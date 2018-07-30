@@ -137,7 +137,7 @@ EncoderBase::EncoderBase(
       operator_export_type_(operator_export_type) {
   model_proto->set_producer_name("pytorch");
   model_proto->set_ir_version(onnx::IR_VERSION);
-  model_proto->set_producer_version("0.4");
+  model_proto->set_producer_version("0.3");
   auto* imp = model_proto->add_opset_import();
   // This is the version of ONNX operator set we are targeting
   imp->set_version(onnx_opset_version);

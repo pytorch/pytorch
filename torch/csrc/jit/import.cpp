@@ -62,7 +62,8 @@ at::ScalarType DecoderBase::onnxTypeToATenType(onnx_torch::TensorProto_DataType 
 
 at::Tensor DecoderBase::buildTensor(const onnx_torch::TensorProto& tensor_proto) {
   at::Tensor tensor = at::CPU(onnxTypeToATenType(tensor_proto.data_type())).tensor();
-  tensor.resize_({tensor_proto.dims().begin(), tensor_proto.dims().end()});
+  std::vector<int64_t> sizes = { tensor_proto.dims().begin(), tensor_proto.dims().end() };
+  tensor.resize_(sizes);
 
   JIT_ASSERT(
       tensor.storage()->pImpl()->get_size() *
@@ -321,7 +322,7 @@ void ModuleDecoder::buildIntermediateValue(Value* value, const std::string& name
 
 at::Tensor ModuleDecoder::buildParameter(const onnx_torch::TensorProto& tensor_proto) {
   std::vector<int64_t> strides;
-  std::move(tensor_proto.int32_data().begin() + 3, tensor_proto.int32_data().end(), std::back_inserter(strides));
+  std::move(tensor_proto.int64_data().begin() + 3, tensor_proto.int64_data().end(), std::back_inserter(strides));
   auto tensor = buildTensorCommon(tensor_proto, /* storage_offset = */ tensor_proto.int64_data(2), strides);
   autograd::Variable var = autograd::make_variable(tensor, /* requires_grad = */ tensor_proto.int64_data(1));
   return var;
@@ -329,7 +330,7 @@ at::Tensor ModuleDecoder::buildParameter(const onnx_torch::TensorProto& tensor_p
 
 at::Tensor ModuleDecoder::buildTensor(const onnx_torch::TensorProto& tensor_proto) {
   std::vector<int64_t> strides;
-  std::move(tensor_proto.int32_data().begin() + 1, tensor_proto.int32_data().end(), std::back_inserter(strides));
+  std::move(tensor_proto.int64_data().begin() + 1, tensor_proto.int64_data().end(), std::back_inserter(strides));
   return buildTensorCommon(tensor_proto, /* storage_offset = */ tensor_proto.int64_data(0), strides);
 }
 
@@ -351,7 +352,7 @@ at::Tensor ModuleDecoder::buildTensorCommon(
     auto storage = std::make_shared<at::Tensor>(at::CPU(type).tensor());
     auto string_it = storage_export_map_->find(storage_name);
     JIT_ASSERT(string_it != storage_export_map_->end());
-    storage->resize_({ string_it->second.size() });
+    storage->resize_({ static_cast<int64_t>(string_it->second.size()) });
     std::memcpy(storage->storage()->pImpl()->data(), string_it->second.data(), string_it->second.size());
     storage_map_.insert(std::make_pair(storage_name, storage));
     storage_tensor = storage.get();
