@@ -156,7 +156,7 @@ bool RoIAlignOp<float, CUDAContext>::RunOnDevice() {
     // Handle empty rois
     Y->Resize(0, X.dim32(1), pooled_height_, pooled_width_);
     // The following mutable_data calls are needed to allocate the tensors
-    Y->mutable_data<float>();
+    Y->template mutable_data<float>();
     return true;
   }
 

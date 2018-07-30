@@ -180,7 +180,7 @@ void THNN_(SpatialDilatedMaxPooling_updateGradInput)(
   int64_t nInputCols, nInputRows, nInputPlane, batchSize;
   int64_t nOutputCols, nOutputRows;
 
-  if (input->_dim() == 3) {
+  if (THTensor_nDimensionLegacyAll(input) == 3) {
     nInputCols = input->size(2);
     nInputRows = input->size(1);
     nInputPlane = input->size(0);

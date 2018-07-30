@@ -11,7 +11,7 @@ static THCDeviceTensor<real, Dim> THNN_(devicetensor)(THCState *state, THCTensor
     return THCDeviceTensor<real, Dim>();
   }
 
-  int inDim = THCTensor__nDimension(state, t);
+  int inDim = THCTensor_nDimensionLegacyAll(state, t);
   if (inDim == Dim) {
     return toDeviceTensor<real, Dim>(state, t);
   }

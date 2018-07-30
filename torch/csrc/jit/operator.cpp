@@ -104,6 +104,9 @@ struct SchemaParser {
       case TK_FALSE:
         L.next();
         return false;
+      case TK_NONE:
+        L.next();
+        return IValue();
       case TK_IDENT: {
         auto tok = L.next();
         auto text = tok.text();
@@ -160,11 +163,8 @@ struct SchemaParser {
   }
 
   IValue parseTensorDefault(const SourceRange& range) {
-    if("None" == L.expect(TK_IDENT).text()) {
-      return at::Tensor();
-    } else {
-      throw ErrorReport(range) << "invalid tensor default value";
-    }
+    L.expect(TK_NONE);
+    return IValue();
   }
   void parseDefaultValue(Argument& arg) {
     auto range = L.cur().range;
@@ -283,7 +283,7 @@ struct OperatorRegistry  {
         }
       }
 #endif
-      JIT_ASSERTM(op_ptr_it != operators_by_sig.end(), "Couldn't find an operator for %s", name);
+      JIT_ASSERTM(op_ptr_it != operators_by_sig.end(), "Couldn't find an operator for ", name);
       it = operators_by_sig_literal.emplace_hint(it, name, op_ptr_it->second);
     }
     return it->second;

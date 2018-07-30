@@ -35,7 +35,7 @@ bool BernoulliJSDOp<float, CPUContext>::RunOnDevice() {
   L->ResizeLike(X);
   auto* x_data = X.data<float>();
   auto* t_data = T.data<float>();
-  auto* l_data = L->mutable_data<float>();
+  auto* l_data = L->template mutable_data<float>();
   for (int i = 0; i < N; i++) {
     auto p_mdl = x_data[i];
     auto p_emp = t_data[i];
@@ -57,7 +57,7 @@ bool BernoulliJSDGradientOp<float, CPUContext>::RunOnDevice() {
   auto* go_data = go.data<float>();
   auto* x_data = X.data<float>();
   auto* t_data = T.data<float>();
-  auto* gi_data = gi->mutable_data<float>();
+  auto* gi_data = gi->template mutable_data<float>();
   for (int i = 0; i < N; i++) {
     auto p_mdl = x_data[i];
     auto p_emp = t_data[i];

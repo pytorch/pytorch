@@ -44,7 +44,7 @@ class SmoothL1LossOp final : public Operator<Context> {
  protected:
   float beta_; // Transition point from L1 to L2 loss
   float scale_; // Scale the loss by scale_
-  Tensor<Context> buff_; // Buffer for element-wise differences
+  Tensor buff_{Context::GetDeviceType()}; // Buffer for element-wise differences
 };
 
 template <typename T, class Context>
@@ -67,7 +67,7 @@ class SmoothL1LossGradientOp final : public Operator<Context> {
  protected:
   float beta_; // Transition point from L1 to L2 loss
   float scale_; // Scale the loss by scale_
-  Tensor<Context> buff_; // Buffer for element-wise differences
+  Tensor buff_{Context::GetDeviceType()}; // Buffer for element-wise differences
 };
 
 } // namespace caffe2

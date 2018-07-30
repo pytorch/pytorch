@@ -123,6 +123,7 @@ def _optimize_graph(graph, operator_export_type):
     # onnx only supports tensors, so we turn all out number types into tensors
     torch._C._jit_pass_erase_number_types(graph)
     torch._C._jit_pass_peephole(graph)
+    torch._C._jit_pass_lint(graph)
 
     if operator_export_type != OperatorExportTypes.RAW:
         graph = torch._C._jit_pass_onnx(graph, operator_export_type)

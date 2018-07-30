@@ -42,7 +42,6 @@ public:
     // zero_dim_to_one converts an empty ArrayRef into [1]
     // zero_dim_to_null converts an empty ArrayRef into a null THLongStorage
     bool zero_dim_to_one = false;
-    bool noelem_to_empty = false;
     switch (kind) {
       case THLongStorageViewKind::SIZE:
         zero_dim_to_one = true;
@@ -66,7 +65,7 @@ public:
     }
     storage.scalar_type = at::CTypeToScalarType<th::from_type<int64_t>>::to();
     storage.refcount = 0;
-    storage.flag = 0;
+    storage.set_resizable(false);
   }
 private:
   int64_t one;

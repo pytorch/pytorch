@@ -191,41 +191,6 @@ static PyObject * THPVariable_as_tensor(PyObject* self, PyObject* args, PyObject
   END_HANDLE_TH_ERRORS
 }
 
-// The Python clamp() syntax has to be mapped to one of three C++ functions
-static PyObject * THPVariable_clamp(PyObject* module, PyObject* args, PyObject* kwargs)
-{
-  HANDLE_TH_ERRORS
-  static PythonArgParser parser({
-    "clamp(Tensor input, Scalar min=None, Scalar max=None, *, Tensor out=None)",
-  });
-
-  ParsedArgs<4> parsed_args;
-  auto r = parser.parse(args, kwargs, parsed_args);
-  if (!r.isNone(1) && !r.isNone(2)) {
-    if (!r.isNone(3)) {
-        return wrap(dispatch_clamp(r.tensor(0), r.scalar(1), r.scalar(2), r.tensor(3)));
-    } else {
-        return wrap(dispatch_clamp(r.tensor(0), r.scalar(1), r.scalar(2)));
-    }
-  } else if (!r.isNone(1)) {
-    if (!r.isNone(3)) {
-        return wrap(dispatch_clamp_min(r.tensor(0), r.scalar(1), r.tensor(3)));
-    } else {
-        return wrap(dispatch_clamp_min(r.tensor(0), r.scalar(1)));
-    }
-  } else if (!r.isNone(2)) {
-    if (!r.isNone(3)) {
-        return wrap(dispatch_clamp_max(r.tensor(0), r.scalar(2), r.tensor(3)));
-    } else {
-        return wrap(dispatch_clamp_max(r.tensor(0), r.scalar(2)));
-    }
-  } else {
-    throw std::runtime_error("At least one of 'min' or 'max' must not be None");
-  }
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
 static PyObject * THPVariable_from_numpy(PyObject* module, PyObject* arg)
 {
   HANDLE_TH_ERRORS
@@ -271,7 +236,6 @@ ${py_methods}
 static PyMethodDef torch_functions[] = {
   {"arange", (PyCFunction)THPVariable_arange, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"as_tensor", (PyCFunction)THPVariable_as_tensor, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
-  {"clamp", (PyCFunction)THPVariable_clamp, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"dsmm", (PyCFunction)THPVariable_mm, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"from_numpy", (PyCFunction)THPVariable_from_numpy, METH_STATIC | METH_O, NULL},
   {"hsmm", (PyCFunction)THPVariable_hspmm, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
