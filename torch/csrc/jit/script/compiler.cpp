@@ -463,7 +463,7 @@ at::optional<std::vector<Value*>> tryMatchSchema(
           value = graph.insertNode(graph.createUndefined())->output();
       }
 
-      if(!v.value->type()->isSubtypeOf(arg.type)) {
+      if(!value->type()->isSubtypeOf(arg.type)) {
         err() << "expected a value of type " << arg.type->str() << " for argument '" << arg.name << "' but found "
               << value->type()->str() << "\n"
               << positional_inputs[i]->loc;
