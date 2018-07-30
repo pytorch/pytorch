@@ -8,7 +8,7 @@
 namespace torch { namespace jit {
 std::ostream& operator<<(std::ostream & out, const IValue & v) {
   switch(v.tag) {
-    #define DEFINE_CASE(x) case v.Tag::x: return v.format ## x(out);
+    #define DEFINE_CASE(x) case IValue::Tag::x: return v.format ## x(out);
     TORCH_FORALL_TAGS(DEFINE_CASE)
     #undef DEFINE_CASE
   }

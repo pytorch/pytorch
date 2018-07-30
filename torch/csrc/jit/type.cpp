@@ -69,7 +69,7 @@ NoneTypePtr NoneType::get() {
   return value;
 }
 StringTypePtr StringType::get() {
-  static auto value = std::make_shared<StringType>();
+  static auto value = StringType::create();
   return value;
 }
 ListTypePtr ListType::ofTensors() {

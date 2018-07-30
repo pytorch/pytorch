@@ -1,6 +1,7 @@
 #pragma once
 
 #include "torch/csrc/jit/assertions.h"
+#include "torch/csrc/WindowsTorchApiMacro.h"
 
 #include <ATen/ATen.h>
 
@@ -82,16 +83,16 @@ struct ConstantString : at::Retainable {
  private:
   ConstantString(const std::string & str)
   : str_(str) {}
-  const std::string & str_;
+  const std::string str_;
  public:
   static Shared<ConstantString> create(const std::string & str_) {
     return Shared<ConstantString>(
         new ConstantString(str_), false);
   }
-  const char * string() const {
-    return str_.c_str();
+  const std::string & string() const {
+    return str_;
   }
-  operator const char * () const {
+  operator const std::string &() const {
     return string();
   }
   std::ostream& operator<<(std::ostream & out) const {
@@ -100,8 +101,26 @@ struct ConstantString : at::Retainable {
   }
 };
 
-template<typename T>
-struct ConstantList;
+// non-mutable list
+template<typename Elem>
+struct ConstantList : at::Retainable {
+ private:
+  ConstantList(std::vector<Elem> elements_)
+  : elements_(std::move(elements_)) {}
+  std::vector<Elem> elements_;
+ public:
+  static Shared<ConstantList<Elem>> create(std::vector<Elem> elements_) {
+    return Shared<ConstantList<Elem>>(
+        new ConstantList<Elem>(std::move(elements_)), false);
+  }
+  at::ArrayRef<Elem> elements() const {
+    return elements_;
+  }
+  operator at::ArrayRef<Elem>() const {
+    return elements();
+  }
+};
+
 struct IValue;
 using Tuple = ConstantList<IValue>;
 using IntList = ConstantList<int64_t>;
@@ -253,7 +272,7 @@ struct IValue {
   }
   std::ostream& formatIntList(std::ostream& out) const {
     JIT_ASSERT(isIntList());
-    out << toRetainable<IntList>();
+    out << "int list"; //toRetainable<IntList>();
     return out;
   }
 
@@ -291,7 +310,7 @@ struct IValue {
   }
   std::ostream& formatDoubleList(std::ostream& out) const {
     JIT_ASSERT(isDoubleList());
-    out << toRetainable<IntList>();
+    out << "double list";//toRetainable<IntList>();
     return  out;
   }
 
@@ -368,7 +387,7 @@ struct IValue {
   template<typename T>
   T to() const &;
 
-  friend std::ostream& operator<<(std::ostream & out, const IValue & v);
+  TORCH_API friend std::ostream& operator<<(std::ostream & out, const IValue & v);
 
 private:
   template<typename T>
@@ -429,27 +448,6 @@ DEFINE_TO(std::vector<int64_t>, copyToIntList)
 
 
 #undef DEFINE_TO
-
-// non-mutable list
-template<typename Elem>
-struct ConstantList : at::Retainable {
- private:
-  ConstantList(std::vector<Elem> elements_)
-  : elements_(std::move(elements_)) {}
-  std::vector<Elem> elements_;
- public:
-  static Shared<ConstantList<Elem>> create(std::vector<Elem> elements_) {
-    return Shared<ConstantList<Elem>>(
-        new ConstantList<Elem>(std::move(elements_)), false);
-  }
-  at::ArrayRef<Elem> elements() const {
-    return elements_;
-  }
-  operator at::ArrayRef<Elem>() const {
-    return elements();
-  }
-};
-
 
 inline IValue::IValue(Shared<Tuple> v)
 : tag(Tag::Tuple), retainable(true) {

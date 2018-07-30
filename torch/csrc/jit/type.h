@@ -384,7 +384,7 @@ private:
 };
 
 struct StringType;
-using StringTypePtr = std::shared_ptr<IntType>;
+using StringTypePtr = std::shared_ptr<StringType>;
 // This node represents a Python string value
 struct TORCH_API StringType : public Type {
   template<typename ... T>
