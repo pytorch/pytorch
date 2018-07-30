@@ -67,10 +67,6 @@ struct THTensor
       return storage_->scalar_type;
     }
 
-    at::Backend backend() const {
-      return storage_->data_ptr.device().backend();
-    }
-
     ptrdiff_t storage_offset() const {
       return storage_offset_;
     }
