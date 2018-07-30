@@ -350,10 +350,6 @@ Value* createNumber(Graph& g, const SourceRange& loc, const at::Tensor& val) {
   return output;
 }
 
-Value* createStringLiteral(Graph& g, const SourceRange& loc, const std::string& str) {
-  return insertConstant(g, str, loc);
-}
-
 Value* createStack(Graph& g, const SourceRange& loc, at::ArrayRef<Value*> inputs) {
   // bake in constant propagation for the all-constant case because it is
   // common to see constant lists like [1, 2] passed to attributes
@@ -1413,7 +1409,7 @@ private:
   }
 
   Value* emitStringLiteral(const StringLiteral& c) {
-    return createStringLiteral(*graph, c.range(), c.text());
+    return insertConstant(*graph, c.text(), c.range());
   }
 
   // Desugars slice syntactic sugar tensor[begin:end] -> tensor.slice(begin,

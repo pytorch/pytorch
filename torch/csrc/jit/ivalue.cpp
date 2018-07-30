@@ -3,7 +3,7 @@
 #include <ATen/ATen.h>
 
 #define TORCH_FORALL_TAGS(_) \
-  _(None) _(Tensor) _(Double) _(Int) _(Tuple) _(IntList) _(DoubleList) _(String)
+  _(None) _(Tensor) _(Double) _(Int) _(Tuple) _(IntList) _(DoubleList) _(String) _(TensorList)
 
 namespace torch { namespace jit {
 std::ostream& operator<<(std::ostream & out, const IValue & v) {

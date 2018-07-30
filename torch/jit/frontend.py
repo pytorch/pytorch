@@ -447,7 +447,7 @@ class ExprBuilder(Builder):
     @staticmethod
     def build_Str(ctx, expr):
         value = str(expr.s)
-        r = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + len(value))
+        r = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + 1)
         return StringLiteral(r, value)
 
     @staticmethod

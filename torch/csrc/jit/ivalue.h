@@ -77,10 +77,31 @@ private:
   PointerType * pImpl;
 };
 
+// string
+struct ConstantString : at::Retainable {
+ private:
+  ConstantString(const std::string & str)
+  : str_(str) {}
+  const std::string & str_;
+ public:
+  static Shared<ConstantString> create(const std::string & str_) {
+    return Shared<ConstantString>(
+        new ConstantString(str_), false);
+  }
+  const char * string() const {
+    return str_.c_str();
+  }
+  operator const char * () const {
+    return string();
+  }
+  std::ostream& operator<<(std::ostream & out) const {
+    out << string();
+    return out;
+  }
+};
 
 template<typename T>
 struct ConstantList;
-struct ConstantString;
 struct IValue;
 using Tuple = ConstantList<IValue>;
 using IntList = ConstantList<int64_t>;
@@ -171,10 +192,9 @@ struct IValue {
   }
   std::ostream& formatTuple(std::ostream& out) const {
     JIT_ASSERT(isTuple());
-    out << "Tuple";
+    out << "Tuple"; //TODO
     return out;
   }
-
 
   // Double
   IValue(double d)
@@ -241,8 +261,7 @@ struct IValue {
 
   // ConstantString
   IValue(Shared<ConstantString> v);
-  IValue(const char * v);
-  IValue(std::string v);
+  IValue(const std::string& v);
   bool isString() const { return Tag::String == tag; }
   Shared<ConstantString> toString() && {
     JIT_ASSERT(isString());
@@ -254,10 +273,9 @@ struct IValue {
   }
   std::ostream& formatString(std::ostream& out) const {
     JIT_ASSERT(isString());
-    out << toString();
+    out << toRetainable<ConstantString>()->string();
     return out;
   }
-  const char * copyToString() const;
 
   // DoubleList
   IValue(Shared<DoubleList> v);
@@ -290,11 +308,10 @@ struct IValue {
     JIT_ASSERT(isTensorList());
     return toRetainable<TensorList>();
   }
-  std::string formatTensorList() const {
+  std::ostream& formatTensorList(std::ostream& out) const {
     JIT_ASSERT(isTensorList();
-    std::ostringstream ss;
-    ss << toTensorList();
-    return ss.str();
+    out << toRetainable<TensorList>();
+    return out;
   }
 
   // None
@@ -408,7 +425,6 @@ DEFINE_TO(Shared<IntList>, toIntList)
 DEFINE_TO(Shared<ConstantString>, toString)
 DEFINE_TO(at::Scalar, toScalar)
 DEFINE_TO(bool, toInt)
-DEFINE_TO(const char *, copyToString)
 DEFINE_TO(std::vector<int64_t>, copyToIntList)
 
 
@@ -434,24 +450,6 @@ struct ConstantList : at::Retainable {
   }
 };
 
-// string
-struct ConstantString : at::Retainable {
- private:
-  ConstantString(const char * str)
-  : str_(std::move(str)) {}
-  const char * str_;
- public:
-  static Shared<ConstantString> create(const char * str_) {
-    return Shared<ConstantString>(
-        new ConstantString(std::move(str_)), false);
-  }
-  const char * string() const {
-    return str_;
-  }
-  operator const char * () const {
-    return string();
-  }
-};
 
 inline IValue::IValue(Shared<Tuple> v)
 : tag(Tag::Tuple), retainable(true) {
@@ -469,11 +467,8 @@ inline IValue::IValue(Shared<ConstantString> v)
 : tag(Tag::String), retainable(true) {
   as_retainable = v.detach();
 }
-inline IValue::IValue(const char * v)
-: IValue(ConstantString::create(std::move(v))) {}
-inline IValue::IValue(std::string v)
-: IValue(ConstantString::create(std::move(v.c_str()))) {}
-
+inline IValue::IValue(const std::string& v)
+: IValue(ConstantString::create(v)) {}
 
 inline IValue::IValue(Shared<DoubleList> v)
 : tag(Tag::DoubleList), retainable(true) {
@@ -493,8 +488,5 @@ inline std::vector<int64_t> IValue::copyToIntList() const {
   return std::vector<int64_t>(toIntList()->elements());
 }
 
-inline const char * IValue::copyToString() const {
-  return toString()->string();
-}
 
 }}
