@@ -34,11 +34,10 @@ graph(%a.1_data : Dynamic
       %34 : int = prim::Constant[value=1]()
       %data.3 : Dynamic = prim::Loop(%33, %34, %cond_mask.1)
         block0(%_ : int, %37 : Dynamic) {
-          %38 : int = prim::Constant[value=1]()
-          %39 : int = aten::neg(%38)
-          %data.2 : Dynamic = aten::unsqueeze(%37, %39)
-          %41 : int = prim::Constant[value=1]()
-          -> (%41, %data.2)
+          %38 : int = aten::dim(%37)
+          %data.2 : Dynamic = aten::unsqueeze(%37, %38)
+          %40 : int = prim::Constant[value=1]()
+          -> (%40, %data.2)
         }
       %cond_data.1 : Dynamic = aten::expand_as(%data.3, %data.1)
       %cond_mask.2 : Dynamic = aten::expand_as(%data.3, %mask.1)

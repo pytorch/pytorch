@@ -204,7 +204,7 @@ def batch_where(data, mask, dims, data1, mask1, dims1, data2, mask2, dims2):
     cond_mask = data
     if data.dim() == 1:
         for _ in range(data1.dim() - 1):
-            data = data.unsqueeze(-1)
+            data = data.unsqueeze(data.dim())
         cond_data = data.expand_as(data1)
         cond_mask = data.expand_as(mask1)
     res_data = torch.where(cond_data, data1, data2)

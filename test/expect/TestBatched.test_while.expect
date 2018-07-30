@@ -14,7 +14,7 @@ graph(%a.1_data : Dynamic
   %13 : int = prim::Constant[value=0]()
   %14 : Dynamic = aten::gt(%12, %13)
   %15 : int = prim::TensorToNum(%14)
-  %65 : Dynamic, %66 : Dynamic, %67 : Dynamic, %a : Dynamic, %63 : Dynamic, %64 : Dynamic = prim::Loop(%6, %15, %7, %8, %9, %a.1_data, %a.1_mask, %a.1_dims)
+  %64 : Dynamic, %65 : Dynamic, %66 : Dynamic, %a : Dynamic, %62 : Dynamic, %63 : Dynamic = prim::Loop(%6, %15, %7, %8, %9, %a.1_data, %a.1_mask, %a.1_dims)
     block0(%loop_num : int, %cond_data.2 : Dynamic, %cond_mask.3 : Dynamic, %cond_dims : Dynamic, %6_data : Dynamic, %6_mask : Dynamic, %6_dims : Dynamic) {
       %24 : int = prim::Constant[value=1]()
       %25 : Long() = prim::NumToTensor(%24)
@@ -39,11 +39,10 @@ graph(%a.1_data : Dynamic
           %45 : int = prim::Constant[value=1]()
           %data.3 : Dynamic = prim::Loop(%44, %45, %cond_mask.1)
             block0(%_ : int, %48 : Dynamic) {
-              %49 : int = prim::Constant[value=1]()
-              %50 : int = aten::neg(%49)
-              %data.2 : Dynamic = aten::unsqueeze(%48, %50)
-              %52 : int = prim::Constant[value=1]()
-              -> (%52, %data.2)
+              %49 : int = aten::dim(%48)
+              %data.2 : Dynamic = aten::unsqueeze(%48, %49)
+              %51 : int = prim::Constant[value=1]()
+              -> (%51, %data.2)
             }
           %cond_data.1 : Dynamic = aten::expand_as(%data.3, %data.1)
           %cond_mask.2 : Dynamic = aten::expand_as(%data.3, %mask)
@@ -55,12 +54,12 @@ graph(%a.1_data : Dynamic
       %res_data : Dynamic = aten::where(%cond_data, %data.1, %6_data)
       %res_mask : Dynamic = aten::where(%cond_mask, %mask, %6_mask)
       %res_dims : Dynamic = aten::__or__(%dims, %6_dims)
-      %58 : Dynamic = aten::mul(%30, %31)
-      %59 : Dynamic = aten::sum(%58)
-      %60 : int = prim::Constant[value=0]()
-      %61 : Dynamic = aten::gt(%59, %60)
-      %62 : int = prim::TensorToNum(%61)
-      -> (%62, %30, %31, %32, %res_data, %res_mask, %res_dims)
+      %57 : Dynamic = aten::mul(%30, %31)
+      %58 : Dynamic = aten::sum(%57)
+      %59 : int = prim::Constant[value=0]()
+      %60 : Dynamic = aten::gt(%58, %59)
+      %61 : int = prim::TensorToNum(%60)
+      -> (%61, %30, %31, %32, %res_data, %res_mask, %res_dims)
     }
-  return (%a, %63, %64);
+  return (%a, %62, %63);
 }
