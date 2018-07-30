@@ -144,7 +144,7 @@ option(USE_DISTRIBUTED_MW "Use THD (distributed) master worker" OFF)
 # Used when building Caffe2 through setup.py
 option(BUILDING_WITH_TORCH_LIBS "Tell cmake if Caffe2 is being built alongside torch libs" OFF)
 
-if (ANDROID)
+if (ANDROID OR IOS)
   set(BUILD_ATEN OFF)
 endif()
 
