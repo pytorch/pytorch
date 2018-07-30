@@ -16,10 +16,11 @@ class LarsOp final : public Operator<Context> {
         offset_(OperatorBase::GetSingleArgument<float>("offset", 0.5)) {}
 
   bool RunOnDevice() override {
-    auto& X = Input(0);
-    auto& dX = Input(1);
+    auto& dX = Input(0);
+    auto& momentum = Input(1);
     CAFFE_ENFORCE(
-        dX.size() == X.size(), "Gradient size doesn't match parameter size.");
+        dX.size() == momentum.size(),
+        "Gradient size doesn't match momentum size.");
     CAFFE_ENFORCE_GE(offset_, 0);
 
     auto* lr_rescale = Output(0);
@@ -27,8 +28,8 @@ class LarsOp final : public Operator<Context> {
 
     Compute(
         dX.size(),
-        X.template data<T>(),
         dX.template data<T>(),
+        momentum.template data<T>(),
         offset_,
         lr_rescale->template mutable_data<T>());
 
@@ -38,8 +39,8 @@ class LarsOp final : public Operator<Context> {
  private:
   void Compute(
       TIndex N,
-      const T* X_data,
       const T* dX_data,
+      const T* momentum,
       T offset,
       T* lr_rescale_data);
 
