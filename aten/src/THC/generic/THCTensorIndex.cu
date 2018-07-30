@@ -537,16 +537,6 @@ void THCTensor_(indexSelect)(THCState *state, THCTensor *dst, THCTensor *src, in
 
   THLongStorage *newSize;
 
-#ifndef USE_TH_SIZE_ZERO_DIM
-  if (numIndices == 0) {
-    newSize = THCTensor_(newSizeOf)(state, src);
-    THLongStorage_set(newSize, 0, numIndices);
-    THCTensor_(resize)(state, dst, newSize, NULL);
-    THLongStorage_free(newSize);
-    return;
-  }
-#endif
-
   newSize = THCTensor_(newSizeOf)(state, src);
   THLongStorage_set(newSize, dim, numIndices);
   THCTensor_(resize)(state, dst, newSize, NULL);

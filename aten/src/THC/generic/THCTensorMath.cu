@@ -330,9 +330,6 @@ void THCTensor_(nonzero)(THCState* state, THCudaLongTensor *tensor,
 void THCTensor_(diag)(THCState *state, THCTensor *self_, THCTensor *src_, int64_t k){
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src_));
   int nDimension = THCTensor_(nDimensionLegacyNoScalars)(state, src_);
-#ifndef USE_TH_SIZE_ZERO_DIM
-  AT_ASSERT(!src_->is_empty());
-#endif
   THArgCheck((nDimension == 2) || (nDimension == 1), 1, "expected a matrix or a vector");
   if (nDimension == 2) {
     int64_t stride0 = THCTensor_(stride)(state, src_, 0);
