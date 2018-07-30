@@ -26,6 +26,7 @@
 #include "torch/csrc/jit/passes/shape_analysis.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
 #include "torch/csrc/jit/passes/lower_grad_of.h"
+#include "torch/csrc/jit/operator.h"
 #include "torch/csrc/variable_tensor_functions.h"
 
 #include "torch/csrc/autograd/variable.h"
@@ -1022,6 +1023,37 @@ TEST_CASE( "jit test CUDA", "[cuda]" ) {
     argumentSpecTest();
   SECTION( "shape analysis" )
     shapeAnalysisTest();
+}
+
+TEST_CASE("Registering 3rd-Party Operators") {
+  registerOperatorWithStack(
+      "foo::bar(float a, Tensor b) -> Tensor", [](Stack& stack) {
+        double a;
+        at::Tensor b;
+        pop(stack, a, b);
+        auto result = a + b;
+        pack(stack, std::move(result));
+        return 0;
+      });
+  auto& ops = getAllOperatorsFor(Symbol::fromQualString("foo::bar"));
+  REQUIRE(ops.size() == 1);
+
+  auto& op = ops.front();
+  REQUIRE(op->schema.name == "foo::bar");
+
+  REQUIRE(op->schema.arguments.size() == 2);
+  REQUIRE(op->schema.arguments[0].name == "a");
+  REQUIRE(op->schema.arguments[0].type->kind() == TypeKind::FloatType);
+  REQUIRE(op->schema.arguments[1].name == "b");
+  REQUIRE(op->schema.arguments[1].type->kind() == TypeKind::DynamicType);
+
+  REQUIRE(op->schema.returns.size() == 1);
+  REQUIRE(op->schema.arguments[0].name == "a");
+  REQUIRE(op->schema.arguments[0].type->kind() == TypeKind::DynamicType);
+
+  // Run operation!!!!!!!!!!
+
+  // REQUIRE(op(2.0f, at::ones(5)).allclose(at::full(5, 3.0f)));
 }
 
 #endif

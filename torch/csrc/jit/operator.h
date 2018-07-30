@@ -91,6 +91,16 @@ inline Operation getOperation(Node* node) {
 
 void registerOperator(Operator&& op);
 
+void registerOperatorWithStack(const std::string& schema, Operation operation);
+
+template <typename ImplementationFunction>
+void registerOperator(
+    const std::string& schema,
+    ImplementationFunction implementation);
+
+// template <typename Function>
+// void registerOperator(const std::string& schema, Function function);
+
 // XXX: this function is meant to be used with string literals only!
 Operator& sig(const char *signature_literal);
 
