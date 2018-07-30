@@ -283,7 +283,7 @@ void PropagateShapeOnNode(Node * node, bool insert_expands) {
           auto & tp_sizes = tp->sizes();
           if (sizes.size() != tp_sizes.size())
             goto cat_fail;
-          for (size_t i = 0; i < ndim; ++i) {
+          for (int64_t i = 0; i < ndim; ++i) {
             if (sizes[i] != tp_sizes[i] && i != dim) {
               goto cat_fail;
             }
