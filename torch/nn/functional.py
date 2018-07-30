@@ -1836,7 +1836,7 @@ def multilabel_soft_margin_loss(input, target, weight=None, size_average=None,
     if reduction != 'none':
         if reduction == 'sum':
             return loss.sum()
-        else:  # elementwise_mean
+        else:  # global mean
             return loss.mean()
     else:
         if size_average and reduce:
