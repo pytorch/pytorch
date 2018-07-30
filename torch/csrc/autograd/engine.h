@@ -57,7 +57,7 @@ protected:
   ReadyQueue& ready_queue(int device);
   void start_threads();
   virtual void thread_init(int device);
-  virtual void thread_main(GraphTask *task);
+  virtual void thread_main(GraphTask *graph_task);
   virtual void thread_on_exception(FunctionTask& task, std::exception& e);
 
   std::once_flag start_threads_flag;
