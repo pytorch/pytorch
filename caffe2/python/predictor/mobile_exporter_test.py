@@ -73,11 +73,14 @@ class TestMobileExporter(TestCase):
         model = ModelHelper(name="mobile_exporter_test_model")
         model.Copy("data_int", "out")
         model.params.append("data_int")
+        model.params.append("data_obj")
 
         # Create our mobile exportable networks
         workspace.RunNetOnce(model.param_init_net)
         np_data_int = np.random.randint(100, size=(1, 1, 28, 28), dtype=np.int32)
         workspace.FeedBlob("data_int", np_data_int)
+        np_data_obj = np.array(['aa', 'bb']).astype(np.dtype('O'))
+        workspace.FeedBlob("data_obj", np_data_obj)
 
         init_net, predict_net = mobile_exporter.Export(
             workspace, model.net, model.params
