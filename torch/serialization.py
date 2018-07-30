@@ -124,18 +124,24 @@ def _with_file_like(f, mode, body):
     Executes a body function with a file object for f, opening
     it in 'mode' if it is a string filename.
     """
-    new_fd = False
-    if isinstance(f, str) or \
-            (sys.version_info[0] == 2 and isinstance(f, unicode)) or \
-            (sys.version_info[0] == 3 and isinstance(f, pathlib.Path)):
-        new_fd = True
-        f = open(f, mode)
-    try:
-        return body(f)
-    finally:
-        if new_fd:
-            f.close()
 
+    new_fd = False
+    py_ver = sys.version_info[0]
+    if isinstance(f, str) or (py_ver is 2 and isinstance(f, unicode)):
+        f_parent_dir = os.path.dirname(str(f))
+        if not os.path.exists(f_parent_dir):
+            os.makedirs(f_parent_dir)
+        new_fd = True
+        fd = open(f, mode)
+    elif py_ver is 3 and isinstance(f, pathlib.Path):
+        f.parent.mkdir(parents=True, exist_ok=True)
+        new_fd = True
+        fd = open(f, mode)
+
+    try:
+        return body(fd)
+    finally:
+        if new_fd: fd.close()
 
 def _is_compressed_file(f):
     compress_modules = ['gzip']
