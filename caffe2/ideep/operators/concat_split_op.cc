@@ -27,7 +27,7 @@ class IDEEPConcatOp final : public IDEEPOperator {
   bool RunOnDevice() override {
     const auto& input_zero = Input(INPUT0);
     auto* output = Output(OUTPUT);
-    TensorCPU* axis_info = OperatorBase::Output<TensorCPU>(AXIS_INFO);
+    TensorCPU* axis_info = OperatorBase::Output<TensorCPU>(AXIS_INFO, CPU);
 
     vector<itensor> inputs;
     for (int i = 0; i < InputSize(); ++i) {
@@ -88,7 +88,7 @@ class IDEEPSplitOp final : public IDEEPOperator {
           0,
           "If you set split with an input blob, do not pass in "
           "split in the argument.");
-      auto& axis_info = OperatorBase::Input<TensorCPU>(AXIS_INFO);
+      auto& axis_info = OperatorBase::Input<Tensor>(AXIS_INFO, CPU);
       CAFFE_ENFORCE_EQ(axis_info.size(), OutputSize());
       auto* axis_data = axis_info.template data<int>();
       axis_vdata.assign(axis_data, axis_data + OutputSize());

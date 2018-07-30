@@ -4,6 +4,7 @@
 #include "torch/csrc/jit/operator.h"
 #include "torch/csrc/autograd/function.h"
 #include "torch/csrc/jit/constants.h"
+#include "torch/csrc/jit/assertions.h"
 
 #include <iostream>
 #include <unordered_map>
@@ -239,7 +240,7 @@ static void checkSameDevice(const Node* node) {
   bool has_device = false;
   int device;
   auto checkValue = [&](const Value* v) {
-    if(TensorType* type = v->type()->cast<TensorType>()) {
+    if(TensorTypePtr type = v->type()->cast<TensorType>()) {
       if(!has_device) {
         has_device = true;
         device = type->device();
@@ -405,7 +406,7 @@ void Graph::lint() const {
     void check_node(const Node* n) {
       for (auto input : n->inputs_) {
         if (!scope->contains(input)) {
-          JIT_ASSERTM(0, "%%%d not in scope", input->unique());
+          JIT_ASSERTM(0, input->unique(), " not in scope");
         }
       }
       JIT_ASSERT(anticipated_uses[n] == static_cast<int64_t>(n->inputs_.size()));
@@ -520,7 +521,7 @@ void Block::cloneFrom(Block * src, std::function<Value*(Value*)> outer_map) {
 std::shared_ptr<Graph> Graph::copy() {
   auto new_g = std::make_shared<Graph>();
   auto env = [](Value *) -> Value* {
-    barf("Graph::copy() encountered a use of a value not in scope. Run lint!");
+    AT_ERROR("Graph::copy() encountered a use of a value not in scope. Run lint!");
   };
   new_g->block()->cloneFrom(this->block(), env);
   return new_g;
@@ -595,7 +596,7 @@ at::optional<IValue> Node::get(Symbol name) const {
         // disambiguate via schema
         at::Tensor ten = t(name);
         const Argument* arg = findArgument(schema(), name).second;
-        if(arg->type->isSubtypeOf(*NumberType::get())) {
+        if(arg->type->isSubtypeOf(NumberType::get())) {
           return IValue(at::Scalar(ten));
         }
         return IValue(ten);
@@ -618,7 +619,23 @@ Value* Node::namedInput(Symbol name) const {
     // so this is completely unsafe and needs to be gone as soon as possible.
     return v;
   }
-  return input(findArgument(schema(), name).first);
+  const auto & the_schema = schema();
+  int64_t tensor_list_pos = 0;
+  for (auto & arg : the_schema.arguments) {
+    if (*arg.type == *ListType::ofTensors())
+      break;
+    tensor_list_pos++;
+  }
+  int64_t arg_pos = findArgument(schema(), name).first;
+  // XXX: we don't have a single value we could give for a Tensor[],
+  // because we flatten lists into arguments
+  JIT_ASSERT(arg_pos != tensor_list_pos);
+  // NB: if there's no tensor list, then tensor_list_pos == arguments.size(), so this is always true
+  if (arg_pos < tensor_list_pos) {
+    return input(arg_pos);
+  } else {
+    return input(inputs().size() - (the_schema.arguments.size() - arg_pos));
+  }
 }
 
 bool Node::matches(const char *signature_literal, at::ArrayRef<Symbol> const_inputs) {

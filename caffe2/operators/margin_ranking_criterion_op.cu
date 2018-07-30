@@ -45,7 +45,7 @@ bool MarginRankingCriterionOp<CUDAContext>::RunOnDevice() {
   const float* X1data = X1.data<float>();
   const float* X2data = X2.data<float>();
   const int* Ydata = Y.data<int>();
-  float* output_data = loss->mutable_data<float>();
+  float* output_data = loss->template mutable_data<float>();
 
   MRCKernel<<<CAFFE_GET_BLOCKS(X1.size()), CAFFE_CUDA_NUM_THREADS,
               0, context_.cuda_stream()>>>(
@@ -70,8 +70,8 @@ bool MarginRankingCriterionGradientOp<CUDAContext>::RunOnDevice() {
   const int* Ydata = Y.data<int>();
   const float* dOutput_data = dOutput.data<float>();
 
-  float* dX1_data = dX1->mutable_data<float>();
-  float* dX2_data = dX2->mutable_data<float>();
+  float* dX1_data = dX1->template mutable_data<float>();
+  float* dX2_data = dX2->template mutable_data<float>();
   MRCGradientKernel<<<CAFFE_GET_BLOCKS(X1.size()), CAFFE_CUDA_NUM_THREADS,
                       0, context_.cuda_stream()>>>(
       X1.size(), Ydata, X1data, X2data,

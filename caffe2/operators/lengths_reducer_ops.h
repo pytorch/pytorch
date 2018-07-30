@@ -92,7 +92,21 @@ class CPUSparseLengthsReductionOp : public Operator<CPUContext> {
     return true;
   }
 
-  USE_VALUE_KEY_LENGTH_INPUT_FILLERS(CPUContext, DATA, INDICES, LENGTHS)
+  std::vector<TensorFiller<CPUContext>> InputFillers(
+      const std::vector<std::vector<TIndex>>& shapes) override {
+    CAFFE_ENFORCE_EQ(shapes.size(), Operator<CPUContext>::Inputs().size());
+    auto fillers = Operator<CPUContext>::InputFillers(shapes);
+    if (USE_WEIGHT) {
+      // TODO: enable the fillers
+      throw UnsupportedOperatorFeature(
+          OperatorBase::type() + " does not have input fillers");
+    }
+    Operator<CPUContext>::SparseLengthsFillerHelper(
+        shapes, INDICES, LENGTHS, &fillers);
+    Operator<CPUContext>::SparseSegmentsFillerHelper(
+        shapes, DATA, INDICES, &fillers);
+    return fillers;
+  }
 
  private:
   enum {

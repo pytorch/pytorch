@@ -136,14 +136,14 @@ class Workspace {
       auto* from_blob = parent_ws->GetBlob(ws_blob.second);
       CAFFE_ENFORCE(from_blob);
       CAFFE_ENFORCE(
-          from_blob->template IsType<Tensor<Context>>(),
+          from_blob->template IsType<Tensor>(),
           "Expected blob with tensor value",
           ws_blob.second);
       forwarded_blobs_.erase(blob);
       auto* to_blob = CreateBlob(blob);
       CAFFE_ENFORCE(to_blob);
-      const auto& from_tensor = from_blob->template Get<Tensor<Context>>();
-      auto* to_tensor = to_blob->template GetMutable<Tensor<Context>>();
+      const auto& from_tensor = from_blob->template Get<Tensor>();
+      auto* to_tensor = to_blob->GetMutableTensor(Context::GetDeviceType());
       to_tensor->CopyFrom(from_tensor);
     }
   }

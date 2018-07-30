@@ -1,6 +1,7 @@
 #include "torch/csrc/jit/passes/lower_tuples.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
 #include "torch/csrc/utils/functional.h"
+#include "torch/csrc/jit/assertions.h"
 
 namespace torch { namespace jit {
 
@@ -42,7 +43,7 @@ static void VisitNode(Node* n, Node* insert_point) {
   // flatten the input list  op(a, tup, b) --> op(a, t0, t1, b)
   for(size_t i = 0; i < n->inputs().size();) {
     auto input = n->inputs()[i];
-    if(TupleType* tt = input->type()->cast<TupleType>()) {
+    if(TupleTypePtr tt = input->type()->cast<TupleType>()) {
       JIT_ASSERTM(white_list.count(n->kind()) > 0, "tuple appears in op that does not forward tuples");
       JIT_ASSERTM(input->node()->kind() == prim::TupleConstruct, "tuple use not matched to tuple construct");
       for(size_t j = 0; j < tt->elements().size(); ++j) {
@@ -67,7 +68,7 @@ static void VisitNode(Node* n, Node* insert_point) {
     // and:
     //    tup = (t0, t1)
     // is placed at the current insertion point
-    if(TupleType* tt = output->type()->cast<TupleType>()) {
+    if(TupleTypePtr tt = output->type()->cast<TupleType>()) {
       JIT_ASSERTM(white_list.count(n->kind()) > 0, "tuple appears in op that does not forward tuples");
       for(size_t j = 0; j < tt->elements().size(); j++) {
         n->insertOutput(i + 1 + j)->setType(tt->elements()[j]);
@@ -114,12 +115,6 @@ static void EnsureNoTuples(Block* block) {
 }
 
 void LowerTuples(std::shared_ptr<Graph>& graph) {
-  for(auto input : graph->inputs()) {
-    JIT_ASSERTM(input->type()->kind() != TypeKind::TupleType, "tuples cannot be inputs to the graph");
-  }
-  for(auto output : graph->outputs()) {
-    JIT_ASSERTM(output->type()->kind() != TypeKind::TupleType, "tuples cannot be outputs to the graph");
-  }
   LowerTuples(graph->block());
   EliminateDeadCode(graph);
   EnsureNoTuples(graph->block());

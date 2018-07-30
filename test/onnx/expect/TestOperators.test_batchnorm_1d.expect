@@ -26,11 +26,6 @@ graph {
       type: FLOAT
     }
     attribute {
-      name: "is_test"
-      i: 1
-      type: INT
-    }
-    attribute {
       name: "momentum"
       f: 1
       type: FLOAT
@@ -172,5 +167,5 @@ graph {
   }
 }
 opset_import {
-  version: 6
+  version: 7
 }

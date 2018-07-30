@@ -16,7 +16,7 @@ bool PackSegmentsOp<CPUContext>::DoRunWithType2() {
   const auto& data = Input(DATA);
   const auto& lengths = Input(LENGTHS);
   auto* output = Output(0);
-  Tensor<CPUContext>* presence_mask = nullptr;
+  Tensor* presence_mask = nullptr;
   if (return_presence_mask_) {
     presence_mask = Output(1);
   }
@@ -88,7 +88,7 @@ bool PackSegmentsOp<CPUContext>::DoRunWithType2() {
   const auto* d = static_cast<const char*>(data.raw_data());
   TIndex start = 0;
   for (TIndex i = 0; i < lengths.dim(0); ++i) {
-    context_.template CopyItems<CPUContext, CPUContext>(
+    context_.CopyItemsSameDevice(
         data.meta(),
         l[i] * block_size,
         d + block_bytesize * start,
@@ -145,7 +145,7 @@ bool UnpackSegmentsOp<CPUContext>::DoRunWithType2() {
   const auto* d = static_cast<const char*>(data.raw_data());
   TIndex start = 0;
   for (TIndex i = 0; i < lengths.dim(0); ++i) {
-    context_.template CopyItems<CPUContext, CPUContext>(
+    context_.CopyItemsSameDevice(
         data.meta(),
         l[i] * block_size,
         d + block_bytesize * data.dim(1) * i,

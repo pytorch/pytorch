@@ -20,7 +20,7 @@ void THNN_(PReLU_updateOutput)(
   }
   else
   {
-    int ndim = THCTensor_(_nDimension)(state, input);
+    int ndim = THCTensor_(nDimensionLegacyAll)(state, input);
     input = THCTensor_(newContiguous)(state, input);
 
     int n = THCTensor_(nElement)(state, input);
@@ -64,7 +64,7 @@ void THNN_(PReLU_updateGradInput)(
   }
   else
   {
-    int ndim = THCTensor_(_nDimension)(state, input);
+    int ndim = THCTensor_(nDimensionLegacyAll)(state, input);
     input = THCTensor_(newContiguous)(state, input);
     gradOutput = THCTensor_(newContiguous)(state, gradOutput);
 
@@ -119,7 +119,7 @@ void THNN_(PReLU_accGradParameters)(
   }
   else
   {
-    int ndim = THCTensor_(_nDimension)(state, input);
+    int ndim = THCTensor_(nDimensionLegacyAll)(state, input);
 
     if (ndim == 1)
     {

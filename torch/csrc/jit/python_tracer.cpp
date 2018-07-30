@@ -2,11 +2,12 @@
 
 #include "torch/csrc/jit/python_tracer.h"
 #include "torch/csrc/jit/tracer.h"
-#include "torch/csrc/assertions.h"
 #include "torch/csrc/jit/export.h"
 #include "torch/csrc/jit/pybind.h"
 #include "torch/csrc/utils/python_strings.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
+
+#include "ATen/Error.h"
 
 #include <sstream>
 
@@ -76,12 +77,25 @@ PreTraceInfo preRecordPythonTrace(THPObjectPtr pyobj,
   if(!apply) {
     throw python_error();
   }
-  return makePreTraceInfo(inputs, [&](const std::shared_ptr<TracingState>& state, Graph& graph) {
-    return graph.createPythonOp(
-        std::move(apply),
-        arg_types,
-        std::move(scalar_args));
-  });
+
+  PreTraceInfo info;
+  auto & state = getTracingState();
+  auto & graph = state->graph;
+
+  Node *n = info.n = graph->createPythonOp(
+                        std::move(apply),
+                        arg_types,
+                        std::move(scalar_args));
+  recordSourceLocation(n);
+
+  for (const Variable & input : inputs) {
+    n->addInput(getValueTrace(input));
+  }
+
+  // NB: Order matters. This must append after inputs but before outputs.
+  graph->appendNode(n);
+
+  return info;
 }
 
 void pythonRecordSourceLocation(Node* n) {

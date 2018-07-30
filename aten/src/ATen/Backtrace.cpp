@@ -7,7 +7,7 @@
 #include <string>
 #include <vector>
 
-#if !defined(_WIN32)
+#if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
 #include <cxxabi.h>
 #include <execinfo.h>
 #endif // !defined(_WIN32)
@@ -18,7 +18,7 @@ namespace at {
 std::string demangle(const char* name) {
   return std::string(name);
 }
-#else
+#elif !defined(__EMSCRIPTEN__)
 std::string demangle(const char* name) {
   int status = -1;
 
@@ -52,7 +52,7 @@ std::string demangle(const char* name) {
 // https://stackoverflow.com/questions/5693192/win32-backtrace-from-c-code
 // https://stackoverflow.com/questions/26398064/counterpart-to-glibcs-backtrace-and-backtrace-symbols-on-windows
 // https://msdn.microsoft.com/en-us/library/windows/desktop/bb204633%28v=vs.85%29.aspx.
-#if !defined(_WIN32)
+#if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
 
 namespace {
 
@@ -150,7 +150,7 @@ std::string get_backtrace(
     size_t frames_to_skip,
     size_t maximum_number_of_frames,
     bool skip_python_frames) {
-#if !defined(_WIN32)
+#if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
 
   // We always skip this frame (backtrace).
   frames_to_skip += 1;

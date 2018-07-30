@@ -255,26 +255,44 @@ TYPE_RETURN = {
 CHECKED_CAST = {
     'THTensor*':
         CodeTemplate(
-            'checked_cast_tensor<${Tensor}>(${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay})'),
+            'checked_cast_tensor<${Tensor}>('
+            '${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay}, '
+            'Backend::${Backend}, ScalarType::${ScalarName})'),
     'THSTensor*':
-    CodeTemplate(
-        'checked_cast_tensor<Sparse${Tensor}>(${arg_name}.tref.pImpl,"${arg_name}",${arg_pos},false)'),
+        CodeTemplate(
+            'checked_cast_tensor<Sparse${Tensor}>('
+            '${arg_name}.tref.pImpl,"${arg_name}",${arg_pos},false, '
+            'Backend::${Backend}, ScalarType::${ScalarName})'),
     'THBoolTensor*':
         CodeTemplate(
-            'checked_cast_tensor<${Backend}ByteTensor>(${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay})'),
+            'checked_cast_tensor<${Backend}ByteTensor>('
+            '${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay}, '
+            'Backend::${Backend}, ScalarType::Byte)'),
     'THIndexTensor*':
         CodeTemplate(
-            'checked_cast_tensor<${Backend}LongTensor>(${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay})'),
+            'checked_cast_tensor<${Backend}LongTensor>('
+            '${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay}, '
+            'Backend::${Backend}, ScalarType::Long)'),
     'THIntegerTensor*':
         CodeTemplate(
-            'checked_cast_tensor<${Backend}IntTensor>(${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay})'),
+            'checked_cast_tensor<${Backend}IntTensor>('
+            '${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay}, '
+            'Backend::${Backend}, ScalarType::Int)'),
     'THDenseTensor*':
         CodeTemplate(
-            'checked_cast_tensor<${DenseTensor}>(${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay})'),
+            'checked_cast_tensor<${DenseTensor}>('
+            '${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay}, '
+            'Backend::${DenseBackend}, ScalarType::${ScalarName})'),
     'THDenseIndexTensor*':
         CodeTemplate(
-            'checked_cast_tensor<${DenseBackend}LongTensor>(${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay})'),
-    'THStorage*': CodeTemplate('checked_cast_storage<${Storage}>(&${arg_name},"${arg_name}",${arg_pos})'),
+            'checked_cast_tensor<${DenseBackend}LongTensor>('
+            '${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay}, '
+            'Backend::${DenseBackend}, ScalarType::Long)'),
+    'THStorage*':
+        CodeTemplate(
+            'checked_cast_storage<Storage>('
+            '&${arg_name},"${arg_name}",${arg_pos}, '
+            'Backend::${Backend}, ScalarType::${ScalarName})'),
     'THGenerator*':
         CodeTemplate(
             'check_generator<${Backend}Generator>(${arg_name}, &globalContext().defaultGenerator(backend()))'),
@@ -284,8 +302,10 @@ CHECKED_CAST = {
     'THStride*': CodeTemplate('THLongStorageView ${result_name}(${arg_name}, THLongStorageViewKind::STRIDE);'),
     'real': CodeTemplate('${arg_name}.to${ScalarName}()'),
     'accreal': CodeTemplate('${arg_name}.to${AccScalarName}()'),
-    'TensorList': CodeTemplate('tensor_list_checked_cast<${Tensor}, Tensor, '
-                               '${THTensor}>(${arg_name},"${arg_name}",${arg_pos})'),
+    'TensorList': CodeTemplate(
+            'tensor_list_checked_cast<${Tensor}, Tensor, '
+            '${THTensor}>(${arg_name},"${arg_name}",${arg_pos}, '
+            'Backend::${Backend}, ScalarType::${ScalarName})'),
     'IntList': CodeTemplate('check_intlist<${size}>(${arg_name}, "${arg_name}", ${arg_pos}${,default_init})')
 }
 
@@ -299,7 +319,7 @@ CHECKED_USE = {
     'THIntegerTensor*': '{}_->tensor',
     'THDenseTensor*': '{}_->tensor',
     'THDenseIndexTensor*': '{}_->tensor',
-    'THStorage*': '{}_->storage',
+    'THStorage*': '{}_->pImpl()',
     'THGenerator*': '{}_->generator',
     'TensorList': "{0}_.data(), {0}_.size()",
 }
@@ -330,7 +350,7 @@ ALLOC_WRAP = {
 CONSTANT_REPLACEMENTS = [
     ('AS_REAL', '${AS_REAL}'),
     ('__storage_size.get\\(\\)',
-     'THLongStorageView(static_cast<int64_t>(source.size()), THLongStorageViewKind::LENGTH)'),
+     'THLongStorageView(static_cast<int64_t>(source.pImpl()->get_size()), THLongStorageViewKind::LENGTH)'),
     ('__last_dim', 'self.ndimension()-1'),
 ]
 
@@ -1435,7 +1455,7 @@ def create_derived(backend_type_env, declarations):
                     scalar_check_arg = (scalar_check if not isinstance(scalar_check, dict)
                                         else scalar_check.get(arg['name']))  # type: ignore
                     if scalar_check_arg is not None:
-                        stmt = "{}_->maybeScalar({});".format(arg['name'], scalar_check_arg)
+                        stmt = "{}_->maybe_zero_dim({});".format(arg['name'], scalar_check_arg)
                         if nullable_argument(arg):
                             stmt = "if ({}_) {}".format(arg['name'], stmt)
                         body.append(stmt)
@@ -1459,7 +1479,7 @@ def create_derived(backend_type_env, declarations):
                     option['aten_custom_call']).substitute(env))
 
             if ret['type'] in ALLOC_WRAP.keys():
-                maybe_scalar = "->maybeScalar({})".format(scalar_check) \
+                maybe_scalar = "->maybe_zero_dim({})".format(scalar_check) \
                                if scalar_check is not None \
                                else ""
                 wrapped_tensor = CodeTemplate(ALLOC_WRAP[ret['type']]).substitute(

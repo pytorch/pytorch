@@ -1048,8 +1048,9 @@ class TestAutograd(TestCase):
 
         b = a + 5
         next_functions = b.grad_fn.next_functions
-        self.assertEqual(len(next_functions), 1)
+        self.assertEqual(len(next_functions), 2)
         self.assertIs(next_functions[0][0], a.grad_fn)
+        self.assertIs(next_functions[1][0], None)
 
     def test_inplace(self):
         x = torch.ones(5, 5, requires_grad=True)
@@ -2438,6 +2439,12 @@ class TestAutograd(TestCase):
                     out.backward()
             self.assertIn('MyFunc.apply', str(w[0].message))
 
+    def test_symeig_no_eigenvectors(self):
+        A = torch.tensor([[1., 2.], [2., 4.]], dtype=torch.float32, requires_grad=True)
+        w, v = torch.symeig(A, eigenvectors=False)
+        with self.assertRaisesRegex(RuntimeError, 'backward without computing eigenvectors'):
+            torch.autograd.backward([w, v], [torch.ones_like(w), torch.ones_like(v)])
+
 
 def index_variable(shape, max_indices):
     if not isinstance(shape, tuple):
@@ -2648,6 +2655,11 @@ method_tests = [
     ('flip', (S, S, S), ([0, 1, 2],), 'd012'),
     ('flip', (S, S, S), ([0, 2],), 'd02'),
     ('flip', (S, S, S), ([2, 0],), 'd20'),
+    ('flip', (S, S, S), ([-1],), 'neg_d'),
+    ('rot90', (S, S, S), (1, [0, 1],), 'k1_d01'),
+    ('rot90', (S, S, S), (1, [1, 2],), 'k1_d12'),
+    ('rot90', (S, S, S), (1, [1, -1],), 'k1_neg_d'),
+    ('rot90', (S, S, S), (), 'default'),
     ('view_as', (S, S, S), (non_differentiable(torch.rand(S * S, S)),)),
     ('view_as', (), (non_differentiable(torch.tensor(5.5)),), 'scalar'),
     ('view_as', (), (non_differentiable(torch.rand(1, 1)),), 'scalar_to_dims'),
@@ -3041,6 +3053,9 @@ method_tests = [
      'symmetric_pd', NO_ARGS, [skipIfNoLapack], itemgetter(1)),
     ('slogdet', lambda: random_fullrank_matrix_distinct_singular_value(S), NO_ARGS,
      'distinct_singular_values', NO_ARGS, [skipIfNoLapack], itemgetter(1)),
+    ('symeig', lambda: random_symmetric_matrix(S), (True, False), 'lower', NO_ARGS, [skipIfNoLapack]),
+    ('symeig', lambda: random_symmetric_matrix(S), (True, True), 'upper', NO_ARGS, [skipIfNoLapack]),
+    ('symeig', lambda: random_symmetric_matrix(M), (True, True), 'large', NO_ARGS, [skipIfNoLapack]),
     ('svd', lambda: random_fullrank_matrix_distinct_singular_value(S), NO_ARGS, '', NO_ARGS, [skipIfNoLapack]),
     ('svd', lambda: random_fullrank_matrix_distinct_singular_value(S)[:(S - 2)], NO_ARGS,
      'wide', NO_ARGS, [skipIfNoLapack]),
@@ -3449,10 +3464,10 @@ def add_test(
                         if not isinstance(output_variable, tuple):
                             output_variable = (output_variable,)
                         inplace_self_variable = deepcopy(self_variable)
-                        inplace_self_variable_copy = tuple(i + 0 if i is not None else None
+                        inplace_self_variable_copy = tuple(i.clone() if isinstance(i, torch.Tensor) else i
                                                            for i in (inplace_self_variable,))
                         inplace_args_variable = deepcopy(args_variable)
-                        inplace_args_variable_copy = tuple(i + 0 if i is not None else None
+                        inplace_args_variable_copy = tuple(i.clone() if isinstance(i, torch.Tensor) else i
                                                            for i in inplace_args_variable)
 
                         inplace_output_variable = (
