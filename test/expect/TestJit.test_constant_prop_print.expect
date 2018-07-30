@@ -1,0 +1,12 @@
+graph(%input_tensor : Dynamic) {
+  %1 : int = prim::Constant[value=6]()
+  %2 : Dynamic = ^FIXME_zerol()()
+  %a : Dynamic = aten::add(%1, %2)
+   = prim::Print(%a)
+  %4 : int = prim::Constant[value=2]()
+  %5 : int = prim::Constant[value=1]()
+  %b : Dynamic = aten::add(%a, %4, %5)
+  %7 : int = prim::Constant[value=1]()
+  %8 : Dynamic = aten::add(%b, %input_tensor, %7)
+  return (%8);
+}
