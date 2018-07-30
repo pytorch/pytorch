@@ -7990,6 +7990,17 @@ class TestTorch(TestCase):
             for i in range(len(x)):
                 self.assertEqual(geq2_x[i], geq2_array[i])
 
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_multiplication_numpy_scalar(self):
+        np_sc = np.float64(2.0)
+        t = torch.ones(2, requires_grad=True)
+        r1 = np_sc * t
+        self.assertIsInstance(r1, torch.Tensor)
+        self.assertTrue(r1.requires_grad)
+        r2 = t * np_sc
+        self.assertIsInstance(r2, torch.Tensor)
+        self.assertTrue(r2.requires_grad)
+
     def test_error_msg_type_translation(self):
         with self.assertRaisesRegex(
                 RuntimeError,
