@@ -107,15 +107,40 @@ struct EqualNodeCSE {
 
 // The function implements common subexpression elimination.
 // Since the nodes are visited in topological order, one pass is enough.
-void EliminateCommonSubexpression(Block * block) {
+void EliminateCommonSubexpression(Block * block,
+                                  std::function<Node*(Node*)> parent_lookup_fn) {
   std::unordered_set<Node*, HashNodeCSE, EqualNodeCSE> subexprs;
   for (auto it = block->nodes().begin(); it != block->nodes().end(); ++ it) {
     auto node = *it;
     if (node->kind() == prim::PythonOp
         || node->kind() == prim::Print
-        || node->blocks().size() > 0
        ) {
       // Do NOT have enough information to do CSE on these nodes.
+      continue;
+    }
+
+    if (node->blocks().size()) {
+      // Traverse sub-blocks.
+      for (auto block : node->blocks()) {
+        EliminateCommonSubexpression(block,
+        [&](Node *n) {
+          auto existing = subexprs.find(n);
+          if (existing != subexprs.end()) {
+            return *existing;
+          }
+
+          return parent_lookup_fn(n);
+        });
+      }
+
+      continue;
+    }
+
+    // Check for CSE opportunities in the parent block.
+    auto parent_lookup = parent_lookup_fn(node);
+    if (parent_lookup) {
+      node->replaceAllUsesWith(parent_lookup);
+      it.destroyCurrent();
       continue;
     }
 
