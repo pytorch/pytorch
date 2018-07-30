@@ -128,7 +128,7 @@ __device__ T reduce(Op op, DeviceTensor3 tensor, int plane) {
   sum = warpSum(sum);
 
   // 'transpose', and reduce within warp again
-  __shared__ T shared[32];
+  __shared__ T shared[WARP_SIZE];
   __syncthreads();
   if (threadIdx.x % WARP_SIZE == 0) {
     shared[threadIdx.x / WARP_SIZE] = sum;
