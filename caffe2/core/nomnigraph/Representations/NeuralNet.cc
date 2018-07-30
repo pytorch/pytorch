@@ -1,6 +1,6 @@
 #include "nomnigraph/Representations/NeuralNet.h"
+#include <queue>
 #include "nomnigraph/Graph/Algorithms.h"
-
 namespace nom {
 namespace repr {
 
@@ -91,6 +91,60 @@ std::vector<NNGraph::NodeRef> getOutputs(NNGraph::NodeRef n) {
   return out;
 }
 
+std::vector<repr::NNGraph::NodeRef> topologicalSort(
+    const std::vector<repr::NNGraph::NodeRef>& instrs) {
+  std::vector<repr::NNGraph::NodeRef> result;
+  // build dependency graph
+  std::unordered_map<
+      repr::NNGraph::NodeRef,
+      std::unordered_set<repr::NNGraph::NodeRef>>
+      dependency_graph;
+  for (auto& node : instrs) {
+    dependency_graph[node] = std::unordered_set<repr::NNGraph::NodeRef>();
+  }
+  for (auto& node : instrs) {
+    for (auto& output : nn::getOutputs(node)) {
+      for (auto& consumer : nn::getConsumers(output)) {
+        if (dependency_graph.count(consumer)) {
+          dependency_graph[consumer].insert(node);
+        }
+      }
+    }
+  }
+  // sort the instruction node by execution order
+  std::queue<repr::NNGraph::NodeRef> q;
+  std::vector<repr::NNGraph::NodeRef> node_to_remove;
+  for (auto& kv : dependency_graph) {
+    if (kv.second.empty()) {
+      q.push(kv.first);
+      node_to_remove.push_back(kv.first);
+    }
+  }
+  for (auto& node : node_to_remove) {
+    dependency_graph.erase(node);
+  }
+
+  while (!q.empty()) {
+    auto& node = q.front();
+    result.push_back(node);
+    q.pop();
+    for (auto& output : nn::getOutputs(node)) {
+      for (auto& consumer : nn::getConsumers(output)) {
+        if (dependency_graph.count(consumer)) {
+          dependency_graph[consumer].erase(node);
+          if (dependency_graph[consumer].empty()) {
+            q.push(consumer);
+            dependency_graph.erase(consumer);
+          }
+        }
+      }
+    }
+  }
+  assert(
+      dependency_graph.empty() && "dependency graph not empty, loop detected");
+  return result;
+}
+
 // Get all nodes tracked by CF graph
 static std::unordered_set<repr::NNGraph::NodeRef> getTrackedNodes(
     repr::NNCFGraph& cf) {
@@ -163,20 +217,18 @@ void coalesceInsertedDataDependencies(repr::NNModule* m) {
   // Finally we reconcile any data dependency issues (if we can).
   for (auto& bbNode : m->controlFlow.getMutableNodes()) {
     auto bb = bbNode->mutableData()->get();
-    std::unordered_set<repr::NNGraph::NodeRef> seen;
-    for (auto instr_iter = bb->getInstructions().begin();
-         instr_iter != bb->getInstructions().end();
-         ++instr_iter) {
-      // This cannot be auto&, TODO figure out why
-      auto instr = *instr_iter;
-      for (auto& output : getOutputs(instr)) {
-        for (auto& consumer : getConsumers(output)) {
-          if (seen.count(consumer)) {
-            bb->moveInstructionBefore(instr, consumer);
-          }
-        }
-      }
-      seen.insert(instr);
+    auto& instructions = bb->getInstructions();
+    if (instructions.size() <= 1) {
+      continue;
+    }
+    vector<repr::NNGraph::NodeRef> ordered_instructions =
+        topologicalSort(instructions);
+    assert(
+        ordered_instructions.size() == instructions.size() &&
+        "number of instructions mismatch after topological sort");
+    for (size_t idx = ordered_instructions.size() - 1; idx > 0; --idx) {
+      bb->moveInstructionBefore(
+          ordered_instructions[idx - 1], ordered_instructions[idx]);
     }
   }
 }

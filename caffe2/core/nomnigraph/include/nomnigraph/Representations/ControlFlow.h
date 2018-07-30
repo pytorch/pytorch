@@ -65,9 +65,9 @@ class BasicBlock {
     assert(hasInstruction(instr2) && "Instruction not in basic block.");
     auto it1 =
         std::find(std::begin(Instructions), std::end(Instructions), instr1);
+    Instructions.erase(it1);
     auto it2 =
         std::find(std::begin(Instructions), std::end(Instructions), instr2);
-    Instructions.erase(it1);
     Instructions.insert(it2, instr1);
   }
 
