@@ -18,13 +18,13 @@ EmbeddingImpl::EmbeddingImpl(EmbeddingOptions options)
 }
 
 void EmbeddingImpl::reset() {
-  table = register_parameter(
-      "table", torch::empty({options.count_, options.dimension_}));
-  table.data().normal_(0, 1);
+  weight = register_parameter(
+      "weight", torch::empty({options.count_, options.dimension_}));
+  weight.data().normal_(0, 1);
 }
 
 Tensor EmbeddingImpl::forward(Tensor input) {
-  return torch::embedding(table, /*indices=*/input);
+  return torch::embedding(weight, /*indices=*/input);
 }
 } // namespace nn
 } // namespace torch

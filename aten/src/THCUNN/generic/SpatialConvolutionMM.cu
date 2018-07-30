@@ -2,6 +2,8 @@
 #define THC_GENERIC_FILE "generic/SpatialConvolutionMM.cu"
 #else
 
+#include <ATen/div_rtn.h>
+
 static inline void THNN_(SpatialConvolutionMM_shapeCheck)(
                          THCState *state,
                          THCTensor *input, THCTensor *gradOutput,
@@ -49,8 +51,8 @@ static inline void THNN_(SpatialConvolutionMM_shapeCheck)(
       exactInputHeight, exactInputWidth, kH, kW);
   }
 
-  int64_t outputHeight = (exactInputHeight - kH) / dH + 1;
-  int64_t outputWidth  = (exactInputWidth - kW) / dW + 1;
+  int64_t outputHeight = div_rtn<int64_t>(exactInputHeight - kH, dH) + 1;
+  int64_t outputWidth  = div_rtn<int64_t>(exactInputWidth - kW, dW) + 1;
 
   if (outputWidth < 1 || outputHeight < 1) {
     THError("Given input size per channel: (%ld x %ld). "
@@ -109,7 +111,7 @@ void THNN_(SpatialConvolutionMM_updateOutput)(
   if (weight->dim() == 4) {
     int64_t s1 = weight->size(0);
     int64_t s2 = weight->size(1) * weight->size(2) * weight->size(3);
-    weight = THCTensor_(newWithStorage2d)(state, weight->storage, weight->storageOffset, s1, -1, s2, -1);
+    weight = THCTensor_(newWithStorage2d)(state, THTensor_getStoragePtr(weight), weight->storage_offset(), s1, -1, s2, -1);
     freeWeight = 1;
   }
 
@@ -264,7 +266,7 @@ void THNN_(SpatialConvolutionMM_updateGradInput)(
   if (weight->dim() == 4) {
     int64_t s1 = weight->size(0);
     int64_t s2 = weight->size(1) * weight->size(2) * weight->size(3);
-    weight = THCTensor_(newWithStorage2d)(state, weight->storage, weight->storageOffset, s1, -1, s2, -1);
+    weight = THCTensor_(newWithStorage2d)(state, THTensor_getStoragePtr(weight), weight->storage_offset(), s1, -1, s2, -1);
     freeWeight = 1;
   }
 
@@ -398,7 +400,7 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
   if (gradWeight && gradWeight->dim() == 4) {
     int64_t s1 = gradWeight->size(0);
     int64_t s2 = gradWeight->size(1) * gradWeight->size(2) * gradWeight->size(3);
-    gradWeight = THCTensor_(newWithStorage2d)(state, gradWeight->storage, gradWeight->storageOffset, s1, -1, s2, -1);
+    gradWeight = THCTensor_(newWithStorage2d)(state, THTensor_getStoragePtr(gradWeight), gradWeight->storage_offset(), s1, -1, s2, -1);
     freeWeight = 1;
   }
 

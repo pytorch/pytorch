@@ -6,7 +6,7 @@
 #include "THCTensorRandom.h"
 #include "THCGeneral.hpp"
 
-#include "ATen/CUDAStream.h"
+#include "ATen/cuda/CUDAStream.h"
 
 #include "THCCachingAllocator.h"
 #include <stdlib.h>
@@ -426,29 +426,29 @@ cusparseHandle_t THCState_getDeviceSparseHandle(THCState *state, int device, int
 }
 
 THCStream* THCState_getStreamOnDevice(THCState* state, int device) {
-  return at::detail::CUDAStream_getCurrentStreamOnDeviceUnsafe(device);
+  return at::cuda::detail::CUDAStream_getCurrentStreamOnDeviceUnsafe(device);
 }
 
 void THCState_setStreamOnDevice(THCState *state, int device, THCStream *stream) {
-  at::detail::CUDAStream_setStreamOnDevice(device, stream);
+  at::cuda::detail::CUDAStream_setStreamOnDevice(device, stream);
 }
 
 cudaStream_t THCState_getCurrentStreamOnDevice(THCState *state, int device) {
-  return at::detail::CUDAStream_stream(
-    at::detail::CUDAStream_getCurrentStreamOnDeviceUnsafe(device));
+  return at::cuda::detail::CUDAStream_stream(
+    at::cuda::detail::CUDAStream_getCurrentStreamOnDeviceUnsafe(device));
 }
 
 cudaStream_t THCState_getCurrentStream(THCState *state) {
-  return at::detail::CUDAStream_stream(
-    at::detail::CUDAStream_getCurrentStreamUnsafe());
+  return at::cuda::detail::CUDAStream_stream(
+    at::cuda::detail::CUDAStream_getCurrentStreamUnsafe());
 }
 
 THCStream* THCState_getStream(THCState *state) {
-  return at::detail::CUDAStream_getCurrentStreamUnsafe();
+  return at::cuda::detail::CUDAStream_getCurrentStreamUnsafe();
 }
 
 void THCState_setStream(THCState *state, THCStream *stream) {
-  at::detail::CUDAStream_setStream(stream);
+  at::cuda::detail::CUDAStream_setStream(stream);
 }
 
 cublasHandle_t THCState_getCurrentBlasHandle(THCState *state)

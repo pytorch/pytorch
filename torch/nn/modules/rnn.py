@@ -7,6 +7,7 @@ import numbers
 from .module import Module
 from ..parameter import Parameter
 from ..utils.rnn import PackedSequence
+from .. import init
 
 
 class RNNBase(Module):
@@ -115,7 +116,7 @@ class RNNBase(Module):
     def reset_parameters(self):
         stdv = 1.0 / math.sqrt(self.hidden_size)
         for weight in self.parameters():
-            weight.data.uniform_(-stdv, stdv)
+            init.uniform_(weight, -stdv, stdv)
 
     def check_forward_args(self, input, hidden, batch_sizes):
         is_input_packed = batch_sizes is not None
@@ -304,6 +305,10 @@ class RNN(RNNBase):
         bias_hh_l[k]: the learnable hidden-hidden bias of the k-th layer,
             of shape `(hidden_size)`
 
+    .. note::
+        All the weights and biases are initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`
+        where :math:`k = \frac{1}{\text{hidden_size}}`
+
     Examples::
 
         >>> rnn = nn.RNN(10, 20, 2)
@@ -412,6 +417,10 @@ class LSTM(RNNBase):
         bias_hh_l[k] : the learnable hidden-hidden bias of the :math:`\text{k}^{th}` layer
             `(b_hi|b_hf|b_hg|b_ho)`, of shape `(4*hidden_size)`
 
+    .. note::
+        All the weights and biases are initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`
+        where :math:`k = \frac{1}{\text{hidden_size}}`
+
     Examples::
 
         >>> rnn = nn.LSTM(10, 20, 2)
@@ -497,6 +506,11 @@ class GRU(RNNBase):
             (b_ir|b_iz|b_in), of shape `(3*hidden_size)`
         bias_hh_l[k] : the learnable hidden-hidden bias of the :math:`\text{k}^{th}` layer
             (b_hr|b_hz|b_hn), of shape `(3*hidden_size)`
+
+    .. note::
+        All the weights and biases are initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`
+        where :math:`k = \frac{1}{\text{hidden_size}}`
+
     Examples::
 
         >>> rnn = nn.GRU(10, 20, 2)
@@ -565,11 +579,15 @@ class RNNCell(RNNCellBase):
 
     Attributes:
         weight_ih: the learnable input-hidden weights, of shape
-            `(input_size x hidden_size)`
+            `(hidden_size x input_size)`
         weight_hh: the learnable hidden-hidden weights, of shape
             `(hidden_size x hidden_size)`
         bias_ih: the learnable input-hidden bias, of shape `(hidden_size)`
         bias_hh: the learnable hidden-hidden bias, of shape `(hidden_size)`
+
+    .. note::
+        All the weights and biases are initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`
+        where :math:`k = \frac{1}{\text{hidden_size}}`
 
     Examples::
 
@@ -601,7 +619,7 @@ class RNNCell(RNNCellBase):
     def reset_parameters(self):
         stdv = 1.0 / math.sqrt(self.hidden_size)
         for weight in self.parameters():
-            weight.data.uniform_(-stdv, stdv)
+            init.uniform_(weight, -stdv, stdv)
 
     def forward(self, input, hx=None):
         self.check_forward_input(input)
@@ -668,6 +686,10 @@ class LSTMCell(RNNCellBase):
         bias_ih: the learnable input-hidden bias, of shape `(4*hidden_size)`
         bias_hh: the learnable hidden-hidden bias, of shape `(4*hidden_size)`
 
+    .. note::
+        All the weights and biases are initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`
+        where :math:`k = \frac{1}{\text{hidden_size}}`
+
     Examples::
 
         >>> rnn = nn.LSTMCell(10, 20)
@@ -698,7 +720,7 @@ class LSTMCell(RNNCellBase):
     def reset_parameters(self):
         stdv = 1.0 / math.sqrt(self.hidden_size)
         for weight in self.parameters():
-            weight.data.uniform_(-stdv, stdv)
+            init.uniform_(weight, -stdv, stdv)
 
     def forward(self, input, hx=None):
         self.check_forward_input(input)
@@ -752,6 +774,10 @@ class GRUCell(RNNCellBase):
         bias_ih: the learnable input-hidden bias, of shape `(3*hidden_size)`
         bias_hh: the learnable hidden-hidden bias, of shape `(3*hidden_size)`
 
+    .. note::
+        All the weights and biases are initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`
+        where :math:`k = \frac{1}{\text{hidden_size}}`
+
     Examples::
 
         >>> rnn = nn.GRUCell(10, 20)
@@ -781,7 +807,7 @@ class GRUCell(RNNCellBase):
     def reset_parameters(self):
         stdv = 1.0 / math.sqrt(self.hidden_size)
         for weight in self.parameters():
-            weight.data.uniform_(-stdv, stdv)
+            init.uniform_(weight, -stdv, stdv)
 
     def forward(self, input, hx=None):
         self.check_forward_input(input)

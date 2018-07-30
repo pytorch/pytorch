@@ -115,27 +115,27 @@ bool MaxPoolWithIndexOp::DoRunWithType() {
   int output_size = Y->size();
   mask->Resize(output_size);
 
-  MaxPoolForward<T><<<
-      CAFFE_GET_BLOCKS(output_size),
-      CAFFE_CUDA_NUM_THREADS,
-      0,
-      context_.cuda_stream()>>>(
-      output_size,
-      X.data<T>(),
-      X.dim32(0),
-      X.dim32(1),
-      X.dim32(2),
-      X.dim32(3),
-      Y->dim32(2),
-      Y->dim32(3),
-      kernel_h(),
-      kernel_w(),
-      stride_h(),
-      stride_w(),
-      pad_t(),
-      pad_l(),
-      Y->mutable_data<T>(),
-      mask->mutable_data<int>());
+  MaxPoolForward<T>
+      <<<CAFFE_GET_BLOCKS(output_size),
+         CAFFE_CUDA_NUM_THREADS,
+         0,
+         context_.cuda_stream()>>>(
+          output_size,
+          X.data<T>(),
+          X.dim32(0),
+          X.dim32(1),
+          X.dim32(2),
+          X.dim32(3),
+          Y->dim32(2),
+          Y->dim32(3),
+          kernel_h(),
+          kernel_w(),
+          stride_h(),
+          stride_w(),
+          pad_t(),
+          pad_l(),
+          Y->template mutable_data<T>(),
+          mask->template mutable_data<int>());
   return true;
 }
 

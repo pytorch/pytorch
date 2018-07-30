@@ -55,7 +55,6 @@ TEST(MPITest, TestMPIBroadcast) {
   arg->set_f(rank);
   int size;
   MPI_Comm_size(MPI_COMM_WORLD, &size);
-
   for (int root = 0; root < size; ++root) {
     net_def.mutable_op(2)->mutable_arg(0)->set_i(root);
     Workspace ws;
@@ -63,8 +62,8 @@ TEST(MPITest, TestMPIBroadcast) {
     EXPECT_NE(nullptr, net.get());
     EXPECT_TRUE(net->Run());
     // Let's test the value.
-    auto& X = ws.GetBlob("X")->Get<TensorCUDA>();
-    TensorCPU X_cpu(X);
+    auto& X = ws.GetBlob("X")->Get<Tensor>();
+    Tensor X_cpu(X, CPU);
     EXPECT_EQ(X.size(), 10);
     for (int i = 0; i < X.size(); ++i) {
       EXPECT_EQ(X_cpu.data<float>()[i], root);
@@ -133,7 +132,7 @@ TEST(MPITest, TestMPIReduce) {
       auto& X = ws.GetBlob("X_reduced")->Get<TensorCUDA>();
       EXPECT_EQ(X.size(), 10);
       int expected_result = size * (size - 1) / 2;
-      TensorCPU X_cpu(X);
+      Tensor X_cpu(X, CPU);
       for (int i = 0; i < X.size(); ++i) {
         EXPECT_EQ(X_cpu.data<float>()[i], expected_result);
       }
@@ -190,7 +189,7 @@ TEST(MPITest, TestMPIAllgather) {
   EXPECT_TRUE(net->Run());
   // Let's test the value.
   auto& X = ws.GetBlob("X")->Get<TensorCUDA>();
-  TensorCPU X_cpu(X);
+  Tensor X_cpu(X, CPU);
   EXPECT_EQ(X.size(), 20);
   for (int i = 0; i < X.size(); ++i) {
     EXPECT_EQ(X_cpu.data<float>()[i], rank);
@@ -199,7 +198,7 @@ TEST(MPITest, TestMPIAllgather) {
   EXPECT_EQ(X_gathered.size(), 20 * size);
   EXPECT_EQ(X_gathered.dim(0), 2 * size);
   EXPECT_EQ(X_gathered.dim(1), 10);
-  TensorCPU X_gathered_cpu(X_gathered);
+  Tensor X_gathered_cpu(X_gathered, CPU);
   for (int i = 0; i < X_gathered.size(); ++i) {
     EXPECT_EQ(X_gathered_cpu.data<float>()[i], i / 20);
   }
@@ -254,14 +253,14 @@ TEST(MPITest, TestMPIAllreduce) {
   // Let's test the value.
   auto& X = ws.GetBlob("X")->Get<TensorCUDA>();
   EXPECT_EQ(X.size(), 10);
-  TensorCPU X_cpu(X);
+  Tensor X_cpu(X, CPU);
   for (int i = 0; i < X.size(); ++i) {
     EXPECT_EQ(X_cpu.data<float>()[i], rank);
   }
   auto& X_reduced = ws.GetBlob("X_reduced")->Get<TensorCUDA>();
   EXPECT_EQ(X_reduced.size(), 10);
   int expected_result = size * (size - 1) / 2;
-  TensorCPU X_reduced_cpu(X_reduced);
+  Tensor X_reduced_cpu(X_reduced, CPU);
   for (int i = 0; i < X_reduced.size(); ++i) {
     EXPECT_EQ(X_reduced_cpu.data<float>()[i], expected_result);
   }
@@ -316,7 +315,7 @@ TEST(MPITest, TestInPlaceMPIAllreduce) {
   auto& X_reduced = ws.GetBlob("X")->Get<TensorCUDA>();
   EXPECT_EQ(X_reduced.size(), 10);
   int expected_result = size * (size - 1) / 2;
-  TensorCPU X_reduced_cpu(X_reduced);
+  Tensor X_reduced_cpu(X_reduced, CPU);
   for (int i = 0; i < X_reduced.size(); ++i) {
     EXPECT_EQ(X_reduced_cpu.data<float>()[i], expected_result);
   }

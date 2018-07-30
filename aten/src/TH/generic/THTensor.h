@@ -24,9 +24,9 @@ typedef struct THTensor THTensor;
 TH_API THStorage* THTensor_(storage)(const THTensor *self);
 TH_API ptrdiff_t THTensor_(storageOffset)(const THTensor *self);
 
-// See [NOTE: _dim() vs dim()]; _nDimension corresponds to _dim(), nDimension corresponds to dim().
-TH_API int THTensor_(nDimension)(const THTensor *self);
-TH_API int THTensor_(_nDimension)(const THTensor *self);
+// See [NOTE: nDimension vs nDimensionLegacyNoScalars vs nDimensionLegacyAll]
+TH_API int THTensor_(nDimensionLegacyNoScalars)(const THTensor *self);
+TH_API int THTensor_(nDimensionLegacyAll)(const THTensor *self);
 TH_API int64_t THTensor_(size)(const THTensor *self, int dim);
 TH_API int64_t THTensor_(stride)(const THTensor *self, int dim);
 TH_API THLongStorage *THTensor_(newSizeOf)(THTensor *self);
@@ -103,6 +103,7 @@ TH_API void THTensor_(setStorage4d)(THTensor *self, THStorage *storage_, ptrdiff
 TH_API void THTensor_(narrow)(THTensor *self, THTensor *src, int dimension_, int64_t firstIndex_, int64_t size_);
 TH_API void THTensor_(select)(THTensor *self, THTensor *src, int dimension_, int64_t sliceIndex_);
 TH_API void THTensor_(transpose)(THTensor *self, THTensor *src, int dimension1_, int dimension2_);
+TH_API int THTensor_(isTransposed)(const THTensor *self);
 TH_API void THTensor_(unfold)(THTensor *self, THTensor *src, int dimension_, int64_t size_, int64_t step_);
 
 TH_API void THTensor_(squeeze)(THTensor *self, THTensor *src);

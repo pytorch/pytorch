@@ -17,6 +17,8 @@ using Catch::StartsWith;
 using namespace torch::autograd;
 using namespace torch::nn;
 
+#ifdef USE_CUDA
+
 TEST_CASE("Parallel/DifferentiableScatter", "[multi-cuda]") {
   Scatter scatter(
       {torch::Device(torch::kCUDA, 0), torch::Device(torch::kCUDA, 1)});
@@ -228,3 +230,5 @@ TEST_CASE("Parallel/DataParallelUsesAllAvailableCUDADevices", "[cuda]") {
     REQUIRE(output[i].toCInt() == i);
   }
 }
+
+#endif

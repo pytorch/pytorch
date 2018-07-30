@@ -160,7 +160,7 @@ void loadInput(
           CAFFE_THROW("Not support GPU on mobile.");
 #endif
         } else {
-          caffe2::TensorCPU* tensor = blob->GetMutable<caffe2::TensorCPU>();
+          caffe2::TensorCPU* tensor = blob->GetMutableTensor(caffe2::CPU);
           CHECK_NOTNULL(tensor);
           tensor->Resize(input_dims);
           if (input_type_list[i] == "uint8_t") {
@@ -197,7 +197,7 @@ void fillInputBlob(
     int protos_size = tensor_kv.second.protos_size();
     caffe2::TensorProto* tensor_proto =
         tensor_kv.second.mutable_protos(iteration % protos_size);
-    caffe2::TensorCPU* tensor = blob->GetMutable<caffe2::TensorCPU>();
+    caffe2::TensorCPU* tensor = blob->GetMutableTensor(caffe2::CPU);
     tensor->Resize(std::vector<caffe2::TIndex>());
     if (tensor_proto->data_type() == caffe2::TensorProto::STRING) {
       (tensor->mutable_data<std::string>())[0] = tensor_proto->string_data(0);
@@ -215,7 +215,8 @@ void runNetwork(
     const bool wipe_cache,
     const bool run_individual,
     const int warmup,
-    const int iter) {
+    const int iter,
+    const int sleep_before_run) {
   if (!net_def.has_name()) {
     net_def.set_name("benchmark");
   }
@@ -233,6 +234,9 @@ void runNetwork(
 
   if (wipe_cache) {
     caffe2::wipe_cache();
+  }
+  if (sleep_before_run > 0) {
+    sleep(sleep_before_run);
   }
   LOG(INFO) << "Main runs.";
   CAFFE_ENFORCE(
@@ -286,7 +290,7 @@ void writeOutput(
 #endif
         } else {
           writeTextOutput<caffe2::CPUContext, caffe2::TensorCPU>(
-              workspace->GetBlob(name)->GetMutable<caffe2::TensorCPU>(),
+              workspace->GetBlob(name)->GetMutableTensor(caffe2::CPU),
               output_prefix,
               name);
         }

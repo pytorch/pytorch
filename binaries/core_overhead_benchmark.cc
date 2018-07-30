@@ -139,7 +139,7 @@ BENCHMARK(BM_cudaStreamWaitEventThenStreamSynchronize);
 
 static void BM_CudaPointerAffinity(benchmark::State& state) {
   CAFFE2_SKIP_IF_NO_GPU;
-  TensorCUDA tensor(vector<TIndex>{1, 2, 3, 4});
+  Tensor tensor(vector<TIndex>{1, 2, 3, 4}, CUDA);
   float* ptr = tensor.mutable_data<float>();
   while (state.KeepRunning()) {
     volatile int id = GetGPUIDForPointer(ptr);
@@ -198,7 +198,7 @@ static void BM_RawAllocDeallocCPU(benchmark::State& state) {
 BENCHMARK(BM_RawAllocDeallocCPU);
 
 static void BM_TensorAllocDeallocCPU(benchmark::State& state) {
-  Tensor<CPUContext> tensor;
+  Tensor tensor(CPU);
   // small allocation
   tensor.Resize(32, 32);
   while (state.KeepRunning()) {
@@ -210,7 +210,7 @@ BENCHMARK(BM_TensorAllocDeallocCPU);
 
 static void BM_TensorAllocDeallocCUDA(benchmark::State& state) {
   CAFFE2_SKIP_IF_NO_GPU;
-  Tensor<CUDAContext> tensor;
+  Tensor tensor(CUDA);
   // small allocation
   tensor.Resize(32, 32);
   while (state.KeepRunning()) {

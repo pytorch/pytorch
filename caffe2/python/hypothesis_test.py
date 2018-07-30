@@ -13,7 +13,7 @@ import unittest
 
 from caffe2.python import core, workspace, tt_core, dyndep
 import caffe2.python.hypothesis_test_util as hu
-from caffe2.proto.caffe2_pb2 import TensorProto
+from caffe2.proto import caffe2_pb2
 
 dyndep.InitOpsLibrary('@/caffe2/caffe2/fb/optimizers:sgd_simd_ops')
 
@@ -763,12 +763,13 @@ class TestOperators(hu.HypothesisTestCase):
         self.assertReferenceChecks(gc, op, [var, nz, indices, grad, alpha],
                                    ftrl)
 
+    # TODO: (bddppq) test_unique keeps running into segfault on rocm 1.8.2
     @given(input=hu.tensor(max_value=20,
                            max_dim=1,
                            dtype=np.int32,
                            elements=st.integers(min_value=0, max_value=10)),
            with_remapping=st.booleans(),
-           **hu.gcs)
+           **hu.gcs_no_hip)
     def test_unique(self, input, with_remapping, gc, dc):
         op = core.CreateOperator(
             "Unique",
@@ -1807,7 +1808,7 @@ class TestOperators(hu.HypothesisTestCase):
 
         to = _NUMPY_TYPE_TO_ENUM[dst]
         if use_name:
-            to = TensorProto.DataType.Name(to).lower()
+            to = caffe2_pb2.TensorProto.DataType.Name(to).lower()
         op = core.CreateOperator('Cast', ["X"], ["Y"], to=to)
         self.assertDeviceChecks(dc, op, [a], [0])
         out, = self.assertReferenceChecks(gc, op, [a], ref)
@@ -2247,11 +2248,11 @@ class TestOperators(hu.HypothesisTestCase):
         **hu.gcs)
     def test_sparse_to_dense(self, inp, gc, dc):
         first_dim, X, I = inp
-        if X.dtype != np.dtype('float32') and gc.device_type == 1:
+        if X.dtype != np.dtype('float32') and gc.device_type in {caffe2_pb2.CUDA, caffe2_pb2.HIP} :
             # Cuda only support 32 bit float
             print("Bailout {}".format(X.dtype))
             return
-        if gc.device_type == 1:
+        if gc.device_type in {caffe2_pb2.CUDA, caffe2_pb2.HIP}:
             # Cuda version only support int32
             I = I.astype(np.int32)
 

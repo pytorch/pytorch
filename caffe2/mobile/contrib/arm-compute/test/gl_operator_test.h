@@ -27,7 +27,7 @@ template<typename T = float>
 void PopulateCPUBlob(Workspace *ws, bool random, std::string name,
                      std::vector<int> dims, int val = 1, int dist_shift = 0, float variance = 1) {
   Blob *blob = ws->CreateBlob(name);
-  auto *tensor = blob->GetMutable<TensorCPU>();
+  auto* tensor = blob->GetMutableTensor(CPU);
   tensor->Resize(dims);
   T *t_data = tensor->mutable_data<T>();
   std::random_device rd;

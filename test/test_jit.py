@@ -333,9 +333,9 @@ class TestJit(JitTestCase):
 
         def f(x, y):
             out = x + y
-            with torch.jit.scope('Foo', out):
+            with torch.jit.scope('Foo'):
                 out = x * out
-                with torch.jit.scope('Bar', out):
+                with torch.jit.scope('Bar'):
                     out = torch.tanh(out)
                 out = torch.sigmoid(out)
             return out
@@ -615,7 +615,7 @@ class TestJit(JitTestCase):
         x = torch.randn(3, 1, 5, requires_grad=True)
         y = torch.randn(4, 1, 8, 5, requires_grad=True)
 
-        graph = torch.jit._script_graph(broadcast)
+        graph = torch.jit.script(broadcast).graph
         torch._C._jit_pass_shape_analysis(graph, (x, y), False)
         self.assertExpectedGraph(graph)
 
@@ -627,7 +627,7 @@ class TestJit(JitTestCase):
         y = torch.tensor([0.7], dtype=torch.float, device=device)
 
         def doit(x, y):
-            return torch.sigmoid(torch.tanh(x * (x + y) + 1))
+            return torch.sigmoid(torch.tanh(x * (x + y) + x))
 
         ge = self.checkTrace(doit, (x, y))
         self.assertExpectedGraph(ge.graph_for(x, y))
@@ -880,6 +880,7 @@ class TestJit(JitTestCase):
     def test_alexnet(self):
         x = torch.ones(1, 3, 224, 224)
         trace, _ = torch.jit.get_trace_graph(torchvision.models.AlexNet(), x)
+        self.run_pass('cse', trace)
         self.assertExpectedGraph(trace)
 
     # Inplace copies don't work with tracer yet.
@@ -1079,7 +1080,7 @@ class TestJit(JitTestCase):
             a = mat.addmm(mat1, mat2)
             b = mat.addmm(mat1, mat2, alpha=1.0, beta=1.0)
             c = mat.addmm(mat1, mat2, alpha=4.20, beta=2.0)
-            d = mat.addmm(mat1, mat2, alpha=alpha, beta=beta)
+            d = mat.addmm(mat1, mat2, alpha=int(alpha), beta=int(beta))
 
             return a + b + c + d
 
@@ -1144,20 +1145,20 @@ class TestBatched(TestCase):
 
     def test_batch_elementwise_binary(self):
         @torch.jit.batch(batch_size=4)
-        def add(a, b):
-            return a + b
+        def mul(a, b):
+            return a * b
 
         xs, batch = self.rand_batch(4, (True, 3), (False, 2))
         xs2, batch2 = xs, batch
-        res_batch = add(batch, batch2)
-        res = [torch.add(xs[j], xs2[j]) for j in range(4)]
+        res_batch = mul(batch, batch2)
+        res = [torch.mul(xs[j], xs2[j]) for j in range(4)]
         self.assertEqual(res, res_batch.examples())
 
         # test broadcast
         xs, batch = self.rand_batch(4, (False, 3), (False, 2))
         b = torch.rand(3, 2)
-        res_batch = add(batch, b)
-        res = [torch.add(xs[j], b) for j in range(4)]
+        res_batch = mul(batch, b)
+        res = [torch.mul(xs[j], b) for j in range(4)]
         self.assertEqual(res, res_batch.examples())
 
     def test_batch_mm(self):
@@ -1220,6 +1221,7 @@ class TestBatched(TestCase):
         res = [torch.where(xs_cond[j], xs[j], xs2[j]) for j in range(4)]
         self.assertEqual(res, res_batch.examples())
 
+    @unittest.skip("Need support for scalar arguments")
     def test_lstm_cell(self):
         def LSTMCell(x, h, c, w_xi, w_xf, w_xo, w_xc, w_hi, w_hf, w_ho, w_hc, b_i, b_f, b_o, b_c):
             i_t = torch.matmul(x, w_xi) + torch.matmul(h, w_hi) + b_i
@@ -1627,6 +1629,7 @@ class TestScript(JitTestCase):
 
     def test_python_frontend(self):
         def fn(x, y, z):
+            q = None
             q = x + y - z.sigmoid()
             print(q)
             w = -z
@@ -1770,7 +1773,7 @@ class TestScript(JitTestCase):
         def fn(x, y):
             return x + y
 
-        graph = torch.jit._script_graph(fn)
+        graph = torch.jit.script(fn).graph
         self.assertExpectedGraph(graph)
 
     def test_math_tensor_number(self):
@@ -1779,7 +1782,7 @@ class TestScript(JitTestCase):
         def fn(x):
             return x + 7
 
-        graph = torch.jit._script_graph(fn)
+        graph = torch.jit.script(fn).graph
         self.assertExpectedGraph(graph)
 
     def test_math_numbers(self):
@@ -1795,9 +1798,9 @@ class TestScript(JitTestCase):
             # FIXME: return number instead of tensor
             return torch.full([1], c)
 
-        graph1 = torch.jit._script_graph(fn1)
+        graph1 = torch.jit.script(fn1).graph
         self.assertExpectedGraph(graph1, subname="int")
-        graph2 = torch.jit._script_graph(fn2)
+        graph2 = torch.jit.script(fn2).graph
         self.assertExpectedGraph(graph2, subname="float")
 
     def test_if_nest_while(self):
@@ -1859,6 +1862,28 @@ class TestScript(JitTestCase):
         inputs = self._make_scalar_vars([0], torch.int64)
 
         self.assertEqual(test_script_for_in_range_if_ast(*inputs).shape[0], 20)
+
+    def test_script_None(self):
+        def func(x):
+            output = None
+            output = x
+            return output
+
+        self.checkScript(func, [torch.arange(0, 2)], optimize=True)
+
+    def test_script_clamp_none(self):
+        # TODO: could not enable default/optional argument for None in JIT
+        # result from Aten native python_default_init for clamp, it is used
+        # in Aten but not in JIT, need to fix type/default arg system in ATen
+        def test_script_clamp_max_none(x):
+            return torch.clamp(x, min=None, max=2)
+
+        def test_script_clamp_min_none(x):
+            return torch.clamp(x, min=2, max=None)
+
+        input = [torch.arange(0, 3)]
+        self.checkScript(test_script_clamp_max_none, input, optimize=True)
+        self.checkScript(test_script_clamp_min_none, input, optimize=True)
 
     def test_script_bool_constant(self):
         script = '''
@@ -2024,7 +2049,6 @@ def func(t):
             scope = {}
             exec(code, globals(), scope)
             cu = torch.jit.CompilationUnit(code)
-
             self.assertEqual(cu.func(tensor), scope['func'](tensor))
 
         var_int = 2
@@ -2693,6 +2717,26 @@ def func(t):
 
         f = io.BytesIO()
         torch.onnx._export(m, (x, seq_lens), f, verbose=False)
+
+    def test_pack_padded_wrong_types(self):
+        from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
+
+        class PackPaddedWrapper(torch.nn.Module):
+            def __init__(self):
+                super(PackPaddedWrapper, self).__init__()
+                self.seq_lens = [3, 3, 3, 3]
+
+            __constants__ = ['seq_lens']
+
+            def forward(self, x):
+                return pack_padded_sequence(x, self.seq_lens)
+
+        m = PackPaddedWrapper()
+
+        x = torch.rand(3, 4, 5)
+        f = io.BytesIO()
+        with self.assertRaisesRegex(RuntimeError, 'PackPadded requires `lengths` to be a Tensor'):
+            torch.onnx._export(m, (x,), f)
 
     def test_script_outputs(self):
         with self.assertRaisesRegex(RuntimeError, "cannot be used as a tuple"):
@@ -3474,18 +3518,18 @@ def func(t):
             c += b
             return c
 
-        graph = torch.jit._script_graph(func)
+        graph = torch.jit.script(func).graph
         self.run_pass('erase_number_types', graph)
         self.assertExpectedGraph(graph)
 
     def test_loop_unrolling(self):
         def fn(x):
             y = FIXME_zerol()
-            for i in range(x):
+            for i in range(int(x)):
                 y += i
             return y
 
-        graph = torch.jit._script_graph(fn)
+        graph = torch.jit.script(fn).graph
         self.run_pass('loop_unrolling', graph)
         self.assertExpectedGraph(graph)
         self.checkScript(fn, (torch.tensor(10),))
@@ -3504,7 +3548,7 @@ def func(t):
             return y
 
         def check(fn, name):
-            graph = torch.jit._script_graph(fn)
+            graph = torch.jit.script(fn).graph
             self.run_pass('loop_unrolling', graph)
             self.assertExpectedGraph(graph, subname=name)
             self.checkScript(fn, ())
@@ -3516,11 +3560,11 @@ def func(t):
         def fn(x):
             y = FIXME_zerol()
             for i in range(10):
-                for j in range(x):
+                for j in range(int(x)):
                     y += j
             return y
 
-        graph = torch.jit._script_graph(fn)
+        graph = torch.jit.script(fn).graph
         self.run_pass('loop_unrolling', graph)
         self.assertExpectedGraph(graph)
         self.checkScript(fn, (torch.tensor(10),))
@@ -3528,18 +3572,18 @@ def func(t):
     def test_loop_unroll_unused_counter(self):
         def fn(x):
             y = FIXME_zerol()
-            for i in range(x):
+            for i in range(int(x)):
                 y += 1
             return y
 
-        graph = torch.jit._script_graph(fn)
+        graph = torch.jit.script(fn).graph
         self.run_pass('loop_unrolling', graph)
         self.assertExpectedGraph(graph)
 
     def test_loop_unroll_negative(self):
         def fn(x):
             y = FIXME_zerol()
-            for i in range(x):
+            for i in range(int(x)):
                 y += 1
             return y
 
@@ -3584,7 +3628,7 @@ def func(t):
         with self.assertRaisesRegex(RuntimeError, 'argument \'chunks\' must be a constant'):
             @torch.jit.script
             def chunk_non_constant(x, y):
-                return x.chunk(y)
+                return x.chunk(int(y))
 
     def test_unknown_builtin(self):
         with self.assertRaisesRegex(RuntimeError, 'unknown builtin op'):
@@ -3593,7 +3637,7 @@ def func(t):
                 return x.splork(3)
 
     def test_expected_tensor_found_tuple(self):
-        with self.assertRaisesRegex(RuntimeError, 'expected a tensor value but found a Tuple'):
+        with self.assertRaisesRegex(RuntimeError, 'expected a tensor value but found'):
             @torch.jit.script
             def return_tuple_wrong(x):
                 a = (x, x)
@@ -4279,6 +4323,77 @@ def func(t):
 
         self.assertExpected(str(test_index_put.graph))
 
+    def test_annotated_script_fn(self):
+        @torch.jit.script
+        def foo(x, y, z):
+            # type: (Tensor, Tuple[Tensor, Tensor, Tensor], Tuple[Tensor, Tuple[Tensor, Tensor]]) -> Tensor
+            return x
+
+        self.assertExpected(foo.__getattr__('forward').pretty_print_schema())
+
+    def test_annotated_script_method(self):
+        class SM(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x, y):
+                # type: (Tuple[Tensor, Tensor], Tensor) -> Tuple[Tensor, Tensor, Tensor]
+                return y, y, y
+
+        sm = SM()
+
+        self.assertExpected(sm.__getattr__('forward').pretty_print_schema())
+
+    def test_annotated_script_fn_return_mismatch(self):
+        with self.assertRaisesRegex(RuntimeError, r"Return value at position 0 was annotated as "
+                                                  r"having type \(Tensor, Tensor\) but is "
+                                                  r"actually of type Tensor"):
+            @torch.jit.script
+            def return_tup(x):
+                # type: (Tensor) -> Tuple[Tuple[Tensor, Tensor], Tensor]
+                return x, x
+
+    def test_annotated_script_fn_arg_mismatch(self):
+        with self.assertRaisesRegex(RuntimeError, r"arguments for call are not valid"):
+            @torch.jit.script
+            def tuple_arg(x):
+                # type: (Tuple[Tensor, Tensor]) -> Tensor
+                return x + 1
+
+    @unittest.skip('https://github.com/pytorch/pytorch/issues/9595')
+    def test_inline_and_run_annotated_script_fn(self):
+        @torch.jit.script
+        def to_inline(x, y):
+            # type: (Tuple[Tensor, Tensor], Tensor) -> Tensor
+            return y
+
+        @torch.jit.script
+        def some_func(x):
+            return to_inline((x, x), x)
+
+        some_func(torch.rand(3, 4))
+
+    def test_file_format_serialization(self):
+        import tempfile
+        filename = tempfile.mktemp()
+        writer = torch._C.PyTorchFileWriter(filename)
+        import os
+        import random
+        buffers = [os.urandom(size) for size in [random.randint(1, 100) for i in range(20)]]
+        offsets = []
+        for buf in buffers:
+            offsets.append(writer.write_record(buf, len(buf)))
+        import pickle
+        serialized_offsets = pickle.dumps(offsets)
+        writer.write_record(serialized_offsets, len(serialized_offsets))
+        writer.write_end_of_file()
+
+        reader = torch._C.PyTorchFileReader(filename)
+        serialized_offsets_read = reader.get_last_record()
+        parsed_serialized_offsets = pickle.loads(serialized_offsets)
+
+        for i, offset in enumerate(parsed_serialized_offsets):
+            data = reader.get_record_with_key(offset)
+            assert(data == buffers[i])
+
 
 class TestEndToEndHybridFrontendModels(JitTestCase):
 
@@ -4753,10 +4868,6 @@ EXCLUDE_TRACED = {
 
 # known to be failing in script
 EXCLUDE_SCRIPT = {
-    'test_clamp_max',
-    'test_clamp_max_scalar',
-    'test_clamp_min',
-    'test_clamp_min_scalar',
     # TODO: Fix var/std
     # there are two schemas for var (and std):
     # (1) var(Tensor, int, *, bool, bool, Tensor)
