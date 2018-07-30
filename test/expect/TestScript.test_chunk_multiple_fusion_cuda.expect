@@ -1,0 +1,23 @@
+graph(%s : Float(5, 2, 3)
+      %x : Float(5, 6, 3)
+      %y : Float(10, 2, 3)
+      %z : Float(5, 2, 6)) {
+  %4 : Float(5, 2, 3) = prim::FusionGroup_0[device=0](%s, %y, %x, %z)
+  return (%4);
+}
+with prim::FusionGroup_0 = graph(%18 : Float(5, 2, 3)
+      %21 : Float(10, 2, 3)
+      %24 : Float(5, 6, 3)
+      %28 : Float(5, 2, 6)) {
+  %z1 : Float(5, 2!, 3), %z2 : Float(5, 2!, 3) = aten::chunk[chunks=2, dim=2](%28)
+  %x1 : Float(5!, 2, 3), %x2 : Float(5!, 2, 3), %x3 : Float(5!, 2, 3) = aten::chunk[chunks=3, dim=1](%24)
+  %y1 : Float(5, 2, 3), %y2 : Float(5, 2, 3) = aten::chunk[chunks=2, dim=0](%21)
+  %20 : Float(5, 2, 3) = aten::add[alpha={1}](%18, %x1)
+  %17 : Float(5, 2, 3) = aten::add[alpha={1}](%20, %x2)
+  %14 : Float(5, 2, 3) = aten::add[alpha={1}](%17, %x3)
+  %11 : Float(5, 2, 3) = aten::add[alpha={1}](%14, %y1)
+  %8 : Float(5, 2, 3) = aten::add[alpha={1}](%11, %y2)
+  %5 : Float(5, 2, 3) = aten::add[alpha={1}](%8, %z1)
+  %2 : Float(5, 2, 3) = aten::add[alpha={1}](%5, %z2)
+  return (%2);
+}

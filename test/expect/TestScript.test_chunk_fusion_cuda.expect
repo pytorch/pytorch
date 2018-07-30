@@ -1,0 +1,10 @@
+graph(%x : Float(10, 6)) {
+  %1 : Float(10, 2) = prim::FusionGroup_0[device=0](%x)
+  return (%1);
+}
+with prim::FusionGroup_0 = graph(%6 : Float(10, 6)) {
+  %a : Float(10!, 2), %b : Float(10!, 2), %c : Float(10!, 2) = aten::chunk[chunks=3, dim=1](%6)
+  %5 : Float(10, 2) = aten::mul(%a, %b)
+  %2 : Float(10, 2) = aten::add[alpha={1}](%5, %c)
+  return (%2);
+}
