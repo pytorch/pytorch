@@ -1671,7 +1671,7 @@ def _pointwise_loss(lambd, lambd_optimized, input, target, reduction='elementwis
             return d
         return torch.mean(d) if reduction == 'elementwise_mean' else torch.sum(d)
     else:
-        return lambd_optimized(input, target, reduction)
+        return lambd_optimized(input, target, _Reduction.get_enum(reduction))
 
 
 def smooth_l1_loss(input, target, size_average=None, reduce=None, reduction='elementwise_mean'):
@@ -1695,9 +1695,7 @@ def l1_loss(input, target, size_average=None, reduce=None, reduction='elementwis
     See :class:`~torch.nn.L1Loss` for details.
     """
     if size_average is not None or reduce is not None:
-        reduction = _Reduction.legacy_get_enum(size_average, reduce)
-    else:
-        reduction = _Reduction.get_enum(reduction)
+        reduction = _Reduction.legacy_get_string(size_average, reduce)
     return _pointwise_loss(lambda a, b: torch.abs(a - b), torch._C._nn.l1_loss,
                            input, target, reduction)
 
@@ -1710,9 +1708,7 @@ def mse_loss(input, target, size_average=None, reduce=None, reduction='elementwi
     See :class:`~torch.nn.MSELoss` for details.
     """
     if size_average is not None or reduce is not None:
-        reduction = _Reduction.legacy_get_enum(size_average, reduce)
-    else:
-        reduction = _Reduction.get_enum(reduction)
+        reduction = _Reduction.legacy_get_string(size_average, reduce)
     return _pointwise_loss(lambda a, b: (a - b) ** 2, torch._C._nn.mse_loss, input, target, reduction)
 
 
