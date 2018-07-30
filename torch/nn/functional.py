@@ -1,4 +1,4 @@
-"""Functional interface"""
+r"""Functional interface"""
 
 import warnings
 import math
@@ -2103,9 +2103,16 @@ def upsample_bilinear(input, size=None, scale_factor=None):
     return interpolate(input, size, scale_factor, mode='bilinear', align_corners=True)
 
 
-GRID_SAMPLE_MODE_ZEROS = 0
-GRID_SAMPLE_MODE_BORDER = 1
+GRID_SAMPLE_INTERPOLATION_MODES = {
+  'bilinear': 0,
+  # 'nearest': 1,
+}
 
+GRID_SAMPLE_PADDING_MODES = {
+  'zeros': 0,
+  'border': 1,
+  'reflection': 2,
+}
 
 def grid_sample(input, grid, mode='bilinear', padding_mode='zeros'):
     r"""Given an :attr:`input` and a flow-field :attr:`grid`, computes the
@@ -2146,15 +2153,11 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros'):
         output (Tensor): output Tensor
 
     """
-    if mode != 'bilinear':
-        raise NotImplementedError("nn.functional.grid_sample got unsupported mode: '{}'".format(mode))
-    if padding_mode == 'zeros':
-        padding_mode = GRID_SAMPLE_MODE_ZEROS
-    elif padding_mode == 'border':
-        padding_mode = GRID_SAMPLE_MODE_BORDER
-    else:
-        raise ValueError("padding_mode needs to be 'zeros' or 'border', but got {}".format(padding_mode))
-    return torch.grid_sampler(input, grid, padding_mode)
+    if mode not in GRID_SAMPLE_INTERPOLATION_MODES:
+        raise ValueError("nn.functional.grid_sample got unsupported interpolation mode: '{}'".format(mode))
+    if padding_mode not in GRID_SAMPLE_PADDING_MODES:
+        raise ValueError("padding_mode needs to be 'zeros', 'border', or 'reflection', but got '{}'".format(padding_mode))
+    return torch.grid_sampler(input, grid, GRID_SAMPLE_INTERPOLATION_MODES[mode], GRID_SAMPLE_PADDING_MODES[padding_mode])
 
 
 def affine_grid(theta, size):

@@ -762,7 +762,7 @@
 #
 # ssnl: Currently `interpolation_mode` is just a placeholder. It is not really
 #       used. Everywhere Bilinear is assumed. I will add Nearest soon.
-- func: grid_sampler(Tensor input, Tensor grid, int64_t padding_mode) -> Tensor
+- func: grid_sampler(Tensor input, Tensor grid, int64_t interpolation_mode, int64_t padding_mode) -> Tensor
   variants: function
 
 - func: grid_sampler_2d(Tensor input, Tensor grid, int64_t interpolation_mode, int64_t padding_mode) -> Tensor
