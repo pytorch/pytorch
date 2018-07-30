@@ -602,7 +602,7 @@ class Module(object):
                 module.state_dict(destination, prefix + name + '.', keep_vars=keep_vars)
         return destination
 
-    def _load_from_state_dict(self, state_dict, prefix, metadata, strict, missing_keys, unexpected_keys, error_msgs):
+    def _load_from_state_dict(self, state_dict, prefix, metadata, error_msgs):
         r"""Copies parameters and buffers from :attr:`state_dict` into only
         this module, but not its descendants. This is called on every submodule
         in :meth:`~torch.nn.Module.load_state_dict`. Metadata saved for this
@@ -623,13 +623,6 @@ class Module(object):
                 module
             metadata (dict): a dict containing the metadata for this moodule.
                 See
-            strict (bool): whether to strictly enforce that the keys in
-                :attr:`state_dict` with :attr:`prefix` match the names of
-                parameters and buffers in this module
-            missing_keys (list of str): if ``strict=False``, add missing keys to
-                this list
-            unexpected_keys (list of str): if ``strict=False``, add unexpected
-                keys to this list
             error_msgs (list of str): error messages should be added to this
                 list, and will be reported together in
                 :meth:`~torch.nn.Module.load_state_dict`
@@ -663,16 +656,29 @@ class Module(object):
                                       'whose dimensions in the model are {} and '
                                       'whose dimensions in the checkpoint are {}.'
                                       .format(key, param.size(), input_param.size()))
-            elif strict:
-                missing_keys.append(key)
 
-        if strict:
-            for key, input_param in state_dict.items():
-                if key.startswith(prefix):
-                    input_name = key[len(prefix):]
-                    input_name = input_name.split('.', 1)[0]  # get the name of param/buffer/child
-                    if input_name not in self._modules and input_name not in local_state:
-                        unexpected_keys.append(key)
+    def diff_state_dict(self, state_dict, keys=[]):
+        r"""Compares current keys with given state dictionary
+        and returns matched, unmatched and unexpected keys
+
+        Arguments:
+            state_dict (dict): a dict containing parameters and
+                persistent buffers.
+        """
+        local_keys = set(self.state_dict())
+        state_keys = set(state_dict)
+        keys_dict = {}
+
+        # matched keys are keys present in current and given state
+        if not keys or 'matched' in keys:
+            keys_dict['matched'] = state_keys & local_keys
+        # unmatched keys are present in current but not in given state
+        if not keys or 'unmatched' in keys:
+            keys_dict['unmatched'] = local_keys - state_keys
+        # unexpected keys are present in state but not in current
+        if not keys or 'unexpected' in keys:
+            keys_dict['unexpected'] = state_keys - local_keys
+        return keys_dict
 
     def load_state_dict(self, state_dict, strict=True):
         r"""Copies parameters and buffers from :attr:`state_dict` into
@@ -687,8 +693,6 @@ class Module(object):
                 in :attr:`state_dict` match the keys returned by this module's
                 :meth:`~torch.nn.Module.state_dict` function. Default: ``True``
         """
-        missing_keys = []
-        unexpected_keys = []
         error_msgs = []
 
         # copy state_dict so _load_from_state_dict can modify it
@@ -700,7 +704,7 @@ class Module(object):
         def load(module, prefix=''):
             local_metadata = {} if metadata is None else metadata.get(prefix[:-1], {})
             module._load_from_state_dict(
-                state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs)
+                state_dict, prefix, local_metadata, error_msgs)
             for name, child in module._modules.items():
                 if child is not None:
                     load(child, prefix + name + '.')
@@ -708,6 +712,9 @@ class Module(object):
         load(self)
 
         if strict:
+            keys = self.diff_state_dict(state_dict)
+            unexpected_keys = keys['unexpected']
+            missing_keys = keys['unmatched']
             error_msg = ''
             if len(unexpected_keys) > 0:
                 error_msgs.insert(

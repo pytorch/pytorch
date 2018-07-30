@@ -3262,6 +3262,42 @@ class TestNN(NNTestCase):
         for k, v, in old_state_dict.items():
             self.assertTrue(v.equal(new_state_dict[k]))
 
+    def test_diff_state_dict(self):
+        l = nn.Linear(5, 5)
+        block = nn.Module()
+        block.conv1 = nn.Conv2d(3, 3, 3, bias=True)
+        block.conv2 = nn.Conv2d(3, 3, 3, bias=False)
+        net = nn.Module()
+        net.linear1 = l
+        net.linear2 = l
+        net.bn = nn.BatchNorm2d(2)
+        net.block = block
+        net.add_module('empty', None)
+        state_dict = net.state_dict()
+        state_dict = {
+            'linear1.weight': torch.ones(5, 5),
+            'block.conv1.bias': torch.arange(1, 4),
+            'bn.running_mean': torch.randn(2),
+            'nonexistent_key': torch.rand(3)
+        }
+
+        # Test 1: Validate difference is correct
+        keys = net.diff_state_dict(state_dict)
+        matched_keys = keys['matched']
+        unexpected_keys = keys['unexpected']
+        unmatched_keys = keys['unmatched']
+        self.assertEqual(matched_keys, {'linear1.weight',
+                                        'block.conv1.bias', 'bn.running_mean'})
+        self.assertEqual(unexpected_keys, {'nonexistent_key'})
+        self.assertEqual(unmatched_keys, {'linear1.bias', 'bn.weight',
+                                          'linear2.bias', 'bn.num_batches_tracked',
+                                          'bn.running_var', 'linear2.weight', 'block.conv1.weight',
+                                          'bn.bias', 'block.conv2.weight'})
+
+        # Test 2: Validate required keys are returned
+        keys = net.diff_state_dict(state_dict, ['matched'])
+        self.assertEqual(list(keys.keys()), ['matched'])
+
     def test_load_state_dict_BC(self):
         # BatchNormNd
         # Added num_batches_tracked buffer at version 2. For state dict with

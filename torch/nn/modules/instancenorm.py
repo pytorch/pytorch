@@ -11,8 +11,7 @@ class _InstanceNorm(_BatchNorm):
     def _check_input_dim(self, input):
         raise NotImplementedError
 
-    def _load_from_state_dict(self, state_dict, prefix, metadata, strict,
-                              missing_keys, unexpected_keys, error_msgs):
+    def _load_from_state_dict(self, state_dict, prefix, metadata, error_msgs):
         version = metadata.get('version', None)
         # at version 1: removed running_mean and running_var when
         # track_running_stats=False (default)
@@ -38,8 +37,7 @@ class _InstanceNorm(_BatchNorm):
                     state_dict.pop(key)
 
         super(_InstanceNorm, self)._load_from_state_dict(
-            state_dict, prefix, metadata, strict,
-            missing_keys, unexpected_keys, error_msgs)
+            state_dict, prefix, metadata, error_msgs)
 
     def forward(self, input):
         self._check_input_dim(input)
