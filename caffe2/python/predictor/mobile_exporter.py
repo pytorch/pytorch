@@ -20,13 +20,14 @@ def add_tensor(net, name, blob):
         np.dtype('int32'): "GivenTensorIntFill",
         np.dtype('int64'): "GivenTensorInt64Fill",
         np.dtype('uint8'): "GivenTensorStringFill",
+        np.dtype('O'): "GivenTensorStringFill",
     }
 
     shape = blob.shape
     values = blob
     # pass array of uint8 as a string to save storage
     # storing uint8_t has a large overhead for now
-    if blob.dtype == np.dtype('uint8'):
+    if blob.dtype == np.dtype('uint8') or blob.dtype == np.dtype('O'):
         shape = [1]
         values = [str(blob.data)]
 
