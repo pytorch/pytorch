@@ -776,6 +776,9 @@ void argumentSpecTest() {
   REQUIRE(!(c == a));
   REQUIRE(spec.count(c) == 0);
 
+  Stack stack = { var(CF, {1,2}, true), 3, var(CF, {1,2}, true) };
+  ArgumentSpec with_const(true, stack);
+  REQUIRE(with_const.at(2).sizes().size() == 2);
 }
 
 void shapeAnalysisTest() {
