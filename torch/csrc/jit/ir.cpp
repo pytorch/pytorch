@@ -355,7 +355,7 @@ void Graph::lint() const {
   // - every use will occur later in the topsort
 
   struct LintScope {
-    LintScope() {}
+    LintScope() = default;
     LintScope(std::unique_ptr<LintScope> parent)
     : parent(std::move(parent)) {}
     bool contains(const Value * v) {
@@ -487,13 +487,13 @@ void LintGraph(std::shared_ptr<Graph>& graph) {
   graph->lint();
 }
 
-void Block::cloneFrom(Block * src, std::function<Value*(Value*)> outer_map) {
+void Block::cloneFrom(Block * src, std::function<Value*(Value*)> value_map) {
   std::unordered_map<Value*, Value*> local_map;
   auto env = [&](Value * v) {
     auto it = local_map.find(v);
     if(it != local_map.end())
       return it->second;
-    return outer_map(v);
+    return value_map(v);
   };
 
   auto graph = owningGraph();
