@@ -3,7 +3,7 @@
 
 namespace at { namespace native { namespace detail {
 
-  enum GridSamplerInterpolationMode {GridSamplerInterpolationBilinear, GridSamplerInterpolationNearest};
-  enum GridSamplerPaddingMode {GridSamplerPaddingZeros, GridSamplerPaddingBorder, GridSamplerPaddingReflection};
+  enum class GridSamplerInterpolation {Bilinear, Nearest};
+  enum class GridSamplerPadding {Zeros, Border, Reflection};
 
 }}}  // namespace at::native::detail
