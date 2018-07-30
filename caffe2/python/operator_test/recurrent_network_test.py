@@ -9,9 +9,11 @@ from hypothesis import given
 import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
 import numpy as np
+import unittest
 
 
 class RecurrentNetworkTest(hu.HypothesisTestCase):
+    @unittest.skip("flaky test, see https://github.com/pytorch/pytorch/issues/9833")
     @given(T=st.integers(1, 4),
            n=st.integers(1, 5),
            d=st.integers(1, 5))
