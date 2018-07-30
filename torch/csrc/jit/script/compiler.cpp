@@ -459,7 +459,6 @@ at::optional<std::vector<Value*>> tryMatchSchema(
     for(size_t i = 0; i < schema.arguments.size(); ++i) {
       NamedValue v = *positional_inputs[i];
       const auto& arg = schema.arguments[i];
-
       // some functions that take lists of integers for fixed size arrays
       // also allow single ints to be passed in their place.
       // the single int is then repeated to the length of the list
