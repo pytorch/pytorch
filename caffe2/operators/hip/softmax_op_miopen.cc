@@ -44,6 +44,10 @@ class MIOpenSoftmaxOp final : public Operator<HIPContext> {
     const int D = X.size_from_dim(canonical_axis);
 
     Y->ResizeLike(X);
+    auto* Y_data = Y->template mutable_data<T>();
+    if (N == 0) {
+      return true;
+    }
     if (dims_ != X.dims()) {
       MIOPEN_ENFORCE(miopenSet4dTensorDescriptor(
           desc_, miopenTypeWrapper<T>::type, N, D, 1, 1));
@@ -56,7 +60,7 @@ class MIOpenSoftmaxOp final : public Operator<HIPContext> {
         X.template data<T>(),
         &beta_,
         desc_,
-        Y->template mutable_data<T>()));
+        Y_data));
     return true;
   }
 
@@ -99,6 +103,10 @@ class MIOpenSoftmaxGradientOp final : public Operator<HIPContext> {
 
     CHECK_EQ(Y.dims(), dY.dims());
     dX->ResizeLike(Y);
+    auto* dX_data = dX->template mutable_data<T>();
+    if (N == 0) {
+      return true;
+    }
     if (dims_ != Y.dims()) {
       MIOPEN_ENFORCE(miopenSet4dTensorDescriptor(
           desc_, miopenTypeWrapper<T>::type, N, D, 1, 1));
@@ -113,7 +121,7 @@ class MIOpenSoftmaxGradientOp final : public Operator<HIPContext> {
         dY.template data<T>(),
         &beta_,
         desc_,
-        dX->template mutable_data<T>()));
+        dX_data));
     return true;
   }
 

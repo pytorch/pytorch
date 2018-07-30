@@ -94,10 +94,23 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
             operator_export_type=operator_export_type)
 
 
-def _optimize_graph(graph, operator_export_type):
+def _list_constant_prop(g, block):
+    for node in block.nodes():
+        for subblock in node.blocks():
+            _list_constant_prop(g, subblock)
+        if node.kind() == "prim::ListConstruct":
+            input_nodes = [i.node() for i in node.inputs()]
+            if all(inode.kind() == "prim::Constant" and inode.kindOf("value") == "i" for inode in input_nodes):
+                input_values = [inode['value'] for inode in input_nodes]
+                const_node = g.create("prim::Constant")
+                const_node.insertBefore(node)
+                const_node.is_("value", input_values)
+                const_node.output().setType(torch._C.ListType.ofInts())
+                node.output().replaceAllUsesWith(const_node.output())
 
-    # onnx only supports tensors, so we turn all out number types into tensors
-    torch._C._jit_pass_erase_number_types(graph)
+
+def _optimize_graph(graph, operator_export_type):
+    _list_constant_prop(graph, graph)
 
     # run dce to eliminate dead parts of the graph that might have been
     # left behind by things like symbolic_override
@@ -106,6 +119,12 @@ def _optimize_graph(graph, operator_export_type):
 
     torch._C._jit_pass_peephole(graph)
     torch._C._jit_pass_lint(graph)
+
+    # onnx only supports tensors, so we turn all out number types into tensors
+    torch._C._jit_pass_erase_number_types(graph)
+    torch._C._jit_pass_peephole(graph)
+    torch._C._jit_pass_lint(graph)
+
     if operator_export_type != OperatorExportTypes.RAW:
         graph = torch._C._jit_pass_onnx(graph, operator_export_type)
         torch._C._jit_pass_lint(graph)
@@ -452,7 +471,14 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
 
         elif ns == "prim":
             if op_name == "Constant":
-                return g.op("Constant", value_t=n["value"])
+                if n.kindOf("value") == "t":
+                    return g.op("Constant", value_t=n["value"])
+                elif n.kindOf("value") == "is":
+                    value = torch.stack([torch.tensor(v) for v in n["value"]]) if n["value"] else []
+                    return g.op("Constant", value_t=value)
+                else:
+                    raise RuntimeError("Unsupported prim::Constant kind: `{}`. Send a bug report.".format(
+                        n.kindOf("value")))
             elif op_name == "ListConstruct":
                 unsqueezed = [g.op("Unsqueeze", input, axes_i=[0]) for input in inputs]
                 return g.op("Concat", *unsqueezed, axis_i=0)

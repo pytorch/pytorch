@@ -73,7 +73,7 @@ inline std::vector<int> getDevices(const std::vector<at::Tensor>& tensors) {
   std::vector<int> devices(tensors.size(), -1);
   if (tensors[0].type().is_cuda()) {
     for (size_t i = 0; i < tensors.size(); i++) {
-      devices[i] = tensors[i].storage()->getDevice();
+      devices[i] = tensors[i].storage()->pImpl()->getDevice();
     }
   }
   return devices;
@@ -83,7 +83,7 @@ template <typename T>
 std::vector<T*> getDataPointers(const std::vector<at::Tensor>& tensors) {
   std::vector<T*> ptrs(tensors.size());
   for (size_t i = 0; i < tensors.size(); i++) {
-    ptrs[i] = static_cast<T*>(tensors[i].storage()->data());
+    ptrs[i] = static_cast<T*>(tensors[i].storage()->pImpl()->data());
   }
   return ptrs;
 }

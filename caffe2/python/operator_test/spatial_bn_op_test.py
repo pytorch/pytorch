@@ -28,14 +28,11 @@ class TestSpatialBN(hu.HypothesisTestCase):
            order=st.sampled_from(["NCHW", "NHWC"]),
            epsilon=st.floats(min_value=1e-5, max_value=1e-2),
            inplace=st.sampled_from([True, False]),
-           **hu.gcs)
+           # Currently HIP SpatialBN only supports 2D
+           **hu.gcs_no_hip)
     def test_spatialbn_test_mode_3d(
             self, size, input_channels, batch_size, seed, order, epsilon,
             inplace, gc, dc):
-        # Currently HIP SpatialBN only supports 2D
-        if _run_in_hip(gc, dc):
-            return
-
         op = core.CreateOperator(
             "SpatialBN",
             ["X", "scale", "bias", "mean", "var"],
@@ -77,14 +74,11 @@ class TestSpatialBN(hu.HypothesisTestCase):
            order=st.sampled_from(["NCHW", "NHWC"]),
            epsilon=st.floats(min_value=1e-5, max_value=1e-2),
            inplace=st.sampled_from([True, False]),
-           **hu.gcs)
+           # Currently HIP SpatialBN only supports 2D
+           **hu.gcs_no_hip)
     def test_spatialbn_test_mode_1d(
             self, size, input_channels, batch_size, seed, order, epsilon,
             inplace, gc, dc):
-        # Currently HIP SpatialBN only supports 2D
-        if _run_in_hip(gc, dc):
-            return
-
         op = core.CreateOperator(
             "SpatialBN",
             ["X", "scale", "bias", "mean", "var"],
@@ -129,7 +123,7 @@ class TestSpatialBN(hu.HypothesisTestCase):
             self, size, input_channels, batch_size, seed, order, epsilon,
             inplace, engine, gc, dc):
         # Currently HIP SpatialBN only supports NCHW
-        if _run_in_hip(gc, dc) and (order != 'NCHW' or batch_size == 0):
+        if _run_in_hip(gc, dc) and (order != 'NCHW'):
             return
 
         op = core.CreateOperator(
@@ -178,7 +172,7 @@ class TestSpatialBN(hu.HypothesisTestCase):
             self, size, input_channels, batch_size, seed, order, epsilon,
             inplace, engine, gc, dc):
         # Currently HIP SpatialBN only supports NCHW
-        if _run_in_hip(gc, dc) and (order != 'NCHW' or batch_size == 0):
+        if _run_in_hip(gc, dc) and (order != 'NCHW'):
             return
 
         op = core.CreateOperator(
@@ -217,7 +211,7 @@ class TestSpatialBN(hu.HypothesisTestCase):
             self, size, input_channels, batch_size, seed, order, epsilon,
             engine, gc, dc):
         # Currently HIP SpatialBN only supports NCHW
-        if _run_in_hip(gc, dc) and (order != 'NCHW' or batch_size == 0):
+        if _run_in_hip(gc, dc) and (order != 'NCHW'):
             return
 
         op = core.CreateOperator(
@@ -249,14 +243,11 @@ class TestSpatialBN(hu.HypothesisTestCase):
            seed=st.integers(0, 65535),
            order=st.sampled_from(["NCHW", "NHWC"]),
            epsilon=st.floats(min_value=1e-5, max_value=1e-2),
-           **hu.gcs)
+           # Currently HIP SpatialBN only supports 2D
+           **hu.gcs_no_hip)
     def test_spatialbn_train_mode_gradient_check_1d(
             self, size, input_channels, batch_size, seed, order, epsilon,
             gc, dc):
-        # Currently HIP SpatialBN only supports 2D
-        if _run_in_hip(gc, dc):
-            return
-
         op = core.CreateOperator(
             "SpatialBN",
             ["X", "scale", "bias", "mean", "var"],

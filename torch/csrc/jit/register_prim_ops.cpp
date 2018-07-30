@@ -91,6 +91,14 @@ RegisterOperators reg({
           };
         }),
     Operator(
+        prim::None,
+        [](Node* node) {
+          return [](Stack& stack) {
+            stack.push_back(IValue());
+            return 0;
+          };
+        }),
+    Operator(
         prim::Print,
         [](Node* node) {
           size_t num_inputs = node->inputs().size();
@@ -202,7 +210,7 @@ RegisterOperators reg({
         prim::ListConstruct,
         [](Node* node) -> Operation {
           size_t num_inputs = node->inputs().size();
-          ListType* lt = node->output()->type()->expect<ListType>();
+          ListTypePtr lt = node->output()->type()->expect<ListType>();
           if(IntType::get() == lt->getElementType()) {
             return [=](Stack& stack) {
               auto inputs = peekSlice(stack, 0, num_inputs, num_inputs);

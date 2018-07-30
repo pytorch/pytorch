@@ -9,7 +9,7 @@ static void RemoveExpands(Block* block) {
     for (auto sub : it->blocks())
       RemoveExpands(sub);
     if (it->kind() == aten::expand && it->get<int64_t>(attr::implicit) != static_cast<int64_t>(0)) {
-      it->output()->replaceAllUsesWith(it->input());
+      it->output()->replaceAllUsesWith(it->namedInput(attr::self));
       it.destroyCurrent();
     }
   }

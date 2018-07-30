@@ -33,8 +33,8 @@ bool CosineEmbeddingCriterionOp<CUDAContext>::RunOnDevice() {
 
   const float* Sdata = S.data<float>();
   const int* Ydata = Y.data<int>();
-  float* output_data = output->mutable_data<float>();
- 
+  float* output_data = output->template mutable_data<float>();
+
   CECKernel<<<CAFFE_GET_BLOCKS(S.size()), CAFFE_CUDA_NUM_THREADS,
               0, context_.cuda_stream()>>>(
       S.size(), Sdata, Ydata, margin_, output_data);
@@ -53,7 +53,7 @@ bool CosineEmbeddingCriterionGradientOp<CUDAContext>::RunOnDevice() {
   const float* Sdata = S.data<float>();
   const int* Ydata = Y.data<int>();
   const float* dOutput_data = dOutput.data<float>();
-  float* dSdata = dS->mutable_data<float>();
+  float* dSdata = dS->template mutable_data<float>();
   CECGradientKernel<<<CAFFE_GET_BLOCKS(S.size()), CAFFE_CUDA_NUM_THREADS,
                       0, context_.cuda_stream()>>>(
       S.size(), Sdata, Ydata, dOutput_data, margin_, dSdata);

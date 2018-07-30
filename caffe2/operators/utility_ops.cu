@@ -46,7 +46,7 @@ class CopyOnDeviceLikeOp<CUDAContext, CUDAContext, CUDAContext>
 
   bool RunOnDevice() override {
     auto& input = Input(0);
-    auto* output = OperatorBase::Output<Tensor<CUDAContext>>(0);
+    auto* output = OperatorBase::Output<Tensor>(0, CUDA);
     CUDAContext context(GetGPUIDForPointer(Input(1).raw_data()));
     output->ResizeLike(input);
     context.template CopyItems<CUDAContext, CUDAContext>(
@@ -143,7 +143,7 @@ bool NanCheckOp<CUDAContext>::RunOnDevice() {
               << std::endl;
 
     for (int j = 0; j < InputSize(); j++) {
-      TensorCPU cpu_X;
+      Tensor cpu_X(CPU);
       cpu_X.ResizeLike(Input(j));
       // Hack to cause allocaiton happen here, so it won't happen
       // when we do CopyFrom. We need the mutex then because host->gpu
@@ -192,7 +192,7 @@ ElwiseMaxKernel(const float* X, const float* Y, float* maxout, const int N) {
 
 template <>
 bool MaxOp<float, CUDAContext>::Compute() {
-  float* output_data = Output(0)->mutable_data<float>();
+  float* output_data = Output(0)->template mutable_data<float>();
   const int N = Input(0).size();
 
   // Run pairwise-maxes
@@ -223,7 +223,7 @@ ElwiseMinKernel(const float* X, const float* Y, float* minout, const int N) {
 
 template <>
 bool MinOp<float, CUDAContext>::Compute() {
-  float* output_data = Output(0)->mutable_data<float>();
+  float* output_data = Output(0)->template mutable_data<float>();
   const int N = Input(0).size();
 
   // Run pairwise-mines
@@ -274,72 +274,10 @@ bool SelectGradientOpBase<float, CUDAContext>::RunOnDevice() {
         output.data<float>(),
         input.data<float>(),
         grad_output.data<float>(),
-        grad_input->mutable_data<float>());
+        grad_input->template mutable_data<float>());
   }
   return true;
 }
-
-template <typename T_INDEX>
-__global__ void GatherKernel(
-    const float* X,
-    float* Y,
-    const T_INDEX* indices,
-    const int N,
-    const int block_size) {
-  for (int i = blockIdx.x; i < N; i += gridDim.x) {
-    T_INDEX idx = indices[i];
-    const float* src_offset = X + idx * block_size;
-    float* dst_offset = Y + i * block_size;
-    for (int j = threadIdx.x; j < block_size; j += blockDim.x) {
-      dst_offset[j] = src_offset[j];
-    }
-  }
-}
-
-template <>
-bool GatherOp<CUDAContext>::RunOnDevice() {
-  return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
-      this, OperatorBase::Input<TensorCUDA>(INDICES));
-}
-
-template <>
-template <typename Index>
-bool GatherOp<CUDAContext>::DoRunWithType() {
-  auto& data = Input(DATA);
-  auto& indices = Input(INDICES);
-  auto* output = Output(0);
-
-  CAFFE_ENFORCE_GE(data.ndim(), 1, "DATA should be at least 1-D");
-  auto shape = indices.dims();
-  shape.insert(shape.end(), data.dims().begin() + 1, data.dims().end());
-  output->Resize(shape);
-
-  int block_size = data.size() / data.dim(0);
-  auto block_bytesize = data.size_from_dim(1) * data.meta().itemsize();
-  CAFFE_ENFORCE(
-      block_bytesize == data.nbytes() / data.dim(0),
-      "block_bytesize should be consistent with data dim");
-  int N = indices.size();
-
-  auto src_base = static_cast<const float*>(data.raw_data());
-  const Index* idxs = indices.template data<Index>();
-  auto out = static_cast<float*>(output->raw_mutable_data(data.meta()));
-
-  // return early when the input is empty, since CUDA kernel will fail for
-  // empty input.
-  if (N <= 0) {
-    return true;
-  }
-
-  GatherKernel<<<
-      std::min(N, CAFFE_MAXIMUM_NUM_BLOCKS),
-      CAFFE_CUDA_NUM_THREADS,
-      0,
-      context_.cuda_stream()>>>(src_base, out, idxs, N, block_size);
-  return true;
-}
-
-REGISTER_CUDA_OPERATOR(Gather, GatherOp<CUDAContext>);
 
 /**
  * @brief Update slices of Y in-place with a batch of weighted X's.
@@ -501,13 +439,14 @@ template <typename T>
 bool RangeOp<CUDAContext>::DoRunOnDevice(
     const T& start,
     const T& step,
-    Tensor<CUDAContext>* output) {
+    Tensor* output) {
   int N = output->size();
   RangeKernel<<<
       CAFFE_GET_BLOCKS(N),
       CAFFE_CUDA_NUM_THREADS,
       0,
-      context_.cuda_stream()>>>(N, output->mutable_data<T>(), start, step);
+      context_.cuda_stream()>>>(
+      N, output->template mutable_data<T>(), start, step);
   return true;
 }
 
