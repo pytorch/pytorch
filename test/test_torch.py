@@ -7525,12 +7525,7 @@ class TestTorch(TestCase):
         resource = FilelikeMock(data=b"data")
         delattr(resource, "tell")
         delattr(resource, "seek")
-
-        if not PY3:
-            self.assertRaisesRegex(AttributeError, expected_err_msg, lambda: torch.load(resource))
-        else:
-            import io
-            self.assertRaisesRegex(io.UnsupportedOperation, expected_err_msg, lambda: torch.load(resource))
+        self.assertRaisesRegex(AttributeError, expected_err_msg, lambda: torch.load(resource))
 
     def test_from_buffer(self):
         a = bytearray([1, 2, 3, 4])
