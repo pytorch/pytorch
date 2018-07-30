@@ -11,12 +11,14 @@
 
 struct THTensor
 {
+public:
     THTensor(THStorage* storage)
       : refcount_(1)
       , storage_(storage)
       , storage_offset_(0)
       , sizes_{0}
       , strides_{1}
+      , numel_(0)
       , is_zero_dim_(false)
       {}
 
@@ -26,6 +28,7 @@ struct THTensor
       }
     }
 
+private:
     std::atomic<int> refcount_;
 
     // Note: storage->size may be greater than the recorded size
@@ -36,6 +39,9 @@ struct THTensor
     std::vector<int64_t> sizes_;
     std::vector<int64_t> strides_;
 
+    int64_t numel_;
+
+public:
     // TODO: get rid of this, use the sizes_/strides_ .size() instead.
     // This requires making sure TH code can handle zero dims (empty sizes, strides).
     // Short-term plan is to dispatch dim/size/stride through a function that gives these
@@ -56,18 +62,16 @@ struct THTensor
       return sizes_.size();
     }
 
+    inline int64_t numel() const {
+      return numel_;
+    }
+
     ptrdiff_t storage_offset() const {
       return storage_offset_;
     }
 
-    // represents that numel() == 0.
     inline bool is_empty() const {
-      for (int64_t i = 0; i < dim(); ++i) {
-        if (sizes_[i] == 0) {
-          return true;
-        }
-      }
-      return false;
+      return numel_ == 0;
     }
 
     int64_t size(int64_t d) const {
@@ -80,11 +84,24 @@ struct THTensor
       return strides_[d];
     }
 
-    inline at::IntList sizes() {
+    // WARNING: This function does not check if the requested
+    // sizes/strides are in bounds for the storage is allocated;
+    // this is the responsibility of the caller
+    void as_strided_(at::IntList sizes, at::IntList strides) {
+      AT_ASSERT(sizes.size() == strides.size());
+      sizes_ = sizes.vec();
+      strides_ = strides.vec();
+      for (auto s : sizes_) {
+        numel_ *= s;
+        if (numel_ == 0) break;
+      }
+    }
+
+    inline at::IntList sizes() const {
       return sizes_;
     }
 
-    inline at::IntList strides() {
+    inline at::IntList strides() const {
       return strides_;
     }
 
@@ -97,14 +114,21 @@ struct THTensor
         delete this;
       }
     }
+
+    friend void THTensor_resizeDim(THTensor* tensor, int64_t ndim);
+    friend void THTensor_setSizeAtDim(THTensor* tensor, int dim, int64_t new_size);
+    friend void THTensor_setStrideAtDim(THTensor* tensor, int dim, int64_t new_stride);
+    friend void THTensor_setStorageOffset(THTensor* tensor, ptrdiff_t storage_offset);
+    friend THStorage* THTensor_getStoragePtr(const THTensor* tensor);
+    friend void THTensor_stealAndSetStoragePtr(THTensor* tensor, THStorage* storage);
 };
 
-inline int64_t* THTensor_getSizePtr(THTensor* tensor) {
-  return tensor->sizes_.data();
+inline const int64_t* THTensor_getSizePtr(THTensor* tensor) {
+  return tensor->sizes().data();
 }
 
-inline int64_t* THTensor_getStridePtr(THTensor* tensor) {
-  return tensor->strides_.data();
+inline const int64_t* THTensor_getStridePtr(THTensor* tensor) {
+  return tensor->strides().data();
 }
 
 // NB: Non-retaining
@@ -115,19 +139,42 @@ inline THStorage* THTensor_getStoragePtr(const THTensor* tensor) {
 #include "generic/THTensorFastGetSet.hpp"
 #include "THGenerateAllTypes.h"
 
+// NB: This is *truly* a resize; calling code (e.g., squeeze)
+// assumes that old values are preserved
+// TODO: Get rid of this function; it's a bit inefficient from
+// a calculating cached numels perspective.
 inline void THTensor_resizeDim(THTensor* tensor, int64_t ndim) {
-  // NB: This is *truly* a resize; calling code (e.g., squeeze)
-  // assumes that old values are preserved
-  tensor->sizes_.resize(ndim);
-  tensor->strides_.resize(ndim);
-}
-
-inline void THTensor_setSizesAndStrides(THTensor* tensor, std::vector<int64_t>&& new_size, std::vector<int64_t>&& new_stride) {
-  tensor->sizes_ = std::move(new_size);
-  tensor->strides_ = std::move(new_stride);
+  AT_ASSERT(ndim >= 0);
+  // Default the new sizes and strides to 1, because (a) it gives a size
+  // stride which is exactly equivalent to the old sizes/strides
+  // and (b) it doesn't change numel.
+  tensor->sizes_.resize(ndim, 1);
+  tensor->strides_.resize(ndim, 1);
+  tensor->numel_ = 1;
+  for (int64_t i = 0; i < ndim; i++) {
+    tensor->numel_ *= tensor->sizes_[i];
+    if (tensor->numel_ == 0) break;
+  }
 }
 
 inline void THTensor_setSizeAtDim(THTensor* tensor, int dim, int64_t new_size) {
+  if (tensor->sizes_[dim] == 0) {
+    // Gotta fully recompute
+    // TODO: This can lead to bad asymptotics O(dim^2) if you call setSizeAtDim
+    // on a loop for a tensor with many zero-size dimensions.
+    tensor->numel_ = 1;
+    for (int64_t i = 0; i < static_cast<int64_t>(tensor->sizes_.size()); i++) {
+      if (i == dim) {
+        tensor->numel_ *= new_size;
+      } else {
+        tensor->numel_ *= tensor->sizes_[i];
+      }
+      if (tensor->numel_ == 0) break;
+    }
+  } else {
+    tensor->numel_ /= tensor->sizes_[dim];
+    tensor->numel_ *= new_size;
+  }
   tensor->sizes_[dim] = new_size;
 }
 

@@ -73,7 +73,7 @@ TH_API THTensor *THTensor_(newView)(THTensor *tensor, THLongStorage *size);
 // This is especially likely to happen when the tensor is not contiguous. In general, if you still need the
 // values, unless you are doing some size and stride tricks, do not use resize*.
 TH_API void THTensor_(resize)(THTensor *tensor, THLongStorage *size, THLongStorage *stride);
-TH_API void THTensor_(resizeNd)(THTensor *tensor, int nDimension, int64_t *size, int64_t *stride);
+TH_API void THTensor_(resizeNd)(THTensor *tensor, int nDimension, const int64_t *size, const int64_t *stride);
 TH_API void THTensor_(resizeAs)(THTensor *tensor, THTensor *src);
 TH_API void THTensor_(resize1d)(THTensor *tensor, int64_t size0_);
 TH_API void THTensor_(resize2d)(THTensor *tensor, int64_t size0_, int64_t size1_);
@@ -84,7 +84,7 @@ TH_API void THTensor_(resize5d)(THTensor *tensor, int64_t size0_, int64_t size1_
 
 TH_API void THTensor_(set)(THTensor *self, THTensor *src);
 TH_API void THTensor_(setStorage)(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_, THLongStorage *size_, THLongStorage *stride_);
-TH_API void THTensor_(setStorageNd)(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_, int nDimension, int64_t *size, int64_t *stride);
+TH_API void THTensor_(setStorageNd)(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_, int nDimension, const int64_t *size, const int64_t *stride);
 TH_API void THTensor_(setStorage1d)(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_,
                                     int64_t size0_, int64_t stride0_);
 TH_API void THTensor_(setStorage2d)(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_,

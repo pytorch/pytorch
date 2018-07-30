@@ -468,7 +468,7 @@ void THCTensor_(unfold)(THCState *state, THCTensor *self, THCTensor *src, int di
     }
   }
 
-  THTensor_setSizesAndStrides(self, std::move(newSize), std::move(newStride));
+  self->as_strided_(newSize, newStride);
 }
 
 /* we have to handle the case where the result is a number */
@@ -591,12 +591,12 @@ void THCTensor_(freeCopyTo)(THCState *state, THCTensor *self, THCTensor *dst)
 
 /*******************************************************************************/
 
-void THCTensor_(setStorageNd)(THCState *state, THCTensor *self, THCStorage *storage, ptrdiff_t storageOffset, int nDimension, int64_t *size, int64_t *stride)
+void THCTensor_(setStorageNd)(THCState *state, THCTensor *self, THCStorage *storage, ptrdiff_t storageOffset, int nDimension, const int64_t *size, const int64_t *stride)
 {
   THCTensor_setStorageNd(state, self, storage, storageOffset, nDimension, size, stride);
 }
 
-void THCTensor_(resizeNd)(THCState *state, THCTensor *self, int nDimension, int64_t *size, int64_t *stride)
+void THCTensor_(resizeNd)(THCState *state, THCTensor *self, int nDimension, const int64_t *size, const int64_t *stride)
 {
   THCTensor_resizeNd(state, self, nDimension, size, stride);
 }

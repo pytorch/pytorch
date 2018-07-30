@@ -36,13 +36,8 @@ struct AT_API TensorImpl : public Retainable {
   virtual std::unique_ptr<Storage> storage() = 0;
   friend struct Type;
 
-  int64_t numel() {
-    int64_t n = 1;
-    for (auto s : sizes()) {
-      n *= s;
-    }
-    return n;
-  }
+  // TODO: Make this method inline again
+  int64_t numel() const;
 
   // this is called by the generated wrapper code when there are conditions
   // when this output tensor should be zero dimensional. e.g. when all inputs
