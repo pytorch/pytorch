@@ -95,6 +95,8 @@ if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
   "${ROOT_DIR}/scripts/build_android.sh" ${CMAKE_ARGS[*]} "$@"
   exit 0
 elif [[ "${BUILD_ENVIRONMENT}" == conda* ]]; then
+  # Conda is disabled
+  exit 0
   "${ROOT_DIR}/scripts/build_anaconda.sh" --skip-tests --install-locally "$@"
   report_compile_cache_stats
 

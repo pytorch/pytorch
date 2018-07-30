@@ -1,5 +1,7 @@
 #include "caffe2/core/context.h"
 
+#include "ATen/core/ATenCoreTest.h"
+
 #include <atomic>
 #if defined(_MSC_VER)
 #include <process.h>

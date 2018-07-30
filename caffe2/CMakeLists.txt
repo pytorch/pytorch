@@ -51,6 +51,14 @@ if(BUILD_ATEN)
     set(Caffe2_HIP_SRCS ${ATen_CUDA_SRCS})
     set(Caffe2_HIP_INCLUDES ${Caffe2_HIP_INCLUDES} ${Caffe2_GPU_INCLUDE})
   ENDIF(USE_ROCM)
+else()
+  # Only add "ATen Core", a minimal, easy-to-compile fragment of ATen.
+  # This codepath should only be exercised by the Android build.
+  add_subdirectory(../aten/src/ATen/core ATen_core)
+  list(APPEND Caffe2_CPU_SRCS ${ATen_CORE_SRCS})
+  list(APPEND Caffe2_CPU_INCLUDE ${ATen_CORE_INCLUDE})
+  # TODO: We should probably install the headers, but I don't know
+  # how to do that.
 endif()
 
 # ---[ Torch build
@@ -250,6 +258,7 @@ if(USE_CUDA)
   # linking; libculibos and cublas must be last.
   target_link_libraries(
       caffe2_gpu PUBLIC caffe2 ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
+  target_compile_options(caffe2 PRIVATE "-DCAFFE2_BUILD_GPU_LIB")
 
   # Set standard properties on the target
   aten_set_target_props(caffe2_gpu)

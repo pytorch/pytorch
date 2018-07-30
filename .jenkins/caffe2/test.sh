@@ -21,6 +21,8 @@ if [[ "$BUILD_ENVIRONMENT" == conda* ]]; then
   # docker image
   PYTHON="/opt/conda/bin/python"
   INSTALL_PREFIX="/opt/conda/"
+  # skip for now
+  exit 0
 fi
 
 # Add the site-packages in the caffe2 install prefix to the PYTHONPATH
