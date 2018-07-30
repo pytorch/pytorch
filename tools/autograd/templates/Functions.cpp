@@ -2,6 +2,7 @@
 #include <ATen/Utils.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
+#include <ATen/ExpandUtils.h>
 #include <THNN/Reduction.h>
 
 // define constants like M_PI and C keywords for MSVC
@@ -134,22 +135,6 @@ Tensor mvlgamma_backward(Tensor grad, const Tensor & self, int64_t p) {
   Tensor args = at::arange(-p + 1, 1, -1, self.options()).div_(2.);
   args = args.add(self.unsqueeze(-1));
   return grad * args.digamma_().sum(-1).add_(p * (p - 1) * std::log(M_PI) / 4.);
-}
-
-Tensor reduce_to(const Tensor & grad, IntList sizes) {
-  if (sizes.size() == 0) {
-    return grad.sum();
-  }
-  Tensor result = grad;
-  while (result.dim() > (int64_t)sizes.size()) {
-    result = result.sum(0, false);
-  }
-  for (int64_t i = 0; i < result.dim(); ++i) {
-    if (sizes[i] == 1 && result.sizes()[i] > 1) {
-      result = result.sum(i, true);
-    }
-  }
-  return result;
 }
 
 Tensor permute_backwards(const Tensor & grad, IntList fwd_dims) {
@@ -444,6 +429,17 @@ std::vector<Tensor> cat_tensors_backward(const Tensor & grad, const std::vector<
     grad_inputs[i] = grad.narrow(dim, accumulate - size, size);
   }
   return grad_inputs;
+}
+
+Tensor clamp_backward(const Tensor & grad, const Tensor &self, const Scalar & min, const Scalar & max) {
+  // clamp: gradients not defined on min and max, so we return the subgradient 1 for these cases.
+  if (std::isnan(min.toFloat())) {
+    return grad * (self <= max).type_as(grad);
+  } else if (std::isnan(max.toFloat())) {
+    return grad * (self >= min).type_as(grad);
+  } else {
+    return grad * ((self >= min) * (self <= max)).type_as(grad);
+  }
 }
 
 Tensor mm_mat1_backward(const Tensor & grad, const Tensor & mat2, IntList sizes, IntList strides, const Scalar & alpha) {

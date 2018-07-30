@@ -4,7 +4,7 @@
 #include <string>
 #include <unordered_map>
 
-#include "THCCachingAllocator.h"
+#include "caffe2/core/THCCachingAllocator_gpu.h"
 #include "cub/util_allocator.cuh"
 
 // Needed to be included first to check the CAFFE2_USE_CUDNN macros.

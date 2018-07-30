@@ -19,6 +19,7 @@ namespace caffe2 {
 enum class HipMemoryPoolType {
   NONE = 0,
   CUB = 1,
+  THC = 2,
 };
 
 /**
@@ -51,7 +52,7 @@ class ThreadLocalHIPObjects {
 
   hipStream_t GetStream(int gpu, int stream_id) {
     vector<hipStream_t>& gpu_streams = hip_streams_[gpu];
-    if (gpu_streams.size() <= stream_id) {
+    if (gpu_streams.size() <= (unsigned)stream_id) {
       gpu_streams.resize(stream_id + 1, nullptr);
     }
     if (!gpu_streams[stream_id]) {
@@ -65,7 +66,7 @@ class ThreadLocalHIPObjects {
   rocblas_handle GetHandle(int gpu, int stream_id) {
     DeviceGuard guard(gpu);
     vector<rocblas_handle>& gpu_handles = rocblas_handles_[gpu];
-    if (gpu_handles.size() <= stream_id) {
+    if (gpu_handles.size() <= (unsigned)stream_id) {
       gpu_handles.resize(stream_id + 1, nullptr);
     }
     if (!gpu_handles[stream_id]) {
@@ -84,7 +85,7 @@ class ThreadLocalHIPObjects {
   miopenHandle_t GetMiopenHandle(int gpu, int stream_id) {
     DeviceGuard guard(gpu);
     vector<miopenHandle_t>& gpu_handles = miopen_handles_[gpu];
-    if (gpu_handles.size() <= stream_id) {
+    if (gpu_handles.size() <= (unsigned)stream_id) {
       gpu_handles.resize(stream_id + 1, nullptr);
     }
     if (!gpu_handles[stream_id]) {

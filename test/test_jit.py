@@ -627,7 +627,7 @@ class TestJit(JitTestCase):
         y = torch.tensor([0.7], dtype=torch.float, device=device)
 
         def doit(x, y):
-            return torch.sigmoid(torch.tanh(x * (x + y) + 1))
+            return torch.sigmoid(torch.tanh(x * (x + y) + x))
 
         ge = self.checkTrace(doit, (x, y))
         self.assertExpectedGraph(ge.graph_for(x, y))
@@ -1629,6 +1629,7 @@ class TestScript(JitTestCase):
 
     def test_python_frontend(self):
         def fn(x, y, z):
+            q = None
             q = x + y - z.sigmoid()
             print(q)
             w = -z
@@ -1861,6 +1862,28 @@ class TestScript(JitTestCase):
         inputs = self._make_scalar_vars([0], torch.int64)
 
         self.assertEqual(test_script_for_in_range_if_ast(*inputs).shape[0], 20)
+
+    def test_script_None(self):
+        def func(x):
+            output = None
+            output = x
+            return output
+
+        self.checkScript(func, [torch.arange(0, 2)], optimize=True)
+
+    def test_script_clamp_none(self):
+        # TODO: could not enable default/optional argument for None in JIT
+        # result from Aten native python_default_init for clamp, it is used
+        # in Aten but not in JIT, need to fix type/default arg system in ATen
+        def test_script_clamp_max_none(x):
+            return torch.clamp(x, min=None, max=2)
+
+        def test_script_clamp_min_none(x):
+            return torch.clamp(x, min=2, max=None)
+
+        input = [torch.arange(0, 3)]
+        self.checkScript(test_script_clamp_max_none, input, optimize=True)
+        self.checkScript(test_script_clamp_min_none, input, optimize=True)
 
     def test_script_bool_constant(self):
         script = '''
@@ -4348,6 +4371,29 @@ def func(t):
 
         some_func(torch.rand(3, 4))
 
+    def test_file_format_serialization(self):
+        import tempfile
+        filename = tempfile.mktemp()
+        writer = torch._C.PyTorchFileWriter(filename)
+        import os
+        import random
+        buffers = [os.urandom(size) for size in [random.randint(1, 100) for i in range(20)]]
+        offsets = []
+        for buf in buffers:
+            offsets.append(writer.write_record(buf, len(buf)))
+        import pickle
+        serialized_offsets = pickle.dumps(offsets)
+        writer.write_record(serialized_offsets, len(serialized_offsets))
+        writer.write_end_of_file()
+
+        reader = torch._C.PyTorchFileReader(filename)
+        serialized_offsets_read = reader.get_last_record()
+        parsed_serialized_offsets = pickle.loads(serialized_offsets)
+
+        for i, offset in enumerate(parsed_serialized_offsets):
+            data = reader.get_record_with_key(offset)
+            assert(data == buffers[i])
+
 
 class TestEndToEndHybridFrontendModels(JitTestCase):
 
@@ -4822,10 +4868,6 @@ EXCLUDE_TRACED = {
 
 # known to be failing in script
 EXCLUDE_SCRIPT = {
-    'test_clamp_max',
-    'test_clamp_max_scalar',
-    'test_clamp_min',
-    'test_clamp_min_scalar',
     # TODO: Fix var/std
     # there are two schemas for var (and std):
     # (1) var(Tensor, int, *, bool, bool, Tensor)

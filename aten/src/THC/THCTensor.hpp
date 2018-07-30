@@ -6,6 +6,7 @@
 #include "THCTensor.h"
 #include "THTensor.hpp"
 #include "THCStorage.hpp"
+#include "THCGeneral.hpp"
 
 #include <atomic>
 #include <ATen/ATen.h>
