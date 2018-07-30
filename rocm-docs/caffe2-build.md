@@ -17,7 +17,7 @@ Once the machine is ready with ROCm stack, there are two ways to use caffe2
 
 * Build caffe2 from source inside a docker with all the dependencies.
 
-## Lauch docker container with caffe2 pre-installed
+## Launch docker container with caffe2 pre-installed
 ```
 docker run -it --network=host --device=/dev/kfd --device=/dev/dri --group-add video rocm/caffe2:rocm1.8.2
 ```
@@ -55,7 +55,7 @@ docker run -it --network=host --device=/dev/kfd --device=/dev/dri --group-add vi
 ``` 
 Navigate to pytorch directory `cd /pytorch` inside the container.
 
-### Build caffe2 Project from Src
+### Build caffe2 Project from source
 
 * Run the command  
 
