@@ -95,6 +95,13 @@ static inline uint32_t detectHostSIMDExtensions()
 }
 
  #endif
+ 
+#elif defined(__EMSCRIPTEN__)
+
+static inline uint32_t detectHostSIMDExtensions()
+{
+  return SIMDExtension_DEFAULT;
+}
 
 #else   // x86
 static inline void cpuid(uint32_t *eax, uint32_t *ebx, uint32_t *ecx, uint32_t *edx)

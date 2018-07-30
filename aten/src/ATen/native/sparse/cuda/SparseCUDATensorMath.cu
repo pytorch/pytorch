@@ -94,7 +94,7 @@ Tensor& s_addmm_out_sparse_dense_cuda(Tensor& r_, const Tensor& t, const SparseT
             r_.copy_(t);
           }
         } else {
-          at::mul_out(r_, t, beta);
+          at::mul_out(r_, t, beta.toTensor());
         }
 
         /* r_ */
@@ -340,21 +340,11 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, SparseTensorR
 #endif
 }
 
-Tensor add_dense_sparse_cuda(const Tensor& t, SparseTensorRef src, Scalar alpha) {
-  Tensor r = t.type().tensor();
-  add_out_dense_sparse_cuda(r, t, src, alpha);
-  return r;
-}
-
-Tensor& add_dense_sparse_cuda_(Tensor& t, SparseTensorRef src, Scalar alpha) {
-  return add_out_dense_sparse_cuda(t, t, src, alpha);
-}
-
 // --------------------------------------------------------------------
 // add(SparseTensor, SparseTensor, Scalar)  [broadcasts]
 // --------------------------------------------------------------------
 
-SparseTensor& s_add_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t, const SparseTensor& src, Scalar value) {
+SparseTensor& add_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t, const SparseTensor& src, Scalar value) {
 #ifndef __HIP_PLATFORM_HCC__
   AT_ASSERT(t.is_cuda()); // dispatch argument
   AT_CHECK(src.is_cuda(), "add: expected 'other' to be CUDA, but got CPU");
@@ -382,7 +372,7 @@ SparseTensor& s_add_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t, con
   Tensor s_values_ = src._values();
 
   AT_DISPATCH_ALL_TYPES_AND_HALF(
-      s_values_.type(), "s_add_out_sparse_cuda", [&] {
+      s_values_.type(), "add_out_sparse_cuda", [&] {
         if (value.to<scalar_t>() != static_cast<scalar_t>(1)) {
           s_values_ = s_values_.mul(value);
         }
@@ -407,54 +397,21 @@ SparseTensor& s_add_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t, con
 #endif
 }
 
-SparseTensor s_add_sparse_cuda(const SparseTensor& t, const SparseTensor& src, Scalar alpha) {
-  SparseTensor r = t.type().tensor();
-  s_add_out_sparse_cuda(r, t, src, alpha);
-  return r;
-}
-
-SparseTensor& s_add_sparse_cuda_(SparseTensor& t, const SparseTensor& src, Scalar alpha) {
-  return s_add_out_sparse_cuda(t, t, src, alpha);
-}
-
 // --------------------------------------------------------------------
-// sub(SparseTensor, SparseTensor, Scalar)  [broadcasts]
+// mul(SparseTensor, SparseTensor)  [broadcasts]
 // --------------------------------------------------------------------
 
-SparseTensor& s_sub_out_sparse_cuda(SparseTensor& r, const SparseTensor& t, const SparseTensor& src, Scalar value) {
-  AT_ASSERT(t.is_cuda()); // dispatch argument
-  AT_CHECK(src.is_cuda(), "sub: expected 'other' to be CUDA, but got CPU");
-  AT_CHECK(r.is_cuda(), "sub: expected 'out' to be CUDA, but got CPU");
-
-  AT_DISPATCH_ALL_TYPES(
-      t.type(), "sub_sparse", [&] {
-        scalar_t cast_value = value.to<scalar_t>();
-        s_add_out_sparse_cuda(r, t, src, -cast_value);
-      }
-  );
-  return r;
-}
-
-SparseTensor s_sub_sparse_cuda(const SparseTensor& t, const SparseTensor& src, Scalar alpha) {
-  SparseTensor r = t.type().tensor();
-  s_sub_out_sparse_cuda(r, t, src, alpha);
-  return r;
-}
-
-SparseTensor& s_sub_sparse_cuda_(SparseTensor& t, const SparseTensor& src, Scalar alpha) {
-  return s_sub_out_sparse_cuda(t, t, src, alpha);
-}
-
-// --------------------------------------------------------------------
-// mul(SparseTensor, SparseTensor, Scalar)  [broadcasts]
-// --------------------------------------------------------------------
-
-SparseTensor& s_mul_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t_, const SparseTensor& src_) {
+SparseTensor& mul_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t_, const SparseTensor& src_) {
 #ifndef __HIP_PLATFORM_HCC__
+  if (src_.dim() == 0) {
+    return mul_out_sparse_scalar(r_, t_, Scalar(src_));
+  } else if (t_.dim() == 0) {
+    return mul_out_sparse_scalar(r_, src_, Scalar(t_));
+  }
+
   AT_ASSERT(t_.is_cuda()); // dispatch argument
   AT_CHECK(src_.is_cuda(), "mul: expected 'other' to be CUDA, but got CPU");
   AT_CHECK(r_.is_cuda(), "mul: expected 'out' to be CUDA, but got CPU");
-
   AT_CHECK(_check_device({r_, t_, src_}));
   AT_CHECK(t_.sizes().equals(src_.sizes()), "mul: expected 'self' and 'other' to have same size, but ", t_.sizes(), " != ", src_.sizes());
 
@@ -488,7 +445,7 @@ SparseTensor& s_mul_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t_, co
 
   LongTensor resultNnz = at::empty({1}, CUDA(kLong));
   AT_DISPATCH_ALL_TYPES_AND_HALF(
-      t_values_.type(), "s_mul_out_sparse_cuda", [&] {
+      t_values_.type(), "mul_out_sparse_cuda", [&] {
         apply::valueSparseIntersectionKernel<TensorMulOp<scalar_t>, uint64_t, scalar_t>
           <<<grid, block, 0, stream>>>(
             TensorMulOp<scalar_t>(),
@@ -514,18 +471,8 @@ SparseTensor& s_mul_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t_, co
 
   return r_;
 #else
-  AT_ERROR("s_mul_out_sparse_cuda: HIP not supported");
+  AT_ERROR("mul_out_sparse_cuda: HIP not supported");
 #endif
-}
-
-SparseTensor s_mul_sparse_cuda(const SparseTensor& t, const SparseTensor& src) {
-  SparseTensor r = t.type().tensor();
-  s_mul_out_sparse_cuda(r, t, src);
-  return r;
-}
-
-SparseTensor& s_mul_sparse_cuda_(SparseTensor& t, const SparseTensor& src) {
-  return s_mul_out_sparse_cuda(t, t, src);
 }
 
 }} // namespace at::native

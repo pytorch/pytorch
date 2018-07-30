@@ -2,8 +2,8 @@
 
 #include <unordered_set>
 #include "caffe2/core/net.h"
-#include "caffe2/core/predictor_config.h"
 #include "caffe2/core/tensor.h"
+#include "caffe2/predictor/predictor_config.h"
 #include "caffe2/proto/metanet.pb.h"
 #include "caffe2/proto/predictor_consts.pb.h"
 

@@ -100,8 +100,8 @@ class FullyConnectedOpDecomp final : public Operator<Context> {
   }
 
  protected:
-  Tensor<Context> bias_multiplier_;
-  Tensor<Context> multi_buffer_;
+  Tensor bias_multiplier_{Context::GetDeviceType()};
+  Tensor multi_buffer_{Context::GetDeviceType()};
 };
 
 template <typename T, class Context, class Engine=DefaultEngine>
@@ -207,10 +207,10 @@ class FullyConnectedDecompGradientOp : public Operator<Context> {
   }
 
  protected:
-  Tensor<Context> bias_multiplier_;
-  Tensor<Context> du_buffer_;
-  Tensor<Context> dv_buffer_;
-  Tensor<Context> dx_buffer_;
+  Tensor bias_multiplier_{Context::GetDeviceType()};
+  Tensor du_buffer_{Context::GetDeviceType()};
+  Tensor dv_buffer_{Context::GetDeviceType()};
+  Tensor dx_buffer_{Context::GetDeviceType()};
 };
 
 }  // namespace caffe2

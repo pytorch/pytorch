@@ -67,7 +67,7 @@ bool ResizeNearestOp<float, CPUContext>::RunOnDevice() {
   Y->Resize(batch_size, num_channels, output_height, output_width);
 
   const float* Xdata = X.data<float>();
-  float* Ydata = Y->mutable_data<float>();
+  float* Ydata = Y->template mutable_data<float>();
 
   // Specialized implementation for fast 2x upsampling
   if (width_scale_ == 2.0 && height_scale_ == 2.0) {
@@ -108,13 +108,11 @@ bool ResizeNearestGradientOp<float, CPUContext>::RunOnDevice() {
   const int output_height = X.dim32(2);
   const int output_width = X.dim32(3);
   dX->Resize(batch_size, num_channels, output_height, output_width);
-  math::Set<float, CPUContext>(dX->size(),
-                               0.0f,
-                               dX->mutable_data<float>(),
-                               &context_);
+  math::Set<float, CPUContext>(
+      dX->size(), 0.0f, dX->template mutable_data<float>(), &context_);
 
   const float* dYdata = dY.data<float>();
-  float* dXdata = dX->mutable_data<float>();
+  float* dXdata = dX->template mutable_data<float>();
 
   for (int n = 0; n < batch_size; ++n) {
     for (int c = 0; c < num_channels; ++c) {
