@@ -10,9 +10,9 @@
 namespace caffe2 {
 
 enum ConvAlgorithm {
-CONV_ALGORITHM_AUTO = 0,
-CONV_ALGORITHM_WINOGRAD = 1,
-CONV_ALGORITHM_MAX = CONV_ALGORITHM_WINOGRAD + 1
+  CONV_ALGORITHM_AUTO = 0,
+  CONV_ALGORITHM_WINOGRAD = 1,
+  CONV_ALGORITHM_MAX = CONV_ALGORITHM_WINOGRAD + 1
 };
 
 enum FusionType {
@@ -23,12 +23,19 @@ enum FusionType {
   FUSION_MAX = FUSION_CONV_SUM_RELU + 1
 };
 
+// the arg name of ABS MAX for operator input/output
+#define IDEEP_ABSMAX_I(index) ("absmax_input_" + std::to_string(index))
+#define IDEEP_ABSMAX_O(index) ("absmax_output_" + std::to_string(index))
+
 #define USE_IDEEP_DEF_ALIASES()                                                \
+  using ikey = ideep::key_t;                                                   \
   using itensor = ideep::tensor;                                               \
   using iformat = ideep::format;                                               \
+  using iscale = ideep::scale_t;                                               \
   using ialgo = ideep::algorithm;                                              \
   using iprop = ideep::prop_kind;                                              \
   using ipadding = ideep::padding_kind;                                        \
+  using idtype = ideep::tensor::data_type;                                     \
   using iattr = ideep::descriptor_group::attr_t;                               \
   using ibn_flag = ideep::batch_normalization_flag;
 

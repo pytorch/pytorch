@@ -57,7 +57,9 @@ public:
     FetchedBlob result;
     CAFFE_ENFORCE(atensor.materialized(),
                   "Trying to fetch uninitialized tensor");
-    const int numpy_type = CaffeToNumpyType(type_transform(atensor));
+    // XXX: Only support float so far.
+    const int numpy_type = NPY_FLOAT;
+    // const int numpy_type = CaffeToNumpyType(type_transform(atensor));
     CAFFE_ENFORCE(
         numpy_type != -1,
         "Unsupported ideep memory data type? This usually should not happen "
@@ -83,7 +85,7 @@ public:
     }
 
     if (result.copied) {
-      atensor.reorder_to(outPtr);
+      atensor.to_public(outPtr);
     }
 
     return result;
@@ -141,7 +143,7 @@ public:
         if (tensor->get_dims() != adims || type != tensor->get_data_type()) {
           tensor->resize(adims, type);
         }
-        tensor->reorder_from(adims, type,
+        tensor->feed_from(adims, type,
                              static_cast<void *>(PyArray_DATA(array)));
     }
 #else

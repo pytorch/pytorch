@@ -8,13 +8,25 @@ public:
   USE_IDEEP_CONV_POOL_BASE_FUNCTIONS();
 
   IDEEPConvOp(const OperatorDef &operator_def, Workspace *ws)
-      : IDEEPConvPoolOpBase(operator_def, ws),
-        training_mode_(
-            OperatorBase::GetSingleArgument<int>("training_mode", 0)),
-        conv_algorithm_(
-            OperatorBase::GetSingleArgument<int>("conv_algorithm", CONV_ALGORITHM_AUTO)) {
+      : IDEEPConvPoolOpBase(operator_def, ws) {
     OPERATOR_NEEDS_FEATURE(pad_l() == pad_r() && pad_t() == pad_b(),
                            "Uneven padding not supported.");
+
+    need_quantize_ = OperatorBase::GetSingleArgument<int>("need_quantize", 0);
+    if (need_quantize_) {
+      FillScales(X_scales_, IDEEP_ABSMAX_I(INPUT), idtype::u8);
+      FillScales(Y_scales_, IDEEP_ABSMAX_O(OUTPUT), idtype::s8);
+    }
+
+    training_mode_ = OperatorBase::GetSingleArgument<int>("training_mode", 0);
+    pk_ = training_mode_ ? iprop::forward_training : iprop::forward_inference;
+
+    algo_ = ialgo::convolution_direct;
+    auto conv_algorithm = OperatorBase::GetSingleArgument<int>(
+        "conv_algorithm", CONV_ALGORITHM_AUTO);
+    if (conv_algorithm == CONV_ALGORITHM_WINOGRAD) {
+      algo_ = ialgo::convolution_winograd;
+    }
   }
   virtual ~IDEEPConvOp() {}
 
@@ -23,9 +35,9 @@ public:
     const auto &filter = Input(FILTER);
     auto *Y = Output(OUTPUT);
     auto grouped = filter.is_grouped() ? 1 : 0;
-    auto Y_dims =
-        CalcOutputDims(X, grouped ? (filter.get_dim(0) * filter.get_dim(1))
-                                  : filter.get_dim(0));
+    auto Y_dims = CalcOutputDims(
+        X, grouped ? (filter.get_dim(0) * filter.get_dim(1))
+        : filter.get_dim(0));
 
     CAFFE_ENFORCE(4 == X.ndims());
     CAFFE_ENFORCE(4 == filter.ndims() || (grouped && (group_ > 1)));
@@ -37,24 +49,53 @@ public:
         X.get_dim(1), " is not equal to kernel channels * group:",
         filter.get_dim(1 + grouped), "*", group_);
 
-    ideep::algorithm aalgorithm = ideep::algorithm::convolution_direct;
-    if (conv_algorithm_ == CONV_ALGORITHM_WINOGRAD) {
-      aalgorithm = ideep::algorithm::convolution_winograd;
-    }
-
     bool weights_changed =
         (cached_weights_descriptor_ != filter.get_descriptor());
     if (weights_changed && !training_mode_) {
-      cached_weights_descriptor_ = filter.get_descriptor();
+      op_key_.clear();
+      cached_weights_descriptor_ = filter.dup_descriptor();
+      if (need_quantize_)
+        filter_scales_ = filter.calculate_scale(idtype::s8, 0 + grouped);
       auto filter_in = filter;
       filter_in.make_group(group_);
+      auto filter_dtype = filter_scales_.empty()
+        ? filter_in.get_data_type() : idtype::s8;
+      auto filter_mask = (filter_scales_.size() > 1)
+        ? ((filter_in.is_grouped()) ? 3 : 1) : 0;
+      auto filter_attr = (filter_in.get_data_type() != filter_dtype)
+        ? iattr(filter_mask, filter_scales_) : iattr();
+
       auto expected_descriptor =
           ideep::convolution_forward::expected_weights_descriptor(
-              filter_in.get_dims(), filter_in.get_data_type(), stride_,
-              pad_tl(), pad_br(), dilation_, group_, aalgorithm);
-      filter_.init<ideep::utils::allocator, ideep::convolution_forward>(
-          expected_descriptor);
-      ideep::reorder::compute(filter_in, filter_);
+              filter_in.get_dims(), filter_dtype, stride_,
+              pad_tl(), pad_br(), dilation_, group_, algo_);
+      if (filter_in.get_descriptor() != expected_descriptor) {
+        filter_.init<ideep::utils::allocator, ideep::convolution_forward>(
+            expected_descriptor);
+        ideep::reorder::compute(filter_in, filter_, filter_attr);
+      } else {
+        filter_ = filter_in;
+      }
+
+      if (InputSize() > BIAS) {
+        bias_ = Input(BIAS);
+        if (!filter_scales_.empty()) {
+          auto bias_mask = (filter_scales_.size() > 1) ? 1 : 0;
+          auto bias_scales (filter_scales_);
+          auto &X_scales = X.has_scale() ? X.get_scale() : X_scales_;
+          for (int i=0; i<bias_scales.size(); i++) {
+            bias_scales[i] *= X_scales[0];
+          }
+          bias_.init<ideep::utils::allocator, ideep::convolution_forward>(
+              {bias_.get_dims(), idtype::s32, iformat::x});
+          ideep::reorder::compute(Input(BIAS), bias_, {bias_mask, bias_scales});
+        }
+      }
+    }
+
+    if (cached_X_descriptor_ != X.get_descriptor()) {
+      op_key_.clear();
+      cached_X_descriptor_ = X.dup_descriptor();
     }
 
     // NB: actually, in the case when `group_ > 1`, IDEEP will create
@@ -65,27 +106,33 @@ public:
     // trick as above
     if (InputSize() > BIAS) {
       ideep::convolution_forward::compute(
-          X, training_mode_ ? filter : filter_, Input(BIAS), Y_dims, *Y,
+          op_key_, X, training_mode_ ? filter : filter_,
+          training_mode_ ? Input(BIAS) : bias_, Y_dims, *Y,
           stride_, dilation_, pad_tl(), pad_br(), group_,
-          ideep::descriptor_group::attr_t(), aalgorithm);
+          X_scales_, filter_scales_, Y_scales_, iattr(), algo_, pk_);
     } else {
-      ideep::convolution_forward::compute(X, training_mode_ ? filter : filter_,
-                                          Y_dims, *Y, stride_, dilation_,
-                                          pad_tl(), pad_br(), group_,
-                                          ideep::descriptor_group::attr_t(), aalgorithm);
+      ideep::convolution_forward::compute(
+          op_key_, X, training_mode_ ? filter : filter_,
+          Y_dims, *Y, stride_, dilation_, pad_tl(), pad_br(), group_,
+          X_scales_, filter_scales_, Y_scales_, iattr(), algo_, pk_);
     }
 
     return true;
   }
 
 private:
+  iprop pk_;
+  ialgo algo_;
+  ikey op_key_;
+  bool training_mode_;
+  bool need_quantize_;
+  itensor::dims X_dims_;
+  itensor filter_, bias_;
+  iscale X_scales_, filter_scales_, Y_scales_;
+  itensor::descriptor cached_X_descriptor_, cached_weights_descriptor_;
+
   INPUT_TAGS(INPUT, FILTER, BIAS);
   OUTPUT_TAGS(OUTPUT);
-
-  int conv_algorithm_;
-  bool training_mode_;
-  ideep::tensor filter_;
-  ideep::tensor::descriptor cached_weights_descriptor_;
 };
 
 class IDEEPConvGradientOp final : public IDEEPConvPoolOpBase {

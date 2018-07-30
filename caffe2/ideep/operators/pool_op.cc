@@ -20,6 +20,7 @@ class IDEEPPoolOp final : public IDEEPConvPoolOpBase {
               pad_l() < kernel_w() && pad_r() < kernel_w(),
           "Pad should be smaller than kernel.");
     }
+    pk_ = training_mode_ ? iprop::forward_training : iprop::forward_inference;
     // Figure out the pooling descriptor.
     if (operator_def.type().substr(0, 7) == "MaxPool") {
       algo_ = ialgo::pooling_max;
@@ -35,18 +36,24 @@ class IDEEPPoolOp final : public IDEEPConvPoolOpBase {
     auto& X = Input(INPUT);
     auto* Y = Output(OUTPUT);
     auto Y_dims = CalcOutputDims(X, X.get_dim(1));
-    mkldnn::prop_kind pk = training_mode_ ?
-      mkldnn::prop_kind::forward_training : mkldnn::prop_kind::forward_inference;
 
-    ideep::pooling_forward::compute(X, Y_dims, *Y,
-        stride_, kernel_, pad_tl(), pad_br(), algo_, pk);
+    if (!training_mode_ && (cached_X_descriptor_ != X.get_descriptor())) {
+      op_key_.clear();
+      cached_X_descriptor_ = X.dup_descriptor();
+    }
+
+    ideep::pooling_forward::compute(op_key_, X, Y_dims, *Y,
+        stride_, kernel_, pad_tl(), pad_br(), algo_, pk_);
 
     return true;
   }
 
  private:
   ialgo algo_;
+  iprop pk_;
+  ikey op_key_;
   bool training_mode_;
+  itensor::descriptor cached_X_descriptor_;
 
   INPUT_TAGS(INPUT);
   OUTPUT_TAGS(OUTPUT);

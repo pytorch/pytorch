@@ -35,8 +35,12 @@ class IDEEPSpatialBNOp final : public IDEEPOperator {
     if (is_test_) {
       const auto& est_mean = Input(EST_MEAN);
       const auto& est_var = Input(EST_VAR);
+      if (cached_X_descriptor_ != X.get_descriptor()) {
+        op_key_.clear();
+        cached_X_descriptor_ = X.dup_descriptor();
+      }
       ideep::batch_normalization_forward_inference::compute(
-          X, est_mean, est_var, scale, bias, *Y, epsilon_);
+          op_key_, X, est_mean, est_var, scale, bias, *Y, epsilon_);
     } else {
       auto* saved_mean = Output(SAVED_MEAN);
       auto* saved_var = Output(SAVED_VAR);
@@ -54,6 +58,9 @@ class IDEEPSpatialBNOp final : public IDEEPOperator {
   bool is_test_;
   double epsilon_;
   double momentum_;
+
+  ikey op_key_;
+  itensor::descriptor cached_X_descriptor_;
 
   INPUT_TAGS(INPUT, SCALE, BIAS, EST_MEAN, EST_VAR);
   OUTPUT_TAGS(OUTPUT, RUNNING_MEAN, RUNNING_VAR, SAVED_MEAN, SAVED_VAR);

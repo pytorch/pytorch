@@ -83,7 +83,8 @@ class C10_EXPORT IDEEPFallbackOp final : public IDEEPOperator {
   bool RunOnDevice() override {
     for (int i = 0; i < InputSize(); ++i) {
       if (InputIsType<itensor>(i) &&
-          Input(i).get_data_type() == itensor::data_type::f32) {
+          (Input(i).get_data_type() == itensor::data_type::f32
+           || Input(i).has_scale())) {
         auto& input = Input(i);
         if (input_share_[i]) {
           local_input_blobs_[i]->Reset();
@@ -91,11 +92,13 @@ class C10_EXPORT IDEEPFallbackOp final : public IDEEPOperator {
         input_share_[i] = false;
         auto dtensor = BlobGetMutableTensor(local_input_blobs_[i], CPU);
         dtensor->Resize(input.get_dims());
-        if (input.is_public_format()) {
+        if (!input.need_reorder()) {
+          CAFFE_ENFORCE(!input.has_scale(),
+              "Incorrect invocation of get_data_handle");
           dtensor->ShareExternalPointer(
               static_cast<float*>(input.get_data_handle()));
         } else {
-          input.reorder_to(dtensor->template mutable_data<float>());
+          input.to_public(dtensor->template mutable_data<float>());
         }
       } else {
         VLOG(1) << "Input " << i << " is not ideep::tensor. Skipping copy.";
@@ -144,9 +147,11 @@ class C10_EXPORT IDEEPFallbackOp final : public IDEEPOperator {
           dtensor->resize(dst_dims, itensor::data_type::f32);
         }
         if (output_inplace_[i]) {
-          dtensor->reorder_from(dst_dims, itensor::data_type::f32,
+          dtensor->feed_from(dst_dims, itensor::data_type::f32,
                                 const_cast<void*>(src.raw_data()));
         } else {
+          CAFFE_ENFORCE(!dtensor->has_scale(),
+              "Incorrect invocation of set_data_handle");
           dtensor->set_data_handle(const_cast<void *>(src.raw_data()));
         }
       } else {

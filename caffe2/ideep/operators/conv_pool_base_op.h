@@ -64,6 +64,18 @@ class IDEEPConvPoolOpBase : public ConvPoolOpBase<IDEEPContext> {
     return output_dims;
   }
 
+  inline void FillScales(
+      ideep::scale_t &scales,
+      string scalesName,
+      ideep::tensor::data_type data_type) {
+    scales = OperatorBase::GetRepeatedArgument<float>(scalesName);
+    if (data_type == ideep::tensor::data_type::f32 || scales.empty())
+      return;
+    for (auto it = scales.begin(); it != scales.end(); it++) {
+      *it = ideep::dt_max_map.at(data_type) / (*it);
+    }
+  }
+
   bool RunOnDevice() override {
     if (!global_pooling_) {
       for (int dim = 0; dim < kernel_.size(); ++dim) {

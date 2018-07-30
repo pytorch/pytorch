@@ -44,10 +44,16 @@ public:
       filter_in.reshape(filter_dims);
     }
 
+    if (cached_X_descriptor_ != X.get_descriptor()) {
+      op_key_.clear();
+      cached_X_descriptor_ = X.dup_descriptor();
+    }
+
     if (InputSize() > BIAS) {
-      ideep::inner_product_forward::compute(X_in, filter_in, Input(BIAS), *Y);
+      ideep::inner_product_forward::compute(
+          op_key_, X_in, filter_in, Input(BIAS), *Y);
     } else {
-      ideep::inner_product_forward::compute(X_in, filter_in, *Y);
+      ideep::inner_product_forward::compute(op_key_, X_in, filter_in, *Y);
     }
 
     return true;
@@ -57,6 +63,9 @@ private:
   size_t axis_{1};
   size_t axis_w_{1};
   bool float16_compute_;
+
+  ikey op_key_;
+  itensor::descriptor cached_X_descriptor_;
 
   INPUT_TAGS(INPUT, FILTER, BIAS);
   OUTPUT_TAGS(OUTPUT);

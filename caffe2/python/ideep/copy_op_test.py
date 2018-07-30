@@ -63,3 +63,6 @@ class CopyTest(unittest.TestCase):
         workspace.RunOperatorOnce(op)
         X_ideep = workspace.FetchBlob("X")
         np.testing.assert_allclose(X, X_ideep)
+
+if __name__ == "__main__":
+    unittest.main()

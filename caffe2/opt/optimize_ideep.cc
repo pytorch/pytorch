@@ -1,6 +1,5 @@
 #include "caffe2/opt/optimize_ideep.h"
 #include "caffe2/opt/converter.h"
-#include "caffe2/opt/fusion.h"
 
 #ifdef CAFFE2_USE_MKLDNN
 #include "caffe2/ideep/ideep_utils.h"
@@ -22,13 +21,30 @@ void OptimizeForIdeep(
 #else
 USE_IDEEP_DEF_ALIASES();
 
-Blob *getBlob(repr::NNGraph::NodeRef node, caffe2::Workspace *ws) {
-  auto tensor = repr::nn::get<repr::Tensor>(node);
-  CAFFE_ENFORCE(ws->HasBlob(tensor->getName()), "Blob not in workspace");
-  return ws->GetBlob(tensor->getName());
+Blob *renameBlob(const std::string &old_name,
+    const std::string &new_name, caffe2::Workspace *ws) {
+  CAFFE_ENFORCE(!old_name.empty() && !new_name.empty(),
+      "Invalide blob name");
+  if (!ws->HasBlob(old_name) || ws->HasBlob(new_name)) return nullptr;
+  return ws->RenameBlob(old_name, new_name);
 }
 
-template <class T> T *getTensor(Blob *blob) {
+Blob *getBlob(const std::string name, caffe2::Workspace *ws) {
+  CAFFE_ENFORCE(ws->HasBlob(name), "Blob ", name, " not in workspace");
+  return ws->GetBlob(name);
+}
+
+Blob *getBlob(repr::NNGraph::NodeRef node, caffe2::Workspace *ws) {
+  auto tensor = repr::nn::get<repr::Tensor>(node);
+  return getBlob(tensor->getName(), ws);
+}
+
+template <class T> T getTensor(Blob *blob) {
+  CAFFE_ENFORCE(blob, "Blob is invalid");
+  return blob->template Get<T>();
+}
+
+template <class T> T *getMutableTensor(Blob *blob) {
   CAFFE_ENFORCE(blob, "Blob is invalid");
   if (blob && blob->template IsType<T>()) {
     return blob->template GetMutable<T>();
@@ -62,13 +78,23 @@ bool shouldFuseConv(const repr::Conv& conv) {
   return isOnIdeepDevice(conv);
 }
 
-void resetConvForFusion(repr::NNGraph::NodeRef convNode, int fusion_type) {
+bool isConvFusion(repr::NNGraph::NodeRef convNode, int fusion_type) {
   auto conv = repr::nn::get<repr::Conv>(convNode);
-  auto annotation = conv->getMutableAnnotation();
-  if (!annotation || !isa<Caffe2Annotation>(annotation)) {
-    return;
+  auto &op = getOpDef(*conv);
+
+  if (op.type() == "ConvFusion") {
+    for (const auto &arg : op.arg()) {
+      if (arg.name() == "fusion_type") {
+        return arg.i() == fusion_type;
+      }
+    }
   }
 
+  return false;
+}
+
+void resetConvForFusion(repr::NNGraph::NodeRef convNode, int fusion_type) {
+  auto conv = repr::nn::get<repr::Conv>(convNode);
   auto *op = getMutableOpDef(*conv);
   if (op == nullptr) {
     return;
@@ -84,7 +110,7 @@ void resetConvForFusion(repr::NNGraph::NodeRef convNode, int fusion_type) {
         return;
       }
     }
-    return;
+    CAFFE_THROW("Can not find fusion type in ConvFusion");
   }
 
   CAFFE_ENFORCE(fusion_type < FUSION_CONV_SUM_RELU, "Invalid fusion type");
@@ -92,6 +118,48 @@ void resetConvForFusion(repr::NNGraph::NodeRef convNode, int fusion_type) {
   auto* arg = op->add_arg();
   arg->set_name("fusion_type");
   arg->set_i(fusion_type);
+}
+
+void reconnectStatInfo(
+    caffe2::Workspace *ws,
+    repr::NeuralNetOperator *srcOp,
+    std::string srcScaleName,
+    repr::NeuralNetOperator *dstOp,
+    std::string dstScaleName) {
+  if (srcOp == nullptr || dstOp == nullptr)
+    return;
+  if (srcOp == dstOp && srcScaleName == dstScaleName)
+    return;
+  if (dstScaleName.empty())
+    return;
+
+  auto *dst = getMutableOpDef(*dstOp);
+  auto &dst_args = *dst->mutable_arg();
+  auto remove_arg = [&](decltype(dst_args) &args, std::string &name) {
+    for (auto it = args.begin(); it != args.end(); it ++) {
+      if (it->name() == name) {
+        args.erase(it);
+        return true;
+      }
+    }
+    return false;
+  };
+  while(remove_arg(dst_args, dstScaleName));
+
+  if (srcScaleName.empty())
+    return;
+
+  auto &src = getOpDef(*srcOp);
+  auto &src_args = src.arg();
+  auto src_it = src_args.begin();
+  for (; src_it != src_args.end(); src_it ++) {
+    if (src_it->name() == srcScaleName) break;
+  }
+  if (src_it == src_args.end()) return;
+
+  auto *arg = dst->add_arg();
+  *arg = *src_it;
+  arg->set_name(dstScaleName);
 }
 
 bool fuseConvBNAndAffChHelperForIdeep(repr::NNModule* nn, caffe2::Workspace* ws) {
@@ -115,8 +183,8 @@ bool fuseConvBNAndAffChHelperForIdeep(repr::NNModule* nn, caffe2::Workspace* ws)
       continue;
     }
 
-    const auto &op = getOpDef(*conv);
-    if (op.type() == "ConvFusion") {
+    const auto &convOp = getOpDef(*conv);
+    if (convOp.type() == "ConvFusion") {
       continue;
     }
 
@@ -167,13 +235,13 @@ bool fuseConvBNAndAffChHelperForIdeep(repr::NNModule* nn, caffe2::Workspace* ws)
   itensor name##Tensor;                                                  \
   float* name##Data = nullptr;                                           \
   if (need_init) {                                                       \
-    name = getTensor<itensor>(getBlob(nodes[index], ws));                \
+    name = getMutableTensor<itensor>(getBlob(nodes[index], ws));         \
     if (name == nullptr) {                                               \
       LOG(WARNING) << #name " not a IDEEP tensor";                       \
       continue;                                                          \
     }                                                                    \
     name##Tensor.resize(name->get_dims(), name->get_data_type());        \
-    name##Tensor.reorder_from(*name);                                    \
+    name##Tensor.feed_from(*name);                                       \
     CAFFE_ENFORCE(                                                       \
       name##Tensor.is_public_format(), #name " not with public format"); \
     name##Data = static_cast<float*>(name##Tensor.get_data_handle());    \
@@ -212,9 +280,10 @@ bool fuseConvBNAndAffChHelperForIdeep(repr::NNModule* nn, caffe2::Workspace* ws)
       }
     }
 
-    filter->reorder_from(filterTensor);
-    biasConv->reorder_from(biasConvTensor);
+    filter->feed_from(filterTensor);
+    biasConv->feed_from(biasConvTensor);
     nn->dataFlow.replaceNode(convOutput, bnOrAffChOutput);
+    reconnectStatInfo(ws, bn, IDEEP_ABSMAX_O(0), conv, IDEEP_ABSMAX_O(0));
 
     nn->dataFlow.deleteNode(bnOrAffChNode);
     nn->dataFlow.deleteNode(convOutput);
@@ -300,7 +369,8 @@ void fuseConvSumForIdeep(repr::NNModule* nn, caffe2::Workspace* ws) {
     CAFFE_ENFORCE(sumInputX != nullptr, "Invalid sum inputs");
 
     auto preNode = repr::nn::getProducer(sumInputX);
-    if (preNode == nullptr || !repr::nn::is<repr::NeuralNetOperator>(preNode)) {
+    if (preNode == nullptr ||
+        !repr::nn::is<repr::NeuralNetOperator>(preNode)) {
       LOG(WARNING) << "Can not fuse Conv Sum";
       continue;
     }
@@ -315,6 +385,8 @@ void fuseConvSumForIdeep(repr::NNModule* nn, caffe2::Workspace* ws) {
 
     // 2 means FUSION_CONV_SUM
     resetConvForFusion(convNode, 2);
+    reconnectStatInfo(ws, sum, IDEEP_ABSMAX_O(0), conv, IDEEP_ABSMAX_O(0));
+
     nn->dataFlow.createEdge(sumInputX, convNode);
     nn->dataFlow.createEdge(convNode, newOutput);
 
@@ -324,14 +396,92 @@ void fuseConvSumForIdeep(repr::NNModule* nn, caffe2::Workspace* ws) {
   }
 }
 
-void fuseActivationForIdeep(repr::NNModule *nn) {
+void fuseActivationForIdeep(repr::NNModule *nn, caffe2::Workspace *ws) {
   // Conv+Relu fusion
-  auto should_fuse = shouldFuseConv;
-  auto postprocess = std::bind(resetConvForFusion, std::placeholders::_1, 1);
-  fuseActivation<repr::Conv, repr::Relu>(nn, should_fuse, postprocess);
+  for (auto node_pair : repr::nn::dataIterator<repr::Conv>(nn->dataFlow)) {
+    repr::NNGraph::NodeRef conv_node;
+    repr::Conv* conv;
+    std::tie(conv, conv_node) = node_pair;
+
+    // Check topological feasibility
+    auto conv_outputs = repr::nn::getOutputs(conv_node);
+    if (conv_outputs.size() != 1) {
+      continue;
+    }
+    auto conv_output = conv_outputs.front();
+
+    auto consumers = repr::nn::getConsumers(conv_output);
+    if (consumers.size() != 1) {
+      continue;
+    }
+    if (!repr::nn::is<repr::Relu>(consumers.front())) {
+      continue;
+    }
+    auto relu_node = consumers.front();
+    auto relu = repr::nn::get<repr::Relu>(relu_node);
+
+    auto relu_outputs = repr::nn::getOutputs(relu_node);
+    if (relu_outputs.size() != 1) {
+      continue;
+    }
+
+    // Check feasibility with application specific logic
+    if (!shouldFuseConv(*conv)) {
+      continue;
+    }
+
+    reconnectStatInfo(ws, relu, IDEEP_ABSMAX_O(0), conv, IDEEP_ABSMAX_O(0));
+
+    // Ready to fuse
+    auto relu_output = relu_outputs.front();
+    auto output_tensor = repr::nn::get<repr::Tensor>(relu_output);
+    auto output_node = relu_output;
+    auto input_tensor =
+        repr::nn::get<repr::Tensor>(repr::nn::getInputs(conv_node).front());
+
+    if (isConvFusion(conv_node, FUSION_CONV_SUM)) {
+        nn->dataFlow.replaceNode(relu_output, conv_output);
+        nn->dataFlow.deleteNode(relu_node);
+        nn->dataFlow.deleteNode(relu_output);
+    } else {
+      // Conv cannot be in-place
+      if (output_tensor->getName() != input_tensor->getName()) {
+        nn->dataFlow.replaceNode(conv_output, relu_output);
+        nn->dataFlow.deleteNode(relu_node);
+        nn->dataFlow.deleteNode(conv_output);
+      } else {
+        nn->dataFlow.replaceNode(relu_output, conv_output);
+        output_tensor = repr::nn::get<repr::Tensor>(conv_output);
+        output_node = conv_output;
+        nn->dataFlow.deleteNode(relu_node);
+        nn->dataFlow.deleteNode(relu_output);
+      }
+
+      // We may have accidentally made the next op in-place
+      // In future iterations of transformations this won't be an issue,
+      // but current caffe2 predictor usage requires things like
+      // external_input and output to be unchanged.
+      bool rectify_inplace = false;
+      for (auto& consumer : repr::nn::getConsumers(output_node)) {
+        for (auto& consumer_output : repr::nn::getOutputs(consumer)) {
+          auto co_name = repr::nn::get<repr::Tensor>(consumer_output)->getName();
+          if (co_name == output_tensor->getName()) {
+            rectify_inplace = true;
+          }
+        }
+      }
+      if (rectify_inplace) {
+        auto new_output = nn->dataFlow.createNode(
+            make_unique<repr::Tensor>(output_tensor->getName() + "_fusion_fix"));
+        nn->dataFlow.replaceNode(output_node, new_output);
+      }
+    }
+
+    resetConvForFusion(conv_node, 1);
+  }
 }
 
-void enforceFusionInplaceForIdeep(repr::NNModule *nn) {
+void enforceFusionInplaceForIdeep(repr::NNModule *nn, caffe2::Workspace *ws) {
   // For fusions of Conv+Sum or Conv+Sum+ReLU, the last input and output must
   // be inplaced. To enforce inplace, here to re-check whole graph and correct
   // the ConvFusion Ops.
@@ -350,18 +500,9 @@ void enforceFusionInplaceForIdeep(repr::NNModule *nn) {
       continue;
     }
 
-    bool enforce_inplace = false;
-    for (const auto &arg : op.arg()) {
-      // Only check FUSION_SUM & FUSION_SUM_RELU
-      if (arg.name() == "fusion_type"
-          && (arg.i() == FUSION_CONV_SUM
-            || arg.i() == FUSION_CONV_SUM_RELU)) {
-        enforce_inplace = true;
-        break;
-      }
-    }
-
-    if (!enforce_inplace) {
+    // Only check FUSION_SUM & FUSION_SUM_RELU
+    if(!isConvFusion(convNode, FUSION_CONV_SUM)
+        && !isConvFusion(convNode, FUSION_CONV_SUM_RELU)) {
       continue;
     }
 
@@ -383,23 +524,17 @@ void enforceFusionInplaceForIdeep(repr::NNModule *nn) {
     auto newOutput = nn->dataFlow.createNode(
         unique_dyn_cast<repr::NeuralNetData>(newOutputTensor));
     nn->dataFlow.replaceNode(convOutput, newOutput);
-
     nn->dataFlow.deleteNode(convOutput);
   }
 }
 
 void setPoolingInferenceMode(repr::NNModule *nn) {
-  for (auto node_pair : repr::nn::dataIterator<repr::MaxPool>(nn->dataFlow)) {
-    repr::NNGraph::NodeRef maxPoolNode;
-    repr::MaxPool *maxPool;
-    std::tie(maxPool, maxPoolNode) = node_pair;
-
-    if (!isOnIdeepDevice(*maxPool)) {
+  auto setTrainingMode = [](repr::NeuralNetOperator &pool) {
+    if (!isOnIdeepDevice(pool)) {
       LOG(WARNING) << "Not a IDEEP operator";
-      continue;
+      return;
     }
-
-    auto *op = getMutableOpDef(*maxPool);
+    auto *op = getMutableOpDef(pool);
     bool found_training_mode = false;
     for (auto &arg : *op->mutable_arg()) {
       if (arg.name() == "training_mode") {
@@ -408,12 +543,25 @@ void setPoolingInferenceMode(repr::NNModule *nn) {
         break;
       }
     }
-
     if (!found_training_mode) {
       auto *arg = op->add_arg();
       arg->set_name("training_mode");
       arg->set_i(0);
     }
+  };
+
+  for (auto node_pair : repr::nn::dataIterator<repr::MaxPool>(nn->dataFlow)) {
+    repr::NNGraph::NodeRef maxPoolNode;
+    repr::MaxPool *maxPool;
+    std::tie(maxPool, maxPoolNode) = node_pair;
+    setTrainingMode(*maxPool);
+  }
+
+  for (auto node_pair : repr::nn::dataIterator<repr::AveragePool>(nn->dataFlow)) {
+    repr::NNGraph::NodeRef avgPoolNode;
+    repr::AveragePool *avgPool;
+    std::tie(avgPool, avgPoolNode) = node_pair;
+    setTrainingMode(*avgPool);
   }
 }
 
@@ -437,23 +585,18 @@ void preConvertFiltersFormat(repr::NNModule *nn, caffe2::Workspace *ws) {
       continue;
     }
 
-    auto *blob = getBlob(inputs[1], ws);
-    if (blob == nullptr) {
-      LOG(WARNING) << "Filter blob dose not exist";
-      continue;
-    }
-
-    auto *filter = getTensor<itensor>(blob);
+    auto *filterBlob = getBlob(inputs[1], ws);
+    auto *filter = getMutableTensor<itensor>(filterBlob);
     if (filter == nullptr) {
       CAFFE_ENFORCE(filter, "Filter not a IDEEP tensor");
       continue;
     }
 
-    itensor::descriptor expected_desc;
+    itensor::descriptor expectedDesc;
     if (repr::nn::is<repr::Conv>(node)) {
       auto conv = repr::nn::get<repr::Conv>(node);
-      auto initValue = [](vector<int>& v, vector<int> i) {if (v.empty()) v = i;};
-
+      auto initValue = [](vector<int>& v, vector<int> i) {
+        if (v.empty()) v = i; };
       auto strides = conv->getStrides();
       initValue(strides, {1, 1});
       auto pads = conv->getPads();
@@ -461,41 +604,58 @@ void preConvertFiltersFormat(repr::NNModule *nn, caffe2::Workspace *ws) {
       auto dilations = conv->getDilations();
       initValue(dilations, {1, 1});
 
-      ideep::algorithm aalgorithm = ideep::algorithm::convolution_direct;
+      iscale filterScale;
       auto *op = getMutableOpDef(*conv);
+      auto aalgorithm = ialgo::convolution_direct;
       for (auto &arg : *op->mutable_arg()) {
-        if (arg.name() == "conv_algorithm") {
-          if (arg.i() == CONV_ALGORITHM_WINOGRAD) {
-            aalgorithm = ideep::algorithm::convolution_winograd;
-          }
-          break;
+        if ((arg.name() == "conv_algorithm")
+            && (arg.i() == CONV_ALGORITHM_WINOGRAD)) {
+          aalgorithm = ialgo::convolution_winograd;
+        } else if (arg.name() == "need_quantize" && arg.i() != 0) {
+          filterScale = filter->calculate_scale(idtype::s8, 0);
         }
       }
+      auto dataType = filterScale.empty() ? filter->get_data_type() : idtype::s8;
 
       filter->make_group(conv->getGroup());
-      expected_desc = ideep::convolution_forward::expected_weights_descriptor(
-          filter->get_dims(), filter->get_data_type(), strides, {pads[0], pads[1]},
+      expectedDesc = ideep::convolution_forward::expected_weights_descriptor(
+          filter->get_dims(), dataType, strides, {pads[0], pads[1]},
           {pads[2], pads[3]}, dilations, conv->getGroup(), aalgorithm);
 
+      if (filter->get_descriptor() != expectedDesc) {
+        itensor *newFilter = new itensor(expectedDesc);
+        if (filterScale.empty()) {
+          ideep::reorder::compute(*filter, *newFilter);
+        } else {
+          int mask = (filterScale.size() > 1)
+            ? ((conv->getGroup() > 1) ? 3 : 1) : 0;
+          ideep::reorder::compute(filter->as_weights(),
+              *newFilter, {mask, filterScale});
+          newFilter->set_scale(filterScale);
+        }
+        filterBlob->Reset(newFilter);
+      }
+    // convert weights for FC
     } else if (repr::nn::is<repr::FC>(node)) {
       auto fc = repr::nn::get<repr::FC>(node);
       auto axis_w = fc->getAxisW();
       if (axis_w != 1) {
         auto f_dims = filter->get_dims();
         auto f_dim0 = std::accumulate(f_dims.begin(), f_dims.begin() + axis_w,
-                                      1, std::multiplies<itensor::dim_t>());
-        auto f_dim1 = std::accumulate(f_dims.begin() + axis_w, f_dims.end(), 1,
-                                      std::multiplies<itensor::dim_t>());
+            1, std::multiplies<itensor::dim_t>());
+        auto f_dim1 = std::accumulate(f_dims.begin() + axis_w, f_dims.end(),
+            1, std::multiplies<itensor::dim_t>());
         filter->reshape({f_dim0, f_dim1});
       }
-      expected_desc = ideep::inner_product_forward::expected_weights_descriptor(
-          filter->get_dims());
-    }
 
-    if (filter->get_descriptor() != expected_desc) {
-      itensor *new_filter = new itensor(expected_desc);
-      ideep::reorder::compute(*filter, *new_filter);
-      blob->Reset(new_filter);
+      expectedDesc = ideep::inner_product_forward::expected_weights_descriptor(
+          filter->get_dims());
+
+      if (filter->get_descriptor() != expectedDesc) {
+        itensor *newFilter = new itensor(expectedDesc);
+        ideep::reorder::compute(filter->as_weights(), *newFilter);
+        filterBlob->Reset(newFilter);
+      }
     }
   }
 }
@@ -511,9 +671,9 @@ void OptimizeForIdeep(repr::NNModule *nn, caffe2::Workspace *ws,
 
   fuseConvSumForIdeep(nn, ws);
 
-  fuseActivationForIdeep(nn);
+  fuseActivationForIdeep(nn, ws);
 
-  enforceFusionInplaceForIdeep(nn);
+  enforceFusionInplaceForIdeep(nn, ws);
 
   setPoolingInferenceMode(nn);
 
