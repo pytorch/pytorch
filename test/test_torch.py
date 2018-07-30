@@ -1687,6 +1687,7 @@ class TestTorch(TestCase):
             ("...ii->...i", I),       # batch diagonal
             # -- Other
             ("bn,anm,bm->ba", l, w, r),  # as torch.bilinear
+            ("... ii->...i  ", I),       # batch diagonal with spaces
         ]
         for test in test_list:
             actual = torch.einsum(test[0], test[1:])
