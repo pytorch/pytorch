@@ -476,6 +476,13 @@ at::optional<std::vector<Value*>> tryMatchSchema(
         v.value = graph.insertNode(graph.createList(IntType::get(), unpacked))->output();
       }
 
+      if (v.value->node()->kind() == prim::None){
+        if (arg.type->isSubtypeOf(NumberType::get()))
+          v.value = insertConstant(graph, at::Scalar(NAN), loc);
+        else
+          v.value = graph.insertNode(graph.createUndefined())->output();
+      }
+
       if(!v.value->type()->isSubtypeOf(arg.type)) {
         err() << "expected a value of type " << arg.type->str() << " for argument '" << arg.name << "' but found "
               << v.value->type()->str() << "\n"
@@ -1358,6 +1365,9 @@ private:
       case TK_FALSE: {
         return insertConstant(*graph, false, tree->range());
       } break;
+      case TK_NONE: {
+        return emitNone(tree->range());
+      } break;
       case TK_SLICE: {
         const auto slice = Slice(tree);
         return emitSlice(
@@ -1381,6 +1391,13 @@ private:
         throw ErrorReport(tree) << "NYI: " << tree;
         break;
     }
+  }
+
+  Value* emitNone(SourceRange range) {
+    auto& g = *method.graph();
+    return g.insertNode(
+        g.create(prim::None, {}, 1)->setSourceLocation(
+          std::make_shared<SourceRange>(range)))->output();
   }
 
   Value* emitConst(const Const& c) {

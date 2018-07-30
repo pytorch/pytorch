@@ -84,14 +84,14 @@ OPERATOR_SCHEMA(WeightedMultiSampling)
     .SetDoc(R"DOC(
 The operator performs sampling based on the input sampling weights.
 All weights are cummulative probability thus sorted. The output is
-a 1-D tensor (Tensor<int>). If two inputs are given, the second input
+a 1-D tensor (Tensor). If two inputs are given, the second input
 is used to provide shape of the output sample tensor. Otherwise, we use
 argument `num_samples` to determine the number of samples to generate.
 )DOC")
     .Input(
         0,
         "sampling_cdf",
-        "An optional 1-D Tensor<float>."
+        "An optional 1-D Tensor."
         "Input cumulative sampling probability (such as [0.2, 0.5, 0.8, 1.5])."
         " All weights must be non-negative numbers. Note that the last value of"
         " CDF is not necessary 1. If the last value is not 1, all values in"
@@ -105,7 +105,7 @@ argument `num_samples` to determine the number of samples to generate.
         "sampled_indexes",
         "The output tensor contains indices sampled from distribution given"
         "by the weight vector in the input tensor"
-        "The output is a 1-D Tensor<int> of size determined by argument"
+        "The output is a 1-D Tensor of size determined by argument"
         "`num_samples` or the second input tensor.")
     .Arg("num_samples", "number of samples to sample from the input data");
 

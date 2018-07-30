@@ -38,6 +38,8 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
   } else if(t.kind() == TypeKind::ListType) {
     auto prim = t.cast<ListType>()->getElementType();
     out << *prim << "[]";
+  } else if(t.kind() == TypeKind::NoneType) {
+    out << "None";
   } else {
     AT_ERROR("unknown type kind");
   }
@@ -60,8 +62,10 @@ TypePtr FloatType::get() {
   static auto value = FloatType::create();
   return value;
 }
-
-
+TypePtr NoneType::get() {
+  static auto value = NoneType::create();
+  return value;
+}
 TypePtr ListType::ofTensors() {
   static auto value = ListType::create(DynamicType::get());
   return value;

@@ -26,13 +26,13 @@ TEST(MathROCBLASTest, GemmNoTransNoTrans) {
   vector<int> shapeX{5, 10};
   vector<int> shapeW{10, 6};
   vector<int> shapeY{5, 6};
-  auto* tensorX = blobX->GetMutable<Tensor<HIPContext>>();
+  auto* tensorX = blobX->GetMutableTensor(HIP);
   tensorX->Resize(shapeX);
-  auto* tensorW = blobW->GetMutable<Tensor<HIPContext>>();
+  auto* tensorW = blobW->GetMutableTensor(HIP);
   tensorW->Resize(shapeW);
-  auto* tensorY = blobY->GetMutable<Tensor<HIPContext>>();
+  auto* tensorY = blobY->GetMutableTensor(HIP);
   tensorY->Resize(shapeY);
-  auto* tensorY_host = blobY_host->GetMutable<Tensor<CPUContext>>();
+  auto* tensorY_host = blobY_host->GetMutableTensor(CPU);
   tensorY_host->Resize(shapeY);
 
   EXPECT_EQ(tensorX->size(), 50);
@@ -60,7 +60,7 @@ TEST(MathROCBLASTest, GemmNoTransNoTrans) {
       tensorY->mutable_data<float>(),
       &context);
   context.FinishDeviceComputation();
-  tensorY_host->CopyFrom<HIPContext, HIPContext>(*tensorY, &context);
+  tensorY_host->CopyFrom(*tensorY, &context);
   context.FinishDeviceComputation();
   EXPECT_EQ(tensorY_host->size(), 30);
   for (int i = 0; i < tensorY_host->size(); ++i) {
@@ -81,7 +81,7 @@ TEST(MathROCBLASTest, GemmNoTransNoTrans) {
       tensorY->mutable_data<float>(),
       &context);
   context.FinishDeviceComputation();
-  tensorY_host->CopyFrom<HIPContext, HIPContext>(*tensorY, &context);
+  tensorY_host->CopyFrom(*tensorY, &context);
   context.FinishDeviceComputation();
   EXPECT_EQ(tensorY_host->size(), 30);
   for (int i = 0; i < tensorY_host->size(); ++i) {
@@ -102,7 +102,7 @@ TEST(MathROCBLASTest, GemmNoTransNoTrans) {
       tensorY->mutable_data<float>(),
       &context);
   context.FinishDeviceComputation();
-  tensorY_host->CopyFrom<HIPContext, HIPContext>(*tensorY, &context);
+  tensorY_host->CopyFrom(*tensorY, &context);
   context.FinishDeviceComputation();
   EXPECT_EQ(tensorY_host->size(), 30);
   for (int i = 0; i < tensorY_host->size(); ++i) {
@@ -126,13 +126,13 @@ TEST(MathROCBLASTest, GemmNoTransTrans) {
   vector<int> shapeX{5, 10};
   vector<int> shapeW{6, 10};
   vector<int> shapeY{5, 6};
-  auto* tensorX = blobX->GetMutable<Tensor<HIPContext>>();
+  auto* tensorX = blobX->GetMutableTensor(HIP);
   tensorX->Resize(shapeX);
-  auto* tensorW = blobW->GetMutable<Tensor<HIPContext>>();
+  auto* tensorW = blobW->GetMutableTensor(HIP);
   tensorW->Resize(shapeW);
-  auto* tensorY = blobY->GetMutable<Tensor<HIPContext>>();
+  auto* tensorY = blobY->GetMutableTensor(HIP);
   tensorY->Resize(shapeY);
-  auto* tensorY_host = blobY_host->GetMutable<Tensor<CPUContext>>();
+  auto* tensorY_host = blobY_host->GetMutableTensor(CPU);
   tensorY_host->Resize(shapeY);
 
   EXPECT_EQ(tensorX->size(), 50);
@@ -160,7 +160,7 @@ TEST(MathROCBLASTest, GemmNoTransTrans) {
       tensorY->mutable_data<float>(),
       &context);
   context.FinishDeviceComputation();
-  tensorY_host->CopyFrom<HIPContext, HIPContext>(*tensorY, &context);
+  tensorY_host->CopyFrom(*tensorY, &context);
   context.FinishDeviceComputation();
   EXPECT_EQ(tensorY_host->size(), 30);
   for (int i = 0; i < tensorY_host->size(); ++i) {
@@ -181,7 +181,7 @@ TEST(MathROCBLASTest, GemmNoTransTrans) {
       tensorY->mutable_data<float>(),
       &context);
   context.FinishDeviceComputation();
-  tensorY_host->CopyFrom<HIPContext, HIPContext>(*tensorY, &context);
+  tensorY_host->CopyFrom(*tensorY, &context);
   context.FinishDeviceComputation();
   EXPECT_EQ(tensorY_host->size(), 30);
   for (int i = 0; i < tensorY_host->size(); ++i) {
@@ -201,7 +201,7 @@ TEST(MathROCBLASTest, GemmNoTransTrans) {
       tensorY->mutable_data<float>(),
       &context);
   context.FinishDeviceComputation();
-  tensorY_host->CopyFrom<HIPContext, HIPContext>(*tensorY, &context);
+  tensorY_host->CopyFrom(*tensorY, &context);
   context.FinishDeviceComputation();
   EXPECT_EQ(tensorY_host->size(), 30);
   for (int i = 0; i < tensorY_host->size(); ++i) {
@@ -225,13 +225,13 @@ TEST(MathROCBLASTest, GemvNoTrans) {
   vector<int> shapeA{5, 10};
   vector<int> shapeX{10};
   vector<int> shapeY{5};
-  auto* tensorA = blobA->GetMutable<Tensor<HIPContext>>();
+  auto* tensorA = blobA->GetMutableTensor(HIP);
   tensorA->Resize(shapeA);
-  auto* tensorX = blobX->GetMutable<Tensor<HIPContext>>();
+  auto* tensorX = blobX->GetMutableTensor(HIP);
   tensorX->Resize(shapeX);
-  auto* tensorY = blobY->GetMutable<Tensor<HIPContext>>();
+  auto* tensorY = blobY->GetMutableTensor(HIP);
   tensorY->Resize(shapeY);
-  auto* tensorY_host = blobY_host->GetMutable<Tensor<CPUContext>>();
+  auto* tensorY_host = blobY_host->GetMutableTensor(CPU);
   tensorY_host->Resize(shapeY);
 
   EXPECT_EQ(tensorA->size(), 50);
@@ -256,7 +256,7 @@ TEST(MathROCBLASTest, GemvNoTrans) {
       tensorY->mutable_data<float>(),
       &context);
   context.FinishDeviceComputation();
-  tensorY_host->CopyFrom<HIPContext, HIPContext>(*tensorY, &context);
+  tensorY_host->CopyFrom(*tensorY, &context);
   context.FinishDeviceComputation();
   for (int i = 0; i < tensorY_host->size(); ++i) {
     CHECK_EQ(tensorY_host->data<float>()[i], 10) << i;
@@ -274,7 +274,7 @@ TEST(MathROCBLASTest, GemvNoTrans) {
       tensorY->mutable_data<float>(),
       &context);
   context.FinishDeviceComputation();
-  tensorY_host->CopyFrom<HIPContext, HIPContext>(*tensorY, &context);
+  tensorY_host->CopyFrom(*tensorY, &context);
   context.FinishDeviceComputation();
   for (int i = 0; i < tensorY_host->size(); ++i) {
     CHECK_EQ(tensorY_host->data<float>()[i], 15) << i;
@@ -292,7 +292,7 @@ TEST(MathROCBLASTest, GemvNoTrans) {
       tensorY->mutable_data<float>(),
       &context);
   context.FinishDeviceComputation();
-  tensorY_host->CopyFrom<HIPContext, HIPContext>(*tensorY, &context);
+  tensorY_host->CopyFrom(*tensorY, &context);
   context.FinishDeviceComputation();
   for (int i = 0; i < tensorY_host->size(); ++i) {
     CHECK_EQ(tensorY_host->data<float>()[i], 20) << i;
@@ -315,13 +315,13 @@ TEST(MathROCBLASTest, GemvTrans) {
   vector<int> shapeA{6, 10};
   vector<int> shapeX{6};
   vector<int> shapeY{10};
-  auto* tensorA = blobA->GetMutable<Tensor<HIPContext>>();
+  auto* tensorA = blobA->GetMutableTensor(HIP);
   tensorA->Resize(shapeA);
-  auto* tensorX = blobX->GetMutable<Tensor<HIPContext>>();
+  auto* tensorX = blobX->GetMutableTensor(HIP);
   tensorX->Resize(shapeX);
-  auto* tensorY = blobY->GetMutable<Tensor<HIPContext>>();
+  auto* tensorY = blobY->GetMutableTensor(HIP);
   tensorY->Resize(shapeY);
-  auto* tensorY_host = blobY_host->GetMutable<Tensor<CPUContext>>();
+  auto* tensorY_host = blobY_host->GetMutableTensor(CPU);
   tensorY_host->Resize(shapeY);
 
   EXPECT_EQ(tensorA->size(), 60);
@@ -346,7 +346,7 @@ TEST(MathROCBLASTest, GemvTrans) {
       tensorY->mutable_data<float>(),
       &context);
   context.FinishDeviceComputation();
-  tensorY_host->CopyFrom<HIPContext, HIPContext>(*tensorY, &context);
+  tensorY_host->CopyFrom(*tensorY, &context);
   context.FinishDeviceComputation();
   for (int i = 0; i < tensorY_host->size(); ++i) {
     CHECK_EQ(tensorY_host->data<float>()[i], 6) << i;
@@ -364,7 +364,7 @@ TEST(MathROCBLASTest, GemvTrans) {
       tensorY->mutable_data<float>(),
       &context);
   context.FinishDeviceComputation();
-  tensorY_host->CopyFrom<HIPContext, HIPContext>(*tensorY, &context);
+  tensorY_host->CopyFrom(*tensorY, &context);
   context.FinishDeviceComputation();
   for (int i = 0; i < tensorY_host->size(); ++i) {
     CHECK_EQ(tensorY_host->data<float>()[i], 9) << i;
@@ -382,7 +382,7 @@ TEST(MathROCBLASTest, GemvTrans) {
       tensorY->mutable_data<float>(),
       &context);
   context.FinishDeviceComputation();
-  tensorY_host->CopyFrom<HIPContext, HIPContext>(*tensorY, &context);
+  tensorY_host->CopyFrom(*tensorY, &context);
   context.FinishDeviceComputation();
   for (int i = 0; i < tensorY_host->size(); ++i) {
     CHECK_EQ(tensorY_host->data<float>()[i], 12) << i;
