@@ -7522,7 +7522,7 @@ class TestTorch(TestCase):
                             "Please pre-load the data into a buffer like io.BytesIO and " +
                             "try to load from it instead.")
 
-        resource = FilelikeMock(data="abc")
+        resource = FilelikeMock(data=b"data")
         delattr(resource, "tell")
         delattr(resource, "seek")
 
