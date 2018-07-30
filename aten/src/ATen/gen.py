@@ -103,10 +103,6 @@ class FileManager(object):
 TEMPLATE_PATH = options.source_path + "/templates"
 GENERATOR_DERIVED = CodeTemplate.from_file(
     TEMPLATE_PATH + "/GeneratorDerived.h")
-STORAGE_DERIVED_CPP = CodeTemplate.from_file(
-    TEMPLATE_PATH + "/StorageDerived.cpp")
-STORAGE_DERIVED_H = CodeTemplate.from_file(TEMPLATE_PATH + "/StorageDerived.h")
-
 TYPE_DERIVED_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeDerived.cpp")
 SPARSE_TYPE_DERIVED_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/SparseTypeDerived.cpp")
 TYPE_DERIVED_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeDerived.h")
@@ -237,7 +233,6 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
     env['isFloatingType'] = is_floating_type
     env['isIntegralType'] = not is_floating_type
     if density == 'Dense':
-        env['Storage'] = "{}{}Storage".format(backend, scalar_name)
         env['Tensor'] = "{}{}{}Tensor".format(density_tag, backend, scalar_name)
     env['Type'] = "{}{}{}Type".format(density_tag, backend, scalar_name)
     env['DenseTensor'] = "{}{}Tensor".format(backend, scalar_name)
@@ -246,7 +241,6 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
     env['storage_tensor_headers'] = []
     if density != 'Sparse':
         env['storage_tensor_headers'] = [
-            '#include "ATen/{}.h"'.format(env['Storage']),
             '#include "ATen/{}.h"'.format(env['Tensor']),
             '#include "ATen/{}ByteTensor.h"'.format(env['Backend']),
             '#include "ATen/{}IntTensor.h"'.format(env['Backend']),
@@ -322,8 +316,6 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
 
     if density != 'Sparse':
         # there are no storage or tensor types for sparse; it's all uniform
-        fm.write(env['Storage'] + ".cpp", STORAGE_DERIVED_CPP, env)
-        fm.write(env['Storage'] + ".h", STORAGE_DERIVED_H, env)
         env['TensorDenseOrSparse'] = TENSOR_DENSE_CPP.substitute(env)
         fm.write(env['Tensor'] + ".cpp", TENSOR_DERIVED_CPP, env)
         fm.write(env['Tensor'] + ".h", TENSOR_DERIVED_H, env)
@@ -379,7 +371,7 @@ def declare_outputs():
     for backend, density, scalar_types in iterate_types():
         scalar_name = scalar_types[0]
         full_backend = "Sparse" + backend if density == "Sparse" else backend
-        for kind in ["Storage", "Type", "Tensor"]:
+        for kind in ["Type", "Tensor"]:
             if kind != 'Type' and density == "Sparse":
                 # No Storage or Tensor for sparse
                 continue
