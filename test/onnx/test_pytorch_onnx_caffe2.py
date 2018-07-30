@@ -678,7 +678,7 @@ class TestCaffe2Backend(unittest.TestCase):
 
     def test_cumsum(self):
         shape = (3, 4, 5)
-        for params in [{}] + [{'dim': i} for i in range(len(shape))]:
+        for params in [{'dim': i} for i in range(len(shape))]:
             class MyModel(torch.nn.Module):
                 def __init__(self):
                     super(MyModel, self).__init__()
