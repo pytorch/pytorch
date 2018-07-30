@@ -104,7 +104,7 @@ bool DataChannelMPI::init() {
   // OMPI_* is specific to Openmpi implementation.
   // Openmpi v1.10 segfaults in MPI_Bcast with CUDA buffer.
   if (int(OMPI_MAJOR_VERSION) < 2) {
-      throw std::runtime_error("Please use MPI 2.x.x and above for distributed.");
+      throw std::runtime_error("Please use Openmpi major version 2 and above for distributed.");
   }
 #endif /* OMPI_MAJOR_VERSION */
 
