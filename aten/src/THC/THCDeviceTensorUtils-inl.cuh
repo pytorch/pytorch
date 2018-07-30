@@ -95,7 +95,7 @@ template <typename T, int NewDim,
           typename IndexT, template <typename U> class PtrTraits>
 THCDeviceTensor<T, NewDim, IndexT, PtrTraits>
 toDeviceTensorCast(THCState* state, THCudaTensor* t) {
-  switch (THCudaTensor__nDimension(state, t)) {
+  switch (THCudaTensor_nDimensionLegacyAll(state, t)) {
     SWITCH_UNROLL_CUDA_CAST_FACTORY(1);
     SWITCH_UNROLL_CUDA_CAST_FACTORY(2);
     SWITCH_UNROLL_CUDA_CAST_FACTORY(3);

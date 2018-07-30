@@ -28,8 +28,8 @@ class LayerNormOp : public Operator<Context> {
   int axis_;
   float epsilon_;
 
-  Tensor<Context> scratch_;
-  Tensor<Context> seg_indices_;
+  Tensor scratch_{Context::GetDeviceType()};
+  Tensor seg_indices_{Context::GetDeviceType()};
 };
 
 template <class Context>
@@ -53,11 +53,11 @@ class LayerNormGradientOp : public Operator<Context> {
   int axis_;
   float epsilon_;
 
-  Tensor<Context> scratch_;
-  Tensor<Context> gscratch_;
-  Tensor<Context> seg_indices_;
-  Tensor<Context> dstdev_;
-  Tensor<Context> dmean_;
+  Tensor scratch_{Context::GetDeviceType()};
+  Tensor gscratch_{Context::GetDeviceType()};
+  Tensor seg_indices_{Context::GetDeviceType()};
+  Tensor dstdev_{Context::GetDeviceType()};
+  Tensor dmean_{Context::GetDeviceType()};
 };
 
 } // namespace caffe2

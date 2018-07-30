@@ -8,6 +8,10 @@
     (assign
       (list (variable (ident q)))
       (=)
+      (None))
+    (assign
+      (list (variable (ident q)))
+      (=)
       (-
         (+
           (variable (ident x))

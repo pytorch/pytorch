@@ -51,10 +51,10 @@ class PackSegmentsOp final : public Operator<Context> {
   bool return_presence_mask_;
 
   // Scratch space required by the CUDA version
-  Tensor<Context> dev_buffer_;
-  Tensor<Context> dev_lengths_prefix_sum_;
-  Tensor<Context> dev_max_length_;
-  Tensor<CPUContext> host_max_length_;
+  Tensor dev_buffer_{Context::GetDeviceType()};
+  Tensor dev_lengths_prefix_sum_{Context::GetDeviceType()};
+  Tensor dev_max_length_{Context::GetDeviceType()};
+  Tensor host_max_length_{CPU};
 };
 
 template <class Context>
@@ -81,12 +81,12 @@ class UnpackSegmentsOp final : public Operator<Context> {
 
  private:
   TIndex max_length_;
-  Tensor<Context> dev_buffer_;
-  Tensor<Context> dev_lengths_prefix_sum_;
-  Tensor<Context> dev_max_length_;
-  Tensor<Context> dev_num_cell_;
-  Tensor<CPUContext> host_max_length_;
-  Tensor<CPUContext> host_num_cell_;
+  Tensor dev_buffer_{Context::GetDeviceType()};
+  Tensor dev_lengths_prefix_sum_{Context::GetDeviceType()};
+  Tensor dev_max_length_{Context::GetDeviceType()};
+  Tensor dev_num_cell_{Context::GetDeviceType()};
+  Tensor host_max_length_{CPU};
+  Tensor host_num_cell_{CPU};
 };
 
 } // namespace caffe2

@@ -15,7 +15,7 @@ void BlobToTensorDescriptor(
   // Memory type
   // We only allow weights to be CPU tensor for now
   CAFFE_ENFORCE(
-      blob->template IsType<TensorCPU>(),
+      blob->template IsType<Tensor>(CPU),
       "Initialization blob ",
       name,
       " needs to be TensorCPU");

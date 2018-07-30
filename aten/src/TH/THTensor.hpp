@@ -52,13 +52,6 @@ struct THTensor
       return storage_->unsafe_data<T>() + storage_offset_;
     }
 
-    // [NOTE: _dim() vs dim()]
-    // _dim() returns the "old" TH dimension view where no dimensions represents an empty tensor.
-    // dim()  returns the ATen view of the dimensionality, i.e. 0-sized dimensions are supported.
-    inline int64_t _dim() const {
-      return is_empty() ? 0 : dim();
-    }
-
     inline int64_t dim() const {
       return sizes_.size();
     }
@@ -157,6 +150,31 @@ inline bool THTensor_isZeroDim(const THTensor *tensor) {
 
 inline void THTensor_setIsZeroDim(THTensor *tensor, bool is_zero_dim) {
   tensor->is_zero_dim_ = is_zero_dim;
+}
+
+// [NOTE: nDimension vs nDimensionLegacyNoScalars vs nDimensionLegacyAll]
+// nDimension                 corresponds to the "true" ATen dimension. TODO: implement.
+// nDimensionLegacyNoScalars  correpsonds to the ATen dimension, except scalars are viewed as 1-dimensional tensors.
+// nDimensionLegacyAll        corresponds to the ATen dimension, except scalars are viewed as 1-dimensional tensors
+//                            and tensors with a dimension of size zero are collapsed to 0-dimensional tensors.
+//
+// Eventually, everything should go through nDimension or tensor->dim().
+inline int THTensor_nDimensionLegacyNoScalars(const THTensor* tensor) {
+  if (THTensor_isZeroDim(tensor)) {
+    return 1;
+  } else {
+    return tensor->dim();  
+  }
+}
+
+inline int THTensor_nDimensionLegacyAll(const THTensor* tensor) {
+  if (tensor->is_empty()) {
+    return 0;  
+  } else if (THTensor_isZeroDim(tensor)) {
+    return 1;
+  } else {
+    return tensor->dim();  
+  }
 }
 
 TH_API void THTensor_free(THTensor *self);
