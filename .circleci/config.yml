@@ -30,8 +30,8 @@ jobs:
     - run:
         name: Build
         command: |
-          find / -name pip
-          find /
+          echo $PATH
+          sudo /opt/conda/bin/pip install awscli
           export SCCACHE_BUCKET=ossci-compiler-cache
           touch foo
           aws s3 cp foo s3://ossci-linux-build/pytorch/foo
@@ -48,6 +48,7 @@ jobs:
           name: Build
           command: |
             export SCCACHE_BUCKET=ossci-compiler-cache
+            export BUILD_ENVIRONMENT=macos-10.13-py3
             git submodule update --init
             chmod a+x .jenkins/pytorch/macos-build.sh
             .jenkins/pytorch/macos-build.sh
