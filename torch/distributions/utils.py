@@ -52,9 +52,14 @@ def broadcast_all(*values):
         raise ValueError('Input arguments must all be instances of numbers.Number or torch.tensor.')
     if not all(map(torch.is_tensor, values)):
         # promote numbers to tensors of dtype torch.get_default_dtype()
-        maybe_tensor = next(filter(torch.is_tensor, values), None)
-        new_tensor = (lambda v: torch.tensor(v, dtype=torch.get_default_dtype())
-                      if maybe_tensor is None else maybe_tensor.new_tensor(v))
+        def default_promotion(v):
+            return torch.tensor(v, dtype=torch.get_default_dtype())
+
+        new_tensor = default_promotion
+        for value in values:
+            if torch.is_tensor(value):
+                new_tensor = value.new_tensor
+                break
         values = [v if torch.is_tensor(v) else new_tensor(v) for v in values]
     return torch.broadcast_tensors(*values)
 
