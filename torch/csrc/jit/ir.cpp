@@ -632,7 +632,7 @@ bool Node::matches(const char *signature_literal, at::ArrayRef<Symbol> const_inp
 }
 
 void Node::findSchema() const {
-  schema_ = &getOperatorFor(this).schema;
+  schema_ = &getOperatorFor(this).schema();
 }
 
 PythonOp* defaultAllocPythonOp(Graph*g) {
