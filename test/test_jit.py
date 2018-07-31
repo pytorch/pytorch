@@ -1196,17 +1196,26 @@ class TestJit(JitTestCase):
         self.run_pass('constant_propagation', constant_prop.graph)
         self.assertExpected(canonical(constant_prop.graph))
 
-    # TODO: implement
-    @unittest.expectedFailure
     def test_constant_prop_if_constant(self):
         @torch.jit.script
-        def constant_prop():
-            b = 3
-            if True:
-                b = 1
-            if False:
-                b = 2
-            return b
+        def constant_prop(a, b):
+            c0 = 1
+            c1 = 1
+            c2 = 1
+            if a:  # -> c0, c1
+                if b:  # -> c0
+                    if True:  # -> c0
+                        c0 = c0 + 1
+                        if False:
+                            c1 = c1 + 1
+                            c2 = c2 + 1
+            else:  # -> c0, c1
+                c1 = c1 + 1
+
+            if True:  # removed
+                c0 = c0 + 1  # dynamic
+                c2 = c2 + 4  # set to 5
+            return a + c0 + c1 + c2
 
         self.run_pass('constant_propagation', constant_prop.graph)
         self.assertExpected(canonical(constant_prop.graph))
