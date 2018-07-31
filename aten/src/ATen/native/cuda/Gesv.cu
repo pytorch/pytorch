@@ -179,37 +179,33 @@ AT_ERROR("gesv: MAGMA library not found in "
   int info;
   int* ipiv;
 
-  // init to column major format
-  // Note: `sol` and `lu` need to be contiguous since we pass
-  // sol.data() and lu.data() to Magma
-  if (&self == &sol) {
-    // eg. torch.gesv(b, A, out=(b, A))
-    if (isTransposeContiguous(sol)) {
-      sol.t_();
-    } else {
-      auto Bc = self.view({bx, by}).t().clone();
-      sol.resize_({by, bx}).copy_(Bc);
-    }
-  } else if (sol.numel() == self.numel() &&
-             isTransposeContiguous(sol)) {
-    // allow reuse
-    sol.t_().copy_(self.view({bx, by}).t());
-  } else {
-    sol.resize_({by, bx}).copy_(self.view({bx, by}).t());
+  /* Init to column major format. See Gesv.cpp for more comments */
+  bool tc = sol.dim() == 2 && isTransposeContiguous(sol);
+  if (tc) {
+    sol.t_();
   }
 
-  if (&A == &lu) {
-    if (isTransposeContiguous(lu)) {
-      lu.t_();
-    } else {
-      auto Ac = A.t().clone();
-      lu.copy_(Ac);
+  sol.resize_({by, bx});
+  if (&self == &sol) {
+    if (!tc) {
+      sol.copy_(self.view({bx, by}).t().clone());
     }
-  } else if (lu.numel() == A.numel() &&
-             isTransposeContiguous(lu)) {
-    lu.t_().copy_(A.t());
   } else {
-    lu.resize_({ay, ax}).copy_(A.t());
+    sol.copy_(self.view({bx, by}).t());
+  }
+
+  tc = lu.dim() == 2 && isTransposeContiguous(lu);
+  if (tc) {
+    lu.t_();
+  }
+
+  lu.resize_({ay, ax});
+  if (&A == &lu) {
+    if (!tc) {
+      lu.copy_(A.t().clone());
+    }
+  } else {
+    lu.copy_(A.t());
   }
 
   AT_DISPATCH_FLOATING_TYPES(self.type(), "gesv", [&]{
