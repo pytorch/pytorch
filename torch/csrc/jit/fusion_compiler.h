@@ -108,6 +108,8 @@ protected:
   // launch_with_tensors handles packing at::Tensors into this arguments array.
   // CPU code uses the same convension so that launch_with_tensors can be shared.
   virtual void launch_raw(uint32_t numel, void ** arguments) = 0;
+
+  virtual uint64_t get_rand_offset(uint32_t numel) = 0;
   bool has_random;
   std::string name;
   // We keep these around for debugging
