@@ -46,8 +46,19 @@ struct PrintValue : public SugaredValue {
       auto& g = *m.graph();
       if (!attributes.empty())
         throw ErrorReport(loc) << "print doesn't accept any keyword arguments";
-      auto values = toValues(inputs);
-      g.insertNode(g.create(prim::Print, values, 0)
+
+      //temporary hack to allow print statements to work in python 2, where
+      //print(a, b) is treated as a (a, b) tuple input.
+
+      std::vector<Value*> lowered_inputs = toValues(inputs);
+      if(lowered_inputs.size() == 1 && lowered_inputs.at(0)->node()->kind() == prim::TupleConstruct) {
+        auto input = lowered_inputs[0];
+        for(size_t j = 0; j < input->node()->inputs().size(); ++j) {
+          lowered_inputs.insert(lowered_inputs.begin() + 1 + j, input->node()->inputs().at(j));
+        }
+        lowered_inputs.erase(lowered_inputs.begin());
+      }
+      g.insertNode(g.create(prim::Print, lowered_inputs, 0)
                        ->setSourceLocation(std::make_shared<SourceRange>(loc)));
       return std::make_shared<NoneValue>();
   }
@@ -348,27 +359,6 @@ Value* createNumber(Graph& g, const SourceRange& loc, const at::Tensor& val) {
 							<< val.type().scalarType() << "). Please file a bug report.";
   }
   return output;
-}
-
-Value* createStack(Graph& g, const SourceRange& loc, at::ArrayRef<Value*> inputs) {
-  // bake in constant propagation for the all-constant case because it is
-  // common to see constant lists like [1, 2] passed to attributes
-  bool all_constant = std::all_of(inputs.begin(), inputs.end(), [&](Value* v) {
-    return v->node()->kind() == prim::Constant;
-  });
-  if(all_constant) {
-    auto values = fmap(inputs, [&](Value* v) {
-      return v->node()->t(attr::value);
-    });
-    return insertConstant(g, at::stack(values), loc);
-  }
-  return g.insertNode(g.create(aten::stack, inputs)
-                      ->i_(attr::dim, 0)
-                      ->setSourceLocation(std::make_shared<SourceRange>(loc)))->output();
-}
-
-static bool isTensorSubtype(Value* v) {
-  return v->type()->isSubtypeOf(DynamicType::get());
 }
 
 at::optional<std::vector<int64_t>> getIntListAttribute(at::optional<int32_t> N, Value* input) {

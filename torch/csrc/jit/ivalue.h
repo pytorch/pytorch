@@ -85,42 +85,24 @@ struct ConstantString : at::Retainable {
   : str_(str) {}
   const std::string str_;
  public:
-  static Shared<ConstantString> create(const std::string & str_) {
+  static Shared<ConstantString> create(const std::string str_) {
     return Shared<ConstantString>(
         new ConstantString(str_), false);
   }
   const std::string & string() const {
     return str_;
   }
-  operator const std::string &() const {
+  operator const std::string & () const {
     return string();
   }
-  std::ostream& operator<<(std::ostream & out) const {
+  TORCH_API std::ostream& operator<<(std::ostream & out) const {
     out << string();
     return out;
   }
 };
 
-// non-mutable list
-template<typename Elem>
-struct ConstantList : at::Retainable {
- private:
-  ConstantList(std::vector<Elem> elements_)
-  : elements_(std::move(elements_)) {}
-  std::vector<Elem> elements_;
- public:
-  static Shared<ConstantList<Elem>> create(std::vector<Elem> elements_) {
-    return Shared<ConstantList<Elem>>(
-        new ConstantList<Elem>(std::move(elements_)), false);
-  }
-  at::ArrayRef<Elem> elements() const {
-    return elements_;
-  }
-  operator at::ArrayRef<Elem>() const {
-    return elements();
-  }
-};
-
+template<typename T>
+struct ConstantList;
 struct IValue;
 using Tuple = ConstantList<IValue>;
 using IntList = ConstantList<int64_t>;
@@ -192,7 +174,7 @@ struct IValue {
     JIT_ASSERT(isTensor());
     return at::Tensor(as_tensor_impl, /*retain=*/true);
   }
-  std::ostream& formatTensor(std::ostream& out) const {
+  TORCH_API std::ostream& formatTensor(std::ostream& out) const {
     JIT_ASSERT(isTensor());
     out << toTensor();
     return out;
@@ -209,7 +191,7 @@ struct IValue {
     JIT_ASSERT(isTuple());
     return toRetainable<Tuple>();
   }
-  std::ostream& formatTuple(std::ostream& out) const {
+  TORCH_API std::ostream& formatTuple(std::ostream& out) const {
     JIT_ASSERT(isTuple());
     out << "Tuple"; //TODO
     return out;
@@ -225,7 +207,7 @@ struct IValue {
     JIT_ASSERT(isDouble());
     return as_double;
   }
-  std::ostream& formatDouble(std::ostream& out) const {
+  TORCH_API std::ostream& formatDouble(std::ostream& out) const {
     JIT_ASSERT(isDouble());
     out << as_double;
     return out;
@@ -249,7 +231,7 @@ struct IValue {
     JIT_ASSERT(isInt());
     return as_int;
   }
-  std::ostream& formatInt(std::ostream& out) const {
+  TORCH_API std::ostream& formatInt(std::ostream& out) const {
     JIT_ASSERT(isInt());
     out << as_int;
     return out;
@@ -270,9 +252,9 @@ struct IValue {
     JIT_ASSERT(isIntList());
     return toRetainable<IntList>();
   }
-  std::ostream& formatIntList(std::ostream& out) const {
+  TORCH_API std::ostream& formatIntList(std::ostream& out) const {
     JIT_ASSERT(isIntList());
-    out << "int list"; //toRetainable<IntList>();
+    out << "Int List"; //FIXME @eellison toRetainable<IntList>();
     return out;
   }
 
@@ -290,7 +272,7 @@ struct IValue {
     JIT_ASSERT(isString());
     return toRetainable<ConstantString>();
   }
-  std::ostream& formatString(std::ostream& out) const {
+  TORCH_API std::ostream& formatString(std::ostream& out) const {
     JIT_ASSERT(isString());
     out << toRetainable<ConstantString>()->string();
     return out;
@@ -308,9 +290,9 @@ struct IValue {
     JIT_ASSERT(isDoubleList());
     return toRetainable<DoubleList>();
   }
-  std::ostream& formatDoubleList(std::ostream& out) const {
+  TORCH_API std::ostream& formatDoubleList(std::ostream& out) const {
     JIT_ASSERT(isDoubleList());
-    out << "double list";//toRetainable<IntList>();
+    out << "Double List"; //FIXME @eellison toRetainable<IntList>();
     return  out;
   }
 
@@ -327,9 +309,9 @@ struct IValue {
     JIT_ASSERT(isTensorList());
     return toRetainable<TensorList>();
   }
-  std::ostream& formatTensorList(std::ostream& out) const {
-    JIT_ASSERT(isTensorList();
-    out << toRetainable<TensorList>();
+  TORCH_API std::ostream& formatTensorList(std::ostream& out) const {
+    JIT_ASSERT(isTensorList());
+    out << "Tensor List"; //FIXME @eellison toRetainable<TensorList>();
     return out;
   }
 
@@ -448,6 +430,27 @@ DEFINE_TO(std::vector<int64_t>, copyToIntList)
 
 
 #undef DEFINE_TO
+
+// non-mutable list
+template<typename Elem>
+struct ConstantList : at::Retainable {
+ private:
+  ConstantList(std::vector<Elem> elements_)
+  : elements_(std::move(elements_)) {}
+  std::vector<Elem> elements_;
+ public:
+  static Shared<ConstantList<Elem>> create(std::vector<Elem> elements_) {
+    return Shared<ConstantList<Elem>>(
+        new ConstantList<Elem>(std::move(elements_)), false);
+  }
+  at::ArrayRef<Elem> elements() const {
+    return elements_;
+  }
+  operator at::ArrayRef<Elem>() const {
+    return elements();
+  }
+};
+
 
 inline IValue::IValue(Shared<Tuple> v)
 : tag(Tag::Tuple), retainable(true) {

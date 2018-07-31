@@ -402,7 +402,7 @@ struct TORCH_API StringType : public Type {
   }
   static const TypeKind Kind = TypeKind::StringType;
   // global singleton
-  static TypePtr get();
+  static StringTypePtr get();
 private:
   StringType()
   : Type(TypeKind::StringType) {}

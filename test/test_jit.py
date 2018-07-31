@@ -1758,6 +1758,7 @@ a")
         def func(a):
             print(a, "a" 'b' '''c''' """d""", 2, 1.5)
             return a
+
         inputs = self._make_scalar_vars([1], torch.int64)
         self.checkScript(func, inputs, capture_output=True)
 
