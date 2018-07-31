@@ -186,7 +186,7 @@ AT_ERROR("gesv: MAGMA library not found in "
   }
 
   sol.resize_({by, bx});
-  if (&self == &sol) {
+  if (self.data_ptr() == sol.data_ptr()) {
     if (!tc) {
       sol.copy_(self.view({bx, by}).t().clone());
     }
@@ -200,7 +200,7 @@ AT_ERROR("gesv: MAGMA library not found in "
   }
 
   lu.resize_({ay, ax});
-  if (&A == &lu) {
+  if (A.data_ptr() == lu.data_ptr()) {
     if (!tc) {
       lu.copy_(A.t().clone());
     }

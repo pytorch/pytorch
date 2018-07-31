@@ -99,7 +99,7 @@ std::tuple<Tensor&,Tensor&> _gesv_single_out_cpu(
   }
 
   sol.resize_({by, bx});
-  if (&self == &sol) {
+  if (self.data_ptr() == sol.data_ptr()) {
     if (!tc) {
       sol.copy_(self.view({bx, by}).t().clone());
     }
@@ -113,7 +113,7 @@ std::tuple<Tensor&,Tensor&> _gesv_single_out_cpu(
   }
 
   lu.resize_({ay, ax});
-  if (&A == &lu) {
+  if (A.data_ptr() == lu.data_ptr()) {
     if (!tc) {
       lu.copy_(A.t().clone());
     }
