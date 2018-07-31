@@ -12,12 +12,12 @@ static inline void THNN_(SpatialGridSamplerBilinear_shapeCheck)(
   THCUNN_argCheck(state, !grid->is_empty() && THCTensor_(nDimensionLegacyNoScalars)(state, grid) == 4, 2, grid,
       "4D grid tensor expected but got: %s");
 
-  int64_t nbatch   = THCTensor_(size)(state, input, 0);
-  int64_t channels = THCTensor_(size)(state, input, 1);
-  int64_t iheight   = THCTensor_(size)(state, input, 2);
-  int64_t iwidth    = THCTensor_(size)(state, input, 3);
-  int64_t oheight   = THCTensor_(size)(state, grid, 1);
-  int64_t owidth    = THCTensor_(size)(state, grid, 2);
+  int64_t nbatch   = THCTensor_(sizeLegacyNoScalars)(state, input, 0);
+  int64_t channels = THCTensor_(sizeLegacyNoScalars)(state, input, 1);
+  int64_t iheight   = THCTensor_(sizeLegacyNoScalars)(state, input, 2);
+  int64_t iwidth    = THCTensor_(sizeLegacyNoScalars)(state, input, 3);
+  int64_t oheight   = THCTensor_(sizeLegacyNoScalars)(state, grid, 1);
+  int64_t owidth    = THCTensor_(sizeLegacyNoScalars)(state, grid, 2);
 
   THCUNN_check_dim_size(state, grid, 4, 0, nbatch);
   THCUNN_check_dim_size(state, grid, 4, 3, 2);
@@ -39,12 +39,12 @@ THC_API void THNN_(SpatialGridSamplerBilinear_updateOutput)(
 
   THCUNN_assertSameGPU(state, 3, input, grid, output);
   THNN_(SpatialGridSamplerBilinear_shapeCheck)(state, input, grid, NULL);
-  int64_t N = THCTensor_(size)(state, input, 0);
-  int64_t C = THCTensor_(size)(state, input, 1);
-  int64_t IH = THCTensor_(size)(state, input, 2);
-  int64_t IW = THCTensor_(size)(state, input, 3);
-  int64_t H = THCTensor_(size)(state,grid, 1);
-  int64_t W = THCTensor_(size)(state, grid, 2);
+  int64_t N = THCTensor_(sizeLegacyNoScalars)(state, input, 0);
+  int64_t C = THCTensor_(sizeLegacyNoScalars)(state, input, 1);
+  int64_t IH = THCTensor_(sizeLegacyNoScalars)(state, input, 2);
+  int64_t IW = THCTensor_(sizeLegacyNoScalars)(state, input, 3);
+  int64_t H = THCTensor_(sizeLegacyNoScalars)(state,grid, 1);
+  int64_t W = THCTensor_(sizeLegacyNoScalars)(state, grid, 2);
 
   // resize output to the same shape as input
   THCTensor_(resize4d)(state, output, N, C, H, W);
@@ -69,12 +69,12 @@ THC_API void THNN_(SpatialGridSamplerBilinear_updateGradInput)(
 
   THCUNN_assertSameGPU(state, 5, input, gradInput, grid, gradGrid, gradOutput);
   THNN_(SpatialGridSamplerBilinear_shapeCheck)(state, input, grid, gradOutput);
-  int64_t N = THCTensor_(size)(state, input, 0);
-  int64_t C = THCTensor_(size)(state, input, 1);
-  int64_t IH = THCTensor_(size)(state, input, 2);
-  int64_t IW = THCTensor_(size)(state, input, 3);
-  int64_t H = THCTensor_(size)(state, grid, 1);
-  int64_t W = THCTensor_(size)(state, grid, 2);
+  int64_t N = THCTensor_(sizeLegacyNoScalars)(state, input, 0);
+  int64_t C = THCTensor_(sizeLegacyNoScalars)(state, input, 1);
+  int64_t IH = THCTensor_(sizeLegacyNoScalars)(state, input, 2);
+  int64_t IW = THCTensor_(sizeLegacyNoScalars)(state, input, 3);
+  int64_t H = THCTensor_(sizeLegacyNoScalars)(state, grid, 1);
+  int64_t W = THCTensor_(sizeLegacyNoScalars)(state, grid, 2);
 
   THCTensor_(resize4d)(state, gradInput, N, C, IH, IW);
   THCTensor_(resize4d)(state, gradGrid, N, H, W, 2);

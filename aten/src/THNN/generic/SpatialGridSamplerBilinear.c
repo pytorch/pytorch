@@ -17,10 +17,10 @@ static inline void THNN_(SpatialGridSamplerBilinear_shapeCheck)
   THNN_ARGCHECK(!grid->is_empty() && grid->dim() == 4, 2, grid,
     "non-empty 4D grid tensor expected but got: %s");
 
-  int nbatch   = THTensor_(size)(input, 0);
-  int channels = THTensor_(size)(input, 1);
-  int oheight   = THTensor_(size)(grid, 1);
-  int owidth    = THTensor_(size)(grid, 2);
+  int nbatch   = THTensor_(sizeLegacyNoScalars)(input, 0);
+  int channels = THTensor_(sizeLegacyNoScalars)(input, 1);
+  int oheight   = THTensor_(sizeLegacyNoScalars)(grid, 1);
+  int owidth    = THTensor_(sizeLegacyNoScalars)(grid, 2);
 
   THNN_CHECK_DIM_SIZE(grid, 4, 0, nbatch);
   THNN_CHECK_DIM_SIZE(grid, 4, 3, 2);
@@ -46,12 +46,12 @@ TH_API void THNN_(SpatialGridSamplerBilinear_updateOutput)(
     int padding_mode) {
 
   THNN_(SpatialGridSamplerBilinear_shapeCheck)(input, grid, NULL);
-  int N = THTensor_(size)(input, 0);
-  int C = THTensor_(size)(input, 1);
-  int IH = THTensor_(size)(input, 2);
-  int IW = THTensor_(size)(input, 3);
-  int H = THTensor_(size)(grid, 1);
-  int W = THTensor_(size)(grid, 2);
+  int N = THTensor_(sizeLegacyNoScalars)(input, 0);
+  int C = THTensor_(sizeLegacyNoScalars)(input, 1);
+  int IH = THTensor_(sizeLegacyNoScalars)(input, 2);
+  int IW = THTensor_(sizeLegacyNoScalars)(input, 3);
+  int H = THTensor_(sizeLegacyNoScalars)(grid, 1);
+  int W = THTensor_(sizeLegacyNoScalars)(grid, 2);
 
   // resize output to the same shape as input
   THTensor_(resize4d)(output, N, C, H, W);
@@ -130,12 +130,12 @@ TH_API void THNN_(SpatialGridSamplerBilinear_updateGradInput)(
     int padding_mode) {
 
   THNN_(SpatialGridSamplerBilinear_shapeCheck)(input, grid, gradOutput);
-  int N = THTensor_(size)(input, 0);
-  int C = THTensor_(size)(input, 1);
-  int IH = THTensor_(size)(input, 2);
-  int IW = THTensor_(size)(input, 3);
-  int H = THTensor_(size)(grid, 1);
-  int W = THTensor_(size)(grid, 2);
+  int N = THTensor_(sizeLegacyNoScalars)(input, 0);
+  int C = THTensor_(sizeLegacyNoScalars)(input, 1);
+  int IH = THTensor_(sizeLegacyNoScalars)(input, 2);
+  int IW = THTensor_(sizeLegacyNoScalars)(input, 3);
+  int H = THTensor_(sizeLegacyNoScalars)(grid, 1);
+  int W = THTensor_(sizeLegacyNoScalars)(grid, 2);
 
   THTensor_(resize4d)(gradInput, N, C, IH, IW);
   THTensor_(resize4d)(gradGrid, N, H, W, 2);

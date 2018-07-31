@@ -27,10 +27,10 @@ static inline void THNN_(VolumetricReplicationPadding_shapeCheck)(
     dimw++;
     }
 
-  int numPlanes = THCTensor_(size)(state, input, planeDim);
-  int idepth = input->size(dimd);
-  int iheight = input->size(dimh);
-  int iwidth = input->size(dimw);
+  int numPlanes = THCTensor_(sizeLegacyNoScalars)(state, input, planeDim);
+  int idepth = THTensor_sizeLegacyNoScalars(input, dimd);
+  int iheight = THTensor_sizeLegacyNoScalars(input, dimh);
+  int iwidth = THTensor_sizeLegacyNoScalars(input, dimw);
   int odepth = idepth + pfront + pback;
   int oheight = iheight + ptop + pbottom;
   int owidth  = iwidth + pleft + pright;
@@ -43,18 +43,18 @@ static inline void THNN_(VolumetricReplicationPadding_shapeCheck)(
     THArgCheck(THCTensor_canUse32BitIndexMath(state, gradOutput),
                3, "output gradient tensor must fit into 32-bit index math");
 
-    THArgCheck(numPlanes == THCTensor_(size)(state, gradOutput, planeDim), 3,
+    THArgCheck(numPlanes == THCTensor_(sizeLegacyNoScalars)(state, gradOutput, planeDim), 3,
                "gradOutput width unexpected. Expected: %d, Got: %d",
-               numPlanes, THCTensor_(size)(state, gradOutput, planeDim));
-    THArgCheck(owidth == THCTensor_(size)(state, gradOutput, dimw), 3,
+               numPlanes, THCTensor_(sizeLegacyNoScalars)(state, gradOutput, planeDim));
+    THArgCheck(owidth == THCTensor_(sizeLegacyNoScalars)(state, gradOutput, dimw), 3,
                "gradOutput width unexpected. Expected: %d, Got: %d",
-               owidth, THCTensor_(size)(state, gradOutput, dimw));
-    THArgCheck(oheight == THCTensor_(size)(state, gradOutput, dimh), 3,
+               owidth, THCTensor_(sizeLegacyNoScalars)(state, gradOutput, dimw));
+    THArgCheck(oheight == THCTensor_(sizeLegacyNoScalars)(state, gradOutput, dimh), 3,
                "gradOutput height unexpected. Expected: %d, Got: %d",
-               oheight, THCTensor_(size)(state, gradOutput, dimh));
-    THArgCheck(odepth == THCTensor_(size)(state, gradOutput, dimd), 3,
+               oheight, THCTensor_(sizeLegacyNoScalars)(state, gradOutput, dimh));
+    THArgCheck(odepth == THCTensor_(sizeLegacyNoScalars)(state, gradOutput, dimd), 3,
                "gradOutput depth unexpected. Expected: %d, Got: %d",
-               odepth, THCTensor_(size)(state, gradOutput, dimd));
+               odepth, THCTensor_(sizeLegacyNoScalars)(state, gradOutput, dimd));
   }
 }
 
@@ -78,17 +78,17 @@ void THNN_(VolumetricReplicationPadding_updateOutput)(
   int numInputDims = THCTensor_(nDimensionLegacyNoScalars)(state, input);
 
   if (numInputDims == 5) {
-    numBatch = THCTensor_(size)(state, input, 0);
+    numBatch = THCTensor_(sizeLegacyNoScalars)(state, input, 0);
     planeDim++;
     dimd++;
     dimh++;
     dimw++;
   }
 
-  int numPlanes = THCTensor_(size)(state, input, planeDim);
-  int inputD = THCTensor_(size)(state, input, dimd);
-  int inputH = THCTensor_(size)(state, input, dimh);
-  int inputW = THCTensor_(size)(state, input, dimw);
+  int numPlanes = THCTensor_(sizeLegacyNoScalars)(state, input, planeDim);
+  int inputD = THCTensor_(sizeLegacyNoScalars)(state, input, dimd);
+  int inputH = THCTensor_(sizeLegacyNoScalars)(state, input, dimh);
+  int inputW = THCTensor_(sizeLegacyNoScalars)(state, input, dimw);
   int outputD = inputD + pfront + pback;
   int outputH = inputH + ptop + pbottom;
   int outputW  = inputW + pleft + pright;

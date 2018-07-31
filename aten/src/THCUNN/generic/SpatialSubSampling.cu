@@ -13,7 +13,7 @@ static inline void THNN_(SpatialSubSampling_shapeCheck)(
   THCUNN_argCheck(state, !input->is_empty() && (input->dim() == 3 || input->dim() == 4), 2, input,
                   "non-empty 3D or 4D input tensor expected but got: %s");
 
-  int nInputPlane = THCTensor_(size)(state, weight, 0);
+  int nInputPlane = THCTensor_(sizeLegacyNoScalars)(state, weight, 0);
 
   int dimc = 2;
   int dimr = 1;
@@ -25,9 +25,9 @@ static inline void THNN_(SpatialSubSampling_shapeCheck)(
     dimp++;
   }
 
-  int64_t nInputCols = input->size(dimc);
-  int64_t nInputRows = input->size(dimr);
-  THArgCheck(input->size(dimp) == nInputPlane, 2, "invalid number of input planes");
+  int64_t nInputCols = THTensor_sizeLegacyNoScalars(input, dimc);
+  int64_t nInputRows = THTensor_sizeLegacyNoScalars(input, dimr);
+  THArgCheck(THTensor_sizeLegacyNoScalars(input, dimp) == nInputPlane, 2, "invalid number of input planes");
   THArgCheck(nInputCols >= kW && nInputRows >= kH, 2, "input image smaller than kernel size");
 }
 
@@ -45,14 +45,14 @@ void THNN_(SpatialSubSampling_updateOutput)(
   real *output_data;
   real *input_data;
 
-  int nInputPlane = THCTensor_(size)(state, weight, 0);
+  int nInputPlane = THCTensor_(sizeLegacyNoScalars)(state, weight, 0);
 
   THCUNN_assertSameGPU(state, 4, input, output, weight, bias);
   THNN_(SpatialSubSampling_shapeCheck)(state, input, NULL, weight, kW, kH);
 
   if (input->dim() == 3) {
-    int64_t nInputCols = input->size(2);
-    int64_t nInputRows = input->size(1);
+    int64_t nInputCols = THTensor_sizeLegacyNoScalars(input, 2);
+    int64_t nInputRows = THTensor_sizeLegacyNoScalars(input, 1);
     int64_t nOutputCols = (nInputCols - kW) / dW + 1;
     int64_t nOutputRows = (nInputRows - kH) / dH + 1;
 
@@ -74,9 +74,9 @@ void THNN_(SpatialSubSampling_updateOutput)(
       nInputPlane, nInputRows, nInputCols, kH, kW, dH, dW);
     THCudaCheck(cudaGetLastError());
   } else {
-    int64_t nInputCols = input->size(3);
-    int64_t nInputRows = input->size(2);
-    int64_t nbatch = input->size(0);
+    int64_t nInputCols = THTensor_sizeLegacyNoScalars(input, 3);
+    int64_t nInputRows = THTensor_sizeLegacyNoScalars(input, 2);
+    int64_t nbatch = THTensor_sizeLegacyNoScalars(input, 0);
     int64_t nOutputCols = (nInputCols - kW) / dW + 1;
     int64_t nOutputRows = (nInputRows - kH) / dH + 1;
 
@@ -116,11 +116,11 @@ void THNN_(SpatialSubSampling_updateGradInput)(
   THCUNN_assertSameGPU(state, 4, input, gradOutput, weight, gradInput);
   THNN_(SpatialSubSampling_shapeCheck)(state, input, gradOutput, weight, kW, kH);
 
-  int nInputPlane = THCTensor_(size)(state, weight, 0);
+  int nInputPlane = THCTensor_(sizeLegacyNoScalars)(state, weight, 0);
 
   if (input->dim() == 3) {
-    int64_t nInputCols = input->size(2);
-    int64_t nInputRows = input->size(1);
+    int64_t nInputCols = THTensor_sizeLegacyNoScalars(input, 2);
+    int64_t nInputRows = THTensor_sizeLegacyNoScalars(input, 1);
 
     real *weight_data = THCTensor_(data)(state, weight);
     gradOutput = THCTensor_(newContiguous)(state, gradOutput);
@@ -149,9 +149,9 @@ void THNN_(SpatialSubSampling_updateGradInput)(
     }
     THCudaCheck(cudaGetLastError());
   } else {
-    int64_t nInputCols = input->size(3);
-    int64_t nInputRows = input->size(2);
-    int64_t nbatch = input->size(0);
+    int64_t nInputCols = THTensor_sizeLegacyNoScalars(input, 3);
+    int64_t nInputRows = THTensor_sizeLegacyNoScalars(input, 2);
+    int64_t nbatch = THTensor_sizeLegacyNoScalars(input, 0);
 
     real *weight_data = THCTensor_(data)(state, weight);
     gradOutput = THCTensor_(newContiguous)(state, gradOutput);
@@ -196,11 +196,11 @@ void THNN_(SpatialSubSampling_accGradParameters)(
   THCUNN_assertSameGPU(state, 4, input, gradOutput, gradWeight, gradBias);
   THNN_(SpatialSubSampling_shapeCheck)(state, input, gradOutput, gradWeight, kW, kH);
 
-  int nInputPlane = THCTensor_(size)(state, gradWeight, 0);
+  int nInputPlane = THCTensor_(sizeLegacyNoScalars)(state, gradWeight, 0);
 
   if (input->dim() == 3) {
-    int64_t nInputCols = input->size(2);
-    int64_t nInputRows = input->size(1);
+    int64_t nInputCols = THTensor_sizeLegacyNoScalars(input, 2);
+    int64_t nInputRows = THTensor_sizeLegacyNoScalars(input, 1);
 
     real *gradWeight_data = THCTensor_(data)(state, gradWeight);
     real *gradBias_data = THCTensor_(data)(state, gradBias);
@@ -221,9 +221,9 @@ void THNN_(SpatialSubSampling_accGradParameters)(
       nInputPlane, nInputRows, nInputCols, kH, kW, dH, dW, scale);
     THCudaCheck(cudaGetLastError());
   } else {
-    int64_t nInputCols = input->size(3);
-    int64_t nInputRows = input->size(2);
-    int64_t nbatch = input->size(0);
+    int64_t nInputCols = THTensor_sizeLegacyNoScalars(input, 3);
+    int64_t nInputRows = THTensor_sizeLegacyNoScalars(input, 2);
+    int64_t nbatch = THTensor_sizeLegacyNoScalars(input, 0);
 
     real *gradWeight_data = THCTensor_(data)(state, gradWeight);
     real *gradBias_data = THCTensor_(data)(state, gradBias);
@@ -242,8 +242,8 @@ void THNN_(SpatialSubSampling_accGradParameters)(
     int64_t sl;
     for (sl=0; sl<nbatch; sl++) {
       subgradweight<real, accreal> <<<blocks, threads, 0, THCState_getCurrentStream(state)>>> (
-        input_data + sl*input->stride(0),
-        gradOutput_data + sl*gradOutput->stride(0),
+        input_data + sl*THTensor_strideLegacyNoScalars(input, 0),
+        gradOutput_data + sl*THTensor_strideLegacyNoScalars(gradOutput, 0),
         gradWeight_data, gradBias_data,
         nInputPlane, nInputRows, nInputCols, kH, kW, dH, dW, scale);
     }

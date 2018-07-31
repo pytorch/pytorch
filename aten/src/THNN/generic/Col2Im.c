@@ -131,7 +131,7 @@ static inline void THNN_(Col2Im_shapeCheck)(
                 "Expected non-empty 2D or 3D input tensor, but got input of shape %s");
 
   int64_t batch_dim = (ndim == 3) ? 0 : -1;
-  int64_t nInputPlane  = input->size(batch_dim + 1);
+  int64_t nInputPlane  = THTensor_sizeLegacyNoScalars(input, batch_dim + 1);
 
   if (nInputPlane % (kW * kH) != 0) {
     THError("Expected size of input's dimension 1 to be divisible by the "
@@ -139,7 +139,7 @@ static inline void THNN_(Col2Im_shapeCheck)(
             "kernel_size=(%d, %d).", (long long) nInputPlane, kH, kW);
   }
 
-  int64_t inputLength  = input->size(batch_dim + 2);
+  int64_t inputLength  = THTensor_sizeLegacyNoScalars(input, batch_dim + 2);
   int64_t nBlocksH = div_rtn<int64_t>(outputHeight + 2 * padH - dH * (kH - 1) - 1, sH) + 1;
   int64_t nBlocksW = div_rtn<int64_t>(outputWidth + 2 * padW - dW * (kW - 1) - 1, sW) + 1;
 
@@ -176,11 +176,11 @@ void THNN_(Col2Im_updateOutput)(
   if (input->dim() == 2) {
       // Force batch
       batched_input = false;
-      THTensor_(resize3d)(input, 1, input->size(0), input->size(1));
+      THTensor_(resize3d)(input, 1, THTensor_sizeLegacyNoScalars(input, 0), THTensor_sizeLegacyNoScalars(input, 1));
   }
 
-  long batchSize = input->size(0);
-  long nInputPlane = input->size(1);
+  long batchSize = THTensor_sizeLegacyNoScalars(input, 0);
+  long nInputPlane = THTensor_sizeLegacyNoScalars(input, 1);
   long nOutputPlane = nInputPlane / (kW * kH);
 
   input = THTensor_(newContiguous)(input);

@@ -17,17 +17,17 @@ void THNN_(SpatialMaxUnpooling_updateOutput)(
   int64_t nInputCols, nInputRows, nInputPlane, batchSize;
 
   if (input->dim() == 3) {
-    nInputCols = input->size(2);
-    nInputRows = input->size(1);
-    nInputPlane = input->size(0);
+    nInputCols = THTensor_sizeLegacyNoScalars(input, 2);
+    nInputRows = THTensor_sizeLegacyNoScalars(input, 1);
+    nInputPlane = THTensor_sizeLegacyNoScalars(input, 0);
     batchSize = 1;
   }
   else
   {
-    nInputCols = input->size(3);
-    nInputRows = input->size(2);
-    nInputPlane = input->size(1);
-    batchSize = input->size(0);
+    nInputCols = THTensor_sizeLegacyNoScalars(input, 3);
+    nInputRows = THTensor_sizeLegacyNoScalars(input, 2);
+    nInputPlane = THTensor_sizeLegacyNoScalars(input, 1);
+    batchSize = THTensor_sizeLegacyNoScalars(input, 0);
   }
 
   input = THCTensor_(newContiguous)(state, input);
@@ -65,22 +65,22 @@ void THNN_(SpatialMaxUnpooling_updateGradInput)(
   int dimh = 1;
 
   if (input->dim() == 3) {
-    nInputPlane = input->size(0);
+    nInputPlane = THTensor_sizeLegacyNoScalars(input, 0);
     batchSize = 1;
   }
   else
   {
     ++dimw;
     ++dimh;
-    nInputPlane = input->size(1);
-    batchSize = input->size(0);
+    nInputPlane = THTensor_sizeLegacyNoScalars(input, 1);
+    batchSize = THTensor_sizeLegacyNoScalars(input, 0);
   }
-  nInputCols = input->size(dimw);
-  nInputRows = input->size(dimh);
+  nInputCols = THTensor_sizeLegacyNoScalars(input, dimw);
+  nInputRows = THTensor_sizeLegacyNoScalars(input, dimh);
 
-  if(owidth!=gradOutput->size(dimw) || oheight!=gradOutput->size(dimh)){
+  if(owidth!=THTensor_sizeLegacyNoScalars(gradOutput, dimw) || oheight!=THTensor_sizeLegacyNoScalars(gradOutput, dimh)){
      THError("Inconsistent gradOutput size. oheight= %d, owidth= %d, gradOutput: %dx%d",
-             oheight, owidth,gradOutput->size(dimh),gradOutput->size(dimw));
+             oheight, owidth,THTensor_sizeLegacyNoScalars(gradOutput, dimh),THTensor_sizeLegacyNoScalars(gradOutput, dimw));
   }
 
   input = THCTensor_(newContiguous)(state, input);

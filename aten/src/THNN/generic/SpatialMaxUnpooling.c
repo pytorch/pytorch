@@ -67,15 +67,15 @@ void THNN_(SpatialMaxUnpooling_updateOutput)(
 
   if (input->dim() == 4)
   {
-    nbatch = input->size(0);
+    nbatch = THTensor_sizeLegacyNoScalars(input, 0);
     dimw++;
     dimh++;
   }
 
   /* sizes */
-  nslices = input->size(dimh-1);
-  iheight = input->size(dimh);
-  iwidth = input->size(dimw);
+  nslices = THTensor_sizeLegacyNoScalars(input, dimh-1);
+  iheight = THTensor_sizeLegacyNoScalars(input, dimh);
+  iwidth = THTensor_sizeLegacyNoScalars(input, dimw);
 
   /* get contiguous input and indices */
   input = THTensor_(newContiguous)(input);
@@ -184,19 +184,19 @@ void THNN_(SpatialMaxUnpooling_updateGradInput)(
   THTensor_(zero)(gradInput);
 
   if (input->dim() == 4) {
-    nbatch = input->size(0);
+    nbatch = THTensor_sizeLegacyNoScalars(input, 0);
     dimw++;
     dimh++;
   }
 
   /* sizes */
-  nslices = input->size(dimh-1);
-  iheight = input->size(dimh);
-  iwidth = input->size(dimw);
+  nslices = THTensor_sizeLegacyNoScalars(input, dimh-1);
+  iheight = THTensor_sizeLegacyNoScalars(input, dimh);
+  iwidth = THTensor_sizeLegacyNoScalars(input, dimw);
 
-  if(owidth!=gradOutput->size(dimw) || oheight!=gradOutput->size(dimh)){
+  if(owidth!=THTensor_sizeLegacyNoScalars(gradOutput, dimw) || oheight!=THTensor_sizeLegacyNoScalars(gradOutput, dimh)){
     THError("Inconsistent gradOutput size. oheight= %d, owidth= %d, gradOutput: %dx%d",
-	    oheight, owidth, gradOutput->size(dimh), gradOutput->size(dimw));
+	    oheight, owidth, THTensor_sizeLegacyNoScalars(gradOutput, dimh), THTensor_sizeLegacyNoScalars(gradOutput, dimw));
   }
 
   /* get raw pointers */

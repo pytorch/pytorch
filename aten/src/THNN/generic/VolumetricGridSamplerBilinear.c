@@ -17,11 +17,11 @@ static inline void THNN_(VolumetricGridSamplerBilinear_shapeCheck)
   THNN_ARGCHECK(!grid->is_empty() && grid->dim() == 5, 2, grid,
     "non-empty 5D grid tensor expected but got: %s");
 
-  int nbatch   = THTensor_(size)(input, 0);
-  int channels = THTensor_(size)(input, 1);
-  int odepth    = THTensor_(size)(grid, 1);
-  int oheight   = THTensor_(size)(grid, 2);
-  int owidth    = THTensor_(size)(grid, 3);
+  int nbatch   = THTensor_(sizeLegacyNoScalars)(input, 0);
+  int channels = THTensor_(sizeLegacyNoScalars)(input, 1);
+  int odepth    = THTensor_(sizeLegacyNoScalars)(grid, 1);
+  int oheight   = THTensor_(sizeLegacyNoScalars)(grid, 2);
+  int owidth    = THTensor_(sizeLegacyNoScalars)(grid, 3);
 
   THNN_CHECK_DIM_SIZE(grid, 5, 0, nbatch);
   THNN_CHECK_DIM_SIZE(grid, 5, 4, 3);
@@ -49,14 +49,14 @@ TH_API void THNN_(VolumetricGridSamplerBilinear_updateOutput)(
     int padding_mode) {
 
   THNN_(VolumetricGridSamplerBilinear_shapeCheck)(input, grid, NULL);
-  int N = THTensor_(size)(input, 0);
-  int C = THTensor_(size)(input, 1);
-  int ID = THTensor_(size)(input, 2);
-  int IH = THTensor_(size)(input, 3);
-  int IW = THTensor_(size)(input, 4);
-  int D = THTensor_(size)(grid, 1);
-  int H = THTensor_(size)(grid, 2);
-  int W = THTensor_(size)(grid, 3);
+  int N = THTensor_(sizeLegacyNoScalars)(input, 0);
+  int C = THTensor_(sizeLegacyNoScalars)(input, 1);
+  int ID = THTensor_(sizeLegacyNoScalars)(input, 2);
+  int IH = THTensor_(sizeLegacyNoScalars)(input, 3);
+  int IW = THTensor_(sizeLegacyNoScalars)(input, 4);
+  int D = THTensor_(sizeLegacyNoScalars)(grid, 1);
+  int H = THTensor_(sizeLegacyNoScalars)(grid, 2);
+  int W = THTensor_(sizeLegacyNoScalars)(grid, 3);
 
   // resize output to the same shape as input
   THTensor_(resize5d)(output, N, C, D, H, W);
@@ -189,14 +189,14 @@ TH_API void THNN_(VolumetricGridSamplerBilinear_updateGradInput)(
     int padding_mode) {
 
   THNN_(VolumetricGridSamplerBilinear_shapeCheck)(input, grid, gradOutput);
-  int N = THTensor_(size)(input, 0);
-  int C = THTensor_(size)(input, 1);
-  int ID = THTensor_(size)(input, 2);
-  int IH = THTensor_(size)(input, 3);
-  int IW = THTensor_(size)(input, 4);
-  int D = THTensor_(size)(grid, 1);
-  int H = THTensor_(size)(grid, 2);
-  int W = THTensor_(size)(grid, 3);
+  int N = THTensor_(sizeLegacyNoScalars)(input, 0);
+  int C = THTensor_(sizeLegacyNoScalars)(input, 1);
+  int ID = THTensor_(sizeLegacyNoScalars)(input, 2);
+  int IH = THTensor_(sizeLegacyNoScalars)(input, 3);
+  int IW = THTensor_(sizeLegacyNoScalars)(input, 4);
+  int D = THTensor_(sizeLegacyNoScalars)(grid, 1);
+  int H = THTensor_(sizeLegacyNoScalars)(grid, 2);
+  int W = THTensor_(sizeLegacyNoScalars)(grid, 3);
 
   THTensor_(resize5d)(gradInput, N, C, ID, IH, IW);
   THTensor_(resize5d)(gradGrid, N, D, H, W, 3);

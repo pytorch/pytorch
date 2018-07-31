@@ -35,10 +35,10 @@ void THNN_(SpatialUpSamplingNearest_updateOutput)(
     int outputHeight,
     int outputWidth)
 {
-  int nbatch = THTensor_(size)(input, 0);
-  int channels = THTensor_(size)(input, 1);
-  int inputHeight = THTensor_(size)(input, 2);
-  int inputWidth = THTensor_(size)(input, 3);
+  int nbatch = THTensor_(sizeLegacyNoScalars)(input, 0);
+  int channels = THTensor_(sizeLegacyNoScalars)(input, 1);
+  int inputHeight = THTensor_(sizeLegacyNoScalars)(input, 2);
+  int inputWidth = THTensor_(sizeLegacyNoScalars)(input, 3);
   const float height_scale = (float) inputHeight / (float) outputHeight;
   const float width_scale = (float) inputWidth / (float) outputWidth;
 
@@ -46,8 +46,8 @@ void THNN_(SpatialUpSamplingNearest_updateOutput)(
 		  inputHeight, inputWidth, outputHeight, outputWidth);
 
   THTensor_(resize4d)(output,
-                      THTensor_(size)(input, 0),
-                      THTensor_(size)(input, 1),
+                      THTensor_(sizeLegacyNoScalars)(input, 0),
+                      THTensor_(sizeLegacyNoScalars)(input, 1),
                       outputHeight,
                       outputWidth);
   channels = channels * nbatch;

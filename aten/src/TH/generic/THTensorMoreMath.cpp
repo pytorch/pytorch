@@ -10,20 +10,20 @@ void THTensor_(baddbmm)(THTensor *result, real beta, THTensor *t, real alpha, TH
 
   THArgCheck(THTensor_(nDimensionLegacyNoScalars)(batch1) == 3, 1, "expected 3D tensor, got %dD", THTensor_(nDimensionLegacyNoScalars)(batch1));
   THArgCheck(THTensor_(nDimensionLegacyNoScalars)(batch2) == 3, 2, "expected 3D tensor, got %dD", THTensor_(nDimensionLegacyNoScalars)(batch2));
-  THArgCheck(THTensor_(size)(batch1, 0) == THTensor_(size)(batch2, 0), 2,
+  THArgCheck(THTensor_(sizeLegacyNoScalars)(batch1, 0) == THTensor_(sizeLegacyNoScalars)(batch2, 0), 2,
              "equal number of batches expected, got %d, %d",
-             THTensor_(size)(batch1, 0), THTensor_(size)(batch2, 0));
-  THArgCheck(THTensor_(size)(batch1, 2) == THTensor_(size)(batch2, 1), 2,
+             THTensor_(sizeLegacyNoScalars)(batch1, 0), THTensor_(sizeLegacyNoScalars)(batch2, 0));
+  THArgCheck(THTensor_(sizeLegacyNoScalars)(batch1, 2) == THTensor_(sizeLegacyNoScalars)(batch2, 1), 2,
              "wrong matrix size, batch1: %dx%d, batch2: %dx%d",
-             THTensor_(size)(batch1, 1), THTensor_(size)(batch1, 2),
-             THTensor_(size)(batch2, 1), THTensor_(size)(batch2, 2));
+             THTensor_(sizeLegacyNoScalars)(batch1, 1), THTensor_(sizeLegacyNoScalars)(batch1, 2),
+             THTensor_(sizeLegacyNoScalars)(batch2, 1), THTensor_(sizeLegacyNoScalars)(batch2, 2));
 
-  int64_t bs = THTensor_(size)(batch1, 0);
-  int64_t dim1 = THTensor_(size)(batch1, 1);
-  int64_t dim2 = THTensor_(size)(batch2, 2);
-  THArgCheck(THTensor_(size)(t, 0) == bs, 1,   "output tensor of incorrect size");
-  THArgCheck(THTensor_(size)(t, 1) == dim1, 1, "output tensor of incorrect size");
-  THArgCheck(THTensor_(size)(t, 2) == dim2, 1, "output tensor of incorrect size");
+  int64_t bs = THTensor_(sizeLegacyNoScalars)(batch1, 0);
+  int64_t dim1 = THTensor_(sizeLegacyNoScalars)(batch1, 1);
+  int64_t dim2 = THTensor_(sizeLegacyNoScalars)(batch2, 2);
+  THArgCheck(THTensor_(sizeLegacyNoScalars)(t, 0) == bs, 1,   "output tensor of incorrect size");
+  THArgCheck(THTensor_(sizeLegacyNoScalars)(t, 1) == dim1, 1, "output tensor of incorrect size");
+  THArgCheck(THTensor_(sizeLegacyNoScalars)(t, 2) == dim2, 1, "output tensor of incorrect size");
 
   if (t != result) {
     THTensor_(resizeAs)(result, t);
@@ -36,7 +36,7 @@ void THTensor_(baddbmm)(THTensor *result, real beta, THTensor *t, real alpha, TH
   THTensor *matrix2 = THTensor_(new)();
   THTensor *result_matrix = THTensor_(new)();
 
-  for (batch = 0; batch < THTensor_(size)(batch1, 0); ++batch) {
+  for (batch = 0; batch < THTensor_(sizeLegacyNoScalars)(batch1, 0); ++batch) {
     THTensor_(select)(matrix1, batch1, 0, batch);
     THTensor_(select)(matrix2, batch2, 0, batch);
     THTensor_(select)(result_matrix, result, 0, batch);
@@ -88,7 +88,7 @@ void THTensor_(max)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
   THLongStorage_free(dim);
 
   // two implementations optimized for data locality
-  if (t->stride(dimension) == 1) {
+  if (THTensor_strideLegacyNoScalars(t, dimension) == 1) {
     real theMax;
     real value;
     int64_t theIndex;
@@ -121,7 +121,7 @@ void THTensor_(max)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
     }
     THLongTensor_zero(indices_);
 
-    if(t->size(dimension) == 1) {
+    if(THTensor_sizeLegacyNoScalars(t, dimension) == 1) {
       if (!keepdim) {
         THTensor_(squeeze1d)(values_, values_, dimension);
         THLongTensor_squeeze1d(indices_, indices_, dimension);
@@ -131,12 +131,12 @@ void THTensor_(max)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
 
     THTensor *tempValues_ = THTensor_(newWithTensor)(values_);
     // tempValues_.expand_as(t)
-    THTensor_setSizeAtDim(tempValues_, dimension, t->size(dimension));
+    THTensor_setSizeAtDim(tempValues_, dimension, THTensor_sizeLegacyNoScalars(t, dimension));
     THTensor_setStrideAtDim(tempValues_, dimension, 0);
 
     THLongTensor *tempIndices_ = THLongTensor_newWithTensor(indices_);
     // tempIndices_.expand_as(t)
-    THTensor_setSizeAtDim(tempIndices_, dimension, t->size(dimension));
+    THTensor_setSizeAtDim(tempIndices_, dimension, THTensor_sizeLegacyNoScalars(t, dimension));
     THTensor_setStrideAtDim(tempIndices_, dimension, 0);
 
     TH_TENSOR_APPLY3_D(real, t, real, tempValues_, int64_t, tempIndices_, dimension,
@@ -172,7 +172,7 @@ void THTensor_(min)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
   THLongStorage_free(dim);
 
   // two implementations optimized for data locality
-  if (t->stride(dimension) == 1) {
+  if (THTensor_strideLegacyNoScalars(t, dimension) == 1) {
     real theMax;
     real value;
     int64_t theIndex;
@@ -205,7 +205,7 @@ void THTensor_(min)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
     }
     THLongTensor_zero(indices_);
 
-    if(t->size(dimension) == 1) {
+    if(THTensor_sizeLegacyNoScalars(t, dimension) == 1) {
       if (!keepdim) {
         THTensor_(squeeze1d)(values_, values_, dimension);
         THLongTensor_squeeze1d(indices_, indices_, dimension);
@@ -215,12 +215,12 @@ void THTensor_(min)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
 
     THTensor *tempValues_ = THTensor_(newWithTensor)(values_);
     // tempValues_.expand_as(t)
-    THTensor_setSizeAtDim(tempValues_, dimension, t->size(dimension));
+    THTensor_setSizeAtDim(tempValues_, dimension, THTensor_sizeLegacyNoScalars(t, dimension));
     THTensor_setStrideAtDim(tempValues_, dimension, 0);
 
     THLongTensor *tempIndices_ = THLongTensor_newWithTensor(indices_);
     // tempIndices_.expand_as(t)
-    THTensor_setSizeAtDim(tempIndices_, dimension, t->size(dimension));
+    THTensor_setSizeAtDim(tempIndices_, dimension, THTensor_sizeLegacyNoScalars(t, dimension));
     THTensor_setStrideAtDim(tempIndices_, dimension, 0);
 
     TH_TENSOR_APPLY3_D(real, t, real, tempValues_, int64_t, tempIndices_, dimension,
@@ -274,16 +274,16 @@ void THTensor_(sum)(THTensor *r_, THTensor *t, int dimension, int keepdim)
 
         for(j = 0; j < r_Dim; ++j) {
           if(j != dimension){
-            quot = rem/r_->stride(j);
-            rem = rem%r_->stride(j);
-            tBasicIndex += quot*t->stride(j);
+            quot = rem/THTensor_strideLegacyNoScalars(r_, j);
+            rem = rem%THTensor_strideLegacyNoScalars(r_, j);
+            tBasicIndex += quot*THTensor_strideLegacyNoScalars(t, j);
           }
         }
         real *t_data = tp+tBasicIndex;
         real *r__data = rp+iter;
         *r__data = 0;
-        for(j=0; j < t->size(dimension); ++j) {
-          *r__data += *(t_data + j*t->stride(dimension));
+        for(j=0; j < THTensor_sizeLegacyNoScalars(t, dimension); ++j) {
+          *r__data += *(t_data + j*THTensor_strideLegacyNoScalars(t, dimension));
         }
       }
     } else {
@@ -295,7 +295,7 @@ void THTensor_(sum)(THTensor *r_, THTensor *t, int dimension, int keepdim)
 #endif
   if (serial_path) {
     // two implementations optimized for data locality
-    if (t->stride(dimension) == 1) {
+    if (THTensor_strideLegacyNoScalars(t, dimension) == 1) {
       TH_TENSOR_DIM_APPLY2(real, t, real, r_, dimension,
                            accreal sum = 0;
                            int64_t i;
@@ -306,7 +306,7 @@ void THTensor_(sum)(THTensor *r_, THTensor *t, int dimension, int keepdim)
       THTensor_(zero)(r_);
       THTensor *temp_ = THTensor_(newWithTensor)(r_);
       // r_.expand_as(t)
-      THTensor_setSizeAtDim(temp_, dimension, t->size(dimension));
+      THTensor_setSizeAtDim(temp_, dimension, THTensor_sizeLegacyNoScalars(t, dimension));
       THTensor_setStrideAtDim(temp_, dimension, 0);
 
       TH_TENSOR_APPLY2(real, temp_, real, t, *temp__data = *temp__data + *t_data;);
@@ -354,16 +354,16 @@ void THTensor_(prod)(THTensor *r_, THTensor *t, int dimension, int keepdim)
 
         for(j = 0; j < r_Dim; ++j) {
           if(j != dimension){
-            quot = rem/r_->stride(j);
-            rem = rem%r_->stride(j);
-            tBasicIndex += quot*t->stride(j);
+            quot = rem/THTensor_strideLegacyNoScalars(r_, j);
+            rem = rem%THTensor_strideLegacyNoScalars(r_, j);
+            tBasicIndex += quot*THTensor_strideLegacyNoScalars(t, j);
           }
         }
         real *t_data = tp+tBasicIndex;
         real *r__data = rp+iter;
         *r__data = 1;
-        for(j=0; j < t->size(dimension); ++j) {
-          *r__data *= *(t_data + j*t->stride(dimension));
+        for(j=0; j < THTensor_sizeLegacyNoScalars(t, dimension); ++j) {
+          *r__data *= *(t_data + j*THTensor_strideLegacyNoScalars(t, dimension));
         }
       }
     } else {
@@ -376,7 +376,7 @@ void THTensor_(prod)(THTensor *r_, THTensor *t, int dimension, int keepdim)
 
   if(serial_path) {
     // two implementations optimized for data locality
-    if (t->stride(dimension) == 1) {
+    if (THTensor_strideLegacyNoScalars(t, dimension) == 1) {
       TH_TENSOR_DIM_APPLY2(real, t, real, r_, dimension,
                            accreal prod = 1;
                            int64_t i;
@@ -387,7 +387,7 @@ void THTensor_(prod)(THTensor *r_, THTensor *t, int dimension, int keepdim)
       THTensor_(fill)(r_, 1);
       THTensor *temp_ = THTensor_(newWithTensor)(r_);
       // r_.expand_as(t)
-      THTensor_setSizeAtDim(temp_, dimension, t->size(dimension));
+      THTensor_setSizeAtDim(temp_, dimension, THTensor_sizeLegacyNoScalars(t, dimension));
       THTensor_setStrideAtDim(temp_, dimension, 0);
 
       TH_TENSOR_APPLY2(real, temp_, real, t, *temp__data = *temp__data * *t_data;);
@@ -460,9 +460,9 @@ accreal THTensor_(trace)(THTensor *t)
 
   THArgCheck(THTensor_(nDimensionLegacyAll)(t) == 2, 1, "expected a matrix");
 
-  t_stride_0 = THTensor_(stride)(t, 0);
-  t_stride_1 = THTensor_(stride)(t, 1);
-  t_diag_size = THMin(THTensor_(size)(t, 0), THTensor_(size)(t, 1));
+  t_stride_0 = THTensor_(strideLegacyNoScalars)(t, 0);
+  t_stride_1 = THTensor_(strideLegacyNoScalars)(t, 1);
+  t_diag_size = THMin(THTensor_(sizeLegacyNoScalars)(t, 0), THTensor_(sizeLegacyNoScalars)(t, 1));
   while(i < t_diag_size)
   {
     sum += t_data[i*(t_stride_0+t_stride_1)];
@@ -482,7 +482,7 @@ void THTensor_(cross)(THTensor *r_, THTensor *a, THTensor *b, int dimension)
 
   for(i = 0; i < THTensor_(nDimensionLegacyNoScalars)(a); i++)
   {
-    if(THTensor_(size)(a, i) != THTensor_(size)(b, i)) {
+    if(THTensor_(sizeLegacyNoScalars)(a, i) != THTensor_(sizeLegacyNoScalars)(b, i)) {
         THDescBuff ba = THTensor_(sizeDesc)(a);
         THDescBuff bb = THTensor_(sizeDesc)(b);
         THError("inconsistent tensor sizes %s, %s", ba.str, bb.str);
@@ -493,7 +493,7 @@ void THTensor_(cross)(THTensor *r_, THTensor *a, THTensor *b, int dimension)
   {
     for(i = 0; i < THTensor_(nDimensionLegacyNoScalars)(a); i++)
     {
-      if(THTensor_(size)(a, i) == 3)
+      if(THTensor_(sizeLegacyNoScalars)(a, i) == 3)
       {
         dimension = i;
         break;
@@ -507,7 +507,7 @@ void THTensor_(cross)(THTensor *r_, THTensor *a, THTensor *b, int dimension)
 
   THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyNoScalars)(a), 3, "dimension %d out of range",
       dimension + TH_INDEX_BASE);
-  THArgCheck(THTensor_(size)(a, dimension) == 3, 3, "dimension %d does not have size 3",
+  THArgCheck(THTensor_(sizeLegacyNoScalars)(a, dimension) == 3, 3, "dimension %d does not have size 3",
       dimension + TH_INDEX_BASE);
 
   THTensor_(resizeAs)(r_, a);
@@ -565,8 +565,8 @@ void THTensor_(diag)(THTensor *r_, THTensor *t, int k)
   if(THTensor_(nDimensionLegacyNoScalars)(t) == 1)
   {
     real *t_data = THTensor_(data)(t);
-    int64_t t_stride_0 = THTensor_(stride)(t, 0);
-    int64_t t_size = THTensor_(size)(t, 0);
+    int64_t t_stride_0 = THTensor_(strideLegacyNoScalars)(t, 0);
+    int64_t t_size = THTensor_(sizeLegacyNoScalars)(t, 0);
     int64_t sz = t_size + (k >= 0 ? k : -k);
     real *r__data;
     int64_t r__stride_0;
@@ -576,8 +576,8 @@ void THTensor_(diag)(THTensor *r_, THTensor *t, int k)
     THTensor_(resize2d)(r_, sz, sz);
     THTensor_(zero)(r_);
     r__data = THTensor_(data)(r_);
-    r__stride_0 = THTensor_(stride)(r_, 0);
-    r__stride_1 = THTensor_(stride)(r_, 1);
+    r__stride_0 = THTensor_(strideLegacyNoScalars)(r_, 0);
+    r__stride_1 = THTensor_(strideLegacyNoScalars)(r_, 1);
     r__data += (k >= 0 ? k*r__stride_1 : -k*r__stride_0);
 
     for(i = 0; i < t_size; i++)
@@ -586,20 +586,20 @@ void THTensor_(diag)(THTensor *r_, THTensor *t, int k)
   else
   {
     real *t_data = THTensor_(data)(t);
-    int64_t t_stride_0 = THTensor_(stride)(t, 0);
-    int64_t t_stride_1 = THTensor_(stride)(t, 1);
+    int64_t t_stride_0 = THTensor_(strideLegacyNoScalars)(t, 0);
+    int64_t t_stride_1 = THTensor_(strideLegacyNoScalars)(t, 1);
     int64_t sz;
     real *r__data;
     int64_t r__stride_0;
     int64_t i;
 
     if(k >= 0)
-      sz = THMin(THTensor_(size)(t, 0), THTensor_(size)(t, 1)-k);
+      sz = THMin(THTensor_(sizeLegacyNoScalars)(t, 0), THTensor_(sizeLegacyNoScalars)(t, 1)-k);
     else
-      sz = THMin(THTensor_(size)(t, 0)+k, THTensor_(size)(t, 1));
+      sz = THMin(THTensor_(sizeLegacyNoScalars)(t, 0)+k, THTensor_(sizeLegacyNoScalars)(t, 1));
     THTensor_(resize1d)(r_, sz);
     r__data = THTensor_(data)(r_);
-    r__stride_0 = THTensor_(stride)(r_, 0);
+    r__stride_0 = THTensor_(strideLegacyNoScalars)(r_, 0);
 
     t_data += (k >= 0 ? k*t_stride_1 : -k*t_stride_0);
     for(i = 0; i < sz; i++)
@@ -622,9 +622,9 @@ void THTensor_(eye)(THTensor *r_, int64_t n, int64_t m)
 
   i = 0;
   r__data = THTensor_(data)(r_);
-  sz = THMin(THTensor_(size)(r_, 0), THTensor_(size)(r_, 1));
+  sz = THMin(THTensor_(sizeLegacyNoScalars)(r_, 0), THTensor_(sizeLegacyNoScalars)(r_, 1));
   for(i = 0; i < sz; i++)
-    r__data[i*(r_->stride(0)+r_->stride(1))] = 1;
+    r__data[i*(THTensor_strideLegacyNoScalars(r_, 0)+THTensor_strideLegacyNoScalars(r_, 1))] = 1;
 }
 
 
@@ -673,7 +673,7 @@ void THTensor_(randperm)(THTensor *r_, THGenerator *_generator, int64_t n)
 
   THTensor_(resize1d)(r_, n);
   r__data = THTensor_(data)(r_);
-  r__stride_0 = THTensor_(stride)(r_,0);
+  r__stride_0 = THTensor_(strideLegacyNoScalars)(r_,0);
 
   for(i = 0; i < n; i++)
     r__data[i*r__stride_0] = (real)(i);
@@ -1074,7 +1074,7 @@ void THTensor_(mode)(THTensor *values_, THLongTensor *indices_, THTensor *t, int
   THLongTensor_resize(indices_, dim, NULL);
   THLongStorage_free(dim);
 
-  t_size_dim = THTensor_(size)(t, dimension);
+  t_size_dim = THTensor_(sizeLegacyNoScalars)(t, dimension);
 
   temp_ = THTensor_(new)();
   THTensor_(resize1d)(temp_, t_size_dim);
@@ -1132,7 +1132,7 @@ void THTensor_(kthvalue)(THTensor *values_, THLongTensor *indices_, THTensor *t,
   int64_t t_size_dim;
 
   THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyAll)(t), 3, "dimension out of range");
-  THArgCheck(k > 0 && k <= t->size(dimension), 2, "selected index out of range");
+  THArgCheck(k > 0 && k <= THTensor_sizeLegacyNoScalars(t, dimension), 2, "selected index out of range");
 
   int in_dims = THTensor_(nDimensionLegacyAll)(t);
   THTensor_(preserveReduceDimSemantics)(values_, in_dims, dimension, keepdim);
@@ -1143,7 +1143,7 @@ void THTensor_(kthvalue)(THTensor *values_, THLongTensor *indices_, THTensor *t,
   THLongTensor_resize(indices_, dim, NULL);
   THLongStorage_free(dim);
 
-  t_size_dim = THTensor_(size)(t, dimension);
+  t_size_dim = THTensor_(sizeLegacyNoScalars)(t, dimension);
 
   temp_ = THTensor_(new)();
   THTensor_(resize1d)(temp_, t_size_dim);
@@ -1178,7 +1178,7 @@ void THTensor_(median)(THTensor *values_, THLongTensor *indices_, THTensor *t, i
 
   THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyAll)(t), 3, "dimension out of range");
 
-  t_size_dim = THTensor_(size)(t, dimension);
+  t_size_dim = THTensor_(sizeLegacyNoScalars)(t, dimension);
   k = (t_size_dim-1) >> 1; /* take middle or one-before-middle element */
 
   THTensor_(kthvalue)(values_, indices_, t, k+1, dimension, keepdim);
@@ -1193,7 +1193,7 @@ void THTensor_(topk)(THTensor *rt_, THLongTensor *ri_, THTensor *t, int64_t k, i
 #endif
   THArgCheck(dim >= 0 && dim < numDims, 3, "dim not in range");
 
-  int64_t sliceSize = THTensor_(size)(t, dim);
+  int64_t sliceSize = THTensor_(sizeLegacyNoScalars)(t, dim);
 #ifndef USE_TH_SIZE_ZERO_DIM
   THArgCheck(k > 0 && k <= sliceSize, 2, "k not in range for dimension");
 #else
@@ -1271,12 +1271,12 @@ void THTensor_(tril)(THTensor *r_, THTensor *t, int64_t k)
 
   THTensor_(resizeAs)(r_, t);
 
-  t_size_0 = THTensor_(size)(t, 0);
-  t_size_1 = THTensor_(size)(t, 1);
-  t_stride_0 = THTensor_(stride)(t, 0);
-  t_stride_1 = THTensor_(stride)(t, 1);
-  r__stride_0 = THTensor_(stride)(r_, 0);
-  r__stride_1 = THTensor_(stride)(r_, 1);
+  t_size_0 = THTensor_(sizeLegacyNoScalars)(t, 0);
+  t_size_1 = THTensor_(sizeLegacyNoScalars)(t, 1);
+  t_stride_0 = THTensor_(strideLegacyNoScalars)(t, 0);
+  t_stride_1 = THTensor_(strideLegacyNoScalars)(t, 1);
+  r__stride_0 = THTensor_(strideLegacyNoScalars)(r_, 0);
+  r__stride_1 = THTensor_(strideLegacyNoScalars)(r_, 1);
   r__data = THTensor_(data)(r_);
   t_data = THTensor_(data)(t);
 
@@ -1302,12 +1302,12 @@ void THTensor_(triu)(THTensor *r_, THTensor *t, int64_t k)
 
   THTensor_(resizeAs)(r_, t);
 
-  t_size_0 = THTensor_(size)(t, 0);
-  t_size_1 = THTensor_(size)(t, 1);
-  t_stride_0 = THTensor_(stride)(t, 0);
-  t_stride_1 = THTensor_(stride)(t, 1);
-  r__stride_0 = THTensor_(stride)(r_, 0);
-  r__stride_1 = THTensor_(stride)(r_, 1);
+  t_size_0 = THTensor_(sizeLegacyNoScalars)(t, 0);
+  t_size_1 = THTensor_(sizeLegacyNoScalars)(t, 1);
+  t_stride_0 = THTensor_(strideLegacyNoScalars)(t, 0);
+  t_stride_1 = THTensor_(strideLegacyNoScalars)(t, 1);
+  r__stride_0 = THTensor_(strideLegacyNoScalars)(r_, 0);
+  r__stride_1 = THTensor_(strideLegacyNoScalars)(r_, 1);
   r__data = THTensor_(data)(r_);
   t_data = THTensor_(data)(t);
 
@@ -1341,8 +1341,8 @@ inline void THTensor_(check_shape_except_dim)(THTensor *first, THTensor *second,
     if (dim == dimension) {
       continue;
     }
-    int64_t first_dim_size = first->size(dim);
-    int64_t second_dim_size = second->size(dim);
+    int64_t first_dim_size = THTensor_sizeLegacyNoScalars(first, dim);
+    int64_t second_dim_size = THTensor_sizeLegacyNoScalars(second, dim);
     THArgCheck(first_dim_size == second_dim_size, 0,
         "Sizes of tensors must match except in dimension %d. Got %lld and %lld in dimension %d",
         dimension, (long long)first_dim_size, (long long)second_dim_size, dim);
@@ -1386,13 +1386,13 @@ void THTensor_(catArray)(THTensor *result, THTensor **inputs, int numInputs, int
       continue;
     }
     THTensor_(check_shape_except_dim)(notSkippedTensor, tensor, dimension);
-    cat_dim_size += tensor->size(dimension);
+    cat_dim_size += THTensor_sizeLegacyNoScalars(tensor, dimension);
   }
 
   // Compute the size of the result
   THLongStorage *size = THLongStorage_newWithSize(nDims);
   for (int dim = 0; dim < nDims; dim++) {
-    int64_t result_dim_size = notSkippedTensor->size(dim);
+    int64_t result_dim_size = THTensor_sizeLegacyNoScalars(notSkippedTensor, dim);
     if (dim == dimension) {
       result_dim_size = cat_dim_size;
     }
@@ -1431,7 +1431,7 @@ void THTensor_(catArray)(THTensor *result, THTensor **inputs, int numInputs, int
     offset = 0;
     for (int j = 0; j < numInputs; j++) {
       if (!should_skip(inputs[j])) {
-        int64_t dimSize = inputs[j]->size(dimension);
+        int64_t dimSize = THTensor_sizeLegacyNoScalars(inputs[j], dimension);
         THTensor *nt = THTensor_(newWithTensor)(result);
         THTensor_(narrow)(nt, NULL, dimension, offset, dimSize);
         THTensor_(copy)(nt, inputs[j]);
@@ -1690,16 +1690,16 @@ void THTensor_(logicalAnd)(THTensor *r_, THTensor *t, int dimension, int keepdim
 
         for(j = 0; j < r_Dim; ++j) {
           if(j != dimension){
-            quot = rem/r_->stride(j);
-            rem = rem%r_->stride(j);
-            tBasicIndex += quot*t->stride(j);
+            quot = rem/THTensor_strideLegacyNoScalars(r_, j);
+            rem = rem%THTensor_strideLegacyNoScalars(r_, j);
+            tBasicIndex += quot*THTensor_strideLegacyNoScalars(t, j);
           }
         }
         real *t_data = tp+tBasicIndex;
         real *r__data = rp+iter;
         *r__data = 1;
-        for(j=0; j < t->size(dimension); ++j) {
-          *r__data = *r__data && *(t_data + j*t->stride(dimension));
+        for(j=0; j < THTensor_sizeLegacyNoScalars(t, dimension); ++j) {
+          *r__data = *r__data && *(t_data + j*THTensor_strideLegacyNoScalars(t, dimension));
         }
       }
     } else {
@@ -1712,7 +1712,7 @@ void THTensor_(logicalAnd)(THTensor *r_, THTensor *t, int dimension, int keepdim
 
   if(serial_path) {
     // two implementations optimized for data locality
-    if (t->stride(dimension) == 1) {
+    if (THTensor_strideLegacyNoScalars(t, dimension) == 1) {
       TH_TENSOR_DIM_APPLY2(real, t, real, r_, dimension,
                            accreal prod = 1;
                            int64_t i;
@@ -1723,7 +1723,7 @@ void THTensor_(logicalAnd)(THTensor *r_, THTensor *t, int dimension, int keepdim
       THTensor_(fill)(r_, 1);
       THTensor *temp_ = THTensor_(newWithTensor)(r_);
       // r_.expand_as(t)
-      THTensor_setSizeAtDim(temp_, dimension, t->size(dimension));
+      THTensor_setSizeAtDim(temp_, dimension, THTensor_sizeLegacyNoScalars(t, dimension));
       THTensor_setStrideAtDim(temp_, dimension, 0);
 
       TH_TENSOR_APPLY2(real, temp_, real, t, *temp__data = *temp__data && *t_data;);
@@ -1770,16 +1770,16 @@ void THTensor_(logicalAny)(THTensor *r_, THTensor *t, int dimension, int keepdim
 
         for(j = 0; j < r_Dim; ++j) {
           if(j != dimension){
-            quot = rem/r_->stride(j);
-            rem = rem%r_->stride(j);
-            tBasicIndex += quot*t->stride(j);
+            quot = rem/THTensor_strideLegacyNoScalars(r_, j);
+            rem = rem%THTensor_strideLegacyNoScalars(r_, j);
+            tBasicIndex += quot*THTensor_strideLegacyNoScalars(t, j);
           }
         }
         real *t_data = tp+tBasicIndex;
         real *r__data = rp+iter;
         *r__data = 0;
-        for(j=0; j < t->size(dimension); ++j) {
-          *r__data = *r__data || *(t_data + j*t->stride(dimension));
+        for(j=0; j < THTensor_sizeLegacyNoScalars(t, dimension); ++j) {
+          *r__data = *r__data || *(t_data + j*THTensor_strideLegacyNoScalars(t, dimension));
         }
       }
     } else {
@@ -1791,7 +1791,7 @@ void THTensor_(logicalAny)(THTensor *r_, THTensor *t, int dimension, int keepdim
 #endif
   if (serial_path) {
     // two implementations optimized for data locality
-    if (t->stride(dimension) == 1) {
+    if (THTensor_strideLegacyNoScalars(t, dimension) == 1) {
       TH_TENSOR_DIM_APPLY2(real, t, real, r_, dimension,
                            accreal sum = 0;
                            int64_t i;
@@ -1802,7 +1802,7 @@ void THTensor_(logicalAny)(THTensor *r_, THTensor *t, int dimension, int keepdim
       THTensor_(zero)(r_);
       THTensor *temp_ = THTensor_(newWithTensor)(r_);
       // r_.expand_as(t)
-      THTensor_setSizeAtDim(temp_, dimension, t->size(dimension));
+      THTensor_setSizeAtDim(temp_, dimension, THTensor_sizeLegacyNoScalars(t, dimension));
       THTensor_setStrideAtDim(temp_, dimension, 0);
 
       TH_TENSOR_APPLY2(real, temp_, real, t, *temp__data = *temp__data || *t_data;);
@@ -1887,7 +1887,7 @@ void THTensor_(mean)(THTensor *r_, THTensor *t, int dimension, int keepdim)
       dimension + TH_INDEX_BASE);
 
   THTensor_(sum)(r_, t, dimension, keepdim);
-  THTensor_(div)(r_, r_, t->size(dimension));
+  THTensor_(div)(r_, r_, THTensor_sizeLegacyNoScalars(t, dimension));
 }
 
 void THTensor_(std)(THTensor *r_, THTensor *t, int dimension, int biased, int keepdim)
@@ -2065,7 +2065,7 @@ void THTensor_(renorm)(THTensor *res, THTensor *src, real value, int dimension, 
 
   THTensor_(resizeAs)(res, src);
 
-  for (int64_t i = 0; i < src->size(dimension); i++)
+  for (int64_t i = 0; i < THTensor_sizeLegacyNoScalars(src, dimension); i++)
   {
     real norm = 0;
     real new_norm;
@@ -2217,7 +2217,7 @@ void THTensor_(bhistc)(THTensor *hist, THTensor *tensor, int64_t nbins, real min
   real minval;
   real maxval;
 
-  THTensor_(resize2d)(hist, tensor->size(0), nbins);
+  THTensor_(resize2d)(hist, THTensor_sizeLegacyNoScalars(tensor, 0), nbins);
   THTensor_(zero)(hist);
 
   minval = minvalue;

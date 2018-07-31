@@ -19,16 +19,16 @@ void THNN_(LRNforward)(THCState* state, THCTensor* input, THCTensor* output,
 
   if (input->dim() == 3) {
     batchSize = 1;
-    nInputPlane = input->size(0);
-    imsize_h = input->size(1);
-    imsize_w = input->size(2);
+    nInputPlane = THTensor_sizeLegacyNoScalars(input, 0);
+    imsize_h = THTensor_sizeLegacyNoScalars(input, 1);
+    imsize_w = THTensor_sizeLegacyNoScalars(input, 2);
   }
   else
   {
-    batchSize = input->size(0);
-    nInputPlane = input->size(1);
-    imsize_h = input->size(2);
-    imsize_w = input->size(3);
+    batchSize = THTensor_sizeLegacyNoScalars(input, 0);
+    nInputPlane = THTensor_sizeLegacyNoScalars(input, 1);
+    imsize_h = THTensor_sizeLegacyNoScalars(input, 2);
+    imsize_w = THTensor_sizeLegacyNoScalars(input, 3);
   }
 
   input = THCTensor_(newContiguous)(state, input);
@@ -64,16 +64,16 @@ void THNN_(LRNbackward)(THCState* state, THCTensor* input, THCTensor* output,
 
   if (input->dim() == 3) {
     batchSize = 1;
-    nInputPlane = input->size(0);
-    imsize_h = input->size(1);
-    imsize_w = input->size(2);
+    nInputPlane = THTensor_sizeLegacyNoScalars(input, 0);
+    imsize_h = THTensor_sizeLegacyNoScalars(input, 1);
+    imsize_w = THTensor_sizeLegacyNoScalars(input, 2);
   }
   else
   {
-    batchSize = input->size(0);
-    nInputPlane = input->size(1);
-    imsize_h = input->size(2);
-    imsize_w = input->size(3);
+    batchSize = THTensor_sizeLegacyNoScalars(input, 0);
+    nInputPlane = THTensor_sizeLegacyNoScalars(input, 1);
+    imsize_h = THTensor_sizeLegacyNoScalars(input, 2);
+    imsize_w = THTensor_sizeLegacyNoScalars(input, 3);
   }
 
   input = THCTensor_(newContiguous)(state, input);

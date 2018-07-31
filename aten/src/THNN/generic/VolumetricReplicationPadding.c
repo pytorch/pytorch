@@ -33,10 +33,10 @@ static inline void THNN_(VolumetricReplicationPadding_shapeCheck)(
   }
 
   /* sizes */
-  nslices = input->size(dimslices);
-  idepth = input->size(dimd);
-  iheight = input->size(dimh);
-  iwidth = input->size(dimw);
+  nslices = THTensor_sizeLegacyNoScalars(input, dimslices);
+  idepth = THTensor_sizeLegacyNoScalars(input, dimd);
+  iheight = THTensor_sizeLegacyNoScalars(input, dimh);
+  iwidth = THTensor_sizeLegacyNoScalars(input, dimw);
   odepth = idepth + pfront + pback;
   oheight = iheight + ptop + pbottom;
   owidth  = iwidth + pleft + pright;
@@ -47,18 +47,18 @@ static inline void THNN_(VolumetricReplicationPadding_shapeCheck)(
              idepth, iheight, iwidth, odepth, oheight, owidth);
 
   if (gradOutput != NULL) {
-    THArgCheck(nslices == THTensor_(size)(gradOutput, dimslices), 3,
+    THArgCheck(nslices == THTensor_(sizeLegacyNoScalars)(gradOutput, dimslices), 3,
                "gradOutput width unexpected. Expected: %d, Got: %d",
-               nslices, THTensor_(size)(gradOutput, dimslices));
-    THArgCheck(owidth == THTensor_(size)(gradOutput, dimw), 3,
+               nslices, THTensor_(sizeLegacyNoScalars)(gradOutput, dimslices));
+    THArgCheck(owidth == THTensor_(sizeLegacyNoScalars)(gradOutput, dimw), 3,
                "gradOutput width unexpected. Expected: %d, Got: %d",
-               owidth, THTensor_(size)(gradOutput, dimw));
-    THArgCheck(oheight == THTensor_(size)(gradOutput, dimh), 3,
+               owidth, THTensor_(sizeLegacyNoScalars)(gradOutput, dimw));
+    THArgCheck(oheight == THTensor_(sizeLegacyNoScalars)(gradOutput, dimh), 3,
                "gradOutput height unexpected. Expected: %d, Got: %d",
-               oheight, THTensor_(size)(gradOutput, dimh));
-    THArgCheck(odepth == THTensor_(size)(gradOutput, dimd), 3,
+               oheight, THTensor_(sizeLegacyNoScalars)(gradOutput, dimh));
+    THArgCheck(odepth == THTensor_(sizeLegacyNoScalars)(gradOutput, dimd), 3,
                "gradOutput depth unexpected. Expected: %d, Got: %d",
-               odepth, THTensor_(size)(gradOutput, dimd));
+               odepth, THTensor_(sizeLegacyNoScalars)(gradOutput, dimd));
   }
 }
 
@@ -151,7 +151,7 @@ THNN_(VolumetricReplicationPadding_shapeCheck)(
 
   if (input->dim() == 5)
   {
-    nbatch = input->size(0);
+    nbatch = THTensor_sizeLegacyNoScalars(input, 0);
     dimw++;
     dimh++;
     dimd++;
@@ -159,10 +159,10 @@ THNN_(VolumetricReplicationPadding_shapeCheck)(
   }
 
   /* sizes */
-  nslices = input->size(dimslices);
-  idepth = input->size(dimd);
-  iheight = input->size(dimh);
-  iwidth = input->size(dimw);
+  nslices = THTensor_sizeLegacyNoScalars(input, dimslices);
+  idepth = THTensor_sizeLegacyNoScalars(input, dimd);
+  iheight = THTensor_sizeLegacyNoScalars(input, dimh);
+  iwidth = THTensor_sizeLegacyNoScalars(input, dimw);
   odepth = idepth + pfront + pback;
   oheight = iheight + ptop + pbottom;
   owidth  = iwidth + pleft + pright;
@@ -295,7 +295,7 @@ void THNN_(VolumetricReplicationPadding_updateGradInput)(THNNState *state,
 
   if (input->dim() == 5)
   {
-    nbatch = input->size(0);
+    nbatch = THTensor_sizeLegacyNoScalars(input, 0);
     dimw++;
     dimh++;
     dimd++;
@@ -303,10 +303,10 @@ void THNN_(VolumetricReplicationPadding_updateGradInput)(THNNState *state,
   }
 
   /* sizes */
-  nslices = input->size(dimslices);
-  idepth = input->size(dimd);
-  iheight = input->size(dimh);
-  iwidth = input->size(dimw);
+  nslices = THTensor_sizeLegacyNoScalars(input, dimslices);
+  idepth = THTensor_sizeLegacyNoScalars(input, dimd);
+  iheight = THTensor_sizeLegacyNoScalars(input, dimh);
+  iwidth = THTensor_sizeLegacyNoScalars(input, dimw);
   odepth = idepth + pfront + pback;
   oheight = iheight + ptop + pbottom;
   owidth  = iwidth + pleft + pright;

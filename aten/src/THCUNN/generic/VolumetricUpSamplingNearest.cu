@@ -39,11 +39,11 @@ void THNN_(VolumetricUpSamplingNearest_updateOutput)(
            int outputWidth)
 {
   THCUNN_assertSameGPU(state, 2, input, output);
-  int nbatch = THCTensor_(size)(state, input, 0);
-  int channels = THCTensor_(size)(state, input, 1);
-  int inputDepth = THCTensor_(size)(state, input, 2);
-  int inputHeight = THCTensor_(size)(state, input, 3);
-  int inputWidth  = THCTensor_(size)(state, input, 4);
+  int nbatch = THCTensor_(sizeLegacyNoScalars)(state, input, 0);
+  int channels = THCTensor_(sizeLegacyNoScalars)(state, input, 1);
+  int inputDepth = THCTensor_(sizeLegacyNoScalars)(state, input, 2);
+  int inputHeight = THCTensor_(sizeLegacyNoScalars)(state, input, 3);
+  int inputWidth  = THCTensor_(sizeLegacyNoScalars)(state, input, 4);
 
   THNN_(VolumetricUpSamplingNearest_shapeCheck)(state, input, NULL, nbatch, channels,
 		  inputDepth, inputHeight, inputWidth,
@@ -52,8 +52,8 @@ void THNN_(VolumetricUpSamplingNearest_updateOutput)(
 		  outputDepth > 0 && outputHeight > 0 && outputWidth > 0);
 
   THCTensor_(resize5d)(state, output,
-                       THCTensor_(size)(state, input, 0),
-                       THCTensor_(size)(state, input, 1),
+                       THCTensor_(sizeLegacyNoScalars)(state, input, 0),
+                       THCTensor_(sizeLegacyNoScalars)(state, input, 1),
                        outputDepth,
                        outputHeight,
                        outputWidth);

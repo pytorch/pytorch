@@ -132,8 +132,8 @@ void THTensor_(nonzero)(THLongTensor *subscript, THTensor *tensor)
                     div = 1;
 
                     for (dim = tensor->dim() - 1; dim >= 0; dim--) {
-                      *(subscript_data + dim) = (i/div) % tensor->size(dim);
-                      div *= tensor->size(dim);
+                      *(subscript_data + dim) = (i/div) % THTensor_sizeLegacyNoScalars(tensor, dim);
+                      div *= THTensor_sizeLegacyNoScalars(tensor, dim);
                     }
 
                     subscript_data += tensor->dim();
@@ -177,10 +177,10 @@ void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, int dim, THLongTens
   {
     tensor_data = THTensor_(data)(tensor);
     src_data = THTensor_(data)(src);
-    ptrdiff_t rowsize = src->size(0) == 0 ? 1: THTensor_(nElement)(src) / src->size(0);
+    ptrdiff_t rowsize = THTensor_sizeLegacyNoScalars(src, 0) == 0 ? 1: THTensor_(nElement)(src) / THTensor_sizeLegacyNoScalars(src, 0);
 
     // check that the indices are within range
-    int64_t max = src->size(0) - 1 + TH_INDEX_BASE;
+    int64_t max = THTensor_sizeLegacyNoScalars(src, 0) - 1 + TH_INDEX_BASE;
     for (i=0; i<numel; i++) {
       if (index_data[i] < TH_INDEX_BASE || index_data[i] > max) {
         THLongTensor_free(index);
@@ -361,7 +361,7 @@ void THTensor_(indexAdd)(THTensor *tensor, int dim, THLongTensor *index, THTenso
   THArgCheck(index->dim() == 1, 3, "Index is supposed to be a vector");
   THArgCheck(dim < src->dim(), 4,"Indexing dim %d is out of bounds of tensor", dim + TH_INDEX_BASE);
 #endif
-  THArgCheck(numel == src->size(dim),4,"Number of indices should be equal to source:size(dim)");
+  THArgCheck(numel == THTensor_sizeLegacyNoScalars(src, dim),4,"Number of indices should be equal to source:size(dim)");
 
   index = THLongTensor_newContiguous(index);
   index_data = THLongTensor_data(index);
@@ -439,7 +439,7 @@ void THTensor_(gather)(THTensor *tensor, THTensor *src, int dim, THLongTensor *i
   THArgCheck(THTensor_(nDimensionLegacyNoScalars)(src) == THTensor_(nDimensionLegacyNoScalars)(tensor), 2,
              "Input tensor must have same dimensions as output tensor");
 
-  elems_per_row = THLongTensor_size(index, dim);
+  elems_per_row = THLongTensor_sizeLegacyNoScalars(index, dim);
 
   TH_TENSOR_DIM_APPLY3(real, tensor, real, src, int64_t, index, dim,
                        TH_TENSOR_DIM_APPLY3_SIZE_EQ_EXCEPT_DIM,
@@ -473,7 +473,7 @@ void THTensor_(scatter)(THTensor *tensor, int dim, THLongTensor *index, THTensor
              "Input tensor must have same dimensions as output tensor");
 #endif
 
-  elems_per_row = THLongTensor_size(index, dim);
+  elems_per_row = THLongTensor_sizeLegacyNoScalars(index, dim);
 
   TH_TENSOR_DIM_APPLY3(real, tensor, real, src, int64_t, index, dim,
                        TH_TENSOR_DIM_APPLY3_SIZE_SCATTER,
@@ -499,7 +499,7 @@ void THTensor_(scatterAdd)(THTensor *tensor, int dim, THLongTensor *index, THTen
   THArgCheck(THTensor_(nDimensionLegacyNoScalars)(src) == THTensor_(nDimensionLegacyNoScalars)(tensor), 4,
              "Input tensor must have same dimensions as output tensor");
 
-  elems_per_row = THLongTensor_size(index, dim);
+  elems_per_row = THLongTensor_sizeLegacyNoScalars(index, dim);
 
   TH_TENSOR_DIM_APPLY3(real, tensor, real, src, int64_t, index, dim,
                        TH_TENSOR_DIM_APPLY3_SIZE_SCATTER,
@@ -523,7 +523,7 @@ void THTensor_(scatterFill)(THTensor *tensor, int dim, THLongTensor *index, real
   THArgCheck(THLongTensor_nDimensionLegacyAll(index) == THTensor_(nDimensionLegacyAll)(tensor), 3,
              "Index tensor must have same dimensions as output tensor");
 
-  elems_per_row = THLongTensor_size(index, dim);
+  elems_per_row = THLongTensor_sizeLegacyNoScalars(index, dim);
 
   TH_TENSOR_DIM_APPLY2(real, tensor, int64_t, index, dim,
                        for (i = 0; i < elems_per_row; ++i)

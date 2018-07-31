@@ -29,7 +29,7 @@ void THNN_(LookupTable_accGradParameters)(
   }
 
   ptrdiff_t numel = THCIndexTensor_(nElement)(state, input);
-  int64_t stride = THCTensor_(stride)(state, gradWeight, 0);
+  int64_t stride = THCTensor_(strideLegacyNoScalars)(state, gradWeight, 0);
 
   cudaStream_t stream = THCState_getCurrentStream(state);
 
@@ -155,7 +155,7 @@ void THNN_(LookupTable_accGradParameters)(
 #define RUN(NORM, IDXTYPE) \
   calculate_norms_and_renorm<real, accreal, IDXTYPE, NORM> \
     <<<numel, THREADS/2, THREADS * sizeof(accreal), THCState_getCurrentStream(state)>>> \
-    (weightsRaw, idxRaw, normType, maxNorm, THCTensor_(stride)(state, weight, 0))
+    (weightsRaw, idxRaw, normType, maxNorm, THCTensor_(strideLegacyNoScalars)(state, weight, 0))
 
 void THNN_(LookupTable_renorm)(
            THCState *state,

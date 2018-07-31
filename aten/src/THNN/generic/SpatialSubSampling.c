@@ -11,7 +11,7 @@ static inline void THNN_(SpatialSubSampling_shapeCheck)(
                   "3D or 4D input tensor expected but got: %s");
   THArgCheck(THTensor_(isContiguous)(weight), 4, "weight must be contiguous");
 
-  int nInputPlane = THTensor_(size)(weight, 0);
+  int nInputPlane = THTensor_(sizeLegacyNoScalars)(weight, 0);
 
   int dimw = 2;
   int dimh = 1;
@@ -24,10 +24,10 @@ static inline void THNN_(SpatialSubSampling_shapeCheck)(
     dimh++;
   }
 
-  inputWidth = input->size(dimw);
-  inputHeight = input->size(dimh);
+  inputWidth = THTensor_sizeLegacyNoScalars(input, dimw);
+  inputHeight = THTensor_sizeLegacyNoScalars(input, dimh);
 
-  THArgCheck(input->size(dimh-1) == nInputPlane, 2, "invalid number of input planes");
+  THArgCheck(THTensor_sizeLegacyNoScalars(input, dimh-1) == nInputPlane, 2, "invalid number of input planes");
   THArgCheck(inputWidth >= kW && inputHeight >= kH, 2, "input image smaller than kernel size");
 }
 
@@ -56,27 +56,27 @@ void THNN_(SpatialSubSampling_updateOutput)(
   int64_t outputWidth;
   int64_t outputHeight;
 
-  int nInputPlane = THTensor_(size)(weight,0);
+  int nInputPlane = THTensor_(sizeLegacyNoScalars)(weight,0);
 
   int64_t k;
 
   THNN_(SpatialSubSampling_shapeCheck)(input, NULL, weight, kW, kH);
 
   if (input->dim() == 4) {
-    nbatch = input->size(0);
+    nbatch = THTensor_sizeLegacyNoScalars(input, 0);
     dimw++;
     dimh++;
   }
 
-  inputWidth = input->size(dimw);
-  inputHeight = input->size(dimh);
+  inputWidth = THTensor_sizeLegacyNoScalars(input, dimw);
+  inputHeight = THTensor_sizeLegacyNoScalars(input, dimh);
   outputWidth = (inputWidth - kW) / dW + 1;
   outputHeight = (inputHeight - kH) / dH + 1;
 
   if (input->dim() == 3)
     THTensor_(resize3d)(output, nInputPlane, outputHeight, outputWidth);
   else
-    THTensor_(resize4d)(output, input->size(0), nInputPlane, outputHeight, outputWidth);
+    THTensor_(resize4d)(output, THTensor_sizeLegacyNoScalars(input, 0), nInputPlane, outputHeight, outputWidth);
 
   input = THTensor_(newContiguous)(input);
   input_data = THTensor_(data)(input);
@@ -143,7 +143,7 @@ void THNN_(SpatialSubSampling_updateGradInput)(
   int64_t outputWidth;
   int64_t outputHeight;
 
-  int nInputPlane = THTensor_(size)(weight,0);
+  int nInputPlane = THTensor_(sizeLegacyNoScalars)(weight,0);
 
   real *weight_data;
   real *gradOutput_data;
@@ -152,13 +152,13 @@ void THNN_(SpatialSubSampling_updateGradInput)(
   int64_t k;
 
   if (input->dim() == 4) {
-    nbatch = input->size(0);
+    nbatch = THTensor_sizeLegacyNoScalars(input, 0);
     dimw++;
     dimh++;
   }
 
-  inputWidth = input->size(dimw);
-  inputHeight = input->size(dimh);
+  inputWidth = THTensor_sizeLegacyNoScalars(input, dimw);
+  inputHeight = THTensor_sizeLegacyNoScalars(input, dimh);
   outputWidth = (inputWidth - kW) / dW + 1;
   outputHeight = (inputHeight - kH) / dH + 1;
 
@@ -227,7 +227,7 @@ void THNN_(SpatialSubSampling_accGradParameters)(
   int64_t outputWidth;
   int64_t outputHeight;
 
-  int nInputPlane = THTensor_(size)(gradWeight,0);
+  int nInputPlane = THTensor_(sizeLegacyNoScalars)(gradWeight,0);
 
   real *gradWeight_data;
   real *gradBias_data;
@@ -239,11 +239,11 @@ void THNN_(SpatialSubSampling_accGradParameters)(
   if (input->dim() == 4) {
     dimw++;
     dimh++;
-    nbatch = input->size(0);
+    nbatch = THTensor_sizeLegacyNoScalars(input, 0);
   }
 
-  inputWidth = input->size(dimw);
-  inputHeight = input->size(dimh);
+  inputWidth = THTensor_sizeLegacyNoScalars(input, dimw);
+  inputHeight = THTensor_sizeLegacyNoScalars(input, dimh);
   outputWidth = (inputWidth - kW) / dW + 1;
   outputHeight = (inputHeight - kH) / dH + 1;
 

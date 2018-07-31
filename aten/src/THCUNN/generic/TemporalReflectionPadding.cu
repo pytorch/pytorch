@@ -18,13 +18,13 @@ void THNN_(TemporalReflectionPadding_updateOutput)(THCState *state,
                   "non-empty 2D or 3D (batch mode) tensor expected for input, but got: %s")
 
   if (numInputDims == 3) {
-    numBatch = THCTensor_(size)(state, input, 0);
+    numBatch = THCTensor_(sizeLegacyNoScalars)(state, input, 0);
     planeDim++;
     dimw++;
   }
 
-  int numPlanes = THCTensor_(size)(state, input, planeDim);
-  int inputW = THCTensor_(size)(state, input, dimw);
+  int numPlanes = THCTensor_(sizeLegacyNoScalars)(state, input, planeDim);
+  int inputW = THCTensor_(sizeLegacyNoScalars)(state, input, dimw);
 
   THArgCheck(padL < inputW && padR < inputW, 4,
              "Padding size should be less than the corresponding input dimension, "
@@ -84,12 +84,12 @@ void THNN_(TemporalReflectionPadding_updateGradInput)(
     planeDim++;
     dimw++;
   }
-  int iwidth = input->size(dimw);
+  int iwidth = THTensor_sizeLegacyNoScalars(input, dimw);
   int owidth  = iwidth + padL + padR;
 
-  THArgCheck(owidth == THCTensor_(size)(state, gradOutput, dimw), 3,
+  THArgCheck(owidth == THCTensor_(sizeLegacyNoScalars)(state, gradOutput, dimw), 3,
              "gradOutput width unexpected. Expected: %d, Got: %d",
-             owidth, THCTensor_(size)(state, gradOutput, dimw));
+             owidth, THCTensor_(sizeLegacyNoScalars)(state, gradOutput, dimw));
 
   THCTensor_(resizeAs)(state, gradInput, input);
   THCTensor_(zero)(state, gradInput);

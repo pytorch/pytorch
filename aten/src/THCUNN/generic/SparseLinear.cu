@@ -4,17 +4,17 @@
 
 static bool THNN_(checkInput)(THCTensor* t)
 {
-  return !t->is_empty() && THTensor_nDimensionLegacyAll(t) == 2 && t->size(1) == 3;
+  return !t->is_empty() && THTensor_nDimensionLegacyAll(t) == 2 && THTensor_sizeLegacyNoScalars(t, 1) == 3;
 }
 
 static bool THNN_(checkSize2D)(THCTensor* t, int64_t size0, int64_t size1)
 {
-  return !t->is_empty() && THTensor_nDimensionLegacyAll(t) == 2 && t->size(0) == size0 && t->size(1) == size1;
+  return !t->is_empty() && THTensor_nDimensionLegacyAll(t) == 2 && THTensor_sizeLegacyNoScalars(t, 0) == size0 && THTensor_sizeLegacyNoScalars(t, 1) == size1;
 }
 
 static bool THNN_(checkSize1D)(THCTensor* t, int64_t size0)
 {
-  return !t->is_empty() && THTensor_nDimensionLegacyAll(t) == 1 && t->size(0) == size0;
+  return !t->is_empty() && THTensor_nDimensionLegacyAll(t) == 1 && THTensor_sizeLegacyNoScalars(t, 0) == size0;
 }
 
 static inline void THNN_(copyCudaFloatingType)(THCState *state, THCudaIntTensor *buf, THCTensor *t) {
@@ -37,8 +37,8 @@ void THNN_(SparseLinear_updateOutput)(
   THAssert(THCTensor_(checkGPU)(state, 4, input, output, weight, bias));
 
   int64_t h;
-  int64_t outDim = THCTensor_(size)(state, weight, 0);
-  int64_t inDim = THCTensor_(size)(state, weight, 1);
+  int64_t outDim = THCTensor_(sizeLegacyNoScalars)(state, weight, 0);
+  int64_t inDim = THCTensor_(sizeLegacyNoScalars)(state, weight, 1);
 
   THArgCheck(THNN_(checkInput)(input), 2, "input size must be nnz x 3");
   AT_CHECK(!output->is_empty() && THCTensor_(nDimensionLegacyNoScalars)(state, output) == 2,
@@ -47,8 +47,8 @@ void THNN_(SparseLinear_updateOutput)(
 
   weight = THCTensor_(newContiguous)(state, weight);
   
-  int64_t batchnum = THCTensor_(size)(state, output, 0);
-  int64_t nnz = THCTensor_(size)(state, input, 0);
+  int64_t batchnum = THCTensor_(sizeLegacyNoScalars)(state, output, 0);
+  int64_t nnz = THCTensor_(sizeLegacyNoScalars)(state, input, 0);
 
   THCTensor *buffer = THCTensor_(new)(state);
   THCTensor *sel = THCTensor_(new)(state);
@@ -134,16 +134,16 @@ void THNN_(SparseLinear_accGradParameters)(
            accreal weightDecay,
            accreal scale)
 {
-  int64_t outDim = THCTensor_(size)(state, weight, 0);
-  int64_t inDim = THCTensor_(size)(state, weight, 1);
+  int64_t outDim = THCTensor_(sizeLegacyNoScalars)(state, weight, 0);
+  int64_t inDim = THCTensor_(sizeLegacyNoScalars)(state, weight, 1);
 
   THArgCheck(THNN_(checkInput)(input), 2, "input size must be batchsize x nnz x 2");
   THArgCheck(THNN_(checkSize2D)(gradWeight, outDim, inDim), 4, "gradWeight size wrong");
   THArgCheck(THNN_(checkSize1D)(gradBias, outDim), 5, "gradBias size wrong");
 
   weight = THCTensor_(newContiguous)(state, weight);
-  int64_t nnz = THCTensor_(size)(state, input, 0);
-  int64_t batchnum = THCTensor_(size)(state, gradOutput, 0);
+  int64_t nnz = THCTensor_(sizeLegacyNoScalars)(state, input, 0);
+  int64_t batchnum = THCTensor_(sizeLegacyNoScalars)(state, gradOutput, 0);
 
   THCTensor *buf = THCTensor_(new)(state);
   THCTensor *cols = THCTensor_(new)(state);

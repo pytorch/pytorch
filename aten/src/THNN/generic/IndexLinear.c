@@ -23,7 +23,7 @@
 
 static bool THNN_(checkKeysValues)(THLongTensor* keys, THTensor* values)
 {
-  return THLongTensor_size(keys, 0) == THTensor_(nElement)(values)
+  return THLongTensor_sizeLegacyNoScalars(keys, 0) == THTensor_(nElement)(values)
                 && THTensor_(nDimensionLegacyAll)(values) == 1
                 && THLongTensor_nDimensionLegacyAll(keys) == 1;
 }
@@ -42,10 +42,10 @@ void THNN_(IndexLinear_updateOutput)(
           int  train)
 {
   /* Retrieve all the dimensions of the problem */
-  int64_t batchSize = THLongTensor_size(sizes, 0);
-  int64_t keysSize = THLongTensor_size(keys, 0);
-  int64_t outDim = THTensor_(size)(bias, 0);
-  int64_t woutDim = THTensor_(size)(weight, 1);
+  int64_t batchSize = THLongTensor_sizeLegacyNoScalars(sizes, 0);
+  int64_t keysSize = THLongTensor_sizeLegacyNoScalars(keys, 0);
+  int64_t outDim = THTensor_(sizeLegacyNoScalars)(bias, 0);
+  int64_t woutDim = THTensor_(sizeLegacyNoScalars)(weight, 1);
   int maxNormalize = woutDim - outDim;
   int64_t* sizesData = THLongTensor_data(sizes);
   int64_t* cumSumSizesData = THLongTensor_data(cumSumSizes);
@@ -65,7 +65,7 @@ void THNN_(IndexLinear_updateOutput)(
   real* outputData = THTensor_(data)(output);
   real* valuesData = THTensor_(data)(values);
   real* weightData = THTensor_(data)(weight);
-  int64_t weightStride0 = weight->stride(0);
+  int64_t weightStride0 = THTensor_strideLegacyNoScalars(weight, 0);
   real* biasData = THTensor_(data)(bias);
   int64_t* keysData = THLongTensor_data(keys);
 
@@ -250,15 +250,15 @@ void THNN_(IndexLinear_updateParameters)(
   real weightDecay = TH_CONVERT_ACCREAL_TO_REAL(weightDecay_);
   real learningRate = TH_CONVERT_ACCREAL_TO_REAL(learningRate_);
   /* Retrieve all the dimensions of the problem */
-  int64_t outDim = THTensor_(size)(bias, 0);
-  int64_t woutDim = THTensor_(size)(weight, 1);
+  int64_t outDim = THTensor_(sizeLegacyNoScalars)(bias, 0);
+  int64_t woutDim = THTensor_(sizeLegacyNoScalars)(weight, 1);
   int maxNormalize = woutDim - outDim;
-  int64_t keysSize = THLongTensor_size(runningKeys, 0);
+  int64_t keysSize = THLongTensor_sizeLegacyNoScalars(runningKeys, 0);
 
   /* Access the storage data/strides */
   real* gradWeightData = THTensor_(data)(gradWeight);
   real* weightData = THTensor_(data)(weight);
-  int64_t weightStride0 = weight->stride(0);
+  int64_t weightStride0 = THTensor_strideLegacyNoScalars(weight, 0);
   real* gradBiasData = THTensor_(data)(gradBias);
   real* biasData = THTensor_(data)(bias);
   int64_t* keysData = THLongTensor_data(runningKeys);
@@ -395,9 +395,9 @@ void THNN_(IndexLinear_accUpdateGradParameters)(
   real weightDecay = TH_CONVERT_ACCREAL_TO_REAL(weightDecay_);
   real scale = TH_CONVERT_ACCREAL_TO_REAL(scale_);
   /* Retrieve all the dimensions of the problem */
-  int64_t batchSize = THLongTensor_size(sizes, 0);
-  int64_t outDim = THTensor_(size)(bias, 0);
-  int64_t woutDim = THTensor_(size)(weight, 1);
+  int64_t batchSize = THLongTensor_sizeLegacyNoScalars(sizes, 0);
+  int64_t outDim = THTensor_(sizeLegacyNoScalars)(bias, 0);
+  int64_t woutDim = THTensor_(sizeLegacyNoScalars)(weight, 1);
   int maxNormalize = woutDim - outDim;
   THArgCheck(THNN_(checkKeysValues)(keys, values), 1, "Keys and values should have the same number of elements");
 
@@ -406,7 +406,7 @@ void THNN_(IndexLinear_accUpdateGradParameters)(
   real* valuesData =THTensor_(data)(values);
   real* weightData = THTensor_(data)(weight);
   real* biasData = THTensor_(data)(bias);
-  int64_t weightStride0 = weight->stride(0);
+  int64_t weightStride0 = THTensor_strideLegacyNoScalars(weight, 0);
   int64_t* keysData = THLongTensor_data(keys);
   int64_t* sizesData = THLongTensor_data(sizes);
 
@@ -596,10 +596,10 @@ void THNN_(IndexLinear_accGradParameters)(
 {
   real scale = TH_CONVERT_ACCREAL_TO_REAL(scale_);
   /* Retrieve all the dimensions of the problem */
-  int64_t batchSize = THLongTensor_size(sizes, 0);
-  int64_t keysSize = THLongTensor_size(keys, 0);
-  int64_t outDim = THTensor_(size)(bias, 0);
-  int64_t woutDim = THTensor_(size)(weight, 1);
+  int64_t batchSize = THLongTensor_sizeLegacyNoScalars(sizes, 0);
+  int64_t keysSize = THLongTensor_sizeLegacyNoScalars(keys, 0);
+  int64_t outDim = THTensor_(sizeLegacyNoScalars)(bias, 0);
+  int64_t woutDim = THTensor_(sizeLegacyNoScalars)(weight, 1);
   int64_t maxNormalize = (woutDim - outDim) > 0 ?1:0;
   THArgCheck(THNN_(checkKeysValues)(keys, values), 1, "Keys and values should have the same number of elements");
   int64_t* sizesData = THLongTensor_data(sizes);

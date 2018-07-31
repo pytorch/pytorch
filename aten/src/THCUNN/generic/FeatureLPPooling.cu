@@ -62,11 +62,11 @@ THNN_(FeatureLPPooling_resizeForOutput)(THCState* state,
   THAssert(inputDim >= 1 && inputDim <= 4);
 
   int64_t outSize =
-    lpPoolingOutputSize(THCTensor_(size)(state, input, 0), width, stride);
+    lpPoolingOutputSize(THCTensor_(sizeLegacyNoScalars)(state, input, 0), width, stride);
   if (batchMode) {
     THAssert(inputDim > 1);
     outSize =
-      lpPoolingOutputSize(THCTensor_(size)(state, input, 1), width, stride);
+      lpPoolingOutputSize(THCTensor_(sizeLegacyNoScalars)(state, input, 1), width, stride);
   } else {
     THAssert(inputDim < 4);
   }
@@ -76,31 +76,31 @@ THNN_(FeatureLPPooling_resizeForOutput)(THCState* state,
   } else if (inputDim == 2) {
     if (batchMode) {
       THCTensor_(resize2d)(
-        state, toResize, THCTensor_(size)(state, input, 0), outSize);
+        state, toResize, THCTensor_(sizeLegacyNoScalars)(state, input, 0), outSize);
     } else {
       THCTensor_(resize2d)(
-        state, toResize, outSize, THCTensor_(size)(state, input, 1));
+        state, toResize, outSize, THCTensor_(sizeLegacyNoScalars)(state, input, 1));
     }
   } else if (inputDim == 3) {
     if (batchMode) {
       THCTensor_(resize3d)(
         state,
         toResize,
-        THCTensor_(size)(state, input, 0), outSize,
-        THCTensor_(size)(state, input, 2));
+        THCTensor_(sizeLegacyNoScalars)(state, input, 0), outSize,
+        THCTensor_(sizeLegacyNoScalars)(state, input, 2));
     } else {
       THCTensor_(resize3d)(
         state,
         toResize,
-        outSize, THCTensor_(size)(state, input, 1),
-        THCTensor_(size)(state, input, 2));
+        outSize, THCTensor_(sizeLegacyNoScalars)(state, input, 1),
+        THCTensor_(sizeLegacyNoScalars)(state, input, 2));
     }
   } else if (inputDim == 4) {
     THCTensor_(resize4d)(
       state,
       toResize,
-      THCTensor_(size)(state, input, 0), outSize,
-      THCTensor_(size)(state, input, 2), THCTensor_(size)(state, input, 3));
+      THCTensor_(sizeLegacyNoScalars)(state, input, 0), outSize,
+      THCTensor_(sizeLegacyNoScalars)(state, input, 2), THCTensor_(sizeLegacyNoScalars)(state, input, 3));
   }
 }
 
@@ -115,28 +115,28 @@ THNN_(FeatureLPPooling_resize)(THCState* state,
   if (inputDim == 1) {
     THCTensor_(resize1d)(state,
                          toResize,
-                         THCTensor_(size)(state, src, 0));
+                         THCTensor_(sizeLegacyNoScalars)(state, src, 0));
   } else if (inputDim == 2) {
     THCTensor_(resize2d)(
       state,
       toResize,
-      THCTensor_(size)(state, src, 0),
-      THCTensor_(size)(state, src, 1));
+      THCTensor_(sizeLegacyNoScalars)(state, src, 0),
+      THCTensor_(sizeLegacyNoScalars)(state, src, 1));
   } else if (inputDim == 3) {
     THCTensor_(resize3d)(
       state,
       toResize,
-      THCTensor_(size)(state, src, 0),
-      THCTensor_(size)(state, src, 1),
-      THCTensor_(size)(state, src, 2));
+      THCTensor_(sizeLegacyNoScalars)(state, src, 0),
+      THCTensor_(sizeLegacyNoScalars)(state, src, 1),
+      THCTensor_(sizeLegacyNoScalars)(state, src, 2));
   } else if (inputDim == 4) {
     THCTensor_(resize4d)(
       state,
       toResize,
-      THCTensor_(size)(state, src, 0),
-      THCTensor_(size)(state, src, 1),
-      THCTensor_(size)(state, src, 2),
-      THCTensor_(size)(state, src, 3));
+      THCTensor_(sizeLegacyNoScalars)(state, src, 0),
+      THCTensor_(sizeLegacyNoScalars)(state, src, 1),
+      THCTensor_(sizeLegacyNoScalars)(state, src, 2),
+      THCTensor_(sizeLegacyNoScalars)(state, src, 3));
   }
 }
 

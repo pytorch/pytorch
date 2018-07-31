@@ -26,11 +26,11 @@ static inline void THNN_(VolumetricMaxUnpooling_shapeCheck)(
 
   if (THCTensor_(nDimensionLegacyNoScalars)(state, input) == 4)
   {
-    inputSlices = THCTensor_(size)(state, input, 0);
+    inputSlices = THCTensor_(sizeLegacyNoScalars)(state, input, 0);
   }
   else if (THCTensor_(nDimensionLegacyNoScalars)(state, input) == 5)
   {
-    inputSlices = THCTensor_(size)(state, input, 1);
+    inputSlices = THCTensor_(sizeLegacyNoScalars)(state, input, 1);
   }
   else
   {
@@ -51,11 +51,11 @@ static inline void THNN_(VolumetricMaxUnpooling_shapeCheck)(
   }
 
   if (gradOutput != NULL) {
-    if (oT != gradOutput->size(dimt) || oW != gradOutput->size(dimw) || oH != gradOutput->size(dimh))
+    if (oT != THTensor_sizeLegacyNoScalars(gradOutput, dimt) || oW != THTensor_sizeLegacyNoScalars(gradOutput, dimw) || oH != THTensor_sizeLegacyNoScalars(gradOutput, dimh))
     {
       THError(
         "Inconsistent gradOutput size. oT= %d, oH= %d, oW= %d, gradOutput: %dx%dx%d",
-        oT, oH, oW, gradOutput->size(dimt), gradOutput->size(dimh), gradOutput->size(dimw));
+        oT, oH, oW, THTensor_sizeLegacyNoScalars(gradOutput, dimt), THTensor_sizeLegacyNoScalars(gradOutput, dimh), THTensor_sizeLegacyNoScalars(gradOutput, dimw));
     }
 
     THCUNN_check_dim_size(state, gradOutput, input->dim(), dimn, inputSlices);
@@ -88,19 +88,19 @@ void THNN_(VolumetricMaxUnpooling_updateOutput)(
   {
     /* sizes */
     batchSize   = 1;
-    inputSlices = THCTensor_(size)(state, input, 0);
-    inputTime   = THCTensor_(size)(state, input, 1);
-    inputHeight = THCTensor_(size)(state, input, 2);
-    inputWidth  = THCTensor_(size)(state, input, 3);
+    inputSlices = THCTensor_(sizeLegacyNoScalars)(state, input, 0);
+    inputTime   = THCTensor_(sizeLegacyNoScalars)(state, input, 1);
+    inputHeight = THCTensor_(sizeLegacyNoScalars)(state, input, 2);
+    inputWidth  = THCTensor_(sizeLegacyNoScalars)(state, input, 3);
   }
   else if (fiveDimensionalInput)
   {
     /* sizes */
-    batchSize   = THCTensor_(size)(state, input, 0);
-    inputSlices = THCTensor_(size)(state, input, 1);
-    inputTime   = THCTensor_(size)(state, input, 2);
-    inputHeight = THCTensor_(size)(state, input, 3);
-    inputWidth  = THCTensor_(size)(state, input, 4);
+    batchSize   = THCTensor_(sizeLegacyNoScalars)(state, input, 0);
+    inputSlices = THCTensor_(sizeLegacyNoScalars)(state, input, 1);
+    inputTime   = THCTensor_(sizeLegacyNoScalars)(state, input, 2);
+    inputHeight = THCTensor_(sizeLegacyNoScalars)(state, input, 3);
+    inputWidth  = THCTensor_(sizeLegacyNoScalars)(state, input, 4);
   }
 
   if (!fiveDimensionalInput) /* 4D */
@@ -196,18 +196,18 @@ void THNN_(VolumetricMaxUnpooling_updateGradInput)(
   if (!fiveDimensionalInput) /* 4D */
   {
     batchSize = 1;
-    inputSlices  = THCTensor_(size)(state, input, 0);
-    inputTime   = THCTensor_(size)(state, input, 1);
-    inputHeight = THCTensor_(size)(state, input, 2);
-    inputWidth  = THCTensor_(size)(state, input, 3);
+    inputSlices  = THCTensor_(sizeLegacyNoScalars)(state, input, 0);
+    inputTime   = THCTensor_(sizeLegacyNoScalars)(state, input, 1);
+    inputHeight = THCTensor_(sizeLegacyNoScalars)(state, input, 2);
+    inputWidth  = THCTensor_(sizeLegacyNoScalars)(state, input, 3);
   }
   else
   {
-    batchSize    = THCTensor_(size)(state, input, 0);
-    inputSlices  = THCTensor_(size)(state, input, 1);
-    inputTime   = THCTensor_(size)(state, input, 2);
-    inputHeight = THCTensor_(size)(state, input, 3);
-    inputWidth  = THCTensor_(size)(state, input, 4);
+    batchSize    = THCTensor_(sizeLegacyNoScalars)(state, input, 0);
+    inputSlices  = THCTensor_(sizeLegacyNoScalars)(state, input, 1);
+    inputTime   = THCTensor_(sizeLegacyNoScalars)(state, input, 2);
+    inputHeight = THCTensor_(sizeLegacyNoScalars)(state, input, 3);
+    inputWidth  = THCTensor_(sizeLegacyNoScalars)(state, input, 4);
   }
 
   input = THCTensor_(newContiguous)(state, input);

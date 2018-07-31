@@ -7,7 +7,7 @@ void THNN_(Linear_updateAddBuffer)(
           THTensor *input,
           THTensor *addBuffer)
 {
-  int64_t nframe = THTensor_(size)(input,0);
+  int64_t nframe = THTensor_(sizeLegacyNoScalars)(input,0);
   int64_t nElement = THTensor_(nElement)(addBuffer);
   if (nElement != nframe) {
     THTensor_(resize1d)(addBuffer,nframe);
@@ -25,7 +25,7 @@ void THNN_(Linear_updateOutput)(
 {
   int64_t dim = THTensor_(nDimensionLegacyAll)(input);
   if (dim == 1) {
-    THTensor_(resize1d)(output,THTensor_(size)(weight,0));
+    THTensor_(resize1d)(output,THTensor_(sizeLegacyNoScalars)(weight,0));
     if (bias) {
       THTensor_(copy)(output,bias);
     }
@@ -35,9 +35,9 @@ void THNN_(Linear_updateOutput)(
     THTensor_(addmv)(output,1,output,1,weight,input);
   }
   else if (dim == 2) {
-    int64_t nframe = THTensor_(size)(input,0);
+    int64_t nframe = THTensor_(sizeLegacyNoScalars)(input,0);
     int64_t nElement = THTensor_(nElement)(output);
-    THTensor_(resize2d)(output,nframe,THTensor_(size)(weight,0));
+    THTensor_(resize2d)(output,nframe,THTensor_(sizeLegacyNoScalars)(weight,0));
     if (THTensor_(nElement)(output) != nElement) {
       THTensor_(zero)(output);
     }

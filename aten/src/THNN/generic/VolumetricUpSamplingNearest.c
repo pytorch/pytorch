@@ -37,11 +37,11 @@ void THNN_(VolumetricUpSamplingNearest_updateOutput)(
     int outputHeight,
     int outputWidth)
 {
-  int nbatch = THTensor_(size)(input, 0);
-  int channels = THTensor_(size)(input, 1);
-  int inputDepth = THTensor_(size)(input, 2);
-  int inputHeight = THTensor_(size)(input, 3);
-  int inputWidth = THTensor_(size)(input, 4);
+  int nbatch = THTensor_(sizeLegacyNoScalars)(input, 0);
+  int channels = THTensor_(sizeLegacyNoScalars)(input, 1);
+  int inputDepth = THTensor_(sizeLegacyNoScalars)(input, 2);
+  int inputHeight = THTensor_(sizeLegacyNoScalars)(input, 3);
+  int inputWidth = THTensor_(sizeLegacyNoScalars)(input, 4);
   const float depth_scale = (float) inputDepth / (float) outputDepth;
   const float height_scale = (float) inputHeight / (float)outputHeight;
   const float width_scale = (float) inputWidth / (float)outputWidth;
@@ -49,8 +49,8 @@ void THNN_(VolumetricUpSamplingNearest_updateOutput)(
   THNN_(VolumetricUpSamplingNearest_shapeCheck)(input, NULL, nbatch, channels, inputDepth, inputHeight, inputWidth, outputDepth, outputHeight, outputWidth);
 
   THTensor_(resize5d)(output,
-                      THTensor_(size)(input, 0),
-                      THTensor_(size)(input, 1),
+                      THTensor_(sizeLegacyNoScalars)(input, 0),
+                      THTensor_(sizeLegacyNoScalars)(input, 1),
                       outputDepth,
                       outputHeight,
                       outputWidth);

@@ -38,10 +38,10 @@ void THNN_(SpatialUpSamplingBilinear_updateOutput)(
     int outputWidth,
     bool align_corners){
 
-  int nbatch = THTensor_(size)(input, 0);
-  int channels = THTensor_(size)(input, 1);
-  int inputHeight = THTensor_(size)(input, 2);
-  int inputWidth = THTensor_(size)(input, 3);
+  int nbatch = THTensor_(sizeLegacyNoScalars)(input, 0);
+  int channels = THTensor_(sizeLegacyNoScalars)(input, 1);
+  int inputHeight = THTensor_(sizeLegacyNoScalars)(input, 2);
+  int inputWidth = THTensor_(sizeLegacyNoScalars)(input, 3);
 
   THNN_(SpatialUpSamplingBilinear_shapeCheck)
     (input, NULL,
@@ -51,8 +51,8 @@ void THNN_(SpatialUpSamplingBilinear_updateOutput)(
 
   input = THTensor_(newContiguous)(input);
   THTensor_(resize4d)(output,
-		      THTensor_(size)(input, 0),
-		      THTensor_(size)(input, 1),
+		      THTensor_(sizeLegacyNoScalars)(input, 0),
+		      THTensor_(sizeLegacyNoScalars)(input, 1),
 		      outputHeight, outputWidth);
   THTensor_(zero)(output);
   real *idata = THTensor_(data)(input);

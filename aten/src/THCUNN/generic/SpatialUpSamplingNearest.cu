@@ -37,10 +37,10 @@ void THNN_(SpatialUpSamplingNearest_updateOutput)(
            int outputWidth)
 {
   THCUNN_assertSameGPU(state, 2, input, output);
-  int nbatch = THCTensor_(size)(state, input, 0);
-  int channels = THCTensor_(size)(state, input, 1);
-  int inputHeight = THCTensor_(size)(state, input, 2);
-  int inputWidth  = THCTensor_(size)(state, input, 3);
+  int nbatch = THCTensor_(sizeLegacyNoScalars)(state, input, 0);
+  int channels = THCTensor_(sizeLegacyNoScalars)(state, input, 1);
+  int inputHeight = THCTensor_(sizeLegacyNoScalars)(state, input, 2);
+  int inputWidth  = THCTensor_(sizeLegacyNoScalars)(state, input, 3);
 
   THNN_(SpatialUpSamplingNearest_shapeCheck)(state, input, NULL, nbatch, channels,
 		  inputHeight, inputWidth,
@@ -48,8 +48,8 @@ void THNN_(SpatialUpSamplingNearest_updateOutput)(
   THAssert(inputHeight > 0 && inputWidth > 0 && outputHeight > 0 && outputWidth > 0);
 
   THCTensor_(resize4d)(state, output,
-                       THCTensor_(size)(state, input, 0),
-                       THCTensor_(size)(state, input, 1),
+                       THCTensor_(sizeLegacyNoScalars)(state, input, 0),
+                       THCTensor_(sizeLegacyNoScalars)(state, input, 1),
 		       outputHeight,
                        outputWidth);
   THCTensor_(zero)(state, output);

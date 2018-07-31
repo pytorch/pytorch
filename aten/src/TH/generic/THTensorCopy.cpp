@@ -18,8 +18,8 @@ int THTensor_(copyTransposeValid)(THTensor *tensor, THTensor *src) {
   return THTensor_(isContiguous)(tensor) &&
          !src->is_empty() &&
          THTensor_(nDimensionLegacyNoScalars)(src) == 2 &&
-         THTensor_(stride)(src, 0) == 1 &&
-         THTensor_(stride)(src, 1) == THTensor_(size)(src, 0) &&
+         THTensor_(strideLegacyNoScalars)(src, 0) == 1 &&
+         THTensor_(strideLegacyNoScalars)(src, 1) == THTensor_(sizeLegacyNoScalars)(src, 0) &&
          THTensor_(nElement)(tensor) >= MIN_SZ;
 }
 
@@ -41,8 +41,8 @@ void THTensor_(copyTranspose)(THTensor *tensor, THTensor *src) {
   real *bp = THTensor_(data)(buf);
 
 
-  int64_t NR = THTensor_(size)(src, 0);
-  int64_t NC = THTensor_(size)(src, 1);
+  int64_t NR = THTensor_(sizeLegacyNoScalars)(src, 0);
+  int64_t NC = THTensor_(sizeLegacyNoScalars)(src, 1);
   for (int64_t R = 0; R < NR; R += BLOCK_SZ) {
     for (int64_t C = 0; C < NC; C += BLOCK_SZ) {
       real *spo = sp + R + C * NR;

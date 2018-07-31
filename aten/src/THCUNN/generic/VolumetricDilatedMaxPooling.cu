@@ -54,18 +54,18 @@ static inline void THNN_(VolumetricDilatedMaxPooling_shapeCheck)(
   if (THCTensor_(nDimensionLegacyNoScalars)(state, input) == 4)
   {
     /* sizes */
-    inputSlices = THCTensor_(size)(state, input, 0);
-    inputTime   = THCTensor_(size)(state, input, 1);
-    inputHeight = THCTensor_(size)(state, input, 2);
-    inputWidth  = THCTensor_(size)(state, input, 3);
+    inputSlices = THCTensor_(sizeLegacyNoScalars)(state, input, 0);
+    inputTime   = THCTensor_(sizeLegacyNoScalars)(state, input, 1);
+    inputHeight = THCTensor_(sizeLegacyNoScalars)(state, input, 2);
+    inputWidth  = THCTensor_(sizeLegacyNoScalars)(state, input, 3);
   }
   else if (THCTensor_(nDimensionLegacyNoScalars)(state, input) == 5)
   {
     /* sizes */
-    inputSlices = THCTensor_(size)(state, input, 1);
-    inputTime   = THCTensor_(size)(state, input, 2);
-    inputHeight = THCTensor_(size)(state, input, 3);
-    inputWidth  = THCTensor_(size)(state, input, 4);
+    inputSlices = THCTensor_(sizeLegacyNoScalars)(state, input, 1);
+    inputTime   = THCTensor_(sizeLegacyNoScalars)(state, input, 2);
+    inputHeight = THCTensor_(sizeLegacyNoScalars)(state, input, 3);
+    inputWidth  = THCTensor_(sizeLegacyNoScalars)(state, input, 4);
   }
   else
   {
@@ -161,19 +161,19 @@ void THNN_(VolumetricDilatedMaxPooling_updateOutput)(
   {
     /* sizes */
     batchSize   = 1;
-    inputSlices = THCTensor_(size)(state, input, 0);
-    inputTime   = THCTensor_(size)(state, input, 1);
-    inputHeight = THCTensor_(size)(state, input, 2);
-    inputWidth  = THCTensor_(size)(state, input, 3);
+    inputSlices = THCTensor_(sizeLegacyNoScalars)(state, input, 0);
+    inputTime   = THCTensor_(sizeLegacyNoScalars)(state, input, 1);
+    inputHeight = THCTensor_(sizeLegacyNoScalars)(state, input, 2);
+    inputWidth  = THCTensor_(sizeLegacyNoScalars)(state, input, 3);
   }
   else if (fiveDimensionalInput)
   {
     /* sizes */
-    batchSize   = THCTensor_(size)(state, input, 0);
-    inputSlices = THCTensor_(size)(state, input, 1);
-    inputTime   = THCTensor_(size)(state, input, 2);
-    inputHeight = THCTensor_(size)(state, input, 3);
-    inputWidth  = THCTensor_(size)(state, input, 4);
+    batchSize   = THCTensor_(sizeLegacyNoScalars)(state, input, 0);
+    inputSlices = THCTensor_(sizeLegacyNoScalars)(state, input, 1);
+    inputTime   = THCTensor_(sizeLegacyNoScalars)(state, input, 2);
+    inputHeight = THCTensor_(sizeLegacyNoScalars)(state, input, 3);
+    inputWidth  = THCTensor_(sizeLegacyNoScalars)(state, input, 4);
   }
   else
   {
@@ -327,26 +327,26 @@ void THNN_(VolumetricDilatedMaxPooling_updateGradInput)(
   if (!fiveDimensionalInput) /* 4D */
   {
     batchSize = 1;
-    inputSlices  = THCTensor_(size)(state, input, 0);
+    inputSlices  = THCTensor_(sizeLegacyNoScalars)(state, input, 0);
 
-    outputTime   = THCTensor_(size)(state, gradOutput, 1);
-    outputHeight = THCTensor_(size)(state, gradOutput, 2);
-    outputWidth  = THCTensor_(size)(state, gradOutput, 3);
-    inputTime   = THCTensor_(size)(state, gradInput, 1);
-    inputHeight = THCTensor_(size)(state, gradInput, 2);
-    inputWidth  = THCTensor_(size)(state, gradInput, 3);
+    outputTime   = THCTensor_(sizeLegacyNoScalars)(state, gradOutput, 1);
+    outputHeight = THCTensor_(sizeLegacyNoScalars)(state, gradOutput, 2);
+    outputWidth  = THCTensor_(sizeLegacyNoScalars)(state, gradOutput, 3);
+    inputTime   = THCTensor_(sizeLegacyNoScalars)(state, gradInput, 1);
+    inputHeight = THCTensor_(sizeLegacyNoScalars)(state, gradInput, 2);
+    inputWidth  = THCTensor_(sizeLegacyNoScalars)(state, gradInput, 3);
   }
   else
   {
-    batchSize    = THCTensor_(size)(state, input, 0);
-    inputSlices  = THCTensor_(size)(state, input, 1);
+    batchSize    = THCTensor_(sizeLegacyNoScalars)(state, input, 0);
+    inputSlices  = THCTensor_(sizeLegacyNoScalars)(state, input, 1);
 
-    outputTime   = THCTensor_(size)(state, gradOutput, 2);
-    outputHeight = THCTensor_(size)(state, gradOutput, 3);
-    outputWidth  = THCTensor_(size)(state, gradOutput, 4);
-    inputTime   = THCTensor_(size)(state, gradInput, 2);
-    inputHeight = THCTensor_(size)(state, gradInput, 3);
-    inputWidth  = THCTensor_(size)(state, gradInput, 4);
+    outputTime   = THCTensor_(sizeLegacyNoScalars)(state, gradOutput, 2);
+    outputHeight = THCTensor_(sizeLegacyNoScalars)(state, gradOutput, 3);
+    outputWidth  = THCTensor_(sizeLegacyNoScalars)(state, gradOutput, 4);
+    inputTime   = THCTensor_(sizeLegacyNoScalars)(state, gradInput, 2);
+    inputHeight = THCTensor_(sizeLegacyNoScalars)(state, gradInput, 3);
+    inputWidth  = THCTensor_(sizeLegacyNoScalars)(state, gradInput, 4);
   }
 
   gradOutput = THCTensor_(newContiguous)(state, gradOutput);

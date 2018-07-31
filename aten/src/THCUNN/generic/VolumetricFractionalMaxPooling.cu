@@ -22,7 +22,7 @@ void THNN_(VolumetricFractionalMaxPooling_updateOutput)(
                   "non-empty 4D or 5D (batch mode) tensor expected for input, but got: %s");
 
   if (numInputDims == 5) {
-    numBatch = THCTensor_(size)(state, input, 0);
+    numBatch = THCTensor_(sizeLegacyNoScalars)(state, input, 0);
     planeDim++;
     dimh++;
     dimw++;
@@ -30,10 +30,10 @@ void THNN_(VolumetricFractionalMaxPooling_updateOutput)(
   }
 
   /* sizes */
-  int64_t numPlanes = THCTensor_(size)(state, input, planeDim);
-  int64_t inputH = THCTensor_(size)(state, input, dimh);
-  int64_t inputW = THCTensor_(size)(state, input, dimw);
-  int64_t inputT = THCTensor_(size)(state, input, dimt);
+  int64_t numPlanes = THCTensor_(sizeLegacyNoScalars)(state, input, planeDim);
+  int64_t inputH = THCTensor_(sizeLegacyNoScalars)(state, input, dimh);
+  int64_t inputW = THCTensor_(sizeLegacyNoScalars)(state, input, dimw);
+  int64_t inputT = THCTensor_(sizeLegacyNoScalars)(state, input, dimt);
 
   THArgCheck(outputH + poolSizeH - 1 < inputH, 7,
              "poolSizeH (%d) too large relative to input height (%d)",
@@ -121,15 +121,15 @@ void THNN_(VolumetricFractionalMaxPooling_updateGradInput)(
   }
 
   /* sizes */
-  int64_t inputH = THCTensor_(size)(state, input, dimh);
-  int64_t inputW = THCTensor_(size)(state, input, dimw);
-  int64_t inputT = THCTensor_(size)(state, input, dimt);
+  int64_t inputH = THCTensor_(sizeLegacyNoScalars)(state, input, dimh);
+  int64_t inputW = THCTensor_(sizeLegacyNoScalars)(state, input, dimw);
+  int64_t inputT = THCTensor_(sizeLegacyNoScalars)(state, input, dimt);
 
-  THArgCheck(outputH == THCTensor_(size)(state, gradOutput, dimh), 3,
+  THArgCheck(outputH == THCTensor_(sizeLegacyNoScalars)(state, gradOutput, dimh), 3,
                 "gradOutput height unexpected");
-  THArgCheck(outputW == THCTensor_(size)(state, gradOutput, dimw), 3,
+  THArgCheck(outputW == THCTensor_(sizeLegacyNoScalars)(state, gradOutput, dimw), 3,
                 "gradOutput width unexpected");
-  THArgCheck(outputT == THCTensor_(size)(state, gradOutput, dimt), 3,
+  THArgCheck(outputT == THCTensor_(sizeLegacyNoScalars)(state, gradOutput, dimt), 3,
                 "gradOutput time unexpected");
 
   /* resize */
