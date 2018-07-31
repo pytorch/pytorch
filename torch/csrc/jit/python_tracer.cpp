@@ -103,10 +103,10 @@ void pythonRecordSourceLocation(Node* n) {
   n->setSourceLocation(sl);
 }
 
-void initPythonTracerBindings(PyObject* module_) {
+void initPythonTracerBindings(PyObject* module) {
   setRecordSourceLocation(pythonRecordSourceLocation);
 
-  auto m = py::handle(module_).cast<py::module>();
+  auto m = py::handle(module).cast<py::module>();
   py::class_<TracingState,std::shared_ptr<TracingState>>(m, "TracingState", py::dynamic_attr())
     // NB: no constructor; you have to get it from C++ code
     .def("__repr__", [](const TracingState& s) {

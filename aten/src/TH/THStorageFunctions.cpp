@@ -19,38 +19,25 @@ void THStorage_free(THStorage* storage) {
   if (!storage) {
     return;
   }
-
-  if (--storage->refcount == 0) {
-    if (storage->finalizer) {
-      (*storage->finalizer)();
-    }
-    storage->finalizer = nullptr;
-    storage->data_ptr.clear();
-    THStorage_weakFree(storage);
-  }
+  storage->release();
 }
 
 // Manually retains a weak reference
 void THStorage_weakRetain(THStorage *weak_storage) {
-  weak_storage->weakcount++;
+  weak_storage->weak_retain();
 }
 
 // Releases a weak reference
 void THStorage_weakFree(THStorage *weak_storage) {
-  if (--weak_storage->weakcount == 0) {
-    delete weak_storage;
-  }
+  weak_storage->weak_release();
 }
 
 // Given a weak reference, returns a strong reference to a storage (which must
 // be freed when done) or null if the storage is already dead.
 THStorage* THStorage_weakLock(THStorage *weak_storage) {
-  for (;;) {
-    int refcount = weak_storage->refcount.load();
-    if (refcount == 0) return nullptr;
-    if (weak_storage->refcount.compare_exchange_strong(refcount, refcount + 1)) break;
-  }
-  return weak_storage;
+  if (weak_storage->weak_lock())
+    return weak_storage;
+  return nullptr;
 }
 
 THDescBuff THLongStorage_sizeDesc(const THLongStorage *size) {
@@ -95,7 +82,7 @@ ptrdiff_t THStorage_size(const THStorage *self)
 void THStorage_retain(THStorage *storage)
 {
   if (storage) {
-    ++storage->refcount;
+    storage->retain();
   }
 }
 

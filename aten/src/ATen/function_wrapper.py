@@ -290,7 +290,7 @@ CHECKED_CAST = {
             'Backend::${DenseBackend}, ScalarType::Long)'),
     'THStorage*':
         CodeTemplate(
-            'checked_cast_storage<${Storage}>('
+            'checked_cast_storage<Storage>('
             '&${arg_name},"${arg_name}",${arg_pos}, '
             'Backend::${Backend}, ScalarType::${ScalarName})'),
     'THGenerator*':

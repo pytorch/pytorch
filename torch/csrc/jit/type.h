@@ -80,7 +80,7 @@ public:
     JIT_ASSERT(T::Kind == kind());
     return std::static_pointer_cast<const T>(shared_from_this());
   }
-  virtual ~Type() {}
+  virtual ~Type() = default;
 };
 
 inline bool operator!=(const Type & lhs, const Type & rhs) {
