@@ -27,6 +27,9 @@ bool fuseConvBNHelper(repr::NNModule* nn, caffe2::Workspace* ws) {
     }
     auto bnNode = consumer;
     auto bn = repr::nn::get<repr::BatchNormalization>(bnNode);
+    auto bnOutputs = nn::getOutputs(bnNode);
+    NOM_REQUIRE_OR_CONT(bnOutputs.size() == 1);
+    auto bnOutput = bnOutputs.front();
 
     auto convInputs = repr::nn::getInputs(convNode);
     if (convInputs.size() < 3) {
@@ -69,6 +72,8 @@ bool fuseConvBNHelper(repr::NNModule* nn, caffe2::Workspace* ws) {
       biasConvData[c] = bias;
     }
 
+    nn->dataFlow.deleteNode(output);
+    nn->dataFlow.createEdge(convNode, bnOutput);
     nn->dataFlow.deleteNode(bnNode);
     return true;
   }
