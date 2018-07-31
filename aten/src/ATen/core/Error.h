@@ -85,9 +85,9 @@ public:
 };
 
 class AT_CORE_API Warning {
+public:
   using handler_t = void(*)(const SourceLocation& source_location, const char* msg);
 
-public:
   /// Issue a warning with a given message. Dispatched to the current
   /// warning handler.
   static void warn(SourceLocation source_location, std::string msg);
@@ -98,9 +98,6 @@ public:
 
   /// The default warning handler. Prints the message to stderr.
   static void print_warning(const SourceLocation& source_location, const char* msg);
-
-private:
-  static handler_t warning_handler_;
 };
 
 
