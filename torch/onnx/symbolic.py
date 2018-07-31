@@ -868,14 +868,18 @@ def topk(g, self, k, dim, largest, sorted, out=None):
     return g.op("TopK", self, k_i=k, axis_i=dim, outputs=2)
 
 
-@parse_args('v', 'is')
 def repeat(g, self, repeats):
-    if self.isTensor():
+    repeats_sizes = None
+    if not _is_value(repeats):
+        repeats_sizes = len(repeats)
+        repeats = g.op("Constant", value_t=torch.LongTensor(repeats))
+
+    if self.isTensor() and repeats_sizes is not None:
         sizes = self.type().sizes()
-        diff_dims = len(repeats) - len(sizes)
+        diff_dims = len(repeats_sizes) - len(sizes)
         if diff_dims > 0:
             self = view(g, self, [1] * diff_dims + sizes)
-    return g.op("Tile", self, g.op("Constant", value_t=torch.LongTensor(repeats)))
+    return g.op("Tile", self, repeats)
 
 
 def instance_norm(g, input, **kwargs):
