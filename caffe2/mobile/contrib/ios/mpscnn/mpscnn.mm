@@ -68,6 +68,14 @@
 - (void*)weights {
   return self.weights_;
 }
+
+- (id)copyWithZone:(NSZone*)zone {
+  ConvDataSource* newDataSource = [[self class] allocWithZone:zone];
+  newDataSource.weights_ = self.weights_;
+  newDataSource.bias_ = self.bias_;
+  newDataSource.desc_ = self.desc_;
+  return newDataSource;
+}
 @end
 
 namespace caffe2 {
@@ -248,9 +256,9 @@ void computeOutputHW(
     int W,
     int* OH,
     int* OW) {
-  Tensor<CPUContext> input, output;
+  Tensor input(CPU), output(CPU);
   input.Resize(1, 1, H, W);
-  op->SetOutputSize<CPUContext>(input, &output, 1);
+  op->SetOutputSize(input, &output, 1);
   CAFFE_ENFORCE_EQ(output.ndim(), 4);
   *OH = output.dim(2);
   *OW = output.dim(3);
@@ -481,13 +489,13 @@ class MPSCNNPackedInt8BGRANHWCToNCHWCStylizerPreprocessOp final
         "noise_size", 491 /* prime to avoid artifacts */);
     // Treaded as half4 in the kernel, so need half4 here.
     noiseSize = divRoundUp(noiseSize, 4) * 4;
-    if (!noiseBlob->IsType<TensorCPU>() ||
+    if (!noiseBlob->IsType<Tensor>(CPU) ||
         noiseBlob->Get<TensorCPU>().size() != noiseSize) {
       VLOG(2) << "Initializing stylizer with noise: " << noiseSize;
       caffe2::Timer rt;
       // Initialize random noise on first use.
       // Cache it to maintain temporal consistency.
-      auto* t = noiseBlob->template GetMutable<TensorCPU>();
+      auto* t = noiseBlob->GetMutableTensor(CPU);
       t->Resize(noiseSize);
       math::RandGaussian<float, CPUContext>(
           t->size(),

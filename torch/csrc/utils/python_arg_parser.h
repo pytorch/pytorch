@@ -90,8 +90,8 @@ struct PythonArgParser {
 
 private:
   [[noreturn]]
-  void print_error(PyObject* args, PyObject* kwargs, PyObject* dst[]);
-  PythonArgs raw_parse(PyObject* args, PyObject* kwargs, PyObject* dst[]);
+  void print_error(PyObject* args, PyObject* kwargs, PyObject* parsed_args[]);
+  PythonArgs raw_parse(PyObject* args, PyObject* kwargs, PyObject* parsed_args[]);
 
   std::vector<FunctionSignature> signatures_;
   std::string function_name;
@@ -166,6 +166,7 @@ struct FunctionParameter {
   bool optional;
   bool allow_none;
   bool keyword_only;
+  bool allow_numbers_as_tensors = false;
   int size;
   std::string name;
   // having this as a raw PyObject * will presumably leak it, but these are only held by static objects
@@ -192,17 +193,28 @@ inline PythonArgs PythonArgParser::parse(PyObject* args, PyObject* kwargs, Parse
 }
 
 inline at::Tensor PythonArgs::tensor(int i) {
-  if (!args[i]) return at::Tensor();
-  if (!THPVariable_Check(args[i])) {
-    // NB: Are you here because you passed None to a Variable method,
-    // and you expected an undefined tensor to be returned?   Don't add
-    // a test for Py_None here; instead, you need to mark the argument
-    // as *allowing none*; you can do this by writing 'Tensor?' instead
-    // of 'Tensor' in the ATen metadata.
-    throw TypeError("expected Tensor as argument %d, but got %s", i,
-        Py_TYPE(args[i])->tp_name);
+  PyObject* obj = args[i];
+  if (!obj) return at::Tensor();
+  if (!THPVariable_Check(obj)) {
+    at::Scalar scalar;
+    if (THPUtils_checkLong(obj)) {
+      scalar = at::Scalar(THPUtils_unpackLong(obj));
+    } else if (THPUtils_checkDouble(obj)) {
+      scalar = at::Scalar(THPUtils_unpackDouble(obj));
+    } else {
+      // NB: Are you here because you passed None to a Variable method,
+      // and you expected an undefined tensor to be returned?   Don't add
+      // a test for Py_None here; instead, you need to mark the argument
+      // as *allowing none*; you can do this by writing 'Tensor?' instead
+      // of 'Tensor' in the ATen metadata.
+      throw TypeError("expected Tensor as argument %d, but got %s", i,
+          Py_TYPE(obj)->tp_name);
+    }
+    auto tensor = scalar.toTensor();
+    tensor.get()->set_wrapped_number(true);
+    return autograd::make_variable(tensor);
   }
-  return reinterpret_cast<THPVariable*>(args[i])->cdata;
+  return reinterpret_cast<THPVariable*>(obj)->cdata;
 }
 
 inline at::Scalar PythonArgs::scalar(int i) {

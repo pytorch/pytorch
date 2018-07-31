@@ -450,6 +450,10 @@ class TestElementwiseOps(hu.HypothesisTestCase):
         B = np.random.rand(n, m, k, t).astype(np.float32) + bias
         self._run_single_test(op, ref, A, B, True, test_grad, gc, dc)
 
+        A = np.random.rand(1, m, k, 1).astype(np.float32) + bias
+        B = np.random.rand(n, m, k, t).astype(np.float32) + bias
+        self._run_single_test(op, ref, A, B, True, test_grad, gc, dc)
+
         A = np.random.rand(m, 1, t).astype(np.float32) + bias
         B = np.random.rand(n, m, k, t).astype(np.float32) + bias
         self._run_single_test(op, ref, A, B, True, test_grad, gc, dc)
@@ -574,6 +578,10 @@ class TestElementwiseOps(hu.HypothesisTestCase):
         B = np.random.randint(128, size=(n, m, k, t))
         self._run_single_test(op, ref, A, B, True, False, gc, dc)
 
+        A = np.random.randint(128, size=(1, m, k, 1))
+        B = np.random.randint(128, size=(n, m, k, t))
+        self._run_single_test(op, ref, A, B, True, False, gc, dc)
+
         A = np.random.randint(128, size=(m, 1, t))
         B = np.random.randint(128, size=(n, m, k, t))
         self._run_single_test(op, ref, A, B, True, False, gc, dc)
@@ -599,3 +607,30 @@ class TestElementwiseOps(hu.HypothesisTestCase):
     def test_bitwise_xor(self, n, m, k, t, gc, dc):
         self._test_bitwise_binary_op(
             "BitwiseXor", np.bitwise_xor, n, m, k, t, gc, dc)
+
+    @given(X=hu.tensor(elements=st.floats(0.5, 2), dtype=np.float32),
+           inplace=st.booleans(), **hu.gcs)
+    def test_reciprocal(self, X, inplace, gc, dc):
+        def reciprocal_op(X):
+            return [np.reciprocal(X)]
+
+        op = core.CreateOperator(
+            "Reciprocal",
+            ["X"],
+            ["X"] if inplace else ["Y"]
+        )
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=[X],
+            reference=reciprocal_op,
+        )
+        self.assertDeviceChecks(dc, op, [X], [0])
+        self.assertGradientChecks(
+            gc, op, [X], 0, [0], stepsize=1e-3, threshold=0.05)
+
+
+if __name__ == "__main__":
+    import unittest
+    unittest.main()

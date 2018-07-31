@@ -2,6 +2,9 @@
 
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
 #include "torch/csrc/jit/interned_strings.h"
+#include "torch/csrc/jit/constants.h"
+#include "torch/csrc/jit/symbolic_variable.h"
+#include "torch/csrc/jit/assertions.h"
 #include "torch/csrc/utils/functional.h"
 
 #include <ATen/ATen.h>
@@ -181,25 +184,25 @@ void BatchMMBlock(Block* block) {
     if (!root || root.tree_size < min_fusion_size)
       continue;
     auto matmuls = root.gatherMatMuls();
-    auto type = root.node->output()->type()->expect<TensorType>();
+    auto type_ = root.node->output()->type();
+    auto type = type_->expect<TensorType>();
 
     auto batch_inputs = [&](Side s, std::array<int64_t, 2> cat_sizes) -> Value* {
       int inputs_off = s == Side::LHS ? 0 : 1;
       int cat_dim    = s == Side::LHS ? 1 : 0;
       cat_sizes[cat_dim] *= matmuls.size(); // make them really cat_sizes
 
-      auto inputs = fmap(matmuls, [=](Node *mm) { return mm->inputs()[inputs_off]; });
       WithInsertPoint iguard { root.node };
-      inputs.push_back(graph->insertConstant(cat_dim));
-      Node *cat = graph->insertNode(graph->create(aten::cat, inputs));
-      cat->output()->setType(type->withSizes(cat_sizes));
-      return cat->output();
+      auto inputs = fmap(matmuls, [=](Node *mm) -> SymbolicVariable { return mm->inputs()[inputs_off]; });
+      auto cat_output = SymbolicVariable::cat(inputs, cat_dim).value();
+      cat_output->setType(type->withSizes(cat_sizes));
+      return cat_output;
     };
 
     auto lhs_batch = batch_inputs(Side::LHS, root.lhs_sizes);
     auto rhs_batch = batch_inputs(Side::RHS, root.rhs_sizes);
     Node *batch_mm = graph->create(aten::mm, {lhs_batch, rhs_batch});
-    batch_mm->output()->setType(type->asShared());
+    batch_mm->output()->setType(type_);
     batch_mm->insertBefore(root.node);
     root.node->output()->replaceAllUsesWith(batch_mm->output());
     // NB: don't bother with cleaning up after yourself. We'll use DCE for that.

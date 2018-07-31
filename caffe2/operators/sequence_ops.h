@@ -93,8 +93,8 @@ class GatherPaddingOp final : public Operator<Context> {
   int startPaddingWidth_;
   int endPaddingWidth_;
   // Scratch space required by the CUDA version
-  Tensor<Context> lengths_prefix_sum_buffer_;
-  Tensor<Context> lengths_prefix_sum_;
+  Tensor lengths_prefix_sum_buffer_{Context::GetDeviceType()};
+  Tensor lengths_prefix_sum_{Context::GetDeviceType()};
 };
 
 template <class Context>
@@ -133,8 +133,8 @@ class RemovePaddingOp final : public Operator<Context> {
   int endPaddingWidth_;
 
   // Scratch space required by the CUDA version
-  Tensor<Context> lengths_prefix_sum_buffer_;
-  Tensor<Context> lengths_prefix_sum_;
+  Tensor lengths_prefix_sum_buffer_{Context::GetDeviceType()};
+  Tensor lengths_prefix_sum_{Context::GetDeviceType()};
 };
 
 template <class Context>
@@ -236,8 +236,8 @@ class AddPaddingOp final : public Operator<Context> {
   int endPaddingWidth_;
 
   // Scratch space required by the CUDA version
-  Tensor<Context> lengths_prefix_sum_buffer_;
-  Tensor<Context> lengths_prefix_sum_;
+  Tensor lengths_prefix_sum_buffer_{Context::GetDeviceType()};
+  Tensor lengths_prefix_sum_{Context::GetDeviceType()};
 };
 
 template <class Context>

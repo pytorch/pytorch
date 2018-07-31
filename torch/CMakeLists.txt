@@ -107,7 +107,6 @@ add_custom_command(
   WORKING_DIRECTORY "${TORCH_SRC_DIR}/..")
 
 set(TORCH_SRCS
-  ${TORCH_SRC_DIR}/csrc/assertions.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/anomaly_mode.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/aten_variable_hooks.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/engine.cpp
@@ -133,11 +132,13 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/import.cpp
   ${TORCH_SRC_DIR}/csrc/jit/interned_strings.cpp
   ${TORCH_SRC_DIR}/csrc/jit/interpreter.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/constants.cpp
   ${TORCH_SRC_DIR}/csrc/jit/ir.cpp
   ${TORCH_SRC_DIR}/csrc/jit/operator.cpp
   ${TORCH_SRC_DIR}/csrc/jit/operator.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/batch_mm.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/canonicalize.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/passes/constant_propagation.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/common_subexpression_elimination.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/create_autodiff_subgraphs.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/dead_code_elimination.cpp
@@ -229,6 +230,14 @@ else()
     # warnings, see https://bugs.llvm.org/show_bug.cgi?id=21629
     -Wno-missing-braces
     )
+
+  if(NOT APPLE)
+    target_compile_options(torch PRIVATE
+      # Considered to be flaky.  See the discussion at
+      # https://github.com/pytorch/pytorch/pull/9608
+      -Wno-maybe-uninitialized)
+  endif()
+
 endif()
 
 # see the source file for explanation
@@ -375,14 +384,6 @@ if (BUILD_TORCH_TEST AND NOT NO_API AND NOT USE_ROCM)
     ${TORCH_SRC_DIR}/csrc/api
     ${TORCH_SRC_DIR}/csrc/api/include)
 
-  if (NOT MSVC)
-    target_compile_options(torch PRIVATE -Wno-maybe-uninitialized)
-  endif()
-
-  if (APPLE)
-    target_compile_options(torch PRIVATE -Wno-unknown-warning-option)
-  endif()
-
   set(TORCH_API_TEST_DIR "${TORCH_SRC_DIR}/../test/cpp/api")
 
   add_executable(test_api
@@ -413,18 +414,19 @@ if (BUILD_TORCH_TEST AND NOT NO_API AND NOT USE_ROCM)
 
   target_link_libraries(test_api torch ${TORCH_CUDA_LIBRARIES})
 
-  if (APPLE)
-    target_compile_options(test_api PRIVATE
-      -Wno-unknown-warning-option
-      -Wno-missing-braces
-      -Wno-maybe-uninitialized
-      -Wno-reorder
-      )
-  elseif (MSVC)
-  else()
-    target_compile_options(test_api PRIVATE
-      -Wno-unused-but-set-parameter
-      -Wno-reorder
-      )
+  if (NOT MSVC)
+    if (APPLE)
+      target_compile_options(test_api PRIVATE
+        # Clang has an unfixed bug leading to spurious missing braces
+        # warnings, see https://bugs.llvm.org/show_bug.cgi?id=21629
+        -Wno-missing-braces)
+    else()
+      target_compile_options(test_api PRIVATE
+        # Considered to be flaky.  See the discussion at
+        # https://github.com/pytorch/pytorch/pull/9608
+        -Wno-maybe-uninitialized
+        # gcc gives nonsensical warnings about variadic.h
+        -Wno-unused-but-set-parameter)
+    endif()
   endif()
 endif()

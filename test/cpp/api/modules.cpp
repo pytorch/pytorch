@@ -28,9 +28,9 @@ class TestModel : public torch::nn::Module {
 class NestedModel : public torch::nn::Module {
  public:
   NestedModel()
-      : l1(register_module("l1", Linear(5, 20))),
-        t(register_module("test", std::make_shared<TestModel>())),
-        param_(register_parameter("param", torch::empty({3, 2, 21}))) {}
+      : param_(register_parameter("param", torch::empty({3, 2, 21}))),
+        l1(register_module("l1", Linear(5, 20))),
+        t(register_module("test", std::make_shared<TestModel>())) {}
 
   torch::Tensor param_;
   Linear l1;
@@ -142,8 +142,13 @@ TEST_CASE("modules") {
 
   SECTION("embedding") {
     SECTION("basic") {
-      int dict_size = 10;
+      const int64_t dict_size = 10;
       Embedding model(dict_size, 2);
+      REQUIRE(model->parameters().contains("weight"));
+      REQUIRE(model->weight.ndimension() == 2);
+      REQUIRE(model->weight.size(0) == dict_size);
+      REQUIRE(model->weight.size(1) == 2);
+
       // Cannot get gradients to change indices (input) - only for embedding
       // params
       auto x = torch::full({10}, dict_size - 1, torch::kInt64);
@@ -156,7 +161,7 @@ TEST_CASE("modules") {
       REQUIRE(y.size(0) == 10);
       REQUIRE(y.size(1) == 2);
 
-      REQUIRE(model->parameters()["table"].grad().numel() == 2 * dict_size);
+      REQUIRE(model->parameters()["weight"].grad().numel() == 2 * dict_size);
     }
 
     SECTION("list") {

@@ -216,13 +216,8 @@ else
 fi
 
 # Read the python version
-PYTHON_VERSION="$(python --version 2>&1 | grep --only-matching '[0-9]\.[0-9]\.[0-9]*')"
-if [[ "$PYTHON_VERSION" == 3.6* ]]; then
-  # This is needed or else conda tries to move packages to python3/site-packages
-  # instead of python3.6/site-packages. Specifically 3.6 because that's what
-  # the latest Anaconda version is
-  conda_args+=(" --python 3.6")
-fi
+python_version="$(python --version 2>&1 | grep --only-matching '[0-9]\.[0-9]\.[0-9]*')"
+conda_args+=(" --python ${python_version:0:3}")
 
 
 ###########################################################
@@ -301,6 +296,10 @@ fi
 # Add packages required for all Caffe2 builds
 add_package 'glog'
 add_package 'gflags'
+add_package 'mkl' '>=2018'
+add_package 'mkl-include'
+add_package 'typing'
+append_to_section 'build' '- pyyaml'
 caffe2_cmake_args+=("-DUSE_LEVELDB=OFF")
 caffe2_cmake_args+=("-DUSE_LMDB=OFF")
 
@@ -308,10 +307,6 @@ caffe2_cmake_args+=("-DUSE_LMDB=OFF")
 # Add packages required for pytorch
 if [[ -n $integrated ]]; then
   add_package 'cffi'
-  add_package 'mkl' '>=2018'
-  add_package 'mkl-include'
-  add_package 'typing'
-  append_to_section 'build' '- pyyaml'
   append_to_section 'build' '- setuptools'
   #caffe2_cmake_args+=("-DBLAS=MKL")
   if [[ -n $cuda_ver ]]; then

@@ -97,6 +97,9 @@ void initTreeViewBindings(PyObject *module) {
   m.def("FalseLiteral", [](const SourceRange& range) {
     return Expr(Compound::create(TK_FALSE, range, {}));
   });
+  m.def("NoneLiteral", [](const SourceRange& range) {
+    return Expr(Compound::create(TK_NONE, range, {}));
+  });
   py::class_<Type, TreeView>(m, "Type");
   py::class_<TensorType, Type>(m, "TensorType")
     .def(py::init(&TensorType::create));

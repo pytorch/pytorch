@@ -1,7 +1,11 @@
 #pragma once
+
 #include <torch/csrc/jit/ir.h>
 #include "torch/csrc/utils/disallow_copy.h"
+#include <torch/csrc/jit/assertions.h>
+
 #include "ATen/ATen.h"
+
 #include <string>
 #include <algorithm>
 #include <unordered_map>
@@ -25,7 +29,7 @@ struct TensorDesc {
   : TensorDesc(type, TensorDesc::findContiguous(sizes, strides)) {}
   TensorDesc(const at::Tensor& t)
     : TensorDesc(t.type().scalarType(), t.sizes(), t.strides()) {}
-  TensorDesc(TensorType *type)
+  TensorDesc(TensorTypePtr type)
     : TensorDesc(type->scalarType(), type->sizes(), type->strides()) {}
 
   // number of dimensions after contiguity compression
@@ -82,7 +86,7 @@ struct CompiledFusionFunction {
   TH_DISALLOW_COPY_AND_ASSIGN(CompiledFusionFunction);
 
   CompiledFusionFunction(const std::string & name, AnnotatedGraph & agraph);
-  virtual ~CompiledFusionFunction() {}
+  virtual ~CompiledFusionFunction() = default;
 
   // expects outputs to be pre-allocated
   void launch_with_tensors(at::ArrayRef<at::Tensor> inputs, at::ArrayRef<at::Tensor> outputs);

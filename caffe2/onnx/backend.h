@@ -11,6 +11,8 @@
 #include <unordered_map>
 #include <unordered_set>
 
+constexpr int kKnownOpsetVersion = 6;
+
 namespace caffe2 {
 namespace onnx {
 
@@ -19,6 +21,25 @@ using ::ONNX_NAMESPACE::GraphProto;
 using ::ONNX_NAMESPACE::ModelProto;
 using ::ONNX_NAMESPACE::NodeProto;
 using ::ONNX_NAMESPACE::TensorProto;
+using ::ONNX_NAMESPACE::ValueInfoProto;
+
+using ValueInfoMap = std::unordered_map<std::string, ValueInfoProto>;
+
+class ConversionContext {
+ public:
+  ConversionContext(const ValueInfoMap& value_infos, int opset_version)
+      : value_infos_(value_infos), opset_version_(opset_version) {}
+  const ValueInfoMap& value_infos() const {
+    return value_infos_;
+  }
+  int opset_version() const {
+    return opset_version_;
+  }
+
+ private:
+  const ValueInfoMap& value_infos_;
+  const int opset_version_;
+};
 
 // \brief This struct holds the converted ops after the onnx->c2 conversion.
 // Notice that for RNN ops, it may create ops in init_net. Hence we have the
@@ -129,7 +150,9 @@ class Caffe2Backend {
 
   bool SupportOp(const std::string tyep) const;
 
-  Caffe2Ops ConvertNode(const std::string& node_str, int opset_version);
+  Caffe2Ops ConvertNode(
+      const std::string& node_str,
+      const ConversionContext& ctx);
 
   void BuildTensorFillingOp(
       caffe2::OperatorDef* c2_op,
@@ -137,7 +160,8 @@ class Caffe2Backend {
       const std::string& name = "");
 
  private:
-  using SpecialOpConverter = Caffe2Ops (Caffe2Backend::*)(OnnxNode*, int);
+  using SpecialOpConverter =
+      Caffe2Ops (Caffe2Backend::*)(OnnxNode*, const ConversionContext&);
 
   void OnnxToCaffe2(
       caffe2::NetDef* init_net,
@@ -153,51 +177,56 @@ class Caffe2Backend {
   Caffe2Ops OnnxNodeToCaffe2Ops(
       const ModelProto& init_model,
       const ModelProto& pred_model,
-      OnnxNode* onnx_node,
-      int opset_version);
+      const ConversionContext& ctx,
+      OnnxNode* onnx_node);
 
   std::unordered_set<std::string> AllNamesInGraph(const GraphProto& graph);
 
-  Caffe2Ops CommonOnnxNodeToCaffe2Ops(OnnxNode* onnx_node, int opset_version);
+  Caffe2Ops CommonOnnxNodeToCaffe2Ops(
+      OnnxNode* onnx_node,
+      const ConversionContext& ctx);
 
-  Caffe2Ops CreateArgMaxMin(OnnxNode* onnx_node, int opset_version);
+  Caffe2Ops CreateArgMaxMin(OnnxNode* onnx_node, const ConversionContext& ctx);
 
-  Caffe2Ops CreateCast(OnnxNode* onnx_node, int opset_version);
+  Caffe2Ops CreateCast(OnnxNode* onnx_node, const ConversionContext& ctx);
 
-  Caffe2Ops CreateConstant(OnnxNode* onnx_node, int opset_version);
+  Caffe2Ops CreateConstant(OnnxNode* onnx_node, const ConversionContext& ctx);
 
-  Caffe2Ops CreateConvPoolOpBase(OnnxNode* onnx_node, int opset_version);
+  Caffe2Ops CreateConvPoolOpBase(
+      OnnxNode* onnx_node,
+      const ConversionContext& ctx);
 
-  Caffe2Ops CreatePadPool(OnnxNode* onnx_node, int opset_version);
+  Caffe2Ops CreatePadPool(OnnxNode* onnx_node, const ConversionContext& ctx);
 
-  Caffe2Ops CreateReshape(OnnxNode* onnx_node, int opset_version);
+  Caffe2Ops CreateReshape(OnnxNode* onnx_node, const ConversionContext& ctx);
 
-  Caffe2Ops CreateGather(OnnxNode* onnx_node, int opset_version);
+  Caffe2Ops CreateGather(OnnxNode* onnx_node, const ConversionContext& ctx);
 
-  Caffe2Ops CreateGemm(OnnxNode* onnx_node, int opset_version);
+  Caffe2Ops CreateGemm(OnnxNode* onnx_node, const ConversionContext& ctx);
 
-  Caffe2Ops CreatePad(OnnxNode* onnx_node, int opset_version);
+  Caffe2Ops CreatePad(OnnxNode* onnx_node, const ConversionContext& ctx);
 
-  Caffe2Ops CreateConcat(OnnxNode* onnx_node, int opset_version);
+  Caffe2Ops CreateConcat(OnnxNode* onnx_node, const ConversionContext& ctx);
 
-  Caffe2Ops CreateLogSoftmax(OnnxNode* onnx_node, int opset_version);
+  Caffe2Ops CreateLogSoftmax(OnnxNode* onnx_node, const ConversionContext& ctx);
 
-  Caffe2Ops CreateSlice(OnnxNode* onnx_node, int opset_version);
+  Caffe2Ops CreateSlice(OnnxNode* onnx_node, const ConversionContext& ctx);
 
-  Caffe2Ops CreateSplit(OnnxNode* onnx_node, int opset_version);
+  Caffe2Ops CreateSplit(OnnxNode* onnx_node, const ConversionContext& ctx);
 
-  Caffe2Ops CreateReciprocal(OnnxNode* onnx_node, int opset_version);
+  Caffe2Ops CreateReciprocal(OnnxNode* onnx_node, const ConversionContext& ctx);
 
-  Caffe2Ops CreateBatchNormalization(OnnxNode* onnx_node, int opset_version);
+  Caffe2Ops CreateBatchNormalization(
+      OnnxNode* onnx_node,
+      const ConversionContext& ctx);
 
-  Caffe2Ops CreateMatMul(OnnxNode* onnx_node, int opset_version);
+  Caffe2Ops CreateMatMul(OnnxNode* onnx_node, const ConversionContext& ctx);
 
-  Caffe2Ops CreateUpsample(OnnxNode* onnx_node, int opset_version);
+  Caffe2Ops CreateUpsample(OnnxNode* onnx_node, const ConversionContext& ctx);
 
-  Caffe2Ops CreateDropout(OnnxNode* onnx_node, int opset_version);
+  Caffe2Ops CreateDropout(OnnxNode* onnx_node, const ConversionContext& ctx);
 
-  Caffe2Ops CreateLRN(OnnxNode* onnx_node, int opset_version);
-
+  Caffe2Ops CreateLRN(OnnxNode* onnx_node, const ConversionContext& ctx);
 
   // LUT related getters
   const std::unordered_map<std::string, std::string>& get_renamed_operators()
