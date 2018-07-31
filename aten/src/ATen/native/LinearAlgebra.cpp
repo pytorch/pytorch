@@ -317,8 +317,8 @@ Tensor& matmul_out(Tensor &result, const Tensor & tensor1, const Tensor & tensor
 
 Tensor matrix_power(const Tensor& a, int64_t n) {
   AT_CHECK(a.dim() >= 2 && at::isFloatingType(a.type().scalarType()),
-           "pinverse(", a.type(), "{", a.sizes(), "}): expected a tensor "
-           "of floating types with dim atleast 2");
+           "matrix_power(", a.type(), "{", a.sizes(), "}): expected a tensor "
+           "of floating types with dim at least 2");
   if (n == 0) {
     Tensor identities = at::eye(a.size(-2), a.options());
     std::vector<int64_t> output_size (2, 1);
@@ -340,6 +340,13 @@ Tensor matrix_power(const Tensor& a, int64_t n) {
     return at::native::matmul(at::native::matmul(a, a), a);
   }
 
+  // This is a binary decomposition of n.
+  // Moving from the least significant bit to the most significant bit
+  // This is done to reduce the number of matrix multiplications
+  // by raising the input matrix in powers of 2
+  // The total number of matrix multiplications are
+  // number of bits + number of bits that equal 1 ~ O(log n)
+  // instead of O(n)
   Tensor result, z;
   int64_t r;
   while (n > 0) {
