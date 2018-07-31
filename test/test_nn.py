@@ -4945,50 +4945,52 @@ class TestNN(NNTestCase):
             W = random.randint(2, IW)
             test_shape(N, C, IH, IW, H, W, padding_mode)
 
-        # test known input on CPU
-        for padding_mode in ['zeros', 'border', 'reflection']:
+        for mode in ('bilinear', 'nearest'):
+            for padding_mode in ('zeros', 'border', 'reflection'):
 
-            input = torch.arange(1., 11).view(1, 1, 2, 5)
-            grid = torch.tensor(
-                [[-0.9, -1.4, 0, 0.2, 1],
-                 [-1, -0.333, 0, 0.5, 1],
-                 [-1, -0.5, 0, 0.3333, 1],
-                 [-1, -0.2, 0, 1.1, 0.5]]).view(1, 2, 5, 2)
-            output = F.grid_sample(input, grid, padding_mode=padding_mode)
-            if padding_mode == 'zeros':
-                groundtruth = torch.tensor(
-                    [[0.9600, 6.0000000000, 5.0000, 4.8340, 9.0000],
-                     [2.2500, 6.3332500450, 5.0000, 5.1000, 7.0000]]).view(1, 1, 2, 5)
-            elif padding_mode == 'border':
-                groundtruth = torch.tensor(
-                    [[1.2000, 6.0000000000, 5.0000, 4.8340, 9.0000],
-                     [2.2500, 6.3332500450, 5.0000, 5.1000, 8.7500]]).view(1, 1, 2, 5)
-            elif padding_mode == 'reflection':
-                print(output)
-                groundtruth = torch.tensor(
-                    [[2.2000, 6.0000000000, 5.0000, 4.8340, 9.0000],
-                     [2.2500, 6.3332500450, 5.0000, 5.1000, 8.5500]]).view(1, 1, 2, 5)
-            else:
-                assert False, "missing groundtruth test for padding mode '{}'".format(padding_mode)
-            self.assertEqual(output, groundtruth)
+                # test known input on CPU
+                if mode == 'bilinear':
+                    input = torch.arange(1., 11).view(1, 1, 2, 5)
+                    grid = torch.tensor(
+                        [[-0.9, -1.4, 0, 0.2, 1],
+                         [-1, -0.333, 0, 0.5, 1],
+                         [-1, -0.5, 0, 0.3333, 1],
+                         [-1, -0.2, 0, 1.1, 0.5]]).view(1, 2, 5, 2)
+                    output = F.grid_sample(input, grid, padding_mode=padding_mode)
 
-            # do gradcheck
-            N = random.randint(2, 8)
-            C = random.randint(2, 8)
-            H = random.randint(2, 8)
-            W = random.randint(2, 8)
-            input = torch.randn(N, C, H, W, requires_grad=True)
-            grid = torch.randn(N, H, W, 2, requires_grad=True)
-            self.assertTrue(gradcheck(
-                lambda inp, grid: F.grid_sample(inp, grid, padding_mode=padding_mode),
-                (input, grid)))
+                    if padding_mode == 'zeros':
+                        groundtruth = torch.tensor(
+                            [[0.9600, 6.0000000000, 5.0000, 4.8340, 9.0000],
+                             [2.2500, 6.3332500450, 5.0000, 5.1000, 7.0000]]).view(1, 1, 2, 5)
+                    elif padding_mode == 'border':
+                        groundtruth = torch.tensor(
+                            [[1.2000, 6.0000000000, 5.0000, 4.8340, 9.0000],
+                             [2.2500, 6.3332500450, 5.0000, 5.1000, 8.7500]]).view(1, 1, 2, 5)
+                    elif padding_mode == 'reflection':
+                        groundtruth = torch.tensor(
+                            [[2.2000, 6.0000000000, 5.0000, 4.8340, 9.0000],
+                             [2.2500, 6.3332500450, 5.0000, 5.1000, 8.5500]]).view(1, 1, 2, 5)
+                    else:
+                        assert False, "missing groundtruth test for padding mode '{}'".format(padding_mode)
+                    self.assertEqual(output, groundtruth)
 
-            # test CUDA against CPU
-            if TEST_CUDA:
-                test_cpu_against_cuda(N, C, H, W, padding_mode)
-                if TEST_CUDNN:
-                    with cudnn.flags(enabled=False):
-                        test_cpu_against_cuda(N, C, H, W, padding_mode)
+                # do gradcheck
+                N = random.randint(2, 8)
+                C = random.randint(2, 8)
+                H = random.randint(2, 8)
+                W = random.randint(2, 8)
+                input = torch.randn(N, C, H, W, requires_grad=True)
+                grid = torch.randn(N, H, W, 2, requires_grad=True)
+                self.assertTrue(gradcheck(
+                    lambda inp, grid: F.grid_sample(inp, grid, padding_mode=padding_mode),
+                    (input, grid)))
+
+                # test CUDA against CPU
+                if TEST_CUDA:
+                    test_cpu_against_cuda(N, C, H, W, padding_mode)
+                    if TEST_CUDNN:
+                        with cudnn.flags(enabled=False):
+                            test_cpu_against_cuda(N, C, H, W, padding_mode)
 
     def test_grid_sample_3d(self):
         def test_cpu_against_cuda(N, C, D, H, W, padding_mode):
@@ -5046,23 +5048,23 @@ class TestNN(NNTestCase):
             W = random.randint(2, IW)
             test_shape(N, C, ID, IH, IW, D, H, W, padding_mode)
 
-        # test known input on CPU
-        for padding_mode in ['zeros', 'border', 'reflection']:
-            # do gradcheck
-            N = random.randint(2, 5)
-            C = random.randint(2, 5)
-            D = random.randint(2, 5)
-            H = random.randint(2, 5)
-            W = random.randint(2, 5)
-            input = torch.randn(N, C, D, H, W, requires_grad=True)
-            grid = torch.randn(N, D, H, W, 3, requires_grad=True)
-            self.assertTrue(gradcheck(
-                lambda inp, grid: F.grid_sample(inp, grid, padding_mode=padding_mode),
-                (input, grid)))
+        for mode in ('bilinear', 'nearest'):
+            for padding_mode in ('zeros', 'border', 'reflection'):
+                # do gradcheck
+                N = random.randint(2, 5)
+                C = random.randint(2, 5)
+                D = random.randint(2, 5)
+                H = random.randint(2, 5)
+                W = random.randint(2, 5)
+                input = torch.randn(N, C, D, H, W, requires_grad=True)
+                grid = torch.randn(N, D, H, W, 3, requires_grad=True)
+                self.assertTrue(gradcheck(
+                    lambda inp, grid: F.grid_sample(inp, grid, padding_mode=padding_mode),
+                    (input, grid)))
 
-            # test CUDA against CPU
-            if TEST_CUDA:
-                test_cpu_against_cuda(N, C, D, H, W, padding_mode)
+                # test CUDA against CPU
+                if TEST_CUDA:
+                    test_cpu_against_cuda(N, C, D, H, W, padding_mode)
 
     def test_affine_grid(self):
         # test known input on CPU
