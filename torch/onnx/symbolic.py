@@ -869,14 +869,13 @@ def topk(g, self, k, dim, largest, sorted, out=None):
 
 
 def repeat(g, self, repeats):
-    repeats_sizes = None
     if not _is_value(repeats):
-        repeats_sizes = len(repeats)
         repeats = g.op("Constant", value_t=torch.LongTensor(repeats))
+    const_repeats = _maybe_get_const(repeats, 'is')
 
-    if self.isTensor() and repeats_sizes is not None:
+    if self.isTensor() and not _is_value(const_repeats):
         sizes = self.type().sizes()
-        diff_dims = len(repeats_sizes) - len(sizes)
+        diff_dims = len(const_repeats) - len(sizes)
         if diff_dims > 0:
             self = view(g, self, [1] * diff_dims + sizes)
     return g.op("Tile", self, repeats)
