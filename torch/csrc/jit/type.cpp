@@ -46,31 +46,31 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
   return out;
 }
 
-TypePtr DynamicType::get() {
+DynamicTypePtr DynamicType::get() {
   static auto value = DynamicType::create();
   return value;
 }
-TypePtr NumberType::get() {
+NumberTypePtr NumberType::get() {
   static auto value = NumberType::create();
   return value;
 }
-TypePtr IntType::get() {
+IntTypePtr IntType::get() {
   static auto value = IntType::create();
   return value;
 }
-TypePtr FloatType::get() {
+FloatTypePtr FloatType::get() {
   static auto value = FloatType::create();
   return value;
 }
-TypePtr NoneType::get() {
+NoneTypePtr NoneType::get() {
   static auto value = NoneType::create();
   return value;
 }
-TypePtr ListType::ofTensors() {
+ListTypePtr ListType::ofTensors() {
   static auto value = ListType::create(DynamicType::get());
   return value;
 }
-TypePtr ListType::ofInts() {
+ListTypePtr ListType::ofInts() {
   static auto value = ListType::create(IntType::get());
   return value;
 }
