@@ -78,6 +78,9 @@ Tensor diagonal(const Tensor& self, int64_t offset, int64_t dim1_, int64_t dim2_
   } else {
     diag_size = std::max<int64_t>(std::min(self.size(dim1)+offset, self.size(dim2)), 0);
   }
+#ifndef USE_TH_SIZE_ZERO_DIM
+  AT_CHECK(diag_size > 0, "invalid diagonal offset ", offset); // the diagonal offset was too large in magnitude
+#endif
 
   // NumPy allows you to specify offsets "off the end"; let's just be careful not to
   // set a ridiculous storage_offset in that case (technically it shouldn't matter
@@ -154,7 +157,11 @@ Tensor narrow(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
   if (start != cur_size) {  // start being the end is valid, but not a valid dim specification.
     start = maybe_wrap_dim(start, cur_size);
   }
+#ifndef USE_TH_SIZE_ZERO_DIM
+  if (length <= 0 || start > cur_size - length) {
+#else
   if (length < 0 || start > cur_size - length) {
+#endif
     AT_ERROR("start (", start, ") + length (", length, ") exceeds dimension size (", cur_size, ").");
   }
   return at::slice(self, dim, start, start + length, 1);
@@ -239,6 +246,14 @@ static std::vector<int64_t> infer_size(IntList shape, int64_t numel) {
       AT_CHECK(newsize != 0, "cannot reshape tensor of 0 elements into shape ", shape);
       res[*infer_dim] = numel / newsize;
     }
+#ifndef USE_TH_SIZE_ZERO_DIM
+    if (numel == 0) {
+      // Collapse zero-element shapes into one dimension because TH handles zeros
+      // in sizes strangely: x.resize_(1, 0) has shape (1,). TODO: remove this
+      // once we have multi-dimensional empty tensors.
+      return {0};
+    }
+#endif
     return res;
   }
 
@@ -312,6 +327,12 @@ Tensor slice(const Tensor& self, int64_t dim, int64_t start, int64_t end, int64_
   }
   auto storage_offset = self.storage_offset() + start * strides[dim];
   auto len = end - start;
+#ifndef USE_TH_SIZE_ZERO_DIM
+  if (len == 0) {
+    // TODO: currently we don't have support for 0-sized dims, return size 0 tensor for now
+    return self.type().tensor();
+  }
+#endif
   sizes[dim] = (len + step - 1) / step;  // round-up
   strides[dim] *= step;
   return self.as_strided(sizes, strides, storage_offset);
@@ -518,6 +539,11 @@ inferSqueezeGeometry(const Tensor& tensor, int64_t dim) {
 
 std::tuple<std::vector<int64_t>, std::vector<int64_t> >
 inferUnsqueezeGeometry(const Tensor& tensor, int64_t dim) {
+#ifndef USE_TH_SIZE_ZERO_DIM
+  if (tensor.numel() == 0) {
+    throw std::runtime_error("cannot unsqueeze empty tensor");
+  }
+#endif
   std::vector<int64_t> sizes(tensor.sizes());
   std::vector<int64_t> strides(tensor.strides());
   int64_t new_stride = dim >= tensor.dim() ? 1 : sizes[dim] * strides[dim];
