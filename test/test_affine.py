@@ -3,12 +3,18 @@ from __future__ import print_function, division
 import itertools
 import math
 import random
-
-import numpy as np
-import scipy.ndimage
+import unittest
 
 import torch
-from common import run_tests, TestCase
+from common import run_tests, TestCase, TEST_NUMPY, TEST_SCIPY
+
+if TEST_SCIPY:
+    import scipy.ndimage
+    # print("scipy version: ", scipy.version.version)
+
+if TEST_NUMPY:
+    import numpy as np
+
 
 import logging
 log = logging.getLogger(__name__)
@@ -18,7 +24,6 @@ log.setLevel(logging.DEBUG)
 
 # from .affine import affine_grid_generator
 
-print("scipy version: ", scipy.version.version)
 
 # flake8: noqa: E241
 
@@ -270,6 +275,8 @@ def _buildEquivalentTransforms3d(device, input_size, output_size, angle_rad, axi
 
 
 class TestAffine(TestCase):
+
+    @unittest.skipIf(not (TEST_SCIPY and TEST_NUMPY), "Scipy and/or numpy not found")
     def test_affine_2d_rotate0(self):
         for device in device_():
             try:
@@ -327,6 +334,7 @@ class TestAffine(TestCase):
                 log.error([device])
                 raise
 
+    @unittest.skipIf(not (TEST_SCIPY and TEST_NUMPY), "Scipy and/or numpy not found")
     def test_affine_2d_rotate90(self):
         for device, input_size2dsq, output_size2dsq in \
                 itertools.product(device_(), input_size2dsq_(), output_size2dsq_()):
@@ -392,6 +400,7 @@ class TestAffine(TestCase):
                 log.error([device, input_size2dsq, output_size2dsq])
                 raise
 
+    @unittest.skipIf(not (TEST_SCIPY and TEST_NUMPY), "Scipy and/or numpy not found")
     def test_affine_2d_rotate45(self):
         for device in device_():
             input_size = [1, 1, 3, 3]
@@ -446,6 +455,7 @@ class TestAffine(TestCase):
             assert np.abs(scipy_ary - gridsample_ary).max() < 1e-6
             # assert False
 
+    @unittest.skipIf(not (TEST_SCIPY and TEST_NUMPY), "Scipy and/or numpy not found")
     def test_affine_2d_rotateRandom(self):
         for device, angle_rad, input_size2d, output_size2d in \
                 itertools.product(device_(), angle_rad_(), input_size2d_(), output_size2d_()):
@@ -514,6 +524,7 @@ class TestAffine(TestCase):
             assert np.abs(scipy_ary - gridsample_ary).max() < 1e-5
             # assert False
 
+    @unittest.skipIf(not (TEST_SCIPY and TEST_NUMPY), "Scipy and/or numpy not found")
     def test_affine_3d_rotateRandom(self):
         for device, angle_rad, axis_vector, input_size3d, output_size3d in \
                 itertools.product(device_(), angle_rad_(), axis_vector_(), input_size3d_(), output_size3d_()):
