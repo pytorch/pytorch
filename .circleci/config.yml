@@ -53,6 +53,7 @@ jobs:
     - run:
         name: Build
         command: |
+          set -x
           sudo pip install awscli
           curl -L https://nvidia.github.io/nvidia-docker/gpgkey | sudo apt-key add -
           echo "deb https://nvidia.github.io/libnvidia-container/ubuntu14.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
