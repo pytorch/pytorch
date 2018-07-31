@@ -323,6 +323,10 @@ class OperatorBase : public Observable<OperatorBase> {
     return !event_;
   }
 
+  virtual void SyncDevice() {
+    CAFFE_NOT_IMPLEMENTED;
+  }
+
   // Checks whether stream is ready to execute new computation,
   // used in stream allocation optimization to skip stream that is currently
   // busy. Depends on context and operator's device, returns true by default
@@ -576,6 +580,8 @@ class Operator : public OperatorBase {
   const Context* getContext() const {
     return &context_;
   }
+
+  void SyncDevice() final {}
 
   virtual std::vector<TensorFiller<Context>> InputFillers(
       const std::vector<std::vector<TIndex>>& shapes) {
