@@ -55,6 +55,7 @@ jobs:
         name: Build
         command: |
           sudo pip install awscli
+          nvidia-smi
           export AWS_ACCESS_KEY_ID=AKIAIUHRTFRLXI6HBUCQ
           export AWS_SECRET_ACCESS_KEY=$CIRCLECI_AWS_SECRET_KEY
           eval $(aws ecr get-login --region us-east-1 --no-include-email)
@@ -88,10 +89,10 @@ workflows:
   version: 2
   build:
     jobs:
-      - linux_trusty_py3_6_gcc7_build
-      - linux_xenial_cuda9_2_cudnn7_py3_gcc7_build
+#     - linux_trusty_py3_6_gcc7_build
+#     - linux_xenial_cuda9_2_cudnn7_py3_gcc7_build
       - linux_xenial_cuda9_2_cudnn7_py3_gcc7_test
 #         (colon above needed)
 #         requires:
 #           - linux_xenial_cuda9_2_cudnn7_py3_gcc7_build
-      - macos_10_13_py3
+#     - macos_10_13_py3
