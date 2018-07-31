@@ -41,7 +41,7 @@ void RowsWhereRoILevelEquals(Eigen::Ref<const ERArrXXf> rois,
 //    distribute those proposals to their appropriate FPN levels for Faster RCNN.
 //    An anchor at one FPN level may predict an RoI that will map to another
 //    level, hence the need to redistribute the proposals.
-// Reference: detectron/lib/ops/collect_and_distribute_fpn_rpn_proposals.py
+// Reference: facebookresearch/Detectron/detectron/ops/collect_and_distribute_fpn_rpn_proposals.py
 template <class Context>
 class CollectAndDistributeFpnRpnProposalsOp final : public Operator<Context> {
  public:
