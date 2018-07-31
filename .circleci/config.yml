@@ -34,7 +34,7 @@ jobs:
           git submodule update --init
           .jenkins/pytorch/build.sh
     - persist_to_workspace:
-        root: /var/lib/jenkins/.local/lib/python3.6/site-packages/torch
+        root: /opt/conda/lib/python3.6/site-packages/torch
         paths:
           - "*"
   linux_xenial_cuda9_2_cudnn7_py3_gcc7_test:
@@ -48,7 +48,7 @@ jobs:
     steps:
     - checkout
     - attach_workspace:
-        at: /var/lib/jenkins/.local/lib/python3.6/site-packages/torch
+        at: /opt/conda/lib/python3.6/site-packages/torch
     - run:
         name: Build
         command: |
