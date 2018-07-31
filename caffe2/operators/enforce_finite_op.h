@@ -23,7 +23,7 @@ class EnforceFiniteOp final : public Operator<Context> {
   bool DoRunWithType();
 
  private:
-  Tensor buffer_{CPU};
+  Tensor buffer_{Context::GetDeviceType()};
 
   template <typename T>
   void EnforceOnCPU(const Tensor& input) {
