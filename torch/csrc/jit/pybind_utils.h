@@ -18,6 +18,8 @@ inline Stack createStack(const py::tuple& tuple, at::ArrayRef<Value*> inputs, si
         return py::cast<double>(obj);
       case TypeKind::IntType:
         return py::cast<int64_t>(obj);
+      case TypeKind::NoneType:
+        return {};
       case TypeKind::ListType:
       case TypeKind::TupleType:
         throw std::runtime_error("Lists and tuples are not supported yet");
@@ -48,6 +50,8 @@ inline py::object wrapStack(Stack&& outputs, at::ArrayRef<Value*> output_vals) {
         return py::cast(ivalue.toDouble());
       case TypeKind::IntType:
         return py::cast(ivalue.toInt());
+      case TypeKind::NoneType:
+        return py::none();
       case TypeKind::ListType:
       case TypeKind::TupleType:
         throw std::runtime_error("Lists and tuples are not supported yet");
