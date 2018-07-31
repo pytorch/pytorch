@@ -263,7 +263,7 @@ struct Variable::Impl : public at::TensorImpl {
   TORCH_API explicit Impl(
       at::Tensor data,
       bool requires_grad = false,
-      Edge edge = Edge());
+      Edge gradient_edge = Edge());
 
   ~Impl() override;
 

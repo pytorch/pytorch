@@ -24,6 +24,11 @@ Value* insertConstant(
   } else if(val.isIntList()) {
     n->is_(attr::value, val.toIntList()->elements());
     n->output()->setType(ListType::ofInts());
+  } else if(val.isTensorList()) {
+    n->ts_(attr::value, fmap(val.toTensorList()->elements(), [](const at::Tensor & t) {
+      return autograd::Variable(t).data();
+    }));
+    n->output()->setType(ListType::ofTensors());
   } else {
     throw std::runtime_error("Unsupported value kind: " + val.tagKind());
   }
@@ -64,6 +69,14 @@ RegisterOperators reg({
           auto is = node->is(attr::value);
           return [is](Stack& stack) {
             push(stack, is);
+            return 0;
+          };
+        } else if(type->isSubtypeOf(ListType::ofTensors())) {
+          auto ts = fmap(node->ts(attr::value), [](const at::Tensor & t) -> at::Tensor {
+            return autograd::make_variable(t);
+          });
+          return [ts](Stack& stack) {
+            push(stack, ts);
             return 0;
           };
         } else {

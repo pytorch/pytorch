@@ -1,6 +1,7 @@
 #include "ATen/ATen.h"
 #include "ATen/NativeFunctions.h"
 #include "ATen/WrapDimUtilsMulti.h"
+#include <cctype>
 
 namespace at { namespace native {
 
@@ -136,6 +137,8 @@ Tensor einsum(std::string eqn, TensorList tensors) {
   } else {
     in_eqn = eqn;
   }
+  // remove spaces for einsum compatibility (#9929)
+  in_eqn.erase(std::remove_if(in_eqn.begin(), in_eqn.end(), isspace), in_eqn.end());
 
   // next we parse in_eq (the left hand side) by iterating. It is a string of comma separated terms per index
   int64_t operand = 0;
@@ -212,7 +215,7 @@ Tensor einsum(std::string eqn, TensorList tensors) {
             num_output_dims++;
           }
         }
-      } else {                              // letter (hopefully)
+      } else if (! isspace(c)) {                              // letter (hopefully)
         AT_CHECK((ell_char_count == 0) || (ell_char_count == 3), "'.' must only occur in ellipsis in the right hand side");
         AT_CHECK(('a' <= c) && (c <= 'z'), "only lowercase letters a-z allowed as indices");
         int64_t letter_num = c-'a';
