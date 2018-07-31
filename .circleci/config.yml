@@ -30,7 +30,8 @@ jobs:
     - run:
         name: Build
         command: |
-          sudo /usr/local/bin/pip install awscli
+          find / -name pip
+          find /
           export SCCACHE_BUCKET=ossci-compiler-cache
           touch foo
           aws s3 cp foo s3://ossci-linux-build/pytorch/foo
