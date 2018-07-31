@@ -31,15 +31,10 @@ jobs:
         name: Build
         command: |
           export SCCACHE_BUCKET=ossci-compiler-cache
-          #git submodule update --init
-          #.jenkins/pytorch/build.sh
-          #tar czf circleci-${CIRCLE_BUILD_NUM}.tgz $HOME/.local/lib/python*/site-packages/torch*
-          mkdir -p $HOME/.local/flub
-          touch $HOME/.local/flub/foo
-          touch $HOME/.local/flub/bar
+          git submodule update --init
+          .jenkins/pytorch/build.sh
     - persist_to_workspace:
-        #root: $HOME/.local/lib/python3.6/site-packages/
-        root: /var/lib/jenkins/.local/flub
+        root: /var/lib/jenkins/.local/lib/python3.6/site-packages/torch
         paths:
           - "*"
   linux_xenial_cuda9_2_cudnn7_py3_gcc7_test:
@@ -53,12 +48,11 @@ jobs:
     steps:
     - checkout
     - attach_workspace:
-        at: /var/lib/jenkins/.local/flub
+        at: /var/lib/jenkins/.local/lib/python3.6/site-packages/torch
     - run:
         name: Build
         command: |
-          #git submodule update --init
-          ls ~/.local/flub
+          .jenkins/pytorch/test.sh
   macos_10_13_py3:
     macos:
       xcode: "9.0"
