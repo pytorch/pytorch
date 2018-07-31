@@ -31,7 +31,7 @@ void THNN_(SpatialDepthwiseConvolution_updateOutput)(
 
   // Bias has same # of channels as output
   if (bias) {
-    THAssert(bias->size(0) == weight->size(0));
+    THAssert(THTensor_sizeLegacyNoScalars(bias, 0) == weight->size(0));
   }
 
   input = THCTensor_(newContiguous)(state, input);

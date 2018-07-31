@@ -28,9 +28,19 @@ int64_t THCTensor_(size)(THCState *state, const THCTensor *self, int dim)
   return THCTensor_size(state, self, dim);
 }
 
+int64_t THCTensor_(sizeLegacyNoScalars)(THCState *state, const THCTensor *self, int dim)
+{
+  return THTensor_sizeLegacyNoScalars(self, dim);
+}
+
 int64_t THCTensor_(stride)(THCState *state, const THCTensor *self, int dim)
 {
   return THCTensor_stride(state, self, dim);
+}
+
+int64_t THCTensor_(strideLegacyNoScalars)(THCState *state, const THCTensor *self, int dim)
+{
+  return THTensor_strideLegacyNoScalars(self, dim);
 }
 
 THLongStorage *THCTensor_(newSizeOf)(THCState *state, THCTensor *self)

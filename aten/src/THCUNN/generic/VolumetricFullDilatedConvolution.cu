@@ -387,7 +387,7 @@ void THNN_(VolumetricFullDilatedConvolution_accGradParameters)(
   if (gradWeight) {
     nOutputPlane = THCTensor_(size)(state, gradWeight, 1);
   } else if (gradBias) {
-    nOutputPlane = THCTensor_(size)(state, gradBias, 0);
+    nOutputPlane = THCTensor_(sizeLegacyNoScalars)(state, gradBias, 0);
   } else {
     return;
   }
