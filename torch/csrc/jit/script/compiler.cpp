@@ -490,16 +490,8 @@ static std::shared_ptr<SugaredValue> tryEmitBuiltin(
   at::ArrayRef<NamedValue> attributes) {
 
   auto graph = method.graph();
-<<<<<<< HEAD
-  auto matched_inputs = tryMatchSchema(op->schema, loc, *graph, inputs, attributes, failure_messages);
+  auto matched_inputs = tryMatchSchema(op->schema(), loc, *graph, inputs, attributes, failure_messages);
   if(!matched_inputs)
-||||||| merged common ancestors
-  auto flat_inputs = tryMatchSchema(op->schema, loc, *graph, inputs, attributes, failure_messages);
-  if(!flat_inputs)
-=======
-  auto flat_inputs = tryMatchSchema(op->schema(), loc, *graph, inputs, attributes, failure_messages);
-  if(!flat_inputs)
->>>>>>> Parse and register schema declarations lazily
     return nullptr;
   // we successfully matched this schema, construct the node
 
@@ -523,16 +515,6 @@ static std::shared_ptr<SugaredValue> tryEmitBuiltin(
     }
   }
 
-<<<<<<< HEAD
-||||||| merged common ancestors
-  if(op->hasAttributedVersion())
-    liftConstantAttributes(op->schema, n);
-
-=======
-  if(op->hasAttributedVersion())
-    liftConstantAttributes(op->schema(), n);
-
->>>>>>> Parse and register schema declarations lazily
   // assert that we did indeed create an op that has implementation
   // otherwise schema and dispatch are not in sync
   getOperation(n);
