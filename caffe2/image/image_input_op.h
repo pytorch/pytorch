@@ -466,7 +466,7 @@ bool ImageInputOp<Context>::GetImageAndLabelAndInfoFromDBValue(
                 CV_8UC1,
                 const_cast<char*>(datum.data().data())),
             color_ ? CV_LOAD_IMAGE_COLOR : CV_LOAD_IMAGE_GRAYSCALE);
-        if (src.rows == 0 or src.cols == 0) {
+        if (src.rows == 0 || src.cols == 0) {
           num_decode_errors_in_batch_++;
           src = cv::Mat::zeros(cv::Size(224, 224), CV_8UC3);
         }
@@ -541,7 +541,7 @@ bool ImageInputOp<Context>::GetImageAndLabelAndInfoFromDBValue(
                 CV_8UC1,
                 const_cast<char*>(encoded_image_str.data())),
             color_ ? CV_LOAD_IMAGE_COLOR : CV_LOAD_IMAGE_GRAYSCALE);
-        if (src.rows == 0 or src.cols == 0) {
+        if (src.rows == 0 || src.cols == 0) {
           num_decode_errors_in_batch_++;
           src = cv::Mat::zeros(cv::Size(224, 224), CV_8UC3);
         }
