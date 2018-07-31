@@ -432,11 +432,10 @@ void initJitScriptBindings(PyObject* module) {
   // public.
   py::class_<Module, std::shared_ptr<Module>>(m, "ScriptModule")
       .def(py::init<>())
-      .def("export", [](const std::shared_ptr<Module> m, int64_t onnx_opset_version,
-                        ::torch::onnx::OperatorExportTypes operator_export_type) {
+      .def("export", [](const std::shared_ptr<Module> m) {
         std::string module;
         RawDataExportMap export_map;
-        std::tie(module, export_map) = ExportModule(m, onnx_opset_version, operator_export_type);
+        std::tie(module, export_map) = ExportModule(m);
         std::unordered_map<std::string, py::bytes> python_serialized_export_map;
         for (auto& kv : export_map) {
           auto t = kv.second;
@@ -447,8 +446,7 @@ void initJitScriptBindings(PyObject* module) {
           python_serialized_export_map[kv.first] = py::bytes(static_cast<const char*>(t.data_ptr()), copy_bytes);
         }
         return std::make_tuple(py::bytes(module), python_serialized_export_map);
-      }, py::arg("onnx_opset_version")=0,
-         py::arg("operator_export_type")=::torch::onnx::OperatorExportTypes::RAW)
+      })
       .def("_set_optimized", &Module::set_optimized)
       .def(
           "_define",

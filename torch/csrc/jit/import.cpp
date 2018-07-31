@@ -433,12 +433,12 @@ std::shared_ptr<Graph> ImportIRGraph(const std::string& serialized_graph,
   return decoder.decode(serialized_graph, initializers);
 }
 
-std::shared_ptr<script::Module> ImportIRModule(
+void ImportIRModule(
     const std::shared_ptr<script::Module> module,
     const std::string& serialized_module,
     const std::unordered_map<std::string, std::string>& storage_map) {
   ModuleDecoder decoder;
-  return decoder.decode(module, serialized_module, storage_map);
+  decoder.decode(module, serialized_module, storage_map);
 }
 
 }}

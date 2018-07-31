@@ -3658,12 +3658,33 @@ def func(t):
         # test file export
         import io
         f = io.BytesIO()
-        from torch.onnx import OperatorExportTypes, ExportTypes
-        torch.onnx._export_module(m_orig, f, OperatorExportTypes.RAW, ExportTypes.ZIP_ARCHIVE)
+        from torch.onnx import ExportTypes
+        torch.onnx._export_module(m_orig, f, ExportTypes.ZIP_ARCHIVE)
         f.seek(0)
         import zipfile
         with zipfile.ZipFile(f, 'r', compression=zipfile.ZIP_STORED) as z:
             self.assertExpected(str(sorted(file.filename for file in z.infolist())))
+
+    @skipIfNoTorchVision
+    def test_script_module_export_resnet18(self):
+        x = torch.ones(1, 3, 224, 224)
+        m_orig = torch.jit.trace(torch.ones(1, 3, 224, 224))(torchvision.models.resnet18())
+        m_import = torch.jit.ScriptModule()
+        m_export, storage_map = m_orig.export()
+        torch._C._jit_import_module(m_import, m_export, storage_map)
+
+        input = torch.randn(1, 3, 224, 224, requires_grad=True)
+        output_orig = m_orig(input)
+        output_orig.sum().backward()
+        grad_orig = input.grad.clone()
+        input.grad.zero_()
+
+        output_import = m_import(input)
+        output_import.sum().backward()
+        grad_import = input.grad.clone()
+
+        self.assertEqual(output_orig, output_import)
+        self.assertEqual(grad_orig, grad_import)
 
     def test_script_module_export_tensor_type(self):
         class M(torch.jit.ScriptModule):

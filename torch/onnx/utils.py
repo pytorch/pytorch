@@ -286,11 +286,9 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
     return torch_out
 
 
-def _export_module(module, f, operator_export_type=OperatorExportTypes.ONNX, export_type=ExportTypes.PROTOBUF_FILE):
+def _export_module(module, f, export_type=ExportTypes.ZIP_ARCHIVE):
     # TODO: Don't allocate a in-memory string for the protobuf
-    from torch.onnx.symbolic import _onnx_opset_version
-
-    proto, storage_map = module.export(_onnx_opset_version, operator_export_type)
+    proto, storage_map = module.export()
 
     if export_type in [ExportTypes.ZIP_ARCHIVE, ExportTypes.COMPRESSED_ZIP_ARCHIVE]:
         import zipfile

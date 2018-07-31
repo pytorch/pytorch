@@ -499,7 +499,7 @@ void initPythonIRBindings(PyObject * module_) {
   m.def("_jit_import_module", [](const std::shared_ptr<script::Module> module,
                                  const std::string& serialized_module,
                                  const std::unordered_map<std::string, std::string>& storages) {
-    return ImportIRModule(module, serialized_module, storages);
+    ImportIRModule(module, serialized_module, storages);
   });
 }
 }}

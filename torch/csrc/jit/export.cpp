@@ -68,7 +68,6 @@ void validateGraph(const std::shared_ptr<Graph>& graph, onnx_torch::OperatorExpo
 class EncoderBase {
  public:
   EncoderBase(onnx::ModelProto *model_proto,
-             int64_t onnx_opset_version,
              onnx_torch::OperatorExportTypes operator_export_type,
              bool defer_weight_export = false);
 
@@ -129,7 +128,6 @@ onnx::TensorProto_DataType ATenTypeToOnnxType(at::ScalarType at_type) {
 
 EncoderBase::EncoderBase(
     onnx::ModelProto *model_proto,
-    int64_t onnx_opset_version,
     onnx_torch::OperatorExportTypes operator_export_type,
     bool defer_weight_export)
     : num_blocks_(0),
@@ -138,9 +136,6 @@ EncoderBase::EncoderBase(
   model_proto->set_producer_name("pytorch");
   model_proto->set_ir_version(onnx::IR_VERSION);
   model_proto->set_producer_version("0.3");
-  auto* imp = model_proto->add_opset_import();
-  // This is the version of ONNX operator set we are targeting
-  imp->set_version(onnx_opset_version);
 }
 
 void EncoderBase::EncodeValueInfo(
@@ -376,10 +371,14 @@ GraphEncoder::GraphEncoder(
     onnx_torch::OperatorExportTypes operator_export_type,
     const std::vector<at::Tensor> &initializers,
     bool defer_weight_export)
-    : EncoderBase(model_proto, onnx_opset_version, operator_export_type, defer_weight_export) {
+    : EncoderBase(model_proto, operator_export_type, defer_weight_export) {
   if (operator_export_type != onnx_torch::OperatorExportTypes::RAW) {
     validateGraph(graph, operator_export_type);
   }
+
+  auto* imp = model_proto->add_opset_import();
+  // This is the version of ONNX operator set we are targeting
+  imp->set_version(onnx_opset_version);
 
   EncodeGraph(model_proto->mutable_graph(), graph, initializers);
 }
@@ -387,9 +386,7 @@ GraphEncoder::GraphEncoder(
 class ModuleEncoder: public EncoderBase {
  public:
   ModuleEncoder(onnx::ModelProto *model_proto,
-                const std::shared_ptr<script::Module> &module,
-                int64_t onnx_opset_version,
-                onnx_torch::OperatorExportTypes operator_export_type);
+                const std::shared_ptr<script::Module> &module);
 
  private:
   void EncodeModule(onnx::GraphProto *graph_proto, const std::shared_ptr<script::Module> &module);
@@ -441,11 +438,10 @@ class ModuleEncoder: public EncoderBase {
 
 ModuleEncoder::ModuleEncoder(
     onnx::ModelProto *model_proto,
-    const std::shared_ptr<script::Module> &module,
-    int64_t onnx_opset_version,
-    onnx_torch::OperatorExportTypes operator_export_type)
-    : EncoderBase(model_proto, onnx_opset_version, operator_export_type,
-                 /*defer_weight_export*/ true) {
+    const std::shared_ptr<script::Module> &module)
+    : EncoderBase(model_proto,
+                  onnx_torch::OperatorExportTypes::RAW,
+                  /*defer_weight_export*/ true) {
   model_proto->set_doc_string("THIS PROTO IS NOT STANDARD ONNX");
   EncodeModule(model_proto->mutable_graph(), module);
 }
@@ -849,13 +845,9 @@ std::tuple<std::string, RawDataExportMap> ExportGraph(
   return std::make_tuple(model_proto.SerializeAsString(), graph_encoder.get_raw_data_export_map());
 }
 
-std::tuple<std::string, RawDataExportMap> ExportModule(
-                        const std::shared_ptr<script::Module>& module,
-                        int64_t onnx_opset_version,
-                        ::torch::onnx::OperatorExportTypes operator_export_type) {
+std::tuple<std::string, RawDataExportMap> ExportModule(const std::shared_ptr<script::Module>& module) {
   ::ONNX_NAMESPACE::ModelProto model_proto;
-  auto module_encoder = ModuleEncoder(
-    &model_proto, module, onnx_opset_version, operator_export_type);
+  auto module_encoder = ModuleEncoder(&model_proto, module);
   return std::make_tuple(model_proto.SerializeAsString(), module_encoder.get_raw_data_export_map());
 }
 
