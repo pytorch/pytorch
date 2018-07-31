@@ -30,6 +30,7 @@ jobs:
     - run:
         name: Build
         command: |
+          sudo pip install awscli
           export SCCACHE_BUCKET=ossci-compiler-cache
           touch foo
           aws s3 cp foo s3://ossci-linux-build/pytorch/foo
@@ -37,6 +38,16 @@ jobs:
           .jenkins/pytorch/build.sh
           tar czf circleci-${CIRCLE_BUILD_NUM}.tgz $HOME/.local/lib/python*/site-packages/torch*
           aws s3 cp circleci-${CIRCLE_BUILD_NUM}.tgz s3://ossci-linux-build/pytorch/circleci-${CIRCLE_BUILD_NUM}.tgz --acl public-read
+  macos_10_13_py3:
+    macos:
+      xcode: "9.0"
+    steps:
+      - checkout
+      - run:
+          name: Build
+          command: |
+            export SCCACHE_BUCKET=ossci-compiler-cache
+            git submodule update --init
 workflows:
   version: 2
   build:
