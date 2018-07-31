@@ -963,18 +963,17 @@ void testProto() {
 }
 
 void testCustomOperators() {
-  // registerOperatorWithStack
+  // createOperatorWithStack
   {
     auto schema = parseSchema("foo::with_stack(float a, Tensor b) -> Tensor");
-    registerOperatorWithStack(
-        schema, [](Stack& stack) {
-          double a;
-          at::Tensor b;
-          pop(stack, a, b);
-          auto result = a + b;
-          pack(stack, std::move(result));
-          return 0;
-        });
+    RegisterOperators reg({createOperatorWithStack(schema, [](Stack& stack) {
+      double a;
+      at::Tensor b;
+      pop(stack, a, b);
+      auto result = a + b;
+      pack(stack, std::move(result));
+      return 0;
+    })});
     auto& ops = getAllOperatorsFor(Symbol::fromQualString("foo::with_stack"));
     REQUIRE(ops.size() == 1);
 
@@ -994,9 +993,10 @@ void testCustomOperators() {
 
     // REQUIRE(op(2.0f, at::ones(5)).allclose(at::full(5, 3.0f)));
   }
-  // registerOperator with inferred schema
+  // createOperator with inferred schema
   {
-    registerOperator("foo::sugar", [](double a, at::Tensor b) { return a + b; });
+    RegisterOperators reg({createOperator(
+        "foo::sugar", [](double a, at::Tensor b) { return a + b; })});
     auto& ops = getAllOperatorsFor(Symbol::fromQualString("foo::sugar"));
     REQUIRE(ops.size() == 1);
 
@@ -1016,11 +1016,11 @@ void testCustomOperators() {
 
     // REQUIRE(op(2.0f, at::ones(5)).allclose(at::full(5, 3.0f)));
   }
-  // registerOperator with no stack function but explicit schema
+  // createOperator with no stack function but explicit schema
   {
-    registerOperator(
+    RegisterOperators reg({createOperator(
         parseSchema("foo::sugar_with_schema(float a, Tensor b) -> Tensor"),
-        [](double a, at::Tensor b) { return a + b; });
+        [](double a, at::Tensor b) { return a + b; })});
 
     auto& ops =
         getAllOperatorsFor(Symbol::fromQualString("foo::sugar_with_schema"));
@@ -1038,13 +1038,11 @@ void testCustomOperators() {
     REQUIRE(op->schema.returns.size() == 1);
     REQUIRE(op->schema.returns[0].type->kind() == TypeKind::DynamicType);
   }
-  // registerOperator with no stack function but explicit, faulty schema
+  // createOperator with no stack function but explicit, faulty schema
   {
-    registerOperator(
+    RegisterOperators reg({createOperator(
         parseSchema("foo::sugar_with_schema(Tensor a, Tensor b) -> Tensor"),
-        [](double a, at::Tensor b) { return a + b; });
-
-
+        [](double a, at::Tensor b) { return a + b; })});
 
     // TODO: Something bad should happen here?
 

@@ -79,10 +79,10 @@ ReturnType callOperatorWithTuple(
 /// and a stack-based operator implementation (the `operation`). The `operation`
 /// must pop its arguments from the stack, perform some operation on those
 /// arguments, and then push the return value back onto the stack.
-inline void registerOperatorWithStack(
+inline Operator createOperatorWithStack(
     FunctionSchema schema,
     Operation operation) {
-  registerOperator({schema, [operation](Node*) { return operation; }});
+  return {schema, [operation](Node*) { return operation; }};
 }
 
 /// Registers a custom operator with a schema and an implementation function.
@@ -97,13 +97,13 @@ inline void registerOperatorWithStack(
 ///    [](float a, at::Tensor b) { return a + b; });
 /// ```
 template <typename Implementation>
-void registerOperator(FunctionSchema schema, Implementation&& implementation) {
+Operator createOperator(FunctionSchema schema, Implementation&& implementation) {
   using Traits = c10::guts::infer_function_traits_t<Implementation>;
   using ArgumentTypes = typename Traits::parameter_types;
   using ArgumentTuple =
       typename c10::guts::typelist::to_tuple<ArgumentTypes>::type;
   using ReturnType = typename Traits::return_type;
-  registerOperatorWithStack(schema, [implementation](Stack& stack) {
+  return createOperatorWithStack(schema, [implementation](Stack& stack) {
     ArgumentTuple tuple;
     auto result = torch::jit::detail::callOperatorWithTuple<ReturnType>(
         std::move(implementation),
@@ -128,13 +128,13 @@ void registerOperator(FunctionSchema schema, Implementation&& implementation) {
 /// registerOperator("foo::bar", [](float a, at::Tensor b) { return a + b; });
 /// ```
 template <typename Implementation>
-void registerOperator(
+Operator createOperator(
     const std::string& name,
     Implementation&& implementation) {
   using Traits = c10::guts::infer_function_traits_t<Implementation>;
   auto schema =
       torch::jit::detail::createFunctionSchemaFromTraits<Traits>(name);
-  return registerOperator(schema, std::forward<Implementation>(implementation));
+  return createOperator(schema, std::forward<Implementation>(implementation));
 }
 
 } // namespace jit
