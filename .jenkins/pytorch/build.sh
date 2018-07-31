@@ -43,8 +43,6 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # https://github.com/RadeonOpenCompute/hcc#hcc-with-thinlto-linking
   export KMTHINLTO=1
 
-  sudo chown -R jenkins:jenkins /usr/local
-
   python tools/amd_build/build_pytorch_amd.py
   USE_ROCM=1 python setup.py install --user
   exit 0
