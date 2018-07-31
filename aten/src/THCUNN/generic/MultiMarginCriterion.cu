@@ -18,7 +18,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
   input = THCTensor_(newContiguous)(state, input);
   if(weights)
     weights = THCTensor_(newContiguous)(state, weights);
-  if (input->dim() == 1)
+  if (THTensor_nDimensionLegacyNoScalars(input) == 1)
   {
     dim3 blocks(1);
     dim3 threads(MULTIMARGIN_THREADS);
@@ -30,7 +30,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
         THCTensor_(data)(state, input),
         THCIndexTensor_(data)(state, target),
         weights ? THCTensor_(data)(state, weights) : NULL,
-        1, input->size(0),
+        1, THTensor_sizeLegacyNoScalars(input, 0),
         reduction == Reduction::ElementwiseMean,
         margin
       );
@@ -42,7 +42,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
         THCTensor_(data)(state, input),
         THCIndexTensor_(data)(state, target),
         weights ? THCTensor_(data)(state, weights) : NULL,
-        1, input->size(0),
+        1, THTensor_sizeLegacyNoScalars(input, 0),
         reduction == Reduction::ElementwiseMean,
         margin
       );
@@ -52,7 +52,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
   else if (input->dim() == 2)
   {
     int nframe = input->size(0);
-    THArgCheck(!target->is_empty() && (target->dim() == 1) && (target->size(0) == nframe), 3,
+    THArgCheck(!target->is_empty() && (THTensor_nDimensionLegacyNoScalars(target) == 1) && (THTensor_sizeLegacyNoScalars(target, 0) == nframe), 3,
                "inconsistent target size");
     dim3 blocks(input->size(0));
     dim3 threads(MULTIMARGIN_THREADS);
@@ -149,7 +149,7 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
   if(weights)
     weights = THCTensor_(newContiguous)(state, weights);
 
-  if (input->dim() == 1)
+  if (THTensor_nDimensionLegacyNoScalars(input) == 1)
   {
     dim3 blocks(1);
     dim3 threads(MULTIMARGIN_THREADS);
@@ -162,7 +162,7 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
         THCTensor_(data)(state, input),
         THCIndexTensor_(data)(state, target),
         weights ? THCTensor_(data)(state, weights) : NULL,
-        1, gradInput->size(0),
+        1, THTensor_sizeLegacyNoScalars(gradInput, 0),
         reduction == Reduction::ElementwiseMean,
         margin,
         reduction != Reduction::None
@@ -176,7 +176,7 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
         THCTensor_(data)(state, input),
         THCIndexTensor_(data)(state, target),
         weights ? THCTensor_(data)(state, weights) : NULL,
-        1, gradInput->size(0),
+        1, THTensor_sizeLegacyNoScalars(gradInput, 0),
         reduction == Reduction::ElementwiseMean,
         margin,
         reduction != Reduction::None
@@ -187,7 +187,7 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
   else if (input->dim() == 2)
   {
     int nframe = gradInput->size(0);
-    THArgCheck(!target->is_empty() && (target->dim() == 1) && (target->size(0) == nframe), 3,
+    THArgCheck(!target->is_empty() && (THTensor_nDimensionLegacyNoScalars(target) == 1) && (THTensor_sizeLegacyNoScalars(target, 0) == nframe), 3,
                "inconsistent target size");
     dim3 blocks(gradInput->size(0));
     dim3 threads(MULTIMARGIN_THREADS);
