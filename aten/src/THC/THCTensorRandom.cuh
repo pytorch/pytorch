@@ -204,15 +204,9 @@ sampleMultinomialOnce(int64_t* dest,
 
     sum = asmem[0];
     T sample = smem[0];
-    // The random sample is in [0,1) initially (PyTorch convention),
-    // but the code below appears to work with (0,1] (curand uniform convention)
-    // for historical reasons. So we change it back.
-    if (THCNumerics<T>::eq(sample, ScalarConvert<int, T>::to(0))) {
-      sample = ScalarConvert<int, T>::to(1);
-    }
     __syncthreads();
 
-    if (THCNumerics<AccT>::eq(sum,  accZero) || THCNumerics<T>::eq(sample, zero)) {
+    if (THCNumerics<AccT>::eq(sum,  accZero)) {
       // Choose the first element
       if (threadIdx.x == 0) {
         dest[curDist] = TH_INDEX_BASE;
@@ -262,8 +256,8 @@ sampleMultinomialOnce(int64_t* dest,
         THCNumerics<T>::add(smem[threadIdx.x - 1], prevHighProb);
       bool inBucket =
         (cat < categories) &&
-        (!THCNumerics<T>::gt(sample, curBucket)) &&
-        (THCNumerics<T>::gt(sample, prevBucket));
+        (!THCNumerics<T>::ge(sample, curBucket)) &&
+        (THCNumerics<T>::ge(sample, prevBucket));
 
       if (inBucket) {
         // We're done; we have the sample
