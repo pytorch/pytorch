@@ -29,7 +29,6 @@ using autograd::Variable;
 using autograd::variable_list;
 using at::Scalar;
 using at::Tensor;
-using at::TensorList;
 using at::TensorOptions;
 using at::DeviceGuard;
 
@@ -40,12 +39,6 @@ int deviceForInputs(Stack & stack, size_t N) {
     return -1;
   auto t = (stack.end() - N)->toTensor();
   return t.type().is_cuda() ? (int) t.get_device() : -1;
-}
-
-std::vector<at::Tensor> toTensors(at::ArrayRef<IValue> ivalues) {
-  return fmap(ivalues, [](const IValue& v) {
-    return v.toTensor();
-  });
 }
 
 template<size_t N>
