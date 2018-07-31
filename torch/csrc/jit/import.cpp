@@ -18,33 +18,35 @@ namespace {
 
 // IR graph construction
 
-at::Tensor buildTensor(const onnx_torch::TensorProto& tensor_proto) {
+namespace onnx = ::ONNX_NAMESPACE;
+
+at::Tensor buildTensor(const onnx::TensorProto& tensor_proto) {
 
   at::Tensor tensor;
 
   switch(tensor_proto.data_type()) {
-    case onnx_torch::TensorProto_DataType_UINT8:
+    case onnx::TensorProto_DataType_UINT8:
       tensor = at::CPU(at::kByte).tensor();
       break;
-    case onnx_torch::TensorProto_DataType_INT8:
+    case onnx::TensorProto_DataType_INT8:
       tensor = at::CPU(at::kChar).tensor();
       break;
-    case onnx_torch::TensorProto_DataType_INT16:
+    case onnx::TensorProto_DataType_INT16:
       tensor = at::CPU(at::kShort).tensor();
       break;
-    case onnx_torch::TensorProto_DataType_INT32:
+    case onnx::TensorProto_DataType_INT32:
       tensor = at::CPU(at::kInt).tensor();
       break;
-    case onnx_torch::TensorProto_DataType_INT64:
+    case onnx::TensorProto_DataType_INT64:
       tensor = at::CPU(at::kLong).tensor();
       break;
-    case onnx_torch::TensorProto_DataType_FLOAT16:
+    case onnx::TensorProto_DataType_FLOAT16:
       tensor = at::CPU(at::kHalf).tensor();
       break;
-    case onnx_torch::TensorProto_DataType_FLOAT:
+    case onnx::TensorProto_DataType_FLOAT:
       tensor = at::CPU(at::kFloat).tensor();
       break;
-    case onnx_torch::TensorProto_DataType_DOUBLE:
+    case onnx::TensorProto_DataType_DOUBLE:
       tensor = at::CPU(at::kDouble).tensor();
       break;
     default:
@@ -63,10 +65,10 @@ at::Tensor buildTensor(const onnx_torch::TensorProto& tensor_proto) {
   return tensor;
 }
 
-void buildBlock(const onnx_torch::GraphProto& graph_proto, Block* block,
+void buildBlock(const onnx::GraphProto& graph_proto, Block* block,
                 std::unordered_map<std::string, Value*>& value_map);
 
-void buildBlocks(const std::vector<onnx_torch::GraphProto>& graphs_, Node* node,
+void buildBlocks(const std::vector<onnx::GraphProto>& graphs_, Node* node,
                  std::unordered_map<std::string, Value*>& value_map) {
   for (auto g_ : graphs_) {
     auto block = node->addBlock();
@@ -74,7 +76,7 @@ void buildBlocks(const std::vector<onnx_torch::GraphProto>& graphs_, Node* node,
   }
 }
 
-std::shared_ptr<Graph> buildGraph(const onnx_torch::GraphProto& graph_proto) {
+std::shared_ptr<Graph> buildGraph(const onnx::GraphProto& graph_proto) {
   auto graph = std::make_shared<Graph>();
   std::unordered_map<std::string, Value*> value_map;
 
@@ -83,7 +85,7 @@ std::shared_ptr<Graph> buildGraph(const onnx_torch::GraphProto& graph_proto) {
   return graph;
 }
 
-void buildBlock(const onnx_torch::GraphProto& graph_proto, Block* block,
+void buildBlock(const onnx::GraphProto& graph_proto, Block* block,
                 std::unordered_map<std::string, Value*>& value_map) {
 
   for (auto & input : graph_proto.input()) {
@@ -100,42 +102,42 @@ void buildBlock(const onnx_torch::GraphProto& graph_proto, Block* block,
       Symbol name = Symbol::attr(attr.name());
 
       switch(attr.type()) {
-        case onnx_torch::AttributeProto_AttributeType_UNDEFINED:
+        case onnx::AttributeProto_AttributeType_UNDEFINED:
           throw std::runtime_error("UNDEFINED attribute unsupported");
           break;
-        case onnx_torch::AttributeProto_AttributeType_FLOAT:
+        case onnx::AttributeProto_AttributeType_FLOAT:
           node->f_(name, attr.f());
           break;
-        case onnx_torch::AttributeProto_AttributeType_INT:
+        case onnx::AttributeProto_AttributeType_INT:
           node->i_(name, attr.i());
           break;
-        case onnx_torch::AttributeProto_AttributeType_STRING:
+        case onnx::AttributeProto_AttributeType_STRING:
           node->s_(name, std::move(attr.s()));
           break;
-        case onnx_torch::AttributeProto_AttributeType_TENSOR:
+        case onnx::AttributeProto_AttributeType_TENSOR:
           node->t_(name, buildTensor(attr.t()));
           break;
-        case onnx_torch::AttributeProto_AttributeType_GRAPH:
+        case onnx::AttributeProto_AttributeType_GRAPH:
           node->g_(name, buildGraph(attr.g()));
           break;
-        case onnx_torch::AttributeProto_AttributeType_FLOATS:
+        case onnx::AttributeProto_AttributeType_FLOATS:
           node->fs_(name, {attr.floats().begin(), attr.floats().end()});
           break;
-        case onnx_torch::AttributeProto_AttributeType_INTS:
+        case onnx::AttributeProto_AttributeType_INTS:
           node->is_(name, {attr.ints().begin(), attr.ints().end()});
           break;
-        case onnx_torch::AttributeProto_AttributeType_STRINGS:
+        case onnx::AttributeProto_AttributeType_STRINGS:
           node->ss_(name, {attr.strings().begin(), attr.strings().end()});
           break;
-        case onnx_torch::AttributeProto_AttributeType_TENSORS:
-          node->ts_(name, fmap(attr.tensors(), [](const onnx_torch::TensorProto& t) { return buildTensor(t); }));
+        case onnx::AttributeProto_AttributeType_TENSORS:
+          node->ts_(name, fmap(attr.tensors(), [](const onnx::TensorProto& t) { return buildTensor(t); }));
           break;
-        case onnx_torch::AttributeProto_AttributeType_GRAPHS:
+        case onnx::AttributeProto_AttributeType_GRAPHS:
           if (attr.name() == "_blocks") {
             buildBlocks({attr.graphs().begin(), attr.graphs().end()}, node, value_map);
           }
           else {
-            node->gs_(name, fmap(attr.graphs(), [](const onnx_torch::GraphProto& g_) { return buildGraph(g_); }));
+            node->gs_(name, fmap(attr.graphs(), [](const onnx::GraphProto& g_) { return buildGraph(g_); }));
           }
           break;
       }
@@ -159,7 +161,7 @@ void buildBlock(const onnx_torch::GraphProto& graph_proto, Block* block,
   }
 }
 
-std::shared_ptr<Graph> buildGraph(const onnx_torch::GraphProto& graph_proto, std::vector<at::Tensor>& initializers) {
+std::shared_ptr<Graph> buildGraph(const onnx::GraphProto& graph_proto, std::vector<at::Tensor>& initializers) {
 
   auto graph = buildGraph(graph_proto);
 
@@ -212,7 +214,7 @@ void reconstructOutputTypes(Block *b) {
 
 std::shared_ptr<Graph> ImportIRGraph(const std::string& serialized_graph,
                                      std::vector<at::Tensor>& initializers) {
-  auto model_proto = onnx_torch::ModelProto();
+  auto model_proto = ::ONNX_NAMESPACE::ModelProto();
   model_proto.ParseFromString(serialized_graph);
 
   auto graph = buildGraph(model_proto.graph(), initializers);
