@@ -71,7 +71,7 @@ void initJITBindings(PyObject *module) {
    })
    .def("_jit_pass_lint", LintGraph)
    .def("_jit_pass_shape_analysis", [](Graph& graph, py::tuple inputs, bool with_grad) {
-     PropagateInputShapes(graph, ArgumentSpec(with_grad, createStack(inputs)));
+     PropagateInputShapes(graph, ArgumentSpec(with_grad, createStack(inputs, graph.inputs())));
    })
    .def("_jit_pass_remove_expands", RemoveExpands)
    .def("_jit_pass_erase_number_types", EraseNumberTypes)
@@ -186,15 +186,16 @@ void initJITBindings(PyObject *module) {
         return ge.graph();
       })
       .def("graph_for", [](GraphExecutor& ge, py::args args) {
-        return ge.graphFor(createStack(args));
+        return ge.graphFor(createStack(args, ge.graph()->inputs()));
       })
       .def("get_debug_state", [](GraphExecutor& ge) {
         return ge.getDebugState();
       })
       .def("__call__", [](GraphExecutor& ge, py::args args) -> py::object {
-        auto stack = createStack(args);
+        const auto & graph = ge.graph();
+        auto stack = createStack(args, graph->inputs());
         ge.run(stack);
-        return wrapStack(std::move(stack));
+        return wrapStack(std::move(stack), graph->outputs());
       });
 
 
