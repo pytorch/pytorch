@@ -212,7 +212,7 @@ Examples::
     if len(operands) == 1 and isinstance(operands[0], (list, tuple)):
         # the old interface of passing the operands as one list argument
         operands = operands[0]
-    return torch._einsum(equation, operands)
+    return torch._C._VariableFunctions.einsum(equation, operands)
 
 
 def isfinite(tensor):
