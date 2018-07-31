@@ -340,7 +340,7 @@ void EncoderBase::EncodeTensor(
   // Add a buffer to the raw_data_export_map for the caller to dump into an
   // external data store. If external_ref is not specified, we instead dump
   // the contiguous data into the protobuf itself
-  if (defer_weight_export_) {
+  if (defer_weight_export_ && external_ref) {
     // For now, we use the name of the tensor as the external lookup name to
     // avoid ONNX protobuf changes.
     JIT_ASSERT(external_ref.value() == tensor_proto->name());
