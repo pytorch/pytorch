@@ -3,7 +3,7 @@
 // STOP!!! Thinking of including this header directly?  Please
 // read Note [TH abstraction violation]
 
-#include "THStorageClass.hpp"
+#include <ATen/StorageImpl.h>
 #include "THStorageFunctions.h"
 
 #include <ATen/ScalarType.h>
@@ -42,5 +42,4 @@ TH_API void THStorage_resize(THStorage *storage, ptrdiff_t size);
 TH_API void THStorage_swap(THStorage *storage1, THStorage *storage2);
 
 TH_API void THStorage_weakRetain(THStorage *weak_storage);
-TH_API void THStorage_weakFree(THStorage *weak_storage);
 TH_API THStorage* THStorage_weakLock(THStorage *weak_storage);

@@ -26,7 +26,7 @@ class ExpandOp final : public Operator<Context> {
     const auto& X = Input(0);
     const auto& Y_shape_tensor = Input(1);
     std::vector<int64_t> shape_dims(Y_shape_tensor.size());
-    context_.template Copy<int64_t, Context, CPUContext>(
+    context_.template CopyToCPU<int64_t>(
         Y_shape_tensor.size(),
         Y_shape_tensor.template data<int64_t>(),
         shape_dims.data());

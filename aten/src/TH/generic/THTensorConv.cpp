@@ -1367,7 +1367,7 @@ void THTensor_(conv2Dmap)(THTensor *r_, real beta, real alpha, THTensor *t_, THT
 
   AT_CHECK(!t_->is_empty() && t_->dim() == 3, "input: non-empty 3D Tensor expected, got size: ", t_->sizes());
   AT_CHECK(!k_->is_empty() && k_->dim() == 3, "kernel: non-empty 3D Tensor expected, got size: ", k_->sizes());
-  THArgCheck(map->_dim() == 2 , 4, "map: 2D Tensor expected");
+  THArgCheck(THTensor_nDimensionLegacyAll(map) == 2 , 4, "map: 2D Tensor expected");
   THArgCheck(srow >= 1, 6, "Stride should be a positive integer");
   THArgCheck(scol >= 1, 7, "Stride should be a positive integer");
 
@@ -1880,7 +1880,7 @@ void THTensor_(conv3Dmap)(THTensor *r_, real beta, real alpha, THTensor *t_, THT
 
   AT_CHECK(!t_->is_empty() && t_->dim() == 4, "input: non-empty 4D Tensor expected, got size: ", t_->sizes());
   AT_CHECK(!k_->is_empty() && k_->dim() == 4, "kernel: non-empty 4D Tensor expected, got size: ", k_->sizes());
-  THArgCheck(map->_dim() == 2 , 4, "map: 2D Tensor expected");
+  THArgCheck(THTensor_nDimensionLegacyAll(map) == 2 , 4, "map: 2D Tensor expected");
   THArgCheck(srow >= 1, 6, "Stride should be a positive integer");
   THArgCheck(scol >= 1, 7, "Stride should be a positive integer");
   THArgCheck(*vf == 'V' || *vf == 'F', 8, "type of convolution can 'V' or 'F'");

@@ -26,7 +26,7 @@ class EmbeddingImpl : public torch::nn::Cloneable<EmbeddingImpl> {
   Tensor forward(Tensor);
 
   EmbeddingOptions options;
-  Tensor table;
+  Tensor weight;
 };
 
 TORCH_MODULE(Embedding);

@@ -15,48 +15,15 @@ $extra_cuda_headers
 
 namespace at {
 
-${Tensor}::${Tensor}(Context* context)
-: ${Tensor}(context,${THTensor}_new(${state})) {}
-
-${Tensor}::${Tensor}(Context* context, ${THTensor} * tensor)
-: TensorImpl(&context->getType(Backend::${Backend},ScalarType::${ScalarName})),
-  tensor(tensor),
-  context(context) {}
-
-${Tensor}::~${Tensor}() {
-  if (tensor) tensor->release();
-}
-
-const char * ${Tensor}::toString() const {
-  return "${Tensor}";
-}
-
-IntList ${Tensor}::sizes() const {
-  // NB: dim in tensor is not synchronized with THTensor, so it's
-  // important to apply dim here
-  return IntList(THTensor_getSizePtr(tensor), dim());
-}
-
-int64_t ${Tensor}::dim() const {
-  if(isScalar())
-    return 0;
-  return tensor->dim();
-}
-
-const char * ${Tensor}::typeString() {
-  return "${Type}";
-}
-void * ${Tensor}::unsafeGetTH(bool retain) {
-  if (retain) {
-    tensor->retain();
+namespace detail {
+  ${Tensor}* new_${Tensor}() {
+    return new ${Tensor}(${THTensor}_new(${state}));
   }
-  return tensor;
 }
 
-void ${Tensor}::release_resources() {
-  tensor->release();
-  tensor = nullptr;
-}
+${Tensor}::${Tensor}(${THTensor} * tensor)
+: TensorImpl(&globalContext().getType(Backend::${Backend},ScalarType::${ScalarName}), tensor)
+{}
 
 ${TensorDenseOrSparse}
 

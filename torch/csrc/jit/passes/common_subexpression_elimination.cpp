@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <unordered_map>
 
+#include "torch/csrc/jit/assertions.h"
 #include "torch/csrc/jit/interned_strings.h"
 #include "torch/csrc/jit/passes/common_subexpression_elimination.h"
 #include "torch/csrc/utils/functional.h"
@@ -119,13 +120,10 @@ void EliminateCommonSubexpression(Block * block) {
     }
 
     // Check whether the same subexpression already exists.
-    auto subit = subexprs.find(node);
-    if (subit == subexprs.end()) {
-      // If not put current node into the map
-      subexprs.insert(node);
-    } else {
+    auto subit = subexprs.insert(node);
+    if (!subit.second) {
       // Subexpression exists, replace the uses of node, and destroy it.
-      auto existing = *subit;
+      auto existing = *subit.first;
       node->replaceAllUsesWith(existing);
       // Destroy the node.
       it.destroyCurrent();

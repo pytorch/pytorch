@@ -2863,6 +2863,35 @@ Example::
     tensor([ 1.0404, -0.6361])
 """)
 
+add_docstr(torch.mvlgamma,
+           r"""
+mvlgamma(input, p) -> Tensor
+
+Computes the multivariate log-gamma function with dimension :math:`p` element-wise, given by
+
+.. math::
+    \log(\Gamma_{p}(a)) = C + \displaystyle \sum_{i=1}^{p} \log\left(\Gamma\left(a - \frac{i - 1}{2}\right)\right)
+
+where :math:`C = \log(\pi) \times \frac{p (p - 1)}{2}` and :math:`\Gamma(.)` is the Gamma function.
+
+If any of the elements are less than or equal to :math:`\frac{p - 1}{2}`, then an error
+is thrown.
+
+Args:
+    input (Tensor): the tensor to compute the multivariate log-gamma function
+    p (int): the number of dimensions
+
+Example::
+
+    >>> a = torch.empty(2, 3).uniform_(1, 2)
+    >>> a
+    tensor([[1.6835, 1.8474, 1.1929],
+            [1.0475, 1.7162, 1.4180]])
+    >>> torch.mvlgamma(a, 2)
+    tensor([[0.3928, 0.4007, 0.7586],
+            [1.0311, 0.3901, 0.5049]])
+""")
+
 add_docstr(torch.ne,
            r"""
 ne(input, other, out=None) -> Tensor
@@ -4496,6 +4525,43 @@ Example::
 
             [[ 2,  3],
              [ 0,  1]]])
+""")
+
+add_docstr(torch.rot90,
+           r"""
+rot90(input, k, dims) -> Tensor
+
+Rotate a n-D tensor by 90 degrees in the plane specified by dims axis.
+Rotation direction is from the first towards the second axis if k > 0, and from the second towards the first for k < 0.
+
+Args:
+    input (Tensor): the input tensor
+    k (int): number of times to rotate
+    dims (a list or tuple): axis to rotate
+
+Example::
+
+    >>> x = torch.arange(4).view(2, 2)
+    >>> x
+    tensor([[0, 1],
+            [2, 3]])
+    >>> torch.rot90(x, 1, [0, 1])
+    tensor([[1, 3],
+            [0, 2]])
+
+    >>> x = torch.arange(8).view(2, 2, 2)
+    >>> x
+    tensor([[[0, 1],
+             [2, 3]],
+
+            [[4, 5],
+             [6, 7]]])
+    >>> torch.rot90(x, 1, [1, 2])
+    tensor([[[1, 3],
+             [0, 2]],
+
+            [[5, 7],
+             [4, 6]]])
 """)
 
 add_docstr(torch.take,

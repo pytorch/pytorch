@@ -52,10 +52,10 @@ struct ScratchWorkspaces {
 };
 
 inline void UpdateTimestepBlob(Workspace* ws, std::string blob_name, int t) {
-  ws->CreateBlob(blob_name)->GetMutable<TensorCPU>()->Resize(1);
+  ws->CreateBlob(blob_name)->GetMutableTensor(CPU)->Resize(1);
   auto timestepBlob = ws->GetBlob(blob_name);
   CAFFE_ENFORCE(timestepBlob);
-  timestepBlob->GetMutable<TensorCPU>()->mutable_data<int32_t>()[0] = t;
+  timestepBlob->GetMutableTensor(CPU)->template mutable_data<int32_t>()[0] = t;
 }
 
 std::map<string, string> GetRecurrentMapping(
@@ -70,8 +70,8 @@ void applyOffsetAlias(
           << " at offset: " << oc.offset;
   auto srcBlob = ws->GetBlob(oc.src);
   CAFFE_ENFORCE(srcBlob);
-  auto* src = srcBlob->template GetMutable<Tensor<Context>>();
-  auto* dst = ws->GetBlob(oc.dst)->template GetMutable<Tensor<Context>>();
+  auto* src = srcBlob->GetMutableTensor(Context::GetDeviceType());
+  auto* dst = ws->GetBlob(oc.dst)->GetMutableTensor(Context::GetDeviceType());
   auto timestep = src->size() / src->dim(0);
   auto dims = src->dims();
   const int32_t startDstTimestep =
@@ -95,7 +95,7 @@ void repeatCopy(
     T* dst,
     Context* context) {
   for (int i = 0; i < repeat_n; ++i) {
-    context->template Copy<T, Context, Context>(n, src, dst + i * n);
+    context->template CopySameDevice<T>(n, src, dst + i * n);
   }
 }
 
@@ -112,11 +112,11 @@ void initializeRecurrentInput(
     Context* context) {
   auto stateBlob = ws->GetBlob(rc.state);
   CAFFE_ENFORCE(stateBlob);
-  auto* state = stateBlob->template GetMutable<Tensor<Context>>();
+  auto* state = stateBlob->GetMutableTensor(Context::GetDeviceType());
 
   auto inputBlob = ws->GetBlob(rc.input);
   CAFFE_ENFORCE(inputBlob);
-  const auto& input = inputBlob->template Get<Tensor<Context>>();
+  const auto& input = inputBlob->template Get<Tensor>();
   CAFFE_ENFORCE_GE(input.ndim(), 1, rc.input);
   CAFFE_ENFORCE_LE(input.ndim(), 3, rc.input);
 
@@ -134,7 +134,7 @@ void initializeRecurrentInput(
 
   if (input.ndim() >= 2) {
     CAFFE_ENFORCE_EQ(input.dim(input.ndim() - 2), batchSize, rc.input);
-    context->template Copy<T, Context, Context>(
+    context->template CopySameDevice<T>(
         batchSize * stateSize * initialStateLength,
         input.template data<T>(),
         state->template mutable_data<T>());
@@ -654,11 +654,11 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
     for (auto& param : params_) {
       auto pBlob = sharedWs_->GetBlob(param.param);
       CAFFE_ENFORCE(pBlob);
-      const auto& p = pBlob->template Get<Tensor<Context>>();
+      const auto& p = pBlob->template Get<Tensor>();
 
       auto gBlob = sharedWs_->GetBlob(param.grad);
       CAFFE_ENFORCE(gBlob);
-      auto* g = gBlob->template GetMutable<Tensor<Context>>();
+      auto* g = gBlob->GetMutableTensor(Context::GetDeviceType());
       g->ResizeLike(p);
       math::Set<T, Context>(
           g->size(),
@@ -670,11 +670,11 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
     for (auto& rg : recurrentGradients_) {
       auto pBlob = sharedWs_->GetBlob(rg.param);
       CAFFE_ENFORCE(pBlob);
-      const auto& p = pBlob->template Get<Tensor<Context>>();
+      const auto& p = pBlob->template Get<Tensor>();
 
       auto gBlob = sharedWs_->CreateBlob(rg.grad);
       CAFFE_ENFORCE(gBlob);
-      auto* g = gBlob->template GetMutable<Tensor<Context>>();
+      auto* g = gBlob->GetMutableTensor(Context::GetDeviceType());
       g->ResizeLike(p);
       CAFFE_ENFORCE_EQ(g->ndim(), 3);
       const auto timestep = g->size() / g->dim(0);
@@ -701,7 +701,7 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
               << ". Size: " << Input(gradientInputIndex).size();
       auto pGradientBlob = sharedWs_->GetBlob(gradientName);
       CAFFE_ENFORCE(pGradientBlob);
-      auto* g = pGradientBlob->template GetMutable<Tensor<Context>>();
+      auto* g = pGradientBlob->GetMutableTensor(Context::GetDeviceType());
       g->ResizeLike(Input(gradientInputIndex));
       g->template mutable_data<T>();
     }
@@ -715,11 +715,11 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
                 << rg.lastExternalGrad << " for final time step (sep. blob)";
         auto gBlob = sharedWs_->GetBlob(rg.grad);
         CAFFE_ENFORCE(gBlob);
-        auto* g = gBlob->template GetMutable<Tensor<Context>>();
+        auto* g = gBlob->GetMutableTensor(Context::GetDeviceType());
 
         auto oglastBlob = sharedWs_->GetBlob(rg.lastExternalGrad);
         CAFFE_ENFORCE(oglastBlob);
-        const auto& oglast = oglastBlob->template Get<Tensor<Context>>();
+        const auto& oglast = oglastBlob->template Get<Tensor>();
         CAFFE_ENFORCE_EQ(g->dim(1), oglast.dim(1));
         CAFFE_ENFORCE_EQ(g->dim(2), oglast.dim(2));
 
@@ -777,7 +777,7 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
       T* output_data = Output(outputIdx)->template mutable_data<T>();
       auto pBlob = sharedWs_->GetBlob(recurrentGradients_[i].grad);
       CAFFE_ENFORCE(pBlob);
-      auto* p = pBlob->template GetMutable<Tensor<Context>>();
+      auto* p = pBlob->GetMutableTensor(Context::GetDeviceType());
 
       if (Input(inputId).ndim() >= 2) {
         // Gradient states blob should live. And if it gets changed by the
@@ -841,7 +841,7 @@ class AccumulateInputGradientOp : public Operator<Context> {
 
   template<typename T>
   bool DoRunWithType() {
-    const auto& t0 = OperatorBase::Input<Tensor<CPUContext>>(0);
+    const auto& t0 = OperatorBase::Input<Tensor>(0, CPU);
     const auto t = t0.template data<int32_t>()[0];
     auto& og = Input(1);
     auto* g = Output(0);
@@ -890,7 +890,7 @@ class RNNApplyLinkOp : public Operator<Context> {
   bool DoRunWithType() {
     // Both internal and external appear as both input and output to enforce
     // correct dependency computation.
-    const auto& t0 = OperatorBase::Input<Tensor<CPUContext>>(0);
+    const auto& t0 = OperatorBase::Input<Tensor>(0, CPU);
     const auto t = t0.template data<int32_t>()[0];
     auto& external = Input(1);
 

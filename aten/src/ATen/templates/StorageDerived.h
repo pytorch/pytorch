@@ -14,24 +14,18 @@ namespace at {
 struct Allocator;
 
 struct ${Storage} final : public Storage {
-public:
-  explicit ${Storage}(Context* context);
-  ${Storage}(Context* context, THStorage *wrapped);
-  ${Storage}(Context* context, size_t size);
-  ${Storage}(Context* context, size_t size, Allocator* allocator);
-  ${Storage}(Context* context,
-    void * data, size_t size, const std::function<void(void*)> & deleter);
-  ~${Storage}();
+  ${Storage}();
+  ${Storage}(StorageImpl* storage_impl) : Storage(storage_impl){};
+  ${Storage}(size_t size);
+  ${Storage}(size_t size, Allocator* allocator);
+  ${Storage}(
+      void* data,
+      size_t size,
+      const std::function<void(void*)>& deleter);
+  StorageImpl* storage_impl_;
 
-  size_t elementSize() const final;
-
-  Type& type() const final;
-  static const char * typeString();
-
-
-protected:
+ protected:
   friend struct ${Type};
-  Context* context;
 };
 
 } // namespace at

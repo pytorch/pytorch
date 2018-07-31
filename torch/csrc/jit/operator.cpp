@@ -2,7 +2,7 @@
 #include "torch/csrc/jit/script/lexer.h"
 #include "torch/csrc/jit/script/tree.h"
 #include "torch/csrc/jit/operator.h"
-#include "torch/csrc/jit/tensor_conversions.h"
+
 #include "torch/csrc/jit/script/error_report.h"
 
 namespace torch { namespace jit {
@@ -51,28 +51,21 @@ struct SchemaParser {
       {"Layout", IntType::get() },
       {"Device", ListType::ofInts() },
       {"Scalar", NumberType::get() },
+      {"float", FloatType::get() },
+      {"int", IntType::get() },
+      {"bool", IntType::get() }, // TODO: add separate bool type
     };
-    switch(L.cur().kind) {
-      case TK_FLOAT:
-        L.next();
-        return FloatType::get();
-      case TK_INT:
-      case TK_BOOL: // TODO: add separate bool type
-        L.next();
-        return IntType::get();
-      default:
-        auto tok = L.expect(TK_IDENT);
-        auto text = tok.text();
-        auto it = type_map.find(text);
-        if(it == type_map.end())
-          throw ErrorReport(tok.range) << "unknown type specifier";
-        return it->second;
-    }
+    auto tok = L.expect(TK_IDENT);
+    auto text = tok.text();
+    auto it = type_map.find(text);
+    if(it == type_map.end())
+      throw ErrorReport(tok.range) << "unknown type specifier";
+    return it->second;
   }
   void parseType(Argument& arg) {
     arg.type = parseBaseType();
     if(L.nextIf('[')) {
-      arg.type = std::make_shared<ListType>(arg.type);
+      arg.type = ListType::create(arg.type);
       if(L.cur().kind == TK_NUMBER) {
         arg.N = std::stoll(L.next().text());
       }
@@ -103,70 +96,75 @@ struct SchemaParser {
     parseType(arg);
     args.push_back(std::move(arg));
   }
-  at::Tensor parseSingleConstant(TypeKind kind) {
+  IValue parseSingleConstant(TypeKind kind) {
     switch(L.cur().kind) {
       case TK_TRUE:
         L.next();
-        return one();
+        return true;
       case TK_FALSE:
         L.next();
-        return zero();
-      case TK_FLOAT:
+        return false;
+      case TK_NONE:
         L.next();
-        return as_tensor(static_cast<int64_t>(at::kFloat));
+        return IValue();
       case TK_IDENT: {
         auto tok = L.next();
         auto text = tok.text();
-        if("cpu" == text) {
-          return as_tensor(static_cast<int64_t>(at::Device::Type::CPU));
+        if("float" == text) {
+          return static_cast<int64_t>(at::kFloat);
+        } else if("cpu" == text) {
+          return static_cast<int64_t>(at::Device::Type::CPU);
         } else if("strided" == text) {
-          return as_tensor(static_cast<int64_t>(at::kStrided));
+          return static_cast<int64_t>(at::kStrided);
         } else if("ElementwiseMean" == text) {
-          return as_tensor(static_cast<int64_t>(Reduction::ElementwiseMean));
+          return static_cast<int64_t>(Reduction::ElementwiseMean);
         } else {
           throw ErrorReport(L.cur().range) << "invalid numeric default value";
         }
-      } default:
+      }
+      default:
         std::string n;
         if(L.nextIf('-'))
           n = "-" + L.expect(TK_NUMBER).text();
         else
           n = L.expect(TK_NUMBER).text();
         if(kind == TypeKind::FloatType || n.find(".") != std::string::npos || n.find("e") != std::string::npos) {
-          return at::full({}, std::stod(n), at::kDouble); // float?
+          return std::stod(n);
         } else {
           int64_t v = std::stoll(n);
-          return at::full({}, v, at::kLong);
+          return v;
         }
     }
   }
-  at::Tensor parseConstantList(TypeKind kind) {
+  IValue convertToList(TypeKind kind, const SourceRange& range, std::vector<IValue> vs) {
+    switch(kind) {
+        case TypeKind::FloatType:
+          return fmap(vs, [](IValue v) {
+            return v.toDouble();
+          });
+        case TypeKind::IntType:
+          return fmap(vs, [](IValue v) {
+            return v.toInt();
+          });
+        default:
+          throw ErrorReport(range) << "lists are only supported for float or int types.";
+      }
+  }
+  IValue parseConstantList(TypeKind kind) {
     auto tok = L.expect('[');
-    std::vector<at::Tensor> vs;
+    std::vector<IValue> vs;
     if(L.cur().kind != ']') {
       do {
         vs.push_back(parseSingleConstant(kind));
       } while(L.nextIf(','));
     }
     L.expect(']');
-    if(vs.size() == 0) {
-      switch(kind) {
-        case TypeKind::FloatType:
-          return at::empty({}, at::kFloat);
-        case TypeKind::IntType:
-          return at::empty({}, at::kLong);
-        default:
-          throw ErrorReport(tok) << "empty lists are only supported for float or int types.";
-      }
-    }
-    return at::stack(vs);
+    return convertToList(kind, tok.range, std::move(vs));
   }
-  at::Tensor parseTensorDefault(const SourceRange& range) {
-    if("None" == L.expect(TK_IDENT).text()) {
-      return at::Tensor();
-    } else {
-      throw ErrorReport(range) << "invalid tensor default value";
-    }
+
+  IValue parseTensorDefault(const SourceRange& range) {
+    L.expect(TK_NONE);
+    return IValue();
   }
   void parseDefaultValue(Argument& arg) {
     auto range = L.cur().range;
@@ -184,7 +182,9 @@ struct SchemaParser {
         if(L.cur().kind == TK_IDENT) {
           arg.default_value = parseTensorDefault(range);
         } else if(arg.N && L.cur().kind != '[') {
-          arg.default_value = parseSingleConstant(elem_kind->kind()).expand({*arg.N});
+          IValue v = parseSingleConstant(elem_kind->kind());
+          std::vector<IValue> repeated(*arg.N, v);
+          arg.default_value = convertToList(elem_kind->kind(), range, repeated);
         } else {
           arg.default_value = parseConstantList(elem_kind->kind());
         }
@@ -209,17 +209,9 @@ struct SchemaParser {
   }
   Lexer L;
   bool kwarg_only;
-  static at::Tensor one() {
-    static at::Tensor v = at::full({}, 1, at::kLong);
-    return v;
-  }
-  static at::Tensor zero() {
-    static at::Tensor v = at::full({}, 0, at::kLong);
-    return v;
-  }
 };
-}
 
+} // namespace script
 
 namespace {
 
@@ -279,7 +271,7 @@ struct OperatorRegistry  {
     operators_by_sig[canonicalSchemaString(op.schema)] = op_ptr;
   }
 
-  Operator& lookupByLiteral(const char * name) {
+  const std::shared_ptr<Operator>& lookupByLiteral(const char * name) {
     auto it = operators_by_sig_literal.find(name);
     if (it == operators_by_sig_literal.end()) {
       auto op_ptr_it = operators_by_sig.find(name);
@@ -291,10 +283,10 @@ struct OperatorRegistry  {
         }
       }
 #endif
-      JIT_ASSERTM(op_ptr_it != operators_by_sig.end(), "Couldn't find an operator for %s", name);
+      JIT_ASSERTM(op_ptr_it != operators_by_sig.end(), "Couldn't find an operator for ", name);
       it = operators_by_sig_literal.emplace_hint(it, name, op_ptr_it->second);
     }
-    return *it->second;
+    return it->second;
   }
 
   const std::vector<std::shared_ptr<Operator>>& getOperators(Symbol name) {
@@ -323,7 +315,7 @@ const std::vector<std::shared_ptr<Operator>>& getAllOperatorsFor(Symbol name) {
 }
 
 Operator& sig(const char *signature) {
-  return getRegistry().lookupByLiteral(signature);
+  return *getRegistry().lookupByLiteral(signature);
 }
 
 FunctionSchema parseSchema(const std::string& schema) {
@@ -336,7 +328,7 @@ at::optional<AttributeKind> attributeKindOf(TypePtr type) {
     case TypeKind::FloatType: return AttributeKind::f;
     case TypeKind::NumberType: return AttributeKind::t;
     case TypeKind::ListType:
-      if(type->isSubtypeOf(*ListType::ofInts()))
+      if(type->isSubtypeOf(ListType::ofInts()))
         return AttributeKind::is;
       else
         return at::nullopt;
@@ -346,23 +338,10 @@ at::optional<AttributeKind> attributeKindOf(TypePtr type) {
 }
 
 bool typeMatches(TypePtr actual, TypePtr formal) {
-  if(actual->isSubtypeOf(*formal))
-    return true;
-
-  // XXX - this is here because we allow tensors to be used in place of numbers
-  // or lists of numbers in the script because of the restriction that all inputs to script must be tensors.
-  // Once numbers are always treated as seperate types from Tensors, this line
-  // should be removed, since it opens up the possibility of ambigous declarations
-  // dispatching to the wrong implementation.
-  if ((formal->isSubtypeOf(*NumberType::get()) ||
-       formal->isSubtypeOf(*ListType::ofInts())) &&
-      actual->isSubtypeOf(*DynamicType::get()))
-    return true;
-
-  return false;
+  return actual->isSubtypeOf(formal);
 }
 
-bool Operator::matches(Node* node) const {
+bool Operator::matches(const Node* node) const {
   if (node->kind().toQualString() != schema.name) {
     return false;
   }
@@ -420,7 +399,7 @@ bool Operator::matches(Node* node) const {
   return true;
 }
 
-std::shared_ptr<Operator> findOperatorFor(Node* node) {
+std::shared_ptr<Operator> findOperatorFor(const Node* node) {
   const auto& candidates = getAllOperatorsFor(node->kind());
   for(const auto& candidate : candidates) {
     if(candidate->matches(node)) {
@@ -430,7 +409,7 @@ std::shared_ptr<Operator> findOperatorFor(Node* node) {
   return nullptr;
 }
 
-const Operator& getOperatorFor(Node* node) {
+const Operator& getOperatorFor(const Node* node) {
   auto op = findOperatorFor(node);
   if(op)
     return *op;
@@ -450,6 +429,28 @@ const Operator& getOperatorFor(Node* node) {
     er << "  " << candidate->schema << "\n";
   }
   throw er;
+}
+
+
+OperatorSet::OperatorSet(std::initializer_list<const char *> sig_literals) {
+  auto & registry = getRegistry();
+  for (const char * sig : sig_literals) {
+    auto op = registry.lookupByLiteral(sig);
+    ops[Symbol::fromQualString(op->schema.name)].push_back(op);
+  }
+}
+
+Operator* OperatorSet::find(Node *n) {
+  auto it = ops.find(n->kind());
+  if (it == ops.end()) {
+    return nullptr;
+  }
+  for (auto & op : it->second) {
+    if (op->matches(n)) {
+      return op.get();
+    }
+  }
+  return nullptr;
 }
 
 }}

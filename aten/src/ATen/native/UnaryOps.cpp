@@ -1,3 +1,9 @@
+// define constants like M_PI and C keywords for MSVC
+#ifdef _MSC_VER
+#define _USE_MATH_DEFINES
+#include <math.h>
+#endif
+
 #include "ATen/ATen.h"
 #include "ATen/Dispatch.h"
 #include "ATen/ExpandUtils.h"
@@ -40,7 +46,15 @@ Tensor clamp_min(const Tensor& self, Scalar min) {
 }
 
 Tensor& _clamp__cpu(Tensor& self, Scalar min, Scalar max) {
-  return _th_clamp_(self, min, max);
+  if (!std::isnan(min.toDouble()) && !std::isnan(max.toDouble())) {
+    return _th_clamp_(self, min, max);
+  } else if (std::isnan(min.toDouble())) {
+    return _th_clamp_max_(self, max);
+  } else if (std::isnan(max.toDouble())) {
+    return _th_clamp_min_(self, min);
+  } else {
+    return self;
+  }
 }
 
 Tensor& _clamp_out_cpu(
@@ -50,7 +64,14 @@ Tensor& _clamp_out_cpu(
     Scalar max) {
   result.resize_(self.sizes());
   result.copy_(self);
-  return _th_clamp_(result, min, max);
+  if (!std::isnan(min.toDouble()) && !std::isnan(max.toDouble())) {
+    _th_clamp_(result, min, max);
+  } else if (std::isnan(min.toDouble())) {
+    _th_clamp_max_(result, max);
+  } else if (std::isnan(max.toDouble())) {
+    _th_clamp_min_(result, min);
+  }
+  return result;
 }
 
 Tensor& _clamp_max__cpu(Tensor& self, Scalar max) {
@@ -81,6 +102,28 @@ Tensor& fill_(Tensor& self, const Tensor& value) {
   return self._fill_(value);
 }
 
+Tensor mvlgamma(const Tensor& self, int64_t p) {
+  AT_CHECK(at::isFloatingType(self.type().scalarType()),
+           "mvlgamma is not implemented for ", self.type());
+  AT_CHECK((self > 0.5 * (p - 1.)).all().toCByte(),
+           "Condition for computing multivariate log-gamma not met");
+  AT_CHECK(p >= 1, "p has to be greater than or equal to 1");
+  Tensor args = native::arange(-p / 2. + 0.5, 0.5, 0.5, self.options());
+  args = args.add(self.unsqueeze(-1));
+  return args.lgamma_().sum(-1).add_(p * (p - 1) * std::log(M_PI) / 4.);
+}
+
+Tensor& mvlgamma_(Tensor& self, int64_t p) {
+  AT_CHECK(at::isFloatingType(self.type().scalarType()),
+           "mvlgamma is not implemented for ", self.type());
+  AT_CHECK((self > 0.5 * (p - 1.)).all().toCByte(),
+           "Condition for computing multivariate log-gamma not met");
+  AT_CHECK(p >= 1, "p has to be greater than or equal to 1");
+  Tensor args = native::arange(-p / 2. + 0.5, 0.5, 0.5, self.options());
+  args = args.add(self.unsqueeze(-1));
+  return self.copy_(args.lgamma_().sum(-1).add_(p * (p - 1) * std::log(M_PI) / 4.));
+}
+
 // NB: If you use this macro, you may also need to add a CUDA forwarding
 // stub in CUDAUnaryOps
 
@@ -92,14 +135,14 @@ Tensor& fill_(Tensor& self, const Tensor& value) {
   Tensor& _##op##__cpu(Tensor& self_) {                         \
     if (self_.numel() > 0) {                                    \
       Tensor self = sort_strides(self_);                        \
-      op##Impl(self, self);                                     \
+      op##Impl(kCPU, self, self);                               \
     }                                                           \
     return self_;                                               \
   }                                                             \
   Tensor& _##op##_out_cpu(Tensor& result, const Tensor& self) { \
     result.resize_(self.sizes());                               \
     if (result.numel() > 0) {                                   \
-      op##Impl(result, self);                                   \
+      op##Impl(kCPU, result, self);                             \
     }                                                           \
     return result;                                              \
   }
@@ -144,6 +187,30 @@ IMPLEMENT_UNARY_OP_VEC(sqrt)
 IMPLEMENT_UNARY_OP_VEC(tan)
 IMPLEMENT_UNARY_OP_VEC(tanh)
 IMPLEMENT_UNARY_OP_VEC(trunc)
+
+DEFINE_DISPATCH(absImpl);
+DEFINE_DISPATCH(acosImpl);
+DEFINE_DISPATCH(asinImpl);
+DEFINE_DISPATCH(atanImpl);
+DEFINE_DISPATCH(ceilImpl);
+DEFINE_DISPATCH(cosImpl);
+DEFINE_DISPATCH(erfImpl);
+DEFINE_DISPATCH(erfcImpl);
+DEFINE_DISPATCH(expImpl);
+DEFINE_DISPATCH(expm1Impl);
+DEFINE_DISPATCH(floorImpl);
+DEFINE_DISPATCH(logImpl);
+DEFINE_DISPATCH(log10Impl);
+DEFINE_DISPATCH(log1pImpl);
+DEFINE_DISPATCH(log2Impl);
+DEFINE_DISPATCH(roundImpl);
+DEFINE_DISPATCH(rsqrtImpl);
+DEFINE_DISPATCH(sigmoidImpl);
+DEFINE_DISPATCH(sinImpl);
+DEFINE_DISPATCH(sqrtImpl);
+DEFINE_DISPATCH(tanImpl);
+DEFINE_DISPATCH(tanhImpl);
+DEFINE_DISPATCH(truncImpl);
 
 }
 } // namespace at

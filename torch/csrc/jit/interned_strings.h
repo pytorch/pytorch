@@ -19,6 +19,7 @@ _(namespaces, scope) \
 _(namespaces, namespaces) \
 _(prim, Assign) \
 _(prim, Constant) \
+_(prim, None) \
 _(prim, Drop) \
 _(prim, Eval) \
 _(prim, Expand) /* onnx */ \
@@ -43,6 +44,7 @@ _(prim, Undefined) \
 _(prim, Starred) \
 _(prim, TupleConstruct) \
 _(prim, TupleUnpack) \
+_(prim, ListConstruct) \
 _(prim, NumToTensor) \
 _(prim, TensorToNum) \
 _(prim, AutogradAdd) \

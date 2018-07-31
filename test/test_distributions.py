@@ -40,11 +40,12 @@ from torch.distributions import (Bernoulli, Beta, Binomial, Categorical,
                                  FisherSnedecor, Gamma, Geometric, Gumbel,
                                  HalfCauchy, HalfNormal,
                                  Independent, Laplace, LogisticNormal,
-                                 LogNormal, Multinomial, MultivariateNormal,
+                                 LogNormal, LowRankMultivariateNormal,
+                                 Multinomial, MultivariateNormal,
                                  Normal, OneHotCategorical, Pareto, Poisson,
                                  RelaxedBernoulli, RelaxedOneHotCategorical,
                                  StudentT, TransformedDistribution, Uniform,
-                                 constraints, kl_divergence)
+                                 Weibull, constraints, kl_divergence)
 from torch.distributions.constraint_registry import biject_to, transform_to
 from torch.distributions.constraints import Constraint, is_dependent
 from torch.distributions.dirichlet import _Dirichlet_backward
@@ -260,6 +261,18 @@ EXAMPLES = [
             'scale': torch.tensor([1e-5, 1e-5], requires_grad=True),
         },
     ]),
+    Example(LowRankMultivariateNormal, [
+        {
+            'loc': torch.randn(5, 2, requires_grad=True),
+            'cov_factor': torch.randn(5, 2, 1, requires_grad=True),
+            'cov_diag': torch.tensor([2.0, 0.25], requires_grad=True),
+        },
+        {
+            'loc': torch.randn(4, 3, requires_grad=True),
+            'cov_factor': torch.randn(3, 2, requires_grad=True),
+            'cov_diag': torch.tensor([5.0, 1.5, 3.], requires_grad=True),
+        }
+    ]),
     Example(MultivariateNormal, [
         {
             'loc': torch.randn(5, 2, requires_grad=True),
@@ -390,6 +403,12 @@ EXAMPLES = [
             'high': torch.tensor([2.0, 3.0], requires_grad=True),
         },
     ]),
+    Example(Weibull, [
+        {
+            'scale': torch.tensor(torch.randn(5, 5).abs(), requires_grad=True),
+            'concentration': torch.tensor(torch.randn(1).abs(), requires_grad=True)
+        }
+    ])
 ]
 
 BAD_EXAMPLES = [
@@ -586,6 +605,16 @@ BAD_EXAMPLES = [
         {
             'low': torch.tensor([1.0], requires_grad=True),
             'high': torch.tensor([0.0], requires_grad=True),
+        }
+    ]),
+    Example(Weibull, [
+        {
+            'scale': torch.tensor([0.0], requires_grad=True),
+            'concentration': torch.tensor([0.0], requires_grad=True)
+        },
+        {
+            'scale': torch.tensor([1.0], requires_grad=True),
+            'concentration': torch.tensor([-1.0], requires_grad=True)
         }
     ])
 ]
@@ -1448,6 +1477,125 @@ class TestDistributions(TestCase):
                                         scipy.stats.norm(loc=loc, scale=scale),
                                         'Normal(mean={}, std={})'.format(loc, scale))
 
+    def test_lowrank_multivariate_normal_shape(self):
+        mean = torch.randn(5, 3, requires_grad=True)
+        mean_no_batch = torch.randn(3, requires_grad=True)
+        mean_multi_batch = torch.randn(6, 5, 3, requires_grad=True)
+
+        # construct PSD covariance
+        cov_factor = torch.randn(3, 1, requires_grad=True)
+        cov_diag = torch.tensor(torch.randn(3).abs(), requires_grad=True)
+
+        # construct batch of PSD covariances
+        cov_factor_batched = torch.randn(6, 5, 3, 2, requires_grad=True)
+        cov_diag_batched = torch.tensor(torch.randn(6, 5, 3).abs(), requires_grad=True)
+
+        # ensure that sample, batch, event shapes all handled correctly
+        self.assertEqual(LowRankMultivariateNormal(mean, cov_factor, cov_diag)
+                         .sample().size(), (5, 3))
+        self.assertEqual(LowRankMultivariateNormal(mean_no_batch, cov_factor, cov_diag)
+                         .sample().size(), (3,))
+        self.assertEqual(LowRankMultivariateNormal(mean_multi_batch, cov_factor, cov_diag)
+                         .sample().size(), (6, 5, 3))
+        self.assertEqual(LowRankMultivariateNormal(mean, cov_factor, cov_diag)
+                         .sample((2,)).size(), (2, 5, 3))
+        self.assertEqual(LowRankMultivariateNormal(mean_no_batch, cov_factor, cov_diag)
+                         .sample((2,)).size(), (2, 3))
+        self.assertEqual(LowRankMultivariateNormal(mean_multi_batch, cov_factor, cov_diag)
+                         .sample((2,)).size(), (2, 6, 5, 3))
+        self.assertEqual(LowRankMultivariateNormal(mean, cov_factor, cov_diag)
+                         .sample((2, 7)).size(), (2, 7, 5, 3))
+        self.assertEqual(LowRankMultivariateNormal(mean_no_batch, cov_factor, cov_diag)
+                         .sample((2, 7)).size(), (2, 7, 3))
+        self.assertEqual(LowRankMultivariateNormal(mean_multi_batch, cov_factor, cov_diag)
+                         .sample((2, 7)).size(), (2, 7, 6, 5, 3))
+        self.assertEqual(LowRankMultivariateNormal(mean, cov_factor_batched, cov_diag_batched)
+                         .sample((2, 7)).size(), (2, 7, 6, 5, 3))
+        self.assertEqual(LowRankMultivariateNormal(mean_no_batch, cov_factor_batched, cov_diag_batched)
+                         .sample((2, 7)).size(), (2, 7, 6, 5, 3))
+        self.assertEqual(LowRankMultivariateNormal(mean_multi_batch, cov_factor_batched, cov_diag_batched)
+                         .sample((2, 7)).size(), (2, 7, 6, 5, 3))
+
+        # check gradients
+        self._gradcheck_log_prob(LowRankMultivariateNormal,
+                                 (mean, cov_factor, cov_diag))
+        self._gradcheck_log_prob(LowRankMultivariateNormal,
+                                 (mean_multi_batch, cov_factor, cov_diag))
+        self._gradcheck_log_prob(LowRankMultivariateNormal,
+                                 (mean_multi_batch, cov_factor_batched, cov_diag_batched))
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_lowrank_multivariate_normal_log_prob(self):
+        mean = torch.randn(3, requires_grad=True)
+        cov_factor = torch.randn(3, 1, requires_grad=True)
+        cov_diag = torch.tensor(torch.randn(3).abs(), requires_grad=True)
+        cov = cov_factor.matmul(cov_factor.t()) + cov_diag.diag()
+
+        # check that logprob values match scipy logpdf,
+        # and that covariance and scale_tril parameters are equivalent
+        dist1 = LowRankMultivariateNormal(mean, cov_factor, cov_diag)
+        ref_dist = scipy.stats.multivariate_normal(mean.detach().numpy(), cov.detach().numpy())
+
+        x = dist1.sample((10,))
+        expected = ref_dist.logpdf(x.numpy())
+
+        self.assertAlmostEqual(0.0, np.mean((dist1.log_prob(x).detach().numpy() - expected)**2), places=3)
+
+        # Double-check that batched versions behave the same as unbatched
+        mean = torch.randn(5, 3, requires_grad=True)
+        cov_factor = torch.randn(5, 3, 2, requires_grad=True)
+        cov_diag = torch.tensor(torch.randn(5, 3).abs(), requires_grad=True)
+
+        dist_batched = LowRankMultivariateNormal(mean, cov_factor, cov_diag)
+        dist_unbatched = [LowRankMultivariateNormal(mean[i], cov_factor[i], cov_diag[i])
+                          for i in range(mean.size(0))]
+
+        x = dist_batched.sample((10,))
+        batched_prob = dist_batched.log_prob(x)
+        unbatched_prob = torch.stack([dist_unbatched[i].log_prob(x[:, i]) for i in range(5)]).t()
+
+        self.assertEqual(batched_prob.shape, unbatched_prob.shape)
+        self.assertAlmostEqual(0.0, (batched_prob - unbatched_prob).abs().max(), places=3)
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_lowrank_multivariate_normal_sample(self):
+        set_rng_seed(0)  # see Note [Randomized statistical tests]
+        mean = torch.randn(5, requires_grad=True)
+        cov_factor = torch.randn(5, 1, requires_grad=True)
+        cov_diag = torch.tensor(torch.randn(5).abs(), requires_grad=True)
+        cov = cov_factor.matmul(cov_factor.t()) + cov_diag.diag()
+
+        self._check_sampler_sampler(LowRankMultivariateNormal(mean, cov_factor, cov_diag),
+                                    scipy.stats.multivariate_normal(mean.detach().numpy(), cov.detach().numpy()),
+                                    'LowRankMultivariateNormal(loc={}, cov_factor={}, cov_diag={})'
+                                    .format(mean, cov_factor, cov_diag), multivariate=True)
+
+    def test_lowrank_multivariate_normal_properties(self):
+        loc = torch.randn(5)
+        cov_factor = torch.randn(5, 2)
+        cov_diag = torch.tensor(torch.randn(5).abs())
+        cov = cov_factor.matmul(cov_factor.t()) + cov_diag.diag()
+        m1 = LowRankMultivariateNormal(loc, cov_factor, cov_diag)
+        m2 = MultivariateNormal(loc=loc, covariance_matrix=cov)
+        self.assertEqual(m1.mean, m2.mean)
+        self.assertEqual(m1.variance, m2.variance)
+        self.assertEqual(m1.covariance_matrix, m2.covariance_matrix)
+        self.assertEqual(m1.scale_tril, m2.scale_tril)
+        self.assertEqual(m1.precision_matrix, m2.precision_matrix)
+        self.assertEqual(m1.entropy(), m2.entropy())
+
+    def test_lowrank_multivariate_normal_moments(self):
+        set_rng_seed(0)  # see Note [Randomized statistical tests]
+        mean = torch.randn(5)
+        cov_factor = torch.randn(5, 2)
+        cov_diag = torch.tensor(torch.randn(5).abs())
+        d = LowRankMultivariateNormal(mean, cov_factor, cov_diag)
+        samples = d.rsample((100000,))
+        empirical_mean = samples.mean(0)
+        self.assertEqual(d.mean, empirical_mean, prec=0.01)
+        empirical_var = samples.var(0)
+        self.assertEqual(d.variance, empirical_var, prec=0.02)
+
     def test_multivariate_normal_shape(self):
         mean = torch.randn(5, 3, requires_grad=True)
         mean_no_batch = torch.randn(3, requires_grad=True)
@@ -1560,6 +1708,17 @@ class TestDistributions(TestCase):
         self.assertEqual(m.covariance_matrix, m.scale_tril.mm(m.scale_tril.t()))
         self.assertEqual(m.covariance_matrix.mm(m.precision_matrix), torch.eye(m.event_shape[0]))
         self.assertEqual(m.scale_tril, torch.potrf(m.covariance_matrix, upper=False))
+
+    def test_multivariate_normal_moments(self):
+        set_rng_seed(0)  # see Note [Randomized statistical tests]
+        mean = torch.randn(5)
+        scale_tril = transform_to(constraints.lower_cholesky)(torch.randn(5, 5))
+        d = MultivariateNormal(mean, scale_tril=scale_tril)
+        samples = d.rsample((100000,))
+        empirical_mean = samples.mean(0)
+        self.assertEqual(d.mean, empirical_mean, prec=0.01)
+        empirical_var = samples.var(0)
+        self.assertEqual(d.variance, empirical_var, prec=0.05)
 
     def test_exponential(self):
         rate = torch.tensor(torch.randn(5, 5).abs(), requires_grad=True)
@@ -2655,6 +2814,15 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(gumbel.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
         self.assertEqual(gumbel.log_prob(self.tensor_sample_2).size(), torch.Size((3, 2, 3)))
 
+    def test_weibull_scale_scalar_params(self):
+        weibull = Weibull(1, 1)
+        self.assertEqual(weibull._batch_shape, torch.Size())
+        self.assertEqual(weibull._event_shape, torch.Size())
+        self.assertEqual(weibull.sample().size(), torch.Size())
+        self.assertEqual(weibull.sample((3, 2)).size(), torch.Size((3, 2)))
+        self.assertEqual(weibull.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
+        self.assertEqual(weibull.log_prob(self.tensor_sample_2).size(), torch.Size((3, 2, 3)))
+
     def test_normal_shape_scalar_params(self):
         normal = Normal(0, 1)
         self.assertEqual(normal._batch_shape, torch.Size())
@@ -2947,6 +3115,71 @@ class TestKL(TestCase):
                           MultivariateNormal(loc[1][i], scale_tril=scale_tril[1][i])) for i in range(0, b)])
         actual_kl = kl_divergence(MultivariateNormal(loc[0], scale_tril=scale_tril[0]),
                                   MultivariateNormal(loc[1], scale_tril=scale_tril[1]))
+        self.assertEqual(expected_kl, actual_kl)
+
+    def test_kl_multivariate_normal_batched_broadcasted(self):
+        b = 7  # Number of batches
+        loc = [torch.randn(b, 3) for _ in range(0, 2)]
+        scale_tril = [transform_to(constraints.lower_cholesky)(torch.randn(b, 3, 3)),
+                      transform_to(constraints.lower_cholesky)(torch.randn(3, 3))]
+        expected_kl = torch.stack([
+            kl_divergence(MultivariateNormal(loc[0][i], scale_tril=scale_tril[0][i]),
+                          MultivariateNormal(loc[1][i], scale_tril=scale_tril[1])) for i in range(0, b)])
+        actual_kl = kl_divergence(MultivariateNormal(loc[0], scale_tril=scale_tril[0]),
+                                  MultivariateNormal(loc[1], scale_tril=scale_tril[1]))
+        self.assertEqual(expected_kl, actual_kl)
+
+    def test_kl_lowrank_multivariate_normal(self):
+        set_rng_seed(0)  # see Note [Randomized statistical tests]
+        n = 5  # Number of tests for lowrank_multivariate_normal
+        for i in range(0, n):
+            loc = [torch.randn(4) for _ in range(0, 2)]
+            cov_factor = [torch.randn(4, 3) for _ in range(0, 2)]
+            cov_diag = [transform_to(constraints.positive)(torch.randn(4)) for _ in range(0, 2)]
+            covariance_matrix = [cov_factor[i].matmul(cov_factor[i].t()) +
+                                 cov_diag[i].diag() for i in range(0, 2)]
+            p = LowRankMultivariateNormal(loc[0], cov_factor[0], cov_diag[0])
+            q = LowRankMultivariateNormal(loc[1], cov_factor[1], cov_diag[1])
+            p_full = MultivariateNormal(loc[0], covariance_matrix[0])
+            q_full = MultivariateNormal(loc[1], covariance_matrix[1])
+            expected = kl_divergence(p_full, q_full)
+
+            actual_lowrank_lowrank = kl_divergence(p, q)
+            actual_lowrank_full = kl_divergence(p, q_full)
+            actual_full_lowrank = kl_divergence(p_full, q)
+
+            error_lowrank_lowrank = torch.abs(actual_lowrank_lowrank - expected).max()
+            self.assertLess(error_lowrank_lowrank, self.precision, '\n'.join([
+                'Incorrect KL(LowRankMultivariateNormal, LowRankMultivariateNormal) instance {}/{}'.format(i + 1, n),
+                'Expected (from KL MultivariateNormal): {}'.format(expected),
+                'Actual (analytic): {}'.format(actual_lowrank_lowrank),
+            ]))
+
+            error_lowrank_full = torch.abs(actual_lowrank_full - expected).max()
+            self.assertLess(error_lowrank_full, self.precision, '\n'.join([
+                'Incorrect KL(LowRankMultivariateNormal, MultivariateNormal) instance {}/{}'.format(i + 1, n),
+                'Expected (from KL MultivariateNormal): {}'.format(expected),
+                'Actual (analytic): {}'.format(actual_lowrank_full),
+            ]))
+
+            error_full_lowrank = torch.abs(actual_full_lowrank - expected).max()
+            self.assertLess(error_full_lowrank, self.precision, '\n'.join([
+                'Incorrect KL(MultivariateNormal, LowRankMultivariateNormal) instance {}/{}'.format(i + 1, n),
+                'Expected (from KL MultivariateNormal): {}'.format(expected),
+                'Actual (analytic): {}'.format(actual_full_lowrank),
+            ]))
+
+    def test_kl_lowrank_multivariate_normal_batched(self):
+        b = 7  # Number of batches
+        loc = [torch.randn(b, 3) for _ in range(0, 2)]
+        cov_factor = [torch.randn(b, 3, 2) for _ in range(0, 2)]
+        cov_diag = [transform_to(constraints.positive)(torch.randn(b, 3)) for _ in range(0, 2)]
+        expected_kl = torch.stack([
+            kl_divergence(LowRankMultivariateNormal(loc[0][i], cov_factor[0][i], cov_diag[0][i]),
+                          LowRankMultivariateNormal(loc[1][i], cov_factor[1][i], cov_diag[1][i]))
+            for i in range(0, b)])
+        actual_kl = kl_divergence(LowRankMultivariateNormal(loc[0], cov_factor[0], cov_diag[0]),
+                                  LowRankMultivariateNormal(loc[1], cov_factor[1], cov_diag[1]))
         self.assertEqual(expected_kl, actual_kl)
 
     def test_kl_exponential_family(self):
@@ -3290,6 +3523,10 @@ class TestAgainstScipy(TestCase):
                 scipy.stats.lognorm(s=positive_var.clamp(max=3), scale=random_var.exp())
             ),
             (
+                LowRankMultivariateNormal(random_var, torch.zeros(20, 1), positive_var2),
+                scipy.stats.multivariate_normal(random_var, torch.diag(positive_var2))
+            ),
+            (
                 Multinomial(10, simplex_tensor),
                 scipy.stats.multinomial(10, simplex_tensor)
             ),
@@ -3320,6 +3557,10 @@ class TestAgainstScipy(TestCase):
             (
                 Uniform(random_var, random_var + positive_var),
                 scipy.stats.uniform(random_var, positive_var)
+            ),
+            (
+                Weibull(positive_var[0], positive_var2[0]),  # scipy var for Weibull only supports scalars
+                scipy.stats.weibull_min(c=positive_var2[0], scale=positive_var[0])
             )
         ]
 
@@ -3328,7 +3569,7 @@ class TestAgainstScipy(TestCase):
             if isinstance(pytorch_dist, (Cauchy, HalfCauchy)):
                 # Cauchy, HalfCauchy distributions' mean is nan, skipping check
                 continue
-            elif isinstance(pytorch_dist, MultivariateNormal):
+            elif isinstance(pytorch_dist, (LowRankMultivariateNormal, MultivariateNormal)):
                 self.assertEqual(pytorch_dist.mean, scipy_dist.mean, allow_inf=True, message=pytorch_dist)
             else:
                 self.assertEqual(pytorch_dist.mean, scipy_dist.mean(), allow_inf=True, message=pytorch_dist)
@@ -3341,7 +3582,7 @@ class TestAgainstScipy(TestCase):
             elif isinstance(pytorch_dist, (Multinomial, OneHotCategorical)):
                 self.assertEqual(pytorch_dist.variance, np.diag(scipy_dist.cov()), message=pytorch_dist)
                 self.assertEqual(pytorch_dist.stddev, np.diag(scipy_dist.cov()) ** 0.5, message=pytorch_dist)
-            elif isinstance(pytorch_dist, MultivariateNormal):
+            elif isinstance(pytorch_dist, (LowRankMultivariateNormal, MultivariateNormal)):
                 self.assertEqual(pytorch_dist.variance, np.diag(scipy_dist.cov), message=pytorch_dist)
                 self.assertEqual(pytorch_dist.stddev, np.diag(scipy_dist.cov) ** 0.5, message=pytorch_dist)
             else:
