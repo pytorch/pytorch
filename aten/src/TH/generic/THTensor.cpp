@@ -373,11 +373,7 @@ void THTensor_(narrow)(THTensor *self, THTensor *src, int dimension, int64_t fir
 
   THArgCheck( (dimension >= 0) && (dimension < src->dim()), 2, "out of range");
   THArgCheck( firstIndex >= 0, 3, "out of range");
-#ifdef USE_TH_SIZE_ZERO_DIM
   THArgCheck( size >= 0, 4, "out of range");
-#else
-  THArgCheck( size > 0, 4, "out of range");
-#endif
   THArgCheck(firstIndex <= src->size(dimension) - size, 4, "out of range");
 
   THTensor_(set)(self, src);
@@ -396,12 +392,8 @@ void THTensor_(select)(THTensor *self, THTensor *src, int dimension, int64_t sli
   if(!src)
     src = self;
 
-#ifndef USE_TH_SIZE_ZERO_DIM
-  THArgCheck(THTensor_nDimensionLegacyAll(src) > 1, 1, "cannot select on a vector");
-#else
 #ifndef USE_TH_SCALAR
   THArgCheck(src->dim() > 1, 1, "cannot select on a vector");
-#endif
 #endif
   THArgCheck((dimension >= 0) && (dimension < src->dim()), 2, "out of range");
   THArgCheck((sliceIndex >= 0) && (sliceIndex < src->size(dimension)), 3, "out of range");
@@ -446,9 +438,6 @@ void THTensor_(unfold)(THTensor *self, THTensor *src, int dimension, int64_t siz
   if(!src)
     src = self;
 
-#ifndef USE_TH_SIZE_ZERO_DIM
-  THArgCheck(!src->is_empty(), 1, "cannot unfold an empty tensor");
-#endif
   THArgCheck((dimension >= 0) && (dimension < src->dim()), 2, "out of range");
   THArgCheck(size <= src->size(dimension), 3, "out of range");
   THArgCheck(step > 0, 4, "invalid step");
@@ -547,9 +536,6 @@ void THTensor_(unsqueeze1d)(THTensor *self, THTensor *src, int dimension)
     src = self;
 
   THArgCheck((dimension >= 0) && (dimension <= src->dim()), 2, "dimension out of range");
-#ifndef USE_TH_SIZE_ZERO_DIM
-  THArgCheck(!src->is_empty(), 2, "cannot unsqueeze empty tensor");
-#endif
 
   THTensor_(set)(self, src);
 
@@ -728,15 +714,6 @@ void THTensor_(resizeNd)(THTensor *self, int nDimension, int64_t *size, int64_t 
 
   for(d = 0; d < nDimension; d++)
   {
-#ifndef USE_TH_SIZE_ZERO_DIM
-    // we can't support this unless we have arbitrary 0-sized dimensions, but some calls to this
-    // currently exist and expect a size [0] tensor to be returned.
-    if (d == 0 && size[d] == 0) {
-      nDimension = 1;
-    } else {
-      AT_CHECK(size[d] > 0, "sizes must be non-negative");
-    }
-#endif
     if((self->dim() > d) && (size[d] != self->size(d))) {
       hascorrectsize = false;
     }
