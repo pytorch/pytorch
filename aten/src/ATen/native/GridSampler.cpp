@@ -29,7 +29,7 @@ namespace {
   static inline void safe_add_2d(scalar_t *data, int64_t h, int64_t w,
                                  int64_t sH, int64_t sW, int64_t H, int64_t W,
                                  scalar_t delta) {
-    if (h >= 0 && h < H && w >= 0 && w < W) {
+    if (within_bounds_2d(h, w, H, W)) {
       data[h * sH + w * sW] += delta;
     }
   }
@@ -39,7 +39,7 @@ namespace {
                                  int64_t sD, int64_t sH, int64_t sW,
                                  int64_t D, int64_t H, int64_t W,
                                  scalar_t delta) {
-    if (d >=0 && d < D && h >= 0 && h < H && w >= 0 && w < W) {
+    if (within_bounds_3d(d, h, w, D, H, W)) {
       data[d * sD + h * sH + w * sW] += delta;
     }
   }
