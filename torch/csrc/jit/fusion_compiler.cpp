@@ -94,11 +94,8 @@ struct TensorInfo {
 };
 )");
 
-// The reason why we used TensorFlow's philox implementation is that currently
-// NVRTC couldn't resolve the curand.h header file correctly, as curand.h will
-// include lots of other header files which will break the NVRTC preprocessor.
-// The TF's version is standalone and thus we don't need to worry too much
-// about including in stuff that we don't need.
+// We rewrite the code for philox RNG from curand as nvrtc couldn't resolve the
+// curand header correctly.
 constexpr auto rand_support_literal = R"(
 
   class Philox {
@@ -186,8 +183,8 @@ constexpr auto rand_support_literal = R"(
     static const unsigned long kPhiloxSB = 0xCD9E8D57;
   };
 
-  // Constants are picked from https://www.doornik.com/research/randomdouble.pdf
-  #define M_RAN_INVM32 2.32830643653869628906e-010
+  // Inverse of 2^32.
+  #define M_RAN_INVM32 2.3283064e-10f
   __device__  __inline__ float uniform(unsigned int x) {
     return x * M_RAN_INVM32;
   }
@@ -392,8 +389,8 @@ std::string encodeRHS(Node * n) {
     {aten::pow, "powf(${0}, ${1})"},
 
     //alpha
-    {aten::add, "${0} + ${alpha}*${1}"},
-    {aten::sub, "(${0} - ${alpha}*${1})"},
+    {aten::add, "${0} + ${2}*${1}"},
+    {aten::sub, "(${0} - ${2}*${1})"},
     {aten::rand_like, "uniform(rnd())"},
 
     // simple derivatives
