@@ -180,8 +180,8 @@ bool CollectAndDistributeFpnRpnProposalsOp<CPUContext>::RunOnDevice() {
   //   outputs[0].data[...] = rois
   auto* rois_out = Output(0);
   rois_out->Resize(rois.rows(), rois.cols());
-  Eigen::Map<ERArrXXf> rois_out_mat(rois_out->mutable_data<float>(),
-                                    rois.rows(), rois.cols());
+  Eigen::Map<ERArrXXf> rois_out_mat(
+      rois_out->template mutable_data<float>(), rois.rows(), rois.cols());
   rois_out_mat = rois;
 
   // Create new roi blobs for each FPN level
@@ -207,9 +207,10 @@ bool CollectAndDistributeFpnRpnProposalsOp<CPUContext>::RunOnDevice() {
     // Output blob_roi_level
     auto* roi_out = Output(i + 1);
     roi_out->Resize(blob_roi_level.rows(), blob_roi_level.cols());
-    Eigen::Map<ERArrXXf> roi_out_mat(roi_out->mutable_data<float>(),
-                                     blob_roi_level.rows(),
-                                     blob_roi_level.cols());
+    Eigen::Map<ERArrXXf> roi_out_mat(
+        roi_out->template mutable_data<float>(),
+        blob_roi_level.rows(),
+        blob_roi_level.cols());
     roi_out_mat = blob_roi_level;
 
     // Append indices from idx_lvl to rois_idx_restore
@@ -219,8 +220,9 @@ bool CollectAndDistributeFpnRpnProposalsOp<CPUContext>::RunOnDevice() {
   utils::ArgSort(rois_idx_restore);
   auto* rois_idx_restore_out = Output(OutputSize() - 1);
   rois_idx_restore_out->Resize(rois_idx_restore.size());
-  Eigen::Map<EArrXi> rois_idx_restore_out_mat(rois_idx_restore_out->mutable_data<int>(),
-                                              rois_idx_restore.size());
+  Eigen::Map<EArrXi> rois_idx_restore_out_mat(
+      rois_idx_restore_out->template mutable_data<int>(),
+      rois_idx_restore.size());
   rois_idx_restore_out_mat = rois_idx_restore;
 
   return true;

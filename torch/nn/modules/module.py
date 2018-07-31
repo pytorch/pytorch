@@ -642,6 +642,10 @@ class Module(object):
             if key in state_dict:
                 input_param = state_dict[key]
 
+                # Backward compatibility: loading 1-dim tensor from 0.3.* to version 0.4+
+                if len(param.shape) == 0 and len(input_param.shape) == 1:
+                    input_param = input_param[0]
+
                 if input_param.shape != param.shape:
                     # local shape should match the one in checkpoint
                     error_msgs.append('size mismatch for {}: copying a param of {} from checkpoint, '

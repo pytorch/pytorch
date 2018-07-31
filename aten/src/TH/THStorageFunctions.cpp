@@ -15,44 +15,29 @@
 #include "THGenerateHalfType.h"
 
 // Free a non-weak pointer to THStorage
-void THStorage_free(THStorage *storage) {
+void THStorage_free(THStorage* storage) {
   if (!storage) {
     return;
   }
-
-  if (storage->flag & TH_STORAGE_REFCOUNTED) {
-    if (--storage->refcount == 0) {
-      if (storage->finalizer) {
-        (*storage->finalizer)();
-      }
-      storage->finalizer = nullptr;
-      storage->data_ptr.clear();
-      THStorage_weakFree(storage);
-    }
-  }
+  storage->release();
 }
 
 // Manually retains a weak reference
 void THStorage_weakRetain(THStorage *weak_storage) {
-  weak_storage->weakcount++;
+  weak_storage->weak_retain();
 }
 
 // Releases a weak reference
 void THStorage_weakFree(THStorage *weak_storage) {
-  if (--weak_storage->weakcount == 0) {
-    delete weak_storage;
-  }
+  weak_storage->weak_release();
 }
 
 // Given a weak reference, returns a strong reference to a storage (which must
 // be freed when done) or null if the storage is already dead.
 THStorage* THStorage_weakLock(THStorage *weak_storage) {
-  for (;;) {
-    int refcount = weak_storage->refcount.load();
-    if (refcount == 0) return nullptr;
-    if (weak_storage->refcount.compare_exchange_strong(refcount, refcount + 1)) break;
-  }
-  return weak_storage;
+  if (weak_storage->weak_lock())
+    return weak_storage;
+  return nullptr;
 }
 
 THDescBuff THLongStorage_sizeDesc(const THLongStorage *size) {
@@ -94,20 +79,10 @@ ptrdiff_t THStorage_size(const THStorage *self)
   return self->size;
 }
 
-void THStorage_setFlag(THStorage *storage, const char flag)
-{
-  storage->flag |= flag;
-}
-
-void THStorage_clearFlag(THStorage *storage, const char flag)
-{
-  storage->flag &= ~flag;
-}
-
 void THStorage_retain(THStorage *storage)
 {
-  if (storage && (storage->flag & TH_STORAGE_REFCOUNTED)) {
-    ++storage->refcount;
+  if (storage) {
+    storage->retain();
   }
 }
 
@@ -122,7 +97,7 @@ THStorage* THStorage_newWithData(at::ScalarType scalar_type, std::unique_ptr<at:
 
 void THStorage_resize(THStorage *storage, ptrdiff_t size)
 {
-  if (storage->flag & TH_STORAGE_RESIZABLE)
+  if (storage->resizable)
   {
     /* case when the allocator does not have a realloc defined */
     at::DataPtr old_data;
@@ -153,7 +128,7 @@ void THStorage_swap(THStorage *storage1, THStorage *storage2)
     SWAP(data_ptr);
     SWAP(size);
     // don't swap refcount!
-    SWAP(flag);
+    SWAP(resizable);
     SWAP(allocator);
     SWAP(finalizer);
 #undef SWAP

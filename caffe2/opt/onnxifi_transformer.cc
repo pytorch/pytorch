@@ -175,11 +175,11 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOp(
 
       // Feed into workspace as CPU Tensors
       auto* blob = ws->CreateBlob(t.name());
-      auto* cpu_tensor = blob->GetMutable<TensorCPU>();
+      auto* cpu_tensor = blob->GetMutableTensor(CPU);
       std::vector<TIndex> dims;
       std::copy(t.dims().begin(), t.dims().end(), dims.begin());
       cpu_tensor->Resize(dims);
-      context.template CopyBytes<CPUContext, CPUContext>(
+      context.CopyBytesSameDevice(
           cpu_tensor->size() * sizeof(float),
           static_cast<const void*>(t.raw_data().data()),
           cpu_tensor->raw_mutable_data(TypeMeta::Make<float>()));
@@ -323,8 +323,10 @@ void OnnxifiTransformer::Transform(
 
   // function to tell whether the ONNXIFI backend supports a given C2 op or not
   // TODO: choose backend id
+  onnxifi_library* backend = lib_;
+  onnxBackendID backend_id = backend_ids_[0];
   auto supports =
-      [&exporter, &shape_hints, backend = lib_, backend_id = backend_ids_[0]](
+      [&exporter, &shape_hints, backend, backend_id](
           const caffe2::OperatorDef& op) {
         const OpSchema* schema = OpSchemaRegistry::Schema(op.type());
         // NB: this might not be a hard constraint as we can just export C2

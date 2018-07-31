@@ -411,7 +411,7 @@ class ParameterDict(Module):
         class MyModule(nn.Module):
             def __init__(self):
                 super(MyModule, self).__init__()
-                self.choices = nn.ParameterDict({
+                self.params = nn.ParameterDict({
                         'left': nn.Parameter(torch.randn(5, 10)),
                         'right': nn.Parameter(torch.randn(5, 10))
                 })

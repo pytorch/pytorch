@@ -28,7 +28,7 @@ struct AttributeValue {
   Symbol name;
   virtual AttributeKind kind() const = 0;
   virtual Ptr clone() const = 0;
-  virtual ~AttributeValue() {}
+  virtual ~AttributeValue() = default;
 };
 
 template<typename T, AttributeKind Kind>
@@ -101,7 +101,7 @@ private:
 // we return Derived* pointers because Nodes are normally held as pointers.
 template<typename Derived>
 struct Attributes {
-  Attributes() {}
+  Attributes() = default;
   void copyAttributes(const Attributes & rhs) {
     values_.clear();
     for(auto & i : rhs.values_) {

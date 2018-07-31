@@ -17,17 +17,27 @@ except ImportError:
 
 # These functions require manual Python bindings or are not exposed to Python
 SKIP_PYTHON_BINDINGS = [
-    'alias', 'contiguous', 'clamp.*', 'is_cuda', 'is_sparse', 'size', 'stride',
+    'alias', 'contiguous', 'is_cuda', 'is_sparse', 'size', 'stride',
     '.*_backward', '.*_backward_(out|input|weight|bias)', '.*_forward',
     '.*_forward_out', 'sparse_raw_resize_', '_unsafe_view', 'tensor',
     'sparse_coo_tensor', 'th_sparse_coo_tensor', 'native_sparse_coo_tensor',
     '_arange.*', '_range.*', '_linspace.*', '_logspace.*',
+    '_sparse_add.*', '_sparse_div.*', '_sparse_mul.*', '_sparse_sub.*',
     'index',
     '_indexCopy_', 'max_values', 'min_values', 'argmax', 'argmin',
     '_cumsum.*', '_cumprod.*', '_sum.*', '_prod.*', '_th_.*',
     'arange.*', 'range.*', '_gesv.*', '_getri.*', 'slice',
     '_local_scalar', '_local_scalar_dense',
     'max_pool1d', 'max_pool2d', 'max_pool3d'
+]
+
+# These function signatures are not exposed to Python. Note that this signature
+# list does not support regex.
+SKIP_PYTHON_BINDINGS_SIGNATURES = [
+    'add(Tensor, Scalar, Scalar)', 'add_(Tensor, Scalar, Scalar)',
+    'sub(Tensor, Scalar, Scalar)', 'sub_(Tensor, Scalar, Scalar)',
+    'mul(Tensor, Scalar)', 'mul_(Tensor, Scalar)',
+    'div(Tensor, Scalar)', 'div_(Tensor, Scalar)',
 ]
 
 PY_VARIABLE_METHOD_VARARGS = CodeTemplate("""\
@@ -130,6 +140,12 @@ def should_generate_python_binding(declaration):
     name = declaration['name']
     for pattern in SKIP_PYTHON_BINDINGS:
         if re.match('^' + pattern + '$', name):
+            return False
+
+    simple_types = [arg['simple_type'] for arg in declaration['arguments']]
+    signature = '{}({})'.format(name, ', '.join(simple_types))
+    for pattern in SKIP_PYTHON_BINDINGS_SIGNATURES:
+        if pattern == signature:
             return False
 
     # TODO: fix handling of SparseTensor. We don't want to generate Python

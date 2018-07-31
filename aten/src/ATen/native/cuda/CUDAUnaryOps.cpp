@@ -3,7 +3,15 @@
 namespace at { namespace native {
 
 Tensor& _clamp__cuda(Tensor& self, Scalar min, Scalar max) {
-  return _th_clamp_(self, min, max);
+  if (!std::isnan(min.toDouble()) && !std::isnan(max.toDouble())) {
+    return _th_clamp_(self, min, max);
+  } else if (std::isnan(min.toDouble())) {
+    return _th_clamp_max_(self, max);
+  } else if (std::isnan(max.toDouble())) {
+    return _th_clamp_min_(self, min);
+  } else {
+    return self;
+  }
 }
 
 Tensor& _clamp_out_cuda(
@@ -13,7 +21,14 @@ Tensor& _clamp_out_cuda(
     Scalar max) {
   result.resize_(self.sizes());
   result.copy_(self);
-  return _th_clamp_(result, min, max);
+  if (!std::isnan(min.toDouble()) && !std::isnan(max.toDouble())) {
+    _th_clamp_(result, min, max);
+  } else if (std::isnan(min.toDouble())) {
+    _th_clamp_max_(result, max);
+  } else if (std::isnan(max.toDouble())) {
+    _th_clamp_min_(result, min);
+  }
+  return result;
 }
 
 Tensor& _clamp_max__cuda(Tensor& self, Scalar max) {

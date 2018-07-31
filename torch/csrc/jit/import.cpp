@@ -66,7 +66,7 @@ struct Model_ {
 // Readers
 
 struct ReaderBase {
-  ReaderBase() {}
+  ReaderBase() = default;
   ReaderBase(pb_callback_t& cb) {
     initialize_callback(cb);
   }
@@ -391,7 +391,10 @@ at::Tensor buildTensor(const Tensor_& tensor_) {
 
   tensor.resize_(tensor_.dims);
 
-  JIT_ASSERT(tensor.storage()->size() * tensor.storage()->elementSize() == tensor_.raw_data.size());
+  JIT_ASSERT(
+      tensor.storage()->pImpl()->get_size() *
+          tensor.storage()->pImpl()->elementSize() ==
+      tensor_.raw_data.size());
 
   std::memcpy(tensor.data_ptr(), tensor_.raw_data.data(), tensor_.raw_data.size());
 
@@ -512,7 +515,45 @@ std::shared_ptr<Graph> buildGraph(const Graph_& graph_, std::vector<at::Tensor>&
   return graph;
 }
 
+// TODO: this should be removed once we'll be able to serialize value types
+void reconstructOutputTypes(Block *b) {
+  for (Node * n : b->nodes()) {
+    if (n->kind() == prim::Constant) {
+      switch (n->kindOf(attr::value)) {
+        case AttributeKind::i:
+          n->output()->setType(IntType::get());
+          break;
+        case AttributeKind::f:
+          n->output()->setType(FloatType::get());
+          break;
+        case AttributeKind::is:
+          n->output()->setType(ListType::ofInts());
+          break;
+        case AttributeKind::t:
+          n->output()->setType(DynamicType::get());
+          break;
+        default:
+          throw std::runtime_error("Unsupported case in reconstructOutputTypes. File a bug report");
+      }
+    } else if (n->kind() == prim::ListConstruct && n->inputs().size() > 0) {
+      auto input_types = fmap(n->inputs(), [](Value *v) -> TypePtr {
+        return v->node()->kind() == prim::Constant ? v->type() : nullptr;
+      });
+      // Check that all types are equal
+      if (std::equal(std::next(input_types.begin()), input_types.end(), input_types.begin())) {
+        auto elem_type = input_types[0];
+        if (elem_type == IntType::get()) {
+          n->output()->setType(ListType::ofInts());
+        }
+      }
+    }
+    for (Block * b : n->blocks()) {
+      reconstructOutputTypes(b);
+    }
+  }
 }
+
+} // anonymous namespace
 
 std::shared_ptr<Graph> ImportIRGraph(const std::string& serialized_graph,
                                      std::vector<at::Tensor>& initializers) {
@@ -522,6 +563,8 @@ std::shared_ptr<Graph> ImportIRGraph(const std::string& serialized_graph,
   auto model = Reader<Model_>::read(&istream);
 
   auto graph = buildGraph(model.graph, initializers);
+
+  reconstructOutputTypes(graph->block());
 
   return graph;
 }

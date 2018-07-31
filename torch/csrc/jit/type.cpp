@@ -38,36 +38,40 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
   } else if(t.kind() == TypeKind::ListType) {
     auto prim = t.cast<ListType>()->getElementType();
     out << *prim << "[]";
+  } else if(t.kind() == TypeKind::NoneType) {
+    out << "None";
   } else {
     AT_ERROR("unknown type kind");
   }
   return out;
 }
 
-TypePtr DynamicType::get() {
-  static auto value = std::make_shared<DynamicType>();
+DynamicTypePtr DynamicType::get() {
+  static auto value = DynamicType::create();
   return value;
 }
-TypePtr NumberType::get() {
-  static auto value = std::make_shared<NumberType>();
+NumberTypePtr NumberType::get() {
+  static auto value = NumberType::create();
   return value;
 }
-TypePtr IntType::get() {
-  static auto value = std::make_shared<IntType>();
+IntTypePtr IntType::get() {
+  static auto value = IntType::create();
   return value;
 }
-TypePtr FloatType::get() {
-  static auto value = std::make_shared<FloatType>();
+FloatTypePtr FloatType::get() {
+  static auto value = FloatType::create();
   return value;
 }
-
-
-TypePtr ListType::ofTensors() {
-  static auto value = std::make_shared<ListType>(DynamicType::get());
+NoneTypePtr NoneType::get() {
+  static auto value = NoneType::create();
   return value;
 }
-TypePtr ListType::ofInts() {
-  static auto value = std::make_shared<ListType>(IntType::get());
+ListTypePtr ListType::ofTensors() {
+  static auto value = ListType::create(DynamicType::get());
+  return value;
+}
+ListTypePtr ListType::ofInts() {
+  static auto value = ListType::create(IntType::get());
   return value;
 }
 

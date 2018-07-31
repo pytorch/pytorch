@@ -615,6 +615,8 @@ DELEGATE_SIMPLE_UNARY_FUNCTION(float, Rsqrt, vsInvSqrt)
 DELEGATE_SIMPLE_UNARY_FUNCTION(double, Rsqrt, vdInvSqrt)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Cbrt, vsCbrt)
 DELEGATE_SIMPLE_UNARY_FUNCTION(double, Cbrt, vdCbrt)
+DELEGATE_SIMPLE_UNARY_FUNCTION(float, Inv, vsInv)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Inv, vdInv)
 #undef DELEGATE_SIMPLE_UNARY_FUNCTION
 
 #define DELEGATE_SINCOS_FUNCTION(T, OriginalFunc)           \
@@ -734,6 +736,15 @@ DELEGATE_COSH_FUNCTION(float)
 DELEGATE_COSH_FUNCTION(double)
 #undef DELEGATE_COSH_FUNCTION
 
+#define DELEGATE_INV_FUNCTION(T)                                        \
+  template <>                                                           \
+  void Inv<T, CPUContext>(const int N, const T* x, T* y, CPUContext*) { \
+    EigenVectorMap<T>(y, N) = ConstEigenVectorArrayMap<T>(x, N).inverse();\
+  }
+DELEGATE_INV_FUNCTION(float)
+DELEGATE_INV_FUNCTION(double)
+#undef DELEGATE_INV_FUNCTION
+
 #endif // CAFFE2_USE_MKL
 
 #define DELEGATE_NEG_FUNCTION(T)                                        \
@@ -807,28 +818,28 @@ DEFINE_SIMPLE_BINARY_FUNCTION(Div, /)
 // Eigen or via custom code.
 ////////////////////////////////////////////////////////////////////////////////
 
-#define CAFFE2_SPECIALIZED_REDUCEMIN(T)    \
-  template <>                              \
-  void ReduceMin<T, CPUContext>(           \
-      const int N,                         \
-      const T* x,                          \
-      T* y,                                \
-      Tensor<CPUContext>* /*scratch_ptr*/, \
-      CPUContext* /*context*/) {           \
-    *y = *std::min_element(x, x + N);      \
+#define CAFFE2_SPECIALIZED_REDUCEMIN(T) \
+  template <>                           \
+  void ReduceMin<T, CPUContext>(        \
+      const int N,                      \
+      const T* x,                       \
+      T* y,                             \
+      Tensor* /*scratch_ptr*/,          \
+      CPUContext* /*context*/) {        \
+    *y = *std::min_element(x, x + N);   \
   }
 CAFFE2_SPECIALIZED_REDUCEMIN(float)
 #undef CAFFE2_SPECIALIZED_REDUCEMIN
 
-#define CAFFE2_SPECIALIZED_REDUCEMAX(T)    \
-  template <>                              \
-  void ReduceMax<T, CPUContext>(           \
-      const int N,                         \
-      const T* x,                          \
-      T* y,                                \
-      Tensor<CPUContext>* /*scratch_ptr*/, \
-      CPUContext* /*context*/) {           \
-    *y = *std::max_element(x, x + N);      \
+#define CAFFE2_SPECIALIZED_REDUCEMAX(T) \
+  template <>                           \
+  void ReduceMax<T, CPUContext>(        \
+      const int N,                      \
+      const T* x,                       \
+      T* y,                             \
+      Tensor* /*scratch_ptr*/,          \
+      CPUContext* /*context*/) {        \
+    *y = *std::max_element(x, x + N);   \
   }
 CAFFE2_SPECIALIZED_REDUCEMAX(float)
 CAFFE2_SPECIALIZED_REDUCEMAX(int32_t)
@@ -1899,7 +1910,7 @@ void RandGaussian<float, CPUContext>(
       const T* x,                            \
       T* y,                                  \
       CPUContext* /* unused */,              \
-      Tensor<CPUContext>* /* unused */) {    \
+      Tensor* /* unused */) {                \
     *y = ConstEigenVectorMap<T>(x, N).sum(); \
   }
 
@@ -1915,7 +1926,7 @@ void SumSqr<float, CPUContext>(
     const float* x,
     float* y,
     CPUContext* /*context*/ /* unused */,
-    Tensor<CPUContext>* /*scratch_ptr*/ /* unused */) {
+    Tensor* /*scratch_ptr*/ /* unused */) {
   *y = ConstEigenVectorMap<float>(x, N).squaredNorm();
 }
 
@@ -2593,6 +2604,13 @@ bool TransposeWithHPTT(
   for (int i = 0; i < ndim; ++i) {
     axes_cm[i] = cm_fn(axes[cm_fn(i)]);
     dims_cm[i] = dims[cm_fn(i)];
+  }
+
+  // HPTT doesn't handle 0 sized inputs.
+  for (auto dim : dims_cm) {
+    if (dim <= 0) {
+      return false;
+    }
   }
   auto plan = hptt::create_plan(
       axes_cm.data(),

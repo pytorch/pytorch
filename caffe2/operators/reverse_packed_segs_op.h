@@ -58,7 +58,7 @@ class ReversePackedSegsOp final : public Operator<Context> {
     const LengthType* lengths_ptr = lengths.template data<LengthType>();
 
     vector<LengthType> lengths_host(batch_size);
-    context_.template Copy<LengthType, Context, CPUContext>(
+    context_.template CopyToCPU<LengthType>(
         batch_size, lengths_ptr, &lengths_host[0]);
     context_.FinishDeviceComputation();
 
@@ -71,14 +71,14 @@ class ReversePackedSegsOp final : public Operator<Context> {
         const T* data_block_ptr = data_ptr + (j * batch_size + i) * block_size;
         T* rev_data_block_ptr =
             rev_data_ptr + ((seg_length - 1 - j) * batch_size + i) * block_size;
-        context_.template Copy<T, Context, Context>(
+        context_.template CopySameDevice<T>(
             block_size, data_block_ptr, rev_data_block_ptr);
       }
       for (; j < max_length; j++) {
         const T* data_block_ptr = data_ptr + (j * batch_size + i) * block_size;
         T* rev_data_block_ptr =
             rev_data_ptr + (j * batch_size + i) * block_size;
-        context_.template Copy<T, Context, Context>(
+        context_.template CopySameDevice<T>(
             block_size, data_block_ptr, rev_data_block_ptr);
       }
     }

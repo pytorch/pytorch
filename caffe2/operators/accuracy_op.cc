@@ -38,7 +38,7 @@ bool AccuracyOp<float, CPUContext>::RunOnDevice() {
     }
   }
   CAFFE_ENFORCE_LE(correct, N);
-  *(Y->mutable_data<float>()) = static_cast<float>(correct) / N;
+  *(Y->template mutable_data<float>()) = static_cast<float>(correct) / N;
 
   return true;
 }
@@ -46,10 +46,10 @@ bool AccuracyOp<float, CPUContext>::RunOnDevice() {
 REGISTER_CPU_OPERATOR(Accuracy, AccuracyOp<float, CPUContext>);
 
 OPERATOR_SCHEMA(Accuracy)
-  .NumInputs(2)
-  .NumOutputs(1)
-  .ScalarType(TensorProto::FLOAT)
-  .SetDoc(R"DOC(
+    .NumInputs(2)
+    .NumOutputs(1)
+    .ScalarType(TensorProto::FLOAT)
+    .SetDoc(R"DOC(
 Accuracy takes two inputs- predictions and labels, and returns a float
 accuracy value for the batch. Predictions are expected in the form of 2-D tensor
 containing a batch of scores for various classes, and labels are expected in the
@@ -57,16 +57,25 @@ containing a batch of scores for various classes, and labels are expected in the
 the score for the label index in the predictions is the highest among all
 classes, it is considered a correct prediction.
 )DOC")
-  .Arg(
-      "top_k",
-      "Count as correct by comparing the true label to the top k scoring "
-      "classes (default 1: only compare to the top scoring class i.e. argmax)")
-  .Input(0, "predictions", "2-D tensor (Tensor<float>) of size "
-         "(num_batches x num_classes) containing scores")
-  .Input(1, "labels", "1-D tensor (Tensor<int>) of size (num_batches) having "
+    .Arg(
+        "top_k",
+        "Count as correct by comparing the true label to the top k scoring "
+        "classes (default 1: only compare to the top scoring class i.e. argmax)")
+    .Input(
+        0,
+        "predictions",
+        "2-D tensor (Tensor<float>) of size "
+        "(num_batches x num_classes) containing scores")
+    .Input(
+        1,
+        "labels",
+        "1-D tensor (Tensor<float>) of size (num_batches) having "
         "the indices of true labels")
-  .Output(0, "accuracy", "1-D tensor (Tensor<float>) of size 1 containing "
-          "accuracy");
+    .Output(
+        0,
+        "accuracy",
+        "1-D tensor (Tensor<float>) of size 1 containing "
+        "accuracy");
 
 SHOULD_NOT_DO_GRADIENT(Accuracy);
 }  // namespace caffe2

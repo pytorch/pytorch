@@ -77,12 +77,25 @@ PreTraceInfo preRecordPythonTrace(THPObjectPtr pyobj,
   if(!apply) {
     throw python_error();
   }
-  return makePreTraceInfo(inputs, [&](const std::shared_ptr<TracingState>& state, Graph& graph) {
-    return graph.createPythonOp(
-        std::move(apply),
-        arg_types,
-        std::move(scalar_args));
-  });
+
+  PreTraceInfo info;
+  auto & state = getTracingState();
+  auto & graph = state->graph;
+
+  Node *n = info.n = graph->createPythonOp(
+                        std::move(apply),
+                        arg_types,
+                        std::move(scalar_args));
+  recordSourceLocation(n);
+
+  for (const Variable & input : inputs) {
+    n->addInput(getValueTrace(input));
+  }
+
+  // NB: Order matters. This must append after inputs but before outputs.
+  graph->appendNode(n);
+
+  return info;
 }
 
 void pythonRecordSourceLocation(Node* n) {
@@ -90,10 +103,10 @@ void pythonRecordSourceLocation(Node* n) {
   n->setSourceLocation(sl);
 }
 
-void initPythonTracerBindings(PyObject* module_) {
+void initPythonTracerBindings(PyObject* module) {
   setRecordSourceLocation(pythonRecordSourceLocation);
 
-  auto m = py::handle(module_).cast<py::module>();
+  auto m = py::handle(module).cast<py::module>();
   py::class_<TracingState,std::shared_ptr<TracingState>>(m, "TracingState", py::dynamic_attr())
     // NB: no constructor; you have to get it from C++ code
     .def("__repr__", [](const TracingState& s) {

@@ -15,7 +15,7 @@ class BatchGatherOp final : public Operator<Context> {
 
   bool RunOnDevice() override {
     return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
-        this, OperatorBase::Input<TensorCPU>(INDICES));
+        this, OperatorBase::Input<Tensor>(INDICES, CPU));
   }
 
   template <typename TInd>
@@ -54,8 +54,7 @@ class BatchGatherOp final : public Operator<Context> {
         auto src =
             src_base + idx * block_bytesize + batch * data_batch_bytesize;
         auto dst = out + i * block_bytesize + batch * gathered_batch_bytesize;
-        context_.template CopyItems<Context, Context>(
-            data.meta(), block_size, src, dst);
+        context_.CopyItemsSameDevice(data.meta(), block_size, src, dst);
       }
     }
     return true;
@@ -72,7 +71,7 @@ class BatchGatherGradientOp final : public Operator<Context> {
 
   bool RunOnDevice() override {
     return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
-        this, OperatorBase::Input<TensorCPU>(INDICES));
+        this, OperatorBase::Input<Tensor>(INDICES, CPU));
   }
 
   template <typename TInd>

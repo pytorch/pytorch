@@ -12,7 +12,7 @@ class Dropout(InplaceFunction):
     @staticmethod
     def symbolic(g, input, p=0.5, train=False, inplace=False):
         # See Note [Export inplace]
-        r, _ = g.op("Dropout", input, ratio_f=p, is_test_i=not train, outputs=2)
+        r, _ = g.op("Dropout", input, ratio_f=p, outputs=2)
         return r
 
     @classmethod
