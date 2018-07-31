@@ -410,8 +410,8 @@ bool THC_reduceDim(THCState* state,
                    int keepdim) {
   ptrdiff_t inElements = THCTensor_nElement(state, in);
 
-  int64_t reductionSize = THCTensor_size(state, in, dim);
-  int64_t reductionStride = THCTensor_stride(state, in, dim);
+  int64_t reductionSize = THTensor_sizeLegacyNoScalars(in, dim);
+  int64_t reductionStride = THTensor_strideLegacyNoScalars(in, dim);
   ptrdiff_t outElements = inElements / reductionSize;
 
   if (THCTensor_nDimensionLegacyAll(state, out) > MAX_CUTORCH_DIMS ||

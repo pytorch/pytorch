@@ -59,7 +59,7 @@ void THNN_(SoftMarginCriterion_updateGradInput)(
 
   TH_TENSOR_APPLY3(real, gradInput, real, input, real, target,
                    real z = exp(-*target_data * *input_data);
-                   *gradInput_data = -norm*(*target_data)*z/(1. + z) * THTensor_(fastGet1d)(gradOutput, 0);)
+                   *gradInput_data = -norm*(*target_data)*z/(1. + z) * THTensor_(fastGetLegacy1dNoScalars)(gradOutput, 0);)
 }
 
 #endif

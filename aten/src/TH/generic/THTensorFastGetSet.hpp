@@ -2,6 +2,10 @@
 #define TH_GENERIC_FILE "generic/THTensorFastGetSet.hpp"
 #else
 
+static inline real THTensor_(fastGetLegacy1dNoScalars)(THTensor *self, int64_t x0) {
+  return (THStorage_(data)(THTensor_getStoragePtr(self))+self->storage_offset())[(x0)*THTensor_strideLegacyNoScalars(self, 0)];
+}
+
 static inline real THTensor_(fastGet1d)(THTensor *self, int64_t x0) {
   return (THStorage_(data)(THTensor_getStoragePtr(self))+self->storage_offset())[(x0)*self->stride(0)];
 }

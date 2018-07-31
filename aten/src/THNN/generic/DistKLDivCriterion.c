@@ -57,7 +57,7 @@ void THNN_(DistKLDivCriterion_updateGradInput)(
   real norm = (reduction == Reduction::ElementwiseMean ? 1./((real)THTensor_(nElement)(input)) : 1.);
 
   TH_TENSOR_APPLY3(real, gradInput, real, input, real, target,
-    *gradInput_data = *target_data > 0 ? norm * (-*target_data) * THTensor_(fastGet1d)(gradOutput, 0) : 0;
+    *gradInput_data = *target_data > 0 ? norm * (-*target_data) * THTensor_(fastGetLegacy1dNoScalars)(gradOutput, 0) : 0;
   );
 }
 

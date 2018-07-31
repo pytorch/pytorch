@@ -22,10 +22,20 @@ int64_t THCTensor_size(THCState *state, const THCTensor *self, int dim) {
   return self->size(dim);
 }
 
+int64_t THCTensor_sizeLegacyNoScalars(THCState *state, const THCTensor *self, int dim) {
+  return THTensor_sizeLegacyNoScalars(self, dim);
+}
+
+
 int64_t THCTensor_stride(THCState *state, const THCTensor *self, int dim) {
   THArgCheck((dim >= 0) && (dim < self->dim()), 2, "out of range");
   return self->stride(dim);
 }
+
+int64_t THCTensor_strideLegacyNoScalars(THCState *state, const THCTensor *self, int dim) {
+  return THTensor_strideLegacyNoScalars(self, dim);
+}
+
 THLongStorage *THCTensor_newSizeOf(THCState *state, THCTensor *self) {
   THLongStorage *size = THLongStorage_newWithSize(self->dim());
   THLongStorage_rawCopy(size, THTensor_getSizePtr(self));
@@ -310,6 +320,9 @@ bool THCTensor_canUse32BitIndexMath(THCState* state, const THCTensor* t, ptrdiff
   if (elements >= max_elem) {
     return false;
   }
+  if (t->dim() == 0) {
+    return true;
+  }
 
   ptrdiff_t offset = 0;
   ptrdiff_t linearId = elements - 1;
@@ -393,7 +406,7 @@ bool THCTensor_maybeOverlappingIndices(THCState* state, const THCTensor* t) {
   int dims = THCTensor_nDimensionLegacyAll(state, t);
   int nonSize1Dims = 0;
   for (int i = 0; i < dims; ++i) {
-    int64_t size = THCTensor_size(state, t, i);
+    int64_t size = THCTensor_sizeLegacyNoScalars(state, t, i);
 
     if (size > 1) {
       info[nonSize1Dims].size = size;

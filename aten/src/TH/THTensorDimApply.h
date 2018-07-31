@@ -61,16 +61,16 @@
     TH_TENSOR_DIM_APPLY_counter[TH_TENSOR_DIM_APPLY_i] = 0; \
 \
   TENSOR1##_data = THTensor_getStoragePtr(TENSOR1)->data<TYPE1>()+(TENSOR1)->storage_offset(); \
-  TENSOR1##_stride = (TENSOR1)->stride(DIMENSION); \
-  TENSOR1##_size = TENSOR1->size(DIMENSION); \
+  TENSOR1##_stride = THTensor_strideLegacyNoScalars((TENSOR1), DIMENSION); \
+  TENSOR1##_size = THTensor_sizeLegacyNoScalars((TENSOR1), DIMENSION); \
 \
   TENSOR2##_data = THTensor_getStoragePtr(TENSOR2)->data<TYPE2>()+(TENSOR2)->storage_offset(); \
-  TENSOR2##_stride = (TENSOR2)->stride(DIMENSION); \
-  TENSOR2##_size = TENSOR2->size(DIMENSION); \
+  TENSOR2##_stride = THTensor_strideLegacyNoScalars((TENSOR2), DIMENSION); \
+  TENSOR2##_size = THTensor_sizeLegacyNoScalars((TENSOR2), DIMENSION);  \
 \
   TENSOR3##_data = THTensor_getStoragePtr(TENSOR3)->data<TYPE3>()+(TENSOR3)->storage_offset(); \
-  TENSOR3##_stride = (TENSOR3)->stride(DIMENSION); \
-  TENSOR3##_size = TENSOR3->size(DIMENSION); \
+  TENSOR3##_stride = THTensor_strideLegacyNoScalars((TENSOR3), DIMENSION); \
+  TENSOR3##_size = THTensor_sizeLegacyNoScalars((TENSOR3), DIMENSION); \
 \
   while(!TH_TENSOR_DIM_APPLY_hasFinished) \
   { \
@@ -92,11 +92,11 @@
       } \
 \
       TH_TENSOR_DIM_APPLY_counter[TH_TENSOR_DIM_APPLY_i]++; \
-      TENSOR1##_data += TENSOR1->stride(TH_TENSOR_DIM_APPLY_i); \
-      TENSOR2##_data += TENSOR2->stride(TH_TENSOR_DIM_APPLY_i); \
-      TENSOR3##_data += TENSOR3->stride(TH_TENSOR_DIM_APPLY_i); \
+      TENSOR1##_data += THTensor_strideLegacyNoScalars(TENSOR1, TH_TENSOR_DIM_APPLY_i); \
+      TENSOR2##_data += THTensor_strideLegacyNoScalars(TENSOR2, TH_TENSOR_DIM_APPLY_i); \
+      TENSOR3##_data += THTensor_strideLegacyNoScalars(TENSOR3, TH_TENSOR_DIM_APPLY_i); \
 \
-      if(TH_TENSOR_DIM_APPLY_counter[TH_TENSOR_DIM_APPLY_i] == TENSOR1->size(TH_TENSOR_DIM_APPLY_i)) \
+      if(TH_TENSOR_DIM_APPLY_counter[TH_TENSOR_DIM_APPLY_i] == THTensor_sizeLegacyNoScalars(TENSOR1, TH_TENSOR_DIM_APPLY_i)) \
       { \
         if(TH_TENSOR_DIM_APPLY_i == THTensor_nDimensionLegacyNoScalars(TENSOR1)-1) \
         { \
@@ -105,9 +105,9 @@
         } \
         else \
         { \
-          TENSOR1##_data -= TH_TENSOR_DIM_APPLY_counter[TH_TENSOR_DIM_APPLY_i]*TENSOR1->stride(TH_TENSOR_DIM_APPLY_i); \
-          TENSOR2##_data -= TH_TENSOR_DIM_APPLY_counter[TH_TENSOR_DIM_APPLY_i]*TENSOR2->stride(TH_TENSOR_DIM_APPLY_i); \
-          TENSOR3##_data -= TH_TENSOR_DIM_APPLY_counter[TH_TENSOR_DIM_APPLY_i]*TENSOR3->stride(TH_TENSOR_DIM_APPLY_i); \
+          TENSOR1##_data -= TH_TENSOR_DIM_APPLY_counter[TH_TENSOR_DIM_APPLY_i]*THTensor_strideLegacyNoScalars(TENSOR1, TH_TENSOR_DIM_APPLY_i); \
+          TENSOR2##_data -= TH_TENSOR_DIM_APPLY_counter[TH_TENSOR_DIM_APPLY_i]*THTensor_strideLegacyNoScalars(TENSOR2, TH_TENSOR_DIM_APPLY_i); \
+          TENSOR3##_data -= TH_TENSOR_DIM_APPLY_counter[TH_TENSOR_DIM_APPLY_i]*THTensor_strideLegacyNoScalars(TENSOR3, TH_TENSOR_DIM_APPLY_i); \
           TH_TENSOR_DIM_APPLY_counter[TH_TENSOR_DIM_APPLY_i] = 0; \
         } \
       } \
@@ -155,7 +155,7 @@
   { \
     if(TH_TENSOR_DIM_APPLY_i == DIMENSION) \
       continue; \
-    if(TENSOR1->size(TH_TENSOR_DIM_APPLY_i) != TENSOR2->size(TH_TENSOR_DIM_APPLY_i)) { \
+    if(THTensor_sizeLegacyNoScalars(TENSOR1, TH_TENSOR_DIM_APPLY_i) != THTensor_sizeLegacyNoScalars(TENSOR2, TH_TENSOR_DIM_APPLY_i)) { \
       AT_ERROR("Expected ", #TENSOR1, " ", TENSOR1->sizes(), " and ", #TENSOR2, " ", TENSOR2->sizes(), " to have the same size in dimension ", DIMENSION); \
     }                                                                   \
   } \
@@ -168,12 +168,12 @@
     TH_TENSOR_DIM_APPLY_counter[TH_TENSOR_DIM_APPLY_i] = 0; \
 \
   TENSOR1##_data = THTensor_getStoragePtr(TENSOR1)->data<TYPE1>()+(TENSOR1)->storage_offset(); \
-  TENSOR1##_stride = (TENSOR1)->stride(DIMENSION); \
-  TENSOR1##_size = TENSOR1->size(DIMENSION); \
+  TENSOR1##_stride = THTensor_strideLegacyNoScalars((TENSOR1), DIMENSION); \
+  TENSOR1##_size = THTensor_sizeLegacyNoScalars(TENSOR1, DIMENSION); \
 \
   TENSOR2##_data = THTensor_getStoragePtr(TENSOR2)->data<TYPE2>()+(TENSOR2)->storage_offset(); \
-  TENSOR2##_stride = (TENSOR2)->stride(DIMENSION); \
-  TENSOR2##_size = TENSOR2->size(DIMENSION); \
+  TENSOR2##_stride = THTensor_strideLegacyNoScalars((TENSOR2), DIMENSION); \
+  TENSOR2##_size = THTensor_sizeLegacyNoScalars(TENSOR2, DIMENSION); \
 \
   while(!TH_TENSOR_DIM_APPLY_hasFinished) \
   { \
@@ -195,10 +195,10 @@
       } \
 \
       TH_TENSOR_DIM_APPLY_counter[TH_TENSOR_DIM_APPLY_i]++; \
-      TENSOR1##_data += TENSOR1->stride(TH_TENSOR_DIM_APPLY_i); \
-      TENSOR2##_data += TENSOR2->stride(TH_TENSOR_DIM_APPLY_i); \
+      TENSOR1##_data += THTensor_strideLegacyNoScalars(TENSOR1, TH_TENSOR_DIM_APPLY_i); \
+      TENSOR2##_data += THTensor_strideLegacyNoScalars(TENSOR2, TH_TENSOR_DIM_APPLY_i); \
 \
-      if(TH_TENSOR_DIM_APPLY_counter[TH_TENSOR_DIM_APPLY_i] == TENSOR1->size(TH_TENSOR_DIM_APPLY_i)) \
+      if(TH_TENSOR_DIM_APPLY_counter[TH_TENSOR_DIM_APPLY_i] == THTensor_sizeLegacyNoScalars(TENSOR1, TH_TENSOR_DIM_APPLY_i)) \
       { \
         if(TH_TENSOR_DIM_APPLY_i == THTensor_nDimensionLegacyNoScalars(TENSOR1)-1) \
         { \
@@ -207,8 +207,8 @@
         } \
         else \
         { \
-          TENSOR1##_data -= TH_TENSOR_DIM_APPLY_counter[TH_TENSOR_DIM_APPLY_i]*TENSOR1->stride(TH_TENSOR_DIM_APPLY_i); \
-          TENSOR2##_data -= TH_TENSOR_DIM_APPLY_counter[TH_TENSOR_DIM_APPLY_i]*TENSOR2->stride(TH_TENSOR_DIM_APPLY_i); \
+          TENSOR1##_data -= TH_TENSOR_DIM_APPLY_counter[TH_TENSOR_DIM_APPLY_i]*THTensor_strideLegacyNoScalars(TENSOR1, TH_TENSOR_DIM_APPLY_i); \
+          TENSOR2##_data -= TH_TENSOR_DIM_APPLY_counter[TH_TENSOR_DIM_APPLY_i]*THTensor_strideLegacyNoScalars(TENSOR2, TH_TENSOR_DIM_APPLY_i); \
           TH_TENSOR_DIM_APPLY_counter[TH_TENSOR_DIM_APPLY_i] = 0; \
         } \
       } \
@@ -270,8 +270,8 @@
     THError("invalid dimension"); \
 \
   TENSOR##_data = THTensor_getStoragePtr(TENSOR)->data<TYPE>()+(TENSOR)->storage_offset(); \
-  TENSOR##_stride = (TENSOR)->stride(DIMENSION); \
-  TENSOR##_size = TENSOR->size(DIMENSION); \
+  TENSOR##_stride = THTensor_strideLegacyNoScalars((TENSOR), DIMENSION); \
+  TENSOR##_size = THTensor_sizeLegacyNoScalars(TENSOR, DIMENSION); \
   /* Counter stores the indices into the Tensor at any time */ \
   TH_TENSOR_DIM_APPLY_counter = (int64_t*)THAlloc(sizeof(int64_t)*(THTensor_nDimensionLegacyAll(TENSOR))); \
   for(TH_TENSOR_DIM_APPLY_i = 0; TH_TENSOR_DIM_APPLY_i < THTensor_nDimensionLegacyAll(TENSOR); TH_TENSOR_DIM_APPLY_i++) \
@@ -302,9 +302,9 @@
 \
       /* Bump the counter at this index, update the pointer */ \
       TH_TENSOR_DIM_APPLY_counter[TH_TENSOR_DIM_APPLY_i]++; \
-      TENSOR##_data += TENSOR->stride(TH_TENSOR_DIM_APPLY_i); \
+      TENSOR##_data += THTensor_strideLegacyNoScalars(TENSOR, TH_TENSOR_DIM_APPLY_i); \
 \
-      if(TH_TENSOR_DIM_APPLY_counter[TH_TENSOR_DIM_APPLY_i] == TENSOR->size(TH_TENSOR_DIM_APPLY_i)) \
+      if(TH_TENSOR_DIM_APPLY_counter[TH_TENSOR_DIM_APPLY_i] == THTensor_sizeLegacyNoScalars(TENSOR, TH_TENSOR_DIM_APPLY_i)) \
       { \
         /* Handled TENSOR_size(dim) iterations for DIM_APPLY_i. If this is the last dimension, exit */ \
         if(TH_TENSOR_DIM_APPLY_i == THTensor_nDimensionLegacyAll(TENSOR)-1) \
@@ -315,7 +315,7 @@
         else \
         { \
           /* Reset the counter, and the pointer to the beginning of the storage for this combination of indices */ \
-          TENSOR##_data -= TH_TENSOR_DIM_APPLY_counter[TH_TENSOR_DIM_APPLY_i]*TENSOR->stride(TH_TENSOR_DIM_APPLY_i); \
+          TENSOR##_data -= TH_TENSOR_DIM_APPLY_counter[TH_TENSOR_DIM_APPLY_i]*THTensor_strideLegacyNoScalars(TENSOR, TH_TENSOR_DIM_APPLY_i); \
           TH_TENSOR_DIM_APPLY_counter[TH_TENSOR_DIM_APPLY_i] = 0; \
         } \
       } \

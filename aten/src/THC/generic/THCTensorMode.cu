@@ -17,10 +17,10 @@ THC_API void THCTensor_(calculateMode)(THCState *state,
   // calculations to get an offset
   real *data = THCTensor_(data)(state, input);
   for (int i = 0; i < THLongStorage_size(position); ++i) {
-    data += THLongStorage_data(position)[i] * THCTensor_(stride)(state, input, i);
+    data += THLongStorage_data(position)[i] * THTensor_strideLegacyNoScalars(input, i);
   }
 
-  int64_t nElement = THCTensor_(size)(state, input, THCTensor_(nDimensionLegacyAll)(state, input) - 1);
+  int64_t nElement = THCTensor_(sizeLegacyNoScalars)(state, input, THCTensor_(nDimensionLegacyAll)(state, input) - 1);
   THCThrustAllocator thrustAlloc(state);
 
   // Wrap input data, sortBuffer, in Thrust device vectors
@@ -121,8 +121,8 @@ THC_API void THCTensor_(calculateMode)(THCState *state,
 
   for (int i = 0; i < THLongStorage_size(position); ++i) {
     int64_t pos = THLongStorage_data(position)[i];
-    valuesOffset += THCTensor_(stride)(state, values, i) * pos;
-    indicesOffset += THCudaLongTensor_stride(state, indices, i) * pos;
+    valuesOffset += THTensor_strideLegacyNoScalars(values, i) * pos;
+    indicesOffset += THTensor_strideLegacyNoScalars(indices, i) * pos;
   }
   THCStorage_(set)(state, THCTensor_(storage)(state, values), valuesOffset, mode);
   THCudaLongStorage_set(state, THCudaLongTensor_storage(state, indices), indicesOffset, index);
@@ -145,7 +145,7 @@ THC_API void THCTensor_(dimApplyMode)(THCState *state,
     THCTensor_(calculateMode)(state, values, indices, input, sortBuffer, dimension, position);
   } else {
     // Loop through the values and recurse
-    for (int i = 0; i < THCTensor_(size)(state, input, curDim); ++i) {
+    for (int i = 0; i < THCTensor_(sizeLegacyNoScalars)(state, input, curDim); ++i) {
       THLongStorage_data(position)[curDim] = i;
       THCTensor_(dimApplyMode)(state, values, indices, input, sortBuffer, dimension, position, curDim + 1);
     }
@@ -175,7 +175,7 @@ THC_API void THCTensor_(mode)(THCState *state,
   ndim = THCTensor_(nDimensionLegacyAll)(state, input);
   THArgCheck(dimension >= 0 && dimension < ndim, 4, "Dimension of out bounds");
 
-  sliceSize = THCTensor_(size)(state, input, dimension);
+  sliceSize = THCTensor_(sizeLegacyNoScalars)(state, input, dimension);
   slices = THCTensor_(nElement)(state, input) / sliceSize;
 
   // Resize output value, index Tensors to appropriate sizes (i.e. the same as

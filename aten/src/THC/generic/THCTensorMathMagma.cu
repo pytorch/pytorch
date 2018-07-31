@@ -185,7 +185,7 @@ THC_API void THCTensor_(gels)(THCState *state, THCTensor *rb_, THCTensor *ra_, T
 THC_API void THCTensor_(syev)(THCState *state, THCTensor *re_, THCTensor *rv_, THCTensor *a, const char *jobzs, const char *uplos)
 {
 #ifdef USE_MAGMA
-  int64_t n = a->size(0);
+  int64_t n = THTensor_sizeLegacyNoScalars(a, 0);
   int64_t lda = n;
 
   magma_uplo_t uplo = uplos[0] == 'U' ?  MagmaUpper : MagmaLower;
