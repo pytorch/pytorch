@@ -13,6 +13,8 @@
 #include "caffe2/core/typeid.h"
 #include "caffe2/proto/caffe2.pb.h"
 
+#include "ATen/core/ATenCoreTest.h"
+
 CAFFE2_DECLARE_bool(caffe2_report_cpu_memory_usage);
 
 namespace caffe2 {

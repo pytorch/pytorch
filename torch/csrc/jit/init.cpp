@@ -18,6 +18,7 @@
 #include "torch/csrc/jit/passes/onnx/fixup_onnx_loop.h"
 #include "torch/csrc/jit/passes/shape_analysis.h"
 #include "torch/csrc/jit/passes/decompose_addmm.h"
+#include "torch/csrc/jit/passes/constant_propagation.h"
 #include "torch/csrc/jit/passes/loop_unrolling.h"
 #include "torch/csrc/jit/passes/to_batch.h"
 #include "torch/csrc/jit/passes/specialize_undef.h"
@@ -75,6 +76,9 @@ void initJITBindings(PyObject *module) {
    .def("_jit_pass_remove_expands", RemoveExpands)
    .def("_jit_pass_erase_number_types", EraseNumberTypes)
    .def("_jit_pass_loop_unrolling", UnrollLoops)
+   .def("_jit_pass_constant_propagation", [](std::shared_ptr<Graph>& g) {
+     return ConstantPropagation(g);
+   })
    .def("_jit_run_cpp_tests", [] {
      // We have to release the GIL inside this method, because if we happen to
      // initialize the autograd engine in these tests, the newly spawned worker threads will

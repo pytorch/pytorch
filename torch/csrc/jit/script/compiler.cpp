@@ -351,27 +351,6 @@ Value* createNumber(Graph& g, const SourceRange& loc, const at::Tensor& val) {
   return output;
 }
 
-Value* createStack(Graph& g, const SourceRange& loc, at::ArrayRef<Value*> inputs) {
-  // bake in constant propagation for the all-constant case because it is
-  // common to see constant lists like [1, 2] passed to attributes
-  bool all_constant = std::all_of(inputs.begin(), inputs.end(), [&](Value* v) {
-    return v->node()->kind() == prim::Constant;
-  });
-  if(all_constant) {
-    auto values = fmap(inputs, [&](Value* v) {
-      return v->node()->t(attr::value);
-    });
-    return insertConstant(g, at::stack(values), loc);
-  }
-  return g.insertNode(g.create(aten::stack, inputs)
-                      ->i_(attr::dim, 0)
-                      ->setSourceLocation(std::make_shared<SourceRange>(loc)))->output();
-}
-
-static bool isTensorSubtype(Value* v) {
-  return v->type()->isSubtypeOf(DynamicType::get());
-}
-
 at::optional<std::vector<int64_t>> getIntListAttribute(at::optional<int32_t> N, Value* input) {
   auto list = constant_as<Shared<jit::IntList>>(input);
   if(list)
@@ -455,51 +434,46 @@ at::optional<std::vector<Value*>> tryMatchSchema(
     }
 
     // check input types
-    std::vector<Value*> flat_inputs;
+    std::vector<Value*> matched_inputs;
     for(size_t i = 0; i < schema.arguments.size(); ++i) {
-      NamedValue v = *positional_inputs[i];
+      Value* value = positional_inputs[i]->value;
       const auto& arg = schema.arguments[i];
 
       // some functions that take lists of integers for fixed size arrays
       // also allow single ints to be passed in their place.
       // the single int is then repeated to the length of the list
-      if (isIntUsedAsIntList(v.value, arg)) {
-        std::vector<Value*> repeated(*arg.N, v.value);
-        v.value = graph.insertNode(graph.createList(IntType::get(), repeated))->output();
+      if (isIntUsedAsIntList(value, arg)) {
+        std::vector<Value*> repeated(*arg.N, value);
+        value = graph.insertNode(graph.createList(IntType::get(), repeated))->output();
       }
 
-      // Allow tuples that only contain integers to turn into lists of integers
-      if(*ListType::ofInts() == *arg.type &&
-         v.value->type()->kind() == TypeKind::TupleType &&
-         v.value->type()->isSubtypeOf(ListType::ofInts())) {
-        auto unpacked = createTupleUnpack(v.value);
-        v.value = graph.insertNode(graph.createList(IntType::get(), unpacked))->output();
+      // Allow homogeneous tuples to be casted implicitly to lists of appropriate types
+      if (arg.type->kind() == TypeKind::ListType &&
+          value->type()->kind() == TypeKind::TupleType &&
+          value->type()->isSubtypeOf(arg.type)) {
+        auto unpacked = createTupleUnpack(value);
+        auto elem_type = arg.type->expect<ListType>()->getElementType();
+        value = graph.insertNode(graph.createList(elem_type, unpacked))->output();
       }
 
-      if (v.value->node()->kind() == prim::None){
+      if (value->node()->kind() == prim::None){
         if (arg.type->isSubtypeOf(NumberType::get()))
-          v.value = insertConstant(graph, at::Scalar(NAN), loc);
+          value = insertConstant(graph, at::Scalar(NAN), loc);
         else
-          v.value = graph.insertNode(graph.createUndefined())->output();
+          value = graph.insertNode(graph.createUndefined())->output();
       }
 
-      if(!v.value->type()->isSubtypeOf(arg.type)) {
+      if(!value->type()->isSubtypeOf(arg.type)) {
         err() << "expected a value of type " << arg.type->str() << " for argument '" << arg.name << "' but found "
-              << v.value->type()->str() << "\n"
-              << v.loc;
+              << value->type()->str() << "\n"
+              << positional_inputs[i]->loc;
         return at::nullopt;
       }
 
-      // we only support tensor lists for builtins, where they must be flattened
-      if(arg.type->isSubtypeOf(ListType::ofTensors())) {
-        auto outputs = createTupleUnpack(v.value);
-        flat_inputs.insert(flat_inputs.end(), outputs.begin(), outputs.end());
-      } else {
-        flat_inputs.push_back(v.value);
-      }
+      matched_inputs.push_back(value);
     }
 
-    return flat_inputs;
+    return matched_inputs;
 }
 
 
@@ -513,20 +487,20 @@ static std::shared_ptr<SugaredValue> tryEmitBuiltin(
   at::ArrayRef<NamedValue> attributes) {
 
   auto graph = method.graph();
-  auto flat_inputs = tryMatchSchema(op->schema, loc, *graph, inputs, attributes, failure_messages);
-  if(!flat_inputs)
+  auto matched_inputs = tryMatchSchema(op->schema, loc, *graph, inputs, attributes, failure_messages);
+  if(!matched_inputs)
     return nullptr;
   // we successfully matched this schema, construct the node
 
   NodeKind kind(Symbol::aten(name));
-  auto n = graph->insertNode(graph->create(kind, *flat_inputs, 0))
+  auto n = graph->insertNode(graph->create(kind, *matched_inputs, 0))
                 ->setSourceLocation(std::make_shared<SourceRange>(loc));
 
   // special case for chunk when the chunks=<const> is known
   // DO NOT ADD MORE SPECIAL CASES HERE, REFACTOR INTO A FUNCTION IF
   // NEEDED
   if(n->kind() == aten::chunk) {
-    auto value = constant_as<int64_t>((*flat_inputs)[1]);
+    auto value = constant_as<int64_t>((*matched_inputs)[1]);
     if(!value) {
       throw ErrorReport(loc) << "argument 'chunks' must be a constant";
     }
@@ -588,7 +562,7 @@ std::shared_ptr<SugaredValue> emitBuiltinCall(
 }
 
 static Value* ensureTensor(const SourceRange& range, Value* v) {
-  if(!isTensorSubtype(v)) {
+  if(!v->type()->isSubtypeOf(DynamicType::get())) {
     throw ErrorReport(range) << "expected a tensor value but found a "
                              << v->type()->str();
   }

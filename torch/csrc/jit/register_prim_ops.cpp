@@ -231,6 +231,18 @@ RegisterOperators reg({
               push(stack, std::move(vals));
               return 0;
             };
+          } else if (lt->getElementType()->isSubtypeOf(DynamicType::get())) {
+            return [=](Stack& stack) {
+              const size_t stack_size = stack.size();
+              std::vector<at::Tensor> vals;
+              vals.reserve(num_inputs);
+              for (size_t i = stack_size - num_inputs; i < stack_size; ++i) {
+                vals.push_back(std::move(stack[i]).toTensor());
+              }
+              drop(stack, num_inputs);
+              push(stack, std::move(vals));
+              return 0;
+            };
           } else {
             std::stringstream ss;
             ss << "unsupported list type: " << *lt->getElementType();

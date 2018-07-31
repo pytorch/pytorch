@@ -323,8 +323,10 @@ void OnnxifiTransformer::Transform(
 
   // function to tell whether the ONNXIFI backend supports a given C2 op or not
   // TODO: choose backend id
+  onnxifi_library* backend = lib_;
+  onnxBackendID backend_id = backend_ids_[0];
   auto supports =
-      [&exporter, &shape_hints, backend = lib_, backend_id = backend_ids_[0]](
+      [&exporter, &shape_hints, backend, backend_id](
           const caffe2::OperatorDef& op) {
         const OpSchema* schema = OpSchemaRegistry::Schema(op.type());
         // NB: this might not be a hard constraint as we can just export C2

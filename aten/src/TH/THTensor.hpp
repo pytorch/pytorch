@@ -177,6 +177,19 @@ inline int THTensor_nDimensionLegacyAll(const THTensor* tensor) {
   }
 }
 
+inline int64_t THTensor_strideLegacyNoScalars(const THTensor *self, int dim) {
+  THArgCheck((dim >= 0) && (dim < THTensor_nDimensionLegacyNoScalars(self)), 2, "dimension %d out of range of %dD tensor",
+      dim+TH_INDEX_BASE, THTensor_nDimensionLegacyNoScalars(self));
+  return THTensor_isZeroDim(self) ? 1 : self->stride(dim);
+}
+
+inline int64_t THTensor_sizeLegacyNoScalars(const THTensor *self, int dim)
+{
+  THArgCheck((dim >= 0) && (dim < THTensor_nDimensionLegacyNoScalars(self)), 2, "dimension %d out of range of %dD tensor",
+      dim+TH_INDEX_BASE, THTensor_nDimensionLegacyNoScalars(self));
+  return THTensor_isZeroDim(self) ? 1 : self->size(dim);
+}
+
 TH_API void THTensor_free(THTensor *self);
 TH_CPP_API at::optional<std::vector<int64_t>> THTensor_compute_stride(at::IntList oldshape, at::IntList oldstride,
                                                                       at::IntList newshape);
