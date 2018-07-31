@@ -169,7 +169,7 @@ Pointwise Ops
 .. autofunction:: cos
 .. autofunction:: cosh
 .. autofunction:: div
-.. autofunction:: digamma 
+.. autofunction:: digamma
 .. autofunction:: erf
 .. autofunction:: erfc
 .. autofunction:: erfinv
@@ -297,6 +297,7 @@ BLAS and LAPACK Operations
 .. autofunction:: slogdet
 .. autofunction:: matmul
 .. autofunction:: matrix_rank
+.. autofunction:: matrix_power
 .. autofunction:: mm
 .. autofunction:: mv
 .. autofunction:: orgqr
