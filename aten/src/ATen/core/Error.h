@@ -1,7 +1,7 @@
 #pragma once
 
-#include <ATen/ATenGeneral.h> // for AT_API
-#include <ATen/optional.h>
+#include <ATen/core/CoreAPI.h>
+#include <ATen/core/optional.h>
 
 #include <cstddef>
 #include <exception>
@@ -66,7 +66,7 @@ std::ostream& operator<<(std::ostream& out, const SourceLocation& loc);
 ///
 /// NB: at::Error is handled specially by the default torch to suppress the
 /// backtrace, see torch/csrc/Exceptions.h
-class AT_API Error : public std::exception {
+class AT_CORE_API Error : public std::exception {
   std::string what_without_backtrace_;
   std::string what_;
 
@@ -84,7 +84,7 @@ public:
   }
 };
 
-class AT_API Warning {
+class AT_CORE_API Warning {
   using handler_t = void(*)(const SourceLocation& source_location, const char* msg);
 
 public:
