@@ -31,6 +31,7 @@ jobs:
         name: Build
         command: |
           export SCCACHE_BUCKET=ossci-compiler-cache
+          export TORCH_CUDA_ARCH_LIST=5.2
           git submodule update --init
           .jenkins/pytorch/build.sh
     - persist_to_workspace:
@@ -40,8 +41,6 @@ jobs:
   linux_xenial_cuda9_2_cudnn7_py3_gcc7_test:
     machine:
       image: default
-      resource_class: gpu.small
-      working_directory: /tmp
 #   docker:
 #     - image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7:226
 #       user: jenkins
@@ -61,8 +60,9 @@ jobs:
           echo "deb https://nvidia.github.io/nvidia-docker/ubuntu14.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
           sudo apt-get update
           sudo apt-get install linux-headers-$(uname -r)
+          sudo apt-get install linux-image-generic
           wget 'https://s3.amazonaws.com/ossci-linux/nvidia_driver/NVIDIA-Linux-x86_64-396.26.run'
-          sudo /bin/bash ./NVIDIA-Linux-x86_64-396.26.run -s
+          sudo /bin/bash ./NVIDIA-Linux-x86_64-396.26.run -s --no-drm
           sudo apt-get install -y nvidia-docker2
           sudo pkill -SIGHUP dockerd
           nvidia-smi
