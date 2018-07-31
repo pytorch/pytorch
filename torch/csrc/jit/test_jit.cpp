@@ -958,10 +958,12 @@ void testIValue() {
 void testProto() {
   ::ONNX_NAMESPACE::ModelProto proto;
   proto.set_producer_name("foo");
+  REQUIRE(proto.SerializeAsString() != "");
 }
 
 TORCH_API std::string runJITCPPTests() {
   std::stringstream out;
+  /*
   testIValue();
   testControlFlow();
   testGraphExecutor();
@@ -979,6 +981,7 @@ TORCH_API std::string runJITCPPTests() {
   fromQualStringTests();
   argumentSpecTest();
   shapeAnalysisTest();
+  */
   testProto();
   return out.str();
 }
