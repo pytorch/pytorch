@@ -41,7 +41,7 @@ jobs:
         #root: $HOME/.local/lib/python3.6/site-packages/
         root: $HOME/.local/flub
         paths:
-          - *
+          - "*"
   linux_xenial_cuda9_2_cudnn7_py3_gcc7_test:
     docker:
       - image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7:226
