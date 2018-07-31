@@ -17,7 +17,7 @@ jobs:
           git submodule update --init
           .jenkins/pytorch/build.sh
           .jenkins/pytorch/test.sh
-  linux_xenial_cuda9_2_cudnn7_py3_gcc7:
+  linux_xenial_cuda9_2_cudnn7_py3_gcc7_build:
     docker:
       - image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7:226
         user: jenkins
@@ -30,15 +30,19 @@ jobs:
     - run:
         name: Build
         command: |
-          echo $PATH
-          sudo /opt/conda/bin/pip install awscli
           export SCCACHE_BUCKET=ossci-compiler-cache
-          touch foo
-          aws s3 cp foo s3://ossci-linux-build/pytorch/foo
-          git submodule update --init
-          .jenkins/pytorch/build.sh
-          tar czf circleci-${CIRCLE_BUILD_NUM}.tgz $HOME/.local/lib/python*/site-packages/torch*
-          aws s3 cp circleci-${CIRCLE_BUILD_NUM}.tgz s3://ossci-linux-build/pytorch/circleci-${CIRCLE_BUILD_NUM}.tgz --acl public-read
+          #git submodule update --init
+          #.jenkins/pytorch/build.sh
+          #tar czf circleci-${CIRCLE_BUILD_NUM}.tgz $HOME/.local/lib/python*/site-packages/torch*
+          mkdir -p $HOME/.local/flub
+          touch $HOME/.local/flub/foo
+          mkdir -p workspace
+          tar czf workspace/flub.tgz $HOME/.local/flub
+    - persist_to_workspace:
+        #root: $HOME/.local/lib/python3.6/site-packages/
+        root: workspace
+        paths:
+          - flub.tgz
   macos_10_13_py3:
     macos:
       xcode: "9.0"
@@ -57,5 +61,5 @@ workflows:
   build:
     jobs:
       - linux_trusty_py3_6_gcc7_build
-      - linux_xenial_cuda9_2_cudnn7_py3_gcc7
+      - linux_xenial_cuda9_2_cudnn7_py3_gcc7_build
       - macos_10_13_py3
