@@ -90,7 +90,8 @@ workflows:
     jobs:
       - linux_trusty_py3_6_gcc7_build
       - linux_xenial_cuda9_2_cudnn7_py3_gcc7_build
-      - linux_xenial_cuda9_2_cudnn7_py3_gcc7_test:
+      - linux_xenial_cuda9_2_cudnn7_py3_gcc7_test
+#         (colon above needed)
 #         requires:
 #           - linux_xenial_cuda9_2_cudnn7_py3_gcc7_build
       - macos_10_13_py3
