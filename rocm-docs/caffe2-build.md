@@ -21,11 +21,7 @@ Once the machine is ready with ROCm stack, there are two ways to use caffe2
 ```
 docker run -it --network=host --device=/dev/kfd --device=/dev/dri --group-add video rocm/caffe2:rocm1.8.2
 ```
-Once the container is launched, set the environment variables
-```
-export LD_LIBRARY_PATH=/usr/local/caffe2/lib:$LD_LIBRARY_PATH
-export PYTHONPATH=/usr/local/caffe2/lib/python2.7/dist-packages:$PYTHONPATH
-```
+
 To run benchmarks, skip directly to benchmarks section of the document.
 
 ## Build Caffe2 from source
