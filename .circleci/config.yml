@@ -44,6 +44,8 @@ jobs:
     resource_class: gpu.small
     steps:
     - checkout
+    - attach_workspace:
+        at: /opt/workspace
     - run:
         name: Build
         command: |
@@ -71,13 +73,6 @@ jobs:
           echo "mkdir -p /opt/conda/lib/python3.6/site-packages" | docker exec -u jenkins -i "$id" bash
           docker cp "/opt/workspace" "$id:/opt/conda/lib/python3.6/site-packages/torch"
           (echo "export SCCACHE_BUCKET=$SCCACHE_BUCKET" && echo 'sudo chown -R jenkins workspace /opt/conda/lib/python3.6/site-packages/torch && cd workspace && git submodule update --init && .jenkins/pytorch/test.sh') | docker exec -u jenkins -i "$id" bash
-    - checkout
-    - attach_workspace:
-        at: /opt/workspace
-    - run:
-        name: Build
-        command: |
-          .jenkins/pytorch/test.sh
   macos_10_13_py3:
     macos:
       xcode: "9.0"
