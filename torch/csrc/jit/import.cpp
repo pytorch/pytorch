@@ -53,7 +53,8 @@ at::Tensor buildTensor(const onnx::TensorProto& tensor_proto) {
       throw std::runtime_error("Unsupported data type");
   }
 
-  tensor.resize_({tensor_proto.dims().begin(), tensor_proto.dims().end()});
+  std::vector<int64_t> sizes = {tensor_proto.dims().begin(), tensor_proto.dims().end()};
+  tensor.resize_(sizes);
 
   JIT_ASSERT(
       tensor.storage()->pImpl()->get_size() *
