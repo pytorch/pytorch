@@ -667,28 +667,6 @@ Example::
     torch.Size([10, 3, 5])
 """)
 
-add_docstr(torch.broadcast_all,
-           r"""
-broadcast_all(seq) -> List of Tensors
-
-Broadcasts the given sequence of :attr:`seq` tensors according to
-:ref:`_broadcasting-semantics`.
-
-Args:
-    seq (sequence of Tensors): any python sequence of tensors of the same type.
-
-Example::
-
-    >>> x = torch.arange(3).view(1, 3)
-    >>> y = torch.arange(2).view(2, 1)
-    >>> a, b = torch.broadcast_all([x, y])
-    >>> a.size()
-    torch.Size([2, 3])
-    >>> a
-    tensor([[0, 1, 2],
-            [0, 1, 2]])
-""")
-
 add_docstr(torch.stack,
            r"""
 stack(seq, dim=0, out=None) -> Tensor

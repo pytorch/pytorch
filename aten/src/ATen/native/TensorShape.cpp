@@ -12,7 +12,7 @@
 namespace at {
 namespace native {
 
-std::vector<Tensor> broadcast_all(TensorList tensors) {
+std::vector<Tensor> broadcast_tensors(TensorList tensors) {
   return expand_outplace(tensors);
 }
 
