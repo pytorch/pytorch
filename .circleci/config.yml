@@ -38,5 +38,5 @@ workflows:
   version: 2
   linux_trusty_py3_6_gcc7:
     jobs:
-      - linux_trusty_py3_6_gcc7_build:
-      - linux_xenial_cuda9_2_cudnn7_py3_gcc7:
+      - linux_trusty_py3_6_gcc7_build
+      - linux_xenial_cuda9_2_cudnn7_py3_gcc7
