@@ -55,6 +55,16 @@ jobs:
         name: Build
         command: |
           sudo pip install awscli
+          curl -L https://nvidia.github.io/nvidia-docker/gpgkey | sudo apt-key add -
+          echo "deb https://nvidia.github.io/libnvidia-container/ubuntu14.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
+          echo "deb https://nvidia.github.io/nvidia-container-runtime/ubuntu14.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
+          echo "deb https://nvidia.github.io/nvidia-docker/ubuntu14.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
+          sudo apt-get update
+          #sudo apt-get install linux-headers-$(uname -r)
+          #wget 'https://s3.amazonaws.com/ossci-linux/nvidia_driver/NVIDIA-Linux-x86_64-396.26.run'
+          #sudo /bin/bash ./NVIDIA-Linux-x86_64-396.26.run -s
+          sudo apt-get install -y nvidia-docker2
+          sudo pkill -SIGHUP dockerd
           nvidia-smi
           export AWS_ACCESS_KEY_ID=AKIAIUHRTFRLXI6HBUCQ
           export AWS_SECRET_ACCESS_KEY=$CIRCLECI_AWS_SECRET_KEY
