@@ -2605,6 +2605,13 @@ bool TransposeWithHPTT(
     axes_cm[i] = cm_fn(axes[cm_fn(i)]);
     dims_cm[i] = dims[cm_fn(i)];
   }
+
+  // HPTT doesn't handle 0 sized inputs.
+  for (auto dim : dims_cm) {
+    if (dim <= 0) {
+      return false;
+    }
+  }
   auto plan = hptt::create_plan(
       axes_cm.data(),
       ndim,
