@@ -112,20 +112,30 @@ void ToBatch::visitTensorToNum(Node* n, Block* block, Block* res_block){
 // clone prim::ListConstruct to new graph
 void ToBatch::visitListConstruct(Node* n, Block* block, Block* res_block){
   auto res_graph = res_block->owningGraph();
-  for(Value* input : n->inputs()){
-    if(rn_env.find(input) == rn_env.end()){
-      rn_env[input] = batch_map.at(input)[0];
+  if(n->inputs()[0]->type() == DynamicType::get()){  // TensorList: expand directly
+    std::vector<Value*> inputs;
+    for(Value* input: n->inputs()) {
+      auto res = batch_map.at(input);
+      inputs.insert(inputs.end(), res.begin(), res.end());
     }
+    batch_map[n->output()] = inputs;
   }
-  auto* r_node = res_graph->createClone(n, rn_fn);
-  r_node->setStage(n->stage());
-  res_block->appendNode(r_node);
-  // transform int[] to tensor
-  auto to_tensor_node = res_graph->create(Symbol::fromQualString("aten::_list_to_tensor"));
-  to_tensor_node->setStage(n->stage());
-  to_tensor_node->addInput(r_node->output());
-  res_block->appendNode(to_tensor_node);
-  rn_env[n->output()] = to_tensor_node->output();
+  else {  // ScalarList: transform to tensor, then transform back
+    for(Value* input : n->inputs()) {
+      if(rn_env.find(input) == rn_env.end()){
+        rn_env[input] = batch_map.at(input)[0];
+      }
+    }
+    auto* r_node = res_graph->createClone(n, rn_fn);
+    r_node->setStage(n->stage());
+    res_block->appendNode(r_node);
+    // transform int[] to tensor
+    auto to_tensor_node = res_graph->create(Symbol::fromQualString("aten::_list_to_tensor"));
+    to_tensor_node->setStage(n->stage());
+    to_tensor_node->addInput(r_node->output());
+    res_block->appendNode(to_tensor_node);
+    rn_env[n->output()] = to_tensor_node->output();
+  }
 }
 
 // prim::If transformation:
