@@ -503,7 +503,10 @@ void ModuleEncoder::EncodeTypeInfo(
     type_proto->set_denotation("FloatType");
   } else if (kind == TypeKind::IntType) {
     type_proto->set_denotation("IntType");
-  } else {
+  } else if (kind == TypeKind::NoneType) {
+    type_proto->set_denotation("NoneType");
+  }
+  else {
     throw std::runtime_error("unexpected type kind");
   }
 }

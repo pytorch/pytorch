@@ -305,6 +305,8 @@ TypePtr ModuleDecoder::buildType(const onnx_torch::TypeProto& type_proto) {
     return FloatType::get();
   } else if (kind == "IntType") {
     return IntType::get();
+  } else if (kind == "NoneType") {
+    return NoneType::get();
   } else {
     throw std::runtime_error("unexpected string for type kind");
   }
