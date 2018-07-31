@@ -173,7 +173,6 @@ sampleMultinomialOnce(int64_t* dest,
 
   AccT accZero = ScalarConvert<int, AccT>::to(0);
   T zero = ScalarConvert<int, T>::to(0);
-  T one = ScalarConvert<int, T>::to(1);
 
   for (int64_t curDist = blockIdx.x;
        curDist < distributions; curDist += gridDim.x) {
@@ -204,7 +203,13 @@ sampleMultinomialOnce(int64_t* dest,
     __syncthreads();
 
     sum = asmem[0];
-    T sample = THCNumerics<T>::sub(one, smem[0]);
+    T sample = smem[0];
+    // The random sample is in [0,1) initially (PyTorch convention),
+    // but the code below appears to work with (0,1] (curand uniform convention)
+    // for historical reasons. So we change it back.
+    if (THCNumerics<T>::eq(sample, ScalarConvert<int, T>::to(0))) {
+      sample = ScalarConvert<int, T>::to(1);
+    }
     __syncthreads();
 
     if (THCNumerics<AccT>::eq(sum,  accZero) || THCNumerics<T>::eq(sample, zero)) {
