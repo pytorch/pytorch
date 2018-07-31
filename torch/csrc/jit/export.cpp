@@ -162,7 +162,7 @@ void addAttribute(onnx::NodeProto * n_p, jit::Node * n, jit::Symbol name, Export
 
 void encodeTypeProtoTensorType(onnx::TypeProto_Tensor* tensor_type, Value* n) {
   onnx::TensorShapeProto* shape = tensor_type->mutable_shape();
-  if (TensorType* node_type = n->type()->cast<TensorType>()) {
+  if (TensorTypePtr node_type = n->type()->cast<TensorType>()) {
     const std::vector<std::int64_t>& sizes = node_type->sizes();
     for (size_t i = 0; i < sizes.size(); i++) {
       shape->add_dim();
@@ -569,7 +569,7 @@ RawDataExportMap ToModelProto(
 
   model_proto->set_producer_name("pytorch");
   model_proto->set_producer_version("0.3");
-  model_proto->set_ir_version(3);
+  model_proto->set_ir_version(onnx::IR_VERSION);
   auto* imp = model_proto->add_opset_import();
   // This is the version of ONNX operator set we are targeting
   imp->set_version(onnx_opset_version);
