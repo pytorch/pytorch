@@ -68,7 +68,7 @@ struct SugaredValue : public std::enable_shared_from_this<SugaredValue> {
     SourceRange loc,
     Method & m,
     // note: names for args will be 'argument 0', 'argument 1', etc..
-    at::ArrayRef<NamedValue> inputs,
+    at::ArrayRef<NamedValue> inputs_,
     at::ArrayRef<NamedValue> attributes,
     size_t n_binders) {
 // n_binders is always set to the number of variables an expression is
@@ -89,7 +89,7 @@ struct SugaredValue : public std::enable_shared_from_this<SugaredValue> {
     throw ErrorReport(loc) << "cannot call a " << kind();
   }
 
-  virtual ~SugaredValue() {}
+  virtual ~SugaredValue() = default;
 };
 
 // most things in the environment are just simple value types

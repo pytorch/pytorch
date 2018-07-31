@@ -104,6 +104,9 @@ struct SchemaParser {
       case TK_FALSE:
         L.next();
         return false;
+      case TK_NONE:
+        L.next();
+        return IValue();
       case TK_IDENT: {
         auto tok = L.next();
         auto text = tok.text();
@@ -160,11 +163,8 @@ struct SchemaParser {
   }
 
   IValue parseTensorDefault(const SourceRange& range) {
-    if("None" == L.expect(TK_IDENT).text()) {
-      return at::Tensor();
-    } else {
-      throw ErrorReport(range) << "invalid tensor default value";
-    }
+    L.expect(TK_NONE);
+    return IValue();
   }
   void parseDefaultValue(Argument& arg) {
     auto range = L.cur().range;
@@ -283,7 +283,7 @@ struct OperatorRegistry  {
         }
       }
 #endif
-      JIT_ASSERTM(op_ptr_it != operators_by_sig.end(), "Couldn't find an operator for %s", name);
+      JIT_ASSERTM(op_ptr_it != operators_by_sig.end(), "Couldn't find an operator for ", name);
       it = operators_by_sig_literal.emplace_hint(it, name, op_ptr_it->second);
     }
     return it->second;
@@ -359,22 +359,6 @@ bool Operator::matches(const Node* node) const {
         return false;
       }
       attributes_seen++;
-    } else if(*arg.type == *ListType::ofTensors()) {
-      // Tensor[] is handled as varargs, consume inputs until the remaining required arguments
-      // XXX - there can only be a single Tensor[] in a declaration
-      size_t remaining_required = 0;
-      for(size_t j = arg_i + 1; j < schema.arguments.size(); ++j){
-        // remaining arguments are only those that won't be consumed from attributes
-        if(attributes_size == 0 || !attributeKindOf(schema.arguments[j].type))
-          remaining_required++;
-      }
-      while(inputs_size - input_i > remaining_required) {
-        auto input = node->inputs()[input_i++];
-        if(!typeMatches(input->type(), DynamicType::get())) {
-          // std::cout << "vararg argument is not Dynamic\n";
-          return false;
-        }
-      }
     } else {
       if(input_i == inputs_size) {
         // std::cout << "not enough inputs\n";

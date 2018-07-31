@@ -91,6 +91,14 @@ RegisterOperators reg({
           };
         }),
     Operator(
+        prim::None,
+        [](Node* node) {
+          return [](Stack& stack) {
+            stack.push_back(IValue());
+            return 0;
+          };
+        }),
+    Operator(
         prim::Print,
         [](Node* node) {
           size_t num_inputs = node->inputs().size();
@@ -219,6 +227,18 @@ RegisterOperators reg({
               std::vector<double> vals = fmap(inputs, [](const IValue& v) {
                 return v.toDouble();
               });
+              drop(stack, num_inputs);
+              push(stack, std::move(vals));
+              return 0;
+            };
+          } else if (lt->getElementType()->isSubtypeOf(DynamicType::get())) {
+            return [=](Stack& stack) {
+              const size_t stack_size = stack.size();
+              std::vector<at::Tensor> vals;
+              vals.reserve(num_inputs);
+              for (size_t i = stack_size - num_inputs; i < stack_size; ++i) {
+                vals.push_back(std::move(stack[i]).toTensor());
+              }
               drop(stack, num_inputs);
               push(stack, std::move(vals));
               return 0;

@@ -71,6 +71,8 @@ template <typename T, class Context>
 void Not(const int N, const T* x, T* y, Context* context);
 template <typename T, class Context>
 void Powx(const int N, const T* a, const T b, T* y, Context* context);
+template <typename T, class Context>
+void Inv(const int N, const T* x, T* y, Context* context);
 
 #define CAFFE2_DECLARE_COMPARE_OP(Comp)                                      \
   template <typename T, class Context>                                       \

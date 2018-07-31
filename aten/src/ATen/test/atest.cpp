@@ -36,12 +36,7 @@ TEST_CASE( "atest", "[]" ) {
   foo = foo+foo*3;
   foo -= 4;
 
-  {
-    Tensor no;
-    REQUIRE_THROWS(add_out(no,foo,foo));
-  }
   Scalar a = 4;
-
   float b = a.to<float>();
   REQUIRE(b == 4);
 

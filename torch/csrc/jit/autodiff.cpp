@@ -9,6 +9,7 @@
 #include <torch/csrc/jit/assertions.h>
 
 #include <algorithm>
+#include <memory>
 
 namespace torch { namespace jit {
 
@@ -24,11 +25,8 @@ void wrapDim(int64_t & dim, const std::vector<int64_t> & sizes) {
 bool isDifferentiable(Node * n) {
   static OperatorSet differentiable_ops = {
     "aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
-    "aten::add(Tensor self, Scalar other, *, Scalar alpha) -> Tensor",
     "aten::sub(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
-    "aten::sub(Tensor self, Scalar other, *, Scalar alpha) -> Tensor",
     "aten::mul(Tensor self, Tensor other) -> Tensor",
-    "aten::mul(Tensor self, Scalar other) -> Tensor",
     "aten::sigmoid(Tensor self) -> Tensor",
     "aten::tanh(Tensor self) -> Tensor",
     "aten::relu(Tensor self) -> Tensor",
@@ -120,16 +118,13 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
     auto inputs = fmap<SymbolicVariable>(node->inputs());
     auto outputs = fmap<SymbolicVariable>(node->outputs());
 
-    if (node->matches("aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor") ||
-        node->matches("aten::add(Tensor self, Scalar other, *, Scalar alpha) -> Tensor")) {
+    if (node->matches("aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor")) {
       return {grads.at(0), grads.at(0) * node->namedInput(attr::alpha), nullptr};
 
-    } else if (node->matches("aten::sub(Tensor self, Tensor other, *, Scalar alpha) -> Tensor") ||
-               node->matches("aten::sub(Tensor self, Scalar other, *, Scalar alpha) -> Tensor")) {
+    } else if (node->matches("aten::sub(Tensor self, Tensor other, *, Scalar alpha) -> Tensor")) {
       return {grads.at(0), -grads.at(0) * node->namedInput(attr::alpha), nullptr};
 
-    } else if (node->matches("aten::mul(Tensor self, Tensor other) -> Tensor") ||
-               node->matches("aten::mul(Tensor self, Scalar other) -> Tensor")) {
+    } else if (node->matches("aten::mul(Tensor self, Tensor other) -> Tensor")) {
       return {grads.at(0) * inputs.at(1), grads.at(0) * inputs.at(0)};
 
     } else if (node->matches("aten::sigmoid(Tensor self) -> Tensor")) {
@@ -570,14 +565,13 @@ static void lambdaLiftReverse(Gradient& grad_desc, ReverseDetails& rev_info) {
   reverse_block->owningNode()->destroy();
 }
 
-Gradient differentiate(std::shared_ptr<Graph>& _graph, const std::vector<bool>& requires_grad) {
+Gradient differentiate(std::shared_ptr<Graph>& graph, const std::vector<bool>& requires_grad) {
   Gradient grad_desc;
   // Take ownership of the graph
-  JIT_ASSERTM(
-      _graph.use_count() == 1,
-      "differentiate will mutate and destroy the graph, so it requires "
-      "graph.use_count() == 1, but found ", _graph.use_count());
-  std::swap(_graph, grad_desc.f);
+  JIT_ASSERTM(graph.use_count() == 1,
+              "differentiate will mutate and destroy the graph, so it requires "
+              "graph.use_count() == 1, but found %d", graph.use_count());
+  std::swap(graph, grad_desc.f);
   // XXX: Take care when handling outputs - they can be duplicated!
 
   WithInsertPoint guard(grad_desc.f->block());

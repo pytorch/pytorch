@@ -615,6 +615,8 @@ DELEGATE_SIMPLE_UNARY_FUNCTION(float, Rsqrt, vsInvSqrt)
 DELEGATE_SIMPLE_UNARY_FUNCTION(double, Rsqrt, vdInvSqrt)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Cbrt, vsCbrt)
 DELEGATE_SIMPLE_UNARY_FUNCTION(double, Cbrt, vdCbrt)
+DELEGATE_SIMPLE_UNARY_FUNCTION(float, Inv, vsInv)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Inv, vdInv)
 #undef DELEGATE_SIMPLE_UNARY_FUNCTION
 
 #define DELEGATE_SINCOS_FUNCTION(T, OriginalFunc)           \
@@ -733,6 +735,15 @@ DELEGATE_SINH_FUNCTION(double)
 DELEGATE_COSH_FUNCTION(float)
 DELEGATE_COSH_FUNCTION(double)
 #undef DELEGATE_COSH_FUNCTION
+
+#define DELEGATE_INV_FUNCTION(T)                                        \
+  template <>                                                           \
+  void Inv<T, CPUContext>(const int N, const T* x, T* y, CPUContext*) { \
+    EigenVectorMap<T>(y, N) = ConstEigenVectorArrayMap<T>(x, N).inverse();\
+  }
+DELEGATE_INV_FUNCTION(float)
+DELEGATE_INV_FUNCTION(double)
+#undef DELEGATE_INV_FUNCTION
 
 #endif // CAFFE2_USE_MKL
 
@@ -2593,6 +2604,13 @@ bool TransposeWithHPTT(
   for (int i = 0; i < ndim; ++i) {
     axes_cm[i] = cm_fn(axes[cm_fn(i)]);
     dims_cm[i] = dims[cm_fn(i)];
+  }
+
+  // HPTT doesn't handle 0 sized inputs.
+  for (auto dim : dims_cm) {
+    if (dim <= 0) {
+      return false;
+    }
   }
   auto plan = hptt::create_plan(
       axes_cm.data(),

@@ -66,7 +66,7 @@ struct Model_ {
 // Readers
 
 struct ReaderBase {
-  ReaderBase() {}
+  ReaderBase() = default;
   ReaderBase(pb_callback_t& cb) {
     initialize_callback(cb);
   }
@@ -391,7 +391,10 @@ at::Tensor buildTensor(const Tensor_& tensor_) {
 
   tensor.resize_(tensor_.dims);
 
-  JIT_ASSERT(tensor.storage()->size() * tensor.storage()->elementSize() == tensor_.raw_data.size());
+  JIT_ASSERT(
+      tensor.storage()->pImpl()->get_size() *
+          tensor.storage()->pImpl()->elementSize() ==
+      tensor_.raw_data.size());
 
   std::memcpy(tensor.data_ptr(), tensor_.raw_data.data(), tensor_.raw_data.size());
 
