@@ -70,6 +70,7 @@ jobs:
             export SCCACHE_BUCKET=ossci-compiler-cache
             export BUILD_ENVIRONMENT=pytorch-macos-10.13-py3
             export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer/
+            find -name /Applications
             git submodule update --init
             chmod a+x .jenkins/pytorch/macos-build.sh
             .jenkins/pytorch/macos-build.sh
