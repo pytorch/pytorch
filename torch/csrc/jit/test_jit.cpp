@@ -3,6 +3,8 @@
 #define CATCH_CONFIG_MAIN
 #include "catch.hpp"
 
+using Catch::StartsWith;
+
 #else
 
 #define REQUIRE JIT_ASSERT
@@ -1019,7 +1021,7 @@ void testCustomOperators() {
   // createOperator with no stack function but explicit schema
   {
     RegisterOperators reg({createOperator(
-        parseSchema("foo::sugar_with_schema(float a, Tensor b) -> Tensor"),
+        "foo::sugar_with_schema(float a, Tensor b) -> Tensor",
         [](double a, at::Tensor b) { return a + b; })});
 
     auto& ops =
@@ -1040,16 +1042,34 @@ void testCustomOperators() {
   }
   // createOperator with no stack function but explicit, faulty schema
   {
-    RegisterOperators reg({createOperator(
-        parseSchema("foo::sugar_with_schema(Tensor a, Tensor b) -> Tensor"),
-        [](double a, at::Tensor b) { return a + b; })});
-
-    // TODO: Something bad should happen here?
-
-
-
-
-
+#ifdef USE_CATCH
+    REQUIRE_THROWS_WITH(
+        createOperator(
+            "foo::sugar_with_bad_schema(Tensor a) -> Tensor",
+            [](double a, at::Tensor b) { return a + b; }),
+        StartsWith("Inferred 2 argument(s) for operator implementation, "
+                   "but the provided schema specified 1 argument(s)."));
+    REQUIRE_THROWS_WITH(
+        createOperator(
+            "foo::sugar_with_bad_schema(Tensor a) -> Tensor",
+            [](double a) { return a; }),
+        StartsWith("Inferred type for argument #0 was float, "
+                   "but the provided schema specified type Dynamic "
+                   "for the argument in that position"));
+   REQUIRE_THROWS_WITH(
+       createOperator(
+           "foo::sugar_with_bad_schema(float a) -> (float, float)",
+           [](double a) { return a; }),
+       StartsWith("Inferred 1 return value(s) for operator implementation, "
+                  "but the provided schema specified 2 return value(s)."));
+    REQUIRE_THROWS_WITH(
+        createOperator(
+            "foo::sugar_with_bad_schema(float a) -> Tensor",
+            [](double a) { return a; }),
+        StartsWith("Inferred type for return value #0 was float, "
+                   "but the provided schema specified type Dynamic "
+                   "for the return value in that position"));
+#endif // USE_CATCH
   }
 }
 

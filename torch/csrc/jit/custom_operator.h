@@ -73,6 +73,69 @@ ReturnType callOperatorWithTuple(
   pop(stack, std::get<Is>(tuple)...);
   return std::forward<Implementation>(implementation)(std::get<Is>(tuple)...);
 }
+
+void checkArgumentVector(
+    const char* what,
+    const std::vector<Argument>& inferred,
+    const std::vector<Argument>& provided,
+    const FunctionSchema& inferredSchema,
+    const FunctionSchema& providedSchema) {
+  AT_CHECK(
+      inferred.size() == provided.size(),
+      "Inferred ", inferred.size(), " ", what,
+      "(s) for operator implementation, but the provided schema specified ",
+      provided.size(), " ", what, "(s). Inferred schema: ",
+      inferredSchema, " | Provided schema: ", providedSchema);
+  for (size_t i = 0; i < provided.size(); ++i) {
+    AT_CHECK(
+        provided[i].type == inferred[i].type,
+        "Inferred type for ", what, " #", i, " was ",
+        *inferred[i].type, ", but the provided schema specified type ",
+        *provided[i].type, " for the ", what,
+        " in that position. Inferred schema: ",
+        inferredSchema, " | Provided schema: ", providedSchema);
+  }
+}
+
+/// If `schemaOrName` contains a `(`, it is assumed it specifies a schema, else
+/// it is assumed it only specifies the name. In the case where it is a full
+/// schema (assumed), we nevertheless infer the schema and verify that the user
+/// made no mistakes. Either way, this function returns the final schema.
+template <typename Traits>
+FunctionSchema inferAndCheckSchema(const std::string& schemaOrName) {
+  // If there is no '(' in the schema, we assume this is only the name (e.g.
+  // "foo::bar").
+  const auto bracketIndex = schemaOrName.find('(');
+  if (bracketIndex == std::string::npos) {
+    // Infer the full schema and we're good.
+    return torch::jit::detail::createFunctionSchemaFromTraits<Traits>(
+        /*name=*/schemaOrName);
+  }
+
+  // If the user provided her own schema, we need to infer it nevertheless and
+  // check that it's correct. We return the user provided schema in the end
+  // because it has proper argument names.
+
+  auto providedSchema = parseSchema(schemaOrName);
+  // Pick out only the name part.
+  auto name = schemaOrName.substr(0, bracketIndex);
+
+  const auto inferredSchema =
+      torch::jit::detail::createFunctionSchemaFromTraits<Traits>(name);
+  checkArgumentVector(
+      "argument",
+      inferredSchema.arguments,
+      providedSchema.arguments,
+      inferredSchema,
+      providedSchema);
+  checkArgumentVector(
+      "return value",
+      inferredSchema.returns,
+      providedSchema.returns,
+      inferredSchema,
+      providedSchema);
+  return providedSchema;
+}
 } // namespace detail
 
 /// Low-level interface to register an operator with a parsed `FunctionSchema`
@@ -85,11 +148,25 @@ inline Operator createOperatorWithStack(
   return {schema, [operation](Node*) { return operation; }};
 }
 
-/// Registers a custom operator with a schema and an implementation function.
+/// Registers a custom operator with a name or schema, and an implementation
+/// function.
+///
+/// If the first argument specifies only the function name like `foo::bar`, the
+/// schema, including the type of each argument and the return type, is inferred
+/// from the function signature. Otherwise, the string should specify the whole
+/// schema, like `foo::bar(Tensor a, double b) -> Tensor`. In that case, the
+/// schema will still be inferred from the function and checked against this
+/// provided schema.
+///
+/// If the schema is left to be inferred, the argument names will take on
+/// sequential placeholder names like `_0`, `_1`, '_2' and so on. If you want
+/// argument names to be preserved, you should provide the schema yourself.
+///
 /// The implementation function can be a function pointer or a functor
 /// (including a lambda object). The function (or `operator()`) can take any
 /// number of arguments with a type from the subset accepted by the PyTorch
 /// JIT/Script backend, and return a single type or a tuple of types.
+///
 /// Example invocation:
 /// ```
 /// registerOperator(
@@ -97,12 +174,17 @@ inline Operator createOperatorWithStack(
 ///    [](float a, at::Tensor b) { return a + b; });
 /// ```
 template <typename Implementation>
-Operator createOperator(FunctionSchema schema, Implementation&& implementation) {
+Operator createOperator(
+    const std::string& schemaOrName,
+    Implementation&& implementation) {
   using Traits = c10::guts::infer_function_traits_t<Implementation>;
   using ArgumentTypes = typename Traits::parameter_types;
   using ArgumentTuple =
       typename c10::guts::typelist::to_tuple<ArgumentTypes>::type;
   using ReturnType = typename Traits::return_type;
+
+  auto schema = torch::jit::detail::inferAndCheckSchema<Traits>(schemaOrName);
+
   return createOperatorWithStack(schema, [implementation](Stack& stack) {
     ArgumentTuple tuple;
     auto result = torch::jit::detail::callOperatorWithTuple<ReturnType>(
@@ -114,28 +196,5 @@ Operator createOperator(FunctionSchema schema, Implementation&& implementation) 
     return 0;
   });
 }
-
-/// Registers a custom operator with a name and an implementation function. The
-/// schema, including the type of each argument and the return type, is inferred
-/// from the function signature. The argument names are not automatically
-/// inferred and by default take on sequential placeholder names like `_1`, `_2`
-/// and so on. If you want function names to be preserved, use the overload of
-/// this function that takes an explicit schema. The implementation function (or
-/// `operator()`) can take any number of arguments with a type from the subset
-/// accepted by the PyTorch JIT/Script backend, and return a single type or a
-/// tuple of types. Example invocation:
-/// ```
-/// registerOperator("foo::bar", [](float a, at::Tensor b) { return a + b; });
-/// ```
-template <typename Implementation>
-Operator createOperator(
-    const std::string& name,
-    Implementation&& implementation) {
-  using Traits = c10::guts::infer_function_traits_t<Implementation>;
-  auto schema =
-      torch::jit::detail::createFunctionSchemaFromTraits<Traits>(name);
-  return createOperator(schema, std::forward<Implementation>(implementation));
-}
-
 } // namespace jit
 } // namespace torch
