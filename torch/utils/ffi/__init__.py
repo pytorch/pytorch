@@ -21,7 +21,7 @@ if cffi.__version_info__ < (1, 4, 0):
 
 def _generate_typedefs():
     typedefs = []
-    for t in ['Double', 'Float', 'Long', 'Int', 'Short', 'Char', 'Byte']:
+    for t in ['Double', 'Float', 'Long', 'Int', 'Short', 'Char', 'Byte', 'Half']:
         for lib in ['TH', 'THCuda']:
             for kind in ['Tensor', 'Storage']:
                 python_name = t + kind
