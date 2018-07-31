@@ -810,8 +810,8 @@ Tensor grid_sampler_3d_cuda(const Tensor& input, const Tensor& grid,
   auto H = grid.size(2);
   auto W = grid.size(3);
   auto output = at::empty({N, input.size(1), D, H, W}, input.options());
+  int count = static_cast<int>(N * D * H * W);
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "grid_sampler_2d_cuda", [&] {
-    int count = static_cast<int>(N * D * H * W);
     grid_sampler_3d_kernel<scalar_t>
       <<<GET_BLOCKS(count), CUDA_NUM_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
         count,
