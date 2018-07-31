@@ -35,14 +35,8 @@ test_paths=(
     "$top_dir/test/onnx"
 )
 
-if hash catchsegv 2>/dev/null; then
-    PYTEST="catchsegv pytest"
-else
-    PYTEST="pytest"
-fi
-
 if [[ $PARALLEL == 1 ]]; then
-    $PYTEST -n 3 "${test_paths[@]}"
+    pytest -n 3 "${test_paths[@]}"
 else
-    $PYTEST "${test_paths[@]}"
+    pytest "${test_paths[@]}"
 fi

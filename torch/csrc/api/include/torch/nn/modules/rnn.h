@@ -41,7 +41,7 @@ class RNNImplBase : public torch::nn::Cloneable<Derived> {
   enum class CuDNNMode { RNN_RELU = 0, RNN_TANH = 1, LSTM = 2, GRU = 3 };
 
   RNNImplBase(
-      RNNOptionsBase options,
+      RNNOptionsBase options_,
       at::optional<CuDNNMode> cudnn_mode = at::nullopt,
       int64_t number_of_gates = 1,
       bool has_cell_state = false);
@@ -60,7 +60,19 @@ class RNNImplBase : public torch::nn::Cloneable<Derived> {
   /// Recursively moves all parameters to the given device.
   void to(torch::Device device, bool non_blocking = false) override;
 
+  /// Fills the internal flattened parameter buffers passed to cuDNN. Call this
+  /// method if you mess around with the variable storages and want to use
+  /// cuDNN.
   void flatten_parameters_for_cudnn();
+
+  RNNOptionsBase options;
+
+  std::vector<Tensor> w_ih;
+  std::vector<Tensor> w_hh;
+  std::vector<Tensor> b_ih;
+  std::vector<Tensor> b_hh;
+
+  Dropout dropout;
 
  protected:
   virtual Tensor cell_forward(Tensor input, Tensor state, int64_t layer) = 0;
@@ -72,17 +84,9 @@ class RNNImplBase : public torch::nn::Cloneable<Derived> {
   bool use_cudnn(Tensor sample) const;
   Tensor create_dropout_state(Tensor input) const;
 
-  RNNOptionsBase options_;
-
-  std::vector<Tensor> ihw_;
-  std::vector<Tensor> ihb_;
-  std::vector<Tensor> hhw_;
-  std::vector<Tensor> hhb_;
-
   int64_t number_of_gates_;
   bool has_cell_state_;
   at::optional<CuDNNMode> cudnn_mode_;
-  Dropout dropout_module_;
 
   // This is copied from pytorch, to determine whether weights are flat for the
   // fast CUDNN route. Otherwise, we have to use non flattened weights, which
@@ -117,14 +121,14 @@ struct RNNOptions {
 
 class RNNImpl : public detail::RNNImplBase<RNNImpl> {
  public:
+  RNNImpl(int64_t input_size, int64_t hidden_size)
+      : RNNImpl(RNNOptions(input_size, hidden_size)) {}
   explicit RNNImpl(RNNOptions options);
 
-  const RNNOptions& options() const noexcept;
+  RNNOptions options;
 
  private:
   Tensor cell_forward(Tensor input, Tensor state, int64_t layer) override;
-
-  RNNOptions options_;
   std::function<Tensor(Tensor)> activation_function_;
 };
 
@@ -136,9 +140,9 @@ using LSTMOptions = detail::RNNOptionsBase;
 
 class LSTMImpl : public detail::RNNImplBase<LSTMImpl> {
  public:
+  LSTMImpl(int64_t input_size, int64_t hidden_size)
+      : LSTMImpl(LSTMOptions(input_size, hidden_size)) {}
   explicit LSTMImpl(LSTMOptions options);
-
-  const LSTMOptions& options() const noexcept;
 
  private:
   Tensor cell_forward(Tensor input, Tensor state, int64_t layer) override;
@@ -152,9 +156,9 @@ using GRUOptions = detail::RNNOptionsBase;
 
 class GRUImpl : public detail::RNNImplBase<GRUImpl> {
  public:
+  GRUImpl(int64_t input_size, int64_t hidden_size)
+      : GRUImpl(GRUOptions(input_size, hidden_size)) {}
   explicit GRUImpl(GRUOptions options);
-
-  const GRUOptions& options() const noexcept;
 
  private:
   Tensor cell_forward(Tensor input, Tensor state, int64_t layer) override;

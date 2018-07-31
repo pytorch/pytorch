@@ -93,6 +93,7 @@ from .kl import kl_divergence, register_kl
 from .laplace import Laplace
 from .log_normal import LogNormal
 from .logistic_normal import LogisticNormal
+from .lowrank_multivariate_normal import LowRankMultivariateNormal
 from .multinomial import Multinomial
 from .multivariate_normal import MultivariateNormal
 from .normal import Normal
@@ -105,6 +106,7 @@ from .studentT import StudentT
 from .transformed_distribution import TransformedDistribution
 from .transforms import *
 from .uniform import Uniform
+from .weibull import Weibull
 
 __all__ = [
     'Bernoulli',
@@ -135,6 +137,7 @@ __all__ = [
     'StudentT',
     'Poisson',
     'Uniform',
+    'Weibull',
     'TransformedDistribution',
     'biject_to',
     'kl_divergence',

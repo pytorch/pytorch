@@ -513,6 +513,7 @@ class BCEWithLogitsLoss(_Loss):
 
     It's possible to trade off recall and precision by adding weights to positive examples.
     In this case the loss can be described as:
+
     .. math::
         \ell(x, y) = L = \{l_1,\dots,l_N\}^\top, \quad
         l_n = - w_n \left[ p_n t_n \cdot \log \sigma(x_n)
@@ -522,7 +523,7 @@ class BCEWithLogitsLoss(_Loss):
     :math:`p_n > 1` increases the recall, :math:`p_n < 1` increases the precision.
 
     For example, if a dataset contains 100 positive and 300 negative examples of a single class,
-    then `pos_weight` for the class should be equal to math:`\frac{300}{100}=3`.
+    then `pos_weight` for the class should be equal to :math:`\frac{300}{100}=3`.
     The loss would act as if the dataset contains math:`3\times 100=300` positive examples.
 
     Args:
@@ -577,7 +578,7 @@ class HingeEmbeddingLoss(_Loss):
     containing values (`1` or `-1`).
     This is usually used for measuring whether two inputs are similar or
     dissimilar, e.g. using the L1 pairwise distance as `x`, and is typically
-    used for learning nonlinear embeddings or semi-supervised learning::
+    used for learning nonlinear embeddings or semi-supervised learning.
 
     The loss function for :math:`n`-th sample in the mini-batch is
 

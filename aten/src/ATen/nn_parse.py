@@ -66,7 +66,7 @@ def output_arguments(thnn_function):
     def is_output_arg(arg_name, func_name):
         if arg_name == 'output' and 'updateOutput' in cname:
             return True
-        if name in {'gradInput', 'gradWeight', 'gradBias'}:
+        if name in {'gradInput', 'gradWeight', 'gradBias', 'gradGrid'}:
             return True
         if arg_name == 'indices' and 'updateOutput' in cname and 'Unpool' not in cname:
             # indices is an output argument in pooling and an input in unpooling
@@ -355,7 +355,7 @@ def backward_declaration(base, thnn_functions):
         else:
             base_name = arg['name'][len('grad_'):] if arg['name'] != 'grad_input' else 'self'
             if base_name in [a['name'] for a in arguments]:
-                scalar_check[arg['name']] = base_name + '_->isScalar()'
+                scalar_check[arg['name']] = base_name + '_->dim() == 0'
             else:
                 raise ValueError(("Could not infer scalar_check for {} argument of func {} because {} "
                                   "does not exist.  Please explicitly specify scalar_check."

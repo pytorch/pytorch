@@ -11,7 +11,7 @@ import torch.cuda
 import torch.multiprocessing as mp
 from torch.autograd import Variable
 from torch.nn import Parameter
-from common import TestCase, run_tests, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN
+from common import TestCase, run_tests, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, TEST_WITH_ASAN
 
 
 TEST_REPEATS = 30
@@ -21,7 +21,6 @@ TEST_CUDA_IPC = torch.cuda.is_available() and \
     sys.platform != 'darwin' and \
     sys.platform != 'win32'
 TEST_MULTIGPU = TEST_CUDA_IPC and torch.cuda.device_count() > 1
-TEST_WITH_ASAN = os.getenv('PYTORCH_TEST_WITH_ASAN', False)
 
 
 class SubProcess(mp.Process):
@@ -208,18 +207,15 @@ class TestMultiprocessing(TestCase):
     def _test_preserve_sharing(self, ctx=mp, repeat=1):
         def do_test():
             x = torch.randn(5, 5)
-            data = [x.storage(), x.storage()[1:4], x, x[2], x[:, 1]]
+            data = [x.storage(), x, x[2], x[:, 1]]
             q = ctx.Queue()
             q.put(data)
             new_data = q.get(timeout=1)
             self.assertEqual(new_data, data, 0)
             storage_cdata = data[0]._cdata
             self.assertEqual(new_data[0]._cdata, storage_cdata)
-            for t in new_data[2:]:
+            for t in new_data[1:]:
                 self.assertEqual(t.storage()._cdata, storage_cdata)
-            # TODO: enable after fixing #46
-            # new_data[0].fill_(10)
-            # self.assertEqual(new_data[1], new_data[0][1:4], 0)
 
         with leak_checker(self):
             for i in range(repeat):
@@ -253,8 +249,6 @@ class TestMultiprocessing(TestCase):
         self._test_sharing(repeat=TEST_REPEATS)
 
     @unittest.skipIf(platform == 'darwin', "file descriptor strategy is not supported on macOS")
-    @unittest.skipIf(TEST_WITH_ASAN,
-                     "test_fd_preserve_sharing is known buggy, see https://github.com/pytorch/pytorch/issues/5311")
     def test_fd_preserve_sharing(self):
         self._test_preserve_sharing(repeat=TEST_REPEATS)
 
@@ -268,8 +262,6 @@ class TestMultiprocessing(TestCase):
         with fs_sharing():
             self._test_sharing(repeat=TEST_REPEATS)
 
-    @unittest.skipIf(TEST_WITH_ASAN,
-                     "test_fs_preserve_sharing is known buggy, see https://github.com/pytorch/pytorch/issues/5311")
     def test_fs_preserve_sharing(self):
         with fs_sharing():
             self._test_preserve_sharing(repeat=TEST_REPEATS)
@@ -336,7 +328,13 @@ class TestMultiprocessing(TestCase):
             self.assertEqual(v, torch.arange(i * 5., (i + 1) * 5).sum())
             self.assertEqual(device, i % 2)
             self.assertEqual(tensor_size, 5)
-            self.assertEqual(storage_size, 5)
+            # You might think this should be the case, but it's not!  After
+            # data from the CUDA caching allocator goes through IPC, the
+            # size of the storage is the size of the *cached cudaMalloc for
+            # the entire memory block* of the storage, not just the storage.
+            # See Note [CUDA IPC and the caching allocator] for more info
+            #
+            # self.assertEqual(storage_size, 5)
 
     @unittest.skipIf(IS_WINDOWS, 'not applicable to Windows (only fails with fork)')
     @unittest.skipIf(not torch.cuda.is_available(), 'CUDA not available')

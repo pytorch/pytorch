@@ -19,16 +19,15 @@ struct LinearOptions {
 
 class LinearImpl : public Cloneable<LinearImpl> {
  public:
+  LinearImpl(int64_t in, int64_t out) : LinearImpl(LinearOptions(in, out)) {}
   explicit LinearImpl(LinearOptions options);
 
   void reset() override;
   Tensor forward(Tensor);
-  const LinearOptions& options() const noexcept;
 
- private:
-  Tensor weight_;
-  Tensor bias_;
-  LinearOptions options_;
+  LinearOptions options;
+  Tensor weight;
+  Tensor bias;
 };
 
 TORCH_MODULE(Linear);

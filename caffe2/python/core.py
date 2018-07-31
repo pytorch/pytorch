@@ -1718,7 +1718,7 @@ class Net(object):
             OrderedDict(inputs) if input_is_pair_list else
             OrderedDict(zip(inputs, inputs)))
         for output in outputs:
-            assert self.BlobIsDefined(output)
+            assert self.BlobIsDefined(output), "{} is not defined".format(output)
         input_names = {str(k): str(v) for k, v in viewitems(inputs)}
         output_names = [str(o) for o in outputs]
         proto = self._net
@@ -1901,7 +1901,7 @@ class Net(object):
     def AddExternalOutput(self, *outputs):
         for output in outputs:
             assert isinstance(output, BlobReference)
-            assert self.BlobIsDefined(output)
+            assert self.BlobIsDefined(output), "{} is not defined".format(output)
         for output in outputs:
             self.Proto().external_output.extend([str(output)])
 
@@ -1947,9 +1947,10 @@ class Net(object):
                 self._input_record = schema.NewRecord(self, input_record)
         else:
             self._input_record = input_record
-            for blob in input_record.field_blobs():
-                if blob not in self.external_inputs:
-                    self.AddExternalInput(blob)
+
+        for blob in self._input_record.field_blobs():
+            if blob not in self.external_inputs:
+                self.AddExternalInput(blob)
         return self._input_record
 
     def recover_input_record_by_prefix(self, prefix):
@@ -1988,7 +1989,7 @@ class Net(object):
             'Tried to append to missing output record'
         )
         for blob in record.field_blobs():
-            assert self.BlobIsDefined(blob)
+            assert self.BlobIsDefined(blob), "{} is not defined".format(blob)
         for blob in record.field_blobs():
             self.AddExternalOutput(blob)
         self._output_record = self._output_record + schema.Struct(
@@ -2732,6 +2733,8 @@ class Plan(object):
         assert isinstance(plan_proto, caffe2_pb2.PlanDef)
         plan = Plan(plan_proto.name)
         plan._plan.CopyFrom(plan_proto)
+        del plan._plan.network[:]
+        del plan._plan.execution_step[:]
 
         net_obj_dict = {}
         net_proto_dict = {}

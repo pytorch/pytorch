@@ -9,6 +9,48 @@
 
 namespace caffe2 {
 
+// Common Eigen types that we will often use
+template <typename T>
+using EigenMatrixMap =
+    Eigen::Map<Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic>>;
+template <typename T>
+using EigenArrayMap =
+    Eigen::Map<Eigen::Array<T, Eigen::Dynamic, Eigen::Dynamic>>;
+template <typename T>
+using EigenVectorMap = Eigen::Map<Eigen::Matrix<T, Eigen::Dynamic, 1>>;
+template <typename T>
+using EigenVectorArrayMap = Eigen::Map<Eigen::Array<T, Eigen::Dynamic, 1>>;
+template <typename T>
+using ConstEigenMatrixMap =
+    Eigen::Map<const Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic>>;
+template <typename T>
+using ConstEigenArrayMap =
+    Eigen::Map<const Eigen::Array<T, Eigen::Dynamic, Eigen::Dynamic>>;
+template <typename T>
+using ConstEigenVectorMap =
+    Eigen::Map<const Eigen::Matrix<T, Eigen::Dynamic, 1>>;
+template <typename T>
+using ConstEigenVectorArrayMap =
+    Eigen::Map<const Eigen::Array<T, Eigen::Dynamic, 1>>;
+
+using EigenOuterStride = Eigen::OuterStride<Eigen::Dynamic>;
+using EigenInnerStride = Eigen::InnerStride<Eigen::Dynamic>;
+using EigenStride = Eigen::Stride<Eigen::Dynamic, 2>;
+template <typename T>
+using EigenOuterStridedMatrixMap = Eigen::
+    Map<Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic>, 0, EigenOuterStride>;
+template <typename T>
+using ConstEigenOuterStridedMatrixMap = Eigen::Map<
+    const Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic>,
+    0,
+    EigenOuterStride>;
+template <typename T>
+using EigenStridedMatrixMap = Eigen::
+    Map<Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic>, 0, EigenStride>;
+template <typename T>
+using ConstEigenStridedMatrixMap = Eigen::
+    Map<const Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic>, 0, EigenStride>;
+
 // 1-d array
 template <typename T>
 using EArrXt = Eigen::Array<T, Eigen::Dynamic, 1>;

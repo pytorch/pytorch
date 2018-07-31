@@ -1,6 +1,8 @@
+#include "torch/csrc/jit/assertions.h"
 #include "torch/csrc/jit/script/module.h"
 #include "torch/csrc/jit/script/compiler.h"
 #include "torch/csrc/jit/script/error_report.h"
+#include "torch/csrc/jit/operator.h"
 
 namespace torch { namespace jit { namespace script {
 
@@ -18,10 +20,10 @@ static FunctionSchema defaultSchemaFor(Method& method) {
   for(size_t i = 0; i < num_inputs; ++i) {
     const Value* v = g.inputs().at(i);
     std::string name = v->hasUniqueName() ? v->uniqueName() : ("argument_"  + std::to_string(i));
-    args.push_back({std::move(name), DynamicType::get(), at::nullopt, at::nullopt});
+    args.push_back({std::move(name), DynamicType::get()});
   }
   for(size_t i = 0; i < g.outputs().size(); ++i) {
-    returns.push_back({"", DynamicType::get(), at::nullopt, at::nullopt});
+    returns.push_back({"", DynamicType::get()});
   }
   return { method.name(), std::move(args), std::move(returns) };
 }

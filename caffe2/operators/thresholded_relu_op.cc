@@ -1,5 +1,6 @@
 #include "caffe2/operators/thresholded_relu_op.h"
 
+#include "caffe2/utils/eigen_utils.h"
 #include "caffe2/utils/math.h"
 
 namespace caffe2 {
@@ -11,11 +12,11 @@ bool ThresholdedReluOp<float, CPUContext>::RunOnDevice() {
   Y->ResizeLike(X);
 
   ConstEigenVectorArrayMap<float> Xvec(X.data<float>(), X.size());
-  EigenVectorArrayMap<float> Yvec(Y->mutable_data<float>(), Y->size());
+  EigenVectorArrayMap<float> Yvec(Y->template mutable_data<float>(), Y->size());
   Yvec = (Xvec > alpha_).select(Xvec, 0.f);
   /* Naive implementation
   const float* Xdata = X.data<float>();
-  float* Ydata = Y->mutable_data<float>();
+  float* Ydata = Y->template mutable_data<float>();
   for (int i = 0; i < X.size(); ++i) {
     Xdata[i] -= alpha_;
     Ydata[i] = std::max(Xdata[i], 0.0f);
@@ -34,7 +35,7 @@ bool ThresholdedReluGradientOp<float, CPUContext>::RunOnDevice() {
 
   const float* Ydata = Y.data<float>();
   const float* dYdata = dY.data<float>();
-  float* dXdata = dX->mutable_data<float>();
+  float* dXdata = dX->template mutable_data<float>();
   EigenVectorArrayMap<float> dXvec(dXdata, dX->size());
   ConstEigenVectorArrayMap<float> Yvec(Ydata, Y.size());
   ConstEigenVectorArrayMap<float> dYvec(dYdata, dY.size());

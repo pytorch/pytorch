@@ -3,6 +3,7 @@
 #pragma once
 
 #include "caffe2/contrib/prof/prof_dag_net.h"
+#include "caffe2/proto/prof_dag.pb.h"
 
 namespace caffe2 {
 namespace contrib {
@@ -17,6 +18,9 @@ class TwoNumberStats {
       : sum_(mean * count),
         squareSum_((stddev * stddev + mean * mean) * count),
         count_(count) {}
+  // This is a small structure and so it's OK to copy (and move).
+  TwoNumberStats(const TwoNumberStats& other) = default;
+  TwoNumberStats(TwoNumberStats&& other) = default;
   void addPoint(float point) {
     sum_ += point;
     squareSum_ += point * point;
@@ -34,6 +38,20 @@ class TwoNumberStats {
       return 0;
     }
     return sqrt((count_ * squareSum_ - sum_ * sum_) / (count_ * count_));
+  }
+  // Serializes the internal state.
+  TwoNumberStatsProto ToProto() const {
+    TwoNumberStatsProto proto;
+    proto.set_mean(getMean());
+    proto.set_stddev(getStddev());
+    proto.set_count(count_);
+    return proto;
+  }
+  // Merges another stat accumulator into this one.
+  void Merge(const TwoNumberStats& other) {
+    sum_ += other.sum_;
+    squareSum_ += other.squareSum_;
+    count_ += other.count_;
   }
 
  private:

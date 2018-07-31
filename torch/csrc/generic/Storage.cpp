@@ -6,7 +6,7 @@ PyObject *THPStorageClass = NULL;
 
 PyObject * THPStorage_(New)(THWStorage *ptr)
 {
-  TORCH_ASSERT(ptr);
+  AT_ASSERT(ptr);
   PyTypeObject *type = (PyTypeObject *)THPStorageClass;
   PyObject *obj = type->tp_alloc(type, 0);
   if (obj) {
@@ -23,13 +23,13 @@ static void THPStorage_(dealloc)(THPStorage* self)
   Py_TYPE(self)->tp_free((PyObject*)self);
 }
 
-static THWStorage* THPStorage_(newWithAllocator)(int64_t size, THAllocator* allocator)
+static THWStorage* THPStorage_(newWithAllocator)(int64_t size, at::Allocator* allocator)
 {
 #if defined(THC_GENERIC_FILE) || defined(THD_GENERIC_FILE)
   THPUtils_setError(THPStorageStr " does not support custom allocators");
   return NULL;
 #else
-  return THWStorage_(newWithAllocator)(LIBRARY_STATE size, allocator, NULL);
+  return THWStorage_(newWithAllocator)(LIBRARY_STATE size, allocator);
 #endif
 }
 
@@ -88,43 +88,8 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
 
   // torch.Storage(view_source, [offset, [size]])
   if (num_args < 4 && THPStorage_(Check)(first_arg)) {
-#ifdef THD_GENERIC_FILE
-    THPUtils_setError("distributed storages don't support storage views");
+    THPUtils_setError("storage views not supported");
     return NULL;
-#else
-    THPStorage *storage_arg = (THPStorage *)first_arg;
-    int64_t numel = storage_arg->cdata->size;
-    int64_t offset = 0;
-
-    if (num_args >= 2) {
-      PyObject *second_arg = PyTuple_GET_ITEM(args, 1);
-      if (!THPUtils_checkLong(second_arg))
-        goto invalid_arguments;
-      offset = THPUtils_unpackLong(second_arg);
-    }
-
-    int64_t size = numel - offset;
-    if (num_args >= 3) {
-      PyObject *third_arg = PyTuple_GET_ITEM(args, 2);
-      if (!THPUtils_checkLong(third_arg))
-        goto invalid_arguments;
-      size = THPUtils_unpackLong(third_arg);
-    }
-
-    THPUtils_assert(offset >= 0 && offset <= numel, "specified an offset of "
-        "%" PRId64 ", but the viewed storage has only %" PRId64 " element(s)", offset, numel);
-    THPUtils_assert(size >= 1 && size <= numel - offset, "specified a size of "
-        "%" PRId64 ", but the viewed storage has only %" PRId64 " element(s) after offset %" PRId64,
-        size, numel - offset, offset);
-
-    real *data_ptr = THWStorage_(data)(LIBRARY_STATE storage_arg->cdata) + offset;
-    THWStoragePtr storage(THWStorage_(newWithData)(LIBRARY_STATE data_ptr, size));
-    storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_VIEW;
-    storage->view = storage_arg->cdata;
-    THWStorage_(retain)(LIBRARY_STATE storage_arg->cdata);
-    self->cdata = storage.release();
-    return (PyObject*)self.release();
-#endif
   }
 
   // torch.Storage(sequence)
@@ -160,9 +125,6 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
 #endif
   }
 
-#ifndef THD_GENERIC_FILE
-invalid_arguments:
-#endif
   THPUtils_invalidArguments(args, kwargs, THPStorageStr " constructor", 6,
           "no arguments",
           "(int size)",
@@ -198,30 +160,8 @@ static PyObject * THPStorage_(get)(THPStorage *self, PyObject *index)
     return THPUtils_(newReal)(value);
   /* Slice index */
   } else if (PySlice_Check(index)) {
-#ifdef THD_GENERIC_FILE
-    THPUtils_setError("distributed storages don't support slicing");
+    THPUtils_setError("storages don't support slicing");
     return NULL;
-#else
-    Py_ssize_t start, stop, slicelength, step;
-    int64_t len = THWStorage_(size)(LIBRARY_STATE self->cdata);
-    if (!THPUtils_parseSlice(index, len, &start, &stop, &step, &slicelength))
-      return NULL;
-    if (step != 1) {
-      THPUtils_setError("Trying to slice with a step of %" PRId64 ", but only a step of "
-          "1 is supported", (int64_t)step);
-      return NULL;
-    }
-
-    real *data = THWStorage_(data)(LIBRARY_STATE self->cdata);
-    THWStoragePtr new_storage(THWStorage_(newWithData)(LIBRARY_STATE data + start, slicelength));
-    new_storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_VIEW;
-    new_storage->view = self->cdata;
-    THWStorage_(retain)(LIBRARY_STATE self->cdata);
-
-    PyObject *_ret = THPStorage_(New)(new_storage);
-    new_storage.release();
-    return _ret;
-#endif
   }
   PyErr_Format(PyExc_TypeError, "can't index a " THPStorageStr " with %s",
       THPUtils_typename(index));

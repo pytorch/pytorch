@@ -16,15 +16,6 @@ namespace {
 #define isnan std::isnan
 #endif
 
-// workaround: cuda 8 cannot do static_cast with half
-#ifdef __CUDACC__
-template<typename R, typename T>
-deviceforcuda R cast_wrapper(T v) { return scalar_cast<R>(v); }
-#else
-template<typename R, typename T>
-deviceforcuda R cast_wrapper(T v) { return static_cast<R>(v); }
-#endif
-
 template<typename scalar_t>
 struct BaseSampler {
   nvfunction_or_function<scalar_t(void)> sampler;
@@ -65,9 +56,9 @@ deviceforcuda scalar_t sample_gamma(scalar_t alpha, BaseSampler<accscalar_t>& st
   accscalar_t scale = 1.0f;
 
   // Boost alpha for higher acceptance probability.
-  if (alpha < cast_wrapper<scalar_t,float>(1.0f)) {
+  if (alpha < 1.0f) {
     scale *= std::pow(1 - standard_uniform.sample(), 1.0f / alpha);
-    alpha += cast_wrapper<scalar_t,float>(1.0f);
+    alpha += 1.0f;
   }
 
   // This implements the acceptance-rejection method of Marsaglia and Tsang (2000)
@@ -84,9 +75,9 @@ deviceforcuda scalar_t sample_gamma(scalar_t alpha, BaseSampler<accscalar_t>& st
     const accscalar_t u = 1 - standard_uniform.sample();
     const accscalar_t xx = x * x;
     if (u < 1.0f - 0.0331f * xx * xx)
-      return cast_wrapper<scalar_t,accscalar_t>(scale * d * v);
+      return static_cast<scalar_t>(scale * d * v);
     if (std::log(u) < 0.5f * xx + d * (1.0f - v + std::log(v)))
-      return cast_wrapper<scalar_t,accscalar_t>(scale * d * v);
+      return static_cast<scalar_t>(scale * d * v);
   }
 }
 
@@ -159,8 +150,8 @@ deviceforcuda static inline scalar_t digamma_one(scalar_t x) {
 template <typename scalar_t, typename accscalar_t>
 deviceforcuda scalar_t standard_gamma_grad_one(scalar_t alpha_, scalar_t x_) {
   // Use a Taylor series expansion for small x.
-  accscalar_t x = cast_wrapper<accscalar_t,scalar_t>(x_);
-  accscalar_t alpha = cast_wrapper<accscalar_t,scalar_t>(alpha_);
+  accscalar_t x = static_cast<accscalar_t>(x_);
+  accscalar_t alpha = static_cast<accscalar_t>(alpha_);
   if (x < 0.8f) {
     accscalar_t numer = 1;
     accscalar_t denom = alpha;
@@ -178,7 +169,7 @@ deviceforcuda scalar_t standard_gamma_grad_one(scalar_t alpha_, scalar_t x_) {
     const auto gamma_cdf_alpha = (std::log(x) - digamma_one<accscalar_t,accscalar_t>(alpha)) * gamma_cdf
         - pow_x_alpha * series2;
     const auto result = -gamma_cdf_alpha / gamma_pdf;
-    return isnan(result) ? cast_wrapper<scalar_t,float>( 0.f ) : cast_wrapper<scalar_t,accscalar_t>(result);
+    return isnan(result) ? static_cast<scalar_t>( 0.f ) : static_cast<scalar_t>(result);
   }
 
   // Use a Rice saddle point expansion for large alpha.
@@ -188,7 +179,7 @@ deviceforcuda scalar_t standard_gamma_grad_one(scalar_t alpha_, scalar_t x_) {
       const auto numer_2 = 1440 * (alpha * alpha) + 6 * x * (53 - 120 * x)
           - 65 * x * x / alpha + alpha * (107 + 3600 * x);
       const auto denom = 1244160 * (alpha * alpha) * (alpha * alpha);
-      return cast_wrapper<scalar_t,accscalar_t>(numer_1 * numer_2 / denom);
+      return static_cast<scalar_t>(numer_1 * numer_2 / denom);
     }
     const auto denom = std::sqrt(8 * alpha);
     const auto term2 = denom / (alpha - x);
@@ -198,7 +189,7 @@ deviceforcuda scalar_t standard_gamma_grad_one(scalar_t alpha_, scalar_t x_) {
                      - std::sqrt(2 / alpha) * (alpha + x) / ((alpha - x) * (alpha - x));
     const auto stirling = 1 + 1 / (12 * alpha) * (1 + 1 / (24 * alpha));
     const auto numer = x * term1;
-    return cast_wrapper<scalar_t,accscalar_t>(-stirling * numer / denom);
+    return static_cast<scalar_t>(-stirling * numer / denom);
   }
 
   // Use a bivariate rational approximation to the reparameterized gradient.
@@ -218,7 +209,7 @@ deviceforcuda scalar_t standard_gamma_grad_one(scalar_t alpha_, scalar_t x_) {
   }
   const auto p = coef_v[0] + v * (coef_v[1] + v * (coef_v[2] + v * coef_v[3]));
   const auto q = coef_v[4] + v * (coef_v[5] + v * (coef_v[6] + v * coef_v[7]));
-  return cast_wrapper<scalar_t,accscalar_t>(std::exp(p / q));
+  return static_cast<scalar_t>(std::exp(p / q));
 }
 
 } // namespace

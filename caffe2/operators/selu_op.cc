@@ -1,5 +1,6 @@
 #include "caffe2/operators/selu_op.h"
 
+#include "caffe2/utils/eigen_utils.h"
 #include "caffe2/utils/math.h"
 
 namespace caffe2 {
@@ -11,7 +12,7 @@ bool SeluOp<float, CPUContext>::RunOnDevice() {
   Y->ResizeLike(X);
 
   ConstEigenVectorArrayMap<float> Xvec(X.data<float>(), X.size());
-  EigenVectorArrayMap<float> Yvec(Y->mutable_data<float>(), Y->size());
+  EigenVectorArrayMap<float> Yvec(Y->template mutable_data<float>(), Y->size());
   Yvec = lambda_ * (Xvec > 0).select(Xvec, (alpha_ * Xvec.exp() - alpha_));
   return true;
 }
@@ -26,7 +27,8 @@ bool SeluGradientOp<float, CPUContext>::RunOnDevice() {
 
   ConstEigenVectorArrayMap<float> Yvec(Y.data<float>(), Y.size());
   ConstEigenVectorArrayMap<float> dYvec(dY.data<float>(), dY.size());
-  EigenVectorArrayMap<float> dXvec(dX->mutable_data<float>(), dX->size());
+  EigenVectorArrayMap<float> dXvec(
+      dX->template mutable_data<float>(), dX->size());
 
   const float la = lambda_ * alpha_;
   dXvec = (Yvec > 0).select(lambda_ * dYvec, dYvec * (Yvec + la));

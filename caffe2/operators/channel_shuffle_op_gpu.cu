@@ -1,5 +1,5 @@
 #include "caffe2/core/context_gpu.h"
-#include "channel_shuffle_op.h"
+#include "caffe2/operators/channel_shuffle_op.h"
 
 namespace caffe2 {
 
@@ -42,7 +42,7 @@ __global__ void ChannelShuffleNHWCKernel(
 }
 
 template <>
-bool ChannelShuffleOp<CUDAContext>::RunOnDeviceWithOrderNCHW() {
+bool ChannelShuffleOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
   const auto& X = Input(0);
   auto* Y = Output(0);
   Y->ResizeLike(X);
@@ -56,12 +56,12 @@ bool ChannelShuffleOp<CUDAContext>::RunOnDeviceWithOrderNCHW() {
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(
-      X.size(), S, C, G, K, X.data<float>(), Y->mutable_data<float>());
+      X.size(), S, C, G, K, X.data<float>(), Y->template mutable_data<float>());
   return true;
 }
 
 template <>
-bool ChannelShuffleOp<CUDAContext>::RunOnDeviceWithOrderNHWC() {
+bool ChannelShuffleOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
   const auto& X = Input(0);
   auto* Y = Output(0);
   Y->ResizeLike(X);
@@ -74,12 +74,12 @@ bool ChannelShuffleOp<CUDAContext>::RunOnDeviceWithOrderNHWC() {
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(
-      X.size(), G, K, X.data<float>(), Y->mutable_data<float>());
+      X.size(), G, K, X.data<float>(), Y->template mutable_data<float>());
   return true;
 }
 
 template <>
-bool ChannelShuffleGradientOp<CUDAContext>::RunOnDeviceWithOrderNCHW() {
+bool ChannelShuffleGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
   const auto& dY = Input(0);
   auto* dX = Output(0);
   dX->ResizeLike(dY);
@@ -93,12 +93,18 @@ bool ChannelShuffleGradientOp<CUDAContext>::RunOnDeviceWithOrderNCHW() {
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(
-      dY.size(), S, C, K, G, dY.data<float>(), dX->mutable_data<float>());
+      dY.size(),
+      S,
+      C,
+      K,
+      G,
+      dY.data<float>(),
+      dX->template mutable_data<float>());
   return true;
 }
 
 template <>
-bool ChannelShuffleGradientOp<CUDAContext>::RunOnDeviceWithOrderNHWC() {
+bool ChannelShuffleGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
   const auto& dY = Input(0);
   auto* dX = Output(0);
   dX->ResizeLike(dY);
@@ -111,12 +117,13 @@ bool ChannelShuffleGradientOp<CUDAContext>::RunOnDeviceWithOrderNHWC() {
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(
-      dY.size(), K, G, dY.data<float>(), dX->mutable_data<float>());
+      dY.size(), K, G, dY.data<float>(), dX->template mutable_data<float>());
   return true;
 }
 
-REGISTER_CUDA_OPERATOR(ChannelShuffle, ChannelShuffleOp<CUDAContext>);
+REGISTER_CUDA_OPERATOR(ChannelShuffle, ChannelShuffleOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(
     ChannelShuffleGradient,
-    ChannelShuffleGradientOp<CUDAContext>);
+    ChannelShuffleGradientOp<float, CUDAContext>);
+
 } // namespace caffe2

@@ -10,6 +10,7 @@
 #include <ATen/detail/CUDAHooksInterface.h>
 
 #include "THC/THC.h"
+#include <THC/THCGeneral.hpp>
 
 #if AT_CUDNN_ENABLED()
 #include "ATen/cudnn/cudnn-wrapper.h"
@@ -50,10 +51,10 @@ void unchecked_set_device(int32_t device) {
 
 struct DynamicCUDAInterfaceSetter {
   DynamicCUDAInterfaceSetter() {
-    at::detail::DynamicCUDAInterface::set_device = set_device;
-    at::detail::DynamicCUDAInterface::get_device = get_device;
-    at::detail::DynamicCUDAInterface::unchecked_set_device =
-        unchecked_set_device;
+    using at::detail::DynamicCUDAInterface;
+    DynamicCUDAInterface::set_device = set_device;
+    DynamicCUDAInterface::get_device = get_device;
+    DynamicCUDAInterface::unchecked_set_device = unchecked_set_device;
   }
 };
 
@@ -68,8 +69,9 @@ DynamicCUDAInterfaceSetter _;
 // let's not if we don't need to!)
 std::unique_ptr<THCState, void (*)(THCState*)> CUDAHooks::initCUDA() const {
   THCState* thc_state = THCState_alloc();
+  // Caching allocator has no context
   THCState_setDeviceAllocator(thc_state, THCCachingAllocator_get());
-  thc_state->cudaHostAllocator = &THCCachingHostAllocator;
+  thc_state->cudaHostAllocator = getTHCCachingHostAllocator();
   THCudaInit(thc_state);
   return std::unique_ptr<THCState, void (*)(THCState*)>(
       thc_state, [](THCState* p) {
@@ -96,29 +98,6 @@ bool CUDAHooks::hasCuDNN() const {
   return AT_CUDNN_ENABLED();
 }
 
-cudaStream_t CUDAHooks::getCurrentCUDAStream(THCState* thc_state) const {
-  return THCState_getCurrentStream(thc_state);
-}
-cudaStream_t CUDAHooks::getCurrentCUDAStreamOnDevice(
-    THCState* thc_state,
-    int64_t device) const {
-  return THCState_getCurrentStreamOnDevice(thc_state, device);
-}
-#ifndef __HIP_PLATFORM_HCC__
-cusparseHandle_t CUDAHooks::getCurrentCUDASparseHandle(THCState* thc_state) const {
-  return THCState_getCurrentSparseHandle(thc_state);
-}
-#endif
-struct cudaDeviceProp* CUDAHooks::getCurrentDeviceProperties(
-    THCState* thc_state) const {
-  return THCState_getCurrentDeviceProperties(thc_state);
-}
-struct cudaDeviceProp* CUDAHooks::getDeviceProperties(
-    THCState* thc_state,
-    int device) const {
-  return THCState_getDeviceProperties(thc_state, device);
-}
-
 int64_t CUDAHooks::current_device() const {
   int device;
   cudaError_t err = cudaGetDevice(&device);
@@ -143,7 +122,7 @@ bool CUDAHooks::compiledWithCuDNN() const {
 bool CUDAHooks::supportsDilatedConvolutionWithCuDNN() const {
 #if AT_CUDNN_ENABLED()
   cudaDeviceProp* prop =
-      getCurrentDeviceProperties(globalContext().getTHCState());
+      THCState_getCurrentDeviceProperties(globalContext().getTHCState());
   // NOTE: extra parenthesis around numbers disable clang warnings about
   // dead code
   return (

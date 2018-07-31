@@ -34,10 +34,22 @@ Containers
 .. autoclass:: ModuleList
     :members:
 
+:hidden:`ModuleDict`
+~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: ModuleDict
+    :members:
+
 :hidden:`ParameterList`
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: ParameterList
+    :members:
+
+:hidden:`ParameterDict`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: ParameterDict
     :members:
 
 Convolution layers
@@ -80,16 +92,16 @@ Convolution layers
 .. autoclass:: ConvTranspose3d
     :members:
 
+:hidden:`Unfold`
+~~~~~~~~~~~~~~~~
+
+.. autoclass:: Unfold
+    :members:
+
 :hidden:`Fold`
 ~~~~~~~~~~~~~~
 
 .. autoclass:: Fold
-    :members:
-
-:hidden:`Unfold`
-~~~~~~~~~~~~~~~
-
-.. autoclass:: Unfold
     :members:
 
 
@@ -428,7 +440,7 @@ Normalization layers
 .. autoclass:: GroupNorm
     :members:
 
-    :hidden:`InstanceNorm1d`
+:hidden:`InstanceNorm1d`
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: InstanceNorm1d
@@ -735,12 +747,12 @@ Utilities
 .. autofunction:: torch.nn.utils.clip_grad_value_
 
 :hidden:`parameters_to_vector`
-~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: torch.nn.utils.parameters_to_vector
 
 :hidden:`vector_to_parameters`
-~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: torch.nn.utils.vector_to_parameters
 
@@ -835,15 +847,15 @@ Convolution functions
 
 .. autofunction:: conv_transpose3d
 
-:hidden:`fold`
-~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: fold
-
 :hidden:`unfold`
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: unfold
+
+:hidden:`fold`
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: fold
 
 Pooling functions
 ----------------------------------
@@ -1035,7 +1047,7 @@ Non-linear activation functions
 .. autofunction:: softshrink
 
 :hidden:`gumbel_softmax`
-~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: gumbel_softmax
 
@@ -1089,6 +1101,11 @@ Linear functions
 ~~~~~~~~~~~~~~~~
 
 .. autofunction:: linear
+
+:hidden:`bilinear`
+~~~~~~~~~~~~~~~~
+
+.. autofunction:: bilinear
 
 Dropout functions
 -----------------
@@ -1240,6 +1257,11 @@ Vision functions
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: pad
+
+:hidden:`interpolate`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: interpolate
 
 :hidden:`upsample`
 ~~~~~~~~~~~~~~~~~~~~~~~

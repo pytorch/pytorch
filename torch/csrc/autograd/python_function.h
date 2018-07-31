@@ -37,7 +37,7 @@ struct VariableInfo {
 struct PyFunction : public Function {
   PyFunction(PyObject* obj) : obj(obj) {}
 
-  virtual variable_list apply(const variable_list& inputs) override;
+  virtual variable_list apply(variable_list&& inputs) override;
   variable_list legacy_apply(const variable_list& inputs);
 
   virtual void release_variables() override;
@@ -90,7 +90,6 @@ struct THPFunction {
     // For each input, true if the input is a THPVariable
     std::vector<bool> is_variable_input;
     char has_freed_buffers;
-    char is_traced;
 
     // The C++ wrapper for this Python function.
     // See a comment in THPFunction_asFunction for details about this field.

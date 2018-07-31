@@ -47,11 +47,12 @@ RNNOptionsBase::RNNOptionsBase(int64_t input_size, int64_t hidden_size)
 
 template <typename Derived>
 RNNImplBase<Derived>::RNNImplBase(
-    RNNOptionsBase options,
+    RNNOptionsBase options_,
     at::optional<CuDNNMode> cudnn_mode,
     int64_t number_of_gates,
     bool has_cell_state)
-    : options_(options),
+    : options(options_),
+      dropout(nullptr),
       number_of_gates_(number_of_gates),
       has_cell_state_(has_cell_state),
       cudnn_mode_(cudnn_mode) {
@@ -60,36 +61,36 @@ RNNImplBase<Derived>::RNNImplBase(
 
 template <typename Derived>
 void RNNImplBase<Derived>::reset() {
-  if (options_.dropout_ > 0.0) {
-    dropout_module_ = Dropout(options_.dropout_);
+  if (options.dropout_ > 0.0) {
+    dropout = Dropout(options.dropout_);
   }
 
-  ihw_.resize(options_.layers_);
-  hhw_.resize(options_.layers_);
-  ihb_.resize(options_.layers_);
-  hhb_.resize(options_.layers_);
+  w_ih.resize(options.layers_);
+  w_hh.resize(options.layers_);
+  b_ih.resize(options.layers_);
+  b_hh.resize(options.layers_);
 
-  const int64_t gate_size = options_.hidden_size_ * number_of_gates_;
+  const int64_t gate_size = options.hidden_size_ * number_of_gates_;
 
-  for (int64_t layer = 0; layer < options_.layers_; ++layer) {
+  for (int64_t layer = 0; layer < options.layers_; ++layer) {
     const int64_t input_size =
-        (layer == 0) ? options_.input_size_ : options_.hidden_size_;
-    ihw_[layer] = this->register_parameter(
+        (layer == 0) ? options.input_size_ : options.hidden_size_;
+    w_ih[layer] = this->register_parameter(
         "weight_ih_l" + std::to_string(layer),
         torch::empty({gate_size, input_size}));
-    hhw_[layer] = this->register_parameter(
+    w_hh[layer] = this->register_parameter(
         "weight_hh_l" + std::to_string(layer),
-        torch::empty({gate_size, options_.hidden_size_}));
+        torch::empty({gate_size, options.hidden_size_}));
 
-    if (options_.with_bias_) {
-      ihb_[layer] = this->register_parameter(
+    if (options.with_bias_) {
+      b_ih[layer] = this->register_parameter(
           "bias_ih_l" + std::to_string(layer), torch::empty({gate_size}));
-      hhb_[layer] = this->register_parameter(
+      b_hh[layer] = this->register_parameter(
           "bias_hh_l" + std::to_string(layer), torch::empty({gate_size}));
     }
   }
 
-  const auto stdv = 1.0 / std::sqrt(options_.hidden_size_);
+  const auto stdv = 1.0 / std::sqrt(options.hidden_size_);
   for (auto& p : this->parameters()) {
     p->data().uniform_(-stdv, stdv);
   }
@@ -107,12 +108,12 @@ RNNOutput RNNImplBase<Derived>::forward(Tensor input, Tensor state) {
 template <typename Derived>
 std::vector<Tensor> RNNImplBase<Derived>::flat_weights() const {
   std::vector<Tensor> flat;
-  for (int64_t layer = 0; layer < options_.layers_; layer++) {
-    flat.push_back(ihw_[layer]);
-    flat.push_back(hhw_[layer]);
-    if (options_.with_bias_) {
-      flat.push_back(ihb_[layer]);
-      flat.push_back(hhb_[layer]);
+  for (int64_t layer = 0; layer < options.layers_; layer++) {
+    flat.push_back(w_ih[layer]);
+    flat.push_back(w_hh[layer]);
+    if (options.with_bias_) {
+      flat.push_back(b_ih[layer]);
+      flat.push_back(b_hh[layer]);
     }
   }
   return flat;
@@ -127,12 +128,12 @@ bool RNNImplBase<Derived>::use_cudnn(Tensor sample) const {
 template <typename Derived>
 Tensor RNNImplBase<Derived>::create_dropout_state(Tensor input) const {
   static const int64_t dropout_seed =
-      torch::ones({}, torch::kInt64).random_().toCLong();
-  if (options_.dropout_ > 0) {
+      torch::empty({}, torch::kInt64).random_().toCLong();
+  if (options.dropout_ > 0) {
     torch::DeviceGuard guard(input.device());
     return torch::_cudnn_init_dropout_state(
         input.type().toScalarType(torch::kUInt8),
-        options_.dropout_,
+        options.dropout_,
         this->is_training(),
         dropout_seed);
   }
@@ -144,16 +145,16 @@ RNNOutput RNNImplBase<Derived>::autograd_forward(Tensor input, Tensor state) {
   std::vector<Tensor> new_state;
   auto has_hidden = state.defined();
   auto layer_dimension = has_hidden ? state.ndimension() - 3 : -1;
-  for (int64_t layer = 0; layer < options_.layers_; layer++) {
+  for (int64_t layer = 0; layer < options.layers_; layer++) {
     new_state.push_back(
         has_hidden ? state.select(layer_dimension, layer) : Tensor());
   }
 
   auto output = torch::zeros(
-      {input.size(0), input.size(1), options_.hidden_size_}, input.options());
+      {input.size(0), input.size(1), options.hidden_size_}, input.options());
   for (int64_t t = 0; t < input.size(0); t++) {
     auto x = input.select(0, t);
-    for (int64_t i = 0; i < options_.layers_; i++) {
+    for (int64_t i = 0; i < options.layers_; i++) {
       // cell_forward() returns a stacked tensor of one or more cell states.
       auto layer_output = cell_forward(x, new_state[i], i);
       // If there are multiple cell states, keep all. If there is only one,
@@ -162,8 +163,8 @@ RNNOutput RNNImplBase<Derived>::autograd_forward(Tensor input, Tensor state) {
       // x should always be the hidden cell state h, assumed to be the zero-th.
       x = layer_output[0];
       output.select(0, t).copy_(x);
-      if (options_.dropout_ > 0 && i != options_.layers_ - 1) {
-        x = dropout_module_->forward(x);
+      if (options.dropout_ > 0 && i != options.layers_ - 1) {
+        x = dropout->forward(x);
       }
     }
   }
@@ -178,8 +179,8 @@ RNNOutput RNNImplBase<Derived>::autograd_forward(Tensor input, Tensor state) {
 template <typename Derived>
 void RNNImplBase<Derived>::flatten_parameters_for_cudnn() {
   data_ptrs_.clear();
-  const auto any_parameter = ihw_.at(0);
-  if (!use_cudnn(/*sample=*/ihw_.at(0))) {
+  const auto any_parameter = w_ih.at(0);
+  if (!use_cudnn(/*sample=*/w_ih.at(0))) {
     return;
   }
   std::unordered_set<void*> unique_data_ptrs;
@@ -200,11 +201,11 @@ void RNNImplBase<Derived>::flatten_parameters_for_cudnn() {
     NoGradGuard guard;
     flat_weights_ = torch::_cudnn_rnn_flatten_weight(
         TensorListView(flat_weights()),
-        /*weight_stride=*/options_.with_bias_ ? 4 : 2,
-        options_.input_size_,
+        /*weight_stride=*/options.with_bias_ ? 4 : 2,
+        options.input_size_,
         static_cast<int64_t>(*cudnn_mode_),
-        options_.hidden_size_,
-        options_.layers_,
+        options.hidden_size_,
+        options.layers_,
         /*batch_first=*/false,
         /*bidirectional=*/false);
   }
@@ -225,11 +226,11 @@ RNNOutput RNNImplBase<Derived>::CUDNN_forward(Tensor input, Tensor state) {
     }
   } else {
     hx = torch::zeros(
-        {options_.layers_, input.size(1), options_.hidden_size_},
+        {options.layers_, input.size(1), options.hidden_size_},
         input.options());
     if (has_cell_state_) {
       cx = torch::zeros(
-          {options_.layers_, input.size(1), options_.hidden_size_},
+          {options.layers_, input.size(1), options.hidden_size_},
           input.options());
     }
   }
@@ -248,15 +249,15 @@ RNNOutput RNNImplBase<Derived>::CUDNN_forward(Tensor input, Tensor state) {
   auto cudnn_output = torch::_cudnn_rnn(
       /*input=*/input,
       /*weight=*/TensorListView(flat_weights()),
-      /*weight_stride0=*/options_.with_bias_ ? 4 : 2,
+      /*weight_stride0=*/options.with_bias_ ? 4 : 2,
       /*weight_buf=*/flat_weights_,
       /*hx=*/hx,
       /*cx=*/cx,
       /*mode=*/static_cast<int64_t>(*cudnn_mode_),
-      /*hidden_size=*/options_.hidden_size_,
-      /*num_layers=*/options_.layers_,
+      /*hidden_size=*/options.hidden_size_,
+      /*num_layers=*/options.layers_,
       /*batch_first=*/false,
-      /*dropout=*/options_.dropout_,
+      /*dropout=*/options.dropout_,
       /*train=*/this->is_training(),
       /*bidirectional=*/false,
       /*batch_sizes=*/{},
@@ -318,8 +319,8 @@ RNNImpl::RNNImpl(RNNOptions options)
               .with_bias(options.with_bias_)
               .dropout(options.dropout_),
           /*cudnn_mode=*/static_cast<CuDNNMode>(options.activation_)),
-      options_(options) {
-  switch (options_.activation_) {
+      options(options) {
+  switch (options.activation_) {
     case RNNActivation::ReLU: {
       activation_function_ = torch::relu;
       break;
@@ -334,16 +335,12 @@ RNNImpl::RNNImpl(RNNOptions options)
 Tensor RNNImpl::cell_forward(Tensor input, Tensor state, int64_t layer) {
   auto hx = state.defined()
       ? state
-      : torch::zeros({input.size(0), options_.hidden_size_}, input.options());
+      : torch::zeros({input.size(0), options.hidden_size_}, input.options());
 
-  auto h = linear(input, ihw_[layer], ihb_[layer]) +
-      linear(hx, hhw_[layer], hhb_[layer]);
+  auto h = linear(input, w_ih[layer], b_ih[layer]) +
+      linear(hx, w_hh[layer], b_hh[layer]);
 
   return torch::stack(activation_function_(h));
-}
-
-const RNNOptions& RNNImpl::options() const noexcept {
-  return options_;
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ LSTM ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -358,13 +355,12 @@ LSTMImpl::LSTMImpl(LSTMOptions options)
 Tensor LSTMImpl::cell_forward(Tensor input, Tensor state, int64_t layer) {
   auto hid = state.defined()
       ? state
-      : torch::zeros(
-            {2, input.size(0), options_.hidden_size_}, input.options());
+      : torch::zeros({2, input.size(0), options.hidden_size_}, input.options());
   auto hx = hid[0];
   auto cx = hid[1];
 
-  auto gates = linear(input, ihw_[layer], ihb_[layer]) +
-      linear(hx, hhw_[layer], hhb_[layer]);
+  auto gates = linear(input, w_ih[layer], b_ih[layer]) +
+      linear(hx, w_hh[layer], b_hh[layer]);
 
   auto chunked = gates.chunk(4, 1);
   auto in_gate = chunked[0].sigmoid();
@@ -378,10 +374,6 @@ Tensor LSTMImpl::cell_forward(Tensor input, Tensor state, int64_t layer) {
   return torch::stack(TensorListView{hy, cy}, 0);
 }
 
-const LSTMOptions& LSTMImpl::options() const noexcept {
-  return options_;
-}
-
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ GRU ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 GRUImpl::GRUImpl(GRUOptions options)
@@ -393,10 +385,10 @@ GRUImpl::GRUImpl(GRUOptions options)
 Tensor GRUImpl::cell_forward(Tensor input, Tensor state, int64_t layer) {
   auto hx = state.defined()
       ? state
-      : torch::zeros({input.size(0), options_.hidden_size_}, input.options());
+      : torch::zeros({input.size(0), options.hidden_size_}, input.options());
 
-  auto gi = linear(input, ihw_[layer], ihb_[layer]);
-  auto gh = linear(input, hhw_[layer], hhb_[layer]);
+  auto gi = linear(input, w_ih[layer], b_ih[layer]);
+  auto gh = linear(input, w_hh[layer], b_hh[layer]);
   auto gic = gi.chunk(3, 1);
   auto ghc = gh.chunk(3, 1);
 
@@ -406,10 +398,6 @@ Tensor GRUImpl::cell_forward(Tensor input, Tensor state, int64_t layer) {
   auto hy = new_gate + input_gate * (hx - new_gate);
 
   return torch::stack(TensorListView(hy));
-}
-
-const GRUOptions& GRUImpl::options() const noexcept {
-  return options_;
 }
 } // namespace nn
 } // namespace torch

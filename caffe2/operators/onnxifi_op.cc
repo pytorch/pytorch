@@ -7,7 +7,7 @@ namespace {
 void BlobToTensorDescriptor(
     const std::string& name,
     Workspace* ws,
-    onnxTensorDescriptor* desc,
+    onnxTensorDescriptorV1* desc,
     std::vector<std::vector<uint64_t>>* shapes) {
   const Blob* blob = ws->GetBlob(name);
   CAFFE_ENFORCE(blob, "Blob ", name, " doesn't exist");
@@ -15,10 +15,11 @@ void BlobToTensorDescriptor(
   // Memory type
   // We only allow weights to be CPU tensor for now
   CAFFE_ENFORCE(
-      blob->template IsType<TensorCPU>(),
+      blob->template IsType<Tensor>(CPU),
       "Initialization blob ",
       name,
       " needs to be TensorCPU");
+  desc->tag = ONNXIFI_TAG_TENSOR_DESCRIPTOR_V1;
   desc->memoryType = ONNXIFI_MEMORY_TYPE_CPU;
 
   // Data type
@@ -43,19 +44,19 @@ void BlobToTensorDescriptor(
 } // namespace
 
 template <>
-std::vector<onnxTensorDescriptor>
+std::vector<onnxTensorDescriptorV1>
 OnnxifiOp<float, CPUContext>::BuildInitializationList(
     Workspace* ws,
     std::unordered_set<std::string>* initialization_list,
     std::vector<std::string>* weight_names,
     std::vector<std::vector<uint64_t>>* weight_shapes) {
   const std::vector<string>& ws_blobs = ws->Blobs();
-  std::vector<onnxTensorDescriptor> descs;
+  std::vector<onnxTensorDescriptorV1> descs;
   for (const auto& s : ws_blobs) {
     auto it = initialization_list->find(s);
     if (it != initialization_list->end()) {
       weight_names->emplace_back(s);
-      onnxTensorDescriptor tensor_desc;
+      onnxTensorDescriptorV1 tensor_desc;
       tensor_desc.name = weight_names->back().c_str();
       BlobToTensorDescriptor(s, ws, &tensor_desc, weight_shapes);
       descs.push_back(tensor_desc);
@@ -91,6 +92,10 @@ bool OnnxifiOp<float, CPUContext>::RunOnDevice() {
     tensor_descriptor.dataType = ONNXIFI_DATATYPE_FLOAT32;
     tensor_descriptor.memoryType = ONNXIFI_MEMORY_TYPE_CPU;
     tensor_descriptor.dimensions = tensor_dims.size();
+    CAFFE_ENFORCE(
+        tensor_descriptor.dimensions != 0,
+        tensor_descriptor.name,
+        " has 0 dim");
     output_shapes_.emplace_back(tensor_dims.cbegin(), tensor_dims.cend());
     tensor_descriptor.shape = output_shapes_.back().data();
     tensor_descriptor.buffer =
@@ -106,22 +111,23 @@ bool OnnxifiOp<float, CPUContext>::RunOnDevice() {
           output_desc_.data()),
       ONNXIFI_STATUS_SUCCESS);
 
-  onnxMemoryFence input_fence;
-  input_fence.event = nullptr;
+  onnxMemoryFenceV1 input_fence;
+  input_fence.tag = ONNXIFI_TAG_MEMORY_FENCE_V1;
   input_fence.type = ONNXIFI_SYNCHRONIZATION_EVENT;
   CAFFE_ENFORCE_EQ(
-      lib_->onnxInitEvent(backend_, input_fence.event), ONNXIFI_STATUS_SUCCESS);
-  onnxMemoryFence output_fence;
+      lib_->onnxInitEvent(backend_, &input_fence.event),
+      ONNXIFI_STATUS_SUCCESS);
+  onnxMemoryFenceV1 output_fence;
+  output_fence.tag = ONNXIFI_TAG_MEMORY_FENCE_V1;
   output_fence.type = ONNXIFI_SYNCHRONIZATION_EVENT;
-  output_fence.event = nullptr;
 
   // Call the asycn run on backend, singal event on input fence and wait for the
   // event on output fence
   CAFFE_ENFORCE_EQ(
+      lib_->onnxSignalEvent(input_fence.event), ONNXIFI_STATUS_SUCCESS);
+  CAFFE_ENFORCE_EQ(
       lib_->onnxRunGraph(graph_, &input_fence, &output_fence),
       ONNXIFI_STATUS_SUCCESS);
-  CAFFE_ENFORCE_EQ(
-      lib_->onnxSignalEvent(input_fence.event), ONNXIFI_STATUS_SUCCESS);
   CAFFE_ENFORCE_EQ(
       lib_->onnxWaitEvent(output_fence.event), ONNXIFI_STATUS_SUCCESS);
 

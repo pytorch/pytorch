@@ -21,25 +21,32 @@ class OptimizerBase {
   using ParameterCursor = torch::detail::CursorBase<Tensor>;
 
   /// Constructs the `Optimizer` from a vector of parameters.
-  explicit OptimizerBase(std::vector<Tensor> parameters)
-      : parameters_(std::move(parameters)) {}
+  explicit OptimizerBase(std::vector<Tensor> parameters);
 
   /// Constructs the `Optimizer` from a ParameterCursor, such as
   /// `nn::Module::parameters()` returns.
-  explicit OptimizerBase(ParameterCursor cursor) {
-    parameters_.reserve(cursor.size());
-    for (const auto& parameter : cursor) {
-      parameters_.push_back(*parameter);
-    }
-  }
+  explicit OptimizerBase(const ParameterCursor& cursor);
 
   virtual ~OptimizerBase() = default;
+
+  /// Adds the given vector of parameters to the optimizer's parameter list.
+  /// Override this method if you want to modify the way parameters are added to
+  /// the `Optimizer`.
+  virtual void add_parameters(const std::vector<Tensor>& parameters);
+
+  /// Adds the `ParameterCursor`'s parameters to the optimizer's parameter list.
+  /// NOTE: Calls the `vector<Tensor>` overload of `add_parameters` -- override
+  /// that method if you want to modify the behavior of `add_parameters`.
+  virtual void add_parameters(const ParameterCursor& cursor);
 
   /// Zeros out the gradients of all parameters.
   virtual void zero_grad();
 
   /// Provides a reference to the parameters this optimizer holds.
   const std::vector<Tensor>& parameters() const noexcept;
+
+  /// Returns the number of parameters referenced by the optimizer.
+  size_t size() const noexcept;
 
  protected:
   OptimizerBase() = default;

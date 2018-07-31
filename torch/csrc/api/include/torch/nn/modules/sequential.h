@@ -20,24 +20,34 @@ namespace nn {
 /// A `Sequential` module is a container for any number of other modules. Its
 /// `forward()` method chains outputs to inputs and returns the final output.
 /// The `Sequential` class reference semantics.
-class Sequential : public Cloneable<Sequential> {
+class SequentialImpl : public Cloneable<SequentialImpl> {
  public:
-  using Iterator = std::vector<std::shared_ptr<AnyModule>>::iterator;
+  using Iterator = std::vector<AnyModule>::iterator;
+  using ConstIterator = std::vector<AnyModule>::const_iterator;
 
   /// Constructs the `Sequential` from a pack of modules. Each module can either
   /// be a plain value (e.g. `Linear`) or a boxed value (e.g.
   /// `shared_ptr<Linear>`). Unboxed modules will be moved into `shared_ptr`s
   /// internally.
-  template <
-      typename... Modules,
-      typename = disable_if_contains_t<Sequential, Modules...>>
-  explicit Sequential(Modules&&... modules) {
+  template <typename... Modules>
+  explicit SequentialImpl(Modules&&... modules) {
     modules_.reserve(sizeof...(Modules));
     push_back(std::forward<Modules>(modules)...);
   }
 
-  /// reset() is empty for `Sequential`, since it does not have parameter of its
-  /// own.
+  /// Special cloning function for `Sequential` because it does not use
+  /// `reset()`.
+  std::shared_ptr<Module> clone(
+      at::optional<Device> device = at::nullopt) const override {
+    auto clone = std::make_shared<SequentialImpl>();
+    for (const auto& module : modules_) {
+      clone->push_back(module.clone(device));
+    }
+    return clone;
+  }
+
+  /// `reset()` is empty for `Sequential`, since it does not have parameter of
+  /// its own.
   void reset() override {}
 
   /// Feeds the `inputs` to the first module, then chains the output of each
@@ -47,11 +57,10 @@ class Sequential : public Cloneable<Sequential> {
     AT_CHECK(!is_empty(), "Cannot call forward() on an empty Sequential");
 
     auto iterator = modules_.begin();
-    auto input =
-        (*iterator)->forward(std::forward<ArgumentTypes>(arguments)...);
+    auto input = iterator->forward(std::forward<ArgumentTypes>(arguments)...);
 
     for (++iterator; iterator != modules_.end(); ++iterator) {
-      input = (*iterator)->forward(std::move(input));
+      input = iterator->forward(std::move(input));
     }
 
     // Check the return value and give a nice error message if the requsted
@@ -72,7 +81,7 @@ class Sequential : public Cloneable<Sequential> {
     // Nesting Sequential doesn't work because `forward()`'s return type is
     // templatized, so it'll give a nasty compiler error.
     static_assert(
-        !std::is_same<Sequential, ModuleType>::value,
+        !std::is_same<SequentialImpl, ModuleType>::value,
         "Sequential is not nestable");
     static_assert(
         torch::detail::is_module<ModuleType>::value,
@@ -80,9 +89,7 @@ class Sequential : public Cloneable<Sequential> {
     static_assert(
         torch::detail::has_forward<ModuleType>::value,
         "Can only add modules with a forward() method to Sequential");
-    modules_.push_back(std::make_shared<AnyModule>(std::move(module_ptr)));
-    const auto index = modules_.size() - 1;
-    register_module(std::to_string(index), modules_[index]->ptr());
+    push_back(AnyModule(std::move(module_ptr)));
   }
 
   /// Adds a new `Module` to the `Sequential` container, moving or copying it
@@ -90,7 +97,7 @@ class Sequential : public Cloneable<Sequential> {
   /// and letting the container deal with the boxing. This means you can write
   /// `Sequential(Module(3, 4))` instead of
   /// `Sequential(std::make_shared<Module>(3, 4))`.
-  template <typename M, typename = torch::detail::disable_if_module_holder_t<M>>
+  template <typename M, typename = torch::detail::enable_if_module_t<M>>
   void push_back(M&& module) {
     // Need to get rid of any reference components for make_unique.
     using Type = typename std::remove_reference<M>::type;
@@ -102,16 +109,30 @@ class Sequential : public Cloneable<Sequential> {
   /// `Sequential`.
   template <typename M>
   void push_back(const ModuleHolder<M>& module_holder) {
-    push_back(module_holder.get());
+    push_back(module_holder.ptr());
+  }
+
+  /// Iterates over the container and calls `push_back()` on each value.
+  template <typename Container>
+  void extend(const Container& container) {
+    for (const auto& module : container) {
+      push_back(module);
+    }
   }
 
   /// Returns an iterator to the start of the `Sequential`.
   Iterator begin() {
     return modules_.begin();
   }
+  ConstIterator begin() const {
+    return modules_.begin();
+  }
 
   /// Returns an iterator to the end of the `Sequential`.
   Iterator end() {
+    return modules_.end();
+  }
+  ConstIterator end() const {
     return modules_.end();
   }
 
@@ -124,7 +145,7 @@ class Sequential : public Cloneable<Sequential> {
         torch::detail::is_module<T>::value,
         "Can only call Sequential::at with an nn::Module type");
     AT_CHECK(index < size(), "Index out of range");
-    return modules_[index]->get<T>();
+    return modules_[index].get<T>();
   }
 
   /// Attempts to return the module at the given index as the requested type.
@@ -136,7 +157,7 @@ class Sequential : public Cloneable<Sequential> {
         torch::detail::is_module<T>::value,
         "Can only call Sequential::at with an nn::Module type");
     AT_CHECK(index < size(), "Index out of range");
-    return modules_[index]->get<T>();
+    return modules_[index].get<T>();
   }
 
   /// Attempts to return a `std::shared_ptr` whose dynamic type is that of the
@@ -144,7 +165,7 @@ class Sequential : public Cloneable<Sequential> {
   /// out of bounds.
   std::shared_ptr<Module> ptr(size_t index) const {
     AT_CHECK(index < size(), "Index out of range");
-    return modules_[index]->ptr();
+    return modules_[index].ptr();
   }
 
   /// Attempts to return a `std::shared_ptr` whose type is the one provided.
@@ -156,7 +177,7 @@ class Sequential : public Cloneable<Sequential> {
         torch::detail::is_module<T>::value,
         "Can only call Sequential::ptr with an nn::Module type");
     AT_CHECK(index < size(), "Index out of range");
-    return modules_[index]->ptr<T>();
+    return modules_[index].ptr<T>();
   }
 
   /// Like `ptr(index)`.
@@ -188,13 +209,22 @@ class Sequential : public Cloneable<Sequential> {
     push_back(std::forward<Second>(second), std::forward<Rest>(rest)...);
   }
 
+  /// Adds a type-erased `AnyModule` to the `Sequential`.
+  void push_back(AnyModule any_module) {
+    modules_.push_back(std::move(any_module));
+    const auto index = modules_.size() - 1;
+    register_module(std::to_string(index), modules_[index].ptr());
+  }
+
   /// The base case, when the list of modules is empty.
   void push_back() {}
 
   // Box the AnyModules to give Sequential reference semantics, like the rest of
   // the API. Note that this is not required otherwise, this could just be a
   // `vector<AnyModule>`.
-  std::vector<std::shared_ptr<AnyModule>> modules_;
+  std::vector<AnyModule> modules_;
 };
+
+TORCH_MODULE(Sequential);
 } // namespace nn
 } // namespace torch

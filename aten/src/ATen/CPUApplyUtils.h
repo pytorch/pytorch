@@ -253,16 +253,15 @@ apply_op(int64_t numel, int64_t offset, const Op& op, Args... iters) {
   }
 }
 
+
 inline void apply_kernel(){};
 
+// TODO: Deal elegantly with 0-dim tensors. iters.strides_ of 0-dim
+// strided_tensor_iter will be of size 0 for dim 0 and iters.strides_[iters.dim_
+// - 1] will index at -1. C++14 integer_sequence could be of use here.
 template <typename Op, typename... Args>
 inline void
 apply_kernel(int64_t numel, int64_t offset, const Op& op, Args... iters) {
-  // For 0-dim tensors
-  if (numel == 1 && max_dim(iters...) == 0) {
-    op(1, iters.data_..., iters.strides_[iters.dim_ - 1]...);
-    return;
-  }
   if (offset > 0)
     forward(offset, iters...);
   int64_t size = std::min(numel, max_iterate_size(iters...));
@@ -284,6 +283,10 @@ inline void
 CPU_tensor_parallel_kernel_apply2(Tensor tensor1, Tensor tensor2, const Op op) {
   if (!_apply_preamble({tensor1, tensor2}))
     return;
+  if (tensor1.numel() == 1) {
+    op(1, tensor1.data<scalar1>(), tensor2.data<scalar2>(), 0, 0);
+    return;
+  }
   if (tensor1.ndimension() < 8 && tensor2.ndimension() < 8) {
     parallel_for(
         0,

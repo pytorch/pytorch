@@ -1,8 +1,12 @@
 ##############################################################################
 # Macro to update cached options.
 macro (caffe2_update_option variable value)
-  get_property(__help_string CACHE ${variable} PROPERTY HELPSTRING)
-  set(${variable} ${value} CACHE BOOL ${__help_string} FORCE)
+  if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
+    get_property(__help_string CACHE ${variable} PROPERTY HELPSTRING)
+    set(${variable} ${value} CACHE BOOL ${__help_string} FORCE)
+  else()
+    set(${variable} ${value})
+  endif()
 endmacro()
 
 
@@ -176,6 +180,7 @@ function(aten_compile_options libname)
     -Wextra
     -fexceptions
     -Wno-missing-field-initializers
+    -Wno-strict-overflow
     -Wno-type-limits
     -Wno-unused-parameter
     -Wno-unknown-warning-option

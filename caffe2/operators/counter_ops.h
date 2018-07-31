@@ -75,7 +75,7 @@ class ResetCounterOp final : public Operator<Context> {
     auto& counterPtr = OperatorBase::Input<std::unique_ptr<Counter<T>>>(0);
     auto previous = counterPtr->reset(init_count_);
     if (OutputSize() == 1) {
-      auto* output = OperatorBase::Output<TensorCPU>(0);
+      auto* output = Output(0);
       output->Resize();
       *output->template mutable_data<T>() = previous;
     }
@@ -96,7 +96,7 @@ class CountDownOp final : public Operator<Context> {
 
   bool RunOnDevice() override {
     auto& counterPtr = OperatorBase::Input<std::unique_ptr<Counter<T>>>(0);
-    auto* output = OperatorBase::Output<TensorCPU>(0);
+    auto* output = Output(0);
     output->Resize(std::vector<int>{});
     *output->template mutable_data<bool>() = counterPtr->countDown();
     return true;
@@ -113,7 +113,7 @@ class CheckCounterDoneOp final : public Operator<Context> {
 
   bool RunOnDevice() override {
     auto& counterPtr = OperatorBase::Input<std::unique_ptr<Counter<T>>>(0);
-    auto* output = OperatorBase::Output<TensorCPU>(0);
+    auto* output = Output(0);
     output->Resize(std::vector<int>{});
     *output->template mutable_data<bool>() = counterPtr->checkIfDone();
     return true;
@@ -130,7 +130,7 @@ class CountUpOp final : public Operator<Context> {
 
   bool RunOnDevice() override {
     auto& counterPtr = OperatorBase::Input<std::unique_ptr<Counter<T>>>(0);
-    auto* output = OperatorBase::Output<TensorCPU>(0);
+    auto* output = Output(0);
     output->Resize(std::vector<int>{});
     *output->template mutable_data<T>() = counterPtr->countUp();
     return true;
@@ -147,7 +147,7 @@ class RetrieveCountOp final : public Operator<Context> {
 
   bool RunOnDevice() override {
     auto& counterPtr = OperatorBase::Input<std::unique_ptr<Counter<T>>>(0);
-    auto* output = OperatorBase::Output<TensorCPU>(0);
+    auto* output = Output(0);
     output->Resize(std::vector<int>{});
     *output->template mutable_data<T>() = counterPtr->retrieve();
     return true;

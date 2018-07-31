@@ -2,46 +2,51 @@
 
 set -ex
 
+pip install --user --no-cache-dir hypothesis==3.59.0
+
+
 # The INSTALL_PREFIX here must match up with test.sh
 INSTALL_PREFIX="/usr/local/caffe2"
 LOCAL_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 ROOT_DIR=$(cd "$LOCAL_DIR"/../.. && pwd)
 CMAKE_ARGS=()
+SCCACHE="$(which sccache)"
 
+if [ "$(which gcc)" != "/root/sccache/gcc" ]; then
+  # Setup SCCACHE
+  ###############################################################################
+  # Setup sccache if SCCACHE_BUCKET is set
+  if [ -n "${SCCACHE_BUCKET}" ]; then
+    mkdir -p ./sccache
 
-# Setup SCCACHE
-###############################################################################
-# Setup sccache if SCCACHE_BUCKET is set
-if [ -n "${SCCACHE_BUCKET}" ]; then
-  mkdir -p ./sccache
+    SCCACHE="$(which sccache)"
+    if [ -z "${SCCACHE}" ]; then
+      echo "Unable to find sccache..."
+      exit 1
+    fi
 
-  SCCACHE="$(which sccache)"
-  if [ -z "${SCCACHE}" ]; then
-    echo "Unable to find sccache..."
-    exit 1
+    # Setup wrapper scripts
+    for compiler in cc c++ gcc g++ x86_64-linux-gnu-gcc; do
+      (
+        echo "#!/bin/sh"
+        echo "exec $SCCACHE $(which $compiler) \"\$@\""
+      ) > "./sccache/$compiler"
+      chmod +x "./sccache/$compiler"
+    done
+
+    if [[ "${BUILD_ENVIRONMENT}" == *-cuda* ]]; then
+      (
+        echo "#!/bin/sh"
+        echo "exec $SCCACHE $(which nvcc) \"\$@\""
+      ) > "./sccache/nvcc"
+      chmod +x "./sccache/nvcc"
+    fi
+
+    export CACHE_WRAPPER_DIR="$PWD/sccache"
+
+    # CMake must find these wrapper scripts
+    export PATH="$CACHE_WRAPPER_DIR:$PATH"
   fi
-
-  # Setup wrapper scripts
-  for compiler in cc c++ gcc g++ x86_64-linux-gnu-gcc; do
-    (
-      echo "#!/bin/sh"
-      echo "exec $SCCACHE $(which $compiler) \"\$@\""
-    ) > "./sccache/$compiler"
-    chmod +x "./sccache/$compiler"
-  done
-
-  if [[ "${BUILD_ENVIRONMENT}" == *-cuda* ]]; then
-    (
-      echo "#!/bin/sh"
-      echo "exec $SCCACHE $(which nvcc) \"\$@\""
-    ) > "./sccache/nvcc"
-    chmod +x "./sccache/nvcc"
-  fi
-
-  export CACHE_WRAPPER_DIR="$PWD/sccache"
-
-  # CMake must find these wrapper scripts
-  export PATH="$CACHE_WRAPPER_DIR:$PATH"
 fi
 
 # Setup ccache if configured to use it (and not sccache)
@@ -90,11 +95,6 @@ if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
   "${ROOT_DIR}/scripts/build_android.sh" ${CMAKE_ARGS[*]} "$@"
   exit 0
 elif [[ "${BUILD_ENVIRONMENT}" == conda* ]]; then
-  # click (required by onnx) wants these set
-  # TODO don't think this fixes the problem for conda3 yet
-  export LANG=C.UTF-8
-  export LC_ALL=C.UTF-8
-
   "${ROOT_DIR}/scripts/build_anaconda.sh" --skip-tests --install-locally "$@"
   report_compile_cache_stats
 
@@ -124,7 +124,7 @@ CMAKE_ARGS+=("-DUSE_OBSERVERS=ON")
 CMAKE_ARGS+=("-DUSE_ZSTD=ON")
 CMAKE_ARGS+=("-DCMAKE_INSTALL_PREFIX=${INSTALL_PREFIX}")
 
-if [[ $BUILD_ENVIRONMENT == *-aten-* ]]; then
+if [[ $BUILD_ENVIRONMENT == *-aten-* || -n "$INTEGRATED" ]]; then
   if [[ CMAKE_ARGS != *USE_ATEN* ]] && [[ CMAKE_ARGS != *BUILD_ATEN* ]]; then
     CMAKE_ARGS+=("-DBUILD_ATEN=ON")
   fi
@@ -160,6 +160,9 @@ if [[ $BUILD_ENVIRONMENT == *rocm* ]]; then
   export LANG=C.UTF-8
   export LC_ALL=C.UTF-8
   export HCC_AMDGPU_TARGET=gfx900
+
+  ########## HIPIFY Caffe2 operators
+  ${PYTHON} "${ROOT_DIR}/tools/amd_build/build_caffe2_amd.py"
 fi
 
 # Try to include Redis support for Linux builds
@@ -198,6 +201,7 @@ if [[ "${BUILD_ENVIRONMENT}" == *-cuda* ]] && [ -n "${SCCACHE}" ]; then
 else
   MAX_JOBS=$(nproc)
 fi
+
 
 
 ###############################################################################

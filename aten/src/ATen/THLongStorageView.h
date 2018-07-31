@@ -1,7 +1,7 @@
 #pragma once
 
 #include "TH/TH.h"
-#include "TH/THStorage.hpp"
+#include "TH/THStorageFunctions.hpp"
 #include "TH/THTypeConversion.hpp"
 
 namespace at {
@@ -37,12 +37,11 @@ public:
   */
 
   THLongStorageView(ArrayRef<int64_t> ref, THLongStorageViewKind kind)
-  : zero_dim_to_null(false)
+  : storage(at::CTypeToScalarType<th::from_type<int64_t>>::to(), 0, getTHDefaultAllocator(), 0), zero_dim_to_null(false)
   {
     // zero_dim_to_one converts an empty ArrayRef into [1]
     // zero_dim_to_null converts an empty ArrayRef into a null THLongStorage
     bool zero_dim_to_one = false;
-    bool noelem_to_empty = false;
     switch (kind) {
       case THLongStorageViewKind::SIZE:
         zero_dim_to_one = true;
@@ -58,17 +57,14 @@ public:
       // make storage of size 0 actually a 1-length storage with 1 element
       // so that our 0-dim tensors get allocated as 1-dim inside TH
       one = 1;
-      storage.data_ptr = &one;
+      storage.data_ptr = {&one, kCPU}; // non-owning
       storage.size = 1;
     } else {
-      storage.data_ptr = (void*)(ref.data());
+      storage.data_ptr = {const_cast<void*>(static_cast<const void*>(ref.data())), kCPU}; // non-owning
       storage.size = ref.size();
     }
     storage.scalar_type = at::CTypeToScalarType<th::from_type<int64_t>>::to();
-    storage.refcount = 0;
-    storage.flag = 0;
-    storage.allocator = nullptr;
-    storage.allocatorContext = nullptr;
+    storage.set_resizable(false);
   }
 private:
   int64_t one;

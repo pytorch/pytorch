@@ -1,17 +1,23 @@
-#include "comm.h"
+#include <torch/csrc/cuda/comm.h>
 
-#include "torch/csrc/utils/tensor_flatten.h"
-#include "torch/csrc/cuda/device_set.h"
+#ifdef USE_CUDA
+
+#include <torch/csrc/cuda/device_set.h>
+#include <torch/csrc/utils/tensor_flatten.h>
+
 #ifdef USE_NCCL
-#include "torch/csrc/cuda/nccl.h"
+#include <torch/csrc/cuda/nccl.h>
 #endif
 
 #include <ATen/ATen.h>
+#include <ATen/cuda/CUDAGuard.h>
+#include <ATen/cuda/CUDAContext.h>
+#include <ATen/optional.h>
 
 #include <cstddef>
+#include <vector>
 
 namespace torch { namespace cuda {
-
 using namespace at;
 
 // Some operations can be performed more efficiently if we're handling tensors
@@ -111,4 +117,89 @@ tensor_list2d broadcast_coalesced(TensorList tensors, IntList devices, size_t bu
   return outputs;
 }
 
-}}
+std::vector<at::Tensor> scatter(
+    const at::Tensor& tensor,
+    at::IntList devices,
+    const at::optional<std::vector<int64_t>>& chunk_sizes,
+    int64_t dim,
+    const at::optional<std::vector<at::cuda::CUDAStream>>& streams) {
+  std::vector<at::Tensor> chunks;
+  if (chunk_sizes) {
+    const int64_t chunk_size_sum =
+        std::accumulate(chunk_sizes->begin(), chunk_sizes->end(), 0);
+    AT_CHECK(
+      chunk_size_sum == tensor.size(dim),
+      "given chunk sizes don't sum up to the tensor's size ",
+      "(sum(chunk_sizes) == ", chunk_size_sum,
+      ", but expected ", tensor.size(dim), ")");
+    chunks.reserve(chunk_sizes->size());
+    int64_t chunk_start = 0;
+    for (size_t chunk = 0; chunk < chunk_sizes->size(); ++chunk) {
+      const int64_t chunk_size = (*chunk_sizes)[chunk];
+      AT_CHECK(chunk_size > 0, "Chunk size must be positive");
+      chunks.push_back(tensor.narrow(dim, chunk_start, chunk_size));
+      chunk_start += chunk_size;
+    }
+    AT_ASSERT(chunks.size() == chunk_sizes->size());
+  } else {
+    chunks = tensor.chunk(/*chunks=*/devices.size(), /*dim=*/dim);
+  }
+  at::cuda::CUDAGuard cuda_guard;
+  for (size_t chunk = 0; chunk < chunks.size(); ++chunk) {
+    const auto device_index = static_cast<int32_t>(devices[chunk]);
+    if (streams) {
+      AT_CHECK(
+          (*streams)[chunk].device() == device_index,
+          "Expected the device associated with the stream at index ",
+          chunk, " (was ", (*streams)[chunk].device(), ") ",
+          "to match the device supplied at that index ",
+          "(expected ", device_index, ")");
+      cuda_guard.set_stream(at::cuda::CUDAStream((*streams)[chunk]));
+    }
+    chunks[chunk] = chunks[chunk].contiguous().to(
+        {at::kCUDA, device_index}, /*non_blocking=*/true);
+  }
+  return chunks;
+}
+
+at::Tensor gather(
+    at::TensorList tensors,
+    int64_t dim,
+    at::optional<int32_t> destination_index) {
+  AT_CHECK(!tensors.empty(), "Expected at least one tensor to gather from");
+  at::Tensor result;
+  int64_t total_size = 0;
+  auto& first = tensors.front();
+  const auto first_size = first.sizes();
+  std::vector<int64_t> expected_size(first_size.begin(), first_size.end());
+  for (const auto& tensor : tensors) {
+    AT_CHECK(
+        tensor.type().is_cuda(), "Gather expects all inputs to have CUDA type");
+    AT_ASSERT(tensor.ndimension() == static_cast<int64_t>(expected_size.size()));
+    expected_size[dim] = tensor.size(dim);
+    for (size_t dimension = 0; dimension < expected_size.size(); ++dimension) {
+      AT_CHECK(
+          expected_size[dimension] == tensor.size(dimension),
+          "Gather got an input of invalid size: got ",
+          tensor.sizes(), ", but expected ", at::IntList(expected_size));
+    }
+    total_size += tensor.size(dim);
+  }
+  expected_size[dim] = total_size;
+  at::Device device(at::kCPU);
+  if (!destination_index || *destination_index != -1) {
+    device = at::Device(at::kCUDA, destination_index ? *destination_index : -1);
+  }
+  result = at::empty(expected_size, first.options().device(device));
+
+  int64_t chunk_start = 0;
+  for (const auto& tensor : tensors) {
+    result.narrow(dim, chunk_start, tensor.size(dim))
+        .copy_(tensor, /*non_blocking=*/true);
+    chunk_start += tensor.size(dim);
+  }
+  return result;
+}
+}} // namespace torch::cuda
+
+#endif

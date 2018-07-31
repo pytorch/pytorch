@@ -3,6 +3,8 @@
 #include "torch/csrc/autograd/symbolic.h"
 
 #include "torch/csrc/utils/functional.h"
+#include <torch/csrc/jit/assertions.h>
+
 #include <ATen/ATen.h>
 #include <ATen/optional.h>
 
@@ -71,7 +73,7 @@ void encodeTensor(onnx::TensorProto * p, const at::Tensor & tensor,
       onnx_type = onnx::kINT64;
       break;
     default:
-      torch::barf("unexpected tensor scalar type");
+      AT_ERROR("unexpected tensor scalar type");
       break;
   }
   p->set_data_type(onnx_type);
@@ -154,7 +156,7 @@ void addAttribute(onnx::NodeProto * n_p, jit::Node * n, jit::Symbol name, Export
 
 void encodeTypeProtoTensorType(onnx::TypeProtoTensor* tensor_type, Value* n) {
   onnx::TensorShapeProto* shape = tensor_type->mutable_shape();
-  if (TensorType* node_type = n->type()->cast<TensorType>()) {
+  if (TensorTypePtr node_type = n->type()->cast<TensorType>()) {
     const std::vector<std::int64_t>& sizes = node_type->sizes();
     for (std::int64_t s : sizes) {
       shape->add_dim(s);
@@ -184,7 +186,7 @@ void encodeTypeProtoTensorType(onnx::TypeProtoTensor* tensor_type, Value* n) {
         onnx_type = onnx::kINT64;
         break;
       default:
-        torch::barf("unexpected tensor scalar type");
+        AT_ERROR("unexpected tensor scalar type");
         break;
     }
     tensor_type->set_data_type(onnx_type);
@@ -337,17 +339,12 @@ void validateGraph(const std::shared_ptr<Graph>& graph, onnx::OperatorExportType
       // Macro'ed so we get a marginally better line number on failed export
 #define FAIL_EXPORT(name) \
       throw std::runtime_error(std::string("ONNX export failed: ") + name + "\n\nGraph we tried to export:\n" + graph->toString());
-    IR_IF(node, CppOp)
-      auto cpp_node = static_cast<torch::jit::CppOp*>(value);
-      FAIL_EXPORT(
-          "Couldn't export C++ operator " + cpp_node->name() +
-          "\n\nDefined at:\n" + getNodeStackTraceString(node))
-      IR_ELSEIF(PythonOp)
+    IR_IF(node, PythonOp)
       auto py_node = static_cast<torch::jit::PythonOp*>(value);
       FAIL_EXPORT(
           "Couldn't export Python operator " + py_node->name() +
           "\n\nDefined at:\n" + getNodeStackTraceString(node))
-      IR_ELSE()
+    IR_ELSE()
       // Special error messages for certain types of operators
       if (node->kind() == aten::expand) {
         FAIL_EXPORT(

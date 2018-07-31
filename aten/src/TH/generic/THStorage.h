@@ -2,6 +2,11 @@
 #define TH_GENERIC_FILE "generic/THStorage.h"
 #else
 
+#ifdef __cplusplus
+#include <ATen/Allocator.h>
+#include <ATen/StorageImpl.h>
+#endif
+
 /* on pourrait avoir un liste chainee
    qui initialise math, lab structures (or more).
    mouais -- complique.
@@ -16,13 +21,14 @@
    primitives??
  */
 
-#define TH_STORAGE_REFCOUNTED 1
-#define TH_STORAGE_RESIZABLE  2
-#define TH_STORAGE_FREEMEM    4
-#define TH_STORAGE_VIEW       8
-
 // Struct definition is moved to THStorage.hpp (so this file stays C compatible)
-typedef struct THStorage THStorage;
+
+#ifdef __cplusplus
+#define THStorage at::StorageImpl
+#else
+typedef struct at_Storage_Impl at_Storage_Impl;
+#define THStorage at_Storage_Impl
+#endif
 
 // These used to be distinct types; for some measure of backwards compatibility and documentation
 // alias these to the single THStorage type.
@@ -51,23 +57,18 @@ TH_API THStorage* THStorage_(newWithSize3)(real, real, real);
 TH_API THStorage* THStorage_(newWithSize4)(real, real, real, real);
 TH_API THStorage* THStorage_(newWithMapping)(const char *filename, ptrdiff_t size, int flags);
 
-/* takes ownership of data */
-TH_API THStorage* THStorage_(newWithData)(real *data, ptrdiff_t size);
-
 TH_API THStorage* THStorage_(newWithAllocator)(ptrdiff_t size,
-                                               THAllocator* allocator,
-                                               void *allocatorContext);
+                                               THAllocator* allocator);
+#ifdef __cplusplus
 TH_API THStorage* THStorage_(newWithDataAndAllocator)(
-    real* data, ptrdiff_t size, THAllocator* allocator, void *allocatorContext);
+    at::DataPtr&& data, ptrdiff_t size, at::Allocator* allocator);
+#endif
 
 /* should not differ with API */
 TH_API void THStorage_(setFlag)(THStorage *storage, const char flag);
 TH_API void THStorage_(clearFlag)(THStorage *storage, const char flag);
 TH_API void THStorage_(retain)(THStorage *storage);
 TH_API void THStorage_(swap)(THStorage *storage1, THStorage *storage2);
-
-/* used by StorageSharing */
-TH_API int THStorage_(retainIfLive)(THStorage *storage);
 
 /* might differ with other API (like CUDA) */
 TH_API void THStorage_(free)(THStorage *storage);

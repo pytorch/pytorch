@@ -4,6 +4,7 @@ from torch.nn.parameter import Parameter
 from .module import Module
 from .batchnorm import _BatchNorm
 from .. import functional as F
+from .. import init
 
 
 class LocalResponseNorm(Module):
@@ -96,11 +97,13 @@ class LayerNorm(Module):
             .. math::
                 [* \times \text{normalized_shape}[0] \times \text{normalized_shape}[1]
                     \times \ldots \times \text{normalized_shape}[-1]]
+
             If a single integer is used, it is treated as a singleton list, and this module will
             normalize over the last dimension which is expected to be of that specific size.
         eps: a value added to the denominator for numerical stability. Default: 1e-5
         elementwise_affine: a boolean value that when set to ``True``, this module
-            has learnable per-element affine parameters. Default: ``True``
+            has learnable per-element affine parameters initialized to ones (for weights)
+            and zeros (for biases). Default: ``True``.
 
     Shape:
         - Input: :math:`(N, *)`
@@ -139,8 +142,8 @@ class LayerNorm(Module):
 
     def reset_parameters(self):
         if self.elementwise_affine:
-            self.weight.data.fill_(1)
-            self.bias.data.zero_()
+            init.ones_(self.weight)
+            init.zeros_(self.bias)
 
     def forward(self, input):
         return F.layer_norm(
@@ -172,7 +175,8 @@ class GroupNorm(Module):
         num_channels (int): number of channels expected in input
         eps: a value added to the denominator for numerical stability. Default: 1e-5
         affine: a boolean value that when set to ``True``, this module
-            has learnable per-channel affine parameters. Default: ``True``
+            has learnable per-channel affine parameters initialized to ones (for weights)
+            and zeros (for biases). Default: ``True``.
 
     Shape:
         - Input: :math:`(N, num\_channels, *)`
@@ -208,8 +212,8 @@ class GroupNorm(Module):
 
     def reset_parameters(self):
         if self.affine:
-            self.weight.data.fill_(1)
-            self.bias.data.zero_()
+            init.ones_(self.weight)
+            init.zeros_(self.bias)
 
     def forward(self, input):
         return F.group_norm(

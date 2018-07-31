@@ -104,7 +104,7 @@ auto PyFunction::legacy_apply(const variable_list& inputs) -> variable_list {
 // NOTE: this function is written in a way that assumes it's only called for backward;
 // it's used by engine.cpp.  This is responsible for forwarding a call from
 // C++'s Function::apply to a Python method "apply".
-auto PyFunction::apply(const variable_list& inputs) -> variable_list {
+auto PyFunction::apply(variable_list&& inputs) -> variable_list {
   AutoGIL gil;
   at::DeviceGuard _device_guard;
   THPFunction* py_fn = (THPFunction*)obj;
@@ -434,7 +434,7 @@ static void _wrap_outputs(THPFunction *self,
     auto var = as_variable(obj, i);
     if (cdata) {
       auto output_nr = cdata->add_input_metadata(var.type(), var.sizes());
-      TORCH_ASSERT(i == (int)output_nr);
+      AT_ASSERT(i == (int)output_nr);
     }
     set_history(var, i, is_input, is_modified, is_differentiable);
 
@@ -550,7 +550,7 @@ std::pair<UnpackedInput, InputFlags> unpack_input(PyObject *args) {
 }
 
 static void _assert_not_tracing(const char* name, const variable_list& input_vars) {
-  if (tracer::isTracingVar(input_vars)) {
+  if (tracer::isTracing()) {
     std::ostringstream oss;
     oss << "Attempted to trace " << name;
     oss << ", but tracing of legacy functions is not supported";
@@ -562,7 +562,7 @@ static jit::tracer::PreTraceInfo _trace_pre_record(
     PyObject* op_obj,
     PyObject *input_objects,
     const variable_list& input_vars) {
-  if (!tracer::isTracingVar(input_vars)) {
+  if (!jit::tracer::isTracing()) {
     return jit::tracer::PreTraceInfo();
   }
 
@@ -598,7 +598,7 @@ static void _trace_post_record(
     const variable_list& input_vars,
     PyObject *output_objects,
     bool is_inplace) {
-  if (!trace_info.state) {
+  if (!jit::tracer::isTracing()) {
     return;
   }
 
@@ -612,7 +612,6 @@ static void _trace_post_record(
 
   jit::tracer::postRecordTrace(trace_info, output_vars);
 
-  auto state_lock = trace_info.state->lock();
   trace_info.n->i_(attr::inplace, is_inplace);
 
 }
@@ -640,11 +639,6 @@ PyObject* process_outputs(PyObject *op_obj, THPFunction* grad_fn, const Unpacked
 
   bool is_inplace = static_cast<bool>(grad_fn->dirty_tensors);
   _wrap_outputs(grad_fn, inputs, raw_output, outputs, is_executable);
-  // NOTE: _trace_post_record has to run before _save_variables, because we need
-  // to assign traces to outputs before we convert them to SavedVariables.
-  // On the other hand, it needs to go after _mark_non_differentiable, because
-  // it might be wraping backwards in Evals, and _mark_non_differentiable uses
-  // grad_fn pointer equality for error checking.
   _trace_post_record(trace_info, op_obj, unpacked.input_vars, outputs, is_inplace);
   if (is_executable) {
     _save_variables(grad_fn);
@@ -715,10 +709,6 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *inputs)
 
   // Record input nodes if tracing
   auto trace_info = _trace_pre_record(cls, inputs, unpacked_input.input_vars);
-  if (trace_info.state) {
-    // TODO: ezyang suggests this is unused and can be removed
-    ctx->is_traced = true;
-  }
 
   // Initialize backward function (and ctx)
   bool is_executable = input_info.is_executable;
@@ -774,7 +764,7 @@ static void _prepare_grads(THPFunction *self, THPObjectPtr& raw_grads, bool is_g
 
   // Look for Nones and replace them with new buffers
   auto& grads_info = is_grad_output ? self->output_info : self->input_info;
-  TORCH_ASSERT(grads_info.size() == (size_t)num_grads);
+  AT_ASSERT(grads_info.size() == (size_t)num_grads);
   for (int i = 0; i < num_grads; i++) {
     PyObject *grad = PyTuple_GET_ITEM(raw_grads.get(), i);
     if (grad == Py_None) {
@@ -1009,7 +999,6 @@ static struct PyGetSetDef THPFunction_properties[] = {
   {"dirty_tensors", &getObject<&THPFunction::dirty_tensors>, &setObject<&THPFunction::dirty_tensors>, nullptr, nullptr},
   {"needs_input_grad", &getObject<&THPFunction::needs_input_grad>, nullptr, nullptr, nullptr},
   {"requires_grad", getRequiresGrad, nullptr, nullptr, nullptr},
-  {"_is_tracing", &getMember<char, &THPFunction::is_traced, PyBool_FromLong>, nullptr, nullptr, nullptr},
   {"metadata", (getter)THPFunction_metadata, nullptr, nullptr, nullptr},
   {nullptr}
 };

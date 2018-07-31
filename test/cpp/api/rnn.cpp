@@ -9,13 +9,14 @@
 #include <test/cpp/api/util.h>
 
 using namespace torch::nn;
+using namespace torch::test;
 
 template <typename R, typename Func>
 bool test_RNN_xor(Func&& model_maker, bool cuda = false) {
   torch::manual_seed(0);
 
   auto nhid = 32;
-  auto model = std::make_shared<torch::SimpleContainer>();
+  auto model = std::make_shared<SimpleContainer>();
   auto l1 = model->add(Linear(1, nhid), "l1");
   auto rnn = model->add(model_maker(nhid), "rnn");
   auto lo = model->add(Linear(nhid, 1), "lo");
@@ -109,7 +110,7 @@ TEST_CASE("rnn") {
     LSTM model(2, 2);
     for (auto& v : model->parameters()) {
       float size = v->numel();
-      auto p = static_cast<float*>(v->data().storage()->data());
+      auto p = static_cast<float*>(v->data().storage()->pImpl()->data());
       for (size_t i = 0; i < size; i++) {
         p[i] = i / size;
       }
@@ -117,7 +118,7 @@ TEST_CASE("rnn") {
 
     auto x = torch::empty({3, 4, 2}, torch::requires_grad());
     float size = x.data().numel();
-    auto p = static_cast<float*>(x.data().storage()->data());
+    auto p = static_cast<float*>(x.data().storage()->pImpl()->data());
     for (size_t i = 0; i < size; i++) {
       p[i] = (size - i) / size;
     }

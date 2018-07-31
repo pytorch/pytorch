@@ -36,12 +36,7 @@ TEST_CASE( "atest", "[]" ) {
   foo = foo+foo*3;
   foo -= 4;
 
-  {
-    Tensor no;
-    REQUIRE_THROWS(add_out(no,foo,foo));
-  }
   Scalar a = 4;
-
   float b = a.to<float>();
   REQUIRE(b == 4);
 
@@ -103,7 +98,8 @@ TEST_CASE( "atest", "[]" ) {
   if(at::hasCUDA()) {
     int isgone = 0;
     {
-      auto f2 = CUDA(kFloat).tensorFromBlob(nullptr, {1,2,3}, [&](void*) {
+      auto base = CUDA(kFloat).tensor({1,2,3});
+      auto f2 = CUDA(kFloat).tensorFromBlob(base.data_ptr(), {1,2,3}, [&](void*) {
         isgone++;
       });
     }

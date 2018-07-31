@@ -9,28 +9,8 @@
 #include <functional>
 #include <memory>
 
-// Forward declare these CUDA types here to avoid including CUDA headers in
-// ATen headers, which would make ATen always require CUDA to build.
+// Forward-declares THCState
 struct THCState;
-struct CUstream_st;
-typedef struct CUstream_st* cudaStream_t;
-struct cudaDeviceProp;
-
-#ifndef __HIP_PLATFORM_HCC__
-// pyHIPIFY rewrites this as:
-//
-//    struct cusparseContext;
-//    typedef struct cusparseContext *hipsparseHandle_t;
-//
-// however, this forward declaration is wrong
-// the way that the HIP headers define hipsparseHandle_t is
-//
-//    typedef cusparseHandle_t hipsparseHandle_t
-//
-// so the rewrite is wrong.
-struct cusparseContext;
-typedef struct cusparseContext *cusparseHandle_t;
-#endif
 
 namespace at {
 class Context;
@@ -87,30 +67,6 @@ struct AT_API CUDAHooksInterface {
 
   virtual bool hasCuDNN() const {
     return false;
-  }
-
-  virtual cudaStream_t getCurrentCUDAStream(THCState*) const {
-    AT_ERROR("Cannot getCurrentCUDAStream() without ATen_cuda library. ", CUDA_HELP);
-  }
-
-#ifndef __HIP_PLATFORM_HCC__
-  virtual cusparseHandle_t getCurrentCUDASparseHandle(THCState*) const {
-    AT_ERROR("Cannot getCurrentCUDASparseHandle() without ATen_cuda library. ", CUDA_HELP);
-  }
-#endif
-
-  virtual cudaStream_t getCurrentCUDAStreamOnDevice(THCState*, int64_t device)
-      const {
-    AT_ERROR("Cannot getCurrentCUDAStream() without ATen_cuda library. ", CUDA_HELP);
-  }
-
-  virtual struct cudaDeviceProp* getCurrentDeviceProperties(THCState*) const {
-    AT_ERROR("Cannot getCurrentDeviceProperties() without ATen_cuda library. ", CUDA_HELP);
-  }
-
-  virtual struct cudaDeviceProp* getDeviceProperties(THCState*, int device)
-      const {
-    AT_ERROR("Cannot getDeviceProperties() without ATen_cuda library. ", CUDA_HELP);
   }
 
   virtual int64_t current_device() const {

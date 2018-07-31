@@ -7,6 +7,8 @@
 #include <caffe2/operators/collect_and_distribute_fpn_rpn_proposals_op.h>
 #include <caffe2/operators/conv_transpose_op.h>
 #include <caffe2/operators/cross_entropy_op.h>
+#include <caffe2/operators/ctc_beam_search_decoder_op.h>
+#include <caffe2/operators/ctc_greedy_decoder_op.h>
 #include <caffe2/operators/dropout_op.h>
 #include <caffe2/operators/elementwise_ops.h>
 #include <caffe2/operators/filler_op.h>
@@ -45,7 +47,7 @@ struct SigmoidCPUFunctor {
 REGISTER_IDEEP_OPERATOR(Softmax, IDEEPFallbackOp<SoftmaxOp<float, CPUContext>>);
 REGISTER_IDEEP_OPERATOR(
     ChannelShuffle,
-    IDEEPFallbackOp<ChannelShuffleOp<CPUContext>>);
+    IDEEPFallbackOp<ChannelShuffleOp<float, CPUContext>>);
 REGISTER_IDEEP_OPERATOR(
     LabelCrossEntropy,
     IDEEPFallbackOp<LabelCrossEntropyOp<float, CPUContext>>);
@@ -113,6 +115,14 @@ REGISTER_IDEEP_OPERATOR(
 REGISTER_IDEEP_OPERATOR(
     PRelu,
     IDEEPFallbackOp<PReluOp<float, CPUContext>>);
+  
+// ctc decoder operators
+REGISTER_IDEEP_OPERATOR(
+    CTCGreedyDecoder,
+    IDEEPFallbackOp<CTCGreedyDecoderOp<CPUContext>>);
+REGISTER_IDEEP_OPERATOR(
+    CTCBeamSearchDecoder,
+    IDEEPFallbackOp<CTCBeamSearchDecoderOp<CPUContext>>);
 
 REGISTER_IDEEP_OPERATOR(
     AveragedLossGradient,

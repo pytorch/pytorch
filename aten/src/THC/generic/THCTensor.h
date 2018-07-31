@@ -2,8 +2,6 @@
 #define THC_GENERIC_FILE "generic/THCTensor.h"
 #else
 
-#define TH_TENSOR_REFCOUNTED 1
-
 typedef struct THCTensor THCTensor;
 
 // These used to be distinct types; for some measure of backwards compatibility and documentation
@@ -23,9 +21,9 @@ typedef struct THCTensor THCTensor;
 THC_API THCStorage* THCTensor_(storage)(THCState *state, const THCTensor *self);
 THC_API ptrdiff_t THCTensor_(storageOffset)(THCState *state, const THCTensor *self);
 
-// See [NOTE: _dim() vs dim()]; _nDimension corresponds to _dim(), nDimension corresponds to dim().
-THC_API int THCTensor_(nDimension)(THCState *state, const THCTensor *self);
-THC_API int THCTensor_(_nDimension)(THCState *state, const THCTensor *self);
+// See [NOTE: nDimension vs nDimensionLegacyNoScalars vs nDimensionLegacyAll]
+THC_API int THCTensor_(nDimensionLegacyNoScalars)(THCState *state, const THCTensor *self);
+THC_API int THCTensor_(nDimensionLegacyAll)(THCState *state, const THCTensor *self);
 
 THC_API int64_t THCTensor_(size)(THCState *state, const THCTensor *self, int dim);
 THC_API int64_t THCTensor_(stride)(THCState *state, const THCTensor *self, int dim);
