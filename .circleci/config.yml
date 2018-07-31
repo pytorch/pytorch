@@ -41,12 +41,6 @@ jobs:
   linux_xenial_cuda9_2_cudnn7_py3_gcc7_test:
     machine:
       image: default
-#   docker:
-#     - image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7:226
-#       user: jenkins
-#       aws_auth:
-#         aws_access_key_id: AKIAIUHRTFRLXI6HBUCQ
-#         aws_secret_access_key: $CIRCLECI_AWS_SECRET_KEY
     resource_class: gpu.small
     steps:
     - checkout
@@ -78,8 +72,8 @@ jobs:
           docker cp "/opt/workspace" "$id:/opt/conda/lib/python3.6/site-packages/torch"
           (echo "export SCCACHE_BUCKET=$SCCACHE_BUCKET" && echo 'sudo chown -R jenkins workspace /opt/conda/lib/python3.6/site-packages/torch && cd workspace && git submodule update --init && .jenkins/pytorch/test.sh') | docker exec -u jenkins -i "$id" bash
     - checkout
-#   - attach_workspace:
-#       at: /opt/workspace
+    - attach_workspace:
+        at: /opt/workspace
     - run:
         name: Build
         command: |
@@ -101,10 +95,9 @@ workflows:
   version: 2
   build:
     jobs:
-#     - linux_trusty_py3_6_gcc7_build
-#     - linux_xenial_cuda9_2_cudnn7_py3_gcc7_build
-      - linux_xenial_cuda9_2_cudnn7_py3_gcc7_test
-#         (colon above needed)
-#         requires:
-#           - linux_xenial_cuda9_2_cudnn7_py3_gcc7_build
-#     - macos_10_13_py3
+      - linux_trusty_py3_6_gcc7_build
+      - linux_xenial_cuda9_2_cudnn7_py3_gcc7_build
+      - linux_xenial_cuda9_2_cudnn7_py3_gcc7_test:
+          requires:
+            - linux_xenial_cuda9_2_cudnn7_py3_gcc7_build
+      - macos_10_13_py3
