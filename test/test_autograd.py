@@ -1374,6 +1374,7 @@ class TestAutograd(TestCase):
             Variable(torch.randn(10, 10), _grad_fn=CollectOnDelete())
 
     @unittest.skipIf(torch.cuda.device_count() < 2, "no multi-GPU")
+    @unittest.skipIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")
     def test_unused_output_gpu(self):
         from torch.nn.parallel._functions import Broadcast
         x = Variable(torch.randn(5, 5).float().cuda(), requires_grad=True)
