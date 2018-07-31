@@ -119,18 +119,20 @@ struct SymbolicVariable {
     return create(t("narrow"), { *this, insertConstant(dim), insertConstant(start), insertConstant(length) }, 1)[0];
   }
   static SymbolicVariable cat(ArrayRef<SymbolicVariable> inputs, Value* dim) {
-    std::vector<SymbolicVariable> all_inputs = inputs;
-    all_inputs.push_back(dim);
-    return create(aten::cat, all_inputs)[0];
+    Graph *g = dim->owningGraph();
+    auto value_inputs = fmap(inputs, [](const SymbolicVariable & v) { return v.value(); });
+    Value *input_list = g->insertNode(g->createList(DynamicType::get(), value_inputs))->output();
+    return create(aten::cat, {input_list, dim})[0];
   }
   static SymbolicVariable cat(ArrayRef<SymbolicVariable> inputs, int dim) {
     JIT_ASSERT(inputs.size() > 0);
     return SymbolicVariable::cat(inputs, inputs[0].insertConstant(dim));
   }
   static SymbolicVariable stack(ArrayRef<SymbolicVariable> inputs, Value* dim) {
-    std::vector<SymbolicVariable> all_inputs = inputs;
-    all_inputs.push_back(dim);
-    return create(aten::stack, all_inputs)[0];
+    Graph *g = dim->owningGraph();
+    auto value_inputs = fmap(inputs, [](const SymbolicVariable & v) { return v.value(); });
+    Value *input_list = g->insertNode(g->createList(DynamicType::get(), value_inputs))->output();
+    return create(aten::stack, {input_list, dim})[0];
   }
   static SymbolicVariable stack(ArrayRef<SymbolicVariable> inputs, int dim) {
     JIT_ASSERT(inputs.size() > 0);
