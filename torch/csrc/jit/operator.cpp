@@ -324,12 +324,6 @@ void registerOperator(Operator&& op) {
   getRegistry().registerOperator(std::move(op));
 }
 
-void registerOperatorWithStack(const std::string& schema, Operation operation) {
-  // Ideally we'd `std::move` the `operation`, but we need to use `std::bind`
-  // for this in C++11. Is this worth it?
-  registerOperator({schema, [operation](Node*) { return operation; }});
-}
-
 const std::vector<std::shared_ptr<Operator>>& getAllOperatorsFor(Symbol name) {
   return getRegistry().getOperators(name);
 }

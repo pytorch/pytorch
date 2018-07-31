@@ -27,6 +27,7 @@
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
 #include "torch/csrc/jit/passes/lower_grad_of.h"
 #include "torch/csrc/jit/operator.h"
+#include "torch/csrc/jit/custom_operator.h"
 #include "torch/csrc/variable_tensor_functions.h"
 
 #include "torch/csrc/autograd/variable.h"
@@ -961,6 +962,99 @@ void testProto() {
   proto.set_producer_name("foo");
 }
 
+void testCustomOperators() {
+  // registerOperatorWithStack
+  {
+    auto schema = parseSchema("foo::with_stack(float a, Tensor b) -> Tensor");
+    registerOperatorWithStack(
+        schema, [](Stack& stack) {
+          double a;
+          at::Tensor b;
+          pop(stack, a, b);
+          auto result = a + b;
+          pack(stack, std::move(result));
+          return 0;
+        });
+    auto& ops = getAllOperatorsFor(Symbol::fromQualString("foo::with_stack"));
+    REQUIRE(ops.size() == 1);
+
+    auto& op = ops.front();
+    REQUIRE(op->schema.name == "foo::with_stack");
+
+    REQUIRE(op->schema.arguments.size() == 2);
+    REQUIRE(op->schema.arguments[0].name == "a");
+    REQUIRE(op->schema.arguments[0].type->kind() == TypeKind::FloatType);
+    REQUIRE(op->schema.arguments[1].name == "b");
+    REQUIRE(op->schema.arguments[1].type->kind() == TypeKind::DynamicType);
+
+    REQUIRE(op->schema.returns.size() == 1);
+    REQUIRE(op->schema.returns[0].type->kind() == TypeKind::DynamicType);
+
+    // Run operation!!!!!!!!!!
+
+    // REQUIRE(op(2.0f, at::ones(5)).allclose(at::full(5, 3.0f)));
+  }
+  // registerOperator with inferred schema
+  {
+    registerOperator("foo::sugar", [](double a, at::Tensor b) { return a + b; });
+    auto& ops = getAllOperatorsFor(Symbol::fromQualString("foo::sugar"));
+    REQUIRE(ops.size() == 1);
+
+    auto& op = ops.front();
+    REQUIRE(op->schema.name == "foo::sugar");
+
+    REQUIRE(op->schema.arguments.size() == 2);
+    REQUIRE(op->schema.arguments[0].name == "_0");
+    REQUIRE(op->schema.arguments[0].type->kind() == TypeKind::FloatType);
+    REQUIRE(op->schema.arguments[1].name == "_1");
+    REQUIRE(op->schema.arguments[1].type->kind() == TypeKind::DynamicType);
+
+    REQUIRE(op->schema.returns.size() == 1);
+    REQUIRE(op->schema.returns[0].type->kind() == TypeKind::DynamicType);
+
+    // Run operation!!!!!!!!!!
+
+    // REQUIRE(op(2.0f, at::ones(5)).allclose(at::full(5, 3.0f)));
+  }
+  // registerOperator with no stack function but explicit schema
+  {
+    registerOperator(
+        parseSchema("foo::sugar_with_schema(float a, Tensor b) -> Tensor"),
+        [](double a, at::Tensor b) { return a + b; });
+
+    auto& ops =
+        getAllOperatorsFor(Symbol::fromQualString("foo::sugar_with_schema"));
+    REQUIRE(ops.size() == 1);
+
+    auto& op = ops.front();
+    REQUIRE(op->schema.name == "foo::sugar_with_schema");
+
+    REQUIRE(op->schema.arguments.size() == 2);
+    REQUIRE(op->schema.arguments[0].name == "a");
+    REQUIRE(op->schema.arguments[0].type->kind() == TypeKind::FloatType);
+    REQUIRE(op->schema.arguments[1].name == "b");
+    REQUIRE(op->schema.arguments[1].type->kind() == TypeKind::DynamicType);
+
+    REQUIRE(op->schema.returns.size() == 1);
+    REQUIRE(op->schema.returns[0].type->kind() == TypeKind::DynamicType);
+  }
+  // registerOperator with no stack function but explicit, faulty schema
+  {
+    registerOperator(
+        parseSchema("foo::sugar_with_schema(Tensor a, Tensor b) -> Tensor"),
+        [](double a, at::Tensor b) { return a + b; });
+
+
+
+    // TODO: Something bad should happen here?
+
+
+
+
+
+  }
+}
+
 TORCH_API std::string runJITCPPTests() {
   std::stringstream out;
   testIValue();
@@ -981,6 +1075,7 @@ TORCH_API std::string runJITCPPTests() {
   argumentSpecTest();
   shapeAnalysisTest();
   testProto();
+  testCustomOperators();
   return out.str();
 }
 
@@ -1007,6 +1102,8 @@ TEST_CASE( "jit test CPU", "[cpu]" ) {
     attributesTest();
   SECTION( "interned strings" )
     internedStringsTests();
+  SECTION( "custom operators" )
+    testCustomOperators();
 }
 
 TEST_CASE( "jit test CUDA", "[cuda]" ) {
@@ -1023,37 +1120,6 @@ TEST_CASE( "jit test CUDA", "[cuda]" ) {
     argumentSpecTest();
   SECTION( "shape analysis" )
     shapeAnalysisTest();
-}
-
-TEST_CASE("Registering 3rd-Party Operators") {
-  registerOperatorWithStack(
-      "foo::bar(float a, Tensor b) -> Tensor", [](Stack& stack) {
-        double a;
-        at::Tensor b;
-        pop(stack, a, b);
-        auto result = a + b;
-        pack(stack, std::move(result));
-        return 0;
-      });
-  auto& ops = getAllOperatorsFor(Symbol::fromQualString("foo::bar"));
-  REQUIRE(ops.size() == 1);
-
-  auto& op = ops.front();
-  REQUIRE(op->schema.name == "foo::bar");
-
-  REQUIRE(op->schema.arguments.size() == 2);
-  REQUIRE(op->schema.arguments[0].name == "a");
-  REQUIRE(op->schema.arguments[0].type->kind() == TypeKind::FloatType);
-  REQUIRE(op->schema.arguments[1].name == "b");
-  REQUIRE(op->schema.arguments[1].type->kind() == TypeKind::DynamicType);
-
-  REQUIRE(op->schema.returns.size() == 1);
-  REQUIRE(op->schema.arguments[0].name == "a");
-  REQUIRE(op->schema.arguments[0].type->kind() == TypeKind::DynamicType);
-
-  // Run operation!!!!!!!!!!
-
-  // REQUIRE(op(2.0f, at::ones(5)).allclose(at::full(5, 3.0f)));
 }
 
 #endif
