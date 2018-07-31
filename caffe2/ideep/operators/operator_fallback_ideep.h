@@ -53,13 +53,20 @@ class IDEEPFallbackOp final : public IDEEPOperator {
     // then forward output blobs to local workspace.
     std::unordered_map<string, string> forwarded_output_blobs;
     for (int i = 0; i < base_def_.output_size(); i++) {
+      // For in-place case, the in/output tensor for local_ws must be
+      // re-created, instead of forwarding from current workspace.
       string parent_name(base_def_.output(i));
-      if (!SkipOutputCopy::Contains(i)) {
-        parent_name += "_cpu_output_blob_" + base_def_.type();
-      }
+      parent_name += "_cpu_output_blob_" + base_def_.type();
       local_output_blobs_.push_back(ws->CreateBlob(parent_name));
       CHECK_NOTNULL(local_output_blobs_.back());
       forwarded_output_blobs[base_def_.output(i)] = parent_name;
+      output_inplace_.push_back(false);
+      for (const string &input_name : base_def_.input()) {
+        if (input_name == base_def_.output(i)) {
+          output_inplace_[i] = true;
+          break;
+        }
+      }
     }
     local_ws_.reset(new Workspace(ws, forwarded_output_blobs));
     // Set up the symbols for the local workspace.
@@ -67,31 +74,26 @@ class IDEEPFallbackOp final : public IDEEPOperator {
       local_input_blobs_.push_back(local_ws_->CreateBlob(name));
       CHECK_NOTNULL(local_input_blobs_.back());
     }
+    input_share_.resize(local_input_blobs_.size(), false);
     base_op_.reset(new CPUOp(base_def_, local_ws_.get()));
   }
 
   bool RunOnDevice() override {
     for (int i = 0; i < InputSize(); ++i) {
-      if (InputIsType<itensor>(i) && Input(i).get_data_type() == itensor::data_type::f32) {
+      if (InputIsType<itensor>(i) &&
+          Input(i).get_data_type() == itensor::data_type::f32) {
         auto& input = Input(i);
-        auto dtensor = local_input_blobs_[i]->GetMutableTensor(CPU);
-        dtensor->Resize(input.get_dims());
-        if (input.is_public_format()) {
-          dtensor->ShareExternalPointer(static_cast<float*>(input.get_data_handle()));
-        } else {
-          input.reorder_to(dtensor->template mutable_data<float>());
+        if (input_share_[i]) {
+          local_input_blobs_[i]->Reset();
         }
-      } else if (
-          InputIsType<itensor>(i) &&
-          Input(i).get_data_type() == itensor::data_type::s32) {
-        auto& input = Input(i);
+        input_share_[i] = false;
         auto dtensor = local_input_blobs_[i]->GetMutableTensor(CPU);
         dtensor->Resize(input.get_dims());
         if (input.is_public_format()) {
           dtensor->ShareExternalPointer(
-              static_cast<long*>(input.get_data_handle()));
+              static_cast<float*>(input.get_data_handle()));
         } else {
-          input.reorder_to(dtensor->template mutable_data<long>());
+          input.reorder_to(dtensor->template mutable_data<float>());
         }
       } else {
         VLOG(1) << "Input " << i << " is not ideep::tensor. Skipping copy.";
@@ -99,8 +101,9 @@ class IDEEPFallbackOp final : public IDEEPOperator {
         // local_input_blobs will only be used as const blob input for the
         // base op so we are still fine.
         local_input_blobs_[i]->ShareExternal(
-            const_cast<void*>(OperatorBase::Inputs()[i]->GetRaw()),
+            const_cast<void *>(OperatorBase::Inputs()[i]->GetRaw()),
             OperatorBase::Inputs()[i]->meta());
+        input_share_[i] = true;
       }
     }
 
@@ -111,19 +114,21 @@ class IDEEPFallbackOp final : public IDEEPOperator {
     }
 
     for (int i = 0; i < OutputSize(); ++i) {
-      if (SkipOutputCopy::Contains(i)) {
-        VLOG(1) << "Copy output: index " << i << " skipped.";
-        continue;
-      }
       CAFFE_ENFORCE(
           local_output_blobs_[i]->template IsType<TensorCPU>(),
           "IDEEP fallback op currently does not support non-TensorCPU "
           "output type who needs copying.");
       const auto& src = local_output_blobs_[i]->template Get<TensorCPU>();
 
-      if (src.template IsType<float>()) {
+      if (src.template IsType<float>() && !SkipOutputCopy::Contains(i) &&
+          src.dims().size() != 0 && src.size_from_dim(0) != 0 &&
+          base_op_->type() != "Python") {
         Blob* dst = OperatorBase::OutputBlob(i);
-        if (!dst->template IsType<itensor>()) {
+        // The output tensor must be ideep tensor with public format.
+        // If reusing ideep tensor with non-public format, the tensor buffer
+        // will be interpreted incorrectly.
+        if (!dst->template IsType<itensor>() ||
+            !dst->template Get<itensor>().is_public_format()) {
           dst->Reset(new itensor());
         }
 
@@ -133,7 +138,12 @@ class IDEEPFallbackOp final : public IDEEPOperator {
         if (dtensor->get_dims() != dst_dims) {
           dtensor->resize(dst_dims, itensor::data_type::f32);
         }
-        dtensor->set_data_handle(const_cast<void*>(src.raw_data()));
+        if (output_inplace_[i]) {
+          dtensor->reorder_from(dst_dims, itensor::data_type::f32,
+                                const_cast<void*>(src.raw_data()));
+        } else {
+          dtensor->set_data_handle(const_cast<void *>(src.raw_data()));
+        }
       } else {
         VLOG(2) << "Output " << base_def_.output(i) << " as CPUTensor";
         auto src_dims = src.dims();
@@ -150,6 +160,8 @@ class IDEEPFallbackOp final : public IDEEPOperator {
  protected:
   vector<Blob*> local_input_blobs_;
   vector<Blob*> local_output_blobs_;
+  vector<bool> output_inplace_;
+  vector<bool> input_share_;
   std::unique_ptr<CPUOp> base_op_;
   std::unique_ptr<Workspace> local_ws_;
   OperatorDef base_def_;

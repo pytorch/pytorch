@@ -25,13 +25,21 @@ class IDEEPConcatOp final : public IDEEPOperator {
   virtual ~IDEEPConcatOp() {}
 
   bool RunOnDevice() override {
-    const auto& input_zero = Input(INPUT0);
     auto* output = Output(OUTPUT);
     TensorCPU* axis_info = OperatorBase::Output<TensorCPU>(AXIS_INFO, CPU);
 
     vector<itensor> inputs;
     for (int i = 0; i < InputSize(); ++i) {
-      inputs.emplace_back(Input(i));
+      if (OperatorBase::InputBlob(i).template IsType<itensor>()) {
+        inputs.emplace_back(Input(i));
+      } else {
+        CAFFE_ENFORCE(OperatorBase::InputBlob(i).template IsType<TensorCPU>(),
+                      "Expect cpu tensor if not itensor");
+        auto& tensor_cpu = OperatorBase::Input<Tensor>(i, CPU);
+        CAFFE_ENFORCE(tensor_cpu.dims().size() == 0 ||
+                      tensor_cpu.size_from_dim(0) == 0,
+                      "Expect zero dim tensor");
+      }
     }
 
     auto axis_vdata = ideep::concat::compute(inputs, axis_, add_axis_, *output);
