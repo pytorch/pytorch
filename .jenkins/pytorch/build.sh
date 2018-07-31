@@ -44,11 +44,10 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   export KMTHINLTO=1
 
   sudo chown -R jenkins:jenkins /usr/local
-  rm -rf "$(dirname "${BASH_SOURCE[0]}")/../../../pytorch_amd/" || true
-  python "$(dirname "${BASH_SOURCE[0]}")/../../tools/amd_build/build_pytorch_amd.py"
 
-  USE_ROCM=1 python setup.py install
-  exit
+  python tools/amd_build/build_pytorch_amd.py
+  USE_ROCM=1 python setup.py install --user
+  exit 0
 fi
 
 # TODO: Don't install this here
