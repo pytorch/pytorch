@@ -419,7 +419,7 @@ def tensordot(a, b, dims=2):
          :attr`b` respectively
 
     When called with an integer argument :attr:`dims` = :math:`d`, and the number of
-    dimensions of :attr:`a` and :attr:`b` is :math:`m` and :math`n`, repsectively,
+    dimensions of :attr:`a` and :attr:`b` is :math:`m` and :math`n`, respectively,
     it computes
 
     :math:`r_{i_0,...,i_{m-d}, i_d,...,i_n}`
@@ -457,4 +457,4 @@ def tensordot(a, b, dims=2):
             dims = dims.item()
         dims_a = list(range(-dims, 0))
         dims_b = list(range(dims))
-    return torch._tensordot(a, b, dims_a, dims_b)
+    return torch._C._VariableFunctions.tensordot(a, b, dims_a, dims_b)

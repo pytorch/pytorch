@@ -439,7 +439,7 @@ Tensor bilinear(const Tensor& input1, const Tensor& input2, const Tensor& weight
 
 // implements tensordot, a matrix-multiplication-like contraction, but the dimensions given
 // in the two dimension lists
-Tensor _tensordot(const Tensor& input1, const Tensor& input2, IntList dims1, IntList dims2) {
+Tensor tensordot(const Tensor& input1, const Tensor& input2, IntList dims1, IntList dims2) {
   AT_CHECK(dims1.size() == dims2.size(), "both dimension lists should have same length");
   int64_t csize = 1;  // total size of the contracted dimensions
   Tensor t1 = input1;
