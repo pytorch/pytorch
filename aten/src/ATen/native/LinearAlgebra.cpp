@@ -315,5 +315,43 @@ Tensor& matmul_out(Tensor &result, const Tensor & tensor1, const Tensor & tensor
   return result;
 }
 
+Tensor matrix_power(const Tensor& a, int64_t n) {
+  AT_CHECK(a.dim() >= 2 && at::isFloatingType(a.type().scalarType()),
+           "pinverse(", a.type(), "{", a.sizes(), "}): expected a tensor "
+           "of floating types with dim atleast 2");
+  if (n == 0) {
+    Tensor identities = at::eye(a.size(-2), a.options());
+    std::vector<int64_t> output_size (2, 1);
+    if (a.dim() > 2) {
+      output_size.insert(output_size.begin(), a.sizes().begin(), a.sizes().end() - 2);
+      identities = identities.repeat(output_size);
+    }
+    return identities;
+  } else if (n < 0) {
+    AT_CHECK(a.dim() == 2, "Negative powers for batch matrices are currently not supported")
+    Tensor a_ = at::native::inverse(a);
+    n *= -1;
+    return at::native::matrix_power(a_, n);
+  } else if (n == 1) {
+    return a.clone();
+  } else if (n == 2) {
+    return at::native::matmul(a, a);
+  } else if (n == 3) {
+    return at::native::matmul(at::native::matmul(a, a), a);
+  }
+
+  Tensor result, z;
+  int64_t r;
+  while (n > 0) {
+    z = (!z.defined()) ? a.clone() : at::native::matmul(z, z);
+    r = n % 2;
+    n = n / 2;
+    if (r == 1) {
+      result = (!result.defined()) ? z.clone() : at::native::matmul(result, z);
+    }
+  }
+  return result;
 }
-}
+
+} // namespace native
+} // namespace at

@@ -2907,6 +2907,8 @@ method_tests = [
     ('matmul', (S, S, M, M), ((S, S, M, S),), "4d_4d"),
     ('matmul', (S, S, M, M), ((M,),), "4d_1d"),
     ('matmul', (M,), ((S, S, M, S),), "1d_4d"),
+    ('matrix_power', (S, S), [3], "n=3"),
+    ('matrix_power', (S, S), [0], "n=0"),
     ('addcmul', (S, S), ((S, S), (S, S))),
     ('addcmul', (S, S), ((S, 1), (1, S)), 'broadcast_rhs'),
     ('addcmul', (1,), ((S, S, 1), (1, S)), 'broadcast_all'),

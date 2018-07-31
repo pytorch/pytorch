@@ -1243,6 +1243,13 @@ masked_select(mask) -> Tensor
 See :func:`torch.masked_select`
 """)
 
+add_docstr_all('matrix_power',
+               r"""
+matrix_power(n) -> Tensor
+
+See :func:`torch.matrix_power`
+""")
+
 add_docstr_all('max',
                r"""
 max(dim=None, keepdim=False) -> Tensor or (Tensor, Tensor)

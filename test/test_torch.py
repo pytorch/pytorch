@@ -4305,6 +4305,40 @@ class TestTorch(TestCase):
         self._test_pinverse(self, conv_fn=lambda x: x)
 
     @staticmethod
+    def _test_matrix_power(self, conv_fn):
+        def run_test(M):
+            MP2 = torch.matrix_power(M, 2)
+            self.assertEqual(MP2, torch.matmul(M, M))
+
+            MP3 = torch.matrix_power(M, 3)
+            self.assertEqual(MP3, torch.matmul(MP2, M))
+
+            MP4 = torch.matrix_power(M, 4)
+            self.assertEqual(MP4, torch.matmul(MP2, MP2))
+
+            MP6 = torch.matrix_power(M, 6)
+            self.assertEqual(MP6, torch.matmul(MP3, MP3))
+
+            MP0 = torch.matrix_power(M, 0)
+            self.assertEqual(MP0, torch.eye(M.size(-2)).expand_as(M))
+
+        # Single matrix
+        M = conv_fn(torch.randn(5, 5))
+        run_test(M)
+
+        # Batch matrices
+        M = conv_fn(torch.randn(3, 3, 3))
+        run_test(M)
+
+        # Many batch matrices
+        M = conv_fn(torch.randn(2, 3, 3, 3))
+        run_test(M)
+
+    @skipIfNoLapack
+    def test_matrix_power(self):
+        self._test_matrix_power(self, conv_fn=lambda x: x)
+
+    @staticmethod
     def _test_det_logdet_slogdet(self, conv_fn):
         def reference_det(M):
             # naive row reduction

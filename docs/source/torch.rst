@@ -293,6 +293,7 @@ BLAS and LAPACK Operations
 .. autofunction:: logdet
 .. autofunction:: slogdet
 .. autofunction:: matmul
+.. autofunction:: matrix_power
 .. autofunction:: mm
 .. autofunction:: mv
 .. autofunction:: orgqr

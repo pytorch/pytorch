@@ -948,6 +948,8 @@
 - func: matmul_out(Tensor result, Tensor self, Tensor other) -> Tensor
   variants: function
 
+- func: matrix_power(Tensor self, int64_t n) -> Tensor
+
 - func: max(Tensor self, int64_t dim, bool keepdim=false) -> (Tensor, Tensor)
 
 - func: max_out(Tensor max, Tensor max_values, Tensor self, int64_t dim, bool keepdim=false) -> (Tensor, Tensor)
