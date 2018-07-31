@@ -3,8 +3,9 @@
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
 #include "torch/csrc/jit/interned_strings.h"
 #include "torch/csrc/jit/constants.h"
-#include "torch/csrc/utils/functional.h"
+#include "torch/csrc/jit/symbolic_variable.h"
 #include "torch/csrc/jit/assertions.h"
+#include "torch/csrc/utils/functional.h"
 
 #include <ATen/ATen.h>
 #include <algorithm>
@@ -191,12 +192,11 @@ void BatchMMBlock(Block* block) {
       int cat_dim    = s == Side::LHS ? 1 : 0;
       cat_sizes[cat_dim] *= matmuls.size(); // make them really cat_sizes
 
-      auto inputs = fmap(matmuls, [=](Node *mm) { return mm->inputs()[inputs_off]; });
       WithInsertPoint iguard { root.node };
-      inputs.push_back(insertConstant(*graph, cat_dim));
-      Node *cat = graph->insertNode(graph->create(aten::cat, inputs));
-      cat->output()->setType(type->withSizes(cat_sizes));
-      return cat->output();
+      auto inputs = fmap(matmuls, [=](Node *mm) -> SymbolicVariable { return mm->inputs()[inputs_off]; });
+      auto cat_output = SymbolicVariable::cat(inputs, cat_dim).value();
+      cat_output->setType(type->withSizes(cat_sizes));
+      return cat_output;
     };
 
     auto lhs_batch = batch_inputs(Side::LHS, root.lhs_sizes);

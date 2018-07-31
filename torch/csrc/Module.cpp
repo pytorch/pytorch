@@ -402,6 +402,16 @@ PyObject *THPModule_isDefaultTypeCuda(PyObject *_unused, PyObject *arg) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject *THPModule_useZeroSizeDim(PyObject *_unused, PyObject *arg) {
+  HANDLE_TH_ERRORS
+#ifdef USE_TH_SIZE_ZERO_DIM
+  Py_RETURN_TRUE;
+#else
+  Py_RETURN_FALSE;
+#endif
+  END_HANDLE_TH_ERRORS
+}
+
 static PyMethodDef TorchMethods[] = {
   {"_initExtension",  (PyCFunction)THPModule_initExtension,   METH_O,       NULL},
   {"_autograd_init",  (PyCFunction)THPAutograd_initExtension, METH_NOARGS,  NULL},
@@ -432,6 +442,7 @@ static PyMethodDef TorchMethods[] = {
   {"set_flush_denormal", (PyCFunction)THPModule_setFlushDenormal, METH_O,     NULL},
   {"get_default_dtype", (PyCFunction)THPModule_getDefaultDtype, METH_NOARGS,  NULL},
   {"_is_default_type_cuda", (PyCFunction)THPModule_isDefaultTypeCuda, METH_NOARGS,  NULL},
+  {"_use_zero_size_dim", (PyCFunction)THPModule_useZeroSizeDim, METH_NOARGS,  NULL},
   {NULL, NULL, 0, NULL}
 };
 
