@@ -161,6 +161,15 @@ if (${COMPILER_SUPPORTS_HIDDEN_INLINE_VISIBILITY})
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CAFFE2_VISIBILITY_FLAG}")
 endif()
 
+# ---[ Checks if linker supports -rdynamic. `-rdynamic` tells linker
+# -to add all (including unused) symbols into the dynamic symbol
+# -table. We need this to get symbols when generating backtrace at
+# -runtime.
+check_cxx_compiler_flag("-rdynamic" COMPILER_SUPPORTS_RDYNAMIC)
+if (${COMPILER_SUPPORTS_RDYNAMIC})
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -rdynamic")
+endif()
+
 # ---[ If we are using msvc, set no warning flags
 # Note(jiayq): if you are going to add a warning flag, check if this is
 # totally necessary, and only add when you see fit. If it is needed due to
