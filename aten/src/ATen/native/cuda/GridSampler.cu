@@ -19,6 +19,75 @@ namespace {
     return ::min(static_cast<float>(clip_limit - 1), ::max(in, 0.f));
   }
 
+  // clip_coordinates_set_grad works similarly to clip_coordinates except that
+  // it also returns the `d output / d input` via pointer argument `grad_in`.
+  // This is useful in the backward pass of grid_sampler.
+  template <typename scalar_t>
+  static __forceinline__ __device__
+  float clip_coordinates_set_grad(float in, int clip_limit, scalar_t *grad_in) {
+    if (in < 0.f) {
+      *grad_in = static_cast<scalar_t>(0);
+      return 0.f;
+    } else {
+      float max = static_cast<float>(clip_limit - 1);
+      if (in > max) {
+        *grad_in = static_cast<scalar_t>(0);
+        return max;
+      } else {
+        *grad_in = static_cast<scalar_t>(1);
+        return in;
+      }
+    }
+  }
+
+  static __forceinline__ __device__
+  float reflect_coordinates(float in, int clip_limit) {
+    if (clip_limit == static_cast<int>(1)) {
+      return 0.f;
+    }
+    in = ::fabs(in);
+    float max = static_cast<float>(clip_limit - 1);
+    // `fmod` returns same sign as `in`, which is positive after the `fabs` above.
+    float extra = ::fmod(in, max);
+    int flips = static_cast<int>(::floor(in / max));
+    if (flips % 2 == 0) {
+      return extra;
+    } else {
+      return max - extra;
+    }
+  }
+
+  // reflect_coordinates_set_grad works similarly to reflect_coordinates except
+  // that it also returns the `d output / d input` via pointer argument
+  // `grad_in`.
+  // This is useful in the backward pass of grid_sampler.
+  template <typename scalar_t>
+  static __forceinline__ __device__
+  float reflect_coordinates_set_grad(float in, int clip_limit, scalar_t *grad_in) {
+    if (clip_limit == static_cast<int>(1)) {
+      *grad_in = static_cast<scalar_t>(0);
+      return 0.f;
+    }
+    int grad_in_mult_;
+    if (in < 0.f) {
+      grad_in_mult_ = -1;
+      in = -in;
+    } else {
+      grad_in_mult_ = 1;
+    }
+    float max = static_cast<float>(clip_limit - 1);
+    // `fmod` returns same sign as `in`, which is positive after the `if` above.
+    float extra = ::fmod(in, max);
+    int flips = static_cast<int>(::floor(in / max));
+    if (flips % 2 == 0) {
+      *grad_in = static_cast<scalar_t>(grad_in_mult_);
+      return extra;
+    } else {
+      *grad_in = static_cast<scalar_t>(-grad_in_mult_);
+      return max - extra;
+    }
+  }
+
   static __forceinline__ __device__
   bool within_bounds_2d(int h, int w, int H, int W) {
     return h >= 0 && h < H && w >= 0 && w < W;
@@ -94,6 +163,10 @@ namespace {
         // clip coordinates to image borders
         ixf = clip_coordinates(ixf, inp_W);
         iyf = clip_coordinates(iyf, inp_H);
+      } else if (padding_mode == GridSamplerPadding::Reflection) {
+        // reflect coordinates by image borders
+        ixf = reflect_coordinates(ixf, inp_W);
+        iyf = reflect_coordinates(iyf, inp_H);
       }
 
       ix = static_cast<scalar_t>(ixf);
@@ -190,6 +263,11 @@ namespace {
         ixf = clip_coordinates(ixf, inp_W);
         iyf = clip_coordinates(iyf, inp_H);
         izf = clip_coordinates(izf, inp_D);
+      } else if (padding_mode == GridSamplerPadding::Reflection) {
+        // reflect coordinates by image borders
+        ixf = reflect_coordinates(ixf, inp_W);
+        iyf = reflect_coordinates(iyf, inp_H);
+        izf = reflect_coordinates(izf, inp_D);
       }
 
       ix = static_cast<scalar_t>(ixf);
@@ -327,19 +405,18 @@ namespace {
 
       // multipliers for gradients on ix and iy
       // E.g.,  0 for out-of-bound indices when GridSamplerPadding::Border
-      //       -1 for out-of-bound indices when GridSamplerPadding::Reflection
-      scalar_t gix_mult = static_cast<scalar_t>(1), giy_mult = static_cast<scalar_t>(1);
-
+      scalar_t gix_mult, giy_mult;
       if (padding_mode == GridSamplerPadding::Border) {
         // clip coordinates to image borders
-        if (ixf < 0.f || ixf >= static_cast<float>(inp_W - 1)) {
-          gix_mult = static_cast<scalar_t>(0);
-          ixf = clip_coordinates(ixf, inp_W);
-        }
-        if (iyf < 0.f || iyf >= static_cast<float>(inp_H - 1)) {
-          giy_mult = static_cast<scalar_t>(0);
-          iyf = clip_coordinates(iyf, inp_H);
-        }
+        ixf = clip_coordinates_set_grad(ixf, inp_W, &gix_mult);
+        iyf = clip_coordinates_set_grad(iyf, inp_H, &giy_mult);
+      } else if (padding_mode == GridSamplerPadding::Reflection) {
+        // reflect coordinates by image borders
+        ixf = reflect_coordinates_set_grad(ixf, inp_W, &gix_mult);
+        iyf = reflect_coordinates_set_grad(iyf, inp_H, &giy_mult);
+      } else {  // padding_mode == GridSamplerPadding::Zeros
+        gix_mult = static_cast<scalar_t>(1);
+        giy_mult = static_cast<scalar_t>(1);
       }
 
       ix = static_cast<scalar_t>(ixf);
@@ -470,25 +547,21 @@ namespace {
 
       // multipliers for gradients on ix, iy, and iz
       // E.g.,  0 for out-of-bound indices when GridSamplerPadding::Border
-      //       -1 for out-of-bound indices when GridSamplerPadding::Reflection
-      scalar_t gix_mult = static_cast<scalar_t>(1),
-               giy_mult = static_cast<scalar_t>(1),
-               giz_mult = static_cast<scalar_t>(1);
-
+      scalar_t gix_mult, giy_mult, giz_mult;
       if (padding_mode == GridSamplerPadding::Border) {
         // clip coordinates to image borders
-        if (ixf < 0.f || ixf >= static_cast<float>(inp_W - 1)) {
-          gix_mult = static_cast<scalar_t>(0);
-          ixf = clip_coordinates(ixf, inp_W);
-        }
-        if (iyf < 0.f || iyf >= static_cast<float>(inp_H - 1)) {
-          giy_mult = static_cast<scalar_t>(0);
-          iyf = clip_coordinates(iyf, inp_H);
-        }
-        if (izf < 0.f || izf >= static_cast<float>(inp_D - 1)) {
-          giz_mult = static_cast<scalar_t>(0);
-          izf = clip_coordinates(izf, inp_D);
-        }
+        ixf = clip_coordinates_set_grad(ixf, inp_W, &gix_mult);
+        iyf = clip_coordinates_set_grad(iyf, inp_H, &giy_mult);
+        izf = clip_coordinates_set_grad(izf, inp_D, &giz_mult);
+      } else if (padding_mode == GridSamplerPadding::Reflection) {
+        // reflect coordinates by image borders
+        ixf = reflect_coordinates_set_grad(ixf, inp_W, &gix_mult);
+        iyf = reflect_coordinates_set_grad(iyf, inp_H, &giy_mult);
+        izf = reflect_coordinates_set_grad(izf, inp_D, &giz_mult);
+      } else {  // padding_mode == GridSamplerPadding::Zeros
+        gix_mult = static_cast<scalar_t>(1);
+        giy_mult = static_cast<scalar_t>(1);
+        giz_mult = static_cast<scalar_t>(1);
       }
 
       ix = static_cast<scalar_t>(ixf);

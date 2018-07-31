@@ -4946,32 +4946,37 @@ class TestNN(NNTestCase):
             test_shape(N, C, IH, IW, H, W, padding_mode)
 
         # test known input on CPU
-        for padding_mode in ['zeros', 'border']:
+        for padding_mode in ['zeros', 'border', 'reflection']:
 
-            input = Variable(torch.arange(1., 11).view(1, 1, 2, 5))
-            grid = Variable(torch.Tensor(
+            input = torch.arange(1., 11).view(1, 1, 2, 5)
+            grid = torch.tensor(
                 [[-0.9, -1.4, 0, 0.2, 1],
                  [-1, -0.333, 0, 0.5, 1],
                  [-1, -0.5, 0, 0.3333, 1],
-                 [-1, -0.2, 0, 1.1, 0.5]]).view(1, 2, 5, 2))
+                 [-1, -0.2, 0, 1.1, 0.5]]).view(1, 2, 5, 2)
             output = F.grid_sample(input, grid, padding_mode=padding_mode)
-
             if padding_mode == 'zeros':
-                groundtruth = torch.Tensor(
+                groundtruth = torch.tensor(
                     [[0.9600, 6.0000000000, 5.0000, 4.8340, 9.0000],
-                     [2.2500, 6.333250045, 5.0000, 5.1000, 7.0000]]).view(1, 1, 2, 5)
-            else:
-                groundtruth = torch.Tensor(
+                     [2.2500, 6.3332500450, 5.0000, 5.1000, 7.0000]]).view(1, 1, 2, 5)
+            elif padding_mode == 'border':
+                groundtruth = torch.tensor(
                     [[1.2000, 6.0000000000, 5.0000, 4.8340, 9.0000],
-                     [2.2500, 6.333250045, 5.0000, 5.1000, 8.7500]]).view(1, 1, 2, 5)
-
-            self.assertEqual(output.data, groundtruth)
+                     [2.2500, 6.3332500450, 5.0000, 5.1000, 8.7500]]).view(1, 1, 2, 5)
+            elif padding_mode == 'reflection':
+                print(output)
+                groundtruth = torch.tensor(
+                    [[2.2000, 6.0000000000, 5.0000, 4.8340, 9.0000],
+                     [2.2500, 6.3332500450, 5.0000, 5.1000, 8.5500]]).view(1, 1, 2, 5)
+            else:
+                assert False, "missing groundtruth test for padding mode '{}'".format(padding_mode)
+            self.assertEqual(output, groundtruth)
 
             # do gradcheck
-            N = random.randint(1, 8)
-            C = random.randint(1, 8)
-            H = random.randint(1, 8)
-            W = random.randint(1, 8)
+            N = random.randint(2, 8)
+            C = random.randint(2, 8)
+            H = random.randint(2, 8)
+            W = random.randint(2, 8)
             input = torch.randn(N, C, H, W, requires_grad=True)
             grid = torch.randn(N, H, W, 2, requires_grad=True)
             self.assertTrue(gradcheck(
@@ -5042,13 +5047,13 @@ class TestNN(NNTestCase):
             test_shape(N, C, ID, IH, IW, D, H, W, padding_mode)
 
         # test known input on CPU
-        for padding_mode in ['zeros', 'border']:
+        for padding_mode in ['zeros', 'border', 'reflection']:
             # do gradcheck
-            N = random.randint(2, 8)
-            C = random.randint(2, 8)
-            D = random.randint(2, 8)
-            H = random.randint(2, 8)
-            W = random.randint(2, 8)
+            N = random.randint(2, 5)
+            C = random.randint(2, 5)
+            D = random.randint(2, 5)
+            H = random.randint(2, 5)
+            W = random.randint(2, 5)
             input = torch.randn(N, C, D, H, W, requires_grad=True)
             grid = torch.randn(N, D, H, W, 3, requires_grad=True)
             self.assertTrue(gradcheck(

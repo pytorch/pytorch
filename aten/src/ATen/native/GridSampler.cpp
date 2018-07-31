@@ -18,6 +18,75 @@ namespace {
     return std::min(static_cast<scalar_t>(clip_limit - 1), std::max(in, static_cast<scalar_t>(0)));
   }
 
+  // clip_coordinates_set_grad works similarly to clip_coordinates except that
+  // it also returns the `d output / d input` via pointer argument `grad_in`.
+  // This is useful in the backward pass of grid_sampler.
+  template<typename scalar_t>
+  static inline scalar_t clip_coordinates_set_grad(scalar_t in, int64_t clip_limit,
+                                                   scalar_t *grad_in) {
+    if (in < static_cast<scalar_t>(0)) {
+      *grad_in = static_cast<scalar_t>(0);
+      return static_cast<scalar_t>(0);
+    } else {
+      scalar_t max = static_cast<scalar_t>(clip_limit - 1);
+      if (in > max) {
+        *grad_in = static_cast<scalar_t>(0);
+        return max;
+      } else {
+        *grad_in = static_cast<scalar_t>(1);
+        return in;
+      }
+    }
+  }
+
+  template<typename scalar_t>
+  static inline scalar_t reflect_coordinates(scalar_t in, int64_t clip_limit) {
+    if (clip_limit == static_cast<int64_t>(1)) {
+      return static_cast<scalar_t>(0);
+    }
+    in = std::fabs(in);
+    scalar_t max = static_cast<scalar_t>(clip_limit - 1);
+    // `fmod` returns same sign as `in`, which is positive after the `fabs` above.
+    scalar_t extra = std::fmod(in, max);
+    int flips = static_cast<int>(std::floor(in / max));
+    if (flips % 2 == 0) {
+      return extra;
+    } else {
+      return max - extra;
+    }
+  }
+
+  // reflect_coordinates_set_grad works similarly to reflect_coordinates except
+  // that it also returns the `d output / d input` via pointer argument
+  // `grad_in`.
+  // This is useful in the backward pass of grid_sampler.
+  template<typename scalar_t>
+  static inline scalar_t reflect_coordinates_set_grad(scalar_t in, int64_t clip_limit,
+                                                      scalar_t *grad_in) {
+    if (clip_limit == static_cast<int64_t>(1)) {
+      *grad_in = static_cast<scalar_t>(0);
+      return static_cast<scalar_t>(0);
+    }
+    int grad_in_mult_;
+    if (in < static_cast<scalar_t>(0)) {
+      grad_in_mult_ = -1;
+      in = -in;
+    } else {
+      grad_in_mult_ = 1;
+    }
+    scalar_t max = static_cast<scalar_t>(clip_limit - 1);
+    // `fmod` returns same sign as `in`, which is positive after the `if` above.
+    scalar_t extra = std::fmod(in, max);
+    int flips = static_cast<int>(std::floor(in / max));
+    if (flips % 2 == 0) {
+      *grad_in = static_cast<scalar_t>(grad_in_mult_);
+      return extra;
+    } else {
+      *grad_in = static_cast<scalar_t>(-grad_in_mult_);
+      return max - extra;
+    }
+  }
+
   static inline bool within_bounds_2d(int64_t h, int64_t w, int64_t H, int64_t W) {
     return h >= 0 && h < H && w >= 0 && w < W;
   }
@@ -92,6 +161,10 @@ namespace {
             // clip coordinates to image borders
             ix = clip_coordinates(ix, inp_W);
             iy = clip_coordinates(iy, inp_H);
+          } else if (padding_mode == GridSamplerPadding::Reflection) {
+            // reflect coordinates by image borders
+            ix = reflect_coordinates(ix, inp_W);
+            iy = reflect_coordinates(iy, inp_H);
           }
 
           // get NE, NW, SE, SW pixel values from (x, y)
@@ -193,6 +266,11 @@ namespace {
               ix = clip_coordinates(ix, inp_W);
               iy = clip_coordinates(iy, inp_H);
               iz = clip_coordinates(iz, inp_D);
+            } else if (padding_mode == GridSamplerPadding::Reflection) {
+              // reflect coordinates by image borders
+              ix = reflect_coordinates(ix, inp_W);
+              iy = reflect_coordinates(iy, inp_H);
+              iz = reflect_coordinates(iz, inp_D);
             }
 
             // get corner pixel values from (x, y, z)
@@ -338,19 +416,18 @@ namespace {
 
           // multipliers for gradients on ix and iy
           // E.g.,  0 for out-of-bound indices when GridSamplerPadding::Border
-          //       -1 for out-of-bound indices when GridSamplerPadding::Reflection
-          scalar_t gix_mult = static_cast<scalar_t>(1), giy_mult = static_cast<scalar_t>(1);
-
+          scalar_t gix_mult, giy_mult;
           if (padding_mode == GridSamplerPadding::Border) {
             // clip coordinates to image borders
-            if (ix < static_cast<scalar_t>(0) || ix >= static_cast<scalar_t>(inp_W - 1)) {
-              gix_mult = static_cast<scalar_t>(0);
-              ix = clip_coordinates(ix, inp_W);
-            }
-            if (iy < static_cast<scalar_t>(0) || iy >= static_cast<scalar_t>(inp_H - 1)) {
-              giy_mult = static_cast<scalar_t>(0);
-              iy = clip_coordinates(iy, inp_H);
-            }
+            ix = clip_coordinates_set_grad(ix, inp_W, &gix_mult);
+            iy = clip_coordinates_set_grad(iy, inp_H, &giy_mult);
+          } else if (padding_mode == GridSamplerPadding::Reflection) {
+            // reflect coordinates by image borders
+            ix = reflect_coordinates_set_grad(ix, inp_W, &gix_mult);
+            iy = reflect_coordinates_set_grad(iy, inp_H, &giy_mult);
+          } else {  // padding_mode == GridSamplerPadding::Zeros
+            gix_mult = static_cast<scalar_t>(1);
+            giy_mult = static_cast<scalar_t>(1);
           }
 
           // get NE, NW, SE, SW pixel values from (x, y)
@@ -486,25 +563,21 @@ namespace {
 
             // multipliers for gradients on ix, iy, and iz
             // E.g.,  0 for out-of-bound indices when GridSamplerPadding::Border
-            //       -1 for out-of-bound indices when GridSamplerPadding::Reflection
-            scalar_t gix_mult = static_cast<scalar_t>(1),
-                     giy_mult = static_cast<scalar_t>(1),
-                     giz_mult = static_cast<scalar_t>(1);
-
+            scalar_t gix_mult, giy_mult, giz_mult;
             if (padding_mode == GridSamplerPadding::Border) {
               // clip coordinates to image borders
-              if (ix < static_cast<scalar_t>(0) || ix >= static_cast<scalar_t>(inp_W - 1)) {
-                gix_mult = static_cast<scalar_t>(0);
-                ix = clip_coordinates(ix, inp_W);
-              }
-              if (iy < static_cast<scalar_t>(0) || iy >= static_cast<scalar_t>(inp_H - 1)) {
-                giy_mult = static_cast<scalar_t>(0);
-                iy = clip_coordinates(iy, inp_H);
-              }
-              if (iz < static_cast<scalar_t>(0) || iz >= static_cast<scalar_t>(inp_D - 1)) {
-                giz_mult = static_cast<scalar_t>(0);
-                iz = clip_coordinates(iz, inp_D);
-              }
+              ix = clip_coordinates_set_grad(ix, inp_W, &gix_mult);
+              iy = clip_coordinates_set_grad(iy, inp_H, &giy_mult);
+              iz = clip_coordinates_set_grad(iz, inp_D, &giz_mult);
+            } else if (padding_mode == GridSamplerPadding::Reflection) {
+              // reflect coordinates by image borders
+              ix = reflect_coordinates_set_grad(ix, inp_W, &gix_mult);
+              iy = reflect_coordinates_set_grad(iy, inp_H, &giy_mult);
+              iz = reflect_coordinates_set_grad(iz, inp_D, &giz_mult);
+            } else {  // padding_mode == GridSamplerPadding::Zeros
+              gix_mult = static_cast<scalar_t>(1);
+              giy_mult = static_cast<scalar_t>(1);
+              giz_mult = static_cast<scalar_t>(1);
             }
 
             // get corner pixel values from (x, y, z)
