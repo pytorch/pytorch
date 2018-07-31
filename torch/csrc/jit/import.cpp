@@ -16,51 +16,53 @@ namespace torch { namespace jit {
 
 namespace {
 
+namespace onnx = ::ONNX_NAMESPACE;
+
 // IR graph construction
 
 class DecoderBase {
  protected:
-  virtual std::shared_ptr<Graph> buildGraph(const onnx_torch::GraphProto& graph_proto);
+  virtual std::shared_ptr<Graph> buildGraph(const onnx::GraphProto& graph_proto);
 
-  void buildBlock(const onnx_torch::GraphProto& graph_proto, Block* block,
+  void buildBlock(const onnx::GraphProto& graph_proto, Block* block,
                    std::unordered_map<std::string, Value*>& value_map);
 
-  void buildBlocks(const std::vector<onnx_torch::GraphProto>& graphs_, Node* node,
+  void buildBlocks(const std::vector<onnx::GraphProto>& graphs_, Node* node,
                    std::unordered_map<std::string, Value*>& value_map);
 
-  virtual void buildValue(Value* value, const onnx_torch::ValueInfoProto& valueinfo_proto) {};
+  virtual void buildValue(Value* value, const onnx::ValueInfoProto& valueinfo_proto) {};
 
   virtual void buildIntermediateValue(Value* value, const std::string& name) {};
 
-  at::ScalarType onnxTypeToATenType(onnx_torch::TensorProto_DataType tensor_proto);
+  at::ScalarType onnxTypeToATenType(onnx::TensorProto_DataType tensor_proto);
 
-  virtual at::Tensor buildTensor(const onnx_torch::TensorProto& tensor_proto);
+  virtual at::Tensor buildTensor(const onnx::TensorProto& tensor_proto);
 };
 
-at::ScalarType DecoderBase::onnxTypeToATenType(onnx_torch::TensorProto_DataType onnx_type) {
+at::ScalarType DecoderBase::onnxTypeToATenType(onnx::TensorProto_DataType onnx_type) {
   switch(onnx_type) {
-    case onnx_torch::TensorProto_DataType_UINT8:
+    case onnx::TensorProto_DataType_UINT8:
       return at::kByte;
-    case onnx_torch::TensorProto_DataType_INT8:
+    case onnx::TensorProto_DataType_INT8:
       return at::kChar;
-    case onnx_torch::TensorProto_DataType_INT16:
+    case onnx::TensorProto_DataType_INT16:
       return at::kShort;
-    case onnx_torch::TensorProto_DataType_INT32:
+    case onnx::TensorProto_DataType_INT32:
       return at::kInt;
-    case onnx_torch::TensorProto_DataType_INT64:
+    case onnx::TensorProto_DataType_INT64:
       return at::kLong;
-    case onnx_torch::TensorProto_DataType_FLOAT16:
+    case onnx::TensorProto_DataType_FLOAT16:
       return at::kHalf;
-    case onnx_torch::TensorProto_DataType_FLOAT:
+    case onnx::TensorProto_DataType_FLOAT:
       return at::kFloat;
-    case onnx_torch::TensorProto_DataType_DOUBLE:
+    case onnx::TensorProto_DataType_DOUBLE:
       return at::kDouble;
     default:
       throw std::runtime_error("Unsupported data type");
   }
 }
 
-at::Tensor DecoderBase::buildTensor(const onnx_torch::TensorProto& tensor_proto) {
+at::Tensor DecoderBase::buildTensor(const onnx::TensorProto& tensor_proto) {
   at::Tensor tensor = at::CPU(onnxTypeToATenType(tensor_proto.data_type())).tensor();
   std::vector<int64_t> sizes = { tensor_proto.dims().begin(), tensor_proto.dims().end() };
   tensor.resize_(sizes);
@@ -75,7 +77,7 @@ at::Tensor DecoderBase::buildTensor(const onnx_torch::TensorProto& tensor_proto)
 }
 
 void DecoderBase::buildBlocks(
-    const std::vector<onnx_torch::GraphProto>& graphs_, Node* node,
+    const std::vector<onnx::GraphProto>& graphs_, Node* node,
     std::unordered_map<std::string, Value*>& value_map) {
   for (auto g_ : graphs_) {
     auto block = node->addBlock();
@@ -83,7 +85,7 @@ void DecoderBase::buildBlocks(
   }
 }
 
-std::shared_ptr<Graph> DecoderBase::buildGraph(const onnx_torch::GraphProto& graph_proto) {
+std::shared_ptr<Graph> DecoderBase::buildGraph(const onnx::GraphProto& graph_proto) {
   auto graph = std::make_shared<Graph>();
   std::unordered_map<std::string, Value*> value_map;
 
@@ -92,7 +94,7 @@ std::shared_ptr<Graph> DecoderBase::buildGraph(const onnx_torch::GraphProto& gra
   return graph;
 }
 
-void DecoderBase::buildBlock(const onnx_torch::GraphProto& graph_proto, Block* block,
+void DecoderBase::buildBlock(const onnx::GraphProto& graph_proto, Block* block,
                 std::unordered_map<std::string, Value*>& value_map) {
 
   for (auto & input : graph_proto.input()) {
@@ -111,44 +113,44 @@ void DecoderBase::buildBlock(const onnx_torch::GraphProto& graph_proto, Block* b
       Symbol name = Symbol::attr(attr.name());
 
       switch(attr.type()) {
-        case onnx_torch::AttributeProto_AttributeType_UNDEFINED:
+        case onnx::AttributeProto_AttributeType_UNDEFINED:
           throw std::runtime_error("UNDEFINED attribute unsupported");
           break;
-        case onnx_torch::AttributeProto_AttributeType_FLOAT:
+        case onnx::AttributeProto_AttributeType_FLOAT:
           node->f_(name, attr.f());
           break;
-        case onnx_torch::AttributeProto_AttributeType_INT:
+        case onnx::AttributeProto_AttributeType_INT:
           node->i_(name, attr.i());
           break;
-        case onnx_torch::AttributeProto_AttributeType_STRING:
+        case onnx::AttributeProto_AttributeType_STRING:
           node->s_(name, std::move(attr.s()));
           break;
-        case onnx_torch::AttributeProto_AttributeType_TENSOR:
+        case onnx::AttributeProto_AttributeType_TENSOR:
           node->t_(name, buildTensor(attr.t()));
           break;
-        case onnx_torch::AttributeProto_AttributeType_GRAPH:
+        case onnx::AttributeProto_AttributeType_GRAPH:
           node->g_(name, buildGraph(attr.g()));
           break;
-        case onnx_torch::AttributeProto_AttributeType_FLOATS:
+        case onnx::AttributeProto_AttributeType_FLOATS:
           node->fs_(name, {attr.floats().begin(), attr.floats().end()});
           break;
-        case onnx_torch::AttributeProto_AttributeType_INTS:
+        case onnx::AttributeProto_AttributeType_INTS:
           node->is_(name, {attr.ints().begin(), attr.ints().end()});
           break;
-        case onnx_torch::AttributeProto_AttributeType_STRINGS:
+        case onnx::AttributeProto_AttributeType_STRINGS:
           node->ss_(name, {attr.strings().begin(), attr.strings().end()});
           break;
-        case onnx_torch::AttributeProto_AttributeType_TENSORS:
-          node->ts_(name, fmap(attr.tensors(), [this](const onnx_torch::TensorProto& t) {
+        case onnx::AttributeProto_AttributeType_TENSORS:
+          node->ts_(name, fmap(attr.tensors(), [this](const onnx::TensorProto& t) {
                                                  return buildTensor(t);
                                                }));
           break;
-        case onnx_torch::AttributeProto_AttributeType_GRAPHS:
+        case onnx::AttributeProto_AttributeType_GRAPHS:
           if (attr.name() == "_blocks") {
             buildBlocks({attr.graphs().begin(), attr.graphs().end()}, node, value_map);
           }
           else {
-            node->gs_(name, fmap(attr.graphs(), [this](const onnx_torch::GraphProto& g_) {
+            node->gs_(name, fmap(attr.graphs(), [this](const onnx::GraphProto& g_) {
                                                   return buildGraph(g_);
                                                 }));
           }
@@ -225,7 +227,7 @@ void GraphDecoder::reconstructOutputTypes(Block *b) {
 std::shared_ptr<Graph> GraphDecoder::decode(
     const std::string& serialized_graph,
     std::vector<at::Tensor>& initializers) {
-  auto model_proto = onnx_torch::ModelProto();
+  auto model_proto = onnx::ModelProto();
   model_proto.ParseFromString(serialized_graph);
 
   auto graph_proto = model_proto.graph();
@@ -245,19 +247,19 @@ class ModuleDecoder : DecoderBase {
       const std::unordered_map<std::string, std::string>& storage_map);
 
  private:
-  virtual std::shared_ptr<Graph> buildGraph(const onnx_torch::GraphProto& graph_proto) override;
+  virtual std::shared_ptr<Graph> buildGraph(const onnx::GraphProto& graph_proto) override;
 
-  virtual at::Tensor buildTensor(const onnx_torch::TensorProto& tensor_proto) override;
+  virtual at::Tensor buildTensor(const onnx::TensorProto& tensor_proto) override;
 
-  TypePtr buildType(const onnx_torch::TypeProto& type_proto);
+  TypePtr buildType(const onnx::TypeProto& type_proto);
 
-  virtual void buildValue(Value* value, const onnx_torch::ValueInfoProto& valueinfo_proto) override;
+  virtual void buildValue(Value* value, const onnx::ValueInfoProto& valueinfo_proto) override;
 
   virtual void buildIntermediateValue(Value* value, const std::string& name) override;
 
-  at::Tensor buildParameter(const onnx_torch::TensorProto& tensor_proto);
+  at::Tensor buildParameter(const onnx::TensorProto& tensor_proto);
 
-  at::Tensor buildTensorCommon(const onnx_torch::TensorProto& tensor_proto,
+  at::Tensor buildTensorCommon(const onnx::TensorProto& tensor_proto,
                                const int64_t storage_offset,
                                const std::vector<int64_t>& strides);
 
@@ -267,17 +269,17 @@ class ModuleDecoder : DecoderBase {
 
   const std::unordered_map<std::string, std::string> *storage_export_map_;
   std::unordered_map<std::string, std::shared_ptr<at::Tensor>> storage_map_;
-  std::unordered_map<std::string, const onnx_torch::TypeProto*> value_type_map_;
+  std::unordered_map<std::string, const onnx::TypeProto*> value_type_map_;
 };
 
-std::shared_ptr<Graph> ModuleDecoder::buildGraph(const onnx_torch::GraphProto& graph_proto) {
+std::shared_ptr<Graph> ModuleDecoder::buildGraph(const onnx::GraphProto& graph_proto) {
   for (auto &subtype : graph_proto.value_info()) {
     value_type_map_[subtype.name()] = &subtype.type();
   }
   return DecoderBase::buildGraph(graph_proto);
 }
 
-TypePtr ModuleDecoder::buildType(const onnx_torch::TypeProto& type_proto) {
+TypePtr ModuleDecoder::buildType(const onnx::TypeProto& type_proto) {
   auto tensortype_proto = type_proto.tensor_type();
   auto shape_proto = tensortype_proto.shape();
   auto kind = type_proto.denotation();
@@ -312,7 +314,7 @@ TypePtr ModuleDecoder::buildType(const onnx_torch::TypeProto& type_proto) {
   }
 }
 
-void ModuleDecoder::buildValue(Value* value, const onnx_torch::ValueInfoProto& valueinfo_proto) {
+void ModuleDecoder::buildValue(Value* value, const onnx::ValueInfoProto& valueinfo_proto) {
   value->setType(buildType(valueinfo_proto.type()));
 }
 
@@ -322,22 +324,24 @@ void ModuleDecoder::buildIntermediateValue(Value* value, const std::string& name
   value->setType(buildType(*it->second));
 }
 
-at::Tensor ModuleDecoder::buildParameter(const onnx_torch::TensorProto& tensor_proto) {
+at::Tensor ModuleDecoder::buildParameter(const onnx::TensorProto& tensor_proto) {
   std::vector<int64_t> strides;
+  // We've stored three other values (is_buffer, requires_grad, storage_offset) before strides; ignore them
   std::move(tensor_proto.int64_data().begin() + 3, tensor_proto.int64_data().end(), std::back_inserter(strides));
   auto tensor = buildTensorCommon(tensor_proto, /* storage_offset = */ tensor_proto.int64_data(2), strides);
   autograd::Variable var = autograd::make_variable(tensor, /* requires_grad = */ tensor_proto.int64_data(1));
   return var;
 }
 
-at::Tensor ModuleDecoder::buildTensor(const onnx_torch::TensorProto& tensor_proto) {
+at::Tensor ModuleDecoder::buildTensor(const onnx::TensorProto& tensor_proto) {
   std::vector<int64_t> strides;
+  // We've stored one other value (storage_offset) before strides; ignore it
   std::move(tensor_proto.int64_data().begin() + 1, tensor_proto.int64_data().end(), std::back_inserter(strides));
   return buildTensorCommon(tensor_proto, /* storage_offset = */ tensor_proto.int64_data(0), strides);
 }
 
 at::Tensor ModuleDecoder::buildTensorCommon(
-    const onnx_torch::TensorProto& tensor_proto,
+    const onnx::TensorProto& tensor_proto,
     const int64_t storage_offset,
     const std::vector<int64_t>& strides) {
   // NB: storage_offset and strides are passed in separately because
@@ -392,7 +396,7 @@ std::shared_ptr<script::Module> ModuleDecoder::decode(
     const std::shared_ptr<script::Module> root_module,
     const std::string &serialized_module,
     const std::unordered_map<std::string, std::string> &storage_export_map) {
-  auto model_proto = onnx_torch::ModelProto();
+  auto model_proto = onnx::ModelProto();
   model_proto.ParseFromString(serialized_module);
   auto graph_proto = model_proto.graph();
 

@@ -461,6 +461,8 @@ void ModuleEncoder::EncodeTypeInfo(
   onnx::TypeProto_Tensor* tensortype_proto = type_proto->mutable_tensor_type();
   onnx::TensorShapeProto* shape_proto = tensortype_proto->mutable_shape();
 
+  // Use TypeProto fields to encode types.
+  // denotation stores the type as a string
   auto kind = type->kind();
   if (kind == TypeKind::DynamicType) {
     type_proto->set_denotation("DynamicType");
@@ -468,6 +470,8 @@ void ModuleEncoder::EncodeTypeInfo(
     type_proto->set_denotation("TensorType");
     TensorTypePtr node_type = type->cast<TensorType>();
     const std::vector<std::int64_t>& sizes = node_type->sizes();
+
+    // store the sizes and strides in the dims field of TensorShapeProto
     for (size_t i = 0; i < sizes.size(); i++) {
       shape_proto->add_dim();
       shape_proto->mutable_dim(i)->set_dim_value(sizes[i]);
@@ -482,6 +486,8 @@ void ModuleEncoder::EncodeTypeInfo(
     type_proto->set_denotation("TupleType");
     TupleTypePtr node_type = type->cast<TupleType>();
     auto elements = node_type->elements();
+
+    // Generate a name for and encode each subtype in the value_info field of the GraphProto.
     for (size_t i = 0; i < elements.size(); i++) {
       std::string name = "#" + std::to_string(type_counter_++);
       shape_proto->add_dim();
@@ -492,6 +498,8 @@ void ModuleEncoder::EncodeTypeInfo(
   } else if (kind == TypeKind::ListType) {
     type_proto->set_denotation("ListType");
     ListTypePtr node_type = type->cast<ListType>();
+
+    // Generate a name for and encode the subtype in the value_info field of the GraphProto.
     std::string name = "#" + std::to_string(type_counter_++);
     shape_proto->add_dim();
     shape_proto->mutable_dim(0)->set_dim_param(name);
