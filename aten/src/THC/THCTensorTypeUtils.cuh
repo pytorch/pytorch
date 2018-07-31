@@ -85,11 +85,7 @@ template <>
 struct ScalarNegate<half> {
   static __host__ __device__ half to(const half v) {
 #ifdef __CUDA_ARCH__
-#ifdef CUDA_HALF_INSTRUCTIONS
-    return __hneg(v);
-#else
     return __float2half(-__half2float(v));
-#endif
 #else
 #if CUDA_VERSION < 9000 && !defined(__HIP_PLATFORM_HCC__)
     half out = v;
