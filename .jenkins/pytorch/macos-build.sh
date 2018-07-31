@@ -31,9 +31,9 @@ if [[ "${JOB_BASE_NAME}" == *cuda9.2* ]]; then
 
   # Eigen gives "explicit specialization of class must precede its first use" error
   # when compiling with Xcode 9.1 toolchain, so we have to use Xcode 8.2 toolchain instead.
-  export DEVELOPER_DIR=/Library/Developer/CommandLineTools
+  #export DEVELOPER_DIR=/Library/Developer/CommandLineTools
 else
-  export DEVELOPER_DIR=/Applications/Xcode9.app/Contents/Developer
+  #export DEVELOPER_DIR=/Applications/Xcode9.app/Contents/Developer
 fi
 
 export MACOSX_DEPLOYMENT_TARGET=10.9
