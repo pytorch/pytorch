@@ -45,7 +45,7 @@ inline void distBroadcastCoalesced(
     AT_ASSERT(synced.size() == tensors.size());
     for (size_t i = 0; i < synced.size(); ++i) {
       // Copy into the per-process tensors.
-      tensors[i].copy_(synced[i]);
+      tensors[i].copy_(synced[i], /*non_blocking=*/true);
     }
   }
 }
