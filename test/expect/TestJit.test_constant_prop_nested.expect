@@ -11,6 +11,5 @@ graph(%a : Dynamic) {
       %6 : int = prim::Constant[value=1]()
       -> (%6)
     }
-  %7 : Long() = prim::NumToTensor(%c)
-  return (%7);
+  return (%c);
 }
