@@ -481,7 +481,7 @@ class NumpyTests(TestCase):
         self.assertEqual(torch.ones(1, 2), a[True, [0, 1], True, True, [1], [[2]]])
         self.assertRaises(RuntimeError, lambda: a[False, [0, 1], ...])
 
-    def test_boolean_indexing_weirdness_tensors(self
+    def test_boolean_indexing_weirdness_tensors(self):
         return
         # Weird boolean indexing things
         false = torch.tensor(False)
