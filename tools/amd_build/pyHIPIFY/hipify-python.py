@@ -424,9 +424,6 @@ def processKernelLaunches(string, stats):
         # Update the statistics
         stats["kernel_launches"].append(hip_kernel)
 
-    # Transpile std math functions to device functions
-    output_string = transpile_device_math(output_string)
-
     return output_string
 
 
@@ -492,18 +489,6 @@ def replace_forceinline(input_string):
     """
     output_string = input_string
     output_string = re.sub("__forceinline__", "inline", output_string)
-    return output_string
-
-
-def replace_math_functions(input_string):
-    """ FIXME: Temporarily replace std:: invocations of math functions with non-std:: versions to prevent linker errors
-        NOTE: This can lead to correctness issues when running tests, since the correct version of the math function (exp/expf) might not get called.
-        Plan is to remove this function once HIP supports std:: math function calls inside device code
-    """
-    output_string = input_string
-    output_string = re.sub("std::exp\(", "::exp(", output_string)
-    output_string = re.sub("std::log\(", "::log(", output_string)
-    output_string = re.sub("std::pow\(", "::pow(", output_string)
     return output_string
 
 
@@ -730,7 +715,7 @@ def preprocessor(filepath, stats, hipify_caffe2):
             output_source = disable_asserts(output_source)
 
         # Replace std:: with non-std:: versions
-        output_source = replace_math_functions(output_source)
+        output_source = transpile_device_math(output_source)
 
         # Replace __forceinline__ with inline
         output_source = replace_forceinline(output_source)
@@ -909,13 +894,11 @@ def disable_module(input_file):
 
 
 def transpile_device_math(input_string):
-    """Automatically searches within kernels and transpiles the std math
-    function calls into device math calls"""
+    """ Temporarily replace std:: invocations of math functions with non-std:: versions."""
     output_string = input_string
 
     # Extract device code positions
-    get_kernel_definitions = [k for k in re.finditer(
-        r"(template[ ]*<(.*)>\n.*\n?)?(__global__|__device__) void[\n| ](\w+(\(.*\))?)\(", input_string)]
+    get_kernel_definitions = [k for k in re.finditer(r"(__global__|__device__)", input_string)]
 
     # Iterate through each kernel definition
     for kernel in get_kernel_definitions:

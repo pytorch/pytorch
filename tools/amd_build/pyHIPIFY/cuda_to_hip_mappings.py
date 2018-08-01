@@ -17,8 +17,15 @@ MATH_TRANSPILATIONS = {
     "std::max": ("::max"),
     "std::min": ("::min"),
     "std::ceil": ("::ceil"),
-    "std::floor": ("::floor")
+    "std::floor": ("::floor"),
+    "std::exp": ("::exp"),
+    "std::log": ("::log"),
+    "std::pow": ("::pow"),
+    "std::fabs": ("::fabs"),
+    "std::fmod": ("::fmod"),
+    "std::remainder": ("::remainder"),
 }
+
 
 CUDA_TYPE_NAME_MAP = {
     "CUresult": ("hipError_t", CONV_TYPE, API_DRIVER),
