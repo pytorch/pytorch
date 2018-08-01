@@ -55,19 +55,6 @@ void SparseTensorImpl::set_indices_and_values_unsafe(const Tensor& indices, cons
   AT_CHECK(indices.type().backend() == values.type().backend(), "backend of indices (", indices.type().backend(), ") must match backend of values (", values.type().backend(), ")");
   AT_CHECK(!indices.is_cuda() || indices.get_device() == values.get_device(), "device of indices (", indices.get_device(), ") must match device of values (", values.get_device(), ")");
 
-#ifndef USE_TH_SIZE_ZERO_DIM
-  // TODO: Explicit empty test is needed because we don't handle size zero
-  // dimensions at the moment
-  bool empty = values.numel() == 0;
-  if (!empty) {
-    AT_CHECK(indices.dim() == 2, "indices must be nDim x nnz, but got: ", indices.sizes());
-    AT_CHECK(indices.size(1) == values.size(0), "indices and values must have same nnz, but got nnz from indices: ", indices.size(1), ", nnz from values: ", values.size(0));
-    AT_CHECK(indices.size(0) == sparseDims_, "indices has incorrect first dimension, expected ", sparseDims_, ", got ", indices.size(0));
-    AT_CHECK(values.dim() == denseDims_ + 1, "values has incorrect number of dimensions, expected ", denseDims_ + 1, ", got ", values.dim());
-  } else {
-    AT_CHECK(indices.numel() == 0, "if values is empty, indices must be empty too");
-  }
-#else
   AT_CHECK(indices.dim() == 2, "indices must be nDim x nnz, but got: ", indices.sizes());
   AT_CHECK(indices.size(1) == values.size(0), "indices and values must have same nnz, but got nnz from indices: ", indices.size(1), ", nnz from values: ", values.size(0));
   AT_CHECK(indices.size(0) == sparseDims_, "indices has incorrect first dimension, expected ", sparseDims_, ", got ", indices.size(0));
@@ -81,21 +68,11 @@ void SparseTensorImpl::set_indices_and_values_unsafe(const Tensor& indices, cons
     std::equal(expected_values_size.begin(), expected_values_size.end(), new_values_size.begin()),
     "values has incorrect size, expected ", expected_values_size, ", got ", new_values_size
   );
-#endif
 
   indices_ = indices;
   values_ = values;
 
-#ifndef USE_TH_SIZE_ZERO_DIM
-  // We need this ternary if we don't have zero-size dimensions support.
-  // (Actually, this will "accidentally" work today because all zero-size
-  // tensors have size [0], and so you'll get 0 when empty is zero; but it's
-  // more explicit this way.)
-  nnz_ = empty ? 0 : values.size(0);
-#else
   nnz_ = values.size(0);
-#endif
-
   coalesced_ = false;
 }
 

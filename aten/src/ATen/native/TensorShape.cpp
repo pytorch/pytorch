@@ -411,12 +411,8 @@ static inline Tensor & sparse_transpose_(Tensor & self, int64_t dim0, int64_t di
     auto sizes = self.sizes().vec();
     std::swap(sizes[dim0], sizes[dim1]);
 
-#ifndef USE_TH_SIZE_ZERO_DIM
-    return self.sparse_raw_resize_legacy_(sizes, self._sparseDims(), self._denseDims());
-#else
     _get_sparse_impl(self)->resize_(self._sparseDims(), self._denseDims(), sizes);
     return self;
-#endif    
   } else {
     auto indices = self._indices();
     auto row0 = indices.select(0, dim0);
@@ -431,12 +427,7 @@ static inline Tensor & sparse_transpose_(Tensor & self, int64_t dim0, int64_t di
     auto sizes = self.sizes().vec();
     std::swap(sizes[dim0], sizes[dim1]);
 
-#ifndef USE_TH_SIZE_ZERO_DIM
-    return self.sparse_raw_resize_legacy_(sizes, -1, -1);
-#else
-    _get_sparse_impl(self)->resize_(self._indices().size(0), self._values().dim() - 1, sizes);
-    return self;
-#endif
+    return self.sparse_resize_(sizes, self._indices().size(0), self._values().dim() - 1);
   }
 }
 

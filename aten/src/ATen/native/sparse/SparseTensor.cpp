@@ -78,13 +78,6 @@ SparseTensor new_with_tensor_sparse(const LongTensor& indices, const Tensor& val
     values = values_;
   }
 
-#ifndef USE_TH_SIZE_ZERO_DIM
-  // TODO: This is a temporary test until we support zero-size dims.
-  // I'm NOT adding the "obvious" bypass code, because it wasn't supported
-  // previously
-  AT_CHECK(indices.numel() != 0, "cannot construct sparse tensor with empty indices; use the nullary constructor instead");
-#endif
-
   const SparseType& dtype = values.type().toSparse();
 
   // If sizes are not given, it is inferred as max index of each dim.
@@ -123,14 +116,12 @@ SparseTensor new_with_tensor_sparse(const LongTensor& indices, const Tensor& val
   return _new_with_dims_and_tensor_sparse(dtype, sparseDims, denseDims, computed_sizes, indices, values);
 }
 
-#ifdef USE_TH_SIZE_ZERO_DIM
 SparseTensor new_with_dims_and_size_sparse(const SparseType& dtype, int64_t sparseDims, int64_t denseDims, ArrayRef<int64_t> size) {
   SparseTensor self = new_sparse(dtype);
   AT_CHECK(size.size() != 0, "cannot construct sparse tensor with empty size and no values; use the nullary constructor instead");
   _get_sparse_impl(self)->resize_and_clear_(sparseDims, denseDims, size);
   return self;
 }
-#endif
 
 SparseTensor new_with_size_sparse(const SparseType& dtype, ArrayRef<int64_t> size) {
   return new_with_dims_and_size_sparse(dtype, size.size(), 0, size);
@@ -152,13 +143,6 @@ SparseTensor new_with_tensor_and_size_unsafe_sparse(const LongTensor& indices, c
 
   const SparseType& dtype = values.type().toSparse();
 
-#ifndef USE_TH_SIZE_ZERO_DIM
-  // NB: used to be a dim() == 0 test, but that's legacy TH semantics
-  if (indices.numel() == 0 && values.numel() == 0) {
-    return new_with_size_sparse(dtype, sizes);
-  }
-#endif
-
   int64_t sparseDims = indices.size(0);
   int64_t denseDims = values.dim() - 1;
   return _new_with_dims_and_tensor_sparse(dtype, sparseDims, denseDims, sizes, indices, values);
@@ -175,14 +159,6 @@ SparseTensor new_with_tensor_and_size_sparse(const LongTensor& indices, const Te
   }
 
   const SparseType& dtype = values.type().toSparse();
-
-#ifndef USE_TH_SIZE_ZERO_DIM
-  // NB: This used to be dims, but mumble TH handling zero-sized tensors
-  // incorrectly
-  if (indices.numel() == 0 && values.numel() == 0) {
-    return new_with_size_sparse(dtype, sizes);
-  }
-#endif
 
   int64_t sparseDims = indices.size(0);
   int64_t denseDims = values.dim() - 1;
@@ -208,15 +184,6 @@ SparseTensor new_with_tensor_and_size_sparse(const LongTensor& indices, const Te
     }
   }
 
-#ifndef USE_TH_SIZE_ZERO_DIM
-  for (int64_t d = 0; d < denseDims; d++) {
-    int64_t values_size = values.size(d+1);
-    int64_t specified_size = sizes[static_cast<size_t>(sparseDims + d)];
-    AT_CHECK(values_size <= specified_size,
-             "values and sizes are inconsistent: sizes[", d + sparseDims, "] is ", specified_size,
-             " but values.size(", d + 1, ") is ", values_size);
-  }
-#endif
   return _new_with_dims_and_tensor_sparse(dtype, sparseDims, denseDims, sizes, indices, values);
 }
 
@@ -234,10 +201,7 @@ SparseTensor clone_sparse(const SparseTensor& self) {
  ******************************************************************************/
 
 SparseTensor& sparse_resize_(SparseTensor& self, ArrayRef<int64_t> size, int64_t sparseDims, int64_t denseDims) {
-#ifdef USE_TH_SIZE_ZERO_DIM
   _get_sparse_impl(self)->resize_(sparseDims, denseDims, size);
-#endif
-
   return self;
 }
 
@@ -272,9 +236,6 @@ SparseTensor& copy_sparse_(SparseTensor& self, const SparseTensor& src) {
   // NB: This seems to copy the underlying full indices/values buffer
   _copy_into_sparse(self, _get_sparse_impl(src)->indices(), _get_sparse_impl(src)->values());
   _get_sparse_impl(self)->set_coalesced(src.is_coalesced());
-#ifndef USE_TH_SIZE_ZERO_DIM
-  _get_sparse_impl(self)->set_nnz(src._nnz());
-#endif
   return self;
 }
 
@@ -308,9 +269,6 @@ SparseTensor coalesce_sparse_cpu(const SparseTensor& self) {
   // TODO: is there a more idiomatic way to do this?
   LongTensor newIndices = indices.type().tensor(indices.sizes());
   Tensor newValues = values.type().tensor(values.sizes());
-#ifndef USE_TH_SIZE_ZERO_DIM
-  _alias_into_sparse(dst, newIndices, newValues);
-#endif
 
   LongTensor indicesBuffer;
   LongTensor indicesPermutation;
@@ -344,16 +302,11 @@ SparseTensor coalesce_sparse_cpu(const SparseTensor& self) {
         }
     });
 
-#ifdef USE_TH_SIZE_ZERO_DIM
   SparseTensor dst = new_with_dims_and_size_sparse(self.type(), sparseDims, denseDims, self.sizes());
   newIndices = newIndices.narrow(1, 0, i+1);
   newValues = newValues.narrow(0, 0, i+1);
   _get_sparse_impl(dst)->set_indices_and_values_unsafe(newIndices, newValues);
-#endif
   _get_sparse_impl(dst)->set_coalesced(true);
-#ifndef USE_TH_SIZE_ZERO_DIM
-  _get_sparse_impl(dst)->set_nnz(i + 1);
-#endif
 
   return dst;
 }
@@ -375,16 +328,10 @@ SparseTensor& sparse_mask_out_cpu(SparseTensor& r, const Tensor& t, const Sparse
   LongTensor mask_indices = mask._indices();
   Tensor mask_values = mask._values();
   Tensor r_values = r._values().type().tensor(mask_values.sizes());
-#ifndef USE_TH_SIZE_ZERO_DIM
-  _alias_into_sparse(r, mask_indices.clone(), r_values);
-#else
   _get_sparse_impl(r)->set_indices_and_values_unsafe(mask_indices.clone(), r_values);
-#endif
   _get_sparse_impl(r)->set_coalesced(mask.is_coalesced());
   int64_t r_nnz = mask._nnz();
-#ifndef USE_TH_SIZE_ZERO_DIM
-  _get_sparse_impl(r)->set_nnz(r_nnz);
-#endif
+
   // NB: Relies on mask._nnz() == 0 test above
   auto mask_indices_accessor = mask_indices.accessor<int64_t, 2>();
 
