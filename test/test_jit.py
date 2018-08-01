@@ -2986,7 +2986,8 @@ def func(t):
                 f.write(code)
             fn = get_fn('test_type_annotation_py3', script_path)
 
-            with self.assertRaisesRegex(RuntimeError, r"expected a value of type Tensor for argument '0' but found \(Tensor, Tensor\)"):
+            with self.assertRaisesRegex(RuntimeError, r"expected a value of type Tensor for argument"
+                                                      r" '0' but found \(Tensor, Tensor\)"):
                 @torch.jit.script
                 def bad_fn(x):
                     x, y = fn((x, x), x, x)
