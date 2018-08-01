@@ -269,6 +269,12 @@ if(OPENMP_FOUND)
   target_link_libraries(torch -fopenmp)
 endif()
 
+if (NOT NO_API AND NOT USE_ROCM)
+  target_include_directories(torch PUBLIC
+    ${TORCH_SRC_DIR}/csrc/api
+    ${TORCH_SRC_DIR}/csrc/api/include)
+endif()
+
 if(USE_CUDA)
   if(MSVC)
     set(TORCH_CUDA_LIBRARIES
@@ -367,7 +373,7 @@ install(TARGETS torch
   ARCHIVE DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 
 # JIT Tests. TODO: Put into test/cpp/jit folder
-if (NOT MSVC AND NOT APPLE AND NOT USE_ROCM)
+if (BUILD_TORCH_TEST AND NOT MSVC AND NOT APPLE AND NOT USE_ROCM)
   add_executable(test_jit ${TORCH_SRC_DIR}/csrc/jit/test_jit.cpp)
   target_link_libraries(test_jit torch ${TORCH_CUDA_LIBRARIES})
   target_compile_definitions(test_jit PUBLIC USE_CATCH _FORCE_INLINES)
@@ -381,10 +387,6 @@ if (NOT MSVC AND NOT APPLE AND NOT USE_ROCM)
 endif()
 
 if (BUILD_TORCH_TEST AND NOT NO_API AND NOT USE_ROCM)
-  target_include_directories(torch PUBLIC
-    ${TORCH_SRC_DIR}/csrc/api
-    ${TORCH_SRC_DIR}/csrc/api/include)
-
   set(TORCH_API_TEST_DIR "${TORCH_SRC_DIR}/../test/cpp/api")
 
   add_executable(test_api
