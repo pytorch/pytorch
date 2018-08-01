@@ -1,5 +1,6 @@
-#include "caffe2/opt/converter.h"
 #include "caffe2/opt/fusion.h"
+#include "caffe2/core/logging.h"
+#include "caffe2/opt/converter.h"
 #include "caffe2/opt/passes.h"
 
 namespace caffe2 {
@@ -18,13 +19,11 @@ bool fuseConvBNHelper(repr::NNModule* nn, caffe2::Workspace* ws) {
   for (auto convNode : repr::nn::nodeIterator<repr::Conv>(nn->dataFlow)) {
     auto output = repr::nn::getOutputs(convNode).front();
     auto consumers = repr::nn::getConsumers(output);
-    if (consumers.size() != 1) {
-      continue;
-    }
+    NOM_REQUIRE_OR_CONT(consumers.size() == 1);
+
     auto consumer = consumers.front();
-    if (!repr::nn::is<repr::BatchNormalization>(consumer)) {
-      continue;
-    }
+    NOM_REQUIRE_OR_CONT(repr::nn::is<repr::BatchNormalization>(consumer));
+
     auto bnNode = consumer;
     auto bn = repr::nn::get<repr::BatchNormalization>(bnNode);
     auto bnOutputs = nn::getOutputs(bnNode);
@@ -32,16 +31,13 @@ bool fuseConvBNHelper(repr::NNModule* nn, caffe2::Workspace* ws) {
     auto bnOutput = bnOutputs.front();
 
     auto convInputs = repr::nn::getInputs(convNode);
-    if (convInputs.size() < 3) {
-      assert(0 && "Invalid convolution input size (TODO: optional bias)");
-      continue;
-    }
+    CAFFE_ENFORCE(
+        convInputs.size() >= 3,
+        "Invalid convolution input size (TODO: optional bias)");
 
     auto bnInputs = repr::nn::getInputs(bnNode);
-    if (bnInputs.size() < 5) {
-      assert(0 && "Invalid batch normalization input size");
-      continue;
-    }
+    CAFFE_ENFORCE(
+        bnInputs.size() >= 5, "Invalid batch normalization input size");
 
 #define EXPOSE_TENSOR_DATA(name, index, inputs)                            \
   auto name = repr::nn::get<repr::Tensor>(inputs[index]);                  \
