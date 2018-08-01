@@ -398,7 +398,7 @@ Tensor VariableType::contiguous(const Tensor & self) const {
 static std::vector<std::vector<int64_t>> to_args_sizes(TensorList tensors) {
   std::vector<std::vector<int64_t>> args_sizes(tensors.size());
   for (size_t i = 0; i < tensors.size(); ++i) {
-    args_sizes[i] = tensors[i].sizes();
+    args_sizes[i] = tensors[i].sizes().vec();
   }
   return args_sizes;
 }

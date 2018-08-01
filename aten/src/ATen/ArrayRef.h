@@ -195,13 +195,6 @@ class ArrayRef final {
   }
 
   /// @}
-  /// @name Conversion operators
-  /// @{
-  operator std::vector<T>() const {
-    return std::vector<T>(Data, Data + Length);
-  }
-
-  /// @}
 };
 
 } // namespace at

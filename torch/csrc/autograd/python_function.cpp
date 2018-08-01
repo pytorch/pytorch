@@ -45,7 +45,7 @@ namespace torch { namespace autograd {
 
 VariableInfo::VariableInfo(const Variable& var)
   : type(&var.type())
-  , size(var.sizes())
+  , size(var.sizes().vec())
   , requires_grad(var.requires_grad()) {
   if (var.type().is_cuda()) {
     device = var.get_device();
