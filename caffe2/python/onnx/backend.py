@@ -658,10 +658,7 @@ class Caffe2Backend(Backend):
 
     @staticmethod
     def optimize_onnx(input, init=False, predict=False):
-        passes =  ['fuse_consecutive_transposes',
-                   'eliminate_nop_transpose',
-                   'fuse_transpose_into_gemm',
-                   'lift_lexical_references']
+        passes = onnx.optimizer.default_enabled_passes
         if init:
             passes.append('split_init')
         if predict:
