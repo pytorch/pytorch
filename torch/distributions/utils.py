@@ -32,6 +32,11 @@ def _finfo(tensor):
     return _FINFO[tensor.storage_type()]
 
 
+# promote numbers to tensors of dtype torch.get_default_dtype()
+def _default_promotion(v):
+    return torch.tensor(v, dtype=torch.get_default_dtype())
+
+
 def broadcast_all(*values):
     r"""
     Given a list of values (possibly containing numbers), returns a list where each
@@ -48,14 +53,10 @@ def broadcast_all(*values):
         ValueError: if any of the values is not a `numbers.Number` or
             `torch.*Tensor` instance
     """
-    if not all(map(lambda v: torch.is_tensor(v) or isinstance(v, Number), values)):
+    if not all(torch.is_tensor(v) or isinstance(v, Number) for v in values):
         raise ValueError('Input arguments must all be instances of numbers.Number or torch.tensor.')
     if not all(map(torch.is_tensor, values)):
-        # promote numbers to tensors of dtype torch.get_default_dtype()
-        def default_promotion(v):
-            return torch.tensor(v, dtype=torch.get_default_dtype())
-
-        new_tensor = default_promotion
+        new_tensor = _default_promotion
         for value in values:
             if torch.is_tensor(value):
                 new_tensor = value.new_tensor
