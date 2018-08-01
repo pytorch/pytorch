@@ -965,106 +965,85 @@ void testProto() {
 }
 
 void testCustomOperators() {
-  // createOperatorWithStack
   {
-    auto schema = parseSchema("foo::with_stack(float a, Tensor b) -> Tensor");
-    RegisterOperators reg({createOperatorWithStack(schema, [](Stack& stack) {
-      double a;
-      at::Tensor b;
-      pop(stack, a, b);
-      auto result = a + b;
-      pack(stack, std::move(result));
-      return 0;
-    })});
-    auto& ops = getAllOperatorsFor(Symbol::fromQualString("foo::with_stack"));
+    RegisterOperators reg({createOperator(
+        "foo::bar", [](double a, at::Tensor b) { return a + b; })});
+    auto& ops = getAllOperatorsFor(Symbol::fromQualString("foo::bar"));
     REQUIRE(ops.size() == 1);
 
     auto& op = ops.front();
-    REQUIRE(op->schema.name == "foo::with_stack");
+    REQUIRE(op->schema().name == "foo::bar");
 
-    REQUIRE(op->schema.arguments.size() == 2);
-    REQUIRE(op->schema.arguments[0].name == "a");
-    REQUIRE(op->schema.arguments[0].type->kind() == TypeKind::FloatType);
-    REQUIRE(op->schema.arguments[1].name == "b");
-    REQUIRE(op->schema.arguments[1].type->kind() == TypeKind::DynamicType);
+    REQUIRE(op->schema().arguments.size() == 2);
+    REQUIRE(op->schema().arguments[0].name == "_0");
+    REQUIRE(op->schema().arguments[0].type->kind() == TypeKind::FloatType);
+    REQUIRE(op->schema().arguments[1].name == "_1");
+    REQUIRE(op->schema().arguments[1].type->kind() == TypeKind::DynamicType);
 
-    REQUIRE(op->schema.returns.size() == 1);
-    REQUIRE(op->schema.returns[0].type->kind() == TypeKind::DynamicType);
+    REQUIRE(op->schema().returns.size() == 1);
+    REQUIRE(op->schema().returns[0].type->kind() == TypeKind::DynamicType);
 
-    // Run operation!!!!!!!!!!
+    Stack stack;
+    push(stack, 2.0f, at::ones(5));
+    op->getOperation()(stack);
+    at::Tensor output;
+    pop(stack, output);
 
-    // REQUIRE(op(2.0f, at::ones(5)).allclose(at::full(5, 3.0f)));
+    REQUIRE(output.allclose(at::full(5, 3.0f)));
   }
-  // createOperator with inferred schema
   {
     RegisterOperators reg({createOperator(
-        "foo::sugar", [](double a, at::Tensor b) { return a + b; })});
-    auto& ops = getAllOperatorsFor(Symbol::fromQualString("foo::sugar"));
-    REQUIRE(ops.size() == 1);
-
-    auto& op = ops.front();
-    REQUIRE(op->schema.name == "foo::sugar");
-
-    REQUIRE(op->schema.arguments.size() == 2);
-    REQUIRE(op->schema.arguments[0].name == "_0");
-    REQUIRE(op->schema.arguments[0].type->kind() == TypeKind::FloatType);
-    REQUIRE(op->schema.arguments[1].name == "_1");
-    REQUIRE(op->schema.arguments[1].type->kind() == TypeKind::DynamicType);
-
-    REQUIRE(op->schema.returns.size() == 1);
-    REQUIRE(op->schema.returns[0].type->kind() == TypeKind::DynamicType);
-
-    // Run operation!!!!!!!!!!
-
-    // REQUIRE(op(2.0f, at::ones(5)).allclose(at::full(5, 3.0f)));
-  }
-  // createOperator with no stack function but explicit schema
-  {
-    RegisterOperators reg({createOperator(
-        "foo::sugar_with_schema(float a, Tensor b) -> Tensor",
+        "foo::bar_with_schema(float a, Tensor b) -> Tensor",
         [](double a, at::Tensor b) { return a + b; })});
 
     auto& ops =
-        getAllOperatorsFor(Symbol::fromQualString("foo::sugar_with_schema"));
+        getAllOperatorsFor(Symbol::fromQualString("foo::bar_with_schema"));
     REQUIRE(ops.size() == 1);
 
     auto& op = ops.front();
-    REQUIRE(op->schema.name == "foo::sugar_with_schema");
+    REQUIRE(op->schema().name == "foo::bar_with_schema");
 
-    REQUIRE(op->schema.arguments.size() == 2);
-    REQUIRE(op->schema.arguments[0].name == "a");
-    REQUIRE(op->schema.arguments[0].type->kind() == TypeKind::FloatType);
-    REQUIRE(op->schema.arguments[1].name == "b");
-    REQUIRE(op->schema.arguments[1].type->kind() == TypeKind::DynamicType);
+    REQUIRE(op->schema().arguments.size() == 2);
+    REQUIRE(op->schema().arguments[0].name == "a");
+    REQUIRE(op->schema().arguments[0].type->kind() == TypeKind::FloatType);
+    REQUIRE(op->schema().arguments[1].name == "b");
+    REQUIRE(op->schema().arguments[1].type->kind() == TypeKind::DynamicType);
 
-    REQUIRE(op->schema.returns.size() == 1);
-    REQUIRE(op->schema.returns[0].type->kind() == TypeKind::DynamicType);
+    REQUIRE(op->schema().returns.size() == 1);
+    REQUIRE(op->schema().returns[0].type->kind() == TypeKind::DynamicType);
+
+    Stack stack;
+    push(stack, 2.0f, at::ones(5));
+    op->getOperation()(stack);
+    at::Tensor output;
+    pop(stack, output);
+
+    REQUIRE(output.allclose(at::full(5, 3.0f)));
   }
-  // createOperator with no stack function but explicit, faulty schema
   {
 #ifdef USE_CATCH
     REQUIRE_THROWS_WITH(
         createOperator(
-            "foo::sugar_with_bad_schema(Tensor a) -> Tensor",
+            "foo::bar_with_bad_schema(Tensor a) -> Tensor",
             [](double a, at::Tensor b) { return a + b; }),
         StartsWith("Inferred 2 argument(s) for operator implementation, "
                    "but the provided schema specified 1 argument(s)."));
     REQUIRE_THROWS_WITH(
         createOperator(
-            "foo::sugar_with_bad_schema(Tensor a) -> Tensor",
+            "foo::bar_with_bad_schema(Tensor a) -> Tensor",
             [](double a) { return a; }),
         StartsWith("Inferred type for argument #0 was float, "
                    "but the provided schema specified type Dynamic "
                    "for the argument in that position"));
-   REQUIRE_THROWS_WITH(
-       createOperator(
-           "foo::sugar_with_bad_schema(float a) -> (float, float)",
-           [](double a) { return a; }),
-       StartsWith("Inferred 1 return value(s) for operator implementation, "
-                  "but the provided schema specified 2 return value(s)."));
     REQUIRE_THROWS_WITH(
         createOperator(
-            "foo::sugar_with_bad_schema(float a) -> Tensor",
+            "foo::bar_with_bad_schema(float a) -> (float, float)",
+            [](double a) { return a; }),
+        StartsWith("Inferred 1 return value(s) for operator implementation, "
+                   "but the provided schema specified 2 return value(s)."));
+    REQUIRE_THROWS_WITH(
+        createOperator(
+            "foo::bar_with_bad_schema(float a) -> Tensor",
             [](double a) { return a; }),
         StartsWith("Inferred type for return value #0 was float, "
                    "but the provided schema specified type Dynamic "

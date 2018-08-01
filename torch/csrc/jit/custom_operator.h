@@ -138,16 +138,6 @@ FunctionSchema inferAndCheckSchema(const std::string& schemaOrName) {
 }
 } // namespace detail
 
-/// Low-level interface to register an operator with a parsed `FunctionSchema`
-/// and a stack-based operator implementation (the `operation`). The `operation`
-/// must pop its arguments from the stack, perform some operation on those
-/// arguments, and then push the return value back onto the stack.
-inline Operator createOperatorWithStack(
-    FunctionSchema schema,
-    Operation operation) {
-  return {schema, [operation](Node*) { return operation; }};
-}
-
 /// Registers a custom operator with a name or schema, and an implementation
 /// function.
 ///
@@ -185,7 +175,7 @@ Operator createOperator(
 
   auto schema = torch::jit::detail::inferAndCheckSchema<Traits>(schemaOrName);
 
-  return createOperatorWithStack(schema, [implementation](Stack& stack) {
+  return Operator(schema, [implementation](Stack& stack) {
     ArgumentTuple tuple;
     auto result = torch::jit::detail::callOperatorWithTuple<ReturnType>(
         std::move(implementation),
