@@ -61,8 +61,9 @@ void SparseTensorImpl::set_indices_and_values_unsafe(const Tensor& indices, cons
   AT_CHECK(values.dim() == denseDims_ + 1, "values has incorrect number of dimensions, expected ", denseDims_ + 1, ", got ", values.dim());
 
   auto dense_size_original = sizes().slice(sparseDims_);
-  std::vector<int64_t> expected_values_size = {values.size(0)};
-  expected_values_size.insert(expected_values_size.end(), dense_size_original.begin(), dense_size_original.end());
+  std::vector<int64_t> expected_values_size_vec = {values.size(0)};
+  expected_values_size_vec.insert(expected_values_size_vec.end(), dense_size_original.begin(), dense_size_original.end());
+  ArrayRef<int64_t> expected_values_size(expected_values_size_vec);
   auto new_values_size = values.sizes();
   AT_CHECK(
     std::equal(expected_values_size.begin(), expected_values_size.end(), new_values_size.begin()),
