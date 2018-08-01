@@ -89,7 +89,7 @@ fused_dropout_kernel(cuda::detail::TensorInfo<scalar_t, IndexType> a,
 template<typename scalar_t, typename accscalar_t>
 void masked_scale_kernel(at::Tensor& ret, const at::Tensor src, const at::Tensor mask, accscalar_t scale){
    at::cuda::CUDA_tensor_apply3<scalar_t, scalar_t, uint8_t>(ret, src, mask, [scale]__device__(scalar_t& ret_val, const scalar_t& src_val, const uint8_t mask_val){
-       ret_val = mask_val * src_val * scale;
+       ret_val = (float)mask_val * src_val * scale;
   });
 }
 } //anonymous namespace
