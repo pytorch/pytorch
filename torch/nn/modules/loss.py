@@ -1135,15 +1135,15 @@ class CTCLoss(_Loss):
             then the mean over the batch is taken. Default: 'elementwise_mean'
 
     Inputs:
-        log_probs: :math:`(T, N, C)` where `C = number of characters in alphabet including blank`,
+        log_probs: Tensor of size :math:`(T, N, C)` where `C = number of characters in alphabet including blank`,
             `T = input length`, and `N = batch size`.
             The logarithmized probabilities of the outputs
             (e.g. obtained with :func:`torch.nn.functional.log_softmax`).
-        targets: :math:`(N, S)` or `(sum(target_lenghts))`.
+        targets: Tensor of size :math:`(N, S)` or `(sum(target_lenghts))`.
             Targets (cannot be blank). In the second form, the targets are assumed to be concatenated.
-        input_lengths: :math:`(N)`.
+        input_lengths: Tuple or tensor of size :math:`(N)`.
             Lengths of the inputs (must each be :math:`\leq T`)
-        target_lengths: :math:`(N)`.
+        target_lengths: Tuple or tensor of size  :math:`(N)`.
             Lengths of the targets
 
 
