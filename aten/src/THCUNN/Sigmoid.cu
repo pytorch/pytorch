@@ -10,7 +10,6 @@ struct sigmoid_updateGradInput_functor {
   }
 };
 
-#ifdef CUDA_HALF_TENSOR
 template <>
 struct sigmoid_updateGradInput_functor<half> {
   __device__ __forceinline__ void operator()(half* gradInput, const half *output, const half *gradOutput) const {
@@ -19,7 +18,6 @@ struct sigmoid_updateGradInput_functor<half> {
     *gradInput = __float2half(go * (1.f - out) * out);
   }
 };
-#endif
 
 #include "generic/Sigmoid.cu"
 #include "THCGenerateFloatTypes.h"

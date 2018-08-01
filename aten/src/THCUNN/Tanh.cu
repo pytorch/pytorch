@@ -12,7 +12,6 @@ struct tanh_updateGradInput_functor
   }
 };
 
-#ifdef CUDA_HALF_TENSOR
 template <>
 struct tanh_updateGradInput_functor<half>
 {
@@ -23,7 +22,6 @@ struct tanh_updateGradInput_functor<half>
     *gradInput = __float2half(go * (1.f - out * out));
   }
 };
-#endif
 
 #include "generic/Tanh.cu"
 #include "THCGenerateFloatTypes.h"

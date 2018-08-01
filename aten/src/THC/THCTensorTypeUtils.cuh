@@ -80,7 +80,6 @@ struct ScalarInv {
   static __host__ __device__ T to(const T v) { return ((T) 1) / v; }
 };
 
-#ifdef CUDA_HALF_TENSOR
 template <>
 struct ScalarNegate<half> {
   static __host__ __device__ half to(const half v) {
@@ -132,7 +131,5 @@ inline bool operator!=(half a, half b) {
   return araw.x != braw.x;
 #endif
 }
-
-#endif // CUDA_HALF_TENSOR
 
 #endif // THC_TENSOR_TYPE_UTILS_INC

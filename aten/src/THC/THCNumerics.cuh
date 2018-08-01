@@ -149,7 +149,6 @@ struct THCNumerics<int64_t> {
   static inline __host__ __device__  bool isinf(int64_t a) { return false; }
 };
 
-#ifdef CUDA_HALF_TENSOR
 template <>
 struct THCNumerics<half> {
 #if CUDA_VERSION < 9000
@@ -569,7 +568,6 @@ static inline __host__ __device__ half lgamma(half a) {
   }
 
 };
-#endif
 
 template <>
 struct THCNumerics<float> {
@@ -688,7 +686,6 @@ struct ScalarConvert {
   static __host__ __device__ Out to(const In v) { return (Out) v; }
 };
 
-#ifdef CUDA_HALF_TENSOR
 template <typename Out>
 struct ScalarConvert<half, Out> {
   static __host__ __device__ Out to(const half v) {
@@ -722,7 +719,5 @@ template <typename T, typename U>
 __host__ __device__ T scalar_cast(U u) {
   return ScalarConvert<U, T>::to(u);
 }
-
-#endif
 
 #endif // THC_NUMERICS_INC

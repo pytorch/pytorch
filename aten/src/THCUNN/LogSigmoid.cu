@@ -45,7 +45,6 @@ struct logSigmoid_updateGradInput_functor
   }
 };
 
-#ifdef CUDA_HALF_TENSOR
 template <>
 struct logSigmoid_updateOutput_functor<half> {
   __device__ __forceinline__ void operator()(half* output, const half *input) const {
@@ -72,7 +71,6 @@ struct logSigmoid_updateGradInput_functor<half> {
     *gradInput = __float2half(go * (-max_deriv - sign*((z - 1.f)/z)));
   }
 };
-#endif
 
 #include "generic/LogSigmoid.cu"
 #include "THCGenerateFloatTypes.h"

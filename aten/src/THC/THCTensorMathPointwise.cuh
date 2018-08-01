@@ -31,7 +31,6 @@ struct TensorSigmoidOp {
   }
 };
 
-#ifdef CUDA_HALF_TENSOR
 template <>
 struct TensorSigmoidOp<half> {
   __device__ __forceinline__ void operator()(half* out, half* in) const {
@@ -44,7 +43,6 @@ struct TensorSigmoidOp<half> {
     *v = __float2half(1.0f / (1.0f + expf(- fv)));
   }
 };
-#endif
 
 template <typename T>
 struct TensorSignOp {
@@ -72,7 +70,6 @@ struct TensorSignOp<unsigned char> {
   }
 };
 
-#ifdef CUDA_HALF_TENSOR
 template <>
 struct TensorSignOp<half> {
   __device__ __forceinline__ void operator()(half* out, half* in) {
@@ -85,7 +82,6 @@ struct TensorSignOp<half> {
     *v = __float2half((orig > 0) - (orig < 0));
   }
 };
-#endif
 
 template <typename T>
 struct TensorAddOp {
@@ -98,7 +94,6 @@ struct TensorAddOp {
   }
 };
 
-#ifdef CUDA_HALF_TENSOR
 template <>
 struct TensorAddOp<half> {
   __device__ __forceinline__ void operator()(half* out, half* in) {
@@ -115,7 +110,6 @@ struct TensorAddOp<half> {
     *out = __float2half(fout);
   }
 };
-#endif // CUDA_HALF_TENSOR
 
 template <typename T>
 struct TensorCAddOp {
@@ -132,7 +126,6 @@ struct TensorCAddOp {
   T val;
 };
 
-#ifdef CUDA_HALF_TENSOR
 template <>
 struct TensorCAddOp<half> {
   TensorCAddOp(half v) : val(v) {}
@@ -157,7 +150,6 @@ struct TensorCAddOp<half> {
 
   half val;
 };
-#endif // CUDA_HALF_TENSOR
 
 template <typename T>
 struct TensorSubOp {
@@ -170,7 +162,6 @@ struct TensorSubOp {
   }
 };
 
-#ifdef CUDA_HALF_TENSOR
 template <>
 struct TensorSubOp<half> {
   __device__ __forceinline__ void operator()(half* out, half* in) {
@@ -187,7 +178,6 @@ struct TensorSubOp<half> {
     *out = __float2half(fout);
   }
 };
-#endif // CUDA_HALF_TENSOR
 
 template <typename T>
 struct TensorMulOp {
@@ -200,7 +190,6 @@ struct TensorMulOp {
   }
 };
 
-#ifdef CUDA_HALF_TENSOR
 template <>
 struct TensorMulOp<half> {
   __device__ __forceinline__ void operator()(half* out, half* in) {
@@ -217,7 +206,6 @@ struct TensorMulOp<half> {
     *out = __float2half(fout);
   }
 };
-#endif // CUDA_HALF_TENSOR
 
 template<typename T, int StaticExp>
 struct TensorPowOp {
@@ -329,7 +317,6 @@ struct TensorCPowOp<double> {
   }
 };
 
-#ifdef CUDA_HALF_TENSOR
 template <>
 struct TensorCPowOp<half> {
   __device__ __forceinline__ void operator()(half* out, half* in) {
@@ -348,7 +335,6 @@ struct TensorCPowOp<half> {
     *out = __float2half(fout);
   }
 };
-#endif // CUDA_HALF_TENSOR
 
 template <typename T>
 struct TensorDivOp {
@@ -363,7 +349,6 @@ struct TensorDivOp {
   }
 };
 
-#ifdef CUDA_HALF_TENSOR
 template <>
 struct TensorDivOp<half> {
   __device__ __forceinline__ void
@@ -384,7 +369,6 @@ struct TensorDivOp<half> {
     *out = __float2half(fout);
   }
 };
-#endif // CUDA_HALF_TENSOR
 
 template<typename T>
 static __device__ __forceinline__
@@ -441,7 +425,6 @@ struct TensorCRemainderOp<double> {
   }
 };
 
-#ifdef CUDA_HALF_TENSOR
 template <>
 struct TensorCRemainderOp<half> {
   __device__ __forceinline__ void operator()(half* out, half* in) {
@@ -456,7 +439,6 @@ struct TensorCRemainderOp<half> {
     *out = fin2 != 0 ? __float2half(fin1 - fin2 * floorf(fin1 / fin2)) : __float2half(NAN);
   }
 };
-#endif // CUDA_HALF_TENSOR
 
 template <typename T>
 struct TensorCFmodOp {
@@ -491,7 +473,6 @@ struct TensorCFmodOp<double> {
   }
 };
 
-#ifdef CUDA_HALF_TENSOR
 template <>
 struct TensorCFmodOp<half> {
   __device__ __forceinline__ void operator()(half* out, half* in) {
@@ -502,7 +483,6 @@ struct TensorCFmodOp<half> {
     *out = __float2half(fmodf(__half2float(*in1), __half2float(*in2)));
   }
 };
-#endif // CUDA_HALF_TENSOR
 
 template <typename T>
 struct TensorClampOp {

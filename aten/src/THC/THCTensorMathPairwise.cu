@@ -21,7 +21,6 @@ struct TensorAddConstantOp {
   const T val;
 };
 
-#ifdef CUDA_HALF_TENSOR
 template <>
 struct TensorAddConstantOp<half> {
   TensorAddConstantOp(half v) : fval(THC_half2float(v)) {}
@@ -40,7 +39,6 @@ struct TensorAddConstantOp<half> {
 
   const float fval;
 };
-#endif // CUDA_HALF_TENSOR
 
 
 template <typename T>
@@ -58,7 +56,6 @@ struct TensorSubConstantOp {
 };
 
 
-#ifdef CUDA_HALF_TENSOR
 template <>
 struct TensorSubConstantOp<half> {
   TensorSubConstantOp(half v): fval(-(THC_half2float(v))) {}
@@ -77,7 +74,6 @@ struct TensorSubConstantOp<half> {
 
   const float fval;
 };
-#endif // CUDA_HALF_TENSOR
 
 
 template <typename T>
@@ -94,7 +90,6 @@ struct TensorMulConstantOp {
   const T val;
 };
 
-#ifdef CUDA_HALF_TENSOR
 template <>
 struct TensorMulConstantOp<half> {
   TensorMulConstantOp(half v) : fval(THC_half2float(v)) {}
@@ -113,7 +108,6 @@ struct TensorMulConstantOp<half> {
 
   const float fval;
 };
-#endif // CUDA_HALF_TENSOR
 
 template <typename T>
 struct TensorDivConstantOp {
@@ -157,7 +151,6 @@ struct TensorDivConstantOp<double> {
   const double val;
 };
 
-#ifdef CUDA_HALF_TENSOR
 template <>
 struct TensorDivConstantOp<half> {
   TensorDivConstantOp(half v) : fval(1.f / THC_half2float(v)) {}
@@ -175,7 +168,6 @@ struct TensorDivConstantOp<half> {
 
   const float fval;
 };
-#endif // CUDA_HALF_TENSOR
 
 template<typename T>
 static __device__ __forceinline__
@@ -239,7 +231,6 @@ struct TensorRemainderOp<double> {
   const double val;
 };
 
-#ifdef CUDA_HALF_TENSOR
 template <>
 struct TensorRemainderOp<half> {
   TensorRemainderOp(half v): fval(THC_half2float(v)) {}
@@ -258,7 +249,6 @@ struct TensorRemainderOp<half> {
 
   const float fval;
 };
-#endif // CUDA_HALF_TENSOR
 
 template <typename T>
 struct TensorFmodOp {
@@ -288,7 +278,6 @@ struct TensorFmodOp<double> {
   const double val;
 };
 
-#ifdef CUDA_HALF_TENSOR
 template <>
 struct TensorFmodOp<half> {
   TensorFmodOp(half v): fval(THC_half2float(v)) {}
@@ -303,7 +292,6 @@ struct TensorFmodOp<half> {
 
   const float fval;
 };
-#endif // CUDA_HALF_TENSOR
 
 template <typename T, int Upper>
 struct TensorTriOp {

@@ -52,10 +52,8 @@ THCTensor *THCTensor_new(THCState *state, at::ScalarType scalar_type) {
       return THCudaIntTensor_new(state);
     case at::ScalarType::Long:
       return THCudaLongTensor_new(state);
-#ifdef CUDA_HALF_TENSOR
     case at::ScalarType::Half:
       return THCudaHalfTensor_new(state);
-#endif
     case at::ScalarType::Float:
       return THCudaTensor_new(state);
     case at::ScalarType::Double:
