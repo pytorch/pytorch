@@ -60,7 +60,14 @@ struct Parser {
         L.next();
       } break;
       case '(': {
-        L.next();
+	L.next();
+	if (L.nextIf(')')) {
+	  ///here we have the empty tuple case
+	  std::vector<Expr> vecExpr;
+	  List<Expr> listExpr = List<Expr>::create(L.cur().range, vecExpr);
+	  prefix = ListLiteral::create(L.cur().range, listExpr);
+	  break;
+	}
         prefix = parseExpOrExpList(')');
         L.expect(')');
       } break;
