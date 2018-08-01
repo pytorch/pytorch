@@ -127,6 +127,8 @@ public:
   // NOTE: this function will resize the sparse tensor and also set `indices` and `values` to empty.
   void resize_and_clear_(int64_t sparseDims, int64_t denseDims, ArrayRef<int64_t> size) {
     AT_CHECK(sparseDims + denseDims == size.size(), "number of dimensions must be sparseDims (", sparseDims, ") + denseDims (", denseDims, "), but got ", size.size());
+    std::cout << "resize_and_clear_ size: " << size << "\n"; 
+    std::cout << "resize_and_clear_ size_: " << size_ << "\n";
     size_ = size;
     sparseDims_ = sparseDims;
     denseDims_ = denseDims;
