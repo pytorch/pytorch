@@ -31,7 +31,7 @@ Tensor celu(const Tensor & self, Scalar alpha) {
 }
 
 Tensor & celu_(Tensor & self, Scalar alpha) {
-  Tensor inv_alpha = alpha.toTensor().reciprocal();
+  double inv_alpha = 1. / alpha.to<double>();
   return at::elu_(self, 1.0, alpha, Scalar(inv_alpha));
 }
 
