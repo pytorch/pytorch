@@ -44,6 +44,10 @@ jobs:
     resource_class: gpu.small
     steps:
     - checkout
+    - run:
+        name: Prepare workspace
+        command: |
+          sudo mkdir -p /opt/workspace
     - attach_workspace:
         at: /opt/workspace
     - run:
