@@ -27,8 +27,10 @@ __all__ = [
     'dependent',
     'dependent_property',
     'greater_than',
+    'greater_than_eq',
     'integer_interval',
     'interval',
+    'half_open_interval',
     'is_dependent',
     'less_than',
     'lower_cholesky',
@@ -151,6 +153,17 @@ class _GreaterThan(Constraint):
         return self.lower_bound < value
 
 
+class _GreaterThanEq(Constraint):
+    """
+    Constrain to a real half line `[lower_bound, inf)`.
+    """
+    def __init__(self, lower_bound):
+        self.lower_bound = lower_bound
+
+    def check(self, value):
+        return self.lower_bound <= value
+
+
 class _LessThan(Constraint):
     """
     Constrain to a real half line `[-inf, upper_bound)`.
@@ -172,6 +185,18 @@ class _Interval(Constraint):
 
     def check(self, value):
         return (self.lower_bound <= value) & (value <= self.upper_bound)
+
+
+class _HalfOpenInterval(Constraint):
+    """
+    Constrain to a real interval `[lower_bound, upper_bound)`.
+    """
+    def __init__(self, lower_bound, upper_bound):
+        self.lower_bound = lower_bound
+        self.upper_bound = upper_bound
+
+    def check(self, value):
+        return (self.lower_bound <= value) & (value < self.upper_bound)
 
 
 class _Simplex(Constraint):
@@ -240,9 +265,11 @@ real = _Real()
 real_vector = _RealVector()
 positive = _GreaterThan(0.)
 greater_than = _GreaterThan
+greater_than_eq = _GreaterThanEq
 less_than = _LessThan
 unit_interval = _Interval(0., 1.)
 interval = _Interval
+half_open_interval = _HalfOpenInterval
 simplex = _Simplex()
 lower_triangular = _LowerTriangular()
 lower_cholesky = _LowerCholesky()
