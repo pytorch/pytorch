@@ -631,6 +631,10 @@ bool Node::matches(const char *signature_literal, at::ArrayRef<Symbol> const_inp
   return true;
 }
 
+void Node::dump() const {
+  std::cout << *this << "\n";
+}
+
 void Node::findSchema() const {
   schema_ = &getOperatorFor(this).schema();
 }
