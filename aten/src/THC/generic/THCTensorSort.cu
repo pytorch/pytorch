@@ -9,10 +9,8 @@ THC_API void THCTensor_(sortKeyValueInplace)(THCState* state,
                                            THCTensor* key,
                                            THCudaLongTensor* value,
                                            int dim, bool dir) {
-  THLongStorage *valueSize = THCudaLongTensor_newSizeOf(state, value);
-  THArgCheck(THCTensor_(isSize)(state, key, valueSize), 2,
+  THArgCheck(key->sizes().equals(value->sizes()), 2,
              "Key tensor must have same size as value tensor");
-  THLongStorage_free(valueSize);
   int dims = THCudaLongTensor_nDimensionLegacyNoScalars(state, value);
   THArgCheck(dims <= MAX_CUTORCH_DIMS, 3, CUTORCH_DIM_WARNING);
   dims = THCTensor_(nDimensionLegacyNoScalars)(state, key);
