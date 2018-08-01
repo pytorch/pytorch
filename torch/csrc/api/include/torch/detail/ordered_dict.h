@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/Error.h>
+#include <ATen/core/Error.h>
 
 #include <cstdint>
 #include <functional>

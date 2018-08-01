@@ -14,7 +14,7 @@
 // ATen: modified from llvm::SmallVector.
 // replaced report_bad_alloc_error with std::bad_alloc
 
-#include "SmallVector.h"
+#include <ATen/core/SmallVector.h>
 
 namespace at {
 

@@ -1,7 +1,7 @@
 #pragma once
 
 #include <ATen/Allocator.h>
-#include <ATen/Error.h>
+#include <ATen/core/Error.h>
 #include <ATen/Generator.h>
 #include <ATen/Registry.h>
 

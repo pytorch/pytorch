@@ -1,6 +1,6 @@
 #include "DispatchStub.h"
 
-#include <ATen/Error.h>
+#include <ATen/core/Error.h>
 
 #include <cpuinfo.h>
 #include <cstdlib>

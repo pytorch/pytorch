@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ATen/ATenGeneral.h"
+#include "ATen/core/ATenGeneral.h"
 #include <cstring>
 #include <limits>
 

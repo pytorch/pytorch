@@ -1,6 +1,6 @@
 #pragma once
 
-#include "caffe2/utils/C++17.h"
+#include <ATen/core/C++17.h>
 #include "caffe2/utils/TypeTraits.h"
 
 namespace c10 { namespace guts { namespace typelist {
@@ -177,7 +177,30 @@ template<class Head, class... Tail> struct head<typelist<Head, Tail...>> final {
 };
 template<class TypeList> using head_t = typename head<TypeList>::type;
 
-
+/**
+ * Returns the last element of a type list.
+ * Example:
+ *   int  ==  last_t<typelist<int, string>>
+ */
+template <class TypeList>
+struct last final {
+  static_assert(
+      detail::false_t<TypeList>::value,
+      "In typelist::last<T>, the T argument must be typelist<...>.");
+};
+template <class Head, class... Tail>
+struct last<typelist<Head, Tail...>> final {
+  using type = typename last<typelist<Tail...>>::type;
+};
+template <class Head>
+struct last<typelist<Head>> final {
+  using type = Head;
+};
+template <class TypeList>
+using last_t = typename last<TypeList>::type;
+static_assert(
+    std::is_same<int, last_t<typelist<double, float, int>>>::value,
+    "");
 
 /**
  * Reverses a typelist.

@@ -20,7 +20,7 @@
 
 #pragma once
 
-#include "AlignOf.h"
+#include <ATen/core/AlignOf.h>
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
@@ -33,7 +33,7 @@
 #include <type_traits>
 #include <utility>
 
-#include <ATen/ATenGeneral.h>
+#include <ATen/core/ATenGeneral.h>
 
 #if __GNUG__ && __GNUC__ < 5
 #define AT_IS_TRIVIALLY_COPYABLE(T) __has_trivial_copy(T)

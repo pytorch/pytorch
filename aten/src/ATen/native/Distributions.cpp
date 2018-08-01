@@ -1,7 +1,7 @@
 #include "ATen/ATen.h"
 #include "ATen/CPUApplyUtils.h"
 #include "ATen/Dispatch.h"
-#include "ATen/Error.h"
+#include "ATen/core/Error.h"
 #include "ATen/ExpandUtils.h"
 #include "ATen/NativeFunctions.h"
 

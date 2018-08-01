@@ -2,7 +2,7 @@
 
 #include <torch/tensor.h>
 
-#include <ATen/ArrayRef.h>
+#include <ATen/core/ArrayRef.h>
 #include <ATen/Tensor.h>
 
 #include <algorithm>

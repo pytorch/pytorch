@@ -11,7 +11,7 @@
 #include "ATen/TensorImpl.h"
 #include "ATen/Device.h"
 #include "ATen/Layout.h"
-#include "ATen/optional.h"
+#include "ATen/core/optional.h"
 
 namespace at {
 struct Generator;

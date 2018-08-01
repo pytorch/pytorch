@@ -80,7 +80,7 @@ Tensor flip_cuda(const Tensor& self, IntList dims) {
     return out_tensor;
   }
 
-  auto flip_dims = std::vector<int64_t>(dims);
+  auto flip_dims = dims.vec();
   wrap_all_dims(flip_dims, total_dims);
 
   // use kernel_pointwise_flip_apply2 only when to-flip dim is the 1st or last dim, where collapseDims can reduce the amount of work
@@ -99,10 +99,10 @@ Tensor flip_cuda(const Tensor& self, IntList dims) {
 
   auto flip_dims_t = at::CPU(kLong).tensorFromBlob(flip_dims.data(), {static_cast<int64_t>(flip_dims.size())});
 
-  auto shape = std::vector<int64_t>(in_tensor.sizes());
+  auto shape = in_tensor.sizes().vec();
   auto shape_t = at::CPU(kLong).tensorFromBlob(shape.data(), {static_cast<int64_t>(shape.size())});
 
-  auto strides = std::vector<int64_t>(in_tensor.strides());
+  auto strides = in_tensor.strides().vec();
   auto strides_t = at::CPU(kLong).tensorFromBlob(strides.data(), {static_cast<int64_t>(strides.size())});
 
   // stride_contiguous is the stride of non-contiguous tensor after calling contiguous(),

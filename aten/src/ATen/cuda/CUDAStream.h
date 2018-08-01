@@ -5,7 +5,7 @@
 
 #include "cuda_runtime_api.h"
 
-#include <ATen/ATenGeneral.h>
+#include <ATen/core/ATenGeneral.h>
 
 /*
 * A CUDA stream interface with no CUDA build dependency.
