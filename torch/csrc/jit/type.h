@@ -80,7 +80,7 @@ public:
     JIT_ASSERT(T::Kind == kind());
     return std::static_pointer_cast<const T>(shared_from_this());
   }
-  virtual ~Type() {}
+  virtual ~Type() = default;
 };
 
 inline bool operator!=(const Type & lhs, const Type & rhs) {
@@ -104,7 +104,7 @@ struct TORCH_API DynamicType : public Type {
   }
   static const TypeKind Kind = TypeKind::DynamicType;
   // global singleton
-  static TypePtr get();
+  static DynamicTypePtr get();
 private:
   DynamicType()
   : Type(TypeKind::DynamicType) {}
@@ -237,8 +237,8 @@ struct TORCH_API ListType : public Type {
     return elem;
   }
   // common cast List[Tensor]
-  static TypePtr ofTensors();
-  static TypePtr ofInts();
+  static ListTypePtr ofTensors();
+  static ListTypePtr ofInts();
 private:
   ListType(TypePtr elem)
   : Type(TypeKind::ListType), elem(elem) {}
@@ -326,7 +326,7 @@ struct TORCH_API NumberType : public Type {
   }
   static const TypeKind Kind = TypeKind::NumberType;
   // global singleton
-  static TypePtr get();
+  static NumberTypePtr get();
 private:
   NumberType()
   : Type(TypeKind::NumberType) {}
@@ -351,7 +351,7 @@ struct TORCH_API FloatType : public Type {
   }
   static const TypeKind Kind = TypeKind::FloatType;
   // global singleton
-  static TypePtr get();
+  static FloatTypePtr get();
 private:
   FloatType()
   : Type(TypeKind::FloatType) {}
@@ -376,7 +376,7 @@ struct TORCH_API IntType : public Type {
   }
   static const TypeKind Kind = TypeKind::IntType;
   // global singleton
-  static TypePtr get();
+  static IntTypePtr get();
 private:
   IntType()
   : Type(TypeKind::IntType) {}
@@ -401,7 +401,7 @@ struct NoneType : public Type {
   }
   static const TypeKind Kind = TypeKind::NoneType;
   // global singleton
-  static TypePtr get();
+  static NoneTypePtr get();
 private:
   NoneType()
   : Type(TypeKind::NoneType) {}

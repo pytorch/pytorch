@@ -21,6 +21,7 @@
 #include "torch/csrc/jit/passes/specialize_undef.h"
 #include "torch/csrc/jit/passes/loop_unrolling.h"
 #include "torch/csrc/jit/passes/lower_grad_of.h"
+#include "torch/csrc/jit/passes/constant_propagation.h"
 #include "torch/csrc/jit/symbolic_variable.h"
 #include "torch/csrc/jit/ivalue.h"
 
@@ -240,14 +241,7 @@ struct GraphExecutorImpl {
   , symbolically_differentiable(symbolically_differentiable)
   , may_introduce_gradient(calcMayIntroduceGradient(this->graph->block())) {}
   GraphExecutorImpl(std::shared_ptr<Graph> graph, bool optimize)
-  : GraphExecutorImpl(graph, optimize, isDifferentiable(*graph)) {
-    for(auto input : graph->inputs()) {
-      JIT_ASSERTM(input->type()->kind() != TypeKind::TupleType, "tuples cannot be inputs to the graph");
-    }
-    for(auto output : graph->outputs()) {
-      JIT_ASSERTM(output->type()->kind() != TypeKind::TupleType, "tuples cannot be outputs to the graph");
-    }
-  }
+  : GraphExecutorImpl(graph, optimize, isDifferentiable(*graph)) {}
 
   // entry point where execution begins
   void run(Stack & stack) {
@@ -516,28 +510,28 @@ void runRequiredPasses(const std::shared_ptr<Graph>& g)  {
   RemoveExpands(g);
 }
 
-void specializeToSpec(const std::shared_ptr<Graph>& graph_, const ArgumentSpec& spec) {
+void specializeToSpec(const std::shared_ptr<Graph>& graph, const ArgumentSpec& spec) {
   // clean up GradOf and AutogradAdd nodes
   // this must be first because later passes do not know what GradOfs are
   std::vector<bool> defined;
   for(size_t i = 0; i < spec.size(); ++i) {
     defined.push_back(spec.at(i).defined());
   }
-  specializeUndef(*graph_, defined);
+  specializeUndef(*graph, defined);
 
   // required passes shared with autograd fallback
-  runRequiredPasses(graph_);
+  runRequiredPasses(graph);
 
   // Decompose addmm nodes to add + mm, so expands can be inserted and
   // gradients accumulated on the backward pass
   //
   // In the future, if we need more passes like this, we should convert this
   // into a generic canonicalization pass.
-  DecomposeAddmm(graph_);
+  DecomposeAddmm(graph);
   // clean up dead constants from specialization
-  EliminateDeadCode(graph_);
+  EliminateDeadCode(graph);
   // calculate all input shapes
-  PropagateInputShapes(*graph_, spec);
+  PropagateInputShapes(*graph, spec);
 }
 
 void runOptimization(std::shared_ptr<Graph> & graph, bool graphMustSupportVariables) {
@@ -554,7 +548,7 @@ void runOptimization(std::shared_ptr<Graph> & graph, bool graphMustSupportVariab
 
     // They also may assume that concrete sizes/strides are availiable
     UnrollLoops(graph);
-
+    ConstantPropagation(graph);
     //TODO: create peephole optimizations that are safe to run
     // when we are using variables, and when we do not know sizes.
     PeepholeOptimize(graph);

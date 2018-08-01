@@ -159,7 +159,7 @@ struct GraphTask {
   std::unordered_map<Function*, ExecInfo> exec_info;
   std::vector<Variable> captured_vars;
 
-  void init_to_execute(Function& graph_root, const edge_list& captures);
+  void init_to_execute(Function& graph_root, const edge_list& outputs);
 
   // The value of worker_device in the thread that created this task.
   // See Note [Reentrant backwards]
@@ -499,14 +499,14 @@ struct ClearCallbacks {
   std::mutex& callbacks_lock;
 };
 
-auto Engine::execute(const edge_list& input_roots,
+auto Engine::execute(const edge_list& roots,
                      const variable_list& inputs,
                      bool keep_graph,
                      bool create_graph,
                      const edge_list& outputs) -> variable_list {
   std::call_once(start_threads_flag, &Engine::start_threads, this);
 
-  validate_outputs(input_roots, const_cast<variable_list&>(inputs), [](const std::string& msg) {
+  validate_outputs(roots, const_cast<variable_list&>(inputs), [](const std::string& msg) {
     return msg;
   });
 
@@ -517,7 +517,7 @@ auto Engine::execute(const edge_list& input_roots,
   std::unique_lock<std::mutex> lock(graph_task.mutex);
 
   // Now compute the dependencies for all executable functions and queue the root
-  auto graph_root = std::make_shared<GraphRoot>(input_roots, inputs);
+  auto graph_root = std::make_shared<GraphRoot>(roots, inputs);
   compute_dependencies(graph_root.get(), graph_task);
   if (!outputs.empty()) {
     graph_task.init_to_execute(*graph_root, outputs);

@@ -328,7 +328,7 @@ struct TORCH_API Function : std::enable_shared_from_this<Function> {
 /// See Function::is_traceable() for definition.
 struct TraceableFunction : public Function {
   using Function::Function;
-  bool is_traceable() final override {
+  bool is_traceable() final {
     return true;
   }
 };

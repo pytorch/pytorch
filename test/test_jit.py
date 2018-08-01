@@ -1111,6 +1111,87 @@ class TestJit(JitTestCase):
         ten = torch.rand(3, 3)
         self.assertEqual(test_fn(ten, mask), traced_test_fn(ten, mask))
 
+    def test_constant_prop_simple(self):
+        @torch.jit.script
+        def constant_prop(input_tensor):
+            a = 2 * 3
+            b = a + 2
+            return b + input_tensor
+
+        x = torch.tensor(2)
+        out_ref = constant_prop(x)
+        self.run_pass('constant_propagation', constant_prop.graph)
+        out_test = constant_prop(torch.tensor(2))
+        self.assertEqual(out_ref, out_test)
+        self.assertExpected(canonical(constant_prop.graph))
+
+    def test_constant_prop_nested(self):
+        @torch.jit.script
+        def constant_prop(a):
+            b = 2 + 1
+            if a < 2:
+                c = b + 2
+            else:
+                c = b - 2
+            return c
+
+        out_ref = constant_prop(torch.tensor(2))
+        self.run_pass('constant_propagation', constant_prop.graph)
+        out_test = constant_prop(torch.tensor(2))
+        self.assertEqual(out_ref, out_test)
+        self.assertExpected(canonical(constant_prop.graph))
+
+    def test_constant_prop_print(self):
+        @torch.jit.script
+        def constant_prop(input_tensor):
+            a = 2 * 3 + FIXME_zerol()
+            print(a)
+            b = a + 2
+            return b + input_tensor
+
+        self.run_pass('constant_propagation', constant_prop.graph)
+        self.assertExpected(canonical(constant_prop.graph))
+
+    def test_constant_prop_rand(self):
+        @torch.jit.script
+        def constant_prop():
+            a = torch.randn([3])
+            b = a + 2
+            return b
+
+        self.run_pass('constant_propagation', constant_prop.graph)
+        self.assertExpected(canonical(constant_prop.graph))
+
+    # TODO: implement
+    @unittest.expectedFailure
+    def test_constant_prop_if_constant(self):
+        @torch.jit.script
+        def constant_prop():
+            b = 3
+            if True:
+                b = 1
+            if False:
+                b = 2
+            return b
+
+        self.run_pass('constant_propagation', constant_prop.graph)
+        self.assertExpected(canonical(constant_prop.graph))
+
+    # TODO: implement
+    @unittest.expectedFailure
+    def test_constant_prop_loop_constant(self):
+        @torch.jit.script
+        def constant_prop():
+            b = 0
+            while True:
+                b = 1
+            while False:
+                b = 2
+            return b
+
+        self.run_pass('constant_propagation', constant_prop.graph)
+        self.assertExpected(canonical(constant_prop.graph))
+
 
 class TestBatched(TestCase):
     # generate random examples and create an batchtensor with them
@@ -3636,10 +3717,10 @@ def func(t):
             def unknown_builtin(x):
                 return x.splork(3)
 
-    def test_expected_tensor_found_tuple(self):
-        with self.assertRaisesRegex(RuntimeError, 'expected a tensor value but found'):
+    def test_return_tuple(self):
+        with self.assertRaisesRegex(RuntimeError, 'only supported return types'):
             @torch.jit.script
-            def return_tuple_wrong(x):
+            def return_tuple(x):
                 a = (x, x)
                 return a, x
 
@@ -4357,6 +4438,17 @@ def func(t):
             def tuple_arg(x):
                 # type: (Tuple[Tensor, Tensor]) -> Tensor
                 return x + 1
+
+    def test_script_non_tensor_args_outputs(self):
+        @torch.jit.script
+        def fn(x, y):
+            # type: (Tensor, float) -> float
+            return float((x + y).sum())
+
+        x = torch.ones(2, 2)
+        z = fn(x, 1)
+        self.assertIsInstance(z, float)
+        self.assertEqual(z, 8.)
 
     @unittest.skip('https://github.com/pytorch/pytorch/issues/9595')
     def test_inline_and_run_annotated_script_fn(self):

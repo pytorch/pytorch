@@ -29,6 +29,11 @@
 - func: _cast_Half(Tensor self, bool non_blocking=false) -> Tensor
   variants: function, method
 
+- func: _cudnn_ctc_loss(Tensor log_probs, Tensor targets, IntList input_lengths, IntList target_lengths, int64_t blank, bool deterministic) -> (Tensor, Tensor)
+  variants: function
+  dispatch:
+    CUDA: _cudnn_ctc_loss
+
 - func: _cudnn_rnn_flatten_weight(TensorList weight_arr, int64_t weight_stride0, int64_t input_size, int64_t mode, int64_t hidden_size, int64_t num_layers, bool batch_first, bool bidirectional) -> Tensor
   variants: function
   dispatch:
@@ -503,6 +508,21 @@
 
 - func: cumprod_out(Tensor result, Tensor self, int64_t dim) -> Tensor
   variants: function
+
+- func: ctc_loss(Tensor log_probs, Tensor targets, IntList input_lengths, IntList target_lengths, int64_t blank=0, int64_t reduction=Reduction::ElementwiseMean) -> Tensor
+  variants: function
+
+- func: _ctc_loss(Tensor log_probs, Tensor targets, IntList input_lengths, IntList target_lengths, int64_t blank=0) -> (Tensor, Tensor)
+  variants: function
+  dispatch:
+    CPU:  ctc_loss_cpu
+    CUDA: ctc_loss_gpu
+
+- func: _ctc_loss_backward(Tensor grad, Tensor log_probs, Tensor targets, IntList input_lengths, IntList target_lengths, Tensor neg_log_likelihood, Tensor log_alpha, int64_t blank) -> Tensor
+  variants: function
+  dispatch:
+    CPU: ctc_loss_backward_cpu
+    CUDA: ctc_loss_backward_gpu
 
 - func: det(Tensor self) -> Tensor
 
