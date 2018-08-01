@@ -1,5 +1,5 @@
-#include <ATen/Error.h>
-#include <ATen/Backtrace.h>
+#include <ATen/core/Error.h>
+#include <ATen/core/Backtrace.h>
 
 #include <iostream>
 #include <string>

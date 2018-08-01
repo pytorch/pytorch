@@ -3,19 +3,19 @@
 #include "ATen/Context.h"
 #include "ATen/cuda/CUDAStream.h"
 #include "ATen/cuda/Exceptions.h"
-#include "ATen/ATenGeneral.h"
+#include "ATen/core/ATenGeneral.h"
 
 #include <cstdint>
 
 #include "cuda_runtime_api.h"
 #include "cusparse.h"
 
-namespace at { namespace cuda { 
+namespace at { namespace cuda {
 
 /*
 A common CUDA interface for ATen.
 
-This interface is distinct from CUDAHooks, which defines an interface that links 
+This interface is distinct from CUDAHooks, which defines an interface that links
 to both CPU-only and CUDA builds. That interface is intended for runtime dispatch
 and should be used from files that are included in both CPU-only and CUDA builds.
 

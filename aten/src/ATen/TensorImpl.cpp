@@ -1,7 +1,7 @@
 #include <ATen/TensorImpl.h>
 
 #include <ATen/Tensor.h>
-#include <ATen/optional.h>
+#include <ATen/core/optional.h>
 
 #include <TH/THTensor.hpp>
 

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ATen/Error.h"
+#include "ATen/core/Error.h"
 
 #define AT_CUDNN_CHECK(STATUS)                                                 \
   if (STATUS != CUDNN_STATUS_SUCCESS) {                                        \

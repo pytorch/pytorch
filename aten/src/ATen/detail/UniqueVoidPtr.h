@@ -1,6 +1,6 @@
 #include <memory>
 
-#include <ATen/ATenGeneral.h>
+#include <ATen/core/ATenGeneral.h>
 
 namespace at {
 

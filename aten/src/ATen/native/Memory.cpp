@@ -1,5 +1,5 @@
 #include "ATen/ATen.h"
-#include "ATen/Error.h"
+#include "ATen/core/Error.h"
 #include "ATen/NativeFunctions.h"
 #include "ATen/detail/CUDAHooksInterface.h"
 

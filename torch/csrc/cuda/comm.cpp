@@ -12,7 +12,7 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAGuard.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/optional.h>
+#include <ATen/core/optional.h>
 
 #include <cstddef>
 #include <vector>

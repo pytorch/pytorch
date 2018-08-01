@@ -18,7 +18,7 @@
 #include "ATen/UndefinedTensor.h"
 #include "ATen/Utils.h"
 #include "ATen/DeviceGuard.h"
-#include "ATen/optional.h"
+#include "ATen/core/optional.h"
 
 #include <cstddef>
 #include <functional>

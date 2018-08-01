@@ -4,7 +4,7 @@
 #include <string>
 #include <typeinfo>
 
-#include <ATen/ATenGeneral.h>
+#include <ATen/core/ATenGeneral.h>
 
 namespace at {
 /// Utility to demangle a C++ symbol name.

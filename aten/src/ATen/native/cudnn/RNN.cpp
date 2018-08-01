@@ -1,7 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Config.h>
-#include <ATen/Error.h>
+#include <ATen/core/Error.h>
 #include <ATen/MatrixRef.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/cuda/CUDAConfig.h>

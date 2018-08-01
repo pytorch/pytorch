@@ -9,7 +9,7 @@
 
 #include <torch/csrc/utils/memory.h>
 
-#include <ATen/optional.h>
+#include <ATen/core/optional.h>
 
 using namespace torch::nn;
 

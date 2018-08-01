@@ -1,7 +1,7 @@
 #pragma once
 
-#include <ATen/ATenGeneral.h> // for AT_API
-#include <ATen/optional.h>
+#include <ATen/core/ATenGeneral.h> // for AT_API
+#include <ATen/core/optional.h>
 
 #include <cstddef>
 #include <exception>

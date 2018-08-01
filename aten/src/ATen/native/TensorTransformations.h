@@ -1,6 +1,6 @@
 #include "ATen/ATen.h"
 
-#include <ATen/Error.h>
+#include <ATen/core/Error.h>
 #include <ATen/WrapDimUtils.h>
 
 #include <algorithm>
