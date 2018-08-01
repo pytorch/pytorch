@@ -90,7 +90,6 @@ def DeviceOption(
     node_name=None,
     numa_node_id=None,
     extra_info=None,
-    hip_gpu_id=0,
 ):
     option = caffe2_pb2.DeviceOption()
     option.device_type = device_type
