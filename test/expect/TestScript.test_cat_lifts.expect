@@ -1,15 +1,18 @@
 graph(%x : Dynamic) {
   %1 : int = prim::Constant[value=1]()
-  %2 : Dynamic = aten::cat(%x, %x, %1)
-  return (%2);
+  %2 : Dynamic[] = prim::ListConstruct(%x, %x)
+  %3 : Dynamic = aten::cat(%2, %1)
+  return (%3);
 }
 graph(%x : Dynamic) {
   %1 : int = prim::Constant[value=1]()
-  %2 : Dynamic = aten::cat(%1)
-  return (%2);
+  %2 : Dynamic[] = prim::ListConstruct()
+  %3 : Dynamic = aten::cat(%2, %1)
+  return (%3);
 }
 graph(%x : Dynamic) {
   %1 : int = prim::Constant[value=1]()
-  %2 : Dynamic = aten::cat(%x, %1)
-  return (%2);
+  %2 : Dynamic[] = prim::ListConstruct(%x)
+  %3 : Dynamic = aten::cat(%2, %1)
+  return (%3);
 }

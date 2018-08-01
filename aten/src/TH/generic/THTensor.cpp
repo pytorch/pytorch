@@ -400,16 +400,12 @@ void THTensor_(select)(THTensor *self, THTensor *src, int dimension, int64_t sli
 
   THTensor_(set)(self, src);
   THTensor_(narrow)(self, NULL, dimension, sliceIndex, 1);
-  // this check looks unnecessary, but some compiler combinations complain; maybe the issue is:
-  // https://gcc.gnu.org/bugzilla/show_bug.cgi?id=83239.
-  if (self->dim() > 0) {
-    for(d = dimension; d < self->dim()-1; d++)
-    {
-      THTensor_setSizeAtDim(self, d, self->size(d+1));
-      THTensor_setStrideAtDim(self, d, self->stride(d+1));
-    }
-    THTensor_resizeDim(self, self->dim() - 1);
+  for(d = dimension; d < self->dim()-1; d++)
+  {
+    THTensor_setSizeAtDim(self, d, self->size(d+1));
+    THTensor_setStrideAtDim(self, d, self->stride(d+1));
   }
+  THTensor_resizeDim(self, self->dim() - 1);
 }
 
 void THTensor_(transpose)(THTensor *self, THTensor *src, int dimension1, int dimension2)

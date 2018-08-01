@@ -859,7 +859,7 @@ def softmin(input, dim=None, _stacklevel=3):
     """
     if dim is None:
         dim = _get_softmax_dim('softmin', input.dim(), _stacklevel)
-    return -input.softmax(dim)
+    return (-input).softmax(dim)
 
 
 def softmax(input, dim=None, _stacklevel=3):
@@ -1350,6 +1350,41 @@ def local_response_norm(input, size, alpha=1e-4, beta=0.75, k=1):
 
 # loss
 
+def ctc_loss(log_probs, targets, input_lengths, target_lengths, blank=0,
+             reduction='elementwise_mean'):
+    r"""The Connectionist Temporal Classification loss.
+
+    See :class:`~torch.nn.CTCLoss` for details.
+
+    Args:
+        log_probs: :math:`(T, N, C)` where `C = number of characters in alphabet including blank`,
+            `T = input length`, and `N = batch size`.
+            The logarithmized probabilities of the outputs
+            (e.g. obtained with :func:`torch.nn.functional.log_softmax`).
+        targets: :math:`(N, S)` or `(sum(target_lenghts))`.
+            Targets (cannot be blank). In the second form, the targets are assumed to be concatenated.
+        input_lengths: :math:`(N)`.
+            Lengths of the inputs (must each be :math:`\leq T`)
+        target_lengths: :math:`(N)`.
+            Lengths of the targets
+        blank (int, optional):
+            Blank label. Default :math:`0`.
+        reduction (string, optional): Specifies the reduction to apply to the output:
+            'none' | 'elementwise_mean' | 'sum'. 'none': no reduction will be applied,
+            'elementwise_mean': the output losses will be divided by the target lengths and
+            then the mean over the batch is taken. Default: 'elementwise_mean'
+
+    Example::
+
+        >>> log_probs = torch.randn(50, 16, 20).log_softmax(2).detach().requires_grad_()
+        >>> targets = torch.randint(1, 21, (16, 30), dtype=torch.long)
+        >>> input_lengths = torch.full((16,), 50, dtype=torch.long)
+        >>> target_lengths = torch.randint(10,30,(16,), dtype=torch.long)
+        >>> loss = F.ctc_loss(log_probs, targets, input_lengths, target_lengths)
+        >>> loss.backward()
+    """
+    return torch.ctc_loss(log_probs, targets, input_lengths, target_lengths, blank, _Reduction.get_enum(reduction))
+
 
 def nll_loss(input, target, weight=None, size_average=None, ignore_index=-100,
              reduce=None, reduction='elementwise_mean'):
@@ -1671,7 +1706,7 @@ def _pointwise_loss(lambd, lambd_optimized, input, target, reduction='elementwis
             return d
         return torch.mean(d) if reduction == 'elementwise_mean' else torch.sum(d)
     else:
-        return lambd_optimized(input, target, reduction)
+        return lambd_optimized(input, target, _Reduction.get_enum(reduction))
 
 
 def smooth_l1_loss(input, target, size_average=None, reduce=None, reduction='elementwise_mean'):
@@ -1695,9 +1730,7 @@ def l1_loss(input, target, size_average=None, reduce=None, reduction='elementwis
     See :class:`~torch.nn.L1Loss` for details.
     """
     if size_average is not None or reduce is not None:
-        reduction = _Reduction.legacy_get_enum(size_average, reduce)
-    else:
-        reduction = _Reduction.get_enum(reduction)
+        reduction = _Reduction.legacy_get_string(size_average, reduce)
     return _pointwise_loss(lambda a, b: torch.abs(a - b), torch._C._nn.l1_loss,
                            input, target, reduction)
 
@@ -1710,9 +1743,7 @@ def mse_loss(input, target, size_average=None, reduce=None, reduction='elementwi
     See :class:`~torch.nn.MSELoss` for details.
     """
     if size_average is not None or reduce is not None:
-        reduction = _Reduction.legacy_get_enum(size_average, reduce)
-    else:
-        reduction = _Reduction.get_enum(reduction)
+        reduction = _Reduction.legacy_get_string(size_average, reduce)
     return _pointwise_loss(lambda a, b: (a - b) ** 2, torch._C._nn.mse_loss, input, target, reduction)
 
 
