@@ -634,7 +634,7 @@ SparseTensor& hspmm_out_sparse_cpu(SparseTensor& r, const SparseTensor& sparse_,
   indices.resize_({1, outNnz});
   Tensor values = dense.type().tensor({outNnz, n});
 
-  std::vector<int64_t> new_size = _get_sparse_impl(newSparse)->sizes();
+  std::vector<int64_t> new_size = _get_sparse_impl(newSparse)->sizes().vec();
   new_size[0] = outNnz;
   _get_sparse_impl(newSparse)->resize_(_get_sparse_impl(newSparse)->sparseDims(), _get_sparse_impl(newSparse)->denseDims(), new_size);
 

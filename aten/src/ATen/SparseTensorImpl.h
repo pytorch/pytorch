@@ -59,7 +59,7 @@ public:
   // WARNING: This function does NOT preserve invariants of sparseDims/denseDims with
   // respect to indices and values
   void raw_resize_(int64_t sparseDims, int64_t denseDims, ArrayRef<int64_t> size) {
-    size_ = size;
+    size_ = size.vec();
     sparseDims_ = sparseDims;
     denseDims_ = denseDims;
   }
@@ -75,12 +75,12 @@ public:
       values_size.insert(values_size.end(), dense_size.begin(), dense_size.end());
       values_.resize_(values_size);
 
-      std::vector<int64_t> indices_size = indices().sizes();
+      std::vector<int64_t> indices_size = indices().sizes().vec();
       indices_size[0] = sparseDims;
       indices_.resize_(indices_size);
     }
 
-    size_ = size;
+    size_ = size.vec();
     sparseDims_ = sparseDims;
     denseDims_ = denseDims;
 
@@ -93,7 +93,7 @@ public:
   void resize_and_clear_(int64_t sparseDims, int64_t denseDims, ArrayRef<int64_t> size) {
     AT_CHECK(sparseDims + denseDims == size.size(), "number of dimensions must be sparseDims (", sparseDims, ") + denseDims (", denseDims, "), but got ", size.size());
 
-    size_ = size;
+    size_ = size.vec();
     sparseDims_ = sparseDims;
     denseDims_ = denseDims;
 

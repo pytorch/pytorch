@@ -223,7 +223,7 @@ SparseTensor& hspmm_out_sparse_cuda(SparseTensor& r_, const SparseTensor& sparse
   thrust::device_ptr<int64_t> indicesIter(dstIndices.data<int64_t>());
   thrust::sequence(policy, indicesIter, indicesIter + nnz);
 
-  std::vector<int64_t> new_size = _get_sparse_impl(newSparse)->sizes();
+  std::vector<int64_t> new_size = _get_sparse_impl(newSparse)->sizes().vec();
   new_size[0] = nnz;
   _get_sparse_impl(newSparse)->resize_(_get_sparse_impl(newSparse)->sparseDims(), _get_sparse_impl(newSparse)->denseDims(), new_size);
 
