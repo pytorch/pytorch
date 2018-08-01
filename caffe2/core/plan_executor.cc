@@ -478,6 +478,7 @@ bool RunPlanOnWorkspace(
     Workspace* ws,
     const PlanDef& plan,
     ShouldContinue shouldContinue) {
+  ActiveWorkspace aws(ws);
   LOG(INFO) << "Started executing plan.";
   if (plan.execution_step_size() == 0) {
     LOG(WARNING) << "Nothing to run - did you define a correct plan?";

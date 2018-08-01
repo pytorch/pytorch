@@ -312,4 +312,8 @@ ThreadPool* Workspace::GetThreadPool() {
   return thread_pool_.get();
 }
 
+std::mutex ActiveWorkspace::wsmutex_;
+
+std::unordered_set<Workspace*> ActiveWorkspace::workspaces_;
+
 } // namespace caffe2
