@@ -54,7 +54,7 @@ at::Device as_device(const std::vector<int64_t>& elements) {
 }
 
 RegisterOperators reg({
-${constructors}
+  ${constructors}
 });
 
 } // anon namespace
