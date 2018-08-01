@@ -1,5 +1,3 @@
-#include <algorithm>
-
 #include <ATen/ATen.h>
 #include <ATen/SparseTensorImpl.h>
 
@@ -18,14 +16,14 @@ namespace at {
 //
 // This means that we allocate a [1,0] size indices tensor and a [0] size
 // values tensor for such an empty tensor.
-SparseTensorImpl::SparseTensorImpl(Type * type)
-    : TensorImpl(type, nullptr)
+SparseTensorImpl::SparseTensorImpl(at::Backend backend, at::ScalarType scalar_type)
+    : TensorImpl(backend, scalar_type, nullptr, false)
     , size_{0}
     , sparseDims_(1)
     , denseDims_(0)
-    , indices_(type->toDense().toScalarType(ScalarType::Long).tensor({1, 0}))
-    , values_(type->toDense().tensor()) {
-      AT_ASSERT(type->is_sparse());
+    , indices_(globalContext().getTypeOpt(toDense(backend), ScalarType::Long)->tensor({1, 0}))
+    , values_(globalContext().getTypeOpt(toDense(backend), scalar_type)->tensor()) {
+      AT_ASSERT(backend == Backend::SparseCPU || backend == Backend::SparseCUDA);
     }
 
 IntList SparseTensorImpl::sizes() const {
