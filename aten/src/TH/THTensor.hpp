@@ -129,6 +129,7 @@ inline THStorage* THTensor_getStoragePtr(const THTensor* tensor) {
 inline void THTensor_resizeDim(THTensor* tensor, int64_t ndim) {
   // NB: This is *truly* a resize; calling code (e.g., squeeze)
   // assumes that old values are preserved
+  tensor->is_zero_dim_ = bool(ndim == 0);
   tensor->sizes_.resize(ndim);
   tensor->strides_.resize(ndim);
 }
