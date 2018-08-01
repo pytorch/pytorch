@@ -407,7 +407,7 @@ void initJitScriptBindings(PyObject* module) {
     std::vector<Argument> arguments, returns;
     size_t i = method ? 1 : 0;
     for (auto arg_type : arg_types) {
-      arguments.push_back(Argument(def.params()[i++].ident().name(), arg_type, {}, {}, false));
+      arguments.push_back(Argument(def.decl().params()[i++].ident().name(), arg_type, {}, {}, false));
     }
     for (auto ret_type : return_types) {
       returns.push_back(Argument("", ret_type, {}, {}, false));
@@ -563,7 +563,7 @@ void initJitScriptBindings(PyObject* module) {
       size_t i = 0;
       if (typed_def.schema) {
         for (const auto &arg_type : typed_def.schema->arguments) {
-          arg_type_args.push_back(Argument(typed_def.def.params()[i++].ident().name(), arg_type.type, {}, {}, false));
+          arg_type_args.push_back(Argument(typed_def.def.decl().params()[i++].ident().name(), arg_type.type, {}, {}, false));
         }
         for (const auto &return_type : typed_def.schema->returns) {
           return_type_args.push_back(Argument("", return_type.type, {}, {}, false));

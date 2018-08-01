@@ -1,9 +1,11 @@
 (def
   (ident fn)
-  (list
-    (param (ident x) (tensor_type))
-    (param (ident y) (tensor_type))
-    (param (ident z) (tensor_type)))
+  (decl
+    (list
+      (param (ident x) (tensor_type))
+      (param (ident y) (tensor_type))
+      (param (ident z) (tensor_type)))
+    (tensor_type))
   (list
     (assign
       (list (variable (ident q)))

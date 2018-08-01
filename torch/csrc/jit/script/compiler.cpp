@@ -627,21 +627,21 @@ struct to_ir {
 
     std::vector<Argument> arguments, returns; // for schema
     // inputs
-    auto it = def.params().begin();
-    auto end = def.params().end();
+    auto it = def.decl().params().begin();
+    auto end = def.decl().params().end();
     // Type annotations exclude explicitly typing the "self" parameter, so in the
     // case that this is a method with self we expect one fewer parameter annotation
     // than the number of parameters this Def takes.
-    auto expected_annotation_size = self ? def.params().size() - 1 : def.params().size();
+    auto expected_annotation_size = self ? def.decl().params().size() - 1 : def.decl().params().size();
     if (typed_def.schema && typed_def.schema->arguments.size() != expected_annotation_size) {
-      throw ErrorReport(def.params().range()) << "Number of type annotations for"
+      throw ErrorReport(def.decl().params().range()) << "Number of type annotations for"
         << " function parameters (" << typed_def.schema->arguments.size() << ")"
         << " does not match the number of parameters on the function ("
         << expected_annotation_size << ")!";
     }
     if(self) {
       if(it == end)
-        throw ErrorReport(def.params().range()) << "methods must have a self argument";
+        throw ErrorReport(def.decl().params().range()) << "methods must have a self argument";
       environment_stack->setSugaredVar(def.range(), (*it).ident().name(), self);
       ++it;
     }

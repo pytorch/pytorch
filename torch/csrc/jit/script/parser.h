@@ -391,13 +391,17 @@ struct Parser {
     }
     return c(TK_LIST, r, std::move(stmts));
   }
+  TreeRef parseDecl() {
+    auto paramlist = parseList('(', ',', ')', &Parser::parseParam);
+    L.expect(':');
+    return Decl::create(paramlist.range(), List<Param>(paramlist), TensorType::create(L.cur().range));
+  }
   TreeRef parseFunction() {
     L.expect(TK_DEF);
     auto name = parseIdent();
-    auto paramlist = parseList('(', ',', ')', &Parser::parseParam);
-    L.expect(':');
+    auto decl = parseDecl();
     auto stmts_list = parseStatements();
-    return Def::create(name.range(), Ident(name), List<Param>(paramlist),
+    return Def::create(name.range(), Ident(name), Decl(decl),
                        List<Stmt>(stmts_list));
   }
   Lexer& lexer() {

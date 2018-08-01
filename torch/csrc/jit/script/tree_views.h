@@ -20,7 +20,8 @@ namespace script {
 // Type  = TensorType()                                                 TK_TENSOR_TYPE
 // Param = Param(Type type, Ident name)                                 TK_PARAM
 //
-// Def   = Def(Ident name, List<Param> params, List<Stmt> body)         TK_DEF
+// Decl  = Decl(List<Param> params, Type return_type)                   TK_DECL
+// Def   = Def(Ident name, Decl decl, List<Stmt> body)                  TK_DEF
 //
 // Stmt  = If(Expr cond, List<Stmt> true_body, List<Stmt> false_body)   TK_IF
 //       | For(List<Expr> targets, List<Expr> iters, List<Stmt> body)   TK_FOR
@@ -324,6 +325,21 @@ struct TensorType : public Type {
 // Top level definitions
 ////////////////////////////////////////////////////////////////////////////////
 
+struct Decl : public TreeView {
+  explicit Decl(const TreeRef& tree) : TreeView(tree) {
+    tree->match(TK_DECL);
+  }
+  List<Param> params() const {
+    return List<Param>(subtree(0));
+  }
+  Type return_type() const {
+    return Type(subtree(1));
+  }
+  static Decl create(const SourceRange& range, const List<Param>& params, Type return_type) {
+    return Decl(Compound::create(TK_DECL, range, {params, return_type}));
+  }
+};
+
 struct Def : public TreeView {
   explicit Def(const TreeRef& tree) : TreeView(tree) {
     tree->match(TK_DEF);
@@ -331,8 +347,8 @@ struct Def : public TreeView {
   Ident name() const {
     return Ident(subtree(0));
   }
-  List<Param> params() const {
-    return List<Param>(subtree(1));
+  Decl decl() const {
+    return Decl(subtree(1));
   }
   List<Stmt> statements() const {
     return List<Stmt>(subtree(2));
@@ -340,10 +356,10 @@ struct Def : public TreeView {
   static Def create(
       const SourceRange& range,
       const Ident& name,
-      const List<Param>& params,
+      const Decl& decl,
       const List<Stmt>& stmts) {
     return Def(Compound::create(
-        TK_DEF, range, {name, params, stmts}));
+        TK_DEF, range, {name, decl, stmts}));
   }
 };
 

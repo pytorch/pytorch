@@ -4331,6 +4331,12 @@ def func(t):
 
         self.checkScript(t2, (torch.zeros(1, 1, 2),))
 
+    def test_parser_type_annotations(self):
+        cu = torch.jit.CompilationUnit('''
+            def foo(x : Tensor, y : Tuple[Tuple[Tensor, Tensor], Tensor]):
+                return x
+        ''')
+
     def test_gather_dynamic_index(self):
         def t(x):
             gather1 = x[0]
