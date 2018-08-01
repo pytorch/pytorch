@@ -127,19 +127,13 @@ SparseTensor new_with_tensor_sparse(const LongTensor& indices, const Tensor& val
 SparseTensor new_with_dims_and_size_sparse(const SparseType& dtype, int64_t sparseDims, int64_t denseDims, ArrayRef<int64_t> size) {
   SparseTensor self = new_sparse(dtype);
   AT_CHECK(size.size() != 0, "cannot construct sparse tensor with empty size and no values; use the nullary constructor instead");
-  sparse_resize_and_clear_(self, size, sparseDims, denseDims);
+  _get_sparse_impl(self)->resize_and_clear_(sparseDims, denseDims, size);
   return self;
 }
 #endif
 
 SparseTensor new_with_size_sparse(const SparseType& dtype, ArrayRef<int64_t> size) {
-#ifndef USE_TH_SIZE_ZERO_DIM
-  SparseTensor self = new_sparse(dtype);
-  _raw_resize_sparse_legacy(self, size.size(), 0, size);
-  return self;
-#else
   return new_with_dims_and_size_sparse(dtype, size.size(), 0, size);
-#endif
 }
 
 // NOTE: new_with_tensor_and_size_unsafe_sparse() differs from new_with_tensor_and_size_sparse()
@@ -229,47 +223,19 @@ SparseTensor new_with_tensor_and_size_sparse(const LongTensor& indices, const Te
 // NB: Deleted newWithSizeNd variants
 
 SparseTensor clone_sparse(const SparseTensor& self) {
-#ifndef USE_TH_SIZE_ZERO_DIM
-  SparseTensor other = new_sparse(self.type());
-  _raw_resize_sparse_legacy(other, self._sparseDims(), self._denseDims(), self.sizes());
-  // NB: This seems to preserve the size of the UN-narrowed indices and
-  // values.  Veeery interesting.
-  _copy_into_sparse(other, _get_sparse_impl(self)->indices(), _get_sparse_impl(self)->values());
-  _get_sparse_impl(other)->set_coalesced(self.is_coalesced());
-  _get_sparse_impl(other)->set_nnz(self._nnz());
-  return other;
-#else
   SparseTensor other = new_with_dims_and_size_sparse(self.type(), self._sparseDims(), self._denseDims(), self.sizes());
   _copy_into_sparse(other, _get_sparse_impl(self)->indices(), _get_sparse_impl(self)->values());
   _get_sparse_impl(other)->set_coalesced(self.is_coalesced());
   return other;
-#endif
 }
 
 /******************************************************************************
  * reshaping methods
  ******************************************************************************/
 
-// TODO: remove this function when USE_TH_SIZE_ZERO_DIM is enabled by default
-void resize_sparse(const SparseTensor& self, ArrayRef<int64_t> size) {
-  _raw_resize_sparse_legacy(self, size.size(), 0, size);
-}
-
-// TODO: remove this function when USE_TH_SIZE_ZERO_DIM is enabled by default
-SparseTensor& sparse_raw_resize_legacy_(SparseTensor& self, ArrayRef<int64_t> size, int64_t sparseDims, int64_t denseDims) {
-  if (sparseDims == -1) {
-    sparseDims = self._indices().size(0);
-  }
-  if (denseDims == -1) {
-    denseDims = self._values().dim() - 1;
-  }
-  _raw_resize_sparse_legacy(self, sparseDims, denseDims, size);
-  return self;
-}
-
-SparseTensor& sparse_resize_and_clear_(SparseTensor& self, ArrayRef<int64_t> size, int64_t sparseDims, int64_t denseDims) {
+SparseTensor& sparse_resize_(SparseTensor& self, ArrayRef<int64_t> size, int64_t sparseDims, int64_t denseDims) {
 #ifdef USE_TH_SIZE_ZERO_DIM
-  _get_sparse_impl(self)->resize_and_clear_(sparseDims, denseDims, size);
+  _get_sparse_impl(self)->resize_(sparseDims, denseDims, size);
 #endif
 
   return self;
@@ -283,11 +249,7 @@ namespace {
 
 SparseTensor& resize_as_sparse_(SparseTensor& self, const SparseTensor& src) {
   if (!_is_same_size_as_sparse(self, src)) {
-#ifndef USE_TH_SIZE_ZERO_DIM
-    _raw_resize_sparse_legacy(self, src._sparseDims(), src._denseDims(), src.sizes());
-#else
-    sparse_resize_and_clear_(self, src.sizes(), src._sparseDims(), src._denseDims());
-#endif
+    sparse_resize_(self, src.sizes(), src._sparseDims(), src._denseDims());
   }
   return self;
 }
@@ -301,11 +263,7 @@ Tensor sparse_to_dense(const SparseTensor& self) {
 
 SparseTensor& copy_sparse_(SparseTensor& self, const SparseTensor& src) {
   if (isSameTensor(self, src)) return self;
-#ifndef USE_TH_SIZE_ZERO_DIM
-  _raw_resize_sparse_legacy(self, src._sparseDims(), src._denseDims(), src.sizes());
-#else
-  sparse_resize_and_clear_(self, src.sizes(), src._sparseDims(), src._denseDims());
-#endif
+  _get_sparse_impl(self)->resize_(src._sparseDims(), src._denseDims(), src.sizes());
   // NB: This seems to copy the underlying full indices/values buffer
   _copy_into_sparse(self, _get_sparse_impl(src)->indices(), _get_sparse_impl(src)->values());
   _get_sparse_impl(self)->set_coalesced(src.is_coalesced());
@@ -342,10 +300,6 @@ SparseTensor coalesce_sparse_cpu(const SparseTensor& self) {
     factor *= self.size(d);
   }
 
-#ifndef USE_TH_SIZE_ZERO_DIM
-  SparseTensor dst = new_sparse(self.type());
-  _raw_resize_sparse_legacy(dst, sparseDims, denseDims, self.sizes());
-#endif
   // TODO: is there a more idiomatic way to do this?
   LongTensor newIndices = indices.type().tensor(indices.sizes());
   Tensor newValues = values.type().tensor(values.sizes());

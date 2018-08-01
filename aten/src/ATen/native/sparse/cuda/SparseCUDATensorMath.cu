@@ -199,7 +199,7 @@ SparseTensor& hspmm_out_sparse_cuda(SparseTensor& r_, const SparseTensor& sparse
 #ifndef USE_TH_SIZE_ZERO_DIM
   _get_sparse_impl(r_)->raw_resize_(1, 1, {m, n});
 #else
-  r_.sparse_resize_and_clear_({m, n}, 1, 1);
+  _get_sparse_impl(r_)->resize_and_clear_(1, 1, {m, n});
 #endif
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
