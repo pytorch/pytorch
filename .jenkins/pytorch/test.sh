@@ -64,7 +64,7 @@ test_python_all_except_nn() {
 
 test_aten() {
   # Test ATen
-  if [[ "$BUILD_ENVIRONMENT" != *asan* ]]; then
+  if ([[ "$BUILD_ENVIRONMENT" != *asan* ]] && [[ "$BUILD_ENVIRONMENT" != *rocm* ]]); then
     echo "Running ATen tests with pytorch lib"
     TORCH_LIB_PATH=$(python -c "import site; print(site.getsitepackages()[0])")/torch/lib
     # NB: the ATen test binaries don't have RPATH set, so it's necessary to
