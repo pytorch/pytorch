@@ -22,7 +22,7 @@ from functools import reduce
 from torch import multiprocessing as mp
 from common import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MKL, \
     TEST_LIBROSA, run_tests, download_file, skipIfNoLapack, suppress_warnings, \
-    IS_WINDOWS, PY3, NO_MULTIPROCESSING_SPAWN, skipIfNoZeroSize
+    IS_WINDOWS, PY3, NO_MULTIPROCESSING_SPAWN, skipIfNoZeroSize, TEST_WITH_ROCM
 from multiprocessing.reduction import ForkingPickler
 
 if TEST_NUMPY:
@@ -724,6 +724,7 @@ class TestTorch(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
+    @unittest.skipIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")
     def test_norm_cuda(self):
         self._test_norm(self, device='cuda')
 
@@ -1120,6 +1121,26 @@ class TestTorch(TestCase):
         for i in range(m1.size(0)):
             res2[i, 3] = res2[i, 3] + 2
         self.assertEqual(res1, res2)
+
+        # inter-type
+        m1 = torch.randn(10, 10)
+        self.assertEqual(m1 + 3, m1 + torch.tensor(3))
+        self.assertEqual(3 + m1, torch.tensor(3) + m1)
+        one = torch.tensor(1, dtype=torch.uint8)
+        self.assertEqual(torch.add(one, 1), 2)
+        self.assertEqual(torch.add(one, 1).dtype, torch.uint8)
+
+        # contiguous + non-contiguous
+        m1 = torch.randn(10, 10)
+        m2 = torch.randn(10, 10).t()
+        res = m1 + m2
+        self.assertTrue(res.is_contiguous())
+        self.assertEqual(res, m1 + m2.contiguous())
+
+        # 1d + empty
+        m1 = torch.tensor([1.0], dtype=torch.float)
+        m2 = torch.tensor([], dtype=torch.float)
+        self.assertEqual(m1 + m2, [])
 
         # [res] torch.add([res,] tensor1, value, tensor2)
 
@@ -3249,6 +3270,7 @@ class TestTorch(TestCase):
         self.assertRaises(TypeError, lambda: q.topk(4, True))
 
     @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
+    @unittest.skipIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")
     def test_topk_noncontiguous_gpu(self):
         t = torch.randn(20, device="cuda")[::2]
         top1, idx1 = t.topk(5)
@@ -6394,6 +6416,11 @@ class TestTorch(TestCase):
         devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         for device in devices:
 
+            # need to init cuda to check has_magma
+            empty = torch.randn((0, 0), device=device)
+            if device == 'cuda' and not torch.cuda.has_magma:
+                continue
+
             def fn(torchfn, *args):
                 return torchfn(*tuple(torch.randn(shape, device=device) if isinstance(shape, tuple) else shape
                                       for shape in args))
@@ -6720,6 +6747,8 @@ class TestTorch(TestCase):
         self.assertEqual(torch.tensor([7, 8, 5, 6, 3, 4, 1, 2]).view(2, 2, 2), data.flip(0, 1))
         self.assertEqual(torch.tensor([8, 7, 6, 5, 4, 3, 2, 1]).view(2, 2, 2), data.flip(0, 1, 2))
 
+        # check for wrap dim
+        self.assertEqual(torch.tensor([2, 1, 4, 3, 6, 5, 8, 7]).view(2, 2, 2), data.flip(-1))
         # check for permute
         self.assertEqual(torch.tensor([6, 5, 8, 7, 2, 1, 4, 3]).view(2, 2, 2), data.flip(0, 2))
         self.assertEqual(torch.tensor([6, 5, 8, 7, 2, 1, 4, 3]).view(2, 2, 2), data.flip(2, 0))
@@ -6730,8 +6759,6 @@ class TestTorch(TestCase):
         self.assertRaises(TypeError, lambda: data.flip())
         # not allow size of flip dim > total dims
         self.assertRaises(RuntimeError, lambda: data.flip(0, 1, 2, 3))
-        # not allow dim < 0
-        self.assertRaises(RuntimeError, lambda: data.flip(-1))
         # not allow dim > max dim
         self.assertRaises(RuntimeError, lambda: data.flip(3))
 
@@ -6756,6 +6783,10 @@ class TestTorch(TestCase):
         self.assertEqual(flip0_result, data.flip(0))
         self.assertEqual(flip1_result, data.flip(1))
 
+        # test empty tensor, should just return an empty tensor of the same shape
+        data = torch.tensor([])
+        self.assertEqual(data, data.flip(0))
+
     def test_flip(self):
         self._test_flip(self, use_cuda=False)
 
@@ -6768,6 +6799,44 @@ class TestTorch(TestCase):
 
         val = torch.tensor(42)
         self.assertEqual(reversed(val), torch.tensor(42))
+
+    @staticmethod
+    def _test_rot90(self, use_cuda=False):
+        device = torch.device("cuda" if use_cuda else "cpu")
+        data = torch.arange(1, 5, device=device).view(2, 2)
+        self.assertEqual(torch.tensor([1, 2, 3, 4]).view(2, 2), data.rot90(0, [0, 1]))
+        self.assertEqual(torch.tensor([2, 4, 1, 3]).view(2, 2), data.rot90(1, [0, 1]))
+        self.assertEqual(torch.tensor([4, 3, 2, 1]).view(2, 2), data.rot90(2, [0, 1]))
+        self.assertEqual(torch.tensor([3, 1, 4, 2]).view(2, 2), data.rot90(3, [0, 1]))
+
+        # test for default args k=1, dims=[0, 1]
+        self.assertEqual(data.rot90(), data.rot90(1, [0, 1]))
+
+        # test for reversed order of dims
+        self.assertEqual(data.rot90(3, [0, 1]), data.rot90(1, [1, 0]))
+
+        # test for modulo of k
+        self.assertEqual(data.rot90(5, [0, 1]), data.rot90(1, [0, 1]))
+        self.assertEqual(data.rot90(3, [0, 1]), data.rot90(-1, [0, 1]))
+        self.assertEqual(data.rot90(-5, [0, 1]), data.rot90(-1, [0, 1]))
+
+        # test for dims out-of-range error
+        self.assertRaises(RuntimeError, lambda: data.rot90(1, [0, -3]))
+        self.assertRaises(RuntimeError, lambda: data.rot90(1, [0, 2]))
+
+        # test tensor with more than 2D
+        data = torch.arange(1, 9, device=device).view(2, 2, 2)
+        self.assertEqual(torch.tensor([2, 4, 1, 3, 6, 8, 5, 7]).view(2, 2, 2), data.rot90(1, [1, 2]))
+        self.assertEqual(data.rot90(1, [1, -1]), data.rot90(1, [1, 2]))
+
+        # test for errors
+        self.assertRaises(RuntimeError, lambda: data.rot90(1, [0, 3]))
+        self.assertRaises(RuntimeError, lambda: data.rot90(1, [1, 1]))
+        self.assertRaises(RuntimeError, lambda: data.rot90(1, [0, 1, 2]))
+        self.assertRaises(RuntimeError, lambda: data.rot90(1, [0]))
+
+    def test_rot90(self):
+        self._test_rot90(self, use_cuda=False)
 
     def test_storage(self):
         v = torch.randn(3, 5)
@@ -7184,6 +7253,7 @@ class TestTorch(TestCase):
             self.assertEqual(device, device_copied)
 
     @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
+    @unittest.skipIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")
     def test_half_tensor_cuda(self):
         x = torch.randn(5, 5).half()
         self.assertEqual(x.cuda(), x)
@@ -7499,6 +7569,7 @@ class TestTorch(TestCase):
             t2.fill_(rnum)
             self.assertEqual(t1, t2, 0)
 
+    @unittest.skipIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")
     def test_print(self):
         default_type = torch.Tensor().type()
         for t in torch._tensor_classes:
@@ -7663,6 +7734,7 @@ class TestTorch(TestCase):
             self.assertEqual(torch.empty_like(a).type(), a.type())
 
     @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
+    @unittest.skipIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")
     def test_pin_memory(self):
         x = torch.randn(3, 5)
         self.assertFalse(x.is_pinned())
@@ -7833,6 +7905,7 @@ class TestTorch(TestCase):
         self.assertRaises(ValueError, lambda: torch.from_numpy(x))
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @unittest.skipIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")
     def test_ctor_with_numpy_array(self):
         dtypes = [
             np.double,

@@ -78,7 +78,7 @@ struct TensorBaseImpl {
     return pImpl != UndefinedTensor::singleton();
   }
 
-  friend struct Type;
+  friend struct at::Type;
 
   //TODO(zach): sort out friend structes
 public:

@@ -247,6 +247,7 @@ struct Expr : public TreeView {
       case TK_CONST:
       case TK_TRUE:
       case TK_FALSE:
+      case TK_NONE:
       case TK_CAST:
       case TK_APPLY:
       case '.':

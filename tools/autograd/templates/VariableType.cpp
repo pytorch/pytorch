@@ -38,67 +38,6 @@ using namespace at;
 using namespace torch::autograd::generated;
 
 namespace torch { namespace autograd {
-// Helper methods for working with Attributes (torch/csrc/jit/attributes.h)
-
-at::Tensor maybeUnwrapVar(const at::Tensor& t) {
-  return t.is_variable() ? Variable(t).data() : t;
-}
-
-// The overloaded accessors are convenient for the generated code (since we
-// don't want to make the codegen do the dispatch manually)
-static void setattr(jit::Node* n, jit::Symbol name, int64_t v)             { n->i_(name, v); }
-static void setattr(jit::Node* n, jit::Symbol name, const at::Scalar& v)   { n->t_(name, maybeUnwrapVar(v.toTensor())); }
-static void setattr(jit::Node* n, jit::Symbol name, SparseTensorRef s)     { n->t_(name, s.tref); }
-static void setattr(jit::Node* n, jit::Symbol name, const at::IntList& v)  { n->is_(name, v); }
-static void setattr(jit::Node* n, jit::Symbol name, bool v)                { n->i_(name, v); }
-static void setattr(jit::Node* n, jit::Symbol name, double v)              { n->f_(name, v); }
-static void setattr(jit::Node* n, jit::Symbol name, std::string v)         { n->s_(name, v); }
-template<std::size_t N>
-static void setattr(jit::Node* n, jit::Symbol name, std::array<bool, N> v) { n->is_(name, std::vector<int64_t>(v.begin(), v.end())); }
-
-static jit::Value* insertConstant(jit::Node* n, jit::IValue value) {
-  jit::WithInsertPoint guard(n);
-  return insertConstant(*n->owningGraph(), std::move(value));
-}
-
-static void genericInsertInput(jit::Node* n, size_t idx, jit::IValue value) {
-  n->insertInput(idx, insertConstant(n, std::move(value)));
-}
-
-void failPositionalAttr() {
-  throw std::runtime_error("unsupported type in setposattr. File a bug report!");
-}
-
-static void setposattr(jit::Node* n, size_t idx, const char *name, int64_t v)             { genericInsertInput(n, idx, v); }
-static void setposattr(jit::Node* n, size_t idx, const char *name, const at::Scalar& v)   { genericInsertInput(n, idx, v); }
-static void setposattr(jit::Node* n, size_t idx, const char *name, SparseTensorRef s)     { failPositionalAttr(); }
-static void setposattr(jit::Node* n, size_t idx, const char *name, const at::IntList& v)  {
-  using ArgumentStash = jit::tracer::ArgumentStash;
-  if (ArgumentStash::hasIntList(name)) {
-    auto info = ArgumentStash::popIntList(name);
-    for (size_t i = 0; i < info.size(); ++i) {
-      if (info[i] != nullptr) continue;
-      info[i] = insertConstant(n, v[i]);
-    }
-    for (jit::Value* v : info) {
-      if (*v->type() != *jit::IntType::get()) {
-        throw std::runtime_error(
-          "Type mismatch in setposattr for IntList. Check that your program "
-          "is valid without tracing, and please file a bug report if it is.");
-      }
-    }
-    jit::WithInsertPoint insert_point{n};
-    auto& g = *n->owningGraph();
-    auto size = g.insertNode(g.createList(jit::IntType::get(), info))->output();
-    n->insertInput(idx, size);
-  } else {
-    return genericInsertInput(n, idx, v);
-  }
-}
-static void setposattr(jit::Node* n, size_t idx, const char *name, bool v)                { genericInsertInput(n, idx, v); }
-static void setposattr(jit::Node* n, size_t idx, const char *name, double v)              { genericInsertInput(n, idx, v); }
-template<std::size_t N>
-static void setposattr(jit::Node* n, size_t idx, const char *name, std::array<bool, N> v) { failPositionalAttr(); }
 
 VariableType::VariableType(Context* context, Type* baseType)
   : Type(context, /*is_variable=*/true, /*is_undefined=*/false)

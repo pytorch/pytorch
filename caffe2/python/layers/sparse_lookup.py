@@ -257,7 +257,7 @@ class SparseLookup(ModelLayer):
 
             segment_ids = net.LengthsToSegmentIds(
                 self.input_record.lengths(),
-                self.input_record.lengths() + '_sid')
+                net.NextScopedBlob(self.input_record.lengths() + '_sid'))
             net.__getattr__('SortedSegmentRange' + self.reducer)(
                 [table_rows, segment_ids],
                 self.output_schema.field_blobs(),

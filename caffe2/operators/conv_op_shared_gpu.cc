@@ -12,16 +12,16 @@ void createSharedBuffer<CUDAContext>(Workspace* ws) {
 }
 
 template <>
-void runWithSharedBuffer(
+void runWithSharedBuffer<CUDAContext>(
     Workspace* ws,
-    std::function<void(Tensor<CUDAContext>* buffer)> f) {
+    std::function<void(Tensor* buffer)> f) {
   auto* mutexBlob = ws->GetBlob("__CAFFE2_SHARED_CONV_BUFFER_CUDA_MUTEX__");
   CAFFE_ENFORCE(mutexBlob, "Must call createSharedBuffer() first");
 
   auto* mutexPtr = mutexBlob->GetMutable<std::unique_ptr<std::mutex>>();
   std::lock_guard<std::mutex> g(**mutexPtr);
-  auto* buffer = ws->GetBlob("__CAFFE2_SHARED_CONV_BUFFER_CUDA__")
-                     ->GetMutable<TensorCUDA>();
+  auto* buffer =
+      ws->GetBlob("__CAFFE2_SHARED_CONV_BUFFER_CUDA__")->GetMutableTensor(CUDA);
   f(buffer);
 }
 }

@@ -32,11 +32,6 @@ struct AT_API TensorImpl : public Retainable {
   virtual IntList sizes() const;
   virtual IntList strides() const;
   virtual int64_t dim() const;
-  /**
-   * Perform a conversion of this tensor to a scalar, if numel() == 1.
-   * Otherwise, raise an error.
-   */
-  virtual Scalar localScalar() = 0;
   virtual void * unsafeGetTH(bool retain);
   virtual std::unique_ptr<Storage> storage() = 0;
   friend struct Type;
@@ -55,6 +50,19 @@ struct AT_API TensorImpl : public Retainable {
   // we also prevent this from getting marked as a zero dim tensor if it is not
   // the right shape afterall.
   virtual TensorImpl* maybe_zero_dim(bool condition_when_zero_dim);
+
+  // True if a tensor was auto-wrapped from a C++ or Python number.
+  // Wrapped numbers do not participate in the result type computation for
+  // mixed-type operations if there are any Tensors that are not wrapped
+  // numbers. Otherwise, they behave like their non-wrapped equivalents.
+  // See [Result type computation] in TensorIterator.h.
+  bool is_wrapped_number() const {
+    return is_wrapped_number_;
+  }
+  void set_wrapped_number(bool value) {
+    AT_ASSERT(dim() == 0);
+    is_wrapped_number_ = value;
+  }
 
   // ~~~~~ Autograd API ~~~~~
   // Some methods below are defined in TensorImpl.cpp because Tensor is an
@@ -83,6 +91,7 @@ struct AT_API TensorImpl : public Retainable {
   virtual void set_data(Tensor new_data);
 
 protected:
+  bool is_wrapped_number_ = false;
   Type * type_;
 public:
   THTensor * tensor;

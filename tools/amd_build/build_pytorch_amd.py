@@ -1,4 +1,3 @@
-"""Requires the hipify-python.py script (https://github.com/ROCm-Developer-Tools/pyHIPIFY)."""
 import shutil
 import subprocess
 import os
@@ -8,6 +7,7 @@ from functools import reduce
 
 amd_build_dir = os.path.dirname(os.path.realpath(__file__))
 proj_dir = os.path.dirname(os.path.dirname(amd_build_dir))
+
 includes = [
     "aten/*",
     "torch/*"
@@ -16,7 +16,7 @@ includes = [
 # List of operators currently disabled
 yaml_file = os.path.join(amd_build_dir, "disabled_features.yaml")
 
-# Apply patch files.
+# Apply patch files in place.
 patch_folder = os.path.join(amd_build_dir, "patches")
 for filename in os.listdir(os.path.join(amd_build_dir, "patches")):
     subprocess.Popen(["git", "apply", os.path.join(patch_folder, filename)], cwd=proj_dir)

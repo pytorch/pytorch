@@ -85,6 +85,7 @@ def IsOperatorWithEngine(op_type, engine):
 def DeviceOption(
     device_type,
     cuda_gpu_id=0,
+    hip_gpu_id=0,
     random_seed=None,
     node_name=None,
     numa_node_id=None,
@@ -2024,12 +2025,9 @@ class Net(object):
     def RunAllOnGPU(self, gpu_id=0, use_gpu_engine=False):
         """A convenient function to run everything on the GPU."""
         device_option = caffe2_pb2.DeviceOption()
-        if workspace.has_gpu_support:
-            device_option.device_type = caffe2_pb2.CUDA
-            device_option.cuda_gpu_id = gpu_id
-        else:
-            device_option.device_type = caffe2_pb2.HIP
-            device_option.hip_gpu_id = gpu_id
+        device_option.device_type = caffe2_pb2.CUDA if workspace.has_gpu_support else caffe2_pb2.HIP
+        device_option.cuda_gpu_id = gpu_id
+        device_option.hip_gpu_id = gpu_id
         self._net.device_option.CopyFrom(device_option)
         if use_gpu_engine:
             for op in self._net.op:
