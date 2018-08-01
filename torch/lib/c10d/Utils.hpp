@@ -64,7 +64,7 @@ inline std::vector<std::vector<int64_t>> getSizes(
     const std::vector<at::Tensor>& tensors) {
   std::vector<std::vector<int64_t>> sizes(tensors.size());
   for (size_t i = 0; i < tensors.size(); i++) {
-    sizes[i] = tensors[i].sizes();
+    sizes[i] = tensors[i].sizes().vec();
   }
   return sizes;
 }
