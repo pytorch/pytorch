@@ -87,7 +87,8 @@ Tensor empty(IntList size, const TensorOptions& options) {
 
 Tensor& empty_out(Tensor& result, IntList size) {
   if (result.is_sparse()) {
-    _get_sparse_impl(result)->resize_and_clear_(size.size(), 0, size);
+    std::vector<int64_t> size_vec(size);
+    _get_sparse_impl(result)->resize_and_clear_(size.size(), 0, size_vec);
   } else {
     result.resize_(size);
   }
