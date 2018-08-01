@@ -100,28 +100,31 @@ public:
 
 #ifdef USE_TH_SIZE_ZERO_DIM
   // NOTE: This function preserves invariants of sparseDims/denseDims with respect to
-  // indices and values
+  // indices and values.
   void resize_(int64_t sparseDims, int64_t denseDims, ArrayRef<int64_t> size) {
     AT_CHECK(sparseDims + denseDims == size.size(), "number of dimensions must be sparseDims (", sparseDims, ") + denseDims (", denseDims, "), but got ", size.size());
-    AT_CHECK(indices().size(0) == sparseDims, "indices has incorrect first dimension, expected ", sparseDims, ", got ", indices().size(0));
-    AT_CHECK(values().dim() == denseDims + 1, "values has incorrect number of dimensions, expected ", denseDims + 1, ", got ", values().dim());
 
-    auto dense_size_original = sizes().slice(sparseDims_);
-    auto dense_size_new = size.slice(sparseDims);
-    AT_CHECK(
-      dense_size_original.equals(dense_size_new),
-      "dense dim sizes don't match, expected ", dense_size_original, ", got ", dense_size_new
-    );
+    if ((!size.equals(size_)) || (sparseDims != sparseDims_) || (denseDims != denseDims_)) {
+      std::vector<int64_t> values_size = {values().size(0)};
+      auto dense_size = size.slice(sparseDims);
+      values_size.insert(values_size.end(), dense_size.begin(), dense_size.end());
+      values_.resize_(values_size);
+
+      std::vector<int64_t> indices_size = indices().sizes();
+      indices_size[0] = sparseDims;
+      indices_.resize_(indices_size);
+    }
 
     size_ = size;
     sparseDims_ = sparseDims;
     denseDims_ = denseDims;
+
+    AT_CHECK(indices().size(0) == sparseDims_, "indices has incorrect first dimension, expected ", sparseDims_, ", got ", indices().size(0));
+    AT_CHECK(values().dim() == denseDims_ + 1, "values has incorrect number of dimensions, expected ", denseDims_ + 1, ", got ", values().dim());
+    AT_CHECK(indices_.size(1) == values_.size(0), "indices and values must have same nnz, but got nnz from indices: ", indices_.size(1), ", nnz from values: ", values_.size(0));  
   }
 
   // NOTE: this function will resize the sparse tensor and also set `indices` and `values` to empty.
-  // The reason we do this is that it's difficult to preserve the dim invariants when we change the
-  // sparse tensor size but it doesn't agree with the dims of the existing indices or values, so we
-  // should also reset the indices and values to preserve the dim invariants.
   void resize_and_clear_(int64_t sparseDims, int64_t denseDims, ArrayRef<int64_t> size) {
     AT_CHECK(sparseDims + denseDims == size.size(), "number of dimensions must be sparseDims (", sparseDims, ") + denseDims (", denseDims, "), but got ", size.size());
     size_ = size;
