@@ -859,7 +859,7 @@ def softmin(input, dim=None, _stacklevel=3):
     """
     if dim is None:
         dim = _get_softmax_dim('softmin', input.dim(), _stacklevel)
-    return -input.softmax(dim)
+    return (-input).softmax(dim)
 
 
 def softmax(input, dim=None, _stacklevel=3):
