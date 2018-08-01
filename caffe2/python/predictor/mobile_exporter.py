@@ -20,6 +20,7 @@ def add_tensor(net, name, blob):
         np.dtype('int32'): "GivenTensorIntFill",
         np.dtype('int64'): "GivenTensorInt64Fill",
         np.dtype('uint8'): "GivenTensorStringFill",
+        np.dtype('O'): "GivenTensorStringFill"
     }
 
     shape = blob.shape
@@ -29,6 +30,12 @@ def add_tensor(net, name, blob):
     if blob.dtype == np.dtype('uint8'):
         shape = [1]
         values = [str(blob.data)]
+    # Only allow string arrays as objects.
+    # The only intended use case for this is to store arrays of strings in the
+    # model which can be used for post processing results in subsequent ops.
+    if blob.dtype == np.dtype('O'):
+        for blob_val in blob:
+            assert(isinstance(blob_val, bytes))
 
     op = core.CreateOperator(
         kTypeNameMapper[blob.dtype],
