@@ -186,16 +186,16 @@ private:
     : Type(TypeKind::TensorType)
     , scalar_type_(tensor.type().scalarType())
     , device_(tensor.type().is_cuda() ? tensor.get_device() : -1)
-    , sizes_(tensor.sizes())
-    , strides_(tensor.strides()) {}
+    , sizes_(tensor.sizes().vec())
+    , strides_(tensor.strides().vec()) {}
   TensorType(at::ScalarType scalar_type, int device, at::IntList sizes)
     : TensorType(scalar_type, device, sizes, TensorType::contiguousStridesOf(sizes)) {}
   TensorType(at::ScalarType scalar_type, int device, at::IntList sizes, at::IntList strides)
     : Type(TypeKind::TensorType)
     , scalar_type_(scalar_type)
     , device_(device)
-    , sizes_(sizes)
-    , strides_(strides)
+    , sizes_(sizes.vec())
+    , strides_(strides.vec())
     {}
   static std::vector<int64_t> contiguousStridesOf(at::IntList sizes) {
     std::vector<int64_t> strides(sizes.size());

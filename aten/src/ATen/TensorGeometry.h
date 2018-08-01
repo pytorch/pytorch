@@ -9,7 +9,7 @@ struct AT_API TensorGeometry {
   TensorGeometry() : storage_offset_(0) {}
 
   explicit TensorGeometry(IntList sizes)
-    : sizes_(sizes)
+    : sizes_(sizes.vec())
     , strides_(sizes.size())
     , storage_offset_(0) {
       int64_t dim = sizes.size();
@@ -21,8 +21,8 @@ struct AT_API TensorGeometry {
   }
 
   explicit TensorGeometry(const Tensor& t)
-    : sizes_(t.sizes())
-    , strides_(t.strides())
+    : sizes_(t.sizes().vec())
+    , strides_(t.strides().vec())
     , storage_offset_(t.storage_offset()) {}
 
   // true if the tensor is contiguous
