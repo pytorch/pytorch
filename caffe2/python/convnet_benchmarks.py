@@ -776,7 +776,7 @@ def GetArgumentParser():
         action='store_true',
         help="If True, dump the model prototxts to disk."
     )
-    parser.add_argument("--net_type", type=str, default="simple")
+    parser.add_argument("--net_type", type=str, default="dag")
     parser.add_argument("--num_workers", type=int, default=2)
     parser.add_argument("--use-nvtx", default=False, action='store_true')
     parser.add_argument("--htrace_span_log_path", type=str)
