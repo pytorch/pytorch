@@ -465,7 +465,7 @@ def disable_asserts(input_string):
 
 
 def replace_forceinline(input_string):
-    """__forceinline__'d methods can cause 'symbol multiply defined' errors in HIP. 
+    """__forceinline__'d methods can cause 'symbol multiply defined' errors in HIP.
     Adding 'static' to all such methods leads to compilation errors, so
     replacing '__forceinline__' with 'inline' as a workaround
     https://github.com/ROCm-Developer-Tools/HIP/blob/master/docs/markdown/hip_faq.md#what-if-hip-generates-error-of-symbol-multiply-defined-only-on-amd-machine
@@ -484,6 +484,10 @@ def replace_math_functions(input_string):
     output_string = re.sub("std::exp\(", "::exp(", output_string)
     output_string = re.sub("std::log\(", "::log(", output_string)
     output_string = re.sub("std::pow\(", "::pow(", output_string)
+    output_string = re.sub("std::min\(", "::min(", output_string)
+    output_string = re.sub("std::max\(", "::max(", output_string)
+    output_string = re.sub("std::ceil\(", "::ceil(", output_string)
+    output_string = re.sub("std::floor\(", "::floor(", output_string)
     return output_string
 
 
