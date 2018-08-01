@@ -12,7 +12,7 @@ void THNN_(GatedLinear_updateOutput)(
 
   // size output to half of input
   dim = dim - TH_INDEX_BASE;
-  const int64_t nIn = THCTensor_(size)(state, input, dim);
+  const int64_t nIn = THCTensor_(sizeLegacyNoScalars)(state, input, dim);
   THArgCheck(nIn % 2 == 0, 2, "Halving dimension must be even. Dim %d is size %ld",
       dim + TH_INDEX_BASE, nIn);
   const int64_t inputSize = THCTensor_(size)(state, input, dim) / 2;
