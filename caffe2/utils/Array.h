@@ -38,10 +38,10 @@
 
 #pragma once
 
-#include <utility>
+#include <ATen/core/C++17.h>
 #include <stdexcept>
 #include <string>
-#include "caffe2/utils/C++17.h"
+#include <utility>
 
 namespace c10 { namespace guts {
 
