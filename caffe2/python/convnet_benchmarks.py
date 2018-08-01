@@ -59,12 +59,11 @@ pass.
 """
 
 import argparse
-import os
 
-from caffe2.python import workspace, brew, model_helper, core
-from caffe2.proto import caffe2_pb2
+from caffe2.python import workspace, brew, model_helper
 
-def MLP(order, cudnn_ws, model_path=""):
+
+def MLP(order, cudnn_ws):
     model = model_helper.ModelHelper(name="MLP")
     d = 256
     depth = 20
@@ -99,7 +98,7 @@ def MLP(order, cudnn_ws, model_path=""):
     return model, d
 
 
-def AlexNet(order, cudnn_ws, model_path=""):
+def AlexNet(order, cudnn_ws):
     my_arg_scope = {
         'order': order,
         'use_cudnn': True,
@@ -192,7 +191,7 @@ def AlexNet(order, cudnn_ws, model_path=""):
     return model, 224
 
 
-def OverFeat(order, cudnn_ws, model_path=""):
+def OverFeat(order, cudnn_ws):
     my_arg_scope = {
         'order': order,
         'use_cudnn': True,
@@ -278,7 +277,7 @@ def OverFeat(order, cudnn_ws, model_path=""):
     return model, 231
 
 
-def VGGA(order, cudnn_ws, model_path=""):
+def VGGA(order, cudnn_ws):
     my_arg_scope = {
         'order': order,
         'use_cudnn': True,
@@ -476,7 +475,7 @@ def _InceptionModule(
     return output
 
 
-def Inception(order, cudnn_ws, model_path=""):
+def Inception(order, cudnn_ws):
     my_arg_scope = {
         'order': order,
         'use_cudnn': True,
@@ -563,84 +562,6 @@ def Inception(order, cudnn_ws, model_path=""):
     model.net.AveragedLoss(xent, "loss")
     return model, 224
 
-def Resnet50(order, cudnn_ws, model_path=""):
-    if model_path == "":
-        print("ERROR: please specify paths to init_net and predict_net protobufs for Resnet50")
-        exit(1)
-    device_opts = caffe2_pb2.DeviceOption()
-    device_opts.device_type = caffe2_pb2.HIP
-    device_opts.hip_gpu_id = 0
-
-    INIT_NET_PB = os.path.join(model_path, "init_net.pb")
-    PREDICT_NET_PB = os.path.join(model_path, "predict_net.pb")
-    init_def = caffe2_pb2.NetDef()
-    with open(INIT_NET_PB, 'rb') as f:
-        init_def.ParseFromString(f.read())
-        init_def.device_option.CopyFrom(device_opts)
-
-    net_def = caffe2_pb2.NetDef()
-    with open(PREDICT_NET_PB, 'rb') as f:
-        net_def.ParseFromString(f.read())
-        net_def.device_option.CopyFrom(device_opts)
-
-    init_net = core.Net(init_def)
-    predict_net = core.Net(net_def)
-    for op in init_net.Proto().op:
-        op.device_option.CopyFrom(device_opts)
-    for op in predict_net.Proto().op:
-        op.device_option.CopyFrom(device_opts)
-    my_arg_scope = {
-        'order': order,
-    }
-    model = model_helper.ModelHelper(
-        name="resnet50",
-        arg_scope=my_arg_scope,
-    )
-
-    model.param_init_net = init_net
-    model.net = predict_net
-    xent = model.net.LabelCrossEntropy(["gpu_0/softmax", "label"], "xent")
-    model.net.AveragedLoss(xent, "loss")
-    return model, 224
-
-def Inception_v2(order, cudnn_ws, model_path=""):
-    if model_path == "":
-        print("ERROR: please specify paths to init_net and predict_net protobufs for Inception_v2")
-        exit(1)
-    device_opts = caffe2_pb2.DeviceOption()
-    device_opts.device_type = caffe2_pb2.HIP
-    device_opts.hip_gpu_id = 0
-
-    INIT_NET_PB = os.path.join(model_path, "init_net.pb")
-    PREDICT_NET_PB = os.path.join(model_path, "predict_net.pb")
-    init_def = caffe2_pb2.NetDef()
-    with open(INIT_NET_PB, 'rb') as f:
-        init_def.ParseFromString(f.read())
-        init_def.device_option.CopyFrom(device_opts)
-
-    net_def = caffe2_pb2.NetDef()
-    with open(PREDICT_NET_PB, 'rb') as f:
-        net_def.ParseFromString(f.read())
-        net_def.device_option.CopyFrom(device_opts)
-
-    init_net = core.Net(init_def)
-    predict_net = core.Net(net_def)
-
-    my_arg_scope = {
-        'order': order,
-    }
-
-    model = model_helper.ModelHelper(
-        name="GoogleNet",
-        arg_scope=my_arg_scope,
-    )
-
-    model.param_init_net = init_net
-    model.net = predict_net
-    xent = model.net.LabelCrossEntropy(["prob", "label"], "xent")
-    model.net.AveragedLoss(xent, "loss")
-    return model, 224
-
 
 def AddParameterUpdate(model):
     """ Simple plain SGD update -- not tuned to actually train the models """
@@ -654,7 +575,7 @@ def AddParameterUpdate(model):
 
 
 def Benchmark(model_gen, arg):
-    model, input_size = model_gen(arg.order, arg.cudnn_ws, arg.model_path)
+    model, input_size = model_gen(arg.order, arg.cudnn_ws)
     model.Proto().type = arg.net_type
     model.Proto().num_workers = arg.num_workers
 
@@ -669,7 +590,7 @@ def Benchmark(model_gen, arg):
 
     model.param_init_net.GaussianFill(
         [],
-        "gpu_0/data" if arg.model == "Resnet50" else "data",
+        "data",
         shape=input_shape,
         mean=0.0,
         std=1.0
@@ -780,7 +701,6 @@ def GetArgumentParser():
     parser.add_argument("--num_workers", type=int, default=2)
     parser.add_argument("--use-nvtx", default=False, action='store_true')
     parser.add_argument("--htrace_span_log_path", type=str)
-    parser.add_argument("--model_path", type=str, default="", help="set path to init net and predict_net protobufs")
     return parser
 
 
@@ -803,8 +723,5 @@ if __name__ == '__main__':
             'VGGA': VGGA,
             'Inception': Inception,
             'MLP': MLP,
-            'Resnet50': Resnet50,
-            'Inception_v2':Inception_v2
-
         }
         Benchmark(model_map[args.model], args)
