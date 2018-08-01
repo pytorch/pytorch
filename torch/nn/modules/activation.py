@@ -322,6 +322,9 @@ class CELU(Module):
         >>> m = nn.CELU()
         >>> input = torch.randn(2)
         >>> output = m(input)
+
+    .. _`Continuously Differentiable Exponential Linear Units`:
+        https://arxiv.org/abs/1704.07483
     """
 
     def __init__(self, alpha=1., inplace=False):
