@@ -788,17 +788,19 @@ Tensor grid_sampler_2d_cuda(const Tensor& input, const Tensor& grid,
   auto H = grid.size(1);
   auto W = grid.size(2);
   auto output = at::empty({N, input.size(1), H, W}, input.options());
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "grid_sampler_2d_cuda", [&] {
-    int count = static_cast<int>(N * H * W);
-    grid_sampler_2d_kernel<scalar_t>
-      <<<GET_BLOCKS(count), CUDA_NUM_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
-        count,
-        getTensorInfo<scalar_t, int>(input),
-        getTensorInfo<scalar_t, int>(grid),
-        getTensorInfo<scalar_t, int>(output),
-        static_cast<GridSamplerInterpolation>(interpolation_mode),
-        static_cast<GridSamplerPadding>(padding_mode));
-  });
+  int count = static_cast<int>(N * H * W);
+  if (count > 0) {
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "grid_sampler_2d_cuda", [&] {
+      grid_sampler_2d_kernel<scalar_t>
+        <<<GET_BLOCKS(count), CUDA_NUM_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
+          count,
+          getTensorInfo<scalar_t, int>(input),
+          getTensorInfo<scalar_t, int>(grid),
+          getTensorInfo<scalar_t, int>(output),
+          static_cast<GridSamplerInterpolation>(interpolation_mode),
+          static_cast<GridSamplerPadding>(padding_mode));
+    });
+  }
   return output;
 }
 
@@ -811,16 +813,18 @@ Tensor grid_sampler_3d_cuda(const Tensor& input, const Tensor& grid,
   auto W = grid.size(3);
   auto output = at::empty({N, input.size(1), D, H, W}, input.options());
   int count = static_cast<int>(N * D * H * W);
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "grid_sampler_2d_cuda", [&] {
-    grid_sampler_3d_kernel<scalar_t>
-      <<<GET_BLOCKS(count), CUDA_NUM_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
-        count,
-        getTensorInfo<scalar_t, int>(input),
-        getTensorInfo<scalar_t, int>(grid),
-        getTensorInfo<scalar_t, int>(output),
-        static_cast<GridSamplerInterpolation>(interpolation_mode),
-        static_cast<GridSamplerPadding>(padding_mode));
-  });
+  if (count > 0) {
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "grid_sampler_2d_cuda", [&] {
+      grid_sampler_3d_kernel<scalar_t>
+        <<<GET_BLOCKS(count), CUDA_NUM_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
+          count,
+          getTensorInfo<scalar_t, int>(input),
+          getTensorInfo<scalar_t, int>(grid),
+          getTensorInfo<scalar_t, int>(output),
+          static_cast<GridSamplerInterpolation>(interpolation_mode),
+          static_cast<GridSamplerPadding>(padding_mode));
+    });
+  }
   return output;
 }
 
@@ -834,18 +838,20 @@ grid_sampler_2d_backward_cuda(const Tensor& grad_output, const Tensor& input, co
   auto grad_input = at::zeros_like(input);
   auto grad_grid = at::empty_like(grid);
   int count = static_cast<int>(N * H * W);
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "grid_sampler_2d_backward_cuda", [&] {
-    grid_sampler_2d_backward_kernel<scalar_t>
-      <<<GET_BLOCKS(count), CUDA_NUM_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
-        count,
-        getTensorInfo<scalar_t, int>(grad_output),
-        getTensorInfo<scalar_t, int>(input),
-        getTensorInfo<scalar_t, int>(grid),
-        getTensorInfo<scalar_t, int>(grad_input),
-        getTensorInfo<scalar_t, int>(grad_grid),
-        static_cast<GridSamplerInterpolation>(interpolation_mode),
-        static_cast<GridSamplerPadding>(padding_mode));
-  });
+  if (count > 0) {
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "grid_sampler_2d_backward_cuda", [&] {
+      grid_sampler_2d_backward_kernel<scalar_t>
+        <<<GET_BLOCKS(count), CUDA_NUM_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
+          count,
+          getTensorInfo<scalar_t, int>(grad_output),
+          getTensorInfo<scalar_t, int>(input),
+          getTensorInfo<scalar_t, int>(grid),
+          getTensorInfo<scalar_t, int>(grad_input),
+          getTensorInfo<scalar_t, int>(grad_grid),
+          static_cast<GridSamplerInterpolation>(interpolation_mode),
+          static_cast<GridSamplerPadding>(padding_mode));
+    });
+  }
   return std::make_tuple(grad_input, grad_grid);
 }
 
@@ -860,18 +866,20 @@ grid_sampler_3d_backward_cuda(const Tensor& grad_output, const Tensor& input, co
   auto grad_input = at::zeros_like(input);
   auto grad_grid = at::empty_like(grid);
   int count = static_cast<int>(N * D * H * W);
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "grid_sampler_3d_backward_cuda", [&] {
-    grid_sampler_3d_backward_kernel<scalar_t>
-      <<<GET_BLOCKS(count), CUDA_NUM_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
-        count,
-        getTensorInfo<scalar_t, int>(grad_output),
-        getTensorInfo<scalar_t, int>(input),
-        getTensorInfo<scalar_t, int>(grid),
-        getTensorInfo<scalar_t, int>(grad_input),
-        getTensorInfo<scalar_t, int>(grad_grid),
-        static_cast<GridSamplerInterpolation>(interpolation_mode),
-        static_cast<GridSamplerPadding>(padding_mode));
-  });
+  if (count > 0) {
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "grid_sampler_3d_backward_cuda", [&] {
+      grid_sampler_3d_backward_kernel<scalar_t>
+        <<<GET_BLOCKS(count), CUDA_NUM_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
+          count,
+          getTensorInfo<scalar_t, int>(grad_output),
+          getTensorInfo<scalar_t, int>(input),
+          getTensorInfo<scalar_t, int>(grid),
+          getTensorInfo<scalar_t, int>(grad_input),
+          getTensorInfo<scalar_t, int>(grad_grid),
+          static_cast<GridSamplerInterpolation>(interpolation_mode),
+          static_cast<GridSamplerPadding>(padding_mode));
+    });
+  }
   return std::make_tuple(grad_input, grad_grid);
 }
 

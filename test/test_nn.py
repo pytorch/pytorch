@@ -4945,6 +4945,9 @@ class TestNN(NNTestCase):
             W = random.randint(2, IW)
             test_shape(N, C, IH, IW, H, W, mode, padding_mode)
 
+            # testing empty grid
+            test_shape(N, C, IH, IW, 0, W, mode, padding_mode)
+
         for mode in ('bilinear', 'nearest'):
             for padding_mode in ('zeros', 'border', 'reflection'):
 
@@ -5064,6 +5067,9 @@ class TestNN(NNTestCase):
             H = random.randint(2, IH)
             W = random.randint(2, IW)
             test_shape(N, C, ID, IH, IW, D, H, W, mode, padding_mode)
+
+            # testing empty grid
+            test_shape(N, C, ID, IH, IW, D, 0, W, mode, padding_mode)
 
         for mode in ('bilinear', 'nearest'):
             for padding_mode in ('zeros', 'border', 'reflection'):
