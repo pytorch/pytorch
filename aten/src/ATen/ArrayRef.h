@@ -17,6 +17,7 @@
 
 #include <ATen/Error.h>
 #include <ATen/SmallVector.h>
+#include <ATen/core/C++17.h>
 
 #include <array>
 #include <iterator>
