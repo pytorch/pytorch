@@ -463,7 +463,7 @@ inline TypePtr TensorType::fromNumberType(TypePtr typ) {
 
 template <typename T>
 TypePtr getTypePtr() {
-#define TYPE_STR(Type) #Type,
+#define TYPE_STR(Type) #Type, " ",
   AT_ERROR(
       "Type ",
       at::demangle_type<T>(),
@@ -477,6 +477,7 @@ template<> inline TypePtr getTypePtr<at::Tensor>() { return DynamicType::get(); 
 template<> inline TypePtr getTypePtr<double>() { return FloatType::get(); }
 template<> inline TypePtr getTypePtr<int64_t>() { return IntType::get(); }
 template<> inline TypePtr getTypePtr<bool>() { return IntType::get(); }
+template<> inline TypePtr getTypePtr<at::Scalar>() { return NumberType::get(); }
 template<> inline TypePtr getTypePtr<std::vector<at::Tensor>>() { return ListType::ofTensors(); }
 template<> inline TypePtr getTypePtr<std::vector<double>>() { return ListType::ofFloats(); }
 template<> inline TypePtr getTypePtr<std::vector<int64_t>>() { return ListType::ofInts(); }

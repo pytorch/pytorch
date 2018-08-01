@@ -159,7 +159,7 @@ FunctionSchema inferAndCheckSchema(const std::string& schemaOrName) {
 ///
 /// Example invocation:
 /// ```
-/// registerOperator(
+/// createOperator(
 ///    parseSchema("foo::bar(float a, Tensor b)"),
 ///    [](float a, at::Tensor b) { return a + b; });
 /// ```
