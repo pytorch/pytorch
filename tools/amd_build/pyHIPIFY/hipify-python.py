@@ -463,12 +463,12 @@ def find_closure_group(input_string, start, group):
 
 def find_bracket_group(input_string, start):
     """Finds the first balanced parantheses."""
-    return find_closure_group(input_string, start, group=["(", ")"])
+    return find_closure_group(input_string, start, group=["{", "}"])
 
 
 def find_paranthesis_group(input_string, start):
     """Finds the first balanced bracket."""
-    return find_closure_group(input_string, start, group=["{", "}"])
+    return find_closure_group(input_string, start, group=["(", ")"])
 
 
 def disable_asserts(input_string):
