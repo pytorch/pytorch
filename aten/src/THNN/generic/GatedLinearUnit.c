@@ -10,7 +10,7 @@ void THNN_(GatedLinear_updateOutput)(
 {
   // size output to half of input
   dim = dim - TH_INDEX_BASE;
-  const int64_t nIn = THTensor_(size)(input, dim);
+  const int64_t nIn = THTensor_sizeLegacyNoScalars(input, dim);
   THArgCheck(nIn % 2 == 0, 2, "Halving dimension must be even. Dim %d is size %ld",
       dim + TH_INDEX_BASE, nIn);
 

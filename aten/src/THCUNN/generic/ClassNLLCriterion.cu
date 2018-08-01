@@ -16,7 +16,7 @@ void THNN_(ClassNLLCriterion_updateOutput)(
   }
 
   int n_dims = THCTensor_(nDimensionLegacyNoScalars)(state, input);
-  int n_classes = THCTensor_(size)(state, input, n_dims - 1);
+  int n_classes = THCTensor_(sizeLegacyNoScalars)(state, input, n_dims - 1);
   ignore_index -= TH_INDEX_BASE;
 
   if (weights) {
@@ -31,8 +31,8 @@ void THNN_(ClassNLLCriterion_updateOutput)(
 
   THArgCheck(!input->is_empty() && (n_dims <= 2 && n_dims > 0), 2, "non-empty vector or matrix expected");
 
-  int64_t batch_size = n_dims == 1 ? 1 : THCTensor_(size)(state, input, 0);
-  int64_t num_targets = THCudaLongTensor_size(state, target, 0);
+  int64_t batch_size = n_dims == 1 ? 1 : THCTensor_(sizeLegacyNoScalars)(state, input, 0);
+  int64_t num_targets = THCudaLongTensor_sizeLegacyNoScalars(state, target, 0);
   THArgCheck(batch_size == num_targets,
       2, "mismatch between the batch size of input (%ld) and that of target (%ld)",
       batch_size, num_targets);
@@ -152,7 +152,7 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
   THArgCheck(!input->is_empty() && (n_dims <= 2 && n_dims > 0), 2, "non-empty vector or matrix expected");
 
   int64_t batch_size = n_dims == 1 ? 1 : THCTensor_(size)(state, input, 0);
-  int64_t num_targets = THCudaLongTensor_size(state, target, 0);
+  int64_t num_targets = THCudaLongTensor_sizeLegacyNoScalars(state, target, 0);
   THArgCheck(batch_size == num_targets,
       2, "mismatch between the batch size of input (%ld) and that of target (%ld)",
       batch_size, num_targets);
