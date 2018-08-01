@@ -355,12 +355,15 @@ at::optional<std::vector<int64_t>> getIntListAttribute(at::optional<int32_t> N, 
   auto list = constant_as<Shared<jit::IntList>>(input);
   if(list)
     return std::vector<int64_t>(list.value()->elements());
+
   // broadcast IntList[3] with value 4 -> {4, 4, 4}
   if(!N)
     return at::nullopt;
+
   auto r = constant_as<int64_t>(input);
   if(!r)
     return at::nullopt;
+
   // broadcast to attribute size
   return std::vector<int64_t>(*N, *r);
 }
@@ -487,7 +490,7 @@ static std::shared_ptr<SugaredValue> tryEmitBuiltin(
   at::ArrayRef<NamedValue> attributes) {
 
   auto graph = method.graph();
-  auto matched_inputs = tryMatchSchema(op->schema, loc, *graph, inputs, attributes, failure_messages);
+  auto matched_inputs = tryMatchSchema(op->schema(), loc, *graph, inputs, attributes, failure_messages);
   if(!matched_inputs)
     return nullptr;
   // we successfully matched this schema, construct the node
@@ -507,7 +510,7 @@ static std::shared_ptr<SugaredValue> tryEmitBuiltin(
     for(int64_t i = 0; i < *value; ++i)
       n->addOutput();
   } else {
-    for(auto & ret : op->schema.returns) {
+    for(auto & ret : op->schema().returns) {
       n->addOutput()->setType(ret.type);
     }
   }
