@@ -15,9 +15,9 @@ const int WARP_SIZE = 32;
 
 // The maximum number of threads in a block
 #if defined(__HIP_PLATFORM_HCC__)
-const int MAX_BLOCK_SIZE = 512;
-#else
 const int MAX_BLOCK_SIZE = 256;
+#else
+const int MAX_BLOCK_SIZE = 512;
 #endif
 
 // Number of threads in a block given an input size up to MAX_BLOCK_SIZE
