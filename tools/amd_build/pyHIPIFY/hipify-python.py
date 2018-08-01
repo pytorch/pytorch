@@ -492,6 +492,18 @@ def replace_forceinline(input_string):
     return output_string
 
 
+def replace_math_functions(input_string):
+    """ FIXME: Temporarily replace std:: invocations of math functions with non-std:: versions to prevent linker errors
+        NOTE: This can lead to correctness issues when running tests, since the correct version of the math function (exp/expf) might not get called.
+        Plan is to remove this function once HIP supports std:: math function calls inside device code
+    """
+    output_string = input_string
+    output_string = re.sub("std::exp\(", "::exp(", output_string)
+    output_string = re.sub("std::log\(", "::log(", output_string)
+    output_string = re.sub("std::pow\(", "::pow(", output_string)
+    return output_string
+
+
 def replace_extern_shared(input_string):
     """Match extern __shared__ type foo[]; syntax and use HIP_DYNAMIC_SHARED() MACRO instead.
        https://github.com/ROCm-Developer-Tools/HIP/blob/master/docs/markdown/hip_kernel_language.md#__shared__
@@ -713,6 +725,9 @@ def preprocessor(filepath, stats, hipify_caffe2):
         # Disable asserts
         if not filepath.endswith("THCGeneral.h.in"):
             output_source = disable_asserts(output_source)
+
+        # Replace std:: with non-std:: versions
+        output_source = replace_math_functions(output_source)
 
         # Replace std:: with non-std:: versions
         output_source = transpile_device_math(output_source)
