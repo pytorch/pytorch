@@ -17,7 +17,9 @@ namespace at {
 
 namespace detail {
 
-inline std::ostream& _str(std::ostream& ss) { return ss; }
+inline std::ostream& _str(std::ostream& ss) {
+  return ss;
+}
 
 template <typename T>
 inline std::ostream& _str(std::ostream& ss, const T& t) {
@@ -26,8 +28,7 @@ inline std::ostream& _str(std::ostream& ss, const T& t) {
 }
 
 template <typename T, typename... Args>
-inline std::ostream&
-_str(std::ostream& ss, const T& t, const Args&... args) {
+inline std::ostream& _str(std::ostream& ss, const T& t, const Args&... args) {
   return _str(_str(ss, t), args...);
 }
 
@@ -70,7 +71,7 @@ class AT_CORE_API Error : public std::exception {
   std::string what_without_backtrace_;
   std::string what_;
 
-public:
+ public:
   Error(SourceLocation source_location, std::string err);
 
   /// Returns the complete error message, including the source location.
@@ -85,9 +86,10 @@ public:
 };
 
 class AT_CORE_API Warning {
-  using handler_t = void(*)(const SourceLocation& source_location, const char* msg);
+  using handler_t =
+      void (*)(const SourceLocation& source_location, const char* msg);
 
-public:
+ public:
   /// Issue a warning with a given message. Dispatched to the current
   /// warning handler.
   static void warn(SourceLocation source_location, std::string msg);
@@ -97,16 +99,18 @@ public:
   static void set_warning_handler(handler_t handler);
 
   /// The default warning handler. Prints the message to stderr.
-  static void print_warning(const SourceLocation& source_location, const char* msg);
+  static void print_warning(
+      const SourceLocation& source_location,
+      const char* msg);
 
-private:
+ private:
   static handler_t warning_handler_;
 };
 
-
 } // namespace at
 
-// TODO: variants that print the expression tested and thus don't require strings
+// TODO: variants that print the expression tested and thus don't require
+// strings
 // TODO: CAFFE_ENFORCE_WITH_CALLER style macro
 
 #define AT_ERROR(...) \
@@ -115,17 +119,29 @@ private:
 #define AT_WARN(...) \
   at::Warning::warn({__func__, __FILE__, __LINE__}, at::str(__VA_ARGS__))
 
-#define AT_ASSERT(cond) \
-  if (!(cond)) {             \
-    AT_ERROR(#cond " ASSERT FAILED at ", __FILE__, ":", __LINE__, ", please report a bug to PyTorch.");   \
+#define AT_ASSERT(cond)                       \
+  if (!(cond)) {                              \
+    AT_ERROR(                                 \
+        #cond " ASSERT FAILED at ",           \
+        __FILE__,                             \
+        ":",                                  \
+        __LINE__,                             \
+        ", please report a bug to PyTorch."); \
   }
 
-#define AT_ASSERTM(cond, ...) \
-  if (!(cond)) {             \
-    AT_ERROR(at::str(#cond, " ASSERT FAILED at ", __FILE__, ":", __LINE__, ", please report a bug to PyTorch. ", __VA_ARGS__));   \
+#define AT_ASSERTM(cond, ...)                 \
+  if (!(cond)) {                              \
+    AT_ERROR(at::str(                         \
+        #cond,                                \
+        " ASSERT FAILED at ",                 \
+        __FILE__,                             \
+        ":",                                  \
+        __LINE__,                             \
+        ", please report a bug to PyTorch. ", \
+        __VA_ARGS__));                        \
   }
 
-#define AT_CHECK(cond, ...) \
-  if (!(cond)) {             \
-    AT_ERROR(at::str(__VA_ARGS__));   \
+#define AT_CHECK(cond, ...)         \
+  if (!(cond)) {                    \
+    AT_ERROR(at::str(__VA_ARGS__)); \
   }
