@@ -241,6 +241,11 @@ SparseTensor& sparse_resize_(SparseTensor& self, ArrayRef<int64_t> size, int64_t
   return self;
 }
 
+SparseTensor& sparse_resize_and_clear_(SparseTensor& self, ArrayRef<int64_t> size, int64_t sparseDims, int64_t denseDims) {
+  _get_sparse_impl(self)->resize_and_clear_(sparseDims, denseDims, size);
+  return self;
+}
+
 namespace {
   bool _is_same_size_as_sparse(const SparseTensor& self, const SparseTensor& src) {
     return self._sparseDims() == src._sparseDims() && self._denseDims() == src._denseDims() && self.sizes().equals(src.sizes());

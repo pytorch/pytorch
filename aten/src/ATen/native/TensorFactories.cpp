@@ -13,7 +13,6 @@
 #include "ATen/ScalarType.h"
 #include "ATen/Deprecated.h"
 #include "ATen/TensorOptions.h"
-#include "ATen/native/sparse/SparseUtils.h"
 #include "TH/THRandom.h"
 
 #include <algorithm>
@@ -87,8 +86,7 @@ Tensor empty(IntList size, const TensorOptions& options) {
 
 Tensor& empty_out(Tensor& result, IntList size) {
   if (result.is_sparse()) {
-    std::cout << "size: " << size << "\n";
-    _get_sparse_impl(result)->resize_and_clear_(size.size(), 0, size);
+    result.sparse_resize_and_clear_(size, size.size(), 0);
   } else {
     result.resize_(size);
   }
@@ -119,7 +117,7 @@ Tensor empty_like(const Tensor& self) {
 Tensor empty_like(const Tensor& self, const TensorOptions& options) {
   if (options.layout() == kSparse && self.type().is_sparse()) {
     auto res = options.type().tensor();
-    _get_sparse_impl(res)->resize_and_clear_(self._sparseDims(), self._denseDims(), self.sizes());
+    res.sparse_resize_and_clear_(self.sizes(), self._sparseDims(), self._denseDims());
 
     return res;
   }
@@ -474,7 +472,7 @@ Tensor zeros(IntList size, const TensorOptions& options) {
 
 Tensor& zeros_out(Tensor& result, IntList size) {
   if (result.is_sparse()) {
-    _get_sparse_impl(result)->resize_and_clear_(size.size(), 0, size);
+    result.sparse_resize_and_clear_(size, size.size(), 0);
     return result;
   } else {
     result.resize_(size);
@@ -489,7 +487,7 @@ Tensor zeros_like(const Tensor& self) {
 Tensor zeros_like(const Tensor& self, const TensorOptions& options) {
   if (options.layout() == kSparse && self.type().is_sparse()) {
     auto res = options.type().tensor();
-    _get_sparse_impl(res)->resize_and_clear_(self._sparseDims(), self._denseDims(), self.sizes());
+    res.sparse_resize_and_clear_(self.sizes(), self._sparseDims(), self._denseDims());
     return res;
   }
   return native::zeros(self.sizes(), options);
