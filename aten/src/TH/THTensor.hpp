@@ -56,6 +56,10 @@ struct THTensor
       return sizes_.size();
     }
 
+    at::ScalarType scalar_type() const {
+      return storage_->scalar_type;
+    }
+
     ptrdiff_t storage_offset() const {
       return storage_offset_;
     }
