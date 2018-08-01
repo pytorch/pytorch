@@ -82,7 +82,7 @@ void THNN_(ClassNLLCriterion_updateOutput)(
     }
   } else if (THTensor_(nDimensionLegacyAll)(input) == 2) {
     int batch_size = THTensor_(size)(input, 0);
-    THAssert(THIndexTensor_(size)(target, 0) == batch_size);
+    THAssert(THTensor_sizeLegacyNoScalars(target, 0) == batch_size);
 
     int n_target = THTensor_(size)(input, 1);
 
@@ -189,7 +189,7 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
 
   } else if (THTensor_(nDimensionLegacyAll)(input) == 2) {
     int batch_size = THTensor_(size)(input, 0);
-    THAssert(THIndexTensor_(size)(target, 0) == batch_size);
+    THAssert(THTensor_sizeLegacyNoScalars(target, 0) == batch_size);
 
     int n_target = THTensor_(size)(input, 1);
 

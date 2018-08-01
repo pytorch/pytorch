@@ -1123,6 +1123,61 @@ class TripletMarginLoss(_Loss):
         return F.triplet_margin_loss(anchor, positive, negative, margin=self.margin, p=self.p,
                                      eps=self.eps, swap=self.swap, reduction=self.reduction)
 
+
+class CTCLoss(_Loss):
+    r"""The Connectionist Temporal Classification loss.
+
+    Args:
+        blank (int, optional): blank label. Default :math:`0`.
+        reduction (string, optional): Specifies the reduction to apply to the output:
+            'none' | 'elementwise_mean' | 'sum'. 'none': no reduction will be applied,
+            'elementwise_mean': the output losses will be divided by the target lengths and
+            then the mean over the batch is taken. Default: 'elementwise_mean'
+
+    Inputs:
+        log_probs: :math:`(T, N, C)` where `C = number of characters in alphabet including blank`,
+            `T = input length`, and `N = batch size`.
+            The logarithmized probabilities of the outputs
+            (e.g. obtained with :func:`torch.nn.functional.log_softmax`).
+        targets: :math:`(N, S)` or `(sum(target_lenghts))`.
+            Targets (cannot be blank). In the second form, the targets are assumed to be concatenated.
+        input_lengths: :math:`(N)`.
+            Lengths of the inputs (must each be :math:`\leq T`)
+        target_lengths: :math:`(N)`.
+            Lengths of the targets
+
+
+    Example::
+
+        >>> ctc_loss = nn.CTCLoss()
+        >>> log_probs = torch.randn(50, 16, 20).log_softmax(2).detach().requires_grad_()
+        >>> targets = torch.randint(1, 21, (16, 30), dtype=torch.long)
+        >>> input_lengths = torch.full((16,), 50, dtype=torch.long)
+        >>> target_lengths = torch.randint(10,30,(16,), dtype=torch.long)
+        >>> loss = ctc_loss(log_probs, targets, input_lengths, target_lengths)
+        >>> loss.backward()
+
+    Reference:
+        A. Graves et al.: Connectionist Temporal Classification:
+        Labelling Unsegmented Sequence Data with Recurrent Neural Networks:
+        https://www.cs.toronto.edu/~graves/icml_2006.pdf
+
+    .. Note::
+        In order to use CuDNN, the following must be satisfied: :attr:`targets` must be
+        in concatenated format, all :attr:`input_lengths` must be `T`.  :math:`blank=0`,
+        :attr:`target_lengths` :math:`\leq 256`, the integer arguments must be of
+        :class:`torch.IntTensor`.
+
+        The regular implementation uses the (more common in PyTorch) `torch.long` dtype.
+    """
+
+    def __init__(self, blank=0, reduction='elementwise_mean'):
+        super(CTCLoss, self).__init__(reduction=reduction)
+        self.blank = blank
+
+    def forward(self, log_probs, targets, input_lengths, target_lengths):
+        return F.ctc_loss(log_probs, targets, input_lengths, target_lengths, self.blank, self.reduction)
+
 # TODO: L1HingeEmbeddingCriterion
 # TODO: MSECriterion weight
 # TODO: ClassSimplexCriterion

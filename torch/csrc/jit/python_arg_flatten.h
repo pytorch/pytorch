@@ -14,7 +14,7 @@ namespace torch { namespace jit { namespace python {
 struct IODescriptor {
   struct VariableMetadata {
     VariableMetadata(const autograd::Variable& var)
-      : sizes(var.sizes())
+      : sizes(var.sizes().vec())
       , type(var.type().scalarType())
       , device(var.type().is_cuda() ? var.get_device() : -1)
       , requires_grad(var.requires_grad()) {}

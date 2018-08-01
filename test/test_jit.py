@@ -4093,10 +4093,10 @@ def func(t):
             def unknown_builtin(x):
                 return x.splork(3)
 
-    def test_expected_tensor_found_tuple(self):
-        with self.assertRaisesRegex(RuntimeError, 'expected a tensor value but found'):
+    def test_return_tuple(self):
+        with self.assertRaisesRegex(RuntimeError, 'only supported return types'):
             @torch.jit.script
-            def return_tuple_wrong(x):
+            def return_tuple(x):
                 a = (x, x)
                 return a, x
 
@@ -4814,6 +4814,17 @@ def func(t):
             def tuple_arg(x):
                 # type: (Tuple[Tensor, Tensor]) -> Tensor
                 return x + 1
+
+    def test_script_non_tensor_args_outputs(self):
+        @torch.jit.script
+        def fn(x, y):
+            # type: (Tensor, float) -> float
+            return float((x + y).sum())
+
+        x = torch.ones(2, 2)
+        z = fn(x, 1)
+        self.assertIsInstance(z, float)
+        self.assertEqual(z, 8.)
 
     @unittest.skip('https://github.com/pytorch/pytorch/issues/9595')
     def test_inline_and_run_annotated_script_fn(self):

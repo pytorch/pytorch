@@ -683,6 +683,8 @@ public:
     return *schema_;
   }
 
+  void dump() const;
+
   virtual ~Node() = default;
 private:
   std::pair<Value*, const Argument&> findInput(Symbol name);

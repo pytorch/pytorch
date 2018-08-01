@@ -149,15 +149,8 @@ void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, int dim, THLongTens
   int64_t *index_data;
   real *tensor_data, *src_data;
 
-#ifndef USE_TH_SIZE_ZERO_DIM
-  THArgCheck(THTensor_nDimensionLegacyAll(index) <= 1, 3, "Index is supposed to be an empty tensor or a vector");
-  THArgCheck(dim < THTensor_nDimensionLegacyAll(src), 4, "Indexing dim %d is out of bounds of tensor", dim + TH_INDEX_BASE);
-  THArgCheck(THTensor_nDimensionLegacyAll(src) > 0, 2, "Source tensor is empty");
-#else
-  THArgCheck(index->dim() == 1, 3, "Index is supposed to be 1-dimensional");
-  THArgCheck(dim < src->dim(), 4, "Indexing dim %d is out of bounds of tensor", dim + TH_INDEX_BASE);
-  //THArgCheck(src->dim() > 0, 2, "Source tensor is empty");
-#endif
+  THArgCheck(THTensor_nDimensionLegacyNoScalars(index) == 1, 3, "Index is supposed to be 1-dimensional");
+  THArgCheck(dim < THTensor_nDimensionLegacyNoScalars(src), 4, "Indexing dim %d is out of bounds of tensor", dim + TH_INDEX_BASE);
 
   numel = THLongTensor_nElement(index);
 
@@ -188,7 +181,7 @@ void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, int dim, THLongTens
       }
     }
 
-    if (src->dim() == 1) {
+    if (src->dim() <= 1) {
       #pragma omp parallel for if(numel > TH_OMP_OVERHEAD_THRESHOLD) private(i)
       for (i=0; i<numel; i++)
         tensor_data[i] = src_data[index_data[i] - TH_INDEX_BASE];
@@ -198,7 +191,7 @@ void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, int dim, THLongTens
         memcpy(tensor_data + i*rowsize, src_data + (index_data[i] - TH_INDEX_BASE)*rowsize, rowsize*sizeof(real));
     }
   }
-  else if (src->dim() == 1)
+  else if (src->dim() <= 1)
   {
     for (i=0; i<numel; i++)
       THTensor_(set1d)(tensor,i,THTensor_(get1d)(src,index_data[i] - TH_INDEX_BASE));
@@ -354,14 +347,9 @@ void THTensor_(indexAdd)(THTensor *tensor, int dim, THLongTensor *index, THTenso
   int64_t *index_data;
 
   numel = THLongTensor_nElement(index);
-#ifndef USE_TH_SIZE_ZERO_DIM
-  THArgCheck(THTensor_nDimensionLegacyAll(index) == 1, 3, "Index is supposed to be a vector");
-  THArgCheck(dim < THTensor_nDimensionLegacyAll(src), 4,"Indexing dim %d is out of bounds of tensor", dim + TH_INDEX_BASE);
-#else
-  THArgCheck(index->dim() == 1, 3, "Index is supposed to be a vector");
-  THArgCheck(dim < src->dim(), 4,"Indexing dim %d is out of bounds of tensor", dim + TH_INDEX_BASE);
-#endif
-  THArgCheck(numel == src->size(dim),4,"Number of indices should be equal to source:size(dim)");
+  THArgCheck(THTensor_nDimensionLegacyNoScalars(index) == 1, 3, "Index is supposed to be a vector");
+  THArgCheck(dim < THTensor_nDimensionLegacyNoScalars(src), 4,"Indexing dim %d is out of bounds of tensor", dim + TH_INDEX_BASE);
+  THArgCheck(numel == THTensor_sizeLegacyNoScalars(src, dim),4,"Number of indices should be equal to source:size(dim)");
 
   index = THLongTensor_newContiguous(index);
   index_data = THLongTensor_data(index);
@@ -400,13 +388,8 @@ void THTensor_(indexFill)(THTensor *tensor, int dim, THLongTensor *index, real v
   int64_t *index_data;
 
   numel = THLongTensor_nElement(index);
-#ifndef USE_TH_SIZE_ZERO_DIM
-  THArgCheck(THTensor_nDimensionLegacyAll(index) == 1, 3, "Index is supposed to be a vector");
-  THArgCheck(dim < THTensor_nDimensionLegacyAll(tensor), 4,"Indexing dim %d is out of bounds of tensor", dim + TH_INDEX_BASE);
-#else
-  THArgCheck(index->dim() == 1, 3, "Index is supposed to be a vector");
-  THArgCheck(dim < tensor->dim(), 4,"Indexing dim %d is out of bounds of tensor", dim + TH_INDEX_BASE);
-#endif
+  THArgCheck(THTensor_nDimensionLegacyNoScalars(index) == 1, 3, "Index is supposed to be a vector");
+  THArgCheck(dim < THTensor_nDimensionLegacyNoScalars(tensor), 4,"Indexing dim %d is out of bounds of tensor", dim + TH_INDEX_BASE);
 
   index = THLongTensor_newContiguous(index);
   index_data = THLongTensor_data(index);
@@ -459,19 +442,11 @@ void THTensor_(scatter)(THTensor *tensor, int dim, THLongTensor *index, THTensor
 {
   int64_t elems_per_row, i, idx;
 
-#ifndef USE_TH_SIZE_ZERO_DIM
-  THArgCheck(dim < THTensor_(nDimensionLegacyAll)(tensor), 2, "Index dimension is out of bounds");
-  THArgCheck(THLongTensor_nDimensionLegacyAll(index) == THTensor_(nDimensionLegacyAll)(tensor), 3,
-             "Index tensor must have same dimensions as output tensor");
-  THArgCheck(THTensor_(nDimensionLegacyAll)(src) == THTensor_(nDimensionLegacyAll)(tensor), 4,
-             "Input tensor must have same dimensions as output tensor");
-#else
   THArgCheck(dim < THTensor_(nDimensionLegacyNoScalars)(tensor), 2, "Index dimension is out of bounds");
   THArgCheck(THLongTensor_nDimensionLegacyNoScalars(index) == THTensor_(nDimensionLegacyNoScalars)(tensor), 3,
              "Index tensor must have same dimensions as output tensor");
   THArgCheck(THTensor_(nDimensionLegacyNoScalars)(src) == THTensor_(nDimensionLegacyNoScalars)(tensor), 4,
              "Input tensor must have same dimensions as output tensor");
-#endif
 
   elems_per_row = THLongTensor_size(index, dim);
 

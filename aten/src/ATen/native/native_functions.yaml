@@ -29,6 +29,11 @@
 - func: _cast_Half(Tensor self, bool non_blocking=false) -> Tensor
   variants: function, method
 
+- func: _cudnn_ctc_loss(Tensor log_probs, Tensor targets, IntList input_lengths, IntList target_lengths, int64_t blank, bool deterministic) -> (Tensor, Tensor)
+  variants: function
+  dispatch:
+    CUDA: _cudnn_ctc_loss
+
 - func: _cudnn_rnn_flatten_weight(TensorList weight_arr, int64_t weight_stride0, int64_t input_size, int64_t mode, int64_t hidden_size, int64_t num_layers, bool batch_first, bool bidirectional) -> Tensor
   variants: function
   dispatch:
@@ -504,6 +509,21 @@
 - func: cumprod_out(Tensor result, Tensor self, int64_t dim) -> Tensor
   variants: function
 
+- func: ctc_loss(Tensor log_probs, Tensor targets, IntList input_lengths, IntList target_lengths, int64_t blank=0, int64_t reduction=Reduction::ElementwiseMean) -> Tensor
+  variants: function
+
+- func: _ctc_loss(Tensor log_probs, Tensor targets, IntList input_lengths, IntList target_lengths, int64_t blank=0) -> (Tensor, Tensor)
+  variants: function
+  dispatch:
+    CPU:  ctc_loss_cpu
+    CUDA: ctc_loss_gpu
+
+- func: _ctc_loss_backward(Tensor grad, Tensor log_probs, Tensor targets, IntList input_lengths, IntList target_lengths, Tensor neg_log_likelihood, Tensor log_alpha, int64_t blank) -> Tensor
+  variants: function
+  dispatch:
+    CPU: ctc_loss_backward_cpu
+    CUDA: ctc_loss_backward_gpu
+
 - func: det(Tensor self) -> Tensor
 
 - func: diagflat(Tensor self, int64_t offset=0) -> Tensor
@@ -715,8 +735,44 @@
   variants: function
   deprecated: true
 
+# NOTE [ grid_sampler Native Functions ]
+# `grid_sampler` does all the shape checking and then dispatches to one of
+# `cudnn_grid_sampler`, `grid_sampler_2d`, or `grid_sampler_3d`, each of which
+# has the corresponding backward defined as native functions as well. Therefore,
+# in these functions and their backwards, no more shape checking is done.
+#
+# Additionally, arguments `padding_mode` and `interpolation_mode` are cast to
+# enums defined in `native/GridSampler.h`. `cudnn_grid_sampler` doesn't take in
+# `interpolation_mode` because it only supports Bilinear interpolation mode.
+#
+# ssnl: Currently `interpolation_mode` is just a placeholder. It is not really
+#       used. Everywhere Bilinear is assumed. I will add Nearest soon.
 - func: grid_sampler(Tensor input, Tensor grid, int64_t padding_mode) -> Tensor
   variants: function
+
+- func: grid_sampler_2d(Tensor input, Tensor grid, int64_t interpolation_mode, int64_t padding_mode) -> Tensor
+  variants: function
+  dispatch:
+    CPU: grid_sampler_2d_cpu
+    CUDA: grid_sampler_2d_cuda
+
+- func: grid_sampler_2d_backward(Tensor grad_output, Tensor input, Tensor grid, int64_t interpolation_mode, int64_t padding_mode) -> (Tensor, Tensor)
+  variants: function
+  dispatch:
+    CPU: grid_sampler_2d_backward_cpu
+    CUDA: grid_sampler_2d_backward_cuda
+
+- func: grid_sampler_3d(Tensor input, Tensor grid, int64_t interpolation_mode, int64_t padding_mode) -> Tensor
+  variants: function
+  dispatch:
+    CPU: grid_sampler_3d_cpu
+    CUDA: grid_sampler_3d_cuda
+
+- func: grid_sampler_3d_backward(Tensor grad_output, Tensor input, Tensor grid, int64_t interpolation_mode, int64_t padding_mode) -> (Tensor, Tensor)
+  variants: function
+  dispatch:
+    CPU: grid_sampler_3d_backward_cpu
+    CUDA: grid_sampler_3d_backward_cuda
 
 - func: hann_window(int64_t window_length, TensorOptions options={}) -> Tensor
   variants: function
@@ -1268,6 +1324,12 @@
   variants: function
 
 - func: selu_(Tensor self) -> Tensor
+  variants: function
+
+- func: celu(Tensor self, Scalar alpha=1.0) -> Tensor
+  variants: function
+
+- func: celu_(Tensor self, Scalar alpha=1.0) -> Tensor
   variants: function
 
 - func: sigmoid(Tensor self) -> Tensor

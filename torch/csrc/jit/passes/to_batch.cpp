@@ -393,7 +393,7 @@ void ToBatch::visitLoop(Node* n, Block* block, Block* res_block){
     for(size_t j = 0; j < EXP_BTENSOR_SIZE; j++){
       loop_block->addInput(name + "_" + EXP_BTENSOR_NAME[j]);
     }
-    batch_map[input] = std::vector<Value*>(loop_block->inputs().slice((i - 1) * EXP_BTENSOR_SIZE + 1 + EXP_BTENSOR_SIZE * cond_is_tensor, EXP_BTENSOR_SIZE));
+    batch_map[input] = std::vector<Value*>(loop_block->inputs().slice((i - 1) * EXP_BTENSOR_SIZE + 1 + EXP_BTENSOR_SIZE * cond_is_tensor, EXP_BTENSOR_SIZE).vec());
   }
 
   toBatch(n->blocks()[0], loop_block);
@@ -450,7 +450,7 @@ void ToBatch::visitLoop(Node* n, Block* block, Block* res_block){
     for(size_t j = 1; j < EXP_BTENSOR_SIZE; j++){
       r_node->insertOutput(i * EXP_BTENSOR_SIZE + j);
     }
-    batch_map[n->outputs()[i]] = r_node->outputs().slice(i * EXP_BTENSOR_SIZE, EXP_BTENSOR_SIZE);
+    batch_map[n->outputs()[i]] = r_node->outputs().slice(i * EXP_BTENSOR_SIZE, EXP_BTENSOR_SIZE).vec();
   }
   // add cond to outputs of loop node
   if(cond_is_tensor){
@@ -474,7 +474,7 @@ void ToBatch::toBatch(Block* block, Block* res_block) {
       for(size_t j = 0; j < EXP_BTENSOR_SIZE; j++){
         res_block->addInput(name + "_" + EXP_BTENSOR_NAME[j]);
       }
-      batch_map[input] = std::vector<Value*>(res_block->inputs().slice(i * EXP_BTENSOR_SIZE, EXP_BTENSOR_SIZE));
+      batch_map[input] = std::vector<Value*>(res_block->inputs().slice(i * EXP_BTENSOR_SIZE, EXP_BTENSOR_SIZE).vec());
     }
   }
 
