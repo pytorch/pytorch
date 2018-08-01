@@ -327,9 +327,6 @@ struct Variable::Impl : public at::TensorImpl {
   /// Reset all expensive fields to free up resources
   void release_resources() override;
 
-  // Make this field public so we can access it from `Variable`.
-  using at::TensorImpl::type_;
-
   std::string name;
   at::Tensor data_;
 
