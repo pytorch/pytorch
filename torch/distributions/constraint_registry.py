@@ -164,7 +164,9 @@ def _transform_to_positive(constraint):
 
 
 @biject_to.register(constraints.greater_than)
+@biject_to.register(constraints.greater_than_eq)
 @transform_to.register(constraints.greater_than)
+@transform_to.register(constraints.greater_than_eq)
 def _transform_to_greater_than(constraint):
     return transforms.ComposeTransform([transforms.ExpTransform(),
                                         transforms.AffineTransform(constraint.lower_bound, 1)])
@@ -178,7 +180,9 @@ def _transform_to_less_than(constraint):
 
 
 @biject_to.register(constraints.interval)
+@biject_to.register(constraints.half_open_interval)
 @transform_to.register(constraints.interval)
+@transform_to.register(constraints.half_open_interval)
 def _transform_to_interval(constraint):
     # Handle the special case of the unit interval.
     lower_is_0 = isinstance(constraint.lower_bound, numbers.Number) and constraint.lower_bound == 0
