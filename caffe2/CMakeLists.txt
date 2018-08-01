@@ -282,8 +282,8 @@ if (MSVC AND NOT BUILD_SHARED_LIBS)
   # but the user doesn't have to worry about it; (2) requires the user
   # to set the macro themselves... but only if they don't use cmake.
   #
-  # So, which is appropriate in our situation?  One thing I do want
-  # to observe is that it is more common to distribute
+  # So, which is appropriate in our situation?  In my mind, here is
+  # the distinguishing factor: it is more common to distribute
   # DLLs, since they don't require you to line up the CRT version
   # (/MD, /MDd, /MT, /MTd) and MSVC version at the use site.  So,
   # if a user is already in the business of static linkage, they're
