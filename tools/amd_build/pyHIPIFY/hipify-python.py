@@ -898,8 +898,7 @@ def transpile_device_math(input_string):
     output_string = input_string
 
     # Extract device code positions
-    get_kernel_definitions = [k for k in re.finditer(r"(__global__|__device__)", input_string)]
-
+    get_kernel_definitions = [k for k in re.finditer( r"(template[ ]*<(.*)>\n.*\n?)?(__global__|__device__) void[\n| ](\w+(\(.*\))?)\(", string)]
     # Iterate through each kernel definition
     for kernel in get_kernel_definitions:
         # Find the final paranthesis that closes this kernel function definition.
