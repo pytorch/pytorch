@@ -10,8 +10,6 @@ from common_cuda import TEST_CUDA
 from test_torch import TestTorch
 from numbers import Number
 
-USE_ZERO_SIZE_DIM = torch._C._use_zero_size_dim()
-
 
 def cpu_only(inner):
     @functools.wraps(inner)
@@ -981,59 +979,32 @@ class TestSparse(TestCase):
         indices = self.IndexTensor([[1, 2], [0, 2]])
         values = self.ValueTensor([[1, 1, 1], [1, 1, 1]])
         sizes = torch.Size([3, 3, 2])
-        if USE_ZERO_SIZE_DIM:
-            with self.assertRaisesRegex(RuntimeError, "values has incorrect size"):
-                self.SparseTensor(indices, values, sizes)
-        else:
-            with self.assertRaisesRegex(RuntimeError, "values and sizes are inconsistent"):
-                self.SparseTensor(indices, values, sizes)
+        with self.assertRaisesRegex(RuntimeError, "values has incorrect size"):
+            self.SparseTensor(indices, values, sizes)
 
     def test_factory_default(self):
         tensor = self.SparseTensor()
-        if USE_ZERO_SIZE_DIM:
-            expected_indices = self.IndexTensor(1, 0)
-            expected_size = torch.Size([0])
-        else:
-            expected_indices = self.IndexTensor()
-            expected_size = torch.Size([])
+        expected_indices = self.IndexTensor(1, 0)
+        expected_size = torch.Size([0])
         self.assertEqual(tensor._indices(), expected_indices)
         self.assertEqual(tensor.shape, expected_size)
 
     def test_factory_empty_indices(self):
         device = 'cuda' if self.is_cuda else 'cpu'
-        if USE_ZERO_SIZE_DIM:
-            tensor = self.SparseTensor()
-            expected_indices = torch.empty((1, 0), dtype=torch.long, device=device)
-        else:
-            tensor = torch.sparse_coo_tensor([], [], torch.Size([]), device=device)
-            expected_indices = torch.tensor([], dtype=torch.long, device=device)
+        tensor = self.SparseTensor()
+        expected_indices = torch.empty((1, 0), dtype=torch.long, device=device)
         self.assertEqual(tensor._indices(), expected_indices)
 
-        if USE_ZERO_SIZE_DIM:
-            tensor = torch.sparse_coo_tensor(torch.Size([2, 0]), device=device)
-            expected_indices = torch.empty((2, 0), dtype=torch.long, device=device)
-            pass
-        else:
-            tensor = torch.sparse_coo_tensor([], [], torch.Size([2, 0]), device=device)
-            expected_indices = torch.tensor([], dtype=torch.long, device=device)
+        tensor = torch.sparse_coo_tensor(torch.Size([2, 0]), device=device)
+        expected_indices = torch.empty((2, 0), dtype=torch.long, device=device)
         self.assertEqual(tensor._indices(), expected_indices)
 
-        if USE_ZERO_SIZE_DIM:
-            tensor = torch.sparse_coo_tensor(torch.Size([2, 2, 0]), device=device)
-            expected_indices = torch.empty((3, 0), dtype=torch.long, device=device)
-            pass
-        else:
-            tensor = torch.sparse_coo_tensor([], [], torch.Size([2, 2, 0]), device=device)
-            expected_indices = torch.tensor([], dtype=torch.long, device=device)
+        tensor = torch.sparse_coo_tensor(torch.Size([2, 2, 0]), device=device)
+        expected_indices = torch.empty((3, 0), dtype=torch.long, device=device)
         self.assertEqual(tensor._indices(), expected_indices)
 
-        if USE_ZERO_SIZE_DIM:
-            tensor = torch.sparse_coo_tensor(torch.Size([2, 2, 0, 0]), device=device)
-            expected_indices = torch.empty((4, 0), dtype=torch.long, device=device)
-            pass
-        else:
-            tensor = torch.sparse_coo_tensor([], [], torch.Size([2, 2, 0, 0]), device=device)
-            expected_indices = torch.tensor([], dtype=torch.long, device=device)
+        tensor = torch.sparse_coo_tensor(torch.Size([2, 2, 0, 0]), device=device)
+        expected_indices = torch.empty((4, 0), dtype=torch.long, device=device)
         self.assertEqual(tensor._indices(), expected_indices)
 
     def test_factory_nnz(self):
@@ -1043,7 +1014,6 @@ class TestSparse(TestCase):
         with self.assertRaisesRegex(RuntimeError, "indices and values must have same nnz"):
             self.SparseTensor(indices, values, sizes)
 
-    @unittest.skipIf(not USE_ZERO_SIZE_DIM, 'zero-size dimensions not supported')
     def test_factory_zero_nnz(self):
         device = 'cuda' if self.is_cuda else 'cpu'
         t = torch.sparse_coo_tensor(torch.empty(1, 0), torch.empty(0, 2, 4, 0), device=device)
@@ -1086,7 +1056,6 @@ class TestSparse(TestCase):
         self.assertEqual(t._values(), expected_values)
         self.assertEqual(t.size(), expected_size)
 
-    @unittest.skipIf(not USE_ZERO_SIZE_DIM, 'zero-size dimensions not supported')
     def test_factory_dense_dims(self):
         indices = self.IndexTensor([[0]])
         values = self.ValueTensor([[[1, 1, 1], [1, 1, 1]]])
@@ -1184,8 +1153,7 @@ class TestSparse(TestCase):
         self.assertFalse(torch.sparse_coo_tensor(([0], [0]), 0., (1, 1)).is_nonzero())
         self.assertFalse(torch.sparse_coo_tensor(([0, 0],), (0., 0.), (1,)).is_nonzero())
         self.assertFalse(torch.sparse_coo_tensor(([0, 0],), (-1., 1.), (1,)).is_nonzero())
-        if USE_ZERO_SIZE_DIM:
-            self.assertTrue(torch.sparse_coo_tensor(torch.zeros(0, 1), 12.3, []).is_nonzero())  # scalar sparse tensor
+        self.assertTrue(torch.sparse_coo_tensor(torch.zeros(0, 1), 12.3, []).is_nonzero())  # scalar sparse tensor
 
 
 class TestUncoalescedSparse(TestSparse):
