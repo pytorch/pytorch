@@ -14,7 +14,10 @@ supported in ROCm/HIP yet.
 
 # List of math functions that should be replaced inside device code only.
 MATH_TRANSPILATIONS = {
-    "": (""),
+    "std::max": ("::max"),
+    "std::min": ("::min"),
+    "std::ceil": ("::ceil"),
+    "std::floor": ("::floor")
 }
 
 CUDA_TYPE_NAME_MAP = {
