@@ -9,7 +9,7 @@ into two categories:
     - Look at the outstanding issues here: https://github.com/pytorch/pytorch/issues
     - Especially look at the Low Priority and Medium Priority issues
     - Pick an issue and comment on the task that you want to work on this feature
-    - If you need more context on a particular issue, please ask and we shall provide.
+    - If you need more contexts on a particular issue, please ask and we shall provide.
 
 Once you finish implementing a feature or bugfix, please send a Pull Request to
 https://github.com/pytorch/pytorch
