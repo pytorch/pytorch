@@ -5,5 +5,4 @@
 namespace at {
 
 AT_CORE_API int CoreTest();
-
 }

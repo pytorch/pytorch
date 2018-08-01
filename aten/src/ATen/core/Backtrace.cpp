@@ -1,5 +1,5 @@
-#include <ATen/core/optional.h>
 #include <ATen/core/Backtrace.h>
+#include <ATen/core/optional.h>
 
 #include <functional>
 #include <memory>
@@ -9,7 +9,9 @@
 
 #if defined(__ANDROID__)
 #define AT_CORE_MOBILE 1
-#elif (defined(__APPLE__) && (TARGET_IPHONE_SIMULATOR || TARGET_OS_SIMULATOR || TARGET_OS_IPHONE))
+#elif (                   \
+    defined(__APPLE__) && \
+    (TARGET_IPHONE_SIMULATOR || TARGET_OS_SIMULATOR || TARGET_OS_IPHONE))
 #define AT_CORE_MOBILE 1
 #else
 #define AT_CORE_MOBILE 0
