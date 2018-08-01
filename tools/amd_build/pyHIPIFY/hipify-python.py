@@ -895,10 +895,12 @@ def disable_module(input_file):
 
 def transpile_device_math(input_string):
     """ Temporarily replace std:: invocations of math functions with non-std:: versions."""
+    # Extract device code positions
+    get_kernel_definitions = [k for k in re.finditer( r"(template[ ]*<(.*)>\n.*\n?)?(__global__|__device__) void[\n| ](\w+(\(.*\))?)\(", input_string)]
+
+    # Prepare output
     output_string = input_string
 
-    # Extract device code positions
-    get_kernel_definitions = [k for k in re.finditer( r"(template[ ]*<(.*)>\n.*\n?)?(__global__|__device__) void[\n| ](\w+(\(.*\))?)\(", string)]
     # Iterate through each kernel definition
     for kernel in get_kernel_definitions:
         # Find the final paranthesis that closes this kernel function definition.
@@ -1240,7 +1242,8 @@ def main():
                 f.truncate()
 
     all_files = list(matched_files_iter(args.output_directory, includes=args.includes,
-                                        ignores=args.ignores, extensions=args.extensions, hipify_caffe2=args.hipify_caffe2))
+                                        ignores=args.ignores, extensions=args.extensions,
+                                        hipify_caffe2=args.hipify_caffe2))
 
     # Start Preprocessor
     preprocess(
