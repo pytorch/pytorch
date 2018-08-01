@@ -15,10 +15,8 @@
 
 #pragma once
 
+#include <ATen/core/C++17.h>
 #include <ATen/core/Error.h>
-
-// TODO: Consider inverting this dependency, so that SmallVector defines
-// an implicit conversion to ArrayRef, rather than the other way around
 #include <ATen/core/SmallVector.h>
 
 #include <array>
@@ -26,170 +24,189 @@
 #include <vector>
 
 namespace at {
-  /// ArrayRef - Represent a constant reference to an array (0 or more elements
-  /// consecutively in memory), i.e. a start pointer and a length.  It allows
-  /// various APIs to take consecutive elements easily and conveniently.
-  ///
-  /// This class does not own the underlying data, it is expected to be used in
-  /// situations where the data resides in some other buffer, whose lifetime
-  /// extends past that of the ArrayRef. For this reason, it is not in general
-  /// safe to store an ArrayRef.
-  ///
-  /// This is intended to be trivially copyable, so it should be passed by
-  /// value.
-  template<typename T>
-  class ArrayRef {
-  public:
-    typedef const T *iterator;
-    typedef const T *const_iterator;
-    typedef size_t size_type;
 
-    typedef std::reverse_iterator<iterator> reverse_iterator;
+/// ArrayRef - Represent a constant reference to an array (0 or more elements
+/// consecutively in memory), i.e. a start pointer and a length.  It allows
+/// various APIs to take consecutive elements easily and conveniently.
+///
+/// This class does not own the underlying data, it is expected to be used in
+/// situations where the data resides in some other buffer, whose lifetime
+/// extends past that of the ArrayRef. For this reason, it is not in general
+/// safe to store an ArrayRef.
+///
+/// This is intended to be trivially copyable, so it should be passed by
+/// value.
+template <typename T>
+class ArrayRef final {
+ public:
+  using iterator = const T*;
+  using const_iterator = const T*;
+  using size_type = size_t;
 
-  private:
-    /// The start of the array, in an external buffer.
-    const T *Data;
+  using reverse_iterator = std::reverse_iterator<iterator>;
 
-    /// The number of elements.
-    size_type Length;
+ private:
+  /// The start of the array, in an external buffer.
+  const T* Data;
 
-  public:
-    /// @name Constructors
-    /// @{
+  /// The number of elements.
+  size_type Length;
 
-    /// Construct an empty ArrayRef.
-    /*implicit*/ ArrayRef() : Data(nullptr), Length(0) {}
+ public:
+  /// @name Constructors
+  /// @{
 
-    /// Construct an ArrayRef from a single element.
-    /*implicit*/ ArrayRef(const T &OneElt)
-      : Data(&OneElt), Length(1) {}
+  /// Construct an empty ArrayRef.
+  /* implicit */ constexpr ArrayRef() : Data(nullptr), Length(0) {}
 
-    /// Construct an ArrayRef from a pointer and length.
-    /*implicit*/ ArrayRef(const T *data, size_t length)
+  /// Construct an ArrayRef from a single element.
+  // TODO Make this explicit
+  constexpr ArrayRef(const T& OneElt) : Data(&OneElt), Length(1) {}
+
+  /// Construct an ArrayRef from a pointer and length.
+  constexpr ArrayRef(const T* data, size_t length)
       : Data(data), Length(length) {}
 
-    /// Construct an ArrayRef from a range.
-    ArrayRef(const T *begin, const T *end)
+  /// Construct an ArrayRef from a range.
+  constexpr ArrayRef(const T* begin, const T* end)
       : Data(begin), Length(end - begin) {}
 
-    /// Construct an ArrayRef from a SmallVector. This is templated in order to
-    /// avoid instantiating SmallVectorTemplateCommon<T> whenever we
-    /// copy-construct an ArrayRef.
-    template<typename U>
-    /*implicit*/ ArrayRef(const SmallVectorTemplateCommon<T, U> &Vec)
-      : Data(Vec.data()), Length(Vec.size()) {
-    }
-
-    /// Construct an ArrayRef from a std::vector.
-    template<typename A>
-    /*implicit*/ ArrayRef(const std::vector<T, A> &Vec)
+  /// Construct an ArrayRef from a SmallVector. This is templated in order to
+  /// avoid instantiating SmallVectorTemplateCommon<T> whenever we
+  /// copy-construct an ArrayRef.
+  template <typename U>
+  /* implicit */ ArrayRef(const SmallVectorTemplateCommon<T, U>& Vec)
       : Data(Vec.data()), Length(Vec.size()) {}
 
-    /// Construct an ArrayRef from a std::array
-    template <size_t N>
-    /*implicit*/ constexpr ArrayRef(const std::array<T, N> &Arr)
-        : Data(Arr.data()), Length(N) {}
+  /// Construct an ArrayRef from a std::vector.
+  template <typename A>
+  /* implicit */ ArrayRef(const std::vector<T, A>& Vec)
+      : Data(Vec.data()), Length(Vec.size()) {}
 
-    /// Construct an ArrayRef from a C array.
-    template <size_t N>
-    /*implicit*/ constexpr ArrayRef(const T (&Arr)[N]) : Data(Arr), Length(N) {}
+  /// Construct an ArrayRef from a std::array
+  template <size_t N>
+  /* implicit */ constexpr ArrayRef(const std::array<T, N>& Arr)
+      : Data(Arr.data()), Length(N) {}
 
-    /// Construct an ArrayRef from a std::initializer_list.
-    /*implicit*/ ArrayRef(const std::initializer_list<T> &Vec)
-    : Data(Vec.begin() == Vec.end() ? (T*)nullptr : Vec.begin()),
-      Length(Vec.size()) {}
+  /// Construct an ArrayRef from a C array.
+  template <size_t N>
+  /* implicit */ constexpr ArrayRef(const T (&Arr)[N]) : Data(Arr), Length(N) {}
 
-    /// @}
-    /// @name Simple Operations
-    /// @{
+  /// Construct an ArrayRef from a std::initializer_list.
+  /* implicit */ constexpr ArrayRef(const std::initializer_list<T>& Vec)
+      : Data(Vec.begin() == Vec.end() ? static_cast<T*>(nullptr) : Vec.begin()),
+        Length(Vec.size()) {}
 
-    const_iterator begin() const { return Data; }
-    const_iterator end() const { return Data + Length; }
+  /// @}
+  /// @name Simple Operations
+  /// @{
 
-    reverse_iterator rbegin() const { return reverse_iterator(end()); }
-    reverse_iterator rend() const { return reverse_iterator(begin()); }
+  constexpr iterator begin() const {
+    return Data;
+  }
+  constexpr iterator end() const {
+    return Data + Length;
+  }
 
-    /// empty - Check if the array is empty.
-    bool empty() const { return Length == 0; }
+  constexpr reverse_iterator rbegin() const {
+    return reverse_iterator(end());
+  }
+  constexpr reverse_iterator rend() const {
+    return reverse_iterator(begin());
+  }
 
-    const T *data() const { return Data; }
+  /// empty - Check if the array is empty.
+  constexpr bool empty() const {
+    return Length == 0;
+  }
 
-    /// size - Get the array size.
-    size_t size() const { return Length; }
+  constexpr const T* data() const {
+    return Data;
+  }
 
-    /// front - Get the first element.
-    const T &front() const {
-      AT_CHECK(!empty(), "ArrayRef: attempted to access front() of empty list");
-      return Data[0];
-    }
+  /// size - Get the array size.
+  constexpr size_t size() const {
+    return Length;
+  }
 
-    /// back - Get the last element.
-    const T &back() const {
-      AT_CHECK(!empty(), "ArrayRef: attempted to access back() of empty list");
-      return Data[Length-1];
-    }
+  /// front - Get the first element.
+  AT_CPP14_CONSTEXPR const T& front() const {
+    AT_CHECK(!empty(), "ArrayRef: attempted to access front() of empty list");
+    return Data[0];
+  }
 
-    /// equals - Check for element-wise equality.
-    bool equals(ArrayRef RHS) const {
-      if (Length != RHS.Length)
-        return false;
-      return std::equal(begin(), end(), RHS.begin());
-    }
+  /// back - Get the last element.
+  AT_CPP14_CONSTEXPR const T& back() const {
+    AT_CHECK(!empty(), "ArrayRef: attempted to access back() of empty list");
+    return Data[Length - 1];
+  }
 
-    /// slice(n, m) - Chop off the first N elements of the array, and keep M
-    /// elements in the array.
-    ArrayRef<T> slice(size_t N, size_t M) const {
-      AT_CHECK(N+M <= size(), "ArrayRef: invalid slice, ", N, " + ", M, " is not <= ", size());
-      return ArrayRef<T>(data()+N, M);
-    }
+  /// equals - Check for element-wise equality.
+  constexpr bool equals(ArrayRef RHS) const {
+    return Length == RHS.Length && std::equal(begin(), end(), RHS.begin());
+  }
 
-    /// slice(n) - Chop off the first N elements of the array.
-    ArrayRef<T> slice(size_t N) const { return slice(N, size() - N); }
+  /// slice(n, m) - Chop off the first N elements of the array, and keep M
+  /// elements in the array.
+  AT_CPP14_CONSTEXPR ArrayRef<T> slice(size_t N, size_t M) const {
+    AT_CHECK(
+        N + M <= size(),
+        "ArrayRef: invalid slice, N = ",
+        N,
+        "; M = ",
+        M,
+        "; size = ",
+        size());
+    return ArrayRef<T>(data() + N, M);
+  }
 
-    /// @}
-    /// @name Operator Overloads
-    /// @{
-    const T &operator[](size_t Index) const {
-      return Data[Index];
-    }
+  /// slice(n) - Chop off the first N elements of the array.
+  constexpr ArrayRef<T> slice(size_t N) const {
+    return slice(N, size() - N);
+  }
 
-    /// Vector compatibility
-    const T &at(size_t Index) const {
-      AT_CHECK(Index < Length, "ArrayRef: invalid index ", Index, " for length ", Length);
-      return Data[Index];
-    }
+  /// @}
+  /// @name Operator Overloads
+  /// @{
+  constexpr const T& operator[](size_t Index) const {
+    return Data[Index];
+  }
 
-    /// Disallow accidental assignment from a temporary.
-    ///
-    /// The declaration here is extra complicated so that "arrayRef = {}"
-    /// continues to select the move assignment operator.
-    template <typename U>
-    typename std::enable_if<std::is_same<U, T>::value, ArrayRef<T>>::type &
-    operator=(U &&Temporary) = delete;
+  /// Vector compatibility
+  AT_CPP14_CONSTEXPR const T& at(size_t Index) const {
+    AT_CHECK(
+        Index < Length,
+        "ArrayRef: invalid index Index = ",
+        Index,
+        "; Length = ",
+        Length);
+    return Data[Index];
+  }
 
-    /// Disallow accidental assignment from a temporary.
-    ///
-    /// The declaration here is extra complicated so that "arrayRef = {}"
-    /// continues to select the move assignment operator.
-    template <typename U>
-    typename std::enable_if<std::is_same<U, T>::value, ArrayRef<T>>::type &
-    operator=(std::initializer_list<U>) = delete;
+  /// Disallow accidental assignment from a temporary.
+  ///
+  /// The declaration here is extra complicated so that "arrayRef = {}"
+  /// continues to select the move assignment operator.
+  template <typename U>
+  typename std::enable_if<std::is_same<U, T>::value, ArrayRef<T>>::type&
+  operator=(U&& Temporary) = delete;
 
-    /// @}
-    /// @name Expensive Operations
-    /// @{
-    std::vector<T> vec() const {
-      return std::vector<T>(Data, Data+Length);
-    }
+  /// Disallow accidental assignment from a temporary.
+  ///
+  /// The declaration here is extra complicated so that "arrayRef = {}"
+  /// continues to select the move assignment operator.
+  template <typename U>
+  typename std::enable_if<std::is_same<U, T>::value, ArrayRef<T>>::type&
+  operator=(std::initializer_list<U>) = delete;
 
-    /// @}
-    /// @name Conversion operators
-    /// @{
-    operator std::vector<T>() const {
-      return std::vector<T>(Data, Data+Length);
-    }
+  /// @}
+  /// @name Expensive Operations
+  /// @{
+  std::vector<T> vec() const {
+    return std::vector<T>(Data, Data + Length);
+  }
 
-    /// @}
-  };
+  /// @}
+};
 
-} // end namespace at
+} // namespace at

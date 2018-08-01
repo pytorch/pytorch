@@ -392,7 +392,7 @@ inline IValue::IValue(std::vector<at::Tensor> v)
 : IValue(TensorList::create(std::move(v))) {}
 
 inline std::vector<int64_t> IValue::copyToIntList() const {
-  return std::vector<int64_t>(toIntList()->elements());
+  return toIntList()->elements().vec();
 }
 
 }}
