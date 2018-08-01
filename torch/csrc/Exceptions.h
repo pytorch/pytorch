@@ -4,7 +4,7 @@
 #include <stdexcept>
 #include <string>
 
-#include "ATen/Error.h"
+#include "ATen/core/Error.h"
 #include "THP_export.h"
 #include "torch/csrc/utils/object_ptr.h"
 #include "torch/csrc/utils/auto_gil.h"

@@ -9,7 +9,7 @@
 /// If you are writing a compute bound kernel, you can use the CUDA half
 /// intrinsics directly on the Half type from device code.
 
-#include "ATen/ATenGeneral.h"
+#include "ATen/core/ATenGeneral.h"
 
 #include <limits>
 #include <string>

@@ -3,8 +3,8 @@
 // ${generated_comment}
 
 #include "ATen/Allocator.h"
-#include "ATen/ArrayRef.h"
-#include "ATen/ATenGeneral.h"
+#include "ATen/core/ArrayRef.h"
+#include "ATen/core/ATenGeneral.h"
 #include "ATen/Generator.h"
 #include "ATen/Half.h"
 #include "ATen/Scalar.h"

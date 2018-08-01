@@ -4,8 +4,8 @@
 #include <limits>
 #include <functional>
 
-#include "ATen/ATenGeneral.h"
-#include "ATen/ArrayRef.h"
+#include "ATen/core/ATenGeneral.h"
+#include "ATen/core/ArrayRef.h"
 #include "ATen/Generator.h"
 #include "ATen/Half.h"
 #include "ATen/SparseTensorRef.h"

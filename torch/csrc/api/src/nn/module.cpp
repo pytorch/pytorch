@@ -4,8 +4,8 @@
 
 #include <torch/csrc/autograd/generated/VariableType.h>
 
-#include <ATen/Error.h>
-#include <ATen/optional.h>
+#include <ATen/core/Error.h>
+#include <ATen/core/optional.h>
 
 #include <algorithm>
 #include <map>

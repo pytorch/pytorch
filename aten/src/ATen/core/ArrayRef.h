@@ -18,6 +18,8 @@
 #include <ATen/core/Error.h>
 #include <ATen/core/SmallVector.h>
 #include <ATen/core/C++17.h>
+#include <ATen/core/Error.h>
+#include <ATen/core/SmallVector.h>
 
 #include <array>
 #include <iterator>

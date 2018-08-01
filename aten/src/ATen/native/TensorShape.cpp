@@ -1,9 +1,9 @@
 #include "ATen/ATen.h"
-#include "ATen/Error.h"
+#include "ATen/core/Error.h"
 #include "ATen/ExpandUtils.h"
 #include "ATen/NativeFunctions.h"
 #include "ATen/WrapDimUtils.h"
-#include "ATen/optional.h"
+#include "ATen/core/optional.h"
 #include <TH/THTensor.hpp>
 
 #include <algorithm>

@@ -6,8 +6,8 @@
 #include <torch/tensor.h>
 
 #include <ATen/ATen.h>
-#include <ATen/Error.h>
-#include <ATen/optional.h>
+#include <ATen/core/Error.h>
+#include <ATen/core/optional.h>
 
 #include <cstddef>
 #include <functional>

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ATen/ATenGeneral.h"
+#include "ATen/core/ATenGeneral.h"
 #include "ATen/CPUGeneral.h"
 #include "ATen/Allocator.h"
 #include "ATen/Scalar.h"
@@ -22,4 +22,4 @@
 #include "ATen/Layout.h"
 #include "ATen/OptionsGuard.h"
 #include "ATen/CUDAGuard.h"
-#include "ATen/Error.h"
+#include "ATen/core/Error.h"
