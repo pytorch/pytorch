@@ -45,9 +45,9 @@ def vector_to_parameters(vec, parameters):
         param_device = _check_param_device(param, param_device)
 
         # The length of the parameter
-        num_param = torch.prod(torch.LongTensor(list(param.size())))
+        num_param = param.numel()
         # Slice the vector, reshape it, and replace the old data of the parameter
-        param.data = vec[pointer:pointer + num_param].view(param.size()).data
+        param.data = vec[pointer:pointer + num_param].view_as(param).data
 
         # Increment the pointer
         pointer += num_param
