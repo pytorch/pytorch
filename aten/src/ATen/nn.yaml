@@ -58,7 +58,7 @@
 
 # Activation functions
 
-- name: elu(Tensor self, Scalar alpha=1, Scalar scale=1)
+- name: elu(Tensor self, Scalar alpha=1, Scalar scale=1, Scalar input_scale=1)
   cname: ELU
   has_inplace: True
   scalar_check:

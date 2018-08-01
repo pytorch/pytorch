@@ -237,7 +237,7 @@ TEST_CASE("modules") {
       REQUIRE(functional(torch::ones({}) * -1).toCFloat() == 0);
     }
     {
-      auto functional = Functional(torch::elu, /*alpha=*/1, /*scale=*/0);
+      auto functional = Functional(torch::elu, /*alpha=*/1, /*scale=*/0, /*input_scale=*/1);
       REQUIRE(functional(torch::ones({})).toCFloat() == 0);
     }
   }
