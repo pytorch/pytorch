@@ -183,7 +183,6 @@ SparseTensor new_with_tensor_and_size_sparse(const LongTensor& indices, const Te
                "sizes is inconsistent with indices: for dim ", d, ", size is ", dim_size, " but found index ", max_index_in_dim);
     }
   }
-
   return _new_with_dims_and_tensor_sparse(dtype, sparseDims, denseDims, sizes, indices, values);
 }
 
@@ -331,7 +330,6 @@ SparseTensor& sparse_mask_out_cpu(SparseTensor& r, const Tensor& t, const Sparse
   _get_sparse_impl(r)->set_indices_and_values_unsafe(mask_indices.clone(), r_values);
   _get_sparse_impl(r)->set_coalesced(mask.is_coalesced());
   int64_t r_nnz = mask._nnz();
-
   // NB: Relies on mask._nnz() == 0 test above
   auto mask_indices_accessor = mask_indices.accessor<int64_t, 2>();
 
