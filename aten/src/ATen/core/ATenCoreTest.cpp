@@ -7,4 +7,4 @@ int CoreTest() {
   return CoreTestGlobal++;
 }
 
-}
+} // namespace at
