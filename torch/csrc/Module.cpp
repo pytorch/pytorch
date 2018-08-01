@@ -613,6 +613,13 @@ static PyObject* initModule() {
 
   ASSERT_TRUE(PyModule_AddObject(module, "has_mkl", at::hasMKL() ? Py_True : Py_False) == 0);
 
+#ifdef _GLIBCXX_USE_CXX11_ABI
+  ASSERT_TRUE(PyModule_AddObject(module, "_GLIBCXX_USE_CXX11_ABI",
+        _GLIBCXX_USE_CXX11_ABI ? Py_True : Py_False) == 0);
+#else
+  ASSERT_TRUE(PyModule_AddObject(module, "_GLIBCXX_USE_CXX11_ABI", Py_False) == 0);
+#endif
+
   auto& defaultGenerator = at::globalContext().defaultGenerator(at::kCPU);
   THPDefaultGenerator = (THPGenerator*)THPGenerator_NewWithGenerator(
     defaultGenerator);
