@@ -32,10 +32,8 @@ jobs:
         command: |
           export SCCACHE_BUCKET=ossci-compiler-cache
           export TORCH_CUDA_ARCH_LIST=5.2
-          #git submodule update --init
-          #.jenkins/pytorch/build.sh
-          mkdir -p /opt/conda/lib/python3.6/site-packages/torch
-          touch /opt/conda/lib/python3.6/site-packages/torch/alfafafafafafa
+          git submodule update --init
+          .jenkins/pytorch/build.sh
     - persist_to_workspace:
         root: /opt/conda/lib/python3.6/site-packages/torch
         paths:
