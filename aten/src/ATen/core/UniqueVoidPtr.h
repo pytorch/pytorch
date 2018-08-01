@@ -1,15 +1,15 @@
 #include <memory>
 
-#include <ATen/ATenGeneral.h>
+#include <ATen/core/CoreAPI.h>
 
 namespace at {
 
-using DeleterFnPtr = void(*)(void*);
+using DeleterFnPtr = void (*)(void*);
 
 namespace detail {
 
 // Does not delete anything
-AT_API void deleteNothing(void*);
+AT_CORE_API void deleteNothing(void*);
 
 // A detail::UniqueVoidPtr is an owning smart pointer like unique_ptr, but
 // with three major differences:
@@ -35,32 +35,46 @@ AT_API void deleteNothing(void*);
 // to reflect this.
 //
 class UniqueVoidPtr {
-private:
+ private:
   // Lifetime tied to ctx_
   void* data_;
   std::unique_ptr<void, DeleterFnPtr> ctx_;
-public:
+
+ public:
   UniqueVoidPtr() : data_(nullptr), ctx_(nullptr, &deleteNothing) {}
-  explicit UniqueVoidPtr(void* data) : data_(data), ctx_(nullptr, &deleteNothing) {}
+  explicit UniqueVoidPtr(void* data)
+      : data_(data), ctx_(nullptr, &deleteNothing) {}
   UniqueVoidPtr(void* data, void* ctx, DeleterFnPtr ctx_deleter)
-    : data_(data), ctx_(ctx, ctx_deleter ? ctx_deleter : &deleteNothing) {}
-  void* operator->() const { return data_; }
+      : data_(data), ctx_(ctx, ctx_deleter ? ctx_deleter : &deleteNothing) {}
+  void* operator->() const {
+    return data_;
+  }
   void clear() {
     ctx_ = nullptr;
     data_ = nullptr;
   }
-  void* get() const { return data_; }
-  void* get_context() const { return ctx_.get(); }
-  void* release_context() { return ctx_.release(); }
+  void* get() const {
+    return data_;
+  }
+  void* get_context() const {
+    return ctx_.get();
+  }
+  void* release_context() {
+    return ctx_.release();
+  }
   template <typename T>
   T* cast_context(DeleterFnPtr expected_deleter) const {
-    if (get_deleter() != expected_deleter) return nullptr;
+    if (get_deleter() != expected_deleter)
+      return nullptr;
     return static_cast<T*>(get_context());
   }
-  operator bool() const { return data_ || ctx_; }
-  DeleterFnPtr get_deleter() const { return ctx_.get_deleter(); }
+  operator bool() const {
+    return data_ || ctx_;
+  }
+  DeleterFnPtr get_deleter() const {
+    return ctx_.get_deleter();
+  }
 };
-
 
 // Note [How UniqueVoidPtr is implemented]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -80,9 +94,18 @@ public:
 // pointer itself.  In simple cases, the context pointer is just the pointer
 // itself.
 
-inline bool operator==(const UniqueVoidPtr& sp, std::nullptr_t) noexcept { return !sp; }
-inline bool operator==(std::nullptr_t, const UniqueVoidPtr& sp) noexcept { return !sp; }
-inline bool operator!=(const UniqueVoidPtr& sp, std::nullptr_t) noexcept { return sp; }
-inline bool operator!=(std::nullptr_t, const UniqueVoidPtr& sp) noexcept { return sp; }
+inline bool operator==(const UniqueVoidPtr& sp, std::nullptr_t) noexcept {
+  return !sp;
+}
+inline bool operator==(std::nullptr_t, const UniqueVoidPtr& sp) noexcept {
+  return !sp;
+}
+inline bool operator!=(const UniqueVoidPtr& sp, std::nullptr_t) noexcept {
+  return sp;
+}
+inline bool operator!=(std::nullptr_t, const UniqueVoidPtr& sp) noexcept {
+  return sp;
+}
 
-}} // namespace at::detail
+} // namespace detail
+} // namespace at
