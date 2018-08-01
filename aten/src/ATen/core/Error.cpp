@@ -1,5 +1,5 @@
-#include <ATen/Error.h>
-#include <ATen/Backtrace.h>
+#include <ATen/core/Error.h>
+#include <ATen/core/Backtrace.h>
 
 #include <iostream>
 #include <string>
@@ -15,18 +15,18 @@ Error::Error(SourceLocation source_location, std::string err)
   , what_(str(err, " (", source_location, ")\n", get_backtrace(/*frames_to_skip=*/2)))
   {}
 
+static Warning::handler_t global_warning_handler = &Warning::print_warning;
+
 void Warning::warn(SourceLocation source_location, std::string msg) {
-  warning_handler_(source_location, msg.c_str());
+  global_warning_handler(source_location, msg.c_str());
 }
 
 void Warning::set_warning_handler(handler_t handler) {
-  warning_handler_ = handler;
+  global_warning_handler = handler;
 }
 
 void Warning::print_warning(const SourceLocation& source_location, const char* msg) {
   std::cerr << "Warning: " << msg << " (" << source_location << ")\n";
 }
-
-Warning::handler_t Warning::warning_handler_ = &Warning::print_warning;
 
 } // namespace at
