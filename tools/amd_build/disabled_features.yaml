@@ -73,7 +73,7 @@
         }
       },
       {
-        "path": "aten/src/ATen/Error.h",
+        "path": "aten/src/ATen/core/Error.h",
         "s_constants": {
           "#if !defined(_WIN32)": "#if !defined(_WIN32) && !defined(__HIP_PLATFORM_HCC__)"
         }

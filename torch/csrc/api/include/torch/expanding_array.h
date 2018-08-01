@@ -1,7 +1,7 @@
 #pragma once
 
-#include <ATen/ArrayRef.h>
-#include <ATen/Error.h>
+#include <ATen/core/ArrayRef.h>
+#include <ATen/core/Error.h>
 
 #include <algorithm>
 #include <array>

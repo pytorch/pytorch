@@ -5,7 +5,7 @@
 
 #include "ATen/Type.h"
 #include <ATen/TensorGeometry.h>
-#include <ATen/optional.h>
+#include <ATen/core/optional.h>
 
 #include <cstdint>
 #include <memory>

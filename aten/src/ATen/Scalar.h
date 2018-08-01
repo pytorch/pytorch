@@ -6,7 +6,7 @@
 #include <string>
 #include <utility>
 
-#include "ATen/ATenGeneral.h"
+#include "ATen/core/ATenGeneral.h"
 #include "ATen/Half.h"
 #include "ATen/ScalarType.h"
 #include "ATen/TensorBase.h"

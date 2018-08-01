@@ -6,7 +6,7 @@
 #include <torch/nn/pimpl.h>
 #include <torch/tensor.h>
 
-#include <ATen/Error.h>
+#include <ATen/core/Error.h>
 
 #include <cstdint>
 #include <memory>

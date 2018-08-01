@@ -8,7 +8,7 @@
 #include "ATen/Parallel.h"
 #include "ATen/cpu/vec256/functional.h"
 #include "ATen/cpu/vec256/vec256.h"
-#include "ATen/optional.h"
+#include "ATen/core/optional.h"
 
 // [Note AVX-SSE transitions] In general we avoid calls into cmath for code
 // compiled with AVX/AVX2 This is because of SSE-AVX transitions and a bug in
