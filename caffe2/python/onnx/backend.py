@@ -35,6 +35,7 @@ import onnx.numpy_helper
 import onnx.defs
 import onnx.optimizer
 import onnx.shape_inference
+import onnx.utils
 from onnx.backend.base import Backend, Device, DeviceType, namedtupledict
 
 from caffe2.python.onnx.workspace import Workspace

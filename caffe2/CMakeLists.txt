@@ -40,6 +40,7 @@ if(BUILD_ATEN)
   # ATen tests use catch instead of gtest so keep separate for now
   # list(APPEND Caffe2_CPU_TEST_SRCS ${ATen_CPU_TEST_SRCS})
   # list(APPEND Caffe2_GPU_TEST_SRCS ${ATen_CUDA_TEST_SRCS})
+  list(APPEND Caffe2_CPU_TEST_SRCS ${ATen_CORE_TEST_SRCS})
   list(APPEND Caffe2_CPU_INCLUDE ${ATen_CPU_INCLUDE})
   list(APPEND Caffe2_GPU_INCLUDE ${ATen_CUDA_INCLUDE})
   list(APPEND Caffe2_DEPENDENCY_LIBS ${ATen_CPU_DEPENDENCY_LIBS})
@@ -57,6 +58,7 @@ else()
   add_subdirectory(../aten/src/ATen/core ATen_core)
   list(APPEND Caffe2_CPU_SRCS ${ATen_CORE_SRCS})
   list(APPEND Caffe2_CPU_INCLUDE ${ATen_CORE_INCLUDE})
+  list(APPEND Caffe2_CPU_TEST_SRCS ${ATen_CORE_TEST_SRCS})
   # TODO: We should probably install the headers, but I don't know
   # how to do that.
 endif()

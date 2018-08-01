@@ -64,7 +64,7 @@ static inline void THNN_(SpatialFullDilatedConvolution_shapeCheck)(
       int64_t nOutputPlane = weight->size(1);
       THNN_CHECK_DIM_SIZE(gradOutput, ndim, dimf, nOutputPlane);
     } else if (bias != NULL) {
-      int64_t nOutputPlane = bias->size(0);
+      int64_t nOutputPlane = THTensor_sizeLegacyNoScalars(bias, 0);
       THNN_CHECK_DIM_SIZE(gradOutput, ndim, dimf, nOutputPlane);
     }
     THNN_CHECK_DIM_SIZE(gradOutput, ndim, dimh, outputHeight);
@@ -332,7 +332,7 @@ void THNN_(SpatialFullDilatedConvolution_accGradParameters)(
   if (gradWeight) {
     nOutputPlane = THTensor_(size)(gradWeight, 1);
   } else if (gradBias) {
-    nOutputPlane = THTensor_(size)(gradBias, 0);
+    nOutputPlane = THTensor_sizeLegacyNoScalars(gradBias, 0);
   } else {
     return;
   }
@@ -402,7 +402,7 @@ void THNN_(SpatialFullDilatedConvolution_accGradParameters)(
       // M,N,K are dims of matrix A and B
       // (see http://docs.nvidia.com/cuda/cublas/#cublas-lt-t-gt-gemm)
       int64_t n = columns->size(0);   // nOutputPlane * kh * kw
-      int64_t m = input_n->size(0);   // nInputPlane
+      int64_t m = THTensor_sizeLegacyNoScalars(input_n, 0);   // nInputPlane
       int64_t k = columns->size(1);   // inputHeight * inputWidth
 
       // Do GEMM (note: this is a bit confusing because gemm assumes column-major matrices)

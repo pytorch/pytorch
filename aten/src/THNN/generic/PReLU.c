@@ -26,8 +26,8 @@ void THNN_(PReLU_updateOutput)(
   int64_t bs = 1, ks = 1;
   {
     int64_t input_ndim = THTensor_(nDimensionLegacyAll)(input);
-    if (input->size(input_ndim > 1) != nOutputPlane)
-      THError("Wrong number of input planes. Expected %d but got %d.", nOutputPlane, input->size(input_ndim > 1));
+    if (THTensor_sizeLegacyNoScalars(input, input_ndim > 1) != nOutputPlane)
+      THError("Wrong number of input planes. Expected %d but got %d.", nOutputPlane, THTensor_sizeLegacyNoScalars(input, input_ndim > 1));
 
     if (input_ndim > 1) {
         bs = input->size(0);
@@ -91,8 +91,8 @@ void THNN_(PReLU_updateGradInput)(
   int64_t bs = 1, ks = 1;
   {
     int64_t input_ndim = THTensor_(nDimensionLegacyAll)(input);
-    if (input->size(input_ndim > 1) != nOutputPlane)
-      THError("Wrong number of input planes. Expected %d but got %d.", nOutputPlane, input->size(input_ndim > 1));
+    if (THTensor_sizeLegacyNoScalars(input, input_ndim > 1) != nOutputPlane)
+      THError("Wrong number of input planes. Expected %d but got %d.", nOutputPlane, THTensor_sizeLegacyNoScalars(input, input_ndim > 1));
 
     if (input_ndim > 1) {
         bs = input->size(0);
@@ -162,8 +162,8 @@ void THNN_(PReLU_accGradParameters)(
   int64_t bs = 1, ks = 1;
   {
     int64_t input_ndim = THTensor_(nDimensionLegacyAll)(input);
-    if (input->size(input_ndim > 1) != nOutputPlane)
-      THError("Wrong number of input planes. Expected %d but got %d.", nOutputPlane, input->size(input_ndim > 1));
+    if (THTensor_sizeLegacyNoScalars(input, input_ndim > 1) != nOutputPlane)
+      THError("Wrong number of input planes. Expected %d but got %d.", nOutputPlane, THTensor_sizeLegacyNoScalars(input, input_ndim > 1));
 
     if (input_ndim > 1) {
         bs = input->size(0);

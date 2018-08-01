@@ -28,9 +28,19 @@ int64_t THCTensor_(size)(THCState *state, const THCTensor *self, int dim)
   return THCTensor_size(state, self, dim);
 }
 
+int64_t THCTensor_(sizeLegacyNoScalars)(THCState *state, const THCTensor *self, int dim)
+{
+  return THTensor_sizeLegacyNoScalars(self, dim);
+}
+
 int64_t THCTensor_(stride)(THCState *state, const THCTensor *self, int dim)
 {
   return THCTensor_stride(state, self, dim);
+}
+
+int64_t THCTensor_(strideLegacyNoScalars)(THCState *state, const THCTensor *self, int dim)
+{
+  return THTensor_strideLegacyNoScalars(self, dim);
 }
 
 THLongStorage *THCTensor_(newSizeOf)(THCState *state, THCTensor *self)
@@ -367,11 +377,7 @@ void THCTensor_(narrow)(THCState *state, THCTensor *self, THCTensor *src, int di
 
   THArgCheck( (dimension >= 0) && (dimension < src->dim()), 3, "out of range");
   THArgCheck( firstIndex >= 0, 4, "out of range");
-#ifdef USE_TH_SIZE_ZERO_DIM
   THArgCheck( size >= 0, 5, "out of range");
-#else
-  THArgCheck( size > 0, 5, "out of range");
-#endif
   THArgCheck(firstIndex+size <= src->size(dimension), 5, "out of range");
 
   THCTensor_(set)(state, self, src);
@@ -390,12 +396,8 @@ void THCTensor_(select)(THCState *state, THCTensor *self, THCTensor *src, int di
   if(!src)
     src = self;
 
-#ifndef USE_TH_SIZE_ZERO_DIM
-  THArgCheck(THTensor_nDimensionLegacyAll(src) > 1, 1, "cannot select on a vector");
-#else
 #ifndef USE_TH_SCALAR
   THArgCheck(src->dim() > 1, 1, "cannot select on a vector");
-#endif
 #endif
   THArgCheck((dimension >= 0) && (dimension < src->dim()), 3, "out of range");
   THArgCheck((sliceIndex >= 0) && (sliceIndex < src->size(dimension)), 4, "out of range");
@@ -440,9 +442,6 @@ void THCTensor_(unfold)(THCState *state, THCTensor *self, THCTensor *src, int di
   if(!src)
     src = self;
 
-#ifndef USE_TH_SIZE_ZERO_DIM
-  THArgCheck(!src->is_empty(), 1, "cannot unfold an empty tensor");
-#endif
   THArgCheck(dimension < src->dim(), 2, "out of range");
   THArgCheck(size <= src->size(dimension), 3, "out of range");
   THArgCheck(step > 0, 4, "invalid step");

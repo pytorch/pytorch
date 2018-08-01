@@ -65,7 +65,7 @@ static inline void THNN_(SpatialFullDilatedConvolution_shapeCheck)(
       int64_t nOutputPlane = weight->size(1);
       THCUNN_check_dim_size(state, gradOutput, ndim, dimf, nOutputPlane);
     } else if (bias != NULL) {
-      int64_t nOutputPlane = bias->size(0);
+      int64_t nOutputPlane = THTensor_sizeLegacyNoScalars(bias, 0);
       THCUNN_check_dim_size(state, gradOutput, ndim, dimf, nOutputPlane);
     }
     THCUNN_check_dim_size(state, gradOutput, ndim, dimh, outputHeight);
@@ -351,7 +351,7 @@ void THNN_(SpatialFullDilatedConvolution_accGradParameters)(
   if (gradWeight != NULL) {
     nOutputPlane = THCTensor_(size)(state, gradWeight, 1);
   } else if (gradBias != NULL) {
-    nOutputPlane = THCTensor_(size)(state, gradBias, 0);
+    nOutputPlane = THCTensor_(sizeLegacyNoScalars)(state, gradBias, 0);
   } else {
     return;
   }

@@ -45,7 +45,7 @@
 
 #define THNN_CHECK_DIM_SIZE(T, DIM, DIM_SIZE, SIZE)			\
   if (THTensor_(nDimensionLegacyNoScalars)(T) != DIM ||				\
-      THTensor_(size)(T, DIM_SIZE) != SIZE) {				\
+      THTensor_sizeLegacyNoScalars(T, DIM_SIZE) != SIZE) {				\
       THDescBuff s1 = THTensor_(sizeDesc)(T);				\
       THError("Need " #T " of dimension %d and " #T ".size[%d] == %d"	\
 	      " but got " #T " to be of shape: %s", DIM, DIM_SIZE, SIZE, s1.str); \
@@ -53,7 +53,7 @@
 
 #define THNN_CHECK_DIM_SIZE_INDICES(T, DIM, DIM_SIZE, SIZE)			\
   if (THIndexTensor_(nDimensionLegacyNoScalars)(T) != DIM ||				\
-      THIndexTensor_(size)(T, DIM_SIZE) != SIZE) {				\
+      THTensor_sizeLegacyNoScalars(T, DIM_SIZE) != SIZE) {				\
       THDescBuff s1 = THIndexTensor_(sizeDesc)(T);				\
       THError("Need " #T " of dimension %d and " #T ".size[%d] == %d"	\
         " but got " #T " to be of shape: %s", DIM, DIM_SIZE, SIZE, s1.str); \
@@ -245,9 +245,6 @@
 #include "generic/SpatialUpSamplingBilinear.c"
 #include "THGenerateFloatTypes.h"
 
-#include "generic/SpatialGridSamplerBilinear.c"
-#include "THGenerateFloatTypes.h"
-
 #include "generic/VolumetricAveragePooling.c"
 #include "THGenerateFloatTypes.h"
 
@@ -303,7 +300,4 @@
 #include "THGenerateFloatTypes.h"
 
 #include "generic/VolumetricUpSamplingTrilinear.c"
-#include "THGenerateFloatTypes.h"
-
-#include "generic/VolumetricGridSamplerBilinear.c"
 #include "THGenerateFloatTypes.h"
