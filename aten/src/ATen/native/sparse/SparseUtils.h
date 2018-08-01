@@ -42,10 +42,16 @@ inline bool _check_device(ArrayRef<Tensor> ts) {
   return true;
 }
 
+// Takes indices and values and directly puts them into the sparse tensor, no
+// copy.  This used to be called THSTensor_(_move)
+inline void _alias_into_sparse(const SparseTensor& self, const LongTensor& indices, const Tensor& values) {
+  _get_sparse_impl(self)->set_indices_and_values_unsafe(indices, values);
+}
+
 // Take indices and values and makes a (data) copy of them to put into the sparse
 // indices/values.  This used to be called THSTensor_(_set)
 inline void _copy_into_sparse(const SparseTensor& self, const LongTensor& indices, const Tensor& values) {
-  _get_sparse_impl(self)->set_indices_and_values_unsafe(indices.clone(), values.clone());
+  _alias_into_sparse(self, indices.clone(), values.clone());
 }
 
 // Does NOT make copies of indices/values
@@ -58,7 +64,7 @@ inline SparseTensor _new_with_dims_and_tensor_sparse(
     const Tensor& values) {
   SparseTensor self = new_sparse(dtype);
   _get_sparse_impl(self)->resize_(sparseDims, denseDims, sizes);
-  _get_sparse_impl(self)->set_indices_and_values_unsafe(indices, values);
+  _alias_into_sparse(self, indices, values);
   return self;
 }
 

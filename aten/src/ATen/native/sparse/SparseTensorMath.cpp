@@ -71,10 +71,7 @@ SparseTensor& mul_out_sparse_scalar(SparseTensor& r, const SparseTensor& t, Scal
     r._indices().copy_(t._indices());
     Tensor r_values = r._values(); // Sigh... needed because mul_out takes Tensor&
     at::mul_out(r_values, t._values(), scalar_tensor(value));
-
-    auto r_indices = r._indices().narrow(1, 0, t._nnz());
-    r_values = r_values.narrow(0, 0, t._nnz());
-    _get_sparse_impl(r)->set_indices_and_values_unsafe(r_indices, r_values);
+    _get_sparse_impl(r)->set_nnz(t._nnz());
     _get_sparse_impl(r)->set_coalesced(t.is_coalesced());
   }
   return r;
@@ -126,10 +123,7 @@ SparseTensor& pow_out_sparse_scalar(SparseTensor& r, const SparseTensor& t_, Sca
   r._indices().copy_(t._indices());
   Tensor r_values = r._values(); // Sigh... needed because pow_out takes Tensor&
   at::pow_out(r_values, t._values(), value);
-
-  auto r_indices = r._indices().narrow(1, 0, t._nnz());
-  r_values = r_values.narrow(0, 0, t._nnz());
-  _get_sparse_impl(r)->set_indices_and_values_unsafe(r_indices, r_values);
+  _get_sparse_impl(r)->set_nnz(t._nnz());
   _get_sparse_impl(r)->set_coalesced(t.is_coalesced());
 
   return r;
@@ -157,10 +151,7 @@ SparseTensor& div_out_sparse_scalar(SparseTensor& r, const SparseTensor& t, Scal
     r._indices().copy_(t._indices());
     Tensor r_values = r._values(); // Sigh... needed because div_out takes Tensor&
     at::div_out(r_values, t._values(), scalar_tensor(value));
-
-    auto r_indices = r._indices().narrow(1, 0, t._nnz());
-    r_values = r_values.narrow(0, 0, t._nnz());
-    _get_sparse_impl(r)->set_indices_and_values_unsafe(r_indices, r_values);
+    _get_sparse_impl(r)->set_nnz(t._nnz());
     _get_sparse_impl(r)->set_coalesced(t.is_coalesced());
   }
   return r;
@@ -210,6 +201,7 @@ SparseTensor& add_out_sparse_cpu(SparseTensor& r, const SparseTensor& t, const S
   LongTensor r_indices = t_indices.type().tensor({sparseDims, max_nnz});
   Tensor r_values = _new_values_with_size_of(s_values, max_nnz).zero_();
   r.resize_as_(src);
+  _get_sparse_impl(r)->set_indices_and_values_unsafe(r_indices, r_values);
 
   int64_t blockSize = r_values.stride(0);
   int64_t cmp, d;
@@ -267,10 +259,7 @@ SparseTensor& add_out_sparse_cpu(SparseTensor& r, const SparseTensor& t, const S
       }
   );
 
-  r_indices = r_indices.narrow(1, 0, r_i);
-  r_values = r_values.narrow(0, 0, r_i);
-  _get_sparse_impl(r)->set_indices_and_values_unsafe(r_indices, r_values);
-
+  _get_sparse_impl(r)->set_nnz(r_i);
   // TODO: I think it may be possible to track inside the loop and
   // detect when we are uncoalesced (e.g., by observing that an
   // index goes backwards) which may be more precise than using the
@@ -386,6 +375,7 @@ SparseTensor& mul_out_sparse_cpu(SparseTensor& r, const Tensor& t_, const Tensor
   LongTensor r_indices = t_indices.type().tensor({sparseDims, max_nnz});
   Tensor r_values = _new_values_with_size_of(t_values, max_nnz).zero_();
   r.resize_as_(src);
+  _get_sparse_impl(r)->set_indices_and_values_unsafe(r_indices, r_values);
 
   int64_t match, d;
   int64_t r_i = 0, t_i = 0, s_i = 0;
@@ -445,9 +435,7 @@ SparseTensor& mul_out_sparse_cpu(SparseTensor& r, const Tensor& t_, const Tensor
     );
   }
 
-  r_indices = r_indices.narrow(1, 0, r_i);
-  r_values = r_values.narrow(0, 0, r_i);
-  _get_sparse_impl(r)->set_indices_and_values_unsafe(r_indices, r_values);
+  _get_sparse_impl(r)->set_nnz(r_i);
   _get_sparse_impl(r)->set_coalesced(true);
 
   return r;
@@ -771,9 +759,8 @@ SparseTensor& _sspaddmm_out_cpu(
   );
 
   // to avoid a clone
-  newi = newi.narrow(1, 0, p);
-  newv = newv.narrow(0, 0, p);
   _get_sparse_impl(r)->set_indices_and_values_unsafe(newi, newv);
+  _get_sparse_impl(r)->set_nnz(p);
 
   return r;
 }

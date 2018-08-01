@@ -265,9 +265,12 @@ SparseTensor coalesce_sparse_cpu(const SparseTensor& self) {
     factor *= self.size(d);
   }
 
+  SparseTensor dst = new_sparse(self.type());
+  _get_sparse_impl(dst)->resize_(sparseDims, denseDims, self.sizes());
   // TODO: is there a more idiomatic way to do this?
   LongTensor newIndices = indices.type().tensor(indices.sizes());
   Tensor newValues = values.type().tensor(values.sizes());
+  _alias_into_sparse(dst, newIndices, newValues);
 
   LongTensor indicesBuffer;
   LongTensor indicesPermutation;
@@ -301,11 +304,8 @@ SparseTensor coalesce_sparse_cpu(const SparseTensor& self) {
         }
     });
 
-  SparseTensor dst = new_with_dims_and_size_sparse(self.type(), sparseDims, denseDims, self.sizes());
-  newIndices = newIndices.narrow(1, 0, i+1);
-  newValues = newValues.narrow(0, 0, i+1);
-  _get_sparse_impl(dst)->set_indices_and_values_unsafe(newIndices, newValues);
   _get_sparse_impl(dst)->set_coalesced(true);
+  _get_sparse_impl(dst)->set_nnz(i + 1);
 
   return dst;
 }
@@ -327,9 +327,10 @@ SparseTensor& sparse_mask_out_cpu(SparseTensor& r, const Tensor& t, const Sparse
   LongTensor mask_indices = mask._indices();
   Tensor mask_values = mask._values();
   Tensor r_values = r._values().type().tensor(mask_values.sizes());
-  _get_sparse_impl(r)->set_indices_and_values_unsafe(mask_indices.clone(), r_values);
+  _alias_into_sparse(r, mask_indices.clone(), r_values);
   _get_sparse_impl(r)->set_coalesced(mask.is_coalesced());
   int64_t r_nnz = mask._nnz();
+  _get_sparse_impl(r)->set_nnz(r_nnz);
   // NB: Relies on mask._nnz() == 0 test above
   auto mask_indices_accessor = mask_indices.accessor<int64_t, 2>();
 

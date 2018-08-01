@@ -106,6 +106,11 @@ public:
   }
 
   void set_coalesced(bool coalesced) { coalesced_ = coalesced; }
+  void set_nnz(int64_t nnz) {
+    indices_ = indices_.narrow(1, 0, nnz);
+    values_ = values_.narrow(0, 0, nnz);
+    nnz_ = nnz;
+  }
 
   // Takes indices and values and directly puts them into the sparse tensor, no copy.
   // NOTE: this function is unsafe because it doesn't check whether any indices are
