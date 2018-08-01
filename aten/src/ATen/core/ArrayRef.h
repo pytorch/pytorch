@@ -15,9 +15,9 @@
 
 #pragma once
 
+#include <ATen/core/C++17.h>
 #include <ATen/core/Error.h>
 #include <ATen/core/SmallVector.h>
-#include <ATen/core/C++17.h>
 
 #include <array>
 #include <iterator>
@@ -149,7 +149,14 @@ class ArrayRef final {
   /// slice(n, m) - Chop off the first N elements of the array, and keep M
   /// elements in the array.
   AT_CPP14_CONSTEXPR ArrayRef<T> slice(size_t N, size_t M) const {
-    AT_CHECK(N + M <= size(), "ArrayRef: invalid slice, N = ", N, "; M = ", M, "; size = ", size());
+    AT_CHECK(
+        N + M <= size(),
+        "ArrayRef: invalid slice, N = ",
+        N,
+        "; M = ",
+        M,
+        "; size = ",
+        size());
     return ArrayRef<T>(data() + N, M);
   }
 
@@ -167,7 +174,12 @@ class ArrayRef final {
 
   /// Vector compatibility
   AT_CPP14_CONSTEXPR const T& at(size_t Index) const {
-    AT_CHECK(Index < Length, "ArrayRef: invalid index Index = ", Index, "; Length = ", Length);
+    AT_CHECK(
+        Index < Length,
+        "ArrayRef: invalid index Index = ",
+        Index,
+        "; Length = ",
+        Length);
     return Data[Index];
   }
 
