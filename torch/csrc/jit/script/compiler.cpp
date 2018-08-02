@@ -1368,6 +1368,11 @@ private:
         auto values = getValues(ll.inputs(), /*maybe_unpack=*/true, identity);
         return graph->insertNode(graph->createTuple(values))->output();
       } break;
+      case TK_TUPLE_LITERAL: {
+        auto ll = TupleLiteral(tree);
+        auto values = getValues(ll.inputs(), /*maybe_unpack=*/true, identity);
+        return graph->insertNode(graph->createTuple(values))->output();
+      } break;
       default:
         throw ErrorReport(tree) << "NYI: " << tree;
         break;
