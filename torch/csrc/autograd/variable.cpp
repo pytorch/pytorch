@@ -121,7 +121,7 @@ void Variable::Impl::set_data(Tensor new_data) {
     scalar_type_ = new_data.type().scalarType();
     backend_ = new_data.type().backend();
     is_variable_ = true;
-    AT_ASSERT(type() == VariableType::getType(new_data.type()));
+    AT_ASSERT(at::optional<Type*>(&type()) == VariableType::getType(new_data.type()));
     // Clear grad_accumulator if it exists, since it stores the old type info.
     grad_accumulator_.reset();
   }
