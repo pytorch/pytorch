@@ -653,7 +653,9 @@ class TestLRScheduler(TestCase):
     def test_cycle_lr_triangular_mode_one_lr(self):
         target = [1, 2, 3, 4, 5, 4, 3, 2, 1, 2, 3]
         targets = [target, target]
-        scheduler = CyclicLR(self.opt, base_lr=1, max_lr=5, step_size_up=4,
+        for param_group in self.opt.param_groups:
+            param_group['lr'] = 1
+        scheduler = CyclicLR(self.opt, max_lr=5, step_size_up=4,
                              mode='triangular')
         self._test_cycle_lr(scheduler, targets, len(target))
 
@@ -661,7 +663,9 @@ class TestLRScheduler(TestCase):
         target = [1, 2, 3, 4, 5, 4, 3, 2, 1, 1.5, 2.0, 2.5, 3.0, 2.5, 2.0, 1.5, 1] + \
                  [1.25, 1.50, 1.75, 2.00, 1.75]
         targets = [target, target]
-        scheduler = CyclicLR(self.opt, base_lr=1, max_lr=5, step_size_up=4,
+        for param_group in self.opt.param_groups:
+            param_group['lr'] = 1
+        scheduler = CyclicLR(self.opt, max_lr=5, step_size_up=4,
                              mode='triangular2')
         self._test_cycle_lr(scheduler, targets, len(target))
 
@@ -672,7 +676,9 @@ class TestLRScheduler(TestCase):
         xs = [0, 0.25, 0.5, 0.75, 1, 0.75, 0.50, 0.25, 0, 0.25, 0.5, 0.75, 1]
         target = list(map(lambda x: base_lr + x[1] * diff_lr * gamma**x[0], enumerate(xs)))
         targets = [target, target]
-        scheduler = CyclicLR(self.opt, base_lr=base_lr,
+        for param_group in self.opt.param_groups:
+            param_group['lr'] = base_lr
+        scheduler = CyclicLR(self.opt,
                              max_lr=max_lr, step_size_up=4,
                              mode='exp_range', gamma=gamma)
         self._test_cycle_lr(scheduler, targets, len(target))
@@ -681,7 +687,9 @@ class TestLRScheduler(TestCase):
         target_1 = [1, 2, 3, 4, 5, 4, 3, 2, 1, 2, 3]
         target_2 = list(map(lambda x: x + 1, target_1))
         targets = [target_1, target_2]
-        scheduler = CyclicLR(self.opt, base_lr=[1, 2], max_lr=[5, 6], step_size_up=4,
+        for lr, param_group in zip([1, 2], self.opt.param_groups):
+            param_group['lr'] = lr
+        scheduler = CyclicLR(self.opt, max_lr=[5, 6], step_size_up=4,
                              mode='triangular')
         self._test_cycle_lr(scheduler, targets, len(target_1))
 
@@ -690,7 +698,9 @@ class TestLRScheduler(TestCase):
                    [1.25, 1.50, 1.75, 2.00, 1.75]
         target_2 = list(map(lambda x: x + 2, target_1))
         targets = [target_1, target_2]
-        scheduler = CyclicLR(self.opt, base_lr=[1, 3], max_lr=[5, 7], step_size_up=4,
+        for lr, param_group in zip([1, 3], self.opt.param_groups):
+            param_group['lr'] = lr
+        scheduler = CyclicLR(self.opt, max_lr=[5, 7], step_size_up=4,
                              mode='triangular2')
         self._test_cycle_lr(scheduler, targets, len(target_1))
 
@@ -706,7 +716,9 @@ class TestLRScheduler(TestCase):
         target_1 = list(map(lambda x: base_lr_1 + x[1] * diff_lr_1 * gamma**x[0], enumerate(xs)))
         target_2 = list(map(lambda x: base_lr_2 + x[1] * diff_lr_2 * gamma**x[0], enumerate(xs)))
         targets = [target_1, target_2]
-        scheduler = CyclicLR(self.opt, base_lr=[base_lr_1, base_lr_2],
+        for lr, param_group in zip([base_lr_1, base_lr_2], self.opt.param_groups):
+            param_group['lr'] = lr
+        scheduler = CyclicLR(self.opt,
                              max_lr=[max_lr_1, max_lr_2], step_size_up=4,
                              mode='exp_range', gamma=gamma)
         self._test_cycle_lr(scheduler, targets, len(target_1))
@@ -714,7 +726,9 @@ class TestLRScheduler(TestCase):
     def test_triangular_mode_step_size_up_down(self):
         target = [1, 2, 3, 4, 5, 13 / 3, 11 / 3, 9 / 3, 7 / 3, 5 / 3, 1]
         targets = [target, target]
-        scheduler = CyclicLR(self.opt, base_lr=1, max_lr=5,
+        for param_group in self.opt.param_groups:
+            param_group['lr'] = 1
+        scheduler = CyclicLR(self.opt, max_lr=5,
                              step_size_up=4,
                              step_size_down=6,
                              mode='triangular')
@@ -730,9 +744,10 @@ class TestLRScheduler(TestCase):
         base_lrs = [1 + delta for delta in deltas]
         max_lrs = [5 + delta for delta in deltas]
         targets = [[x + delta for x in base_target] for delta in deltas]
+        for lr, param_group in zip(base_lrs, self.opt.param_groups):
+            param_group['lr'] = lr
         scheduler = CyclicLR(
             self.opt,
-            base_lr=base_lrs,
             max_lr=max_lrs,
             step_size_up=2,
             step_size_down=6,
@@ -749,7 +764,9 @@ class TestLRScheduler(TestCase):
         ])
         target = [base_lr + x * diff_lr * gamma**i for i, x in enumerate(xs)]
         targets = [target, target]
-        scheduler = CyclicLR(self.opt, base_lr=base_lr, max_lr=max_lr,
+        for param_group in self.opt.param_groups:
+            param_group['lr'] = base_lr
+        scheduler = CyclicLR(self.opt, max_lr=max_lr,
                              step_size_up=2, step_size_down=6,
                              mode='exp_range', gamma=gamma)
         self._test_cycle_lr(scheduler, targets, len(target))

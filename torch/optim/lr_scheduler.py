@@ -417,7 +417,7 @@ class ReduceLROnPlateau(object):
         self._init_is_better(mode=self.mode, threshold=self.threshold, threshold_mode=self.threshold_mode)
 
 
-class CyclicLR(object):
+class CyclicLR(_LRScheduler):
     """Sets the learning rate of each parameter group according to
     cyclical learning rate policy (CLR). The policy cycles the learning
     rate between two boundaries with a constant frequency, as detailed in
@@ -442,13 +442,10 @@ class CyclicLR(object):
 
     Args:
         optimizer (Optimizer): Wrapped optimizer.
-        base_lr (float or list): Initial learning rate which is the
-            lower boundary in the cycle for eachparam groups.
-            Default: 0.001
         max_lr (float or list): Upper boundaries in the cycle for
             each parameter group. Functionally,
-            it defines the cycle amplitude (max_lr - base_lr).
-            The lr at any cycle is the sum of base_lr
+            it defines the cycle amplitude (max_lr - initial_lr).
+            The lr at any cycle is the sum of initial_lr
             and some scaling of the amplitude; therefore
             max_lr may not actually be reached depending on
             scaling function. Default: 0.006
@@ -491,7 +488,6 @@ class CyclicLR(object):
 
     def __init__(self,
                  optimizer,
-                 base_lr=1e-3,
                  max_lr=6e-3,
                  step_size_up=2000,
                  step_size_down=None,
@@ -507,7 +503,6 @@ class CyclicLR(object):
         self.optimizer = optimizer
 
         self.max_lrs = self._format_lr('max_lr', optimizer, max_lr)
-        self.base_lrs = self._format_lr('base_lr', optimizer, base_lr)
 
         step_size_down = step_size_down or step_size_up
         self.total_size = float(step_size_up + step_size_down)
@@ -533,9 +528,7 @@ class CyclicLR(object):
         else:
             self.scale_fn = scale_fn
             self.scale_mode = scale_mode
-
-        self.step(last_batch_idx + 1)
-        self.last_batch_idx = last_batch_idx
+        super(CyclicLR, self).__init__(optimizer, last_batch_idx)
 
     def _format_lr(self, name, optimizer, lr):
         """Return correctly formatted lr for each param group."""
@@ -547,13 +540,6 @@ class CyclicLR(object):
         else:
             return lr * np.ones(len(optimizer.param_groups))
 
-    def step(self, batch_idx=None):
-        if batch_idx is None:
-            batch_idx = self.last_batch_idx + 1
-        self.last_batch_idx = batch_idx
-        for param_group, lr in zip(self.optimizer.param_groups, self.get_lr()):
-            param_group['lr'] = lr
-
     def _triangular_scale_fn(self, x):
         return 1.
 
@@ -564,11 +550,11 @@ class CyclicLR(object):
         return self.gamma**(x)
 
     def get_lr(self):
-        """Calculates the learning rate at batch index:
-        ``self.last_batch_idx``.
+        """Calculates the learning rate at batch index. This function treats
+        `self.last_epoch` as the last batch index.
         """
-        cycle = np.floor(1 + self.last_batch_idx / self.total_size)
-        x = 1 + self.last_batch_idx / self.total_size - cycle
+        cycle = np.floor(1 + self.last_epoch / self.total_size)
+        x = 1 + self.last_epoch / self.total_size - cycle
         if x <= self.step_ratio:
             scale_factor = x / self.step_ratio
         else:
@@ -580,6 +566,6 @@ class CyclicLR(object):
             if self.scale_mode == 'cycle':
                 lr = base_lr + base_height * self.scale_fn(cycle)
             else:
-                lr = base_lr + base_height * self.scale_fn(self.last_batch_idx)
+                lr = base_lr + base_height * self.scale_fn(self.last_epoch)
             lrs.append(lr)
         return lrs
