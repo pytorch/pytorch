@@ -30,7 +30,7 @@ StorageImpl::StorageImpl(
 
 namespace detail {
 Backend get_backend(StorageImpl* storage_impl) {
-  if (storage_impl->data_ptr.device().is_cuda()) {
+  if (storage_impl->data_ptr().device().is_cuda()) {
     return Backend::CUDA;
   }
   return Backend::CPU;
