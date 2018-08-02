@@ -133,7 +133,7 @@ TEST(WorkspaceTest, ActiveWorkspace) {
   }
 
   int calls = 0;
-  ActiveWorkspace::ForEach([&](Workspace* _) { calls++; });
+  ActiveWorkspace::ForEach([&](Workspace* /* unused */) { calls++; });
   EXPECT_EQ(calls, 0);
 }
 

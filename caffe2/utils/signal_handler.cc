@@ -165,7 +165,7 @@ std::vector<uintptr_t> getBacktrace() {
 
 void printBlobSizes() {
   ::caffe2::ActiveWorkspace::ForEach(
-      [&](Workspace* ws) { ws->PrintBlobSizes(); });
+      [&](::caffe2::Workspace* ws) { ws->PrintBlobSizes(); });
 }
 
 void printStacktrace() {
