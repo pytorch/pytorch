@@ -930,7 +930,7 @@ void testIValue() {
   JIT_ASSERT(foo2.isDouble());
   JIT_ASSERT(foo2.toDouble() == 4.0);
   JIT_ASSERT(foo->use_count() == 2);
-  JIT_ASSERT(baz.toIntList()->elements().equals({3,4,5}));
+  JIT_ASSERT(ArrayRef<int64_t>(baz.toIntList()->elements()).equals({3,4,5}));
 
   auto move_it = std::move(baz).toIntList();
   JIT_ASSERT(foo->use_count() == 2);
@@ -940,10 +940,11 @@ void testIValue() {
   IValue dlist(DoubleList::create({3.5}));
   JIT_ASSERT(
       dlist.isDoubleList() &&
-      std::move(dlist).toDoubleList()->elements().equals({3.5}));
+      ArrayRef<double>(std::move(dlist).toDoubleList()->elements())
+          .equals({3.5}));
   JIT_ASSERT(dlist.isNone());
   dlist = IValue(DoubleList::create({3.4}));
-  JIT_ASSERT(dlist.toDoubleList()->elements().equals({3.4}));
+  JIT_ASSERT(ArrayRef<double>(dlist.toDoubleList()->elements()).equals({3.4}));
   IValue the_list(Tuple::create({IValue(3.4), IValue(4), IValue(foo)}));
   JIT_ASSERT(foo->use_count() == 3);
   JIT_ASSERT(the_list.isTuple());
@@ -1019,6 +1020,44 @@ void testCustomOperators() {
     pop(stack, output);
 
     REQUIRE(output.allclose(at::full(5, 3.0f)));
+  }
+  {
+    // Check that lists work well.
+    RegisterOperators reg({createOperator(
+        "foo::lists(int[] ints, float[] floats, Tensor[] tensors) -> float[]",
+        [](const std::vector<int64_t>& ints,
+           const std::vector<double>& floats,
+           std::vector<at::Tensor> tensors) { return floats; })});
+
+    auto& ops =
+        getAllOperatorsFor(Symbol::fromQualString("foo::lists"));
+    REQUIRE(ops.size() == 1);
+
+    auto& op = ops.front();
+    REQUIRE(op->schema().name == "foo::lists");
+
+    REQUIRE(op->schema().arguments.size() == 3);
+    REQUIRE(op->schema().arguments[0].name == "a");
+    REQUIRE(op->schema().arguments[0].type == ListType::ofInts());
+    REQUIRE(op->schema().arguments[1].name == "b");
+    REQUIRE(op->schema().arguments[1].type == ListType::ofFloats());
+    REQUIRE(op->schema().arguments[2].name == "c");
+    REQUIRE(op->schema().arguments[2].type == ListType::ofTensors());
+
+    REQUIRE(op->schema().returns.size() == 1);
+    REQUIRE(op->schema().returns[0].type == ListType::ofTensors());
+
+    Stack stack;
+    push(stack, std::vector<int64_t>{1, 2});
+    push(stack, std::vector<double>{1.0, 2.0});
+    push(stack, std::vector<at::Tensor>{at::ones(5)});
+    op->getOperation()(stack);
+    std::vector<double> output;
+    pop(stack, output);
+
+    REQUIRE(output.size() == 2);
+    REQUIRE(output[0] == 1.0);
+    REQUIRE(output[0] == 2.0);
   }
   {
 #ifdef USE_CATCH

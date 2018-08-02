@@ -467,7 +467,7 @@ TypePtr getTypePtr() {
   AT_ERROR(
       "Type ",
       at::demangle_type<T>(),
-      " does not belong to known types {",
+      " could not be converted to any of the known types { ",
       TH_FORALL_TYPES(TYPE_STR) "}");
 #undef TYPE_STR
   return nullptr;

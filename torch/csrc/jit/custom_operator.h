@@ -117,11 +117,10 @@ FunctionSchema inferAndCheckSchema(const std::string& schemaOrName) {
   // because it has proper argument names.
 
   auto providedSchema = parseSchema(schemaOrName);
-  // Pick out only the name part.
-  auto name = schemaOrName.substr(0, bracketIndex);
 
   const auto inferredSchema =
-      torch::jit::detail::createFunctionSchemaFromTraits<Traits>(name);
+      torch::jit::detail::createFunctionSchemaFromTraits<Traits>(
+          providedSchema.name);
   checkArgumentVector(
       "argument",
       inferredSchema.arguments,
@@ -160,7 +159,7 @@ FunctionSchema inferAndCheckSchema(const std::string& schemaOrName) {
 /// Example invocation:
 /// ```
 /// createOperator(
-///    parseSchema("foo::bar(float a, Tensor b)"),
+///    "foo::bar(float a, Tensor b)",
 ///    [](float a, at::Tensor b) { return a + b; });
 /// ```
 template <typename Implementation>
@@ -168,10 +167,11 @@ Operator createOperator(
     const std::string& schemaOrName,
     Implementation&& implementation) {
   using Traits = c10::guts::infer_function_traits_t<Implementation>;
-  using ArgumentTypes = typename Traits::parameter_types;
+  using ArgumentTypes =
+      c10::guts::typelist::map_t<decay_t, typename Traits::parameter_types>;
   using ArgumentTuple =
       typename c10::guts::typelist::to_tuple<ArgumentTypes>::type;
-  using ReturnType = typename Traits::return_type;
+  using ReturnType = decay_t<typename Traits::return_type>;
 
   auto schema = torch::jit::detail::inferAndCheckSchema<Traits>(schemaOrName);
 
