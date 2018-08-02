@@ -1828,23 +1828,20 @@ def multilabel_soft_margin_loss(input, target, weight=None, size_average=None,
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
 
-    loss = - (target * logsigmoid(input) + (1 - target) * logsigmoid(-input))
+    loss = -(target * logsigmoid(input) + (1 - target) * logsigmoid(-input))
+    loss.sum(dim=0)  # only return N loss values
 
     if weight is not None:
         loss = loss * weight
 
-    if reduction != 'none':
-        if reduction == 'sum':
-            return loss.sum()
-        else:  # global mean
-            return loss.mean()
+    if reduction == 'none':
+        return loss
+    elif reduction == 'elementwise_mean':
+        return loss.mean()
+    elif reduction == 'sum':
+        return loss.sum()
     else:
-        if size_average and reduce:
-            return loss.mean()
-        elif reduce:
-            return loss.sum()
-        else:
-            return loss
+        raise ValueError(reduction + " is not valid")
 
 
 def cosine_embedding_loss(input1, input2, target, margin=0, size_average=None,
