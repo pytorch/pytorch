@@ -129,7 +129,9 @@ TEST(WorkspaceTest, ActiveWorkspace) {
     });
     EXPECT_EQ(calls, 1);
 
+#if GTEST_HAS_DEATH_TEST
     EXPECT_DEATH(capture(), "Workspace is already borrowed as active!");
+#endif
   }
 
   int calls = 0;
