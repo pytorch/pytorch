@@ -1850,6 +1850,16 @@ class TestAutograd(TestCase):
         out.sum().backward()
         self.assertEqual(x.grad.data, y_data)
 
+    def test_broadcast_tensors(self):
+        f_args_variable = (torch.randn(3, requires_grad=True),
+                           torch.randn(1, 2, 1, requires_grad=True),
+                           torch.randn(1, 1, requires_grad=True),
+                           torch.randn(5, 1, 1, requires_grad=True))
+        f_args_tensor = deepcopy(unpack_variables(f_args_variable))
+        run_functional_checks(self, "test_broadcast_tensors", "broadcast",
+                              lambda a, b, c, d: torch.broadcast_tensors(a, b, c, d),
+                              True, f_args_variable, f_args_tensor)
+
     def test_cat(self):
         f_args_variable = (torch.randn(1, S, S, requires_grad=True),
                            torch.randn(2, S, S, requires_grad=True),

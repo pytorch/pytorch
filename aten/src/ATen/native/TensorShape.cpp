@@ -12,6 +12,10 @@
 namespace at {
 namespace native {
 
+std::vector<Tensor> broadcast_tensors(TensorList tensors) {
+  return expand_outplace(tensors);
+}
+
 static void check_cat_no_zero_dim(TensorList tensors) {
   for(size_t i = 0; i < tensors.size(); ++i) {
     auto& t = tensors[i];

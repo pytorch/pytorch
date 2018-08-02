@@ -2939,6 +2939,17 @@ class TestTorch(TestCase):
                          torch.randn(0, 7, 0, 6, 5, 0, 1) + torch.randn(1, 1, 5, 1, 7))
         self.assertRaises(RuntimeError, lambda: torch.randn(7, 0) + torch.randn(2, 1))
 
+    def test_broadcast_tensors(self):
+        x0 = torch.randn(2, 1, 3)
+        x1 = torch.randn(3)
+        x2 = torch.randn(3, 1)
+        expected_size = (2, 3, 3)
+
+        y0, y1, y2 = torch.broadcast_tensors(x0, x1, x2)
+        self.assertTrue(y0.size() == expected_size)
+        self.assertTrue(y1.size() == expected_size)
+        self.assertTrue(y2.size() == expected_size)
+
     @staticmethod
     def _test_contiguous(self, cast):
         x = cast(torch.randn(1, 16, 5, 5))
