@@ -741,6 +741,25 @@ In-place version of :func:`~selu`.
 """)
 
 
+def celu(input, alpha=1., inplace=False):
+    r"""celu(input, alpha=1., inplace=False) -> Tensor
+
+    Applies element-wise,
+    :math:`\text{CELU}(x) = \max(0,x) + \min(0, \alpha * (\exp(x/\alpha) - 1))`.
+
+    See :class:`~torch.nn.CELU` for more details.
+    """
+    if inplace:
+        return torch.celu_(input, alpha)
+    return torch.celu(input, alpha)
+
+celu_ = _add_docstr(torch.celu_, r"""
+celu_(input, alpha=1.) -> Tensor
+
+In-place version of :func:`~celu`.
+""")
+
+
 def leaky_relu(input, negative_slope=0.01, inplace=False):
     r"""
     leaky_relu(input, negative_slope=0.01, inplace=False) -> Tensor
@@ -1099,7 +1118,7 @@ def embedding(input, weight, padding_idx=None, max_norm=None, norm_type=2,
             assert padding_idx >= -weight.size(0), 'Padding_idx must be within num_embeddings'
             padding_idx = weight.size(0) + padding_idx
     elif padding_idx is None:
-            padding_idx = -1
+        padding_idx = -1
     if max_norm is not None:
         # `embedding_renorm_` will call .contiguous() on input anyways, so we
         # call it here and take advantage of the improved locality in the

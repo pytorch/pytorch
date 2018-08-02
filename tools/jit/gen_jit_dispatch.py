@@ -52,28 +52,6 @@ def jit_type_of(arg):
         typ = '{}?'.format(typ)
     return typ
 
-# map from aten 'simple_type' to the function that will cast a attribute value
-# to that type
-FROM_ATTRIBUTE = {
-    'Device': 'as_device(node->is(attr::{}))',
-    'IntList': 'std::vector<int64_t>(node->is(attr::{}))',
-    'Layout': 'static_cast<at::Layout>(node->i(attr::{}))',
-    'Scalar': 'Scalar(node->t(attr::{}))',
-    'ScalarType': 'static_cast<at::ScalarType>(node->i(attr::{}))',
-    'Tensor': 'node->t(attr::{})',
-    'bool': 'bool(node->i(attr::{}))',
-    'double': 'node->f(attr::{})',
-    'int64_t': 'node->i(attr::{})',
-    'std::array<bool,2>': 'as_bool_array<2>(node->is(attr::{}))',
-    'std::array<bool,3>': 'as_bool_array<3>(node->is(attr::{}))',
-    'std::array<bool,4>': 'as_bool_array<4>(node->is(attr::{}))',
-}
-
-
-def from_attribute(arg):
-    simple_type = arg['simple_type']
-    return FROM_ATTRIBUTE[simple_type].format(arg['name'])
-
 
 # map from aten 'simple_type' to the function that will turn a tensor into
 # that type
@@ -99,8 +77,6 @@ def from_ivalue(arg, value):
     return FROM_IVALUE[simple_type].format(value)
 
 
-KW_ACCESS = CodeTemplate("""(node->${method}(Symbol::attr("${name}")))""")
-
 CALL_NAMESPACE = CodeTemplate("""\
 auto result = at::${name}(
     ${args}
@@ -123,24 +99,20 @@ auto result = torch::${name}(
 );
 """)
 
-# TODO (apaszke): remove the attributed codepath once we remove them
 CONSTRUCTOR = CodeTemplate("""\
-[](Node *node) {
-  ${kw_assignments}
-  return Operation([=](Stack & stack) {
+[](Stack & stack) {
     autograd::profiler::RecordFunction record("${name}");
     ${call}
     drop(stack, ${num_inputs});
     pack(stack, std::move(result));
     return 0;
-  });
 }
 """)
 
 OPERATOR = CodeTemplate("""\
 Operator(
     "${signature}",
-    ${ops}
+    ${op}
 ),
 """)
 
@@ -215,26 +187,19 @@ def gen_jit_dispatch(declarations, out, template_path):
                 name=decl['name'], first=args[0], args=pack_arguments(args[1:]),
                 num_inputs=num_inputs)
 
-    def emit_decl_variant(decl, is_positional_arg):
-        # is_positional_arg is a boolean list the same length as decl['arguments']
-        # that indicates if the argument should come from the postional list
-        # of inputs. If false, the argument comes from the constant attributes
+    def emit_decl_variant(decl):
         kw_assignments = []
         arguments = []
-        num_inputs = sum(is_positional_arg)
+        num_inputs = len(decl['arguments'])
 
         real_inputs = 0
-        for i, arg in enumerate(decl['arguments']):
+        for arg in decl['arguments']:
             if arg['simple_type'] in default_only_types:
                 arguments.append(arg['default'])
-            elif is_tensor_arg(arg) or is_positional_arg[i]:
+            else:
                 value = '(std::move(peek(stack, {}, {})))'.format(real_inputs, num_inputs)
                 arguments.append(from_ivalue(arg, value))
                 real_inputs += 1
-            else:
-                assign = "auto {} = {};".format(arg['name'], from_attribute(arg))
-                kw_assignments.append(assign)
-                arguments.append(arg['name'])
 
         call = get_invocation(decl, arguments, num_inputs)
 
@@ -245,29 +210,6 @@ def gen_jit_dispatch(declarations, out, template_path):
                                              kw_assignments=kw_assignments,
                                              num_inputs=num_inputs)
         return constructor
-
-    def emit_decl(decl):
-        arguments = decl['arguments']
-        num_tensor_args = sum(map(is_tensor_arg, arguments))
-
-        # Right now, we generate dispatch methods that either take all non-tensor arguments
-        # as attributes, or don't use any attributes at all. In the future we might want to
-        # have something in the middle too (might be useful for e.g. constant propagation
-        # into attributes, as that would allow us to avoid reparsing tensors into scalar
-        # args at every invocation).
-
-        all_real_arguments_are_inputs = tuple(arg['simple_type'] not in default_only_types for arg in arguments)
-        only_tensors_are_inputs = tuple(is_tensor_arg(arg) for arg in arguments)
-
-        variants = [emit_decl_variant(decl, all_real_arguments_are_inputs)]
-        # in some cases there are no inputs that are possibly attributes, so the
-        # variants are actually the same. If so avoid generating both to save compilation
-        # time.
-        if all_real_arguments_are_inputs != only_tensors_are_inputs:
-            variants += [',', emit_decl_variant(decl, only_tensors_are_inputs)]
-
-        ops.append(OPERATOR.substitute(signature=signature(decl),
-                                       ops=variants))
 
     # This function declares an order on declarations. This is necessary because
     # there is some ambiguity in the choice of overload: if an argument is overloaded
@@ -331,7 +273,8 @@ def gen_jit_dispatch(declarations, out, template_path):
 
     jit_decls = sort_decls(jit_decls)
     for decl in jit_decls:
-        emit_decl(decl)
+        ops.append(OPERATOR.substitute(signature=signature(decl),
+                                       op=emit_decl_variant(decl)))
 
     # Sort the generated snippets to ensure that the generation is deterministic
     env = {

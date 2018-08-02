@@ -24,8 +24,8 @@ void THNN_(PReLU_updateOutput)(
     input = THCTensor_(newContiguous)(state, input);
 
     int n = THCTensor_(nElement)(state, input);
-    if (input->size(ndim > 1) != nOutputPlane)
-      THError("Wrong number of input planes. Expected %d but got %d.", nOutputPlane, input->size(ndim > 1));
+    if (THTensor_sizeLegacyNoScalars(input, ndim > 1) != nOutputPlane)
+      THError("Wrong number of input planes. Expected %d but got %d.", nOutputPlane, THTensor_sizeLegacyNoScalars(input, ndim > 1));
 
     int mapSize = 1;
     for (int d = 2; d < ndim; d++) {
@@ -69,8 +69,8 @@ void THNN_(PReLU_updateGradInput)(
     gradOutput = THCTensor_(newContiguous)(state, gradOutput);
 
     int n = THCTensor_(nElement)(state, input);
-    if (input->size(ndim > 1) != nOutputPlane)
-      THError("Wrong number of input planes. Expected %d but got %d.", nOutputPlane, input->size(ndim > 1));
+    if (THTensor_sizeLegacyNoScalars(input, ndim > 1) != nOutputPlane)
+      THError("Wrong number of input planes. Expected %d but got %d.", nOutputPlane, THTensor_sizeLegacyNoScalars(input, ndim > 1));
 
     int mapSize = 1;
     for (int d = 2; d < ndim; d++) {

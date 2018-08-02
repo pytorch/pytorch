@@ -109,8 +109,8 @@ struct strided_tensor_iter {
       : data_(tensor.data<T>()),
         dim_(tensor.ndimension()),
         counter_(dim_, 0),
-        sizes_(tensor.sizes()),
-        strides_(tensor.strides()) {
+        sizes_(tensor.sizes().vec()),
+        strides_(tensor.strides().vec()) {
     _setup_arrays(tensor, this);
   }
 };

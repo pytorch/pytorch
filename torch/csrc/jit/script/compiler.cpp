@@ -354,7 +354,7 @@ Value* createNumber(Graph& g, const SourceRange& loc, const at::Tensor& val) {
 at::optional<std::vector<int64_t>> getIntListAttribute(at::optional<int32_t> N, Value* input) {
   auto list = constant_as<Shared<jit::IntList>>(input);
   if(list)
-    return std::vector<int64_t>(list.value()->elements());
+    return list.value()->elements().vec();
 
   // broadcast IntList[3] with value 4 -> {4, 4, 4}
   if(!N)
@@ -677,7 +677,7 @@ struct to_ir {
       if (return_stmt.values().size() == 1 && results.size() == 1) {
         auto result = results.at(0);
         if(result->type()->cast<TupleType>()) {
-          results = createTupleUnpack(result);
+          results = createTupleUnpack(result).vec();
         }
       }
       if (typed_def.schema && typed_def.schema->returns.size() != results.size()) {

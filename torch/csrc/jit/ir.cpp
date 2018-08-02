@@ -44,9 +44,9 @@ std::ostream& operator<<(std::ostream & out, const at::ArrayRef<T> & nodes) {
 }
 
 struct const_value_list_with_types {
-  const std::vector<const Value*>& values;
+  const ArrayRef<const Value*> values;
   bool use_newlines;
-  const_value_list_with_types(const std::vector<const Value*>& values, bool use_newlines = false)
+  const_value_list_with_types(ArrayRef<const Value*> values, bool use_newlines = false)
     : values(values), use_newlines(use_newlines) {}
 };
 std::ostream& operator<<(std::ostream & out, const_value_list_with_types l) {
@@ -629,6 +629,10 @@ bool Node::matches(const char *signature_literal, at::ArrayRef<Symbol> const_inp
     if (!is_constant(s)) return false;
   }
   return true;
+}
+
+void Node::dump() const {
+  std::cout << *this << "\n";
 }
 
 void Node::findSchema() const {

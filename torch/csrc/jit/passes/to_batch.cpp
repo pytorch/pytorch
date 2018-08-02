@@ -14,7 +14,7 @@ void ToBatch::toBatch(Block* block, Block* res_block) {
     res_block->addInput(name + "_data");
     res_block->addInput(name + "_mask");
     res_block->addInput(name + "_dims");
-    batch_map[input] = std::vector<Value*>(res_block->inputs().slice(i * 3, 3));
+    batch_map[input] = res_block->inputs().slice(i * 3, 3).vec();
   }
 
   for (auto it = block->nodes().begin(); it != block->nodes().end(); it++) {

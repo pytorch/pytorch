@@ -32,7 +32,7 @@ THTensor_compute_stride(at::IntList oldshape, at::IntList oldstride, at::IntList
   // This could perhaps be combined with the below code, but the complexity didn't seem worth it.
   int64_t numel = std::accumulate(oldshape.begin(), oldshape.end(), 1, std::multiplies<int64_t>());
   if (numel == 0 && oldshape.equals(newshape)) {
-    return std::vector<int64_t>(oldstride);
+    return oldstride.vec();
   }
 
   std::vector<int64_t> newstride(newshape.size());

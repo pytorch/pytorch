@@ -90,7 +90,8 @@ TH_API void THNN_(ELU_updateOutput)(
           THTensor *input,             // input tensor
           THTensor *output,            // [OUT] ELU output
           accreal alpha,               // an ELU parameter (as in paper)
-          accreal scale,               // scaling factor
+          accreal scale,               // scaling factor for output
+          accreal input_scale,         // scaling factor for input
           bool inplace);               // if true, modifies gradOutput and sets gradInput onto it (no additional memory is allocated)
 TH_API void THNN_(ELU_updateGradInput)(
           THNNState *state,            // library's state
@@ -98,7 +99,8 @@ TH_API void THNN_(ELU_updateGradInput)(
           THTensor *gradInput,         // [OUT] gradient w.r.t. input
           THTensor *output,            // output from a forward pass
           accreal alpha,               // an ELU parameter (as in paper)
-          accreal scale);
+          accreal scale,
+          accreal input_scale);
 
 TH_API void THNN_(DistKLDivCriterion_updateOutput)(
           THNNState *state,            // library's state
@@ -1226,34 +1228,6 @@ TH_API void THNN_(SpatialUpSamplingBilinear_updateGradInput)(
           int osizeH,
           int osizeW,
           bool align_corners);
-
-TH_API void THNN_(SpatialGridSamplerBilinear_updateOutput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *grid,
-          THTensor *output,
-          int padding_mode);
-
-TH_API void THNN_(SpatialGridSamplerBilinear_updateGradInput)(
-          THNNState *state,
-          THTensor *input, THTensor *gradInput,
-          THTensor *grid, THTensor *gradGrid,
-          THTensor *gradOutput,
-          int padding_mode);
-
-TH_API void THNN_(VolumetricGridSamplerBilinear_updateOutput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *grid,
-          THTensor *output,
-          int padding_mode);
-
-TH_API void THNN_(VolumetricGridSamplerBilinear_updateGradInput)(
-          THNNState *state,
-          THTensor *input, THTensor *gradInput,
-          THTensor *grid, THTensor *gradGrid,
-          THTensor *gradOutput,
-          int padding_mode);
 
 TH_API void THNN_(unfolded_acc)(
           THTensor *finput,

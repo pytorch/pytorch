@@ -225,6 +225,72 @@ target_include_directories(caffe2 SYSTEM PRIVATE "${Caffe2_DEPENDENCY_INCLUDE}")
 aten_set_target_props(caffe2)
 target_compile_options(caffe2 INTERFACE "-std=c++11")
 target_compile_options(caffe2 PRIVATE "-DCAFFE2_BUILD_MAIN_LIB")
+if (MSVC AND NOT BUILD_SHARED_LIBS)
+  # Note [Supporting both static and dynamic libraries on Window]
+  # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  # A Windows library may be distributed as either a static or dynamic
+  # library.  The chosen distribution mechanism affects how you setup
+  # the headers for the library: if you statically link a function,
+  # all you need is an ordinary signature:
+  #
+  #     void f();
+  #
+  # But if you *dynamically* link it, then you must provide a __declspec
+  # specifying that it should be imported from a DLL:
+  #
+  #     __declspec(dllimport) void f();
+  #
+  # Mixing the two situations will not work: if you specify dllimport
+  # while statically linking, the linker will complain it cannot find
+  # the __imp_f symbol (which serve as the DLL entrypoint); if you
+  # fail to specify dllimport for a symbol that's coming from a DLL,
+  # the linker will complain that it can't find f.  Joy!
+  #
+  # Most places on the Internet, you will find people have written
+  # their headers under the assumption that the application will
+  # only ever be dynamically linked, as they define a macro which
+  # tags a function as __declspec(dllexport) if you are actually
+  # building the library, and __declspec(dllimport) otherwise.  But
+  # if you want these headers to also work if you are linking against
+  # a static library, you need a way to avoid adding these __declspec's
+  # at all.  And that "mechanism" needs to apply to any downstream
+  # libraries/executables which are going to link against your library.
+  #
+  #   As an aside, why do we need to support both modes?
+  #   For historical reasons, PyTorch ATen on Windows is built dynamically,
+  #   while Caffe2 on Windows is built statically (mostly because if
+  #   we build it dynamically, we are over the DLL exported symbol limit--and
+  #   that is because Caffe2 hasn't comprehensively annotated all symbols
+  #   which cross the DLL boundary with CAFFE_API).  So any code
+  #   which is used by both PyTorch and Caffe2 needs to support both
+  #   modes of linking.
+  #
+  # So, you have a macro (call it AT_CORE_STATIC_WINDOWS) which you need to have
+  # set for any downstream library/executable that transitively includes your
+  # headers.  How are you going to do this?  You have two options:
+  #
+  #   1. Write out a config.h header which stores whether or not
+  #      you are linking statically or dynamically.
+  #
+  #   2. Force all of users to set the the macro themselves.  If they
+  #      use cmake, you can set -DAT_CORE_STATIC_WINDOWS=1 as a PUBLIC
+  #      compile option, in which case cmake will automatically
+  #      add the macro for you.
+  #
+  # Which one is better? Well, it depends: they trade off implementor
+  # ease versus user ease: (1) is more work for the library author
+  # but the user doesn't have to worry about it; (2) requires the user
+  # to set the macro themselves... but only if they don't use cmake.
+  #
+  # So, which is appropriate in our situation?  In my mind, here is
+  # the distinguishing factor: it is more common to distribute
+  # DLLs, since they don't require you to line up the CRT version
+  # (/MD, /MDd, /MT, /MTd) and MSVC version at the use site.  So,
+  # if a user is already in the business of static linkage, they're
+  # already in "expert user" realm.  So, I've decided that at this
+  # point in time, the simplicity of implementation of (2) wins out.
+  target_compile_options(caffe2 PUBLIC "-DAT_CORE_STATIC_WINDOWS=1")
+endif()
 # Use -O2 for release builds (-O3 doesn't improve perf, and -Os results in perf regression)
 target_compile_options(caffe2 PRIVATE "$<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-O2>")
 install(TARGETS caffe2 EXPORT Caffe2Targets DESTINATION lib)

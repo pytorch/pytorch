@@ -735,8 +735,44 @@
   variants: function
   deprecated: true
 
+# NOTE [ grid_sampler Native Functions ]
+# `grid_sampler` does all the shape checking and then dispatches to one of
+# `cudnn_grid_sampler`, `grid_sampler_2d`, or `grid_sampler_3d`, each of which
+# has the corresponding backward defined as native functions as well. Therefore,
+# in these functions and their backwards, no more shape checking is done.
+#
+# Additionally, arguments `padding_mode` and `interpolation_mode` are cast to
+# enums defined in `native/GridSampler.h`. `cudnn_grid_sampler` doesn't take in
+# `interpolation_mode` because it only supports Bilinear interpolation mode.
+#
+# ssnl: Currently `interpolation_mode` is just a placeholder. It is not really
+#       used. Everywhere Bilinear is assumed. I will add Nearest soon.
 - func: grid_sampler(Tensor input, Tensor grid, int64_t padding_mode) -> Tensor
   variants: function
+
+- func: grid_sampler_2d(Tensor input, Tensor grid, int64_t interpolation_mode, int64_t padding_mode) -> Tensor
+  variants: function
+  dispatch:
+    CPU: grid_sampler_2d_cpu
+    CUDA: grid_sampler_2d_cuda
+
+- func: grid_sampler_2d_backward(Tensor grad_output, Tensor input, Tensor grid, int64_t interpolation_mode, int64_t padding_mode) -> (Tensor, Tensor)
+  variants: function
+  dispatch:
+    CPU: grid_sampler_2d_backward_cpu
+    CUDA: grid_sampler_2d_backward_cuda
+
+- func: grid_sampler_3d(Tensor input, Tensor grid, int64_t interpolation_mode, int64_t padding_mode) -> Tensor
+  variants: function
+  dispatch:
+    CPU: grid_sampler_3d_cpu
+    CUDA: grid_sampler_3d_cuda
+
+- func: grid_sampler_3d_backward(Tensor grad_output, Tensor input, Tensor grid, int64_t interpolation_mode, int64_t padding_mode) -> (Tensor, Tensor)
+  variants: function
+  dispatch:
+    CPU: grid_sampler_3d_backward_cpu
+    CUDA: grid_sampler_3d_backward_cuda
 
 - func: hann_window(int64_t window_length, TensorOptions options={}) -> Tensor
   variants: function
@@ -1288,6 +1324,12 @@
   variants: function
 
 - func: selu_(Tensor self) -> Tensor
+  variants: function
+
+- func: celu(Tensor self, Scalar alpha=1.0) -> Tensor
+  variants: function
+
+- func: celu_(Tensor self, Scalar alpha=1.0) -> Tensor
   variants: function
 
 - func: sigmoid(Tensor self) -> Tensor
