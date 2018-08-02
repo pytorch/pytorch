@@ -10,7 +10,7 @@
 #include "THCTensorInfo.cuh"
 
 int THCTensor_nDimensionLegacyNoScalars(THCState *state, const THCTensor *self) {
-  return self->dim();
+  return THTensor_nDimensionLegacyNoScalars(self);
 }
 
 int THCTensor_nDimensionLegacyAll(THCState *state, const THCTensor *self) {
@@ -99,15 +99,6 @@ void THCTensor_resizeNd(THCState *state, THCTensor *self, int nDimension, int64_
 
   for(d = 0; d < nDimension; d++)
   {
-#ifndef USE_TH_SIZE_ZERO_DIM
-    // we can't support this unless we have arbitrary 0-sized dimensions, but some calls to this
-    // currently exist and expect a size [0] tensor to be returned.
-    if (d == 0 && size[d] == 0) {
-      nDimension = 1;
-    } else {
-      AT_CHECK(size[d] > 0, "sizes must be non-negative");
-    }
-#endif
     if((self->dim() > d) && (size[d] != self->size(d))) {
       hascorrectsize = false;
     }
@@ -234,9 +225,6 @@ void THCTensor_unsqueeze1d(THCState *state, THCTensor *self, THCTensor *src, int
     src = self;
 
   THArgCheck((dimension >= 0) && (dimension <= src->dim()), 3, "dimension out of range");
-#ifndef USE_TH_SIZE_ZERO_DIM
-  THArgCheck(!src->is_empty(), 3, "cannot unsqueeze empty tensor");
-#endif
 
   THCTensor_set(state, self, src);
 

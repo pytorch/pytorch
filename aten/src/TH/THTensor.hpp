@@ -56,6 +56,10 @@ struct THTensor
       return sizes_.size();
     }
 
+    at::ScalarType scalar_type() const {
+      return storage_->scalar_type;
+    }
+
     ptrdiff_t storage_offset() const {
       return storage_offset_;
     }
@@ -109,6 +113,17 @@ inline int64_t* THTensor_getStridePtr(THTensor* tensor) {
 
 // NB: Non-retaining
 inline THStorage* THTensor_getStoragePtr(const THTensor* tensor) {
+  // Within PyTorch, the invariant is that storage_ is always
+  // initialized; we never have tensors that don't have any storage.
+  // However, for Caffe2, this is not true, because they have permitted
+  // tensors to be allocated without specifying what scalar type
+  // they should be, only to be filled when GetMutableData is called
+  // for the first time (providing the necessary type).  It is an ERROR to
+  // invoke any PyTorch operations on such a half-constructed storage,
+  // and this check tests for that case.
+  AT_CHECK(tensor->storage_, "Cannot use PyTorch operations on a half-constructed "
+           "tensor.  If this tensor came from Caffe2, please call GetMutableData on "
+           "it first; otherwise, this is a bug, please report it.");
   return tensor->storage_;
 }
 
@@ -118,6 +133,7 @@ inline THStorage* THTensor_getStoragePtr(const THTensor* tensor) {
 inline void THTensor_resizeDim(THTensor* tensor, int64_t ndim) {
   // NB: This is *truly* a resize; calling code (e.g., squeeze)
   // assumes that old values are preserved
+  tensor->is_zero_dim_ = bool(ndim == 0);
   tensor->sizes_.resize(ndim);
   tensor->strides_.resize(ndim);
 }
@@ -141,6 +157,9 @@ inline void THTensor_setStorageOffset(THTensor* tensor, ptrdiff_t storage_offset
 
 // NB: Steals ownership of storage
 inline void THTensor_stealAndSetStoragePtr(THTensor* tensor, THStorage* storage) {
+  // Caffe2 might have tensors whose storages are null, but we
+  // don't allow it in PyTorch.
+  AT_ASSERT(storage);
   tensor->storage_ = storage;
 }
 
@@ -175,6 +194,19 @@ inline int THTensor_nDimensionLegacyAll(const THTensor* tensor) {
   } else {
     return tensor->dim();  
   }
+}
+
+inline int64_t THTensor_strideLegacyNoScalars(const THTensor *self, int dim) {
+  THArgCheck((dim >= 0) && (dim < THTensor_nDimensionLegacyNoScalars(self)), 2, "dimension %d out of range of %dD tensor",
+      dim+TH_INDEX_BASE, THTensor_nDimensionLegacyNoScalars(self));
+  return THTensor_isZeroDim(self) ? 1 : self->stride(dim);
+}
+
+inline int64_t THTensor_sizeLegacyNoScalars(const THTensor *self, int dim)
+{
+  THArgCheck((dim >= 0) && (dim < THTensor_nDimensionLegacyNoScalars(self)), 2, "dimension %d out of range of %dD tensor",
+      dim+TH_INDEX_BASE, THTensor_nDimensionLegacyNoScalars(self));
+  return THTensor_isZeroDim(self) ? 1 : self->size(dim);
 }
 
 TH_API void THTensor_free(THTensor *self);

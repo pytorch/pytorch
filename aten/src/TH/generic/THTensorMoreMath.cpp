@@ -557,9 +557,6 @@ void THTensor_(onesLike)(THTensor *r_, THTensor *input)
 
 void THTensor_(diag)(THTensor *r_, THTensor *t, int k)
 {
-#ifndef USE_TH_SIZE_ZERO_DIM
-  AT_ASSERT(!t->is_empty())
-#endif
   THArgCheck(THTensor_(nDimensionLegacyNoScalars)(t) == 1 || THTensor_(nDimensionLegacyNoScalars)(t) == 2, 1, "matrix or a vector expected");
 
   if(THTensor_(nDimensionLegacyNoScalars)(t) == 1)
@@ -1186,19 +1183,11 @@ void THTensor_(median)(THTensor *values_, THLongTensor *indices_, THTensor *t, i
 
 void THTensor_(topk)(THTensor *rt_, THLongTensor *ri_, THTensor *t, int64_t k, int dim, int dir, int sorted)
 {
-#ifndef USE_TH_SIZE_ZERO_DIM
-  int numDims = THTensor_(nDimensionLegacyAll)(t);
-#else
   int numDims = THTensor_(nDimensionLegacyNoScalars)(t);
-#endif
   THArgCheck(dim >= 0 && dim < numDims, 3, "dim not in range");
 
   int64_t sliceSize = THTensor_(size)(t, dim);
-#ifndef USE_TH_SIZE_ZERO_DIM
-  THArgCheck(k > 0 && k <= sliceSize, 2, "k not in range for dimension");
-#else
   THArgCheck(k >= 0 && k <= sliceSize, 2, "k not in range for dimension");
-#endif
 
   THTensor *tmpResults = THTensor_(new)();
   THTensor_(resize1d)(tmpResults, sliceSize);

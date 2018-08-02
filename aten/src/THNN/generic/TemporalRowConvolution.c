@@ -38,7 +38,7 @@ static inline void THNN_(TemporalRowConvolution_shapeCheck)(
 	THNN_ARGCHECK(!input->is_empty() && (ndim == 2 || ndim == 3), 1, input,
 	              "non-empty 2D or 3D (batch mode) input tensor expected, but got :%s");
 
-	int64_t inputFrameSize = weight->size(0);
+	int64_t inputFrameSize = THTensor_sizeLegacyNoScalars(weight, 0);
 	int64_t nInputFrame = input->size(dimS);
 	int64_t nOutputFrame = (nInputFrame + 2 * padW - kW) / dW + 1;
 
@@ -197,7 +197,7 @@ void THNN_(TemporalRowConvolution_updateOutput)(
 	THNN_(TemporalRowConvolution_shapeCheck)(
 		state, input, NULL, weight, bias, kW, dW, padW);
 
-	int64_t inputFrameSize = weight->size(0);
+	int64_t inputFrameSize = THTensor_sizeLegacyNoScalars(weight, 0);
 	int64_t nInputFrame = input->size(ndim - 1);
 	int64_t nOutputFrame = (nInputFrame + 2 * padW - kW) / dW + 1;
 
@@ -311,7 +311,7 @@ void THNN_(TemporalRowConvolution_updateGradInput)(
 	THNN_(TemporalRowConvolution_shapeCheck)(state, input, gradOutput, weight,
 	                                         NULL, kW, dW, padW);
 
-	int64_t inputFrameSize = weight->size(0);
+	int64_t inputFrameSize = THTensor_sizeLegacyNoScalars(weight, 0);
 	int64_t nInputFrame = input->size(ndim - 1);
 	int64_t nOutputFrame = (nInputFrame + 2 * padW - kW) / dW + 1;
 
@@ -386,7 +386,7 @@ static void THNN_(TemporalRowConvolution_accGradParameters_frame)(
     THTensor_(free)(tfinput);
 
 	if (gradBias != NULL) {
-		for (i = 0; i < gradBias->size(0); i++) {
+		for (i = 0; i < THTensor_sizeLegacyNoScalars(gradBias, 0); i++) {
 			int64_t k;
 			real sum = 0;
 			real *data = THStorage_(data)(THTensor_getStoragePtr(gradOutput3d))

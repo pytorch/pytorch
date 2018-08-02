@@ -141,17 +141,9 @@ Tensor& eye_out_cpu(Tensor& result, int64_t n) {
 }
 
 Tensor& eye_out_cpu(Tensor& result, int64_t n, int64_t m) {
-#ifndef USE_TH_SIZE_ZERO_DIM
-  AT_CHECK(n > 0, "n must be greater than 0, got ", n);
-#else
   AT_CHECK(n >= 0, "n must be greater or equal to 0, got ", n);
-#endif
 
-#ifndef USE_TH_SIZE_ZERO_DIM
-  if(m <= 0) {
-#else
   if(m < 0) {
-#endif
     m = n;
   }
 

@@ -32,30 +32,19 @@ def _finfo(tensor):
     return _FINFO[tensor.storage_type()]
 
 
-def _broadcast_shape(shapes):
-    r"""
-    Given a list of tensor sizes, returns the size of the resulting broadcasted
-    tensor.
-
-    Args:
-        shapes (list of torch.Size): list of tensor sizes
-    """
-    shape = torch.Size()
-    for s in shapes:
-        shape = torch._C._infer_size(s, shape)
-    return shape
+# promote numbers to tensors of dtype torch.get_default_dtype()
+def _default_promotion(v):
+    return torch.tensor(v, dtype=torch.get_default_dtype())
 
 
 def broadcast_all(*values):
     r"""
     Given a list of values (possibly containing numbers), returns a list where each
     value is broadcasted based on the following rules:
-      - `torch.*Tensor` instances are broadcasted as per the `broadcasting rules
-        <http://pytorch.org/docs/master/notes/broadcasting.html>`_
+      - `torch.*Tensor` instances are broadcasted as per :ref:`_broadcasting-semantics`.
       - numbers.Number instances (scalars) are upcast to tensors having
         the same size and type as the first tensor passed to `values`.  If all the
-        values are scalars, then they are upcasted to Tensors having size
-        `(1,)`.
+        values are scalars, then they are upcasted to scalar Tensors.
 
     Args:
         values (list of `numbers.Number` or `torch.*Tensor`)
@@ -64,22 +53,16 @@ def broadcast_all(*values):
         ValueError: if any of the values is not a `numbers.Number` or
             `torch.*Tensor` instance
     """
-    values = list(values)
-    scalar_idxs = [i for i in range(len(values)) if isinstance(values[i], Number)]
-    tensor_idxs = [i for i in range(len(values)) if values[i].__class__.__name__ == 'Tensor']
-    if len(scalar_idxs) + len(tensor_idxs) != len(values):
+    if not all(torch.is_tensor(v) or isinstance(v, Number) for v in values):
         raise ValueError('Input arguments must all be instances of numbers.Number or torch.tensor.')
-    if tensor_idxs:
-        broadcast_shape = _broadcast_shape([values[i].size() for i in tensor_idxs])
-        for idx in tensor_idxs:
-            values[idx] = values[idx].expand(broadcast_shape)
-        template = values[tensor_idxs[0]]
-        for idx in scalar_idxs:
-            values[idx] = template.new(template.size()).fill_(values[idx])
-    else:
-        for idx in scalar_idxs:
-            values[idx] = torch.tensor(float(values[idx]))
-    return values
+    if not all(map(torch.is_tensor, values)):
+        new_tensor = _default_promotion
+        for value in values:
+            if torch.is_tensor(value):
+                new_tensor = value.new_tensor
+                break
+        values = [v if torch.is_tensor(v) else new_tensor(v) for v in values]
+    return torch.broadcast_tensors(*values)
 
 
 def _sum_rightmost(value, dim):

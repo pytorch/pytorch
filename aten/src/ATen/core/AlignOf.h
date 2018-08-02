@@ -33,7 +33,7 @@ namespace at {
 // MSVC requires special handling here.
 #ifndef _MSC_VER
 
-template<size_t Alignment, size_t Size>
+template <size_t Alignment, size_t Size>
 struct AlignedCharArray {
   alignas(Alignment) char buffer[Size];
 };
@@ -41,7 +41,7 @@ struct AlignedCharArray {
 #else // _MSC_VER
 
 /// \brief Create a type with an aligned char buffer.
-template<size_t Alignment, size_t Size>
+template <size_t Alignment, size_t Size>
 struct AlignedCharArray;
 
 // We provide special variations of this template for the most common
@@ -52,7 +52,7 @@ struct AlignedCharArray;
 // MSVC warns on the existence of the declspec despite the union member forcing
 // proper alignment.
 
-template<size_t Size>
+template <size_t Size>
 struct AlignedCharArray<1, Size> {
   union {
     char aligned;
@@ -60,7 +60,7 @@ struct AlignedCharArray<1, Size> {
   };
 };
 
-template<size_t Size>
+template <size_t Size>
 struct AlignedCharArray<2, Size> {
   union {
     short aligned;
@@ -68,7 +68,7 @@ struct AlignedCharArray<2, Size> {
   };
 };
 
-template<size_t Size>
+template <size_t Size>
 struct AlignedCharArray<4, Size> {
   union {
     int aligned;
@@ -76,7 +76,7 @@ struct AlignedCharArray<4, Size> {
   };
 };
 
-template<size_t Size>
+template <size_t Size>
 struct AlignedCharArray<8, Size> {
   union {
     double aligned;
@@ -84,14 +84,13 @@ struct AlignedCharArray<8, Size> {
   };
 };
 
-
 // The rest of these are provided with a __declspec(align(...)) and we simply
 // can't pass them by-value as function arguments on MSVC.
 
 #define AT_ALIGNEDCHARARRAY_TEMPLATE_ALIGNMENT(x) \
-  template<size_t Size> \
-  struct AlignedCharArray<x, Size> { \
-    __declspec(align(x)) char buffer[Size]; \
+  template <size_t Size>                          \
+  struct AlignedCharArray<x, Size> {              \
+    __declspec(align(x)) char buffer[Size];       \
   };
 
 AT_ALIGNEDCHARARRAY_TEMPLATE_ALIGNMENT(16)
@@ -104,24 +103,47 @@ AT_ALIGNEDCHARARRAY_TEMPLATE_ALIGNMENT(128)
 #endif // _MSC_VER
 
 namespace detail {
-template <typename T1,
-          typename T2 = char, typename T3 = char, typename T4 = char,
-          typename T5 = char, typename T6 = char, typename T7 = char,
-          typename T8 = char, typename T9 = char, typename T10 = char>
+template <
+    typename T1,
+    typename T2 = char,
+    typename T3 = char,
+    typename T4 = char,
+    typename T5 = char,
+    typename T6 = char,
+    typename T7 = char,
+    typename T8 = char,
+    typename T9 = char,
+    typename T10 = char>
 class AlignerImpl {
-  T1 t1; T2 t2; T3 t3; T4 t4; T5 t5; T6 t6; T7 t7; T8 t8; T9 t9; T10 t10;
+  T1 t1;
+  T2 t2;
+  T3 t3;
+  T4 t4;
+  T5 t5;
+  T6 t6;
+  T7 t7;
+  T8 t8;
+  T9 t9;
+  T10 t10;
 
   AlignerImpl() = delete;
 };
 
-template <typename T1,
-          typename T2 = char, typename T3 = char, typename T4 = char,
-          typename T5 = char, typename T6 = char, typename T7 = char,
-          typename T8 = char, typename T9 = char, typename T10 = char>
+template <
+    typename T1,
+    typename T2 = char,
+    typename T3 = char,
+    typename T4 = char,
+    typename T5 = char,
+    typename T6 = char,
+    typename T7 = char,
+    typename T8 = char,
+    typename T9 = char,
+    typename T10 = char>
 union SizerImpl {
   char arr1[sizeof(T1)], arr2[sizeof(T2)], arr3[sizeof(T3)], arr4[sizeof(T4)],
-       arr5[sizeof(T5)], arr6[sizeof(T6)], arr7[sizeof(T7)], arr8[sizeof(T8)],
-       arr9[sizeof(T9)], arr10[sizeof(T10)];
+      arr5[sizeof(T5)], arr6[sizeof(T6)], arr7[sizeof(T7)], arr8[sizeof(T8)],
+      arr9[sizeof(T9)], arr10[sizeof(T10)];
 };
 } // end namespace detail
 
@@ -132,14 +154,20 @@ union SizerImpl {
 /// expose a char array buffer member which can be used as suitable storage for
 /// a placement new of any of these types. Support for more than ten types can
 /// be added at the cost of more boilerplate.
-template <typename T1,
-          typename T2 = char, typename T3 = char, typename T4 = char,
-          typename T5 = char, typename T6 = char, typename T7 = char,
-          typename T8 = char, typename T9 = char, typename T10 = char>
-struct AlignedCharArrayUnion : AlignedCharArray<
-    alignof(detail::AlignerImpl<T1, T2, T3, T4, T5,
-                                      T6, T7, T8, T9, T10>),
-    sizeof(::at::detail::SizerImpl<T1, T2, T3, T4, T5,
-                                     T6, T7, T8, T9, T10>)> {
-};
+template <
+    typename T1,
+    typename T2 = char,
+    typename T3 = char,
+    typename T4 = char,
+    typename T5 = char,
+    typename T6 = char,
+    typename T7 = char,
+    typename T8 = char,
+    typename T9 = char,
+    typename T10 = char>
+struct AlignedCharArrayUnion
+    : AlignedCharArray<
+          alignof(detail::AlignerImpl<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10>),
+          sizeof(::at::detail::
+                     SizerImpl<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10>)> {};
 } // end namespace at

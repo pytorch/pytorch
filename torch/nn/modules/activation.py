@@ -118,6 +118,7 @@ class RReLU(Module):
     .. _`Empirical Evaluation of Rectified Activations in Convolutional Network`:
         https://arxiv.org/abs/1505.00853
     """
+
     def __init__(self, lower=1. / 8, upper=1. / 3, inplace=False):
         super(RReLU, self).__init__()
         self.lower = lower
@@ -293,6 +294,46 @@ class ELU(Module):
 
     def forward(self, input):
         return F.elu(input, self.alpha, self.inplace)
+
+    def extra_repr(self):
+        inplace_str = ', inplace' if self.inplace else ''
+        return 'alpha={}{}'.format(self.alpha, inplace_str)
+
+
+class CELU(Module):
+    r"""Applies element-wise,
+    :math:`\text{CELU}(x) = \max(0,x) + \min(0, \alpha * (\exp(x/\alpha) - 1))`
+
+    More details can be found in the paper `Continuously Differentiable Exponential Linear Units`_ .
+
+    Args:
+        alpha: the :math:`\alpha` value for the CELU formulation. Default: 1.0
+        inplace: can optionally do the operation in-place. Default: ``False``
+
+    Shape:
+        - Input: :math:`(N, *)` where `*` means, any number of additional
+          dimensions
+        - Output: :math:`(N, *)`, same shape as the input
+
+    .. image:: scripts/activation_images/CELU.png
+
+    Examples::
+
+        >>> m = nn.CELU()
+        >>> input = torch.randn(2)
+        >>> output = m(input)
+
+    .. _`Continuously Differentiable Exponential Linear Units`:
+        https://arxiv.org/abs/1704.07483
+    """
+
+    def __init__(self, alpha=1., inplace=False):
+        super(CELU, self).__init__()
+        self.alpha = alpha
+        self.inplace = inplace
+
+    def forward(self, input):
+        return F.celu(input, self.alpha, self.inplace)
 
     def extra_repr(self):
         inplace_str = ', inplace' if self.inplace else ''
@@ -668,6 +709,7 @@ class Softmin(Module):
         >>> input = torch.randn(2, 3)
         >>> output = m(input)
     """
+
     def __init__(self, dim=None):
         super(Softmin, self).__init__()
         self.dim = dim
