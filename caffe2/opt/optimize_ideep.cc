@@ -363,6 +363,31 @@ void enforceFusionInplaceForIdeep(repr::NNModule* nn) {
   }
 }
 
+void setPoolingInferenceMode(repr::NNModule *nn) {
+  for (auto node_pair : repr::nn::dataIterator<repr::MaxPool>(nn->dataFlow)) {
+    repr::NNGraph::NodeRef maxPoolNode;
+    repr::MaxPool *maxPool;
+    std::tie(maxPool, maxPoolNode) = node_pair;
+
+    if (!isOnIdeepDevice(*maxPool)) {
+      LOG(WARNING) << "Not a IDEEP operator";
+      continue;
+    }
+
+    auto *op = getMutableOpDef(*maxPool);
+    for (auto &arg : *op->mutable_arg()) {
+      if (arg.name() == "training_mode") {
+        arg.set_i(0);
+        return;
+      }
+    }
+
+    auto *arg = op->add_arg();
+    arg->set_name("training_mode");
+    arg->set_i(0);
+  }
+}
+
 void OptimizeForIdeep(
     repr::NNModule* nn,
     caffe2::Workspace* ws,
@@ -379,6 +404,8 @@ void OptimizeForIdeep(
   fuseActivationForIdeep(nn);
 
   enforceFusionInplaceForIdeep(nn);
+
+  setPoolingInferenceMode(nn);
 }
 
 #endif // CAFFE2_USE_IDEEP
