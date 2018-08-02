@@ -557,8 +557,8 @@ class TestConvolution(hu.HypothesisTestCase):
         m.net.SquaredL2Distance(["0_0_flat", "label"], "xent")
         m.net.AveragedLoss("xent", "loss")
         input_to_grad = m.AddGradientOperators(["loss"])
-        m.Proto().device_option.CopyFrom(dc)
-        m.param_init_net.Proto().device_option.CopyFrom(dc)
+        m.Proto().device_option.CopyFrom(gc)
+        m.param_init_net.Proto().device_option.CopyFrom(gc)
         m.Proto().type = net_type
         m.Proto().num_workers = num_workers
         self.ws.run(m.param_init_net)
@@ -570,10 +570,10 @@ class TestConvolution(hu.HypothesisTestCase):
             for input_blob in input_blobs:
                 self.ws.create_blob(input_blob).feed(
                     np.random.randn(n, d, h, w).astype(np.float32),
-                    device_option=dc)
+                    device_option=gc)
                 self.ws.create_blob("label").feed(
                     np.random.randn(n, d * h * w).astype(np.float32),
-                    device_option=dc)
+                    device_option=gc)
             self.ws.run(m.net)
             gradients = [
                 self.ws.blobs[str(input_to_grad[input_blob])].fetch()
