@@ -112,7 +112,7 @@ def skipIfNoLapack(fn):
         try:
             fn(*args, **kwargs)
         except Exception as e:
-            if 'Lapack library not found' in e.args[0]:
+            if 'Lapack library not found' in repr(e):
                 raise unittest.SkipTest('Compiled without Lapack')
             raise
     return wrapper
