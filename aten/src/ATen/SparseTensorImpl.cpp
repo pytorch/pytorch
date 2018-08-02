@@ -18,8 +18,8 @@ namespace at {
 // tensor and a [0] size values tensor for such an empty tensor.  However,
 // we don't currently support zero-size dimensions, so we can't actually
 // do this; so we just allocate zero-size tensors for everything.
-SparseTensorImpl::SparseTensorImpl(at::Backend backend, at::ScalarType scalar_type)
-    : TensorImpl(backend, scalar_type, nullptr, false)
+SparseTensorImpl::SparseTensorImpl(Type* type, at::Backend backend, at::ScalarType scalar_type)
+    : TensorImpl(type, backend, scalar_type, nullptr, false)
     , size_{0}
     , sparseDims_(1)
     , denseDims_(0)
