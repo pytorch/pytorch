@@ -3655,16 +3655,6 @@ def func(t):
         self.assertEqual(m_orig.doit3(input), m_import.doit3(input))
         self.assertEqual(m_orig.forward(input), m_import.forward(input))
 
-        # test file export
-        import io
-        f = io.BytesIO()
-        from torch.onnx import ExportTypes
-        torch.onnx._export_module(m_orig, f, ExportTypes.ZIP_ARCHIVE)
-        f.seek(0)
-        import zipfile
-        with zipfile.ZipFile(f, 'r', compression=zipfile.ZIP_STORED) as z:
-            self.assertExpected(str(sorted(file.filename for file in z.infolist())))
-
     @skipIfNoTorchVision
     def test_script_module_export_resnet18(self):
         x = torch.ones(1, 3, 224, 224)
