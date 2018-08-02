@@ -197,7 +197,10 @@ class Hardtanh(Module):
 
 
 class ReLU6(Hardtanh):
-    r"""Applies the element-wise function :math:`\text{ReLU6}(x) = \min(\max(0,x), 6)`
+    r"""Applies the element-wise function:
+
+    .. math::
+        \text{ReLU6}(x) = \min(\max(0,x), 6)
 
     Args:
         inplace: can optionally do the operation in-place. Default: ``False``
@@ -250,8 +253,10 @@ class Sigmoid(Module):
 
 
 class Tanh(Module):
-    r"""Applies element-wise,
-    :math:`\text{Tanh}(x) = \tanh(x) = \frac{e^x - e^{-x}} {e^x + e^{-x}}`
+    r"""Applies the element-wise function:
+
+    .. math::
+        \text{Tanh}(x) = \tanh(x) = \frac{e^x - e^{-x}} {e^x + e^{-x}}
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
@@ -272,7 +277,7 @@ class Tanh(Module):
 
 
 class ELU(Module):
-    r"""Applies element-wise,
+    r"""Applies the element-wise function:
 
     .. math::
         \text{ELU}(x) = \max(0,x) + \min(0, \alpha * (\exp(x) - 1))
@@ -309,8 +314,10 @@ class ELU(Module):
 
 
 class CELU(Module):
-    r"""Applies element-wise,
-    :math:`\text{CELU}(x) = \max(0,x) + \min(0, \alpha * (\exp(x/\alpha) - 1))`
+    r"""Applies the element-wise function:
+
+    .. math::
+        \text{CELU}(x) = \max(0,x) + \min(0, \alpha * (\exp(x/\alpha) - 1))
 
     More details can be found in the paper `Continuously Differentiable Exponential Linear Units`_ .
 
@@ -392,8 +399,8 @@ class SELU(Module):
 
 class GLU(Module):
     r"""Applies the gated linear unit function
-    :math:`{GLU}(a, b)= a \otimes \sigma(b)` where `a` is the first half of
-    the input vector and `b` is the second half.
+    :math:`{GLU}(a, b)= a \otimes \sigma(b)` where :math:`a` is the first half
+    of the input vector and :math:`b` is the second half.
 
     Args:
         dim (int): the dimension on which to split the input. Default: -1
@@ -422,8 +429,7 @@ class GLU(Module):
 
 
 class Hardshrink(Module):
-    r"""Applies the hard shrinkage function element-wise
-    Hardshrink is defined as:
+    r"""Applies the hard shrinkage function element-wise:
 
     .. math::
         \text{HardShrink}(x) =
@@ -462,7 +468,7 @@ class Hardshrink(Module):
 
 
 class LeakyReLU(Module):
-    r"""Applies element-wise,
+    r"""Applies the element-wise function:
 
     .. math::
         \text{LeakyReLU}(x) = \max(0, x) + \text{negative\_slope} * \min(0, x)
@@ -509,7 +515,7 @@ class LeakyReLU(Module):
 
 
 class LogSigmoid(Module):
-    r"""Applies element-wise
+    r"""Applies the element-wise function:
 
     .. math:`\text{LogSigmoid}(x) = \log\left(\frac{ 1 }{ 1 + \exp(-x)}\right)`
 
@@ -532,7 +538,7 @@ class LogSigmoid(Module):
 
 
 class Softplus(Module):
-    r"""Applies element-wise;
+    r"""Applies the element-wise function:
 
     .. math::
         \text{Softplus}(x) = \frac{1}{\beta} * \log(1 + \exp(\beta * x))
@@ -574,7 +580,7 @@ class Softplus(Module):
 
 
 class Softshrink(Module):
-    r"""Applies the soft shrinkage function elementwise. Defined as:
+    r"""Applies the soft shrinkage function elementwise:
 
     .. math::
         \text{SoftShrinkage}(x) =
@@ -613,11 +619,10 @@ class Softshrink(Module):
 
 
 class PReLU(Module):
-    r"""Applies element-wise the function
+    r"""Applies the element-wise function:
 
     .. math::
         \text{PReLU}(x) = \max(0,x) + a * \min(0,x)
-
 
     or
 
@@ -667,7 +672,7 @@ class PReLU(Module):
 
 
 class Softsign(Module):
-    r"""Applies element-wise, with the function
+    r"""Applies the element-wise function:
 
     .. math::
         \text{SoftSign}(x) = \frac{x}{ 1 + |x|}
@@ -691,7 +696,7 @@ class Softsign(Module):
 
 
 class Tanhshrink(Module):
-    r"""Applies element-wise,
+    r"""Applies the element-wise function:
 
     .. math::
         \text{Tanhshrink}(x) = x - \text{Tanh}(x)
@@ -824,10 +829,11 @@ class Softmax2d(Module):
 
 
 class LogSoftmax(Module):
-    r"""Applies the `Log(Softmax(x))` function to an n-dimensional input Tensor.
-    The LogSoftmax formulation can be simplified as
+    r"""Applies the :math:`\log(\text{Softmax}(x))` function to an n-dimensional
+    input Tensor. The LogSoftmax formulation can be simplified as:
 
-    :math:`\text{LogSoftmax}(x_{i}) = \log\left(\frac{\exp(x_i) }{ \sum_j \exp(x_j)} \right)`
+    .. math::
+        \text{LogSoftmax}(x_{i}) = \log\left(\frac{\exp(x_i) }{ \sum_j \exp(x_j)} \right)
 
     Shape:
         - Input: any shape
