@@ -1381,8 +1381,8 @@ private:
         auto ll = ListLiteral(tree);
         auto values = getValues(ll.inputs(), /*maybe_unpack=*/true, identity);
         if (values.size() == 0) {
-          throw ErrorReport(tree)
-              << "Empty list literals not allowed. Use the builtins TODO instead";
+          throw ErrorReport(tree) << "Empty list literals not allowed. "
+                                  << "Use _constructEmptyFooList() instead.";
         }
         const auto elem_type = values.at(0)->type();
         return graph->insertNode(graph->createList(elem_type, values))

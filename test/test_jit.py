@@ -2073,18 +2073,24 @@ a")
             if True:
                 x = [1, 2, 3]
 
+        with self.assertRaisesRegex(RuntimeError, "Empty list literals not allowed"):
+            @torch.jit.script
+            def reassign_from_empty_literal():
+                x = []
+                if True:
+                    x = [1, 2, 3]
+
         @torch.jit.script
-        def reassign_from_empty():
-            x = []
+        def reassign_from_empty_builtin():
+            x = _constructEmptyIntList()
             if True:
                 x = [1, 2, 3]
-
-        with self.assertRaisesRegex(RuntimeError, "previously has type"):
-            @torch.jit.script
-            def reassign_to_empty():
-                x = [1, 2, 3]
-                if True:
-                    x = []
+            y = _constructEmptyFloatList()
+            if True:
+                y = [1.0, 2.0, 3.0]
+            z = _constructEmptyTensorList()
+            if True:
+                z = [torch.randn([1])]
 
         with self.assertRaisesRegex(RuntimeError, "previously has type"):
             @torch.jit.script
@@ -2096,7 +2102,7 @@ a")
         with self.assertRaisesRegex(RuntimeError, "previously has type"):
             @torch.jit.script
             def reassign_nested():
-                x = []
+                x = _constructEmptyIntList()
                 if True:
                     x = [1, 2, 3]
                     if True:

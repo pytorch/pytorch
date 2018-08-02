@@ -307,6 +307,27 @@ RegisterOperators reg2({
     DEFINE_INT_OP(aten::__and__, a&& b)
     DEFINE_INT_OP(aten::__or__, a || b)
 
+    Operator("aten::_constructEmptyIntList() -> int[]",
+        [](Node* node) -> Operation {
+          return [=](Stack& stack){
+            push(stack, std::vector<int64_t>());
+            return 0;
+        };
+      }),
+    Operator("aten::_constructEmptyFloatList() -> float[]",
+        [](Node* node) -> Operation {
+          return [=](Stack& stack){
+            push(stack, std::vector<double>());
+            return 0;
+        };
+      }),
+    Operator("aten::_constructEmptyTensorList() -> Tensor[]",
+        [](Node* node) -> Operation {
+          return [=](Stack& stack){
+            push(stack, std::vector<at::Tensor>());
+            return 0;
+        };
+      }),
     Operator(
         "aten::neg(int a) -> int",
         [](Node* node) {
