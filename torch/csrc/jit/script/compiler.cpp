@@ -1568,7 +1568,7 @@ TypePtr parseTypeFromExpr(Expr expr) {
     }
     auto value_name = Var(subscript.value()).name().name();
     if (!subscriptable_types().count(value_name)) {
-      throw ErrorReport(subscript.value().range()) << "Type cannot be subscripted.";
+      throw ErrorReport(subscript.range()) << "Type " << value_name << " cannot be subscripted";
     }
     if (value_name == "Tuple") {
       std::vector<TypePtr> subscript_expr_types;
@@ -1578,7 +1578,8 @@ TypePtr parseTypeFromExpr(Expr expr) {
       return TupleType::create(subscript_expr_types);
     }
   }
-  throw ErrorReport(expr.range()) << "Incompatible type expression type: " << kindToString(expr.kind());
+  throw ErrorReport(expr.range()) << "Expression of type " << kindToString(expr.kind())
+                                  << " cannot be used in a type expression";
 }
 
 std::vector<Argument> parseArgsFromDef(Def &def) {
@@ -1622,7 +1623,6 @@ void defineMethodsInModule(Module & m, const std::string& source, const Resolver
   std::vector<TypedDef> definitions;
   std::vector<Resolver> resolvers;
   while (p.lexer().cur().kind != TK_EOF) {
-    // TODO: Function schema
     auto def = Def(p.parseFunction());
     auto schema = type_annotations::extractSchemaFromDef(def);
     definitions.emplace_back(def, schema);
