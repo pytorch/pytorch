@@ -125,6 +125,7 @@ module_tests = [
         module_name='ELU',
         constructor_args=(2.,),
         input_size=(3, 2, 5),
+        reference_fn=lambda x, _: torch.where(x >= 0, x, 2 * (x.exp() - 1))
     ),
     # TODO: reference function
     dict(

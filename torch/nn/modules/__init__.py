@@ -3,7 +3,7 @@ from .linear import Linear, Bilinear
 from .conv import Conv1d, Conv2d, Conv3d, \
     ConvTranspose1d, ConvTranspose2d, ConvTranspose3d
 from .activation import Threshold, ReLU, Hardtanh, ReLU6, Sigmoid, Tanh, \
-    Softmax, Softmax2d, LogSoftmax, ELU, SELU, Hardshrink, LeakyReLU, LogSigmoid, \
+    Softmax, Softmax2d, LogSoftmax, ELU, SELU, CELU, Hardshrink, LeakyReLU, LogSigmoid, \
     Softplus, Softshrink, PReLU, Softsign, Softmin, Tanhshrink, RReLU, GLU
 from .loss import L1Loss, NLLLoss, KLDivLoss, MSELoss, BCELoss, BCEWithLogitsLoss, NLLLoss2d, \
     CosineEmbeddingLoss, CTCLoss, HingeEmbeddingLoss, MarginRankingLoss, \
@@ -31,7 +31,7 @@ from .adaptive import AdaptiveLogSoftmaxWithLoss
 __all__ = [
     'Module', 'Linear', 'Conv1d', 'Conv2d', 'Conv3d', 'ConvTranspose1d',
     'ConvTranspose2d', 'ConvTranspose3d', 'Threshold', 'ReLU', 'Hardtanh', 'ReLU6',
-    'Sigmoid', 'Tanh', 'Softmax', 'Softmax2d', 'LogSoftmax', 'ELU', 'SELU', 'GLU', 'Hardshrink',
+    'Sigmoid', 'Tanh', 'Softmax', 'Softmax2d', 'LogSoftmax', 'ELU', 'SELU', 'CELU', 'GLU', 'Hardshrink',
     'LeakyReLU', 'LogSigmoid', 'Softplus', 'Softshrink', 'PReLU', 'Softsign', 'Softmin',
     'Tanhshrink', 'RReLU', 'L1Loss', 'NLLLoss', 'KLDivLoss', 'MSELoss', 'BCELoss', 'BCEWithLogitsLoss',
     'NLLLoss2d', 'PoissonNLLLoss', 'CosineEmbeddingLoss', 'CTCLoss', 'HingeEmbeddingLoss', 'MarginRankingLoss',
