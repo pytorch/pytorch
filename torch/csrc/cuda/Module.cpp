@@ -340,11 +340,7 @@ static PyObject * THCPModule_initExtension(PyObject *self)
   bool has_magma = false;
 #endif
 
-#ifdef CUDA_HALF_TENSOR
   bool has_half = true;
-#else
-  bool has_half = false;
-#endif
 
   auto set_module_attr = [&](const char* name, PyObject* v) {
     if (PyObject_SetAttrString(m, name, v) < 0) {
