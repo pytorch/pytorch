@@ -16,7 +16,7 @@
 
 #include "ATen/core/Half.h"
 #include "caffe2/core/common.h"
-#include "caffe2/utils/IdWrapper.h"
+#include "ATen/core/IdWrapper.h"
 
 namespace caffe2 {
 class CaffeTypeId;
@@ -33,7 +33,7 @@ class TypeMeta;
  * You need to register your types using CAFFE_KNOWN_TYPE(MyType) to be able to use CaffeTypeId with custom types.
  * This is for example used to store the dtype of tensors.
  */
-class CaffeTypeId final : public c10::guts::IdWrapper<CaffeTypeId, uint16_t> {
+class CaffeTypeId final : public at::IdWrapper<CaffeTypeId, uint16_t> {
 public:
   static CaffeTypeId createTypeId();
 
@@ -58,7 +58,7 @@ inline bool operator<(CaffeTypeId lhs, CaffeTypeId rhs) {
 
 }
 
-C10_DEFINE_HASH_FOR_IDWRAPPER(caffe2::CaffeTypeId)
+AT_DEFINE_HASH_FOR_IDWRAPPER(caffe2::CaffeTypeId)
 
 inline std::ostream& operator<<(std::ostream& stream, caffe2::CaffeTypeId typeId) {
   return stream << typeId.underlyingId();
