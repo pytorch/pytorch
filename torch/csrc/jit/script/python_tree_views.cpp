@@ -193,6 +193,10 @@ void initTreeViewBindings(PyObject *module) {
     .def(py::init([](const SourceRange& range, std::vector<Expr> args) {
       return ListLiteral::create(range, wrap_list(range, std::move(args)));
     }));
+  py::class_<TupleLiteral, Expr>(m, "TupleLiteral")
+    .def(py::init([](const SourceRange& range, std::vector<Expr> args) {
+      return TupleLiteral::create(range, wrap_list(range, std::move(args)));
+    }));
   py::class_<Gather, Expr>(m, "Gather")
     .def(py::init([](const Expr& base, const Expr& index) {
       return Gather::create(base.range(), base, index);
