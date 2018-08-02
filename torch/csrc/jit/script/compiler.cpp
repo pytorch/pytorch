@@ -1380,7 +1380,13 @@ private:
       case TK_LIST_LITERAL: {
         auto ll = ListLiteral(tree);
         auto values = getValues(ll.inputs(), /*maybe_unpack=*/true, identity);
-        return graph->insertNode(graph->createTuple(values))->output();
+        if (values.size() == 0) {
+          throw ErrorReport(tree)
+              << "Empty list literals not allowed. Use the builtins TODO instead";
+        }
+        const auto elem_type = values.at(0)->type();
+        return graph->insertNode(graph->createList(elem_type, values))
+            ->output();
       } break;
       case TK_TUPLE_LITERAL: {
         auto ll = TupleLiteral(tree);
