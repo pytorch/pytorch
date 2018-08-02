@@ -4333,7 +4333,7 @@ def func(t):
 
     def test_parser_type_annotations(self):
         cu = torch.jit.CompilationUnit('''
-            def foo(x : Tensor, y : Tuple[Tuple[Tensor, Tensor], Tensor]):
+            def foo(x : Tensor, y : Tuple[Tuple[Tensor, Tensor], Tensor]) -> Tuple[Tensor, Tensors]:
                 return x
         ''')
 

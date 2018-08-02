@@ -100,9 +100,6 @@ void initTreeViewBindings(PyObject *module) {
   m.def("NoneLiteral", [](const SourceRange& range) {
     return Expr(Compound::create(TK_NONE, range, {}));
   });
-  py::class_<Type, TreeView>(m, "Type");
-  py::class_<TensorType, Type>(m, "TensorType")
-    .def(py::init(&TensorType::create));
 
   py::class_<Stmt, TreeView>(m, "Stmt");
   py::class_<Expr, TreeView>(m, "Expr");
@@ -118,7 +115,7 @@ void initTreeViewBindings(PyObject *module) {
     }));
   py::class_<Decl, TreeView>(m, "Decl")
     .def(py::init([](std::vector<Param> params,
-                     Type return_type) {
+                     Expr return_type) {
       auto r = return_type.range();
       return Decl::create(r, wrap_list(r, std::move(params)), std::move(return_type));
     }));

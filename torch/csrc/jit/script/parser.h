@@ -391,8 +391,17 @@ struct Parser {
   }
   TreeRef parseDecl() {
     auto paramlist = parseList('(', ',', ')', &Parser::parseParam);
+    // Parse return type annotation
+    TreeRef return_type;
+    if (L.nextIf(TK_ARROW)) {
+      // Exactly one expression for return type annotation
+      return_type = parseExp();
+    } else {
+      // Default to returning single tensor. TODO: better sentinel value?
+      return_type = Var::create(L.cur().range, Ident::create(L.cur().range, "Tensor"));
+    }
     L.expect(':');
-    return Decl::create(paramlist.range(), List<Param>(paramlist), TensorType::create(L.cur().range));
+    return Decl::create(paramlist.range(), List<Param>(paramlist), Expr(return_type));
   }
   TreeRef parseFunction() {
     L.expect(TK_DEF);

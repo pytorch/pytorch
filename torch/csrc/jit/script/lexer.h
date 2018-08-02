@@ -40,7 +40,6 @@ namespace script {
   _(TK_OPTION, "option", "")                     \
   _(TK_APPLY, "apply", "")                       \
   _(TK_COMPREHENSION, "comprehension", "")       \
-  _(TK_TENSOR_TYPE, "tensor_type", "")           \
   _(TK_RANGE_CONSTRAINT, "range_constraint", "") \
   _(TK_PARAM, "param", "")                       \
   _(TK_INFERRED, "inferred", "")                 \

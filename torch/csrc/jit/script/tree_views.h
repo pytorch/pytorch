@@ -17,7 +17,6 @@ namespace script {
 // - Maybe<T> is really a Tree with kind TK_OPTION that has 0 or 1 subtree of type T
 // - Builtin types are: Ident (TK_IDENT), String (TK_STRING)
 //
-// Type  = TensorType()                                                 TK_TENSOR_TYPE
 // Param = Param(Expr type, Ident name)                                 TK_PARAM
 //
 // Decl  = Decl(List<Param> params, Type return_type)                   TK_DECL
@@ -199,17 +198,6 @@ struct Ident : public TreeView {
 // Base types (production LHS)
 ////////////////////////////////////////////////////////////////////////////////
 
-struct Type : public TreeView {
-  explicit Type(const TreeRef& tree) : TreeView(tree) {
-    switch (tree->kind()) {
-      case TK_TENSOR_TYPE:
-        return;
-      default:
-        throw ErrorReport(tree) << kindToString(tree->kind()) << " is not a valid Type";
-    }
-  }
-};
-
 struct Stmt : public TreeView {
   explicit Stmt(const TreeRef& tree) : TreeView(tree) {
     switch (tree->kind()) {
@@ -307,20 +295,6 @@ struct Param : public TreeView {
   }
 };
 
-
-////////////////////////////////////////////////////////////////////////////////
-// Type
-////////////////////////////////////////////////////////////////////////////////
-
-struct TensorType : public Type {
-  explicit TensorType(const TreeRef& tree) : Type(tree) {
-    tree_->match(TK_TENSOR_TYPE);
-  }
-  static TensorType create(const SourceRange& range) {
-    return TensorType(Compound::create(TK_TENSOR_TYPE, range, {}));
-  }
-};
-
 ////////////////////////////////////////////////////////////////////////////////
 // Top level definitions
 ////////////////////////////////////////////////////////////////////////////////
@@ -332,10 +306,10 @@ struct Decl : public TreeView {
   List<Param> params() const {
     return List<Param>(subtree(0));
   }
-  Type return_type() const {
-    return Type(subtree(1));
+  Expr return_type() const {
+    return Expr(subtree(1));
   }
-  static Decl create(const SourceRange& range, const List<Param>& params, Type return_type) {
+  static Decl create(const SourceRange& range, const List<Param>& params, Expr return_type) {
     return Decl(Compound::create(TK_DECL, range, {params, return_type}));
   }
 };
