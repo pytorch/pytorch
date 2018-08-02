@@ -2441,6 +2441,20 @@ a")
         y = torch.arange(0., 8, 2, requires_grad=True)
         self.checkScript(func, [x, y], optimize=True, capture_output=True)
 
+    def test_type_cast(self):
+        def test_int_to_float():
+            b = float(2)
+            return b + 1.0
+
+        def test_float_to_int():
+            b = int(2.0)
+            return b + 1
+
+        graph1 = torch.jit.script(test_int_to_float).graph
+        self.assertExpectedGraph(graph1, subname="int_to_float")
+        graph2 = torch.jit.script(test_float_to_int).graph
+        self.assertExpectedGraph(graph2, subname="float_to_int")
+
     def test_multiple_assignment(self):
         def outer_func(x):
             return x * 2, x + 2

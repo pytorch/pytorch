@@ -64,19 +64,25 @@ struct PrintValue : public SugaredValue {
   }
 };
 
-static Value* numToTensor(const SourceRange& loc, Value* value) {
+static Value* typeCast(const SourceRange& loc, Value* value, TypePtr dst) {
   auto& graph = *value->owningGraph();
-  auto n = graph.insertNode(graph.createNumToTensor(value))
-      ->setSourceLocation(std::make_shared<SourceRange>(loc));
-  return n->output();
-}
+  const TypePtr orig = value->type();
+  Node* n = nullptr;
 
-static Value* tensorToNum(
-    const SourceRange& loc,
-    Value* value,
-    const TypePtr type) {
-  auto& graph = *value->owningGraph();
-  auto* result = graph.insertNode(graph.createTensorToNum(type, value))
+  if(dst->isSubtypeOf(DynamicType::get()) && orig->isSubtypeOf(NumberType::get())) {
+    n = graph.createNumToTensor(value);
+  } else if (dst->isSubtypeOf(NumberType::get()) && orig->isSubtypeOf(DynamicType::get())) {
+    n = graph.createTensorToNum(dst, value);
+  } else if(dst->isSubtypeOf(IntType::get()) && orig->isSubtypeOf(FloatType::get())) {
+    n = graph.createFloatToInt(dst, value);
+  } else if(dst->isSubtypeOf(FloatType::get()) && orig->isSubtypeOf(IntType::get())) {
+    n = graph.createIntToFloat(dst, value);
+  } else {
+    throw ErrorReport(loc) << "Cannot cast type '" << orig->str() << "' to type '"
+      << dst->str() << "', no available type casting.";
+  }
+
+  auto* result = graph.insertNode(n)
       ->setSourceLocation(std::make_shared<SourceRange>(loc))
       ->output();
   return result;
@@ -104,15 +110,7 @@ struct CastValue : public SugaredValue {
       auto values = toValues(inputs);
       Value* input = values.at(0);
       if(!input->type()->isSubtypeOf(type)) {
-        if(*type == *DynamicType::get()) {
-          if(!input->type()->isSubtypeOf(NumberType::get())) {
-            throw ErrorReport(loc) << "expected a number";
-          }
-          input = numToTensor(loc, input);
-        } else {
-          ensureTensors(loc, values);
-          input = tensorToNum(loc, values.at(0), type);
-        }
+          input = typeCast(loc, input, type);
       }
       return std::make_shared<SimpleValue>(input);
   }
@@ -840,7 +838,7 @@ private:
   Value* emitCond(Expr cond) {
     Value* v = emitExpr(cond, identity);
     if(v->type()->isSubtypeOf(DynamicType::get())) {
-      v = tensorToNum(cond.range(), v, IntType::get());
+      v = typeCast(cond.range(), v, IntType::get());
     }
     if(!v->type()->isSubtypeOf(IntType::get())) {
       throw ErrorReport(cond) << "expected a tensor or integer expression for condition but found " << v->type()->str();

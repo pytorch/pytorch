@@ -1027,6 +1027,16 @@ public:
     result->output()->setType(type);
     return result;
   }
+  Node* createIntToFloat(const TypePtr& type, Value* value) {
+    auto* result = create(prim::IntToFloat, {value});
+    result->output()->setType(type);
+    return result;
+  }
+  Node* createFloatToInt(const TypePtr& type, Value* value) {
+    auto* result = create(prim::FloatToInt, {value});
+    result->output()->setType(type);
+    return result;
+  }
   Node* createPythonOp(
       THPObjectPtr&& pyobj,
       const std::string& cconv,

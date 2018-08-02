@@ -422,9 +422,6 @@ struct NoneType : public Type {
   virtual std::string str() const override {
     return "None";
   }
-  virtual bool isSubtypeOf(const TypePtr rhs) const override {
-    return *this == *rhs;
-  }
   static const TypeKind Kind = TypeKind::NoneType;
   // global singleton
   static NoneTypePtr get();

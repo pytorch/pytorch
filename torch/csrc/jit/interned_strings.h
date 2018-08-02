@@ -47,6 +47,8 @@ _(prim, TupleUnpack) \
 _(prim, ListConstruct) \
 _(prim, NumToTensor) \
 _(prim, TensorToNum) \
+_(prim, IntToFloat) \
+_(prim, FloatToInt) \
 _(prim, AutogradAdd) \
 _(prim, GradOf) \
 _(prim, AnyDefined) \
