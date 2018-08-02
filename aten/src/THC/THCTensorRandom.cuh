@@ -223,14 +223,14 @@ sampleMultinomialOnce(int64_t* dest,
       // All threads in bounds load a value
       int cat = chunk * blockDim.x + threadIdx.x;
 
-      AccT val =
+      T dist_val = ScalarConvert<AccT, T>::to(
         cat < categories ?
           THCNumerics<AccT>::div(
               ScalarConvert<T, AccT>::to(dist[curDist * stride_dist + cat * stride_categories]),
               sum) :
-          accZero;
+	  accZero);
 
-      smem[threadIdx.x] = ScalarConvert<AccT, T>::to(val);
+      smem[threadIdx.x] = dist_val;
       __syncthreads();
 
       // Perform an inclusive prefix sum of the shared memory contents
@@ -257,7 +257,8 @@ sampleMultinomialOnce(int64_t* dest,
       bool inBucket =
         (cat < categories) &&
         (!THCNumerics<T>::ge(sample, curBucket)) &&
-        (THCNumerics<T>::ge(sample, prevBucket));
+        (THCNumerics<T>::ge(sample, prevBucket)) &&
+        (THCNumerics<T>::gt(dist_val, zero));
 
       if (inBucket) {
         // We're done; we have the sample
