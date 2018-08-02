@@ -11,7 +11,7 @@ void Operator<CUDAContext>::SyncDevice() {
 
   cudaEvent_t ev;
   cudaSetDevice(context->cuda_gpu_id());
-  cudaEventCreate(&ev);
+  cudaEventCreateWithFlags(&ev, cudaEventDisableTiming);
   cudaEventRecord(ev, context->cuda_stream());
   cudaEventSynchronize(ev);
   cudaEventDestroy(ev);
