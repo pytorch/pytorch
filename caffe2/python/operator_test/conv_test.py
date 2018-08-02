@@ -503,9 +503,9 @@ class TestConvolution(hu.HypothesisTestCase):
            net_type=st.sampled_from(
                ["simple", "dag"] +
                (["async_dag"] if workspace.has_gpu_support or workspace.has_hip_support else [])),
-           do=st.sampled_from(hu.device_options),
-           engine=st.sampled_from(["CUDNN", ""]))
-    def test_convolution_sync(self, net_type, num_workers, do, engine):
+           engine=st.sampled_from(["CUDNN", ""]),
+           **hu.gcs_ho_hip)
+    def test_convolution_sync(self, net_type, num_workers, engine, gc, dc):
         m = ModelHelper(name="test_model")
         n = 1
         d = 2
@@ -557,8 +557,8 @@ class TestConvolution(hu.HypothesisTestCase):
         m.net.SquaredL2Distance(["0_0_flat", "label"], "xent")
         m.net.AveragedLoss("xent", "loss")
         input_to_grad = m.AddGradientOperators(["loss"])
-        m.Proto().device_option.CopyFrom(do)
-        m.param_init_net.Proto().device_option.CopyFrom(do)
+        m.Proto().device_option.CopyFrom(dc)
+        m.param_init_net.Proto().device_option.CopyFrom(dc)
         m.Proto().type = net_type
         m.Proto().num_workers = num_workers
         self.ws.run(m.param_init_net)
@@ -570,10 +570,10 @@ class TestConvolution(hu.HypothesisTestCase):
             for input_blob in input_blobs:
                 self.ws.create_blob(input_blob).feed(
                     np.random.randn(n, d, h, w).astype(np.float32),
-                    device_option=do)
+                    device_option=dc)
                 self.ws.create_blob("label").feed(
                     np.random.randn(n, d * h * w).astype(np.float32),
-                    device_option=do)
+                    device_option=dc)
             self.ws.run(m.net)
             gradients = [
                 self.ws.blobs[str(input_to_grad[input_blob])].fetch()
