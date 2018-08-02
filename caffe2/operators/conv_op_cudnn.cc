@@ -602,12 +602,12 @@ bool CudnnConvOp::DoRunWithType() {
             kernel_w()));
       } else {
         vector<int> dims(filter.dims().begin(), filter.dims().end());
-        dims[0] /= group_;
 #if !CUDNN_VERSION_MIN(7, 0, 0)
+        // We only need to divide dims by group_ when CUDNN version < 7.0
+        // see CUDA group convolution doc: https://fburl.com/dgj6dvpd
         order_ == StorageOrder::NCHW ? dims[1] /= group_
                                      : dims[filter.ndim() - 1] /= group_;
 #endif
-        dims[filter.ndim() - 1] /= group_;
         CUDNN_ENFORCE(cudnnSetFilterNdDescriptor(
             filter_desc_,
             cudnnTypeWrapper<T_W>::type,
@@ -959,10 +959,12 @@ bool CudnnConvGradientOp::DoRunWithType() {
       } else {
         vector<int> dims(filter.dims().begin(), filter.dims().end());
 #if !CUDNN_VERSION_MIN(7, 0, 0)
-        dims[0] /= group_;
-#endif
+        // We only need to divide dims by group_ when CUDNN version < 7.0
+        // see CUDA group convolution doc: https://fburl.com/dgj6dvpd
         order_ == StorageOrder::NCHW ? dims[1] /= group_
                                      : dims[filter.ndim() - 1] /= group_;
+#endif
+
         CUDNN_ENFORCE(cudnnSetFilterNdDescriptor(
             filter_desc_,
             cudnnTypeWrapper<T_W>::type,
