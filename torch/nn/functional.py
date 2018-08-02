@@ -1829,7 +1829,7 @@ def multilabel_soft_margin_loss(input, target, weight=None, size_average=None,
         reduction = _Reduction.legacy_get_string(size_average, reduce)
 
     loss = -(target * logsigmoid(input) + (1 - target) * logsigmoid(-input))
-    loss.sum(dim=0)  # only return N loss values
+    loss = loss.sum(dim=0)  # only return N loss values
 
     if weight is not None:
         loss = loss * weight
