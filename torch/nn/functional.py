@@ -765,7 +765,7 @@ def leaky_relu(input, negative_slope=0.01, inplace=False):
     leaky_relu(input, negative_slope=0.01, inplace=False) -> Tensor
 
     Applies element-wise,
-    :math:`\text{LeakyReLU}(x) = \max(0, x) + \text{negative_slope} * \min(0, x)`
+    :math:`\text{LeakyReLU}(x) = \max(0, x) + \text{negative\_slope} * \min(0, x)`
 
     See :class:`~torch.nn.LeakyReLU` for more details.
     """

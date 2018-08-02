@@ -189,7 +189,7 @@ class Subgraph {
     return nodes_;
   }
 
-  const size_t getNodesCount() const {
+  size_t getNodesCount() const {
     return (size_t)nodes_.size();
   }
 

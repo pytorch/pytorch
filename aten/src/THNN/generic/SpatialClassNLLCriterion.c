@@ -78,7 +78,7 @@ void THNN_(SpatialClassNLLCriterion_updateOutput)(
             continue;
           }
           real value = THTensor_(fastGet4d)(input, b, cur_target, h, w);
-          real weight = weights ? THTensor_(fastGet1d)(weights, cur_target) : 1.0f;
+          real weight = weights ? THTensor_(fastGetLegacy1dNoScalars)(weights, cur_target) : 1.0f;
           THTensor_(fastSet3d)(output, b, h, w, -value * weight);
         }
       }
@@ -161,7 +161,7 @@ void THNN_(SpatialClassNLLCriterion_updateGradInput)(
           if (cur_target == ignore_index) {
             continue;
           }
-          real value = -(weights ? THTensor_(fastGet1d)(weights, cur_target) : 1.0f);
+          real value = -(weights ? THTensor_(fastGetLegacy1dNoScalars)(weights, cur_target) : 1.0f);
           real gradOutput_value = THTensor_(fastGet3d)(gradOutput, b, h, w);
           THTensor_(fastSet4d)(gradInput, b, cur_target, h, w, value * gradOutput_value);
         }
@@ -201,7 +201,7 @@ void THNN_(SpatialClassNLLCriterion_updateGradInput)(
 
       int index = b * sample_size + cur_target * map_size + elem;
       gradInput_data[index] =
-        -(weights ? weights_data[cur_target] : 1.0f) / normalize * THTensor_(fastGet1d)(gradOutput, 0);
+        -(weights ? weights_data[cur_target] : 1.0f) / normalize * THTensor_(fastGetLegacy1dNoScalars)(gradOutput, 0);
     }
   }
 

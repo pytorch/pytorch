@@ -43,7 +43,9 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
   input_data = THTensor_(data)(input);
   target_data = THIndexTensor_(data)(target);
 
-  THNN_resizeAs_indices(isTarget, target);
+  if (!isTarget->sizes().equals(target->sizes())) {
+    THTensor_(resizeNd)(isTarget, target->dim(), THTensor_getSizePtr(target), nullptr);
+  }
   THTensor_(zero)(isTarget);
   isTarget_data = THTensor_(data)(isTarget);
 
@@ -232,7 +234,7 @@ void THNN_(MultiLabelMarginCriterion_updateGradInput)(
     THNN_CHECK_DIM_SIZE(gradOutput, 1, 0, 1);
     for (t = 0; t < nframe*dim; t++)
     {
-      gradInput_data[t] *= THTensor_(fastGet1d)(gradOutput, 0);
+      gradInput_data[t] *= THTensor_(fastGetLegacy1dNoScalars)(gradOutput, 0);
     }
   }
   else
@@ -242,7 +244,7 @@ void THNN_(MultiLabelMarginCriterion_updateGradInput)(
     {
       for (d = 0; d < dim; d++)
       {
-        gradInput_data[t * dim + d] *= THTensor_(fastGet1d)(gradOutput, t);
+        gradInput_data[t * dim + d] *= THTensor_(fastGetLegacy1dNoScalars)(gradOutput, t);
       }
     }
   }

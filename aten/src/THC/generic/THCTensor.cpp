@@ -523,20 +523,6 @@ int THCTensor_(isContiguous)(THCState *state, const THCTensor *self)
   return THCTensor_isContiguous(state, self);
 }
 
-int THCTensor_(isSize)(THCState *state, const THCTensor *self, const THLongStorage *dims)
-{
-  int d;
-  if (self->dim() != dims->size)
-    return 0;
-
-  for (d = 0; d < self->dim(); ++d)
-  {
-    if (self->size(d) != THLongStorage_data(dims)[d])
-      return 0;
-  }
-  return 1;
-}
-
 int THCTensor_(isSetTo)(THCState *state, const THCTensor *self, const THCTensor *src)
 {
   if (THTensor_getStoragePtr(self) == THTensor_getStoragePtr(src) &&
@@ -606,14 +592,14 @@ void THCTensor_(set1d)(THCState *state, THCTensor *tensor, int64_t x0, real valu
 {
   THArgCheck(THTensor_nDimensionLegacyNoScalars(tensor) == 1, 1, "tensor must have one dimension");
   THArgCheck( (x0 >= 0) && (x0 < THTensor_sizeLegacyNoScalars(tensor, 0)), 2, "out of range");
-  THCStorage_(set)(state, THTensor_getStoragePtr(tensor), tensor->storage_offset()+x0*tensor->stride(0), value);
+  THCStorage_(set)(state, THTensor_getStoragePtr(tensor), tensor->storage_offset()+x0*THTensor_strideLegacyNoScalars(tensor, 0), value);
 }
 
 real THCTensor_(get1d)(THCState *state, const THCTensor *tensor, int64_t x0)
 {
   THArgCheck(THTensor_nDimensionLegacyNoScalars(tensor) == 1, 1, "tensor must have one dimension");
   THArgCheck( (x0 >= 0) && (x0 < THTensor_sizeLegacyNoScalars(tensor, 0)), 2, "out of range");
-  return THCStorage_(get)(state, THTensor_getStoragePtr(tensor), tensor->storage_offset()+x0*tensor->stride(0));
+  return THCStorage_(get)(state, THTensor_getStoragePtr(tensor), tensor->storage_offset()+x0*THTensor_strideLegacyNoScalars(tensor, 0));
 }
 
 void THCTensor_(set2d)(THCState *state, THCTensor *tensor, int64_t x0, int64_t x1, real value)

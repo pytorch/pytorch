@@ -114,9 +114,9 @@ THCTensor_(cross)(THCState *state, THCTensor *self, THCTensor *x, THCTensor *y, 
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 3, self, x, y));
 
   int i;
-  int nd = THCTensor_(nDimensionLegacyNoScalars)(state, x);
+  int nd = x->dim();
   ptrdiff_t nelem = THCTensor_(nElement)(state, x);
-  THArgCheck(nd == THCTensor_(nDimensionLegacyNoScalars)(state, y), 1, "tensors must have same number of dimensions");
+  THArgCheck(nd == y->dim(), 1, "tensors must have same number of dimensions");
   for (i = 0; i < nd; i++) {
     THArgCheck(THCTensor_(size)(state, x, i) == THCTensor_(size)(state, y, i), 1, "dimension %i of x and y does not match", i);
     if (dimension < 0 && THCTensor_(size)(state, x, i) == 3) {
