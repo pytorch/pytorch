@@ -10,7 +10,7 @@
 
 namespace torch { namespace jit {
 
-FunctionSchema parseSchema(const std::string& decl);
+FunctionSchema parseSchema(const std::string& schema);
 
 using OperationCreator = std::function<Operation(Node*)>;
 
@@ -33,7 +33,7 @@ struct TORCH_API Operator {
 
   FunctionSchema schema;
 
-  bool matches(const Node* n) const;
+  bool matches(const Node* node) const;
   // Operators have different versions depending on if some inputs are encoded
   // as attributes or inputs. This function returns the right Operation function,
   // given a node encoded for one variant.

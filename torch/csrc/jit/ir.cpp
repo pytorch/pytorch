@@ -355,7 +355,7 @@ void Graph::lint() const {
   // - every use will occur later in the topsort
 
   struct LintScope {
-    LintScope() {}
+    LintScope() = default;
     LintScope(std::unique_ptr<LintScope> parent)
     : parent(std::move(parent)) {}
     bool contains(const Value * v) {
@@ -487,13 +487,13 @@ void LintGraph(std::shared_ptr<Graph>& graph) {
   graph->lint();
 }
 
-void Block::cloneFrom(Block * src, std::function<Value*(Value*)> outer_map) {
+void Block::cloneFrom(Block * src, std::function<Value*(Value*)> value_map) {
   std::unordered_map<Value*, Value*> local_map;
   auto env = [&](Value * v) {
     auto it = local_map.find(v);
     if(it != local_map.end())
       return it->second;
-    return outer_map(v);
+    return value_map(v);
   };
 
   auto graph = owningGraph();
@@ -619,23 +619,8 @@ Value* Node::namedInput(Symbol name) const {
     // so this is completely unsafe and needs to be gone as soon as possible.
     return v;
   }
-  const auto & the_schema = schema();
-  int64_t tensor_list_pos = 0;
-  for (auto & arg : the_schema.arguments) {
-    if (*arg.type == *ListType::ofTensors())
-      break;
-    tensor_list_pos++;
-  }
   int64_t arg_pos = findArgument(schema(), name).first;
-  // XXX: we don't have a single value we could give for a Tensor[],
-  // because we flatten lists into arguments
-  JIT_ASSERT(arg_pos != tensor_list_pos);
-  // NB: if there's no tensor list, then tensor_list_pos == arguments.size(), so this is always true
-  if (arg_pos < tensor_list_pos) {
-    return input(arg_pos);
-  } else {
-    return input(inputs().size() - (the_schema.arguments.size() - arg_pos));
-  }
+  return input(arg_pos);
 }
 
 bool Node::matches(const char *signature_literal, at::ArrayRef<Symbol> const_inputs) {

@@ -204,9 +204,9 @@ def try_real_annotations(fn):
 
 def ann_to_type(ann):
     if ann is None:
-        return DynamicType()
+        return DynamicType.get()
     elif ann is torch.Tensor:
-        return DynamicType()
+        return DynamicType.get()
     elif is_tuple(ann):
         return TupleType([ann_to_type(a) for a in ann.__args__])
     raise ValueError("The only supported annotations kinds are Tensor and Tuple[...]")

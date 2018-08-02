@@ -104,7 +104,7 @@ struct ParsedArgs {
 
 
 ParsedArgs flatten(py::handle obj);
-PyObject* unflatten(at::ArrayRef<autograd::Variable> outputs,
+PyObject* unflatten(at::ArrayRef<autograd::Variable> vars,
                     const IODescriptor& structure);
 
 }}} // namespace torch::jit::python

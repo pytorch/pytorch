@@ -61,7 +61,8 @@ def init_process_group(backend, init_method='env://', **kwargs):
         group_name (str, optional): Group name. See description of init methods.
 
     To enable ``backend == mpi``, PyTorch needs to built from source on a system that
-    supports MPI.
+    supports MPI. If you want to use Openmpi with CUDA-aware support, please use Openmpi
+    major version 2 and above.
 
     """
     world_size = kwargs.pop('world_size', -1)

@@ -66,7 +66,7 @@ struct Model_ {
 // Readers
 
 struct ReaderBase {
-  ReaderBase() {}
+  ReaderBase() = default;
   ReaderBase(pb_callback_t& cb) {
     initialize_callback(cb);
   }

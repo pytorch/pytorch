@@ -76,6 +76,9 @@ void gpu_nullary_kernel(TensorIterator& iter, const func_t& f) {
   using arg0_t = typename traits::result_type;
 
   int64_t numel = iter.numel();
+  if (numel == 0) {
+    return;
+  }
   if (iter.is_trivial_1d()) {
     auto strides = iter.get_inner_strides();
     int stride0 = strides[0];
@@ -105,6 +108,9 @@ void gpu_unary_kernel(TensorIterator& iter, const func_t& f) {
   using arg1_t = typename traits::arg1_t;
 
   int64_t numel = iter.numel();
+  if (numel == 0) {
+    return;
+  }
   if (iter.is_cpu_scalar(1)) {
     auto a = iter.scalar_value<arg1_t>(1);
     iter.remove_operand(1);
@@ -152,6 +158,9 @@ void gpu_binary_kernel(TensorIterator& iter, const func_t& f) {
   using arg2_t = typename traits::arg2_t;
 
   int numel = iter.numel();
+  if (numel == 0) {
+    return;
+  }
   if (iter.is_cpu_scalar(1)) {
     auto a = iter.scalar_value<arg1_t>(1);
     iter.remove_operand(1);

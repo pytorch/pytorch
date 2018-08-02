@@ -12,8 +12,6 @@ StorageImpl::StorageImpl(
     : scalar_type(scalar_type),
       data_ptr(std::move(data_ptr)),
       size(size),
-      refcount(1),
-      weakcount(1), // from the strong reference
       resizable(resizable),
       allocator(allocator),
       finalizer(nullptr) {}

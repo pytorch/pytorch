@@ -345,18 +345,14 @@ std::vector<ConcatDesc> emitCompilationUnit(std::ostream & out,
     size_t i = 0;
     for(auto o : subgraph.outputs()) {
       auto & desc = agraph.output_desc[i++];
-      if(o->node()->kind() != aten::cat) {
+      if(o->node()->kind() != prim::FusedConcat) {
         emitFormal(o, desc);
         concat_desc.emplace_back();
         flat_output_nodes.push_back(o);
       } else {
         auto cat = o->node();
-        auto tensor_inputs = cat->inputs();
-        // We need to drop the dim arg
-        tensor_inputs = tensor_inputs.slice(0, tensor_inputs.size() - 1);
-        size_t nInputs = tensor_inputs.size();
-        concat_desc.emplace_back(desc, nInputs, cat->get<int64_t>(attr::dim).value());
-        for(auto c : tensor_inputs) {
+        concat_desc.emplace_back(desc, cat->inputs().size(), cat->i(attr::dim));
+        for(auto c : cat->inputs()) {
           emitFormal(c, *concat_desc.back().subtensorDesc);
           flat_output_nodes.push_back(c);
         }
@@ -386,8 +382,9 @@ std::vector<ConcatDesc> emitCompilationUnit(std::ostream & out,
   }
 
   for(auto n : subgraph.nodes()) {
-    if(n->kind() == aten::cat)
-      continue; // Concat nodes by narrowing the output Tensors before the kernel runs
+    // FusedConcat nodes work by narrowing the output Tensors before the kernel runs
+    if (n->kind() == prim::FusedConcat)
+      continue;
     env.s("node",valueName(n->output()));
     env.s("rhs", encodeRHS(n));
     body << format("auto ${node} = ${rhs};\n",env);

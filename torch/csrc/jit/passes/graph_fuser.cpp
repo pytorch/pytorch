@@ -177,16 +177,25 @@ struct GraphFuser {
     }
   }
 
-  bool allCatInputsHaveSameSize(Node * node) {
-    JIT_ASSERT(node->kind() == aten::cat);
-    std::vector<Value*> inputs = node->inputs();
-    if (!node->hasAttributes()) {
-      inputs.pop_back(); // Get rid of the dim argument
-    }
+  bool isFusableCatNode(Node * node) {
+    if (node->kind() != aten::cat)
+      return false;
+    if (!node->is_constant(attr::dim))
+      return false;
 
-    auto expected = inputs.at(0)->type()->cast<TensorType>();
+    auto tensors_node = node->namedInput(attr::tensors)->node();
+    if (tensors_node->kind() != prim::ListConstruct) return false;
+    // NB: Note that technically other uses of the list aren't a big problem for us.
+    // It would be enough to place the prim::FusedConcat before the prim::ListConstruct, and
+    // allUsersAreThisConsumerOrOccurAfterIt would still be satisfied. However, I don't expect this
+    // to be necessary any time soon, and so we're simply assuming that we don't have to deal with that.
+    if (tensors_node->output()->uses().size() > 1) return false;
+    auto tensors = tensors_node->inputs();
+
+    // Our fusion code assumes that all inputs have the same shapes, so we need to check this too.
+    auto expected = tensors.at(0)->type()->cast<TensorType>();
     if (!expected) return false;
-    return std::all_of(inputs.begin(), inputs.end(), [expected](Value *v) {
+    return std::all_of(tensors.begin(), tensors.end(), [&expected](Value *v) {
         auto actual = v->type()->cast<TensorType>();
         return actual && actual->sizes() == expected->sizes();
     });
@@ -197,15 +206,7 @@ struct GraphFuser {
   // because it is not a simple map, can be put in a fusion group
   // as long as no items in the group read the output of concat
   bool isFusableAsExitNode(Node * node) {
-    if(isFusable(node))
-      return true;
-    // this concat fusion only works when all the inputs are the same size
-    // and we can statically infer the dimension along which we should concat
-    // otherwise they cannot partipate in the same map
-    if(node->kind() == aten::cat && node->is_constant(attr::dim) && allCatInputsHaveSameSize(node))
-      return true;
-
-    return false;
+    return isFusable(node) || isFusableCatNode(node);
   }
 
   // necessary condition for fusion. If all of the uses of producer are consumer
@@ -241,8 +242,9 @@ struct GraphFuser {
     // we can move the consumer up into the producer.
     // but this requires better handling of merging fusion groups so it is not done now
     at::optional<int> consumer_device = getDevice(consumer);
+    Node *real_consumer = consumer->kind() == aten::cat ? consumer->namedInput(attr::tensors)->node() : consumer;
     return isFusable(producer->node()) &&
-      allUsersAreThisConsumerOrOccurAfterIt(consumer, producer) &&
+      allUsersAreThisConsumerOrOccurAfterIt(real_consumer, producer) &&
       consumer_device && consumer_device == getDevice(producer->node()) &&
       (*consumer_device != kCPUDevice || sharedFusionCompiler().canCompileOnCPU());
   }
@@ -389,7 +391,24 @@ struct GraphFuser {
 
   Node * fuse(Node * consumer, Value * producer) {
     auto group = consumer;
-    if(group->kind() != prim::FusionGroup) {
+    if (consumer->kind() == aten::cat) {
+      Graph * graph = consumer->owningGraph();
+      Node * list_construct = consumer->namedInput(attr::tensors)->node();
+      int64_t dim = consumer->get<int64_t>(attr::dim).value();
+
+      Node * fused_cat = graph->create(prim::FusedConcat, list_construct->inputs())->i_(attr::dim, dim);
+      fused_cat->insertBefore(list_construct);
+      fused_cat->output()->copyMetadata(consumer->output());
+      consumer->output()->replaceAllUsesWith(fused_cat->output());
+      topological_index[fused_cat] = topological_index[list_construct];
+
+      // NB: this deletes the fused_cat node from the original graph
+      group = createSingletonFusionGroup(fused_cat);
+      consumer->destroy();
+      if (list_construct->output()->uses().empty()) {
+        list_construct->destroy();
+      }
+    } else if (consumer->kind() != prim::FusionGroup) {
       group = createSingletonFusionGroup(consumer);
     }
     if (producer->node()->kind() == prim::FusionGroup) {
@@ -450,7 +469,6 @@ struct GraphFuser {
       }
     }
 
-    // TODO: Remove this restriction if we ever need to distribute across
     // multiple return operators
     Node * producer_for_chunk_node = producer_for_chunk->node();
     JIT_ASSERT(producer_for_chunk_node->outputs().size() == 1);
@@ -521,11 +539,14 @@ struct GraphFuser {
   std::pair<graph_node_list::iterator, bool> scanNode(Node * consumer) {
     auto stage_guard = block->owningGraph()->setStageTemporary(consumer->stage());
     if(isFusableAsExitNode(consumer)) {
+      value_list inputs;
+      auto consumer_inputs = consumer->kind() == aten::cat ?
+        consumer->namedInput(attr::tensors)->node()->inputs() :
+        consumer->inputs();
       // handle inputs in reverse topological order as well...
       // otherwise in f(a,a+b) it will appear a is used twice if we consider
       // the f-a fusion before the f-(a+b) fusion first.
-      value_list inputs;
-      for(auto i : consumer->inputs()) {
+      for(auto i : consumer_inputs) {
         if (i->node()->owningBlock() == block) {
           inputs.push_back(i);
           JIT_ASSERT(topological_index.count(i->node()) > 0);

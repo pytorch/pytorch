@@ -64,7 +64,6 @@ public:
       storage.size = ref.size();
     }
     storage.scalar_type = at::CTypeToScalarType<th::from_type<int64_t>>::to();
-    storage.refcount = 0;
     storage.set_resizable(false);
   }
 private:
