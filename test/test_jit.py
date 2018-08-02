@@ -4864,6 +4864,8 @@ EXCLUDE_TRACED = {
     'test_split_dim_neg0',
     'test_gesv',
     'test_inverse',
+    'test_matrix_power_n=-1',  # involves inverse
+    'test_matrix_power_n=-3',  # involves inverse
 }
 
 # known to be failing in script
@@ -4923,6 +4925,8 @@ EXCLUDE_SCRIPT = {
     'test_split_dim_neg0',
     'test_gesv',
     'test_inverse',
+    'test_matrix_power_n=-1',  # involves inverse
+    'test_matrix_power_n=-3',  # involves inverse
 }
 
 
