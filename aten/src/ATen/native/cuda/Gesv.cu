@@ -179,44 +179,79 @@ AT_ERROR("gesv: MAGMA library not found in "
   int info;
   int* ipiv;
 
+  bool use_temp_sol = false;
+  bool use_temp_lu = false;
+  auto temp_sol = self.type().tensor();
+  auto temp_lu = self.type().tensor();
+
   /* Init to column major format. See Gesv.cpp for more comments */
-  bool tc = sol.dim() == 2 && isTransposeContiguous(sol);
+
+  bool tc = isTransposeContiguous(sol);
   if (tc) {
     sol.t_();
+  } else if (sol.dim() == 2 &&
+             sol.size(0) == bx &&
+             sol.size(1) == by) {
+    use_temp_sol = true;
   }
 
-  sol.resize_({by, bx});
-  if (self.data_ptr() == sol.data_ptr()) {
-    if (!tc) {
-      sol.copy_(self.view({bx, by}).t().clone());
-    }
+  if (use_temp_sol) {
+    temp_sol.resize_({by, bx});
+    temp_sol.copy_(self.view({bx, by}).t());
   } else {
-    sol.copy_(self.view({bx, by}).t());
+    sol.resize_({by, bx});
+    if (&self == &sol) {
+      if (!tc) {
+        sol.copy_(self.view({bx, by}).t().clone());
+      }
+    } else {
+      sol.copy_(self.view({bx, by}).t());
+    }
   }
 
-  tc = lu.dim() == 2 && isTransposeContiguous(lu);
+  tc = isTransposeContiguous(lu);
   if (tc) {
     lu.t_();
+  } else if (lu.dim() == 2 &&
+             lu.size(0) == ax &&
+             lu.size(1) == ay) {
+    use_temp_lu = true;
   }
 
-  lu.resize_({ay, ax});
-  if (A.data_ptr() == lu.data_ptr()) {
-    if (!tc) {
-      lu.copy_(A.t().clone());
-    }
+  if (use_temp_lu) {
+    temp_lu.resize_({ay, ax});
+    temp_lu.copy_(A.t());
   } else {
-    lu.copy_(A.t());
+    lu.resize_({ay, ax});
+    if (&A == &lu) {
+      if (!tc) {
+        lu.copy_(A.t().clone());
+      }
+    } else {
+      lu.copy_(A.t());
+    }
   }
 
   AT_DISPATCH_FLOATING_TYPES(self.type(), "gesv", [&]{
-      auto A_ptr = lu.data<scalar_t>();
-      auto b_ptr = sol.data<scalar_t>();
+      auto A_ptr = use_temp_lu ? temp_lu.data<scalar_t>()
+                               : lu.data<scalar_t>();
+      auto b_ptr = use_temp_sol ? temp_sol.data<scalar_t>()
+                                : sol.data<scalar_t>();
       ALLOCATE_ARRAY(ipiv, int, bx, sol);
       magmaGesv<scalar_t>(bx, by, A_ptr, bx, ipiv, b_ptr, bx, &info);
   });
 
-  sol.t_();
-  lu.t_();
+  if (use_temp_sol) {
+    sol.copy_(temp_sol.t_());
+  } else {
+    sol.t_();
+  }
+
+  if (use_temp_lu) {
+    lu.copy_(temp_lu.t_());
+  } else {
+    lu.t_();
+  }
 
   checkErrors({info});
   return std::tuple<Tensor&,Tensor&>(sol, lu);
