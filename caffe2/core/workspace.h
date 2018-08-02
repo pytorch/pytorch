@@ -309,7 +309,7 @@ class ActiveWorkspace {
   /**
    * Borrows a workspace and adds it to the active set.
    */
-  ActiveWorkspace(Workspace* workspace) : workspace_(workspace) {
+  explicit ActiveWorkspace(Workspace* workspace) : workspace_(workspace) {
     CHECK_NOTNULL(workspace);
     std::lock_guard<std::mutex> guard(wsmutex_);
     auto inserted = workspaces_.insert(workspace_).second;
