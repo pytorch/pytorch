@@ -61,6 +61,14 @@ struct AnnotatedGraph {
   std::vector<TensorDesc> output_desc;
 };
 
+struct ChunkDesc {
+  size_t formal_idx; // index into subgraph.inputs()
+  int64_t chunks;
+  int64_t dim;
+  ChunkDesc(size_t formal_idx, int64_t chunks, int64_t dim)
+  : formal_idx(formal_idx), chunks(chunks), dim(dim) {}
+};
+
 struct ConcatDesc {
   size_t nSubtensors; // == 1 for outputs that are not concats, otherwise it is the number tensors concatenated
   size_t dim; // dimension along which the concat occurs
@@ -119,6 +127,9 @@ protected:
   // an output is actually a concatenation of
   // many subtensors that the fusion group produces
   std::vector<ConcatDesc> concat_desc;
+
+  // A list of chunk operations this function may run.
+  std::vector<ChunkDesc> chunk_desc;
 };
 
 struct FusionCompilerConfig {

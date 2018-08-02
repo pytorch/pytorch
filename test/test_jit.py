@@ -1593,6 +1593,80 @@ class TestScript(JitTestCase):
             func2.graph, (torch.zeros(1, 1, 1, 1, 4),), False)
         self.assertExpected(canonical(func2.graph), subname='2')
 
+    @unittest.skipIf(not RUN_CUDA, "No CUDA")
+    def test_chunk_fusion_cuda(self):
+        def fn(x):
+            a, b, c = x.chunk(3, 1)
+            return a * b + c
+
+        inputs = [torch.randn(10, 6, dtype=torch.float, device='cuda')]
+
+        self.checkScript(fn, inputs)
+
+        fn_script = torch.jit.script(fn)
+        _ = fn_script(*inputs)
+        self.assertExpectedGraph(fn_script.graph_for(*inputs))
+
+    @unittest.skipIf(not RUN_CUDA, "No CUDA")
+    def test_chunk_multiple_fusion_cuda(self):
+        # The arguments are intentionally used out of order as a test to see
+        # if the fusion compiler adds extra args in the correct order
+        def fn(s, x, y, z):
+            z1, z2 = z.chunk(2, 2)
+            x1, x2, x3 = x.chunk(3, 1)
+            y1, y2 = y.chunk(2, 0)
+            return s + x1 + x2 + x3 + y1 + y2 + z1 + z2
+
+        inputs = [
+            torch.randn(5, 2, 3, dtype=torch.float, device='cuda'),
+            torch.randn(5, 6, 3, dtype=torch.float, device='cuda'),
+            torch.randn(10, 2, 3, dtype=torch.float, device='cuda'),
+            torch.randn(5, 2, 6, dtype=torch.float, device='cuda'),
+        ]
+
+        self.checkScript(fn, inputs)
+
+        fn_script = torch.jit.script(fn)
+        _ = fn_script(*inputs)
+        self.assertExpectedGraph(fn_script.graph_for(*inputs))
+
+    @staticmethod
+    def _test_chunk_fusion_correctness(self, device='cpu'):
+        def chunk_4_0(x):
+            x0, x1, x2, x3 = x.chunk(4, 0)
+            return x0 + x1 + x2 + x3
+
+        def chunk_4_1(x):
+            x0, x1, x2, x3 = x.chunk(4, 1)
+            return x0 + x1 + x2 + x3
+
+        def chunk_4_last(x):
+            x0, x1, x2, x3 = x.chunk(4, 2)
+            return x0 + x1 + x2 + x3
+
+        fns = [chunk_4_0, chunk_4_1, chunk_4_last]
+        tensors = [
+            # splitSize = 1
+            torch.randn(4, 4, 4, dtype=torch.float, device=device),
+
+            # contiguous case
+            torch.randn(12, 8, 16, dtype=torch.float, device=device),
+
+            # non-contiguous case
+            torch.randn(12, 8, 16, dtype=torch.float, device=device).transpose(1, 2),
+        ]
+
+        for tensor in tensors:
+            for fn in fns:
+                self.checkScript(fn, [tensor])
+
+    def test_chunk_fusion_correctness(self):
+        return self._test_chunk_fusion_correctness(self, 'cpu')
+
+    @unittest.skipIf(not RUN_CUDA, "No CUDA")
+    def test_chunk_fusion_correctness_cuda(self):
+        return self._test_chunk_fusion_correctness(self, 'cuda')
+
     def test_cat(self):
         @torch.jit.script
         def func(x):

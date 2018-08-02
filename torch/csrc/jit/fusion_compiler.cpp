@@ -171,16 +171,27 @@ typedef __half half;
 // offset += curDimIndex*strides[i]; // *strides[i] is optional if list_is_cont becaause strides.back() == 1
 // linearId /= sizes[i];
 auto dim_calc = CodeTemplate(R"(
-//printf("tensor ${tensor} sizes[${d}] = %d, strides[${d}] = %d\n", ${tensor}.sizes[${d}],${tensor}.strides[${d}]);
-size_t ${tensor}_dimIndex${d} = ${tensor}_linearIndex ${mod_sizes};
-${tensor}_offset += ${tensor}_dimIndex${d} ${times_stride};
+// printf("tensor ${tensor} sizes[${d}] = %d, strides[${d}] = %d\n", ${tensor}.sizes[${d}],${tensor}.strides[${d}]);
+size_t ${node}_dimIndex${d} = ${node}_linearIndex ${mod_sizes};
+${node}_offset += ${node}_dimIndex${d} ${times_stride};
 )");
 
-static void emitIndexingFor(std::ostream & out, const std::string & tensor, int ndim, bool last_is_cont) {
+static void emitIndexingFor(
+    std::ostream & out,
+    const std::string & node,
+    const std::string & tensor,
+    const std::string & initial_offset,
+    const std::string & initial_linearIndex,
+    int ndim,
+    bool last_is_cont) {
   TemplateEnv env;
+  env.s("node",node);
   env.s("tensor",tensor);
-  out << format("IndexType ${tensor}_offset = 0;\n",env);
-  out << format("IndexType ${tensor}_linearIndex = linearIndex;\n",env);
+  env.s("initial_offset", initial_offset);
+  env.s("initial_linearIndex", initial_linearIndex);
+
+  out << format("IndexType ${node}_offset = ${initial_offset};\n",env);
+  out << format("IndexType ${node}_linearIndex = ${initial_linearIndex};\n",env);
   for(int d = ndim - 1; d >= 0; --d) {
     env.d("d",d);
     env.s("mod_sizes", d > 0 ? format("% ${tensor}.sizes[${d}]",env) : "");
@@ -188,10 +199,25 @@ static void emitIndexingFor(std::ostream & out, const std::string & tensor, int 
       format("* ${tensor}.strides[${d}]",env) : "");
     out << dim_calc.format(env);
     if(d > 0) {
-      out << format("${tensor}_linearIndex /= ${tensor}.sizes[${d}];\n",env);
+      out << format("${node}_linearIndex /= ${tensor}.sizes[${d}];\n",env);
     }
   }
 }
+
+static void emitDefaultIndexingFor(
+    std::ostream & out,
+    const std::string & tensor,
+    int ndim,
+    bool last_is_cont) {
+  return emitIndexingFor(out,
+                         /*node*/tensor,
+                         /*tensor*/tensor,
+                         /*initial_offset*/"0",
+                         /*initial_linearIndex*/"linearIndex",
+                         ndim,
+                         last_is_cont);
+}
+
 
 static std::string valueName(Value * n) {
   return "n" + std::to_string(n->unique());
@@ -205,6 +231,76 @@ static std::string scalarValue(double v) {
   std::ostringstream out;
   out << std::scientific << v << "f";
   return out.str();
+}
+
+// XXX: assumes graph inputs are 32-bit indexable
+// assumes v is an input to the graph.
+size_t toInputIndex(Value * v, Graph & subgraph) {
+  auto start = subgraph.inputs().begin();
+  auto it = std::find(start, subgraph.inputs().end(), v);
+  JIT_ASSERT(it != subgraph.inputs().end());
+  return it - start;
+}
+
+// Consider torch.chunk(tensor, chunks, dim).
+// Let tensor have size (x_0, x_1, ..., x_n) and strides (s_0, ..., s_n).
+// Let the "splitSize" be (x_{dim} * x_{dim + 1} * ... * x_n) / chunks
+// and let the "splitStride" be x_{dim} / chunks * stride_{dim}
+//
+// This function assumes the splitStride and splitSize are passed to the kernel.
+// The strategy for performing at::chunk is:
+// 1) Convert linearIndex (for output tensors) to a 2D index
+//    representing indexing into compressed output tensors.
+// 2) Convert the 2D index into a linearIndex for the input tensor
+// 3) Use the linearIndex (input tensor) and splitOffset to index
+//    into the input tensor.
+static void emitChunk(
+    std::ostream & offsets,
+    std::ostream & body,
+    Node * chunk,
+    const std::string & inputName,
+    TensorDesc & inputDesc) {
+  TemplateEnv env;
+  size_t chunks = chunk->outputs().size();
+  auto in_tensor = inputName;
+
+  env.d("chunks", chunks);
+  env.s("in", in_tensor);
+
+  // First, use linearIndex (for the output tensors) to compute
+  // the corresponding linearIndex on the input tensor.
+  //
+  // We convert linearIndex to a 2D index that represents indexing
+  // into the (compressed) output tensor. The compressed output
+  // tensor will always have <= 2 dimensions because it is non-contiguous
+  // at dimension chunk_dim - 1.
+  //
+  // The output tensor has compressed size (???, ${in}_splitSize).
+  // This 2D index is then converted back to a linearIndex by scaling
+  // dim0 by ${chunks}.
+  offsets << format("IndexType ${in}_chunk_linearIndex = "
+                    "linearIndex % ${in}_splitSize + "
+                    "linearIndex / ${in}_splitSize * ${chunks} * ${in}_splitSize;\n", env);
+
+  // Now that we have a linearIndex for the input tensor, we can
+  // index into the tensor to produce each output.
+  for (size_t c = 0; c < chunks; ++c) {
+    env.s("out", valueName(chunk->outputs()[c]));
+    env.d("c", c);
+    // Convenience name. All intermediate variables will have this prefix.
+    auto name = format("${out}_${in}", env);
+    env.s("name", name);
+
+    // Emits the offset for the input tensor.
+    auto in_offset = format("${in}_splitStride * ${c}", env);
+    auto in_linearIndex = format("${in}_chunk_linearIndex", env);
+    emitIndexingFor(offsets, name, in_tensor, in_offset,
+                    in_linearIndex, inputDesc.nDim(),
+                    inputDesc.lastIsContiguous());
+
+    // Index into ${in} and assign to ${out}.
+    body << format("auto ${out} = ${in}.data[${name}_offset];\n", env);
+  }
 }
 
 static const char * scalarTypeName(at::ScalarType type) {
@@ -309,10 +405,25 @@ std::string encodeRHS(Node * n) {
   return format(str, env);
 }
 
-std::vector<ConcatDesc> emitCompilationUnit(std::ostream & out,
-                                            const std::string & name,
-                                            AnnotatedGraph & agraph,
-                                            bool use_cuda) {
+static void writeFormal(
+    const std::string & type,
+    const std::string & name,
+    std::vector<std::string> & formals,
+    std::vector<std::string> & argumentLoads) {
+  TemplateEnv env;
+  env.s("type", type);
+  env.s("name", name);
+  env.d("formal_index", formals.size() + 1); // + 1 because the first argument is the linearIndex
+
+  formals.push_back(format("${type} ${name}", env));
+  argumentLoads.push_back(format("*static_cast<${type}*>(args[${formal_index}])", env));
+}
+
+std::tuple<std::vector<ConcatDesc>,std::vector<ChunkDesc>>
+emitCompilationUnit(std::ostream & out,
+                    const std::string & name,
+                    AnnotatedGraph & agraph,
+                    bool use_cuda) {
   Graph& subgraph = *agraph.graph;
   TemplateEnv env;
   env.s("kernelName",name);
@@ -323,10 +434,11 @@ std::vector<ConcatDesc> emitCompilationUnit(std::ostream & out,
   std::stringstream tensorOffsets;
   std::vector<std::string> formals;
   std::vector<std::string> argument_loads;
+  std::vector<ChunkDesc> chunk_desc;
   auto emitFormal = [&](Value * n, const TensorDesc & desc) {
     std::string tensor = "t" + std::to_string(formals.size()); //can't be unique() because Param may be an output
     size_t nDim = desc.nDim();
-    emitIndexingFor(tensorOffsets, tensor, nDim,  desc.lastIsContiguous());
+    emitDefaultIndexingFor(tensorOffsets, tensor, nDim, desc.lastIsContiguous());
     env.s("tensor",tensor);
     env.d("formal_index", formals.size() + 1); // + 1 because the first argument is the linearIndex
     env.d("nDim",nDim);
@@ -336,8 +448,9 @@ std::vector<ConcatDesc> emitCompilationUnit(std::ostream & out,
   };
   {
     size_t i = 0;
-    for(auto p : subgraph.inputs())
+    for(auto p : subgraph.inputs()) {
       emitFormal(p,agraph.input_desc[i++]);
+    }
   }
   std::vector<ConcatDesc> concat_desc;
   std::vector<Value*> flat_output_nodes;
@@ -385,6 +498,22 @@ std::vector<ConcatDesc> emitCompilationUnit(std::ostream & out,
     // FusedConcat nodes work by narrowing the output Tensors before the kernel runs
     if (n->kind() == prim::FusedConcat)
       continue;
+    if(n->kind() == aten::chunk) {
+      size_t inputIndex = toInputIndex(n->inputs()[0], subgraph);
+      auto inputName = "t" + std::to_string(inputIndex);
+      auto& input = agraph.input_desc[inputIndex];
+
+      auto chunks = toIValue(n->inputs()[1]).value().toInt();
+      auto dim = toIValue(n->inputs()[2]).value().toInt();
+
+      emitChunk(tensorOffsets, body, n, inputName, input);
+      chunk_desc.emplace_back(inputIndex, chunks, dim);
+
+      env.s("tensor", inputName);
+      writeFormal("size_t", format("${tensor}_splitSize", env), formals, argument_loads);
+      writeFormal("size_t", format("${tensor}_splitStride", env), formals, argument_loads);
+      continue;
+    }
     env.s("node",valueName(n->output()));
     env.s("rhs", encodeRHS(n));
     body << format("auto ${node} = ${rhs};\n",env);
@@ -423,7 +552,8 @@ std::vector<ConcatDesc> emitCompilationUnit(std::ostream & out,
     out << cpu_compilation_unit_template.format(env);
   }
 
-  return concat_desc;
+  return std::tuple<std::vector<ConcatDesc>,std::vector<ChunkDesc>>(
+      std::move(concat_desc), chunk_desc);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -496,6 +626,42 @@ void compressContiguous(
   JIT_ASSERT(!cont.back() || strides.back() == 1);
 }
 
+// XXX: Assumes that after at::chunk, all inputs are the same size
+static inline std::vector<int64_t> computeMapSize(
+    at::ArrayRef<at::Tensor> inputs,
+    std::vector<ChunkDesc> chunks) {
+  if (chunks.size() == 0) {
+    return inputs[0].sizes();
+  }
+  // Use the first chunk to compute map_size
+  const auto& chunk = chunks[0];
+  const auto& tensor = inputs[chunk.formal_idx];
+  std::vector<int64_t> map_size(tensor.sizes().begin(), tensor.sizes().end());
+  map_size[chunk.dim] /= chunk.chunks;
+  return map_size;
+}
+
+// XXX: this code assumes that inputs are 32-bit addressable
+static inline uint32_t computeNumel(at::IntList sizes) {
+  uint32_t result = 1;
+  if (sizes.size() == 0) {
+    return 0;
+  }
+  for (int64_t size : sizes) {
+    result *= size;
+  }
+  return result;
+}
+
+// XXX: this code assumes that [chunks, dim] are 32-bit (they should be 64-bit)
+static inline size_t computeSplitSize(at::Tensor tensor, size_t chunks, size_t dim) {
+  size_t result = 1;
+  for (size_t d = dim; d < tensor.dim(); ++d) {
+    result *= tensor.size(d);
+  }
+  return result / chunks;
+}
+
 } // anonymous namespace
 
 void CompiledFusionFunction::launch_with_tensors(at::ArrayRef<at::Tensor> inputs, at::ArrayRef<at::Tensor> outputs) {
@@ -505,13 +671,14 @@ void CompiledFusionFunction::launch_with_tensors(at::ArrayRef<at::Tensor> inputs
   size_t flat_outputs_size = 0;
   for(auto & c : concat_desc)
     flat_outputs_size += c.nSubtensors;
+  // XXX: this code assumes that after at::chunk, all inputs are the same size
   // XXX: this code assumes that inputs are 32-bit addressable
-  // XXX: this code assumes that all inputs are of the same size
+  // XXX: Because inputs can be chunked in the kernel, the following doesn't completely assert the above.
   JIT_ASSERT(inputs[0].numel() <= std::numeric_limits<uint32_t>::max());
-  uint32_t numel = inputs[0].numel();
-  at::IntList map_size = inputs[0].sizes();
+  auto map_size = computeMapSize(inputs, chunk_desc);
+  uint32_t numel = computeNumel(map_size);
   // Compute the storage needed to store TensorInfo structs for inputs and outputs.
-  size_t uncompressedDim = input_desc.at(0).contiguity.size();
+  size_t uncompressedDim = inputs[0].dim();
   size_t maxPossibleTensorInfoSize = sizeof(TensorInfo) + 2 * sizeof(uint32_t) * uncompressedDim;
   size_t maxPossibleBufferSize = maxPossibleTensorInfoSize * (inputs.size() + flat_outputs_size);
   std::vector<char> buffer(maxPossibleBufferSize);
@@ -519,6 +686,9 @@ void CompiledFusionFunction::launch_with_tensors(at::ArrayRef<at::Tensor> inputs
   // A vector of arguments to the kernel. It's (numel, *input_descs, *output_descs)
   std::vector<void*> arguments;
   arguments.reserve(1 + inputs.size() + flat_outputs_size);
+  // Extra arguments from chunk. Each chunk requires 2 extra args.
+  std::vector<int64_t> extra_args;
+  extra_args.reserve(chunk_desc.size() * 2);
   // Asserts that t's dims can be compressed in the same way as in desc
   // (that's what the kernel assumes), and appends it to the arguments vector.
   auto addTensorInfo = [&](TensorDesc & desc, const at::Tensor & t) {
@@ -555,6 +725,22 @@ void CompiledFusionFunction::launch_with_tensors(at::ArrayRef<at::Tensor> inputs
       }
     }
   }
+
+  // Handle additional arguments for at::chunk
+  for (auto & chunk : chunk_desc) {
+    // Compute splitSize for input tensor
+    auto tensor = inputs[chunk.formal_idx];
+    JIT_ASSERT(tensor.size(chunk.dim) % chunk.chunks == 0);
+    size_t splitSize = computeSplitSize(tensor, chunk.chunks, chunk.dim);
+    size_t splitStride = tensor.stride(chunk.dim) * tensor.size(chunk.dim) / chunk.chunks;
+    extra_args.push_back(splitSize);
+    extra_args.push_back(splitStride);
+  }
+
+  for (auto & arg : extra_args) {
+    arguments.push_back(&arg);
+  }
+
   launch_raw(numel, arguments.data());
 }
 
@@ -590,7 +776,7 @@ struct CUDAFusionFunction : public CompiledFusionFunction {
     checkCUDAVersion(prop);
 
     std::stringstream cu;
-    concat_desc = codegen::emitCompilationUnit(cu, name, agraph, true);
+    std::tie(concat_desc, chunk_desc) = codegen::emitCompilationUnit(cu, name, agraph, true);
     compilation_unit = cu.str();
     nvrtcProgram program;
     TORCH_NVRTC_CHECK(nvrtcCreateProgram(&program, compilation_unit.c_str(), NULL, 0, nullptr, nullptr));
@@ -786,7 +972,7 @@ struct CPUFusionFunction : public CompiledFusionFunction {
     TempFile cpp_file(cpp_template, 4);
 
     std::stringstream cu;
-    concat_desc = codegen::emitCompilationUnit(cu, name, agraph, false);
+    std::tie(concat_desc, chunk_desc) = codegen::emitCompilationUnit(cu, name, agraph, false);
     compilation_unit = cu.str();
     cpp_file.write(compilation_unit);
     cpp_file.sync();
