@@ -110,6 +110,14 @@ def get_fn(file_name, script_path):
 class JitTestCase(TestCase):
     _do_cuda_memory_leak_check = True
 
+    def getExportImportCopy(self, m):
+        imported = torch.jit.ScriptModule()
+        f = tempfile.NamedTemporaryFile()
+        m.export(f.name)
+        f.seek(0)
+        torch._C._jit_import_module(imported, f.name)
+        return imported
+
     def assertExpectedONNXGraph(self, trace, *args, **kwargs):
         torch.onnx._optimize_trace(trace, operator_export_type=OperatorExportTypes.ONNX)
         self.assertExpectedGraph(trace, *args, **kwargs)
@@ -231,20 +239,11 @@ class JitTestCase(TestCase):
 
 class TestJit(JitTestCase):
     def assertExportImport(self, trace, inputs):
-        initializers = []
+        m = torch.jit.ScriptModule()
+        m._create_method_from_graph("forward", trace.graph())
+        m_import = self.getExportImportCopy(m)
 
-        def run(graph):
-            return torch._C.GraphExecutor(graph, False)(*inputs)
-
-        proto, _ = trace.graph().export(initializers, onnx_opset_version=0,
-                                        defer_weight_export=False,
-                                        operator_export_type=OperatorExportTypes.RAW)
-        self.assertFalse(initializers)
-
-        imported_graph, initializers = torch._C._jit_import_graph(proto)
-        self.assertFalse(initializers)
-
-        self.assertEqual(run(trace.graph()), run(imported_graph))
+        self.assertEqual(m.forward(*inputs), m_import.forward(*inputs))
 
     def test_simple(self):
         x = torch.tensor([0.4], requires_grad=True)
@@ -3720,9 +3719,7 @@ def func(t):
                 return a + b + self.bias + c
 
         m_orig = M2()
-        m_import = torch.jit.ScriptModule()
-        m_export, storage_map = m_orig.export()
-        torch._C._jit_import_module(m_import, m_export, storage_map)
+        m_import = self.getExportImportCopy(m_orig)
 
         input = torch.randn(3, 2)
         self.assertEqual(m_orig.doit(input), m_import.doit(input))
@@ -3734,9 +3731,7 @@ def func(t):
     def test_script_module_export_resnet18(self):
         x = torch.ones(1, 3, 224, 224)
         m_orig = torch.jit.trace(torch.ones(1, 3, 224, 224))(torchvision.models.resnet18())
-        m_import = torch.jit.ScriptModule()
-        m_export, storage_map = m_orig.export()
-        torch._C._jit_import_module(m_import, m_export, storage_map)
+        m_import = self.getExportImportCopy(m_orig)
 
         input = torch.randn(1, 3, 224, 224, requires_grad=True)
         output_orig = m_orig(input)
@@ -3764,9 +3759,7 @@ def func(t):
 
         for type in [torch.float, torch.double]:
             m_orig = M(type)
-            m_import = torch.jit.ScriptModule()
-            m_export, storage_map = m_orig.export()
-            torch._C._jit_import_module(m_import, m_export, storage_map)
+            m_import = self.getExportImportCopy(m_orig)
             self.assertEqual(m_orig.foo(), m_import.foo())
             self.assertTrue(m_orig.foo().dtype == m_import.foo().dtype)
 
@@ -3783,9 +3776,7 @@ def func(t):
                 return self.param
 
         m_orig = M()
-        m_import = torch.jit.ScriptModule()
-        m_export, storage_map = m_orig.export()
-        torch._C._jit_import_module(m_import, m_export, storage_map)
+        m_import = self.getExportImportCopy(m_orig)
         self.assertTrue(m_import.foo().device == torch.device('cpu'))
         self.assertEqual(m_orig.foo(), m_import.foo())
         self.assertTrue(m_orig.foo().dtype == m_import.foo().dtype)
@@ -3804,9 +3795,15 @@ def func(t):
                 return self.param1 + self.param2 + self.param3
 
         m_orig = M()
-        m_import = torch.jit.ScriptModule()
-        m_export, storage_map = m_orig.export()
-        torch._C._jit_import_module(m_import, m_export, storage_map)
+        m_import = self.getExportImportCopy(m_orig)
+
+        print(m_orig.param1)
+        print(m_orig.param2)
+        print(m_orig.param3)
+        print(m_import.param1)
+        print(m_import.param2)
+        print(m_import.param3)
+
         self.assertEqual(m_orig.foo(), m_import.foo())
         self.assertTrue(m_import.param1.storage().data_ptr() == m_import.param2.storage().data_ptr())
         self.assertTrue(m_import.param1.storage().data_ptr() != m_import.param3.storage().data_ptr())
