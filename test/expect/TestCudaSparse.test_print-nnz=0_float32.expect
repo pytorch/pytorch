@@ -1,0 +1,5 @@
+tensor(layout=torch.sparse_coo,
+       indices=tensor([], dtype=torch.int64),
+       values=tensor([], dtype=torch.float32),
+       size=(200, 200, 3),
+       dtype=torch.float32)

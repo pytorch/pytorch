@@ -107,6 +107,37 @@ class TestSparse(TestCase):
         # TODO: Put this in torch.cuda.randn
         return self.ValueTensor(*args, **kwargs).normal_()
 
+    def test_print(self):
+        if self.is_uncoalesced:
+            raise unittest.SkipTest("test_print is the same regardless of is_uncoalesced")
+        for nnz in (0, 3):
+            indices = torch.arange(2 * nnz).view(2, nnz).type(self.IndexTensor)
+            if indices.numel() > 0:
+                indices[:, -1] = indices[:, 0]  # make it uncoalesced
+            values = torch.arange(3 * nnz).view(nnz, 3).type(self.ValueTensor)
+            values.add_(torch.randn_like(values) * 0.1)
+            sp_tensor = self.SparseTensor(indices, values, (200, 200, 3))
+
+            def get():
+                return sp_tensor.detach()
+
+            subname_prefix = 'nnz={}'.format(nnz)
+            self.assertExpected(str(get()), subname=subname_prefix)
+            dtypes = [torch.int32]
+            if values.dtype == torch.double:
+                dtypes.append(torch.float)
+            else:
+                dtypes.append(torch.double)
+            for dtype in dtypes:
+                x = get().to(dtype)
+                subname = '{}_{}'.format(subname_prefix, str(dtype).split('.')[1])
+                self.assertExpected(str(x), subname=subname)
+                if x.dtype.is_floating_point:
+                    str(x.requires_grad_())
+                    self.assertExpected(str(x + x), subname='{}_grad_fn'.format(subname))
+                str(x._indices())
+                str(x._values())
+
     @skipIfRocm
     def test_basic(self):
         x, i, v = self._gen_sparse(3, 10, 100)
