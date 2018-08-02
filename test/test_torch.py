@@ -4306,7 +4306,9 @@ class TestTorch(TestCase):
 
     @staticmethod
     def _test_matrix_power(self, conv_fn):
-        def run_test(M):
+        def run_test(M, sign=1):
+            if sign == -1:
+                M = M.inverse()
             MP2 = torch.matrix_power(M, 2)
             self.assertEqual(MP2, torch.matmul(M, M))
 
@@ -4333,6 +4335,13 @@ class TestTorch(TestCase):
         # Many batch matrices
         M = conv_fn(torch.randn(2, 3, 3, 3))
         run_test(M)
+
+        # Single matrix, but full rank
+        # This is for negative powers
+        from test_autograd import random_fullrank_matrix_distinct_singular_value
+        M = conv_fn(random_fullrank_matrix_distinct_singular_value(5))
+        run_test(M)
+        run_test(M, sign=-1)
 
     @skipIfNoLapack
     def test_matrix_power(self):
