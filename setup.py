@@ -659,7 +659,9 @@ else:
         # Clang has an unfixed bug leading to spurious missing
         # braces warnings, see
         # https://bugs.llvm.org/show_bug.cgi?id=21629
-        '-Wno-missing-braces'
+        '-Wno-missing-braces',
+        # gcc7 seems to report spurious warnings with this enabled
+        "-Wno-stringop-overflow",
     ]
     if check_env_flag('WERROR'):
         extra_compile_args.append('-Werror')
@@ -1023,6 +1025,7 @@ if __name__ == '__main__':
                 'lib/torch_shm_manager',
                 'lib/*.h',
                 'lib/include/ATen/*.h',
+                'lib/include/ATen/core/*.h',
                 'lib/include/ATen/detail/*.h',
                 'lib/include/ATen/cuda/*.h',
                 'lib/include/ATen/cuda/*.cuh',

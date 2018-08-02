@@ -232,11 +232,11 @@ bool THC_reduceAll(THCState* state,
                    int outOnDevice) {
   ptrdiff_t inElements = THCTensor_nElement(state, in);
 
-  if (THCTensor__nDimension(state, in) > MAX_CUTORCH_DIMS) {
+  if (THCTensor_nDimensionLegacyAll(state, in) > MAX_CUTORCH_DIMS) {
     return false;
   }
 
-  if (THCTensor__nDimension(state, in) == 0) {
+  if (THCTensor_nDimensionLegacyAll(state, in) == 0) {
     // Zero-dim tensor; do nothing
     *out = init;
     return true;

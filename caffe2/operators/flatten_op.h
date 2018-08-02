@@ -20,7 +20,7 @@ class FlattenOp : public Operator<Context> {
     CAFFE_ENFORCE_GE(
         input.dims().size(), axis_, "The rank of the tensor must be >= axis.");
     output->Resize(input.size_to_dim(axis_), input.size_from_dim(axis_));
-    context_.template CopyItems<Context, Context>(
+    context_.CopyItemsSameDevice(
         input.meta(),
         input.size(),
         input.raw_data(),

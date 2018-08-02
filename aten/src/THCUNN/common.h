@@ -61,16 +61,16 @@ inline int GET_BLOCKS(const int N)
   }
 
 #define THCUNN_check_dim_size(STATE, T, DIM, DIM_SIZE, SIZE) \
-  if (THCTensor_(nDimension)(STATE, T) != DIM ||             \
-      THCTensor_(size)(STATE, T, DIM_SIZE) != SIZE) {        \
+  if (THCTensor_(nDimensionLegacyNoScalars)(STATE, T) != DIM ||             \
+      THCTensor_(sizeLegacyNoScalars)(STATE, T, DIM_SIZE) != SIZE) {        \
       THCDescBuff s1 = THCTensor_(sizeDesc)(state, T);       \
       THError("Need " #T " of dimension %d and " #T ".size[%d] == %d"	\
               " but got " #T " to be of shape: %s", DIM, DIM_SIZE, SIZE, s1.str); \
   }
 
 #define THCUNN_check_dim_size_indices(STATE, T, DIM, DIM_SIZE, SIZE)  \
-  if (THCIndexTensor_(nDimension)(STATE, T) != DIM ||                 \
-      THCIndexTensor_(size)(STATE, T, DIM_SIZE) != SIZE) {            \
+  if (THCIndexTensor_(nDimensionLegacyNoScalars)(STATE, T) != DIM ||                 \
+      THCIndexTensor_(sizeLegacyNoScalars)(STATE, T, DIM_SIZE) != SIZE) {            \
       THCDescBuff s1 = THCIndexTensor_(sizeDesc)(state, T);           \
       THError("Need " #T " of dimension %d and " #T ".size[%d] == %d" \
               " but got " #T " to be of shape: %s", DIM, DIM_SIZE, SIZE, s1.str); \

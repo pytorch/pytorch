@@ -169,7 +169,7 @@ bool SoftmaxWithLossOp<float, CPUContext>::RunOnDevice() {
         D, 1.f, sum_multiplier_.mutable_data<float>(), &context_);
   }
 
-  float* Pdata = P->mutable_data<float>();
+  float* Pdata = P->template mutable_data<float>();
   const float* weights = (InputSize() > 2 ? Input(2).data<float>() : nullptr);
 
   if (label_prob_mode_) {
@@ -253,7 +253,7 @@ bool SoftmaxWithLossOp<float, CPUContext>::RunOnDevice() {
   }
 
   avg_loss->Resize(vector<TIndex>());
-  float* avg_loss_data = avg_loss->mutable_data<float>();
+  float* avg_loss_data = avg_loss->template mutable_data<float>();
   if (weight_sum != 0.0) {
     avg_loss_data[0] = loss_sum * scale_ / weight_sum;
   } else {
@@ -292,12 +292,12 @@ bool SoftmaxWithLossGradientOp<float, CPUContext>::RunOnDevice() {
   }
 
   const float* Pdata = P.data<float>();
-  float* dX_data = dX->mutable_data<float>();
+  float* dX_data = dX->template mutable_data<float>();
 
   // Copy softmax probabilities into dX. All but the neuron
   // corresponding to the correct label has gradient equaling e(x_j)
   // which is the probability under softmax.
-  context_.Copy<float, CPUContext, CPUContext>(P.size(), Pdata, dX_data);
+  context_.CopyFromCPU<float>(P.size(), Pdata, dX_data);
 
   // Compute gradient for the matching labels.
   float total_weight = 0.0f;

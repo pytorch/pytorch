@@ -22,7 +22,7 @@ from functools import reduce
 from torch import multiprocessing as mp
 from common import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MKL, \
     TEST_LIBROSA, run_tests, download_file, skipIfNoLapack, suppress_warnings, \
-    IS_WINDOWS, PY3, NO_MULTIPROCESSING_SPAWN, skipIfNoZeroSize, TEST_WITH_ROCM
+    IS_WINDOWS, PY3, NO_MULTIPROCESSING_SPAWN, TEST_WITH_ROCM
 from multiprocessing.reduction import ForkingPickler
 
 if TEST_NUMPY:
@@ -866,7 +866,6 @@ class TestTorch(TestCase):
     def test_dim_reduction(self):
         self._test_dim_reduction(self, lambda t: t)
 
-    @skipIfNoZeroSize
     def test_reduction_empty(self):
         fns_to_test = [
             # name, function, identity
@@ -930,7 +929,6 @@ class TestTorch(TestCase):
             self.assertEqual(torch.ones((2, 1, 4), device=device), xb.all(1, keepdim=True))
             self.assertEqual(torch.ones((), device=device), xb.all())
 
-    @skipIfNoZeroSize
     def test_pairwise_distance_empty(self):
         devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         for device in devices:
@@ -1121,6 +1119,26 @@ class TestTorch(TestCase):
         for i in range(m1.size(0)):
             res2[i, 3] = res2[i, 3] + 2
         self.assertEqual(res1, res2)
+
+        # inter-type
+        m1 = torch.randn(10, 10)
+        self.assertEqual(m1 + 3, m1 + torch.tensor(3))
+        self.assertEqual(3 + m1, torch.tensor(3) + m1)
+        one = torch.tensor(1, dtype=torch.uint8)
+        self.assertEqual(torch.add(one, 1), 2)
+        self.assertEqual(torch.add(one, 1).dtype, torch.uint8)
+
+        # contiguous + non-contiguous
+        m1 = torch.randn(10, 10)
+        m2 = torch.randn(10, 10).t()
+        res = m1 + m2
+        self.assertTrue(res.is_contiguous())
+        self.assertEqual(res, m1 + m2.contiguous())
+
+        # 1d + empty
+        m1 = torch.tensor([1.0], dtype=torch.float)
+        m2 = torch.tensor([], dtype=torch.float)
+        self.assertEqual(m1 + m2, [])
 
         # [res] torch.add([res,] tensor1, value, tensor2)
 
@@ -1670,6 +1688,7 @@ class TestTorch(TestCase):
             ("...ii->...i", I),       # batch diagonal
             # -- Other
             ("bn,anm,bm->ba", l, w, r),  # as torch.bilinear
+            ("... ii->...i  ", I),       # batch diagonal with spaces
         ]
         for test in test_list:
             actual = torch.einsum(test[0], test[1:])
@@ -2220,7 +2239,6 @@ class TestTorch(TestCase):
         self.assertTrue(x.is_cuda)
         torch.set_default_tensor_type(saved_type)
 
-    @skipIfNoZeroSize
     def test_tensor_factories_empty(self):
         # ensure we can create empty tensors from each factory function
         shapes = [(5, 0, 1), (0,), (0, 0, 1, 0, 2, 0, 0)]
@@ -2907,7 +2925,6 @@ class TestTorch(TestCase):
     def test_broadcast(self):
         self._test_broadcast(self, lambda t: t)
 
-    @skipIfNoZeroSize
     def test_broadcast_empty(self):
         # empty + empty
         self.assertRaises(RuntimeError, lambda: torch.randn(5, 0) + torch.randn(0, 5))
@@ -2923,6 +2940,17 @@ class TestTorch(TestCase):
                          torch.randn(0, 7, 0, 6, 5, 0, 1) + torch.randn(1, 1, 5, 1, 7))
         self.assertRaises(RuntimeError, lambda: torch.randn(7, 0) + torch.randn(2, 1))
 
+    def test_broadcast_tensors(self):
+        x0 = torch.randn(2, 1, 3)
+        x1 = torch.randn(3)
+        x2 = torch.randn(3, 1)
+        expected_size = (2, 3, 3)
+
+        y0, y1, y2 = torch.broadcast_tensors(x0, x1, x2)
+        self.assertTrue(y0.size() == expected_size)
+        self.assertTrue(y1.size() == expected_size)
+        self.assertTrue(y2.size() == expected_size)
+
     @staticmethod
     def _test_contiguous(self, cast):
         x = cast(torch.randn(1, 16, 5, 5))
@@ -2937,9 +2965,7 @@ class TestTorch(TestCase):
         return self._test_contiguous(self, lambda t: t)
 
     def test_empty_tensor_props(self):
-        sizes = [(0,)]
-        if torch._C._use_zero_size_dim():
-            sizes += [(0, 3), (5, 0), (5, 0, 3, 0, 2), (0, 3, 0, 2), (0, 5, 0, 2, 0)]
+        sizes = [(0,), (0, 3), (5, 0), (5, 0, 3, 0, 2), (0, 3, 0, 2), (0, 5, 0, 2, 0)]
         devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         for size in sizes:
             for device in devices:
@@ -3456,9 +3482,6 @@ class TestTorch(TestCase):
 
     @staticmethod
     def _test_cat_empty(self, use_cuda=False):
-        if not torch._C._use_zero_size_dim():
-            return
-
         dtype = torch.float32
         device = 'cuda' if use_cuda else 'cpu'
 
@@ -3504,9 +3527,6 @@ class TestTorch(TestCase):
         self.assertEqual(x.narrow(-2, -1, 1), torch.Tensor([[6, 7, 8]]))
 
     def test_narrow_empty(self):
-        if not torch._C._use_zero_size_dim():
-            return
-
         devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         for device in devices:
             x = torch.randn(2, 3, 4, device=device)
@@ -3638,7 +3658,7 @@ class TestTorch(TestCase):
         self.assertEqual(res1, res2)
 
     def test_slice(self):
-        empty = torch.empty(0, 4) if torch._C._use_zero_size_dim() else torch.Tensor()
+        empty = torch.empty(0, 4)
         x = torch.arange(0., 16).view(4, 4)
         self.assertEqual(x[:], x)
         self.assertEqual(x[:4], x)
@@ -4931,10 +4951,7 @@ class TestTorch(TestCase):
         reference = conv_fn(consec((3, 3, 3)))
 
         # empty tensor indexing
-        if torch._C._use_zero_size_dim():
-            self.assertEqual(reference[conv_fn(torch.LongTensor())], reference.new(0, 3, 3))
-        else:
-            self.assertEqual(reference[conv_fn(torch.LongTensor())], reference.new())
+        self.assertEqual(reference[conv_fn(torch.LongTensor())], reference.new(0, 3, 3))
 
         self.assertEqual(reference[0], consec((3, 3)), 0)
         self.assertEqual(reference[1], consec((3, 3), 10), 0)
@@ -4980,14 +4997,9 @@ class TestTorch(TestCase):
         self.assertEqual(reference[None, 2:5, None, None], reference.unsqueeze(0)[:, 2:5].unsqueeze(2).unsqueeze(2))
 
         # indexing 0-length slice
-        if torch._C._use_zero_size_dim():
-            self.assertEqual(torch.empty(0, 5, 5), reference[slice(0)])
-            self.assertEqual(torch.empty(0, 5), reference[slice(0), 2])
-            self.assertEqual(torch.empty(0, 5), reference[2, slice(0)])
-        else:
-            self.assertEqual(torch.tensor([]), reference[slice(0)])
-            self.assertEqual(torch.tensor([]), reference[slice(0), 2])
-            self.assertEqual(torch.tensor([]), reference[2, slice(0)])
+        self.assertEqual(torch.empty(0, 5, 5), reference[slice(0)])
+        self.assertEqual(torch.empty(0, 5), reference[slice(0), 2])
+        self.assertEqual(torch.empty(0, 5), reference[2, slice(0)])
         self.assertEqual(torch.tensor([]), reference[2, 1:1, 2])
 
         # indexing with step
@@ -5697,7 +5709,6 @@ class TestTorch(TestCase):
         check(src, idx)
         check(src.transpose(1, 2), idx)
 
-    @skipIfNoZeroSize
     def test_take_empty(self):
         devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         for device in devices:
@@ -5728,7 +5739,6 @@ class TestTorch(TestCase):
         dst.put_(idx, src, accumulate=True)
         self.assertEqual(dst.tolist(), [[5, 7], [1, 1]])
 
-    @skipIfNoZeroSize
     def test_put_empty(self):
         devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         for device in devices:
@@ -6050,7 +6060,6 @@ class TestTorch(TestCase):
     def test_view(self):
         TestTorch._test_view(self, lambda x: x)
 
-    @skipIfNoZeroSize
     def test_view_empty(self):
         x = torch.randn(0, 6)
         self.assertEqual((1, 0, 6, 1, 1), x.view(1, 0, 6, 1, 1).shape)
@@ -6076,12 +6085,8 @@ class TestTorch(TestCase):
         self.assertEqual(empty, empty.reshape(-1))
         self.assertEqual(empty, empty.reshape([0]))
         # TODO: fix these once we have multi-dimensional empty tensors
-        if torch._C._use_zero_size_dim():
-            self.assertEqual(empty.reshape([0, 1]).shape, (0, 1))
-            self.assertEqual(empty.reshape([1, -1]).shape, (1, 0))
-        else:
-            self.assertEqual(empty.reshape([0, 1]).shape, (0,))
-            self.assertEqual(empty.reshape([1, -1]).shape, (0,))
+        self.assertEqual(empty.reshape([0, 1]).shape, (0, 1))
+        self.assertEqual(empty.reshape([1, -1]).shape, (1, 0))
         self.assertRaises(RuntimeError, lambda: empty.reshape(1))
 
         x = torch.randn(3, 3)
@@ -6089,7 +6094,6 @@ class TestTorch(TestCase):
         self.assertEqual(x.data_ptr(), x.reshape_as(torch.rand(1, 9, 1)).data_ptr())
         self.assertRaises(RuntimeError, lambda: x.reshape_as(torch.rand(10)))
 
-    @skipIfNoZeroSize
     def test_empty_reshape(self):
         x = torch.randn(0, 6)
         self.assertEqual((1, 0, 6, 1, 1), x.reshape(1, 0, 6, 1, 1).shape)
@@ -6099,7 +6103,6 @@ class TestTorch(TestCase):
         # match NumPy semantics -- don't infer the size of dimension with a degree of freedom
         self.assertRaises(RuntimeError, lambda: x.reshape(0, -1))
 
-    @skipIfNoZeroSize
     def test_tensor_shape_empty(self):
         devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         for device in devices:
@@ -6165,7 +6168,6 @@ class TestTorch(TestCase):
             self.assertEqual([(0, 1, 3, 0)], [z.shape for z in torch.split(x, 0, dim=0)])
 
     # functions that operate over a dimension but don't reduce.
-    @skipIfNoZeroSize
     def test_dim_function_empty(self):
         devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         for device in devices:
@@ -6289,7 +6291,6 @@ class TestTorch(TestCase):
             c = torch.randn((0, 1, 2), device=device)
             self.assertEqual(c, c.index_select(0, ind_empty))
 
-    @skipIfNoZeroSize
     def test_blas_empty(self):
         devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         for device in devices:
@@ -6359,7 +6360,6 @@ class TestTorch(TestCase):
             A_LU, pivots = fn(torch.btrifact, (2, 0, 0))
             self.assertEqual([(2, 0, 0), (2, 0)], [A_LU.shape, pivots.shape])
 
-    @skipIfNoZeroSize
     def test_blas_alpha_beta_empty(self):
         devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         for device in devices:
@@ -6385,7 +6385,6 @@ class TestTorch(TestCase):
             self.assertEqual(torch.full((2, 3), beta * value, device=device),
                              torch.addmm(input=input, mat1=mat, mat2=mat2, alpha=alpha, beta=beta, out=out))
 
-    @skipIfNoZeroSize
     @skipIfNoLapack
     def test_lapack_empty(self):
         # FIXME: these are just a selection of LAPACK functions -- we need a general strategy here.
@@ -6395,6 +6394,11 @@ class TestTorch(TestCase):
         # to name / migrate-to better wrappers.
         devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         for device in devices:
+
+            # need to init cuda to check has_magma
+            empty = torch.randn((0, 0), device=device)
+            if device == 'cuda' and not torch.cuda.has_magma:
+                continue
 
             def fn(torchfn, *args):
                 return torchfn(*tuple(torch.randn(shape, device=device) if isinstance(shape, tuple) else shape
@@ -6871,9 +6875,6 @@ class TestTorch(TestCase):
                         self.assertNotEqual(tensor[dst1[i, 0], dst1[i, 1], dst1[i, 2]].item(), 0)
 
     def test_nonzero_empty(self):
-        if not torch._C._use_zero_size_dim():
-            return
-
         devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         for device in devices:
             x = torch.randn(0, 2, 0, 5, 0, device=device)
@@ -7498,15 +7499,11 @@ class TestTorch(TestCase):
         expected_err_msg = (".*You can only torch.load from a file that is seekable. " +
                             "Please pre-load the data into a buffer like io.BytesIO and " +
                             "try to load from it instead.")
-        if PY3:
-            import urllib.request
-            import io
-            resource = urllib.request.urlopen('https://download.pytorch.org/test_data/linear.pt')
-            self.assertRaisesRegex(io.UnsupportedOperation, expected_err_msg, lambda: torch.load(resource))
-        else:
-            import urllib
-            resource = urllib.urlopen('https://download.pytorch.org/test_data/linear.pt')
-            self.assertRaisesRegex(AttributeError, expected_err_msg, lambda: torch.load(resource))
+
+        resource = FilelikeMock(data=b"data")
+        delattr(resource, "tell")
+        delattr(resource, "seek")
+        self.assertRaisesRegex(AttributeError, expected_err_msg, lambda: torch.load(resource))
 
     def test_from_buffer(self):
         a = bytearray([1, 2, 3, 4])
@@ -7869,10 +7866,7 @@ class TestTorch(TestCase):
 
         # check zero dimensional
         x = np.zeros((0, 2))
-        if torch._C._use_zero_size_dim():
-            self.assertEqual(torch.from_numpy(x).shape, (0, 2))
-        else:
-            self.assertEqual(torch.from_numpy(x).shape, (0,))
+        self.assertEqual(torch.from_numpy(x).shape, (0, 2))
 
         # check ill-sized strides raise exception
         x = np.array([3., 5., 8.])
@@ -7921,6 +7915,20 @@ class TestTorch(TestCase):
                 tensor = torch.cuda.HalfTensor(array)
                 for i in range(len(array)):
                     self.assertEqual(tensor[i], array[i])
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_ctor_with_numpy_scalar_ctor(self):
+        dtypes = [
+            np.double,
+            np.float,
+            np.float16,
+            np.int64,
+            np.int32,
+            np.int16,
+            np.uint8
+        ]
+        for dtype in dtypes:
+            self.assertEqual(dtype(42), torch.tensor(dtype(42)).item())
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_numpy_index(self):
@@ -8008,6 +8016,17 @@ class TestTorch(TestCase):
             self.assertIsInstance(geq2_x, torch.ByteTensor)
             for i in range(len(x)):
                 self.assertEqual(geq2_x[i], geq2_array[i])
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_multiplication_numpy_scalar(self):
+        np_sc = np.float64(2.0)
+        t = torch.ones(2, requires_grad=True)
+        r1 = np_sc * t
+        self.assertIsInstance(r1, torch.Tensor)
+        self.assertTrue(r1.requires_grad)
+        r2 = t * np_sc
+        self.assertIsInstance(r2, torch.Tensor)
+        self.assertTrue(r2.requires_grad)
 
     def test_error_msg_type_translation(self):
         with self.assertRaisesRegex(

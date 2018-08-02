@@ -14,8 +14,9 @@
 
 #include <exception>
 
+#include "ATen/core/Half.h"
 #include "caffe2/core/common.h"
-#include "caffe2/utils/IdWrapper.h"
+#include "ATen/core/IdWrapper.h"
 
 namespace caffe2 {
 class CaffeTypeId;
@@ -32,16 +33,16 @@ class TypeMeta;
  * You need to register your types using CAFFE_KNOWN_TYPE(MyType) to be able to use CaffeTypeId with custom types.
  * This is for example used to store the dtype of tensors.
  */
-class CaffeTypeId final : public c10::guts::IdWrapper<CaffeTypeId, uint16_t> {
+class CaffeTypeId final : public at::IdWrapper<CaffeTypeId, uint16_t> {
 public:
   static CaffeTypeId createTypeId();
 
   friend std::ostream& ::operator<<(std::ostream& stream, CaffeTypeId typeId);
   friend bool operator<(CaffeTypeId lhs, CaffeTypeId rhs);
 
-  // TODO Can we get rid of uninitialized?
+  // This is 8, because 0 is uint8_t (due to ScalarType BC constraint)
   static constexpr CaffeTypeId uninitialized() {
-    return CaffeTypeId(0);
+    return CaffeTypeId(8);
   }
 
 private:
@@ -57,7 +58,7 @@ inline bool operator<(CaffeTypeId lhs, CaffeTypeId rhs) {
 
 }
 
-C10_DEFINE_HASH_FOR_IDWRAPPER(caffe2::CaffeTypeId)
+AT_DEFINE_HASH_FOR_IDWRAPPER(caffe2::CaffeTypeId)
 
 inline std::ostream& operator<<(std::ostream& stream, caffe2::CaffeTypeId typeId) {
   return stream << typeId.underlyingId();
@@ -437,27 +438,29 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
       #T);                                                     \
   }
 
-template <class Context>
 class Tensor;
-class CPUContext;
-class CUDAContext;
 
-// note: first preallocated id is 1, because 0 is used for uninitialized type
-// ids.
+// Note: we have preallocated the numbers 0-8 so they line up exactly
+// with at::ScalarType's numbering.  All other numbers do not matter.
+//
+// Notably, the "uninitialized" type id is 8, not 0, for hysterical raisins.
+
 struct _CaffeHighestPreallocatedTypeId final {};
 
-CAFFE_DECLARE_KNOWN_TYPE(1, Tensor<CPUContext>);
-CAFFE_DECLARE_KNOWN_TYPE(2, Tensor<CUDAContext>);
-CAFFE_DECLARE_KNOWN_TYPE(3, float);
-CAFFE_DECLARE_KNOWN_TYPE(4, int);
-CAFFE_DECLARE_KNOWN_TYPE(5, std::string);
-CAFFE_DECLARE_KNOWN_TYPE(6, bool);
-CAFFE_DECLARE_KNOWN_TYPE(7, uint8_t);
-CAFFE_DECLARE_KNOWN_TYPE(8, int8_t);
-CAFFE_DECLARE_KNOWN_TYPE(9, uint16_t);
-CAFFE_DECLARE_KNOWN_TYPE(10, int16_t);
-CAFFE_DECLARE_KNOWN_TYPE(11, int64_t);
-CAFFE_DECLARE_KNOWN_TYPE(12, double);
+CAFFE_DECLARE_KNOWN_TYPE(0, uint8_t);
+CAFFE_DECLARE_KNOWN_TYPE(1, int8_t);
+CAFFE_DECLARE_KNOWN_TYPE(2, int16_t);
+CAFFE_DECLARE_KNOWN_TYPE(3, int);
+CAFFE_DECLARE_KNOWN_TYPE(4, int64_t);
+CAFFE_DECLARE_KNOWN_TYPE(5, at::Half);
+CAFFE_DECLARE_KNOWN_TYPE(6, float);
+CAFFE_DECLARE_KNOWN_TYPE(7, double);
+// 8 = undefined type id
+
+CAFFE_DECLARE_KNOWN_TYPE(9, Tensor);
+CAFFE_DECLARE_KNOWN_TYPE(10, std::string);
+CAFFE_DECLARE_KNOWN_TYPE(11, bool);
+CAFFE_DECLARE_KNOWN_TYPE(12, uint16_t);
 CAFFE_DECLARE_KNOWN_TYPE(13, char);
 CAFFE_DECLARE_KNOWN_TYPE(14, std::unique_ptr<std::mutex>);
 CAFFE_DECLARE_KNOWN_TYPE(15, std::unique_ptr<std::atomic<bool>>);

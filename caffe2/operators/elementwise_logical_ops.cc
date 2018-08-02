@@ -12,8 +12,8 @@ OPERATOR_SCHEMA(Where)
     .AllowInplace({{1, 2}})
     .IdenticalTypeAndShapeOfInput(1)
     .SetDoc(R"DOC(
-Operator Where takes three input data (Tensor<bool>, Tensor<T>, Tensor<T>) and
-produces one output data (Tensor<T>) where z = c ? x : y is applied elementwise.
+Operator Where takes three input data (Tensor, Tensor, Tensor) and
+produces one output data (Tensor) where z = c ? x : y is applied elementwise.
 )DOC")
     .Input(0, "C", "input tensor containing booleans")
     .Input(1, "X", "input tensor")

@@ -10,16 +10,16 @@
 namespace at {
 
 // NB: Order matters for this macro; it is relied upon in
-// _promoteTypesLookup and probably other places.
+// _promoteTypesLookup and the serialization format.
 #define AT_FORALL_SCALAR_TYPES(_) \
-_(uint8_t,Byte,i) \
-_(int8_t,Char,i) \
-_(int16_t,Short,i) \
-_(int,Int,i) \
-_(int64_t,Long,i) \
-_(at::Half,Half,d) \
-_(float,Float,d) \
-_(double,Double,d)
+_(uint8_t,Byte,i)  /* 0 */ \
+_(int8_t,Char,i)   /* 1 */ \
+_(int16_t,Short,i) /* 2 */ \
+_(int,Int,i)       /* 3 */ \
+_(int64_t,Long,i)  /* 4 */ \
+_(at::Half,Half,d) /* 5 */ \
+_(float,Float,d)   /* 6 */ \
+_(double,Double,d) /* 7 */
 
 #define AT_FORALL_SCALAR_TYPES_EXCEPT_HALF(_) \
 _(uint8_t,Byte,i) \
@@ -35,7 +35,7 @@ enum class ScalarType {
   n,
   AT_FORALL_SCALAR_TYPES(DEFINE_ENUM)
 #undef DEFINE_ENUM
-  Undefined,
+  Undefined, // 8
   NumOptions
 };
 
@@ -129,15 +129,15 @@ static inline bool isFloatingType(ScalarType t) {
 
 static inline ScalarType promoteTypes(ScalarType a, ScalarType b) {
   // This is generated according to NumPy's promote_types
-#define u1 ScalarType::Byte
-#define i1 ScalarType::Char
-#define i2 ScalarType::Short
-#define i4 ScalarType::Int
-#define i8 ScalarType::Long
-#define f2 ScalarType::Half
-#define f4 ScalarType::Float
-#define f8 ScalarType::Double
-#define ud ScalarType::Undefined
+  constexpr auto u1 = ScalarType::Byte;
+  constexpr auto i1 = ScalarType::Char;
+  constexpr auto i2 = ScalarType::Short;
+  constexpr auto i4 = ScalarType::Int;
+  constexpr auto i8 = ScalarType::Long;
+  constexpr auto f2 = ScalarType::Half;
+  constexpr auto f4 = ScalarType::Float;
+  constexpr auto f8 = ScalarType::Double;
+  constexpr auto ud = ScalarType::Undefined;
   static constexpr ScalarType _promoteTypesLookup
       [static_cast<int>(ScalarType::NumOptions)]
       [static_cast<int>(ScalarType::NumOptions)] = {
@@ -152,15 +152,6 @@ static inline ScalarType promoteTypes(ScalarType a, ScalarType b) {
     /* f8 */ { f8, f8, f8, f8, f8, f8, f8, f8, ud },
     /* ud */ { ud, ud, ud, ud, ud, ud, ud, ud, ud },
   };
-#undef u1
-#undef i1
-#undef i2
-#undef i4
-#undef i8
-#undef f2
-#undef f4
-#undef f8
-#undef ud
   return _promoteTypesLookup[static_cast<int>(a)][static_cast<int>(b)];
 }
 

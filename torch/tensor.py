@@ -242,7 +242,7 @@ class Tensor(torch._C._TensorBase):
                           "consider using btrifact_with_info instead", stacklevel=2)
             factorization, pivots, _info = super(Tensor, self).btrifact_with_info(pivot=pivot)
             if info.type() != _info.type():
-                raise ValueError('btrifact expects info to be an IntTenor')
+                raise ValueError('btrifact expects info to be an IntTensor')
             info.resize_as_(_info).copy_(_info)
             return factorization, pivots
         else:
@@ -292,14 +292,6 @@ class Tensor(torch._C._TensorBase):
     def scatter_add(self, dim, index, source):
         return self.clone().scatter_add_(dim, index, source)
 
-    def masked_copy(self, mask, tensor):
-        warnings.warn("masked_copy is deprecated and renamed to masked_scatter, and will be removed in v0.3")
-        return self.masked_scatter(mask, tensor)
-
-    def masked_copy_(self, mask, tensor):
-        warnings.warn("masked_copy_ is deprecated and renamed to masked_scatter_, and will be removed in v0.3")
-        return self.masked_scatter_(mask, tensor)
-
     def masked_scatter(self, mask, tensor):
         return self.clone().masked_scatter_(mask, tensor)
 
@@ -319,7 +311,7 @@ class Tensor(torch._C._TensorBase):
             return output
 
     def __rsub__(self, other):
-        return -self + other
+        return torch.sub(other, self)
 
     def __rdiv__(self, other):
         if self.dtype.is_floating_point:
@@ -392,6 +384,8 @@ class Tensor(torch._C._TensorBase):
         return sorted(keys)
 
     # Numpy array interface, to support `numpy.asarray(tensor) -> ndarray`
+    __array_priority__ = 1000    # prefer Tensor ops over numpy ones
+
     def __array__(self, dtype=None):
         if dtype is None:
             return self.cpu().numpy()

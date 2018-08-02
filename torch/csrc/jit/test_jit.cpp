@@ -220,6 +220,9 @@ static void fusionTests() {
   testOne(1,2,0,2);
 
 
+  auto createFusedConcat = [](Graph & graph, at::ArrayRef<Value*> inputs, int64_t dim) -> Value* {
+    return graph.insertNode(graph.create(prim::FusedConcat, inputs)->i_(attr::dim, dim))->output();
+  };
 
   auto testConcat = [&](int dim) {
     Graph graph;
@@ -227,7 +230,7 @@ static void fusionTests() {
     Var i1 = Var::asNewInput(graph);
     auto o0 = i0 * i1;
     o0.addAsOutput();
-    Var::cat({i0, o0}, dim).addAsOutput();
+    Var(createFusedConcat(graph, {i0, o0}, dim)).addAsOutput();
 
     auto a = at::rand({3,4,5}, at::kCUDA);
     auto b = at::rand({4,3,5}, at::kCUDA).transpose(0,1);
@@ -641,7 +644,7 @@ std::string toString(std::shared_ptr<Graph>& graph) {
 void testDifferentiate(std::ostream & out) {
   auto graph = std::make_shared<Graph>();
   at::ScalarType s = at::ScalarType::Float;
-  auto type = std::shared_ptr<TensorType>(new TensorType(s, -1, {2, 3, 4}, {12, 4, 1}));
+  auto type = TensorType::create(s, -1, {2, 3, 4}, {12, 4, 1});
 
   // Build up a fake graph
   auto a = SymbolicVariable::asNewInput(*graph, type);
@@ -668,7 +671,7 @@ void testDifferentiate(std::ostream & out) {
 void testDifferentiateWithRequiresGrad(std::ostream & out) {
   auto graph = std::make_shared<Graph>();
   at::ScalarType s = at::ScalarType::Float;
-  auto type = std::shared_ptr<TensorType>(new TensorType(s, -1, {2, 3, 4}, {12, 4, 1}));
+  auto type = TensorType::create(s, -1, {2, 3, 4}, {12, 4, 1});
 
   // Build up a fake graph
   auto a = SymbolicVariable::asNewInput(*graph, type);
@@ -776,6 +779,9 @@ void argumentSpecTest() {
   REQUIRE(!(c == a));
   REQUIRE(spec.count(c) == 0);
 
+  Stack stack = { var(CF, {1,2}, true), 3, var(CF, {1,2}, true) };
+  ArgumentSpec with_const(true, stack);
+  REQUIRE(with_const.at(2).sizes().size() == 2);
 }
 
 void shapeAnalysisTest() {

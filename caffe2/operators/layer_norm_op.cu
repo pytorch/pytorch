@@ -45,7 +45,7 @@ void allocScratchAndReduce(
     float* output,
     int num_segments,
     int* seg_indices,
-    Tensor<CUDAContext>* scratch,
+    Tensor* scratch,
     cudaStream_t stream) {
   size_t temp_storage_bytes;
   cub::DeviceSegmentedReduce::Sum(
@@ -63,8 +63,8 @@ void allocScratchAndReduce(
   scratch->Resize(vector<size_t>{temp_storage_floats});
 
   cub::DeviceSegmentedReduce::Sum(
-      scratch->mutable_data<float>(), // To retrieve required temporary storage
-                                      // size
+      scratch->template mutable_data<float>(), // To retrieve required temporary
+                                               // storage size
       temp_storage_bytes, // size_t &temp_storage_bytes
       input, // InputIteratorT d_i
       output, // OutputIteratorT d_out
@@ -72,7 +72,7 @@ void allocScratchAndReduce(
       seg_indices, // int *d_begin_offsets
       seg_indices + 1, // int *d_end_offsets
       stream // cudaStream_t stream=0
-      );
+  );
 }
 
 } //  namespace
@@ -107,7 +107,7 @@ bool LayerNormOp<CUDAContext>::DoRunWithType<float>() {
       std::bind1st(std::multiplies<int>(), right));
 
   seg_indices_.Resize(vector<size_t>{segs.size()});
-  context_.CopyBytes<CPUContext, CUDAContext>(
+  context_.CopyBytesFromCPU(
       sizeof(int) * segs.size(),
       static_cast<void*>(segs.data()),
       static_cast<void*>(seg_indices_.mutable_data<int>()));
@@ -237,7 +237,7 @@ __global__ void gradientMegaKernel(
   }
 }
 
-#define PRINT(X, N, D) printTensor<<<1, 1, 0, context_.cuda_stream()>>>(X, N, D)
+#define PRINT(X, N, D) printTensor >> (X, N, D)
 
 } // namespace
 
@@ -272,7 +272,7 @@ bool LayerNormGradientOp<CUDAContext>::DoRunWithType<float>() {
       std::bind1st(std::multiplies<int>(), right));
 
   seg_indices_.Resize(vector<size_t>{segs.size()});
-  context_.CopyBytes<CPUContext, CUDAContext>(
+  context_.CopyBytesFromCPU(
       sizeof(int) * segs.size(),
       static_cast<void*>(segs.data()),
       static_cast<void*>(seg_indices_.mutable_data<int>()));

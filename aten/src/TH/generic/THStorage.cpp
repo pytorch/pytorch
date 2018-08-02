@@ -25,7 +25,7 @@ THStorage* THStorage_(new)(void)
       at::CTypeToScalarType<th::from_type<real>>::to(),
       0,
       getTHDefaultAllocator(),
-      TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE);
+      true);
   return storage;
 }
 
@@ -35,7 +35,7 @@ THStorage* THStorage_(newWithSize)(ptrdiff_t size)
       at::CTypeToScalarType<th::from_type<real>>::to(),
       size,
       getTHDefaultAllocator(),
-      TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE);
+      true);
   return storage;
 }
 
@@ -46,7 +46,7 @@ THStorage* THStorage_(newWithAllocator)(ptrdiff_t size,
       at::CTypeToScalarType<th::from_type<real>>::to(),
       size,
       allocator,
-      TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE);
+      true);
   return storage;
 }
 
@@ -61,13 +61,11 @@ THStorage* THStorage_(newWithMapping)(const char *filename, ptrdiff_t size, int 
       THMapAllocator::makeDataPtr(
           filename, flags, size * at::elementSize(scalar_type), &actual_size),
       /* allocator */ nullptr,
-      TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE);
+      false);
 
   if (size <= 0) {
     storage->size = actual_size / at::elementSize(scalar_type);
   }
-
-  THStorage_clearFlag(storage, TH_STORAGE_RESIZABLE);
 
   return storage;
 }
@@ -110,16 +108,6 @@ THStorage* THStorage_(newWithSize4)(real data0, real data1, real data2, real dat
   return self;
 }
 
-void THStorage_(setFlag)(THStorage *storage, const char flag)
-{
-  THStorage_setFlag(storage, flag);
-}
-
-void THStorage_(clearFlag)(THStorage *storage, const char flag)
-{
-  THStorage_clearFlag(storage, flag);
-}
-
 void THStorage_(retain)(THStorage *storage)
 {
   THStorage_retain(storage);
@@ -137,7 +125,7 @@ THStorage* THStorage_(newWithDataAndAllocator)(at::DataPtr&& data, ptrdiff_t siz
       size,
       std::move(data),
       allocator,
-      TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE);
+      true);
   return storage;
 }
 

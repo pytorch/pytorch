@@ -1,5 +1,7 @@
 graph(%x : Dynamic) {
   %1 : Dynamic = aten::neg(%x)
-  %5 : Dynamic = aten::add[other={1}, alpha={1}](%1)
+  %2 : int = prim::Constant[value=1]()
+  %4 : int = prim::Constant[value=1]()
+  %5 : Dynamic = aten::add(%1, %2, %4)
   return (%5);
 }

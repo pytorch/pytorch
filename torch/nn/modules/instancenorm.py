@@ -109,8 +109,8 @@ class InstanceNorm1d(_InstanceNorm):
     """
 
     def _check_input_dim(self, input):
-        if input.dim() != 3:
-            raise ValueError('expected 3D input (got {}D input)'
+        if input.dim() != 2 and input.dim() != 3:
+            raise ValueError('expected 2D or 3D input (got {}D input)'
                              .format(input.dim()))
 
 

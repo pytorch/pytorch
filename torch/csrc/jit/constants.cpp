@@ -22,8 +22,13 @@ Value* insertConstant(
     n->f_(attr::value, val.toDouble());
     n->output()->setType(FloatType::get());
   } else if(val.isIntList()) {
-    n->is_(attr::value, val.toIntList()->elements());
+    n->is_(attr::value, val.toIntList()->elements().vec());
     n->output()->setType(ListType::ofInts());
+  } else if(val.isTensorList()) {
+    n->ts_(attr::value, fmap(val.toTensorList()->elements(), [](const at::Tensor & t) {
+      return autograd::Variable(t).data();
+    }));
+    n->output()->setType(ListType::ofTensors());
   } else {
     throw std::runtime_error("Unsupported value kind: " + val.tagKind());
   }
@@ -38,14 +43,14 @@ RegisterOperators reg({
       prim::Constant,
       [](Node* node) -> Operation {
         TypePtr type = node->output()->type();
-        if(type->isSubtypeOf(*DynamicType::get())) {
+        if(type->isSubtypeOf(DynamicType::get())) {
           auto t = autograd::make_variable(node->t(attr::value));
           return [t](Stack& stack) {
             stack.push_back(t);
             return 0;
           };
         } else if (
-            type->isSubtypeOf(*NumberType::get()) &&
+            type->isSubtypeOf(NumberType::get()) &&
             node->kindOf(attr::value) == AttributeKind::i) {
           auto i = node->i(attr::value);
           return [i](Stack& stack) {
@@ -53,17 +58,25 @@ RegisterOperators reg({
             return 0;
           };
         } else if (
-            type->isSubtypeOf(*NumberType::get()) &&
+            type->isSubtypeOf(NumberType::get()) &&
             node->kindOf(attr::value) == AttributeKind::f) {
           auto f = node->f(attr::value);
           return [f](Stack& stack) {
             push(stack, f);
             return 0;
           };
-        } else if(type->isSubtypeOf(*ListType::ofInts())) {
+        } else if(type->isSubtypeOf(ListType::ofInts())) {
           auto is = node->is(attr::value);
           return [is](Stack& stack) {
             push(stack, is);
+            return 0;
+          };
+        } else if(type->isSubtypeOf(ListType::ofTensors())) {
+          auto ts = fmap(node->ts(attr::value), [](const at::Tensor & t) -> at::Tensor {
+            return autograd::make_variable(t);
+          });
+          return [ts](Stack& stack) {
+            push(stack, ts);
             return 0;
           };
         } else {

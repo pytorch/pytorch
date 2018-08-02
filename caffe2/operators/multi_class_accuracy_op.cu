@@ -51,8 +51,8 @@ bool MultiClassAccuracyOp<float, CUDAContext>::RunOnDevice() {
 
   const float* Xdata = X.data<float>();
   const int* labeldata = label.data<int>();
-  float* accuracies = Y0->mutable_data<float>();
-  int* amounts = Y1->mutable_data<int>();
+  float* accuracies = Y0->template mutable_data<float>();
+  int* amounts = Y1->template mutable_data<int>();
   math::Set<float, CUDAContext>(D, 0.0, accuracies, &context_);
   math::Set<int, CUDAContext>(D, 0, amounts, &context_);
 

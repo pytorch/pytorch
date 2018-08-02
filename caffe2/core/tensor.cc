@@ -43,9 +43,33 @@ TensorPrinter::~TensorPrinter() {
   }
 }
 
-static CaffeMap<CaffeTypeId, TypeCall> type_call_registry_ {
-  {TypeMeta::Id<Tensor<CPUContext>>(), GetTensorType<CPUContext>}
-};
+void TensorPrinter::PrintMeta(const Tensor& tensor) {
+  if (to_file_) {
+    (*log_file_) << MetaStr(tensor) << std::endl;
+  } else {
+    LOG(INFO) << MetaStr(tensor);
+  }
+}
+
+std::string TensorPrinter::MetaStr(const Tensor& tensor) {
+  std::stringstream meta_stream;
+  meta_stream << "Tensor " << tensor_name_ << " of type "
+              << tensor.meta().name() << ". Dims: (";
+  for (const auto dim : tensor.dims()) {
+    meta_stream << dim << ",";
+  }
+  meta_stream << "): ";
+  return meta_stream.str();
+}
+
+TypeMeta GetTensorType(const void* c) {
+  const Tensor* tc = static_cast<const Tensor*>(c);
+  return tc->meta();
+}
+
+// TODO(jerryzh): Remove
+static CaffeMap<CaffeTypeId, TypeCall> type_call_registry_{
+    {TypeMeta::Id<Tensor>(), GetTensorType}};
 
 TypeCall GetTypeCallFunction(CaffeTypeId id) {
   auto f = type_call_registry_.find(id);
@@ -59,9 +83,26 @@ void RegisterTypeCallFunction(CaffeTypeId id, TypeCall c) {
   type_call_registry_[id] = c;
 }
 
-static CaffeMap<CaffeTypeId, TensorInfoCall> tensor_info_call_registry_{
-    {TypeMeta::Id<Tensor<CPUContext>>(), GetTensorInfo<CPUContext>}};
+int GetGPUIDForPointer(const void* ptr);
 
+vector<TIndex> GetTensorInfo(
+    const void* c,
+    bool* shares_data,
+    size_t* capacity,
+    DeviceOption* device) {
+  const Tensor* tc = static_cast<const Tensor*>(c);
+  *shares_data = tc->shares_data();
+  *capacity = tc->capacity_nbytes();
+  tc->ExtractDeviceOption(device);
+  return tc->dims();
+}
+
+// since we only have one tensor, probably need to remove this at some point?
+static CaffeMap<CaffeTypeId, TensorInfoCall> tensor_info_call_registry_{
+    {TypeMeta::Id<Tensor>(), GetTensorInfo}};
+
+// TODO: Remove this code in a separate diff, since we only have one
+// GetTensorInfo function now
 TensorInfoCall GetTensorInfoFunction(CaffeTypeId id) {
   auto f = tensor_info_call_registry_.find(id);
   if (f == tensor_info_call_registry_.end()) {
@@ -74,11 +115,21 @@ void RegisterTensorInfoFunction(CaffeTypeId id, TensorInfoCall c) {
   tensor_info_call_registry_[id] = c;
 }
 
+void TensorVectorResize(
+    std::vector<Tensor>& tensors,
+    int size,
+    DeviceType type) {
+  tensors.reserve(size);
+  for (auto i = 0; i < size; ++i) {
+    tensors.emplace_back(type);
+  }
+}
+
 namespace {
 
-struct TensorCPUStatGetter : BlobStatGetter {
+struct TensorStatGetter : BlobStatGetter {
   size_t sizeBytes(const Blob& blob) const override {
-    const auto& tensor = blob.Get<TensorCPU>();
+    const auto& tensor = blob.Get<Tensor>();
     auto nbytes = tensor.nbytes();
     if (nbytes > 0 && tensor.IsType<std::string>()) {
       const auto* data = tensor.data<std::string>();
@@ -89,7 +140,7 @@ struct TensorCPUStatGetter : BlobStatGetter {
     return nbytes;
   }
 };
-REGISTER_BLOB_STAT_GETTER(TensorCPU, TensorCPUStatGetter);
+REGISTER_BLOB_STAT_GETTER(Tensor, TensorStatGetter);
 }
 
 } // namespace caffe2

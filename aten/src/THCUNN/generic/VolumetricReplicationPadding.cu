@@ -11,7 +11,7 @@ static inline void THNN_(VolumetricReplicationPadding_shapeCheck)(
                          int pfront, int pback) {
   THArgCheck(THCTensor_canUse32BitIndexMath(state, input), 2,
              "input tensor must fit into 32-bit index math");
-  int numInputDims = THCTensor_(nDimension)(state, input);
+  int numInputDims = THCTensor_(nDimensionLegacyNoScalars)(state, input);
 
   THCUNN_argCheck(state, !input->is_empty() && (numInputDims == 4 || numInputDims == 5), 2, input,
     "non-empty 4D or 5D (batch mode) tensor expected for input, but got: %s");
@@ -75,7 +75,7 @@ void THNN_(VolumetricReplicationPadding_updateOutput)(
   int dimw = 3;
   int numBatch = 1;
 
-  int numInputDims = THCTensor_(nDimension)(state, input);
+  int numInputDims = THCTensor_(nDimensionLegacyNoScalars)(state, input);
 
   if (numInputDims == 5) {
     numBatch = THCTensor_(size)(state, input, 0);
@@ -137,7 +137,7 @@ void THNN_(VolumetricReplicationPadding_updateGradInput)(
   int dimh = 2;
   int dimw = 3;
 
-  int numInputDims = THCTensor_(nDimension)(state, input);
+  int numInputDims = THCTensor_(nDimensionLegacyNoScalars)(state, input);
   if (numInputDims == 5) {
     planeDim++;
     dimd++;

@@ -147,6 +147,7 @@ static std::vector<std::vector<TypePtr>> flattenStages(Graph & graph) {
     while(input_pos < graph.inputs().size() && graph.inputs()[input_pos]->stage() == i) {
       auto nv = store->addOutput();
       auto old_node = graph.inputs()[input_pos];
+      nv->setType(old_node->type());
       stage_input_types[i].push_back(old_node->type());
       old_node->replaceAllUsesWith(nv);
       input_pos++;
@@ -336,9 +337,9 @@ struct PreprocessGraph {
 struct ContainerTensor : public at::TensorImpl {
 public:
   ContainerTensor()
-  : TensorImpl(&(at::globalContext().getType(at::Backend::Undefined,at::ScalarType::Undefined)), nullptr) {}
+  : TensorImpl(at::Backend::Undefined,at::ScalarType::Undefined, nullptr, /* is_variable */ false) {}
 
-  virtual ~ContainerTensor() {}
+  virtual ~ContainerTensor() = default;
   virtual at::IntList sizes() const override {
     throw std::runtime_error("sizes() on ContainerTensor");
   }
@@ -684,8 +685,8 @@ struct CodeImpl {
 
 // InterpreterState state that is held across stages and used to compute a Code
 struct InterpreterStateImpl {
-  InterpreterStateImpl(const Code & function_)
-  : function(function_.pImpl),
+  InterpreterStateImpl(const Code & code)
+  : function(code.pImpl),
     int_data(function->int_data.data()),
     bool_data(function->bool_data),
     registers(function->register_size) {
@@ -774,15 +775,15 @@ std::ostream & operator<<(std::ostream & out, const Code & code) {
 
 Code::Code(std::shared_ptr<Graph>& graph)
     : pImpl(new CodeImpl(graph)) {}
-Code::~Code() {}
+Code::~Code() = default;
 
 const std::vector<GraphExecutor*>& Code::executors() {
   return pImpl->executors();
 }
 
-InterpreterState::InterpreterState(const Code & function)
-  : pImpl(new InterpreterStateImpl(function)) {}
-InterpreterState::~InterpreterState() {}
+InterpreterState::InterpreterState(const Code & code)
+  : pImpl(new InterpreterStateImpl(code)) {}
+InterpreterState::~InterpreterState() = default;
 
 void InterpreterState::runOneStage(Stack & stack) {
   return pImpl->runOneStage(stack);

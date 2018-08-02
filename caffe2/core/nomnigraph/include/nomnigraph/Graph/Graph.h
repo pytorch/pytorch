@@ -46,28 +46,31 @@ class Edge : public StorageType<U...> {
  public:
   using NodeRef = typename Graph<T, U...>::NodeRef;
   Edge(NodeRef tail, NodeRef head, U... args)
-      : StorageType<U...>(std::forward<U...>(args)...), Tail(tail), Head(head) {
+      : StorageType<U...>(std::forward<U...>(args)...),
+        tail_(tail),
+        head_(head) {
     DEBUG_PRINT("Creating instance of Edge: %p\n", this);
   }
 
   const NodeRef& tail() const {
-    return Tail;
+    return tail_;
   }
   const NodeRef& head() const {
-    return Head;
+    return head_;
   }
 
   void setTail(NodeRef n) {
-    Tail = n;
+    tail_ = n;
   }
 
   void setHead(NodeRef n) {
-    Head = n;
+    head_ = n;
   }
 
  private:
-  NodeRef Tail;
-  NodeRef Head;
+  NodeRef tail_;
+  NodeRef head_;
+
   friend class Graph<T, U...>;
 };
 
@@ -88,54 +91,55 @@ class Node : public StorageType<T>, public Notifier<Node<T, U...>> {
   /// \brief Adds an edge by reference to known in-edges.
   /// \p e A reference to an edge that will be added as an in-edge.
   void addInEdge(EdgeRef e) {
-    inEdges.emplace_back(e);
+    inEdges_.emplace_back(e);
   }
 
   /// \brief Adds an edge by reference to known out-edges.
   /// \p e A reference to an edge that will be added as an out-edge.
   void addOutEdge(EdgeRef e) {
-    outEdges.emplace_back(e);
+    outEdges_.emplace_back(e);
   }
 
   /// \brief Removes an edge by reference to known in-edges.
   /// \p e A reference to an edge that will be removed from in-edges.
   void removeInEdge(EdgeRef e) {
-    auto iter = std::find(inEdges.begin(), inEdges.end(), e);
-    assert(
-        iter != inEdges.end() &&
-        "Attempted to remove edge that isn't connected to this node");
-    inEdges.erase(iter);
+    removeEdgeInternal(inEdges_, e);
   }
 
   /// \brief Removes an edge by reference to known out-edges.
   /// \p e A reference to an edge that will be removed from out-edges.
   void removeOutEdge(EdgeRef e) {
-    auto iter = std::find(outEdges.begin(), outEdges.end(), e);
-    assert(
-        iter != outEdges.end() &&
-        "Attempted to remove edge that isn't connected to this node");
-    outEdges.erase(iter);
+    removeEdgeInternal(outEdges_, e);
   }
 
   const std::vector<EdgeRef>& getOutEdges() const {
-    return outEdges;
+    return outEdges_;
   }
   const std::vector<EdgeRef>& getInEdges() const {
-    return inEdges;
+    return inEdges_;
   }
 
-  void setInEdges(std::vector<EdgeRef> es) {
-    inEdges = es;
+  void setInEdges(std::vector<EdgeRef> edges) {
+    inEdges_ = edges;
   }
 
-  void setOutEdges(std::vector<EdgeRef> es) {
-    outEdges = es;
+  void setOutEdges(std::vector<EdgeRef> edges) {
+    outEdges_ = edges;
   }
 
- protected:
-  std::vector<EdgeRef> inEdges;
-  std::vector<EdgeRef> outEdges;
+ private:
+  std::vector<EdgeRef> inEdges_;
+  std::vector<EdgeRef> outEdges_;
+
   friend class Graph<T, U...>;
+
+  void removeEdgeInternal(std::vector<EdgeRef>& edges, EdgeRef e) {
+    auto iter = std::find(edges.begin(), edges.end(), e);
+    assert(
+        iter != edges.end() &&
+        "Attempted to remove edge that isn't connected to this node");
+    edges.erase(iter);
+  }
 };
 
 /// \brief Effectively a constant reference to a graph.
@@ -158,46 +162,56 @@ class Subgraph {
   using EdgeRef = typename Graph<T, U...>::EdgeRef;
 
   void addNode(NodeRef n) {
-    Nodes.insert(n);
+    nodes_.insert(n);
   }
+
   bool hasNode(NodeRef n) const {
-    return Nodes.count(n) != 0;
+    return nodes_.count(n) != 0;
   }
+
   void removeNode(NodeRef n) {
-    Nodes.erase(n);
+    nodes_.erase(n);
   }
 
   void addEdge(EdgeRef e) {
-    Edges.insert(e);
+    edges_.insert(e);
   }
-  bool hasEdge(EdgeRef n) const {
-    return Edges.count(n) != 0;
+
+  bool hasEdge(EdgeRef e) const {
+    return edges_.count(e) != 0;
   }
+
   void removeEdge(EdgeRef e) {
-    Edges.erase(e);
+    edges_.erase(e);
   }
 
   const std::unordered_set<NodeRef>& getNodes() const {
-    return Nodes;
-  }
-  const std::unordered_set<EdgeRef>& getEdges() const {
-    return Edges;
+    return nodes_;
   }
 
+  const size_t getNodesCount() const {
+    return (size_t)nodes_.size();
+  }
+
+  const std::unordered_set<EdgeRef>& getEdges() const {
+    return edges_;
+  }
+
+ private:
+  std::unordered_set<NodeRef> nodes_;
+  std::unordered_set<EdgeRef> edges_;
+
   void printEdges() {
-    for (const auto& edge : Edges) {
+    for (const auto& edge : edges_) {
       printf("Edge: %p (%p -> %p)\n", &edge, edge->tail(), edge->head());
     }
   }
 
   void printNodes() const {
-    for (const auto& node : Nodes) {
+    for (const auto& node : nodes_) {
       printf("Node: %p\n", node);
     }
   }
-
-  std::unordered_set<NodeRef> Nodes;
-  std::unordered_set<EdgeRef> Edges;
 };
 
 /// \brief A simple graph implementation
@@ -231,21 +245,21 @@ class Graph {
   }
 
   void importNode(NodeRef node, Graph<T, U...>& otherGraph) {
-    for (auto it = Nodes.begin(); it != Nodes.end(); ++it) {
+    for (auto it = nodes_.begin(); it != nodes_.end(); ++it) {
       if (&(*it) == node) {
-        std::list<Node<T, U...>>& otherNodes = otherGraph.Nodes;
-        otherNodes.splice(otherNodes.end(), Nodes, it, ++it);
-        otherGraph.NodeRefs.insert(node);
+        std::list<Node<T, U...>>& otherNodes = otherGraph.nodes_;
+        otherNodes.splice(otherNodes.end(), nodes_, it, ++it);
+        otherGraph.nodeRefs_.insert(node);
         break;
       }
     }
   }
 
   void importEdge(EdgeRef edge, Graph<T, U...>& otherGraph) {
-    std::list<Edge<T, U...>>& otherEdges = otherGraph.Edges;
-    for (auto it = Edges.begin(); it != Edges.end(); ++it) {
+    std::list<Edge<T, U...>>& otherEdges = otherGraph.edges_;
+    for (auto it = edges_.begin(); it != edges_.end(); ++it) {
       if (&(*it) == edge) {
-        otherEdges.splice(otherEdges.end(), Edges, it, ++it);
+        otherEdges.splice(otherEdges.end(), edges_, it, ++it);
         break;
       }
     }
@@ -313,9 +327,9 @@ class Graph {
   /// \return A reference to the edge created.
   EdgeRef createEdge(NodeRef tail, NodeRef head, U... data) {
     DEBUG_PRINT("Creating edge (%p -> %p)\n", tail, head);
-    this->Edges.emplace_back(
+    this->edges_.emplace_back(
         Edge<T, U...>(tail, head, std::forward<U...>(data)...));
-    EdgeRef e = &this->Edges.back();
+    EdgeRef e = &this->edges_.back();
     head->addInEdge(e);
     tail->addOutEdge(e);
     return e;
@@ -339,84 +353,84 @@ class Graph {
   /// related to the node.
   void deleteNode(NodeRef n, bool deleteEdges = true) {
     if (deleteEdges) {
-      auto inEdges = n->inEdges;
+      auto inEdges = n->inEdges_;
       for (auto& edge : inEdges) {
         deleteEdge(edge);
       }
-      auto outEdges = n->outEdges;
+      auto outEdges = n->outEdges_;
       for (auto& edge : outEdges) {
         deleteEdge(edge);
       }
     }
-    for (auto i = Nodes.begin(); i != Nodes.end(); ++i) {
+    for (auto i = nodes_.begin(); i != nodes_.end(); ++i) {
       if (&*i == n) {
-        NodeRefs.erase(n);
-        Nodes.erase(i);
+        nodeRefs_.erase(n);
+        nodes_.erase(i);
         break;
       }
     }
   }
 
-  bool hasNode(NodeRef ref) const {
-    return NodeRefs.find(ref) != NodeRefs.end();
+  bool hasNode(NodeRef node) const {
+    return nodeRefs_.find(node) != nodeRefs_.end();
   }
 
   /// \brief Deletes a edge from the graph.
   /// \p e A reference to the edge.
-  void deleteEdge(EdgeRef e, bool remove_ref = true) {
-    if (remove_ref) {
-      e->Tail->removeOutEdge(e);
-      e->Head->removeInEdge(e);
+  void deleteEdge(EdgeRef e, bool removeRef = true) {
+    if (removeRef) {
+      e->tail_->removeOutEdge(e);
+      e->head_->removeInEdge(e);
     }
-    for (auto i = Edges.begin(); i != Edges.end(); ++i) {
+    for (auto i = edges_.begin(); i != edges_.end(); ++i) {
       if (&*i == e) {
-        Edges.erase(i);
+        edges_.erase(i);
         break;
       }
     }
   }
 
   const std::vector<NodeRef> getMutableNodes() {
-    std::vector<NodeRef> v;
-    for (auto& n : Nodes) {
+    std::vector<NodeRef> result;
+    for (auto& n : nodes_) {
       DEBUG_PRINT("Adding node to mutable output (%p)\n", &n);
-      v.emplace_back(&n);
+      result.emplace_back(&n);
     }
-    return v;
+    return result;
   }
 
   const std::vector<EdgeRef> getMutableEdges() {
-    std::vector<EdgeRef> v;
-    for (auto& e : Edges) {
+    std::vector<EdgeRef> result;
+    for (auto& e : edges_) {
       DEBUG_PRINT("Adding edge to mutable output (%p)\n", &e);
-      v.emplace_back(&e);
+      result.emplace_back(&e);
     }
-    return v;
+    return result;
+  }
+
+ private:
+  std::list<Node<T, U...>> nodes_;
+  std::list<Edge<T, U...>> edges_;
+  std::unordered_set<NodeRef> nodeRefs_;
+
+  NodeRef createNodeInternal(Node<T, U...>&& node) {
+    nodes_.emplace_back(std::move(node));
+    NodeRef nodeRef = &nodes_.back();
+    DEBUG_PRINT("Creating node (%p)\n", nodeRef);
+    nodeRefs_.insert(nodeRef);
+    return nodeRef;
   }
 
   void printEdges() {
-    for (const auto& edge : Edges) {
+    for (const auto& edge : edges_) {
       printf("Edge: %p (%p -> %p)\n", &edge, edge.tail(), edge.head());
     }
   }
 
   void printNodes() const {
-    for (const auto& node : Nodes) {
+    for (const auto& node : nodes_) {
       printf("Node: %p\n", &node);
     }
-  }
-
- private:
-  std::list<Node<T, U...>> Nodes;
-  std::list<Edge<T, U...>> Edges;
-  std::unordered_set<NodeRef> NodeRefs;
-
-  NodeRef createNodeInternal(Node<T, U...>&& node) {
-    Nodes.emplace_back(std::move(node));
-    NodeRef nodeRef = &Nodes.back();
-    DEBUG_PRINT("Creating node (%p)\n", nodeRef);
-    NodeRefs.insert(nodeRef);
-    return nodeRef;
   }
 };
 

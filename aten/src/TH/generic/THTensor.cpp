@@ -15,27 +15,27 @@ ptrdiff_t THTensor_(storageOffset)(const THTensor *self)
   return self->storage_offset();
 }
 
-int THTensor_(nDimension)(const THTensor *self)
+int THTensor_(nDimensionLegacyNoScalars)(const THTensor *self)
 {
-  return self->dim();
+  return THTensor_nDimensionLegacyNoScalars(self);
 }
 
-int THTensor_(_nDimension)(const THTensor *self)
+int THTensor_(nDimensionLegacyAll)(const THTensor *self)
 {
-  return self->_dim();
+  return THTensor_nDimensionLegacyAll(self);
 }
 
 int64_t THTensor_(size)(const THTensor *self, int dim)
 {
   THArgCheck((dim >= 0) && (dim < self->dim()), 2, "dimension %d out of range of %dD tensor",
-      dim+TH_INDEX_BASE, THTensor_(nDimension)(self));
+      dim+TH_INDEX_BASE, THTensor_(nDimensionLegacyNoScalars)(self));
   return self->size(dim);
 }
 
 int64_t THTensor_(stride)(const THTensor *self, int dim)
 {
   THArgCheck((dim >= 0) && (dim < self->dim()), 2, "dimension %d out of range of %dD tensor",
-      dim+TH_INDEX_BASE, THTensor_(nDimension)(self));
+      dim+TH_INDEX_BASE, THTensor_(nDimensionLegacyNoScalars)(self));
   return self->stride(dim);
 }
 
@@ -373,11 +373,7 @@ void THTensor_(narrow)(THTensor *self, THTensor *src, int dimension, int64_t fir
 
   THArgCheck( (dimension >= 0) && (dimension < src->dim()), 2, "out of range");
   THArgCheck( firstIndex >= 0, 3, "out of range");
-#ifdef USE_TH_SIZE_ZERO_DIM
   THArgCheck( size >= 0, 4, "out of range");
-#else
-  THArgCheck( size > 0, 4, "out of range");
-#endif
   THArgCheck(firstIndex <= src->size(dimension) - size, 4, "out of range");
 
   THTensor_(set)(self, src);
@@ -396,12 +392,8 @@ void THTensor_(select)(THTensor *self, THTensor *src, int dimension, int64_t sli
   if(!src)
     src = self;
 
-#ifndef USE_TH_SIZE_ZERO_DIM
-  THArgCheck(src->_dim() > 1, 1, "cannot select on a vector");
-#else
 #ifndef USE_TH_SCALAR
   THArgCheck(src->dim() > 1, 1, "cannot select on a vector");
-#endif
 #endif
   THArgCheck((dimension >= 0) && (dimension < src->dim()), 2, "out of range");
   THArgCheck((sliceIndex >= 0) && (sliceIndex < src->size(dimension)), 3, "out of range");
@@ -423,8 +415,8 @@ void THTensor_(transpose)(THTensor *self, THTensor *src, int dimension1, int dim
   if(!src)
     src = self;
 
-  THArgCheck( (dimension1 >= 0) && (dimension1 < src->dim()), 1, "out of range");
-  THArgCheck( (dimension2 >= 0) && (dimension2 < src->dim()), 2, "out of range");
+  THArgCheck( (dimension1 >= 0) && (dimension1 < THTensor_nDimensionLegacyNoScalars(src)), 1, "out of range");
+  THArgCheck( (dimension2 >= 0) && (dimension2 < THTensor_nDimensionLegacyNoScalars(src)), 2, "out of range");
 
   THTensor_(set)(self, src);
 
@@ -446,10 +438,7 @@ void THTensor_(unfold)(THTensor *self, THTensor *src, int dimension, int64_t siz
   if(!src)
     src = self;
 
-#ifndef USE_TH_SIZE_ZERO_DIM
-  THArgCheck(!src->is_empty(), 1, "cannot unfold an empty tensor");
-#endif
-  THArgCheck((dimension >= 0) && (dimension < src->dim()), 2, "out of range");
+  THArgCheck((dimension >= 0) && (dimension < THTensor_nDimensionLegacyNoScalars(src)), 2, "out of range");
   THArgCheck(size <= src->size(dimension), 3, "out of range");
   THArgCheck(step > 0, 4, "invalid step");
 
@@ -459,18 +448,20 @@ void THTensor_(unfold)(THTensor *self, THTensor *src, int dimension, int64_t siz
   std::vector<int64_t> newStride(/* size */ self->dim()+1);
 
   newSize[self->dim()] = size;
-  newStride[self->dim()] = self->stride(dimension);
+  newStride[self->dim()] = THTensor_strideLegacyNoScalars(self, dimension);
   for(d = 0; d < self->dim(); d++)
   {
+    auto self_size = THTensor_sizeLegacyNoScalars(self, d);
+    auto self_stride = THTensor_strideLegacyNoScalars(self, d);
     if(d == dimension)
     {
-      newSize[d] = (self->size(d) - size) / step + 1;
-      newStride[d] = step*self->stride(d);
+      newSize[d] = (self_size - size) / step + 1;
+      newStride[d] = step*self_stride;
     }
     else
     {
-      newSize[d] = self->size(d);
-      newStride[d] = self->stride(d);
+      newSize[d] = self_size;
+      newStride[d] = self_stride;
     }
   }
 
@@ -547,9 +538,6 @@ void THTensor_(unsqueeze1d)(THTensor *self, THTensor *src, int dimension)
     src = self;
 
   THArgCheck((dimension >= 0) && (dimension <= src->dim()), 2, "dimension out of range");
-#ifndef USE_TH_SIZE_ZERO_DIM
-  THArgCheck(!src->is_empty(), 2, "cannot unsqueeze empty tensor");
-#endif
 
   THTensor_(set)(self, src);
 
@@ -575,7 +563,7 @@ int THTensor_(isTransposed)(const THTensor *self)
   int64_t size_max_stride = 1;
   int64_t z = 1;
   int d;
-  for (d = 0; d < self->_dim(); ++d) {
+  for (d = 0; d < THTensor_nDimensionLegacyAll(self); ++d) {
     if (self->stride(d) == 0 && self->size(d) != 1)
       return 0;
     if (self->stride(d) > max_stride) {
@@ -611,10 +599,10 @@ int THTensor_(isContiguous)(const THTensor *self)
 int THTensor_(isSize)(const THTensor *self, const THLongStorage *dims)
 {
   int d;
-  if (self->_dim() != dims->size)
+  if (THTensor_nDimensionLegacyAll(self) != dims->size)
     return 0;
 
-  for(d = 0; d < self->_dim(); ++d)
+  for(d = 0; d < THTensor_nDimensionLegacyAll(self); ++d)
   {
     if(self->size(d) != THLongStorage_data(dims)[d])
       return 0;
@@ -641,10 +629,10 @@ int THTensor_(isSetTo)(const THTensor *self, const THTensor* src)
     return 0;
   if (THTensor_getStoragePtr(self) == THTensor_getStoragePtr(src) &&
       self->storage_offset() == src->storage_offset() &&
-      self->_dim() == src->_dim())
+      THTensor_nDimensionLegacyAll(self) == THTensor_nDimensionLegacyAll(src))
   {
     int d;
-    for (d = 0; d < self->_dim(); ++d)
+    for (d = 0; d < THTensor_nDimensionLegacyAll(self); ++d)
     {
       if (self->size(d) != src->size(d) || self->stride(d) != src->stride(d))
         return 0;
@@ -656,13 +644,13 @@ int THTensor_(isSetTo)(const THTensor *self, const THTensor* src)
 
 ptrdiff_t THTensor_(nElement)(const THTensor *self)
 {
-  if(self->_dim() == 0)
+  if(THTensor_nDimensionLegacyAll(self) == 0)
     return 0;
   else
   {
     ptrdiff_t nElement = 1;
     int d;
-    for(d = 0; d < self->_dim(); d++)
+    for(d = 0; d < THTensor_nDimensionLegacyAll(self); d++)
       nElement *= self->size(d);
     return nElement;
   }
@@ -728,15 +716,6 @@ void THTensor_(resizeNd)(THTensor *self, int nDimension, int64_t *size, int64_t 
 
   for(d = 0; d < nDimension; d++)
   {
-#ifndef USE_TH_SIZE_ZERO_DIM
-    // we can't support this unless we have arbitrary 0-sized dimensions, but some calls to this
-    // currently exist and expect a size [0] tensor to be returned.
-    if (d == 0 && size[d] == 0) {
-      nDimension = 1;
-    } else {
-      AT_CHECK(size[d] > 0, "sizes must be non-negative");
-    }
-#endif
     if((self->dim() > d) && (size[d] != self->size(d))) {
       hascorrectsize = false;
     }
@@ -790,56 +769,56 @@ void THTensor_(resizeNd)(THTensor *self, int nDimension, int64_t *size, int64_t 
 
 void THTensor_(set1d)(THTensor *tensor, int64_t x0, real value)
 {
-  THArgCheck(tensor->_dim() == 1, 1, "tensor must have one dimension");
+  THArgCheck(THTensor_nDimensionLegacyNoScalars(tensor) == 1, 1, "tensor must have one dimension");
   THArgCheck( (x0 >= 0) && (x0 < tensor->size(0)), 2, "out of range");
   THStorage_(set)(THTensor_getStoragePtr(tensor), tensor->storage_offset()+x0*tensor->stride(0), value);
 }
 
 real THTensor_(get1d)(const THTensor *tensor, int64_t x0)
 {
-  THArgCheck(tensor->_dim() == 1, 1, "tensor must have one dimension");
+  THArgCheck(THTensor_nDimensionLegacyNoScalars(tensor) == 1, 1, "tensor must have one dimension");
   THArgCheck( (x0 >= 0) && (x0 < tensor->size(0)), 2, "out of range");
   return THStorage_(get)(THTensor_getStoragePtr(tensor), tensor->storage_offset()+x0*tensor->stride(0));
 }
 
 void THTensor_(set2d)(THTensor *tensor, int64_t x0, int64_t x1, real value)
 {
-  THArgCheck(tensor->_dim() == 2, 1, "tensor must have two dimensions");
+  THArgCheck(THTensor_nDimensionLegacyAll(tensor) == 2, 1, "tensor must have two dimensions");
   THArgCheck((x0 >= 0) && (x0 < tensor->size(0)) && (x1 >= 0) && (x1 < tensor->size(1)), 2, "out of range");
   THStorage_(set)(THTensor_getStoragePtr(tensor), tensor->storage_offset()+x0*tensor->stride(0)+x1*tensor->stride(1), value);
 }
 
 real THTensor_(get2d)(const THTensor *tensor, int64_t x0, int64_t x1)
 {
-  THArgCheck(tensor->_dim() == 2, 1, "tensor must have two dimensions");
+  THArgCheck(THTensor_nDimensionLegacyAll(tensor) == 2, 1, "tensor must have two dimensions");
   THArgCheck((x0 >= 0) && (x0 < tensor->size(0)) && (x1 >= 0) && (x1 < tensor->size(1)), 2, "out of range");
   return THStorage_(get)(THTensor_getStoragePtr(tensor), tensor->storage_offset()+x0*tensor->stride(0)+x1*tensor->stride(1));
 }
 
 void THTensor_(set3d)(THTensor *tensor, int64_t x0, int64_t x1, int64_t x2, real value)
 {
-  THArgCheck(tensor->_dim() == 3, 1, "tensor must have three dimensions");
+  THArgCheck(THTensor_nDimensionLegacyAll(tensor) == 3, 1, "tensor must have three dimensions");
   THArgCheck( (x0 >= 0) && (x0 < tensor->size(0)) && (x1 >= 0) && (x1 < tensor->size(1)) && (x2 >= 0) && (x2 < tensor->size(2)), 2, "out of range");
   THStorage_(set)(THTensor_getStoragePtr(tensor), tensor->storage_offset()+x0*tensor->stride(0)+x1*tensor->stride(1)+x2*tensor->stride(2), value);
 }
 
 real THTensor_(get3d)(const THTensor *tensor, int64_t x0, int64_t x1, int64_t x2)
 {
-  THArgCheck(tensor->_dim() == 3, 1, "tensor must have three dimensions");
+  THArgCheck(THTensor_nDimensionLegacyAll(tensor) == 3, 1, "tensor must have three dimensions");
   THArgCheck( (x0 >= 0) && (x0 < tensor->size(0)) && (x1 >= 0) && (x1 < tensor->size(1)) && (x2 >= 0) && (x2 < tensor->size(2)), 2, "out of range");
   return THStorage_(get)(THTensor_getStoragePtr(tensor), tensor->storage_offset()+x0*tensor->stride(0)+x1*tensor->stride(1)+x2*tensor->stride(2));
 }
 
 void THTensor_(set4d)(THTensor *tensor, int64_t x0, int64_t x1, int64_t x2, int64_t x3, real value)
 {
-  THArgCheck(tensor->_dim() == 4, 1, "tensor must have four dimensions");
+  THArgCheck(THTensor_nDimensionLegacyAll(tensor) == 4, 1, "tensor must have four dimensions");
   THArgCheck((x0 >= 0) && (x0 < tensor->size(0)) && (x1 >= 0) && (x1 < tensor->size(1)) && (x2 >= 0) && (x2 < tensor->size(2)) && (x3 >= 0) && (x3 < tensor->size(3)), 2, "out of range");
   THStorage_(set)(THTensor_getStoragePtr(tensor), tensor->storage_offset()+x0*tensor->stride(0)+x1*tensor->stride(1)+x2*tensor->stride(2)+x3*tensor->stride(3), value);
 }
 
 real THTensor_(get4d)(const THTensor *tensor, int64_t x0, int64_t x1, int64_t x2, int64_t x3)
 {
-  THArgCheck(tensor->_dim() == 4, 1, "tensor must have four dimensions");
+  THArgCheck(THTensor_nDimensionLegacyAll(tensor) == 4, 1, "tensor must have four dimensions");
   THArgCheck((x0 >= 0) && (x0 < tensor->size(0)) && (x1 >= 0) && (x1 < tensor->size(1)) && (x2 >= 0) && (x2 < tensor->size(2)) && (x3 >= 0) && (x3 < tensor->size(3)), 2, "out of range");
   return THStorage_(get)(THTensor_getStoragePtr(tensor), tensor->storage_offset()+x0*tensor->stride(0)+x1*tensor->stride(1)+x2*tensor->stride(2)+x3*tensor->stride(3));
 }
@@ -853,10 +832,10 @@ THDescBuff THTensor_(desc)(const THTensor *tensor) {
   n += snprintf(str, L-n, "torch." _stringify(x) "Tensor of size ");
 #undef _stringify
   int i;
-  for(i = 0; i < tensor->_dim(); i++) {
+  for(i = 0; i < THTensor_nDimensionLegacyAll(tensor); i++) {
     if(n >= L) break;
     n += snprintf(str+n, L-n, "%" PRId64, tensor->size(i));
-    if(i < tensor->_dim()-1) {
+    if(i < THTensor_nDimensionLegacyAll(tensor)-1) {
       n += snprintf(str+n, L-n, "x");
     }
   }

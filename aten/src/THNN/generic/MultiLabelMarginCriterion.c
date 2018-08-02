@@ -17,14 +17,14 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
   int64_t t, d, dt, ddt;
   real sum;
 
-  AT_CHECK(!input->is_empty() && (input->dim() == 1 || input->dim() == 2),
+  AT_CHECK(!input->is_empty() && input->dim() <= 2,
            "non-empty vector or matrix expected, got size: ", input->sizes());
 
-  if (input->dim() == 1)
+  if (input->dim() <= 1)
   {
     nframe = 1;
-    dim = input->size(0);
-    AT_CHECK(!target->is_empty() && (target->dim() == 1) && (target->size(0) == dim),
+    dim = THTensor_sizeLegacyNoScalars(input, 0);
+    AT_CHECK(!target->is_empty() && (target->dim() <= 1) && (THTensor_sizeLegacyNoScalars(target, 0) == dim),
              "inconsistent target size");
   }
   else
@@ -155,16 +155,16 @@ void THNN_(MultiLabelMarginCriterion_updateGradInput)(
   int64_t t, d, dt;
   real g;
 
-  AT_CHECK(!input->is_empty() && (input->dim() == 1 || input->dim() == 2),
+  AT_CHECK(!input->is_empty() && input->dim() <= 2,
            "vector or matrix expected, got size: ", input->sizes());
 
-  if (input->dim() == 1)
+  if (input->dim() <= 1)
   {
     nframe = 1;
-    dim = input->size(0);
-    AT_CHECK((!target->is_empty() && target->dim() == 1) && (target->size(0) == dim),
+    dim = THTensor_sizeLegacyNoScalars(input, 0);
+    AT_CHECK((!target->is_empty() && target->dim() <= 1) && (THTensor_sizeLegacyNoScalars(target, 0) == dim),
              "inconsistent target size");
-    AT_CHECK((!isTarget->is_empty() && isTarget->dim() == 1) && (isTarget->size(0) == dim),
+    AT_CHECK((!isTarget->is_empty() && isTarget->dim() <= 1) && (THTensor_sizeLegacyNoScalars(isTarget, 0) == dim),
              "inconsistent isTarget size");
   }
   else

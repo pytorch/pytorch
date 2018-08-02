@@ -5,7 +5,7 @@
 #include "caffe2/utils/math.h"
 
 // Bounding box utils for generate_proposals_op
-// Reference: detectron/lib/utils/boxes.py
+// Reference: facebookresearch/Detectron/detectron/utils/boxes.py
 
 namespace caffe2 {
 namespace utils {

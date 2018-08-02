@@ -141,7 +141,7 @@ bool CuDNNDropoutOp::DoRunWithType() {
   // now actually run the computation
   if (is_test_) {
     if (Y != &X) {
-      context_.Copy<T, CUDAContext, CUDAContext>(
+      context_.CopySameDevice<T>(
           X.size(), X.template data<T>(), Y->template mutable_data<T>());
     }
     return true;
@@ -150,8 +150,7 @@ bool CuDNNDropoutOp::DoRunWithType() {
     // Reshape tensor descriptors if necessary
     if (X.dims() != cudnn_input_dims_ && !is_test_) {
       CAFFE_ENFORCE(scratch_blob_);
-      Tensor<CUDAContext>* states =
-          scratch_blob_->GetMutable<Tensor<CUDAContext>>();
+      Tensor* states = scratch_blob_->GetMutableTensor(CUDA);
       cudnn_input_dims_ = X.dims();
       CUDNN_ENFORCE(cudnnSetTensor4dDescriptor(
           data_desc_,
@@ -172,7 +171,7 @@ bool CuDNNDropoutOp::DoRunWithType() {
       if (!states_initialized_) {
         // set the dropout descriptor (note: need to allocate the states data
         // before acquiring the mutex)
-        uint8_t* states_data = states->mutable_data<uint8_t>();
+        uint8_t* states_data = states->template mutable_data<uint8_t>();
         {
           // Need to protect  as clashes with NCCL
           std::lock_guard<std::mutex> lk(CUDAContext::mutex());
@@ -195,7 +194,7 @@ bool CuDNNDropoutOp::DoRunWithType() {
         X.template data<T>(),
         data_desc_,
         Y->template mutable_data<T>(),
-        mask->mutable_data<uint8_t>(),
+        mask->template mutable_data<uint8_t>(),
         reserve_space_size_in_bytes_));
   }
   return true;
@@ -219,7 +218,7 @@ template <typename T, typename M>
 bool CuDNNDropoutGradientOp::DoRunWithType() {
   const auto& dY = Input(0);
   const auto& mask = Input(1);
-  const Tensor<CUDAContext>& states = scratch_blob_->Get<Tensor<CUDAContext>>();
+  const Tensor& states = scratch_blob_->Get<Tensor>();
   auto* dX = Output(0);
 
   auto size_prod = 1;

@@ -14,7 +14,7 @@ class GatherFused8BitRowwiseOp : public Operator<Context> {
 
   bool RunOnDevice() override {
     return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
-        this, OperatorBase::Input<TensorCPU>(INDICES));
+        this, OperatorBase::Input<Tensor>(INDICES, CPU));
   }
 
   template <typename Index>

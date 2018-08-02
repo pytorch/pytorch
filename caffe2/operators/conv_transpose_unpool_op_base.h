@@ -131,10 +131,7 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
     }
   }
   // Sets the output size. The output channel is manually specified.
-  void SetOutputSize(
-      const Tensor<Context>& input,
-      Tensor<Context>* output,
-      int output_channel) {
+  void SetOutputSize(const Tensor& input, Tensor* output, int output_channel) {
     CAFFE_ENFORCE(4 == input.ndim());
     CAFFE_ENFORCE(input.size() > 0);
     int N = input.dim32(0);

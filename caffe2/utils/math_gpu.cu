@@ -355,6 +355,9 @@ DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(
     Sign,
     utils::Sign<std::int64_t>)
 
+DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Inv, utils::Inv<float>)
+DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(double, Inv, utils::Inv<double>)
+
 #undef DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION
 
 #define CAFFE2_SPECIALIZED_CUDA_SINCOS(T)                            \
@@ -639,7 +642,7 @@ DEFINE_BROADCAST_CUDA_BITWISE_BINARY_FUNCTION(BitwiseXor, thrust::bit_xor)
       const int N,                                                      \
       const T* src,                                                     \
       T* dst,                                                           \
-      Tensor<CUDAContext>* scratch_ptr,                                 \
+      Tensor* scratch_ptr,                                              \
       CUDAContext* context) {                                           \
     size_t memRequired = 0;                                             \
     cub::DeviceReduce::func(                                            \
@@ -1627,7 +1630,7 @@ void Dot<float, CUDAContext>(
     CUDAContext* context) {
   float result;
   CUBLAS_ENFORCE(cublasSdot(context->cublas_handle(), n, a, 1, b, 1, &result));
-  context->Copy<float, CPUContext, CUDAContext>(1, &result, y);
+  context->CopyFromCPU<float>(1, &result, y);
 }
 
 template <>
@@ -1713,7 +1716,7 @@ void SumGenericIter(
     IterT it,
     T*& dest,
     CUDAContext* context,
-    Tensor<CUDAContext>* scratch_ptr) {
+    Tensor* scratch_ptr) {
   size_t memRequired = 0;
   cub::DeviceReduce::Sum(
       nullptr, memRequired, it, dest, N, context->cuda_stream());
@@ -1742,7 +1745,7 @@ void Sum<float, CUDAContext>(
     const float* x,
     float* y,
     CUDAContext* context,
-    Tensor<CUDAContext>* scratch_ptr) {
+    Tensor* scratch_ptr) {
   if (scratch_ptr && N > DEVICE_REDUCE_SIZE_THRESHOLD) {
     SumGenericIter<float>(N, x, y, context, scratch_ptr);
   } else {
@@ -1757,7 +1760,7 @@ void Sum<int32_t, CUDAContext>(
     const int32_t* x,
     int32_t* y,
     CUDAContext* context,
-    Tensor<CUDAContext>* scratch_ptr) {
+    Tensor* scratch_ptr) {
   if (scratch_ptr && N > DEVICE_REDUCE_SIZE_THRESHOLD) {
     SumGenericIter<int32_t>(N, x, y, context, scratch_ptr);
   } else {
@@ -1782,7 +1785,7 @@ struct FloatTransform {
       const T* x,                                                         \
       T* y,                                                               \
       CUDAContext* context,                                               \
-      Tensor<CUDAContext>* scratch_ptr) {                                 \
+      Tensor* scratch_ptr) {                                              \
     if (scratch_ptr && N > DEVICE_REDUCE_SIZE_THRESHOLD) {                \
       FloatTransform<T> transform;                                        \
       cub::TransformInputIterator<float, FloatTransform<T>, const T*> it( \
@@ -1814,7 +1817,7 @@ void SumSqr<float, CUDAContext>(
     const float* x,
     float* y,
     CUDAContext* context,
-    Tensor<CUDAContext>* scratch_ptr) {
+    Tensor* scratch_ptr) {
   if (scratch_ptr && N > DEVICE_REDUCE_SIZE_THRESHOLD) {
     SqrTransform<float> transform;
     cub::TransformInputIterator<float, SqrTransform<float>, const float*> it(
@@ -1833,7 +1836,7 @@ void SumSqr<float, CUDAContext>(
       const T* x,                                                       \
       T* y,                                                             \
       CUDAContext* context,                                             \
-      Tensor<CUDAContext>* scratch_ptr) {                               \
+      Tensor* scratch_ptr) {                                            \
     if (scratch_ptr && N > DEVICE_REDUCE_SIZE_THRESHOLD) {              \
       FloatTransform<T> float_transform;                                \
       cub::TransformInputIterator<float, FloatTransform<T>, const T*>   \
