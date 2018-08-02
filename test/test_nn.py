@@ -1742,6 +1742,19 @@ class TestNN(NNTestCase):
         self.assertTrue(embedding.weight.grad.is_sparse)
         self.assertEqual(embedding.weight.grad.shape, embedding.weight.shape)
 
+    def test_embedding_sparse_empty_tensor(self):
+        embedding = nn.Embedding(0, 0, sparse=True)
+        input = torch.LongTensor()
+        embedding(input).sum().backward()
+        self.assertTrue(embedding.weight.grad.is_sparse)
+        self.assertEqual(embedding.weight.grad.shape, embedding.weight.shape)
+
+        embedding = nn.Embedding(10, 0, sparse=True)
+        input = torch.LongTensor([[0, 2, 4, 5], [4, 3, 0, 9]])
+        embedding(input).sum().backward()
+        self.assertTrue(embedding.weight.grad.is_sparse)
+        self.assertEqual(embedding.weight.grad.shape, embedding.weight.shape)
+
     def test_embedding_padding_idx(self):
         embedding = nn.Embedding(10, 20, padding_idx=0)
         input = Variable(torch.LongTensor([[0, 2, 4, 5], [4, 3, 0, 9]]))
