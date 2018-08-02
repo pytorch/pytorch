@@ -28,11 +28,12 @@ StorageImpl::StorageImpl(
           allocator,
           resizable) {}
 
-Type& StorageImpl::type() {
-  if (data_ptr.device().is_cuda()) {
-    return globalContext().getType(Backend::CUDA, scalar_type);
+namespace detail {
+Backend get_backend(StorageImpl* storage_impl) {
+  if (storage_impl->data_ptr.device().is_cuda()) {
+    return Backend::CUDA;
   }
-  return globalContext().getType(Backend::CPU, scalar_type);
+  return Backend::CPU;
 }
-
+} // namespace detail
 } // namespace at
