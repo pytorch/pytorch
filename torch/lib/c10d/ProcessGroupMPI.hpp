@@ -125,12 +125,12 @@ class ProcessGroupMPI : public ProcessGroup {
   std::shared_ptr<ProcessGroup::Work> gather(
       std::vector<std::vector<at::Tensor>>& outputTensors,
       std::vector<at::Tensor>& inputTensors,
-      const GatherOptions& ops = GatherOptions()) override;
+      const GatherOptions& opts = GatherOptions()) override;
 
   std::shared_ptr<ProcessGroup::Work> scatter(
       std::vector<at::Tensor>& outputTensors,
       std::vector<std::vector<at::Tensor>>& inputTensors,
-      const ScatterOptions& ops = ScatterOptions()) override;
+      const ScatterOptions& opts = ScatterOptions()) override;
 
   // Creating a new ProcessGroupMPI, will initiialize MPI if not initialized
   static std::shared_ptr<ProcessGroupMPI> createProcessGroupMPI();

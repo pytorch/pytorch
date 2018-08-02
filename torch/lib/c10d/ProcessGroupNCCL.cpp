@@ -583,14 +583,14 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather(
 std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::gather(
     std::vector<std::vector<at::Tensor>>& outputTensors,
     std::vector<at::Tensor>& inputTensors,
-    const GatherOptions& ops) {
+    const GatherOptions& opts) {
   throw std::runtime_error("ProcessGroupNCCL does not support gather");
 }
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::scatter(
     std::vector<at::Tensor>& outputTensors,
     std::vector<std::vector<at::Tensor>>& inputTensors,
-    const ScatterOptions& ops) {
+    const ScatterOptions& opts) {
   throw std::runtime_error("ProcessGroupNCCL does not support scatter");
 }
 

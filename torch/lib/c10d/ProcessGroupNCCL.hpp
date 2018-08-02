@@ -121,12 +121,12 @@ class ProcessGroupNCCL : public ProcessGroup {
   std::shared_ptr<ProcessGroup::Work> gather(
       std::vector<std::vector<at::Tensor>>& outputTensors,
       std::vector<at::Tensor>& inputTensors,
-      const GatherOptions& ops = GatherOptions()) override;
+      const GatherOptions& opts = GatherOptions()) override;
 
   std::shared_ptr<ProcessGroup::Work> scatter(
       std::vector<at::Tensor>& outputTensors,
       std::vector<std::vector<at::Tensor>>& inputTensors,
-      const ScatterOptions& ops = ScatterOptions()) override;
+      const ScatterOptions& opts = ScatterOptions()) override;
 
  protected:
   // Helper that broadcasts nccl unique ID to all ranks through the store

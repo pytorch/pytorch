@@ -105,12 +105,12 @@ class ProcessGroup {
   virtual std::shared_ptr<ProcessGroup::Work> gather(
       std::vector<std::vector<at::Tensor>>& outputTensors,
       std::vector<at::Tensor>& inputTensors,
-      const GatherOptions& ops = GatherOptions()) = 0;
+      const GatherOptions& opts = GatherOptions()) = 0;
 
   virtual std::shared_ptr<ProcessGroup::Work> scatter(
       std::vector<at::Tensor>& outputTensors,
       std::vector<std::vector<at::Tensor>>& inputTensors,
-      const ScatterOptions& ops = ScatterOptions()) = 0;
+      const ScatterOptions& opts = ScatterOptions()) = 0;
 
  protected:
   const int rank_;
