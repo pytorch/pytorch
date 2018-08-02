@@ -326,10 +326,10 @@ CHECKED_USE = {
 CHECKED_USE_NULLABLE = CodeTemplate('${arg_name}_ ? ${usage} : NULL')
 
 ALLOC_NOARGS_WRAP = {
-    'THTensor*': 'detail::new_${Tensor}()',
-    'THBoolTensor*': 'detail::new_${Backend}ByteTensor()',
-    'THIndexTensor*': 'detail::new_${Backend}LongTensor()',
-    'THIntegerTensor*': 'detail::new_${Backend}IntTensor()',
+    'THTensor*': 'new TensorImpl(Backend::${Backend}, ScalarType::${ScalarName})',
+    'THBoolTensor*': 'new TensorImpl(Backend::${Backend}, ScalarType::Byte)',
+    'THIndexTensor*': 'new TensorImpl(Backend::${Backend}, ScalarType::Long)',
+    'THIntegerTensor*': 'new TensorImpl(Backend::${Backend}, ScalarType::Int)',
     'THSTensor*': 'detail::new_Sparse${Tensor}()',
     'THDenseTensor*': 'detail::new_${DenseTensor}()',
     'THDenseIndexTensor*': 'detail::new_${DenseBackend}LongTensor()',

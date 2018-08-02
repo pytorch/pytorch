@@ -1,5 +1,6 @@
 #include <ATen/TensorImpl.h>
 
+#include "ATen/Context.h"
 #include <ATen/Tensor.h>
 #include <ATen/core/optional.h>
 #include <ATen/Context.h>
@@ -54,6 +55,15 @@ void Tensor::backward(
   pImpl->backward(std::move(gradient), keep_graph, create_graph);
 }
 
+TensorImpl::TensorImpl(Backend backend, ScalarType scalar_type) {
+  type_ = &globalContext().getType(backend, scalar_type);
+  Storage* storage = type_->storage().release();
+  StorageImpl* storage_impl = storage->pImpl();
+  storage_impl->retain();
+  storage_impl->set_resizable(true);
+  tensor = new THTensor(storage_impl);
+}
+
 TensorImpl::~TensorImpl() {
   if (tensor) tensor->release();
 }
@@ -96,6 +106,12 @@ void * TensorImpl::unsafeGetTH(bool retain) {
     tensor->retain();
   }
   return tensor;
+}
+
+std::unique_ptr<Storage> TensorImpl::storage() {
+  auto storage = THTensor_getStoragePtr(tensor);
+  THStorage_retain(storage);
+  return std::unique_ptr<Storage>(new Storage(storage));
 }
 
 } // namespace at

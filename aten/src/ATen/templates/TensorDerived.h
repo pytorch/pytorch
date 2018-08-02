@@ -13,15 +13,6 @@ namespace at {
 struct ${Tensor} final : public TensorImpl {
 public:
   ${Tensor}(THTensor * tensor);
-  virtual std::unique_ptr<Storage> storage() override;
 };
-
-namespace detail {
-  // This is just a temporary function to help out code generation.
-  // Eventually, the codegen code should construct tensors using
-  // a new Tensor constructor that takes scalar type and backend,
-  // but I haven't written this yet.
-  ${Tensor}* new_${Tensor}();
-}
 
 } // namespace at

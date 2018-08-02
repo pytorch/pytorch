@@ -111,8 +111,6 @@ TYPE_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/Type.cpp")
 
 TENSOR_DERIVED_CPP = CodeTemplate.from_file(
     TEMPLATE_PATH + "/TensorDerived.cpp")
-TENSOR_DENSE_CPP = CodeTemplate.from_file(
-    TEMPLATE_PATH + "/TensorDense.cpp")
 
 REGISTER_CUDA_H = CodeTemplate.from_file(TEMPLATE_PATH + "/RegisterCUDA.h")
 REGISTER_CUDA_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/RegisterCUDA.cpp")
@@ -316,7 +314,6 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
 
     if density != 'Sparse':
         # there are no storage or tensor types for sparse; it's all uniform
-        env['TensorDenseOrSparse'] = TENSOR_DENSE_CPP.substitute(env)
         fm.write(env['Tensor'] + ".cpp", TENSOR_DERIVED_CPP, env)
         fm.write(env['Tensor'] + ".h", TENSOR_DERIVED_H, env)
 

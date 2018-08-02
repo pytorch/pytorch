@@ -54,12 +54,6 @@ inline T* checked_cast_tensor(Base* expr, const char * name, int pos, bool allow
     AT_ERROR("Expected object of scalar type ", scalar_type, " but got scalar type ", expr->type().scalarType(),
              " for argument #", pos, " '", name, "'");
   }
-  // This is going away soon; delete this when we remove the subtypes of
-  // TensorImpl (so that we can eliminate the T template parameter)
-  if (typeid(*expr) != typeid(T)) {
-    AT_ERROR("Expected object of RTTI type ", typeid(T).name(), " but found type ", typeid(*expr).name(),
-             " for argument #", pos, " '", name, "'");
-  }
   return static_cast<T*>(expr);
 }
 
