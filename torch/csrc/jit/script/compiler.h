@@ -131,7 +131,8 @@ struct TORCH_API BuiltinFunction : public SugaredValue {
     size_t n_binders) override;
 };
 
-using Resolver = std::function<std::shared_ptr<SugaredValue>(const std::string& name)>;
+using Resolver = std::function<std::shared_ptr<
+    SugaredValue>(const std::string& name, Method& m, const SourceRange& loc)>;
 TORCH_API void defineMethodsInModule(
   Module & m,
   const std::vector<TypedDef>& definitions,
