@@ -12,7 +12,7 @@ from torch.autograd import Variable
 from torch import sparse
 from torch.optim.lr_scheduler import LambdaLR, StepLR, MultiStepLR, ExponentialLR, CosineAnnealingLR, \
     ReduceLROnPlateau, CyclicLR
-from common import TestCase, run_tests, TEST_WITH_UBSAN
+from common import TestCase, run_tests, TEST_WITH_UBSAN, TEST_WITH_ROCM
 
 
 def rosenbrock(tensor):
