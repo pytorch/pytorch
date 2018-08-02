@@ -42,19 +42,19 @@ int deviceForInputs(Stack & stack, size_t N) {
 }
 
 template<size_t N>
-std::array<bool, N> as_bool_array(const std::vector<int64_t>& vec) {
+std::array<bool, N> as_bool_array(at::ArrayRef<int64_t> vec) {
   std::array<bool, N> res;
   JIT_ASSERT(vec.size() == N);
   std::copy(vec.begin(), vec.end(), res.begin());
   return res;
 }
 
-at::Device as_device(const std::vector<int64_t>& elements) {
+at::Device as_device(ArrayRef<int64_t> elements) {
   return at::Device(static_cast<at::Device::Type>(elements[0]), elements[1]);
 }
 
 RegisterOperators reg({
-${constructors}
+  ${constructors}
 });
 
 } // anon namespace

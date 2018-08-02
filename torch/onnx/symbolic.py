@@ -667,10 +667,12 @@ def unfold(g, input, dimension, size, step):
     return g.op("ATen", input, operator_s="unfold", dimension_i=dimension, size_i=size, step_i=step)
 
 
-@parse_args('v', 't', 't')
-def elu(g, input, alpha, scale):
+@parse_args('v', 't', 't', 't')
+def elu(g, input, alpha, scale, input_scale):
     if scale and scale != 1.:
         return _unimplemented("scale", "does not support scale in Elu")
+    if input_scale and input_scale != 1.:
+        return _unimplemented("input_scale", "does not support input_scale in Elu")
     # See Note [Export inplace]
     return g.op("Elu", input, alpha_f=_scalar(alpha))
 
@@ -878,14 +880,17 @@ def topk(g, self, k, dim, largest, sorted, out=None):
     return g.op("TopK", self, k_i=k, axis_i=dim, outputs=2)
 
 
-@parse_args('v', 'is')
 def repeat(g, self, repeats):
-    if self.isTensor():
+    if not _is_value(repeats):
+        repeats = g.op("Constant", value_t=torch.LongTensor(repeats))
+    const_repeats = _maybe_get_const(repeats, 'is')
+
+    if self.isTensor() and not _is_value(const_repeats):
         sizes = self.type().sizes()
-        diff_dims = len(repeats) - len(sizes)
+        diff_dims = len(const_repeats) - len(sizes)
         if diff_dims > 0:
             self = view(g, self, [1] * diff_dims + sizes)
-    return g.op("Tile", self, g.op("Constant", value_t=torch.LongTensor(repeats)))
+    return g.op("Tile", self, repeats)
 
 
 def instance_norm(g, input, **kwargs):

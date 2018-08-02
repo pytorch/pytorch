@@ -3,10 +3,13 @@
 
 FILE(GLOB ATen_CORE_HEADERS "*.h")
 FILE(GLOB ATen_CORE_SRCS "*.cpp")
+FILE(GLOB ATen_CORE_TEST_SRCS "*_test.cpp")
+EXCLUDE(ATen_CORE_SRCS "${ATen_CORE_SRCS}" ${ATen_CORE_TEST_SRCS})
 
 # Pass to parent
 set(ATen_CORE_HEADERS ${ATen_CORE_HEADERS} PARENT_SCOPE)
 set(ATen_CORE_SRCS ${ATen_CORE_SRCS} PARENT_SCOPE)
+set(ATen_CORE_TEST_SRCS ${ATen_CORE_TEST_SRCS} PARENT_SCOPE)
 # This is a little dodgy, because it means ALL ATen headers are made
 # visible.  Fortunately, you should just get a lot of undefined symbol
 # errors if you go outside core

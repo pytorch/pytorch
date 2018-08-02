@@ -306,3 +306,7 @@ BLAS and LAPACK Operations
 .. autofunction:: svd
 .. autofunction:: symeig
 .. autofunction:: trtrs
+
+Utilities
+----------------------------------
+.. autofunction:: compiled_with_cxx11_abi
