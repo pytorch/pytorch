@@ -46,9 +46,19 @@ struct PrintValue : public SugaredValue {
       auto& g = *m.graph();
       if (!attributes.empty())
         throw ErrorReport(loc) << "print doesn't accept any keyword arguments";
-      auto values = toValues(inputs);
-      ensureTensors(loc, values);
-      g.insertNode(g.create(prim::Print, values, 0)
+
+      //temporary hack to allow print statements to work in python 2, where
+      //print(a, b) is treated as a (a, b) tuple input.
+
+      std::vector<Value*> lowered_inputs = toValues(inputs);
+      if(lowered_inputs.size() == 1 && lowered_inputs.at(0)->node()->kind() == prim::TupleConstruct) {
+        auto input = lowered_inputs[0];
+        for(size_t j = 0; j < input->node()->inputs().size(); ++j) {
+          lowered_inputs.insert(lowered_inputs.begin() + 1 + j, input->node()->inputs().at(j));
+        }
+        lowered_inputs.erase(lowered_inputs.begin());
+      }
+      g.insertNode(g.create(prim::Print, lowered_inputs, 0)
                        ->setSourceLocation(std::make_shared<SourceRange>(loc)));
       return std::make_shared<NoneValue>();
   }
@@ -1364,6 +1374,9 @@ private:
       case TK_IF_EXPR: {
         return emitTernaryIf(TernaryIf(tree));
       } break;
+      case TK_STRINGLITERAL: {
+        return emitStringLiteral(StringLiteral(tree));
+      } break;
       case TK_LIST_LITERAL: {
         auto ll = ListLiteral(tree);
         auto values = getValues(ll.inputs(), /*maybe_unpack=*/true, identity);
@@ -1392,6 +1405,10 @@ private:
       return insertConstant(*graph, c.asFloatingPoint(), c.range());
     else
       return insertConstant(*graph, c.asIntegral(), c.range());
+  }
+
+  Value* emitStringLiteral(const StringLiteral& c) {
+    return insertConstant(*graph, c.text(), c.range());
   }
 
   // Desugars slice syntactic sugar tensor[begin:end] -> tensor.slice(begin,

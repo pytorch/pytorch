@@ -29,6 +29,9 @@ Value* insertConstant(
       return autograd::Variable(t).data();
     }));
     n->output()->setType(ListType::ofTensors());
+  } else if(val.isString()) {
+    n->s_(attr::string, val.toString()->string());
+    n->output()->setType(StringType::get());
   } else {
     throw std::runtime_error("Unsupported value kind: " + val.tagKind());
   }
@@ -77,6 +80,12 @@ RegisterOperators reg({
           });
           return [ts](Stack& stack) {
             push(stack, ts);
+            return 0;
+          };
+        } else if (type == StringType::get()) {
+          auto s = node->s(attr::string);
+          return [s](Stack& stack) {
+            push(stack, s);
             return 0;
           };
         } else {
