@@ -74,12 +74,12 @@ static Value* typeCast(const SourceRange& loc, Value* value, TypePtr dst) {
   } else if (dst->isSubtypeOf(NumberType::get()) && orig->isSubtypeOf(DynamicType::get())) {
     n = graph.createTensorToNum(dst, value);
   } else if(dst->isSubtypeOf(IntType::get()) && orig->isSubtypeOf(FloatType::get())) {
-    n = graph.createFloatToInt(dst, value);
+    n = graph.createFloatToInt(value);
   } else if(dst->isSubtypeOf(FloatType::get()) && orig->isSubtypeOf(IntType::get())) {
-    n = graph.createIntToFloat(dst, value);
+    n = graph.createIntToFloat(value);
   } else {
     throw ErrorReport(loc) << "Cannot cast type '" << orig->str() << "' to type '"
-      << dst->str() << "', no available type casting.";
+      << dst->str() << "'.";
   }
 
   auto* result = graph.insertNode(n)

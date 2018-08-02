@@ -1027,14 +1027,16 @@ public:
     result->output()->setType(type);
     return result;
   }
-  Node* createIntToFloat(const TypePtr& type, Value* value) {
+  Node* createIntToFloat(Value* value) {
+    JIT_ASSERT(*value->type() == *IntType::get());
     auto* result = create(prim::IntToFloat, {value});
-    result->output()->setType(type);
+    result->output()->setType(FloatType::get());
     return result;
   }
-  Node* createFloatToInt(const TypePtr& type, Value* value) {
+  Node* createFloatToInt(Value* value) {
+    JIT_ASSERT(*value->type() == *FloatType::get());
     auto* result = create(prim::FloatToInt, {value});
-    result->output()->setType(type);
+    result->output()->setType(IntType::get());
     return result;
   }
   Node* createPythonOp(
