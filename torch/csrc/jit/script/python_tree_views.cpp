@@ -207,16 +207,13 @@ void initTreeViewBindings(PyObject *module) {
     .def(py::init([](const SourceRange& range, std::vector<Expr> args) {
       return TupleLiteral::create(range, wrap_list(range, std::move(args)));
     }));
-  py::class_<Gather, Expr>(m, "Gather")
-    .def(py::init([](const Expr& base, const Expr& index) {
-      return Gather::create(base.range(), base, index);
+  py::class_<Subscript, Expr>(m, "Subscript")
+    .def(py::init([](const Expr& base, std::vector<Expr> subscript_exprs) {
+      return Subscript::create(base.range(), base, wrap_list(base.range(), std::move(subscript_exprs)));
     }));
-  py::class_<Slice, Expr>(m, "Slice")
-    .def(py::init([](const Expr& base, Expr* lower, Expr* upper) {
-      return Slice::create(base.range(),
-                           base,
-                           wrap_maybe(base.range(), lower),
-                           wrap_maybe(base.range(), upper));
+  py::class_<SliceExpr, Expr>(m, "SliceExpr")
+    .def(py::init([](const SourceRange& range, Expr *lower, Expr *upper) {
+      return SliceExpr::create(range, wrap_maybe(range, lower), wrap_maybe(range, upper));
     }));
   py::class_<Starred, Expr>(m, "Starred")
     .def(py::init([](const SourceRange& range, Expr expr){

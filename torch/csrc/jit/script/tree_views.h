@@ -55,8 +55,8 @@ namespace script {
 //       -- NB: x.name(y) is desugared into name(x, y)
 //       | Apply(Ident name, List<Expr> args, List<Attribute> kwargs)   TK_APPLY
 //       | Select(Expr base, Ident attr_name)                           '.'
-//       | Slice(Expr value, Maybe<Expr> first, Maybe<Expr> second)     TK_SLICE
-//       | Gather(Expr value, Expr indices)                             TK_GATHER
+//       | Subscript(Expr value, List<Expr> subscript_exprs)            TK_SUBSCRIPT
+//       | SliceExpr(Maybe<Expr> start, Maybe<Expr> end)                TK_SLICE_EXPR
 //       | Var(Ident name)                                              TK_VAR
 //       | ListLiteral(List<Expr> inputs)                               TK_LIST_LITERAL
 //       | TupleLiteral(List<Expr> inputs)                              TK_TUPLE_LITERAL
@@ -254,8 +254,8 @@ struct Expr : public TreeView {
       case TK_CAST:
       case TK_APPLY:
       case '.':
-      case TK_SLICE:
-      case TK_GATHER:
+      case TK_SUBSCRIPT:
+      case TK_SLICE_EXPR:
       case TK_VAR:
       case TK_LIST_LITERAL:
       case TK_TUPLE_LITERAL:
@@ -630,18 +630,15 @@ struct Select : public Expr {
   }
 };
 
-struct Slice : public Expr {
-  explicit Slice(const TreeRef& tree) : Expr(tree) {
-    tree_->match(TK_SLICE);
-  }
-  Expr value() const {
-    return Expr(subtree(0));
+struct SliceExpr : public Expr {
+  explicit SliceExpr(const TreeRef& tree) : Expr(tree) {
+    tree_->match(TK_SLICE_EXPR);
   }
   Maybe<Expr> start() const {
-    return Maybe<Expr>(subtree(1));
+    return Maybe<Expr>(subtree(0));
   }
   Maybe<Expr> end() const {
-    return Maybe<Expr>(subtree(2));
+    return Maybe<Expr>(subtree(1));
   }
   Expr startOr(int alternative) const {
     const auto startOption = start();
@@ -651,12 +648,11 @@ struct Slice : public Expr {
     const auto endOption = end();
     return endOption.present() ? endOption.get() : createInt(alternative);
   }
-  static Slice create(
+  static SliceExpr create(
       const SourceRange& range,
-      const Expr& value,
       const Maybe<Expr>& start,
       const Maybe<Expr>& end) {
-    return Slice(Compound::create(TK_SLICE, range, {value, start, end}));
+    return SliceExpr(Compound::create(TK_SLICE_EXPR, range, {start, end}));
   }
 private:
   Expr createInt(int value) const {
@@ -664,18 +660,21 @@ private:
   }
 };
 
-struct Gather : public Expr {
-  explicit Gather(const TreeRef& tree) : Expr(tree) {
-    tree_->match(TK_GATHER);
+struct Subscript : public Expr {
+  explicit Subscript(const TreeRef& tree) : Expr(tree) {
+    tree_->match(TK_SUBSCRIPT);
   }
   Expr value() const {
     return Expr(subtree(0));
   }
-  Expr indices() const {
-    return Expr(subtree(1));
+  List<Expr> subscript_exprs() const {
+    return List<Expr>(subtree(1));
   }
-  static Gather create(const SourceRange& range, const Expr& value, const Expr& indices) {
-    return Gather(Compound::create(TK_GATHER, range, {value, indices}));
+  static Subscript create(
+      const SourceRange& range,
+      const Expr& value,
+      const List<Expr>& subscript_exprs) {
+    return Subscript(Compound::create(TK_SUBSCRIPT, range, {value, subscript_exprs}));
   }
 };
 

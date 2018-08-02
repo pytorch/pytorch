@@ -71,9 +71,8 @@ namespace script {
   _(TK_DIV_EQ, "/=", "/=")                       \
   _(TK_GLOBAL, "global", "global")               \
   _(TK_BUILT_IN, "built-in", "")                 \
-  _(TK_SLICE, "slice", "")                       \
+  _(TK_SUBSCRIPT, "subscript", "")               \
   _(TK_VAR, "variable", "")                      \
-  _(TK_GATHER, "gather", "")                     \
   _(TK_NOTHING, "nothing", "")                   \
   _(TK_LIST_LITERAL, "list-literal", "")         \
   _(TK_TUPLE_LITERAL, "tuple-literal", "")       \
@@ -83,7 +82,8 @@ namespace script {
   _(TK_UNARY_MINUS, "unary minus", "")           \
   _(TK_POW, "pow operator", "**")                \
   _(TK_ARROW, "arrow", "->")                     \
-  _(TK_DECL, "decl", "")
+  _(TK_DECL, "decl", "")                         \
+  _(TK_SLICE_EXPR, "slice expr", "")
 
 static const char* valid_single_char_tokens = "+-*/@()[]:,={}><.?";
 

@@ -417,14 +417,14 @@ class ExprBuilder(Builder):
         sub_type = type(expr.slice)
         if sub_type is ast.Index:
             index = build_expr(ctx, expr.slice.value)
-            return Gather(base, index)
+            return Subscript(base, [index])
         elif sub_type is ast.Slice:
             lower = build_expr(ctx, expr.slice.lower) if expr.slice.lower is not None else None
             upper = build_expr(ctx, expr.slice.upper) if expr.slice.upper is not None else None
             if expr.slice.step is not None:
                 step = build_expr(ctx, expr.slice.step)
                 raise NotSupportedError(step.range(), "slices with ranges are not supported yet")
-            return Slice(base, lower, upper)
+            return Subscript(base, [SliceExpr(base.range(), lower, upper)])
         elif sub_type is ast.ExtSlice:
             raise NotSupportedError(base.range(), "slicing multiple dimensions at the same time isn't supported yet")
         else:  # Ellipsis (can only happen in Python 2)

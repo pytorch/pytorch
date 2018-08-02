@@ -1351,13 +1351,24 @@ private:
       case TK_NONE: {
         return emitNone(tree->range());
       } break;
-      case TK_SLICE: {
-        return emitSlice(Slice(tree));
-      } break;
-      case TK_GATHER: {
-        const auto gather = Gather(tree);
-        return emitGather(
-            gather.range(), {gather.value(), gather.indices()});
+      case TK_SUBSCRIPT: {
+        const auto subscript = Subscript(tree);
+        auto slice_exprs = subscript.subscript_exprs();
+        if (slice_exprs.size() != 1) {
+          // TODO Implement multidimensional slice
+          throw ErrorReport(subscript.range()) << "Subscripting multiple dimensions is currently not supported\n";
+        }
+        if (slice_exprs[0].kind() == TK_SLICE_EXPR) {
+          auto single_slice_expr = SliceExpr(slice_exprs[0].tree());
+          return emitSlice(
+              subscript.range(),
+              {subscript.value(),
+               single_slice_expr.startOr(0),
+               single_slice_expr.endOr(-1)});
+        } else {
+          return emitGather(
+              subscript.range(), {subscript.value(), slice_exprs[0]});
+        }
       } break;
       case TK_IF_EXPR: {
         return emitTernaryIf(TernaryIf(tree));
@@ -1413,8 +1424,9 @@ private:
     return insertConstant(*graph, c.text(), c.range());
   }
 
-  // Desugars slice syntactic sugar foo[begin:end]
-  Value* emitSlice(const Slice& slice) {
+  // Desugars slice syntactic sugar tensor[begin:end] -> tensor.slice(begin,
+  // end).
+  Value* emitSlice(const SliceExpr& slice) {
     const auto& loc = slice.range();
     TreeList inputs = {slice.value(), slice.startOr(0)};
     const auto applyInputs = Compound::create(TK_LIST, loc, std::move(inputs));
@@ -1530,7 +1542,9 @@ void defineMethodsInModule(Module & m, const std::string& source, const Resolver
   std::vector<Resolver> resolvers;
   while (p.lexer().cur().kind != TK_EOF) {
     // TODO: Function schema
-    definitions.emplace_back(Def(p.parseFunction()), at::nullopt);
+    auto def = Def(p.parseFunction());
+    auto schema = at::nullopt;
+    definitions.emplace_back(def, schema);
     resolvers.push_back(resolver);
   }
   defineMethodsInModule(m, definitions, resolvers, self);

@@ -90,7 +90,7 @@ struct Parser {
       } else if (L.cur().kind == '(') {
         prefix = createApply(Expr(prefix));
       } else if (L.cur().kind == '[') {
-        prefix = parseSliceOrGather(prefix);
+        prefix = parseSubscript(prefix);
       } else {
         break;
       }
@@ -261,37 +261,30 @@ struct Parser {
     L.expect(')');
   }
 
-  // OK: [a] (gather), [a:], [:a], [a:b], [:] (slice)
-  // Not OK: []
-  TreeRef parseSliceOrGather(TreeRef value) {
-    const auto range = L.cur().range;
-    L.expect('[');
-
-    // `first` will either be the gather indices, or the start of the slice.
+  // Parse expr's of the form [a:], [:b], [a:b], [:]
+  Expr parseSubscriptExp() {
     TreeRef first, second;
-
-    // Here we can either have a colon (which starts a slice), or an expression.
-    // If an expression, we don't know yet if it will be a slice or a gather.
+    auto range = L.cur().range;
     if (L.cur().kind != ':') {
       first = parseExp();
-      if (L.nextIf(']')) {
-        return Gather::create(range, Expr(value), Expr(first));
-      } else {
-        first = c(TK_OPTION, range, {first});
+    }
+    if (L.nextIf(':')) {
+      if (L.cur().kind != ',' && L.cur().kind != ']') {
+        second = parseExp();
       }
+      auto maybe_first = first ? Maybe<Expr>::create(range, Expr(first)) : Maybe<Expr>::create(range);
+      auto maybe_second = second ? Maybe<Expr>::create(range, Expr(second)) : Maybe<Expr>::create(range);
+      return SliceExpr::create(range, maybe_first, maybe_second);
     } else {
-      first = c(TK_OPTION, range, {});
+      return Expr(first);
     }
-    L.expect(':');
-    // Now we *may* have an expression.
-    if (L.cur().kind != ']') {
-      second = c(TK_OPTION, range, {parseExp()});
-    } else {
-      second = c(TK_OPTION, range, {});
-    }
-    L.expect(']');
+  }
 
-    return Slice::create(range, Expr(value), Maybe<Expr>(first), Maybe<Expr>(second));
+  TreeRef parseSubscript(TreeRef value) {
+    const auto range = L.cur().range;
+
+    auto subscript_exprs = parseList('[', ',', ']', &Parser::parseSubscriptExp);
+    return Subscript::create(range, Expr(value), subscript_exprs);
   }
 
   TreeRef parseParam() {
