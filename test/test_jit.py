@@ -2254,6 +2254,22 @@ def func(t):
         slope = torch.tensor([0.5])
         self.checkScript(fn, [x, slope], optimize=True)
 
+    def test_module_lookup(self):
+        import math
+        import numpy
+
+        @torch.jit.script
+        def f(x):
+            return math.pi * x
+
+        @torch.jit.script
+        def g(x):
+            return numpy.pi * x
+
+        a = torch.tensor(1.0, dtype=torch.float32)
+        self.assertEqual(f(a).item(), math.pi)
+        self.assertEqual(g(a).item(), numpy.pi)
+
     def test_script_docstring(self):
         @torch.jit.script
         def with_docstring(x):

@@ -231,19 +231,22 @@ std::shared_ptr<SugaredValue> PythonValue::attr(SourceRange loc, Method & m, con
   // make an exception for traversing modules because we want to be access
   // torch, torch.nn.functional, and the functions they expose.
   py::object member = getattr(loc, field);
-  if (isBuiltinModule()) {
-    if(py::isinstance<py::function>(member)) {
-      return std::make_shared<BuiltinFunction>(field, at::nullopt);
+  if (isBuiltinModule() && py::isinstance<py::function>(member)) {
+    return std::make_shared<BuiltinFunction>(field, at::nullopt);
+  }
+  if (py::isinstance<py::module>(self)) {
+    if(py::isinstance<py::module>(member)) {
+      return std::make_shared<PythonValue>(member);
     }
-    //e.g. any tensor attribute objects such as torch.uint8
+    //e.g. any tensor attribute objects such as torch.uint8 or numeric types
     if(THPDtype_Check(member.ptr()) ||
        THPLayout_Check(member.ptr()) ||
-       THPDevice_Check(member.ptr())) {
+       THPDevice_Check(member.ptr()) ||
+       py::isinstance<py::int_>(member) ||
+       py::isinstance<py::float_>(member) ||
+       py::isinstance<py::bool_>(member)) {
       return ConstantPythonValue::create(loc, m, member);
     }
-  }
-  if (py::isinstance<py::module>(self) && py::isinstance<py::module>(member)) {
-    return std::make_shared<PythonValue>(member);
   }
   throw ErrorReport(loc) << "unsupported attribute lookup on " << py::repr(self) << ".";
 }
