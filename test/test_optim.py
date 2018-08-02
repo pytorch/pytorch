@@ -712,7 +712,7 @@ class TestLRScheduler(TestCase):
         self._test_cycle_lr(scheduler, targets, len(target_1))
 
     def test_triangular_mode_step_size_up_down(self):
-        target = [1, 2, 3, 4, 5, 13 / 3, 11 / 3, 9 / 3, 7 / 3, 5 / 3, 1]
+        target = [1.0, 2.0, 3.0, 4.0, 5.0, 13.0 / 3, 11.0 / 3, 9.0 / 3, 7.0 / 3, 5.0 / 3, 1.0]
         targets = [target, target]
         scheduler = CyclicLR(self.opt, base_lr=1, max_lr=5,
                              step_size_up=4,
@@ -722,9 +722,9 @@ class TestLRScheduler(TestCase):
 
     def test_triangular2_mode_step_size_up_down(self):
         base_target = ([
-            1, 3, 5, 13 / 3, 11 / 3, 9 / 3, 7 / 3, 5 / 3, 1, 2, 3, 8 / 3,
-            7 / 3, 6 / 3, 5 / 3, 4 / 3, 1, 3 / 2, 2, 11 / 6, 10 / 6, 9 / 6,
-            8 / 6, 7 / 6
+            1.0, 3.0, 5.0, 13.0 / 3, 11.0 / 3, 9.0 / 3, 7.0 / 3, 5.0 / 3, 1.0, 2.0, 3.0, 8.0 / 3,
+            7.0 / 3, 6.0 / 3, 5.0 / 3, 4.0 / 3, 1.0, 3.0 / 2, 2.0, 11.0 / 6, 10.0 / 6, 9.0 / 6,
+            8.0 / 6, 7.0 / 6
         ])
         deltas = [2 * i for i in range(0, 2)]
         base_lrs = [1 + delta for delta in deltas]
@@ -744,8 +744,8 @@ class TestLRScheduler(TestCase):
         diff_lr = max_lr - base_lr
         gamma = 0.9
         xs = ([
-            0, 0.5, 1, 5 / 6, 4 / 6, 3 / 6, 2 / 6, 1 / 6, 0, 0.5, 1, 5 / 6,
-            4 / 6
+            0.0, 0.5, 1.0, 5.0 / 6, 4.0 / 6, 3.0 / 6, 2.0 / 6, 1.0 / 6, 0.0, 0.5, 1.0, 5.0 / 6,
+            4.0 / 6
         ])
         target = [base_lr + x * diff_lr * gamma**i for i, x in enumerate(xs)]
         targets = [target, target]
