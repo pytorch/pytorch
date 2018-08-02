@@ -184,13 +184,19 @@ template<class TypeList> using head_t = typename head<TypeList>::type;
  */
 
 /// Base template.
-template<size_t Index, class... Items> struct element;
+template<size_t Index, class TypeList> struct element final {
+    static_assert(detail::false_t<TypeList>::value, "In typelist::element<T>, the T argument must be typelist<...>.");
+};
 
 /// Successful case, we have reached the zero index and can "return" the head type.
 template<class Head, class... Tail> struct element<0, typelist<Head, Tail...>> { using type = Head; };
 
-/// Error case, we have an index but ran out of types!
-template<size_t Index> struct element<Index, typelist<>> { };
+/// Error case, we have an index but ran out of types! It will only be selected
+/// if `Ts...` is actually empty!
+template <size_t Index, class... Ts>
+struct element<Index, typelist<Ts...>> {
+  static_assert(Index < sizeof...(Ts), "Index is out of bounds in typelist::element");
+};
 
 /// Shave off types until we hit the <0, Head, Tail...> or <Index> case.
 template<size_t Index, class Head, class... Tail> struct element<Index, typelist<Head, Tail...>> : element<Index-1, typelist<Tail...>> { };
