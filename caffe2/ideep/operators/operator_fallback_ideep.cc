@@ -25,6 +25,8 @@
 #include <caffe2/operators/softmax_op.h>
 #include <caffe2/operators/transpose_op.h>
 #include <caffe2/operators/utility_ops.h>
+#include <caffe2/operators/affine_channel_op.h>
+#include <caffe2/operators/stop_gradient.h>
 
 // can add more non-IDEEP operators if needed
 namespace caffe2 {
@@ -106,6 +108,12 @@ REGISTER_IDEEP_OPERATOR(
 REGISTER_IDEEP_OPERATOR(
     BBoxTransform,
     IDEEPFallbackOp<BBoxTransformOp<float, CPUContext>>);
+REGISTER_IDEEP_OPERATOR(
+    AffineChannel,
+    IDEEPFallbackOp<AffineChannelOp<float, CPUContext>>);
+REGISTER_IDEEP_OPERATOR(
+    StopGradient,
+    IDEEPFallbackOp<StopGradientOp<CPUContext>>);
 
 REGISTER_IDEEP_OPERATOR(
     PadImage,
