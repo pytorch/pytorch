@@ -3603,6 +3603,139 @@ def func(t):
         self.assertEqual(1, foo3(a))
         self.assertEqual(2, foo3(b))
 
+    def test_script_module_export_submodule(self):
+        class M1(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M1, self).__init__(False)
+                self.weight = nn.Parameter(torch.randn(2))
+
+            @torch.jit.script_method
+            def forward(self, thing):
+                return self.weight + thing
+
+        class M2(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M2, self).__init__(False)
+                # test submodule
+                self.sub = M1()
+                self.weight = nn.Parameter(torch.randn(2, 3))
+                self.bias = nn.Parameter(torch.randn(2))
+                self.define("""
+                    def hi(self, a):
+                        return self.weight.mm(a)
+                """)
+
+            @torch.jit.script_method
+            def doit(self, input):
+                return self.weight.mm(input)
+
+            @torch.jit.script_method
+            def doit2(self, input):
+                return self.weight.mm(input)
+
+            @torch.jit.script_method
+            def doit3(self, input):
+                return input + torch.ones([1], dtype=torch.double)
+
+            @torch.jit.script_method
+            def forward(self, input):
+                a = self.doit(input)
+                b = self.doit2(input)
+                c = self.hi(input)
+                return a + b + self.bias + c
+
+        m_orig = M2()
+        m_import = torch.jit.ScriptModule()
+        m_export, storage_map = m_orig.export()
+        torch._C._jit_import_module(m_import, m_export, storage_map)
+
+        input = torch.randn(3, 2)
+        self.assertEqual(m_orig.doit(input), m_import.doit(input))
+        self.assertEqual(m_orig.hi(input), m_import.hi(input))
+        self.assertEqual(m_orig.doit3(input), m_import.doit3(input))
+        self.assertEqual(m_orig.forward(input), m_import.forward(input))
+
+    @skipIfNoTorchVision
+    def test_script_module_export_resnet18(self):
+        x = torch.ones(1, 3, 224, 224)
+        m_orig = torch.jit.trace(torch.ones(1, 3, 224, 224))(torchvision.models.resnet18())
+        m_import = torch.jit.ScriptModule()
+        m_export, storage_map = m_orig.export()
+        torch._C._jit_import_module(m_import, m_export, storage_map)
+
+        input = torch.randn(1, 3, 224, 224, requires_grad=True)
+        output_orig = m_orig(input)
+        output_orig.sum().backward()
+        grad_orig = input.grad.clone()
+        input.grad.zero_()
+
+        output_import = m_import(input)
+        output_import.sum().backward()
+        grad_import = input.grad.clone()
+
+        self.assertEqual(output_orig, output_import)
+        self.assertEqual(grad_orig, grad_import)
+
+    def test_script_module_export_tensor_type(self):
+        class M(torch.jit.ScriptModule):
+
+            def __init__(self, type):
+                super(M, self).__init__(False)
+                self.param = torch.nn.Parameter(torch.zeros((5, 5), dtype=type).random_())
+
+            @torch.jit.script_method
+            def foo(self):
+                return self.param
+
+        for type in [torch.float, torch.double]:
+            m_orig = M(type)
+            m_import = torch.jit.ScriptModule()
+            m_export, storage_map = m_orig.export()
+            torch._C._jit_import_module(m_import, m_export, storage_map)
+            self.assertEqual(m_orig.foo(), m_import.foo())
+            self.assertTrue(m_orig.foo().dtype == m_import.foo().dtype)
+
+    @unittest.skipIf(not RUN_CUDA, "testing cuda tensors require CUDA")
+    def test_script_module_export_tensor_cuda(self):
+        class M(torch.jit.ScriptModule):
+
+            def __init__(self):
+                super(M, self).__init__(False)
+                self.param = torch.nn.Parameter(torch.zeros((5, 5), device='cuda').random_())
+
+            @torch.jit.script_method
+            def foo(self):
+                return self.param
+
+        m_orig = M()
+        m_import = torch.jit.ScriptModule()
+        m_export, storage_map = m_orig.export()
+        torch._C._jit_import_module(m_import, m_export, storage_map)
+        self.assertTrue(m_import.foo().device == torch.device('cpu'))
+        self.assertEqual(m_orig.foo(), m_import.foo())
+        self.assertTrue(m_orig.foo().dtype == m_import.foo().dtype)
+
+    def test_script_module_export_shared_storage(self):
+        class M(torch.jit.ScriptModule):
+
+            def __init__(self):
+                super(M, self).__init__(False)
+                self.param1 = torch.nn.Parameter(torch.rand(5, 5))
+                self.param2 = torch.nn.Parameter(self.param1[3])
+                self.param3 = torch.nn.Parameter(torch.rand(5, 5))
+
+            @torch.jit.script_method
+            def foo(self):
+                return self.param1 + self.param2 + self.param3
+
+        m_orig = M()
+        m_import = torch.jit.ScriptModule()
+        m_export, storage_map = m_orig.export()
+        torch._C._jit_import_module(m_import, m_export, storage_map)
+        self.assertEqual(m_orig.foo(), m_import.foo())
+        self.assertTrue(m_import.param1.storage().data_ptr() == m_import.param2.storage().data_ptr())
+        self.assertTrue(m_import.param1.storage().data_ptr() != m_import.param3.storage().data_ptr())
+
     def test_onnx_export_script_module(self):
         class ModuleToExport(torch.jit.ScriptModule):
             def __init__(self):
