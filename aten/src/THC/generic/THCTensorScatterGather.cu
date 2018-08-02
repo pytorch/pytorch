@@ -14,10 +14,8 @@ void THCTensor_(gather)(THCState* state, THCTensor *tensor,
 
   THArgCheck(THCudaLongTensor_nDimensionLegacyNoScalars(state, index) == THCTensor_(nDimensionLegacyNoScalars)(state, src), 4,
              "Index tensor must have same dimensions as input tensor");
-  THLongStorage *indexSize = THCudaLongTensor_newSizeOf(state, index);
-  THArgCheck(THCTensor_(isSize)(state, tensor, indexSize), 4,
+  THArgCheck(tensor->sizes().equals(index->sizes()), 4,
              "Index tensor must have the same size as output tensor.");
-  THLongStorage_free(indexSize);
   THArgCheck(dim >= 0 && dim < THCTensor_(nDimensionLegacyNoScalars)(state, tensor), 3,
              "Index dimension is out of bounds");
   THArgCheck(THCTensor_(nDimensionLegacyNoScalars)(state, src) == THCTensor_(nDimensionLegacyNoScalars)(state, tensor), 2,
