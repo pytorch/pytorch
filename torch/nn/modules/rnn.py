@@ -306,7 +306,7 @@ class RNN(RNNBase):
 
     .. note::
         All the weights and biases are initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`
-        where :math:`k = \frac{1}{\text{hidden_size}}`
+        where :math:`k = \frac{1}{\text{hidden\_size}}`
 
     Examples::
 
@@ -417,7 +417,7 @@ class LSTM(RNNBase):
 
     .. note::
         All the weights and biases are initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`
-        where :math:`k = \frac{1}{\text{hidden_size}}`
+        where :math:`k = \frac{1}{\text{hidden\_size}}`
 
     Examples::
 
@@ -506,7 +506,7 @@ class GRU(RNNBase):
 
     .. note::
         All the weights and biases are initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`
-        where :math:`k = \frac{1}{\text{hidden_size}}`
+        where :math:`k = \frac{1}{\text{hidden\_size}}`
 
     Examples::
 
@@ -584,7 +584,7 @@ class RNNCell(RNNCellBase):
 
     .. note::
         All the weights and biases are initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`
-        where :math:`k = \frac{1}{\text{hidden_size}}`
+        where :math:`k = \frac{1}{\text{hidden\_size}}`
 
     Examples::
 
@@ -685,7 +685,7 @@ class LSTMCell(RNNCellBase):
 
     .. note::
         All the weights and biases are initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`
-        where :math:`k = \frac{1}{\text{hidden_size}}`
+        where :math:`k = \frac{1}{\text{hidden\_size}}`
 
     Examples::
 
@@ -773,7 +773,7 @@ class GRUCell(RNNCellBase):
 
     .. note::
         All the weights and biases are initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`
-        where :math:`k = \frac{1}{\text{hidden_size}}`
+        where :math:`k = \frac{1}{\text{hidden\_size}}`
 
     Examples::
 

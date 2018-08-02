@@ -209,12 +209,12 @@ def stft(input, n_fft, hop_length=None, win_length=None, window=None,
     expression:
 
     .. math::
-        X[m, \omega] = \sum_{k = 0}^{\text{win_length}}%
+        X[m, \omega] = \sum_{k = 0}^{\text{win\_length}}%
                             window[k]\ input[m \times hop_length + k]\ %
-                            e^{- j \frac{2 \pi \cdot \omega k}{\text{win_length}}},
+                            e^{- j \frac{2 \pi \cdot \omega k}{\text{win\_length}}},
 
     where :math:`m` is the index of the sliding window, and :math:`\omega` is
-    the frequency that :math:`0 \leq \omega < \text{n_fft}`. When
+    the frequency that :math:`0 \leq \omega < \text{n\_fft}`. When
     :attr:`onesided` is the default value ``True``,
 
     * :attr:`input` must be either a 1-D time sequenceor 2-D a batch of time
@@ -229,25 +229,25 @@ def stft(input, n_fft, hop_length=None, win_length=None, window=None,
     * :attr:`window` can be a 1-D tensor of size :attr:`win_length`, e.g., from
       :meth:`torch.hann_window`. If :attr:`window` is ``None`` (default), it is
       treated as if having :math:`1` everywhere in the window. If
-      :math:`\text{win_length} < \text{n_fft}`, :attr:`window` will be padded on
+      :math:`\text{win\_length} < \text{n\_fft}`, :attr:`window` will be padded on
       both sides to length :attr:`n_fft` before being applied.
 
     * If :attr:`center` is ``True`` (default), :attr:`input` will be padded on
       both sides so that the :math:`t`-th frame is centered at time
-      :math:`t \times \text{hop_length}`. Otherwise, the :math:`t`-th frame
-      begins at time  :math:`t \times \text{hop_length}`.
+      :math:`t \times \text{hop\_length}`. Otherwise, the :math:`t`-th frame
+      begins at time  :math:`t \times \text{hop\_length}`.
 
     * :attr:`pad_mode` determines the padding method used on :attr:`input` when
       :attr:`center` is ``True``. See :meth:`torch.nn.functional.pad` for
       all available options. Default is ``"reflect"``.
 
     * If :attr:`onesided` is ``True`` (default), only values for :math:`\omega`
-      in :math:`\left[0, 1, 2, \dots, \left\lfloor \frac{\text{n_fft}}{2} \right\rfloor + 1\right]`
+      in :math:`\left[0, 1, 2, \dots, \left\lfloor \frac{\text{n\_fft}}{2} \right\rfloor + 1\right]`
       are returned because the real-to-complex Fourier transform satisfies the
-      conjugate symmetry, i.e., :math:`X[m, \omega] = X[m, \text{n_fft} - \omega]^*`.
+      conjugate symmetry, i.e., :math:`X[m, \omega] = X[m, \text{n\_fft} - \omega]^*`.
 
     * If :attr:`normalized` is ``True`` (default is ``False``), the function
-      returns the normalized STFT results, i.e., multiplied by :math:`(\text{frame_length})^{-0.5}`.
+      returns the normalized STFT results, i.e., multiplied by :math:`(\text{frame\_length})^{-0.5}`.
 
     Returns the real and the imaginary parts together as one tensor of size
     :math:`(* \times N \times T \times 2)`, where :math:`*` is the optional
@@ -270,7 +270,7 @@ def stft(input, n_fft, hop_length=None, win_length=None, window=None,
         window (Tensor, optional): the optional window function.
             Default: ``None`` (treated as window of all :math:`1`s)
         center (bool, optional): whether to pad :attr:`input` on both sides so
-            that the :math:`t`-th frame is centered at time :math:`t \times \text{hop_length}`.
+            that the :math:`t`-th frame is centered at time :math:`t \times \text{hop\_length}`.
             Default: ``True``
         pad_mode (string, optional): controls the padding method used when
             :attr:`center` is ``True``. Default: ``"reflect"``

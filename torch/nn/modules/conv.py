@@ -139,17 +139,17 @@ class Conv1d(_ConvNd):
 
           .. math::
               L_{out} = \left\lfloor\frac{L_{in} + 2 \times \text{padding} - \text{dilation}
-                        \times (\text{kernel_size} - 1) - 1}{\text{stride}} + 1\right\rfloor
+                        \times (\text{kernel\_size} - 1) - 1}{\text{stride}} + 1\right\rfloor
 
     Attributes:
         weight (Tensor): the learnable weights of the module of shape
             (out_channels, in_channels, kernel_size). The values of these weights are sampled from
             :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
-            :math:`k = \frac{1}{\text{in_channels} * \text{kernel_size}}`
+            :math:`k = \frac{1}{\text{in\_channels} * \text{kernel\_size}}`
         bias (Tensor):   the learnable bias of the module of shape
             (out_channels). If :attr:`bias` is ``True``, then the values of these weights are
             sampled from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
-            :math:`k = \frac{1}{\text{in_channels} * \text{kernel_size}}`
+            :math:`k = \frac{1}{\text{in\_channels} * \text{kernel\_size}}`
 
     Examples::
 
@@ -259,21 +259,21 @@ class Conv2d(_ConvNd):
 
           .. math::
               H_{out} = \left\lfloor\frac{H_{in}  + 2 \times \text{padding}[0] - \text{dilation}[0]
-                        \times (\text{kernel_size}[0] - 1) - 1}{\text{stride}[0]} + 1\right\rfloor
+                        \times (\text{kernel\_size}[0] - 1) - 1}{\text{stride}[0]} + 1\right\rfloor
 
               W_{out} = \left\lfloor\frac{W_{in}  + 2 \times \text{padding}[1] - \text{dilation}[1]
-                        \times (\text{kernel_size}[1] - 1) - 1}{\text{stride}[1]} + 1\right\rfloor
+                        \times (\text{kernel\_size}[1] - 1) - 1}{\text{stride}[1]} + 1\right\rfloor
 
     Attributes:
         weight (Tensor): the learnable weights of the module of shape
                          (out_channels, in_channels, kernel_size[0], kernel_size[1]).
                          The values of these weights are sampled from
                          :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
-                         :math:`k = \frac{1}{\text{in_channels} * \prod_{i=0}^{1}\text{kernel_size[i]}}`
+                         :math:`k = \frac{1}{\text{in\_channels} * \prod_{i=0}^{1}\text{kernel\_size}[i]}`
         bias (Tensor):   the learnable bias of the module of shape (out_channels). If :attr:`bias` is ``True``,
                          then the values of these weights are
                          sampled from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
-                         :math:`k = \frac{1}{\text{in_channels} * \prod_{i=0}^{1}\text{kernel_size[i]}}`
+                         :math:`k = \frac{1}{\text{in\_channels} * \prod_{i=0}^{1}\text{kernel\_size}[i]}`
 
     Examples::
 
@@ -381,24 +381,24 @@ class Conv3d(_ConvNd):
 
           .. math::
               D_{out} = \left\lfloor\frac{D_{in} + 2 \times \text{padding}[0] - \text{dilation}[0]
-                    \times (\text{kernel_size}[0] - 1) - 1}{\text{stride}[0]} + 1\right\rfloor
+                    \times (\text{kernel\_size}[0] - 1) - 1}{\text{stride}[0]} + 1\right\rfloor
 
               H_{out} = \left\lfloor\frac{H_{in} + 2 \times \text{padding}[1] - \text{dilation}[1]
-                    \times (\text{kernel_size}[1] - 1) - 1}{\text{stride}[1]} + 1\right\rfloor
+                    \times (\text{kernel\_size}[1] - 1) - 1}{\text{stride}[1]} + 1\right\rfloor
 
               W_{out} = \left\lfloor\frac{W_{in} + 2 \times \text{padding}[2] - \text{dilation}[2]
-                    \times (\text{kernel_size}[2] - 1) - 1}{\text{stride}[2]} + 1\right\rfloor
+                    \times (\text{kernel\_size}[2] - 1) - 1}{\text{stride}[2]} + 1\right\rfloor
 
     Attributes:
         weight (Tensor): the learnable weights of the module of shape
                          (out_channels, in_channels, kernel_size[0], kernel_size[1], kernel_size[2])
                          The values of these weights are sampled from
                          :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
-                         :math:`k = \frac{1}{\text{in_channels} * \prod_{i=0}^{2}\text{kernel_size[i]}}`
+                         :math:`k = \frac{1}{\text{in\_channels} * \prod_{i=0}^{2}\text{kernel\_size}[i]}`
         bias (Tensor):   the learnable bias of the module of shape (out_channels). If :attr:`bias` is ``True``,
                          then the values of these weights are
                          sampled from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
-                         :math:`k = \frac{1}{\text{in_channels} * \prod_{i=0}^{2}\text{kernel_size[i]}}`
+                         :math:`k = \frac{1}{\text{in\_channels} * \prod_{i=0}^{2}\text{kernel\_size}[i]}`
 
     Examples::
 
@@ -543,18 +543,18 @@ class ConvTranspose1d(_ConvTransposeMixin, _ConvNd):
 
           .. math::
               L_{out} = (L_{in} - 1) \times \text{stride} - 2 \times \text{padding}
-                    + \text{kernel_size} + \text{output_padding}
+                    + \text{kernel\_size} + \text{output\_padding}
 
     Attributes:
         weight (Tensor): the learnable weights of the module of shape
                          (in_channels, out_channels, kernel_size[0], kernel_size[1]). The values
                          of these weights are sampled from
                          :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
-                         :math:`k = \frac{1}{\text{in_channels} * \text{kernel_size}}`
+                         :math:`k = \frac{1}{\text{in\_channels} * \text{kernel\_size}}`
         bias (Tensor):   the learnable bias of the module of shape (out_channels).
                          If :attr:`bias` is ``True``, then the values of these weights are
                          sampled from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
-                         :math:`k = \frac{1}{\text{in_channels} * \text{kernel_size}}`
+                         :math:`k = \frac{1}{\text{in\_channels} * \text{kernel\_size}}`
     """
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
@@ -653,21 +653,21 @@ class ConvTranspose2d(_ConvTransposeMixin, _ConvNd):
 
           .. math::
               H_{out} = (H_{in} - 1) \times \text{stride}[0] - 2 \times \text{padding}[0]
-                    + \text{kernel_size}[0] + \text{output_padding}[0]
+                    + \text{kernel\_size}[0] + \text{output\_padding}[0]
 
               W_{out} = (W_{in} - 1) \times \text{stride}[1] - 2 \times \text{padding}[1]
-                    + \text{kernel_size}[1] + \text{output_padding}[1]
+                    + \text{kernel\_size}[1] + \text{output\_padding}[1]
 
     Attributes:
         weight (Tensor): the learnable weights of the module of shape
                          (in_channels, out_channels, kernel_size[0], kernel_size[1])
                          The values of these weights are sampled from
                          :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
-                         :math:`k = \frac{1}{\text{in_channels} * \prod_{i=0}^{1}\text{kernel_size[i]}}`
+                         :math:`k = \frac{1}{\text{in\_channels} * \prod_{i=0}^{1}\text{kernel\_size}[i]}`
         bias (Tensor):   the learnable bias of the module of shape (out_channels)
                          If :attr:`bias` is ``True``, then the values of these weights are
                          sampled from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
-                         :math:`k = \frac{1}{\text{in_channels} * \prod_{i=0}^{1}\text{kernel_size[i]}}`
+                         :math:`k = \frac{1}{\text{in\_channels} * \prod_{i=0}^{1}\text{kernel\_size}[i]}`
 
     Examples::
 
@@ -793,24 +793,24 @@ class ConvTranspose3d(_ConvTransposeMixin, _ConvNd):
 
           .. math::
               D_{out} = (D_{in} - 1) \times \text{stride}[0] - 2 \times \text{padding}[0]
-                    + \text{kernel_size}[0] + \text{output_padding}[0]
+                    + \text{kernel\_size}[0] + \text{output\_padding}[0]
 
               H_{out} = (H_{in} - 1) \times \text{stride}[1] - 2 \times \text{padding}[1]
-                    + \text{kernel_size}[1] + \text{output_padding}[1]
+                    + \text{kernel\_size}[1] + \text{output\_padding}[1]
 
               W_{out} = (W_{in} - 1) \times \text{stride}[2] - 2 \times \text{padding}[2]
-                    + \text{kernel_size}[2] + \text{output_padding}[2]
+                    + \text{kernel\_size}[2] + \text{output\_padding}[2]
 
     Attributes:
         weight (Tensor): the learnable weights of the module of shape
                          (in_channels, out_channels, kernel_size[0], kernel_size[1], kernel_size[2])
                          The values of these weights are sampled from
                          :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
-                         :math:`k = \frac{1}{\text{in_channels} * \prod_{i=0}^{2}\text{kernel_size[i]}}`
+                         :math:`k = \frac{1}{\text{in\_channels} * \prod_{i=0}^{2}\text{kernel\_size}[i]}`
         bias (Tensor):   the learnable bias of the module of shape (out_channels)
                          If :attr:`bias` is ``True``, then the values of these weights are
                          sampled from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
-                         :math:`k = \frac{1}{\text{in_channels} * \prod_{i=0}^{2}\text{kernel_size[i]}}`
+                         :math:`k = \frac{1}{\text{in\_channels} * \prod_{i=0}^{2}\text{kernel\_size}[i]}`
 
     Examples::
 
