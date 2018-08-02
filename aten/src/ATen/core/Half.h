@@ -9,7 +9,7 @@
 /// If you are writing a compute bound kernel, you can use the CUDA half
 /// intrinsics directly on the Half type from device code.
 
-#include "ATen/core/CoreAPI.h"
+#include <ATen/core/CoreAPI.h>
 
 #include <cmath>
 #include <cstdint>
@@ -22,6 +22,10 @@
 
 #ifdef __CUDACC__
 #include <cuda_fp16.h>
+#endif
+
+#if defined(__HIP_DEVICE_COMPILE__)
+#include <hip/hip_fp16.h>
 #endif
 
 #ifndef AT_HOSTDEVICE
