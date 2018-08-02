@@ -4333,15 +4333,15 @@ def func(t):
 
     def test_parser_type_annotations(self):
         cu = torch.jit.CompilationUnit('''
-            def foo(x : Tensor, y : Tuple[Tuple[Tensor, Tensor], Tensor]) -> Tuple[Tensor, Tensors]:
-                return x
+            def foo(x : Tensor, y : Tuple[Tuple[Tensor, Tensor], Tensor]) -> Tuple[Tensor, Tensor]:
+                return x, x
         ''')
 
     def test_parser_type_annotations_comment(self):
         cu = torch.jit.CompilationUnit('''
             def foo(x, y):
-                # type: (Tensor, Tuple[Tuple[Tensor, Tensor], Tensor]) -> Tuple[Tensor, Tensors]
-                return x
+                # type: (Tensor, Tuple[Tuple[Tensor, Tensor], Tensor]) -> Tuple[Tensor, Tensor]
+                return x, x
         ''')
 
     def test_gather_dynamic_index(self):

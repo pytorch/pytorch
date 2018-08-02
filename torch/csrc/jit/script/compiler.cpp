@@ -1536,6 +1536,87 @@ void defineMethodsInModule(Module & m, const std::vector<TypedDef>& definitions,
   }
 }
 
+namespace type_annotations {
+
+std::unordered_map<std::string, TypePtr> ident_to_type_lut() {
+  static std::unordered_map<std::string, TypePtr> map = {
+    {"Tensor", DynamicType::get()},
+    {"Int", IntType::get()},
+    {"Float", FloatType::get()},
+  };
+  return map;
+}
+
+std::unordered_set<std::string> subscriptable_types() {
+  static std::unordered_set<std::string> map = {
+    "Tuple"
+  };
+  return map;
+}
+
+TypePtr parseTypeFromExpr(Expr expr) {
+  if (expr.kind() == TK_VAR) {
+    auto ident = Var(expr).name();
+    if (ident_to_type_lut().count(ident.name())) {
+      return ident_to_type_lut()[ident.name()];
+    }
+    throw ErrorReport(expr.range()) << "Unknown type name " << ident.name();
+  } else if (expr.kind() == TK_SUBSCRIPT) {
+    auto subscript = Subscript(expr);
+    if (subscript.value().kind() != TK_VAR) {
+      throw ErrorReport(subscript.value().range()) << "Subscripted type must be a type identifier";
+    }
+    auto value_name = Var(subscript.value()).name().name();
+    if (!subscriptable_types().count(value_name)) {
+      throw ErrorReport(subscript.value().range()) << "Type cannot be subscripted.";
+    }
+    if (value_name == "Tuple") {
+      std::vector<TypePtr> subscript_expr_types;
+      for (auto expr : subscript.subscript_exprs()) {
+        subscript_expr_types.push_back(parseTypeFromExpr(expr));
+      }
+      return TupleType::create(subscript_expr_types);
+    }
+  }
+  throw ErrorReport(expr.range()) << "Incompatible type expression type: " << kindToString(expr.kind());
+}
+
+std::vector<Argument> parseArgsFromDef(Def &def) {
+  std::vector<Argument> retval;
+  for (size_t i = 0; i < def.decl().params().size(); ++i) {
+    auto decl_arg = def.decl().params()[i];
+    auto arg = Argument(decl_arg.ident().name(), parseTypeFromExpr(decl_arg.type()),
+                        /*N =*/{}, /*default_value =*/{}, /*kwarg_only =*/false);
+    retval.push_back(arg);
+  }
+  return retval;
+}
+
+std::vector<Argument> parseReturnsFromDef(Def &def) {
+  auto parsed_type = parseTypeFromExpr(def.decl().return_type());
+  if (auto tuple_type = parsed_type->cast<TupleType>()) {
+    // Flatten a single return type of type Tuple into its constituent types
+    std::vector<Argument> retval;
+    for (auto type_ptr : tuple_type->elements()) {
+      retval.emplace_back("", type_ptr, /*N =*/at::nullopt,
+                          /*default_value =*/at::nullopt, /*kwarg_only =*/false);
+    }
+    return retval;
+  } else {
+    return {Argument("", parsed_type, /*N =*/{}, /*default_value =*/{},
+                     /*kwarg_only =*/false)};
+  }
+}
+
+FunctionSchema extractSchemaFromDef(Def &def) {
+    auto name = def.name().name();
+    std::vector<Argument> args = parseArgsFromDef(def);
+    std::vector<Argument> returns = parseReturnsFromDef(def);
+    return FunctionSchema(name, args, returns);
+}
+
+}  // namespace type_annotations
+
 void defineMethodsInModule(Module & m, const std::string& source, const Resolver& resolver, SugaredValuePtr self) {
   Parser p(source);
   std::vector<TypedDef> definitions;
@@ -1543,7 +1624,7 @@ void defineMethodsInModule(Module & m, const std::string& source, const Resolver
   while (p.lexer().cur().kind != TK_EOF) {
     // TODO: Function schema
     auto def = Def(p.parseFunction());
-    auto schema = at::nullopt;
+    auto schema = type_annotations::extractSchemaFromDef(def);
     definitions.emplace_back(def, schema);
     resolvers.push_back(resolver);
   }
