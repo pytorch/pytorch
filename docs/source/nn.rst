@@ -1120,7 +1120,7 @@ Linear functions
 .. autofunction:: linear
 
 :hidden:`bilinear`
-~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: bilinear
 
