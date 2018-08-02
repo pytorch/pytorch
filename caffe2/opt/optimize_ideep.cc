@@ -375,16 +375,20 @@ void setPoolingInferenceMode(repr::NNModule *nn) {
     }
 
     auto *op = getMutableOpDef(*maxPool);
+    bool found_training_mode = false;
     for (auto &arg : *op->mutable_arg()) {
       if (arg.name() == "training_mode") {
         arg.set_i(0);
-        return;
+        found_training_mode = true;
+        break;
       }
     }
 
-    auto *arg = op->add_arg();
-    arg->set_name("training_mode");
-    arg->set_i(0);
+    if (!found_training_mode) {
+      auto *arg = op->add_arg();
+      arg->set_name("training_mode");
+      arg->set_i(0);
+    }
   }
 }
 
