@@ -4337,12 +4337,17 @@ def func(t):
                 return x, x
         ''')
 
+        self.assertExpected(cu.__getattr__('foo').pretty_print_schema())
+
     def test_parser_type_annotations_comment(self):
         cu = torch.jit.CompilationUnit('''
             def foo(x, y):
                 # type: (Tensor, Tuple[Tuple[Tensor, Tensor], Tensor]) -> Tuple[Tensor, Tensor]
                 return x, x
         ''')
+
+        self.assertExpected(cu.__getattr__('foo').pretty_print_schema())
+
 
     def test_gather_dynamic_index(self):
         def t(x):
