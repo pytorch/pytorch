@@ -30,6 +30,12 @@ CUDA_LIBS = ['nvcuda.dll',
 TORCH_LIBS = ['shm.dll']
 
 
+def add_paths(paths):
+    """Add paths to `PATH`"""
+    for path in paths:
+        os.environ['PATH'] = path + ';' + os.environ['PATH']
+
+
 def get_output(command):
     """Returns stdout if rc is not 0 else None"""
     p = subprocess.Popen(command, stdout=subprocess.PIPE,
@@ -66,6 +72,7 @@ def detect_reason(raw_message):
             message += 'It seems that torch is not installed.\n'
             message += 'Please refer to https://pytorch.org for installation.\n'
     elif raw_message.startswith('DLL load failed'):
+        add_paths([NVTOOLEXT_HOME, PY_DLL_PATH])
         message += check_dependents(TORCH_LIBS, 'PyTorch', [
                                     '1. Please change your current directory.', '2. Please reinstall torch.'])
         message += check_dependents(VC_LIBS, 'VC Redist',
@@ -74,9 +81,6 @@ def detect_reason(raw_message):
                                     '`conda install mkl` or `pip install mkl`')
         message += check_dependents(INTEL_OPENMP_LIBS, 'intel-openmp',
                                     '`conda install intel-openmp` or `pip install intel-openmp`')
-        message += 'If the error persists when you installed these dependencies, then you may try adding '
-        message += '`%s` to the environment variable `PATH`.\n' % PY_DLL_PATH
-        message += 'And make sure you restart the command prompt when you apply any changes to the environment.\n'
         if IS_CUDA:
             if os.path.exists(NV_ROOT):
                 message += check_dependents(
@@ -84,6 +88,12 @@ def detect_reason(raw_message):
             else:
                 message += check_dependents(
                     CUDA_LIBS, 'CUDA', 'It seems that you don\'t have NV cards. Please use CPU version instead.')
+        
+        if message == '':
+            message += 'It seems `import torch` should work.'
+            message += 'You may try to add `%s` to the environment variable `PATH`.\n' % PY_DLL_PATH
+            message += 'And make sure you restart the command prompt when you apply any changes to the environment.\n'
+
     return message
 
 
