@@ -420,13 +420,13 @@ at::optional<std::vector<Value*>> tryMatchSchema(
     }
     // fill in named arguments
     for(const NamedValue& nv : attributes) {
-      auto idx = schema.argumentIndexWithName(nv.name);
+      auto idx = schema.argumentIndexWithName(nv.name());
       if(!idx) {
-        err() << "unknown keyword argument '" << nv.name << "'\n" << nv.loc;
+        err() << "unknown keyword argument '" << nv.name() << "'\n" << nv.loc();
         return at::nullopt;
       }
       if(positional_inputs[*idx]) {
-        err() << "argument " <<  nv.name << " specified twice \n" << nv.loc;
+        err() << "argument " <<  nv.name() << " specified twice \n" << nv.loc();
         return at::nullopt;
       }
       positional_inputs[*idx] = nv;
@@ -448,7 +448,7 @@ at::optional<std::vector<Value*>> tryMatchSchema(
     // check input types
     std::vector<Value*> matched_inputs;
     for(size_t i = 0; i < schema.arguments.size(); ++i) {
-      Value* value = positional_inputs[i]->value;
+      Value* value = positional_inputs[i]->value();
       const auto& arg = schema.arguments[i];
 
       // some functions that take lists of integers for fixed size arrays
@@ -478,7 +478,7 @@ at::optional<std::vector<Value*>> tryMatchSchema(
       if(!value->type()->isSubtypeOf(arg.type)) {
         err() << "expected a value of type " << arg.type->str() << " for argument '" << arg.name << "' but found "
               << value->type()->str() << "\n"
-              << positional_inputs[i]->loc;
+              << positional_inputs[i]->loc();
         return at::nullopt;
       }
 

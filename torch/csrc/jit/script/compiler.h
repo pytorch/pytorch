@@ -30,7 +30,7 @@ struct TypedDef {
 
 static inline std::vector<Value*> toValues(at::ArrayRef<NamedValue> nvs) {
   return fmap(nvs, [](const NamedValue& v) {
-    return v.value;
+    return v.value();
   });
 }
 
