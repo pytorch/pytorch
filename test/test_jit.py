@@ -2213,6 +2213,28 @@ a")
         check_dynamic_indexing("[i + j]", consec((3, 3)), 0, 1)
         check_dynamic_indexing("[i:j, i]", consec((3, 3, 2)), 0, 2)
 
+    # testing implicit conversion of tensors to scalars
+    def test_promote(self):
+        @torch.jit.script
+        def multiple_defs(x):
+            c = 1
+            x = x + c
+            return x
+
+        @torch.jit.script
+        def foo_script(x, dim):
+            return x.unsqueeze(dim)
+
+        # testing unnecessary conversion is not happening
+        self.assertTrue("TensorToNum" not in str(multiple_defs.graph))
+
+        x = torch.randn(1)
+        dim = torch.zeros(1)
+        foo_script(x, dim)
+        dim = torch.zeros(2, 2)
+        with self.assertRaisesRegex(RuntimeError, 'cannot be converted to Scalar'):
+                    foo_script(x, dim)
+
     def test_keyword(self):
         @torch.jit.script
         def func(x):

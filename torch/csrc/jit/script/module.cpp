@@ -42,7 +42,7 @@ std::vector<Value*> Method::emit_call_to(SourceRange loc, Method & callee, Array
   std::stringstream failure_messages;
   auto all_inputs = tryMatchSchema(
     callee.schema ? *callee.schema : defaultSchemaFor(callee),
-    loc, *graph(), args, kwargs, failure_messages);
+    loc, *graph(), args, kwargs, failure_messages, /* convert tensor to scalar */ false);
   if(!all_inputs)
     throw ErrorReport(loc) << failure_messages.str();
 
