@@ -584,57 +584,23 @@ Value* Value::setUniqueName(const std::string & name) {
   return this;
 }
 
-std::pair<size_t, const Argument*> findArgument(const FunctionSchema& the_schema, Symbol name) {
+size_t findArgument(const FunctionSchema& the_schema, Symbol name) {
   auto name_str = name.toUnqualString();
   for (size_t i = 0; i < the_schema.arguments.size(); ++i) {
     const Argument* arg = &the_schema.arguments[i];
     if (arg->name == name_str) {
-      return std::make_pair(i, arg);
+      return i;
     }
   }
   throw std::runtime_error(std::string("Couldn't find an argument called ") + name.toQualString());
 }
 
 at::optional<IValue> Node::get(Symbol name) const {
-  // TODO (apaszke): remove. this is in here for now just so that we can ensure
-  // we always use this in places where the node has a valid schema already
-  // (will make next commits easier).
-  if (hasAttribute(name)) {
-    switch (kindOf(name)) {
-      case AttributeKind::i:
-        return IValue(i(name));
-      case AttributeKind::f:
-        return IValue(f(name));
-      case AttributeKind::t: {
-        // attributes are ambiguous, this might be a at::Scalar
-        // disambiguate via schema
-        at::Tensor ten = t(name);
-        const Argument* arg = findArgument(schema(), name).second;
-        if(arg->type->isSubtypeOf(NumberType::get())) {
-          return IValue(at::Scalar(ten));
-        }
-        return IValue(ten);
-      }
-      case AttributeKind::is:
-        return IValue(is(name));
-      default:
-        throw std::runtime_error("get() NYI");
-    }
-  }
   return toIValue(namedInput(name));
 }
 
 Value* Node::namedInput(Symbol name) const {
-  if(hasAttribute(name)) {
-    // XXX - const cast because this really should not be modifying graph
-    // and once we remove attributes it no longer will
-    Value* v = const_cast<Graph&>(*owningGraph()).insertConstant(get(name).value());
-    // XXX - insert point can be anywhere since modifying the graph is unexpected,
-    // so this is completely unsafe and needs to be gone as soon as possible.
-    return v;
-  }
-  int64_t arg_pos = findArgument(schema(), name).first;
-  return input(arg_pos);
+  return input(findArgument(schema(), name));
 }
 
 bool Node::matches(const char *signature_literal, at::ArrayRef<Symbol> const_inputs) {
