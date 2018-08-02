@@ -2537,11 +2537,21 @@ def make_nonzero_det(A, sign=None, min_singular_value=0.1):
     return A
 
 
-def random_fullrank_matrix_distinct_singular_value(l):
-    A = torch.randn(l, l)
-    u, _, v = A.svd()
-    s = torch.arange(1., l + 1).mul_(1.0 / (l + 1))
-    return u.mm(torch.diag(s)).mm(v.t())
+def random_fullrank_matrix_distinct_singular_value(l, batches=None):
+    if batches is None:
+        A = torch.randn(l, l)
+        u, _, v = A.svd()
+        s = torch.arange(1., l + 1).mul_(1.0 / (l + 1))
+        return u.mm(torch.diag(s)).mm(v.t())
+    else:
+        all_matrices = []        
+        for i in range(0, torch.prod(torch.as_tensor(batches)).item()):
+            A = torch.randn(l, l)
+            u, _, v = A.svd()
+            s = torch.arange(1., l + 1).mul_(1.0 / (l + 1))
+            a_fullrank = u.mm(torch.diag(s)).mm(v.t())
+            all_matrices.append(a_fullrank)
+        return torch.stack(all_matrices).reshape(*(batches + [l, l]))
 
 
 def uniform_scalar(offset=0, requires_grad=False):
@@ -3014,8 +3024,8 @@ method_tests = [
     ('index_fill', (S, S), (0, torch.tensor(0, dtype=torch.int64), 2), 'scalar_index_dim', [0]),
     ('index_fill', (), (0, torch.tensor([0], dtype=torch.int64), 2), 'scalar_input_dim', [0]),
     ('index_fill', (), (0, torch.tensor(0, dtype=torch.int64), 2), 'scalar_both_dim', [0]),
-    ('inverse', (S, S), NO_ARGS, '', NO_ARGS, [skipIfNoLapack]),
-    ('inverse', (2, 3, S, S), NO_ARGS, 'batched', NO_ARGS, [skipIfNoLapack]),
+    ('inverse', random_fullrank_matrix_distinct_singular_value(S), NO_ARGS, '', NO_ARGS, [skipIfNoLapack]),
+    ('inverse', random_fullrank_matrix_distinct_singular_value(S, [2, 3]), NO_ARGS, 'batched', NO_ARGS, [skipIfNoLapack]),
     ('det', (S, S), NO_ARGS, '', NO_ARGS, [skipIfNoLapack]),
     ('det', (1, 1), NO_ARGS, '1x1', NO_ARGS, [skipIfNoLapack]),
     ('det', lambda: random_symmetric_matrix(S), NO_ARGS, 'symmetric', NO_ARGS, [skipIfNoLapack]),
@@ -3067,11 +3077,15 @@ method_tests = [
      'tall_all', NO_ARGS, [skipIfNoLapack], lambda usv: (usv[0][:, :(S - 2)], usv[1], usv[2])),
     ('svd', lambda: random_fullrank_matrix_distinct_singular_value(M), NO_ARGS,
      'large', NO_ARGS, [skipIfNoLapack]),
-    ('gesv', (S, S), ((S, S),), '', NO_ARGS, [skipIfNoLapack]),
-    ('gesv', (S, S, S), ((S, S, S),), 'batched', NO_ARGS, [skipIfNoLapack]),
-    ('gesv', (2, 3, S, S), ((2, 3, S, S),), 'batched_dims', NO_ARGS, [skipIfNoLapack]),
-    ('gesv', (2, 2, S, S), ((1, S, S),), 'batched_broadcast_A', NO_ARGS, [skipIfNoLapack]),
-    ('gesv', (1, S, S), ((2, 2, S, S),), 'batched_broadcast_b', NO_ARGS, [skipIfNoLapack]),
+    ('gesv', (S, S), (random_fullrank_matrix_distinct_singular_value(S),), '', NO_ARGS, [skipIfNoLapack]),
+    ('gesv', (S, S, S), (random_fullrank_matrix_distinct_singular_value(S, [S]),),
+     'batched', NO_ARGS, [skipIfNoLapack]),
+    ('gesv', (2, 3, S, S), (random_fullrank_matrix_distinct_singular_value(S, [2, 3]),),
+     'batched_dims', NO_ARGS, [skipIfNoLapack]),
+    ('gesv', (2, 2, S, S), (random_fullrank_matrix_distinct_singular_value(S, [1]),),
+     'batched_broadcast_A', NO_ARGS, [skipIfNoLapack]),
+    ('gesv', (1, S, S), (random_fullrank_matrix_distinct_singular_value(S, [2, 2]),),
+     'batched_broadcast_b', NO_ARGS, [skipIfNoLapack]),
     ('fill_', (S, S, S), (1,), 'number'),
     ('fill_', (), (1,), 'number_scalar'),
     # FIXME: we should compute the derivative w.r.t torch.tensor(1)
