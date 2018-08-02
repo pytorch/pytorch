@@ -64,7 +64,7 @@ void THNN_(SmoothL1Criterion_updateGradInput)(
   }
 
   THNN_CHECK_DIM_SIZE(gradOutput, 1, 0, 1);
-  real norm = (reduction == Reduction::ElementwiseMean ? 1./((real)THTensor_(nElement)(input)) : 1.) * THTensor_(fastGet1d)(gradOutput, 0);
+  real norm = (reduction == Reduction::ElementwiseMean ? 1./((real)THTensor_(nElement)(input)) : 1.) * THTensor_(fastGetLegacy1dNoScalars)(gradOutput, 0);
 
   TH_TENSOR_APPLY3(real, gradInput, real, input, real, target,
     real x = *input_data - *target_data;
