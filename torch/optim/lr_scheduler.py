@@ -442,10 +442,13 @@ class CyclicLR(_LRScheduler):
 
     Args:
         optimizer (Optimizer): Wrapped optimizer.
+        base_lr (float or list): Initial learning rate which is the
+            lower boundary in the cycle for eachparam groups.
+            Default: 0.001
         max_lr (float or list): Upper boundaries in the cycle for
             each parameter group. Functionally,
-            it defines the cycle amplitude (max_lr - initial_lr).
-            The lr at any cycle is the sum of initial_lr
+            it defines the cycle amplitude (max_lr - base_lr).
+            The lr at any cycle is the sum of base_lr
             and some scaling of the amplitude; therefore
             max_lr may not actually be reached depending on
             scaling function. Default: 0.006
@@ -488,6 +491,7 @@ class CyclicLR(_LRScheduler):
 
     def __init__(self,
                  optimizer,
+                 base_lr=1e-3,
                  max_lr=6e-3,
                  step_size_up=2000,
                  step_size_down=None,
@@ -501,6 +505,11 @@ class CyclicLR(_LRScheduler):
             raise TypeError('{} is not an Optimizer'.format(
                 type(optimizer).__name__))
         self.optimizer = optimizer
+
+        base_lrs = self._format_lr('base_lr', optimizer, base_lr)
+        if last_batch_idx == -1:
+            for base_lr, group in zip(base_lrs, optimizer.param_groups):
+                group['lr'] = base_lr
 
         self.max_lrs = self._format_lr('max_lr', optimizer, max_lr)
 
