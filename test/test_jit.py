@@ -2060,6 +2060,48 @@ a")
             canonical(foo2.graph) +
             canonical(foo3.graph))
 
+    def test_list_literal(self):
+        @torch.jit.script
+        def reassign():
+            x = [1]
+            if True:
+                x = [2]
+
+        @torch.jit.script
+        def reassign_arity_change():
+            x = [1]
+            if True:
+                x = [1, 2, 3]
+
+        @torch.jit.script
+        def reassign_from_empty():
+            x = []
+            if True:
+                x = [1, 2, 3]
+
+        with self.assertRaisesRegex(RuntimeError, "previously has type"):
+            @torch.jit.script
+            def reassign_to_empty():
+                x = [1, 2, 3]
+                if True:
+                    x = []
+
+        with self.assertRaisesRegex(RuntimeError, "previously has type"):
+            @torch.jit.script
+            def reassign_bad_type():
+                x = [1]
+                if True:
+                    x = [1.0]
+
+        with self.assertRaisesRegex(RuntimeError, "previously has type"):
+            @torch.jit.script
+            def reassign_nested():
+                x = []
+                if True:
+                    x = [1, 2, 3]
+                    if True:
+                        x = [1.0]
+
     def test_func_call(self):
         script = '''
         def add(a, b):
