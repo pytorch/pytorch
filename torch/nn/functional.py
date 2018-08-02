@@ -741,6 +741,25 @@ In-place version of :func:`~selu`.
 """)
 
 
+def celu(input, alpha=1., inplace=False):
+    r"""celu(input, alpha=1., inplace=False) -> Tensor
+
+    Applies element-wise,
+    :math:`\text{CELU}(x) = \max(0,x) + \min(0, \alpha * (\exp(x/\alpha) - 1))`.
+
+    See :class:`~torch.nn.CELU` for more details.
+    """
+    if inplace:
+        return torch.celu_(input, alpha)
+    return torch.celu(input, alpha)
+
+celu_ = _add_docstr(torch.celu_, r"""
+celu_(input, alpha=1.) -> Tensor
+
+In-place version of :func:`~celu`.
+""")
+
+
 def leaky_relu(input, negative_slope=0.01, inplace=False):
     r"""
     leaky_relu(input, negative_slope=0.01, inplace=False) -> Tensor
@@ -859,7 +878,7 @@ def softmin(input, dim=None, _stacklevel=3):
     """
     if dim is None:
         dim = _get_softmax_dim('softmin', input.dim(), _stacklevel)
-    return -input.softmax(dim)
+    return (-input).softmax(dim)
 
 
 def softmax(input, dim=None, _stacklevel=3):
@@ -1099,7 +1118,7 @@ def embedding(input, weight, padding_idx=None, max_norm=None, norm_type=2,
             assert padding_idx >= -weight.size(0), 'Padding_idx must be within num_embeddings'
             padding_idx = weight.size(0) + padding_idx
     elif padding_idx is None:
-            padding_idx = -1
+        padding_idx = -1
     if max_norm is not None:
         # `embedding_renorm_` will call .contiguous() on input anyways, so we
         # call it here and take advantage of the improved locality in the
@@ -1706,7 +1725,7 @@ def _pointwise_loss(lambd, lambd_optimized, input, target, reduction='elementwis
             return d
         return torch.mean(d) if reduction == 'elementwise_mean' else torch.sum(d)
     else:
-        return lambd_optimized(input, target, reduction)
+        return lambd_optimized(input, target, _Reduction.get_enum(reduction))
 
 
 def smooth_l1_loss(input, target, size_average=None, reduce=None, reduction='elementwise_mean'):
@@ -1730,9 +1749,7 @@ def l1_loss(input, target, size_average=None, reduce=None, reduction='elementwis
     See :class:`~torch.nn.L1Loss` for details.
     """
     if size_average is not None or reduce is not None:
-        reduction = _Reduction.legacy_get_enum(size_average, reduce)
-    else:
-        reduction = _Reduction.get_enum(reduction)
+        reduction = _Reduction.legacy_get_string(size_average, reduce)
     return _pointwise_loss(lambda a, b: torch.abs(a - b), torch._C._nn.l1_loss,
                            input, target, reduction)
 
@@ -1745,9 +1762,7 @@ def mse_loss(input, target, size_average=None, reduce=None, reduction='elementwi
     See :class:`~torch.nn.MSELoss` for details.
     """
     if size_average is not None or reduce is not None:
-        reduction = _Reduction.legacy_get_enum(size_average, reduce)
-    else:
-        reduction = _Reduction.get_enum(reduction)
+        reduction = _Reduction.legacy_get_string(size_average, reduce)
     return _pointwise_loss(lambda a, b: (a - b) ** 2, torch._C._nn.mse_loss, input, target, reduction)
 
 

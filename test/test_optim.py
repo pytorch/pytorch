@@ -31,7 +31,6 @@ def wrap_old_fn(old_fn, **config):
 
 
 class TestOptim(TestCase):
-
     def _test_rosenbrock(self, constructor, old_fn):
         params_t = torch.Tensor([1.5, 1.5])
         state = {}
@@ -505,6 +504,20 @@ class SchedulerTestNet(torch.nn.Module):
         return self.conv2(F.relu(self.conv1(x)))
 
 
+class LambdaLRTestObject:
+    def __init__(self, value):
+        self.value = value
+
+    def __call__(self, epoch):
+        return self.value * epoch
+
+    def __eq__(self, other):
+        if isinstance(other, self.__class__):
+            return self.__dict__ == other.__dict__
+        else:
+            return False
+
+
 class TestLRScheduler(TestCase):
     def setUp(self):
         self.net = SchedulerTestNet()
@@ -670,6 +683,28 @@ class TestLRScheduler(TestCase):
         scheduler_copy.load_state_dict(scheduler.state_dict())
         for key in scheduler.__dict__.keys():
             if key not in {'optimizer', 'is_better'}:
+                self.assertEqual(scheduler.__dict__[key], scheduler_copy.__dict__[key], allow_inf=True)
+
+    def test_lambda_lr_state_dict_fn(self):
+        scheduler = LambdaLR(self.opt, lr_lambda=lambda x: x)
+        state = scheduler.state_dict()
+        self.assertIsNone(state['lr_lambdas'][0])
+
+        scheduler_copy = LambdaLR(self.opt, lr_lambda=lambda x: x)
+        scheduler_copy.load_state_dict(state)
+        for key in scheduler.__dict__.keys():
+            if key not in {'optimizer', 'lr_lambdas'}:
+                self.assertEqual(scheduler.__dict__[key], scheduler_copy.__dict__[key], allow_inf=True)
+
+    def test_lambda_lr_state_dict_obj(self):
+        scheduler = LambdaLR(self.opt, lr_lambda=LambdaLRTestObject(10))
+        state = scheduler.state_dict()
+        self.assertIsNotNone(state['lr_lambdas'][0])
+
+        scheduler_copy = LambdaLR(self.opt, lr_lambda=LambdaLRTestObject(-1))
+        scheduler_copy.load_state_dict(state)
+        for key in scheduler.__dict__.keys():
+            if key not in {'optimizer'}:
                 self.assertEqual(scheduler.__dict__[key], scheduler_copy.__dict__[key], allow_inf=True)
 
     def _check_scheduler_state_dict(self, constr, constr2, epochs=10):

@@ -338,6 +338,12 @@ Non-linear activations (weighted sum, nonlinearity)
 .. autoclass:: SELU
     :members:
 
+:hidden:`CELU`
+~~~~~~~~~~~~~~
+
+.. autoclass:: CELU
+    :members:
+
 :hidden:`Sigmoid`
 ~~~~~~~~~~~~~~~~~
 
@@ -989,6 +995,11 @@ Non-linear activation functions
 ~~~~~~~~~~~~~~
 
 .. autofunction:: selu
+
+:hidden:`celu`
+~~~~~~~~~~~~~~
+
+.. autofunction:: celu
 
 :hidden:`leaky_relu`
 ~~~~~~~~~~~~~~~~~~~~
