@@ -676,6 +676,18 @@ class TestCaffe2Backend(unittest.TestCase):
             x = Variable(torch.randn(*shape))
             self.run_model_test(MyModel(), train=False, input=(x), batch_size=BATCH_SIZE, use_gpu=False)
 
+    def test_cumsum(self):
+        shape = (3, 4, 5)
+        for params in [{'dim': i} for i in range(len(shape))]:
+            class MyModel(torch.nn.Module):
+                def __init__(self):
+                    super(MyModel, self).__init__()
+
+                def forward(self, x):
+                    return torch.cumsum(x, **params)
+            x = Variable(torch.randn(*shape))
+            self.run_model_test(MyModel(), train=False, input=(x), batch_size=BATCH_SIZE, use_gpu=False)
+
     def test_repeat(self):
         class MyModel(torch.nn.Module):
             def __init__(self):

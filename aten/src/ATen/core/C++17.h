@@ -95,10 +95,14 @@ template<class T> using decay_t = typename std::decay<T>::type;
 
 #ifdef __cpp_lib_logical_traits
 
-using conjunction = std::conjunction;
-using disjunction = std::disjunction;
-using bool_constant = std::bool_constant;
-using negation = std::negation;
+template <class... B>
+using conjunction = std::conjunction<B...>;
+template <class... B>
+using disjunction = std::disjunction<B...>;
+template <bool B>
+using bool_constant = std::bool_constant<B>;
+template <class B>
+using negation = std::negation<B>;
 
 #else
 
@@ -145,7 +149,10 @@ template<typename... Ts> using void_t = typename make_void<Ts...>::type;
 
 #ifdef __cpp_lib_apply
 
-using apply = std::apply;
+template <class F, class Tuple>
+inline constexpr decltype(auto) apply(F&& f, Tuple&& t) {
+  return std::apply(std::forward<F>(f), std::forward<Tuple>(t));
+}
 
 #else
 
@@ -175,9 +182,9 @@ constexpr auto apply(F&& f, Tuple&& t) -> decltype(detail::apply_impl(
 
 
 #if defined(__cpp_constexpr) && __cpp_constexpr >= 201304
-#  define C10_CPP14_CONSTEXPR constexpr
+#  define AT_CPP14_CONSTEXPR constexpr
 #else
-#  define C10_CPP14_CONSTEXPR
+#  define AT_CPP14_CONSTEXPR
 #endif
 
 

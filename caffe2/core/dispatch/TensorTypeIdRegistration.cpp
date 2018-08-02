@@ -1,5 +1,5 @@
 #include "caffe2/core/dispatch/TensorTypeIdRegistration.h"
-#include "caffe2/utils/C++17.h"
+#include <ATen/core/C++17.h>
 
 namespace c10 {
 

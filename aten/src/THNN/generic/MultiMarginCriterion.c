@@ -32,7 +32,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
   {
     nframe = input->size(0);
     dim = input->size(1);
-    AT_CHECK(!target->is_empty() && (target->dim() == 1) && (target->size(0) == nframe),
+    AT_CHECK(!target->is_empty() && (THTensor_nDimensionLegacyNoScalars(target) == 1) && (THTensor_sizeLegacyNoScalars(target, 0) == nframe),
              "inconsistent target size, got: ", target->sizes());
   }
 

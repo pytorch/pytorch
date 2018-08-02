@@ -1,5 +1,5 @@
-#include <ATen/optional.h>
-#include <ATen/Backtrace.h>
+#include <ATen/core/Backtrace.h>
+#include <ATen/core/optional.h>
 
 #include <functional>
 #include <memory>
@@ -7,18 +7,30 @@
 #include <string>
 #include <vector>
 
-#if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
+#if defined(__ANDROID__)
+#define AT_CORE_MOBILE 1
+#elif (                   \
+    defined(__APPLE__) && \
+    (TARGET_IPHONE_SIMULATOR || TARGET_OS_SIMULATOR || TARGET_OS_IPHONE))
+#define AT_CORE_MOBILE 1
+#else
+#define AT_CORE_MOBILE 0
+#endif
+
+#if !AT_CORE_MOBILE && !defined(_WIN32) && !defined(__EMSCRIPTEN__)
+#define SUPPORTS_BACKTRACE 1
+#else
+#define SUPPORTS_BACKTRACE 0
+#endif
+
+#if SUPPORTS_BACKTRACE
 #include <cxxabi.h>
 #include <execinfo.h>
 #endif // !defined(_WIN32)
 
 namespace at {
-#if defined(_MSC_VER)
-// Windows does not have cxxabi.h, so we will simply return the original.
-std::string demangle(const char* name) {
-  return std::string(name);
-}
-#elif !defined(__EMSCRIPTEN__)
+
+#if SUPPORTS_BACKTRACE
 std::string demangle(const char* name) {
   int status = -1;
 
@@ -45,6 +57,10 @@ std::string demangle(const char* name) {
     return name;
   }
 }
+#else
+std::string demangle(const char* name) {
+  return std::string(name);
+}
 #endif
 
 // TODO: This backtrace retrieval can be implemented on Windows via the Windows
@@ -52,8 +68,7 @@ std::string demangle(const char* name) {
 // https://stackoverflow.com/questions/5693192/win32-backtrace-from-c-code
 // https://stackoverflow.com/questions/26398064/counterpart-to-glibcs-backtrace-and-backtrace-symbols-on-windows
 // https://msdn.microsoft.com/en-us/library/windows/desktop/bb204633%28v=vs.85%29.aspx.
-#if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
-
+#if SUPPORTS_BACKTRACE
 namespace {
 
 struct FrameInformation {
@@ -143,14 +158,13 @@ at::optional<FrameInformation> parse_frame_information(
 }
 
 } // anonymous namespace
-
-#endif // !defined(_WIN32)
+#endif // SUPPORTS_BACKTRACE
 
 std::string get_backtrace(
     size_t frames_to_skip,
     size_t maximum_number_of_frames,
     bool skip_python_frames) {
-#if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
+#if SUPPORTS_BACKTRACE
 
   // We always skip this frame (backtrace).
   frames_to_skip += 1;
@@ -221,10 +235,9 @@ std::string get_backtrace(
   }
 
   return stream.str();
-
-#else
-
+#else // !SUPPORTS_BACKTRACE
   return "(no backtrace available)";
-#endif
+#endif // SUPPORTS_BACKTRACE
 }
+
 } // namespace at
