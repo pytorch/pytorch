@@ -221,23 +221,50 @@ def get_summarized_data(self):
         return self
 
 
-def _str(self):
+def _str(self, skip_device=False):
     if self.is_sparse:
-        size_str = str(tuple(self.shape)).replace(' ', '')
-        return '{} of size {} with indices:\n{}\nand values:\n{}'.format(
-            self.type(), size_str, self._indices(), self._values())
+        size_str = str(tuple(self.shape))
+        prefix = 'tensor('
+        indent = len(prefix)
+        tensor_str = 'layout={},'.format(self.layout)
+        # indices and values need to be detached to not print their `grad_fn`s,
+        # which are not implemented.
+        for i, l in enumerate(_str(self._indices().detach(), skip_device=True).split('\n')):
+            if i == 0:
+                tensor_str += '\n{}indices={}'.format(' ' * indent, l)
+                indent += len('indices=')
+            else:
+                tensor_str += '\n{}{}'.format(' ' * indent, l)
+        indent = len(prefix)
+        tensor_str += ','
+        for i, l in enumerate(_str(self._values().detach(), skip_device=True).split('\n')):
+            if i == 0:
+                tensor_str += '\n{}values={}'.format(' ' * indent, l)
+                indent += len('values=')
+            else:
+                tensor_str += '\n{}{}'.format(' ' * indent, l)
+        indent = len(prefix)
+        tensor_str += ',\n{}size={}'.format(' ' * indent, str(tuple(self.shape)))
+        if self.dtype != torch.get_default_dtype() and self.dtype != torch.int64:
+            tensor_str += ',\n{}dtype={}'.format(' ' * indent, str(self.dtype))
+        if self.grad_fn is not None:
+            tensor_str += ',\n{}grad_fn=<{}>'.format(' ' * indent, type(self.grad_fn).__name__)
+        elif self.requires_grad:
+            tensor_str += ',\n{}requires_grad=True'.format(' ' * indent)
+        return prefix + tensor_str + ')'
 
     prefix = 'tensor('
     indent = len(prefix)
     summarize = self.numel() > PRINT_OPTS.threshold
 
     suffix = ''
-    if not torch._C._is_default_type_cuda():
-        if self.device.type == 'cuda':
-            suffix += ', device=\'' + str(self.device) + '\''
-    else:
-        if self.device.type == 'cpu' or torch.cuda.current_device() != self.device.index:
-            suffix += ', device=\'' + str(self.device) + '\''
+    if not skip_device:
+        if not torch._C._is_default_type_cuda():
+            if self.device.type == 'cuda':
+                suffix += ', device=\'' + str(self.device) + '\''
+        else:
+            if self.device.type == 'cpu' or torch.cuda.current_device() != self.device.index:
+                suffix += ', device=\'' + str(self.device) + '\''
 
     if self.numel() == 0:
         # Explicitly print the shape if it is not (0,), to match NumPy behavior
@@ -255,6 +282,9 @@ def _str(self):
 
         formatter = _Formatter(get_summarized_data(self) if summarize else self)
         tensor_str = _tensor_str(self, indent, formatter, summarize)
+
+    if self.layout != torch.strided:
+        suffix += ', layout=' + str(self.layout)
 
     if self.grad_fn is not None:
         name = type(self.grad_fn).__name__
