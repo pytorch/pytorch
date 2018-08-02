@@ -246,6 +246,7 @@ struct Expr : public TreeView {
       case '/':
       case TK_NOT:
       case TK_CONST:
+      case TK_STRINGLITERAL:
       case TK_TRUE:
       case TK_FALSE:
       case TK_NONE:
@@ -561,6 +562,18 @@ struct Const : public Expr {
   }
   static Const create(const SourceRange& range, const std::string& value) {
     return Const(Compound::create(TK_CONST, range, {String::create(value)}));
+  }
+};
+
+struct StringLiteral : public Expr {
+  explicit StringLiteral(const TreeRef& tree) : Expr(tree) {
+    tree_->matchNumSubtrees(TK_STRINGLITERAL, 1);
+  }
+  const std::string& text() const {
+    return subtree(0)->stringValue();
+  }
+  static StringLiteral create(const SourceRange& range, const std::string& value) {
+    return StringLiteral(Compound::create(TK_STRINGLITERAL, range, {String::create(value)}));
   }
 };
 
