@@ -504,7 +504,7 @@ class TestConvolution(hu.HypothesisTestCase):
                ["simple", "dag"] +
                (["async_dag"] if workspace.has_gpu_support or workspace.has_hip_support else [])),
            engine=st.sampled_from(["CUDNN", ""]),
-           **hu.gcs_ho_hip)
+           **hu.gcs_no_hip)
     def test_convolution_sync(self, net_type, num_workers, engine, gc, dc):
         m = ModelHelper(name="test_model")
         n = 1
