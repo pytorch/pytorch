@@ -56,7 +56,6 @@ install_hip_thrust() {
     git clone --recursive https://github.com/ROCmSoftwarePlatform/Thrust.git /data/Thrust
     rm -rf /data/Thrust/thrust/system/cuda/detail/cub-hip
     git clone --recursive https://github.com/ROCmSoftwarePlatform/cub-hip.git /data/Thrust/thrust/system/cuda/detail/cub-hip
-    cd /data/Thrust/thrust/system/cuda/detail/cub-hip && git checkout hip_port_1.7.4_caffe2 && cd -
 }
 
 # This will be removed after merging an upcoming PR.
