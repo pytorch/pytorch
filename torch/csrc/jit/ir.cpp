@@ -628,7 +628,7 @@ Value* Node::namedInput(Symbol name) const {
   if(hasAttribute(name)) {
     // XXX - const cast because this really should not be modifying graph
     // and once we remove attributes it no longer will
-    Value* v = insertConstant(const_cast<Graph&>(*owningGraph()), get(name).value());
+    Value* v = const_cast<Graph&>(*owningGraph()).insertConstant(get(name).value());
     // XXX - insert point can be anywhere since modifying the graph is unexpected,
     // so this is completely unsafe and needs to be gone as soon as possible.
     return v;

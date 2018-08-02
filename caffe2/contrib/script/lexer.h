@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "caffe2/core/common.h"
+#include "torch/csrc/jit/source_range.h"
 
 namespace caffe2 {
 namespace script {

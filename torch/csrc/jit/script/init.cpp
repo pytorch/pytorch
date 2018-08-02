@@ -313,24 +313,24 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   auto& g = *m.graph();
   if (is_constant) {
     if (py::isinstance<py::int_>(obj)) {
-      return toSimple(insertConstant(g, py::cast<int64_t>(obj), loc));
+      return toSimple(g.insertConstant(py::cast<int64_t>(obj), loc));
     } else if (py::isinstance<py::float_>(obj)) {
-      return toSimple(insertConstant(g, py::cast<float>(obj), loc));
+      return toSimple(g.insertConstant(py::cast<float>(obj), loc));
     } else if (py::isinstance<py::bool_>(obj)) {
-      return toSimple(insertConstant(g, py::cast<bool>(obj), loc));
+      return toSimple(g.insertConstant(py::cast<bool>(obj), loc));
     } else if (THPDevice_Check(obj.ptr())) {
       auto device = (THPDevice*)obj.ptr();
       std::vector<int64_t> v = {static_cast<int64_t>(device->device.type()),
                                 device->device.index()};
-      return toSimple(insertConstant(g, std::move(v)));
+      return toSimple(g.insertConstant(std::move(v)));
     } else if (THPLayout_Check(obj.ptr())) {
       auto layout = (THPLayout*)obj.ptr();
       const auto v = static_cast<int64_t>(layout->layout);
-      return toSimple(insertConstant(g, v, loc));
+      return toSimple(g.insertConstant(v, loc));
     } else if (THPDtype_Check(obj.ptr())) {
       auto dtype = (THPDtype*)(obj.ptr());
       const auto v = static_cast<int64_t>(dtype->scalar_type);
-      return toSimple(insertConstant(g, v, loc));
+      return toSimple(g.insertConstant(v, loc));
     } else if (py::isinstance<py::tuple>(obj)) {
      return std::make_shared<ConstantPythonTupleValue>(obj);
     }
