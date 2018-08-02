@@ -88,7 +88,7 @@ def detect_reason(raw_message):
             else:
                 message += check_dependents(
                     CUDA_LIBS, 'CUDA', 'It seems that you don\'t have NV cards. Please use CPU version instead.')
-        
+
         if message == '':
             message += 'It seems `import torch` should work.'
             message += 'You may try to add `%s` to the environment variable `PATH`.\n' % PY_DLL_PATH
