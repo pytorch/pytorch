@@ -172,7 +172,7 @@ def build_param(ctx, py_arg):
         raise ValueError("Compiled functions don't support annotations")
     name = py_arg.id if PY2 else py_arg.arg
     r = ctx.make_range(py_arg.lineno, py_arg.col_offset, py_arg.col_offset + len(name))
-    return Param(TensorType(r), Ident(r, name))
+    return Param(Var(Ident(r, 'Tensor')), Ident(r, name))
 
 
 class StmtBuilder(Builder):

@@ -2,9 +2,15 @@
   (ident fn)
   (decl
     (list
-      (param (ident x) (tensor_type))
-      (param (ident y) (tensor_type))
-      (param (ident z) (tensor_type)))
+      (param
+        (ident x)
+        (variable (ident Tensor)))
+      (param
+        (ident y)
+        (variable (ident Tensor)))
+      (param
+        (ident z)
+        (variable (ident Tensor))))
     (tensor_type))
   (list
     (assign

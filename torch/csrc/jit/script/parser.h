@@ -295,9 +295,14 @@ struct Parser {
   }
 
   TreeRef parseParam() {
-    auto typ = TensorType::create(L.cur().range);
     auto ident = parseIdent();
-    return Param::create(typ.range(), Ident(ident), Type(typ));
+    TreeRef type;
+    if (L.nextIf(':')) {
+      type = parseExp();
+    } else {
+      type = Var::create(L.cur().range, Ident::create(L.cur().range, "Tensor"));
+    }
+    return Param::create(type->range(), Ident(ident), Expr(type));
   }
 
   // 'first' has already been parsed since expressions can exist

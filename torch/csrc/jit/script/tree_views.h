@@ -18,7 +18,7 @@ namespace script {
 // - Builtin types are: Ident (TK_IDENT), String (TK_STRING)
 //
 // Type  = TensorType()                                                 TK_TENSOR_TYPE
-// Param = Param(Type type, Ident name)                                 TK_PARAM
+// Param = Param(Expr type, Ident name)                                 TK_PARAM
 //
 // Decl  = Decl(List<Param> params, Type return_type)                   TK_DECL
 // Def   = Def(Ident name, Decl decl, List<Stmt> body)                  TK_DEF
@@ -292,14 +292,14 @@ struct Param : public TreeView {
   explicit Param(const TreeRef& tree) : TreeView(tree) {
     tree_->match(TK_PARAM);
   }
-  static Param create(const SourceRange& range, const Ident& ident, const Type& type) {
+  static Param create(const SourceRange& range, const Ident& ident, const Expr& type) {
     return Param(Compound::create(TK_PARAM, range, {ident, type}));
   }
   Ident ident() const {
     return Ident(subtree(0));
   }
-  Type type() const {
-    return Type(subtree(1));
+  Expr type() const {
+    return Expr(subtree(1));
   }
   template<typename T>
   T typeExpect() const {
