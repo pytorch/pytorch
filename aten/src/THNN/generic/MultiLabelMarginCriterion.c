@@ -44,7 +44,7 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
   target_data = THIndexTensor_(data)(target);
 
   if (!isTarget->sizes().equals(target->sizes())) {
-    THTensor_(resizeNd)(isTarget, isTarget->dim(), THTensor_getSizePtr(target), nullptr);
+    THTensor_(resizeNd)(isTarget, target->dim(), THTensor_getSizePtr(target), nullptr);
   }
   THTensor_(zero)(isTarget);
   isTarget_data = THTensor_(data)(isTarget);
