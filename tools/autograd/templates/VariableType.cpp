@@ -13,6 +13,7 @@
 #include "torch/csrc/jit/tracer.h"
 #include "torch/csrc/jit/constants.h"
 #include "torch/csrc/jit/symbolic_variable.h"
+#include "torch/csrc/jit/ir.h"
 
 #include "torch/csrc/utils/variadic.h"
 #include "torch/csrc/autograd/functions/utils.h"
