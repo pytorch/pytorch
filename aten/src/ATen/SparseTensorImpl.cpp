@@ -18,14 +18,14 @@ namespace at {
 // tensor and a [0] size values tensor for such an empty tensor.  However,
 // we don't currently support zero-size dimensions, so we can't actually
 // do this; so we just allocate zero-size tensors for everything.
-SparseTensorImpl::SparseTensorImpl(Type * type)
-    : TensorImpl(type, nullptr)
+SparseTensorImpl::SparseTensorImpl(at::Backend backend, at::ScalarType scalar_type)
+    : TensorImpl(backend, scalar_type, nullptr, false)
     , size_{0}
     , sparseDims_(1)
     , denseDims_(0)
-    , indices_(type->toDense().toScalarType(ScalarType::Long).tensor())
-    , values_(type->toDense().tensor()) {
-      AT_ASSERT(type->is_sparse());
+    , indices_(globalContext().getTypeOpt(toDense(backend), ScalarType::Long)->tensor())
+    , values_(globalContext().getTypeOpt(toDense(backend), scalar_type)->tensor()) {
+      AT_ASSERT(backend == Backend::SparseCPU || backend == Backend::SparseCUDA);
     }
 
 IntList SparseTensorImpl::sizes() const {
