@@ -1,4 +1,4 @@
-#include "caffe2/core/predictor.h"
+#include "caffe2/predictor/predictor.h"
 #ifdef CAFFE2_OPTIMIZER
 #include "caffe2/opt/optimizer.h"
 #endif
@@ -14,7 +14,7 @@ void enforceIsTensor(Workspace* ws, const std::string& name) {
   auto blob = ws->GetBlob(name);
   CAFFE_ENFORCE(blob, "Blob does not exist: ", name);
   CAFFE_ENFORCE(
-      blob->template IsType<TensorCPU>(), "Blob is not a CPU Tensor: ", name);
+      blob->template IsType<Tensor>(CPU), "Blob is not a CPU Tensor: ", name);
 }
 
 void shareInputTensor(
@@ -24,7 +24,7 @@ void shareInputTensor(
   enforceIsTensor(ws, name);
   auto* blob = ws->GetBlob(name);
   CAFFE_ENFORCE(blob, "Blob: ", name, " does not exist");
-  auto* tensor = blob->template GetMutable<TensorCPU>();
+  auto* tensor = blob->GetMutableTensor(CPU);
   tensor->ResizeLike(*input);
   tensor->ShareData(*input);
 }
@@ -33,7 +33,7 @@ TensorCPU* extractOutputTensor(Workspace* ws, const std::string& name) {
   enforceIsTensor(ws, name);
   auto* blob = ws->GetBlob(name);
   CAFFE_ENFORCE(blob, "Blob: ", name, " does not exist");
-  return blob->template GetMutable<TensorCPU>();
+  return blob->GetMutableTensor(CPU);
 }
 
 // We don't use the getNet() from predictor_utils.cc here because that file
@@ -115,7 +115,7 @@ Predictor::Predictor(
   for (const auto& name : predict_net->external_input()) {
     if (!initialized.count(name)) {
       auto* blob = ws_.CreateBlob(name);
-      blob->template GetMutable<TensorCPU>();
+      blob->GetMutableTensor(CPU);
     }
   }
 

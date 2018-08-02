@@ -13,14 +13,14 @@ ptrdiff_t THCTensor_(storageOffset)(THCState *state, const THCTensor *self)
   return self->storage_offset();
 }
 
-int THCTensor_(nDimension)(THCState *state, const THCTensor *self)
+int THCTensor_(nDimensionLegacyNoScalars)(THCState *state, const THCTensor *self)
 {
-  return THCTensor_nDimension(state, self);
+  return THCTensor_nDimensionLegacyNoScalars(state, self);
 }
 
-int THCTensor_(_nDimension)(THCState *state, const THCTensor *self)
+int THCTensor_(nDimensionLegacyAll)(THCState *state, const THCTensor *self)
 {
-  return THCTensor__nDimension(state, self);
+  return THCTensor_nDimensionLegacyAll(state, self);
 }
 
 int64_t THCTensor_(size)(THCState *state, const THCTensor *self, int dim)
@@ -236,7 +236,7 @@ THCTensor *THCTensor_(newView)(THCState *state, THCTensor *tensor, THLongStorage
 // Collapses the first two dimensions of a tensor.
 // Assumes the input tensor is contiguous.
 THCTensor *THCTensor_(newFoldBatchDim)(THCState *state, THCTensor *input) {
-  int in_dims = THCTensor_(_nDimension)(state, input);
+  int in_dims = THCTensor_(nDimensionLegacyAll)(state, input);
   THArgCheck(in_dims >= 2, 1, "Tensor needs to have at least two dimensions");
   THArgCheck(THCTensor_(isContiguous)(state, input), 1,
              "Tensor must be contiguous");
@@ -391,7 +391,7 @@ void THCTensor_(select)(THCState *state, THCTensor *self, THCTensor *src, int di
     src = self;
 
 #ifndef USE_TH_SIZE_ZERO_DIM
-  THArgCheck(src->_dim() > 1, 1, "cannot select on a vector");
+  THArgCheck(THTensor_nDimensionLegacyAll(src) > 1, 1, "cannot select on a vector");
 #else
 #ifndef USE_TH_SCALAR
   THArgCheck(src->dim() > 1, 1, "cannot select on a vector");

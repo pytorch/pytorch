@@ -333,16 +333,21 @@ class ExprBuilder(Builder):
             return TrueLiteral(r)
         elif expr.id == "False":
             return FalseLiteral(r)
+        elif expr.id == "None":
+            return NoneLiteral(r)
         return Var(Ident(r, expr.id))
 
     @staticmethod
     def build_NameConstant(ctx, expr):
-        text = "True" if expr.value else "False"
-        r = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + len(text))
-        if expr.value:
+        r = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + len(str(expr.value)))
+        if expr.value is True:
             return TrueLiteral(r)
-        else:
+        elif expr.value is False:
             return FalseLiteral(r)
+        elif expr.value is None:
+            return NoneLiteral(r)
+        else:
+            raise ValueError("Name constant value unsupported: " + str(expr.value))
 
     @staticmethod
     def build_BinOp(ctx, expr):

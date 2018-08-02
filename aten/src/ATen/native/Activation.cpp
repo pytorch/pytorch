@@ -34,36 +34,34 @@ Tensor & rrelu_(Tensor & self, Scalar lower, Scalar upper, bool training, Genera
 }
 
 Tensor hardshrink_cpu(const Tensor & self, Scalar lambd) {
-  auto lambd_tensor = lambd.toTensor().toType(self.type().scalarType()).toBackend(self.is_cuda() ? Backend::CUDA : Backend::CPU);
   auto out_tensor = at::empty_like(self);
   AT_DISPATCH_FLOATING_TYPES(self.type(), "hardshrink_cpu", [&] {
-    scalar_t* lambd_tensor_d = lambd_tensor.data<scalar_t>();
+    auto lambd_val = lambd.to<scalar_t>();
     at::CPU_tensor_apply2<scalar_t, scalar_t>(
       self,
       out_tensor,
-      [lambd_tensor_d](
+      [&](
         scalar_t& self_val,
         scalar_t& out_tensor_val) {
-          out_tensor_val = (self_val >= -*lambd_tensor_d && self_val <= *lambd_tensor_d) ? convert<scalar_t, int>(0) : self_val;
+          out_tensor_val = (self_val >= -lambd_val && self_val <= lambd_val) ? scalar_t(0) : self_val;
     });
   });
   return out_tensor;
 }
 
 Tensor hardshrink_backward_cpu(const Tensor & grad, const Tensor & self, Scalar lambd) {
-  auto lambd_tensor = lambd.toTensor().toType(self.type().scalarType()).toBackend(self.is_cuda() ? Backend::CUDA : Backend::CPU);
   auto out_tensor = at::empty_like(self);
   AT_DISPATCH_FLOATING_TYPES(self.type(), "hardshrink_backward_cpu", [&] {
-    scalar_t* lambd_tensor_d = lambd_tensor.data<scalar_t>();
+    auto lambd_val = lambd.to<scalar_t>();
     at::CPU_tensor_apply3<scalar_t, scalar_t, scalar_t>(
       self,
       grad,
       out_tensor,
-      [lambd_tensor_d](
+      [&](
         scalar_t& self_val,
         scalar_t& grad_val,
         scalar_t& out_tensor_val) {
-          out_tensor_val = (self_val >= -*lambd_tensor_d && self_val <= *lambd_tensor_d) ? convert<scalar_t, int>(0) : grad_val;
+          out_tensor_val = (self_val >= -lambd_val && self_val <= lambd_val) ? scalar_t(0) : grad_val;
     });
   });
   return out_tensor;

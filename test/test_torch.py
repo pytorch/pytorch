@@ -1122,6 +1122,26 @@ class TestTorch(TestCase):
             res2[i, 3] = res2[i, 3] + 2
         self.assertEqual(res1, res2)
 
+        # inter-type
+        m1 = torch.randn(10, 10)
+        self.assertEqual(m1 + 3, m1 + torch.tensor(3))
+        self.assertEqual(3 + m1, torch.tensor(3) + m1)
+        one = torch.tensor(1, dtype=torch.uint8)
+        self.assertEqual(torch.add(one, 1), 2)
+        self.assertEqual(torch.add(one, 1).dtype, torch.uint8)
+
+        # contiguous + non-contiguous
+        m1 = torch.randn(10, 10)
+        m2 = torch.randn(10, 10).t()
+        res = m1 + m2
+        self.assertTrue(res.is_contiguous())
+        self.assertEqual(res, m1 + m2.contiguous())
+
+        # 1d + empty
+        m1 = torch.tensor([1.0], dtype=torch.float)
+        m2 = torch.tensor([], dtype=torch.float)
+        self.assertEqual(m1 + m2, [])
+
         # [res] torch.add([res,] tensor1, value, tensor2)
 
     def test_csub(self):
@@ -1670,6 +1690,7 @@ class TestTorch(TestCase):
             ("...ii->...i", I),       # batch diagonal
             # -- Other
             ("bn,anm,bm->ba", l, w, r),  # as torch.bilinear
+            ("... ii->...i  ", I),       # batch diagonal with spaces
         ]
         for test in test_list:
             actual = torch.einsum(test[0], test[1:])
@@ -6396,6 +6417,11 @@ class TestTorch(TestCase):
         devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         for device in devices:
 
+            # need to init cuda to check has_magma
+            empty = torch.randn((0, 0), device=device)
+            if device == 'cuda' and not torch.cuda.has_magma:
+                continue
+
             def fn(torchfn, *args):
                 return torchfn(*tuple(torch.randn(shape, device=device) if isinstance(shape, tuple) else shape
                                       for shape in args))
@@ -7923,6 +7949,20 @@ class TestTorch(TestCase):
                     self.assertEqual(tensor[i], array[i])
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_ctor_with_numpy_scalar_ctor(self):
+        dtypes = [
+            np.double,
+            np.float,
+            np.float16,
+            np.int64,
+            np.int32,
+            np.int16,
+            np.uint8
+        ]
+        for dtype in dtypes:
+            self.assertEqual(dtype(42), torch.tensor(dtype(42)).item())
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_numpy_index(self):
         i = np.int32([0, 1, 2])
         x = torch.randn(5, 5)
@@ -8008,6 +8048,17 @@ class TestTorch(TestCase):
             self.assertIsInstance(geq2_x, torch.ByteTensor)
             for i in range(len(x)):
                 self.assertEqual(geq2_x[i], geq2_array[i])
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_multiplication_numpy_scalar(self):
+        np_sc = np.float64(2.0)
+        t = torch.ones(2, requires_grad=True)
+        r1 = np_sc * t
+        self.assertIsInstance(r1, torch.Tensor)
+        self.assertTrue(r1.requires_grad)
+        r2 = t * np_sc
+        self.assertIsInstance(r2, torch.Tensor)
+        self.assertTrue(r2.requires_grad)
 
     def test_error_msg_type_translation(self):
         with self.assertRaisesRegex(

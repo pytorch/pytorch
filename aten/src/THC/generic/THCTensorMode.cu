@@ -20,7 +20,7 @@ THC_API void THCTensor_(calculateMode)(THCState *state,
     data += THLongStorage_data(position)[i] * THCTensor_(stride)(state, input, i);
   }
 
-  int64_t nElement = THCTensor_(size)(state, input, THCTensor_(_nDimension)(state, input) - 1);
+  int64_t nElement = THCTensor_(size)(state, input, THCTensor_(nDimensionLegacyAll)(state, input) - 1);
   THCThrustAllocator thrustAlloc(state);
 
   // Wrap input data, sortBuffer, in Thrust device vectors
@@ -137,7 +137,7 @@ THC_API void THCTensor_(dimApplyMode)(THCState *state,
                                int dimension,
                                THLongStorage *position,
                                int curDim) {
-  int64_t ndim = THCTensor_(_nDimension)(state, input);
+  int64_t ndim = THCTensor_(nDimensionLegacyAll)(state, input);
 
   // Because we have transposed the Tensor, the data for the dimension we are mode'ing along
   // is always in the innermost dimension
@@ -172,7 +172,7 @@ THC_API void THCTensor_(mode)(THCState *state,
   THAssert(THCTensor_(checkGPU)(state, 1, values));
 
   // Verify they are asking for a valid dimension
-  ndim = THCTensor_(_nDimension)(state, input);
+  ndim = THCTensor_(nDimensionLegacyAll)(state, input);
   THArgCheck(dimension >= 0 && dimension < ndim, 4, "Dimension of out bounds");
 
   sliceSize = THCTensor_(size)(state, input, dimension);

@@ -259,6 +259,7 @@ Other Operations
 .. autofunction:: diagflat
 .. autofunction:: diagonal
 .. autofunction:: einsum
+.. autofunction:: flatten
 .. autofunction:: flip
 .. autofunction:: histc
 .. autofunction:: meshgrid

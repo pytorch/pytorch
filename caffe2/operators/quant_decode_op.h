@@ -12,10 +12,10 @@ namespace {
 
 template <class CodebookT, class CodeT>
 void Decode(
-    const TensorCPU& codebook,
-    const TensorCPU& codes,
-    /* optional */ const TensorCPU* const decoded_grad,
-    TensorCPU* const output,
+    const Tensor& codebook,
+    const Tensor& codes,
+    /* optional */ const Tensor* const decoded_grad,
+    Tensor* const output,
     bool resizeOnly) {
   CAFFE_ENFORCE(codebook.IsType<CodebookT>());
 
@@ -28,7 +28,7 @@ void Decode(
   if (decoded_grad == nullptr) {
     // Forward pass: decode and store codebook values in output.
     output->ResizeLike(codes);
-    auto* out_ptr = output->mutable_data<CodebookT>();
+    auto* out_ptr = output->template mutable_data<CodebookT>();
     if (resizeOnly) {
       return;
     }
@@ -45,7 +45,7 @@ void Decode(
     auto* const gradient_end = gradient_ptr + decoded_grad->size();
 
     CAFFE_ENFORCE_EQ(cb_size, output->size());
-    auto* out_ptr = output->mutable_data<CodebookT>();
+    auto* out_ptr = output->template mutable_data<CodebookT>();
     while (gradient_ptr < gradient_end) {
       DCHECK_LE(*code_ptr, cb_size);
       out_ptr[*code_ptr++] += *gradient_ptr++;
@@ -56,10 +56,10 @@ void Decode(
 #define REGISTER_DECODER(codebookType, codesType)                      \
   {                                                                    \
     {TypeMeta::Id<codebookType>(), TypeMeta::Id<codesType>()},         \
-        [](const TensorCPU& codebook_,                                 \
-           const TensorCPU& codes_,                                    \
-           const TensorCPU* gradient_,                                 \
-           TensorCPU* outDecoded_,                                     \
+        [](const Tensor& codebook_,                                    \
+           const Tensor& codes_,                                       \
+           const Tensor* gradient_,                                    \
+           Tensor* outDecoded_,                                        \
            bool resizeOnly_) {                                         \
           Decode<codebookType, codesType>(                             \
               codebook_, codes_, gradient_, outDecoded_, resizeOnly_); \
@@ -67,18 +67,18 @@ void Decode(
   }
 
 inline void DecodeGeneral(
-    const TensorCPU& codebook,
-    const TensorCPU& codes,
-    const TensorCPU* gradient,
-    TensorCPU* outDecoded,
+    const Tensor& codebook,
+    const Tensor& codes,
+    const Tensor* gradient,
+    Tensor* outDecoded,
     bool resizeOnly) {
   const static std::map<
       std::pair<CaffeTypeId, CaffeTypeId>,
       std::function<void(
-          const TensorCPU& codebook,
-          const TensorCPU& codes,
-          const TensorCPU* gradient,
-          TensorCPU* outDecoded,
+          const Tensor& codebook,
+          const Tensor& codes,
+          const Tensor* gradient,
+          Tensor* outDecoded,
           bool resizeOnly)>>
       gDecoderMapper = {REGISTER_DECODER(float, uint8_t),
                         REGISTER_DECODER(float, uint16_t),
@@ -153,7 +153,7 @@ class QuantDecodeGradientOp final : public Operator<CPUContext> {
 
     auto* gradient = Output(0);
     gradient->ResizeLike(codebook);
-    auto* gradient_ptr = gradient->mutable_data<float>();
+    auto* gradient_ptr = gradient->template mutable_data<float>();
     std::fill(gradient_ptr, gradient_ptr + gradient->size(), 0);
 
     for (int i = 0; i < num_code_tensors; i++) {

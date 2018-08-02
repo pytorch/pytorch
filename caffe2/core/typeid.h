@@ -437,41 +437,37 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
       #T);                                                     \
   }
 
-template <class Context>
 class Tensor;
-class CPUContext;
-class CUDAContext;
 
 // note: first preallocated id is 1, because 0 is used for uninitialized type
 // ids.
 struct _CaffeHighestPreallocatedTypeId final {};
 
-CAFFE_DECLARE_KNOWN_TYPE(1, Tensor<CPUContext>);
-CAFFE_DECLARE_KNOWN_TYPE(2, Tensor<CUDAContext>);
-CAFFE_DECLARE_KNOWN_TYPE(3, float);
-CAFFE_DECLARE_KNOWN_TYPE(4, int);
-CAFFE_DECLARE_KNOWN_TYPE(5, std::string);
-CAFFE_DECLARE_KNOWN_TYPE(6, bool);
-CAFFE_DECLARE_KNOWN_TYPE(7, uint8_t);
-CAFFE_DECLARE_KNOWN_TYPE(8, int8_t);
-CAFFE_DECLARE_KNOWN_TYPE(9, uint16_t);
-CAFFE_DECLARE_KNOWN_TYPE(10, int16_t);
-CAFFE_DECLARE_KNOWN_TYPE(11, int64_t);
-CAFFE_DECLARE_KNOWN_TYPE(12, double);
-CAFFE_DECLARE_KNOWN_TYPE(13, char);
-CAFFE_DECLARE_KNOWN_TYPE(14, std::unique_ptr<std::mutex>);
-CAFFE_DECLARE_KNOWN_TYPE(15, std::unique_ptr<std::atomic<bool>>);
-CAFFE_DECLARE_KNOWN_TYPE(16, std::vector<int32_t>);
-CAFFE_DECLARE_KNOWN_TYPE(17, std::vector<int64_t>);
-CAFFE_DECLARE_KNOWN_TYPE(18, std::vector<unsigned long>);
-CAFFE_DECLARE_KNOWN_TYPE(19, bool*);
-CAFFE_DECLARE_KNOWN_TYPE(20, char*);
-CAFFE_DECLARE_KNOWN_TYPE(21, int*);
+CAFFE_DECLARE_KNOWN_TYPE(1, Tensor);
+CAFFE_DECLARE_KNOWN_TYPE(2, float);
+CAFFE_DECLARE_KNOWN_TYPE(3, int);
+CAFFE_DECLARE_KNOWN_TYPE(4, std::string);
+CAFFE_DECLARE_KNOWN_TYPE(5, bool);
+CAFFE_DECLARE_KNOWN_TYPE(6, uint8_t);
+CAFFE_DECLARE_KNOWN_TYPE(7, int8_t);
+CAFFE_DECLARE_KNOWN_TYPE(8, uint16_t);
+CAFFE_DECLARE_KNOWN_TYPE(9, int16_t);
+CAFFE_DECLARE_KNOWN_TYPE(10, int64_t);
+CAFFE_DECLARE_KNOWN_TYPE(11, double);
+CAFFE_DECLARE_KNOWN_TYPE(12, char);
+CAFFE_DECLARE_KNOWN_TYPE(13, std::unique_ptr<std::mutex>);
+CAFFE_DECLARE_KNOWN_TYPE(14, std::unique_ptr<std::atomic<bool>>);
+CAFFE_DECLARE_KNOWN_TYPE(15, std::vector<int32_t>);
+CAFFE_DECLARE_KNOWN_TYPE(16, std::vector<int64_t>);
+CAFFE_DECLARE_KNOWN_TYPE(17, std::vector<unsigned long>);
+CAFFE_DECLARE_KNOWN_TYPE(18, bool*);
+CAFFE_DECLARE_KNOWN_TYPE(19, char*);
+CAFFE_DECLARE_KNOWN_TYPE(20, int*);
 
 #ifdef CAFFE2_UNIQUE_LONG_TYPEMETA
-CAFFE_DECLARE_KNOWN_TYPE(22, long);
-CAFFE_DECLARE_KNOWN_TYPE(23, std::vector<long>);
+CAFFE_DECLARE_KNOWN_TYPE(21, long);
+CAFFE_DECLARE_KNOWN_TYPE(22, std::vector<long>);
 #endif // CAFFE2_UNIQUE_LONG_TYPEMETA
 
-CAFFE_DECLARE_KNOWN_TYPE(24, _CaffeHighestPreallocatedTypeId);
+CAFFE_DECLARE_KNOWN_TYPE(23, _CaffeHighestPreallocatedTypeId);
 }

@@ -37,12 +37,12 @@ class RecurrentBaseOp : public Operator<CUDAContext> {
 
  protected:
   void initialize(
-      const Tensor<CUDAContext>& input,
-      Tensor<CUDAContext>* dropoutStates = nullptr,
+      const Tensor& input,
+      Tensor* dropoutStates = nullptr,
       // If passed, reshapes to the appropriate size
-      Tensor<CUDAContext>* output = nullptr,
-      Tensor<CUDAContext>* hiddenOutput = nullptr,
-      Tensor<CUDAContext>* cellOutput = nullptr);
+      Tensor* output = nullptr,
+      Tensor* hiddenOutput = nullptr,
+      Tensor* cellOutput = nullptr);
 
   CuDNNWrapper cudnn_wrapper_;
   cudnnDropoutDescriptor_t dropoutDesc_;

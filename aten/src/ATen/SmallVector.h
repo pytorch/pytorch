@@ -944,6 +944,12 @@ public:
     return *this;
   }
 
+  template <typename Container>
+  const SmallVector &operator=(Container &&C) {
+    this->assign(C.begin(), C.end());
+    return *this;
+  }
+
   const SmallVector &operator=(std::initializer_list<T> IL) {
     this->assign(IL);
     return *this;

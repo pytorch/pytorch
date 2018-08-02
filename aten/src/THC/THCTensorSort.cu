@@ -3,7 +3,7 @@
 void THCudaLongTensor_fillSliceWithIndex(THCState* state,
                                          THCudaLongTensor* t,
                                          int dim) {
-  int64_t dims = THCudaLongTensor_nDimension(state, t);
+  int64_t dims = THCudaLongTensor_nDimensionLegacyNoScalars(state, t);
   THArgCheck(dims <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
 
   ptrdiff_t inElements = THCudaLongTensor_nElement(state, t);

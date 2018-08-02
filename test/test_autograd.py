@@ -1049,8 +1049,9 @@ class TestAutograd(TestCase):
 
         b = a + 5
         next_functions = b.grad_fn.next_functions
-        self.assertEqual(len(next_functions), 1)
+        self.assertEqual(len(next_functions), 2)
         self.assertIs(next_functions[0][0], a.grad_fn)
+        self.assertIs(next_functions[1][0], None)
 
     def test_inplace(self):
         x = torch.ones(5, 5, requires_grad=True)
@@ -3473,10 +3474,10 @@ def add_test(
                         if not isinstance(output_variable, tuple):
                             output_variable = (output_variable,)
                         inplace_self_variable = deepcopy(self_variable)
-                        inplace_self_variable_copy = tuple(i + 0 if i is not None else None
+                        inplace_self_variable_copy = tuple(i.clone() if isinstance(i, torch.Tensor) else i
                                                            for i in (inplace_self_variable,))
                         inplace_args_variable = deepcopy(args_variable)
-                        inplace_args_variable_copy = tuple(i + 0 if i is not None else None
+                        inplace_args_variable_copy = tuple(i.clone() if isinstance(i, torch.Tensor) else i
                                                            for i in inplace_args_variable)
 
                         inplace_output_variable = (

@@ -52,7 +52,8 @@ struct Parser {
         prefix = parseConst();
       } break;
       case TK_TRUE:
-      case TK_FALSE: {
+      case TK_FALSE:
+      case TK_NONE: {
         auto k = L.cur().kind;
         auto r = L.cur().range;
         prefix = c(k, r, {});

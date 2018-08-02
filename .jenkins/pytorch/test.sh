@@ -21,7 +21,17 @@ popd
 # ASAN test is not working
 if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     export ASAN_OPTIONS=detect_leaks=0:symbolize=1
-    export UBSAN_OPTIONS=print_stacktrace=1
+    # We suppress the vptr volation, since we have separate copies of
+    # libprotobuf in both libtorch.so and libcaffe2.so, and it causes
+    # the following problem:
+    #    test_cse (__main__.TestJit) ... torch/csrc/jit/export.cpp:622:38:
+    #        runtime error: member call on address ... which does not point
+    #        to an object of type 'google::protobuf::MessageLite'
+    #        ...: note: object is of type 'onnx_torch::ModelProto'
+    #
+    # This problem should be solved when libtorch.so and libcaffe2.so are
+    # merged.
+    export UBSAN_OPTIONS=print_stacktrace=1:suppressions=$PWD/ubsan.supp
     export PYTORCH_TEST_WITH_ASAN=1
     export PYTORCH_TEST_WITH_UBSAN=1
     # TODO: Figure out how to avoid hard-coding these paths

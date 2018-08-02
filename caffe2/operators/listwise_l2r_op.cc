@@ -77,9 +77,9 @@ template <>
 float LambdaRankNdcgOp<float, CPUContext>::LambdaRankNdcgSession(
     int start_index,
     int end_index,
-    const Tensor<CPUContext>& y,
-    const Tensor<CPUContext>& r,
-    Tensor<CPUContext>** dy) {
+    const Tensor& y,
+    const Tensor& r,
+    Tensor** dy) {
   CAFFE_ENFORCE(start_index >= 0);
   CAFFE_ENFORCE(start_index < y.size());
   const auto* y_data = y.template data<float>();

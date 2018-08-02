@@ -44,7 +44,7 @@
   }
 
 #define THNN_CHECK_DIM_SIZE(T, DIM, DIM_SIZE, SIZE)			\
-  if (THTensor_(nDimension)(T) != DIM ||				\
+  if (THTensor_(nDimensionLegacyNoScalars)(T) != DIM ||				\
       THTensor_(size)(T, DIM_SIZE) != SIZE) {				\
       THDescBuff s1 = THTensor_(sizeDesc)(T);				\
       THError("Need " #T " of dimension %d and " #T ".size[%d] == %d"	\
@@ -52,7 +52,7 @@
   }
 
 #define THNN_CHECK_DIM_SIZE_INDICES(T, DIM, DIM_SIZE, SIZE)			\
-  if (THIndexTensor_(nDimension)(T) != DIM ||				\
+  if (THIndexTensor_(nDimensionLegacyNoScalars)(T) != DIM ||				\
       THIndexTensor_(size)(T, DIM_SIZE) != SIZE) {				\
       THDescBuff s1 = THIndexTensor_(sizeDesc)(T);				\
       THError("Need " #T " of dimension %d and " #T ".size[%d] == %d"	\

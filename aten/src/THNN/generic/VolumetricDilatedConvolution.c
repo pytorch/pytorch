@@ -2,6 +2,8 @@
 #define TH_GENERIC_FILE "generic/VolumetricDilatedConvolution.c"
 #else
 
+#include <ATen/div_rtn.h>
+
 static inline void THNN_(VolumetricDilatedConvolution_shapeCheck)(
                          THTensor *input, THTensor *gradOutput,
                          THTensor *weight, THTensor *bias,
@@ -47,9 +49,9 @@ static inline void THNN_(VolumetricDilatedConvolution_shapeCheck)(
   int64_t inputDepth  = input->size(dimd);
   int64_t inputHeight  = input->size(dimh);
   int64_t inputWidth   = input->size(dimw);
-  int64_t outputDepth  = (inputDepth  + 2*padT - (dilationT * (kT - 1) + 1)) / dT + 1;
-  int64_t outputHeight = (inputHeight + 2*padH - (dilationH * (kH - 1) + 1)) / dH + 1;
-  int64_t outputWidth  = (inputWidth  + 2*padW - (dilationW * (kW - 1) + 1)) / dW + 1;
+  int64_t outputDepth  = div_rtn<int64_t>(inputDepth  + 2*padT - (dilationT * (kT - 1) + 1), dT) + 1;
+  int64_t outputHeight = div_rtn<int64_t>(inputHeight + 2*padH - (dilationH * (kH - 1) + 1), dH) + 1;
+  int64_t outputWidth  = div_rtn<int64_t>(inputWidth  + 2*padW - (dilationW * (kW - 1) + 1), dW) + 1;
 
   if (outputDepth < 1 || outputWidth < 1 || outputHeight < 1) {
     THError("Given input size per channel: (%ld x %ld x %ld). "

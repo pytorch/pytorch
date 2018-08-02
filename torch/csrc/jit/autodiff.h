@@ -4,7 +4,9 @@
 #include "torch/csrc/jit/ir.h"
 
 #include <ATen/ATen.h>
+
 #include <vector>
+#include <memory>
 
 namespace torch { namespace jit {
 

@@ -66,10 +66,10 @@ class MKLFallbackOp final : public Operator<MKLContext> {
     for (int i = 0; i < InputSize(); ++i) {
       if (OperatorBase::InputIsType<MKLMemory<float>>(i)) {
         OperatorBase::Input<MKLMemory<float>>(i).CopyTo(
-            local_input_blobs_[i]->template GetMutable<TensorCPU>());
+            local_input_blobs_[i]->GetMutableTensor(CPU));
       } else if (OperatorBase::InputIsType<MKLMemory<double>>(i)) {
         OperatorBase::Input<MKLMemory<double>>(i).CopyTo(
-            local_input_blobs_[i]->template GetMutable<TensorCPU>());
+            local_input_blobs_[i]->GetMutableTensor(CPU));
       } else {
         VLOG(1) << "Input " << i << " is not MKLMemory. Skipping copy.";
         // Note(jiayq): This removes a const but conceptually

@@ -19,6 +19,7 @@ _(namespaces, scope) \
 _(namespaces, namespaces) \
 _(prim, Assign) \
 _(prim, Constant) \
+_(prim, None) \
 _(prim, Drop) \
 _(prim, Eval) \
 _(prim, Expand) /* onnx */ \
@@ -49,6 +50,7 @@ _(prim, TensorToNum) \
 _(prim, AutogradAdd) \
 _(prim, GradOf) \
 _(prim, AnyDefined) \
+_(prim, FusedConcat) \
 _(aten, __not__) \
 FORALL_ATEN_BASE_SYMBOLS(_) \
 _(onnx, Add) \

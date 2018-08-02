@@ -59,6 +59,7 @@ namespace script {
   _(TK_IF_EXPR, "if", "")                        \
   _(TK_TRUE, "True", "True")                     \
   _(TK_FALSE, "False", "False")                  \
+  _(TK_NONE, "None", "None")                     \
   _(TK_AND, "and", "and")                        \
   _(TK_OR, "or", "or")                           \
   _(TK_NOT, "not", "not")                        \

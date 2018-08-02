@@ -25,7 +25,7 @@ inline void parallel_for(
     const int64_t begin,
     const int64_t end,
     const int64_t grain_size,
-    const F f) {
+    const F& f) {
 #ifdef _OPENMP
 #pragma omp parallel if ((end - begin) >= grain_size)
   {

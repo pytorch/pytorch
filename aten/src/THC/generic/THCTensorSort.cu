@@ -13,9 +13,9 @@ THC_API void THCTensor_(sortKeyValueInplace)(THCState* state,
   THArgCheck(THCTensor_(isSize)(state, key, valueSize), 2,
              "Key tensor must have same size as value tensor");
   THLongStorage_free(valueSize);
-  int dims = THCudaLongTensor_nDimension(state, value);
+  int dims = THCudaLongTensor_nDimensionLegacyNoScalars(state, value);
   THArgCheck(dims <= MAX_CUTORCH_DIMS, 3, CUTORCH_DIM_WARNING);
-  dims = THCTensor_(nDimension)(state, key);
+  dims = THCTensor_(nDimensionLegacyNoScalars)(state, key);
   THArgCheck(dims <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
 
   ptrdiff_t inElements = THCTensor_(nElement)(state, key);
@@ -158,7 +158,7 @@ void THCTensor_(sortViaThrust)(THCState* state,
                                THCudaLongTensor* indices,
                                THCTensor* input,
                                int dim, bool dir) {
-  int nDims = THCTensor_(_nDimension)(state, input);
+  int nDims = THCTensor_(nDimensionLegacyAll)(state, input);
 
   ptrdiff_t totalElements = THCTensor_(nElement)(state, input);
   int64_t sliceSize = THCTensor_(size)(state, input, dim);
@@ -283,11 +283,11 @@ THC_API void THCTensor_(sort)(THCState* state,
                                int dim, int order) {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, sorted, input));
   THCAssertSameGPU(THCudaLongTensor_checkGPU(state, 1, indices));
-  int64_t dims = THCTensor_(nDimension)(state, sorted);
+  int64_t dims = THCTensor_(nDimensionLegacyNoScalars)(state, sorted);
   THArgCheck(dims <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
-  dims = THCTensor_(nDimension)(state, input);
+  dims = THCTensor_(nDimensionLegacyNoScalars)(state, input);
   THArgCheck(dims <= MAX_CUTORCH_DIMS, 4, CUTORCH_DIM_WARNING);
-  dims = THCudaLongTensor_nDimension(state, indices);
+  dims = THCudaLongTensor_nDimensionLegacyNoScalars(state, indices);
   THArgCheck(dims <= MAX_CUTORCH_DIMS, 3, CUTORCH_DIM_WARNING);
 
   // Make sure sufficient output space is allocated

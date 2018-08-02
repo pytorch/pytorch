@@ -33,8 +33,8 @@ class AtomicFetchAddOp final : public Operator<CPUContext> {
     d->Resize(std::vector<TIndex>());
     auto* aPtr = a.data<int32_t>();
     auto* bPtr = b.data<int32_t>();
-    auto* cPtr = c->mutable_data<int32_t>();
-    auto* dPtr = d->mutable_data<int32_t>();
+    auto* cPtr = c->template mutable_data<int32_t>();
+    auto* dPtr = d->template mutable_data<int32_t>();
     std::lock_guard<std::mutex> lg(*mutex);
     *dPtr = *aPtr;
     *cPtr = *aPtr + *bPtr;
@@ -77,7 +77,7 @@ class CheckAtomicBoolOp final : public Operator<CPUContext> {
   bool RunOnDevice() override {
     auto& ptr = OperatorBase::Input<std::unique_ptr<std::atomic<bool>>>(0);
     Output(0)->Resize(1);
-    *Output(0)->mutable_data<bool>() = ptr->load();
+    *Output(0)->template mutable_data<bool>() = ptr->load();
     return true;
   }
 };

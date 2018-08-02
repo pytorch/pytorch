@@ -189,7 +189,7 @@ namespace caffe2 {
         }
 
       protected:
-        Tensor<Context> bias_multiplier_;
+       Tensor bias_multiplier_{Context::GetDeviceType()};
     };
 
   template <typename T, class Context, class Engine=DefaultEngine>
@@ -343,9 +343,9 @@ namespace caffe2 {
         }
 
       protected:
-        Tensor<Context> bias_multiplier_;
-        Tensor<Context> sum_buffer_;
-        Tensor<Context> comp_r_buf_;
+       Tensor bias_multiplier_{Context::GetDeviceType()};
+       Tensor sum_buffer_{Context::GetDeviceType()};
+       Tensor comp_r_buf_{Context::GetDeviceType()};
     };
 
 }  // namespace caffe2

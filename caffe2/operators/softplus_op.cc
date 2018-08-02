@@ -11,7 +11,7 @@ bool SoftplusOp<float, CPUContext>::RunOnDevice() {
   auto* Y = Output(0);
   Y->ResizeLike(X);
 
-  EigenVectorMap<float>(Y->mutable_data<float>(), X.size()) =
+  EigenVectorMap<float>(Y->template mutable_data<float>(), X.size()) =
       (ConstEigenVectorMap<float>(X.data<float>(), X.size()).array().exp() +
        1.0f)
           .log();
@@ -28,7 +28,7 @@ bool SoftplusGradientOp<float, CPUContext>::RunOnDevice() {
 
   const float* Ydata = Y.data<float>();
   const float* dYdata = dY.data<float>();
-  float* dXdata = dX->mutable_data<float>();
+  float* dXdata = dX->template mutable_data<float>();
   EigenVectorArrayMap<float> dXvec(dXdata, dX->size());
   ConstEigenVectorArrayMap<float> Yvec(Ydata, Y.size());
   ConstEigenVectorArrayMap<float> dYvec(dYdata, dY.size());

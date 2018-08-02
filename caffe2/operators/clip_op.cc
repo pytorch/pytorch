@@ -8,7 +8,7 @@ bool ClipOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0);
   auto* Y = Output(0);
   Y->ResizeLike(X);
-  EigenVectorMap<float>(Y->mutable_data<float>(), Y->size()) =
+  EigenVectorMap<float>(Y->template mutable_data<float>(), Y->size()) =
       ConstEigenVectorMap<float>(X.data<float>(), X.size())
           .cwiseMax(min_)
           .cwiseMin(max_);
@@ -25,7 +25,7 @@ bool ClipGradientOp<float, CPUContext>::RunOnDevice() {
   dX->ResizeLike(Y);
   const float* Ydata = Y.data<float>();
   const float* dYdata = dY.data<float>();
-  float* dXdata = dX->mutable_data<float>();
+  float* dXdata = dX->template mutable_data<float>();
   for (int i = 0; i < Y.size(); ++i) {
     dXdata[i] = dYdata[i] * (Ydata[i] > min_ && Ydata[i] < max_);
   }

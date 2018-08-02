@@ -15,38 +15,51 @@ graph(%0 : Double(1, 3, 224, 224)
       %14 : Double(4096)
       %15 : Double(1000, 4096)
       %16 : Double(1000)) {
-  %17 : Double(1, 64, 55, 55) = aten::_convolution[stride=[4, 4], padding=[2, 2], dilation=[1, 1], transposed=0, output_padding=[0, 0], groups=1, benchmark=0, deterministic=0, cudnn_enabled=1](%0, %1, %2), scope: AlexNet/Sequential[features]/Conv2d[0]
-  %18 : Double(1, 64, 55, 55) = aten::threshold[threshold={0}, value={0}](%17), scope: AlexNet/Sequential[features]/ReLU[1]
-  %19 : Double(1, 64, 27, 27), %20 : Long(1, 64, 27, 27) = aten::max_pool2d_with_indices[kernel_size=[3, 3], stride=[2, 2], padding=[0, 0], dilation=[1, 1], ceil_mode=0](%18), scope: AlexNet/Sequential[features]/MaxPool2d[2]
-  %21 : Double(1, 192, 27, 27) = aten::_convolution[stride=[1, 1], padding=[2, 2], dilation=[1, 1], transposed=0, output_padding=[0, 0], groups=1, benchmark=0, deterministic=0, cudnn_enabled=1](%19, %3, %4), scope: AlexNet/Sequential[features]/Conv2d[3]
-  %22 : Double(1, 192, 27, 27) = aten::threshold[threshold={0}, value={0}](%21), scope: AlexNet/Sequential[features]/ReLU[4]
-  %23 : Double(1, 192, 13, 13), %24 : Long(1, 192, 13, 13) = aten::max_pool2d_with_indices[kernel_size=[3, 3], stride=[2, 2], padding=[0, 0], dilation=[1, 1], ceil_mode=0](%22), scope: AlexNet/Sequential[features]/MaxPool2d[5]
-  %25 : Double(1, 384, 13, 13) = aten::_convolution[stride=[1, 1], padding=[1, 1], dilation=[1, 1], transposed=0, output_padding=[0, 0], groups=1, benchmark=0, deterministic=0, cudnn_enabled=1](%23, %5, %6), scope: AlexNet/Sequential[features]/Conv2d[6]
-  %26 : Double(1, 384, 13, 13) = aten::threshold[threshold={0}, value={0}](%25), scope: AlexNet/Sequential[features]/ReLU[7]
-  %27 : Double(1, 256, 13, 13) = aten::_convolution[stride=[1, 1], padding=[1, 1], dilation=[1, 1], transposed=0, output_padding=[0, 0], groups=1, benchmark=0, deterministic=0, cudnn_enabled=1](%26, %7, %8), scope: AlexNet/Sequential[features]/Conv2d[8]
-  %28 : Double(1, 256, 13, 13) = aten::threshold[threshold={0}, value={0}](%27), scope: AlexNet/Sequential[features]/ReLU[9]
-  %29 : Double(1, 256, 13, 13) = aten::_convolution[stride=[1, 1], padding=[1, 1], dilation=[1, 1], transposed=0, output_padding=[0, 0], groups=1, benchmark=0, deterministic=0, cudnn_enabled=1](%28, %9, %10), scope: AlexNet/Sequential[features]/Conv2d[10]
-  %30 : Double(1, 256, 13, 13) = aten::threshold[threshold={0}, value={0}](%29), scope: AlexNet/Sequential[features]/ReLU[11]
-  %31 : Double(1, 256, 6, 6), %32 : Long(1, 256, 6, 6) = aten::max_pool2d_with_indices[kernel_size=[3, 3], stride=[2, 2], padding=[0, 0], dilation=[1, 1], ceil_mode=0](%30), scope: AlexNet/Sequential[features]/MaxPool2d[12]
-  %33 : int = prim::Constant[value=0](), scope: AlexNet
-  %34 : int = aten::size(%31, %33), scope: AlexNet
-  %35 : Long() = prim::NumToTensor(%34), scope: AlexNet
-  %36 : int = prim::TensorToNum(%35), scope: AlexNet
-  %37 : int = prim::Constant[value=9216](), scope: AlexNet
-  %38 : int[] = prim::ListConstruct(%36, %37), scope: AlexNet
-  %39 : Double(1, 9216) = aten::view(%31, %38), scope: AlexNet
-  %40 : Double(1, 9216) = ^Dropout(0.5, True, False)(%39), scope: AlexNet/Sequential[classifier]/Dropout[0]
-  %41 : Double(9216!, 4096!) = aten::t(%11), scope: AlexNet/Sequential[classifier]/Linear[1]
-  %42 : Double(1, 4096) = aten::expand[size=[1, 4096], implicit=1](%12), scope: AlexNet/Sequential[classifier]/Linear[1]
-  %43 : Double(1, 4096) = aten::addmm[beta={1}, alpha={1}](%42, %40, %41), scope: AlexNet/Sequential[classifier]/Linear[1]
-  %44 : Double(1, 4096) = aten::threshold[threshold={0}, value={0}](%43), scope: AlexNet/Sequential[classifier]/ReLU[2]
-  %45 : Double(1, 4096) = ^Dropout(0.5, True, False)(%44), scope: AlexNet/Sequential[classifier]/Dropout[3]
-  %46 : Double(4096!, 4096!) = aten::t(%13), scope: AlexNet/Sequential[classifier]/Linear[4]
-  %47 : Double(1, 4096) = aten::expand[size=[1, 4096], implicit=1](%14), scope: AlexNet/Sequential[classifier]/Linear[4]
-  %48 : Double(1, 4096) = aten::addmm[beta={1}, alpha={1}](%47, %45, %46), scope: AlexNet/Sequential[classifier]/Linear[4]
-  %49 : Double(1, 4096) = aten::threshold[threshold={0}, value={0}](%48), scope: AlexNet/Sequential[classifier]/ReLU[5]
-  %50 : Double(4096!, 1000!) = aten::t(%15), scope: AlexNet/Sequential[classifier]/Linear[6]
-  %51 : Double(1, 1000) = aten::expand[size=[1, 1000], implicit=1](%16), scope: AlexNet/Sequential[classifier]/Linear[6]
-  %52 : Double(1, 1000) = aten::addmm[beta={1}, alpha={1}](%51, %49, %50), scope: AlexNet/Sequential[classifier]/Linear[6]
-  return (%52);
+  %17 : int = prim::Constant[value=4](), scope: AlexNet/Sequential[features]/Conv2d[0]
+  %18 : int[] = prim::ListConstruct(%17, %17), scope: AlexNet/Sequential[features]/Conv2d[0]
+  %19 : int = prim::Constant[value=2](), scope: AlexNet/Sequential[features]/Conv2d[0]
+  %20 : int[] = prim::ListConstruct(%19, %19), scope: AlexNet/Sequential[features]/Conv2d[0]
+  %21 : int = prim::Constant[value=1](), scope: AlexNet/Sequential[features]/Conv2d[0]
+  %22 : int[] = prim::ListConstruct(%21, %21), scope: AlexNet/Sequential[features]/Conv2d[0]
+  %23 : int = prim::Constant[value=0](), scope: AlexNet/Sequential[features]/Conv2d[0]
+  %24 : int[] = prim::ListConstruct(%23, %23), scope: AlexNet/Sequential[features]/Conv2d[0]
+  %25 : Double(1, 64, 55, 55) = aten::_convolution(%0, %1, %2, %18, %20, %22, %23, %24, %21, %23, %23, %21), scope: AlexNet/Sequential[features]/Conv2d[0]
+  %26 : Double(1, 64, 55, 55) = aten::threshold(%25, %23, %23), scope: AlexNet/Sequential[features]/ReLU[1]
+  %27 : int = prim::Constant[value=3](), scope: AlexNet/Sequential[features]/MaxPool2d[2]
+  %28 : int[] = prim::ListConstruct(%27, %27), scope: AlexNet/Sequential[features]/MaxPool2d[2]
+  %29 : Double(1, 64, 27, 27), %30 : Long(1, 64, 27, 27) = aten::max_pool2d_with_indices(%26, %28, %20, %24, %22, %23), scope: AlexNet/Sequential[features]/MaxPool2d[2]
+  %31 : Double(1, 192, 27, 27) = aten::_convolution(%29, %3, %4, %22, %20, %22, %23, %24, %21, %23, %23, %21), scope: AlexNet/Sequential[features]/Conv2d[3]
+  %32 : Double(1, 192, 27, 27) = aten::threshold(%31, %23, %23), scope: AlexNet/Sequential[features]/ReLU[4]
+  %33 : Double(1, 192, 13, 13), %34 : Long(1, 192, 13, 13) = aten::max_pool2d_with_indices(%32, %28, %20, %24, %22, %23), scope: AlexNet/Sequential[features]/MaxPool2d[5]
+  %35 : Double(1, 384, 13, 13) = aten::_convolution(%33, %5, %6, %22, %22, %22, %23, %24, %21, %23, %23, %21), scope: AlexNet/Sequential[features]/Conv2d[6]
+  %36 : Double(1, 384, 13, 13) = aten::threshold(%35, %23, %23), scope: AlexNet/Sequential[features]/ReLU[7]
+  %37 : Double(1, 256, 13, 13) = aten::_convolution(%36, %7, %8, %22, %22, %22, %23, %24, %21, %23, %23, %21), scope: AlexNet/Sequential[features]/Conv2d[8]
+  %38 : Double(1, 256, 13, 13) = aten::threshold(%37, %23, %23), scope: AlexNet/Sequential[features]/ReLU[9]
+  %39 : Double(1, 256, 13, 13) = aten::_convolution(%38, %9, %10, %22, %22, %22, %23, %24, %21, %23, %23, %21), scope: AlexNet/Sequential[features]/Conv2d[10]
+  %40 : Double(1, 256, 13, 13) = aten::threshold(%39, %23, %23), scope: AlexNet/Sequential[features]/ReLU[11]
+  %41 : Double(1, 256, 6, 6), %42 : Long(1, 256, 6, 6) = aten::max_pool2d_with_indices(%40, %28, %20, %24, %22, %23), scope: AlexNet/Sequential[features]/MaxPool2d[12]
+  %43 : int = aten::size(%41, %23), scope: AlexNet
+  %44 : Long() = prim::NumToTensor(%43), scope: AlexNet
+  %45 : int = prim::TensorToNum(%44), scope: AlexNet
+  %46 : int = prim::Constant[value=9216](), scope: AlexNet
+  %47 : int[] = prim::ListConstruct(%45, %46), scope: AlexNet
+  %48 : Double(1, 9216) = aten::view(%41, %47), scope: AlexNet
+  %49 : Double(1, 9216) = ^Dropout(0.5, True, False)(%48), scope: AlexNet/Sequential[classifier]/Dropout[0]
+  %50 : Double(9216!, 4096!) = aten::t(%11), scope: AlexNet/Sequential[classifier]/Linear[1]
+  %51 : int = prim::Constant[value=4096](), scope: AlexNet/Sequential[classifier]/Linear[1]
+  %52 : int[] = prim::ListConstruct(%21, %51), scope: AlexNet/Sequential[classifier]/Linear[1]
+  %53 : Double(1, 4096) = aten::expand(%12, %52, %21), scope: AlexNet/Sequential[classifier]/Linear[1]
+  %54 : Double(1, 4096) = aten::addmm(%53, %49, %50, %21, %21), scope: AlexNet/Sequential[classifier]/Linear[1]
+  %55 : Double(1, 4096) = aten::threshold(%54, %23, %23), scope: AlexNet/Sequential[classifier]/ReLU[2]
+  %56 : Double(1, 4096) = ^Dropout(0.5, True, False)(%55), scope: AlexNet/Sequential[classifier]/Dropout[3]
+  %57 : Double(4096!, 4096!) = aten::t(%13), scope: AlexNet/Sequential[classifier]/Linear[4]
+  %58 : Double(1, 4096) = aten::expand(%14, %52, %21), scope: AlexNet/Sequential[classifier]/Linear[4]
+  %59 : Double(1, 4096) = aten::addmm(%58, %56, %57, %21, %21), scope: AlexNet/Sequential[classifier]/Linear[4]
+  %60 : Double(1, 4096) = aten::threshold(%59, %23, %23), scope: AlexNet/Sequential[classifier]/ReLU[5]
+  %61 : Double(4096!, 1000!) = aten::t(%15), scope: AlexNet/Sequential[classifier]/Linear[6]
+  %62 : int = prim::Constant[value=1000](), scope: AlexNet/Sequential[classifier]/Linear[6]
+  %63 : int[] = prim::ListConstruct(%21, %62), scope: AlexNet/Sequential[classifier]/Linear[6]
+  %64 : Double(1, 1000) = aten::expand(%16, %63, %21), scope: AlexNet/Sequential[classifier]/Linear[6]
+  %65 : Double(1, 1000) = aten::addmm(%64, %60, %61, %21, %21), scope: AlexNet/Sequential[classifier]/Linear[6]
+  return (%65);
 }

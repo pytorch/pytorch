@@ -23,10 +23,20 @@ namespace at {
 AT_API int _crash_if_asan(int);
 
 template <typename T, typename Base>
-static inline T* checked_cast_storage(Base* expr, const char * name, int pos) {
-  if (typeid(*expr) != typeid(T))
-    AT_ERROR("Expected object of type ", T::typeString(), " but found type ", expr->type().toString(),
+static inline T* checked_cast_storage(Base* expr, const char * name, int pos, Backend backend, ScalarType scalar_type) {
+  if (expr->pImpl()->type().backend() != backend) {
+    AT_ERROR("Expected object of backend ", backend, " but got backend ", expr->pImpl()->type().backend(),
              " for argument #", pos, " '", name, "'");
+  }
+  if (expr->pImpl()->type().scalarType() != scalar_type) {
+    AT_ERROR("Expected object of scalar type ", scalar_type, " but got scalar type ", expr->pImpl()->type().scalarType(),
+             " for argument #", pos, " '", name, "'");
+  }
+  // NB: We're getting rid of derived types soon!
+  // if (typeid(*(expr->pImpl())) != typeid(T)) {
+  //   AT_ERROR("Expected object of RTTI type ", typeid(T).name(), " but found type ", typeid(*(expr->pImpl())).name(),
+  //            " for argument #", pos, " '", name, "'");
+  // }
   return static_cast<T*>(expr);
 }
 

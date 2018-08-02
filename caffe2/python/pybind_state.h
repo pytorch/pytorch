@@ -90,19 +90,20 @@ static_assert(
 int CaffeToNumpyType(const TypeMeta& meta);
 const TypeMeta& NumpyTypeToCaffe(int numpy_type);
 
-template <class Context>
 class TensorFetcher : public BlobFetcherBase {
  public:
   pybind11::object Fetch(const Blob& blob) override {
-    return FetchTensor(blob.Get<Tensor<Context>>(), true).obj;
+    return FetchTensor(blob.Get<Tensor>(), true).obj;
   }
 
-  bool NeedsCopy(const TypeMeta& meta) const {
-    return !std::is_same<Context, CPUContext>::value ||
+  // Checks whether the data with type `meta` needs to be copied in the context
+  // of `tensor`
+  bool NeedsCopy(const Tensor* tensor, const TypeMeta& meta) const {
+    return tensor->GetStaticContext() != GetCPUStaticContext() ||
         CaffeToNumpyType(meta) == NPY_OBJECT;
   }
 
-  FetchedBlob FetchTensor(const Tensor<Context>& tensor, bool force_copy) {
+  FetchedBlob FetchTensor(const Tensor& tensor, bool force_copy) {
     FetchedBlob result;
     CAFFE_ENFORCE_GE(tensor.size(), 0, "Trying to fetch unitilized tensor");
     const int numpy_type = CaffeToNumpyType(tensor.meta());
@@ -115,7 +116,7 @@ class TensorFetcher : public BlobFetcherBase {
     for (const auto dim : tensor.dims()) {
       npy_dims.push_back(dim);
     }
-    result.copied = force_copy || NeedsCopy(tensor.meta());
+    result.copied = force_copy || NeedsCopy(&tensor, tensor.meta());
     void* outPtr;
     if (result.copied) {
       result.obj = py::reinterpret_steal<py::object>(
@@ -123,7 +124,7 @@ class TensorFetcher : public BlobFetcherBase {
       outPtr = static_cast<void*>(
           PyArray_DATA(reinterpret_cast<PyArrayObject*>(result.obj.ptr())));
     } else {
-      outPtr = const_cast<Tensor<Context>&>(tensor).raw_mutable_data();
+      outPtr = const_cast<Tensor&>(tensor).raw_mutable_data();
       result.obj = py::reinterpret_steal<py::object>(PyArray_SimpleNewFromData(
           tensor.ndim(), npy_dims.data(), numpy_type, outPtr));
     }
@@ -146,10 +147,9 @@ class TensorFetcher : public BlobFetcherBase {
     }
 
     if (result.copied) {
-      Context context;
-      context.template CopyBytes<Context, CPUContext>(
-          tensor.nbytes(), tensor.raw_data(), outPtr);
-      context.FinishDeviceComputation();
+      auto context = tensor.GetStaticContext()->CreateContext();
+      context->CopyBytesToCPU(tensor.nbytes(), tensor.raw_data(), outPtr);
+      context->FinishDeviceComputation();
     }
     return result;
   }
@@ -161,7 +161,7 @@ class TensorFeeder : public BlobFeederBase {
   void FeedTensor(
       const DeviceOption& option,
       PyArrayObject* original_array,
-      Tensor<Context>* tensor) {
+      Tensor* tensor) {
     PyArrayObject* array = PyArray_GETCONTIGUOUS(original_array);
     auto g = MakeGuard([&]() { Py_XDECREF(array); });
 
@@ -220,7 +220,7 @@ class TensorFeeder : public BlobFeederBase {
             "instead of unicode strings.");
         break;
       default:
-        context.template CopyBytes<CPUContext, Context>(
+        context.CopyBytesFromCPU(
             tensor->size() * meta.itemsize(),
             static_cast<void*>(PyArray_DATA(array)),
             tensor->raw_mutable_data(meta));
@@ -230,7 +230,10 @@ class TensorFeeder : public BlobFeederBase {
 
   virtual void
   Feed(const DeviceOption& option, PyArrayObject* original_array, Blob* blob) {
-    FeedTensor(option, original_array, blob->GetMutable<Tensor<Context>>());
+    FeedTensor(
+        option,
+        original_array,
+        blob->GetMutableTensor(Context::GetDeviceType()));
   }
 };
 
@@ -316,29 +319,26 @@ class PythonOpBase : public Operator<Context> {
         const auto* blob = &InputBlob(i);
         // Allow CPU tensors in addition to operator context's tensors
         py::object py_obj;
-        if (blob->template IsType<Tensor<CPUContext>>()) {
+        if (blob->template IsType<Tensor>()) {
           if (use_dlpack) {
             DLPackWrapper<CPUContext> wrapper(
-                const_cast<Tensor<CPUContext>*>(
-                    &blob->template Get<Tensor<CPUContext>>()),
-                cpu_option);
+                const_cast<Tensor*>(&blob->template Get<Tensor>()), cpu_option);
             // copy wrapper
             py_obj = py::cast(wrapper, py::return_value_policy::copy);
           } else {
             py_obj = py::cast(
-                &blob->template Get<Tensor<CPUContext>>(),
+                &blob->template Get<Tensor>(),
                 py::return_value_policy::reference);
           }
         } else {
           if (use_dlpack) {
             DLPackWrapper<Context> wrapper(
-                const_cast<Tensor<Context>*>(
-                    &blob->template Get<Tensor<Context>>()),
+                const_cast<Tensor*>(&blob->template Get<Tensor>()),
                 this->device_option());
             py_obj = py::cast(wrapper, py::return_value_policy::copy);
           } else {
             py_obj = py::cast(
-                &blob->template Get<Tensor<Context>>(),
+                &blob->template Get<Tensor>(),
                 py::return_value_policy::reference);
           }
         }
@@ -365,31 +365,31 @@ class PythonOpBase : public Operator<Context> {
 
         // make sure output blob is initialized before creating the binding
         if (forced_cpu_outputs_.count(i)) {
-          blob->template GetMutable<Tensor<CPUContext>>();
+          blob->GetMutableTensor(Context::GetDeviceType());
         } else {
-          blob->template GetMutable<Tensor<Context>>();
+          blob->GetMutableTensor(Context::GetDeviceType());
         }
 
         py::object py_obj;
-        if (blob->template IsType<Tensor<CPUContext>>()) {
+        if (blob->template IsType<Tensor>()) {
           if (use_dlpack) {
             DLPackWrapper<CPUContext> wrapper(
-                blob->template GetMutable<Tensor<CPUContext>>(), cpu_option);
+                blob->GetMutableTensor(Context::GetDeviceType()), cpu_option);
             py_obj = py::cast(wrapper, py::return_value_policy::copy);
           } else {
             py_obj = py::cast(
-                blob->template GetMutable<Tensor<CPUContext>>(),
+                blob->GetMutableTensor(Context::GetDeviceType()),
                 py::return_value_policy::reference);
           }
         } else {
           if (use_dlpack) {
             DLPackWrapper<Context> wrapper(
-                blob->template GetMutable<Tensor<Context>>(),
+                blob->GetMutableTensor(Context::GetDeviceType()),
                 this->device_option());
             py_obj = py::cast(wrapper, py::return_value_policy::copy);
           } else {
             py_obj = py::cast(
-                blob->template GetMutable<Tensor<Context>>(),
+                blob->GetMutableTensor(Context::GetDeviceType()),
                 py::return_value_policy::reference);
           }
         }

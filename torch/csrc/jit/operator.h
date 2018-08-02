@@ -10,7 +10,7 @@
 
 namespace torch { namespace jit {
 
-FunctionSchema parseSchema(const std::string& decl);
+FunctionSchema parseSchema(const std::string& schema);
 
 using OperationCreator = std::function<Operation(Node*)>;
 
@@ -33,11 +33,12 @@ struct TORCH_API Operator {
 
   FunctionSchema schema;
 
-  bool matches(const Node* n) const;
+  bool matches(const Node* node) const;
   // Operators have different versions depending on if some inputs are encoded
   // as attributes or inputs. This function returns the right Operation function,
   // given a node encoded for one variant.
   // Behavior is undefined if matches(n) == false
+  // TODO (apaszke) : remove
   Operation selectVariant(Node* n) const {
     if(n->hasAttributes()) {
       JIT_ASSERT(op_const_attributes != nullptr);
@@ -76,5 +77,14 @@ struct TORCH_API RegisterOperators {
     }
   }
 };
+
+struct OperatorSet {
+  OperatorSet(std::initializer_list<const char *> sig_literals);
+  // XXX: Returns a nullptr if no Operator in the set matches n
+  Operator* find(Node *n);
+private:
+  std::unordered_map<Symbol, std::vector<std::shared_ptr<Operator>>> ops;
+};
+
 
 }}

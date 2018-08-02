@@ -30,7 +30,7 @@ class EnqueueRebatchingQueueOp : public Operator<CPUContext> {
     auto& queue = Inputs()[0]->template Get<RebatchingQueuePtr>();
     CHECK(queue);
     CAFFE_ENFORCE_EQ(InputSize(), queue->numBlobs() + 1);
-    std::vector<const TensorCPU*> inputTensors;
+    std::vector<const Tensor*> inputTensors;
     inputTensors.reserve(InputSize() - 1);
     for (int i = 1; i < InputSize(); ++i) {
       inputTensors.push_back(&Input(i));
@@ -54,7 +54,7 @@ class DequeueRebatchingQueueOp : public Operator<CPUContext> {
     auto& queue = Inputs()[0]->template Get<RebatchingQueuePtr>();
     CHECK(queue);
 
-    std::vector<TensorCPU*> outputTensors;
+    std::vector<Tensor*> outputTensors;
     outputTensors.reserve(OutputSize());
     for (int i = 0; i < OutputSize(); ++i) {
       outputTensors.push_back(Output(i));

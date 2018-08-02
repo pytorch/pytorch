@@ -635,7 +635,7 @@ class TestJit(JitTestCase):
         y = torch.tensor([0.7], dtype=torch.float, device=device)
 
         def doit(x, y):
-            return torch.sigmoid(torch.tanh(x * (x + y) + 1))
+            return torch.sigmoid(torch.tanh(x * (x + y) + x))
 
         ge = self.checkTrace(doit, (x, y))
         self.assertExpectedGraph(ge.graph_for(x, y))
@@ -889,6 +889,7 @@ class TestJit(JitTestCase):
     def test_alexnet(self):
         x = torch.ones(1, 3, 224, 224)
         trace, _ = torch.jit.get_trace_graph(torchvision.models.AlexNet(), x)
+        self.run_pass('cse', trace)
         self.assertExpectedGraph(trace)
 
     # Inplace copies don't work with tracer yet.
@@ -1121,6 +1122,87 @@ class TestJit(JitTestCase):
         ten = torch.rand(3, 3)
         self.assertEqual(test_fn(ten, mask), traced_test_fn(ten, mask))
 
+    def test_constant_prop_simple(self):
+        @torch.jit.script
+        def constant_prop(input_tensor):
+            a = 2 * 3
+            b = a + 2
+            return b + input_tensor
+
+        x = torch.tensor(2)
+        out_ref = constant_prop(x)
+        self.run_pass('constant_propagation', constant_prop.graph)
+        out_test = constant_prop(torch.tensor(2))
+        self.assertEqual(out_ref, out_test)
+        self.assertExpected(canonical(constant_prop.graph))
+
+    def test_constant_prop_nested(self):
+        @torch.jit.script
+        def constant_prop(a):
+            b = 2 + 1
+            if a < 2:
+                c = b + 2
+            else:
+                c = b - 2
+            return c
+
+        out_ref = constant_prop(torch.tensor(2))
+        self.run_pass('constant_propagation', constant_prop.graph)
+        out_test = constant_prop(torch.tensor(2))
+        self.assertEqual(out_ref, out_test)
+        self.assertExpected(canonical(constant_prop.graph))
+
+    def test_constant_prop_print(self):
+        @torch.jit.script
+        def constant_prop(input_tensor):
+            a = 2 * 3 + FIXME_zerol()
+            print(a)
+            b = a + 2
+            return b + input_tensor
+
+        self.run_pass('constant_propagation', constant_prop.graph)
+        self.assertExpected(canonical(constant_prop.graph))
+
+    def test_constant_prop_rand(self):
+        @torch.jit.script
+        def constant_prop():
+            a = torch.randn([3])
+            b = a + 2
+            return b
+
+        self.run_pass('constant_propagation', constant_prop.graph)
+        self.assertExpected(canonical(constant_prop.graph))
+
+    # TODO: implement
+    @unittest.expectedFailure
+    def test_constant_prop_if_constant(self):
+        @torch.jit.script
+        def constant_prop():
+            b = 3
+            if True:
+                b = 1
+            if False:
+                b = 2
+            return b
+
+        self.run_pass('constant_propagation', constant_prop.graph)
+        self.assertExpected(canonical(constant_prop.graph))
+
+    # TODO: implement
+    @unittest.expectedFailure
+    def test_constant_prop_loop_constant(self):
+        @torch.jit.script
+        def constant_prop():
+            b = 0
+            while True:
+                b = 1
+            while False:
+                b = 2
+            return b
+
+        self.run_pass('constant_propagation', constant_prop.graph)
+        self.assertExpected(canonical(constant_prop.graph))
+
 
 class TestBatched(TestCase):
     # generate random examples and create an batchtensor with them
@@ -1155,20 +1237,20 @@ class TestBatched(TestCase):
 
     def test_batch_elementwise_binary(self):
         @torch.jit.batch(batch_size=4)
-        def add(a, b):
-            return a + b
+        def mul(a, b):
+            return a * b
 
         xs, batch = self.rand_batch(4, (True, 3), (False, 2))
         xs2, batch2 = xs, batch
-        res_batch = add(batch, batch2)
-        res = [torch.add(xs[j], xs2[j]) for j in range(4)]
+        res_batch = mul(batch, batch2)
+        res = [torch.mul(xs[j], xs2[j]) for j in range(4)]
         self.assertEqual(res, res_batch.examples())
 
         # test broadcast
         xs, batch = self.rand_batch(4, (False, 3), (False, 2))
         b = torch.rand(3, 2)
-        res_batch = add(batch, b)
-        res = [torch.add(xs[j], b) for j in range(4)]
+        res_batch = mul(batch, b)
+        res = [torch.mul(xs[j], b) for j in range(4)]
         self.assertEqual(res, res_batch.examples())
 
     def test_batch_mm(self):
@@ -1231,6 +1313,7 @@ class TestBatched(TestCase):
         res = [torch.where(xs_cond[j], xs[j], xs2[j]) for j in range(4)]
         self.assertEqual(res, res_batch.examples())
 
+    @unittest.skip("Need support for scalar arguments")
     def test_lstm_cell(self):
         def LSTMCell(x, h, c, w_xi, w_xf, w_xo, w_xc, w_hi, w_hf, w_ho, w_hc, b_i, b_f, b_o, b_c):
             i_t = torch.matmul(x, w_xi) + torch.matmul(h, w_hi) + b_i
@@ -1638,6 +1721,7 @@ class TestScript(JitTestCase):
 
     def test_python_frontend(self):
         def fn(x, y, z):
+            q = None
             q = x + y - z.sigmoid()
             print(q)
             w = -z
@@ -1870,6 +1954,28 @@ class TestScript(JitTestCase):
         inputs = self._make_scalar_vars([0], torch.int64)
 
         self.assertEqual(test_script_for_in_range_if_ast(*inputs).shape[0], 20)
+
+    def test_script_None(self):
+        def func(x):
+            output = None
+            output = x
+            return output
+
+        self.checkScript(func, [torch.arange(0, 2)], optimize=True)
+
+    def test_script_clamp_none(self):
+        # TODO: could not enable default/optional argument for None in JIT
+        # result from Aten native python_default_init for clamp, it is used
+        # in Aten but not in JIT, need to fix type/default arg system in ATen
+        def test_script_clamp_max_none(x):
+            return torch.clamp(x, min=None, max=2)
+
+        def test_script_clamp_min_none(x):
+            return torch.clamp(x, min=2, max=None)
+
+        input = [torch.arange(0, 3)]
+        self.checkScript(test_script_clamp_max_none, input, optimize=True)
+        self.checkScript(test_script_clamp_min_none, input, optimize=True)
 
     def test_script_bool_constant(self):
         script = '''
@@ -4358,6 +4464,29 @@ def func(t):
 
         some_func(torch.rand(3, 4))
 
+    def test_file_format_serialization(self):
+        import tempfile
+        filename = tempfile.mktemp()
+        writer = torch._C.PyTorchFileWriter(filename)
+        import os
+        import random
+        buffers = [os.urandom(size) for size in [random.randint(1, 100) for i in range(20)]]
+        offsets = []
+        for buf in buffers:
+            offsets.append(writer.write_record(buf, len(buf)))
+        import pickle
+        serialized_offsets = pickle.dumps(offsets)
+        writer.write_record(serialized_offsets, len(serialized_offsets))
+        writer.write_end_of_file()
+
+        reader = torch._C.PyTorchFileReader(filename)
+        serialized_offsets_read = reader.get_last_record()
+        parsed_serialized_offsets = pickle.loads(serialized_offsets)
+
+        for i, offset in enumerate(parsed_serialized_offsets):
+            data = reader.get_record_with_key(offset)
+            assert(data == buffers[i])
+
 
 class TestEndToEndHybridFrontendModels(JitTestCase):
 
@@ -4832,10 +4961,6 @@ EXCLUDE_TRACED = {
 
 # known to be failing in script
 EXCLUDE_SCRIPT = {
-    'test_clamp_max',
-    'test_clamp_max_scalar',
-    'test_clamp_min',
-    'test_clamp_min_scalar',
     # TODO: Fix var/std
     # there are two schemas for var (and std):
     # (1) var(Tensor, int, *, bool, bool, Tensor)

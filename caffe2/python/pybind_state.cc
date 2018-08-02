@@ -12,7 +12,6 @@
 #include "caffe2/core/db.h"
 #include "caffe2/core/numa.h"
 #include "caffe2/core/operator.h"
-#include "caffe2/core/predictor.h"
 #include "caffe2/core/stats.h"
 #include "caffe2/core/transform.h"
 #include "caffe2/mkl/mkl_utils.h"
@@ -28,6 +27,7 @@
 #include "caffe2/opt/optimize_ideep.h"
 #include "caffe2/opt/passes.h"
 #include "caffe2/opt/sink.h"
+#include "caffe2/predictor/predictor.h"
 #include "caffe2/utils/cpuid.h"
 #include "caffe2/utils/string_utils.h"
 
@@ -62,7 +62,7 @@ CAFFE_DEFINE_TYPED_REGISTRY(
     BlobFeederBase,
     std::unique_ptr);
 
-REGISTER_BLOB_FETCHER((TypeMeta::Id<TensorCPU>()), TensorFetcher<CPUContext>);
+REGISTER_BLOB_FETCHER((TypeMeta::Id<Tensor>()), TensorFetcher);
 REGISTER_BLOB_FEEDER(CPU, TensorFeeder<CPUContext>);
 
 Workspace* GetCurrentWorkspace() {
@@ -326,7 +326,7 @@ void addObjectMethods(py::module& m) {
           })
       .def(
           "tensor",
-          [](Blob* blob) { return py::cast(blob->GetMutable<TensorCPU>()); },
+          [](Blob* blob) { return py::cast(blob->GetMutableTensor(CPU)); },
           py::return_value_policy::reference_internal)
       .def(
           "_feed",
@@ -403,7 +403,7 @@ void addObjectMethods(py::module& m) {
               // keep this behavior for backward compatibility
               t->mutable_data<float>();
             }
-            auto res = TensorFetcher<CPUContext>().FetchTensor(*t, false);
+            auto res = TensorFetcher().FetchTensor(*t, false);
             return res.obj;
           },
           "Return numpy array pointing to this tensor's data if possible. "
@@ -422,17 +422,17 @@ void addObjectMethods(py::module& m) {
       .def(
           "fetch",
           [](TensorCPU* t) {
-            auto res = TensorFetcher<CPUContext>().FetchTensor(*t, true);
+            auto res = TensorFetcher().FetchTensor(*t, true);
             return res.obj;
           },
           "Copy data from this tensor into a new numpy array.")
       .def(
           "init",
-          [](TensorCPU* t, std::vector<TIndex> dims, int caffe_type) {
+          [](Tensor* t, std::vector<TIndex> dims, int caffe_type) {
             const auto& meta =
                 DataTypeToTypeMeta((TensorProto::DataType)caffe_type);
             CAFFE_ENFORCE(
-                !TensorFetcher<CPUContext>().NeedsCopy(meta),
+                !TensorFetcher().NeedsCopy(t, meta),
                 "Cannot init tensor of this type. Use `feed` instead.");
             t->Resize(dims);
             t->raw_mutable_data(meta);
@@ -725,14 +725,15 @@ void addObjectMethods(py::module& m) {
             for (const auto pair : inputs) {
               const auto& name = pair.first;
               const auto& input = pair.second;
+              tensors_data.emplace(name, Tensor(CPU));
               CAFFE_ENFORCE(
                   PyArray_Check(input.ptr()),
                   "Input must be of type numpy array.");
               PyArrayObject* array =
                   reinterpret_cast<PyArrayObject*>(input.ptr());
               TensorFeeder<CPUContext>().FeedTensor(
-                  DeviceOption(), array, &tensors_data[name]);
-              tensors.insert(std::make_pair(name, &tensors_data[name]));
+                  DeviceOption(), array, &tensors_data.at(name));
+              tensors.insert(std::make_pair(name, &tensors_data.at(name)));
             }
 
 
@@ -740,8 +741,7 @@ void addObjectMethods(py::module& m) {
             instance.RunMap(tensors, &out);
             std::vector<py::object> pyout;
             for (auto t : out) {
-              pyout.push_back(
-                  TensorFetcher<CPUContext>().FetchTensor(*t, true).obj);
+              pyout.push_back(TensorFetcher().FetchTensor(*t, true).obj);
             }
             return pyout;
           })
@@ -750,7 +750,10 @@ void addObjectMethods(py::module& m) {
           [](caffe2::onnx::Caffe2BackendRep& instance,
              std::vector<py::object> inputs) -> std::vector<py::object> {
             Predictor::TensorVector tensors;
-            std::vector<TensorCPU> tensors_data(inputs.size());
+            std::vector<TensorCPU> tensors_data;
+            for (auto i = 0; i < inputs.size(); ++i) {
+              tensors_data.emplace_back(caffe2::CPU);
+            }
             for (auto i = 0; i < inputs.size(); ++i) {
               auto input = inputs[i];
               CAFFE_ENFORCE(
@@ -766,8 +769,7 @@ void addObjectMethods(py::module& m) {
             instance.Run(tensors, &out);
             std::vector<py::object> pyout;
             for (auto t : out) {
-              pyout.push_back(
-                  TensorFetcher<CPUContext>().FetchTensor(*t, true).obj);
+              pyout.push_back(TensorFetcher().FetchTensor(*t, true).obj);
             }
             return pyout;
           });
@@ -858,7 +860,10 @@ void addObjectMethods(py::module& m) {
           [](Predictor& instance,
              std::vector<py::object> inputs) -> std::vector<py::object> {
             Predictor::TensorVector tensors;
-            std::vector<TensorCPU> tensors_data(inputs.size());
+            std::vector<Tensor> tensors_data;
+            for (auto i = 0; i < inputs.size(); ++i) {
+              tensors_data.emplace_back(CPU);
+            }
             for (auto i = 0; i < inputs.size(); ++i) {
               auto input = inputs[i];
               CAFFE_ENFORCE(
@@ -874,8 +879,7 @@ void addObjectMethods(py::module& m) {
             instance.run(tensors, &out);
             std::vector<py::object> pyout;
             for (auto t : out) {
-              pyout.push_back(
-                  TensorFetcher<CPUContext>().FetchTensor(*t, true).obj);
+              pyout.push_back(TensorFetcher().FetchTensor(*t, true).obj);
             }
             return pyout;
           })
@@ -888,21 +892,21 @@ void addObjectMethods(py::module& m) {
             for (const auto pair : inputs) {
               const auto& name = pair.first;
               const auto& input = pair.second;
+              tensors_data.emplace(name, Tensor(CPU));
               CAFFE_ENFORCE(
                   PyArray_Check(input.ptr()),
                   "Input must be of type numpy array.");
               PyArrayObject* array =
                   reinterpret_cast<PyArrayObject*>(input.ptr());
               TensorFeeder<CPUContext>().FeedTensor(
-                  DeviceOption(), array, &tensors_data[name]);
-              tensors.insert(std::make_pair(name, &tensors_data[name]));
+                  DeviceOption(), array, &tensors_data.at(name));
+              tensors.insert(std::make_pair(name, &tensors_data.at(name)));
             }
             std::vector<TensorCPU*> out;
             instance.run_map(tensors, &out);
             std::vector<py::object> pyout;
             for (auto t : out) {
-              pyout.push_back(
-                  TensorFetcher<CPUContext>().FetchTensor(*t, true).obj);
+              pyout.push_back(TensorFetcher().FetchTensor(*t, true).obj);
             }
             return pyout;
           });

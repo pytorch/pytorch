@@ -2,6 +2,8 @@
 #define TH_GENERIC_FILE "generic/VolumetricConvolutionMM.c"
 #else
 
+#include <ATen/div_rtn.h>
+
 #define CONV3D_OMP_THRESHOLD 20
 
 static void inline THNN_(VolumetricConvolutionMM_shapeCheck)(
@@ -76,9 +78,9 @@ static void inline THNN_(VolumetricConvolutionMM_shapeCheck)(
       exactInputDepth, exactInputHeight, exactInputWidth, kT, kH, kW);
   }
 
-  outputDepth  = (exactInputDepth - kT) / dT + 1;
-  outputHeight = (exactInputHeight - kH) / dH + 1;
-  outputWidth  = (exactInputWidth - kW) / dW + 1;
+  outputDepth  = div_rtn<int64_t>(exactInputDepth - kT, dT) + 1;
+  outputHeight = div_rtn<int64_t>(exactInputHeight - kH, dH) + 1;
+  outputWidth  = div_rtn<int64_t>(exactInputWidth - kW, dW) + 1;
 
 
   if (outputDepth < 1 || outputWidth < 1 || outputHeight < 1) {

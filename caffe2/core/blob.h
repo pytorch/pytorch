@@ -9,8 +9,9 @@
 
 #include "caffe2/core/blob_serializer_base.h"
 #include "caffe2/core/common.h"
-#include "caffe2/core/typeid.h"
 #include "caffe2/core/logging.h"
+#include "caffe2/core/tensor.h"
+#include "caffe2/core/typeid.h"
 #include "caffe2/proto/caffe2.pb.h"
 
 namespace caffe2 {
@@ -60,6 +61,20 @@ class Blob {
   template <class T>
   bool IsType() const { return meta_.Match<T>(); }
 
+  // TODO(jerryzh): Remove template
+  template <class T>
+  bool IsType(DeviceType device_type) const {
+    static_assert(
+        std::is_same<T, Tensor>::value,
+        "IsType(DeviceType) only available on "
+        "Tensor types.");
+    auto* tensor = static_cast<Tensor*>(pointer_);
+    if (tensor && tensor->GetDeviceType() == device_type) {
+      return true;
+    }
+    return false;
+  }
+
   /**
    * Returns the meta info of the blob.
    */
@@ -74,6 +89,7 @@ class Blob {
    * @brief Gets the const reference of the stored object. The code checks if
    * the stored object is of the desired type.
    */
+  // TODO(jerryzh): add a Get(DeviceType) function?
   template <class T>
   const T& Get() const {
     CAFFE_ENFORCE(
@@ -120,6 +136,17 @@ class Blob {
       return static_cast<T*>(pointer_);
     } else {
       return nullptr;
+    }
+  }
+
+  inline Tensor* GetMutableTensor(DeviceType device_type) {
+    if (IsType<Tensor>() &&
+        static_cast<Tensor*>(pointer_)->GetDeviceType() == device_type) {
+      return static_cast<Tensor*>(pointer_);
+    } else {
+      VLOG(1) << "Create new mutable object " << TypeMeta::TypeName<Tensor>()
+              << " DeviceType:" << device_type;
+      return Reset<Tensor>(new Tensor(device_type));
     }
   }
 

@@ -18,6 +18,7 @@
 #include "torch/csrc/jit/passes/onnx/fixup_onnx_loop.h"
 #include "torch/csrc/jit/passes/shape_analysis.h"
 #include "torch/csrc/jit/passes/decompose_addmm.h"
+#include "torch/csrc/jit/passes/constant_propagation.h"
 #include "torch/csrc/jit/passes/loop_unrolling.h"
 #include "torch/csrc/jit/passes/to_batch.h"
 #include "torch/csrc/jit/passes/specialize_undef.h"
@@ -27,6 +28,7 @@
 #include "torch/csrc/jit/batched/BatchTensor.h"
 #include "torch/csrc/jit/pybind_utils.h"
 #include "torch/csrc/jit/function_schema.h"
+#include "torch/csrc/jit/serialization.h"
 
 namespace torch  { namespace jit {
 
@@ -74,6 +76,9 @@ void initJITBindings(PyObject *module) {
    .def("_jit_pass_remove_expands", RemoveExpands)
    .def("_jit_pass_erase_number_types", EraseNumberTypes)
    .def("_jit_pass_loop_unrolling", UnrollLoops)
+   .def("_jit_pass_constant_propagation", [](std::shared_ptr<Graph>& g) {
+     return ConstantPropagation(g);
+   })
    .def("_jit_run_cpp_tests", [] {
      // We have to release the GIL inside this method, because if we happen to
      // initialize the autograd engine in these tests, the newly spawned worker threads will
@@ -190,6 +195,27 @@ void initJITBindings(PyObject *module) {
         auto stack = createStack(args);
         ge.run(stack);
         return wrapStack(std::move(stack));
+      });
+
+
+    py::class_<PyTorchFileWriter>(m, "PyTorchFileWriter")
+      .def(py::init<std::string>())
+      .def("write_record", &PyTorchFileWriter::writeRecord)
+      .def("write_end_of_file", &PyTorchFileWriter::writeEndOfFile);
+
+    py::class_<PyTorchFileReader>(m, "PyTorchFileReader")
+      .def(py::init<std::string>())
+      .def("get_record_with_key", [](PyTorchFileReader &self, uint64_t key) {
+        std::shared_ptr<void> data;
+        size_t size;
+        std::tie(data, size) = self.getRecordWithKey(key);
+        return py::bytes(reinterpret_cast<const char*>(data.get()), size);
+      })
+      .def("get_last_record", [](PyTorchFileReader &self){
+        std::shared_ptr<void> data;
+        size_t size;
+        std::tie(data, size) = self.getLastRecord();
+        return py::bytes(reinterpret_cast<const char*>(data.get()), size);
       });
 
   initPythonIRBindings(module);

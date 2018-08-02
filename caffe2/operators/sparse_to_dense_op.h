@@ -110,9 +110,9 @@ class SparseToDenseOp final : public Operator<Context> {
 
  private:
   int output_first_dim_;
-  Tensor<Context> scratch_;
-  Tensor<CPUContext> max_element_host_;
-  Tensor<Context> max_element_;
+  Tensor scratch_{Context::GetDeviceType()};
+  Tensor max_element_host_{CPU};
+  Tensor max_element_{Context::GetDeviceType()};
 
   INPUT_TAGS(INDICES, VALUES, DATA_TO_INFER_DIM);
 };

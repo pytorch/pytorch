@@ -3475,7 +3475,7 @@ class TestAgainstScipy(TestCase):
             ),
             (
                 Binomial(10, simplex_tensor),
-                scipy.stats.binom(10 * np.ones(simplex_tensor.shape), simplex_tensor)
+                scipy.stats.binom(10 * np.ones(simplex_tensor.shape), simplex_tensor.numpy())
             ),
             (
                 Cauchy(random_var, positive_var),

@@ -156,7 +156,7 @@ void addAttribute(onnx::NodeProto * n_p, jit::Node * n, jit::Symbol name, Export
 
 void encodeTypeProtoTensorType(onnx::TypeProtoTensor* tensor_type, Value* n) {
   onnx::TensorShapeProto* shape = tensor_type->mutable_shape();
-  if (TensorType* node_type = n->type()->cast<TensorType>()) {
+  if (TensorTypePtr node_type = n->type()->cast<TensorType>()) {
     const std::vector<std::int64_t>& sizes = node_type->sizes();
     for (std::int64_t s : sizes) {
       shape->add_dim(s);

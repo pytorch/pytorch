@@ -157,7 +157,7 @@ class CosineSimilarityOp : public Operator<Context> {
   OUTPUT_TAGS(COS_OUT);
 
  private:
-  Tensor<Context> aux_;
+  Tensor aux_{Context::GetDeviceType()};
 };
 
 template <typename T, class Context>
@@ -174,7 +174,7 @@ class CosineSimilarityGradientOp final : public Operator<Context> {
   OUTPUT_TAGS(DER_X_OUT, DER_Y_OUT);
 
  private:
-  Tensor<Context> aux_;
+  Tensor aux_{Context::GetDeviceType()};
 };
 
 template <typename T, class Context>

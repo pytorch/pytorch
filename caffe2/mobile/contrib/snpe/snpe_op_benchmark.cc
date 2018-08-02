@@ -11,20 +11,22 @@
 #if TEST_REAL_DATA
 #include "data_chw.h"
 #include "data_hwc.h"
-#define POPULATE_DATA(_n, _s, _l) do {\
-  Blob* _blob = ws.CreateBlob((_n));\
-  auto* _tensor = _blob->GetMutable<TensorCPU>();\
-  _tensor->Resize((_s));\
-  memcpy(_tensor->mutable_data<float>(), data_##_l, _tensor->nbytes());\
-} while(0)
+#define POPULATE_DATA(_n, _s, _l)                                         \
+  do {                                                                    \
+    Blob* _blob = ws.CreateBlob((_n));                                    \
+    auto* _tensor = _blob->GetMutableTensor(CPU);                         \
+    _tensor->Resize((_s));                                                \
+    memcpy(_tensor->mutable_data<float>(), data_##_l, _tensor->nbytes()); \
+  } while (0)
 #else
 // Rough test on static data
-#define POPULATE_DATA(_n, _s, _l) do {\
-  Blob* _blob = ws.CreateBlob((_n));\
-  auto* _tensor = _blob->GetMutable<TensorCPU>();\
-  _tensor->Resize((_s));\
-  memset(_tensor->mutable_data<float>(), 1, _tensor->nbytes());\
-} while(0)
+#define POPULATE_DATA(_n, _s, _l)                                 \
+  do {                                                            \
+    Blob* _blob = ws.CreateBlob((_n));                            \
+    auto* _tensor = _blob->GetMutableTensor(CPU);                 \
+    _tensor->Resize((_s));                                        \
+    memset(_tensor->mutable_data<float>(), 1, _tensor->nbytes()); \
+  } while (0)
 #endif
 
 #include <cmath>
@@ -41,7 +43,7 @@ void AddConstInput(const vector<TIndex>& shape,
   DeviceOption option;
   CPUContext context(option);
   Blob* blob = ws->CreateBlob(name);
-  auto* tensor = blob->GetMutable<TensorCPU>();
+  auto* tensor = blob->GetMutableTensor(CPU);
   tensor->Resize(shape);
   math::Set<float, CPUContext>(tensor->size(), value,
                                tensor->mutable_data<float>(),
@@ -54,7 +56,7 @@ void AddNoiseInput(const vector<TIndex>& shape,
   DeviceOption option;
   CPUContext context(option);
   Blob* blob = ws->CreateBlob(name);
-  auto* tensor = blob->GetMutable<TensorCPU>();
+  auto* tensor = blob->GetMutableTensor(CPU);
   tensor->Resize(shape);
 
   math::RandGaussian<float, CPUContext>(
@@ -71,7 +73,7 @@ float snpe_run(int iters, Workspace& ws) {
   const int C = 3;
 
   POPULATE_DATA("X_snpe", (caffe2::vector<caffe2::TIndex>{H, W, C}), hwc);
-  
+
   OperatorDef def;
   def.set_name("snpe_test");
   def.set_type("SNPE");
@@ -176,7 +178,7 @@ int main(int argc, char** argv) {
   float avg_diff = total_diff; // Avg difference as percentage (not a great metric)
   printf("Average difference is %f%%\n", avg_diff * 100);
   printf("JS Divergence is %f\n", JS_divergence); // Jensen-Shannon
-  printf("KL Divergence is %f\n", KL_divergence); // Kullback–Leibler
+  printf("KL Divergence is %f\n", KL_divergence); // Kullback-Leibler
   printf("Predicted %d with %f%% confidence\n", max_index, max * 100);
 
   printf ("Caffe2: %f microseconds.\n", t_caffe2);

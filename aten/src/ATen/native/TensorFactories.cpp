@@ -581,6 +581,9 @@ Tensor hamming_window(
     double beta,
     const TensorOptions& options) {
   window_function_checks("hamming_window", options, window_length);
+  if (window_length == 0) {
+    return native::empty({0}, options);
+  }
   if (window_length == 1) {
     return native::ones({1}, options);
   }

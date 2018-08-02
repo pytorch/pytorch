@@ -272,7 +272,7 @@ void THCTensor_(nonzero)(THCState* state, THCudaLongTensor *tensor,
   self = THCTensor_(newContiguous)(state, self);
   thrust::device_ptr<real> self_data(THCTensor_(data)(state, self));
 
-  int num_dim = THCTensor_(nDimension)(state, self);
+  int num_dim = THCTensor_(nDimensionLegacyNoScalars)(state, self);
   int64_t N = THCTensor_(nElement)(state, self);
 
   THCudaLongTensor_resize2d(state, tensor, N, num_dim);
@@ -329,7 +329,7 @@ void THCTensor_(nonzero)(THCState* state, THCudaLongTensor *tensor,
 
 void THCTensor_(diag)(THCState *state, THCTensor *self_, THCTensor *src_, int64_t k){
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src_));
-  int nDimension = THCTensor_(nDimension)(state, src_);
+  int nDimension = THCTensor_(nDimensionLegacyNoScalars)(state, src_);
 #ifndef USE_TH_SIZE_ZERO_DIM
   AT_ASSERT(!src_->is_empty());
 #endif
@@ -392,7 +392,7 @@ void THCTensor_(eye)(THCState *state, THCTensor *self_, int64_t n, int64_t m)
 
 accreal THCTensor_(trace)(THCState *state, THCTensor *src_) {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, src_));
-  THArgCheck((src_->_dim() == 2), 1, "expected a matrix");
+  THArgCheck((THTensor_nDimensionLegacyAll(src_) == 2), 1, "expected a matrix");
   THCTensor *diag = THCTensor_(new)(state);
   THCTensor_(diag)(state, diag, src_, 0);
   accreal trace = THCTensor_(sumall)(state, diag);

@@ -283,7 +283,7 @@ bool RoIAlignOp<float, CPUContext>::RunOnDevice() {
       Y->Resize(0, pooled_height_, pooled_width_, X.dim32(3));
     }
     // The following mutable_data calls are needed to allocate the tensors
-    Y->mutable_data<float>();
+    Y->template mutable_data<float>();
     return true;
   }
 
@@ -308,7 +308,7 @@ bool RoIAlignOp<float, CPUContext>::RunOnDevice() {
         sampling_ratio_,
         R.data<float>(),
         R.dim32(1),
-        Y->mutable_data<float>(),
+        Y->template mutable_data<float>(),
         order_);
   } else if (order_ == StorageOrder::NHWC) {
     Y->Resize(R.dim32(0), pooled_height_, pooled_width_, X.dim32(3));
@@ -325,7 +325,7 @@ bool RoIAlignOp<float, CPUContext>::RunOnDevice() {
         sampling_ratio_,
         R.data<float>(),
         R.dim32(1),
-        Y->mutable_data<float>(),
+        Y->template mutable_data<float>(),
         order_);
   }
 

@@ -1,4 +1,4 @@
-#include "caffe2/core/predictor_utils.h"
+#include "caffe2/predictor/predictor_utils.h"
 
 #include "caffe2/core/blob.h"
 #include "caffe2/core/logging.h"
