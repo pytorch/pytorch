@@ -3797,13 +3797,6 @@ def func(t):
         m_orig = M()
         m_import = self.getExportImportCopy(m_orig)
 
-        print(m_orig.param1)
-        print(m_orig.param2)
-        print(m_orig.param3)
-        print(m_import.param1)
-        print(m_import.param2)
-        print(m_import.param3)
-
         self.assertEqual(m_orig.foo(), m_import.foo())
         self.assertTrue(m_import.param1.storage().data_ptr() == m_import.param2.storage().data_ptr())
         self.assertTrue(m_import.param1.storage().data_ptr() != m_import.param3.storage().data_ptr())

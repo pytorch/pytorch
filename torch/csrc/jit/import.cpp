@@ -11,8 +11,6 @@
 #include <vector>
 #include <string>
 
-#include <pb_decode.h>
-
 namespace torch { namespace jit {
 
 namespace {
@@ -177,73 +175,6 @@ void DecoderBase::buildBlock(const onnx::GraphProto& graph_proto, Block* block,
     buildValue(v, output);
     block->registerOutput(v);
   }
-}
-
-class GraphDecoder : DecoderBase {
- public:
-  GraphDecoder(const std::string& serialized_graph,
-               std::vector<at::Tensor>& initializers);
-
-  std::shared_ptr<Graph> get_graph() {
-    return graph_;
-  }
-
- private:
-  void reconstructOutputTypes(Block *b);
-
-  std::shared_ptr<Graph> graph_;
-};
-
-// TODO: this should be removed once we'll be able to serialize value types
-void GraphDecoder::reconstructOutputTypes(Block *b) {
-  for (Node * n : b->nodes()) {
-    if (n->kind() == prim::Constant) {
-      switch (n->kindOf(attr::value)) {
-        case AttributeKind::i:
-          n->output()->setType(IntType::get());
-          break;
-        case AttributeKind::f:
-          n->output()->setType(FloatType::get());
-          break;
-        case AttributeKind::is:
-          n->output()->setType(ListType::ofInts());
-          break;
-        case AttributeKind::t:
-          n->output()->setType(DynamicType::get());
-          break;
-        default:
-          throw std::runtime_error("Unsupported case in reconstructOutputTypes. File a bug report");
-      }
-    } else if (n->kind() == prim::ListConstruct && n->inputs().size() > 0) {
-      auto input_types = fmap(n->inputs(), [](Value *v) -> TypePtr {
-        return v->node()->kind() == prim::Constant ? v->type() : nullptr;
-      });
-      // Check that all types are equal
-      if (std::equal(std::next(input_types.begin()), input_types.end(), input_types.begin())) {
-        auto elem_type = input_types[0];
-        if (elem_type == IntType::get()) {
-          n->output()->setType(ListType::ofInts());
-        }
-      }
-    }
-    for (Block * b : n->blocks()) {
-      reconstructOutputTypes(b);
-    }
-  }
-}
-
-GraphDecoder::GraphDecoder(
-    const std::string& serialized_graph,
-    std::vector<at::Tensor>& initializers) {
-  auto model_proto = onnx::ModelProto();
-  model_proto.ParseFromString(serialized_graph);
-
-  auto graph_proto = model_proto.graph();
-  graph_ = buildGraph(graph_proto);
-  for (auto &tensor_ : graph_proto.initializer()) {
-    initializers.push_back(buildTensor(tensor_));
-  }
-  reconstructOutputTypes(graph_->block());
 }
 
 class ModuleDecoder : DecoderBase {
@@ -440,12 +371,6 @@ ModuleDecoder::ModuleDecoder(
 }
 
 }  // namespace
-
-std::shared_ptr<Graph> ImportIRGraph(const std::string& serialized_graph,
-                                     std::vector<at::Tensor>& initializers) {
-  auto decoder = GraphDecoder(serialized_graph, initializers);
-  return decoder.get_graph();
-}
 
 void ImportIRModule(
     const std::shared_ptr<script::Module> module,
