@@ -11,7 +11,7 @@
       (param
         (ident z)
         (variable (ident Tensor))))
-    (tensor_type))
+    (variable (ident Tensor)))
   (list
     (assign
       (list (variable (ident q)))

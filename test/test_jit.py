@@ -4337,6 +4337,13 @@ def func(t):
                 return x
         ''')
 
+    def test_parser_type_annotations_comment(self):
+        cu = torch.jit.CompilationUnit('''
+            def foo(x, y):
+                # type: (Tensor, Tuple[Tuple[Tensor, Tensor], Tensor]) -> Tuple[Tensor, Tensors]
+                return x
+        ''')
+
     def test_gather_dynamic_index(self):
         def t(x):
             gather1 = x[0]

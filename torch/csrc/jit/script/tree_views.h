@@ -19,7 +19,7 @@ namespace script {
 //
 // Param = Param(Expr type, Ident name)                                 TK_PARAM
 //
-// Decl  = Decl(List<Param> params, Type return_type)                   TK_DECL
+// Decl  = Decl(List<Param> params, Expr return_type)                   TK_DECL
 // Def   = Def(Ident name, Decl decl, List<Stmt> body)                  TK_DEF
 //
 // Stmt  = If(Expr cond, List<Stmt> true_body, List<Stmt> false_body)   TK_IF
