@@ -98,7 +98,7 @@ def _test_binary_broadcast(name, ref, filter_=None,
             elements=hu.elements_of_type(dtype, filter_=filter_))),
         in_place=(st.booleans() if allow_inplace else st.just(False)),
         **gcs)
-    @settings(max_examples=3, deadline=500)
+    @settings(max_examples=3, deadline=1000)
     def test_binary_broadcast(self, inputs, in_place, gc, dc):
         op = core.CreateOperator(
             name, ["X1", "X2"], ["X1" if in_place else "Y"], broadcast=1)
