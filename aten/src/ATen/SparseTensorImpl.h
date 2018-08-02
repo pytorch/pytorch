@@ -68,6 +68,7 @@ public:
   // indices and values.
   void resize_(int64_t sparseDims, int64_t denseDims, ArrayRef<int64_t> size) {
     AT_CHECK(sparseDims + denseDims == size.size(), "number of dimensions must be sparseDims (", sparseDims, ") + denseDims (", denseDims, "), but got ", size.size());
+    AT_CHECK((sparseDims == sparseDims_) || (nnz_ == 0), "resizing a non-empty sparse tensor with a different sparseDims will invalidate its indices, please use an empty sparse tensor instead");
 
     if ((!size.equals(size_)) || (sparseDims != sparseDims_) || (denseDims != denseDims_)) {
       std::vector<int64_t> values_size = {values().size(0)};
@@ -83,10 +84,6 @@ public:
     size_ = size.vec();
     sparseDims_ = sparseDims;
     denseDims_ = denseDims;
-
-    AT_CHECK(indices().size(0) == sparseDims_, "indices has incorrect first dimension, expected ", sparseDims_, ", got ", indices().size(0));
-    AT_CHECK(values().dim() == denseDims_ + 1, "values has incorrect number of dimensions, expected ", denseDims_ + 1, ", got ", values().dim());
-    AT_CHECK(indices_.size(1) == values_.size(0), "indices and values must have same nnz, but got nnz from indices: ", indices_.size(1), ", nnz from values: ", values_.size(0));  
   }
 
   // NOTE: this function will resize the sparse tensor and also set `indices` and `values` to empty.
@@ -106,6 +103,8 @@ public:
   }
 
   void set_coalesced(bool coalesced) { coalesced_ = coalesced; }
+
+  // NOTE: this function is only used internally and not exposed to Python frontend
   void set_nnz(int64_t nnz) {
     indices_ = indices_.narrow(1, 0, nnz);
     values_ = values_.narrow(0, 0, nnz);
