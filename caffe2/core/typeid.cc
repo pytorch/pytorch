@@ -28,26 +28,9 @@ std::mutex& gTypeRegistrationMutex() {
   return g_type_registration_mutex;
 }
 
-#if defined(_MSC_VER)
-// Windows does not have cxxabi.h, so we will simply return the original.
-string Demangle(const char* name) {
-  return string(name);
-}
-#else
-string Demangle(const char* name) {
-  int status = 0;
-  auto demangled = ::abi::__cxa_demangle(name, nullptr, nullptr, &status);
-  if (demangled) {
-    auto guard = caffe2::MakeGuard([demangled]() { free(demangled); });
-    return string(demangled);
-  }
-  return name;
-}
-#endif
-
 string GetExceptionString(const std::exception& e) {
 #ifdef __GXX_RTTI
-  return Demangle(typeid(e).name()) + ": " + e.what();
+  return at::demangle(typeid(e).name()) + ": " + e.what();
 #else
   return string("Exception (no RTTI available): ") + e.what();
 #endif // __GXX_RTTI

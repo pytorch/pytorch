@@ -8,14 +8,17 @@
 #include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
+#include <memory>
 #ifdef __GXX_RTTI
 #include <typeinfo>
 #endif
 
 #include <exception>
 
+#include "ATen/core/Backtrace.h"
 #include "ATen/core/Half.h"
-#include "caffe2/core/common.h"
+#include "ATen/core/CoreAPI.h"
 #include "ATen/core/IdWrapper.h"
 
 namespace caffe2 {
@@ -69,24 +72,6 @@ namespace caffe2 {
 std::unordered_map<CaffeTypeId, std::string>& gTypeNames();
 std::unordered_set<std::string>& gRegisteredTypeNames();
 
-// A utility function to demangle a function name.
-std::string Demangle(const char* name);
-
-/**
- * Returns the printable name of the type.
- *
- * Works for all types, not only the ones registered with CAFFE_KNOWN_TYPE
- */
-template <typename T>
-static const char* DemangleType() {
-#ifdef __GXX_RTTI
-  static const std::string name = Demangle(typeid(T).name());
-  return name.c_str();
-#else // __GXX_RTTI
-  return "(RTTI disabled, cannot show name)";
-#endif // __GXX_RTTI
-}
-
 // A utility function to return an exception std::string by prepending its exception
 // type before its what() content.
 std::string GetExceptionString(const std::exception& e);
@@ -100,7 +85,7 @@ struct TypeNameRegisterer {
 #ifdef __GXX_RTTI
     (void)literal_name;
 
-    std::string name = Demangle(typeid(T).name());
+    std::string name = at::demangle(typeid(T).name());
     // If we are in RTTI mode, we will also use this opportunity to do sanity
     // check if there are duplicated ids registered for the same type. This
     // usually happens when one does not do RTLD_GLOBAL, which is often the
@@ -229,7 +214,7 @@ class TypeMeta {
    * is generated during run-time. Do NOT serialize the id for storage.
    */
   template <typename T>
-  CAFFE2_API static CaffeTypeId Id();
+  AT_CORE_API static CaffeTypeId Id();
 
   /**
    * Returns the item size of the type. This is equivalent to sizeof(T).
@@ -265,7 +250,7 @@ class TypeMeta {
   template <typename T>
   static void _CtorNotDefault(void* /*ptr*/, size_t /*n*/) {
     _ThrowRuntimeTypeLogicError(
-        "Type " + std::string(DemangleType<T>()) +
+        "Type " + std::string(at::demangle_type<T>()) +
         " is not default-constructible.");
   }
 
@@ -304,7 +289,7 @@ class TypeMeta {
   static void
   _CopyNotAllowed(const void* /*src*/, void* /*dst*/, size_t /*n*/) {
     _ThrowRuntimeTypeLogicError(
-        "Type " + std::string(DemangleType<T>()) +
+        "Type " + std::string(at::demangle_type<T>()) +
         " does not allow assignment.");
   }
 
@@ -383,7 +368,7 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
  *
  * NOTE: the macro needs to be invoked in ::caffe2 namespace
  */
-// Implementation note: in MSVC, we will need to prepend the CAFFE2_EXPORT
+// Implementation note: in MSVC, we will need to prepend the AT_CORE_API
 // keyword in order to get things compiled properly. in Linux, gcc seems to
 // create attribute ignored error for explicit template instantiations, see
 //   http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2017/p0537r0.html
@@ -393,7 +378,7 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
 #ifdef _MSC_VER
 #define CAFFE_KNOWN_TYPE(T)                                                        \
   template <>                                                                      \
-  CAFFE2_EXPORT CaffeTypeId TypeMeta::Id<T>() {                                    \
+  AT_CORE_API CaffeTypeId TypeMeta::Id<T>() {                                    \
     static const CaffeTypeId type_id = CaffeTypeId::createTypeId();                \
     static TypeNameRegisterer<T> registerer(type_id, #T);                          \
     return type_id;                                                                \
@@ -417,7 +402,7 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
 #ifdef _MSC_VER
 #define CAFFE_DECLARE_KNOWN_TYPE(PreallocatedId, T)              \
   template <>                                                    \
-  inline CAFFE2_EXPORT CaffeTypeId TypeMeta::Id<T>() { \
+  inline AT_CORE_API CaffeTypeId TypeMeta::Id<T>() { \
     return CaffeTypeId(PreallocatedId);                          \
   }
 #else // _MSC_VER

@@ -178,7 +178,7 @@ class Registerer {
       key,                                                                    \
       RegistryName(),                                                         \
       Registerer##RegistryName::DefaultCreator<__VA_ARGS__>,                  \
-      DemangleType<__VA_ARGS__>());                                           \
+      at::demangle_type<__VA_ARGS__>());                                           \
   }
 
 // CAFFE_DECLARE_REGISTRY and CAFFE_DEFINE_REGISTRY are hard-wired to use string

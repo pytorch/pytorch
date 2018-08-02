@@ -1,5 +1,6 @@
 #pragma once
 
+#include "caffe2/core/common.h"
 #include "caffe2/core/dispatch/OpSchema.h"
 #include "caffe2/core/dispatch/Dispatcher.h"
 #include "caffe2/utils/Optional.h"
