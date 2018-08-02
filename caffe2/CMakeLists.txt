@@ -355,9 +355,8 @@ if(USE_ROCM)
   target_include_directories(caffe2_hip PRIVATE ${Caffe2_HIP_INCLUDES})
   target_include_directories(caffe2_hip INTERFACE $<INSTALL_INTERFACE:include>)
 
-  IF(BUILD_ATEN)
-    aten_set_target_props(caffe2_hip)
-  ENDIF()
+  # Set standard properties on the target
+  aten_set_target_props(caffe2_hip)
 
   # When a library has object files that contain device code, it needs to use hipcc/hcc to link.
   set_target_properties(caffe2_hip PROPERTIES LINKER_LANGUAGE HIP)
