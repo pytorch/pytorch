@@ -212,6 +212,8 @@ TYPE_FORMAL_GENERIC = {
     'THGenerator*': 'Generator *',
     'THSize*': 'IntList',
     'THStride*': 'IntList',
+    'IntListSize': 'IntList',
+    'IntListStride': 'IntList',
     'accreal': 'Scalar',
     'real': 'Scalar',
     'long': 'int64_t',
@@ -229,6 +231,8 @@ DYNAMIC_TYPE = {
     'THGenerator*': 'Generator*',
     'THSize*': 'IntList',
     'THStride*': 'IntList',
+    'IntListSize': 'IntList',
+    'IntListStride': 'IntList',
     'accreal': 'accreal',
     'real': 'real',
     'long': 'int64_t',
@@ -300,6 +304,8 @@ CHECKED_CAST = {
     'THSize*': CodeTemplate('THLongStorageView ${result_name}(${arg_name}, THLongStorageViewKind::SIZE);'),
     # This is a cast done via direct-construction
     'THStride*': CodeTemplate('THLongStorageView ${result_name}(${arg_name}, THLongStorageViewKind::STRIDE);'),
+    'IntListSize': CodeTemplate('std::vector<int64_t> ${result_name} = get_intlist_size_th(${arg_name});'),
+    'IntListStride': CodeTemplate('at::IntList ${result_name} = get_intlist_stride_th(${arg_name});'),
     'real': CodeTemplate('${arg_name}.to${ScalarName}()'),
     'accreal': CodeTemplate('${arg_name}.to${AccScalarName}()'),
     'TensorList': CodeTemplate(
@@ -309,7 +315,7 @@ CHECKED_CAST = {
     'IntList': CodeTemplate('check_intlist<${size}>(${arg_name}, "${arg_name}", ${arg_pos}${,default_init})')
 }
 
-DIRECT_CONSTRUCTION_CHECKED_CAST = {'THSize*', 'THStride*'}
+DIRECT_CONSTRUCTION_CHECKED_CAST = {'THSize*', 'THStride*', 'IntListSize', 'IntListStride'}
 
 CHECKED_USE = {
     'THTensor*': '{}_->tensor',
@@ -349,8 +355,6 @@ ALLOC_WRAP = {
 # Replacements for constants when calling into TH
 CONSTANT_REPLACEMENTS = [
     ('AS_REAL', '${AS_REAL}'),
-    ('__storage_size.get\\(\\)',
-     'THLongStorageView(static_cast<int64_t>(source.pImpl()->size()), THLongStorageViewKind::LENGTH)'),
     ('__last_dim', 'self.ndimension()-1'),
 ]
 
@@ -1327,7 +1331,7 @@ def create_derived(backend_type_env, declarations):
         output_count = 0
 
         # scalar_check is the heuristic conditions when a result may be a scalar_check
-        # if there is a THSize* argument, then its dimensions are used to determine scalar.
+        # if there is a THSize*/IntListSize argument, then its dimensions are used to determine scalar.
         # otherwise, it is true if all the input tensors are scalars,
         scalar_check_is_from_size = False
         scalar_check_is_from_option = False
@@ -1343,7 +1347,7 @@ def create_derived(backend_type_env, declarations):
         for arg in option['arguments']:
             if is_real_argument_to_wrapper(arg):
                 count += 1
-            if arg['type'] == 'THSize*' and not scalar_check_is_from_option:
+            if (arg['type'] == 'THSize*' or arg['type'] == 'IntListSize') and not scalar_check_is_from_option:
                 scalar_check_is_from_size = True
                 scalar_check = '{}.size() == 0'.format(arg['name'])
             if arg['type'] == 'TensorList':

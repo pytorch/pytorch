@@ -122,6 +122,7 @@ INSTALL(FILES
   generic/THStorageCopy.h
   generic/THTensor.cpp
   generic/THTensor.h
+  generic/THTensor.hpp
   generic/THTensorConv.cpp
   generic/THTensorConv.h
   generic/THTensorCopy.cpp
