@@ -140,6 +140,10 @@ struct Method {
     return *this;
   }
 
+  const FunctionSchema& getSchema() const noexcept {
+    return *schema;
+  }
+
   std::string prettyPrintSchema() const {
     JIT_ASSERT(schema);
     std::stringstream ss;
