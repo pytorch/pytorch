@@ -20,8 +20,8 @@
 #include <mutex>
 #include <unordered_set>
 
+#include "caffe2/core/active_workspace.h"
 #include "caffe2/core/init.h"
-#include "caffe2/core/workspace.h"
 
 #if CAFFE2_ANDROID
 #ifndef SYS_gettid

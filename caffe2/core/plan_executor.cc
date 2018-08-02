@@ -7,6 +7,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "caffe2/core/active_workspace.h"
 #include "caffe2/core/timer.h"
 #include "caffe2/core/workspace.h"
 #include "caffe2/proto/caffe2.pb.h"
