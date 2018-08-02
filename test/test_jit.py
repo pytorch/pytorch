@@ -438,6 +438,29 @@ class TestJit(JitTestCase):
         ge = self.checkTrace(f, (x, y))
         self.assertExpectedGraph(ge.graph_for(x, y))
 
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    def test_fusion_rand(self):
+        class M(torch.jit.ScriptModule):
+            __constants__ = ['d']
+
+            def __init__(self):
+                self.d = torch.device('cuda')
+
+            @torch.jit.script_method
+            def create(self, x):
+                return x * x + x + torch.rand_like(x)
+
+        x = torch.zeros([3, 4, 5], dtype=torch.float, device='cuda')
+        m = M()
+        out1 = m.create(x)
+        out2 = m.create(x)
+        self.assertNotEqual(out1, out2)
+        self.assertTrue(torch.all(out1 >= 0))
+        self.assertTrue(torch.all(out1 < 1))
+        self.assertTrue(torch.all(out2 >= 0))
+        self.assertTrue(torch.all(out2 < 1))
+
     @staticmethod
     def fn_test_comparison_gt_lt(x, y):
         mask = (x > 0).type_as(x)

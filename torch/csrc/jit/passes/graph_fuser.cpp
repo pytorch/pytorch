@@ -75,6 +75,7 @@ std::unordered_set<NodeKind> simple_mappable = {
   // TODO support those
   //aten::clamp,
   //aten::lerp,
+  aten::rand_like,
 };
 
 bool isSimpleMap(Node *node) {
