@@ -68,8 +68,8 @@ THCTensor_(renorm)(THCState *state, THCTensor* self, THCTensor* src, real value,
   THArgCheck(THCTensor_(nDimensionLegacyNoScalars)(state, src) > 1, 1, "need at least 2 dimensions");
 
   if (numel > 0) {
-    ptrdiff_t size = numel / data->size(0);
-    dim3 grid(data->size(0));
+    ptrdiff_t size = numel / THTensor_sizeLegacyNoScalars(data, 0);
+    dim3 grid( THTensor_sizeLegacyNoScalars(data, 0));
     dim3 threads(32);
 
     THCTensor_kernel_renorm<real, accreal>

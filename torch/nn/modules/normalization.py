@@ -95,8 +95,8 @@ class LayerNorm(Module):
             of size
 
             .. math::
-                [* \times \text{normalized_shape}[0] \times \text{normalized_shape}[1]
-                    \times \ldots \times \text{normalized_shape}[-1]]
+                [* \times \text{normalized\_shape}[0] \times \text{normalized\_shape}[1]
+                    \times \ldots \times \text{normalized\_shape}[-1]]
 
             If a single integer is used, it is treated as a singleton list, and this module will
             normalize over the last dimension which is expected to be of that specific size.

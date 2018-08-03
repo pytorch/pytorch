@@ -1,6 +1,7 @@
 #pragma once
 
 #include "torch/csrc/jit/ir.h"
+#include "torch/csrc/jit/script/module.h"
 #include "torch/csrc/onnx/onnx.h"
 
 namespace torch { namespace jit {
@@ -31,5 +32,8 @@ TORCH_API std::string PrettyPrintExportedGraph(
     bool defer_weight_export,
     ::torch::onnx::OperatorExportTypes operator_export_type
       = ::torch::onnx::OperatorExportTypes::ONNX);
+
+TORCH_API std::tuple<std::string, RawDataExportMap> ExportModule(
+    const std::shared_ptr<script::Module>& module);
 
 }}

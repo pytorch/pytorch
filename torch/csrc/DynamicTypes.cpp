@@ -69,7 +69,9 @@ at::Type* get_type(const std::string& name, bool is_cuda, bool is_sparse) {
 
 PyTypeObject* getPyTypeObject(const at::Storage& storage)
 {
-  auto it = attype_to_py_storage_type.find(&storage.pImpl()->type());
+  auto attype = at::globalContext().getTypeOpt(
+      at::detail::get_backend(storage.pImpl()), storage.pImpl()->scalar_type);
+  auto it = attype_to_py_storage_type.find(attype);
   if (it != attype_to_py_storage_type.end()) {
     return it->second;
   }

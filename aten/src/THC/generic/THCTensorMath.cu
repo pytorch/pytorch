@@ -314,9 +314,9 @@ void THCTensor_(nonzero)(THCState* state, THCudaLongTensor *tensor,
       strided_tensor.begin(),
       strided_tensor.end(),
       stride_dim.begin(),
-      idx_functor(div, self->size(dim))
+      idx_functor(div, THTensor_sizeLegacyNoScalars(self, dim))
     );
-    div *= self->size(dim);
+    div *= THTensor_sizeLegacyNoScalars(self, dim);
   }
 
   THCudaLongTensor_resize2d(state, tensor, num_nonzeros, num_dim);
@@ -349,7 +349,7 @@ void THCTensor_(diag)(THCState *state, THCTensor *self_, THCTensor *src_, int64_
   } else {
     ptrdiff_t totalElements = THCTensor_(nElement)(state, src_);
     ptrdiff_t size = (k > 0) ? totalElements + k : totalElements - k;
-    int64_t strideSrc = THCTensor_(stride)(state, src_, 0);
+    int64_t strideSrc = THTensor_strideLegacyNoScalars(src_, 0);
     THCTensor_(resize2d)(state, self_, size, size);
     THCTensor_(zero)(state, self_);
     if (size > 0) {

@@ -91,8 +91,6 @@ struct AT_API StorageImpl : public Retainable {
     return at::elementSize(scalar_type);
   }
 
-  Type& type();
-
   //TODO: Rename to size() and size to size_
   size_t get_size() const { 
     return size;
@@ -112,4 +110,7 @@ struct AT_API StorageImpl : public Retainable {
   }
 };
 
+namespace detail {
+AT_API Backend get_backend(StorageImpl* storage_impl);
+}
 } // namespace at

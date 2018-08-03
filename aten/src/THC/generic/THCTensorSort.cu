@@ -22,7 +22,7 @@ THC_API void THCTensor_(sortKeyValueInplace)(THCState* state,
     return;
   }
 
-  int64_t keySliceSize = THCTensor_(size)(state, key, dim);
+  int64_t keySliceSize = THCTensor_(sizeLegacyNoScalars)(state, key, dim);
   ptrdiff_t keySlices = inElements / keySliceSize;
 
   // The amount of shared memory and block size is based on
@@ -159,8 +159,8 @@ void THCTensor_(sortViaThrust)(THCState* state,
   int nDims = THCTensor_(nDimensionLegacyAll)(state, input);
 
   ptrdiff_t totalElements = THCTensor_(nElement)(state, input);
-  int64_t sliceSize = THCTensor_(size)(state, input, dim);
-  int64_t sliceStride = THCTensor_(stride)(state, input, dim);
+  int64_t sliceSize = THCTensor_(sizeLegacyNoScalars)(state, input, dim);
+  int64_t sliceStride = THTensor_strideLegacyNoScalars(input, dim);
 
   // We perform a vectorized segmented sort in Thrust.
   // Say we are sorting a (2, 3) tensor. We have in flattened form:
@@ -295,7 +295,7 @@ THC_API void THCTensor_(sort)(THCState* state,
   THLongStorage_free(inputSize);
 
   // How large are the slices that we are sorting?
-  int64_t sliceSize = THCTensor_(size)(state, input, dim);
+  int64_t sliceSize = THCTensor_(sizeLegacyNoScalars)(state, input, dim);
 
   // Workaround:
   // CUDA 8 uses more shared memory than 7.5 for bitonicSortKVInPlace,
