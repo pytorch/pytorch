@@ -158,13 +158,13 @@ inline py::object createPyObjectForStack(Stack&& stack) {
   // Return a simple value and not a single-element tuple if there is only one
   // return value.
   if (stack.size() == 1) {
-    return toPyObject(pop(stack));
+    return toPyObject(std::move(stack[0]));
   }
 
   // If there is more than one return value, pop them into a py::tuple.
   py::tuple return_values(stack.size());
   for (size_t ret = 0; ret < return_values.size(); ++ret) {
-    return_values[ret] = toPyObject(pop(stack));
+    return_values[ret] = toPyObject(std::move(stack[ret]));
   }
 
   return return_values;

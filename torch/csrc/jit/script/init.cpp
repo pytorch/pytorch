@@ -539,7 +539,8 @@ void initJitScriptBindings(PyObject* module) {
       .def("graph_for", [](Module& self, py::args args) {
         if (self.find_method("forward")) {
           Method & m = self.get_method("forward");
-          return m.graph_for(createStackForSchema(m.getSchema(), args));
+          return m.graph_for(
+              evilDeprecatedBadCreateStackDoNotUse(args, m.graph()->inputs()));
         }
         throw std::runtime_error("Attempted to call graph_for on a Module without a compiled forward()");
       })
@@ -565,7 +566,7 @@ void initJitScriptBindings(PyObject* module) {
     .def("propagate_and_assign_input_and_output_shapes", &Method::propagate_and_assign_input_and_output_shapes)
     .def("params", &Method::params)
     .def("graph_for", [](Method& self, py::args args) {
-      return self.graph_for(createStackForSchema(self.getSchema(), args));
+      return self.graph_for(evilDeprecatedBadCreateStackDoNotUse(args, self.graph()->inputs()));
     })
     .def("set_arg_and_return_types", [](Method &self, TypedDef &typed_def, bool method) {
       std::vector<Argument> arg_type_args, return_type_args;
