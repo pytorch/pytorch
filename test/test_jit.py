@@ -2213,6 +2213,13 @@ a")
         check_dynamic_indexing("[i + j]", consec((3, 3)), 0, 1)
         check_dynamic_indexing("[i:j, i]", consec((3, 3, 2)), 0, 2)
 
+    def test_method_on_number(self):
+        def func():
+            c = 1
+            return c.add(1)
+        with self.assertRaisesRegex(RuntimeError, 'Cannot call methods on numbers'):
+                    torch.jit.script(func)
+
     # testing implicit conversion of tensors to scalars
     def test_promote(self):
         @torch.jit.script
