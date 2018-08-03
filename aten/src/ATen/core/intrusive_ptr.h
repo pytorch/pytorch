@@ -390,12 +390,13 @@ class weak_intrusive_ptr final {
     target_ = NullType::singleton();
   }
 
+  constexpr explicit weak_intrusive_ptr(TTarget* target) : target_(target) {}
+
  public:
   using element_type = TTarget;
 
-  explicit weak_intrusive_ptr(
-      const intrusive_ptr<TTarget, NullType>& ptr)
-      : target_(ptr.get()) {
+  explicit weak_intrusive_ptr(const intrusive_ptr<TTarget, NullType>& ptr)
+      : weak_intrusive_ptr(ptr.get()) {
     retain_();
   }
 
@@ -508,6 +509,39 @@ class weak_intrusive_ptr final {
       }
     } while (target_->refcount_.compare_exchange_weak(refcount, refcount + 1));
     return intrusive_ptr<TTarget, NullType>(target_);
+  }
+
+  /**
+   * Returns an owning (but still only weakly referenced) pointer to the
+   * underlying object and makes the weak_intrusive_ptr instance invalid.
+   * That means the weakcount is not decreased.
+   * You *must* put the returned pointer back into a weak_intrusive_ptr using
+   * weak_intrusive_ptr::reclaim(ptr) to properly destruct it.
+   * This is helpful for C APIs.
+   */
+  TTarget* release() noexcept {
+    TTarget* result = target_;
+    target_ = NullType::singleton();
+    return result;
+  }
+
+  /**
+   * Takes an owning (but must be weakly referenced) pointer to TTarget* and
+   * creates a weak_intrusive_ptr that takes over ownership.
+   * Thas means the weakcount is not increased.
+   * This is the counter-part to weak_intrusive_ptr::release() and the pointer
+   * passed in *must* have been created using weak_intrusive_ptr::release().
+   */
+  static weak_intrusive_ptr reclaim(TTarget* owning_weak_ptr) {
+    // if refcount > 0, weakcount must be >1 for weak references to exist.
+    // see weak counting explanation at top of this file.
+    // if refcount == 0, weakcount only must be >0.
+    AT_ASSERTM(
+        owning_weak_ptr->weakcount_.load() > 1 ||
+            (owning_weak_ptr->refcount_.load() == 0 &&
+             owning_weak_ptr->weakcount_.load() > 0),
+        "weak_intrusive_ptr: Can only weak_intrusive_ptr::reclaim() owning pointers that were created using weak_intrusive_ptr::release().");
+    return weak_intrusive_ptr(owning_weak_ptr);
   }
 
   template <class TTarget1, class NullType1, class TTarget2, class NullType2>
