@@ -12,15 +12,6 @@ CAFFE2_DEFINE_bool(caffe2_use_fatal_for_enforce, false,
                    "of throwing an exception.");
 
 namespace caffe2 {
-std::string StripBasename(const std::string &full_path) {
-  const char kSeparator = '/';
-  size_t pos = full_path.rfind(kSeparator);
-  if (pos != std::string::npos) {
-    return full_path.substr(pos + 1, std::string::npos);
-  } else {
-    return full_path;
-  }
-}
 
 size_t ReplaceAll(string& s, const char* from, const char* to) {
   CAFFE_ENFORCE(from && *from);
@@ -67,7 +58,7 @@ EnforceNotMet::EnforceNotMet(
     const void* caller)
     : msg_stack_{MakeString(
           "[enforce fail at ",
-          StripBasename(std::string(file)),
+          at::detail::StripBasename(std::string(file)),
           ":",
           line,
           "] ",
@@ -236,7 +227,7 @@ MessageLogger::MessageLogger(const char *file, int line, int severity)
           //<< ":" << std::setw(2) << timeinfo->tm_min
           //<< ":" << std::setw(2) << timeinfo->tm_sec
           //<< "." << std::setw(9) << ns.count() % 1000000000
-          << " " << StripBasename(std::string(file)) << ":" << line << "] ";
+          << " " << at::detail::StripBasename(std::string(file)) << ":" << line << "] ";
 }
 
 // Output the contents of the stream to the proper channel on destruction.

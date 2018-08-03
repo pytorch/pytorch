@@ -7,6 +7,7 @@
 #include <limits>
 #include <sstream>
 
+#include <ATen/core/Error.h>
 #include "caffe2/core/flags.h"
 #include "caffe2/proto/caffe2.pb.h"
 
@@ -91,9 +92,6 @@ inline string Join(const string& delimiter, const Container& v) {
   }
   return s.str();
 }
-
-// Obtains the base name from a full path.
-string StripBasename(const std::string& full_path);
 
 // Replace all occurrences of "from" substring to "to" string.
 // Returns number of replacements
