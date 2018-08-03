@@ -499,6 +499,7 @@ FunctionOption = TypedDict('FunctionOption', {
     'native_type_method_dispatch': str,
     # options should be List[FunctionOption]
     'options': Any,
+    'requires_tensor': bool,
     'return_call': str,
     'return_type': str,
     'return': ReturnDecl,
@@ -527,6 +528,7 @@ OutputDeclaration = NamedTuple('OutputDeclaration', [
     ('returns', List[ReturnType]),
     ('inplace', bool),
     ('abstract', bool),
+    ('requires_tensor', bool),
     ('device_guard', bool),
     ('with_gil', bool),
     ('deprecated', bool),
@@ -559,7 +561,8 @@ def is_mutable_formal_argument(argument, option):
 
 
 def check_methods_do_not_start_with_underscore(name, is_method):
-    if name in {'_local_scalar', '_values', '_indices', '_nnz', '_sparseDims', '_denseDims'}:
+    if name in {'_local_scalar', '_values', '_indices', '_nnz', '_dimI',
+                '_dimV', '_coalesced_'}:
         return
     if is_method and name.startswith('_') and not name.startswith('__'):
         message = "Function '{}' starts with a single underscore and is ".format(name)
@@ -923,6 +926,7 @@ def create_generic(top_env, declarations):
             inplace=option['inplace'],
             # See Note [Abstract ATen methods]
             abstract=abstract,
+            requires_tensor=option.get('requires_tensor', False),
             device_guard=option.get('device_guard', True),
             with_gil=option.get('with_gil', False),
             deprecated=option.get('deprecated', False)
@@ -1160,6 +1164,7 @@ def create_generic(top_env, declarations):
             inplace=option['inplace'],
             # See Note [Abstract ATen methods]
             abstract=abstract,
+            requires_tensor=option.get('requires_tensor', False),
             device_guard=option.get('device_guard', True),
             with_gil=option.get('with_gil', False),
             deprecated=option['deprecated'],

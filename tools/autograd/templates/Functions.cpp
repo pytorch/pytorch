@@ -10,6 +10,7 @@
 #include <ATen/core/TensorOptions.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
+#include <ATen/SparseTensorUtils.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/core/Reduction.h>
 
@@ -1964,8 +1965,8 @@ std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
 }
 
 std::tuple<Tensor, Tensor, Tensor> _trilinear_backward(const Tensor& grad_out, const Tensor& i1, const Tensor& i2, const Tensor& i3,
-						       IntList expand1, IntList expand2, IntList expand3,
-						       IntList sumdim, int64_t unroll_dim, std::array<bool, 3> grad_mask) {
+                                                       IntList expand1, IntList expand2, IntList expand3,
+                                                       IntList sumdim, int64_t unroll_dim, std::array<bool, 3> grad_mask) {
   Tensor grad_i1, grad_i2, grad_i3;
   if (grad_mask[0])
     grad_i1 = at::_trilinear(grad_out, i2, i3, sumdim, expand2, expand3, expand1);
@@ -1985,6 +1986,27 @@ Tensor log1p_backward(const Tensor& grad, const Tensor& self) {
       "or report a bug if you think this is an error.");
   }
   return grad / (self + 1);
+}
+
+Tensor sparse_values_backward(const Tensor& grad_values, const Tensor& indices,
+                              IntList sizes, bool input_is_coalesced) {
+  auto grad_input = at::_sparse_coo_tensor_unsafe(indices, grad_values, sizes);
+  return grad_input._coalesced_(input_is_coalesced);
+}
+
+Tensor sparse_constructor_values_backward(const Tensor& sparse_grad_out, const Tensor& indices, IntList values_shape) {
+  // TODO: improve this backward by writing a kernel (maybe)
+  auto sparse_dim = indices.size(0);
+  if (sparse_dim == 0) {
+    return at::zeros(values_shape, sparse_grad_out._values().options());
+  }
+  auto dense_grad = sparse_grad_out.to_dense();
+  auto full_size = sparse_grad_out.sizes();
+  auto flattened_grad_shape = values_shape.vec();
+  flattened_grad_shape[0] = at::prod_intlist(full_size.slice(0, sparse_dim));
+  auto flattened_dense_grad = dense_grad.view(flattened_grad_shape);
+  auto flattened_indices = at::sparse::flatten_indices(indices, full_size);
+  return flattened_dense_grad.index_select(0, flattened_indices);
 }
 
 } // anonymous namespace

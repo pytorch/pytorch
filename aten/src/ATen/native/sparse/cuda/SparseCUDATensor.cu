@@ -1,7 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/native/sparse/SparseUtils.h>
+#include <ATen/SparseTensorUtils.h>
 #include <ATen/native/sparse/cuda/SparseCUDAApplyUtils.cuh>
 #include <ATen/AccumulateType.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
@@ -24,6 +24,8 @@
 
 namespace at { namespace native {
 
+using namespace at::sparse;
+
 SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
   int64_t nnz = self._nnz();
   if (self.is_coalesced()) {
@@ -33,7 +35,7 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
   // we should keep the original tensor intact and do coalesce on a copy of the tensor
   if (nnz < 2) {
     SparseTensor dst = self.clone();
-    _get_sparse_impl(dst)->set_coalesced(true);
+    dst._coalesced_(true);
     return dst;
   }
 
@@ -48,12 +50,12 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
   // TODO: I'm not sure if this could ever be non-contiguous
   LongTensor values = self._values().contiguous();
 
-  int64_t sparseDims = self._sparseDims();
+  int64_t sparse_dim = self.sparse_dim();
   int64_t stride = values.stride(0);
 
   // indices will be modified by Thrust, so we have to clone or use new storage
   // here.
-  LongTensor indices1D = _newFlattenedIndices(self, true);
+  LongTensor indices1D = flatten_indices(self._indices(), self.sizes(), true);
 
   LongTensor origIndices = at::empty({nnz}, self._indices().options());
   LongTensor uniqueOffsets = at::empty({nnz}, self._indices().options());
@@ -122,14 +124,14 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
   ////////////////////////////////////////////////////////////
   // unflatten indices if necessary
   LongTensor newIndices;
-  if (sparseDims == 1) {
+  if (sparse_dim == 1) {
     newIndices = indices1D;
   } else {
-    newIndices = at::empty({sparseDims, newNnz}, origIndices.options());
+    newIndices = at::empty({sparse_dim, newNnz}, origIndices.options());
     if (TH_INDEX_BASE != 0) {
       indices1D.add_(-1);
     }
-    for (int64_t d = sparseDims - 1; d >= 0; d--) {
+    for (int64_t d = sparse_dim - 1; d >= 0; d--) {
       // NB: Not a select, so I can preserve the outer dimension
       LongTensor indicesSlice = newIndices.narrow(0, d, 1);
       // Note for the porting guide: THCTensor_(copy) does NOT do normal
@@ -145,8 +147,7 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
   }
   ////////////////////////////////////////////////////////////
 
-  SparseTensor dst = ::at::native::sparse_coo_tensor(newIndices, newValues, self.sizes());
-  _get_sparse_impl(dst)->set_coalesced(true);
+  SparseTensor dst = ::at::native::sparse_coo_tensor(newIndices, newValues, self.sizes())._coalesced_(true);
 
   THCudaCheck(cudaGetLastError());
   return dst;
