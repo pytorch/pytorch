@@ -350,7 +350,7 @@ std::shared_ptr<SugaredValue> packOutputs(Graph& g, at::ArrayRef<Value*> values)
 
 Value* createNumber(Graph& g, const SourceRange& loc, const at::Tensor& val) {
   JIT_ASSERT(val.numel() == 1);
-  auto* output = insertConstant(g, val, loc);
+  auto* output = g.insertConstant(val, loc);
   if (val.type().scalarType() == at::kLong) {
     output->setType(IntType::get());
   } else if (val.type().scalarType() == at::kFloat) {
@@ -444,7 +444,7 @@ at::optional<std::vector<Value*>> tryMatchSchema(
       }
       positional_inputs[i] = NamedValue(
           loc, i,
-          insertConstant(graph, *default_value, loc));
+          graph.insertConstant(*default_value, loc));
     }
 
     // check input types
@@ -472,7 +472,7 @@ at::optional<std::vector<Value*>> tryMatchSchema(
 
       if (value->node()->kind() == prim::None){
         if (arg.type->isSubtypeOf(NumberType::get()))
-          value = insertConstant(graph, at::Scalar(NAN), loc);
+          value = graph.insertConstant(at::Scalar(NAN), loc);
         else
           value = graph.insertNode(graph.createUndefined())->output();
       }
@@ -941,12 +941,12 @@ private:
         max_trip_count_val = emitExpr(max_trip_count.value(), ensureInt);
       } else {
         max_trip_count_val =
-            insertConstant(*graph, INT_MAX, range);
+            graph->insertConstant(INT_MAX,range);
       }
       if (cond) {
         cond_val = emitCond(cond.value());
       } else {
-        cond_val = insertConstant(*graph, true, range);
+        cond_val = graph->insertConstant(true, range);
       }
     }
     n->addInput(max_trip_count_val);
@@ -967,7 +967,7 @@ private:
         Value* body_cond_value = emitCond(cond.value());
         body_block->registerOutput(body_cond_value);
       } else {
-        Value* cond_value_dummy = insertConstant(*graph, true, range);
+        Value* cond_value_dummy = graph->insertConstant(true, range);
         body_block->registerOutput(cond_value_dummy);
       }
 
@@ -1352,10 +1352,10 @@ private:
         return emitConst(Const(tree));
       } break;
       case TK_TRUE: {
-        return insertConstant(*graph, true, tree->range());
+        return graph->insertConstant(true, tree->range());
       } break;
       case TK_FALSE: {
-        return insertConstant(*graph, false, tree->range());
+        return graph->insertConstant(false, tree->range());
       } break;
       case TK_NONE: {
         return emitNone(tree->range());
@@ -1402,9 +1402,9 @@ private:
 
   Value* emitConst(const Const& c) {
     if (c.isFloatingPoint())
-      return insertConstant(*graph, c.asFloatingPoint(), c.range());
+      return graph->insertConstant(c.asFloatingPoint(), c.range());
     else
-      return insertConstant(*graph, c.asIntegral(), c.range());
+      return graph->insertConstant(c.asIntegral(), c.range());
   }
 
   Value* emitStringLiteral(const StringLiteral& c) {
@@ -1425,9 +1425,9 @@ private:
     NamedValue begin = input_values[1];
     NamedValue end = input_values[2];
     NamedValue dim = NamedValue(loc, "dim",
-        insertConstant(*graph, 0, loc));
+        graph->insertConstant(0, loc));
     NamedValue step = NamedValue(loc, "step",
-        insertConstant(*graph, 1, loc));
+        graph->insertConstant(1, loc));
 
     return emitBuiltinCall(
                loc, method, "slice", {tensor, dim, begin, end, step}, {}, true)
@@ -1447,7 +1447,7 @@ private:
     NamedValue dim = NamedValue(
         loc,
         "dim",
-        insertConstant(*graph, 0, loc));
+        graph->insertConstant(0, loc));
     NamedValue idx = input_values[1];
 
     return emitBuiltinCall(loc, method, "select", {tensor, dim, idx}, {}, true)

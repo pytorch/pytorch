@@ -176,7 +176,7 @@ struct SymbolicVariable {
   }
 private:
   Value * insertConstant(IValue value) const {
-    return jit::insertConstant(*v->owningGraph(), value);
+    return v->owningGraph()->insertConstant(value);
   }
   SymbolicVariable typeLike(SymbolicVariable other) {
     if (auto other_type = other.v->type()->cast<TensorType>())
