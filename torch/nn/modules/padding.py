@@ -22,7 +22,7 @@ class _ConstantPadNd(Module):
 class ConstantPad1d(_ConstantPadNd):
     r"""Pads the input tensor boundaries with a constant value.
 
-    For `N`d-padding, use :func:`torch.nn.functional.pad()`.
+    For `N`-dimensional padding, use :func:`torch.nn.functional.pad()`.
 
     Args:
         padding (int, tuple): the size of the padding. If is `int`, uses the same
@@ -70,7 +70,7 @@ class ConstantPad1d(_ConstantPadNd):
 class ConstantPad2d(_ConstantPadNd):
     r"""Pads the input tensor boundaries with a constant value.
 
-    For `N`d-padding, use :func:`torch.nn.functional.pad()`.
+    For `N`-dimensional padding, use :func:`torch.nn.functional.pad()`.
 
     Args:
         padding (int, tuple): the size of the padding. If is `int`, uses the same
@@ -123,7 +123,7 @@ class ConstantPad2d(_ConstantPadNd):
 class ConstantPad3d(_ConstantPadNd):
     r"""Pads the input tensor boundaries with a constant value.
 
-    For `N`d-padding, use :func:`torch.nn.functional.pad()`.
+    For `N`-dimensional padding, use :func:`torch.nn.functional.pad()`.
 
     Args:
         padding (int, tuple): the size of the padding. If is `int`, uses the same
@@ -167,7 +167,7 @@ class _ReflectionPadNd(Module):
 class ReflectionPad1d(_ReflectionPadNd):
     r"""Pads the input tensor using the reflection of the input boundary.
 
-    For `N`d-padding, use :func:`torch.nn.functional.pad()`.
+    For `N`-dimensional padding, use :func:`torch.nn.functional.pad()`.
 
     Args:
         padding (int, tuple): the size of the padding. If is `int`, uses the same
@@ -208,7 +208,7 @@ class ReflectionPad1d(_ReflectionPadNd):
 class ReflectionPad2d(_ReflectionPadNd):
     r"""Pads the input tensor using the reflection of the input boundary.
 
-    For `N`d-padding, use :func:`torch.nn.functional.pad()`.
+    For `N`-dimensional padding, use :func:`torch.nn.functional.pad()`.
 
     Args:
         padding (int, tuple): the size of the padding. If is `int`, uses the same
@@ -266,7 +266,7 @@ class _ReplicationPadNd(Module):
 class ReplicationPad1d(_ReplicationPadNd):
     r"""Pads the input tensor using replication of the input boundary.
 
-    For `N`d-padding, use :func:`torch.nn.functional.pad()`.
+    For `N`-dimensional padding, use :func:`torch.nn.functional.pad()`.
 
     Args:
         padding (int, tuple): the size of the padding. If is `int`, uses the same
@@ -304,7 +304,7 @@ class ReplicationPad1d(_ReplicationPadNd):
 class ReplicationPad2d(_ReplicationPadNd):
     r"""Pads the input tensor using replication of the input boundary.
 
-    For `N`d-padding, use :func:`torch.nn.functional.pad()`.
+    For `N`-dimensional padding, use :func:`torch.nn.functional.pad()`.
 
     Args:
         padding (int, tuple): the size of the padding. If is `int`, uses the same
@@ -352,7 +352,7 @@ class ReplicationPad2d(_ReplicationPadNd):
 class ReplicationPad3d(_ReplicationPadNd):
     r"""Pads the input tensor using replication of the input boundary.
 
-    For `N`d-padding, use :func:`torch.nn.functional.pad()`.
+    For `N`-dimensional padding, use :func:`torch.nn.functional.pad()`.
 
     Args:
         padding (int, tuple): the size of the padding. If is `int`, uses the same
@@ -387,7 +387,7 @@ class ReplicationPad3d(_ReplicationPadNd):
 class ZeroPad2d(ConstantPad2d):
     r"""Pads the input tensor boundaries with zero.
 
-    For `N`d-padding, use :func:`torch.nn.functional.pad()`.
+    For `N`-dimensional padding, use :func:`torch.nn.functional.pad()`.
 
     Args:
         padding (int, tuple): the size of the padding. If is `int`, uses the same

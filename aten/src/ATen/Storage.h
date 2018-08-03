@@ -21,6 +21,9 @@ public:
   Storage(const Storage&) = delete;
   Storage(Storage&&) = delete;
   Storage(const Storage&&) = delete;
+  void set_pImpl(StorageImpl* storage_impl) {
+    storage_impl_ = storage_impl;
+  }
   StorageImpl* pImpl() {
     return storage_impl_;
   }

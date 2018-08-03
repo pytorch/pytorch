@@ -68,8 +68,9 @@ class Blob {
         std::is_same<T, Tensor>::value,
         "IsType(DeviceType) only available on "
         "Tensor types.");
+    bool is_match = meta_.Match<T>();
     auto* tensor = static_cast<Tensor*>(pointer_);
-    if (tensor && tensor->GetDeviceType() == device_type) {
+    if (is_match && tensor && tensor->GetDeviceType() == device_type) {
       return true;
     }
     return false;

@@ -4,17 +4,17 @@
 
 void THCStorage_(rawCopy)(THCState *state, THCStorage *self, real *src)
 {
-  THCudaCheck(cudaMemcpyAsync(THCStorage_(data)(state, self), src, self->size * sizeof(real), cudaMemcpyDeviceToDevice, THCState_getCurrentStream(state)));
+  THCudaCheck(cudaMemcpyAsync(THCStorage_(data)(state, self), src, self->size() * sizeof(real), cudaMemcpyDeviceToDevice, THCState_getCurrentStream(state)));
 }
 
 // conversions are delegated to THCTensor implementation
 #define THC_CUDA_STORAGE_IMPLEMENT_COPY(TYPEC,TYPECUDA)                                 \
 void THCStorage_(copyCuda##TYPEC)(THCState *state, THCStorage *self, struct THCuda##TYPECUDA##Storage *src)  \
 {                                                                                       \
-  THArgCheck(self->size == src->size, 2, "size does not match");                        \
-  THCTensor* selfTensor = THCTensor_(newWithStorage1d)(state, self, 0, self->size, 1);  \
+  THArgCheck(self->size() == src->size(), 2, "size does not match");                        \
+  THCTensor* selfTensor = THCTensor_(newWithStorage1d)(state, self, 0, self->size(), 1);  \
   struct THCuda##TYPECUDA##Tensor* srcTensor =                                          \
-      THCuda##TYPECUDA##Tensor_newWithStorage1d(state, src, 0, src->size, 1);           \
+      THCuda##TYPECUDA##Tensor_newWithStorage1d(state, src, 0, src->size(), 1);           \
   THCTensor_(copyCuda##TYPEC)(state, selfTensor, srcTensor);                            \
   THCuda##TYPECUDA##Tensor_free(state, srcTensor);                                      \
   THCTensor_(free)(state, selfTensor);                                                  \

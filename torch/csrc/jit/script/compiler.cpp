@@ -64,19 +64,25 @@ struct PrintValue : public SugaredValue {
   }
 };
 
-static Value* numToTensor(const SourceRange& loc, Value* value) {
+static Value* typeCast(const SourceRange& loc, Value* value, TypePtr dst) {
   auto& graph = *value->owningGraph();
-  auto n = graph.insertNode(graph.createNumToTensor(value))
-      ->setSourceLocation(std::make_shared<SourceRange>(loc));
-  return n->output();
-}
+  const TypePtr orig = value->type();
+  Node* n = nullptr;
 
-static Value* tensorToNum(
-    const SourceRange& loc,
-    Value* value,
-    const TypePtr type) {
-  auto& graph = *value->owningGraph();
-  auto* result = graph.insertNode(graph.createTensorToNum(type, value))
+  if(dst->isSubtypeOf(DynamicType::get()) && orig->isSubtypeOf(NumberType::get())) {
+    n = graph.createNumToTensor(value);
+  } else if (dst->isSubtypeOf(NumberType::get()) && orig->isSubtypeOf(DynamicType::get())) {
+    n = graph.createTensorToNum(dst, value);
+  } else if(dst->isSubtypeOf(IntType::get()) && orig->isSubtypeOf(FloatType::get())) {
+    n = graph.createFloatToInt(value);
+  } else if(dst->isSubtypeOf(FloatType::get()) && orig->isSubtypeOf(IntType::get())) {
+    n = graph.createIntToFloat(value);
+  } else {
+    throw ErrorReport(loc) << "Cannot cast type '" << orig->str() << "' to type '"
+      << dst->str() << "'.";
+  }
+
+  auto* result = graph.insertNode(n)
       ->setSourceLocation(std::make_shared<SourceRange>(loc))
       ->output();
   return result;
@@ -104,15 +110,7 @@ struct CastValue : public SugaredValue {
       auto values = toValues(inputs);
       Value* input = values.at(0);
       if(!input->type()->isSubtypeOf(type)) {
-        if(*type == *DynamicType::get()) {
-          if(!input->type()->isSubtypeOf(NumberType::get())) {
-            throw ErrorReport(loc) << "expected a number";
-          }
-          input = numToTensor(loc, input);
-        } else {
-          ensureTensors(loc, values);
-          input = tensorToNum(loc, values.at(0), type);
-        }
+          input = typeCast(loc, input, type);
       }
       return std::make_shared<SimpleValue>(input);
   }
@@ -350,7 +348,7 @@ std::shared_ptr<SugaredValue> packOutputs(Graph& g, at::ArrayRef<Value*> values)
 
 Value* createNumber(Graph& g, const SourceRange& loc, const at::Tensor& val) {
   JIT_ASSERT(val.numel() == 1);
-  auto* output = insertConstant(g, val, loc);
+  auto* output = g.insertConstant(val, loc);
   if (val.type().scalarType() == at::kLong) {
     output->setType(IntType::get());
   } else if (val.type().scalarType() == at::kFloat) {
@@ -365,7 +363,7 @@ Value* createNumber(Graph& g, const SourceRange& loc, const at::Tensor& val) {
 at::optional<std::vector<int64_t>> getIntListAttribute(at::optional<int32_t> N, Value* input) {
   auto list = constant_as<Shared<jit::IntList>>(input);
   if(list)
-    return list.value()->elements().vec();
+    return list.value()->elements();
 
   // broadcast IntList[3] with value 4 -> {4, 4, 4}
   if(!N)
@@ -444,7 +442,7 @@ at::optional<std::vector<Value*>> tryMatchSchema(
       }
       positional_inputs[i] = NamedValue(
           loc, i,
-          insertConstant(graph, *default_value, loc));
+          graph.insertConstant(*default_value, loc));
     }
 
     // check input types
@@ -472,7 +470,7 @@ at::optional<std::vector<Value*>> tryMatchSchema(
 
       if (value->node()->kind() == prim::None){
         if (arg.type->isSubtypeOf(NumberType::get()))
-          value = insertConstant(graph, at::Scalar(NAN), loc);
+          value = graph.insertConstant(at::Scalar(NAN), loc);
         else
           value = graph.insertNode(graph.createUndefined())->output();
       }
@@ -840,7 +838,7 @@ private:
   Value* emitCond(Expr cond) {
     Value* v = emitExpr(cond, identity);
     if(v->type()->isSubtypeOf(DynamicType::get())) {
-      v = tensorToNum(cond.range(), v, IntType::get());
+      v = typeCast(cond.range(), v, IntType::get());
     }
     if(!v->type()->isSubtypeOf(IntType::get())) {
       throw ErrorReport(cond) << "expected a tensor or integer expression for condition but found " << v->type()->str();
@@ -941,12 +939,12 @@ private:
         max_trip_count_val = emitExpr(max_trip_count.value(), ensureInt);
       } else {
         max_trip_count_val =
-            insertConstant(*graph, INT_MAX, range);
+            graph->insertConstant(INT_MAX,range);
       }
       if (cond) {
         cond_val = emitCond(cond.value());
       } else {
-        cond_val = insertConstant(*graph, true, range);
+        cond_val = graph->insertConstant(true, range);
       }
     }
     n->addInput(max_trip_count_val);
@@ -967,7 +965,7 @@ private:
         Value* body_cond_value = emitCond(cond.value());
         body_block->registerOutput(body_cond_value);
       } else {
-        Value* cond_value_dummy = insertConstant(*graph, true, range);
+        Value* cond_value_dummy = graph->insertConstant(true, range);
         body_block->registerOutput(cond_value_dummy);
       }
 
@@ -1352,10 +1350,10 @@ private:
         return emitConst(Const(tree));
       } break;
       case TK_TRUE: {
-        return insertConstant(*graph, true, tree->range());
+        return graph->insertConstant(true, tree->range());
       } break;
       case TK_FALSE: {
-        return insertConstant(*graph, false, tree->range());
+        return graph->insertConstant(false, tree->range());
       } break;
       case TK_NONE: {
         return emitNone(tree->range());
@@ -1380,7 +1378,20 @@ private:
       case TK_LIST_LITERAL: {
         auto ll = ListLiteral(tree);
         auto values = getValues(ll.inputs(), /*maybe_unpack=*/true, identity);
-        return graph->insertNode(graph->createTuple(values))->output();
+        if (values.size() == 0) {
+          throw ErrorReport(tree) << "Empty list literals not allowed. "
+                                  << "Use _constructEmptyFooList() instead";
+        }
+        const auto elem_type = values.at(0)->type();
+        for (auto v : values) {
+          if (v->type() != elem_type) {
+            throw ErrorReport(tree)
+                << "Lists must contain only a single type, expected: "
+                << *elem_type << " but found " << *v->type() << " instead";
+          }
+        }
+        return graph->insertNode(graph->createList(elem_type, values))
+            ->output();
       } break;
       case TK_TUPLE_LITERAL: {
         auto ll = TupleLiteral(tree);
@@ -1402,9 +1413,9 @@ private:
 
   Value* emitConst(const Const& c) {
     if (c.isFloatingPoint())
-      return insertConstant(*graph, c.asFloatingPoint(), c.range());
+      return graph->insertConstant(c.asFloatingPoint(), c.range());
     else
-      return insertConstant(*graph, c.asIntegral(), c.range());
+      return graph->insertConstant(c.asIntegral(), c.range());
   }
 
   Value* emitStringLiteral(const StringLiteral& c) {
@@ -1425,9 +1436,9 @@ private:
     NamedValue begin = input_values[1];
     NamedValue end = input_values[2];
     NamedValue dim = NamedValue(loc, "dim",
-        insertConstant(*graph, 0, loc));
+        graph->insertConstant(0, loc));
     NamedValue step = NamedValue(loc, "step",
-        insertConstant(*graph, 1, loc));
+        graph->insertConstant(1, loc));
 
     return emitBuiltinCall(
                loc, method, "slice", {tensor, dim, begin, end, step}, {}, true)
@@ -1447,7 +1458,7 @@ private:
     NamedValue dim = NamedValue(
         loc,
         "dim",
-        insertConstant(*graph, 0, loc));
+        graph->insertConstant(0, loc));
     NamedValue idx = input_values[1];
 
     return emitBuiltinCall(loc, method, "select", {tensor, dim, idx}, {}, true)

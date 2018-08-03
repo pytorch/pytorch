@@ -350,7 +350,7 @@ ALLOC_WRAP = {
 CONSTANT_REPLACEMENTS = [
     ('AS_REAL', '${AS_REAL}'),
     ('__storage_size.get\\(\\)',
-     'THLongStorageView(static_cast<int64_t>(source.pImpl()->get_size()), THLongStorageViewKind::LENGTH)'),
+     'THLongStorageView(static_cast<int64_t>(source.pImpl()->size()), THLongStorageViewKind::LENGTH)'),
     ('__last_dim', 'self.ndimension()-1'),
 ]
 

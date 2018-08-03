@@ -336,64 +336,31 @@ FunctionSchema parseSchema(const std::string& schema) {
   return script::SchemaParser(schema).parseDeclarations().at(0);
 }
 
-at::optional<AttributeKind> attributeKindOf(TypePtr type) {
-  switch(type->kind()) {
-    case TypeKind::IntType: return AttributeKind::i;
-    case TypeKind::FloatType: return AttributeKind::f;
-    case TypeKind::NumberType: return AttributeKind::t;
-    case TypeKind::ListType:
-      if(type->isSubtypeOf(ListType::ofInts()))
-        return AttributeKind::is;
-      else
-        return at::nullopt;
-    default:
-      return at::nullopt;
-  }
-}
-
-bool typeMatches(TypePtr actual, TypePtr formal) {
-  return actual->isSubtypeOf(formal);
-}
-
 bool Operator::matches(const Node* node) const {
+  // wrong name
   if (node->kind().toQualString() != schema().name) {
     return false;
   }
-  size_t attributes_size = node->numAttributes();
-  size_t attributes_seen = 0;
-  auto inputs_size = node->inputs().size();
-  size_t input_i = 0;
-  for(size_t arg_i = 0; arg_i < schema().arguments.size(); ++arg_i) {
-    at::optional<AttributeKind> attribute_kind;
-    const Argument& arg = schema().arguments[arg_i];
-    if(attributes_size > 0 && (attribute_kind = attributeKindOf(arg.type))) {
-      auto name = Symbol::fromQualString("attr::" + arg.name);
-      if(!node->hasAttribute(name) || node->kindOf(name) != *attribute_kind) {
-        // std::cout << "missing attribute: " << name << "\n";
-        return false;
-      }
-      attributes_seen++;
-    } else {
-      if(input_i == inputs_size) {
-        // std::cout << "not enough inputs\n";
-        return false;
-      }
-      auto input = node->inputs()[input_i++];
-      if(!typeMatches(input->type(), arg.type)) {
-        // std::cout << "argument " << arg_i << " has the wrong type\n";
-        return false;
-      }
+  at::ArrayRef<const Value*> actuals = node->inputs();
+  const auto& formals = schema().arguments;
+
+  // not enough inputs
+  if(actuals.size() < formals.size())
+    return false;
+
+  for(size_t i = 0; i < formals.size(); ++i) {
+    // mismatched input type
+    if (!actuals[i]->type()->isSubtypeOf(formals[i].type)) {
+      return false;
     }
   }
 
-  if(!schema().is_vararg && input_i != inputs_size) {
+  // too many inputs
+  if(!schema().is_vararg && actuals.size() != formals.size()) {
     // std::cout << "not all inputs used\n" << input_i << " " << inputs_size << "\n";
     return false;
   }
-  if(!schema().is_vararg && attributes_seen != attributes_size) {
-    // std::cout << "not all attributes used\n" << attributes_seen << " " << attributes_size << "\n";
-    return false;
-  }
+
   return true;
 }
 
