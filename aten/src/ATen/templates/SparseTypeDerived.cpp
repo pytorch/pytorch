@@ -43,7 +43,7 @@ bool ${Type}::is_distributed() const { return false; }
 std::unique_ptr<Storage> ${Type}::storage(bool resizable) const {
   AT_ERROR("storage not supported on sparse");
 }
-std::unique_ptr<Storage> ${Type}::storage(size_t size) const {
+std::unique_ptr<Storage> ${Type}::storage(size_t size, bool resizable) const {
   AT_ERROR("storage not supported on sparse");
 }
 std::unique_ptr<Storage> ${Type}::storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const {

@@ -63,15 +63,16 @@ std::unique_ptr<Storage> ${Type}::storage(bool resizable) const {
       resizable
   ));
 }
-std::unique_ptr<Storage> ${Type}::storage(size_t size) const {
+std::unique_ptr<Storage> ${Type}::storage(size_t size, bool resizable) const {
   return std::unique_ptr<Storage>(new Storage(
       ScalarType::${ScalarName},
       size,
 #if ${isCUDA}
-      globalContext().getTHCState()->cudaDeviceAllocator
+      globalContext().getTHCState()->cudaDeviceAllocator,
 #else
-      getTHDefaultAllocator()
+      getTHDefaultAllocator(),
 #endif
+      resizable
   ));
 }
 std::unique_ptr<Storage> ${Type}::storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const {
