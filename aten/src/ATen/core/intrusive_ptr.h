@@ -3,6 +3,7 @@
 #include <ATen/core/Error.h>
 #include <atomic>
 #include <stdexcept>
+#include <ATen/core/C++17.h>
 
 namespace c10 {
 
@@ -85,7 +86,7 @@ class intrusive_ptr_target {
    * destructed by the scope (i.e. without intrusive_ptr), this function will
    * not be called.
    */
-  virtual void release_resources() const {}
+  virtual void release_resources() {}
 };
 
 namespace detail {
@@ -136,7 +137,9 @@ class intrusive_ptr final {
       // weakcount is one larger than the actual number of weak references.
       // So we need to decrement it here.
       auto weak_count = --target_->weakcount_;
-      target_->release_resources();
+      // justification for const_cast: release_resources is basically a destructor
+      // and a destructor always mutates the object, even for const objects.
+      const_cast<c10::guts::remove_const_t<TTarget>*>(target_)->release_resources();
       if (weak_count == 0) {
         delete target_;
       }

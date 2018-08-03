@@ -43,7 +43,7 @@ class DestructableMock : public intrusive_ptr_target {
     *wasDestructed_ = true;
   }
 
-  void release_resources() const override {
+  void release_resources() override {
     *resourcesReleased_ = true;
   }
 
