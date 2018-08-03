@@ -1,7 +1,7 @@
 #pragma once
 
+#include "ATen/ATenGeneral.h"
 #include "ATen/Context.h"
-#include "ATen/core/ATenGeneral.h"
 #include "ATen/cuda/CUDAStream.h"
 #include "ATen/cuda/Exceptions.h"
 
