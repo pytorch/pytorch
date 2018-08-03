@@ -492,6 +492,23 @@ at::optional<size_t> findInputWithName(const std::string& name, at::ArrayRef<Nam
   return at::nullopt;
 }
 
+Value* tryCreateList(
+    TypePtr elem_type,
+    Graph& graph,
+    const SourceRange& loc,
+    at::ArrayRef<NamedValue> varargs,
+    std::function<std::ostream&()> err) {
+  Argument elem_arg("", elem_type);
+  std::vector<Value*> list_ctor;
+  for(const auto& a : varargs) {
+    Value* av = tryMatchArgument(elem_arg, graph, loc, a, err);
+    if(!av)
+      return nullptr;
+    list_ctor.push_back(av);
+  }
+  return graph.insertNode(graph.createList(elem_type, list_ctor))->output();
+}
+
 at::optional<std::vector<Value*>> tryMatchSchema(
   const FunctionSchema& schema,
   const SourceRange& loc,
@@ -507,11 +524,30 @@ at::optional<std::vector<Value*>> tryMatchSchema(
     std::vector<Value*> positional_inputs;
     std::vector<bool> used_kwarg(kwargs.size(), false);
 
-    for(size_t i = 0; i < schema.arguments.size(); ++i) {
-      const auto& arg = schema.arguments[i];
+    // if we finish the loop will we have consumed all arguments?
+    size_t used_args = 0;
+
+    for(size_t schema_i = 0; schema_i < schema.arguments.size(); ++schema_i) {
+      const auto& arg = schema.arguments[schema_i];
       at::optional<NamedValue> v;
-      if(i < args.size()) {
-        v = args[i];
+      if(!arg.kwarg_only && schema_i < args.size()) {
+
+        // allow zeros(IntList sizes) to work with zeros(1, 2) or zeros(1)
+        if (arg.type->kind() == TypeKind::ListType && // the formal must be a list
+            !arg.N && // it must not be a broadcasting list like int[3], otherwise a single int is a valid input
+            (schema_i + 1 == schema.arguments.size() || schema.arguments[schema_i + 1].kwarg_only) &&  // must be the last position argument
+            !args[schema_i].value(graph)->type()->isSubtypeOf(arg.type)) { // and the actual should not be a list already
+          auto elem_type = arg.type->expect<ListType>()->getElementType();
+          Value* list = tryCreateList(elem_type, graph, loc, args.slice(schema_i), err);
+          if(!list)
+            return at::nullopt;
+          used_args = args.size();
+          positional_inputs.push_back(list);
+          continue;
+        }
+
+        v = args[schema_i];
+        used_args++;
       } else if(auto idx = findInputWithName(arg.name, kwargs))  {
         const NamedValue& nv = kwargs[*idx];
         if(used_kwarg[*idx]) {
@@ -523,7 +559,7 @@ at::optional<std::vector<Value*>> tryMatchSchema(
       } else if(arg.default_value) {
         v = NamedValue(*arg.default_value);
       } else {
-        err() << "argument " << schema.arguments[i].name << " not provided.\n" << loc;
+        err() << "argument " << schema.arguments[schema_i].name << " not provided.\n" << loc;
         return at::nullopt;
       }
       Value * positional = tryMatchArgument(arg, graph, loc, *v, err);
@@ -533,8 +569,8 @@ at::optional<std::vector<Value*>> tryMatchSchema(
     }
 
     // check for unused positional arguments
-    if(args.size() > schema.arguments.size()) {
-      err() << "expected at most " << schema.arguments.size() << " arguments "
+    if(used_args < args.size()) {
+      err() << "expected at most " << used_args << " arguments "
       << "but found " << args.size() << " positional arguments.\n" << loc << "\n";
       return at::nullopt;
     }
