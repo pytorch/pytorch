@@ -437,6 +437,53 @@ static inline bool isIntUsedAsIntList(
          *arg.type == *ListType::ofInts() && arg.N;
 }
 
+Value* tryMatchArgument(
+    const Argument& arg,
+    Graph& graph,
+    const SourceRange& loc,
+    const NamedValue& named_value,
+    std::function<std::ostream&()> err) {
+  Value* value = named_value.value(graph);
+
+  // some functions that take lists of integers for fixed size arrays
+  // also allow single ints to be passed in their place.
+  // the single int is then repeated to the length of the list
+  if (isIntUsedAsIntList(value, arg)) {
+    std::vector<Value*> repeated(*arg.N, value);
+    value = graph.insertNode(graph.createList(IntType::get(), repeated))->output();
+  }
+
+  // Allow homogeneous tuples to be casted implicitly to lists of appropriate types
+  if (arg.type->kind() == TypeKind::ListType &&
+      value->type()->kind() == TypeKind::TupleType) {
+      auto list_type = arg.type->cast<ListType>()->getElementType();
+      auto tuple = value->type()->cast<TupleType>();
+      auto castable = std::all_of(tuple->elements().begin(), tuple->elements().end(), [&](const TypePtr& t) {
+        return t->isSubtypeOf(list_type);
+      });
+      if (castable) {
+        auto unpacked = createTupleUnpack(value);
+        auto elem_type = arg.type->expect<ListType>()->getElementType();
+        value = graph.insertNode(graph.createList(elem_type, unpacked))->output();
+      }
+  }
+
+  if (value->node()->kind() == prim::None){
+    if (arg.type->isSubtypeOf(NumberType::get()))
+      value = graph.insertConstant(at::Scalar(NAN), loc);
+    else
+      value = graph.insertNode(graph.createUndefined())->output();
+  }
+
+  if(!value->type()->isSubtypeOf(arg.type)) {
+    err() << "expected a value of type " << arg.type->str() << " for argument '" << arg.name << "' but found "
+          << value->type()->str() << "\n"
+          << named_value.locOr(loc);
+    return nullptr;
+  }
+  return value;
+}
+
 at::optional<std::vector<Value*>> tryMatchSchema(
   const FunctionSchema& schema,
   const SourceRange& loc,
@@ -489,46 +536,10 @@ at::optional<std::vector<Value*>> tryMatchSchema(
     // check input types
     std::vector<Value*> matched_inputs;
     for(size_t i = 0; i < schema.arguments.size(); ++i) {
-      Value* value = positional_inputs[i]->value(graph);
-      const auto& arg = schema.arguments[i];
-
-      // some functions that take lists of integers for fixed size arrays
-      // also allow single ints to be passed in their place.
-      // the single int is then repeated to the length of the list
-      if (isIntUsedAsIntList(value, arg)) {
-        std::vector<Value*> repeated(*arg.N, value);
-        value = graph.insertNode(graph.createList(IntType::get(), repeated))->output();
-      }
-
-      // Allow homogeneous tuples to be casted implicitly to lists of appropriate types
-      if (arg.type->kind() == TypeKind::ListType &&
-          value->type()->kind() == TypeKind::TupleType) {
-          auto list_type = arg.type->cast<ListType>()->getElementType();
-          auto tuple = value->type()->cast<TupleType>();
-          auto castable = std::all_of(tuple->elements().begin(), tuple->elements().end(), [&](const TypePtr& t) {
-            return t->isSubtypeOf(list_type);
-          });
-          if (castable) {
-            auto unpacked = createTupleUnpack(value);
-            auto elem_type = arg.type->expect<ListType>()->getElementType();
-            value = graph.insertNode(graph.createList(elem_type, unpacked))->output();
-          }
-      }
-
-      if (value->node()->kind() == prim::None){
-        if (arg.type->isSubtypeOf(NumberType::get()))
-          value = graph.insertConstant(at::Scalar(NAN), loc);
-        else
-          value = graph.insertNode(graph.createUndefined())->output();
-      }
-
-      if(!value->type()->isSubtypeOf(arg.type)) {
-        err() << "expected a value of type " << arg.type->str() << " for argument '" << arg.name << "' but found "
-              << value->type()->str() << "\n"
-              << positional_inputs[i]->locOr(loc);
+      Value* value = tryMatchArgument(
+          schema.arguments[i], graph, loc, *positional_inputs[i], err);
+      if(!value)
         return at::nullopt;
-      }
-
       matched_inputs.push_back(value);
     }
 
