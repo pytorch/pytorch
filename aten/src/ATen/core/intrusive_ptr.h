@@ -121,7 +121,7 @@ class intrusive_ptr final {
   friend class intrusive_ptr;
   friend class weak_intrusive_ptr<TTarget, NullType>;
 
-  void retain() noexcept {
+  void retain_() {
     if (target_ != NullType::singleton()) {
       size_t new_refcount = ++target_->refcount_;
       AT_ASSERTM(
@@ -130,7 +130,7 @@ class intrusive_ptr final {
     }
   }
 
-  void release() noexcept {
+  void reset_() noexcept {
     if (target_ != NullType::singleton() && --target_->refcount_ == 0) {
       // See comment above about weakcount. As long as refcount>0,
       // weakcount is one larger than the actual number of weak references.
@@ -171,13 +171,13 @@ class intrusive_ptr final {
     rhs.target_ = FromNullType::singleton();
   }
 
-  intrusive_ptr(const intrusive_ptr& rhs) noexcept : target_(rhs.target_) {
-    retain();
+  intrusive_ptr(const intrusive_ptr& rhs) : target_(rhs.target_) {
+    retain_();
   }
 
   template <class From, class FromNullType>
   /* implicit */ intrusive_ptr(
-      const intrusive_ptr<From, FromNullType>& rhs) noexcept
+      const intrusive_ptr<From, FromNullType>& rhs)
       : target_(rhs.target_) {
     static_assert(
         std::is_convertible<From*, TTarget*>::value,
@@ -185,11 +185,11 @@ class intrusive_ptr final {
     static_assert(
         NullType::singleton() == FromNullType::singleton(),
         "NullType mismatch. intrusive_ptr copy constructor got pointer with differing null value.");
-    retain();
+    retain_();
   }
 
   ~intrusive_ptr() noexcept {
-    release();
+    reset_();
   }
 
   intrusive_ptr& operator=(intrusive_ptr&& rhs) & noexcept {
@@ -205,7 +205,7 @@ class intrusive_ptr final {
     static_assert(
         NullType::singleton() == FromNullType::singleton(),
         "NullType mismatch. intrusive_ptr move assignment got pointer with differing null value.");
-    release();
+    reset_();
     target_ = rhs.target_;
     rhs.target_ = FromNullType::singleton();
     return *this;
@@ -216,17 +216,16 @@ class intrusive_ptr final {
   }
 
   template <class From, class FromNullType>
-      intrusive_ptr& operator=(const intrusive_ptr<From, NullType>& rhs) &
-      noexcept {
+      intrusive_ptr& operator=(const intrusive_ptr<From, NullType>& rhs) & {
     static_assert(
         std::is_convertible<From*, TTarget*>::value,
         "Type mismatch. intrusive_ptr copy assignment got pointer of wrong type.");
     static_assert(
         NullType::singleton() == FromNullType::singleton(),
         "NullType mismatch. intrusive_ptr copy assignment got pointer with differing null value.");
-    release();
+    reset_();
     target_ = rhs.target_;
-    retain();
+    retain_();
     return *this;
   }
 
@@ -251,7 +250,7 @@ class intrusive_ptr final {
   }
 
   void reset() noexcept {
-    release();
+    reset_();
   }
 
   void swap(intrusive_ptr& rhs) noexcept {
@@ -276,11 +275,37 @@ class intrusive_ptr final {
     return use_count() == 1;
   }
 
+  /**
+   * Returns an owning (!) pointer to the underlying object and makes the
+   * intrusive_ptr instance invalid. That means the refcount is not decreased.
+   * You *must* put the returned pointer back into a intrusive_ptr using
+   * intrusive_ptr::reclaim(ptr) to properly destruct it.
+   * This is helpful for C APIs.
+   */
+  TTarget* release() noexcept {
+    TTarget* result = target_;
+    target_ = NullType::singleton();
+    return result;
+  }
+
+  /**
+   * Takes an owning pointer to TTarget* and creates an intrusive_ptr that takes
+   * over ownership. Thas means the refcount is not increased.
+   * This is the counter-part to intrusive_ptr::release() and the pointer
+   * passed in *must* have been created using intrusive_ptr::release().
+   */
+  static intrusive_ptr reclaim(TTarget* owning_ptr) {
+    AT_ASSERTM(
+        owning_ptr->refcount_.load() > 0,
+        "intrusive_ptr: Can only intrusive_ptr::reclaim() owning pointers that were created using intrusive_ptr::release().");
+    return intrusive_ptr(owning_ptr);
+  }
+
   template <class... Args>
   static intrusive_ptr make(Args&&... args) {
     auto result = intrusive_ptr(new TTarget(std::forward<Args>(args)...));
-    // We can't use retain(), because we also have to increase weakcount
-    // and because we allow raising these values from 0, which retain()
+    // We can't use retain_(), because we also have to increase weakcount
+    // and because we allow raising these values from 0, which retain_()
     // has an assertion against.
     ++result.target_->refcount_;
     ++result.target_->weakcount_;
@@ -346,7 +371,7 @@ class weak_intrusive_ptr final {
   template <class TTarget2, class NullType2>
   friend class weak_intrusive_ptr;
 
-  void retain() noexcept {
+  void retain_() {
     if (target_ != NullType::singleton()) {
       size_t new_weakcount = ++target_->weakcount_;
       AT_ASSERTM(
@@ -355,7 +380,7 @@ class weak_intrusive_ptr final {
     }
   }
 
-  void release() noexcept {
+  void reset_() noexcept {
     if (target_ != NullType::singleton() && --target_->weakcount_ == 0) {
       delete target_;
     }
@@ -366,9 +391,9 @@ class weak_intrusive_ptr final {
   using element_type = TTarget;
 
   explicit weak_intrusive_ptr(
-      const intrusive_ptr<TTarget, NullType>& ptr) noexcept
+      const intrusive_ptr<TTarget, NullType>& ptr)
       : target_(ptr.get()) {
-    retain();
+    retain_();
   }
 
   weak_intrusive_ptr(weak_intrusive_ptr&& rhs) noexcept : target_(rhs.target_) {
@@ -388,14 +413,14 @@ class weak_intrusive_ptr final {
     rhs.target_ = FromNullType::singleton();
   }
 
-  weak_intrusive_ptr(const weak_intrusive_ptr& rhs) noexcept
+  weak_intrusive_ptr(const weak_intrusive_ptr& rhs)
       : target_(rhs.target_) {
-    retain();
+    retain_();
   }
 
   template <class From, class FromNullType>
   /* implicit */ weak_intrusive_ptr(
-      const weak_intrusive_ptr<From, FromNullType>& rhs) noexcept
+      const weak_intrusive_ptr<From, FromNullType>& rhs)
       : target_(rhs.target_) {
     static_assert(
         std::is_convertible<From*, TTarget*>::value,
@@ -403,11 +428,11 @@ class weak_intrusive_ptr final {
     static_assert(
         NullType::singleton() == FromNullType::singleton(),
         "NullType mismatch. weak_intrusive_ptr copy constructor got pointer with differing null value.");
-    retain();
+    retain_();
   }
 
   ~weak_intrusive_ptr() noexcept {
-    release();
+    reset_();
   }
 
   weak_intrusive_ptr& operator=(weak_intrusive_ptr&& rhs) & noexcept {
@@ -424,7 +449,7 @@ class weak_intrusive_ptr final {
     static_assert(
         NullType::singleton() == FromNullType::singleton(),
         "NullType mismatch. weak_intrusive_ptr move assignment got pointer with differing null value.");
-    release();
+    reset_();
     target_ = rhs.target_;
     rhs.target_ = FromNullType::singleton();
     return *this;
@@ -436,22 +461,21 @@ class weak_intrusive_ptr final {
 
   template <class From, class FromNullType>
       weak_intrusive_ptr& operator=(
-          const weak_intrusive_ptr<From, NullType>& rhs) &
-      noexcept {
+          const weak_intrusive_ptr<From, NullType>& rhs) & {
     static_assert(
         std::is_convertible<From*, TTarget*>::value,
         "Type mismatch. weak_intrusive_ptr copy assignment got pointer of wrong type.");
     static_assert(
         NullType::singleton() == FromNullType::singleton(),
         "NullType mismatch. weak_intrusive_ptr copy assignment got pointer with differing null value.");
-    release();
+    reset_();
     target_ = rhs.target_;
-    retain();
+    retain_();
     return *this;
   }
 
   void reset() noexcept {
-    release();
+    reset_();
   }
 
   void swap(weak_intrusive_ptr& rhs) noexcept {
