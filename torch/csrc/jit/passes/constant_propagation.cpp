@@ -55,32 +55,22 @@ void propagateNode(Node* n) {
   auto graph = n->owningGraph();
   WithInsertPoint guard(n);
   for (size_t i = 0; i < outputs.size(); ++i) {
-    auto new_output = graph->insertConstant(outputs[i]);
+    auto new_output = insertConstant(*graph, outputs[i]);
     n->outputs()[i]->replaceAllUsesWith(new_output);
     // let dce elimination remove n
   }
 }
 
-void lowerIf(Block *body, Node * n) {
-  auto graph = n->owningGraph();
-  WithInsertPoint insert_point_guard { n };
-
-  std::unordered_map<Value*, Value*> value_map;
-  auto get_value = [&](Value *v) {
-    auto it = value_map.find(v);
-    if (it != value_map.end())
-      return it->second;
-    return v;
-  };
-
-  for (Node *orig : body->nodes()) {
-    Node *clone = graph->insertNode(graph->createClone(orig, get_value));
-    for (size_t i = 0; i < orig->outputs().size(); ++i) {
-      value_map[orig->outputs()[i]] = clone->outputs()[i];
-    }
+void inlineIf(Block *body, Node * n) {
+  for(auto it = body->nodes().begin(); it != body->nodes().end();) {
+    Node *body_node = *it;
+    //advance iterator because after body_node is moved its next pointer will be
+    //to n
+    it++;
+    body_node->moveBefore(n);
   }
   for (size_t i = 0; i < n->outputs().size(); ++i) {
-    n->outputs().at(i)->replaceAllUsesWith(get_value(body->outputs().at(i)));
+    n->outputs().at(i)->replaceAllUsesWith(body->outputs().at(i));
   }
   // NB: destroy the node here, because it might contain side effects, like print
   n->destroy();
@@ -91,32 +81,23 @@ bool isTrueConstant(Value *val) {
   return maybe_value && *maybe_value;
 }
 
-void lowerIf(Node *n) {
+void inlineIf(Node *n) {
   if (isTrueConstant(n->input())) {
-    lowerIf(n->blocks()[0], n);
+    inlineIf(n->blocks()[0], n);
   } else {
-    lowerIf(n->blocks()[1], n);
+    inlineIf(n->blocks()[1], n);
   }
 }
 
-//returns true if the mutated variables are changed
-bool recomputeMutatedVariables(Node *n) {
+//remove extra outputs from the node
+bool removeExtraNodeOutputs(Node *n) {
   JIT_ASSERTM(n->kind() == prim::If, "Only supported for If nodes");
-  std::unordered_set<Value*> mutated_variables;
-  for (Block * block : n->blocks()) {
-    for (Node *n : block->nodes()) {
-      for (size_t i = 0; i < n->outputs().size(); ++i) {
-        mutated_variables.insert(n->outputs()[i]);
-      }
-    }
-  }
   auto true_block = n->blocks()[0];
   auto false_block = n->blocks()[1];
   auto initial_outputs = true_block->outputs().size();
-  for (size_t i = 0; i < true_block->outputs().size();) {
-    //neither block mutates output i
-    if (!mutated_variables.count(true_block->outputs()[i]) &&
-      !mutated_variables.count(false_block->outputs()[i])) {
+  for (size_t i = 0; i < true_block->outputs().size(); ) {
+    //neither block changes the output value
+    if (true_block->outputs()[i] == false_block->outputs()[i]) {
       n->outputs().at(i)->replaceAllUsesWith(true_block->outputs()[i]);
       n->eraseOutput(i);
       true_block->eraseOutput(i);
@@ -131,54 +112,44 @@ bool recomputeMutatedVariables(Node *n) {
 
 } // anonymous namespace
 
-//returns whether the node's set of mutated variables changed
-bool ConstantPropagation(Node* n, bool recurse) {
+void ConstantPropagation(Node* n, bool recurse) {
   bool constant_inputs = (n->inputs().size() > 0) &&
     std::all_of(n->inputs().begin(), n->inputs().end(), [&](Value* v) {
       return v->node()->kind() == prim::Constant;
     });
   bool supported_node = skip_list.count(n->kind()) == 0;
   auto run_blocks = [&]() {
-    bool any_child = false;
     if (recurse) {
       for (Block * block : n->blocks()) {
-        auto child = ConstantPropagation(block, recurse);
-        any_child = any_child || child;
+        ConstantPropagation(block, recurse);
       }
     }
-    return any_child;
   };
   if (n->kind() == prim::If) {
-    //did a child node change
-    bool changed = run_blocks();
-    //inline node if we can, otherwise if a child node changed recompute
-    //mutated variables and see if this node changed
+    run_blocks();
+    //inline node if we can, otherwise check for simplified outputs
     if (constant_inputs) {
-      lowerIf(n);
-    } else if (changed) {
-      changed = recomputeMutatedVariables(n);
+      inlineIf(n);
+    } else {
+      removeExtraNodeOutputs(n);
     }
-    return constant_inputs || changed;
+    //don't rerun run_blocks
+    return;
   } else if (constant_inputs && supported_node) {
     propagateNode(n);
   }
   //TODO handle loop nodes. Even if a loop node contains an if that is
   //inlined its mutated variables currently don't get updated
   run_blocks();
-  return false;
 }
 
-//returns true if the mutated variables in this block's node have changed
-bool ConstantPropagation(Block* block, bool recurse) {
+void ConstantPropagation(Block* block, bool recurse) {
   ConstantPropagation(block->param_node(), recurse);
-  bool any_child = false;
   for(auto it = block->nodes().begin(); it != block->nodes().end();) {
     Node *n = *it;
     it++; //advance iterator bc the current node may be destroyed
-    auto child = ConstantPropagation(n, recurse);
-    any_child = any_child || child;
+    ConstantPropagation(n, recurse);
   }
-  return any_child;
 }
 
 void ConstantPropagation(std::shared_ptr<Graph>& graph) {

@@ -1212,7 +1212,7 @@ class TestJit(JitTestCase):
             else:  # -> c0, c1
                 c1 = c1 + 1
 
-            if True:  # removed
+            if True:  # inlined
                 c0 = c0 + 1  # dynamic
                 c2 = c2 + 4  # set to 5
             return a + c0 + c1 + c2
