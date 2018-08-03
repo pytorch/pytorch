@@ -2043,7 +2043,7 @@ a")
 
         @torch.jit.script
         def foo2(x):
-            return torch.cat(_constructEmptyTensorList(), dim=1)
+            return torch.cat(_construct_empty_tensor_list(), dim=1)
 
         @torch.jit.script
         def foo3(x):
@@ -2057,13 +2057,13 @@ a")
     def test_list_literal(self):
         # Python equivalents for the empty list construction builtins. We need
         # these otherwise the tests won't execute in regular Python mode.
-        def _constructEmptyIntList():
+        def _construct_empty_int_list():
             return []
 
-        def _constructEmptyFloatList():
+        def _construct_empty_float_list():
             return []
 
-        def _constructEmptyTensorList():
+        def _construct_empty_tensor_list():
             return []
 
         def reassign():
@@ -2089,13 +2089,13 @@ a")
             self.checkScript(reassign_from_empty_literal, (), optimize=True)
 
         def reassign_from_empty_builtin():
-            x = _constructEmptyIntList()
+            x = _construct_empty_int_list()
             if True:
                 x = [1, 2, 3]
-            y = _constructEmptyFloatList()
+            y = _construct_empty_float_list()
             if True:
                 y = [1.0, 2.0, 3.0]
-            z = _constructEmptyTensorList()
+            z = _construct_empty_tensor_list()
             if True:
                 z = [torch.randn([1])]
             return
@@ -2110,7 +2110,7 @@ a")
             self.checkScript(reassign_bad_type, (), optimize=True)
 
         def reassign_nested():
-            x = _constructEmptyIntList()
+            x = _construct_empty_int_list()
             if True:
                 x = [1, 2, 3]
                 if True:
