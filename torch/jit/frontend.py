@@ -146,7 +146,11 @@ def build_def(ctx, py_def):
     body = py_def.body
     r = ctx.make_range(py_def.lineno, py_def.col_offset,
                        py_def.col_offset + len("def"))
-    decl = Decl(r, build_param_list(ctx, py_def.args), None)
+    param_list = build_param_list(ctx, py_def.args)
+    return_type = None
+    if getattr(py_def, 'returns') is not None:
+        return_type = build_expr(ctx, py_def.returns)
+    decl = Decl(r, param_list, return_type)
     return Def(Ident(r, py_def.name),
                decl,
                build_stmts(ctx, body))
@@ -167,11 +171,13 @@ def build_param_list(ctx, py_args):
 def build_param(ctx, py_arg):
     # NB: In Python3 py_arg is a pair of (str arg, expr? annotation)
     #     In Python2 py_arg is a Name (Expr subclass)
-    if getattr(py_arg, 'annotation', None) is not None:
-        raise ValueError("Compiled functions don't support annotations")
     name = py_arg.id if PY2 else py_arg.arg
     r = ctx.make_range(py_arg.lineno, py_arg.col_offset, py_arg.col_offset + len(name))
-    return Param(Var(Ident(r, 'Tensor')), Ident(r, name))
+    if getattr(py_arg, 'annotation', None) is not None:
+        annotation_expr = build_expr(ctx, py_arg.annotation)
+    else:
+        annotation_expr = Var(Ident(r, 'Tensor'))
+    return Param(annotation_expr, Ident(r, name))
 
 
 class StmtBuilder(Builder):

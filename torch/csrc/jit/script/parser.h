@@ -397,9 +397,6 @@ struct Parser {
     return For::create(r, targets, itrs, body);
   }
 
-  // First return value is the TreeRef to the list of statements we've parsed.
-  // The second one is an optional Decl for if we find type annotations in a
-  // comments
   TreeRef parseStatements(bool expect_indent=true) {
     auto r = L.cur().range;
     if (expect_indent)
