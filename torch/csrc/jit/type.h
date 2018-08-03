@@ -240,6 +240,7 @@ struct TORCH_API ListType : public Type {
   // common cast List[Tensor]
   static ListTypePtr ofTensors();
   static ListTypePtr ofInts();
+  static ListTypePtr ofFloats();
 private:
   ListType(TypePtr elem)
   : Type(TypeKind::ListType), elem(elem) {}
@@ -422,9 +423,6 @@ struct NoneType : public Type {
   virtual std::string str() const override {
     return "None";
   }
-  virtual bool isSubtypeOf(const TypePtr rhs) const override {
-    return *this == *rhs;
-  }
   static const TypeKind Kind = TypeKind::NoneType;
   // global singleton
   static NoneTypePtr get();
@@ -459,5 +457,26 @@ inline TypePtr TensorType::fromNumberType(TypePtr typ) {
   }
   AT_ERROR("unknown number type", typ->str());
 }
+
+template <typename T>
+TypePtr getTypePtr() {
+#define TYPE_STR(Type) #Type, " ",
+  AT_ERROR(
+      "Type ",
+      at::demangle_type<T>(),
+      " could not be converted to any of the known types { ",
+      TH_FORALL_TYPES(TYPE_STR) "}");
+#undef TYPE_STR
+  return nullptr;
+}
+
+template<> inline TypePtr getTypePtr<at::Tensor>() { return DynamicType::get(); }
+template<> inline TypePtr getTypePtr<double>() { return FloatType::get(); }
+template<> inline TypePtr getTypePtr<int64_t>() { return IntType::get(); }
+template<> inline TypePtr getTypePtr<bool>() { return IntType::get(); }
+template<> inline TypePtr getTypePtr<at::Scalar>() { return NumberType::get(); }
+template<> inline TypePtr getTypePtr<std::vector<at::Tensor>>() { return ListType::ofTensors(); }
+template<> inline TypePtr getTypePtr<std::vector<double>>() { return ListType::ofFloats(); }
+template<> inline TypePtr getTypePtr<std::vector<int64_t>>() { return ListType::ofInts(); }
 
 }} // namespace torch::jit

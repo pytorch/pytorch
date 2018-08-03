@@ -3,6 +3,8 @@
 #define CATCH_CONFIG_MAIN
 #include "catch.hpp"
 
+using Catch::StartsWith;
+
 #else
 
 #define REQUIRE JIT_ASSERT
@@ -26,6 +28,8 @@
 #include "torch/csrc/jit/passes/shape_analysis.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
 #include "torch/csrc/jit/passes/lower_grad_of.h"
+#include "torch/csrc/jit/operator.h"
+#include "torch/csrc/jit/custom_operator.h"
 #include "torch/csrc/variable_tensor_functions.h"
 
 #include "torch/csrc/autograd/variable.h"
@@ -926,7 +930,7 @@ void testIValue() {
   JIT_ASSERT(foo2.isDouble());
   JIT_ASSERT(foo2.toDouble() == 4.0);
   JIT_ASSERT(foo->use_count() == 2);
-  JIT_ASSERT(baz.toIntList()->elements().equals({3,4,5}));
+  JIT_ASSERT(ArrayRef<int64_t>(baz.toIntList()->elements()).equals({3,4,5}));
 
   auto move_it = std::move(baz).toIntList();
   JIT_ASSERT(foo->use_count() == 2);
@@ -936,10 +940,11 @@ void testIValue() {
   IValue dlist(DoubleList::create({3.5}));
   JIT_ASSERT(
       dlist.isDoubleList() &&
-      std::move(dlist).toDoubleList()->elements().equals({3.5}));
+      ArrayRef<double>(std::move(dlist).toDoubleList()->elements())
+          .equals({3.5}));
   JIT_ASSERT(dlist.isNone());
   dlist = IValue(DoubleList::create({3.4}));
-  JIT_ASSERT(dlist.toDoubleList()->elements().equals({3.4}));
+  JIT_ASSERT(ArrayRef<double>(dlist.toDoubleList()->elements()).equals({3.4}));
   IValue the_list(Tuple::create({IValue(3.4), IValue(4), IValue(foo)}));
   JIT_ASSERT(foo->use_count() == 3);
   JIT_ASSERT(the_list.isTuple());
@@ -958,6 +963,132 @@ void testIValue() {
 void testProto() {
   ::ONNX_NAMESPACE::ModelProto proto;
   proto.set_producer_name("foo");
+}
+
+void testCustomOperators() {
+  {
+    RegisterOperators reg({createOperator(
+        "foo::bar", [](double a, at::Tensor b) { return a + b; })});
+    auto& ops = getAllOperatorsFor(Symbol::fromQualString("foo::bar"));
+    REQUIRE(ops.size() == 1);
+
+    auto& op = ops.front();
+    REQUIRE(op->schema().name == "foo::bar");
+
+    REQUIRE(op->schema().arguments.size() == 2);
+    REQUIRE(op->schema().arguments[0].name == "_0");
+    REQUIRE(op->schema().arguments[0].type->kind() == TypeKind::FloatType);
+    REQUIRE(op->schema().arguments[1].name == "_1");
+    REQUIRE(op->schema().arguments[1].type->kind() == TypeKind::DynamicType);
+
+    REQUIRE(op->schema().returns.size() == 1);
+    REQUIRE(op->schema().returns[0].type->kind() == TypeKind::DynamicType);
+
+    Stack stack;
+    push(stack, 2.0f, at::ones(5));
+    op->getOperation()(stack);
+    at::Tensor output;
+    pop(stack, output);
+
+    REQUIRE(output.allclose(at::full(5, 3.0f)));
+  }
+  {
+    RegisterOperators reg({createOperator(
+        "foo::bar_with_schema(float a, Tensor b) -> Tensor",
+        [](double a, at::Tensor b) { return a + b; })});
+
+    auto& ops =
+        getAllOperatorsFor(Symbol::fromQualString("foo::bar_with_schema"));
+    REQUIRE(ops.size() == 1);
+
+    auto& op = ops.front();
+    REQUIRE(op->schema().name == "foo::bar_with_schema");
+
+    REQUIRE(op->schema().arguments.size() == 2);
+    REQUIRE(op->schema().arguments[0].name == "a");
+    REQUIRE(op->schema().arguments[0].type->kind() == TypeKind::FloatType);
+    REQUIRE(op->schema().arguments[1].name == "b");
+    REQUIRE(op->schema().arguments[1].type->kind() == TypeKind::DynamicType);
+
+    REQUIRE(op->schema().returns.size() == 1);
+    REQUIRE(op->schema().returns[0].type->kind() == TypeKind::DynamicType);
+
+    Stack stack;
+    push(stack, 2.0f, at::ones(5));
+    op->getOperation()(stack);
+    at::Tensor output;
+    pop(stack, output);
+
+    REQUIRE(output.allclose(at::full(5, 3.0f)));
+  }
+  {
+    // Check that lists work well.
+    RegisterOperators reg({createOperator(
+        "foo::lists(int[] ints, float[] floats, Tensor[] tensors) -> float[]",
+        [](const std::vector<int64_t>& ints,
+           const std::vector<double>& floats,
+           std::vector<at::Tensor> tensors) { return floats; })});
+
+    auto& ops =
+        getAllOperatorsFor(Symbol::fromQualString("foo::lists"));
+    REQUIRE(ops.size() == 1);
+
+    auto& op = ops.front();
+    REQUIRE(op->schema().name == "foo::lists");
+
+    REQUIRE(op->schema().arguments.size() == 3);
+    REQUIRE(op->schema().arguments[0].name == "ints");
+    REQUIRE(op->schema().arguments[0].type->isSubtypeOf(ListType::ofInts()));
+    REQUIRE(op->schema().arguments[1].name == "floats");
+    REQUIRE(op->schema().arguments[1].type->isSubtypeOf(ListType::ofFloats()));
+    REQUIRE(op->schema().arguments[2].name == "tensors");
+    REQUIRE(op->schema().arguments[2].type->isSubtypeOf(ListType::ofTensors()));
+
+    REQUIRE(op->schema().returns.size() == 1);
+    REQUIRE(op->schema().returns[0].type->isSubtypeOf(ListType::ofFloats()));
+
+    Stack stack;
+    push(stack, std::vector<int64_t>{1, 2});
+    push(stack, std::vector<double>{1.0, 2.0});
+    push(stack, std::vector<at::Tensor>{at::ones(5)});
+    op->getOperation()(stack);
+    std::vector<double> output;
+    pop(stack, output);
+
+    REQUIRE(output.size() == 2);
+    REQUIRE(output[0] == 1.0);
+    REQUIRE(output[1] == 2.0);
+  }
+  {
+#ifdef USE_CATCH
+    REQUIRE_THROWS_WITH(
+        createOperator(
+            "foo::bar_with_bad_schema(Tensor a) -> Tensor",
+            [](double a, at::Tensor b) { return a + b; }),
+        StartsWith("Inferred 2 argument(s) for operator implementation, "
+                   "but the provided schema specified 1 argument(s)."));
+    REQUIRE_THROWS_WITH(
+        createOperator(
+            "foo::bar_with_bad_schema(Tensor a) -> Tensor",
+            [](double a) { return a; }),
+        StartsWith("Inferred type for argument #0 was float, "
+                   "but the provided schema specified type Dynamic "
+                   "for the argument in that position"));
+    REQUIRE_THROWS_WITH(
+        createOperator(
+            "foo::bar_with_bad_schema(float a) -> (float, float)",
+            [](double a) { return a; }),
+        StartsWith("Inferred 1 return value(s) for operator implementation, "
+                   "but the provided schema specified 2 return value(s)."));
+    REQUIRE_THROWS_WITH(
+        createOperator(
+            "foo::bar_with_bad_schema(float a) -> Tensor",
+            [](double a) { return a; }),
+        StartsWith("Inferred type for return value #0 was float, "
+                   "but the provided schema specified type Dynamic "
+                   "for the return value in that position"));
+#endif // USE_CATCH
+  }
 }
 
 TORCH_API std::string runJITCPPTests() {
@@ -980,6 +1111,7 @@ TORCH_API std::string runJITCPPTests() {
   argumentSpecTest();
   shapeAnalysisTest();
   testProto();
+  testCustomOperators();
   return out.str();
 }
 
@@ -1006,6 +1138,8 @@ TEST_CASE( "jit test CPU", "[cpu]" ) {
     attributesTest();
   SECTION( "interned strings" )
     internedStringsTests();
+  SECTION( "custom operators" )
+    testCustomOperators();
 }
 
 TEST_CASE( "jit test CUDA", "[cuda]" ) {

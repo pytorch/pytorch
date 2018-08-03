@@ -43,7 +43,7 @@ class DestructableMock : public intrusive_ptr_target {
     *wasDestructed_ = true;
   }
 
-  void release_resources() const override {
+  void release_resources() override {
     *resourcesReleased_ = true;
   }
 
@@ -1415,6 +1415,44 @@ TEST(IntrusivePtrTest, givenCopyAssignedPtr_whenReassigningCopy_thenIsUnique) {
   obj2 = make_intrusive<SomeClass>();
   EXPECT_TRUE(obj.unique());
   EXPECT_TRUE(obj2.unique());
+}
+
+TEST(IntrusivePtrTest, givenPtr_whenReleasedAndReclaimed_thenDoesntCrash) {
+  intrusive_ptr<SomeClass> obj = make_intrusive<SomeClass>();
+  SomeClass* ptr = obj.release();
+  intrusive_ptr<SomeClass> reclaimed = intrusive_ptr<SomeClass>::reclaim(ptr);
+}
+
+TEST(
+    IntrusivePtrTest,
+    givenPtr_whenReleasedAndReclaimed_thenIsDestructedAtEnd) {
+  bool resourcesReleased = false;
+  bool wasDestructed = false;
+  {
+    intrusive_ptr<DestructableMock> outer;
+    {
+      intrusive_ptr<DestructableMock> inner =
+          make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
+      DestructableMock* ptr = inner.release();
+      EXPECT_FALSE(resourcesReleased);
+      EXPECT_FALSE(wasDestructed);
+      outer = intrusive_ptr<DestructableMock>::reclaim(ptr);
+    }
+    // inner is destructed
+    EXPECT_FALSE(resourcesReleased);
+    EXPECT_FALSE(wasDestructed);
+  }
+  // outer is destructed
+  EXPECT_TRUE(resourcesReleased);
+  EXPECT_TRUE(wasDestructed);
+}
+
+TEST(IntrusivePtrTest, givenStackObject_whenReclaimed_thenCrashes) {
+  // This would cause very weird bugs on destruction.
+  // Better to crash early on creation.
+  SomeClass obj;
+  intrusive_ptr<SomeClass> ptr;
+  EXPECT_ANY_THROW(ptr = intrusive_ptr<SomeClass>::reclaim(&obj));
 }
 
 namespace {

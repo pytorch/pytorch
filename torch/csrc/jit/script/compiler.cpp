@@ -64,19 +64,25 @@ struct PrintValue : public SugaredValue {
   }
 };
 
-static Value* numToTensor(const SourceRange& loc, Value* value) {
+static Value* typeCast(const SourceRange& loc, Value* value, TypePtr dst) {
   auto& graph = *value->owningGraph();
-  auto n = graph.insertNode(graph.createNumToTensor(value))
-      ->setSourceLocation(std::make_shared<SourceRange>(loc));
-  return n->output();
-}
+  const TypePtr orig = value->type();
+  Node* n = nullptr;
 
-static Value* tensorToNum(
-    const SourceRange& loc,
-    Value* value,
-    const TypePtr type) {
-  auto& graph = *value->owningGraph();
-  auto* result = graph.insertNode(graph.createTensorToNum(type, value))
+  if(dst->isSubtypeOf(DynamicType::get()) && orig->isSubtypeOf(NumberType::get())) {
+    n = graph.createNumToTensor(value);
+  } else if (dst->isSubtypeOf(NumberType::get()) && orig->isSubtypeOf(DynamicType::get())) {
+    n = graph.createTensorToNum(dst, value);
+  } else if(dst->isSubtypeOf(IntType::get()) && orig->isSubtypeOf(FloatType::get())) {
+    n = graph.createFloatToInt(value);
+  } else if(dst->isSubtypeOf(FloatType::get()) && orig->isSubtypeOf(IntType::get())) {
+    n = graph.createIntToFloat(value);
+  } else {
+    throw ErrorReport(loc) << "Cannot cast type '" << orig->str() << "' to type '"
+      << dst->str() << "'.";
+  }
+
+  auto* result = graph.insertNode(n)
       ->setSourceLocation(std::make_shared<SourceRange>(loc))
       ->output();
   return result;
@@ -104,15 +110,7 @@ struct CastValue : public SugaredValue {
       auto values = toValues(inputs);
       Value* input = values.at(0);
       if(!input->type()->isSubtypeOf(type)) {
-        if(*type == *DynamicType::get()) {
-          if(!input->type()->isSubtypeOf(NumberType::get())) {
-            throw ErrorReport(loc) << "expected a number";
-          }
-          input = numToTensor(loc, input);
-        } else {
-          ensureTensors(loc, values);
-          input = tensorToNum(loc, values.at(0), type);
-        }
+          input = typeCast(loc, input, type);
       }
       return std::make_shared<SimpleValue>(input);
   }
@@ -365,7 +363,7 @@ Value* createNumber(Graph& g, const SourceRange& loc, const at::Tensor& val) {
 at::optional<std::vector<int64_t>> getIntListAttribute(at::optional<int32_t> N, Value* input) {
   auto list = constant_as<Shared<jit::IntList>>(input);
   if(list)
-    return list.value()->elements().vec();
+    return list.value()->elements();
 
   // broadcast IntList[3] with value 4 -> {4, 4, 4}
   if(!N)
@@ -840,7 +838,7 @@ private:
   Value* emitCond(Expr cond) {
     Value* v = emitExpr(cond, identity);
     if(v->type()->isSubtypeOf(DynamicType::get())) {
-      v = tensorToNum(cond.range(), v, IntType::get());
+      v = typeCast(cond.range(), v, IntType::get());
     }
     if(!v->type()->isSubtypeOf(IntType::get())) {
       throw ErrorReport(cond) << "expected a tensor or integer expression for condition but found " << v->type()->str();
@@ -1380,7 +1378,20 @@ private:
       case TK_LIST_LITERAL: {
         auto ll = ListLiteral(tree);
         auto values = getValues(ll.inputs(), /*maybe_unpack=*/true, identity);
-        return graph->insertNode(graph->createTuple(values))->output();
+        if (values.size() == 0) {
+          throw ErrorReport(tree) << "Empty list literals not allowed. "
+                                  << "Use _constructEmptyFooList() instead";
+        }
+        const auto elem_type = values.at(0)->type();
+        for (auto v : values) {
+          if (v->type() != elem_type) {
+            throw ErrorReport(tree)
+                << "Lists must contain only a single type, expected: "
+                << *elem_type << " but found " << *v->type() << " instead";
+          }
+        }
+        return graph->insertNode(graph->createList(elem_type, values))
+            ->output();
       } break;
       case TK_TUPLE_LITERAL: {
         auto ll = TupleLiteral(tree);

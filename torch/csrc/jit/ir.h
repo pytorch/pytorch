@@ -1029,6 +1029,18 @@ public:
     result->output()->setType(type);
     return result;
   }
+  Node* createIntToFloat(Value* value) {
+    JIT_ASSERT(*value->type() == *IntType::get());
+    auto* result = create(prim::IntToFloat, {value});
+    result->output()->setType(FloatType::get());
+    return result;
+  }
+  Node* createFloatToInt(Value* value) {
+    JIT_ASSERT(*value->type() == *FloatType::get());
+    auto* result = create(prim::FloatToInt, {value});
+    result->output()->setType(IntType::get());
+    return result;
+  }
   Node* createPythonOp(
       THPObjectPtr&& pyobj,
       const std::string& cconv,

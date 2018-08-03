@@ -3185,6 +3185,8 @@ class TestTorch(TestCase):
         torch.sort(x, out=(res2val, res2ind))
         self.assertEqual(res1val, res2val, 0)
         self.assertEqual(res1ind, res2ind, 0)
+        self.assertEqual(torch.argsort(x), res1ind)
+        self.assertEqual(x.argsort(), res1ind)
 
         # Test sorting of random numbers
         self.assertIsOrdered('ascending', x, res2val, res2ind, 'random')
@@ -3211,6 +3213,8 @@ class TestTorch(TestCase):
         torch.sort(x, x.dim() - 1, True, out=(res2val, res2ind))
         self.assertEqual(res1val, res2val, 0)
         self.assertEqual(res1ind, res2ind, 0)
+        self.assertEqual(torch.argsort(x, x.dim() - 1, True), res1ind)
+        self.assertEqual(x.argsort(x.dim() - 1, True), res1ind)
 
         # Test sorting of random numbers
         self.assertIsOrdered('descending', x, res2val, res2ind, 'random')

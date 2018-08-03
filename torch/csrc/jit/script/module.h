@@ -275,13 +275,13 @@ struct Module {
     return modules.get(name).module;
   }
 
-  const detail::OrderedDict<std::string, NamedModule>& get_modules() const {
+  const torch::detail::OrderedDict<std::string, NamedModule>& get_modules() const {
     return modules;
   }
-  const detail::OrderedDict<std::string, NamedParameter>& get_parameters() const {
+  const torch::detail::OrderedDict<std::string, NamedParameter>& get_parameters() const {
     return parameters;
   }
-  const detail::OrderedDict<std::string, std::unique_ptr<Method>>& get_methods() const {
+  const torch::detail::OrderedDict<std::string, std::unique_ptr<Method>>& get_methods() const {
     return methods;
   }
 
@@ -304,9 +304,9 @@ struct Module {
   // it is only legal to _add_ new modules and parameters.
   // removing them will allow member_inputs to point to invalid parameters
   // no such restriction exists for methods
-  detail::OrderedDict<std::string, NamedModule> modules;
-  detail::OrderedDict<std::string, NamedParameter> parameters;
-  detail::OrderedDict<std::string, std::unique_ptr<Method>> methods;
+  torch::detail::OrderedDict<std::string, NamedModule> modules;
+  torch::detail::OrderedDict<std::string, NamedParameter> parameters;
+  torch::detail::OrderedDict<std::string, std::unique_ptr<Method>> methods;
   bool optimize;
 };
 
