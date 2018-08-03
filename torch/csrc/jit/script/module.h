@@ -7,6 +7,7 @@
 #include "torch/csrc/jit/function_schema.h"
 #include "torch/csrc/jit/assertions.h"
 #include "torch/csrc/jit/named_value.h"
+#include "torch/csrc/jit/source_range.h"
 
 #include <torch/csrc/api/include/torch/detail/ordered_dict.h>
 
@@ -34,8 +35,6 @@ namespace torch { namespace jit { namespace script {
 //     ...
 // Note: because Method/Module are exposed to python these
 // classes use python method naming conventions
-
-struct SourceRange;
 
 struct Method {
   Method(std::string name, bool optimize,
