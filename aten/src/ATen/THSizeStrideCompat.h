@@ -14,7 +14,7 @@ static inline at::IntList get_intlist_size_th(IntList sizes) {
   static int64_t one = 1;
   if (sizes.size() == 0) {
     // fake scalar
-    return IntList({one});
+    return IntList(&one, 1);
   } else {
     return sizes;
   }
