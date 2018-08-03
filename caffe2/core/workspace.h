@@ -73,8 +73,7 @@ class Workspace {
    * and is responsible for making sure that its lifetime is longer than the
    * created workspace.
    */
-  explicit Workspace(Workspace* shared)
-      : Workspace(".", shared) {}
+  explicit Workspace(Workspace* shared) : Workspace(".", shared) {}
 
   /**
    * Initializes workspace with parent workspace, blob name remapping
@@ -295,10 +294,10 @@ class Workspace {
    * This function is thread safe and there is no race condition between
    * workspaces being passed to f in this thread and destroyed in another.
    */
-  template<typename F>
+  template <typename F>
   static void ForEach(F f) {
     std::lock_guard<std::mutex> guard(wsmutex_);
-    for (Workspace *ws : workspaces_) {
+    for (Workspace* ws : workspaces_) {
       f(ws);
     }
   }

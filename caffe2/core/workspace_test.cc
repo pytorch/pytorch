@@ -1,9 +1,9 @@
 #include <iostream>
 
-#include "caffe2/core/operator.h"
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include "caffe2/core/operator.h"
 
 namespace caffe2 {
 
@@ -120,8 +120,7 @@ TEST(WorkspaceTest, BlobMapping) {
 
 static std::vector<Workspace*> collectForEach() {
   std::vector<Workspace*> workspaces;
-  Workspace::ForEach(
-    [&](Workspace* ws) { workspaces.push_back(ws); });
+  Workspace::ForEach([&](Workspace* ws) { workspaces.push_back(ws); });
   return workspaces;
 }
 
