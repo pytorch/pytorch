@@ -80,5 +80,9 @@ ListTypePtr ListType::ofInts() {
   static auto value = ListType::create(IntType::get());
   return value;
 }
+ListTypePtr ListType::ofFloats() {
+  static auto value = ListType::create(FloatType::get());
+  return value;
+}
 
 }} // namespace torch::jit
