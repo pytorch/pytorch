@@ -141,6 +141,7 @@ struct Method {
   }
 
   const FunctionSchema& getSchema() const noexcept {
+    AT_ASSERT(schema != nullptr);
     return *schema;
   }
 
