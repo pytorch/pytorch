@@ -6,6 +6,7 @@ namespace torch { namespace autograd {
 struct VariableHooks : public at::VariableHooksInterface {
   VariableHooks(at::VariableHooksArgs) {}
   void registerVariableTypeFor(at::Context*, at::Backend, at::ScalarType) const override;
+  at::Type& getVariableType(const at::Type&) const override;
 };
 
 // Sigh, the registry doesn't support namespaces :(
@@ -18,6 +19,10 @@ REGISTER_VARIABLE_HOOKS(VariableHooks)
 void VariableHooks::registerVariableTypeFor(at::Context* context, at::Backend backend, at::ScalarType scalar_type) const {
   auto* baseType = context->getTypeRaw(backend, scalar_type);
   register_variable_type_for(baseType);
+}
+
+at::Type& VariableHooks::getVariableType(const at::Type& baseType) const {
+  return *VariableType::getType(baseType);
 }
 
 }} // torch::autograd

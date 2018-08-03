@@ -21,7 +21,7 @@ namespace detail {
 }
 
 ${Tensor}::${Tensor}(${THTensor} * tensor)
-: TensorImpl(&globalContext().getType(Backend::${Backend},ScalarType::${ScalarName}), tensor)
+: TensorImpl(&globalContext().getType(Backend::${Backend},ScalarType::${ScalarName}), Backend::${Backend}, ScalarType::${ScalarName}, tensor, /* is variable */ false)
 {}
 
 ${TensorDenseOrSparse}

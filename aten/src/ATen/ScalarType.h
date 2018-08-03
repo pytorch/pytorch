@@ -79,6 +79,8 @@ static inline const char * toString(Backend b) {
     case Backend::CUDA: return "CUDA";
     case Backend::SparseCPU: return "SparseCPU";
     case Backend::SparseCUDA: return "SparseCUDA";
+    case Backend::Undefined: return "Undefined";
+    case Backend::NumOptions: return "NumOptions";
     default: return "UNKNOWN_BACKEND";
   }
 }
@@ -95,8 +97,9 @@ static inline const char * toString(ScalarType t) {
 
   switch(t) {
     AT_FORALL_SCALAR_TYPES(DEFINE_CASE)
-    default:
-      return "UNKNOWN_SCALAR";
+    case ScalarType::Undefined: return "Undefined";
+    case ScalarType::NumOptions: return "NumOptions";
+    default: return "UNKNOWN_SCALAR";
   }
 #undef DEFINE_CASE
 }

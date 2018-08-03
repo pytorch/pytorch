@@ -39,7 +39,7 @@ public:
   }
   Type & getType(Backend p, ScalarType s) {
     auto* type = getTypeOpt(p, s);
-    if (!type) AT_ERROR(toString(p), toString(s), "Type is not enabled.");
+    if (!type) AT_ERROR("Type for ", toString(p), " ", toString(s), " is not enabled.");
     return *type;
   }
   Generator & defaultGenerator(Backend p) {
