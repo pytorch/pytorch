@@ -1,6 +1,6 @@
 #pragma once
 #include "ATen/Config.h"
-#include "ATen/Half.h"
+#include "ATen/core/Half.h"
 
 // Defines the accumulation type for a scalar type.
 // Example:

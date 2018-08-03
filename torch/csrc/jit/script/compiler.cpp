@@ -10,7 +10,7 @@
 
 #include "torch/csrc/jit/constants.h"
 
-#include "ATen/optional.h"
+#include "ATen/core/optional.h"
 
 
 #include <climits>

@@ -2,6 +2,8 @@
 
 // ${generated_comment}
 
+#include "ATen/Device.h"
+#include "ATen/Layout.h"
 #include "ATen/Scalar.h"
 #include "ATen/ScalarType.h"
 #include "ATen/SparseTensorRef.h"
@@ -9,9 +11,7 @@
 #include "ATen/TensorAccessor.h"
 #include "ATen/TensorBase.h"
 #include "ATen/TensorImpl.h"
-#include "ATen/Device.h"
-#include "ATen/Layout.h"
-#include "ATen/optional.h"
+#include "ATen/core/optional.h"
 
 namespace at {
 struct Generator;

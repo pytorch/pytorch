@@ -1,6 +1,6 @@
 #include "ATen/ATen.h"
-#include "ATen/Error.h"
 #include "ATen/NativeFunctions.h"
+#include "ATen/core/Error.h"
 
 #include <THC/THCGeneral.h>
 #include <THC/THCThrustAllocator.cuh>
