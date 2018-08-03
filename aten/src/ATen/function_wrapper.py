@@ -304,7 +304,7 @@ CHECKED_CAST = {
     'THSize*': CodeTemplate('THLongStorageView ${result_name}(${arg_name}, THLongStorageViewKind::SIZE);'),
     # This is a cast done via direct-construction
     'THStride*': CodeTemplate('THLongStorageView ${result_name}(${arg_name}, THLongStorageViewKind::STRIDE);'),
-    'IntListSize': CodeTemplate('std::vector<int64_t> ${result_name} = get_intlist_size_th(${arg_name});'),
+    'IntListSize': CodeTemplate('at::IntList ${result_name} = get_intlist_size_th(${arg_name});'),
     'IntListStride': CodeTemplate('at::IntList ${result_name} = get_intlist_stride_th(${arg_name});'),
     'real': CodeTemplate('${arg_name}.to${ScalarName}()'),
     'accreal': CodeTemplate('${arg_name}.to${AccScalarName}()'),

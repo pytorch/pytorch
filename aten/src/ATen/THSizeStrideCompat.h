@@ -10,12 +10,13 @@
 
 namespace at {
 
-static inline std::vector<int64_t> get_intlist_size_th(IntList sizes) {
+static inline at::IntList get_intlist_size_th(IntList sizes) {
+  static int64_t one = 1;
   if (sizes.size() == 0) {
     // fake scalar
-    return std::vector<int64_t>({1});
+    return IntList({one});
   } else {
-    return sizes.vec();
+    return sizes;
   }
 }
 
