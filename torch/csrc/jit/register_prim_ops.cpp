@@ -310,8 +310,87 @@ RegisterOperators reg({
     };                                                                 \
   }),
 
+// Operators that take two lists and return a bool
+#define DEFINE_LIST_COMPARISON_OP(aten_op, impl_name) \
+  Operator("aten::" #aten_op "(int[] a, int[] b) -> int", impl_name<Shared<IntList>>), \
+  Operator("aten::" #aten_op "(float[] a, float[] b) -> int", impl_name<Shared<DoubleList>>), \
+  Operator("aten::" #aten_op "(Tensor[] a, Tensor[] b) -> int", impl_name<Shared<TensorList>>),
+
+// Operators that take two lists and return a list of the same type
+#define DEFINE_LIST_FUNCTIONAL_OP(aten_op, impl_name) \
+  Operator("aten::" #aten_op "(int[] a, int[] b) -> int[]", impl_name<Shared<IntList>, int64_t>), \
+  Operator("aten::" #aten_op "(float[] a, float[] b) -> float[]", impl_name<Shared<DoubleList>, double>), \
+  Operator("aten::" #aten_op "(Tensor[] a, Tensor[] b) -> Tensor[]", impl_name<Shared<TensorList>, at::Tensor>),
+
+
+template <typename T>
+Operation listEq(Node* node) {
+  return [=](Stack& stack) {
+    T a;
+    T b;
+    pop(stack, a, b);
+    if (a->elements().equals(b->elements())) {
+      push(stack, 1);
+    } else {
+      push(stack, 0);
+    }
+    return 0;
+  };
+}
+
+// Specialization for at::Tensor, since it doesn't define operator==
+template <>
+Operation listEq<Shared<TensorList>>(Node* node) {
+  return [=](Stack& stack) {
+    Shared<TensorList> a;
+    Shared<TensorList> b;
+    pop(stack, a, b);
+    if (a->elements().size() != b->elements().size()) {
+      push(stack, 0);
+      return 0;
+    }
+
+    for (size_t i = 0; i < a->elements().size(); ++i) {
+      const auto& a_element = a->elements()[i];
+      const auto& b_element = b->elements()[i];
+      if (!a_element.equal(b_element)) {
+        push(stack, 0);
+        return 0;
+      }
+    }
+
+    return 0;
+  };
+}
+
+template <class TList, class TElement>
+Operation listAdd(Node* node) {
+  return [=](Stack& stack) {
+    TList a;
+    TList b;
+    pop(stack, a, b);
+
+    std::vector<TElement> ret;
+    const auto total_size = a->elements().size() + b->elements().size();
+    ret.reserve(total_size);
+    for (const auto& a_element : a->elements()) {
+      ret.push_back(a_element);
+    }
+    for (const auto& b_element : b->elements()) {
+      ret.push_back(b_element);
+    }
+
+    push(stack, ret);
+    return 0;
+  };
+}
+
 RegisterOperators reg2({
     DEFINE_BINARY_OP(aten::add, a + b)
+
+    DEFINE_LIST_COMPARISON_OP(eq, listEq)
+    DEFINE_LIST_FUNCTIONAL_OP(add, listAdd)
+
     DEFINE_BINARY_OP(aten::sub, a - b)
     DEFINE_BINARY_OP(aten::mul, a * b)
     DEFINE_BINARY_OP(aten::div, a / b)

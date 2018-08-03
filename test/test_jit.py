@@ -107,6 +107,20 @@ def get_fn(file_name, script_path):
     return fn
 
 
+# Python equivalents for the empty list construction builtins. We need
+# these otherwise the tests won't execute in regular Python mode.
+def _construct_empty_int_list():
+    return []
+
+
+def _construct_empty_float_list():
+    return []
+
+
+def _construct_empty_tensor_list():
+    return []
+
+
 class JitTestCase(TestCase):
     _do_cuda_memory_leak_check = True
 
@@ -2057,17 +2071,6 @@ a")
             canonical(foo3.graph))
 
     def test_list_literal(self):
-        # Python equivalents for the empty list construction builtins. We need
-        # these otherwise the tests won't execute in regular Python mode.
-        def _construct_empty_int_list():
-            return []
-
-        def _construct_empty_float_list():
-            return []
-
-        def _construct_empty_tensor_list():
-            return []
-
         def reassign():
             x = [1]
             if True:
@@ -2120,6 +2123,37 @@ a")
             return
         with self.assertRaisesRegex(RuntimeError, "previously has type"):
             self.checkScript(reassign_nested, (), optimize=True)
+
+    def test_list_ops(self):
+        def test_equality():
+            a = [1, 2, 3]
+            b = [1, 2, 3]
+            return a == b
+
+        self.checkScript(test_equality, (), optimize=True)
+
+        def test_non_equality():
+            a = [1, 2, 3]
+            b = [3]
+            return a == b
+
+        self.checkScript(test_non_equality, (), optimize=True)
+
+        def test_list_add():
+            a = [1, 2, 3]
+            b = [2]
+            c = a + b
+            return c == [1, 2, 3, 2]
+
+        self.checkScript(test_list_add, (), optimize=True)
+
+        def test_list_add_empty():
+            a = [1, 2, 3]
+            b = _construct_empty_int_list()
+            c = a + b
+            return c == [1, 2, 3]
+
+        self.checkScript(test_list_add_empty, (), optimize=True)
 
     def test_func_call(self):
         script = '''
