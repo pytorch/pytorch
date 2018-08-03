@@ -1382,9 +1382,16 @@ private:
         auto values = getValues(ll.inputs(), /*maybe_unpack=*/true, identity);
         if (values.size() == 0) {
           throw ErrorReport(tree) << "Empty list literals not allowed. "
-                                  << "Use _constructEmptyFooList() instead.";
+                                  << "Use _constructEmptyFooList() instead";
         }
         const auto elem_type = values.at(0)->type();
+        for (auto v : values) {
+          if (v->type() != elem_type) {
+            throw ErrorReport(tree)
+                << "Lists must contain only a single type, expected: "
+                << *elem_type << " but found " << *v->type() << " instead";
+          }
+        }
         return graph->insertNode(graph->createList(elem_type, values))
             ->output();
       } break;
