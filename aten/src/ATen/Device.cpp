@@ -1,6 +1,6 @@
 #include <ATen/Device.h>
 
-#include <ATen/Error.h>
+#include <ATen/core/Error.h>
 
 #include <exception>
 #include <ostream>

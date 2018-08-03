@@ -1,7 +1,6 @@
 #pragma once
 
 #include <ATen/Registry.h>
-#include <ATen/Error.h>
 #include <ATen/ScalarType.h>
 
 namespace at {
