@@ -21,6 +21,7 @@ _(NumberType) \
 _(FloatType) \
 _(IntType) \
 _(NoneType) \
+_(StringType) \
 
 enum class TypeKind {
 #define DEFINE_TYPE(T) T,
@@ -380,6 +381,31 @@ struct TORCH_API IntType : public Type {
 private:
   IntType()
   : Type(TypeKind::IntType) {}
+};
+
+struct StringType;
+using StringTypePtr = std::shared_ptr<StringType>;
+// This node represents a Python string value
+struct TORCH_API StringType : public Type {
+  template<typename ... T>
+  static StringTypePtr create( T&& ... all ) {
+    return StringTypePtr(new StringType( std::forward<T>(all)... ));
+  }
+  bool operator==(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
+  std::string str() const override {
+    return "string";
+  }
+  bool isSubtypeOf(const TypePtr rhs) const override {
+    return *this == *rhs;
+  }
+  static const TypeKind Kind = TypeKind::StringType;
+  // global singleton
+  static StringTypePtr get();
+private:
+  StringType()
+  : Type(TypeKind::StringType) {}
 };
 
 struct NoneType;

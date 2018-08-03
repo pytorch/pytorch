@@ -191,6 +191,7 @@ def gen_jit_dispatch(declarations, out, template_path):
         kw_assignments = []
         arguments = []
         num_inputs = len(decl['arguments'])
+        op_capture = ''
 
         real_inputs = 0
         for arg in decl['arguments']:
@@ -208,7 +209,8 @@ def gen_jit_dispatch(declarations, out, template_path):
         constructor = CONSTRUCTOR.substitute(name=decl['name'],
                                              call=call,
                                              kw_assignments=kw_assignments,
-                                             num_inputs=num_inputs)
+                                             num_inputs=num_inputs,
+                                             op_capture=op_capture)
         return constructor
 
     # This function declares an order on declarations. This is necessary because

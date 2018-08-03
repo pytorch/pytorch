@@ -115,7 +115,6 @@ THC_API void THCTensor_(unsqueeze1d)(THCState *state, THCTensor *self, THCTensor
 THC_API int THCTensor_(isContiguous)(THCState *state, const THCTensor *self);
 THC_API int THCTensor_(isSameSizeAs)(THCState *state, const THCTensor *self, const THCTensor *src);
 THC_API int THCTensor_(isSetTo)(THCState *state, const THCTensor *self, const THCTensor *src);
-THC_API int THCTensor_(isSize)(THCState *state, const THCTensor *self, const THLongStorage *dims);
 THC_API ptrdiff_t THCTensor_(nElement)(THCState *state, const THCTensor *self);
 
 THC_API void THCTensor_(retain)(THCState *state, THCTensor *self);

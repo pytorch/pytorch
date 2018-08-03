@@ -53,7 +53,7 @@ BlobFeederBase::~BlobFeederBase() {}
 
 CAFFE_DEFINE_TYPED_REGISTRY(
     BlobFetcherRegistry,
-    CaffeTypeId,
+    TypeIdentifier,
     BlobFetcherBase,
     std::unique_ptr);
 CAFFE_DEFINE_TYPED_REGISTRY(
@@ -82,7 +82,7 @@ static_assert(
     "We make an assumption that int is always int32 for numpy "
     "type mapping.");
 int CaffeToNumpyType(const TypeMeta& meta) {
-  static std::map<CaffeTypeId, int> numpy_type_map{
+  static std::map<TypeIdentifier, int> numpy_type_map{
       {TypeMeta::Id<bool>(), NPY_BOOL},
       {TypeMeta::Id<double>(), NPY_DOUBLE},
       {TypeMeta::Id<float>(), NPY_FLOAT},

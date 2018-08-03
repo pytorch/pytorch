@@ -532,7 +532,7 @@ class TestDataLoader(TestCase):
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @unittest.skipIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")
     def test_main_process_unclean_exit(self):
-        r'''There might be ConnectionResetError or leaked semaphore warning (due to dirty process exit), \
+        '''There might be ConnectionResetError or leaked semaphore warning (due to dirty process exit), \
 but they are all safe to ignore'''
         worker_pids = mp.Array('i', [0] * 4)
 

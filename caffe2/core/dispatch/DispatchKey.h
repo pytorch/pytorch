@@ -16,8 +16,8 @@ struct TensorParameterDispatchKey final {
   // note: This dispatch key structure is not final yet and will change. Don't rely on it.
   DeviceTypeId deviceTypeId;
   LayoutId layoutId;
-  // TODO Move this CaffeTypeId to c10 namespace
-  caffe2::CaffeTypeId dataType;
+  // TODO Move this TypeIdentifier to c10 namespace
+  caffe2::TypeIdentifier dataType;
 };
 inline constexpr bool operator==(const TensorParameterDispatchKey& lhs, const TensorParameterDispatchKey& rhs) {
   return lhs.deviceTypeId == rhs.deviceTypeId && lhs.layoutId == rhs.layoutId && lhs.dataType == rhs.dataType;
@@ -34,7 +34,7 @@ namespace std {
   struct hash<c10::details::TensorParameterDispatchKey> {
     // TODO constexpr hashing
     size_t operator()(const c10::details::TensorParameterDispatchKey& obj) const {
-      return std::hash<c10::DeviceTypeId>()(obj.deviceTypeId) ^ std::hash<c10::LayoutId>()(obj.layoutId) ^ std::hash<caffe2::CaffeTypeId>()(obj.dataType);
+      return std::hash<c10::DeviceTypeId>()(obj.deviceTypeId) ^ std::hash<c10::LayoutId>()(obj.layoutId) ^ std::hash<caffe2::TypeIdentifier>()(obj.dataType);
     }
   };
 }  // namespace std

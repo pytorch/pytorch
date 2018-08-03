@@ -46,9 +46,19 @@ struct PrintValue : public SugaredValue {
       auto& g = *m.graph();
       if (!attributes.empty())
         throw ErrorReport(loc) << "print doesn't accept any keyword arguments";
-      auto values = toValues(inputs);
-      ensureTensors(loc, values);
-      g.insertNode(g.create(prim::Print, values, 0)
+
+      //temporary hack to allow print statements to work in python 2, where
+      //print(a, b) is treated as a (a, b) tuple input.
+
+      std::vector<Value*> lowered_inputs = toValues(inputs);
+      if(lowered_inputs.size() == 1 && lowered_inputs.at(0)->node()->kind() == prim::TupleConstruct) {
+        auto input = lowered_inputs[0];
+        for(size_t j = 0; j < input->node()->inputs().size(); ++j) {
+          lowered_inputs.insert(lowered_inputs.begin() + 1 + j, input->node()->inputs().at(j));
+        }
+        lowered_inputs.erase(lowered_inputs.begin());
+      }
+      g.insertNode(g.create(prim::Print, lowered_inputs, 0)
                        ->setSourceLocation(std::make_shared<SourceRange>(loc)));
       return std::make_shared<NoneValue>();
   }
@@ -189,8 +199,9 @@ struct Environment {
 
   SugaredValuePtr createCapturedInputIfNeeded(const SourceRange& loc, std::string ident) {
     auto in_frame = findInThisFrame(ident);
-    if (in_frame)
+    if (in_frame) {
       return in_frame;
+    }
 
     // recursively handles the case where parent blocks are also loops
     auto from_parent = next ? next->createCapturedInputIfNeeded(loc, ident) : nullptr;
@@ -266,7 +277,7 @@ struct Environment {
     auto retval = createCapturedInputIfNeeded(range, ident);
 
     if(!retval) {
-      retval = resolver(ident);
+      retval = resolver(ident, method, range);
     }
 
     if(!retval) {
@@ -417,7 +428,7 @@ at::optional<std::vector<Value*>> tryMatchSchema(
         return at::nullopt;
       }
       if(positional_inputs[*idx]) {
-        err() << "argument '" <<  nv.name << "' specified twice \n" << nv.loc;
+        err() << "argument " <<  nv.name << " specified twice \n" << nv.loc;
         return at::nullopt;
       }
       positional_inputs[*idx] = nv;
@@ -428,7 +439,7 @@ at::optional<std::vector<Value*>> tryMatchSchema(
         continue;
       auto default_value = schema.arguments[i].default_value;
       if(!default_value) {
-        err() << "argument '" << schema.arguments[i].name << "' not provided.\n" << loc;
+        err() << "argument " << schema.arguments[i].name << " not provided.\n" << loc;
         return at::nullopt;
       }
       positional_inputs[i] = NamedValue(
@@ -1363,6 +1374,9 @@ private:
       case TK_IF_EXPR: {
         return emitTernaryIf(TernaryIf(tree));
       } break;
+      case TK_STRINGLITERAL: {
+        return emitStringLiteral(StringLiteral(tree));
+      } break;
       case TK_LIST_LITERAL: {
         auto ll = ListLiteral(tree);
         auto values = getValues(ll.inputs(), /*maybe_unpack=*/true, identity);
@@ -1391,6 +1405,10 @@ private:
       return insertConstant(*graph, c.asFloatingPoint(), c.range());
     else
       return insertConstant(*graph, c.asIntegral(), c.range());
+  }
+
+  Value* emitStringLiteral(const StringLiteral& c) {
+    return insertConstant(*graph, c.text(), c.range());
   }
 
   // Desugars slice syntactic sugar tensor[begin:end] -> tensor.slice(begin,

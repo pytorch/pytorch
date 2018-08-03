@@ -75,6 +75,9 @@ struct Parser {
         auto list = parseList('[', ',', ']', &Parser::parseExp);
         prefix = ListLiteral::create(list.range(), List<Expr>(list));
       } break;
+      case TK_STRINGLITERAL: {
+        prefix = parseStringLiteral();
+      } break;
       default: {
         Ident name = parseIdent();
         prefix = Var::create(name.range(), name);
@@ -180,14 +183,67 @@ struct Parser {
       L.expect(end);
     return List<T>::create(r, elements);
   }
+
   Const parseConst() {
     auto range = L.cur().range;
     auto t = L.expect(TK_NUMBER);
     return Const::create(t.range, t.text());
   }
+
+  bool isCharCount(char c, const std::string& str, size_t start, int len) {
+    //count checks from [start, start + len)
+    return start + len <= str.size() && std::count(str.begin() + start, str.begin() + start + len, c) == len;
+  }
+
+  std::string parseString(const SourceRange& range, const std::string &str) {
+    int quote_len = isCharCount(str[0], str, 0, 3) ? 3 : 1;
+    auto ret_str = str.substr(quote_len, str.size() - quote_len * 2);
+    size_t pos = ret_str.find('\\');
+    while(pos != std::string::npos) {
+      //invariant: pos has to escape a character because it is a valid string
+      char c = ret_str[pos + 1];
+      switch (ret_str[pos + 1]) {
+        case '\\':
+        case '\'':
+        case '\"':
+        case '\n':
+          break;
+        case 'a':
+          c = '\a';
+          break;
+        case 'b':
+          c = '\b';
+          break;
+        case 'f':
+          c = '\f';
+          break;
+        case 'n':
+          c = '\n';
+          break;
+        case 'v':
+          c = '\v';
+          break;
+        default:
+          throw ErrorReport(range) << " octal and hex escaped sequences are not supported";
+      }
+      ret_str.replace(pos, /* num to erase */ 2, /* num copies */ 1, c);
+      pos = ret_str.find('\\', pos + 1);
+    }
+    return ret_str;
+  }
+
+  StringLiteral parseStringLiteral() {
+    auto range = L.cur().range;
+    std::stringstream ss;
+    while(L.cur().kind == TK_STRINGLITERAL)
+      ss << parseString(L.cur().range, L.next().text());
+    return StringLiteral::create(range, ss.str());
+  }
+
   Expr parseAttributeValue() {
     return parseExp();
   }
+
   void parseOperatorArguments(TreeList& inputs, TreeList& attributes) {
     L.expect('(');
     if (L.cur().kind != ')') {
