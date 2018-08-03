@@ -59,7 +59,9 @@ class Blob {
    * Checks if the content stored in the blob is of type T.
    */
   template <class T>
-  bool IsType() const { return meta_.Match<T>(); }
+  bool IsType() const {
+    return meta_.Match<T>();
+  }
 
   // TODO(jerryzh): Remove template
   template <class T>
@@ -99,6 +101,9 @@ class Blob {
         meta_.name(),
         " while caller expects ",
         TypeMeta::TypeName<T>());
+    // TODO: after we add Get<Tensor>(DeviceType)
+    // and changed all the callsites, we can add
+    // a static assert here to enforce T != Tensor
     return *static_cast<const T*>(pointer_);
   }
 
@@ -141,8 +146,7 @@ class Blob {
   }
 
   inline Tensor* GetMutableTensor(DeviceType device_type) {
-    if (IsType<Tensor>() &&
-        static_cast<Tensor*>(pointer_)->GetDeviceType() == device_type) {
+    if (IsType<Tensor>(device_type)) {
       return static_cast<Tensor*>(pointer_);
     } else {
       VLOG(1) << "Create new mutable object " << TypeMeta::TypeName<Tensor>()
