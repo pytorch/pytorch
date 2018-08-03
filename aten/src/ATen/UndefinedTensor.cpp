@@ -1,6 +1,6 @@
 #include "ATen/UndefinedTensor.h"
 #include "ATen/Context.h"
-#include "ATen/Error.h"
+#include "ATen/core/Error.h"
 
 namespace at {
 

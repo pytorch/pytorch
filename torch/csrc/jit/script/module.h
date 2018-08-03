@@ -11,8 +11,8 @@
 
 #include <torch/csrc/api/include/torch/detail/ordered_dict.h>
 
-#include <ATen/optional.h>
-#include <ATen/ArrayRef.h>
+#include <ATen/core/ArrayRef.h>
+#include <ATen/core/optional.h>
 
 #include <functional>
 #include <memory>

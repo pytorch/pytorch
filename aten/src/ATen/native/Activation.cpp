@@ -1,8 +1,8 @@
 #include "ATen/ATen.h"
-#include "ATen/NativeFunctions.h"
-#include "ATen/Dispatch.h"
 #include "ATen/CPUApplyUtils.h"
-#include "ATen/Half.h"
+#include "ATen/Dispatch.h"
+#include "ATen/NativeFunctions.h"
+#include "ATen/core/Half.h"
 
 namespace at { namespace native {
 

@@ -8,18 +8,18 @@
 // ${generated_comment}
 
 $storage_tensor_headers
-#include "ATen/${Generator}.h"
-#include "ATen/${DenseTensor}.h"
 #include "ATen/${DenseBackend}LongTensor.h"
+#include "ATen/${DenseTensor}.h"
+#include "ATen/${Generator}.h"
 #include "ATen/Allocator.h"
-#include "ATen/Half.h"
-#include "ATen/WrapDimUtils.h"
+#include "ATen/DeviceGuard.h"
 #include "ATen/NativeFunctions.h"
 #include "ATen/THLongStorageView.h"
 #include "ATen/UndefinedTensor.h"
 #include "ATen/Utils.h"
-#include "ATen/DeviceGuard.h"
-#include "ATen/optional.h"
+#include "ATen/WrapDimUtils.h"
+#include "ATen/core/Half.h"
+#include "ATen/core/optional.h"
 
 #include <cstddef>
 #include <functional>

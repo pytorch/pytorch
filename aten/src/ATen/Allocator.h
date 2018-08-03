@@ -3,9 +3,9 @@
 #include <memory>
 #include <stddef.h>
 
-#include <ATen/Error.h>
-#include <ATen/Retainable.h>
 #include <ATen/Device.h>
+#include <ATen/Retainable.h>
+#include <ATen/core/Error.h>
 #include <ATen/core/UniqueVoidPtr.h>
 
 namespace at {
