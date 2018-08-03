@@ -21,6 +21,7 @@
 #include <unordered_set>
 
 #include "caffe2/core/init.h"
+#include "caffe2/core/workspace.h"
 
 #if CAFFE2_ANDROID
 #ifndef SYS_gettid
