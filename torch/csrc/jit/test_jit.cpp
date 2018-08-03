@@ -1037,15 +1037,15 @@ void testCustomOperators() {
     REQUIRE(op->schema().name == "foo::lists");
 
     REQUIRE(op->schema().arguments.size() == 3);
-    REQUIRE(op->schema().arguments[0].name == "a");
-    REQUIRE(op->schema().arguments[0].type == ListType::ofInts());
-    REQUIRE(op->schema().arguments[1].name == "b");
-    REQUIRE(op->schema().arguments[1].type == ListType::ofFloats());
-    REQUIRE(op->schema().arguments[2].name == "c");
-    REQUIRE(op->schema().arguments[2].type == ListType::ofTensors());
+    REQUIRE(op->schema().arguments[0].name == "ints");
+    REQUIRE(op->schema().arguments[0].type->isSubtypeOf(ListType::ofInts()));
+    REQUIRE(op->schema().arguments[1].name == "floats");
+    REQUIRE(op->schema().arguments[1].type->isSubtypeOf(ListType::ofFloats()));
+    REQUIRE(op->schema().arguments[2].name == "tensors");
+    REQUIRE(op->schema().arguments[2].type->isSubtypeOf(ListType::ofTensors()));
 
     REQUIRE(op->schema().returns.size() == 1);
-    REQUIRE(op->schema().returns[0].type == ListType::ofTensors());
+    REQUIRE(op->schema().returns[0].type->isSubtypeOf(ListType::ofFloats()));
 
     Stack stack;
     push(stack, std::vector<int64_t>{1, 2});
@@ -1057,7 +1057,7 @@ void testCustomOperators() {
 
     REQUIRE(output.size() == 2);
     REQUIRE(output[0] == 1.0);
-    REQUIRE(output[0] == 2.0);
+    REQUIRE(output[1] == 2.0);
   }
   {
 #ifdef USE_CATCH

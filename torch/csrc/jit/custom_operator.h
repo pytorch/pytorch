@@ -14,7 +14,7 @@ namespace detail {
 template <typename... Ts, size_t... Is>
 std::vector<Argument> createArgumentVectorFromTypes(Indices<Is...> indices) {
   // Arguments are named "_<index>"
-  return {Argument("_" + std::to_string(Is), getTypePtr<Ts>())...};
+  return {Argument("_" + std::to_string(Is), getTypePtr<decay_t<Ts>>())...};
 }
 
 template <typename... Ts, size_t... Is>
@@ -33,7 +33,7 @@ std::vector<Argument> createReturns(std::tuple<Ts...>* tuple) {
 /// Create a single-element `vector` for simple (non-tuple) return types.
 template <typename ReturnType>
 std::vector<Argument> createReturns(ReturnType*) {
-  return {Argument("_1", getTypePtr<ReturnType>())};
+  return {Argument("_1", getTypePtr<decay_t<ReturnType>>())};
 }
 
 /// Creates a vector of `Argument` from `FunctionTraits` and a pack of indices
@@ -88,7 +88,7 @@ void checkArgumentVector(
       inferredSchema, " | Provided schema: ", providedSchema);
   for (size_t i = 0; i < provided.size(); ++i) {
     AT_CHECK(
-        provided[i].type == inferred[i].type,
+        provided[i].type->isSubtypeOf(inferred[i].type),
         "Inferred type for ", what, " #", i, " was ",
         *inferred[i].type, ", but the provided schema specified type ",
         *provided[i].type, " for the ", what,
