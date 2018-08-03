@@ -40,20 +40,6 @@ int64_t THTensor_(stride)(const THTensor *self, int dim)
   return self->stride(dim);
 }
 
-THLongStorage *THTensor_(newSizeOf)(THTensor *self)
-{
-  THLongStorage *size = THLongStorage_newWithSize(self->dim());
-  THLongStorage_rawCopy(size, THTensor_getSizePtr(self));
-  return size;
-}
-
-THLongStorage *THTensor_(newStrideOf)(THTensor *self)
-{
-  THLongStorage *stride = THLongStorage_newWithSize(self->dim());
-  THLongStorage_rawCopy(stride, THTensor_getStridePtr(self));
-  return stride;
-}
-
 real *THTensor_(data)(const THTensor *self) {
   return self->data<real>();
 }
@@ -124,38 +110,29 @@ THTensor *THTensor_(newWithStorage4d)(THStorage *storage, ptrdiff_t storageOffse
                                           {stride0, stride1, stride2, stride3});
 }
 
-THTensor *THTensor_(newWithSize)(THLongStorage *size, THLongStorage *stride)
+THTensor *THTensor_(newWithSize)(at::IntList size, at::IntList stride)
 {
-  at::IntList size_(size == nullptr ? nullptr : size->data<int64_t>(), size == nullptr ? 0 : size->size());
-  at::IntList stride_(stride == nullptr ? nullptr : stride->data<int64_t>(), stride == nullptr ? 0 : stride->size());
-  return THTensor_(newWithStorage)(NULL, 0, size_, stride_);
-}
-
-THTensor *THTensor_(newWithSizeIntList)(at::IntList sizes) {
-  THTensor *self = new THTensor(THStorage_(new)());
-  THTensor_(resizeNd)(self, sizes.size(), const_cast<int64_t*>(sizes.data()), nullptr);
-
-  return self;
+  return THTensor_(newWithStorage)(NULL, 0, size, stride);
 }
 
 THTensor *THTensor_(newWithSize1d)(int64_t size0)
 {
-  return THTensor_(newWithSizeIntList)({size0});
+  return THTensor_(newWithSize)({size0}, {});
 }
 
 THTensor *THTensor_(newWithSize2d)(int64_t size0, int64_t size1)
 {
-  return THTensor_(newWithSizeIntList)({size0, size1});
+  return THTensor_(newWithSize)({size0, size1}, {});
 }
 
 THTensor *THTensor_(newWithSize3d)(int64_t size0, int64_t size1, int64_t size2)
 {
-  return THTensor_(newWithSizeIntList)({size0, size1, size2});
+  return THTensor_(newWithSize)({size0, size1, size2}, {});
 }
 
 THTensor *THTensor_(newWithSize4d)(int64_t size0, int64_t size1, int64_t size2, int64_t size3)
 {
-  return THTensor_(newWithSizeIntList)({size0, size1, size2, size3});
+  return THTensor_(newWithSize)({size0, size1, size2, size3}, {});
 }
 
 THTensor *THTensor_(newClone)(THTensor *self)
@@ -222,7 +199,7 @@ THTensor *THTensor_(newView)(THTensor *tensor, at::IntList size)
 }
 
 /* Resize */
-void THTensor_(resize)(THTensor *self, THLongStorage *size, THLongStorage *stride)
+void THTensor_(resize)(THTensor *self, at::IntList size, at::IntList stride)
 {
   return THTensor_resize(self, size, stride);
 }
@@ -704,9 +681,7 @@ THDescBuff THTensor_(desc)(const THTensor *tensor) {
 }
 
 THDescBuff THTensor_(sizeDesc)(const THTensor *tensor) {
-  THLongStorage *size = THTensor_(newSizeOf)((THTensor*)tensor);
-  THDescBuff buf = THLongStorage_sizeDesc(size);
-  THLongStorage_free(size);
+  THDescBuff buf = _THSizeDesc(tensor->sizes().data(), tensor->sizes().size());
   return buf;
 }
 

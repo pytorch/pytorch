@@ -23,9 +23,9 @@
   cpu_half: True
   arguments:
     - THTensor* self
-    - arg: THSize* size
+    - arg: IntListSize size
       long_args: True
-    - CONSTANT NULL
+    - CONSTANT {}
 ]]
 [[
   name: set_
@@ -3393,8 +3393,8 @@
       arguments: []
     - cname: newWithSize
       arguments:
-        - THSize* size
-        - CONSTANT NULL
+        - IntListSize size
+        - CONSTANT {}
 ]]
 [[
   name: tensor
@@ -3404,8 +3404,8 @@
   options:
     - cname: newWithSize
       arguments:
-        - THSize* size
-        - arg: THStride* stride
+        - IntListSize size
+        - arg: IntListStride stride
     - cname: newWithStorage
       arguments:
         - THStorage* storage

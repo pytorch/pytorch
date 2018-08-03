@@ -59,16 +59,16 @@ void THTensor_setStorageNd(THTensor *self, THStorage *storage, ptrdiff_t storage
   THTensor_resizeNd(self, nDimension, size, stride);
 }
 
-void THTensor_resize(THTensor *self, THLongStorage *size, THLongStorage *stride)
+void THTensor_resize(THTensor *self, at::IntList size, at::IntList stride)
 {
-  THArgCheck(size != NULL, 2, "invalid size");
-  if(stride)
-    THArgCheck(stride->size() == size->size(), 3, "invalid stride");
+  THArgCheck(size.data() != NULL, 2, "invalid size");
+  if(stride.data())
+    THArgCheck(stride.size() == size.size(), 3, "invalid stride");
 
 #ifdef DEBUG
-  THAssert(size->size() <= INT_MAX);
+  THAssert(size.size() <= INT_MAX);
 #endif
-  THTensor_resizeNd(self, size->size(), THLongStorage_data(size), (stride ? THLongStorage_data(stride) : NULL));
+  THTensor_resizeNd(self, size.size(), size.data(), stride.data());
 }
 
 void THTensor_resizeNd(THTensor *self, int nDimension, const int64_t *size, const int64_t *stride)

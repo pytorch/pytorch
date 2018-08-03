@@ -49,10 +49,6 @@ THStorage* THStorage_weakLock(THStorage *weak_storage) {
   return nullptr;
 }
 
-THDescBuff THLongStorage_sizeDesc(const THLongStorage *size) {
-  return _THSizeDesc(THLongStorage_data(size), size->size());
-}
-
 ptrdiff_t THStorage_size(const THStorage *self)
 {
   return self->size();

@@ -95,10 +95,9 @@ THCTensor_(std)(THCState *state, THCTensor *self_, THCTensor *src, int dimension
 
   THCTensor_preserveReduceDimSemantics(
       state, self_, THCTensor_(nDimensionLegacyAll)(state, src), dimension, keepdim);
-  THLongStorage *dim = THCTensor_(newSizeOf)(state, src);
-  THLongStorage_set(dim, dimension, 1);
-  THCTensor_(resize)(state, self_, dim, NULL);
-  THLongStorage_free(dim);
+  std::vector<int64_t> dim = src->sizes().vec();
+  dim[dimension] = 1;
+  THCTensor_(resize)(state, self_, dim, {});
 
   THCTensor *self = THCTensor_(newContiguous)(state, self_);
   src = THCTensor_(newContiguous)(state, src);
@@ -124,10 +123,9 @@ THCTensor_(var)(THCState *state, THCTensor *self_, THCTensor *src, int dimension
 
   THCTensor_preserveReduceDimSemantics(
       state, self_, THCTensor_(nDimensionLegacyAll)(state, src), dimension, keepdim);
-  THLongStorage *dim = THCTensor_(newSizeOf)(state, src);
-  THLongStorage_set(dim, dimension, 1);
-  THCTensor_(resize)(state, self_, dim, NULL);
-  THLongStorage_free(dim);
+  std::vector<int64_t> dim = src->sizes().vec();
+  dim[dimension] = 1;
+  THCTensor_(resize)(state, self_, dim, {});
 
   THCTensor *self = THCTensor_(newContiguous)(state, self_);
   src = THCTensor_(newContiguous)(state, src);
