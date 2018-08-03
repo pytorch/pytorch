@@ -149,7 +149,6 @@ void replaceLoopCounter(Node *loop) {
 
   WithInsertPoint insertPointGuard{ body->return_node() };
   Value* result = graph->insert(aten::add, {internal_counter, 1});
-  std::cout << *result->node() << "\n";
   body->insertOutput(1, result);
 }
 
