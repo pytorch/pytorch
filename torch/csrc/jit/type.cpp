@@ -40,6 +40,8 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
     out << *prim << "[]";
   } else if(t.kind() == TypeKind::NoneType) {
     out << "None";
+  } else if(t.kind() == TypeKind::StringType) {
+    out << "string";
   } else {
     AT_ERROR("unknown type kind");
   }
@@ -64,6 +66,10 @@ FloatTypePtr FloatType::get() {
 }
 NoneTypePtr NoneType::get() {
   static auto value = NoneType::create();
+  return value;
+}
+StringTypePtr StringType::get() {
+  static auto value = StringType::create();
   return value;
 }
 ListTypePtr ListType::ofTensors() {

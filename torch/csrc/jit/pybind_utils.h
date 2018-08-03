@@ -20,9 +20,10 @@ inline Stack createStack(const py::tuple& tuple, at::ArrayRef<Value*> inputs, si
         return py::cast<int64_t>(obj);
       case TypeKind::NoneType:
         return {};
+      case TypeKind::StringType:
       case TypeKind::ListType:
       case TypeKind::TupleType:
-        throw std::runtime_error("Lists and tuples are not supported yet");
+        throw std::runtime_error("Lists tuples and strings are not supported yet");
       case TypeKind::NumberType:
         throw std::runtime_error("Insufficient type information to convert input");
     }
@@ -52,9 +53,10 @@ inline py::object wrapStack(Stack&& outputs, at::ArrayRef<Value*> output_vals) {
         return py::cast(ivalue.toInt());
       case TypeKind::NoneType:
         return py::none();
+      case TypeKind::StringType:
       case TypeKind::ListType:
       case TypeKind::TupleType:
-        throw std::runtime_error("Lists and tuples are not supported yet");
+        throw std::runtime_error("Lists tuples and strings are not supported yet");
       case TypeKind::NumberType:
         throw std::runtime_error("Insufficient type information to convert input");
     }
