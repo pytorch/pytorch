@@ -109,7 +109,7 @@ class AT_CORE_API Error : public std::exception {
     return msg_.c_str();
   }
 
-  const void* caller() const noexcept {
+  inline const void* caller() const noexcept {
     return caller_;
   }
 
