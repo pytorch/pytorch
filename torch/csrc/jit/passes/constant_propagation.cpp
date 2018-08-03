@@ -57,7 +57,7 @@ void propagateNode(Node* n) {
   auto graph = n->owningGraph();
   WithInsertPoint guard(n);
   for (size_t i = 0; i < outputs.size(); ++i) {
-    auto new_output = insertConstant(*graph, outputs[i]);
+    auto new_output = graph->insertConstant(outputs[i]);
     n->outputs()[i]->replaceAllUsesWith(new_output);
     // let dce elimination remove n
   }

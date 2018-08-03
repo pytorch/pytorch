@@ -8,7 +8,7 @@ namespace torch { namespace jit {
 Value* insertConstant(
     Graph& g,
     IValue val,
-    at::optional<script::SourceRange> loc) {
+    at::optional<SourceRange> loc) {
   Node * n = g.create(prim::Constant);
   if(val.isTensor()) {
     at::Tensor ref = std::move(val).toTensor();
@@ -22,7 +22,7 @@ Value* insertConstant(
     n->f_(attr::value, val.toDouble());
     n->output()->setType(FloatType::get());
   } else if(val.isIntList()) {
-    n->is_(attr::value, val.toIntList()->elements().vec());
+    n->is_(attr::value, val.toIntList()->elements());
     n->output()->setType(ListType::ofInts());
   } else if(val.isTensorList()) {
     n->ts_(attr::value, fmap(val.toTensorList()->elements(), [](const at::Tensor & t) {
@@ -36,7 +36,7 @@ Value* insertConstant(
     throw std::runtime_error("Unsupported value kind: " + val.tagKind());
   }
   if(loc)
-    n->setSourceLocation(std::make_shared<script::SourceRange>(*loc));
+    n->setSourceLocation(std::make_shared<SourceRange>(*loc));
   return g.insertNode(n)->output();
 }
 

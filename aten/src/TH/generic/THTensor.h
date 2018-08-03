@@ -80,7 +80,7 @@ TH_API void THTensor_(resize2d)(THTensor *tensor, int64_t size0_, int64_t size1_
 TH_API void THTensor_(resize3d)(THTensor *tensor, int64_t size0_, int64_t size1_, int64_t size2_);
 TH_API void THTensor_(resize4d)(THTensor *tensor, int64_t size0_, int64_t size1_, int64_t size2_, int64_t size3_);
 TH_API void THTensor_(resize5d)(THTensor *tensor, int64_t size0_, int64_t size1_, int64_t size2_, int64_t size3_, int64_t size4_);
-// Note: these are legacy resize functions that treat sizes as size->size == 0 and size->data<int64_t>() as being 0-terminated.
+// Note: these are legacy resize functions that treat sizes as size->size() == 0 and size->data<int64_t>() as being 0-terminated.
 
 TH_API void THTensor_(set)(THTensor *self, THTensor *src);
 TH_API void THTensor_(setStorage)(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_, THLongStorage *size_, THLongStorage *stride_);

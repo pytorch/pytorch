@@ -3,6 +3,7 @@
 #include "torch/csrc/Device.h"
 #include "torch/csrc/Dtype.h"
 #include "torch/csrc/Layout.h"
+#include "torch/csrc/jit/export.h"
 #include "torch/csrc/jit/script/compiler.h"
 
 #include "torch/csrc/jit/python_tracer.h"
@@ -313,24 +314,24 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   auto& g = *m.graph();
   if (is_constant) {
     if (py::isinstance<py::int_>(obj)) {
-      return toSimple(insertConstant(g, py::cast<int64_t>(obj), loc));
+      return toSimple(g.insertConstant(py::cast<int64_t>(obj), loc));
     } else if (py::isinstance<py::float_>(obj)) {
-      return toSimple(insertConstant(g, py::cast<float>(obj), loc));
+      return toSimple(g.insertConstant(py::cast<float>(obj), loc));
     } else if (py::isinstance<py::bool_>(obj)) {
-      return toSimple(insertConstant(g, py::cast<bool>(obj), loc));
+      return toSimple(g.insertConstant(py::cast<bool>(obj), loc));
     } else if (THPDevice_Check(obj.ptr())) {
       auto device = (THPDevice*)obj.ptr();
       std::vector<int64_t> v = {static_cast<int64_t>(device->device.type()),
                                 device->device.index()};
-      return toSimple(insertConstant(g, std::move(v)));
+      return toSimple(g.insertConstant(std::move(v)));
     } else if (THPLayout_Check(obj.ptr())) {
       auto layout = (THPLayout*)obj.ptr();
       const auto v = static_cast<int64_t>(layout->layout);
-      return toSimple(insertConstant(g, v, loc));
+      return toSimple(g.insertConstant(v, loc));
     } else if (THPDtype_Check(obj.ptr())) {
       auto dtype = (THPDtype*)(obj.ptr());
       const auto v = static_cast<int64_t>(dtype->scalar_type);
-      return toSimple(insertConstant(g, v, loc));
+      return toSimple(g.insertConstant(v, loc));
     } else if (py::isinstance<py::tuple>(obj)) {
      return std::make_shared<ConstantPythonTupleValue>(obj);
     }
@@ -431,6 +432,21 @@ void initJitScriptBindings(PyObject* module) {
   // public.
   py::class_<Module, std::shared_ptr<Module>>(m, "ScriptModule")
       .def(py::init<>())
+      .def("export", [](const std::shared_ptr<Module> m) {
+        std::string module;
+        RawDataExportMap export_map;
+        std::tie(module, export_map) = ExportModule(m);
+        std::unordered_map<std::string, py::bytes> python_serialized_export_map;
+        for (auto& kv : export_map) {
+          auto t = kv.second;
+          size_t copy_bytes = t.type().elementSizeInBytes() * t.numel();
+          // TODO: this is an unecessary copy. In theory we can directly return
+          // the map from identifier to Tensor, but we need some API in Python
+          // to get raw `bytes` containing the raw tensor data.
+          python_serialized_export_map[kv.first] = py::bytes(static_cast<const char*>(t.data_ptr()), copy_bytes);
+        }
+        return std::make_tuple(py::bytes(module), python_serialized_export_map);
+      })
       .def("_set_optimized", &Module::set_optimized)
       .def(
           "_define",
