@@ -1,5 +1,11 @@
 #pragma once
 
+/*
+ * The c10 dispatcher is not finished yet and will change a lot.
+ * Please ignore it for now.
+ * TODO Remove this comment once finished
+ */
+
 #include "caffe2/core/dispatch/DispatchKey.h"
 #include "caffe2/proto/caffe2.pb.h"
 #include "caffe2/utils/Array.h"

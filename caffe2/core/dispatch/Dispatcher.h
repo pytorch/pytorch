@@ -1,5 +1,11 @@
 #pragma once
 
+/*
+ * The c10 dispatcher is not finished yet and will change a lot.
+ * Please ignore it for now.
+ * TODO Remove this comment once finished
+ */
+
 #include "caffe2/core/dispatch/DispatchTable.h"
 
 namespace c10 {

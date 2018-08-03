@@ -1,5 +1,11 @@
 #pragma once
 
+/*
+ * The c10 dispatcher is not finished yet and will change a lot.
+ * Please ignore it for now.
+ * TODO Remove this comment once finished
+ */
+
 #include "caffe2/core/dispatch/OpSchema.h"
 #include "caffe2/core/dispatch/Dispatcher.h"
 #include <ATen/core/optional.h>

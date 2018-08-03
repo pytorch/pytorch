@@ -1,5 +1,11 @@
 #pragma once
 
+/*
+ * The c10 dispatcher is not finished yet and will change a lot.
+ * Please ignore it for now.
+ * TODO Remove this comment once finished
+ */
+
 /**
  * To register your own tensor types, do in a header file:
  *   C10_DECLARE_TENSOR_TYPE(MY_TENSOR)

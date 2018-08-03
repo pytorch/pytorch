@@ -1,3 +1,10 @@
+/*
+ * This op is only for testing the c10 dispatcher and might not support all
+ * parameter combinations or backends the corresponding caffe2 op supports.
+ * Please ignore this.
+ * TODO Remove this comment once this is more final
+ */
+
 #include "caffe2/core/dispatch/KernelRegistration.h"
 #include "caffe2/operators/experimental/c10/schemas/concat.h"
 #include "caffe2/utils/math.h"
