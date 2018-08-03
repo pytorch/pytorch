@@ -4746,7 +4746,7 @@ def func(t):
 
         # The neg op in the python function should be properly inlined to the
         # graph
-        self.assertExpected(str(traced_fn.graph))
+        self.assertExpected(canonical(traced_fn.graph))
 
     def test_call_python_mod_from_tracing_fn(self):
         class PythonMod(torch.nn.Module):
@@ -4765,7 +4765,7 @@ def func(t):
 
         # Note: the parameter self.param from the Python module is inlined
         # into the graph
-        self.assertExpected(str(traced_fn.graph))
+        self.assertExpected(canonical(traced_fn.graph))
 
     def test_call_traced_fn_from_tracing_fn(self):
         @torch.jit.trace(torch.rand(3, 4))
@@ -4776,7 +4776,7 @@ def func(t):
         def traced_fn(x):
             return traced_fn1(x) + 1
 
-        self.assertExpected(str(traced_fn.graph))
+        self.assertExpected(canonical(traced_fn.graph))
 
     def test_call_traced_mod_from_tracing_fn(self):
         class TracedModule(torch.nn.Module):
@@ -4795,7 +4795,7 @@ def func(t):
 
         # Note: the parameter self.param from the Python module is inlined
         # into the graph
-        self.assertExpected(str(traced_fn.graph))
+        self.assertExpected(canonical(traced_fn.graph))
 
     def test_call_script_fn_from_tracing_fn(self):
         @torch.jit.script
@@ -4806,7 +4806,7 @@ def func(t):
         def traced_fn(x):
             return script_fn(x) + 1
 
-        self.assertExpected(str(traced_fn.graph))
+        self.assertExpected(canonical(traced_fn.graph))
 
     def test_call_script_mod_from_tracing_fn(self):
         class ScriptMod(torch.jit.ScriptModule):
@@ -4824,7 +4824,7 @@ def func(t):
         def traced_fn(x):
             return sm(x) + 1
 
-        self.assertExpected(str(traced_fn.graph))
+        self.assertExpected(canonical(traced_fn.graph))
 
     def test_call_python_fn_from_traced_module(self):
         def python_fn(x):
@@ -4843,7 +4843,7 @@ def func(t):
         # Note: parameter self.param from the traced module should appear as
         # an input to the graph and the neg op from the Python function should
         # be properly inlined
-        self.assertExpected(str(tm.graph))
+        self.assertExpected(canonical(tm.graph))
 
     def test_call_python_mod_from_traced_module(self):
         class PythonModule(torch.nn.Module):
@@ -4867,7 +4867,7 @@ def func(t):
 
         # Note: the parameters from both modules should appear in the flattened
         # inputs of the graph. All ops from both modules should be inlined.
-        self.assertExpected(str(tm.graph))
+        self.assertExpected(canonical(tm.graph))
 
     def test_call_traced_fn_from_traced_module(self):
         @torch.jit.trace(torch.rand(3, 4))
@@ -4884,7 +4884,7 @@ def func(t):
 
         tm = torch.jit.trace(torch.rand(3, 4))(TracedModule())
         # Note: neg op from the traced function should be properly inlined
-        self.assertExpected(str(tm.graph))
+        self.assertExpected(canonical(tm.graph))
 
     def test_call_traced_module_from_traced_module(self):
         class TracedModule1(torch.nn.Module):
@@ -4908,7 +4908,7 @@ def func(t):
 
         # Note: the parameters from both modules should appear in the flattened
         # inputs of the graph. All ops from both modules should be inlined.
-        self.assertExpected(str(tm.graph))
+        self.assertExpected(canonical(tm.graph))
 
     def test_call_script_fn_from_traced_module(self):
         @torch.jit.script
@@ -4925,7 +4925,7 @@ def func(t):
 
         tm = torch.jit.trace(torch.rand(3, 4))(TracedModule())
         # Note: neg op from the script function should be properly inlined
-        self.assertExpected(str(tm.graph))
+        self.assertExpected(canonical(tm.graph))
 
     def test_call_script_module_from_traced_module(self):
         class ScriptMod(torch.jit.ScriptModule):
@@ -4950,7 +4950,7 @@ def func(t):
 
         # Note: the parameters from both modules should appear in the flattened
         # inputs of the graph. All ops from both modules should be inlined.
-        self.assertExpected(str(tm.graph))
+        self.assertExpected(canonical(tm.graph))
 
     def test_call_python_fn_from_script_fn(self):
         def python_fn(x):
@@ -4962,7 +4962,7 @@ def func(t):
 
         # Note: the call to python_fn appears as `^python_fn()` and is called
         # as a PythonOp in the interpreter
-        self.assertExpected(str(script_fn.graph))
+        self.assertExpected(canonical(script_fn.graph))
 
     def test_call_python_mod_from_script_fn(self):
         class PythonModule(torch.nn.Module):

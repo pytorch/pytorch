@@ -50,7 +50,7 @@ struct PrintValue : public SugaredValue {
       //temporary hack to allow print statements to work in python 2, where
       //print(a, b) is treated as a (a, b) tuple input.
 
-      std::vector<Value*> lowered_inputs = toValues(inputs);
+      std::vector<Value*> lowered_inputs = toValues(*m.graph(), inputs);
       if(lowered_inputs.size() == 1 && lowered_inputs.at(0)->node()->kind() == prim::TupleConstruct) {
         auto input = lowered_inputs[0];
         for(size_t j = 0; j < input->node()->inputs().size(); ++j) {
@@ -107,7 +107,7 @@ struct CastValue : public SugaredValue {
         throw ErrorReport(loc) << "casts do not accept any keyword arguments";
       if (inputs.size() != 1)
         throw ErrorReport(loc) << "expected a single argument for cast";
-      auto values = toValues(inputs);
+      auto values = toValues(*m.graph(), inputs);
       Value* input = values.at(0);
       if(!input->type()->isSubtypeOf(type)) {
           input = typeCast(loc, input, type);
@@ -422,11 +422,11 @@ at::optional<std::vector<Value*>> tryMatchSchema(
     for(const NamedValue& nv : attributes) {
       auto idx = schema.argumentIndexWithName(nv.name());
       if(!idx) {
-        err() << "unknown keyword argument '" << nv.name() << "'\n" << nv.loc();
+        err() << "unknown keyword argument '" << nv.name() << "'\n" << nv.locOr(loc);
         return at::nullopt;
       }
       if(positional_inputs[*idx]) {
-        err() << "argument " <<  nv.name() << " specified twice \n" << nv.loc();
+        err() << "argument " <<  nv.name() << " specified twice \n" << nv.locOr(loc);
         return at::nullopt;
       }
       positional_inputs[*idx] = nv;
@@ -440,15 +440,13 @@ at::optional<std::vector<Value*>> tryMatchSchema(
         err() << "argument " << schema.arguments[i].name << " not provided.\n" << loc;
         return at::nullopt;
       }
-      positional_inputs[i] = NamedValue(
-          loc, i,
-          graph.insertConstant(*default_value, loc));
+      positional_inputs[i] = NamedValue(*default_value);
     }
 
     // check input types
     std::vector<Value*> matched_inputs;
     for(size_t i = 0; i < schema.arguments.size(); ++i) {
-      Value* value = positional_inputs[i]->value();
+      Value* value = positional_inputs[i]->value(graph);
       const auto& arg = schema.arguments[i];
 
       // some functions that take lists of integers for fixed size arrays
@@ -478,7 +476,7 @@ at::optional<std::vector<Value*>> tryMatchSchema(
       if(!value->type()->isSubtypeOf(arg.type)) {
         err() << "expected a value of type " << arg.type->str() << " for argument '" << arg.name << "' but found "
               << value->type()->str() << "\n"
-              << positional_inputs[i]->loc();
+              << positional_inputs[i]->locOr(loc);
         return at::nullopt;
       }
 
@@ -1209,7 +1207,6 @@ private:
       bool maybe_unpack=false,
       std::function<Value*(const SourceRange&, Value*)> post_process = ensureTensor) {
     std::vector<NamedValue> values;
-    size_t next_arg = 0;
     for (const auto& tree : trees) {
       if(maybe_unpack && tree->kind() == TK_STARRED) {
         auto starred = Starred(tree);
@@ -1217,13 +1214,12 @@ private:
         for(auto entry : entries) {
           values.push_back(NamedValue(
               tree->range(),
-              next_arg++,
               post_process(
                   starred.range(), entry->asValue(starred.range(), method))));
         }
       } else {
         values.push_back(NamedValue(
-            tree->range(), next_arg++, emitExpr(Expr(tree), post_process)));
+            tree->range(), emitExpr(Expr(tree), post_process)));
       }
     }
     return values;
@@ -1239,7 +1235,7 @@ private:
       TreeList trees,
       bool maybe_unpack=false,
       std::function<Value*(const SourceRange&, Value*)> post_process = ensureTensor) {
-    return toValues(getNamedValues(trees, maybe_unpack, post_process));
+    return toValues(*graph, getNamedValues(trees, maybe_unpack, post_process));
   }
   std::vector<Value*> getValues(
       List<Expr> trees,

@@ -108,7 +108,7 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
 
   // call it like a function, e.g. `outputs = this(inputs)`
   virtual std::shared_ptr<SugaredValue> call(SourceRange loc, Method & m, at::ArrayRef<NamedValue> inputs_, at::ArrayRef<NamedValue> attributes, size_t n_binders) override {
-    auto inputs = toValues(inputs_);
+    auto inputs = toValues(*m.graph(), inputs_);
     auto schema = getSchema(inputs.size(), n_binders);
 
     std::stringstream failure_messages;

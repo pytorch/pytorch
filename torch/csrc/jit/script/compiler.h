@@ -28,9 +28,9 @@ struct TypedDef {
   at::optional<FunctionSchema> schema;
 };
 
-static inline std::vector<Value*> toValues(at::ArrayRef<NamedValue> nvs) {
-  return fmap(nvs, [](const NamedValue& v) {
-    return v.value();
+static inline std::vector<Value*> toValues(Graph& g, at::ArrayRef<NamedValue> nvs) {
+  return fmap(nvs, [&](const NamedValue& v) {
+    return v.value(g);
   });
 }
 
