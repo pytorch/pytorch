@@ -16,6 +16,7 @@ includes = [
     "caffe2/distributed/*",
     "caffe2/queue/*",
     "caffe2/**/*_test*",
+    "caffe2/core/THCCachingAllocator*",
 ]
 
 ignores = [

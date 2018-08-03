@@ -98,7 +98,7 @@ bool ResizeNearestOp<float, CUDAContext>::RunOnDevice() {
       height_scale_,
       width_scale_,
       X.data<float>(),
-      Y->mutable_data<float>());
+      Y->template mutable_data<float>());
 
   return true;
 }
@@ -117,7 +117,7 @@ bool ResizeNearestGradientOp<float, CUDAContext>::RunOnDevice() {
   int output_width = X.dim32(3);
   dX->Resize(batch_size, num_channels, output_height, output_width);
   math::Set<float, CUDAContext>(
-      dX->size(), 0.0f, dX->mutable_data<float>(), &context_);
+      dX->size(), 0.0f, dX->template mutable_data<float>(), &context_);
 
   const auto size = dY.size();
   NearestNeighborGradientKernel<<<
@@ -134,7 +134,7 @@ bool ResizeNearestGradientOp<float, CUDAContext>::RunOnDevice() {
       height_scale_,
       width_scale_,
       dY.data<float>(),
-      dX->mutable_data<float>());
+      dX->template mutable_data<float>());
 
   return true;
 }

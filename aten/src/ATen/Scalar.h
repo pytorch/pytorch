@@ -10,7 +10,6 @@
 #include "ATen/Half.h"
 #include "ATen/ScalarType.h"
 #include "ATen/TensorBase.h"
-#include "ATen/Utils.h"
 
 
 namespace at {
@@ -70,12 +69,14 @@ public:
     return Tag::HAS_t == tag;
   }
 
+  Scalar operator-() const;
+
 private:
   enum class Tag { HAS_d, HAS_i, HAS_t };
   Tag tag;
   union {
     double d;
-    int64_t i;
+    int64_t i = 0;
   } v;
   detail::TensorBase t;
   friend struct Type;
@@ -94,5 +95,4 @@ inline T Scalar::to<T>() { \
 }
 AT_FORALL_SCALAR_TYPES(DEFINE_TO)
 #undef DEFINE_TO
-
 }

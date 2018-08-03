@@ -74,7 +74,7 @@ tensor_list2d broadcast_coalesced(TensorList tensors, IntList devices, size_t bu
   }
 
   tensor_list2d outputs(devices.size());
-  outputs[0] = tensors;
+  outputs[0] = tensors.vec();
   for (auto & o : outputs)
     o.reserve(tensors.size());
 

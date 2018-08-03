@@ -69,8 +69,8 @@ OPERATOR_SCHEMA(ReluN)
     .CostInferenceFunction(CostInferenceForReluN)
     .IdenticalTypeAndShape()
     .SetDoc(R"DOC(
-Relu takes one input data (Tensor<T>) and produces one output data
-(Tensor<T>) where the rectified linear function, y = min(max(0, x), n),
+Relu takes one input data (Tensor) and produces one output data
+(Tensor) where the rectified linear function, y = min(max(0, x), n),
 is applied to the tensor elementwise.
 )DOC")
     .Input(0, "X", "1D input tensor")

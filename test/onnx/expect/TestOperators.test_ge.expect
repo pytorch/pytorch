@@ -50,7 +50,7 @@ graph {
     name: "3"
     type {
       tensor_type {
-        elem_type: INT8
+        elem_type: UINT8
         shape {
           dim {
             dim_value: 3
@@ -64,5 +64,5 @@ graph {
   }
 }
 opset_import {
-  version: 6
+  version: 7
 }

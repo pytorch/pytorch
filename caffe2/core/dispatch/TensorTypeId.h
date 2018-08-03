@@ -1,6 +1,6 @@
 #pragma once
 
-#include "caffe2/utils/IdWrapper.h"
+#include "ATen/core/IdWrapper.h"
 #include <string>
 #include <iostream>
 #include <mutex>
@@ -21,7 +21,7 @@ namespace details {
 /**
  * Dynamic type ID of a Tensor argument.  It represents something like CPUTensor, etc.
  */
-class TensorTypeId final : public guts::IdWrapper<TensorTypeId, details::_tensorTypeId_underlyingType> {
+class TensorTypeId final : public at::IdWrapper<TensorTypeId, details::_tensorTypeId_underlyingType> {
 public:
   // Don't use this!
   // Unfortunately, a default constructor needs to be defined because of https://reviews.llvm.org/D41223
@@ -35,4 +35,4 @@ private:
 
 }  // namespace c10
 
-C10_DEFINE_HASH_FOR_IDWRAPPER(c10::TensorTypeId)
+AT_DEFINE_HASH_FOR_IDWRAPPER(c10::TensorTypeId)

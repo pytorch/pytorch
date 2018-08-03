@@ -32,7 +32,7 @@ void THC_copyTensor(THCState* state, THCTensor* dst, THCTensor* src) {
              THCTensor_nElement(state, src),
              2, "sizes do not match");
 
-  if (THCTensor__nDimension(state, dst) == 0) {
+  if (THCTensor_nDimensionLegacyAll(state, dst) == 0) {
     // Zero-dim tensor; copy nothing
     return;
   }

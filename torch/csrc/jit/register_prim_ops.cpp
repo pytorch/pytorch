@@ -96,19 +96,11 @@ RegisterOperators reg({
           size_t num_inputs = node->inputs().size();
           return [num_inputs](Stack& stack) {
             bool first = true;
-            for (const IValue& i_ : last(stack, num_inputs)) {
-              auto i = i_.toTensor();
+            for (const IValue& i : last(stack, num_inputs)) {
               if (!first)
                 std::cout << " ";
               first = false;
-              if (auto tensor_impl = dynamic_cast<at::TensorImpl*>(i.get())) {
-                std::cout << at::Tensor(tensor_impl, true);
-              } else if (!i.defined()) {
-                std::cout << "<undefined tensor>";
-              } else {
-                auto& r = *i.get();
-                std::cout << "<" << typeid(r).name() << " at " << i << ">";
-              }
+              std::cout << i;
             }
             drop(stack, num_inputs);
             std::cout << std::endl;
@@ -202,7 +194,7 @@ RegisterOperators reg({
         prim::ListConstruct,
         [](Node* node) -> Operation {
           size_t num_inputs = node->inputs().size();
-          ListType* lt = node->output()->type()->expect<ListType>();
+          ListTypePtr lt = node->output()->type()->expect<ListType>();
           if(IntType::get() == lt->getElementType()) {
             return [=](Stack& stack) {
               auto inputs = peekSlice(stack, 0, num_inputs, num_inputs);
@@ -219,6 +211,18 @@ RegisterOperators reg({
               std::vector<double> vals = fmap(inputs, [](const IValue& v) {
                 return v.toDouble();
               });
+              drop(stack, num_inputs);
+              push(stack, std::move(vals));
+              return 0;
+            };
+          } else if (lt->getElementType()->isSubtypeOf(DynamicType::get())) {
+            return [=](Stack& stack) {
+              const size_t stack_size = stack.size();
+              std::vector<at::Tensor> vals;
+              vals.reserve(num_inputs);
+              for (size_t i = stack_size - num_inputs; i < stack_size; ++i) {
+                vals.push_back(std::move(stack[i]).toTensor());
+              }
               drop(stack, num_inputs);
               push(stack, std::move(vals));
               return 0;
@@ -327,7 +331,35 @@ RegisterOperators reg2({
             return 0;
           };
         }),
-
+    Operator(
+        "aten::_tensor_to_list(Tensor a) -> int[]",
+        [](Node* node) {
+          return [=](Stack& stack) {
+            at::Tensor t;
+            pop(stack, t);
+            std::vector<int64_t> elems;
+            for(int i = 0; i < t.size(0); i++){
+              elems.push_back(*t[i].toIntData());
+            }
+            push(stack, jit::IntList::create(elems));
+            return 0;
+          };
+        }),
+    Operator(
+        "aten::_list_to_tensor(int[] a) -> Tensor",
+        [](Node* node) {
+          return [=](Stack& stack) {
+            std::vector<int64_t> l;
+            pop(stack, l);
+            auto t = torch::empty(
+                {static_cast<int64_t>(l.size())}, at::dtype(at::kInt));
+            for(size_t i = 0; i < l.size(); i++){
+              t[i] = l[i];
+            }
+            push(stack, t);
+            return 0;
+          };
+        }),
     // commutative
     DEFINE_ST_OP(mul, at::mul(b, a))
     DEFINE_ST_OP(add, at::add(b, a))

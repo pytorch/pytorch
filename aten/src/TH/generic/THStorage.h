@@ -4,6 +4,7 @@
 
 #ifdef __cplusplus
 #include <ATen/Allocator.h>
+#include <ATen/StorageImpl.h>
 #endif
 
 /* on pourrait avoir un liste chainee
@@ -20,11 +21,14 @@
    primitives??
  */
 
-#define TH_STORAGE_REFCOUNTED 1
-#define TH_STORAGE_RESIZABLE  2
-
 // Struct definition is moved to THStorage.hpp (so this file stays C compatible)
-typedef struct THStorage THStorage;
+
+#ifdef __cplusplus
+#define THStorage at::StorageImpl
+#else
+typedef struct at_Storage_Impl at_Storage_Impl;
+#define THStorage at_Storage_Impl
+#endif
 
 // These used to be distinct types; for some measure of backwards compatibility and documentation
 // alias these to the single THStorage type.

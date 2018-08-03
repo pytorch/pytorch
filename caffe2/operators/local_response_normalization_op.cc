@@ -15,7 +15,7 @@ bool LRNOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
   const int image_size = C * H * W;
   const float* Xdata = X.data<float>();
   Y->ResizeLike(X);
-  float* Ydata = Y->mutable_data<float>();
+  float* Ydata = Y->template mutable_data<float>();
 
   if (OutputSize() > 1) {
     scale_ = Output(1);
@@ -25,11 +25,10 @@ bool LRNOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
     }
   }
   scale_->ResizeLike(X);
-  float* scale_data = scale_->mutable_data<float>();
+  float* scale_data = scale_->template mutable_data<float>();
   math::Set<float, CPUContext>(X.size(), bias_, scale_data, &context_);
-  TensorCPU padded_square(
-      vector<TIndex>{C + size_ - 1, H, W});
-  float* padded_square_data = padded_square.mutable_data<float>();
+  Tensor padded_square(vector<TIndex>{C + size_ - 1, H, W}, CPU);
+  float* padded_square_data = padded_square.template mutable_data<float>();
   math::Set<float, CPUContext>(padded_square.size(), 0., padded_square_data,
                                &context_);
   const float alpha_over_size = alpha_ / size_;
@@ -48,7 +47,7 @@ bool LRNOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
     for (int c = 1; c < C; ++c) {
       float* this_scale_slice = scale_data + n * image_size + c * H * W;
       // copy previous scale
-      context_.Copy<float, CPUContext, CPUContext>(
+      context_.CopyFromCPU<float>(
           H * W, this_scale_slice - H * W, this_scale_slice);
       // add head
       math::Axpy<float, CPUContext>(
@@ -80,7 +79,7 @@ bool LRNOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
   const int num_rows = N * H * W;
   const float* Xdata = X.data<float>();
   Y->ResizeLike(X);
-  float* Ydata = Y->mutable_data<float>();
+  float* Ydata = Y->template mutable_data<float>();
 
   if (OutputSize() > 1) {
     scale_ = Output(1);
@@ -90,10 +89,10 @@ bool LRNOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
     }
   }
   scale_->ResizeLike(X);
-  float* scale_data = scale_->mutable_data<float>();
+  float* scale_data = scale_->template mutable_data<float>();
 
-  TensorCPU padded_square(vector<TIndex>(1, C + size_ - 1));
-  float* padded_square_data = padded_square.mutable_data<float>();
+  Tensor padded_square(vector<TIndex>(1, C + size_ - 1), CPU);
+  float* padded_square_data = padded_square.template mutable_data<float>();
   math::Set<float, CPUContext>(padded_square.size(), 0., padded_square_data,
                                &context_);
   const float alpha_over_size = alpha_ / size_;
@@ -143,13 +142,12 @@ bool LRNGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
     scale_ = &local_scale_tensor_;
   }
   scale_->ResizeLike(X);
-  float* scale_data = scale_->mutable_data<float>();
+  float* scale_data = scale_->template mutable_data<float>();
   const float* dYdata = dY.data<float>();
-  float* dXdata = dX->mutable_data<float>();
+  float* dXdata = dX->template mutable_data<float>();
 
-  TensorCPU padded_ratio(
-      vector<TIndex>{C + size_ - 1, H, W});
-  float* padded_ratio_data = padded_ratio.mutable_data<float>();
+  Tensor padded_ratio(vector<TIndex>{C + size_ - 1, H, W}, CPU);
+  float* padded_ratio_data = padded_ratio.template mutable_data<float>();
   // Compute scale(copied from LRNOp) - reusing padded_ratio
   math::Set<float, CPUContext>(X.size(), bias_, scale_data, &context_);
   math::Set<float, CPUContext>(padded_ratio.size(), 0., padded_ratio_data,
@@ -170,7 +168,7 @@ bool LRNGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
     for (int c = 1; c < C; ++c) {
       float* this_scale_slice = scale_data + n * image_size + c * H * W;
       // copy previous scale
-      context_.Copy<float, CPUContext, CPUContext>(
+      context_.CopyFromCPU<float>(
           H * W, this_scale_slice - H * W, this_scale_slice);
       // add head
       math::Axpy<float, CPUContext>(
@@ -185,9 +183,8 @@ bool LRNGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
 
   math::Set<float, CPUContext>(padded_ratio.size(), 0., padded_ratio_data,
                                &context_);
-  TensorCPU accum_ratio(vector<TIndex>{H, W});
-  float* accum_ratio_data = accum_ratio.mutable_data<float>();
-
+  Tensor accum_ratio(vector<TIndex>{H, W}, CPU);
+  float* accum_ratio_data = accum_ratio.template mutable_data<float>();
 
   const float cache_ratio = 2. * alpha_ * beta_ / size_;
   const int inverse_pre_pad = size_ - (size_ + 1) / 2;
@@ -246,9 +243,9 @@ bool LRNGradientOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
     scale_ = &local_scale_tensor_;
   }
   scale_->ResizeLike(X);
-  TensorCPU padded_ratio(vector<TIndex>(1, C + size_ - 1));
-  float* padded_ratio_data = padded_ratio.mutable_data<float>();
-  float* scale_data = scale_->mutable_data<float>();
+  Tensor padded_ratio(vector<TIndex>(1, C + size_ - 1), CPU);
+  float* padded_ratio_data = padded_ratio.template mutable_data<float>();
+  float* scale_data = scale_->template mutable_data<float>();
   // Compute scale(copied from LRNOp) - reusing padded_ratio
   math::Set<float, CPUContext>(X.size(), bias_, scale_data, &context_);
   math::Set<float, CPUContext>(padded_ratio.size(), 0., padded_ratio_data,
@@ -278,7 +275,7 @@ bool LRNGradientOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
   const float* Ydata = Y.data<float>();
 
   const float* dYdata = dY.data<float>();
-  float* dXdata = dX->mutable_data<float>();
+  float* dXdata = dX->template mutable_data<float>();
   for (int n = 0; n < num_rows; ++n) {
     const int offset = n * C;
     for (int c = 0; c < C; ++c) {

@@ -95,7 +95,7 @@ bool RemovePaddingOp<CPUContext>::DoRunWithType() {
   std::transform(
       lengths_ptr,
       lengths_ptr + lengths_size,
-      lengths_out->mutable_data<int32_t>(),
+      lengths_out->template mutable_data<int32_t>(),
       [pad_width](int32_t x) { return x - pad_width; });
   return true;
 }
@@ -156,7 +156,7 @@ bool AddPaddingOp<CPUContext>::MakePadding(
   std::transform(
       lengths_ptr,
       lengths_ptr + lengths_size,
-      lengths_out->mutable_data<int32_t>(),
+      lengths_out->template mutable_data<int32_t>(),
       [pad_width](int32_t x) { return x + pad_width; });
   return true;
 }
@@ -203,7 +203,7 @@ bool PadEmptySamplesOp<CPUContext>::RunOnDevice() {
         static_cast<char*>(out_features->raw_mutable_data(features.meta()));
     auto src_base = static_cast<const char*>(features.raw_data());
     // copy data and add padding index as zero
-    Tensor<CPUContext> zero;
+    Tensor zero{CPU};
     zero.Resize(block_size);
     auto zeroPtr =
         static_cast<const char*>(zero.raw_mutable_data(features.meta()));
@@ -211,7 +211,7 @@ bool PadEmptySamplesOp<CPUContext>::RunOnDevice() {
     int start_src = 0;
     for (int i = 0; i < lengths.size(); ++i) {
       if (lengthsPtr[i] == 0) {
-        context_.template CopyItems<CPUContext, CPUContext>(
+        context_.CopyItemsSameDevice(
             features.meta(),
             block_size,
             zeroPtr,
@@ -219,7 +219,7 @@ bool PadEmptySamplesOp<CPUContext>::RunOnDevice() {
         start_dest += block_size;
       } else {
         auto src = src_base + start_src * features.meta().itemsize();
-        context_.template CopyItems<CPUContext, CPUContext>(
+        context_.CopyItemsSameDevice(
             features.meta(),
             lengthsPtr[i] * block_size,
             src,

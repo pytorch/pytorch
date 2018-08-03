@@ -58,8 +58,8 @@ OPERATOR_SCHEMA(Swish)
     .NumOutputs(1)
     .IdenticalTypeAndShape()
     .SetDoc(R"DOC(
-Swish takes one input data (Tensor<T>) and produces one output data
-(Tensor<T>) where the swish function, y = x / (1 + exp(-x)), is applied to the
+Swish takes one input data (Tensor) and produces one output data
+(Tensor) where the swish function, y = x / (1 + exp(-x)), is applied to the
 tensor elementwise.
 )DOC")
     .Input(0, "X", "1D input tensor")

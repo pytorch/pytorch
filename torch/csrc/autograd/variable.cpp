@@ -154,8 +154,8 @@ std::shared_ptr<Function>& Variable::ViewImpl::get_grad_fn() {
     AT_ASSERT(output_nr_ == 0);
     auto fn = std::make_shared<generated::AsStridedBackward>();
     fn->self_geometry = at::TensorGeometry(base_);
-    fn->size = sizes();
-    fn->stride = strides();
+    fn->size = sizes().vec();
+    fn->stride = strides().vec();
     fn->storage_offset = data_.storage_offset();
     fn->set_next_edges(collect_next_edges(base_));
     fn->add_input_metadata(base_.type(), sizes());

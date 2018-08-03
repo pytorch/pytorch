@@ -19,6 +19,7 @@ _(namespaces, scope) \
 _(namespaces, namespaces) \
 _(prim, Assign) \
 _(prim, Constant) \
+_(prim, None) \
 _(prim, Drop) \
 _(prim, Eval) \
 _(prim, Expand) /* onnx */ \
@@ -49,6 +50,7 @@ _(prim, TensorToNum) \
 _(prim, AutogradAdd) \
 _(prim, GradOf) \
 _(prim, AnyDefined) \
+_(prim, FusedConcat) \
 _(aten, __not__) \
 FORALL_ATEN_BASE_SYMBOLS(_) \
 _(onnx, Add) \
@@ -88,7 +90,9 @@ _(attr, sizes) \
 _(attr, starts) \
 _(attr, transA) \
 _(attr, transB) \
-_(attr, name)
+_(attr, name) \
+_(attr, string)
+
 
 // 'prim' symbols are synthetic operators that occur only in the IR
 // and don't have corresponding implementations in ATen.

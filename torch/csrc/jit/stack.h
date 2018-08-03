@@ -27,10 +27,10 @@ static inline IValue & peek(Stack & stack, size_t i, size_t N) {
 }
 // treat the last N elements of the stack as a list, looking up the
 // slice starting at index i and having length len
-static inline at::ArrayRef<IValue> peekSlice(Stack & stack, size_t i, size_t len, size_t N) {
+static inline at::ArrayRef<IValue> peekSlice(const Stack & stack, size_t i, size_t len, size_t N) {
   return at::ArrayRef<IValue>(stack).slice(stack.size() - N + i, len);
 }
-static inline at::ArrayRef<IValue> last(Stack & stack, size_t N) {
+static inline at::ArrayRef<IValue> last(const Stack & stack, size_t N) {
   return peekSlice(stack, 0, N, N);
 }
 static inline void drop(Stack & stack, size_t n) {
@@ -77,8 +77,8 @@ inline void pack(Stack & stack, T&& v) {
 }
 
 template<>
-inline void pack(Stack & stack, std::vector<at::Tensor>&& ts) {
-  for(auto& t : ts) {
+inline void pack(Stack & stack, std::vector<at::Tensor>&& v) {
+  for(auto& t : v) {
     stack.push_back(IValue(std::move(t)));
   }
 }

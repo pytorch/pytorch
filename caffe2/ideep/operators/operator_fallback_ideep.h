@@ -74,7 +74,7 @@ class IDEEPFallbackOp final : public IDEEPOperator {
     for (int i = 0; i < InputSize(); ++i) {
       if (InputIsType<itensor>(i) && Input(i).get_data_type() == itensor::data_type::f32) {
         auto& input = Input(i);
-        auto dtensor = local_input_blobs_[i]->template GetMutable<TensorCPU>();
+        auto dtensor = local_input_blobs_[i]->GetMutableTensor(CPU);
         dtensor->Resize(input.get_dims());
         if (input.is_public_format()) {
           dtensor->ShareExternalPointer(static_cast<float*>(input.get_data_handle()));
@@ -85,7 +85,7 @@ class IDEEPFallbackOp final : public IDEEPOperator {
           InputIsType<itensor>(i) &&
           Input(i).get_data_type() == itensor::data_type::s32) {
         auto& input = Input(i);
-        auto dtensor = local_input_blobs_[i]->template GetMutable<TensorCPU>();
+        auto dtensor = local_input_blobs_[i]->GetMutableTensor(CPU);
         dtensor->Resize(input.get_dims());
         if (input.is_public_format()) {
           dtensor->ShareExternalPointer(
@@ -138,8 +138,8 @@ class IDEEPFallbackOp final : public IDEEPOperator {
         VLOG(2) << "Output " << base_def_.output(i) << " as CPUTensor";
         auto src_dims = src.dims();
         Blob* dst = OperatorBase::OutputBlob(i);
-        dst->Reset(new Tensor<CPUContext>());
-        auto dtensor = dst->template GetMutable<TensorCPU>();
+        dst->Reset(new Tensor(CPU));
+        auto dtensor = dst->GetMutableTensor(CPU);
         dtensor->Resize(src_dims);
         dtensor->ShareData(src);
       }
@@ -156,4 +156,3 @@ class IDEEPFallbackOp final : public IDEEPOperator {
 };
 
 } // namespace caffe2
-

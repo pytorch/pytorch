@@ -1,4 +1,4 @@
-## @package onnx
+# @package onnx
 # Module caffe2.python.onnx.tests.c2_ref_test
 
 from __future__ import absolute_import
@@ -39,14 +39,14 @@ class TestCaffe2Basic(TestCase):
     def test_check_arguments(self):
         b2 = C.Caffe2Backend()
 
-        node_def = make_node("Add", inputs = ["X", "Y"], outputs = ["Z"])
-        b2.convert_node(node_def.SerializeToString(), 6)
+        node_def = make_node("Add", inputs=["X", "Y"], outputs=["Z"])
+        b2.convert_node(node_def.SerializeToString())
 
-        bad_node_def = make_node("Add", inputs = ["X", "Y"], outputs = ["Z"], foo = 42, bar = 56)
+        bad_node_def = make_node("Add", inputs=["X", "Y"], outputs=["Z"], foo=42, bar=56)
         with self.assertRaisesRegexp(
-            RuntimeError,
-            ".*?Don't know how to map unexpected argument (foo|bar) \(from operator .*?\).*$"):
-            b2.convert_node(bad_node_def.SerializeToString(), 6)
+                RuntimeError,
+                ".*?Don't know how to map unexpected argument (foo|bar) \(from operator .*?\).*$"):
+            b2.convert_node(bad_node_def.SerializeToString())
 
     def test_relu_graph(self):
         X = np.random.randn(3, 2).astype(np.float32)
@@ -199,6 +199,54 @@ class TestCaffe2Basic(TestCase):
             output["Y"],
             alpha * np.dot(A, B) + beta * C)
 
+    def test_gemm_conversion(self):
+        node_def = make_node(
+            'Gemm',
+            ['A', 'B', 'C'],
+            ["Y"],
+            alpha=2.,
+            beta=3.,
+            transB=True)
+
+        backend = C.Caffe2Backend()
+
+        # without broadcast and without shape info, gemm will be
+        # converted to matmul + add
+        _, op_strs = backend.convert_node(node_def.SerializeToString())
+        op_names = []
+        for s in op_strs:
+            op = caffe2_pb2.OperatorDef()
+            op.ParseFromString(s)
+            op_names.append(op.type)
+        self.assertEqual(op_names, ['Scale', 'Scale', 'MatMul', 'Add'])
+
+        # with shape info (that indicates C is 1D), gemm will be
+        # converted to FC
+        _, op_strs = backend.convert_node(node_def.SerializeToString(
+        ), [make_tensor_value_info("C", onnx.TensorProto.FLOAT, (1,)).SerializeToString()])
+        op_names = []
+        for s in op_strs:
+            op = caffe2_pb2.OperatorDef()
+            op.ParseFromString(s)
+            op_names.append(op.type)
+        self.assertEqual(op_names, ['Scale', 'Scale', 'FC'])
+
+        # or with broadcast, gemm will be converted to fc
+        node_def = make_node(
+            'Gemm',
+            ['A', 'B', 'C'],
+            ["Y"],
+            transB=True,
+            broadcast=1)
+
+        _, op_strs = backend.convert_node(node_def.SerializeToString())
+        op_names = []
+        for s in op_strs:
+            op = caffe2_pb2.OperatorDef()
+            op.ParseFromString(s)
+            op_names.append(op.type)
+        self.assertEqual(op_names, ['FC'])
+
     def test_tensor_filling_ops(self):
         for dtype in [
                 onnx.TensorProto.FLOAT,
@@ -266,7 +314,6 @@ class TestCaffe2Basic(TestCase):
             self.assertEqual(len(output), 1)
             np.testing.assert_almost_equal(output[0], vals)
             np.testing.assert_almost_equal(ws.FetchBlob(op.output[0]), vals)
-
 
     def test_slice(self):
         X = np.random.randn(1, 2, 3).astype(np.float32)

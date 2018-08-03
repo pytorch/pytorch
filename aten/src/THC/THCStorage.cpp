@@ -15,7 +15,7 @@ void THCStorage_resize(THCState *state, THCStorage *self, ptrdiff_t size)
   int device;
   THCudaCheck(cudaGetDevice(&device));
 
-  if(!(self->flag & TH_STORAGE_RESIZABLE))
+  if (!self->resizable)
     THError("Trying to resize storage that is not resizable");
 
   size_t elementSize = at::elementSize(self->scalar_type);
@@ -58,6 +58,6 @@ THC_API THCStorage* THCStorage_new(
       scalar_type,
       0,
       state->cudaDeviceAllocator,
-      TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE);
+      true);
   return storage;
 }

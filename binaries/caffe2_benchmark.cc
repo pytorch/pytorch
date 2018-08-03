@@ -62,6 +62,10 @@ CAFFE2_DEFINE_bool(
     run_individual,
     false,
     "Whether to benchmark individual operators.");
+CAFFE2_DEFINE_int(
+    sleep_before_run,
+    0,
+    "The seconds to sleep before starting the benchmarking.");
 CAFFE2_DEFINE_bool(
     text_output,
     false,
@@ -115,7 +119,8 @@ int main(int argc, char** argv) {
       caffe2::FLAGS_wipe_cache,
       caffe2::FLAGS_run_individual,
       caffe2::FLAGS_warmup,
-      caffe2::FLAGS_iter);
+      caffe2::FLAGS_iter,
+      caffe2::FLAGS_sleep_before_run);
 
   writeOutput(
       workspace,

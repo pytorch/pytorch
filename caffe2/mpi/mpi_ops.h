@@ -36,8 +36,7 @@ class MPIBroadcastOp final : public Operator<Context> {
   bool RunOnDevice() override {
     MPI_Comm comm = OperatorBase::Input<MPICommonWorldWrapper>(0).comm();
     CAFFE_ENFORCE(
-        OperatorBase::OutputIsType<Tensor<Context>>(0),
-        "Output is of wrong type.");
+        OperatorBase::OutputIsType<Tensor>(0), "Output is of wrong type.");
     auto* output = Output(0);
     // Make sure that output is already allocated.
     CAFFE_ENFORCE(
@@ -168,8 +167,8 @@ class MPISendTensorOp final : public Operator<Context> {
     MPI_Comm comm = OperatorBase::Input<MPICommonWorldWrapper>(COMM).comm();
     auto& input = Input(INPUT);
     if (InputSize() == 4) {
-      dst_ = OperatorBase::Input<TensorCPU>(DST).template data<int>()[0];
-      tag_ = OperatorBase::Input<TensorCPU>(TAG).template data<int>()[0];
+      dst_ = OperatorBase::Input<Tensor>(DST, CPU).template data<int>()[0];
+      tag_ = OperatorBase::Input<Tensor>(TAG, CPU).template data<int>()[0];
     }
     if (raw_buffer_) {
       // We need to do a const cast to cope with the fact that, before OpenMPI
@@ -211,8 +210,8 @@ class MPIReceiveTensorOp final : public Operator<Context> {
   bool RunOnDevice() override {
     MPI_Comm comm = OperatorBase::Input<MPICommonWorldWrapper>(COMM).comm();
     if (InputSize() == 4) {
-      src_ = OperatorBase::Input<TensorCPU>(SRC_IN).template data<int>()[0];
-      tag_ = OperatorBase::Input<TensorCPU>(TAG_IN).template data<int>()[0];
+      src_ = OperatorBase::Input<Tensor>(SRC_IN, CPU).template data<int>()[0];
+      tag_ = OperatorBase::Input<Tensor>(TAG_IN, CPU).template data<int>()[0];
     }
     MPI_Status status;
     if (raw_buffer_) {
@@ -228,10 +227,10 @@ class MPIReceiveTensorOp final : public Operator<Context> {
     } else {
       CAFFE_NOT_IMPLEMENTED;
     }
-    auto* src_out = OperatorBase::Output<TensorCPU>(SRC_OUT);
+    auto* src_out = OperatorBase::Output<Tensor>(SRC_OUT, CPU);
     src_out->Resize();
     src_out->template mutable_data<int>()[0] = status.MPI_SOURCE;
-    auto* tag_out = OperatorBase::Output<TensorCPU>(TAG_OUT);
+    auto* tag_out = OperatorBase::Output<Tensor>(TAG_OUT, CPU);
     tag_out->Resize();
     tag_out->template mutable_data<int>()[0] = status.MPI_TAG;
     return true;

@@ -402,11 +402,11 @@ at::Tensor _convolution_nogroup(
     bool transposed, IntList output_padding) {
 
   ConvParams params;
-  params.stride = stride;
-  params.padding = padding;
-  params.dilation = dilation;
+  params.stride = stride.vec();
+  params.padding = padding.vec();
+  params.dilation = dilation.vec();
   params.transposed = transposed;
-  params.output_padding = output_padding;
+  params.output_padding = output_padding.vec();
   params.groups = 1;
   params.benchmark = false;
   params.deterministic = false;
@@ -474,11 +474,11 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward(
   auto weight = weight_r;
 
   ConvParams params;
-  params.stride = stride_;
-  params.padding = padding_;
-  params.dilation = dilation_;
+  params.stride = stride_.vec();
+  params.padding = padding_.vec();
+  params.dilation = dilation_.vec();
   params.transposed = transposed_;
-  params.output_padding = output_padding_;
+  params.output_padding = output_padding_.vec();
   params.groups = groups_;
   params.benchmark = benchmark;
   params.deterministic = deterministic;

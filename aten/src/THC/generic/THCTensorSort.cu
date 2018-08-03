@@ -9,13 +9,11 @@ THC_API void THCTensor_(sortKeyValueInplace)(THCState* state,
                                            THCTensor* key,
                                            THCudaLongTensor* value,
                                            int dim, bool dir) {
-  THLongStorage *valueSize = THCudaLongTensor_newSizeOf(state, value);
-  THArgCheck(THCTensor_(isSize)(state, key, valueSize), 2,
+  THArgCheck(key->sizes().equals(value->sizes()), 2,
              "Key tensor must have same size as value tensor");
-  THLongStorage_free(valueSize);
-  int dims = THCudaLongTensor_nDimension(state, value);
+  int dims = THCudaLongTensor_nDimensionLegacyNoScalars(state, value);
   THArgCheck(dims <= MAX_CUTORCH_DIMS, 3, CUTORCH_DIM_WARNING);
-  dims = THCTensor_(nDimension)(state, key);
+  dims = THCTensor_(nDimensionLegacyNoScalars)(state, key);
   THArgCheck(dims <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
 
   ptrdiff_t inElements = THCTensor_(nElement)(state, key);
@@ -24,7 +22,7 @@ THC_API void THCTensor_(sortKeyValueInplace)(THCState* state,
     return;
   }
 
-  int64_t keySliceSize = THCTensor_(size)(state, key, dim);
+  int64_t keySliceSize = THCTensor_(sizeLegacyNoScalars)(state, key, dim);
   ptrdiff_t keySlices = inElements / keySliceSize;
 
   // The amount of shared memory and block size is based on
@@ -158,11 +156,11 @@ void THCTensor_(sortViaThrust)(THCState* state,
                                THCudaLongTensor* indices,
                                THCTensor* input,
                                int dim, bool dir) {
-  int nDims = THCTensor_(_nDimension)(state, input);
+  int nDims = THCTensor_(nDimensionLegacyAll)(state, input);
 
   ptrdiff_t totalElements = THCTensor_(nElement)(state, input);
-  int64_t sliceSize = THCTensor_(size)(state, input, dim);
-  int64_t sliceStride = THCTensor_(stride)(state, input, dim);
+  int64_t sliceSize = THCTensor_(sizeLegacyNoScalars)(state, input, dim);
+  int64_t sliceStride = THTensor_strideLegacyNoScalars(input, dim);
 
   // We perform a vectorized segmented sort in Thrust.
   // Say we are sorting a (2, 3) tensor. We have in flattened form:
@@ -283,11 +281,11 @@ THC_API void THCTensor_(sort)(THCState* state,
                                int dim, int order) {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, sorted, input));
   THCAssertSameGPU(THCudaLongTensor_checkGPU(state, 1, indices));
-  int64_t dims = THCTensor_(nDimension)(state, sorted);
+  int64_t dims = THCTensor_(nDimensionLegacyNoScalars)(state, sorted);
   THArgCheck(dims <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
-  dims = THCTensor_(nDimension)(state, input);
+  dims = THCTensor_(nDimensionLegacyNoScalars)(state, input);
   THArgCheck(dims <= MAX_CUTORCH_DIMS, 4, CUTORCH_DIM_WARNING);
-  dims = THCudaLongTensor_nDimension(state, indices);
+  dims = THCudaLongTensor_nDimensionLegacyNoScalars(state, indices);
   THArgCheck(dims <= MAX_CUTORCH_DIMS, 3, CUTORCH_DIM_WARNING);
 
   // Make sure sufficient output space is allocated
@@ -297,7 +295,7 @@ THC_API void THCTensor_(sort)(THCState* state,
   THLongStorage_free(inputSize);
 
   // How large are the slices that we are sorting?
-  int64_t sliceSize = THCTensor_(size)(state, input, dim);
+  int64_t sliceSize = THCTensor_(sizeLegacyNoScalars)(state, input, dim);
 
   // Workaround:
   // CUDA 8 uses more shared memory than 7.5 for bitonicSortKVInPlace,

@@ -252,7 +252,11 @@ def tensors1d(n, min_len=1, max_len=64, dtype=np.float32, elements=None):
 cpu_do = caffe2_pb2.DeviceOption()
 gpu_do = caffe2_pb2.DeviceOption(device_type=caffe2_pb2.CUDA)
 hip_do = caffe2_pb2.DeviceOption(device_type=caffe2_pb2.HIP)
-device_options = [cpu_do] + ([gpu_do] if workspace.has_gpu_support else []) + ([hip_do] if workspace.has_hip_support else [])
+# (bddppq) Do not rely on this no_hip option! It's just used to
+# temporarily skip some flaky tests on ROCM before it's getting more mature.
+_device_options_no_hip = [cpu_do] + ([gpu_do] if workspace.has_gpu_support else [])
+device_options = _device_options_no_hip + ([hip_do] if workspace.has_hip_support else [])
+
 # Include device option for each GPU
 expanded_device_options = [cpu_do] + (
     [caffe2_pb2.DeviceOption(device_type=caffe2_pb2.CUDA, cuda_gpu_id=i)
@@ -275,6 +279,7 @@ gcs = dict(
 
 gcs_cpu_only = dict(gc=st.sampled_from([cpu_do]), dc=st.just([cpu_do]))
 gcs_gpu_only = dict(gc=st.sampled_from([gpu_do]), dc=st.just([gpu_do]))
+gcs_no_hip = dict(gc=st.sampled_from(_device_options_no_hip), dc=st.just(_device_options_no_hip))
 
 
 @contextlib.contextmanager

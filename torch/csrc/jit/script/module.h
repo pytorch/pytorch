@@ -7,6 +7,7 @@
 #include "torch/csrc/jit/function_schema.h"
 #include "torch/csrc/jit/assertions.h"
 #include "torch/csrc/jit/named_value.h"
+#include "torch/csrc/jit/source_range.h"
 
 #include <torch/csrc/api/include/torch/detail/ordered_dict.h>
 
@@ -35,8 +36,6 @@ namespace torch { namespace jit { namespace script {
 // Note: because Method/Module are exposed to python these
 // classes use python method naming conventions
 
-struct SourceRange;
-
 struct Method {
   Method(std::string name, bool optimize,
          std::shared_ptr<Graph> graph,
@@ -54,13 +53,13 @@ struct Method {
     }
   }
 
-  variable_tensor_list run(variable_tensor_list && inputs) {
-    for(auto tp : member_inputs) {
-      inputs.push_back(*tp);
+  void run(Stack & stack) {
+    for(at::Tensor* tp : member_inputs) {
+      stack.push_back(*tp);
     }
-    return get_executor().run(std::move(inputs));
+    get_executor().run(stack);
   }
-  std::shared_ptr<Graph> graph_for(const variable_tensor_list& inputs) {
+  std::shared_ptr<Graph> graph_for(const Stack& inputs) {
     return get_executor().graphFor(inputs);
   }
   std::shared_ptr<Graph> graph() const {
@@ -95,12 +94,15 @@ struct Method {
 
   std::shared_ptr<Graph> propagate_shapes(std::vector<at::Tensor> inputs, bool with_grad=false) {
     auto retval = graph_->copy();
-    for (auto inp : member_inputs) {
-      inputs.push_back(*inp);
+    Stack stack;
+    stack.reserve(inputs.size() + member_inputs.size());
+    for (at::Tensor & i : inputs) {
+      stack.emplace_back(std::move(i));
     }
-    PropagateInputShapes(
-      *retval,
-      ArgumentSpec(with_grad, variable_tensor_list(std::move(inputs))));
+    for (at::Tensor* inp : member_inputs) {
+      stack.push_back(*inp);
+    }
+    PropagateInputShapes(*retval, ArgumentSpec(with_grad, std::move(stack)));
     return retval;
   }
 
@@ -110,21 +112,20 @@ struct Method {
       inputs.push_back(*inp);
     }
     if (propagate) {
-      auto inputs_copy = inputs;
-      PropagateInputShapes(*retval, ArgumentSpec(with_grad, variable_tensor_list(std::move(inputs_copy))));
+      PropagateInputShapes(*retval, ArgumentSpec(with_grad, fmap<IValue>(inputs)));
     }
     JIT_ASSERT(retval->inputs().size() == inputs.size());
     for (size_t i=0; i < retval->inputs().size(); ++i) {
       auto scalar_type = inputs[i].type().scalarType();
       auto sizes = inputs[i].sizes();
-      auto type = std::make_shared<torch::jit::TensorType>(scalar_type, -1, sizes);
+      auto type = torch::jit::TensorType::create(scalar_type, -1, sizes);
       retval->inputs()[i]->setType(type);
     }
     JIT_ASSERT(retval->outputs().size() == outputs.size());
     for (size_t i=0; i < retval->outputs().size(); ++i) {
       auto scalar_type = outputs[i].type().scalarType();
       auto sizes = outputs[i].sizes();
-      auto type = std::make_shared<torch::jit::TensorType>(scalar_type, -1, sizes);
+      auto type = torch::jit::TensorType::create(scalar_type, -1, sizes);
       retval->outputs()[i]->setType(type);
     }
     return retval;
