@@ -91,7 +91,7 @@ class AT_CORE_API Error : public std::exception {
  public:
   Error(const std::string& msg, const std::string& backtrace, const void* caller=nullptr);
   Error(SourceLocation source_location, const std::string& msg);
-  Error(const char* file, const int line, const char* condition, const std::string& msg, const void* caller);
+  Error(const char* file, const int line, const char* condition, const std::string& msg, const std::string& backtrace, const void* caller = nullptr);
 
   void AppendMessage(const std::string& msg);
 

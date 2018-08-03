@@ -1061,8 +1061,7 @@ TEST(BlobTest, CastingMessage) {
     b.Get<BlobTestBar>();
     FAIL() << "Should have thrown";
   } catch (const EnforceNotMet& e) {
-    string msg = e.what();
-    msg = msg.substr(0, msg.find('\n'));
+    string msg = e.what_without_backtrace();
     LOG(INFO) << msg;
     EXPECT_NE(msg.find("BlobTestFoo"), std::string::npos) << msg;
     EXPECT_NE(msg.find("BlobTestBar"), std::string::npos) << msg;

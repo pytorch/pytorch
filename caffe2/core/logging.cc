@@ -39,6 +39,14 @@ void SetStackTraceFetcher(std::function<string(void)> fetcher) {
   *GetFetchStackTrace() = fetcher;
 }
 
+[[noreturn]] void ThrowEnforceNotMet(const char* file, const int line, const char* condition, const std::string& msg, const void* caller) {
+  at::Error e(file, line, condition, msg, (*GetFetchStackTrace())(), caller);
+  if (FLAGS_caffe2_use_fatal_for_enforce) {
+    LOG(FATAL) << e.msg_stack()[0];
+  }
+  throw e;
+}
+
 static std::function<void(const OperatorDef&)> OperatorLogger =
     [](const OperatorDef&) { return; };
 
@@ -48,48 +56,6 @@ void SetOperatorLogger(std::function<void(const OperatorDef&)> tracer) {
 
 std::function<void(const OperatorDef&)> GetOperatorLogger() {
   return OperatorLogger;
-}
-
-EnforceNotMet::EnforceNotMet(
-    const char* file,
-    const int line,
-    const char* condition,
-    const string& msg,
-    const void* caller)
-    : msg_stack_{MakeString(
-          "[enforce fail at ",
-          at::detail::StripBasename(std::string(file)),
-          ":",
-          line,
-          "] ",
-          condition,
-          ". ",
-          msg,
-          " ")},
-      stack_trace_((*GetFetchStackTrace())()) {
-  if (FLAGS_caffe2_use_fatal_for_enforce) {
-    LOG(FATAL) << msg_stack_[0];
-  }
-  caller_ = caller;
-  full_msg_ = this->msg();
-}
-
-void EnforceNotMet::AppendMessage(const string& msg) {
-  msg_stack_.push_back(msg);
-  full_msg_ = this->msg();
-}
-
-string EnforceNotMet::msg() const {
-  return std::accumulate(msg_stack_.begin(), msg_stack_.end(), string("")) +
-      stack_trace_;
-}
-
-const char* EnforceNotMet::what() const noexcept {
-  return full_msg_.c_str();
-}
-
-const void* EnforceNotMet::caller() const noexcept {
-  return caller_;
 }
 
 }  // namespace caffe2

@@ -39,10 +39,9 @@ Error::Error(SourceLocation source_location, const std::string& msg)
   : Error(msg, str(" (", source_location, ")\n", get_backtrace(/*frames_to_skip=*/2))) {}
 
 // Caffe2-style error message
-Error::Error(const char* file, const int line, const char* condition, const std::string& msg, const void* caller)
+Error::Error(const char* file, const int line, const char* condition, const std::string& msg, const std::string& backtrace, const void* caller)
   : Error(str("[enforce fail at ", detail::StripBasename(file), ":", line, "] ", condition, ". ", msg),
-          str("\n", get_backtrace(/*frames_to_skip=*/2)),
-          caller) {}
+          backtrace, caller) {}
 
 std::string Error::msg() const {
   return std::accumulate(msg_stack_.begin(), msg_stack_.end(), std::string("")) + backtrace_;
