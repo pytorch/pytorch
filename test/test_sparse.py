@@ -974,13 +974,13 @@ class TestSparse(TestCase):
         values = self.ValueTensor([.5, .5])
         sizes = torch.Size([2, 3])
         with self.assertRaisesRegex(RuntimeError, "sizes is inconsistent with indices"):
-            self.SparseTensor(indices, values, sizes)
+            torch.sparse_coo_tensor(indices, values, sizes)
 
         indices = self.IndexTensor([[1, 2], [0, 2]])
         values = self.ValueTensor([[1, 1, 1], [1, 1, 1]])
         sizes = torch.Size([3, 3, 2])
         with self.assertRaisesRegex(RuntimeError, "values has incorrect size"):
-            self.SparseTensor(indices, values, sizes)
+            torch.sparse_coo_tensor(indices, values, sizes)
 
     def test_factory_default(self):
         tensor = self.SparseTensor()
@@ -1012,7 +1012,7 @@ class TestSparse(TestCase):
         values = self.ValueTensor([[1, 1], [1, 1]])  # (nnz, ...): (2, 2)
         sizes = torch.Size([2, 2])
         with self.assertRaisesRegex(RuntimeError, "indices and values must have same nnz"):
-            self.SparseTensor(indices, values, sizes)
+            torch.sparse_coo_tensor(indices, values, sizes)
 
     def test_factory_zero_nnz(self):
         device = 'cuda' if self.is_cuda else 'cpu'
@@ -1061,7 +1061,7 @@ class TestSparse(TestCase):
         values = self.ValueTensor([[[1, 1, 1], [1, 1, 1]]])
         sizes = torch.Size([1, 3, 4])
         with self.assertRaisesRegex(RuntimeError, "values has incorrect size"):
-            self.SparseTensor(indices, values, sizes)
+            torch.sparse_coo_tensor(indices, values, sizes)
 
     @cpu_only
     def test_factory_type_inference(self):
