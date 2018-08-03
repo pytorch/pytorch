@@ -18,8 +18,16 @@ struct Tensor;
 
 namespace at {
 struct AT_API TensorImpl : public Retainable {
-  explicit TensorImpl(Backend backend, ScalarType scalar_type, THTensor * tensor, bool is_variable)
-  : backend_(backend), scalar_type_(scalar_type), is_variable_(is_variable), tensor(tensor) {}
+  explicit TensorImpl(
+      Backend backend,
+      ScalarType scalar_type,
+      THTensor* tensor,
+      bool is_variable)
+      : tensor(tensor) {
+    tensor->is_variable_ = is_variable;
+    tensor->backend_ = backend;
+    tensor->scalar_type_ = scalar_type;
+  }
   TensorImpl(Backend backend, ScalarType scalar_type);
 
   virtual ~TensorImpl();
@@ -93,14 +101,6 @@ struct AT_API TensorImpl : public Retainable {
 
   virtual void set_data(Tensor new_data);
 
-protected:
-  Backend backend_;
-  // INVARIANT: When storage is non-null, this scalar type must
-  // agree with the scalar type in storage
-  ScalarType scalar_type_;
-  bool is_variable_ = false;
-  bool is_wrapped_number_ = false;
-public:
   THTensor * tensor;
 };
 } // namespace at
