@@ -7,7 +7,6 @@
 #include <unordered_map>
 #include <vector>
 
-#include "caffe2/core/active_workspace.h"
 #include "caffe2/core/timer.h"
 #include "caffe2/core/workspace.h"
 #include "caffe2/proto/caffe2.pb.h"
@@ -479,7 +478,6 @@ bool RunPlanOnWorkspace(
     Workspace* ws,
     const PlanDef& plan,
     ShouldContinue shouldContinue) {
-  ActiveWorkspace aws(ws);
   LOG(INFO) << "Started executing plan.";
   if (plan.execution_step_size() == 0) {
     LOG(WARNING) << "Nothing to run - did you define a correct plan?";

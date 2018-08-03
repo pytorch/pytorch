@@ -20,7 +20,6 @@
 #include <mutex>
 #include <unordered_set>
 
-#include "caffe2/core/active_workspace.h"
 #include "caffe2/core/init.h"
 
 #if CAFFE2_ANDROID
@@ -164,7 +163,7 @@ std::vector<uintptr_t> getBacktrace() {
 }
 
 void printBlobSizes() {
-  ::caffe2::ActiveWorkspace::ForEach(
+  ::caffe2::Workspace::ForEach(
       [&](::caffe2::Workspace* ws) { ws->PrintBlobSizes(); });
 }
 

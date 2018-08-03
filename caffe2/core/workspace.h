@@ -52,7 +52,7 @@ class Workspace {
   /**
    * Initializes an empty workspace.
    */
-  Workspace() : root_folder_("."), shared_(nullptr) {}
+  Workspace() : Workspace(".", nullptr) {}
 
   /**
    * Initializes an empty workspace with the given root folder.
@@ -62,7 +62,7 @@ class Workspace {
    * by the workspace.
    */
   explicit Workspace(const string& root_folder)
-      : root_folder_(root_folder), shared_(nullptr) {}
+      : Workspace(root_folder, nullptr) {}
 
   /**
    * Initializes a workspace with a shared workspace.
@@ -73,8 +73,8 @@ class Workspace {
    * and is responsible for making sure that its lifetime is longer than the
    * created workspace.
    */
-  explicit Workspace(const Workspace* shared)
-      : root_folder_("."), shared_(shared) {}
+  explicit Workspace(Workspace* shared)
+      : Workspace(".", shared) {}
 
   /**
    * Initializes workspace with parent workspace, blob name remapping
@@ -84,7 +84,7 @@ class Workspace {
   Workspace(
       const Workspace* shared,
       const std::unordered_map<string, string>& forwarded_blobs)
-      : root_folder_("."), shared_(nullptr) {
+      : Workspace(".", nullptr) {
     CAFFE_ENFORCE(shared, "Parent workspace must be specified");
     for (const auto& forwarded : forwarded_blobs) {
       CAFFE_ENFORCE(
@@ -98,12 +98,17 @@ class Workspace {
    * Initializes a workspace with a root folder and a shared workspace.
    */
   Workspace(const string& root_folder, Workspace* shared)
-      : root_folder_(root_folder), shared_(shared) {}
+      : root_folder_(root_folder), shared_(shared) {
+    std::lock_guard<std::mutex> guard(wsmutex_);
+    workspaces_.insert(this);
+  }
 
   ~Workspace() {
     if (FLAGS_caffe2_print_blob_sizes_at_exit) {
       PrintBlobSizes();
     }
+    std::lock_guard<std::mutex> guard(wsmutex_);
+    workspaces_.erase(this);
   }
 
   /**
@@ -284,6 +289,20 @@ class Workspace {
   bool RunOperatorOnce(const OperatorDef& op_def);
   bool RunNetOnce(const NetDef& net_def);
 
+  /**
+   * Applies a function f on each workspace that currently exists.
+   *
+   * This function is thread safe and there is no race condition between
+   * workspaces being passed to f in this thread and destroyed in another.
+   */
+  template<typename F>
+  static void ForEach(F f) {
+    std::lock_guard<std::mutex> guard(wsmutex_);
+    for (Workspace *ws : workspaces_) {
+      f(ws);
+    }
+  }
+
  public:
   std::atomic<int> last_failed_op_net_position;
 
@@ -296,6 +315,9 @@ class Workspace {
       forwarded_blobs_;
   std::unique_ptr<ThreadPool> thread_pool_;
   std::mutex thread_pool_creation_mutex_;
+
+  static std::mutex wsmutex_;
+  static std::unordered_set<Workspace*> workspaces_;
 
   DISABLE_COPY_AND_ASSIGN(Workspace);
 };
