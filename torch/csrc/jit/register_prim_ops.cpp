@@ -83,6 +83,26 @@ RegisterOperators reg({
           };
         }),
     Operator(
+        prim::IntToFloat,
+        [](Node* node) -> Operation {
+          return [](Stack& stack) {
+            int64_t i;
+            pop(stack, i);
+            push(stack, (float)i);
+            return 0;
+          };
+        }),
+    Operator(
+        prim::FloatToInt,
+        [](Node* node) -> Operation {
+          return [](Stack& stack) {
+            double d;
+            pop(stack, d);
+            push(stack, (int64_t)d);
+            return 0;
+          };
+        }),
+    Operator(
         prim::Undefined,
         [](Node* node) {
           return [](Stack& stack) {
