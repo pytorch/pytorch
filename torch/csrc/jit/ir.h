@@ -8,6 +8,8 @@
 #include "torch/csrc/jit/interned_strings.h"
 #include "torch/csrc/jit/resource_guard.h"
 #include "torch/csrc/jit/source_location.h"
+#include "torch/csrc/jit/source_range.h"
+#include "torch/csrc/jit/constants.h"
 #include "torch/csrc/jit/function_schema.h"
 #include "torch/csrc/jit/ivalue.h"
 #include "torch/csrc/jit/type.h"
@@ -1051,6 +1053,12 @@ public:
       }
     }
     return r;
+  }
+
+  Value* insertConstant(
+      IValue val,
+      at::optional<SourceRange> loc = at::nullopt) {
+    return jit::insertConstant(*this, std::move(val), loc);
   }
 
   Node * appendNode(Node * n) {
