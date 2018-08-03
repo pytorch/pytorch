@@ -29,11 +29,6 @@ cmake --version
 # TODO: Don't run this...
 pip install -r requirements.txt || true
 
-# TODO: Don't install this here
-if ! which conda; then
-  pip install --user mkl mkl-devel
-fi
-
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # This is necessary in order to cross compile (or else we'll have missing GPU device).
   export MAX_JOBS=4
@@ -56,6 +51,11 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   python tools/amd_build/build_pytorch_amd.py
   USE_ROCM=1 python setup.py install --user
   exit 0
+fi
+
+# TODO: Don't install this here
+if ! which conda; then
+  pip install mkl mkl-devel
 fi
 
 # sccache will fail for CUDA builds if all cores are used for compiling
