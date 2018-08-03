@@ -1,8 +1,8 @@
 #pragma once
 
+#include "ATen/ATenGeneral.h"
 #include "ATen/StorageImpl.h"
 #include "ATen/UndefinedTensor.h"
-#include "ATen/core/ATenGeneral.h"
 #include "ATen/core/ArrayRef.h"
 #include "ATen/core/Error.h"
 
