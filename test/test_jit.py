@@ -2229,7 +2229,7 @@ a")
             return x
 
         @torch.jit.script
-        def foo_script(x, dim):
+        def tensor_to_num(x, dim):
             return x.unsqueeze(dim)
 
         # testing unnecessary conversion is not happening
@@ -2237,10 +2237,10 @@ a")
 
         x = torch.randn(1)
         dim = torch.zeros(1)
-        foo_script(x, dim)
+        tensor_to_num(x, dim)
         dim = torch.zeros(2, 2)
         with self.assertRaisesRegex(RuntimeError, 'cannot be converted to Scalar'):
-                    foo_script(x, dim)
+                    tensor_to_num(x, dim)
 
     def test_keyword(self):
         @torch.jit.script

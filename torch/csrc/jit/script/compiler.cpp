@@ -680,18 +680,18 @@ Value* emitBuiltinCall(
   std::stringstream failure_messages;
   //first we try to match the schema without any conversion
   //if no schema matches then insert TensorToNum nodes where needed
-  bool convert_tensors_to_nums = false;
-  for (size_t i = 0; i < 2; i++) {
+  for(bool convert_tensors_to_nums : {false, true}) {
     for (const std::shared_ptr<Operator>& op : variants) {
+      //clear previous error messages
+      failure_messages.str("");
       if (auto result = tryEmitBuiltin(
               op, failure_messages, loc, graph, name, inputs, attributes,
               convert_tensors_to_nums)) {
         return result;
       }
     }
-    //convert tensors to nums on the second pass
-    convert_tensors_to_nums = true;
   }
+
   // none of the options worked
   if(!required) {
     return nullptr;
