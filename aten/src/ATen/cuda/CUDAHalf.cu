@@ -1,5 +1,5 @@
+#include "ATen/core/Half.h"
 #include "ATen/cuda/CUDAHalf.cuh"
-#include "ATen/Half.h"
 
 #include <cuda.h>
 #include <cuda_runtime.h>

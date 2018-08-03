@@ -8,7 +8,7 @@
 #include "torch/csrc/utils/pybind.h"
 
 #include <ATen/Device.h>
-#include <ATen/Error.h>
+#include <ATen/core/Error.h>
 
 #include <cstring>
 #include <limits>
