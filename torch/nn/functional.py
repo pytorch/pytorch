@@ -1833,14 +1833,14 @@ def multilabel_soft_margin_loss(input, target, weight=None, size_average=None,
     if weight is not None:
         loss = loss * weight
 
-    loss = loss.sum(dim=1)  # only return N loss values
+    loss = loss.sum(dim=1) / input.size(1)  # only return N loss values
 
     if reduction == 'none':
         return loss
     elif reduction == 'elementwise_mean':
-        return loss.sum() / input.numel()
+        return loss.mean()
     elif reduction == 'sum':
-        return loss.sum() / input.size(1)
+        return loss.sum()
     else:
         raise ValueError(reduction + " is not valid")
 
