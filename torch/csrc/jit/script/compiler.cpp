@@ -1536,20 +1536,26 @@ void defineMethodsInModule(Module & m, const std::vector<TypedDef>& definitions,
   }
 }
 
-namespace type_annotations {
-
 std::unordered_map<std::string, TypePtr> ident_to_type_lut() {
   static std::unordered_map<std::string, TypePtr> map = {
     {"Tensor", DynamicType::get()},
-    {"Int", IntType::get()},
-    {"Float", FloatType::get()},
+    {"int", IntType::get()},
+    {"float", FloatType::get()},
   };
   return map;
 }
 
-std::unordered_set<std::string> subscriptable_types() {
-  static std::unordered_set<std::string> map = {
-    "Tuple"
+TypePtr parseTypeFromExpr(Expr expr);
+
+std::unordered_map<std::string, std::function<TypePtr(Subscript)>> subscript_to_type_fns() {
+  static std::unordered_map<std::string, std::function<TypePtr(Subscript)>> map = {
+    {"Tuple", [](Subscript subscript) -> TypePtr {
+      std::vector<TypePtr> subscript_expr_types;
+      for (auto expr : subscript.subscript_exprs()) {
+        subscript_expr_types.push_back(parseTypeFromExpr(expr));
+      }
+      return TupleType::create(subscript_expr_types);
+    }},
   };
   return map;
 }
@@ -1557,8 +1563,9 @@ std::unordered_set<std::string> subscriptable_types() {
 TypePtr parseTypeFromExpr(Expr expr) {
   if (expr.kind() == TK_VAR) {
     auto ident = Var(expr).name();
-    if (ident_to_type_lut().count(ident.name())) {
-      return ident_to_type_lut()[ident.name()];
+    auto itr = ident_to_type_lut().find(ident.name());
+    if (itr != ident_to_type_lut().end()) {
+      return itr->second;
     }
     throw ErrorReport(expr.range()) << "Unknown type name " << ident.name();
   } else if (expr.kind() == TK_SUBSCRIPT) {
@@ -1567,24 +1574,19 @@ TypePtr parseTypeFromExpr(Expr expr) {
       throw ErrorReport(subscript.value().range()) << "Subscripted type must be a type identifier";
     }
     auto value_name = Var(subscript.value()).name().name();
-    if (!subscriptable_types().count(value_name)) {
+    if (!subscript_to_type_fns().count(value_name)) {
       throw ErrorReport(subscript.range()) << "Type " << value_name << " cannot be subscripted";
     }
-    if (value_name == "Tuple") {
-      std::vector<TypePtr> subscript_expr_types;
-      for (auto expr : subscript.subscript_exprs()) {
-        subscript_expr_types.push_back(parseTypeFromExpr(expr));
-      }
-      return TupleType::create(subscript_expr_types);
-    }
+    return subscript_to_type_fns()[value_name](subscript);
   }
   throw ErrorReport(expr.range()) << "Expression of type " << kindToString(expr.kind())
                                   << " cannot be used in a type expression";
 }
 
-std::vector<Argument> parseArgsFromDef(Def &def) {
+std::vector<Argument> parseArgsFromDef(Def &def, bool is_method=false) {
   std::vector<Argument> retval;
-  for (size_t i = 0; i < def.decl().params().size(); ++i) {
+  size_t i = is_method ? 1 : 0;
+  for (; i < def.decl().params().size(); ++i) {
     auto decl_arg = def.decl().params()[i];
     auto arg = Argument(decl_arg.ident().name(), parseTypeFromExpr(decl_arg.type()),
                         /*N =*/{}, /*default_value =*/{}, /*kwarg_only =*/false);
@@ -1609,14 +1611,12 @@ std::vector<Argument> parseReturnsFromDef(Def &def) {
   }
 }
 
-FunctionSchema extractSchemaFromDef(Def &def) {
+FunctionSchema extractSchemaFromDef(Def &def, bool is_method=false) {
     auto name = def.name().name();
-    std::vector<Argument> args = parseArgsFromDef(def);
+    std::vector<Argument> args = parseArgsFromDef(def, is_method);
     std::vector<Argument> returns = parseReturnsFromDef(def);
     return FunctionSchema(name, args, returns);
 }
-
-}  // namespace type_annotations
 
 void defineMethodsInModule(Module & m, const std::string& source, const Resolver& resolver, SugaredValuePtr self) {
   Parser p(source);
@@ -1624,7 +1624,7 @@ void defineMethodsInModule(Module & m, const std::string& source, const Resolver
   std::vector<Resolver> resolvers;
   while (p.lexer().cur().kind != TK_EOF) {
     auto def = Def(p.parseFunction());
-    auto schema = type_annotations::extractSchemaFromDef(def);
+    auto schema = extractSchemaFromDef(def, bool(self));
     definitions.emplace_back(def, schema);
     resolvers.push_back(resolver);
   }
