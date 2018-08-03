@@ -1584,11 +1584,11 @@ TypePtr parseTypeFromExpr(Expr expr) {
                                   << " cannot be used in a type expression";
 }
 
-std::vector<Argument> parseArgsFromDef(Def &def, bool is_method=false) {
+std::vector<Argument> parseArgsFromDecl(Decl decl, bool is_method=false) {
   std::vector<Argument> retval;
   size_t i = is_method ? 1 : 0;
-  for (; i < def.decl().params().size(); ++i) {
-    auto decl_arg = def.decl().params()[i];
+  for (; i < decl.params().size(); ++i) {
+    auto decl_arg = decl.params()[i];
     auto arg = Argument(decl_arg.ident().name(), parseTypeFromExpr(decl_arg.type()),
                         /*N =*/{}, /*default_value =*/{}, /*kwarg_only =*/false);
     retval.push_back(arg);
@@ -1596,9 +1596,9 @@ std::vector<Argument> parseArgsFromDef(Def &def, bool is_method=false) {
   return retval;
 }
 
-std::vector<Argument> parseReturnsFromDef(Def &def) {
-  JIT_ASSERT(def.decl().return_type().present());
-  auto parsed_type = parseTypeFromExpr(def.decl().return_type().get());
+std::vector<Argument> parseReturnsFromDecl(Decl decl) {
+  JIT_ASSERT(decl.return_type().present());
+  auto parsed_type = parseTypeFromExpr(decl.return_type().get());
   if (auto tuple_type = parsed_type->cast<TupleType>()) {
     // Flatten a single return type of type Tuple into its constituent types
     std::vector<Argument> retval;
@@ -1615,10 +1615,10 @@ std::vector<Argument> parseReturnsFromDef(Def &def) {
 
 FunctionSchema extractSchemaFromDef(Def &def, bool is_method=false) {
     auto name = def.name().name();
-    std::vector<Argument> args = parseArgsFromDef(def, is_method);
+    std::vector<Argument> args = parseArgsFromDecl(def.decl(), is_method);
     at::optional<std::vector<Argument>> returns = at::nullopt;
     if (def.decl().return_type().present()) {
-      returns = parseReturnsFromDef(def);
+      returns = parseReturnsFromDecl(def.decl());
     }
     return FunctionSchema(name, args, returns);
 }

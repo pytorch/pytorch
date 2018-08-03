@@ -305,7 +305,6 @@ struct Parser {
 
   TreeRef parseTypeComment() {
     auto range = L.cur().range;
-    L.expect(TK_TYPE_COMMENT);
     auto param_types = parseList('(', ',', ')', &Parser::parseBareTypeAnnotation);
     TreeRef return_type;
     if (L.nextIf(TK_ARROW)) {
@@ -346,9 +345,6 @@ struct Parser {
         auto values = parseList(TK_NOTHING, ',', TK_NEWLINE, &Parser::parseExp);
         return Return::create(range, values);
       }
-      case TK_TYPE_COMMENT: {
-        return parseTypeComment();
-      }
       default: {
         List<Expr> exprs = parseList(TK_NOTHING, ',', TK_NOTHING, &Parser::parseExp);
         if (L.cur().kind != TK_NEWLINE) {
@@ -374,11 +370,11 @@ struct Parser {
     L.expect(TK_IF);
     auto cond = parseExp();
     L.expect(':');
-    auto true_branch = std::get<0>(parseStatements());
+    auto true_branch = parseStatements();
     auto false_branch = makeList(L.cur().range, {});
     if (L.nextIf(TK_ELSE)) {
       L.expect(':');
-      false_branch = std::get<0>(parseStatements());
+      false_branch = parseStatements();
     }
     return If::create(r, Expr(cond), List<Stmt>(true_branch), List<Stmt>(false_branch));
   }
@@ -387,7 +383,7 @@ struct Parser {
     L.expect(TK_WHILE);
     auto cond = parseExp();
     L.expect(':');
-    auto body = std::get<0>(parseStatements());
+    auto body = parseStatements();
     return While::create(r, Expr(cond), List<Stmt>(body));
   }
   TreeRef parseFor() {
@@ -397,33 +393,25 @@ struct Parser {
     L.expect(TK_IN);
     auto itrs = parseList(TK_NOTHING, ',', TK_NOTHING, &Parser::parseExp);
     L.expect(':');
-    auto body = std::get<0>(parseStatements());
+    auto body = parseStatements();
     return For::create(r, targets, itrs, body);
   }
 
   // First return value is the TreeRef to the list of statements we've parsed.
   // The second one is an optional Decl for if we find type annotations in a
   // comments
-  std::tuple<TreeRef, std::shared_ptr<TreeRef>> parseStatements() {
+  TreeRef parseStatements(bool expect_indent=true) {
     auto r = L.cur().range;
-    L.expect(TK_INDENT);
+    if (expect_indent)
+      L.expect(TK_INDENT);
     TreeList stmts;
-    std::shared_ptr<TreeRef> type_annotation_decl = nullptr;
     for (size_t i=0; ; ++i) {
       auto stmt = parseStmt();
-      if (stmt->kind() == TK_DECL) {
-        // The first statement in a block is the only valid context where a
-        // type annotation context can be interpreted
-        if (i == 0) {
-          type_annotation_decl = std::make_shared<TreeRef>(stmt);
-        }
-      } else {
-        stmts.push_back(stmt);
-      }
+      stmts.push_back(stmt);
       if (L.nextIf(TK_DEDENT))
         break;
     }
-    return {c(TK_LIST, r, std::move(stmts)), type_annotation_decl};
+    return c(TK_LIST, r, std::move(stmts));
   }
   TreeRef parseDecl() {
     auto paramlist = parseList('(', ',', ')', &Parser::parseParam);
@@ -440,35 +428,37 @@ struct Parser {
     return Decl::create(paramlist.range(), List<Param>(paramlist), Maybe<Expr>(return_type));
   }
 
+  Decl mergeTypesFromTypeComment(Decl decl, Decl type_annotation_decl) {
+    if (decl.params().size() != type_annotation_decl.params().size()) {
+      throw ErrorReport(type_annotation_decl.range()) << "Number of type annotations ("
+        << type_annotation_decl.params().size() << ") did not match the number of "
+        << "function parameters (" << decl.params().size() << ")";
+    }
+    auto old = decl.params();
+    auto _new = type_annotation_decl.params();
+    // Merge signature idents and ranges with annotation types
+
+    std::vector<Param> new_params;
+    for (size_t i=0; i < decl.params().size(); ++i) {
+      new_params.push_back(Param::create(old[i].range(), old[i].ident(), _new[i].type()));
+    }
+    return Decl::create(decl.range(), List<Param>::create(decl.range(), new_params), type_annotation_decl.return_type());
+  }
+
   TreeRef parseFunction() {
     L.expect(TK_DEF);
     auto name = parseIdent();
     auto decl = Decl(parseDecl());
 
-    // Handle type annotations specified as a comment. Extract out the types
-    // and pair them up with each respective parameter from the original Decl
-    // parse. Forward the return type.
-    TreeRef stmts_list;
-    std::shared_ptr<TreeRef> type_annotation;
-    std::tie(stmts_list, type_annotation) = parseStatements();
-    if (type_annotation) {
-      auto type_annotation_decl = Decl(*type_annotation);
-      if (decl.params().size() != type_annotation_decl.params().size()) {
-        throw ErrorReport(type_annotation_decl.range()) << "Number of type annotations ("
-          << type_annotation_decl.params().size() << ") did not match the number of "
-          << "function parameters (" << decl.params().size() << ")";
-      }
-      auto old = decl.params();
-      auto _new = type_annotation_decl.params();
-      // Merge signature idents and ranges with annotation types
-      std::vector<Param> new_params;
-      for (size_t i=0; i < decl.params().size(); ++i) {
-        new_params.push_back(Param::create(old[i].range(), old[i].ident(), _new[i].type()));
-      }
-      decl = Decl::create(decl.range(), List<Param>::create(decl.range(), new_params), type_annotation_decl.return_type());
+    // Handle type annotations specified in a type comment as the first line of
+    // the function.
+    L.expect(TK_INDENT);
+    if (L.nextIf(TK_TYPE_COMMENT)) {
+      auto type_annotation_decl = Decl(parseTypeComment());
+      decl = mergeTypesFromTypeComment(decl, type_annotation_decl);
     }
 
-
+    auto stmts_list = parseStatements(false);
     return Def::create(name.range(), Ident(name), Decl(decl),
                        List<Stmt>(stmts_list));
   }
