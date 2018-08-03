@@ -255,7 +255,7 @@ TYPE_RETURN = {
 CHECKED_CAST = {
     'THTensor*':
         CodeTemplate(
-            'checked_cast_tensor<${Tensor}>('
+            'checked_cast_tensor<TensorImpl>('
             '${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay}, '
             'Backend::${Backend}, ScalarType::${ScalarName})'),
     'THSTensor*':
@@ -302,7 +302,7 @@ CHECKED_CAST = {
     'real': CodeTemplate('${arg_name}.to${ScalarName}()'),
     'accreal': CodeTemplate('${arg_name}.to${AccScalarName}()'),
     'TensorList': CodeTemplate(
-            'tensor_list_checked_cast<${Tensor}, Tensor, '
+            'tensor_list_checked_cast<TensorImpl, Tensor, '
             '${THTensor}>(${arg_name},"${arg_name}",${arg_pos}, '
             'Backend::${Backend}, ScalarType::${ScalarName})'),
     'IntList': CodeTemplate('check_intlist<${size}>(${arg_name}, "${arg_name}", ${arg_pos}${,default_init})')
@@ -336,10 +336,10 @@ ALLOC_NOARGS_WRAP = {
 }
 
 ALLOC_WRAP = {
-    'THTensor*': 'new ${Tensor}(${arguments})',
-    'THBoolTensor*': 'new ${Backend}ByteTensor(${arguments})',
-    'THIndexTensor*': 'new ${Backend}LongTensor(${arguments})',
-    'THIntegerTensor*': 'new ${Backend}IntTensor(${arguments})',
+    'THTensor*': 'new TensorImpl(Backend::${Backend}, ScalarType::${ScalarName}, ${arguments})',
+    'THBoolTensor*': 'new TensorImpl(Backend::${Backend}, ScalarType::Byte, ${arguments})',
+    'THIndexTensor*': 'new TensorImpl(Backend::${Backend}, ScalarType::Long, ${arguments})',
+    'THIntegerTensor*': 'new TensorImpl(Backend::${Backend}, ScalarType::Int, ${arguments})',
     'THSTensor*': 'new Sparse${Tensor}(${arguments})',
     'THDenseTensor*': 'new ${DenseTensor}(${arguments})',
     'THDenseIndexTensor*': 'new ${DenseBackend}LongTensor(${arguments})',

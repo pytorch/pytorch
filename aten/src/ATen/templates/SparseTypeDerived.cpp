@@ -7,8 +7,6 @@
 
 // ${generated_comment}
 
-#include "ATen/${DenseBackend}LongTensor.h"
-#include "ATen/${DenseTensor}.h"
 #include "ATen/${Generator}.h"
 #include "ATen/Allocator.h"
 #include "ATen/DeviceGuard.h"

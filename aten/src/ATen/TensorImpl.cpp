@@ -59,7 +59,7 @@ TensorImpl::TensorImpl(Backend backend, ScalarType scalar_type) {
   type_ = &globalContext().getType(backend, scalar_type);
   Storage* storage = type_->storage().release();
   StorageImpl* storage_impl = storage->pImpl();
-  storage_impl->retain();
+  // storage_impl->retain();
   storage_impl->set_resizable(true);
   tensor = new THTensor(storage_impl);
 }
@@ -117,8 +117,8 @@ void * TensorImpl::unsafeGetTH(bool retain) {
 }
 
 std::unique_ptr<Storage> TensorImpl::storage() {
-  auto storage = THTensor_getStoragePtr(tensor);
-  THStorage_retain(storage);
+  StorageImpl* storage = tensor->storage_;
+  storage->retain();
   return std::unique_ptr<Storage>(new Storage(storage));
 }
 

@@ -8,8 +8,6 @@
 // ${generated_comment}
 
 $storage_tensor_headers
-#include "ATen/${DenseBackend}LongTensor.h"
-#include "ATen/${DenseTensor}.h"
 #include "ATen/${Generator}.h"
 #include "ATen/Allocator.h"
 #include "ATen/DeviceGuard.h"
@@ -94,7 +92,8 @@ std::unique_ptr<Storage> ${Type}::storageWithAllocator(int64_t size, Allocator* 
 Tensor ${Type}::unsafeTensorFromTH(void * th_pointer, bool retain) const {
   if (retain)
     ${THTensor}_retain(${state,} (${THTensor}*) th_pointer);
-  return Tensor(new ${Tensor}((${THTensor}*)(th_pointer)), false);
+  return Tensor(new TensorImpl(Backend::${Backend}, ScalarType::${ScalarName},
+        (${THTensor}*)(th_pointer)), false);
 }
 std::unique_ptr<Storage> ${Type}::unsafeStorageFromTH(void * th_pointer, bool retain) const {
   if (retain)
