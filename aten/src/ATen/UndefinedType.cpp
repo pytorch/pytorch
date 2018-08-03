@@ -15,7 +15,7 @@ bool UndefinedType::is_cuda() const { return false; }
 bool UndefinedType::is_sparse() const { return false; }
 bool UndefinedType::is_distributed() const { return false; }
 
-std::unique_ptr<Storage> UndefinedType::storage() const {
+std::unique_ptr<Storage> UndefinedType::storage(bool resizable) const {
   AT_ERROR("storage not defined for UndefinedType");
 }
 std::unique_ptr<Storage> UndefinedType::storage(size_t size) const {

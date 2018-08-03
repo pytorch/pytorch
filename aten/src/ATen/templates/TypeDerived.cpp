@@ -51,15 +51,16 @@ bool ${Type}::is_cuda() const { return backend() == kCUDA || backend() == kSpars
 bool ${Type}::is_sparse() const { return backend() == kSparseCPU || backend() == kSparseCUDA; }
 bool ${Type}::is_distributed() const { return false; }
 
-std::unique_ptr<Storage> ${Type}::storage() const {
+std::unique_ptr<Storage> ${Type}::storage(bool resizable) const {
   return std::unique_ptr<Storage>(new Storage(
       ScalarType::${ScalarName},
       0,
 #if ${isCUDA}
-      globalContext().getTHCState()->cudaDeviceAllocator
+      globalContext().getTHCState()->cudaDeviceAllocator,
 #else
-      getTHDefaultAllocator()
+      getTHDefaultAllocator(),
 #endif
+      resizable
   ));
 }
 std::unique_ptr<Storage> ${Type}::storage(size_t size) const {

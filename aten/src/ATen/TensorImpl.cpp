@@ -57,10 +57,8 @@ void Tensor::backward(
 
 TensorImpl::TensorImpl(Backend backend, ScalarType scalar_type) {
   type_ = &globalContext().getType(backend, scalar_type);
-  Storage* storage = type_->storage().release();
+  Storage* storage = type_->storage(true).release();
   StorageImpl* storage_impl = storage->pImpl();
-  // storage_impl->retain();
-  storage_impl->set_resizable(true);
   tensor = new THTensor(storage_impl);
 }
 

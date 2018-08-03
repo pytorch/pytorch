@@ -40,7 +40,7 @@ bool ${Type}::is_cuda() const { return backend() == kCUDA || backend() == kSpars
 bool ${Type}::is_sparse() const { return backend() == kSparseCPU || backend() == kSparseCUDA; }
 bool ${Type}::is_distributed() const { return false; }
 
-std::unique_ptr<Storage> ${Type}::storage() const {
+std::unique_ptr<Storage> ${Type}::storage(bool resizable) const {
   AT_ERROR("storage not supported on sparse");
 }
 std::unique_ptr<Storage> ${Type}::storage(size_t size) const {
