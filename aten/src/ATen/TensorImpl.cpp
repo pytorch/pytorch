@@ -12,11 +12,14 @@ namespace at {
 
 Type& TensorImpl::type() const {
   Type* base_type = &globalContext().getType(backend_, scalar_type_);
+  Type* r = nullptr;
   if (is_variable_) {
-    return detail::getVariableHooks().getVariableType(*base_type);
+    r = &detail::getVariableHooks().getVariableType(*base_type);
   } else {
-    return *base_type;
+    r = base_type;
   }
+  AT_ASSERT(type_ == r);
+  return *r;
 }
 
 Tensor& TensorImpl::grad() {

@@ -19,9 +19,10 @@ struct Tensor;
 namespace at {
 struct AT_API TensorImpl : public Retainable {
   explicit TensorImpl(Type * type, Backend backend, ScalarType scalar_type, THTensor * tensor, bool is_variable)
-  : backend_(backend), scalar_type_(scalar_type), is_variable_(is_variable), tensor(tensor) {
-    AT_ASSERT(&this->type() == type);
+  : type_(type), backend_(backend), scalar_type_(scalar_type), is_variable_(is_variable), tensor(tensor) {
   }
+
+  Type* type_;
 
   virtual ~TensorImpl();
 

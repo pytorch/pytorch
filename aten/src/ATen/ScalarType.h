@@ -97,8 +97,8 @@ static inline const char * toString(ScalarType t) {
 
   switch(t) {
     AT_FORALL_SCALAR_TYPES(DEFINE_CASE)
-    ScalarType::Undefined: return "Undefined";
-    ScalarType::NumOptions: return "NumOptions";
+    case ScalarType::Undefined: return "Undefined";
+    case ScalarType::NumOptions: return "NumOptions";
     default: return "UNKNOWN_SCALAR";
   }
 #undef DEFINE_CASE
