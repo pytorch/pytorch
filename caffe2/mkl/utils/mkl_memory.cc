@@ -21,12 +21,9 @@ CAFFE_KNOWN_TYPE(mkl::MKLMemory<double>);
 template <typename T>
 static vector<TIndex> GetMKLTensorInfo(
     const void* c,
-    bool* shares_data,
     size_t* capacity,
     DeviceOption* device) {
   const mkl::MKLMemory<T>* tc = static_cast<const mkl::MKLMemory<T>*>(c);
-  // it's too hard to get sharing info from mkl::MKLMemory
-  *shares_data = false;
   *capacity = tc->size() * sizeof(T);
   device->set_device_type(MKLDNN);
   device->set_cuda_gpu_id(0);
