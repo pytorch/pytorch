@@ -109,13 +109,9 @@ TYPE_DERIVED_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeDerived.h")
 TYPE_H = CodeTemplate.from_file(TEMPLATE_PATH + "/Type.h")
 TYPE_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/Type.cpp")
 
-TENSOR_DERIVED_CPP = CodeTemplate.from_file(
-    TEMPLATE_PATH + "/TensorDerived.cpp")
-
 REGISTER_CUDA_H = CodeTemplate.from_file(TEMPLATE_PATH + "/RegisterCUDA.h")
 REGISTER_CUDA_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/RegisterCUDA.cpp")
 
-TENSOR_DERIVED_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TensorDerived.h")
 TENSOR_H = CodeTemplate.from_file(TEMPLATE_PATH + "/Tensor.h")
 TENSOR_METHODS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TensorMethods.h")
 
@@ -236,14 +232,7 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
     env['DenseTensor'] = "{}{}Tensor".format(backend, scalar_name)
     env['Backend'] = density_tag + backend
     env['DenseBackend'] = backend
-    env['storage_tensor_headers'] = []
-    if density != 'Sparse':
-        env['storage_tensor_headers'] = [
-            '#include "ATen/{}.h"'.format(env['Tensor']),
-            '#include "ATen/{}ByteTensor.h"'.format(env['Backend']),
-            '#include "ATen/{}IntTensor.h"'.format(env['Backend']),
-            '#include "ATen/{}LongTensor.h"'.format(env['Backend']),
-        ]
+    env['storage_tensor_headers'] = ['#include "ATen/TensorImpl.h"']
 
     # used for generating switch logic for external functions
     tag = density_tag + backend + scalar_name
@@ -313,11 +302,6 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
         fm = cuda_file_manager
 
     if density != 'Sparse':
-        # there are no storage or tensor types for sparse; it's all uniform
-        fm.write(env['Tensor'] + ".cpp", TENSOR_DERIVED_CPP, env)
-        fm.write(env['Tensor'] + ".h", TENSOR_DERIVED_H, env)
-
-    if density != 'Sparse':
         fm.write(env['Type'] + ".cpp", TYPE_DERIVED_CPP, env)
     else:
         fm.write(env['Type'] + ".cpp", SPARSE_TYPE_DERIVED_CPP, env)
@@ -368,7 +352,7 @@ def declare_outputs():
     for backend, density, scalar_types in iterate_types():
         scalar_name = scalar_types[0]
         full_backend = "Sparse" + backend if density == "Sparse" else backend
-        for kind in ["Type", "Tensor"]:
+        for kind in ["Type"]:
             if kind != 'Type' and density == "Sparse":
                 # No Storage or Tensor for sparse
                 continue

@@ -280,12 +280,12 @@ CHECKED_CAST = {
             'Backend::${Backend}, ScalarType::Int)'),
     'THDenseTensor*':
         CodeTemplate(
-            'checked_cast_tensor<${DenseTensor}>('
+            'checked_cast_tensor<TensorImpl>('
             '${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay}, '
             'Backend::${DenseBackend}, ScalarType::${ScalarName})'),
     'THDenseIndexTensor*':
         CodeTemplate(
-            'checked_cast_tensor<${DenseBackend}LongTensor>('
+            'checked_cast_tensor<TensorImpl>('
             '${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay}, '
             'Backend::${DenseBackend}, ScalarType::Long)'),
     'THStorage*':
@@ -331,8 +331,8 @@ ALLOC_NOARGS_WRAP = {
     'THIndexTensor*': 'new TensorImpl(Backend::${Backend}, ScalarType::Long)',
     'THIntegerTensor*': 'new TensorImpl(Backend::${Backend}, ScalarType::Int)',
     'THSTensor*': 'detail::new_Sparse${Tensor}()',
-    'THDenseTensor*': 'detail::new_${DenseTensor}()',
-    'THDenseIndexTensor*': 'detail::new_${DenseBackend}LongTensor()',
+    'THDenseTensor*': 'new TensorImpl(Backend::${Backend}, ScalarType::${ScalarName})',
+    'THDenseIndexTensor*': 'new TensorImpl(Backend::${Backend}, ScalarType::Long)'
 }
 
 ALLOC_WRAP = {
@@ -341,8 +341,8 @@ ALLOC_WRAP = {
     'THIndexTensor*': 'new TensorImpl(Backend::${Backend}, ScalarType::Long, ${arguments})',
     'THIntegerTensor*': 'new TensorImpl(Backend::${Backend}, ScalarType::Int, ${arguments})',
     'THSTensor*': 'new Sparse${Tensor}(${arguments})',
-    'THDenseTensor*': 'new ${DenseTensor}(${arguments})',
-    'THDenseIndexTensor*': 'new ${DenseBackend}LongTensor(${arguments})',
+    'THDenseTensor*': 'new TensorImpl(Backend::${Backend}, ScalarType::${ScalarName}, ${arguments})',
+    'THDenseIndexTensor*': 'new TensorImpl(Backend::${Backend}, ScalarType::Long, ${arguments})',
 }
 
 # Replacements for constants when calling into TH

@@ -33,11 +33,6 @@ static inline T* checked_cast_storage(Base* expr, const char * name, int pos, Ba
     AT_ERROR("Expected object of scalar type ", scalar_type, " but got scalar type ", expr->pImpl()->scalar_type(),
              " for argument #", pos, " '", name, "'");
   }
-  // NB: We're getting rid of derived types soon!
-  // if (typeid(*(expr->pImpl())) != typeid(T)) {
-  //   AT_ERROR("Expected object of RTTI type ", typeid(T).name(), " but found type ", typeid(*(expr->pImpl())).name(),
-  //            " for argument #", pos, " '", name, "'");
-  // }
   return static_cast<T*>(expr);
 }
 
@@ -46,14 +41,14 @@ inline T* checked_cast_tensor(Base* expr, const char * name, int pos, bool allow
   if(allowNull && expr == UndefinedTensor::singleton()) {
     return nullptr;
   }
-  if (expr->type().backend() != backend) {
-    AT_ERROR("Expected object of backend ", backend, " but got backend ", expr->type().backend(),
-             " for argument #", pos, " '", name, "'");
-  }
-  if (expr->type().scalarType() != scalar_type) {
-    AT_ERROR("Expected object of scalar type ", scalar_type, " but got scalar type ", expr->type().scalarType(),
-             " for argument #", pos, " '", name, "'");
-  }
+  // if (expr->type().backend() != backend) {
+  //   AT_ERROR("Expected object of backend ", backend, " but got backend ", expr->type().backend(),
+  //            " for argument #", pos, " '", name, "'");
+  // }
+  // if (expr->type().scalarType() != scalar_type) {
+  //   AT_ERROR("Expected object of scalar type ", scalar_type, " but got scalar type ", expr->type().scalarType(),
+  //            " for argument #", pos, " '", name, "'");
+  // }
   return static_cast<T*>(expr);
 }
 
