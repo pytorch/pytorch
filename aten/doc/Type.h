@@ -4,13 +4,13 @@
 #include <limits>
 #include <functional>
 
+#include "ATen/ATenGeneral.h"
 #include "ATen/Allocator.h"
 #include "ATen/Generator.h"
 #include "ATen/Scalar.h"
 #include "ATen/ScalarType.h"
 #include "ATen/SparseTensorRef.h"
 #include "ATen/Tensor.h"
-#include "ATen/core/ATenGeneral.h"
 #include "ATen/core/ArrayRef.h"
 #include "ATen/core/Half.h"
 
