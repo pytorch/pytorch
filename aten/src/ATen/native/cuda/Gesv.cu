@@ -179,25 +179,23 @@ AT_ERROR("gesv: MAGMA library not found in "
   int info;
   int* ipiv;
 
-  bool use_temp_sol = false;
-  bool use_temp_lu = false;
-  auto temp_sol = self.type().tensor();
-  auto temp_lu = self.type().tensor();
+  at::optional<Tensor> temp_sol;
+  at::optional<Tensor> temp_lu;
 
   /* Init to column major format. See Gesv.cpp for more comments */
 
   bool tc = isTransposeContiguous(sol);
   if (tc) {
-    sol.t_();
+    sol = sol.t();
   } else if (sol.dim() == 2 &&
              sol.size(0) == bx &&
              sol.size(1) == by) {
-    use_temp_sol = true;
+    temp_sol = self.type().tensor();
   }
 
-  if (use_temp_sol) {
-    temp_sol.resize_({by, bx});
-    temp_sol.copy_(self.view({bx, by}).t());
+  if (temp_sol) {
+    temp_sol.value().resize_({by, bx});
+    temp_sol.value().copy_(self.view({bx, by}).t());
   } else {
     sol.resize_({by, bx});
     if (&self == &sol) {
@@ -211,16 +209,16 @@ AT_ERROR("gesv: MAGMA library not found in "
 
   tc = isTransposeContiguous(lu);
   if (tc) {
-    lu.t_();
+    lu = lu.t();
   } else if (lu.dim() == 2 &&
              lu.size(0) == ax &&
              lu.size(1) == ay) {
-    use_temp_lu = true;
+    temp_lu = self.type().tensor();
   }
 
-  if (use_temp_lu) {
-    temp_lu.resize_({ay, ax});
-    temp_lu.copy_(A.t());
+  if (temp_lu) {
+    temp_lu.value().resize_({ay, ax});
+    temp_lu.value().copy_(A.t());
   } else {
     lu.resize_({ay, ax});
     if (&A == &lu) {
@@ -233,24 +231,24 @@ AT_ERROR("gesv: MAGMA library not found in "
   }
 
   AT_DISPATCH_FLOATING_TYPES(self.type(), "gesv", [&]{
-      auto A_ptr = use_temp_lu ? temp_lu.data<scalar_t>()
-                               : lu.data<scalar_t>();
-      auto b_ptr = use_temp_sol ? temp_sol.data<scalar_t>()
-                                : sol.data<scalar_t>();
+      auto A_ptr = temp_lu ? temp_lu.value().data<scalar_t>()
+                           : lu.data<scalar_t>();
+      auto b_ptr = temp_sol ? temp_sol.value().data<scalar_t>()
+                            : sol.data<scalar_t>();
       ALLOCATE_ARRAY(ipiv, int, bx, sol);
       magmaGesv<scalar_t>(bx, by, A_ptr, bx, ipiv, b_ptr, bx, &info);
   });
 
-  if (use_temp_sol) {
-    sol.copy_(temp_sol.t_());
+  if (temp_sol) {
+    sol.copy_(temp_sol.value().t_());
   } else {
-    sol.t_();
+    sol = sol.t();
   }
 
-  if (use_temp_lu) {
-    lu.copy_(temp_lu.t_());
+  if (temp_lu) {
+    lu.copy_(temp_lu.value().t_());
   } else {
-    lu.t_();
+    lu = lu.t();
   }
 
   checkErrors({info});
