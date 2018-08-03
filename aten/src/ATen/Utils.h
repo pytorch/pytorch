@@ -7,6 +7,7 @@
 #include "ATen/core/ATenGeneral.h"    
 #include "ATen/core/ArrayRef.h"    
 #include "ATen/core/Error.h"
+#include "ATen/Formatting.h"
 
 #include <algorithm>
 #include <sstream>
