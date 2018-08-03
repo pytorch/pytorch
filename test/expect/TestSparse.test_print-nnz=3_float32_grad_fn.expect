@@ -1,9 +1,6 @@
-tensor(layout=torch.sparse_coo,
-       indices=tensor([[0, 1, 0],
-                       [3, 4, 3]]),
-       values=tensor([[ 0.0092,  2.0805,  3.7977],
-                      [ 6.0433,  7.8775, 10.1007],
-                      [12.0462, 14.1386, 15.9466]], dtype=torch.float32),
-       size=(200, 200, 3),
-       dtype=torch.float32,
-       grad_fn=<AddBackward0>)
+tensor(indices=[[0, 1, 0],
+                [3, 4, 3]]
+       values=[[ 0.0092,  2.0805,  3.7977],
+               [ 6.0433,  7.8775, 10.1007],
+               [12.0462, 14.1386, 15.9466]],
+       size=(200, 200, 3), dtype=torch.float32, layout=torch.sparse_coo, grad_fn=<AddBackward0>)

@@ -118,18 +118,15 @@ class TestSparse(TestCase):
             values.add_(torch.randn_like(values) * 0.1)
             sp_tensor = self.SparseTensor(indices, values, (200, 200, 3))
 
-            def get():
-                return sp_tensor.detach()
-
             subname_prefix = 'nnz={}'.format(nnz)
-            self.assertExpected(str(get()), subname=subname_prefix)
+            self.assertExpected(str(sp_tensor), subname=subname_prefix)
             dtypes = [torch.int32]
             if values.dtype == torch.double:
                 dtypes.append(torch.float)
             else:
                 dtypes.append(torch.double)
             for dtype in dtypes:
-                x = get().to(dtype)
+                x = sp_tensor.detach().to(dtype)
                 subname = '{}_{}'.format(subname_prefix, str(dtype).split('.')[1])
                 self.assertExpected(str(x), subname=subname)
                 if x.dtype.is_floating_point:

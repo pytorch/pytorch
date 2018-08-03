@@ -1,6 +1,3 @@
-tensor(layout=torch.sparse_coo,
-       indices=tensor([], dtype=torch.int64),
-       values=tensor([], dtype=torch.float32),
-       size=(200, 200, 3),
-       dtype=torch.float32,
-       grad_fn=<AddBackward0>)
+tensor(indices=[]
+       values=[],
+       device='cuda:0', size=(200, 200, 3), dtype=torch.float32, layout=torch.sparse_coo, grad_fn=<AddBackward0>)
