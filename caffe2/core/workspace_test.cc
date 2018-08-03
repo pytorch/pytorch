@@ -1,10 +1,13 @@
 #include <iostream>
 
-#include "caffe2/core/operator.h"
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include "caffe2/core/operator.h"
 
 namespace caffe2 {
+
+using ::testing::UnorderedElementsAre;
 
 class WorkspaceTestFoo {};
 
@@ -113,6 +116,31 @@ TEST(WorkspaceTest, BlobMapping) {
     EXPECT_TRUE(child.HasBlob("inner_b"));
     EXPECT_TRUE(child.GetBlob("inner_b"));
   }
+}
+
+static std::vector<Workspace*> collectForEach() {
+  std::vector<Workspace*> workspaces;
+  Workspace::ForEach([&](Workspace* ws) { workspaces.push_back(ws); });
+  return workspaces;
+}
+
+TEST(WorkspaceTest, ForEach) {
+  // NOTE: This might break if tests are run in parallel!
+  EXPECT_THAT(collectForEach(), UnorderedElementsAre());
+
+  {
+    Workspace ws1;
+    EXPECT_THAT(collectForEach(), UnorderedElementsAre(&ws1));
+
+    {
+      Workspace ws2;
+      EXPECT_THAT(collectForEach(), UnorderedElementsAre(&ws1, &ws2));
+    }
+
+    EXPECT_THAT(collectForEach(), UnorderedElementsAre(&ws1));
+  }
+
+  EXPECT_THAT(collectForEach(), UnorderedElementsAre());
 }
 
 }  // namespace caffe2

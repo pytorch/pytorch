@@ -196,12 +196,14 @@ if(BUILD_TEST)
   set(BUILD_GTEST ON)
   set(INSTALL_GTEST OFF)
   # We currently don't need gmock right now.
-  set(BUILD_GMOCK OFF)
+  set(BUILD_GMOCK ON)
+  set(INSTALL_GMOCK OFF)
   # For Windows, we will check the runtime used is correctly passed in.
   if (NOT CAFFE2_USE_MSVC_STATIC_RUNTIME)
     set(gtest_force_shared_crt ON)
   endif()
   add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/googletest)
+  include_directories(SYSTEM ${CMAKE_CURRENT_LIST_DIR}/../third_party/googletest/googlemock/include)
   include_directories(SYSTEM ${CMAKE_CURRENT_LIST_DIR}/../third_party/googletest/googletest/include)
 
   # We will not need to test benchmark lib itself.
