@@ -70,6 +70,12 @@ def _get_const(value, desc, arg_name):
     return _parse_arg(value, desc)
 
 
+def _unpack_list(list_value):
+    list_node = list_value.node()
+    assert list_node.kind() == "prim::ListConstruct"
+    return list_node.inputs()
+
+
 def parse_args(*arg_descriptors):
     def decorator(fn):
         def wrapper(g, *args):
@@ -215,11 +221,16 @@ def reciprocal(g, self):
     return g.op("Div", _if_scalar_type_as(g, torch.ones(1), self), self)
 
 
-# This syntax is Python 2 portable
-def cat(g, *args):
-    dim = _get_const(args[-1], 'i', 'dim')
-    tensors = args[:-1]
+@parse_args('v', 'i')
+def cat(g, tensor_list, dim):
+    tensors = _unpack_list(tensor_list)
     return g.op("Concat", *tensors, axis_i=dim)
+
+
+@parse_args('v', 'i')
+def stack(g, tensor_list, dim):
+    unsqueezed = [g.op("Unsqueeze", t, axes_i=[dim]) for t in _unpack_list(tensor_list)]
+    return g.op("Concat", *unsqueezed, axis_i=dim)
 
 
 def mm(g, self, other):
@@ -347,11 +358,6 @@ def view(g, self, size):
                 return g.op("Flatten", self, axis_i=1)
         shape = g.op("Constant", value_t=torch.LongTensor(size))
     return g.op("Reshape", self, shape)
-
-
-def stack(g, *args):
-    unsqueezed = [g.op("Unsqueeze", t, axes_i=[dim]) for t in args[:-1]] + [args[-1]]
-    return concat(g, *unsqueezed)
 
 
 @parse_args('v', 'i', 'i')
@@ -661,10 +667,12 @@ def unfold(g, input, dimension, size, step):
     return g.op("ATen", input, operator_s="unfold", dimension_i=dimension, size_i=size, step_i=step)
 
 
-@parse_args('v', 't', 't')
-def elu(g, input, alpha, scale):
+@parse_args('v', 't', 't', 't')
+def elu(g, input, alpha, scale, input_scale):
     if scale and scale != 1.:
         return _unimplemented("scale", "does not support scale in Elu")
+    if input_scale and input_scale != 1.:
+        return _unimplemented("input_scale", "does not support input_scale in Elu")
     # See Note [Export inplace]
     return g.op("Elu", input, alpha_f=_scalar(alpha))
 
@@ -678,8 +686,10 @@ def index_select(g, self, dim, index):
     return g.op("Gather", self, index, axis_i=dim)
 
 
-def index_put(g, *inputs):
-    return g.op("ATen", *inputs, operator_s='index_put')
+def index_put(g, self, indices_list_value, values):
+    indices_list = list(_unpack_list(indices_list_value))
+    args = [self] + indices_list + [values]
+    return g.op("ATen", *args, operator_s='index_put')
 
 
 def type_as(g, self, other):
@@ -870,14 +880,17 @@ def topk(g, self, k, dim, largest, sorted, out=None):
     return g.op("TopK", self, k_i=k, axis_i=dim, outputs=2)
 
 
-@parse_args('v', 'is')
 def repeat(g, self, repeats):
-    if self.isTensor():
+    if not _is_value(repeats):
+        repeats = g.op("Constant", value_t=torch.LongTensor(repeats))
+    const_repeats = _maybe_get_const(repeats, 'is')
+
+    if self.isTensor() and not _is_value(const_repeats):
         sizes = self.type().sizes()
-        diff_dims = len(repeats) - len(sizes)
+        diff_dims = len(const_repeats) - len(sizes)
         if diff_dims > 0:
             self = view(g, self, [1] * diff_dims + sizes)
-    return g.op("Tile", self, g.op("Constant", value_t=torch.LongTensor(repeats)))
+    return g.op("Tile", self, repeats)
 
 
 def instance_norm(g, input, **kwargs):

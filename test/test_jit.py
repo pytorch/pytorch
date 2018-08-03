@@ -9,7 +9,7 @@ from torch.autograd import Variable, Function
 from torch.autograd.function import traceable
 from torch.testing import assert_allclose
 from torch.onnx import OperatorExportTypes
-from common import TestCase, run_tests, IS_WINDOWS, TEST_WITH_UBSAN
+from common import TestCase, run_tests, IS_WINDOWS, TEST_WITH_UBSAN, TEST_WITH_ROCM
 from textwrap import dedent
 import os
 import io
@@ -385,6 +385,7 @@ class TestJit(JitTestCase):
     # TODO: Fuser doesn't work at all when inputs require grad. Fix that
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @unittest.skipIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")
     def test_lstm_fusion_cuda(self):
         inputs = get_lstm_inputs('cuda')
         ge = self.checkTrace(LSTMCellF, inputs)
@@ -408,6 +409,7 @@ class TestJit(JitTestCase):
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @unittest.skipIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")
     def test_lstm_fusion_concat(self):
         inputs = get_lstm_inputs('cuda')
         ge = self.checkTrace(LSTMCellC, inputs)
@@ -415,6 +417,7 @@ class TestJit(JitTestCase):
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @unittest.skipIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")
     def test_concat_fusion(self):
         hx = torch.randn(3, 20, dtype=torch.float, device='cuda')
         cx = torch.randn(3, 20, dtype=torch.float, device='cuda')
@@ -427,6 +430,7 @@ class TestJit(JitTestCase):
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @unittest.skipIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")
     def test_fusion_distribute(self):
         def f(x, y):
             z1, z2 = (x + y).chunk(2, dim=1)
@@ -438,6 +442,29 @@ class TestJit(JitTestCase):
         ge = self.checkTrace(f, (x, y))
         self.assertExpectedGraph(ge.graph_for(x, y))
 
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    def test_fusion_rand(self):
+        class M(torch.jit.ScriptModule):
+            __constants__ = ['d']
+
+            def __init__(self):
+                self.d = torch.device('cuda')
+
+            @torch.jit.script_method
+            def create(self, x):
+                return x * x + x + torch.rand_like(x)
+
+        x = torch.zeros([3, 4, 5], dtype=torch.float, device='cuda')
+        m = M()
+        out1 = m.create(x)
+        out2 = m.create(x)
+        self.assertNotEqual(out1, out2)
+        self.assertTrue(torch.all(out1 >= 0))
+        self.assertTrue(torch.all(out1 < 1))
+        self.assertTrue(torch.all(out2 >= 0))
+        self.assertTrue(torch.all(out2 < 1))
+
     @staticmethod
     def fn_test_comparison_gt_lt(x, y):
         mask = (x > 0).type_as(x)
@@ -448,6 +475,7 @@ class TestJit(JitTestCase):
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @unittest.skipIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")
     def test_comparison_gt_lt(self):
         x = torch.randn(4, 4, dtype=torch.float, device='cuda')
         y = torch.randn(4, 4, dtype=torch.float, device='cuda')
@@ -456,6 +484,7 @@ class TestJit(JitTestCase):
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @unittest.skipIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")
     def test_comparison_ge_le(self):
         def f(x, y):
             mask = (x >= 0).type_as(x)
@@ -475,6 +504,7 @@ class TestJit(JitTestCase):
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @unittest.skipIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")
     def test_relu(self):
         x = torch.randn(4, 4, dtype=torch.float, device='cuda')
         y = torch.randn(4, 4, dtype=torch.float, device='cuda')
@@ -497,6 +527,7 @@ class TestJit(JitTestCase):
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @unittest.skipIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")
     def test_exp(self):
         x = torch.randn(4, 4, dtype=torch.float, device='cuda')
         y = torch.randn(4, 4, dtype=torch.float, device='cuda')
@@ -841,6 +872,7 @@ class TestJit(JitTestCase):
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "cpp tests require CUDA")
+    @unittest.skipIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")
     def test_cpp(self):
         # rather than rebuild assertExpected in cpp,
         # just glob all the cpp outputs into one file for now
@@ -1197,8 +1229,9 @@ class TestBatched(TestCase):
     # generate random examples and create an batchtensor with them
     def rand_batch(self, *dims):
         dims = [dim for dim in dims if dim != ()]
-        xs = [torch.rand(1, *(random.randint(1, size) if b else size for b, size in dims[1:])) for i in range(dims[0])]
-        xb = BatchTensor(xs, torch.tensor([b for b, d in dims[1:]]))
+        xs = [torch.rand(1, *(random.randint(1, size) if b else size for b, size in dims[1:]),
+                         requires_grad=True) for i in range(dims[0])]
+        xb = BatchTensor(xs, torch.tensor([b for b, d in dims[1:]]).byte())
         return xs, xb
 
     def test_create_batchtensor(self):
@@ -1226,20 +1259,20 @@ class TestBatched(TestCase):
 
     def test_batch_elementwise_binary(self):
         @torch.jit.batch(batch_size=4)
-        def mul(a, b):
-            return a * b
+        def add(a, b):
+            return a + b
 
         xs, batch = self.rand_batch(4, (True, 3), (False, 2))
         xs2, batch2 = xs, batch
-        res_batch = mul(batch, batch2)
-        res = [torch.mul(xs[j], xs2[j]) for j in range(4)]
+        res_batch = add(batch, batch2)
+        res = [torch.add(xs[j], xs2[j]) for j in range(4)]
         self.assertEqual(res, res_batch.examples())
 
         # test broadcast
         xs, batch = self.rand_batch(4, (False, 3), (False, 2))
         b = torch.rand(3, 2)
-        res_batch = mul(batch, b)
-        res = [torch.mul(xs[j], b) for j in range(4)]
+        res_batch = add(batch, b)
+        res = [torch.add(xs[j], b) for j in range(4)]
         self.assertEqual(res, res_batch.examples())
 
     def test_batch_mm(self):
@@ -1286,6 +1319,33 @@ class TestBatched(TestCase):
         xs2, batch2 = self.rand_batch(4, (False, 2), (True, 3))
         matmul_test(xs, batch, xs2, batch2)
 
+    def test_batch_select(self):
+        @torch.jit.batch(batch_size=4)
+        def select(x):
+            return torch.select(x, 1, 0)
+
+        xs, batch = self.rand_batch(4, (True, 3), (True, 2))
+        res_batch = select(batch)
+        res = [torch.select(xs[j], 1, 0) for j in range(4)]
+        self.assertEqual(res, res_batch.examples())
+
+        xs, batch = self.rand_batch(4, (False, 3), (True, 2))
+        res_batch = select(batch)
+        res = [torch.select(xs[j], 1, 0) for j in range(4)]
+        self.assertEqual(res, res_batch.examples())
+
+    def test_batch_index_select(self):
+        @torch.jit.batch(batch_size=4)
+        def index_select(x, ind):
+            return x.index_select(1, ind)
+
+        xs, batch = self.rand_batch(4, (False, 5), (True, 2))
+        ind = [torch.randint(0, 4, (1,), dtype=torch.long) for i in range(4)]
+        ind_batch = BatchTensor(ind, torch.tensor([]).byte())
+        res_batch = index_select(batch, ind_batch)
+        res = [torch.index_select(xs[j], 1, ind[j]) for j in range(4)]
+        self.assertEqual(res, res_batch.examples())
+
     def test_batch_where(self):
         @torch.jit.batch(batch_size=4)
         def where(c, a, b):
@@ -1302,41 +1362,238 @@ class TestBatched(TestCase):
         res = [torch.where(xs_cond[j], xs[j], xs2[j]) for j in range(4)]
         self.assertEqual(res, res_batch.examples())
 
-    @unittest.skip("Need support for scalar arguments")
-    def test_lstm_cell(self):
-        def LSTMCell(x, h, c, w_xi, w_xf, w_xo, w_xc, w_hi, w_hf, w_ho, w_hc, b_i, b_f, b_o, b_c):
-            i_t = torch.matmul(x, w_xi) + torch.matmul(h, w_hi) + b_i
-            f_t = torch.matmul(x, w_xf) + torch.matmul(h, w_hf) + b_f
-            o_t = torch.matmul(x, w_xo) + torch.matmul(h, w_ho) + b_o
-            # activations
-            i_t = torch.sigmoid(i_t)
-            f_t = torch.sigmoid(f_t)
-            o_t = torch.sigmoid(o_t)
-            # cell computations
-            c_t = torch.matmul(x, w_xc) + torch.matmul(h, w_hc) + b_c
-            c_t = torch.tanh(c_t)
-            c_t = torch.mul(c, f_t) + torch.mul(i_t, c_t)
-            h_t = torch.mul(o_t, torch.tanh(c_t))
-            return h_t
+    def test_batch_argmax(self):
+        @torch.jit.batch(batch_size=4)
+        def argmax(a):
+            return torch.argmax(a, 1)
+
+        xs, batch = self.rand_batch(4, (True, 5), (True, 6))
+        res_batch = argmax(batch)
+        res = [torch.argmax(xs[j], 1) for j in range(4)]
+        self.assertEqual(res, res_batch.examples())
 
         @torch.jit.batch(batch_size=4)
-        def LSTMCell_batch(x, h, c, w_xi, w_xf, w_xo, w_xc, w_hi, w_hf, w_ho, w_hc, b_i, b_f, b_o, b_c):
-            i_t = torch.matmul(x, w_xi) + torch.matmul(h, w_hi) + b_i
-            f_t = torch.matmul(x, w_xf) + torch.matmul(h, w_hf) + b_f
-            o_t = torch.matmul(x, w_xo) + torch.matmul(h, w_ho) + b_o
-            # activations
-            i_t = torch.sigmoid(i_t)
-            f_t = torch.sigmoid(f_t)
-            o_t = torch.sigmoid(o_t)
-            # cell computations
-            c_t = torch.matmul(x, w_xc) + torch.matmul(h, w_hc) + b_c
-            c_t = torch.tanh(c_t)
-            c_t = torch.mul(c, f_t) + torch.mul(i_t, c_t)
-            h_t = torch.mul(o_t, torch.tanh(c_t))
-            return h_t
+        def argmax(a):
+            return torch.argmax(a, 1, False)
+
+        res_batch = argmax(batch)
+        res = [torch.argmax(xs[j], 1, False) for j in range(4)]
+        self.assertEqual(res, res_batch.examples())
+
+    def test_batch_topk(self):
+        @torch.jit.batch(batch_size=4)
+        def topk(a):
+            return torch.topk(a, 3, 1)
+
+        xs, batch = self.rand_batch(4, (False, 5), (True, 6))
+
+        # along static dim
+        res_batch = topk(batch)
+        res = [torch.topk(xs[j], 3, 1)[0] for j in range(4)]
+        res_idx = [torch.topk(xs[j], 3, 1)[1] for j in range(4)]
+        self.assertEqual(res, res_batch[0].examples())
+        self.assertEqual(res_idx, res_batch[1].examples())
+
+        @torch.jit.batch(batch_size=4)
+        def topk(a):
+            return torch.topk(a, 1, 2)
+
+        # along dynamic dim
+        res_batch = topk(batch)
+        res = [torch.topk(xs[j], 1, 2)[0] for j in range(4)]
+        res_idx = [torch.topk(xs[j], 1, 2)[1] for j in range(4)]
+        self.assertEqual(res, res_batch[0].examples())
+        self.assertEqual(res_idx, res_batch[1].examples())
+
+    def test_batch_softmax(self):
+        @torch.jit.batch(batch_size=4)
+        def softmax(a):
+            return torch.softmax(a, 1)
+
+        xs, batch = self.rand_batch(4, (False, 5), (True, 6))
+
+        # along static dim
+        res_batch = softmax(batch)
+        res = [torch.softmax(xs[j], 1) for j in range(4)]
+        self.assertEqual(res, res_batch.examples())
+
+        @torch.jit.batch(batch_size=4)
+        def softmax(a):
+            return torch.softmax(a, 2)
+
+        # along dynamic dim
+        res_batch = softmax(batch)
+        res = [torch.softmax(xs[j], 2) for j in range(4)]
+        self.assertEqual(res, res_batch.examples())
+
+    def test_batch_view(self):
+        @torch.jit.batch(batch_size=4)
+        def view(a):
+            return a.view([4, -1, 3])
+
+        xs, batch = self.rand_batch(4, (True, 5), (False, 3))
+        res_batch = view(batch)
+        res = [xs[j].view([1, -1, 3]) for j in range(4)]
+        self.assertEqual(res, res_batch.examples())
+
+    def test_batch_cat(self):
+        @torch.jit.batch(batch_size=4)
+        def cat2(a, b):
+            return torch.cat([a, b], 2)
+
+        xs, batch = self.rand_batch(4, (True, 5), (False, 3))
+        xs2, batch2 = xs, batch
+        res_batch = cat2(batch, batch2)
+        res = [torch.cat([xs[j], xs2[j]], 2) for j in range(4)]
+        self.assertEqual(res, res_batch.examples())
+
+    def test_batch_sum(self):
+        @torch.jit.batch(batch_size=4)
+        def batch_sum(a):
+            return a.sum()
+
+        xs, batch = self.rand_batch(4, (True, 5), (False, 3))
+        res_batch = batch_sum(batch)
+        res = [xs[j].sum().unsqueeze(0) for j in range(4)]
+        self.assertEqual(res, res_batch.examples())
+
+    def test_if_else(self):
+        def single_if(a, b):
+            if a > b:
+                a = a + b
+            else:
+                a = a - b
+            return a
+
+        batch_if = torch.jit.batch(batch_size=4)(single_if)
+
+        a, batch_a = self.rand_batch(4, ())
+        b, batch_b = self.rand_batch(4, ())
+        res_batch = batch_if(batch_a, batch_b)
+        res = [single_if(a[j], b[j]) for j in range(4)]
+        self.assertEqual(res, res_batch.examples())
+
+        script_if = torch.jit.script(single_if)
+        graph = torch.to_batch_graph(script_if.graph)
+        self.assertExpected(str(graph))
+
+    def test_if_else_with_scalar(self):
+        def single_if(a, b):
+            if a > 0.1:
+                a = a + b
+            else:
+                a = a - b
+            return a
+
+        batch_if = torch.jit.batch(batch_size=4)(single_if)
+
+        a, batch_a = self.rand_batch(4, ())
+        b, batch_b = self.rand_batch(4, ())
+        res_batch = batch_if(batch_a, batch_b)
+        res = [single_if(a[j], b[j]) for j in range(4)]
+        self.assertEqual(res, res_batch.examples())
+
+        script_if = torch.jit.script(single_if)
+        graph = torch.to_batch_graph(script_if.graph)
+        self.assertExpected(str(graph))
+
+    def test_if_noelse(self):
+        def single_if(a, b):
+            if a > b:
+                a = a + b
+            return a
+
+        batch_if = torch.jit.batch(batch_size=4)(single_if)
+
+        a, batch_a = self.rand_batch(4, ())
+        b, batch_b = self.rand_batch(4, ())
+        res_batch = batch_if(batch_a, batch_b)
+        res = [single_if(a[j], b[j]) for j in range(4)]
+        self.assertEqual(res, res_batch.examples())
+
+        script_if = torch.jit.script(single_if)
+        graph = torch.to_batch_graph(script_if.graph)
+        self.assertExpected(str(graph))
+
+    def test_if_noelse_with_scalar(self):
+        def single_if(a, b):
+            if a > 0.1:
+                a = a + b
+            return a
+
+        batch_if = torch.jit.batch(batch_size=4)(single_if)
+
+        a, batch_a = self.rand_batch(4, ())
+        b, batch_b = self.rand_batch(4, ())
+        res_batch = batch_if(batch_a, batch_b)
+        res = [single_if(a[j], b[j]) for j in range(4)]
+        self.assertEqual(res, res_batch.examples())
+
+        script_if = torch.jit.script(single_if)
+        graph = torch.to_batch_graph(script_if.graph)
+        self.assertExpected(str(graph))
+
+    def test_while(self):
+        def single_while(a, b):
+            while a > b:
+                a = a - b
+            return a
+
+        batch_while = torch.jit.batch(batch_size=4)(single_while)
+
+        a, batch_a = self.rand_batch(4, ())
+        b = [torch.abs(torch.rand(1)) for i in range(4)]
+        batch_b = BatchTensor(b, torch.tensor([]).byte())
+        res_batch = batch_while(batch_a, batch_b)
+        res = [single_while(a[j], b[j]) for j in range(4)]
+        self.assertEqual(res, res_batch.examples())
+
+        script_while = torch.jit.script(single_while)
+        graph = torch.to_batch_graph(script_while.graph)
+        self.assertExpected(str(graph))
+
+    def test_for(self):
+        def single_for(x, y):
+            for _ in range(10):
+                x = x + y
+            return x
+
+        batch_for = torch.jit.batch(batch_size=4)(single_for)
+
+        a, batch_a = self.rand_batch(4, ())
+        b, batch_b = self.rand_batch(4, ())
+        res_batch = batch_for(batch_a, batch_b)
+        res = [single_for(a[j], b[j]) for j in range(4)]
+        self.assertEqual(res, res_batch.examples())
+
+        script_for = torch.jit.script(single_for)
+        graph = torch.to_batch_graph(script_for.graph)
+        self.assertExpected(str(graph))
+
+    def test_lstm(self):
+        def LSTM(x_all, h, c, w_xi, w_xf, w_xo, w_xc, w_hi, w_hf, w_ho, w_hc, b_i, b_f, b_o, b_c):
+            for i in range(x_all.size(1)):
+                x = x_all.select(1, i)
+                i_t = torch.matmul(x, w_xi) + torch.matmul(h, w_hi) + b_i
+                f_t = torch.matmul(x, w_xf) + torch.matmul(h, w_hf) + b_f
+                o_t = torch.matmul(x, w_xo) + torch.matmul(h, w_ho) + b_o
+                # activations
+                i_t = torch.sigmoid(i_t)
+                f_t = torch.sigmoid(f_t)
+                o_t = torch.sigmoid(o_t)
+                # cell computations
+                c_t = torch.matmul(x, w_xc) + torch.matmul(h, w_hc) + b_c
+                c_t = torch.tanh(c_t)
+                c_t = torch.mul(c_t, f_t) + torch.mul(i_t, c_t)
+                h_t = torch.mul(o_t, torch.tanh(c_t))
+                h = h_t
+                c = c_t
+            return h
+
+        LSTM_batch = torch.jit.batch(batch_size=4)(LSTM)
 
         batch_size, input_size, hidden_size = 4, 3, 2
-        xs, batch = self.rand_batch(batch_size, (False, input_size))
+        xs, batch = self.rand_batch(batch_size, (True, 4), (False, input_size))
         hx, h_batch = self.rand_batch(batch_size, (False, hidden_size))
         cx, c_batch = self.rand_batch(batch_size, (False, hidden_size))
 
@@ -1356,10 +1613,161 @@ class TestBatched(TestCase):
         b_o = torch.rand(hidden_size)
         b_c = torch.rand(hidden_size)
 
-        ys = [LSTMCell(xs[j].squeeze(0), hx[j], cx[j], w_xi, w_xf, w_xo, w_xc,
-                       w_hi, w_hf, w_ho, w_hc, b_i, b_f, b_o, b_c) for j in range(batch_size)]
-        ybs = LSTMCell_batch(batch, h_batch, c_batch, w_xi, w_xf, w_xo, w_xc,
-                             w_hi, w_hf, w_ho, w_hc, b_i, b_f, b_o, b_c)
+        ys = [LSTM(xs[j], hx[j], cx[j], w_xi, w_xf, w_xo, w_xc,
+                   w_hi, w_hf, w_ho, w_hc, b_i, b_f, b_o, b_c) for j in range(batch_size)]
+        ybs = LSTM_batch(batch, h_batch, c_batch, w_xi, w_xf, w_xo, w_xc,
+                         w_hi, w_hf, w_ho, w_hc, b_i, b_f, b_o, b_c)
+        self.assertEqual(ys, ybs.examples())
+
+    def test_greedy_search(self):
+        def greedy(x, h, c, embed, w_xi, w_xf, w_xo, w_xc, w_hi, w_hf, w_ho, w_hc,
+                   b_i, b_f, b_o, b_c, w_hs, b_s, iter_num):
+            iter_count = torch.zeros_like(iter_num)
+            while(iter_count < iter_num):
+                iter_count += 1
+                # LSTM Cell
+                i_t = torch.matmul(x, w_xi) + torch.matmul(h, w_hi) + b_i
+                f_t = torch.matmul(x, w_xf) + torch.matmul(h, w_hf) + b_f
+                o_t = torch.matmul(x, w_xo) + torch.matmul(h, w_ho) + b_o
+                # activations
+                i_t = torch.sigmoid(i_t)
+                f_t = torch.sigmoid(f_t)
+                o_t = torch.sigmoid(o_t)
+                # cell computations
+                c_t = torch.matmul(x, w_xc) + torch.matmul(h, w_hc) + b_c
+                c_t = torch.tanh(c_t)
+                c_t = torch.mul(c_t, f_t) + torch.mul(i_t, c_t)
+                h_t = torch.mul(o_t, torch.tanh(c_t))
+                h = h_t
+                c = c_t
+                # calculate feature with max probability
+                s_t = torch.matmul(h_t, w_hs) + b_s
+                p_t = torch.softmax(s_t, 1)
+                i_t = torch.argmax(p_t, 1)
+                x = embed.index_select(1, i_t).squeeze(1)
+            return h
+
+        greedy_batch = torch.jit.batch(batch_size=4)(greedy)
+
+        batch_size, input_size, hidden_size, vocab_size = 4, 6, 8, 7
+        xs, batch = self.rand_batch(batch_size, (False, input_size))
+        hx, h_batch = self.rand_batch(batch_size, (False, hidden_size))
+        cx, c_batch = self.rand_batch(batch_size, (False, hidden_size))
+        embed, embed_batch = self.rand_batch(batch_size, (False, vocab_size), (False, input_size))
+        iter_num = [torch.randint(2, 5, (1,)) for i in range(batch_size)]
+        iter_num_batch = BatchTensor(iter_num, torch.tensor([]).byte())
+
+        # input to hidden weights
+        w_xi = torch.rand(input_size, hidden_size)
+        w_xf = torch.rand(input_size, hidden_size)
+        w_xo = torch.rand(input_size, hidden_size)
+        w_xc = torch.rand(input_size, hidden_size)
+        # hidden to hidden weights
+        w_hi = torch.rand(hidden_size, hidden_size)
+        w_hf = torch.rand(hidden_size, hidden_size)
+        w_ho = torch.rand(hidden_size, hidden_size)
+        w_hc = torch.rand(hidden_size, hidden_size)
+        # bias terms
+        b_i = torch.rand(hidden_size)
+        b_f = torch.rand(hidden_size)
+        b_o = torch.rand(hidden_size)
+        b_c = torch.rand(hidden_size)
+        # hidden to vocab weights, bias
+        w_hs = torch.rand(hidden_size, vocab_size)
+        b_s = torch.rand(vocab_size)
+
+        ys = [greedy(xs[j], hx[j], cx[j], embed[j], w_xi, w_xf, w_xo, w_xc,
+                     w_hi, w_hf, w_ho, w_hc, b_i, b_f, b_o, b_c, w_hs, b_s, iter_num[j]) for j in range(batch_size)]
+        ybs = greedy_batch(batch, h_batch, c_batch, embed_batch, w_xi, w_xf, w_xo, w_xc,
+                           w_hi, w_hf, w_ho, w_hc, b_i, b_f, b_o, b_c, w_hs, b_s, iter_num_batch)
+        self.assertEqual(ys, ybs.examples())
+
+    def test_beam_search(self):
+        def beam(x, h, c, embed, w_xi, w_xf, w_xo, w_xc, w_hi, w_hf, w_ho, w_hc,
+                 b_i, b_f, b_o, b_c, w_hs, b_s, iter_num, idx):
+            k = 5
+            vocab_size = embed.size(1)
+            iter_count = torch.zeros_like(iter_num)
+            max_len = idx.size(2)
+            while(iter_count < iter_num):
+                iter_count += 1
+                # LSTM Cell
+                i_t = torch.matmul(x, w_xi) + torch.matmul(h, w_hi) + b_i
+                f_t = torch.matmul(x, w_xf) + torch.matmul(h, w_hf) + b_f
+                o_t = torch.matmul(x, w_xo) + torch.matmul(h, w_ho) + b_o
+                # activations
+                i_t = torch.sigmoid(i_t)
+                f_t = torch.sigmoid(f_t)
+                o_t = torch.sigmoid(o_t)
+                # cell computations
+                c_t = torch.matmul(x, w_xc) + torch.matmul(h, w_hc) + b_c
+                c_t = torch.tanh(c_t)
+                c_t = torch.mul(c_t, f_t) + torch.mul(i_t, c_t)
+                h_t = torch.mul(o_t, torch.tanh(c_t))
+                h = h_t
+                c = c_t
+                # calculate features with max probability
+                s_t = torch.matmul(h_t, w_hs) + b_s
+                s_t = s_t.view([1, s_t.size(1) * s_t.size(2)])
+                p_t = torch.softmax(s_t, 1)
+                prob_t, idx_t = torch.topk(p_t, k, 1)
+                if(int(idx_t.dim()) > 1):
+                    idx_t_tmp = idx_t.squeeze(0)
+                else:
+                    idx_t_tmp = idx_t
+                new_y = torch.fmod(idx_t_tmp, vocab_size)
+                pre_y = idx_t_tmp / vocab_size
+                x = embed.index_select(1, new_y)
+                h = h_t.index_select(1, pre_y)
+                c = c_t.index_select(1, pre_y)
+                iter = int(iter_count[0])
+                idx = torch.cat([idx.narrow(2, 0, iter).index_select(1, pre_y),
+                                torch.fmod(idx_t, vocab_size).unsqueeze(-1),
+                                idx.narrow(2, iter, max_len - iter)], 2)
+                idx = idx.narrow(2, 0, max_len)
+            return idx
+
+        beam_batch = torch.jit.batch(batch_size=4)(beam)
+
+        k = 5
+        batch_size, input_size, hidden_size, vocab_size = 4, 6, 8, 7
+        max_len = 5
+        xs, batch = self.rand_batch(batch_size, (False, 1), (False, input_size))
+        hx, h_batch = self.rand_batch(batch_size, (False, 1), (False, hidden_size))
+        cx, c_batch = self.rand_batch(batch_size, (False, 1), (False, hidden_size))
+        embed, embed_batch = self.rand_batch(batch_size, (False, vocab_size), (False, input_size))
+        iter_num = [torch.randint(2, max_len + 1, (1,)) for i in range(batch_size)]
+        iter_num_batch = BatchTensor(iter_num, torch.tensor([]).byte())
+
+        # input to hidden weights
+        w_xi = torch.rand(input_size, hidden_size)
+        w_xf = torch.rand(input_size, hidden_size)
+        w_xo = torch.rand(input_size, hidden_size)
+        w_xc = torch.rand(input_size, hidden_size)
+        # hidden to hidden weights
+        w_hi = torch.rand(hidden_size, hidden_size)
+        w_hf = torch.rand(hidden_size, hidden_size)
+        w_ho = torch.rand(hidden_size, hidden_size)
+        w_hc = torch.rand(hidden_size, hidden_size)
+        # bias terms
+        b_i = torch.rand(1, hidden_size)
+        b_f = torch.rand(1, hidden_size)
+        b_o = torch.rand(1, hidden_size)
+        b_c = torch.rand(1, hidden_size)
+        # hidden to vocab weights, bias
+        w_hs = torch.rand(hidden_size, vocab_size)
+        b_s = torch.rand(1, vocab_size)
+
+        idx_batch = torch.jit.BatchTensor(torch.zeros([batch_size, k, max_len], dtype=torch.long),
+                                          torch.zeros([batch_size, 1, max_len]).byte(),
+                                          torch.tensor([0, 1]).byte())
+        idx = [torch.zeros([1, k, max_len], dtype=torch.long) for _ in range(batch_size)]
+
+        ys = [beam(xs[j], hx[j], cx[j], embed[j], w_xi, w_xf, w_xo, w_xc, w_hi, w_hf, w_ho, w_hc,
+                   b_i, b_f, b_o, b_c, w_hs, b_s, iter_num[j], idx[j]).narrow(2, 0, int(iter_num[j]))
+              for j in range(batch_size)]
+        ybs = beam_batch(batch, h_batch, c_batch, embed_batch, w_xi, w_xf, w_xo, w_xc,
+                         w_hi, w_hf, w_ho, w_hc, b_i, b_f, b_o, b_c, w_hs, b_s, iter_num_batch, idx_batch)
         self.assertEqual(ys, ybs.examples())
 
 
@@ -1437,6 +1845,34 @@ class TestScript(JitTestCase):
         ''')
         a = Variable(torch.rand(1))
         self.assertEqual(a, cu.foo(a))
+
+    # because the compilation unit ingests python strings
+    # to use an escape sequence escape the backslash (\\n = \n)
+    def test_string_cu(self):
+        cu = torch.jit.CompilationUnit('''
+            def foo(a):
+                print(a, """a\\n\tb\\n""", 2, "a\
+a")
+                return a
+        ''')
+        self.assertExpected(str(cu.foo.graph))
+
+    def test_string_new_line(self):
+        with self.assertRaisesRegex(RuntimeError, "expected a valid token*"):
+            torch.jit.CompilationUnit('''
+            def test_while(a):
+                print("
+                    a")
+                return a
+            ''')
+
+    def test_string_single_escape(self):
+        with self.assertRaisesRegex(RuntimeError, "expected a valid token*"):
+            torch.jit.CompilationUnit('''
+            def test_while(a):
+                print("\\")
+                return a
+            ''')
 
     def test_script_annotation(self):
         @torch.jit.script
@@ -1725,6 +2161,14 @@ class TestScript(JitTestCase):
 
     def _make_scalar_vars(self, arr, dtype):
         return [torch.tensor(val, dtype=dtype) for val in arr]
+
+    def test_string_print(self):
+        def func(a):
+            print(a, "a" 'b' '''c''' """d""", 2, 1.5)
+            return a
+
+        inputs = self._make_scalar_vars([1], torch.int64)
+        self.checkScript(func, inputs, capture_output=True)
 
     def test_while(self):
         def func(a, b, max):
@@ -2161,6 +2605,7 @@ def func(t):
         self._test_tensor_number_math()
 
     @unittest.skipIf(not RUN_CUDA, "No CUDA")
+    @unittest.skipIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")
     def test_tensor_number_math_cuda(self):
         self._test_tensor_number_math(device='cuda')
 
@@ -2986,7 +3431,8 @@ def func(t):
                 f.write(code)
             fn = get_fn('test_type_annotation_py3', script_path)
 
-            with self.assertRaisesRegex(RuntimeError, r"expected Tensor, but got"):
+            with self.assertRaisesRegex(RuntimeError, r"expected a value of type Tensor for argument"
+                                                      r" '0' but found \(Tensor, Tensor\)"):
                 @torch.jit.script
                 def bad_fn(x):
                     x, y = fn((x, x), x, x)
@@ -3045,13 +3491,13 @@ def func(t):
                 y = self.baz(x)
                 return x
 
-        with self.assertRaisesRegex(RuntimeError, "incorrect number of arguments: expected 1, but got 2"):
+        with self.assertRaisesRegex(RuntimeError, "expected at most 1 arguments but found 2"):
             ModuleTooMany()
-        with self.assertRaisesRegex(RuntimeError, "incorrect number of arguments: expected 2, but got 1"):
+        with self.assertRaisesRegex(RuntimeError, "argument 1 not provided"):
             ModuleTooFew()
         with self.assertRaisesRegex(RuntimeError, "need 3 values .* found only 2"):
             ModuleTooManyAssign()
-        with self.assertRaisesRegex(RuntimeError, "incorrect number of arguments: expected 2, but got 1"):
+        with self.assertRaisesRegex(RuntimeError, "argument 1 not provided."):
             ModuleDefault()
 
     def test_script_define_order(self):
@@ -3156,6 +3602,139 @@ def func(t):
         self.assertEqual(2, foo2(b))
         self.assertEqual(1, foo3(a))
         self.assertEqual(2, foo3(b))
+
+    def test_script_module_export_submodule(self):
+        class M1(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M1, self).__init__(False)
+                self.weight = nn.Parameter(torch.randn(2))
+
+            @torch.jit.script_method
+            def forward(self, thing):
+                return self.weight + thing
+
+        class M2(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M2, self).__init__(False)
+                # test submodule
+                self.sub = M1()
+                self.weight = nn.Parameter(torch.randn(2, 3))
+                self.bias = nn.Parameter(torch.randn(2))
+                self.define("""
+                    def hi(self, a):
+                        return self.weight.mm(a)
+                """)
+
+            @torch.jit.script_method
+            def doit(self, input):
+                return self.weight.mm(input)
+
+            @torch.jit.script_method
+            def doit2(self, input):
+                return self.weight.mm(input)
+
+            @torch.jit.script_method
+            def doit3(self, input):
+                return input + torch.ones([1], dtype=torch.double)
+
+            @torch.jit.script_method
+            def forward(self, input):
+                a = self.doit(input)
+                b = self.doit2(input)
+                c = self.hi(input)
+                return a + b + self.bias + c
+
+        m_orig = M2()
+        m_import = torch.jit.ScriptModule()
+        m_export, storage_map = m_orig.export()
+        torch._C._jit_import_module(m_import, m_export, storage_map)
+
+        input = torch.randn(3, 2)
+        self.assertEqual(m_orig.doit(input), m_import.doit(input))
+        self.assertEqual(m_orig.hi(input), m_import.hi(input))
+        self.assertEqual(m_orig.doit3(input), m_import.doit3(input))
+        self.assertEqual(m_orig.forward(input), m_import.forward(input))
+
+    @skipIfNoTorchVision
+    def test_script_module_export_resnet18(self):
+        x = torch.ones(1, 3, 224, 224)
+        m_orig = torch.jit.trace(torch.ones(1, 3, 224, 224))(torchvision.models.resnet18())
+        m_import = torch.jit.ScriptModule()
+        m_export, storage_map = m_orig.export()
+        torch._C._jit_import_module(m_import, m_export, storage_map)
+
+        input = torch.randn(1, 3, 224, 224, requires_grad=True)
+        output_orig = m_orig(input)
+        output_orig.sum().backward()
+        grad_orig = input.grad.clone()
+        input.grad.zero_()
+
+        output_import = m_import(input)
+        output_import.sum().backward()
+        grad_import = input.grad.clone()
+
+        self.assertEqual(output_orig, output_import)
+        self.assertEqual(grad_orig, grad_import)
+
+    def test_script_module_export_tensor_type(self):
+        class M(torch.jit.ScriptModule):
+
+            def __init__(self, type):
+                super(M, self).__init__(False)
+                self.param = torch.nn.Parameter(torch.zeros((5, 5), dtype=type).random_())
+
+            @torch.jit.script_method
+            def foo(self):
+                return self.param
+
+        for type in [torch.float, torch.double]:
+            m_orig = M(type)
+            m_import = torch.jit.ScriptModule()
+            m_export, storage_map = m_orig.export()
+            torch._C._jit_import_module(m_import, m_export, storage_map)
+            self.assertEqual(m_orig.foo(), m_import.foo())
+            self.assertTrue(m_orig.foo().dtype == m_import.foo().dtype)
+
+    @unittest.skipIf(not RUN_CUDA, "testing cuda tensors require CUDA")
+    def test_script_module_export_tensor_cuda(self):
+        class M(torch.jit.ScriptModule):
+
+            def __init__(self):
+                super(M, self).__init__(False)
+                self.param = torch.nn.Parameter(torch.zeros((5, 5), device='cuda').random_())
+
+            @torch.jit.script_method
+            def foo(self):
+                return self.param
+
+        m_orig = M()
+        m_import = torch.jit.ScriptModule()
+        m_export, storage_map = m_orig.export()
+        torch._C._jit_import_module(m_import, m_export, storage_map)
+        self.assertTrue(m_import.foo().device == torch.device('cpu'))
+        self.assertEqual(m_orig.foo(), m_import.foo())
+        self.assertTrue(m_orig.foo().dtype == m_import.foo().dtype)
+
+    def test_script_module_export_shared_storage(self):
+        class M(torch.jit.ScriptModule):
+
+            def __init__(self):
+                super(M, self).__init__(False)
+                self.param1 = torch.nn.Parameter(torch.rand(5, 5))
+                self.param2 = torch.nn.Parameter(self.param1[3])
+                self.param3 = torch.nn.Parameter(torch.rand(5, 5))
+
+            @torch.jit.script_method
+            def foo(self):
+                return self.param1 + self.param2 + self.param3
+
+        m_orig = M()
+        m_import = torch.jit.ScriptModule()
+        m_export, storage_map = m_orig.export()
+        torch._C._jit_import_module(m_import, m_export, storage_map)
+        self.assertEqual(m_orig.foo(), m_import.foo())
+        self.assertTrue(m_import.param1.storage().data_ptr() == m_import.param2.storage().data_ptr())
+        self.assertTrue(m_import.param1.storage().data_ptr() != m_import.param3.storage().data_ptr())
 
     def test_onnx_export_script_module(self):
         class ModuleToExport(torch.jit.ScriptModule):
@@ -3717,10 +4296,10 @@ def func(t):
             def unknown_builtin(x):
                 return x.splork(3)
 
-    def test_expected_tensor_found_tuple(self):
-        with self.assertRaisesRegex(RuntimeError, 'expected a tensor value but found'):
+    def test_return_tuple(self):
+        with self.assertRaisesRegex(RuntimeError, 'only supported return types'):
             @torch.jit.script
-            def return_tuple_wrong(x):
+            def return_tuple(x):
                 a = (x, x)
                 return a, x
 
@@ -3856,18 +4435,6 @@ def func(t):
             def wrong_use_as_callable(x):
                 return x(3, 4, 5)
 
-    def test_wrong_python_kwarg_call(self):
-        with self.assertRaisesRegex(RuntimeError, 'keyword arguments in Python calls aren\'t supported'):
-            # NB: the only way I could get to this code path is if I made the
-            # python function have 0 inputs, since we interpret all the inputs to
-            # the function as inputs (including those with defaults) and not kwargs
-            def test_fn():
-                return 3
-
-            @torch.jit.script
-            def wrong_python_kwarg_call(self):
-                return test_fn(attr=6)
-
     def test_python_val_doesnt_have_attr(self):
         with self.assertRaisesRegex(RuntimeError, 'object has no attribute abcd'):
             def test_fn():
@@ -3878,7 +4445,7 @@ def func(t):
                 return test_fn.abcd
 
     def test_wrong_module_attr_lookup(self):
-        with self.assertRaisesRegex(RuntimeError, 'unsupported attribute lookup on'):
+        with self.assertRaisesRegex(RuntimeError, 'python value of type \'type\' cannot be used as a value:'):
             import io
 
             @torch.jit.script
@@ -3886,7 +4453,7 @@ def func(t):
                 return io.BytesIO
 
     def test_wrong_method_call_inputs(self):
-        with self.assertRaisesRegex(RuntimeError, 'argument \'y\' not provided'):
+        with self.assertRaisesRegex(RuntimeError, 'argument y not provided'):
             class SomeModule(torch.jit.ScriptModule):
 
                 @torch.jit.script_method
@@ -4439,6 +5006,17 @@ def func(t):
                 # type: (Tuple[Tensor, Tensor]) -> Tensor
                 return x + 1
 
+    def test_script_non_tensor_args_outputs(self):
+        @torch.jit.script
+        def fn(x, y):
+            # type: (Tensor, float) -> float
+            return float((x + y).sum())
+
+        x = torch.ones(2, 2)
+        z = fn(x, 1)
+        self.assertIsInstance(z, float)
+        self.assertEqual(z, 8.)
+
     @unittest.skip('https://github.com/pytorch/pytorch/issues/9595')
     def test_inline_and_run_annotated_script_fn(self):
         @torch.jit.script
@@ -4450,7 +5028,8 @@ def func(t):
         def some_func(x):
             return to_inline((x, x), x)
 
-        some_func(torch.rand(3, 4))
+        x = torch.rand(3, 4)
+        self.assertEqual(some_func(x), x)
 
     def test_file_format_serialization(self):
         import tempfile
@@ -4981,11 +5560,9 @@ EXCLUDE_SCRIPT = {
     'test_expand_new_dim',
     'test_expand_new_dim_front_old_front_1',
     'test_expand_scalar_to_dims',
-    'test_expand_scalar_to_scalar',
     'test_expand_size',
     'test_permute',
     'test_permute_neg_dim',
-    'test_permute_scalar',
     'test_repeat',
     'test_repeat_scalar',
     'test_repeat_single_number',
@@ -4993,12 +5570,10 @@ EXCLUDE_SCRIPT = {
     'test_reshape',
     'test_reshape_1d',
     'test_reshape_scalar_to_1d',
-    'test_reshape_scalar_to_scalar',
     'test_reshape_size',
     'test_view',
     'test_view_1d',
     'test_view_scalar_to_1d',
-    'test_view_scalar_to_scalar',
     'test_view_size',
     'test_split_dim',
     'test_split_dim_neg0',

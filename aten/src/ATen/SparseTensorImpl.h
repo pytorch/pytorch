@@ -75,7 +75,7 @@ public:
     if (size.size() == 0) {
       size_ = {0};
     } else {
-      size_ = size;
+      size_ = size.vec();
     }
     sparseDims_ = sparseDims;
     denseDims_ = denseDims;

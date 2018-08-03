@@ -44,9 +44,9 @@ std::ostream& operator<<(std::ostream & out, const at::ArrayRef<T> & nodes) {
 }
 
 struct const_value_list_with_types {
-  const std::vector<const Value*>& values;
+  const ArrayRef<const Value*> values;
   bool use_newlines;
-  const_value_list_with_types(const std::vector<const Value*>& values, bool use_newlines = false)
+  const_value_list_with_types(ArrayRef<const Value*> values, bool use_newlines = false)
     : values(values), use_newlines(use_newlines) {}
 };
 std::ostream& operator<<(std::ostream & out, const_value_list_with_types l) {
@@ -82,6 +82,20 @@ void printPrimList(std::ostream & out, const std::vector<T> & items) {
   }
   out << "]";
 }
+
+std::string escapeString(std::string s) {
+  std::vector<char> search = {'\n', '\t', '\v'};
+  std::vector<std::string> replace = {"\\n", "\\t", "\\v"};
+  for (size_t i = 0; i < search.size(); i++) {
+    size_t pos = s.find(search[i]);
+    while(pos != std::string::npos) {
+      s.replace(pos, 1, replace[i]);
+      pos = s.find(search[i], pos + 1);
+    }
+  }
+  return s;
+}
+
 void printAttributes(std::ostream & out, const Node * n, bool ignore_subgraph=false) {
   out << "[";
   auto names = n->attributeNames();
@@ -110,7 +124,7 @@ void printAttributes(std::ostream & out, const Node * n, bool ignore_subgraph=fa
         printPrimList(out,n->is(name));
         break;
       case AttributeKind::s:
-        out << n->s(name);
+        out << escapeString(n->s(name));
         break;
       case AttributeKind::ss:
         printPrimList(out,n->ss(name));
@@ -619,23 +633,8 @@ Value* Node::namedInput(Symbol name) const {
     // so this is completely unsafe and needs to be gone as soon as possible.
     return v;
   }
-  const auto & the_schema = schema();
-  int64_t tensor_list_pos = 0;
-  for (auto & arg : the_schema.arguments) {
-    if (*arg.type == *ListType::ofTensors())
-      break;
-    tensor_list_pos++;
-  }
   int64_t arg_pos = findArgument(schema(), name).first;
-  // XXX: we don't have a single value we could give for a Tensor[],
-  // because we flatten lists into arguments
-  JIT_ASSERT(arg_pos != tensor_list_pos);
-  // NB: if there's no tensor list, then tensor_list_pos == arguments.size(), so this is always true
-  if (arg_pos < tensor_list_pos) {
-    return input(arg_pos);
-  } else {
-    return input(inputs().size() - (the_schema.arguments.size() - arg_pos));
-  }
+  return input(arg_pos);
 }
 
 bool Node::matches(const char *signature_literal, at::ArrayRef<Symbol> const_inputs) {
@@ -646,8 +645,12 @@ bool Node::matches(const char *signature_literal, at::ArrayRef<Symbol> const_inp
   return true;
 }
 
+void Node::dump() const {
+  std::cout << *this << "\n";
+}
+
 void Node::findSchema() const {
-  schema_ = &getOperatorFor(this).schema;
+  schema_ = &getOperatorFor(this).schema();
 }
 
 PythonOp* defaultAllocPythonOp(Graph*g) {

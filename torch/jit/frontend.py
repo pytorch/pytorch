@@ -435,14 +435,20 @@ class ExprBuilder(Builder):
 
     @staticmethod
     def build_Tuple(ctx, expr):
-        return ListLiteral(ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + 1),
-                           [build_expr(ctx, e) for e in expr.elts])
+        return TupleLiteral(ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + 1),
+                            [build_expr(ctx, e) for e in expr.elts])
 
     @staticmethod
     def build_Num(ctx, expr):
         value = str(expr.n)
         r = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + len(value))
         return Const(r, value)
+
+    @staticmethod
+    def build_Str(ctx, expr):
+        value = str(expr.s)
+        r = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + 1)
+        return StringLiteral(r, value)
 
     @staticmethod
     def build_Starred(ctx, expr):

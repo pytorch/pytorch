@@ -154,7 +154,7 @@ static inline void THNN_(VolumetricFullDilatedConvolution_shapeCheck)(
       const int64_t nOutputPlane = weight->size(1);
       THNN_CHECK_DIM_SIZE(gradOutput, ndim, dimf, nOutputPlane);
     } else if (bias != NULL) {
-      const int64_t nOutputPlane = bias->size(0);
+      const int64_t nOutputPlane = THTensor_sizeLegacyNoScalars(bias, 0);
       THNN_CHECK_DIM_SIZE(gradOutput, ndim, dimf, nOutputPlane);
     }
     THNN_CHECK_DIM_SIZE(gradOutput, ndim, dimd, outputDepth);
@@ -441,7 +441,7 @@ void THNN_(VolumetricFullDilatedConvolution_accGradParameters)(
   if (gradWeight) {
     nOutputPlane = THTensor_(size)(gradWeight, 1);
   } else if (gradBias) {
-    nOutputPlane = THTensor_(size)(gradBias, 0);
+    nOutputPlane = THTensor_sizeLegacyNoScalars(gradBias, 0);
   } else {
     return;
   }

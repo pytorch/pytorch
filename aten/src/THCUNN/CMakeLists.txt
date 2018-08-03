@@ -43,7 +43,6 @@ ${CMAKE_CURRENT_SOURCE_DIR}/SpatialDilatedMaxPooling.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialFractionalMaxPooling.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialFullConvolution.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialFullDilatedConvolution.cu
-${CMAKE_CURRENT_SOURCE_DIR}/SpatialGridSamplerBilinear.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialMaxPooling.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialMaxUnpooling.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialReflectionPadding.cu
@@ -71,7 +70,6 @@ ${CMAKE_CURRENT_SOURCE_DIR}/VolumetricDilatedMaxPooling.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/VolumetricFractionalMaxPooling.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/VolumetricFullConvolution.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/VolumetricFullDilatedConvolution.cu
-${CMAKE_CURRENT_SOURCE_DIR}/VolumetricGridSamplerBilinear.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/VolumetricMaxPooling.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/VolumetricMaxUnpooling.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/VolumetricReplicationPadding.cu

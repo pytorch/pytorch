@@ -40,7 +40,7 @@ namespace at {
 
 struct Type;
 
-struct TH_CPP_API StorageImpl : public Retainable {
+struct AT_API StorageImpl : public Retainable {
 
   StorageImpl() = delete;
   virtual ~StorageImpl() {};
@@ -57,6 +57,8 @@ struct TH_CPP_API StorageImpl : public Retainable {
   StorageImpl(StorageImpl&&) = delete;
   StorageImpl(const StorageImpl&&) = delete;
 
+  // TODO: Rename this into th_data, and move it out of the class;
+  // the real data shouldn't call th::from_type
   template <typename T>
   inline T* data() const {
     auto scalar_type_T = at::CTypeToScalarType<th::from_type<T>>::to();
@@ -89,8 +91,6 @@ struct TH_CPP_API StorageImpl : public Retainable {
     return at::elementSize(scalar_type);
   }
 
-  Type& type();
-
   //TODO: Rename to size() and size to size_
   size_t get_size() const { 
     return size;
@@ -110,4 +110,7 @@ struct TH_CPP_API StorageImpl : public Retainable {
   }
 };
 
+namespace detail {
+AT_API Backend get_backend(StorageImpl* storage_impl);
+}
 } // namespace at

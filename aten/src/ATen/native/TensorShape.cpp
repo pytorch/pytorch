@@ -12,6 +12,10 @@
 namespace at {
 namespace native {
 
+std::vector<Tensor> broadcast_tensors(TensorList tensors) {
+  return expand_outplace(tensors);
+}
+
 static void check_cat_no_zero_dim(TensorList tensors) {
   for(size_t i = 0; i < tensors.size(); ++i) {
     auto& t = tensors[i];
@@ -92,8 +96,8 @@ Tensor diagonal(const Tensor& self, int64_t offset, int64_t dim1_, int64_t dim2_
 
   // construct new size and stride: we drop dim1 and dim2 (maximum first for not changing the index of the minumum)
   // the new ("joint") dimension is appended to the end of the shape / stride to match numpy semantics
-  auto sizes = std::vector<int64_t>(self.sizes());
-  auto strides = std::vector<int64_t>(self.strides());
+  auto sizes = self.sizes().vec();
+  auto strides = self.strides().vec();
   sizes.erase(sizes.begin() + std::max(dim1, dim2));
   strides.erase(strides.begin() + std::max(dim1, dim2));
   sizes.erase(sizes.begin() + std::min(dim1, dim2));
@@ -276,8 +280,8 @@ Tensor select(const Tensor& self, int64_t dim, int64_t index) {
   if (index < 0) {
     index += size;
   }
-  auto sizes = std::vector<int64_t>(self.sizes());
-  auto strides = std::vector<int64_t>(self.strides());
+  auto sizes = self.sizes().vec();
+  auto strides = self.strides().vec();
   auto storage_offset = self.storage_offset() + index * strides[dim];
   sizes.erase(sizes.begin() + dim);
   strides.erase(strides.begin() + dim);
@@ -288,8 +292,8 @@ Tensor slice(const Tensor& self, int64_t dim, int64_t start, int64_t end, int64_
   int64_t ndim = self.dim();
   AT_CHECK(ndim > 0, "slice() cannot be applied to a 0-dim tensor.");
   dim = maybe_wrap_dim(dim, ndim);
-  auto sizes = std::vector<int64_t>(self.sizes());
-  auto strides = std::vector<int64_t>(self.strides());
+  auto sizes = self.sizes().vec();
+  auto strides = self.strides().vec();
   if (step <= 0) {
     // TODO: support negative strides
     throw std::runtime_error("slice step must be positive");
@@ -403,7 +407,7 @@ static inline Tensor & sparse_transpose_(Tensor & self, int64_t dim0, int64_t di
   }
 
   if (self._indices().numel() == 0 && self._values().numel() == 0) {
-    std::vector<int64_t> sizes(self.sizes());
+    auto sizes = self.sizes().vec();
     std::swap(sizes[dim0], sizes[dim1]);
 
     return self.sparse_raw_resize_(sizes, self._sparseDims(), self._denseDims());
@@ -418,7 +422,7 @@ static inline Tensor & sparse_transpose_(Tensor & self, int64_t dim0, int64_t di
     row0.copy_(row1);
     row1.copy_(tmp);
 
-    std::vector<int64_t> sizes(self.sizes());
+    auto sizes = self.sizes().vec();
     std::swap(sizes[dim0], sizes[dim1]);
 
     return self.sparse_raw_resize_(sizes, -1, -1);
@@ -437,8 +441,8 @@ Tensor & transpose_(Tensor & self, int64_t dim0, int64_t dim1) {
     return sparse_transpose_(self, dim0, dim1);
   }
 
-  std::vector<int64_t> strides(self.strides());
-  std::vector<int64_t> sizes(self.sizes());
+  auto strides = self.strides().vec();
+  auto sizes = self.sizes().vec();
   std::swap(strides[dim0], strides[dim1]);
   std::swap(sizes[dim0], sizes[dim1]);
   return self.as_strided_(sizes, strides);
@@ -457,8 +461,8 @@ Tensor transpose(const Tensor & self, int64_t dim0, int64_t dim1) {
     return sparse_transpose_(self_clone, dim0, dim1);
   }
 
-  std::vector<int64_t> strides(self.strides());
-  std::vector<int64_t> sizes(self.sizes());
+  auto strides = self.strides().vec();
+  auto sizes = self.sizes().vec();
   std::swap(strides[dim0], strides[dim1]);
   std::swap(sizes[dim0], sizes[dim1]);
   return self.as_strided(sizes, strides);
@@ -518,8 +522,8 @@ inferSqueezeGeometry(const Tensor& tensor, int64_t dim) {
 
 std::tuple<std::vector<int64_t>, std::vector<int64_t> >
 inferUnsqueezeGeometry(const Tensor& tensor, int64_t dim) {
-  std::vector<int64_t> sizes(tensor.sizes());
-  std::vector<int64_t> strides(tensor.strides());
+  auto sizes = tensor.sizes().vec();
+  auto strides = tensor.strides().vec();
   int64_t new_stride = dim >= tensor.dim() ? 1 : sizes[dim] * strides[dim];
   sizes.insert(sizes.begin() + dim, 1);
   strides.insert(strides.begin() + dim, new_stride);
@@ -537,7 +541,7 @@ Tensor squeeze(const Tensor& self, int64_t dim) {
   dim = maybe_wrap_dim(dim, dims);
 
   if (dims == 0 || self.sizes()[dim] != 1) {
-    return self.as_strided(self.sizes().vec(), self.strides().vec());
+    return self.as_strided(self.sizes(), self.strides());
   }
   auto g = inferSqueezeGeometry(self, dim);
   return self.as_strided(std::get<0>(g), std::get<1>(g));
@@ -553,7 +557,7 @@ Tensor & squeeze_(Tensor& self, int64_t dim) {
   dim = maybe_wrap_dim(dim, self.dim());
 
   if (dims == 0 || self.sizes()[dim] != 1) {
-    return self.as_strided_(self.sizes().vec(), self.strides().vec());
+    return self.as_strided_(self.sizes(), self.strides());
   }
   auto g = inferSqueezeGeometry(self, dim);
   return self.as_strided_(std::get<0>(g), std::get<1>(g));

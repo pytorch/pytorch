@@ -20,19 +20,19 @@ void THNN_(MultiMarginCriterion_updateOutput)(
   int64_t t, d;
   real sum;
 
-  AT_CHECK(!input->is_empty() && (input->dim() == 1 || input->dim() == 2),
+  AT_CHECK(!input->is_empty() && input->dim() <= 2,
            "non-empty vector or matrix expected, got size: ", input->sizes());
 
-  if (input->dim() == 1)
+  if (input->dim() <= 1)
   {
     nframe = 1;
-    dim = input->size(0);
+    dim = THTensor_sizeLegacyNoScalars(input, 0);
   }
   else
   {
     nframe = input->size(0);
     dim = input->size(1);
-    AT_CHECK(!target->is_empty() && (target->dim() == 1) && (target->size(0) == nframe),
+    AT_CHECK(!target->is_empty() && (THTensor_nDimensionLegacyNoScalars(target) == 1) && (THTensor_sizeLegacyNoScalars(target, 0) == nframe),
              "inconsistent target size, got: ", target->sizes());
   }
 
@@ -136,19 +136,19 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
   int64_t t, d;
   real g;
 
-  AT_CHECK(!input->is_empty() && (input->dim() == 1 || input->dim() == 2),
+  AT_CHECK(!input->is_empty() && (input->dim() <= 2),
            "non-empty vector or matrix expected, got size: ", input->sizes());
 
-  if (input->dim() == 1)
+  if (input->dim() <= 1)
   {
     nframe = 1;
-    dim = input->size(0);
+    dim = THTensor_sizeLegacyNoScalars(input, 0);
   }
   else
   {
     nframe = input->size(0);
     dim = input->size(1);
-    AT_CHECK(!target->is_empty() && (target->dim() == 1) && (target->size(0) == nframe),
+    AT_CHECK(!target->is_empty() && (target->dim() <= 1) && (THTensor_sizeLegacyNoScalars(target, 0) == nframe),
              "inconsistent target size, got: ", target->sizes());
   }
 
@@ -199,7 +199,7 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
   {
     THNN_CHECK_DIM_SIZE(gradOutput, 1, 0, 1);
     for (t = 0; t < nframe * dim; t++) {
-      gradInput_data[t] *= THTensor_(fastGet1d)(gradOutput, 0);
+      gradInput_data[t] *= THTensor_(fastGetLegacy1dNoScalars)(gradOutput, 0);
     }
   }
   else
@@ -209,7 +209,7 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
     {
       for (d = 0; d < dim; d++)
       {
-        gradInput_data[t * dim + d] *= THTensor_(fastGet1d)(gradOutput, t);
+        gradInput_data[t * dim + d] *= THTensor_(fastGetLegacy1dNoScalars)(gradOutput, t);
       }
     }
   }

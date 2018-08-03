@@ -121,14 +121,14 @@
   int shape_check_flag = 0; \
   for(TH_TENSOR_DIM_APPLY_i = 0; TH_TENSOR_DIM_APPLY_i < THTensor_nDimensionLegacyAll(TENSOR1); TH_TENSOR_DIM_APPLY_i++) \
   { \
-    int64_t TENSOR3##_dim_size = TENSOR3->size(TH_TENSOR_DIM_APPLY_i); \
+    int64_t TENSOR3##_dim_size = THTensor_sizeLegacyNoScalars(TENSOR3, TH_TENSOR_DIM_APPLY_i); \
     if (TH_TENSOR_DIM_APPLY_i != DIMENSION) { \
-      if (TENSOR3##_dim_size > TENSOR1->size(TH_TENSOR_DIM_APPLY_i)) { \
+      if (TENSOR3##_dim_size > THTensor_sizeLegacyNoScalars(TENSOR1, TH_TENSOR_DIM_APPLY_i)) { \
         shape_check_flag = 1; \
         break; \
       } \
     } \
-    if (TENSOR3##_dim_size > TENSOR2->size(TH_TENSOR_DIM_APPLY_i)) { \
+    if (TENSOR3##_dim_size > THTensor_sizeLegacyNoScalars(TENSOR2, TH_TENSOR_DIM_APPLY_i)) { \
       shape_check_flag = 1; \
       break; \
     } \

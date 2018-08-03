@@ -33,12 +33,14 @@ class Upsample(Module):
         - Output: :math:`(N, C, W_{out})`, :math:`(N, C, H_{out}, W_{out})`
           or :math:`(N, C, D_{out}, H_{out}, W_{out})`, where
 
-          .. math::
-              D_{out} = \left\lfloor D_{in} \times \text{scale_factor} \right\rfloor \text{ or size}[-3]
+    .. math::
+        D_{out} = \left\lfloor D_{in} \times \text{scale\_factor} \right\rfloor \text{ or size}[-3]
 
-              H_{out} = \left\lfloor H_{in} \times \text{scale_factor} \right\rfloor \text{ or size}[-2]
+    .. math::
+        H_{out} = \left\lfloor H_{in} \times \text{scale\_factor} \right\rfloor \text{ or size}[-2]
 
-              W_{out} = \left\lfloor W_{in} \times \text{scale_factor} \right\rfloor \text{ or size}[-1]
+    .. math::
+        W_{out} = \left\lfloor W_{in} \times \text{scale\_factor} \right\rfloor \text{ or size}[-1]
 
     .. warning::
         With ``align_corners = True``, the linearly interpolating modes
@@ -151,10 +153,11 @@ class UpsamplingNearest2d(Upsample):
         - Input: :math:`(N, C, H_{in}, W_{in})`
         - Output: :math:`(N, C, H_{out}, W_{out})` where
 
-          .. math::
-              H_{out} = \left\lfloor H_{in} \times \text{scale_factor} \right\rfloor
+    .. math::
+          H_{out} = \left\lfloor H_{in} \times \text{scale\_factor} \right\rfloor
 
-              W_{out} = \left\lfloor W_{in} \times \text{scale_factor} \right\rfloor
+    .. math::
+          W_{out} = \left\lfloor W_{in} \times \text{scale\_factor} \right\rfloor
 
     Examples::
 
@@ -199,10 +202,11 @@ class UpsamplingBilinear2d(Upsample):
         - Input: :math:`(N, C, H_{in}, W_{in})`
         - Output: :math:`(N, C, H_{out}, W_{out})` where
 
-          .. math::
-              H_{out} = \left\lfloor H_{in} \times \text{scale_factor} \right\rfloor
+    .. math::
+        H_{out} = \left\lfloor H_{in} \times \text{scale\_factor} \right\rfloor
 
-              W_{out} = \left\lfloor W_{in} \times \text{scale_factor} \right\rfloor
+    .. math::
+        W_{out} = \left\lfloor W_{in} \times \text{scale\_factor} \right\rfloor
 
     Examples::
 

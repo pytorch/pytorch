@@ -279,11 +279,11 @@ Tensor & index_copy_(Tensor & self, int64_t dim, const Tensor & index, const Ten
   }
 
   // Check that source and destination slices have the same size
-  auto selfSlicedSizes = std::vector<int64_t>(self.sizes());
+  auto selfSlicedSizes = self.sizes().vec();
   if (selfSlicedSizes.size() > 0) {
     selfSlicedSizes.erase(selfSlicedSizes.begin() + dim);
   }
-  auto sourceSlicedSizes = std::vector<int64_t>(source.sizes());
+  auto sourceSlicedSizes = source.sizes().vec();
   if (sourceSlicedSizes.size() > 0) {
     sourceSlicedSizes.erase(sourceSlicedSizes.begin() + dim);
   }

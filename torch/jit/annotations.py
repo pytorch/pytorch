@@ -3,7 +3,7 @@ import sys
 import ast
 import inspect
 import torch
-from torch._C import DynamicType, TupleType
+from torch._C import DynamicType, TupleType, FloatType, IntType
 from textwrap import dedent
 
 
@@ -204,9 +204,13 @@ def try_real_annotations(fn):
 
 def ann_to_type(ann):
     if ann is None:
-        return DynamicType()
+        return DynamicType.get()
     elif ann is torch.Tensor:
-        return DynamicType()
+        return DynamicType.get()
     elif is_tuple(ann):
         return TupleType([ann_to_type(a) for a in ann.__args__])
+    elif ann is float:
+        return FloatType.get()
+    elif ann is int:
+        return IntType.get()
     raise ValueError("The only supported annotations kinds are Tensor and Tuple[...]")

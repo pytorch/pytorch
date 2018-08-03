@@ -21,6 +21,7 @@ _(NumberType) \
 _(FloatType) \
 _(IntType) \
 _(NoneType) \
+_(StringType) \
 
 enum class TypeKind {
 #define DEFINE_TYPE(T) T,
@@ -104,7 +105,7 @@ struct TORCH_API DynamicType : public Type {
   }
   static const TypeKind Kind = TypeKind::DynamicType;
   // global singleton
-  static TypePtr get();
+  static DynamicTypePtr get();
 private:
   DynamicType()
   : Type(TypeKind::DynamicType) {}
@@ -186,16 +187,16 @@ private:
     : Type(TypeKind::TensorType)
     , scalar_type_(tensor.type().scalarType())
     , device_(tensor.type().is_cuda() ? tensor.get_device() : -1)
-    , sizes_(tensor.sizes())
-    , strides_(tensor.strides()) {}
+    , sizes_(tensor.sizes().vec())
+    , strides_(tensor.strides().vec()) {}
   TensorType(at::ScalarType scalar_type, int device, at::IntList sizes)
     : TensorType(scalar_type, device, sizes, TensorType::contiguousStridesOf(sizes)) {}
   TensorType(at::ScalarType scalar_type, int device, at::IntList sizes, at::IntList strides)
     : Type(TypeKind::TensorType)
     , scalar_type_(scalar_type)
     , device_(device)
-    , sizes_(sizes)
-    , strides_(strides)
+    , sizes_(sizes.vec())
+    , strides_(strides.vec())
     {}
   static std::vector<int64_t> contiguousStridesOf(at::IntList sizes) {
     std::vector<int64_t> strides(sizes.size());
@@ -237,8 +238,8 @@ struct TORCH_API ListType : public Type {
     return elem;
   }
   // common cast List[Tensor]
-  static TypePtr ofTensors();
-  static TypePtr ofInts();
+  static ListTypePtr ofTensors();
+  static ListTypePtr ofInts();
 private:
   ListType(TypePtr elem)
   : Type(TypeKind::ListType), elem(elem) {}
@@ -326,7 +327,7 @@ struct TORCH_API NumberType : public Type {
   }
   static const TypeKind Kind = TypeKind::NumberType;
   // global singleton
-  static TypePtr get();
+  static NumberTypePtr get();
 private:
   NumberType()
   : Type(TypeKind::NumberType) {}
@@ -351,7 +352,7 @@ struct TORCH_API FloatType : public Type {
   }
   static const TypeKind Kind = TypeKind::FloatType;
   // global singleton
-  static TypePtr get();
+  static FloatTypePtr get();
 private:
   FloatType()
   : Type(TypeKind::FloatType) {}
@@ -376,10 +377,35 @@ struct TORCH_API IntType : public Type {
   }
   static const TypeKind Kind = TypeKind::IntType;
   // global singleton
-  static TypePtr get();
+  static IntTypePtr get();
 private:
   IntType()
   : Type(TypeKind::IntType) {}
+};
+
+struct StringType;
+using StringTypePtr = std::shared_ptr<StringType>;
+// This node represents a Python string value
+struct TORCH_API StringType : public Type {
+  template<typename ... T>
+  static StringTypePtr create( T&& ... all ) {
+    return StringTypePtr(new StringType( std::forward<T>(all)... ));
+  }
+  bool operator==(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
+  std::string str() const override {
+    return "string";
+  }
+  bool isSubtypeOf(const TypePtr rhs) const override {
+    return *this == *rhs;
+  }
+  static const TypeKind Kind = TypeKind::StringType;
+  // global singleton
+  static StringTypePtr get();
+private:
+  StringType()
+  : Type(TypeKind::StringType) {}
 };
 
 struct NoneType;
@@ -401,7 +427,7 @@ struct NoneType : public Type {
   }
   static const TypeKind Kind = TypeKind::NoneType;
   // global singleton
-  static TypePtr get();
+  static NoneTypePtr get();
 private:
   NoneType()
   : Type(TypeKind::NoneType) {}

@@ -683,6 +683,8 @@ public:
     return *schema_;
   }
 
+  void dump() const;
+
   virtual ~Node() = default;
 private:
   std::pair<Value*, const Argument&> findInput(Symbol name);
@@ -985,7 +987,6 @@ public:
   Node * createUndefined() {
     return create(prim::Undefined);
   }
-
   Node * createFusionGroup(int device) {
     auto n = create(prim::FusionGroup, 0);
     n->g_(attr::Subgraph,std::make_shared<Graph>(scope_root_));

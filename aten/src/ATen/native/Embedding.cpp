@@ -24,7 +24,7 @@ Tensor embedding(const Tensor & weight, const Tensor & indices,
     return weight.index_select(0, indices);
   }
 
-  auto size = std::vector<int64_t>(indices.sizes());
+  auto size = indices.sizes().vec();
   for (auto d : weight.sizes().slice(1)) {
     size.push_back(d);
   }

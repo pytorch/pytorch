@@ -2939,6 +2939,17 @@ class TestTorch(TestCase):
                          torch.randn(0, 7, 0, 6, 5, 0, 1) + torch.randn(1, 1, 5, 1, 7))
         self.assertRaises(RuntimeError, lambda: torch.randn(7, 0) + torch.randn(2, 1))
 
+    def test_broadcast_tensors(self):
+        x0 = torch.randn(2, 1, 3)
+        x1 = torch.randn(3)
+        x2 = torch.randn(3, 1)
+        expected_size = (2, 3, 3)
+
+        y0, y1, y2 = torch.broadcast_tensors(x0, x1, x2)
+        self.assertTrue(y0.size() == expected_size)
+        self.assertTrue(y1.size() == expected_size)
+        self.assertTrue(y2.size() == expected_size)
+
     @staticmethod
     def _test_contiguous(self, cast):
         x = cast(torch.randn(1, 16, 5, 5))
@@ -7485,15 +7496,11 @@ class TestTorch(TestCase):
         expected_err_msg = (".*You can only torch.load from a file that is seekable. " +
                             "Please pre-load the data into a buffer like io.BytesIO and " +
                             "try to load from it instead.")
-        if PY3:
-            import urllib.request
-            import io
-            resource = urllib.request.urlopen('https://download.pytorch.org/test_data/linear.pt')
-            self.assertRaisesRegex(io.UnsupportedOperation, expected_err_msg, lambda: torch.load(resource))
-        else:
-            import urllib
-            resource = urllib.urlopen('https://download.pytorch.org/test_data/linear.pt')
-            self.assertRaisesRegex(AttributeError, expected_err_msg, lambda: torch.load(resource))
+
+        resource = FilelikeMock(data=b"data")
+        delattr(resource, "tell")
+        delattr(resource, "seek")
+        self.assertRaisesRegex(AttributeError, expected_err_msg, lambda: torch.load(resource))
 
     def test_from_buffer(self):
         a = bytearray([1, 2, 3, 4])

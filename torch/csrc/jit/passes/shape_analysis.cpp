@@ -263,6 +263,39 @@ void PropagateShapeOnNode(Node * node, bool insert_expands) {
     default:
       break; // fall-through
   }
+  if (node->matches("aten::cat(Tensor[] tensors, int dim) -> Tensor", /*with_const=*/attr::dim)) {
+    auto list_node = node->namedInput(attr::tensors)->node();
+    JIT_ASSERT(list_node->kind() == prim::ListConstruct);
+    auto tensors = list_node->inputs();
+    if (tensors.size() > 0) {
+      auto input_types = fmap(tensors, [](Value *v) { return v->type()->cast<TensorType>(); });
+      if (std::all_of(input_types.begin(), input_types.end(),
+          [](const TensorTypePtr& tp) { return tp != nullptr; })) {
+        std::vector<int64_t> sizes = input_types[0]->sizes();
+        const int64_t dim = wrapDim(node->get<int64_t>(attr::dim).value(), sizes);
+        const int64_t ndim = sizes.size();
+
+        if (dim < 0 || dim >= ndim)
+          goto cat_fail;
+
+        sizes[dim] = 0;
+        for (auto & tp : input_types) {
+          auto & tp_sizes = tp->sizes();
+          if (sizes.size() != tp_sizes.size())
+            goto cat_fail;
+          for (int64_t i = 0; i < ndim; ++i) {
+            if (sizes[i] != tp_sizes[i] && i != dim) {
+              goto cat_fail;
+            }
+          }
+          sizes[dim] += tp_sizes[dim];
+        }
+        node->output()->setType(input_types[0]->withSizes(sizes));
+        return;
+      }
+    }
+  }
+cat_fail:
 
   bool can_propagate_by_running = canPropagateShapeByRunningIt(node);
   auto maybe_tensor_types = gatherTensorTypes(node);

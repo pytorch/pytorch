@@ -25,6 +25,16 @@ Tensor & selu_(Tensor & self) {
   return at::elu_(self, SELU_ALPHA, SELU_SCALE);
 }
 
+Tensor celu(const Tensor & self, Scalar alpha) {
+  double inv_alpha = 1. / alpha.to<double>();
+  return at::elu(self, 1.0, alpha, Scalar(inv_alpha));
+}
+
+Tensor & celu_(Tensor & self, Scalar alpha) {
+  double inv_alpha = 1. / alpha.to<double>();
+  return at::elu_(self, 1.0, alpha, Scalar(inv_alpha));
+}
+
 Tensor rrelu(const Tensor & self, Scalar lower, Scalar upper, bool training, Generator* generator) {
   return at::rrelu_with_noise(self, self.type().tensor(), lower, upper, training, generator);
 }
