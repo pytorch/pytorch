@@ -1,9 +1,11 @@
 #pragma once
 
-#include "ATen/ATenGeneral.h"
 #include "ATen/StorageImpl.h"
 #include "ATen/UndefinedTensor.h"
 #include "ATen/core/ArrayRef.h"
+
+#include "ATen/core/ATenGeneral.h"    
+#include "ATen/core/ArrayRef.h"    
 #include "ATen/core/Error.h"
 
 #include <algorithm>
@@ -23,8 +25,8 @@ namespace at {
 
 AT_API int _crash_if_asan(int);
 
-template <typename T, typename Base>
-static inline T* checked_cast_storage(Base* expr, const char * name, int pos, Backend backend, ScalarType scalar_type) {
+template <typename T>
+static inline T* checked_cast_storage(Storage* expr, const char * name, int pos, Backend backend, ScalarType scalar_type) {
   if (at::detail::get_backend(expr->pImpl()) != backend) {
     AT_ERROR("Expected object of backend ", backend, " but got backend ", at::detail::get_backend(expr->pImpl()),
              " for argument #", pos, " '", name, "'");
@@ -41,14 +43,14 @@ inline T* checked_cast_tensor(Base* expr, const char * name, int pos, bool allow
   if(allowNull && expr == UndefinedTensor::singleton()) {
     return nullptr;
   }
-  // if (expr->type().backend() != backend) {
-  //   AT_ERROR("Expected object of backend ", backend, " but got backend ", expr->type().backend(),
-  //            " for argument #", pos, " '", name, "'");
-  // }
-  // if (expr->type().scalarType() != scalar_type) {
-  //   AT_ERROR("Expected object of scalar type ", scalar_type, " but got scalar type ", expr->type().scalarType(),
-  //            " for argument #", pos, " '", name, "'");
-  // }
+  if (expr->type().backend() != backend) {
+    AT_ERROR("Expected object of backend ", backend, " but got backend ", expr->type().backend(),
+             " for argument #", pos, " '", name, "'");
+  }
+  if (expr->type().scalarType() != scalar_type) {
+    AT_ERROR("Expected object of scalar type ", scalar_type, " but got scalar type ", expr->type().scalarType(),
+             " for argument #", pos, " '", name, "'");
+  }
   return static_cast<T*>(expr);
 }
 

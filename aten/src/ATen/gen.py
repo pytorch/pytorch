@@ -232,7 +232,9 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
     env['DenseTensor'] = "{}{}Tensor".format(backend, scalar_name)
     env['Backend'] = density_tag + backend
     env['DenseBackend'] = backend
-    env['storage_tensor_headers'] = ['#include "ATen/TensorImpl.h"']
+    env['storage_tensor_headers'] = []
+    if density != 'Sparse':
+        env['storage_tensor_headers'] = ['#include "ATen/TensorImpl.h"']
 
     # used for generating switch logic for external functions
     tag = density_tag + backend + scalar_name
