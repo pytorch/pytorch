@@ -329,7 +329,7 @@ Operation listEq(Node* node) {
     T a;
     T b;
     pop(stack, a, b);
-    if (a->elements().equals(b->elements())) {
+    if (a->elements() == b->elements()) {
       push(stack, 1);
     } else {
       push(stack, 0);
