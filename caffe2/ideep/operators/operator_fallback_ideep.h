@@ -146,7 +146,6 @@ class IDEEPFallbackOp final : public IDEEPOperator {
         dtensor->set_data_handle(const_cast<void*>(src.raw_data()));
       } else {
         VLOG(2) << "Output " << base_def_.output(i) << " as CPUTensor";
-        auto src_dims = src.dims();
         Blob* dst = OperatorBase::OutputBlob(i);
         dst->Reset(new Tensor(CPU));
         auto dtensor = dst->GetMutableTensor(CPU);
