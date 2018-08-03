@@ -326,6 +326,7 @@ if(USE_CUDA)
   # linking; libculibos and cublas must be last.
   target_link_libraries(
       caffe2_gpu PUBLIC caffe2 ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
+  target_compile_options(caffe2 PRIVATE "-DCAFFE2_BUILD_GPU_LIB")
 
   # Set standard properties on the target
   aten_set_target_props(caffe2_gpu)

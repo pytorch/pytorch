@@ -89,6 +89,7 @@ list(APPEND ATen_CPU_INCLUDE ${CMAKE_CURRENT_BINARY_DIR})
 IF(NOT AT_LINK_STYLE)
   SET(AT_LINK_STYLE SHARED)
 ENDIF()
+message(STATUS "AT_LINK_STYLE is ${AT_LINK_STYLE}")
 
 IF(BLAS_FOUND)
   IF ($ENV{TH_BINARY_BUILD})
@@ -274,6 +275,7 @@ set(ATen_CPU_SRCS ${all_cpu_cpp})
 if(AT_LINK_STYLE STREQUAL "INTERFACE")
   # Source code can't be added to an interface library, so it is
   # passed back to be compiled into the containing library
+  message("Making INTERFACE library (CPU)")
   add_library(ATen_cpu INTERFACE)
   list(APPEND ATen_CPU_DEPENDENCY_LIBS ATEN_CPU_FILES_GEN_LIB)
 else()

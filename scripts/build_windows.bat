@@ -63,6 +63,7 @@ cmake .. ^
   -DUSE_LEVELDB=OFF ^
   -DUSE_ROCKSDB=OFF ^
   -DUSE_OPENCV=OFF ^
+  -DBUILD_ATEN=ON ^
   -DBUILD_SHARED_LIBS=OFF ^
   -DBUILD_PYTHON=OFF^
   || goto :label_error
