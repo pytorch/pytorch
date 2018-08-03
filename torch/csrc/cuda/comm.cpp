@@ -10,9 +10,9 @@
 #endif
 
 #include <ATen/ATen.h>
-#include <ATen/cuda/CUDAGuard.h>
+#include <ATen/core/optional.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/optional.h>
+#include <ATen/cuda/CUDAGuard.h>
 
 #include <cstddef>
 #include <vector>

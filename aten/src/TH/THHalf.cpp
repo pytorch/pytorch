@@ -1,5 +1,5 @@
 #include "THHalf.h"
-#include <ATen/Half.h>
+#include <ATen/core/Half.h>
 
 /* Copyright 1993-2014 NVIDIA Corporation.  All rights reserved. */
 

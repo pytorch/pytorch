@@ -1,7 +1,7 @@
 #include "ATen/cuda/CUDAStream.h"
 #include "ATen/cuda/CUDAContext.h"
 #include "ATen/cuda/Exceptions.h"
-#include "ATen/Error.h"
+#include "ATen/core/Error.h"
 
 #include <mutex>
 #include <atomic>
@@ -84,7 +84,7 @@ namespace detail {
     internals->device = current_device();
     #ifndef __HIP_PLATFORM_HCC__
       AT_CUDA_CHECK(cudaStreamCreateWithPriority(&internals->stream, flags, priority));
-    #else 
+    #else
       AT_CUDA_CHECK(cudaStreamCreateWithFlags(&internals->stream, flags));
     #endif // __HIP_PLATFORM_HCC__
     return internals;

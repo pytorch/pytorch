@@ -10,7 +10,7 @@
 
 #include "torch/csrc/jit/constants.h"
 
-#include "ATen/optional.h"
+#include "ATen/core/optional.h"
 
 
 #include <climits>
@@ -363,7 +363,7 @@ Value* createNumber(Graph& g, const SourceRange& loc, const at::Tensor& val) {
 at::optional<std::vector<int64_t>> getIntListAttribute(at::optional<int32_t> N, Value* input) {
   auto list = constant_as<Shared<jit::IntList>>(input);
   if(list)
-    return list.value()->elements().vec();
+    return list.value()->elements();
 
   // broadcast IntList[3] with value 4 -> {4, 4, 4}
   if(!N)

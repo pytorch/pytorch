@@ -1,7 +1,7 @@
 #pragma once
 
-#include <ATen/Error.h>
 #include <ATen/ScalarType.h>
+#include <ATen/core/Error.h>
 
 #include <cstddef>
 #include <iosfwd>
