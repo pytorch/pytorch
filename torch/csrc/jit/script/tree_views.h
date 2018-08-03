@@ -19,7 +19,7 @@ namespace script {
 //
 // Param = Param(Expr type, Ident name)                                 TK_PARAM
 //
-// Decl  = Decl(List<Param> params, Expr return_type)                   TK_DECL
+// Decl  = Decl(List<Param> params, Maybe<Expr> return_type)            TK_DECL
 // Def   = Def(Ident name, Decl decl, List<Stmt> body)                  TK_DEF
 //
 // Stmt  = If(Expr cond, List<Stmt> true_body, List<Stmt> false_body)   TK_IF
@@ -306,10 +306,10 @@ struct Decl : public TreeView {
   List<Param> params() const {
     return List<Param>(subtree(0));
   }
-  Expr return_type() const {
-    return Expr(subtree(1));
+  Maybe<Expr> return_type() const {
+    return Maybe<Expr>(subtree(1));
   }
-  static Decl create(const SourceRange& range, const List<Param>& params, Expr return_type) {
+  static Decl create(const SourceRange& range, const List<Param>& params, Maybe<Expr> return_type) {
     return Decl(Compound::create(TK_DECL, range, {params, return_type}));
   }
 };

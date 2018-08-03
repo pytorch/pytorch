@@ -114,10 +114,10 @@ void initTreeViewBindings(PyObject *module) {
                          wrap_list(r, std::move(body)));
     }));
   py::class_<Decl, TreeView>(m, "Decl")
-    .def(py::init([](std::vector<Param> params,
-                     Expr return_type) {
-      auto r = return_type.range();
-      return Decl::create(r, wrap_list(r, std::move(params)), std::move(return_type));
+    .def(py::init([](const SourceRange& r,
+                     std::vector<Param> params,
+                     Expr *return_type) {
+      return Decl::create(r, wrap_list(r, std::move(params)), wrap_maybe(r, return_type));
     }));
 
 

@@ -565,8 +565,10 @@ void initJitScriptBindings(PyObject* module) {
         for (const auto &arg_type : typed_def.schema->arguments) {
           arg_type_args.push_back(Argument(typed_def.def.decl().params()[i++].ident().name(), arg_type.type, {}, {}, false));
         }
-        for (const auto &return_type : typed_def.schema->returns) {
-          return_type_args.push_back(Argument("", return_type.type, {}, {}, false));
+        if (typed_def.schema->returns) {
+          for (const auto &return_type : *typed_def.schema->returns) {
+            return_type_args.push_back(Argument("", return_type.type, {}, {}, false));
+          }
         }
         self.setSchema(FunctionSchema(self.name(), arg_type_args, return_type_args));
       }

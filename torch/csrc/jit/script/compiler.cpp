@@ -515,7 +515,8 @@ static Value* tryEmitBuiltin(
     for(int64_t i = 0; i < *value; ++i)
       n->addOutput();
   } else {
-    for(auto & ret : op->schema().returns) {
+    JIT_ASSERT(op->schema().returns);
+    for(auto & ret : *op->schema().returns) {
       n->addOutput()->setType(ret.type);
     }
   }
@@ -685,9 +686,9 @@ struct to_ir {
           results = createTupleUnpack(result).vec();
         }
       }
-      if (typed_def.schema && typed_def.schema->returns.size() != results.size()) {
+      if (typed_def.schema && typed_def.schema->returns && typed_def.schema->returns->size() != results.size()) {
         throw ErrorReport(def.range()) << "Number of type annotations for function"
-          << " return (" << typed_def.schema->returns.size() << ") does not match"
+          << " return (" << typed_def.schema->returns->size() << ") does not match"
           << " the number of returns from the function (" << results.size() << ")!";
       }
       auto range = return_stmt.range();
@@ -704,8 +705,8 @@ struct to_ir {
         }
         graph->registerOutput(r);
         TypePtr type = DynamicType::get();
-        if (typed_def.schema) {
-          type = typed_def.schema->returns.at(return_type_idx).type;
+        if (typed_def.schema && typed_def.schema->returns) {
+          type = typed_def.schema->returns->at(return_type_idx).type;
           if (!r->type()->isSubtypeOf(type)) {
             throw ErrorReport(return_stmt.range()) << "Return value at position "
               << return_type_idx << " was annotated as having type " << type->str()
@@ -1536,7 +1537,7 @@ void defineMethodsInModule(Module & m, const std::vector<TypedDef>& definitions,
   }
 }
 
-std::unordered_map<std::string, TypePtr> ident_to_type_lut() {
+const std::unordered_map<std::string, TypePtr> &ident_to_type_lut() {
   static std::unordered_map<std::string, TypePtr> map = {
     {"Tensor", DynamicType::get()},
     {"int", IntType::get()},
@@ -1547,7 +1548,7 @@ std::unordered_map<std::string, TypePtr> ident_to_type_lut() {
 
 TypePtr parseTypeFromExpr(Expr expr);
 
-std::unordered_map<std::string, std::function<TypePtr(Subscript)>> subscript_to_type_fns() {
+const std::unordered_map<std::string, std::function<TypePtr(Subscript)>> &subscript_to_type_fns() {
   static std::unordered_map<std::string, std::function<TypePtr(Subscript)>> map = {
     {"Tuple", [](Subscript subscript) -> TypePtr {
       std::vector<TypePtr> subscript_expr_types;
@@ -1577,7 +1578,7 @@ TypePtr parseTypeFromExpr(Expr expr) {
     if (!subscript_to_type_fns().count(value_name)) {
       throw ErrorReport(subscript.range()) << "Type " << value_name << " cannot be subscripted";
     }
-    return subscript_to_type_fns()[value_name](subscript);
+    return subscript_to_type_fns().at(value_name)(subscript);
   }
   throw ErrorReport(expr.range()) << "Expression of type " << kindToString(expr.kind())
                                   << " cannot be used in a type expression";
@@ -1596,7 +1597,8 @@ std::vector<Argument> parseArgsFromDef(Def &def, bool is_method=false) {
 }
 
 std::vector<Argument> parseReturnsFromDef(Def &def) {
-  auto parsed_type = parseTypeFromExpr(def.decl().return_type());
+  JIT_ASSERT(def.decl().return_type().present());
+  auto parsed_type = parseTypeFromExpr(def.decl().return_type().get());
   if (auto tuple_type = parsed_type->cast<TupleType>()) {
     // Flatten a single return type of type Tuple into its constituent types
     std::vector<Argument> retval;
@@ -1614,7 +1616,10 @@ std::vector<Argument> parseReturnsFromDef(Def &def) {
 FunctionSchema extractSchemaFromDef(Def &def, bool is_method=false) {
     auto name = def.name().name();
     std::vector<Argument> args = parseArgsFromDef(def, is_method);
-    std::vector<Argument> returns = parseReturnsFromDef(def);
+    at::optional<std::vector<Argument>> returns = at::nullopt;
+    if (def.decl().return_type().present()) {
+      returns = parseReturnsFromDef(def);
+    }
     return FunctionSchema(name, args, returns);
 }
 

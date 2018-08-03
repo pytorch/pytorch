@@ -309,12 +309,12 @@ struct Parser {
     auto param_types = parseList('(', ',', ')', &Parser::parseBareTypeAnnotation);
     TreeRef return_type;
     if (L.nextIf(TK_ARROW)) {
-      return_type = parseExp();
+      return_type = Maybe<Expr>::create(L.cur().range, parseExp());
     } else {
-      return_type = Var::create(L.cur().range, Ident::create(L.cur().range, "Tensor"));
+      return_type = Maybe<Expr>::create(L.cur().range);
     }
     L.expect(TK_NEWLINE);
-    return Decl::create(range, param_types, Expr(return_type));
+    return Decl::create(range, param_types, Maybe<Expr>(return_type));
   }
 
   // 'first' has already been parsed since expressions can exist
@@ -431,13 +431,13 @@ struct Parser {
     TreeRef return_type;
     if (L.nextIf(TK_ARROW)) {
       // Exactly one expression for return type annotation
-      return_type = parseExp();
+      return_type = Maybe<Expr>::create(L.cur().range, parseExp());
     } else {
       // Default to returning single tensor. TODO: better sentinel value?
-      return_type = Var::create(L.cur().range, Ident::create(L.cur().range, "Tensor"));
+      return_type = Maybe<Expr>::create(L.cur().range);
     }
     L.expect(':');
-    return Decl::create(paramlist.range(), List<Param>(paramlist), Expr(return_type));
+    return Decl::create(paramlist.range(), List<Param>(paramlist), Maybe<Expr>(return_type));
   }
 
   TreeRef parseFunction() {

@@ -146,7 +146,7 @@ def build_def(ctx, py_def):
     body = py_def.body
     r = ctx.make_range(py_def.lineno, py_def.col_offset,
                        py_def.col_offset + len("def"))
-    decl = Decl(build_param_list(ctx, py_def.args), Var(Ident(r, 'Tensor')))
+    decl = Decl(r, build_param_list(ctx, py_def.args), None)
     return Def(Ident(r, py_def.name),
                decl,
                build_stmts(ctx, body))

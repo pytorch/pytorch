@@ -11,7 +11,7 @@
       (param
         (ident z)
         (variable (ident Tensor))))
-    (variable (ident Tensor)))
+    (option))
   (list
     (assign
       (list (variable (ident q)))

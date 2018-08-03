@@ -39,7 +39,7 @@ struct FunctionSchema {
   FunctionSchema(
       std::string name,
       std::vector<Argument> arguments,
-      std::vector<Argument> returns,
+      at::optional<std::vector<Argument>> returns,
       bool is_vararg = false,
       bool is_varret = false)
       : name(std::move(name)),
@@ -62,7 +62,7 @@ struct FunctionSchema {
 
   const std::string name;
   const std::vector<Argument> arguments;
-  const std::vector<Argument> returns;
+  const at::optional<std::vector<Argument>> returns;
   // if true then this schema takes an arbitrary number of additional arguments
   // after the argument specified in arguments
   // currently this is used primarily to represent 'primtive' operators whose
@@ -100,15 +100,19 @@ inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema)
     out << schema.arguments[i];
   }
 
-  out << ") -> ";
-  if (schema.returns.size() == 1) {
-    out << schema.returns.at(0).type->str();
-  } else if (schema.returns.size() > 1) {
-    out << "(";
-    for (size_t i = 0; i < schema.returns.size(); ++i) {
-      if (i > 0) out << ", ";
-      out << schema.returns[i].type->str();
+  if (schema.returns) {
+    out << ") -> ";
+    if (schema.returns->size() == 1) {
+      out << schema.returns->at(0).type->str();
+    } else if (schema.returns->size() > 1) {
+      out << "(";
+      for (size_t i = 0; i < schema.returns->size(); ++i) {
+        if (i > 0) out << ", ";
+        out << (*schema.returns)[i].type->str();
+      }
+      out << ")";
     }
+  } else {
     out << ")";
   }
   return out;
