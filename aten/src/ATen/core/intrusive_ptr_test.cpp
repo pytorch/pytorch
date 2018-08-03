@@ -2988,3 +2988,87 @@ TEST(
     EXPECT_TRUE(wasDestructed);
   }
 }
+
+TEST(WeakIntrusivePtrTest, givenPtr_whenReleasedAndReclaimed_thenDoesntCrash) {
+  IntrusiveAndWeak<SomeClass> obj = make_weak_intrusive<SomeClass>();
+  SomeClass* ptr = obj.weak.release();
+  weak_intrusive_ptr<SomeClass> reclaimed =
+      weak_intrusive_ptr<SomeClass>::reclaim(ptr);
+}
+
+TEST(
+    WeakIntrusivePtrTest,
+    givenWeakOnlyPtr_whenReleasedAndReclaimed_thenDoesntCrash) {
+  weak_intrusive_ptr<SomeClass> obj = make_weak_only<SomeClass>();
+  SomeClass* ptr = obj.release();
+  weak_intrusive_ptr<SomeClass> reclaimed =
+      weak_intrusive_ptr<SomeClass>::reclaim(ptr);
+}
+
+TEST(
+    WeakIntrusivePtrTest,
+    givenPtr_whenReleasedAndReclaimed_thenIsDestructedAtEnd) {
+  bool resourcesReleased = false;
+  bool wasDestructed = false;
+  bool dummy = false;
+  {
+    IntrusiveAndWeak<DestructableMock> outer =
+        make_weak_intrusive<DestructableMock>(&dummy, &dummy);
+    {
+      IntrusiveAndWeak<DestructableMock> inner =
+          make_weak_intrusive<DestructableMock>(
+              &resourcesReleased, &wasDestructed);
+      EXPECT_FALSE(resourcesReleased);
+      EXPECT_FALSE(wasDestructed);
+      DestructableMock* ptr = inner.weak.release();
+      EXPECT_FALSE(resourcesReleased);
+      EXPECT_FALSE(wasDestructed);
+      outer.ptr = inner.ptr;
+      outer.weak = weak_intrusive_ptr<DestructableMock>::reclaim(ptr);
+    }
+    // inner is destructed
+    EXPECT_FALSE(resourcesReleased);
+    EXPECT_FALSE(wasDestructed);
+    outer.weak.reset();
+    EXPECT_FALSE(resourcesReleased);
+    EXPECT_FALSE(wasDestructed);
+  }
+  // outer is destructed
+  EXPECT_TRUE(resourcesReleased);
+  EXPECT_TRUE(wasDestructed);
+}
+
+TEST(
+    WeakIntrusivePtrTest,
+    givenWeakOnlyPtr_whenReleasedAndReclaimed_thenIsDestructedAtEnd) {
+  bool resourcesReleased = false;
+  bool wasDestructed = false;
+  {
+    weak_intrusive_ptr<DestructableMock> outer =
+        make_invalid_weak<DestructableMock>();
+    {
+      weak_intrusive_ptr<DestructableMock> inner =
+          make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
+      EXPECT_TRUE(resourcesReleased);
+      EXPECT_FALSE(wasDestructed);
+      DestructableMock* ptr = inner.release();
+      EXPECT_TRUE(resourcesReleased);
+      EXPECT_FALSE(wasDestructed);
+      outer = weak_intrusive_ptr<DestructableMock>::reclaim(ptr);
+    }
+    // inner is destructed
+    EXPECT_TRUE(resourcesReleased);
+    EXPECT_FALSE(wasDestructed);
+  }
+  // outer is destructed
+  EXPECT_TRUE(resourcesReleased);
+  EXPECT_TRUE(wasDestructed);
+}
+
+TEST(WeakIntrusivePtrTest, givenStackObject_whenReclaimed_thenCrashes) {
+  // This would cause very weird bugs on destruction.
+  // Better to crash early on creation.
+  SomeClass obj;
+  weak_intrusive_ptr<SomeClass> ptr = make_invalid_weak<SomeClass>();
+  EXPECT_ANY_THROW(ptr = weak_intrusive_ptr<SomeClass>::reclaim(&obj));
+}
