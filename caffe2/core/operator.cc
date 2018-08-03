@@ -527,11 +527,9 @@ TensorShape GetTensorShapeOfBlob(const Blob* b) {
     tp.set_data_type(TypeMetaToDataType(type_fun(b->GetRaw())));
   }
   if (tensor_info_fun) {
-    bool _shares_data;
     size_t _capacity;
     DeviceOption _device;
-    auto shape =
-        tensor_info_fun(b->GetRaw(), &_shares_data, &_capacity, &_device);
+    auto shape = tensor_info_fun(b->GetRaw(), &_capacity, &_device);
     for (auto d : shape) {
       tp.add_dims(d);
     }
@@ -615,12 +613,10 @@ std::map<string, std::pair<DeviceOption, DeviceOption>> ValidateTensorDevices(
   auto Check = [&](const Blob& blob, std::string blob_name) {
     TensorInfoCall tensor_info_fun = GetTensorInfoFunction(blob.meta().id());
     if (tensor_info_fun) {
-      bool _shares_data;
       size_t _capacity;
       DeviceOption blob_device;
       tensor_info_fun(
           const_cast<Blob&>(blob).GetRaw(),
-          &_shares_data,
           &_capacity,
           &blob_device);
 
