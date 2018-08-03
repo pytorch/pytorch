@@ -121,13 +121,23 @@ class IDEEPFallbackOp final : public IDEEPOperator {
           "output type who needs copying.");
       const auto& src = local_output_blobs_[i]->template Get<TensorCPU>();
 
+      auto src_dims = src.dims();
+      if (src.ndim() == 0) {
+        VLOG(1) << "Copy output: index " << i << " skipped.";
+        Blob* dst = OperatorBase::OutputBlob(i);
+        dst->Reset(new Tensor(CPU));
+        auto dtensor = dst->GetMutableTensor(CPU);
+        dtensor->Resize(src_dims);
+        dtensor->ShareData(src);
+        continue;
+      }
+
       if (src.template IsType<float>()) {
         Blob* dst = OperatorBase::OutputBlob(i);
         if (!dst->template IsType<itensor>()) {
           dst->Reset(new itensor());
         }
 
-        auto src_dims = src.dims();
         itensor::dims dst_dims (src_dims.begin(), src_dims.end());
         auto dtensor = dst->template GetMutable<itensor>();
         if (dtensor->get_dims() != dst_dims) {
@@ -136,7 +146,6 @@ class IDEEPFallbackOp final : public IDEEPOperator {
         dtensor->set_data_handle(const_cast<void*>(src.raw_data()));
       } else {
         VLOG(2) << "Output " << base_def_.output(i) << " as CPUTensor";
-        auto src_dims = src.dims();
         Blob* dst = OperatorBase::OutputBlob(i);
         dst->Reset(new Tensor(CPU));
         auto dtensor = dst->GetMutableTensor(CPU);
