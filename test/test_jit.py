@@ -2059,8 +2059,10 @@ a")
         # these otherwise the tests won't execute in regular Python mode.
         def _constructEmptyIntList():
             return []
+
         def _constructEmptyFloatList():
             return []
+
         def _constructEmptyTensorList():
             return []
 
