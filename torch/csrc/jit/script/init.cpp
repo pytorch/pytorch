@@ -11,6 +11,7 @@
 #include "torch/csrc/jit/constants.h"
 #include "torch/csrc/jit/passes/to_batch.h"
 #include "torch/csrc/jit/function_schema.h"
+#include "torch/csrc/jit/script/parser.h"
 
 #include <torch/csrc/api/include/torch/detail/ordered_dict.h>
 
@@ -558,25 +559,20 @@ void initJitScriptBindings(PyObject* module) {
     .def("graph_for", [](Method& self, py::args args) {
       return self.graph_for(evilDeprecatedBadCreateStackDoNotUse(args, self.graph()->inputs()));
     })
-    .def("set_arg_and_return_types", [](Method &self, TypedDef &typed_def, bool method) {
-      std::vector<Argument> arg_type_args, return_type_args;
-      size_t i = 0;
-      if (typed_def.schema) {
-        for (const auto &arg_type : typed_def.schema->arguments) {
-          arg_type_args.push_back(Argument(typed_def.def.decl().params()[i++].ident().name(), arg_type.type, {}, {}, false));
-        }
-        if (typed_def.schema->returns) {
-          for (const auto &return_type : *typed_def.schema->returns) {
-            return_type_args.push_back(Argument("", return_type.type, {}, {}, false));
-          }
-        }
-        self.setSchema(FunctionSchema(self.name(), arg_type_args, return_type_args));
-      }
+    .def("forward_schema", [](Method &self, Def &def, bool is_method) {
+      auto schema = extractSchemaFromDef(def, is_method);
+      self.setSchema(schema);
     })
     .def("pretty_print_schema", &Method::prettyPrintSchema);
 
-  m.def("_jit_script_compile", [](const TypedDef &typed_def, ResolutionCallback rcb) {
-    return compileFunction(typed_def, pythonResolver(rcb));
+  m.def("_jit_script_compile", [](const Def &def, ResolutionCallback rcb) {
+    return compileFunction(def, pythonResolver(rcb));
+  });
+
+  m.def("merge_decl_types_from_comment", [](Decl decl, const std::string& line) {
+    Parser p(line);
+    auto type_comment_decl = Decl(p.parseTypeComment(true));
+    return p.mergeTypesFromTypeComment(decl, type_comment_decl);
   });
 
 }

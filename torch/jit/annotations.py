@@ -143,6 +143,7 @@ def parse_type_line(type_line):
     return arg_types, ret_types
 
 _def_end_regex = re.compile(r'.*\)\s*:.*')
+_def_end_regex_py3 = re.compile(r'.*\)\s*->\s*.*:.*')
 
 
 def get_type_line(source):
@@ -153,7 +154,7 @@ def get_type_line(source):
         return line[:line.index('#') if '#' in line else None]
 
     i = 0
-    while not _def_end_regex.match(strip_comment(lines[i])):
+    while not _def_end_regex.match(strip_comment(lines[i])) and not _def_end_regex_py3.match(strip_comment(lines[i])):
         i += 1
     i += 1
 

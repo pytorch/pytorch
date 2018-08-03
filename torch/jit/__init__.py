@@ -357,15 +357,15 @@ def _fn_to_typed_def(fn, method=False):
 
 def script(fn, optimize=True, _frames_up=0):
     rcb = createResolutionCallback(_frames_up + 1)
-    typed_def = _fn_to_typed_def(fn)
-    graph = _jit_script_compile(typed_def, rcb)
+    ast = get_jit_ast(fn)
+    graph = _jit_script_compile(ast, rcb)
     mod = ScriptModule()
     mod._create_method_from_graph('forward', graph)
     # TODO: refactor everything so we're not 1) creating a ScriptModule
     # 2) Throwing everything away except for the graph 3) Creating a new
     # ScriptModule and dumping that graph in 4) Re-populating the schema
     # because it was lost doing the previous
-    mod.__getattr__('forward').set_arg_and_return_types(typed_def, False)
+    mod.__getattr__('forward').forward_schema(ast, False)
     # Forward docstrings
     mod.__doc__ = fn.__doc__
     return mod

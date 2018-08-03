@@ -1584,7 +1584,7 @@ TypePtr parseTypeFromExpr(Expr expr) {
                                   << " cannot be used in a type expression";
 }
 
-std::vector<Argument> parseArgsFromDecl(Decl decl, bool is_method=false) {
+std::vector<Argument> parseArgsFromDecl(Decl decl, bool is_method) {
   std::vector<Argument> retval;
   size_t i = is_method ? 1 : 0;
   for (; i < decl.params().size(); ++i) {
@@ -1613,7 +1613,7 @@ std::vector<Argument> parseReturnsFromDecl(Decl decl) {
   }
 }
 
-FunctionSchema extractSchemaFromDef(Def &def, bool is_method=false) {
+FunctionSchema extractSchemaFromDef(Def &def, bool is_method) {
     auto name = def.name().name();
     std::vector<Argument> args = parseArgsFromDecl(def.decl(), is_method);
     at::optional<std::vector<Argument>> returns = at::nullopt;
@@ -1636,10 +1636,11 @@ void defineMethodsInModule(Module & m, const std::string& source, const Resolver
   defineMethodsInModule(m, definitions, resolvers, self);
 }
 
-std::shared_ptr<Graph> compileFunction(TypedDef typed_def, const Resolver& resolver) {
+std::shared_ptr<Graph> compileFunction(Def def, const Resolver& resolver) {
   Module m;
-  defineMethodsInModule(m, {typed_def}, {resolver}, nullptr);
-  return m.get_method(typed_def.def.name().name()).graph();
+  auto schema = extractSchemaFromDef(def);
+  defineMethodsInModule(m, {TypedDef(def, schema)}, {resolver}, nullptr);
+  return m.get_method(def.name().name()).graph();
 }
 
 std::vector<std::shared_ptr<SugaredValue>> SimpleValue::asTuple(SourceRange loc, Method& m) {

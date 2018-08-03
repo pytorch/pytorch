@@ -129,7 +129,8 @@ def get_jit_ast(fn):
     py_ast = ast.parse(source)
     if len(py_ast.body) != 1 or not isinstance(py_ast.body[0], ast.FunctionDef):
         raise RuntimeError("expected a single top-level function")
-    return build_def(SourceRangeFactory(source), py_ast.body[0])
+    type_line = torch.jit.annotations.get_type_line(source)
+    return build_def(SourceRangeFactory(source), py_ast.body[0], type_line)
 
 
 class Builder(object):
@@ -140,7 +141,7 @@ class Builder(object):
         return method(ctx, node)
 
 
-def build_def(ctx, py_def):
+def build_def(ctx, py_def, type_line=None):
     returns = []
     ret_body = []
     body = py_def.body
@@ -151,6 +152,8 @@ def build_def(ctx, py_def):
     if getattr(py_def, 'returns') is not None:
         return_type = build_expr(ctx, py_def.returns)
     decl = Decl(r, param_list, return_type)
+    if type_line is not None:
+        decl = torch._C.merge_decl_types_from_comment(decl, type_line)
     return Def(Ident(r, py_def.name),
                decl,
                build_stmts(ctx, body))

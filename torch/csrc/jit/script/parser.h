@@ -303,8 +303,12 @@ struct Parser {
     return Param::create(type.range(), Ident::create(type.range(), ""), type);
   }
 
-  TreeRef parseTypeComment() {
+  TreeRef parseTypeComment(bool expect_type_token=false) {
+    // HACK. Refactor this to not have this boolean flag.
     auto range = L.cur().range;
+    if (expect_type_token) {
+      L.expect(TK_TYPE_COMMENT);
+    }
     auto param_types = parseList('(', ',', ')', &Parser::parseBareTypeAnnotation);
     TreeRef return_type;
     if (L.nextIf(TK_ARROW)) {
@@ -312,7 +316,8 @@ struct Parser {
     } else {
       return_type = Maybe<Expr>::create(L.cur().range);
     }
-    L.expect(TK_NEWLINE);
+    if (!expect_type_token)
+      L.expect(TK_NEWLINE);
     return Decl::create(range, param_types, Maybe<Expr>(return_type));
   }
 
@@ -426,7 +431,12 @@ struct Parser {
   }
 
   Decl mergeTypesFromTypeComment(Decl decl, Decl type_annotation_decl) {
-    if (decl.params().size() != type_annotation_decl.params().size()) {
+    // HACK this whole method is one big hack right now.
+    bool is_method_guess = false;
+    if (decl.params().size() == type_annotation_decl.params().size() + 1) {
+      is_method_guess = true;
+    }
+    if (!is_method_guess && decl.params().size() != type_annotation_decl.params().size()) {
       throw ErrorReport(type_annotation_decl.range()) << "Number of type annotations ("
         << type_annotation_decl.params().size() << ") did not match the number of "
         << "function parameters (" << decl.params().size() << ")";
@@ -436,8 +446,13 @@ struct Parser {
     // Merge signature idents and ranges with annotation types
 
     std::vector<Param> new_params;
-    for (size_t i=0; i < decl.params().size(); ++i) {
-      new_params.push_back(Param::create(old[i].range(), old[i].ident(), _new[i].type()));
+    size_t i = is_method_guess ? 1 : 0;
+    size_t j = 0;
+    if (is_method_guess) {
+      new_params.push_back(old[0]);
+    }
+    for (; i < decl.params().size(); ++i, ++j) {
+      new_params.push_back(Param::create(old[i].range(), old[i].ident(), _new[j].type()));
     }
     return Decl::create(decl.range(), List<Param>::create(decl.range(), new_params), type_annotation_decl.return_type());
   }
