@@ -1977,17 +1977,12 @@ a")
         self.checkScript(func4, (a, b), optimize=True)
 
     def test_literal(self):
-        def func(a, b):
-            c = [a, b]
-            d, e = c
-            return d + e
-
-        def func2(a, b):
+        def func1(a, b):
             c = a, b
             d, e = c
             return d + e
 
-        def func3(a, b):
+        def func2(a, b):
             c = a, (a, b)
             d, e = c
             f, g = e
@@ -1995,9 +1990,8 @@ a")
 
         a = torch.rand(1, requires_grad=True)
         b = torch.rand(1, requires_grad=True)
-        self.checkScript(func, (a, b), optimize=True)
+        self.checkScript(func1, (a, b), optimize=True)
         self.checkScript(func2, (a, b), optimize=True)
-        self.checkScript(func3, (a, b), optimize=True)
 
     def test_expand(self):
         @torch.jit.script
@@ -2049,7 +2043,7 @@ a")
 
         @torch.jit.script
         def foo2(x):
-            return torch.cat([], dim=1)
+            return torch.cat(_construct_empty_tensor_list(), dim=1)
 
         @torch.jit.script
         def foo3(x):
@@ -2059,6 +2053,71 @@ a")
             canonical(foo.graph) +
             canonical(foo2.graph) +
             canonical(foo3.graph))
+
+    def test_list_literal(self):
+        # Python equivalents for the empty list construction builtins. We need
+        # these otherwise the tests won't execute in regular Python mode.
+        def _construct_empty_int_list():
+            return []
+
+        def _construct_empty_float_list():
+            return []
+
+        def _construct_empty_tensor_list():
+            return []
+
+        def reassign():
+            x = [1]
+            if True:
+                x = [2, 3]
+            return
+        self.checkScript(reassign, (), optimize=True)
+
+        def reassign_arity_change():
+            x = [1]
+            if True:
+                x = [1, 2, 3]
+            return
+        self.checkScript(reassign_arity_change, (), optimize=True)
+
+        def reassign_from_empty_literal():
+            x = []
+            if True:
+                x = [1, 2, 3]
+            return
+        with self.assertRaisesRegex(RuntimeError, "Empty list literals not allowed"):
+            self.checkScript(reassign_from_empty_literal, (), optimize=True)
+
+        def reassign_from_empty_builtin():
+            x = _construct_empty_int_list()
+            if True:
+                x = [1, 2, 3]
+            y = _construct_empty_float_list()
+            if True:
+                y = [1.0, 2.0, 3.0]
+            z = _construct_empty_tensor_list()
+            if True:
+                z = [torch.randn([1])]
+            return
+        self.checkScript(reassign_from_empty_builtin, (), optimize=True)
+
+        def reassign_bad_type():
+            x = [1]
+            if True:
+                x = [1.0]
+            return
+        with self.assertRaisesRegex(RuntimeError, "previously has type"):
+            self.checkScript(reassign_bad_type, (), optimize=True)
+
+        def reassign_nested():
+            x = _construct_empty_int_list()
+            if True:
+                x = [1, 2, 3]
+                if True:
+                    x = [1.0]
+            return
+        with self.assertRaisesRegex(RuntimeError, "previously has type"):
+            self.checkScript(reassign_nested, (), optimize=True)
 
     def test_func_call(self):
         script = '''
@@ -4044,12 +4103,12 @@ def func(t):
             def f4(a):
                 torch.cat(a)
 
-        with self.assertRaisesRegex(RuntimeError, 'argument \'tensors\' but found \\(\\(Tensor\\)\\)'):
+        with self.assertRaisesRegex(RuntimeError, 'argument \'tensors\' but found Tensor[][]'):
             @torch.jit.script
             def f5(a):
                 torch.cat([[a]])
 
-        with self.assertRaisesRegex(RuntimeError, 'expected a value of type int\\[\\] for argument \'size\''):
+        with self.assertRaisesRegex(RuntimeError, 'Lists must contain only a single type'):
             @torch.jit.script
             def f6(a):
                 a.expand(size=[3, [4]])
