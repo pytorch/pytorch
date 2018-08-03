@@ -17,18 +17,17 @@
 //    weakcount == number of weak references to the object,
 //      plus one more if refcount > 0
 //
-//  - StorageImpl stays live as long as there are any strong
+//  - the underlying object stays live as long as there are any strong
 //    or weak pointers to it (weakcount > 0, since strong
 //    references count as a +1 to weakcount)
 //
-//  - finalizers are called and data_ptr is deallocated when refcount == 0
+//  - underlying_object::release_resources() is called when refcount == 0
+//
+//  - the underlying object is destructed when weakcount == 0 (which implies
+//  refcount == 0)
 //
 //  - Once refcount == 0, it can never again be > 0 (the transition
 //    from > 0 to == 0 is monotonic)
-//
-//  - When you access StorageImpl via a weak pointer, you must
-//    atomically increment the use count, if it is greater than 0.
-//    If it is not, you must report that the storage is dead.
 //
 
 struct THFinalizer {
