@@ -2298,7 +2298,7 @@ a")
         x = torch.rand(10, dtype=torch.float, requires_grad=True)
         self.assertEqual(func(x), torch.cat((x, x), dim=0))
 
-        with self.assertRaisesRegex(RuntimeError, "expected at most"):
+        with self.assertRaisesRegex(RuntimeError, "expected a value of type int"):
             @torch.jit.script
             def func(x):
                 return torch.cat((x, x), x, dim=0)
@@ -4606,7 +4606,7 @@ def func(t):
             def f0(a):
                 torch.sum(a, a, a, a)
 
-        with self.assertRaisesRegex(RuntimeError, 'unknown keyword argument'):
+        with self.assertRaisesRegex(RuntimeError, 'argument self not provided'):
             @torch.jit.script
             def f1(a):
                 torch.sum(foo=4)

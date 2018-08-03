@@ -484,66 +484,73 @@ Value* tryMatchArgument(
   return value;
 }
 
+at::optional<size_t> findInputWithName(const std::string& name, at::ArrayRef<NamedValue> kwargs) {
+  for(size_t i = 0; i < kwargs.size(); ++i) {
+    if(kwargs[i].name() == name)
+      return i;
+  }
+  return at::nullopt;
+}
+
 at::optional<std::vector<Value*>> tryMatchSchema(
   const FunctionSchema& schema,
   const SourceRange& loc,
   Graph& graph,
-  at::ArrayRef<NamedValue> inputs,
-  at::ArrayRef<NamedValue> attributes,
+  at::ArrayRef<NamedValue> args,
+  at::ArrayRef<NamedValue> kwargs,
   std::ostream& failure_messages) {
     auto err = [&]() -> std::ostream& {
       failure_messages << "\nfor operator " << schema << ":\n";
       return failure_messages;
     };
 
-    std::vector<at::optional<NamedValue>> positional_inputs(schema.arguments.size(), at::nullopt);
+    std::vector<Value*> positional_inputs;
+    std::vector<bool> used_kwarg(kwargs.size(), false);
 
-    size_t total_inputs = attributes.size() + inputs.size();
-    if(total_inputs > schema.arguments.size()) {
-      err() << "expected at most " << schema.arguments.size() << " arguments "
-      << "but found " << total_inputs << "\n" << loc << "\n";
-      return at::nullopt;
-    }
-    // fill in positional arguments
-    for(size_t i = 0; i < inputs.size(); ++i) {
-      positional_inputs[i] = inputs[i];
-    }
-    // fill in named arguments
-    for(const NamedValue& nv : attributes) {
-      auto idx = schema.argumentIndexWithName(nv.name());
-      if(!idx) {
-        err() << "unknown keyword argument '" << nv.name() << "'\n" << nv.locOr(loc);
-        return at::nullopt;
-      }
-      if(positional_inputs[*idx]) {
-        err() << "argument " <<  nv.name() << " specified twice \n" << nv.locOr(loc);
-        return at::nullopt;
-      }
-      positional_inputs[*idx] = nv;
-    }
-    // fill in default values
-    for(size_t i = 0; i < positional_inputs.size(); ++i) {
-      if(positional_inputs[i])
-        continue;
-      auto default_value = schema.arguments[i].default_value;
-      if(!default_value) {
+    for(size_t i = 0; i < schema.arguments.size(); ++i) {
+      const auto& arg = schema.arguments[i];
+      at::optional<NamedValue> v;
+      if(i < args.size()) {
+        v = args[i];
+      } else if(auto idx = findInputWithName(arg.name, kwargs))  {
+        const NamedValue& nv = kwargs[*idx];
+        if(used_kwarg[*idx]) {
+          err() << "argument " << nv.name() << " specified twice \n" << nv.locOr(loc);
+          return at::nullopt;
+        }
+        used_kwarg[*idx] = true;
+        v = nv;
+      } else if(arg.default_value) {
+        v = NamedValue(*arg.default_value);
+      } else {
         err() << "argument " << schema.arguments[i].name << " not provided.\n" << loc;
         return at::nullopt;
       }
-      positional_inputs[i] = NamedValue(*default_value);
-    }
-
-    // check input types
-    std::vector<Value*> matched_inputs;
-    for(size_t i = 0; i < schema.arguments.size(); ++i) {
-      Value* value = tryMatchArgument(
-          schema.arguments[i], graph, loc, *positional_inputs[i], err);
-      if(!value)
+      Value * positional = tryMatchArgument(arg, graph, loc, *v, err);
+      if(!positional)
         return at::nullopt;
-      matched_inputs.push_back(value);
+      positional_inputs.push_back(positional);
     }
 
-    return matched_inputs;
+    // check for unused positional arguments
+    if(args.size() > schema.arguments.size()) {
+      err() << "expected at most " << schema.arguments.size() << " arguments "
+      << "but found " << args.size() << " positional arguments.\n" << loc << "\n";
+      return at::nullopt;
+    }
+    // check for unused kwargs
+    for(size_t i = 0; i < kwargs.size(); ++i) {
+      const auto& nv = kwargs[i];
+      if (!used_kwarg[i]) {
+        if(!schema.argumentIndexWithName(nv.name())) {
+          err() << "keyword argument " << nv.name() << " unknown\n";
+        } else {
+          err() << "keyword argument " << nv.name() << " specified twice\n";
+        }
+        return at::nullopt;
+      }
+    }
+    return positional_inputs;
 }
 
 
