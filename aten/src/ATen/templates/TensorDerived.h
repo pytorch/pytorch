@@ -10,9 +10,9 @@ $th_headers
 
 namespace at {
 
-struct ${Tensor} final : public TensorImpl {
-public:
-  ${Tensor}(THTensor * tensor);
-};
+// struct ${Tensor} final : public TensorImpl {
+// public:
+//   ${Tensor}(THTensor * tensor);
+// };
 
 } // namespace at
