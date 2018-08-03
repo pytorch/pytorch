@@ -1,8 +1,8 @@
 #pragma once
 
-#include "ATen/ArrayRef.h"
-#include "ATen/ATenGeneral.h"
-#include "ATen/Half.h"
+#include "ATen/core/ATenGeneral.h"
+#include "ATen/core/ArrayRef.h"
+#include "ATen/core/Half.h"
 
 #include <cstdint>
 #include <iostream>

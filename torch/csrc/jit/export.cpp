@@ -7,7 +7,7 @@
 #include <torch/csrc/jit/assertions.h>
 
 #include <ATen/ATen.h>
-#include <ATen/optional.h>
+#include <ATen/core/optional.h>
 
 #include <cstring>
 #include <fstream>

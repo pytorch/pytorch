@@ -21,7 +21,7 @@
 #include "torch/csrc/WindowsTorchApiMacro.h"
 
 #include <ATen/ATen.h>
-#include "ATen/ArrayRef.h"
+#include "ATen/core/ArrayRef.h"
 
 #include <algorithm>
 #include <atomic>

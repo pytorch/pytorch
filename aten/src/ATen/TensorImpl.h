@@ -5,7 +5,7 @@
 
 #include "ATen/Retainable.h"
 #include "ATen/ScalarType.h"
-#include "ATen/optional.h"
+#include "ATen/core/optional.h"
 
 struct THTensor;
 
