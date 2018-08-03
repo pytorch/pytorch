@@ -339,11 +339,11 @@ private:
   ValueTable value_table;
 };
 
-std::shared_ptr<SugaredValue> packOutputs(Graph& g, at::ArrayRef<Value*> values) {
+Value* packOutputs(Graph& g, at::ArrayRef<Value*> values) {
   if(values.size() == 1) {
-    return std::make_shared<SimpleValue>(values[0]);
+    return values[0];
   }
-  return std::make_shared<SimpleValue>(g.insertNode(g.createTuple(values))->output());
+  return g.insertNode(g.createTuple(values))->output();
 }
 
 Value* createNumber(Graph& g, const SourceRange& loc, const at::Tensor& val) {
@@ -487,23 +487,21 @@ at::optional<std::vector<Value*>> tryMatchSchema(
 }
 
 
-static std::shared_ptr<SugaredValue> tryEmitBuiltin(
+static Value* tryEmitBuiltin(
   const std::shared_ptr<Operator>& op,
   std::stringstream& failure_messages,
   const SourceRange& loc,
-  Method& method,
-  const std::string & name,
+  Graph& graph,
+  Symbol name,
   at::ArrayRef<NamedValue> inputs,
   at::ArrayRef<NamedValue> attributes) {
 
-  auto graph = method.graph();
-  auto matched_inputs = tryMatchSchema(op->schema(), loc, *graph, inputs, attributes, failure_messages);
+  auto matched_inputs = tryMatchSchema(op->schema(), loc, graph, inputs, attributes, failure_messages);
   if(!matched_inputs)
     return nullptr;
   // we successfully matched this schema, construct the node
 
-  NodeKind kind(Symbol::aten(name));
-  auto n = graph->insertNode(graph->create(kind, *matched_inputs, 0))
+  auto n = graph.insertNode(graph.create(name, *matched_inputs, 0))
                 ->setSourceLocation(std::make_shared<SourceRange>(loc));
 
   // special case for chunk when the chunks=<const> is known
@@ -526,7 +524,7 @@ static std::shared_ptr<SugaredValue> tryEmitBuiltin(
   // otherwise schema and dispatch are not in sync
   getOperation(n);
 
-  return packOutputs(*graph, n->outputs());
+  return packOutputs(graph, n->outputs());
 }
 
 static std::string prefixLine(const std::string& str, std::string prefix) {
@@ -541,21 +539,21 @@ static std::string prefixLine(const std::string& str, std::string prefix) {
   return ss.str();
 }
 
-std::shared_ptr<SugaredValue> emitBuiltinCall(
+Value* emitBuiltinCall(
   const SourceRange& loc,
-  Method& method,
-  const std::string & name,
+  Graph& graph,
+  Symbol name,
   at::ArrayRef<NamedValue> inputs,
   at::ArrayRef<NamedValue> attributes,
   // if true, emitBuiltinCall will throw an exception if this builtin does not exist,
   // otherwise it will return nullptr if the builtin is not found.
   bool required) {
 
-  const auto& variants = getAllOperatorsFor(Symbol::aten(name));
+  const auto& variants = getAllOperatorsFor(name);
   std::stringstream failure_messages;
   for (const std::shared_ptr<Operator>& op : variants) {
     if (auto result = tryEmitBuiltin(
-            op, failure_messages, loc, method, name, inputs, attributes)) {
+            op, failure_messages, loc, graph, name, inputs, attributes)) {
       return result;
     }
   }
@@ -609,7 +607,7 @@ std::shared_ptr<SugaredValue> BuiltinFunction::call(
   if (value)
     inputs.push_back(*value);
   inputs.insert(inputs.end(), inputs_.begin(), inputs_.end());
-  return emitBuiltinCall(loc, m, name, inputs, attributes, true);
+  return std::make_shared<SimpleValue>(emitBuiltinCall(loc, *m.graph(), Symbol::aten(name), inputs, attributes, true));
 }
 
 struct to_ir {
@@ -1248,10 +1246,10 @@ private:
   std::shared_ptr<SugaredValue> emitApplyIdent(Ident ident, const std::vector<NamedValue>& inputs, at::ArrayRef<NamedValue> attributes, size_t n_binders) {
     auto it = function_table.find(ident.name());
     if (it != function_table.end()) {
-      return packOutputs(*graph, method.emit_call_to(ident.range(), it->second, inputs, attributes));
+      return std::make_shared<SimpleValue>(packOutputs(*graph, method.emit_call_to(ident.range(), it->second, inputs, attributes)));
     }
-    if(auto result = emitBuiltinCall(ident.range(), method, ident.name(), inputs, attributes, false)) {
-      return result;
+    if(auto result = emitBuiltinCall(ident.range(), *method.graph(), Symbol::aten(ident.name()), inputs, attributes, false)) {
+      return std::make_shared<SimpleValue>(result);
     }
     // it wasn't known built in, so treat it like standard apply
     return emitApplyExpr(Var::create(ident.range(), ident), inputs, attributes, n_binders);
@@ -1332,12 +1330,11 @@ private:
         auto named_values = getNamedValues(inputs, /*maybe_unpack=*/false, identity);
         return emitBuiltinCall(
                    tree->range(),
-                   method,
-                   kind.toUnqualString(),
+                   *method.graph(),
+                   kind,
                    named_values,
                    {},
-                   /*required=*/true)
-            ->asValue(tree->range(), method);
+                   /*required=*/true);
       }
       case TK_STARRED: {
         throw ErrorReport(tree) << "Unexpected starred expansion. File a bug report.";
@@ -1432,7 +1429,7 @@ private:
 
     // Build the input arguments
     std::vector<NamedValue> args = {sliceable};
-    if (sliceable.value->type()->kind() == TypeKind::DynamicType) {
+    if (sliceable.value(*graph)->type()->kind() == TypeKind::DynamicType) {
       // If the sliceable object is a tensor, specify a default dimension
       args.emplace_back(loc, "dim", graph->insertConstant(0, loc));
     }
@@ -1445,9 +1442,8 @@ private:
       args.emplace_back(loc, "end", emitExpr(Expr(slice.end().get()), identity));
     }
 
-    return emitBuiltinCall(loc, method, "slice", args, {step}, true)
-        ->asValue(loc, method);
-  }
+    return emitBuiltinCall(loc, *graph, aten::slice, args, {step}, true);
+}
 
   // Desugars gather syntactic sugar foo[i]
   Value* emitGather(
@@ -1460,18 +1456,16 @@ private:
                                         identity);
     NamedValue gatherable = input_values[0];
     NamedValue idx = input_values[1];
-    if (gatherable.value->type()->kind() == TypeKind::ListType) {
+    if (gatherable.value(*graph)->type()->kind() == TypeKind::ListType) {
       // if it's a list, emit a regular index selection op
       return emitBuiltinCall(
-                 loc, method, "select", {gatherable, idx}, {}, true)
-          ->asValue(loc, method);
+                 loc, *graph, aten::select, {gatherable, idx}, {}, true);
 
     } else {
       // if it's a single tensor, map tensor[idx] -> tensor.select(0, idx)
       NamedValue dim = NamedValue(loc, "dim", graph->insertConstant(0, loc));
       return emitBuiltinCall(
-                 loc, method, "select", {gatherable, dim, idx}, {}, true)
-          ->asValue(loc, method);
+                 loc, *graph, aten::select, {gatherable, dim, idx}, {}, true);
     }
   }
 };

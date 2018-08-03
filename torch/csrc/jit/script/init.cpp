@@ -140,7 +140,7 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
     std::vector<Value*> outputs;
     for(size_t i = 0; i < schema.returns.size(); ++i)
       outputs.push_back(new_node->addOutput());
-    return packOutputs(*m.graph(), outputs);
+    return std::make_shared<SimpleValue>(packOutputs(*m.graph(), outputs));
   }
 
   virtual std::shared_ptr<SugaredValue> attr(SourceRange loc, Method & m, const std::string& field) override;
@@ -233,7 +233,7 @@ struct MethodValue : public SugaredValue {
     return "method";
   }
   virtual std::shared_ptr<SugaredValue> call(SourceRange loc, Method & caller, at::ArrayRef<NamedValue> inputs, at::ArrayRef<NamedValue> attributes, size_t n_binders) override {
-    return packOutputs(*caller.graph(), caller.emit_call_to(loc, method, inputs, attributes));
+    return std::make_shared<SimpleValue>(packOutputs(*caller.graph(), caller.emit_call_to(loc, method, inputs, attributes)));
   }
 private:
   std::shared_ptr<Module> module;
