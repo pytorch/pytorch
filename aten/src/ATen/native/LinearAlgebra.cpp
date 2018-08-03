@@ -321,12 +321,10 @@ Tensor matrix_power(const Tensor& a, int64_t n) {
            "of floating types with dim at least 2");
   if (n == 0) {
     Tensor identities = at::eye(a.size(-2), a.options());
-    std::vector<int64_t> output_size (2, 1);
     if (a.dim() > 2) {
-      output_size.insert(output_size.begin(), a.sizes().begin(), a.sizes().end() - 2);
-      identities = identities.repeat(output_size);
+      return a.clone().copy_(identities.expand_as(a));
     }
-    return identities;
+    return a.clone().copy_(identities);
   } else if (n < 0) {
     AT_CHECK(a.dim() == 2, "Negative powers for batch matrices are currently not supported")
     Tensor a_ = at::inverse(a);

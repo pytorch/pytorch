@@ -2910,6 +2910,7 @@ method_tests = [
     ('matrix_power', (S, S), [2], "n=2"),
     ('matrix_power', (S, S, S), [3], "n=3"),
     ('matrix_power', (S, S, S), [1], "n=1"),
+    ('matrix_power', (S, S, S), [0], "n=0"),
     ('matrix_power', random_fullrank_matrix_distinct_singular_value(S), [-1], "n=-1"),
     ('matrix_power', random_fullrank_matrix_distinct_singular_value(S), [-3], "n=-3"),
     ('addcmul', (S, S), ((S, S), (S, S))),
