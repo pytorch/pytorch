@@ -180,7 +180,7 @@ if(${check_name}.type().is_sparse()) {
 }""")
 
 BUFFER_DEFINITION = CodeTemplate("""\
-auto ${name}_ = new ${Tensor}(${THTensor}_new());
+auto ${name}_ = new TensorImpl(Backend::${Backend}, ScalarType::${ScalarName}, ${THTensor}_new());
 auto ${name} = Tensor(${name}_, false);""")
 
 CONDITIONAL_INITIALIZER = CodeTemplate("""\

@@ -64,6 +64,14 @@ TensorImpl::TensorImpl(Backend backend, ScalarType scalar_type) {
   tensor = new THTensor(storage_impl);
 }
 
+TensorImpl::TensorImpl(
+    Backend backend,
+    ScalarType scalar_type,
+    THTensor* tensor_) {
+  type_ = &globalContext().getType(backend, scalar_type);
+  tensor = tensor_;
+}
+
 TensorImpl::~TensorImpl() {
   if (tensor) tensor->release();
 }
