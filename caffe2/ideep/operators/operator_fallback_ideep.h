@@ -126,7 +126,7 @@ class IDEEPFallbackOp final : public IDEEPOperator {
         VLOG(1) << "Copy output: index " << i << " skipped.";
         Blob* dst = OperatorBase::OutputBlob(i);
         dst->Reset(new Tensor(CPU));
-        auto dtensor = dst->template GetMutableTensor(CPU);
+        auto dtensor = dst->GetMutableTensor(CPU);
         dtensor->Resize(src_dims);
         dtensor->ShareData(src);
         continue;
