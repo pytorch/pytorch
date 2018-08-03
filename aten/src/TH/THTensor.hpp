@@ -28,7 +28,7 @@ struct THTensor
 
     std::atomic<int> refcount_;
 
-    // Note: storage->size may be greater than the recorded size
+    // Note: storage->size() may be greater than the recorded size
     // of a tensor
     THStorage *storage_;
     ptrdiff_t storage_offset_;
@@ -57,7 +57,7 @@ struct THTensor
     }
 
     at::ScalarType scalar_type() const {
-      return storage_->scalar_type;
+      return storage_->scalar_type();
     }
 
     ptrdiff_t storage_offset() const {

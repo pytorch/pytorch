@@ -86,9 +86,16 @@ TEST(BlobTest, Blob) {
   int* int_unused CAFFE2_UNUSED = blob.GetMutable<int>();
   EXPECT_TRUE(blob.IsType<int>());
   EXPECT_FALSE(blob.IsType<BlobTestFoo>());
+  EXPECT_FALSE(blob.IsType<Tensor>(CPU));
 
   BlobTestFoo* foo_unused CAFFE2_UNUSED = blob.GetMutable<BlobTestFoo>();
   EXPECT_TRUE(blob.IsType<BlobTestFoo>());
+  EXPECT_FALSE(blob.IsType<int>());
+  EXPECT_FALSE(blob.IsType<Tensor>(CPU));
+
+  Tensor* tensor_unused CAFFE2_UNUSED = blob.GetMutableTensor(CPU);
+  EXPECT_TRUE(blob.IsType<Tensor>(CPU));
+  EXPECT_FALSE(blob.IsType<BlobTestFoo>());
   EXPECT_FALSE(blob.IsType<int>());
 }
 
