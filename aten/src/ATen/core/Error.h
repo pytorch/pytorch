@@ -99,7 +99,8 @@ class AT_CORE_API Error : public std::exception {
       const int line,
       const char* condition,
       const std::string& msg,
-      const void* caller);
+      const std::string& backtrace,
+      const void* caller = nullptr);
 
   void AppendMessage(const std::string& msg);
 
