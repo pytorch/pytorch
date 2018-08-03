@@ -3,6 +3,7 @@
 #include <ATen/core/CoreAPI.h>
 #include <ATen/core/optional.h>
 
+#include <vector>
 #include <cstddef>
 #include <exception>
 #include <ostream>
@@ -16,6 +17,9 @@
 namespace at {
 
 namespace detail {
+
+// Obtains the base name from a full path.
+std::string StripBasename(const std::string& full_path);
 
 inline std::ostream& _str(std::ostream& ss) {
   return ss;
@@ -68,20 +72,50 @@ std::ostream& operator<<(std::ostream& out, const SourceLocation& loc);
 /// NB: at::Error is handled specially by the default torch to suppress the
 /// backtrace, see torch/csrc/Exceptions.h
 class AT_CORE_API Error : public std::exception {
-  std::string what_without_backtrace_;
-  std::string what_;
+  std::vector<std::string> msg_stack_;
+  std::string backtrace_;
+
+  // These two are derived fields from msg_stack_ and backtrace_, but we need
+  // fields for the strings so that we can return a const char* (as the
+  // signature of std::exception requires).
+  std::string msg_;
+  std::string msg_without_backtrace_;
+
+  // This is a little debugging trick: you can stash a relevant pointer
+  // in caller, and then when you catch the exception, you can compare
+  // against pointers you have on hand to get more information about
+  // where the exception came from.  In Caffe2, this is used to figure
+  // out which operator raised an exception.
+  const void* caller_;
 
  public:
-  Error(SourceLocation source_location, std::string err);
+  Error(const std::string& msg, const std::string& backtrace, const void* caller=nullptr);
+  Error(SourceLocation source_location, const std::string& msg);
+  Error(const char* file, const int line, const char* condition, const std::string& msg, const std::string& backtrace, const void* caller = nullptr);
+
+  void AppendMessage(const std::string& msg);
+
+  // Compute the full message from msg_ and msg_without_backtrace_
+  // TODO: Maybe this should be private
+  std::string msg() const;
+  std::string msg_without_backtrace() const;
+
+  const std::vector<std::string>& msg_stack() const {
+    return msg_stack_;
+  }
 
   /// Returns the complete error message, including the source location.
   const char* what() const noexcept override {
-    return what_.c_str();
+    return msg_.c_str();
+  }
+
+  inline const void* caller() const noexcept {
+    return caller_;
   }
 
   /// Returns only the error message string, without source location.
   const char* what_without_backtrace() const noexcept {
-    return what_without_backtrace_.c_str();
+    return msg_without_backtrace_.c_str();
   }
 };
 
