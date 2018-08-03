@@ -515,6 +515,10 @@
 - func: ctc_loss(Tensor log_probs, Tensor targets, IntList input_lengths, IntList target_lengths, int64_t blank=0, int64_t reduction=Reduction::ElementwiseMean) -> Tensor
   variants: function
 
+# convenience function that converts to intlists for you
+- func: ctc_loss(Tensor log_probs, Tensor targets, Tensor input_lengths, Tensor target_lengths, int64_t blank=0, int64_t reduction=Reduction::ElementwiseMean) -> Tensor
+  variants: function
+
 - func: _ctc_loss(Tensor log_probs, Tensor targets, IntList input_lengths, IntList target_lengths, int64_t blank=0) -> (Tensor, Tensor)
   variants: function
   dispatch:
