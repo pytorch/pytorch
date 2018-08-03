@@ -31,7 +31,7 @@ pip install -r requirements.txt || true
 
 # TODO: Don't install this here
 if ! which conda; then
-  pip install mkl mkl-devel
+  pip install --user mkl mkl-devel
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
