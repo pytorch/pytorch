@@ -50,6 +50,7 @@ Error::Error(
     const int line,
     const char* condition,
     const std::string& msg,
+    const std::string& backtrace,
     const void* caller)
     : Error(
           str("[enforce fail at ",
@@ -60,7 +61,7 @@ Error::Error(
               condition,
               ". ",
               msg),
-          str("\n", get_backtrace(/*frames_to_skip=*/2)),
+          backtrace,
           caller) {}
 
 std::string Error::msg() const {
