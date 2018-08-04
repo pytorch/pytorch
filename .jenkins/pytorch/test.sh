@@ -101,7 +101,7 @@ test_torchvision() {
   # this should be a transient requirement...)
   # See https://github.com/pytorch/pytorch/issues/7525
   #time python setup.py install
-  pip install .
+  pip install --user .
   popd
 }
 
