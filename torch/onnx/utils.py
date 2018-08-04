@@ -123,6 +123,7 @@ def _optimize_graph(graph, operator_export_type):
     # onnx only supports tensors, so we turn all out number types into tensors
     torch._C._jit_pass_erase_number_types(graph)
     torch._C._jit_pass_peephole(graph)
+    torch._C._jit_pass_lint(graph)
 
     if operator_export_type != OperatorExportTypes.RAW:
         graph = torch._C._jit_pass_onnx(graph, operator_export_type)
@@ -479,8 +480,14 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
                     raise RuntimeError("Unsupported prim::Constant kind: `{}`. Send a bug report.".format(
                         n.kindOf("value")))
             elif op_name == "ListConstruct":
-                unsqueezed = [g.op("Unsqueeze", input, axes_i=[0]) for input in inputs]
-                return g.op("Concat", *unsqueezed, axis_i=0)
+                t = n.output().type()
+                # Tensor lists are used mostly for inputs to cat/stack. They need to be handled
+                # in those symbolics, and should become dead afterwards.
+                if t == torch._C.ListType.ofTensors():
+                    return None
+                elif t == torch._C.ListType.ofInts():
+                    unsqueezed = [g.op("Unsqueeze", input, axes_i=[0]) for input in inputs]
+                    return g.op("Concat", *unsqueezed, axis_i=0)
             elif op_name == "Undefined":
                 # Undefined is not an ONNX operator; keep it as prim::Undefined
                 # and let the exporter handle finally eliminating these

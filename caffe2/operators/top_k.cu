@@ -166,18 +166,18 @@ class TopKCudaOp : public Operator<Context> {
   int axis_;
 
   // Buffers for CUDAContext.
-  Tensor<Context> input_transposed_buffer_;
-  Tensor<Context> values_transposed_buffer_;
-  Tensor<Context> indices_transposed_buffer_;
+  Tensor input_transposed_buffer_{CUDA};
+  Tensor values_transposed_buffer_{CUDA};
+  Tensor indices_transposed_buffer_{CUDA};
 
   // Shape tensors on device for CUDAContext.
-  Tensor<Context> input_dims_device_;
-  Tensor<Context> input_transposed_dims_device_;
-  Tensor<Context> input_axes_device_;
+  Tensor input_dims_device_{CUDA};
+  Tensor input_transposed_dims_device_{CUDA};
+  Tensor input_axes_device_{CUDA};
 
-  Tensor<Context> output_dims_device_;
-  Tensor<Context> output_transposed_dims_device_;
-  Tensor<Context> output_transposed_axes_device_;
+  Tensor output_dims_device_{CUDA};
+  Tensor output_transposed_dims_device_{CUDA};
+  Tensor output_transposed_axes_device_{CUDA};
 };
 
 template <typename T, typename Context>

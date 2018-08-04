@@ -30,9 +30,12 @@ bool NHWC2NCHWOp<float, CUDAContext>::RunOnDevice() {
   DCHECK_EQ(X.ndim(), 4);
   const int N = X.dim32(0), H = X.dim32(1), W = X.dim32(2), C = X.dim32(3);
   Y->Resize(N, C, H, W);
-  NHWC2NCHWKernel<<<CAFFE_GET_BLOCKS(X.size()), CAFFE_CUDA_NUM_THREADS,
-                    0, context_.cuda_stream()>>>(
-      N, H * W, C, X.data<float>(), Y->mutable_data<float>());
+  NHWC2NCHWKernel<<<
+      CAFFE_GET_BLOCKS(X.size()),
+      CAFFE_CUDA_NUM_THREADS,
+      0,
+      context_.cuda_stream()>>>(
+      N, H * W, C, X.data<float>(), Y->template mutable_data<float>());
   return true;
 }
 
@@ -43,9 +46,12 @@ bool NCHW2NHWCOp<float, CUDAContext>::RunOnDevice() {
   DCHECK_EQ(X.ndim(), 4);
   const int N = X.dim32(0), C = X.dim32(1), H = X.dim32(2), W = X.dim32(3);
   Y->Resize(N, H, W, C);
-  NCHW2NHWCKernel<<<CAFFE_GET_BLOCKS(X.size()), CAFFE_CUDA_NUM_THREADS,
-                    0, context_.cuda_stream()>>>(
-      N, C, H * W, X.data<float>(), Y->mutable_data<float>());
+  NCHW2NHWCKernel<<<
+      CAFFE_GET_BLOCKS(X.size()),
+      CAFFE_CUDA_NUM_THREADS,
+      0,
+      context_.cuda_stream()>>>(
+      N, C, H * W, X.data<float>(), Y->template mutable_data<float>());
   return true;
 }
 

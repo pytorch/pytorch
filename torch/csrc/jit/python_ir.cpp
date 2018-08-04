@@ -451,10 +451,22 @@ void initPythonIRBindings(PyObject * module_) {
     .def("scalarType",[](Type& t) {
       return at::toString(t.expect<TensorType>()->scalarType());
     })
-    ;
+    .def("__eq__", [](std::shared_ptr<Type>& self, std::shared_ptr<Type>& other) {
+		  return *self == *other;
+    })
+    .def("isSubtypeOf", [](std::shared_ptr<Type>& self, std::shared_ptr<Type> other) {
+        return self->isSubtypeOf(other);
+    });
 
+  py::class_<NumberType, Type, std::shared_ptr<NumberType>>(m, "NumberType")
+    .def_static("get", &NumberType::get);
+  py::class_<IntType, Type, std::shared_ptr<IntType>>(m, "IntType")
+    .def_static("get", &IntType::get);
+  py::class_<FloatType, Type, std::shared_ptr<FloatType>>(m, "FloatType")
+    .def_static("get", &FloatType::get);
   py::class_<DynamicType, Type, std::shared_ptr<DynamicType>>(m, "DynamicType")
-    .def(py::init([](){ return DynamicType::create(); }));
+    .def_static("get", &DynamicType::get);
+
   py::class_<TupleType, Type, std::shared_ptr<TupleType>>(m, "TupleType")
     .def(py::init([](std::vector<TypePtr> a){ return TupleType::create(a); }))
     .def("elements", [](TupleType &self){
@@ -465,7 +477,9 @@ void initPythonIRBindings(PyObject * module_) {
       return types;
     });
   py::class_<ListType, Type, std::shared_ptr<ListType>>(m, "ListType")
-    .def_static("ofInts", &ListType::ofInts);
+    .def_static("ofInts", &ListType::ofInts)
+    .def_static("ofTensors", &ListType::ofTensors)
+    .def("getElementType", &ListType::getElementType);
 
   py::class_<Use>(m,"Use")
   .def_readonly("user",&Use::user)
@@ -481,6 +495,11 @@ void initPythonIRBindings(PyObject * module_) {
           std::move(tensor), /*requires_grad=*/false));
     }
     return std::make_tuple(graph, variables);
+  });
+  m.def("_jit_import_module", [](const std::shared_ptr<script::Module> module,
+                                 const std::string& serialized_module,
+                                 const std::unordered_map<std::string, std::string>& storages) {
+    ImportIRModule(module, serialized_module, storages);
   });
 }
 }}

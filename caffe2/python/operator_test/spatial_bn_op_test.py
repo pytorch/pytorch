@@ -123,7 +123,7 @@ class TestSpatialBN(hu.HypothesisTestCase):
             self, size, input_channels, batch_size, seed, order, epsilon,
             inplace, engine, gc, dc):
         # Currently HIP SpatialBN only supports NCHW
-        if _run_in_hip(gc, dc) and (order != 'NCHW' or batch_size == 0):
+        if _run_in_hip(gc, dc) and (order != 'NCHW'):
             return
 
         op = core.CreateOperator(
@@ -172,7 +172,7 @@ class TestSpatialBN(hu.HypothesisTestCase):
             self, size, input_channels, batch_size, seed, order, epsilon,
             inplace, engine, gc, dc):
         # Currently HIP SpatialBN only supports NCHW
-        if _run_in_hip(gc, dc) and (order != 'NCHW' or batch_size == 0):
+        if _run_in_hip(gc, dc) and (order != 'NCHW'):
             return
 
         op = core.CreateOperator(
@@ -211,7 +211,7 @@ class TestSpatialBN(hu.HypothesisTestCase):
             self, size, input_channels, batch_size, seed, order, epsilon,
             engine, gc, dc):
         # Currently HIP SpatialBN only supports NCHW
-        if _run_in_hip(gc, dc) and (order != 'NCHW' or batch_size == 0):
+        if _run_in_hip(gc, dc) and (order != 'NCHW'):
             return
 
         op = core.CreateOperator(

@@ -21,7 +21,7 @@ namespace detail {
 
 template<typename T>
 void genericAddInput(Node *n, T value) {
-  n->addInput(insertConstant(*n->owningGraph(), value));
+  n->addInput(n->owningGraph()->insertConstant(value));
 }
 
 void badArgType() {
@@ -38,9 +38,9 @@ void addInputs(Node *n, const char * name, const std::string& value)         { b
 void addInputs(Node *n, const char * name, const at::SparseTensorRef& value) { badArgType(); }
 
 void addInputs(Node *n, const char * name, at::TensorList value) {
-  for (auto & t : value) {
-    n->addInput(getValueTrace(t));
-  }
+  Graph *g = n->owningGraph();
+  Node *list_node = g->appendNode(g->createList(DynamicType::get(), fmap(value, getValueTrace)));
+  n->addInput(list_node->output());
 }
 
 void addInputs(Node *n, const char * name, at::IntList value) {
@@ -52,7 +52,7 @@ void addInputs(Node *n, const char * name, at::IntList value) {
   auto& g = getTracingState()->graph;
   for (size_t i = 0; i < info.size(); ++i) {
     if (info[i] != nullptr) continue;
-    info[i] = insertConstant(*g, value[i]);
+    info[i] = g->insertConstant(value[i]);
   }
   for (jit::Value* v : info) {
     if (*v->type() != *jit::IntType::get()) {
@@ -100,7 +100,7 @@ autograd::Variable getSizeOf(const autograd::Variable& var, int64_t dim) {
   auto size_var = autograd::make_variable(at::Scalar(var.size(dim)).toTensor());
   auto* value = getValueTrace(var);
   WithInsertPoint ipoint { graph->block() };
-  auto* node = graph->insertNode(graph->create(aten::size, {value, insertConstant(*graph, dim)}));
+  auto* node = graph->insertNode(graph->create(aten::size, {value, graph->insertConstant(dim)}));
   node->output()->setType(jit::IntType::get());
 
   auto ten =

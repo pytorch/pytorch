@@ -66,6 +66,10 @@ class OperatorBase : public Observable<OperatorBase> {
   // Get the inputs and outputs as specific types.
   template <typename T>
   inline const T& Input(int idx) {
+    static_assert(
+        !std::is_same<T, Tensor>::value,
+        "You should use Input<Tensor>(int, DeviceType) for "
+        "Tensor.");
     DCHECK_LT(idx, inputs_.size());
     try {
       return inputs_.at(idx)->template Get<T>();
@@ -79,9 +83,47 @@ class OperatorBase : public Observable<OperatorBase> {
     }
   }
 
+  // TODO(jerryzh): Remove template
+  // and the type argument?
+  // This is to keep the API changes minimal and make refactoring
+  // a bit easier
+  template <typename T>
+  inline const T& Input(int idx, DeviceType type) {
+    static_assert(
+        std::is_same<T, Tensor>::value,
+        "Input(int, DeviceType) is only available for Tensor");
+    DCHECK_LT(idx, inputs_.size());
+    try {
+      // TODO(jerryzh): We'll need to check device type in Get<T>() later
+      // Get<T>() -> Get<T>(type)
+      const auto& tensor = inputs_.at(idx)->template Get<T>();
+      return tensor;
+    } catch (::caffe2::EnforceNotMet& enf) {
+      if (has_debug_def()) {
+        enf.AppendMessage(".\nOffending Blob name: ");
+        enf.AppendMessage(debug_def().input(idx));
+        enf.AppendMessage(".\n");
+      }
+      throw enf;
+    }
+  }
+
   template <typename T>
   inline T* Output(int idx) {
+    static_assert(
+        !std::is_same<T, Tensor>::value,
+        "You should use Output<Tensor>(int, DeviceType) for "
+        "Tensor.");
     return outputs_.at(idx)->template GetMutable<T>();
+  }
+
+  // TODO(jerryzh): Remove this template
+  template <typename T>
+  inline T* Output(int idx, DeviceType type) {
+    static_assert(
+        std::is_same<T, Tensor>::value,
+        "Output(int, DeviceType) is only available for Tensor");
+    return outputs_.at(idx)->GetMutableTensor(type);
   }
 
   template <typename T>
@@ -100,12 +142,38 @@ class OperatorBase : public Observable<OperatorBase> {
 
   template <typename T>
   inline bool InputIsType(int idx) {
+    static_assert(
+        !std::is_same<T, Tensor>::value,
+        "You should use InputIsType<Tensor>(int, DeviceType) for "
+        "Tensor.");
     return inputs_.at(idx)->template IsType<T>();
   }
 
   template <typename T>
+  inline bool InputIsType(int idx, DeviceType device_type) {
+    static_assert(
+        std::is_same<T, Tensor>::value,
+        "InputIsType(idx, DeviceType) only available on "
+        "Tensor types.");
+    return inputs_.at(idx)->template IsType<T>(device_type);
+  }
+
+  template <typename T>
   inline bool OutputIsType(int idx) {
+    static_assert(
+        !std::is_same<T, Tensor>::value,
+        "You should use OutputIsType<Tensor>(int, DeviceType) for "
+        "Tensor.");
     return outputs_.at(idx)->template IsType<T>();
+  }
+
+  template <typename T>
+  inline bool OutputIsType(int idx, DeviceType type) {
+    static_assert(
+        std::is_same<T, Tensor>::value,
+        "OutputIsType(idx, DeviceType) only available on "
+        "Tensor types.");
+    return outputs_.at(idx)->template IsType<T>(type);
   }
 
   inline int InputSize() const {
@@ -271,6 +339,10 @@ class OperatorBase : public Observable<OperatorBase> {
     return !event_;
   }
 
+  virtual void SyncDevice() {
+    CAFFE_NOT_IMPLEMENTED;
+  }
+
   // Checks whether stream is ready to execute new computation,
   // used in stream allocation optimization to skip stream that is currently
   // busy. Depends on context and operator's device, returns true by default
@@ -380,11 +452,14 @@ class Operator : public OperatorBase {
   }
   ~Operator() noexcept override {}
 
-  inline const Tensor<Context>& Input(int idx) {
-    return OperatorBase::template Input<Tensor<Context>>(idx);
+  inline const Tensor& Input(
+      int idx,
+      DeviceType type = Context::GetDeviceType()) {
+    return OperatorBase::template Input<Tensor>(idx, type);
   }
-  inline Tensor<Context>* Output(int idx) {
-    return OperatorBase::template Output<Tensor<Context>>(idx);
+
+  inline Tensor* Output(int idx, DeviceType type = Context::GetDeviceType()) {
+    return OperatorBase::template Output<Tensor>(idx, type);
   }
 
   void WaitEvent(const Event& ev, int stream_id = -1) final {
@@ -521,6 +596,8 @@ class Operator : public OperatorBase {
   const Context* getContext() const {
     return &context_;
   }
+
+  void SyncDevice() final {}
 
   virtual std::vector<TensorFiller<Context>> InputFillers(
       const std::vector<std::vector<TIndex>>& shapes) {
@@ -714,8 +791,8 @@ struct DispatchHelper<FixedValues<>, ExtraArgs...> {
       return DispatchHelper<TensorTypes<Types...>, ExtraArgs...>::             \
           template call<Op>(op, meta);                                         \
     }                                                                          \
-    template <typename Op, typename Context>                                   \
-    static bool call(Op* op, const Tensor<Context>& tensor) {                  \
+    template <typename Op>                                                     \
+    static bool call(Op* op, const Tensor& tensor) {                           \
       return call<Op>(op, tensor.meta());                                      \
     }                                                                          \
     template <typename Op>                                                     \
@@ -730,8 +807,8 @@ struct DispatchHelper<FixedValues<>, ExtraArgs...> {
     static bool call(Op* /* unused */, const TypeMeta& meta) {                 \
       CAFFE_THROW("Unsupported type of tensor: ", meta.name());                \
     }                                                                          \
-    template <typename Op, typename Context>                                   \
-    static bool call(Op* op, const Tensor<Context>& tensor) {                  \
+    template <typename Op>                                                     \
+    static bool call(Op* op, const Tensor& tensor) {                           \
       return call<Op>(op, tensor.meta());                                      \
     }                                                                          \
     template <typename Op>                                                     \
@@ -748,8 +825,8 @@ struct DispatchHelper<FixedValues<>, ExtraArgs...> {
     static bool call(Op* op, const TypeMeta&) {                                \
       return op->template DoRunWithOtherType<ExtraArgs...>();                  \
     }                                                                          \
-    template <typename Op, typename Context>                                   \
-    static bool call(Op* op, const Tensor<Context>& tensor) {                  \
+    template <typename Op>                                                     \
+    static bool call(Op* op, const Tensor& tensor) {                           \
       return call<Op>(op, tensor.meta());                                      \
     }                                                                          \
     template <typename Op>                                                     \

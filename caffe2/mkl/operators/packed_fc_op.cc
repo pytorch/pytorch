@@ -49,7 +49,7 @@ class PackedFCOp final : public Operator<CPUContext> {
 
     // Check out what is the passed in format.
     const MKLPackedMatrix* packed_matrix = nullptr;
-    if (OperatorBase::InputIsType<TensorCPU>(1)) {
+    if (OperatorBase::InputIsType<Tensor>(1, CPU)) {
       const auto& W = Input(1);
       CAFFE_ENFORCE_EQ(W.ndim(), 2);
       CAFFE_ENFORCE_EQ(W.dim32(0), N);
@@ -142,7 +142,7 @@ class PackedFCOp final : public Operator<CPUContext> {
   size_t axis_{1};
   uint32_t hash_{0};
   vector<TIndex> Y_shape_cache_;
-  Tensor<CPUContext> bias_multiplier_;
+  Tensor bias_multiplier_{CPU};
   std::unique_ptr<MKLPackedMatrix> local_packed_matrix_;
 };
 

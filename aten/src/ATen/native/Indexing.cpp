@@ -69,11 +69,7 @@ static std::vector<Tensor> expandByteTensors(const Tensor & self, TensorList ind
       }
       // Replace with nonzeros
       auto nonzero = index.nonzero();
-#ifndef USE_TH_SIZE_ZERO_DIM
-      auto special_empty = nonzero.numel() == 0;
-#else
       auto special_empty = false;
-#endif
       for (int64_t j = 0; j < index.dim(); j++) {
         if (special_empty) {
           // We can't call select on an empty tensor so we just create an empty
@@ -214,26 +210,10 @@ static Tensor computeLinearIndex(const Tensor & src, TensorList indices) {
   return linearIndex;
 }
 
-#ifndef USE_TH_SIZE_ZERO_DIM
-static bool hasEmptyTensor(TensorList tensors) {
-  for (auto& tensor : tensors) {
-    if (tensor.defined() && tensor.numel() == 0) {
-      return true;
-    }
-  }
-  return false;
-}
-#endif
-
 static std::tuple<Tensor, Tensor> makeLinearIndex(Tensor self, TensorList orig) {
   checkIndexTensorTypes(orig);
   // first expand ByteTensor (boolean masks) into 1 or more LongTensors
   auto indices = expandByteTensors(self, orig);
-#ifndef USE_TH_SIZE_ZERO_DIM
-  if (hasEmptyTensor(indices)) {
-    return std::make_tuple(self, self.type().toScalarType(kLong).tensor());
-  }
-#endif
   // next broadcast all index tensors together
   indices = expand_outplace(indices);
   // add missing null Tensors so that it matches self.dim()
@@ -299,11 +279,11 @@ Tensor & index_copy_(Tensor & self, int64_t dim, const Tensor & index, const Ten
   }
 
   // Check that source and destination slices have the same size
-  auto selfSlicedSizes = std::vector<int64_t>(self.sizes());
+  auto selfSlicedSizes = self.sizes().vec();
   if (selfSlicedSizes.size() > 0) {
     selfSlicedSizes.erase(selfSlicedSizes.begin() + dim);
   }
-  auto sourceSlicedSizes = std::vector<int64_t>(source.sizes());
+  auto sourceSlicedSizes = source.sizes().vec();
   if (sourceSlicedSizes.size() > 0) {
     sourceSlicedSizes.erase(sourceSlicedSizes.begin() + dim);
   }

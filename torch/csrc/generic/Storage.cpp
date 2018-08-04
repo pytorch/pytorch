@@ -151,9 +151,9 @@ static PyObject * THPStorage_(get)(THPStorage *self, PyObject *index)
     int64_t nindex = THPUtils_unpackLong(index);
     if (nindex < 0)
       nindex += THWStorage_(size)(LIBRARY_STATE self->cdata);
-    if (nindex < 0 || nindex >= self->cdata->size) {
+    if (nindex < 0 || nindex >= self->cdata->size()) {
       PyErr_Format(PyExc_IndexError, "index %" PRId64 " out of range for storage of "
-              "size %" PRId64, (int64_t) nindex, (int64_t) self->cdata->size);
+              "size %" PRId64, (int64_t) nindex, (int64_t) self->cdata->size());
       return NULL;
     }
     real value = THWStorage_(get)(LIBRARY_STATE self->cdata, nindex);

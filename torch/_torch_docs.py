@@ -5723,7 +5723,7 @@ returned window size. :attr:`periodic` flag determines whether the returned
 window trims off the last duplicate value from the symmetric window and is
 ready to be used as a periodic window with functions like
 :meth:`torch.stft`. Therefore, if :attr:`periodic` is true, the :math:`N` in
-above formula is in fact :math:`\text{window_length} + 1`. Also, we always have
+above formula is in fact :math:`\text{window\_length} + 1`. Also, we always have
 ``torch.hann_window(L, periodic=True)`` equal to
 ``torch.hann_window(L + 1, periodic=False)[:-1])``.
 
@@ -5741,7 +5741,7 @@ Arguments:
     {requires_grad}
 
 Returns:
-    Tensor: A 1-D tensor of size :math:`(\text{{window_length}},)` containing the window
+    Tensor: A 1-D tensor of size :math:`(\text{{window\_length}},)` containing the window
 
 """.format(**factory_common_args))
 
@@ -5763,7 +5763,7 @@ returned window size. :attr:`periodic` flag determines whether the returned
 window trims off the last duplicate value from the symmetric window and is
 ready to be used as a periodic window with functions like
 :meth:`torch.stft`. Therefore, if :attr:`periodic` is true, the :math:`N` in
-above formula is in fact :math:`\text{window_length} + 1`. Also, we always have
+above formula is in fact :math:`\text{window\_length} + 1`. Also, we always have
 ``torch.hamming_window(L, periodic=True)`` equal to
 ``torch.hamming_window(L + 1, periodic=False)[:-1])``.
 
@@ -5784,7 +5784,7 @@ Arguments:
     {requires_grad}
 
 Returns:
-    Tensor: A 1-D tensor of size :math:`(\text{{window_length}},)` containing the window
+    Tensor: A 1-D tensor of size :math:`(\text{{window\_length}},)` containing the window
 
 """.format(**factory_common_args))
 
@@ -5809,7 +5809,7 @@ returned window size. :attr:`periodic` flag determines whether the returned
 window trims off the last duplicate value from the symmetric window and is
 ready to be used as a periodic window with functions like
 :meth:`torch.stft`. Therefore, if :attr:`periodic` is true, the :math:`N` in
-above formula is in fact :math:`\text{window_length} + 1`. Also, we always have
+above formula is in fact :math:`\text{window\_length} + 1`. Also, we always have
 ``torch.bartlett_window(L, periodic=True)`` equal to
 ``torch.bartlett_window(L + 1, periodic=False)[:-1])``.
 
@@ -5827,7 +5827,7 @@ Arguments:
     {requires_grad}
 
 Returns:
-    Tensor: A 1-D tensor of size :math:`(\text{{window_length}},)` containing the window
+    Tensor: A 1-D tensor of size :math:`(\text{{window\_length}},)` containing the window
 
 """.format(**factory_common_args))
 
@@ -5849,7 +5849,7 @@ returned window size. :attr:`periodic` flag determines whether the returned
 window trims off the last duplicate value from the symmetric window and is
 ready to be used as a periodic window with functions like
 :meth:`torch.stft`. Therefore, if :attr:`periodic` is true, the :math:`N` in
-above formula is in fact :math:`\text{window_length} + 1`. Also, we always have
+above formula is in fact :math:`\text{window\_length} + 1`. Also, we always have
 ``torch.blackman_window(L, periodic=True)`` equal to
 ``torch.blackman_window(L + 1, periodic=False)[:-1])``.
 
@@ -5867,7 +5867,7 @@ Arguments:
     {requires_grad}
 
 Returns:
-    Tensor: A 1-D tensor of size :math:`(\text{{window_length}},)` containing the window
+    Tensor: A 1-D tensor of size :math:`(\text{{window\_length}},)` containing the window
 
 """.format(**factory_common_args))
 

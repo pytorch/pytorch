@@ -13,7 +13,7 @@ static inline void THNN_(TemporalUpSamplingNearest_shapeCheck)
        " but got input (W: %d) output (W: %d)",
        inputWidth, outputWidth);
   if (input != NULL) {
-    THNN_ARGCHECK(input->_dim() == 3, 2, input,
+    THNN_ARGCHECK(THTensor_nDimensionLegacyAll(input) == 3, 2, input,
       "3D input tensor expected but got: %s");
   }
 

@@ -512,8 +512,8 @@ class SumReduceLikeOp final : public Operator<Context> {
   int axis_;
   string axis_str_;
   string order_;
-  Tensor<Context> ones_;
-  Tensor<Context> sum_buffer_;
+  Tensor ones_{Context::GetDeviceType()};
+  Tensor sum_buffer_{Context::GetDeviceType()};
 };
 
 } // namespace caffe2

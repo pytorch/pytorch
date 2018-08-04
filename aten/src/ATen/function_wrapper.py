@@ -288,7 +288,11 @@ CHECKED_CAST = {
             'checked_cast_tensor<${DenseBackend}LongTensor>('
             '${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay}, '
             'Backend::${DenseBackend}, ScalarType::Long)'),
-    'THStorage*': CodeTemplate('checked_cast_storage<${Storage}>(&${arg_name},"${arg_name}",${arg_pos})'),
+    'THStorage*':
+        CodeTemplate(
+            'checked_cast_storage<Storage>('
+            '&${arg_name},"${arg_name}",${arg_pos}, '
+            'Backend::${Backend}, ScalarType::${ScalarName})'),
     'THGenerator*':
         CodeTemplate(
             'check_generator<${Backend}Generator>(${arg_name}, &globalContext().defaultGenerator(backend()))'),
@@ -315,7 +319,7 @@ CHECKED_USE = {
     'THIntegerTensor*': '{}_->tensor',
     'THDenseTensor*': '{}_->tensor',
     'THDenseIndexTensor*': '{}_->tensor',
-    'THStorage*': '{}_->storage',
+    'THStorage*': '{}_->pImpl()',
     'THGenerator*': '{}_->generator',
     'TensorList': "{0}_.data(), {0}_.size()",
 }
@@ -346,7 +350,7 @@ ALLOC_WRAP = {
 CONSTANT_REPLACEMENTS = [
     ('AS_REAL', '${AS_REAL}'),
     ('__storage_size.get\\(\\)',
-     'THLongStorageView(static_cast<int64_t>(source.size()), THLongStorageViewKind::LENGTH)'),
+     'THLongStorageView(static_cast<int64_t>(source.pImpl()->size()), THLongStorageViewKind::LENGTH)'),
     ('__last_dim', 'self.ndimension()-1'),
 ]
 

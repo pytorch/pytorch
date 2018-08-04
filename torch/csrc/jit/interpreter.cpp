@@ -94,7 +94,7 @@ void desugarTripCounts(Block * b) {
       {
         WithInsertPoint guard(n);
         // int i = 0
-        Value* initial_trip_count = insertConstant(*g, 0);
+        Value* initial_trip_count = g->insertConstant(0);
         // Set up initial iteration number value for loop-carried dependency
         n->removeInput(0);
         // Input 0 is now initial termination condition, insert this after that.
@@ -112,7 +112,7 @@ void desugarTripCounts(Block * b) {
         // increment the trip count at the end of the body. Then, emit the same
         // conjunctive stopping condition as above.
 
-        Value* const_one = insertConstant(*g, 1);
+        Value* const_one = g->insertConstant(1);
 
         Value* inc_trip_count =
             g->insertNode(g->create(
@@ -337,9 +337,9 @@ struct PreprocessGraph {
 struct ContainerTensor : public at::TensorImpl {
 public:
   ContainerTensor()
-  : TensorImpl(&(at::globalContext().getType(at::Backend::Undefined,at::ScalarType::Undefined)), nullptr) {}
+  : TensorImpl(at::Backend::Undefined,at::ScalarType::Undefined, nullptr, /* is_variable */ false) {}
 
-  virtual ~ContainerTensor() {}
+  virtual ~ContainerTensor() = default;
   virtual at::IntList sizes() const override {
     throw std::runtime_error("sizes() on ContainerTensor");
   }
@@ -685,8 +685,8 @@ struct CodeImpl {
 
 // InterpreterState state that is held across stages and used to compute a Code
 struct InterpreterStateImpl {
-  InterpreterStateImpl(const Code & function_)
-  : function(function_.pImpl),
+  InterpreterStateImpl(const Code & code)
+  : function(code.pImpl),
     int_data(function->int_data.data()),
     bool_data(function->bool_data),
     registers(function->register_size) {
@@ -775,15 +775,15 @@ std::ostream & operator<<(std::ostream & out, const Code & code) {
 
 Code::Code(std::shared_ptr<Graph>& graph)
     : pImpl(new CodeImpl(graph)) {}
-Code::~Code() {}
+Code::~Code() = default;
 
 const std::vector<GraphExecutor*>& Code::executors() {
   return pImpl->executors();
 }
 
-InterpreterState::InterpreterState(const Code & function)
-  : pImpl(new InterpreterStateImpl(function)) {}
-InterpreterState::~InterpreterState() {}
+InterpreterState::InterpreterState(const Code & code)
+  : pImpl(new InterpreterStateImpl(code)) {}
+InterpreterState::~InterpreterState() = default;
 
 void InterpreterState::runOneStage(Stack & stack) {
   return pImpl->runOneStage(stack);

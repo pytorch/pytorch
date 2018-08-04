@@ -2,6 +2,8 @@
 #define THC_GENERIC_FILE "generic/SpatialConvolutionMM.cu"
 #else
 
+#include <ATen/div_rtn.h>
+
 static inline void THNN_(SpatialConvolutionMM_shapeCheck)(
                          THCState *state,
                          THCTensor *input, THCTensor *gradOutput,
@@ -49,8 +51,8 @@ static inline void THNN_(SpatialConvolutionMM_shapeCheck)(
       exactInputHeight, exactInputWidth, kH, kW);
   }
 
-  int64_t outputHeight = (exactInputHeight - kH) / dH + 1;
-  int64_t outputWidth  = (exactInputWidth - kW) / dW + 1;
+  int64_t outputHeight = div_rtn<int64_t>(exactInputHeight - kH, dH) + 1;
+  int64_t outputWidth  = div_rtn<int64_t>(exactInputWidth - kW, dW) + 1;
 
   if (outputWidth < 1 || outputHeight < 1) {
     THError("Given input size per channel: (%ld x %ld). "
@@ -71,7 +73,7 @@ static inline void THNN_(SpatialConvolutionMM_shapeCheck)(
       int64_t nOutputPlane = weight->size(0);
       THCUNN_check_dim_size(state, gradOutput, ndim, dimf, nOutputPlane);
     } else if (bias != NULL) {
-      int64_t nOutputPlane = bias->size(0);
+      int64_t nOutputPlane = THTensor_sizeLegacyNoScalars(bias, 0);
       THCUNN_check_dim_size(state, gradOutput, ndim, dimf, nOutputPlane);
     }
     THCUNN_check_dim_size(state, gradOutput, ndim, dimh, outputHeight);

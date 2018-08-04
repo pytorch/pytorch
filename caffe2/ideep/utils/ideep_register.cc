@@ -1,7 +1,8 @@
-#include <ideep_pin_singletons.hpp>
+#include <caffe2/core/event_cpu.h>
 #include <caffe2/core/operator.h>
 #include <caffe2/proto/caffe2.pb.h>
-#include <caffe2/core/event_cpu.h>
+#include <ideep_pin_singletons.hpp>
+#include "ideep_context.h"
 
 namespace caffe2 {
 
@@ -25,5 +26,12 @@ REGISTER_EVENT_QUERY_FUNCTION(IDEEP, EventQueryCPU);
 REGISTER_EVENT_ERROR_MESSAGE_FUNCTION(IDEEP, EventErrorMessageCPU);
 REGISTER_EVENT_SET_FINISHED_FUNCTION(IDEEP, EventSetFinishedCPU);
 REGISTER_EVENT_RESET_FUNCTION(IDEEP, EventResetCPU);
+
+BaseStaticContext* GetIDEEPStaticContext() {
+  static IDEEPStaticContext context;
+  return &context;
+}
+
+REGISTER_STATIC_CONTEXT(IDEEP, GetIDEEPStaticContext());
 
 } // namespace caffe2

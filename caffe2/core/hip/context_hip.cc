@@ -4,8 +4,10 @@
 #include <string>
 #include <unordered_map>
 
+#include "caffe2/core/hip/THCCachingAllocator_hip.h"
 #include "cub/util_allocator.cuh"
 #include "caffe2/core/asan.h"
+#include "caffe2/core/blob_stats.h"
 #include "caffe2/core/hip/common_miopen.h"
 #include "caffe2/core/hip/context_hip.h"
 #include "caffe2/core/init.h"
@@ -50,8 +52,6 @@ CAFFE2_DEFINE_int(caffe2_gpu_memory_report_interval_mb,
 
 namespace caffe2 {
 
-CAFFE_KNOWN_TYPE(Tensor<HIPContext>);
-
 thread_local ThreadLocalHIPObjects HIPContext::hip_objects_;
 
 // TODO(jiayq): these variables shouldn't be currently accessed during static
@@ -62,7 +62,9 @@ thread_local ThreadLocalHIPObjects HIPContext::hip_objects_;
 HipMemoryPoolType g_hip_memory_pool_type;
 
 // For cub allocator
-unique_ptr<cub::CachingDeviceAllocator> g_cub_allocator;
+std::unique_ptr<cub::CachingDeviceAllocator> g_cub_allocator;
+
+std::unique_ptr<THCCachingAllocator> g_thc_allocator;
 // an unordered map that holds the map from the cuda memory pointer to the
 // device id that it is allocated from. This is used in the cuda memory pool
 // cases, where we need the device id to carry out the deletion.
@@ -87,16 +89,6 @@ static long g_total_mem = 0;
 static long g_last_rep  = 0;
 
 HipMemoryPoolType GetHipMemoryPoolType() { return g_hip_memory_pool_type; }
-
-vector<TIndex>
-GetHipTensorInfo(const void* c, bool* shares_data, size_t* capacity, DeviceOption* device)
-{
-    vector<TIndex> dims          = GetTensorInfo<HIPContext>(c, shares_data, capacity, device);
-    const Tensor<HIPContext>* tc = static_cast<const Tensor<HIPContext>*>(c);
-    device->set_device_type(HIP);
-    device->set_hip_gpu_id(GetGPUIDForPointer(tc->raw_data()));
-    return dims;
-}
 
 ///////////////////////////////////////////////////////////////////////////////
 // A wrapper to allow us to lazily initialize all HIP environments that Caffe
@@ -151,10 +143,6 @@ static void Caffe2InitializeHip()
         }
     }
 
-    RegisterTypeCallFunction(TypeMeta::Id<Tensor<HIPContext>>(), GetTensorType<HIPContext>);
-
-    RegisterTensorInfoFunction(TypeMeta::Id<Tensor<HIPContext>>(), GetHipTensorInfo);
-
     // CheckMiOpenVersions();
 }
 
@@ -195,6 +183,11 @@ static void Caffe2SetHIPMemoryPool()
         // Sets up cub.
         g_hip_memory_pool_type = HipMemoryPoolType::CUB;
         SetUpCub();
+    }
+    else if(FLAGS_caffe2_hip_memory_pool == "thc")
+    {
+        g_hip_memory_pool_type = HipMemoryPoolType::THC;
+        g_thc_allocator.reset(new THCCachingAllocator());
     }
     else
     {
@@ -245,6 +238,7 @@ struct Caffe2HipInitializerHelper
         }
     }
 };
+
 } // namespace
 
 /**
@@ -327,20 +321,17 @@ void TrackMemoryAlloc(size_t nbytes)
 }
 }
 
-std::pair<void*, MemoryDeleter> HIPContext::New(size_t nbytes)
-{
-    // Lock the mutex
-    std::lock_guard<std::mutex> lock(HIPContext::mutex());
-    // A one-time caffe2 cuda initializer.
-    static Caffe2HipInitializerHelper g_hip_initializer_;
-    void* ptr = nullptr;
+std::pair<void*, MemoryDeleter> HIPStaticContext::New(size_t nbytes) const {
+  // Lock the mutex
+  std::lock_guard<std::mutex> lock(HIPContext::mutex());
+  // A one-time caffe2 cuda initializer.
+  static Caffe2HipInitializerHelper g_hip_initializer_;
+  void* ptr = nullptr;
 
-    if(FLAGS_caffe2_gpu_memory_tracking)
-    {
-        TrackMemoryAlloc(nbytes);
-    }
-    switch(g_hip_memory_pool_type)
-    {
+  if (FLAGS_caffe2_gpu_memory_tracking) {
+    TrackMemoryAlloc(nbytes);
+  }
+  switch (g_hip_memory_pool_type) {
     case HipMemoryPoolType::NONE:
         HIP_ENFORCE(hipMalloc(&ptr, nbytes));
         if(FLAGS_caffe2_gpu_memory_tracking)
@@ -358,28 +349,33 @@ std::pair<void*, MemoryDeleter> HIPContext::New(size_t nbytes)
             g_size_map[ptr] = nbytes;
         }
         return {ptr, Delete};
+    case HipMemoryPoolType::THC:
+        HIP_ENFORCE(g_thc_allocator->Alloc(&ptr, nbytes, 0 /* stream */));
+        if (FLAGS_caffe2_gpu_memory_tracking)
+        {
+          g_size_map[ptr]                = nbytes;
+          g_hip_device_affiliation[ptr] = CaffeHipGetDevice();
+        }
+        return {ptr, Delete};
     }
     return {nullptr, Delete};
 }
 
-void HIPContext::Delete(void* ptr)
-{
-    // lock the mutex
-    std::lock_guard<std::mutex> lock(HIPContext::mutex());
+void HIPStaticContext::Delete(void* ptr) {
+  // lock the mutex
+  std::lock_guard<std::mutex> lock(HIPContext::mutex());
 
-    if(FLAGS_caffe2_gpu_memory_tracking)
-    {
-        auto sz_it = g_size_map.find(ptr);
-        DCHECK(sz_it != g_size_map.end());
-        auto aff_it = g_hip_device_affiliation.find(ptr);
-        DCHECK(aff_it != g_hip_device_affiliation.end());
-        g_total_mem -= sz_it->second;
-        g_total_by_gpu_map[aff_it->second] -= sz_it->second;
-        g_size_map.erase(sz_it);
-    }
+  if (FLAGS_caffe2_gpu_memory_tracking) {
+    auto sz_it = g_size_map.find(ptr);
+    DCHECK(sz_it != g_size_map.end());
+    auto aff_it = g_hip_device_affiliation.find(ptr);
+    DCHECK(aff_it != g_hip_device_affiliation.end());
+    g_total_mem -= sz_it->second;
+    g_total_by_gpu_map[aff_it->second] -= sz_it->second;
+    g_size_map.erase(sz_it);
+  }
 
-    switch(g_hip_memory_pool_type)
-    {
+  switch (g_hip_memory_pool_type) {
     case HipMemoryPoolType::NONE:
     {
         // If memory pool is not set up, use simple hipFree.
@@ -412,7 +408,22 @@ void HIPContext::Delete(void* ptr)
         g_hip_device_affiliation.erase(it);
         break;
     }
+    case HipMemoryPoolType::THC: 
+    {
+        HIP_ENFORCE(g_thc_allocator->Free(ptr));
+        if (FLAGS_caffe2_gpu_memory_tracking) {
+          g_hip_device_affiliation.erase(g_hip_device_affiliation.find(ptr));
+        }
+        break;
+    }
     }
 }
+
+BaseStaticContext* GetHIPStaticContext() {
+  static HIPStaticContext context;
+  return &context;
+}
+
+REGISTER_STATIC_CONTEXT(HIP, GetHIPStaticContext());
 
 } // namespace caffe2

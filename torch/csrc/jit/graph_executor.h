@@ -34,7 +34,7 @@ struct GraphExecutorState {
 
 struct GraphExecutorImpl;
 struct TORCH_API GraphExecutor {
-  GraphExecutor() {}
+  GraphExecutor() = default;
   GraphExecutor(std::shared_ptr<Graph> graph, bool optimize = true);
   // note: if not specified, symbolically_differentiable is computed from the graph.
   GraphExecutor(std::shared_ptr<Graph> graph, bool optimize, bool symbolically_differentiable);

@@ -2,6 +2,7 @@
 #ifdef CAFFE2_OPTIMIZER
 #include "caffe2/opt/optimizer.h"
 #endif
+#include "caffe2/utils/proto_utils.h"
 
 #include <unordered_set>
 #include "caffe2/core/init.h"
@@ -14,7 +15,7 @@ void enforceIsTensor(Workspace* ws, const std::string& name) {
   auto blob = ws->GetBlob(name);
   CAFFE_ENFORCE(blob, "Blob does not exist: ", name);
   CAFFE_ENFORCE(
-      blob->template IsType<TensorCPU>(), "Blob is not a CPU Tensor: ", name);
+      blob->template IsType<Tensor>(CPU), "Blob is not a CPU Tensor: ", name);
 }
 
 void shareInputTensor(
@@ -24,7 +25,7 @@ void shareInputTensor(
   enforceIsTensor(ws, name);
   auto* blob = ws->GetBlob(name);
   CAFFE_ENFORCE(blob, "Blob: ", name, " does not exist");
-  auto* tensor = blob->template GetMutable<TensorCPU>();
+  auto* tensor = blob->GetMutableTensor(CPU);
   tensor->ResizeLike(*input);
   tensor->ShareData(*input);
 }
@@ -33,7 +34,7 @@ TensorCPU* extractOutputTensor(Workspace* ws, const std::string& name) {
   enforceIsTensor(ws, name);
   auto* blob = ws->GetBlob(name);
   CAFFE_ENFORCE(blob, "Blob: ", name, " does not exist");
-  return blob->template GetMutable<TensorCPU>();
+  return blob->GetMutableTensor(CPU);
 }
 
 // We don't use the getNet() from predictor_utils.cc here because that file
@@ -96,7 +97,9 @@ Predictor::Predictor(
   GlobalInit();
 #endif
   auto predict_net = config_.predict_net;
-  if (optimization) {
+
+  if (optimization &&
+      !ArgumentHelper::HasArgument(*predict_net, "disable_nomnigraph")) {
 #ifdef CAFFE2_OPTIMIZER
     try {
       *predict_net = opt::optimize(*predict_net, &ws_, optimization);
@@ -115,7 +118,7 @@ Predictor::Predictor(
   for (const auto& name : predict_net->external_input()) {
     if (!initialized.count(name)) {
       auto* blob = ws_.CreateBlob(name);
-      blob->template GetMutable<TensorCPU>();
+      blob->GetMutableTensor(CPU);
     }
   }
 

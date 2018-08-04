@@ -23,12 +23,13 @@ class LengthsTileOp : public Operator<Context> {
 
     // Context::CopyFrom and math::Sum need the same context to avoid race
     // conditions
-    CPUContext cpuContext;
-    lengths_host_.CopyFrom(lengths, &cpuContext);
+    // why? CPUContext is not used in Sum
+    lengths_host_.CopyFrom(lengths);
     auto lengths_size = lengths_host_.size();
     auto* lengths_data = lengths_host_.data<int32_t>();
 
     int32_t total_length = 0;
+    CPUContext cpuContext;
     math::Sum<int32_t, CPUContext>(
         lengths_size, lengths_data, &total_length, &cpuContext);
 
@@ -44,7 +45,7 @@ class LengthsTileOp : public Operator<Context> {
       auto length = lengths_data[i];
       CAFFE_ENFORCE_GE(length, 0);
       for (int32_t j = 0; j < length; ++j) {
-        context_.template CopyBytes<Context, Context>(block_bytesize, src, out);
+        context_.CopyBytesSameDevice(block_bytesize, src, out);
         out += block_bytesize;
       }
       src += block_bytesize;
@@ -55,7 +56,7 @@ class LengthsTileOp : public Operator<Context> {
   INPUT_TAGS(DATA, LENGTHS);
 
  private:
-  TensorCPU lengths_host_;
+  Tensor lengths_host_{CPU};
 };
 
 } // namespace caffe2

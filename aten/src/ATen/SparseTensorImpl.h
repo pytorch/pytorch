@@ -2,7 +2,7 @@
 
 #include "ATen/Tensor.h"
 #include "ATen/TensorImpl.h"
-#include "ATen/Error.h"
+#include "ATen/core/Error.h"
 
 namespace at {
 struct AT_API SparseTensorImpl : public TensorImpl {
@@ -48,7 +48,7 @@ struct AT_API SparseTensorImpl : public TensorImpl {
 
 public:
   // Public for now...
-  explicit SparseTensorImpl(Type * type);
+  explicit SparseTensorImpl(at::Backend, at::ScalarType);
 
   int64_t nnz() const { return nnz_; }
   int64_t sparseDims() const { return sparseDims_; }
@@ -75,7 +75,7 @@ public:
     if (size.size() == 0) {
       size_ = {0};
     } else {
-      size_ = size;
+      size_ = size.vec();
     }
     sparseDims_ = sparseDims;
     denseDims_ = denseDims;

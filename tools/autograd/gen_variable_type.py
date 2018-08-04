@@ -46,12 +46,6 @@ DONT_RECORD_TRACE = {
 
 # These functions have their names recorded under trace renamed,
 RENAME_TRACE = {
-    'th_add': 'add',
-    's_native_add': 'add',
-    'th_sub': 'sub',
-    's_native_sub': 'sub',
-    'th_mul': 'mul',
-    's_native_mul': 'mul',
     'th_addmm': 'addmm',
     's_native_addmm': 'addmm',
     'zero': 'zeros_like',
@@ -177,12 +171,6 @@ def should_trace(declaration):
     # However, we can't use DONT_RECORD_TRACE, because we must only disable
     # these for overloads that come from native (the TH overloads still "work")
     overload = [arg['simple_type'] for arg in declaration['arguments'] if not arg.get('output', False)]
-    if base_name == 'add' and overload == ['Tensor', 'Tensor', 'Scalar']:
-        return False
-    if base_name == 'sub' and overload == ['Tensor', 'Tensor', 'Scalar']:
-        return False
-    if base_name == 'mul' and overload == ['Tensor', 'Tensor', 'Scalar']:
-        return False
     if base_name == 'addmm' and overload == ['Tensor', 'Tensor', 'Tensor', 'Scalar', 'Scalar']:
         return False
     return True
@@ -352,6 +340,8 @@ def emit_body(declaration):
             elif arg['type'] == 'TensorList':
                 name += '_'
                 expr = 'make_saved_variable_list({})'.format(arg['name'])
+            elif arg['type'] == 'IntList':
+                expr = expr + ".vec()"
             stmts.append('grad_fn->{} = {};'.format(name, expr))
         return stmts
 

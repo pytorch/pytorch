@@ -70,6 +70,12 @@ def _get_const(value, desc, arg_name):
     return _parse_arg(value, desc)
 
 
+def _unpack_list(list_value):
+    list_node = list_value.node()
+    assert list_node.kind() == "prim::ListConstruct"
+    return list_node.inputs()
+
+
 def parse_args(*arg_descriptors):
     def decorator(fn):
         def wrapper(g, *args):
@@ -91,7 +97,7 @@ def _scalar(x):
     return x.item()
 
 
-def _if_scalar_type_as(self, tensor):
+def _if_scalar_type_as(g, self, tensor):
     """
     Convert self into the same type of tensor, as necessary.
 
@@ -106,14 +112,6 @@ def _if_scalar_type_as(self, tensor):
         return getattr(self, ty)()
     else:
         return self
-
-
-def _broadcast_if_scalar(x):
-    """Return kwargs enabling broadcasting if 'x' is a scalar."""
-    if isinstance(x, torch._C.Value):
-        return {}
-    else:
-        return {"broadcast_i": 1}
 
 
 def _is_value(x):
@@ -145,7 +143,7 @@ def _unimplemented(op, msg):
 # increasing this number.  This includes symbolic definitions NOT in this
 # file, so grep for "OpName" (with quotes)
 
-_onnx_opset_version = 6
+_onnx_opset_version = 7
 
 
 # ---------------------------------------------------------------------
@@ -166,10 +164,6 @@ _onnx_opset_version = 6
 #     will do implicit conversions on scalars; however, ONNX will not, so
 #     we must do the conversion ourselves.  This is what _if_scalar_type_as
 #     does.
-#
-#   - Most of the time, the arguments to self/other are pre-expanded according
-#     to broadcasting.  However, a scalar will NOT be broadcasted, so we have
-#     to enable broadcasting ONNX side.
 #
 #   - Dispatch to these functions takes advantage an outrageous coincidence
 #     between the tensor and scalar name.  When we add two tensors together,
@@ -196,39 +190,47 @@ def add(g, self, other, alpha):
         return _unimplemented("add", "alpha != 1")
     # See Note [Pointwise by scalar]
     other = _maybe_get_scalar(other)
-    return g.op("Add", self, _if_scalar_type_as(other, self), **_broadcast_if_scalar(other))
+    return g.op("Add", self, _if_scalar_type_as(g, other, self))
 
 
 @parse_args('v', 'v', 't')
 def sub(g, self, other, alpha):
     if _scalar(alpha) != 1:
         return _unimplemented("sub", "alpha != 1")
-    # See Note [Pointwise by scalar]
+    # See Note [Pointwise by scalar]. Note that self or other may be scalars.
     other = _maybe_get_scalar(other)
-    return g.op("Sub", self, _if_scalar_type_as(other, self), **_broadcast_if_scalar(other))
+    self = _maybe_get_scalar(self)
+    self = _if_scalar_type_as(g, self, other)
+    other = _if_scalar_type_as(g, other, self)
+    return g.op("Sub", self, other)
 
 
 def mul(g, self, other):
     # See Note [Pointwise by scalar]
     other = _maybe_get_scalar(other)
-    return g.op("Mul", self, _if_scalar_type_as(other, self), **_broadcast_if_scalar(other))
+    return g.op("Mul", self, _if_scalar_type_as(g, other, self))
 
 
 def div(g, self, other):
     # See Note [Pointwise by scalar]
     other = _maybe_get_scalar(other)
-    return g.op("Div", self, _if_scalar_type_as(other, self), **_broadcast_if_scalar(other))
+    return g.op("Div", self, _if_scalar_type_as(g, other, self))
 
 
 def reciprocal(g, self):
-    return g.op("Div", _if_scalar_type_as(torch.ones(1), self), self, broadcast_i=1)
+    return g.op("Div", _if_scalar_type_as(g, torch.ones(1), self), self)
 
 
-# This syntax is Python 2 portable
-def cat(g, *args):
-    dim = _get_const(args[-1], 'i', 'dim')
-    tensors = args[:-1]
+@parse_args('v', 'i')
+def cat(g, tensor_list, dim):
+    tensors = _unpack_list(tensor_list)
     return g.op("Concat", *tensors, axis_i=dim)
+
+
+@parse_args('v', 'i')
+def stack(g, tensor_list, dim):
+    unsqueezed = [g.op("Unsqueeze", t, axes_i=[dim]) for t in _unpack_list(tensor_list)]
+    return g.op("Concat", *unsqueezed, axis_i=dim)
 
 
 def mm(g, self, other):
@@ -236,7 +238,7 @@ def mm(g, self, other):
     # since beta = 0
     ty = self.type().scalarType().lower()
     C = g.constant(0, [1], ty)
-    return g.op("Gemm", self, other, C, beta_f=0.0, alpha_f=1.0, broadcast_i=True)
+    return g.op("Gemm", self, other, C, beta_f=0.0, alpha_f=1.0)
 
 
 def bmm(g, self, other):
@@ -356,11 +358,6 @@ def view(g, self, size):
                 return g.op("Flatten", self, axis_i=1)
         shape = g.op("Constant", value_t=torch.LongTensor(size))
     return g.op("Reshape", self, shape)
-
-
-def stack(g, *args):
-    unsqueezed = [g.op("Unsqueeze", t, axes_i=[dim]) for t in args[:-1]] + [args[-1]]
-    return concat(g, *unsqueezed)
 
 
 @parse_args('v', 'i', 'i')
@@ -564,9 +561,10 @@ replication_pad3d = replication_pad
 
 @parse_args('v', 'is')
 def upsample_nearest2d(g, input, output_size):
+    height_scale = float(output_size[-2]) / input.type().sizes()[-2]
+    width_scale = float(output_size[-1]) / input.type().sizes()[-1]
     return g.op("Upsample", input,
-                height_scale_f=float(output_size[-2]) / input.type().sizes()[-2],
-                width_scale_f=float(output_size[-1]) / input.type().sizes()[-1],
+                scales_f=[1., 1., height_scale, width_scale],
                 mode_s="nearest")
 
 
@@ -574,20 +572,21 @@ def upsample_nearest2d(g, input, output_size):
 def upsample_bilinear2d(g, input, output_size, align_corners):
     if align_corners:
         return _unimplemented("upsample_bilinear2d", "align_corners == True")
-    w_scale = float(output_size[-1]) / input.type().sizes()[-1]
-    h_scale = float(output_size[-2]) / input.type().sizes()[-2]
-    return g.op("Upsample", input, width_scale_f=w_scale,
-                height_scale_f=h_scale, mode_s="bilinear")
+    height_scale = float(output_size[-2]) / input.type().sizes()[-2]
+    width_scale = float(output_size[-1]) / input.type().sizes()[-1]
+    return g.op("Upsample", input,
+                scales_f=[1., 1., height_scale, width_scale],
+                mode_s="bilinear")
 
 
 def gt(g, input, other):
     other = _maybe_get_scalar(other)
-    return g.op("Greater", input, _if_scalar_type_as(other, input), **_broadcast_if_scalar(other))
+    return g.op("Greater", input, _if_scalar_type_as(g, other, input))
 
 
 def lt(g, input, other):
     other = _maybe_get_scalar(other)
-    return g.op("Less", input, _if_scalar_type_as(other, input), **_broadcast_if_scalar(other))
+    return g.op("Less", input, _if_scalar_type_as(g, other, input))
 
 
 def ge(g, input, other):
@@ -600,6 +599,12 @@ def le(g, input, other):
 
 @parse_args('v', 'i')
 def log_softmax(g, input, dim=None):
+    # PyTorch dim and ONNX axis have different meanings.
+    # See Softmax comment for details.
+    if dim < 0:
+        dim = len(input.type().sizes()) + dim
+    if len(input.type().sizes()) != dim + 1:
+        return _unimplemented("dim", "ONNX and PyTorch use different strategies to split the input.")
     return g.op("LogSoftmax", input, axis_i=dim)
 
 
@@ -632,7 +637,7 @@ def _convolution(g, input, weight, bias, stride, padding, dilation,
     n = g.op("ConvTranspose" if transposed else "Conv", *args, **kwargs)
 
     if bias.node().kind() != "prim::Undefined" and len(bias.type().sizes()) != 1:
-        return g.op("Add", n, bias, broadcast_i=1, axis_i=1)
+        return g.op("Add", n, bias)
     else:
         return n
 
@@ -645,7 +650,6 @@ def batch_norm(g, input, weight, bias, running_mean, running_var, training, mome
         input = g.op("Unsqueeze", input, axes_i=[2])
 
     out = g.op("BatchNormalization", input, weight, bias, running_mean, running_var,
-               is_test_i=not training,
                epsilon_f=eps,
                momentum_f=1 - momentum,
                outputs=1 if not training else 5)
@@ -669,10 +673,12 @@ def unfold(g, input, dimension, size, step):
     return g.op("ATen", input, operator_s="unfold", dimension_i=dimension, size_i=size, step_i=step)
 
 
-@parse_args('v', 't', 't')
-def elu(g, input, alpha, scale):
+@parse_args('v', 't', 't', 't')
+def elu(g, input, alpha, scale, input_scale):
     if scale and scale != 1.:
         return _unimplemented("scale", "does not support scale in Elu")
+    if input_scale and input_scale != 1.:
+        return _unimplemented("input_scale", "does not support input_scale in Elu")
     # See Note [Export inplace]
     return g.op("Elu", input, alpha_f=_scalar(alpha))
 
@@ -686,8 +692,10 @@ def index_select(g, self, dim, index):
     return g.op("Gather", self, index, axis_i=dim)
 
 
-def index_put(g, *inputs):
-    return g.op("ATen", *inputs, operator_s='index_put')
+def index_put(g, self, indices_list_value, values):
+    indices_list = list(_unpack_list(indices_list_value))
+    args = [self] + indices_list + [values]
+    return g.op("ATen", *args, operator_s='index_put')
 
 
 def type_as(g, self, other):
@@ -713,12 +721,19 @@ def abs(g, self):
 
 def pow(g, self, exponent):
     exponent = _maybe_get_scalar(exponent)
-    return g.op("Pow", self, _if_scalar_type_as(exponent, self), **_broadcast_if_scalar(exponent))
+    return g.op("Pow", self, _if_scalar_type_as(g, exponent, self))
 
 
 @parse_args('v', 'f', 'f')
 def clamp(g, self, min, max):
-    return g.op("Clip", self, min_f=min, max_f=max)
+    # check min/max is NaN or not, and dispatch the call
+    # a != a means a == NaN
+    if min != min:
+        return clamp_max(g, self, max)
+    elif max != max:
+        return clamp_min(g, self, min)
+    else:
+        return g.op("Clip", self, min_f=min, max_f=max)
 
 
 @parse_args('v', 'f')
@@ -871,14 +886,17 @@ def topk(g, self, k, dim, largest, sorted, out=None):
     return g.op("TopK", self, k_i=k, axis_i=dim, outputs=2)
 
 
-@parse_args('v', 'is')
 def repeat(g, self, repeats):
-    if self.isTensor():
+    if not _is_value(repeats):
+        repeats = g.op("Constant", value_t=torch.LongTensor(repeats))
+    const_repeats = _maybe_get_const(repeats, 'is')
+
+    if self.isTensor() and not _is_value(const_repeats):
         sizes = self.type().sizes()
-        diff_dims = len(repeats) - len(sizes)
+        diff_dims = len(const_repeats) - len(sizes)
         if diff_dims > 0:
             self = view(g, self, [1] * diff_dims + sizes)
-    return g.op("Tile", self, g.op("Constant", value_t=torch.LongTensor(repeats)))
+    return g.op("Tile", self, repeats)
 
 
 def instance_norm(g, input, **kwargs):

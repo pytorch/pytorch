@@ -116,7 +116,7 @@ class IDeepFeeder : public BlobFeederBase {
      const auto npy_type = PyArray_TYPE(array);
      const TypeMeta& meta = NumpyTypeToCaffe(npy_type);
      CAFFE_ENFORCE(
-        meta.id() != CaffeTypeId::uninitialized(),
+        meta.id() != TypeIdentifier::uninitialized(),
         "This numpy data type is not supported: ",
         PyArray_TYPE(array),
         ".");

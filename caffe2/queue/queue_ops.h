@@ -146,7 +146,7 @@ class SafeDequeueBlobsOp final : public Operator<Context> {
       }
       for (int col = 0; col < size; ++col) {
         auto* out = this->Output(col);
-        const auto& in = blobPtrs_.at(col)->template Get<Tensor<Context>>();
+        const auto& in = blobPtrs_.at(col)->template Get<Tensor>();
         if (i == 0) {
           out->CopyFrom(in);
         } else {
