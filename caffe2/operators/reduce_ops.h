@@ -137,6 +137,7 @@ struct MinReducer {
         dims.data(),
         axes.size(),
         axes.data(),
+        T(1),
         X_data,
         Y_data,
         context);
@@ -168,6 +169,7 @@ struct MaxReducer {
         dims.data(),
         axes.size(),
         axes.data(),
+        T(1),
         X_data,
         Y_data,
         context);
@@ -199,6 +201,7 @@ struct SumReducer {
         dims.data(),
         axes.size(),
         axes.data(),
+        T(1),
         X_data,
         Y_data,
         context);
@@ -240,6 +243,7 @@ struct MeanReducer {
         dims.data(),
         axes.size(),
         axes.data(),
+        T(1),
         X_data,
         Y_data,
         context);
@@ -267,7 +271,7 @@ struct MeanReducer {
         dY_dims.cbegin(), dY_dims.cend(), 1, std::multiplies<int>());
     const int dX_size = std::accumulate(
         dX_dims.cbegin(), dX_dims.cend(), 1, std::multiplies<int>());
-    math::Scale<T, Context>(
+    math::Scale<T, T, Context>(
         dX_size,
         static_cast<float>(dY_size) / static_cast<float>(dX_size),
         dX_data,
@@ -291,6 +295,7 @@ struct L1Reducer {
         dims.data(),
         axes.size(),
         axes.data(),
+        T(1),
         X_data,
         Y_data,
         context);
@@ -322,6 +327,7 @@ struct L2Reducer {
         dims.data(),
         axes.size(),
         axes.data(),
+        T(1),
         X_data,
         Y_data,
         context);

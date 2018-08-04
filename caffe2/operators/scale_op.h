@@ -20,7 +20,7 @@ class ScaleOp final : public Operator<Context> {
     auto& X = Input(0);
     auto* Y = Output(0);
     Y->ResizeLike(X);
-    math::Scale<T, Context>(
+    math::Scale<float, T, Context>(
         X.size(),
         scale_,
         X.template data<T>(),

@@ -96,6 +96,7 @@ class ExpandGradientOp final : public Operator<Context> {
         dY_dims.data(),
         axes.size(),
         axes.data(),
+        T(1),
         dY.template data<T>(),
         dX->template mutable_data<T>(),
         &context_);

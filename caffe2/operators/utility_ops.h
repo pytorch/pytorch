@@ -1,7 +1,9 @@
 #ifndef CAFFE2_OPERATORS_UTILITY_OPS_H_
 #define CAFFE2_OPERATORS_UTILITY_OPS_H_
 
-#include <math.h>
+#include <cmath>
+#include <map>
+#include <utility>
 
 #include "caffe2/core/common_omp.h"
 #include "caffe2/core/context.h"
@@ -9,10 +11,8 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/core/types.h"
 #include "caffe2/operators/gather_op.h"
+#include "caffe2/utils/conversions.h"
 #include "caffe2/utils/math.h"
-
-#include <map>
-#include <utility>
 
 namespace caffe2 {
 
@@ -331,7 +331,7 @@ class WeightedSumOp : public Operator<Context> {
     int size = X0.size();
     auto* output = Output(0);
     output->ResizeLike(X0);
-    math::Scale<DstType, Context>(
+    math::Scale<float, DstType, Context>(
         size,
         weight0.template data<float>(),
         X0.template data<DstType>(),
@@ -388,7 +388,7 @@ class WeightedSumGradientOp : public Operator<Context> {
       auto* cur_dX = Output(i);
       cur_dX->ResizeLike(dY);
 
-      math::Scale<DstType, Context>(
+      math::Scale<float, DstType, Context>(
           size,
           cur_w.template data<float>(),
           dY_data,
@@ -521,8 +521,8 @@ class ScatterWeightedSumOp : public Operator<Context> {
       for (int i = 0; i < K; ++i) {
         Index idx = idxs[i];
         // double-checking the indices, but it's fine as it's DCHECK only
-        DCHECK(0 <= idx && idx < N) << "Index out of bounds: " << idx
-                                    << ", range 0 to " << N;
+        DCHECK(0 <= idx && idx < N)
+            << "Index out of bounds: " << idx << ", range 0 to " << N;
         math::AxpyFixedSize<T, Context, FixedSize>(
             block_size,
             w,
@@ -662,8 +662,8 @@ class ScatterAssignOp : public Operator<Context> {
     for (int i = 0; i < K; ++i) {
       Index idx = idxs[i];
       // double-checking the indices, but it's fine as it's DCHECK only
-      DCHECK(0 <= idx && idx < N) << "Index out of bounds: " << idx
-                                  << ", range 0 to " << N;
+      DCHECK(0 <= idx && idx < N)
+          << "Index out of bounds: " << idx << ", range 0 to " << N;
       context_.template CopySameDevice<T>(
           block_size, slicesData + block_size * i, data + block_size * idx);
     }
