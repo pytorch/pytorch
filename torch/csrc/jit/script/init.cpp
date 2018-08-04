@@ -3,7 +3,7 @@
 #include "torch/csrc/Device.h"
 #include "torch/csrc/Dtype.h"
 #include "torch/csrc/Layout.h"
-#include "torch/csrc/jit/export.h"
+#include "torch/csrc/jit/import.h"
 #include "torch/csrc/jit/script/compiler.h"
 
 #include "torch/csrc/jit/python_tracer.h"
@@ -432,8 +432,10 @@ void initJitScriptBindings(PyObject* module) {
   // public.
   py::class_<Module, std::shared_ptr<Module>>(m, "ScriptModule")
       .def(py::init<>())
-      .def("export", [](const std::shared_ptr<Module> m, const std::string& filename) {
-        ExportModule(m, filename);
+      .def("save", &Module::save)
+      .def("_load", [](const std::shared_ptr<script::Module> module,
+                       const std::string& filename) {
+        ImportIRModule(module, filename);
       })
       .def("_set_optimized", &Module::set_optimized)
       .def(

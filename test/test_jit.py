@@ -111,12 +111,10 @@ class JitTestCase(TestCase):
     _do_cuda_memory_leak_check = True
 
     def getExportImportCopy(self, m):
-        imported = torch.jit.ScriptModule()
         f = tempfile.NamedTemporaryFile()
-        m.export(f.name)
+        m.save(f.name)
         f.seek(0)
-        torch._C._jit_import_module(imported, f.name)
-        return imported
+        return torch.jit.load(f.name)
 
     def assertExpectedONNXGraph(self, trace, *args, **kwargs):
         torch.onnx._optimize_trace(trace, operator_export_type=OperatorExportTypes.ONNX)

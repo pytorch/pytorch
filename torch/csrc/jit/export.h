@@ -34,7 +34,7 @@ TORCH_API std::string PrettyPrintExportedGraph(
       = ::torch::onnx::OperatorExportTypes::ONNX);
 
 TORCH_API void ExportModule(
-    const std::shared_ptr<script::Module>& module,
+    const script::Module& module,
     const std::string& filename);
 
 }}

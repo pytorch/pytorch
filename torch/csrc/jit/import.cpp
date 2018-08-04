@@ -378,4 +378,10 @@ void ImportIRModule(
   ModuleDecoder(module, filename);
 }
 
+std::shared_ptr<script::Module> load(const std::string& filename) {
+  auto module = std::make_shared<script::Module>();
+  ModuleDecoder(module, filename);
+  return module;
+}
+
 }}
