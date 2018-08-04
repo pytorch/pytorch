@@ -111,10 +111,16 @@ class JitTestCase(TestCase):
     _do_cuda_memory_leak_check = True
 
     def getExportImportCopy(self, m):
-        f = tempfile.NamedTemporaryFile()
+        # Ideally we would like to not have to manually delete the file, but NamedTemporaryFile
+        # opens the file, and it cannot be opened multiple times in Windows. To support Windows,
+        # close the file after creation and try to remove it manually
+        f = tempfile.NamedTemporaryFile(delete=False)
+        f.close()
         m.save(f.name)
-        f.seek(0)
-        return torch.jit.load(f.name)
+        imported = torch.jit.load(f.name)
+        print(f.name)
+        os.unlink(f.name)
+        return imported
 
     def assertExpectedONNXGraph(self, trace, *args, **kwargs):
         torch.onnx._optimize_trace(trace, operator_export_type=OperatorExportTypes.ONNX)
