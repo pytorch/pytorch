@@ -82,9 +82,7 @@ void magmaGetrfBatched<float>(
   name = reinterpret_cast<type*>(storage_##name->pImpl()->data());
 
 template <typename scalar_t>
-static void applyInverse(
-    Tensor &self, Tensor &self_inv,
-    std::vector<int64_t>& getrf_infos, std::vector<int64_t>& getri_infos) {
+static void applyInverse(Tensor &self, Tensor &self_inv, std::vector<int64_t>& infos) {
 #ifndef USE_MAGMA
 AT_ERROR("inverse: MAGMA library not found in "
     "compilation. Please rebuild with MAGMA.");
@@ -97,15 +95,13 @@ AT_ERROR("inverse: MAGMA library not found in "
   magma_int_t batch_size = magma_int_cast(batchCount(self), "batchCount");
   magma_int_t n = magma_int_cast(self.size(-2), "self.size(-2)");
 
-  magma_int_t* getrf_info_array;
-  magma_int_t* getri_info_array;
+  magma_int_t* info_array;
   magma_int_t* ipiv_data;
   magma_int_t** ipiv_array;
   scalar_t** self_array;
   scalar_t** self_inv_array;
 
-  ALLOCATE_ARRAY(getrf_info_array, magma_int_t, batch_size, self);
-  ALLOCATE_ARRAY(getri_info_array, magma_int_t, batch_size, self);
+  ALLOCATE_ARRAY(info_array, magma_int_t, batch_size, self);
   ALLOCATE_ARRAY(ipiv_data, magma_int_t, batch_size * n, self);
   ALLOCATE_ARRAY(ipiv_array, magma_int_t*, batch_size, self);
   ALLOCATE_ARRAY(self_array, scalar_t*, batch_size, self);
@@ -118,35 +114,39 @@ AT_ERROR("inverse: MAGMA library not found in "
     ipiv_array[i] = &ipiv_data[i * self_mat_stride];
   }
 
+  // Create queue for both getrf and getri per batch
+  magma_queue_t inverse_magma_queue = createMagmaQueue(self);
+
   magmaGetrfBatched<scalar_t>(
-    n, n, self_array, n, ipiv_array, getrf_info_array,
-    batch_size, createMagmaQueue(self));
+    n, n, self_array, n, ipiv_array, info_array,
+    batch_size, inverse_magma_queue);
 
   for (int64_t i = 0; i < batch_size; i++) {
-    getrf_infos[i] = getrf_info_array[i];
+    infos[i] = info_array[i];
   }
+
+  // This is to pre-emptively stop compution if getrf fails
+  checkErrors(infos, "inverse");
 
   magmaGetriBatched<scalar_t>(
     n, self_array, n, ipiv_array, self_inv_array,
-    n, getri_info_array, batch_size, createMagmaQueue(self));
+    n, info_array, batch_size, inverse_magma_queue);
 
   for (int64_t i = 0; i < batch_size; i++) {
-    getri_infos[i] = getri_info_array[i];
+    infos[i] = info_array[i];
   }
 #endif
 }
 
 Tensor _inverse_helper_cuda(const Tensor& self) {
-  std::vector<int64_t> getrf_infos(batchCount(self), 0);
-  std::vector<int64_t> getri_infos(batchCount(self), 0);
+  std::vector<int64_t> infos(batchCount(self), 0);
   auto self_working_copy = cloneBatchedColumnMajor(self);
   auto self_inv_working_copy = cloneBatchedColumnMajor(self);
   AT_DISPATCH_FLOATING_TYPES(self.type(), "inverse", [&]{
     applyInverse<scalar_t>(
-      self_working_copy, self_inv_working_copy, getrf_infos, getri_infos);
+      self_working_copy, self_inv_working_copy, infos);
   });
-  checkErrors(getrf_infos, "getrf");
-  checkErrors(getri_infos, "getri");
+  checkErrors(infos, "inverse");
   return self_inv_working_copy;
 }
 

@@ -10,7 +10,6 @@
 #include "TH.h" // for USE_LAPACK
 
 #include <vector>
-#include <iostream>
 
 #ifdef USE_LAPACK
 extern "C" void dgetri_(
@@ -79,7 +78,7 @@ template<> void lapackGetrf<float>(
 
 template <typename scalar_t>
 static void applyInverse(
-  Tensor& self, std::vector<int64_t>& getrf_infos, std::vector<int64_t>& getri_infos) {
+  Tensor& self, std::vector<int64_t>& infos) {
 #ifndef USE_LAPACK
   AT_ERROR("inverse: LAPACK library not found in compilation");
 #endif
@@ -99,9 +98,8 @@ static void applyInverse(
     scalar_t* self_working_ptr = &self_data[i * self_matrix_stride];
     lapackGetrf<scalar_t>(n, n, self_working_ptr, n, ipiv.data<int>(),
                           &info);
-    getrf_infos[i] = info;
+    infos[i] = info;
     if (info != 0) {
-      std::cout << "F: " << info << std::endl;
       return;
     }
 
@@ -116,24 +114,21 @@ static void applyInverse(
     // now to compute the actual inverse
     lapackGetri<scalar_t>(n, self_working_ptr, n, ipiv.data<int>(),
                           work.data<scalar_t>(), lwork, &info);
-    getri_infos[i] = info;
+    infos[i] = info;
     if (info != 0) {
-      std::cout << "I: " << info << std::endl;
       return;
     }
   }
 }
 
 Tensor _inverse_helper_cpu(const Tensor& self) {
-  std::vector<int64_t> getrf_infos(batchCount(self), 0);
-  std::vector<int64_t> getri_infos(batchCount(self), 0);
+  std::vector<int64_t> infos(batchCount(self), 0);
   auto self_working_copy = cloneBatchedColumnMajor(self);
   AT_DISPATCH_FLOATING_TYPES(self.type(), "inverse", [&]{
-    applyInverse<scalar_t>(self_working_copy, getrf_infos, getri_infos);
+    applyInverse<scalar_t>(self_working_copy, infos);
   });
   
-  checkErrors(getrf_infos, "getrf");
-  checkErrors(getri_infos, "getri");
+  checkErrors(infos, "inverse");
   return self_working_copy;
 }
 
