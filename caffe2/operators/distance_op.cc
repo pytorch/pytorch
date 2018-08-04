@@ -177,7 +177,7 @@ bool CosineSimilarityGradientOp<float, CPUContext>::RunOnDevice() {
     math::Dot<float, CPUContext>(
         D, X_data + offset, Y_data + offset, &XY, &context_);
 
-    math::Scale<float, CPUContext>(
+    math::Scale<float, float, CPUContext>(
         D, dCos_data[i] / XYN, Y_data + offset, dX_data + offset, &context_);
     math::Axpy(
         D,
@@ -186,7 +186,7 @@ bool CosineSimilarityGradientOp<float, CPUContext>::RunOnDevice() {
         dX_data + offset,
         &context_);
 
-    math::Scale<float, CPUContext>(
+    math::Scale<float, float, CPUContext>(
         D, dCos_data[i] / XYN, X_data + offset, dY_data + offset, &context_);
     math::Axpy(
         D,
@@ -282,9 +282,9 @@ bool DotProductGradientOp<float, CPUContext>::RunOnDevice() {
   auto* dY_data = dY->template mutable_data<float>();
   for (int i = 0; i < N; ++i) { // TODO: multithreading
     auto offset = i * D;
-    math::Scale<float, CPUContext>(
+    math::Scale<float, float, CPUContext>(
         D, dDot_data[i], X_data + offset, dY_data + offset, &context_);
-    math::Scale<float, CPUContext>(
+    math::Scale<float, float, CPUContext>(
         D, dDot_data[i], Y_data + offset, dX_data + offset, &context_);
   }
   return true;
