@@ -601,7 +601,7 @@ class clean(distutils.command.clean.clean):
         import re
         with open('.gitignore', 'r') as f:
             ignores = f.read()
-            pat = re.compile('^#( BEGIN NOT-CLEAN-FILES )*')
+            pat = re.compile(r'^#( BEGIN NOT-CLEAN-FILES )?')
             for wildcard in filter(None, ignores.split('\n')):
                 match = pat.match(wildcard)
                 if match:
