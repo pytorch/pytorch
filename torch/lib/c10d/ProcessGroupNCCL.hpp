@@ -128,6 +128,17 @@ class ProcessGroupNCCL : public ProcessGroup {
       std::vector<std::vector<at::Tensor>>& inputTensors,
       const ScatterOptions& opts = ScatterOptions()) override;
 
+  std::shared_ptr<ProcessGroup::Work> send(
+      std::vector<at::Tensor>& tensors, int dstRank) override;
+
+  std::shared_ptr<ProcessGroup::Work> recv(
+      std::vector<at::Tensor>& tensors, int srcRank) override;
+
+  std::shared_ptr<ProcessGroup::Work> recvAnysource(
+      std::vector<at::Tensor>& tensors, int* srcRank) override;
+
+  std::shared_ptr<ProcessGroup::Work> barrier() override;
+
  protected:
   // Helper that broadcasts nccl unique ID to all ranks through the store
   void broadcastUniqueNCCLID(ncclUniqueId* ncclID);

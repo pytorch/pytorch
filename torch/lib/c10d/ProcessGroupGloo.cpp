@@ -595,4 +595,23 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::scatter(
   throw std::runtime_error("ProcessGroupGloo does not support scatter");
 }
 
+std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::send(
+    std::vector<at::Tensor>& tensors, int dstRank) {
+  throw std::runtime_error("ProcessGroupGloo does not support send");
+}
+
+std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::recv(
+    std::vector<at::Tensor>& tensors, int srcRank) {
+  throw std::runtime_error("ProcessGroupGloo does not support recv");
+}
+
+std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::recvAnysource(
+    std::vector<at::Tensor>& tensors, int* srcRank) {
+  throw std::runtime_error("ProcessGroupGloo does not support recv");
+}
+
+std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::barrier() {
+  throw std::runtime_error("ProcessGroupGloo does not support barrier");
+}
+
 } // namespace c10d
