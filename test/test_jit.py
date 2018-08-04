@@ -5598,8 +5598,8 @@ EXCLUDE_TRACED = {
     'test_gesv',
     'test_gesv_batched',
     'test_gesv_batched_dims',
-    'test_gesv_broadcast_A',
-    'test_gesv_broadcast_b',
+    'test_gesv_batched_broadcast_A',
+    'test_gesv_batched_broadcast_b',
     'test_inverse',
     'test_inverse_batched',
 }
@@ -5658,8 +5658,8 @@ EXCLUDE_SCRIPT = {
     'test_gesv',
     'test_gesv_batched',
     'test_gesv_batched_dims',
-    'test_gesv_broadcast_A',
-    'test_gesv_broadcast_b',
+    'test_gesv_batched_broadcast_A',
+    'test_gesv_batched_broadcast_b',
     'test_inverse',
     'test_inverse_batched',
 }
