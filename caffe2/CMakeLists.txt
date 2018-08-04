@@ -289,7 +289,10 @@ if (MSVC AND NOT BUILD_SHARED_LIBS)
   # if a user is already in the business of static linkage, they're
   # already in "expert user" realm.  So, I've decided that at this
   # point in time, the simplicity of implementation of (2) wins out.
-  target_compile_options(caffe2 PUBLIC "-DAT_CORE_STATIC_WINDOWS=1")
+  #
+  # NB: This must be target_compile_definitions, not target_compile_options,
+  # as the latter is not respected by nvcc
+  target_compile_definitions(caffe2 PUBLIC "AT_CORE_STATIC_WINDOWS=1")
 endif()
 # Use -O2 for release builds (-O3 doesn't improve perf, and -Os results in perf regression)
 target_compile_options(caffe2 PRIVATE "$<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-O2>")

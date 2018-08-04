@@ -63,7 +63,7 @@ SparseTensor new_sparse(const SparseType& dtype) {
   AT_ASSERT(!dtype.is_variable());
   AT_ASSERT(dtype.is_sparse());
   // TODO: Hmm... this const_cast business seems a bit dodgy
-  return SparseTensor(new SparseTensorImpl(const_cast<SparseType*>(&dtype)), /* retain */ false);
+  return SparseTensor(new SparseTensorImpl(dtype.backend(), dtype.scalarType()), /* retain */ false);
 }
 
 /*** Helper methods ***/

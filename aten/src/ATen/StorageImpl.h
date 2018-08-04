@@ -17,18 +17,17 @@
 //    weakcount == number of weak references to the object,
 //      plus one more if refcount > 0
 //
-//  - StorageImpl stays live as long as there are any strong
+//  - the underlying object stays live as long as there are any strong
 //    or weak pointers to it (weakcount > 0, since strong
 //    references count as a +1 to weakcount)
 //
-//  - finalizers are called and data_ptr is deallocated when refcount == 0
+//  - underlying_object::release_resources() is called when refcount == 0
+//
+//  - the underlying object is destructed when weakcount == 0 (which implies
+//  refcount == 0)
 //
 //  - Once refcount == 0, it can never again be > 0 (the transition
 //    from > 0 to == 0 is monotonic)
-//
-//  - When you access StorageImpl via a weak pointer, you must
-//    atomically increment the use count, if it is greater than 0.
-//    If it is not, you must report that the storage is dead.
 //
 
 struct THFinalizer {
@@ -41,31 +40,27 @@ namespace at {
 struct Type;
 
 struct AT_API StorageImpl : public Retainable {
-
+ public:
   StorageImpl() = delete;
   virtual ~StorageImpl() {};
   StorageImpl(at::ScalarType, ptrdiff_t, at::DataPtr, at::Allocator*, bool);
   StorageImpl(at::ScalarType, ptrdiff_t, at::Allocator*, bool);
-  at::ScalarType scalar_type;
-  at::DataPtr data_ptr;
-  ptrdiff_t size;
-  bool resizable;
-  at::Allocator* allocator;
-  std::unique_ptr<THFinalizer> finalizer;
   StorageImpl(StorageImpl&) = delete;
   StorageImpl(const StorageImpl&) = delete;
-  StorageImpl(StorageImpl&&) = delete;
+  // NB: Don't move ref count!
+  StorageImpl(StorageImpl&& other) = delete;
   StorageImpl(const StorageImpl&&) = delete;
+  StorageImpl& operator=(StorageImpl&& other) = delete;
 
   // TODO: Rename this into th_data, and move it out of the class;
   // the real data shouldn't call th::from_type
   template <typename T>
   inline T* data() const {
     auto scalar_type_T = at::CTypeToScalarType<th::from_type<T>>::to();
-    if (scalar_type != scalar_type_T) {
+    if (scalar_type_ != scalar_type_T) {
       AT_ERROR(
           "Attempt to access StorageImpl having data type ",
-          at::toString(scalar_type),
+          at::toString(scalar_type_),
           " as data type ",
           at::toString(scalar_type_T));
     }
@@ -74,42 +69,75 @@ struct AT_API StorageImpl : public Retainable {
 
   template <typename T>
   inline T* unsafe_data() const {
-    return static_cast<T*>(this->data_ptr.get());
+    return static_cast<T*>(this->data_ptr_.get());
   }
 
   void release_resources() {
-    if (finalizer) {
-      (*finalizer)();
+    if (finalizer_) {
+      (*finalizer_)();
     }
-    finalizer = nullptr;
-    data_ptr.clear();
+    finalizer_ = nullptr;
+    data_ptr_.clear();
   }
 
   void operator=(const StorageImpl&) = delete;
 
   virtual size_t elementSize() const {
-    return at::elementSize(scalar_type);
+    return at::elementSize(scalar_type_);
   }
 
   Type& type();
 
-  //TODO: Rename to size() and size to size_
-  size_t get_size() const { 
-    return size;
+  // TODO: Rename to size() and size to size_
+  ptrdiff_t size() const {
+    return size_;
+  };
+  void set_size(ptrdiff_t size) {
+    size_ = size;
+  };
+  bool resizable() const {
+    return resizable_;
+  };
+  at::DataPtr& data_ptr() {
+    return data_ptr_;
+  };
+  void set_data_ptr(at::DataPtr&& data_ptr) {
+    data_ptr_ = std::move(data_ptr);
   };
   void* data() {
-    return data_ptr.get();
+    return data_ptr_.get();
   };
   const void* data() const {
-    return data_ptr.get();
+    return data_ptr_.get();
   };
-
+  at::Allocator* allocator() {
+    return allocator_;
+  };
+  at::ScalarType& scalar_type() {
+    return scalar_type_;
+  };
+  const at::Allocator* allocator() const {
+    return allocator_;
+  };
   int getDevice() const {
-    return data_ptr.device().index();
+    return data_ptr_.device().index();
   }
-  void set_resizable(bool resizable_) {
-    resizable = resizable_;
+  void set_resizable(bool resizable) {
+    resizable_ = resizable;
   }
+
+ private:
+  at::ScalarType scalar_type_;
+  at::DataPtr data_ptr_;
+  ptrdiff_t size_;
+  bool resizable_;
+
+ public:
+  at::Allocator* allocator_;
+  std::unique_ptr<THFinalizer> finalizer_;
 };
 
+namespace detail {
+AT_API Backend get_backend(StorageImpl* storage_impl);
+}
 } // namespace at

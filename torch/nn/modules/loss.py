@@ -872,7 +872,7 @@ class MultiLabelSoftMarginLoss(_WeightedLoss):
     For each sample in the minibatch:
 
     .. math::
-        loss(x, y) = - \sum_i y[i] * \log((1 + \exp(-x[i]))^{-1})
+        loss(x, y) = - \frac{1}{C} * \sum_i y[i] * \log((1 + \exp(-x[i]))^{-1})
                          + (1-y[i]) * \log\left(\frac{\exp(-x[i])}{(1 + \exp(-x[i]))}\right)
 
     where `i == 0` to `x.nElement()-1`, `y[i]  in {0,1}`.
@@ -1143,15 +1143,15 @@ class CTCLoss(_Loss):
             then the mean over the batch is taken. Default: 'elementwise_mean'
 
     Inputs:
-        log_probs: :math:`(T, N, C)` where `C = number of characters in alphabet including blank`,
+        log_probs: Tensor of size :math:`(T, N, C)` where `C = number of characters in alphabet including blank`,
             `T = input length`, and `N = batch size`.
             The logarithmized probabilities of the outputs
             (e.g. obtained with :func:`torch.nn.functional.log_softmax`).
-        targets: :math:`(N, S)` or `(sum(target_lenghts))`.
+        targets: Tensor of size :math:`(N, S)` or `(sum(target_lenghts))`.
             Targets (cannot be blank). In the second form, the targets are assumed to be concatenated.
-        input_lengths: :math:`(N)`.
+        input_lengths: Tuple or tensor of size :math:`(N)`.
             Lengths of the inputs (must each be :math:`\leq T`)
-        target_lengths: :math:`(N)`.
+        target_lengths: Tuple or tensor of size  :math:`(N)`.
             Lengths of the targets
 
 
@@ -1174,7 +1174,7 @@ class CTCLoss(_Loss):
         In order to use CuDNN, the following must be satisfied: :attr:`targets` must be
         in concatenated format, all :attr:`input_lengths` must be `T`.  :math:`blank=0`,
         :attr:`target_lengths` :math:`\leq 256`, the integer arguments must be of
-        :class:`torch.IntTensor`.
+        dtype :attr:`torch.int32`.
 
         The regular implementation uses the (more common in PyTorch) `torch.long` dtype.
     """

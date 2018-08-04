@@ -95,6 +95,7 @@ class OnnxifiOp final : public Operator<Context> {
     CAFFE_ENFORCE_EQ(
         lib_->onnxInitGraph(
             backend_,
+            nullptr,
             onnx_model_str.size(),
             (void*)(onnx_model_str.c_str()),
             weight_descs.size(),
