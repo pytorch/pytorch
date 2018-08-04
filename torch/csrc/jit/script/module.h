@@ -140,7 +140,7 @@ struct Method {
     return *this;
   }
 
-  const FunctionSchema& getSchema() const noexcept {
+  const FunctionSchema& getSchema() const {
     AT_ASSERT(schema != nullptr);
     return *schema;
   }
