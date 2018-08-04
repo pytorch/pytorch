@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ATen/core/ATenGeneral.h"
+#include "ATen/ATenGeneral.h"
 #include "ATen/core/ArrayRef.h"
 #include "ATen/core/Half.h"
 
