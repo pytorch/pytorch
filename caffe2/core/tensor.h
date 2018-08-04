@@ -189,7 +189,6 @@ class Tensor {
       dims_.clear();
       size_ = -1;
       data_.reset();
-      shares_data_ = false;
       capacity_ = 0;
       reserved_ = false;
       return;
@@ -415,7 +414,6 @@ class Tensor {
     std::swap(size_, other.size_);
     std::swap(meta_, other.meta_);
     std::swap(data_, other.data_);
-    std::swap(shares_data_, other.shares_data_);
     std::swap(capacity_, other.capacity_);
     std::swap(reserved_, other.reserved_);
     std::swap(device_type_, other.device_type_);
@@ -448,7 +446,6 @@ class Tensor {
     // Finally, do sharing.
     data_ = src.data_;
     capacity_ = src.capacity_;
-    shares_data_ = true;
   }
 
   /**
@@ -494,11 +491,6 @@ class Tensor {
     } else {
       capacity_ = nbytes();
     }
-    shares_data_ = true;
-  }
-
-  bool shares_data() const {
-    return shares_data_;
   }
 
   /**
@@ -747,7 +739,6 @@ class Tensor {
   TIndex size_ = -1;
   TypeMeta meta_;
   std::shared_ptr<void> data_;
-  bool shares_data_ = false;
   size_t capacity_ = 0;
   bool reserved_ = false;
   DeviceType device_type_ = CPU;
@@ -827,6 +818,9 @@ using TensorCPU = Tensor;
 
 constexpr int k_limit_default_ = 1000;
 
+// TODO: the following logic can be merged into regular Tensor class methods
+// after MKLMemory starts to implement Tensor interface
+
 // Type call registry
 typedef TypeMeta (*TypeCall)(const void*);
 TypeCall GetTypeCallFunction(TypeIdentifier id);
@@ -835,7 +829,6 @@ void RegisterTypeCallFunction(TypeIdentifier id, TypeCall c);
 // Shape call registry
 typedef vector<TIndex> (*TensorInfoCall)(
     const void*,
-    bool* shares_data,
     size_t* capacity,
     DeviceOption* device);
 TensorInfoCall GetTensorInfoFunction(TypeIdentifier id);

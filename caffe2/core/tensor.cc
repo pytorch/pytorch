@@ -87,11 +87,9 @@ int GetGPUIDForPointer(const void* ptr);
 
 vector<TIndex> GetTensorInfo(
     const void* c,
-    bool* shares_data,
     size_t* capacity,
     DeviceOption* device) {
   const Tensor* tc = static_cast<const Tensor*>(c);
-  *shares_data = tc->shares_data();
   *capacity = tc->capacity_nbytes();
   tc->ExtractDeviceOption(device);
   return tc->dims();
