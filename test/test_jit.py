@@ -5596,7 +5596,12 @@ EXCLUDE_TRACED = {
     'test_split_dim',
     'test_split_dim_neg0',
     'test_gesv',
+    'test_gesv_batched',
+    'test_gesv_batched_dims',
+    'test_gesv_broadcast_A',
+    'test_gesv_broadcast_b',
     'test_inverse',
+    'test_inverse_batched',
 }
 
 # known to be failing in script
@@ -5651,7 +5656,12 @@ EXCLUDE_SCRIPT = {
     'test_split_dim',
     'test_split_dim_neg0',
     'test_gesv',
+    'test_gesv_batched',
+    'test_gesv_batched_dims',
+    'test_gesv_broadcast_A',
+    'test_gesv_broadcast_b',
     'test_inverse',
+    'test_inverse_batched',
 }
 
 
