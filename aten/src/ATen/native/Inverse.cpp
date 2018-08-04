@@ -133,6 +133,9 @@ Tensor _inverse_helper_cpu(const Tensor& self) {
 }
 
 Tensor inverse(const Tensor &self) {
+  if (self.size(-1) == 0) {
+    return at::empty_like(self);
+  }
   if (self.dim() == 2) {
     return at::_getri_single(self);
   }
@@ -141,6 +144,9 @@ Tensor inverse(const Tensor &self) {
 }
 
 Tensor& inverse_out(Tensor &result, const Tensor &self) {
+  if (self.size(-1) == 0) {
+    return result.resize_as_(self);
+  }
   result.copy_(native::inverse(self));
   return result;
 }

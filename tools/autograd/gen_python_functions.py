@@ -26,7 +26,7 @@ SKIP_PYTHON_BINDINGS = [
     'index',
     '_indexCopy_', 'max_values', 'min_values', 'argmax', 'argmin',
     '_cumsum.*', '_cumprod.*', '_sum.*', '_prod.*', '_th_.*',
-    'arange.*', 'range.*', '_gesv.*', '_getri.*', 'slice',
+    'arange.*', 'range.*', '_gesv.*', '_getri.*', '_inverse.*', 'slice',
     '_local_scalar', '_local_scalar_dense',
     'max_pool1d', 'max_pool2d', 'max_pool3d'
 ]
