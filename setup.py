@@ -598,14 +598,23 @@ class clean(distutils.command.clean.clean):
 
     def run(self):
         import glob
+        import re
         with open('.gitignore', 'r') as f:
             ignores = f.read()
-            for wildcard in filter(bool, ignores.split('\n')):
-                for filename in glob.glob(wildcard):
-                    try:
-                        os.remove(filename)
-                    except OSError:
-                        shutil.rmtree(filename, ignore_errors=True)
+            pat = re.compile('^#( BEGIN NOT-CLEAN-FILES )*')
+            for wildcard in filter(None, ignores.split('\n')):
+                match = pat.match(wildcard)
+                if match:
+                    if match.group(1):
+                        # Marker is found and stop reading .gitignore.
+                        break
+                    # Ignore lines which begin with '#'.
+                else:
+                    for filename in glob.glob(wildcard):
+                        try:
+                            os.remove(filename)
+                        except OSError:
+                            shutil.rmtree(filename, ignore_errors=True)
 
         # It's an old-style class in Python 2.7...
         distutils.command.clean.clean.run(self)

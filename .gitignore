@@ -141,10 +141,6 @@ docs/source/scripts/activation_images/
 # PyCharm files
 .idea
 
-# Visual Studio Code files
-.vscode
-.vs
-
 # OSX dir files
 .DS_Store
 
@@ -195,3 +191,11 @@ caffe2.egg-info
 
 # Atom/Watchman required file
 .watchmanconfig
+
+# BEGIN NOT-CLEAN-FILES (setup.py handles this marker. Do not change.)
+#
+# Below files are not deleted by "setup.py clean".
+
+# Visual Studio Code files
+.vscode
+.vs
