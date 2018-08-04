@@ -21,24 +21,26 @@ namespace native {
 #ifdef USE_MAGMA
 
 template<class scalar_t>
-void magmaGesv(
+int magmaGesv(
     int64_t n, int64_t nrhs, scalar_t* A_data, int64_t lda,
     int* ipiv, scalar_t* B_data, int64_t ldb, int* info) {
-  AT_ERROR("magma: gesv only takes float or double Tensors");
+  return -1;
 }
 
 template<>
-void magmaGesv<float>(
+int magmaGesv<float>(
     int64_t n, int64_t nrhs, float* A_data, int64_t lda,
     int* ipiv, float* B_data, int64_t ldb, int* info) {
   magma_sgesv_gpu(n, nrhs, A_data, lda, ipiv, B_data, ldb, info);
+  return 0;
 }
 
 template<>
-void magmaGesv<double>(
+int magmaGesv<double>(
     int64_t n, int64_t nrhs, double* A_data, int64_t lda,
     int* ipiv, double* B_data, int64_t ldb, int* info) {
   magma_dgesv_gpu(n, nrhs, A_data, lda, ipiv, B_data, ldb, info);
+  return 0;
 }
 
 template<class scalar_t>
@@ -176,9 +178,8 @@ AT_ERROR("gesv: MAGMA library not found in "
   int64_t by = (self.dim() == 1) ? 1 : self.size(1);
   int64_t ax = A.size(0);
   int64_t ay = A.size(1);
-  int info;
+  int info, res;
   int* ipiv;
-
   at::optional<Tensor> temp_sol;
   at::optional<Tensor> temp_lu;
 
@@ -236,7 +237,7 @@ AT_ERROR("gesv: MAGMA library not found in "
       auto b_ptr = temp_sol ? temp_sol.value().data<scalar_t>()
                             : sol.data<scalar_t>();
       ALLOCATE_ARRAY(ipiv, int, bx, sol);
-      magmaGesv<scalar_t>(bx, by, A_ptr, bx, ipiv, b_ptr, bx, &info);
+      res = magmaGesv<scalar_t>(bx, by, A_ptr, bx, ipiv, b_ptr, bx, &info);
   });
 
   if (temp_sol) {
@@ -251,6 +252,9 @@ AT_ERROR("gesv: MAGMA library not found in "
     lu = lu.t();
   }
 
+  if (res == -1) {
+    AT_ERROR("magma: gesv only takes float or double Tensors");
+  }
   checkErrors({info});
   return std::tuple<Tensor&,Tensor&>(sol, lu);
 #endif

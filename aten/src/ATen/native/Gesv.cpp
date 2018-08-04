@@ -23,23 +23,25 @@ extern "C" void sgesv_(
 namespace at { namespace native {
 
 template<class scalar_t>
-void lapackGesv(
+int lapackGesv(
     int n, int nrhs, scalar_t* a, int lda, int* ipiv,
     scalar_t* b, int ldb, int* info) {
-  AT_ERROR("gesv only takes float or double Tensors");
+  return -1;
 }
 
 #ifdef USE_LAPACK
-template<> void lapackGesv<float>(
+template<> int lapackGesv<float>(
     int n, int nrhs, float* a, int lda, int* ipiv,
     float* b, int ldb, int* info) {
   sgesv_(&n, &nrhs, a, &lda, ipiv, b, &ldb, info);
+  return 0;
 }
 
-template<> void lapackGesv<double>(
+template<> int lapackGesv<double>(
     int n, int nrhs, double* a, int lda, int* ipiv,
     double* b, int ldb, int* info) {
   dgesv_(&n, &nrhs, a, &lda, ipiv, b, &ldb, info);
+  return 0;
 }
 #endif
 
@@ -88,8 +90,7 @@ std::tuple<Tensor&,Tensor&> _gesv_single_out_cpu(
   int64_t by = (self.dim() == 1) ? 1 : self.size(1);
   int64_t ax = A.size(0);
   int64_t ay = A.size(1);
-  int info = 0;
-
+  int info, res;
   at::optional<Tensor> temp_sol;
   at::optional<Tensor> temp_lu;
 
@@ -151,7 +152,8 @@ std::tuple<Tensor&,Tensor&> _gesv_single_out_cpu(
     auto b_ptr = temp_sol ? temp_sol.value().data<scalar_t>()
                           : sol.data<scalar_t>();
     auto ipiv = at::empty({bx}, sol.options().dtype(kInt));
-    lapackGesv<scalar_t>(bx, by, A_ptr, bx, ipiv.data<int>(), b_ptr, bx, &info);
+    res = lapackGesv<scalar_t>(bx, by, A_ptr, bx, ipiv.data<int>(),
+                               b_ptr, bx, &info);
   });
 
   if (temp_sol) {
@@ -166,6 +168,9 @@ std::tuple<Tensor&,Tensor&> _gesv_single_out_cpu(
     lu = lu.t();
   }
 
+  if (res == -1) {
+    AT_ERROR("gesv only takes float or double Tensors");
+  }
   checkErrors({info});
   return std::tuple<Tensor&, Tensor&>(sol, lu);
 }
