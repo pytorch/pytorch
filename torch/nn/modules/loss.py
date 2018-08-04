@@ -872,7 +872,7 @@ class MultiLabelSoftMarginLoss(_WeightedLoss):
     For each sample in the minibatch:
 
     .. math::
-        loss(x, y) = - \sum_i y[i] * \log((1 + \exp(-x[i]))^{-1})
+        loss(x, y) = - \frac{1}{C} * \sum_i y[i] * \log((1 + \exp(-x[i]))^{-1})
                          + (1-y[i]) * \log\left(\frac{\exp(-x[i])}{(1 + \exp(-x[i]))}\right)
 
     where `i == 0` to `x.nElement()-1`, `y[i]  in {0,1}`.
