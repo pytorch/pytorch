@@ -253,6 +253,7 @@ void Broadcast(
     const int* X_dims,
     const int Y_ndim,
     const int* Y_dims,
+    const T alpha,
     const T* X,
     T* Y,
     Context* context);

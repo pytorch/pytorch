@@ -2262,7 +2262,7 @@ void Axpy<float16, CUDAContext>(
       context->cublas_handle(),
       N,
       &alpha,
-      CUDA_R_16F,
+      CUDA_R_32F,
       X,
       CUDA_R_16F,
       1,
@@ -2272,42 +2272,39 @@ void Axpy<float16, CUDAContext>(
       CUDA_R_32F));
 }
 
-namespace {
-template <typename T>
-__global__ void AxpyKernel(const int n, const float* a, const T* x, T* y) {
-  CUDA_1D_KERNEL_LOOP(index, n) {
-    y[index] = convert::Get<T>(
-        convert::Get<float>(x[index]) * (*a) + convert::Get<float>(y[index]));
-  }
-}
-} // namespace
-
 template <>
 void Axpy<float, CUDAContext>(
-    const int n,
+    const int N,
     const float* alpha,
     const float* X,
     float* Y,
     CUDAContext* context) {
-  AxpyKernel<float>
-      <<<CAFFE_GET_BLOCKS(n),
-         CAFFE_CUDA_NUM_THREADS,
-         0,
-         context->cuda_stream()>>>(n, alpha, X, Y);
+  CUBLAS_ENFORCE(cublasSetPointerMode(
+      context->cublas_handle(), CUBLAS_POINTER_MODE_DEVICE));
+  CUBLAS_ENFORCE(cublasSaxpy(context->cublas_handle(), N, alpha, X, 1, Y, 1));
 }
 
 template <>
 void Axpy<float16, CUDAContext>(
-    const int n,
+    const int N,
     const float* alpha,
     const float16* X,
     float16* Y,
     CUDAContext* context) {
-  AxpyKernel<float16>
-      <<<CAFFE_GET_BLOCKS(n),
-         CAFFE_CUDA_NUM_THREADS,
-         0,
-         context->cuda_stream()>>>(n, alpha, X, Y);
+  CUBLAS_ENFORCE(cublasSetPointerMode(
+      context->cublas_handle(), CUBLAS_POINTER_MODE_DEVICE));
+  CUBLAS_ENFORCE(cublasAxpyEx(
+      context->cublas_handle(),
+      N,
+      alpha,
+      CUDA_R_32F,
+      X,
+      CUDA_R_16F,
+      1,
+      Y,
+      CUDA_R_16F,
+      1,
+      CUDA_R_32F));
 }
 
 namespace {
@@ -3387,7 +3384,8 @@ template <typename T, int D>
 __global__ void BroadcastCUDAKernel(
     const int Y_size,
     const SimpleArray<int, D> X_strides,
-    const SimpleArray<int, D> Y_dims,
+    const SimpleArray<FixedDivisor<int>, D> Y_dims,
+    const T alpha,
     const T* X,
     T* Y) {
   CUDA_1D_KERNEL_LOOP(Y_index, Y_size) {
@@ -3395,13 +3393,14 @@ __global__ void BroadcastCUDAKernel(
     int Y_index_val = Y_index;
 #pragma unroll
     for (int i = D - 1; i >= 0; --i) {
-      X_index += (Y_index_val % Y_dims.data[i]) * X_strides.data[i];
-      Y_index_val /= Y_dims.data[i];
+      int d;
+      Y_dims.data[i].DivMod(Y_index_val, &Y_index_val, &d);
+      X_index += d * X_strides.data[i];
     }
 #if __CUDA_ARCH__ >= 350
-    Y[Y_index] = __ldg(X + X_index);
+    Y[Y_index] = __ldg(X + X_index) * alpha;
 #else
-    Y[Y_index] = X[X_index];
+    Y[Y_index] = X[X_index] * alpha;
 #endif
   }
 }
@@ -3411,11 +3410,12 @@ void BroadcastCUDAImpl(
     const int X_ndim,
     const int* X_dims,
     const int* Y_dims,
+    const T alpha,
     const T* X,
     T* Y,
     CUDAContext* context) {
   SimpleArray<int, D> X_strides_array;
-  SimpleArray<int, D> Y_dims_array;
+  SimpleArray<FixedDivisor<int>, D> Y_dims_array;
   const int d = D - X_ndim;
   std::fill(X_strides_array.data, X_strides_array.data + d, 0);
   int cur_stride = 1;
@@ -3424,31 +3424,47 @@ void BroadcastCUDAImpl(
     X_strides_array.data[i] = X_dims[i - d] == 1 ? 0 : cur_stride;
     cur_stride *= X_dims[i - d];
   }
-  std::copy_n(Y_dims, D, Y_dims_array.data);
+  for (int i = 0; i < D; ++i) {
+    if (Y_dims[i] == 0) {
+      return;
+    }
+    Y_dims_array.data[i] = FixedDivisor<int>(Y_dims[i]);
+  }
   const int Y_size =
       std::accumulate(Y_dims, Y_dims + D, 1, std::multiplies<int>());
   BroadcastCUDAKernel<T, D>
       <<<CAFFE_GET_BLOCKS(Y_size),
          CAFFE_CUDA_NUM_THREADS,
          0,
-         context->cuda_stream()>>>(Y_size, X_strides_array, Y_dims_array, X, Y);
+         context->cuda_stream()>>>(
+          Y_size, X_strides_array, Y_dims_array, alpha, X, Y);
 }
 
 } // namespace
 
-#define CAFFE2_SPECIALIZED_CUDA_BROADCAST(T)                                  \
-  template <>                                                                 \
-  void Broadcast<T, CUDAContext>(                                             \
-      const int X_ndim,                                                       \
-      const int* X_dims,                                                      \
-      const int Y_ndim,                                                       \
-      const int* Y_dims,                                                      \
-      const T* X,                                                             \
-      T* Y,                                                                   \
-      CUDAContext* context) {                                                 \
-    CAFFE_ENFORCE_LE(X_ndim, Y_ndim);                                         \
-    DISPATCH_FUNCTION_BY_VALUE_WITH_TYPE_1(                                   \
-        Y_ndim, BroadcastCUDAImpl, T, X_ndim, X_dims, Y_dims, X, Y, context); \
+#define CAFFE2_SPECIALIZED_CUDA_BROADCAST(T) \
+  template <>                                \
+  void Broadcast<T, CUDAContext>(            \
+      const int X_ndim,                      \
+      const int* X_dims,                     \
+      const int Y_ndim,                      \
+      const int* Y_dims,                     \
+      const T alpha,                         \
+      const T* X,                            \
+      T* Y,                                  \
+      CUDAContext* context) {                \
+    CAFFE_ENFORCE_LE(X_ndim, Y_ndim);        \
+    DISPATCH_FUNCTION_BY_VALUE_WITH_TYPE_1(  \
+        Y_ndim,                              \
+        BroadcastCUDAImpl,                   \
+        T,                                   \
+        X_ndim,                              \
+        X_dims,                              \
+        Y_dims,                              \
+        alpha,                               \
+        X,                                   \
+        Y,                                   \
+        context);                            \
   }
 CAFFE2_SPECIALIZED_CUDA_BROADCAST(std::int32_t)
 CAFFE2_SPECIALIZED_CUDA_BROADCAST(std::int64_t)
