@@ -1226,6 +1226,9 @@ __global__ void SetKernel(const int N, const T alpha, T* Y) {
   template <>                                                     \
   void Set<T, HIPContext>(                                        \
       const size_t N, const T alpha, T* Y, HIPContext* context) { \
+    if (N == 0) {                                                 \
+      return;                                                     \
+    }                                                             \
     hipLaunchKernelGGL(                                           \
         (SetKernel),                                              \
         CAFFE_GET_BLOCKS(N),                                      \
@@ -3026,6 +3029,7 @@ __global__ void BroadcastHIPKernel(
     const int Y_size,
     const SimpleArray<int, D> X_strides,
     const SimpleArray<int, D> Y_dims,
+    const T alpha,
     const T* X,
     T* Y) {
   HIP_1D_KERNEL_LOOP(Y_index, Y_size) {
@@ -3038,7 +3042,7 @@ __global__ void BroadcastHIPKernel(
           : (Y_index_val % Y_dims.data[i]) * X_strides.data[i];
       Y_index_val /= Y_dims.data[i];
     }
-    Y[Y_index] = __ldg(X + X_index);
+    Y[Y_index] = __ldg(X + X_index) * alpha;
   }
 }
 
@@ -3047,6 +3051,7 @@ void BroadcastHIPImpl(
     const int X_ndim,
     const int* X_dims,
     const int* Y_dims,
+    const T alpha,
     const T* X,
     T* Y,
     HIPContext* context) {
@@ -3072,25 +3077,36 @@ void BroadcastHIPImpl(
       Y_size,
       X_strides_array,
       Y_dims_array,
+      alpha,
       X,
       Y);
 }
 
 } // namespace
 
-#define CAFFE2_SPECIALIZED_HIP_BROADCAST(T)                                  \
-  template <>                                                                \
-  void Broadcast<T, HIPContext>(                                             \
-      const int X_ndim,                                                      \
-      const int* X_dims,                                                     \
-      const int Y_ndim,                                                      \
-      const int* Y_dims,                                                     \
-      const T* X,                                                            \
-      T* Y,                                                                  \
-      HIPContext* context) {                                                 \
-    CAFFE_ENFORCE_LE(X_ndim, Y_ndim);                                        \
-    DISPATCH_FUNCTION_BY_VALUE_WITH_TYPE_1(                                  \
-        Y_ndim, BroadcastHIPImpl, T, X_ndim, X_dims, Y_dims, X, Y, context); \
+#define CAFFE2_SPECIALIZED_HIP_BROADCAST(T) \
+  template <>                               \
+  void Broadcast<T, HIPContext>(            \
+      const int X_ndim,                     \
+      const int* X_dims,                    \
+      const int Y_ndim,                     \
+      const int* Y_dims,                    \
+      const T alpha,                        \
+      const T* X,                           \
+      T* Y,                                 \
+      HIPContext* context) {                \
+    CAFFE_ENFORCE_LE(X_ndim, Y_ndim);       \
+    DISPATCH_FUNCTION_BY_VALUE_WITH_TYPE_1( \
+        Y_ndim,                             \
+        BroadcastHIPImpl,                   \
+        T,                                  \
+        X_ndim,                             \
+        X_dims,                             \
+        Y_dims,                             \
+        alpha,                              \
+        X,                                  \
+        Y,                                  \
+        context);                           \
   }
 CAFFE2_SPECIALIZED_HIP_BROADCAST(std::int32_t)
 CAFFE2_SPECIALIZED_HIP_BROADCAST(std::int64_t)

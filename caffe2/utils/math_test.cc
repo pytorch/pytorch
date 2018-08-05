@@ -689,6 +689,7 @@ class BroadcastTest : public testing::Test {
         X_dims.data(),
         Y_dims.size(),
         Y_dims.data(),
+        1.0f,
         X_.data<float>(),
         Y_.mutable_data<float>(),
         cpu_context_.get());
