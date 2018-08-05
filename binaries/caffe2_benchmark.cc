@@ -84,21 +84,15 @@ int main(int argc, char** argv) {
 
   auto workspace = make_shared<caffe2::Workspace>(new caffe2::Workspace());
   bool run_on_gpu = backendCudaSet(caffe2::FLAGS_backend);
-
-  // support other device type in the future?
-  caffe2::DeviceType run_dev = run_on_gpu ? caffe2::CUDA : caffe2::CPU;
-
   // Run initialization network.
   caffe2::NetDef init_net_def;
   CAFFE_ENFORCE(ReadProtoFromFile(caffe2::FLAGS_init_net, &init_net_def));
-  setDeviceType(&init_net_def, run_dev);
   setOperatorEngine(&init_net_def, caffe2::FLAGS_backend);
   CAFFE_ENFORCE(workspace->RunNetOnce(init_net_def));
 
   // Run main network.
   caffe2::NetDef net_def;
   CAFFE_ENFORCE(ReadProtoFromFile(caffe2::FLAGS_net, &net_def));
-  setDeviceType(&net_def, run_dev);
   setOperatorEngine(&net_def, caffe2::FLAGS_backend);
 
   map<string, caffe2::TensorProtos> tensor_protos_map;
