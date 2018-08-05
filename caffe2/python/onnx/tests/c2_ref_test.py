@@ -231,22 +231,6 @@ class TestCaffe2Basic(TestCase):
             op_names.append(op.type)
         self.assertEqual(op_names, ['Scale', 'Scale', 'FC'])
 
-        # or with broadcast, gemm will be converted to fc
-        node_def = make_node(
-            'Gemm',
-            ['A', 'B', 'C'],
-            ["Y"],
-            transB=True,
-            broadcast=1)
-
-        _, op_strs = backend.convert_node(node_def.SerializeToString())
-        op_names = []
-        for s in op_strs:
-            op = caffe2_pb2.OperatorDef()
-            op.ParseFromString(s)
-            op_names.append(op.type)
-        self.assertEqual(op_names, ['FC'])
-
     def test_tensor_filling_ops(self):
         for dtype in [
                 onnx.TensorProto.FLOAT,
