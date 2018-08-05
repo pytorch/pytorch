@@ -5926,6 +5926,26 @@ EXCLUDE_SCRIPT = {
     'test_split_dim_neg0',
     'test_gesv',
     'test_inverse',
+    # skipped nn functional tests
+    # ops involves sampling which could not test
+    'test_nn_dropout',
+    'test_nn_alpha_dropout',
+    'test_nn_dropout2d',
+    'test_nn_dropout3d',
+    'test_nn_feature_alpha_dropout',
+    'test_nn_gumbel_softmax',
+
+
+
+    # argument has custom behavior
+    'test_nn_fractional_max_pool2d',
+    'test_nn_embedding',
+    'test_nn_embedding_bag',
+    'test_nn_batch_norm'
+    # unknown builtin op
+    'test_nn_tanhshrink',
+    'test_nn_softsign',
+    'test_nn_softmin',
 }
 
 
@@ -5955,7 +5975,7 @@ def the_method({}):
 '''
 
 
-def create_script_fn(method_name, is_functional, output_process_fn):
+def create_script_fn(method_name, func_type, output_process_fn):
     def script_fn(*args, **kwargs):
         formals = []
         tensors = []
@@ -5971,10 +5991,15 @@ def create_script_fn(method_name, is_functional, output_process_fn):
         kwargs_str = ''
         for k, v in kwargs.items():
             kwargs_str += ', ' + k + '=' + str(v)
-        if is_functional:
+        if func_type == 'functional':
             call = 'torch.{}({}{})'.format(method_name, ', '.join(actuals), kwargs_str)
-        else:
+        elif func_type == 'method':
             call = '{}.{}({}{})'.format(actuals[0], method_name, ', '.join(actuals[1:]), kwargs_str)
+        elif func_type == 'nn_functional':
+            call = 'torch.nn.functional.{}({}{})'.format(method_name, ', '.join(actuals), kwargs_str)
+        else:
+            raise 'Unsupported function type'
+
         script = script_template.format(', '.join(formals), call)
         CU = torch.jit.CompilationUnit(script)
         return output_process_fn(CU.the_method(*tensors))
@@ -6004,6 +6029,7 @@ def check_against_reference(self, func, reference_func, args, kwargs=None, allow
     # test no gradients case
     outputs = reference_func(*nograd_inputs, **kwargs)
     outputs_test = func(*nograd_inputs, **kwargs)
+
     self.assertEqual(outputs, outputs_test)
 
     # test single grad case
@@ -6170,6 +6196,115 @@ UBSAN_BLACKLISTED_TESTS = [
     "test_reciprocal_scalar",
 ]
 
+L = 20
+M = 10
+S = 5
+
+# NB: JIT script tests for all nn functional interfaces, script mode does
+# not support in_place operations yet, so no inplace operation tests added.
+#
+# (
+#   method name,
+#   input size/constructing fn,
+#   args (tuple represents shape of a tensor arg),
+#   test variant name (will be used at test name suffix),    // optional
+#   indices for possible dim arg,                            // optional
+#   fn mapping output to part that should be gradcheck'ed,   // optional
+# )
+nn_functional_tests = [
+    # TODO: default  arguments for None type not supported, add
+    # manually as argument, remove when ATen default arg system ready
+    ('conv1d', (S, S, S), ((S, S, S), None)),
+    ('conv2d', (S, S, S, S), ((S, S, S, S), None)),
+    ('conv3d', (S, S, S, S, S), ((S, S, S, S, S), None)),
+    ('conv_transpose1d', (S, S, S), ((S, S, S), None)),
+    ('conv_transpose2d', (S, S, S, S), ((S, S, S, S), None)),
+    ('conv_transpose3d', (S, S, S, S, S), ((S, S, S, S, S), None)),
+    ('conv_tbc', (S, S, S), ((S, S, S), (S,), 2)),
+    ('avg_pool1d', (S, S, S), (3,)),
+    ('avg_pool2d', (S, S, S, S), (3,)),
+    ('avg_pool3d', (S, S, S, S, S), (3,)),
+    ('fractional_max_pool2d', (S, S, S, S), (3, [2, 3], None)),
+    ('max_pool1d', (S, S, S), (2, 1)),
+    ('max_pool2d', (S, S, S, S), (2, 1)),
+    ('max_pool3d', (S, S, S, S, S), (2, 1)),
+    ('max_unpool1d', torch.tensor([2, 4]), (torch.tensor([1, 3]), 2, 2, 0)),
+    # ('max_unpool2d', (S, 1, S), ((M, S),), 'broadcast_all'),
+    # ('max_unpool3d', (S, 1, S), ((M, S),), 'broadcast_all'),
+    # ('lp_pool1d', (S, S, S), ((S, S, S),)),
+    # ('lp_pool2d', (S, S, S), ((S, S, S),)),
+    # ('adaptive_max_pool1d', (S, S, S), ((S, S),), 'broadcast_rhs'),
+    # ('adaptive_max_pool2d', (S, S, S), ((S, S),), 'broadcast_rhs'),
+    # ('adaptive_max_pool3d', (S, S, S), ((S, S),), 'broadcast_rhs'),
+    # ('adaptive_avg_pool1d', (S, S, S), ((S, S),), 'broadcast_rhs'),
+    # ('adaptive_avg_pool2d', (S, S, S), ((S, S),), 'broadcast_rhs'),
+    # ('adaptive_avg_pool3d', (S, S, S), ((S, S),), 'broadcast_rhs'),
+    ('dropout', (S, S, S), (0.5,)),
+    ('alpha_dropout', (S, S, S), (0.5,)),
+    ('dropout2d', (S, S, S), (0.5,)),
+    ('dropout3d', (S, S, S), (0.5,)),
+    ('feature_alpha_dropout', (S, S, S), (0.5,)),
+    ('threshold', (S, S, S), (0.1, 2),),
+    ('relu', (S, S, S), (),),
+    ('glu', (S - 1, S - 1, S - 1), (),),
+    ('hardtanh', (S, S, S), (-0.5, 0.5),),
+    ('elu', (S, S, S), (0.9,),),
+    ('selu', (S, S, S), (),),
+    ('celu', (S, S, S), (0.9,),),
+    ('leaky_relu', (S, S, S), (0.02,),),
+    ('rrelu', (S, S, S), (0.1, 0.3,),),
+    ('hardshrink', (S, S, S), (0.4,),),
+    ('tanhshrink', (S, S, S), (),),
+    ('softsign', (S, S, S), (),),
+    ('softplus', (S, S, S), (),),
+    ('softmin', (S, S, S), (0,),),
+    ('softmax', (S, S, S), (0,),),
+    ('gumbel_softmax', (S, S), (),),
+    ('log_softmax', (S, S, S), (0,),),
+    ('linear', (S, S), (),),
+    ('bilinear', (S, S, S), (),),
+    ('embedding', torch.tensor([[1, 2, 4, 5], [4, 3, 2, 5]]), (torch.rand(6, 3), ),),
+    ('embedding_bag', torch.tensor([1, 2, 4, 2]), (torch.rand(5, 3), torch.tensor([0, 4]),),),
+    # batch norm running_mean, running_var is not a parameter, no derivatives
+    # ('batch_norm', (S, S), (torch.randn(S), torch.ones(S), ),),
+    # ('instance_norm', (S, S, S), (torch.zeros(S), torch.ones(S)),),
+    ('layer_norm', (S, S, S, S), ([5], None, None),),
+    ('group_norm', (S, S, S), (1, 5),),
+    ('local_response_norm', (S, S, S), (),),
+    ('ctc_loss', (S, S, S), (),),
+    ('nll_loss', (S, S, S), (),),
+    ('poisson_nll_loss', (S, S, S), (),),
+    ('kl_div', (S, S, S), (),),
+    ('cross_entropy', (S, S, S), (),),
+    ('binary_cross_entropy', (S, S, S), (),),
+    ('binary_cross_entropy_with_logits', (S, S, S), (),),
+    ('smooth_l1_loss', (S, S, S), (),),
+    ('l1_loss', (S, S, S), (),),
+    ('mse_loss', (S, S, S), (),),
+    ('margin_loss', (S, S, S), (),),
+    ('margin_ranking_loss', (S, S, S), (),),
+    ('hinge_embedding_loss', (S, S, S), (),),
+    ('multilabel_margin_loss', (S, S, S), (),),
+    ('soft_margin_loss', (S, S, S), (),),
+    ('multilabel_soft_margin_loss', (S, S, S), (),),
+    ('cosine_embedding_loss', (S, S, S), (),),
+    ('multi_margin_loss', (S, S, S), (),),
+    ('pixel_shuffle', (S, S, S), (),),
+    ('upsample', (S, S, S), (),),
+    ('interpolate', (S, S, S), (),),
+    ('upsample_nearest', (S, S, S), (),),
+    ('upsample_bilinear', (S, S, S), (),),
+    ('grid_sample', (S, S, S), (),),
+    ('affine_grid', (S, S, S), (),),
+    ('pad', (S, S, S), (),),
+    ('pairwise_distance', (S, S, S), (),),
+    ('consine_similarity', (S, S, S), (),),
+    ('triplet_margin_loss', (S, S, S), (),),
+    ('normalize', (S, S, S), (),),
+    ('unfold', (S, S, S), (),),
+    ('fold', (S, S, S), (),),
+]
+
 
 def add_test(
         name,
@@ -6179,8 +6314,9 @@ def add_test(
         dim_args_idx=(),
         skipTestIf=(),
         output_process_fn=lambda x: x,
-        kwargs=None):
-    basic_test_name = 'test_' + name
+        kwargs=None,
+        test_type='tensor_op'):
+    basic_test_name = name
     if variant_name != '':
         basic_test_name += '_' + variant_name
 
@@ -6189,6 +6325,11 @@ def add_test(
         new_args = [arg * dim_perm[dim_args_idx.index(i)] if i in dim_args_idx else arg for i, arg in enumerate(args)]
         test_name = basic_test_name + ''.join('_neg' + str(i) for i, idx in enumerate(dim_perm) if idx < 0)
         new_args = tuple(new_args)
+
+        if test_type == 'nn_op':
+            test_name = 'test_nn_' + test_name
+        else:
+            test_name = 'test_' + test_name
 
         # for-loop bodies don't define scopes, so we have to save the variables
         # we want to close over in some way
@@ -6201,30 +6342,18 @@ def add_test(
                 # FixMe: run grad checks on inplace self
                 if is_inplace:
                     self_variable.requires_grad = False
-                # need to record this because methods can change the szie (e.g. unsqueeze)
+                # need to record this because methods can change the size (e.g. unsqueeze)
                 args_variable, kwargs_variable = create_input(args, requires_grad=not is_inplace, call_kwargs=kwargs)
                 self_tensor = deepcopy(self_variable.data)
                 args_tensor = deepcopy(unpack_variables(args_variable))
-                output_variable = getattr(self_variable, name)(*args_variable, **kwargs_variable)
 
-                def fn(*inputs, **kwargs):
-                    output = getattr(inputs[0], name)(*inputs[1:], **kwargs)
-                    return output_process_fn(output)
+                if test_type == 'nn_op':
+                    # fix the seed for tests
+                    torch.manual_seed(2)
+                    output_variable = getattr(F, name)(self_variable, *args_variable, **kwargs_variable)
 
-                if not is_inplace and name not in EXCLUDE_GRADCHECK and not exclude_tensor_method(name, test_name):
-                    if test_name not in EXCLUDE_TRACED:
-                        check_against_reference(self, create_traced_fn(fn),
-                                                fn, (self_variable,) + args_variable, kwargs_variable)
-
-                    if not is_magic_method and test_name not in EXCLUDE_SCRIPT:
-                        check_against_reference(self,
-                                                create_script_fn(name, False, output_process_fn),
-                                                fn, (self_variable,) + args_variable, kwargs_variable)
-
-                # functional interface tests
-                if hasattr(torch, name) and name not in EXCLUDE_FUNCTIONAL:
                     def fn(*inputs, **kwargs):
-                        output = getattr(torch, name)(*inputs, **kwargs)
+                        output = getattr(F, name)(*inputs, **kwargs)
                         return output_process_fn(output)
 
                     f_args_variable = (self_variable,) + args_variable
@@ -6235,8 +6364,43 @@ def add_test(
 
                     if not is_inplace and test_name not in EXCLUDE_SCRIPT:
                         check_against_reference(self,
-                                                create_script_fn(name, True, output_process_fn),
+                                                create_script_fn(name, 'nn_functional', output_process_fn),
                                                 fn, f_args_variable, kwargs_variable)
+
+                else:
+                    output_variable = getattr(self_variable, name)(*args_variable, **kwargs_variable)
+
+                    def fn(*inputs, **kwargs):
+                        # output = getattr(inputs[0], name)(*inputs[1:], **kwargs)
+                        output = getattr(F, name)(*inputs, **kwargs)
+                        return output_process_fn(output)
+
+                    if not is_inplace and name not in EXCLUDE_GRADCHECK and not exclude_tensor_method(name, test_name):
+                        if test_name not in EXCLUDE_TRACED:
+                            check_against_reference(self, create_traced_fn(fn),
+                                                    fn, (self_variable,) + args_variable, kwargs_variable)
+
+                        if not is_magic_method and test_name not in EXCLUDE_SCRIPT:
+                            check_against_reference(self,
+                                                    create_script_fn(name, 'method', output_process_fn),
+                                                    fn, (self_variable,) + args_variable, kwargs_variable)
+
+                    # functional interface tests
+                    if hasattr(torch, name) and name not in EXCLUDE_FUNCTIONAL:
+                        def fn(*inputs, **kwargs):
+                            output = getattr(torch, name)(*inputs, **kwargs)
+                            return output_process_fn(output)
+
+                        f_args_variable = (self_variable,) + args_variable
+                        f_args_tensor = (self_tensor,) + args_tensor
+
+                        if not is_inplace and test_name not in EXCLUDE_TRACED:
+                            check_against_reference(self, create_traced_fn(fn), fn, f_args_variable, kwargs_variable)
+
+                        if not is_inplace and test_name not in EXCLUDE_SCRIPT:
+                            check_against_reference(self,
+                                                    create_script_fn(name, 'functional', output_process_fn),
+                                                    fn, f_args_variable, kwargs_variable)
 
             check(name)
             inplace_name = name + '_'
@@ -6255,6 +6419,11 @@ def add_test(
 
 for test in method_tests:
     add_test(*test)
+
+for test in nn_functional_tests:
+    # print(*test)
+    add_test(*test, test_type='nn_op')
+
 
 if __name__ == '__main__':
     run_tests()
