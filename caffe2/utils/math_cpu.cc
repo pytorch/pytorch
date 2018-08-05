@@ -460,7 +460,7 @@ CAFFE2_SPECIALIZED_AXPBY(float, s)
       const TAlpha alpha,                                              \
       const TData* x,                                                  \
       TData* y,                                                        \
-      CPUContext* context) {                                           \
+      CPUContext* /* context */) {                                     \
     EigenVectorMap<TData>(y, n) =                                      \
         ConstEigenVectorMap<TData>(x, n) * static_cast<TData>(alpha);  \
   }                                                                    \
@@ -470,7 +470,7 @@ CAFFE2_SPECIALIZED_AXPBY(float, s)
       const TAlpha* alpha,                                             \
       const TData* x,                                                  \
       TData* y,                                                        \
-      CPUContext* context) {                                           \
+      CPUContext* /* context */) {                                     \
     EigenVectorMap<TData>(y, n) =                                      \
         ConstEigenVectorMap<TData>(x, n) * static_cast<TData>(*alpha); \
   }
@@ -873,9 +873,12 @@ DEFINE_SIMPLE_BINARY_FUNCTION(Div, /)
 #define CAFFE2_SPECIALIZED_SET(T)                                             \
   template <>                                                                 \
   void Set<T, CPUContext>(const size_t N, const T alpha, T* Y, CPUContext*) { \
+    if (N == 0) {                                                             \
+      return;                                                                 \
+    }                                                                         \
     if (alpha == (T)0) {                                                      \
       if (Y != nullptr) {                                                     \
-        memset(Y, 0, N * sizeof(T));                                          \
+        std::memset(Y, 0, N * sizeof(T));                                     \
       }                                                                       \
     } else {                                                                  \
       EigenVectorMap<T>(Y, N).setConstant(alpha);                             \
@@ -1168,9 +1171,7 @@ void ReduceTensor(
     const int Y_size =                                                         \
         std::accumulate(Y_dims, Y_dims + num_dims, 1, std::multiplies<int>()); \
     if (X_size == 0) {                                                         \
-      if (Y_size > 0) {                                                        \
-        Set<T, CPUContext>(Y_size, alpha * init, Y, context);                  \
-      }                                                                        \
+      Set<T, CPUContext>(Y_size, alpha * init, Y, context);                    \
       return;                                                                  \
     }                                                                          \
     if (alpha == T(0)) {                                                       \
@@ -1312,9 +1313,7 @@ DELEGATE_REDUCE_FUNCTION(
     const int Y_size =                                                         \
         std::accumulate(Y_dims, Y_dims + num_dims, 1, std::multiplies<int>()); \
     if (X_size == 0) {                                                         \
-      if (Y_size > 0) {                                                        \
-        Set<T, CPUContext>(Y_size, 0, Y, context);                             \
-      }                                                                        \
+      Set<T, CPUContext>(Y_size, 0, Y, context);                               \
       return;                                                                  \
     }                                                                          \
     if (alpha == T(0)) {                                                       \
@@ -1381,9 +1380,7 @@ CAFFE2_SPECIALIZED_REDUCE_MEAN(double)
     const int Y_size =                                                         \
         std::accumulate(Y_dims, Y_dims + num_dims, 1, std::multiplies<int>()); \
     if (X_size == 0) {                                                         \
-      if (Y_size > 0) {                                                        \
-        Set<T, CPUContext>(Y_size, 0, Y, context);                             \
-      }                                                                        \
+      Set<T, CPUContext>(Y_size, 0, Y, context);                               \
       return;                                                                  \
     }                                                                          \
     if (alpha == T(0)) {                                                       \
@@ -1437,40 +1434,44 @@ void BroadcastImpl(
     const int* X_dims,
     const int Y_ndim,
     const int* Y_dims,
+    const T alpha,
     const T* X,
-    T* Y) {
+    T* Y,
+    CPUContext* context) {
   CAFFE_ENFORCE_LE(X_ndim, Y_ndim);
-  std::vector<int> X_dims_ex(Y_ndim);
+  std::vector<int> X_dims_vector(Y_ndim);
   const int d = Y_ndim - X_ndim;
-  std::fill(X_dims_ex.begin(), X_dims_ex.begin() + d, 1);
+  std::fill(X_dims_vector.begin(), X_dims_vector.begin() + d, 1);
   for (int i = d; i < Y_ndim; ++i) {
     CAFFE_ENFORCE(X_dims[i - d] == 1 || X_dims[i - d] == Y_dims[i]);
-    X_dims_ex[i] = X_dims[i - d];
+    X_dims_vector[i] = X_dims[i - d];
   }
+  X_dims = X_dims_vector.data();
   const int Y_size =
       std::accumulate(Y_dims, Y_dims + Y_ndim, 1, std::multiplies<int>());
   std::vector<int> index(Y_ndim, 0);
   for (int Y_index = 0; Y_index < Y_size; ++Y_index) {
-    const int X_index =
-        utils::GetIndexFromDims(Y_ndim, X_dims_ex.data(), index.data());
+    const int X_index = utils::GetIndexFromDims(Y_ndim, X_dims, index.data());
     Y[Y_index] = X[X_index];
     utils::IncreaseIndexInDims(Y_ndim, Y_dims, index.data());
   }
+  Scale<T, T, CPUContext>(Y_size, alpha, Y, Y, context);
 }
 
 } // namespace
 
-#define CAFFE2_SPECIALIZED_BROADCAST(T)                     \
-  template <>                                               \
-  void Broadcast<T, CPUContext>(                            \
-      const int X_ndim,                                     \
-      const int* X_dims,                                    \
-      const int Y_ndim,                                     \
-      const int* Y_dims,                                    \
-      const T* X,                                           \
-      T* Y,                                                 \
-      CPUContext* /* context */) {                          \
-    BroadcastImpl<T>(X_ndim, X_dims, Y_ndim, Y_dims, X, Y); \
+#define CAFFE2_SPECIALIZED_BROADCAST(T)                                     \
+  template <>                                                               \
+  void Broadcast<T, CPUContext>(                                            \
+      const int X_ndim,                                                     \
+      const int* X_dims,                                                    \
+      const int Y_ndim,                                                     \
+      const int* Y_dims,                                                    \
+      const T alpha,                                                        \
+      const T* X,                                                           \
+      T* Y,                                                                 \
+      CPUContext* context) {                                                \
+    BroadcastImpl<T>(X_ndim, X_dims, Y_ndim, Y_dims, alpha, X, Y, context); \
   }
 CAFFE2_SPECIALIZED_BROADCAST(std::int32_t)
 CAFFE2_SPECIALIZED_BROADCAST(std::int64_t)
