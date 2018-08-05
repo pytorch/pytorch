@@ -55,6 +55,7 @@ class ExpandOp final : public Operator<Context> {
         X_dims.data(),
         Y_dims.size(),
         Y_dims.data(),
+        T(1),
         X.template data<T>(),
         Y->template mutable_data<T>(),
         &context_);
