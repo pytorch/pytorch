@@ -153,7 +153,7 @@ def build_def(ctx, py_def, type_line=None):
         return_type = build_expr(ctx, py_def.returns)
     decl = Decl(r, param_list, return_type)
     if type_line is not None:
-        decl = torch._C.merge_decl_types_from_comment(decl, type_line)
+        decl = torch._C.merge_decl_types_from_comment(decl, stripped)
     return Def(Ident(r, py_def.name),
                decl,
                build_stmts(ctx, body))

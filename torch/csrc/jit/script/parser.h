@@ -303,10 +303,9 @@ struct Parser {
     return Param::create(type.range(), Ident::create(type.range(), ""), type);
   }
 
-  TreeRef parseTypeComment(bool expect_type_token=false) {
-    // HACK. Refactor this to not have this boolean flag.
+  TreeRef parseTypeComment(bool parse_full_line=false) {
     auto range = L.cur().range;
-    if (expect_type_token) {
+    if (parse_full_line) {
       L.expect(TK_TYPE_COMMENT);
     }
     auto param_types = parseList('(', ',', ')', &Parser::parseBareTypeAnnotation);
@@ -316,7 +315,7 @@ struct Parser {
     } else {
       return_type = Maybe<Expr>::create(L.cur().range);
     }
-    if (!expect_type_token)
+    if (!parse_full_line)
       L.expect(TK_NEWLINE);
     return Decl::create(range, param_types, Maybe<Expr>(return_type));
   }
