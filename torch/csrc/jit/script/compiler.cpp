@@ -633,6 +633,9 @@ struct to_ir {
     // Type annotations exclude explicitly typing the "self" parameter, so in the
     // case that this is a method with self we expect one fewer parameter annotation
     // than the number of parameters this Def takes.
+    if (self && def.decl().params().size() == 0) {
+      throw ErrorReport(def.decl().params().range()) << "methods must have a self argument";
+    }
     auto expected_annotation_size = self ? def.decl().params().size() - 1 : def.decl().params().size();
     if (typed_def.schema && typed_def.schema->arguments.size() != expected_annotation_size) {
       throw ErrorReport(def.decl().params().range()) << "Number of type annotations for"
