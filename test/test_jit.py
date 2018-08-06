@@ -118,7 +118,6 @@ class JitTestCase(TestCase):
         f.close()
         m.save(f.name)
         imported = torch.jit.load(f.name)
-        print(f.name)
         os.unlink(f.name)
         return imported
 
