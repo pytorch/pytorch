@@ -1,4 +1,5 @@
 #include "ATen/ATen.h"
+#include "ATen/cuda/CUDAContext.h"
 #include "ATen/cuda/CUDAApplyUtils.cuh"
 
 namespace at {
@@ -116,7 +117,7 @@ __global__ void kernelHistogram1D(
       <<<grid,                                                             \
          block,                                                            \
          (MEMORY_TYPE == CUDAHistogramMemoryType::SHARED) ? sharedMem : 0, \
-         at::globalContext().getCurrentCUDAStream()>>>(                    \
+         getCurrentCUDAStream()>>>(                    \
           aInfo, pInfo, bInfo, binsize, totalElements, WEIGHTS_OP);        \
   AT_ASSERTM(cudaGetLastError() == cudaSuccess, "kernelHistogram1D failed");
 
@@ -184,8 +185,7 @@ bool CUDA_tensor_histogram(
   }
 
   CUDAHistogramMemoryType memType = CUDAHistogramMemoryType::GLOBAL;
-  auto maxSharedMem =
-      at::globalContext().getCurrentDeviceProperties()->sharedMemPerBlock;
+  auto maxSharedMem = getCurrentDeviceProperties()->sharedMemPerBlock;
   auto sharedMem = nbins * sizeof(output_t) + 8; // 8 guard bytes
   auto maxGlobalMem = getFreeGlobalMemory();
   auto multiBlockMem = nbins * grid.x * sizeof(output_t) + 8; // 8 guard bytes

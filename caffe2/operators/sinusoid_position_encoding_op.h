@@ -9,6 +9,7 @@
 #include "caffe2/core/operator.h"
 
 #include "Eigen/Core"
+#include "caffe2/utils/eigen_utils.h"
 
 namespace caffe2 {
 
@@ -27,7 +28,7 @@ class SinusoidPositionEncodingOp : public Operator<Context> {
 
   bool RunOnDevice() override {
     return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
-        this, OperatorBase::Input<TensorCPU>(0));
+        this, OperatorBase::Input<Tensor>(0, CPU));
   }
 
   template <typename Index>

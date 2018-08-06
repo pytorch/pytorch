@@ -18,20 +18,16 @@ namespace at {
 // tensor and a [0] size values tensor for such an empty tensor.  However,
 // we don't currently support zero-size dimensions, so we can't actually
 // do this; so we just allocate zero-size tensors for everything.
-SparseTensorImpl::SparseTensorImpl(Type * type)
-    : TensorImpl(type)
+SparseTensorImpl::SparseTensorImpl(at::Backend backend, at::ScalarType scalar_type)
+    : TensorImpl(backend, scalar_type, nullptr, false)
     , size_{0}
     , sparseDims_(1)
     , denseDims_(0)
-    , indices_(type->toDense().toScalarType(ScalarType::Long).tensor())
-    , values_(type->toDense().tensor()) {
-      AT_ASSERT(type->is_sparse());
+    , indices_(globalContext().getTypeOpt(toDense(backend), ScalarType::Long)->tensor())
+    , values_(globalContext().getTypeOpt(toDense(backend), scalar_type)->tensor()) {
+      AT_ASSERT(backend == Backend::SparseCPU || backend == Backend::SparseCUDA);
     }
 
-const char * SparseTensorImpl::toString() const {
-  // TODO: also give back type information
-  return "SparseTensor";
-}
 IntList SparseTensorImpl::sizes() const {
   return size_;
 }
@@ -41,14 +37,12 @@ IntList SparseTensorImpl::strides() const {
 int64_t SparseTensorImpl::dim() const {
   return sparseDims_ + denseDims_;
 }
-Scalar SparseTensorImpl::localScalar() {
-  int64_t n = numel();
-  AT_CHECK(n == 1, "localScalar() called on a Tensor with ", n, " elements");
-  if (nnz_ == 0) return Scalar(0);
-  if (coalesced_) return values_.pImpl->localScalar();
-  // You have a non-coalesced scalar sparse tensor?!  Wow!  Have
-  // a cookie.
-  return values_.sum().pImpl->localScalar();
+TensorImpl* SparseTensorImpl::maybe_zero_dim(bool condition_when_zero_dim) {
+  AT_CHECK(condition_when_zero_dim == (dim() == 0),
+           "Attempted to maybe_zero_dim on a SparseTensorImpl to ", condition_when_zero_dim,
+           " but the SparseTensor's dim() is ", dim(), " and SparseTensors do not support"
+           " changing dimensionality via maybe_zero_dim");
+  return this;
 }
 void * SparseTensorImpl::unsafeGetTH(bool retain) {
   AT_ERROR("unsafeGetTH not supported for new style TensorImpl");
@@ -62,9 +56,9 @@ void SparseTensorImpl::set_indices_and_values(const Tensor& indices, const Tenso
   // dimensions at the moment
   bool empty = values.numel() == 0;
   AT_CHECK(values.type().toSparse() == type(), "values type must match sparse tensor type");
-  AT_CHECK(indices.type().scalarType() == kLong);
-  AT_CHECK(indices.type().backend() == values.type().backend());
-  AT_CHECK(!indices.is_cuda() || indices.get_device() == values.get_device());
+  AT_CHECK(indices.type().scalarType() == kLong, "indices must be an int64 tensor");
+  AT_CHECK(indices.type().backend() == values.type().backend(), "backend of indices (", indices.type().backend(), ") must match backend of values (", values.type().backend(), ")");
+  AT_CHECK(!indices.is_cuda() || indices.get_device() == values.get_device(), "device of indices (", indices.get_device(), ") must match device of values (", values.get_device(), ")");
   if (!empty) {
     AT_CHECK(indices.dim() == 2, "indices must be nDim x nnz");
     AT_CHECK(indices.size(1) == values.size(0), "indices and values must have same nnz");

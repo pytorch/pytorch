@@ -201,9 +201,9 @@ class MapSerializer : public BlobSerializerBase {
     CAFFE_ENFORCE(blob.IsType<MapType>());
     const MapType& map_data = blob.template Get<MapType>();
     TIndex sz = map_data.size();
-    Tensor<CPUContext> key_tensor;
+    Tensor key_tensor(CPU);
     key_tensor.Resize(sz);
-    Tensor<CPUContext> value_tensor;
+    Tensor value_tensor(CPU);
     value_tensor.Resize(sz);
     auto* key_data = key_tensor.mutable_data<KEY_T>();
     auto* value_data = value_tensor.mutable_data<VALUE_T>();
@@ -215,7 +215,7 @@ class MapSerializer : public BlobSerializerBase {
     }
 
     TensorProtos tensor_protos;
-    TensorSerializer<CPUContext> ser;
+    TensorSerializer ser;
     ser.Serialize(
         key_tensor, name, tensor_protos.add_protos(), 0, key_tensor.size());
     ser.Serialize(
@@ -239,8 +239,8 @@ class MapDeserializer : public BlobDeserializerBase {
     CAFFE_ENFORCE(
         tensor_protos.ParseFromString(proto.content()),
         "Fail to parse TensorProtos");
-    TensorDeserializer<CPUContext> deser;
-    Tensor<CPUContext> key_tensor, value_tensor;
+    TensorDeserializer deser;
+    Tensor key_tensor(CPU), value_tensor(CPU);
     deser.Deserialize(tensor_protos.protos(0), &key_tensor);
     deser.Deserialize(tensor_protos.protos(1), &value_tensor);
     auto* key_data = key_tensor.data<KEY_T>();

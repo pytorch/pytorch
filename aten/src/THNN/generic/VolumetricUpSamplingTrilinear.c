@@ -5,6 +5,8 @@
 #define TH_GENERIC_FILE "generic/VolumetricUpSamplingTrilinear.c"
 #else
 
+#include "linear_upsampling.h"
+
 static inline void THNN_(VolumetricUpSamplingTrilinear_shapeCheck)
      (THTensor *input, THTensor *gradOutput,
       int nBatch, int nChannels,
@@ -79,25 +81,26 @@ void THNN_(VolumetricUpSamplingTrilinear_updateOutput)(
         }
       }
     }
+    THTensor_(free)(input);
     return;
   }
-  const float rdepth  = THNN_(linear_upsampling_compute_scale)(inputDepth, outputDepth, align_corners);
-  const float rheight = THNN_(linear_upsampling_compute_scale)(inputHeight, outputHeight, align_corners);
-  const float rwidth  = THNN_(linear_upsampling_compute_scale)(inputWidth, outputWidth, align_corners);
+  const accreal rdepth  = linear_upsampling_compute_scale<accreal>(inputDepth, outputDepth, align_corners);
+  const accreal rheight = linear_upsampling_compute_scale<accreal>(inputHeight, outputHeight, align_corners);
+  const accreal rwidth  = linear_upsampling_compute_scale<accreal>(inputWidth, outputWidth, align_corners);
   for (int t2 = 0; t2 < outputDepth; ++t2) {
-    const float t1r = THNN_(linear_upsampling_compute_source_index)(rdepth, t2, align_corners);
+    const accreal t1r = linear_upsampling_compute_source_index<accreal>(rdepth, t2, align_corners);
     const int t1 = t1r;
     const int t1p = (t1 < inputDepth - 1) ? 1 : 0;
     const real t1lambda = t1r - t1;
     const real t0lambda = (real)1. - t1lambda;
     for (int h2 = 0; h2 < outputHeight; ++h2) {
-      const float h1r = THNN_(linear_upsampling_compute_source_index)(rheight, h2, align_corners);
+      const accreal h1r = linear_upsampling_compute_source_index<accreal>(rheight, h2, align_corners);
       const int h1 = h1r;
       const int h1p = (h1 < inputHeight - 1) ? 1 : 0;
       const real h1lambda = h1r - h1;
       const real h0lambda = (real)1. - h1lambda;
       for (int w2 = 0; w2 < outputWidth; ++w2) {
-        const float w1r = THNN_(linear_upsampling_compute_source_index)(rwidth, w2, align_corners);
+        const accreal w1r = linear_upsampling_compute_source_index<accreal>(rwidth, w2, align_corners);
         const int w1 = w1r;
         const int w1p = (w1 < inputWidth - 1) ? 1 : 0;
         const real w1lambda = w1r - w1;
@@ -169,25 +172,26 @@ void THNN_(VolumetricUpSamplingTrilinear_updateGradInput)(
         }
       }
     }
+    THTensor_(free)(gradOutput);
     return;
   }
-  const float rdepth  = THNN_(linear_upsampling_compute_scale)(inputDepth, outputDepth, align_corners);
-  const float rheight = THNN_(linear_upsampling_compute_scale)(inputHeight, outputHeight, align_corners);
-  const float rwidth  = THNN_(linear_upsampling_compute_scale)(inputWidth, outputWidth, align_corners);
+  const accreal rdepth  = linear_upsampling_compute_scale<accreal>(inputDepth, outputDepth, align_corners);
+  const accreal rheight = linear_upsampling_compute_scale<accreal>(inputHeight, outputHeight, align_corners);
+  const accreal rwidth  = linear_upsampling_compute_scale<accreal>(inputWidth, outputWidth, align_corners);
   for (int t2 = 0; t2 < outputDepth; ++t2) {
-    const float t1r = THNN_(linear_upsampling_compute_source_index)(rdepth, t2, align_corners);
+    const accreal t1r = linear_upsampling_compute_source_index<accreal>(rdepth, t2, align_corners);
     const int t1 = t1r;
     const int t1p = (t1 < inputDepth - 1) ? 1 : 0;
     const real t1lambda = t1r - t1;
     const real t0lambda = (real)1. - t1lambda;
     for (int h2 = 0; h2 < outputHeight; ++h2) {
-      const float h1r = THNN_(linear_upsampling_compute_source_index)(rheight, h2, align_corners);
+      const accreal h1r = linear_upsampling_compute_source_index<accreal>(rheight, h2, align_corners);
       const int h1 = h1r;
       const int h1p = (h1 < inputHeight - 1) ? 1 : 0;
       const real h1lambda = h1r - h1;
       const real h0lambda = (real)1. - h1lambda;
       for (int w2 = 0; w2 < outputWidth; ++w2) {
-        const float w1r = THNN_(linear_upsampling_compute_source_index)(rwidth, w2, align_corners);
+        const accreal w1r = linear_upsampling_compute_source_index<accreal>(rwidth, w2, align_corners);
         const int w1 = w1r;
         const int w1p = (w1 < inputWidth - 1) ? 1 : 0;
         const real w1lambda = w1r - w1;

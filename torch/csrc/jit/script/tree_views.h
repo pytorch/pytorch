@@ -51,7 +51,6 @@ namespace script {
 //       |     Not                                                      TK_NOT
 //       |     USub                                                     '-'
 //       | Const(String value)                                          TK_CONST
-//       | Cast(ScalarType type, Expr expr)                             TK_CAST
 //       -- NB: x.name(y) is desugared into name(x, y)
 //       | Apply(Ident name, List<Expr> args, List<Attribute> kwargs)   TK_APPLY
 //       | Select(Expr base, Ident attr_name)                           '.'
@@ -59,6 +58,7 @@ namespace script {
 //       | Gather(Expr value, Expr indices)                             TK_GATHER
 //       | Var(Ident name)                                              TK_VAR
 //       | ListLiteral(List<Expr> inputs)                               TK_LIST_LITERAL
+//       | TupleLiteral(List<Expr> inputs)                              TK_TUPLE_LITERAL
 //       | Starred(Expr expr)                                           TK_STARRED
 //
 // -- NB: only allowed expressions are Const or List(Const)
@@ -71,10 +71,6 @@ namespace script {
 //            | Mul()                                                   TK_TIMES_EQ
 //            | Div()                                                   TK_DIV_EQ
 //
-// ScalarType = IntType()                                               TK_INT
-//            | FloatType()                                             TK_FLOAT
-//            | LongType()                                              TK_LONG
-//            | DoubleType()                                            TK_DOUBLE
 
 // Each subclass of TreeView should provide:
 // 1. Constructor that takes a TreeRef, and checks that it's of the right type.
@@ -250,8 +246,10 @@ struct Expr : public TreeView {
       case '/':
       case TK_NOT:
       case TK_CONST:
+      case TK_STRINGLITERAL:
       case TK_TRUE:
       case TK_FALSE:
+      case TK_NONE:
       case TK_CAST:
       case TK_APPLY:
       case '.':
@@ -259,6 +257,7 @@ struct Expr : public TreeView {
       case TK_GATHER:
       case TK_VAR:
       case TK_LIST_LITERAL:
+      case TK_TUPLE_LITERAL:
       case '@':
       case TK_POW:
         return;
@@ -318,20 +317,6 @@ struct TensorType : public Type {
   }
   static TensorType create(const SourceRange& range) {
     return TensorType(Compound::create(TK_TENSOR_TYPE, range, {}));
-  }
-};
-
-struct ScalarType : public TreeView {
-  explicit ScalarType(const TreeRef& tree) : TreeView(tree) {
-    switch (tree->kind()) {
-      case TK_INT:
-      case TK_LONG:
-      case TK_FLOAT:
-      case TK_DOUBLE:
-        return;
-      default:
-        throw ErrorReport(tree) << kindToString(tree->kind()) << " is not a valid ScalarType";
-    }
   }
 };
 
@@ -580,18 +565,15 @@ struct Const : public Expr {
   }
 };
 
-struct Cast : public Expr {
-  explicit Cast(const TreeRef& tree) : Expr(tree) {
-    tree_->match(TK_CAST);
+struct StringLiteral : public Expr {
+  explicit StringLiteral(const TreeRef& tree) : Expr(tree) {
+    tree_->matchNumSubtrees(TK_STRINGLITERAL, 1);
   }
-  ScalarType type() const {
-    return ScalarType(subtree(0));
+  const std::string& text() const {
+    return subtree(0)->stringValue();
   }
-  Expr input() const {
-    return Expr(subtree(1));
-  }
-  static Cast create(const SourceRange& range, const Type& type, const Expr& input) {
-    return Cast(Compound::create(TK_CAST, range, {type, input}));
+  static StringLiteral create(const SourceRange& range, const std::string& value) {
+    return StringLiteral(Compound::create(TK_STRINGLITERAL, range, {String::create(value)}));
   }
 };
 
@@ -727,6 +709,17 @@ struct ListLiteral : public Expr {
   }
 };
 
+struct TupleLiteral : public Expr {
+  explicit TupleLiteral(const TreeRef& tree) : Expr(tree) {
+    tree_->match(TK_TUPLE_LITERAL);
+  }
+  List<Expr> inputs() const {
+    return subtree(0);
+  }
+  static TupleLiteral create(const SourceRange& range, const List<Expr>& inputs) {
+    return TupleLiteral(Compound::create(TK_TUPLE_LITERAL, range, {inputs}));
+  }
+};
 
 struct Starred : public Expr {
   explicit Starred(const TreeRef& tree) : Expr(tree) {

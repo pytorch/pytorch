@@ -10,6 +10,7 @@
 #include "caffe2/core/types.h"
 #include "caffe2/utils/math.h"
 
+#include <cstring>
 #include <map>
 #include <utility>
 
@@ -29,7 +30,7 @@ class GatherRangesToDenseOp final : public Operator<Context> {
 
   bool RunOnDevice() override {
     return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
-        this, OperatorBase::Input<TensorCPU>(RANGES));
+        this, OperatorBase::Input<Tensor>(RANGES, CPU));
   }
 
   template <typename Index>
@@ -87,7 +88,7 @@ class GatherRangesToDenseOp final : public Operator<Context> {
             j);
 
         if (InputSize() == 2) {
-          context_.template CopyItems<Context, Context>(
+          context_.CopyItemsSameDevice(
               data.meta(),
               rangeLength,
               rawData + rangeStart * itemsize,

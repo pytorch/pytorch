@@ -1,11 +1,12 @@
 #include "torch/csrc/jit/passes/graph_fuser.h"
 #include "torch/csrc/jit/fusion_compiler.h"
 #include "torch/csrc/jit/autodiff.h"
+#include "torch/csrc/jit/assertions.h"
 #include <unordered_map>
 
 #ifdef USE_CUDA
   #include "cuda.h" // for CUDA_VERSION
-#endif 
+#endif
 
 namespace torch { namespace jit {
 
@@ -31,7 +32,6 @@ std::unordered_set<NodeKind> simple_mappable = {
   aten::atan,
   aten::atan2,
   aten::ceil,
-  aten::clamp,
   aten::cos,
   aten::cosh,
   aten::div,
@@ -44,7 +44,6 @@ std::unordered_set<NodeKind> simple_mappable = {
   aten::ge,
   aten::gt,
   aten::le,
-  aten::lerp,
   aten::lgamma,
   aten::log,
   aten::log10,
@@ -73,33 +72,18 @@ std::unordered_set<NodeKind> simple_mappable = {
   aten::type_as,
   aten::_sigmoid_backward,
   aten::_tanh_backward,
+  // TODO support those
+  //aten::clamp,
+  //aten::lerp,
+  aten::rand_like,
 };
 
 bool isSimpleMap(Node *node) {
+  // TODO: use signature matching
   if(simple_mappable.count(node->kind()) == 0)
     return false;
   if((node->kind() == aten::min || node->kind() == aten::max) && node->inputs().size() == 1)
     return false;
-  // Make sure that the node doesn't broadcast.
-  JIT_ASSERT(node->inputs().size() > 0);
-  TensorType* expected_type = node->inputs()[0]->type()->cast<TensorType>();
-  if (!expected_type) return false;
-//type checking is intentionally dropped from isSimpleMap
-//isFusable is checking input/output types as there are some exceptions from allFloatIO requirement
-  static const auto equal_modulo_strides = [](TensorType* expected, const TypePtr& _actual) {
-     TensorType* actual = _actual->cast<TensorType>();
-     return actual &&
-           expected->device() == actual->device() &&
-           expected->sizes() == actual->sizes();
-  };
-  for (Value * val : node->inputs()) {
-    if (!equal_modulo_strides(expected_type, val->type()))
-      return false;
-  }
-  for (Value * val : node->outputs()) {
-    if (!equal_modulo_strides(expected_type, val->type()))
-      return false;
-  }
   return true;
 }
 
@@ -132,68 +116,90 @@ struct GraphFuser {
   bool hasSupportedType(Value* node) {
     if (auto tt = node->type()->cast<TensorType>()) {
       if (tt->scalarType() == at::kFloat) return true;
-
       #ifdef USE_CUDA
         // Checks for half tensor on GPU
-        // const auto device = tt->device();
-        if (tt->device() != kCPUDevice 
+        if (tt->device() != kCPUDevice
           && CUDA_VERSION >= 9
           && tt->scalarType() == at::ScalarType::Half) {
           return true;
         }
-      #endif 
-    } 
-
+      #endif
+    }
     return false;
   }
 
-  bool allSupportedList(at::ArrayRef<Value*> list){
-    for (auto& o: list){
-      if (!hasSupportedType(o)) return false;
+  bool areTensorsOfSameShape(at::ArrayRef<Value*> values) {
+    auto expected_type = values.at(0)->type()->cast<TensorType>();
+    if (!expected_type) return false;
+    for (Value * val : values) {
+      auto val_type = val->type()->cast<TensorType>();
+      if (!val_type) return false;
+      if (expected_type->device() != val_type->device()) return false;
+      if (expected_type->sizes() != val_type->sizes()) return false;
     }
-
     return true;
   }
 
-  bool allSupportedIO(Node* node) {
-    return (allSupportedList(node->inputs()) && allSupportedList(node->outputs()));
+  bool hasSupportedType(Node* node) {
+    return areTensorsOfSameShape(node->inputs()) &&
+           haveSupportedType(node->inputs()) &&
+           haveSupportedType(node->outputs());
   }
+
+  bool haveSupportedType(at::ArrayRef<Value*> list) {
+    for (Value *v : list) {
+      if (!hasSupportedType(v)) return false;
+    }
+    return true;
+  }
+
 
   bool isFusable(Node * node) {
     if (node->owningBlock() != block) return false;
     if (node->kind() == prim::FusionGroup) return true;
     if (!isSimpleMap(node)) return false;
-    switch (node->kind()){
-//comparison operators produce Byte type, and it's ok, check only inputs
-      case aten::le:
-      case aten::ge:
-      case aten::lt:
-      case aten::gt:
-      case aten::ne:
-      case aten::eq:
-         return allSupportedList(node->inputs());
-      case aten::type_as:
-//type_as can have different input types as long as output is float, check only output
-         return allSupportedList(node->outputs());
-      default:
-         return allSupportedIO(node);
+
+    if (node->matches("aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor", /*const=*/attr::alpha)) {
+      std::vector<Value*> inputs {node->namedInput(attr::self), node->namedInput(attr::other)};
+      return areTensorsOfSameShape(inputs) && haveSupportedType(inputs);
+    } else if (node->matches("aten::lt(Tensor self, Tensor other) -> Tensor") ||
+               node->matches("aten::le(Tensor self, Tensor other) -> Tensor") ||
+               node->matches("aten::gt(Tensor self, Tensor other) -> Tensor") ||
+               node->matches("aten::ge(Tensor self, Tensor other) -> Tensor") ||
+               node->matches("aten::eq(Tensor self, Tensor other) -> Tensor") ||
+               node->matches("aten::ne(Tensor self, Tensor other) -> Tensor")) {
+      // comparison operators produce Byte type, and it's ok, check only inputs
+      return areTensorsOfSameShape(node->inputs()) && haveSupportedType(node->inputs());
+    } else if (node->matches("aten::type_as(Tensor self, Tensor other) -> Tensor")) {
+      // type_as can have different input types as long as output is float, check only output
+      return haveSupportedType(node->outputs());
+    } else {
+      return hasSupportedType(node);
     }
   }
 
-  bool allOutputsHaveSameSize(Node * node) {
-    TensorType *tt_ptr = nullptr;
-    for (const auto i : node->inputs()) {
-      auto cur_tt_ptr = i->type()->cast<TensorType>();
-      if (!cur_tt_ptr) {
-        return false;
-      }
+  bool isFusableCatNode(Node * node) {
+    if (node->kind() != aten::cat)
+      return false;
+    if (!node->is_constant(attr::dim))
+      return false;
 
-      if (tt_ptr && tt_ptr->sizes() != cur_tt_ptr->sizes()) {
-        return false;
-      }
-      tt_ptr = cur_tt_ptr;
-    }
-    return true;
+    auto tensors_node = node->namedInput(attr::tensors)->node();
+    if (tensors_node->kind() != prim::ListConstruct) return false;
+    // NB: Note that technically other uses of the list aren't a big problem for us.
+    // It would be enough to place the prim::FusedConcat before the prim::ListConstruct, and
+    // allUsersAreThisConsumerOrOccurAfterIt would still be satisfied. However, I don't expect this
+    // to be necessary any time soon, and so we're simply assuming that we don't have to deal with that.
+    if (tensors_node->output()->uses().size() > 1) return false;
+    auto tensors = tensors_node->inputs();
+
+    // Our fusion code assumes that all inputs have the same shapes, so we need to check this too.
+    auto expected = tensors.at(0)->type()->cast<TensorType>();
+    if (!expected) return false;
+    return std::all_of(tensors.begin(), tensors.end(), [&expected](Value *v) {
+        auto actual = v->type()->cast<TensorType>();
+        return actual && actual->sizes() == expected->sizes();
+    });
   }
 
   // Can this node produce an _output_ of a fusion group?
@@ -201,14 +207,7 @@ struct GraphFuser {
   // because it is not a simple map, can be put in a fusion group
   // as long as no items in the group read the output of concat
   bool isFusableAsExitNode(Node * node) {
-    if(isFusable(node))
-      return true;
-    // this concat fusion only works when all the inputs are the same size
-    // otherwise they cannot partipate in the same map
-    if(node->kind() == aten::cat && allOutputsHaveSameSize(node))
-      return true;
-
-    return false;
+    return isFusable(node) || isFusableCatNode(node);
   }
 
   // necessary condition for fusion. If all of the uses of producer are consumer
@@ -244,8 +243,9 @@ struct GraphFuser {
     // we can move the consumer up into the producer.
     // but this requires better handling of merging fusion groups so it is not done now
     at::optional<int> consumer_device = getDevice(consumer);
+    Node *real_consumer = consumer->kind() == aten::cat ? consumer->namedInput(attr::tensors)->node() : consumer;
     return isFusable(producer->node()) &&
-      allUsersAreThisConsumerOrOccurAfterIt(consumer, producer) &&
+      allUsersAreThisConsumerOrOccurAfterIt(real_consumer, producer) &&
       consumer_device && consumer_device == getDevice(producer->node()) &&
       (*consumer_device != kCPUDevice || sharedFusionCompiler().canCompileOnCPU());
   }
@@ -325,12 +325,24 @@ struct GraphFuser {
       inputs_map[input] = subgraph.inputs()[i++];
     }
     // add n's inputs to the fusion group's input list if we don't already have them
+    Node * insert_after = nullptr;
     for (auto input : n->inputs()) {
       if (inputs_map.count(input) == 0) {
-        auto in_group = subgraph.addInput();
-        in_group->setType(input->type());
-        inputs_map[input] = in_group;
-        group->addInput(input);
+        if (input->type()->isSubtypeOf(DynamicType::get())) {
+          auto in_group = subgraph.addInput();
+          in_group->setType(input->type());
+          inputs_map[input] = in_group;
+          group->addInput(input);
+        } else {
+          // We don't support passing in scalars as arguments to fused kernels, so we generally
+          // don't allow fusing tensor-scalar operations unless the scalar is constant. In those
+          // cases we inline the constants directly in the body of the fused group.
+          JIT_ASSERT(input->node()->kind() == prim::Constant);
+          Node * in_const = subgraph.createClone(input->node(), [](Value*) -> Value* { throw std::runtime_error("unexpected input"); });
+          subgraph.prependNode(in_const);
+          insert_after = in_const;
+          inputs_map[input] = in_const->output();
+        }
       }
     }
     // copy n into the graph, remapping its inputs to internal nodes
@@ -349,7 +361,7 @@ struct GraphFuser {
       subgraph.inputs()[p]->replaceAllUsesWith(in_graph->output());
       subgraph.eraseInput(p);
     }
-    return subgraph.prependNode(in_graph);
+    return insert_after ? in_graph->insertAfter(insert_after) : subgraph.prependNode(in_graph);
   }
 
   // turn consumer node n into a fusion group with just n inside
@@ -380,7 +392,24 @@ struct GraphFuser {
 
   Node * fuse(Node * consumer, Value * producer) {
     auto group = consumer;
-    if(group->kind() != prim::FusionGroup) {
+    if (consumer->kind() == aten::cat) {
+      Graph * graph = consumer->owningGraph();
+      Node * list_construct = consumer->namedInput(attr::tensors)->node();
+      int64_t dim = consumer->get<int64_t>(attr::dim).value();
+
+      Node * fused_cat = graph->create(prim::FusedConcat, list_construct->inputs())->i_(attr::dim, dim);
+      fused_cat->insertBefore(list_construct);
+      fused_cat->output()->copyMetadata(consumer->output());
+      consumer->output()->replaceAllUsesWith(fused_cat->output());
+      topological_index[fused_cat] = topological_index[list_construct];
+
+      // NB: this deletes the fused_cat node from the original graph
+      group = createSingletonFusionGroup(fused_cat);
+      consumer->destroy();
+      if (list_construct->output()->uses().empty()) {
+        list_construct->destroy();
+      }
+    } else if (consumer->kind() != prim::FusionGroup) {
       group = createSingletonFusionGroup(consumer);
     }
     if (producer->node()->kind() == prim::FusionGroup) {
@@ -430,7 +459,7 @@ struct GraphFuser {
     if (!isChunk(chunk))
       return false;
     // and the thing being chunked is fusable into the consumer
-    Value * producer_for_chunk = chunk->input();
+    Value * producer_for_chunk = chunk->namedInput(attr::self);
     if (!isFusable(producer_for_chunk->node()) || !allUsersAreThisConsumer(chunk,producer_for_chunk))
       return false;
     // and all uses of the chunk are in this consumer
@@ -441,7 +470,6 @@ struct GraphFuser {
       }
     }
 
-    // TODO: Remove this restriction if we ever need to distribute across
     // multiple return operators
     Node * producer_for_chunk_node = producer_for_chunk->node();
     JIT_ASSERT(producer_for_chunk_node->outputs().size() == 1);
@@ -455,20 +483,25 @@ struct GraphFuser {
     std::vector<std::vector<Value*>> chunked_inputs;
     for (auto input : producer_for_chunk_node->inputs()) {
       auto input_type = input->type()->cast<TensorType>();
+      // XXX: we only work with pointwise ops in here, so we know it is valid to push
+      // the concat only through tensor arguments (and all other args can be safely ignored).
+      if (!input_type)
+        continue;
       // NB: I decided not to use cloneFrom here, because if we make cloneFrom
       // copy selects one day, it is definitely not what you want here (selects
       // have different types).
       // TODO: Perhaps we should use cloneFrom now, as it seems unlikely
       // to copy select nodes now that we have refactored to have a Value
       // distinct from Node.
-      Node * input_chunk = block->owningGraph()->create(chunk->kind(), 0);
-      input_chunk->copyAttributes(*chunk);
+      Node * input_chunk = block->owningGraph()->create(aten::chunk, 0);
       input_chunk->addInput(input);
+      input_chunk->addInput(chunk->namedInput(attr::chunks));
+      input_chunk->addInput(chunk->namedInput(attr::dim));
       insertAt(&insertion_point, input_chunk);
 
       chunked_inputs.emplace_back(); // alas, to not be C++17
       for (auto chunk_sel : chunk->outputs()) {
-          auto chunk_sel_type = chunk_sel->type()->cast<TensorType>();
+          auto chunk_sel_type = chunk_sel->type()->expect<TensorType>();
           Value * input_chunk_sel = input_chunk->addOutput();
           input_chunk_sel->setType(
             input_type->withSizesStrides(chunk_sel_type->sizes(),
@@ -480,12 +513,20 @@ struct GraphFuser {
     // apply the op to each chunk of the chunked operands,
     // and then rewrite the graph to use them!
     for (auto chunk_sel : chunk->outputs()) {
+      auto original_inputs = producer_for_chunk_node->inputs();
       Node * chunked_op = block->owningGraph()->create(producer_for_chunk_node->kind());
       chunked_op->copyAttributes(*producer_for_chunk_node);
       // Invariant: mappable operators always produce contiguous output
       chunked_op->output()->setType(chunk_sel->type()->cast<TensorType>()->contiguous());
-      for (auto by_chunk_output_idx : chunked_inputs) {
-        chunked_op->addInput(by_chunk_output_idx.at(chunk_sel->offset()));
+      auto chunked_inputs_it = chunked_inputs.begin();
+      for (size_t i = 0; i < original_inputs.size(); ++i) {
+        if (original_inputs[i]->type()->isSubtypeOf(DynamicType::get())) {
+          JIT_ASSERT(chunked_inputs_it != chunked_inputs.end());
+          chunked_op->addInput(chunked_inputs_it->at(chunk_sel->offset()));
+          ++chunked_inputs_it;
+        } else {
+          chunked_op->addInput(original_inputs[i]);
+        }
       }
       insertAt(&insertion_point, chunked_op);
       chunk_sel->replaceAllUsesWith(chunked_op->output());
@@ -499,11 +540,14 @@ struct GraphFuser {
   std::pair<graph_node_list::iterator, bool> scanNode(Node * consumer) {
     auto stage_guard = block->owningGraph()->setStageTemporary(consumer->stage());
     if(isFusableAsExitNode(consumer)) {
+      value_list inputs;
+      auto consumer_inputs = consumer->kind() == aten::cat ?
+        consumer->namedInput(attr::tensors)->node()->inputs() :
+        consumer->inputs();
       // handle inputs in reverse topological order as well...
       // otherwise in f(a,a+b) it will appear a is used twice if we consider
       // the f-a fusion before the f-(a+b) fusion first.
-      value_list inputs;
-      for(auto i : consumer->inputs()) {
+      for(auto i : consumer_inputs) {
         if (i->node()->owningBlock() == block) {
           inputs.push_back(i);
           JIT_ASSERT(topological_index.count(i->node()) > 0);

@@ -1,16 +1,14 @@
 #include <gloo/transport/tcp/device.h>
 
-#include "CUDAUtils.hpp"
-#include "FileStore.hpp"
-#include "ProcessGroupGloo.hpp"
-#include "private/CUDAUtils.hpp"
-
-#include "test/CUDATest.hpp"
-#include "test/TestUtils.hpp"
+#include <c10d/CUDAUtils.hpp>
+#include <c10d/FileStore.hpp>
+#include <c10d/ProcessGroupGloo.hpp>
+#include <c10d/private/CUDAUtils.hpp>
+#include <c10d/test/CUDATest.hpp>
+#include <c10d/test/TestUtils.hpp>
 
 using namespace c10d::test;
 
-using c10d::CUDADevice;
 using c10d::CUDAStream;
 using c10d::ProcessGroup;
 using c10d::THCStreamGuard;
@@ -75,8 +73,9 @@ class AsyncInputIsOutputTest : public AsyncTest {
 
     // Allocate inputs on available devices in a round robin fashion.
     inputs_.resize(numTensors_);
+    at::DeviceGuard deviceGuard;
     for (auto i = 0; i < numTensors_; i++) {
-      CUDADevice device(i % numDevices_);
+      deviceGuard.set_index(i % numDevices_);
       inputs_[i] = type.tensor({16, 16});
     }
 
@@ -89,7 +88,7 @@ class AsyncInputIsOutputTest : public AsyncTest {
     //
     streams_.resize(numDevices_);
     for (auto i = 0; i < numDevices_; i++) {
-      CUDADevice device(i);
+      deviceGuard.set_index(i);
       streams_[i] = CUDAStream::create();
     }
   }
@@ -141,14 +140,15 @@ class AsyncAllreduceTest : public AsyncInputIsOutputTest {
     auto guards = createStreamGuard();
 
     // Launch sleep on every stream
+    at::DeviceGuard deviceGuard;
     for (auto i = 0; i < numDevices_; i++) {
-      CUDADevice device(i);
+      deviceGuard.set_index(i);
       cudaSleep(streams_[i], 10 * 1000 * 1000);
     }
 
     // Launch value initialization for every tensor
     for (auto i = 0; i < numTensors_; i++) {
-      CUDADevice device(i % numDevices_);
+      deviceGuard.set_index(i % numDevices_);
       inputs_[i].fill_(pg_->getRank() * numTensors_ + i);
     }
 
@@ -166,14 +166,15 @@ class AsyncBroadcastTest : public AsyncInputIsOutputTest {
     auto guards = createStreamGuard();
 
     // Launch sleep on every stream
+    at::DeviceGuard deviceGuard;
     for (auto i = 0; i < numDevices_; i++) {
-      CUDADevice device(i);
+      deviceGuard.set_index(i);
       cudaSleep(streams_[i], 10 * 1000 * 1000);
     }
 
     // Launch value initialization for every tensor
     for (auto i = 0; i < numTensors_; i++) {
-      CUDADevice device(i % numDevices_);
+      deviceGuard.set_index(i % numDevices_);
       inputs_[i].fill_(pg_->getRank() * numTensors_ + i);
     }
 

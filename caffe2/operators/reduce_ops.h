@@ -137,6 +137,7 @@ struct MinReducer {
         dims.data(),
         axes.size(),
         axes.data(),
+        T(1),
         X_data,
         Y_data,
         context);
@@ -168,6 +169,7 @@ struct MaxReducer {
         dims.data(),
         axes.size(),
         axes.data(),
+        T(1),
         X_data,
         Y_data,
         context);
@@ -199,6 +201,7 @@ struct SumReducer {
         dims.data(),
         axes.size(),
         axes.data(),
+        T(1),
         X_data,
         Y_data,
         context);
@@ -219,6 +222,7 @@ struct SumReducer {
         dY_dims.data(),
         dX_dims.size(),
         dX_dims.data(),
+        T(1),
         dY_data,
         dX_data,
         context);
@@ -240,6 +244,7 @@ struct MeanReducer {
         dims.data(),
         axes.size(),
         axes.data(),
+        T(1),
         X_data,
         Y_data,
         context);
@@ -255,26 +260,85 @@ struct MeanReducer {
       const T* /* Y_data */,
       T* dX_data,
       Context* context) const {
+    const int dY_size = std::accumulate(
+        dY_dims.cbegin(), dY_dims.cend(), 1, std::multiplies<int>());
+    const int dX_size = std::accumulate(
+        dX_dims.cbegin(), dX_dims.cend(), 1, std::multiplies<int>());
     math::Broadcast(
         dY_dims.size(),
         dY_dims.data(),
         dX_dims.size(),
         dX_dims.data(),
+        static_cast<T>(dY_size) / static_cast<T>(dX_size),
         dY_data,
-        dX_data,
-        context);
-    const int dY_size = std::accumulate(
-        dY_dims.cbegin(), dY_dims.cend(), 1, std::multiplies<int>());
-    const int dX_size = std::accumulate(
-        dX_dims.cbegin(), dX_dims.cend(), 1, std::multiplies<int>());
-    math::Scale<T, Context>(
-        dX_size,
-        static_cast<float>(dY_size) / static_cast<float>(dX_size),
-        dX_data,
         dX_data,
         context);
     return true;
   }
+};
+
+template <class Context>
+struct L1Reducer {
+  template <typename T>
+  bool Forward(
+      const std::vector<int>& dims,
+      const std::vector<int>& axes,
+      const T* X_data,
+      T* Y_data,
+      Context* context) const {
+    math::ReduceL1<T, Context>(
+        dims.size(),
+        dims.data(),
+        axes.size(),
+        axes.data(),
+        T(1),
+        X_data,
+        Y_data,
+        context);
+    return true;
+  }
+
+  template <typename T>
+  bool Backward(
+      const std::vector<int>& dY_dims,
+      const std::vector<int>& dX_dims,
+      const T* dY_data,
+      const T* X_data,
+      const T* Y_data,
+      T* dX_data,
+      Context* context) const;
+};
+
+template <class Context>
+struct L2Reducer {
+  template <typename T>
+  bool Forward(
+      const std::vector<int>& dims,
+      const std::vector<int>& axes,
+      const T* X_data,
+      T* Y_data,
+      Context* context) const {
+    math::ReduceL2<T, Context>(
+        dims.size(),
+        dims.data(),
+        axes.size(),
+        axes.data(),
+        T(1),
+        X_data,
+        Y_data,
+        context);
+    return true;
+  }
+
+  template <typename T>
+  bool Backward(
+      const std::vector<int>& dY_dims,
+      const std::vector<int>& dX_dims,
+      const T* dY_data,
+      const T* X_data,
+      const T* Y_data,
+      T* dX_data,
+      Context* context) const;
 };
 
 } // namespace caffe2

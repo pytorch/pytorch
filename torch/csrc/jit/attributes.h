@@ -5,9 +5,10 @@
 #include <memory>
 #include <vector>
 #include <ATen/ATen.h>
+#include "ATen/Utils.h"
 
-#include "torch/csrc/jit/interned_strings.h"
-#include "torch/csrc/assertions.h"
+#include <torch/csrc/jit/assertions.h>
+#include <torch/csrc/jit/interned_strings.h>
 
 namespace torch { namespace jit {
 
@@ -27,7 +28,7 @@ struct AttributeValue {
   Symbol name;
   virtual AttributeKind kind() const = 0;
   virtual Ptr clone() const = 0;
-  virtual ~AttributeValue() {}
+  virtual ~AttributeValue() = default;
 };
 
 template<typename T, AttributeKind Kind>
@@ -39,10 +40,10 @@ struct ScalarAttributeValue : public AttributeValue {
   ValueType & value() {
     return value_;
   }
-  virtual Ptr clone() const override {
+  Ptr clone() const override {
     return Ptr(new ScalarAttributeValue(name, value_));
   }
-  virtual AttributeKind kind() const override { return Kind; }
+  AttributeKind kind() const override { return Kind; }
 private:
   ValueType value_;
 };
@@ -56,8 +57,8 @@ struct VectorAttributeValue : public AttributeValue {
   ValueType & value() {
     return value_;
   }
-  virtual AttributeKind kind() const override { return Kind; }
-  virtual std::unique_ptr<AttributeValue> clone() const override {
+  AttributeKind kind() const override { return Kind; }
+  std::unique_ptr<AttributeValue> clone() const override {
     auto copy = value_;
     return Ptr(new VectorAttributeValue(name, std::move(copy)));
   }
@@ -87,7 +88,7 @@ struct AttributeError : public std::exception {
     }
     msg = ss.str();
   }
-  virtual const char* what() const noexcept override  {
+  const char* what() const noexcept override  {
     return msg.c_str();
   }
 private:
@@ -100,7 +101,7 @@ private:
 // we return Derived* pointers because Nodes are normally held as pointers.
 template<typename Derived>
 struct Attributes {
-  Attributes() {}
+  Attributes() = default;
   void copyAttributes(const Attributes & rhs) {
     values_.clear();
     for(auto & i : rhs.values_) {
@@ -195,7 +196,8 @@ struct Attributes {
   }
 
 private:
-  Derived* This() {
+  // UBSAN error: https://github.com/pytorch/pytorch/issues/9055
+  Derived* This() __ubsan_ignore_vptr__ {
     return static_cast<Derived*>(this);
   }
   template<typename T>

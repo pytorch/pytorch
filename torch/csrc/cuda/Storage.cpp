@@ -11,15 +11,9 @@
 #include "THCP.h"
 
 #include "override_macros.h"
-#include "torch/csrc/allocators.h"
+#include "torch/csrc/finalizer.h"
 #include "torch/csrc/copy_utils.h"
 #include "DynamicTypes.h"
 
 #define THC_GENERIC_FILE "torch/csrc/generic/Storage.cpp"
 #include <THC/THCGenerateAllTypes.h>
-
-template<>
-void THPPointer<THCStorage>::free() {
-  if (ptr)
-    THCStorage_free(LIBRARY_STATE ptr);
-}

@@ -47,7 +47,7 @@ class ConvFusionTest(hu.HypothesisTestCase):
             device_option=dc[0]
         )
 
-        # Manual fusion
+        # Manual fusion for Conv + ReLU
         conv_fusion = core.CreateOperator(
             "ConvFusion",
             ["X1", "w1", "b1"] if use_bias else ["X1", "w1"],
@@ -59,21 +59,6 @@ class ConvFusionTest(hu.HypothesisTestCase):
             fusion_type = 1,
             device_option=dc[1]
         )
-
-        # Auto fusion
-        old_net = caffe2_pb2.NetDef()
-        conv_old = caffe2_pb2.OperatorDef()
-        conv_old.CopyFrom(conv)
-        conv_old.device_option.CopyFrom(dc[1])
-        relu_old = caffe2_pb2.OperatorDef()
-        relu_old.CopyFrom(relu)
-        relu_old.device_option.CopyFrom(dc[1])
-        old_net.op.extend([conv_old, relu_old])
-        net = core.Net("net")
-        net.Proto().CopyFrom(old_net)
-        optimizeForIDEEP(net)
-        self.assertTrue(len(net.Proto().op) == 1)
-        self.assertTrue(net.Proto().op[0].type == "ConvFusion")
 
         X = np.random.rand(
             batch_size, input_channels * group, size, size).astype(np.float32) - 0.5
@@ -103,10 +88,24 @@ class ConvFusionTest(hu.HypothesisTestCase):
             print(np.max(np.abs(Y1 - Y0)))
             self.assertTrue(False)
 
+        # Auto fusion for Conv + ReLU
         workspace.ResetWorkspace()
+        old_net = caffe2_pb2.NetDef()
+        conv_old = caffe2_pb2.OperatorDef()
+        conv_old.CopyFrom(conv)
+        conv_old.device_option.CopyFrom(dc[1])
+        relu_old = caffe2_pb2.OperatorDef()
+        relu_old.CopyFrom(relu)
+        relu_old.device_option.CopyFrom(dc[1])
+        old_net.op.extend([conv_old, relu_old])
         workspace.FeedBlob('X0', X, dc[1])
         workspace.FeedBlob('w0', w, dc[1])
         workspace.FeedBlob('b0', b, dc[1])
+        net = core.Net("net")
+        net.Proto().CopyFrom(old_net)
+        optimizeForIDEEP(net)
+        self.assertTrue(len(net.Proto().op) == 1)
+        self.assertTrue(net.Proto().op[0].type == "ConvFusion")
         workspace.RunOperatorOnce(net.Proto().op[0])
         Y2 = workspace.FetchBlob('Y0')
         if not np.allclose(Y0, Y2, atol=0.01, rtol=0.01):
@@ -130,6 +129,12 @@ class ConvFusionTest(hu.HypothesisTestCase):
     def test_convolution_sum_fusion(self, stride, pad, kernel, size,
                              input_channels, output_channels,
                              batch_size, use_bias, group, gc, dc):
+        relu_S0 = core.CreateOperator(
+            "Relu",
+            ["S0"],
+            ["S0"],
+            device_option=dc[0]
+        )
         conv = core.CreateOperator(
             "Conv",
             ["X0", "w0", "b0"] if use_bias else ["X0", "w0"],
@@ -145,6 +150,14 @@ class ConvFusionTest(hu.HypothesisTestCase):
             ["S0", "Y0"],
             ["S0"],
             device_option=dc[0]
+        )
+
+        # Manual fusion for Conv + Sum
+        relu_S1 = core.CreateOperator(
+            "Relu",
+            ["S1"],
+            ["S1"],
+            device_option=dc[1]
         )
         conv_fusion = core.CreateOperator(
             "ConvFusion",
@@ -173,6 +186,7 @@ class ConvFusionTest(hu.HypothesisTestCase):
         Y0 = workspace.FetchBlob('Y0')
         S = np.random.rand(*Y0.shape).astype(np.float32) - 0.5
         workspace.FeedBlob('S0', S, dc[0])
+        workspace.RunOperatorOnce(relu_S0)
         workspace.RunOperatorOnce(sum)
         S0 = workspace.FetchBlob('S0')
 
@@ -181,6 +195,7 @@ class ConvFusionTest(hu.HypothesisTestCase):
         workspace.FeedBlob('w1', w, dc[1])
         workspace.FeedBlob('b1', b, dc[1])
         workspace.FeedBlob('S1', S, dc[1])
+        workspace.RunOperatorOnce(relu_S1)
         workspace.RunOperatorOnce(conv_fusion)
         S1 = workspace.FetchBlob('S1')
 
@@ -189,6 +204,37 @@ class ConvFusionTest(hu.HypothesisTestCase):
             print(S0.flatten())
             print(np.max(np.abs(S1 - S0)))
             self.assertTrue(False)
+
+        # Auto fusion for Conv + Sum
+        workspace.ResetWorkspace()
+        old_net = caffe2_pb2.NetDef()
+        relu_S0_old = caffe2_pb2.OperatorDef()
+        relu_S0_old.CopyFrom(relu_S0)
+        relu_S0_old.device_option.CopyFrom(dc[1])
+        conv_old = caffe2_pb2.OperatorDef()
+        conv_old.CopyFrom(conv)
+        conv_old.device_option.CopyFrom(dc[1])
+        sum_old = caffe2_pb2.OperatorDef()
+        sum_old.CopyFrom(sum)
+        sum_old.device_option.CopyFrom(dc[1])
+        old_net.op.extend([relu_S0_old, conv_old, sum_old])
+        workspace.FeedBlob('X0', X, dc[1])
+        workspace.FeedBlob('w0', w, dc[1])
+        workspace.FeedBlob('b0', b, dc[1])
+        workspace.FeedBlob('S0', S, dc[1])
+        net = core.Net("net")
+        net.Proto().CopyFrom(old_net)
+        optimizeForIDEEP(net)
+        self.assertTrue(len(net.Proto().op) == 2)
+        self.assertTrue(net.Proto().op[1].type == "ConvFusion")
+        workspace.RunNetOnce(net.Proto())
+        S2 = workspace.FetchBlob('S0')
+        if not np.allclose(S0, S2, atol=0.01, rtol=0.01):
+            print(S2.flatten())
+            print(S0.flatten())
+            print(np.max(np.abs(S2 - S0)))
+            self.assertTrue(False)
+
         workspace.SwitchWorkspace(old_ws_name)
 
     @given(stride=st.integers(1, 3),
@@ -204,6 +250,12 @@ class ConvFusionTest(hu.HypothesisTestCase):
     def test_convolution_sum_relu_fusion(self, stride, pad, kernel, size,
                              input_channels, output_channels,
                              batch_size, use_bias, group, gc, dc):
+        relu_S0 = core.CreateOperator(
+            "Relu",
+            ["S0"],
+            ["S0"],
+            device_option=dc[0]
+        )
         conv = core.CreateOperator(
             "Conv",
             ["X0", "w0", "b0"] if use_bias else ["X0", "w0"],
@@ -225,6 +277,14 @@ class ConvFusionTest(hu.HypothesisTestCase):
             ["S0"],
             ["S0"],
             device_option=dc[0]
+        )
+
+        # Manual fusion for Conv + Sum + ReLU
+        relu_S1 = core.CreateOperator(
+            "Relu",
+            ["S1"],
+            ["S1"],
+            device_option=dc[1]
         )
         conv_fusion = core.CreateOperator(
             "ConvFusion",
@@ -253,6 +313,7 @@ class ConvFusionTest(hu.HypothesisTestCase):
         Y0 = workspace.FetchBlob('Y0')
         S = np.random.rand(*Y0.shape).astype(np.float32) - 0.5
         workspace.FeedBlob('S0', S, dc[0])
+        workspace.RunOperatorOnce(relu_S0)
         workspace.RunOperatorOnce(sum)
         workspace.RunOperatorOnce(relu)
         S0 = workspace.FetchBlob('S0')
@@ -262,6 +323,7 @@ class ConvFusionTest(hu.HypothesisTestCase):
         workspace.FeedBlob('w1', w, dc[1])
         workspace.FeedBlob('b1', b, dc[1])
         workspace.FeedBlob('S1', S, dc[1])
+        workspace.RunOperatorOnce(relu_S1)
         workspace.RunOperatorOnce(conv_fusion)
         S1 = workspace.FetchBlob('S1')
 
@@ -270,6 +332,40 @@ class ConvFusionTest(hu.HypothesisTestCase):
             print(S0.flatten())
             print(np.max(np.abs(S1 - S0)))
             self.assertTrue(False)
+
+        # Auto fusion for Conv + Sum + ReLU
+        workspace.ResetWorkspace()
+        old_net = caffe2_pb2.NetDef()
+        relu_S0_old = caffe2_pb2.OperatorDef()
+        relu_S0_old.CopyFrom(relu_S0)
+        relu_S0_old.device_option.CopyFrom(dc[1])
+        conv_old = caffe2_pb2.OperatorDef()
+        conv_old.CopyFrom(conv)
+        conv_old.device_option.CopyFrom(dc[1])
+        sum_old = caffe2_pb2.OperatorDef()
+        sum_old.CopyFrom(sum)
+        sum_old.device_option.CopyFrom(dc[1])
+        relu_old = caffe2_pb2.OperatorDef()
+        relu_old.CopyFrom(relu)
+        relu_old.device_option.CopyFrom(dc[1])
+        old_net.op.extend([relu_S0_old, conv_old, sum_old, relu_old])
+        workspace.FeedBlob('X0', X, dc[1])
+        workspace.FeedBlob('w0', w, dc[1])
+        workspace.FeedBlob('b0', b, dc[1])
+        workspace.FeedBlob('S0', S, dc[1])
+        net = core.Net("net")
+        net.Proto().CopyFrom(old_net)
+        optimizeForIDEEP(net)
+        self.assertTrue(len(net.Proto().op) == 2)
+        self.assertTrue(net.Proto().op[1].type == "ConvFusion")
+        workspace.RunNetOnce(net.Proto())
+        S2 = workspace.FetchBlob('S0')
+        if not np.allclose(S0, S2, atol=0.01, rtol=0.01):
+            print(S2.flatten())
+            print(S0.flatten())
+            print(np.max(np.abs(S2 - S0)))
+            self.assertTrue(False)
+
         workspace.SwitchWorkspace(old_ws_name)
 
 if __name__ == "__main__":

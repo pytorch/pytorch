@@ -176,7 +176,7 @@ class LSTMUnitOp : public Operator<Context> {
     }
 
     const auto t = static_cast<OperatorBase*>(this)
-                       ->Input<Tensor<CPUContext>>(TIMESTEP)
+                       ->Input<Tensor>(TIMESTEP, CPU)
                        .template data<int32_t>()[0];
     Output(CELL_T)->ResizeLike(Input(CELL_T_M_1));
     auto* C = Output(CELL_T)->template mutable_data<T>();
@@ -253,7 +253,7 @@ class LSTMUnitGradientOp : public Operator<Context> {
     const auto* C_prev = Input(CELL_T_M_1).template data<T>();
     const auto* X = Input(GATES).template data<T>();
     const auto t = static_cast<OperatorBase*>(this)
-                       ->Input<Tensor<CPUContext>>(TIMESTEP)
+                       ->Input<Tensor>(TIMESTEP, CPU)
                        .template data<int32_t>()[0];
     const auto* C = Input(CELL_T).template data<T>();
     const auto* H = Input(HIDDEN_T).template data<T>();

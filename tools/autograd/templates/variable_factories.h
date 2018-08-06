@@ -5,8 +5,9 @@
 #include <torch/csrc/autograd/variable.h>
 
 #include <ATen/ATen.h>
-#include <ATen/ArrayRef.h>
+#include <ATen/core/ArrayRef.h>
 
+#include <functional>
 #include <initializer_list>
 #include <utility>
 
@@ -38,5 +39,24 @@ namespace torch {
 AT_FORALL_SCALAR_TYPES_EXCEPT_HALF(TENSOR)
 #undef TENSOR
 
+inline autograd::Variable from_blob(
+    void* data,
+    at::IntList sizes,
+    const std::function<void(void*)>& deleter,
+    const at::TensorOptions& options = {}) {
+  at::Tensor tensor =
+      at::from_blob(data, sizes, deleter, options.discard_runtime_type());
+  return autograd::make_variable(
+      tensor, /*requires_grad=*/options.requires_grad());
+}
+
+inline autograd::Variable from_blob(
+    void* data,
+    at::IntList sizes,
+    const at::TensorOptions& options = {}) {
+  return torch::from_blob(data, sizes, /*deleter=*/[](void*) {}, options);
+}
+
 ${function_definitions}
+
 } // namespace torch

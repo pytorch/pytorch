@@ -86,7 +86,6 @@
 #   LD_LIBRARY_PATH
 #     we will search for libraries in these paths
 
-
 from setuptools import setup, Extension, distutils, Command, find_packages
 import setuptools.command.build_ext
 import setuptools.command.install
@@ -176,6 +175,8 @@ cwd = os.path.dirname(os.path.abspath(__file__))
 lib_path = os.path.join(cwd, "torch", "lib")
 third_party_path = os.path.join(cwd, "third_party")
 tmp_install_path = lib_path + "/tmp_install"
+rel_site_packages = distutils.sysconfig.get_python_lib(prefix='')
+full_site_packages = distutils.sysconfig.get_python_lib()
 
 
 class PytorchCommand(setuptools.Command):
@@ -302,6 +303,7 @@ def build_libs(libs):
         build_libs_cmd = ['bash', 'tools/build_pytorch_libs.sh']
     my_env = os.environ.copy()
     my_env["PYTORCH_PYTHON"] = sys.executable
+    my_env["CMAKE_PREFIX_PATH"] = full_site_packages
     my_env["NUM_JOBS"] = str(NUM_JOBS)
     my_env["ONNX_NAMESPACE"] = ONNX_NAMESPACE
     if not IS_WINDOWS:
@@ -316,6 +318,8 @@ def build_libs(libs):
     if USE_CUDA:
         my_env["CUDA_BIN_PATH"] = CUDA_HOME
         build_libs_cmd += ['--use-cuda']
+        if IS_WINDOWS:
+            my_env["NVTOOLEXT_HOME"] = NVTOOLEXT_HOME
     if USE_ROCM:
         build_libs_cmd += ['--use-rocm']
     if USE_NNPACK:
@@ -333,9 +337,10 @@ def build_libs(libs):
         build_libs_cmd += ['--use-gloo-ibverbs']
     if USE_DISTRIBUTED_MW:
         build_libs_cmd += ['--use-distributed-mw']
-
     if FULL_CAFFE2:
         build_libs_cmd += ['--full-caffe2']
+
+    my_env["BUILD_TORCH"] = "ON"
 
     if subprocess.call(build_libs_cmd + libs, env=my_env) != 0:
         print("Failed to run '{}'".format(' '.join(build_libs_cmd + libs)))
@@ -437,7 +442,7 @@ class develop(setuptools.command.develop.develop):
         def load(filename):
             with open(filename) as f:
                 return json.load(f)
-        ninja_files = glob.glob('build/*_compile_commands.json')
+        ninja_files = glob.glob('build/*compile_commands.json')
         cmake_files = glob.glob('torch/lib/build/*/compile_commands.json')
         all_commands = [entry
                         for f in ninja_files + cmake_files
@@ -474,7 +479,6 @@ build_ext_parent = ninja_build_ext if USE_NINJA \
 class build_ext(build_ext_parent):
 
     def run(self):
-
         # Print build options
         if USE_NUMPY:
             print('-- Building with NumPy bindings')
@@ -533,26 +537,29 @@ class build_ext(build_ext_parent):
             self.copy_file(export_lib, target_lib)
 
     def build_extensions(self):
-        # If also building Caffe2 python, then we need this extra logic copied
-        # from the old setup_caffe2.py
+        # The caffe2 extensions are created in
+        # tmp_install/lib/pythonM.m/site-packages/caffe2/python/
+        # and need to be copied to build/lib.linux.... , which will be a
+        # platform dependent build folder created by the "build" command of
+        # setuptools. Only the contents of this folder are installed in the
+        # "install" command by default.
         if FULL_CAFFE2:
-            pybind_exts = [
+            # We only make this copy for Caffe2's pybind extensions
+            caffe2_pybind_exts = [
                 'caffe2.python.caffe2_pybind11_state',
                 'caffe2.python.caffe2_pybind11_state_gpu',
+                'caffe2.python.caffe2_pybind11_state_hip',
             ]
-            # The cmake of Caffe2 puts these in the site-packages rather than
-            # the build directory like the other torch extensions
-            sp_dir = distutils.sysconfig.get_python_lib(prefix='')
             i = 0
             while i < len(self.extensions):
                 ext = self.extensions[i]
-                if ext.name not in pybind_exts:
+                if ext.name not in caffe2_pybind_exts:
                     i += 1
                     continue
                 fullname = self.get_ext_fullname(ext.name)
                 filename = self.get_ext_filename(fullname)
 
-                src = os.path.join(tmp_install_path, sp_dir, filename)
+                src = os.path.join(tmp_install_path, rel_site_packages, filename)
                 if not os.path.exists(src):
                     print("{} does not exist".format(src))
                     del self.extensions[i]
@@ -564,6 +571,12 @@ class build_ext(build_ext_parent):
                     self.copy_file(src, dst)
                     i += 1
         distutils.command.build_ext.build_ext.build_extensions(self)
+
+    def get_outputs(self):
+        outputs = distutils.command.build_ext.build_ext.get_outputs(self)
+        if FULL_CAFFE2:
+            outputs += [os.path.join(self.build_lib, d) for d in ['caffe', 'caffe2']]
+        return outputs
 
 
 class build(distutils.command.build.build):
@@ -585,14 +598,23 @@ class clean(distutils.command.clean.clean):
 
     def run(self):
         import glob
+        import re
         with open('.gitignore', 'r') as f:
             ignores = f.read()
-            for wildcard in filter(bool, ignores.split('\n')):
-                for filename in glob.glob(wildcard):
-                    try:
-                        os.remove(filename)
-                    except OSError:
-                        shutil.rmtree(filename, ignore_errors=True)
+            pat = re.compile(r'^#( BEGIN NOT-CLEAN-FILES )?')
+            for wildcard in filter(None, ignores.split('\n')):
+                match = pat.match(wildcard)
+                if match:
+                    if match.group(1):
+                        # Marker is found and stop reading .gitignore.
+                        break
+                    # Ignore lines which begin with '#'.
+                else:
+                    for filename in glob.glob(wildcard):
+                        try:
+                            os.remove(filename)
+                        except OSError:
+                            shutil.rmtree(filename, ignore_errors=True)
 
         # It's an old-style class in Python 2.7...
         distutils.command.clean.clean.run(self)
@@ -631,6 +653,7 @@ else:
         '-std=c++11',
         '-Wall',
         '-Wextra',
+        '-Wno-strict-overflow',
         '-Wno-unused-parameter',
         '-Wno-missing-field-initializers',
         '-Wno-write-strings',
@@ -645,7 +668,9 @@ else:
         # Clang has an unfixed bug leading to spurious missing
         # braces warnings, see
         # https://bugs.llvm.org/show_bug.cgi?id=21629
-        '-Wno-missing-braces'
+        '-Wno-missing-braces',
+        # gcc7 seems to report spurious warnings with this enabled
+        "-Wno-stringop-overflow",
     ]
     if check_env_flag('WERROR'):
         extra_compile_args.append('-Werror')
@@ -710,119 +735,74 @@ if IS_WINDOWS:
 main_compile_args = ['-D_THP_CORE', '-DONNX_NAMESPACE=' + ONNX_NAMESPACE]
 main_libraries = ['shm']
 main_link_args = CAFFE2_LIBS + [NANOPB_STATIC_LIB, PROTOBUF_STATIC_LIB]
+if IS_WINDOWS:
+    main_link_args.append(os.path.join(lib_path, 'torch.lib'))
+elif IS_DARWIN:
+    main_link_args.append(os.path.join(lib_path, 'libtorch.dylib'))
+else:
+    main_link_args.append(os.path.join(lib_path, 'libtorch.so'))
 main_sources = [
-    "torch/csrc/PtrWrapper.cpp",
-    "torch/csrc/Module.cpp",
-    "torch/csrc/Generator.cpp",
-    "torch/csrc/Size.cpp",
-    "torch/csrc/Dtype.cpp",
-    "torch/csrc/Device.cpp",
-    "torch/csrc/Exceptions.cpp",
-    "torch/csrc/Layout.cpp",
-    "torch/csrc/Storage.cpp",
     "torch/csrc/DataLoader.cpp",
+    "torch/csrc/Device.cpp",
+    "torch/csrc/Dtype.cpp",
     "torch/csrc/DynamicTypes.cpp",
-    "torch/csrc/assertions.cpp",
+    "torch/csrc/Exceptions.cpp",
+    "torch/csrc/Generator.cpp",
+    "torch/csrc/Layout.cpp",
+    "torch/csrc/Module.cpp",
+    "torch/csrc/PtrWrapper.cpp",
+    "torch/csrc/Size.cpp",
+    "torch/csrc/Storage.cpp",
+    "torch/csrc/autograd/functions/init.cpp",
+    "torch/csrc/autograd/generated/python_functions.cpp",
+    "torch/csrc/autograd/generated/python_nn_functions.cpp",
+    "torch/csrc/autograd/generated/python_torch_functions.cpp",
+    "torch/csrc/autograd/generated/python_variable_methods.cpp",
+    "torch/csrc/autograd/init.cpp",
+    "torch/csrc/autograd/python_anomaly_mode.cpp",
+    "torch/csrc/autograd/python_cpp_function.cpp",
+    "torch/csrc/autograd/python_engine.cpp",
+    "torch/csrc/autograd/python_function.cpp",
+    "torch/csrc/autograd/python_hook.cpp",
+    "torch/csrc/autograd/python_legacy_variable.cpp",
+    "torch/csrc/autograd/python_variable.cpp",
+    "torch/csrc/autograd/python_variable_indexing.cpp",
     "torch/csrc/byte_order.cpp",
-    "torch/csrc/torch.cpp",
+    "torch/csrc/finalizer.cpp",
+    "torch/csrc/jit/batched/BatchTensor.cpp",
+    "torch/csrc/jit/init.cpp",
+    "torch/csrc/jit/ivalue.cpp",
+    "torch/csrc/jit/passes/onnx.cpp",
+    "torch/csrc/jit/passes/onnx/fixup_onnx_loop.cpp",
+    "torch/csrc/jit/passes/onnx/peephole.cpp",
+    "torch/csrc/jit/passes/to_batch.cpp",
+    "torch/csrc/jit/python_arg_flatten.cpp",
+    "torch/csrc/jit/python_interpreter.cpp",
+    "torch/csrc/jit/python_ir.cpp",
+    "torch/csrc/jit/python_tracer.cpp",
+    "torch/csrc/jit/script/init.cpp",
+    "torch/csrc/jit/script/lexer.cpp",
+    "torch/csrc/jit/script/module.cpp",
+    "torch/csrc/jit/script/python_tree_views.cpp",
+    "torch/csrc/nn/THNN.cpp",
+    "torch/csrc/onnx/init.cpp",
+    "torch/csrc/serialization.cpp",
+    "torch/csrc/tensor/python_tensor.cpp",
     "torch/csrc/utils.cpp",
     "torch/csrc/utils/cuda_lazy_init.cpp",
     "torch/csrc/utils/invalid_arguments.cpp",
     "torch/csrc/utils/object_ptr.cpp",
     "torch/csrc/utils/python_arg_parser.cpp",
+    "torch/csrc/utils/tensor_apply.cpp",
+    "torch/csrc/utils/tensor_conversion_dispatch.cpp",
+    "torch/csrc/utils/tensor_dtypes.cpp",
+    "torch/csrc/utils/tensor_flatten.cpp",
+    "torch/csrc/utils/tensor_layouts.cpp",
     "torch/csrc/utils/tensor_list.cpp",
     "torch/csrc/utils/tensor_new.cpp",
     "torch/csrc/utils/tensor_numpy.cpp",
-    "torch/csrc/utils/tensor_dtypes.cpp",
-    "torch/csrc/utils/tensor_layouts.cpp",
     "torch/csrc/utils/tensor_types.cpp",
     "torch/csrc/utils/tuple_parser.cpp",
-    "torch/csrc/utils/tensor_apply.cpp",
-    "torch/csrc/utils/tensor_conversion_dispatch.cpp",
-    "torch/csrc/utils/tensor_flatten.cpp",
-    "torch/csrc/utils/variadic.cpp",
-    "torch/csrc/allocators.cpp",
-    "torch/csrc/serialization.cpp",
-    "torch/csrc/jit/init.cpp",
-    "torch/csrc/jit/interpreter.cpp",
-    "torch/csrc/jit/python_interpreter.cpp",
-    "torch/csrc/jit/ir.cpp",
-    "torch/csrc/jit/fusion_compiler.cpp",
-    "torch/csrc/jit/graph_executor.cpp",
-    "torch/csrc/jit/python_ir.cpp",
-    "torch/csrc/jit/test_jit.cpp",
-    "torch/csrc/jit/tracer.cpp",
-    "torch/csrc/jit/tracer_state.cpp",
-    "torch/csrc/jit/python_tracer.cpp",
-    "torch/csrc/jit/passes/shape_analysis.cpp",
-    "torch/csrc/jit/interned_strings.cpp",
-    "torch/csrc/jit/type.cpp",
-    "torch/csrc/jit/export.cpp",
-    "torch/csrc/jit/import.cpp",
-    "torch/csrc/jit/autodiff.cpp",
-    "torch/csrc/jit/python_arg_flatten.cpp",
-    "torch/csrc/jit/variable_flags.cpp",
-    "torch/csrc/jit/passes/create_autodiff_subgraphs.cpp",
-    "torch/csrc/jit/passes/graph_fuser.cpp",
-    "torch/csrc/jit/passes/onnx.cpp",
-    "torch/csrc/jit/passes/dead_code_elimination.cpp",
-    "torch/csrc/jit/passes/remove_expands.cpp",
-    "torch/csrc/jit/passes/lower_tuples.cpp",
-    "torch/csrc/jit/passes/lower_grad_of.cpp",
-    "torch/csrc/jit/passes/common_subexpression_elimination.cpp",
-    "torch/csrc/jit/passes/peephole.cpp",
-    "torch/csrc/jit/passes/inplace_check.cpp",
-    "torch/csrc/jit/passes/canonicalize.cpp",
-    "torch/csrc/jit/passes/batch_mm.cpp",
-    "torch/csrc/jit/passes/decompose_addmm.cpp",
-    "torch/csrc/jit/passes/specialize_undef.cpp",
-    "torch/csrc/jit/passes/erase_number_types.cpp",
-    "torch/csrc/jit/passes/loop_unrolling.cpp",
-    "torch/csrc/jit/passes/onnx/peephole.cpp",
-    "torch/csrc/jit/passes/onnx/fixup_onnx_loop.cpp",
-    "torch/csrc/jit/generated/aten_dispatch.cpp",
-    "torch/csrc/jit/generated/aten_schema.cpp",
-    "torch/csrc/jit/script/lexer.cpp",
-    "torch/csrc/jit/script/compiler.cpp",
-    "torch/csrc/jit/script/module.cpp",
-    "torch/csrc/jit/script/init.cpp",
-    "torch/csrc/jit/script/python_tree_views.cpp",
-    "torch/csrc/jit/batched/BatchTensor.cpp",
-    "torch/csrc/autograd/init.cpp",
-    "torch/csrc/autograd/aten_variable_hooks.cpp",
-    "torch/csrc/autograd/grad_mode.cpp",
-    "torch/csrc/autograd/anomaly_mode.cpp",
-    "torch/csrc/autograd/python_anomaly_mode.cpp",
-    "torch/csrc/autograd/engine.cpp",
-    "torch/csrc/autograd/function.cpp",
-    "torch/csrc/autograd/variable.cpp",
-    "torch/csrc/autograd/saved_variable.cpp",
-    "torch/csrc/autograd/input_buffer.cpp",
-    "torch/csrc/autograd/profiler.cpp",
-    "torch/csrc/autograd/python_function.cpp",
-    "torch/csrc/autograd/python_cpp_function.cpp",
-    "torch/csrc/autograd/python_variable.cpp",
-    "torch/csrc/autograd/python_variable_indexing.cpp",
-    "torch/csrc/autograd/python_legacy_variable.cpp",
-    "torch/csrc/autograd/python_engine.cpp",
-    "torch/csrc/autograd/python_hook.cpp",
-    "torch/csrc/autograd/generated/VariableType.cpp",
-    "torch/csrc/autograd/generated/Functions.cpp",
-    "torch/csrc/autograd/generated/python_torch_functions.cpp",
-    "torch/csrc/autograd/generated/python_variable_methods.cpp",
-    "torch/csrc/autograd/generated/python_functions.cpp",
-    "torch/csrc/autograd/generated/python_nn_functions.cpp",
-    "torch/csrc/autograd/functions/basic_ops.cpp",
-    "torch/csrc/autograd/functions/tensor.cpp",
-    "torch/csrc/autograd/functions/accumulate_grad.cpp",
-    "torch/csrc/autograd/functions/special.cpp",
-    "torch/csrc/autograd/functions/utils.cpp",
-    "torch/csrc/autograd/functions/init.cpp",
-    "torch/csrc/nn/THNN.cpp",
-    "torch/csrc/tensor/python_tensor.cpp",
-    "torch/csrc/onnx/onnx.npb.cpp",
-    "torch/csrc/onnx/onnx.cpp",
-    "torch/csrc/onnx/init.cpp",
 ]
 
 try:
@@ -963,7 +943,10 @@ def make_relative_rpath(path):
 ################################################################################
 
 extensions = []
-packages = find_packages(exclude=('tools', 'tools.*', 'caffe2', 'caffe2.*', 'caffe', 'caffe.*'))
+if FULL_CAFFE2:
+    packages = find_packages(exclude=('tools', 'tools.*'))
+else:
+    packages = find_packages(exclude=('tools', 'tools.*', 'caffe2', 'caffe2.*', 'caffe', 'caffe.*'))
 C = Extension("torch._C",
               libraries=main_libraries,
               sources=main_sources,
@@ -1052,6 +1035,7 @@ if __name__ == '__main__':
                 'lib/torch_shm_manager',
                 'lib/*.h',
                 'lib/include/ATen/*.h',
+                'lib/include/ATen/core/*.h',
                 'lib/include/ATen/detail/*.h',
                 'lib/include/ATen/cuda/*.h',
                 'lib/include/ATen/cuda/*.cuh',
@@ -1060,9 +1044,9 @@ if __name__ == '__main__':
                 'lib/include/ATen/cuda/detail/*.cuh',
                 'lib/include/pybind11/*.h',
                 'lib/include/pybind11/detail/*.h',
-                'lib/include/TH/*.h',
-                'lib/include/TH/generic/*.h',
-                'lib/include/THC/*.h',
+                'lib/include/TH/*.h*',
+                'lib/include/TH/generic/*.h*',
+                'lib/include/THC/*.h*',
                 'lib/include/THC/*.cuh',
                 'lib/include/THC/generic/*.h',
                 'lib/include/THCUNN/*.cuh',

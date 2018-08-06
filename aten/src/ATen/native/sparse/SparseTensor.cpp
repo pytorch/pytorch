@@ -63,7 +63,7 @@ SparseTensor new_sparse(const SparseType& dtype) {
   AT_ASSERT(!dtype.is_variable());
   AT_ASSERT(dtype.is_sparse());
   // TODO: Hmm... this const_cast business seems a bit dodgy
-  return SparseTensor(new SparseTensorImpl(const_cast<SparseType*>(&dtype)), /* retain */ false);
+  return SparseTensor(new SparseTensorImpl(dtype.backend(), dtype.scalarType()), /* retain */ false);
 }
 
 /*** Helper methods ***/
@@ -330,6 +330,9 @@ SparseTensor& sparse_mask_out_cpu(SparseTensor& r, const Tensor& t, const Sparse
   AT_CHECK(mask.is_coalesced(), "sparse_mask: mask is uncoalesced");
   AT_CHECK(mask.sizes().equals(t.sizes()), "sparse_mask: operands have incompatible sizes; self has size ",
       t.sizes(), " but mask has size ", mask.sizes());
+  AT_ASSERT(!t.is_cuda()); // we were supposed to have dispatched on this
+  AT_CHECK(!r.is_cuda(), "sparse_mask: expected 'out' to be CPU, but got CUDA");
+  AT_CHECK(!mask.is_cuda(), "sparse_mask: expected 'mask' to be CPU, but got CUDA");
   resize_as_sparse_(r, mask);
   if (mask._nnz() == 0) {
     r.zero_();

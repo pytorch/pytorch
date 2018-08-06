@@ -57,7 +57,7 @@ test_cpp_api() {
   CPP_BUILD="$PWD/../cpp-build"
   rm -rf $CPP_BUILD
   mkdir -p $CPP_BUILD
-  WERROR=1 VERBOSE=1 tools/cpp_build/build_all.sh "$CPP_BUILD"
+  WERROR=1 VERBOSE=1 tools/cpp_build/build_caffe2.sh "$CPP_BUILD"
 
   python tools/download_mnist.py --quiet -d test/cpp/api/mnist
 
@@ -65,7 +65,7 @@ test_cpp_api() {
   # without these paths being set
   export DYLD_LIBRARY_PATH="$DYLD_LIBRARY_PATH:$PWD/miniconda3/lib"
   export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$PWD/miniconda3/lib"
-  "$CPP_BUILD"/libtorch/bin/test_api
+  "$CPP_BUILD"/caffe2/bin/test_api
 }
 
 if [ -z "${JOB_BASE_NAME}" ] || [[ "${JOB_BASE_NAME}" == *-test ]]; then

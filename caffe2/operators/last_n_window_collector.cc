@@ -94,7 +94,7 @@ class LastNWindowCollectorOp : public Operator<Context> {
 
     if (num_entries > numToCollect_) {
       // just copy the last N rows
-      context_.template CopyItems<Context, Context>(
+      context_.CopyItemsSameDevice(
           input.meta(),
           num_to_copy * block_size,
           input_data + (num_entries - numToCollect_) * block_bytesize,
@@ -105,13 +105,13 @@ class LastNWindowCollectorOp : public Operator<Context> {
     auto start = *next_data;
     auto first_chunk_size =
         std::min<size_t>(num_to_copy + start, numToCollect_) - start;
-    context_.template CopyItems<Context, Context>(
+    context_.CopyItemsSameDevice(
         input.meta(),
         first_chunk_size * block_size,
         input_data,
         output_data + start * block_bytesize);
 
-    context_.template CopyItems<Context, Context>(
+    context_.CopyItemsSameDevice(
         input.meta(),
         (num_to_copy - first_chunk_size) * block_size,
         input_data + first_chunk_size * block_bytesize,

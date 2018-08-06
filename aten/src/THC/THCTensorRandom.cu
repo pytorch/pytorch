@@ -22,8 +22,8 @@ THCGenerator* THCRandom_getGenerator(THCState* state);
 /* Sets up generator. Allocates but does not create the generator states. Not thread-safe. */
 __host__ void initializeGenerator(THCState *state, THCGenerator* gen)
 {
-  THCudaCheck(THCudaMalloc(state, (void**)&gen->state.gen_states, MAX_NUM_BLOCKS * sizeof(curandStateMtgp32)));
-  THCudaCheck(THCudaMalloc(state, (void**)&gen->state.kernel_params, sizeof(mtgp32_kernel_params)));
+  gen->state.gen_states = static_cast<struct curandStateMtgp32*>(THCudaMalloc(state, MAX_NUM_BLOCKS * sizeof(curandStateMtgp32)));
+  gen->state.kernel_params = static_cast<mtgp32_kernel_params*>(THCudaMalloc(state, sizeof(mtgp32_kernel_params)));
 }
 
 /* Creates a new generator state given the seed. Not thread-safe. */

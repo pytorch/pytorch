@@ -3,6 +3,7 @@
 #include "detail/IndexUtils.cuh"
 #include "ATen/TensorUtils.h"
 #include "THC/THCAtomics.cuh"
+#include "ATen/cuda/CUDAContext.h"
 
 //
 // This file contains pointwise operation functions and kernels that
@@ -239,7 +240,7 @@ __host__ __device__ __forceinline__ T ATenCeilDiv(T a, T b) {
 inline bool getApplyGrid(uint64_t totalElements, dim3& grid, int64_t curDevice) {
   if (curDevice == -1) return false;
   uint64_t numBlocks = ATenCeilDiv(totalElements, static_cast<uint64_t>(AT_APPLY_THREADS_PER_BLOCK));
-  uint64_t maxGridX = at::globalContext().getDeviceProperties(curDevice)->maxGridSize[0];
+  uint64_t maxGridX = at::cuda::getDeviceProperties(curDevice)->maxGridSize[0];
   if (numBlocks > maxGridX)
       numBlocks = maxGridX;
   grid = dim3(numBlocks);
@@ -322,7 +323,7 @@ bool CUDA_tensor_apply2(at::Tensor a,
                         scalar1,                                        \
                         scalar2,                                        \
                         TYPE, A, B>                                     \
-   <<<grid, block, 0, at::globalContext().getCurrentCUDAStreamOnDevice(curDevice)>>>(    \
+   <<<grid, block, 0, at::cuda::getCurrentCUDAStreamOnDevice(curDevice)>>>(    \
        aInfo, bInfo, (TYPE) totalElements, op);
 
 #define HANDLE_B_CASE(TYPE, A, B) {         \
@@ -365,7 +366,7 @@ bool CUDA_tensor_apply2(at::Tensor a,
     bInfo.collapseDims();
 #if CUDA_VERSION < 9000
     if (!(aInfo.isContiguous() && bInfo.isContiguous()))
-        grid.x = std::min((unsigned int)at::globalContext().getCurrentDeviceProperties()->multiProcessorCount * AT_APPLY_BLOCKS_PER_SM , grid.x);
+        grid.x = std::min((unsigned int)at::cuda::getCurrentDeviceProperties()->multiProcessorCount * AT_APPLY_BLOCKS_PER_SM , grid.x);
 #endif
 
     HANDLE_A_CASE(unsigned int, aInfo.dims, bInfo.dims);
@@ -388,17 +389,17 @@ bool CUDA_tensor_apply2(at::Tensor a,
                             scalar1,
                             scalar2,
                           uint64_t, 1, 1>
-        <<<grid, block, 0, at::globalContext().getCurrentCUDAStream()>>>(
+        <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
            aInfo, bInfo, (uint64_t) totalElements, op);
     } else {
 #if CUDA_VERSION < 9000
-      grid.x = std::min((unsigned int)at::globalContext().getCurrentDeviceProperties()->multiProcessorCount * AT_APPLY_BLOCKS_PER_SM , grid.x);
+      grid.x = std::min((unsigned int)at::cuda::getCurrentDeviceProperties()->multiProcessorCount * AT_APPLY_BLOCKS_PER_SM , grid.x);
 #endif
       kernelPointwiseApply2<Op,
                             scalar1,
                             scalar2,
                             uint64_t, -1, -1>
-        <<<grid, block, 0, at::globalContext().getCurrentCUDAStream()>>>(
+        <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
            aInfo, bInfo, (uint64_t) totalElements, op);
     }
   }
@@ -502,7 +503,7 @@ bool CUDA_tensor_apply3(at::Tensor a,
                         scalar2,                                        \
                         scalar3,                                        \
                         TYPE, A, B, C>                                  \
-    <<<grid, block, 0, at::globalContext().getCurrentCUDAStreamOnDevice(curDevice)>>>(   \
+    <<<grid, block, 0, at::cuda::getCurrentCUDAStreamOnDevice(curDevice)>>>(   \
       aInfo, bInfo, cInfo, (TYPE) totalElements, op);
 
 #define HANDLE_C_CASE(TYPE, A, B, C) {      \
@@ -566,7 +567,7 @@ bool CUDA_tensor_apply3(at::Tensor a,
 
 #if CUDA_VERSION < 9000
     if (!(aInfo.isContiguous() && bInfo.isContiguous() && cInfo.isContiguous()))
-      grid.x = std::min((unsigned int)at::globalContext().getCurrentDeviceProperties()->multiProcessorCount * AT_APPLY_BLOCKS_PER_SM , grid.x);
+      grid.x = std::min((unsigned int)at::cuda::getCurrentDeviceProperties()->multiProcessorCount * AT_APPLY_BLOCKS_PER_SM , grid.x);
 #endif
     HANDLE_A_CASE(unsigned int, aInfo.dims, bInfo.dims, cInfo.dims);
   } else {
@@ -594,11 +595,11 @@ bool CUDA_tensor_apply3(at::Tensor a,
                             scalar2,
                             scalar3,
                             uint64_t, 1, 1, 1>
-        <<<grid, block, 0, at::globalContext().getCurrentCUDAStream()>>>(
+        <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
           aInfo, bInfo, cInfo, (uint64_t) totalElements, op);
     } else {
 #if CUDA_VERSION < 9000
-  grid.x = std::min((unsigned int)at::globalContext().getCurrentDeviceProperties()->multiProcessorCount * AT_APPLY_BLOCKS_PER_SM , grid.x);
+  grid.x = std::min((unsigned int)at::cuda::getCurrentDeviceProperties()->multiProcessorCount * AT_APPLY_BLOCKS_PER_SM , grid.x);
 #endif
 
 	kernelPointwiseApply3<Op,
@@ -606,7 +607,7 @@ bool CUDA_tensor_apply3(at::Tensor a,
                         scalar2,
                         scalar3,
                         uint64_t, -1, -1, -1>
-        <<<grid, block, 0, at::globalContext().getCurrentCUDAStream()>>>(
+        <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
           aInfo, bInfo, cInfo, (uint64_t) totalElements, op);
     }
   }
@@ -730,7 +731,7 @@ bool CUDA_tensor_apply4(at::Tensor a,
                         scalar3,                                        \
                         scalar4,                                        \
                         TYPE, A, B, C, D>                               \
-    <<<grid, block, 0, at::globalContext().getCurrentCUDAStreamOnDevice(curDevice)>>>(   \
+    <<<grid, block, 0, at::cuda::getCurrentCUDAStreamOnDevice(curDevice)>>>(   \
     aInfo, bInfo, cInfo, dInfo, (TYPE) totalElements, op);
 
 #define HANDLE_D_CASE(TYPE, A, B, C, D) {       \
@@ -813,7 +814,7 @@ bool CUDA_tensor_apply4(at::Tensor a,
 
 #if CUDA_VERSION < 9000
     if (!(aInfo.isContiguous() && bInfo.isContiguous() && cInfo.isContiguous() && dInfo.isContiguous()))
-      grid.x = std::min((unsigned int)at::globalContext().getCurrentDeviceProperties()->multiProcessorCount * AT_APPLY_BLOCKS_PER_SM , grid.x);
+      grid.x = std::min((unsigned int)at::cuda::getCurrentDeviceProperties()->multiProcessorCount * AT_APPLY_BLOCKS_PER_SM , grid.x);
 #endif
     HANDLE_A_CASE(unsigned int, aInfo.dims, bInfo.dims, cInfo.dims, dInfo.dims);
   } else {
@@ -846,11 +847,11 @@ bool CUDA_tensor_apply4(at::Tensor a,
                             scalar3,
                             scalar4,
                             uint64_t, 1, 1, 1, 1>
-        <<<grid, block, 0, at::globalContext().getCurrentCUDAStream()>>>(
+        <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
           aInfo, bInfo, cInfo, dInfo, (uint64_t) totalElements, op);
     } else {
 #if CUDA_VERSION < 9000
-  grid.x = std::min((unsigned int)at::globalContext().getCurrentDeviceProperties()->multiProcessorCount * AT_APPLY_BLOCKS_PER_SM , grid.x);
+  grid.x = std::min((unsigned int)at::cuda::getCurrentDeviceProperties()->multiProcessorCount * AT_APPLY_BLOCKS_PER_SM , grid.x);
 #endif
 
 	kernelPointwiseApply4<Op,
@@ -859,7 +860,7 @@ bool CUDA_tensor_apply4(at::Tensor a,
                         scalar3,
                         scalar4,
                         uint64_t, -1, -1, -1, -1>
-        <<<grid, block, 0, at::globalContext().getCurrentCUDAStream()>>>(
+        <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
           aInfo, bInfo, cInfo, dInfo, (uint64_t) totalElements, op);
     }
   }

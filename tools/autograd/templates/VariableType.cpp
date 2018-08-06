@@ -11,9 +11,13 @@
 #include "torch/csrc/autograd/functions/tensor.h"
 #include "torch/csrc/autograd/functions/basic_ops.h"
 #include "torch/csrc/jit/tracer.h"
+#include "torch/csrc/jit/constants.h"
 #include "torch/csrc/jit/symbolic_variable.h"
-#include "torch/csrc/jit/tensor_conversions.h"
+
 #include "torch/csrc/utils/variadic.h"
+#include "torch/csrc/autograd/functions/utils.h"
+
+#include <ATen/detail/VariableHooksInterface.h>
 
 #include <array>
 #include <cstddef>
@@ -36,65 +40,6 @@ using namespace at;
 using namespace torch::autograd::generated;
 
 namespace torch { namespace autograd {
-// Helper methods for working with Attributes (torch/csrc/jit/attributes.h)
-
-// The overloaded accessors are convenient for the generated code (since we
-// don't want to make the codegen do the dispatch manually)
-static void setattr(jit::Node* n, jit::Symbol name, int64_t v)             { n->i_(name, v); }
-static void setattr(jit::Node* n, jit::Symbol name, const at::Scalar& v)   { n->t_(name, v.toTensor()); }
-static void setattr(jit::Node* n, jit::Symbol name, SparseTensorRef s)     { n->t_(name, s.tref); }
-static void setattr(jit::Node* n, jit::Symbol name, const at::IntList& v)  { n->is_(name, v); }
-static void setattr(jit::Node* n, jit::Symbol name, bool v)                { n->i_(name, v); }
-static void setattr(jit::Node* n, jit::Symbol name, double v)              { n->f_(name, v); }
-static void setattr(jit::Node* n, jit::Symbol name, std::string v)         { n->s_(name, v); }
-template<std::size_t N>
-static void setattr(jit::Node* n, jit::Symbol name, std::array<bool, N> v) { n->is_(name, std::vector<int64_t>(v.begin(), v.end())); }
-
-template<typename T>
-static jit::Value* createConstant(jit::Node* n, T value) {
-  return n->owningGraph()->createConstant(jit::as_tensor(value))->insertBefore(n)->output();
-}
-
-template<typename T>
-static void genericInsertInput(jit::Node* n, size_t idx, T value) {
-  n->insertInput(idx, createConstant(n, value));
-}
-
-void failPositionalAttr() {
-  throw std::runtime_error("unsupported type in setposattr. File a bug report!");
-}
-
-static void setposattr(jit::Node* n, size_t idx, const char *name, int64_t v)             { genericInsertInput(n, idx, v); }
-static void setposattr(jit::Node* n, size_t idx, const char *name, const at::Scalar& v)   { genericInsertInput(n, idx, v); }
-static void setposattr(jit::Node* n, size_t idx, const char *name, SparseTensorRef s)     { failPositionalAttr(); }
-static void setposattr(jit::Node* n, size_t idx, const char *name, const at::IntList& v)  {
-  using ArgumentStash = jit::tracer::ArgumentStash;
-  if (ArgumentStash::hasIntList(name)) {
-    auto info = ArgumentStash::popIntList(name);
-    for (size_t i = 0; i < info.size(); ++i) {
-      if (info[i] != nullptr) continue;
-      info[i] = createConstant(n, v[i]);
-    }
-    jit::TensorType expected_type {at::kLong, -1, {}};
-    for (jit::Value* v : info) {
-      if (*v->type() != expected_type) {
-        throw std::runtime_error(
-          "Type mismatch in setposattr for IntList. Check that your program "
-          "is valid without tracing, and please file a bug report if it is.");
-      }
-    }
-    jit::WithInsertPoint insert_point{n};
-    auto symbolic_info = fmap<jit::SymbolicVariable>(info);
-    auto size = jit::SymbolicVariable::stack(symbolic_info, 0);
-    n->insertInput(idx, size);
-  } else {
-    return genericInsertInput(n, idx, v);
-  }
-}
-static void setposattr(jit::Node* n, size_t idx, const char *name, bool v)                { genericInsertInput(n, idx, v); }
-static void setposattr(jit::Node* n, size_t idx, const char *name, double v)              { genericInsertInput(n, idx, v); }
-template<std::size_t N>
-static void setposattr(jit::Node* n, size_t idx, const char *name, std::array<bool, N> v) { failPositionalAttr(); }
 
 VariableType::VariableType(Context* context, Type* baseType)
   : Type(context, /*is_variable=*/true, /*is_undefined=*/false)
@@ -159,7 +104,7 @@ std::vector<std::unique_ptr<Type>> type_to_variable_type;
 
 // XXX - this is not threadsafe with uses of Variables
 void register_variable_type_for(Type* baseType) {
-  TORCH_ASSERT(baseType);
+  AT_ASSERT(baseType);
   size_t base_id = static_cast<size_t>(baseType->ID());
   if(type_to_variable_type.size() <= base_id) {
     type_to_variable_type.resize(base_id + 1);
@@ -181,7 +126,50 @@ struct VariableTypeRegistry {
   }
 };
 
+struct VariableHooks : public at::VariableHooksInterface {
+  VariableHooks(at::VariableHooksArgs) {}
+  void registerVariableTypeFor(at::Context*, at::Backend, at::ScalarType) const override;
+  at::Type& getVariableType(const at::Type&) const override;
+};
+
+// Sigh, the registry doesn't support namespaces :(
+using at::RegistererVariableHooksRegistry;
+using at::VariableHooksRegistry;
+
+// WARNING: YOU MUST DO THE NEXT TWO STATIC INITIALIZERS IN THIS ORDER.
+//
+// If you do it in the other order, this is what can happen if
+// these static initializers are called before Context is
+// initialized:
+//
+//    - VariableHooks::registerVariableTypeFor will be activated
+//      to register a variable type
+//
+//    - We run the constructor of VariableTypeRegistry, which
+//      calls at::globalContext()
+//
+//    - Context is not initialized yet, so we call the constructor
+//      of Context
+//
+//    - We register CPU types, calling VariableHooks::registerVariableTypeFor
+//
+//    - We register the CPU type as a variable type
+//
+//    - In VariableTypeRegistry, we try to register the Variable type AGAIN!!
+//      Disaster.
+//
 static VariableTypeRegistry registry;
+REGISTER_VARIABLE_HOOKS(VariableHooks)
+
+// Pre-condition: backend/scalar_type is a valid type in the type_registry
+void VariableHooks::registerVariableTypeFor(at::Context* context, at::Backend backend, at::ScalarType scalar_type) const {
+  auto* baseType = context->getTypeRaw(backend, scalar_type);
+  register_variable_type_for(baseType);
+}
+
+at::Type& VariableHooks::getVariableType(const at::Type& baseType) const {
+  return *VariableType::getType(baseType);
+}
 
 bool VariableType::isVariableType(const at::Type& type) {
   return type.is_variable();
@@ -316,24 +304,15 @@ static Tensor as_view(const Tensor & base, Tensor tensor) {
   return make_variable_view(std::move(base_var), std::move(tensor));
 }
 
-struct ComputeRequiresGrad : IterArgs<ComputeRequiresGrad> {
-  bool out = false;
-  using IterArgs<ComputeRequiresGrad>::operator();
-  void operator()(const at::Tensor& tensor) {
-    const auto& var = static_cast<const Variable&>(tensor);
-    if (var.defined() && var.requires_grad()) {
-      out = true;
-    }
+static std::vector<Tensor> as_view(const Tensor & base, std::vector<Tensor> tensors) {
+  auto base_var = Variable(base);
+  if (base_var.is_view()) {
+    base_var = base_var.base();
   }
-  bool short_circuit() { return out; }
-};
-
-template<typename... Args>
-static bool compute_requires_grad(Args&&... args) {
-  if (!GradMode::is_enabled()) {
-    return false;
+  for(Tensor &tensor : tensors) {
+    tensor = make_variable_view(base_var, std::move(tensor));
   }
-  return ComputeRequiresGrad().apply(std::forward<Args>(args)...).out;
+  return tensors;
 }
 
 static void check_no_requires_grad(const Tensor& tensor, const char* name) {
@@ -376,20 +355,6 @@ static void rebase_history(ArrayRef<Variable> vars, std::shared_ptr<Function> gr
         // TODO: eliminate const_cast
         auto output_nr = grad_fn->add_input_metadata(var.type(), var.sizes());
         const_cast<Variable&>(var).rebase_history({grad_fn, output_nr});
-      } else {
-        grad_fn->add_input_metadata(Function::undefined_input());
-      }
-    }
-  }
-}
-
-static void set_history(ArrayRef<Variable> vars, std::shared_ptr<Function> grad_fn) {
-  if (grad_fn) {
-    for (auto& var : vars) {
-      if (var.defined()) {
-        // TODO: eliminate const_cast
-        auto output_nr = grad_fn->add_input_metadata(var.type(), var.sizes());
-        const_cast<Variable&>(var).set_gradient_edge({grad_fn, output_nr});
       } else {
         grad_fn->add_input_metadata(Function::undefined_input());
       }
@@ -478,7 +443,7 @@ Tensor VariableType::contiguous(const Tensor & self) const {
 static std::vector<std::vector<int64_t>> to_args_sizes(TensorList tensors) {
   std::vector<std::vector<int64_t>> args_sizes(tensors.size());
   for (size_t i = 0; i < tensors.size(); ++i) {
-    args_sizes[i] = tensors[i].sizes();
+    args_sizes[i] = tensors[i].sizes().vec();
   }
   return args_sizes;
 }

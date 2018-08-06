@@ -1,5 +1,7 @@
 #include "caffe2/operators/sigmoid_op.h"
 
+#include "caffe2/utils/eigen_utils.h"
+
 #include <algorithm>
 #include <functional>
 #include <string>
@@ -20,7 +22,7 @@ bool SigmoidGradientFunctor<CPUContext>::Forward(
       Y_dims.cbegin(), Y_dims.cend(), 1, std::multiplies<int>());
   ConstEigenVectorArrayMap<T> dY_arr(dY, size);
   ConstEigenVectorArrayMap<T> Y_arr(Y, size);
-  EigenVectorArrayMap<T>(dX, size) = dY_arr * Y_arr * (1. - Y_arr);
+  EigenVectorArrayMap<T>(dX, size) = dY_arr * Y_arr * (T(1) - Y_arr);
   return true;
 }
 

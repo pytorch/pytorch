@@ -160,8 +160,8 @@ sampleMultinomialOnce(int64_t* dest,
                       int categories,
                       T* sampled,
                       T* dist,
-                      int stride_dist,        // dist->stride[0]
-                      int stride_categories   // dist->stride[1]
+                      int stride_dist,        // dist->stride(0)
+                      int stride_categories   // dist->stride(1)
                       ) {
   extern __shared__  unsigned char my_smem[];
   __shared__ bool found;

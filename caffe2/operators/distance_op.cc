@@ -1,4 +1,5 @@
 #include "caffe2/operators/distance_op.h"
+#include "caffe2/utils/eigen_utils.h"
 
 namespace caffe2 {
 
@@ -14,7 +15,7 @@ bool SquaredL2DistanceOp<float, CPUContext>::RunOnDevice() {
   int N = X.ndim() > 0 ? X.dim32(0) : 1;
   distance->Resize(N);
   int D = N > 0 ? X.size() / N : 0;
-  float* distance_data = distance->mutable_data<float>();
+  float* distance_data = distance->template mutable_data<float>();
   const float* X_data = X.data<float>();
   const float* Y_data = Y.data<float>();
   for (int i = 0; i < N; ++i) {
@@ -47,7 +48,7 @@ bool L1DistanceOp<float, CPUContext>::RunOnDevice() {
   const float* Y_data = Y.data<float>();
 
   for (int i = 0; i < N; ++i) {
-    (distance->mutable_data<float>())[i] =
+    (distance->template mutable_data<float>())[i] =
         (ConstEigenVectorMap<float>(X_data + i * D, D).array() -
          ConstEigenVectorMap<float>(Y_data + i * D, D).array())
             .abs()
@@ -85,14 +86,18 @@ bool L1DistanceGradientOp<float, CPUContext>::RunOnDevice() {
           (X.data<float>())[offset + j] - (Y.data<float>())[offset + j];
       const float kEps = 1e-12f;
       if (temp < -kEps) {
-        dX->mutable_data<float>()[offset + j] = -(dDistance.data<float>())[i];
-        dY->mutable_data<float>()[offset + j] = (dDistance.data<float>())[i];
+        dX->template mutable_data<float>()[offset + j] =
+            -(dDistance.data<float>())[i];
+        dY->template mutable_data<float>()[offset + j] =
+            (dDistance.data<float>())[i];
       } else if (temp > kEps) {
-        dX->mutable_data<float>()[offset + j] = (dDistance.data<float>())[i];
-        dY->mutable_data<float>()[offset + j] = -(dDistance.data<float>())[i];
+        dX->template mutable_data<float>()[offset + j] =
+            (dDistance.data<float>())[i];
+        dY->template mutable_data<float>()[offset + j] =
+            -(dDistance.data<float>())[i];
       } else {
-        dX->mutable_data<float>()[offset + j] = 0;
-        dY->mutable_data<float>()[offset + j] = 0;
+        dX->template mutable_data<float>()[offset + j] = 0;
+        dY->template mutable_data<float>()[offset + j] = 0;
       }
     }
   }
@@ -111,7 +116,7 @@ bool CosineSimilarityOp<float, CPUContext>::RunOnDevice() {
   const int N = X.ndim() > 0 ? X.dim32(0) : 1;
   const int D = X.size_from_dim(1);
   result->Resize(N);
-  float* result_data = result->mutable_data<float>();
+  float* result_data = result->template mutable_data<float>();
   const float* X_data = X.data<float>();
   const float* Y_data = Y.data<float>();
   float X2, Y2;
@@ -172,7 +177,7 @@ bool CosineSimilarityGradientOp<float, CPUContext>::RunOnDevice() {
     math::Dot<float, CPUContext>(
         D, X_data + offset, Y_data + offset, &XY, &context_);
 
-    math::Scale<float, CPUContext>(
+    math::Scale<float, float, CPUContext>(
         D, dCos_data[i] / XYN, Y_data + offset, dX_data + offset, &context_);
     math::Axpy(
         D,
@@ -181,7 +186,7 @@ bool CosineSimilarityGradientOp<float, CPUContext>::RunOnDevice() {
         dX_data + offset,
         &context_);
 
-    math::Scale<float, CPUContext>(
+    math::Scale<float, float, CPUContext>(
         D, dCos_data[i] / XYN, X_data + offset, dY_data + offset, &context_);
     math::Axpy(
         D,
@@ -277,9 +282,9 @@ bool DotProductGradientOp<float, CPUContext>::RunOnDevice() {
   auto* dY_data = dY->template mutable_data<float>();
   for (int i = 0; i < N; ++i) { // TODO: multithreading
     auto offset = i * D;
-    math::Scale<float, CPUContext>(
+    math::Scale<float, float, CPUContext>(
         D, dDot_data[i], X_data + offset, dY_data + offset, &context_);
-    math::Scale<float, CPUContext>(
+    math::Scale<float, float, CPUContext>(
         D, dDot_data[i], Y_data + offset, dX_data + offset, &context_);
   }
   return true;
@@ -307,7 +312,7 @@ bool DotProductWithPaddingOp<float, CPUContext>::RunOnDevice() {
   D = std::min(DX, DY);
   restD = std::max(DX, DY) - D;
   result->Resize(N);
-  float* result_data = result->mutable_data<float>();
+  float* result_data = result->template mutable_data<float>();
   const float* X_data = X.data<float>();
   const float* Y_data = Y.data<float>();
   for (int i = 0; i < N; ++i) { // TODO: multithreading

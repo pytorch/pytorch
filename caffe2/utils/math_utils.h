@@ -49,6 +49,28 @@ int GetIndexFromDims(const int n, const int* dims, const int* index);
 // Checks if the input permutation is an identity permutation;
 bool IsIdentityPermutation(const int n, const int* perm);
 
+bool IsRowwiseReduce(
+    const int ndim,
+    const int* X_dims,
+    const int* Y_dims,
+    int* rows,
+    int* cols);
+
+bool IsColwiseReduce(
+    const int ndim,
+    const int* X_dims,
+    const int* Y_dims,
+    int* rows,
+    int* cols);
+
+bool IsBothEndsReduce(
+    const int ndim,
+    const int* X_dims,
+    const int* Y_dims,
+    int* pre,
+    int* mid,
+    int* nxt);
+
 // Computest the broadcast binary operation dims.
 void ComputeBroadcastBinaryOpDims(
     const int A_ndim,
@@ -63,14 +85,25 @@ bool IsRowwiseBroadcastBinaryOp(
     const int ndim,
     const int* A_dims,
     const int* B_dims,
-    int* pivot,
+    int* rows,
+    int* cols,
     bool* broadcast_1st);
 
 bool IsColwiseBroadcastBinaryOp(
     const int ndim,
     const int* A_dims,
     const int* B_dims,
-    int* pivot,
+    int* rows,
+    int* cols,
+    bool* broadcast_1st);
+
+bool IsBothEndsBroadcastBinaryOp(
+    const int ndim,
+    const int* A_dims,
+    const int* B_dims,
+    int* pre,
+    int* mid,
+    int* nxt,
     bool* broadcast_1st);
 
 void ComputeTransposeAxesForReduceOp(

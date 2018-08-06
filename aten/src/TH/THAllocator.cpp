@@ -1,13 +1,13 @@
 #include "THAllocator.h"
 
-#include <atomic>
-#if ATOMIC_INT_LOCK_FREE == 2
-#define TH_ATOMIC_IPC_REFCOUNT 1
-#endif
-
 /* stuff for mapped files */
 #ifdef _WIN32
 #include <windows.h>
+#endif
+
+#include <atomic>
+#if ATOMIC_INT_LOCK_FREE == 2
+#define TH_ATOMIC_IPC_REFCOUNT 1
 #endif
 
 #if HAVE_MMAP
@@ -19,38 +19,22 @@
 #endif
 /* end of stuff for mapped files */
 
-static void *THDefaultAllocator_alloc(void* ctx, ptrdiff_t size) {
-  return THAlloc(size);
-}
-
-static void *THDefaultAllocator_realloc(void* ctx, void* ptr, ptrdiff_t size) {
-  return THRealloc(ptr, size);
-}
-
-static void THDefaultAllocator_free(void* ctx, void* ptr) {
-  THFree(ptr);
-}
-
-THAllocator THDefaultAllocator = {
-  &THDefaultAllocator_alloc,
-  &THDefaultAllocator_realloc,
-  &THDefaultAllocator_free
+struct THDefaultAllocator final : public at::Allocator {
+  at::DataPtr allocate(size_t size) const override {
+    auto* ptr = THAlloc(size);
+    return {ptr, ptr, &THFree, at::kCPU};
+  }
+  at::DeleterFnPtr raw_deleter() const override {
+    return &THFree;
+  }
 };
+
+static THDefaultAllocator th_default_allocator;
+at::Allocator* getTHDefaultAllocator() {
+  return &th_default_allocator;
+}
 
 #if defined(_WIN32) || defined(HAVE_MMAP)
-
-struct THMapAllocatorContext_ {
-  char *filename; /* file name */
-  int flags;
-  ptrdiff_t size; /* mapped size */
-#ifdef _WIN32
-  HANDLE handle;
-  HANDLE event;
-  char *eventname;
-#else
-  int fd;
-#endif
-};
 
 #define TH_ALLOC_ALIGNMENT 64
 
@@ -63,85 +47,286 @@ const char * unknown_filename = "filename not specified";
 const char * unknown_eventname = "eventname not specified";
 #endif
 
-THMapAllocatorContext *THMapAllocatorContext_new(const char *filename, int flags)
+THMapAllocator::THMapAllocator(WithFd, const char *filename, int fd, int flags, size_t size)
+  : filename_(filename ? filename : unknown_filename)
+  , flags_(0) // to be filled later
+  , size_(0) // to be filled later
+#ifdef _WIN32
+  , handle_(INVALID_HANDLE_VALUE) // to be filled later
+  , event_(INVALID_HANDLE_VALUE) // to be filled later
+  , eventname_(filename ? std::string(filename) + "_event" : unknown_eventname)
+#else
+  , fd_(fd)
+#endif
+  , base_ptr_(nullptr)
 {
-  THMapAllocatorContext *ctx = static_cast<THMapAllocatorContext*>(THAlloc(sizeof(THMapAllocatorContext)));
 
-  if (!(flags & TH_ALLOCATOR_MAPPED_SHARED) && !(flags & TH_ALLOCATOR_MAPPED_SHAREDMEM))
+  if (!(flags & TH_ALLOCATOR_MAPPED_SHARED) && !(flags & TH_ALLOCATOR_MAPPED_SHAREDMEM)) {
     flags &= ~TH_ALLOCATOR_MAPPED_NOCREATE;
-  if ((flags ^ TH_ALLOCATOR_MAPPED_EXCLUSIVE) == 0)
-    THError("TH_ALLOCATOR_MAPPED_EXCLUSIVE flag requires opening the file "
-        "in shared mode");
-
-  if (!filename) {
-    filename = unknown_filename;
   }
-  ctx->filename = static_cast<char*>(THAlloc(strlen(filename)+1));
-  strcpy(ctx->filename, filename);
+  if ((flags ^ TH_ALLOCATOR_MAPPED_EXCLUSIVE) == 0) {
+    AT_ERROR("TH_ALLOCATOR_MAPPED_EXCLUSIVE flag requires opening the file in shared mode");
+  }
 #ifdef _WIN32
-  if (filename == unknown_filename) {
-    size_t namelen = strlen(unknown_eventname)+1;
-    ctx->eventname = static_cast<char*>(THAlloc(namelen));
-    strcpy(ctx->eventname, unknown_eventname);
+  if (fd != -1) {
+    AT_ERROR("THMapAllocator_newWithFd is unsupported on Windows");
+  }
+#endif
+  flags_ = flags;
+
+  // OK, now do the allocation
+
+  if (size == 0) {
+    return;
+  }
+
+#ifdef _WIN32
+  if (flags_ & TH_ALLOCATOR_MAPPED_SHAREDMEM) {
+    // Shadowing
+    const char *filename;
+    const char *eventname;
+    LARGE_INTEGER hfilesz;
+
+    if (filename_[0] == '/') {
+      filename = filename_.c_str() + 1;
+      eventname = eventname_.c_str() + 1;
+    } else {
+      filename = filename_.c_str();
+      eventname = eventname_.c_str();
+    }
+
+    hfilesz.QuadPart = size;
+
+    if (flags_ & TH_ALLOCATOR_MAPPED_EXCLUSIVE) {
+      handle_ = CreateFileMapping(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, hfilesz.HighPart, hfilesz.LowPart, filename);
+      event_ = CreateEvent(nullptr, FALSE, FALSE, eventname);
+    } else if (flags_ & TH_ALLOCATOR_MAPPED_NOCREATE) {
+      handle_ = OpenFileMapping(FILE_MAP_ALL_ACCESS, FALSE, filename);
+      event_ = OpenEvent(EVENT_ALL_ACCESS, FALSE, eventname);
+    } else {
+      AT_ERROR("Expected either TH_ALLOCATOR_MAPPED_EXCLUSIVE or TH_ALLOCATOR_MAPPED_NOCREATE");
+    }
+
+    if (event_ == nullptr) {
+      AT_ERROR("Couldn't open shared event: <", eventname, ">, error code: <", GetLastError(), ">");
+    }
+
+    if (handle_ == nullptr) {
+      AT_ERROR("Couldn't open shared file mapping: <", filename, ">, error code: <", GetLastError(), ">");
+    }
+
+    size_ = size;
+    base_ptr_ = MapViewOfFile(handle_, FILE_MAP_ALL_ACCESS, 0, 0, size);
+    if (!base_ptr_) {
+      AT_ERROR("Couldn't map view of shared file <", filename, ">, error code: <", GetLastError(), ">");
+    }
   } else {
-    const char *suffixname = "_event";
-    size_t namelen = strlen(filename)+1+strlen(suffixname);
-    ctx->eventname = static_cast<char*>(THAlloc(namelen));
-    strcpy(ctx->eventname, ctx->filename);
-    strcat(ctx->eventname, suffixname);
+
+    HANDLE hfile;
+    HANDLE hmfile;
+    LARGE_INTEGER hfilesz;
+
+    if (flags_ & TH_ALLOCATOR_MAPPED_EXCLUSIVE) {
+      AT_ERROR("exclusive file mapping is not supported on Windows");
+    }
+    if (flags_ & TH_ALLOCATOR_MAPPED_NOCREATE) {
+      AT_ERROR("file mapping without creation is not supported on Windows");
+    }
+    if (flags_ & TH_ALLOCATOR_MAPPED_KEEPFD) {
+      AT_ERROR("TH_ALLOCATOR_MAPPED_KEEPFD not supported on Windows");
+    }
+    if (flags_ & TH_ALLOCATOR_MAPPED_FROMFD) {
+      AT_ERROR("TH_ALLOCATOR_MAPPED_FROMFD not supported on Windows");
+    }
+
+    /* open file */
+    /* FILE_FLAG_RANDOM_ACCESS ? */
+    if (flags_) {
+      hfile = CreateFileA(filename_.c_str(), GENERIC_READ|GENERIC_WRITE, FILE_SHARE_WRITE|FILE_SHARE_READ, 0, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
+      if (hfile == INVALID_HANDLE_VALUE) {
+        AT_ERROR("could not open file <", filename_, "> in read-write mode; error code: <", GetLastError(), ">");
+      }
+    } else {
+      hfile = CreateFileA(filename_.c_str(), GENERIC_READ, FILE_SHARE_WRITE|FILE_SHARE_READ, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
+      if (hfile == INVALID_HANDLE_VALUE) {
+        AT_ERROR("could not open file <", filename_, "> in read-only mode; error code: <", GetLastError(), ">");
+      }
+    }
+
+    if (GetFileSizeEx(hfile, &hfilesz) == 0) {
+      AT_ERROR("could not get file size: <", filename_, ">; error code: <", GetLastError(), ">");
+    }
+
+    if (size > 0) {
+      if (size > hfilesz.QuadPart) {
+        if (flags_) {
+          hfilesz.QuadPart = size;
+          if (SetFilePointerEx(hfile, hfilesz, NULL, FILE_BEGIN) == 0) {
+            CloseHandle(hfile);
+            AT_ERROR("unable to stretch file <", filename_, "> to the right size; error code: <", GetLastError(), ">", filename_);
+          }
+          if (SetEndOfFile(hfile) == 0) {
+            CloseHandle(hfile);
+            AT_ERROR("unable to write to file <", filename_, ">; error code: <", GetLastError(), ">");
+          }
+        } else {
+          CloseHandle(hfile);
+          AT_ERROR("file <", filename_, "> size is smaller than the required mapping size <", size, ">; error code: <", GetLastError(), ">");
+        }
+      }
+    } else {
+      size = hfilesz.QuadPart;
+    }
+
+    size_ = size; /* if we are here, it must be the right size */
+
+    hfilesz.QuadPart = size_;
+
+    /* get map handle */
+    if (flags_) {
+      if ( (hmfile = CreateFileMapping(hfile, NULL, PAGE_READWRITE, hfilesz.HighPart, hfilesz.LowPart, NULL)) == NULL ) {
+        AT_ERROR("could not create a map on file <", filename_, ">; error code: <", GetLastError(), ">");
+      }
+    } else {
+      if ( (hmfile = CreateFileMapping(hfile, NULL, PAGE_WRITECOPY, hfilesz.HighPart, hfilesz.LowPart, NULL)) == NULL ) {
+        AT_ERROR("could not create a map on file <", filename_, ">; error code: <", GetLastError(), ">");
+      }
+    }
+
+    /* map the stuff */
+    if(flags_) {
+      base_ptr_ = MapViewOfFile(hmfile, FILE_MAP_ALL_ACCESS, 0, 0, 0);
+    } else {
+      base_ptr_ = MapViewOfFile(hmfile, FILE_MAP_COPY, 0, 0, 0);
+    }
+
+    CloseHandle(hfile);
+    CloseHandle(hmfile);
+  }
+#else /* _WIN32 */
+  {
+    /* open file */
+    int fd;
+    int flags; // shadow
+    struct stat file_stat;
+
+    if (flags_ & (TH_ALLOCATOR_MAPPED_SHARED | TH_ALLOCATOR_MAPPED_SHAREDMEM)) {
+      flags = O_RDWR | O_CREAT;
+    } else {
+      flags = O_RDONLY;
+    }
+
+    if (flags_ & TH_ALLOCATOR_MAPPED_EXCLUSIVE) {
+      flags |= O_EXCL;
+    }
+    if (flags_ & TH_ALLOCATOR_MAPPED_NOCREATE) {
+      flags &= ~O_CREAT;
+    }
+
+    if (!(flags_ & TH_ALLOCATOR_MAPPED_FROMFD)) {
+      if (flags_ & TH_ALLOCATOR_MAPPED_SHARED) {
+        if ((fd = open(filename_.c_str(), flags, (mode_t)0600)) == -1) {
+          AT_ERROR("unable to open file <", filename_, "> in read-write mode");
+        }
+      } else if (flags_ & TH_ALLOCATOR_MAPPED_SHAREDMEM) {
+#ifdef HAVE_SHM_OPEN
+        if((fd = shm_open(filename_.c_str(), flags, (mode_t)0600)) == -1) {
+          AT_ERROR("unable to open shared memory object <", filename_, "> in read-write mode");
+        }
+#else
+        AT_ERROR("unable to open file <", filename_, "> in sharedmem mode, shm_open unavailable on this platform");
+#endif
+      } else {
+        if ((fd = open(filename_.c_str(), O_RDONLY)) == -1) {
+          AT_ERROR("unable to open file <", filename_, "> in read-only mode");
+        }
+      }
+    } else {
+      fd = fd_;
+    }
+
+    if (fstat(fd, &file_stat) == -1) {
+      if (!(flags_ & TH_ALLOCATOR_MAPPED_FROMFD)) {
+        ::close(fd);
+      }
+      AT_ERROR("unable to stat the file <", filename_, ">");
+    }
+
+    if (size > 0) {
+      if (size > file_stat.st_size) {
+        if (flags_) {
+          if (ftruncate(fd, size) == -1) {
+            AT_ERROR("unable to resize file <", filename_, "> to the right size");
+          }
+          if (fstat(fd, &file_stat) == -1 || file_stat.st_size < size) {
+            ::close(fd);
+            AT_ERROR("unable to stretch file <", filename_, "> to the right size");
+          }
+/* on macOS write returns with errno 45 (Opperation not supported) when used
+ * with a file descriptor obtained via shm_open
+ */
+#ifndef __APPLE__
+          if ((write(fd, "", 1)) != 1) /* note that the string "" contains the '\0' byte ... */ {
+            ::close(fd);
+            AT_ERROR("unable to write to file <", filename_, ">");
+          }
+#endif
+        } else {
+          ::close(fd);
+          AT_ERROR("file <", filename_, "> size is smaller than the required mapping size <", size, ">");
+        }
+      }
+    } else {
+      size = file_stat.st_size;
+    }
+
+    size_ = size; /* if we are here, it must be the right size */
+
+    /* map it */
+    if (flags_ & (TH_ALLOCATOR_MAPPED_SHARED | TH_ALLOCATOR_MAPPED_SHAREDMEM)) {
+      base_ptr_ = mmap(nullptr, size_, PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0);
+    } else {
+      base_ptr_ = mmap(nullptr, size_, PROT_READ|PROT_WRITE, MAP_PRIVATE, fd, 0);
+    }
+
+    if (base_ptr_ == MAP_FAILED) {
+      base_ptr_ = nullptr; /* let's be sure it is NULL */
+    }
+
+    if (flags_ & TH_ALLOCATOR_MAPPED_KEEPFD) {
+      fd_ = fd;
+    } else {
+      if (::close(fd) == -1) {
+        AT_ERROR("Error closing file <", filename_, ">");
+      }
+      fd_ = -1;
+    }
+
+    if (flags_ & TH_ALLOCATOR_MAPPED_UNLINK) {
+      if (flags_ & TH_ALLOCATOR_MAPPED_SHAREDMEM) {
+#ifdef HAVE_SHM_UNLINK
+        if (shm_unlink(filename_.c_str()) == -1) {
+          AT_ERROR("could not unlink the shared memory file ", filename_);
+        }
+#else
+        AT_ERROR("could not unlink the shared memory file ", filename_, ", shm_unlink not available on platform");
+#endif
+      } else {
+        if (unlink(filename_.c_str()) == -1)
+          AT_ERROR("could not unlink file %s", filename_);
+      }
+    }
+
+    if (base_ptr_ == MAP_FAILED) {
+      AT_ERROR("$ Torch: unable to mmap memory: you tried to mmap ", size_/1073741824, " GB.");
+    }
   }
 #endif
-
-  ctx->flags = flags;
-  ctx->size = 0;
-#ifdef _WIN32
-  ctx->handle = INVALID_HANDLE_VALUE;
-#else
-  ctx->fd = -1;
-#endif
-
-  return ctx;
 }
 
-THMapAllocatorContext *THMapAllocatorContext_newWithFd(const char *filename, int fd, int flags)
-{
-#ifdef _WIN32
-  THError("THMapAllocatorContext_newWithFd is unsupported on Windows");
-#else
-  THMapAllocatorContext *ctx = THMapAllocatorContext_new(filename, flags);
-  ctx->fd = fd;
-
-  return ctx;
-#endif
-}
-
-char * THMapAllocatorContext_filename(THMapAllocatorContext *ctx)
-{
-  return ctx->filename;
-}
-
-int THMapAllocatorContext_fd(THMapAllocatorContext *ctx)
-{
-#ifdef _WIN32
-  THError("THMapAllocatorContext_fd is unsupported on Windows");
-#else
-  return ctx->fd;
-#endif
-}
-
-ptrdiff_t THMapAllocatorContext_size(THMapAllocatorContext *ctx)
-{
-  return ctx->size;
-}
-
-void THMapAllocatorContext_free(THMapAllocatorContext *ctx)
-{
-  THFree(ctx->filename);
-#ifdef _WIN32
-  THFree(ctx->eventname);
-#endif
-  THFree(ctx);
-}
+THMapAllocator::THMapAllocator(const char *filename, int flags, size_t size)
+  : THMapAllocator(WITH_FD, filename, -1, flags, size)
+{}
 
 #ifdef _WIN32
 typedef struct{
@@ -165,464 +350,214 @@ static VOID CALLBACK WaitForReleaseHandle(PVOID lpParam, BOOLEAN TimerOrWaitFire
 }
 #endif
 
-static void *_map_alloc(void* ctx_, ptrdiff_t size)
-{
-  if (size == 0)
-    return NULL;
-
-  THMapAllocatorContext *ctx = static_cast<THMapAllocatorContext*>(ctx_);
-  void *data = NULL;
-
-#ifdef _WIN32
-  if (ctx->flags & TH_ALLOCATOR_MAPPED_SHAREDMEM)
-  {
-    char *filename;
-    char *eventname;
-    LARGE_INTEGER hfilesz;
-
-    if (ctx->filename[0] == '/') {
-      filename = ctx->filename + 1;
-      eventname = ctx->eventname + 1;
-    }
-    else {
-      filename = ctx->filename;
-      eventname = ctx->eventname;
-    }
-
-    hfilesz.QuadPart = size;
-
-    if (ctx->flags & TH_ALLOCATOR_MAPPED_EXCLUSIVE)
-    {
-      ctx->handle = CreateFileMapping(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, hfilesz.HighPart, hfilesz.LowPart, filename);
-      ctx->event = CreateEvent(NULL, FALSE, FALSE, eventname);
-    }
-    else if (ctx->flags & TH_ALLOCATOR_MAPPED_NOCREATE)
-    {
-      ctx->handle = OpenFileMapping(FILE_MAP_ALL_ACCESS, FALSE, filename);
-      ctx->event = OpenEvent(EVENT_ALL_ACCESS, FALSE, eventname);
-    }
-    else
-    {
-      THError("Expected either TH_ALLOCATOR_MAPPED_EXCLUSIVE or TH_ALLOCATOR_MAPPED_NOCREATE");
-    }
-
-    if (ctx->event == NULL)
-      THError("Couldn't open shared event: <%s>, error code: <%d>", eventname, GetLastError());
-
-    if (ctx->handle == NULL)
-      THError("Couldn't open shared file mapping: <%s>, error code: <%d>", filename, GetLastError());
-
-    ctx->size = size;
-    data = MapViewOfFile(ctx->handle, FILE_MAP_ALL_ACCESS, 0, 0, size);
-    if (!data)
-      THError("Couldn't map view of shared file <%s>, error code: <%d>", filename, GetLastError());
-  }
-  else
-  {
-
-    HANDLE hfile;
-    HANDLE hmfile;
-    LARGE_INTEGER hfilesz;
-
-    if (ctx->flags & TH_ALLOCATOR_MAPPED_EXCLUSIVE)
-      THError("exclusive file mapping is not supported on Windows");
-    if (ctx->flags & TH_ALLOCATOR_MAPPED_NOCREATE)
-      THError("file mapping without creation is not supported on Windows");
-    if (ctx->flags & TH_ALLOCATOR_MAPPED_KEEPFD)
-      THError("TH_ALLOCATOR_MAPPED_KEEPFD not supported on Windows");
-    if (ctx->flags & TH_ALLOCATOR_MAPPED_FROMFD)
-      THError("TH_ALLOCATOR_MAPPED_FROMFD not supported on Windows");
-
-    /* open file */
-    /* FILE_FLAG_RANDOM_ACCESS ? */
-    if(ctx->flags)
-    {
-      hfile = CreateFileA(ctx->filename, GENERIC_READ|GENERIC_WRITE, FILE_SHARE_WRITE|FILE_SHARE_READ, 0, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
-      if (hfile == INVALID_HANDLE_VALUE)
-        THError("could not open file <%s> in read-write mode; error code: <%d>", ctx->filename, GetLastError());
-    }
-    else
-    {
-      hfile = CreateFileA(ctx->filename, GENERIC_READ, FILE_SHARE_WRITE|FILE_SHARE_READ, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
-      if (hfile == INVALID_HANDLE_VALUE)
-        THError("could not open file <%s> in read-only mode; error code: <%d>", ctx->filename, GetLastError());
-    }
-
-    if (GetFileSizeEx(hfile, &hfilesz) == 0)
-      THError("could not get file size: <%s>; error code: <%d>", ctx->filename, GetLastError());
-
-    if(size > 0)
-    {
-      if(size > hfilesz.QuadPart)
-      {
-        if(ctx->flags)
-        {
-          hfilesz.QuadPart = size;
-          if(SetFilePointerEx(hfile, hfilesz, NULL, FILE_BEGIN) == 0)
-          {
-            CloseHandle(hfile);
-            THError("unable to stretch file <%s> to the right size; error code: <%d>", ctx->filename, GetLastError());
-          }
-          if(SetEndOfFile(hfile) == 0)
-          {
-            CloseHandle(hfile);
-            THError("unable to write to file <%s>; error code: <%d>", ctx->filename, GetLastError());
-          }
-        }
-        else
-        {
-          CloseHandle(hfile);
-          THError("file <%s> size is smaller than the required mapping size <%ld>; error code: <%d>", ctx->filename, size, GetLastError());
-        }
-      }
-    }
-    else
-      size = hfilesz.QuadPart;
-
-    ctx->size = size; /* if we are here, it must be the right size */
-
-    hfilesz.QuadPart = ctx->size;
-
-    /* get map handle */
-    if(ctx->flags)
-    {
-      if( (hmfile = CreateFileMapping(hfile, NULL, PAGE_READWRITE, hfilesz.HighPart, hfilesz.LowPart, NULL)) == NULL )
-        THError("could not create a map on file <%s>; error code: <%d>", ctx->filename, GetLastError());
-    }
-    else
-    {
-      if( (hmfile = CreateFileMapping(hfile, NULL, PAGE_WRITECOPY, hfilesz.HighPart, hfilesz.LowPart, NULL)) == NULL )
-        THError("could not create a map on file <%s>; error code: <%d>", ctx->filename, GetLastError());
-    }
-
-    /* map the stuff */
-    if(ctx->flags)
-      data = MapViewOfFile(hmfile, FILE_MAP_ALL_ACCESS, 0, 0, 0);
-    else
-      data = MapViewOfFile(hmfile, FILE_MAP_COPY, 0, 0, 0);
-
-    CloseHandle(hfile);
-    CloseHandle(hmfile);
-  }
-#else /* _WIN32 */
-  {
-    /* open file */
-    int fd;
-    int flags;
-    struct stat file_stat;
-
-    if (ctx->flags & (TH_ALLOCATOR_MAPPED_SHARED | TH_ALLOCATOR_MAPPED_SHAREDMEM))
-      flags = O_RDWR | O_CREAT;
-    else
-      flags = O_RDONLY;
-
-    if (ctx->flags & TH_ALLOCATOR_MAPPED_EXCLUSIVE)
-      flags |= O_EXCL;
-    if (ctx->flags & TH_ALLOCATOR_MAPPED_NOCREATE)
-      flags &= ~O_CREAT;
-
-    if (!(ctx->flags & TH_ALLOCATOR_MAPPED_FROMFD)) {
-      if(ctx->flags & TH_ALLOCATOR_MAPPED_SHARED)
-      {
-        if((fd = open(ctx->filename, flags, (mode_t)0600)) == -1)
-          THError("unable to open file <%s> in read-write mode", ctx->filename);
-      }
-      else if (ctx->flags & TH_ALLOCATOR_MAPPED_SHAREDMEM)
-      {
-#ifdef HAVE_SHM_OPEN
-        if((fd = shm_open(ctx->filename, flags, (mode_t)0600)) == -1)
-          THError("unable to open shared memory object <%s> in read-write mode", ctx->filename);
-#else
-        THError("unable to open file <%s> in sharedmem mode, shm_open unavailable on this platform", ctx->filename);
-#endif
-      }
-      else
-      {
-        if((fd = open(ctx->filename, O_RDONLY)) == -1)
-          THError("unable to open file <%s> in read-only mode", ctx->filename);
-      }
-    } else {
-      fd = ctx->fd;
-    }
-
-    if(fstat(fd, &file_stat) == -1)
-    {
-      if (!(ctx->flags & TH_ALLOCATOR_MAPPED_FROMFD))
-        close(fd);
-      THError("unable to stat the file <%s>", ctx->filename);
-    }
-
-    if(size > 0)
-    {
-      if(size > file_stat.st_size)
-      {
-        if(ctx->flags)
-        {
-          if(ftruncate(fd, size) == -1)
-            THError("unable to resize file <%s> to the right size", ctx->filename);
-          if(fstat(fd, &file_stat) == -1 || file_stat.st_size < size)
-          {
-            close(fd);
-            THError("unable to stretch file <%s> to the right size", ctx->filename);
-          }
-/* on macOS write returns with errno 45 (Opperation not supported) when used
- * with a file descriptor obtained via shm_open
- */
-#ifndef __APPLE__
-          if((write(fd, "", 1)) != 1) /* note that the string "" contains the '\0' byte ... */
-          {
-            close(fd);
-            THError("unable to write to file <%s>", ctx->filename);
-          }
-#endif
-        }
-        else
-        {
-          close(fd);
-          THError("file <%s> size is smaller than the required mapping size <%ld>", ctx->filename, size);
-        }
-      }
-    }
-    else
-      size = file_stat.st_size;
-
-    ctx->size = size; /* if we are here, it must be the right size */
-
-    /* map it */
-    if (ctx->flags & (TH_ALLOCATOR_MAPPED_SHARED | TH_ALLOCATOR_MAPPED_SHAREDMEM))
-      data = mmap(NULL, ctx->size, PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0);
-    else
-      data = mmap(NULL, ctx->size, PROT_READ|PROT_WRITE, MAP_PRIVATE, fd, 0);
-
-    if (ctx->flags & TH_ALLOCATOR_MAPPED_KEEPFD) {
-      ctx->fd = fd;
-    } else {
-      if(close(fd) == -1)
-        THError("Error closing file <%s>", ctx->filename);
-      ctx->fd = -1;
-    }
-
-    if (ctx->flags & TH_ALLOCATOR_MAPPED_UNLINK) {
-      if (ctx->flags & TH_ALLOCATOR_MAPPED_SHAREDMEM)
-      {
-#ifdef HAVE_SHM_UNLINK
-        if (shm_unlink(ctx->filename) == -1)
-          THError("could not unlink the shared memory file %s", ctx->filename);
-#else
-        THError("could not unlink the shared memory file %s, shm_unlink not available on platform", ctx->filename);
-#endif
-      }
-      else
-      {
-        if (unlink(ctx->filename) == -1)
-          THError("could not unlink file %s", ctx->filename);
-      }
-    }
-
-    if(data == MAP_FAILED)
-    {
-      data = NULL; /* let's be sure it is NULL */
-      THError("$ Torch: unable to mmap memory: you tried to mmap %dGB.", ctx->size/1073741824);
-    }
-  }
-#endif
-
-  return data;
-}
-
-static void * THMapAllocator_alloc(void *ctx, ptrdiff_t size) {
-  return _map_alloc(ctx, size);
-}
-
-static void *THMapAllocator_realloc(void* ctx, void* ptr, ptrdiff_t size) {
-  THError("cannot realloc mapped data");
-  return NULL;
-}
-
-static void THMapAllocator_free(void* ctx_, void* data) {
-  if (data == NULL)
+void THMapAllocator::close() {
+  if (closed_) {
     return;
-
-  THMapAllocatorContext *ctx = static_cast<THMapAllocatorContext *>(ctx_);
-
+  }
+  closed_ = true;
+  if (base_ptr_ == nullptr) {
+    return;
+  }
 #ifdef _WIN32
-  if ((ctx->flags & TH_ALLOCATOR_MAPPED_KEEPFD) || (ctx->flags & TH_ALLOCATOR_MAPPED_SHAREDMEM))
-    CloseHandle(ctx->handle);
-  if(UnmapViewOfFile(data) == 0)
-    THError("could not unmap the shared memory file");
+  if ((flags_ & TH_ALLOCATOR_MAPPED_KEEPFD) || (flags_ & TH_ALLOCATOR_MAPPED_SHAREDMEM))
+    CloseHandle(handle_);
+  if(UnmapViewOfFile(base_ptr_) == 0)
+    AT_ERROR("could not unmap the shared memory file");
 #else /* _WIN32 */
-  if (ctx->flags & TH_ALLOCATOR_MAPPED_KEEPFD) {
-    if (close(ctx->fd) == -1)
-      THError("could not close file descriptor %d", ctx->fd);
+  if (flags_ & TH_ALLOCATOR_MAPPED_KEEPFD) {
+    if (::close(fd_) == -1) {
+      AT_ERROR("could not close file descriptor ", fd_);
+    }
   }
 
-  if (munmap(data, ctx->size))
-    THError("could not unmap the shared memory file");
+  if (munmap(base_ptr_, size_)) {
+    AT_ERROR("could not unmap the shared memory file");
+  }
 
-  if (!(ctx->flags & (TH_ALLOCATOR_MAPPED_FROMFD | TH_ALLOCATOR_MAPPED_UNLINK)))
-  {
-    if (ctx->flags & TH_ALLOCATOR_MAPPED_SHAREDMEM)
-    {
+  if (!(flags_ & (TH_ALLOCATOR_MAPPED_FROMFD | TH_ALLOCATOR_MAPPED_UNLINK))) {
+    if (flags_ & TH_ALLOCATOR_MAPPED_SHAREDMEM) {
 #ifdef HAVE_SHM_UNLINK
-      if (shm_unlink(ctx->filename) == -1)
-        THError("could not unlink the shared memory file %s", ctx->filename);
+      if (shm_unlink(filename_.c_str()) == -1) {
+        AT_ERROR("could not unlink the shared memory file ", filename_);
+      }
 #else
-      THError("could not unlink the shared memory file %s, shm_unlink not available on platform", ctx->filename);
+      AT_ERROR("could not unlink the shared memory file ", filename_, ", shm_unlink not available on platform");
 #endif
     }
   }
 #endif /* _WIN32 */
-
-  THMapAllocatorContext_free(ctx);
 }
 
-#else
+#else /* defined(_WIN32) || defined(HAVE_MMAP) */
 
-THMapAllocatorContext *THMapAllocatorContext_new(const char *filename, int flags) {
-  THError("file mapping not supported on your system");
-  return NULL;
+THMapAllocator::THMapAllocator(const char *filename, int flags, size_t size) {
+  AT_ERROR("file mapping not supported on your system");
 }
 
-void THMapAllocatorContext_free(THMapAllocatorContext *ctx) {
-  THError("file mapping not supported on your system");
+THMapAllocator::THMapAllocator(WithFd, const char *filename, int fd, int flags) {
+  AT_ERROR("file mapping not supported on your system");
 }
 
-static void *THMapAllocator_alloc(void* ctx_, ptrdiff_t size) {
-  THError("file mapping not supported on your system");
-  return NULL;
-}
-
-static void *THMapAllocator_realloc(void* ctx, void* ptr, ptrdiff_t size) {
-  THError("file mapping not supported on your system");
-  return NULL;
-}
-
-static void THMapAllocator_free(void* ctx, void* data) {
-  THError("file mapping not supported on your system");
-}
+THMapAllocator::~THMapAllocator(THMapAllocator* ctx) {}
 
 #endif
 
 #if (defined(_WIN32) || defined(HAVE_MMAP)) && defined(TH_ATOMIC_IPC_REFCOUNT)
 
-static void * THRefcountedMapAllocator_alloc(void *_ctx, ptrdiff_t size) {
-  THMapAllocatorContext *ctx = static_cast<THMapAllocatorContext *>(_ctx);
+THRefcountedMapAllocatorArgCheck::THRefcountedMapAllocatorArgCheck(int flags) {
+  if (flags & TH_ALLOCATOR_MAPPED_FROMFD) {
+    AT_ERROR("THRefcountedMapAllocator doesn't support TH_ALLOCATOR_MAPPED_FROMFD flag");
+  }
+  if (flags & TH_ALLOCATOR_MAPPED_KEEPFD) {
+    AT_ERROR("THRefcountedMapAllocator doesn't support TH_ALLOCATOR_MAPPED_KEEPFD flag");
+  }
+  if (flags & TH_ALLOCATOR_MAPPED_UNLINK) {
+    AT_ERROR("THRefcountedMapAllocator doesn't support TH_ALLOCATOR_MAPPED_UNLINK flag");
+  }
+  if (!(flags & TH_ALLOCATOR_MAPPED_SHAREDMEM)) {
+    AT_ERROR("THRefcountedMapAllocator requires TH_ALLOCATOR_MAPPED_SHAREDMEM flag");
+  }
+}
 
-  if (ctx->flags & TH_ALLOCATOR_MAPPED_FROMFD)
-    THError("THRefcountedMapAllocator doesn't support TH_ALLOCATOR_MAPPED_FROMFD flag");
-  if (ctx->flags & TH_ALLOCATOR_MAPPED_KEEPFD)
-    THError("THRefcountedMapAllocator doesn't support TH_ALLOCATOR_MAPPED_KEEPFD flag");
-  if (ctx->flags & TH_ALLOCATOR_MAPPED_UNLINK)
-    THError("THRefcountedMapAllocator doesn't support TH_ALLOCATOR_MAPPED_UNLINK flag");
-  if (!(ctx->flags & TH_ALLOCATOR_MAPPED_SHAREDMEM))
-    THError("THRefcountedMapAllocator requires TH_ALLOCATOR_MAPPED_SHAREDMEM flag");
+THRefcountedMapAllocator::THRefcountedMapAllocator(const char *filename, int flags, size_t size)
+  : THRefcountedMapAllocatorArgCheck(flags)
+  , THMapAllocator(filename, flags, size + TH_ALLOC_ALIGNMENT) {
 
-  size = size + TH_ALLOC_ALIGNMENT;
-  void *ptr = _map_alloc(ctx, size);
-  char *data = ((char*)ptr) + TH_ALLOC_ALIGNMENT;
-  THMapInfo *map_info = (THMapInfo*)ptr;
+    initializeAlloc();
+}
+THRefcountedMapAllocator::THRefcountedMapAllocator(WithFd, const char *filename, int fd, int flags, size_t size)
+  : THRefcountedMapAllocatorArgCheck(flags)
+  , THMapAllocator(WITH_FD, filename, flags, fd, size + TH_ALLOC_ALIGNMENT) {
+
+    initializeAlloc();
+}
+
+void THRefcountedMapAllocator::initializeAlloc() {
+  char *data = ((char*)base_ptr_) + TH_ALLOC_ALIGNMENT;
+  THMapInfo *map_info = (THMapInfo*)base_ptr_;
 
 #ifdef _WIN32
   ReleaseContext* r_ctx = (ReleaseContext *) THAlloc(sizeof(ReleaseContext));
-  r_ctx->handle = ctx->handle;
-  r_ctx->event = ctx->event;
+  r_ctx->handle = handle_;
+  r_ctx->event = event_;
   r_ctx->wait = NULL;
-  BOOL can_wait = RegisterWaitForSingleObject(&r_ctx->wait, ctx->event, WaitForReleaseHandle, (PVOID)r_ctx, INFINITE, WT_EXECUTEONLYONCE);
+  BOOL can_wait = RegisterWaitForSingleObject(&r_ctx->wait, event_, WaitForReleaseHandle, (PVOID)r_ctx, INFINITE, WT_EXECUTEONLYONCE);
   if (!can_wait) {
-    THError("Couldn't register wait on event, error code: <%d>", GetLastError());
+    AT_ERROR("Couldn't register wait on event, error code: <", GetLastError(), ">");
   }
 #endif
 
-  if (ctx->flags & TH_ALLOCATOR_MAPPED_EXCLUSIVE)
-    map_info->refcount = 1;
-  else
+  if (flags_ & TH_ALLOCATOR_MAPPED_EXCLUSIVE) {
+    new (&map_info->refcount) std::atomic<int>(1);
+  } else {
     map_info->refcount++;
-
-  return (void*)data;
+  }
 }
 
-static void *THRefcountedMapAllocator_realloc(void* ctx, void* ptr, ptrdiff_t size) {
-  THError("cannot realloc mapped data");
-  return NULL;
-}
+void THRefcountedMapAllocator::close() {
+  if (closed_) {
+    return;
+  }
+  closed_ = true;
 
-static void THRefcountedMapAllocator_free(void* ctx_, void* data) {
-  THMapAllocatorContext *ctx = static_cast<THMapAllocatorContext *>(ctx_);
+  void* data = base_ptr_;
 
 #ifdef _WIN32
-  THMapInfo *info = (THMapInfo*)(((char*)data) - TH_ALLOC_ALIGNMENT);
+  THMapInfo *info = (THMapInfo*)data;
   if (--info->refcount == 0) {
-    SetEvent(ctx->event);
+    SetEvent(event_);
   }
-  if(UnmapViewOfFile(((char*)data) - TH_ALLOC_ALIGNMENT) == 0)
-    THError("could not unmap the shared memory file");
+  if(UnmapViewOfFile(data) == 0) {
+    AT_ERROR("could not unmap the shared memory file");
+  }
 #else /* _WIN32 */
 
-  THMapInfo *info = (THMapInfo*)(((char*)data) - TH_ALLOC_ALIGNMENT);
+  THMapInfo *info = (THMapInfo*)(data);
   if (--info->refcount == 0) {
 #ifdef HAVE_SHM_UNLINK
-    if (shm_unlink(ctx->filename) == -1)
-      THError("could not unlink the shared memory file %s", ctx->filename);
+    if (shm_unlink(filename_.c_str()) == -1) {
+      AT_ERROR("could not unlink the shared memory file ", filename_);
+    }
 #else
-    THError("could not unlink the shared memory file %s, shm_unlink not available on platform", ctx->filename);
+    AT_ERROR("could not unlink the shared memory file ", filename_, ", shm_unlink not available on platform");
 #endif /* HAVE_SHM_UNLINK */
   }
-  if (munmap(info, ctx->size))
-    THError("could not unmap the shared memory file %s", ctx->filename);
+  if (munmap(info, size_)) {
+    AT_ERROR("could not unmap the shared memory file ", filename_);
+  }
 #endif /* _WIN32 */
-
-  THMapAllocatorContext_free(ctx);
 }
 
-void THRefcountedMapAllocator_incref(THMapAllocatorContext *ctx, void *data)
+void THRefcountedMapAllocator::incref()
 {
-  THMapInfo *map_info = (THMapInfo*)(((char*)data) - TH_ALLOC_ALIGNMENT);
+  THMapInfo *map_info = static_cast<THMapInfo*>(base_ptr_);
   ++map_info->refcount;
 }
 
-int THRefcountedMapAllocator_decref(THMapAllocatorContext *ctx, void *data)
+int THRefcountedMapAllocator::decref()
 {
-  THMapInfo *map_info = (THMapInfo*)(((char*)data) - TH_ALLOC_ALIGNMENT);
+  THMapInfo *map_info = static_cast<THMapInfo*>(base_ptr_);
   return --map_info->refcount == 0;
 }
 
 #else
 
-static void * THRefcountedMapAllocator_alloc(void *ctx, ptrdiff_t size) {
-  THError("refcounted file mapping not supported on your system");
-  return NULL;
+
+THRefcountedMapAllocatorArgCheck::THRefcountedMapAllocatorArgCheck(int flags) {}
+
+THRefcountedMapAllocator::THRefcountedMapAllocator(const char *filename, int flags, size_t size) {
+  AT_ERROR("refcounted file mapping not supported on your system");
 }
 
-static void *THRefcountedMapAllocator_realloc(void* ctx, void* ptr, ptrdiff_t size) {
-  THError("refcounted file mapping not supported on your system");
-  return NULL;
+THRefcountedMapAllocator::THRefcountedMapAllocator(WithFd, const char *filename, int fd, int flags, size_t size) {
+  AT_ERROR("refcounted file mapping not supported on your system");
 }
 
-static void THRefcountedMapAllocator_free(void* ctx_, void* data) {
-  THError("refcounted file mapping not supported on your system");
-}
-
-void THRefcountedMapAllocator_incref(THMapAllocatorContext *ctx, void *data)
-{
-  THError("refcounted file mapping not supported on your system");
-}
-
-int THRefcountedMapAllocator_decref(THMapAllocatorContext *ctx, void *data)
-{
-  THError("refcounted file mapping not supported on your system");
-  return 0;
-}
+void THRefcountedMapAllocator::initializeAlloc() {}
+THRefcountedMapAllocator::~THRefcountedMapAllocator() {}
 
 #endif
 
-THAllocator THMapAllocator = {
-  &THMapAllocator_alloc,
-  &THMapAllocator_realloc,
-  &THMapAllocator_free
-};
+static void deleteTHMapAllocator(void* ptr) {
+  delete static_cast<THMapAllocator*>(ptr);
+}
 
-THAllocator THRefcountedMapAllocator = {
-  &THRefcountedMapAllocator_alloc,
-  &THRefcountedMapAllocator_realloc,
-  &THRefcountedMapAllocator_free
-};
+static void deleteTHRefcountedMapAllocator(void* ptr) {
+  delete static_cast<THRefcountedMapAllocator*>(ptr);
+}
+
+THMapAllocator* THMapAllocator::fromDataPtr(const at::DataPtr& dptr) {
+  return dptr.cast_context<THMapAllocator>(&deleteTHMapAllocator);
+}
+
+THRefcountedMapAllocator* THRefcountedMapAllocator::fromDataPtr(const at::DataPtr& dptr) {
+  return dptr.cast_context<THRefcountedMapAllocator>(&deleteTHRefcountedMapAllocator);
+}
+
+at::DataPtr THMapAllocator::makeDataPtr(const char *filename, int flags, size_t size, size_t* actual_size_out) {
+  auto* context = new THMapAllocator(filename, flags, size);
+  if (actual_size_out) *actual_size_out = context->size();
+  return {context->data(), context, &deleteTHMapAllocator, at::kCPU};
+}
+
+at::DataPtr THMapAllocator::makeDataPtr(WithFd, const char *filename, int fd, int flags, size_t size, size_t* actual_size_out) {
+  auto* context = new THMapAllocator(WITH_FD, filename, fd, flags, size);
+  if (actual_size_out) *actual_size_out = context->size();
+  return {context->data(), context, &deleteTHMapAllocator, at::kCPU};
+}
+
+at::DataPtr THRefcountedMapAllocator::makeDataPtr(const char *filename, int flags, size_t size, size_t* actual_size_out) {
+  auto* context = new THRefcountedMapAllocator(filename, flags, size);
+  if (actual_size_out) *actual_size_out = context->size() - TH_ALLOC_ALIGNMENT;
+  return {context->data(), context, &deleteTHRefcountedMapAllocator, at::kCPU};
+}
+
+at::DataPtr THRefcountedMapAllocator::makeDataPtr(WithFd, const char *filename, int fd, int flags, size_t size, size_t* actual_size_out) {
+  auto* context = new THRefcountedMapAllocator(WITH_FD, filename, fd, flags, size);
+  if (actual_size_out) *actual_size_out = context->size() - TH_ALLOC_ALIGNMENT;
+  return {context->data(), context, &deleteTHRefcountedMapAllocator, at::kCPU};
+}
+
+void* THRefcountedMapAllocator::data() const {
+  return static_cast<void*>(static_cast<char*>(base_ptr_) + TH_ALLOC_ALIGNMENT);
+}

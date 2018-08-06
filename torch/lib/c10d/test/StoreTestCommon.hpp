@@ -1,7 +1,7 @@
 #pragma once
 
-#include "Store.hpp"
-#include "test/TestUtils.hpp"
+#include <c10d/Store.hpp>
+#include <c10d/test/TestUtils.hpp>
 
 namespace c10d {
 namespace test {

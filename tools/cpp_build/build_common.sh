@@ -11,7 +11,6 @@ fi
 
 CAFFE2_BUILDPATH="$BUILD_PATH/caffe2"
 NANOPB_BUILDPATH="$BUILD_PATH/nanopb"
-LIBTORCH_BUILDPATH="$BUILD_PATH/libtorch"
 
 # Build with Ninja if available. It has much cleaner output.
 GENERATE="Unix Makefiles"

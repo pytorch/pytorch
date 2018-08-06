@@ -1,7 +1,6 @@
 #pragma once
 
 #include <ATen/ATen.h>
-#include "torch/csrc/assertions.h"
 
 namespace torch { namespace autograd {
 
@@ -19,7 +18,7 @@ struct TypeAndShape {
   }
 
   const at::Type& type() const {
-    TORCH_ASSERT(type_);
+    AT_ASSERT(type_);
     return *type_;
   }
 

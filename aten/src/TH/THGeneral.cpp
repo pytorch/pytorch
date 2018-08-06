@@ -1,4 +1,4 @@
-#include "THGeneral.h"
+#include <TH/THGeneral.h>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -303,7 +303,7 @@ TH_API void THInferNumThreads(void)
 #endif
 }
 
-TH_API THDescBuff _THSizeDesc(const int64_t *size, const int64_t ndim) {
+THDescBuff _THSizeDesc(const int64_t *size, const int64_t ndim) {
   const int L = TH_DESC_BUFF_LEN;
   THDescBuff buf;
   char *str = buf.str;

@@ -1,4 +1,6 @@
 import torch
+import torch.nn.functional as F
+from torch._six import inf
 from operator import mul
 from functools import reduce
 import math
@@ -6,13 +8,39 @@ import math
 __all__ = [
     'argmax',
     'argmin',
+    'argsort',
     'btrifact',
     'btriunpack',
+    'broadcast_tensors',
+    'isfinite',
+    'isinf',
     'isnan',
     'split',
-    'unbind',
+    'stft',
     'unique',
 ]
+
+
+def broadcast_tensors(*tensors):
+    r"""broadcast_tensors(*tensors) -> List of Tensors
+
+    Broadcasts the given tensors according to :ref:`_broadcasting-semantics`.
+
+    Args:
+        *tensors: any number of tensors of the same type
+
+    Example::
+
+        >>> x = torch.arange(3).view(1, 3)
+        >>> y = torch.arange(2).view(2, 1)
+        >>> a, b = torch.broadcast_tensors(x, y)
+        >>> a.size()
+        torch.Size([2, 3])
+        >>> a
+        tensor([[0, 1, 2],
+                [0, 1, 2]])
+    """
+    return torch._C._VariableFunctions.broadcast_tensors(tensors)
 
 
 def split(tensor, split_size_or_sections, dim=0):
@@ -30,7 +58,7 @@ def split(tensor, split_size_or_sections, dim=0):
     Arguments:
         tensor (Tensor): tensor to split.
         split_size_or_sections (int) or (list(int)): size of a single chunk or
-        list of sizes for each chunk
+            list of sizes for each chunk
         dim (int): dimension along which to split the tensor.
     """
     # Overwriting reason:
@@ -87,18 +115,6 @@ def btrifact(A, info=None, pivot=True):
     return A.btrifact(info, pivot)
 
 
-def unbind(tensor, dim=0):
-    r"""Removes a tensor dimension.
-
-    Returns a tuple of all slices along a given dimension, already without it.
-
-    Arguments:
-        tensor (Tensor): the tensor to unbind
-        dim (int): dimension to remove
-    """
-    return tuple(tensor.select(dim, i) for i in range(tensor.size(dim)))
-
-
 def btriunpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
     r"""Unpacks the data and pivots from a batched LU factorization (btrifact) of a tensor.
 
@@ -148,6 +164,137 @@ def btriunpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
     return P, L, U
 
 
+def isfinite(tensor):
+    r"""Returns a new tensor with boolean elements representing if each element is `Finite` or not.
+
+    Arguments:
+        tensor (Tensor): A tensor to check
+
+    Returns:
+        Tensor: A ``torch.ByteTensor`` containing a 1 at each location of finite elements and 0 otherwise
+
+    Example::
+
+        >>> torch.isfinite(torch.Tensor([1, float('inf'), 2, float('-inf'), float('nan')]))
+        tensor([ 1,  0,  1,  0,  0], dtype=torch.uint8)
+    """
+    if not isinstance(tensor, torch.Tensor):
+        raise ValueError("The argument is not a tensor", str(tensor))
+    return (tensor == tensor) & (tensor.abs() != inf)
+
+
+def isinf(tensor):
+    r"""Returns a new tensor with boolean elements representing if each element is `+/-INF` or not.
+
+    Arguments:
+        tensor (Tensor): A tensor to check
+
+    Returns:
+        Tensor: A ``torch.ByteTensor`` containing a 1 at each location of `+/-INF` elements and 0 otherwise
+
+    Example::
+
+        >>> torch.isinf(torch.Tensor([1, float('inf'), 2, float('-inf'), float('nan')]))
+        tensor([ 0,  1,  0,  1,  0], dtype=torch.uint8)
+    """
+    if not isinstance(tensor, torch.Tensor):
+        raise ValueError("The argument is not a tensor", str(tensor))
+    return tensor.abs() == inf
+
+
+def stft(input, n_fft, hop_length=None, win_length=None, window=None,
+         center=True, pad_mode='reflect', normalized=False, onesided=True):
+    r"""Short-time Fourier transform (STFT).
+
+    Ignoring the optional batch dimension, this method computes the following
+    expression:
+
+    .. math::
+        X[m, \omega] = \sum_{k = 0}^{\text{win\_length}}%
+                            window[k]\ input[m \times hop_length + k]\ %
+                            e^{- j \frac{2 \pi \cdot \omega k}{\text{win\_length}}},
+
+    where :math:`m` is the index of the sliding window, and :math:`\omega` is
+    the frequency that :math:`0 \leq \omega < \text{n\_fft}`. When
+    :attr:`onesided` is the default value ``True``,
+
+    * :attr:`input` must be either a 1-D time sequenceor 2-D a batch of time
+      sequences.
+
+    * If :attr:`hop_length` is ``None`` (default), it is treated as equal to
+      ``floor(n_fft / 4)``.
+
+    * If :attr:`win_length` is ``None`` (default), it is treated as equal to
+      :attr:`n_fft`.
+
+    * :attr:`window` can be a 1-D tensor of size :attr:`win_length`, e.g., from
+      :meth:`torch.hann_window`. If :attr:`window` is ``None`` (default), it is
+      treated as if having :math:`1` everywhere in the window. If
+      :math:`\text{win\_length} < \text{n\_fft}`, :attr:`window` will be padded on
+      both sides to length :attr:`n_fft` before being applied.
+
+    * If :attr:`center` is ``True`` (default), :attr:`input` will be padded on
+      both sides so that the :math:`t`-th frame is centered at time
+      :math:`t \times \text{hop\_length}`. Otherwise, the :math:`t`-th frame
+      begins at time  :math:`t \times \text{hop\_length}`.
+
+    * :attr:`pad_mode` determines the padding method used on :attr:`input` when
+      :attr:`center` is ``True``. See :meth:`torch.nn.functional.pad` for
+      all available options. Default is ``"reflect"``.
+
+    * If :attr:`onesided` is ``True`` (default), only values for :math:`\omega`
+      in :math:`\left[0, 1, 2, \dots, \left\lfloor \frac{\text{n\_fft}}{2} \right\rfloor + 1\right]`
+      are returned because the real-to-complex Fourier transform satisfies the
+      conjugate symmetry, i.e., :math:`X[m, \omega] = X[m, \text{n\_fft} - \omega]^*`.
+
+    * If :attr:`normalized` is ``True`` (default is ``False``), the function
+      returns the normalized STFT results, i.e., multiplied by :math:`(\text{frame\_length})^{-0.5}`.
+
+    Returns the real and the imaginary parts together as one tensor of size
+    :math:`(* \times N \times T \times 2)`, where :math:`*` is the optional
+    batch size of :attr:`input`, :math:`N` is the number of frequencies where
+    STFT is applied, :math:`T` is the total number of frames used, and each pair
+    in the last dimension represents a complex number as the real part and the
+    imaginary part.
+
+    .. warning::
+      This function changed signature at version 0.4.1. Calling with the
+      previous signature may cause error or return incorrect result.
+
+    Arguments:
+        input (Tensor): the input tensor
+        n_fft (int, optional): size of Fourier transform
+        hop_length (int): the distance between neighboring sliding window
+            frames. Default: ``None`` (treated as equal to ``floor(n_fft / 4)``)
+        win_length (int): the size of window frame and STFT filter.
+            Default: ``None``  (treated as equal to :attr:`n_fft`)
+        window (Tensor, optional): the optional window function.
+            Default: ``None`` (treated as window of all :math:`1`s)
+        center (bool, optional): whether to pad :attr:`input` on both sides so
+            that the :math:`t`-th frame is centered at time :math:`t \times \text{hop\_length}`.
+            Default: ``True``
+        pad_mode (string, optional): controls the padding method used when
+            :attr:`center` is ``True``. Default: ``"reflect"``
+        normalized (bool, optional): controls whether to return the normalized STFT results
+             Default: ``False``
+        onesided (bool, optional): controls whether to return half of results to
+            avoid redundancy Default: ``True``
+
+    Returns:
+        Tensor: A tensor containing the STFT result with shape described above
+
+    """
+    # TODO: after having proper ways to map Python strings to ATen Enum, move
+    #       this and F.pad to ATen.
+    if center:
+        signal_dim = input.dim()
+        extended_shape = [1] * (3 - signal_dim) + list(input.size())
+        pad = int(n_fft // 2)
+        input = F.pad(input.view(extended_shape), (pad, pad), pad_mode)
+        input = input.view(input.shape[-signal_dim:])
+    return torch._C._VariableFunctions.stft(input, n_fft, hop_length, win_length, window, normalized, onesided)
+
+
 def isnan(tensor):
     r"""Returns a new tensor with boolean elements representing if each element is `NaN` or not.
 
@@ -163,7 +310,7 @@ def isnan(tensor):
         tensor([ 0,  1,  0], dtype=torch.uint8)
     """
     if not isinstance(tensor, torch.Tensor):
-        raise ValueError("The argument is not a tensor")
+        raise ValueError("The argument is not a tensor", str(tensor))
     return tensor != tensor
 
 
@@ -280,3 +427,36 @@ def argmin(input, dim=None, keepdim=False):
     if dim is None:
         return torch._argmin(input.contiguous().view(-1), dim=0, keepdim=False)
     return torch._argmin(input, dim, keepdim)
+
+
+def argsort(input, dim=None, descending=False):
+    """Returns the indices that sort a tensor along a given dimension in ascending
+    order by value.
+
+    This is the second value returned by :meth:`torch.sort`.  See its documentation
+    for the exact semantics of this method.
+
+    Args:
+        input (Tensor): the input tensor
+        dim (int, optional): the dimension to sort along
+        descending (bool, optional): controls the sorting order (ascending or descending)
+
+    Example::
+
+        >>> a = torch.randn(4, 4)
+        >>> a
+        tensor([[ 0.0785,  1.5267, -0.8521,  0.4065],
+                [ 0.1598,  0.0788, -0.0745, -1.2700],
+                [ 1.2208,  1.0722, -0.7064,  1.2564],
+                [ 0.0669, -0.2318, -0.8229, -0.9280]])
+
+
+        >>> torch.argsort(a, dim=1)
+        tensor([[2, 0, 3, 1],
+                [3, 2, 1, 0],
+                [2, 1, 0, 3],
+                [3, 2, 1, 0]])
+    """
+    if dim is None:
+        return torch.sort(input, -1, descending)[1]
+    return torch.sort(input, dim, descending)[1]

@@ -67,101 +67,32 @@ class TestSpatialBN(hu.HypothesisTestCase):
     def test_spatialbn_train_mode(
             self, size, input_channels, batch_size, seed, order, epsilon,
             inplace, gc, dc):
-        op0 = core.CreateOperator(
-             "SpatialBN",
-            ["X0", "scale0", "bias0", "running_mean0", "running_var0"],
-            ["X0" if inplace else "Y0",
-            "running_mean0", "running_var0", "saved_mean0", "saved_var0"],
-            order=order,
-            is_test=False,
-            epsilon=epsilon,
-            device_option=dc[0]
-        )
-        op1 = core.CreateOperator(
+        print("dc0: {}, dc1: {}".format(dc[0], dc[1]))
+        op = core.CreateOperator(
             "SpatialBN",
-            ["X1", "scale1", "bias1", "running_mean1", "running_var1"],
-            ["X1" if inplace else "Y1",
-             "running_mean1", "running_var1", "saved_mean1", "saved_var1"],
+            ["X", "scale", "bias", "running_mean", "running_var"],
+            ["X" if inplace else "Y",
+            "running_mean", "running_var", "saved_mean", "saved_var"],
             order=order,
             is_test=False,
             epsilon=epsilon,
-            device_option=dc[1]
         )
         np.random.seed(1701)
         scale = np.random.rand(input_channels).astype(np.float32) + 0.5
         bias = np.random.rand(input_channels).astype(np.float32) - 0.5
-        mean = np.random.randn(input_channels).astype(np.float32)
-        var = np.random.rand(input_channels).astype(np.float32) + 0.5
+        running_mean = np.random.randn(input_channels).astype(np.float32)
+        running_var = np.random.rand(input_channels).astype(np.float32) + 0.5
         X = np.random.rand(
             batch_size, input_channels, size, size).astype(np.float32) - 0.5
 
         if order == "NHWC":
             X = X.swapaxes(1, 2).swapaxes(2, 3)
 
-        old_ws_name = workspace.CurrentWorkspace()
-        workspace.SwitchWorkspace("_device_check_", True)
-        workspace.FeedBlob('X0', X, dc[0])
-        workspace.FeedBlob('scale0', scale, dc[0])
-        workspace.FeedBlob('bias0', bias, dc[0])
-        workspace.FeedBlob('running_mean0', mean, dc[0])
-        workspace.FeedBlob('running_var0', var, dc[0])
-        workspace.RunOperatorOnce(op0)
-        Y0 = workspace.FetchBlob('X0' if inplace else 'Y0')
-        running_mean0 = workspace.FetchBlob('running_mean0')
-        running_var0 = workspace.FetchBlob('running_var0')
-        saved_mean0 = workspace.FetchBlob('saved_mean0')
-        saved_var0 = workspace.FetchBlob('saved_var0')
-
-        workspace.ResetWorkspace()
-        workspace.FeedBlob('X1', X, dc[1])
-        workspace.FeedBlob('scale1', scale, dc[1])
-        workspace.FeedBlob('bias1', bias, dc[1])
-        workspace.FeedBlob('running_mean1', mean, dc[1])
-        workspace.FeedBlob('running_var1', var, dc[1])
-        workspace.RunOperatorOnce(op1)
-        Y1 = workspace.FetchBlob('X1' if inplace else 'Y1')
-        running_mean1 = workspace.FetchBlob('running_mean1')
-        running_var1 = workspace.FetchBlob('running_var1')
-        saved_mean1 = workspace.FetchBlob('saved_mean1')
-        saved_var1 = workspace.FetchBlob('saved_var1')
-
-        if not np.allclose(Y0, Y1, atol=0.01, rtol=0.01):
-            print("Failure in checking device option 1 and output. The outputs are:")
-            print(Y1.flatten())
-            print(Y0.flatten())
-            print(np.max(np.abs(Y1 - Y0)))
-            self.assertTrue(False)
-
-        if not np.allclose(running_mean0, running_mean1, atol=0.01, rtol=0.01):
-            print("Failure in checking device option 1 and output running mean. The outputs are:")
-            print(running_mean1.flatten())
-            print(running_mean0.flatten())
-            print(np.max(np.abs(running_mean1 - running_mean0)))
-            self.assertTrue(False)
-
-        if not np.allclose(running_var0, running_var1, atol=0.01, rtol=0.01):
-            print("Failure in checking device option 1 and outpu running var. The outputs are:")
-            print(running_var1.flatten())
-            print(running_var0.flatten())
-            print(np.max(np.abs(running_var1 - running_var0)))
-            self.assertTrue(False)
-
-        if not np.allclose(saved_mean0, saved_mean1, atol=0.01, rtol=0.01):
-            print("Failure in checking device option 1 and outpu mean. The outputs are:")
-            print(saved_mean1.flatten())
-            print(saved_mean0.flatten())
-            print(np.max(np.abs(saved_mean1 - saved_mean0)))
-            self.assertTrue(False)
-
-        saved_var0 = np.square(1 / saved_var0)
-        if not np.allclose(saved_var0, saved_var1, atol=0.01, rtol=0.01):
-            print("Failure in checking device option 1 and outpu var. The outputs are:")
-            print(saved_var1.flatten())
-            print(saved_var0.flatten())
-            print(np.max(np.abs(saved_var1 - saved_var0)))
-            self.assertTrue(False)
-
-        workspace.SwitchWorkspace(old_ws_name)
+        # TODO: It looks like IDEEP spatial_bn op outputs save_var (output[4])
+        # as the reciprocal of CPU op's output. Need to check back and add
+        # output[4] for comparison
+        self.assertDeviceChecks(dc, op, [X, scale, bias, running_mean, running_var],
+            [0, 1, 2, 3])
 
     @given(size=st.integers(7, 10),
            input_channels=st.integers(1, 10),

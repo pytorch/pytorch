@@ -201,13 +201,6 @@ TEST_CASE("any-module") {
     REQUIRE(!any.is_empty());
     REQUIRE(any.forward(5.0f).get<int>() == 8);
   }
-  SECTION("has reference semantics") {
-    Sequential first(Linear(2, 3), Linear(4, 4), Linear(4, 5));
-    Sequential second(first);
-
-    REQUIRE(first.size() == second.size());
-    REQUIRE(std::equal(first.begin(), first.end(), second.begin()));
-  }
   SECTION("constructs from ModuleHolder") {
     struct MImpl : torch::nn::Module {
       explicit MImpl(int value_) : torch::nn::Module("M"), value(value_) {}

@@ -1,4 +1,5 @@
 #include "caffe2/operators/channel_backprop_stats_op.h"
+#include "caffe2/utils/eigen_utils.h"
 
 namespace caffe2 {
 
@@ -25,8 +26,10 @@ bool ChannelBackpropStatsOp<CPUContext>::RunOnDevice() {
   ConstEigenVectorArrayMap<float> mean_arr(Input(SAVED_MEAN).data<float>(), C);
   ConstEigenVectorArrayMap<float> inv_stddev_arr(
       Input(SAVED_INV_STDDEV).data<float>(), C);
-  EigenVectorArrayMap<float> dBias_arr(dBias->mutable_data<float>(), C);
-  EigenVectorArrayMap<float> dScale_arr(dScale->mutable_data<float>(), C);
+  EigenVectorArrayMap<float> dBias_arr(
+      dBias->template mutable_data<float>(), C);
+  EigenVectorArrayMap<float> dScale_arr(
+      dScale->template mutable_data<float>(), C);
 
   dBias_arr.setZero();
   dScale_arr.setZero();

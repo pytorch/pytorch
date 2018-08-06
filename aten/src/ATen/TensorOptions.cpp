@@ -4,7 +4,9 @@
 #include <ATen/Layout.h>
 #include <ATen/OptionsGuard.h>
 #include <ATen/ScalarType.h>
-#include <ATen/optional.h>
+#include <ATen/core/optional.h>
+
+#include <iostream>
 
 namespace at {
 
@@ -17,3 +19,13 @@ TensorOptions::TensorOptions(bool use_thread_local_default_options) {
   }
 }
 } // namespace at
+
+std::ostream& operator<<(
+    std::ostream& stream,
+    const at::TensorOptions& options) {
+  return stream << "TensorOptions(dtype=" << options.dtype()
+                << ", device=" << options.device()
+                << ", layout=" << options.layout()
+                << ", requires_grad=" << std::boolalpha
+                << options.requires_grad() << ")";
+}

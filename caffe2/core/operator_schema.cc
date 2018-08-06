@@ -232,6 +232,18 @@ OpSchema& OpSchema::IdenticalTypeAndShapeOfInput(int idx) {
       });
 }
 
+OpSchema& OpSchema::IdenticalTypeAndShapeOfMultipleInputs(
+    const vector<int>& indices) {
+  return TensorInferenceFunction(
+      [indices](const OperatorDef&, const vector<TensorShape>& input_types) {
+        vector<TensorShape> out(indices.size());
+        for (int i = 0; i < indices.size(); i++) {
+          out[i] = input_types[indices.at(i)];
+        }
+        return out;
+      });
+}
+
 OpSchema& OpSchema::IdenticalTypeAndShapeOfInputDim(int idx, int dim) {
   return TensorInferenceFunction(
       [idx, dim](const OperatorDef&, const vector<TensorShape>& input_types) {

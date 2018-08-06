@@ -14,17 +14,17 @@ void THNN_(MSECriterion_updateOutput)(
   if (reduction != Reduction::None) {
     THTensor_(resize1d)(output, 1);
 
-    real sum = 0;
+    accreal sum = 0;
 
     TH_TENSOR_APPLY2(real, input, real, target,
-      real z = (*input_data - *target_data);
+      accreal z = (*input_data - *target_data);
       sum += z*z;
     );
 
     if (reduction == Reduction::ElementwiseMean)
       sum /= THTensor_(nElement)(input);
 
-    THTensor_(set1d)(output, 0, sum);
+    THTensor_(set1d)(output, 0, (real)sum);
     return;
   }
 

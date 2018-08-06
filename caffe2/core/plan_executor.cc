@@ -100,7 +100,7 @@ std::function<bool(int64_t)> getContinuationTest(
 
 // if the blob doesn't exist or is not initiaized, return false
 inline bool getShouldStop(const Blob* b) {
-  if (!b || b->meta().id() == CaffeTypeId::uninitialized()) { // not exist or uninitialized
+  if (!b || b->meta().id() == TypeIdentifier::uninitialized()) { // not exist or uninitialized
     return false;
   }
 
@@ -131,8 +131,7 @@ struct WorkspaceIdInjector {
           "Integer overflow while calculating GLOBAL_WORKSPACE_ID blob");
       int32_t global_ws_id = (seq_++) + (static_cast<int32_t>(node_id) << 16);
       Blob* global_ws_id_blob = workspace->CreateLocalBlob(GLOBAL_WORKSPACE_ID);
-      TensorCPU* global_ws_id_tensor =
-          global_ws_id_blob->template GetMutable<TensorCPU>();
+      TensorCPU* global_ws_id_tensor = global_ws_id_blob->GetMutableTensor(CPU);
       global_ws_id_tensor->Resize();
       global_ws_id_tensor->template mutable_data<int32_t>()[0] = global_ws_id;
       VLOG(1) << "Adding " << GLOBAL_WORKSPACE_ID << " = " << global_ws_id;
@@ -512,15 +511,7 @@ bool RunPlanOnWorkspace(
     LOG(INFO) << "Step " << step.name() << " took " << step_timer.Seconds()
               << " seconds.";
   }
-  float exec_time = plan_timer.Seconds();
-
-#ifndef CAFFE2_MOBILE
-  PlanExecutionTime plan_stat(plan.name());
-  CAFFE_EVENT(
-      plan_stat, plan_execution_time_ns, (long)(exec_time * 1000000000));
-#endif // CAFFE2_MOBILE
-
-  LOG(INFO) << "Total plan took " << exec_time << " seconds.";
+  LOG(INFO) << "Total plan took " << plan_timer.Seconds() << " seconds.";
   LOG(INFO) << "Plan executed successfully.";
   return true;
 }

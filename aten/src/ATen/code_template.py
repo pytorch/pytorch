@@ -50,7 +50,9 @@ class CodeTemplate(object):
                     comma_after = ', '
                     key = key[:-1]
             v = lookup(key)
-            if indent is not None and isinstance(v, list):
+            if indent is not None:
+                if not isinstance(v, list):
+                    v = [v]
                 return indent_lines(indent, v)
             elif isinstance(v, list):
                 middle = ', '.join([str(x) for x in v])
@@ -58,7 +60,7 @@ class CodeTemplate(object):
                     return middle
                 return comma_before + middle + comma_after
             else:
-                return (indent or '') + str(v)
+                return str(v)
         return self.subtitution.sub(replace, self.pattern)
 
 

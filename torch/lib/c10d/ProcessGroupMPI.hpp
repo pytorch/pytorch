@@ -1,11 +1,5 @@
 #pragma once
 
-#include "ProcessGroup.hpp"
-#include "Types.hpp"
-#include "Utils.hpp"
-
-#include <mpi.h>
-
 #include <condition_variable>
 #include <deque>
 #include <exception>
@@ -13,6 +7,12 @@
 #include <mutex>
 #include <thread>
 #include <vector>
+
+#include <mpi.h>
+
+#include <c10d/ProcessGroup.hpp>
+#include <c10d/Types.hpp>
+#include <c10d/Utils.hpp>
 
 namespace c10d {
 

@@ -2,8 +2,6 @@
 #define THC_GENERIC_FILE "generic/THCTensor.h"
 #else
 
-#define TH_TENSOR_REFCOUNTED 1
-
 typedef struct THCTensor THCTensor;
 
 // These used to be distinct types; for some measure of backwards compatibility and documentation
@@ -23,12 +21,14 @@ typedef struct THCTensor THCTensor;
 THC_API THCStorage* THCTensor_(storage)(THCState *state, const THCTensor *self);
 THC_API ptrdiff_t THCTensor_(storageOffset)(THCState *state, const THCTensor *self);
 
-// See [NOTE: _dim() vs dim()]; _nDimension corresponds to _dim(), nDimension corresponds to dim().
-THC_API int THCTensor_(nDimension)(THCState *state, const THCTensor *self);
-THC_API int THCTensor_(_nDimension)(THCState *state, const THCTensor *self);
+// See [NOTE: nDimension vs nDimensionLegacyNoScalars vs nDimensionLegacyAll]
+THC_API int THCTensor_(nDimensionLegacyNoScalars)(THCState *state, const THCTensor *self);
+THC_API int THCTensor_(nDimensionLegacyAll)(THCState *state, const THCTensor *self);
 
 THC_API int64_t THCTensor_(size)(THCState *state, const THCTensor *self, int dim);
+THC_API int64_t THCTensor_(sizeLegacyNoScalars)(THCState *state, const THCTensor *self, int dim);
 THC_API int64_t THCTensor_(stride)(THCState *state, const THCTensor *self, int dim);
+THC_API int64_t THCTensor_(strideLegacyNoScalars)(THCState *state, const THCTensor *self, int dim);
 THC_API THLongStorage *THCTensor_(newSizeOf)(THCState *state, THCTensor *self);
 THC_API THLongStorage *THCTensor_(newStrideOf)(THCState *state, THCTensor *self);
 THC_API real *THCTensor_(data)(THCState *state, const THCTensor *self);
@@ -115,7 +115,6 @@ THC_API void THCTensor_(unsqueeze1d)(THCState *state, THCTensor *self, THCTensor
 THC_API int THCTensor_(isContiguous)(THCState *state, const THCTensor *self);
 THC_API int THCTensor_(isSameSizeAs)(THCState *state, const THCTensor *self, const THCTensor *src);
 THC_API int THCTensor_(isSetTo)(THCState *state, const THCTensor *self, const THCTensor *src);
-THC_API int THCTensor_(isSize)(THCState *state, const THCTensor *self, const THLongStorage *dims);
 THC_API ptrdiff_t THCTensor_(nElement)(THCState *state, const THCTensor *self);
 
 THC_API void THCTensor_(retain)(THCState *state, THCTensor *self);

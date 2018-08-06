@@ -31,8 +31,10 @@ class _Reduction:
 
     # In order to support previous versions, accept boolean size_average and reduce
     # and convert them into the new constants for now
+
+    # We use these functions in torch/legacy as well, in which case we'll silence the warning
     @staticmethod
-    def legacy_get_string(size_average, reduce):
+    def legacy_get_string(size_average, reduce, emit_warning=True):
         warning = "size_average and reduce args will be deprecated, please use reduction='{}' instead."
 
         if size_average is None:
@@ -41,18 +43,18 @@ class _Reduction:
             reduce = True
 
         if size_average and reduce:
-            warnings.warn(warning.format('elementwise_mean'))
-            return 'elementwise_mean'
+            ret = 'elementwise_mean'
         elif reduce:
-            warnings.warn(warning.format('sum'))
-            return 'sum'
+            ret = 'sum'
         else:
-            warnings.warn(warning.format('none'))
-            return 'none'
+            ret = 'none'
+        if emit_warning:
+            warnings.warn(warning.format(ret))
+        return ret
 
     @staticmethod
-    def legacy_get_enum(size_average, reduce):
-        return _Reduction.get_enum(_Reduction.legacy_get_string(size_average, reduce))
+    def legacy_get_enum(size_average, reduce, emit_warning=True):
+        return _Reduction.get_enum(_Reduction.legacy_get_string(size_average, reduce, emit_warning))
 
 
 conv1d = _add_docstr(torch.conv1d, r"""
@@ -593,35 +595,12 @@ def dropout(input, p=0.5, training=False, inplace=False):
     return _functions.dropout.Dropout.apply(input, p, training, inplace)
 
 
-def alpha_dropout(input, p=0.5, training=False):
+def alpha_dropout(input, p=0.5, training=False, inplace=False):
     r"""Applies alpha dropout to the input.
 
     See :class:`~torch.nn.AlphaDropout` for details.
-
-    Args:
-        p (float, optional): the drop probability. Default: 0.5
-        training (bool, optional): switch between training and evaluation mode. Default: ``False``
     """
-    if p < 0 or p > 1:
-        raise ValueError("dropout probability has to be between 0 and 1, "
-                         "but got {}".format(p))
-
-    if p == 0 or not training:
-        return input
-
-    alpha = -1.7580993408473766
-    keep_prob = 1 - p
-    # TODO avoid casting to byte after resize
-    noise = input.data.new().resize_(input.size())
-    noise.bernoulli_(p)
-    noise = noise.byte()
-
-    output = input.masked_fill(noise, alpha)
-
-    a = (keep_prob + alpha ** 2 * keep_prob * (1 - keep_prob)) ** (-0.5)
-    b = -a * alpha * (1 - keep_prob)
-
-    return output.mul_(a).add_(b)
+    return _functions.dropout.AlphaDropout.apply(input, p, training, inplace)
 
 
 def dropout2d(input, p=0.5, training=False, inplace=False):
@@ -630,6 +609,10 @@ def dropout2d(input, p=0.5, training=False, inplace=False):
 
 def dropout3d(input, p=0.5, training=False, inplace=False):
     return _functions.dropout.FeatureDropout.apply(input, p, training, inplace)
+
+
+def feature_alpha_dropout(input, p=0.5, training=False, inplace=False):
+    return _functions.dropout.FeatureAlphaDropout.apply(input, p, training, inplace)
 
 
 def threshold(input, threshold, value, inplace=False):
@@ -758,12 +741,31 @@ In-place version of :func:`~selu`.
 """)
 
 
+def celu(input, alpha=1., inplace=False):
+    r"""celu(input, alpha=1., inplace=False) -> Tensor
+
+    Applies element-wise,
+    :math:`\text{CELU}(x) = \max(0,x) + \min(0, \alpha * (\exp(x/\alpha) - 1))`.
+
+    See :class:`~torch.nn.CELU` for more details.
+    """
+    if inplace:
+        return torch.celu_(input, alpha)
+    return torch.celu(input, alpha)
+
+celu_ = _add_docstr(torch.celu_, r"""
+celu_(input, alpha=1.) -> Tensor
+
+In-place version of :func:`~celu`.
+""")
+
+
 def leaky_relu(input, negative_slope=0.01, inplace=False):
     r"""
     leaky_relu(input, negative_slope=0.01, inplace=False) -> Tensor
 
     Applies element-wise,
-    :math:`\text{LeakyReLU}(x) = \max(0, x) + \text{negative_slope} * \min(0, x)`
+    :math:`\text{LeakyReLU}(x) = \max(0, x) + \text{negative\_slope} * \min(0, x)`
 
     See :class:`~torch.nn.LeakyReLU` for more details.
     """
@@ -876,7 +878,7 @@ def softmin(input, dim=None, _stacklevel=3):
     """
     if dim is None:
         dim = _get_softmax_dim('softmin', input.dim(), _stacklevel)
-    return -input.softmax(dim)
+    return (-input).softmax(dim)
 
 
 def softmax(input, dim=None, _stacklevel=3):
@@ -1009,6 +1011,7 @@ def tanh(input):
 
     See :class:`~torch.nn.Tanh` for more details.
     """
+    warnings.warn("nn.functional.tanh is deprecated. Use torch.tanh instead.")
     return input.tanh()
 
 
@@ -1019,10 +1022,9 @@ def sigmoid(input):
 
     See :class:`~torch.nn.Sigmoid` for more details.
     """
+    warnings.warn("nn.functional.sigmoid is deprecated. Use torch.sigmoid instead.")
     return input.sigmoid()
 
-
-# etc.
 
 def linear(input, weight, bias=None):
     r"""
@@ -1109,7 +1111,6 @@ def embedding(input, weight, padding_idx=None, max_norm=None, norm_type=2,
                  [ 0.0000,  0.0000,  0.0000],
                  [ 0.6262,  0.2438,  0.7471]]])
     """
-    input = input.contiguous()
     if padding_idx is not None:
         if padding_idx > 0:
             assert padding_idx < weight.size(0), 'Padding_idx must be within num_embeddings'
@@ -1117,8 +1118,12 @@ def embedding(input, weight, padding_idx=None, max_norm=None, norm_type=2,
             assert padding_idx >= -weight.size(0), 'Padding_idx must be within num_embeddings'
             padding_idx = weight.size(0) + padding_idx
     elif padding_idx is None:
-            padding_idx = -1
+        padding_idx = -1
     if max_norm is not None:
+        # `embedding_renorm_` will call .contiguous() on input anyways, so we
+        # call it here and take advantage of the improved locality in the
+        # `embedding` call below too.
+        input = input.contiguous()
         with torch.no_grad():
             torch.embedding_renorm_(weight, input, max_norm, norm_type)
     return torch.embedding(weight, input, padding_idx, scale_grad_by_freq, sparse)
@@ -1204,7 +1209,7 @@ def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
             offsets = torch.arange(0, input.numel(), input.size(1),
                                    dtype=torch.long, device=input.device)
 
-            input = input.view(-1)
+            input = input.reshape(-1)
     elif input.dim() == 1:
         if offsets is None:
             raise ValueError("offsets has to be a 1D Tensor but got None")
@@ -1288,7 +1293,7 @@ def instance_norm(input, running_mean=None, running_var=None, weight=None,
 
     import torch.onnx.symbolic
 
-    @torch.onnx.symbolic_override_first_arg_based(torch.onnx.symbolic.instance_norm)
+    @torch.onnx.symbolic_override(torch.onnx.symbolic.instance_norm)
     def _instance_norm(input, running_mean=None, running_var=None, weight=None,
                        bias=None, use_input_stats=None, momentum=None, eps=None):
         # Repeat stored stats and affine transform params if necessary
@@ -1363,6 +1368,41 @@ def local_response_norm(input, size, alpha=1e-4, beta=0.75, k=1):
 
 
 # loss
+
+def ctc_loss(log_probs, targets, input_lengths, target_lengths, blank=0,
+             reduction='elementwise_mean'):
+    r"""The Connectionist Temporal Classification loss.
+
+    See :class:`~torch.nn.CTCLoss` for details.
+
+    Args:
+        log_probs: :math:`(T, N, C)` where `C = number of characters in alphabet including blank`,
+            `T = input length`, and `N = batch size`.
+            The logarithmized probabilities of the outputs
+            (e.g. obtained with :func:`torch.nn.functional.log_softmax`).
+        targets: :math:`(N, S)` or `(sum(target_lenghts))`.
+            Targets (cannot be blank). In the second form, the targets are assumed to be concatenated.
+        input_lengths: :math:`(N)`.
+            Lengths of the inputs (must each be :math:`\leq T`)
+        target_lengths: :math:`(N)`.
+            Lengths of the targets
+        blank (int, optional):
+            Blank label. Default :math:`0`.
+        reduction (string, optional): Specifies the reduction to apply to the output:
+            'none' | 'elementwise_mean' | 'sum'. 'none': no reduction will be applied,
+            'elementwise_mean': the output losses will be divided by the target lengths and
+            then the mean over the batch is taken. Default: 'elementwise_mean'
+
+    Example::
+
+        >>> log_probs = torch.randn(50, 16, 20).log_softmax(2).detach().requires_grad_()
+        >>> targets = torch.randint(1, 21, (16, 30), dtype=torch.long)
+        >>> input_lengths = torch.full((16,), 50, dtype=torch.long)
+        >>> target_lengths = torch.randint(10,30,(16,), dtype=torch.long)
+        >>> loss = F.ctc_loss(log_probs, targets, input_lengths, target_lengths)
+        >>> loss.backward()
+    """
+    return torch.ctc_loss(log_probs, targets, input_lengths, target_lengths, blank, _Reduction.get_enum(reduction))
 
 
 def nll_loss(input, target, weight=None, size_average=None, ignore_index=-100,
@@ -1685,7 +1725,7 @@ def _pointwise_loss(lambd, lambd_optimized, input, target, reduction='elementwis
             return d
         return torch.mean(d) if reduction == 'elementwise_mean' else torch.sum(d)
     else:
-        return lambd_optimized(input, target, reduction)
+        return lambd_optimized(input, target, _Reduction.get_enum(reduction))
 
 
 def smooth_l1_loss(input, target, size_average=None, reduce=None, reduction='elementwise_mean'):
@@ -1709,9 +1749,7 @@ def l1_loss(input, target, size_average=None, reduce=None, reduction='elementwis
     See :class:`~torch.nn.L1Loss` for details.
     """
     if size_average is not None or reduce is not None:
-        reduction = _Reduction.legacy_get_enum(size_average, reduce)
-    else:
-        reduction = _Reduction.get_enum(reduction)
+        reduction = _Reduction.legacy_get_string(size_average, reduce)
     return _pointwise_loss(lambda a, b: torch.abs(a - b), torch._C._nn.l1_loss,
                            input, target, reduction)
 
@@ -1724,9 +1762,7 @@ def mse_loss(input, target, size_average=None, reduce=None, reduction='elementwi
     See :class:`~torch.nn.MSELoss` for details.
     """
     if size_average is not None or reduce is not None:
-        reduction = _Reduction.legacy_get_enum(size_average, reduce)
-    else:
-        reduction = _Reduction.get_enum(reduction)
+        reduction = _Reduction.legacy_get_string(size_average, reduce)
     return _pointwise_loss(lambda a, b: (a - b) ** 2, torch._C._nn.mse_loss, input, target, reduction)
 
 
@@ -1791,8 +1827,22 @@ def multilabel_soft_margin_loss(input, target, weight=None, size_average=None,
     """
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
-    input = torch.sigmoid(input)
-    return binary_cross_entropy(input, target, weight, None, None, reduction)
+
+    loss = -(target * logsigmoid(input) + (1 - target) * logsigmoid(-input))
+
+    if weight is not None:
+        loss = loss * weight
+
+    loss = loss.sum(dim=1) / input.size(1)  # only return N loss values
+
+    if reduction == 'none':
+        return loss
+    elif reduction == 'elementwise_mean':
+        return loss.mean()
+    elif reduction == 'sum':
+        return loss.sum()
+    else:
+        raise ValueError(reduction + " is not valid")
 
 
 def cosine_embedding_loss(input1, input2, target, margin=0, size_average=None,
@@ -1863,6 +1913,11 @@ def upsample(input, size=None, scale_factor=None, mode='nearest', align_corners=
     r"""Upsamples the input to either the given :attr:`size` or the given
     :attr:`scale_factor`
 
+    .. warning::
+        This function is deprecated in favor of :func:`torch.nn.functional.interpolate`.
+        This is equivalent with ``nn.functional.interpolate(...)``.
+
+
     The algorithm used for upsampling is determined by :attr:`mode`.
 
     Currently temporal, spatial and volumetric upsampling are supported, i.e.
@@ -1896,44 +1951,69 @@ def upsample(input, size=None, scale_factor=None, mode='nearest', align_corners=
         affects the outputs.
 
     """
+    warnings.warn("nn.functional.upsample is deprecated. Use nn.functional.interpolate instead.")
+    return interpolate(input, size, scale_factor, mode, align_corners)
+
+
+def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corners=None):
+    r"""Down/up samples the input to either the given :attr:`size` or the given
+    :attr:`scale_factor`
+
+    The algorithm used for interpolation is determined by :attr:`mode`.
+
+    Currently temporal, spatial and volumetric sampling are supported, i.e.
+    expected inputs are 3-D, 4-D or 5-D in shape.
+
+    The input dimensions are interpreted in the form:
+    `mini-batch x channels x [optional depth] x [optional height] x width`.
+
+    The modes available for resizing are: `nearest`, `linear` (3D-only),
+    `bilinear` (4D-only), `trilinear` (5D-only), `area`
+
+    Args:
+        input (Tensor): the input tensor
+        size (int or Tuple[int] or Tuple[int, int] or Tuple[int, int, int]):
+            output spatial size.
+        scale_factor (float or Tuple[float]): multiplier for spatial size. Has to match input size if it is a tuple.
+        mode (string): algorithm used for upsampling:
+            'nearest' | 'linear' | 'bilinear' | 'trilinear' | 'area'. Default: 'nearest'
+        align_corners (bool, optional): if True, the corner pixels of the input
+            and output tensors are aligned, and thus preserving the values at
+            those pixels. This only has effect when :attr:`mode` is `linear`,
+            `bilinear`, or `trilinear`. Default: False
+
+    .. warning::
+        With ``align_corners = True``, the linearly interpolating modes
+        (`linear`, `bilinear`, and `trilinear`) don't proportionally align the
+        output and input pixels, and thus the output values can depend on the
+        input size. This was the default behavior for these modes up to version
+        0.3.1. Since then, the default behavior is ``align_corners = False``.
+        See :class:`~torch.nn.Upsample` for concrete examples on how this
+        affects the outputs.
+
+    """
     from numbers import Integral
     from .modules.utils import _ntuple
 
-    def _check_size_scale_factor():
+    def _check_size_scale_factor(dim):
         if size is None and scale_factor is None:
             raise ValueError('either size or scale_factor should be defined')
         if size is not None and scale_factor is not None:
             raise ValueError('only one of size or scale_factor should be defined')
-        if scale_factor is not None and not isinstance(scale_factor, (Integral, tuple)):
-            raise ValueError('scale_factor must be of integer type or a tuple of integer types')
-
-    def _scale_factor(dim):
-        _check_size_scale_factor()
-        if scale_factor is not None and not isinstance(scale_factor, Integral):
-            raise ValueError('scale_factor must be a single Integer value for nearest neighbor sampling')
-        if scale_factor is not None:
-            return scale_factor
-        sizes = _ntuple(dim)(size)
-        computed_scale_factor = sizes[0] // input.size(2)
-        for d in range(dim):
-            if sizes[d] % input.size(d + 2) != 0:
-                raise RuntimeError("output size specified in UpsamplingNearest "
-                                   "({}) has to be divisible by the input size, but got: "
-                                   "{}".format('x'.join(map(str, sizes)),
-                                               'x'.join(map(str, input.size()))))
-            if sizes[d] // input.size(d + 2) != computed_scale_factor:
-                raise RuntimeError("input aspect ratio doesn't match the output ratio")
-
-        return computed_scale_factor
+        if scale_factor is not None and isinstance(scale_factor, tuple)\
+                and len(scale_factor) != dim:
+            raise ValueError('scale_factor shape must match input shape. '
+                             'Input is {}D, scale_factor size is {}'.format(dim, len(scale_factor)))
 
     def _output_size(dim):
-        _check_size_scale_factor()
+        _check_size_scale_factor(dim)
         if size is not None:
             return size
         scale_factors = _ntuple(dim)(scale_factor)
-        return [input.size(i + 2) * scale_factors[i] for i in range(dim)]
+        # math.floor might return float in py2.7
+        return [int(math.floor(input.size(i + 2) * scale_factors[i])) for i in range(dim)]
 
-    if mode == 'nearest':
+    if mode in ('nearest', 'area'):
         if align_corners is not None:
             raise ValueError("align_corners option can only be set with the "
                              "interpolating modes: linear | bilinear | trilinear")
@@ -1946,11 +2026,17 @@ def upsample(input, size=None, scale_factor=None, mode='nearest', align_corners=
             align_corners = False
 
     if input.dim() == 3 and mode == 'nearest':
-        return torch._C._nn.upsample_nearest1d(input, _scale_factor(1))
+        return torch._C._nn.upsample_nearest1d(input, _output_size(1))
     elif input.dim() == 4 and mode == 'nearest':
-        return torch._C._nn.upsample_nearest2d(input, _scale_factor(2))
+        return torch._C._nn.upsample_nearest2d(input, _output_size(2))
     elif input.dim() == 5 and mode == 'nearest':
-        return torch._C._nn.upsample_nearest3d(input, _scale_factor(3))
+        return torch._C._nn.upsample_nearest3d(input, _output_size(3))
+    elif input.dim() == 3 and mode == 'area':
+        return adaptive_avg_pool1d(input, _output_size(1))
+    elif input.dim() == 4 and mode == 'area':
+        return adaptive_avg_pool2d(input, _output_size(2))
+    elif input.dim() == 5 and mode == 'area':
+        return adaptive_avg_pool3d(input, _output_size(3))
     elif input.dim() == 3 and mode == 'linear':
         return torch._C._nn.upsample_linear1d(input, _output_size(1), align_corners)
     elif input.dim() == 3 and mode == 'bilinear':
@@ -1979,8 +2065,8 @@ def upsample_nearest(input, size=None, scale_factor=None):
     r"""Upsamples the input, using nearest neighbours' pixel values.
 
     .. warning::
-        This function is deprecated in favor of :func:`torch.nn.functional.upsample`.
-        This is equivalent with ``nn.functional.upsample(..., mode='nearest')``.
+        This function is deprecated in favor of :func:`torch.nn.functional.interpolate`.
+        This is equivalent with ``nn.functional.interpolate(..., mode='nearest')``.
 
     Currently spatial and volumetric upsampling are supported (i.e. expected
     inputs are 4 or 5 dimensional).
@@ -1992,17 +2078,17 @@ def upsample_nearest(input, size=None, scale_factor=None):
         scale_factor (int): multiplier for spatial size. Has to be an integer.
     """
     # DeprecationWarning is ignored by default
-    warnings.warn("nn.functional.upsample_nearest is deprecated. Use nn.functional.upsample instead.")
-    return upsample(input, size, scale_factor, mode='nearest')
+    warnings.warn("nn.functional.upsample_nearest is deprecated. Use nn.functional.interpolate instead.")
+    return interpolate(input, size, scale_factor, mode='nearest')
 
 
 def upsample_bilinear(input, size=None, scale_factor=None):
     r"""Upsamples the input, using bilinear upsampling.
 
     .. warning::
-        This function is deprecated in favor of :func:`torch.nn.functional.upsample`.
+        This function is deprecated in favor of :func:`torch.nn.functional.interpolate`.
         This is equivalent with
-        ``nn.functional.upsample(..., mode='bilinear', align_corners=True)``.
+        ``nn.functional.interpolate(..., mode='bilinear', align_corners=True)``.
 
     Expected inputs are spatial (4 dimensional). Use `upsample_trilinear` fo
     volumetric (5 dimensional) inputs.
@@ -2013,8 +2099,12 @@ def upsample_bilinear(input, size=None, scale_factor=None):
         scale_factor (int or Tuple[int, int]): multiplier for spatial size
     """
     # DeprecationWarning is ignored by default
-    warnings.warn("nn.functional.upsample_bilinear is deprecated. Use nn.functional.upsample instead.")
-    return upsample(input, size, scale_factor, mode='bilinear', align_corners=True)
+    warnings.warn("nn.functional.upsample_bilinear is deprecated. Use nn.functional.interpolate instead.")
+    return interpolate(input, size, scale_factor, mode='bilinear', align_corners=True)
+
+
+GRID_SAMPLE_MODE_ZEROS = 0
+GRID_SAMPLE_MODE_BORDER = 1
 
 
 def grid_sample(input, grid, mode='bilinear', padding_mode='zeros'):
@@ -2058,7 +2148,13 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros'):
     """
     if mode != 'bilinear':
         raise NotImplementedError("nn.functional.grid_sample got unsupported mode: '{}'".format(mode))
-    return vision.grid_sampler(input, grid, padding_mode)
+    if padding_mode == 'zeros':
+        padding_mode = GRID_SAMPLE_MODE_ZEROS
+    elif padding_mode == 'border':
+        padding_mode = GRID_SAMPLE_MODE_BORDER
+    else:
+        raise ValueError("padding_mode needs to be 'zeros' or 'border', but got {}".format(padding_mode))
+    return torch.grid_sampler(input, grid, padding_mode)
 
 
 def affine_grid(theta, size):
@@ -2230,12 +2326,16 @@ def assert_int_or_pair(arg, arg_name, message):
 
 
 def unfold(input, kernel_size, dilation=1, padding=0, stride=1):
-    r"""Creates array of convolution patches from :math:`(N,C,H,W)`-tensor
+    r"""Extracts sliding local blocks from an batched input tensor.
+
+    .. warning::
+        Currently, only 4-D input tensors (batched image-like tensors) are
+        supported.
 
     See :class:`torch.nn.Unfold` for details
     """
 
-    if input is not None and input.dim() == 4:
+    if input.dim() == 4:
         msg = '{} must be int or 2-tuple for 4D input'
         assert_int_or_pair(kernel_size, 'kernel_size', msg)
         assert_int_or_pair(dilation, 'dilation', msg)
@@ -2245,15 +2345,20 @@ def unfold(input, kernel_size, dilation=1, padding=0, stride=1):
         return Im2Col.apply(input, _pair(kernel_size),
                             _pair(dilation), _pair(padding), _pair(stride))
     else:
-        raise NotImplementedError("Input Error: Only 4D input Tensors supported (got {}D)".format(input.dim()))
+        raise NotImplementedError("Input Error: Only 4D input Tensors are supported (got {}D)".format(input.dim()))
 
 
 def fold(input, output_size, kernel_size, dilation=1, padding=0, stride=1):
-    r"""Combines array of convolution patches to :math:`(N,C,H,W)`-tensor
+    r"""Combines an array of sliding local blocks into a large containing
+    tensor.
+
+    .. warning::
+        Currently, only 4-D output tensors (batched image-like tensors) are
+        supported.
 
     See :class:`torch.nn.Fold` for details
     """
-    if input is not None and input.dim() == 3:
+    if input.dim() == 3:
         msg = '{} must be int or 2-tuple for 3D input'
         assert_int_or_pair(output_size, 'output_size', msg)
         assert_int_or_pair(kernel_size, 'kernel_size', msg)
@@ -2264,4 +2369,4 @@ def fold(input, output_size, kernel_size, dilation=1, padding=0, stride=1):
         return Col2Im.apply(input, _pair(output_size), _pair(kernel_size),
                             _pair(dilation), _pair(padding), _pair(stride))
     else:
-        raise NotImplementedError("Input Error: Only 3D input Tensors supported (got {}D)".format(input.dim()))
+        raise NotImplementedError("Input Error: Only 3D input Tensors are supported (got {}D)".format(input.dim()))

@@ -85,15 +85,13 @@ void PerfNetObserver::Stop() {
 
       p.latency = static_cast<const PerfOperatorObserver*>(observerMap_[op])
                       ->getMilliseconds();
-#ifndef CAFFE2_IOS
-      auto cost = static_cast<const PerfOperatorObserver*>(observerMap_[op])
-                      ->getAnalyticalCost();
-      p.flops = cost.flops;
-#endif // CAFFE2_MOBILE
 
       p.engine = op->engine();
       p.type = op->type();
-      p.tensor_shapes = op->InputTensorShapes();
+      p.tensor_shapes =
+          static_cast<const PerfOperatorObserver*>(observerMap_[op])
+              ->getTensorShapes();
+
       if (op->has_debug_def()) {
         for (auto arg : op->debug_def().arg()) {
           p.args.emplace_back(arg);
@@ -152,31 +150,15 @@ void PerfOperatorObserver::Stop() {
   /* Time from the start of the net minus the time spent on all other
      operators is the time spent on this operator */
   milliseconds_ = netObserver_->getTimer().MilliSeconds() - milliseconds_;
+  tensor_shapes_ = subject_->InputTensorShapes();
 }
 
 double PerfOperatorObserver::getMilliseconds() const {
   return milliseconds_;
 }
 
-OpSchema::Cost PerfOperatorObserver::getAnalyticalCost() const {
-  auto* op = subject_;
-  auto* schema = OpSchemaRegistry::Schema(op->type());
-  OpSchema::Cost cost;
-  if (schema && schema->HasCostInferenceFunction()) {
-    vector<TensorShape> shapes = op->InputTensorShapes();
-
-    auto all_good_shapes = std::accumulate(
-        shapes.begin(),
-        shapes.end(),
-        true,
-        [](bool acc, const TensorShape& shape) {
-          return acc && !shape.unknown_shape();
-        });
-    if (all_good_shapes) {
-      cost = schema->InferCost(op->debug_def(), shapes);
-    }
-  }
-  return cost;
+std::vector<TensorShape> PerfOperatorObserver::getTensorShapes() const {
+  return tensor_shapes_;
 }
 
 } // namespace caffe2

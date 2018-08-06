@@ -4,11 +4,6 @@
 
 namespace at { namespace cuda {
 
-struct PinnedMemoryAllocator final : public Allocator {
-  void* allocate(size_t n) const override;
-  void deallocate(void* ptr) const override;
-};
-
-PinnedMemoryAllocator* getPinnedMemoryAllocator();
+at::Allocator* getPinnedMemoryAllocator();
 
 }} // namespace at::cuda

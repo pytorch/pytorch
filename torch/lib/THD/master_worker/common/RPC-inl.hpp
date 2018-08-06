@@ -1,5 +1,5 @@
 #include <cstdint>
-#include "TH/THStorage.h"
+#include "TH/THStorageFunctions.h"
 #include "Traits.hpp"
 
 namespace thd { namespace rpc { namespace detail {

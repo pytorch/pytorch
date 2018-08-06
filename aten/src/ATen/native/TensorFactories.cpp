@@ -7,12 +7,12 @@
 #include "ATen/ATen.h"
 #include "ATen/CPUGenerator.h"
 #include "ATen/CheckGenerator.h"
+#include "ATen/Deprecated.h"
 #include "ATen/Dispatch.h"
-#include "ATen/Error.h"
 #include "ATen/NativeFunctions.h"
 #include "ATen/ScalarType.h"
-#include "ATen/Deprecated.h"
 #include "ATen/TensorOptions.h"
+#include "ATen/core/Error.h"
 #include "TH/THRandom.h"
 
 #include <algorithm>
@@ -37,9 +37,9 @@ void window_function_checks(
       " expects floating point dtypes, got: ",
       options.type().toString());
   AT_CHECK(
-      window_length > 0,
+      window_length >= 0,
       function_name,
-      " requires positive window_length, got window_length=%lld",
+      " requires non-negative window_length, got window_length=",
       window_length);
 }
 } // namespace
@@ -141,8 +141,9 @@ Tensor& eye_out_cpu(Tensor& result, int64_t n) {
 }
 
 Tensor& eye_out_cpu(Tensor& result, int64_t n, int64_t m) {
-  AT_CHECK(n > 0, "n must be greater than 0, got", n);
-  if(m <= 0) {
+  AT_CHECK(n >= 0, "n must be greater or equal to 0, got ", n);
+
+  if(m < 0) {
     m = n;
   }
 
@@ -504,6 +505,9 @@ Tensor bartlett_window(
     bool periodic,
     const TensorOptions& options) {
   window_function_checks("bartlett_window", options, window_length);
+  if (window_length == 0) {
+    return native::empty({0}, options);
+  }
   if (window_length == 1) {
     return native::ones({1}, options);
   }
@@ -569,6 +573,9 @@ Tensor hamming_window(
     double beta,
     const TensorOptions& options) {
   window_function_checks("hamming_window", options, window_length);
+  if (window_length == 0) {
+    return native::empty({0}, options);
+  }
   if (window_length == 1) {
     return native::ones({1}, options);
   }

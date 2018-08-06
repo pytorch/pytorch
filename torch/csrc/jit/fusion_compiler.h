@@ -1,6 +1,9 @@
 #pragma once
+
 #include <torch/csrc/jit/ir.h>
 #include "torch/csrc/utils/disallow_copy.h"
+#include <torch/csrc/jit/assertions.h>
+
 #include "ATen/ATen.h"
 #include <string>
 #include <algorithm>
@@ -25,7 +28,7 @@ struct TensorDesc {
   : TensorDesc(type, TensorDesc::findContiguous(sizes, strides)) {}
   TensorDesc(const at::Tensor& t)
     : TensorDesc(t.type().scalarType(), t.sizes(), t.strides()) {}
-  TensorDesc(TensorType *type)
+  TensorDesc(TensorTypePtr type)
     : TensorDesc(type->scalarType(), type->sizes(), type->strides()) {}
 
   // number of dimensions after contiguity compression
@@ -82,7 +85,7 @@ struct CompiledFusionFunction {
   TH_DISALLOW_COPY_AND_ASSIGN(CompiledFusionFunction);
 
   CompiledFusionFunction(const std::string & name, AnnotatedGraph & agraph);
-  virtual ~CompiledFusionFunction() {}
+  virtual ~CompiledFusionFunction() = default;
 
   // expects outputs to be pre-allocated
   void launch_with_tensors(at::ArrayRef<at::Tensor> inputs, at::ArrayRef<at::Tensor> outputs);
@@ -105,6 +108,9 @@ protected:
   // launch_with_tensors handles packing at::Tensors into this arguments array.
   // CPU code uses the same convension so that launch_with_tensors can be shared.
   virtual void launch_raw(uint32_t numel, void ** arguments) = 0;
+
+  virtual uint64_t get_rand_offset(uint32_t numel) = 0;
+  bool has_random;
   std::string name;
   // We keep these around for debugging
   std::string compilation_unit;

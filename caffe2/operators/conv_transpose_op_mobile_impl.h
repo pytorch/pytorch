@@ -15,6 +15,7 @@
 #include "caffe2/operators/conv_op_shared.h"
 #include "caffe2/operators/conv_transpose_op_mobile.h"
 #include "caffe2/utils/cpu_neon.h"
+#include "caffe2/utils/eigen_utils.h"
 #include "caffe2/utils/fixed_divisor.h"
 #include "caffe2/utils/math.h"
 
@@ -528,9 +529,9 @@ void sumInto(float* acc, std::vector<float*>& toSum, size_t size) {
 
 template <typename T, class Context>
 bool ConvTransposeMobileOp<T, Context>::RunOnDeviceWithOrderNCHW() {
-  const Tensor<Context>& X = Input(INPUT);
+  const Tensor& X = Input(INPUT);
   auto& filter = Input(FILTER);
-  Tensor<Context>* Y = Output(0);
+  Tensor* Y = Output(0);
   const int N = X.dim32(0), M = X.dim32(1), H = X.dim32(2), W = X.dim32(3);
   CAFFE_ENFORCE(filter.ndim() == 4, "filter must be 4D tensor");
   CAFFE_ENFORCE(
@@ -605,7 +606,7 @@ bool ConvTransposeMobileOp<T, Context>::RunOnDeviceWithOrderNCHW() {
         &context_);
   };
 
-  auto f = [&](Tensor<Context>* threadBuffer) {
+  auto f = [&](Tensor* threadBuffer) {
     threadBuffer->Resize(
         numThreads * threadYBufferSizeAligned +
         numThreads * threadColBufferSize);

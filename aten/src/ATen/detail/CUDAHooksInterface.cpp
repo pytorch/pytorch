@@ -1,6 +1,6 @@
 #include <ATen/detail/CUDAHooksInterface.h>
 
-#include <ATen/Error.h>
+#include <ATen/core/Error.h>
 
 #include <cstddef>
 #include <memory>

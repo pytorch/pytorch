@@ -30,26 +30,30 @@ if(NOT DEFINED BLAS_SET_BY_USER)
   set(BLAS_SET_BY_USER ${BLAS_SET_BY_USER} CACHE STRING "Marks whether BLAS was manually set by user or auto-detected")
 endif()
 
-# These lines are an attempt to make find_package(cuda) pick up
-# libcuda.dylib, and not cuda.framework.  It doesn't work all
-# the time, but it seems to help for some users.
-# TODO: replace this with a more robust fix
+# Apple specific
 if(APPLE)
+  # These lines are an attempt to make find_package(cuda) pick up
+  # libcuda.dylib, and not cuda.framework.  It doesn't work all
+  # the time, but it seems to help for some users.
+  # TODO: replace this with a more robust fix
   set(CMAKE_FIND_FRAMEWORK LAST)
   set(CMAKE_FIND_APPBUNDLE LAST)
-endif()
 
-# Get clang version on macOS
-if(APPLE)
+  # Get clang version on macOS
   EXECUTE_PROCESS( COMMAND ${CMAKE_CXX_COMPILER} --version OUTPUT_VARIABLE clang_full_version_string )
   string(REGEX REPLACE "Apple LLVM version ([0-9]+\\.[0-9]+).*" "\\1" CLANG_VERSION_STRING ${clang_full_version_string})
   MESSAGE( STATUS "CLANG_VERSION_STRING:         " ${CLANG_VERSION_STRING} )
+
+
+  # RPATH stuff
+  set(CMAKE_MACOSX_RPATH ON)
 endif()
 
 # ---[ Options.
 # Note to developers: if you add an option below, make sure you also add it to
 # cmake/Summary.cmake so that the summary prints out the option values.
 include(CMakeDependentOption)
+option(BUILD_TORCH "Build Torch" OFF)
 option(BUILD_CAFFE2 "Build Caffe2" ON)
 option(BUILD_ATEN "Build ATen" OFF)
 option(BUILD_BINARY "Build C++ binaries" ON)
@@ -138,16 +142,15 @@ cmake_dependent_option(
 option(USE_DISTRIBUTED "Use THD (distributed)" OFF)
 option(USE_DISTRIBUTED_MW "Use THD (distributed) master worker" OFF)
 
+# Used when building Caffe2 through setup.py
+option(BUILDING_WITH_TORCH_LIBS "Tell cmake if Caffe2 is being built alongside torch libs" OFF)
+
 if (USE_ATEN)
     set(BUILD_ATEN ${USE_ATEN})
 endif()
 
 # ---[ CMake scripts + modules
 list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake/Modules)
-
-if (MSVC AND ${BUILD_SHARED_LIBS})
-  set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
-endif()
 
 # ---[ CMake build directories
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
@@ -201,25 +204,34 @@ if(NOT MSVC)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wextra")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-missing-field-initializers")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-type-limits")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-array-bounds")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unknown-pragmas")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-sign-compare")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-parameter")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-variable")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-function")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-result")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-strict-overflow")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-strict-aliasing")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-error=deprecated-declarations")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-stringop-overflow")
   # These flags are not available in GCC-4.8.5. Set only when using clang.
   # Compared against https://gcc.gnu.org/onlinedocs/gcc-4.8.5/gcc/Option-Summary.html
-  if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
+  if ("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-invalid-partial-specialization")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-typedef-redefinition")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unknown-warning-option")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-private-field")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-inconsistent-missing-override")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-aligned-allocation-unavailable")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-c++14-extensions")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-constexpr-not-const")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-missing-braces")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Qunused-arguments")
   endif()
   if ((APPLE AND (NOT ("${CLANG_VERSION_STRING}" VERSION_LESS "9.0")))
-    OR (CMAKE_COMPILER_IS_GNUCXX AND (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 7.0)))
+    OR (CMAKE_COMPILER_IS_GNUCXX 
+    AND (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 7.0 AND NOT APPLE)))
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -faligned-new")
   endif()
   if ($ENV{WERROR})
@@ -274,13 +286,12 @@ include_directories(BEFORE ${PROJECT_SOURCE_DIR})
 # in PROJECT_SOURCE_DIR.
 include_directories(BEFORE ${PROJECT_BINARY_DIR})
 
+include_directories(BEFORE ${PROJECT_SOURCE_DIR}/aten/src/)
+
 # ---[ Old caffe protobuf
 if(BUILD_CAFFE2)
   add_subdirectory(caffe/proto)
 endif()
-
-# ---[ Shared build
-add_subdirectory(c10)
 
 # ---[ Main build
 add_subdirectory(caffe2)

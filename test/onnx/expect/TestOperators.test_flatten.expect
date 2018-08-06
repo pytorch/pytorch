@@ -99,11 +99,6 @@ graph {
     input: "7"
     output: "9"
     op_type: "Div"
-    attribute {
-      name: "broadcast"
-      i: 1
-      type: INT
-    }
   }
   node {
     output: "10"
@@ -122,11 +117,6 @@ graph {
     input: "10"
     output: "11"
     op_type: "Mul"
-    attribute {
-      name: "broadcast"
-      i: 1
-      type: INT
-    }
   }
   node {
     input: "11"
@@ -216,5 +206,5 @@ graph {
   }
 }
 opset_import {
-  version: 6
+  version: 7
 }

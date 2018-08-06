@@ -1,6 +1,6 @@
 #include "ATen/ATen.h"
-#include "ATen/Error.h"
 #include "ATen/NativeFunctions.h"
+#include "ATen/core/Error.h"
 
 #include <THC/THCGeneral.h>
 #include <THC/THCThrustAllocator.cuh>
@@ -20,8 +20,9 @@ Tensor& eye_out_cuda(Tensor& result, int64_t n) {
 }
 
 Tensor& eye_out_cuda(Tensor& result, int64_t n, int64_t m) {
-  AT_CHECK(n > 0, "n must be greater than zero, got", n);
-  if(m <= 0) {
+  AT_CHECK(n >= 0, "n must be greater or equal to 0, got ", n);
+
+  if(m < 0) {
     m = n;
   }
 

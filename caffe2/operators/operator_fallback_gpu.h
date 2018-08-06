@@ -62,8 +62,8 @@ class GPUFallbackOp final : public Operator<CUDAContext> {
   bool RunOnDevice() override {
     bool need_sync = false;
     for (int i = 0; i < InputSize(); ++i) {
-      if (OperatorBase::InputIsType<TensorCUDA>(i)) {
-        local_input_blobs_[i]->template GetMutable<TensorCPU>()->CopyFrom(
+      if (OperatorBase::InputIsType<Tensor>(i, CUDA)) {
+        local_input_blobs_[i]->GetMutableTensor(CPU)->CopyFrom(
             Input(i), &context_);
         need_sync = true;
       } else {
@@ -93,11 +93,10 @@ class GPUFallbackOp final : public Operator<CUDAContext> {
         continue;
       }
       CAFFE_ENFORCE(
-          local_output_blobs_[i]->template IsType<TensorCPU>(),
+          local_output_blobs_[i]->template IsType<Tensor>(CPU),
           "GPU fallback op currently does not support non-TensorCPU "
           "output type who needs copying.");
-      Output(i)->CopyFrom(
-          local_output_blobs_[i]->template Get<TensorCPU>(), &context_);
+      Output(i)->CopyFrom(local_output_blobs_[i]->template Get<TensorCPU>());
     }
     return true;
   }

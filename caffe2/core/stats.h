@@ -258,6 +258,25 @@ class DetailedExportedStat : public ExportedStat {
   }
 };
 
+class StaticStat : public Stat {
+ private:
+  StatValue* value_;
+
+ public:
+  StaticStat(const std::string& groupName, const std::string& name)
+      : Stat(groupName, name),
+        value_(StatRegistry::get().add(groupName + "/" + name)) {}
+
+  int64_t increment(int64_t value = 1) {
+    return value_->reset(value);
+  }
+
+  template <typename T, typename Unused1, typename... Unused>
+  int64_t increment(T value, Unused1, Unused...) {
+    return increment(value);
+  }
+};
+
 namespace detail {
 
 template <class T>
@@ -285,7 +304,7 @@ template <class T>
 _ScopeGuard<T> ScopeGuard(T f) {
   return _ScopeGuard<T>(f);
 }
-}
+} // namespace detail
 
 #define CAFFE_STAT_CTOR(ClassName)                 \
   ClassName(std::string name) : groupName(name) {} \
@@ -316,6 +335,11 @@ _ScopeGuard<T> ScopeGuard(T f) {
     groupName, #name     \
   }
 
+#define CAFFE_STATIC_STAT(name) \
+  StaticStat name {             \
+    groupName, #name            \
+  }
+
 #define CAFFE_EVENT(stats, field, ...)                              \
   {                                                                 \
     auto __caffe_event_value_ = stats.field.increment(__VA_ARGS__); \
@@ -330,4 +354,4 @@ _ScopeGuard<T> ScopeGuard(T f) {
   if (auto g = detail::ScopeGuard([&](int64_t nanos) {   \
         CAFFE_EVENT(stats, field, nanos, ##__VA_ARGS__); \
       }))
-}
+} // namespace caffe2

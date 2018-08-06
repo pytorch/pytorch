@@ -88,10 +88,6 @@ TEST_CASE( "scalar test", "[]" ) {
     auto t2 = zeros({4,4}, CUDAFloat);
     cout << &t2 << "\n";
     cout << "AFTER GET TYPE " << &CUDAFloat << "\n";
-    auto s = CUDAFloat.storage(4);
-    REQUIRE( s->get(3).toFloat() == 0.0 );
-    s->fill(7);
-    REQUIRE( s->get(3).toFloat() == 7.0 );
   }
   auto t = ones({4,4});
 

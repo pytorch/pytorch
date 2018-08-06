@@ -24,7 +24,7 @@ class TestDropout(hu.HypothesisTestCase):
         # TODO(lukeyeager): enable this path when the GPU path is fixed
         if in_place:
             # Skip if trying in-place on GPU
-            assume(not (gc.device_type == caffe2_pb2.CUDA and engine == ''))
+            assume(not (gc.device_type in {caffe2_pb2.CUDA, caffe2_pb2.HIP} and engine == ''))
             # If in-place on CPU, don't compare with GPU
             dc = dc[:1]
 
@@ -52,7 +52,7 @@ class TestDropout(hu.HypothesisTestCase):
         # TODO(lukeyeager): enable this path when the op is fixed
         if in_place:
             # Skip if trying in-place on GPU
-            assume(gc.device_type != caffe2_pb2.CUDA)
+            assume(gc.device_type not in {caffe2_pb2.CUDA, caffe2_pb2.HIP})
             # If in-place on CPU, don't compare with GPU
             dc = dc[:1]
         is_test = not output_mask

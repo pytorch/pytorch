@@ -81,7 +81,7 @@ class ClassSimplexCriterion(MSECriterion):
             input,
             self._target,
             self.output_tensor,
-            _Reduction.legacy_get_enum(self.sizeAverage, True),
+            _Reduction.legacy_get_enum(self.sizeAverage, True, emit_warning=False),
         )
         self.output = self.output_tensor[0].item()
         return self.output
@@ -95,7 +95,7 @@ class ClassSimplexCriterion(MSECriterion):
             self._target,
             implicit_gradOutput,
             self.gradInput,
-            _Reduction.legacy_get_enum(self.sizeAverage, True),
+            _Reduction.legacy_get_enum(self.sizeAverage, True, emit_warning=False),
         )
         return self.gradInput
 

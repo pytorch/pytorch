@@ -37,7 +37,7 @@ class AsyncPollingNet : public AsyncNetBase {
 
   // Polling
   std::vector<EventStatus> status_;
-  void reset();
+  void reset() override;
   std::atomic<bool> has_chain_failed_;
 
   DISABLE_COPY_AND_ASSIGN(AsyncPollingNet);

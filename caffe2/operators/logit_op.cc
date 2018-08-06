@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "caffe2/operators/elementwise_ops.h"
+#include "caffe2/utils/eigen_utils.h"
 
 namespace caffe2 {
 

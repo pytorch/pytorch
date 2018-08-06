@@ -26,12 +26,12 @@ class TensorRTTransformer {
       size_t max_workspace_size,
       int verbosity,
       bool debug_builder,
-      bool build_serializable_op = true)
-      : max_batch_size_(max_batch_size),
+      bool build_serializable_op = false)
+      : build_serializable_op_(build_serializable_op),
+        max_batch_size_(max_batch_size),
         max_workspace_size_(max_workspace_size),
         verbosity_(verbosity),
-        debug_builder_(debug_builder),
-        build_serializable_op_(build_serializable_op) {}
+        debug_builder_(debug_builder) {}
 
   OperatorDef BuildTrtOp(
       const std::string& onnx_model_str,
@@ -79,7 +79,8 @@ class TensorRTTransformer {
   // Input mapping
   std::unordered_map<std::string, std::string> input_mapping_;
 
-  // Generate serializable trt op or defer the onnx->trt process to ctor of the Trt op
+  // Generate serializable trt op or defer the onnx->trt process to ctor of the
+  // Trt op
   bool build_serializable_op_{true};
 
   // TensorRT params

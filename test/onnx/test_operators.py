@@ -133,9 +133,7 @@ class TestOperators(TestCase):
     def test_add_left_broadcast(self):
         x = Variable(torch.DoubleTensor(3), requires_grad=True)
         y = Variable(torch.DoubleTensor(2, 3), requires_grad=True)
-        self.assertONNXRaisesRegex(RuntimeError,
-                                   r"ONNX export failed: Could not export a broadcasted operation.*",
-                                   lambda x, y: x + y, (x, y), verbose=True)
+        self.assertONNX(lambda x, y: x + y, (x, y))
 
     def test_add_size1_broadcast(self):
         x = Variable(torch.DoubleTensor(2, 3), requires_grad=True)
@@ -151,6 +149,10 @@ class TestOperators(TestCase):
         x = Variable(torch.DoubleTensor(2, 3), requires_grad=True)
         y = Variable(torch.DoubleTensor(1, 3), requires_grad=True)
         self.assertONNX(lambda x, y: x + y, (x, y))
+
+    def test_rsub(self):
+        x = Variable(torch.DoubleTensor(2, 3), requires_grad=True)
+        self.assertONNX(lambda x: 1 - x, (x,))
 
     def test_transpose(self):
         x = Variable(torch.Tensor([[0, 1], [2, 3]]), requires_grad=True)
@@ -257,6 +259,18 @@ class TestOperators(TestCase):
         x = Variable(torch.randn(3, 4), requires_grad=True)
         self.assertONNX(lambda x: torch.clamp(x, min=-0.5, max=0.5), x)
 
+    def test_clip_min(self):
+        x = Variable(torch.randn(1, 2, 3, 4), requires_grad=True)
+        self.assertONNX(lambda x: x.clamp(min=-0.1), x)
+
+    def test_clip_max(self):
+        x = Variable(torch.randn(1, 2, 3, 4), requires_grad=True)
+        self.assertONNX(lambda x: x.clamp(max=0.1), x)
+
+    def test_hardtanh(self):
+        x = Variable(torch.randn(3, 4), requires_grad=True)
+        self.assertONNX(lambda x: torch.nn.Hardtanh(-0.5, 0.5)(x), x)
+
     def test_max(self):
         x = Variable(torch.randn(3, 4), requires_grad=True)
         y = Variable(torch.randn(3, 4), requires_grad=True)
@@ -343,12 +357,16 @@ class TestOperators(TestCase):
 
     def test_logsoftmax(self):
         x = Variable(torch.randn(1, 2, 3, 4), requires_grad=True)
-        self.assertONNX(nn.LogSoftmax(dim=2), x)
+        self.assertONNX(nn.LogSoftmax(dim=3), x)
 
     def test_pow(self):
         x = Variable(torch.randn(1, 2, 3, 4), requires_grad=True)
         y = Variable(torch.randn(1, 2, 3, 4), requires_grad=True)
         self.assertONNX(lambda x, y: x.pow(y), (x, y))
+
+    def test_elu(self):
+        x = Variable(torch.randn(1, 2, 3, 4), requires_grad=True)
+        self.assertONNX(nn.ELU(), x)
 
     def test_selu(self):
         x = Variable(torch.randn(1, 2, 3, 4), requires_grad=True)
@@ -361,6 +379,10 @@ class TestOperators(TestCase):
     def test_repeat_dim_overflow(self):
         x = Variable(torch.randn(1, 2), requires_grad=True)
         self.assertONNX(lambda x: x.repeat(1, 2, 3, 4), x)
+
+    def test_norm(self):
+        x = Variable(torch.randn(1, 2, 3, 4), requires_grad=True)
+        self.assertONNX(lambda x: x.norm(dim=2), (x))
 
     def test_symbolic_override(self):
         """Lifted from fast-neural-style: custom implementation of instance norm
@@ -416,7 +438,7 @@ class TestOperators(TestCase):
             return g.op('Sum', x, y[0], y[1]), (
                 g.op('Neg', x), g.op('Neg', y[0]))
 
-        @torch.onnx.symbolic_override_first_arg_based(symb)
+        @torch.onnx.symbolic_override(symb)
         def foo(x, y):
             return x + y[0] + y[1], (-x, -y[0])
 

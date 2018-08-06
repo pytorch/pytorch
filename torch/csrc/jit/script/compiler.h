@@ -17,6 +17,17 @@ struct CallsiteDescriptor {
   bool allow_varargs;
 };
 
+struct TypedDef {
+  TypedDef(Def def, at::optional<FunctionSchema> schema)
+    : def(std::move(def)), schema(std::move(schema)) {}
+
+  TypedDef(Def def)
+    : def(std::move(def)), schema(at::nullopt) {}
+
+  Def def;
+  at::optional<FunctionSchema> schema;
+};
+
 static inline std::vector<Value*> toValues(at::ArrayRef<NamedValue> nvs) {
   return fmap(nvs, [](const NamedValue& v) {
     return v.value;
@@ -57,7 +68,7 @@ struct SugaredValue : public std::enable_shared_from_this<SugaredValue> {
     SourceRange loc,
     Method & m,
     // note: names for args will be 'argument 0', 'argument 1', etc..
-    at::ArrayRef<NamedValue> inputs,
+    at::ArrayRef<NamedValue> inputs_,
     at::ArrayRef<NamedValue> attributes,
     size_t n_binders) {
 // n_binders is always set to the number of variables an expression is
@@ -78,12 +89,12 @@ struct SugaredValue : public std::enable_shared_from_this<SugaredValue> {
     throw ErrorReport(loc) << "cannot call a " << kind();
   }
 
-  virtual ~SugaredValue() {}
+  virtual ~SugaredValue() = default;
 };
 
 // most things in the environment are just simple value types
 // and not special python syntax sugar types
-struct SimpleValue : public SugaredValue {
+struct TORCH_API SimpleValue : public SugaredValue {
   SimpleValue(Value * value)
   : value(value) {}
   virtual std::string kind() const override {
@@ -101,7 +112,7 @@ private:
   Value* value;
 };
 
-struct BuiltinFunction : public SugaredValue {
+struct TORCH_API BuiltinFunction : public SugaredValue {
   BuiltinFunction(const std::string& name, at::optional<NamedValue> value)
     : name(name), value(std::move(value)) {}
   std::string name;
@@ -120,29 +131,30 @@ struct BuiltinFunction : public SugaredValue {
     size_t n_binders) override;
 };
 
-using Resolver = std::function<std::shared_ptr<SugaredValue>(const std::string& name)>;
-void defineMethodsInModule(
+using Resolver = std::function<std::shared_ptr<
+    SugaredValue>(const std::string& name, Method& m, const SourceRange& loc)>;
+TORCH_API void defineMethodsInModule(
   Module & m,
-  const std::vector<Def>& definitions,
+  const std::vector<TypedDef>& definitions,
   const std::vector<Resolver>& resolvers, /* determines how we handle free variables in each definition*/
   std::shared_ptr<SugaredValue> self /* if non-null, the first argument to each def, is bound to this value */
 );
 
 // same as above but parse the definitions from source
-void defineMethodsInModule(Module & m, const std::string& source, const Resolver& resolver, std::shared_ptr<SugaredValue> self);
-std::shared_ptr<Graph> compileFunction(Def def, const Resolver& resolver);
+TORCH_API void defineMethodsInModule(Module & m, const std::string& source, const Resolver& resolver, std::shared_ptr<SugaredValue> self);
+TORCH_API std::shared_ptr<Graph> compileFunction(TypedDef def, const Resolver& resolver);
 
 // pack outputs of a function following python rules. If there is a single value return
 // a SimpleValue, otherwise pack all the values into a Tuple.
-std::shared_ptr<SugaredValue> packOutputs(Graph& g, at::ArrayRef<Value*> values);
-std::vector<Value*> inlineCallTo(Graph& g, Graph& callee, ArrayRef<Value*> inputs);
-void ensureSizeMatches(SourceRange loc, size_t expected, size_t actual, const std::string& what);
-void ensureTensors(const SourceRange& range, at::ArrayRef<Value*> values);
+TORCH_API std::shared_ptr<SugaredValue> packOutputs(Graph& g, at::ArrayRef<Value*> values);
+TORCH_API std::vector<Value*> inlineCallTo(Graph& g, Graph& callee, ArrayRef<Value*> inputs);
+TORCH_API void ensureSizeMatches(SourceRange loc, size_t expected, size_t actual, const std::string& what);
+TORCH_API void ensureTensors(const SourceRange& range, at::ArrayRef<Value*> values);
 
 // try to match a list if inputs and keyword 'attributes' to this schema,
 // if it works return the flat list of positional inputs to the call
 // if it returns nullopt, then failure_messages contains a good error report
-at::optional<std::vector<Value*>> tryMatchSchema(
+TORCH_API at::optional<std::vector<Value*>> tryMatchSchema(
   const FunctionSchema& schema,
   const SourceRange& loc,
   Graph& graph,

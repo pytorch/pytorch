@@ -1,5 +1,7 @@
 #include "caffe2/operators/softsign_op.h"
 
+#include "caffe2/utils/eigen_utils.h"
+
 #include <algorithm>
 #include <functional>
 

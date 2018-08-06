@@ -13,7 +13,7 @@
 #include <torch/torch.h>
 
 #include <ATen/cudnn/Descriptors.h> // for TensorDescriptor
-#include <ATen/cudnn/Exceptions.h> // for CUDNN_CHECK
+#include <ATen/cuda/Exceptions.h> // for CUDNN_CHECK
 #include <ATen/cudnn/Handles.h> // for getCudnnHandle
 
 // Name of function in python module and name used for error messages by

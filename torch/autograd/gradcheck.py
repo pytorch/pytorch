@@ -170,15 +170,22 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
     tupled_inputs = _as_tuple(inputs)
 
     # Make sure that gradients are saved for all inputs
+    any_input_requiring_grad = False
     for inp in tupled_inputs:
         if isinstance(inp, torch.Tensor):
-            if inp.requires_grad and inp.dtype != torch.float64:
-                warnings.warn(
-                    'At least one of the inputs that requires gradient \
-                     is not of double precision floating point. '
-                    'This check will likely fail if all the inputs are not of \
-                     double precision floating point. ')
+            if inp.requires_grad:
+                if inp.dtype != torch.float64:
+                    warnings.warn(
+                        'At least one of the inputs that requires gradient '
+                        'is not of double precision floating point. '
+                        'This check will likely fail if all the inputs are '
+                        'not of double precision floating point. ')
+                any_input_requiring_grad = True
             inp.retain_grad()
+    if not any_input_requiring_grad:
+        raise ValueError(
+            'gradcheck expects at least one input tensor to require gradient, '
+            'but none of the them have requires_grad=True.')
 
     output = _differentiable_outputs(func(*inputs))
 

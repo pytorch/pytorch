@@ -10,11 +10,12 @@ from collections import OrderedDict
 from itertools import product
 from operator import mul, itemgetter
 from functools import reduce, wraps
+from torch._six import inf, nan
 from torch.autograd.gradcheck import gradgradcheck, gradcheck
 from torch.autograd.function import once_differentiable
 from torch.autograd.profiler import profile
 from common import TEST_MKL, TestCase, run_tests, skipIfNoLapack, \
-    suppress_warnings, skipIfNoZeroSize
+    suppress_warnings, TEST_WITH_ROCM
 from torch.autograd import Variable, Function, detect_anomaly
 from torch.autograd.function import InplaceFunction
 from torch.testing import make_non_contiguous, randn_like
@@ -329,6 +330,17 @@ class TestAutograd(TestCase):
         x = torch.ones(1, requires_grad=True)
         y = x ** 2
         torch.autograd.grad(y, x)  # this should succeed now
+
+    def test_grad_fn_badcalls(self):
+        error_regex = 'expected .* arguments, got .* instead'
+        x = torch.ones(1, requires_grad=True)
+        y = x ** 2
+        with self.assertRaisesRegex(TypeError, error_regex):
+            y.grad_fn(x.detach(), x.detach())  # too many
+        with self.assertRaisesRegex(TypeError, error_regex):
+            y.grad_fn()  # too few
+
+        y.grad_fn(x.detach())  # this should succeed
 
     def test_grad_unreachable(self):
         x = torch.ones(1, requires_grad=True)
@@ -1036,8 +1048,9 @@ class TestAutograd(TestCase):
 
         b = a + 5
         next_functions = b.grad_fn.next_functions
-        self.assertEqual(len(next_functions), 1)
+        self.assertEqual(len(next_functions), 2)
         self.assertIs(next_functions[0][0], a.grad_fn)
+        self.assertIs(next_functions[1][0], None)
 
     def test_inplace(self):
         x = torch.ones(5, 5, requires_grad=True)
@@ -1284,6 +1297,13 @@ class TestAutograd(TestCase):
         self.assertEqual(y.grad.data, grad[1])
         self.assertEqual(z.grad.data, grad[2])
 
+    def test_unbind(self):
+        stacked = torch.randn(3, 10, 10, requires_grad=True)
+        x, y, z = stacked.unbind()
+        grad = torch.randn(3, 10, 10)
+        torch.autograd.backward([x, y, z], grad.unbind())
+        self.assertEqual(stacked.grad.data, grad)
+
     def test_put(self):
         root = torch.randn(4, 5, requires_grad=True)
         values = torch.randn(6, requires_grad=True)
@@ -1506,12 +1526,12 @@ class TestAutograd(TestCase):
         pyscalar = -12345.1
         f[0] = pyscalar
         self.assertEqual(float(f), pyscalar)
-        f[0] = float('nan')
+        f[0] = nan
         self.assertTrue(math.isnan(float(f)))
-        f[0] = float('inf')
-        self.assertEqual(float(f), float('inf'), allow_inf=True)
-        f[0] = float('-inf')
-        self.assertEqual(float(f), float('-inf'), allow_inf=True)
+        f[0] = inf
+        self.assertEqual(float(f), inf, allow_inf=True)
+        f[0] = -inf
+        self.assertEqual(float(f), -inf, allow_inf=True)
 
         # integral -> floating point
         # check we can convert something that loses precision
@@ -1521,11 +1541,11 @@ class TestAutograd(TestCase):
         self.assertEqual(float(l), float(pyscalar))
 
         # floating point -> integral
-        f[0] = float('nan')
+        f[0] = nan
         self.assertRaises(ValueError, lambda: integral_conv(f[0]))
-        f[0] = float('inf')
+        f[0] = inf
         self.assertRaises(OverflowError, lambda: integral_conv(f[0]))
-        f[0] = float('-inf')
+        f[0] = -inf
         self.assertRaises(OverflowError, lambda: integral_conv(f[0]))
         f[0] = sys.float_info.max
         self.assertEqual(integral_conv(f), sys.float_info.max)
@@ -1540,9 +1560,9 @@ class TestAutograd(TestCase):
         test_nonzero(l, -2, True)
         test_nonzero(f, 0.0, False)
         test_nonzero(f, sys.float_info.min, True)
-        test_nonzero(f, float('nan'), bool(float('nan')))
-        test_nonzero(f, float('inf'), bool(float('inf')))
-        test_nonzero(f, float('-inf'), bool(float('-inf')))
+        test_nonzero(f, nan, bool(nan))
+        test_nonzero(f, inf, bool(inf))
+        test_nonzero(f, -inf, bool(-inf))
 
     def test_pyscalar_conversions(self):
         self._test_pyscalar_conversions(lambda x: x, lambda x: int(x))
@@ -1554,6 +1574,7 @@ class TestAutograd(TestCase):
                 self._test_pyscalar_conversions(lambda x: x.cuda(), lambda x: long(x))
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
+    @unittest.skipIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")
     def test_pin_memory(self):
         x = torch.randn(2, 2, requires_grad=True)
         self.assertEqual(x, x.pin_memory())
@@ -1830,6 +1851,16 @@ class TestAutograd(TestCase):
         out.sum().backward()
         self.assertEqual(x.grad.data, y_data)
 
+    def test_broadcast_tensors(self):
+        f_args_variable = (torch.randn(3, requires_grad=True),
+                           torch.randn(1, 2, 1, requires_grad=True),
+                           torch.randn(1, 1, requires_grad=True),
+                           torch.randn(5, 1, 1, requires_grad=True))
+        f_args_tensor = deepcopy(unpack_variables(f_args_variable))
+        run_functional_checks(self, "test_broadcast_tensors", "broadcast",
+                              lambda a, b, c, d: torch.broadcast_tensors(a, b, c, d),
+                              True, f_args_variable, f_args_tensor)
+
     def test_cat(self):
         f_args_variable = (torch.randn(1, S, S, requires_grad=True),
                            torch.randn(2, S, S, requires_grad=True),
@@ -1871,7 +1902,6 @@ class TestAutograd(TestCase):
                               False, f_args_variable, f_args_tensor)
         self.assertTrue(gradcheck(lambda a, b: torch.cat((a, b)), f_args_variable, eps=1e-6, atol=PRECISION))
 
-    @skipIfNoZeroSize
     def test_cat_empty(self):
         f_args_variable = (torch.randn(0, S, requires_grad=True),
                            torch.randn(S, S, requires_grad=True))
@@ -1880,7 +1910,6 @@ class TestAutograd(TestCase):
                               lambda a, b: torch.cat((a, b)),
                               True, f_args_variable, f_args_tensor)
 
-    @skipIfNoLapack
     def test_potrf(self):
         root = Variable(torch.tril(torch.rand(S, S)), requires_grad=True)
 
@@ -2040,6 +2069,29 @@ class TestAutograd(TestCase):
         run_test((10, 10), torch.zeros(10, 10))
         run_test((10,), 0)
 
+    def test_pinverse(self):
+        # Why is pinverse tested this way, and not ordinarily as other linear algebra methods?
+        # 1. Pseudo-inverses are not generally continuous, which means that they are not differentiable
+        # 2. Derivatives for pseudo-inverses exist typically for constant rank (Golub et al, 1973)
+        # 3. This method creates two orthogonal matrices, and a constructs a test case with large
+        #    singular values (given by x to the function).
+        # 4. This will ensure that small perturbations don't affect the rank of matrix, in which case
+        #    a derivative exists.
+        # 5. This test exists since pinverse is implemented using SVD, and is hence a backpropable method
+        m, n = 5, 10
+        U = torch.randn(n, m).qr()[0].t()  # Orthogonal with dimensions m x n
+        V = torch.randn(n, m).qr()[0].t()  # Orthogonal with dimensions m x n
+
+        def func(x):
+            S = torch.cat([x, torch.zeros(n - m)], 0)
+            M = U.mm(torch.diag(S)).mm(V.t())
+            return M.pinverse()
+
+        gradcheck(func, [torch.rand(m).add_(1).requires_grad_()])
+        gradcheck(func, [torch.rand(m).add_(10).requires_grad_()])
+        gradgradcheck(func, [torch.rand(m).add_(1).requires_grad_()])
+        gradgradcheck(func, [torch.rand(m).add_(10).requires_grad_()])
+
     def test_profiler(self):
         x = torch.randn(10, 10)
 
@@ -2064,13 +2116,22 @@ class TestAutograd(TestCase):
 
     def test_as_strided(self):
 
-        def test(x, repro_fn, *args):
-            def closure(x):
-                if repro_fn is not None:
-                    x = repro_fn(x)
-                return x.as_strided(*args)
-
+        def test(x, prepro_fn, size, strides, offset=None):
             x = x.to(torch.double).detach().requires_grad_()
+
+            # Check that forward will **not** resize storage because it may
+            # cause NaN in output and fail numerical Jacobian check consequently
+            with torch.no_grad():
+                y = prepro_fn(x) if prepro_fn is not None else x
+                max_offset = sum((si - 1) * st for si, st in zip(size, strides))
+                max_offset += offset if offset is not None else y.storage_offset()
+                assert max_offset < len(y.storage()), "test case resizes storage"
+
+            def closure(x):
+                if prepro_fn is not None:
+                    x = prepro_fn(x)
+                return x.as_strided(size, strides, offset)
+
             gradcheck(closure, [x])
             gradgradcheck(closure, [x])
 
@@ -2078,7 +2139,7 @@ class TestAutograd(TestCase):
         test(torch.arange(0, 25), lambda x: x.view(5, 5), [3, 3], [6, 2], 2)
 
         # test crazy stride at dim with size 1 case
-        test(torch.randn(10), None, [1, 2, 1, 5], [0, 5, 100, 1], 2)
+        test(torch.randn(12), None, [1, 2, 1, 5], [0, 5, 100, 1], 2)
 
         # test expand case
         test(torch.randn(5), None, [3, 3, 3], [0, 1, 0], 2)
@@ -2329,6 +2390,7 @@ class TestAutograd(TestCase):
                         f(dt)
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
+    @unittest.skipIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")
     def test_set_requires_grad_only_for_floats_cuda(self):
         self._test_set_requires_grad_only_for_floats(self, True)
 
@@ -2336,6 +2398,7 @@ class TestAutograd(TestCase):
         self._test_set_requires_grad_only_for_floats(self, False)
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
+    @unittest.skipIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")
     def test_rnn_backward_to_input_but_not_parameters_cuda(self):
         # this checks whether it is possible to not require
         # weight parameters, but require inputs, see #7722
@@ -2386,6 +2449,12 @@ class TestAutograd(TestCase):
                     out = MyFunc.apply(inp, inp, False)
                     out.backward()
             self.assertIn('MyFunc.apply', str(w[0].message))
+
+    def test_symeig_no_eigenvectors(self):
+        A = torch.tensor([[1., 2.], [2., 4.]], dtype=torch.float32, requires_grad=True)
+        w, v = torch.symeig(A, eigenvectors=False)
+        with self.assertRaisesRegex(RuntimeError, 'backward without computing eigenvectors'):
+            torch.autograd.backward([w, v], [torch.ones_like(w), torch.ones_like(v)])
 
 
 def index_variable(shape, max_indices):
@@ -2590,10 +2659,18 @@ method_tests = [
     ('reshape', (S,), (S,), '1d'),
     ('reshape', (), (dont_convert(()),), 'scalar_to_scalar'),
     ('reshape', (), (1,), 'scalar_to_1d'),
+    ('reshape_as', (S, S, S), (non_differentiable(torch.rand(S * S, S)),)),
+    ('reshape_as', (), (non_differentiable(torch.tensor(42.)),), 'scalar'),
+    ('reshape_as', (), (non_differentiable(torch.rand(1, 1)),), 'scalar_to_dims'),
     ('flip', (S, S, S), ([0],), 'd0'),
     ('flip', (S, S, S), ([0, 1, 2],), 'd012'),
     ('flip', (S, S, S), ([0, 2],), 'd02'),
     ('flip', (S, S, S), ([2, 0],), 'd20'),
+    ('flip', (S, S, S), ([-1],), 'neg_d'),
+    ('rot90', (S, S, S), (1, [0, 1],), 'k1_d01'),
+    ('rot90', (S, S, S), (1, [1, 2],), 'k1_d12'),
+    ('rot90', (S, S, S), (1, [1, -1],), 'k1_neg_d'),
+    ('rot90', (S, S, S), (), 'default'),
     ('view_as', (S, S, S), (non_differentiable(torch.rand(S * S, S)),)),
     ('view_as', (), (non_differentiable(torch.tensor(5.5)),), 'scalar'),
     ('view_as', (), (non_differentiable(torch.rand(1, 1)),), 'scalar_to_dims'),
@@ -2610,6 +2687,8 @@ method_tests = [
     ('expm1', (), NO_ARGS, 'scalar'),
     ('erf', torch.rand(S, S, S), NO_ARGS),
     ('erf', uniform_scalar(requires_grad=True), NO_ARGS, 'scalar'),
+    ('erfc', torch.rand(S, S, S), NO_ARGS),
+    ('erfc', uniform_scalar(requires_grad=True), NO_ARGS, 'scalar'),
     ('erfinv', torch.rand(S, S, S).clamp(-0.9, 0.9), NO_ARGS),
     ('erfinv', normal_scalar_clamp(-0.9, 0.9, requires_grad=True), NO_ARGS, 'scalar'),
     ('log', torch.rand(S, S, S) + 1e-2, NO_ARGS),
@@ -2779,7 +2858,7 @@ method_tests = [
     ('std', (S,), (0, True, True), 'keepdim_dim_1d', [0]),
     ('renorm', (S, S, S), (2, 1, 0.5), 'dim', [1]),
     ('renorm', (S, S, S), (1, 2, 3), 'norm_1'),
-    ('renorm', (S, S, S), (float('inf'), 2, 0.5), 'norm_inf'),
+    ('renorm', (S, S, S), (inf, 2, 0.5), 'norm_inf'),
     ('repeat', (S,), (2,), 'single_number'),
     ('repeat', (), (2, 3), 'scalar'),
     ('repeat', (2, 2), (3, 2)),
@@ -2871,7 +2950,7 @@ method_tests = [
     ('norm', (S, S), (0.5,), '0_5'),
     ('norm', (S, S), (1,), '1'),
     ('norm', (S, S), (3,), '3'),
-    ('norm', (S, S), (float('inf'),), 'inf'),
+    ('norm', (S, S), (inf,), 'inf'),
     ('norm', (S, S), (-1,), 'neg_1'),
     ('norm', (S, S), (-0.5,), 'neg_0_5'),
     ('norm', (S, S), (-1.5,), 'neg_1_5'),
@@ -2985,6 +3064,9 @@ method_tests = [
      'symmetric_pd', NO_ARGS, [skipIfNoLapack], itemgetter(1)),
     ('slogdet', lambda: random_fullrank_matrix_distinct_singular_value(S), NO_ARGS,
      'distinct_singular_values', NO_ARGS, [skipIfNoLapack], itemgetter(1)),
+    ('symeig', lambda: random_symmetric_matrix(S), (True, False), 'lower', NO_ARGS, [skipIfNoLapack]),
+    ('symeig', lambda: random_symmetric_matrix(S), (True, True), 'upper', NO_ARGS, [skipIfNoLapack]),
+    ('symeig', lambda: random_symmetric_matrix(M), (True, True), 'large', NO_ARGS, [skipIfNoLapack]),
     ('svd', lambda: random_fullrank_matrix_distinct_singular_value(S), NO_ARGS, '', NO_ARGS, [skipIfNoLapack]),
     ('svd', lambda: random_fullrank_matrix_distinct_singular_value(S)[:(S - 2)], NO_ARGS,
      'wide', NO_ARGS, [skipIfNoLapack]),
@@ -3048,7 +3130,7 @@ method_tests = [
     ('select', (S, S, S), (1, -1), 'wrap_dim', [0]),
     ('select', (S,), (0, 2), '1d'),
     ('narrow', (S, S, S), (1, 2, 2), 'dim', [0]),
-    ('narrow', (S, S, S), (1, 0, 0), 'empty_dim', [0], [skipIfNoZeroSize]),
+    ('narrow', (S, S, S), (1, 0, 0), 'empty_dim', [0]),
     ('squeeze', (S, 1, S, 1), NO_ARGS),
     ('squeeze', (1, 1, 1, 1), NO_ARGS, 'input_sizes_are_ones'),
     ('squeeze', (S, 1, S, 1), (1,), '1_dim', [0]),
@@ -3393,10 +3475,10 @@ def add_test(
                         if not isinstance(output_variable, tuple):
                             output_variable = (output_variable,)
                         inplace_self_variable = deepcopy(self_variable)
-                        inplace_self_variable_copy = tuple(i + 0 if i is not None else None
+                        inplace_self_variable_copy = tuple(i.clone() if isinstance(i, torch.Tensor) else i
                                                            for i in (inplace_self_variable,))
                         inplace_args_variable = deepcopy(args_variable)
-                        inplace_args_variable_copy = tuple(i + 0 if i is not None else None
+                        inplace_args_variable_copy = tuple(i.clone() if isinstance(i, torch.Tensor) else i
                                                            for i in inplace_args_variable)
 
                         inplace_output_variable = (

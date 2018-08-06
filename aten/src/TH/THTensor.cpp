@@ -1,60 +1,17 @@
-#include <cmath>
-#include <float.h>
-
-#include <atomic>
 #include "THTensor.hpp"
-#include "THVector.h"
-#include "generic/simd/simd.h"
-
-#include "THBlas.h"
-#include "THLapack.h"
-#include "THRandom.h"
-#include "THTensorDimApply.h"
-#include "THMath.h"
 
 #include "generic/THTensor.cpp"
 #include "THGenerateAllTypes.h"
 
 #include "generic/THTensor.cpp"
 #include "THGenerateHalfType.h"
-
-#include "generic/THTensorCopy.cpp"
-#include "THGenerateAllTypes.h"
-
-#include "generic/THTensorCopy.cpp"
-#include "THGenerateHalfType.h"
-
-#include "generic/THTensorRandom.cpp"
-#include "THGenerateAllTypes.h"
-
-#include "generic/THTensorMath.cpp"
-#include "THGenerateAllTypes.h"
-
-#include "generic/THTensorConv.cpp"
-#include "THGenerateAllTypes.h"
-
-#include "generic/THTensorLapack.cpp"
-#include "THGenerateFloatTypes.h"
 
 #include <numeric>
 
 void THTensor_free(THTensor *self)
 {
-  if(!self)
-    return;
-
-  if(self->flag & TH_TENSOR_REFCOUNTED)
-  {
-    if(--self->refcount == 0)
-    {
-      THFree(self->size);
-      THFree(self->stride);
-      if(self->storage)
-        THStorage_free(self->storage);
-      self->refcount.~atomic<int>();
-      THFree(self);
-    }
-  }
+  if (!self) return;
+  self->release();
 }
 
 // On a high level,
@@ -75,7 +32,7 @@ THTensor_compute_stride(at::IntList oldshape, at::IntList oldstride, at::IntList
   // This could perhaps be combined with the below code, but the complexity didn't seem worth it.
   int64_t numel = std::accumulate(oldshape.begin(), oldshape.end(), 1, std::multiplies<int64_t>());
   if (numel == 0 && oldshape.equals(newshape)) {
-    return std::vector<int64_t>(oldstride);
+    return oldstride.vec();
   }
 
   std::vector<int64_t> newstride(newshape.size());

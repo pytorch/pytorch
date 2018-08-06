@@ -35,7 +35,7 @@ bool test_optimizer_xor(Options options) {
   const int64_t kBatchSize = 4;
   const int64_t kMaximumNumberOfEpochs = 3000;
 
-  auto optimizer = OptimizerClass(model.parameters(), options);
+  auto optimizer = OptimizerClass(model->parameters(), options);
 
   float running_loss = 1;
   int epoch = 0;
@@ -48,7 +48,7 @@ bool test_optimizer_xor(Options options) {
     }
     inputs.set_requires_grad(true);
     optimizer.zero_grad();
-    auto x = model.forward(inputs);
+    auto x = model->forward(inputs);
     torch::Tensor loss = torch::binary_cross_entropy(x, labels);
     loss.backward();
 
@@ -91,10 +91,10 @@ void check_exact_values(
       Linear(3, 1),
       Functional(torch::sigmoid));
 
-  model.to(torch::kFloat64);
+  model->to(torch::kFloat64);
 
   // Use exact input values because matching random values is hard.
-  auto parameters = model.parameters();
+  auto parameters = model->parameters();
   assign_parameter(
       parameters,
       "0.weight",
@@ -111,7 +111,7 @@ void check_exact_values(
 
   for (size_t i = 0; i < kIterations; ++i) {
     optimizer.zero_grad();
-    auto output = model.forward(input);
+    auto output = model->forward(input);
     auto loss = output.sum();
     loss.backward();
 
@@ -132,6 +132,30 @@ void check_exact_values(
         }
       }
     }
+  }
+}
+
+TEST_CASE("Optim/BasicInterface") {
+  struct MyOptimizer : Optimizer {
+    using Optimizer::Optimizer;
+    void step() override {}
+  };
+  std::vector<torch::Tensor> parameters = {
+      torch::ones({2, 3}), torch::zeros({2, 3}), torch::rand({2, 3})};
+  {
+    MyOptimizer optimizer(parameters);
+    REQUIRE(optimizer.size() == parameters.size());
+  }
+  {
+    MyOptimizer optimizer;
+    REQUIRE(optimizer.size() == 0);
+    optimizer.add_parameters(parameters);
+    REQUIRE(optimizer.size() == parameters.size());
+  }
+  {
+    Linear linear(3, 4);
+    MyOptimizer optimizer(linear->parameters());
+    REQUIRE(optimizer.size() == linear->parameters().size());
   }
 }
 

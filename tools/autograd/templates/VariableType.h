@@ -4,6 +4,8 @@
 
 #include <ATen/ATen.h>
 
+#include <torch/csrc/WindowsTorchApiMacro.h>
+
 #include <cstdint> // for size_t
 #include <functional> // for function
 #include <memory> // for unique_ptr
@@ -28,7 +30,7 @@ using at::optional;
 
 void register_variable_type_for(at::Type* baseType);
 
-struct VariableType final : public at::Type {
+struct TORCH_API VariableType final : public at::Type {
   VariableType(Context* context, at::Type* baseType);
   virtual at::ScalarType scalarType() const override;
   virtual at::Backend backend() const override;

@@ -70,7 +70,7 @@ Tensor & ${Type}::s_copy_(Tensor & dst, const Tensor & src, bool non_blocking) c
     default:
       ${function_fallthrough}
   }
-  dst.pImpl->setScalar(src.pImpl->isScalar());
+  dst.pImpl->maybe_zero_dim(src.pImpl->dim() == 0);
   return dst;
 }
 """)
@@ -91,7 +91,7 @@ Tensor & ${Type}::_s_copy_from(const Tensor & src, Tensor & dst, bool non_blocki
       AT_ERROR("copy does not support ", toString(), " to ", dst.type().toString(), " copy.");
       break;
   }
-  dst.pImpl->setScalar(src.pImpl->isScalar());
+  dst.pImpl->maybe_zero_dim(src.pImpl->dim() == 0);
   return dst; // NB! dst
 }
 """)
@@ -116,7 +116,7 @@ def create_one_copy(dst_type, all_types):
         cuda = ''
         state = []
         if src_type['Backend'] == 'CUDA' or dst_type['Backend'] == 'CUDA':
-            state.append('context->getTHCState()')
+            state.append('globalContext().getTHCState()')
         if src_type['Backend'] == 'CUDA':
             if dst_type['Backend'] == 'CUDA':
                 cuda = 'Cuda'
@@ -159,7 +159,11 @@ def create_one_copy(dst_type, all_types):
     # for sparse.)
     checked_cast_dst = ''
     if dst_type['Density'] == 'Dense':
-        checked_cast_dst = 'checked_cast_tensor<{}>(dst.pImpl, "dst", 0, false);'.format(dst_type['Tensor'])
+        checked_cast_dst = \
+            'checked_cast_tensor<{}>(dst.pImpl, "dst", 0, false, Backend::{}, ScalarType::{});' \
+            .format(dst_type['Tensor'],
+                    dst_type['Backend'],
+                    dst_type['ScalarName'])
 
     env = nested_dict({
         'function_fallthrough': function_fallthrough,
@@ -183,7 +187,7 @@ def create_one_copy_from(src_type, all_types):
         if src_type['Backend'] == 'CUDA':
             cuda = 'Cuda'
         if dst_type['Backend'] == 'CUDA' or src_type['Backend'] == 'CUDA':
-            state.append('context->getTHCState()')
+            state.append('globalContext().getTHCState()')
 
         body_env = nested_dict({
             'src_scalar_name': src_type['ScalarName'],
@@ -208,7 +212,9 @@ def create_one_copy_from(src_type, all_types):
     # See Note [checked_cast_tensor is for dense only]
     checked_cast_src = ''
     if src_type['Density'] != 'Sparse':
-        checked_cast_src = 'checked_cast_tensor<{}>(src.pImpl, "src", 0, false);'.format(src_type['Tensor'])
+        checked_cast_src = \
+            'checked_cast_tensor<{}>(src.pImpl, "src", 0, false, Backend::{}, ScalarType::{});' \
+            .format(src_type['Tensor'], src_type['Backend'], src_type['ScalarName'])
 
     return FUNCTION_FROM.substitute(src_type, copy_body=copy_body, checked_cast_src=checked_cast_src)
 

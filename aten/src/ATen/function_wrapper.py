@@ -143,7 +143,7 @@ static inline ${return_type} ${api_name}(${formals}) {
 """)
 # add a native declaration for a native function
 NATIVE_DECLARATION = CodeTemplate("""\
-${return_type} ${native_type_method_dispatch}(${formals_with_defaults});
+AT_API ${return_type} ${native_type_method_dispatch}(${formals_with_defaults});
 """)
 
 # special method definition for factory functions in Functions.h
@@ -180,7 +180,7 @@ if(${check_name}.type().is_sparse()) {
 }""")
 
 BUFFER_DEFINITION = CodeTemplate("""\
-auto ${name}_ = new ${Tensor}(context);
+auto ${name}_ = new ${Tensor}(${THTensor}_new());
 auto ${name} = Tensor(${name}_, false);""")
 
 CONDITIONAL_INITIALIZER = CodeTemplate("""\
@@ -234,6 +234,11 @@ DYNAMIC_TYPE = {
     'long': 'int64_t',
 }
 
+NATIVE_DYNAMIC_TYPE = {
+    'Tensor &': 'Tensor',
+    'const Tensor &': 'Tensor',
+}
+
 TYPE_RETURN = {
     'THTensor*': 'Tensor',
     'THIndexTensor*': 'Tensor',
@@ -250,37 +255,57 @@ TYPE_RETURN = {
 CHECKED_CAST = {
     'THTensor*':
         CodeTemplate(
-            'checked_cast_tensor<${Tensor}>(${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay})'),
+            'checked_cast_tensor<${Tensor}>('
+            '${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay}, '
+            'Backend::${Backend}, ScalarType::${ScalarName})'),
     'THSTensor*':
-    CodeTemplate(
-        'checked_cast_tensor<Sparse${Tensor}>(${arg_name}.tref.pImpl,"${arg_name}",${arg_pos},false)'),
+        CodeTemplate(
+            'checked_cast_tensor<Sparse${Tensor}>('
+            '${arg_name}.tref.pImpl,"${arg_name}",${arg_pos},false, '
+            'Backend::${Backend}, ScalarType::${ScalarName})'),
     'THBoolTensor*':
         CodeTemplate(
-            'checked_cast_tensor<${Backend}ByteTensor>(${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay})'),
+            'checked_cast_tensor<${Backend}ByteTensor>('
+            '${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay}, '
+            'Backend::${Backend}, ScalarType::Byte)'),
     'THIndexTensor*':
         CodeTemplate(
-            'checked_cast_tensor<${Backend}LongTensor>(${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay})'),
+            'checked_cast_tensor<${Backend}LongTensor>('
+            '${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay}, '
+            'Backend::${Backend}, ScalarType::Long)'),
     'THIntegerTensor*':
         CodeTemplate(
-            'checked_cast_tensor<${Backend}IntTensor>(${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay})'),
+            'checked_cast_tensor<${Backend}IntTensor>('
+            '${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay}, '
+            'Backend::${Backend}, ScalarType::Int)'),
     'THDenseTensor*':
         CodeTemplate(
-            'checked_cast_tensor<${DenseTensor}>(${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay})'),
+            'checked_cast_tensor<${DenseTensor}>('
+            '${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay}, '
+            'Backend::${DenseBackend}, ScalarType::${ScalarName})'),
     'THDenseIndexTensor*':
         CodeTemplate(
-            'checked_cast_tensor<${DenseBackend}LongTensor>(${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay})'),
-    'THStorage*': CodeTemplate('checked_cast_storage<${Storage}>(&${arg_name},"${arg_name}",${arg_pos})'),
+            'checked_cast_tensor<${DenseBackend}LongTensor>('
+            '${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay}, '
+            'Backend::${DenseBackend}, ScalarType::Long)'),
+    'THStorage*':
+        CodeTemplate(
+            'checked_cast_storage<Storage>('
+            '&${arg_name},"${arg_name}",${arg_pos}, '
+            'Backend::${Backend}, ScalarType::${ScalarName})'),
     'THGenerator*':
         CodeTemplate(
-            'check_generator<${Backend}Generator>(${arg_name}, &context->defaultGenerator(backend()))'),
+            'check_generator<${Backend}Generator>(${arg_name}, &globalContext().defaultGenerator(backend()))'),
     # This is a cast done via direct-construction
     'THSize*': CodeTemplate('THLongStorageView ${result_name}(${arg_name}, THLongStorageViewKind::SIZE);'),
     # This is a cast done via direct-construction
     'THStride*': CodeTemplate('THLongStorageView ${result_name}(${arg_name}, THLongStorageViewKind::STRIDE);'),
     'real': CodeTemplate('${arg_name}.to${ScalarName}()'),
     'accreal': CodeTemplate('${arg_name}.to${AccScalarName}()'),
-    'TensorList': CodeTemplate('tensor_list_checked_cast<${Tensor}, Tensor, '
-                               '${THTensor}>(${arg_name},"${arg_name}",${arg_pos})'),
+    'TensorList': CodeTemplate(
+            'tensor_list_checked_cast<${Tensor}, Tensor, '
+            '${THTensor}>(${arg_name},"${arg_name}",${arg_pos}, '
+            'Backend::${Backend}, ScalarType::${ScalarName})'),
     'IntList': CodeTemplate('check_intlist<${size}>(${arg_name}, "${arg_name}", ${arg_pos}${,default_init})')
 }
 
@@ -294,28 +319,38 @@ CHECKED_USE = {
     'THIntegerTensor*': '{}_->tensor',
     'THDenseTensor*': '{}_->tensor',
     'THDenseIndexTensor*': '{}_->tensor',
-    'THStorage*': '{}_->storage',
+    'THStorage*': '{}_->pImpl()',
     'THGenerator*': '{}_->generator',
     'TensorList': "{0}_.data(), {0}_.size()",
 }
 
 CHECKED_USE_NULLABLE = CodeTemplate('${arg_name}_ ? ${usage} : NULL')
 
+ALLOC_NOARGS_WRAP = {
+    'THTensor*': 'detail::new_${Tensor}()',
+    'THBoolTensor*': 'detail::new_${Backend}ByteTensor()',
+    'THIndexTensor*': 'detail::new_${Backend}LongTensor()',
+    'THIntegerTensor*': 'detail::new_${Backend}IntTensor()',
+    'THSTensor*': 'detail::new_Sparse${Tensor}()',
+    'THDenseTensor*': 'detail::new_${DenseTensor}()',
+    'THDenseIndexTensor*': 'detail::new_${DenseBackend}LongTensor()',
+}
+
 ALLOC_WRAP = {
-    'THTensor*': 'new ${Tensor}(context${,arguments})',
-    'THBoolTensor*': 'new ${Backend}ByteTensor(context${,arguments})',
-    'THIndexTensor*': 'new ${Backend}LongTensor(context${,arguments})',
-    'THIntegerTensor*': 'new ${Backend}IntTensor(context${,arguments})',
-    'THSTensor*': 'new Sparse${Tensor}(context${,arguments})',
-    'THDenseTensor*': 'new ${DenseTensor}(context${,arguments})',
-    'THDenseIndexTensor*': 'new ${DenseBackend}LongTensor(context${,arguments})',
+    'THTensor*': 'new ${Tensor}(${arguments})',
+    'THBoolTensor*': 'new ${Backend}ByteTensor(${arguments})',
+    'THIndexTensor*': 'new ${Backend}LongTensor(${arguments})',
+    'THIntegerTensor*': 'new ${Backend}IntTensor(${arguments})',
+    'THSTensor*': 'new Sparse${Tensor}(${arguments})',
+    'THDenseTensor*': 'new ${DenseTensor}(${arguments})',
+    'THDenseIndexTensor*': 'new ${DenseBackend}LongTensor(${arguments})',
 }
 
 # Replacements for constants when calling into TH
 CONSTANT_REPLACEMENTS = [
     ('AS_REAL', '${AS_REAL}'),
     ('__storage_size.get\\(\\)',
-     'THLongStorageView(static_cast<int64_t>(source.size()), THLongStorageViewKind::LENGTH)'),
+     'THLongStorageView(static_cast<int64_t>(source.pImpl()->size()), THLongStorageViewKind::LENGTH)'),
     ('__last_dim', 'self.ndimension()-1'),
 ]
 
@@ -871,13 +906,13 @@ def create_generic(top_env, declarations):
 
         # not clear we need dynamic_type translation as we can specify the correct type
         # directly in native functions
-        def add_type_as_dynamic_type(argument, option):
+        def add_dynamic_type(argument, option):
             # type: (AtFormal, FunctionOption) -> AtFormal
-            argument['dynamic_type'] = argument['type']
+            argument['dynamic_type'] = NATIVE_DYNAMIC_TYPE.get(argument['type'], argument['type'])
             return argument
 
         result = pos_args + kwd_args
-        result = [add_type_as_dynamic_type(argument, option) for argument in result]
+        result = [add_dynamic_type(argument, option) for argument in result]
 
         # ensure we get reference-type formals when appropriate
         def native_translate_formals(argument, option):
@@ -928,7 +963,7 @@ def create_generic(top_env, declarations):
 
             rtype = {
                 'type': actual_return_type,
-                'dynamic_type': t,
+                'dynamic_type': NATIVE_DYNAMIC_TYPE.get(t, t),
             }  # type: ReturnType
             if name is not None:
                 rtype['name'] = name
@@ -1223,7 +1258,10 @@ def create_derived(backend_type_env, declarations):
     def allocate_arg(env, arg, output_count):
         # type: (Environment, THFormal, int) -> List[str]
         name = arg['name']
-        allocation = CodeTemplate(ALLOC_WRAP[arg['type']]).substitute(env, arguments=[])
+        state = ''
+        if is_cuda:
+            state = 'globalContext().getTHCState()'
+        allocation = CodeTemplate(ALLOC_NOARGS_WRAP[arg['type']]).substitute(env)
         tensor_arg = '{}_'.format(name)
         if arg.get('mask', False):
             allocation = 'output_mask[{}] ? {} : nullptr'.format(output_count, allocation)
@@ -1252,7 +1290,7 @@ def create_derived(backend_type_env, declarations):
         is_nn = option['mode'] == 'NN'
         actuals = get_arguments(cimpl['arguments'], option)
         if is_cuda or is_nn:
-            actuals = ['context->getTHCState()'] + actuals
+            actuals = ['globalContext().getTHCState()'] + actuals
 
         cname = cimpl['cname']
         if option.get('sparse', False):
@@ -1375,16 +1413,16 @@ def create_derived(backend_type_env, declarations):
                 else:
                     body += initializers
 
-                # for out-of-place: isScalar() for all input tensors is and'd to form
+                # for out-of-place: dim() == 0 for all input tensors is and'd to form
                 # the test for whether the output is also a scalar
-                # for in-place: isScalar() shouldn't change as a result of the operation
+                # for in-place: dim() == 0 shouldn't change as a result of the operation
                 if (not arg.get('output') and 'Tensor' in arg['type'] and
                         'TensorList' not in arg['type'] and
                         'THS' not in arg['type'] and
                         not scalar_check_is_from_size and
                         not scalar_check_is_from_option and
                         not option['inplace']):
-                    check = '{}->isScalar()'.format(arg['name'] + '_')
+                    check = '{}->dim() == 0'.format(arg['name'] + '_')
                     if nullable_argument(arg):
                         check = '(!{} || {})'.format(arg['name'] + '_', check)
                     scalar_check = (check if scalar_check is None
@@ -1417,7 +1455,7 @@ def create_derived(backend_type_env, declarations):
                     scalar_check_arg = (scalar_check if not isinstance(scalar_check, dict)
                                         else scalar_check.get(arg['name']))  # type: ignore
                     if scalar_check_arg is not None:
-                        stmt = "{}_->maybeScalar({});".format(arg['name'], scalar_check_arg)
+                        stmt = "{}_->maybe_zero_dim({});".format(arg['name'], scalar_check_arg)
                         if nullable_argument(arg):
                             stmt = "if ({}_) {}".format(arg['name'], stmt)
                         body.append(stmt)
@@ -1441,7 +1479,7 @@ def create_derived(backend_type_env, declarations):
                     option['aten_custom_call']).substitute(env))
 
             if ret['type'] in ALLOC_WRAP.keys():
-                maybe_scalar = "->maybeScalar({})".format(scalar_check) \
+                maybe_scalar = "->maybe_zero_dim({})".format(scalar_check) \
                                if scalar_check is not None \
                                else ""
                 wrapped_tensor = CodeTemplate(ALLOC_WRAP[ret['type']]).substitute(

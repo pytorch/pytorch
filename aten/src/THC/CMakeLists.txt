@@ -12,7 +12,7 @@ foreach(THC_TYPE Byte Char Short Int Long Half Float Double)
    foreach(THC_FILE TensorSort TensorMathCompareT TensorMathPointwise TensorMathCompare TensorMathReduce TensorMasked)
       if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/generated/THC${THC_FILE}${THC_TYPE}.cu")
          FILE(WRITE "${CMAKE_CURRENT_SOURCE_DIR}/generated/THC${THC_FILE}${THC_TYPE}.cu"
-           "#include \"../THC${THC_FILE}.cuh\"\n#include \"THCTensor.hpp\"\n#include \"THCStream.hpp\"\n#include \"../generic/THC${THC_FILE}.cu\"\n#include \"../THCGenerate${THC_TYPE}Type.h\"\n")
+           "#include \"../THC${THC_FILE}.cuh\"\n#include \"THCTensor.hpp\"\n#include \"../generic/THC${THC_FILE}.cu\"\n#include \"../THCGenerate${THC_TYPE}Type.h\"\n")
       endif()
       LIST(APPEND extra_src "${CMAKE_CURRENT_SOURCE_DIR}/generated/THC${THC_FILE}${THC_TYPE}.cu")
    endforeach()
@@ -59,6 +59,7 @@ set(ATen_CUDA_SRCS ${ATen_CUDA_SRCS}
 INSTALL(FILES
           THC.h
           ${CMAKE_CURRENT_BINARY_DIR}/THCGeneral.h
+          THCGeneral.hpp
           THCBlas.h
           THCSleep.h
           THCStorage.h
@@ -113,7 +114,6 @@ INSTALL(FILES
           # See Note [TH abstraction violation]
           THCGenerator.hpp
           THCTensor.hpp
-          THCStream.hpp
           THCStorage.hpp
           DESTINATION "${ATEN_INSTALL_INCLUDE_SUBDIR}/THC")
 

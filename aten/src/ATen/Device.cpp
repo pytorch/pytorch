@@ -1,6 +1,6 @@
 #include <ATen/Device.h>
 
-#include <ATen/Error.h>
+#include <ATen/core/Error.h>
 
 #include <exception>
 #include <ostream>
@@ -76,20 +76,6 @@ Device::Device(const std::string& device_string) : Device(Type::CPU) {
 }
 
 } // namespace at
-
-std::ostream& operator<<(std::ostream& stream, at::Device::Type type) {
-  switch (type) {
-    case at::Device::Type::CPU: {
-      stream << "cpu";
-      break;
-    }
-    case at::Device::Type::CUDA: {
-      stream << "cuda";
-      break;
-    }
-  }
-  return stream;
-}
 
 std::ostream& operator<<(std::ostream& stream, const at::Device& device) {
   stream << device.type();

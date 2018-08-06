@@ -106,8 +106,11 @@ target_compile_options(c10d PUBLIC
 # c10d links to Caffe2/ATen, but the targets don't add TH/THC to the include path
 target_include_directories(c10d PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../tmp_install/include/TH)
 target_include_directories(c10d PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../tmp_install/include/THC)
+# For <c10d/...>
+target_include_directories(c10d PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/..)
 # For torch/csrc/utils/hash.h and torch/csrc/utils/functional.h
 target_include_directories(c10d PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../../..)
+# For <gloo/...>
 target_include_directories(c10d PUBLIC ${GLOO_INCLUDE_DIR})
 
 copy_header(CUDAUtils.hpp)

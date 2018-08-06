@@ -7,6 +7,7 @@
 #include <sstream>
 #include <TH/TH.h>
 #include <ATen/ATen.h>
+#include "ATen/cuda/CUDAContext.h"
 #include <THC/THCCachingAllocator.h>
 #ifdef USE_NCCL
 #include <nccl.h>
@@ -241,8 +242,7 @@ PyObject * THCPModule_cudaUnlockMutex(PyObject *module)
 PyObject * THCPModule_emptyCache(PyObject *_unused)
 {
   HANDLE_TH_ERRORS
-  auto device_allocator = THCState_getDeviceAllocator(state);
-  THCudaCheck(device_allocator->emptyCache(device_allocator->state));
+  THCCachingAllocator_emptyCache();
   END_HANDLE_TH_ERRORS
   Py_RETURN_NONE;
 }
@@ -310,7 +310,7 @@ static void bindCudaDeviceProperties(PyObject* module) {
       return stream.str();
     });
   m.def("_get_device_properties", [](int device) -> cudaDeviceProp * {
-    return at::globalContext().getDeviceProperties(device);
+    return at::cuda::getDeviceProperties(device);
   }, py::return_value_policy::reference);
 }
 

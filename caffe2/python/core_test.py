@@ -9,7 +9,7 @@ import unittest
 import numpy as np
 
 from caffe2.proto import caffe2_pb2
-from caffe2.python import core, workspace, test_util
+from caffe2.python import core, workspace, schema, test_util
 from caffe2.python.task import Node, Task
 
 
@@ -197,6 +197,24 @@ class TestCloneNet(test_util.TestCase):
 
         params._CheckLookupTables()
         n._CheckLookupTables()
+
+
+class TestExternalInputs(test_util.TestCase):
+    def testSetInputRecordWithBlobs(self):
+        net = core.Net("test")
+        record = schema.NewRecord(net, schema.Struct(
+            ("x", schema.Scalar(np.float)),
+        ))
+        input_record = net.set_input_record(record)
+        self.assertTrue(net.BlobIsDefined(input_record.x()))
+        self.assertIn(input_record.x(), net.external_inputs)
+
+    def testSetInputRecordWithoutBlobs(self):
+        net = core.Net("test")
+        record = schema.Struct(("x", schema.Scalar(np.float)))
+        input_record = net.set_input_record(record)
+        self.assertTrue(net.BlobIsDefined(input_record.x()))
+        self.assertIn(input_record.x(), net.external_inputs)
 
 
 class TestCreateOperator(test_util.TestCase):
@@ -481,8 +499,11 @@ class TestCreatePlan(test_util.TestCase):
 
         self.assertEqual(len(plan.Steps()), 1)
         self.assertEqual(len(test_plan.Steps()), 1)
+        self.assertEqual(len(plan.Proto().network), 9)
+        self.assertEqual(len(test_plan.Proto().network), 9)
+        self.assertEqual(len(plan.Proto().execution_step), 1)
+        self.assertEqual(len(test_plan.Proto().execution_step), 1)
         self.assertEqual(plan.Steps()[0].Name(), test_plan.Steps()[0].Name())
-
         self.assertEqual(len(plan.Nets()), len(test_plan.Nets()))
         for idx in range(0, len(plan.Nets())):
             # When we create Net for test_plan, we will end up with new Net

@@ -17,41 +17,13 @@ extern "C" {
 #include "caffe2/core/types.h"
 #include "caffe2/utils/math_utils.h"
 
-#include "Eigen/Core"
-#include "Eigen/Dense"
-
 namespace caffe2 {
 
-template <class Context>
 class Tensor;
 
 // An empty class as a placeholder for a math function that has no specific
 // engine specified.
 class DefaultEngine {};
-
-// Common Eigen types that we will often use
-template <typename T>
-using EigenMatrixMap =
-    Eigen::Map<Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic>>;
-template <typename T>
-using EigenArrayMap =
-    Eigen::Map<Eigen::Array<T, Eigen::Dynamic, Eigen::Dynamic>>;
-template <typename T>
-using EigenVectorMap = Eigen::Map<Eigen::Matrix<T, Eigen::Dynamic, 1>>;
-template <typename T>
-using EigenVectorArrayMap = Eigen::Map<Eigen::Array<T, Eigen::Dynamic, 1>>;
-template <typename T>
-using ConstEigenMatrixMap =
-    Eigen::Map<const Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic>>;
-template <typename T>
-using ConstEigenArrayMap =
-    Eigen::Map<const Eigen::Array<T, Eigen::Dynamic, Eigen::Dynamic>>;
-template <typename T>
-using ConstEigenVectorMap =
-    Eigen::Map<const Eigen::Matrix<T, Eigen::Dynamic, 1>>;
-template <typename T>
-using ConstEigenVectorArrayMap =
-    Eigen::Map<const Eigen::Array<T, Eigen::Dynamic, 1>>;
 
 namespace math {
 
@@ -72,7 +44,13 @@ void Tan(const int N, const T* x, T* y, Context* context);
 template <typename T, class Context>
 void Atan(const int N, const T* x, T* y, Context* context);
 template <typename T, class Context>
+void Sinh(const int N, const T* x, T* y, Context* context);
+template <typename T, class Context>
+void Cosh(const int N, const T* x, T* y, Context* context);
+template <typename T, class Context>
 void SinCos(const int N, const T* x, T* ys, T* yc, Context* context);
+template <typename T, class Context>
+void Tanh(const int N, const T* x, T* y, Context* context);
 template <typename T, class Context>
 void Abs(const int N, const T* x, T* y, Context* context);
 template <typename T, class Context>
@@ -93,6 +71,8 @@ template <typename T, class Context>
 void Not(const int N, const T* x, T* y, Context* context);
 template <typename T, class Context>
 void Powx(const int N, const T* a, const T b, T* y, Context* context);
+template <typename T, class Context>
+void Inv(const int N, const T* x, T* y, Context* context);
 
 #define CAFFE2_DECLARE_COMPARE_OP(Comp)                                      \
   template <typename T, class Context>                                       \
@@ -189,7 +169,7 @@ void ReduceMin(
     const int N,
     const T* x,
     T* y,
-    Tensor<Context>* scratch_ptr,
+    Tensor* scratch_ptr,
     Context* context);
 
 template <typename T, class Context>
@@ -197,7 +177,7 @@ void ReduceMax(
     const int N,
     const T* x,
     T* y,
-    Tensor<Context>* scratch_ptr,
+    Tensor* scratch_ptr,
     Context* context);
 
 template <typename T, class Context>
@@ -206,6 +186,7 @@ void ReduceMin(
     const int* dims,
     const int num_axes,
     const int* axes,
+    const T alpha,
     const T* X,
     T* Y,
     Context* context);
@@ -216,6 +197,7 @@ void ReduceMax(
     const int* dims,
     const int num_axes,
     const int* axes,
+    const T alpha,
     const T* X,
     T* Y,
     Context* context);
@@ -226,6 +208,7 @@ void ReduceSum(
     const int* dims,
     const int num_axes,
     const int* axes,
+    const T alpha,
     const T* X,
     T* Y,
     Context* context);
@@ -236,6 +219,29 @@ void ReduceMean(
     const int* dims,
     const int num_axes,
     const int* axes,
+    const T alpha,
+    const T* X,
+    T* Y,
+    Context* context);
+
+template <typename T, class Context>
+void ReduceL1(
+    const int num_dims,
+    const int* dims,
+    const int num_axes,
+    const int* axes,
+    const T alpha,
+    const T* X,
+    T* Y,
+    Context* context);
+
+template <typename T, class Context>
+void ReduceL2(
+    const int num_dims,
+    const int* dims,
+    const int num_axes,
+    const int* axes,
+    const T alpha,
     const T* X,
     T* Y,
     Context* context);
@@ -247,6 +253,7 @@ void Broadcast(
     const int* X_dims,
     const int Y_ndim,
     const int* Y_dims,
+    const T alpha,
     const T* X,
     T* Y,
     Context* context);
@@ -311,8 +318,8 @@ void Transpose(
 // limitation that the data has to be contiguous in memory.
 template <typename T, class Context, class Engine = DefaultEngine>
 void Gemm(
-    const CBLAS_TRANSPOSE TransA,
-    const CBLAS_TRANSPOSE TransB,
+    const CBLAS_TRANSPOSE trans_A,
+    const CBLAS_TRANSPOSE trans_B,
     const int M,
     const int N,
     const int K,
@@ -328,8 +335,8 @@ void Gemm(
 // In most cases you probably want to use the function above, though.
 template <typename T, class Context, class Engine = DefaultEngine>
 void GemmEx(
-    const CBLAS_TRANSPOSE TransA,
-    const CBLAS_TRANSPOSE TransB,
+    const CBLAS_TRANSPOSE trans_A,
+    const CBLAS_TRANSPOSE trans_B,
     const int M,
     const int N,
     const int K,
@@ -346,19 +353,37 @@ void GemmEx(
 // GemmBatched provides a simple abstraction into library routines
 template <typename T, class Context, class Engine = DefaultEngine>
 void GemmBatched(
-    const CBLAS_TRANSPOSE TransA,
-    const CBLAS_TRANSPOSE TransB,
+    const CBLAS_TRANSPOSE trans_A,
+    const CBLAS_TRANSPOSE trans_B,
+    const int batch_size,
+    const int M,
+    const int N,
+    const int K,
+    const float alpha,
+    const T** A,
+    const T** B,
+    const float beta,
+    T** C,
+    Context* context,
+    TensorProto::DataType math_type = TensorProto_DataType_FLOAT);
+
+template <typename T, class Context, class Engine = DefaultEngine>
+void GemmStridedBatched(
+    const CBLAS_TRANSPOSE trans_A,
+    const CBLAS_TRANSPOSE trans_B,
     const int batch_size,
     const int M,
     const int N,
     const int K,
     const float alpha,
     const T* A,
+    const int A_stride,
     const T* B,
+    const int B_stride,
     const float beta,
     T* C,
+    const int C_stride,
     Context* context,
-    Tensor<Context>* scratch = nullptr,
     TensorProto::DataType math_type = TensorProto_DataType_FLOAT);
 
 // Gemv always takes in a M*N matrix A, and depending on whether we set TransA
@@ -367,7 +392,7 @@ void GemmBatched(
 // CblasTrans:   x is an M dim vector and y is an N dim vector.
 template <typename T, class Context, class Engine = DefaultEngine>
 void Gemv(
-    const CBLAS_TRANSPOSE TransA,
+    const CBLAS_TRANSPOSE trans_A,
     const int M,
     const int N,
     const float alpha,
@@ -383,6 +408,17 @@ void Set(const size_t N, const T alpha, T* X, Context* context);
 
 template <typename T, class Context>
 void RandUniform(const size_t n, const T a, const T b, T* r, Context* context);
+
+// Generate n values that sum up to a fixed sum
+// and subject to a restriction a <= x <= b for each x generated
+template <typename T, class Context>
+void RandFixedSum(
+    const size_t n,
+    const T a,
+    const T b,
+    const T sum,
+    T* r,
+    Context* context);
 
 template <typename T, class Context>
 void RandUniformUnique(
@@ -413,7 +449,7 @@ void Sum(
     const T* x,
     T* y,
     Context* context,
-    Tensor<Context>* scratch_ptr = nullptr);
+    Tensor* scratch_ptr = nullptr);
 
 // Sum of squares of vector x, and writes the result to a single value y.
 template <typename T, class Context>
@@ -422,7 +458,7 @@ void SumSqr(
     const T* x,
     T* y,
     Context* context,
-    Tensor<Context>* scratch_ptr = nullptr);
+    Tensor* scratch_ptr = nullptr);
 
 // Select does index selection of the rows a N*D matrix x, and gives the N
 // dimensional vector y that contains the selected data.
@@ -435,14 +471,24 @@ void Select(
     T* y,
     Context* context);
 
-template <typename T, class Context>
-void Scale(const int N, const float alpha, const T* x, T* y, Context* context);
+template <typename TAlpha, typename TData, class Context>
+void Scale(
+    const int N,
+    const TAlpha alpha,
+    const TData* x,
+    TData* y,
+    Context* context);
 
 // Different from the Scale function above, if alpha is passed in
 // as a pointer, we will assume that it lives on the Context device,
 // for example on GPU.
-template <typename T, class Context>
-void Scale(const int N, const float* alpha, const T* x, T* y, Context* context);
+template <typename TAlpha, typename TData, class Context>
+void Scale(
+    const int N,
+    const TAlpha* alpha,
+    const TData* x,
+    TData* y,
+    Context* context);
 
 template <typename T, class Context>
 void Axpy(const int N, const float alpha, const T* x, T* y, Context* context);
@@ -552,6 +598,16 @@ void CopyMatrix(
     const int ldb,
     Context* context,
     TypeMeta::TypedCopy copy = nullptr);
+
+template <typename T, class Context>
+void CopyMatrix(
+    const int M,
+    const int N,
+    const T* A,
+    const int lda,
+    T* B,
+    const int ldb,
+    Context* context);
 
 template <typename T, class Context>
 void CopyVector(const int N, const T* A, T* B, Context* context);

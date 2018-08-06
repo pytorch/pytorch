@@ -6,7 +6,7 @@
 
 #include <ATen/ATen.h>
 
-#include "Types.hpp"
+#include <c10d/Types.hpp>
 
 namespace c10d {
 

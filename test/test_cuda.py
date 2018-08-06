@@ -12,6 +12,7 @@ import torch
 import torch.cuda
 import torch.cuda.comm as comm
 from torch import multiprocessing as mp
+from torch._six import inf, nan
 
 from test_torch import TestTorch
 from common import TestCase, get_gpu_type, to_gpu, freeze_rng_state, run_tests, \
@@ -89,11 +90,7 @@ float_types_no_half = [
 
 
 def number(floating, integer, t):
-    name = type(t).__name__
-    if 'Double' in name or 'Float' in name or 'Half' in name:
-        return floating
-    else:
-        return integer
+    return floating if is_floating(t) else integer
 
 
 def cast_tensor(tensor, t):
@@ -104,7 +101,14 @@ M = 50
 
 
 def make_tensor(t, *sizes):
-    return t(*sizes).copy_(torch.randn(*sizes))
+    if 'Half' in t.__name__:
+        return t(*sizes).copy_(torch.randn(*sizes))
+    else:
+        tensor = t(*sizes)
+        if tensor.is_floating_point():
+            return tensor.normal_()
+        else:
+            return tensor.random_(0, 10)
 
 
 def make_sparse_tensor(t, n, *sizes):
@@ -339,6 +343,8 @@ tests = [
     ('mode', small_3d, lambda t: [],),
     ('mode', small_3d, lambda t: [1], 'dim'),
     ('mode', small_3d, lambda t: [-1], 'neg_dim'),
+    ('mvlgamma', lambda t: tensor_clamp(small_2d(t), 0.1, 10), lambda t: [1], '2d_p=1', float_types_no_half),
+    ('mvlgamma', lambda t: tensor_clamp(small_2d(t), 0.6, 10), lambda t: [2], '2d_p=2', float_types_no_half),
     ('remainder', small_3d, lambda t: [3], 'value'),
     ('remainder', small_3d, lambda t: [-3], 'negative_value', signed_types),
     ('remainder', small_3d, lambda t: [small_3d_positive(t)], 'tensor'),
@@ -408,7 +414,7 @@ tests = [
     ('unsqueeze', new_t(2, 3, 4), lambda t: [2],),
     ('unsqueeze', new_t(2, 3, 4), lambda t: [-2], 'neg_dim'),
     ('view', small_3d, lambda t: [100, 10], 'contiguous'),
-    ('view_as', small_3d, lambda t: [t(100, 10)],),
+    ('view_as', small_3d, lambda t: [make_tensor(t, 100, 10)],),
     ('zero', small_3d, lambda t: [],),
     ('zeros', small_3d, lambda t: [1, 2, 3, 4],),
     ('eye', small_2d, lambda t: [3, 4],),
@@ -416,6 +422,11 @@ tests = [
     ('flip', small_3d, lambda t: [0, 1, 2], 'd012', types, True),
     ('flip', small_3d, lambda t: [0, 2], 'd02', types, True),
     ('flip', small_3d, lambda t: [2, 0], 'd20', types, True),
+    ('flip', small_3d, lambda t: [-1], 'neg_d', types, True),
+    ('rot90', small_2d, lambda t: [1, [0, 1]], 'k1_d01', types, True),
+    ('rot90', small_3d, lambda t: [1, [1, 2]], 'k1_d12', types, True),
+    ('rot90', small_3d, lambda t: [1, [1, -1]], 'k1_neg_d', types, True),
+    ('rot90', small_3d, lambda t: [], 'default', types, True),
     ('rsqrt', lambda t: constant_tensor_add(1, small_3d(t)), lambda t: [], None, float_types),
     ('sinh', lambda t: tensor_clamp(small_3d(t), -1, 1), lambda t: [], None, float_types),
     ('tan', lambda t: tensor_clamp(small_3d(t), -1, 1), lambda t: [], None, float_types),
@@ -434,6 +445,23 @@ tests = [
         unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
     ('inverse', new_t(20, 20), lambda t: [], None, float_types, False),
     ('geqrf', new_t(20, 20), lambda t: [], None, float_types, False,
+        unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
+    ('svd', new_t(10, 10), lambda t: [], 'square', float_types_no_half, False,
+        unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
+    ('svd', lambda t: new_t(10, 10)(t).t(), lambda t: [True], 'square_col_maj',
+        float_types_no_half, False,
+        unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
+    ('svd', new_t(20, 5), lambda t: [True], 'tall_some', float_types_no_half, False,
+        unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
+    ('svd', new_t(20, 5), lambda t: [False], 'tall_all', float_types_no_half, False,
+        unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
+    ('svd', lambda t: new_t(5, 20)(t).t(), lambda t: [True],
+        'tall_some_col_maj', float_types_no_half, False,
+        unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
+    ('svd', lambda t: new_t(5, 20)(t).t(), lambda t: [False],
+        'tall_all_col_maj', float_types_no_half, False,
+        unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
+    ('eig', new_t(10, 10), lambda t: [True], 'with_eigvec', float_types_no_half, False,
         unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
 ]
 
@@ -456,6 +484,7 @@ custom_half_precision = {
     'add': 1e-2,
     'acos': 1e-3,
     'addbmm': 1e-1,
+    'addcdiv': 1e-2,
     'addcmul': 1e-2,
     'addmm': 1e-1,
     'addmv': 1e-2,
@@ -473,9 +502,11 @@ custom_half_precision = {
     'div': 1e-3,
     'dot': 1e-2,
     'erf': 1e-3,
+    'erfc': 1e-3,
     'erfinv': 1e-3,
     'exp': 1e-2,
     'expm1': 1e-2,
+    'fill': 1e-3,
     'lerp': 1e-2,
     'lgamma': 1e-2,
     'log': 1e-2,
@@ -528,6 +559,7 @@ simple_pointwise_float = [
     'cos',
     'cosh',
     'erf',
+    'erfc',
     'erfinv',
     'exp',
     'expm1',
@@ -569,7 +601,7 @@ def compare_cpu_gpu(tensor_constructor, arg_constructor, fn, t, precision=1e-5):
         gpu_tensor = to_gpu(cpu_tensor)
         cpu_args = arg_constructor(t)
         gpu_args = [to_gpu(arg) for arg in cpu_args]
-        if t.__name__ == 'HalfTensor':
+        if is_half(t):
             cpu_tensor = cpu_tensor.float()
             cpu_args = [arg.float() if isinstance(arg, torch.Tensor) and is_half(arg) else arg for arg in cpu_args]
         cpu_result = getattr(cpu_tensor, fn)(*cpu_args)
@@ -758,7 +790,7 @@ class TestCuda(TestCase):
             if not end0:
                 gen1_max_times = torch.LongTensor(1).random_(0, 3)[0]
             else:
-                gen1_max_times = float('inf')
+                gen1_max_times = inf
             t = 0
             while t < gen1_max_times and not end1:
                 end1 = advance(gen1, end1)
@@ -877,7 +909,7 @@ class TestCuda(TestCase):
                  (lambda x: x.max(0)[0], 'max_dim')]
         for f, name in tests:
             a = torch.arange(25.0).view(5, 5)
-            a[2, 2] = float('nan')
+            a[2, 2] = nan
             actual = f(a.cuda()).cpu()
             expected = f(a).cpu()
             self.assertEqual(torch.isnan(actual), torch.isnan(expected), 'nans for {}'.format(name))
@@ -1369,6 +1401,10 @@ class TestCuda(TestCase):
         return TestTorch._select_broadcastable_dims(dims_full)
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    def test_pinverse(self):
+        TestTorch._test_pinverse(self, lambda t: t.cuda())
+
+    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_det_logdet_slogdet(self):
         TestTorch._test_det_logdet_slogdet(self, lambda t: t.cuda())
 
@@ -1385,6 +1421,9 @@ class TestCuda(TestCase):
 
     def test_flip(self):
         TestTorch._test_flip(self, use_cuda=True)
+
+    def test_rot90(self):
+        TestTorch._test_rot90(self, use_cuda=True)
 
     def test_signal_window_functions(self):
         TestTorch._test_signal_window_functions(self, device=torch.device('cuda'))
@@ -1449,11 +1488,8 @@ class TestCuda(TestCase):
         os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stderr.fileno())
 
     def _spawn_method(self, method, arg):
-        try:
-            mp.set_start_method('spawn')
-        except RuntimeError:
-            pass
-        with mp.Pool(1, initializer=self.mute) as pool:
+        ctx = mp.get_context("spawn")
+        with ctx.Pool(1, initializer=self.mute) as pool:
             errors = pool.map(method, [arg])
             for e in errors:
                 if 'device-side assert triggered' not in str(e):
@@ -1478,9 +1514,9 @@ class TestCuda(TestCase):
     def test_multinomial_invalid_probs_cuda(self):
         test_method = TestCuda._test_multinomial_invalid_probs_cuda
         self._spawn_method(test_method, torch.Tensor([0, -1]))
-        self._spawn_method(test_method, torch.Tensor([0, float('inf')]))
-        self._spawn_method(test_method, torch.Tensor([0, float('-inf')]))
-        self._spawn_method(test_method, torch.Tensor([0, float('nan')]))
+        self._spawn_method(test_method, torch.Tensor([0, inf]))
+        self._spawn_method(test_method, torch.Tensor([0, -inf]))
+        self._spawn_method(test_method, torch.Tensor([0, nan]))
 
     def test_broadcast(self):
         TestTorch._test_broadcast(self, lambda t: t.cuda())
@@ -1661,7 +1697,6 @@ class TestCuda(TestCase):
         cpu_tensor = torch.tensor([-0.999999994, -1.999999994, -2.0000000111,
                                   -100.99999994, -1931.99999994, 0.000000111,
                                   -0.000000111, 0, -1, -2, -931])
-        nan = float('nan')
         expected_errors = torch.tensor([0, 0, 0, 0, 0, 0, 0, nan, nan, nan, nan])
         gpu_tensor = cpu_tensor.cuda()
         cpu_out = cpu_tensor.digamma()
@@ -1784,18 +1819,6 @@ class TestCuda(TestCase):
     def test_random_neg_values(self):
         TestTorch._test_random_neg_values(self, use_cuda=True)
 
-    def test_overlapped_indices(self):
-        a = torch.arange(0, 128).view(32, 4).cuda()
-        b = torch.arange(0, 128).view(32, 4).cuda()
-        b = b.set_(b.storage(), storage_offset=0, size=(65, 64), stride=(1, 1))
-        b += 5
-        b = b.set_(b.storage(),
-                   storage_offset=0,
-                   size=a.size(),
-                   stride=a.stride())
-        a += 5
-        self.assertEqual(a, b)
-
     def test_bincount_cuda(self):
         TestTorch._test_bincount(self, device='cuda')
         # ensure CUDA code coverage
@@ -1882,7 +1905,7 @@ def generate_tests():
                 continue
 
             precision = custom_precision.get(name, TestCuda.precision)
-            if t == torch.HalfTensor:
+            if is_half(t):
                 precision = custom_half_precision.get(name, precision)
 
             for inplace in (True, False):

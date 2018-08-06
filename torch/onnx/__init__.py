@@ -56,48 +56,6 @@ def _run_symbolic_method(*args, **kwargs):
     return utils._run_symbolic_method(*args, **kwargs)
 
 
-def _symbolic_override_wrapper_maker(symbolic_fn, might_trace, fn):
-
-    def wrapper(*args, **kwargs):
-        import torch
-        import torch.jit
-        from torch.autograd import Function, function
-
-        # fast pass
-        if not might_trace(args):
-            return fn(*args, **kwargs)
-
-        flat_args = tuple(function._iter_tensors_permissive(args))
-        flat_args_only_tensors = tuple(t for t in flat_args if isinstance(t, torch.Tensor))
-        if not any(map(torch._C._jit_is_tracing, flat_args_only_tensors)):
-            return fn(*args, **kwargs)
-
-        tstate = torch._C._get_tracing_state(flat_args_only_tensors)
-
-        arg_values = [torch._C._get_value_trace(tstate, x) if isinstance(x, torch.Tensor) else x for x in flat_args]
-
-        # This must come after the calls to get_value_trace, lest we
-        # lose information due to in-place operations.
-        output_vars = fn(*args, **kwargs)
-
-        symbolic_args = function._unflatten(arg_values, args)
-        output_vals = symbolic_fn(tstate.graph(), *symbolic_args, **kwargs)
-
-        for var, val in zip(
-                function._iter_tensors(output_vars),
-                function._iter_jit_values(output_vals)):
-            val.inferTypeFrom(var.data)
-            torch._C._set_value_trace(tstate, var, val)
-
-        return output_vars
-
-    # fn might be autograd.Function too, in this case wrapping doesn't work
-    if isinstance(fn, types.FunctionType):
-        wrapper = functools.wraps(fn)(wrapper)
-
-    return wrapper
-
-
 def symbolic_override(symbolic_fn):
     r"""
     Decorator to override ONNX export of the a function with specified subgraph.
@@ -123,47 +81,36 @@ def symbolic_override(symbolic_fn):
         return x + y[0] + y[1]
     ```
     """
-
-    return functools.partial(_symbolic_override_wrapper_maker, symbolic_fn, lambda x: True)
-
-
-def symbolic_override_first_arg_based(symbolic_fn):
-    r"""
-    Decorator to override ONNX export of the a function with specified subgraph.
-
-    Equivalent to :func:`symbolic_override` but checks only the first argument
-    of the function to figure out whether the tracing is on. Thus the first arg
-    needs to be a Tensor.
-    """
-
-    def might_trace(args):
+    def decorator(fn):
         import torch
-        first_arg = args[0]
-        if not isinstance(first_arg, torch.Tensor):
-            raise ValueError('First argument of {} is expected to be a tensor, '
-                             'but got an object of type {}'
-                             .format(symbolic_fn.__name__, type(first_arg)))
-        return torch._C._jit_is_tracing(first_arg)
+        from torch.autograd import function
 
-    return functools.partial(_symbolic_override_wrapper_maker, symbolic_fn, might_trace)
+        def wrapper(*args, **kwargs):
+            tstate = torch._C._get_tracing_state()
+            if not tstate:
+                return fn(*args, **kwargs)
 
+            flat_args = tuple(function._iter_tensors_permissive(args))
+            arg_values = [torch._C._get_value_trace(x) if isinstance(x, torch.Tensor) else x for x in flat_args]
 
-def symbolic_override_packed_sequence_based(symbolic_fn):
-    r"""
-    Decorator to override ONNX export of the a function with specified subgraph.
+            # This must come after the calls to get_value_trace, lest we
+            # lose information due to in-place operations.
+            output_vars = fn(*args, **kwargs)
 
-    Equivalent to :func:`symbolic_override` but checks only the first argument
-    of the function to figure out whether the tracing is on. Thus the first arg
-    needs to be a Tensor.
-    """
+            symbolic_args = function._unflatten(arg_values, args)
+            output_vals = symbolic_fn(tstate.graph(), *symbolic_args, **kwargs)
 
-    def might_trace(args):
-        import torch
-        first_arg = args[0]
-        if not isinstance(first_arg, torch.nn.utils.rnn.PackedSequence):
-            raise ValueError('pad_packed_sequence expects sequence to be a '
-                             'PackedSequence, but got an object of type {}'
-                             .format(type(first_arg)))
-        return torch._C._jit_is_tracing(first_arg[0])
+            for var, val in zip(
+                    function._iter_tensors(output_vars),
+                    function._iter_jit_values(output_vals)):
+                val.inferTypeFrom(var.data)
+                torch._C._set_value_trace(var, val)
 
-    return functools.partial(_symbolic_override_wrapper_maker, symbolic_fn, might_trace)
+            return output_vars
+
+        # fn might be autograd.Function too, in this case wrapping doesn't work
+        if isinstance(fn, types.FunctionType):
+            wrapper = functools.wraps(fn)(wrapper)
+
+        return wrapper
+    return decorator

@@ -2,16 +2,17 @@
 
 #include "torch/csrc/autograd/edge.h"
 #include "torch/csrc/autograd/function.h"
-#include "torch/csrc/autograd/functions/special.h"
+#include "torch/csrc/autograd/generated/variable_factories.h"
 #include "torch/csrc/autograd/profiler.h"
 #include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/jit/aten_dispatch.h"
+#include "torch/csrc/jit/assertions.h"
 #include "torch/csrc/jit/fusion_compiler.h"
 #include "torch/csrc/jit/graph_executor.h"
 #include "torch/csrc/jit/ir.h"
-#include "torch/csrc/jit/tensor_conversions.h"
+#include "torch/csrc/jit/ivalue.h"
+#include "torch/csrc/jit/constants.h"
+#include "torch/csrc/jit/operator.h"
 #include "torch/csrc/variable_tensor_functions.h"
-#include "torch/csrc/autograd/generated/variable_factories.h"
 
 #include <exception>
 #include <iostream>
@@ -26,25 +27,6 @@
 #include <vector>
 
 namespace torch { namespace jit {
-
-
-// externally registered handles, currently used so that python ops
-// can be in a separate compilation unit
-static std::mutex handler_mutex;
-static std::vector<OpHandler> handlers;
-void addInterpreterOpHandler(OpHandler handler) {
-  std::lock_guard<std::mutex> guard(handler_mutex);
-  handlers.push_back(handler);
-}
-at::optional<Operation> lookupExternalOp(Node* n) {
-  std::lock_guard<std::mutex> guard(handler_mutex);
-  for(auto & handler : handlers) {
-    if(auto r = handler(n)) {
-      return *r;
-    }
-  }
-  return at::nullopt;
-}
 
 // Before we translate to intepreter instructions, we do
 // some preprocessing of the graph to turn it into a form that is closer
@@ -80,14 +62,14 @@ Value* createTripCountConjunctiveCondition(
   // Emit initial comparison -- initial_trip_count < max_trip_count
   Value* initial_comparison_value =
       g->insertNode(g->create(aten::lt, {cur_trip_count, max_trip_count}, 1))
-          ->output();
+          ->output()->setType(IntType::get());
 
   // Replace initial condition with logical `and` of trip count and
   // initial condition
   Value* new_cond =
       g->insertNode(
            g->create(aten::__and__, {initial_comparison_value, cond}, 1))
-          ->output();
+          ->output()->setType(IntType::get());
   return new_cond;
 }
 
@@ -112,9 +94,7 @@ void desugarTripCounts(Block * b) {
       {
         WithInsertPoint guard(n);
         // int i = 0
-        Value* initial_trip_count =
-            g->insertNode(g->createConstant(at::zeros({1}, at::kLong)))
-                ->output();
+        Value* initial_trip_count = g->insertConstant(0);
         // Set up initial iteration number value for loop-carried dependency
         n->removeInput(0);
         // Input 0 is now initial termination condition, insert this after that.
@@ -132,14 +112,12 @@ void desugarTripCounts(Block * b) {
         // increment the trip count at the end of the body. Then, emit the same
         // conjunctive stopping condition as above.
 
-        Value* const_one =
-            g->insertNode(g->createConstant(at::ones({1}, at::kLong)))
-                ->output();
+        Value* const_one = g->insertConstant(1);
 
         Value* inc_trip_count =
             g->insertNode(g->create(
-                    aten::add, {block_trip_count_input, const_one, const_one}, 1))
-             ->output();
+                    aten::add, {block_trip_count_input, const_one}, 1))
+             ->output()->setType(IntType::get());
         body_block->insertOutput(1, inc_trip_count);
 
         Value* body_cond = createTripCountConjunctiveCondition(
@@ -169,6 +147,7 @@ static std::vector<std::vector<TypePtr>> flattenStages(Graph & graph) {
     while(input_pos < graph.inputs().size() && graph.inputs()[input_pos]->stage() == i) {
       auto nv = store->addOutput();
       auto old_node = graph.inputs()[input_pos];
+      nv->setType(old_node->type());
       stage_input_types[i].push_back(old_node->type());
       old_node->replaceAllUsesWith(nv);
       input_pos++;
@@ -358,12 +337,9 @@ struct PreprocessGraph {
 struct ContainerTensor : public at::TensorImpl {
 public:
   ContainerTensor()
-  : TensorImpl(&(at::globalContext().getType(at::Backend::Undefined,at::ScalarType::Undefined))) {}
+  : TensorImpl(at::Backend::Undefined,at::ScalarType::Undefined, nullptr, /* is_variable */ false) {}
 
-  virtual ~ContainerTensor() {}
-  virtual const char * toString() const override {
-    throw std::runtime_error("toString() on ContainerTensor");
-  }
+  virtual ~ContainerTensor() = default;
   virtual at::IntList sizes() const override {
     throw std::runtime_error("sizes() on ContainerTensor");
   }
@@ -373,9 +349,6 @@ public:
   virtual int64_t dim() const override {
     throw std::runtime_error("dim() on ContainerTensor");
   }
-  virtual at::Scalar localScalar() override {
-    throw std::runtime_error("localScalar() on ContainerTensor");
-  }
   virtual void * unsafeGetTH(bool retain) override {
     throw std::runtime_error("unsafeGetTH() on ContainerTensor");
   }
@@ -383,31 +356,6 @@ public:
     throw std::runtime_error("storage() on ContainerTensor");
   }
 };
-
-bool hasHandleOutput(Node * n) {
-  if(n->outputs().size() == 0)
-    return false;
-  auto & last = n->outputs().back();
-  return last->isHandle() && last->uses().size() > 0; // don't bother creating a handle if it is never used
-}
-
-Operation createCppOperation(CppOp* op) {
-  std::shared_ptr<autograd::Function> func = op->fn;
-  JIT_ASSERT(!hasHandleOutput(op));
-  auto num_inputs = op->inputs().size();
-  return [=](Stack & stack) {
-    autograd::variable_list v_inputs;
-    for(size_t i = 0; i < num_inputs; i++) {
-      v_inputs.push_back(std::move(peek(stack, i, num_inputs)));
-    }
-    drop(stack, num_inputs);
-    autograd::variable_list v_outputs = (*func)(v_inputs);
-    for(auto & output : v_outputs) {
-      stack.push_back(output);
-    }
-    return 0;
-  };
-}
 
 // We need some lists for inputs and outputs. To keep all the memory
 // contiguous we allocate a single vector and use offsets into the vector
@@ -445,7 +393,7 @@ struct CodeImpl {
   CodeImpl(std::shared_ptr<Graph>& graph_)
       : preprocess(*graph_) {
     graph = preprocess.graph;
-    //std::cout << "into code graph:\n" << *graph << "\n";
+    // std::cout << "into code graph:\n" << *graph << "\n";
     insertNodesFromBlock(graph->block());
   }
 
@@ -455,7 +403,7 @@ struct CodeImpl {
     JIT_ASSERT(inst.debug_name == prim::Placeholder);
     auto offset = relativeJump(from_inst, to_inst);
     inst.callback = [offset](Stack & stack) {
-      auto t = tensor_as<int64_t>(pop(stack));
+      auto t = pop(stack).toInt();
       return (t == 0) ? offset : 0;
     };
     inst.debug_name = prim::JumpZ;
@@ -467,7 +415,7 @@ struct CodeImpl {
     JIT_ASSERT(inst.debug_name == prim::Placeholder);
     auto offset = relativeJump(from_inst, to_inst);
     inst.callback = [offset](Stack & stack) {
-      auto t = tensor_as<int64_t>(pop(stack));
+      auto t = pop(stack).toInt();
       return (t != 0) ? offset : 0;
     };
     inst.debug_name = prim::JumpNZ;
@@ -570,7 +518,7 @@ struct CodeImpl {
 
   size_t insertInstruction(Node * n) {
     auto inst = insertInstruction(n->kind(), n->getSourceLocation(), n->inputs(), moveFlags(n) , n->outputs());
-    instructions[inst].callback = getOperation(n);
+    instructions[inst].callback = getInterpreterOperation(n);
     return inst;
   }
   size_t insertInstruction(Symbol sym,
@@ -660,165 +608,21 @@ struct CodeImpl {
 
   // Returns a function implementing functionality of a given node,
   // or nullptr if it's a no-op for autograd.
-  Operation getOperation(jit::Node* node) {
-    IR_IFM(node, CppOp)
-      JIT_ASSERT(!dynamic_cast<autograd::Eval*>(value->fn.get()));
-      return createCppOperation(value);
-    IR_ELSEIF(FusionGroup)
-      auto fusion_fn = sharedFusionCompiler().getOrCompile(value);
-      auto num_inputs = value->inputs().size();
-      return [fusion_fn, num_inputs](Stack & stack) {
-        autograd::profiler::RecordFunction record("FusionGroup");
-        std::vector<at::Tensor> toutputs;
-        // TODO: have fusion_fn work off of a stack as well
-        fusion_fn->launch(last(stack, num_inputs), toutputs);
-        drop(stack, num_inputs);
-        stack.insert(stack.end(), toutputs.begin(), toutputs.end());
-        return 0;
-      };
-    IR_ELSEIF(Constant)
-      auto t = autograd::make_variable(value->t(attr::value));
-      return [t](Stack & stack) {
-        stack.push_back(t);
-        return 0;
-      };
-    IR_ELSEIF(TensorToNum)
-      // no-op
-      return [](Stack & stack) {
-        return 0;
-      };
-    IR_ELSEIF(NumToTensor)
-      // no-op
-      return [](Stack & stack) {
-        return 0;
-      };
-    IR_ELSEIF(Undefined)
-    return [](Stack & stack) {
-      stack.push_back(at::Tensor());
+  Operation getInterpreterOperation(jit::Node* node) {
+    if(node->kind() != prim::GraphExecutor) {
+      return getOperation(node);
+    }
+    // recursive graph executors cannot be Operators because they
+    // have to register themselves with the interpreter so that
+    // we can provide useful debugging information
+
+    auto executor = std::make_shared<GraphExecutor>(node->g(attr::Subgraph));
+    graph_executors.emplace_back(executor.get());
+    return [=](Stack& stack) mutable {
+      autograd::profiler::RecordFunction record("GraphExecutor");
+      executor->run(stack);
       return 0;
     };
-    IR_ELSEIF(AnyDefined)
-      size_t num_inputs = value->inputs().size();
-      auto true_ = at::full({}, 1, at::kLong);
-      auto false_ = at::full({}, 0, at::kLong);
-      return [=](Stack & stack) {
-        bool result = false;
-        for(const at::Tensor& t : last(stack, num_inputs)) {
-          if(t.defined()) {
-            result = true;
-            break;
-          }
-        }
-        drop(stack, num_inputs);
-        stack.push_back(result ? true_ : false_);
-        return 0;
-      };
-    IR_ELSEIF(AutogradAdd)
-      return [=](Stack & stack) {
-        auto a = pop(stack);
-        auto b = pop(stack);
-        if(!a.defined())
-          stack.push_back(b);
-        else if(!b.defined())
-          stack.push_back(a);
-        else
-          stack.push_back(a + b);
-        return 0;
-      };
-    IR_ELSEIF(Print)
-      size_t num_inputs = value->inputs().size();
-      return [num_inputs](Stack & stack) {
-        bool first = true;
-        for (at::Tensor i : last(stack, num_inputs)) {
-          if (!first) std::cout << " ";
-          first = false;
-          if (auto tensor_impl = dynamic_cast<at::TensorImpl*>(i.get())) {
-            std::cout << at::Tensor(tensor_impl, true);
-          } else if (!i.defined()) {
-            std::cout << "<undefined tensor>";
-          } else {
-            auto& r = *i.get();
-            std::cout << "<" << typeid(r).name() << " at " << i << ">";
-          }
-        }
-        drop(stack, num_inputs);
-        std::cout << std::endl;
-        return 0;
-      };
-    IR_ELSEIF(GraphExecutor)
-      auto executor = std::make_shared<GraphExecutor>(value->g(attr::Subgraph));
-      graph_executors.emplace_back(executor.get());
-      auto num_inputs = value->inputs().size();
-      return [=](Stack& stack) mutable {
-        autograd::profiler::RecordFunction record("GraphExecutor");
-        auto inputs = last(stack, num_inputs);
-        variable_tensor_list tinputs(inputs.begin(), inputs.end());
-        drop(stack, num_inputs);
-        //TODO: has graph executor work from a stack as well
-        variable_tensor_list toutputs = executor->run(variable_tensor_list(std::move(tinputs)));
-        stack.insert(stack.end(), toutputs.begin(), toutputs.end());
-        return 0;
-      };
-
-    // Load x, y
-    // loads values from registers onto the stack, the actual callback does
-    // nothing since the stack manipulation is already encoded in inst.inputs
-    // and inst.outputs
-    IR_ELSEIF(Load)
-      return [=](Stack& stack) {
-        return 0;
-      };
-
-    // x, y = Store
-    // stores values from stack into registers, the actual callback does
-    // nothing since the stack manipulation is already encoded in inst.inputs
-    // and inst.outputs
-    IR_ELSEIF(Store)
-      return [=](Stack& stack) {
-        return 0;
-      };
-    IR_ELSEIF(Drop)
-      auto N = value->inputs().size();
-      return [=](Stack& stack) {
-        drop(stack, N);
-        return 0;
-      };
-    IR_ELSE()
-      switch (node->kind()) {
-        case onnx::Reshape: {
-          return [=](Stack& stack) {
-            auto shape = pop(stack).contiguous();
-            auto input = pop(stack);
-            JIT_ASSERT(shape.ndimension() == 1);
-            at::IntList shape_list(shape.data<int64_t>(), shape.size(0));
-            stack.push_back(input.reshape(shape_list));
-            return 0;
-          };
-        } break;
-        case onnx::Shape: {
-          return [=](Stack& stack) {
-            auto t = pop(stack);
-            at::IntList sizes = t.sizes();
-            auto sizes_tensor = torch::empty({static_cast<int64_t>(sizes.size())}, at::dtype(at::kLong));
-            auto accessor = sizes_tensor.accessor<int64_t, 1>();
-            for (size_t i=0; i<sizes.size(); ++i) {
-              accessor[i] = sizes[i];
-            }
-            stack.push_back(sizes_tensor);
-            return 0;
-          };
-        } break;
-        default: ;
-      };
-
-      // ops registered in another compilation unit
-      // eg: the PythonOp handler
-      if(auto op = lookupExternalOp(node)) {
-        return *op;
-      }
-
-      return getTensorOp(node).op;
-    IR_END()
   }
 
   const std::vector<GraphExecutor*>& executors() {
@@ -881,8 +685,8 @@ struct CodeImpl {
 
 // InterpreterState state that is held across stages and used to compute a Code
 struct InterpreterStateImpl {
-  InterpreterStateImpl(const Code & function_)
-  : function(function_.pImpl),
+  InterpreterStateImpl(const Code & code)
+  : function(code.pImpl),
     int_data(function->int_data.data()),
     bool_data(function->bool_data),
     registers(function->register_size) {
@@ -957,7 +761,7 @@ struct InterpreterStateImpl {
   // in the case where it is true, then the interpreter and this array get copied
   // if this every becomes a bottleneck then we _should_ consider minimizing the
   // total number or register
-  std::vector<at::Tensor> registers;
+  std::vector<IValue> registers;
 
   // single buffer for input/output calls to ATen functions, so that we do not reallocate
   Stack stack;
@@ -971,18 +775,18 @@ std::ostream & operator<<(std::ostream & out, const Code & code) {
 
 Code::Code(std::shared_ptr<Graph>& graph)
     : pImpl(new CodeImpl(graph)) {}
-Code::~Code() {}
+Code::~Code() = default;
 
 const std::vector<GraphExecutor*>& Code::executors() {
   return pImpl->executors();
 }
 
-InterpreterState::InterpreterState(const Code & function)
-  : pImpl(new InterpreterStateImpl(function)) {}
-InterpreterState::~InterpreterState() {}
+InterpreterState::InterpreterState(const Code & code)
+  : pImpl(new InterpreterStateImpl(code)) {}
+InterpreterState::~InterpreterState() = default;
 
 void InterpreterState::runOneStage(Stack & stack) {
-    return pImpl->runOneStage(stack);
+  return pImpl->runOneStage(stack);
 }
 
 const TensorType & InterpreterState::tensorTypeForInput(size_t i) const {

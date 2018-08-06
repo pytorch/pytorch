@@ -11,14 +11,12 @@
 
 #include <gloo/transport/tcp/device.h>
 
-#include "CUDAUtils.hpp"
-#include "FileStore.hpp"
-#include "ProcessGroupGloo.hpp"
-#include "test/TestUtils.hpp"
+#include <c10d/CUDAUtils.hpp>
+#include <c10d/FileStore.hpp>
+#include <c10d/ProcessGroupGloo.hpp>
+#include <c10d/test/TestUtils.hpp>
 
 using namespace c10d::test;
-
-using c10d::CUDADevice;
 
 class SignalTest {
  public:
@@ -202,8 +200,11 @@ void testBroadcast(const std::string& path, const at::Backend b) {
       // Initialize inputs
       for (auto k = 0; k < size; k++) {
         inputs[k].resize(stride);
+        at::DeviceGuard deviceGuard;
         for (auto l = 0; l < stride; l++) {
-          CUDADevice device(type.is_cuda() ? l : -1);
+          if (type.is_cuda()) {
+            deviceGuard.set_index(l);
+          }
           inputs[k][l] = at::ones(type, {16, 16}) * (k * stride + l);
         }
       }

@@ -1,5 +1,6 @@
 #include "ulp_neon.h"
 #include "caffe2/core/timer.h"
+#include "caffe2/utils/eigen_utils.h"
 #include "caffe2/utils/math.h"
 
 namespace caffe2 {
@@ -437,7 +438,7 @@ void run2b1bConvIm2ColGEMM(QConvState* state,
   const size_t QK = KH * KW * divRoundUp(X.dim32(3), 8);
   Y->Resize(X.dim32(0), OH, OW, OC);
   if (!state->WQPacked) {
-    state->WQPacked = caffe2::make_unique<TensorCPU>();
+    state->WQPacked = caffe2::make_unique<Tensor>(CPU);
     qpack_tiles<kGEMMTileSize, kGEMMTileDepthBytes>(state, *(state->WQ), 1, state->WQPacked.get());
     CAFFE_ENFORCE_EQ(state->WQPacked->dim32(0), divRoundUp(OC, kGEMMTileSize));
     CAFFE_ENFORCE_EQ(state->WQPacked->dim32(1), divRoundUp(QK, kGEMMTileDepthBytes));

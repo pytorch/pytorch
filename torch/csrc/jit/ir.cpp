@@ -1,6 +1,10 @@
 #include "ir.h"
 
+
+#include "torch/csrc/jit/operator.h"
 #include "torch/csrc/autograd/function.h"
+#include "torch/csrc/jit/constants.h"
+#include "torch/csrc/jit/assertions.h"
 
 #include <iostream>
 #include <unordered_map>
@@ -14,7 +18,6 @@
 namespace torch { namespace jit {
 
 // Sigh, see https://stackoverflow.com/questions/8016780/undefined-reference-to-static-constexpr-char
-constexpr Symbol CppOp::Kind;
 constexpr Symbol PythonOp::Kind;
 
 constexpr int max_tensor_display_size = 10;
@@ -40,14 +43,10 @@ std::ostream& operator<<(std::ostream & out, const at::ArrayRef<T> & nodes) {
   return out;
 }
 
-std::string CppOp::name() const {
-  return fn->name();
-}
-
 struct const_value_list_with_types {
-  const std::vector<const Value*>& values;
+  const ArrayRef<const Value*> values;
   bool use_newlines;
-  const_value_list_with_types(const std::vector<const Value*>& values, bool use_newlines = false)
+  const_value_list_with_types(ArrayRef<const Value*> values, bool use_newlines = false)
     : values(values), use_newlines(use_newlines) {}
 };
 std::ostream& operator<<(std::ostream & out, const_value_list_with_types l) {
@@ -83,6 +82,20 @@ void printPrimList(std::ostream & out, const std::vector<T> & items) {
   }
   out << "]";
 }
+
+std::string escapeString(std::string s) {
+  std::vector<char> search = {'\n', '\t', '\v'};
+  std::vector<std::string> replace = {"\\n", "\\t", "\\v"};
+  for (size_t i = 0; i < search.size(); i++) {
+    size_t pos = s.find(search[i]);
+    while(pos != std::string::npos) {
+      s.replace(pos, 1, replace[i]);
+      pos = s.find(search[i], pos + 1);
+    }
+  }
+  return s;
+}
+
 void printAttributes(std::ostream & out, const Node * n, bool ignore_subgraph=false) {
   out << "[";
   auto names = n->attributeNames();
@@ -111,7 +124,7 @@ void printAttributes(std::ostream & out, const Node * n, bool ignore_subgraph=fa
         printPrimList(out,n->is(name));
         break;
       case AttributeKind::s:
-        out << n->s(name);
+        out << escapeString(n->s(name));
         break;
       case AttributeKind::ss:
         printPrimList(out,n->ss(name));
@@ -169,8 +182,6 @@ std::ostream& printNode(std::ostream & out, size_t level, const Node * n, std::v
   IR_IFM_CONST(n,PythonOp)
     out << "^" << value->name();
     value->writeScalars(out);
-  IR_ELSEIFM_CONST(CppOp)
-    out << "CppOp[" << value->name() << "]";
   IR_ELSE()
     if(n->hasAttribute(attr::Subgraph) && groups) {
       out << n->kind().toQualString() << "_" << groups->size();
@@ -243,7 +254,7 @@ static void checkSameDevice(const Node* node) {
   bool has_device = false;
   int device;
   auto checkValue = [&](const Value* v) {
-    if(TensorType* type = v->type()->cast<TensorType>()) {
+    if(TensorTypePtr type = v->type()->cast<TensorType>()) {
       if(!has_device) {
         has_device = true;
         device = type->device();
@@ -289,10 +300,6 @@ void Node::lint() const {
       JIT_ASSERT(std::find(ALL_OF(input->uses_), Use(const_cast<Node*>(this), i)) != input->uses_.end());
       JIT_ASSERT(stage_ >= input->stage_);
       JIT_ASSERT(graph_->all_nodes.count(this) == 1);
-      // Handle invariant
-      if (i != inputs_.size() - 1) {
-        JIT_ASSERT(input->type()->kind() != TypeKind::HandleType);
-      }
       i++;
     }
   }
@@ -334,8 +341,6 @@ void Node::lint() const {
     }
     JIT_ASSERT(n_scalars == value->scalar_args.size());
     JIT_ASSERT(n_tensors == inputs_.size());
-  IR_ELSEIFM_CONST(CppOp)
-    // TODO: add invariants
   IR_ELSEIF(Eval)
     // TODO: add invariants
   // TODO: It's not good for these ops to be top-level, it makes cases longer.
@@ -364,7 +369,7 @@ void Graph::lint() const {
   // - every use will occur later in the topsort
 
   struct LintScope {
-    LintScope() {}
+    LintScope() = default;
     LintScope(std::unique_ptr<LintScope> parent)
     : parent(std::move(parent)) {}
     bool contains(const Value * v) {
@@ -415,7 +420,7 @@ void Graph::lint() const {
     void check_node(const Node* n) {
       for (auto input : n->inputs_) {
         if (!scope->contains(input)) {
-          JIT_ASSERTM(0, "%%%d not in scope", input->unique());
+          JIT_ASSERTM(0, input->unique(), " not in scope");
         }
       }
       JIT_ASSERT(anticipated_uses[n] == static_cast<int64_t>(n->inputs_.size()));
@@ -496,13 +501,13 @@ void LintGraph(std::shared_ptr<Graph>& graph) {
   graph->lint();
 }
 
-void Block::cloneFrom(Block * src, std::function<Value*(Value*)> outer_map) {
+void Block::cloneFrom(Block * src, std::function<Value*(Value*)> value_map) {
   std::unordered_map<Value*, Value*> local_map;
   auto env = [&](Value * v) {
     auto it = local_map.find(v);
     if(it != local_map.end())
       return it->second;
-    return outer_map(v);
+    return value_map(v);
   };
 
   auto graph = owningGraph();
@@ -530,7 +535,7 @@ void Block::cloneFrom(Block * src, std::function<Value*(Value*)> outer_map) {
 std::shared_ptr<Graph> Graph::copy() {
   auto new_g = std::make_shared<Graph>();
   auto env = [](Value *) -> Value* {
-    barf("Graph::copy() encountered a use of a value not in scope. Run lint!");
+    AT_ERROR("Graph::copy() encountered a use of a value not in scope. Run lint!");
   };
   new_g->block()->cloneFrom(this->block(), env);
   return new_g;
@@ -577,6 +582,41 @@ Value* Value::setUniqueName(const std::string & name) {
   names[name] = this;
   unique_name_ = name;
   return this;
+}
+
+size_t findArgument(const FunctionSchema& the_schema, Symbol name) {
+  auto name_str = name.toUnqualString();
+  for (size_t i = 0; i < the_schema.arguments.size(); ++i) {
+    const Argument* arg = &the_schema.arguments[i];
+    if (arg->name == name_str) {
+      return i;
+    }
+  }
+  throw std::runtime_error(std::string("Couldn't find an argument called ") + name.toQualString());
+}
+
+at::optional<IValue> Node::get(Symbol name) const {
+  return toIValue(namedInput(name));
+}
+
+Value* Node::namedInput(Symbol name) const {
+  return input(findArgument(schema(), name));
+}
+
+bool Node::matches(const char *signature_literal, at::ArrayRef<Symbol> const_inputs) {
+  if (!sig(signature_literal).matches(this)) return false;
+  for (Symbol s : const_inputs) {
+    if (!is_constant(s)) return false;
+  }
+  return true;
+}
+
+void Node::dump() const {
+  std::cout << *this << "\n";
+}
+
+void Node::findSchema() const {
+  schema_ = &getOperatorFor(this).schema();
 }
 
 PythonOp* defaultAllocPythonOp(Graph*g) {

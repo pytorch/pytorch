@@ -41,7 +41,7 @@ TEST_CASE("TensorOptions/ConstructsWellFromCUDATypes", "[cuda]") {
   REQUIRE_OPTIONS(kCUDA, 5, kFloat, kSparse);
 }
 
-TEST_CASE("TensorOptions/ConstructsWellFromCUDATensors", "[cuda]") {
+TEST_CASE("TensorOptions/ConstructsWellFromCUDATensors", "[multi-cuda]") {
   auto options = TensorOptions(empty(5, device(kCUDA).dtype(kDouble)));
   REQUIRE_OPTIONS(kCUDA, 0, kDouble, kStrided);
 
@@ -66,7 +66,7 @@ TEST_CASE("TensorOptions/ConstructsWellFromCUDATensors", "[cuda]") {
   }
 }
 
-TEST_CASE("OptionsGuardCUDA", "[cuda]") {
+TEST_CASE("OptionsGuardCUDA", "[multi-cuda]") {
   Tensor tensor;
   {
     OptionsGuard guard(device(kCUDA));
@@ -87,7 +87,7 @@ TEST_CASE("OptionsGuardCUDA", "[cuda]") {
   REQUIRE_TENSOR_OPTIONS(kCUDA, 0, kInt, kStrided);
 }
 
-TEST_CASE("DeviceGuardOptionsGuardInteraction", "[cuda]") {
+TEST_CASE("DeviceGuardOptionsGuardInteraction", "[multi-cuda]") {
   Tensor tensor;
   {
     // Check that OptionsGuard respects any active device before construction.
@@ -110,4 +110,19 @@ TEST_CASE("DeviceGuardOptionsGuardInteraction", "[cuda]") {
       }
     }
   }
+}
+
+TEST_CASE("DeviceGuardIsMovable", "[cuda]") {
+  DeviceGuard first(1);
+  REQUIRE(first.original_index() == 0);
+  REQUIRE(first.last_index() == 1);
+  DeviceGuard second(std::move(first));
+  REQUIRE(second.original_index() == 0);
+  REQUIRE(second.last_index() == 1);
+  REQUIRE(first.original_index() == -1);
+  DeviceGuard third;
+  third = std::move(second);
+  REQUIRE(third.original_index() == 0);
+  REQUIRE(third.last_index() == 1);
+  REQUIRE(second.original_index() == -1);
 }

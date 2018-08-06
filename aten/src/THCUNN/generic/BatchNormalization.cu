@@ -11,7 +11,7 @@ static THCDeviceTensor<real, Dim> THNN_(devicetensor)(THCState *state, THCTensor
     return THCDeviceTensor<real, Dim>();
   }
 
-  int inDim = THCTensor__nDimension(state, t);
+  int inDim = THCTensor_nDimensionLegacyAll(state, t);
   if (inDim == Dim) {
     return toDeviceTensor<real, Dim>(state, t);
   }
@@ -21,11 +21,11 @@ static THCDeviceTensor<real, Dim> THNN_(devicetensor)(THCState *state, THCTensor
   int size[Dim];
   for (int i = 0; i < Dim || i < inDim; ++i) {
     if (i < Dim && i < inDim) {
-      size[i] = t->size[i];
+      size[i] = THTensor_sizeLegacyNoScalars(t, i);
     } else if (i < Dim) {
       size[i] = 1;
     } else {
-      size[Dim - 1] *= t->size[i];
+      size[Dim - 1] *= THTensor_sizeLegacyNoScalars(t, i);
     }
   }
   return THCDeviceTensor<real, Dim>(t->data<real>(), size);

@@ -53,13 +53,13 @@ class WhereOp final : public Operator<Context> {
       for (int i = 0; i < select.size(); i++) {
         size_t offset = i * block_size;
         if (select_data[i]) {
-          context_.template CopyItems<Context, Context>(
+          context_.CopyItemsSameDevice(
               output->meta(),
               block_size,
               left_data + offset,
               output_data + offset);
         } else {
-          context_.template CopyItems<Context, Context>(
+          context_.CopyItemsSameDevice(
               output->meta(),
               block_size,
               right_data + offset,

@@ -18,7 +18,7 @@ TEST_CASE( "undefined tensor test", "[]" ) {
   std::stringstream ss;
   ss << und << std::endl;
   REQUIRE(!und.defined());
-  REQUIRE(std::string("UndefinedTensor") == und.toString());
+  REQUIRE(std::string("UndefinedType") == und.toString());
 
   REQUIRE_THROWS_WITH(und.strides(), Catch::Contains("strides"));
   REQUIRE_THROWS_WITH(und.dim(), Catch::Contains("dim"));

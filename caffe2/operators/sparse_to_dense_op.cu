@@ -1,4 +1,4 @@
-#include "sparse_to_dense_op.h"
+#include "caffe2/operators/sparse_to_dense_op.h"
 
 #include "caffe2/core/common_gpu.h"
 #include "caffe2/core/context_gpu.h"

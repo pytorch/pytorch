@@ -1,5 +1,6 @@
 from numbers import Number
 import torch
+from torch._six import inf, nan
 import math
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
@@ -27,15 +28,15 @@ class StudentT(Distribution):
     @property
     def mean(self):
         m = self.loc.clone()
-        m[self.df <= 1] = float('nan')
+        m[self.df <= 1] = nan
         return m
 
     @property
     def variance(self):
         m = self.df.clone()
         m[self.df > 2] = self.scale[self.df > 2].pow(2) * self.df[self.df > 2] / (self.df[self.df > 2] - 2)
-        m[(self.df <= 2) & (self.df > 1)] = float('inf')
-        m[self.df <= 1] = float('nan')
+        m[(self.df <= 2) & (self.df > 1)] = inf
+        m[self.df <= 1] = nan
         return m
 
     def __init__(self, df, loc=0., scale=1., validate_args=None):

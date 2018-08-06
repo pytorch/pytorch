@@ -148,6 +148,11 @@ def _symbolic_pack_padded_sequence(g, input, lengths, batch_first=False, padding
     # optimization pass to remove this later. It is an error if all
     # PackPadded operators cannot be optimized out.
 
+    if not isinstance(input, torch._C.Value):
+        raise RuntimeError("PackPadded requires `input` to be a Tensor")
+    if not isinstance(lengths, torch._C.Value):
+        raise RuntimeError("PackPadded requires `lengths` to be a Tensor")
+
     def _onnx_symbolic_pack_padded_sequence(g, input, lengths):
         if batch_first:
             input = g.op('Transpose', input, perm_i=[1, 0, 2])
@@ -168,8 +173,7 @@ def _symbolic_pack_padded_sequence(g, input, lengths, batch_first=False, padding
     return tuple(o for o in outputs)
 
 
-pack_padded_sequence = torch.onnx.symbolic_override_first_arg_based(
-    _symbolic_pack_padded_sequence)(pack_padded_sequence)
+pack_padded_sequence = torch.onnx.symbolic_override(_symbolic_pack_padded_sequence)(pack_padded_sequence)
 
 
 def pad_packed_sequence(sequence, batch_first=False, padding_value=0.0, total_length=None):
@@ -264,8 +268,7 @@ def _symbolic_pad_packed_sequence(g, input, batch_first=False, padding_value=0.0
     return data, lengths
 
 
-pad_packed_sequence = torch.onnx.symbolic_override_packed_sequence_based(
-    _symbolic_pad_packed_sequence)(pad_packed_sequence)
+pad_packed_sequence = torch.onnx.symbolic_override(_symbolic_pad_packed_sequence)(pad_packed_sequence)
 
 
 def pad_sequence(sequences, batch_first=False, padding_value=0):

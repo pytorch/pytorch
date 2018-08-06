@@ -16,7 +16,6 @@
 #include "torch/csrc/autograd/generated/VariableType.h"
 #include "torch/csrc/autograd/utils/python_error_messages.h"
 #include "torch/csrc/autograd/utils/wrap_outputs.h"
-#include "torch/csrc/jit/tracer_state.h"
 #include "torch/csrc/tensor/python_tensor.h"
 #include "torch/csrc/utils/auto_gil.h"
 #include "torch/csrc/utils/cuda_lazy_init.h"

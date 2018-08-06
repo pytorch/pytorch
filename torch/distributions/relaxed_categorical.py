@@ -1,7 +1,7 @@
 import torch
 from torch.distributions import constraints
 from torch.distributions.categorical import Categorical
-from torch.distributions.utils import clamp_probs, broadcast_all, _log_sum_exp
+from torch.distributions.utils import clamp_probs, broadcast_all
 from torch.distributions.distribution import Distribution
 from torch.distributions.transformed_distribution import TransformedDistribution
 from torch.distributions.transforms import ExpTransform
@@ -9,8 +9,10 @@ from torch.distributions.transforms import ExpTransform
 
 class ExpRelaxedCategorical(Distribution):
     r"""
-    Creates a ExpRelaxedCategorical parameterized by `probs` and `temperature`.
-    Returns the log of a point in the simplex. Based on the interface to OneHotCategorical.
+    Creates a ExpRelaxedCategorical parameterized by
+    :attr:`temperature`, and either :attr:`probs` or :attr:`logits`.
+    Returns the log of a point in the simplex. Based on the interface to
+    :class:`OneHotCategorical`.
 
     Implementation based on [1].
 
@@ -58,7 +60,7 @@ class ExpRelaxedCategorical(Distribution):
         uniforms = clamp_probs(self.logits.new(self._extended_shape(sample_shape)).uniform_())
         gumbels = -((-(uniforms.log())).log())
         scores = (self.logits + gumbels) / self.temperature
-        return scores - _log_sum_exp(scores)
+        return scores - scores.logsumexp(dim=-1, keepdim=True)
 
     def log_prob(self, value):
         K = self._categorical._num_events
@@ -68,15 +70,16 @@ class ExpRelaxedCategorical(Distribution):
         log_scale = (self.temperature.new(self.temperature.shape).fill_(K).lgamma() -
                      self.temperature.log().mul(-(K - 1)))
         score = logits - value.mul(self.temperature)
-        score = (score - _log_sum_exp(score)).sum(-1)
+        score = (score - score.logsumexp(dim=-1, keepdim=True)).sum(-1)
         return score + log_scale
 
 
 class RelaxedOneHotCategorical(TransformedDistribution):
     r"""
-    Creates a RelaxedOneHotCategorical distribution parametrized by `temperature` and either `probs` or `logits`.
-    This is a relaxed version of the `OneHotCategorical` distribution, so its
-    values are on simplex, and has reparametrizable samples.
+    Creates a RelaxedOneHotCategorical distribution parametrized by
+    :attr:`temperature`, and either :attr:`probs` or :attr:`logits`.
+    This is a relaxed version of the :class:`OneHotCategorical` distribution, so
+    its samples are on simplex, and are reparametrizable.
 
     Example::
 

@@ -81,16 +81,12 @@
 - name: acos(Tensor self)
   self: grad * -((-self * self + 1).rsqrt())
 
+- name: add(Tensor self, Tensor other, *, Scalar alpha)
+  self: grad
+  other: maybe_multiply(grad, alpha)
+
 - name: add(Tensor self, Scalar other, *, Scalar alpha)
   self: grad
-
-- name: s_native_add(Tensor self, Tensor other, *, Scalar alpha)
-  self: grad
-  other: maybe_multiply(grad, alpha)
-
-- name: th_add(Tensor self, Tensor other, *, Scalar alpha)
-  self: grad
-  other: maybe_multiply(grad, alpha)
 
 - name: addbmm(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta, Scalar alpha)
   self: maybe_multiply(grad, beta)
@@ -172,11 +168,10 @@
 - name: ceil(Tensor self)
   self: zeros_like(grad)
 
-# For clamp, clamp_min, and clamp_max, gradient is not defined at the
-# boundaries. But empirically it's helpful to be able to get gradient on min and
-# max, so we return the subgradient 1 for these cases.
+# For clamp, gradient is not defined at the boundaries. But empirically it's helpful 
+# to be able to get gradient on min and max, so we return the subgradient 1 for these cases.
 - name: clamp(Tensor self, Scalar min, Scalar max)
-  self: grad * ((self >= min) * (self <= max)).type_as(grad)
+  self: clamp_backward(grad, self, min, max)
 
 - name: clamp_min(Tensor self, Scalar min)
   self: grad * (self >= min).type_as(grad)
@@ -206,6 +201,9 @@
 - name: conv_tbc(Tensor self, Tensor weight, Tensor bias, int64_t pad)
   self, weight, bias: conv_tbc_backward(grad, self, weight, bias, pad)
 
+- name: _ctc_loss(Tensor log_probs, Tensor targets, IntList input_lengths, IntList target_lengths, int64_t blank)
+  log_probs: _ctc_loss_backward(grad, log_probs, targets, input_lengths, target_lengths, result0, result1, blank)
+
 - name: det(Tensor self)
   self: det_backward(grad, self, result)
 
@@ -219,12 +217,12 @@
   self: norm_backward(grad, self - other, p, result)
   other: -norm_backward(grad, self - other, p, result)
 
-- name: div(Tensor self, Scalar other)
-  self: grad / other
-
 - name: div(Tensor self, Tensor other)
   self: grad / other
   other: -grad * self / (other * other)
+
+- name: div(Tensor self, Scalar other)
+  self: grad / other
 
 - name: dot(Tensor self, Tensor tensor)
   self: grad * tensor
@@ -243,6 +241,9 @@
 - name: erf(Tensor self)
   self: 2.0 / sqrt(M_PI) * exp(-(self.pow(2))) * grad
 
+- name: erfc(Tensor self)
+  self: -2.0 / sqrt(M_PI) * exp(-(self.pow(2))) * grad
+
 - name: erfinv(Tensor self)
   self: 0.5 * sqrt(M_PI) * exp(self.erfinv().pow(2)) * grad
 
@@ -253,7 +254,7 @@
   self: grad * (result + 1)
 
 - name: expand(Tensor self, IntList size, *, bool implicit)
-  self: reduce_to(grad, self.sizes())
+  self: at::sum_to(grad, self.sizes())
 
 - name: exponential_(Tensor self, double lambd, Generator generator)
   self: zeros_like(grad)
@@ -310,6 +311,12 @@
   self: gesv_backward_self(grad, self, A)
   A: gesv_backward_A(grad, self, A, result0)
 
+- name: grid_sampler_2d(Tensor input, Tensor grid, int64_t interpolation_mode, int64_t padding_mode)
+  input, grid: grid_sampler_2d_backward(grad, input, grid, interpolation_mode, padding_mode)
+
+- name: grid_sampler_3d(Tensor input, Tensor grid, int64_t interpolation_mode, int64_t padding_mode)
+  input, grid: grid_sampler_3d_backward(grad, input, grid, interpolation_mode, padding_mode)
+
 - name: gt_(Tensor self, Scalar other)
   self: zeros_like(self)
 
@@ -339,10 +346,10 @@
   self: at::zeros(self.sizes(), grad.type()).index_add_(dim, index, grad)
 
 - name: inverse(Tensor self)
-  self: -at::mm(output.t(), at::mm(grad, output.t()))
+  self: -at::mm(result.t(), at::mm(grad, result.t()))
 
 - name: kthvalue(Tensor self, int64_t k, int64_t dim, bool keepdim)
-  self: index_select_backward(grad, dim, indices, self.sizes(), keepdim)
+  self: index_select_backward(grad, dim, result1, self.sizes(), keepdim)
 
 - name: le_(Tensor self, Scalar other)
   self: zeros_like(self)
@@ -407,7 +414,7 @@
   self: zeros_like(self).masked_scatter_(mask, grad)
 
 - name: max(Tensor self, int64_t dim, bool keepdim)
-  self: index_select_backward(grad, dim, max_indices, self.sizes(), keepdim)
+  self: index_select_backward(grad, dim, result1, self.sizes(), keepdim)
 
 - name: max(Tensor self)
   self: select_equals_backward(grad, self, result)
@@ -440,10 +447,10 @@
 # The backward implementation is correct in the sense that it returns the
 # subgradient on one side.
 - name: median(Tensor self, int64_t dim, bool keepdim)
-  self: index_select_backward(grad, dim, indices, self.sizes(), keepdim)
+  self: index_select_backward(grad, dim, result1, self.sizes(), keepdim)
 
 - name: min(Tensor self, int64_t dim, bool keepdim)
-  self: index_select_backward(grad, dim, min_indices, self.sizes(), keepdim)
+  self: index_select_backward(grad, dim, result1, self.sizes(), keepdim)
 
 - name: min(Tensor self)
   self: select_equals_backward(grad, self, result)
@@ -457,22 +464,21 @@
   mat2: mm_mat2_backward(grad, self, mat2.sizes(), mat2.strides(), 1)
 
 - name: mode(Tensor self, int64_t dim, bool keepdim)
-  self: index_select_backward(grad, dim, indices, self.sizes(), keepdim)
+  self: index_select_backward(grad, dim, result1, self.sizes(), keepdim)
+
+- name: mul(Tensor self, Tensor other)
+  self: grad * other
+  other: grad * self
 
 - name: mul(Tensor self, Scalar other)
   self: grad * other
 
-- name: s_native_mul(Tensor self, Tensor other)
-  self: grad * other
-  other: grad * self
-
-- name: th_mul(Tensor self, Tensor other)
-  self: grad * other
-  other: grad * self
-
 - name: mv(Tensor self, Tensor vec)
   self: grad.ger(vec)
   vec: self.t().mv(grad)
+
+- name: mvlgamma(Tensor self, int64_t p)
+  self: mvlgamma_backward(grad, self, p)
 
 - name: ne_(Tensor self, Scalar other)
   self: zeros_like(self)
@@ -576,7 +582,7 @@
   self: repeat_backward(grad, self.dim(), repeats)
 
 # DO NOT define a backward for reshape!
-# reshape is special in that it sometimes returns a view, and somtimes not.
+# reshape is special in that it sometimes returns a view, and sometimes not.
 # Defining a backward will make codegen spit out the forward call as
 #     as_variable(baseType->reshape(self)),
 # making it impossible (hard) to detect when it is actually a view.
@@ -653,16 +659,12 @@
 - name: std(Tensor self, int64_t dim, bool unbiased, bool keepdim)
   self: var_backward(grad / (result * 2), self, dim, unbiased, keepdim)
 
+- name: sub(Tensor self, Tensor other, *, Scalar alpha)
+  self: grad
+  other: -grad * alpha
+
 - name: sub(Tensor self, Scalar other, *, Scalar alpha)
   self: grad
-
-- name: s_native_sub(Tensor self, Tensor other, *, Scalar alpha)
-  self: grad
-  other: -grad * alpha
-
-- name: th_sub(Tensor self, Tensor other, *, Scalar alpha)
-  self: grad
-  other: -grad * alpha
 
 - name: _sum(Tensor self)
   self: grad.expand(self.sizes())
@@ -674,13 +676,16 @@
   self: svd_backward(grads, self, some, res1, res2, res3)  # resX are defined in Declarations.cwrap
 
 - name: symeig(Tensor self, bool eigenvectors, bool upper)
-  self: not_implemented("symeig")
+  self: symeig_backward(grads, self, eigenvectors, upper, res1, res2)
 
 - name: t(Tensor self)
   self: grad.t()
 
 - name: flip(Tensor self, IntList dims)
   self: grad.flip(dims)
+
+- name: rot90(Tensor self, int64_t k, IntList dims)
+  self: grad.rot90(-k, dims)
 
 - name: take(Tensor self, Tensor index)
   self: zeros_like(self).put_(index, grad, true)
@@ -769,8 +774,8 @@
 - name: embedding(Tensor weight, Tensor indices, int64_t padding_idx, bool scale_grad_by_freq, bool sparse)
   weight: embedding_backward(grad, indices, weight.size(0), padding_idx, scale_grad_by_freq, sparse)
 
-- name: embedding_bag(Tensor weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq, int64_t mode, bool sparse)
-  weight: embedding_bag_backward(grad, indices, offsets, result1, result2, result3, weight.size(0), scale_grad_by_freq, mode, sparse)
+- name: _embedding_bag(Tensor weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq, int64_t mode, bool sparse)
+  weight: _embedding_bag_backward(grad, indices, offsets, result1, result2, result3, weight.size(0), scale_grad_by_freq, mode, sparse)
 
 - name: embedding_renorm_(Tensor self, Tensor indices, double max_norm, double norm_type)
   self: not_implemented("embedding_renorm")
@@ -806,8 +811,8 @@
 - name: relu(Tensor self)
   self: threshold_backward(grad, self, 0, 0)
 
-- name: elu_forward(Tensor self, Scalar alpha, Scalar scale)
-  self: elu_backward(grad, alpha, scale, output)
+- name: elu_forward(Tensor self, Scalar alpha, Scalar scale, Scalar input_scale)
+  self: elu_backward(grad, alpha, scale, input_scale, output)
 
 - name: glu_forward(Tensor self, int64_t dim)
   self: glu_backward(grad, self, dim)
@@ -885,14 +890,14 @@
 - name: upsample_trilinear3d_forward(Tensor self, IntList output_size, bool align_corners)
   self: upsample_trilinear3d_backward(grad, output_size, self.sizes(), align_corners)
 
-- name: upsample_nearest1d_forward(Tensor self, int64_t scale_factor)
-  self: upsample_nearest1d_backward(grad, self, scale_factor)
+- name: upsample_nearest1d_forward(Tensor self, IntList output_size)
+  self: upsample_nearest1d_backward(grad, output_size, self.sizes())
 
-- name: upsample_nearest2d_forward(Tensor self, int64_t scale_factor)
-  self: upsample_nearest2d_backward(grad, self, scale_factor)
+- name: upsample_nearest2d_forward(Tensor self, IntList output_size)
+  self: upsample_nearest2d_backward(grad, output_size, self.sizes())
 
-- name: upsample_nearest3d_forward(Tensor self, int64_t scale_factor)
-  self: upsample_nearest3d_backward(grad, self, scale_factor)
+- name: upsample_nearest3d_forward(Tensor self, IntList output_size)
+  self: upsample_nearest3d_backward(grad, output_size, self.sizes())
 
 - name: adaptive_avg_pool2d_forward(Tensor self, IntList output_size)
   self: adaptive_avg_pool2d_backward(grad, self)
@@ -1004,9 +1009,9 @@
   grad_output: avg_pool3d(grad, kernel_size, stride, padding, ceil_mode, count_include_pad)
   self: zeros_like(self)
 
-- name: elu_backward(Tensor grad_output, Scalar alpha, Scalar scale, Tensor output)
-  grad_output: elu_backward(grad, alpha, scale, output)
-  output: grad * grad_output * (output < 0).toType(grad.type())
+- name: elu_backward(Tensor grad_output, Scalar alpha, Scalar scale, Scalar input_scale, Tensor output)
+  grad_output: elu_backward(grad, alpha, scale, input_scale, output)
+  output: grad * grad_output * input_scale * (output < 0).toType(grad.type())
 
 - name: fractional_max_pool2d_backward(Tensor grad_output, Tensor self, IntList kernel_size, IntList output_size, Tensor indices)
   grad_output: max_pool_double_backward(grad, indices, 2)
@@ -1125,17 +1130,14 @@
 - name: upsample_trilinear3d_backward(Tensor grad_output, IntList output_size, IntList input_size, bool align_corners)
   grad_output: upsample_trilinear3d(grad, output_size, align_corners)
 
-- name: upsample_nearest1d_backward(Tensor grad_output, Tensor self, int64_t scale_factor)
-  grad_output: upsample_nearest1d(grad, scale_factor)
-  self: zeros_like(grad)
+- name: upsample_nearest1d_backward(Tensor grad_output, IntList output_size, IntList input_size)
+  grad_output: upsample_nearest1d(grad, output_size)
 
-- name: upsample_nearest2d_backward(Tensor grad_output, Tensor self, int64_t scale_factor)
-  grad_output: upsample_nearest2d(grad, scale_factor)
-  self: zeros_like(grad)
+- name: upsample_nearest2d_backward(Tensor grad_output, IntList output_size, IntList input_size)
+  grad_output: upsample_nearest2d(grad, output_size)
 
-- name: upsample_nearest3d_backward(Tensor grad_output, Tensor self, int64_t scale_factor)
-  grad_output: upsample_nearest3d(grad, scale_factor)
-  self: zeros_like(grad)
+- name: upsample_nearest3d_backward(Tensor grad_output, IntList output_size, IntList input_size)
+  grad_output: upsample_nearest3d(grad, output_size)
 
 - name: _sigmoid_backward(Tensor grad_output, Tensor output)
   grad_output: _sigmoid_backward(grad, output)
@@ -1146,6 +1148,8 @@
   output: -2 * output * grad * grad_output
 
 # cudnn
+- name: _cudnn_ctc_loss(Tensor log_probs, Tensor targets, IntList input_lengths, IntList target_lengths, int64_t blank, bool deterministic)
+  log_probs: result1
 
 - name: cudnn_convolution_transpose(Tensor self, Tensor weight, Tensor bias, IntList padding, IntList output_padding, IntList stride, IntList dilation, int64_t groups, bool benchmark, bool deterministic)
   self, weight, bias: cudnn_convolution_transpose_backward(self, grad, weight, padding, output_padding, stride, dilation, groups, benchmark, deterministic, grad_input_mask)
@@ -1203,9 +1207,15 @@
   input, hx, cx, weight: "_cudnn_rnn_backward(input, weight, weight_stride0, result4, hx, cx, result0, grads[0], grads[1], grads[2], mode, hidden_size, num_layers, batch_first, dropout, train, bidirectional, batch_sizes, dropout_state, retain_variables ? result3.clone() : result3, grad_input_mask)"
 
 # mkldnn
-- name: mkldnn_convolution(Tensor self, Tensor weight, Tensor bias, IntList padding, IntList stride, IntList dilation)
-  self, weight, bias: mkldnn_convolution_backward(self, grad, weight, padding, stride, dilation, grad_input_mask)
+- name: mkldnn_convolution(Tensor self, Tensor weight, Tensor bias, IntList padding, IntList stride, IntList dilation, int64_t groups)
+  self, weight, bias: mkldnn_convolution_backward(self, grad, weight, padding, stride, dilation, groups, grad_input_mask)
 
 # fft
 - name: _fft_with_size(Tensor self, int64_t signal_ndim, bool complex_input, bool complex_output, bool inverse, IntList checked_signal_sizes, bool normalized, bool onesided, IntList output_sizes)
   self: fft_backward(self, grad, signal_ndim, complex_input, complex_output, inverse, checked_signal_sizes, normalized, onesided, output_sizes)
+
+- name: unbind(Tensor self, int64_t dim)
+  self: stack(to_tensor_list(grads), dim)
+
+- name: stack(TensorList tensors, int64_t dim)
+  tensors: unbind(grad, dim)

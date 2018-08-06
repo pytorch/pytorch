@@ -304,7 +304,7 @@ if (USE_MKL AND USE_IDEEP)
   
   if (MKLDNN_INCLUDE_DIR)
     list(APPEND IDEEP_INCLUDE_DIR ${MKLDNN_INCLUDE_DIR})
-    list(APPEND __ideep_looked_for ${MKLDNN_INCLUDE_DIR})
+    list(APPEND __ideep_looked_for MKLDNN_INCLUDE_DIR)
     # to avoid adding conflicting submodels
     set(ORIG_WITH_TEST ${WITH_TEST})
     set(WITH_TEST OFF)
@@ -325,7 +325,7 @@ if (USE_MKL AND USE_IDEEP)
       endif()
       get_filename_component(MKLML_INNER_INCLUDE_DIR ${MKLML_INNER_INCLUDE_DIR} DIRECTORY)
       list(APPEND IDEEP_INCLUDE_DIR ${MKLML_INNER_INCLUDE_DIR})
-      list(APPEND __ideep_looked_for ${MKLML_INNER_INCLUDE_DIR})
+      list(APPEND __ideep_looked_for MKLML_INNER_INCLUDE_DIR)
 
       if(APPLE)
         set(__mklml_inner_libs mklml iomp5)

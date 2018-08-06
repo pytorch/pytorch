@@ -31,9 +31,9 @@ static inline void THNN_(SpatialAveragePooling_shapeCheck)(
 	     "padW = %d, padH = %d, kW = %d, kH = %d",
 	     padW, padH, kW, kH);
 
-  int64_t nInputPlane = input->size[dimh-1];
-  int64_t inputHeight = input->size[dimh];
-  int64_t inputWidth = input->size[dimw];
+  int64_t nInputPlane = input->size(dimh-1);
+  int64_t inputHeight = input->size(dimh);
+  int64_t inputWidth = input->size(dimw);
   int64_t outputHeight, outputWidth;
   int64_t nOutputPlane = nInputPlane;
 
@@ -103,15 +103,15 @@ void THNN_(SpatialAveragePooling_updateOutput)(
     (input, NULL, kH, kW, dH, dW, padH, padW, ceil_mode);
 
   if (input->dim() == 4) {
-    nbatch = input->size[0];
+    nbatch = input->size(0);
     dimw++;
     dimh++;
     dimc++;
   }
 
-  inputWidth = input->size[dimw];
-  inputHeight = input->size[dimh];
-  nInputPlane = input->size[dimc];
+  inputWidth = input->size(dimw);
+  inputHeight = input->size(dimh);
+  nInputPlane = input->size(dimc);
 
   if(ceil_mode)
   {
@@ -136,7 +136,7 @@ void THNN_(SpatialAveragePooling_updateOutput)(
   if (input->dim() == 3)
     THTensor_(resize3d)(output, nInputPlane, outputHeight, outputWidth);
   else
-    THTensor_(resize4d)(output, input->size[0], nInputPlane, outputHeight, outputWidth);
+    THTensor_(resize4d)(output, input->size(0), nInputPlane, outputHeight, outputWidth);
 
   input = THTensor_(newContiguous)(input);
   THArgCheck(THTensor_(isContiguous)(output), 3, "output must be contiguous");
@@ -232,16 +232,16 @@ void THNN_(SpatialAveragePooling_updateGradInput)(
 
 
   if (input->dim() == 4) {
-    nbatch = input->size[0];
+    nbatch = input->size(0);
     dimw++;
     dimh++;
     dimc++;
     ndim = 4;
   }
 
-  inputWidth = input->size[dimw];
-  inputHeight = input->size[dimh];
-  nInputPlane = input->size[dimc];
+  inputWidth = input->size(dimw);
+  inputHeight = input->size(dimh);
+  nInputPlane = input->size(dimc);
 
   if(ceil_mode)
   {

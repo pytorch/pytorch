@@ -19,9 +19,9 @@ template <>
 void OneHotOp<CUDAContext>::DoOneHotOp(
     TIndex batch_size,
     TIndex index_size,
-    const Tensor<CUDAContext>& indices,
-    Tensor<CUDAContext>* output) {
-  float* output_ptr = output->mutable_data<float>();
+    const Tensor& indices,
+    Tensor* output) {
+  float* output_ptr = output->template mutable_data<float>();
   math::Set<float, CUDAContext>(output->size(), 0., output_ptr, &context_);
   OneHotOpKernel<<<
       CAFFE_GET_BLOCKS(batch_size),

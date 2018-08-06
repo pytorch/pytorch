@@ -10,17 +10,6 @@ namespace caffe2 {
 namespace {
 
 template <typename T>
-__global__ void TanhCUDAKernel(const int N, const T* X, T* Y) {
-  CUDA_1D_KERNEL_LOOP(i, N) {
-#if __CUDA_ARCH__ >= 350
-    Y[i] = tanh(__ldg(X + i));
-#else
-    Y[i] = tanh(X[i]);
-#endif
-  }
-}
-
-template <typename T>
 __global__ void
 TanhGradientCUDAKernel(const int N, const T* dY, const T* Y, T* dX) {
   CUDA_1D_KERNEL_LOOP(i, N) {
@@ -33,18 +22,6 @@ TanhGradientCUDAKernel(const int N, const T* dY, const T* Y, T* dX) {
 }
 
 } // namespace
-
-template <>
-template <typename T>
-bool TanhFunctor<CUDAContext>::
-operator()(const int N, const T* X, T* Y, CUDAContext* context) const {
-  TanhCUDAKernel<T>
-      <<<CAFFE_GET_BLOCKS(N),
-         CAFFE_CUDA_NUM_THREADS,
-         0,
-         context->cuda_stream()>>>(N, X, Y);
-  return true;
-}
 
 template <>
 template <typename T>
