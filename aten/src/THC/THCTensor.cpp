@@ -9,6 +9,10 @@
 
 #include "THCTensorInfo.cuh"
 
+int THCTensor_nDimension(THCState *state, const THCTensor *self) {
+  return THTensor_nDimension(self);
+}
+
 int THCTensor_nDimensionLegacyNoScalars(THCState *state, const THCTensor *self) {
   return THTensor_nDimensionLegacyNoScalars(self);
 }
