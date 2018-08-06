@@ -98,13 +98,23 @@ if TEST_NUMPY:
     import numpy
 
 
+def skipIfRocm(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if TEST_WITH_ROCM:
+            raise unittest.SkipTest("test doesn't currently work on the ROCm stack")
+        else:
+            fn(*args, **kwargs)
+    return wrapper
+
+
 def skipIfNoLapack(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
         try:
             fn(*args, **kwargs)
         except Exception as e:
-            if 'Lapack library not found' in e.args[0]:
+            if 'Lapack library not found' in repr(e):
                 raise unittest.SkipTest('Compiled without Lapack')
             raise
     return wrapper
