@@ -309,7 +309,7 @@ TEST_CASE("sequential/clone-to-device", "[cuda]") {
   Sequential sequential(Linear(3, 4), Functional(torch::relu), BatchNorm(3));
   torch::Device device(torch::kCUDA, 0);
   Sequential clone =
-      std::static_pointer_cast<SequentialImpl>(sequential->clone(device));
+      std::dynamic_pointer_cast<SequentialImpl>(sequential->clone(device));
   for (const auto& p : clone->parameters()) {
     REQUIRE(p->device() == device);
   }
