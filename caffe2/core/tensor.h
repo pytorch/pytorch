@@ -232,6 +232,17 @@ class Tensor {
   virtual ~Tensor() noexcept {}
 
   /**
+   * @brief Extend the outer-most dimension of this tensor
+   *        to dimension of `num`.
+   */
+  void ExtendTo(TIndex num, float growthPct, BaseContext* context) {
+    CAFFE_ENFORCE_GE_WITH_CALLER(dims_.size(), 1);
+    CAFFE_ENFORCE_GE_WITH_CALLER(growthPct, 0);
+    CAFFE_ENFORCE(context != nullptr, "Context must be provided.");
+    Extend(num - dims_[0], growthPct, context);
+  }
+
+  /**
    * @brief Extends the outer-most dimension of this tensor by num elements,
    * preserving the existing data.
    *
@@ -242,6 +253,8 @@ class Tensor {
    */
   void Extend(TIndex num, float growthPct, BaseContext* context) {
     CAFFE_ENFORCE_GE_WITH_CALLER(dims_.size(), 1);
+    CAFFE_ENFORCE_GE_WITH_CALLER(
+        num, 0, "`num` must be non-negative for Extend");
     auto newDims = dims_;
     newDims[0] += num;
     if (!data_) {
@@ -261,30 +274,17 @@ class Tensor {
     auto newCapacity = dims_;
     newCapacity[0] = std::max<size_t>(
         newDims[0], std::ceil(dims_[0] * (growthPct + 100) / 100));
-    Reserve(newCapacity, context);
-    dims_ = newDims;
-    size_ = newSize;
-  }
-
-  template <class T>
-  void Reserve(const std::vector<T>& newCapacity, BaseContext* context) {
-    auto newSize = std::accumulate(
-        newCapacity.begin(),
-        newCapacity.end(),
-        static_cast<TIndex>(1),
-        std::multiplies<TIndex>());
-    if (newSize * meta_.itemsize() <= capacity_) {
-      return;
-    }
     auto oldData = std::move(data_);
     auto oldSize = size_;
     auto oldDims = dims_;
     Resize(newCapacity);
     auto* newData = raw_mutable_data(meta_);
+    CAFFE_ENFORCE(
+        context != nullptr, "Context must be provided to Extend the tensor");
     context->CopyItemsSameDevice(meta_, oldSize, oldData.get(), newData);
-    dims_ = oldDims;
-    size_ = oldSize;
     reserved_ = true;
+    dims_ = newDims;
+    size_ = newSize;
   }
 
   /**
@@ -293,7 +293,7 @@ class Tensor {
    * This method guarantees that no re-allocations are carried out, which means
    * that the extra capacity after the end of the shurnk tensor is maintained.
    */
-  void Shrink(TIndex outer_dim) {
+  void ShrinkTo(TIndex outer_dim) {
     CAFFE_ENFORCE_WITH_CALLER(dims_.size() >= 1, "Tensor must be at least 1D");
     CAFFE_ENFORCE_WITH_CALLER(
         outer_dim <= dims_[0],
@@ -304,6 +304,38 @@ class Tensor {
         dims_.end(),
         static_cast<TIndex>(1),
         std::multiplies<TIndex>());
+  }
+
+  /**
+   * @brief Reserve space for the underlying tensor.
+   *
+   * This must be called after Resize(), since we only specify the first
+   * dimension This does not copy over the old data to the newly allocated space
+   */
+  template <class T>
+  void ReserveSpace(const T& outer_dim) {
+    CAFFE_ENFORCE(
+        size_ != -1, "size should be initialized before calling ReserveSpace");
+    auto newCapacity = dims_;
+    newCapacity[0] = outer_dim;
+    auto newSize = std::accumulate(
+        newCapacity.begin(),
+        newCapacity.end(),
+        static_cast<TIndex>(1),
+        std::multiplies<TIndex>());
+    if (newSize * meta_.itemsize() <= capacity_) {
+      return;
+    }
+    // Old data is discarded
+    data_.reset();
+    auto oldSize = size_;
+    auto oldDims = dims_;
+    Resize(newCapacity);
+    // Allocate new memory and don't copy over the data
+    raw_mutable_data(meta_);
+    dims_ = oldDims;
+    size_ = oldSize;
+    reserved_ = true;
   }
 
   /**
@@ -389,7 +421,7 @@ class Tensor {
     capacity_ = 0;
     // If reserved is true and we changed tensor memory then it is fine
     // to switch it to false, if Resize is called from Reserve and it triggers
-    // FreeMemory() then reserved_ will be set to true at end of Reserve()
+    // FreeMemory() then reserved_ will be set to true at end of ReserveSpace()
     reserved_ = false;
   }
 
@@ -740,6 +772,10 @@ class Tensor {
   TypeMeta meta_;
   std::shared_ptr<void> data_;
   size_t capacity_ = 0;
+  // we decide to keep reserved and it will
+  // live in Tensor after the split
+  // The logic is that if Extend() or ReserveSpace() were ever called,
+  // then subsequent Resize()s will not free up Storage.
   bool reserved_ = false;
   DeviceType device_type_ = CPU;
   // In case of chunk load we store how much data was already loaded
