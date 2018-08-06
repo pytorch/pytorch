@@ -626,7 +626,7 @@ void ModuleEncoder::EncodeTensor(
       t = tensor.type().tensor(
           *tensor.storage(),
           /* storageOffset = */ 0,
-          /* size = */ { tensor.type().elementSizeInBytes() * tensor.storage()->pImpl()->size() },
+          /* size = */ { static_cast<int64_t>(tensor.type().elementSizeInBytes() * tensor.storage()->pImpl()->size()) },
           /* strides = */ { 1 })
         .toBackend(at::kCPU);
     }
