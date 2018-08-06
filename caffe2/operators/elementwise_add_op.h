@@ -56,6 +56,7 @@ struct AddFunctor {
         C_dims.data(),
         A_axes.size(),
         A_axes.data(),
+        TGrad(1),
         dC,
         dA,
         context);
@@ -64,6 +65,7 @@ struct AddFunctor {
         C_dims.data(),
         B_axes.size(),
         B_axes.data(),
+        TGrad(1),
         dC,
         dB,
         context);

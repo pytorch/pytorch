@@ -258,7 +258,9 @@ struct IValue {
     return out;
   }
 
-  std::vector<int64_t> copyToIntList() const;
+  const std::vector<int64_t>& toIntListRef() const;
+  const std::vector<double>& toFloatListRef() const;
+  const std::vector<at::Tensor>& toTensorListRef() const;
 
   // ConstantString
   IValue(Shared<ConstantString> v);
@@ -426,7 +428,9 @@ DEFINE_TO(Shared<IntList>, toIntList)
 DEFINE_TO(Shared<ConstantString>, toString)
 DEFINE_TO(at::Scalar, toScalar)
 DEFINE_TO(bool, toInt)
-DEFINE_TO(std::vector<int64_t>, copyToIntList)
+DEFINE_TO(std::vector<int64_t>, toIntListRef)
+DEFINE_TO(std::vector<double>, toFloatListRef)
+DEFINE_TO(std::vector<at::Tensor>, toTensorListRef)
 
 
 #undef DEFINE_TO
@@ -443,10 +447,10 @@ struct ConstantList : at::Retainable {
     return Shared<ConstantList<Elem>>(
         new ConstantList<Elem>(std::move(elements_)), false);
   }
-  at::ArrayRef<Elem> elements() const {
+  const std::vector<Elem>& elements() const {
     return elements_;
   }
-  operator at::ArrayRef<Elem>() const {
+  operator const std::vector<Elem>&() const {
     return elements();
   }
 };
@@ -485,8 +489,16 @@ inline IValue::IValue(Shared<TensorList> v)
 inline IValue::IValue(std::vector<at::Tensor> v)
 : IValue(TensorList::create(std::move(v))) {}
 
-inline std::vector<int64_t> IValue::copyToIntList() const {
-  return toIntList()->elements().vec();
+inline const std::vector<int64_t>& IValue::toIntListRef() const {
+  return toIntList()->elements();
+}
+
+inline const std::vector<double>& IValue::toFloatListRef() const {
+  return toDoubleList()->elements();
+}
+
+inline const std::vector<at::Tensor>& IValue::toTensorListRef() const {
+  return toTensorList()->elements();
 }
 
 

@@ -1,7 +1,7 @@
 #pragma once
 
-#include <ATen/ArrayRef.h>
-#include <ATen/Error.h>
+#include <ATen/core/ArrayRef.h>
+#include <ATen/core/Error.h>
 
 #include <algorithm>
 #include <array>
@@ -21,13 +21,13 @@ template <size_t D, typename T = int64_t>
 class ExpandingArray {
  public:
   /// Constructs an `ExpandingArray` from an `initializer_list`. The extent of
-  /// the lenght is checked against the `ExpandingArray`'s extent parameter `D`
+  /// the length is checked against the `ExpandingArray`'s extent parameter `D`
   /// at runtime.
   /*implicit*/ ExpandingArray(std::initializer_list<T> list)
       : ExpandingArray(std::vector<T>(list)) {}
 
   /// Constructs an `ExpandingArray` from a `vector`. The extent of the
-  /// lenght is checked against the `ExpandingArray`'s extent parameter `D` at
+  /// length is checked against the `ExpandingArray`'s extent parameter `D` at
   /// runtime.
   /*implicit*/ ExpandingArray(const std::vector<T>& values) {
     AT_CHECK(

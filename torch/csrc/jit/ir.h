@@ -8,6 +8,8 @@
 #include "torch/csrc/jit/interned_strings.h"
 #include "torch/csrc/jit/resource_guard.h"
 #include "torch/csrc/jit/source_location.h"
+#include "torch/csrc/jit/source_range.h"
+#include "torch/csrc/jit/constants.h"
 #include "torch/csrc/jit/function_schema.h"
 #include "torch/csrc/jit/ivalue.h"
 #include "torch/csrc/jit/type.h"
@@ -19,7 +21,7 @@
 #include "torch/csrc/WindowsTorchApiMacro.h"
 
 #include <ATen/ATen.h>
-#include "ATen/ArrayRef.h"
+#include "ATen/core/ArrayRef.h"
 
 #include <algorithm>
 #include <atomic>
@@ -1027,6 +1029,18 @@ public:
     result->output()->setType(type);
     return result;
   }
+  Node* createIntToFloat(Value* value) {
+    JIT_ASSERT(*value->type() == *IntType::get());
+    auto* result = create(prim::IntToFloat, {value});
+    result->output()->setType(FloatType::get());
+    return result;
+  }
+  Node* createFloatToInt(Value* value) {
+    JIT_ASSERT(*value->type() == *FloatType::get());
+    auto* result = create(prim::FloatToInt, {value});
+    result->output()->setType(IntType::get());
+    return result;
+  }
   Node* createPythonOp(
       THPObjectPtr&& pyobj,
       const std::string& cconv,
@@ -1051,6 +1065,12 @@ public:
       }
     }
     return r;
+  }
+
+  Value* insertConstant(
+      IValue val,
+      at::optional<SourceRange> loc = at::nullopt) {
+    return jit::insertConstant(*this, std::move(val), loc);
   }
 
   Node * appendNode(Node * n) {

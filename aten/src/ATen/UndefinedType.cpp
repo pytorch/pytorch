@@ -1,5 +1,5 @@
 #include "ATen/UndefinedType.h"
-#include "ATen/Error.h"
+#include "ATen/core/Error.h"
 
 namespace at {
 
