@@ -55,7 +55,7 @@ std::tuple<Tensor, Tensor> _unique_dim_cpu_template(
     const bool return_inverse) {
   // reshape tensor as [dim, -1]
   Tensor input_flat = self.transpose(dim, 0);
-  std::vector<int64_t> orig_sizes(input_flat.sizes());
+  std::vector<int64_t> orig_sizes(input_flat.sizes().begin(), input_flat.sizes().end());
 
   input_flat = input_flat.contiguous().view({input_flat.size(0), -1});
 
