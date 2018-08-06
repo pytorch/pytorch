@@ -6,7 +6,6 @@
 #include <THC/THCTensorMathReduce.cuh>
 #include <THC/THCTensorSort.cuh>
 #include <THC/THCThrustAllocator.cuh>
-#include <THC/THCNumerics.cuh>
 
 #include "ATen/AccumulateType.h"
 
@@ -200,7 +199,7 @@ __global__ void cunn_SpatialSoftMaxForward(
       ////////////////////////////////////////////////////////////
 
       if (blockDim.x > 1) {
-        accscalar_t max_input = THCNumerics<accscalar_t>::min();
+        accscalar_t max_input = std::numeric_limits<accscalar_t>::lowest();
         for (uint32_t d = threadIdx.x; d < dim_size; d += blockDim.x) {
           const accscalar_t value = static_cast<accscalar_t>(input[data_offset + d * dim_stride]);
           max_input = Max<accscalar_t>()(max_input, value);
@@ -217,7 +216,7 @@ __global__ void cunn_SpatialSoftMaxForward(
         for (uint32_t d = threadIdx.x; d < dim_size; d += blockDim.x)
           output[data_offset + d * dim_stride] = epilogue(input[data_offset + d * dim_stride]);
       } else {
-        accscalar_t max_input = THCNumerics<accscalar_t>::min();
+        accscalar_t max_input = std::numeric_limits<accscalar_t>::lowest();
         for (uint32_t d = threadIdx.x; d < dim_size; d += blockDim.x) {
           const accscalar_t value = static_cast<accscalar_t>(input[data_offset + d * dim_stride]);
           max_input = Max<accscalar_t>()(max_input, value);
@@ -403,9 +402,9 @@ cunn_SoftMaxForward(scalar_t *output, scalar_t *input, int classes)
 
   // find the max
   accscalar_t threadMax = ilpReduce<MaxFloat, ILP, scalar_t, accscalar_t>(
-      input, classes, MaxFloat<scalar_t, accscalar_t>(), -THCNumerics<accscalar_t>::max());
+      input, classes, MaxFloat<scalar_t, accscalar_t>(), -std::numeric_limits<accscalar_t>::max());
   accscalar_t max_k = blockReduce<Max, accscalar_t>(
-      sdata, threadMax, Max<accscalar_t>(), -THCNumerics<accscalar_t>::max());
+      sdata, threadMax, Max<accscalar_t>(), -std::numeric_limits<accscalar_t>::max());
 
   // reduce all values
   accscalar_t threadExp = ilpReduce<SumExpFloat, ILP, scalar_t, accscalar_t>(

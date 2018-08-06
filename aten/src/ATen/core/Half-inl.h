@@ -188,6 +188,137 @@ inline AT_HOSTDEVICE Half operator/(int a, Half b) {
 } // namespace at
 
 namespace std {
+  
+// specializing std for common mathematical functions to be used with at::Half.
+// For most of this functions the cmath header/math_functions.hpp in cuda 
+// would call the corresponding float specialization. 
+// However, here we are calling the float functions
+// directly to save one API call, like it's been done in the old THCNumerics.cuh
+// Also note that some of these functions might not have been used in the library
+// at all. However, keeping all the function definitions to provide backward
+// compatibility
+
+inline AT_HOSTDEVICE at::Half lgamma(at::Half a) {
+  return (at::Half)lgammaf((float)a);
+}
+
+inline AT_HOSTDEVICE at::Half exp(at::Half a) {
+  return (at::Half)expf((float)a);
+}
+
+inline AT_HOSTDEVICE at::Half log(at::Half a) {
+  return (at::Half)logf((float)a);
+}
+
+inline AT_HOSTDEVICE at::Half log10(at::Half a) {
+  return (at::Half)log10f((float)a); 
+}
+
+inline AT_HOSTDEVICE at::Half log1p(at::Half a) {
+  return (at::Half)log1pf((float)a);
+}
+
+inline AT_HOSTDEVICE at::Half log2(at::Half a) {
+  return (at::Half)log2f(a);
+}
+
+inline AT_HOSTDEVICE at::Half expm1(at::Half a) {
+  return (at::Half)expm1f((float)a); 
+}
+
+inline AT_HOSTDEVICE at::Half cos(at::Half a) {
+  return (at::Half)cosf((float)a);
+}
+
+inline AT_HOSTDEVICE at::Half sin(at::Half a) {
+  return (at::Half)sinf((float)a);
+}
+
+inline AT_HOSTDEVICE at::Half sqrt(at::Half a) {
+  return (at::Half)sqrtf((float)a);
+}
+
+inline AT_HOSTDEVICE at::Half ceil(at::Half a) {
+  return (at::Half)ceilf((float)a);
+}
+
+inline AT_HOSTDEVICE at::Half floor(at::Half a) {
+  return (at::Half)floorf((float)a);
+}
+
+inline AT_HOSTDEVICE at::Half trunc(at::Half a) {
+  return (at::Half)truncf((float)a);
+}
+
+inline AT_HOSTDEVICE at::Half acos(at::Half a) {
+  return (at::Half)acosf((float)a);
+}
+
+inline AT_HOSTDEVICE at::Half cosh(at::Half a) {
+  return (at::Half)coshf((float)a);
+}
+
+inline AT_HOSTDEVICE at::Half acosh(at::Half a) {
+  return (at::Half)acoshf((float)a);
+}
+
+inline AT_HOSTDEVICE at::Half asin(at::Half a) {
+  return (at::Half)asinf((float)a);
+}
+
+inline AT_HOSTDEVICE at::Half sinh(at::Half a) {
+  return (at::Half)sinhf((float)a);
+}
+
+inline AT_HOSTDEVICE at::Half asinh(at::Half a) {
+  return (at::Half)asinhf((float)a);
+}
+
+inline AT_HOSTDEVICE at::Half tan(at::Half a) {
+  return (at::Half)tanf((float)a);
+}
+
+inline AT_HOSTDEVICE at::Half atan(at::Half a) {
+  return (at::Half)atanf((float)a);
+}
+
+inline AT_HOSTDEVICE at::Half tanh(at::Half a) {
+  return (at::Half)tanhf((float)a);
+}
+
+inline AT_HOSTDEVICE at::Half erf(at::Half a) {
+  return (at::Half)erff((float)a);
+}
+
+inline AT_HOSTDEVICE at::Half erfc(at::Half a) {
+  return (at::Half)erfcf((float)a);
+}
+
+inline AT_HOSTDEVICE at::Half abs(at::Half a) {
+  return (at::Half)fabs((float)a);
+}
+
+inline AT_HOSTDEVICE at::Half round(at::Half a) {
+  return (at::Half)roundf((float)a);
+}
+
+inline AT_HOSTDEVICE at::Half pow(at::Half a, at::Half b) {
+  return (at::Half)powf((float)a, (float)b);
+}
+
+inline AT_HOSTDEVICE at::Half atan2(at::Half a, at::Half b) {
+  return (at::Half)atan2f((float)a, (float)b);
+}
+
+inline AT_HOSTDEVICE bool isnan(at::Half a) {
+  return isnan((float)a);
+}
+
+inline AT_HOSTDEVICE bool isinf(at::Half a) {
+  return isinf((float)a);
+}
+
+// std specialization for numeric limits
 
 template <>
 class numeric_limits<at::Half> {
