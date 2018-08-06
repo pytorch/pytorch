@@ -143,6 +143,10 @@ inline void THTensor_setIsZeroDim(THTensor *tensor, bool is_zero_dim) {
 //                            and tensors with a dimension of size zero are collapsed to 0-dimensional tensors.
 //
 // Eventually, everything should go through nDimension or tensor->dim().
+inline int THTensor_nDimension(const THTensor* tensor) {
+  return tensor->dim();
+}
+
 inline int THTensor_nDimensionLegacyNoScalars(const THTensor* tensor) {
   if (THTensor_isZeroDim(tensor)) {
     return 1;

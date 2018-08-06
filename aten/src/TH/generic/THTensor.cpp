@@ -15,6 +15,11 @@ ptrdiff_t THTensor_(storageOffset)(const THTensor *self)
   return self->storage_offset();
 }
 
+int THTensor_(nDimension)(const THTensor *self)
+{
+  return THTensor_nDimension(self);
+}
+
 int THTensor_(nDimensionLegacyNoScalars)(const THTensor *self)
 {
   return THTensor_nDimensionLegacyNoScalars(self);
