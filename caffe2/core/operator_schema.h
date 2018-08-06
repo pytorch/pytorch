@@ -271,7 +271,7 @@ class OpSchema {
   OpSchema& Input(const int n, const char* name, const char* description);
   OpSchema& Output(const int n, const char* name, const char* description);
   // Calls the passed function with `this` as an argument. Useful for
-  // adding docs for temlated/macro ops.
+  // adding docs for templated/macro ops.
   OpSchema& FillUsing(std::function<void(OpSchema&)> populator);
 
   // Remove from documentation
@@ -478,9 +478,9 @@ inline vector<TIndex> GetDimsVector(const TensorShape& shape) {
 }
 
 // Helper function
-inline uint64_t nElemFromDim(const TensorShape& X) {
-  uint64_t nElem = X.dims_size() > 0 ? 1 : 0;
-  for (int i = 0; i < X.dims_size(); ++i) {
+inline uint64_t nElemFromDim(const TensorShape& X, int dim = 0) {
+  uint64_t nElem = 1;
+  for (int i = dim; i < X.dims_size(); ++i) {
     nElem *= X.dims(i);
   }
   return nElem;
