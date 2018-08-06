@@ -5347,6 +5347,126 @@ def func(t):
             data = reader.get_record_with_key(offset)
             assert(data == buffers[i])
 
+    # ***** Type annotation tests ****
+    # Test combinations of:
+    # {String frontend, Python AST Frontend}
+    # {Python 3-style type annotations, MyPy-style type comments}
+    # {Script method, Script function}
+
+    #  String frontend , Python 3-style type annotations , Script function
+    def test_annot_string_py3_fn(self):
+        # TODO: return non-tensor type
+        cu = torch.jit.CompilationUnit('''
+            def foo(x : Tensor, y : Tuple[Tensor, Tensor]) -> Tuple[Tensor, Tensor]:
+                return x, x
+        ''')
+        self.assertExpected(cu.__getattr__('foo').pretty_print_schema())
+
+    #  String frontend , Python 3-style type annotations , Script method
+    # def test_annot_string_py3_method(self):
+    #     # TODO: self should not get type Tensor
+    #     cu = torch.jit.CompilationUnit('''
+    #         def foo(self, x : Tensor, y : Tuple[Tensor, Tensor]) -> Tuple[Tensor, Tensor]:
+    #             return x, x
+    #     ''')
+    #     self.assertExpected(cu.__getattr__('foo').pretty_print_schema())
+
+    #  String frontend , MyPy-style type comments , Script function
+    def test_annot_string_mypy_fn(self):
+        cu = torch.jit.CompilationUnit('''
+            def foo(x, y):
+                # type: (Tensor, Tuple[Tensor, Tensor]) -> Tuple[Tensor, Tensor]
+                return x, x
+        ''')
+        self.assertExpected(cu.__getattr__('foo').pretty_print_schema())
+
+    #  String frontend , MyPy-style type comments , Script method
+    # def test_annot_string_mypy_method(self):
+    #     # TODO: self should not get type Tensor
+    #     cu = torch.jit.CompilationUnit('''
+    #         def foo(self, x, y):
+    #             # type: (Tensor, Tuple[Tensor, Tensor]) -> Tuple[Tensor, Tensor]
+    #             return x, x
+    #     ''')
+    #     self.assertExpected(cu.__getattr__('foo').pretty_print_schema())
+
+    # Helper function to eval Python3 code without causing a syntax error for
+    # this file under py2
+    def _get_py3_code(self, code, fn_name):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            script_path = os.path.join(tmp_dir, 'script.py')
+            with open(script_path, 'w') as f:
+                f.write(code)
+            import importlib.util
+            spec = importlib.util.spec_from_file_location(fn_name, script_path)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            fn = getattr(module, fn_name)
+            return fn
+
+    #  Python AST Frontend , Python 3-style type annotations , Script function
+    @unittest.skipIf(not PY35, "Python 3.5 needed")
+    def test_annot_ast_py3_fn(self):
+        code = dedent('''
+            from typing import Tuple
+            from torch import Tensor
+            import torch
+            @torch.jit.script
+            def foo(x : Tensor, y : Tuple[Tensor, Tensor]) -> Tuple[Tensor, Tensor]:
+                return x, x
+        ''')
+        fn = self._get_py3_code(code, 'foo')
+        self.assertExpected(fn.__getattr__('forward').pretty_print_schema())
+
+    #  Python AST Frontend , Python 3-style type annotations , Script method
+    @unittest.skipIf(not PY35, "Python 3.5 needed")
+    def test_annot_ast_py3_method(self):
+        # TODO: implementation
+        code = dedent('''
+            from typing import Tuple
+            from torch import Tensor
+            import torch
+            class FooModule(torch.jit.ScriptModule):
+                @torch.jit.script_method
+                def foo(self, x : Tensor, y : Tuple[Tensor, Tensor]) -> Tuple[Tensor, Tensor]:
+                    return x, x
+            instance = FooModule()
+        ''')
+        fn = self._get_py3_code(code, 'instance')
+        self.assertExpected(fn.__getattr__('foo').pretty_print_schema())
+
+    #  Python AST Frontend , MyPy-style type comments , Script function
+    @unittest.skipIf(not PY35, "Python 3.5 needed")
+    def test_annot_ast_mypy_fn(self):
+        code = dedent('''
+            from typing import Tuple
+            from torch import Tensor
+            import torch
+            @torch.jit.script
+            def foo(x, y):
+                # type: (Tensor, Tuple[Tensor, Tensor]) -> Tuple[Tensor, Tensor]
+                return x, x
+        ''')
+        fn = self._get_py3_code(code, 'foo')
+        self.assertExpected(fn.__getattr__('forward').pretty_print_schema())
+
+    #  Python AST Frontend , MyPy-style type comments , Script method
+    @unittest.skipIf(not PY35, "Python 3.5 needed")
+    def test_annot_ast_mypy_method(self):
+        code = dedent('''
+            from typing import Tuple
+            from torch import Tensor
+            import torch
+            class FooModule(torch.jit.ScriptModule):
+                @torch.jit.script_method
+                def foo(self, x, y):
+                    # type: (Tensor, Tuple[Tensor, Tensor]) -> Tuple[Tensor, Tensor]
+                    return x, x
+            instance = FooModule()
+        ''')
+        fn = self._get_py3_code(code, 'instance')
+        self.assertExpected(fn.__getattr__('foo').pretty_print_schema())
+
 
 class TestEndToEndHybridFrontendModels(JitTestCase):
 

@@ -424,8 +424,13 @@ class ExprBuilder(Builder):
         base = build_expr(ctx, expr.value)
         sub_type = type(expr.slice)
         if sub_type is ast.Index:
-            index = build_expr(ctx, expr.slice.value)
-            return Subscript(base, [index])
+            if isinstance(expr.slice.value, ast.Tuple) or isinstance(expr.slice.value, ast.List):
+                indices = []
+                for index_expr in expr.slice.value.elts:
+                    indices.append(build_expr(ctx, index_expr))
+                return Subscript(base, indices)
+            else:
+                return Subscript(base, [build_expr(ctx, expr.slice.value)])
         elif sub_type is ast.Slice:
             lower = build_expr(ctx, expr.slice.lower) if expr.slice.lower is not None else None
             upper = build_expr(ctx, expr.slice.upper) if expr.slice.upper is not None else None
