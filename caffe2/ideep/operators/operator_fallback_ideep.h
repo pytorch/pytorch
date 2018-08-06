@@ -56,7 +56,9 @@ class IDEEPFallbackOp final : public IDEEPOperator {
       // For in-place case, the in/output tensor for local_ws must be
       // re-created, instead of forwarding from current workspace.
       string parent_name(base_def_.output(i));
-      parent_name += "_cpu_output_blob_" + base_def_.type();
+      if (!SkipOutputCopy::Contains(i)) {
+        parent_name += "_cpu_output_blob_" + base_def_.type();
+      }
       local_output_blobs_.push_back(ws->CreateBlob(parent_name));
       CHECK_NOTNULL(local_output_blobs_.back());
       forwarded_output_blobs[base_def_.output(i)] = parent_name;
@@ -114,6 +116,10 @@ class IDEEPFallbackOp final : public IDEEPOperator {
     }
 
     for (int i = 0; i < OutputSize(); ++i) {
+      if (SkipOutputCopy::Contains(i)) {
+        VLOG(1) << "Copy output: index " << i << " skipped.";
+        continue;
+      }
       CAFFE_ENFORCE(
           local_output_blobs_[i]->template IsType<TensorCPU>(),
           "IDEEP fallback op currently does not support non-TensorCPU "
