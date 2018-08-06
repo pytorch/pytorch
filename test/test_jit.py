@@ -115,10 +115,12 @@ class JitTestCase(TestCase):
         # opens the file, and it cannot be opened multiple times in Windows. To support Windows,
         # close the file after creation and try to remove it manually
         f = tempfile.NamedTemporaryFile(delete=False)
-        f.close()
-        m.save(f.name)
-        imported = torch.jit.load(f.name)
-        os.unlink(f.name)
+        try:
+            f.close()
+            m.save(f.name)
+            imported = torch.jit.load(f.name)
+        finally:
+            os.unlink(f.name)
         return imported
 
     def assertExpectedONNXGraph(self, trace, *args, **kwargs):
