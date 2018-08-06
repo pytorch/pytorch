@@ -66,6 +66,10 @@ class OperatorBase : public Observable<OperatorBase> {
   // Get the inputs and outputs as specific types.
   template <typename T>
   inline const T& Input(int idx) {
+    static_assert(
+        !std::is_same<T, Tensor>::value,
+        "You should use Input<Tensor>(int, DeviceType) for "
+        "Tensor.");
     DCHECK_LT(idx, inputs_.size());
     try {
       return inputs_.at(idx)->template Get<T>();
@@ -106,6 +110,10 @@ class OperatorBase : public Observable<OperatorBase> {
 
   template <typename T>
   inline T* Output(int idx) {
+    static_assert(
+        !std::is_same<T, Tensor>::value,
+        "You should use Output<Tensor>(int, DeviceType) for "
+        "Tensor.");
     return outputs_.at(idx)->template GetMutable<T>();
   }
 
@@ -134,6 +142,10 @@ class OperatorBase : public Observable<OperatorBase> {
 
   template <typename T>
   inline bool InputIsType(int idx) {
+    static_assert(
+        !std::is_same<T, Tensor>::value,
+        "You should use InputIsType<Tensor>(int, DeviceType) for "
+        "Tensor.");
     return inputs_.at(idx)->template IsType<T>();
   }
 
@@ -148,6 +160,10 @@ class OperatorBase : public Observable<OperatorBase> {
 
   template <typename T>
   inline bool OutputIsType(int idx) {
+    static_assert(
+        !std::is_same<T, Tensor>::value,
+        "You should use OutputIsType<Tensor>(int, DeviceType) for "
+        "Tensor.");
     return outputs_.at(idx)->template IsType<T>();
   }
 

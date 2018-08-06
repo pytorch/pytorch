@@ -2,8 +2,8 @@
 
 #include <torch/tensor.h>
 
-#include <ATen/ArrayRef.h>
 #include <ATen/Tensor.h>
+#include <ATen/core/ArrayRef.h>
 
 #include <algorithm>
 #include <array>

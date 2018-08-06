@@ -108,6 +108,8 @@ def get_fn(file_name, script_path):
 
 
 class JitTestCase(TestCase):
+    _do_cuda_memory_leak_check = True
+
     def assertExpectedONNXGraph(self, trace, *args, **kwargs):
         torch.onnx._optimize_trace(trace, operator_export_type=OperatorExportTypes.ONNX)
         self.assertExpectedGraph(trace, *args, **kwargs)
