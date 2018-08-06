@@ -43,6 +43,11 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # This environment variable enabled HCC Optimizations that speed up the linking stage.
   # https://github.com/RadeonOpenCompute/hcc#hcc-with-thinlto-linking
   export KMTHINLTO=1
+
+  # Need the libc++1 and libc++abi1 libraries to allow torch._C to load at runtime
+  sudo apt-get install libc++1
+  sudo apt-get install libc++abi1
+
   python tools/amd_build/build_pytorch_amd.py
   USE_ROCM=1 python setup.py install --user
   exit 0
