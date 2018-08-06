@@ -7,12 +7,12 @@
 #include "ATen/ATen.h"
 #include "ATen/CPUGenerator.h"
 #include "ATen/CheckGenerator.h"
+#include "ATen/Deprecated.h"
 #include "ATen/Dispatch.h"
-#include "ATen/Error.h"
 #include "ATen/NativeFunctions.h"
 #include "ATen/ScalarType.h"
-#include "ATen/Deprecated.h"
 #include "ATen/TensorOptions.h"
+#include "ATen/core/Error.h"
 #include "TH/THRandom.h"
 
 #include <algorithm>

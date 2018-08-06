@@ -6205,7 +6205,7 @@ new_criterion_tests = [
         input_fn=lambda: torch.randn(5, 10),
         target_fn=lambda: torch.rand(5, 10).mul(2).floor(),
         reference_fn=lambda i, t, m: -((t * i.sigmoid().log() + (1 - t) * (-i).sigmoid().log()) * get_weight(m)).sum() /
-            (i.numel() if get_reduction(m) == 'elementwise_mean' else 1),
+            (i.numel() if get_reduction(m) == 'elementwise_mean' else i.size(1) if get_reduction(m) == 'sum' else 1),
         desc='weights',
         check_sum_reduction=True,
         check_gradgrad=False,
@@ -6240,6 +6240,20 @@ new_criterion_tests = [
         desc='2d_int_target',
         constructor_args=(0,),  # blank=0
         extra_args=([50, 50, 50], [30, 25, 20]),  # input_lengths, target_lengths
+        input_fn=lambda: torch.randn(50, 3, 15).log_softmax(2),
+        target_fn=lambda: torch.randint(1, 15, (3, 30), dtype=torch.int),
+        reference_fn=lambda i, t, il, tl, m:
+            ctcloss_reference(i, t, il, tl, blank=0, reduction=get_reduction(m)),
+        check_sum_reduction=True,
+        check_gradgrad=False,
+        check_half=False,
+        convert_target=False,
+    ),
+    dict(
+        module_name='CTCLoss',
+        desc='2d_lengths_tensors',
+        constructor_args=(0,),  # blank=0
+        extra_args=(torch.tensor([50, 50, 50]), torch.tensor([30, 25, 20])),  # input_lengths, target_lengths
         input_fn=lambda: torch.randn(50, 3, 15).log_softmax(2),
         target_fn=lambda: torch.randint(1, 15, (3, 30), dtype=torch.int),
         reference_fn=lambda i, t, il, tl, m:
@@ -6698,7 +6712,8 @@ def multilabelsoftmarginloss_no_reduce_test():
         constructor=wrap_functional(
             lambda i: F.multilabel_soft_margin_loss(i, t.type_as(i), reduction='none')),
         input_fn=lambda: torch.randn(5, 10),
-        reference_fn=lambda i, m: -(t * i.sigmoid().log() + (1 - t) * (-i).sigmoid().log()),
+        reference_fn=lambda i, m:
+            (-(t * i.sigmoid().log() + (1 - t) * (-i).sigmoid().log())).sum(dim=1) / i.size(1),
         check_gradgrad=False,
         pickle=False)
 
@@ -6712,7 +6727,8 @@ def multilabelsoftmarginloss_weights_no_reduce_test():
             lambda i: F.multilabel_soft_margin_loss(i, t.type_as(i),
                                                     weight=weights.type_as(i), reduction='none')),
         input_fn=lambda: torch.randn(5, 10),
-        reference_fn=lambda i, m: -((t * i.sigmoid().log() + (1 - t) * (-i).sigmoid().log()) * weights),
+        reference_fn=lambda i, m:
+            (-(t * i.sigmoid().log() + (1 - t) * (-i).sigmoid().log()) * weights).sum(dim=1) / i.size(1),
         check_sum_reduction=True,
         check_gradgrad=False,
         pickle=False)

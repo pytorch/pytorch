@@ -1,8 +1,8 @@
 #include "ATen/ATen.h"
-#include "ATen/TensorUtils.h"
-#include "ATen/Error.h"
-#include "ATen/cuda/CUDAContext.h"
 #include "ATen/AccumulateType.h"
+#include "ATen/TensorUtils.h"
+#include "ATen/core/Error.h"
+#include "ATen/cuda/CUDAContext.h"
 
 #include <THC/THCDeviceUtils.cuh>
 #include <THC/THCTensorMathReduce.cuh>

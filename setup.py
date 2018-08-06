@@ -598,14 +598,23 @@ class clean(distutils.command.clean.clean):
 
     def run(self):
         import glob
+        import re
         with open('.gitignore', 'r') as f:
             ignores = f.read()
-            for wildcard in filter(bool, ignores.split('\n')):
-                for filename in glob.glob(wildcard):
-                    try:
-                        os.remove(filename)
-                    except OSError:
-                        shutil.rmtree(filename, ignore_errors=True)
+            pat = re.compile(r'^#( BEGIN NOT-CLEAN-FILES )?')
+            for wildcard in filter(None, ignores.split('\n')):
+                match = pat.match(wildcard)
+                if match:
+                    if match.group(1):
+                        # Marker is found and stop reading .gitignore.
+                        break
+                    # Ignore lines which begin with '#'.
+                else:
+                    for filename in glob.glob(wildcard):
+                        try:
+                            os.remove(filename)
+                        except OSError:
+                            shutil.rmtree(filename, ignore_errors=True)
 
         # It's an old-style class in Python 2.7...
         distutils.command.clean.clean.run(self)
@@ -635,6 +644,10 @@ if IS_WINDOWS:
                           '/wd4305', '/wd4244', '/wd4190', '/wd4101', '/wd4996',
                           '/wd4275']
     if sys.version_info[0] == 2:
+        if not check_env_flag('FORCE_PY27_BUILD'):
+            print('The support for PyTorch with Python 2.7 on Windows is very experimental.')
+            print('Please set the flag `FORCE_PY27_BUILD` to 1 to continue build.')
+            sys.exit(1)
         # /bigobj increases number of sections in .obj file, which is needed to link
         # against libaries in Python 2.7 under Windows
         extra_compile_args.append('/bigobj')

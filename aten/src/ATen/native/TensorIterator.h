@@ -1,8 +1,8 @@
 #pragma once
 
 #include <ATen/ATen.h>
-#include <ATen/SmallVector.h>
-#include <ATen/optional.h>
+#include <ATen/core/SmallVector.h>
+#include <ATen/core/optional.h>
 #include <ATen/detail/ScalarTypeConversions.h>
 
 // TensorIterator is a helper class for element-wise operations, such as
