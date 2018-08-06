@@ -375,10 +375,7 @@ THCTensor_(medianall)(THCState *state, THCTensor *self) {
   nelem = THCTensor_(nElement)(state, self);
   k = (nelem-1) >> 1;
 
-  THLongStorage *size = THLongStorage_newWithSize1(nelem);
-  THCTensor *view = THCTensor_(newView)(state, self, size);
-
-  THLongStorage_free(size);
+  THCTensor *view = THCTensor_(newView)(state, self, {nelem});
 
   THCTensor *sorted = THCTensor_(new)(state);
   THCudaLongTensor *indices = THCudaLongTensor_new(state);

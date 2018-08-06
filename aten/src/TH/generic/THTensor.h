@@ -37,8 +37,6 @@ TH_API real *THTensor_(data)(const THTensor *self);
 /**** creation methods ****/
 TH_API THTensor *THTensor_(new)(void);
 TH_API THTensor *THTensor_(newWithTensor)(THTensor *tensor);
-/* stride might be NULL */
-TH_API THTensor *THTensor_(newWithStorage)(THStorage *storage_, ptrdiff_t storageOffset_, THLongStorage *size_, THLongStorage *stride_);
 TH_API THTensor *THTensor_(newWithStorage1d)(THStorage *storage_, ptrdiff_t storageOffset_,
                                 int64_t size0_, int64_t stride0_);
 TH_API THTensor *THTensor_(newWithStorage2d)(THStorage *storage_, ptrdiff_t storageOffset_,
@@ -67,7 +65,6 @@ TH_API THTensor *THTensor_(newSelect)(THTensor *tensor, int dimension_, int64_t 
 TH_API THTensor *THTensor_(newNarrow)(THTensor *tensor, int dimension_, int64_t firstIndex_, int64_t size_);
 TH_API THTensor *THTensor_(newTranspose)(THTensor *tensor, int dimension1_, int dimension2_);
 TH_API THTensor *THTensor_(newUnfold)(THTensor *tensor, int dimension_, int64_t size_, int64_t step_);
-TH_API THTensor *THTensor_(newView)(THTensor *tensor, THLongStorage *size);
 
 // resize* methods simply resize the storage. So they may not retain the current data at current indices.
 // This is especially likely to happen when the tensor is not contiguous. In general, if you still need the
@@ -83,7 +80,6 @@ TH_API void THTensor_(resize5d)(THTensor *tensor, int64_t size0_, int64_t size1_
 // Note: these are legacy resize functions that treat sizes as size->size() == 0 and size->data<int64_t>() as being 0-terminated.
 
 TH_API void THTensor_(set)(THTensor *self, THTensor *src);
-TH_API void THTensor_(setStorage)(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_, THLongStorage *size_, THLongStorage *stride_);
 TH_API void THTensor_(setStorageNd)(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_, int nDimension, int64_t *size, int64_t *stride);
 TH_API void THTensor_(setStorage1d)(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_,
                                     int64_t size0_, int64_t stride0_);
