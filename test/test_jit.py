@@ -5363,13 +5363,18 @@ def func(t):
         self.assertExpected(cu.__getattr__('foo').pretty_print_schema())
 
     #  String frontend , Python 3-style type annotations , Script method
-    # def test_annot_string_py3_method(self):
-    #     # TODO: self should not get type Tensor
-    #     cu = torch.jit.CompilationUnit('''
-    #         def foo(self, x : Tensor, y : Tuple[Tensor, Tensor]) -> Tuple[Tensor, Tensor]:
-    #             return x, x
-    #     ''')
-    #     self.assertExpected(cu.__getattr__('foo').pretty_print_schema())
+    def test_annot_string_py3_method(self):
+        class TestModule(torch.jit.ScriptModule):
+            def __init__(self):
+                super(TestModule, self).__init__()
+
+                self.define('''
+            def foo(self, x : Tensor, y : Tuple[Tensor, Tensor]) -> Tuple[Tensor, Tensor]:
+                return x, x
+                ''')
+
+        tm = TestModule()
+        self.assertExpected(tm.__getattr__('foo').pretty_print_schema())
 
     #  String frontend , MyPy-style type comments , Script function
     def test_annot_string_mypy_fn(self):
@@ -5381,14 +5386,19 @@ def func(t):
         self.assertExpected(cu.__getattr__('foo').pretty_print_schema())
 
     #  String frontend , MyPy-style type comments , Script method
-    # def test_annot_string_mypy_method(self):
-    #     # TODO: self should not get type Tensor
-    #     cu = torch.jit.CompilationUnit('''
-    #         def foo(self, x, y):
-    #             # type: (Tensor, Tuple[Tensor, Tensor]) -> Tuple[Tensor, Tensor]
-    #             return x, x
-    #     ''')
-    #     self.assertExpected(cu.__getattr__('foo').pretty_print_schema())
+    def test_annot_string_mypy_method(self):
+        class TestModule(torch.jit.ScriptModule):
+            def __init__(self):
+                super(TestModule, self).__init__()
+
+                self.define('''
+            def foo(self, x, y):
+                # type: (Tensor, Tuple[Tensor, Tensor]) -> Tuple[Tensor, Tensor]
+                return x, x
+                ''')
+
+        tm = TestModule()
+        self.assertExpected(tm.__getattr__('foo').pretty_print_schema())
 
     # Helper function to eval Python3 code without causing a syntax error for
     # this file under py2
