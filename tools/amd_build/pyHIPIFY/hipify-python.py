@@ -463,7 +463,7 @@ def find_bracket_group(input_string, start):
     return find_closure_group(input_string, start, group=["{", "}"])
 
 
-def find_paranthesis_group(input_string, start):
+def find_parentheses_group(input_string, start):
     """Finds the first balanced bracket."""
     return find_closure_group(input_string, start, group=["(", ")"])
 
@@ -475,7 +475,7 @@ def disable_asserts(input_string):
     output_string = input_string
     asserts = list(re.finditer(r"\bassert[ ]*\(", input_string))
     for assert_item in asserts:
-        p_start, p_end = find_paranthesis_group(input_string, assert_item.end() - 1)
+        p_start, p_end = find_parentheses_group(input_string, assert_item.end() - 1)
         start = assert_item.start()
         output_string = output_string.replace(input_string[start:p_end + 1], "")
     return output_string
