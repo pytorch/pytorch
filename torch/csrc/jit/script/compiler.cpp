@@ -908,8 +908,13 @@ private:
     // Register outputs in each block
     for (const auto& x : mutated_variables) {
       auto tv = save_true->getVar(x, stmt.range());
-      true_block->registerOutput(tv);
       auto fv = save_false->getVar(x, stmt.range());
+      if (!tv->type()->isSubtypeOf(unshapedType(fv->type()))) {
+        throw ErrorReport(stmt)
+          << "Type mismatch: " << x << " is set to type " << tv->type()->str() << " in the true branch"
+          << " and type " << fv->type()->str() << " in the false branch";
+      }
+      true_block->registerOutput(tv);
       false_block->registerOutput(fv);
       environment_stack->setVar(stmt.range(), x, n->addOutput()->setType(tv->type()));
     }

@@ -3884,6 +3884,34 @@ def func(t):
                 if True:
                     a = 4
 
+    def test_different_types_from_if_blocks(self):
+        with self.assertRaisesRegex(RuntimeError, "Type mismatch"):
+            @torch.jit.script
+            def diff_tuple_sizes(x):
+                if False:
+                    c0 = ((x, x), (x, x, x))
+                else:
+                    c0 = ((x, x, x), (x, x))
+                return c0
+        with self.assertRaisesRegex(RuntimeError, "Type mismatch: c0 is set to type Tensor "
+                                    "in the true branch and type int in the false branch:"):
+            @torch.jit.script
+            def diff_type(x):
+                if False:
+                    c0 = x
+                else:
+                    c0 = 1
+                return c0
+
+        # testing that different length lists don't throw error
+        @torch.jit.script
+        def foo(x):
+            if True:
+                c = [x, x]
+            else:
+                c = [x, x, x]
+            return torch.cat(c, dim=1)
+
     def test_type_annotations(self):
         def fn(x, y):
             # type: (Tensor, Tensor) -> Tuple[Tensor, Tensor, Tensor]
