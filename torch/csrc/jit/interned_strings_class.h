@@ -5,8 +5,8 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
-#include "ATen/optional.h"
-#include "ATen/Error.h"
+#include "ATen/core/Error.h"
+#include "ATen/core/optional.h"
 #include "string.h"
 #include "torch/csrc/jit/interned_strings.h"
 

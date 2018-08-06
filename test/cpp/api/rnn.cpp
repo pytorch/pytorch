@@ -110,7 +110,7 @@ TEST_CASE("rnn") {
     LSTM model(2, 2);
     for (auto& v : model->parameters()) {
       float size = v->numel();
-      auto p = static_cast<float*>(v->data().storage()->data());
+      auto p = static_cast<float*>(v->data().storage()->pImpl()->data());
       for (size_t i = 0; i < size; i++) {
         p[i] = i / size;
       }
@@ -118,7 +118,7 @@ TEST_CASE("rnn") {
 
     auto x = torch::empty({3, 4, 2}, torch::requires_grad());
     float size = x.data().numel();
-    auto p = static_cast<float*>(x.data().storage()->data());
+    auto p = static_cast<float*>(x.data().storage()->pImpl()->data());
     for (size_t i = 0; i < size; i++) {
       p[i] = (size - i) / size;
     }

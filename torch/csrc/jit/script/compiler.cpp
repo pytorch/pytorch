@@ -10,7 +10,7 @@
 
 #include "torch/csrc/jit/constants.h"
 
-#include "ATen/optional.h"
+#include "ATen/core/optional.h"
 
 
 #include <climits>
@@ -46,27 +46,43 @@ struct PrintValue : public SugaredValue {
       auto& g = *m.graph();
       if (!attributes.empty())
         throw ErrorReport(loc) << "print doesn't accept any keyword arguments";
-      auto values = toValues(inputs);
-      ensureTensors(loc, values);
-      g.insertNode(g.create(prim::Print, values, 0)
+
+      //temporary hack to allow print statements to work in python 2, where
+      //print(a, b) is treated as a (a, b) tuple input.
+
+      std::vector<Value*> lowered_inputs = toValues(inputs);
+      if(lowered_inputs.size() == 1 && lowered_inputs.at(0)->node()->kind() == prim::TupleConstruct) {
+        auto input = lowered_inputs[0];
+        for(size_t j = 0; j < input->node()->inputs().size(); ++j) {
+          lowered_inputs.insert(lowered_inputs.begin() + 1 + j, input->node()->inputs().at(j));
+        }
+        lowered_inputs.erase(lowered_inputs.begin());
+      }
+      g.insertNode(g.create(prim::Print, lowered_inputs, 0)
                        ->setSourceLocation(std::make_shared<SourceRange>(loc)));
       return std::make_shared<NoneValue>();
   }
 };
 
-static Value* numToTensor(const SourceRange& loc, Value* value) {
+static Value* typeCast(const SourceRange& loc, Value* value, TypePtr dst) {
   auto& graph = *value->owningGraph();
-  auto n = graph.insertNode(graph.createNumToTensor(value))
-      ->setSourceLocation(std::make_shared<SourceRange>(loc));
-  return n->output();
-}
+  const TypePtr orig = value->type();
+  Node* n = nullptr;
 
-static Value* tensorToNum(
-    const SourceRange& loc,
-    Value* value,
-    const TypePtr type) {
-  auto& graph = *value->owningGraph();
-  auto* result = graph.insertNode(graph.createTensorToNum(type, value))
+  if(dst->isSubtypeOf(DynamicType::get()) && orig->isSubtypeOf(NumberType::get())) {
+    n = graph.createNumToTensor(value);
+  } else if (dst->isSubtypeOf(NumberType::get()) && orig->isSubtypeOf(DynamicType::get())) {
+    n = graph.createTensorToNum(dst, value);
+  } else if(dst->isSubtypeOf(IntType::get()) && orig->isSubtypeOf(FloatType::get())) {
+    n = graph.createFloatToInt(value);
+  } else if(dst->isSubtypeOf(FloatType::get()) && orig->isSubtypeOf(IntType::get())) {
+    n = graph.createIntToFloat(value);
+  } else {
+    throw ErrorReport(loc) << "Cannot cast type '" << orig->str() << "' to type '"
+      << dst->str() << "'.";
+  }
+
+  auto* result = graph.insertNode(n)
       ->setSourceLocation(std::make_shared<SourceRange>(loc))
       ->output();
   return result;
@@ -93,16 +109,8 @@ struct CastValue : public SugaredValue {
         throw ErrorReport(loc) << "expected a single argument for cast";
       auto values = toValues(inputs);
       Value* input = values.at(0);
-      if(!input->type()->isSubtypeOf(*type)) {
-        if(*type == *DynamicType::get()) {
-          if(!input->type()->isSubtypeOf(*NumberType::get())) {
-            throw ErrorReport(loc) << "expected a number";
-          }
-          input = numToTensor(loc, input);
-        } else {
-          ensureTensors(loc, values);
-          input = tensorToNum(loc, values.at(0), type);
-        }
+      if(!input->type()->isSubtypeOf(type)) {
+          input = typeCast(loc, input, type);
       }
       return std::make_shared<SimpleValue>(input);
   }
@@ -149,8 +157,9 @@ struct Environment {
   std::shared_ptr<Environment> next;
 
   SugaredValuePtr findInThisFrame(const std::string& name) {
-    if (value_table.count(name)) {
-      return value_table.at(name);
+    auto it = value_table.find(name);
+    if (it != value_table.end()) {
+      return it->second;
     }
     return nullptr;
   }
@@ -188,8 +197,9 @@ struct Environment {
 
   SugaredValuePtr createCapturedInputIfNeeded(const SourceRange& loc, std::string ident) {
     auto in_frame = findInThisFrame(ident);
-    if (in_frame)
+    if (in_frame) {
       return in_frame;
+    }
 
     // recursively handles the case where parent blocks are also loops
     auto from_parent = next ? next->createCapturedInputIfNeeded(loc, ident) : nullptr;
@@ -244,7 +254,7 @@ struct Environment {
         throw ErrorReport(loc) << "Cannot re-assign '" << name << "' because it has type " << value->kind() <<
 	" and " << name << " is not a first-class value.  Only reassignments to first-class values are allowed";
       }
-      if(!as_simple_value->type()->isSubtypeOf(*unshapedType(simple_parent->type()))) {
+      if(!as_simple_value->type()->isSubtypeOf(unshapedType(simple_parent->type()))) {
         throw ErrorReport(loc) << "variable '" << name << "' previously has type " << simple_parent->type()->str()
         << " but is now being assigned to a value of type " << as_simple_value->type()->str();
       }
@@ -265,7 +275,7 @@ struct Environment {
     auto retval = createCapturedInputIfNeeded(range, ident);
 
     if(!retval) {
-      retval = resolver(ident);
+      retval = resolver(ident, method, range);
     }
 
     if(!retval) {
@@ -338,7 +348,7 @@ std::shared_ptr<SugaredValue> packOutputs(Graph& g, at::ArrayRef<Value*> values)
 
 Value* createNumber(Graph& g, const SourceRange& loc, const at::Tensor& val) {
   JIT_ASSERT(val.numel() == 1);
-  auto* output = insertConstant(g, val, loc);
+  auto* output = g.insertConstant(val, loc);
   if (val.type().scalarType() == at::kLong) {
     output->setType(IntType::get());
   } else if (val.type().scalarType() == at::kFloat) {
@@ -350,105 +360,21 @@ Value* createNumber(Graph& g, const SourceRange& loc, const at::Tensor& val) {
   return output;
 }
 
-Value* createStack(Graph& g, const SourceRange& loc, at::ArrayRef<Value*> inputs) {
-  // bake in constant propagation for the all-constant case because it is
-  // common to see constant lists like [1, 2] passed to attributes
-  bool all_constant = std::all_of(inputs.begin(), inputs.end(), [&](Value* v) {
-    return v->node()->kind() == prim::Constant;
-  });
-  if(all_constant) {
-    auto values = fmap(inputs, [&](Value* v) {
-      return v->node()->t(attr::value);
-    });
-    return insertConstant(g, at::stack(values), loc);
-  }
-  return g.insertNode(g.create(aten::stack, inputs)
-                      ->i_(attr::dim, 0)
-                      ->setSourceLocation(std::make_shared<SourceRange>(loc)))->output();
-}
-
-static bool isTensorSubtype(Value* v) {
-  return v->type()->isSubtypeOf(*DynamicType::get());
-}
-
 at::optional<std::vector<int64_t>> getIntListAttribute(at::optional<int32_t> N, Value* input) {
   auto list = constant_as<Shared<jit::IntList>>(input);
   if(list)
-    return std::vector<int64_t>(*list);
+    return list.value()->elements();
+
   // broadcast IntList[3] with value 4 -> {4, 4, 4}
   if(!N)
     return at::nullopt;
+
   auto r = constant_as<int64_t>(input);
   if(!r)
     return at::nullopt;
+
   // broadcast to attribute size
   return std::vector<int64_t>(*N, *r);
-}
-
-// try to turn constant inputs into attributes
-void liftConstantAttributes(const FunctionSchema& schema, Node* node) {
-  // we shouldn't start with attributes, just inputs
-  JIT_ASSERT(!node->hasAttributes());
-  std::vector<Value*> new_inputs;
-  Attributes<Node> attributes;
-  for(size_t i = 0, n = 0; i < schema.arguments.size(); ++i) {
-    const auto& arg = schema.arguments[i];
-    // this was a builtin with a vararg list lowered,
-    if(*arg.type == *ListType::ofTensors()) {
-      // we need to skip all the vararg nodes, and continue parsing the
-      // possible attribute nodes
-      size_t vararg_list_size = node->inputs().size() - (schema.arguments.size() - 1);
-      while(n < i + vararg_list_size) {
-        new_inputs.push_back(node->input(n++));
-      }
-      continue;
-    }
-    auto input = node->input(n++);
-    switch(arg.type->kind()) {
-      case TypeKind::IntType:{
-        auto r = constant_as<int64_t>(input);
-        if(!r)
-          return;
-        attributes.i_(Symbol::attr(arg.name), *r);
-      } break;
-      case TypeKind::FloatType: {
-        auto r = constant_as<double>(input);
-        if(!r)
-          return;
-        attributes.f_(Symbol::attr(arg.name), *r);
-      } break;
-      case TypeKind::NumberType: {
-        auto r = constant_as<at::Scalar>(input);
-        if(!r)
-          return;
-        attributes.t_(Symbol::attr(arg.name), r->toTensor());
-      } break;
-      case TypeKind::ListType: {
-        auto elem = arg.type->expect<ListType>()->getElementType();
-        if(elem->kind() == TypeKind::IntType) {
-          auto r = getIntListAttribute(arg.N, input);
-          if(!r)
-            return;
-          attributes.is_(Symbol::attr(arg.name), *r);
-        } else {
-          // only IntLists can become attributes, other
-          // types are not attribute-able
-          new_inputs.push_back(input);
-        }
-      } break;
-      default:
-        new_inputs.push_back(input);
-    }
-  }
-  // nothing changed no need to modify the node
-  if(!attributes.hasAttributes())
-    return;
-
-  node->removeAllInputs();
-  for(Value* input : new_inputs) {
-    node->addInput(input);
-  }
-  node->copyAttributes(attributes);
 }
 
 at::ArrayRef<Value*> createTupleUnpack(Value* v) {
@@ -500,7 +426,7 @@ at::optional<std::vector<Value*>> tryMatchSchema(
         return at::nullopt;
       }
       if(positional_inputs[*idx]) {
-        err() << "argument '" <<  nv.name << "' specified twice \n" << nv.loc;
+        err() << "argument " <<  nv.name << " specified twice \n" << nv.loc;
         return at::nullopt;
       }
       positional_inputs[*idx] = nv;
@@ -511,55 +437,55 @@ at::optional<std::vector<Value*>> tryMatchSchema(
         continue;
       auto default_value = schema.arguments[i].default_value;
       if(!default_value) {
-        err() << "argument '" << schema.arguments[i].name << "' not provided.\n" << loc;
+        err() << "argument " << schema.arguments[i].name << " not provided.\n" << loc;
         return at::nullopt;
       }
       positional_inputs[i] = NamedValue(
-          loc,
-          i,
-          insertConstant(graph, *default_value, loc)
-              ->setType(schema.arguments[i].type));
+          loc, i,
+          graph.insertConstant(*default_value, loc));
     }
 
     // check input types
-    std::vector<Value*> flat_inputs;
+    std::vector<Value*> matched_inputs;
     for(size_t i = 0; i < schema.arguments.size(); ++i) {
-      NamedValue v = *positional_inputs[i];
+      Value* value = positional_inputs[i]->value;
       const auto& arg = schema.arguments[i];
 
       // some functions that take lists of integers for fixed size arrays
       // also allow single ints to be passed in their place.
       // the single int is then repeated to the length of the list
-      if (isIntUsedAsIntList(v.value, arg)) {
-        std::vector<Value*> repeated(*arg.N, v.value);
-        v.value = graph.insertNode(graph.createList(IntType::get(), repeated))->output();
+      if (isIntUsedAsIntList(value, arg)) {
+        std::vector<Value*> repeated(*arg.N, value);
+        value = graph.insertNode(graph.createList(IntType::get(), repeated))->output();
       }
 
-      // Allow tuples that only contain integers to turn into lists of integers
-      if(*ListType::ofInts() == *arg.type &&
-         v.value->type()->kind() == TypeKind::TupleType &&
-         v.value->type()->isSubtypeOf(*ListType::ofInts())) {
-        auto unpacked = createTupleUnpack(v.value);
-        v.value = graph.insertNode(graph.createList(IntType::get(), unpacked))->output();
+      // Allow homogeneous tuples to be casted implicitly to lists of appropriate types
+      if (arg.type->kind() == TypeKind::ListType &&
+          value->type()->kind() == TypeKind::TupleType &&
+          value->type()->isSubtypeOf(arg.type)) {
+        auto unpacked = createTupleUnpack(value);
+        auto elem_type = arg.type->expect<ListType>()->getElementType();
+        value = graph.insertNode(graph.createList(elem_type, unpacked))->output();
       }
 
-      if(!v.value->type()->isSubtypeOf(*arg.type)) {
+      if (value->node()->kind() == prim::None){
+        if (arg.type->isSubtypeOf(NumberType::get()))
+          value = graph.insertConstant(at::Scalar(NAN), loc);
+        else
+          value = graph.insertNode(graph.createUndefined())->output();
+      }
+
+      if(!value->type()->isSubtypeOf(arg.type)) {
         err() << "expected a value of type " << arg.type->str() << " for argument '" << arg.name << "' but found "
-              << v.value->type()->str() << "\n"
-              << v.loc;
+              << value->type()->str() << "\n"
+              << positional_inputs[i]->loc;
         return at::nullopt;
       }
 
-      // we only support tensor lists for builtins, where they must be flattened
-      if(arg.type->isSubtypeOf(*ListType::ofTensors())) {
-        auto outputs = createTupleUnpack(v.value);
-        flat_inputs.insert(flat_inputs.end(), outputs.begin(), outputs.end());
-      } else {
-        flat_inputs.push_back(v.value);
-      }
+      matched_inputs.push_back(value);
     }
 
-    return flat_inputs;
+    return matched_inputs;
 }
 
 
@@ -573,37 +499,30 @@ static std::shared_ptr<SugaredValue> tryEmitBuiltin(
   at::ArrayRef<NamedValue> attributes) {
 
   auto graph = method.graph();
-  auto flat_inputs = tryMatchSchema(op->schema, loc, *graph, inputs, attributes, failure_messages);
-  if(!flat_inputs)
+  auto matched_inputs = tryMatchSchema(op->schema(), loc, *graph, inputs, attributes, failure_messages);
+  if(!matched_inputs)
     return nullptr;
   // we successfully matched this schema, construct the node
 
-  // note: we always construct purely positional nodes here
-  // the pass liftConstantAttributes replaces the node with with one that
-  // uses attributes if all the attributes ended up as constants
-
   NodeKind kind(Symbol::aten(name));
-  auto n = graph->insertNode(graph->create(kind, *flat_inputs, 0))
+  auto n = graph->insertNode(graph->create(kind, *matched_inputs, 0))
                 ->setSourceLocation(std::make_shared<SourceRange>(loc));
 
   // special case for chunk when the chunks=<const> is known
   // DO NOT ADD MORE SPECIAL CASES HERE, REFACTOR INTO A FUNCTION IF
   // NEEDED
   if(n->kind() == aten::chunk) {
-    auto value = constant_as<int64_t>((*flat_inputs)[1]);
+    auto value = constant_as<int64_t>((*matched_inputs)[1]);
     if(!value) {
       throw ErrorReport(loc) << "argument 'chunks' must be a constant";
     }
     for(int64_t i = 0; i < *value; ++i)
       n->addOutput();
   } else {
-    for(auto & ret : op->schema.returns) {
+    for(auto & ret : op->schema().returns) {
       n->addOutput()->setType(ret.type);
     }
   }
-
-  if(op->hasAttributedVersion())
-    liftConstantAttributes(op->schema, n);
 
   // assert that we did indeed create an op that has implementation
   // otherwise schema and dispatch are not in sync
@@ -655,7 +574,7 @@ std::shared_ptr<SugaredValue> emitBuiltinCall(
 }
 
 static Value* ensureTensor(const SourceRange& range, Value* v) {
-  if(!isTensorSubtype(v)) {
+  if(!v->type()->isSubtypeOf(DynamicType::get())) {
     throw ErrorReport(range) << "expected a tensor value but found a "
                              << v->type()->str();
   }
@@ -663,7 +582,7 @@ static Value* ensureTensor(const SourceRange& range, Value* v) {
 }
 
 static Value* ensureInt(const SourceRange& range, Value* v) {
-  if(!v->type()->isSubtypeOf(*IntType::get())) {
+  if(!v->type()->isSubtypeOf(IntType::get())) {
     throw ErrorReport(range) << "expected a int but found a "
                              << v->type()->str();
   }
@@ -697,14 +616,14 @@ std::shared_ptr<SugaredValue> BuiltinFunction::call(
 
 struct to_ir {
   to_ir(
-      Def def,
+      TypedDef typed_def,
       FunctionTable& function_table,
       const Resolver& resolver,
       SugaredValuePtr self,
       Method& method) // method being constructed
       : method(method)
       , graph(method.graph())
-      , def(def)
+      , def(typed_def.def)
       , function_table(function_table)
       , resolver(resolver)
       , environment_stack(nullptr) {
@@ -714,16 +633,37 @@ struct to_ir {
     // inputs
     auto it = def.params().begin();
     auto end = def.params().end();
+    // Type annotations exclude explicitly typing the "self" parameter, so in the
+    // case that this is a method with self we expect one fewer parameter annotation
+    // than the number of parameters this Def takes.
+    auto expected_annotation_size = self ? def.params().size() - 1 : def.params().size();
+    if (typed_def.schema && typed_def.schema->arguments.size() != expected_annotation_size) {
+      throw ErrorReport(def.params().range()) << "Number of type annotations for"
+        << " function parameters (" << typed_def.schema->arguments.size() << ")"
+        << " does not match the number of parameters on the function ("
+        << expected_annotation_size << ")!";
+    }
     if(self) {
       if(it == end)
         throw ErrorReport(def.params().range()) << "methods must have a self argument";
       environment_stack->setSugaredVar(def.range(), (*it).ident().name(), self);
       ++it;
     }
+    size_t arg_annotation_idx = 0;
     for(;it != end; ++it) {
       auto& name = (*it).ident().name();
-      arguments.push_back({name, DynamicType::get()});
-      environment_stack->setVar((*it).ident().range(), name, graph->addInput(name));
+      // Add the input to the graph
+      Value *new_input = graph->addInput(name);
+      environment_stack->setVar((*it).ident().range(), name, new_input);
+
+      // Record the type for the schema and set the Type on the Value*
+      // TypePtr arg_type = DynamicType::get();
+      if (typed_def.schema) {
+        arguments.push_back(typed_def.schema->arguments.at(arg_annotation_idx++));
+      } else {
+        arguments.emplace_back(name, DynamicType::get());
+      }
+      new_input->setType(arguments.back().type);
     }
     // body
     auto stmts = def.statements();
@@ -746,18 +686,38 @@ struct to_ir {
       if (return_stmt.values().size() == 1 && results.size() == 1) {
         auto result = results.at(0);
         if(result->type()->cast<TupleType>()) {
-          results = createTupleUnpack(result);
+          results = createTupleUnpack(result).vec();
         }
       }
+      if (typed_def.schema && typed_def.schema->returns.size() != results.size()) {
+        throw ErrorReport(def.range()) << "Number of type annotations for function"
+          << " return (" << typed_def.schema->returns.size() << ") does not match"
+          << " the number of returns from the function (" << results.size() << ")!";
+      }
       auto range = return_stmt.range();
+      size_t return_type_idx = 0;
       for (auto& r : results) {
-        if(r->type()->isSubtypeOf(*NumberType::get())) {
-          graph->registerOutput(numToTensor(range, r));
-        } else {
-          ensureTensor(range, r);
-          graph->registerOutput(r);
+        // TODO: support tuples and lists as returns
+        auto return_kind = r->type()->kind();
+        if (return_kind != TypeKind::TensorType &&
+            return_kind != TypeKind::DynamicType &&
+            return_kind != TypeKind::IntType &&
+            return_kind != TypeKind::FloatType) {
+          throw ErrorReport(return_stmt.range()) << "The only supported return types "
+            << "are tensors, ints and floats";
         }
-        returns.push_back({"", DynamicType::get()});
+        graph->registerOutput(r);
+        TypePtr type = DynamicType::get();
+        if (typed_def.schema) {
+          type = typed_def.schema->returns.at(return_type_idx).type;
+          if (!r->type()->isSubtypeOf(type)) {
+            throw ErrorReport(return_stmt.range()) << "Return value at position "
+              << return_type_idx << " was annotated as having type " << type->str()
+              << " but is actually of type " << r->type()->str();
+          }
+          return_type_idx++;
+        }
+        returns.push_back({"", type});
       }
     }
 
@@ -877,10 +837,10 @@ private:
 
   Value* emitCond(Expr cond) {
     Value* v = emitExpr(cond, identity);
-    if(v->type()->isSubtypeOf(*DynamicType::get())) {
-      v = tensorToNum(cond.range(), v, IntType::get());
+    if(v->type()->isSubtypeOf(DynamicType::get())) {
+      v = typeCast(cond.range(), v, IntType::get());
     }
-    if(!v->type()->isSubtypeOf(*IntType::get())) {
+    if(!v->type()->isSubtypeOf(IntType::get())) {
       throw ErrorReport(cond) << "expected a tensor or integer expression for condition but found " << v->type()->str();
     }
     return v;
@@ -979,12 +939,12 @@ private:
         max_trip_count_val = emitExpr(max_trip_count.value(), ensureInt);
       } else {
         max_trip_count_val =
-            insertConstant(*graph, INT_MAX, range);
+            graph->insertConstant(INT_MAX,range);
       }
       if (cond) {
         cond_val = emitCond(cond.value());
       } else {
-        cond_val = insertConstant(*graph, true, range);
+        cond_val = graph->insertConstant(true, range);
       }
     }
     n->addInput(max_trip_count_val);
@@ -1005,7 +965,7 @@ private:
         Value* body_cond_value = emitCond(cond.value());
         body_block->registerOutput(body_cond_value);
       } else {
-        Value* cond_value_dummy = insertConstant(*graph, true, range);
+        Value* cond_value_dummy = graph->insertConstant(true, range);
         body_block->registerOutput(cond_value_dummy);
       }
 
@@ -1390,10 +1350,13 @@ private:
         return emitConst(Const(tree));
       } break;
       case TK_TRUE: {
-        return insertConstant(*graph, true, tree->range());
+        return graph->insertConstant(true, tree->range());
       } break;
       case TK_FALSE: {
-        return insertConstant(*graph, false, tree->range());
+        return graph->insertConstant(false, tree->range());
+      } break;
+      case TK_NONE: {
+        return emitNone(tree->range());
       } break;
       case TK_SLICE: {
         const auto slice = Slice(tree);
@@ -1409,8 +1372,29 @@ private:
       case TK_IF_EXPR: {
         return emitTernaryIf(TernaryIf(tree));
       } break;
+      case TK_STRINGLITERAL: {
+        return emitStringLiteral(StringLiteral(tree));
+      } break;
       case TK_LIST_LITERAL: {
         auto ll = ListLiteral(tree);
+        auto values = getValues(ll.inputs(), /*maybe_unpack=*/true, identity);
+        if (values.size() == 0) {
+          throw ErrorReport(tree) << "Empty list literals not allowed. "
+                                  << "Use _constructEmptyFooList() instead";
+        }
+        const auto elem_type = values.at(0)->type();
+        for (auto v : values) {
+          if (v->type() != elem_type) {
+            throw ErrorReport(tree)
+                << "Lists must contain only a single type, expected: "
+                << *elem_type << " but found " << *v->type() << " instead";
+          }
+        }
+        return graph->insertNode(graph->createList(elem_type, values))
+            ->output();
+      } break;
+      case TK_TUPLE_LITERAL: {
+        auto ll = TupleLiteral(tree);
         auto values = getValues(ll.inputs(), /*maybe_unpack=*/true, identity);
         return graph->insertNode(graph->createTuple(values))->output();
       } break;
@@ -1420,11 +1404,22 @@ private:
     }
   }
 
+  Value* emitNone(SourceRange range) {
+    auto& g = *method.graph();
+    return g.insertNode(
+        g.create(prim::None, {}, 1)->setSourceLocation(
+          std::make_shared<SourceRange>(range)))->output();
+  }
+
   Value* emitConst(const Const& c) {
     if (c.isFloatingPoint())
-      return insertConstant(*graph, c.asFloatingPoint(), c.range());
+      return graph->insertConstant(c.asFloatingPoint(), c.range());
     else
-      return insertConstant(*graph, c.asIntegral(), c.range());
+      return graph->insertConstant(c.asIntegral(), c.range());
+  }
+
+  Value* emitStringLiteral(const StringLiteral& c) {
+    return insertConstant(*graph, c.text(), c.range());
   }
 
   // Desugars slice syntactic sugar tensor[begin:end] -> tensor.slice(begin,
@@ -1441,9 +1436,9 @@ private:
     NamedValue begin = input_values[1];
     NamedValue end = input_values[2];
     NamedValue dim = NamedValue(loc, "dim",
-        insertConstant(*graph, 0, loc));
+        graph->insertConstant(0, loc));
     NamedValue step = NamedValue(loc, "step",
-        insertConstant(*graph, 1, loc));
+        graph->insertConstant(1, loc));
 
     return emitBuiltinCall(
                loc, method, "slice", {tensor, dim, begin, end, step}, {}, true)
@@ -1463,7 +1458,7 @@ private:
     NamedValue dim = NamedValue(
         loc,
         "dim",
-        insertConstant(*graph, 0, loc));
+        graph->insertConstant(0, loc));
     NamedValue idx = input_values[1];
 
     return emitBuiltinCall(loc, method, "select", {tensor, dim, idx}, {}, true)
@@ -1499,16 +1494,16 @@ std::vector<Value*> inlineCallTo(Graph& g, Graph& callee, ArrayRef<Value*> input
   return outputs;
 }
 
-void defineMethodsInModule(Module & m, const std::vector<Def>& definitions, const std::vector<Resolver>& resolvers, SugaredValuePtr self) {
+void defineMethodsInModule(Module & m, const std::vector<TypedDef>& definitions, const std::vector<Resolver>& resolvers, SugaredValuePtr self) {
   FunctionTable table;
   JIT_ASSERT(definitions.size() == resolvers.size());
   auto resolver_it = resolvers.begin();
   std::vector<Method*> methods;
-  for(Def def : definitions) {
-    const std::string& name = def.name().name();
+  for(TypedDef typed_def : definitions) {
+    const std::string& name = typed_def.def.name().name();
     Resolver resolver = *resolver_it++;
-    auto creator = [def, &table, resolver, self](Method& method) {
-      to_ir(def, table, resolver, self,  method);
+    auto creator = [typed_def, &table, resolver, self](Method& method) {
+      to_ir(typed_def, table, resolver, self,  method);
     };
     Method& method = m.create_method(name, creator);
     // if self is defined, then these are methods and do not go into the global namespace
@@ -1527,19 +1522,20 @@ void defineMethodsInModule(Module & m, const std::vector<Def>& definitions, cons
 
 void defineMethodsInModule(Module & m, const std::string& source, const Resolver& resolver, SugaredValuePtr self) {
   Parser p(source);
-  std::vector<Def> definitions;
+  std::vector<TypedDef> definitions;
   std::vector<Resolver> resolvers;
   while (p.lexer().cur().kind != TK_EOF) {
-    definitions.push_back(Def(p.parseFunction()));
+    // TODO: Function schema
+    definitions.emplace_back(Def(p.parseFunction()), at::nullopt);
     resolvers.push_back(resolver);
   }
   defineMethodsInModule(m, definitions, resolvers, self);
 }
 
-std::shared_ptr<Graph> compileFunction(Def def, const Resolver& resolver) {
-  Module m; //note: we don't use 'm' to execute so this setting is unused
-  defineMethodsInModule(m, {def}, {resolver}, nullptr);
-  return m.get_method(def.name().name()).graph();
+std::shared_ptr<Graph> compileFunction(TypedDef typed_def, const Resolver& resolver) {
+  Module m;
+  defineMethodsInModule(m, {typed_def}, {resolver}, nullptr);
+  return m.get_method(typed_def.def.name().name()).graph();
 }
 
 std::vector<std::shared_ptr<SugaredValue>> SimpleValue::asTuple(SourceRange loc, Method& m) {

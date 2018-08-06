@@ -5,11 +5,10 @@
 
 // ${generated_comment}
 
-#include "ATen/Config.h"
 #include "ATen/${Tensor}.h"
-#include "ATen/${Storage}.h"
 #include "ATen/Scalar.h"
-#include "ATen/Half.h"
+#include "ATen/Storage.h"
+#include "ATen/core/Half.h"
 
 $extra_cuda_headers
 
@@ -22,7 +21,7 @@ namespace detail {
 }
 
 ${Tensor}::${Tensor}(${THTensor} * tensor)
-: TensorImpl(&globalContext().getType(Backend::${Backend},ScalarType::${ScalarName}), tensor)
+: TensorImpl(Backend::${Backend}, ScalarType::${ScalarName}, tensor, /* is variable */ false)
 {}
 
 ${TensorDenseOrSparse}

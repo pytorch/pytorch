@@ -14,6 +14,128 @@ void THTensor_free(THTensor *self)
   self->release();
 }
 
+void THTensor_setStorage(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_, at::IntList size_, at::IntList stride_) {
+  if(size_.data() && stride_.data())
+    THArgCheck(size_.size() == stride_.size(), 5, "inconsistent size/stride sizes");
+
+  AT_CHECK(size_.data(), "size must not be null");
+#ifdef DEBUG
+  THAssert(size_.size() <= INT_MAX);
+#endif
+  THTensor_setStorageNd(self,
+                        storage_,
+                        storageOffset_,
+                        size_.size(),
+                        size_.data(),
+                        stride_.data());
+}
+
+void THTensor_setStorageNd(THTensor *self, THStorage *storage, ptrdiff_t storageOffset, int nDimension, const int64_t *size, const int64_t *stride)
+{
+  /* storage */
+  if(THTensor_getStoragePtr(self) != storage)
+  {
+    if (!THTensor_getStoragePtr(self)) {
+      THError("Tensor: invalid null storage");
+    }
+    auto scalar_type = THTensor_getStoragePtr(self)->scalar_type();
+    THStorage_free(THTensor_getStoragePtr(self));
+    if(storage)
+    {
+      THTensor_stealAndSetStoragePtr(self, storage);
+      THStorage_retain(THTensor_getStoragePtr(self));
+    }
+    else {
+      THTensor_stealAndSetStoragePtr(self, THStorage_new(scalar_type));
+    }
+  }
+
+  /* storageOffset */
+  if(storageOffset < 0)
+    THError("Tensor: invalid storage offset");
+  THTensor_setStorageOffset(self, storageOffset);
+
+  /* size and stride */
+  THTensor_resizeNd(self, nDimension, size, stride);
+}
+
+void THTensor_resize(THTensor *self, at::IntList size, at::IntList stride)
+{
+  THArgCheck(size.data() != NULL, 2, "invalid size");
+  if(stride.data())
+    THArgCheck(stride.size() == size.size(), 3, "invalid stride");
+
+#ifdef DEBUG
+  THAssert(size.size() <= INT_MAX);
+#endif
+  THTensor_resizeNd(self, size.size(), size.data(), stride.data());
+}
+
+void THTensor_resizeNd(THTensor *self, int nDimension, const int64_t *size, const int64_t *stride)
+{
+  int d;
+  ptrdiff_t totalSize;
+  bool hascorrectsize = true;
+
+#ifndef USE_TH_SCALAR
+  AT_CHECK(nDimension > 0, "resizeNd nDimension must be greater than 0");
+#else
+  AT_CHECK(nDimension >= 0, "resizeNd nDimension must be non-negative");
+#endif
+
+  for(d = 0; d < nDimension; d++)
+  {
+    if((self->dim() > d) && (size[d] != self->size(d))) {
+      hascorrectsize = false;
+    }
+
+    // NB: this used to test that stride[d] was >= 0
+    if((self->dim() > d) && stride && (stride[d] != self->stride(d))) {
+      hascorrectsize = false;
+    }
+  }
+
+  if(nDimension != self->dim()) {
+    hascorrectsize = false;
+  }
+
+  if(hascorrectsize) {
+    return;
+  }
+
+  if(nDimension != self->dim())
+  {
+    THTensor_resizeDim(self, nDimension);
+  }
+
+  totalSize = 1;
+  for(d = nDimension-1; d >= 0; d--)
+  {
+    THTensor_setSizeAtDim(self, d, size[d]);
+    if(stride && (stride[d] >= 0) ) {
+      THTensor_setStrideAtDim(self, d, stride[d]);
+    } else {
+      if(d == nDimension-1) {
+        THTensor_setStrideAtDim(self, d, 1);
+      } else {
+        // Keep stride monotonically increasing to match NumPy.
+        THTensor_setStrideAtDim(self, d, std::max<int64_t>(self->size(d+1), 1)*self->stride(d+1));
+      }
+    }
+    totalSize += (self->size(d)-1)*self->stride(d);
+  }
+
+  if(totalSize+self->storage_offset() > 0)
+  {
+    if(!THTensor_getStoragePtr(self)) {
+      THTensor_stealAndSetStoragePtr(self, THStorage_new(self->scalar_type()));
+    }
+    if(totalSize+self->storage_offset() > THTensor_getStoragePtr(self)->size()) {
+      THStorage_resize(THTensor_getStoragePtr(self), totalSize+self->storage_offset());
+    }
+  }
+}
+
 // On a high level,
 // 1. separate oldshape chunks of dimensions, where the dimensions are
 //    ``contiguous'' in each chunk, i.e., oldstride[i] = oldshape[i+1] * oldstride[i+1]
@@ -32,7 +154,7 @@ THTensor_compute_stride(at::IntList oldshape, at::IntList oldstride, at::IntList
   // This could perhaps be combined with the below code, but the complexity didn't seem worth it.
   int64_t numel = std::accumulate(oldshape.begin(), oldshape.end(), 1, std::multiplies<int64_t>());
   if (numel == 0 && oldshape.equals(newshape)) {
-    return std::vector<int64_t>(oldstride);
+    return oldstride.vec();
   }
 
   std::vector<int64_t> newstride(newshape.size());

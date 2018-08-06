@@ -69,7 +69,7 @@ static void EmbeddingLookupGenericSlow(
     }
     if (normalize_by_lengths && lengths[m]) {
       // hack: context is not really used
-      math::Scale<OutType, CPUContext>(
+      math::Scale<float, OutType, CPUContext>(
           block_size, 1.f / lengths[m], out, out, nullptr);
     }
     out += block_size;

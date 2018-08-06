@@ -422,6 +422,11 @@ tests = [
     ('flip', small_3d, lambda t: [0, 1, 2], 'd012', types, True),
     ('flip', small_3d, lambda t: [0, 2], 'd02', types, True),
     ('flip', small_3d, lambda t: [2, 0], 'd20', types, True),
+    ('flip', small_3d, lambda t: [-1], 'neg_d', types, True),
+    ('rot90', small_2d, lambda t: [1, [0, 1]], 'k1_d01', types, True),
+    ('rot90', small_3d, lambda t: [1, [1, 2]], 'k1_d12', types, True),
+    ('rot90', small_3d, lambda t: [1, [1, -1]], 'k1_neg_d', types, True),
+    ('rot90', small_3d, lambda t: [], 'default', types, True),
     ('rsqrt', lambda t: constant_tensor_add(1, small_3d(t)), lambda t: [], None, float_types),
     ('sinh', lambda t: tensor_clamp(small_3d(t), -1, 1), lambda t: [], None, float_types),
     ('tan', lambda t: tensor_clamp(small_3d(t), -1, 1), lambda t: [], None, float_types),
@@ -1417,6 +1422,9 @@ class TestCuda(TestCase):
     def test_flip(self):
         TestTorch._test_flip(self, use_cuda=True)
 
+    def test_rot90(self):
+        TestTorch._test_rot90(self, use_cuda=True)
+
     def test_signal_window_functions(self):
         TestTorch._test_signal_window_functions(self, device=torch.device('cuda'))
 
@@ -1810,18 +1818,6 @@ class TestCuda(TestCase):
 
     def test_random_neg_values(self):
         TestTorch._test_random_neg_values(self, use_cuda=True)
-
-    def test_overlapped_indices(self):
-        a = torch.arange(0, 128).view(32, 4).cuda()
-        b = torch.arange(0, 128).view(32, 4).cuda()
-        b = b.set_(b.storage(), storage_offset=0, size=(65, 64), stride=(1, 1))
-        b += 5
-        b = b.set_(b.storage(),
-                   storage_offset=0,
-                   size=a.size(),
-                   stride=a.stride())
-        a += 5
-        self.assertEqual(a, b)
 
     def test_bincount_cuda(self):
         TestTorch._test_bincount(self, device='cuda')

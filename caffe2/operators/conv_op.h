@@ -54,10 +54,10 @@ class ConvOp final : public ConvPoolOpBase<Context> {
       const T* bias,
       T* Y);
 
-  Tensor<Context> col_buffer_;
-  Tensor<Context> bias_multiplier_;
-  Tensor<Context> img_shape_device_;
-  Tensor<Context> col_buffer_shape_device_;
+  Tensor col_buffer_{Context::GetDeviceType()};
+  Tensor bias_multiplier_{Context::GetDeviceType()};
+  Tensor img_shape_device_{Context::GetDeviceType()};
+  Tensor col_buffer_shape_device_{Context::GetDeviceType()};
   // Input: X, W, b
   // Output: Y
   INPUT_TAGS(INPUT, FILTER, BIAS);
@@ -83,10 +83,10 @@ class ConvGradientOp final : public ConvPoolOpBase<Context> {
   bool RunOnDeviceWithOrderNHWC() override;
 
  private:
-  Tensor<Context> col_buffer_;
-  Tensor<Context> bias_multiplier_;
-  Tensor<Context> img_shape_device_;
-  Tensor<Context> col_buffer_shape_device_;
+  Tensor col_buffer_{Context::GetDeviceType()};
+  Tensor bias_multiplier_{Context::GetDeviceType()};
+  Tensor img_shape_device_{Context::GetDeviceType()};
+  Tensor col_buffer_shape_device_{Context::GetDeviceType()};
   bool no_bias_;
   // input: X, W, dY
   // output: dW, db, and optionally dX

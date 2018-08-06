@@ -10,6 +10,19 @@ graph {
       t {
         dims: 4
         data_type: INT64
+        raw_data: "\001\000\000\000\000\000\000\000\002\000\000\000\000\000\000\000\003\000\000\000\000\000\000\000\004\000\000\000\000\000\000\000"
+      }
+      type: TENSOR
+    }
+  }
+  node {
+    output: "2"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        dims: 4
+        data_type: INT64
         raw_data: "\001\000\000\000\000\000\000\000\001\000\000\000\000\000\000\000\001\000\000\000\000\000\000\000\002\000\000\000\000\000\000\000"
       }
       type: TENSOR
@@ -17,26 +30,13 @@ graph {
   }
   node {
     input: "0"
-    input: "1"
-    output: "2"
+    input: "2"
+    output: "3"
     op_type: "Reshape"
   }
   node {
-    output: "3"
-    op_type: "Constant"
-    attribute {
-      name: "value"
-      t {
-        dims: 4
-        data_type: INT64
-        raw_data: "\001\000\000\000\000\000\000\000\002\000\000\000\000\000\000\000\003\000\000\000\000\000\000\000\004\000\000\000\000\000\000\000"
-      }
-      type: TENSOR
-    }
-  }
-  node {
-    input: "2"
     input: "3"
+    input: "1"
     output: "4"
     op_type: "Tile"
   }
@@ -81,5 +81,5 @@ graph {
   }
 }
 opset_import {
-  version: 6
+  version: 7
 }

@@ -3,9 +3,8 @@
 namespace caffe2 {
 
 template <>
-bool RangeFillOp<float, CPUContext>::Fill(
-    TensorCPU* output) {
-  float* data = output->mutable_data<float>();
+bool RangeFillOp<float, CPUContext>::Fill(Tensor* output) {
+  float* data = output->template mutable_data<float>();
   for (int i = 0; i < output->size(); ++i) {
     data[i] = i;
   }
@@ -14,7 +13,7 @@ bool RangeFillOp<float, CPUContext>::Fill(
 
 template <>
 template <typename T>
-bool DiagonalFillOp<CPUContext>::FillWithType(TensorCPU* output) {
+bool DiagonalFillOp<CPUContext>::FillWithType(Tensor* output) {
   VerifyOutputShape(output);
   T value = OperatorBase::GetSingleArgument<T>("value", 0);
   auto* data = output->template mutable_data<T>();

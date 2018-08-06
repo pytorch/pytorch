@@ -2,6 +2,9 @@
 
 set -ex
 
+pip install --user --no-cache-dir hypothesis==3.59.0
+
+
 # The INSTALL_PREFIX here must match up with test.sh
 INSTALL_PREFIX="/usr/local/caffe2"
 LOCAL_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -121,7 +124,7 @@ CMAKE_ARGS+=("-DUSE_OBSERVERS=ON")
 CMAKE_ARGS+=("-DUSE_ZSTD=ON")
 CMAKE_ARGS+=("-DCMAKE_INSTALL_PREFIX=${INSTALL_PREFIX}")
 
-if [[ $BUILD_ENVIRONMENT == *-aten-* ]]; then
+if [[ $BUILD_ENVIRONMENT == *-aten-* || -n "$INTEGRATED" ]]; then
   if [[ CMAKE_ARGS != *USE_ATEN* ]] && [[ CMAKE_ARGS != *BUILD_ATEN* ]]; then
     CMAKE_ARGS+=("-DBUILD_ATEN=ON")
   fi

@@ -69,7 +69,7 @@ void flip_cuda_kernel(scalar_t* in_tensor, scalar_t* out_tensor, int64_t N, int6
 Tensor flip_cuda(const Tensor& self, IntList dims) {
   auto in_tensor = self;
   const int64_t flip_dims_size = dims.size(), total_dims = in_tensor.dim(), N = in_tensor.numel();
-  check_errors(total_dims, flip_dims_size, dims);
+  flip_check_errors(total_dims, flip_dims_size, dims);
 
   int64_t block_size = 512;
   dim3 dim_block(block_size);
@@ -80,13 +80,16 @@ Tensor flip_cuda(const Tensor& self, IntList dims) {
     return out_tensor;
   }
 
+  auto flip_dims = dims.vec();
+  wrap_all_dims(flip_dims, total_dims);
+
   // use kernel_pointwise_flip_apply2 only when to-flip dim is the 1st or last dim, where collapseDims can reduce the amount of work
-  if (flip_dims_size == 1 && in_tensor.is_contiguous() && (dims[0] == 0 || dims[0] == total_dims - 1)) {
+  if (flip_dims_size == 1 && in_tensor.is_contiguous() && (flip_dims[0] == 0 || flip_dims[0] == total_dims - 1)) {
     AT_DISPATCH_ALL_TYPES_AND_HALF(in_tensor.type(), "flip_cuda", [&] {
       auto in_tensor_info = cuda::detail::getTensorInfo<scalar_t, int64_t>(in_tensor);
       auto out_tensor_info = cuda::detail::getTensorInfo<scalar_t, int64_t>(out_tensor);
-      int flip_dim = in_tensor_info.collapseDims(dims[0]);
-      out_tensor_info.collapseDims(dims[0]);
+      int flip_dim = in_tensor_info.collapseDims(flip_dims[0]);
+      out_tensor_info.collapseDims(flip_dims[0]);
       kernel_pointwise_flip_apply2<scalar_t, int64_t>
         <<<dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
           in_tensor_info, out_tensor_info, N, flip_dim, total_dims);
@@ -94,13 +97,12 @@ Tensor flip_cuda(const Tensor& self, IntList dims) {
     return out_tensor;
   }
 
-  auto flip_dims = std::vector<int64_t>(dims);
   auto flip_dims_t = at::CPU(kLong).tensorFromBlob(flip_dims.data(), {static_cast<int64_t>(flip_dims.size())});
 
-  auto shape = std::vector<int64_t>(in_tensor.sizes());
+  auto shape = in_tensor.sizes().vec();
   auto shape_t = at::CPU(kLong).tensorFromBlob(shape.data(), {static_cast<int64_t>(shape.size())});
 
-  auto strides = std::vector<int64_t>(in_tensor.strides());
+  auto strides = in_tensor.strides().vec();
   auto strides_t = at::CPU(kLong).tensorFromBlob(strides.data(), {static_cast<int64_t>(strides.size())});
 
   // stride_contiguous is the stride of non-contiguous tensor after calling contiguous(),

@@ -8,7 +8,7 @@ namespace torch { namespace jit {
 
 // schema as used in the compiler for resolving function calls and reporting
 // errors. These objects should be constructed from C10 schema once those
-// are availiable
+// are available.
 struct Argument {
   Argument(
       std::string name = "",

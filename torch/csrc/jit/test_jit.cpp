@@ -3,6 +3,8 @@
 #define CATCH_CONFIG_MAIN
 #include "catch.hpp"
 
+using Catch::StartsWith;
+
 #else
 
 #define REQUIRE JIT_ASSERT
@@ -26,6 +28,8 @@
 #include "torch/csrc/jit/passes/shape_analysis.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
 #include "torch/csrc/jit/passes/lower_grad_of.h"
+#include "torch/csrc/jit/operator.h"
+#include "torch/csrc/jit/custom_operator.h"
 #include "torch/csrc/variable_tensor_functions.h"
 
 #include "torch/csrc/autograd/variable.h"
@@ -220,6 +224,9 @@ static void fusionTests() {
   testOne(1,2,0,2);
 
 
+  auto createFusedConcat = [](Graph & graph, at::ArrayRef<Value*> inputs, int64_t dim) -> Value* {
+    return graph.insertNode(graph.create(prim::FusedConcat, inputs)->i_(attr::dim, dim))->output();
+  };
 
   auto testConcat = [&](int dim) {
     Graph graph;
@@ -227,7 +234,7 @@ static void fusionTests() {
     Var i1 = Var::asNewInput(graph);
     auto o0 = i0 * i1;
     o0.addAsOutput();
-    Var::cat({i0, o0}, dim).addAsOutput();
+    Var(createFusedConcat(graph, {i0, o0}, dim)).addAsOutput();
 
     auto a = at::rand({3,4,5}, at::kCUDA);
     auto b = at::rand({4,3,5}, at::kCUDA).transpose(0,1);
@@ -641,7 +648,7 @@ std::string toString(std::shared_ptr<Graph>& graph) {
 void testDifferentiate(std::ostream & out) {
   auto graph = std::make_shared<Graph>();
   at::ScalarType s = at::ScalarType::Float;
-  auto type = std::shared_ptr<TensorType>(new TensorType(s, -1, {2, 3, 4}, {12, 4, 1}));
+  auto type = TensorType::create(s, -1, {2, 3, 4}, {12, 4, 1});
 
   // Build up a fake graph
   auto a = SymbolicVariable::asNewInput(*graph, type);
@@ -668,7 +675,7 @@ void testDifferentiate(std::ostream & out) {
 void testDifferentiateWithRequiresGrad(std::ostream & out) {
   auto graph = std::make_shared<Graph>();
   at::ScalarType s = at::ScalarType::Float;
-  auto type = std::shared_ptr<TensorType>(new TensorType(s, -1, {2, 3, 4}, {12, 4, 1}));
+  auto type = TensorType::create(s, -1, {2, 3, 4}, {12, 4, 1});
 
   // Build up a fake graph
   auto a = SymbolicVariable::asNewInput(*graph, type);
@@ -714,7 +721,8 @@ bool isEqual(at::IntList lhs, at::IntList rhs) {
   return lhs.size() == rhs.size() && std::equal(lhs.begin(), lhs.end(), rhs.begin());
 }
 
-bool isEqual(const TensorInfo & ti, const autograd::Variable & v) {
+bool isEqual(const ArgumentInfo & ti, const autograd::Variable & v) {
+  REQUIRE(ti.isTensor());
   if(!ti.defined())
     return ti.defined() == v.defined();
   return
@@ -728,8 +736,8 @@ bool isEqual(const TensorInfo & ti, const autograd::Variable & v) {
 // work around the fact that variable_tensor_list doesn't duplicate all
 // of std::vector's constructors.
 // most constructors are never used in the implementation, just in our tests.
-variable_tensor_list createVarList(std::vector<at::Tensor> && list) {
-  return variable_tensor_list(std::move(list));
+Stack createStack(std::vector<at::Tensor> && list) {
+  return Stack(std::make_move_iterator(list.begin()), std::make_move_iterator(list.end()));
 }
 
 void argumentSpecTest() {
@@ -738,14 +746,14 @@ void argumentSpecTest() {
   auto & GF = at::CUDA(at::kFloat);
   auto & GD = at::CUDA(at::kDouble);
 
-  auto list =  createVarList({ var(CF, {1}, true), var(CD, {1, 2}, false) , var(GF, {}, true), var(GD, {4,5,6}, false), undef()});
+  auto list = createStack({ var(CF, {1}, true), var(CD, {1, 2}, false) , var(GF, {}, true), var(GD, {4,5,6}, false), undef()});
 
   // make sure we have some non-standard strides
-  list[1].transpose_(0, 1);
+  list[1].toTensor().transpose_(0, 1);
 
   // same list but different backing values
-  auto list2 = createVarList({ var(CF, {1}, true), var(CD, {1, 2}, false) , var(GF, {}, true), var(GD, {4,5,6}, false), undef()});
-  list2[1].transpose_(0, 1);
+  auto list2 = createStack({ var(CF, {1}, true), var(CD, {1, 2}, false) , var(GF, {}, true), var(GD, {4,5,6}, false), undef()});
+  list2[1].toTensor().transpose_(0, 1);
 
 
   ArgumentSpec a(true, list);
@@ -758,7 +766,7 @@ void argumentSpecTest() {
   REQUIRE(d.hashCode() == a.hashCode());
 
   for(size_t i = 0; i < list.size(); ++i) {
-    REQUIRE(isEqual(a.tensorInfo(i), list[i]));
+    REQUIRE(isEqual(a.at(i), list[i].toTensor()));
   }
   ArgumentSpec no_grad(/*with_grad=*/false, list);
   REQUIRE(no_grad != a);
@@ -770,11 +778,14 @@ void argumentSpecTest() {
   spec.insert(std::move(no_grad));
   REQUIRE(spec.count(ArgumentSpec(true,list)) == 1);
 
-  list2[1].transpose_(0,1);
+  list2[1].toTensor().transpose_(0,1);
   ArgumentSpec c(true, list2); // same as list, except for one stride
   REQUIRE(!(c == a));
   REQUIRE(spec.count(c) == 0);
 
+  Stack stack = { var(CF, {1,2}, true), 3, var(CF, {1,2}, true) };
+  ArgumentSpec with_const(true, stack);
+  REQUIRE(with_const.at(2).sizes().size() == 2);
 }
 
 void shapeAnalysisTest() {
@@ -793,7 +804,7 @@ void shapeAnalysisTest() {
   auto w_hh  = t_def(at::randn({4 * hidden_size, hidden_size}, at::kCUDA));
 
   auto g = build_lstm();
-  ArgumentSpec spec(false, createVarList({v(input), v(hx), v(cx), v(w_ih), v(w_hh) }));
+  ArgumentSpec spec(false, createStack({v(input), v(hx), v(cx), v(w_ih), v(w_hh) }));
   PropagateInputShapes(*g, spec);
   at::Tensor r0, r1;
   std::tie(r0, r1) = lstm(input, hx, cx, w_ih, w_hh);
@@ -818,14 +829,15 @@ void testGraphExecutor() {
   auto w_ih  = t_def(at::randn({4 * hidden_size, input_size}, at::kCUDA));
   auto w_hh  = t_def(at::randn({4 * hidden_size, hidden_size}, at::kCUDA));
 
-  std::vector<at::Tensor> inputs = {v(input), v(hx), v(cx), v(w_ih), v(w_hh) };
   auto g = build_lstm();
   GraphExecutor executor(g);
-  auto outputs = executor.run(variable_tensor_list(std::move(inputs)));
+  auto stack = createStack({v(input), v(hx), v(cx), v(w_ih), v(w_hh)});
+  executor.run(stack);
+  REQUIRE(stack.size() == 2);
   at::Tensor r0, r1;
   std::tie(r0, r1) = lstm(input, hx, cx, w_ih, w_hh);
-  REQUIRE(almostEqual(Variable(outputs[0]).data(), r0));
-  REQUIRE(almostEqual(Variable(outputs[1]).data(), r1));
+  REQUIRE(almostEqual(Variable(stack[0].toTensor()).data(), r0));
+  REQUIRE(almostEqual(Variable(stack[1].toTensor()).data(), r1));
 }
 
 void testBlocks(std::ostream & out) {
@@ -918,7 +930,7 @@ void testIValue() {
   JIT_ASSERT(foo2.isDouble());
   JIT_ASSERT(foo2.toDouble() == 4.0);
   JIT_ASSERT(foo->use_count() == 2);
-  JIT_ASSERT(baz.toIntList()->elements().equals({3,4,5}));
+  JIT_ASSERT(ArrayRef<int64_t>(baz.toIntList()->elements()).equals({3,4,5}));
 
   auto move_it = std::move(baz).toIntList();
   JIT_ASSERT(foo->use_count() == 2);
@@ -928,10 +940,11 @@ void testIValue() {
   IValue dlist(DoubleList::create({3.5}));
   JIT_ASSERT(
       dlist.isDoubleList() &&
-      std::move(dlist).toDoubleList()->elements().equals({3.5}));
+      ArrayRef<double>(std::move(dlist).toDoubleList()->elements())
+          .equals({3.5}));
   JIT_ASSERT(dlist.isNone());
   dlist = IValue(DoubleList::create({3.4}));
-  JIT_ASSERT(dlist.toDoubleList()->elements().equals({3.4}));
+  JIT_ASSERT(ArrayRef<double>(dlist.toDoubleList()->elements()).equals({3.4}));
   IValue the_list(Tuple::create({IValue(3.4), IValue(4), IValue(foo)}));
   JIT_ASSERT(foo->use_count() == 3);
   JIT_ASSERT(the_list.isTuple());
@@ -950,6 +963,132 @@ void testIValue() {
 void testProto() {
   ::ONNX_NAMESPACE::ModelProto proto;
   proto.set_producer_name("foo");
+}
+
+void testCustomOperators() {
+  {
+    RegisterOperators reg({createOperator(
+        "foo::bar", [](double a, at::Tensor b) { return a + b; })});
+    auto& ops = getAllOperatorsFor(Symbol::fromQualString("foo::bar"));
+    REQUIRE(ops.size() == 1);
+
+    auto& op = ops.front();
+    REQUIRE(op->schema().name == "foo::bar");
+
+    REQUIRE(op->schema().arguments.size() == 2);
+    REQUIRE(op->schema().arguments[0].name == "_0");
+    REQUIRE(op->schema().arguments[0].type->kind() == TypeKind::FloatType);
+    REQUIRE(op->schema().arguments[1].name == "_1");
+    REQUIRE(op->schema().arguments[1].type->kind() == TypeKind::DynamicType);
+
+    REQUIRE(op->schema().returns.size() == 1);
+    REQUIRE(op->schema().returns[0].type->kind() == TypeKind::DynamicType);
+
+    Stack stack;
+    push(stack, 2.0f, at::ones(5));
+    op->getOperation()(stack);
+    at::Tensor output;
+    pop(stack, output);
+
+    REQUIRE(output.allclose(at::full(5, 3.0f)));
+  }
+  {
+    RegisterOperators reg({createOperator(
+        "foo::bar_with_schema(float a, Tensor b) -> Tensor",
+        [](double a, at::Tensor b) { return a + b; })});
+
+    auto& ops =
+        getAllOperatorsFor(Symbol::fromQualString("foo::bar_with_schema"));
+    REQUIRE(ops.size() == 1);
+
+    auto& op = ops.front();
+    REQUIRE(op->schema().name == "foo::bar_with_schema");
+
+    REQUIRE(op->schema().arguments.size() == 2);
+    REQUIRE(op->schema().arguments[0].name == "a");
+    REQUIRE(op->schema().arguments[0].type->kind() == TypeKind::FloatType);
+    REQUIRE(op->schema().arguments[1].name == "b");
+    REQUIRE(op->schema().arguments[1].type->kind() == TypeKind::DynamicType);
+
+    REQUIRE(op->schema().returns.size() == 1);
+    REQUIRE(op->schema().returns[0].type->kind() == TypeKind::DynamicType);
+
+    Stack stack;
+    push(stack, 2.0f, at::ones(5));
+    op->getOperation()(stack);
+    at::Tensor output;
+    pop(stack, output);
+
+    REQUIRE(output.allclose(at::full(5, 3.0f)));
+  }
+  {
+    // Check that lists work well.
+    RegisterOperators reg({createOperator(
+        "foo::lists(int[] ints, float[] floats, Tensor[] tensors) -> float[]",
+        [](const std::vector<int64_t>& ints,
+           const std::vector<double>& floats,
+           std::vector<at::Tensor> tensors) { return floats; })});
+
+    auto& ops =
+        getAllOperatorsFor(Symbol::fromQualString("foo::lists"));
+    REQUIRE(ops.size() == 1);
+
+    auto& op = ops.front();
+    REQUIRE(op->schema().name == "foo::lists");
+
+    REQUIRE(op->schema().arguments.size() == 3);
+    REQUIRE(op->schema().arguments[0].name == "ints");
+    REQUIRE(op->schema().arguments[0].type->isSubtypeOf(ListType::ofInts()));
+    REQUIRE(op->schema().arguments[1].name == "floats");
+    REQUIRE(op->schema().arguments[1].type->isSubtypeOf(ListType::ofFloats()));
+    REQUIRE(op->schema().arguments[2].name == "tensors");
+    REQUIRE(op->schema().arguments[2].type->isSubtypeOf(ListType::ofTensors()));
+
+    REQUIRE(op->schema().returns.size() == 1);
+    REQUIRE(op->schema().returns[0].type->isSubtypeOf(ListType::ofFloats()));
+
+    Stack stack;
+    push(stack, std::vector<int64_t>{1, 2});
+    push(stack, std::vector<double>{1.0, 2.0});
+    push(stack, std::vector<at::Tensor>{at::ones(5)});
+    op->getOperation()(stack);
+    std::vector<double> output;
+    pop(stack, output);
+
+    REQUIRE(output.size() == 2);
+    REQUIRE(output[0] == 1.0);
+    REQUIRE(output[1] == 2.0);
+  }
+  {
+#ifdef USE_CATCH
+    REQUIRE_THROWS_WITH(
+        createOperator(
+            "foo::bar_with_bad_schema(Tensor a) -> Tensor",
+            [](double a, at::Tensor b) { return a + b; }),
+        StartsWith("Inferred 2 argument(s) for operator implementation, "
+                   "but the provided schema specified 1 argument(s)."));
+    REQUIRE_THROWS_WITH(
+        createOperator(
+            "foo::bar_with_bad_schema(Tensor a) -> Tensor",
+            [](double a) { return a; }),
+        StartsWith("Inferred type for argument #0 was float, "
+                   "but the provided schema specified type Dynamic "
+                   "for the argument in that position"));
+    REQUIRE_THROWS_WITH(
+        createOperator(
+            "foo::bar_with_bad_schema(float a) -> (float, float)",
+            [](double a) { return a; }),
+        StartsWith("Inferred 1 return value(s) for operator implementation, "
+                   "but the provided schema specified 2 return value(s)."));
+    REQUIRE_THROWS_WITH(
+        createOperator(
+            "foo::bar_with_bad_schema(float a) -> Tensor",
+            [](double a) { return a; }),
+        StartsWith("Inferred type for return value #0 was float, "
+                   "but the provided schema specified type Dynamic "
+                   "for the return value in that position"));
+#endif // USE_CATCH
+  }
 }
 
 TORCH_API std::string runJITCPPTests() {
@@ -972,6 +1111,7 @@ TORCH_API std::string runJITCPPTests() {
   argumentSpecTest();
   shapeAnalysisTest();
   testProto();
+  testCustomOperators();
   return out.str();
 }
 
@@ -998,6 +1138,8 @@ TEST_CASE( "jit test CPU", "[cpu]" ) {
     attributesTest();
   SECTION( "interned strings" )
     internedStringsTests();
+  SECTION( "custom operators" )
+    testCustomOperators();
 }
 
 TEST_CASE( "jit test CUDA", "[cuda]" ) {

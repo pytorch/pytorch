@@ -4,4 +4,4 @@
 # turn on CI side before PyTorch repository supports it.  This
 # file has the same format as .jenkins/enabled-configs.txt
 
-py2-clang3.8-rocmnightly-ubuntu16.04-test
+py2-clang3.8-rocm1.7.1-ubuntu16.04-test

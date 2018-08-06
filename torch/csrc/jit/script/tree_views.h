@@ -58,6 +58,7 @@ namespace script {
 //       | Gather(Expr value, Expr indices)                             TK_GATHER
 //       | Var(Ident name)                                              TK_VAR
 //       | ListLiteral(List<Expr> inputs)                               TK_LIST_LITERAL
+//       | TupleLiteral(List<Expr> inputs)                              TK_TUPLE_LITERAL
 //       | Starred(Expr expr)                                           TK_STARRED
 //
 // -- NB: only allowed expressions are Const or List(Const)
@@ -245,8 +246,10 @@ struct Expr : public TreeView {
       case '/':
       case TK_NOT:
       case TK_CONST:
+      case TK_STRINGLITERAL:
       case TK_TRUE:
       case TK_FALSE:
+      case TK_NONE:
       case TK_CAST:
       case TK_APPLY:
       case '.':
@@ -254,6 +257,7 @@ struct Expr : public TreeView {
       case TK_GATHER:
       case TK_VAR:
       case TK_LIST_LITERAL:
+      case TK_TUPLE_LITERAL:
       case '@':
       case TK_POW:
         return;
@@ -561,6 +565,18 @@ struct Const : public Expr {
   }
 };
 
+struct StringLiteral : public Expr {
+  explicit StringLiteral(const TreeRef& tree) : Expr(tree) {
+    tree_->matchNumSubtrees(TK_STRINGLITERAL, 1);
+  }
+  const std::string& text() const {
+    return subtree(0)->stringValue();
+  }
+  static StringLiteral create(const SourceRange& range, const std::string& value) {
+    return StringLiteral(Compound::create(TK_STRINGLITERAL, range, {String::create(value)}));
+  }
+};
+
 struct Apply : public Expr {
   explicit Apply(const TreeRef& tree) : Expr(tree) {
     tree_->match(TK_APPLY);
@@ -693,6 +709,17 @@ struct ListLiteral : public Expr {
   }
 };
 
+struct TupleLiteral : public Expr {
+  explicit TupleLiteral(const TreeRef& tree) : Expr(tree) {
+    tree_->match(TK_TUPLE_LITERAL);
+  }
+  List<Expr> inputs() const {
+    return subtree(0);
+  }
+  static TupleLiteral create(const SourceRange& range, const List<Expr>& inputs) {
+    return TupleLiteral(Compound::create(TK_TUPLE_LITERAL, range, {inputs}));
+  }
+};
 
 struct Starred : public Expr {
   explicit Starred(const TreeRef& tree) : Expr(tree) {

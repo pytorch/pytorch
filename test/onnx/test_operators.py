@@ -133,9 +133,7 @@ class TestOperators(TestCase):
     def test_add_left_broadcast(self):
         x = Variable(torch.DoubleTensor(3), requires_grad=True)
         y = Variable(torch.DoubleTensor(2, 3), requires_grad=True)
-        self.assertONNXRaisesRegex(RuntimeError,
-                                   r"ONNX export failed: Could not export a broadcasted operation.*",
-                                   lambda x, y: x + y, (x, y), verbose=True)
+        self.assertONNX(lambda x, y: x + y, (x, y))
 
     def test_add_size1_broadcast(self):
         x = Variable(torch.DoubleTensor(2, 3), requires_grad=True)
@@ -151,6 +149,10 @@ class TestOperators(TestCase):
         x = Variable(torch.DoubleTensor(2, 3), requires_grad=True)
         y = Variable(torch.DoubleTensor(1, 3), requires_grad=True)
         self.assertONNX(lambda x, y: x + y, (x, y))
+
+    def test_rsub(self):
+        x = Variable(torch.DoubleTensor(2, 3), requires_grad=True)
+        self.assertONNX(lambda x: 1 - x, (x,))
 
     def test_transpose(self):
         x = Variable(torch.Tensor([[0, 1], [2, 3]]), requires_grad=True)
@@ -355,12 +357,16 @@ class TestOperators(TestCase):
 
     def test_logsoftmax(self):
         x = Variable(torch.randn(1, 2, 3, 4), requires_grad=True)
-        self.assertONNX(nn.LogSoftmax(dim=2), x)
+        self.assertONNX(nn.LogSoftmax(dim=3), x)
 
     def test_pow(self):
         x = Variable(torch.randn(1, 2, 3, 4), requires_grad=True)
         y = Variable(torch.randn(1, 2, 3, 4), requires_grad=True)
         self.assertONNX(lambda x, y: x.pow(y), (x, y))
+
+    def test_elu(self):
+        x = Variable(torch.randn(1, 2, 3, 4), requires_grad=True)
+        self.assertONNX(nn.ELU(), x)
 
     def test_selu(self):
         x = Variable(torch.randn(1, 2, 3, 4), requires_grad=True)

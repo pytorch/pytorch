@@ -17,6 +17,17 @@ struct CallsiteDescriptor {
   bool allow_varargs;
 };
 
+struct TypedDef {
+  TypedDef(Def def, at::optional<FunctionSchema> schema)
+    : def(std::move(def)), schema(std::move(schema)) {}
+
+  TypedDef(Def def)
+    : def(std::move(def)), schema(at::nullopt) {}
+
+  Def def;
+  at::optional<FunctionSchema> schema;
+};
+
 static inline std::vector<Value*> toValues(at::ArrayRef<NamedValue> nvs) {
   return fmap(nvs, [](const NamedValue& v) {
     return v.value;
@@ -57,7 +68,7 @@ struct SugaredValue : public std::enable_shared_from_this<SugaredValue> {
     SourceRange loc,
     Method & m,
     // note: names for args will be 'argument 0', 'argument 1', etc..
-    at::ArrayRef<NamedValue> inputs,
+    at::ArrayRef<NamedValue> inputs_,
     at::ArrayRef<NamedValue> attributes,
     size_t n_binders) {
 // n_binders is always set to the number of variables an expression is
@@ -78,7 +89,7 @@ struct SugaredValue : public std::enable_shared_from_this<SugaredValue> {
     throw ErrorReport(loc) << "cannot call a " << kind();
   }
 
-  virtual ~SugaredValue() {}
+  virtual ~SugaredValue() = default;
 };
 
 // most things in the environment are just simple value types
@@ -120,17 +131,18 @@ struct TORCH_API BuiltinFunction : public SugaredValue {
     size_t n_binders) override;
 };
 
-using Resolver = std::function<std::shared_ptr<SugaredValue>(const std::string& name)>;
+using Resolver = std::function<std::shared_ptr<
+    SugaredValue>(const std::string& name, Method& m, const SourceRange& loc)>;
 TORCH_API void defineMethodsInModule(
   Module & m,
-  const std::vector<Def>& definitions,
+  const std::vector<TypedDef>& definitions,
   const std::vector<Resolver>& resolvers, /* determines how we handle free variables in each definition*/
   std::shared_ptr<SugaredValue> self /* if non-null, the first argument to each def, is bound to this value */
 );
 
 // same as above but parse the definitions from source
 TORCH_API void defineMethodsInModule(Module & m, const std::string& source, const Resolver& resolver, std::shared_ptr<SugaredValue> self);
-TORCH_API std::shared_ptr<Graph> compileFunction(Def def, const Resolver& resolver);
+TORCH_API std::shared_ptr<Graph> compileFunction(TypedDef def, const Resolver& resolver);
 
 // pack outputs of a function following python rules. If there is a single value return
 // a SimpleValue, otherwise pack all the values into a Tuple.

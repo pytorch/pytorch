@@ -30,7 +30,7 @@ TEST_CASE( "broadcast", "[]" ) {
 
     SECTION( "with scalar" ) {
       auto aScalar = ones({1}, T);
-      aScalar.get()->maybeScalar(true);
+      aScalar.get()->maybe_zero_dim(true);
       auto b = randn({3, 5}, T);
       REQUIRE((aScalar + b).equal(aScalar.expand(b.sizes()) + b.expand(b.sizes())));
     }
@@ -60,7 +60,7 @@ TEST_CASE( "broadcast", "[]" ) {
 
     SECTION( "with scalar" ) {
       auto aTensorScalar = ones({1}, T);
-      aTensorScalar.get()->maybeScalar(true);
+      aTensorScalar.get()->maybe_zero_dim(true);
       auto b = randn({3, 2, 1}, T);
       auto c = randn({1, 2, 5}, T);
       std::vector<int64_t> expanded_sizes = {3, 2, 5};
@@ -93,7 +93,7 @@ TEST_CASE( "broadcast", "[]" ) {
     SECTION( "with scalar" ) {
       auto a = randn({3, 5}, T);
       auto bScalar = ones({1}, T);
-      bScalar.get()->maybeScalar(true);
+      bScalar.get()->maybe_zero_dim(true);
       REQUIRE((a + bScalar).equal(a + bScalar.expand(a.sizes())));
     }
 
@@ -118,7 +118,7 @@ TEST_CASE( "broadcast", "[]" ) {
     SECTION( "with scalar" ) {
       auto aClone = a.clone();
       auto bScalar = ones({1}, T);
-      bScalar.get()->maybeScalar(true);
+      bScalar.get()->maybe_zero_dim(true);
       REQUIRE(a.addcmul_(bScalar, c).equal(aClone.addcmul_(bScalar.expand(a.sizes()), c.expand(a.sizes()))));
     }
 
@@ -142,7 +142,7 @@ TEST_CASE( "broadcast", "[]" ) {
 
     SECTION( "with scalar" ) {
       Tensor aScalar = ones({1}, T);
-      aScalar.get()->maybeScalar(true);
+      aScalar.get()->maybe_zero_dim(true);
       REQUIRE(aScalar.addmm(b, c).equal(aScalar.expand({5, 7}).addmm(b, c)));
     }
 

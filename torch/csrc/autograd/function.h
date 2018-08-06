@@ -11,7 +11,7 @@
 #include "torch/csrc/utils/variadic.h"
 
 #include <ATen/ATen.h>
-#include <ATen/Error.h>
+#include <ATen/core/Error.h>
 
 #include <algorithm>
 #include <cstdint>
@@ -337,7 +337,7 @@ struct TORCH_API Function : std::enable_shared_from_this<Function> {
 /// See Function::is_traceable() for definition.
 struct TraceableFunction : public Function {
   using Function::Function;
-  bool is_traceable() final override {
+  bool is_traceable() final {
     return true;
   }
 };

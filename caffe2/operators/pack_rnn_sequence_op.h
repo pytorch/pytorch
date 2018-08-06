@@ -73,7 +73,7 @@ class PackRNNSequenceOpBase : public Operator<Context> {
       for (int r = 0; r < lengths_vec[c]; r++) {
         auto input_offset = Forward ? (offset + r) : (r * cols + c);
         auto output_offset = Forward ? (r * cols + c) : (offset + r);
-        context_.template CopyItems<Context, Context>(
+        context_.CopyItemsSameDevice(
             values.meta(),
             block_size,
             values_vec + input_offset * block_size,

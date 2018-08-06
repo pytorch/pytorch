@@ -109,7 +109,8 @@ message Argument {
 
 // DeviceType that Caffe2 currently supports.
 // Note: if you add a device type, make sure you add the corresponding device
-// line in the DeviceTypeName() function in caffe2/utils/proto_utils.cc.
+// line in the DeviceTypeName() function in caffe2/utils/proto_utils.cc
+// and update ATen/core/DeviceType.h
 enum DeviceType {
   CPU = 0;                    // In default, we will use CPU.
   CUDA = 1;                   // CUDA.

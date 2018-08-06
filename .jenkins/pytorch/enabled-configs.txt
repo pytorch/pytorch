@@ -40,4 +40,4 @@ pytorch-macos-10.13-cuda9.2-cudnn7-py3-build
 pytorch-docker-build-test
 short-perf-test-cpu
 short-perf-test-gpu
-py2-clang3.8-rocmnightly-ubuntu16.04-build
+py2-clang3.8-rocm1.7.1-ubuntu16.04-build

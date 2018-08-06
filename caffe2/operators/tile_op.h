@@ -34,7 +34,7 @@ class TileOp : public Operator<Context> {
           "Input `tiles` should be a vector of size 1.");
 
       const auto& input1 = Input(1);
-      context_.template CopyItems<Context, CPUContext>(
+      context_.CopyItemsToCPU(
           input1.meta(),
           1,
           static_cast<const char*>(input1.raw_data()),
@@ -46,7 +46,7 @@ class TileOp : public Operator<Context> {
             "Input `axis` should be a vector of size 1.");
 
         const auto& input2 = Input(2);
-        context_.template CopyItems<Context, CPUContext>(
+        context_.CopyItemsToCPU(
             input2.meta(),
             1,
             static_cast<const char*>(input2.raw_data()),
@@ -114,8 +114,7 @@ class TileOp : public Operator<Context> {
       char* output_data) {
     for (auto i = 0; i < outer_dim; ++i) {
       for (auto t = 0; t < tiles_; ++t) {
-        context_.template CopyItems<Context, Context>(
-            meta, inner_dim, input_data, output_data);
+        context_.CopyItemsSameDevice(meta, inner_dim, input_data, output_data);
         output_data += inner_dim * item_size;
       }
       input_data += inner_dim * item_size;
@@ -149,7 +148,7 @@ class TileGradientOp : public Operator<Context> {
           "Input `tiles` should be a vector of size 1.");
 
       const auto& input1 = Input(1);
-      context_.template CopyItems<Context, CPUContext>(
+      context_.CopyItemsToCPU(
           input1.meta(),
           1,
           static_cast<const char*>(input1.raw_data()),
@@ -161,7 +160,7 @@ class TileGradientOp : public Operator<Context> {
             "Input `axis` should be a vector of size 1.");
 
         const auto& input2 = Input(2);
-        context_.template CopyItems<Context, CPUContext>(
+        context_.CopyItemsToCPU(
             input2.meta(),
             1,
             static_cast<const char*>(input2.raw_data()),
@@ -231,8 +230,7 @@ class TileGradientOp : public Operator<Context> {
       const char* input_data,
       char* output_data) {
     for (auto i = 0; i < outer_dim; ++i) {
-      context_.template CopyItems<Context, Context>(
-          meta, inner_dim, input_data, output_data);
+      context_.CopyItemsSameDevice(meta, inner_dim, input_data, output_data);
       input_data += inner_dim * item_size;
       for (auto t = 1; t < tiles_; ++t) {
         math::Axpy<T, Context>(

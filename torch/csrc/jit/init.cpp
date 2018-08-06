@@ -18,6 +18,7 @@
 #include "torch/csrc/jit/passes/onnx/fixup_onnx_loop.h"
 #include "torch/csrc/jit/passes/shape_analysis.h"
 #include "torch/csrc/jit/passes/decompose_addmm.h"
+#include "torch/csrc/jit/passes/constant_propagation.h"
 #include "torch/csrc/jit/passes/loop_unrolling.h"
 #include "torch/csrc/jit/passes/to_batch.h"
 #include "torch/csrc/jit/passes/specialize_undef.h"
@@ -26,6 +27,11 @@
 #include "torch/csrc/jit/script/python_tree_views.h"
 #include "torch/csrc/jit/batched/BatchTensor.h"
 #include "torch/csrc/jit/pybind_utils.h"
+#include "torch/csrc/jit/function_schema.h"
+#include "torch/csrc/jit/serialization.h"
+#include "torch/csrc/jit/operator.h"
+
+#include <pybind11/functional.h>
 
 namespace torch  { namespace jit {
 
@@ -56,22 +62,26 @@ void initJITBindings(PyObject *module) {
    .def("_jit_pass_onnx", ToONNX)
    .def("_jit_pass_onnx_peephole", PeepholeOptimizeONNX)
    .def("_jit_pass_fuse", FuseGraph)
-   .def("_jit_pass_dce", [](std::shared_ptr<Graph>& g){
+   .def("_jit_pass_dce", [](std::shared_ptr<Graph>& g) {
      return EliminateDeadCode(g); // overload resolution
    })
-   .def("_jit_pass_cse", EliminateCommonSubexpression)
+   .def("_jit_pass_cse", [](std::shared_ptr<Graph>& g) {
+     return EliminateCommonSubexpression(g); // overload resolution
+   })
    .def("_jit_pass_peephole", PeepholeOptimize)
    .def("_jit_pass_canonicalize", [](const std::shared_ptr<Graph>& g) {
      return Canonicalize(g);
    })
    .def("_jit_pass_lint", LintGraph)
    .def("_jit_pass_shape_analysis", [](Graph& graph, py::tuple inputs, bool with_grad) {
-     auto tensor_inputs = createVariableTensorList(inputs);
-     PropagateInputShapes(graph, ArgumentSpec(with_grad, tensor_inputs));
+     PropagateInputShapes(graph, ArgumentSpec(with_grad, evilDeprecatedBadCreateStackDoNotUse(inputs, graph.inputs())));
    })
    .def("_jit_pass_remove_expands", RemoveExpands)
    .def("_jit_pass_erase_number_types", EraseNumberTypes)
    .def("_jit_pass_loop_unrolling", UnrollLoops)
+   .def("_jit_pass_constant_propagation", [](std::shared_ptr<Graph>& g) {
+     return ConstantPropagation(g);
+   })
    .def("_jit_run_cpp_tests", [] {
      // We have to release the GIL inside this method, because if we happen to
      // initialize the autograd engine in these tests, the newly spawned worker threads will
@@ -175,33 +185,61 @@ void initJITBindings(PyObject *module) {
           }),
           py::arg("graph"),
           py::arg("optimize") = true)
+      .def("graph_for", [](GraphExecutor& ge, py::args args) {
+        return ge.graphFor(evilDeprecatedBadCreateStackDoNotUse(args, ge.graph()->inputs()));
+      })
       .def_property_readonly("graph", [](GraphExecutor& ge) {
         return ge.graph();
-      })
-      .def("graph_for", [](GraphExecutor& ge, py::args args) {
-        return ge.graphFor(createVariableTensorList(args));
       })
       .def("get_debug_state", [](GraphExecutor& ge) {
         return ge.getDebugState();
       })
       .def("__call__", [](GraphExecutor& ge, py::args args) -> py::object {
-        auto inputs = createVariableTensorList(args);
-        auto outputs = ge.run(std::move(inputs));
-        // if we don't tell pybind these are variables it chokes on the
-        // conversion.
-        // TODO: fix conversions to be sane and make sure this works.
-        if (outputs.size() == 0) {
-          return py::none();
-        } else if (outputs.size() == 1) {
-          return py::cast(autograd::as_variable_ref(outputs[0]));
-        } else {
-          py::tuple tuple(outputs.size());
-          for(size_t i = 0; i < outputs.size(); i++) {
-            tuple[i] = py::cast(autograd::as_variable_ref(outputs[i]));
-          }
-          return tuple;
-        }
+        const auto & graph = ge.graph();
+        auto stack = evilDeprecatedBadCreateStackDoNotUse(args, graph->inputs());
+        ge.run(stack);
+        return createPyObjectForStack(std::move(stack));
       });
+
+
+    py::class_<PyTorchFileWriter>(m, "PyTorchFileWriter")
+      .def(py::init<std::string>())
+      .def("write_record", &PyTorchFileWriter::writeRecord)
+      .def("write_end_of_file", &PyTorchFileWriter::writeEndOfFile);
+
+    py::class_<PyTorchFileReader>(m, "PyTorchFileReader")
+      .def(py::init<std::string>())
+      .def("get_record_with_key", [](PyTorchFileReader &self, uint64_t key) {
+        std::shared_ptr<void> data;
+        size_t size;
+        std::tie(data, size) = self.getRecordWithKey(key);
+        return py::bytes(reinterpret_cast<const char*>(data.get()), size);
+      })
+      .def("get_last_record", [](PyTorchFileReader &self){
+        std::shared_ptr<void> data;
+        size_t size;
+        std::tie(data, size) = self.getLastRecord();
+        return py::bytes(reinterpret_cast<const char*>(data.get()), size);
+      });
+
+  m.def("_jit_get_operation", [](const std::string& qualified_name) {
+    try {
+      auto symbol = Symbol::fromQualString(qualified_name);
+      auto operations = getAllOperatorsFor(std::move(symbol));
+      AT_CHECK(!operations.empty(), "No such operator ", qualified_name);
+      AT_CHECK(
+          operations.size() == 1,
+          "Found ", operations.size(), " overloads for operator ",
+          qualified_name, "! Overloads are not supported from Python.");
+      std::shared_ptr<Operator> op = operations[0];
+      return py::cpp_function([op](py::args args, py::kwargs kwargs) {
+        return invokeOperatorFromPython(
+            *op, std::move(args), std::move(kwargs));
+      });
+    } catch (const at::Error& error) {
+      throw std::runtime_error(error.what_without_backtrace());
+    }
+  }, py::arg("qualified_name"));
 
   initPythonIRBindings(module);
   tracer::initPythonTracerBindings(module);

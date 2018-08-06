@@ -10,7 +10,7 @@
 #include "torch/csrc/autograd/variable_version.h"
 
 #include <ATen/ATen.h>
-#include <ATen/Error.h>
+#include <ATen/core/Error.h>
 
 #include <list>
 #include <memory>
@@ -22,7 +22,7 @@
 namespace torch {
 namespace autograd {
 Variable::Impl::Impl(at::Tensor data, bool requires_grad, Edge gradient_edge)
-    : TensorImpl(VariableType::getType(data), nullptr),
+    : TensorImpl(data.type().backend(), data.type().scalarType(), nullptr, /* is variable */ true),
       data_(std::move(data)),
       grad_fn_(std::move(gradient_edge.function)),
       requires_grad_(false),
@@ -63,10 +63,6 @@ void* Variable::Impl::unsafeGetTH(bool retain) {
 
 std::unique_ptr<at::Storage> Variable::Impl::storage() {
   return data_.storage();
-}
-
-Scalar Variable::Impl::localScalar() {
-  return data_.pImpl->localScalar();
 }
 
 std::shared_ptr<Function> Variable::Impl::get_grad_accumulator() {
@@ -133,8 +129,10 @@ void Variable::Impl::set_data(Tensor new_data) {
     }
   }
   
-  // Updates type and data
-  type_ = VariableType::getType(new_data.type());
+  // Updates metadata
+  scalar_type_ = new_data.type().scalarType();
+  backend_ = new_data.type().backend();
+  is_variable_ = true;
   data_ = std::move(new_data);
 }
 
@@ -167,8 +165,8 @@ std::shared_ptr<Function>& Variable::ViewImpl::get_grad_fn() {
     AT_ASSERT(output_nr_ == 0);
     auto fn = std::make_shared<generated::AsStridedBackward>();
     fn->self_geometry = at::TensorGeometry(base_);
-    fn->size = sizes();
-    fn->stride = strides();
+    fn->size = sizes().vec();
+    fn->stride = strides().vec();
     fn->storage_offset = data_.storage_offset();
     fn->set_next_edges(collect_next_edges(base_));
     fn->add_input_metadata(
