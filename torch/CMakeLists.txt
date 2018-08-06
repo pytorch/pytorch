@@ -46,6 +46,13 @@ if("${isSystemDir}" STREQUAL "-1")
   list(APPEND CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib")
 endif()
 
+# Get the correct Python executable
+if (DEFINED ENV{PYTORCH_PYTHON})
+  message(STATUS "Using python found in $ENV{PYTORCH_PYTHON}")
+  set(PYCMD "$ENV{PYTORCH_PYTHON}")
+else()
+  SET(PYCMD "python")
+endif()
 
 # Generate files
 set(TOOLS_PATH "${TORCH_SRC_DIR}/../tools")
@@ -79,7 +86,7 @@ add_custom_command(
   "${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops.cpp"
   "${TORCH_SRC_DIR}/csrc/jit/generated/aten_interned_strings.h"
   COMMAND
-  python tools/setup_helpers/generate_code.py
+  ${PYCMD} tools/setup_helpers/generate_code.py
     --declarations-path "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
     --nn-path "aten/src/"
   DEPENDS
@@ -102,13 +109,13 @@ add_custom_command(
   "${TOOLS_PATH}/autograd/gen_autograd.py"
   "${TOOLS_PATH}/autograd/gen_autograd_functions.py"
   "${TOOLS_PATH}/autograd/gen_variable_type.py"
+  "${TOOLS_PATH}/jit/gen_jit_dispatch.py"
   "${TOOLS_PATH}/jit/templates/register_aten_ops.cpp"
   "${TOOLS_PATH}/jit/templates/aten_interned_strings.h"
   WORKING_DIRECTORY "${TORCH_SRC_DIR}/..")
 
 set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/autograd/anomaly_mode.cpp
-  ${TORCH_SRC_DIR}/csrc/autograd/aten_variable_hooks.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/engine.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/function.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/functions/accumulate_grad.cpp
@@ -134,10 +141,12 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/interpreter.cpp
   ${TORCH_SRC_DIR}/csrc/jit/constants.cpp
   ${TORCH_SRC_DIR}/csrc/jit/ir.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/ivalue.cpp
   ${TORCH_SRC_DIR}/csrc/jit/operator.cpp
   ${TORCH_SRC_DIR}/csrc/jit/operator.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/batch_mm.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/canonicalize.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/passes/constant_propagation.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/common_subexpression_elimination.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/create_autodiff_subgraphs.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/dead_code_elimination.cpp
@@ -161,8 +170,6 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/test_jit.cpp
   ${TORCH_SRC_DIR}/csrc/jit/tracer.cpp
   ${TORCH_SRC_DIR}/csrc/jit/type.cpp
-  ${TORCH_SRC_DIR}/csrc/onnx/onnx.cpp
-  ${TORCH_SRC_DIR}/csrc/onnx/onnx.npb.cpp
   ${TORCH_SRC_DIR}/csrc/torch.cpp
   ${TORCH_SRC_DIR}/csrc/utils/tensor_flatten.cpp
   ${TORCH_SRC_DIR}/csrc/utils/variadic.cpp
@@ -267,6 +274,12 @@ if(OPENMP_FOUND)
   target_link_libraries(torch -fopenmp)
 endif()
 
+if (NOT NO_API AND NOT USE_ROCM)
+  target_include_directories(torch PUBLIC
+    ${TORCH_SRC_DIR}/csrc/api
+    ${TORCH_SRC_DIR}/csrc/api/include)
+endif()
+
 if(USE_CUDA)
   if(MSVC)
     set(TORCH_CUDA_LIBRARIES
@@ -365,7 +378,7 @@ install(TARGETS torch
   ARCHIVE DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 
 # JIT Tests. TODO: Put into test/cpp/jit folder
-if (NOT MSVC AND NOT APPLE AND NOT USE_ROCM)
+if (BUILD_TORCH_TEST AND NOT MSVC AND NOT APPLE AND NOT USE_ROCM)
   add_executable(test_jit ${TORCH_SRC_DIR}/csrc/jit/test_jit.cpp)
   target_link_libraries(test_jit torch ${TORCH_CUDA_LIBRARIES})
   target_compile_definitions(test_jit PUBLIC USE_CATCH _FORCE_INLINES)
@@ -379,10 +392,6 @@ if (NOT MSVC AND NOT APPLE AND NOT USE_ROCM)
 endif()
 
 if (BUILD_TORCH_TEST AND NOT NO_API AND NOT USE_ROCM)
-  target_include_directories(torch PUBLIC
-    ${TORCH_SRC_DIR}/csrc/api
-    ${TORCH_SRC_DIR}/csrc/api/include)
-
   set(TORCH_API_TEST_DIR "${TORCH_SRC_DIR}/../test/cpp/api")
 
   add_executable(test_api

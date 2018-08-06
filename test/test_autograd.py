@@ -15,7 +15,7 @@ from torch.autograd.gradcheck import gradgradcheck, gradcheck
 from torch.autograd.function import once_differentiable
 from torch.autograd.profiler import profile
 from common import TEST_MKL, TestCase, run_tests, skipIfNoLapack, \
-    suppress_warnings, skipIfNoZeroSize, BUILT_WITH_ROCM
+    suppress_warnings, TEST_WITH_ROCM, skipIfRocm
 from torch.autograd import Variable, Function, detect_anomaly
 from torch.autograd.function import InplaceFunction
 from torch.testing import make_non_contiguous, randn_like
@@ -975,6 +975,7 @@ class TestAutograd(TestCase):
         with self.assertRaises(RuntimeError):
             b.add_(5)
 
+    @unittest.skipIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")
     def test_requires_grad_factory(self):
         x = torch.randn(2, 3)
         fns = [torch.ones_like, torch.testing.randn_like]
@@ -1048,8 +1049,9 @@ class TestAutograd(TestCase):
 
         b = a + 5
         next_functions = b.grad_fn.next_functions
-        self.assertEqual(len(next_functions), 1)
+        self.assertEqual(len(next_functions), 2)
         self.assertIs(next_functions[0][0], a.grad_fn)
+        self.assertIs(next_functions[1][0], None)
 
     def test_inplace(self):
         x = torch.ones(5, 5, requires_grad=True)
@@ -1373,6 +1375,7 @@ class TestAutograd(TestCase):
             Variable(torch.randn(10, 10), _grad_fn=CollectOnDelete())
 
     @unittest.skipIf(torch.cuda.device_count() < 2, "no multi-GPU")
+    @unittest.skipIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")
     def test_unused_output_gpu(self):
         from torch.nn.parallel._functions import Broadcast
         x = Variable(torch.randn(5, 5).float().cuda(), requires_grad=True)
@@ -1401,6 +1404,7 @@ class TestAutograd(TestCase):
         self.assertEqual(device[0], 1)
 
     @unittest.skipIf(torch.cuda.device_count() < 2, "no multi-GPU")
+    @unittest.skipIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")
     def test_inputbuffer_add_multigpu(self):
         input = torch.randn(1).cuda(0).requires_grad_()
         output = input.cuda(1) + input.cuda(1)
@@ -1450,6 +1454,7 @@ class TestAutograd(TestCase):
         self.assertIsNotNone(view.grad_fn)
         self.assertIs(view._base, x)
 
+    @unittest.skipIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")
     def _test_type_conversion_backward(self, t, ):
         fvar = Variable(t(torch.randn(5, 5).float()), requires_grad=True)
         fvar.double().sum().backward()
@@ -1573,7 +1578,7 @@ class TestAutograd(TestCase):
                 self._test_pyscalar_conversions(lambda x: x.cuda(), lambda x: long(x))
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
-    @unittest.skipIf(BUILT_WITH_ROCM, "test doesn't currently work on the ROCm stack")
+    @unittest.skipIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")
     def test_pin_memory(self):
         x = torch.randn(2, 2, requires_grad=True)
         self.assertEqual(x, x.pin_memory())
@@ -1850,6 +1855,16 @@ class TestAutograd(TestCase):
         out.sum().backward()
         self.assertEqual(x.grad.data, y_data)
 
+    def test_broadcast_tensors(self):
+        f_args_variable = (torch.randn(3, requires_grad=True),
+                           torch.randn(1, 2, 1, requires_grad=True),
+                           torch.randn(1, 1, requires_grad=True),
+                           torch.randn(5, 1, 1, requires_grad=True))
+        f_args_tensor = deepcopy(unpack_variables(f_args_variable))
+        run_functional_checks(self, "test_broadcast_tensors", "broadcast",
+                              lambda a, b, c, d: torch.broadcast_tensors(a, b, c, d),
+                              True, f_args_variable, f_args_tensor)
+
     def test_cat(self):
         f_args_variable = (torch.randn(1, S, S, requires_grad=True),
                            torch.randn(2, S, S, requires_grad=True),
@@ -1891,7 +1906,6 @@ class TestAutograd(TestCase):
                               False, f_args_variable, f_args_tensor)
         self.assertTrue(gradcheck(lambda a, b: torch.cat((a, b)), f_args_variable, eps=1e-6, atol=PRECISION))
 
-    @skipIfNoZeroSize
     def test_cat_empty(self):
         f_args_variable = (torch.randn(0, S, requires_grad=True),
                            torch.randn(S, S, requires_grad=True))
@@ -1900,7 +1914,7 @@ class TestAutograd(TestCase):
                               lambda a, b: torch.cat((a, b)),
                               True, f_args_variable, f_args_tensor)
 
-    @skipIfNoLapack
+    @unittest.skipIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")
     def test_potrf(self):
         root = Variable(torch.tril(torch.rand(S, S)), requires_grad=True)
 
@@ -2060,6 +2074,7 @@ class TestAutograd(TestCase):
         run_test((10, 10), torch.zeros(10, 10))
         run_test((10,), 0)
 
+    @unittest.skipIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")
     def test_pinverse(self):
         # Why is pinverse tested this way, and not ordinarily as other linear algebra methods?
         # 1. Pseudo-inverses are not generally continuous, which means that they are not differentiable
@@ -2172,6 +2187,7 @@ class TestAutograd(TestCase):
         self._test_where_functional(lambda t: t)
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
+    @unittest.skipIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")
     def test_where_functional_cuda(self):
         self._test_where_functional(lambda t: t.cuda())
 
@@ -2381,7 +2397,7 @@ class TestAutograd(TestCase):
                         f(dt)
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
-    @unittest.skipIf(BUILT_WITH_ROCM, "test doesn't currently work on the ROCm stack")
+    @unittest.skipIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")
     def test_set_requires_grad_only_for_floats_cuda(self):
         self._test_set_requires_grad_only_for_floats(self, True)
 
@@ -2389,7 +2405,7 @@ class TestAutograd(TestCase):
         self._test_set_requires_grad_only_for_floats(self, False)
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
-    @unittest.skipIf(BUILT_WITH_ROCM, "test doesn't currently work on the ROCm stack")
+    @unittest.skipIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")
     def test_rnn_backward_to_input_but_not_parameters_cuda(self):
         # this checks whether it is possible to not require
         # weight parameters, but require inputs, see #7722
@@ -2441,6 +2457,7 @@ class TestAutograd(TestCase):
                     out.backward()
             self.assertIn('MyFunc.apply', str(w[0].message))
 
+    @unittest.skipIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")
     def test_symeig_no_eigenvectors(self):
         A = torch.tensor([[1., 2.], [2., 4.]], dtype=torch.float32, requires_grad=True)
         w, v = torch.symeig(A, eigenvectors=False)
@@ -3070,10 +3087,10 @@ method_tests = [
     ('svd', lambda: random_fullrank_matrix_distinct_singular_value(M), NO_ARGS,
      'large', NO_ARGS, [skipIfNoLapack]),
     ('gesv', (S, S), ((S, S),), '', NO_ARGS, [skipIfNoLapack]),
-    ('gesv', (S, S, S), ((S, S, S),), 'batched', NO_ARGS, [skipIfNoLapack]),
-    ('gesv', (2, 3, S, S), ((2, 3, S, S),), 'batched_dims', NO_ARGS, [skipIfNoLapack]),
-    ('gesv', (2, 2, S, S), ((1, S, S),), 'batched_broadcast_A', NO_ARGS, [skipIfNoLapack]),
-    ('gesv', (1, S, S), ((2, 2, S, S),), 'batched_broadcast_b', NO_ARGS, [skipIfNoLapack]),
+    ('gesv', (S, S, S), ((S, S, S),), 'batched', NO_ARGS, [skipIfNoLapack, skipIfRocm]),
+    ('gesv', (2, 3, S, S), ((2, 3, S, S),), 'batched_dims', NO_ARGS, [skipIfNoLapack, skipIfRocm]),
+    ('gesv', (2, 2, S, S), ((1, S, S),), 'batched_broadcast_A', NO_ARGS, [skipIfNoLapack, skipIfRocm]),
+    ('gesv', (1, S, S), ((2, 2, S, S),), 'batched_broadcast_b', NO_ARGS, [skipIfNoLapack, skipIfRocm]),
     ('fill_', (S, S, S), (1,), 'number'),
     ('fill_', (), (1,), 'number_scalar'),
     # FIXME: we should compute the derivative w.r.t torch.tensor(1)
@@ -3121,7 +3138,7 @@ method_tests = [
     ('select', (S, S, S), (1, -1), 'wrap_dim', [0]),
     ('select', (S,), (0, 2), '1d'),
     ('narrow', (S, S, S), (1, 2, 2), 'dim', [0]),
-    ('narrow', (S, S, S), (1, 0, 0), 'empty_dim', [0], [skipIfNoZeroSize]),
+    ('narrow', (S, S, S), (1, 0, 0), 'empty_dim', [0]),
     ('squeeze', (S, 1, S, 1), NO_ARGS),
     ('squeeze', (1, 1, 1, 1), NO_ARGS, 'input_sizes_are_ones'),
     ('squeeze', (S, 1, S, 1), (1,), '1_dim', [0]),
@@ -3466,10 +3483,10 @@ def add_test(
                         if not isinstance(output_variable, tuple):
                             output_variable = (output_variable,)
                         inplace_self_variable = deepcopy(self_variable)
-                        inplace_self_variable_copy = tuple(i + 0 if i is not None else None
+                        inplace_self_variable_copy = tuple(i.clone() if isinstance(i, torch.Tensor) else i
                                                            for i in (inplace_self_variable,))
                         inplace_args_variable = deepcopy(args_variable)
-                        inplace_args_variable_copy = tuple(i + 0 if i is not None else None
+                        inplace_args_variable_copy = tuple(i.clone() if isinstance(i, torch.Tensor) else i
                                                            for i in inplace_args_variable)
 
                         inplace_output_variable = (

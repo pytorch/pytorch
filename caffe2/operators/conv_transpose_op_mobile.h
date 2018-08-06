@@ -35,7 +35,7 @@ class ConvTransposeMobileOp final : public ConvTransposeUnpoolBase<Context> {
  private:
   // We store a numThreasds per-worker  tiles of Y, and numThreads per-worker threadBuffer for the
   // gemm output, laid out in that order.
-  TensorCPU threadBuffer_;
+  Tensor threadBuffer_{CPU};
 
   // Input: X, W, b
   // Output: Y

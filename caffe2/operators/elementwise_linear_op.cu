@@ -67,10 +67,17 @@ bool ElementwiseLinearOp<float, CUDAContext>::RunOnDevice(){
 
   Y->ResizeLike(X);
 
-  ElementwiseLinearKernel<<<CAFFE_GET_BLOCKS(N * D), CAFFE_CUDA_NUM_THREADS,
-                          0, context_.cuda_stream()>>>(
-    N, D, X.data<float>(), a.data<float>(), b.data<float>(),
-    Y->mutable_data<float>());
+  ElementwiseLinearKernel<<<
+      CAFFE_GET_BLOCKS(N * D),
+      CAFFE_CUDA_NUM_THREADS,
+      0,
+      context_.cuda_stream()>>>(
+      N,
+      D,
+      X.data<float>(),
+      a.data<float>(),
+      b.data<float>(),
+      Y->template mutable_data<float>());
   return true;
 }
 
@@ -88,15 +95,15 @@ bool ElementwiseLinearGradientOp<float, CUDAContext>::RunOnDevice(){
   CAFFE_ENFORCE_EQ(a.ndim(), 1, a.ndim());
   CAFFE_ENFORCE_EQ(a.dim(0), D, a.ndim());
 
-  auto *g_X = Output(0);
+  auto* g_X = Output(0);
   auto *g_a = Output(1);
   auto *g_b = Output(2);
   g_X->ResizeLike(X);
   g_a->ResizeLike(a);
   g_b->ResizeLike(a);
 
-  float* g_a_data = g_a->mutable_data<float>();
-  float* g_b_data = g_b->mutable_data<float>();
+  float* g_a_data = g_a->template mutable_data<float>();
+  float* g_b_data = g_b->template mutable_data<float>();
 
   ElementwiseLinearGradientKernel<<<
       D,
@@ -108,7 +115,7 @@ bool ElementwiseLinearGradientOp<float, CUDAContext>::RunOnDevice(){
       g_o.data<float>(),
       X.data<float>(),
       a.data<float>(),
-      g_X->mutable_data<float>(),
+      g_X->template mutable_data<float>(),
       g_a_data,
       g_b_data);
   return true;

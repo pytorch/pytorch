@@ -43,7 +43,7 @@ TensorProtosDBInput<Context>::TensorProtosDBInput(
 template <class Context>
 bool TensorProtosDBInput<Context>::Prefetch() {
   const db::DBReader& reader = OperatorBase::Input<db::DBReader>(0);
-  TensorDeserializer<CPUContext> deserializer;
+  TensorDeserializer deserializer;
   if (batch_size_ == 0) {
     // We do not need to construct a batch. As a result, we will simply
     // deserialize everything into the target prefetched blob.
@@ -56,11 +56,13 @@ bool TensorProtosDBInput<Context>::Prefetch() {
         protos.mutable_protos(i)->clear_device_detail();
       }
       deserializer.Deserialize(
-          protos.protos(i),
-          prefetched_blobs_[i].template GetMutable<TensorCPU>());
+          protos.protos(i), prefetched_blobs_[i].GetMutableTensor(CPU));
     }
   } else {
-    vector<TensorCPU> temp_tensors(OutputSize());
+    vector<Tensor> temp_tensors;
+    for (int i = 0; i < OutputSize(); ++i) {
+      temp_tensors.emplace_back(CPU);
+    }
     for (int item_id = 0; item_id < batch_size_; ++item_id) {
       reader.Read(&key_, &value_);
       TensorProtos protos;
@@ -72,18 +74,18 @@ bool TensorProtosDBInput<Context>::Prefetch() {
           vector<int> dims(
               protos.protos(i).dims().begin(), protos.protos(i).dims().end());
           dims.insert(dims.begin(), batch_size_);
-          prefetched_blobs_[i].template GetMutable<TensorCPU>()->Resize(dims);
+          prefetched_blobs_[i].GetMutableTensor(CPU)->Resize(dims);
         }
       }
       for (int i = 0; i < protos.protos_size(); ++i) {
-        TensorCPU* dst = prefetched_blobs_[i].template GetMutable<TensorCPU>();
+        TensorCPU* dst = prefetched_blobs_[i].GetMutableTensor(CPU);
         TensorCPU& src = temp_tensors[i];
         if (protos.protos(i).has_device_detail()) {
           protos.mutable_protos(i)->clear_device_detail();
         }
         deserializer.Deserialize(protos.protos(i), &src);
         DCHECK_EQ(src.size() * batch_size_, dst->size());
-        this->context_.template CopyItems<CPUContext, CPUContext>(
+        this->context_.CopyItemsSameDevice(
             src.meta(),
             src.size(),
             src.raw_data(),
@@ -98,8 +100,9 @@ bool TensorProtosDBInput<Context>::Prefetch() {
 template <class Context>
 bool TensorProtosDBInput<Context>::CopyPrefetched() {
   for (int i = 0; i < OutputSize(); ++i) {
-    OperatorBase::Output<Tensor<Context>>(i)->CopyFrom(
-        prefetched_blobs_[i].template Get<TensorCPU>(), &this->context_);
+    OperatorBase::template Output<Tensor>(i, Context::GetDeviceType())
+        ->CopyFrom(
+            prefetched_blobs_[i].template Get<TensorCPU>(), &this->context_);
   }
   return true;
 }

@@ -1,7 +1,7 @@
 #pragma once
 
-#include <ATen/Error.h>
 #include <ATen/ScalarType.h>
+#include <ATen/core/Error.h>
 #include <type_traits>
 
 // Implements instruction set specific function dispatch.
@@ -46,7 +46,7 @@ enum class CPUCapability {
 CPUCapability get_cpu_capability();
 
 template <typename FnPtr, typename T>
-struct DispatchStub {
+struct AT_API DispatchStub {
   static_assert(std::is_pointer<FnPtr>::value, "FnPtr should be a pointer type");
 
   template <typename... ArgTypes>
@@ -104,7 +104,8 @@ struct RegisterDispatch {
 } // anonymous namespace
 
 #define DECLARE_DISPATCH(fn, name) \
-  extern struct name : DispatchStub<fn, name> {} name
+  struct name : DispatchStub<fn, name> {}; \
+  extern AT_API struct name name
 
 #define DEFINE_DISPATCH(name) struct name name
 

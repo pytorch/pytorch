@@ -23,9 +23,9 @@
   cpu_half: True
   arguments:
     - THTensor* self
-    - arg: THSize* size
+    - arg: IntListSize size
       long_args: True
-    - CONSTANT NULL
+    - CONSTANT {}
 ]]
 [[
   name: set_
@@ -43,23 +43,23 @@
       scalar_check: False
       arguments:
         - THTensor* self
-        - CONSTANT NULL, 0, THLongStorageView({0}, THLongStorageViewKind::SIZE), NULL
+        - CONSTANT NULL, 0, {0}, {}
     - cname: setStorage
       scalar_check: False
       arguments:
         - THTensor* self
         - THStorage* source
         - CONSTANT 0
-        - CONSTANT __storage_size.get()
-        - CONSTANT NULL
+        - CONSTANT {static_cast<int64_t>(source.pImpl()->size())}
+        - CONSTANT {}
     - cname: setStorage
       arguments:
         - THTensor* self
         - THStorage* source
         - long storage_offset
-        - THSize* size
-        - arg: THStride* stride
-          default: NULL
+        - IntListSize size
+        - arg: IntListStride stride
+          default: {}
 ]]
 [[
   name: _fill_
@@ -171,7 +171,7 @@
   return: THTensor*
   arguments:
     - THTensor* self
-    - arg: THSize* size
+    - arg: IntListSize size
       long_args: True
 ]]
 [[
@@ -2193,218 +2193,6 @@
     - THTensor* self
 ]]
 [[
-  name: th_add
-  variants:
-    - function
-  return: argument 0
-  options:
-    - cname: cadd
-      arguments:
-        - arg: THTensor* result
-          output: True
-        - arg: THTensor* self
-          broadcast: other fallback
-        - arg: real alpha
-          default: AS_REAL(1)
-          kwarg_only: True
-        - THTensor* other
-]]
-[[
-  name: add
-  variants:
-    - method
-    - function
-  return: argument 0
-  options:
-    - cname: add_scaled
-      arguments:
-        - arg: THTensor* result
-          output: True
-        - THTensor* self
-        - real other
-        - arg: real alpha
-          default: AS_REAL(1)
-          kwarg_only: True
-]]
-[[
-  name: th_add_
-  return: argument 0
-  variants: [function]
-  options:
-    - cname: cadd
-      arguments:
-        - THTensor* self
-        - arg: THTensor* self
-          broadcast: other inplace fallback
-        - arg: real alpha
-          default: AS_REAL(1)
-          kwarg_only: True
-        - THTensor* other
-]]
-[[
-  name: add_
-  return: argument 0
-  options:
-    - cname: add_scaled
-      arguments:
-        - THTensor* self
-        - THTensor* self
-        - real other
-        - arg: real alpha
-          default: AS_REAL(1)
-          kwarg_only: True
-]]
-[[
-  name: th_sub
-  variants:
-    - function
-  return: argument 0
-  options:
-    - cname: csub
-      arguments:
-        - arg: THTensor* result
-          output: True
-        - arg: THTensor* self
-          broadcast: other fallback
-        - arg: real alpha
-          default: AS_REAL(1)
-          kwarg_only: True
-        - THTensor* other
-]]
-[[
-  name: sub
-  variants:
-    - method
-    - function
-  return: argument 0
-  options:
-    - cname: sub_scaled
-      arguments:
-        - arg: THTensor* result
-          output: True
-        - THTensor* self
-        - real other
-        - arg: real alpha
-          default: AS_REAL(1)
-          kwarg_only: True
-]]
-[[
-  name: th_sub_
-  return: argument 0
-  variants: [function]
-  options:
-    - cname: csub
-      arguments:
-        - THTensor* self
-        - arg: THTensor* self
-          broadcast: other inplace fallback
-        - arg: real alpha
-          default: AS_REAL(1)
-          kwarg_only: True
-        - THTensor* other
-]]
-[[
-  name: sub_
-  return: argument 0
-  options:
-    - cname: sub_scaled
-      arguments:
-        - THTensor* self
-        - THTensor* self
-        - real other
-        - arg: real alpha
-          default: AS_REAL(1)
-          kwarg_only: True
-]]
-[[
-  name: th_mul
-  variants:
-    - function
-  return: argument 0
-  options:
-    - cname: mul
-      arguments:
-        - arg: THTensor* result
-          output: True
-        - THTensor* self
-        - real other
-    - cname: cmul
-      arguments:
-        - arg: THTensor* result
-          output: True
-        - arg: THTensor* self
-          broadcast: other fallback
-        - arg: THTensor* other
-]]
-[[
-  name: th_mul_
-  variants:
-    - function
-  return: argument 0
-  options:
-    - cname: mul
-      arguments:
-        - THTensor* self
-        - THTensor* self
-        - real other
-    - cname: cmul
-      arguments:
-        - THTensor* self
-        - arg: THTensor* self
-          broadcast: other inplace fallback
-        - THTensor* other
-]]
-[[
-  name: th_div
-  variants:
-    - function
-  return: argument 0
-  options:
-    - cname: div
-      arguments:
-        - arg: THTensor* result
-          output: True
-        - THTensor* self
-        - real other
-]]
-[[
-  name: div
-  variants:
-    - method
-    - function
-  return: argument 0
-  options:
-    - cname: cdiv
-      arguments:
-        - arg: THTensor* result
-          output: True
-        - arg: THTensor* self
-          broadcast: other fallback
-        - THTensor* other
-]]
-[[
-  name: th_div_
-  variants: [function]
-  return: argument 0
-  options:
-    - cname: div
-      arguments:
-        - THTensor* self
-        - THTensor* self
-        - real other
-]]
-[[
-  name: div_
-  return: argument 0
-  options:
-    - cname: cdiv
-      arguments:
-        - THTensor* self
-        - arg: THTensor* self
-          broadcast: other inplace fallback
-        - THTensor* other
-]]
-[[
   name: fmod
   return: argument 0
   variants:
@@ -3605,8 +3393,8 @@
       arguments: []
     - cname: newWithSize
       arguments:
-        - THSize* size
-        - CONSTANT NULL
+        - IntListSize size
+        - CONSTANT {}
 ]]
 [[
   name: tensor
@@ -3616,15 +3404,15 @@
   options:
     - cname: newWithSize
       arguments:
-        - THSize* size
-        - arg: THStride* stride
+        - IntListSize size
+        - arg: IntListStride stride
     - cname: newWithStorage
       arguments:
         - THStorage* storage
         - int64_t storageOffset
-        - THSize* size
-        - arg: THStride* stride
-          default: NULL
+        - IntListSize size
+        - arg: IntListStride stride
+          default: {}
 ]]
 
 # In theory, this could be a part of the above declaration. But in

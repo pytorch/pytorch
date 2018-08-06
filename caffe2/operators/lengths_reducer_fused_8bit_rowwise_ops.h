@@ -68,7 +68,21 @@ class SparseLengthsFused8BitRowwiseOp : public Operator<Context> {
     return true;
   }
 
-  USE_VALUE_KEY_LENGTH_INPUT_FILLERS(Context, DATA, INDICES, LENGTHS)
+  std::vector<TensorFiller<Context>> InputFillers(
+      const std::vector<std::vector<TIndex>>& shapes) override {
+    CAFFE_ENFORCE_EQ(shapes.size(), Operator<Context>::Inputs().size());
+    auto fillers = Operator<Context>::InputFillers(shapes);
+    if (with_weights) {
+      // TODO: enable the fillers
+      throw UnsupportedOperatorFeature(
+          OperatorBase::type() + " does not have input fillers");
+    }
+    Operator<Context>::SparseLengthsFillerHelper(
+        shapes, INDICES, LENGTHS, &fillers);
+    Operator<Context>::SparseSegmentsFillerHelper(
+        shapes, DATA, INDICES, &fillers);
+    return fillers;
+  }
 
  private:
   enum {

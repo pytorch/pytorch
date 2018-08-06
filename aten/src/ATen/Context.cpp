@@ -37,6 +37,8 @@ Context::Context()
   Type::registerCPU(this);
 }
 
+// TODO: This could be bad juju if someone calls globalContext() in the
+// destructor of an object with static lifetime.
 Context & globalContext() {
   static Context globalContext_;
   return globalContext_;

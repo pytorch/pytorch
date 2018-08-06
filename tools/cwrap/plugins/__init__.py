@@ -432,4 +432,3 @@ from .GILRelease import GILRelease
 from .AutoGPU import AutoGPU
 from .CuDNNPlugin import CuDNNPlugin
 from .WrapDim import WrapDim
-from .Broadcast import Broadcast

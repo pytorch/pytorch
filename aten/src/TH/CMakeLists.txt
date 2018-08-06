@@ -29,7 +29,6 @@ set(ATen_TH_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/THHalf.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THAllocator.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THSize.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/THStorageClass.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THStorageFunctions.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THTensor.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THTensorCopy.cpp
@@ -101,7 +100,6 @@ INSTALL(FILES
   THVector.h
   THHalf.h
   THTensor.hpp
-  THStorageClass.hpp
   THStorageFunctions.hpp
   THGenerator.hpp
   THTypeConversion.hpp
@@ -124,6 +122,7 @@ INSTALL(FILES
   generic/THStorageCopy.h
   generic/THTensor.cpp
   generic/THTensor.h
+  generic/THTensor.hpp
   generic/THTensorConv.cpp
   generic/THTensorConv.h
   generic/THTensorCopy.cpp

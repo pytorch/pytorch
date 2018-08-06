@@ -2,6 +2,7 @@
 #include <ATen/Utils.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
+#include <ATen/ExpandUtils.h>
 #include <THNN/Reduction.h>
 
 // define constants like M_PI and C keywords for MSVC
@@ -136,22 +137,6 @@ Tensor mvlgamma_backward(Tensor grad, const Tensor & self, int64_t p) {
   return grad * args.digamma_().sum(-1).add_(p * (p - 1) * std::log(M_PI) / 4.);
 }
 
-Tensor reduce_to(const Tensor & grad, IntList sizes) {
-  if (sizes.size() == 0) {
-    return grad.sum();
-  }
-  Tensor result = grad;
-  while (result.dim() > (int64_t)sizes.size()) {
-    result = result.sum(0, false);
-  }
-  for (int64_t i = 0; i < result.dim(); ++i) {
-    if (sizes[i] == 1 && result.sizes()[i] > 1) {
-      result = result.sum(i, true);
-    }
-  }
-  return result;
-}
-
 Tensor permute_backwards(const Tensor & grad, IntList fwd_dims) {
   // invert the permutation
   auto ndims = fwd_dims.size();
@@ -190,7 +175,7 @@ Tensor prod_safe_zeros_backward(const Tensor &grad, const Tensor& inp, int64_t d
     return grad;
   }
 
-  std::vector<int64_t> ones_size(inp.sizes());
+  auto ones_size = inp.sizes().vec();
   ones_size[dim] = 1;
   Tensor ones = at::ones(ones_size, grad.type());
   Tensor exclusive_normal_nocp = at::cat({ones, inp.narrow(dim, 0, inp.size(dim) - 1)}, dim);
@@ -343,7 +328,7 @@ Tensor cumprod_backward(const Tensor &grad, const Tensor &input, int64_t dim) {
     return sum_scan_exclusive(result * grad, dim) / input;
   }
 
-  std::vector<int64_t> ones_size(input.sizes());
+  auto ones_size = input.sizes().vec();
   ones_size[dim] = 1;
   Tensor ones = at::ones({1}, grad.type()).expand(ones_size);
   Tensor grad_input = at::zeros(input.sizes(), grad.type());
@@ -446,6 +431,17 @@ std::vector<Tensor> cat_tensors_backward(const Tensor & grad, const std::vector<
   return grad_inputs;
 }
 
+Tensor clamp_backward(const Tensor & grad, const Tensor &self, const Scalar & min, const Scalar & max) {
+  // clamp: gradients not defined on min and max, so we return the subgradient 1 for these cases.
+  if (std::isnan(min.toFloat())) {
+    return grad * (self <= max).type_as(grad);
+  } else if (std::isnan(max.toFloat())) {
+    return grad * (self >= min).type_as(grad);
+  } else {
+    return grad * ((self >= min) * (self <= max)).type_as(grad);
+  }
+}
+
 Tensor mm_mat1_backward(const Tensor & grad, const Tensor & mat2, IntList sizes, IntList strides, const Scalar & alpha) {
   // if input was column-major, return grad as column-order for efficiency
   if (strides[0] == 1 && strides[1] == sizes[0]) {
@@ -465,7 +461,7 @@ Tensor mm_mat2_backward(const Tensor & grad, const Tensor & mat1, IntList sizes,
 }
 
 Tensor renorm_backward(const Tensor & grad, const Tensor & self, Scalar p, int64_t dim, Scalar maxnorm) {
-  auto transposed_sizes = std::vector<int64_t>(self.transpose(dim, 0).sizes());
+  auto transposed_sizes = self.transpose(dim, 0).sizes().vec();
   auto flatten = [&](const Tensor & t) {
     return t.transpose(dim, 0).contiguous().view({t.size(dim), -1});
   };
@@ -641,7 +637,7 @@ Tensor split_with_sizes_backward(const std::vector<torch::autograd::Variable> &g
       grads_all_defined[j] = grads[j];
     } else {
       auto length = split_sizes[j];
-      std::vector<int64_t> grad_size(sizes);
+      auto grad_size = sizes.vec();
       grad_size[dim] = length;
       grads_all_defined[j] = at::zeros(grad_size, type);
     }
@@ -663,7 +659,7 @@ Tensor split_backward(const std::vector<torch::autograd::Variable> &grads,
 
 Tensor max_pool_double_backward(const Tensor & grad, const Tensor & indices, int dim) {
   AT_ASSERT(indices.dim() >= dim);
-  auto size = std::vector<int64_t>(indices.sizes().slice(0, indices.dim() - dim));
+  auto size = indices.sizes().slice(0, indices.dim() - dim).vec();
   size.push_back(-1);
   auto indices_view = indices.view(size);
   return grad.contiguous().view(size).gather(-1, indices_view).view(indices.sizes());
@@ -690,7 +686,7 @@ Tensor glu_double_backward(const Tensor & grad, const Tensor & grad_output, cons
 
 Tensor glu_double_backward_grad_output(const Tensor & grad, const Tensor & input, int64_t dim) {
   if (dim < 0) dim += input.dim();
-  std::vector<int64_t> sizes = input.sizes();
+  auto sizes = input.sizes().vec();
   sizes[dim] /= 2;
   auto tmp = grad * glu_backward(at::ones(sizes, input.type()), input, dim);
   return tmp.narrow(dim, 0, sizes[dim]) + tmp.narrow(dim, sizes[dim], sizes[dim]);
@@ -1549,27 +1545,27 @@ Tensor symeig_backward(const std::vector<torch::autograd::Variable> &grads, cons
                     bool eigenvectors, bool upper, const Tensor& lambda, const Tensor& v) {
     auto glambda = grads[0];
     auto gv = grads[1];
-    
+
     auto vt = v.t();
-    
+
     if (!eigenvectors) {
         throw std::runtime_error(std::string("cannot compute backward without "
                                              "computing eigenvectors in forward pass"));
     }
-    
+
     Tensor result;
     if (gv.defined()) {
         Tensor F = lambda.unsqueeze(0).expand_as(self).clone();
         F.sub_(at::unsqueeze(lambda, 1));
         F.diagonal().fill_(INFINITY);
         F.pow_(-1);
-        
+
         F.mul_(vt.mm(gv));
         result = v.mm(F.mm(vt));
     } else {
         result = at::zeros_like(self);
     }
-    
+
     if (glambda.defined()) {
         result.add_((v * glambda).mm(vt));
     }

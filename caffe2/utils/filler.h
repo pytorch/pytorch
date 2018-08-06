@@ -13,14 +13,14 @@ template <class Context_t>
 class TensorFiller {
  public:
   template <class Type>
-  void Fill(Tensor<Context_t>* tensor) const {
+  void Fill(Tensor* tensor) const {
     CAFFE_ENFORCE(context_, "context is null");
     CAFFE_ENFORCE(tensor, "tensor is null");
     auto min = static_cast<Type>(min_);
     auto max = static_cast<Type>(max_);
     CAFFE_ENFORCE_LE(min, max);
 
-    Tensor<Context_t> temp_tensor(shape_);
+    Tensor temp_tensor(shape_, Context_t::GetDeviceType());
     tensor->swap(temp_tensor);
     Type* data = tensor->template mutable_data<Type>();
     Context_t* context = static_cast<Context_t*>(context_);

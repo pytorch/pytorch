@@ -233,9 +233,9 @@ class PiecewiseLinearTransformOp final : public Operator<Context> {
   vector<T> slopes_from_arg_;
   vector<T> intercepts_from_arg_;
 
-  Tensor<Context> bounds_device_;
-  Tensor<Context> intercepts_device_;
-  Tensor<Context> slopes_device_;
+  Tensor bounds_device_{Context::GetDeviceType()};
+  Tensor intercepts_device_{Context::GetDeviceType()};
+  Tensor slopes_device_{Context::GetDeviceType()};
   bool gpu_copied_ = false;
 
   // If true, the piecewise linear functions are passed through args,

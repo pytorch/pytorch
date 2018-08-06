@@ -47,8 +47,8 @@ class SigmoidFocalLossOp final : public Operator<Context> {
   int num_classes_;
   float gamma_;
   float alpha_;
-  Tensor<Context> losses_;
-  Tensor<Context> counts_;
+  Tensor losses_{Context::GetDeviceType()};
+  Tensor counts_{Context::GetDeviceType()};
 };
 
 template <typename T, class Context>
@@ -74,8 +74,8 @@ class SigmoidFocalLossGradientOp final : public Operator<Context> {
   int num_classes_;
   float gamma_;
   float alpha_;
-  Tensor<Context> counts_;
-  Tensor<Context> weights_; // unignored weights
+  Tensor counts_{Context::GetDeviceType()};
+  Tensor weights_{Context::GetDeviceType()}; // unignored weights
 };
 
 } // namespace caffe2

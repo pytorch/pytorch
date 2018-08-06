@@ -21,7 +21,7 @@ class RMACRegionsOp final : public Operator<Context> {
  protected:
   int scales_;
   float overlap_;
-  Tensor<Context> num_rois_;
+  Tensor num_rois_{Context::GetDeviceType()};
 };
 
 } // namespace caffe2

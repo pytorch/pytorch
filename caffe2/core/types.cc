@@ -13,7 +13,7 @@ CAFFE_KNOWN_TYPE(caffe2::float16);
 TensorProto::DataType TypeMetaToDataType(const TypeMeta& meta) {
   static_assert(sizeof(int) == 4,
                 "int in this compiler does not equal to 4 bytes.");
-  static std::map<CaffeTypeId, TensorProto::DataType> data_type_map {
+  static std::map<TypeIdentifier, TensorProto::DataType> data_type_map {
     {TypeMeta::Id<float>(), TensorProto_DataType_FLOAT},
     {TypeMeta::Id<int>(), TensorProto_DataType_INT32},
     // BYTE does not have a type meta to proto mapping: we should

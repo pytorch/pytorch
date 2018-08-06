@@ -1,6 +1,6 @@
 #pragma once
 
-#include "caffe2/core/predictor.h"
+#include "caffe2/predictor/predictor.h"
 #include "caffe2/proto/caffe2.pb.h"
 
 #include <memory>

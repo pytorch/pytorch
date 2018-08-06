@@ -338,6 +338,12 @@ Non-linear activations (weighted sum, nonlinearity)
 .. autoclass:: SELU
     :members:
 
+:hidden:`CELU`
+~~~~~~~~~~~~~~
+
+.. autoclass:: CELU
+    :members:
+
 :hidden:`Sigmoid`
 ~~~~~~~~~~~~~~~~~
 
@@ -602,6 +608,12 @@ Loss functions
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: CrossEntropyLoss
+    :members:
+
+:hidden:`CTCLoss`
+~~~~~~~~~~~~~~~~~
+
+.. autoclass:: CTCLoss
     :members:
 
 :hidden:`NLLLoss`
@@ -984,6 +996,11 @@ Non-linear activation functions
 
 .. autofunction:: selu
 
+:hidden:`celu`
+~~~~~~~~~~~~~~
+
+.. autofunction:: celu
+
 :hidden:`leaky_relu`
 ~~~~~~~~~~~~~~~~~~~~
 
@@ -1103,7 +1120,7 @@ Linear functions
 .. autofunction:: linear
 
 :hidden:`bilinear`
-~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: bilinear
 
@@ -1179,6 +1196,11 @@ Loss functions
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: cross_entropy
+
+:hidden:`ctc_loss`
+~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: ctc_loss
 
 :hidden:`hinge_embedding_loss`
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

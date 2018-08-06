@@ -24,11 +24,11 @@ static inline void THNN_(VolumetricMaxUnpooling_shapeCheck)(
              "stride should be greater than zero, but got dT: %d dH: %d dW: %d",
              dT, dH, dW);
 
-  if (THCTensor_(nDimension)(state, input) == 4)
+  if (THCTensor_(nDimensionLegacyNoScalars)(state, input) == 4)
   {
     inputSlices = THCTensor_(size)(state, input, 0);
   }
-  else if (THCTensor_(nDimension)(state, input) == 5)
+  else if (THCTensor_(nDimensionLegacyNoScalars)(state, input) == 5)
   {
     inputSlices = THCTensor_(size)(state, input, 1);
   }
@@ -83,8 +83,8 @@ void THNN_(VolumetricMaxUnpooling_updateOutput)(
         dT, dW, dH, padT, padW, padH);
   THCUNN_assertSameGPU(state, 3, input, indices, output);
 
-  int fiveDimensionalInput = THCTensor_(nDimension)(state, input) == 5;
-  if (THCTensor_(nDimension)(state, input) == 4)
+  int fiveDimensionalInput = THCTensor_(nDimensionLegacyNoScalars)(state, input) == 5;
+  if (THCTensor_(nDimensionLegacyNoScalars)(state, input) == 4)
   {
     /* sizes */
     batchSize   = 1;
@@ -192,7 +192,7 @@ void THNN_(VolumetricMaxUnpooling_updateGradInput)(
         dT, dW, dH, padT, padW, padH);
   THCUNN_assertSameGPU(state, 4, input, indices, gradOutput, gradInput);
 
-  int fiveDimensionalInput = THCTensor_(nDimension)(state, input) == 5;
+  int fiveDimensionalInput = THCTensor_(nDimensionLegacyNoScalars)(state, input) == 5;
   if (!fiveDimensionalInput) /* 4D */
   {
     batchSize = 1;
