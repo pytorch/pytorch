@@ -96,7 +96,7 @@ auto PyFunction::legacy_apply(const variable_list& inputs) -> variable_list {
       inputs,
       std::move(tensor_results),
       [this](edge_list&& next_edges) {
-        return std::make_shared<NotImplemented>(
+        return std::make_shared<Error>(
             name() + " is not differentiable twice", std::move(next_edges));
       });
 }
