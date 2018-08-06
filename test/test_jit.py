@@ -1828,7 +1828,8 @@ class TestScript(JitTestCase):
             os.close(r)
             os.close(w)
 
-    def checkScriptRaisesRegex(self, script, inputs, exception, regex, optimize=True, outputs=None, capture_output=False):
+    def checkScriptRaisesRegex(self, script, inputs, exception, regex,
+                               optimize=True, outputs=None, capture_output=False):
         """
         Checks that a given function will throw the correct exception,
         when executed with normal python, the string frontend, and the AST frontend
