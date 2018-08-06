@@ -1,6 +1,7 @@
 version: 2
 jobs:
   linux_trusty_py3_6_gcc7_build:
+    working_directory: /var/lib/jenkins/workspace
     docker:
       - image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.6-gcc7:226
         user: jenkins
@@ -18,6 +19,7 @@ jobs:
           .jenkins/pytorch/build.sh
           .jenkins/pytorch/test.sh
   linux_xenial_cuda9_2_cudnn7_py3_gcc7_build:
+    working_directory: /var/lib/jenkins/workspace
     docker:
       - image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7:226
         user: jenkins
@@ -86,6 +88,7 @@ jobs:
       - run:
           name: Build
           command: |
+            set -ex
             export SCCACHE_BUCKET=ossci-compiler-cache
             export BUILD_ENVIRONMENT=pytorch-macos-10.13-py3
             git submodule update --init
