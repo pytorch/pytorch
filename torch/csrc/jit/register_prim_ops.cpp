@@ -327,6 +327,12 @@ RegisterOperators reg({
   Operator("aten::" #aten_op "(float[] a, float[] b) -> float[]", impl_name<Shared<DoubleList>, double>), \
   Operator("aten::" #aten_op "(Tensor[] a, Tensor[] b) -> Tensor[]", impl_name<Shared<TensorList>, at::Tensor>),
 
+// Operators that take TODO
+#define DEFINE_LIST_SELECT_OP(aten_op, impl_name) \
+  Operator("aten::" #aten_op "(int[] a, int b) -> int", impl_name<Shared<IntList>>), \
+  Operator("aten::" #aten_op "(float[] a, int b) -> float", impl_name<Shared<DoubleList>>), \
+  Operator("aten::" #aten_op "(Tensor[] a, int b) -> Tensor", impl_name<Shared<TensorList>>),
+
 
 template <typename T>
 Operation listEq(Node* node) {
@@ -339,6 +345,31 @@ Operation listEq(Node* node) {
     } else {
       push(stack, 0);
     }
+    return 0;
+  };
+}
+
+template <typename T>
+Operation listSelect(Node* node) {
+  return [=](Stack& stack) {
+    T list;
+    int64_t idx;
+    pop(stack, list, idx);
+    const int64_t list_size = list->elements().size();
+    if (idx >= list_size) {
+      throw std::out_of_range("list index out of range");
+    }
+
+    if (idx < 0) {
+      // Handle negative indexing
+      idx = list_size + idx;
+      if (idx < 0) {
+        throw std::out_of_range("list index out of range");
+      }
+    }
+
+    auto element = list->elements().at(idx);
+    push(stack, std::move(element));
     return 0;
   };
 }
@@ -410,10 +441,9 @@ RegisterOperators reg2({
     DEFINE_BINARY_OP(aten::add, a + b)
 
     DEFINE_LIST_BINARY_OP(eq, int, listEq)
-
 		DEFINE_LIST_UNARY_OP(len, int, listLen)
-
     DEFINE_LIST_GENERIC_OP(add, listAdd)
+    DEFINE_LIST_SELECT_OP(select, listSelect)
 
     DEFINE_BINARY_OP(aten::sub, a - b)
     DEFINE_BINARY_OP(aten::mul, a * b)
