@@ -32,6 +32,7 @@
 #include <memory>
 #include <unordered_set>
 #include <vector>
+#include <map>
 
 namespace torch { namespace autograd {
 
@@ -110,6 +111,8 @@ private:
   Scope* parent_;
   Symbol name_;
   std::vector<std::unique_ptr<Scope> > children_;
+  std::map<std::string, int> constants_;
+  std::map<std::string, std::string> input_aliases_;
 public:
   Scope() {
     name_ = Symbol::scope("");
@@ -138,6 +141,24 @@ public:
       current = current->parent_;
     }
     return current;
+  }
+  bool hasConstant(std::string name) {
+    return constants_.find(name) != constants_.end();
+  }
+  int getConstant(std::string name) {
+    return constants_[name];
+  }
+  void addConstant(std::string name, int value) {
+    constants_[name] = value;
+  }
+  bool hasNameAlias(std::string alias) {
+    return input_aliases_.find(alias) != input_aliases_.end();
+  }
+  std::string getNameAlias(std::string alias) {
+    return input_aliases_[alias];
+  }
+  void addNameAlias(std::string alias, std::string name) {
+    input_aliases_[alias] = name;
   }
   Symbol name() {
     return name_;
@@ -180,6 +201,7 @@ private:
   size_t stage_ = 0;           // 0-forward, 1-backward, 2-double-backward,...
   use_list uses_;
   std::string unique_name_;
+  std::string original_name_;
   TypePtr type_;
 public:
   Value* setType(TypePtr type);
@@ -202,12 +224,25 @@ public:
   bool hasUniqueName() const {
     return !unique_name_.empty();
   }
+  bool hasOriginalName() const {
+    return original_name_ != "";
+  }
   TORCH_API Value* setUniqueName(const std::string & name);
   std::string uniqueName() const {
     if (hasUniqueName())
       return unique_name_;
     return std::to_string(unique());
   }
+  std::string originalName() const {
+   return original_name_;
+ }
+ std::string readableName() const {
+   if (hasOriginalName()) {
+      return originalName();
+   } else {
+      return uniqueName();
+   }
+ }
   Value* setStage(size_t s) {
     stage_ = s;
     return this;
@@ -327,7 +362,7 @@ public:
     stage_ = s;
     return this;
   }
-  Scope* scope() {
+  Scope* scope() const {
     return scope_;
   }
   void setScope(Scope* scope) {
@@ -1170,6 +1205,9 @@ public:
   }
 
   friend TORCH_API std::ostream& operator<<(std::ostream & out, const Graph & g);
+
+  std::ostream& prettyPrint(std::ostream & out);
+
   TORCH_API std::shared_ptr<Graph> copy();
 
 private:

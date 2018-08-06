@@ -251,6 +251,175 @@ std::ostream& operator<<(std::ostream & out, const Graph & g) {
   return out;
 }
 
+std::string getBaseName(std::string str) {
+  return str.substr(0, str.find_first_of('.'));
+}
+
+std::ostream& prettyPrintValue(std::ostream & out, const Value* val) {
+  auto scope = val->node()->scope();
+  auto unique = val->uniqueName();
+  if (val->node()->kind() == prim::Constant) {
+    if (scope->hasConstant(unique)) {
+      out << scope->getConstant(unique);
+    } else {
+      throw std::runtime_error("const not found for : " + unique);
+    }
+  } else {
+    auto name = val->readableName();
+    if (scope->hasNameAlias(unique)) {
+      name = scope->getNameAlias(unique);
+    }
+
+    if (isdigit(name.at(0))) {
+      out << "%";
+    }
+    out << name;
+  }
+return out;
+}
+
+std::ostream& prettyPrintInputs(std::ostream & out, const Node* node) {
+  out << "(";
+  auto delimiter = "";
+  for (auto in_value : node->inputs()) {
+    out << delimiter;
+    prettyPrintValue(out, in_value);
+    delimiter = ", ";
+  }
+  out << ")";
+  return out;
+}
+
+std::ostream& prettyPrintNodeVisitor(std::ostream & out, const Node* root, int level);
+
+std::ostream& prettyPrintBlockVisitor(std::ostream & out, const Block* root, int level) {
+  for (auto node : root->nodes()) {
+    prettyPrintNodeVisitor(out, node, level);
+  }
+
+  prettyPrintNodeVisitor(out, root->return_node(), level);
+
+  return out;
+}
+
+// Handles iterating over nodes/subblocks
+std::ostream& prettyPrintNodeVisitor(std::ostream & out, const Node* node, int level) {
+  if (node->kind() == prim::Constant) {
+    // Add constant to current scope map
+    node->scope()->addConstant(
+      node->outputs()[0]->uniqueName(),
+      node->i(node->attributeNames()[0])
+    );
+    return out;
+  }
+
+  if (node->kind() == prim::Return) {
+    // Handled elsewhere, do nothing
+    return out;
+  }
+
+  indent(out, level);
+  int new_level = level + 1;
+
+  // if there are subblocks on this node, visit them
+  switch (node->kind()) {
+  case prim::Loop: {
+    out << "while ";
+    prettyPrintValue(out, node->inputs()[1]);
+
+    out << std::endl;
+    auto body_block = node->blocks()[0];
+
+    // Offset to skip loop trip count
+    int count = 1;
+    std::map<std::string, Value*> looks;
+    for (auto block_param : body_block->param_node()->outputs())  {
+      // add names to map
+      node->scope()->addNameAlias(
+        block_param->uniqueName(),
+        node->inputs()[count]->readableName()
+      );
+      count++;
+    }
+
+    // Add alias for loop condition
+    node->scope()->addNameAlias(
+      body_block->return_node()->inputs()[0]->readableName(),
+      node->inputs()[1]->uniqueName()
+    );
+
+    // for (auto block_input : body_block->param_node())
+    prettyPrintBlockVisitor(out, body_block, new_level);
+    break;
+  }
+  case prim::If: {
+    out << "if ";
+    auto if_block = node->blocks()[0];
+    auto else_block = node->blocks()[1];
+    prettyPrintValue(out, node->inputs()[0]);
+    out << ":" << std::endl;
+
+    // Print node contents
+    prettyPrintBlockVisitor(out, if_block, new_level);
+    // Print if block output
+    int if_count = 0;
+    for (auto output_value : node->outputs()) {
+      indent(out, new_level);
+      prettyPrintValue(out, output_value);
+      out << " = ";
+      prettyPrintValue(out, if_block->return_node()->inputs()[if_count++]);
+      out << std::endl;
+      if_count++;
+    }
+
+    indent(out, level);
+    out << "else:" << std::endl;
+    prettyPrintBlockVisitor(out, else_block, new_level);
+    int else_count = 0;
+    for (auto output_value : node->outputs()) {
+      indent(out, new_level);
+      out << output_value->readableName();
+      out << " = ";
+      prettyPrintValue(out, else_block->return_node()->inputs()[else_count]);
+      out << std::endl;
+      else_count++;
+    }
+    }
+    break;
+  default:
+    // Print outputs
+    if (node->outputs().size() > 0) {
+      auto delim = "";
+      for (auto output_value : node->outputs()) {
+        out << delim;
+        prettyPrintValue(out, output_value);
+        delim = ", ";
+      }
+      out << " = ";
+    }
+
+    out << node->kind().toQualString();
+
+    // Print instruction parameters
+    prettyPrintInputs(out, node);
+
+    out << std::endl;
+  }
+
+  return out;
+}
+
+std::ostream& Graph::prettyPrint(std::ostream & out) {
+  // Print body
+  prettyPrintBlockVisitor(out, block(), 1);
+
+  indent(out, 1);
+  out << "return ";
+  prettyPrintValue(out, block()->return_node()->inputs()[0]);
+  out << std::endl;
+  return out;
+}
+
 static void checkSameDevice(const Node* node) {
   bool has_device = false;
   int device;
@@ -545,6 +714,10 @@ std::shared_ptr<Graph> Graph::copy() {
 Value* Value::setUniqueName(const std::string & name) {
   if (name.size() > 0 && name.find_first_not_of("0123456789") == std::string::npos) {
     throw std::runtime_error("names may not be integers: " + name);
+  }
+
+  if (!hasOriginalName()) {
+    original_name_ = name;
   }
 
   auto & names = node()->owningGraph()->unique_names_;
