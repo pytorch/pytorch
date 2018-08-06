@@ -215,7 +215,11 @@ void addInputs(Node *n, const char * name, std::array<bool, N> value) {
 
 TORCH_API void postRecordTrace(Node* node, at::ArrayRef<Variable> outputs);
 
-TORCH_API inline void postRecordTrace(
+// All these overloads are to handle (1) single `at::Tensor` (2)
+// `vector<at::Tensor>` because of implicit conversion trouble with `Variable`,
+// as well as any other types, for which we throw an exception.
+
+inline void postRecordTrace(
     Node* node,
     at::ArrayRef<at::Tensor> tensors) {
   postRecordTrace(node, fmap(tensors, [](const at::Tensor& tensor) {
@@ -223,7 +227,7 @@ TORCH_API inline void postRecordTrace(
                   }));
 }
 
-TORCH_API inline void postRecordTrace(Node* node, at::Tensor tensor) {
+inline void postRecordTrace(Node* node, at::Tensor tensor) {
   postRecordTrace(node, at::ArrayRef<Variable>{Variable(tensor)});
 }
 
@@ -233,7 +237,7 @@ template <
         (!std::is_convertible<torch::decay_t<T>, ArrayRef<Variable>>::value &&
          !std::is_convertible<torch::decay_t<T>, ArrayRef<at::Tensor>>::value &&
          !std::is_convertible<torch::decay_t<T>, Variable>::value)>>
-TORCH_API void postRecordTrace(Node* node, T&&) {
+void postRecordTrace(Node* node, T&&) {
   AT_ERROR(
       "Found an unsupported argument type ", at::demangle_type<T>(),
       " in the JIT tracer. " "File a bug report.");
