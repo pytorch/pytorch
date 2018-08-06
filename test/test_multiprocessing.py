@@ -360,6 +360,8 @@ class TestMultiprocessing(TestCase):
         p.join()
         self.assertIsInstance(outq.get(), RuntimeError)
 
+    @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
+                     don't support multiprocessing with spawn start method")
     @unittest.skipIf(not TEST_CUDA_IPC, 'CUDA IPC not available')
     def test_event(self):
         ctx = mp.get_context('spawn')
@@ -432,7 +434,7 @@ class TestMultiprocessing(TestCase):
             self._test_autograd_sharing(var)
 
     def test_leaf_variable_sharing(self):
-        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
+        devices = ['cpu'] if not torch.cuda.is_available() or NO_MULTIPROCESSING_SPAWN else ['cpu', 'cuda']
         for device in devices:
             for requires_grad in [True, False]:
                 var = Variable(torch.arange(1., 26, device=device).view(5, 5), requires_grad=requires_grad)
