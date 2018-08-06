@@ -106,7 +106,7 @@ class FullyConnectedOp_SPARSE final : public Operator<Context> {
     const auto& jw = Input(3);
     // Notice that we do not need to transpose b
     const auto& b = Input(4);
-    auto* Yt = Output(0); //transposed Y
+    auto* Yt = Output(0); // transposed Y
     // here we assume X is k-by-m
     CAFFE_ENFORCE_EQ(Xt.ndim(), 2);
     CAFFE_ENFORCE_EQ(b.ndim(), 1);
@@ -140,7 +140,7 @@ class FullyConnectedOp_SPARSE final : public Operator<Context> {
   }
 
  protected:
-  Tensor<Context> bias_multiplier_;
+  Tensor bias_multiplier_{Context::GetDeviceType()};
 };
 
 

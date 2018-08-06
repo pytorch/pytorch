@@ -28,14 +28,11 @@ void Workspace::PrintBlobSizes() {
     Blob* b = this->GetBlob(s);
     TensorInfoCall shape_fun = GetTensorInfoFunction(b->meta().id());
     if (shape_fun) {
-      bool shares_data = false;
       size_t capacity;
       DeviceOption _device;
-      auto shape = shape_fun(b->GetRaw(), &shares_data, &capacity, &_device);
-      if (shares_data) {
-        // Blobs sharing data do not actually take any memory
-        capacity = 0;
-      }
+      auto shape = shape_fun(b->GetRaw(), &capacity, &_device);
+      // NB: currently it overcounts capacity of shared storages
+      // TODO: fix it after the storage sharing is merged
       cumtotal += capacity;
       blob_sizes.push_back(make_pair(capacity, s));
     }
@@ -55,11 +52,10 @@ void Workspace::PrintBlobSizes() {
     Blob* b = this->GetBlob(sb.second);
     TensorInfoCall shape_fun = GetTensorInfoFunction(b->meta().id());
     CHECK(shape_fun != nullptr);
-    bool _shares_data = false;
     size_t capacity;
     DeviceOption _device;
 
-    auto shape = shape_fun(b->GetRaw(), &_shares_data, &capacity, &_device);
+    auto shape = shape_fun(b->GetRaw(), &capacity, &_device);
     std::stringstream ss;
     ss << sb.second << ";";
     for (const auto d : shape) {

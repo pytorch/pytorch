@@ -68,7 +68,7 @@ class GroupSpatialSoftmaxGradientOp final : public Operator<Context> {
  protected:
   int num_classes_;
   StorageOrder order_;
-  Tensor<Context> sum_probs_;
+  Tensor sum_probs_{Context::GetDeviceType()};
 };
 
 } // namespace caffe2

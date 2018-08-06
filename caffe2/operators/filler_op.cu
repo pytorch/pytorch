@@ -25,19 +25,19 @@ __global__ void FillDiagonalKernel(
 }
 
 template <>
-bool RangeFillOp<float, CUDAContext>::Fill(TensorCUDA* output) {
+bool RangeFillOp<float, CUDAContext>::Fill(Tensor* output) {
   int N = output->size();
   FillRangeKernel<<<
       CAFFE_GET_BLOCKS(N),
       CAFFE_CUDA_NUM_THREADS,
       0,
-      context_.cuda_stream()>>>(N, output->mutable_data<float>());
+      context_.cuda_stream()>>>(N, output->template mutable_data<float>());
   return true;
 }
 
 template <>
 template <typename T>
-bool DiagonalFillOp<CUDAContext>::FillWithType(TensorCUDA* output) {
+bool DiagonalFillOp<CUDAContext>::FillWithType(Tensor* output) {
   VerifyOutputShape(output);
   auto* data = output->template mutable_data<T>();
   int size = output->size();

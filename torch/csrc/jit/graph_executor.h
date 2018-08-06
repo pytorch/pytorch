@@ -34,16 +34,16 @@ struct GraphExecutorState {
 
 struct GraphExecutorImpl;
 struct TORCH_API GraphExecutor {
-  GraphExecutor() {}
+  GraphExecutor() = default;
   GraphExecutor(std::shared_ptr<Graph> graph, bool optimize = true);
   // note: if not specified, symbolically_differentiable is computed from the graph.
   GraphExecutor(std::shared_ptr<Graph> graph, bool optimize, bool symbolically_differentiable);
-  variable_tensor_list run(variable_tensor_list && inputs);
+  void run(Stack & inputs);
   explicit operator bool() const {
     return pImpl != nullptr;
   }
   std::shared_ptr<Graph> graph() const;
-  std::shared_ptr<Graph> graphFor(const variable_tensor_list& inputs) const;
+  std::shared_ptr<Graph> graphFor(const Stack& inputs) const;
   GraphExecutorState getDebugState();
 private:
   std::shared_ptr<GraphExecutorImpl> pImpl;

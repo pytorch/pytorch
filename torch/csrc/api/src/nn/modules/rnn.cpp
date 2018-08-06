@@ -5,8 +5,8 @@
 #include <torch/tensor_list_view.h>
 #include <torch/utils.h>
 
-#include <ATen/Error.h>
-#include <ATen/optional.h>
+#include <ATen/core/Error.h>
+#include <ATen/core/optional.h>
 
 #include <array>
 #include <cmath>

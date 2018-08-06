@@ -19,11 +19,6 @@ graph {
     input: "1"
     output: "2"
     op_type: "Add"
-    attribute {
-      name: "broadcast"
-      i: 1
-      type: INT
-    }
   }
   name: "torch-jit-export"
   input {
@@ -60,5 +55,5 @@ graph {
   }
 }
 opset_import {
-  version: 6
+  version: 7
 }

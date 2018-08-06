@@ -14,10 +14,10 @@ namespace caffe2 {
 
 template <typename T, class Context>
 bool DeformConvOp<T, Context>::RunOnDeviceWithOrderNCHW() {
-  const Tensor<Context>& X = Input(INPUT);
-  const Tensor<Context>& offset = Input(OFFSET);
+  const Tensor& X = Input(INPUT);
+  const Tensor& offset = Input(OFFSET);
   auto& filter = Input(FILTER);
-  Tensor<Context>* Y = Output(0);
+  Tensor* Y = Output(0);
   const int N = X.dim32(0), C = X.dim32(1);
   CAFFE_ENFORCE_EQ(X.ndim(), filter.ndim());
   const int M = filter.dim32(0);
@@ -133,7 +133,7 @@ bool DeformConvOp<T, Context>::RunOnDeviceWithOrderNCHW() {
     bias_data = Input(BIAS).template data<T>();
   }
 
-  auto f = [&](Tensor<Context>* col_buffer) {
+  auto f = [&](Tensor* col_buffer) {
     col_buffer->Resize(buffer_shape);
     T* col_buffer_data = col_buffer->template mutable_data<T>();
     // Im2col, followed by gemm.

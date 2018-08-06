@@ -438,9 +438,9 @@ class Depthwise3x3ConvOp final : public ConvPoolOpBase<CPUContext> {
   }
 
   bool RunOnDeviceWithOrderNCHW() override {
-    const Tensor<CPUContext>& X = Input(0);
+    const Tensor& X = Input(0);
     auto& filter = Input(1);
-    Tensor<CPUContext>* Y = Output(0);
+    Tensor* Y = Output(0);
     const int N = X.dim32(0), C = X.dim32(1);
     CAFFE_ENFORCE_EQ(X.ndim(), filter.ndim());
     const int M = filter.dim32(0);
@@ -536,7 +536,7 @@ class Depthwise3x3ConvOp final : public ConvPoolOpBase<CPUContext> {
   }
 
  private:
-  Tensor<CPUContext> bias_;
+  Tensor bias_{CPU};
 };
 
 REGISTER_CPU_OPERATOR_WITH_ENGINE(Conv, DEPTHWISE_3x3, Depthwise3x3ConvOp);

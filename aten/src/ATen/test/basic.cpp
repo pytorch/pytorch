@@ -270,6 +270,10 @@ static void test(Type & type) {
     auto result = tensor.m(relu).m(mse_loss, other, Reduction::ElementwiseMean);
     REQUIRE(result.allclose(mse_loss(relu(tensor), other)));
   }
+  SECTION("core") {
+    int i = CoreTest();
+    REQUIRE(i + 1 == CoreTest());
+  }
 }
 
 TEST_CASE( "basic tests CPU", "[cpu]" ) {

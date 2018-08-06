@@ -18,8 +18,8 @@
 #include <string>
 #include <vector>
 
-#include <ATen/Backtrace.h>
 #include <ATen/ATenGeneral.h>
+#include <ATen/core/Backtrace.h>
 
 namespace at {
 

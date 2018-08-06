@@ -42,8 +42,8 @@ from torch.distributions import (Bernoulli, Beta, Binomial, Categorical,
                                  Independent, Laplace, LogisticNormal,
                                  LogNormal, LowRankMultivariateNormal,
                                  Multinomial, MultivariateNormal,
-                                 Normal, OneHotCategorical, Pareto, Poisson,
-                                 RelaxedBernoulli, RelaxedOneHotCategorical,
+                                 NegativeBinomial, Normal, OneHotCategorical, Pareto,
+                                 Poisson, RelaxedBernoulli, RelaxedOneHotCategorical,
                                  StudentT, TransformedDistribution, Uniform,
                                  Weibull, constraints, kl_divergence)
 from torch.distributions.constraint_registry import biject_to, transform_to
@@ -121,6 +121,16 @@ EXAMPLES = [
         {'probs': torch.tensor([[1.0, 0.0], [0.0, 1.0]], requires_grad=True),
          'total_count': torch.tensor([[10., 8.], [5., 3.]])},
         {'probs': torch.tensor([[1.0, 0.0], [0.0, 1.0]], requires_grad=True),
+         'total_count': torch.tensor(0.)},
+    ]),
+    Example(NegativeBinomial, [
+        {'probs': torch.tensor([[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]], requires_grad=True), 'total_count': 10},
+        {'probs': torch.tensor([[0.9, 0.0], [0.0, 0.9]], requires_grad=True), 'total_count': 10},
+        {'probs': torch.tensor([[0.9, 0.0], [0.0, 0.9]], requires_grad=True), 'total_count': torch.tensor([10])},
+        {'probs': torch.tensor([[0.9, 0.0], [0.0, 0.9]], requires_grad=True), 'total_count': torch.tensor([10, 8])},
+        {'probs': torch.tensor([[0.9, 0.0], [0.0, 0.9]], requires_grad=True),
+         'total_count': torch.tensor([[10., 8.], [5., 3.]])},
+        {'probs': torch.tensor([[0.9, 0.0], [0.0, 0.9]], requires_grad=True),
          'total_count': torch.tensor(0.)},
     ]),
     Example(Multinomial, [
@@ -437,6 +447,12 @@ BAD_EXAMPLES = [
         {'probs': torch.tensor([[-1.0, 10.0], [0.0, -1.0]], requires_grad=True)},
     ]),
     Example(Binomial, [
+        {'probs': torch.tensor([[-0.0000001, 0.2, 0.3], [0.5, 0.3, 0.2]], requires_grad=True),
+         'total_count': 10},
+        {'probs': torch.tensor([[1.0, 0.0], [0.0, 2.0]], requires_grad=True),
+         'total_count': 10},
+    ]),
+    Example(NegativeBinomial, [
         {'probs': torch.tensor([[-0.0000001, 0.2, 0.3], [0.5, 0.3, 0.2]], requires_grad=True),
          'total_count': 10},
         {'probs': torch.tensor([[1.0, 0.0], [0.0, 2.0]], requires_grad=True),
@@ -910,6 +926,37 @@ class TestDistributions(TestCase):
         self.assertEqual(bin0.enumerate_support(), torch.tensor([0.]))
         bin1 = Binomial(torch.tensor(5), torch.tensor(0.5))
         self.assertEqual(bin1.enumerate_support(), torch.arange(6))
+
+    def test_negative_binomial(self):
+        p = torch.tensor(torch.arange(0.05, 1, 0.1), requires_grad=True)
+        for total_count in [1, 2, 10]:
+            self._gradcheck_log_prob(lambda p: NegativeBinomial(total_count, p), [p])
+            self._gradcheck_log_prob(lambda p: NegativeBinomial(total_count, None, p.log()), [p])
+        self.assertRaises(NotImplementedError, NegativeBinomial(10, p).rsample)
+        self.assertRaises(NotImplementedError, NegativeBinomial(10, p).entropy)
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_negative_binomial_log_prob(self):
+        probs = torch.tensor(torch.arange(0.05, 1, 0.1))
+        for total_count in [1, 2, 10]:
+
+            def ref_log_prob(idx, x, log_prob):
+                p = probs.view(-1)[idx].item()
+                expected = scipy.stats.nbinom(total_count, 1 - p).logpmf(x)
+                self.assertAlmostEqual(log_prob, expected, places=3)
+
+            self._check_log_prob(NegativeBinomial(total_count, probs), ref_log_prob)
+            logits = probs_to_logits(probs, is_binary=True)
+            self._check_log_prob(NegativeBinomial(total_count, logits=logits), ref_log_prob)
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_negative_binomial_log_prob_vectorized_count(self):
+        probs = torch.tensor([0.2, 0.7, 0.9])
+        for total_count, sample in [(torch.tensor([10]), torch.tensor([7., 3., 9.])),
+                                    (torch.tensor([1, 2, 10]), torch.tensor([0., 1., 9.]))]:
+            log_prob = NegativeBinomial(total_count, probs).log_prob(sample)
+            expected = scipy.stats.nbinom(total_count.cpu().numpy(), 1 - probs.cpu().numpy()).logpmf(sample)
+            self.assertAlmostEqual(log_prob, expected, places=4)
 
     def test_multinomial_1d(self):
         total_count = 10
@@ -3475,7 +3522,7 @@ class TestAgainstScipy(TestCase):
             ),
             (
                 Binomial(10, simplex_tensor),
-                scipy.stats.binom(10 * np.ones(simplex_tensor.shape), simplex_tensor)
+                scipy.stats.binom(10 * np.ones(simplex_tensor.shape), simplex_tensor.numpy())
             ),
             (
                 Cauchy(random_var, positive_var),
@@ -3862,6 +3909,9 @@ class TestConstraintRegistry(TestCase):
             constraints.greater_than(0),
             constraints.greater_than(2),
             constraints.greater_than(-2),
+            constraints.greater_than_eq(0),
+            constraints.greater_than_eq(2),
+            constraints.greater_than_eq(-2),
             constraints.less_than(tensor([-10., -2, 0, 2, 10])),
             constraints.less_than(0),
             constraints.less_than(2),
@@ -3871,6 +3921,10 @@ class TestConstraintRegistry(TestCase):
                                  tensor([-3., 3, 1, 5, 5])),
             constraints.interval(-2, -1),
             constraints.interval(1, 2),
+            constraints.half_open_interval(tensor([-4., -2, 0, 2, 4]),
+                                           tensor([-3., 3, 1, 5, 5])),
+            constraints.half_open_interval(-2, -1),
+            constraints.half_open_interval(1, 2),
             constraints.simplex,
             constraints.lower_cholesky,
         ]

@@ -1,11 +1,24 @@
 #include <ATen/TensorImpl.h>
 
 #include <ATen/Tensor.h>
-#include <ATen/optional.h>
+#include <ATen/core/optional.h>
+#include <ATen/Context.h>
+
+#include <ATen/detail/VariableHooksInterface.h>
 
 #include <TH/THTensor.hpp>
 
 namespace at {
+
+Type& TensorImpl::type() const {
+  Type* base_type = &globalContext().getType(backend_, scalar_type_);
+  if (is_variable_) {
+    return detail::getVariableHooks().getVariableType(*base_type);
+  } else {
+    return *base_type;
+  }
+}
+
 Tensor& TensorImpl::grad() {
   AT_ERROR("grad is not implemented for Tensor");
 }

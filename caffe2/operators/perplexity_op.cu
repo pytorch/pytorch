@@ -26,7 +26,7 @@ bool PerplexityOp<float, CUDAContext>::RunOnDevice() {
   int N = X.dim32(0);
 
   Y->Resize(vector<TIndex>());
-  float* Ydata = Y->mutable_data<float>();
+  float* Ydata = Y->template mutable_data<float>();
   const float* Xdata = X.data<float>();
 
   float perplexity = thrust::transform_reduce(

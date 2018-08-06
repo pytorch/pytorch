@@ -51,7 +51,7 @@ static inline void THNN_(VolumetricDilatedMaxPooling_shapeCheck)(
     dimw++;
   }
 
-  if (THCTensor_(nDimension)(state, input) == 4)
+  if (THCTensor_(nDimensionLegacyNoScalars)(state, input) == 4)
   {
     /* sizes */
     inputSlices = THCTensor_(size)(state, input, 0);
@@ -59,7 +59,7 @@ static inline void THNN_(VolumetricDilatedMaxPooling_shapeCheck)(
     inputHeight = THCTensor_(size)(state, input, 2);
     inputWidth  = THCTensor_(size)(state, input, 3);
   }
-  else if (THCTensor_(nDimension)(state, input) == 5)
+  else if (THCTensor_(nDimensionLegacyNoScalars)(state, input) == 5)
   {
     /* sizes */
     inputSlices = THCTensor_(size)(state, input, 1);
@@ -142,7 +142,7 @@ void THNN_(VolumetricDilatedMaxPooling_updateOutput)(
   int dimh = 2;
   int dimw = 3;
 
-  int fiveDimensionalInput = THCTensor_(nDimension)(state, input) == 5;
+  int fiveDimensionalInput = THCTensor_(nDimensionLegacyNoScalars)(state, input) == 5;
 
   if (fiveDimensionalInput)
   {
@@ -157,7 +157,7 @@ void THNN_(VolumetricDilatedMaxPooling_updateOutput)(
         dT, dW, dH, padT, padW, padH,
         dilationT, dilationW, dilationH, ceilMode);
 
-  if (THCTensor_(nDimension)(state, input) == 4)
+  if (THCTensor_(nDimensionLegacyNoScalars)(state, input) == 4)
   {
     /* sizes */
     batchSize   = 1;
@@ -316,7 +316,7 @@ void THNN_(VolumetricDilatedMaxPooling_updateGradInput)(
   int outputTime, outputHeight, outputWidth;
   int inputTime, inputHeight, inputWidth;
 
-  int fiveDimensionalInput = THCTensor_(nDimension)(state, input) == 5;
+  int fiveDimensionalInput = THCTensor_(nDimensionLegacyNoScalars)(state, input) == 5;
 
   THCUNN_assertSameGPU(state, 4, input, indices, gradOutput, gradInput);
   THNN_(VolumetricDilatedMaxPooling_shapeCheck)(

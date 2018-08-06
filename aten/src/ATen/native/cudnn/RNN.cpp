@@ -1,9 +1,9 @@
 #include <ATen/ATen.h>
-#include <ATen/TensorUtils.h>
 #include <ATen/Config.h>
-#include <ATen/Error.h>
 #include <ATen/MatrixRef.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/TensorUtils.h>
+#include <ATen/core/Error.h>
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/cuda/Exceptions.h>
 
@@ -166,7 +166,7 @@ namespace {
     std::vector<TensorDescriptor> descriptors(batch_sizes.size());
     size_t i = 0;
     // To be mutated in the loop
-    std::vector<int64_t> batch_tensor_size(tensor.sizes());
+    auto batch_tensor_size = tensor.sizes().vec();
     for (auto batch_size : batch_sizes) {
       batch_tensor_size[0] = batch_size;
       // NB: cuDNN RNN API does not support 2d descriptors, so we
@@ -994,7 +994,7 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> _cudnn_rnn_backward(
   if (output_mask[3]) {
     dw = at::native::_cudnn_rnn_backward_weight(input, weight, weight_stride0, weight_buf, hx, cx, output, mode, hidden_size, num_layers, batch_first, dropout, train, bidirectional, batch_sizes, dropout_state, reserve);
   }
-  return std::tuple<Tensor, Tensor, Tensor, TensorList>{dx, dhx, dcx, dw};
+  return std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>>{dx, dhx, dcx, dw};
 }
 
 // TODO: I am not sure if we actually need the 'dropout' and 'train' parameters

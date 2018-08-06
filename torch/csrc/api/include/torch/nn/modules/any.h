@@ -9,7 +9,7 @@
 #include <torch/csrc/utils/variadic.h>
 
 #include <ATen/Device.h>
-#include <ATen/optional.h>
+#include <ATen/core/optional.h>
 
 #include <memory>
 #include <type_traits>
