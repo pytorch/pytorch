@@ -258,7 +258,7 @@ THCTensor_(normall)(THCState *state, THCTensor *self, real _value)
                         ReduceAdd<accreal>{},
                         scalar_cast<accreal>(0),
                         &result, 0);
-    result = THCNumerics<accreal>::pow(result, 
+    result = THCNumerics<accreal>::pow(result,
                                        THCNumerics<accreal>::cinv(value));
   }
 

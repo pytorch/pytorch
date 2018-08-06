@@ -295,7 +295,7 @@ bool THC_reduceAll(THCState* state,
 
     /*
     Only instantiates the all 1D special case and the fallback all nD case for
-    large (64-bit indexed) tensors to reduce compilation time. 
+    large (64-bit indexed) tensors to reduce compilation time.
     */
     if (inInfo.dims == 1) {
       HANDLE_IN_CASE(uint64_t, 1);

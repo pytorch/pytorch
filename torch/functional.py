@@ -367,6 +367,29 @@ def unique(input, sorted=False, return_inverse=False):
         return output
 
 
+def _reduceDim(tensor, pos, func):
+    if len(tensor.shape) == 0:
+        return (int(pos),)
+    reduced_tensor, reduced_pos = func(tensor, dim=0)
+
+    target_pos = _reduceDim(reduced_tensor, reduced_pos, func)
+    return (int(pos[target_pos]),) + target_pos
+
+
+def _translate_idx(tensor_dim, idx):
+    if len(tensor_dim) != len(idx):
+        raise RuntimeError("tensor_dim and idx length should match")
+    n_dim = len(idx)
+    for i, j in zip(idx, tensor_dim):
+        if i >= j:
+            raise ValueError("idx out of range")
+    flattened_idx = 0
+    for i in range(n_dim - 1):
+        flattened_idx = (flattened_idx + idx[i]) * tensor_dim[i + 1]
+    flattened_idx += idx[-1]
+    return flattened_idx
+
+
 def argmax(input, dim=None, keepdim=False):
     """Returns the indices of the maximum values of a tensor across a dimension.
 
@@ -394,7 +417,13 @@ def argmax(input, dim=None, keepdim=False):
         tensor([ 0,  2,  0,  1])
     """
     if dim is None:
-        return torch._argmax(input.contiguous().view(-1), dim=0, keepdim=False)
+        # Instead of squeeze to 1 dimension, do it multiple passes for better perf.
+        t, pos = torch.max(input, dim=0)
+        idx = _reduceDim(t, pos, torch.max)
+        tensor_dim = input.shape
+        idx_tensor = torch.tensor(_translate_idx(tensor_dim, idx), device=input.device)
+        return idx_tensor
+
     return torch._argmax(input, dim, keepdim)
 
 
@@ -425,7 +454,13 @@ def argmin(input, dim=None, keepdim=False):
         tensor([ 2,  1,  3,  1])
     """
     if dim is None:
-        return torch._argmin(input.contiguous().view(-1), dim=0, keepdim=False)
+        # Instead of squeeze to 1 dimension, do it multiple passes for better perf.
+        t, pos = torch.min(input, dim=0)
+        idx = _reduceDim(t, pos, torch.min)
+        tensor_dim = input.shape
+        idx_tensor = torch.tensor(_translate_idx(tensor_dim, idx), device=input.device)
+        return idx_tensor
+
     return torch._argmin(input, dim, keepdim)
 
 
