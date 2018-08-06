@@ -345,16 +345,6 @@ class CompilationUnit(object):
         return self.module._get_method(attr)
 
 
-def _fn_to_typed_def(fn, method=False):
-    schema = annotations.get_signature(fn)
-    ast = get_jit_ast(fn)
-    if schema:
-        typed_def = torch._C._pack_typed_def(ast, schema[0], schema[1], method)
-    else:
-        typed_def = torch._C.TypedDef(ast)
-    return typed_def
-
-
 def script(fn, optimize=True, _frames_up=0):
     rcb = createResolutionCallback(_frames_up + 1)
     ast = get_jit_ast(fn)

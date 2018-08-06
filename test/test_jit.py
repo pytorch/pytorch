@@ -5431,7 +5431,6 @@ def func(t):
     #  Python AST Frontend , Python 3-style type annotations , Script method
     @unittest.skipIf(not PY35, "Python 3.5 needed")
     def test_annot_ast_py3_method(self):
-        # TODO: implementation
         code = dedent('''
             from typing import Tuple
             from torch import Tensor
