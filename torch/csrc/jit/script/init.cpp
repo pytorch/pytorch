@@ -132,14 +132,14 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
     // Note that this effectively makes the return type of Tuple[Tensor] and Tensor
     // equivalent, but the PythonOp impl ends with an optional tuple unpack, so we need
     // to do it.
-    for (auto & ret_arg : schema.returns) {
+    for (auto & ret_arg : *schema.returns) {
       if (!ret_arg.type->isSubtypeOf(DynamicType::get())) {
         throw ErrorReport(loc) << "Python functions can currently only return Tensors";
       }
     }
 
     std::vector<Value*> outputs;
-    for(size_t i = 0; i < schema.returns.size(); ++i)
+    for(size_t i = 0; i < schema.returns->size(); ++i)
       outputs.push_back(new_node->addOutput());
     return std::make_shared<SimpleValue>(packOutputs(*m.graph(), outputs));
   }
