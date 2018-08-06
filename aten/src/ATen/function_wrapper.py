@@ -311,13 +311,13 @@ CHECKED_CAST = {
 DIRECT_CONSTRUCTION_CHECKED_CAST = {'IntListSize', 'IntListStride'}
 
 CHECKED_USE = {
-    'THTensor*': '{}_->tensor',
-    'THSTensor*': '{}_->tensor',
-    'THIndexTensor*': '{}_->tensor',
-    'THBoolTensor*': '{}_->tensor',
-    'THIntegerTensor*': '{}_->tensor',
-    'THDenseTensor*': '{}_->tensor',
-    'THDenseIndexTensor*': '{}_->tensor',
+    'THTensor*': '(THTensor*){}_->unsafeGetTH(false)',
+    'THSTensor*': '(THTensor*){}_->unsafeGetTH(false)',
+    'THIndexTensor*': '(THTensor*){}_->unsafeGetTH(false)',
+    'THBoolTensor*': '(THTensor*){}_->unsafeGetTH(false)',
+    'THIntegerTensor*': '(THTensor*){}_->unsafeGetTH(false)',
+    'THDenseTensor*': '(THTensor*){}_->unsafeGetTH(false)',
+    'THDenseIndexTensor*': '(THTensor*){}_->unsafeGetTH(false)',
     'THStorage*': '{}_->pImpl()',
     'THGenerator*': '{}_->generator',
     'TensorList': "{0}_.data(), {0}_.size()",

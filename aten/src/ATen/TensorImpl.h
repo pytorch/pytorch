@@ -100,7 +100,6 @@ protected:
   ScalarType scalar_type_;
   bool is_variable_ = false;
   bool is_wrapped_number_ = false;
-public:
   THTensor * tensor;
 };
 } // namespace at
