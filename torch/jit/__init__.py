@@ -371,7 +371,7 @@ def script(fn, optimize=True, _frames_up=0):
     return mod
 
 
-ScriptMethodStub = namedtuple('ScriptMethodStub', ('resolution_callback', 'typed_def', 'original_method'))
+ScriptMethodStub = namedtuple('ScriptMethodStub', ('resolution_callback', 'def_', 'original_method'))
 
 
 def script_method(fn):
@@ -387,8 +387,9 @@ def script_method(fn):
     #
     # createResolutionCallback internally adds 1 to get us to the scope of this
     # function (the calling function). Adding 2 gets us to the proper surrounding scope.
-    typed_def = _fn_to_typed_def(fn, method=True)
-    return ScriptMethodStub(createResolutionCallback(frames_up=2), typed_def, fn)
+    rcb = createResolutionCallback(frames_up=2)
+    ast = get_jit_ast(fn)
+    return ScriptMethodStub(rcb, ast, fn)
 
 
 def batch(batch_size=1, optimize=True, _frames_up=0):
@@ -595,9 +596,9 @@ class ScriptMeta(type(torch._C.ScriptModule)):
             if cls is type(self):
                 torch._C.ScriptModule.__init__(self)
             original_init(self, *args, **kwargs)
-            typed_defs = [m.typed_def for m in methods]
+            defs = [m.def_ for m in methods]
             rcbs = [m.resolution_callback for m in methods]
-            self._create_methods(typed_defs, rcbs)
+            self._create_methods(defs, rcbs)
 
         cls.__init__ = init_then_register
         return super(ScriptMeta, cls).__init__(name, bases, attrs)

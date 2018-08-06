@@ -436,14 +436,19 @@ void initJitScriptBindings(PyObject* module) {
             auto self = has_self ? std::make_shared<ModuleValue>(m) : nullptr;
             return defineMethodsInModule(*m, script, pythonResolver(rcb), self);
           })
-      .def("_create_methods", [](std::shared_ptr<Module> m, const std::vector<TypedDef>& defs, const std::vector<ResolutionCallback>& rcbs) {
+      .def("_create_methods", [](std::shared_ptr<Module> m, const std::vector<Def>& defs, const std::vector<ResolutionCallback>& rcbs) {
         std::vector<Resolver> resolvers;
         for(auto & callback : rcbs) {
           resolvers.push_back(pythonResolver(callback));
         }
+        std::vector<TypedDef> typed_defs;
+        for (auto & def : defs) {
+          auto schema = extractSchemaFromDef(def, true);
+          typed_defs.emplace_back(def, schema);
+        }
         defineMethodsInModule(
           *m,
-          defs,
+          typed_defs,
           resolvers,
           std::make_shared<ModuleValue>(m));
       })

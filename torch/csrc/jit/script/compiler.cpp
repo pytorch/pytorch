@@ -1613,7 +1613,7 @@ std::vector<Argument> parseReturnsFromDecl(Decl decl) {
   }
 }
 
-FunctionSchema extractSchemaFromDef(Def &def, bool is_method) {
+FunctionSchema extractSchemaFromDef(const Def &def, bool is_method) {
     auto name = def.name().name();
     std::vector<Argument> args = parseArgsFromDecl(def.decl(), is_method);
     at::optional<std::vector<Argument>> returns = at::nullopt;

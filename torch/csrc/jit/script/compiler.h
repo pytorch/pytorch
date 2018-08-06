@@ -162,7 +162,7 @@ TORCH_API at::optional<std::vector<Value*>> tryMatchSchema(
   at::ArrayRef<NamedValue> attributes,
   std::ostream& failure_messages);
 
-TORCH_API FunctionSchema extractSchemaFromDef(Def &def, bool is_method=false);
+TORCH_API FunctionSchema extractSchemaFromDef(const Def &def, bool is_method=false);
 
 TORCH_API Value* emitBuiltinCall(
   const SourceRange& loc,
