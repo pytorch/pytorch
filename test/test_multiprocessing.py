@@ -434,7 +434,9 @@ class TestMultiprocessing(TestCase):
             self._test_autograd_sharing(var)
 
     def test_leaf_variable_sharing(self):
-        devices = ['cpu'] if not torch.cuda.is_available() or NO_MULTIPROCESSING_SPAWN else ['cpu', 'cuda']
+        devices = ['cpu']
+        if torch.cuda.is_available() and not NO_MULTIPROCESSING_SPAWN and TEST_CUDA_IPC:
+            devices.append('cuda')
         for device in devices:
             for requires_grad in [True, False]:
                 var = Variable(torch.arange(1., 26, device=device).view(5, 5), requires_grad=requires_grad)
