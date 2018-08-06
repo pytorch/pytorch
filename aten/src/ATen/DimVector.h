@@ -1,6 +1,6 @@
 #pragma once
 
-#include "SmallVector.h"
+#include <ATen/core/SmallVector.h>
 #include <stdint.h>
 
 namespace at {

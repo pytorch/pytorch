@@ -2,17 +2,17 @@
 
 // ${generated_comment}
 
-#include "ATen/Allocator.h"
-#include "ATen/ArrayRef.h"
 #include "ATen/ATenGeneral.h"
+#include "ATen/Allocator.h"
+#include "ATen/Deprecated.h"
 #include "ATen/Generator.h"
-#include "ATen/Half.h"
+#include "ATen/Layout.h"
 #include "ATen/Scalar.h"
 #include "ATen/ScalarType.h"
 #include "ATen/SparseTensorRef.h"
 #include "ATen/Tensor.h"
-#include "ATen/Deprecated.h"
-#include "ATen/Layout.h"
+#include "ATen/core/ArrayRef.h"
+#include "ATen/core/Half.h"
 #include "THNN/Reduction.h"
 
 #include <array>

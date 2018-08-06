@@ -452,6 +452,7 @@ class ReduceTensorTest : public testing::Test {
         X_dims.data(),
         axes.size(),
         axes.data(),
+        1.0f,
         X_.data<float>(),
         Y_.mutable_data<float>(),
         cpu_context_.get());
@@ -472,11 +473,12 @@ TEST_F(ReduceTensorTest, ReduceMinTest) {
                               const int* dims,
                               const int num_axes,
                               const int* axes,
+                              const float alpha,
                               const float* X,
                               float* Y,
                               CPUContext* context) {
     return math::ReduceMin<float, CPUContext>(
-        num_dims, dims, num_axes, axes, X, Y, context);
+        num_dims, dims, num_axes, axes, alpha, X, Y, context);
   };
   // Test for 1D tensor.
   RunRedcueTensorTest(reduce_min, {3}, {0}, {1.0f, 2.0f, 3.0f}, {1.0f});
@@ -523,11 +525,12 @@ TEST_F(ReduceTensorTest, ReduceMaxTest) {
                               const int* dims,
                               const int num_axes,
                               const int* axes,
+                              const float alpha,
                               const float* X,
                               float* Y,
                               CPUContext* context) {
     return math::ReduceMax<float, CPUContext>(
-        num_dims, dims, num_axes, axes, X, Y, context);
+        num_dims, dims, num_axes, axes, alpha, X, Y, context);
   };
   // Test for 1D tensor.
   RunRedcueTensorTest(reduce_max, {3}, {0}, {1.0f, 2.0f, 3.0f}, {3.0f});
@@ -686,6 +689,7 @@ class BroadcastTest : public testing::Test {
         X_dims.data(),
         Y_dims.size(),
         Y_dims.data(),
+        1.0f,
         X_.data<float>(),
         Y_.mutable_data<float>(),
         cpu_context_.get());
