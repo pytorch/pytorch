@@ -68,7 +68,7 @@ fi
 WERROR=1 python setup.py install
 
 # Add the test binaries so that they won't be git clean'ed away
-git add -f build/bin
+git add -f build/bin build/lib
 
 # Testing ATen install
 if [[ "$BUILD_ENVIRONMENT" != *cuda* ]]; then
@@ -94,12 +94,4 @@ if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda8-cudnn6-py3* ]]; then
   pip install -r requirements.txt || true
   make html
   popd
-fi
-
-# Test no-Python build
-if [[ "$BUILD_TEST_LIBTORCH" == "1" ]]; then
-  echo "Building libtorch"
-  # NB: Install outside of source directory (at the same level as the root
-  # pytorch folder) so that it doesn't get cleaned away prior to docker push.
-  WERROR=1 VERBOSE=1 tools/cpp_build/build_caffe2.sh "$PWD/../cpp-build"
 fi
