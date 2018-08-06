@@ -223,7 +223,13 @@ target_include_directories(caffe2 PRIVATE ${Caffe2_CPU_INCLUDE})
 target_include_directories(caffe2 SYSTEM PRIVATE "${Caffe2_DEPENDENCY_INCLUDE}")
 # Set standard properties on the target
 aten_set_target_props(caffe2)
+
+if (MSVC)
 target_compile_options(caffe2 INTERFACE "-std=c++11")
+else()
+target_compile_options(caffe2 INTERFACE "$<$<COMPILE_LANGUAGE:CXX>:-std=c++11>")
+endif()
+
 target_compile_options(caffe2 PRIVATE "-DCAFFE2_BUILD_MAIN_LIB")
 if (MSVC AND NOT BUILD_SHARED_LIBS)
   # Note [Supporting both static and dynamic libraries on Window]
