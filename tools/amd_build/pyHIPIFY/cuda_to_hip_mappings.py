@@ -12,6 +12,21 @@ ROCm/HIP string, a type and API annotation and - optionally - an annotation if i
 supported in ROCm/HIP yet.
 """
 
+# List of math functions that should be replaced inside device code only.
+MATH_TRANSPILATIONS = {
+    "std::max": ("::max"),
+    "std::min": ("::min"),
+    "std::ceil": ("::ceil"),
+    "std::floor": ("::floor"),
+    "std::exp": ("::exp"),
+    "std::log": ("::log"),
+    "std::pow": ("::pow"),
+    "std::fabs": ("::fabs"),
+    "std::fmod": ("::fmod"),
+    "std::remainder": ("::remainder"),
+}
+
+
 CUDA_TYPE_NAME_MAP = {
     "CUresult": ("hipError_t", CONV_TYPE, API_DRIVER),
     "cudaError_t": ("hipError_t", CONV_TYPE, API_RUNTIME),
@@ -2138,5 +2153,5 @@ CAFFE2_SPECIFIC_MAPPINGS = {
     "hipblasGetStream": ("rocblas_get_stream", API_CAFFE2),
 }
 
-CUDA_TO_HIP_MAPPINGS = [CUDA_IDENTIFIER_MAP, CUDA_TYPE_NAME_MAP, 
+CUDA_TO_HIP_MAPPINGS = [CUDA_IDENTIFIER_MAP, CUDA_TYPE_NAME_MAP,
                         CUDA_INCLUDE_MAP, CUDA_SPARSE_MAP, PYTORCH_SPECIFIC_MAPPINGS, CAFFE2_SPECIFIC_MAPPINGS]
