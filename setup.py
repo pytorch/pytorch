@@ -644,6 +644,10 @@ if IS_WINDOWS:
                           '/wd4305', '/wd4244', '/wd4190', '/wd4101', '/wd4996',
                           '/wd4275']
     if sys.version_info[0] == 2:
+        if not check_env_flag('FORCE_PY27_BUILD'):
+            print('The support for PyTorch with Python 2.7 on Windows is very experimental.')
+            print('Please set the flag `FORCE_PY27_BUILD` to 1 to continue build.')
+            sys.exit(1)
         # /bigobj increases number of sections in .obj file, which is needed to link
         # against libaries in Python 2.7 under Windows
         extra_compile_args.append('/bigobj')
