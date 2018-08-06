@@ -3,6 +3,7 @@
 #include <ATen/ScalarType.h>
 #include <ATen/core/Error.h>
 #include <ATen/core/DeviceType.h>
+#include <ATen/core/Error.h>
 
 #include <cstddef>
 #include <iosfwd>
@@ -38,7 +39,8 @@ struct Device {
     }
   }
 
-  /// Constructs a new `Device` from a `DeviceType` and an optional device index.
+  /// Constructs a new `Device` from a `DeviceType` and an optional device
+  /// index.
   /* implicit */ Device(DeviceType type, int32_t index = -1)
       : type_(type), index_(index) {
     AT_CHECK(
