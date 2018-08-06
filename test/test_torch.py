@@ -143,6 +143,9 @@ class TestTorch(TestCase):
 
         return tensors
 
+    def test_dir(self):
+        dir(torch)
+
     def test_dot(self):
         types = {
             'torch.DoubleTensor': 1e-8,
