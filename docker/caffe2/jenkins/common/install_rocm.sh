@@ -22,7 +22,6 @@ install_ubuntu() {
                    rocblas \
                    hipblas \
                    rocrand \
-                   hcsparse \
                    rocm-profiler \
                    cxlactivitylogger
 
@@ -61,8 +60,22 @@ install_hip_thrust() {
 # This will be removed after merging an upcoming PR.
 install_hcrng() {
     mkdir -p /opt/rocm/debians
-    curl https://s3.amazonaws.com/ossci-linux/hcrng-master-a8c6a0b-Linux.deb -o /opt/rocm/debians/hcrng.deb 
+    curl https://s3.amazonaws.com/ossci-linux/hcrng-master-a8c6a0b-Linux.deb -o /opt/rocm/debians/hcrng.deb
     dpkg -i /opt/rocm/debians/hcrng.deb
+}
+
+# This package will be deprecated in the future with the release of rocSparse.
+install_hcsparse() {
+    mkdir -p /opt/rocm/debians
+    curl https://s3.amazonaws.com/ossci-linux/hcsparse-master-907a505-Linux.deb -o /opt/rocm/debians/hcsparse.deb
+    dpkg -i /opt/rocm/debians/hcsparse.deb
+}
+
+install_rocRAND() {
+    # Install a newer version more compatible with PyTorch.
+    mkdir -p /opt/rocm/debians
+    curl https://s3.amazonaws.com/ossci-linux/rocrand-1.8.0-Linux.deb -o /opt/rocm/debians/rocRAND.deb
+    dpkg -i /opt/rocm/debians/rocRAND.deb
 }
 
 # Install Python packages depending on the base OS
@@ -77,3 +90,5 @@ fi
 
 install_hip_thrust
 install_hcrng
+install_rocRAND
+install_hcsparse
