@@ -353,12 +353,17 @@ Operation listEq<Shared<TensorList>>(Node* node) {
     for (size_t i = 0; i < a->elements().size(); ++i) {
       const auto& a_element = a->elements()[i];
       const auto& b_element = b->elements()[i];
-      if (!a_element.equal(b_element)) {
+      // This preserves Python's semantics, which uses eq() to compare two
+      // elements, then passes the result to bool().
+      // see: https://docs.python.org/3.4/reference/datamodel.html#object.__ge__
+      const auto cmp_result = a_element.eq(b_element);
+      if (!cmp_result.is_nonzero()) {
         push(stack, 0);
         return 0;
       }
     }
 
+    push(stack, 1);
     return 0;
   };
 }

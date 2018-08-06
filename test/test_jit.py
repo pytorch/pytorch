@@ -1828,6 +1828,25 @@ class TestScript(JitTestCase):
             os.close(r)
             os.close(w)
 
+    def checkScriptRaisesRegex(self, script, inputs, exception, regex, optimize=True, outputs=None, capture_output=False):
+        """
+        Checks that a given function will throw the correct exception,
+        when executed with normal python, the string frontend, and the AST frontend
+        """
+        # normal python
+        with self.assertRaisesRegex(exception, regex):
+            script(*inputs)
+        # string frontend
+        with self.assertRaisesRegex(exception, regex):
+            source = textwrap.dedent(inspect.getsource(script))
+            cu = torch.jit.CompilationUnit(source, optimize)
+            ge = getattr(cu, script.__name__)
+            ge(*inputs)
+        # python AST frontend
+        with self.assertRaisesRegex(exception, regex):
+            ge = torch.jit.script(script, optimize)
+            ge(*inputs)
+
     def checkScript(self, script, inputs, optimize=True, outputs=None, name='func', capture_output=False, frames_up=1):
         if isinstance(script, str):
             cu = torch.jit.CompilationUnit(script, optimize, _frames_up=frames_up)
@@ -2154,6 +2173,29 @@ a")
             return c == [1, 2, 3]
 
         self.checkScript(test_list_add_empty, (), optimize=True)
+
+        def test_tensor_list_equality():
+            t1 = torch.ones([1, 1])
+            t2 = torch.ones([1, 1])
+            x = [t1, t2]
+            y = [t2, t1]
+            return x == y
+
+        self.checkScript(test_tensor_list_equality, (), optimize=True)
+
+        def test_invalid_list_equality():
+            t1 = torch.ones([2, 2])
+            t2 = torch.ones([2, 2])
+            x = [t1, t2]
+            y = [t2, t1]
+            # will throw since the tensors have more than one element
+            return x == y
+
+        self.checkScriptRaisesRegex(
+            test_invalid_list_equality,
+            (),
+            RuntimeError,
+            "bool value of Tensor")
 
     def test_func_call(self):
         script = '''
