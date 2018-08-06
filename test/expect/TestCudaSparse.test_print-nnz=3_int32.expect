@@ -1,6 +1,0 @@
-tensor(indices=[[0, 1, 0],
-                [3, 4, 3]]
-       values=[[0, 0, 2],
-               [3, 3, 4],
-               [6, 7, 7]],
-       device='cuda:0', size=(200, 200, 3), dtype=torch.int32, layout=torch.sparse_coo)

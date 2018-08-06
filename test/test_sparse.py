@@ -110,30 +110,59 @@ class TestSparse(TestCase):
     def test_print(self):
         if self.is_uncoalesced:
             raise unittest.SkipTest("test_print is the same regardless of is_uncoalesced")
-        for nnz in (0, 3):
-            indices = torch.arange(2 * nnz).view(2, nnz).type(self.IndexTensor)
+
+        shape_dimI_nnz = [
+            ((), 0, 2),
+            ((0,), 0, 10),
+            ((2,), 0, 3),
+            ((100, 3), 1, 3),
+            ((100, 20, 3), 2, 0),
+            ((10, 0, 3), 0, 3),
+            ((10, 0, 3), 0, 0),
+        ]
+
+        printed = []
+        for shape, dimI, nnz in shape_dimI_nnz:
+            indices_shape = torch.Size((dimI, nnz))
+            values_shape = torch.Size((nnz,) + shape[dimI:])
+            printed.append("# shape: {}".format(torch.Size(shape)))
+            printed.append("# nnz: {}".format(nnz))
+            printed.append("# dimI: {}".format(dimI))
+            printed.append("# indices shape: {}".format(indices_shape))
+            printed.append("# values shape: {}".format(values_shape))
+
+            indices = torch.arange(indices_shape.numel(), dtype=self.IndexTensor.dtype,
+                                   device=self.device).view(indices_shape)
+            for d in range(dimI):
+                indices[d].clamp_(max=shape[d])  # make it valid index
             if indices.numel() > 0:
                 indices[:, -1] = indices[:, 0]  # make it uncoalesced
-            values = torch.arange(3 * nnz).view(nnz, 3).type(self.ValueTensor)
-            values.add_(torch.randn_like(values) * 0.1)
-            sp_tensor = self.SparseTensor(indices, values, (200, 200, 3))
+            values_numel = values_shape.numel()
+            values = torch.arange(values_numel, dtype=self.ValueTensor.dtype,
+                                  device=self.device).view(values_shape).div_(values_numel / 2.)
+            sp_tensor = self.SparseTensor(indices, values, shape)
 
-            subname_prefix = 'nnz={}'.format(nnz)
-            self.assertExpected(str(sp_tensor), subname=subname_prefix)
             dtypes = [torch.int32]
             if values.dtype == torch.double:
                 dtypes.append(torch.float)
             else:
                 dtypes.append(torch.double)
             for dtype in dtypes:
+                printed.append("########## {} ##########".format(dtype))
                 x = sp_tensor.detach().to(dtype)
-                subname = '{}_{}'.format(subname_prefix, str(dtype).split('.')[1])
-                self.assertExpected(str(x), subname=subname)
+                printed.append("# sparse tensor")
+                printed.append(str(x))
                 if x.dtype.is_floating_point:
-                    str(x.requires_grad_())
-                    self.assertExpected(str(x + x), subname='{}_grad_fn'.format(subname))
-                str(x._indices())
-                str(x._values())
+                    printed.append("# after requires_grad_")
+                    printed.append(str(x.requires_grad_()))
+                    printed.append("# after addition")
+                    printed.append(str(x + x))
+                printed.append("# _indices")
+                printed.append(str(x._indices()))
+                printed.append("# _values")
+                printed.append(str(x._values()))
+            printed.append('')
+        self.assertExpected('\n'.join(printed))
 
     @skipIfRocm
     def test_basic(self):
@@ -1023,6 +1052,10 @@ class TestSparse(TestCase):
         values = self.ValueTensor([.5, .5])
         sizes = torch.Size([2, 3])
         with self.assertRaisesRegex(RuntimeError, "sizes is inconsistent with indices"):
+            torch.sparse_coo_tensor(indices, values, sizes)
+
+        indices.fill_(-1)
+        with self.assertRaisesRegex(RuntimeError, "found negative index"):
             torch.sparse_coo_tensor(indices, values, sizes)
 
         indices = self.IndexTensor([[1, 2], [0, 2]])

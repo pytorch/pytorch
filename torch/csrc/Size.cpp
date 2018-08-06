@@ -135,6 +135,22 @@ static PyMappingMethods THPSize_as_mapping = {
     0
 };
 
+static PyObject *THPSize_numel(THPSize *self)
+{
+  HANDLE_TH_ERRORS
+  int64_t numel = 1;
+  for (Py_ssize_t i = 0; i < PyTuple_Size((PyObject*)self); ++i) {
+    numel *= PyLong_AsLong(PyTuple_GET_ITEM(self, i));
+  }
+  return THPUtils_packUInt64(numel);
+  END_HANDLE_TH_ERRORS
+}
+
+static PyMethodDef THPSize_methods[] = {
+  {"numel",       (PyCFunction)THPSize_numel,       METH_NOARGS,  nullptr},
+  {nullptr}
+};
+
 
 PyTypeObject THPSizeType = {
   PyVarObject_HEAD_INIT(nullptr, 0)
@@ -157,14 +173,14 @@ PyTypeObject THPSizeType = {
   0,                                     /* tp_setattro */
   0,                                     /* tp_as_buffer */
   Py_TPFLAGS_DEFAULT,                    /* tp_flags */
-  nullptr,                                  /* tp_doc */
+  nullptr,                               /* tp_doc */
   0,                                     /* tp_traverse */
   0,                                     /* tp_clear */
   0,                                     /* tp_richcompare */
   0,                                     /* tp_weaklistoffset */
   0,                                     /* tp_iter */
   0,                                     /* tp_iternext */
-  0,                                     /* tp_methods */
+  THPSize_methods,                       /* tp_methods */
   0,                                     /* tp_members */
   0,                                     /* tp_getset */
   &PyTuple_Type,                         /* tp_base */

@@ -1,3 +1,0 @@
-tensor(indices=[]
-       values=[],
-       size=(200, 200, 3), dtype=torch.float32, layout=torch.sparse_coo, grad_fn=<AddBackward0>)

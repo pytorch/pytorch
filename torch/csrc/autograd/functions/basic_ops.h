@@ -24,9 +24,9 @@ struct TORCH_API Error : public Function {
   std::string msg;
 };
 
-// Now we print grad_fn names in tensor printing. For functions with backward
+// We print grad_fn names in tensor printing. For functions with backward
 // NYI, grad_fn=<Error> will be printed if we use Error, which is confusing. So
-// special case NotImplemented case here.
+// special case with a new NotImplemented function here.
 struct TORCH_API NotImplemented : public Error {
   NotImplemented(std::string forward_fn, edge_list&& next_edges)
     : Error("derivative for " + forward_fn + " is not implemented",

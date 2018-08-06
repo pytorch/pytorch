@@ -205,12 +205,20 @@ def _tensor_str(self, indent):
     return _tensor_str_with_formatter(self, indent, formatter, summarize)
 
 
-def _maybe_wrap_suffix(suffix, indent, tensor_str):
-    suffix_len = len(suffix)
+def _add_suffixes(tensor_str, suffixes, indent, force_newline):
+    tensor_strs = [tensor_str]
     last_line_len = len(tensor_str) - tensor_str.rfind('\n') + 1
-    if suffix_len > 2 and last_line_len + suffix_len > PRINT_OPTS.linewidth:
-        return ',\n' + ' ' * indent + suffix[2:]
-    return suffix
+    for suffix in suffixes:
+        suffix_len = len(suffix)
+        if force_newline or last_line_len + suffix_len + 2 > PRINT_OPTS.linewidth:
+            tensor_strs.append(',\n' + ' ' * indent + suffix)
+            last_line_len = indent + suffix_len
+            force_newline = False
+        else:
+            tensor_strs.append(', ' + suffix)
+            last_line_len += suffix_len + 2
+    tensor_strs.append(')')
+    return ''.join(tensor_strs)
 
 
 def get_summarized_data(self):
@@ -235,53 +243,57 @@ def _str(self):
     prefix = 'tensor('
     indent = len(prefix)
 
-    suffix = ''
+    suffixes = []
     if not torch._C._is_default_type_cuda():
         if self.device.type == 'cuda':
-            suffix += ', device=\'' + str(self.device) + '\''
+            suffixes.append('device=\'' + str(self.device) + '\'')
     else:
         if self.device.type == 'cpu' or torch.cuda.current_device() != self.device.index:
-            suffix += ', device=\'' + str(self.device) + '\''
+            suffixes.append('device=\'' + str(self.device) + '\'')
 
-    if self.numel() == 0 and not self.is_sparse:
-        # Explicitly print the shape if it is not (0,), to match NumPy behavior
-        if self.dim() != 1:
-            suffix += ', size=' + str(tuple(self.shape))
+    has_default_dtype = self.dtype == torch.get_default_dtype() or self.dtype == torch.int64
 
-        # In an empty tensor, there are no elements to infer if the dtype should be int64,
-        # so it must be shown explicitly.
-        if self.dtype != torch.get_default_dtype():
-            suffix += ', dtype=' + str(self.dtype)
-        tensor_str = '[]'
+    if self.is_sparse:
+        suffixes.append('size=' + str(tuple(self.shape)))
+        suffixes.append('nnz=' + str(self._nnz()))
+        if not has_default_dtype:
+            suffixes.append('dtype=' + str(self.dtype))
+        indices_prefix = 'indices=tensor('
+        indices = self._indices().detach()
+        indices_str = _tensor_str(indices, indent + len(indices_prefix))
+        if indices.numel() == 0:
+            indices_str += ', size=' + str(tuple(indices.shape))
+        values_prefix = 'values=tensor('
+        values = self._values().detach()
+        values_str = _tensor_str(values, indent + len(values_prefix))
+        if values.numel() == 0:
+            values_str += ', size=' + str(tuple(values.shape))
+        tensor_str = indices_prefix + indices_str + '),\n' + ' ' * indent + values_prefix + values_str + ')'
     else:
-        if self.is_sparse:
-            suffix += ', size=' + str(tuple(self.shape))
+        if self.numel() == 0 and not self.is_sparse:
+            # Explicitly print the shape if it is not (0,), to match NumPy behavior
+            if self.dim() != 1:
+                suffixes.append('size=' + str(tuple(self.shape)))
 
-        if self.dtype != torch.get_default_dtype() and self.dtype != torch.int64:
-            suffix += ', dtype=' + str(self.dtype)
-
-        if self.is_sparse:
-            indices_prefix = 'indices='
-            indices_str = _tensor_str(self._indices().detach(), indent + len(indices_prefix))
-            values_prefix = 'values='
-            values_str = _tensor_str(self._values().detach(), indent + len(values_prefix))
-            tensor_str = indices_prefix + indices_str + '\n' + ' ' * indent + values_prefix + values_str
+            # In an empty tensor, there are no elements to infer if the dtype
+            # should be int64, so it must be shown explicitly.
+            if self.dtype != torch.get_default_dtype():
+                suffixes.append('dtype=' + str(self.dtype))
+            tensor_str = '[]'
         else:
+            if not has_default_dtype:
+                suffixes.append('dtype=' + str(self.dtype))
             tensor_str = _tensor_str(self, indent)
 
     if self.layout != torch.strided:
-        suffix += ', layout=' + str(self.layout)
+        suffixes.append('layout=' + str(self.layout))
 
     if self.grad_fn is not None:
         name = type(self.grad_fn).__name__
         if name == 'CppFunction':
             name = self.grad_fn.name().rsplit('::', maxsplit=1)[-1]
-        suffix += ', grad_fn=<{}>'.format(name)
+        suffixes.append('grad_fn=<{}>'.format(name))
     elif self.requires_grad:
-        suffix += ', requires_grad=True'
+        suffixes.append('requires_grad=True')
 
-    suffix += ')'
-
-    suffix = _maybe_wrap_suffix(suffix, indent, tensor_str)
-
-    return prefix + tensor_str + suffix
+    return _add_suffixes(prefix + tensor_str, suffixes, indent, force_newline=self.is_sparse)

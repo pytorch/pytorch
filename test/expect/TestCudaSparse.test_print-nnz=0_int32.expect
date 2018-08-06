@@ -1,3 +1,0 @@
-tensor(indices=[]
-       values=[],
-       device='cuda:0', size=(200, 200, 3), dtype=torch.int32, layout=torch.sparse_coo)

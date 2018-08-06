@@ -1,2 +1,0 @@
-tensor(indices=[]
-       values=[], size=(200, 200, 3), layout=torch.sparse_coo)
