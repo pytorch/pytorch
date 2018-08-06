@@ -69,13 +69,6 @@ inline void _setup_arrays(Tensor& tensor, Arg* iter) {
     iter->strides_[iter->dim_] = stride;
     iter->dim_++;
   }
-//      std::cout << "tensor: " << tensor << std::endl; 
-//      std::cout << "tensor.strides(): " << tensor.strides() << std::endl; 
-//      std::cout << "tensor.sizes(): " << tensor.sizes() << std::endl; 
-  for (int64_t i = 0; i < iter->dim_; i++) {
-//    std::cout << "iter->sizes_[" << i << "]: "   << iter->sizes_[i] << std::endl;
-//    std::cout << "iter->strides_[" << i << "]: " << iter->strides_[i] << std::endl;
-  }
 }
 
 template <typename T, int N>
@@ -295,12 +288,6 @@ CPU_tensor_parallel_kernel_apply2(Tensor tensor1, Tensor tensor2, const Op op) {
     return;
   }
   if (tensor1.ndimension() < 8 && tensor2.ndimension() < 8) {
-//      std::cout << "tensor1: " << tensor1 << std::endl; 
-//      std::cout << "tensor1.strides(): " << tensor1.strides() << std::endl; 
-//      std::cout << "tensor1.sizes(): " << tensor1.sizes() << std::endl; 
-//      std::cout << "tensor2: " << tensor2 << std::endl; 
-//      std::cout << "tensor2.strides(): " << tensor2.strides() << std::endl; 
-//      std::cout << "tensor2.sizes(): " << tensor2.sizes() << std::endl; 
     parallel_for(
         0,
         tensor1.numel(),
