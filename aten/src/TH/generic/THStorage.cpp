@@ -21,12 +21,7 @@ size_t THStorage_(elementSize)()
 
 THStorage* THStorage_(new)(void)
 {
-  THStorage* storage = new THStorage(
-      at::CTypeToScalarType<th::from_type<real>>::to(),
-      0,
-      getTHDefaultAllocator(),
-      true);
-  return storage;
+  return THStorage_new(at::CTypeToScalarType<th::from_type<real>>::to());
 }
 
 THStorage* THStorage_(newWithSize)(ptrdiff_t size)

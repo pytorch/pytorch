@@ -84,11 +84,11 @@ struct THTensor
       return strides_[d];
     }
 
-    inline at::IntList sizes() {
+    inline at::IntList sizes() const {
       return sizes_;
     }
 
-    inline at::IntList strides() {
+    inline at::IntList strides() const {
       return strides_;
     }
 
@@ -211,5 +211,16 @@ inline void THTensor_stealAndSetStoragePtr(THTensor* tensor, THStorage* storage)
 }
 
 TH_API void THTensor_free(THTensor *self);
+TH_API void THTensor_setStorageNd(THTensor *self, THStorage *storage, ptrdiff_t storageOffset, int nDimension, const int64_t *size, const int64_t *stride);
+TH_API void THTensor_resizeNd(THTensor *self, int nDimension, const int64_t *size, const int64_t *stride);
+
+TH_CPP_API void THTensor_resize(THTensor *self, at::IntList size, at::IntList stride);
+TH_CPP_API void THTensor_setStorage(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_, at::IntList size_, at::IntList stride_);
 TH_CPP_API at::optional<std::vector<int64_t>> THTensor_compute_stride(at::IntList oldshape, at::IntList oldstride,
                                                                       at::IntList newshape);
+
+#include "generic/THTensor.hpp"
+#include "THGenerateAllTypes.h"
+
+#include "generic/THTensor.hpp"
+#include "THGenerateHalfType.h"
