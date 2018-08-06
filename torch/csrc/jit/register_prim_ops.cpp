@@ -310,14 +310,19 @@ RegisterOperators reg({
     };                                                                 \
   }),
 
-// Operators that take two lists and return a bool
-#define DEFINE_LIST_COMPARISON_OP(aten_op, impl_name) \
-  Operator("aten::" #aten_op "(int[] a, int[] b) -> int", impl_name<Shared<IntList>>), \
-  Operator("aten::" #aten_op "(float[] a, float[] b) -> int", impl_name<Shared<DoubleList>>), \
-  Operator("aten::" #aten_op "(Tensor[] a, Tensor[] b) -> int", impl_name<Shared<TensorList>>),
+// Operators that take two lists and reduce them to return a specified type
+#define DEFINE_LIST_BINARY_OP(aten_op, return_type, impl_name) \
+  Operator("aten::" #aten_op "(int[] a, int[] b) -> " #return_type, impl_name<Shared<IntList>>), \
+  Operator("aten::" #aten_op "(float[] a, float[] b) -> " #return_type, impl_name<Shared<DoubleList>>), \
+  Operator("aten::" #aten_op "(Tensor[] a, Tensor[] b) -> " #return_type, impl_name<Shared<TensorList>>),
+
+#define DEFINE_LIST_UNARY_OP(aten_op, return_type, impl_name) \
+  Operator("aten::" #aten_op "(int[] a) -> " #return_type, impl_name<Shared<IntList>>), \
+  Operator("aten::" #aten_op "(float[] a) -> " #return_type, impl_name<Shared<DoubleList>>), \
+  Operator("aten::" #aten_op "(Tensor[] a) -> " #return_type, impl_name<Shared<TensorList>>),
 
 // Operators that take two lists and return a list of the same type
-#define DEFINE_LIST_FUNCTIONAL_OP(aten_op, impl_name) \
+#define DEFINE_LIST_GENERIC_OP(aten_op, impl_name) \
   Operator("aten::" #aten_op "(int[] a, int[] b) -> int[]", impl_name<Shared<IntList>, int64_t>), \
   Operator("aten::" #aten_op "(float[] a, float[] b) -> float[]", impl_name<Shared<DoubleList>, double>), \
   Operator("aten::" #aten_op "(Tensor[] a, Tensor[] b) -> Tensor[]", impl_name<Shared<TensorList>, at::Tensor>),
@@ -334,6 +339,17 @@ Operation listEq(Node* node) {
     } else {
       push(stack, 0);
     }
+    return 0;
+  };
+}
+
+template <typename T>
+Operation listLen(Node* node) {
+  return [=](Stack& stack) {
+    T a;
+    pop(stack, a);
+    const int64_t size = a->elements().size();
+    push(stack, size);
     return 0;
   };
 }
@@ -393,8 +409,11 @@ Operation listAdd(Node* node) {
 RegisterOperators reg2({
     DEFINE_BINARY_OP(aten::add, a + b)
 
-    DEFINE_LIST_COMPARISON_OP(eq, listEq)
-    DEFINE_LIST_FUNCTIONAL_OP(add, listAdd)
+    DEFINE_LIST_BINARY_OP(eq, int, listEq)
+
+		DEFINE_LIST_UNARY_OP(len, int, listLen)
+
+    DEFINE_LIST_GENERIC_OP(add, listAdd)
 
     DEFINE_BINARY_OP(aten::sub, a - b)
     DEFINE_BINARY_OP(aten::mul, a * b)
