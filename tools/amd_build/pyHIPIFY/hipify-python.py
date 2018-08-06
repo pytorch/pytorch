@@ -37,6 +37,7 @@ import ast
 from functools import reduce
 from enum import Enum
 from cuda_to_hip_mappings import CUDA_TO_HIP_MAPPINGS
+from cuda_to_hip_mappings import MATH_TRANSPILATIONS
 
 # Hardcode the PyTorch template map
 """This dictionary provides the mapping from PyTorch kernel template types
@@ -426,21 +427,27 @@ def processKernelLaunches(string, stats):
     return output_string
 
 
-def find_parenthesis_end(input_string, start):
+def find_closure_group(input_string, start, group):
+    """Generalization for finding a balancing closure group
+
+    e.g. if group = ["(", ")"], then finds the first balanced parantheses.
+         if group = ["{", "}"], then finds the first balanced bracket.
+    """
+
     inside_parenthesis = False
     parens = 0
     pos = start
     p_start, p_end = -1, -1
 
     while pos < len(input_string):
-        if input_string[pos] == "(":
+        if input_string[pos] == group[0]:
             if inside_parenthesis is False:
                 inside_parenthesis = True
                 parens = 1
                 p_start = pos
             else:
                 parens += 1
-        elif input_string[pos] == ")" and inside_parenthesis:
+        elif input_string[pos] == group[1] and inside_parenthesis:
             parens -= 1
 
             if parens == 0:
@@ -451,6 +458,16 @@ def find_parenthesis_end(input_string, start):
     return None, None
 
 
+def find_bracket_group(input_string, start):
+    """Finds the first balanced parantheses."""
+    return find_closure_group(input_string, start, group=["{", "}"])
+
+
+def find_parentheses_group(input_string, start):
+    """Finds the first balanced bracket."""
+    return find_closure_group(input_string, start, group=["(", ")"])
+
+
 def disable_asserts(input_string):
     """ Disables regular assert statements
     e.g. "assert(....)" -> "/*assert(....)*/"
@@ -458,7 +475,7 @@ def disable_asserts(input_string):
     output_string = input_string
     asserts = list(re.finditer(r"\bassert[ ]*\(", input_string))
     for assert_item in asserts:
-        p_start, p_end = find_parenthesis_end(input_string, assert_item.end() - 1)
+        p_start, p_end = find_parentheses_group(input_string, assert_item.end() - 1)
         start = assert_item.start()
         output_string = output_string.replace(input_string[start:p_end + 1], "")
     return output_string
@@ -712,6 +729,9 @@ def preprocessor(filepath, stats, hipify_caffe2):
         # Replace std:: with non-std:: versions
         output_source = replace_math_functions(output_source)
 
+        # Replace std:: with non-std:: versions
+        output_source = transpile_device_math(output_source)
+
         # Replace __forceinline__ with inline
         output_source = replace_forceinline(output_source)
 
@@ -886,6 +906,31 @@ def disable_module(input_file):
         f.seek(0)
         f.write(disabled)
         f.truncate()
+
+
+def transpile_device_math(input_string):
+    """ Temporarily replace std:: invocations of math functions with non-std:: versions."""
+    # Extract device code positions
+    get_kernel_definitions = [k for k in re.finditer( r"(template[ ]*<(.*)>\n.*\n?)?(__global__|__device__) void[\n| ](\w+(\(.*\))?)\(", input_string)]
+
+    # Prepare output
+    output_string = input_string
+
+    # Iterate through each kernel definition
+    for kernel in get_kernel_definitions:
+        # Find the final paranthesis that closes this kernel function definition.
+        _, paranth_end = find_bracket_group(input_string, kernel.end() - 1)
+
+        # Replace all std:: math functions within range [start...ending]
+        selection = input_string[kernel.start():paranth_end + 1]
+        selection_transpiled = selection
+        for func in MATH_TRANSPILATIONS:
+            selection_transpiled = selection_transpiled.replace(func, MATH_TRANSPILATIONS[func])
+
+        # Perform replacements inside the output_string
+        output_string = output_string.replace(selection, selection_transpiled)
+
+    return output_string
 
 
 def extract_arguments(start, string):
@@ -1212,7 +1257,8 @@ def main():
                 f.truncate()
 
     all_files = list(matched_files_iter(args.output_directory, includes=args.includes,
-                                        ignores=args.ignores, extensions=args.extensions, hipify_caffe2=args.hipify_caffe2))
+                                        ignores=args.ignores, extensions=args.extensions,
+                                        hipify_caffe2=args.hipify_caffe2))
 
     # Start Preprocessor
     preprocess(
