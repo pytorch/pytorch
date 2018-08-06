@@ -1,5 +1,9 @@
 #include "caffe2/operators/distance_op.h"
 #include "caffe2/utils/eigen_utils.h"
+#ifdef CAFFE2_USE_IDEEP
+#include <caffe2/ideep/operators/operator_fallback_ideep.h>
+#include <caffe2/ideep/utils/ideep_operator.h>
+#endif
 
 namespace caffe2 {
 
@@ -396,6 +400,11 @@ REGISTER_CPU_OPERATOR(L1Distance, L1DistanceOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(
     L1DistanceGradient,
     L1DistanceGradientOp<float, CPUContext>);
+#ifdef CAFFE2_USE_IDEEP
+REGISTER_IDEEP_OPERATOR(
+    L1DistanceGradient,
+    IDEEPFallbackOp<L1DistanceGradientOp<float, CPUContext>>);
+#endif
 
 OPERATOR_SCHEMA(L1Distance)
     .NumInputs(2)
