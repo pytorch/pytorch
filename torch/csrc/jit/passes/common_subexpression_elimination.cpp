@@ -79,6 +79,7 @@ struct HashNodeCSE {
     JIT_ASSERT(k != nullptr);
     return get_hash(k->kind(),
                     k->stage(),
+                    fmap(k->outputs(), [](const Value *v) { return v->type()->kind(); }),
                     fmap(k->inputs(), [](const Value *v) { return v->unique(); }));
   }
 };
@@ -90,6 +91,15 @@ struct EqualNodeCSE {
 
     if (lhs->kind() != rhs->kind()) return false;
     if (lhs->stage() != rhs->stage()) return false;
+
+    // Check whether the output types are the same.
+    auto lhs_outputs = lhs->outputs();
+    auto rhs_outputs = rhs->outputs();
+    if (lhs_outputs.size() != rhs_outputs.size()) return false;
+    for (size_t i = 0; i < lhs_outputs.size(); ++i) {
+      if (*lhs_outputs[i]->type() != *rhs_outputs[i]->type())
+        return false;
+    }
 
     // Check whether the inputs are the same.
     auto lhs_inputs = lhs->inputs();
