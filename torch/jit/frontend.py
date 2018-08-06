@@ -149,7 +149,7 @@ def build_def(ctx, py_def, type_line=None):
                        py_def.col_offset + len("def"))
     param_list = build_param_list(ctx, py_def.args)
     return_type = None
-    if getattr(py_def, 'returns') is not None:
+    if getattr(py_def, 'returns', None) is not None:
         return_type = build_expr(ctx, py_def.returns)
     decl = Decl(r, param_list, return_type)
     if type_line is not None:
