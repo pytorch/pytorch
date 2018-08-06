@@ -179,8 +179,8 @@ AT_ERROR("gesv: MAGMA library not found in "
   int info;
   int* ipiv;
 
-  at::optional<Tensor> temp_sol;
-  at::optional<Tensor> temp_lu;
+  at::optional<Tensor> temp_sol = at::nullopt;
+  at::optional<Tensor> temp_lu = at::nullopt;
 
   /* Init to column major format. See Gesv.cpp for more comments */
 
@@ -190,13 +190,10 @@ AT_ERROR("gesv: MAGMA library not found in "
   } else if (sol.dim() == 2 &&
              sol.size(0) == bx &&
              sol.size(1) == by) {
-    temp_sol = self.type().tensor();
+    temp_sol = self.view({bx, by}).t().clone();
   }
 
-  if (temp_sol) {
-    temp_sol.value().resize_({by, bx});
-    temp_sol.value().copy_(self.view({bx, by}).t());
-  } else {
+  if (!temp_sol) {
     sol.resize_({by, bx});
     if (&self == &sol) {
       if (!tc) {
@@ -213,13 +210,10 @@ AT_ERROR("gesv: MAGMA library not found in "
   } else if (lu.dim() == 2 &&
              lu.size(0) == ax &&
              lu.size(1) == ay) {
-    temp_lu = self.type().tensor();
+    temp_lu = A.t().clone();
   }
 
-  if (temp_lu) {
-    temp_lu.value().resize_({ay, ax});
-    temp_lu.value().copy_(A.t());
-  } else {
+  if (!temp_lu) {
     lu.resize_({ay, ax});
     if (&A == &lu) {
       if (!tc) {
