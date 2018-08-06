@@ -69,6 +69,44 @@ template <typename scalar_t>
     return std::tuple<Tensor, Tensor>(output, inverse_indices);
 
   }
+
+template <typename scalar_t>
+  std::tuple<Tensor, Tensor> _unique_dim_cuda_template(
+    const Tensor& self,
+    const int64_t dim,
+    const bool return_inverse) {
+    cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+    auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
+    auto policy = thrust::cuda::par(allocator).on(stream);
+
+    const Tensor& input = self.contiguous();
+    int64_t num_inp = input.numel();
+    const scalar_t* input_data = input.data<scalar_t>();
+
+    //sort & unique
+    Tensor output = input.clone();
+    output = output.view(-1);
+    scalar_t* output_data = output.data<scalar_t>();
+    thrust::sort(policy, output_data, output_data + num_inp);
+    scalar_t* output_end = thrust::unique(policy, output_data, output_data + num_inp);
+    int64_t num_out = output_end - output_data;
+    output.resize_(num_out);
+
+    Tensor inverse_indices = at::empty({0}, self.type().toScalarType(kLong));
+
+    if (return_inverse) {
+      inverse_indices.resize_(input.sizes());
+      int64_t* inverse_indices_data = inverse_indices.data<int64_t>();
+      int block = 512;
+      int grid = std::min<int64_t>((num_inp * num_out + block - 1) / block, 2048L);
+      inverse_indices_kernel<<<grid, block, 0, stream>>>(
+        input_data, output_data, inverse_indices_data, num_inp, num_out);
+    }
+
+    THCudaCheck(cudaGetLastError());  
+    return std::tuple<Tensor, Tensor>(output, inverse_indices);
+  }
+
 } // namespace
 
 #endif
@@ -84,6 +122,17 @@ _unique_cuda(const Tensor& self, const bool sorted, const bool return_inverse) {
 #else
   AT_ERROR("unique_cuda: HIP not supported");
 #endif
+}
+
+std::tuple<Tensor, Tensor>
+_unique_dim_cuda(const Tensor& self, const int64_t dim, const bool sorted, const bool return_inverse) {
+  #ifndef __HIP_PLATFORM_HCC__
+    return AT_DISPATCH_ALL_TYPES(self.type(), "unique_dim", [&] {
+      return _unique_dim_cuda_template<scalar_t>(self, dim, return_inverse);
+    });
+  #else
+    AT_ERROR("unique_dim_cuda: HIP not supported");
+  #endif
 }
 
 }  // namespace native

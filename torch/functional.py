@@ -314,7 +314,7 @@ def isnan(tensor):
     return tensor != tensor
 
 
-def unique(input, sorted=False, return_inverse=False):
+def unique(input, sorted=False, return_inverse=False, dim=None):
     r"""Returns the unique scalar elements of the input tensor as a 1-D tensor.
 
     Arguments:
@@ -356,11 +356,19 @@ def unique(input, sorted=False, return_inverse=False):
                 [ 1,  2]])
 
     """
-    output, inverse_indices = torch._unique(
-        input,
-        sorted=sorted,
-        return_inverse=return_inverse,
-    )
+    if dim is not None:
+        output, inverse_indices = torch._unique_dim(
+            input,
+            dim,
+            sorted=sorted,
+            return_inverse=return_inverse
+        )
+    else:
+        output, inverse_indices = torch._unique(
+            input,
+            sorted=sorted,
+            return_inverse=return_inverse,
+        )
     if return_inverse:
         return output, inverse_indices
     else:
