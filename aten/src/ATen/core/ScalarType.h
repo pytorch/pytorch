@@ -114,10 +114,10 @@ struct Tensor;
 typedef ArrayRef<int64_t> IntList;
 typedef ArrayRef<Tensor> TensorList;
 
-} // namespace at
-
 inline std::ostream& operator<<(
     std::ostream& stream,
     at::ScalarType scalar_type) {
   return stream << at::toString(scalar_type);
 }
+
+} // namespace at
