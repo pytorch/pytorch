@@ -1609,6 +1609,8 @@ class TestNN(NNTestCase):
         test('softmax', 0)
         test('log_softmax', 0)
         test('leaky_relu', 0.2)
+        test('threshold', 3, 2)
+        test('threshold', 3, 2, inplace=True)
 
     def test_nonlinearity_propagate_nan(self):
         self._test_nonlinearity_propagate_nan('cpu')
