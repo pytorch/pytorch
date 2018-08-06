@@ -342,7 +342,7 @@ THCTensor_(minall)(THCState *state, THCTensor *self) {
   if (!THC_reduceAll<real>(state, self,
                            thrust::identity<accreal>{},
                            ReduceMin<accreal>{},
-                           THCNumerics<accreal>::max(), &val, 0)) {
+                           THCNumerics<accreal>::inf(), &val, 0)) {
     THArgCheck(false, 1, CUTORCH_DIM_WARNING);
   }
 
@@ -357,7 +357,7 @@ THCTensor_(maxall)(THCState *state, THCTensor *self) {
   if (!THC_reduceAll<real>(state, self,
                            thrust::identity<accreal>{},
                            ReduceMax<accreal>{},
-                           THCNumerics<accreal>::min(), &val, 0)) {
+                           THCNumerics<accreal>::neg(THCNumerics<accreal>::inf()), &val, 0)) {
     THArgCheck(false, 1, CUTORCH_DIM_WARNING);
   }
 
@@ -450,7 +450,7 @@ THCTensor_(max)(THCState *state,
   thrust::pair<real, int64_t>
     init =
     thrust::make_pair<real, int64_t>(
-      THCNumerics<real>::min(), 0);
+      THCNumerics<real>::neg(THCNumerics<real>::inf()), 0);
 
   return THC_reduceDimIndex<real, int64_t>(
     state, values, indices, src, dimension, keepdim, init,
@@ -469,7 +469,7 @@ THCTensor_(min)(THCState *state,
   thrust::pair<real, int64_t>
     init =
     thrust::make_pair<real, int64_t>(
-      THCNumerics<real>::max(), 0);
+      THCNumerics<real>::inf(), 0);
 
   return THC_reduceDimIndex<real, int64_t>(
     state, values, indices, src, dimension, keepdim, init,

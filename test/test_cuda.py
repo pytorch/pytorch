@@ -1621,6 +1621,12 @@ class TestCuda(TestCase):
         _, v = y.min(dim=0)
         self.assertEqual(v, expected)
 
+    def test_max_with_inf(self):
+        TestTorch._test_max_with_inf(self, lambda x: x.cuda())
+
+    def test_min_with_inf(self):
+        TestTorch._test_min_with_inf(self, lambda x: x.cuda())
+
     def test_int_pow(self):
         TestTorch._test_int_pow(self, lambda x: x.cuda())
 
