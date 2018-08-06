@@ -1380,7 +1380,7 @@ private:
         auto values = getValues(ll.inputs(), /*maybe_unpack=*/true, identity);
         if (values.size() == 0) {
           throw ErrorReport(tree) << "Empty list literals not allowed. "
-                                  << "Use _constructEmptyFooList() instead";
+                                  << "Use _construct_empty_FOO_list() instead";
         }
         const auto elem_type = values.at(0)->type();
         for (auto v : values) {
