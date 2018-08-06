@@ -52,7 +52,6 @@ ROCM_BLACKLIST = [
     'multiprocessing',
     'nccl',
     'nn',
-    'optim',
     'sparse',
     'torch',
     'utils',
