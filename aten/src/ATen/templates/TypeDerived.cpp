@@ -97,7 +97,7 @@ Tensor ${Type}::unsafeTensorFromTH(void * th_pointer, bool retain) const {
   if (retain)
     ${THTensor}_retain(${state,} (${THTensor}*) th_pointer);
   return Tensor(new TensorImpl(Backend::${Backend}, ScalarType::${ScalarName},
-        (${THTensor}*)(th_pointer)), false);
+        (${THTensor}*)(th_pointer), false), false);
 }
 std::unique_ptr<Storage> ${Type}::unsafeStorageFromTH(void * th_pointer, bool retain) const {
   if (retain)
