@@ -486,10 +486,9 @@ bool THC_reduceDim(THCState* state,
       state, out, THCTensor_nDimensionLegacyAll(state, in), dim, keepdim);
 
   // Resize out
-  THLongStorage* sizes = THCTensor_newSizeOf(state, in);
-  THLongStorage_set(sizes, dim, 1);
-  THCTensor_resize(state, out, sizes, NULL);
-  THLongStorage_free(sizes);
+  std::vector<int64_t> sizes = in->sizes().vec();
+  sizes[dim] = 1;
+  THCTensor_resize(state, out, sizes, {});
 
   // It is possible that the tensor dimensions are able to be collapsed,
   // and thus we can reduce the actual code complexity of the copy by
