@@ -119,18 +119,18 @@ void EliminateCommonSubexpression(Block * block,
       continue;
     }
 
-    if (node->blocks().size()) {
+    if (!node->blocks().empty()) {
       // Traverse sub-blocks.
       for (auto block : node->blocks()) {
         EliminateCommonSubexpression(block,
-        [&](Node *n) {
-          auto existing = subexprs.find(n);
-          if (existing != subexprs.end()) {
-            return *existing;
-          }
+          [&](Node *n) {
+            auto existing = subexprs.find(n);
+            if (existing != subexprs.end()) {
+              return *existing;
+            }
 
-          return parent_lookup_fn(n);
-        });
+            return parent_lookup_fn(n);
+          });
       }
 
       continue;
