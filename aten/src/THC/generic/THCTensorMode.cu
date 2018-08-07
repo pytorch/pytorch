@@ -183,7 +183,7 @@ THC_API void THCTensor_(mode)(THCState *state,
       state, values, ndim, dimension, keepdim);
   THCTensor_preserveReduceDimSemantics(
       state, indices, ndim, dimension, keepdim);
-  std::vector<int64_t> dim = input->sizes().vec();
+  std::vector<int64_t> dim = THTensor_sizesLegacyNoScalars(input);
   dim[dimension] = 1;
   THCTensor_(resize)(state, values, dim, {});
   THCudaLongTensor_resize(state, indices, dim, {});

@@ -535,7 +535,7 @@ void THCTensor_(indexSelect)(THCState *state, THCTensor *dst, THCTensor *src, in
   THArgCheck(dim < srcDims, 4, "Indexing dim is out of bounds");
   THArgCheck(srcDims > 0, 2, "Source tensor is empty");
 
-  std::vector<int64_t> newSize = src->sizes().vec();
+  std::vector<int64_t> newSize = THTensor_sizesLegacyNoScalars(src);
   newSize[dim] = numIndices;
   THCTensor_(resize)(state, dst, newSize, {});
 
