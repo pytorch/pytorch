@@ -1131,7 +1131,7 @@ public:
     return oss.str();
   }
 
-  friend std::ostream& operator<<(std::ostream & out, const Graph & g);
+  friend TORCH_API std::ostream& operator<<(std::ostream & out, const Graph & g);
   TORCH_API std::shared_ptr<Graph> copy();
 
 private:
