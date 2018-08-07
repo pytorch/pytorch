@@ -338,6 +338,13 @@ static void validate_outputs(const edge_list& edges, variable_list& grads, const
       ss << metadata.type() << " but got " << grads[i].type();
       throw std::runtime_error(format_error(ss.str()));
     }
+    const auto output_device = output.is_cuda() ? output.get_device() : -1;
+    if (output_device != metadata.device()) {
+      std::stringstream ss;
+      ss << "invalid gradient at index " << i << " - expected device ";
+      ss << metadata.device() << " but got " << output_device;
+      throw std::runtime_error(format_error(ss.str()));
+    }
   }
 }
 

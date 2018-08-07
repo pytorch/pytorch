@@ -124,7 +124,7 @@ def handle_outputs_taken_as_arguments(options):
 
 def sanitize_return(option):
     ret = option['return']
-    m = re.match('argument (\d+(,\d+)*)', ret)
+    m = re.match(r'argument (\d+(,\d+)*)', ret)
     if m is not None:
         arguments = [int(x) for x in m.group(1).split(',')]
         option['return'] = {'kind': 'arguments', 'arguments': arguments}
