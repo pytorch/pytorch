@@ -98,15 +98,10 @@ void THCTensor_resizeAs(THCState *state, THCTensor *self, THCTensor *src) {
 
 void THCTensor_resizeNd(THCState *state, THCTensor *self, int nDimension, const int64_t *size, const int64_t *stride)
 {
+  AT_CHECK(nDimension >= 0, "resizeNd nDimension must be non-negative");
   int d;
   ptrdiff_t totalSize;
   bool hascorrectsize = true;
-
-#ifndef USE_TH_SCALAR
-  AT_CHECK(nDimension > 0, "resizeNd nDimension must be greater than 0");
-#else
-  AT_CHECK(nDimension >= 0, "resizeNd nDimension must be non-negative");
-#endif
 
   for(d = 0; d < nDimension; d++)
   {
@@ -228,11 +223,7 @@ void THCTensor_squeeze1d(THCState *state, THCTensor *self, THCTensor *src, int d
 
   THCTensor_set(state, self, src);
 
-#ifdef TH_SCALAR
   if(src->size(dimension) == 1)
-#else
-  if(src->size(dimension) == 1 && src->dim() > 1)
-#endif
   {
     for(d = dimension; d < self->dim()-1; d++)
     {
