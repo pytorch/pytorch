@@ -27,6 +27,8 @@
 #include <caffe2/operators/utility_ops.h>
 #include <caffe2/sgd/iter_op.h>
 #include <caffe2/sgd/learning_rate_op.h>
+#include <caffe2/operators/ctc_greedy_decoder_op.h>
+#include <caffe2/operators/ctc_beam_search_decoder_op.h>
 
 // can add more non-IDEEP operators if needed
 namespace caffe2 {
@@ -115,7 +117,7 @@ REGISTER_IDEEP_OPERATOR(
 REGISTER_IDEEP_OPERATOR(
     PRelu,
     IDEEPFallbackOp<PReluOp<float, CPUContext>>);
-  
+
 // ctc decoder operators
 REGISTER_IDEEP_OPERATOR(
     CTCGreedyDecoder,
