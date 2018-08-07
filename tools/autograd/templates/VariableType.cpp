@@ -13,6 +13,7 @@
 #include "torch/csrc/jit/tracer.h"
 #include "torch/csrc/jit/constants.h"
 #include "torch/csrc/jit/symbolic_variable.h"
+#include "torch/csrc/jit/ir.h"
 
 #include "torch/csrc/utils/variadic.h"
 #include "torch/csrc/autograd/functions/utils.h"
@@ -343,7 +344,7 @@ static void throw_error_out_requires_grad(const char* name) {
 
 static void rebase_history(Variable& var, std::shared_ptr<Function> grad_fn) {
   if (grad_fn && var.defined()) {
-    grad_fn->add_input_metadata(var.type(), var.sizes());
+    grad_fn->add_input_metadata(var);
     var.rebase_history({std::move(grad_fn), 0});
   }
 }
@@ -353,7 +354,7 @@ static void rebase_history(ArrayRef<Variable> vars, std::shared_ptr<Function> gr
     for (auto& var : vars) {
       if (var.defined()) {
         // TODO: eliminate const_cast
-        auto output_nr = grad_fn->add_input_metadata(var.type(), var.sizes());
+        auto output_nr = grad_fn->add_input_metadata(var);
         const_cast<Variable&>(var).rebase_history({grad_fn, output_nr});
       } else {
         grad_fn->add_input_metadata(Function::undefined_input());
