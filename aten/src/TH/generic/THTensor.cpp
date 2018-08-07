@@ -327,9 +327,7 @@ void THTensor_(select)(THTensor *self, THTensor *src, int dimension, int64_t sli
   if(!src)
     src = self;
 
-#ifndef USE_TH_SCALAR
-  THArgCheck(src->dim() > 1, 1, "cannot select on a vector");
-#endif
+  THArgCheck(src->dim() > 0, 1, "cannot select on a 0-dim tensor");
   THArgCheck((dimension >= 0) && (dimension < src->dim()), 2, "out of range");
   THArgCheck((sliceIndex >= 0) && (sliceIndex < src->size(dimension)), 3, "out of range");
 
@@ -426,15 +424,6 @@ void THTensor_(squeeze)(THTensor *self, THTensor *src)
     }
   }
 
-#ifndef USE_TH_SCALAR
-  /* right now, we do not handle 0-dimension tensors */
-  if(ndim == 0 && src->dim() > 0)
-  {
-    THTensor_setSizeAtDim(self, 0, 1);
-    THTensor_setStrideAtDim(self, 0, 1);
-    ndim = 1;
-  }
-#endif
   THTensor_resizeDim(self, ndim);
 }
 
@@ -449,11 +438,7 @@ void THTensor_(squeeze1d)(THTensor *self, THTensor *src, int dimension)
 
   THTensor_(set)(self, src);
 
-#ifdef USE_TH_SCALAR
   if(src->size(dimension) == 1)
-#else
-  if(src->size(dimension) == 1 && src->dim() > 1)
-#endif
   {
     for(d = dimension; d < self->dim()-1; d++)
     {
