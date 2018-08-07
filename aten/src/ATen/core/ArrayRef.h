@@ -100,10 +100,6 @@ class ArrayRef final {
   /// @}
   /// @name Simple Operations
   /// @{
-  void reset(const std::initializer_list<T>& Vec) {
-    Data = Vec.begin() == Vec.end() ? static_cast<T*>(nullptr) : Vec.begin();
-    Length = Vec.size();
-  }
 
   constexpr iterator begin() const {
     return Data;

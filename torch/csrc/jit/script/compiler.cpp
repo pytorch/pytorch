@@ -1436,17 +1436,19 @@ private:
     NamedValue step = NamedValue(loc, "step", graph->insertConstant(1, loc));
 
     const auto has_end = slice.end().present();
-    at::ArrayRef<NamedValue> input_args = {tensor, dim, begin};
     if (has_end) {
       // If the user specified an `end` index, pass it down
       NamedValue end =
           NamedValue(loc, "end", emitExpr(Expr(slice.end().get()), identity));
-      input_args.reset({tensor, dim, begin, end});
+      return emitBuiltinCall(
+                 loc, method, "slice", {tensor, dim, begin, end}, {step}, true)
+          ->asValue(loc, method);
+    } else {
+      // Otherwise rely on the schema default argument
+      return emitBuiltinCall(
+                 loc, method, "slice", {tensor, dim, begin}, {step}, true)
+          ->asValue(loc, method);
     }
-
-    // Otherwise rely on the schema default argument
-    return emitBuiltinCall(loc, method, "slice", input_args, {step}, true)
-        ->asValue(loc, method);
   }
 
   // Desugars gather syntactic sugar tensor[idx] -> tensor.select(idx).
