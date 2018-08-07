@@ -1284,14 +1284,15 @@ Returns:
     (Tensor, Tensor): A tuple containing
 
         - **e** (*Tensor*): Shape :math:`(n \times 2)`. Each row is an eigenvalue of ``a``,
-            with the first element is the real part and the second element is the imanginary part.
+            where the first element is the real part and the second element is the imaginary part.
             The eigenvalues are not necessarily ordered.
         - **v** (*Tensor*): If ``eigenvectors=False``, it's an empty tensor.
-            Otherwise this tensor of shape :math:`(n \times n)`, contains normalized (unit “length”) eigenvector info,
-            in the same order of their eigenvalues in ``e``.
+            Otherwise, this tensor of shape :math:`(n \times n)` can be used to compute normalized (unit length)
+            eigenvectors of corresponding eigenvalues ``e`` as follows.
             If the corresponding e[j] is a real number, column v[:, j] is the eigenvector corresponding to
             eigenvalue e[j].
-            If the corresponding e[j] and e[j + 1] eigenvalues form a complex conjugate pair, then the true
+            If the corresponding e[j] and e[j + 1] eigenvalues form a complex conjugate pair, then the true eigenvectors
+            can be computed as
             :math:`eigenvector[j] = v[:, j] + i * v[:, j + 1], eigenvector[j + 1] = v[:, j] - i * v[:, j + 1]`.
 """)
 
