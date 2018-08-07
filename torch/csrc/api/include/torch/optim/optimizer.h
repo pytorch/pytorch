@@ -4,6 +4,7 @@
 #include <torch/nn/cursor.h>
 #include <torch/tensor.h>
 
+#include <algorithm>
 #include <functional>
 #include <memory>
 #include <vector>
@@ -64,6 +65,18 @@ class OptimizerBase {
     return result;
   }
 
+  /// Accesses a buffer at the given index.
+  /// Additionally, zeros out the buffers when this is called on the index
+  template<typename T>
+  T& buffer_at(std::vector<T>& buffers, size_t index) {
+    if (buffers.size() <= index) {
+      const auto old_size = buffers.size();
+      buffers.resize(index + 1);
+      std::fill(buffers.begin() + old_size, buffers.end(), T{0});
+    }
+    return buffers[index];
+  }
+
   /// Accesses a buffer at the given index, converts it to the type of the
   /// parameter at the corresponding index (a no-op if they match).
   /// Additionally, zeros out the buffers when this is called on the index
@@ -73,23 +86,12 @@ class OptimizerBase {
         buffers.push_back(torch::zeros_like(parameters_.at(i)));
       }
     }
+    // Copy the buffer to the device and dtype of the parameter.
     const auto& parameter = parameters_.at(index);
     const auto& buffer = buffers.at(index);
     if (buffer.device() != parameter.device() ||
         buffer.dtype() != parameter.dtype()) {
       buffers[index] = buffer.to(parameter.device(), parameter.dtype());
-    }
-    return buffers[index];
-  }
-
-  /// Accesses a buffer at the given index. 
-  /// Additionally, zeros out the buffers when this is called on the index
-  /// TODO: Make this templated on numeric types!
-  int64_t& buffer_at(std::vector<int64_t>& buffers, size_t index) {
-    if (buffers.size() <= index) {
-      for (auto i = buffers.size(); i <= index; i++) {
-        buffers.push_back(0);
-      }
     }
     return buffers[index];
   }
