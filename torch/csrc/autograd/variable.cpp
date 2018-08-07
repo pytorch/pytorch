@@ -130,9 +130,6 @@ void Variable::Impl::set_data(Tensor new_data) {
   }
   
   // Updates metadata
-  scalar_type_ = new_data.type().scalarType();
-  backend_ = new_data.type().backend();
-  is_variable_ = true;
   data_ = std::move(new_data);
 }
 

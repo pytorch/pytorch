@@ -22,13 +22,8 @@ struct AT_API TensorImpl : public Retainable {
       Backend backend,
       ScalarType scalar_type,
       THTensor* tensor,
-      bool is_variable)
-      : tensor(tensor) {
-    tensor->is_variable_ = is_variable;
-    tensor->backend_ = backend;
-    tensor->scalar_type_ = scalar_type;
-  }
-  TensorImpl(Backend backend, ScalarType scalar_type);
+      bool is_variable);
+  TensorImpl(Backend backend, ScalarType scalar_type, bool is_variable);
 
   virtual ~TensorImpl();
 
@@ -67,13 +62,8 @@ struct AT_API TensorImpl : public Retainable {
   // mixed-type operations if there are any Tensors that are not wrapped
   // numbers. Otherwise, they behave like their non-wrapped equivalents.
   // See [Result type computation] in TensorIterator.h.
-  bool is_wrapped_number() const {
-    return is_wrapped_number_;
-  }
-  void set_wrapped_number(bool value) {
-    AT_ASSERT(dim() == 0);
-    is_wrapped_number_ = value;
-  }
+  bool is_wrapped_number() const;
+  void set_wrapped_number(bool value);
 
   // ~~~~~ Autograd API ~~~~~
   // Some methods below are defined in TensorImpl.cpp because Tensor is an

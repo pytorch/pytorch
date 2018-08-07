@@ -8,6 +8,7 @@
 
 #include <atomic>
 #include <ATen/ATen.h>
+// #include <ATen/ScalarType.h>
 
 struct THTensor
 {
@@ -20,10 +21,10 @@ struct THTensor
       , is_zero_dim_(false)
       {}
 
-    Backend backend_;
+    at::Backend backend_;
     // INVARIANT: When storage is non-null, this scalar type must
     // agree with the scalar type in storage
-    ScalarType scalar_type_;
+    at::ScalarType scalar_type_;
     bool is_variable_ = false;
     bool is_wrapped_number_ = false;
 
