@@ -348,7 +348,7 @@ endif()
 if(USE_ROCM)
   # Call again since Caffe2_HIP_INCLUDES is extended with ATen include dirs.
   if(BUILD_ATEN)
-    # Get Compile Definitions from the directory (FindHIP.CMake bug)
+    # Get Compile Definitions from the directory (FindHIP.cmake bug)
     get_directory_property(MY_DEFINITIONS COMPILE_DEFINITIONS)
     if(MY_DEFINITIONS)
       foreach(_item ${MY_DEFINITIONS})
