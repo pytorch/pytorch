@@ -57,12 +57,13 @@ void Tensor::backward(
 }
 
 TensorImpl::TensorImpl(Backend backend, ScalarType scalar_type, bool is_variable) {
-  tensor->backend_ = backend;
-  tensor->scalar_type_ = scalar_type;
   auto type = &globalContext().getType(backend, scalar_type);
   Storage* storage = type->storage(true).release();
   StorageImpl* storage_impl = storage->pImpl();
   tensor = new THTensor(storage_impl);
+  tensor->backend_ = backend;
+  tensor->scalar_type_ = scalar_type;
+  tensor->is_variable_ = is_variable;
 }
 
 TensorImpl::TensorImpl(

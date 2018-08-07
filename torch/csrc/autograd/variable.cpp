@@ -117,6 +117,7 @@ void Variable::Impl::backward(
 }
 
 void Variable::Impl::set_data(Tensor new_data) {
+<<<<<<< HEAD
   // Resets gradient accumulator if metadata is out of date
   std::lock_guard<std::mutex> lock(mutex_);
   auto prior_accumulator = grad_accumulator_.lock();
