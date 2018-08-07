@@ -64,6 +64,10 @@ using std::vector;
 #define CAFFE2_USED __attribute__((__used__))
 #endif //_MSC_VER
 
+#ifndef DISABLE_COPY_AND_ASSIGN
+#define DISABLE_COPY_AND_ASSIGN(classname) AT_DISABLE_COPY_AND_ASSIGN(classname)
+#endif
+
 // Define enabled when building for iOS or Android devices
 #if !defined(CAFFE2_MOBILE)
 #if defined(__ANDROID__)
