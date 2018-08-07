@@ -38,9 +38,10 @@ export MAX_JOBS=2
 export IMAGE_COMMIT_TAG=${BUILD_ENVIRONMENT}-${IMAGE_COMMIT_ID}
 
 # Download torch binaries in the test jobs
-rm -rf ${PYTORCH_ENV_DIR}/miniconda3/lib/python3.6/site-packages/torch*
-aws s3 cp s3://ossci-macos-build/pytorch/${IMAGE_COMMIT_TAG}.7z ${IMAGE_COMMIT_TAG}.7z
-7z x ${IMAGE_COMMIT_TAG}.7z -o"${PYTORCH_ENV_DIR}/miniconda3/lib/python3.6/site-packages"
+# NOTE: we don't need to download binaries from S3 in CircleCI
+# rm -rf ${PYTORCH_ENV_DIR}/miniconda3/lib/python3.6/site-packages/torch*
+# aws s3 cp s3://ossci-macos-build/pytorch/${IMAGE_COMMIT_TAG}.7z ${IMAGE_COMMIT_TAG}.7z
+# 7z x ${IMAGE_COMMIT_TAG}.7z -o"${PYTORCH_ENV_DIR}/miniconda3/lib/python3.6/site-packages"
 
 test_python_all() {
   echo "Ninja version: $(ninja --version)"

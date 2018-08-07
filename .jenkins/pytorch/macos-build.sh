@@ -62,5 +62,6 @@ mkdir -p ${PYTORCH_ENV_DIR}/miniconda3/lib/python3.6/site-packages/torch/test_bi
 mv build/{bin,lib} ${PYTORCH_ENV_DIR}/miniconda3/lib/python3.6/site-packages/torch/test_binaries/build/
 
 # Upload torch binaries when the build job is finished
-7z a ${IMAGE_COMMIT_TAG}.7z ${PYTORCH_ENV_DIR}/miniconda3/lib/python3.6/site-packages/torch*
-aws s3 cp ${IMAGE_COMMIT_TAG}.7z s3://ossci-macos-build/pytorch/${IMAGE_COMMIT_TAG}.7z --acl public-read
+# NOTE: we don't need to upload binaries to S3 in CircleCI
+# 7z a ${IMAGE_COMMIT_TAG}.7z ${PYTORCH_ENV_DIR}/miniconda3/lib/python3.6/site-packages/torch*
+# aws s3 cp ${IMAGE_COMMIT_TAG}.7z s3://ossci-macos-build/pytorch/${IMAGE_COMMIT_TAG}.7z --acl public-read

@@ -80,7 +80,7 @@ jobs:
           echo "mkdir -p /opt/conda/lib/python3.6/site-packages" | docker exec -u jenkins -i "$id" bash
           docker cp "/opt/workspace" "$id:/opt/conda/lib/python3.6/site-packages/torch"
           (echo "export SCCACHE_BUCKET=$SCCACHE_BUCKET" && echo 'sudo chown -R jenkins workspace /opt/conda/lib/python3.6/site-packages/torch && cd workspace && git submodule update --init && .jenkins/pytorch/test.sh') | docker exec -u jenkins -i "$id" bash
-  macos_10_13_py3:
+  macos_10_13_py3_build:
     macos:
       xcode: "9.0"
     steps:
@@ -89,13 +89,28 @@ jobs:
           name: Build
           command: |
             set -ex
-            brew install p7zip
-            echo "HOME: " ${HOME} # yf225 debug: see where HOME is
             export SCCACHE_BUCKET=ossci-compiler-cache
             export BUILD_ENVIRONMENT=pytorch-macos-10.13-py3
             git submodule update --init
             chmod a+x .jenkins/pytorch/macos-build.sh
             .jenkins/pytorch/macos-build.sh
+      - persist_to_workspace:
+          root: /Users/distiller/pytorch-ci-env/miniconda3/lib/python3.6/site-packages/torch
+          paths:
+            - "*"
+  macos_10_13_py3_test:
+    macos:
+      xcode: "9.0"
+    steps:
+      - checkout
+      - run:
+          name: Build
+          command: |
+            set -ex
+            export BUILD_ENVIRONMENT=pytorch-macos-10.13-py3
+            git submodule update --init
+            chmod a+x .jenkins/pytorch/macos-test.sh
+            .jenkins/pytorch/macos-test.sh
 workflows:
   version: 2
   build:
@@ -105,4 +120,7 @@ workflows:
       - linux_xenial_cuda9_2_cudnn7_py3_gcc7_test:
           requires:
             - linux_xenial_cuda9_2_cudnn7_py3_gcc7_build
-      - macos_10_13_py3
+      - macos_10_13_py3_build
+      - macos_10_13_py3_test:
+          requires:
+            - macos_10_13_py3_build
