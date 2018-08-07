@@ -180,14 +180,6 @@ fi
 # Use a speciallized onnx namespace in CI to catch hardcoded onnx namespace
 CMAKE_ARGS+=("-DONNX_NAMESPACE=ONNX_NAMESPACE_FOR_C2_CI")
 
-if [[ -n "$INTEGRATED" ]]; then
-    # TODO: This is a temporary hack to work around the issue that both
-    # caffe2 and pytorch have libcaffe2.so and crossfire at runtime.
-    CMAKE_ARGS+=("-DBUILD_SHARED_LIBS=OFF")
-    CMAKE_ARGS+=("-DBUILD_CUSTOM_PROTOBUF=OFF")
-    CMAKE_ARGS+=("-DCAFFE2_LINK_LOCAL_PROTOBUF=OFF")
-fi
-
 # We test the presence of cmake3 (for platforms like Centos and Ubuntu 14.04)
 # and use that if so.
 if [[ -x "$(command -v cmake3)" ]]; then
