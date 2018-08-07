@@ -305,13 +305,22 @@ class Tensor(torch._C._TensorBase):
     def masked_fill(self, mask, value):
         return self.clone().masked_fill_(mask, value)
 
-    def unique(self, sorted=False, return_inverse=False):
+    def unique(self, sorted=False, return_inverse=False, dim=None):
         r"""Returns the unique scalar elements of the tensor as a 1-D tensor.
 
         See :func:`torch.unique`
         """
-        output, inverse_indices = self._unique(
-            sorted=sorted, return_inverse=return_inverse)
+        if dim is not None:
+            output, inverse_indices = self._unique_dim(
+                sorted=sorted,
+                return_inverse=return_inverse,
+                dim=dim
+            )
+        else:
+            output, inverse_indices = self._unique(
+                sorted=sorted,
+                return_inverse=return_inverse
+            )
         if return_inverse:
             return output, inverse_indices
         else:

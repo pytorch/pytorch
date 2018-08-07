@@ -79,6 +79,51 @@ template <typename scalar_t>
     auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
     auto policy = thrust::cuda::par(allocator).on(stream);
 
+    // Tensor input_flat = self.transpose(dim, 0);
+    // std::vector<int64_t> orig_sizes(input_flat.sizes().begin(), input_flat.sizes().end());
+
+    // // unbind to use in thrust::sort
+    // std::vector<Tensor> input_unbind = at::unbind(input_flat, 0);
+    // thrust::sort(policy, input_unbind.begin(), input_unbind.end(),
+    //   [] __device__ (const Tensor& lhs, const Tensor& rhs) -> bool {
+    //     // compare to lexicographical sort
+    //     for (int i = 0; i < lhs.numel(); ++i) {
+    //       if (lhs[i].toCFloat() < rhs[i].toCFloat()) {
+    //         return true;
+    //       }
+    //       else if (lhs[i].toCFloat() > rhs[i].toCFloat()) {
+    //         return false;
+    //       }
+    //     }
+    //     return false;
+    //   });
+    
+    // auto last = thrust::unique(policy, input_unbind.begin(), input_unbind.end(),
+    //   [] __device __ (const Tensor& a, const Tensor& b) -> bool {
+    //     return at::equal(a, b);
+    // });
+    // input_unbind.erase(last, input_unbind.end());
+
+    // // reshape back
+    // auto output_dim = at::stack(input_unbind, 0);
+    // std::vector<int64_t> new_sizes(orig_sizes.begin(), orig_sizes.end());
+    // new_sizes[0] = -1;
+    // output_dim = output_dim.view(new_sizes);
+    // output_dim = output_dim.transpose(0, dim);
+
+    // Tensor inverse_indices_dim = at::empty({0}, self.type(.toScalarType(kLong)));
+    // int64_t size = self.size(dim);
+    // inverse_indices_dim.resize_(size);
+    // std::vector<Tensor> self_unbind = at::unbind(self, dim);
+    // std::vector<Tensor> output_unbind = at::unbind(output_dim,, dim);
+    // for (int i = 0; i < self_unbind.size(); ++i) {
+    //   for (int j = 0; j < output_unbind.size(); ++j) {
+    //     if (at::equal(self.unbind[i], output_unbind[j])) {
+    //       inverse_indices_dim[i] = j;
+    //     }
+    //   }
+    // }
+
     const Tensor& input = self.contiguous();
     int64_t num_inp = input.numel();
     const scalar_t* input_data = input.data<scalar_t>();
