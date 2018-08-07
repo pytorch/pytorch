@@ -26,47 +26,60 @@ gcc --version
 echo "CMake version:"
 cmake --version
 
-# TODO: Don't run this...
-pip install -r requirements.txt || true
+if [ `uname -m` != "ppc64le" ]; then
+  # TODO: Don't run this...
+  pip install -r requirements.txt || true
 
-if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
-  export MAX_JOBS=4
-  # This is necessary in order to cross compile (or else we'll have missing GPU device).
-  export HCC_AMDGPU_TARGET=gfx900
+  if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+    export MAX_JOBS=4
+    # This is necessary in order to cross compile (or else we'll have missing GPU device).
+    export HCC_AMDGPU_TARGET=gfx900
 
-  # These environment variables are not set on CI when we were running as the Jenkins user.
-  # The HIP Utility scripts require these environment variables to be set in order to run without error.
-  export LANG=C.UTF-8
-  export LC_ALL=C.UTF-8
+    # These environment variables are not set on CI when we were running as the Jenkins user.
+    # The HIP Utility scripts require these environment variables to be set in order to run without error.
+    export LANG=C.UTF-8
+    export LC_ALL=C.UTF-8
 
-  # This environment variable enabled HCC Optimizations that speed up the linking stage.
-  # https://github.com/RadeonOpenCompute/hcc#hcc-with-thinlto-linking
-  # export KMTHINLTO=1
-  python tools/amd_build/build_pytorch_amd.py
-  USE_ROCM=1 python setup.py install --user
+    # This environment variable enabled HCC Optimizations that speed up the linking stage.
+    # https://github.com/RadeonOpenCompute/hcc#hcc-with-thinlto-linking
+    # export KMTHINLTO=1
+    python tools/amd_build/build_pytorch_amd.py
+    USE_ROCM=1 python setup.py install --user
+    exit 0
+  fi
+
+  # TODO: Don't install this here
+  if ! which conda; then
+    pip install mkl mkl-devel
+  fi
+
+  # sccache will fail for CUDA builds if all cores are used for compiling
+  # gcc 7 with sccache seems to have intermittent OOM issue if all cores are used
+  if ([[ "$BUILD_ENVIRONMENT" == *cuda* ]] || [[ "$BUILD_ENVIRONMENT" == *gcc7* ]]) && which sccache > /dev/null; then
+    export MAX_JOBS=`expr $(nproc) - 1`
+  fi
+
+  # Target only our CI GPU machine's CUDA arch to speed up the build
+  export TORCH_CUDA_ARCH_LIST=5.2
+
+  if [[ "$BUILD_ENVIRONMENT" == *trusty-py3.6-gcc5.4* ]]; then
+    export DEBUG=1
+  fi
+
+  WERROR=1 python setup.py install
+fi
+
+if [ `uname -m` == "ppc64le" ]; then
+  export USE_SYSTEM_NCCL=1
+  export NCCL_ROOT_DIR=/usr/local/cuda
+  export NCCL_LIB_DIR=/usr/local/cuda/lib64
+  export NCCL_INCLUDE_DIR=/usr/local/cuda/include
+  export LD_LIBRARY_PATH=/usr/lib64/openmpi/lib:$LD_LIBRARY_PATH:/usr/local/cuda/lib64
+
+  LD_LIBRARY_PATH=/usr/lib:/usr/local/magma/lib:$LD_LIBRARY_PATH python setup.py install
+
   exit 0
 fi
-
-# TODO: Don't install this here
-if ! which conda; then
-  pip install mkl mkl-devel
-fi
-
-# sccache will fail for CUDA builds if all cores are used for compiling
-# gcc 7 with sccache seems to have intermittent OOM issue if all cores are used
-if ([[ "$BUILD_ENVIRONMENT" == *cuda* ]] || [[ "$BUILD_ENVIRONMENT" == *gcc7* ]]) && which sccache > /dev/null; then
-  export MAX_JOBS=`expr $(nproc) - 1`
-fi
-
-# Target only our CI GPU machine's CUDA arch to speed up the build
-export TORCH_CUDA_ARCH_LIST=5.2
-
-if [[ "$BUILD_ENVIRONMENT" == *trusty-py3.6-gcc5.4* ]]; then
-  export DEBUG=1
-fi
-
-WERROR=1 python setup.py install
-
 # Add the test binaries so that they won't be git clean'ed away
 git add -f build/bin
 
