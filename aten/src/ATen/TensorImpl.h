@@ -3,8 +3,7 @@
 #include <atomic>
 #include <memory>
 
-#include "ATen/Retainable.h"
-#include "ATen/ScalarType.h"
+#include "ATen/StorageImpl.h"
 #include "ATen/core/optional.h"
 
 struct THTensor;
@@ -18,11 +17,28 @@ struct Tensor;
 
 namespace at {
 struct AT_API TensorImpl : public Retainable {
-  explicit TensorImpl(Backend backend, ScalarType scalar_type, THTensor * tensor, bool is_variable)
-  : backend_(backend), scalar_type_(scalar_type), is_variable_(is_variable), tensor(tensor) {}
-  TensorImpl(Backend backend, ScalarType scalar_type);
+  TensorImpl(Backend backend, ScalarType scalar_type, bool is_variable = false);
+  TensorImpl(StorageImpl* storage, bool is_variable = false)
+      : TensorImpl(
+            storage,
+            detail::get_backend(storage),
+            storage->scalar_type(),
+            is_variable) {}
+  TensorImpl(
+      StorageImpl* storage,
+      Backend backend,
+      ScalarType scalar_type,
+      bool is_variable = false)
+      : storage_(storage),
+        storage_offset_(0),
+        sizes_{0},
+        strides_{1},
+        is_zero_dim_(false),
+        backend_(backend),
+        scalar_type_(scalar_type),
+        is_variable_(is_variable) {}
 
-  virtual ~TensorImpl();
+  virtual ~TensorImpl() {};
 
   virtual void release_resources() override;
 
@@ -93,6 +109,51 @@ struct AT_API TensorImpl : public Retainable {
 
   virtual void set_data(Tensor new_data);
 
+  // Note: storage->size() may be greater than the recorded size
+  // of a tensor
+  at::StorageImpl* storage_;
+  ptrdiff_t storage_offset_;
+
+  std::vector<int64_t> sizes_;
+  std::vector<int64_t> strides_;
+
+  // TODO: get rid of this, use the sizes_/strides_ .size() instead.
+  // This requires making sure TH code can handle zero dims (empty sizes, strides).
+  // Short-term plan is to dispatch dim/size/stride through a function that gives these
+  // in a "legacy" format, i.e. 0-dim becomes 1-dim.  Then medium term we remove the legacy calls.
+  bool is_zero_dim_;
+
+  template <typename T>
+  inline T * data() const {
+    return storage_->data<T>() + storage_offset_;
+  }
+
+  template <typename T>
+  inline T * unsafe_data() const {
+    return storage_->unsafe_data<T>() + storage_offset_;
+  }
+
+  at::ScalarType scalar_type() const {
+    return storage_->scalar_type();
+  }
+
+  ptrdiff_t storage_offset() const {
+    return storage_offset_;
+  }
+
+  // represents that numel() == 0.
+  inline bool is_empty() const {
+    for (int64_t i = 0; i < dim(); ++i) {
+      if (sizes_[i] == 0) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  int64_t size(int64_t d) const;
+  int64_t stride(int64_t d) const;
+
 protected:
   Backend backend_;
   // INVARIANT: When storage is non-null, this scalar type must
@@ -100,7 +161,5 @@ protected:
   ScalarType scalar_type_;
   bool is_variable_ = false;
   bool is_wrapped_number_ = false;
-public:
-  THTensor * tensor;
 };
 } // namespace at
