@@ -28,12 +28,6 @@ if [[ "${JOB_BASE_NAME}" == *cuda9.2* ]]; then
   export DYLD_LIBRARY_PATH=/Developer/NVIDIA/CUDA-${CUDA_VERSION}/lib${DYLD_LIBRARY_PATH:+:${DYLD_LIBRARY_PATH}}
   export CUDA_HOME=/Developer/NVIDIA/CUDA-${CUDA_VERSION}
   export NO_CUDA=0
-
-  # Eigen gives "explicit specialization of class must precede its first use" error
-  # when compiling with Xcode 9.1 toolchain, so we have to use Xcode 8.2 toolchain instead.
-  #export DEVELOPER_DIR=/Library/Developer/CommandLineTools
-else
-  #export DEVELOPER_DIR=/Applications/Xcode9.app/Contents/Developer
 fi
 
 export MACOSX_DEPLOYMENT_TARGET=10.9
