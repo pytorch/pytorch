@@ -4241,6 +4241,40 @@ class TestTorch(TestCase):
         self.assertEqual(X, Xhat, 1e-8, 'USV\' wrong')
 
     @staticmethod
+    def _test_matrix_rank(self, conv_fn):
+        a = torch.eye(10)
+        self.assertEqual(torch.matrix_rank(a), 10)
+        self.assertEqual(torch.matrix_rank(a, True), 10)
+
+        a[5, 5] = 0
+        self.assertEqual(torch.matrix_rank(a), 9)
+        self.assertEqual(torch.matrix_rank(a, True), 9)
+
+        a = torch.randn(24, 42)
+        self.assertEqual(torch.matrix_rank(a), torch.matrix_rank(a.t()))
+        aaT = torch.mm(a, a.t())
+        self.assertEqual(torch.matrix_rank(aaT), torch.matrix_rank(aaT, True))
+        aTa = torch.mm(a.t(), a)
+        self.assertEqual(torch.matrix_rank(aTa), torch.matrix_rank(aTa, True))
+
+        if TEST_NUMPY:
+            from numpy.linalg import matrix_rank
+            a = torch.randn(35, 75)
+            self.assertEqual(torch.matrix_rank(a), matrix_rank(a.numpy()))
+            self.assertEqual(torch.matrix_rank(a, 0.01), matrix_rank(a.numpy(), 0.01))
+
+            aaT = torch.mm(a, a.t())
+            self.assertEqual(torch.matrix_rank(aaT), matrix_rank(aaT.numpy()))
+            self.assertEqual(torch.matrix_rank(aaT, 0.01), matrix_rank(aaT.numpy(), 0.01))
+            self.assertEqual(torch.matrix_rank(aaT, True), matrix_rank(aaT.numpy(), True))
+            self.assertEqual(torch.matrix_rank(aaT, 0.01, True),
+                             matrix_rank(aaT.numpy(), 0.01, True))
+
+    @skipIfNoLapack
+    def test_matrix_rank(self):
+        self._test_matrix_rank(self, lambda x: x)
+
+    @staticmethod
     def _test_signal_window_functions(self, device='cpu'):
         if not TEST_SCIPY:
             raise unittest.SkipTest('Scipy not found')
