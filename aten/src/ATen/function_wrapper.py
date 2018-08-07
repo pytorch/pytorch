@@ -295,6 +295,7 @@ CHECKED_CAST = {
         CodeTemplate(
             'check_generator<${Backend}Generator>(${arg_name}, &globalContext().defaultGenerator(backend()))'),
     # This is a cast done via direct-construction
+    'IntListStride': CodeTemplate('at::IntList ${result_name} = get_intlist_stride_th(${arg_name});'),
     'real': CodeTemplate('${arg_name}.to${ScalarName}()'),
     'accreal': CodeTemplate('${arg_name}.to${AccScalarName}()'),
     'TensorList': CodeTemplate(
@@ -304,14 +305,16 @@ CHECKED_CAST = {
     'IntList': CodeTemplate('check_intlist<${size}>(${arg_name}, "${arg_name}", ${arg_pos}${,default_init})')
 }
 
+DIRECT_CONSTRUCTION_CHECKED_CAST = {'IntListStride'}
+
 CHECKED_USE = {
-    'THTensor*': '{}_->tensor',
-    'THSTensor*': '{}_->tensor',
-    'THIndexTensor*': '{}_->tensor',
-    'THBoolTensor*': '{}_->tensor',
-    'THIntegerTensor*': '{}_->tensor',
-    'THDenseTensor*': '{}_->tensor',
-    'THDenseIndexTensor*': '{}_->tensor',
+    'THTensor*': '{}_',
+    'THSTensor*': '{}_',
+    'THIndexTensor*': '{}_',
+    'THBoolTensor*': '{}_',
+    'THIntegerTensor*': '{}_',
+    'THDenseTensor*': '{}_',
+    'THDenseIndexTensor*': '{}_',
     'THStorage*': '{}_->pImpl()',
     'THGenerator*': '{}_->generator',
     'TensorList': "{0}_.data(), {0}_.size()",
@@ -330,13 +333,13 @@ ALLOC_NOARGS_WRAP = {
 }
 
 ALLOC_WRAP = {
-    'THTensor*': 'new TensorImpl(Backend::${Backend}, ScalarType::${ScalarName}, ${arguments}, false)',
-    'THBoolTensor*': 'new TensorImpl(Backend::${Backend}, ScalarType::Byte, ${arguments}, false)',
-    'THIndexTensor*': 'new TensorImpl(Backend::${Backend}, ScalarType::Long, ${arguments}, false)',
-    'THIntegerTensor*': 'new TensorImpl(Backend::${Backend}, ScalarType::Int, ${arguments}, false)',
+    'THTensor*': '${arguments}',
+    'THBoolTensor*': '${arguments}',
+    'THIndexTensor*': '${arguments}',
+    'THIntegerTensor*': '${arguments}',
     'THSTensor*': 'new Sparse${Tensor}(${arguments})',
-    'THDenseTensor*': 'new TensorImpl(Backend::${Backend}, ScalarType::${ScalarName}, ${arguments}, false)',
-    'THDenseIndexTensor*': 'new TensorImpl(Backend::${Backend}, ScalarType::Long, ${arguments}, false)',
+    'THDenseTensor*': '${arguments}',
+    'THDenseIndexTensor*': '${arguments}',
 }
 
 # Replacements for constants when calling into TH
