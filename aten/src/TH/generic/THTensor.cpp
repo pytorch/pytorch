@@ -399,7 +399,6 @@ void THTensor_(unfold)(THTensor *self, THTensor *src, int dimension, int64_t siz
       newStride[d] = self_stride;
     }
   }
-
   THTensor_setSizesAndStrides(self, std::move(newSize), std::move(newStride));
 }
 
@@ -672,10 +671,10 @@ THDescBuff THTensor_(desc)(const THTensor *tensor) {
   n += snprintf(str, L-n, "torch." _stringify(x) "Tensor of size ");
 #undef _stringify
   int i;
-  for(i = 0; i < THTensor_nDimensionLegacyAll(tensor); i++) {
+  for(i = 0; i < THTensor_nDimension(tensor); i++) {
     if(n >= L) break;
     n += snprintf(str+n, L-n, "%" PRId64, tensor->size(i));
-    if(i < THTensor_nDimensionLegacyAll(tensor)-1) {
+    if(i < THTensor_nDimension(tensor)-1) {
       n += snprintf(str+n, L-n, "x");
     }
   }

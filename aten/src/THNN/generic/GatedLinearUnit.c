@@ -15,7 +15,7 @@ void THNN_(GatedLinear_updateOutput)(
       dim + TH_INDEX_BASE, nIn);
 
   const int64_t inputSize = THTensor_(size)(input, dim) / 2;
-  std::vector<int64_t> newSizes = input->sizes().vec();
+  std::vector<int64_t> newSizes = THTensor_sizesLegacyNoScalars(input);
   newSizes[dim] = inputSize;
   THTensor_(resize)(output, newSizes, {});
 
