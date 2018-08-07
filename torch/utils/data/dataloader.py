@@ -103,7 +103,7 @@ def _worker_loop(dataset, index_queue, data_queue, collate_fn, seed, init_fn, wo
             break
         idx, batch_indices = r
         try:
-            samples = collate_fn([dataset[i] for i in batch_indices])
+            samples = select_indices_and_collate(collate_fn, dataset, batch_indices)
         except Exception:
             data_queue.put((idx, ExceptionWrapper(sys.exc_info())))
         else:
@@ -187,6 +187,14 @@ def default_collate(batch):
         return [default_collate(samples) for samples in transposed]
 
     raise TypeError((error_msg.format(type(batch[0]))))
+
+
+def select_indices_and_collate(collate_fn, dataset, indices):
+    if collate_fn == default_collate and isinstance(dataset, torch.utils.data.TensorDataset):
+        torch_indices = torch.LongTensor(indices)
+        return [tensor.index_select(0, torch_indices) for tensor in dataset.tensors]
+    else:
+        return collate_fn([dataset[i] for i in indices])
 
 
 def pin_memory_batch(batch):
@@ -311,7 +319,7 @@ class _DataLoaderIter(object):
     def __next__(self):
         if self.num_workers == 0:  # same-process loading
             indices = next(self.sample_iter)  # may raise StopIteration
-            batch = self.collate_fn([self.dataset[i] for i in indices])
+            batch = select_indices_and_collate(self.collate_fn, self.dataset, indices)
             if self.pin_memory:
                 batch = pin_memory_batch(batch)
             return batch
