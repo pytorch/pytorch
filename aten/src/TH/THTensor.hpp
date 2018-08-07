@@ -127,13 +127,17 @@ inline THStorage* THTensor_getStoragePtr(const THTensor* tensor) {
   return tensor->storage_;
 }
 
-
 inline bool THTensor_isZeroDim(const THTensor *tensor) {
   return tensor->is_zero_dim_;
 }
 
 inline void THTensor_setIsZeroDim(THTensor *tensor, bool is_zero_dim) {
   tensor->is_zero_dim_ = is_zero_dim;
+}
+
+inline void THTensor_maybe_zero_dim(THTensor *tensor, bool condition_when_zero_dim) {
+  bool is_zero_dim = (condition_when_zero_dim && tensor->sizes().size() == 1 && tensor->size(0) == 1) || tensor->dim() == 0;
+  THTensor_setIsZeroDim(tensor, is_zero_dim);
 }
 
 // [NOTE: nDimension vs nDimensionLegacyNoScalars vs nDimensionLegacyAll]
