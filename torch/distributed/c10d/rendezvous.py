@@ -59,13 +59,13 @@ def _file_rendezvous_handler(url):
     query = dict(pair.split("=") for pair in filter(None, result.query.split("&")))
     if "rank" not in query:
         raise _error("rank parameter missing")
-    if "size" not in query:
-        raise _error("size parameter missing")
+    if "world_size" not in query:
+        raise _error("world size parameter missing")
 
     rank = int(query["rank"])
-    size = int(query["size"])
+    world_size = int(query["world_size"])
     store = FileStore(path)
-    yield (store, rank, size)
+    yield (store, rank, world_size)
 
     # If this configuration is invalidated, there is nothing we can do about it
     raise RuntimeError("Unable to perform rerendezvous using file:// method")
@@ -81,18 +81,52 @@ def _tcp_rendezvous_handler(url):
     query = dict(pair.split("=") for pair in filter(None, result.query.split("&")))
     if "rank" not in query:
         raise _error("rank parameter missing")
-    if "size" not in query:
-        raise _error("size parameter missing")
+    if "world_size" not in query:
+        raise _error("world size parameter missing")
 
     rank = int(query["rank"])
-    size = int(query["size"])
+    world_size = int(query["world_size"])
     start_daemon = rank == 0
     store = TCPStore(result.hostname, result.port, start_daemon)
-    yield (store, rank, size)
+    yield (store, rank, world_size)
 
     # If this configuration is invalidated, there is nothing we can do about it
     raise RuntimeError("Unable to perform rerendezvous using tcp:// method")
 
 
+def _env_rendezvous_handler(url):
+    def _error(msg):
+        return ValueError("env:// rendezvous: " + msg)
+
+    if url != "env://":
+        raise _error("Only `env://` is expected for the env init method")
+    world_size = os.environ("WORLD_SIZE")
+    if world_size is None:
+        raise _error("world size is missing")
+    rank = os.environ("RANK")
+    if rank is None:
+        raise _error("rank is missing")
+    master_addr = os.environ("MASTER_ADDR")
+    if master_addr is None:
+        raise _error("master addr is missing")
+    master_port = os.environ("MASTER_PORT")
+    if master_port is None:
+        raise _error("master port is missing")
+
+    # Converting before creating the store
+    rank = int(rank)
+    world_size = int(world_size)
+    master_port = int(master_port)
+
+    # Now start the TCP store daemon on the rank 0
+    start_daemon = rank == 0
+    store = TCPStore(master_addr, master_port, start_daemon)
+    yield (store, rank, world_size)
+
+    # If this configuration is invalidated, there is nothing we can do about it
+    raise RuntimeError("Unable to perform rerendezvous using env:// method")
+
+
 register_rendezvous_handler("file", _file_rendezvous_handler)
 register_rendezvous_handler("tcp", _tcp_rendezvous_handler)
+register_rendezvous_handler("env", _env_rendezvous_handler)
