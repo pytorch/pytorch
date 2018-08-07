@@ -215,20 +215,8 @@ void addInputs(Node *n, const char * name, std::array<bool, N> value) {
 
 TORCH_API void postRecordTrace(Node* node, at::ArrayRef<Variable> outputs);
 
-// All these overloads are to handle (1) single `at::Tensor` (2)
-// `vector<at::Tensor>` because of implicit conversion trouble with `Variable`,
-// as well as any other types, for which we throw an exception.
-
-inline void postRecordTrace(
-    Node* node,
-    at::ArrayRef<at::Tensor> tensors) {
-  postRecordTrace(node, fmap(tensors, [](const at::Tensor& tensor) {
-                    return Variable(tensor);
-                  }));
-}
-
-inline void postRecordTrace(Node* node, at::Tensor tensor) {
-  postRecordTrace(node, at::ArrayRef<Variable>{Variable(tensor)});
+inline void postRecordTrace(Node* node, at::ArrayRef<at::Tensor> tensors) {
+  postRecordTrace(node, fmap<Variable>(tensors));
 }
 
 template <
@@ -240,7 +228,7 @@ template <
 void postRecordTrace(Node* node, T&&) {
   AT_ERROR(
       "Found an unsupported argument type ", at::demangle_type<T>(),
-      " in the JIT tracer. " "File a bug report.");
+      " in the JIT tracer. File a bug report.");
 }
 
 TORCH_API autograd::Variable getSizeOf(const autograd::Variable& var, int64_t dim);
