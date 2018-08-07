@@ -8,7 +8,6 @@
 
 #include <atomic>
 #include <ATen/ATen.h>
-// #include <ATen/ScalarType.h>
 
 struct THTensor
 {
