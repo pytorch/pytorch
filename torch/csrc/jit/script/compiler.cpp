@@ -1435,20 +1435,16 @@ private:
     NamedValue dim = NamedValue(loc, "dim", graph->insertConstant(0, loc));
     NamedValue step = NamedValue(loc, "step", graph->insertConstant(1, loc));
 
+    std::vector<NamedValue> args = {tensor, dim, begin};
     const auto has_end = slice.end().present();
     if (has_end) {
       // If the user specified an `end` index, pass it down
-      NamedValue end =
-          NamedValue(loc, "end", emitExpr(Expr(slice.end().get()), identity));
-      return emitBuiltinCall(
-                 loc, method, "slice", {tensor, dim, begin, end}, {step}, true)
-          ->asValue(loc, method);
-    } else {
-      // Otherwise rely on the schema default argument
-      return emitBuiltinCall(
-                 loc, method, "slice", {tensor, dim, begin}, {step}, true)
-          ->asValue(loc, method);
+      args.emplace_back(loc, "end", emitExpr(Expr(slice.end().get()), identity));
     }
+
+    // Otherwise rely on the schema default argument
+    return emitBuiltinCall(loc, method, "slice", args, {step}, true)
+        ->asValue(loc, method);
   }
 
   // Desugars gather syntactic sugar tensor[idx] -> tensor.select(idx).
