@@ -15,7 +15,7 @@ from torch.autograd.gradcheck import gradgradcheck, gradcheck
 from torch.autograd.function import once_differentiable
 from torch.autograd.profiler import profile
 from common import TEST_MKL, TestCase, run_tests, skipIfNoLapack, \
-    suppress_warnings, TEST_WITH_ROCM, skipIfRocm
+    suppress_warnings, skipIfRocm
 from torch.autograd import Variable, Function, detect_anomaly
 from torch.autograd.function import InplaceFunction
 from torch.testing import make_non_contiguous, randn_like
@@ -975,7 +975,7 @@ class TestAutograd(TestCase):
         with self.assertRaises(RuntimeError):
             b.add_(5)
 
-    @unittest.skipIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")
+    @skipIfRocm
     def test_requires_grad_factory(self):
         x = torch.randn(2, 3)
         fns = [torch.ones_like, torch.testing.randn_like]
@@ -1375,7 +1375,7 @@ class TestAutograd(TestCase):
             Variable(torch.randn(10, 10), _grad_fn=CollectOnDelete())
 
     @unittest.skipIf(torch.cuda.device_count() < 2, "no multi-GPU")
-    @unittest.skipIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")
+    @skipIfRocm
     def test_unused_output_gpu(self):
         from torch.nn.parallel._functions import Broadcast
         x = Variable(torch.randn(5, 5).float().cuda(), requires_grad=True)
@@ -1404,7 +1404,7 @@ class TestAutograd(TestCase):
         self.assertEqual(device[0], 1)
 
     @unittest.skipIf(torch.cuda.device_count() < 2, "no multi-GPU")
-    @unittest.skipIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")
+    @skipIfRocm
     def test_inputbuffer_add_multigpu(self):
         input = torch.randn(1).cuda(0).requires_grad_()
         output = input.cuda(1) + input.cuda(1)
@@ -1454,7 +1454,7 @@ class TestAutograd(TestCase):
         self.assertIsNotNone(view.grad_fn)
         self.assertIs(view._base, x)
 
-    @unittest.skipIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")
+    @skipIfRocm
     def _test_type_conversion_backward(self, t, ):
         fvar = Variable(t(torch.randn(5, 5).float()), requires_grad=True)
         fvar.double().sum().backward()
@@ -1578,7 +1578,7 @@ class TestAutograd(TestCase):
                 self._test_pyscalar_conversions(lambda x: x.cuda(), lambda x: long(x))
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
-    @unittest.skipIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")
+    @skipIfRocm
     def test_pin_memory(self):
         x = torch.randn(2, 2, requires_grad=True)
         self.assertEqual(x, x.pin_memory())
@@ -1914,7 +1914,7 @@ class TestAutograd(TestCase):
                               lambda a, b: torch.cat((a, b)),
                               True, f_args_variable, f_args_tensor)
 
-    @unittest.skipIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")
+    @skipIfRocm
     def test_potrf(self):
         root = Variable(torch.tril(torch.rand(S, S)), requires_grad=True)
 
@@ -2074,7 +2074,7 @@ class TestAutograd(TestCase):
         run_test((10, 10), torch.zeros(10, 10))
         run_test((10,), 0)
 
-    @unittest.skipIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")
+    @skipIfRocm
     def test_pinverse(self):
         # Why is pinverse tested this way, and not ordinarily as other linear algebra methods?
         # 1. Pseudo-inverses are not generally continuous, which means that they are not differentiable
@@ -2187,7 +2187,7 @@ class TestAutograd(TestCase):
         self._test_where_functional(lambda t: t)
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
-    @unittest.skipIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")
+    @skipIfRocm
     def test_where_functional_cuda(self):
         self._test_where_functional(lambda t: t.cuda())
 
@@ -2397,7 +2397,7 @@ class TestAutograd(TestCase):
                         f(dt)
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
-    @unittest.skipIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")
+    @skipIfRocm
     def test_set_requires_grad_only_for_floats_cuda(self):
         self._test_set_requires_grad_only_for_floats(self, True)
 
@@ -2405,7 +2405,7 @@ class TestAutograd(TestCase):
         self._test_set_requires_grad_only_for_floats(self, False)
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
-    @unittest.skipIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")
+    @skipIfRocm
     def test_rnn_backward_to_input_but_not_parameters_cuda(self):
         # this checks whether it is possible to not require
         # weight parameters, but require inputs, see #7722
@@ -2457,7 +2457,7 @@ class TestAutograd(TestCase):
                     out.backward()
             self.assertIn('MyFunc.apply', str(w[0].message))
 
-    @unittest.skipIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")
+    @skipIfRocm
     def test_symeig_no_eigenvectors(self):
         A = torch.tensor([[1., 2.], [2., 4.]], dtype=torch.float32, requires_grad=True)
         w, v = torch.symeig(A, eigenvectors=False)
