@@ -229,7 +229,7 @@ void load(Archive& archive, torch::Tensor& tensor) {
         archive,
         cputensor.data_ptr(),
         cputensor.numel() * cputensor.type().elementSizeInBytes());
-    tensor.copy_(cputensor);
+    tensor.data().copy_(cputensor.data());
   } else {
     agimpl::loadBinary(
         archive,
