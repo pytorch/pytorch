@@ -54,6 +54,14 @@
   dispatch:
     CUDA: _cudnn_init_dropout_state
 
+- func: _fused_dropout(Tensor self, double p, Generator* generator=nullptr) -> (Tensor, Tensor)
+  dispatch:
+     CUDA: fused_dropout_cuda
+
+- func: _masked_scale(Tensor self, Tensor mask, double scale) -> Tensor
+  dispatch:
+     CUDA: masked_scale_cuda
+
 - func: abs(Tensor self) -> Tensor
 
 - func: abs_(Tensor self) -> Tensor
@@ -1002,6 +1010,7 @@
 
 - func: logsumexp_out(Tensor result, Tensor self, int64_t dim, bool keepdim=False) -> Tensor
   variants: function
+
 
 - func: margin_ranking_loss(Tensor input1, Tensor input2, Tensor target, double margin=0.0, int64_t reduction=Reduction::ElementwiseMean) -> Tensor
   variants: function
