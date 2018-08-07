@@ -259,7 +259,7 @@ class cudnnTensorDescWrapper {
   cudnnTensorFormat_t format_;
   cudnnDataType_t type_;
   vector<int> dims_;
-  DISABLE_COPY_AND_ASSIGN(cudnnTensorDescWrapper);
+  AT_DISABLE_COPY_AND_ASSIGN(cudnnTensorDescWrapper);
 };
 
 class cudnnFilterDescWrapper {
@@ -313,7 +313,7 @@ class cudnnFilterDescWrapper {
   StorageOrder order_;
   cudnnDataType_t type_;
   vector<int> dims_;
-  DISABLE_COPY_AND_ASSIGN(cudnnFilterDescWrapper);
+  AT_DISABLE_COPY_AND_ASSIGN(cudnnFilterDescWrapper);
 };
 
 

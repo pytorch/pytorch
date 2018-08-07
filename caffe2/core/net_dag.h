@@ -84,7 +84,7 @@ class DAGNetBase : public NetBase {
   mutable std::vector<DAGNetStats> stats_;
   std::unordered_map<int, std::unique_ptr<Timer>> task_timers_;
 
-  DISABLE_COPY_AND_ASSIGN(DAGNetBase);
+  AT_DISABLE_COPY_AND_ASSIGN(DAGNetBase);
 };
 
 class DAGNet : public DAGNetBase {

@@ -288,7 +288,7 @@ class Blob {
   void* pointer_ = nullptr;
   DestroyCall destroy_ = nullptr;
 
-  DISABLE_COPY_AND_ASSIGN(Blob);
+  AT_DISABLE_COPY_AND_ASSIGN(Blob);
 };
 
 inline void swap(Blob& lhs, Blob& rhs) {
