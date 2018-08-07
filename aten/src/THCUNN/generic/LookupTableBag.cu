@@ -31,15 +31,10 @@ void THNN_(LookupTableBag_updateOutput)(
 
   cudaStream_t stream = THCState_getCurrentStream(state);
 
-  THLongStorage *inputSize = THCIndexTensor_(newSizeOf)(state, input);
-  THLongStorage *outputSize = THLongStorage_newWithSize(2);
-  THLongStorage_data(outputSize)[0] = numBags;
-  THLongStorage_data(outputSize)[1] = stride;
-  THCTensor_(resize)(state, output, outputSize, NULL);
+  std::vector<int64_t> outputSize = {numBags, stride};
+  THCTensor_(resize)(state, output, outputSize, {});
   THCTensor_(zero)(state, output);
-  THCIndexTensor_(resize)(state, offset2bag, inputSize, NULL);
-  THLongStorage_free(inputSize);
-  THLongStorage_free(outputSize);
+  THCIndexTensor_(resize)(state, offset2bag, input->sizes(), {});
 
   dim3 block = dim3(32, 8);
   int grid = 1024;
@@ -99,10 +94,8 @@ void THNN_(LookupTableBag_accGradParameters)(
 
   cudaStream_t stream = THCState_getCurrentStream(state);
 
-  THLongStorage *inputSize = THCIndexTensor_(newSizeOf)(state, input);
-  THCIndexTensor_(resize)(state, sortedIndices, inputSize, NULL);
-  THCIndexTensor_(resize)(state, origIndices, inputSize, NULL);
-  THLongStorage_free(inputSize);
+  THCIndexTensor_(resize)(state, sortedIndices, input->sizes(), {});
+  THCIndexTensor_(resize)(state, origIndices, input->sizes(), {});
 
   // Sort the inputs into sorted with the corresponding indices; we
   // don't need a stable or multidimensional sort, so just use Thrust
