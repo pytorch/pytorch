@@ -125,7 +125,7 @@ class AsyncNetBase : public NetBase {
   bool use_per_net_pools_;
   bool is_blocking_;
 
-  DISABLE_COPY_AND_ASSIGN(AsyncNetBase);
+  AT_DISABLE_COPY_AND_ASSIGN(AsyncNetBase);
 
  private:
   void storeExceptionPtr();

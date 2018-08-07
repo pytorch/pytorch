@@ -32,7 +32,7 @@ class TensorTypeIdCreator final {
   static constexpr at::TensorTypeId max_id_ = TensorTypeId(
       std::numeric_limits<details::_tensorTypeId_underlyingType>::max());
 
-  DISABLE_COPY_AND_ASSIGN(TensorTypeIdCreator);
+  AT_DISABLE_COPY_AND_ASSIGN(TensorTypeIdCreator);
 };
 
 class TensorTypeIdRegistry final {
@@ -46,7 +46,7 @@ class TensorTypeIdRegistry final {
   std::unordered_set<at::TensorTypeId> registeredTypeIds_;
   std::mutex mutex_;
 
-  DISABLE_COPY_AND_ASSIGN(TensorTypeIdRegistry);
+  AT_DISABLE_COPY_AND_ASSIGN(TensorTypeIdRegistry);
 };
 
 class TensorTypeIds final {
@@ -64,7 +64,7 @@ class TensorTypeIds final {
   TensorTypeIdCreator creator_;
   TensorTypeIdRegistry registry_;
 
-  DISABLE_COPY_AND_ASSIGN(TensorTypeIds);
+  AT_DISABLE_COPY_AND_ASSIGN(TensorTypeIds);
 };
 
 inline constexpr at::TensorTypeId TensorTypeIds::undefined() noexcept {
@@ -81,7 +81,7 @@ class TensorTypeIdRegistrar final {
  private:
   at::TensorTypeId id_;
 
-  DISABLE_COPY_AND_ASSIGN(TensorTypeIdRegistrar);
+  AT_DISABLE_COPY_AND_ASSIGN(TensorTypeIdRegistrar);
 };
 
 inline at::TensorTypeId TensorTypeIdRegistrar::id() const noexcept {
