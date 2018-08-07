@@ -140,6 +140,11 @@ struct Method {
     return *this;
   }
 
+  const FunctionSchema& getSchema() const {
+    AT_ASSERT(schema != nullptr);
+    return *schema;
+  }
+
   std::string prettyPrintSchema() const {
     JIT_ASSERT(schema);
     std::stringstream ss;

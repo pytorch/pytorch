@@ -389,6 +389,7 @@ if (BUILD_TORCH_TEST AND NOT MSVC AND NOT APPLE AND NOT USE_ROCM)
   if (USE_CUDA)
     target_link_libraries(test_jit ${CUDA_LIBRARIES})
   endif()
+
 endif()
 
 if (BUILD_TORCH_TEST AND NOT NO_API AND NOT USE_ROCM)
@@ -437,4 +438,5 @@ if (BUILD_TORCH_TEST AND NOT NO_API AND NOT USE_ROCM)
         -Wno-unused-but-set-parameter)
     endif()
   endif()
+
 endif()

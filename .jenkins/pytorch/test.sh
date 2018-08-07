@@ -74,7 +74,7 @@ test_python_all_except_nn() {
 
 test_aten() {
   # Test ATen
-  if [[ "$BUILD_ENVIRONMENT" != *asan* ]]; then
+  if ([[ "$BUILD_ENVIRONMENT" != *asan* ]] && [[ "$BUILD_ENVIRONMENT" != *rocm* ]]); then
     echo "Running ATen tests with pytorch lib"
     TORCH_LIB_PATH=$(python -c "import site; print(site.getsitepackages()[0])")/torch/lib
     # NB: the ATen test binaries don't have RPATH set, so it's necessary to
@@ -101,21 +101,20 @@ test_torchvision() {
   # this should be a transient requirement...)
   # See https://github.com/pytorch/pytorch/issues/7525
   #time python setup.py install
-  pip install .
+  pip install --user .
   popd
 }
 
 test_libtorch() {
   if [[ "$BUILD_TEST_LIBTORCH" == "1" ]]; then
      echo "Testing libtorch"
-     CPP_BUILD="$PWD/../cpp-build"
      if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
-       "$CPP_BUILD"/caffe2/bin/test_jit
+       ./build/bin/test_jit
      else
-       "$CPP_BUILD"/caffe2/bin/test_jit "[cpu]"
+       ./build/bin/test_jit "[cpu]"
      fi
      python tools/download_mnist.py --quiet -d test/cpp/api/mnist
-     OMP_NUM_THREADS=2 "$CPP_BUILD"/caffe2/bin/test_api
+     OMP_NUM_THREADS=2 ./build/bin/test_api
   fi
 }
 
