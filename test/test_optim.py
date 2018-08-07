@@ -11,7 +11,7 @@ from torch.optim import SGD
 from torch.autograd import Variable
 from torch import sparse
 from torch.optim.lr_scheduler import LambdaLR, StepLR, MultiStepLR, ExponentialLR, CosineAnnealingLR, ReduceLROnPlateau
-from common import TestCase, run_tests, TEST_WITH_UBSAN, TEST_WITH_ROCM
+from common import TestCase, run_tests, TEST_WITH_UBSAN, skipIfRocm
 
 
 def rosenbrock(tensor):
