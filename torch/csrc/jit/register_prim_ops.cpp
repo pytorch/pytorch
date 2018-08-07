@@ -311,21 +311,6 @@ RegisterOperators reg({
   }),
 
 template <typename T>
-Operation listEq(Node* node) {
-  return [=](Stack& stack) {
-    T a;
-    T b;
-    pop(stack, a, b);
-    if (a->elements() == b->elements()) {
-      push(stack, 1);
-    } else {
-      push(stack, 0);
-    }
-    return 0;
-  };
-}
-
-template <typename T>
 Operation listSelect(Node* node) {
   return [=](Stack& stack) {
     T list;
@@ -357,6 +342,21 @@ Operation listLen(Node* node) {
     pop(stack, a);
     const int64_t size = a->elements().size();
     push(stack, size);
+    return 0;
+  };
+}
+
+template <typename T>
+Operation listEq(Node* node) {
+  return [=](Stack& stack) {
+    T a;
+    T b;
+    pop(stack, a, b);
+    if (a->elements() == b->elements()) {
+      push(stack, 1);
+    } else {
+      push(stack, 0);
+    }
     return 0;
   };
 }
@@ -414,6 +414,14 @@ Operation listAdd(Node* node) {
 }
 
 RegisterOperators reg2({
+    Operator("aten::select(int[] a, int b) -> int", listSelect<Shared<IntList>>),
+    Operator("aten::select(float[] a, int b) -> float", listSelect<Shared<DoubleList>>),
+    Operator("aten::select(Tensor[] a, int b) -> Tensor", listSelect<Shared<TensorList>>),
+
+    Operator("aten::len(int[] a) -> int", listLen<Shared<IntList>>),
+    Operator("aten::len(float[] a) -> int", listLen<Shared<DoubleList>>),
+    Operator("aten::len(Tensor[] a) -> int", listLen<Shared<TensorList>>),
+
     Operator("aten::eq(int[] a, int[] b) -> int", listEq<Shared<IntList>>),
     Operator("aten::eq(float[] a, float[] b) -> int", listEq<Shared<DoubleList>>),
     Operator("aten::eq(Tensor[] a, Tensor[] b) -> int", listEq<Shared<TensorList>>),
@@ -422,13 +430,6 @@ RegisterOperators reg2({
     Operator("aten::add(float[] a, float[] b) -> float[]", listAdd<Shared<DoubleList>, double>),
     Operator("aten::add(Tensor[] a, Tensor[] b) -> Tensor[]", listAdd<Shared<TensorList>, at::Tensor>),
 
-    Operator("aten::len(int[] a) -> int", listLen<Shared<IntList>>),
-    Operator("aten::len(float[] a) -> int", listLen<Shared<DoubleList>>),
-    Operator("aten::len(Tensor[] a) -> int", listLen<Shared<TensorList>>),
-
-    Operator("aten::select(int[] a, int b) -> int", listSelect<Shared<IntList>>),
-    Operator("aten::select(float[] a, int b) -> float", listSelect<Shared<DoubleList>>),
-    Operator("aten::select(Tensor[] a, int b) -> Tensor", listSelect<Shared<TensorList>>),
 
     DEFINE_BINARY_OP(aten::add, a + b)
     DEFINE_BINARY_OP(aten::sub, a - b)

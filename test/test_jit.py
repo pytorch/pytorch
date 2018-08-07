@@ -2179,7 +2179,7 @@ a")
         self.checkScript(func, ())
 
         def func2():
-            a = []
+            a = _construct_empty_tensor_list()
             return len(a) == 0
 
         self.checkScript(func2, ())
