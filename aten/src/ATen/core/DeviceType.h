@@ -3,7 +3,7 @@
 // ATen/core (which would require a lot more build system hacking.)
 // If you modify me, keep me synchronized with that file.
 
-#include <ATen/core/CoreAPI.h>
+#include <ATen/core/Macros.h>
 
 #include <ostream>
 
