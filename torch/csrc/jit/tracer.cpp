@@ -25,17 +25,20 @@ void genericAddInput(Node *n, T value) {
 }
 
 void badArgType() {
-  throw std::runtime_error("Found an unsupported argument type in the JIT tracer. File a bug report.");
+  AT_ERROR("Found an unsupported argument type in the JIT tracer. File a bug report.");
 }
 
+thread_local std::shared_ptr<TracingState> tracing_state;
 
-void addInputs(Node *n, const char * name, int64_t value)            { genericAddInput(n, value); }
-void addInputs(Node *n, const char * name, bool value)               { genericAddInput(n, value); }
-void addInputs(Node *n, const char * name, double value)             { genericAddInput(n, value); }
-void addInputs(Node *n, const char * name, const at::Scalar& value)  { genericAddInput(n, value); }
+} // namespace detail
+
+void addInputs(Node *n, const char * name, int64_t value)            { detail::genericAddInput(n, value); }
+void addInputs(Node *n, const char * name, bool value)               { detail::genericAddInput(n, value); }
+void addInputs(Node *n, const char * name, double value)             { detail::genericAddInput(n, value); }
+void addInputs(Node *n, const char * name, const at::Scalar& value)  { detail::genericAddInput(n, value); }
 void addInputs(Node *n, const char * name, const at::Tensor& value)  { n->addInput(getValueTrace(value)); }
-void addInputs(Node *n, const char * name, const std::string& value)         { badArgType(); }
-void addInputs(Node *n, const char * name, const at::SparseTensorRef& value) { badArgType(); }
+void addInputs(Node *n, const char * name, const std::string& value)         { detail::badArgType(); }
+void addInputs(Node *n, const char * name, const at::SparseTensorRef& value) { detail::badArgType(); }
 
 void addInputs(Node *n, const char * name, at::TensorList value) {
   Graph *g = n->owningGraph();
@@ -64,9 +67,9 @@ void addInputs(Node *n, const char * name, at::IntList value) {
   n->addInput(g->insertNode(g->createList(jit::IntType::get(), info))->output());
 }
 
-thread_local std::shared_ptr<TracingState> tracing_state;
-
-} // namespace detail
+void addInputs(Node *n, const char * name, const ArrayRef<double>& value) {
+  AT_ERROR("Tracing float lists currently not supported!");
+}
 
 const std::shared_ptr<TracingState>& getTracingState() {
   return detail::tracing_state;
@@ -81,11 +84,11 @@ TracingState::TracingState()
 
 TracingState::~TracingState() = default;
 
-void postRecordTrace(const PreTraceInfo& info,
+void postRecordTrace(Node* node,
                      at::ArrayRef<Variable> outputs) {
   for (size_t i = 0; i < outputs.size(); i++) {
     auto & output = outputs[i];
-    Value * value = info.n->addOutput();
+    Value * value = node->addOutput();
     if (output.defined()) {
       value->inferTypeFrom(output.data());
       setValueTrace(output, value);
