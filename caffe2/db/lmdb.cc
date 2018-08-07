@@ -114,7 +114,7 @@ class LMDBTransaction final : public Transaction {
   MDB_dbi mdb_dbi_;
   MDB_txn* mdb_txn_;
 
-  DISABLE_COPY_AND_ASSIGN(LMDBTransaction);
+  AT_DISABLE_COPY_AND_ASSIGN(LMDBTransaction);
 };
 
 class LMDB : public DB {

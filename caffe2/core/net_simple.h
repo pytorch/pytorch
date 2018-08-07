@@ -48,7 +48,7 @@ class SimpleNet : public NetBase {
 
   vector<unique_ptr<OperatorBase>> operators_;
 
-  DISABLE_COPY_AND_ASSIGN(SimpleNet);
+  AT_DISABLE_COPY_AND_ASSIGN(SimpleNet);
 };
 
 } // namespace caffe2
