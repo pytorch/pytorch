@@ -1,8 +1,8 @@
 #include "ATen/ATen.h"
 #include "ATen/AccumulateType.h"
 #include "ATen/cuda/CUDAApplyUtils.cuh"
-#include "detail/IndexUtils.cuh"
-#include "detail/TensorInfo.cuh"
+#include "ATen/cuda/detail/IndexUtils.cuh"
+#include "ATen/cuda/detail/TensorInfo.cuh"
 #include "curand_kernel.h"
 
 #include <THC/THCGeneral.h>
