@@ -27,4 +27,4 @@ class Parameter(torch.Tensor):
         return 'Parameter containing:\n' + super(Parameter, self).__repr__()
 
     def __reduce_ex__(self, proto):
-        return Parameter, (super(Parameter, self), self.requires_grad)
+        return Parameter, (self.data, self.requires_grad)
