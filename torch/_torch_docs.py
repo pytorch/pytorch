@@ -4136,8 +4136,10 @@ add_docstr(torch.sparse_coo_tensor,
            r"""
 sparse_coo_tensor(indices, values, size=None, dtype=None, device=None, requires_grad=False) -> Tensor
 
-Constructs a sparse_coo_tensor with non-zero elements at the given :attr:`indices` with the given
-:attr:`values`.
+Constructs a sparse tensors in COO(rdinate) format with non-zero elements at the given :attr:`indices`
+with the given :attr:`values`. A sparse tensor can be `uncoalesced`, in that case, there are duplicate
+coordinates in the indices, and the value at that index is the sum of all duplicate value entries:
+`torch.spaerse`_.
 
 Args:
     indices (array_like): Initial data for the tensor. Can be a list, tuple,
@@ -4192,6 +4194,8 @@ Example::
     tensor([], dtype=torch.int64)
     and values:
     tensor([])
+
+.. _torch.sparse: https://pytorch.org/docs/stable/sparse.html
 """)
 
 add_docstr(torch.sqrt,
