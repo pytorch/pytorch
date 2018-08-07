@@ -107,6 +107,20 @@ def get_fn(file_name, script_path):
     return fn
 
 
+# Python equivalents for the empty list construction builtins. We need
+# these otherwise the tests won't execute in regular Python mode.
+def _construct_empty_int_list():
+    return []
+
+
+def _construct_empty_float_list():
+    return []
+
+
+def _construct_empty_tensor_list():
+    return []
+
+
 class JitTestCase(TestCase):
     _do_cuda_memory_leak_check = True
 
@@ -1816,6 +1830,26 @@ class TestScript(JitTestCase):
             os.close(r)
             os.close(w)
 
+    def checkScriptRaisesRegex(self, script, inputs, exception, regex,
+                               optimize=True, outputs=None, capture_output=False):
+        """
+        Checks that a given function will throw the correct exception,
+        when executed with normal python, the string frontend, and the AST frontend
+        """
+        # normal python
+        with self.assertRaisesRegex(exception, regex):
+            script(*inputs)
+        # string frontend
+        with self.assertRaisesRegex(exception, regex):
+            source = textwrap.dedent(inspect.getsource(script))
+            cu = torch.jit.CompilationUnit(source, optimize)
+            ge = getattr(cu, script.__name__)
+            ge(*inputs)
+        # python AST frontend
+        with self.assertRaisesRegex(exception, regex):
+            ge = torch.jit.script(script, optimize)
+            ge(*inputs)
+
     def checkScript(self, script, inputs, optimize=True, outputs=None, name='func', capture_output=False, frames_up=1):
         if isinstance(script, str):
             cu = torch.jit.CompilationUnit(script, optimize, _frames_up=frames_up)
@@ -1948,6 +1982,11 @@ a")
         x = torch.rand(10, dtype=torch.float, requires_grad=True)
         self.checkScript(func, [x], optimize=True)
 
+        def func2(x):
+            return x[5:]
+
+        self.checkScript(func2, [x], optimize=True)
+
     def test_gather(self):
         def func(x):
             return x[0]
@@ -2059,17 +2098,6 @@ a")
             canonical(foo3.graph))
 
     def test_list_literal(self):
-        # Python equivalents for the empty list construction builtins. We need
-        # these otherwise the tests won't execute in regular Python mode.
-        def _construct_empty_int_list():
-            return []
-
-        def _construct_empty_float_list():
-            return []
-
-        def _construct_empty_tensor_list():
-            return []
-
         def reassign():
             x = [1]
             if True:
@@ -2122,6 +2150,100 @@ a")
             return
         with self.assertRaisesRegex(RuntimeError, "previously has type"):
             self.checkScript(reassign_nested, (), optimize=True)
+
+    def test_list_gather(self):
+        def index():
+            a = [1, 2, 3]
+            return a[1]
+
+        self.checkScript(index, ())
+
+        def negative_index():
+            a = [1, 2, 3]
+            return a[-1]
+
+        self.checkScript(negative_index, ())
+
+        def bad_index():
+            a = [1, 2, 3]
+            return a[4]
+
+        self.checkScriptRaisesRegex(bad_index, (), IndexError,
+                                    "list index out of range")
+
+        def bad_negative_index():
+            a = [1, 2, 3]
+            return a[-5]
+
+        self.checkScriptRaisesRegex(bad_negative_index, (), IndexError,
+                                    "list index out of range")
+
+    def test_list_len(self):
+        def func():
+            a = [1, 2, 3]
+            return len(a) == 3
+
+        self.checkScript(func, ())
+
+        def func2():
+            a = _construct_empty_tensor_list()
+            return len(a) == 0
+
+        self.checkScript(func2, ())
+
+    def test_list_ops(self):
+        def test_equality():
+            a = [1, 2, 3]
+            b = [1, 2, 3]
+            return a == b
+
+        self.checkScript(test_equality, (), optimize=True)
+
+        def test_non_equality():
+            a = [1, 2, 3]
+            b = [3]
+            return a == b
+
+        self.checkScript(test_non_equality, (), optimize=True)
+
+        def test_list_add():
+            a = [1, 2, 3]
+            b = [2]
+            c = a + b
+            return c == [1, 2, 3, 2]
+
+        self.checkScript(test_list_add, (), optimize=True)
+
+        def test_list_add_empty():
+            a = [1, 2, 3]
+            b = _construct_empty_int_list()
+            c = a + b
+            return c == [1, 2, 3]
+
+        self.checkScript(test_list_add_empty, (), optimize=True)
+
+        def test_tensor_list_equality():
+            t1 = torch.ones([1, 1])
+            t2 = torch.ones([1, 1])
+            x = [t1, t2]
+            y = [t2, t1]
+            return x == y
+
+        self.checkScript(test_tensor_list_equality, (), optimize=True)
+
+        def test_invalid_list_equality():
+            t1 = torch.ones([2, 2])
+            t2 = torch.ones([2, 2])
+            x = [t1, t2]
+            y = [t2, t1]
+            # will throw since the tensors have more than one element
+            return x == y
+
+        self.checkScriptRaisesRegex(
+            test_invalid_list_equality,
+            (),
+            RuntimeError,
+            "bool value of Tensor")
 
     def test_func_call(self):
         script = '''

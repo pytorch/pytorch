@@ -21,7 +21,7 @@
 #pragma once
 
 #include <ATen/core/AlignOf.h>
-#include <ATen/core/CoreAPI.h>
+#include <ATen/core/Macros.h>
 
 #include <algorithm>
 #include <cassert>
