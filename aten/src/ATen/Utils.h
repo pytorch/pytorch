@@ -3,6 +3,9 @@
 #include "ATen/ATenGeneral.h"
 #include "ATen/StorageImpl.h"
 #include "ATen/UndefinedTensor.h"
+
+#include <ATen/core/ScalarType.h>
+#include "ATen/Formatting.h"
 #include "ATen/core/ArrayRef.h"
 #include "ATen/core/Error.h"
 
@@ -23,8 +26,8 @@ namespace at {
 
 AT_API int _crash_if_asan(int);
 
-template <typename T, typename Base>
-static inline T* checked_cast_storage(Base* expr, const char * name, int pos, Backend backend, ScalarType scalar_type) {
+template <typename T>
+static inline T* checked_cast_storage(Storage* expr, const char * name, int pos, Backend backend, ScalarType scalar_type) {
   if (at::detail::get_backend(expr->pImpl()) != backend) {
     AT_ERROR("Expected object of backend ", backend, " but got backend ", at::detail::get_backend(expr->pImpl()),
              " for argument #", pos, " '", name, "'");
@@ -33,11 +36,6 @@ static inline T* checked_cast_storage(Base* expr, const char * name, int pos, Ba
     AT_ERROR("Expected object of scalar type ", scalar_type, " but got scalar type ", expr->pImpl()->scalar_type(),
              " for argument #", pos, " '", name, "'");
   }
-  // NB: We're getting rid of derived types soon!
-  // if (typeid(*(expr->pImpl())) != typeid(T)) {
-  //   AT_ERROR("Expected object of RTTI type ", typeid(T).name(), " but found type ", typeid(*(expr->pImpl())).name(),
-  //            " for argument #", pos, " '", name, "'");
-  // }
   return static_cast<T*>(expr);
 }
 
@@ -54,12 +52,6 @@ inline T* checked_cast_tensor(Base* expr, const char * name, int pos, bool allow
     AT_ERROR("Expected object of scalar type ", scalar_type, " but got scalar type ", expr->type().scalarType(),
              " for argument #", pos, " '", name, "'");
   }
-  // This is going away soon; delete this when we remove the subtypes of
-  // TensorImpl (so that we can eliminate the T template parameter)
-  if (typeid(*expr) != typeid(T)) {
-    AT_ERROR("Expected object of RTTI type ", typeid(T).name(), " but found type ", typeid(*expr).name(),
-             " for argument #", pos, " '", name, "'");
-  }
   return static_cast<T*>(expr);
 }
 
@@ -73,7 +65,7 @@ static inline std::vector<TH*> tensor_list_checked_cast(ArrayRef<TBase> tensors,
     // dynamic cast for the test
     auto result = dynamic_cast<T*>(expr);
     if (result) {
-      casted[i] = result->tensor;
+      casted[i] = (THTensor*)(result->unsafeGetTH(false));
     } else {
       AT_ERROR("Expected a Tensor of RTTI type ", typeid(T).name(), " but found a type ", typeid(*expr).name(),
                " for sequence element ", i, " in sequence argument at position #", pos, " '", name, "'");

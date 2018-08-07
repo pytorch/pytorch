@@ -2391,7 +2391,7 @@
     if (self_->dim() == 0) {
       throw std::runtime_error("Input must be 1-d or 2-d");
     }
-    ${THTensor}_diag(${state,}result_->tensor, self_->tensor, diagonal);
+    ${THTensor}_diag(${state,}(THTensor*)(result_->unsafeGetTH(false)), (THTensor*)(self_->unsafeGetTH(false)), diagonal);
     result_->maybe_zero_dim(self_->dim() == 0);
 ]]
 [[
@@ -2983,7 +2983,7 @@
     - arg: real tol
       default: -1
   aten_custom_call: |
-    ${THTensor}_pstrf(res1_->tensor, res2_->tensor, self_->tensor, (upper) ? "U" : "L", tol_);
+    ${THTensor}_pstrf((THTensor*)(res1_->unsafeGetTH(false)), (THTensor*)(res2_->unsafeGetTH(false)), (THTensor*)(self_->unsafeGetTH(false)), (upper) ? "U" : "L", tol_);
     res2 -= 1;  // LAPACK returns 1-indexed pivots
 ]]
 [[
