@@ -1274,7 +1274,8 @@ eig(a, eigenvectors=False, out=None) -> (Tensor, Tensor)
 Computes the eigenvalues and eigenvectors of a real square matrix.
 
 Args:
-    a (Tensor): the square matrix for which the eigenvalues and eigenvectors will be computed
+    a (Tensor): the square matrix of shape :math:`(n \times n)` for which the eigenvalues and eigenvectors
+        will be computed
     eigenvectors (bool): ``True`` to compute both eigenvalues and eigenvectors;
         otherwise, only eigenvalues will be computed
     out (tuple, optional): the output tensors
@@ -1282,8 +1283,16 @@ Args:
 Returns:
     (Tensor, Tensor): A tuple containing
 
-        - **e** (*Tensor*): the right eigenvalues of ``a``
-        - **v** (*Tensor*): the eigenvectors of ``a`` if ``eigenvectors`` is ``True``; otherwise an empty tensor
+        - **e** (*Tensor*): Shape :math:`(n \times 2)`. Each row is an eigenvalue of ``a``,
+            with the first element is the real part and the second element is the imanginary part.
+            The eigenvalues are not necessarily ordered.
+        - **v** (*Tensor*): If ``eigenvectors=False``, it's an empty tensor.
+            Otherwise this tensor of shape :math:`(n \times n)`, contains normalized (unit “length”) eigenvector info,
+            in the same order of their eigenvalues in ``e``.
+            If the corresponding e[j] is a real number, column v[:, j] is the eigenvector corresponding to
+            eigenvalue e[j].
+            If the corresponding e[j] and e[j + 1] eigenvalues form a complex conjugate pair, then the true
+            :math:`eigenvector[j] = v[:, j] + i * v[:, j + 1], eigenvector[j + 1] = v[:, j] - i * v[:, j + 1]`.
 """)
 
 add_docstr(torch.einsum,
