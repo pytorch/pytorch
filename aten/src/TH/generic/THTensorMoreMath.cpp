@@ -79,7 +79,7 @@ void THTensor_(max)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
   int in_dims = THTensor_(nDimensionLegacyAll)(t);
   THTensor_(preserveReduceDimSemantics)(values_, in_dims, dimension, keepdim);
   THLongTensor_preserveReduceDimSemantics(indices_, in_dims, dimension, keepdim);
-  std::vector<int64_t> dim = t->sizes().vec();
+  std::vector<int64_t> dim = THTensor_sizesLegacyNoScalars(t);
   dim[dimension] = 1;
   THTensor_(resize)(values_, dim, {});
   THLongTensor_resize(indices_, dim, {});
