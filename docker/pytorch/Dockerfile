@@ -1,6 +1,10 @@
 FROM nvidia/cuda:9.0-cudnn7-devel-ubuntu16.04
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    software-properties-common
+
+RUN add-apt-repository ppa:git-core/ppa && apt-get update \
+     && apt-get install -y --no-install-recommends \
          build-essential \
          cmake \
          git \
