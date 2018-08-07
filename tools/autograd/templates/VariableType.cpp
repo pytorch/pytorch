@@ -59,10 +59,10 @@ bool VariableType::is_cuda() const { return baseType->is_cuda(); }
 bool VariableType::is_sparse() const { return baseType->is_sparse(); }
 bool VariableType::is_distributed() const { return baseType->is_distributed(); }
 
-std::unique_ptr<Storage> VariableType::storage() const {
+std::unique_ptr<Storage> VariableType::storage(bool resizable) const {
   return baseType->storage();
 }
-std::unique_ptr<Storage> VariableType::storage(size_t size) const {
+std::unique_ptr<Storage> VariableType::storage(size_t size, bool resizable) const {
   return baseType->storage(size);
 }
 std::unique_ptr<Storage> VariableType::storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const {
