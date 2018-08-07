@@ -1359,10 +1359,7 @@ private:
         return emitNone(tree->range());
       } break;
       case TK_SLICE: {
-        const auto slice = Slice(tree);
-        return emitSlice(
-            slice.range(),
-            {slice.value(), slice.startOr(0), slice.endOr(-1)});
+        return emitSlice(Slice(tree));
       } break;
       case TK_GATHER: {
         const auto gather = Gather(tree);
@@ -1424,24 +1421,31 @@ private:
 
   // Desugars slice syntactic sugar tensor[begin:end] -> tensor.slice(begin,
   // end).
-  Value* emitSlice(
-      const SourceRange& loc,
-      TreeList&& inputs) {
-    const auto applyInputs =
-        Compound::create(TK_LIST, loc, std::move(inputs));
-    const auto input_values = getNamedValues(applyInputs->trees(),
-                                             /*maybe_unpack*/false,
-                                             identity);
+  Value* emitSlice(const Slice& slice) {
+    const auto& loc = slice.range();
+    TreeList inputs = {slice.value(), slice.startOr(0)};
+    const auto applyInputs = Compound::create(TK_LIST, loc, std::move(inputs));
+    const auto input_values = getNamedValues(
+        applyInputs->trees(),
+        /*maybe_unpack*/ false,
+        identity);
+
     NamedValue tensor = input_values[0];
     NamedValue begin = input_values[1];
-    NamedValue end = input_values[2];
-    NamedValue dim = NamedValue(loc, "dim",
-        graph->insertConstant(0, loc));
-    NamedValue step = NamedValue(loc, "step",
-        graph->insertConstant(1, loc));
+    NamedValue dim = NamedValue(loc, "dim", graph->insertConstant(0, loc));
+    NamedValue step = NamedValue(loc, "step", graph->insertConstant(1, loc));
 
-    return emitBuiltinCall(
-               loc, method, "slice", {tensor, dim, begin, end, step}, {}, true)
+    const auto has_end = slice.end().present();
+    at::ArrayRef<NamedValue> input_args = {tensor, dim, begin};
+    if (has_end) {
+      // If the user specified an `end` index, pass it down
+      NamedValue end =
+          NamedValue(loc, "end", emitExpr(Expr(slice.end().get()), identity));
+      input_args.reset({tensor, dim, begin, end});
+    }
+
+    // Otherwise rely on the schema default argument
+    return emitBuiltinCall(loc, method, "slice", input_args, {step}, true)
         ->asValue(loc, method);
   }
 
