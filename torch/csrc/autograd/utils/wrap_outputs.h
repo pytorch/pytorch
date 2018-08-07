@@ -15,6 +15,9 @@
 namespace torch { namespace autograd { namespace utils {
 
 inline PyObject* wrap(at::Tensor tensor) {
+  if (!tensor.defined()) {
+    Py_RETURN_NONE;
+  }
   return THPVariable_Wrap(Variable(std::move(tensor)));
 }
 
