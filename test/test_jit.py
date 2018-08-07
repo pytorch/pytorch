@@ -994,6 +994,7 @@ class TestJit(JitTestCase):
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")
     def test_ge_cuda(self):
         self.run_ge_tests(True, True)
 
@@ -1030,6 +1031,7 @@ class TestJit(JitTestCase):
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "calls .cuda()")
+    @unittest.skipIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")
     def test_traced_module(self):
         class Model(nn.Module):
             def __init__(self, num_features, num_layers):
@@ -5773,6 +5775,91 @@ def check_against_reference(self, func, reference_func, args, kwargs=None, allow
 
 class TestJitGenerated(TestCase):
     pass
+
+
+class TestCustomOperators(TestCase):
+
+    def test_dynamic_op_registry(self):
+        from torch._ops import _OpNamespace
+        self.assertTrue(hasattr(torch, 'ops'))
+
+        torch.ops.__dict__.pop('aten')
+
+        # Don't use `hasattr()` because it will call `__getattr__`.
+        self.assertNotIn('aten', torch.ops.__dict__)
+        torch.ops.aten
+        self.assertIn('aten', torch.ops.__dict__)
+        self.assertEqual(type(torch.ops.aten), _OpNamespace)
+
+        self.assertNotIn('relu', torch.ops.aten.__dict__)
+        op = torch.ops.aten.relu
+        self.assertTrue(callable(op))
+        self.assertIn('relu', torch.ops.aten.__dict__)
+        op2 = torch.ops.aten.relu
+        self.assertEqual(op, op2)
+
+    def test_simply_calling_an_operator(self):
+        input = torch.randn(100)
+        output = torch.ops.aten.relu(input)
+        self.assertEqual(output, input.relu())
+
+    def test_default_arguments_are_used(self):
+        output = torch.ops.aten.leaky_relu(torch.tensor([-1.0, 1.0]))
+        self.assertEqual(output, torch.tensor([-0.01, 1]))
+
+    def test_only_kwargs(self):
+        output = torch.ops.aten.leaky_relu(self=torch.tensor(-1.0))
+        self.assertEqual(output, torch.tensor(-0.01))
+
+    def test_passing_too_many_args(self):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Expected at most 1 argument\(s\) for operator 'aten::relu', " +
+            "but received 2 argument\(s\). " +
+            "Schema: aten::relu\(Tensor self\) -> Tensor",
+        ):
+            torch.ops.aten.relu(1, 2)
+
+    def test_passing_too_few_args(self):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Missing value for argument 'self' to operator 'aten::relu'. " +
+            "Schema: aten::relu\(Tensor self\) -> Tensor",
+        ):
+            torch.ops.aten.relu()
+
+    def test_passing_one_positional_but_not_the_second(self):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Missing value for argument 'dim' to operator 'aten::log_softmax'"
+        ):
+            torch.ops.aten.log_softmax(torch.ones(5))
+
+    def test_passing_an_argument_both_as_positional_and_kwarg(self):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Argument 'self' specified both as positional and keyword argument"
+        ):
+            torch.ops.aten.leaky_relu(torch.ones(5), self=torch.ones(5))
+
+    def test_passing_unknown_kwargs(self):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Unknown keyword argument 'foo' for operator 'aten::leaky_relu'"
+        ):
+            torch.ops.aten.leaky_relu(torch.ones(5), foo=torch.ones(5))
+    #
+    # def test_passing_and_returning_lists(self):
+    #     a, b = torch.ones(5), torch.zeros(5)
+    #     output = torch.ops.aten.stack([a, b])
+    #     self.assertEqual(output, torch.ones(10))
+    #
+    # def test_throws_for_tuples(self):
+    #     with self.assertRaisesRegex(
+    #         RuntimeError,
+    #         "Unknown keyword argument 'foo' for operator 'aten::leaky_relu'"
+    #     ):
+    #         torch.ops.aten.leaky_relu(torch.ones(5), foo=torch.ones(5))
 
 
 # UBSAN per-function exclusions don't seem to work with OpenMP pragmas,

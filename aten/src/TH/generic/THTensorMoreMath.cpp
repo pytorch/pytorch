@@ -73,19 +73,16 @@ void THTensor_(preserveReduceDimSemantics)(
 
 void THTensor_(max)(THTensor *values_, THLongTensor *indices_, THTensor *t, int dimension, int keepdim)
 {
-  THLongStorage *dim;
-
   THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyAll)(t), 2, "dimension %d out of range",
       dimension + TH_INDEX_BASE);
 
   int in_dims = THTensor_(nDimensionLegacyAll)(t);
   THTensor_(preserveReduceDimSemantics)(values_, in_dims, dimension, keepdim);
   THLongTensor_preserveReduceDimSemantics(indices_, in_dims, dimension, keepdim);
-  dim = THTensor_(newSizeOf)(t);
-  THLongStorage_set(dim, dimension, 1);
-  THTensor_(resize)(values_, dim, NULL);
-  THLongTensor_resize(indices_, dim, NULL);
-  THLongStorage_free(dim);
+  std::vector<int64_t> dim = t->sizes().vec();
+  dim[dimension] = 1;
+  THTensor_(resize)(values_, dim, {});
+  THLongTensor_resize(indices_, dim, {});
 
   // two implementations optimized for data locality
   if (THTensor_strideLegacyNoScalars(t, dimension) == 1) {
@@ -157,19 +154,16 @@ void THTensor_(max)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
 
 void THTensor_(min)(THTensor *values_, THLongTensor *indices_, THTensor *t, int dimension, int keepdim)
 {
-  THLongStorage *dim;
-
   THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyAll)(t), 2, "dimension %d out of range",
       dimension + TH_INDEX_BASE);
 
   int in_dims = THTensor_(nDimensionLegacyAll)(t);
   THTensor_(preserveReduceDimSemantics)(values_, in_dims, dimension, keepdim);
   THLongTensor_preserveReduceDimSemantics(indices_, in_dims, dimension, keepdim);
-  dim = THTensor_(newSizeOf)(t);
-  THLongStorage_set(dim, dimension, 1);
-  THTensor_(resize)(values_, dim, NULL);
-  THLongTensor_resize(indices_, dim, NULL);
-  THLongStorage_free(dim);
+  std::vector<int64_t> dim = t->sizes().vec();
+  dim[dimension] = 1;
+  THTensor_(resize)(values_, dim, {});
+  THLongTensor_resize(indices_, dim, {});
 
   // two implementations optimized for data locality
   if (THTensor_strideLegacyNoScalars(t, dimension) == 1) {
@@ -241,16 +235,13 @@ void THTensor_(min)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
 
 void THTensor_(sum)(THTensor *r_, THTensor *t, int dimension, int keepdim)
 {
-  THLongStorage *dim;
-
   THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyAll)(t), 2, "dimension %d out of range",
       dimension + TH_INDEX_BASE);
 
   THTensor_(preserveReduceDimSemantics)(r_, THTensor_(nDimensionLegacyAll)(t), dimension, keepdim);
-  dim = THTensor_(newSizeOf)(t);
-  THLongStorage_set(dim, dimension, 1);
-  THTensor_(resize)(r_, dim, NULL);
-  THLongStorage_free(dim);
+  std::vector<int64_t> dim = t->sizes().vec();
+  dim[dimension] = 1;
+  THTensor_(resize)(r_, dim, {});
 
   int serial_path = 0;
 #ifdef _OPENMP
@@ -321,16 +312,13 @@ void THTensor_(sum)(THTensor *r_, THTensor *t, int dimension, int keepdim)
 
 void THTensor_(prod)(THTensor *r_, THTensor *t, int dimension, int keepdim)
 {
-  THLongStorage *dim;
-
   THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyAll)(t), 2, "dimension %d out of range",
       dimension + TH_INDEX_BASE);
 
   THTensor_(preserveReduceDimSemantics)(r_, THTensor_(nDimensionLegacyAll)(t), dimension, keepdim);
-  dim = THTensor_(newSizeOf)(t);
-  THLongStorage_set(dim, dimension, 1);
-  THTensor_(resize)(r_, dim, NULL);
-  THLongStorage_free(dim);
+  std::vector<int64_t> dim = t->sizes().vec();
+  dim[dimension] = 1;
+  THTensor_(resize)(r_, dim, {});
 
   int serial_path = 0;
 #ifdef _OPENMP
@@ -904,9 +892,8 @@ void THTensor_(sort)(THTensor *rt_, THLongTensor *ri_, THTensor *t, int dimensio
   THTensor_(copy)(rt_, t);
 
   {
-    THLongStorage *size = THTensor_(newSizeOf)(t);
-    THLongTensor_resize(ri_, size, NULL);
-    THLongStorage_free(size);
+    std::vector<int64_t> size = t->sizes().vec();
+    THLongTensor_resize(ri_, size, {});
   }
 
   if(descendingOrder)
@@ -1053,7 +1040,6 @@ real THTensor_(medianall)(THTensor *tensor)
 
 void THTensor_(mode)(THTensor *values_, THLongTensor *indices_, THTensor *t, int dimension, int keepdim)
 {
-  THLongStorage *dim;
   THTensor *temp_;
   THLongTensor *tempi_;
   real *temp__data;
@@ -1065,11 +1051,10 @@ void THTensor_(mode)(THTensor *values_, THLongTensor *indices_, THTensor *t, int
   int in_dims = THTensor_(nDimensionLegacyAll)(t);
   THTensor_(preserveReduceDimSemantics)(values_, in_dims, dimension, keepdim);
   THLongTensor_preserveReduceDimSemantics(indices_, in_dims, dimension, keepdim);
-  dim = THTensor_(newSizeOf)(t);
-  THLongStorage_set(dim, dimension, 1);
-  THTensor_(resize)(values_, dim, NULL);
-  THLongTensor_resize(indices_, dim, NULL);
-  THLongStorage_free(dim);
+  std::vector<int64_t> dim = t->sizes().vec();
+  dim[dimension] = 1;
+  THTensor_(resize)(values_, dim, {});
+  THLongTensor_resize(indices_, dim, {});
 
   t_size_dim = THTensor_sizeLegacyNoScalars(t, dimension);
 
@@ -1121,7 +1106,6 @@ void THTensor_(mode)(THTensor *values_, THLongTensor *indices_, THTensor *t, int
 
 void THTensor_(kthvalue)(THTensor *values_, THLongTensor *indices_, THTensor *t, int64_t k, int dimension, int keepdim)
 {
-  THLongStorage *dim;
   THTensor *temp_;
   THLongTensor *tempi_;
   real *temp__data;
@@ -1134,11 +1118,10 @@ void THTensor_(kthvalue)(THTensor *values_, THLongTensor *indices_, THTensor *t,
   int in_dims = THTensor_(nDimensionLegacyAll)(t);
   THTensor_(preserveReduceDimSemantics)(values_, in_dims, dimension, keepdim);
   THLongTensor_preserveReduceDimSemantics(indices_, in_dims, dimension, keepdim);
-  dim = THTensor_(newSizeOf)(t);
-  THLongStorage_set(dim, dimension, 1);
-  THTensor_(resize)(values_, dim, NULL);
-  THLongTensor_resize(indices_, dim, NULL);
-  THLongStorage_free(dim);
+  std::vector<int64_t> dim = t->sizes().vec();
+  dim[dimension] = 1;
+  THTensor_(resize)(values_, dim, {});
+  THLongTensor_resize(indices_, dim, {});
 
   t_size_dim = THTensor_sizeLegacyNoScalars(t, dimension);
 
@@ -1197,11 +1180,10 @@ void THTensor_(topk)(THTensor *rt_, THLongTensor *ri_, THTensor *t, int64_t k, i
   THLongTensor_resize1d(tmpIndices, sliceSize);
   int64_t *tmpi__data = THLongTensor_data(tmpIndices);
 
-  THLongStorage *topKSize = THTensor_(newSizeOf)(t);
-  THLongStorage_set(topKSize, dim, k);
-  THTensor_(resize)(rt_, topKSize, NULL);
-  THLongTensor_resize(ri_, topKSize, NULL);
-  THLongStorage_free(topKSize);
+  std::vector<int64_t> topKSize = t->sizes().vec();
+  topKSize[dim] = k;
+  THTensor_(resize)(rt_, topKSize, {});
+  THLongTensor_resize(ri_, topKSize, {});
 
   if (dir) {
     /* k largest elements, descending order (optional: see sorted) */
@@ -1379,15 +1361,15 @@ void THTensor_(catArray)(THTensor *result, THTensor **inputs, int numInputs, int
   }
 
   // Compute the size of the result
-  THLongStorage *size = THLongStorage_newWithSize(nDims);
+  std::vector<int64_t> size(nDims);
   for (int dim = 0; dim < nDims; dim++) {
     int64_t result_dim_size = notSkippedTensor->size(dim);
     if (dim == dimension) {
       result_dim_size = cat_dim_size;
     }
-    THLongStorage_data(size)[dim] = result_dim_size;
+    size[dim] = result_dim_size;
   }
-  THTensor_(resize)(result, size, NULL);
+  THTensor_(resize)(result, size, {});
 
   // Check contiguity of all inputs and result
   bool allContiguous = true;
@@ -1429,7 +1411,6 @@ void THTensor_(catArray)(THTensor *result, THTensor **inputs, int numInputs, int
       }
     }
   }
-  THLongStorage_free(size);
 }
 
 int THTensor_(equal)(THTensor *ta, THTensor* tb)
@@ -1646,16 +1627,13 @@ int THTensor_(logicalAnyAll)(THTensor *tensor)
 
 void THTensor_(logicalAnd)(THTensor *r_, THTensor *t, int dimension, int keepdim)
 {
-  THLongStorage *dim;
-
   THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyAll)(t), 2, "dimension %d out of range",
       dimension + TH_INDEX_BASE);
 
   THTensor_(preserveReduceDimSemantics)(r_, THTensor_(nDimensionLegacyAll)(t), dimension, keepdim);
-  dim = THTensor_(newSizeOf)(t);
-  THLongStorage_set(dim, dimension, 1);
-  THTensor_(resize)(r_, dim, NULL);
-  THLongStorage_free(dim);
+  std::vector<int64_t> dim = t->sizes().vec();
+  dim[dimension] = 1;
+  THTensor_(resize)(r_, dim, {});
 
   int serial_path = 0;
 #ifdef _OPENMP
@@ -1726,16 +1704,13 @@ void THTensor_(logicalAnd)(THTensor *r_, THTensor *t, int dimension, int keepdim
 
 void THTensor_(logicalAny)(THTensor *r_, THTensor *t, int dimension, int keepdim)
 {
-  THLongStorage *dim;
-
   THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyAll)(t), 2, "dimension %d out of range",
       dimension + TH_INDEX_BASE);
 
   THTensor_(preserveReduceDimSemantics)(r_, THTensor_(nDimensionLegacyAll)(t), dimension, keepdim);
-  dim = THTensor_(newSizeOf)(t);
-  THLongStorage_set(dim, dimension, 1);
-  THTensor_(resize)(r_, dim, NULL);
-  THLongStorage_free(dim);
+  std::vector<int64_t> dim = t->sizes().vec();
+  dim[dimension] = 1;
+  THTensor_(resize)(r_, dim, {});
 
   int serial_path = 0;
 #ifdef _OPENMP
@@ -1881,16 +1856,13 @@ void THTensor_(mean)(THTensor *r_, THTensor *t, int dimension, int keepdim)
 
 void THTensor_(std)(THTensor *r_, THTensor *t, int dimension, int biased, int keepdim)
 {
-  THLongStorage *dim;
-
   THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyAll)(t), 3, "invalid dimension %d",
       dimension + TH_INDEX_BASE);
 
   THTensor_(preserveReduceDimSemantics)(r_, THTensor_(nDimensionLegacyAll)(t), dimension, keepdim);
-  dim = THTensor_(newSizeOf)(t);
-  THLongStorage_set(dim, dimension, 1);
-  THTensor_(resize)(r_, dim, NULL);
-  THLongStorage_free(dim);
+  std::vector<int64_t> dim = t->sizes().vec();
+  dim[dimension] = 1;
+  THTensor_(resize)(r_, dim, {});
 
   TH_TENSOR_DIM_APPLY2(real, t, real, r_, dimension,
                        // Uses Welford's algorithm for numeric stability
@@ -1925,16 +1897,13 @@ void THTensor_(std)(THTensor *r_, THTensor *t, int dimension, int biased, int ke
 
 void THTensor_(var)(THTensor *r_, THTensor *t, int dimension, int biased, int keepdim)
 {
-  THLongStorage *dim;
-
   THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyAll)(t), 3, "invalid dimension %d",
       dimension + TH_INDEX_BASE);
 
   THTensor_(preserveReduceDimSemantics)(r_, THTensor_(nDimensionLegacyAll)(t), dimension, keepdim);
-  dim = THTensor_(newSizeOf)(t);
-  THLongStorage_set(dim, dimension, 1);
-  THTensor_(resize)(r_, dim, NULL);
-  THLongStorage_free(dim);
+  std::vector<int64_t> dim = t->sizes().vec();
+  dim[dimension] = 1;
+  THTensor_(resize)(r_, dim, {});
 
   TH_TENSOR_DIM_APPLY2(real, t, real, r_, dimension,
                        // Uses Welford's algorithm for numeric stability
@@ -1969,16 +1938,13 @@ void THTensor_(var)(THTensor *r_, THTensor *t, int dimension, int biased, int ke
 
 void THTensor_(norm)(THTensor *r_, THTensor *t, real value, int dimension, int keepdim)
 {
-  THLongStorage *dim;
-
   THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyAll)(t), 3, "invalid dimension %d",
       dimension + TH_INDEX_BASE);
 
   THTensor_(preserveReduceDimSemantics)(r_, THTensor_(nDimensionLegacyAll)(t), dimension, keepdim);
-  dim = THTensor_(newSizeOf)(t);
-  THLongStorage_set(dim, dimension, 1);
-  THTensor_(resize)(r_, dim, NULL);
-  THLongStorage_free(dim);
+  std::vector<int64_t> dim = t->sizes().vec();
+  dim[dimension] = 1;
+  THTensor_(resize)(r_, dim, {});
 
   #define DIM_REDUCE(reduce, transform) \
     TH_TENSOR_DIM_APPLY2(real, t, real, r_, dimension,      \
