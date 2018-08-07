@@ -3946,7 +3946,7 @@ class TestNN(NNTestCase):
             self.assertEqual(output_cuda, output_cpu)
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
-    @repeat_test_for_types(ALL_TENSORTYPES)
+    @repeat_test_for_types(NO_HALF_TENSORTYPES)
     def test_cuda_rnn_fused(self, dtype=torch.float):
 
         def copy_rnn(rnn1, rnn2):
@@ -3964,14 +3964,14 @@ class TestNN(NNTestCase):
         num_layers = 2
         seq_length = 7
         batch = 6
-        input_val = torch.randn(seq_length, batch, input_size, device="cuda", dtype=dtype)
-        grad_output = torch.randn(seq_length, batch, hidden_size, device="cuda", dtype=dtype)
-        hx_val = torch.randn(num_layers, batch, hidden_size, device="cuda", dtype=dtype)
-        grad_hy = torch.randn(num_layers, batch, hidden_size, device="cuda", dtype=dtype)
+        input_val = torch.randn(seq_length, batch, input_size, dtype=dtype)
+        grad_output = torch.randn(seq_length, batch, hidden_size, dtype=dtype)
+        hx_val = torch.randn(num_layers, batch, hidden_size, dtype=dtype)
+        grad_hy = torch.randn(num_layers, batch, hidden_size, dtype=dtype)
         with torch.backends.cudnn.flags(enabled=False):
             for module in (nn.GRU, nn.LSTM):
                 for bias in (True, False):
-                    rnn = module(input_size, hidden_size, num_layers, bias=bias).to("cuda", dtype)
+                    rnn = module(input_size, hidden_size, num_layers, bias=bias).to(dtype)
                     rnn_cuda = module(input_size, hidden_size, num_layers, bias=bias).to("cuda", dtype)
                     copy_rnn(rnn, rnn_cuda)
 

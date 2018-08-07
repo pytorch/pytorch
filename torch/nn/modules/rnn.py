@@ -7,7 +7,10 @@ import numbers
 from .module import Module
 from ..parameter import Parameter
 from ..utils.rnn import PackedSequence
+from .._functions.rnn import get_rnn_impl as _get_rnn_impl
 from .. import init
+
+_VF = torch._C._VariableFunctions
 
 
 class RNNBase(Module):
@@ -177,7 +180,7 @@ class RNNBase(Module):
             flat_weight = None
 
         self.check_forward_args(input, hx, batch_sizes)
-        func = self._backend.RNN(
+        func = _get_rnn_impl(
             self.mode,
             self.input_size,
             self.hidden_size,
@@ -624,9 +627,9 @@ class RNNCell(RNNCellBase):
             hx = input.new_zeros(input.size(0), self.hidden_size, requires_grad=False)
         self.check_forward_hidden(input, hx)
         if self.nonlinearity == "tanh":
-            func = self._backend.RNNTanhCell
+            func = _VF.rnn_tanh_cell
         elif self.nonlinearity == "relu":
-            func = self._backend.RNNReLUCell
+            func = _VF.rnn_relu_cell
         else:
             raise RuntimeError(
                 "Unknown nonlinearity: {}".format(self.nonlinearity))
@@ -726,7 +729,7 @@ class LSTMCell(RNNCellBase):
             hx = (hx, hx)
         self.check_forward_hidden(input, hx[0], '[0]')
         self.check_forward_hidden(input, hx[1], '[1]')
-        return self._backend.LSTMCell(
+        return _VF.lstm_cell(
             input, hx,
             self.weight_ih, self.weight_hh,
             self.bias_ih, self.bias_hh,
@@ -811,7 +814,7 @@ class GRUCell(RNNCellBase):
         if hx is None:
             hx = input.new_zeros(input.size(0), self.hidden_size, requires_grad=False)
         self.check_forward_hidden(input, hx)
-        return self._backend.GRUCell(
+        return _VF.gru_cell(
             input, hx,
             self.weight_ih, self.weight_hh,
             self.bias_ih, self.bias_hh,
