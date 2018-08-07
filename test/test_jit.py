@@ -2276,6 +2276,11 @@ a")
             return a[3:2] == _construct_empty_int_list()
         self.checkScript(test_backward_slice, ())
 
+        def test_over_slice():
+            a = [0, 1, 2, 3, 4]
+            return a[3:10] == [3, 4]
+        self.checkScript(test_backward_slice, ())
+
     def test_func_call(self):
         script = '''
         def add(a, b):
