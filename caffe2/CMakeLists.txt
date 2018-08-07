@@ -223,7 +223,13 @@ target_include_directories(caffe2 PRIVATE ${Caffe2_CPU_INCLUDE})
 target_include_directories(caffe2 SYSTEM PRIVATE "${Caffe2_DEPENDENCY_INCLUDE}")
 # Set standard properties on the target
 aten_set_target_props(caffe2)
+
+if (MSVC)
 target_compile_options(caffe2 INTERFACE "-std=c++11")
+else()
+target_compile_options(caffe2 INTERFACE "$<$<COMPILE_LANGUAGE:CXX>:-std=c++11>")
+endif()
+
 target_compile_options(caffe2 PRIVATE "-DCAFFE2_BUILD_MAIN_LIB")
 if (MSVC AND NOT BUILD_SHARED_LIBS)
   # Note [Supporting both static and dynamic libraries on Window]
@@ -341,13 +347,24 @@ endif()
 # ---[ Caffe2 HIP sources.
 if(USE_ROCM)
   # Call again since Caffe2_HIP_INCLUDES is extended with ATen include dirs.
-  IF(BUILD_ATEN)
-     HIP_INCLUDE_DIRECTORIES(${Caffe2_HIP_INCLUDES})
-  ENDIF()
+  if(BUILD_ATEN)
+    # Get Compile Definitions from the directory (FindHIP.CMake bug)
+    get_directory_property(MY_DEFINITIONS COMPILE_DEFINITIONS)
+    if(MY_DEFINITIONS)
+      foreach(_item ${MY_DEFINITIONS})
+        LIST(APPEND HIP_HCC_FLAGS "-D${_item}")
+      endforeach()
+    endif()
+
+    # Call again since Caffe2_HIP_INCLUDES is extended with ATen include dirs.
+    hip_include_directories(${Caffe2_HIP_INCLUDES})
+  endif()
   IF(BUILD_CAFFE2)
      set_source_files_properties(${Caffe2_HIP_SRCS} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
   ENDIF()
-  hip_add_library(caffe2_hip ${Caffe2_HIP_SRCS})
+
+  # FindHIP.CMake checks if the SHARED flag is set and adds extra logic accordingly.
+  hip_add_library(caffe2_hip SHARED ${Caffe2_HIP_SRCS})
 
   # Since PyTorch files contain HIP headers, these flags are required for the necessary definitions to be added.
   set_target_properties(caffe2_hip PROPERTIES COMPILE_FLAGS ${HIP_HIPCC_FLAGS})
