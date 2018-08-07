@@ -1445,7 +1445,7 @@ private:
         ->asValue(loc, method);
   }
 
-  // Desugars gather syntactic sugar tensor[idx] -> tensor.select(idx).
+  // Desugars gather syntactic sugar foo[i]
   Value* emitGather(
       const SourceRange& loc,
       TreeList&& inputs) {
@@ -1454,15 +1454,21 @@ private:
     auto input_values = getNamedValues(applyInputs->trees(),
                                         /*maybe_unpack*/false,
                                         identity);
-    NamedValue tensor = input_values[0];
-    NamedValue dim = NamedValue(
-        loc,
-        "dim",
-        graph->insertConstant(0, loc));
+    NamedValue gatherable = input_values[0];
     NamedValue idx = input_values[1];
+    if (gatherable.value->type()->kind() == TypeKind::ListType) {
+      // if it's a list, emit a regular index selection op
+      return emitBuiltinCall(
+                 loc, method, "select", {gatherable, idx}, {}, true)
+          ->asValue(loc, method);
 
-    return emitBuiltinCall(loc, method, "select", {tensor, dim, idx}, {}, true)
-        ->asValue(loc, method);
+    } else {
+      // if it's a single tensor, map tensor[idx] -> tensor.select(0, idx)
+      NamedValue dim = NamedValue(loc, "dim", graph->insertConstant(0, loc));
+      return emitBuiltinCall(
+                 loc, method, "select", {gatherable, dim, idx}, {}, true)
+          ->asValue(loc, method);
+    }
   }
 };
 
