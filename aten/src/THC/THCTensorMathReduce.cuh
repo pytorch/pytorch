@@ -666,7 +666,7 @@ THC_reduceDimIndex(THCState *state,
   THCTensor_preserveReduceDimSemantics(
       state, tgt2_, src_dims, dimension, keepdim);
 
-  std::vector<int64_t> dim = src->sizes().vec();
+  std::vector<int64_t> dim = THTensor_sizesLegacyNoScalars(src);
   dim[dimension] = 1;
   THCTensor_resize(state, tgt1_, dim, {});
   THCTensor_resize(state, tgt2_, dim, {});

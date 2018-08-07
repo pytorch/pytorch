@@ -73,15 +73,10 @@ void THTensor_resize(THTensor *self, at::IntList size, at::IntList stride)
 
 void THTensor_resizeNd(THTensor *self, int nDimension, const int64_t *size, const int64_t *stride)
 {
+  AT_CHECK(nDimension >= 0, "resizeNd nDimension must be non-negative");
   int d;
   ptrdiff_t totalSize;
   bool hascorrectsize = true;
-
-#ifndef USE_TH_SCALAR
-  AT_CHECK(nDimension > 0, "resizeNd nDimension must be greater than 0");
-#else
-  AT_CHECK(nDimension >= 0, "resizeNd nDimension must be non-negative");
-#endif
 
   for(d = 0; d < nDimension; d++)
   {

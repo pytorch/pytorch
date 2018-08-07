@@ -344,9 +344,7 @@ void THCTensor_(select)(THCState *state, THCTensor *self, THCTensor *src, int di
   if(!src)
     src = self;
 
-#ifndef USE_TH_SCALAR
-  THArgCheck(src->dim() > 1, 1, "cannot select on a vector");
-#endif
+  THArgCheck(src->dim() > 0, 1, "cannot select on a 0-dim tensor");
   THArgCheck((dimension >= 0) && (dimension < src->dim()), 3, "out of range");
   THArgCheck((sliceIndex >= 0) && (sliceIndex < src->size(dimension)), 4, "out of range");
 
@@ -444,17 +442,8 @@ void THCTensor_(squeeze)(THCState *state, THCTensor *self, THCTensor *src)
     }
   }
 
-#ifndef USE_TH_SCALAR
-  /* right now, we do not handle 0-dimension tensors */
-  if(ndim == 0 && src->dim() > 0)
-  {
-    THTensor_setSizeAtDim(self, 0, 1);
-    THTensor_setStrideAtDim(self, 0, 1);
-    ndim = 1;
-  }
   THTensor_resizeDim(self, ndim);
 }
-#endif
 
 void THCTensor_(squeeze1d)(THCState *state, THCTensor *self, THCTensor *src, int dimension)
 {

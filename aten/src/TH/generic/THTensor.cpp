@@ -327,9 +327,7 @@ void THTensor_(select)(THTensor *self, THTensor *src, int dimension, int64_t sli
   if(!src)
     src = self;
 
-#ifndef USE_TH_SCALAR
-  THArgCheck(src->dim() > 1, 1, "cannot select on a vector");
-#endif
+  THArgCheck(src->dim() > 0, 1, "cannot select on a 0-dim tensor");
   THArgCheck((dimension >= 0) && (dimension < src->dim()), 2, "out of range");
   THArgCheck((sliceIndex >= 0) && (sliceIndex < src->size(dimension)), 3, "out of range");
 
@@ -399,7 +397,6 @@ void THTensor_(unfold)(THTensor *self, THTensor *src, int dimension, int64_t siz
       newStride[d] = self_stride;
     }
   }
-
   THTensor_setSizesAndStrides(self, std::move(newSize), std::move(newStride));
 }
 
@@ -427,15 +424,6 @@ void THTensor_(squeeze)(THTensor *self, THTensor *src)
     }
   }
 
-#ifndef USE_TH_SCALAR
-  /* right now, we do not handle 0-dimension tensors */
-  if(ndim == 0 && src->dim() > 0)
-  {
-    THTensor_setSizeAtDim(self, 0, 1);
-    THTensor_setStrideAtDim(self, 0, 1);
-    ndim = 1;
-  }
-#endif
   THTensor_resizeDim(self, ndim);
 }
 
@@ -450,11 +438,7 @@ void THTensor_(squeeze1d)(THTensor *self, THTensor *src, int dimension)
 
   THTensor_(set)(self, src);
 
-#ifdef USE_TH_SCALAR
   if(src->size(dimension) == 1)
-#else
-  if(src->size(dimension) == 1 && src->dim() > 1)
-#endif
   {
     for(d = dimension; d < self->dim()-1; d++)
     {
@@ -571,7 +555,7 @@ ptrdiff_t THTensor_(nElement)(const THTensor *self)
   {
     ptrdiff_t nElement = 1;
     int d;
-    for(d = 0; d < THTensor_nDimensionLegacyAll(self); d++)
+    for(d = 0; d < THTensor_nDimension(self); d++)
       nElement *= self->size(d);
     return nElement;
   }
@@ -672,10 +656,10 @@ THDescBuff THTensor_(desc)(const THTensor *tensor) {
   n += snprintf(str, L-n, "torch." _stringify(x) "Tensor of size ");
 #undef _stringify
   int i;
-  for(i = 0; i < THTensor_nDimensionLegacyAll(tensor); i++) {
+  for(i = 0; i < THTensor_nDimension(tensor); i++) {
     if(n >= L) break;
     n += snprintf(str+n, L-n, "%" PRId64, tensor->size(i));
-    if(i < THTensor_nDimensionLegacyAll(tensor)-1) {
+    if(i < THTensor_nDimension(tensor)-1) {
       n += snprintf(str+n, L-n, "x");
     }
   }
