@@ -31,11 +31,6 @@ SKIP_PYTHON_BINDINGS = [
     'max_pool1d', 'max_pool2d', 'max_pool3d'
 ]
 
-NEVER_SKIP = {
-    '_thnn_fused_lstm_cell_backward',
-    '_thnn_fused_gru_cell_backward',
-}
-
 # These function signatures are not exposed to Python. Note that this signature
 # list does not support regex.
 SKIP_PYTHON_BINDINGS_SIGNATURES = [
@@ -143,10 +138,9 @@ const auto options = TensorOptions()
 
 def should_generate_python_binding(declaration):
     name = declaration['name']
-    if name not in NEVER_SKIP:
-        for pattern in SKIP_PYTHON_BINDINGS:
-            if re.match('^' + pattern + '$', name):
-                return False
+    for pattern in SKIP_PYTHON_BINDINGS:
+        if re.match('^' + pattern + '$', name):
+            return False
 
     simple_types = [arg['simple_type'] for arg in declaration['arguments']]
     signature = '{}({})'.format(name, ', '.join(simple_types))

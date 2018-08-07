@@ -2004,7 +2004,7 @@
     CUDA: _thnn_fused_lstm_cell_cuda
   variants: function
 
-- func: _thnn_fused_lstm_cell_backward(Tensor grad_hy, Tensor grad_cy, Tensor cx, Tensor cy, Tensor workspace, bool has_bias) -> (Tensor, Tensor, Tensor, Tensor, Tensor)
+- func: _thnn_fused_lstm_cell_backward(Tensor? grad_hy, Tensor? grad_cy, Tensor cx, Tensor cy, Tensor workspace, bool has_bias) -> (Tensor, Tensor, Tensor, Tensor, Tensor)
   dispatch:
     CUDA: _thnn_fused_lstm_cell_backward_cuda
   variants: function

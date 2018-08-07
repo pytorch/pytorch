@@ -41,11 +41,11 @@ bool allContiguous(at::TensorList tensors) {
                      [](const at::Tensor& t) { return !t.defined() || t.is_contiguous(); });
 }
 
-void getLaunchConfig(dim3& block, dim3& grid, int64_t numel) {
+void getLaunchConfig(dim3* block, dim3* grid, int64_t numel) {
   int curDevice = -1;
   cudaGetDevice(&curDevice);
-  block = cuda::getApplyBlock();
-  AT_ASSERTM(cuda::getApplyGrid(numel, grid, curDevice),
+  *block = cuda::getApplyBlock();
+  AT_ASSERTM(cuda::getApplyGrid(numel, *grid, curDevice),
              "Could not get grid size for pointwise apply.");
 }
 
@@ -95,7 +95,7 @@ __global__ void lstm_cell_forward(
             TensorInfo<scalar_t, index_type> workspace,
             index_type hsz,
             index_type totalElements) {
-    bool has_bias = (bias1.data != NULL);
+    bool has_bias = bias1.data != nullptr;
     for (index_type linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
        linearIndex < totalElements;
        linearIndex += gridDim.x * blockDim.x) {
@@ -181,6 +181,8 @@ __global__ void lstm_cell_backward(
               TensorInfo<scalar_t, index_type> gradInputCx,
               index_type hsz,
               index_type totalElements) {
+  bool has_gradoutput = gradoutput.data != nullptr;
+  bool has_gradoutputcell = gradoutputcell.data != nullptr;
   for (index_type linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
        linearIndex < totalElements;
        linearIndex += gridDim.x * blockDim.x) {
@@ -202,13 +204,13 @@ __global__ void lstm_cell_backward(
 
     scalar_t* gi = &DEVICE_LINEAR_GET(gradInputCx, linearIndex);
 
-    scalar_t go  = DEVICE_LINEAR_GET(gradoutput, linearIndex);
-    scalar_t goc = DEVICE_LINEAR_GET(gradoutputcell, linearIndex);
+    accscalar_t go  = has_gradoutput ? H2F(DEVICE_LINEAR_GET(gradoutput, linearIndex)) : 0.f;
+    accscalar_t goc = has_gradoutputcell ? H2F(DEVICE_LINEAR_GET(gradoutputcell, linearIndex)) : 0.f;
 
     accscalar_t gcx = THCNumerics<accscalar_t>::tanh(H2F(cy));
 
-    accscalar_t gog = H2F(go) * gcx;
-    gcx = H2F(go) * H2F(og) * ( 1 - gcx*gcx) + H2F(goc);
+    accscalar_t gog = go * gcx;
+    gcx = go * H2F(og) * (1 - gcx*gcx) + goc;
 
     accscalar_t gig = gcx * H2F(cg);
     accscalar_t gfg = gcx * H2F(cx);
@@ -244,7 +246,7 @@ __global__ void gru_cell_forward(
             TensorInfo<scalar_t, index_type> storage,
             index_type hsz,
             index_type totalElements) {
-  bool has_bias = (Bias1.data != NULL);
+  bool has_bias = Bias1.data != nullptr;
   for (index_type linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
        linearIndex < totalElements;
        linearIndex += gridDim.x * blockDim.x) {
@@ -352,15 +354,15 @@ __global__ void gru_cell_backward(
 } // namespace kernel
 
 template<typename scalar_t, typename index_type>
-void lstm_forward_index(const Tensor& input_gates, const Tensor& hidden_gates,
-                        const Tensor& input_bias, const Tensor& hidden_bias,
-                        const Tensor& cx,
-                        const Tensor& hy, const Tensor& cy, const Tensor& workspace) {
+void lstm_forward_impl(const Tensor& input_gates, const Tensor& hidden_gates,
+                       const Tensor& input_bias, const Tensor& hidden_bias,
+                       const Tensor& cx,
+                       const Tensor& hy, const Tensor& cy, const Tensor& workspace) {
   using accscalar_t = acc_type<scalar_t, /*is_cuda=*/true>;
 
   dim3 block, grid;
   int64_t numel = cx.numel();
-  getLaunchConfig(block, grid, numel);
+  getLaunchConfig(&block, &grid, numel);
 
   auto input_gatesI = getTensorInfo<scalar_t, index_type>(input_gates);
   auto hidden_gatesI = getTensorInfo<scalar_t, index_type>(hidden_gates);
@@ -386,18 +388,18 @@ void lstm_forward_index(const Tensor& input_gates, const Tensor& hidden_gates,
 }
 
 template<typename scalar_t, typename index_type>
-void lstm_backward_index(const Tensor& grad_hy, const Tensor& grad_cy,
-                         const Tensor& cx, const Tensor& cy,
-                         const Tensor& workspace,
-                         const Tensor& grad_gates, const Tensor& grad_cx) {
+void lstm_backward_impl(const Tensor& grad_hy, const Tensor& grad_cy,
+                        const Tensor& cx, const Tensor& cy,
+                        const Tensor& workspace,
+                        const Tensor& grad_gates, const Tensor& grad_cx) {
   using accscalar_t = acc_type<scalar_t, /*is_cuda=*/true>;
 
   dim3 block, grid;
   int64_t numel = grad_hy.numel();
-  getLaunchConfig(block, grid, numel);
+  getLaunchConfig(&block, &grid, numel);
 
-  auto grad_hyI = getTensorInfo<scalar_t, index_type>(grad_hy);
-  auto grad_cyI = getTensorInfo<scalar_t, index_type>(grad_cy);
+  auto grad_hyI = tryGetTensorInfo<scalar_t, index_type>(grad_hy);
+  auto grad_cyI = tryGetTensorInfo<scalar_t, index_type>(grad_cy);
   auto cxI = getTensorInfo<scalar_t, index_type>(cx);
   auto cyI = getTensorInfo<scalar_t, index_type>(cy);
   auto workspaceI = getTensorInfo<scalar_t, index_type>(workspace);
@@ -419,15 +421,15 @@ void lstm_backward_index(const Tensor& grad_hy, const Tensor& grad_cy,
 }
 
 template<typename scalar_t, typename index_type>
-void gru_forward_index(const Tensor& input_gates, const Tensor& hidden_gates,
-                       const Tensor& input_bias, const Tensor& hidden_bias,
-                       const Tensor& hx,
-                       const Tensor& hy, const Tensor& workspace) {
+void gru_forward_impl(const Tensor& input_gates, const Tensor& hidden_gates,
+                      const Tensor& input_bias, const Tensor& hidden_bias,
+                      const Tensor& hx,
+                      const Tensor& hy, const Tensor& workspace) {
   using accscalar_t = acc_type<scalar_t, /*is_cuda=*/true>;
 
   dim3 block, grid;
   int64_t numel = hx.numel();
-  getLaunchConfig(block, grid, numel);
+  getLaunchConfig(&block, &grid, numel);
 
   auto input_gatesI = getTensorInfo<scalar_t, index_type>(input_gates);
   auto hidden_gatesI = getTensorInfo<scalar_t, index_type>(hidden_gates);
@@ -452,13 +454,13 @@ void gru_forward_index(const Tensor& input_gates, const Tensor& hidden_gates,
 }
 
 template<typename scalar_t, typename index_type>
-void gru_backward_index(const Tensor& grad_hy, const Tensor& workspace,
-                        const Tensor& grad_input_gates, const Tensor& grad_hidden_gates, const Tensor& grad_hx) {
+void gru_backward_impl(const Tensor& grad_hy, const Tensor& workspace,
+                       const Tensor& grad_input_gates, const Tensor& grad_hidden_gates, const Tensor& grad_hx) {
   using accscalar_t = acc_type<scalar_t, /*is_cuda=*/true>;
 
   dim3 block, grid;
   int64_t numel = grad_hy.numel();
-  getLaunchConfig(block, grid, numel);
+  getLaunchConfig(&block, &grid, numel);
 
   auto grad_hyI = getTensorInfo<scalar_t, index_type>(grad_hy);
   auto workspaceI = getTensorInfo<scalar_t, index_type>(workspace);
@@ -501,9 +503,9 @@ std::tuple<Tensor, Tensor, Tensor> _thnn_fused_lstm_cell_cuda(
   auto cy = at::empty_like(cx);
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(input_gates.type(), "_thnn_fused_lstm_cell_cuda", [&] {
     if (canUse32BitIndexMath(workspace)) { // See Note [64-bit index math check elision]
-      lstm_forward_index<scalar_t, int32_t>(input_gates, hidden_gates, input_bias, hidden_bias, cx, hy, cy, workspace);
+      lstm_forward_impl<scalar_t, int32_t>(input_gates, hidden_gates, input_bias, hidden_bias, cx, hy, cy, workspace);
     } else {
-      lstm_forward_index<scalar_t, int64_t>(input_gates, hidden_gates, input_bias, hidden_bias, cx, hy, cy, workspace);
+      lstm_forward_impl<scalar_t, int64_t>(input_gates, hidden_gates, input_bias, hidden_bias, cx, hy, cy, workspace);
     }
   });
   return std::make_tuple(hy, cy, workspace);
@@ -513,9 +515,15 @@ void checkLSTMBackwardSizes(const TensorArg& grad_hy, const TensorArg& grad_cy,
                             const TensorArg& cx, const TensorArg& cy,
                             const TensorArg& workspace) {
   CheckedFrom c = "fused_lstm_cell_backward";
-  checkDim(c, grad_hy, 2);
-  auto exp_size = grad_hy->sizes();
-  checkSize(c, grad_cy, exp_size);
+  const TensorArg& defined_grad = grad_hy->defined() ? grad_hy : grad_cy;
+  checkDim(c, defined_grad, 2);
+  auto exp_size = defined_grad->sizes();
+  if (grad_hy->defined()) {
+    checkSize(c, grad_hy, exp_size);
+  }
+  if (grad_cy->defined()) {
+    checkSize(c, grad_cy, exp_size);
+  }
   checkSize(c, cx, exp_size);
   checkSize(c, cy, exp_size);
   checkDim(c, workspace, 2);
@@ -534,9 +542,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_fused_lstm_cell_backwar
   auto grad_cx = at::empty_like(cx);
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad_hy.type(), "_thnn_fused_lstm_cell_cuda_backward", [&] {
     if (canUse32BitIndexMath(workspace)) { // See Note [64-bit index math check elision]
-      lstm_backward_index<scalar_t, int32_t>(grad_hy, grad_cy, cx, cy, workspace, grad_gates, grad_cx);
+      lstm_backward_impl<scalar_t, int32_t>(grad_hy, grad_cy, cx, cy, workspace, grad_gates, grad_cx);
     } else {
-      lstm_backward_index<scalar_t, int64_t>(grad_hy, grad_cy, cx, cy, workspace, grad_gates, grad_cx);
+      lstm_backward_impl<scalar_t, int64_t>(grad_hy, grad_cy, cx, cy, workspace, grad_gates, grad_cx);
     }
   });
 
@@ -559,9 +567,9 @@ std::tuple<Tensor, Tensor> _thnn_fused_gru_cell_cuda(
   auto hy = at::empty_like(hx);
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(input_gates.type(), "_thnn_fused_gru_cell_cuda", [&] {
     if (canUse32BitIndexMath(workspace)) { // See Note [64-bit index math check elision]
-      gru_forward_index<scalar_t, int32_t>(input_gates, hidden_gates, input_bias, hidden_bias, hx, hy, workspace);
+      gru_forward_impl<scalar_t, int32_t>(input_gates, hidden_gates, input_bias, hidden_bias, hx, hy, workspace);
     } else {
-      gru_forward_index<scalar_t, int64_t>(input_gates, hidden_gates, input_bias, hidden_bias, hx, hy, workspace);
+      gru_forward_impl<scalar_t, int64_t>(input_gates, hidden_gates, input_bias, hidden_bias, hx, hy, workspace);
     }
   });
   return std::make_tuple(hy, workspace);
@@ -583,9 +591,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_fused_gru_cell_backward
   auto grad_hx = at::empty_like(grad_hy);
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad_hy.type(), "_thnn_fused_lstm_cell_cuda_backward", [&] {
     if (canUse32BitIndexMath(workspace)) { // See Note [64-bit index math check elision]
-      gru_backward_index<scalar_t, int32_t>(grad_hy, workspace, grad_input_gates, grad_hidden_gates, grad_hx);
+      gru_backward_impl<scalar_t, int32_t>(grad_hy, workspace, grad_input_gates, grad_hidden_gates, grad_hx);
     } else {
-      gru_backward_index<scalar_t, int64_t>(grad_hy, workspace, grad_input_gates, grad_hidden_gates, grad_hx);
+      gru_backward_impl<scalar_t, int64_t>(grad_hy, workspace, grad_input_gates, grad_hidden_gates, grad_hx);
     }
   });
 
