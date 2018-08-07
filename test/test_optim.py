@@ -236,6 +236,7 @@ class TestOptim(TestCase):
     def _build_params_dict_single(self, weight, bias, **kwargs):
         return [dict(params=bias, **kwargs)]
 
+    @unittest.skipIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")
     def test_sgd(self):
         self._test_rosenbrock(
             lambda params: optim.SGD(params, lr=1e-3),
@@ -272,6 +273,7 @@ class TestOptim(TestCase):
             lambda params: optim.SGD(params, lr=5e-3)
         )
 
+    @unittest.skipIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")
     def test_adam(self):
         self._test_rosenbrock(
             lambda params: optim.Adam(params, lr=1e-2),
@@ -309,6 +311,7 @@ class TestOptim(TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 0: 1.0"):
             optim.SparseAdam(None, lr=1e-2, betas=(1.0, 0.0))
 
+    @unittest.skipIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")
     def test_adadelta(self):
         self._test_rosenbrock(
             lambda params: optim.Adadelta(params),
@@ -332,6 +335,7 @@ class TestOptim(TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid rho value: 1.1"):
             optim.Adadelta(None, lr=1e-2, rho=1.1)
 
+    @unittest.skipIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")
     def test_adagrad(self):
         self._test_rosenbrock(
             lambda params: optim.Adagrad(params, lr=1e-1),
@@ -365,6 +369,7 @@ class TestOptim(TestCase):
             lambda params: optim.Adagrad(params, lr=1e-1)
         )
 
+    @unittest.skipIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")
     def test_adamax(self):
         self._test_rosenbrock(
             lambda params: optim.Adamax(params, lr=1e-1),
@@ -389,6 +394,7 @@ class TestOptim(TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 1: 1.0"):
             optim.Adamax(None, lr=1e-2, betas=(0.0, 1.0))
 
+    @unittest.skipIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")
     def test_rmsprop(self):
         self._test_rosenbrock(
             lambda params: optim.RMSprop(params, lr=1e-2),
@@ -413,6 +419,7 @@ class TestOptim(TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid momentum value: -1.0"):
             optim.RMSprop(None, lr=1e-2, momentum=-1.0)
 
+    @unittest.skipIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")
     def test_asgd(self):
         self._test_rosenbrock(
             lambda params: optim.ASGD(params, lr=1e-3),
@@ -462,6 +469,7 @@ class TestOptim(TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid eta values: 1.0, 0.5"):
             optim.Rprop(None, lr=1e-2, etas=(1.0, 0.5))
 
+    @unittest.skipIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")
     def test_lbfgs(self):
         self._test_rosenbrock(
             lambda params: optim.LBFGS(params),
