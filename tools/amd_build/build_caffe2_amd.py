@@ -15,6 +15,7 @@ includes = [
     "caffe2/video/*",
     "caffe2/distributed/*",
     "caffe2/queue/*",
+    "binaries/*",
     "caffe2/**/*_test*",
     "caffe2/core/THCCachingAllocator*",
 ]
