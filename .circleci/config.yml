@@ -95,7 +95,7 @@ jobs:
             chmod a+x .jenkins/pytorch/macos-build.sh
             .jenkins/pytorch/macos-build.sh
       - persist_to_workspace:
-          root: /Users/distiller/pytorch-ci-env/miniconda3/lib/python3.6/site-packages/torch
+          root: /Users/distiller/pytorch-ci-env
           paths:
             - "*"
   macos_10_13_py3_test:
@@ -103,6 +103,13 @@ jobs:
       xcode: "9.0"
     steps:
       - checkout
+      - run:
+          name: Prepare workspace
+          command: |
+            sudo mkdir -p /Users/distiller/pytorch-ci-env
+            sudo chmod -R 777 /Users/distiller/pytorch-ci-env
+      - attach_workspace:
+          at: /Users/distiller/pytorch-ci-env
       - run:
           name: Build
           command: |
