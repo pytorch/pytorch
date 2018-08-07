@@ -418,24 +418,32 @@ Operation listAdd(Node* node) {
 
 template <typename TList, typename TElement>
 Operation listSlice(Node* node) {
-  return [=](Stack& stack) {
+  return [](Stack& stack) {
     TList list;
-    int64_t begin;
+    int64_t start;
     int64_t end;
     int64_t step;
 
-    pop(stack, list, begin, end, step);
-    std::vector<TElement> sliced_list;
+    pop(stack, list, start, end, step);
     const int64_t list_size = list->elements().size();
-    const auto normalized_begin = normalizeIndex(begin, list_size);
-    const auto normalized_end = std::min(list_size, normalizeIndex(end, list_size));
 
-    for (auto i = normalized_begin; i < normalized_end;) {
-      // Only add to the list if the index is valid; otherwise do nothing
-      // This ensures [1, 2, 3][5:6] == []
-      if (i >= 0) {
-        sliced_list.push_back(list->elements()[i]);
-      }
+    // clamp start and end to the bounds of the list
+    const auto normalized_start =
+        std::max((int64_t)0, normalizeIndex(start, list_size));
+    const auto normalized_end =
+        std::min(list_size, normalizeIndex(end, list_size));
+
+    std::vector<TElement> sliced_list;
+    if (normalized_end <= normalized_start) {
+      // early exit if the slice is trivially empty
+      push(stack, sliced_list);
+      return 0;
+    }
+
+    sliced_list.reserve(normalized_end - normalized_start);
+
+    for (auto i = normalized_start; i < normalized_end;) {
+      sliced_list.push_back(list->elements()[i]);
       i += step;
     }
 
