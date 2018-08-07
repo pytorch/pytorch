@@ -90,6 +90,7 @@ jobs:
           command: |
             set -ex
             brew install p7zip
+            echo "HOME: " ${HOME} # yf225 debug: see where HOME is
             export SCCACHE_BUCKET=ossci-compiler-cache
             export BUILD_ENVIRONMENT=pytorch-macos-10.13-py3
             git submodule update --init
