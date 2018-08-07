@@ -109,7 +109,7 @@ elif [[ "${BUILD_ENVIRONMENT}" == conda* ]]; then
   exit 0
 elif [[ $BUILD_ENVIRONMENT == *setup* ]]; then
   rm -rf $INSTALL_PREFIX && mkdir $INSTALL_PREFIX
-  PYTHONPATH=$INSTALL_PREFIX $PYTHON setup_caffe2.py develop --install-dir $INSTALL_PREFIX
+  PYTHONPATH=$INSTALL_PREFIX FULL_CAFFE2=1 $PYTHON setup.py build_deps install
   exit 0
 fi
 
