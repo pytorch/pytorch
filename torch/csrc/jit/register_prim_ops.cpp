@@ -310,30 +310,6 @@ RegisterOperators reg({
     };                                                                 \
   }),
 
-// Operators that take two lists and reduce them to return a specified type
-#define DEFINE_LIST_BINARY_OP(aten_op, return_type, impl_name) \
-  Operator("aten::" #aten_op "(int[] a, int[] b) -> " #return_type, impl_name<Shared<IntList>>), \
-  Operator("aten::" #aten_op "(float[] a, float[] b) -> " #return_type, impl_name<Shared<DoubleList>>), \
-  Operator("aten::" #aten_op "(Tensor[] a, Tensor[] b) -> " #return_type, impl_name<Shared<TensorList>>),
-
-#define DEFINE_LIST_UNARY_OP(aten_op, return_type, impl_name) \
-  Operator("aten::" #aten_op "(int[] a) -> " #return_type, impl_name<Shared<IntList>>), \
-  Operator("aten::" #aten_op "(float[] a) -> " #return_type, impl_name<Shared<DoubleList>>), \
-  Operator("aten::" #aten_op "(Tensor[] a) -> " #return_type, impl_name<Shared<TensorList>>),
-
-// Operators that take two lists and return a list of the same type
-#define DEFINE_LIST_GENERIC_OP(aten_op, impl_name) \
-  Operator("aten::" #aten_op "(int[] a, int[] b) -> int[]", impl_name<Shared<IntList>, int64_t>), \
-  Operator("aten::" #aten_op "(float[] a, float[] b) -> float[]", impl_name<Shared<DoubleList>, double>), \
-  Operator("aten::" #aten_op "(Tensor[] a, Tensor[] b) -> Tensor[]", impl_name<Shared<TensorList>, at::Tensor>),
-
-// Operators that take TODO
-#define DEFINE_LIST_SELECT_OP(aten_op, impl_name) \
-  Operator("aten::" #aten_op "(int[] a, int b) -> int", impl_name<Shared<IntList>>), \
-  Operator("aten::" #aten_op "(float[] a, int b) -> float", impl_name<Shared<DoubleList>>), \
-  Operator("aten::" #aten_op "(Tensor[] a, int b) -> Tensor", impl_name<Shared<TensorList>>),
-
-
 template <typename T>
 Operation listEq(Node* node) {
   return [=](Stack& stack) {
@@ -438,13 +414,23 @@ Operation listAdd(Node* node) {
 }
 
 RegisterOperators reg2({
+    Operator("aten::eq(int[] a, int[] b) -> int", listEq<Shared<IntList>>),
+    Operator("aten::eq(float[] a, float[] b) -> int", listEq<Shared<DoubleList>>),
+    Operator("aten::eq(Tensor[] a, Tensor[] b) -> int", listEq<Shared<TensorList>>),
+
+    Operator("aten::add(int[] a, int[] b) -> int[]", listAdd<Shared<IntList>, int64_t>),
+    Operator("aten::add(float[] a, float[] b) -> float[]", listAdd<Shared<DoubleList>, double>),
+    Operator("aten::add(Tensor[] a, Tensor[] b) -> Tensor[]", listAdd<Shared<TensorList>, at::Tensor>),
+
+    Operator("aten::len(int[] a) -> int", listLen<Shared<IntList>>),
+    Operator("aten::len(float[] a) -> int", listLen<Shared<DoubleList>>),
+    Operator("aten::len(Tensor[] a) -> int", listLen<Shared<TensorList>>),
+
+    Operator("aten::select(int[] a, int b) -> int", listSelect<Shared<IntList>>),
+    Operator("aten::select(float[] a, int b) -> float", listSelect<Shared<DoubleList>>),
+    Operator("aten::select(Tensor[] a, int b) -> Tensor", listSelect<Shared<TensorList>>),
+
     DEFINE_BINARY_OP(aten::add, a + b)
-
-    DEFINE_LIST_BINARY_OP(eq, int, listEq)
-		DEFINE_LIST_UNARY_OP(len, int, listLen)
-    DEFINE_LIST_GENERIC_OP(add, listAdd)
-    DEFINE_LIST_SELECT_OP(select, listSelect)
-
     DEFINE_BINARY_OP(aten::sub, a - b)
     DEFINE_BINARY_OP(aten::mul, a * b)
     DEFINE_BINARY_OP(aten::div, a / b)

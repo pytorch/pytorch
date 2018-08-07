@@ -2171,6 +2171,19 @@ a")
         self.checkScriptRaisesRegex(bad_negative_index, (), IndexError,
                                     "list index out of range")
 
+    def test_list_len(self):
+        def func():
+            a = [1, 2, 3]
+            return len(a) == 3
+
+        self.checkScript(func, ())
+
+        def func2():
+            a = []
+            return len(a) == 0
+
+        self.checkScript(func2, ())
+
     def test_list_ops(self):
         def test_equality():
             a = [1, 2, 3]
