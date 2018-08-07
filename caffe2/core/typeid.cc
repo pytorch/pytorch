@@ -13,8 +13,8 @@ using std::string;
 
 namespace caffe2 {
 
-std::unordered_map<CaffeTypeId, string>& gTypeNames() {
-  static std::unordered_map<CaffeTypeId, string> g_type_names;
+std::unordered_map<TypeIdentifier, string>& gTypeNames() {
+  static std::unordered_map<TypeIdentifier, string> g_type_names;
   return g_type_names;
 }
 
@@ -59,14 +59,14 @@ void TypeMeta::_ThrowRuntimeTypeLogicError(const std::string& msg) {
   CAFFE_THROW(msg);
 }
 
-CaffeTypeId CaffeTypeId::createTypeId() {
-  static std::atomic<CaffeTypeId::underlying_type> counter(
+TypeIdentifier TypeIdentifier::createTypeId() {
+  static std::atomic<TypeIdentifier::underlying_type> counter(
       TypeMeta::Id<_CaffeHighestPreallocatedTypeId>().underlyingId());
-  const CaffeTypeId::underlying_type new_value = ++counter;
-  if (new_value == std::numeric_limits<CaffeTypeId::underlying_type>::max()) {
-    throw std::logic_error("Ran out of available type ids. If you need more than 2^16 CAFFE_KNOWN_TYPEs, we need to increase CaffeTypeId to use more than 16 bit.");
+  const TypeIdentifier::underlying_type new_value = ++counter;
+  if (new_value == std::numeric_limits<TypeIdentifier::underlying_type>::max()) {
+    throw std::logic_error("Ran out of available type ids. If you need more than 2^16 CAFFE_KNOWN_TYPEs, we need to increase TypeIdentifier to use more than 16 bit.");
   }
-  return CaffeTypeId(new_value);
+  return TypeIdentifier(new_value);
 }
 
 CAFFE_DEFINE_KNOWN_TYPE(Tensor);
@@ -103,7 +103,7 @@ namespace {
 // intended to be only instantiated once here.
 struct UninitializedTypeNameRegisterer {
     UninitializedTypeNameRegisterer() {
-      gTypeNames()[CaffeTypeId::uninitialized()] = "nullptr (uninitialized)";
+      gTypeNames()[TypeIdentifier::uninitialized()] = "nullptr (uninitialized)";
     }
 };
 static UninitializedTypeNameRegisterer g_uninitialized_type_name_registerer;

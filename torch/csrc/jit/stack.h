@@ -77,8 +77,8 @@ inline void pack(Stack & stack, T&& v) {
 }
 
 template<>
-inline void pack(Stack & stack, std::vector<at::Tensor>&& ts) {
-  for(auto& t : ts) {
+inline void pack(Stack & stack, std::vector<at::Tensor>&& v) {
+  for(auto& t : v) {
     stack.push_back(IValue(std::move(t)));
   }
 }

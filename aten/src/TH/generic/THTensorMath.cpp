@@ -805,20 +805,20 @@ void THTensor_(addcdiv)(THTensor *r_, THTensor *t, real value, THTensor *src1, T
 
 void THTensor_(addmv)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor *mat, THTensor *vec)
 {
-  if( (mat->dim() != 2) || (vec->dim() != 1) )
+  if( (mat->dim() != 2) || (THTensor_nDimensionLegacyNoScalars(vec) != 1) )
     THError("matrix and vector expected, got %dD, %dD",
-      mat->dim(), vec->dim());
+      mat->dim(), THTensor_nDimensionLegacyNoScalars(vec));
 
-  if( mat->size(1) != vec->size(0) ) {
+  if( mat->size(1) != THTensor_sizeLegacyNoScalars(vec, 0) ) {
     THDescBuff bm = THTensor_(sizeDesc)(mat);
     THDescBuff bv = THTensor_(sizeDesc)(vec);
     THError("size mismatch, %s, %s", bm.str, bv.str);
   }
 
-  if(t->dim() != 1)
+  if(THTensor_nDimensionLegacyNoScalars(t) != 1)
     THError("vector expected, got t: %dD", t->dim());
 
-  if(t->size(0) != mat->size(0)) {
+  if(THTensor_sizeLegacyNoScalars(t, 0) != mat->size(0)) {
     THDescBuff bt = THTensor_(sizeDesc)(t);
     THDescBuff bm = THTensor_(sizeDesc)(mat);
     THError("size mismatch, t: %s, mat: %s", bt.str, bm.str);
@@ -830,6 +830,8 @@ void THTensor_(addmv)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor
     THTensor_(copy)(r_, t);
   }
 
+  auto r_stride = THTensor_strideLegacyNoScalars(r_, 0);
+
   // n == 1 || lda >= max(1, m)
   #define LDA_COND(M, N, LDA) ((N) == 1 || (LDA) >= THMax(1, (M)))
 
@@ -837,15 +839,15 @@ void THTensor_(addmv)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor
   {
     THBlas_(gemv)('n', mat->size(0), mat->size(1),
                   alpha, THTensor_(data)(mat), mat->stride(1),
-                  THTensor_(data)(vec), vec->stride(0),
-                  beta, THTensor_(data)(r_), r_->stride(0));
+                  THTensor_(data)(vec), THTensor_strideLegacyNoScalars(vec, 0),
+                  beta, THTensor_(data)(r_), r_stride);
   }
   else if(mat->stride(1) == 1 && LDA_COND(mat->size(1), mat->size(0), mat->stride(0)))
   {
     THBlas_(gemv)('t',  mat->size(1), mat->size(0),
                   alpha, THTensor_(data)(mat), mat->stride(0),
-                  THTensor_(data)(vec), vec->stride(0),
-                  beta, THTensor_(data)(r_), r_->stride(0));
+                  THTensor_(data)(vec), THTensor_strideLegacyNoScalars(vec, 0),
+                  beta, THTensor_(data)(r_), r_stride);
   }
   else
   {
@@ -853,15 +855,15 @@ void THTensor_(addmv)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor
 
     THBlas_(gemv)('t',  mat->size(1), mat->size(0),
                   alpha, THTensor_(data)(cmat), cmat->stride(0),
-                  THTensor_(data)(vec), vec->stride(0),
-                  beta, THTensor_(data)(r_), r_->stride(0));
+                  THTensor_(data)(vec), THTensor_strideLegacyNoScalars(vec, 0),
+                  beta, THTensor_(data)(r_), r_stride);
 
     THTensor_(free)(cmat);
   }
 
   // In gemv (x,0).mv(0) does not
   // handle beta, whereas gemm does for case where (x,0).mm(0,y).
-  if (vec->size(0) == 0 && mat->size(0) != 0) {
+  if (THTensor_sizeLegacyNoScalars(vec, 0) == 0 && mat->size(0) != 0) {
     if (beta == 0) {
       THTensor_(zero)(r_);
     } else if (beta != 1) {
@@ -1058,14 +1060,19 @@ void THTensor_(addmm)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor
 
 void THTensor_(addr)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor *vec1, THTensor *vec2)
 {
-  if( (vec1->dim() != 1) || (vec2->dim() != 1) )
+  if( (THTensor_nDimensionLegacyNoScalars(vec1) != 1) || (THTensor_nDimensionLegacyNoScalars(vec2) != 1) )
     THError("vector and vector expected, got %dD, %dD tensors",
-        vec1->dim(), vec2->dim());
+        THTensor_nDimensionLegacyNoScalars(vec1), THTensor_nDimensionLegacyNoScalars(vec2));
 
   if(t->dim() != 2)
     THError("expected matrix, got %dD tensor for t", t->dim());
 
-  if( (t->size(0) != vec1->size(0)) || (t->size(1) != vec2->size(0)) ) {
+  auto vec1_size = THTensor_sizeLegacyNoScalars(vec1, 0);
+  auto vec2_size = THTensor_sizeLegacyNoScalars(vec2, 0);
+  auto vec1_stride = THTensor_strideLegacyNoScalars(vec1, 0);
+  auto vec2_stride = THTensor_strideLegacyNoScalars(vec2, 0);
+
+  if( (t->size(0) != vec1_size) || (t->size(1) != vec2_size) ) {
     THDescBuff bt  = THTensor_(sizeDesc)(t);
     THDescBuff bv1 = THTensor_(sizeDesc)(vec1);
     THDescBuff bv2 = THTensor_(sizeDesc)(vec2);
@@ -1087,27 +1094,27 @@ void THTensor_(addr)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor 
   // n == 1 || lda >= max(1, m)
   #define LDA_COND(M, N, LDA) ((N) == 1 || (LDA) >= THMax(1, (M)))
 
-  if(r_->stride(0) == 1 && LDA_COND(vec1->size(0), vec2->size(0), r_->stride(1)))
+  if(r_->stride(0) == 1 && LDA_COND(vec1_size, vec2_size, r_->stride(1)))
   {
-    THBlas_(ger)(vec1->size(0), vec2->size(0),
-                 alpha, THTensor_(data)(vec1), vec1->stride(0),
-                 THTensor_(data)(vec2), vec2->stride(0),
+    THBlas_(ger)(vec1_size, vec2_size,
+                 alpha, THTensor_(data)(vec1), vec1_stride,
+                 THTensor_(data)(vec2), vec2_stride,
                  THTensor_(data)(r_), r_->stride(1));
   }
-  else if(r_->stride(1) == 1 && LDA_COND(vec2->size(0), vec1->size(0), r_->stride(0)))
+  else if(r_->stride(1) == 1 && LDA_COND(vec2_size, vec1_size, r_->stride(0)))
   {
-    THBlas_(ger)(vec2->size(0), vec1->size(0),
-                 alpha, THTensor_(data)(vec2), vec2->stride(0),
-                 THTensor_(data)(vec1), vec1->stride(0),
+    THBlas_(ger)(vec2_size, vec1_size,
+                 alpha, THTensor_(data)(vec2), vec2_stride,
+                 THTensor_(data)(vec1), vec1_stride,
                  THTensor_(data)(r_), r_->stride(0));
   }
   else
   {
     THTensor *cr = THTensor_(newClone)(r_);
 
-    THBlas_(ger)(vec2->size(0), vec1->size(0),
-                 alpha, THTensor_(data)(vec2), vec2->stride(0),
-                 THTensor_(data)(vec1), vec1->stride(0),
+    THBlas_(ger)(vec2_size, vec1_size,
+                 alpha, THTensor_(data)(vec2), vec2_stride,
+                 THTensor_(data)(vec1), vec1_stride,
                  THTensor_(data)(cr), cr->stride(0));
 
     THTensor_(freeCopyTo)(cr, r_);

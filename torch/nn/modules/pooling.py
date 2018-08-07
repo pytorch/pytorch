@@ -30,11 +30,8 @@ class MaxPool1d(_MaxPoolNd):
     and output :math:`(N, C, L_{out})` can be precisely described as:
 
     .. math::
-
-        \begin{equation*}
-        \text{out}(N_i, C_j, k)  = \max_{m=0, \ldots, \text{kernel_size}-1}
-                \text{input}(N_i, C_j, \text{stride} * k + m)
-        \end{equation*}
+        out(N_i, C_j, k)  = \max_{m=0, \ldots, kernel\_size-1}
+                input(N_i, C_j, stride * k + m)
 
     If :attr:`padding` is non-zero, then the input is implicitly zero-padded on both sides
     for :attr:`padding` number of points. :attr:`dilation` controls the spacing between the kernel points.
@@ -55,7 +52,7 @@ class MaxPool1d(_MaxPoolNd):
 
           .. math::
               L_{out} = \left\lfloor \frac{L_{in} + 2 * \text{padding} - \text{dilation}
-                    * (\text{kernel_size} - 1) - 1}{\text{stride}} + 1\right\rfloor
+                    * (\text{kernel\_size} - 1) - 1}{\text{stride}} + 1\right\rfloor
 
     Examples::
 
@@ -88,10 +85,8 @@ class MaxPool2d(_MaxPoolNd):
 
     .. math::
 
-        \begin{equation*}
-        \text{out}(N_i, C_j, h, w)  = \max_{m=0, \ldots, kH-1} \max_{n=0, \ldots, kW-1}
-                               \text{input}(N_i, C_j, \text{stride}[0] * h + m, \text{stride}[1] * w + n)
-        \end{equation*}
+        out(N_i, C_j, h, w)  = \max_{m=0, \ldots, kH-1} \max_{n=0, \ldots, kW-1}
+                               \text{input}(N_i, C_j, \text{stride[0]} * h + m, \text{stride[1]} * w + n)
 
     If :attr:`padding` is non-zero, then the input is implicitly zero-padded on both sides
     for :attr:`padding` number of points. :attr:`dilation` controls the spacing between the kernel points.
@@ -117,11 +112,12 @@ class MaxPool2d(_MaxPoolNd):
         - Output: :math:`(N, C, H_{out}, W_{out})` where
 
           .. math::
-              H_{out} = \left\lfloor\frac{H_{in} + 2 * \text{padding}[0] - \text{dilation}[0]
-                    * (\text{kernel_size}[0] - 1) - 1}{\text{stride}[0]} + 1\right\rfloor
+              H_{out} = \left\lfloor\frac{H_{in} + 2 * \text{padding[0]} - \text{dilation[0]}
+                    * (\text{kernel\_size[0]} - 1) - 1}{\text{stride[0]}} + 1\right\rfloor
 
-              W_{out} = \left\lfloor\frac{W_{in} + 2 * \text{padding}[1] - \text{dilation}[1]
-                    * (\text{kernel_size}[1] - 1) - 1}{\text{stride}[1]} + 1\right\rfloor
+          .. math::
+              W_{out} = \left\lfloor\frac{W_{in} + 2 * \text{padding[1]} - \text{dilation[1]}
+                    * (\text{kernel\_size[1]} - 1) - 1}{\text{stride[1]}} + 1\right\rfloor
 
     Examples::
 
@@ -144,18 +140,21 @@ class MaxPool2d(_MaxPoolNd):
 
 class MaxPool3d(_MaxPoolNd):
     r"""Applies a 3D max pooling over an input signal composed of several input
-    planes.
+    planes. This is not a test
 
     In the simplest case, the output value of the layer with input size :math:`(N, C, D, H, W)`,
     output :math:`(N, C, D_{out}, H_{out}, W_{out})` and :attr:`kernel_size` :math:`(kD, kH, kW)`
     can be precisely described as:
 
     .. math::
-
-        \begin{align*}
-        \text{out}(N_i, C_j, d, h, w) &= \max_{k=0, \ldots, kD-1} \max_{m=0, \ldots, kH-1} \max_{n=0, \ldots, kW-1}
-                \text{input}(N_i, C_j, \text{stride}[0] * k + d,\\ &\text{stride}[1] * h + m, \text{stride}[2] * w + n)
-        \end{align*}
+        out(N_i, C_j, d, h, w) =
+        \begin{gathered}
+        \max_{k=0, \ldots, kD-1}
+        \max_{m=0, \ldots, kH-1}
+        \max_{n=0, \ldots, kW-1} \\
+        \text{input}(N_i, C_j, \text{stride[0]} *
+        k + d, \text{stride[1]} * h + m, \text{stride[2]} * w + n)
+        \end{gathered}
 
     If :attr:`padding` is non-zero, then the input is implicitly zero-padded on both sides
     for :attr:`padding` number of points. :attr:`dilation` controls the spacing between the kernel points.
@@ -182,13 +181,15 @@ class MaxPool3d(_MaxPoolNd):
 
           .. math::
               D_{out} = \left\lfloor\frac{D_{in} + 2 * \text{padding}[0] - \text{dilation}[0] *
-                (\text{kernel_size}[0] - 1) - 1}{\text{stride}[0]} + 1\right\rfloor
+                (\text{kernel\_size}[0] - 1) - 1}{\text{stride}[0]} + 1\right\rfloor
 
+          .. math::
               H_{out} = \left\lfloor\frac{H_{in} + 2 * \text{padding}[1] - \text{dilation}[1] *
-                (\text{kernel_size}[1] - 1) - 1}{\text{stride}[1]} + 1\right\rfloor
+                (\text{kernel\_size}[1] - 1) - 1}{\text{stride}[1]} + 1\right\rfloor
 
+          .. math::
               W_{out} = \left\lfloor\frac{W_{in} + 2 * \text{padding}[2] - \text{dilation}[2] *
-                (\text{kernel_size}[2] - 1) - 1}{\text{stride}[2]} + 1\right\rfloor
+                (\text{kernel\_size}[2] - 1) - 1}{\text{stride}[2]} + 1\right\rfloor
 
     Examples::
 
@@ -248,7 +249,7 @@ class MaxUnpool1d(_MaxUnpoolNd):
         - Output: :math:`(N, C, H_{out})` where
 
           .. math::
-              H_{out} = (H_{in} - 1) * \text{stride}[0] - 2 * \text{padding}[0] + \text{kernel_size}[0]
+              H_{out} = (H_{in} - 1) * \text{stride}[0] - 2 * \text{padding}[0] + \text{kernel\_size}[0]
 
           or as given by :attr:`output_size` in the call operator
 
@@ -313,9 +314,10 @@ class MaxUnpool2d(_MaxUnpoolNd):
         - Output: :math:`(N, C, H_{out}, W_{out})` where
 
           .. math::
-            H_{out} = (H_{in} - 1) * \text{stride}[0] - 2 * \text{padding}[0] + \text{kernel_size}[0]
+            H_{out} = (H_{in} - 1) * \text{stride[0]} - 2 * \text{padding[0]} + \text{kernel\_size[0]}
 
-            W_{out} = (W_{in} - 1) * \text{stride}[1] - 2 * \text{padding}[1] + \text{kernel_size}[1]
+          .. math::
+            W_{out} = (W_{in} - 1) * \text{stride[1]} - 2 * \text{padding[1]} + \text{kernel\_size[1]}
 
           or as given by :attr:`output_size` in the call operator
 
@@ -384,11 +386,13 @@ class MaxUnpool3d(_MaxUnpoolNd):
         - Output: :math:`(N, C, D_{out}, H_{out}, W_{out})` where
 
           .. math::
-              D_{out} = (D_{in} - 1) * \text{stride}[0] - 2 * \text{padding}[0] + \text{kernel_size}[0]
+              D_{out} = (D_{in} - 1) * \text{stride[0]} - 2 * \text{padding[0]} + \text{kernel\_size[0]}
 
-              H_{out} = (H_{in} - 1) * \text{stride}[1] - 2 * \text{padding}[1] + \text{kernel_size}[1]
+          .. math::
+              H_{out} = (H_{in} - 1) * \text{stride[1]} - 2 * \text{padding[1]} + \text{kernel\_size[1]}
 
-              W_{out} = (W_{in} - 1) * \text{stride}[2] - 2 * \text{padding}[2] + \text{kernel_size}[2]
+          .. math::
+              W_{out} = (W_{in} - 1) * \text{stride[2]} - 2 * \text{padding[2]} + \text{kernel\_size[2]}
 
           or as given by :attr:`output_size` in the call operator
 
@@ -432,10 +436,8 @@ class AvgPool1d(_AvgPoolNd):
 
     .. math::
 
-        \begin{equation*}
         \text{out}(N_i, C_j, l)  = \frac{1}{k} \sum_{m=0}^{k}
                                \text{input}(N_i, C_j, \text{stride} * l + m)
-        \end{equation*}
 
     If :attr:`padding` is non-zero, then the input is implicitly zero-padded on both sides
     for :attr:`padding` number of points.
@@ -456,7 +458,7 @@ class AvgPool1d(_AvgPoolNd):
 
           .. math::
               L_{out} = \left\lfloor \frac{L_{in} +
-              2 * \text{padding} - \text{kernel_size}}{\text{stride}} + 1\right\rfloor
+              2 * \text{padding} - \text{kernel\_size}}{\text{stride}} + 1\right\rfloor
 
     Examples::
 
@@ -491,10 +493,8 @@ class AvgPool2d(_AvgPoolNd):
 
     .. math::
 
-        \begin{equation*}
-        \text{out}(N_i, C_j, h, w)  = \frac{1}{kH * kW} \sum_{m=0}^{kH-1} \sum_{n=0}^{kW-1}
-                               \text{input}(N_i, C_j, \text{stride}[0] * h + m, \text{stride}[1] * w + n)
-        \end{equation*}
+        out(N_i, C_j, h, w)  = \frac{1}{kH * kW} \sum_{m=0}^{kH-1} \sum_{n=0}^{kW-1}
+                               input(N_i, C_j, stride[0] * h + m, stride[1] * w + n)
 
     If :attr:`padding` is non-zero, then the input is implicitly zero-padded on both sides
     for :attr:`padding` number of points.
@@ -518,10 +518,11 @@ class AvgPool2d(_AvgPoolNd):
 
           .. math::
               H_{out} = \left\lfloor\frac{H_{in}  + 2 * \text{padding}[0] -
-                \text{kernel_size}[0]}{\text{stride}[0]} + 1\right\rfloor
+                \text{kernel\_size}[0]}{\text{stride}[0]} + 1\right\rfloor
 
+          .. math::
               W_{out} = \left\lfloor\frac{W_{in}  + 2 * \text{padding}[1] -
-                \text{kernel_size}[1]}{\text{stride}[1]} + 1\right\rfloor
+                \text{kernel\_size}[1]}{\text{stride}[1]} + 1\right\rfloor
 
     Examples::
 
@@ -557,12 +558,10 @@ class AvgPool3d(_AvgPoolNd):
 
     .. math::
 
-        \begin{equation*}
         \text{out}(N_i, C_j, d, h, w)  = \sum_{k=0}^{kD-1} \sum_{m=0}^{kH-1} \sum_{n=0}^{kW-1}
                 \frac{\text{input}(N_i, C_j, \text{stride}[0] * d + k, \text{stride}[1] * h + m,
                         \text{stride}[2] * w + n)}
                      {kD * kH * kW}
-        \end{equation*}
 
     If :attr:`padding` is non-zero, then the input is implicitly zero-padded on all three sides
     for :attr:`padding` number of points.
@@ -586,13 +585,15 @@ class AvgPool3d(_AvgPoolNd):
 
           .. math::
               D_{out} = \left\lfloor\frac{D_{in} + 2 * \text{padding}[0] -
-                    \text{kernel_size}[0]}{\text{stride}[0]} + 1\right\rfloor
+                    \text{kernel\_size}[0]}{\text{stride}[0]} + 1\right\rfloor
 
+          .. math::
               H_{out} = \left\lfloor\frac{H_{in} + 2 * \text{padding}[1] -
-                    \text{kernel_size}[1]}{\text{stride}[1]} + 1\right\rfloor
+                    \text{kernel\_size}[1]}{\text{stride}[1]} + 1\right\rfloor
 
+          .. math::
               W_{out} = \left\lfloor\frac{W_{in} + 2 * \text{padding}[2] -
-                    \text{kernel_size}[2]}{\text{stride}[2]} + 1\right\rfloor
+                    \text{kernel\_size}[2]}{\text{stride}[2]} + 1\right\rfloor
 
     Examples::
 
@@ -721,7 +722,7 @@ class LPPool1d(_LPPoolNd):
 
           .. math::
               L_{out} = \left\lfloor\frac{L_{in} +
-              2 * \text{padding} - \text{kernel_size}}{\text{stride}} + 1\right\rfloor
+              2 * \text{padding} - \text{kernel\_size}}{\text{stride}} + 1\right\rfloor
 
     Examples::
         >>> # power-2 pool of window of length 3, with stride 2.
@@ -767,10 +768,11 @@ class LPPool2d(_LPPoolNd):
 
           .. math::
               H_{out} = \left\lfloor\frac{H_{in}  + 2 * \text{padding}[0] - \text{dilation}[0] *
-                    (\text{kernel_size}[0] - 1) - 1}{\text{stride}[0]} + 1\right\rfloor
+                    (\text{kernel\_size}[0] - 1) - 1}{\text{stride}[0]} + 1\right\rfloor
 
+          .. math::
               W_{out} = \left\lfloor\frac{W_{in}  + 2 * \text{padding}[1] - \text{dilation}[1] *
-                    (\text{kernel_size}[1] - 1) - 1}{\text{stride}[1]} + 1\right\rfloor
+                    (\text{kernel\_size}[1] - 1) - 1}{\text{stride}[1]} + 1\right\rfloor
 
     Examples::
 

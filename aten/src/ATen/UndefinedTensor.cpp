@@ -1,12 +1,12 @@
 #include "ATen/UndefinedTensor.h"
 #include "ATen/Context.h"
-#include "ATen/Error.h"
+#include "ATen/core/Error.h"
 
 namespace at {
 
 // should this use the globalContext?  Can it get a context passed in somehow?
 UndefinedTensor::UndefinedTensor()
-: TensorImpl(&(globalContext().getType(Backend::Undefined,ScalarType::Undefined)), nullptr) {
+: TensorImpl(Backend::Undefined, ScalarType::Undefined, nullptr, /* is variable */ false) {
 }
 
 IntList UndefinedTensor::sizes() const {

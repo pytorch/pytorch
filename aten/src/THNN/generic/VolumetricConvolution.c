@@ -51,7 +51,7 @@ void THNN_(VolumetricConvolution_updateOutput)(
 
     /* add bias */
     if (bias) {
-      for (i = 0; i < bias->size(0); i++)
+      for (i = 0; i < THTensor_sizeLegacyNoScalars(bias, 0); i++)
       {
         THTensor_(select)(outn, output, 0, i);
         THTensor_(fill)(outn, THTensor_(get1d)(bias, i));
@@ -78,7 +78,7 @@ void THNN_(VolumetricConvolution_updateOutput)(
 
       /* add bias */
       if (bias) {
-        for (i = 0; i < bias->size(0); i++)
+        for (i = 0; i < THTensor_sizeLegacyNoScalars(bias, 0); i++)
         {
           THTensor_(select)(outn, outb, 0, i);
           THTensor_(fill)(outn, THTensor_(get1d)(bias, i));
@@ -117,7 +117,7 @@ void THNN_(VolumetricConvolution_updateGradInput)(
 		"non-empty 5D (nOutputPlane x nInputPlane x kT x kH x kW) tensor "
 		"expected for weight, but got: %s");
 
-  int nOutputPlane = (int)weight->size(0);
+  int nOutputPlane = (int)THTensor_sizeLegacyNoScalars(weight, 0);
 
   THNN_ARGCHECK(!gradOutput->is_empty() && (gradOutput->dim() == 4 || gradOutput->dim() == 5), 3,
 		gradOutput,
@@ -187,9 +187,9 @@ void THNN_(VolumetricConvolution_accGradParameters)(
 		"non-empty 5D (nOutputPlane x nInputPlane x kT x kH x kW) tensor "
 		"expected for gradWeight, but got: %s");
 
-  int nOutputPlane = (int)gradWeight->size(0);
+  int nOutputPlane = (int)THTensor_sizeLegacyNoScalars(gradWeight, 0);
   if (gradBias) {
-    THArgCheck(!gradBias->is_empty() && gradBias->dim() == 1 && gradBias->size(0) == nOutputPlane, 5,
+    THArgCheck(!gradBias->is_empty() && THTensor_nDimensionLegacyNoScalars(gradBias) == 1 && THTensor_sizeLegacyNoScalars(gradBias, 0) == nOutputPlane, 5,
       "gradBias tensor has wrong size"
     );
   }

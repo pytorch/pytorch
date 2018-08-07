@@ -43,7 +43,7 @@ class ClipTensorByScalingOp final : public Operator<Context> {
     if (*val_data > threshold_) {
       float ratio = threshold_ / *val_data;
 
-      math::Scale<float, Context>(
+      math::Scale<float, float, Context>(
           clipped->size(),
           ratio,
           input_tensor_data,

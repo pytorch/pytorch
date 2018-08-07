@@ -52,28 +52,6 @@ def jit_type_of(arg):
         typ = '{}?'.format(typ)
     return typ
 
-# map from aten 'simple_type' to the function that will cast a attribute value
-# to that type
-FROM_ATTRIBUTE = {
-    'Device': 'as_device(node->is(attr::{}))',
-    'IntList': 'std::vector<int64_t>(node->is(attr::{}))',
-    'Layout': 'static_cast<at::Layout>(node->i(attr::{}))',
-    'Scalar': 'Scalar(node->t(attr::{}))',
-    'ScalarType': 'static_cast<at::ScalarType>(node->i(attr::{}))',
-    'Tensor': 'node->t(attr::{})',
-    'bool': 'bool(node->i(attr::{}))',
-    'double': 'node->f(attr::{})',
-    'int64_t': 'node->i(attr::{})',
-    'std::array<bool,2>': 'as_bool_array<2>(node->is(attr::{}))',
-    'std::array<bool,3>': 'as_bool_array<3>(node->is(attr::{}))',
-    'std::array<bool,4>': 'as_bool_array<4>(node->is(attr::{}))',
-}
-
-
-def from_attribute(arg):
-    simple_type = arg['simple_type']
-    return FROM_ATTRIBUTE[simple_type].format(arg['name'])
-
 
 # map from aten 'simple_type' to the function that will turn a tensor into
 # that type
@@ -84,6 +62,7 @@ FROM_IVALUE = {
     'Scalar': '{}.toScalar()',
     'ScalarType': 'static_cast<at::ScalarType>({}.toInt())',
     'Tensor': '{}.toTensor()',
+    'TensorList': '{}.toTensorList()->elements()',
     'bool': 'bool({}.toInt())',
     'double': '{}.toDouble()',
     'int64_t': '{}.toInt()',
@@ -98,15 +77,13 @@ def from_ivalue(arg, value):
     return FROM_IVALUE[simple_type].format(value)
 
 
-KW_ACCESS = CodeTemplate("""(node->${method}(Symbol::attr("${name}")))""")
-
 CALL_NAMESPACE = CodeTemplate("""\
 auto result = at::${name}(
     ${args}
 );
 """)
 CALL_METHOD = CodeTemplate("""\
-DeviceGuard device_guard(deviceForInputs(stack, ${num_dynamic_inputs}));
+DeviceGuard device_guard(deviceForInputs(stack, ${num_inputs}));
 auto result = (${first}).${name}(
     ${args}
 );
@@ -122,24 +99,20 @@ auto result = torch::${name}(
 );
 """)
 
-# TODO (apaszke): remove the attributed codepath once we remove them
 CONSTRUCTOR = CodeTemplate("""\
-[](Node *node) {
-  ${kw_assignments}
-  return Operation([=](Stack & stack) {
+[](Stack & stack) {
     autograd::profiler::RecordFunction record("${name}");
     ${call}
-    drop(stack, ${num_dynamic_inputs});
+    drop(stack, ${num_inputs});
     pack(stack, std::move(result));
     return 0;
-  });
 }
 """)
 
 OPERATOR = CodeTemplate("""\
 Operator(
     "${signature}",
-    ${ops}
+    ${op}
 ),
 """)
 
@@ -171,9 +144,6 @@ def is_jit_op(decl):
     # we currently only support vararg tensor lists when they are the _first_ argument
     # and the only tensor argument
     arguments = decl['arguments']
-    # Only support a single TensorList arg
-    if sum(arg['simple_type'] == 'TensorList' for arg in arguments) > 1:
-        return False
 
     return ((not decl['api_name'].endswith('_') or is_magic_method(decl['api_name'])) and
             not decl['name'].endswith('_out') and
@@ -197,7 +167,7 @@ def gen_jit_dispatch(declarations, out, template_path):
 
     ops = []
 
-    def get_invocation(decl, args, num_dynamic_inputs):
+    def get_invocation(decl, args, num_inputs):
 
         # because the arg list can get lengthy we put them on a separate line
         def pack_arguments(args):
@@ -211,108 +181,37 @@ def gen_jit_dispatch(declarations, out, template_path):
         elif 'namespace' in decl['method_of']:
             return CALL_NAMESPACE.substitute(name=decl['name'],
                                              args=pack_arguments(args),
-                                             num_dynamic_inputs=num_dynamic_inputs)
+                                             num_inputs=num_inputs)
         else:
             return CALL_METHOD.substitute(
                 name=decl['name'], first=args[0], args=pack_arguments(args[1:]),
-                num_dynamic_inputs=num_dynamic_inputs)
+                num_inputs=num_inputs)
 
-    def emit_decl_variant(decl, is_positional_arg, has_tensorlist):
-        # is_positional_arg is a boolean list the same length as decl['arguments']
-        # that indicates if the argument should come from the postional list
-        # of inputs. If false, the argument comes from the constant attributes
+    def emit_decl_variant(decl):
         kw_assignments = []
         arguments = []
-
-        if has_tensorlist:
-            kw_assignments.append('size_t varargs_length = node->inputs().size();')
-            # arguments look like: [tensor list], arg1, arg2, arg3
-            # we use peek(<i>, static_inputs) to read the non-vararg inputs
-            # from the end of the stack
-            static_inputs = sum(is_positional_arg) - 1
-            num_dynamic_inputs = 'varargs_length'
-            tensorlist_idx = [i for i, arg in enumerate(decl['arguments']) if arg['simple_type'] == 'TensorList'][0]
-        else:
-            static_inputs = sum(is_positional_arg)
-            num_dynamic_inputs = static_inputs
+        num_inputs = len(decl['arguments'])
+        op_capture = ''
 
         real_inputs = 0
-        for i, arg in enumerate(decl['arguments']):
-            # This conditional allows us to process argument lists with a flattened argument list
-            # with a single TensorList. Given the sequence of arguments:
-            # a b c [d e f g] h i # [] is the list
-            #
-            # 1. For the section where we are processing positional inputs before the
-            #    TensorList:
-            #    a b c [d e f g] h i # [] is the list
-            #    ~~~~~~~~~~~~ <- N
-            #   we set this view_length to the total number of varargs inputs (i.e. the length)
-            #   of the whole argument list. This means that indexing into the list using peek()
-            #   we will retrieve arguments ar their true indices (i.e. peek at 0 points to a,
-            #   1 points to b, etc...). Similarly, we can use peekSlice() to index into the
-            #   list itself this way.
-            # 2. After the list:
-            #    a b c [d e f g] h i # [] is the list
-            #                 ~~~~~~ <- N
-            #   Here we set the view length to static_inputs. In our example,
-            #   we effectively ignore the fact that we have a list here. What is
-            #   significant is that our index i is equivalent when the view length
-            #   is right-justified, whether we have the list or not. Concretely,
-            #   indexing h or i from `a b c [d e f g] h i` is equvalent to indexing
-            #   h or i from `a b c h i`.
-            view_length = 'varargs_length' if has_tensorlist and i < tensorlist_idx else static_inputs
-
-            if arg['simple_type'] == 'TensorList':
-                # NOTE: don't advance real_inputs here. After this we are going
-                # to switch over to indexing from the end as if we only had
-                # the static arguments.
-                arguments.append('toTensors(peekSlice(stack, {}, varargs_length - {}, varargs_length))'
-                                 .format(real_inputs, static_inputs))
-            elif arg['simple_type'] in default_only_types:
+        for arg in decl['arguments']:
+            if arg['simple_type'] in default_only_types:
                 arguments.append(arg['default'])
-            elif is_tensor_arg(arg) or is_positional_arg[i]:
-                value = '(std::move(peek(stack, {}, {})))'.format(real_inputs, view_length)
+            else:
+                value = '(std::move(peek(stack, {}, {})))'.format(real_inputs, num_inputs)
                 arguments.append(from_ivalue(arg, value))
                 real_inputs += 1
-            else:
-                assign = "auto {} = {};".format(arg['name'], from_attribute(arg))
-                kw_assignments.append(assign)
-                arguments.append(arg['name'])
 
-        call = get_invocation(decl, arguments, num_dynamic_inputs)
+        call = get_invocation(decl, arguments, num_inputs)
 
         returns = decl['returns']
-        all_scalars = all(r['dynamic_type'] != 'TensorList' for r in returns)
 
         constructor = CONSTRUCTOR.substitute(name=decl['name'],
                                              call=call,
                                              kw_assignments=kw_assignments,
-                                             num_dynamic_inputs=num_dynamic_inputs)
+                                             num_inputs=num_inputs,
+                                             op_capture=op_capture)
         return constructor
-
-    def emit_decl(decl):
-        arguments = decl['arguments']
-        has_tensorlist = any(arg['simple_type'] == 'TensorList' for arg in arguments)
-        num_tensor_args = sum(map(is_tensor_arg, arguments))
-
-        # Right now, we generate dispatch methods that either take all non-tensor arguments
-        # as attributes, or don't use any attributes at all. In the future we might want to
-        # have something in the middle too (might be useful for e.g. constant propagation
-        # into attributes, as that would allow us to avoid reparsing tensors into scalar
-        # args at every invocation).
-
-        all_real_arguments_are_inputs = tuple(arg['simple_type'] not in default_only_types for arg in arguments)
-        only_tensors_are_inputs = tuple(is_tensor_arg(arg) for arg in arguments)
-
-        variants = [emit_decl_variant(decl, all_real_arguments_are_inputs, has_tensorlist)]
-        # in some cases there are no inputs that are possibly attributes, so the
-        # variants are actually the same. If so avoid generating both to save compilation
-        # time.
-        if all_real_arguments_are_inputs != only_tensors_are_inputs:
-            variants += [',', emit_decl_variant(decl, only_tensors_are_inputs, has_tensorlist)]
-
-        ops.append(OPERATOR.substitute(signature=signature(decl),
-                                       ops=variants))
 
     # This function declares an order on declarations. This is necessary because
     # there is some ambiguity in the choice of overload: if an argument is overloaded
@@ -376,7 +275,8 @@ def gen_jit_dispatch(declarations, out, template_path):
 
     jit_decls = sort_decls(jit_decls)
     for decl in jit_decls:
-        emit_decl(decl)
+        ops.append(OPERATOR.substitute(signature=signature(decl),
+                                       op=emit_decl_variant(decl)))
 
     # Sort the generated snippets to ensure that the generation is deterministic
     env = {

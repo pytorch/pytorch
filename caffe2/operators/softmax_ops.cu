@@ -380,7 +380,7 @@ bool SoftmaxWithLossOp<float, CUDAContext>::RunOnDevice() {
       losses_.size(), losses_.data<float>(), avg_loss_data, &context_, &scratch_);
   // Average of input batch size
   if (total_weight > 0) {
-    math::Scale<float, CUDAContext>(
+    math::Scale<float, float, CUDAContext>(
         1, scale_ / total_weight, avg_loss_data, avg_loss_data, &context_);
   }
 
@@ -466,7 +466,7 @@ bool SpatialSoftmaxWithLossOp<float, CUDAContext>::RunOnDevice() {
 
   // Final scaling
   if (h_total_weight > 0) {
-    math::Scale<float, CUDAContext>(
+    math::Scale<float, float, CUDAContext>(
         1, scale_ / h_total_weight, avg_loss_data, avg_loss_data, &context_);
   }
 
@@ -571,14 +571,14 @@ bool SoftmaxWithLossGradientOp<float, CUDAContext>::RunOnDevice() {
 
   // Scale by d_avg_loss / N
   if (total_weight > 0) {
-    math::Scale<float, CUDAContext>(
+    math::Scale<float, float, CUDAContext>(
         dX->size(),
         scale_ / total_weight,
         dX->data<float>(),
         dX->template mutable_data<float>(),
         &context_);
   }
-  math::Scale<float, CUDAContext>(
+  math::Scale<float, float, CUDAContext>(
       dX->size(),
       d_avg_loss.data<float>(),
       dX->data<float>(),
@@ -661,14 +661,14 @@ bool SpatialSoftmaxWithLossGradientOp<float, CUDAContext>::RunOnDevice() {
 
   // Final scaling
   if (h_total_weight > 0) {
-    math::Scale<float, CUDAContext>(
+    math::Scale<float, float, CUDAContext>(
         dX->size(),
         scale_ / h_total_weight,
         dX->data<float>(),
         dX->template mutable_data<float>(),
         &context_);
   }
-  math::Scale<float, CUDAContext>(
+  math::Scale<float, float, CUDAContext>(
       dX->size(),
       d_avg_loss.data<float>(),
       dX->data<float>(),

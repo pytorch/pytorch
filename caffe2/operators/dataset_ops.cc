@@ -1004,7 +1004,7 @@ class TrimDatasetOp : public Operator<CPUContext> {
     // trim each column to the offset
     for (int col = 0; col < walker.fields().size(); ++col) {
       auto newOuterSize = walker.fields().at(col).offset();
-      Output(col)->Shrink(newOuterSize);
+      Output(col)->ShrinkTo(newOuterSize);
     }
     return true;
   }

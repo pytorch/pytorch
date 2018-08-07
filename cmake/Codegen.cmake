@@ -1,3 +1,9 @@
+# This ill-named file does a number of things:
+# - Installs Caffe2 header files (this has nothing to do with code generation)
+# - Configures caffe2/core/macros.h
+# - Creates an ATen target for its generated C++ files and adds it
+#   as a dependency
+
 if (DEFINED ENV{PYTORCH_PYTHON})
   message(STATUS "Using python found in $ENV{PYTORCH_PYTHON}")
   set(PYCMD "$ENV{PYTORCH_PYTHON}")
@@ -14,6 +20,11 @@ configure_file(
 install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/../caffe2
         DESTINATION include
         FILES_MATCHING PATTERN "*.h")
+if (NOT BUILD_ATEN)
+  install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/core
+          DESTINATION include/ATen/core
+          FILES_MATCHING PATTERN "*.h")
+endif()
 install(FILES ${CMAKE_BINARY_DIR}/caffe2/core/macros.h
         DESTINATION include/caffe2/core)
 

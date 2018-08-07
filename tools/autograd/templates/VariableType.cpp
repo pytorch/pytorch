@@ -17,6 +17,8 @@
 #include "torch/csrc/utils/variadic.h"
 #include "torch/csrc/autograd/functions/utils.h"
 
+#include <ATen/detail/VariableHooksInterface.h>
+
 #include <array>
 #include <cstddef>
 #include <functional>
@@ -124,7 +126,50 @@ struct VariableTypeRegistry {
   }
 };
 
+struct VariableHooks : public at::VariableHooksInterface {
+  VariableHooks(at::VariableHooksArgs) {}
+  void registerVariableTypeFor(at::Context*, at::Backend, at::ScalarType) const override;
+  at::Type& getVariableType(const at::Type&) const override;
+};
+
+// Sigh, the registry doesn't support namespaces :(
+using at::RegistererVariableHooksRegistry;
+using at::VariableHooksRegistry;
+
+// WARNING: YOU MUST DO THE NEXT TWO STATIC INITIALIZERS IN THIS ORDER.
+//
+// If you do it in the other order, this is what can happen if
+// these static initializers are called before Context is
+// initialized:
+//
+//    - VariableHooks::registerVariableTypeFor will be activated
+//      to register a variable type
+//
+//    - We run the constructor of VariableTypeRegistry, which
+//      calls at::globalContext()
+//
+//    - Context is not initialized yet, so we call the constructor
+//      of Context
+//
+//    - We register CPU types, calling VariableHooks::registerVariableTypeFor
+//
+//    - We register the CPU type as a variable type
+//
+//    - In VariableTypeRegistry, we try to register the Variable type AGAIN!!
+//      Disaster.
+//
 static VariableTypeRegistry registry;
+REGISTER_VARIABLE_HOOKS(VariableHooks)
+
+// Pre-condition: backend/scalar_type is a valid type in the type_registry
+void VariableHooks::registerVariableTypeFor(at::Context* context, at::Backend backend, at::ScalarType scalar_type) const {
+  auto* baseType = context->getTypeRaw(backend, scalar_type);
+  register_variable_type_for(baseType);
+}
+
+at::Type& VariableHooks::getVariableType(const at::Type& baseType) const {
+  return *VariableType::getType(baseType);
+}
 
 bool VariableType::isVariableType(const at::Type& type) {
   return type.is_variable();
@@ -398,7 +443,7 @@ Tensor VariableType::contiguous(const Tensor & self) const {
 static std::vector<std::vector<int64_t>> to_args_sizes(TensorList tensors) {
   std::vector<std::vector<int64_t>> args_sizes(tensors.size());
   for (size_t i = 0; i < tensors.size(); ++i) {
-    args_sizes[i] = tensors[i].sizes();
+    args_sizes[i] = tensors[i].sizes().vec();
   }
   return args_sizes;
 }

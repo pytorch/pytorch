@@ -1,8 +1,8 @@
 #pragma once
 
 #include <ATen/Registry.h>
-#include <ATen/Error.h>
 #include <ATen/ScalarType.h>
+#include <ATen/Type.h>
 
 namespace at {
   class Context;
@@ -24,6 +24,10 @@ struct AT_API VariableHooksInterface {
   // This should never actually be implemented, but it is used to
   // squelch -Werror=non-virtual-dtor
   virtual ~VariableHooksInterface() {}
+
+  virtual Type& getVariableType(const at::Type& baseType) const {
+    AT_ERROR("cannot getVariableType without libtorch");
+  }
 
   virtual void registerVariableTypeFor(Context*, Backend backend, ScalarType scalar_type) const {
     // no-op if Variable not available; it'll get handled (if at all) when

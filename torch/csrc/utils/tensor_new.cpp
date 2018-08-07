@@ -17,8 +17,8 @@
 #include "torch/csrc/autograd/generated/variable_factories.h"
 
 #include <ATen/ATen.h>
-#include <ATen/Error.h>
-#include <ATen/optional.h>
+#include <ATen/core/Error.h>
+#include <ATen/core/optional.h>
 
 #include <stdexcept>
 #include <vector>
@@ -139,8 +139,10 @@ ScalarType infer_scalar_type(PyObject *obj) {
   }
 #ifdef USE_NUMPY
   if (PyArray_Check(obj)) {
-    auto array = (PyArrayObject*)obj;
-    return numpy_dtype_to_aten(PyArray_TYPE(array));
+    return numpy_dtype_to_aten(PyArray_TYPE((PyArrayObject*)obj));
+  }
+  if (PyArray_CheckScalar(obj)) {
+    return numpy_dtype_to_aten(PyArray_TYPE((PyArrayObject*)(PyArray_FromScalar(obj, NULL))));
   }
 #endif
   if (PySequence_Check(obj)) {

@@ -2,12 +2,12 @@
 
 #include <ATen/CUDAGenerator.h>
 #include <ATen/Context.h>
-#include <ATen/Error.h>
 #include <ATen/RegisterCUDA.h>
+#include <ATen/core/Error.h>
 #include <ATen/cuda/CUDAConfig.h>
-#include <ATen/native/cuda/CuFFTPlanCache.h>
 #include <ATen/cuda/PinnedMemoryAllocator.h>
 #include <ATen/detail/CUDAHooksInterface.h>
+#include <ATen/native/cuda/CuFFTPlanCache.h>
 
 #include "THC/THC.h"
 #include <THC/THCGeneral.hpp>

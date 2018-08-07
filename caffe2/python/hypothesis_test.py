@@ -630,7 +630,7 @@ class TestOperators(hu.HypothesisTestCase):
            beta=st.floats(min_value=0.1, max_value=0.9),
            lambda1=st.floats(min_value=0.001, max_value=0.1),
            lambda2=st.floats(min_value=0.001, max_value=0.1),
-           engine=st.sampled_from([None]),
+           engine=st.sampled_from([None, "SIMD"]),
            **hu.gcs_cpu_only)
     def test_gftrl_sgd(self, inputs, in_place, alpha, beta, lambda1, lambda2,
                       engine, gc, dc):

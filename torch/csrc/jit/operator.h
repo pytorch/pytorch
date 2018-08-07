@@ -2,67 +2,91 @@
 // once C10 exists this can be removed, or stubbed out, but we need
 // it now to implement correct semantic checking for script
 #pragma once
-#include "ATen/ATen.h"
+
 #include "torch/csrc/jit/assertions.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/function_schema.h"
 #include "torch/csrc/jit/stack.h"
 
+#include "ATen/ATen.h"
+
+#include <functional>
+#include <initializer_list>
+#include <memory>
+#include <string>
+#include <unordered_map>
+#include <utility>
+#include <vector>
+
 namespace torch { namespace jit {
 
-FunctionSchema parseSchema(const std::string& decl);
+FunctionSchema parseSchema(const std::string& schema);
 
 using OperationCreator = std::function<Operation(Node*)>;
 
 struct TORCH_API Operator {
-  Operator(FunctionSchema schema, OperationCreator op, OperationCreator op_const_attributes = nullptr)
-    : schema(std::move(schema))
-    , op(std::move(op))
-    , op_const_attributes(std::move(op_const_attributes)) {}
+  Operator(FunctionSchema schema, OperationCreator op_creator)
+      : schema_(std::make_shared<FunctionSchema>(std::move(schema))),
+        op_creator_(std::move(op_creator)) {}
 
-  Operator(const std::string& schema, OperationCreator op, OperationCreator op_const_attributes = nullptr)
-    : Operator(parseSchema(schema), std::move(op), std::move(op_const_attributes)) {}
+  Operator(const std::string& schema, OperationCreator op_creator)
+      : schema_string_(schema), op_creator_(std::move(op_creator)) {}
 
-  // Helper constructor to regsiter `op` to run
+  // Helper constructor to register `op` to run
   // run for _every_ IR Node where n.kind() == name, regardless of arguments.
-  // This is accomplished by marking the schema varargs and having no required arguments.
-  // This is used for things like prim::While or prim::If that can take a number
-  // of different valid input types and lengths.
-  Operator(Symbol name, OperationCreator op)
-  : Operator(FunctionSchema(name, {}, {}, true), op, op) {}
+  // This is accomplished by marking the schema varargs and having no required
+  // arguments. This is used for things like prim::While or prim::If that can
+  // take a number of different valid input types and lengths.
+  Operator(Symbol name, OperationCreator op_creator)
+      : Operator(FunctionSchema(name, {}, {}, true), std::move(op_creator)) {}
 
-  FunctionSchema schema;
+  Operator(FunctionSchema schema, Operation op)
+      : schema_(std::make_shared<FunctionSchema>(std::move(schema))),
+        op_(std::make_shared<Operation>(std::move(op))) {}
 
-  bool matches(const Node* n) const;
-  // Operators have different versions depending on if some inputs are encoded
-  // as attributes or inputs. This function returns the right Operation function,
-  // given a node encoded for one variant.
-  // Behavior is undefined if matches(n) == false
-  // TODO (apaszke) : remove
-  Operation selectVariant(Node* n) const {
-    if(n->hasAttributes()) {
-      JIT_ASSERT(op_const_attributes != nullptr);
-      return op_const_attributes(n);
-    } else {
-      return op(n);
+  Operator(const std::string& schema, Operation op)
+      : schema_string_(schema),
+        op_(std::make_shared<Operation>(std::move(op))) {}
+
+  bool matches(const Node* node) const;
+
+  Operation getOperation(Node* node = nullptr) const {
+    if (op_) {
+      return *op_;
     }
+    AT_ASSERT(node != nullptr);
+    return op_creator_(node);
   }
-  bool hasAttributedVersion() const {
-    return op_const_attributes != nullptr;
+
+  const FunctionSchema & schema() const {
+    // we lazily parse schema initialized from strings so that
+    // we do less work during static operator registration
+    if(!schema_) {
+      schema_ = std::make_shared<FunctionSchema>(parseSchema(schema_string_.value()));
+      schema_string_ = at::nullopt;
+    }
+    return *schema_;
   }
 private:
-  OperationCreator op;
-  OperationCreator op_const_attributes;
+  mutable at::optional<std::string> schema_string_;
+  // cannot use at::optional because windows has issues that require an assignment operator to be generated
+  // cannot use std::unique_ptr because initializer lists of Operators end up copying the Operator
+  mutable std::shared_ptr<FunctionSchema> schema_;
+
+  // Essentially a variant<Operation, OperationCreator>.
+  // NB: std::function has a default state (where it == nullptr).
+  std::shared_ptr<Operation> op_;
+  OperationCreator op_creator_;
 };
 
-const std::vector<std::shared_ptr<Operator>>& getAllOperatorsFor(Symbol name);
+TORCH_API const std::vector<std::shared_ptr<Operator>>& getAllOperatorsFor(Symbol name);
 std::shared_ptr<Operator> findOperatorFor(const Node* node);
 const Operator& getOperatorFor(const Node* node);
 
 inline Operation getOperation(Node* node) {
   // note: getOperatorFor ensures that getOperatorFor(node).matches(node) == true
   // so the call to selectVariant is always valid.
-  return getOperatorFor(node).selectVariant(node);
+  return getOperatorFor(node).getOperation(node);
 }
 
 void registerOperator(Operator&& op);

@@ -234,6 +234,10 @@ class Tensor(torch._C._TensorBase):
         r"""See :func:`torch.argmin`"""
         return torch.argmin(self, dim, keepdim)
 
+    def argsort(self, dim=None, descending=False):
+        r"""See :func: `torch.argsort`"""
+        return torch.argsort(self, dim, descending)
+
     def btrifact(self, info=None, pivot=True):
         r"""See :func:`torch.btrifact`
         """
@@ -384,6 +388,8 @@ class Tensor(torch._C._TensorBase):
         return sorted(keys)
 
     # Numpy array interface, to support `numpy.asarray(tensor) -> ndarray`
+    __array_priority__ = 1000    # prefer Tensor ops over numpy ones
+
     def __array__(self, dtype=None):
         if dtype is None:
             return self.cpu().numpy()

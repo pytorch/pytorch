@@ -364,6 +364,10 @@ class TestOperators(TestCase):
         y = Variable(torch.randn(1, 2, 3, 4), requires_grad=True)
         self.assertONNX(lambda x, y: x.pow(y), (x, y))
 
+    def test_elu(self):
+        x = Variable(torch.randn(1, 2, 3, 4), requires_grad=True)
+        self.assertONNX(nn.ELU(), x)
+
     def test_selu(self):
         x = Variable(torch.randn(1, 2, 3, 4), requires_grad=True)
         self.assertONNX(nn.SELU(), x)

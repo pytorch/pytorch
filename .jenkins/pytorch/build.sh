@@ -32,6 +32,7 @@ pip install -r requirements.txt || true
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # This is necessary in order to cross compile (or else we'll have missing GPU device).
   export MAX_JOBS=4
+  # This is necessary in order to cross compile (or else we'll have missing GPU device).
   export HCC_AMDGPU_TARGET=gfx900
 
   # These environment variables are not set on CI when we were running as the Jenkins user.
@@ -43,12 +44,13 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # https://github.com/RadeonOpenCompute/hcc#hcc-with-thinlto-linking
   export KMTHINLTO=1
 
-  sudo chown -R jenkins:jenkins /usr/local
-  rm -rf "$(dirname "${BASH_SOURCE[0]}")/../../../pytorch_amd/" || true
-  python "$(dirname "${BASH_SOURCE[0]}")/../../tools/amd_build/build_pytorch_amd.py"
+  # Need the libc++1 and libc++abi1 libraries to allow torch._C to load at runtime
+  sudo apt-get install libc++1
+  sudo apt-get install libc++abi1
 
-  USE_ROCM=1 python setup.py install
-  exit
+  python tools/amd_build/build_pytorch_amd.py
+  USE_ROCM=1 python setup.py install --user
+  exit 0
 fi
 
 # TODO: Don't install this here

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "ATen/Tensor.h"
-#include "ATen/Error.h"
+#include "ATen/core/Error.h"
 
 #include <functional>
 #include <sstream>
@@ -111,7 +111,7 @@ inline std::vector<Tensor> expand_outplace(TensorList to_expand) {
     if (!to_expand[i].defined()) {
       continue;
     } else if (first) {
-      sizes = to_expand[i].sizes();
+      sizes = to_expand[i].sizes().vec();
       first = false;
     } else {
       sizes = infer_size(sizes, to_expand[i].sizes());

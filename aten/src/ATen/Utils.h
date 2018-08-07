@@ -1,9 +1,10 @@
 #pragma once
 
 #include "ATen/ATenGeneral.h"
-#include "ATen/ArrayRef.h"
-#include "ATen/Error.h"
+#include "ATen/StorageImpl.h"
 #include "ATen/UndefinedTensor.h"
+#include "ATen/core/ArrayRef.h"
+#include "ATen/core/Error.h"
 
 #include <algorithm>
 #include <sstream>
@@ -24,12 +25,12 @@ AT_API int _crash_if_asan(int);
 
 template <typename T, typename Base>
 static inline T* checked_cast_storage(Base* expr, const char * name, int pos, Backend backend, ScalarType scalar_type) {
-  if (expr->pImpl()->type().backend() != backend) {
-    AT_ERROR("Expected object of backend ", backend, " but got backend ", expr->pImpl()->type().backend(),
+  if (at::detail::get_backend(expr->pImpl()) != backend) {
+    AT_ERROR("Expected object of backend ", backend, " but got backend ", at::detail::get_backend(expr->pImpl()),
              " for argument #", pos, " '", name, "'");
   }
-  if (expr->pImpl()->type().scalarType() != scalar_type) {
-    AT_ERROR("Expected object of scalar type ", scalar_type, " but got scalar type ", expr->pImpl()->type().scalarType(),
+  if (expr->pImpl()->scalar_type() != scalar_type) {
+    AT_ERROR("Expected object of scalar type ", scalar_type, " but got scalar type ", expr->pImpl()->scalar_type(),
              " for argument #", pos, " '", name, "'");
   }
   // NB: We're getting rid of derived types soon!

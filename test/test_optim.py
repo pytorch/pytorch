@@ -11,7 +11,7 @@ from torch.optim import SGD
 from torch.autograd import Variable
 from torch import sparse
 from torch.optim.lr_scheduler import LambdaLR, StepLR, MultiStepLR, ExponentialLR, CosineAnnealingLR, ReduceLROnPlateau
-from common import TestCase, run_tests, TEST_WITH_UBSAN, TEST_WITH_ROCM
+from common import TestCase, run_tests, TEST_WITH_UBSAN, skipIfRocm
 
 
 def rosenbrock(tensor):
@@ -31,7 +31,6 @@ def wrap_old_fn(old_fn, **config):
 
 
 class TestOptim(TestCase):
-
     def _test_rosenbrock(self, constructor, old_fn):
         params_t = torch.Tensor([1.5, 1.5])
         state = {}
@@ -237,6 +236,7 @@ class TestOptim(TestCase):
     def _build_params_dict_single(self, weight, bias, **kwargs):
         return [dict(params=bias, **kwargs)]
 
+    @skipIfRocm
     def test_sgd(self):
         self._test_rosenbrock(
             lambda params: optim.SGD(params, lr=1e-3),
@@ -273,6 +273,7 @@ class TestOptim(TestCase):
             lambda params: optim.SGD(params, lr=5e-3)
         )
 
+    @skipIfRocm
     def test_adam(self):
         self._test_rosenbrock(
             lambda params: optim.Adam(params, lr=1e-2),
@@ -310,6 +311,7 @@ class TestOptim(TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 0: 1.0"):
             optim.SparseAdam(None, lr=1e-2, betas=(1.0, 0.0))
 
+    @skipIfRocm
     def test_adadelta(self):
         self._test_rosenbrock(
             lambda params: optim.Adadelta(params),
@@ -333,6 +335,7 @@ class TestOptim(TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid rho value: 1.1"):
             optim.Adadelta(None, lr=1e-2, rho=1.1)
 
+    @skipIfRocm
     def test_adagrad(self):
         self._test_rosenbrock(
             lambda params: optim.Adagrad(params, lr=1e-1),
@@ -366,6 +369,7 @@ class TestOptim(TestCase):
             lambda params: optim.Adagrad(params, lr=1e-1)
         )
 
+    @skipIfRocm
     def test_adamax(self):
         self._test_rosenbrock(
             lambda params: optim.Adamax(params, lr=1e-1),
@@ -390,6 +394,7 @@ class TestOptim(TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 1: 1.0"):
             optim.Adamax(None, lr=1e-2, betas=(0.0, 1.0))
 
+    @skipIfRocm
     def test_rmsprop(self):
         self._test_rosenbrock(
             lambda params: optim.RMSprop(params, lr=1e-2),
@@ -414,6 +419,7 @@ class TestOptim(TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid momentum value: -1.0"):
             optim.RMSprop(None, lr=1e-2, momentum=-1.0)
 
+    @skipIfRocm
     def test_asgd(self):
         self._test_rosenbrock(
             lambda params: optim.ASGD(params, lr=1e-3),
@@ -438,7 +444,7 @@ class TestOptim(TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -0.5"):
             optim.ASGD(None, lr=1e-2, weight_decay=-0.5)
 
-    @unittest.skipIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")
+    @skipIfRocm
     def test_rprop(self):
         self._test_rosenbrock(
             lambda params: optim.Rprop(params, lr=1e-3),
@@ -463,6 +469,7 @@ class TestOptim(TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid eta values: 1.0, 0.5"):
             optim.Rprop(None, lr=1e-2, etas=(1.0, 0.5))
 
+    @skipIfRocm
     def test_lbfgs(self):
         self._test_rosenbrock(
             lambda params: optim.LBFGS(params),
@@ -503,6 +510,20 @@ class SchedulerTestNet(torch.nn.Module):
 
     def forward(self, x):
         return self.conv2(F.relu(self.conv1(x)))
+
+
+class LambdaLRTestObject:
+    def __init__(self, value):
+        self.value = value
+
+    def __call__(self, epoch):
+        return self.value * epoch
+
+    def __eq__(self, other):
+        if isinstance(other, self.__class__):
+            return self.__dict__ == other.__dict__
+        else:
+            return False
 
 
 class TestLRScheduler(TestCase):
@@ -670,6 +691,28 @@ class TestLRScheduler(TestCase):
         scheduler_copy.load_state_dict(scheduler.state_dict())
         for key in scheduler.__dict__.keys():
             if key not in {'optimizer', 'is_better'}:
+                self.assertEqual(scheduler.__dict__[key], scheduler_copy.__dict__[key], allow_inf=True)
+
+    def test_lambda_lr_state_dict_fn(self):
+        scheduler = LambdaLR(self.opt, lr_lambda=lambda x: x)
+        state = scheduler.state_dict()
+        self.assertIsNone(state['lr_lambdas'][0])
+
+        scheduler_copy = LambdaLR(self.opt, lr_lambda=lambda x: x)
+        scheduler_copy.load_state_dict(state)
+        for key in scheduler.__dict__.keys():
+            if key not in {'optimizer', 'lr_lambdas'}:
+                self.assertEqual(scheduler.__dict__[key], scheduler_copy.__dict__[key], allow_inf=True)
+
+    def test_lambda_lr_state_dict_obj(self):
+        scheduler = LambdaLR(self.opt, lr_lambda=LambdaLRTestObject(10))
+        state = scheduler.state_dict()
+        self.assertIsNotNone(state['lr_lambdas'][0])
+
+        scheduler_copy = LambdaLR(self.opt, lr_lambda=LambdaLRTestObject(-1))
+        scheduler_copy.load_state_dict(state)
+        for key in scheduler.__dict__.keys():
+            if key not in {'optimizer'}:
                 self.assertEqual(scheduler.__dict__[key], scheduler_copy.__dict__[key], allow_inf=True)
 
     def _check_scheduler_state_dict(self, constr, constr2, epochs=10):

@@ -9,14 +9,12 @@ StorageImpl::StorageImpl(
     at::DataPtr data_ptr,
     at::Allocator* allocator,
     bool resizable)
-    : scalar_type(scalar_type),
-      data_ptr(std::move(data_ptr)),
-      size(size),
-      refcount(1),
-      weakcount(1), // from the strong reference
-      resizable(resizable),
-      allocator(allocator),
-      finalizer(nullptr) {}
+    : scalar_type_(scalar_type),
+      data_ptr_(std::move(data_ptr)),
+      size_(size),
+      resizable_(resizable),
+      allocator_(allocator),
+      finalizer_(nullptr) {}
 
 StorageImpl::StorageImpl(
     at::ScalarType scalar_type,
@@ -30,11 +28,12 @@ StorageImpl::StorageImpl(
           allocator,
           resizable) {}
 
-Type& StorageImpl::type() {
-  if (data_ptr.device().is_cuda()) {
-    return globalContext().getType(Backend::CUDA, scalar_type);
+namespace detail {
+Backend get_backend(StorageImpl* storage_impl) {
+  if (storage_impl->data_ptr().device().is_cuda()) {
+    return Backend::CUDA;
   }
-  return globalContext().getType(Backend::CPU, scalar_type);
+  return Backend::CPU;
 }
-
+} // namespace detail
 } // namespace at
