@@ -8,7 +8,7 @@
  * Both must be in the same namespace.
  */
 
-#include "ATen/core/CoreAPI.h"
+#include "ATen/core/Macros.h"
 #include "ATen/core/TensorTypeId.h"
 
 #include <atomic>

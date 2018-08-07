@@ -2,7 +2,7 @@
 
 #include <cstring>
 #include <limits>
-#include <ATen/core/CoreAPI.h>
+#include <ATen/core/Macros.h>
 
 #ifdef __CUDACC__
 #include <cuda_fp16.h>
