@@ -150,7 +150,7 @@ class TextFileReaderReadOp : public Operator<CPUContext> {
     }
 
     for (int i = 0; i < numFields; ++i) {
-      Output(i)->ShrinkTo(rowsRead);
+      Output(i)->Shrink(rowsRead);
     }
     return true;
   }
