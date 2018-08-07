@@ -517,9 +517,9 @@ bool THC_reduceDim(THCState* state,
         (TYPE) outElements, init, modifyOp, reduceOp, finalizeOp);      \
     }                                                                   \
     else                                                                \
-    {                                                                        \
-        void* stagingData;                                                   \
-        void* semaphores;                                                    \
+    {                                                                   \
+        void* stagingData = nullptr;                                    \
+        void* semaphores = nullptr;                                     \
                                                                              \
         if(grid.y > 1)                                                       \
         {                                                                    \

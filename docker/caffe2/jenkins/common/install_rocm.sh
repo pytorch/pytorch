@@ -21,7 +21,6 @@ install_ubuntu() {
                    miopengemm \
                    rocblas \
                    hipblas \
-                   hcsparse \
                    rocm-profiler \
                    cxlactivitylogger
 
@@ -51,14 +50,18 @@ install_hip_thrust() {
     git clone --recursive https://github.com/ROCmSoftwarePlatform/cub-hip.git /data/Thrust/thrust/system/cuda/detail/cub-hip
 }
 
+# This will be removed after merging an upcoming PR.
+install_hcsparse() {
+    mkdir -p /opt/rocm/debians
+    curl https://s3.amazonaws.com/ossci-linux/hcsparse-master-907a505-Linux.deb -o /opt/rocm/debians/hcsparse.deb 
+    dpkg -i /opt/rocm/debians/hcsparse.deb
+}
+
+# Install an updated version of rocRand that's PyTorch compatible.
 install_rocrand() {
-    mkdir -p /opt/rocm/tmp/
-    cd /opt/rocm/tmp/
-    git clone https://github.com/ROCmSoftwarePlatform/rocRAND.git
-    mkdir build && cd build
-    cmake ..
-    make
-    make install
+    mkdir -p /opt/rocm/debians
+    curl https://s3.amazonaws.com/ossci-linux/rocrand-1.8.0-Linux.deb -o /opt/rocm/debians/rocrand.deb 
+    dpkg -i /opt/rocm/debians/rocrand.deb
 }
 
 # Install Python packages depending on the base OS
@@ -73,3 +76,4 @@ fi
 
 install_hip_thrust
 install_rocrand
+install_hcsparse
