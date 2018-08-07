@@ -218,8 +218,6 @@ if [[ -z "$INTEGRATED" ]]; then
 else
 
   sudo FULL_CAFFE2=1 python setup.py install
-  # TODO: I'm not sure why this is necessary
-  cp -r torch/lib/tmp_install $INSTALL_PREFIX
 
 fi
 
