@@ -89,6 +89,7 @@ jobs:
           name: Build
           command: |
             set -ex
+            brew install p7zip
             export SCCACHE_BUCKET=ossci-compiler-cache
             export BUILD_ENVIRONMENT=pytorch-macos-10.13-py3
             git submodule update --init
