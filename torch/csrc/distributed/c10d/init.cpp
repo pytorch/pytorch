@@ -361,7 +361,23 @@ PyObject* c10d_init(PyObject* _unused) {
           &::c10d::ProcessGroup::Work::wait,
           py::call_guard<py::gil_scoped_release>());
 
-  module.def("_dist_broadcast_coalesced", &::c10d::distBroadcastCoalesced);
+  module.def(
+      "_dist_broadcast_coalesced",
+      &::c10d::distBroadcastCoalesced,
+      py::arg("tensors"),
+      py::arg("buffer_size"),
+      py::arg("process_group"),
+      py::call_guard<py::gil_scoped_release>());
+  module.def(
+      "_sync_params",
+      &::c10d::syncParams,
+      py::arg("process_group"),
+      py::arg("parameter_data"),
+      py::arg("buffer_data"),
+      py::arg("devices"),
+      py::arg("broadcast_bucket_size"),
+      py::arg("broadcast_buffers"),
+      py::call_guard<py::gil_scoped_release>());
 
   Py_RETURN_TRUE;
 }

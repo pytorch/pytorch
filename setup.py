@@ -892,9 +892,10 @@ if USE_DISTRIBUTED:
     include_dirs += [tmp_install_path + "/include/THD"]
     main_link_args += [THD_LIB]
     if IS_LINUX and USE_CUDA:
-        extra_compile_args += ['-DUSE_C10D']
-        main_sources += ['torch/csrc/distributed/c10d/init.cpp']
-        main_link_args += [C10D_LIB]
+        extra_compile_args.append('-DUSE_C10D')
+        main_sources.append('torch/csrc/distributed/c10d/init.cpp')
+        main_sources.append('torch/csrc/distributed/c10d/ddp.cpp')
+        main_link_args.append(C10D_LIB)
 
 if USE_CUDA:
     nvtoolext_lib_name = None

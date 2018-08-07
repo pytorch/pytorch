@@ -3,6 +3,7 @@ import math
 import multiprocessing
 import sys
 import tempfile
+import time
 import unittest
 
 from functools import wraps
@@ -23,7 +24,7 @@ if not c10d.is_available():
     sys.exit(0)
 
 
-TIMEOUT_DEFAULT = 5
+TIMEOUT_DEFAULT = 15
 TIMEOUT_OVERRIDE = {}
 
 TestSkip = namedtuple('TestSkip', 'exit_code, message')
@@ -260,22 +261,30 @@ class MultiProcessTestCase(TestCase):
 
     def _join_processes(self, fn):
         timeout = get_timeout(self.id())
+        start_time = time.time()
         for p in self.processes:
             p.join(timeout)
-        self._check_return_codes()
+        elapsed_time = time.time() - start_time
+        self._check_return_codes(elapsed_time)
 
-    def _check_return_codes(self):
+    def _check_return_codes(self, elapsed_time):
         """
         Checks that the return codes of all spawned processes match, and skips
         tests if they returned a return code indicating a skipping condition.
         """
         first_process = self.processes[0]
-        for p in self.processes:
+        for i, p in enumerate(self.processes):
+            if p.exitcode is None:
+                raise RuntimeError('Process {} terminated or timed out after {} seconds'.format(i, elapsed_time))
             self.assertEqual(p.exitcode, first_process.exitcode)
         for skip in TEST_SKIPS.values():
             if first_process.exitcode == skip.exit_code:
                 raise unittest.SkipTest(skip.message)
         self.assertEqual(first_process.exitcode, 0)
+
+    @property
+    def is_master(self):
+        return self.rank == 0
 
 
 class ProcessGroupGlooTest(MultiProcessTestCase):
@@ -564,7 +573,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @skip_if_not_multigpu
     def test_gloo_backend(self):
-        store = c10d.TCPStore('localhost', self.port, self.rank == 0)
+        store = c10d.TCPStore('localhost', self.port, self.is_master)
         options = c10d.ProcessGroupGloo.Options()
         options.devices = [c10d.ProcessGroupGloo.create_tcp_device(interface="lo")]
         process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size, options)
@@ -573,9 +582,102 @@ class DistributedDataParallelTest(MultiProcessTestCase):
     @skip_if_not_multigpu
     @skip_if_not_nccl
     def test_nccl_backend(self):
-        store = c10d.TCPStore('localhost', self.port, self.rank == 0)
+        store = c10d.TCPStore('localhost', self.port, self.is_master)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
         self._test_ddp_with_process_group(process_group)
+
+    @skip_if_not_multigpu
+    def test_dist_broadcast_coalesced(self):
+        # Set up process group.
+        store = c10d.TCPStore('localhost', self.port, self.is_master)
+        options = c10d.ProcessGroupGloo.Options()
+        options.devices = [c10d.ProcessGroupGloo.create_tcp_device(interface="lo")]
+        process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size, options)
+
+        device = torch.device('cuda')
+
+        target = torch.arange(10, dtype=torch.float64, device=device).chunk(5)
+
+        if self.is_master:
+            # All processes should have these tensors in the end.
+            tensors = target
+        else:
+            # Non-master processes start with empty tensors and should be
+            # filled with the tensors from the master.
+            tensors = torch.zeros(10, device=device).chunk(5)
+
+        c10d._dist_broadcast_coalesced(
+            tensors,
+            buffer_size=10,
+            process_group=process_group)
+
+        if not self.is_master:
+            self.assertEqual(tensors, target)
+
+    @skip_if_not_multigpu
+    def test_sync_params_no_buffers(self):
+        # Set up process group.
+        store = c10d.TCPStore('localhost', self.port, self.is_master)
+        options = c10d.ProcessGroupGloo.Options()
+        options.devices = [c10d.ProcessGroupGloo.create_tcp_device(interface="lo")]
+        process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size, options)
+
+        # Use all available devices on every process here (data is small, so should be fine).
+        devices = list(range(torch.cuda.device_count()))
+        target = torch.arange(10, dtype=torch.float64, device='cuda:0').chunk(5)
+        parameter_data = [target]
+        parameter_data += [torch.zeros(10, device=torch.device('cuda', d)).chunk(5) for d in devices[1:]]
+        buffer_data = [[]] * len(parameter_data)
+
+        c10d._sync_params(
+            process_group,
+            parameter_data=parameter_data,
+            buffer_data=buffer_data,
+            devices=devices,
+            broadcast_bucket_size=10,
+            broadcast_buffers=False)
+
+        for device_data in parameter_data:
+            for i, parameter in enumerate(device_data):
+                self.assertEqual(parameter, target[i])
+
+    @skip_if_not_multigpu
+    def test_sync_params_with_buffers(self):
+        # Set up process group.
+        store = c10d.TCPStore('localhost', self.port, self.is_master)
+        options = c10d.ProcessGroupGloo.Options()
+        options.devices = [c10d.ProcessGroupGloo.create_tcp_device(interface="lo")]
+        process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size, options)
+
+        devices = list(range(torch.cuda.device_count()))
+        target = torch.arange(10, dtype=torch.float64, device='cuda:0').chunk(5)
+        parameter_data = [target]
+        parameter_data += [torch.zeros(10, device=torch.device('cuda', d)).chunk(5) for d in devices[1:]]
+
+        # sync_params should do a dist_broadcast for buffers, so we only populate the master buffers and
+        # then check that other processes' tensors end up matching.
+
+        if self.is_master:
+            buffer_data = [target]
+            buffer_data += [torch.zeros(10, device=torch.device('cuda', d)).chunk(5) for d in devices[1:]]
+        else:
+            buffer_data = [torch.zeros(10, device=torch.device('cuda', d)).chunk(5) for d in devices]
+
+        c10d._sync_params(
+            process_group,
+            parameter_data=parameter_data,
+            buffer_data=buffer_data,
+            devices=devices,
+            broadcast_bucket_size=10,
+            broadcast_buffers=True)
+
+        for device_data in parameter_data:
+            for i, parameter in enumerate(device_data):
+                self.assertEqual(parameter, target[i])
+
+        for device_data in buffer_data:
+            for i, buffer in enumerate(device_data):
+                self.assertEqual(buffer, target[i])
 
 if __name__ == '__main__':
     assert not torch.cuda._initialized, "test_distributed must not have initialized CUDA context on main process"
