@@ -1576,7 +1576,7 @@ def kl_div(input, target, size_average=None, reduce=None, reduction='elementwise
         reduction = _Reduction.legacy_get_enum(size_average, reduce)
     else:
         reduction = _Reduction.get_enum(reduction)
-    return torch._C._nn.kl_div(input, target, reduction)
+    return torch.kl_div_loss(input, target, reduction)
 
 
 def cross_entropy(input, target, weight=None, size_average=None, ignore_index=-100,
