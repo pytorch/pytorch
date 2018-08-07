@@ -256,6 +256,7 @@ function build_caffe2() {
   pushd build
   ${CMAKE_VERSION} .. \
   ${CMAKE_GENERATOR} \
+      -DCMAKE_VERBOSE_MAKEFILE=ON \
       -DBUILDING_WITH_TORCH_LIBS=ON \
       -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
       -DBUILD_CAFFE2=$FULL_CAFFE2 \
