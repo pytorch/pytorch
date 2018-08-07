@@ -89,77 +89,93 @@ std::tuple<Tensor&,Tensor&> _gesv_single_out_cpu(
   int64_t ax = A.size(0);
   int64_t ay = A.size(1);
   int info = 0;
-
-  at::optional<Tensor> temp_sol = at::nullopt;
-  at::optional<Tensor> temp_lu = at::nullopt;
+  Tensor temp_sol;
+  Tensor temp_lu;
 
   /* Init to column major format. `sol` and `lu` need to be contiguous
    * since we pass sol.data() and lu.data() to Lapack */
-
-  bool tc = isTransposeContiguous(sol);
-  if (tc) {
-    // if transpose of output tensor is contiguous, use it
-    sol = sol.t();
-  } else if (sol.dim() == 2 &&
-             sol.size(0) == bx &&
-             sol.size(1) == by) {
-    temp_sol = self.view({bx, by}).t().clone();
+  bool tc_sol = isTransposeContiguous(sol);
+  auto self_t = self.view({bx, by}).t();
+  if (!tc_sol &&
+      !sol.is_contiguous() &&
+      sol.dim() == 2 &&
+      sol.size(0) == bx &&
+      sol.size(1) == by) {
+    // eg. torch.gesv(.., out=(n[::2], ...))
+    temp_sol = self_t.clone();
   }
 
-  if (!temp_sol) {
-    sol.resize_({by, bx});
+  if (!temp_sol.defined()) {
+    if (tc_sol) {
+      sol.t().resize_({by, bx});
+    } else {
+      sol.resize_({by, bx});
+    }
     if (&self == &sol) {
       // note: not a comprehensive check. Will fail for views
-      if (!tc) {
-        sol.copy_(self.view({bx, by}).t().clone());
+      if (!tc_sol) {
+        sol.copy_(self_t.clone());
       }
     } else {
-      sol.copy_(self.view({bx, by}).t());
+      if (tc_sol) {
+        sol.t().copy_(self_t);
+      } else {
+        sol.copy_(self_t);
+      }
     }
   }
 
-  tc = isTransposeContiguous(lu);
-  if (tc) {
-    lu = lu.t();
-  } else if (lu.dim() == 2 &&
-             lu.size(0) == ax &&
-             lu.size(1) == ay) {
+  bool tc_lu = isTransposeContiguous(lu);
+  if (!tc_lu &&
+      !lu.is_contiguous() &&
+      lu.dim() == 2 &&
+      lu.size(0) == ax &&
+      lu.size(1) == ay) {
     temp_lu = A.t().clone();
   }
 
-  if (!temp_lu) {
-    lu.resize_({ay, ax});
+  if (!temp_lu.defined()) {
+    if (tc_lu) {
+      lu.t().resize_({ay, ax});
+    } else {
+      lu.resize_({ay, ax});
+    }
     if (&A == &lu) {
-      if (!tc) {
+      if (!tc_lu) {
         lu.copy_(A.t().clone());
       }
     } else {
-      lu.copy_(A.t());
+      if (tc_lu) {
+        lu.t().copy_(A.t());
+      } else {
+        lu.copy_(A.t());
+      }
     }
   }
 
   AT_DISPATCH_FLOATING_TYPES(self.type(), "gesv", [&]{
-    auto A_ptr = temp_lu ? temp_lu.value().data<scalar_t>()
-                         : lu.data<scalar_t>();
-    auto b_ptr = temp_sol ? temp_sol.value().data<scalar_t>()
-                          : sol.data<scalar_t>();
+    auto A_ptr = temp_lu.defined() ? temp_lu.data<scalar_t>()
+                                   : lu.data<scalar_t>();
+    auto b_ptr = temp_sol.defined() ? temp_sol.data<scalar_t>()
+                                    : sol.data<scalar_t>();
     auto ipiv = at::empty({bx}, sol.options().dtype(kInt));
     lapackGesv<scalar_t>(bx, by, A_ptr, bx, ipiv.data<int>(), b_ptr, bx, &info);
   });
 
-  if (temp_sol) {
-    sol.copy_(temp_sol.value().t_());
-  } else {
-    sol = sol.t();
-  }
-
-  if (temp_lu) {
-    lu.copy_(temp_lu.value().t_());
-  } else {
-    lu = lu.t();
-  }
-
   checkErrors({info});
+
+  if (temp_sol.defined()) {
+    sol.copy_(temp_sol.t_());
+  } else if (!tc_sol) {
+    sol.t_();
+  }
+
+  if (temp_lu.defined()) {
+    lu.copy_(temp_lu.t_());
+  } else if (!tc_lu) {
+    lu.t_();
+  }
+
   return std::tuple<Tensor&, Tensor&>(sol, lu);
 }
 

@@ -178,74 +178,90 @@ AT_ERROR("gesv: MAGMA library not found in "
   int64_t ay = A.size(1);
   int info;
   int* ipiv;
-
-  at::optional<Tensor> temp_sol = at::nullopt;
-  at::optional<Tensor> temp_lu = at::nullopt;
+  Tensor temp_sol;
+  Tensor temp_lu;
 
   /* Init to column major format. See Gesv.cpp for more comments */
-
-  bool tc = isTransposeContiguous(sol);
-  if (tc) {
-    sol = sol.t();
-  } else if (sol.dim() == 2 &&
-             sol.size(0) == bx &&
-             sol.size(1) == by) {
-    temp_sol = self.view({bx, by}).t().clone();
+  bool tc_sol = isTransposeContiguous(sol);
+  auto self_t = self.view({bx, by}).t();
+  if (!tc_sol &&
+      !sol.is_contiguous() &&
+      sol.dim() == 2 &&
+      sol.size(0) == bx &&
+      sol.size(1) == by) {
+    temp_sol = self_t.clone();
   }
 
-  if (!temp_sol) {
-    sol.resize_({by, bx});
+  if (!temp_sol.defined()) {
+    if (tc_sol) {
+      sol.t().resize_({by, bx});
+    } else {
+      sol.resize_({by, bx});
+    }
     if (&self == &sol) {
-      if (!tc) {
-        sol.copy_(self.view({bx, by}).t().clone());
+      if (!tc_sol) {
+        sol.copy_(self_t.clone());
       }
     } else {
-      sol.copy_(self.view({bx, by}).t());
+      if (tc_sol) {
+        sol.t().copy_(self_t);
+      } else {
+        sol.copy_(self_t);
+      }
     }
   }
 
-  tc = isTransposeContiguous(lu);
-  if (tc) {
-    lu = lu.t();
-  } else if (lu.dim() == 2 &&
-             lu.size(0) == ax &&
-             lu.size(1) == ay) {
+  bool tc_lu = isTransposeContiguous(lu);
+  if (!tc_lu &&
+      !lu.is_contiguous() &&
+      lu.dim() == 2 &&
+      lu.size(0) == ax &&
+      lu.size(1) == ay) {
     temp_lu = A.t().clone();
   }
 
-  if (!temp_lu) {
-    lu.resize_({ay, ax});
+  if (!temp_lu.defined()) {
+    if (tc_lu) {
+      lu.t().resize_({ay, ax});
+    } else {
+      lu.resize_({ay, ax});
+    }
     if (&A == &lu) {
-      if (!tc) {
+      if (!tc_lu) {
         lu.copy_(A.t().clone());
       }
     } else {
-      lu.copy_(A.t());
+      if (tc_lu) {
+        lu.t().copy_(A.t());
+      } else {
+        lu.copy_(A.t());
+      }
     }
   }
 
   AT_DISPATCH_FLOATING_TYPES(self.type(), "gesv", [&]{
-      auto A_ptr = temp_lu ? temp_lu.value().data<scalar_t>()
-                           : lu.data<scalar_t>();
-      auto b_ptr = temp_sol ? temp_sol.value().data<scalar_t>()
-                            : sol.data<scalar_t>();
+      auto A_ptr = temp_lu.defined() ? temp_lu.data<scalar_t>()
+                                     : lu.data<scalar_t>();
+      auto b_ptr = temp_sol.defined() ? temp_sol.data<scalar_t>()
+                                      : sol.data<scalar_t>();
       ALLOCATE_ARRAY(ipiv, int, bx, sol);
       magmaGesv<scalar_t>(bx, by, A_ptr, bx, ipiv, b_ptr, bx, &info);
   });
 
-  if (temp_sol) {
-    sol.copy_(temp_sol.value().t_());
-  } else {
-    sol = sol.t();
-  }
-
-  if (temp_lu) {
-    lu.copy_(temp_lu.value().t_());
-  } else {
-    lu = lu.t();
-  }
-
   checkErrors({info});
+
+  if (temp_sol.defined()) {
+    sol.copy_(temp_sol.t_());
+  } else if (!tc_sol) {
+    sol.t_();
+  }
+
+  if (temp_lu.defined()) {
+    lu.copy_(temp_lu.t_());
+  } else if (!tc_lu) {
+    lu.t_();
+  }
+
   return std::tuple<Tensor&,Tensor&>(sol, lu);
 #endif
 }
