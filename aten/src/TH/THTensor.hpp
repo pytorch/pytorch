@@ -53,7 +53,7 @@ struct THTensor
     }
 
     inline int64_t dim() const {
-      return sizes_.size();
+      return is_zero_dim_ ? 0 : sizes_.size();
     }
 
     at::ScalarType scalar_type() const {
@@ -85,11 +85,11 @@ struct THTensor
     }
 
     inline at::IntList sizes() const {
-      return sizes_;
+      return at::IntList(sizes_.data(), dim());
     }
 
     inline at::IntList strides() const {
-      return strides_;
+      return at::IntList(strides_.data(), dim());
     }
 
     void retain() {
@@ -205,13 +205,26 @@ inline void THTensor_resizeDim(THTensor* tensor, int64_t ndim) {
   // NB: This is *truly* a resize; calling code (e.g., squeeze)
   // assumes that old values are preserved
   tensor->is_zero_dim_ = bool(ndim == 0);
-  tensor->sizes_.resize(ndim);
-  tensor->strides_.resize(ndim);
+  if (!tensor->is_zero_dim_) {
+    tensor->sizes_.resize(ndim);
+    tensor->strides_.resize(ndim);
+  } else {
+    tensor->sizes_.assign({1});
+    tensor->strides_.assign({1});
+  }
 }
 
 inline void THTensor_setSizesAndStrides(THTensor* tensor, std::vector<int64_t>&& new_size, std::vector<int64_t>&& new_stride) {
-  tensor->sizes_ = std::move(new_size);
-  tensor->strides_ = std::move(new_stride);
+  AT_CHECK(new_size.size() == new_stride.size(), "dimensionality of sizes (",
+           new_size.size(), ") must match dimensionality of strides (", new_stride.size(), ")");
+  tensor->is_zero_dim_ = bool(new_size.size() == 0);
+  if (!tensor->is_zero_dim_) {
+    tensor->sizes_ = std::move(new_size);
+    tensor->strides_ = std::move(new_stride);
+  } else {
+    tensor->sizes_.assign({1});
+    tensor->strides_.assign({1});
+  }
 }
 
 inline void THTensor_setSizeAtDim(THTensor* tensor, int dim, int64_t new_size) {
