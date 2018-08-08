@@ -153,7 +153,7 @@ def default_collate(batch):
 
     error_msg = "batch must contain tensors, numbers, dicts or lists; found {}"
     elem_type = type(batch[0])
-    if isinstance(batch[0], torch.Tensor):
+    if elem_type == torch.Tensor:
         out = None
         if _use_shared_memory:
             # If we're in a background process, concatenate directly into a
