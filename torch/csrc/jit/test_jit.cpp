@@ -860,18 +860,7 @@ const static auto cf_examples = R"JIT(
       a *= a
       i += 1
     return a
-  def while_if_test(a, b):
-    c = 0
-    while a < 10:
-      a = a + 1
-      b = b + 1
-      if a > b:
-        c = 2
-      else:
-        c = 3
-    return a + 1
- )JIT";
-
+)JIT";
 void testControlFlow() {
   script::Module cu;
   script::defineMethodsInModule(cu, cf_examples, torch::jit::script::nativeResolver, nullptr);
@@ -892,69 +881,7 @@ void testControlFlow() {
   REQUIRE(3 == run_binary("if_test", 3, 2));
   REQUIRE(2 == run_binary("if_one", 2, 3));
   REQUIRE(2 == run_binary("if_one", 3, 2));
-  REQUIRE(256 == run_binary("while_test", 2, 0));
-}
-
-const static auto if_test_expected = R"JIT(  %2 = aten::lt(a, b)
-  %3 = prim::TensorToNum(%2)
-  if %3:
-    c = b
-  else:
-    c = a
-  return c
-)JIT";
-
-const static auto if_one_expected = R"JIT(  %2 = aten::lt(a, b)
-  %3 = prim::TensorToNum(%2)
-  if %3:
-    c = a
-  else:
-    c = b
-  return c
-)JIT";
-
-const static auto while_test_expected = R"JIT(  %4 = aten::lt(i, 3)
-  %5 = prim::TensorToNum(%4)
-  while %5
-    a = aten::mul(a, a)
-    i = aten::add(i, 1, 1)
-    %15 = aten::lt(i, 3)
-    %5 = prim::TensorToNum(%15)
-  return a
-)JIT";
-
-const static auto while_if_test_expected = R"JIT(  %5 = aten::lt(a, 10)
-  %6 = prim::TensorToNum(%5)
-  while %6
-    a = aten::add(a, 1, 1)
-    b = aten::add(b, 1, 1)
-    %18 = aten::gt(a, b)
-    %19 = prim::TensorToNum(%18)
-    if %19:
-      c = 2
-    else:
-      c = 3
-    %25 = aten::lt(a, 10)
-    %6 = prim::TensorToNum(%25)
-  %33 = aten::add(a, 1, 1)
-  return %33
-)JIT";
-
-void testPrettyPrinter() {
-  script::Module cu;
-  script::defineMethodsInModule(cu, cf_examples, torch::jit::script::Resolver(), nullptr);
-
-  auto run_test = [&](const std::string & name, int64_t a, int64_t b) {
-    std::ostringstream os;
-    auto graph = cu.get_method(name).graph();
-    graph->prettyPrint(os);
-    return os.str();
-  };
-
-  REQUIRE(if_test_expected == run_test("if_test", 3, 2));
-  REQUIRE(if_one_expected == run_test("if_one", 3, 2));
-  REQUIRE(while_test_expected == run_test("while_test", 3, 2));
-  REQUIRE(while_if_test_expected == run_test("while_if_test", 3, 2));
+  REQUIRE(256 == run_binary("while_test",2,0));
 }
 
 void testIValue() {
@@ -1252,8 +1179,6 @@ TEST_CASE( "jit test CPU", "[cpu]" ) {
     internedStringsTests();
   SECTION( "custom operators" )
     testCustomOperators();
-  SECTION( "debug printing" )
-    testPrettyPrinter();
 }
 
 TEST_CASE( "jit test CUDA", "[cuda]" ) {

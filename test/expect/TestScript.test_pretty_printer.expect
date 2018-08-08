@@ -1,0 +1,15 @@
+  %5 = aten::lt(a, 10)
+  %6 = prim::TensorToNum(%5)
+  while %6
+    a = aten::add(a, 1, 1)
+    b = aten::add(b, 1, 1)
+    %18 = aten::gt(a, b)
+    %19 = prim::TensorToNum(%18)
+    if %19:
+      c = 2
+    else:
+      c = 3
+    %25 = aten::lt(a, 10)
+    %6 = prim::TensorToNum(%25)
+  %33 = aten::add(a, 1, 1)
+  return %33

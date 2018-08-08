@@ -1,0 +1,7 @@
+  %2 = aten::lt(a, b)
+  %3 = prim::TensorToNum(%2)
+  if %3:
+    c = b
+  else:
+    c = a
+  return c

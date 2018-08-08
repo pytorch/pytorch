@@ -97,6 +97,64 @@ std::string escapeString(std::string s) {
   return s;
 }
 
+void printAttributeValue(std::ostream & out, Symbol & name, const Node * n) {
+  switch(n->kindOf(name)) {
+    case AttributeKind::f:
+      out << n->f(name);
+      break;
+    case AttributeKind::fs:
+      printPrimList(out,n->fs(name));
+      break;
+    case AttributeKind::i:
+      out << n->i(name);
+      break;
+    case AttributeKind::is:
+      printPrimList(out,n->is(name));
+      break;
+    case AttributeKind::s:
+      out << escapeString(n->s(name));
+      break;
+    case AttributeKind::ss:
+      printPrimList(out,n->ss(name));
+      break;
+    case AttributeKind::t:
+      {
+        at::Tensor t = n->t(name);
+        // 1-elem tensors are usually boxed scalars, so print them like it
+        if (t.numel() == 1) {
+          auto scalar_tensor = at::_local_scalar(t.view({}));
+          out << "{";
+          if (scalar_tensor.isFloatingPoint()) {
+            out << scalar_tensor.toDouble();
+          } else {
+            out << scalar_tensor.toLong();
+          }
+          out << "}";
+        } else if (t.numel() <= max_tensor_display_size) {
+          // TODO: This is awful code.  Also it doesn't work on Windows.
+          std::ostringstream tensor_ss;
+          tensor_ss << t;
+          std::string tensor_s{tensor_ss.str()};
+          // Remove newlines
+          std::replace(tensor_s.begin(), tensor_s.end(), '\n', ' ');
+          out << tensor_s;
+        } else {
+          out << "<Tensor>";
+        }
+        break;
+      }
+    case AttributeKind::ts:
+      out << "[<Tensors>]";
+      break;
+    case AttributeKind::g:
+      out << "<Graph>";
+      break;
+    case AttributeKind::gs:
+      out << "[<Graphs>]";
+      break;
+  }
+}
+
 void printAttributes(std::ostream & out, const Node * n, bool ignore_subgraph=false) {
   out << "[";
   auto names = n->attributeNames();
@@ -110,62 +168,9 @@ void printAttributes(std::ostream & out, const Node * n, bool ignore_subgraph=fa
     // don't want to print the qualifier since it should always
     // be attribute, but you might be able to track down a weird
     // bug by printing it out.
-    out << name.toUnqualString() <<"=";
-    switch(n->kindOf(name)) {
-      case AttributeKind::f:
-        out << n->f(name);
-        break;
-      case AttributeKind::fs:
-        printPrimList(out,n->fs(name));
-        break;
-      case AttributeKind::i:
-        out << n->i(name);
-        break;
-      case AttributeKind::is:
-        printPrimList(out,n->is(name));
-        break;
-      case AttributeKind::s:
-        out << "\"" << escapeString(n->s(name)) << "\"";
-        break;
-      case AttributeKind::ss:
-        printPrimList(out,n->ss(name));
-        break;
-      case AttributeKind::t:
-        {
-          at::Tensor t = n->t(name);
-          // 1-elem tensors are usually boxed scalars, so print them like it
-          if (t.numel() == 1) {
-            auto scalar_tensor = at::_local_scalar(t.view({}));
-            out << "{";
-            if (scalar_tensor.isFloatingPoint()) {
-              out << scalar_tensor.toDouble();
-            } else {
-              out << scalar_tensor.toLong();
-            }
-            out << "}";
-          } else if (t.numel() <= max_tensor_display_size) {
-            // TODO: This is awful code.  Also it doesn't work on Windows.
-            std::ostringstream tensor_ss;
-            tensor_ss << t;
-            std::string tensor_s{tensor_ss.str()};
-            // Remove newlines
-            std::replace(tensor_s.begin(), tensor_s.end(), '\n', ' ');
-            out << tensor_s;
-          } else {
-            out << "<Tensor>";
-          }
-          break;
-        }
-      case AttributeKind::ts:
-        out << "[<Tensors>]";
-        break;
-      case AttributeKind::g:
-        out << "<Graph>";
-        break;
-      case AttributeKind::gs:
-        out << "[<Graphs>]";
-        break;
-    }
+    out << name.toUnqualString() << "=";
+
+    printAttributeValue(out, name, n);
   }
   out << "]";
 }
@@ -251,23 +256,29 @@ std::ostream& operator<<(std::ostream & out, const Graph & g) {
   return out;
 }
 
-std::string getBaseName(std::string str) {
-  return str.substr(0, str.find_first_of('.'));
-}
+typedef std::unordered_map<std::string, std::string> alias_list;
+typedef std::unordered_map<std::string, std::pair<const Node*, Symbol>> constant_list;
 
-std::ostream& prettyPrintValue(std::ostream & out, const Value* val) {
-  auto scope = val->node()->scope();
+std::ostream& prettyPrintValue(
+  std::ostream & out,
+  const Value* val,
+  constant_list& constants,
+  alias_list& aliases
+) {
   auto unique = val->uniqueName();
   if (val->node()->kind() == prim::Constant) {
-    if (scope->hasConstant(unique)) {
-      out << scope->getConstant(unique);
+    auto const_value = constants.find(unique);
+    if (const_value != constants.end()) {
+      printAttributeValue(out, const_value->second.second, const_value->second.first);
     } else {
-      throw std::runtime_error("const not found for : " + unique);
+      AT_ERROR("Could not find a constant");
     }
   } else {
     auto name = val->readableName();
-    if (scope->hasNameAlias(unique)) {
-      name = scope->getNameAlias(unique);
+
+    auto aliased_name = aliases.find(unique);
+    if (aliased_name != aliases.end()) {
+      name = aliased_name->second;
     }
 
     if (isdigit(name.at(0))) {
@@ -278,37 +289,132 @@ std::ostream& prettyPrintValue(std::ostream & out, const Value* val) {
 return out;
 }
 
-std::ostream& prettyPrintInputs(std::ostream & out, const Node* node) {
+std::ostream& prettyPrintInputs(
+  std::ostream & out,
+  const Node* node,
+  constant_list& constants,
+  alias_list& aliases
+) {
   out << "(";
   auto delimiter = "";
-  for (auto in_value : node->inputs()) {
+  for (const auto* in_value : node->inputs()) {
     out << delimiter;
-    prettyPrintValue(out, in_value);
+    prettyPrintValue(out, in_value, constants, aliases);
     delimiter = ", ";
   }
   out << ")";
   return out;
 }
 
-std::ostream& prettyPrintNodeVisitor(std::ostream & out, const Node* root, int level);
+std::ostream& prettyPrintNodeVisitor(
+  std::ostream & out,
+  const Node* root,
+  int level,
+  constant_list& constants,
+  alias_list& aliases
+);
 
-std::ostream& prettyPrintBlockVisitor(std::ostream & out, const Block* root, int level) {
-  for (auto node : root->nodes()) {
-    prettyPrintNodeVisitor(out, node, level);
+std::ostream& prettyPrintBlockVisitor(
+  std::ostream & out,
+  const Block* root,
+  int level,
+  constant_list& constants,
+  alias_list& aliases
+) {
+  for (const auto* node : root->nodes()) {
+    prettyPrintNodeVisitor(out, node, level, constants, aliases);
   }
 
-  prettyPrintNodeVisitor(out, root->return_node(), level);
+  prettyPrintNodeVisitor(out, root->return_node(), level, constants, aliases);
+
+  return out;
+}
+
+std::ostream& prettyPrintIf(
+  std::ostream & out,
+  const Node* node,
+  int level,
+  constant_list& constants,
+  alias_list& aliases
+) {
+  out << "if ";
+  auto if_block = node->blocks()[0];
+  auto else_block = node->blocks()[1];
+  prettyPrintValue(out, node->inputs()[0], constants, aliases);
+  out << ":" << std::endl;
+
+  // Print node contents
+  prettyPrintBlockVisitor(out, if_block, level + 1, constants, aliases);
+  // Print if block output
+  int if_count = 0;
+  for (const auto* output_value : node->outputs()) {
+    indent(out, level + 1);
+    prettyPrintValue(out, output_value, constants, aliases);
+    out << " = ";
+    prettyPrintValue(out, if_block->return_node()->inputs()[if_count++], constants, aliases);
+    out << std::endl;
+    if_count++;
+  }
+
+  indent(out, level);
+  out << "else:" << std::endl;
+  prettyPrintBlockVisitor(out, else_block, level + 1, constants, aliases);
+  int else_count = 0;
+  for (const auto* output_value : node->outputs()) {
+    indent(out, level + 1);
+    out << output_value->readableName();
+    out << " = ";
+    prettyPrintValue(out, else_block->return_node()->inputs()[else_count], constants, aliases);
+    out << std::endl;
+    else_count++;
+  }
+
+  return out;
+}
+
+std::ostream& prettyPrintLoop(
+  std::ostream & out,
+  const Node* node,
+  int level,
+  constant_list& constants,
+  alias_list& aliases
+) {
+  out << "while ";
+  prettyPrintValue(out, node->inputs()[1], constants, aliases);
+
+  out << std::endl;
+  auto body_block = node->blocks()[0];
+
+  // Offset to skip loop trip count
+  int count = 1;
+  for (const auto* block_param : body_block->param_node()->outputs())  {
+    // add names to map
+    aliases[block_param->uniqueName()] = node->inputs()[count]->readableName();
+    count++;
+  }
+
+  // Add alias for loop condition
+  aliases[body_block->return_node()->inputs()[0]->readableName()] = node->inputs()[1]->uniqueName();
+
+  // for (auto block_input : body_block->param_node())
+  prettyPrintBlockVisitor(out, body_block, level + 1, constants, aliases);
 
   return out;
 }
 
 // Handles iterating over nodes/subblocks
-std::ostream& prettyPrintNodeVisitor(std::ostream & out, const Node* node, int level) {
+std::ostream& prettyPrintNodeVisitor(
+  std::ostream & out,
+  const Node* node,
+  int level,
+  constant_list& constants,
+  alias_list& aliases
+) {
   if (node->kind() == prim::Constant) {
     // Add constant to current scope map
-    node->scope()->addConstant(
-      node->outputs()[0]->uniqueName(),
-      node->i(node->attributeNames()[0])
+    constants[node->outputs()[0]->uniqueName()] = std::make_pair(
+      node,
+      node->attributeNames()[0]
     );
     return out;
   }
@@ -319,80 +425,22 @@ std::ostream& prettyPrintNodeVisitor(std::ostream & out, const Node* node, int l
   }
 
   indent(out, level);
-  int new_level = level + 1;
 
   // if there are subblocks on this node, visit them
   switch (node->kind()) {
-  case prim::Loop: {
-    out << "while ";
-    prettyPrintValue(out, node->inputs()[1]);
-
-    out << std::endl;
-    auto body_block = node->blocks()[0];
-
-    // Offset to skip loop trip count
-    int count = 1;
-    std::map<std::string, Value*> looks;
-    for (auto block_param : body_block->param_node()->outputs())  {
-      // add names to map
-      node->scope()->addNameAlias(
-        block_param->uniqueName(),
-        node->inputs()[count]->readableName()
-      );
-      count++;
-    }
-
-    // Add alias for loop condition
-    node->scope()->addNameAlias(
-      body_block->return_node()->inputs()[0]->readableName(),
-      node->inputs()[1]->uniqueName()
-    );
-
-    // for (auto block_input : body_block->param_node())
-    prettyPrintBlockVisitor(out, body_block, new_level);
+  case prim::Loop:
+    prettyPrintLoop(out, node, level, constants, aliases);
     break;
-  }
-  case prim::If: {
-    out << "if ";
-    auto if_block = node->blocks()[0];
-    auto else_block = node->blocks()[1];
-    prettyPrintValue(out, node->inputs()[0]);
-    out << ":" << std::endl;
-
-    // Print node contents
-    prettyPrintBlockVisitor(out, if_block, new_level);
-    // Print if block output
-    int if_count = 0;
-    for (auto output_value : node->outputs()) {
-      indent(out, new_level);
-      prettyPrintValue(out, output_value);
-      out << " = ";
-      prettyPrintValue(out, if_block->return_node()->inputs()[if_count++]);
-      out << std::endl;
-      if_count++;
-    }
-
-    indent(out, level);
-    out << "else:" << std::endl;
-    prettyPrintBlockVisitor(out, else_block, new_level);
-    int else_count = 0;
-    for (auto output_value : node->outputs()) {
-      indent(out, new_level);
-      out << output_value->readableName();
-      out << " = ";
-      prettyPrintValue(out, else_block->return_node()->inputs()[else_count]);
-      out << std::endl;
-      else_count++;
-    }
-    }
+  case prim::If:
+    prettyPrintIf(out, node, level, constants, aliases);
     break;
   default:
     // Print outputs
     if (node->outputs().size() > 0) {
       auto delim = "";
-      for (auto output_value : node->outputs()) {
+      for (const auto* output_value : node->outputs()) {
         out << delim;
-        prettyPrintValue(out, output_value);
+        prettyPrintValue(out, output_value, constants, aliases);
         delim = ", ";
       }
       out << " = ";
@@ -401,7 +449,7 @@ std::ostream& prettyPrintNodeVisitor(std::ostream & out, const Node* node, int l
     out << node->kind().toQualString();
 
     // Print instruction parameters
-    prettyPrintInputs(out, node);
+    prettyPrintInputs(out, node, constants, aliases);
 
     out << std::endl;
   }
@@ -410,12 +458,14 @@ std::ostream& prettyPrintNodeVisitor(std::ostream & out, const Node* node, int l
 }
 
 std::ostream& Graph::prettyPrint(std::ostream & out) {
+  constant_list empty_constants;
+  alias_list empty_aliases;
   // Print body
-  prettyPrintBlockVisitor(out, block(), 1);
+  prettyPrintBlockVisitor(out, block(), 1, empty_constants, empty_aliases);
 
   indent(out, 1);
   out << "return ";
-  prettyPrintValue(out, block()->return_node()->inputs()[0]);
+  prettyPrintValue(out, block()->return_node()->inputs()[0], empty_constants, empty_aliases);
   out << std::endl;
   return out;
 }
