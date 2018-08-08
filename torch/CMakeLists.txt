@@ -205,24 +205,45 @@ target_compile_definitions(torch PRIVATE _THP_CORE)
 
 # until they can be unified, keep these lists synced with setup.py
 if(MSVC)
-  target_compile_options(torch PRIVATE
-    /MD
-    /Z7
-    /EHa
-    /DNOMINMAX
-    /wd4267
-    /wd4251
-    /wd4522
-    /wd4522
-    /wd4838
-    /wd4305
-    /wd4244
-    /wd4190
-    /wd4101
-    /wd4996
-    /wd4275
-    /bigobj
-    )
+	if (${CMAKE_BUILD_TYPE} MATCHES "Debug")
+	  target_compile_options(torch PRIVATE
+		/MDd
+		/Z7
+		/EHa
+		/DNOMINMAX
+		/wd4267
+		/wd4251
+		/wd4522
+		/wd4522
+		/wd4838
+		/wd4305
+		/wd4244
+		/wd4190
+		/wd4101
+		/wd4996
+		/wd4275
+		/bigobj
+		)
+	else()
+	  target_compile_options(torch PRIVATE
+		/MD
+		/Z7
+		/EHa
+		/DNOMINMAX
+		/wd4267
+		/wd4251
+		/wd4522
+		/wd4522
+		/wd4838
+		/wd4305
+		/wd4244
+		/wd4190
+		/wd4101
+		/wd4996
+		/wd4275
+		/bigobj
+		)
+	endif()
 else()
   target_compile_options(torch PRIVATE
     -std=c++11
