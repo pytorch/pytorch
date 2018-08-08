@@ -413,6 +413,46 @@ Operation listAdd(Node* node) {
   };
 }
 
+Operation makeMutable(Node* node) {
+  return [](Stack& stack) {
+    Shared<IntList> a;
+    pop(stack, a);
+    IValue mutable_list(MutableIntList::create(a->elements()));
+    IValue world{World()};
+
+    push(stack, mutable_list, world);
+    return 0;
+  };
+}
+
+Operation makeImmutable(Node* node) {
+  return [](Stack& stack) {
+    Shared<MutableIntList> a;
+    World w;
+    pop(stack, a, w);
+    IValue list(IntList::create(a->elements()));
+
+    push(stack, list);
+    return 0;
+  };
+}
+
+Operation listAppend(Node* node) {
+  return [](Stack& stack) {
+    Shared<MutableIntList> a;
+    int64_t el;
+    World w;
+    pop(stack, a, el, w);
+
+    a->elements().push_back(el);
+
+    IValue new_world{World()};
+    push(stack, new_world);
+    return 0;
+  };
+}
+
+
 RegisterOperators reg2({
     Operator("aten::select(int[] a, int b) -> int", listSelect<Shared<IntList>>),
     Operator("aten::select(float[] a, int b) -> float", listSelect<Shared<DoubleList>>),
@@ -430,6 +470,9 @@ RegisterOperators reg2({
     Operator("aten::add(float[] a, float[] b) -> float[]", listAdd<Shared<DoubleList>, double>),
     Operator("aten::add(Tensor[] a, Tensor[] b) -> Tensor[]", listAdd<Shared<TensorList>, at::Tensor>),
 
+    Operator("aten::_make_mutable(int[] a) -> (int[m], World)", makeMutable),
+    Operator("aten::_make_immutable(int[m] a, World w) -> int[]", makeImmutable),
+    Operator("aten::append(int[m] a, int el, World w) -> World", listAppend),
 
     DEFINE_BINARY_OP(aten::add, a + b)
     DEFINE_BINARY_OP(aten::sub, a - b)
