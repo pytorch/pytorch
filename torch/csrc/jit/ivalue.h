@@ -102,12 +102,12 @@ struct ConstantString : at::Retainable {
 };
 
 template<typename T>
-struct ConstantList;
+struct List;
 struct IValue;
-using Tuple = ConstantList<IValue>;
-using IntList = ConstantList<int64_t>;
-using TensorList = ConstantList<at::Tensor>;
-using DoubleList = ConstantList<double>;
+using Tuple = List<IValue>;
+using IntList = List<int64_t>;
+using TensorList = List<at::Tensor>;
+using DoubleList = List<double>;
 
 // IValue is the generic tagged union used by the interpreter to hold
 // all value types.
@@ -117,7 +117,15 @@ using DoubleList = ConstantList<double>;
 // retain/release calls.
 
 #define TORCH_FORALL_TAGS(_) \
-  _(None) _(Tensor) _(Double) _(Int) _(Tuple) _(IntList) _(DoubleList) _(String) _(TensorList)
+  _(None) \
+  _(Tensor) \
+  _(Double) \
+  _(Int) \
+  _(Tuple) \
+  _(IntList) \
+  _(DoubleList) \
+  _(String) \
+  _(TensorList) \
 
 struct IValue {
   IValue()
@@ -443,22 +451,27 @@ DEFINE_TO(std::vector<at::Tensor>, toTensorListRef)
 
 #undef DEFINE_TO
 
-// non-mutable list
-template<typename Elem>
-struct ConstantList : at::Retainable {
+
+template <typename Elem>
+struct List : at::Retainable {
  private:
-  ConstantList(std::vector<Elem> elements_)
-  : elements_(std::move(elements_)) {}
+  List(std::vector<Elem> elements_) : elements_(std::move(elements_)) {}
   std::vector<Elem> elements_;
+
  public:
-  static Shared<ConstantList<Elem>> create(std::vector<Elem> elements_) {
-    return Shared<ConstantList<Elem>>(
-        new ConstantList<Elem>(std::move(elements_)), false);
+  static Shared<List<Elem>> create(std::vector<Elem> elements_) {
+    return Shared<List<Elem>>(new List<Elem>(std::move(elements_)), false);
   }
   const std::vector<Elem>& elements() const {
     return elements_;
   }
   operator const std::vector<Elem>&() const {
+    return elements();
+  }
+  std::vector<Elem>& elements() {
+    return elements_;
+  }
+  operator std::vector<Elem>&() {
     return elements();
   }
 };

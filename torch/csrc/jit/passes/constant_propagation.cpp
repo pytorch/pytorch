@@ -20,6 +20,11 @@ std::unordered_set<Symbol> skip_list = {
   //FIXME Same problem as in DCE - cpp & python PythonOp and CppOp should be
   //FIXME treated as having side effects but ONNX depends on them being removed
   prim::Print,
+  // A memory fence implies a value is being mutated, so constant propagation
+  // must be disallowed.
+  // TODO(suo): we could allow constants to propagated for the first mutable
+  // use of a given value.
+  prim::MemoryFence,
   //all the rand functions from native_functions.yaml
   aten::permute,
   aten::rand,
