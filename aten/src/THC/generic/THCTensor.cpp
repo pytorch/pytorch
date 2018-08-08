@@ -452,9 +452,9 @@ void THCTensor_(squeeze)(THCState *state, THCTensor *self, THCTensor *src)
     THTensor_setStrideAtDim(self, 0, 1);
     ndim = 1;
   }
+#endif
   THTensor_resizeDim(self, ndim);
 }
-#endif
 
 void THCTensor_(squeeze1d)(THCState *state, THCTensor *self, THCTensor *src, int dimension)
 {

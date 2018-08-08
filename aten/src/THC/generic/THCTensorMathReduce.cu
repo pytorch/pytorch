@@ -95,7 +95,7 @@ THCTensor_(std)(THCState *state, THCTensor *self_, THCTensor *src, int dimension
 
   THCTensor_preserveReduceDimSemantics(
       state, self_, THCTensor_(nDimensionLegacyAll)(state, src), dimension, keepdim);
-  std::vector<int64_t> dim = src->sizes().vec();
+  std::vector<int64_t> dim = THTensor_sizesLegacyNoScalars(src);
   dim[dimension] = 1;
   THCTensor_(resize)(state, self_, dim, {});
 
@@ -123,7 +123,7 @@ THCTensor_(var)(THCState *state, THCTensor *self_, THCTensor *src, int dimension
 
   THCTensor_preserveReduceDimSemantics(
       state, self_, THCTensor_(nDimensionLegacyAll)(state, src), dimension, keepdim);
-  std::vector<int64_t> dim = src->sizes().vec();
+  std::vector<int64_t> dim = THTensor_sizesLegacyNoScalars(src);
   dim[dimension] = 1;
   THCTensor_(resize)(state, self_, dim, {});
 
