@@ -1121,11 +1121,6 @@
   dispatch:
     CUDA: miopen_convolution_transpose_backward
 
-- func: miopen_convolution_transpose_backward_bias(Tensor grad_output) -> Tensor
-  variants: function
-  dispatch:
-    CUDA: miopen_convolution_transpose_backward_bias
-
 - func: miopen_convolution_transpose_backward_input(Tensor grad_output, Tensor weight, IntList padding, IntList stride, IntList dilation, int64_t groups, bool benchmark, bool deterministic) -> Tensor
   variants: function
   dispatch:
