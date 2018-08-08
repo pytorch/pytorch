@@ -272,38 +272,4 @@ void THFloatVector_adds_AVX(float *y, const float *x, const float c, const ptrdi
   }
 }
 
-void THFloatVector_cvtFromInt_AVX(float *y, const int *x, const ptrdiff_t n) {
-  ptrdiff_t i;
-  __m256i YMM0, YMM1;
-  __m256 YMM2, YMM3;
-  for (i=0; i<=((n)-16); i+=16) {
-    YMM0 = _mm256_loadu_si256((__m256i const*)(x+i));
-    YMM1 = _mm256_loadu_si256((__m256i const*)(x+i+8));
-    YMM2 = _mm256_cvtepi32_ps(YMM0);
-    YMM3 = _mm256_cvtepi32_ps(YMM1);
-    _mm256_storeu_ps(y+i, YMM2);
-    _mm256_storeu_ps(y+i+8, YMM3);
-  }
-  for (; i<(n); i++) {
-    y[i] = (float)x[i];
-  }
-}
-
-void THDoubleVector_cvtFromInt_AVX(double *y, const int *x, const ptrdiff_t n) {
-  ptrdiff_t i;
-  __m128i YMM0, YMM1;
-  __m256d YMM2, YMM3;
-  for (i=0; i<=((n)- 8); i+=8) {
-    YMM0 = _mm_loadu_si128((__m128i const*)(x+i));
-    YMM1 = _mm_loadu_si128((__m128i const*)(x+i+4));
-    YMM2 = _mm256_cvtepi32_pd(YMM0);
-    YMM3 = _mm256_cvtepi32_pd(YMM1);
-    _mm256_storeu_pd(y+i, YMM2);
-    _mm256_storeu_pd(y+i+4, YMM3);
-  }
-  for (; i<(n); i++) {
-    y[i] = (double)x[i];
-  }
-}
-
 #endif // defined(__AVX__)

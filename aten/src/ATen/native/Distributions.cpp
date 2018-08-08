@@ -1,16 +1,27 @@
 #include "ATen/ATen.h"
+#include "ATen/Config.h"
 #include "ATen/CPUApplyUtils.h"
 #include "ATen/Dispatch.h"
 #include "ATen/ExpandUtils.h"
 #include "ATen/NativeFunctions.h"
 #include "ATen/core/Error.h"
 
+#include "ATen/cpu/vec256/vec256.h"
 #include "ATen/CPUGenerator.h"
 #include "ATen/CheckGenerator.h"
 #include "ATen/core/Generator.h"
 #include "ATen/native/Distributions.h"
 
+#ifdef _OPENMP
+#include <omp.h>
+#endif
+
+#if AT_MKL_ENABLED()
+#include <mkl.h>
+#endif
+
 #include <functional>
+#include <cpuinfo.h>
 
 #include "TH/THRandom.h"
 #include "TH/THGenerator.hpp"
@@ -104,6 +115,101 @@ int64_t sample_poisson(double lambda, THGenerator* generator) {
   }
 }
 
+#if AT_MKL_ENABLED()
+
+#define BERNOULLI_OMP 800
+
+template<typename scalar_t>
+inline void bernoulli_scalar_cpu_mkl_(at::Tensor &self, const double p, THGenerator* gen) {
+  int64_t seed = THRandom_random(gen);
+  int64_t n = self.numel();
+  bool contig = self.is_contiguous();
+  at::Tensor tmp_int_tensor = at::empty(self.sizes(), self.options().dtype(at::kInt));
+  scalar_t *self_ptr = self.data<scalar_t>();
+  int *sample_int_ptr = tmp_int_tensor.data<int>();
+
+#ifdef _OPENMP
+  size_t nthr = !omp_in_parallel() && n >= BERNOULLI_OMP ? omp_get_num_threads() : 1;
+#pragma omp parallel num_threads(nthr) firstprivate(nthr)
+  {
+    size_t tid = omp_get_thread_num();
+    int64_t seg_len_tmp = n / nthr;
+    int64_t line_index_offset = tid * seg_len_tmp;
+    int64_t line_seg_len = (tid == nthr - 1) ? (n - line_index_offset) : seg_len_tmp;
+#else
+  {
+    int64_t line_index_offset = 0;
+    int64_t line_seg_len = n;
+#endif
+
+    if (line_seg_len > 0) {
+      VSLStreamStatePtr stream;
+      vslNewStream(&stream, VSL_BRNG_MCG31, seed);
+      vslSkipAheadStream(stream, line_index_offset);
+      viRngBernoulli(VSL_RNG_METHOD_BERNOULLI_ICDF, stream, line_seg_len,
+        sample_int_ptr + line_index_offset, p);
+      vslDeleteStream(&stream);
+
+      if (contig) {
+        scalar_t *self_seg = self_ptr + line_index_offset;
+        int* tmp_seg = sample_int_ptr + line_index_offset;
+        at::vec256::convert<int, scalar_t>(tmp_seg, self_seg, line_seg_len);
+      }
+    }
+  }
+
+  if (!contig) {
+    self.copy_(tmp_int_tensor);
+  }
+}
+
+template<int>
+inline void bernoulli_scalar_cpu_mkl_(at::Tensor &self, const double p, THGenerator* gen) {
+  int64_t seed = THRandom_random(gen);
+  int64_t n = self.numel();
+  bool contig = self.is_contiguous();
+  int *sample_int_ptr = nullptr;
+  at::optional<at::Tensor> tmp_contig_tensor;
+
+  if (contig) {
+    sample_int_ptr = self.data<int>();
+  } else {
+    tmp_contig_tensor = at::empty_like(self);
+    sample_int_ptr = tmp_contig_tensor->data<int>();
+  }
+
+#ifdef _OPENMP
+  size_t nthr = !omp_in_parallel() && n >= BERNOULLI_OMP ? omp_get_num_threads() : 1;
+#pragma omp parallel num_threads(nthr) firstprivate(nthr)
+  {
+    size_t tid = omp_get_thread_num();
+    int64_t seg_len_tmp = n / nthr;
+    int64_t line_index_offset = tid * seg_len_tmp;
+    int64_t line_seg_len = (tid == nthr - 1)? (n-line_index_offset) : seg_len_tmp;
+#else
+  {
+    int64_t line_index_offset = 0;
+    int64_t line_seg_len = n;
+#endif
+
+    if (line_seg_len > 0) {
+      VSLStreamStatePtr stream;
+      vslNewStream(&stream, VSL_BRNG_MCG31, seed);
+      vslSkipAheadStream(stream, line_index_offset);
+      viRngBernoulli(VSL_RNG_METHOD_BERNOULLI_ICDF, stream, line_seg_len,
+        sample_int_ptr + line_index_offset, p);
+      vslDeleteStream(&stream);
+    }
+  }
+
+  if (!contig) {
+    self.copy_(*tmp_contig_tensor);
+  }
+}
+
+#undef BERNOULLI_OMP
+#endif
+
 } // namespace
 
 namespace at {
@@ -134,6 +240,12 @@ Tensor& bernoulli_scalar_cpu_(Tensor& self, double p, Generator* gen) {
   AT_DISPATCH_ALL_TYPES(self.type(), "bernoulli_scalar_cpu_", [&] {
     THGenerator* generator = get_generator(gen);
     std::lock_guard<std::mutex> lock(generator->mutex);
+#if AT_MKL_ENABLED()
+    if (cpuinfo_initialize() && cpuinfo_vendor_intel == cpuinfo_get_processor(0)->core->vendor) {
+      bernoulli_scalar_cpu_mkl_<scalar_t>(self, p, generator);
+      return;
+    }
+#endif
     CPU_tensor_apply1<scalar_t>(
         self, [generator, p](scalar_t& ret_val) {
           ret_val = static_cast<scalar_t>(THRandom_bernoulli(generator, p));
