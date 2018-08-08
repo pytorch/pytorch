@@ -958,7 +958,7 @@ void THTensor_(ormqr)(THTensor *ra_, THTensor *a, THTensor *tau, THTensor *c, co
 
 void THTensor_(btrifact)(THTensor *ra_, THIntTensor *rpivots_, THIntTensor *rinfo_, int pivot, THTensor *a)
 {
-  AT_CHECK(THTensor_(nDimensionLegacyNoScalars)(a) == 3, "expected 3D tensor, got size: ", a->sizes());
+  AT_CHECK(THTensor_(nDimension)(a) == 3, "expected 3D tensor, got size: ", a->sizes());
   if (!pivot) {
     THError("btrifact without pivoting is not implemented on the CPU");
   }

@@ -112,7 +112,7 @@ class SqueezeOp : public Operator<Context> {
   vector<int> dims_;
 
  public:
-  DISABLE_COPY_AND_ASSIGN(SqueezeOp);
+  AT_DISABLE_COPY_AND_ASSIGN(SqueezeOp);
 };
 } // namespace caffe2
 #endif // CAFFE2_OPERATORS_EXPAND_SQUEEZE_DIMS_OP_H_

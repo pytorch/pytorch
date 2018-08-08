@@ -181,6 +181,22 @@ inline int64_t THTensor_sizeLegacyNoScalars(const THTensor *self, int dim)
 #include "generic/THTensorFastGetSet.hpp"
 #include "THGenerateAllTypes.h"
 
+inline std::vector<int64_t> THTensor_sizesLegacyNoScalars(const THTensor *self) {
+  if (self->dim() == 0) {
+    return {1};
+  } else {
+    return self->sizes().vec();
+  }
+}
+
+inline std::vector<int64_t> THTensor_stridesLegacyNoScalars(const THTensor *self) {
+  if (self->dim() == 0) {
+    return {1};
+  } else {
+    return self->strides().vec();
+  }
+}
+
 inline void THTensor_resizeDim(THTensor* tensor, int64_t ndim) {
   // NB: This is *truly* a resize; calling code (e.g., squeeze)
   // assumes that old values are preserved

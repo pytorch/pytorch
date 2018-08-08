@@ -24,7 +24,7 @@ THC_API void THCTensor_(topk)(THCState* state,
 
   // Build the output size, which is the dim being selected set to
   // size k
-  std::vector<int64_t> topKSize = input->sizes().vec();
+  std::vector<int64_t> topKSize = THTensor_sizesLegacyNoScalars(input);
   topKSize[dim] = k;
   THCTensor_(resize)(state, topK, topKSize, {});
   THCudaLongTensor_resize(state, indices, topKSize, {});

@@ -153,7 +153,7 @@ void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, int dim, THLongTens
 
   numel = THLongTensor_nElement(index);
 
-  std::vector<int64_t> newSize = src->sizes().vec();
+  std::vector<int64_t> newSize = THTensor_sizesLegacyNoScalars(src);
 #ifdef DEBUG
   THAssert(numel <= LONG_MAX);
 #endif
@@ -250,8 +250,8 @@ void THTensor_(indexCopy)(THTensor *tensor, int dim, THLongTensor *index, THTens
 }
 
 static ptrdiff_t THTensor_(dataOffset)(THTensor* tensor, ptrdiff_t linearIndex) {
-  auto size = tensor->sizes();
-  auto stride = tensor->strides();
+  auto size = THTensor_sizesLegacyNoScalars(tensor);
+  auto stride = THTensor_stridesLegacyNoScalars(tensor);
   int nDim = THTensor_nDimensionLegacyAll(tensor);
   ptrdiff_t dataOffset = 0;
   for (int i = nDim - 1; i >= 0; i--) {

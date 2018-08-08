@@ -16,7 +16,7 @@ void THNN_(GatedLinear_updateOutput)(
   THArgCheck(nIn % 2 == 0, 2, "Halving dimension must be even. Dim %d is size %ld",
       dim + TH_INDEX_BASE, nIn);
   const int64_t inputSize = THCTensor_(size)(state, input, dim) / 2;
-  std::vector<int64_t> newSizes = input->sizes().vec();
+  std::vector<int64_t> newSizes = THTensor_sizesLegacyNoScalars(input);
   newSizes[dim] = inputSize;
   THCTensor_(resize)(state, output, newSizes, {});
 
