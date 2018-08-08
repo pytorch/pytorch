@@ -1,5 +1,6 @@
 #include "torch/csrc/jit/script/compiler.h"
 #include "torch/csrc/jit/passes/lower_tuples.h"
+#include "torch/csrc/jit/passes/annotate_effects.h"
 #include "torch/csrc/jit/operator.h"
 #include "torch/csrc/jit/interpreter.h"
 #include "torch/csrc/jit/ir.h"
@@ -625,7 +626,16 @@ std::shared_ptr<SugaredValue> BuiltinFunction::call(
   if (value)
     inputs.push_back(*value);
   inputs.insert(inputs.end(), inputs_.begin(), inputs_.end());
-  return std::make_shared<SimpleValue>(emitBuiltinCall(loc, *m.graph(), Symbol::aten(name), inputs, attributes, true));
+  return std::make_shared<SimpleValue>(emitBuiltinCall(
+      loc,
+      *m.graph(),
+      {
+          Symbol::aten(name),
+          Symbol::prim(name),
+      },
+      inputs,
+      attributes,
+      true));
 }
 
 struct to_ir {
@@ -736,6 +746,7 @@ struct to_ir {
     }
 
     method.setSchema({def.name().name(), std::move(arguments), std::move(returns)});
+    AnnotateEffects(graph);
     // remove any uses of tuples that we inserted
     LowerTuples(graph);
   }

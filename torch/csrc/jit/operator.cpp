@@ -341,7 +341,18 @@ bool Operator::matches(const Node* node) const {
   if (node->kind().toQualString() != schema().name) {
     return false;
   }
-  at::ArrayRef<const Value*> actuals = node->inputs();
+  at::ArrayRef<const Value*> inputs = node->inputs();
+  std::vector<const Value*> actuals;
+
+  // TODO(suo): need to figure out a better way of ignoring world tokens here.
+  // We can't just specially mark mutating schemas, since any op that uses a
+  // mutable value needs to receive a world token as well.
+  std::copy_if(
+      inputs.begin(),
+      inputs.end(),
+      std::back_inserter(actuals),
+      [](const Value* input) { return input->type() != WorldType::get(); });
+
   const auto& formals = schema().arguments;
 
   // not enough inputs

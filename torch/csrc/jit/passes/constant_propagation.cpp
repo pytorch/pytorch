@@ -20,6 +20,9 @@ std::unordered_set<Symbol> skip_list = {
   //FIXME Same problem as in DCE - cpp & python PythonOp and CppOp should be
   //FIXME treated as having side effects but ONNX depends on them being removed
   prim::Print,
+  // TODO(suo): can remove this once world tokens are passed in and out of
+  // graphs correctly
+  prim::append,
   //all the rand functions from native_functions.yaml
   aten::permute,
   aten::rand,

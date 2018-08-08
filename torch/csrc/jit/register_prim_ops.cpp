@@ -173,9 +173,20 @@ Operation listSlice(Node* node) {
   };
 }
 
+template <typename TList, typename TElement>
+Operation listAppend(Node* node) {
+  return [](Stack& stack) {
+    TList a;
+    TElement el;
+    pop(stack, a, el);
+
+    a->elements().push_back(el);
+
+    return 0;
+  };
+}
 
 RegisterOperators reg({
-
     Operator(
         prim::FusionGroup,
         [](Node* node) {
@@ -419,6 +430,10 @@ RegisterOperators reg({
     Operator(
         "prim::ListSlice(Tensor[] l, int start, int end=9223372036854775807, int step=1) -> Tensor[]",
         listSlice<Shared<TensorList>, at::Tensor>),
+
+    Operator("prim::append(int[] list, int el) -> ()", listAppend<Shared<IntList>, int64_t>),
+    Operator("prim::append(float[] list, float el) -> ()", listAppend<Shared<DoubleList>, double>),
+    Operator("prim::append(Tensor[] list, Tensor el) -> ()", listAppend<Shared<TensorList>, at::Tensor>),
 });
 
 // define implementations for primitive number ops
