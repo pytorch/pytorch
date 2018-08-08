@@ -385,7 +385,7 @@ void THCudaBlas_SgemmBatched(THCState *state, char transa, char transb, int64_t 
             "with the bound [val] <= %d", INT_MAX);
   }
 
-  THCudaBlas_SgemmStridedBatched(state, transa, transb, m, n, k, alpha, a, lda, 1, b, ldb, 1, beta, c, ldc, 1, batchCount);
+  THCudaBlas_SgemmStridedBatched(state, transa, transb, m, n, k, alpha, *a, lda, 1, *b, ldb, 1, beta, *c, ldc, 1, batchCount);
 
 }
 #else
@@ -448,7 +448,7 @@ void THCudaBlas_DgemmBatched(THCState *state, char transa, char transb, int64_t 
             "with the bound [val] <= %d", INT_MAX);
   }
   
-  THCudaBlas_DgemmStridedBatched(state, transa, transb, m, n, k, alpha, a, lda, 1, b, ldb, 1, beta, c, ldc, 1, batchCount);
+  THCudaBlas_DgemmStridedBatched(state, transa, transb, m, n, k, alpha, *a, lda, 1, *b, ldb, 1, beta, *c, ldc, 1, batchCount);
 
 }
 #else
