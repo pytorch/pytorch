@@ -5,7 +5,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from caffe2.python import brew
+from caffe2.python import brew, workspace
 from caffe2.python.model_helper import ModelHelper
 from caffe2.proto import caffe2_pb2
 import logging
@@ -17,7 +17,7 @@ class CNNModelHelper(ModelHelper):
     """
 
     def __init__(self, order="NCHW", name=None,
-                 use_cudnn=True, cudnn_exhaustive_search=False,
+                 use_gpu_engine=True, gpu_engine_exhaustive_search=False,
                  ws_nbytes_limit=None, init_params=True,
                  skip_sparse_optim=False,
                  param_model=None):
@@ -31,8 +31,8 @@ class CNNModelHelper(ModelHelper):
 
         cnn_arg_scope = {
             'order': order,
-            'use_cudnn': use_cudnn,
-            'cudnn_exhaustive_search': cudnn_exhaustive_search,
+            'use_gpu_engine': use_gpu_engine,
+            'gpu_engine_exhaustive_search': gpu_engine_exhaustive_search,
         }
         if ws_nbytes_limit:
             cnn_arg_scope['ws_nbytes_limit'] = ws_nbytes_limit
@@ -45,8 +45,8 @@ class CNNModelHelper(ModelHelper):
         )
 
         self.order = order
-        self.use_cudnn = use_cudnn
-        self.cudnn_exhaustive_search = cudnn_exhaustive_search
+        self.use_gpu_engine = use_gpu_engine
+        self.gpu_engine_exhaustive_search = gpu_engine_exhaustive_search
         self.ws_nbytes_limit = ws_nbytes_limit
         if self.order != "NHWC" and self.order != "NCHW":
             raise ValueError(
@@ -79,9 +79,9 @@ class CNNModelHelper(ModelHelper):
         return brew.conv_nd(
             self,
             *args,
-            use_cudnn=self.use_cudnn,
+            use_gpu_engine=self.use_gpu_engine,
             order=self.order,
-            cudnn_exhaustive_search=self.cudnn_exhaustive_search,
+            gpu_engine_exhaustive_search=self.gpu_engine_exhaustive_search,
             ws_nbytes_limit=self.ws_nbytes_limit,
             **kwargs
         )
@@ -90,9 +90,9 @@ class CNNModelHelper(ModelHelper):
         return brew.conv(
             self,
             *args,
-            use_cudnn=self.use_cudnn,
+            use_gpu_engine=self.use_gpu_engine,
             order=self.order,
-            cudnn_exhaustive_search=self.cudnn_exhaustive_search,
+            gpu_engine_exhaustive_search=self.gpu_engine_exhaustive_search,
             ws_nbytes_limit=self.ws_nbytes_limit,
             **kwargs
         )
@@ -101,9 +101,9 @@ class CNNModelHelper(ModelHelper):
         return brew.conv_transpose(
             self,
             *args,
-            use_cudnn=self.use_cudnn,
+            use_gpu_engine=self.use_gpu_engine,
             order=self.order,
-            cudnn_exhaustive_search=self.cudnn_exhaustive_search,
+            gpu_engine_exhaustive_search=self.gpu_engine_exhaustive_search,
             ws_nbytes_limit=self.ws_nbytes_limit,
             **kwargs
         )
@@ -112,9 +112,9 @@ class CNNModelHelper(ModelHelper):
         return brew.group_conv(
             self,
             *args,
-            use_cudnn=self.use_cudnn,
+            use_gpu_engine=self.use_gpu_engine,
             order=self.order,
-            cudnn_exhaustive_search=self.cudnn_exhaustive_search,
+            gpu_engine_exhaustive_search=self.gpu_engine_exhaustive_search,
             ws_nbytes_limit=self.ws_nbytes_limit,
             **kwargs
         )
@@ -123,9 +123,9 @@ class CNNModelHelper(ModelHelper):
         return brew.group_conv_deprecated(
             self,
             *args,
-            use_cudnn=self.use_cudnn,
+            use_gpu_engine=self.use_gpu_engine,
             order=self.order,
-            cudnn_exhaustive_search=self.cudnn_exhaustive_search,
+            gpu_engine_exhaustive_search=self.gpu_engine_exhaustive_search,
             ws_nbytes_limit=self.ws_nbytes_limit,
             **kwargs
         )
@@ -147,16 +147,16 @@ class CNNModelHelper(ModelHelper):
 
     def Dropout(self, *args, **kwargs):
         return brew.dropout(
-            self, *args, order=self.order, use_cudnn=self.use_cudnn, **kwargs
+            self, *args, order=self.order, use_gpu_engine=self.use_gpu_engine, **kwargs
         )
 
     def LRN(self, *args, **kwargs):
         return brew.lrn(
-            self, *args, order=self.order, use_cudnn=self.use_cudnn, **kwargs
+            self, *args, order=self.order, use_gpu_engine=self.use_gpu_engine, **kwargs
         )
 
     def Softmax(self, *args, **kwargs):
-        return brew.softmax(self, *args, use_cudnn=self.use_cudnn, **kwargs)
+        return brew.softmax(self, *args, use_gpu_engine=self.use_gpu_engine, **kwargs)
 
     def SpatialBN(self, *args, **kwargs):
         return brew.spatial_bn(self, *args, order=self.order, **kwargs)
@@ -169,7 +169,7 @@ class CNNModelHelper(ModelHelper):
 
     def Relu(self, *args, **kwargs):
         return brew.relu(
-            self, *args, order=self.order, use_cudnn=self.use_cudnn, **kwargs
+            self, *args, order=self.order, use_gpu_engine=self.use_gpu_engine, **kwargs
         )
 
     def PRelu(self, *args, **kwargs):
@@ -187,7 +187,7 @@ class CNNModelHelper(ModelHelper):
         return brew.sum(self, *args, **kwargs)
 
     def Transpose(self, *args, **kwargs):
-        return brew.transpose(self, *args, use_cudnn=self.use_cudnn, **kwargs)
+        return brew.transpose(self, *args, use_gpu_engine=self.use_gpu_engine, **kwargs)
 
     def Iter(self, *args, **kwargs):
         return brew.iter(self, *args, **kwargs)
@@ -197,7 +197,7 @@ class CNNModelHelper(ModelHelper):
 
     def MaxPool(self, *args, **kwargs):
         return brew.max_pool(
-            self, *args, use_cudnn=self.use_cudnn, order=self.order, **kwargs
+            self, *args, use_gpu_engine=self.use_gpu_engine, order=self.order, **kwargs
         )
 
     def MaxPoolWithIndex(self, *args, **kwargs):
@@ -205,7 +205,7 @@ class CNNModelHelper(ModelHelper):
 
     def AveragePool(self, *args, **kwargs):
         return brew.average_pool(
-            self, *args, use_cudnn=self.use_cudnn, order=self.order, **kwargs
+            self, *args, use_gpu_engine=self.use_gpu_engine, order=self.order, **kwargs
         )
 
     @property
@@ -235,6 +235,11 @@ class CNNModelHelper(ModelHelper):
     @property
     def GPU(self, gpu_id=0):
         device_option = caffe2_pb2.DeviceOption()
-        device_option.device_type = caffe2_pb2.CUDA
-        device_option.cuda_gpu_id = gpu_id
+        if workspace.has_hip_support:
+            device_option.device_type = caffe2_pb2.HIP
+            device_option.hip_gpu_id = gpu_id
+        else:
+            device_option.device_type = caffe2_pb2.CUDA
+            device_option.cuda_gpu_id = gpu_id
+
         return device_option
