@@ -172,70 +172,52 @@ std::tuple<Tensor&,Tensor&> _gesv_single_out_cuda(Tensor& sol, Tensor& lu,
 AT_ERROR("gesv: MAGMA library not found in "
     "compilation. Please rebuild with MAGMA.");
 #else
+  /* See Gesv.cpp for comments */
   int64_t bx = self.size(0);
   int64_t by = (self.dim() == 1) ? 1 : self.size(1);
   int64_t ax = A.size(0);
   int64_t ay = A.size(1);
   int info;
   int* ipiv;
+  bool tc_sol = isTransposeContiguous(sol);
+  bool tc_lu = isTransposeContiguous(lu);
+  bool sol_correct_shape = sol.dim() == 2 &&
+                           sol.size(0) == bx && sol.size(1) == by;
+  bool lu_correct_shape = lu.dim() == 2 && lu.size(0) == ax && lu.size(1) == ay;
   Tensor temp_sol;
   Tensor temp_lu;
 
-  /* Init to column major format. See Gesv.cpp for more comments */
-  bool tc_sol = isTransposeContiguous(sol);
   auto self_t = self.view({bx, by}).t();
-  if (!tc_sol &&
-      !sol.is_contiguous() &&
-      sol.dim() == 2 &&
-      sol.size(0) == bx &&
-      sol.size(1) == by) {
+
+  if (!tc_sol && !sol.is_contiguous() && sol_correct_shape) {
     temp_sol = self_t.clone();
-  }
-
-  if (!temp_sol.defined()) {
-    if (tc_sol) {
-      sol.t().resize_({by, bx});
-    } else {
-      sol.resize_({by, bx});
+  } else if (tc_sol) {
+    sol.t().resize_({by, bx});
+    if (&self != &sol) {
+      sol.t().copy_(self_t);
     }
+  } else {
+    sol.resize_({by, bx});
     if (&self == &sol) {
-      if (!tc_sol) {
-        sol.copy_(self_t.clone());
-      }
+      sol.copy_(self_t.clone());
     } else {
-      if (tc_sol) {
-        sol.t().copy_(self_t);
-      } else {
-        sol.copy_(self_t);
-      }
+      sol.copy_(self_t);
     }
   }
 
-  bool tc_lu = isTransposeContiguous(lu);
-  if (!tc_lu &&
-      !lu.is_contiguous() &&
-      lu.dim() == 2 &&
-      lu.size(0) == ax &&
-      lu.size(1) == ay) {
+  if (!tc_lu && !lu.is_contiguous() && lu_correct_shape) {
     temp_lu = A.t().clone();
-  }
-
-  if (!temp_lu.defined()) {
-    if (tc_lu) {
-      lu.t().resize_({ay, ax});
-    } else {
-      lu.resize_({ay, ax});
+  } else if (tc_lu) {
+    lu.t().resize_({ay, ax});
+    if (&A != &lu) {
+      lu.t().copy_(A.t());
     }
+  } else {
+    lu.resize_({ay, ax});
     if (&A == &lu) {
-      if (!tc_lu) {
-        lu.copy_(A.t().clone());
-      }
+      lu.copy_(A.t().clone());
     } else {
-      if (tc_lu) {
-        lu.t().copy_(A.t());
-      } else {
-        lu.copy_(A.t());
-      }
+      lu.copy_(A.t());
     }
   }
 

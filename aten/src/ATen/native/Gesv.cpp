@@ -84,72 +84,83 @@ std::tuple<Tensor&,Tensor&> _gesv_single_out_cpu(
 #ifndef USE_LAPACK
   AT_ERROR("gesv: LAPACK library not found in compilation");
 #endif
+  /* gesv takes two tensors (self, A) and returns (sol, lu).
+   * The output Tensors (sol, lu) may be the same as input Tensors (self, A)
+   *
+   * Before passing pointers into Lapack, we need to ensure that:
+   * (i)  self and A are represented in column major format
+   * (ii) These pointers point to contiguous data for self and A.
+   *
+   * For 2D matrices, A.t() and self.t() represent their column major formats.
+   *
+   * Case 1) The output tensor is of the correct shape, but it and its transpose
+   *         are not contiguous. eg. torch.gesv(... , out=(n[::2], ...)):
+   *         - clone input tensor into a buffer and use it
+   *
+   * Note: In both cases below, we resize_ if required. This helps to:
+   *       (i)  Make output tensors bigger and contiguous, if required, and
+   *       (ii) Unsqueeze potential 1D `sol`, eg. torch.gesv(b, A, out=(b, A))
+   *
+   * Case 2) output_tensor.t() is contiguous (tc_sol / tc_lu is true):
+   *         a) &input_tensor == &output_tensor:
+   *            - it's fine to use output_tensor.data() as-is. Do nothing.
+   *              (we need to transpose input_tensor for column-major anyway)
+   *         b) &input_tensor != &output_tensor:
+   *            - copy input_tensor.t() to output_tensor.t()
+   *
+   * Case 3) output_tensor.t() is not contiguous:
+   *         - resize_ should make non-contig/incorrectly-sized tensors usable
+   *         a) &input_tensor == &output_tensor:
+   *            - copy input_tensor.t() to itself -- clone before copying
+   *         b) &input_tensor != &output_tensor:
+   *            - copy input_tensor.t() to output_tensor
+   */
   int64_t bx = self.size(0);
   int64_t by = (self.dim() == 1) ? 1 : self.size(1);
   int64_t ax = A.size(0);
   int64_t ay = A.size(1);
   int info = 0;
+  bool tc_sol = isTransposeContiguous(sol);
+  bool tc_lu = isTransposeContiguous(lu);
+  bool sol_correct_shape = sol.dim() == 2 &&
+                           sol.size(0) == bx && sol.size(1) == by;
+  bool lu_correct_shape = lu.dim() == 2 && lu.size(0) == ax && lu.size(1) == ay;
   Tensor temp_sol;
   Tensor temp_lu;
 
-  /* Init to column major format. `sol` and `lu` need to be contiguous
-   * since we pass sol.data() and lu.data() to Lapack */
-  bool tc_sol = isTransposeContiguous(sol);
+  /* self is always viewable to {bx, by} since they are the dimensions
+   * of self (or by == 1). Basically a shortcut to see 1D `self` as 2D */
   auto self_t = self.view({bx, by}).t();
-  if (!tc_sol &&
-      !sol.is_contiguous() &&
-      sol.dim() == 2 &&
-      sol.size(0) == bx &&
-      sol.size(1) == by) {
-    // eg. torch.gesv(.., out=(n[::2], ...))
+
+  if (!tc_sol && !sol.is_contiguous() && sol_correct_shape) {
     temp_sol = self_t.clone();
-  }
-
-  if (!temp_sol.defined()) {
-    if (tc_sol) {
-      sol.t().resize_({by, bx});
-    } else {
-      sol.resize_({by, bx});
+  } else if (tc_sol) {
+    sol.t().resize_({by, bx});
+    if (&self != &sol) {
+      sol.t().copy_(self_t);
     }
+  } else {
+    sol.resize_({by, bx});
     if (&self == &sol) {
-      // note: not a comprehensive check. Will fail for views
-      if (!tc_sol) {
-        sol.copy_(self_t.clone());
-      }
+      sol.copy_(self_t.clone());
     } else {
-      if (tc_sol) {
-        sol.t().copy_(self_t);
-      } else {
-        sol.copy_(self_t);
-      }
+      sol.copy_(self_t);
     }
   }
 
-  bool tc_lu = isTransposeContiguous(lu);
-  if (!tc_lu &&
-      !lu.is_contiguous() &&
-      lu.dim() == 2 &&
-      lu.size(0) == ax &&
-      lu.size(1) == ay) {
+  if (!tc_lu && !lu.is_contiguous() && lu_correct_shape) {
     temp_lu = A.t().clone();
-  }
-
-  if (!temp_lu.defined()) {
-    if (tc_lu) {
-      lu.t().resize_({ay, ax});
-    } else {
-      lu.resize_({ay, ax});
+  } else if (tc_lu) {
+    lu.t().resize_({ay, ax});
+    if (&A != &lu) {
+      lu.t().copy_(A.t());
     }
+  } else {
+    lu.resize_({ay, ax});
     if (&A == &lu) {
-      if (!tc_lu) {
-        lu.copy_(A.t().clone());
-      }
+      lu.copy_(A.t().clone());
     } else {
-      if (tc_lu) {
-        lu.t().copy_(A.t());
-      } else {
-        lu.copy_(A.t());
-      }
+      lu.copy_(A.t());
     }
   }
 
