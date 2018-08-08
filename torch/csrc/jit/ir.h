@@ -247,6 +247,17 @@ public:
   //          %5 = h(%6, %6)
   void replaceAllUsesWith(Value * newValue);
 
+  // Removes all uses of this value.
+  //
+  // Given:   %3 = f(%1, %2)
+  //          %4 = g(%3, %5)
+  //          %5 = h(%3, %4)
+  // Execute: %3.removeAllUses()
+  // Result:  %3 = f(%1, %2)
+  //          %4 = g(%5)
+  //          %5 = h(%4)
+  void removeAllUses();
+
   Value* copyMetadata(Value * from) {
     setType(from->type());
     if (from->hasUniqueName())
@@ -549,7 +560,7 @@ public:
     return {blocks_.data(), blocks_.size()};
   }
 
-  // Insert unattached 'this' node after 'n' in the topological order.
+  // Insert unattached 'this' node before 'n' in the topological order.
   // Returns this (for chaining).
   //
   // Given:   %3 = f(%1, %2)
@@ -1266,6 +1277,13 @@ inline void Value::replaceAllUsesWith(Value * newValue) {
   while (!uses().empty()) {
     replaceFirstUseWith(newValue);
   }
+}
+
+inline void Value::removeAllUses() {
+  for (const auto& use : uses_) {
+    use.user->removeInput(use.offset);
+  }
+  uses_.clear();
 }
 
 inline Node::Node(Graph * graph_, NodeKind kind_) :

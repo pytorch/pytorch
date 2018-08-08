@@ -42,6 +42,8 @@ Value* insertConstant(
     n->destroy();
     n = g.create(prim::None);
     n->output()->setType(NoneType::get());
+  } else if(val.isWorld()) {
+    n->output()->setType(WorldType::get());
   } else {
     throw constant_not_supported_error("Unsupported value kind: " + val.tagKind());
   }
@@ -96,6 +98,11 @@ RegisterOperators reg({
           auto s = node->s(attr::value);
           return [s](Stack& stack) {
             push(stack, s);
+            return 0;
+          };
+        } else if (type == WorldType::get()) {
+          return [](Stack& stack) {
+            push(stack, World());
             return 0;
           };
         } else {

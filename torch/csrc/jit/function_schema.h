@@ -46,7 +46,10 @@ struct FunctionSchema {
         arguments(std::move(arguments)),
         returns(std::move(returns)),
         is_vararg(is_vararg),
-        is_varret(is_varret) {}
+        is_varret(is_varret),
+        is_mutable(isMutable()) {
+    validate();
+  }
   FunctionSchema(
       Symbol name,
       std::vector<Argument> arguments,
@@ -58,7 +61,9 @@ struct FunctionSchema {
             std::move(std::move(arguments)),
             std::move(std::move(returns)),
             is_vararg,
-            is_varret) {}
+            is_varret) {
+    validate();
+  }
 
   const std::string name;
   const std::vector<Argument> arguments;
@@ -69,12 +74,41 @@ struct FunctionSchema {
   // arguments are not checked by schema
   const bool is_vararg;
   const bool is_varret;
+  const bool is_mutable;
+
+  std::vector<Argument> getArgumentsMutable() const {
+    std::vector<Argument> actualArguments;
+    std::copy_if(
+        arguments.cbegin(),
+        arguments.cend(),
+        std::back_inserter(actualArguments),
+        [](const Argument& arg) { return arg.type != WorldType::get(); });
+    return actualArguments;
+  }
+
   at::optional<int> argumentIndexWithName(const std::string& name) const {
     for(size_t i = 0; i < arguments.size(); ++i) {
       if(name == arguments[i].name)
         return i;
     }
     return at::nullopt;
+  }
+
+ private:
+  bool isMutable() const {
+    return std::any_of(
+        arguments.cbegin(), arguments.cend(), [](const Argument& arg) {
+          return arg.type == WorldType::get();
+        });
+  }
+
+  void validate() const {
+    if (is_mutable) {
+      // Mutable schemas should have a world token as the first argument
+      // and return.
+      JIT_ASSERT(arguments.at(0).type == WorldType::get());
+      JIT_ASSERT(returns.at(0).type == WorldType::get());
+    }
   }
 };
 

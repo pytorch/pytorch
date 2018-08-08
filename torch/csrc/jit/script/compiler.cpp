@@ -1,5 +1,6 @@
 #include "torch/csrc/jit/script/compiler.h"
 #include "torch/csrc/jit/passes/lower_tuples.h"
+#include "torch/csrc/jit/passes/annotate_effects.h"
 #include "torch/csrc/jit/operator.h"
 #include "torch/csrc/jit/interpreter.h"
 #include "torch/csrc/jit/ir.h"
@@ -548,6 +549,43 @@ static Value* materializeConstant(T val, Graph& graph,
   return new_constant;
 }
 
+// Match against against a mutable schema.
+//
+// We need to treat mutable schemas differently because the IR explicitly
+// expresses effects by including a world token in mutable ops. Users do not
+// know about the world token, so we need to generate a dummy one and add
+// it to the inputs for schema matching.
+//
+// Example:
+//   append(int[] list, int el)
+// becomes
+//   append(World w, int[] list, int el)
+//
+// NOTE: The dummy world token has no meaning; the AnnotateEffects pass is
+// necessary to enforce linearization on effectful ops.
+at::optional<MatchedSchema> tryMatchMutableSchema(
+    const FunctionSchema& schema,
+    const SourceRange& loc,
+    Graph& graph,
+    at::ArrayRef<NamedValue> inputs,
+    at::ArrayRef<NamedValue> attributes,
+    std::ostream& failure_messages,
+    bool convert_tensors_to_nums) {
+  JIT_ASSERT(schema.is_mutable);
+  // Add a dummy world token to be matched against
+  const auto worldToken = graph.insertConstant(World());
+  std::vector<NamedValue> inputsWithWorldToken(inputs.begin(), inputs.end());
+  inputsWithWorldToken.insert(inputsWithWorldToken.begin(), worldToken);
+  return tryMatchSchema(
+      schema,
+      loc,
+      graph,
+      inputsWithWorldToken,
+      attributes,
+      failure_messages,
+      convert_tensors_to_nums);
+}
+
 at::optional<MatchedSchema> tryMatchSchema(
   const FunctionSchema& schema,
   const SourceRange& loc,
@@ -636,23 +674,41 @@ at::optional<MatchedSchema> tryMatchSchema(
     return MatchedSchema {std::move(positional_inputs), std::move(return_types) };
 }
 
-
 static Value* tryEmitBuiltin(
-  const std::shared_ptr<Operator>& op,
-  std::stringstream& failure_messages,
-  const SourceRange& loc,
-  Graph& graph,
-  Symbol name,
-  at::ArrayRef<NamedValue> inputs,
-  at::ArrayRef<NamedValue> attributes,
-  bool convert_tensors_to_nums) {
+    const std::shared_ptr<Operator>& op,
+    std::stringstream& failure_messages,
+    const SourceRange& loc,
+    Graph& graph,
+    Symbol name,
+    at::ArrayRef<NamedValue> inputs,
+    at::ArrayRef<NamedValue> attributes,
+    bool convert_tensors_to_nums) {
+  at::optional<MatchedSchema> matched_schema;
+  if (op->schema().is_mutable) {
+    matched_schema = tryMatchMutableSchema(
+        op->schema(),
+        loc,
+        graph,
+        inputs,
+        attributes,
+        failure_messages,
+        convert_tensors_to_nums);
+  } else {
+    matched_scema = tryMatchSchema(
+        op->schema(),
+        loc,
+        graph,
+        inputs,
+        attributes,
+        failure_messages,
+        convert_tensors_to_nums);
+  }
 
-  auto matched_schema = tryMatchSchema(op->schema(), loc, graph, inputs, attributes,
-    failure_messages, convert_tensors_to_nums);
-  if(!matched_schema)
+  if (!matched_schema) {
     return nullptr;
-  // we successfully matched this schema, construct the node
+  }
 
+  // we successfully matched this schema, construct the node
   auto n = graph.insertNode(graph.create(name, matched_schema->inputs, 0))
                 ->setSourceLocation(std::make_shared<SourceRange>(loc));
 
@@ -844,6 +900,8 @@ struct to_ir {
     }
 
     method.setSchema({def.name().name(), std::move(arguments), std::move(returns)});
+    // annotate effects to prevent reordering
+    AnnotateEffects(graph);
     // remove any uses of tuples that we inserted that are not needed
     LowerSimpleTuples(graph);
   }

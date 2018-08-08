@@ -53,6 +53,13 @@ void checkImplicitTensorToNum(at::Tensor t, bool toInt) {
 
 RegisterOperators reg({
     Operator(
+        prim::MemoryFence,
+        [](Node* node) {
+          return [](Stack& stack) {
+            return 0;
+          };
+        }),
+    Operator(
         prim::FusionGroup,
         [](Node* node) {
           auto handle = getFusionHandle(node);
@@ -479,6 +486,19 @@ int64_t normalizeIndex(int64_t idx, int64_t list_size) {
   return idx;
 }
 
+template <typename TList, typename TElement>
+Operation listAppend(Node* node) {
+  return [](Stack& stack) {
+    TList a;
+    TElement el;
+    pop(stack, a, el);
+
+    a->elements().push_back(el);
+
+    return 0;
+  };
+}
+
 template <typename T>
 Operation listSelect(Node* node) {
   return [=](Stack& stack) {
@@ -610,12 +630,23 @@ Operation listSlice(Node* node) {
 RegisterOperators reg2({
 
 #define CREATE_LIST_OPS(decl_type, c_type) \
+    // Select element in the `b`th position from list `a`
+    // Equivalent to `a[b]` in Python.
     Operator("aten::select(" decl_type "[] a, int b) -> " decl_type, listSelect<Shared<c_type>>), \
+    // Return the size of list `a`
+    // Equivalent to `len(a)` in Python.
     Operator("aten::len(" decl_type "[] a) -> int", listLen<Shared<c_type>>), \
     Operator("aten::add(" decl_type "[] a, " decl_type "[] b) -> " decl_type "[]", listAdd<Shared<c_type>, c_type::ElemType>), \
+    // Return a slice of list `l`, with a specified start, end, and step length
+    // Equivalent to `l[start:end:step]` in Python.
     Operator( \
         "aten::slice(" decl_type "[] l, int start, int end=9223372036854775807, int step=1) -> " decl_type "[]", \
         listSlice<Shared<c_type>, c_type::ElemType>),
+    // Append `el` to `list`
+    // Equivalent to `list.append(el)` in Python.
+    Operator( \
+        "aten::append(World w, " decl_type "[] list, " decl_type " el) -> World", \
+        listAppend<Shared<c_type>, c_type::ElemType>),
 
 
     CREATE_LIST_OPS("int", IntList)
@@ -623,10 +654,10 @@ RegisterOperators reg2({
     CREATE_LIST_OPS("Tensor", TensorList)
     CREATE_LIST_OPS("t", GenericList)
 
+
     Operator("aten::eq(int[] a, int[] b) -> int", listEq<Shared<IntList>>),
     Operator("aten::eq(float[] a, float[] b) -> int", listEq<Shared<DoubleList>>),
     Operator("aten::eq(Tensor[] a, Tensor[] b) -> int", listEq<Shared<TensorList>>),
-
 
     DEFINE_BINARY_OP(aten::add, a + b)
     DEFINE_BINARY_OP(aten::sub, a - b)

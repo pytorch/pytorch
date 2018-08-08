@@ -57,6 +57,8 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
     out << "Generator";
   } else if(t.kind() == TypeKind::VarType) {
     out << t.expect<VarType>()->name();
+  } else if(t.kind() == TypeKind::WorldType) {
+    out << "World";
   } else {
     AT_ERROR("unknown type kind");
   }
@@ -89,6 +91,10 @@ NoneTypePtr NoneType::get() {
 }
 GeneratorTypePtr GeneratorType::get() {
   static auto value = GeneratorType::create();
+  return value;
+}
+WorldTypePtr WorldType::get() {
+  static auto value = WorldType::create();
   return value;
 }
 StringTypePtr StringType::get() {
