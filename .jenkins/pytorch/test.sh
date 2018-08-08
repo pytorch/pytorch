@@ -9,61 +9,59 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 echo "Testing pytorch"
 
-if [ `uname -m` != "ppc64le" ]; then
-  # JIT C++ extensions require ninja.
-  git clone https://github.com/ninja-build/ninja --quiet
-  pushd ninja
-  python ./configure.py --bootstrap
-  export PATH="$PWD:$PATH"
-  popd
+# JIT C++ extensions require ninja.
+git clone https://github.com/ninja-build/ninja --quiet
+pushd ninja
+python ./configure.py --bootstrap
+export PATH="$PWD:$PATH"
+popd
 
-  # DANGER WILL ROBINSON.  The LD_PRELOAD here could cause you problems
-  # if you're not careful.  Check this if you made some changes and the
-  # ASAN test is not working
-  if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
-      export ASAN_OPTIONS=detect_leaks=0:symbolize=1:strict_init_order=true
-      # We suppress the vptr volation, since we have separate copies of
-      # libprotobuf in both libtorch.so and libcaffe2.so, and it causes
-      # the following problem:
-      #    test_cse (__main__.TestJit) ... torch/csrc/jit/export.cpp:622:38:
-      #        runtime error: member call on address ... which does not point
-      #        to an object of type 'google::protobuf::MessageLite'
-      #        ...: note: object is of type 'onnx_torch::ModelProto'
-      #
-      # This problem should be solved when libtorch.so and libcaffe2.so are
-      # merged.
-      export UBSAN_OPTIONS=print_stacktrace=1:suppressions=$PWD/ubsan.supp
-      export PYTORCH_TEST_WITH_ASAN=1
-      export PYTORCH_TEST_WITH_UBSAN=1
-      # TODO: Figure out how to avoid hard-coding these paths
-      export ASAN_SYMBOLIZER_PATH=/usr/lib/llvm-5.0/bin/llvm-symbolizer
-      export LD_PRELOAD=/usr/lib/llvm-5.0/lib/clang/5.0.0/lib/linux/libclang_rt.asan-x86_64.so
-      # Increase stack size, because ASAN red zones use more stack
-      ulimit -s 81920
+# DANGER WILL ROBINSON.  The LD_PRELOAD here could cause you problems
+# if you're not careful.  Check this if you made some changes and the
+# ASAN test is not working
+if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
+    export ASAN_OPTIONS=detect_leaks=0:symbolize=1:strict_init_order=true
+    # We suppress the vptr volation, since we have separate copies of
+    # libprotobuf in both libtorch.so and libcaffe2.so, and it causes
+    # the following problem:
+    #    test_cse (__main__.TestJit) ... torch/csrc/jit/export.cpp:622:38:
+    #        runtime error: member call on address ... which does not point
+    #        to an object of type 'google::protobuf::MessageLite'
+    #        ...: note: object is of type 'onnx_torch::ModelProto'
+    #
+    # This problem should be solved when libtorch.so and libcaffe2.so are
+    # merged.
+    export UBSAN_OPTIONS=print_stacktrace=1:suppressions=$PWD/ubsan.supp
+    export PYTORCH_TEST_WITH_ASAN=1
+    export PYTORCH_TEST_WITH_UBSAN=1
+    # TODO: Figure out how to avoid hard-coding these paths
+    export ASAN_SYMBOLIZER_PATH=/usr/lib/llvm-5.0/bin/llvm-symbolizer
+    export LD_PRELOAD=/usr/lib/llvm-5.0/lib/clang/5.0.0/lib/linux/libclang_rt.asan-x86_64.so
+    # Increase stack size, because ASAN red zones use more stack
+    ulimit -s 81920
 
-      function get_exit_code() {
-        set +e
-        "$@"
-        retcode=$?
-        set -e
-        return $retcode
-      }
-      (cd test && python -c "import torch")
-      echo "The next three invocations are expected to crash; if they don't that means ASAN/UBSAN is misconfigured"
-      (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_csrc_asan(3)")
-      (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_csrc_ubsan(0)")
-      (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_aten_asan(3)")
-  fi
+    function get_exit_code() {
+      set +e
+      "$@"
+      retcode=$?
+      set -e
+      return $retcode
+    }
+    (cd test && python -c "import torch")
+    echo "The next three invocations are expected to crash; if they don't that means ASAN/UBSAN is misconfigured"
+    (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_csrc_asan(3)")
+    (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_csrc_ubsan(0)")
+    (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_aten_asan(3)")
+fi
 
-  if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
-    export PYTORCH_TEST_WITH_ROCM=1
-  fi
+if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+  export PYTORCH_TEST_WITH_ROCM=1
+fi
 
-  if [[ "${JOB_BASE_NAME}" == *-NO_AVX-* ]]; then
-    export ATEN_CPU_CAPABILITY=default
-  elif [[ "${JOB_BASE_NAME}" == *-NO_AVX2-* ]]; then
-    export ATEN_CPU_CAPABILITY=avx
-  fi
+if [[ "${JOB_BASE_NAME}" == *-NO_AVX-* ]]; then
+  export ATEN_CPU_CAPABILITY=default
+elif [[ "${JOB_BASE_NAME}" == *-NO_AVX2-* ]]; then
+  export ATEN_CPU_CAPABILITY=avx
 fi
 
 test_python_nn() {
@@ -124,20 +122,16 @@ test_libtorch() {
 if [ -z "${JOB_BASE_NAME}" ] || [[ "${JOB_BASE_NAME}" == *-test ]]; then
   test_python_nn
   test_python_all_except_nn
-  if [ `uname -m` != "ppc64le" ]; then
-    test_aten
-    test_torchvision
-    test_libtorch
-  fi 
+  test_aten
+  test_torchvision
+  test_libtorch
 else
   if [[ "${JOB_BASE_NAME}" == *-test1 ]]; then
     test_python_nn
   elif [[ "${JOB_BASE_NAME}" == *-test2 ]]; then
     test_python_all_except_nn
-    if [ `uname -m` != "ppc64le" ]; then
-      test_aten
-      test_torchvision
-      test_libtorch
-    fi
+    test_aten
+    test_torchvision
+    test_libtorch
   fi
 fi
