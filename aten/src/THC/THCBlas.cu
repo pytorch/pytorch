@@ -298,13 +298,17 @@ void THCudaBlas_Hgemm(THCState *state, char transa, char transb, int64_t m, int6
 #else
       cudaDeviceProp* prop = THCState_getCurrentDeviceProperties(state);
       if (prop->major >= 5){
+#ifndef __HIP_PLATFORM_HCC__
         THCublasCheck(cublasSetMathMode(handle, CUBLAS_TENSOR_OP_MATH));
-        THCublasCheck(cublasGemmEx(handle, opa, opb,
+#endif
+	THCublasCheck(cublasGemmEx(handle, opa, opb,
                                    i_m, i_n, i_k, &fAlpha,
                                    a, CUDA_R_16F, i_lda, b, CUDA_R_16F,
                                    i_ldb, &fBeta, c, CUDA_R_16F, i_ldc,
                                    CUDA_R_32F, CUBLAS_GEMM_DFALT_TENSOR_OP));
-        THCublasCheck(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
+#ifndef __HIP_PLATFORM_HCC__
+	THCublasCheck(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
+#endif
       }else{
         THCublasCheck(cublasSgemmEx(handle, opa, opb,
                                     i_m, i_n, i_k, &fAlpha,
@@ -363,14 +367,18 @@ void THCudaBlas_HgemmStridedBatched(THCState *state, char transa, char transb, i
   cublasSetStream(handle, THCState_getCurrentStream(state));
   float fAlpha = THC_half2float(alpha);
   float fBeta = THC_half2float(beta);
+#ifndef __HIP_PLATFORM_HCC__
   THCublasCheck(cublasSetMathMode(handle, CUBLAS_TENSOR_OP_MATH));
+#endif
   THCublasCheck(cublasGemmStridedBatchedEx(handle,
                                    opa, opb, (int)m, (int)n, (int)k,
                                    (void*)&fAlpha, a, CUDA_R_16F, (int)lda, strideA,
                                    b, CUDA_R_16F, (int)ldb, strideB,
                                    (void*)&fBeta, c, CUDA_R_16F, (int)ldc, strideC,
                                    (int)batchCount, CUDA_R_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP));
+#ifndef __HIP_PLATFORM_HCC__
   THCublasCheck(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
+#endif
 }
 #endif
 
