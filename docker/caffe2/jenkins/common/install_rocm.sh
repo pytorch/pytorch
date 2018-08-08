@@ -20,7 +20,6 @@ install_ubuntu() {
                    miopen-hip \
                    miopengemm \
                    rocblas \
-                   hipblas \
                    rocm-profiler \
                    cxlactivitylogger
 
