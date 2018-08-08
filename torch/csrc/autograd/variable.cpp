@@ -11,6 +11,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/core/Error.h>
+#include <TH/THTensor.hpp>
 
 #include <list>
 #include <memory>
@@ -130,6 +131,9 @@ void Variable::Impl::set_data(Tensor new_data) {
   }
   
   // Updates metadata
+  data_.pImpl->tensor->scalar_type_ = new_data.type().scalarType();
+  data_.pImpl->tensor->backend_ = new_data.type().backend();
+  data_.pImpl->tensor->is_variable_ = true;
   data_ = std::move(new_data);
 }
 
