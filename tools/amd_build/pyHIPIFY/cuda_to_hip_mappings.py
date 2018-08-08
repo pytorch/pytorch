@@ -1596,7 +1596,7 @@ CUDA_IDENTIFIER_MAP = {
     "cublasZdotu": ("rocblas_zdotu", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED),
     "cublasZdotc": ("rocblas_zdotc", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED),
     "cublasSscal": ("rocblas_sscal", CONV_MATH_FUNC, API_BLAS),
-    "cublasSscalBatched": ("rocblas_sscal_batched", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTD),
+    "cublasSscalBatched": ("rocblas_sscal_batched", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED),
     "cublasDscal": ("rocblas_dscal", CONV_MATH_FUNC, API_BLAS),
     "cublasDscalBatched": ("rocblas_dscal_batched", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED),
     "cublasCscal": ("rocblas_cscal", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED),
