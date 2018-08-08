@@ -38,10 +38,15 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
   } else if(t.kind() == TypeKind::ListType) {
     auto prim = t.cast<ListType>()->getElementType();
     out << *prim << "[]";
+  } else if(t.kind() == TypeKind::MutableListType) {
+    auto prim = t.cast<MutableListType>()->getElementType();
+    out << *prim << "[&]";
   } else if(t.kind() == TypeKind::NoneType) {
     out << "None";
   } else if(t.kind() == TypeKind::StringType) {
     out << "string";
+  } else if(t.kind() == TypeKind::WorldType) {
+    out << "World";
   } else {
     AT_ERROR("unknown type kind");
   }
@@ -66,6 +71,10 @@ FloatTypePtr FloatType::get() {
 }
 NoneTypePtr NoneType::get() {
   static auto value = NoneType::create();
+  return value;
+}
+WorldTypePtr WorldType::get() {
+  static auto value = WorldType::create();
   return value;
 }
 StringTypePtr StringType::get() {

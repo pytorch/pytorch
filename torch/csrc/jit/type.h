@@ -17,11 +17,13 @@ _(DynamicType) \
 _(TensorType) \
 _(TupleType) \
 _(ListType) \
+_(MutableListType) \
 _(NumberType) \
 _(FloatType) \
 _(IntType) \
 _(NoneType) \
 _(StringType) \
+_(WorldType) \
 
 enum class TypeKind {
 #define DEFINE_TYPE(T) T,
@@ -212,6 +214,66 @@ private:
   int device_;
   std::vector<int64_t> sizes_;
   std::vector<int64_t> strides_;
+};
+
+struct WorldType;
+using WorldTypePtr = std::shared_ptr<WorldType>;
+// TODO
+struct TORCH_API WorldType : public Type {
+  template <typename... T>
+  static WorldTypePtr create(T&&... all) {
+    return WorldTypePtr(new WorldType(std::forward<T>(all)...));
+  }
+  bool operator==(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
+  std::string str() const override {
+    return "world";
+  }
+  bool isSubtypeOf(const TypePtr rhs) const override {
+    return *this == *rhs;
+  }
+  static const TypeKind Kind = TypeKind::WorldType;
+  // global singleton
+  static WorldTypePtr get();
+
+ private:
+  WorldType() : Type(TypeKind::WorldType) {}
+};
+
+struct MutableListType;
+using MutableListTypePtr = std::shared_ptr<MutableListType>;
+
+// TODO
+struct TORCH_API MutableListType : public Type {
+  friend struct Type;
+  template <typename... T>
+  static MutableListTypePtr create(T&&... all) {
+    return MutableListTypePtr(new MutableListType(std::forward<T>(all)...));
+  }
+  bool operator==(const Type& rhs) const override {
+    if (auto rhs_ = rhs.cast<MutableListType>()) {
+      return *getElementType() == *rhs_->getElementType();
+    }
+    return false;
+  }
+  std::string str() const override {
+    std::stringstream ss;
+    ss << getElementType()->str() << "[&]";
+    return ss.str();
+  }
+  TypePtr getElementType() const {
+    return elem;
+  }
+  // common cast List[Tensor]
+  static MutableListTypePtr ofTensors();
+  static MutableListTypePtr ofInts();
+  static MutableListTypePtr ofFloats();
+
+ private:
+  MutableListType(TypePtr elem) : Type(TypeKind::MutableListType), elem(elem) {}
+  static const TypeKind Kind = TypeKind::MutableListType;
+  TypePtr elem;
 };
 
 struct ListType;

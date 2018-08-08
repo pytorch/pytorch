@@ -54,6 +54,7 @@ struct SchemaParser {
       {"float", FloatType::get() },
       {"int", IntType::get() },
       {"bool", IntType::get() }, // TODO: add separate bool type
+      {"World", WorldType::get() },
     };
     auto tok = L.expect(TK_IDENT);
     auto text = tok.text();
@@ -64,10 +65,14 @@ struct SchemaParser {
   }
   void parseType(Argument& arg) {
     arg.type = parseBaseType();
-    if(L.nextIf('[')) {
-      arg.type = ListType::create(arg.type);
-      if(L.cur().kind == TK_NUMBER) {
-        arg.N = std::stoll(L.next().text());
+    if (L.nextIf('[')) {
+      if (L.nextIf(TK_IDENT)) { // TODO fixup
+        arg.type = MutableListType::create(arg.type);
+      } else {
+        arg.type = ListType::create(arg.type);
+        if (L.cur().kind == TK_NUMBER) {
+          arg.N = std::stoll(L.next().text());
+        }
       }
       L.expect(']');
     }

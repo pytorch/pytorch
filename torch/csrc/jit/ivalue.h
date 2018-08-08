@@ -101,11 +101,19 @@ struct ConstantString : at::Retainable {
   }
 };
 
+struct World {
+  World() : world_id(1) {}
+  int64_t world_id;
+};
+
 template<typename T>
 struct ConstantList;
+template<typename T>
+struct MutableList;
 struct IValue;
 using Tuple = ConstantList<IValue>;
 using IntList = ConstantList<int64_t>;
+using MutableIntList = MutableList<int64_t>;
 using TensorList = ConstantList<at::Tensor>;
 using DoubleList = ConstantList<double>;
 
@@ -117,7 +125,17 @@ using DoubleList = ConstantList<double>;
 // retain/release calls.
 
 #define TORCH_FORALL_TAGS(_) \
-  _(None) _(Tensor) _(Double) _(Int) _(Tuple) _(IntList) _(DoubleList) _(String) _(TensorList)
+  _(None) \
+  _(Tensor) \
+  _(Double) \
+  _(Int) \
+  _(Tuple) \
+  _(IntList) \
+  _(DoubleList) \
+  _(String) \
+  _(TensorList) \
+  _(MutableIntList) \
+  _(World) \
 
 struct IValue {
   IValue()
@@ -213,6 +231,23 @@ struct IValue {
     return out;
   }
 
+  // World
+  IValue(World w)
+  : tag(Tag::World), retainable(false) {
+    as_world = w;
+  }
+  bool isWorld() const { return Tag::World == tag; }
+
+  World toWorld() const {
+    JIT_ASSERT(isWorld());
+    return as_world;
+  }
+  TORCH_API std::ostream& formatWorld(std::ostream& out) const {
+    JIT_ASSERT(isWorld());
+    out << as_world.world_id;
+    return out;
+  }
+
   // Int
   IValue(int64_t i)
   : tag(Tag::Int), retainable(false) {
@@ -237,6 +272,25 @@ struct IValue {
     return out;
   }
 
+  // MutableIntList
+  IValue(Shared<MutableIntList> v);
+  /* IValue(std::vector<int64_t> v); */
+  /* IValue(at::ArrayRef<int64_t> v) */
+  /* : IValue(std::vector<int64_t>(v.begin(), v.end())) {} */
+  bool isMutableIntList() const { return Tag::MutableIntList == tag; }
+  Shared<MutableIntList> toMutableIntList() && {
+    JIT_ASSERT(isMutableIntList());
+    return moveToRetainable<MutableIntList>();
+  }
+  Shared<MutableIntList> toMutableIntList() const & {
+    JIT_ASSERT(isMutableIntList());
+    return toRetainable<MutableIntList>();
+  }
+  TORCH_API std::ostream& formatMutableIntList(std::ostream& out) const {
+    JIT_ASSERT(isMutableIntList());
+    out << "Mutable Int List"; //FIXME @eellison toRetainable<MutableIntList>();
+    return out;
+  }
 
   // IntList
   IValue(Shared<IntList> v);
@@ -406,6 +460,7 @@ private:
     at::Retainable* as_retainable;
     double as_double;
     int64_t as_int;
+    World as_world;
     // this type should be as big as all the other types because it will
     // be used to copy the union's value in certain cases
     int64_t payload;
@@ -432,6 +487,7 @@ DEFINE_TO(double, toDouble)
 DEFINE_TO(int64_t, toInt)
 DEFINE_TO(Shared<DoubleList>, toDoubleList)
 DEFINE_TO(Shared<IntList>, toIntList)
+DEFINE_TO(Shared<MutableIntList>, toMutableIntList)
 DEFINE_TO(Shared<TensorList>, toTensorList)
 DEFINE_TO(Shared<ConstantString>, toString)
 DEFINE_TO(at::Scalar, toScalar)
@@ -439,9 +495,29 @@ DEFINE_TO(bool, toInt)
 DEFINE_TO(std::vector<int64_t>, toIntListRef)
 DEFINE_TO(std::vector<double>, toDoubleListRef)
 DEFINE_TO(std::vector<at::Tensor>, toTensorListRef)
+DEFINE_TO(World, toWorld)
 
 
 #undef DEFINE_TO
+
+template<typename Elem>
+struct MutableList : at::Retainable {
+ private:
+  MutableList(std::vector<Elem> elements_)
+  : elements_(std::move(elements_)) {}
+  std::vector<Elem> elements_;
+ public:
+  static Shared<MutableList<Elem>> create(std::vector<Elem> elements_) {
+    return Shared<MutableList<Elem>>(
+        new MutableList<Elem>(std::move(elements_)), false);
+  }
+  std::vector<Elem>& elements() {
+    return elements_;
+  }
+  operator std::vector<Elem>&() {
+    return elements();
+  }
+};
 
 // non-mutable list
 template<typename Elem>
@@ -471,6 +547,10 @@ inline IValue::IValue(Shared<Tuple> v)
 
 inline IValue::IValue(Shared<IntList> v)
 : tag(Tag::IntList), retainable(true) {
+  as_retainable = v.detach();
+}
+inline IValue::IValue(Shared<MutableIntList> v)
+    : tag(Tag::MutableIntList), retainable(true) {
   as_retainable = v.detach();
 }
 inline IValue::IValue(std::vector<int64_t> v)

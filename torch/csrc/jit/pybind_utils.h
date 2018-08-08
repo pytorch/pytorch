@@ -60,6 +60,7 @@ inline IValue toIValue(py::object&& obj, const TypePtr& type) {
         return {};
       case TypeKind::StringType:
       case TypeKind::ListType:
+      case TypeKind::MutableListType:
       case TypeKind::TupleType:
         AT_ERROR("Lists and tuples are not supported yet");
       case TypeKind::NumberType:

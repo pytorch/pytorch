@@ -724,6 +724,7 @@ struct to_ir {
     method.setSchema({def.name().name(), std::move(arguments), std::move(returns)});
     // remove any uses of tuples that we inserted
     LowerTuples(graph);
+    validateWorldState(*graph);
   }
 
 private:
@@ -736,6 +737,19 @@ private:
   // Singly-linked list of environments. This top element contains a member
   // `next` that points to the most immediate enclosing scope's value.
   std::shared_ptr<Environment> environment_stack;
+
+  // Ensure that every world token is used at most once.
+  void validateWorldState(const Graph& graph) {
+    for (const auto& node : graph.nodes()) {
+      for (const auto& input : node->inputs()) {
+        if (input->type()->kind() == TypeKind::WorldType &&
+            input->uses().size() > 1) {
+          // TODO need better error message (maype showing locs)
+          throw std::logic_error("Input used more than once");
+        }
+      }
+    }
+  }
 
   void pushFrame(Block * b) {
     environment_stack = std::make_shared<Environment>(method, resolver, b, environment_stack);
