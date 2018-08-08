@@ -374,6 +374,21 @@ void THCudaBlas_HgemmStridedBatched(THCState *state, char transa, char transb, i
 }
 #endif
 
+#ifdef USE_ROCM
+void THCudaBlas_SgemmBatched(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k,
+                             float alpha, const float *a[], int64_t lda, const float *b[], int64_t ldb,
+                             float beta, float *c[], int64_t ldc, int64_t batchCount)
+{
+  if( (m >= INT_MAX) || (n >= INT_MAX) || (k >= INT_MAX) || (lda >= INT_MAX)  || (ldb >= INT_MAX) || (ldc >= INT_MAX) || (batchCount >= INT_MAX) )
+  {
+    THError("Cublas_SgemmBatched only supports m, n, k, lda, ldb, ldc, batchCount"
+            "with the bound [val] <= %d", INT_MAX);
+  }
+
+  THCudaBlas_SgemmStridedBatched(state, transa, transb, m, n, k, alpa, a, lda, 1, b, ldb, 1, beta, c, ldc, 1, batchCount);
+
+}
+#else
 void THCudaBlas_SgemmBatched(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k,
                              float alpha, const float *a[], int64_t lda, const float *b[], int64_t ldb,
                              float beta, float *c[], int64_t ldc, int64_t batchCount)
@@ -395,6 +410,7 @@ void THCudaBlas_SgemmBatched(THCState *state, char transa, char transb, int64_t 
                                    &alpha, a, (int)lda, b, (int)ldb, &beta, c, (int)ldc,
                                    (int)batchCount));
 }
+#endif
 
 #if CUDA_VERSION >= 8000 || defined USE_ROCM
 void THCudaBlas_SgemmStridedBatched(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k,
@@ -421,6 +437,21 @@ void THCudaBlas_SgemmStridedBatched(THCState *state, char transa, char transb, i
 }
 #endif
 
+#ifdef USE_ROCM
+void THCudaBlas_DgemmBatched(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k,
+                             double alpha, const double *a[], int64_t lda, const double *b[], int64_t ldb,
+                             double beta, double *c[], int64_t ldc, int64_t batchCount)
+{
+  if( (m >= INT_MAX) || (n >= INT_MAX) || (k >= INT_MAX) || (lda >= INT_MAX)  || (ldb >= INT_MAX) || (ldc >= INT_MAX) || (batchCount >= INT_MAX) )
+  {
+    THError("Cublas_DgemmBatched only supports m, n, k, lda, ldb, ldc, batchCount"
+            "with the bound [val] <= %d", INT_MAX);
+  }
+  
+  THCudaBlas_DgemmStridedBatched(state, transa, transb, m, n, k, alpa, a, lda, 1, b, ldb, 1, beta, c, ldc, 1, batchCount);
+
+}
+#else
 void THCudaBlas_DgemmBatched(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k,
                              double alpha, const double *a[], int64_t lda, const double *b[], int64_t ldb,
                              double beta, double *c[], int64_t ldc, int64_t batchCount)
@@ -442,6 +473,7 @@ void THCudaBlas_DgemmBatched(THCState *state, char transa, char transb, int64_t 
                                    &alpha, a, (int)lda, b, (int)ldb, &beta, c, (int)ldc,
                                    (int)batchCount));
 }
+#endif
 
 #if CUDA_VERSION >= 8000 || defined USE_ROCM
 void THCudaBlas_DgemmStridedBatched(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k,
