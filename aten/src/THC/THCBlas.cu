@@ -343,7 +343,7 @@ void THCudaBlas_Dgemm(THCState *state, char transa, char transb, int64_t m, int6
           "with the bound [val] <= %d", INT_MAX);
 }
 
-#if CUDA_VERSION >= 9010
+#if CUDA_VERSION >= 9010 || defined USE_ROCM
 void THCudaBlas_HgemmStridedBatched(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k,
                              half alpha, const half *a, int64_t lda, int64_t strideA, const half *b, int64_t ldb, int64_t strideB,
                              half beta, half *c, int64_t ldc, int64_t strideC, int64_t batchCount)
@@ -396,7 +396,7 @@ void THCudaBlas_SgemmBatched(THCState *state, char transa, char transb, int64_t 
                                    (int)batchCount));
 }
 
-#if CUDA_VERSION >= 8000
+#if CUDA_VERSION >= 8000 || defined USE_ROCM
 void THCudaBlas_SgemmStridedBatched(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k,
                              float alpha, const float *a, int64_t lda, int64_t strideA, const float *b, int64_t ldb, int64_t strideB,
                              float beta, float *c, int64_t ldc, int64_t strideC, int64_t batchCount)
@@ -443,7 +443,7 @@ void THCudaBlas_DgemmBatched(THCState *state, char transa, char transb, int64_t 
                                    (int)batchCount));
 }
 
-#if CUDA_VERSION >= 8000
+#if CUDA_VERSION >= 8000 || defined USE_ROCM
 void THCudaBlas_DgemmStridedBatched(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k,
                              double alpha, const double *a, int64_t lda, int64_t strideA, const double *b, int64_t ldb, int64_t strideB,
                              double beta, double *c, int64_t ldc, int64_t strideC, int64_t batchCount)

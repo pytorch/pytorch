@@ -593,7 +593,7 @@ THCTensor_(baddbmm)(THCState *state, THCTensor *result, real beta, THCTensor *t,
 
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
   // Compute pointers to matrices in each batch.
-#if CUDA_VERSION < 8000
+#if CUDA_VERSION < 8000 && !defined USE_ROCM
   size_t matrices_size = num_batches * sizeof(real*);
 
 //   Copy pointers to device.
@@ -677,7 +677,7 @@ THCTensor_(baddbmm)(THCState *state, THCTensor *result, real beta, THCTensor *t,
 
 #elif defined(THC_REAL_IS_HALF)
 
-#if CUDA_VERSION < 9010
+#if CUDA_VERSION < 9010 && !defined USE_ROCM
   // Currently no HgemmBatched in Cublas
   for (int64_t i = 0; i < num_batches; ++i) {
     THCudaBlas_Hgemm(
