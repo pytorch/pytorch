@@ -10,7 +10,7 @@ void initPythonTracerBindings(PyObject *module);
 
 
 std::string getPythonInterpreterStackTrace();
-tracer::PreTraceInfo preRecordPythonTrace(
+Node* preRecordPythonTrace(
     THPObjectPtr pyobj, std::string arg_types, at::ArrayRef<autograd::Variable> inputs,
     pyobj_list scalar_args);
 

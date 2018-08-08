@@ -985,12 +985,12 @@ void testCustomOperators() {
     REQUIRE(op->schema().returns[0].type->kind() == TypeKind::DynamicType);
 
     Stack stack;
-    push(stack, 2.0f, at::ones(5));
+    push(stack, 2.0f, autograd::make_variable(at::ones(5)));
     op->getOperation()(stack);
     at::Tensor output;
     pop(stack, output);
 
-    REQUIRE(output.allclose(at::full(5, 3.0f)));
+    REQUIRE(output.allclose(autograd::make_variable(at::full(5, 3.0f))));
   }
   {
     RegisterOperators reg({createOperator(
@@ -1014,12 +1014,12 @@ void testCustomOperators() {
     REQUIRE(op->schema().returns[0].type->kind() == TypeKind::DynamicType);
 
     Stack stack;
-    push(stack, 2.0f, at::ones(5));
+    push(stack, 2.0f, autograd::make_variable(at::ones(5)));
     op->getOperation()(stack);
     at::Tensor output;
     pop(stack, output);
 
-    REQUIRE(output.allclose(at::full(5, 3.0f)));
+    REQUIRE(output.allclose(autograd::make_variable(at::full(5, 3.0f))));
   }
   {
     // Check that lists work well.
@@ -1050,7 +1050,7 @@ void testCustomOperators() {
     Stack stack;
     push(stack, std::vector<int64_t>{1, 2});
     push(stack, std::vector<double>{1.0, 2.0});
-    push(stack, std::vector<at::Tensor>{at::ones(5)});
+    push(stack, std::vector<at::Tensor>{autograd::make_variable(at::ones(5))});
     op->getOperation()(stack);
     std::vector<double> output;
     pop(stack, output);
@@ -1088,6 +1088,52 @@ void testCustomOperators() {
                    "but the provided schema specified type Dynamic "
                    "for the return value in that position"));
 #endif // USE_CATCH
+  }
+  {
+    auto op = createOperator(
+        "traced::op(float a, Tensor b) -> Tensor",
+        [](double a, at::Tensor b) { return a + b; });
+
+    std::shared_ptr<tracer::TracingState> state;
+    variable_list trace_vars_in;
+    std::tie(state, trace_vars_in) = tracer::enter({});
+
+    Stack stack;
+    push(stack, 2.0f, autograd::make_variable(at::ones(5)));
+    op.getOperation()(stack);
+    at::Tensor output = autograd::make_variable(at::empty({}));
+    pop(stack, output);
+
+    tracer::exit({output});
+
+    std::string op_name("traced::op");
+    bool contains_traced_op = false;
+    for (const auto& node : state->graph->nodes()) {
+      if (std::string(node->kind().toQualString()) == op_name) {
+        contains_traced_op = true;
+        break;
+      }
+    }
+    REQUIRE(contains_traced_op);
+  }
+  {
+#ifdef USE_CATCH
+    // vector<double> is not supported yet.
+    auto op = createOperator(
+        "traced::op(float[] f) -> int",
+        [](const std::vector<double>& f) -> int64_t { return f.size(); });
+
+    std::shared_ptr<tracer::TracingState> state;
+    variable_list trace_vars_in;
+    std::tie(state, trace_vars_in) = tracer::enter({});
+
+    Stack stack;
+    push(stack, std::vector<double>{1.0});
+
+    REQUIRE_THROWS_WITH(
+        op.getOperation()(stack),
+        StartsWith("Tracing float lists currently not supported!"));
+#endif
   }
 }
 

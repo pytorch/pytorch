@@ -69,7 +69,7 @@ std::shared_ptr<torch::jit::Graph> createGraphByTracing(
   }
 }
 
-PreTraceInfo preRecordPythonTrace(THPObjectPtr pyobj,
+Node* preRecordPythonTrace(THPObjectPtr pyobj,
                                   std::string arg_types,
                                   at::ArrayRef<Variable> inputs,
                                   pyobj_list scalar_args) {
@@ -78,14 +78,10 @@ PreTraceInfo preRecordPythonTrace(THPObjectPtr pyobj,
     throw python_error();
   }
 
-  PreTraceInfo info;
-  auto & state = getTracingState();
-  auto & graph = state->graph;
+  auto & graph = getTracingState()->graph;
 
-  Node *n = info.n = graph->createPythonOp(
-                        std::move(apply),
-                        arg_types,
-                        std::move(scalar_args));
+  Node* n = graph->createPythonOp(
+      std::move(apply), arg_types, std::move(scalar_args));
   recordSourceLocation(n);
 
   for (const Variable & input : inputs) {
@@ -95,7 +91,7 @@ PreTraceInfo preRecordPythonTrace(THPObjectPtr pyobj,
   // NB: Order matters. This must append after inputs but before outputs.
   graph->appendNode(n);
 
-  return info;
+  return n;
 }
 
 void pythonRecordSourceLocation(Node* n) {
