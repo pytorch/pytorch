@@ -575,7 +575,7 @@ class build_ext(build_ext_parent):
     def get_outputs(self):
         outputs = distutils.command.build_ext.build_ext.get_outputs(self)
         if FULL_CAFFE2:
-            outputs += [os.path.join(self.build_lib, d) for d in ['caffe', 'caffe2']]
+            outputs.append(os.path.join(self.build_lib, "caffe2"))
         return outputs
 
 
@@ -950,7 +950,7 @@ extensions = []
 if FULL_CAFFE2:
     packages = find_packages(exclude=('tools', 'tools.*'))
 else:
-    packages = find_packages(exclude=('tools', 'tools.*', 'caffe2', 'caffe2.*', 'caffe', 'caffe.*'))
+    packages = find_packages(exclude=('tools', 'tools.*', 'caffe2', 'caffe2.*'))
 C = Extension("torch._C",
               libraries=main_libraries,
               sources=main_sources,
