@@ -61,7 +61,6 @@ void THTensor_setStorageNd(THTensor *self, THStorage *storage, ptrdiff_t storage
 
 void THTensor_resize(THTensor *self, at::IntList size, at::IntList stride)
 {
-  THArgCheck(size.data() != NULL, 2, "invalid size");
   if(stride.data())
     THArgCheck(stride.size() == size.size(), 3, "invalid stride");
 
