@@ -143,16 +143,16 @@ Tensor _matrix_rank_helper(const Tensor& self, bool symmetric) {
   return S;
 }
 
-int64_t matrix_rank(const Tensor& self, double tol, bool symmetric) {
+Tensor matrix_rank(const Tensor& self, double tol, bool symmetric) {
   AT_CHECK(at::isFloatingType(self.type().scalarType()) && self.dim() == 2,
            "matrix_rank(", self.type(), "{", self.sizes(), "}): expected a 2D tensor "
            "of floating types");
 
   Tensor S = _matrix_rank_helper(self, symmetric);
-  return (S > tol).toType(kLong).sum().toCLong();
+  return (S > tol).toType(kLong).sum();
 }
 
-int64_t matrix_rank(const Tensor& self, bool symmetric) {
+Tensor matrix_rank(const Tensor& self, bool symmetric) {
   AT_CHECK(at::isFloatingType(self.type().scalarType()) && self.dim() == 2,
            "matrix_rank(", self.type(), "{", self.sizes(), "}): expected a 2D tensor "
            "of floating types");
@@ -160,7 +160,7 @@ int64_t matrix_rank(const Tensor& self, bool symmetric) {
   Tensor S = _matrix_rank_helper(self, symmetric);
   double tol = S.max().toCDouble() * std::max<double>(self.size(0), self.size(1)) *
                _get_epsilon(self.type().scalarType());
-  return (S > tol).toType(kLong).sum().toCLong();
+  return (S > tol).toType(kLong).sum();
 }
 
 static void check_1d(const Tensor& t, const char* arg, const char* fn) {
