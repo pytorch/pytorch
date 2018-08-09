@@ -257,6 +257,7 @@ else:
     except Exception:
         pass
 
+
 class create_version_file(PytorchCommand):
     def run(self):
         global version, cwd
@@ -1038,10 +1039,10 @@ tests_require = ['pytest-cov', 'hypothesis'] if FULL_CAFFE2 else []
 
 entry_points = {}
 if FULL_CAFFE2:
-  entry_points={
-      'console_scripts': [
-          'convert-caffe2-to-onnx = caffe2.python.onnx.bin.conversion:caffe2_to_onnx',
-          'convert-onnx-to-caffe2 = caffe2.python.onnx.bin.conversion:onnx_to_caffe2',
+    entry_points = {
+        'console_scripts': [
+            'convert-caffe2-to-onnx = caffe2.python.onnx.bin.conversion:caffe2_to_onnx',
+            'convert-onnx-to-caffe2 = caffe2.python.onnx.bin.conversion:onnx_to_caffe2',
         ]
     }
 
@@ -1091,4 +1092,4 @@ if __name__ == '__main__':
         install_requires=install_requires,
         setup_requires=setup_requires,
         tests_require=tests_require,
-        )
+    )
