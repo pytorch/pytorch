@@ -80,14 +80,12 @@ test_aten() {
     # NB: the ATen test binaries don't have RPATH set, so it's necessary to
     # put the dynamic libraries somewhere were the dynamic linker can find them.
     # This is a bit of a hack.
-    if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]]; then
-      ln -s "$TORCH_LIB_PATH"/libcaffe2* build/bin
-      ln -s "$TORCH_LIB_PATH"/libnccl* build/bin
-    elif [[ "$BUILD_ENVIRONMENT" == *ppc64le* ]]; then
-      # use sudo as we are executing in the context of a non previleged user
-      sudo ln -s "$TORCH_LIB_PATH"/libcaffe2* build/bin
-      sudo ln -s "$TORCH_LIB_PATH"/libnccl* build/bin
+    if [[ "$BUILD_ENVIRONMENT" == *ppc64le* ]]; then
+      SUDO=sudo 
     fi
+
+    ${SUDO} ln -s "$TORCH_LIB_PATH"/libcaffe2* build/bin
+    ${SUDO} ln -s "$TORCH_LIB_PATH"/libnccl* build/bin
 
     ls build/bin
     aten/tools/run_tests.sh build/bin
