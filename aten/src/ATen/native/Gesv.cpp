@@ -93,10 +93,12 @@ std::tuple<Tensor&,Tensor&> _gesv_single_out_cpu(
    *
    * For 2D matrices, A.t() and self.t() represent their column major formats
    *
-   * Case 1) The output tensor is of the correct shape, but it and its transpose
-   *         are not contiguous. eg. torch.gesv(... , out=(n[::2], ...)):
-   *         - clone input tensor into a buffer and use it
-   *         - if output tensor is contiguous, it will be handled in case 3
+   * Case 1) The output tensor has the correct shape, but its elements do not
+   *         form a contiguous chunk of memory (i.e., it and its transpose are
+   *         not contiguous) eg. torch.gesv(... , out=(n[::2], ...)):
+   *         - Since shape is correct, we must not resize_ it. Instead, we
+   *           clone the input tensor into a buffer, use the buffer for Lapack
+   *           and finally copy the buffer to the output tensor
    *
    * Note: In both cases below, we resize_ if required. This helps to:
    *       (i)  Make output tensors bigger and contiguous, if required, and
@@ -135,14 +137,12 @@ std::tuple<Tensor&,Tensor&> _gesv_single_out_cpu(
 
   if (!tc_sol && !sol.is_contiguous() && sol_correct_shape) {
     temp_sol = self_t.clone().t_();
-  } else if (tc_sol) {
-    sol.t().resize_({by, bx});
-    if (&self != &sol) {
-      sol.t().copy_(self_t);
-    }
-  } else {
+  } else if (tc_sol && &self != &sol) {
+    sol.t().resize_({by, bx}).copy_(self_t);
+  } else if (!tc_sol) {
     sol.resize_({by, bx});
     if (&self == &sol) {
+      /* &self == &sol, and may contain garbage after resize_ */
       sol.copy_(self_t.clone()).t_();
     } else {
       sol.copy_(self_t).t_();
@@ -151,12 +151,9 @@ std::tuple<Tensor&,Tensor&> _gesv_single_out_cpu(
 
   if (!tc_lu && !lu.is_contiguous() && lu_correct_shape) {
     temp_lu = A.t().clone().t_();
-  } else if (tc_lu) {
-    lu.t().resize_({ay, ax});
-    if (&A != &lu) {
-      lu.t().copy_(A.t());
-    }
-  } else {
+  } else if (tc_lu && &A != &lu) {
+    lu.t().resize_({ay, ax}).copy_(A.t());
+  } else if (!tc_lu) {
     lu.resize_({ay, ax});
     if (&A == &lu) {
       lu.copy_(A.t().clone()).t_();

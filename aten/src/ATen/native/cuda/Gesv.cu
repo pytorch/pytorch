@@ -191,12 +191,9 @@ AT_ERROR("gesv: MAGMA library not found in "
 
   if (!tc_sol && !sol.is_contiguous() && sol_correct_shape) {
     temp_sol = self_t.clone().t_();
-  } else if (tc_sol) {
-    sol.t().resize_({by, bx});
-    if (&self != &sol) {
-      sol.t().copy_(self_t);
-    }
-  } else {
+  } else if (tc_sol && &self != &sol) {
+    sol.t().resize_({by, bx}).copy_(self_t);
+  } else if (!tc_sol) {
     sol.resize_({by, bx});
     if (&self == &sol) {
       sol.copy_(self_t.clone()).t_();
@@ -207,12 +204,9 @@ AT_ERROR("gesv: MAGMA library not found in "
 
   if (!tc_lu && !lu.is_contiguous() && lu_correct_shape) {
     temp_lu = A.t().clone().t_();
-  } else if (tc_lu) {
-    lu.t().resize_({ay, ax});
-    if (&A != &lu) {
-      lu.t().copy_(A.t());
-    }
-  } else {
+  } else if (tc_lu && &A != &lu) {
+    lu.t().resize_({ay, ax}).copy_(A.t());
+  } else if (!tc_lu) {
     lu.resize_({ay, ax});
     if (&A == &lu) {
       lu.copy_(A.t().clone()).t_();
