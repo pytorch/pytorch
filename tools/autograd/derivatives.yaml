@@ -1215,7 +1215,7 @@
   self: fft_backward(self, grad, signal_ndim, complex_input, complex_output, inverse, checked_signal_sizes, normalized, onesided, output_sizes)
 
 - name: unbind(Tensor self, int64_t dim)
-  self: stack(to_tensor_list(grads), dim)
+  self: unbind_backward(grads, dim)
 
 - name: stack(TensorList tensors, int64_t dim)
   tensors: unbind(grad, dim)
