@@ -1182,6 +1182,11 @@ Loss functions
 
 .. autofunction:: binary_cross_entropy
 
+:hidden:`binary_cross_entropy_with_logits`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: binary_cross_entropy_with_logits
+
 :hidden:`poisson_nll_loss`
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -1246,11 +1251,6 @@ Loss functions
 ~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: nll_loss
-
-:hidden:`binary_cross_entropy_with_logits`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: binary_cross_entropy_with_logits
 
 :hidden:`smooth_l1_loss`
 ~~~~~~~~~~~~~~~~~~~~~~~~
