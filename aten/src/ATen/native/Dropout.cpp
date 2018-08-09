@@ -24,14 +24,16 @@ bool is_fused_kernel_acceptable(const Tensor& input, double p) {
 // NB: sure, we could have used different overloads here, but I would feel insecure
 // knowing that this dispatch depends only on the constness of the references
 template<bool inplace>
-Tensor& multiply(Tensor& input, const Tensor& noise) = delete;
-template<>
-Tensor& multiply<true>(Tensor& input, const Tensor& noise) { return input.mul_(noise); }
+Tensor& multiply(Tensor& input, const Tensor& noise) {
+  static_assert(inplace, "Wrong multiply overload triggered in Dropout.cpp");
+  return input.mul_(noise);
+}
 
 template<bool inplace>
-Tensor multiply(const Tensor& input, const Tensor& noise) = delete;
-template<>
-Tensor multiply<false>(const Tensor& input, const Tensor& noise) { return input.mul(noise); }
+Tensor multiply(const Tensor& input, const Tensor& noise) {
+  static_assert(!inplace, "Wrong multiply overload triggered in Dropout.cpp");
+  return input.mul(noise);
+}
 
 template<bool feature_dropout, bool alpha_dropout, bool inplace, typename T>
 typename std::conditional<inplace, Tensor&, Tensor>::type
