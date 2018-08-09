@@ -152,8 +152,9 @@ Tensor sum_backward(const Tensor & grad, IntList sizes, IntList dims, bool keepd
       auto dims_to_unsqueeze = dim_list_to_bitset(dims, sizes.size());
       Tensor res = grad;
       for (size_t i = 0; i < sizes.size(); i++){
-        if (dims_to_unsqueeze[i])
-        res = res.unsqueeze(i);
+        if (dims_to_unsqueeze[i]) {
+          res = res.unsqueeze(i);
+        }
       }
       return res.expand(sizes);
     }
