@@ -19,44 +19,47 @@ __host__ __device__ void test(){
   // there is no float <=> __half implicit conversion
   assert(static_cast<Half>(3.0f) == 3.0f);
 
-  // asserting if the std functions used on 
+  // asserting if the  functions used on 
   // half types give almost equivalent results when using
-  // std functions on double.
+  //  functions on double.
   // The purpose of these asserts are to test the device side
   // half API for the common mathematical functions.
+  // Note: When calling std math functions from device, don't
+  // use the std namespace, but just "::" so that the function
+  // gets resolved from nvcc math_functions.hpp
 
   float threshold = 0.00001;
-  assert(std::abs(std::lgamma(Half(10.0)) - std::lgamma(10.0f)) <= threshold);
-  assert(std::abs(std::exp(Half(1.0)) - std::exp(1.0f)) <= threshold);
-  assert(std::abs(std::log(Half(1.0)) - std::log(1.0f)) <= threshold);
-  assert(std::abs(std::log10(Half(1000.0)) - std::log10(1000.0f)) <= threshold);
-  assert(std::abs(std::log1p(Half(0.0)) - std::log1p(0.0f)) <= threshold);
-  assert(std::abs(std::log2(Half(1000.0)) - std::log2(1000.0f)) <= threshold);
-  assert(std::abs(std::expm1(Half(1.0)) - std::expm1(1.0f)) <= threshold);
-  assert(std::abs(std::cos(Half(0.0)) - std::cos(0.0f)) <= threshold);
-  assert(std::abs(std::sin(Half(0.0)) - std::sin(0.0f)) <= threshold);
-  assert(std::abs(std::sqrt(Half(100.0)) - std::sqrt(100.0f)) <= threshold);
-  assert(std::abs(std::ceil(Half(2.4)) - std::ceil(2.4f)) <= threshold);
-  assert(std::abs(std::floor(Half(2.7)) - std::floor(2.7f)) <= threshold);
-  assert(std::abs(std::trunc(Half(2.7)) - std::trunc(2.7f)) <= threshold);
-  assert(std::abs(std::acos(Half(-1.0)) - std::acos(-1.0f)) <= threshold);
-  assert(std::abs(std::cosh(Half(1.0)) - std::cosh(1.0f)) <= threshold);
-  assert(std::abs(std::acosh(Half(1.0)) - std::acosh(1.0f)) <= threshold);
-  assert(std::abs(std::asin(Half(1.0)) - std::asin(1.0f)) <= threshold);
-  assert(std::abs(std::sinh(Half(1.0)) - std::sinh(1.0f)) <= threshold);
-  assert(std::abs(std::asinh(Half(1.0)) - std::asinh(1.0f)) <= threshold);
-  assert(std::abs(std::tan(Half(0.0)) - std::tan(0.0f)) <= threshold);
-  assert(std::abs(std::atan(Half(1.0)) - std::atan(1.0f)) <= threshold);
-  assert(std::abs(std::tanh(Half(1.0)) - std::tanh(1.0f)) <= threshold);
-  assert(std::abs(std::erf(Half(10.0)) - std::erf(10.0f)) <= threshold);
-  assert(std::abs(std::erfc(Half(10.0)) - std::erfc(10.0f)) <= threshold);
-  assert(std::abs(std::abs(Half(-3.0)) - std::abs(-3.0f)) <= threshold);
-  assert(std::abs(std::round(Half(2.3)) - std::round(2.3f)) <= threshold);
-  assert(std::abs(std::pow(Half(2.0), Half(10.0)) - std::pow(2.0f, 10.0f)) <= threshold);
-  assert(std::abs(std::atan2(Half(7.0), Half(0.0)) - std::atan2(7.0f, 0.0f)) <= threshold);
-  // note: can't use std namespace on isnan and isinf in device code
-  assert(std::abs(::isnan(Half(0.0)) - ::isnan(0.0f)) <= threshold);
-  assert(std::abs(::isinf(Half(0.0)) - ::isinf(0.0f)) <= threshold);
+  assert(::abs(::lgamma(Half(10.0)) - ::lgamma(10.0f)) <= threshold);
+  assert(::abs(::exp(Half(1.0)) - ::exp(1.0f)) <= threshold);
+  assert(::abs(::log(Half(1.0)) - ::log(1.0f)) <= threshold);
+  assert(::abs(::log10(Half(1000.0)) - ::log10(1000.0f)) <= threshold);
+  assert(::abs(::log1p(Half(0.0)) - ::log1p(0.0f)) <= threshold);
+  assert(::abs(::log2(Half(1000.0)) - ::log2(1000.0f)) <= threshold);
+  assert(::abs(::expm1(Half(1.0)) - ::expm1(1.0f)) <= threshold);
+  assert(::abs(::cos(Half(0.0)) - ::cos(0.0f)) <= threshold);
+  assert(::abs(::sin(Half(0.0)) - ::sin(0.0f)) <= threshold);
+  assert(::abs(::sqrt(Half(100.0)) - ::sqrt(100.0f)) <= threshold);
+  assert(::abs(::ceil(Half(2.4)) - ::ceil(2.4f)) <= threshold);
+  assert(::abs(::floor(Half(2.7)) - ::floor(2.7f)) <= threshold);
+  assert(::abs(::trunc(Half(2.7)) - ::trunc(2.7f)) <= threshold);
+  assert(::abs(::acos(Half(-1.0)) - ::acos(-1.0f)) <= threshold);
+  assert(::abs(::cosh(Half(1.0)) - ::cosh(1.0f)) <= threshold);
+  assert(::abs(::acosh(Half(1.0)) - ::acosh(1.0f)) <= threshold);
+  assert(::abs(::asin(Half(1.0)) - ::asin(1.0f)) <= threshold);
+  assert(::abs(::sinh(Half(1.0)) - ::sinh(1.0f)) <= threshold);
+  assert(::abs(::asinh(Half(1.0)) - ::asinh(1.0f)) <= threshold);
+  assert(::abs(::tan(Half(0.0)) - ::tan(0.0f)) <= threshold);
+  assert(::abs(::atan(Half(1.0)) - ::atan(1.0f)) <= threshold);
+  assert(::abs(::tanh(Half(1.0)) - ::tanh(1.0f)) <= threshold);
+  assert(::abs(::erf(Half(10.0)) - ::erf(10.0f)) <= threshold);
+  assert(::abs(::erfc(Half(10.0)) - ::erfc(10.0f)) <= threshold);
+  assert(::abs(::abs(Half(-3.0)) - ::abs(-3.0f)) <= threshold);
+  assert(::abs(::round(Half(2.3)) - ::round(2.3f)) <= threshold);
+  assert(::abs(::pow(Half(2.0), Half(10.0)) - ::pow(2.0f, 10.0f)) <= threshold);
+  assert(::abs(::atan2(Half(7.0), Half(0.0)) - ::atan2(7.0f, 0.0f)) <= threshold);
+  // note: can't use  namespace on isnan and isinf in device code
+  assert(::abs(::isnan(Half(0.0)) - ::isnan(0.0f)) <= threshold);
+  assert(::abs(::isinf(Half(0.0)) - ::isinf(0.0f)) <= threshold);
 }
 
 __global__ void kernel(){

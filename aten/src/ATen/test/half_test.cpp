@@ -5,6 +5,7 @@
 #include <iostream>
 #include <limits>
 #include <sstream>
+#include <cmath>
 #include <type_traits>
 #include "test_seed.h"
 #include "test_assert.h"
