@@ -6,6 +6,11 @@
 #include "cuda.h"
 #include "cuda_fp16.h"
 #include "cuda_runtime.h"
+// define constants like M_PI and C keywords for MSVC
+#ifdef _MSC_VER
+#define _USE_MATH_DEFINES
+#include <math.h>
+#endif
 
 #include <assert.h>
 

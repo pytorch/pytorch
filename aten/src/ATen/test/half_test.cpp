@@ -3,6 +3,11 @@
 
 #include <ATen/ATen.h>
 #include <iostream>
+// define constants like M_PI and C keywords for MSVC
+#ifdef _MSC_VER
+#define _USE_MATH_DEFINES
+#include <math.h>
+#endif
 #include <limits>
 #include <sstream>
 #include <cmath>
@@ -149,6 +154,12 @@ TEST_CASE( "half common math functions test", "[]" ) {
   assert(std::abs(std::round(Half(2.3)) - std::round(2.3f)) <= threshold);
   assert(std::abs(std::pow(Half(2.0), Half(10.0)) - std::pow(2.0f, 10.0f)) <= threshold);
   assert(std::abs(std::atan2(Half(7.0), Half(0.0)) - std::atan2(7.0f, 0.0f)) <= threshold);
-  assert(std::abs(std::isnan(Half(0.0)) - std::isnan(0.0f)) <= threshold);
-  assert(std::abs(std::isinf(Half(0.0)) - std::isinf(0.0f)) <= threshold);
+  #ifdef __APPLE__
+    // @TODO: can macos do implicit conversion of Half?
+    assert(std::abs(std::isnan(static_cast<float>(Half(0.0))) - std::isnan(0.0f)) <= threshold);
+    assert(std::abs(std::isinf(static_cast<float>(Half(0.0))) - std::isinf(0.0f)) <= threshold);
+  #else
+    assert(std::abs(std::isnan(Half(0.0)) - std::isnan(0.0f)) <= threshold);
+    assert(std::abs(std::isinf(Half(0.0)) - std::isinf(0.0f)) <= threshold);
+  #endif
 }

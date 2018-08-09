@@ -7,6 +7,11 @@
 #include "THCHalf.h"
 #include "ATen/ATen.h"
 #include "ATen/cuda/CUDANumerics.cuh"
+// define constants like M_PI and C keywords for MSVC
+#ifdef _MSC_VER
+#define _USE_MATH_DEFINES
+#include <math.h>
+#endif
 
 // WARNING: THCNumerics is being deprecated. Please follow the comments
 // in this file to learn about new usages.
