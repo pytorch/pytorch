@@ -1437,7 +1437,7 @@ private:
     // Build the input arguments
     std::vector<NamedValue> args = {sliceable};
     if (sliceable.value->type()->kind() == TypeKind::DynamicType) {
-      // If the sliceable opject is a tensor, specify a default dimension
+      // If the sliceable object is a tensor, specify a default dimension
       args.emplace_back(loc, "dim", graph->insertConstant(0, loc));
     }
 
