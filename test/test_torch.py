@@ -8354,35 +8354,35 @@ class TestTorch(TestCase):
                                                   [2., 1.]]], dtype=dtype)
             expected_inverse_dim1 = torch.tensor([1, 0, 2, 0])
             expected_unique_dim2 = torch.tensor([[[1., 1.],
-                                                   [0., 1.],
-                                                   [2., 1.],
-                                                   [0., 1.]],
-                                                  [[1., 1.],
-                                                   [0., 1.],
-                                                   [2., 1.],
-                                                   [0., 1.]]], dtype=dtype)
+                                                  [0., 1.],
+                                                  [2., 1.],
+                                                  [0., 1.]],
+                                                 [[1., 1.],
+                                                  [0., 1.],
+                                                  [2., 1.],
+                                                  [0., 1.]]], dtype=dtype)
             expected_inverse_dim2 = torch.tensor([0, 1])
-    
+
             # dim0
             x_unique = torch.unique(x, dim=0)
             self.assertEqual(expected_unique_dim0, x_unique)
-    
+
             x_unique, x_inverse = torch.unique(x, return_inverse=True, dim=0)
             self.assertEqual(expected_unique_dim0, x_unique)
             self.assertEqual(expected_inverse_dim0, x_inverse)
-    
+
             # dim1
             x_unique = torch.unique(x, dim=1)
             self.assertEqual(expected_unique_dim1, x_unique)
-    
+
             x_unique, x_inverse = torch.unique(x, return_inverse=True, dim=1)
             self.assertEqual(expected_unique_dim1, x_unique)
             self.assertEqual(expected_inverse_dim1, x_inverse)
-    
+
             # dim2
             x_unique = torch.unique(x, dim=2)
             self.assertEqual(expected_unique_dim2, x_unique)
-    
+
             x_unique, x_inverse = torch.unique(x, return_inverse=True, dim=2)
             self.assertEqual(expected_unique_dim2, x_unique)
             self.assertEqual(expected_inverse_dim2, x_inverse)
