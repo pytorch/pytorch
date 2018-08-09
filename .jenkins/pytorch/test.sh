@@ -83,7 +83,7 @@ test_aten() {
     if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]]; then
       ln -s "$TORCH_LIB_PATH"/libcaffe2* build/bin
       ln -s "$TORCH_LIB_PATH"/libnccl* build/bin
-    else [[ "$BUILD_ENVIRONMENT" == *ppc64le* ]]; then
+    elif [[ "$BUILD_ENVIRONMENT" == *ppc64le* ]]; then
       # use sudo as we are executing in the context of a non previleged user
       sudo ln -s "$TORCH_LIB_PATH"/libcaffe2* build/bin
       sudo ln -s "$TORCH_LIB_PATH"/libnccl* build/bin
