@@ -113,12 +113,12 @@ Tensor pinverse(const Tensor& self, double rcond) {
   }
   Tensor U, S, V;
   std::tie(U, S, V) = self.svd();
-  double max_val = S[0].toCDouble();
+  Tensor max_val = S[0];
   Tensor S_pseudoinv = at::where(S > rcond * max_val, S.reciprocal(), at::zeros({}, self.options()));
   return V.mm(S_pseudoinv.diag().mm(U.t()));
 }
 
-Tensor _matrix_rank_helper(const Tensor& self, bool symmetric) {
+static inline Tensor _matrix_rank_helper(const Tensor& self, bool symmetric) {
   Tensor S;
   if (!symmetric) {
     Tensor U, V;
@@ -146,8 +146,8 @@ Tensor matrix_rank(const Tensor& self, bool symmetric) {
            "of floating types");
 
   Tensor S = _matrix_rank_helper(self, symmetric);
-  Tensor tol = S.max() * _get_epsilon(self.type());
-  tol = tol * std::max(self.size(0), self.size(1));
+  Tensor tol = _get_epsilon(self.type()) * std::max(self.size(0), self.size(1));
+  tol.mul_(S.max());
   return (S > tol).sum();
 }
 

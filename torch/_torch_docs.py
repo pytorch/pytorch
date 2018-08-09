@@ -2367,7 +2367,7 @@ rank is done by obtaining the eigenvalues.
 
 :attr:`tol` is the threshold below which the singular values (or the eigenvalues
 when :attr:`symmetric` is ``True``) are considered to be 0. If :attr:`tol` is not
-specified, :attr:`tol` is set to `S.max() * max(S.size()) * eps` where `S` is the
+specified, :attr:`tol` is set to ``S.max() * max(S.size()) * eps`` where `S` is the
 singular values (or the eigenvalues when :attr:`symmetric` is ``True``), and `eps`
 is the epsilon value for the datatype of :attr:`input`.
 
@@ -2381,11 +2381,11 @@ Example::
 
     >>> a = torch.eye(10)
     >>> torch.matrix_rank(a)
-    10
+    tensor(10)
     >>> b = torch.eye(10)
     >>> b[0, 0] = 0
     >>> torch.matrix_rank(b)
-    9
+    tensor(9)
 """)
 
 add_docstr(torch.max,

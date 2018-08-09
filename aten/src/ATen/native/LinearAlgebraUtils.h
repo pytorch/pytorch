@@ -40,7 +40,8 @@ static inline int64_t matrixStride(const Tensor& batched_matrices) {
   return batched_matrices.size(-1) * batched_matrices.size(-2);
 }
 
-static Tensor _get_epsilon(const Type& type) {
+// Returns the epsilon value for floating types
+static inline Tensor _get_epsilon(const Type& type) {
   switch (type.scalarType()) {
     case at::ScalarType::Half:
       return type.tensor({}).fill_(std::numeric_limits<at::Half>::epsilon());
