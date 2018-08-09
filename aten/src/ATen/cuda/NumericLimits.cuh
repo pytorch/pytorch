@@ -3,10 +3,9 @@
 #include <cuda.h>
 #include <limits.h>
 
-// CUDANumerics.cuh is a holder for mathematical functions that are either
-// not in the std namespace or are specialized for compilation
-// with CUDA NVCC or CUDA NVRTC or ROCm HIP. This header is derived from the
-// legacy THCNumerics.cuh.
+// NumericLimits.cuh is a holder for numeric limits definitions of commonly used
+// types. This header is very specific to ROCm HIP and may be removed in the future. 
+// This header is derived from the legacy THCNumerics.cuh.
 
 namespace at{
 
@@ -23,25 +22,25 @@ struct numeric_limits {
 template <>
 struct numeric_limits<uint8_t> {
   static inline __host__ __device__ uint8_t lowest() { return 0; }
-  static inline __host__ __device__ uint8_t max() { return UCHAR_MAX; }
+  static inline __host__ __device__ uint8_t max() { return UINT8_MAX; }
 };
 
 template <>
 struct numeric_limits<int8_t> {
-  static inline __host__ __device__ int8_t lowest() { return SCHAR_MIN; }
-  static inline __host__ __device__ int8_t max() { return SCHAR_MAX; }
+  static inline __host__ __device__ int8_t lowest() { return INT8_MIN; }
+  static inline __host__ __device__ int8_t max() { return INT8_MAX; }
 };
 
 template <>
 struct numeric_limits<int16_t> {
-  static inline __host__ __device__ int16_t lowest() { return SHRT_MIN; }
-  static inline __host__ __device__ int16_t max() { return SHRT_MAX; }
+  static inline __host__ __device__ int16_t lowest() { return INT16_MIN; }
+  static inline __host__ __device__ int16_t max() { return INT16_MAX; }
 };
 
 template <>
 struct numeric_limits<int32_t> {
-  static inline __host__ __device__ int32_t lowest() { return INT_MIN; }
-  static inline __host__ __device__ int32_t max() { return INT_MAX; }
+  static inline __host__ __device__ int32_t lowest() { return INT32_MIN; }
+  static inline __host__ __device__ int32_t max() { return INT32_MAX; }
 };
 
 template <>
@@ -50,8 +49,8 @@ struct numeric_limits<int64_t> {
   static inline __host__ __device__ int64_t lowest() { return _I64_MIN; }
   static inline __host__ __device__ int64_t max() { return _I64_MAX; }
 #else
-  static inline __host__ __device__ int64_t lowest() { return LONG_MIN; }
-  static inline __host__ __device__ int64_t max() { return LONG_MAX; }
+  static inline __host__ __device__ int64_t lowest() { return INT64_MIN; }
+  static inline __host__ __device__ int64_t max() { return INT64_MAX; }
 #endif
 };
 

@@ -2,7 +2,7 @@
 #include "catch.hpp"
 
 #include "ATen/ATen.h"
-#include "ATen/cuda/CUDANumerics.cuh"
+#include "ATen/cuda/NumericLimits.cuh"
 #include "cuda.h"
 #include "cuda_fp16.h"
 #include "cuda_runtime.h"

@@ -6,7 +6,7 @@
 #include <assert.h>
 #include "THCHalf.h"
 #include "ATen/ATen.h"
-#include "ATen/cuda/CUDANumerics.cuh"
+#include "ATen/cuda/NumericLimits.cuh"
 // define constants like M_PI and C keywords for MSVC
 #ifdef _MSC_VER
 #define _USE_MATH_DEFINES
@@ -18,7 +18,7 @@
 // Comments on usage:
 //      - lt,le,gt,ge,eq,neg,add,mul,sub,div and other binary ops can
 //        be implemented using CUDA_apply_utils or binary cuda kernel
-//      - Check CUDANumerics.cuh for specialized math functions.
+//      - Check NumericLimits.cuh for specialized math functions.
 //      - Note how __half and at::Half can be casted. for instance:
 //        static_cast<at::Half>(std::sin(static_cast<at::Half>(a)));
 
@@ -40,7 +40,7 @@ static inline __host__ __device__ scalar_t powi(scalar_t a, scalar_t b) {
   return result;
 }
 
-// DEPRECATED: For integral types, use math functions from std and CUDANumerics.cuh. 
+// DEPRECATED: For integral types, use math functions from std and NumericLimits.cuh. 
 //             Use binary_kernel or CUDA_apply_utils for arithmetic
 template <>
 struct THCNumerics<uint8_t> {
@@ -158,7 +158,7 @@ struct THCNumerics<int64_t> {
   static inline __host__ __device__  bool isinf(int64_t a) { return false; }
 };
 
-// DEPRECATED: use math functions from std and CUDANumerics.cuh
+// DEPRECATED: use math functions from std and NumericLimits.cuh
 #ifdef CUDA_HALF_TENSOR
 template <>
 struct THCNumerics<half> {

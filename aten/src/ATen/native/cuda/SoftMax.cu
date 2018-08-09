@@ -8,7 +8,7 @@
 #include <THC/THCThrustAllocator.cuh>
 
 #include "ATen/AccumulateType.h"
-#include "ATen/cuda/CUDANumerics.cuh"
+#include "ATen/cuda/NumericLimits.cuh"
 
 
 namespace at {
