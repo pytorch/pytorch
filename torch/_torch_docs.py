@@ -607,10 +607,8 @@ bincount(self, weights=None, minlength=0) -> Tensor
 Count the frequency of each value in an array of non-negative ints.
 
 The number of bins (size 1) is one larger than the largest value in
-:attr:`input` unless :attr:`input` is empty, in which case the result is a
-tensor of size 0. If :attr:`minlength` is specified, the number of bins is at least
-:attr:`minlength` and if :attr:`input` is empty, then the result is tensor of size
-:attr:`minlength` filled with zeros. If ``n`` is the value at position ``i``,
+:attr:`input`. If :attr:`minlength` is specified, the number of bins is at least
+:attr:`minlength`. If ``n`` is the value at position ``i``,
 :math:`out[n] += weights[i]` if :attr:`weights` is specified else
 :math:`out[n] += 1`.
 
@@ -618,11 +616,10 @@ Arguments:
     input (Tensor): 1-d int tensor
     weights (Tensor): optional, weight for each value in the input tensor.
         Should be of same size as input tensor.
-    minlength (int): optional, minimum number of bins. Should be non-negative.
+    minlength (int): optional, min number of bins. Should be non-negative.
 
 Shape:
-    output (Tensor): ``Size([max(input) + 1])`` if :attr:`input` is non-empty, else
-                     ``Size(0)``
+    output (Tensor): ``Size([max(input) + 1])``
 
 Example::
 
