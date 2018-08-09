@@ -221,4 +221,6 @@ class Distribution(object):
             raise ValueError('The value argument must be within the support')
 
     def __repr__(self):
-        return self.__class__.__name__ + '()'
+        param_names = [k for k,_ in self.arg_constraints.items()]
+        args_string = ', '.join(['{}: {}'.format(p, self.__dict__[p]) for p in param_names])
+        return self.__class__.__name__ + '(' + args_string + ')'
