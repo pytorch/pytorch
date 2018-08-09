@@ -19,7 +19,10 @@
 #
 import os
 # import sys
-# sys.path.insert(0, os.path.abspath('.'))
+
+# source code directory, relative to this file, for sphinx-autobuild
+# sys.path.insert(0, os.path.abspath('../..'))
+
 import torch
 try:
     import torchvision
@@ -47,10 +50,39 @@ extensions = [
     'sphinx.ext.intersphinx',
     'sphinx.ext.todo',
     'sphinx.ext.coverage',
-    'sphinx.ext.mathjax',
     'sphinx.ext.napoleon',
     'sphinx.ext.viewcode',
+    'sphinxcontrib.katex',
 ]
+
+# katex (mathjax replacement) macros
+#
+#
+
+katex_macros = r'''
+"\\op": "\\operatorname{{#1}}",
+"\\i": "\\mathrm{i}",
+"\\e": "\\mathrm{e}^{#1}",
+"\\w": "\\omega",
+"\\vec": "\\mathbf{#1}",
+"\\x": "\\vec{x}",
+"\\d": "\\operatorname{d}\\!{}",
+"\\dirac": "\\operatorname{\\delta}\\left(#1\\right)",
+"\\scalarprod": "\\left\\langle#1,#2\\right\\rangle",
+'''
+
+# katex options
+#
+#
+
+katex_options = r'''
+delimiters : [
+   {left: "$$", right: "$$", display: true},
+   {left: "\\(", right: "\\)", display: true},
+   {left: "\\[", right: "\\]", display: true}
+],
+strict : false
+'''
 
 napoleon_use_ivar = True
 
@@ -106,13 +138,22 @@ todo_include_todos = True
 autodoc_inherit_docstrings = False
 
 
-# -- Options for HTML output ----------------------------------------------
+# -- katex javascript in header
+#
+#    def setup(app):
+#    app.add_javascript("https://cdn.jsdelivr.net/npm/katex@0.10.0-beta/dist/katex.min.js")
 
+
+# -- Options for HTML output ----------------------------------------------
+#
 # The theme to use for HTML and HTML Help pages.  See the documentation for
 # a list of builtin themes.
 #
+#
+#
 html_theme = 'sphinx_rtd_theme'
 html_theme_path = [sphinx_rtd_theme.get_html_theme_path()]
+
 
 # Theme options are theme-specific and customize the look and feel of a theme
 # further.  For a list of options available for each theme, see the
@@ -135,11 +176,12 @@ if RELEASE:
 # so a file named "default.css" will overwrite the builtin "default.css".
 html_static_path = ['_static', '_images']
 
-# html_style_path = 'css/pytorch_theme.css'
+html_style_path = 'css/pytorch_theme.css'
 html_context = {
     'css_files': [
         'https://fonts.googleapis.com/css?family=Lato',
-        '_static/css/pytorch_theme.css'
+        '_static/css/pytorch_theme.css',
+        'https://cdn.jsdelivr.net/npm/katex@0.10.0-beta/dist/katex.min.css',
     ],
 }
 

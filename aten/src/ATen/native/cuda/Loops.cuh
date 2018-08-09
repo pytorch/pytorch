@@ -28,11 +28,7 @@ namespace at { namespace native {
 
 template<int nt, int vt, typename func_t>
 __launch_bounds__(nt, 4)
-#ifdef __HIP_PLATFORM_HCC__
-__global__ void elementwise_kernel(int N, const func_t& f) {
-#else
 __global__ void elementwise_kernel(int N, func_t f) {
-#endif
   int tid = threadIdx.x;
   int nv = nt * vt;
   int idx = nv * blockIdx.x + tid;

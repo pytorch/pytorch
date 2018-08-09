@@ -46,6 +46,13 @@ if("${isSystemDir}" STREQUAL "-1")
   list(APPEND CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib")
 endif()
 
+# Get the correct Python executable
+if (DEFINED ENV{PYTORCH_PYTHON})
+  message(STATUS "Using python found in $ENV{PYTORCH_PYTHON}")
+  set(PYCMD "$ENV{PYTORCH_PYTHON}")
+else()
+  SET(PYCMD "python")
+endif()
 
 # Generate files
 set(TOOLS_PATH "${TORCH_SRC_DIR}/../tools")
@@ -79,7 +86,7 @@ add_custom_command(
   "${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops.cpp"
   "${TORCH_SRC_DIR}/csrc/jit/generated/aten_interned_strings.h"
   COMMAND
-  python tools/setup_helpers/generate_code.py
+  ${PYCMD} tools/setup_helpers/generate_code.py
     --declarations-path "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
     --nn-path "aten/src/"
   DEPENDS
@@ -109,7 +116,6 @@ add_custom_command(
 
 set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/autograd/anomaly_mode.cpp
-  ${TORCH_SRC_DIR}/csrc/autograd/aten_variable_hooks.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/engine.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/function.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/functions/accumulate_grad.cpp
@@ -135,6 +141,7 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/interpreter.cpp
   ${TORCH_SRC_DIR}/csrc/jit/constants.cpp
   ${TORCH_SRC_DIR}/csrc/jit/ir.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/ivalue.cpp
   ${TORCH_SRC_DIR}/csrc/jit/operator.cpp
   ${TORCH_SRC_DIR}/csrc/jit/operator.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/batch_mm.cpp

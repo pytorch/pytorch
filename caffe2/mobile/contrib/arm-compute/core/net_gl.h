@@ -57,7 +57,7 @@ class GLNet : public NetBase {
 
   vector<unique_ptr<OperatorBase>> operators_;
 
-  DISABLE_COPY_AND_ASSIGN(GLNet);
+  AT_DISABLE_COPY_AND_ASSIGN(GLNet);
 };
 
 } // namespace caffe2

@@ -26,10 +26,17 @@ void ProfileOperatorObserver::Dump() const {
   LOG(INFO) << "--------- Starting operator " << subject_->debug_def().type()
             << " op#" << getId() << " ---------";
   for (int i = 0; i < subject_->InputSize(); ++i) {
-    const auto& tensor = subject_->Input<Tensor>(i);
-    const auto& name = subject_->debug_def().input(i);
-    TensorPrinter printer(name);
-    LOG(INFO) << "Input " << i << ": " << printer.MetaStr(tensor);
+    if (subject_->InputIsType<Tensor>(i, CPU)) {
+      const auto& tensor = subject_->Input<Tensor>(i, CPU);
+      const auto& name = subject_->debug_def().input(i);
+      TensorPrinter printer(name);
+      LOG(INFO) << "Input " << i << ": " << printer.MetaStr(tensor);
+    } else if (subject_->InputIsType<Tensor>(i, CUDA)) {
+      const auto& tensor = subject_->Input<Tensor>(i, CUDA);
+      const auto& name = subject_->debug_def().input(i);
+      TensorPrinter printer(name);
+      LOG(INFO) << "Input " << i << ": " << printer.MetaStr(tensor);
+    }
   }
 
   int a = 0;

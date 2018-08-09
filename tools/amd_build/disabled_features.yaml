@@ -73,19 +73,6 @@
         }
       },
       {
-        "path": "aten/src/ATen/Error.h",
-        "s_constants": {
-          "#if !defined(_WIN32)": "#if !defined(_WIN32) && !defined(__HIP_PLATFORM_HCC__)"
-        }
-      },
-      {
-        "path": "aten/src/ATen/Error.cpp",
-        "s_constants": {
-          "#if !defined(_WIN32)": "#if !defined(_WIN32) && !defined(__HIP_PLATFORM_HCC__)",
-          "#if defined(_MSC_VER)": "#if defined(_MSC_VER) || defined(__HIP_PLATFORM_HCC__)"
-        }
-      },
-      {
         "path": "aten/src/THC/THCTensorRandom.cpp",
         "s_constants": {
           "struct curandStateMtgp32*": "curandStateMtgp32*"
@@ -139,7 +126,8 @@
     "aten/src/ATen/native/cuda/CuFFTUtils.h",
     "aten/src/ATen/native/cuda/CuFFTPlanCache.h",
     "aten/src/ATen/native/cuda/SpectralOps.cu",
-    "aten/src/ATen/native/cuda/Distributions.cu"
+    "aten/src/ATen/native/cuda/Distributions.cu",
+    "aten/src/ATen/native/cuda/Dropout.cu"
   ],
   "disabled_functions": [
     {

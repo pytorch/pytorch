@@ -83,18 +83,30 @@ RegisterOperators reg({
           };
         }),
     Operator(
-        prim::Undefined,
-        [](Node* node) {
+        prim::IntToFloat,
+        [](Node* node) -> Operation {
           return [](Stack& stack) {
-            stack.push_back(at::Tensor());
+            int64_t i;
+            pop(stack, i);
+            push(stack, (float)i);
             return 0;
           };
         }),
     Operator(
-        prim::None,
+        prim::FloatToInt,
+        [](Node* node) -> Operation {
+          return [](Stack& stack) {
+            double d;
+            pop(stack, d);
+            push(stack, (int64_t)d);
+            return 0;
+          };
+        }),
+    Operator(
+        prim::Undefined,
         [](Node* node) {
           return [](Stack& stack) {
-            stack.push_back(IValue());
+            stack.push_back(at::Tensor());
             return 0;
           };
         }),
@@ -104,19 +116,11 @@ RegisterOperators reg({
           size_t num_inputs = node->inputs().size();
           return [num_inputs](Stack& stack) {
             bool first = true;
-            for (const IValue& i_ : last(stack, num_inputs)) {
-              auto i = i_.toTensor();
+            for (const IValue& i : last(stack, num_inputs)) {
               if (!first)
                 std::cout << " ";
               first = false;
-              if (auto tensor_impl = dynamic_cast<at::TensorImpl*>(i.get())) {
-                std::cout << at::Tensor(tensor_impl, true);
-              } else if (!i.defined()) {
-                std::cout << "<undefined tensor>";
-              } else {
-                auto& r = *i.get();
-                std::cout << "<" << typeid(r).name() << " at " << i << ">";
-              }
+              std::cout << i;
             }
             drop(stack, num_inputs);
             std::cout << std::endl;
@@ -306,7 +310,127 @@ RegisterOperators reg({
     };                                                                 \
   }),
 
+template <typename T>
+Operation listSelect(Node* node) {
+  return [=](Stack& stack) {
+    T list;
+    int64_t idx;
+    pop(stack, list, idx);
+    const int64_t list_size = list->elements().size();
+    if (idx >= list_size) {
+      throw std::out_of_range("list index out of range");
+    }
+
+    if (idx < 0) {
+      // Handle negative indexing
+      idx = list_size + idx;
+      if (idx < 0) {
+        throw std::out_of_range("list index out of range");
+      }
+    }
+
+    auto element = list->elements().at(idx);
+    push(stack, std::move(element));
+    return 0;
+  };
+}
+
+template <typename T>
+Operation listLen(Node* node) {
+  return [=](Stack& stack) {
+    T a;
+    pop(stack, a);
+    const int64_t size = a->elements().size();
+    push(stack, size);
+    return 0;
+  };
+}
+
+template <typename T>
+Operation listEq(Node* node) {
+  return [=](Stack& stack) {
+    T a;
+    T b;
+    pop(stack, a, b);
+    if (a->elements() == b->elements()) {
+      push(stack, 1);
+    } else {
+      push(stack, 0);
+    }
+    return 0;
+  };
+}
+
+// Specialization for at::Tensor, since it doesn't define operator==
+template <>
+Operation listEq<Shared<TensorList>>(Node* node) {
+  return [=](Stack& stack) {
+    Shared<TensorList> a;
+    Shared<TensorList> b;
+    pop(stack, a, b);
+    if (a->elements().size() != b->elements().size()) {
+      push(stack, 0);
+      return 0;
+    }
+
+    for (size_t i = 0; i < a->elements().size(); ++i) {
+      const auto& a_element = a->elements()[i];
+      const auto& b_element = b->elements()[i];
+      // This preserves Python's semantics, which uses eq() to compare two
+      // elements, then passes the result to bool().
+      // see: https://docs.python.org/3.4/reference/datamodel.html#object.__ge__
+      const auto cmp_result = a_element.eq(b_element);
+      if (!cmp_result.is_nonzero()) {
+        push(stack, 0);
+        return 0;
+      }
+    }
+
+    push(stack, 1);
+    return 0;
+  };
+}
+
+template <class TList, class TElement>
+Operation listAdd(Node* node) {
+  return [=](Stack& stack) {
+    TList a;
+    TList b;
+    pop(stack, a, b);
+
+    std::vector<TElement> ret;
+    const auto total_size = a->elements().size() + b->elements().size();
+    ret.reserve(total_size);
+    for (const auto& a_element : a->elements()) {
+      ret.push_back(a_element);
+    }
+    for (const auto& b_element : b->elements()) {
+      ret.push_back(b_element);
+    }
+
+    push(stack, ret);
+    return 0;
+  };
+}
+
 RegisterOperators reg2({
+    Operator("aten::select(int[] a, int b) -> int", listSelect<Shared<IntList>>),
+    Operator("aten::select(float[] a, int b) -> float", listSelect<Shared<DoubleList>>),
+    Operator("aten::select(Tensor[] a, int b) -> Tensor", listSelect<Shared<TensorList>>),
+
+    Operator("aten::len(int[] a) -> int", listLen<Shared<IntList>>),
+    Operator("aten::len(float[] a) -> int", listLen<Shared<DoubleList>>),
+    Operator("aten::len(Tensor[] a) -> int", listLen<Shared<TensorList>>),
+
+    Operator("aten::eq(int[] a, int[] b) -> int", listEq<Shared<IntList>>),
+    Operator("aten::eq(float[] a, float[] b) -> int", listEq<Shared<DoubleList>>),
+    Operator("aten::eq(Tensor[] a, Tensor[] b) -> int", listEq<Shared<TensorList>>),
+
+    Operator("aten::add(int[] a, int[] b) -> int[]", listAdd<Shared<IntList>, int64_t>),
+    Operator("aten::add(float[] a, float[] b) -> float[]", listAdd<Shared<DoubleList>, double>),
+    Operator("aten::add(Tensor[] a, Tensor[] b) -> Tensor[]", listAdd<Shared<TensorList>, at::Tensor>),
+
+
     DEFINE_BINARY_OP(aten::add, a + b)
     DEFINE_BINARY_OP(aten::sub, a - b)
     DEFINE_BINARY_OP(aten::mul, a * b)
@@ -323,6 +447,27 @@ RegisterOperators reg2({
     DEFINE_INT_OP(aten::__and__, a&& b)
     DEFINE_INT_OP(aten::__or__, a || b)
 
+    Operator("aten::_construct_empty_int_list() -> int[]",
+        [](Node* node) -> Operation {
+          return [=](Stack& stack){
+            push(stack, std::vector<int64_t>());
+            return 0;
+        };
+      }),
+    Operator("aten::_construct_empty_float_list() -> float[]",
+        [](Node* node) -> Operation {
+          return [=](Stack& stack){
+            push(stack, std::vector<double>());
+            return 0;
+        };
+      }),
+    Operator("aten::_construct_empty_tensor_list() -> Tensor[]",
+        [](Node* node) -> Operation {
+          return [=](Stack& stack){
+            push(stack, std::vector<at::Tensor>());
+            return 0;
+        };
+      }),
     Operator(
         "aten::neg(int a) -> int",
         [](Node* node) {
@@ -347,7 +492,35 @@ RegisterOperators reg2({
             return 0;
           };
         }),
-
+    Operator(
+        "aten::_tensor_to_list(Tensor a) -> int[]",
+        [](Node* node) {
+          return [=](Stack& stack) {
+            at::Tensor t;
+            pop(stack, t);
+            std::vector<int64_t> elems;
+            for(int i = 0; i < t.size(0); i++){
+              elems.push_back(*t[i].toIntData());
+            }
+            push(stack, jit::IntList::create(elems));
+            return 0;
+          };
+        }),
+    Operator(
+        "aten::_list_to_tensor(int[] a) -> Tensor",
+        [](Node* node) {
+          return [=](Stack& stack) {
+            std::vector<int64_t> l;
+            pop(stack, l);
+            auto t = torch::empty(
+                {static_cast<int64_t>(l.size())}, at::dtype(at::kInt));
+            for(size_t i = 0; i < l.size(); i++){
+              t[i] = l[i];
+            }
+            push(stack, t);
+            return 0;
+          };
+        }),
     // commutative
     DEFINE_ST_OP(mul, at::mul(b, a))
     DEFINE_ST_OP(add, at::add(b, a))

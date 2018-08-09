@@ -104,15 +104,18 @@ class IDeepFeeder : public BlobFeederBase {
   }
 
 public:
-  void FeedTensor(const DeviceOption &option, PyArrayObject *original_array,
-                  itensor *tensor) {
+  void FeedTensor(
+      const DeviceOption &option,
+      PyArrayObject *original_array,
+      itensor *tensor) {
     PyArrayObject *array = PyArray_GETCONTIGUOUS(original_array);
     auto g = MakeGuard([&]() { Py_XDECREF(array); });
     const auto npy_type = PyArray_TYPE(array);
     const TypeMeta &meta = NumpyTypeToCaffe(npy_type);
-    CAFFE_ENFORCE(meta.id() != CaffeTypeId::uninitialized(),
-                  "This numpy data type is not supported: ",
-                  PyArray_TYPE(array), ".");
+    CAFFE_ENFORCE(
+        meta.id() != TypeIdentifier::uninitialized(),
+        "This numpy data type is not supported: ",
+        PyArray_TYPE(array), ".");
 
     int ndim = PyArray_NDIM(array);
     npy_intp *npy_dims = PyArray_DIMS(array);

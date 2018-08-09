@@ -1,8 +1,8 @@
 #pragma once
 
-#include "ATen/Error.h"
 #include "ATen/Generator.h"
 #include "ATen/Utils.h"
+#include "ATen/core/Error.h"
 
 namespace at {
 

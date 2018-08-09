@@ -27,6 +27,8 @@
 #include <caffe2/operators/utility_ops.h>
 #include <caffe2/operators/affine_channel_op.h>
 #include <caffe2/operators/stop_gradient.h>
+#include <caffe2/sgd/iter_op.h>
+#include <caffe2/sgd/learning_rate_op.h>
 
 // can add more non-IDEEP operators if needed
 namespace caffe2 {
@@ -121,7 +123,7 @@ REGISTER_IDEEP_OPERATOR(
 REGISTER_IDEEP_OPERATOR(
     PRelu,
     IDEEPFallbackOp<PReluOp<float, CPUContext>>);
-
+  
 // ctc decoder operators
 REGISTER_IDEEP_OPERATOR(
     CTCGreedyDecoder,
@@ -130,4 +132,22 @@ REGISTER_IDEEP_OPERATOR(
     CTCBeamSearchDecoder,
     IDEEPFallbackOp<CTCBeamSearchDecoderOp<CPUContext>>);
 
+REGISTER_IDEEP_OPERATOR(
+    AveragedLossGradient,
+    IDEEPFallbackOp<AveragedLossGradient<float, CPUContext>>);
+REGISTER_IDEEP_OPERATOR(
+    LabelCrossEntropyGradient,
+    IDEEPFallbackOp<LabelCrossEntropyGradientOp<float, CPUContext>>);
+REGISTER_IDEEP_OPERATOR(
+    SoftmaxGradient,
+    IDEEPFallbackOp<SoftmaxGradientOp<float, CPUContext>>);
+REGISTER_IDEEP_OPERATOR(
+    Iter,
+    IDEEPFallbackOp<IterOp<CPUContext>>);
+REGISTER_IDEEP_OPERATOR(
+    LearningRate,
+    IDEEPFallbackOp<LearningRateOp<float, CPUContext>>);
+REGISTER_IDEEP_OPERATOR(
+    WeightedSum,
+    IDEEPFallbackOp<WeightedSumOp<CPUContext>>);
 } // namespace caffe2

@@ -27,7 +27,7 @@
 #include "torch/csrc/utils/tensor_types.h"
 
 #include <ATen/ATen.h>
-#include <ATen/optional.h>
+#include <ATen/core/optional.h>
 
 #include "python_variable_methods_dispatch.h"
 

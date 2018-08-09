@@ -9,7 +9,7 @@
 // 2. Minmin Sun: http://on-demand.gputechconf.com/gtc/2016/presentation/s6383-minmin-sun-speech-recognition.pdf
 
 #include <ATen/TensorUtils.h>
-#include <ATen/Error.h>
+#include <ATen/core/Error.h>
 
 #include <ATen/ATen.h>
 #include "ATen/Dispatch.h"
@@ -176,7 +176,7 @@ std::tuple<Tensor, Tensor> ctc_loss_gpu_template(const Tensor& log_probs, const 
 
   int64_t batch_size = log_probs.size(1);
   int64_t num_labels = log_probs.size(2);
-  AT_CHECK(BLANK < num_labels, "blank must be in label range");
+  AT_CHECK((0 <= BLANK) && (BLANK < num_labels), "blank must be in label range");
   AT_CHECK(input_lengths.size() == batch_size, "input_lengths must be of size batch_size");
   AT_CHECK(target_lengths.size() == batch_size, "target_lengths must be of size batch_size");
 

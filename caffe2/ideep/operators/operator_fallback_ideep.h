@@ -121,11 +121,11 @@ class IDEEPFallbackOp final : public IDEEPOperator {
         continue;
       }
       CAFFE_ENFORCE(
-          local_output_blobs_[i]->template IsType<TensorCPU>(),
+          local_output_blobs_[i]->template IsType<Tensor>(CPU),
           "IDEEP fallback op currently does not support non-TensorCPU "
           "output type who needs copying.");
       const auto& src = local_output_blobs_[i]->template Get<TensorCPU>();
-
+      auto src_dims = src.dims();
       if (src.template IsType<float>() && !SkipOutputCopy::Contains(i) &&
           src.dims().size() != 0 && src.size_from_dim(0) != 0 &&
           base_op_->type() != "Python") {
@@ -138,7 +138,6 @@ class IDEEPFallbackOp final : public IDEEPOperator {
           dst->Reset(new itensor());
         }
 
-        auto src_dims = src.dims();
         itensor::dims dst_dims (src_dims.begin(), src_dims.end());
         auto dtensor = dst->template GetMutable<itensor>();
         if (dtensor->get_dims() != dst_dims) {
@@ -152,7 +151,6 @@ class IDEEPFallbackOp final : public IDEEPOperator {
         }
       } else {
         VLOG(2) << "Output " << base_def_.output(i) << " as CPUTensor";
-        auto src_dims = src.dims();
         Blob* dst = OperatorBase::OutputBlob(i);
         dst->Reset(new Tensor(CPU));
         auto dtensor = dst->GetMutableTensor(CPU);

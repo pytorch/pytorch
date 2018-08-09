@@ -68,10 +68,10 @@ TypeMeta GetTensorType(const void* c) {
 }
 
 // TODO(jerryzh): Remove
-static CaffeMap<CaffeTypeId, TypeCall> type_call_registry_{
+static CaffeMap<TypeIdentifier, TypeCall> type_call_registry_{
     {TypeMeta::Id<Tensor>(), GetTensorType}};
 
-TypeCall GetTypeCallFunction(CaffeTypeId id) {
+TypeCall GetTypeCallFunction(TypeIdentifier id) {
   auto f = type_call_registry_.find(id);
   if (f == type_call_registry_.end()) {
     return nullptr;
@@ -79,7 +79,7 @@ TypeCall GetTypeCallFunction(CaffeTypeId id) {
   return f->second;
 }
 
-void RegisterTypeCallFunction(CaffeTypeId id, TypeCall c) {
+void RegisterTypeCallFunction(TypeIdentifier id, TypeCall c) {
   type_call_registry_[id] = c;
 }
 
@@ -87,23 +87,21 @@ int GetGPUIDForPointer(const void* ptr);
 
 vector<TIndex> GetTensorInfo(
     const void* c,
-    bool* shares_data,
     size_t* capacity,
     DeviceOption* device) {
   const Tensor* tc = static_cast<const Tensor*>(c);
-  *shares_data = tc->shares_data();
   *capacity = tc->capacity_nbytes();
   tc->ExtractDeviceOption(device);
   return tc->dims();
 }
 
 // since we only have one tensor, probably need to remove this at some point?
-static CaffeMap<CaffeTypeId, TensorInfoCall> tensor_info_call_registry_{
+static CaffeMap<TypeIdentifier, TensorInfoCall> tensor_info_call_registry_{
     {TypeMeta::Id<Tensor>(), GetTensorInfo}};
 
 // TODO: Remove this code in a separate diff, since we only have one
 // GetTensorInfo function now
-TensorInfoCall GetTensorInfoFunction(CaffeTypeId id) {
+TensorInfoCall GetTensorInfoFunction(TypeIdentifier id) {
   auto f = tensor_info_call_registry_.find(id);
   if (f == tensor_info_call_registry_.end()) {
     return nullptr;
@@ -111,7 +109,7 @@ TensorInfoCall GetTensorInfoFunction(CaffeTypeId id) {
   return f->second;
 }
 
-void RegisterTensorInfoFunction(CaffeTypeId id, TensorInfoCall c) {
+void RegisterTensorInfoFunction(TypeIdentifier id, TensorInfoCall c) {
   tensor_info_call_registry_[id] = c;
 }
 

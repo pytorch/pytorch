@@ -64,7 +64,7 @@ void THNN_(BatchNormalization_updateOutput)(
     dim3 blocks(input.getSize(1));
     dim3 threads(getNumThreads(input.getSize(2)));
     BatchNormalizationUpdateOutput_kernel<real, accreal, DeviceTensor1, DeviceTensor3> <<<blocks, threads, 0, s>>>(
-      input, output, weight, bias, eps, momentum, runningMean, runningVar,
+      input, output, weight, bias, static_cast<accreal>(eps), static_cast<accreal>(momentum), runningMean, runningVar,
       saveMean, saveStd);
   }
   THCudaCheck(cudaGetLastError());

@@ -223,7 +223,13 @@ target_include_directories(caffe2 PRIVATE ${Caffe2_CPU_INCLUDE})
 target_include_directories(caffe2 SYSTEM PRIVATE "${Caffe2_DEPENDENCY_INCLUDE}")
 # Set standard properties on the target
 aten_set_target_props(caffe2)
+
+if (MSVC)
 target_compile_options(caffe2 INTERFACE "-std=c++11")
+else()
+target_compile_options(caffe2 INTERFACE "$<$<COMPILE_LANGUAGE:CXX>:-std=c++11>")
+endif()
+
 target_compile_options(caffe2 PRIVATE "-DCAFFE2_BUILD_MAIN_LIB")
 if (MSVC AND NOT BUILD_SHARED_LIBS)
   # Note [Supporting both static and dynamic libraries on Window]
@@ -289,7 +295,10 @@ if (MSVC AND NOT BUILD_SHARED_LIBS)
   # if a user is already in the business of static linkage, they're
   # already in "expert user" realm.  So, I've decided that at this
   # point in time, the simplicity of implementation of (2) wins out.
-  target_compile_options(caffe2 PUBLIC "-DAT_CORE_STATIC_WINDOWS=1")
+  #
+  # NB: This must be target_compile_definitions, not target_compile_options,
+  # as the latter is not respected by nvcc
+  target_compile_definitions(caffe2 PUBLIC "AT_CORE_STATIC_WINDOWS=1")
 endif()
 # Use -O2 for release builds (-O3 doesn't improve perf, and -Os results in perf regression)
 target_compile_options(caffe2 PRIVATE "$<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-O2>")
@@ -338,13 +347,24 @@ endif()
 # ---[ Caffe2 HIP sources.
 if(USE_ROCM)
   # Call again since Caffe2_HIP_INCLUDES is extended with ATen include dirs.
-  IF(BUILD_ATEN)
-     HIP_INCLUDE_DIRECTORIES(${Caffe2_HIP_INCLUDES})
-  ENDIF()
+  if(BUILD_ATEN)
+    # Get Compile Definitions from the directory (FindHIP.CMake bug)
+    get_directory_property(MY_DEFINITIONS COMPILE_DEFINITIONS)
+    if(MY_DEFINITIONS)
+      foreach(_item ${MY_DEFINITIONS})
+        LIST(APPEND HIP_HCC_FLAGS "-D${_item}")
+      endforeach()
+    endif()
+
+    # Call again since Caffe2_HIP_INCLUDES is extended with ATen include dirs.
+    hip_include_directories(${Caffe2_HIP_INCLUDES})
+  endif()
   IF(BUILD_CAFFE2)
      set_source_files_properties(${Caffe2_HIP_SRCS} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
   ENDIF()
-  hip_add_library(caffe2_hip ${Caffe2_HIP_SRCS})
+
+  # FindHIP.CMake checks if the SHARED flag is set and adds extra logic accordingly.
+  hip_add_library(caffe2_hip SHARED ${Caffe2_HIP_SRCS})
 
   # Since PyTorch files contain HIP headers, these flags are required for the necessary definitions to be added.
   set_target_properties(caffe2_hip PROPERTIES COMPILE_FLAGS ${HIP_HIPCC_FLAGS})
@@ -355,9 +375,8 @@ if(USE_ROCM)
   target_include_directories(caffe2_hip PRIVATE ${Caffe2_HIP_INCLUDES})
   target_include_directories(caffe2_hip INTERFACE $<INSTALL_INTERFACE:include>)
 
-  IF(BUILD_ATEN)
-    aten_set_target_props(caffe2_hip)
-  ENDIF()
+  # Set standard properties on the target
+  aten_set_target_props(caffe2_hip)
 
   # When a library has object files that contain device code, it needs to use hipcc/hcc to link.
   set_target_properties(caffe2_hip PROPERTIES LINKER_LANGUAGE HIP)

@@ -28,7 +28,7 @@ struct THTensor
 
     std::atomic<int> refcount_;
 
-    // Note: storage->size may be greater than the recorded size
+    // Note: storage->size() may be greater than the recorded size
     // of a tensor
     THStorage *storage_;
     ptrdiff_t storage_offset_;
@@ -57,7 +57,7 @@ struct THTensor
     }
 
     at::ScalarType scalar_type() const {
-      return storage_->scalar_type;
+      return storage_->scalar_type();
     }
 
     ptrdiff_t storage_offset() const {
@@ -84,11 +84,11 @@ struct THTensor
       return strides_[d];
     }
 
-    inline at::IntList sizes() {
+    inline at::IntList sizes() const {
       return sizes_;
     }
 
-    inline at::IntList strides() {
+    inline at::IntList strides() const {
       return strides_;
     }
 
@@ -127,8 +127,75 @@ inline THStorage* THTensor_getStoragePtr(const THTensor* tensor) {
   return tensor->storage_;
 }
 
+
+inline bool THTensor_isZeroDim(const THTensor *tensor) {
+  return tensor->is_zero_dim_;
+}
+
+inline void THTensor_setIsZeroDim(THTensor *tensor, bool is_zero_dim) {
+  tensor->is_zero_dim_ = is_zero_dim;
+}
+
+// [NOTE: nDimension vs nDimensionLegacyNoScalars vs nDimensionLegacyAll]
+// nDimension                 corresponds to the "true" ATen dimension. TODO: implement.
+// nDimensionLegacyNoScalars  correpsonds to the ATen dimension, except scalars are viewed as 1-dimensional tensors.
+// nDimensionLegacyAll        corresponds to the ATen dimension, except scalars are viewed as 1-dimensional tensors
+//                            and tensors with a dimension of size zero are collapsed to 0-dimensional tensors.
+//
+// Eventually, everything should go through nDimension or tensor->dim().
+inline int THTensor_nDimension(const THTensor* tensor) {
+  return tensor->dim();
+}
+
+inline int THTensor_nDimensionLegacyNoScalars(const THTensor* tensor) {
+  if (THTensor_isZeroDim(tensor)) {
+    return 1;
+  } else {
+    return tensor->dim();  
+  }
+}
+
+inline int THTensor_nDimensionLegacyAll(const THTensor* tensor) {
+  if (tensor->is_empty()) {
+    return 0;  
+  } else if (THTensor_isZeroDim(tensor)) {
+    return 1;
+  } else {
+    return tensor->dim();  
+  }
+}
+
+inline int64_t THTensor_strideLegacyNoScalars(const THTensor *self, int dim) {
+  THArgCheck((dim >= 0) && (dim < THTensor_nDimensionLegacyNoScalars(self)), 2, "dimension %d out of range of %dD tensor",
+      dim+TH_INDEX_BASE, THTensor_nDimensionLegacyNoScalars(self));
+  return THTensor_isZeroDim(self) ? 1 : self->stride(dim);
+}
+
+inline int64_t THTensor_sizeLegacyNoScalars(const THTensor *self, int dim)
+{
+  THArgCheck((dim >= 0) && (dim < THTensor_nDimensionLegacyNoScalars(self)), 2, "dimension %d out of range of %dD tensor",
+      dim+TH_INDEX_BASE, THTensor_nDimensionLegacyNoScalars(self));
+  return THTensor_isZeroDim(self) ? 1 : self->size(dim);
+}
+
 #include "generic/THTensorFastGetSet.hpp"
 #include "THGenerateAllTypes.h"
+
+inline std::vector<int64_t> THTensor_sizesLegacyNoScalars(const THTensor *self) {
+  if (self->dim() == 0) {
+    return {1};
+  } else {
+    return self->sizes().vec();
+  }
+}
+
+inline std::vector<int64_t> THTensor_stridesLegacyNoScalars(const THTensor *self) {
+  if (self->dim() == 0) {
+    return {1};
+  } else {
+    return self->strides().vec();
+  }
+}
 
 inline void THTensor_resizeDim(THTensor* tensor, int64_t ndim) {
   // NB: This is *truly* a resize; calling code (e.g., squeeze)
@@ -163,52 +230,17 @@ inline void THTensor_stealAndSetStoragePtr(THTensor* tensor, THStorage* storage)
   tensor->storage_ = storage;
 }
 
-inline bool THTensor_isZeroDim(const THTensor *tensor) {
-  return tensor->is_zero_dim_;
-}
-
-inline void THTensor_setIsZeroDim(THTensor *tensor, bool is_zero_dim) {
-  tensor->is_zero_dim_ = is_zero_dim;
-}
-
-// [NOTE: nDimension vs nDimensionLegacyNoScalars vs nDimensionLegacyAll]
-// nDimension                 corresponds to the "true" ATen dimension. TODO: implement.
-// nDimensionLegacyNoScalars  correpsonds to the ATen dimension, except scalars are viewed as 1-dimensional tensors.
-// nDimensionLegacyAll        corresponds to the ATen dimension, except scalars are viewed as 1-dimensional tensors
-//                            and tensors with a dimension of size zero are collapsed to 0-dimensional tensors.
-//
-// Eventually, everything should go through nDimension or tensor->dim().
-inline int THTensor_nDimensionLegacyNoScalars(const THTensor* tensor) {
-  if (THTensor_isZeroDim(tensor)) {
-    return 1;
-  } else {
-    return tensor->dim();  
-  }
-}
-
-inline int THTensor_nDimensionLegacyAll(const THTensor* tensor) {
-  if (tensor->is_empty()) {
-    return 0;  
-  } else if (THTensor_isZeroDim(tensor)) {
-    return 1;
-  } else {
-    return tensor->dim();  
-  }
-}
-
-inline int64_t THTensor_strideLegacyNoScalars(const THTensor *self, int dim) {
-  THArgCheck((dim >= 0) && (dim < THTensor_nDimensionLegacyNoScalars(self)), 2, "dimension %d out of range of %dD tensor",
-      dim+TH_INDEX_BASE, THTensor_nDimensionLegacyNoScalars(self));
-  return THTensor_isZeroDim(self) ? 1 : self->stride(dim);
-}
-
-inline int64_t THTensor_sizeLegacyNoScalars(const THTensor *self, int dim)
-{
-  THArgCheck((dim >= 0) && (dim < THTensor_nDimensionLegacyNoScalars(self)), 2, "dimension %d out of range of %dD tensor",
-      dim+TH_INDEX_BASE, THTensor_nDimensionLegacyNoScalars(self));
-  return THTensor_isZeroDim(self) ? 1 : self->size(dim);
-}
-
 TH_API void THTensor_free(THTensor *self);
+TH_API void THTensor_setStorageNd(THTensor *self, THStorage *storage, ptrdiff_t storageOffset, int nDimension, const int64_t *size, const int64_t *stride);
+TH_API void THTensor_resizeNd(THTensor *self, int nDimension, const int64_t *size, const int64_t *stride);
+
+TH_CPP_API void THTensor_resize(THTensor *self, at::IntList size, at::IntList stride);
+TH_CPP_API void THTensor_setStorage(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_, at::IntList size_, at::IntList stride_);
 TH_CPP_API at::optional<std::vector<int64_t>> THTensor_compute_stride(at::IntList oldshape, at::IntList oldstride,
                                                                       at::IntList newshape);
+
+#include "generic/THTensor.hpp"
+#include "THGenerateAllTypes.h"
+
+#include "generic/THTensor.hpp"
+#include "THGenerateHalfType.h"

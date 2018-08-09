@@ -39,7 +39,7 @@ class DLPackWrapper {
     if (tensor->size() <= 0) {
       tensor->Resize(0);
     }
-    if (tensor->meta().id() == CaffeTypeId::uninitialized()) {
+    if (tensor->meta().id() == TypeIdentifier::uninitialized()) {
       // treat uninitialized tensor as float tensor
       tensor->template mutable_data<float>();
     }

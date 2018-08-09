@@ -143,10 +143,10 @@ THC_API void THCTensor_(multinomial)(struct THCState *state,
 
   // Categories are in the innermost dimension
   int64_t numDist =
-    inputSize == 1 ? 1 : THCTensor_(size)(state, prob_dist, 0);
+    inputSize == 1 ? 1 : THCTensor_(sizeLegacyNoScalars)(state, prob_dist, 0);
   int64_t numCategoriesLong =
-    inputSize == 1 ? THCTensor_(size)(state, prob_dist, 0) :
-    THCTensor_(size)(state, prob_dist, 1);
+    inputSize == 1 ? THCTensor_(sizeLegacyNoScalars)(state, prob_dist, 0) :
+    THCTensor_(sizeLegacyNoScalars)(state, prob_dist, 1);
 
   // Since the index tensor is float, numCategories cannot exceed max
   // float integer precision

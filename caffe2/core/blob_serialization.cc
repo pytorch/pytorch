@@ -322,7 +322,7 @@ void TensorSerializer::StoreDeviceDetail(
 // The actual serialization registry objects.
 CAFFE_DEFINE_TYPED_REGISTRY(
     BlobSerializerRegistry,
-    CaffeTypeId,
+    TypeIdentifier,
     BlobSerializerBase,
     std::unique_ptr);
 

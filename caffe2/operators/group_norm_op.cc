@@ -18,29 +18,64 @@ namespace caffe2 {
 namespace {
 
 template <typename T>
-inline T Cube(const T& x) {
-  return x * x * x;
-}
-
-template <typename T, StorageOrder kOrder>
-void GroupNormForward(
-    const std::array<int, 4>& dims,
+void GroupNormForwardNCHW(
+    const int N,
+    const int G,
+    const int D,
+    const int HxW,
     const T* X,
     const T* mu,
     const T* rsig,
     const T* gamma,
     const T* beta,
     T* Y) {
-  constexpr int kGDim = kOrder == StorageOrder::NCHW ? 1 : 2;
-  constexpr int kDDim = kOrder == StorageOrder::NCHW ? 2 : 3;
-  const int size = dims[0] * dims[1] * dims[2] * dims[3];
-  std::array<int, 4> index = {0, 0, 0, 0};
-  for (int i = 0; i < size; ++i) {
-    const int i_mu = index[0] * dims[kGDim] + index[kGDim];
-    const int i_gamma = index[kGDim] * dims[kDDim] + index[kDDim];
-    Y[i] = gamma[i_gamma] * (X[i] - mu[i_mu]) * rsig[i_mu] + beta[i_gamma];
-    math::utils::IncreaseIndexInDims(4, dims.data(), index.data());
+  const int C = G * D;
+  EigenArrayMap<T>(Y, D * HxW, N * G) =
+      (ConstEigenArrayMap<T>(X, D * HxW, N * G).rowwise() -
+       ConstEigenVectorArrayMap<T>(mu, N * G).transpose())
+          .rowwise() *
+      ConstEigenVectorArrayMap<T>(rsig, N * G).transpose();
+  T* Y_ptr = Y;
+  const int stride = C * HxW;
+  ConstEigenVectorArrayMap<T> gamma_arr(gamma, C);
+  ConstEigenVectorArrayMap<T> beta_arr(beta, C);
+  for (int i = 0; i < N; ++i) {
+    EigenArrayMap<T> Y_arr(Y_ptr, HxW, C);
+    Y_arr = (Y_arr.rowwise() * gamma_arr.transpose()).rowwise() +
+        beta_arr.transpose();
+    Y_ptr += stride;
   }
+}
+
+template <typename T>
+void GroupNormForwardNHWC(
+    const int N,
+    const int G,
+    const int D,
+    const int HxW,
+    const T* X,
+    const T* mu,
+    const T* rsig,
+    const T* gamma,
+    const T* beta,
+    T* Y) {
+  const int C = G * D;
+  const T* X_ptr = X;
+  T* Y_ptr = Y;
+  for (int i = 0; i < N; ++i) {
+    for (int j = 0; j < HxW; ++j) {
+      EigenArrayMap<T>(Y_ptr, D, G) =
+          (ConstEigenArrayMap<T>(X_ptr, D, G).rowwise() -
+           ConstEigenVectorArrayMap<T>(mu + i * G, G).transpose())
+              .rowwise() *
+          ConstEigenVectorArrayMap<T>(rsig + i * G, G).transpose();
+      X_ptr += C;
+      Y_ptr += C;
+    }
+  }
+  EigenArrayMap<T> Y_arr(Y, C, N * HxW);
+  Y_arr = (Y_arr.colwise() * ConstEigenVectorArrayMap<T>(gamma, C)).colwise() +
+      ConstEigenVectorArrayMap<T>(beta, C);
 }
 
 template <typename T, StorageOrder kOrder>
@@ -97,8 +132,8 @@ void GroupNormBackward(
   for (int i = 0; i < size; ++i) {
     const int i_mu = index[0] * dims[kGDim] + index[kGDim];
     const int i_gamma = index[kGDim] * dims[kDDim] + index[kDDim];
-    const T u =
-        (db[i_mu] * mu[i_mu] - ds[i_mu]) * (X[i] - mu[i_mu]) * Cube(rsig[i_mu]);
+    const T u = (db[i_mu] * mu[i_mu] - ds[i_mu]) * (X[i] - mu[i_mu]) *
+        math::utils::Cube(rsig[i_mu]);
     const T v = db[i_mu] * rsig[i_mu];
     dX[i] = gamma[i_gamma] * dY[i] * rsig[i_mu] + (u - v) * denom;
     dgamma[i_gamma] += dY[i] * (X[i] - mu[i_mu]) * rsig[i_mu];
@@ -138,11 +173,29 @@ bool GroupNormOp<T, Context>::RunOnDeviceImpl(
 
   // Computes Y = gamma * (X - mu) * rsig + beta.
   if (order_ == StorageOrder::NCHW) {
-    GroupNormForward<T, StorageOrder::NCHW>(
-        dims, X_data, mu_data, rsig_data, gamma_data, beta_data, Y_data);
+    GroupNormForwardNCHW<T>(
+        N,
+        G,
+        D,
+        HxW,
+        X_data,
+        mu_data,
+        rsig_data,
+        gamma_data,
+        beta_data,
+        Y_data);
   } else {
-    GroupNormForward<T, StorageOrder::NHWC>(
-        dims, X_data, mu_data, rsig_data, gamma_data, beta_data, Y_data);
+    GroupNormForwardNHWC<T>(
+        N,
+        G,
+        D,
+        HxW,
+        X_data,
+        mu_data,
+        rsig_data,
+        gamma_data,
+        beta_data,
+        Y_data);
   }
   return true;
 }

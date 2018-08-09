@@ -23,7 +23,7 @@ __global__ void GatherKernel(
 template <>
 bool GatherOp<CUDAContext>::RunOnDevice() {
   return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
-      this, OperatorBase::Input<TensorCUDA>(INDICES));
+      this, OperatorBase::Input<Tensor>(INDICES, CUDA));
 }
 
 template <>

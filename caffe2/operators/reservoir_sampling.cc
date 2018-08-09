@@ -39,14 +39,17 @@ class ReservoirSamplingOp final : public Operator<Context> {
       }
     }
 
-    auto dims = input.dims();
-    auto num_entries = dims[0];
+    auto num_entries = input.dims()[0];
 
-    dims[0] = numToCollect_;
-    // IMPORTANT: Force the output to have the right type before reserving,
-    // so that the output gets the right capacity
-    output->raw_mutable_data(input.meta());
-    output->Reserve(dims, &context_);
+    if (!output_initialized) {
+      // IMPORTANT: Force the output to have the right type before reserving,
+      // so that the output gets the right capacity
+      auto dims = input.dims();
+      dims[0] = 0;
+      output->Resize(dims);
+      output->raw_mutable_data(input.meta());
+      output->ReserveSpace(numToCollect_);
+    }
 
     auto* pos_to_object =
         OutputSize() > POS_TO_OBJECT ? Output(POS_TO_OBJECT) : nullptr;
@@ -54,8 +57,9 @@ class ReservoirSamplingOp final : public Operator<Context> {
       if (!output_initialized) {
         // Cleaning up in case the reservoir got reset.
         pos_to_object->Resize(0);
+        pos_to_object->template mutable_data<int64_t>();
+        pos_to_object->ReserveSpace(numToCollect_);
       }
-      pos_to_object->Reserve(std::vector<TIndex>{numToCollect_}, &context_);
     }
 
     auto* object_to_pos_map = OutputSize() > OBJECT_TO_POS_MAP
@@ -96,13 +100,14 @@ class ReservoirSamplingOp final : public Operator<Context> {
     const auto num_new_entries = countNewEntries(unique_object_ids);
     auto num_to_copy = std::min<int32_t>(num_new_entries, numToCollect_);
     auto output_batch_size = output_initialized ? output->dim(0) : 0;
-    dims[0] = std::min<size_t>(numToCollect_, output_batch_size + num_to_copy);
-    if (output_batch_size < numToCollect_) {
-      output->Resize(dims);
-      if (pos_to_object) {
-        pos_to_object->Resize(dims[0]);
-      }
+    auto output_num =
+        std::min<size_t>(numToCollect_, output_batch_size + num_to_copy);
+    // output_num is >= output_batch_size
+    output->ExtendTo(output_num, 50, &context_);
+    if (pos_to_object) {
+      pos_to_object->ExtendTo(output_num, 50, &context_);
     }
+
     auto* output_data =
         static_cast<char*>(output->raw_mutable_data(input.meta()));
     auto* pos_to_object_data = pos_to_object
