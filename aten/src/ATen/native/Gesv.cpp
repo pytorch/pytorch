@@ -91,11 +91,12 @@ std::tuple<Tensor&,Tensor&> _gesv_single_out_cpu(
    * (i)  self and A are represented in column major format
    * (ii) These pointers point to contiguous data for self and A.
    *
-   * For 2D matrices, A.t() and self.t() represent their column major formats.
+   * For 2D matrices, A.t() and self.t() represent their column major formats
    *
    * Case 1) The output tensor is of the correct shape, but it and its transpose
    *         are not contiguous. eg. torch.gesv(... , out=(n[::2], ...)):
    *         - clone input tensor into a buffer and use it
+   *         - if output tensor is contiguous, it will be handled in case 3
    *
    * Note: In both cases below, we resize_ if required. This helps to:
    *       (i)  Make output tensors bigger and contiguous, if required, and
@@ -111,7 +112,7 @@ std::tuple<Tensor&,Tensor&> _gesv_single_out_cpu(
    * Case 3) output_tensor.t() is not contiguous:
    *         - resize_ should make non-contig/incorrectly-sized tensors usable
    *         a) &input_tensor == &output_tensor:
-   *            - copy input_tensor.t() to itself -- clone before copying
+   *            - clone and copy input_tensor.t() to output_tensor (same tensor)
    *         b) &input_tensor != &output_tensor:
    *            - copy input_tensor.t() to output_tensor
    */
@@ -130,10 +131,10 @@ std::tuple<Tensor&,Tensor&> _gesv_single_out_cpu(
 
   /* self is always viewable to {bx, by} since they are the dimensions
    * of self (or by == 1). Basically a shortcut to see 1D `self` as 2D */
-  auto self_t = self.view({bx, by}).t();
+  auto self_t = self.view({bx, by}).t_();
 
   if (!tc_sol && !sol.is_contiguous() && sol_correct_shape) {
-    temp_sol = self_t.clone();
+    temp_sol = self_t.clone().t_();
   } else if (tc_sol) {
     sol.t().resize_({by, bx});
     if (&self != &sol) {
@@ -142,14 +143,14 @@ std::tuple<Tensor&,Tensor&> _gesv_single_out_cpu(
   } else {
     sol.resize_({by, bx});
     if (&self == &sol) {
-      sol.copy_(self_t.clone());
+      sol.copy_(self_t.clone()).t_();
     } else {
-      sol.copy_(self_t);
+      sol.copy_(self_t).t_();
     }
   }
 
   if (!tc_lu && !lu.is_contiguous() && lu_correct_shape) {
-    temp_lu = A.t().clone();
+    temp_lu = A.t().clone().t_();
   } else if (tc_lu) {
     lu.t().resize_({ay, ax});
     if (&A != &lu) {
@@ -158,9 +159,9 @@ std::tuple<Tensor&,Tensor&> _gesv_single_out_cpu(
   } else {
     lu.resize_({ay, ax});
     if (&A == &lu) {
-      lu.copy_(A.t().clone());
+      lu.copy_(A.t().clone()).t_();
     } else {
-      lu.copy_(A.t());
+      lu.copy_(A.t()).t_();
     }
   }
 
@@ -176,15 +177,10 @@ std::tuple<Tensor&,Tensor&> _gesv_single_out_cpu(
   checkErrors({info});
 
   if (temp_sol.defined()) {
-    sol.copy_(temp_sol.t_());
-  } else if (!tc_sol) {
-    sol.t_();
+    sol.copy_(temp_sol);
   }
-
   if (temp_lu.defined()) {
-    lu.copy_(temp_lu.t_());
-  } else if (!tc_lu) {
-    lu.t_();
+    lu.copy_(temp_lu);
   }
 
   return std::tuple<Tensor&, Tensor&>(sol, lu);

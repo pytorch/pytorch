@@ -187,10 +187,10 @@ AT_ERROR("gesv: MAGMA library not found in "
   Tensor temp_sol;
   Tensor temp_lu;
 
-  auto self_t = self.view({bx, by}).t();
+  auto self_t = self.view({bx, by}).t_();
 
   if (!tc_sol && !sol.is_contiguous() && sol_correct_shape) {
-    temp_sol = self_t.clone();
+    temp_sol = self_t.clone().t_();
   } else if (tc_sol) {
     sol.t().resize_({by, bx});
     if (&self != &sol) {
@@ -199,14 +199,14 @@ AT_ERROR("gesv: MAGMA library not found in "
   } else {
     sol.resize_({by, bx});
     if (&self == &sol) {
-      sol.copy_(self_t.clone());
+      sol.copy_(self_t.clone()).t_();
     } else {
-      sol.copy_(self_t);
+      sol.copy_(self_t).t_();
     }
   }
 
   if (!tc_lu && !lu.is_contiguous() && lu_correct_shape) {
-    temp_lu = A.t().clone();
+    temp_lu = A.t().clone().t_();
   } else if (tc_lu) {
     lu.t().resize_({ay, ax});
     if (&A != &lu) {
@@ -215,9 +215,9 @@ AT_ERROR("gesv: MAGMA library not found in "
   } else {
     lu.resize_({ay, ax});
     if (&A == &lu) {
-      lu.copy_(A.t().clone());
+      lu.copy_(A.t().clone()).t_();
     } else {
-      lu.copy_(A.t());
+      lu.copy_(A.t()).t_();
     }
   }
 
@@ -233,15 +233,10 @@ AT_ERROR("gesv: MAGMA library not found in "
   checkErrors({info});
 
   if (temp_sol.defined()) {
-    sol.copy_(temp_sol.t_());
-  } else if (!tc_sol) {
-    sol.t_();
+    sol.copy_(temp_sol);
   }
-
   if (temp_lu.defined()) {
-    lu.copy_(temp_lu.t_());
-  } else if (!tc_lu) {
-    lu.t_();
+    lu.copy_(temp_lu);
   }
 
   return std::tuple<Tensor&,Tensor&>(sol, lu);
