@@ -96,8 +96,7 @@ int64_t TensorImpl::dim() const {
 
 TensorImpl* TensorImpl::maybe_zero_dim(bool condition_when_zero_dim) {
   AT_CHECK(tensor, "TensorImpl without THTensor in maybe_zero_dim");
-  bool is_zero_dim = condition_when_zero_dim && tensor->sizes().size() == 1 && tensor->size(0) == 1;
-  THTensor_setIsZeroDim(tensor, is_zero_dim);
+  THTensor_maybe_zero_dim(tensor, condition_when_zero_dim);
   return this;
 }
 
