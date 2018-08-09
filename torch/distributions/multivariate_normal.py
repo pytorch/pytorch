@@ -131,23 +131,20 @@ class MultivariateNormal(Distribution):
             if covariance_matrix.dim() < 2:
                 raise ValueError("covariance_matrix must be at least two-dimensional, "
                                  "with optional leading batch dimensions")
-            self._unbroadcasted_scale_tril = torch.distributions.multivariate_normal._batch_potrf_lower(
-                covariance_matrix)
+            self._unbroadcasted_scale_tril = _batch_potrf_lower(covariance_matrix)
             self.covariance_matrix, loc_ = torch.broadcast_tensors(covariance_matrix, loc_)
         else:
             if precision_matrix.dim() < 2:
                 raise ValueError("precision_matrix must be at least two-dimensional, "
                                  "with optional leading batch dimensions")
             covariance_matrix = _batch_inverse(precision_matrix)
-            self._unbroadcasted_scale_tril = torch.distributions.multivariate_normal._batch_potrf_lower(
-                covariance_matrix)
+            self._unbroadcasted_scale_tril = _batch_potrf_lower(covariance_matrix)
             self.covariance_matrix, self.precision_matrix, loc_ = torch.broadcast_tensors(
                 covariance_matrix, precision_matrix, loc_)
         self.loc = loc_[..., 0]  # drop rightmost dim
 
         batch_shape, event_shape = self.loc.shape[:-1], self.loc.shape[-1:]
-        super(torch.distributions.multivariate_normal.MultivariateNormal, self).__init__(
-            batch_shape, event_shape, validate_args=validate_args)
+        super(MultivariateNormal, self).__init__(batch_shape, event_shape, validate_args=validate_args)
 
     @lazy_property
     def scale_tril(self):
