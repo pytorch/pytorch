@@ -11,8 +11,8 @@ __global__ void NormalizeKernel(
     const int n,
     const int sf,
     const float* xData,
-    float* yData) {
-  const float kEps = 1e-12f;
+    float* yData,
+    const float kEps) {
   typedef cub::BlockReduce<float, CAFFE_CUDA_NUM_THREADS> BlockReduce;
   __shared__ BlockReduce::TempStorage temp_storage;
 
@@ -45,8 +45,8 @@ __global__ void NormalizeGradientKernel(
     const int SF,
     const float* in_mat,
     const float* grad_out_mat,
-    float* grad_mat) {
-  const float kEps = 1e-12f;
+    float* grad_mat,
+    const float kEps) {
   typedef cub::BlockReduce<float, CAFFE_CUDA_NUM_THREADS> BlockReduce;
   __shared__ BlockReduce::TempStorage temp_storage_sum;
   __shared__ BlockReduce::TempStorage temp_storage_norm;
@@ -92,7 +92,7 @@ void NormalizeOp<float, CUDAContext>::DoNormalize(
       min(n, CAFFE_MAXIMUM_NUM_BLOCKS),
       CAFFE_CUDA_NUM_THREADS,
       0,
-      context_.cuda_stream()>>>(m, n, sf, xData, yData);
+      context_.cuda_stream()>>>(m, n, sf, xData, yData, kEps_);
 }
 
 template <>
@@ -117,7 +117,8 @@ bool NormalizeGradientOp<float, CUDAContext>::RunOnDevice() {
       SF,
       X.data<float>(),
       dY.data<float>(),
-      dX->template mutable_data<float>());
+      dX->template mutable_data<float>(),
+      kEps_);
   return true;
 }
 
