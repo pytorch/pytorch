@@ -1363,15 +1363,10 @@ private:
           throw ErrorReport(subscript.range()) << "Subscripting multiple dimensions is currently not supported\n";
         }
         if (slice_exprs[0].kind() == TK_SLICE_EXPR) {
-          auto single_slice_expr = SliceExpr(slice_exprs[0].tree());
-          return emitSlice(
-              subscript.range(),
-              {subscript.value(),
-               single_slice_expr.startOr(0),
-               single_slice_expr.endOr(-1)});
+          return emitSlice(subscript);
         } else {
           return emitGather(
-              subscript.range(), {subscript.value(), slice_exprs[0]});
+              subscript.range(), TreeList{subscript.value(), slice_exprs[0]});
         }
       } break;
       case TK_IF_EXPR: {
@@ -1430,9 +1425,13 @@ private:
 
   // Desugars slice syntactic sugar tensor[begin:end] -> tensor.slice(begin,
   // end).
-  Value* emitSlice(const SliceExpr& slice) {
-    const auto& loc = slice.range();
-    TreeList inputs = {slice.value(), slice.startOr(0)};
+  Value* emitSlice(const Subscript& subscript) {
+    const auto& loc = subscript.range();
+    // TODO: implement multidimensional slice
+    JIT_ASSERT(subscript.subscript_exprs().size() == 1);
+    JIT_ASSERT(subscript.subscript_exprs()[0].kind() == TK_SLICE_EXPR);
+    auto slice_exp = SliceExpr(subscript.subscript_exprs()[0]);
+    TreeList inputs = {subscript.value(), slice_exp.startOr(0)};
     const auto applyInputs = Compound::create(TK_LIST, loc, std::move(inputs));
     const auto input_values = getNamedValues(
         applyInputs->trees(),
@@ -1452,10 +1451,10 @@ private:
 
     args.push_back(begin);
 
-    const auto has_end = slice.end().present();
+    const auto has_end = slice_exp.end().present();
     if (has_end) {
       // If the user specified an `end` index, pass it down
-      args.emplace_back(loc, "end", emitExpr(Expr(slice.end().get()), identity));
+      args.emplace_back(loc, "end", emitExpr(Expr(slice_exp.end().get()), identity));
     }
 
     return emitBuiltinCall(loc, *graph, aten::slice, args, {step}, true);
