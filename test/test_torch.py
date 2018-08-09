@@ -3340,6 +3340,7 @@ class TestTorch(TestCase):
         self.assertEqual(torch.kthvalue(y, 3)[0], 3, 0)
         self.assertEqual(torch.kthvalue(y, 2)[0], 1, 0)
 
+    @skipIfRocm
     def test_median(self):
         for size in (155, 156):
             x = torch.rand(size, size)
