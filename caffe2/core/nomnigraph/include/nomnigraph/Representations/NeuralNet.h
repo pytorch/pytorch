@@ -17,6 +17,7 @@
 #include "nomnigraph/Representations/ControlFlow.h"
 #include "nomnigraph/Support/Casting.h"
 #include "nomnigraph/Support/Pointer.h"
+#include "nomnigraph/Transformations/SubgraphMatcher.h"
 
 #include <string>
 #include <type_traits>
@@ -419,6 +420,58 @@ void coalesceInsertedDataDependencies(repr::NNModule* m);
 
 template <NNGraph* G>
 struct NodeHelper {};
+
+using NNNodeMatchCriteria = std::function<bool(NNGraph::NodeRef)>;
+using NNSubtree = nom::matcher::SubtreeMatchCriteria<NNNodeMatchCriteria>;
+
+bool hasSingleOutputAndConsumer(NNGraph::NodeRef nodeRef);
+
+template <typename NodeType>
+NNNodeMatchCriteria matchNodeTypeWithPredicate(
+    const std::function<bool(NNGraph::NodeRef, const NodeType&)> predicate,
+    bool expectedSingleOutputAndConsumer = false) {
+  return
+      [&predicate, expectedSingleOutputAndConsumer](NNGraph::NodeRef nodeRef) {
+        NOM_REQUIRE_OR_RET_FALSE(is<NodeType>(nodeRef));
+        if (expectedSingleOutputAndConsumer) {
+          NOM_REQUIRE_OR_RET_FALSE(hasSingleOutputAndConsumer(nodeRef));
+        }
+        NodeType* node = get<NodeType>(nodeRef);
+        return predicate(nodeRef, *node);
+      };
+};
+
+template <typename NodeType>
+NNNodeMatchCriteria matchNodeType(
+    bool expectedSingleOutputAndConsumer = false) {
+  return [expectedSingleOutputAndConsumer](NNGraph::NodeRef nodeRef) {
+    if (expectedSingleOutputAndConsumer) {
+      NOM_REQUIRE_OR_RET_FALSE(hasSingleOutputAndConsumer(nodeRef));
+    }
+    return is<NodeType>(nodeRef);
+  };
+}
+
+NNNodeMatchCriteria matchAnyNode();
+
+struct NNNodeMatch {
+  static bool isMatch(
+      const NNGraph::NodeRef& node,
+      const NNNodeMatchCriteria& criteria) {
+    return criteria(node);
+  }
+};
+
+using NNSubgraphMatcher =
+    nom::matcher::SubgraphMatcher<NNGraph, NNNodeMatchCriteria, NNNodeMatch>;
+
+// This helper method makes it easy to create matching criteria in NNGraph.
+// For example, operatorTree(opMatch, ...) will refer to a tree like this:
+// ... -> opMatch -> opMatch_Output
+NNSubtree operatorTree(
+    const NNNodeMatchCriteria& root,
+    const std::vector<NNSubtree>& childrenCriteria = {},
+    int count = 1);
 
 } // namespace nn
 

@@ -72,7 +72,7 @@ else:
             return os.getppid() == self.manager_pid
 
 
-def _worker_loop(dataset, index_queue, data_queue, collate_fn, seed, init_fn, worker_id):
+def _worker_loop(dataset, index_queue, data_queue, done_event, collate_fn, seed, init_fn, worker_id):
     global _use_shared_memory
     _use_shared_memory = True
 
@@ -86,6 +86,11 @@ def _worker_loop(dataset, index_queue, data_queue, collate_fn, seed, init_fn, wo
     random.seed(seed)
     torch.manual_seed(seed)
 
+    # Do not wait for putting thread to join when this worker exits. Otherwise,
+    # this worker may always be waiting to put and doesn't check index_queue
+    # and done_event for termination signal.
+    data_queue.cancel_join_thread()
+
     if init_fn is not None:
         init_fn(worker_id)
 
@@ -95,11 +100,13 @@ def _worker_loop(dataset, index_queue, data_queue, collate_fn, seed, init_fn, wo
         try:
             r = index_queue.get(timeout=MANAGER_STATUS_CHECK_INTERVAL)
         except queue.Empty:
-            if watchdog.is_alive():
+            if watchdog.is_alive() and not done_event.is_set():
                 continue
             else:
                 break
-        if r is None:
+        # use done_event so that we can get faster exiting signal even if there
+        # are still indices in index_queue
+        if r is None or done_event.is_set():
             break
         idx, batch_indices = r
         try:
@@ -111,7 +118,7 @@ def _worker_loop(dataset, index_queue, data_queue, collate_fn, seed, init_fn, wo
             del samples
 
 
-def _worker_manager_loop(in_queue, out_queue, done_event, pin_memory, device_id):
+def _pin_memory_loop(in_queue, out_queue, done_event, pin_memory, device_id):
     if pin_memory:
         torch.cuda.set_device(device_id)
 
@@ -122,7 +129,7 @@ def _worker_manager_loop(in_queue, out_queue, done_event, pin_memory, device_id)
             if done_event.is_set():
                 return
             raise
-        if r is None:
+        if r is None or done_event.is_set():
             break
         if isinstance(r[1], ExceptionWrapper):
             out_queue.put(r)
@@ -242,7 +249,6 @@ class _DataLoaderIter(object):
         self.num_workers = loader.num_workers
         self.pin_memory = loader.pin_memory and torch.cuda.is_available()
         self.timeout = loader.timeout
-        self.done_event = threading.Event()
 
         self.sample_iter = iter(self.batch_sampler)
 
@@ -252,35 +258,32 @@ class _DataLoaderIter(object):
             self.worker_init_fn = loader.worker_init_fn
             self.index_queues = [multiprocessing.Queue() for _ in range(self.num_workers)]
             self.worker_queue_idx = 0
-            self.worker_result_queue = multiprocessing.SimpleQueue()
+            self.worker_result_queue = multiprocessing.Queue()
             self.batches_outstanding = 0
             self.worker_pids_set = False
             self.shutdown = False
             self.send_idx = 0
             self.rcvd_idx = 0
             self.reorder_dict = {}
+            self.done_event = multiprocessing.Event()
 
             self.workers = [
                 multiprocessing.Process(
                     target=_worker_loop,
                     args=(self.dataset, self.index_queues[i],
-                          self.worker_result_queue, self.collate_fn, base_seed + i,
+                          self.worker_result_queue, self.done_event,
+                          self.collate_fn, base_seed + i,
                           self.worker_init_fn, i))
                 for i in range(self.num_workers)]
 
-            if self.pin_memory or self.timeout > 0:
+            if self.pin_memory:
                 self.data_queue = queue.Queue()
-                if self.pin_memory:
-                    maybe_device_id = torch.cuda.current_device()
-                else:
-                    # do not initialize cuda context if not necessary
-                    maybe_device_id = None
-                self.worker_manager_thread = threading.Thread(
-                    target=_worker_manager_loop,
+                self.pin_memory_thread = threading.Thread(
+                    target=_pin_memory_loop,
                     args=(self.worker_result_queue, self.data_queue, self.done_event, self.pin_memory,
-                          maybe_device_id))
-                self.worker_manager_thread.daemon = True
-                self.worker_manager_thread.start()
+                          torch.cuda.current_device()))
+                self.pin_memory_thread.daemon = True
+                self.pin_memory_thread.start()
             else:
                 self.data_queue = self.worker_result_queue
 
@@ -366,33 +369,29 @@ class _DataLoaderIter(object):
         raise NotImplementedError("_DataLoaderIter cannot be pickled")
 
     def _shutdown_workers(self):
-        try:
-            if not self.shutdown:
-                self.shutdown = True
-                self.done_event.set()
-                for q in self.index_queues:
-                    q.put(None)
-                # if some workers are waiting to put, make place for them
-                try:
-                    while not self.worker_result_queue.empty():
-                        self.worker_result_queue.get()
-                except (FileNotFoundError, ImportError):
-                    # Many weird errors can happen here due to Python
-                    # shutting down. These are more like obscure Python bugs.
-                    # FileNotFoundError can happen when we rebuild the fd
-                    # fetched from the queue but the socket is already closed
-                    # from the worker side.
-                    # ImportError can happen when the unpickler loads the
-                    # resource from `get`.
-                    pass
-                # done_event should be sufficient to exit worker_manager_thread,
-                # but be safe here and put another None
-                self.worker_result_queue.put(None)
-        finally:
-            # removes pids no matter what
+        if not self.shutdown:
+            self.shutdown = True
+            # removes pids from the C side data structure first so worker
+            # termination afterwards won't trigger false positive error report.
             if self.worker_pids_set:
                 _remove_worker_pids(id(self))
                 self.worker_pids_set = False
+            self.done_event.set()
+            if self.pin_memory:
+                # Sending `None` to `pin_memory_thread` must be before
+                # stopping worker processes because the workers may leave
+                # corrupted data in `worker_result_queue`, causing
+                # `pin_memory_thread` unable to read and terminate properly.
+                self.worker_result_queue.put(None)
+            # Workers can't be waiting to put be cause their output queue
+            # is a multiprocessing.Queue and its .put is non-blocking.
+            # They can only be waiting to get, so we put `None` here.
+            for q in self.index_queues:
+                q.put(None)
+            for w in self.workers:
+                w.join()
+            if self.pin_memory:
+                self.pin_memory_thread.join()
 
     def __del__(self):
         if self.num_workers > 0:
