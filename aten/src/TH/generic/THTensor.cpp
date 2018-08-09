@@ -570,7 +570,7 @@ ptrdiff_t THTensor_(nElement)(const THTensor *self)
   {
     ptrdiff_t nElement = 1;
     int d;
-    for(d = 0; d < THTensor_nDimensionLegacyAll(self); d++)
+    for(d = 0; d < THTensor_nDimension(self); d++)
       nElement *= self->size(d);
     return nElement;
   }
