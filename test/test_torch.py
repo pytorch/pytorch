@@ -597,6 +597,12 @@ class TestTorch(TestCase):
     def test_ceil(self):
         self._test_math_by_name('ceil')
 
+    @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
+    def test_ceil_out_cpu_cuda(self):
+        a = torch.randn(1)
+        b = torch.randn(1, device="cuda")
+        self.assertRaises(RuntimeError, lambda: torch.ceil(a, out=b))
+
     def test_rsqrt(self):
         def rsqrt(x):
             if x == 0:
