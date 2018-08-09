@@ -107,23 +107,13 @@ template <typename scalar_t>
         return false;
       });
 
-    Tensor input_sorted = at::empty(input_flat.sizes(), input_flat.type());
-    for ( int i = 0; i < indices.size(0); ++i) {
-      input_sorted[i] = input_flat[indices[i]];
-    }
+    Tensor input_sorted = input_flat.index_select(0, indices);
 
-    // Why is this not working?
-    //thrust::device_vector<Tensor> input_unbind = at::unbind(input_sorted, 0);
-    // auto last = thrust::unique(policy, input_unbind.begin(), input_unbind.end(), 
-    //   [=] __device__ (Tensor a, Tensor b) -> bool {
-    //     return at::equal(a, b);
-    //   });
-    //input_unbind.erase(last, input_unbind.end());
-
-    scalar_t* input_sorted_ptr = input_sorted.data<scalar_t>();
-    thrust::device_vector<int64_t> input_sorted_indices(input_sorted.size(0));
-    thrust::sequence(policy, input_sorted_indices.begin(), input_sorted_indices.end());
-    auto last = thrust::unique(policy, input_sorted_indices.begin(), input_sorted_indices.end(),
+    // get unique tensors
+    scalar_t* input_sorted_ptr = input_sorted.data<scalar_t>();    
+    Tensor input_sorted_indices = at::arange(0, input_sorted.size(0), self.type().toScalarType(kLong));
+    int64_t* input_sorted_indices_ptr = input_sorted_indices.data<int64_t>();
+    auto last = thrust::unique(policy, input_sorted_indices_ptr, input_sorted_indices_ptr + input_sorted_indices.numel(),
       [=] __device__ (int64_t a, int64_t b) -> bool {
         bool eq = true;
         for (int64_t i = 0; i < numel; ++i) {
@@ -135,13 +125,8 @@ template <typename scalar_t>
         }
         return eq;
       });
-    input_sorted_indices.erase(last, input_sorted_indices.end());
-    
-    Tensor output_dim = at::empty({0}, self.type());
-    output_dim.resize_({(int64_t)input_sorted_indices.size(), numel});
-    for (int i = 0; i < output_dim.size(0); ++i) {
-      output_dim[i] = input_sorted[input_sorted_indices[i]];
-    }
+    input_sorted_indices.resize_(last - input_sorted_indices_ptr);
+    Tensor output_dim = input_sorted.index_select(0, input_sorted_indices);
     
     // // reshape back
     std::vector<int64_t> new_sizes(orig_sizes.begin(), orig_sizes.end());
@@ -149,23 +134,26 @@ template <typename scalar_t>
     output_dim = output_dim.view(new_sizes);
     output_dim = output_dim.transpose(0, dim);
 
+    // calculate inverse indices
     Tensor inverse_indices_dim = at::empty({0}, self.type().toScalarType(kLong));
-    int64_t size = self.size(dim);
-    inverse_indices_dim.resize_(size);
-    Tensor mask = at::empty(input_sorted.size(0), self.type().toScalarType(kLong));
-    mask[0] = 1;
-    for (int i = 0; i < input_sorted.size(0) - 1; ++i) {
-      if (!at::equal(input_sorted[i], input_sorted[i+1])) {
-        mask[i+1] = 1; 
+    if (return_inverse) {
+      int64_t size = self.size(dim);
+      inverse_indices_dim.resize_(size);
+      Tensor mask = at::empty(input_sorted.size(0), self.type().toScalarType(kLong));
+      mask[0] = 1;
+      for (int i = 0; i < input_sorted.size(0) - 1; ++i) {
+        if (!at::equal(input_sorted[i], input_sorted[i+1])) {
+          mask[i+1] = 1; 
+        }
+        else {
+          mask[i+1] = 0;
+        }
       }
-      else {
-        mask[i+1] = 0;
-      }
-    }
 
-    Tensor imask = at::cumsum(mask, 0) - 1;
-    for (int i = 0; i < indices.size(0); ++i) {
-      inverse_indices_dim[indices[i]] = imask[i];
+      Tensor imask = at::cumsum(mask, 0) - 1;
+      for (int i = 0; i < indices.size(0); ++i) {
+        inverse_indices_dim[indices[i]] = imask[i];
+      }
     }
 
     THCudaCheck(cudaGetLastError());  

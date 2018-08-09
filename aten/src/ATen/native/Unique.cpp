@@ -22,7 +22,7 @@ std::tuple<Tensor, Tensor> _unique_cpu_template(
   const scalar_t* input_data = input.data<scalar_t>();
   std::unordered_set<scalar_t> set(input_data, input_data + input.numel());
   Tensor output = at::empty({static_cast<int64_t>(set.size())}, input.type());
-  scalar_t* output_data = output.data<scalar_t>();  
+  scalar_t* output_data = output.data<scalar_t>();
 
   if (sorted) {
     std::vector<scalar_t> vec(set.begin(), set.end());
