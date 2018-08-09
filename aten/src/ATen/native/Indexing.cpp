@@ -80,7 +80,7 @@ expandByteTensors(const Tensor & self, TensorList indices) {
   return result;
 }
 
-static bool hasContiguousSubspace(std::vector<std::tuple<Tensor, bool>> tl) {
+static bool hasContiguousSubspace(const std::vector<std::tuple<Tensor, bool>> &tl) {
   // true if all the non-null tensors are adjacent
   auto isDefined = [](const std::tuple<Tensor, bool> & tensor){
     return std::get<0>(tensor).defined();
@@ -101,12 +101,12 @@ static bool hasContiguousSubspace(std::vector<std::tuple<Tensor, bool>> tl) {
 // returns
 //  tensor.permute([1, 3, 0, 2]), {a, b, nullptr, nullptr}
 static std::tuple<Tensor, std::vector<std::tuple<Tensor, bool>>>
-transposeToFront(Tensor self, std::vector<std::tuple<Tensor, bool>> indices) {
+transposeToFront(Tensor self, const std::vector<std::tuple<Tensor, bool>> &indices) {
   std::vector<int64_t> dims;
   std::vector<std::tuple<Tensor, bool>> transposedIndices;
   dims.reserve(self.dim());
   for (int64_t i = 0; i < self.dim(); i++) {
-    Tensor &t = std::get<0>(indices[i]);
+    const Tensor &t = std::get<0>(indices[i]);
     if (t.defined()) {
       dims.push_back(i);
       transposedIndices.emplace_back(t, std::get<1>(indices[i]));
@@ -155,7 +155,8 @@ Tensor _wrap_index_once(const Tensor & self, int64_t dim, int64_t dim_size) {
   return self.remainder(dim_size);
 }
 
-static Tensor computeLinearIndex(const Tensor & src, std::vector<std::tuple<Tensor, bool>> indices) {
+static Tensor computeLinearIndex(const Tensor & src,
+const std::vector<std::tuple<Tensor, bool>> &indices) {
   auto strides = computeLinearStride(src);
   Type& longType = src.type().toScalarType(kLong);
 
@@ -166,7 +167,7 @@ static Tensor computeLinearIndex(const Tensor & src, std::vector<std::tuple<Tens
   Tensor linearIndex;
   int64_t emptyBefore = 0, emptyAfter = 0, nElemBefore = 1, nElemAfter = 1;
   for (int64_t i = 0; i < src.dim(); i++) {
-    Tensor &t = std::get<0>(indices[i]);
+    const Tensor &t = std::get<0>(indices[i]);
     bool needs_wrapdim = std::get<1>(indices[i]);
     if (t.defined()) {
       // Cast index to the longType matching src's backend
@@ -212,8 +213,7 @@ static Tensor computeLinearIndex(const Tensor & src, std::vector<std::tuple<Tens
   return linearIndex;
 }
 
-static std::vector<std::tuple<Tensor, bool>>
-_expand_outplace(std::vector<std::tuple<Tensor, bool>> tensors) {
+static void _expand_outplace(std::vector<std::tuple<Tensor, bool>> &tensors) {
   std::vector<Tensor> _tensors;
   for (auto &t : tensors) {
     _tensors.push_back(std::get<0>(t));
@@ -222,7 +222,6 @@ _expand_outplace(std::vector<std::tuple<Tensor, bool>> tensors) {
   for (int i = 0; i < tensors.size(); i++) {
     std::get<0>(tensors[i]) = _tensors[i];
   }
-  return tensors;
 }
 
 static std::tuple<Tensor, Tensor> makeLinearIndex(Tensor self, TensorList orig) {
@@ -230,7 +229,7 @@ static std::tuple<Tensor, Tensor> makeLinearIndex(Tensor self, TensorList orig) 
   // first expand ByteTensor (boolean masks) into 1 or more LongTensors
   auto indices = expandByteTensors(self, orig);
   // next broadcast all index tensors together
-  indices = _expand_outplace(indices);
+  _expand_outplace(indices);
   // add missing null Tensors so that it matches self.dim()
   while (indices.size() < (size_t)self.dim()) {
     indices.emplace_back(Tensor(), false);
