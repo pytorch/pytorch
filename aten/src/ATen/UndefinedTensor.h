@@ -12,7 +12,7 @@ public:
   IntList sizes() const override;
   IntList strides() const override;
   int64_t dim() const override;
-  void * unsafeGetTH(bool retain) override;
+  THTensor * unsafeGetTH(bool retain) override;
   std::unique_ptr<Storage> storage() override;
 private:
   UndefinedTensor();

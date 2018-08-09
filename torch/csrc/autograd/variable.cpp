@@ -58,7 +58,7 @@ const char* Variable::Impl::typeString() {
   return "VariableType";
 }
 
-void* Variable::Impl::unsafeGetTH(bool retain) {
+THTensor* Variable::Impl::unsafeGetTH(bool retain) {
   return data_.unsafeGetTH(retain);
 }
 
@@ -131,9 +131,9 @@ void Variable::Impl::set_data(Tensor new_data) {
   }
   
   // Updates metadata
-  data_.pImpl->tensor->scalar_type_ = new_data.type().scalarType();
-  data_.pImpl->tensor->backend_ = new_data.type().backend();
-  data_.pImpl->tensor->is_variable_ = true;
+  data_.pImpl->unsafeGetTH(false)->scalar_type_ = new_data.type().scalarType();
+  data_.pImpl->unsafeGetTH(false)->backend_ = new_data.type().backend();
+  data_.pImpl->unsafeGetTH(false)->is_variable_ = true;
   data_ = std::move(new_data);
 }
 

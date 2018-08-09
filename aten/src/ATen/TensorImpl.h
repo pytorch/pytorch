@@ -38,7 +38,7 @@ struct AT_API TensorImpl : public Retainable {
   virtual IntList sizes() const;
   virtual IntList strides() const;
   virtual int64_t dim() const;
-  virtual void * unsafeGetTH(bool retain);
+  virtual THTensor * unsafeGetTH(bool retain);
   virtual std::unique_ptr<Storage> storage();
   friend struct Type;
 
@@ -91,6 +91,7 @@ struct AT_API TensorImpl : public Retainable {
 
   virtual void set_data(Tensor new_data);
 
+protected:
   THTensor * tensor;
 };
 } // namespace at

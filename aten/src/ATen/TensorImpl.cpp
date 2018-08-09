@@ -117,7 +117,7 @@ TensorImpl* TensorImpl::maybe_zero_dim(bool condition_when_zero_dim) {
   return this;
 }
 
-void * TensorImpl::unsafeGetTH(bool retain) {
+THTensor* TensorImpl::unsafeGetTH(bool retain) {
   if (retain) {
     tensor->retain();
   }
