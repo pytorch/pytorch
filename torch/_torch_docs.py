@@ -2358,7 +2358,7 @@ Example::
 
 add_docstr(torch.matrix_rank,
            r"""
-matrix_rank(input, tol=None, bool symmetric=False) -> Int
+matrix_rank(input, tol=None, bool symmetric=False) -> Tensor
 
 Returns the numerical rank of a 2-D tensor. The method to compute the
 matrix rank is done using SVD by default. If :attr:`symmetric` is ``True``,
