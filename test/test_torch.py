@@ -4180,6 +4180,7 @@ class TestTorch(TestCase):
         self.assertEqual(X, Xhat, 1e-8, 'VeV\' wrong')
 
     @skipIfNoLapack
+    @skipIfRocm
     def test_symeig(self):
         xval = torch.rand(100, 3)
         cov = torch.mm(xval.t(), xval)
