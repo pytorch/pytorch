@@ -245,7 +245,7 @@ class SliceOp : public Operator<Context> {
         output, data, starts_host_, ends_host_, &context_);
   }
 
-  DISABLE_COPY_AND_ASSIGN(SliceOp);
+  AT_DISABLE_COPY_AND_ASSIGN(SliceOp);
 
  private:
   std::vector<SIndex> starts_;
@@ -304,7 +304,7 @@ class SliceGradientOp : public Operator<Context> {
     }
   }
 
-  DISABLE_COPY_AND_ASSIGN(SliceGradientOp);
+  AT_DISABLE_COPY_AND_ASSIGN(SliceGradientOp);
 
  private:
   std::vector<SIndex> starts_;

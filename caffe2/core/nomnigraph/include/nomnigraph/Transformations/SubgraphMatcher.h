@@ -1,6 +1,9 @@
 #ifndef NOM_TRANFORMATIONS_SUBGRAPH_MATCHER_H
 #define NOM_TRANFORMATIONS_SUBGRAPH_MATCHER_H
 
+#include <functional>
+#include <vector>
+
 namespace nom {
 
 namespace matcher {
@@ -10,8 +13,10 @@ namespace matcher {
  * - Node matching criteria for the subtree's root.
  * - Children subtree matching criteria
  * - A count, which means we may want more than one of this subtree. The count
- * can be unlimited. The count is only used when we match children of a
- * subtree root, not matching the subtree itself.
+ * can be unlimited. The count is only used when we match children of a subtree
+ * root, not matching the subtree itself.
+ * - If nonTerminal flag is set, it means we only match the root and do not
+ * care about the children.
  */
 template <typename NodeMatchCriteria>
 class SubtreeMatchCriteria {
@@ -19,14 +24,26 @@ class SubtreeMatchCriteria {
   static const int kStarCount = -1;
   SubtreeMatchCriteria(
       const NodeMatchCriteria& root,
-      const std::vector<SubtreeMatchCriteria>& children,
-      int count)
-      : root_(root), children_(children), count_(count){};
+      const std::vector<SubtreeMatchCriteria>& children = {},
+      int count = 1,
+      bool nonTerminal = false)
+      : root_(root),
+        children_(children),
+        count_(count),
+        nonTerminal_(nonTerminal){};
+
+  // Non terminal
+  static SubtreeMatchCriteria<NodeMatchCriteria> nonTerminal(
+      const NodeMatchCriteria& root,
+      int count = 1) {
+    return SubtreeMatchCriteria(root, {}, count, true);
+  }
 
  private:
   NodeMatchCriteria root_;
   std::vector<SubtreeMatchCriteria> children_;
   int count_;
+  bool nonTerminal_;
 
   template <typename, typename, typename>
   friend class SubgraphMatcher;
@@ -58,6 +75,11 @@ struct SubgraphMatcher {
     if (!isNodeMatch(root, criteria.root_)) {
       return false;
     }
+    if (criteria.nonTerminal_) {
+      // This is sufficient to be a match if this criteria specifies a non
+      // terminal node.
+      return true;
+    }
     auto& edges =
         invertGraphTraversal ? root->getInEdges() : root->getOutEdges();
 
@@ -87,9 +109,9 @@ struct SubgraphMatcher {
            (isStarCount || countMatch < expectedCount);
            currentEdgeIdx++) {
         auto edge = edges[currentEdgeIdx];
-        auto nextNode = invertGraphTraversal ? edge->tail() : edge->head();
+        auto child = invertGraphTraversal ? edge->tail() : edge->head();
 
-        if (!isSubtreeMatch(nextNode, childrenCriteria, invertGraphTraversal)) {
+        if (!isSubtreeMatch(child, childrenCriteria, invertGraphTraversal)) {
           if (!isStarCount) {
             // If the current criteria isn't a * pattern, this indicates a
             // failure.
@@ -149,23 +171,6 @@ struct SubgraphMatcher {
     }
   }
 };
-
-// Convenient methods to create subtree matching criteria.
-template <typename NodeMatchCriteria>
-SubtreeMatchCriteria<NodeMatchCriteria> tree(
-    const NodeMatchCriteria& root,
-    const std::vector<SubtreeMatchCriteria<NodeMatchCriteria>>& children = {},
-    int count = 1) {
-  return SubtreeMatchCriteria<NodeMatchCriteria>(root, children, count);
-}
-
-template <typename NodeMatchCriteria>
-SubtreeMatchCriteria<NodeMatchCriteria> treeStar(
-    const NodeMatchCriteria& root,
-    const std::vector<SubtreeMatchCriteria<NodeMatchCriteria>>& children = {}) {
-  return tree(
-      root, children, SubtreeMatchCriteria<NodeMatchCriteria>::kStarCount);
-}
 
 } // namespace matcher
 

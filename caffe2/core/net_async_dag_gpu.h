@@ -32,7 +32,7 @@ class AsyncDAGNet : public DAGNetBase {
   int stream(const DeviceOption& device_option);
   static thread_local std::vector<int> stream_counters_;
 
-  DISABLE_COPY_AND_ASSIGN(AsyncDAGNet);
+  AT_DISABLE_COPY_AND_ASSIGN(AsyncDAGNet);
 };
 
 } // namespace caffe2

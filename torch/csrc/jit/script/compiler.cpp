@@ -1359,10 +1359,7 @@ private:
         return emitNone(tree->range());
       } break;
       case TK_SLICE: {
-        const auto slice = Slice(tree);
-        return emitSlice(
-            slice.range(),
-            {slice.value(), slice.startOr(0), slice.endOr(-1)});
+        return emitSlice(Slice(tree));
       } break;
       case TK_GATHER: {
         const auto gather = Gather(tree);
@@ -1380,7 +1377,8 @@ private:
         auto values = getValues(ll.inputs(), /*maybe_unpack=*/true, identity);
         if (values.size() == 0) {
           throw ErrorReport(tree) << "Empty list literals not allowed. "
-                                  << "Use _constructEmptyFooList() instead";
+                                  << "Use _construct_empty_foo_list() instead. "
+                                  << "`foo` can be `int`, `float` or `tensor`";
         }
         const auto elem_type = values.at(0)->type();
         for (auto v : values) {
@@ -1424,28 +1422,33 @@ private:
 
   // Desugars slice syntactic sugar tensor[begin:end] -> tensor.slice(begin,
   // end).
-  Value* emitSlice(
-      const SourceRange& loc,
-      TreeList&& inputs) {
-    const auto applyInputs =
-        Compound::create(TK_LIST, loc, std::move(inputs));
-    const auto input_values = getNamedValues(applyInputs->trees(),
-                                             /*maybe_unpack*/false,
-                                             identity);
+  Value* emitSlice(const Slice& slice) {
+    const auto& loc = slice.range();
+    TreeList inputs = {slice.value(), slice.startOr(0)};
+    const auto applyInputs = Compound::create(TK_LIST, loc, std::move(inputs));
+    const auto input_values = getNamedValues(
+        applyInputs->trees(),
+        /*maybe_unpack*/ false,
+        identity);
+
     NamedValue tensor = input_values[0];
     NamedValue begin = input_values[1];
-    NamedValue end = input_values[2];
-    NamedValue dim = NamedValue(loc, "dim",
-        graph->insertConstant(0, loc));
-    NamedValue step = NamedValue(loc, "step",
-        graph->insertConstant(1, loc));
+    NamedValue dim = NamedValue(loc, "dim", graph->insertConstant(0, loc));
+    NamedValue step = NamedValue(loc, "step", graph->insertConstant(1, loc));
 
-    return emitBuiltinCall(
-               loc, method, "slice", {tensor, dim, begin, end, step}, {}, true)
+    std::vector<NamedValue> args = {tensor, dim, begin};
+    const auto has_end = slice.end().present();
+    if (has_end) {
+      // If the user specified an `end` index, pass it down
+      args.emplace_back(loc, "end", emitExpr(Expr(slice.end().get()), identity));
+    }
+
+    // Otherwise rely on the schema default argument
+    return emitBuiltinCall(loc, method, "slice", args, {step}, true)
         ->asValue(loc, method);
   }
 
-  // Desugars gather syntactic sugar tensor[idx] -> tensor.select(idx).
+  // Desugars gather syntactic sugar foo[i]
   Value* emitGather(
       const SourceRange& loc,
       TreeList&& inputs) {
@@ -1454,15 +1457,21 @@ private:
     auto input_values = getNamedValues(applyInputs->trees(),
                                         /*maybe_unpack*/false,
                                         identity);
-    NamedValue tensor = input_values[0];
-    NamedValue dim = NamedValue(
-        loc,
-        "dim",
-        graph->insertConstant(0, loc));
+    NamedValue gatherable = input_values[0];
     NamedValue idx = input_values[1];
+    if (gatherable.value->type()->kind() == TypeKind::ListType) {
+      // if it's a list, emit a regular index selection op
+      return emitBuiltinCall(
+                 loc, method, "select", {gatherable, idx}, {}, true)
+          ->asValue(loc, method);
 
-    return emitBuiltinCall(loc, method, "select", {tensor, dim, idx}, {}, true)
-        ->asValue(loc, method);
+    } else {
+      // if it's a single tensor, map tensor[idx] -> tensor.select(0, idx)
+      NamedValue dim = NamedValue(loc, "dim", graph->insertConstant(0, loc));
+      return emitBuiltinCall(
+                 loc, method, "select", {gatherable, dim, idx}, {}, true)
+          ->asValue(loc, method);
+    }
   }
 };
 

@@ -144,7 +144,6 @@ void THTensor_(nonzero)(THLongTensor *subscript, THTensor *tensor)
 void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, int dim, THLongTensor *index)
 {
   ptrdiff_t i, numel;
-  THLongStorage *newSize;
   THTensor *tSlice, *sSlice;
   int64_t *index_data;
   real *tensor_data, *src_data;
@@ -154,14 +153,12 @@ void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, int dim, THLongTens
 
   numel = THLongTensor_nElement(index);
 
-  newSize = THLongStorage_newWithSize(src->dim());
-  THLongStorage_rawCopy(newSize, THTensor_getSizePtr(src));
+  std::vector<int64_t> newSize = THTensor_sizesLegacyNoScalars(src);
 #ifdef DEBUG
   THAssert(numel <= LONG_MAX);
 #endif
-  THLongStorage_data(newSize)[dim] = numel;
-  THTensor_(resize)(tensor,newSize,NULL);
-  THLongStorage_free(newSize);
+  newSize[dim] = numel;
+  THTensor_(resize)(tensor,newSize,{});
 
   index = THLongTensor_newContiguous(index);
   index_data = THLongTensor_data(index);
@@ -253,8 +250,8 @@ void THTensor_(indexCopy)(THTensor *tensor, int dim, THLongTensor *index, THTens
 }
 
 static ptrdiff_t THTensor_(dataOffset)(THTensor* tensor, ptrdiff_t linearIndex) {
-  auto size = tensor->sizes();
-  auto stride = tensor->strides();
+  auto size = THTensor_sizesLegacyNoScalars(tensor);
+  auto stride = THTensor_stridesLegacyNoScalars(tensor);
   int nDim = THTensor_nDimensionLegacyAll(tensor);
   ptrdiff_t dataOffset = 0;
   for (int i = nDim - 1; i >= 0; i--) {

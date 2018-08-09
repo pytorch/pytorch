@@ -31,6 +31,7 @@
 #define NOM_REQUIRE_OR_BREAK(_cond) NOM_REQUIRE_OR_(_cond, break)
 #define NOM_REQUIRE_OR_RET_NULL(_cond) NOM_REQUIRE_OR_(_cond, return nullptr)
 #define NOM_REQUIRE_OR_RET_FALSE(_cond) NOM_REQUIRE_OR_(_cond, return false)
+#define NOM_REQUIRE_OR_RET_TRUE(_cond) NOM_REQUIRE_OR_(_cond, return true)
 #define NOM_REQUIRE_OR_RET(_cond) NOM_REQUIRE_OR_(_cond, return )
 
 // Implements accessors for a generic type T. If the type is not

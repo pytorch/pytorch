@@ -84,11 +84,11 @@ struct THTensor
       return strides_[d];
     }
 
-    inline at::IntList sizes() {
+    inline at::IntList sizes() const {
       return sizes_;
     }
 
-    inline at::IntList strides() {
+    inline at::IntList strides() const {
       return strides_;
     }
 
@@ -143,6 +143,10 @@ inline void THTensor_setIsZeroDim(THTensor *tensor, bool is_zero_dim) {
 //                            and tensors with a dimension of size zero are collapsed to 0-dimensional tensors.
 //
 // Eventually, everything should go through nDimension or tensor->dim().
+inline int THTensor_nDimension(const THTensor* tensor) {
+  return tensor->dim();
+}
+
 inline int THTensor_nDimensionLegacyNoScalars(const THTensor* tensor) {
   if (THTensor_isZeroDim(tensor)) {
     return 1;
@@ -176,6 +180,22 @@ inline int64_t THTensor_sizeLegacyNoScalars(const THTensor *self, int dim)
 
 #include "generic/THTensorFastGetSet.hpp"
 #include "THGenerateAllTypes.h"
+
+inline std::vector<int64_t> THTensor_sizesLegacyNoScalars(const THTensor *self) {
+  if (self->dim() == 0) {
+    return {1};
+  } else {
+    return self->sizes().vec();
+  }
+}
+
+inline std::vector<int64_t> THTensor_stridesLegacyNoScalars(const THTensor *self) {
+  if (self->dim() == 0) {
+    return {1};
+  } else {
+    return self->strides().vec();
+  }
+}
 
 inline void THTensor_resizeDim(THTensor* tensor, int64_t ndim) {
   // NB: This is *truly* a resize; calling code (e.g., squeeze)
@@ -211,5 +231,16 @@ inline void THTensor_stealAndSetStoragePtr(THTensor* tensor, THStorage* storage)
 }
 
 TH_API void THTensor_free(THTensor *self);
+TH_API void THTensor_setStorageNd(THTensor *self, THStorage *storage, ptrdiff_t storageOffset, int nDimension, const int64_t *size, const int64_t *stride);
+TH_API void THTensor_resizeNd(THTensor *self, int nDimension, const int64_t *size, const int64_t *stride);
+
+TH_CPP_API void THTensor_resize(THTensor *self, at::IntList size, at::IntList stride);
+TH_CPP_API void THTensor_setStorage(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_, at::IntList size_, at::IntList stride_);
 TH_CPP_API at::optional<std::vector<int64_t>> THTensor_compute_stride(at::IntList oldshape, at::IntList oldstride,
                                                                       at::IntList newshape);
+
+#include "generic/THTensor.hpp"
+#include "THGenerateAllTypes.h"
+
+#include "generic/THTensor.hpp"
+#include "THGenerateHalfType.h"
