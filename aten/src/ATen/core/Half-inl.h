@@ -2,10 +2,14 @@
 
 #include <cstring>
 #include <limits>
-#include "ATen/core/CoreAPI.h"
+#include <ATen/core/Macros.h>
 
 #ifdef __CUDACC__
 #include <cuda_fp16.h>
+#endif
+
+#if defined(__HIP_DEVICE_COMPILE__)
+#include <hip/hip_fp16.h>
 #endif
 
 namespace at {

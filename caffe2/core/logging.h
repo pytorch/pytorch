@@ -7,6 +7,7 @@
 #include <limits>
 #include <sstream>
 
+#include <ATen/core/Error.h>
 #include "caffe2/core/flags.h"
 #include "caffe2/proto/caffe2.pb.h"
 
@@ -33,6 +34,13 @@ namespace caffe2 {
 // Functions that we use for initialization.
 bool InitCaffeLogging(int* argc, char** argv);
 void UpdateLoggingLevelsFromFlags();
+
+[[noreturn]] void ThrowEnforceNotMet(
+    const char* file,
+    const int line,
+    const char* condition,
+    const std::string& msg,
+    const void* caller = nullptr);
 
 constexpr bool IsUsingGoogleLogging() {
 #ifdef CAFFE2_USE_GOOGLE_GLOG
@@ -92,9 +100,6 @@ inline string Join(const string& delimiter, const Container& v) {
   return s.str();
 }
 
-// Obtains the base name from a full path.
-string StripBasename(const std::string& full_path);
-
 // Replace all occurrences of "from" substring to "to" string.
 // Returns number of replacements
 size_t ReplaceAll(string& s, const char* from, const char* to);
@@ -104,49 +109,30 @@ void SetStackTraceFetcher(std::function<string(void)> fetcher);
 void SetOperatorLogger(std::function<void(const OperatorDef&)> tracer);
 std::function<void(const OperatorDef&)> GetOperatorLogger();
 
-class EnforceNotMet : public std::exception {
- public:
-  EnforceNotMet(
-      const char* file,
-      const int line,
-      const char* condition,
-      const string& msg,
-      const void* caller=nullptr);
-  void AppendMessage(const string& msg);
-  string msg() const;
-  inline const vector<string>& msg_stack() const {
-    return msg_stack_;
-  }
-
-  const char* what() const noexcept override;
-
-  const void* caller() const noexcept;
-
- private:
-  vector<string> msg_stack_;
-  string full_msg_;
-  string stack_trace_;
-  const void* caller_;
-};
+using EnforceNotMet = at::Error;
 
 #define CAFFE_ENFORCE(condition, ...)                                         \
   do {                                                                        \
     if (!(condition)) {                                                       \
-      throw ::caffe2::EnforceNotMet(                                          \
+      ::caffe2::ThrowEnforceNotMet(                                           \
           __FILE__, __LINE__, #condition, ::caffe2::MakeString(__VA_ARGS__)); \
     }                                                                         \
   } while (false)
 
-#define CAFFE_ENFORCE_WITH_CALLER(condition, ...)                             \
-  do {                                                                        \
-    if (!(condition)) {                                                       \
-      throw ::caffe2::EnforceNotMet(                                          \
-          __FILE__, __LINE__, #condition, ::caffe2::MakeString(__VA_ARGS__), this); \
-    }                                                                         \
+#define CAFFE_ENFORCE_WITH_CALLER(condition, ...) \
+  do {                                            \
+    if (!(condition)) {                           \
+      ::caffe2::ThrowEnforceNotMet(               \
+          __FILE__,                               \
+          __LINE__,                               \
+          #condition,                             \
+          ::caffe2::MakeString(__VA_ARGS__),      \
+          this);                                  \
+    }                                             \
   } while (false)
 
-#define CAFFE_THROW(...)         \
-  throw ::caffe2::EnforceNotMet( \
+#define CAFFE_THROW(...)        \
+  ::caffe2::ThrowEnforceNotMet( \
       __FILE__, __LINE__, "", ::caffe2::MakeString(__VA_ARGS__))
 
 /**
@@ -246,7 +232,7 @@ BINARY_COMP_HELPER(LessEquals, <=)
     using namespace ::caffe2::enforce_detail;                           \
     const EnforceFailMessage& CAFFE_ENFORCE_THAT_IMPL_r_ = (condition); \
     if (CAFFE_ENFORCE_THAT_IMPL_r_.bad()) {                             \
-      throw ::caffe2::EnforceNotMet(                                    \
+      ::caffe2::ThrowEnforceNotMet(                                     \
           __FILE__,                                                     \
           __LINE__,                                                     \
           expr,                                                         \
@@ -261,7 +247,7 @@ BINARY_COMP_HELPER(LessEquals, <=)
     const EnforceFailMessage& CAFFE_ENFORCE_THAT_IMPL_WITH_CALLER_r_ = \
         (condition);                                                   \
     if (CAFFE_ENFORCE_THAT_IMPL_WITH_CALLER_r_.bad()) {                \
-      throw ::caffe2::EnforceNotMet(                                   \
+      ::caffe2::ThrowEnforceNotMet(                                    \
           __FILE__,                                                    \
           __LINE__,                                                    \
           expr,                                                        \

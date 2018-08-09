@@ -373,7 +373,7 @@ void THTensor_(syev)(THTensor *re_, THTensor *rv_, THTensor *a, const char *jobz
 
   rv__ = THTensor_(cloneColumnMajor)(rv_, a);
 
-  n = rv__->size(0);
+  n = THTensor_sizeLegacyNoScalars(rv__, 0);
   lda = n;
 
   THTensor_(resize1d)(re_,n);
@@ -688,7 +688,7 @@ void THTensor_(potri)(THTensor *ra_, THTensor *a, const char *uplo)
 
   ra__ = THTensor_(cloneColumnMajor)(ra_, a);
 
-  n = ra__->size(0);
+  n = THTensor_sizeLegacyNoScalars(ra__, 0);
   lda = n;
 
   /* Run inverse */
@@ -866,8 +866,8 @@ void THTensor_(orgqr)(THTensor *ra_, THTensor *a, THTensor *tau)
   THTensor *ra__ = NULL;
   ra__ = THTensor_(cloneColumnMajor)(ra_, a);
 
-  int m = ra__->size(0);
-  int k = tau->size(0);
+  int m = THTensor_sizeLegacyNoScalars(ra__, 0);
+  int k = THTensor_sizeLegacyNoScalars(tau, 0);
   int lda = m;
 
   /* Dry-run to query the suggested size of the workspace. */
@@ -921,7 +921,7 @@ void THTensor_(ormqr)(THTensor *ra_, THTensor *a, THTensor *tau, THTensor *c, co
 
   int m = c->size(0);
   int n = c->size(1);
-  int k = tau->size(0);
+  int k = THTensor_sizeLegacyNoScalars(tau, 0);
   int lda;
   if (*side == 'L')
   {
@@ -958,7 +958,7 @@ void THTensor_(ormqr)(THTensor *ra_, THTensor *a, THTensor *tau, THTensor *c, co
 
 void THTensor_(btrifact)(THTensor *ra_, THIntTensor *rpivots_, THIntTensor *rinfo_, int pivot, THTensor *a)
 {
-  AT_CHECK(THTensor_(nDimensionLegacyNoScalars)(a) == 3, "expected 3D tensor, got size: ", a->sizes());
+  AT_CHECK(THTensor_(nDimension)(a) == 3, "expected 3D tensor, got size: ", a->sizes());
   if (!pivot) {
     THError("btrifact without pivoting is not implemented on the CPU");
   }

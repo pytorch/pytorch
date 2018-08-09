@@ -2,7 +2,7 @@
 
 #include "ATen/Tensor.h"
 #include "ATen/TensorImpl.h"
-#include "ATen/Error.h"
+#include "ATen/core/Error.h"
 
 namespace at {
 struct AT_API SparseTensorImpl : public TensorImpl {

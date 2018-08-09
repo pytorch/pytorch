@@ -37,11 +37,10 @@ Context::Context()
   Type::registerCPU(this);
 }
 
-// NB: Ensure that globalContext is initialized before we load
-// variable hooks, otherwise we will deadlock.  Regardless, the
-// deadlock is bad, and being tracked at https://github.com/pytorch/pytorch/issues/9784
-static Context globalContext_;
+// TODO: This could be bad juju if someone calls globalContext() in the
+// destructor of an object with static lifetime.
 Context & globalContext() {
+  static Context globalContext_;
   return globalContext_;
 }
 

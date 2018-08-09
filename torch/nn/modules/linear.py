@@ -26,11 +26,11 @@ class Linear(Module):
         weight: the learnable weights of the module of shape
             `(out_features x in_features)`. The values are initialized from
             :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
-            :math:`k = \frac{1}{\text{in_features}}`
-        bias:   the learnable bias of the module of shape `(out_features)`.
+            :math:`k = \frac{1}{\text{in\_features}}`
+        bias:   the learnable bias of the module of shape :math:`(out_features)`.
                 If :attr:`bias` is ``True``, the values are initialized from
                 :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
-                :math:`k = \frac{1}{\text{in_features}}`
+                :math:`k = \frac{1}{\text{in\_features}}`
 
     Examples::
 
@@ -79,21 +79,21 @@ class Bilinear(Module):
             Default: ``True``
 
     Shape:
-        - Input: :math:`(N, *, \text{in1_features})`, :math:`(N, *, \text{in2_features})`
+        - Input: :math:`(N, *, \text{in1\_features})`, :math:`(N, *, \text{in2\_features})`
           where :math:`*` means any number of additional dimensions. All but the last
           dimension of the inputs should be the same.
-        - Output: :math:`(N, *, \text{out_features})` where all but the last dimension
+        - Output: :math:`(N, *, \text{out\_features})` where all but the last dimension
           are the same shape as the input.
 
     Attributes:
         weight: the learnable weights of the module of shape
             `(out_features x in1_features x in2_features)`. The values are initialized from
             :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
-            :math:`k = \frac{1}{\text{in1_features}}`
+            :math:`k = \frac{1}{\text{in1\_features}}`
         bias:   the learnable bias of the module of shape `(out_features)`
                 If :attr:`bias` is ``True``, the values are initialized from
                 :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
-                :math:`k = \frac{1}{\text{in1_features}}`
+                :math:`k = \frac{1}{\text{in1\_features}}`
 
     Examples::
 

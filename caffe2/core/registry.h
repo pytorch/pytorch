@@ -108,7 +108,7 @@ class Registry {
   CaffeMap<SrcType, string> help_message_;
   std::mutex register_mutex_;
 
-  DISABLE_COPY_AND_ASSIGN(Registry);
+  AT_DISABLE_COPY_AND_ASSIGN(Registry);
 };
 
 template <class SrcType, class ObjectPtrType, class... Args>

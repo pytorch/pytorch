@@ -765,7 +765,7 @@ def leaky_relu(input, negative_slope=0.01, inplace=False):
     leaky_relu(input, negative_slope=0.01, inplace=False) -> Tensor
 
     Applies element-wise,
-    :math:`\text{LeakyReLU}(x) = \max(0, x) + \text{negative_slope} * \min(0, x)`
+    :math:`\text{LeakyReLU}(x) = \max(0, x) + \text{negative\_slope} * \min(0, x)`
 
     See :class:`~torch.nn.LeakyReLU` for more details.
     """
@@ -1827,8 +1827,22 @@ def multilabel_soft_margin_loss(input, target, weight=None, size_average=None,
     """
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
-    input = torch.sigmoid(input)
-    return binary_cross_entropy(input, target, weight, None, None, reduction)
+
+    loss = -(target * logsigmoid(input) + (1 - target) * logsigmoid(-input))
+
+    if weight is not None:
+        loss = loss * weight
+
+    loss = loss.sum(dim=1) / input.size(1)  # only return N loss values
+
+    if reduction == 'none':
+        return loss
+    elif reduction == 'elementwise_mean':
+        return loss.mean()
+    elif reduction == 'sum':
+        return loss.sum()
+    else:
+        raise ValueError(reduction + " is not valid")
 
 
 def cosine_embedding_loss(input1, input2, target, margin=0, size_average=None,

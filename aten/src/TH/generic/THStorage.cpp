@@ -21,12 +21,7 @@ size_t THStorage_(elementSize)()
 
 THStorage* THStorage_(new)(void)
 {
-  THStorage* storage = new THStorage(
-      at::CTypeToScalarType<th::from_type<real>>::to(),
-      0,
-      getTHDefaultAllocator(),
-      true);
-  return storage;
+  return THStorage_new(at::CTypeToScalarType<th::from_type<real>>::to());
 }
 
 THStorage* THStorage_(newWithSize)(ptrdiff_t size)
@@ -64,7 +59,7 @@ THStorage* THStorage_(newWithMapping)(const char *filename, ptrdiff_t size, int 
       false);
 
   if (size <= 0) {
-    storage->size = actual_size / at::elementSize(scalar_type);
+    storage->set_size(actual_size / at::elementSize(scalar_type));
   }
 
   return storage;
@@ -137,25 +132,34 @@ void THStorage_(resize)(THStorage *storage, ptrdiff_t size)
 void THStorage_(fill)(THStorage *storage, real value)
 {
   ptrdiff_t i;
-  for(i = 0; i < storage->size; i++)
+  for(i = 0; i < storage->size(); i++)
     THStorage_(data)(storage)[i] = value;
 }
 
 void THStorage_(set)(THStorage *self, ptrdiff_t idx, real value)
 {
-  THArgCheck((idx >= 0) && (idx < self->size), 2, "out of bounds");
+  THArgCheck((idx >= 0) && (idx < self->size()), 2, "out of bounds");
   THStorage_(data)(self)[idx] = value;
 }
 
 real THStorage_(get)(const THStorage *self, ptrdiff_t idx)
 {
-  THArgCheck((idx >= 0) && (idx < self->size), 2, "out of bounds");
+  THArgCheck((idx >= 0) && (idx < self->size()), 2, "out of bounds");
   return THStorage_(data)(self)[idx];
 }
 
 void THStorage_(swap)(THStorage *storage1, THStorage *storage2)
 {
-  THStorage_swap(storage1, storage2);
+  std::swap(storage1->scalar_type(), storage2->scalar_type());
+  std::swap(storage1->data_ptr(), storage2->data_ptr());
+  ptrdiff_t tmp_size = storage1->size();
+  storage1->set_size(storage2->size());
+  storage2->set_size(tmp_size);
+  bool tmp_bool = storage1->resizable();
+  storage1->set_resizable(storage2->resizable());
+  storage2->set_resizable(tmp_bool);
+  std::swap(storage1->allocator_, storage2->allocator_);
+  std::swap(storage1->finalizer_, storage2->finalizer_);
 }
 
 #endif

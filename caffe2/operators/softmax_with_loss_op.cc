@@ -348,7 +348,7 @@ bool SoftmaxWithLossGradientOp<float, CPUContext>::RunOnDevice() {
 
   // Scale by d_avg_loss / N
   if (total_weight > 0) {
-    math::Scale<float, CPUContext>(
+    math::Scale<float, float, CPUContext>(
         dX->size(),
         scale_ / total_weight * d_avg_loss.data<float>()[0],
         dX->data<float>(),

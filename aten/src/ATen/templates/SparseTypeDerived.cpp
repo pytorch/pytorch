@@ -8,17 +8,15 @@
 // ${generated_comment}
 
 #include "ATen/${Generator}.h"
-#include "ATen/${DenseTensor}.h"
-#include "ATen/${DenseBackend}LongTensor.h"
 #include "ATen/Allocator.h"
-#include "ATen/Half.h"
-#include "ATen/WrapDimUtils.h"
+#include "ATen/DeviceGuard.h"
 #include "ATen/NativeFunctions.h"
-#include "ATen/THLongStorageView.h"
+#include "ATen/THSizeStrideCompat.h"
 #include "ATen/UndefinedTensor.h"
 #include "ATen/Utils.h"
-#include "ATen/DeviceGuard.h"
-#include "ATen/optional.h"
+#include "ATen/WrapDimUtils.h"
+#include "ATen/core/Half.h"
+#include "ATen/core/optional.h"
 
 #include <cstddef>
 #include <functional>
@@ -42,10 +40,10 @@ bool ${Type}::is_cuda() const { return backend() == kCUDA || backend() == kSpars
 bool ${Type}::is_sparse() const { return backend() == kSparseCPU || backend() == kSparseCUDA; }
 bool ${Type}::is_distributed() const { return false; }
 
-std::unique_ptr<Storage> ${Type}::storage() const {
+std::unique_ptr<Storage> ${Type}::storage(bool resizable) const {
   AT_ERROR("storage not supported on sparse");
 }
-std::unique_ptr<Storage> ${Type}::storage(size_t size) const {
+std::unique_ptr<Storage> ${Type}::storage(size_t size, bool resizable) const {
   AT_ERROR("storage not supported on sparse");
 }
 std::unique_ptr<Storage> ${Type}::storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const {

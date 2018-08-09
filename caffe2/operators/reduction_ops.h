@@ -31,7 +31,7 @@ class SumElementsOp : public Operator<Context> {
     math::Sum<T, Context>(
         X.size(), X.template data<T>(), data, &context_, &scratch_);
     if (average_ && X.size() > 0) {
-      math::Scale<T, Context>(
+      math::Scale<float, T, Context>(
           1,
           static_cast<T>(1.) / X.size(),
           sum->template data<T>(),
@@ -113,7 +113,7 @@ class SumSqrElementsOp : public Operator<Context> {
         &context_,
         &scratch_);
     if (average && X.size() > 0) {
-      math::Scale<T, Context>(
+      math::Scale<float, T, Context>(
           1,
           float(1.) / X.size(),
           sum->template data<T>(),

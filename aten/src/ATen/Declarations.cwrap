@@ -23,9 +23,9 @@
   cpu_half: True
   arguments:
     - THTensor* self
-    - arg: THSize* size
+    - arg: IntListSize size
       long_args: True
-    - CONSTANT NULL
+    - CONSTANT {}
 ]]
 [[
   name: set_
@@ -43,23 +43,23 @@
       scalar_check: False
       arguments:
         - THTensor* self
-        - CONSTANT NULL, 0, THLongStorageView({0}, THLongStorageViewKind::SIZE), NULL
+        - CONSTANT NULL, 0, {0}, {}
     - cname: setStorage
       scalar_check: False
       arguments:
         - THTensor* self
         - THStorage* source
         - CONSTANT 0
-        - CONSTANT __storage_size.get()
-        - CONSTANT NULL
+        - CONSTANT {static_cast<int64_t>(source.pImpl()->size())}
+        - CONSTANT {}
     - cname: setStorage
       arguments:
         - THTensor* self
         - THStorage* source
         - long storage_offset
-        - THSize* size
-        - arg: THStride* stride
-          default: NULL
+        - IntListSize size
+        - arg: IntListStride stride
+          default: {}
 ]]
 [[
   name: _fill_
@@ -171,7 +171,7 @@
   return: THTensor*
   arguments:
     - THTensor* self
-    - arg: THSize* size
+    - arg: IntListSize size
       long_args: True
 ]]
 [[
@@ -3393,8 +3393,8 @@
       arguments: []
     - cname: newWithSize
       arguments:
-        - THSize* size
-        - CONSTANT NULL
+        - IntListSize size
+        - CONSTANT {}
 ]]
 [[
   name: tensor
@@ -3404,15 +3404,15 @@
   options:
     - cname: newWithSize
       arguments:
-        - THSize* size
-        - arg: THStride* stride
+        - IntListSize size
+        - arg: IntListStride stride
     - cname: newWithStorage
       arguments:
         - THStorage* storage
         - int64_t storageOffset
-        - THSize* size
-        - arg: THStride* stride
-          default: NULL
+        - IntListSize size
+        - arg: IntListStride stride
+          default: {}
 ]]
 
 # In theory, this could be a part of the above declaration. But in

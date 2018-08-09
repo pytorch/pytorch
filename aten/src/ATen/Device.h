@@ -1,7 +1,9 @@
 #pragma once
 
-#include <ATen/Error.h>
 #include <ATen/ScalarType.h>
+#include <ATen/core/Error.h>
+#include <ATen/core/DeviceType.h>
+#include <ATen/core/Error.h>
 
 #include <cstddef>
 #include <iosfwd>
@@ -20,26 +22,26 @@ namespace at {
 /// represents a specific, concrete device,
 /// 2. When the device type is CPU, the device index must be zero.
 struct Device {
-  /// The possible values of the device *type*.
-  enum class Type { CPU, CUDA };
+  using Type = at::DeviceType;
 
-  /// Converts a `Backend` to a `Device::Type` if possible.
-  static Type backend_to_type(Backend backend) {
+  /// Converts a `Backend` to a `DeviceType` if possible.
+  static DeviceType backend_to_type(Backend backend) {
     switch (backend) {
       case kCPU:
       case kSparseCPU:
-        return Type::CPU;
+        return DeviceType::CPU;
       case kCUDA:
       case kSparseCUDA:
-        return Type::CUDA;
+        return DeviceType::CUDA;
       default:
         AT_ERROR(
             "Invalid backend ", toString(backend), " for Device construction");
     }
   }
 
-  /// Constructs a new `Device` from a `Type` and an optional device index.
-  /* implicit */ Device(Type type, int32_t index = -1)
+  /// Constructs a new `Device` from a `DeviceType` and an optional device
+  /// index.
+  /* implicit */ Device(DeviceType type, int32_t index = -1)
       : type_(type), index_(index) {
     AT_CHECK(
         index == -1 || index >= 0,
@@ -59,7 +61,7 @@ struct Device {
   /* implicit */ Device(const std::string& device_string);
 
   /// Constructs a new `Device` from a `Backend` (which is converted to a
-  /// `Type`, if possible) and an optional device index.
+  /// `DeviceType`, if possible) and an optional device index.
   /* implicit */ Device(Backend backend, int32_t index = -1)
       : Device(backend_to_type(backend), index) {}
 
@@ -81,7 +83,7 @@ struct Device {
   }
 
   /// Returns the type of device this is.
-  Type type() const noexcept {
+  DeviceType type() const noexcept {
     return type_;
   }
 
@@ -97,21 +99,20 @@ struct Device {
 
   /// Return true if the device is of CUDA type.
   bool is_cuda() const noexcept {
-    return type_ == Type::CUDA;
+    return type_ == DeviceType::CUDA;
   }
 
   /// Return true if the device is of CPU type.
   bool is_cpu() const noexcept {
-    return type_ == Type::CPU;
+    return type_ == DeviceType::CPU;
   }
 
  private:
-  Type type_;
+  DeviceType type_;
   int32_t index_ = -1;
 };
 } // namespace at
 
-AT_API std::ostream& operator<<(std::ostream& stream, at::Device::Type type);
 AT_API std::ostream& operator<<(std::ostream& stream, const at::Device& device);
 
 namespace std {

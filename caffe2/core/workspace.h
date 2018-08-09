@@ -297,7 +297,7 @@ class Workspace {
   std::unique_ptr<ThreadPool> thread_pool_;
   std::mutex thread_pool_creation_mutex_;
 
-  DISABLE_COPY_AND_ASSIGN(Workspace);
+  AT_DISABLE_COPY_AND_ASSIGN(Workspace);
 };
 
 }  // namespace caffe2

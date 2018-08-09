@@ -130,8 +130,8 @@ void broadcastBinary(Node *node, std::vector<TensorTypePtr>& types, size_t idx1,
     WithInsertPoint point_guard { node };
     Node *expand = graph->create(aten::expand,
                                  {node->inputs().at(input_idx),
-                                  insertConstant(*graph, expected_size),
-                                  insertConstant(*graph, 0)})
+                                  graph->insertConstant(expected_size),
+                                  graph->insertConstant(0)})
                         ->insertBefore(node);
     PropagateShapeOnNode(expand);
     node->replaceInput(input_idx, expand->output());

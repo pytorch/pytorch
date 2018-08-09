@@ -129,7 +129,7 @@ bool LayerNormOp<CUDAContext>::DoRunWithType<float>() {
         context_.cuda_stream());
 
     // Second stage: Normalize by feature vector dim
-    math::Scale<float, CUDAContext>(
+    math::Scale<float, float, CUDAContext>(
         left,
         1.0f / right,
         mean->mutable_data<float>(),
@@ -151,7 +151,7 @@ bool LayerNormOp<CUDAContext>::DoRunWithType<float>() {
         context_.cuda_stream());
 
     // Second stage: Normalize by feature vector dim
-    math::Scale<float, CUDAContext>(
+    math::Scale<float, float, CUDAContext>(
         left,
         1.0f / right,
         stdev->mutable_data<float>(),

@@ -37,6 +37,7 @@ import ast
 from functools import reduce
 from enum import Enum
 from cuda_to_hip_mappings import CUDA_TO_HIP_MAPPINGS
+from cuda_to_hip_mappings import MATH_TRANSPILATIONS
 
 # Hardcode the PyTorch template map
 """This dictionary provides the mapping from PyTorch kernel template types
@@ -426,21 +427,27 @@ def processKernelLaunches(string, stats):
     return output_string
 
 
-def find_parenthesis_end(input_string, start):
+def find_closure_group(input_string, start, group):
+    """Generalization for finding a balancing closure group
+
+    e.g. if group = ["(", ")"], then finds the first balanced parantheses.
+         if group = ["{", "}"], then finds the first balanced bracket.
+    """
+
     inside_parenthesis = False
     parens = 0
     pos = start
     p_start, p_end = -1, -1
 
     while pos < len(input_string):
-        if input_string[pos] == "(":
+        if input_string[pos] == group[0]:
             if inside_parenthesis is False:
                 inside_parenthesis = True
                 parens = 1
                 p_start = pos
             else:
                 parens += 1
-        elif input_string[pos] == ")" and inside_parenthesis:
+        elif input_string[pos] == group[1] and inside_parenthesis:
             parens -= 1
 
             if parens == 0:
@@ -451,6 +458,16 @@ def find_parenthesis_end(input_string, start):
     return None, None
 
 
+def find_bracket_group(input_string, start):
+    """Finds the first balanced parantheses."""
+    return find_closure_group(input_string, start, group=["{", "}"])
+
+
+def find_parentheses_group(input_string, start):
+    """Finds the first balanced bracket."""
+    return find_closure_group(input_string, start, group=["(", ")"])
+
+
 def disable_asserts(input_string):
     """ Disables regular assert statements
     e.g. "assert(....)" -> "/*assert(....)*/"
@@ -458,14 +475,14 @@ def disable_asserts(input_string):
     output_string = input_string
     asserts = list(re.finditer(r"\bassert[ ]*\(", input_string))
     for assert_item in asserts:
-        p_start, p_end = find_parenthesis_end(input_string, assert_item.end() - 1)
+        p_start, p_end = find_parentheses_group(input_string, assert_item.end() - 1)
         start = assert_item.start()
         output_string = output_string.replace(input_string[start:p_end + 1], "")
     return output_string
 
 
 def replace_forceinline(input_string):
-    """__forceinline__'d methods can cause 'symbol multiply defined' errors in HIP. 
+    """__forceinline__'d methods can cause 'symbol multiply defined' errors in HIP.
     Adding 'static' to all such methods leads to compilation errors, so
     replacing '__forceinline__' with 'inline' as a workaround
     https://github.com/ROCm-Developer-Tools/HIP/blob/master/docs/markdown/hip_faq.md#what-if-hip-generates-error-of-symbol-multiply-defined-only-on-amd-machine
@@ -484,6 +501,50 @@ def replace_math_functions(input_string):
     output_string = re.sub("std::exp\(", "::exp(", output_string)
     output_string = re.sub("std::log\(", "::log(", output_string)
     output_string = re.sub("std::pow\(", "::pow(", output_string)
+    return output_string
+
+
+def hip_header_magic(input_string):
+    """If the file makes kernel builtin calls and does not include the cuda_runtime.h header,
+    then automatically add an #include to match the "magic" includes provided by NVCC.
+    TODO:
+        Update logic to ignore cases where the cuda_runtime.h is included by another file.
+    """
+
+    # Copy the input.
+    output_string = input_string
+
+    # Check if one of the following headers is already included.
+    headers = ["hip/hip_runtime.h", "hip/hip_runtime_api.h"]
+    if any(re.search(r'#include ("{0}"|<{0}>)'.format(ext), output_string) for ext in headers):
+        return output_string
+
+    # Rough logic to detect if we're inside device code
+    hasDeviceLogic = "hipLaunchKernelGGL" in output_string
+    hasDeviceLogic += "__global__" in output_string
+    hasDeviceLogic += "__shared__" in output_string
+    hasDeviceLogic += re.search(r"[:]?[:]?\b(__syncthreads)\b(\w*\()", output_string) is not None
+
+    # If device logic found, provide the necessary header.
+    if hasDeviceLogic:
+        output_string = '#include "hip/hip_runtime.h"\n' + input_string
+    
+    return output_string
+
+  
+def replace_extern_shared(input_string):
+    """Match extern __shared__ type foo[]; syntax and use HIP_DYNAMIC_SHARED() MACRO instead.
+       https://github.com/ROCm-Developer-Tools/HIP/blob/master/docs/markdown/hip_kernel_language.md#__shared__
+    Example:
+        "extern __shared__ char smemChar[];" => "HIP_DYNAMIC_SHARED( char, smemChar)"
+        "extern __shared__ unsigned char smem[];" => "HIP_DYNAMIC_SHARED( unsigned char, my_smem)"
+    """
+    output_string = input_string
+    output_string = re.sub(
+        r"extern\s+([\w\(\)]+)?\s*__shared__\s+([\w:<>\s]+)\s+(\w+)\s*\[\s*\]\s*;",
+        lambda inp: "HIP_DYNAMIC_SHARED({0} {1}, {2})".format(
+            inp.group(1) or "", inp.group(2), inp.group(3)), output_string)
+
     return output_string
 
 
@@ -681,9 +742,9 @@ def preprocessor(filepath, stats, hipify_caffe2):
 
                 if cuda_type in output_source:
                     if hipify_caffe2:
-                        pattern = r'({0})'.format(cuda_type)
+                        pattern = r'({0})'.format(re.escape(cuda_type))
                     else:
-                        pattern = r'(\b{0}\b)'.format(cuda_type)
+                        pattern = r'(\b{0}\b)'.format(re.escape(cuda_type))
                     output_source = re.sub(pattern, hip_type, output_source)
 
         # Perform Kernel Launch Replacements
@@ -696,8 +757,17 @@ def preprocessor(filepath, stats, hipify_caffe2):
         # Replace std:: with non-std:: versions
         output_source = replace_math_functions(output_source)
 
+        # Replace std:: with non-std:: versions
+        output_source = transpile_device_math(output_source)
+
         # Replace __forceinline__ with inline
         output_source = replace_forceinline(output_source)
+
+        # Include header if device code is contained.
+        output_source = hip_header_magic(output_source)
+
+        # Replace the extern __shared__
+        output_source = replace_extern_shared(output_source)
 
         fout.write(output_source)
 
@@ -706,7 +776,7 @@ def file_specific_replacement(filepath, search_string, replace_string, strict=Fa
     with openf(filepath, "r+") as f:
         contents = f.read()
         if strict:
-            contents = re.sub(r'\b({0})\b'.format(search_string), lambda x: replace_string, contents)
+            contents = re.sub(r'\b({0})\b'.format(re.escape(search_string)), lambda x: replace_string, contents)
         else:
             contents = contents.replace(search_string, replace_string)
         f.seek(0)
@@ -824,7 +894,7 @@ def disable_unsupported_function_call(function, input_string, replacement):
     output_string = input_string
 
     # Find all calls to the function
-    calls = re.finditer(r"\b{0}\b".format(function), input_string)
+    calls = re.finditer(r"\b{0}\b".format(re.escape(function)), input_string)
 
     # Do replacements
     for call in calls:
@@ -867,6 +937,31 @@ def disable_module(input_file):
         f.seek(0)
         f.write(disabled)
         f.truncate()
+
+
+def transpile_device_math(input_string):
+    """ Temporarily replace std:: invocations of math functions with non-std:: versions."""
+    # Extract device code positions
+    get_kernel_definitions = [k for k in re.finditer( r"(template[ ]*<(.*)>\n.*\n?)?(__global__|__device__) void[\n| ](\w+(\(.*\))?)\(", input_string)]
+
+    # Prepare output
+    output_string = input_string
+
+    # Iterate through each kernel definition
+    for kernel in get_kernel_definitions:
+        # Find the final paranthesis that closes this kernel function definition.
+        _, paranth_end = find_bracket_group(input_string, kernel.end() - 1)
+
+        # Replace all std:: math functions within range [start...ending]
+        selection = input_string[kernel.start():paranth_end + 1]
+        selection_transpiled = selection
+        for func in MATH_TRANSPILATIONS:
+            selection_transpiled = selection_transpiled.replace(func, MATH_TRANSPILATIONS[func])
+
+        # Perform replacements inside the output_string
+        output_string = output_string.replace(selection, selection_transpiled)
+
+    return output_string
 
 
 def extract_arguments(start, string):
@@ -983,7 +1078,7 @@ def add_static_casts(filepath, KernelTemplateParams):
                 if "THCUNN" in filepath.split("/") and "generic" not in filepath.split("/"):
                     kernel_name_with_template = kernel_name_with_template.replace("<real>", "<Dtype>")
 
-                full_new_kernel_launch = re.sub(r'\b{0}\b'.format(original_kernel_name_with_template),
+                full_new_kernel_launch = re.sub(r'\b{0}\b'.format(re.escape(original_kernel_name_with_template)),
                                                 lambda x: kernel_name_with_template, full_new_kernel_launch)
 
                 # Replace Launch
@@ -1181,7 +1276,7 @@ def main():
 
                 # Disable Constants w\ Boundary.
                 for const in constants:
-                    txt = re.sub(r"\b{0}\b".format(const), constants[const], txt)
+                    txt = re.sub(r"\b{0}\b".format(re.escape(const)), constants[const], txt)
 
                 # Disable Constants
                 for s_const in s_constants:
@@ -1193,7 +1288,8 @@ def main():
                 f.truncate()
 
     all_files = list(matched_files_iter(args.output_directory, includes=args.includes,
-                                        ignores=args.ignores, extensions=args.extensions, hipify_caffe2=args.hipify_caffe2))
+                                        ignores=args.ignores, extensions=args.extensions,
+                                        hipify_caffe2=args.hipify_caffe2))
 
     # Start Preprocessor
     preprocess(

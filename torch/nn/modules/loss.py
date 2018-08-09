@@ -36,12 +36,13 @@ class L1Loss(_Loss):
     where :math:`N` is the batch size. If reduce is ``True``, then:
 
     .. math::
-        \ell(x, y) = \begin{cases}
-            \operatorname{mean}(L), & \text{if}\; \text{size_average} = \text{True},\\
-            \operatorname{sum}(L),  & \text{if}\; \text{size_average} = \text{False}.
+        \ell(x, y) =
+        \begin{cases}
+            \operatorname{mean}(L), & \text{if size\_average} = \text{True;}\\
+            \operatorname{sum}(L),  & \text{if size\_average} = \text{False.}
         \end{cases}
 
-    `x` and `y` arbitrary shapes with a total of `n` elements each.
+    `x` and `y` are tensors of arbitrary shapes with a total of `n` elements each.
 
     The sum operation still operates over all the elements, and divides by `n`.
 
@@ -113,7 +114,7 @@ class NLLLoss(_WeightedLoss):
     .. math::
         \ell(x, y) = L = \{l_1,\dots,l_N\}^\top, \quad
         l_n = - w_{y_n} x_{n,y_n}, \quad
-        w_{c} = \text{weight}[c] \cdot \mathbb{1}\{c \not= \text{ignore_index}\},
+        w_{c} = \text{weight}[c] \cdot \mathbb{1}\{c \not= \text{ignore\_index}\},
 
     where :math:`N` is the batch size. If :attr:`reduce` is ``True`` (default),
     then
@@ -121,9 +122,9 @@ class NLLLoss(_WeightedLoss):
     .. math::
         \ell(x, y) = \begin{cases}
             \sum_{n=1}^N \frac{1}{\sum_{n=1}^N w_{y_n}} l_n, & \text{if}\;
-            \text{size_average} = \text{True},\\
+            \text{size\_average} = \text{True},\\
             \sum_{n=1}^N l_n,  & \text{if}\;
-            \text{size_average} = \text{False}.
+            \text{size\_average} = \text{False}.
         \end{cases}
 
     Can also be used for higher dimension inputs, such as 2D images, by providing
@@ -290,15 +291,15 @@ class KLDivLoss(_Loss):
 
     .. math::
         l(x,y) = L := \{ l_1,\dots,l_N \}, \quad
-        l_n = y_n \cdot \left( \log y_n - x_n \right),
+        l_n = y_n \cdot \left( \log y_n - x_n \right)
 
     where the index :math:`N` spans all dimensions of ``input`` and :math:`L` has the same
     shape as ``input``. If :attr:`reduce` is ``True`` (the default), then:
 
     .. math::
         \ell(x, y) = \begin{cases}
-            \operatorname{mean}(L), & \text{if}\; \text{size_average} = \text{True},\\
-            \operatorname{sum}(L),  & \text{if}\; \text{size_average} = \text{False}.
+            \operatorname{mean}(L), & \text{if}\; \text{size\_average} = \text{True},\\
+            \operatorname{sum}(L),  & \text{if}\; \text{size\_average} = \text{False}.
         \end{cases}
 
     By default, the losses are averaged for each minibatch over observations
@@ -371,9 +372,10 @@ class MSELoss(_Loss):
     where :math:`N` is the batch size. If reduce is ``True``, then:
 
     .. math::
-        \ell(x, y) = \begin{cases}
-            \operatorname{mean}(L), & \text{if}\; \text{size_average} = \text{True},\\
-            \operatorname{sum}(L),  & \text{if}\; \text{size_average} = \text{False}.
+        \ell(x, y) =
+        \begin{cases}
+            \operatorname{mean}(L), & \text{if}\; \text{size\_average} = \text{True},\\
+            \operatorname{sum}(L),  & \text{if}\; \text{size\_average} = \text{False}.
         \end{cases}
 
     The sum operation still operates over all the elements, and divides by `n`.
@@ -435,8 +437,8 @@ class BCELoss(_WeightedLoss):
 
     .. math::
         \ell(x, y) = \begin{cases}
-            \operatorname{mean}(L), & \text{if}\; \text{size_average} = \text{True},\\
-            \operatorname{sum}(L),  & \text{if}\; \text{size_average} = \text{False}.
+            \operatorname{mean}(L), & \text{if}\; \text{size\_average} = \text{True},\\
+            \operatorname{sum}(L),  & \text{if}\; \text{size\_average} = \text{False}.
         \end{cases}
 
     This is used for measuring the error of a reconstruction in for example
@@ -503,8 +505,8 @@ class BCEWithLogitsLoss(_Loss):
 
     .. math::
         \ell(x, y) = \begin{cases}
-            \operatorname{mean}(L), & \text{if}\; \text{size_average} = \text{True},\\
-            \operatorname{sum}(L),  & \text{if}\; \text{size_average} = \text{False}.
+            \operatorname{mean}(L), & \text{if size\_average} = \text{True},\\
+            \operatorname{sum}(L),  & \text{if size\_average} = \text{False}.
         \end{cases}
 
     This is used for measuring the error of a reconstruction in for example
@@ -592,8 +594,8 @@ class HingeEmbeddingLoss(_Loss):
 
     .. math::
         \ell(x, y) = \begin{cases}
-            \operatorname{mean}(L), & \text{if}\; \text{size_average} = \text{True},\\
-            \operatorname{sum}(L),  & \text{if}\; \text{size_average} = \text{False}.
+            \operatorname{mean}(L), & \text{if size\_average} = \text{True},\\
+            \operatorname{sum}(L),  & \text{if size\_average} = \text{False}.
         \end{cases}
 
     where :math:`L = \{l_1,\dots,l_N\}^\top`.
@@ -639,8 +641,10 @@ class MultiLabelMarginLoss(_Loss):
     .. math::
         \text{loss}(x, y) = \sum_{ij}\frac{\max(0, 1 - (x[y[j]] - x[i]))}{\text{x.size}(0)}
 
-    where `i == 0` to `x.size(0)`, `j == 0` to `y.size(0)`,
-    :math:`y[j] \geq 0`, and :math:`i \neq y[j]` for all `i` and `j`.
+    where :math:`i == 0` to :math:`x.size(0)`, \
+    :math:`j == 0` to :math:`y.size(0)`, \
+    :math:`y[j] \geq 0`, \
+    and :math:`i \neq y[j]` for all :math:`i` and :math:`j`.
 
     `y` and `x` must have the same size.
 
@@ -868,7 +872,7 @@ class MultiLabelSoftMarginLoss(_WeightedLoss):
     For each sample in the minibatch:
 
     .. math::
-        loss(x, y) = - \sum_i y[i] * \log((1 + \exp(-x[i]))^{-1})
+        loss(x, y) = - \frac{1}{C} * \sum_i y[i] * \log((1 + \exp(-x[i]))^{-1})
                          + (1-y[i]) * \log\left(\frac{\exp(-x[i])}{(1 + \exp(-x[i]))}\right)
 
     where `i == 0` to `x.nElement()-1`, `y[i]  in {0,1}`.
@@ -1072,7 +1076,11 @@ class TripletMarginLoss(_Loss):
     .. math::
         L(a, p, n) = \max \{d(a_i, p_i) - d(a_i, n_i) + {\rm margin}, 0\}
 
-    where :math:`d(x_i, y_i) = \left\lVert {\bf x}_i - {\bf y}_i \right\rVert_p`.
+
+    where
+
+    .. math::
+        d(x_i, y_i) = \left\lVert {\bf x}_i - {\bf y}_i \right\rVert_p
 
     Args:
         margin (float, optional): Default: `1`.
@@ -1135,15 +1143,15 @@ class CTCLoss(_Loss):
             then the mean over the batch is taken. Default: 'elementwise_mean'
 
     Inputs:
-        log_probs: :math:`(T, N, C)` where `C = number of characters in alphabet including blank`,
+        log_probs: Tensor of size :math:`(T, N, C)` where `C = number of characters in alphabet including blank`,
             `T = input length`, and `N = batch size`.
             The logarithmized probabilities of the outputs
             (e.g. obtained with :func:`torch.nn.functional.log_softmax`).
-        targets: :math:`(N, S)` or `(sum(target_lenghts))`.
+        targets: Tensor of size :math:`(N, S)` or `(sum(target_lenghts))`.
             Targets (cannot be blank). In the second form, the targets are assumed to be concatenated.
-        input_lengths: :math:`(N)`.
+        input_lengths: Tuple or tensor of size :math:`(N)`.
             Lengths of the inputs (must each be :math:`\leq T`)
-        target_lengths: :math:`(N)`.
+        target_lengths: Tuple or tensor of size  :math:`(N)`.
             Lengths of the targets
 
 
@@ -1166,7 +1174,7 @@ class CTCLoss(_Loss):
         In order to use CuDNN, the following must be satisfied: :attr:`targets` must be
         in concatenated format, all :attr:`input_lengths` must be `T`.  :math:`blank=0`,
         :attr:`target_lengths` :math:`\leq 256`, the integer arguments must be of
-        :class:`torch.IntTensor`.
+        dtype :attr:`torch.int32`.
 
         The regular implementation uses the (more common in PyTorch) `torch.long` dtype.
     """

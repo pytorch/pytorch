@@ -445,6 +445,12 @@ class ExprBuilder(Builder):
         return Const(r, value)
 
     @staticmethod
+    def build_Str(ctx, expr):
+        value = str(expr.s)
+        r = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + 1)
+        return StringLiteral(r, value)
+
+    @staticmethod
     def build_Starred(ctx, expr):
         r = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + 1)
         return Starred(r, build_expr(ctx, expr.value))
