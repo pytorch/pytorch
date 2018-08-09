@@ -459,6 +459,12 @@ inline TypePtr TensorType::fromNumberType(TypePtr typ) {
   AT_ERROR("unknown number type", typ->str());
 }
 
+// attempt to find the correct supertype of t1 and t2. If none is found then
+// nullopt will be returned. If t1 == t2, or t1 is a type refinement of t2,
+// then t2 will be returned (and vice versa).
+// A float and int will return scalar, and two different tensortypes will return dynamic.
+TORCH_API at::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2);
+
 template <typename T>
 TypePtr getTypePtr() {
 #define TYPE_STR(Type) #Type, " ",

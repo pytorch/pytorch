@@ -106,4 +106,47 @@ TypePtr inferTypeFrom(const IValue& value) {
   AT_ASSERTM(false, "Unhandled IValue kind in inferTypeFrom");
 }
 
+at::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2) {
+  //cases that t1 == t2, or t1 is a type refinement of t2 and vice versa
+  if (t1->isSubtypeOf(t2)) {
+    return t2;
+  } else if (t2->isSubtypeOf(t1)) {
+    return t1;
+  }
+
+  // cases in which two types share a supertype
+  if (t1->isSubtypeOf(NumberType::get()) && t2->isSubtypeOf(NumberType::get())) {
+    return static_cast<TypePtr>(NumberType::get());
+  } else if (t1->isSubtypeOf(DynamicType::get()) && t2->isSubtypeOf(DynamicType::get())) {
+    return static_cast<TypePtr>(DynamicType::get());;
+  }
+
+  //types which contain other types
+  if (t1->cast<ListType>() && t2->cast<ListType>()) {
+    auto unified_type = unifyTypes(t1->cast<ListType>()->getElementType(), t2->cast<ListType>()->getElementType());
+    if (unified_type) {
+      return static_cast<TypePtr>(ListType::create(*unified_type));
+    } else {
+      return at::nullopt;
+    }
+  } else if(t1->cast<TupleType>() && t2->cast<TupleType>()) {
+    auto tuple1 = t1->cast<TupleType>();
+    auto tuple2 = t2->cast<TupleType>();
+    if (tuple1->elements().size() != tuple2->elements().size()) {
+      return at::nullopt;
+    }
+    std::vector<TypePtr> elements;
+    for (size_t i = 0; i < tuple1->elements().size(); i++) {
+      if (auto elem = unifyTypes(tuple1->elements().at(i), tuple2->elements().at(i))) {
+        elements.push_back(*elem);
+      } else {
+        return at::nullopt;
+      }
+    }
+    return static_cast<TypePtr>(TupleType::create(elements));
+  }
+
+  return at::nullopt;
+}
+
 }} // namespace torch::jit

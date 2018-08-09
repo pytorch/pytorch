@@ -3884,7 +3884,7 @@ def func(t):
                 if True:
                     a = 4
 
-    def test_different_types_from_if_blocks(self):
+    def test_if_tuple_sizes(self):
         with self.assertRaisesRegex(RuntimeError, "Type mismatch"):
             @torch.jit.script
             def diff_tuple_sizes(x):
@@ -3893,6 +3893,8 @@ def func(t):
                 else:
                     c0 = ((x, x, x), (x, x))
                 return c0
+
+    def test_if_different_type(self):
         with self.assertRaisesRegex(RuntimeError, "Type mismatch: c0 is set to type Tensor "
                                     "in the true branch and type int in the false branch:"):
             @torch.jit.script
@@ -3903,14 +3905,46 @@ def func(t):
                     c0 = 1
                 return c0
 
+    def test_if_list(self):
         # testing that different length lists don't throw error
         @torch.jit.script
-        def foo(x):
+        def test_list(x):
             if True:
                 c = [x, x]
             else:
                 c = [x, x, x]
-            return torch.cat(c, dim=1)
+            return torch.cat(c)
+
+        b = torch.zeros(2, 4)
+        # unrelated bug
+        with self.assertRaisesRegex(RuntimeError, ".*"):
+            test_list.graph.propagate_shapes((b,), False)
+
+    def test_if_supertype(self):
+        @torch.jit.script
+        def tensor_unifying(x, y, z):
+
+            # testing dynamic is appropriately set for y and z
+            if True:
+                x, y, z = x, y, z
+            else:
+                x, y, z = x, x, y
+
+            #  set to scalar
+            if True:
+                c = 1.0
+            else:
+                c = 1
+
+            x = x.clamp(c, c)
+            return x, y, z
+
+        a = torch.zeros(2, 2, dtype=torch.float)
+        b = torch.zeros(2, 4, dtype=torch.long)
+        c = torch.zeros(2, 4, dtype=torch.float)
+
+        tensor_unifying.graph.propagate_shapes((a, b, c), False)
+        self.assertExpected(canonical(tensor_unifying.graph))
 
     def test_type_annotations(self):
         def fn(x, y):
