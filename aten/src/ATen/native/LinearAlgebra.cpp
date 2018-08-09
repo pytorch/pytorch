@@ -2,6 +2,7 @@
 #include "ATen/core/ScalarType.h"
 #include "ATen/ExpandUtils.h"
 #include "ATen/NativeFunctions.h"
+#include "ATen/native/LinearAlgebraUtils.h"
 #include <functional>
 #include <numeric>
 #include <vector>
@@ -117,19 +118,6 @@ Tensor pinverse(const Tensor& self, double rcond) {
   return V.mm(S_pseudoinv.diag().mm(U.t()));
 }
 
-static double _get_epsilon(const ScalarType& sc_type) {
-  switch (sc_type) {
-    case at::ScalarType::Half:
-      return 0.00097656;
-    case at::ScalarType::Float:
-      return 1.19209e-07;
-    case at::ScalarType::Double:
-      return 2.22044604925e-16;
-    default:
-      AT_ERROR("This function doesn't handle non-floating type");
-  }
-}
-
 Tensor _matrix_rank_helper(const Tensor& self, bool symmetric) {
   Tensor S;
   if (!symmetric) {
@@ -149,7 +137,7 @@ Tensor matrix_rank(const Tensor& self, double tol, bool symmetric) {
            "of floating types");
 
   Tensor S = _matrix_rank_helper(self, symmetric);
-  return (S > tol).toType(kLong).sum();
+  return (S > tol).sum();
 }
 
 Tensor matrix_rank(const Tensor& self, bool symmetric) {
@@ -158,9 +146,9 @@ Tensor matrix_rank(const Tensor& self, bool symmetric) {
            "of floating types");
 
   Tensor S = _matrix_rank_helper(self, symmetric);
-  double tol = S.max().toCDouble() * std::max<double>(self.size(0), self.size(1)) *
-               _get_epsilon(self.type().scalarType());
-  return (S > tol).toType(kLong).sum();
+  Tensor tol = S.max() * _get_epsilon(self.type());
+  tol = tol * std::max(self.size(0), self.size(1));
+  return (S > tol).sum();
 }
 
 static void check_1d(const Tensor& t, const char* arg, const char* fn) {
