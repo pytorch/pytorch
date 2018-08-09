@@ -31,9 +31,10 @@ class PackedSequence(PackedSequence_):
 
     """
     def __new__(cls, data, batch_sizes=None):
-        # Using an `*args` and an if statement on `len(args)` breaks BC of the
-        # calling pattern `PackedSequence(data=..., batch_sizes=...)`, so we
-        # have to provide two arguments with names `data` and `batch_sizes`.
+        # PackedSequence used to only have __init__(self, data, batch_sizes)
+        # without a __new__ like this. So to preserve BC for calling in keyword
+        # arg style (e.g., `PackedSequence(data=..., batch_sizes=...)`), we have
+        # to provide two arguments with exact names `data` and `batch_sizes`.
         #
         # support being called as `PackedSequence(data, batch_sizes)`
         if batch_sizes is not None:
