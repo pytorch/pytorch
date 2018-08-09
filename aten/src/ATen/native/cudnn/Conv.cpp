@@ -216,6 +216,8 @@ static void check_args(CheckedFrom c, IntList args, size_t expected_size, const 
 }
 
 
+// NOTE [ Convolution checks ]
+//
 // NB: For many call sites, it is not strictly necessary to check all of
 // these relationships (for example, for forward convolution, we compute
 // the size of output ourselves, so we don't actually need to check
@@ -752,6 +754,8 @@ void cudnn_convolution_add_bias_(CheckedFrom c, const TensorArg& output, const T
                                      &one, odesc.desc(), output->data_ptr()));
 }
 
+// NOTE [ Convolution design ]
+//
 // The general strategy:
 //
 //    - cudnn_convolution (Tensor)
@@ -792,7 +796,6 @@ void cudnn_convolution_add_bias_(CheckedFrom c, const TensorArg& output, const T
 //    - It takes output as a parameter (this should be computed!)
 //    - It doesn't do input checking
 //    - It doesn't resize output (it is assumed to be correctly sized)
-//    - It takes a ConvolutionParams struct
 //
 void raw_cudnn_convolution_forward_out(
     const Tensor& output, const Tensor& input, const Tensor& weight,
@@ -956,6 +959,8 @@ void raw_cudnn_convolution_backward_input_out(
       &zero, args.idesc.desc(), grad_input.data_ptr()));
 }
 
+// NOTE [ Backward vs transpose convolutions ]
+//
 // Backward and transpose are algorithmically equivalent, but they
 // compute their geometry differently.  In a backwards, you knew what
 // the original size of the input tensor was, so you can cache that

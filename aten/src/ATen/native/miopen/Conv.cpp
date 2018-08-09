@@ -201,20 +201,7 @@ static void check_args(CheckedFrom c, IntList args, size_t expected_size, const 
   }
 }
 
-
-// NB: For many call sites, it is not strictly necessary to check all of
-// these relationships (for example, for forward convolution, we compute
-// the size of output ourselves, so we don't actually need to check
-// output.  However, writing a single function that does everything
-// means we get to reuse it for both forwards and all backwards
-// variants, even when the set of "real" inputs varies.  The magic of
-// relational computing!
-//
-// (There is one downside, which is that it is slightly harder to write
-// error messages which are able to distinguish between real inputs
-// (which the user can change) and computed inputs (which the user can
-// only indirectly affect).  It would be an interesting exercise to
-// come up with a general framework to handle such situations.)
+// see NOTE [ Convolution checks] in src/Aten/native/cudnn/Conv.cpp
 static void convolution_shape_check(
     CheckedFrom c,
     const TensorGeometryArg& input, const TensorGeometryArg& weight, const TensorGeometryArg& output,
@@ -577,27 +564,7 @@ void miopen_convolution_add_bias_(CheckedFrom c, const TensorArg& output, const 
                                      &one, odesc.desc(), output->data_ptr()));
 }
 
-// The general strategy:
-//
-//    - miopen_convolution (Tensor)
-//      Entry points for clients, takes bias
-//
-//    - miopen_convolution_forward (TensorArg)
-//      Entry point, which may be reused between regular
-//      convolution and transposed convolution.  Does NOT take bias.
-//
-//    - raw_miopen_convolution_forward_out (Tensor)
-//      Low level function which invokes MIOpen, and takes an output
-//      tensor which is directly written to (thus _out).
-//
-// Where does argument checking happen?  Here's the division of
-// responsibility:
-//  - Things that happen in at::Tensor
-//    - TensorArg allocation
-//    - setMIOpenStreamToCurrent 
-//  - Things that happen in TensorArg
-//    - Check arguments (type, GPU, shape)
-
+// see NOTE [ Convolution design ] in src/Aten/native/cudnn/Conv.cpp
 
 
 // ---------------------------------------------------------------------
@@ -614,7 +581,6 @@ void miopen_convolution_add_bias_(CheckedFrom c, const TensorArg& output, const 
 //    - It takes output as a parameter (this should be computed!)
 //    - It doesn't do input checking
 //    - It doesn't resize output (it is assumed to be correctly sized)
-//    - It takes a ConvolutionParams struct
 //
 void raw_miopen_convolution_forward_out(
     const Tensor& output, const Tensor& input, const Tensor& weight,
@@ -761,15 +727,7 @@ void raw_miopen_convolution_backward_input_out(
       args.idesc.desc(), grad_input.data_ptr(), workspace.data, workspace.size));
 }
 
-// Backward and transpose are algorithmically equivalent, but they
-// compute their geometry differently.  In a backwards, you knew what
-// the original size of the input tensor was, so you can cache that
-// geometry and fill it directly.  In transposed convolution, it is
-// more conventional to not explicitly specify the output (previously
-// input) size, and compute it.  This, however, leaves a degree of
-// freedom; this degree of freedom is resolved using the
-// output_padding parameter.  Both of these interfaces are equivalent,
-// but they are differently convenient depending on the use case.
+// see NOTE [ Backward vs transpose convolutions ] in src/Aten/native/cudnn/Conv.cpp
 
 Tensor miopen_convolution_backward_input(
     CheckedFrom c,
