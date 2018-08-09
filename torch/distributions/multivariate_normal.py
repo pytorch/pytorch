@@ -6,17 +6,6 @@ from torch.distributions.distribution import Distribution
 from torch.distributions.utils import lazy_property
 
 
-def _get_batch_shape(bmat, bvec):
-    r"""
-    Given a batch of matrices and a batch of vectors, compute the combined `batch_shape`.
-    """
-    try:
-        vec_shape = torch._C._infer_size(bvec.shape, bmat.shape[:-1])
-    except RuntimeError:
-        raise ValueError("Incompatible batch shapes: vector {}, matrix {}".format(bvec.shape, bmat.shape))
-    return vec_shape[:-1]
-
-
 def _batch_mv(bmat, bvec):
     r"""
     Performs a batched matrix-vector product, with compatible but different batch shapes.
@@ -128,35 +117,37 @@ class MultivariateNormal(Distribution):
     def __init__(self, loc, covariance_matrix=None, precision_matrix=None, scale_tril=None, validate_args=None):
         if loc.dim() < 1:
             raise ValueError("loc must be at least one-dimensional.")
-        event_shape = loc.shape[-1:]
         if (covariance_matrix is not None) + (scale_tril is not None) + (precision_matrix is not None) != 1:
             raise ValueError("Exactly one of covariance_matrix or precision_matrix or scale_tril may be specified.")
+
+        loc_ = loc.unsqueeze(-1)  # temporarily add dim on right
         if scale_tril is not None:
             if scale_tril.dim() < 2:
                 raise ValueError("scale_tril matrix must be at least two-dimensional, "
                                  "with optional leading batch dimensions")
             self._unbroadcasted_scale_tril = scale_tril
-            batch_shape = _get_batch_shape(scale_tril, loc)
-            self.scale_tril = scale_tril.expand(batch_shape + event_shape + event_shape)
+            self.scale_tril, loc_ = torch.broadcast_tensors(scale_tril, loc_)
         elif covariance_matrix is not None:
             if covariance_matrix.dim() < 2:
                 raise ValueError("covariance_matrix must be at least two-dimensional, "
                                  "with optional leading batch dimensions")
-            self._unbroadcasted_scale_tril = _batch_potrf_lower(covariance_matrix)
-            batch_shape = _get_batch_shape(covariance_matrix, loc)
-            self.covariance_matrix = covariance_matrix.expand(batch_shape + event_shape + event_shape)
+            self._unbroadcasted_scale_tril = torch.distributions.multivariate_normal._batch_potrf_lower(
+                covariance_matrix)
+            self.covariance_matrix, loc_ = torch.broadcast_tensors(covariance_matrix, loc_)
         else:
             if precision_matrix.dim() < 2:
                 raise ValueError("precision_matrix must be at least two-dimensional, "
                                  "with optional leading batch dimensions")
             covariance_matrix = _batch_inverse(precision_matrix)
-            self._unbroadcasted_scale_tril = _batch_potrf_lower(covariance_matrix)
-            batch_shape = _get_batch_shape(precision_matrix, loc)
-            self.precision_matrix = precision_matrix.expand(batch_shape + event_shape + event_shape)
-            self.covariance_matrix = covariance_matrix.expand(batch_shape + event_shape + event_shape)
+            self._unbroadcasted_scale_tril = torch.distributions.multivariate_normal._batch_potrf_lower(
+                covariance_matrix)
+            self.covariance_matrix, self.precision_matrix, loc_ = torch.broadcast_tensors(
+                covariance_matrix, precision_matrix, loc_)
+        self.loc = loc_[..., 0]  # drop rightmost dim
 
-        self.loc = loc.expand(batch_shape + event_shape)
-        super(MultivariateNormal, self).__init__(batch_shape, event_shape, validate_args=validate_args)
+        batch_shape, event_shape = self.loc.shape[:-1], self.loc.shape[-1:]
+        super(torch.distributions.multivariate_normal.MultivariateNormal, self).__init__(
+            batch_shape, event_shape, validate_args=validate_args)
 
     @lazy_property
     def scale_tril(self):
