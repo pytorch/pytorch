@@ -41,6 +41,9 @@ while [[ $# -gt 0 ]]; do
       --full-caffe2)
           FULL_CAFFE2=1
           ;;
+      --cuda-static-link)
+          CAFFE2_STATIC_LINK_CUDA=1
+          ;;
       *)
           break
           ;;
@@ -256,7 +259,6 @@ function build_caffe2() {
   pushd build
   ${CMAKE_VERSION} .. \
   ${CMAKE_GENERATOR} \
-      -DCMAKE_VERBOSE_MAKEFILE=ON \
       -DBUILDING_WITH_TORCH_LIBS=ON \
       -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
       -DBUILD_CAFFE2=$FULL_CAFFE2 \
@@ -267,6 +269,7 @@ function build_caffe2() {
       -DBUILD_SHARED_LIBS=ON \
       -DONNX_NAMESPACE=$ONNX_NAMESPACE \
       -DUSE_CUDA=$USE_CUDA \
+      -DCAFFE2_STATIC_LINK_CUDA=$CAFFE2_STATIC_LINK_CUDA \
       -DUSE_ROCM=$USE_ROCM \
       -DUSE_NNPACK=$USE_NNPACK \
       -DCUDNN_INCLUDE_DIR=$CUDNN_INCLUDE_DIR \

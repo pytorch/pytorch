@@ -315,11 +315,7 @@ if(USE_CUDA)
   # it. We will then manually add the cudart library as interface libs.
   set(__tmp ${CUDA_LIBRARIES})
   set(CUDA_LIBRARIES PRIVATE ${CUDA_LIBRARIES})
-  if(CAFFE2_STATIC_LINK_CUDA)
-    torch_cuda_based_add_library(caffe2_gpu STATIC ${Caffe2_GPU_SRCS})
-  else()
-    torch_cuda_based_add_library(caffe2_gpu ${Caffe2_GPU_SRCS})
-  endif()
+  torch_cuda_based_add_library(caffe2_gpu ${Caffe2_GPU_SRCS})
   set(CUDA_LIBRARIES ${__tmp})
   target_link_libraries(caffe2_gpu INTERFACE caffe2::cudart)
 

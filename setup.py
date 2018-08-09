@@ -151,6 +151,7 @@ IS_LINUX = (platform.system() == 'Linux')
 
 FULL_CAFFE2 = check_env_flag('FULL_CAFFE2')
 BUILD_PYTORCH = check_env_flag('BUILD_PYTORCH')
+USE_CUDA_STATIC_LINK = check_env_flag('USE_CUDA_STATIC_LINK')
 
 NUM_JOBS = multiprocessing.cpu_count()
 max_jobs = os.getenv("MAX_JOBS")
@@ -320,6 +321,8 @@ def build_libs(libs):
         build_libs_cmd += ['--use-cuda']
         if IS_WINDOWS:
             my_env["NVTOOLEXT_HOME"] = NVTOOLEXT_HOME
+    if USE_CUDA_STATIC_LINK:
+        build_libs_cmd += ['--cuda-static-link']
     if USE_ROCM:
         build_libs_cmd += ['--use-rocm']
     if USE_NNPACK:
