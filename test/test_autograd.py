@@ -2962,6 +2962,7 @@ method_tests = [
     ('zero_', (S, S, S), NO_ARGS),
     ('zero_', (), NO_ARGS, 'scalar'),
     ('logsumexp', (S, S), (1,)),
+    ('logsumexp', (), (0,), 'scalar'),
     ('norm', (S, S), (2,)),
     ('norm', (S, S), (0,), '0'),
     ('norm', (S, S), (0.5,), '0_5'),
