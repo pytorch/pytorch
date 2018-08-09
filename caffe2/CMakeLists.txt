@@ -168,8 +168,8 @@ endif()
 
 # ---[ List of libraries to link with
 if (BUILD_CAFFE2)
-  add_library(caffe2_protos STATIC $<TARGET_OBJECTS:Caffe_PROTO> $<TARGET_OBJECTS:Caffe2_PROTO>)
-  add_dependencies(caffe2_protos Caffe_PROTO Caffe2_PROTO)
+  add_library(caffe2_protos STATIC $<TARGET_OBJECTS:Caffe2_PROTO>)
+  add_dependencies(caffe2_protos Caffe2_PROTO)
 else()
   # Do not include caffe2 or caffe protos, but rather have it only be
   # a library to attach local protobuf.
