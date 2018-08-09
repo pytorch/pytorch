@@ -5,6 +5,8 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/utils/math.h"
 
+#define KEPS 1e-12f
+
 namespace caffe2 {
 
 template <typename T, class Context>
@@ -31,6 +33,7 @@ class NormalizeOp final : public Operator<Context> {
   }
 
  private:
+  const T kEps_ = KEPS;
   void
   DoNormalize(const T* xData, T* yData, const int m, const int n, const int sf);
 };
@@ -62,6 +65,7 @@ class NormalizeGradientOp final : public Operator<Context> {
   }
 
  private:
+  const T kEps_ = KEPS;
   void DoNormalize(
       const T* xData,
       const T* gOutData,
