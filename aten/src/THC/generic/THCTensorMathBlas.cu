@@ -593,7 +593,7 @@ THCTensor_(baddbmm)(THCState *state, THCTensor *result, real beta, THCTensor *t,
 
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
   // Compute pointers to matrices in each batch.
-#if CUDA_VERSION < 8000
+#if CUDA_VERSION < 8000 && !defined __HIP_PLATFORM_HCC__
   size_t matrices_size = num_batches * sizeof(real*);
 
 //   Copy pointers to device.

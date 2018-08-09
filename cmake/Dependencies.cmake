@@ -537,7 +537,7 @@ if(BUILD_CAFFE2 OR BUILD_ATEN)
     hip_include_directories(${Caffe2_HIP_INCLUDES})
 
     set(Caffe2_HIP_DEPENDENCY_LIBS
-      ${rocrand_LIBRARIES} ${hiprand_LIBRARIES} ${PYTORCH_HIP_HCC_LIBRARIES} ${PYTORCH_MIOPEN_LIBRARIES} ${hipblas_LIBRARIES})
+      ${rocrand_LIBRARIES} ${hiprand_LIBRARIES} ${PYTORCH_HIP_HCC_LIBRARIES} ${PYTORCH_MIOPEN_LIBRARIES})
     # Additional libraries required by PyTorch AMD that aren't used by Caffe2 (not in Caffe2's docker image)
     if(BUILD_ATEN)
       set(Caffe2_HIP_DEPENDENCY_LIBS ${Caffe2_HIP_DEPENDENCY_LIBS} ${hipsparse_LIBRARIES})
@@ -553,7 +553,7 @@ endif()
 # ---[ ROCm
 if(USE_ROCM AND NOT BUILD_CAFFE2)
  include_directories(SYSTEM ${HIP_PATH}/include)
- include_directories(SYSTEM ${HIPBLAS_PATH}/include)
+ include_directories(SYSTEM ${ROCBLAS_PATH}/include)
  include_directories(SYSTEM ${HIPSPARSE_PATH}/include)
  include_directories(SYSTEM ${HIPRAND_PATH}/include)
  include_directories(SYSTEM ${ROCRAND_PATH}/include)
