@@ -389,7 +389,11 @@ void THCudaBlas_SgemmBatched(THCState *state, char transa, char transb, int64_t 
             "with the bound [val] <= %d", INT_MAX);
   }
 
-  THCudaBlas_SgemmStridedBatched(state, transa, transb, m, n, k, alpha, *a, lda, 1, *b, ldb, 1, beta, *c, ldc, 1, batchCount);
+  const int64_t stridea = (transa == 'N' || transa == 'n') ? lda*k : lda*n;
+  const int64_t strideb = (transb == 'N' || transb == 'n') ? ldb*n : ldb*k;
+  const int64_t stridec = ldc*n;
+
+  THCudaBlas_SgemmStridedBatched(state, transa, transb, m, n, k, alpha, *a, lda, stridea, *b, ldb, strideb, beta, *c, ldc, stridec, batchCount);
 
 }
 #else
@@ -451,8 +455,12 @@ void THCudaBlas_DgemmBatched(THCState *state, char transa, char transb, int64_t 
     THError("Cublas_DgemmBatched only supports m, n, k, lda, ldb, ldc, batchCount"
             "with the bound [val] <= %d", INT_MAX);
   }
+
+  const int64_t stridea = (transa == 'N' || transa == 'n') ? lda*k : lda*n;
+  const int64_t strideb = (transb == 'N' || transb == 'n') ? ldb*n : ldb*k;
+  const int64_t stridec = ldc*n;
   
-  THCudaBlas_DgemmStridedBatched(state, transa, transb, m, n, k, alpha, *a, lda, 1, *b, ldb, 1, beta, *c, ldc, 1, batchCount);
+  THCudaBlas_DgemmStridedBatched(state, transa, transb, m, n, k, alpha, *a, lda, stridea, *b, ldb, strideb, beta, *c, ldc, stridec, batchCount);
 
 }
 #else
