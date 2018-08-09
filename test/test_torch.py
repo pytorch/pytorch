@@ -322,7 +322,7 @@ class TestTorch(TestCase):
         self.assertRaises(RuntimeError, lambda: torch.addr(m, v, s))
         self.assertRaises(RuntimeError, lambda: torch.addr(m, s, v))
 
-    def _test_math(self, torchfn, mathfn, input=None):
+    def _test_math(self, torchfn, mathfn, input=None, skip_expand=True):
         if input is None:
             input = []
             input.append(list(range(-5, 5)))
@@ -367,9 +367,12 @@ class TestTorch(TestCase):
             for i in range(3):
                 self.assertEqual(contig, non_contig[i], 'non-contiguous expand[' + str(i) + ']')
 
-        # The size 1 case is special as it leads to 0 stride and needs to persists
-        check_non_contiguous_expand((1, 7), torch.double)
-        check_non_contiguous_expand((5, 7), torch.float)
+        # Expand is not defined for in-place operations
+        if not skip_expand:
+            # The size 1 case is special as it leads to 0 stride and needs to persists
+            check_non_contiguous_expand((1, 3), torch.double)
+            check_non_contiguous_expand((1, 7), torch.double)
+            check_non_contiguous_expand((5, 7), torch.float)
 
         # If size(dim) == 1, stride(dim) is not defined.
         # The code needs to be able to handle this
@@ -415,7 +418,7 @@ class TestTorch(TestCase):
                 return getattr(x, function_name)()
         else:
             torchfn = getattr(torch, function_name)
-        self._test_math(torchfn, mathfn)
+        self._test_math(torchfn, mathfn, skip_expand=selffn)
 
     def _test_math_by_name(self, function_name, test_self=True):
         if test_self:
