@@ -2105,6 +2105,19 @@ a")
             return
         self.checkScript(reassign, (), optimize=True)
 
+        def shape_analysis(x):
+            y = [x]
+            if True:
+                y = [x, x]
+            while False:
+                y = [x, x, x]
+            return torch.cat(y, dim=1)
+
+        x = torch.zeros(2, 4, 5)
+        graph = torch.jit.script(shape_analysis).graph
+        torch._C._jit_pass_shape_analysis(graph, (x,), False)
+        self.assertExpected(str(graph))
+
         def reassign_arity_change():
             x = [1]
             if True:

@@ -1,0 +1,23 @@
+graph(%x : Double(2, 4, 5)) {
+  %y.1 : Dynamic[] = prim::ListConstruct(%x)
+  %2 : int = prim::Constant[value=1]()
+  %y.3 : Dynamic[] = prim::If(%2)
+    block0() {
+      %y.2 : Dynamic[] = prim::ListConstruct(%x, %x)
+      -> (%y.2)
+    }
+    block1() {
+      -> (%y.1)
+    }
+  %5 : int = prim::Constant[value=2147483647]()
+  %6 : int = prim::Constant[value=0]()
+  %y : Dynamic[] = prim::Loop(%5, %6, %y.3)
+    block0(%7 : int, %10 : Dynamic[]) {
+      %y.4 : Dynamic[] = prim::ListConstruct(%x, %x, %x)
+      %11 : int = prim::Constant[value=0]()
+      -> (%11, %y.4)
+    }
+  %13 : int = prim::Constant[value=1]()
+  %14 : Dynamic = aten::cat(%y, %13)
+  return (%14);
+}
