@@ -142,10 +142,10 @@ static Tensor unsqueezeN(const Tensor & src, int64_t before, int64_t after) {
   return src.view(sizes);
 }
 
-static Tensor wrapIndexOnce(const Tensor & index, int64_t dim, int64_t dim_size) {
-  if (index.numel() != 0) {
-    auto max_idx = index.max().toCLong();
-    auto min_idx = index.min().toCLong();
+Tensor _wrap_index_once(const Tensor & self, int64_t dim, int64_t dim_size) {
+  if (self.numel() != 0) {
+    auto max_idx = self.max().toCLong();
+    auto min_idx = self.min().toCLong();
     if (max_idx >= dim_size) {
       AT_ERROR("index ", max_idx, " is out of bounds for dimension ", dim, " with size ", dim_size);
     }
@@ -153,7 +153,7 @@ static Tensor wrapIndexOnce(const Tensor & index, int64_t dim, int64_t dim_size)
       AT_ERROR("index ", min_idx, " is out of bounds for dimension ", dim, " with size ", dim_size);
     }
   }
-  return index.remainder(dim_size);
+  return self.remainder(dim_size);
 }
 
 static Tensor computeLinearIndex(const Tensor & src, TensorList indices) {
@@ -170,7 +170,7 @@ static Tensor computeLinearIndex(const Tensor & src, TensorList indices) {
     if (indices[i].defined()) {
       // Cast index to the longType matching src's backend
       // This allows us to support ie indexing a cuda tensor with a cpu tensor
-      Tensor index = (wrapIndexOnce(indices[i], i, src.size(i)) * strides[i]).toType(longType);
+      Tensor index = (indices[i]._wrap_index_once(i, src.size(i)) * strides[i]).toType(longType);
       if (linearIndex.defined()) {
         linearIndex += index;
       } else {
