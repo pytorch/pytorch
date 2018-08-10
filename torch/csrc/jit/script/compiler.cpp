@@ -1581,6 +1581,13 @@ TypePtr parseTypeFromExpr(Expr expr) {
       throw ErrorReport(subscript.range()) << "Type " << value_name << " cannot be subscripted";
     }
     return subscript_to_type_fns().at(value_name)(subscript);
+  } else if (expr.kind() == '.') {
+    auto select = Select(expr);
+    if (select.value().kind() == TK_VAR && Var(select.value()).name().name() == "torch"
+        && select.selector().name() == "Tensor") {
+      return ident_to_type_lut().at("Tensor");
+    }
+    std::cout << select << std::endl;
   }
   throw ErrorReport(expr.range()) << "Expression of type " << kindToString(expr.kind())
                                   << " cannot be used in a type expression";

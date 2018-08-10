@@ -53,7 +53,7 @@ namespace script {
 //       | Const(String value)                                          TK_CONST
 //       -- NB: x.name(y) is desugared into name(x, y)
 //       | Apply(Ident name, List<Expr> args, List<Attribute> kwargs)   TK_APPLY
-//       | Select(Expr base, Ident attr_name)                           '.'
+//       | Select(Expr value, Ident selector)                           '.'
 //       | Subscript(Expr value, List<Expr> subscript_exprs)            TK_SUBSCRIPT
 //       | SliceExpr(Maybe<Expr> start, Maybe<Expr> end)                TK_SLICE_EXPR
 //       | Var(Ident name)                                              TK_VAR

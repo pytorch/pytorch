@@ -5476,6 +5476,37 @@ def func(t):
         fn = self._get_py3_code(code, 'instance')
         self.assertExpected(fn.__getattr__('foo').pretty_print_schema())
 
+    def test_torch_dot_tensor_annotation_py3_string(self):
+        # TODO: return non-tensor type
+        cu = torch.jit.CompilationUnit('''
+            def foo(x : torch.Tensor, y : Tuple[torch.Tensor, Tensor]) -> Tuple[Tensor, Tensor]:
+                return x, x
+        ''')
+        self.assertExpected(cu.__getattr__('foo').pretty_print_schema())
+
+    def test_torch_dot_tensor_annotation_mypy_string(self):
+        cu = torch.jit.CompilationUnit('''
+            def foo(x, y):
+                # type: (torch.Tensor, Tuple[torch.Tensor, Tensor]) -> Tuple[Tensor, Tensor]
+                return x, x
+        ''')
+        self.assertExpected(cu.__getattr__('foo').pretty_print_schema())
+
+    @unittest.skipIf(not PY35, "Python 3.5 needed")
+    def test_torch_dot_tensor_annotation_py3_ast(self):
+        code = dedent('''
+            from typing import Tuple
+            from torch import Tensor
+            import torch
+            class FooModule(torch.jit.ScriptModule):
+                @torch.jit.script_method
+                def foo(self, x : torch.Tensor, y : Tuple[torch.Tensor, Tensor]) -> Tuple[Tensor, Tensor]:
+                    return x, x
+            instance = FooModule()
+        ''')
+        fn = self._get_py3_code(code, 'instance')
+        self.assertExpected(fn.__getattr__('foo').pretty_print_schema())
+
 
 class TestEndToEndHybridFrontendModels(JitTestCase):
 
