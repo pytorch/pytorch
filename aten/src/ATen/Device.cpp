@@ -75,8 +75,6 @@ Device::Device(const std::string& device_string) : Device(Type::CPU) {
   }
 }
 
-} // namespace at
-
 std::ostream& operator<<(std::ostream& stream, const at::Device& device) {
   stream << device.type();
   if (device.has_index()) {
@@ -84,3 +82,5 @@ std::ostream& operator<<(std::ostream& stream, const at::Device& device) {
   }
   return stream;
 }
+
+} // namespace at
