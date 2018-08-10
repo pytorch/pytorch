@@ -38,7 +38,13 @@ def scope(scope_name):
             tracing_state.pop_scope()
 
 
-def get_trace_graph(f, args=tuple(), kwargs=None):
+def load(filename):
+    m = ScriptModule()
+    m._load(filename)
+    return m
+
+
+def get_trace_graph(f, args=(), kwargs=None):
     """
     Trace a function or model, returning a tuple consisting of the both the
     *trace* of an execution, as well as the original return value.

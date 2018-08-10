@@ -1420,8 +1420,7 @@ private:
     return insertConstant(*graph, c.text(), c.range());
   }
 
-  // Desugars slice syntactic sugar tensor[begin:end] -> tensor.slice(begin,
-  // end).
+  // Desugars slice syntactic sugar foo[begin:end]
   Value* emitSlice(const Slice& slice) {
     const auto& loc = slice.range();
     TreeList inputs = {slice.value(), slice.startOr(0)};
@@ -1431,19 +1430,25 @@ private:
         /*maybe_unpack*/ false,
         identity);
 
-    NamedValue tensor = input_values[0];
+    NamedValue sliceable = input_values[0];
     NamedValue begin = input_values[1];
-    NamedValue dim = NamedValue(loc, "dim", graph->insertConstant(0, loc));
     NamedValue step = NamedValue(loc, "step", graph->insertConstant(1, loc));
 
-    std::vector<NamedValue> args = {tensor, dim, begin};
+    // Build the input arguments
+    std::vector<NamedValue> args = {sliceable};
+    if (sliceable.value->type()->kind() == TypeKind::DynamicType) {
+      // If the sliceable object is a tensor, specify a default dimension
+      args.emplace_back(loc, "dim", graph->insertConstant(0, loc));
+    }
+
+    args.push_back(begin);
+
     const auto has_end = slice.end().present();
     if (has_end) {
       // If the user specified an `end` index, pass it down
       args.emplace_back(loc, "end", emitExpr(Expr(slice.end().get()), identity));
     }
 
-    // Otherwise rely on the schema default argument
     return emitBuiltinCall(loc, method, "slice", args, {step}, true)
         ->asValue(loc, method);
   }
