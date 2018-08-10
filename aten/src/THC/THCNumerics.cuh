@@ -436,7 +436,14 @@ static inline __host__ __device__ half lgamma(half a) {
 #ifdef CUDA_HALF_INSTRUCTIONS
     return __hisinf(a) != 0;
 #else
-    return ::isinf(static_cast<at::Half>(a));
+    #ifdef _MSC_VER
+      // @TODO: isinf doesn't seem to resolve in windows build properly
+      //        investigate if this could be a bug in CUDA Math API where 
+      //        the isnan, isinf aren't properly implemented 
+      return ::isinf((float)static_cast<at::Half>(a));
+    #else
+      return ::isinf(static_cast<at::Half>(a));
+    #endif
 #endif
   }
 

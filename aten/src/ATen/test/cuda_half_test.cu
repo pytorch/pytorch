@@ -63,10 +63,11 @@ __host__ __device__ void test(){
     //        investigate if this could be a bug in CUDA Math API where 
     //        the isnan, isinf aren't properly implemented 
     assert(::abs(::isnan((float)Half(0.0)) - ::isnan(0.0f)) <= threshold);
+    assert(::abs(::isinf((float)Half(0.0)) - ::isinf(0.0f)) <= threshold);
   #else
     assert(::abs(::isnan(Half(0.0)) - ::isnan(0.0f)) <= threshold);
+    assert(::abs(::isinf(Half(0.0)) - ::isinf(0.0f)) <= threshold);
   #endif
-  assert(::abs(::isinf(Half(0.0)) - ::isinf(0.0f)) <= threshold);
 }
 
 __global__ void kernel(){
