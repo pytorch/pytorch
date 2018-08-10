@@ -168,7 +168,7 @@ class Session(object):
         assert self._open, 'Session already closed.'
         return self
 
-    def __exit__(self, ex_type, value, traceback):
+    def __exit__(self, ex_type, ex_value, traceback):
         if ex_type is None:
             self.close()
 
