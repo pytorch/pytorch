@@ -890,11 +890,7 @@ void THTensor_(sort)(THTensor *rt_, THLongTensor *ri_, THTensor *t, int dimensio
 
   THTensor_(resizeAs)(rt_, t);
   THTensor_(copy)(rt_, t);
-
-  {
-    std::vector<int64_t> size = THTensor_sizesLegacyNoScalars(t);
-    THLongTensor_resize(ri_, size, {});
-  }
+  THLongTensor_resize(ri_, t->sizes(), {});
 
   if(descendingOrder)
   {
@@ -1180,8 +1176,10 @@ void THTensor_(topk)(THTensor *rt_, THLongTensor *ri_, THTensor *t, int64_t k, i
   THLongTensor_resize1d(tmpIndices, sliceSize);
   int64_t *tmpi__data = THLongTensor_data(tmpIndices);
 
-  std::vector<int64_t> topKSize = THTensor_sizesLegacyNoScalars(t);
-  topKSize[dim] = k;
+  std::vector<int64_t> topKSize = t->sizes().vec();
+  if (topKSize.size() > 0) { // handle 0-dim vs 1-dim differences.
+    topKSize[dim] = k;
+  }
   THTensor_(resize)(rt_, topKSize, {});
   THLongTensor_resize(ri_, topKSize, {});
 
