@@ -291,9 +291,6 @@ function build_caffe2() {
   # Install Python proto files
   if [[ $FULL_CAFFE2 -ne 0 ]]; then
     find . -name proto
-    for proto_file in ./caffe/proto/*.py; do
-      cp $proto_file "$BASE_DIR/caffe/proto/"
-    done
     for proto_file in ./caffe2/proto/*.py; do
       cp $proto_file "$BASE_DIR/caffe2/proto/"
     done
