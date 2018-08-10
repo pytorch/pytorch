@@ -43,8 +43,17 @@ struct AT_API StorageImpl : public Retainable {
  public:
   StorageImpl() = delete;
   virtual ~StorageImpl() {};
-  StorageImpl(at::ScalarType, ptrdiff_t, at::DataPtr, at::Allocator*, bool);
-  StorageImpl(at::ScalarType, ptrdiff_t, at::Allocator*, bool);
+  StorageImpl(
+      at::ScalarType scalar_type,
+      ptrdiff_t size,
+      at::DataPtr data_ptr,
+      at::Allocator* allocator,
+      bool resizable);
+  StorageImpl(
+      at::ScalarType scalar_type,
+      ptrdiff_t size,
+      at::Allocator* allocator,
+      bool resizable);
   StorageImpl(StorageImpl&) = delete;
   StorageImpl(const StorageImpl&) = delete;
   // NB: Don't move ref count!

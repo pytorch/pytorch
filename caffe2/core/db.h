@@ -52,7 +52,7 @@ class Cursor {
    */
   virtual bool Valid() = 0;
 
-  DISABLE_COPY_AND_ASSIGN(Cursor);
+  AT_DISABLE_COPY_AND_ASSIGN(Cursor);
 };
 
 /**
@@ -71,7 +71,7 @@ class Transaction {
    */
   virtual void Commit() = 0;
 
-  DISABLE_COPY_AND_ASSIGN(Transaction);
+  AT_DISABLE_COPY_AND_ASSIGN(Transaction);
 };
 
 /**
@@ -99,7 +99,7 @@ class DB {
  protected:
   Mode mode_;
 
-  DISABLE_COPY_AND_ASSIGN(DB);
+  AT_DISABLE_COPY_AND_ASSIGN(DB);
 };
 
 // Database classes are registered by their names so we can do optional
@@ -285,7 +285,7 @@ class DBReader {
   uint32_t num_shards_;
   uint32_t shard_id_;
 
-  DISABLE_COPY_AND_ASSIGN(DBReader);
+  AT_DISABLE_COPY_AND_ASSIGN(DBReader);
 };
 
 class DBReaderSerializer : public BlobSerializerBase {

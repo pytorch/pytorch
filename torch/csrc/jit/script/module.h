@@ -303,6 +303,8 @@ struct Module {
     return nullptr;
   }
 
+  void save(const std::string& filename);
+
  private:
 
   // invariant: to ensure member_inputs of Methods stay valid,

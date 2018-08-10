@@ -13,6 +13,7 @@
 #include "torch/csrc/jit/tracer.h"
 #include "torch/csrc/jit/constants.h"
 #include "torch/csrc/jit/symbolic_variable.h"
+#include "torch/csrc/jit/ir.h"
 
 #include "torch/csrc/utils/variadic.h"
 #include "torch/csrc/autograd/functions/utils.h"
@@ -58,10 +59,10 @@ bool VariableType::is_cuda() const { return baseType->is_cuda(); }
 bool VariableType::is_sparse() const { return baseType->is_sparse(); }
 bool VariableType::is_distributed() const { return baseType->is_distributed(); }
 
-std::unique_ptr<Storage> VariableType::storage() const {
+std::unique_ptr<Storage> VariableType::storage(bool resizable) const {
   return baseType->storage();
 }
-std::unique_ptr<Storage> VariableType::storage(size_t size) const {
+std::unique_ptr<Storage> VariableType::storage(size_t size, bool resizable) const {
   return baseType->storage(size);
 }
 std::unique_ptr<Storage> VariableType::storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const {
@@ -343,7 +344,7 @@ static void throw_error_out_requires_grad(const char* name) {
 
 static void rebase_history(Variable& var, std::shared_ptr<Function> grad_fn) {
   if (grad_fn && var.defined()) {
-    grad_fn->add_input_metadata(var.type(), var.sizes());
+    grad_fn->add_input_metadata(var);
     var.rebase_history({std::move(grad_fn), 0});
   }
 }
@@ -353,7 +354,7 @@ static void rebase_history(ArrayRef<Variable> vars, std::shared_ptr<Function> gr
     for (auto& var : vars) {
       if (var.defined()) {
         // TODO: eliminate const_cast
-        auto output_nr = grad_fn->add_input_metadata(var.type(), var.sizes());
+        auto output_nr = grad_fn->add_input_metadata(var);
         const_cast<Variable&>(var).rebase_history({grad_fn, output_nr});
       } else {
         grad_fn->add_input_metadata(Function::undefined_input());

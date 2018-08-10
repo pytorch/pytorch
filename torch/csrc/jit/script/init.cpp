@@ -3,7 +3,7 @@
 #include "torch/csrc/Device.h"
 #include "torch/csrc/Dtype.h"
 #include "torch/csrc/Layout.h"
-#include "torch/csrc/jit/export.h"
+#include "torch/csrc/jit/import.h"
 #include "torch/csrc/jit/script/compiler.h"
 
 #include "torch/csrc/jit/python_tracer.h"
@@ -421,20 +421,10 @@ void initJitScriptBindings(PyObject* module) {
   // public.
   py::class_<Module, std::shared_ptr<Module>>(m, "ScriptModule")
       .def(py::init<>())
-      .def("export", [](const std::shared_ptr<Module> m) {
-        std::string module;
-        RawDataExportMap export_map;
-        std::tie(module, export_map) = ExportModule(m);
-        std::unordered_map<std::string, py::bytes> python_serialized_export_map;
-        for (auto& kv : export_map) {
-          auto t = kv.second;
-          size_t copy_bytes = t.type().elementSizeInBytes() * t.numel();
-          // TODO: this is an unecessary copy. In theory we can directly return
-          // the map from identifier to Tensor, but we need some API in Python
-          // to get raw `bytes` containing the raw tensor data.
-          python_serialized_export_map[kv.first] = py::bytes(static_cast<const char*>(t.data_ptr()), copy_bytes);
-        }
-        return std::make_tuple(py::bytes(module), python_serialized_export_map);
+      .def("save", &Module::save)
+      .def("_load", [](const std::shared_ptr<script::Module> module,
+                       const std::string& filename) {
+        ImportIRModule(module, filename);
       })
       .def("_set_optimized", &Module::set_optimized)
       .def(

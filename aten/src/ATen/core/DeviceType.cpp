@@ -34,9 +34,9 @@ std::string DeviceTypeName(at::DeviceType d, bool lower_case) {
   }
 }
 
-} // namespace at
-
 std::ostream& operator<<(std::ostream& stream, at::DeviceType type) {
   stream << at::DeviceTypeName(type, /* lower case */ true);
   return stream;
 }
+
+} // namespace at
