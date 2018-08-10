@@ -872,6 +872,7 @@ class TestTorch(TestCase):
             expected = fn(y, 1, keepdim=False)
             self.assertEqual(x[:, 1], expected, '{} with out= kwarg'.format(fn_name))
 
+    @skipIfRocm
     def test_dim_reduction(self):
         self._test_dim_reduction(self, lambda t: t)
 
@@ -938,6 +939,7 @@ class TestTorch(TestCase):
             self.assertEqual(torch.ones((2, 1, 4), device=device), xb.all(1, keepdim=True))
             self.assertEqual(torch.ones((), device=device), xb.all())
 
+    @skipIfRocm
     def test_pairwise_distance_empty(self):
         devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         for device in devices:
@@ -2110,6 +2112,7 @@ class TestTorch(TestCase):
                                                 dtype=int64_dtype, layout=layout, device=device, requires_grad=False),
                                 int64_dtype, layout, device, fv + 5, False)
 
+    @skipIfRocm
     def test_empty_full(self):
         self._test_empty_full(self, torch.testing.get_all_dtypes(), torch.strided, torch.device('cpu'))
         if torch.cuda.device_count() > 0:
@@ -2248,6 +2251,7 @@ class TestTorch(TestCase):
         self.assertTrue(x.is_cuda)
         torch.set_default_tensor_type(saved_type)
 
+    @skipIfRocm
     def test_tensor_factories_empty(self):
         # ensure we can create empty tensors from each factory function
         shapes = [(5, 0, 1), (0,), (0, 0, 1, 0, 2, 0, 0)]
@@ -3184,6 +3188,7 @@ class TestTorch(TestCase):
                 seen.add(ixx[k][j])
             self.assertEqual(len(seen), size)
 
+    @skipIfRocm
     def test_sort(self):
         SIZE = 4
         x = torch.rand(SIZE, SIZE)
@@ -3297,6 +3302,7 @@ class TestTorch(TestCase):
         self.assertEqual(top1, top2)
         self.assertEqual(idx1, idx2)
 
+    @skipIfRocm
     def test_kthvalue(self):
         SIZE = 50
         x = torch.rand(SIZE, SIZE, SIZE)
@@ -3341,6 +3347,7 @@ class TestTorch(TestCase):
         self.assertEqual(torch.kthvalue(y, 3)[0], 3, 0)
         self.assertEqual(torch.kthvalue(y, 2)[0], 1, 0)
 
+    @skipIfRocm
     def test_median(self):
         for size in (155, 156):
             x = torch.rand(size, size)
@@ -3376,6 +3383,7 @@ class TestTorch(TestCase):
             # input unchanged
             self.assertEqual(x, x0, 0)
 
+    @skipIfRocm
     def test_mode(self):
         x = torch.arange(1., SIZE * SIZE + 1).clone().resize_(SIZE, SIZE)
         x[:2] = 1
@@ -3539,6 +3547,7 @@ class TestTorch(TestCase):
         self.assertEqual(x.narrow(-1, -1, 1), torch.Tensor([[2], [5], [8]]))
         self.assertEqual(x.narrow(-2, -1, 1), torch.Tensor([[6, 7, 8]]))
 
+    @skipIfRocm
     def test_narrow_empty(self):
         devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         for device in devices:
@@ -3829,6 +3838,7 @@ class TestTorch(TestCase):
         self.assertEqual(x.data, cast(x_exp))
 
     @skipIfNoLapack
+    @skipIfRocm
     def test_gesv_batched_dims(self):
         self._test_gesv_batched_dims(self, lambda t: t)
 
@@ -4177,6 +4187,7 @@ class TestTorch(TestCase):
         self.assertEqual(X, Xhat, 1e-8, 'VeV\' wrong')
 
     @skipIfNoLapack
+    @skipIfRocm
     def test_symeig(self):
         xval = torch.rand(100, 3)
         cov = torch.mm(xval.t(), xval)
@@ -4908,6 +4919,7 @@ class TestTorch(TestCase):
         self.assertLessEqual(inv0.dist(inv1), 1e-12)
 
     @skipIfNoLapack
+    @skipIfRocm
     def test_pstrf(self):
         def checkPsdCholesky(a, uplo, inplace):
             if inplace:
@@ -6116,6 +6128,7 @@ class TestTorch(TestCase):
         # match NumPy semantics -- don't infer the size of dimension with a degree of freedom
         self.assertRaises(RuntimeError, lambda: x.reshape(0, -1))
 
+    @skipIfRocm
     def test_tensor_shape_empty(self):
         devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         for device in devices:
@@ -6304,6 +6317,7 @@ class TestTorch(TestCase):
             c = torch.randn((0, 1, 2), device=device)
             self.assertEqual(c, c.index_select(0, ind_empty))
 
+    @skipIfRocm
     def test_blas_empty(self):
         devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         for device in devices:
@@ -6373,6 +6387,7 @@ class TestTorch(TestCase):
             A_LU, pivots = fn(torch.btrifact, (2, 0, 0))
             self.assertEqual([(2, 0, 0), (2, 0)], [A_LU.shape, pivots.shape])
 
+    @skipIfRocm
     def test_blas_alpha_beta_empty(self):
         devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         for device in devices:
@@ -7719,7 +7734,6 @@ class TestTorch(TestCase):
             self.assertEqual(torch.empty_like(a).type(), a.type())
 
     @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
-    @skipIfRocm
     def test_pin_memory(self):
         x = torch.randn(3, 5)
         self.assertFalse(x.is_pinned())
@@ -7887,7 +7901,6 @@ class TestTorch(TestCase):
         self.assertRaises(ValueError, lambda: torch.from_numpy(x))
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
-    @skipIfRocm
     def test_ctor_with_numpy_array(self):
         dtypes = [
             np.double,
