@@ -2368,7 +2368,7 @@ rank is done by obtaining the eigenvalues.
 :attr:`tol` is the threshold below which the singular values (or the eigenvalues
 when :attr:`symmetric` is ``True``) are considered to be 0. If :attr:`tol` is not
 specified, :attr:`tol` is set to ``S.max() * max(S.size()) * eps`` where `S` is the
-singular values (or the eigenvalues when :attr:`symmetric` is ``True``), and `eps`
+singular values (or the eigenvalues when :attr:`symmetric` is ``True``), and ``eps``
 is the epsilon value for the datatype of :attr:`input`.
 
 Args:
