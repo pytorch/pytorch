@@ -94,14 +94,6 @@ void registerOperator(Operator&& op);
 // XXX: this function is meant to be used with string literals only!
 Operator& sig(const char *signature_literal);
 
-struct TORCH_API RegisterOperators {
-  RegisterOperators(std::vector<Operator> operators) {
-    for(Operator& o : operators) {
-      registerOperator(std::move(o));
-    }
-  }
-};
-
 struct OperatorSet {
   OperatorSet(std::initializer_list<const char *> sig_literals);
   // XXX: Returns a nullptr if no Operator in the set matches n

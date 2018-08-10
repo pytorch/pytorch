@@ -1059,6 +1059,34 @@ void testCustomOperators() {
     REQUIRE(output[1] == 2.0);
   }
   {
+    RegisterOperators reg(
+        "foo::lists2(Tensor[] tensors) -> Tensor[]",
+        [](std::vector<at::Tensor> tensors) { return tensors; });
+
+    auto& ops =
+        getAllOperatorsFor(Symbol::fromQualString("foo::lists2"));
+    REQUIRE(ops.size() == 1);
+
+    auto& op = ops.front();
+    REQUIRE(op->schema().name == "foo::lists2");
+
+    REQUIRE(op->schema().arguments.size() == 1);
+    REQUIRE(op->schema().arguments[0].name == "tensors");
+    REQUIRE(op->schema().arguments[0].type->isSubtypeOf(ListType::ofTensors()));
+
+    REQUIRE(op->schema().returns.size() == 1);
+    REQUIRE(op->schema().returns[0].type->isSubtypeOf(ListType::ofTensors()));
+
+    Stack stack;
+    push(stack, std::vector<at::Tensor>{autograd::make_variable(at::ones(5))});
+    op->getOperation()(stack);
+    std::vector<at::Tensor> output;
+    pop(stack, output);
+
+    REQUIRE(output.size() == 1);
+    REQUIRE(output[0].allclose(autograd::make_variable(at::ones(5))));
+  }
+  {
 #ifdef USE_CATCH
     REQUIRE_THROWS_WITH(
         createOperator(
