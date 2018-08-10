@@ -50,6 +50,8 @@ done
 
 CMAKE_INSTALL=${CMAKE_INSTALL-make install}
 
+BUILD_SHARED_LIBS=${BUILD_SHARED_LIBS-ON}
+
 # Save user specified env vars, we will manually propagate them
 # to cmake.  We copy distutils semantics, referring to
 # cpython/Lib/distutils/sysconfig.py as the source of truth
@@ -263,7 +265,7 @@ function build_caffe2() {
       -DBUILD_ATEN=ON \
       -DBUILD_PYTHON=$FULL_CAFFE2 \
       -DBUILD_BINARY=OFF \
-      -DBUILD_SHARED_LIBS=ON \
+      -DBUILD_SHARED_LIBS=$BUILD_SHARED_LIBS \
       -DONNX_NAMESPACE=$ONNX_NAMESPACE \
       -DUSE_CUDA=$USE_CUDA \
       -DUSE_ROCM=$USE_ROCM \
