@@ -200,7 +200,7 @@ if (NOT NO_API AND NOT USE_ROCM)
 
 endif()
 
-add_library(torch SHARED ${TORCH_SRCS})
+add_library(torch ${TORCH_SRCS})
 
 target_compile_definitions(torch PRIVATE _THP_CORE)
 
