@@ -71,55 +71,56 @@ std::tuple<Tensor, Tensor> _unique_dim_cpu_template(
         scalar_t rhs = input_flat_ptr[i + b * numel];
         if (lhs < rhs) {
           return true;
-        }
-        else if (lhs > rhs) {
+        } else if (lhs > rhs) {
           return false;
         }
       }
       return false;
     });
-  
+
   Tensor input_sorted = at::empty(input_flat.sizes(), input_flat.type());
   for (int i = 0; i < indices.size(); ++i) {
     input_sorted[i] = input_flat[indices[i]];
-  } 
+  }
  
+  // pre-calculate mask for inverse_indices
+  Tensor mask = at::empty(input_sorted.size(0), self.type().toScalarType(kLong));
+  mask[0] = 1;
+  int mask_idx = 1;
+
   std::vector<Tensor> input_unbind = at::unbind(input_sorted, 0);
   auto last = std::unique(input_unbind.begin(), input_unbind.end(), [&](Tensor a, Tensor b) {
-    return at::equal(a, b);
+    bool eq = at::equal(a, b);
+    if (return_inverse) {
+      if (!eq) {
+        mask[mask_idx++] = 1;
+      } else {
+        mask[mask_idx++] = 0;
+      }
+    }
+    return eq;
   });
   input_unbind.erase(last, input_unbind.end());
 
   // reshape back
-  auto output_dim = at::stack(input_unbind, 0);
+  auto output = at::stack(input_unbind, 0);
   std::vector<int64_t> new_sizes(orig_sizes.begin(), orig_sizes.end());
   new_sizes[0] = -1;
-  output_dim = output_dim.view(new_sizes);
-  output_dim = output_dim.transpose(0, dim);
+  output = output.view(new_sizes);
+  output = output.transpose(0, dim);
 
-  Tensor inverse_indices_dim = at::empty({0}, self.type().toScalarType(kLong));
+  Tensor inverse_indices = at::empty({0}, self.type().toScalarType(kLong));
   if (return_inverse) {
     int64_t size = self.size(dim);
-    inverse_indices_dim.resize_(size);
-
-    Tensor mask = at::empty(input_sorted.size(0), self.type().toScalarType(kLong));
-    mask[0] = 1;
-    for (int i = 0; i < input_sorted.size(0) - 1; ++i) {
-      if (!at::equal(input_sorted[i], input_sorted[i+1])) {
-        mask[i+1] = 1; 
-      }
-      else {
-        mask[i+1] = 0;
-      }
-    }
+    inverse_indices.resize_(size);
 
     Tensor imask = at::cumsum(mask, 0) - 1;
     for (int i = 0; i < indices.size(); ++i) {
-      inverse_indices_dim[indices[i]] = imask[i];
+      inverse_indices[indices[i]] = imask[i];
     }
   }
 
-  return std::make_tuple(output_dim, inverse_indices_dim);
+  return std::make_tuple(output, inverse_indices);
 }
 } // namespace
 

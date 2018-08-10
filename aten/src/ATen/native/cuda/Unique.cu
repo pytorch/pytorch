@@ -82,7 +82,6 @@ template <typename scalar_t>
     auto policy = thrust::cuda::par(allocator).on(stream);
 
     Tensor input_flat = self.transpose(dim, 0);
-    //std::vector<int64_t> orig_sizes(input_flat.sizes().begin(), input_flat.sizes().end());
     auto orig_sizes = input_flat.sizes().vec();
     input_flat = input_flat.contiguous().view({input_flat.size(0), -1});
 
@@ -118,45 +117,44 @@ template <typename scalar_t>
         for (int64_t i = 0; i < numel; ++i) {
           scalar_t lhs = input_sorted_ptr[i + a * numel];
           scalar_t rhs = input_sorted_ptr[i + b * numel];
-          if ( lhs != rhs ) {
+          if (lhs != rhs) {
             return false;
           }
         }
         return true;
       });
     input_sorted_indices.resize_(last - input_sorted_indices_ptr);
-    Tensor output_dim = input_sorted.index_select(0, input_sorted_indices);
-    
+    Tensor output = input_sorted.index_select(0, input_sorted_indices);
+
     // // reshape back
     std::vector<int64_t> new_sizes(orig_sizes.begin(), orig_sizes.end());
     new_sizes[0] = -1;
-    output_dim = output_dim.view(new_sizes);
-    output_dim = output_dim.transpose(0, dim);
+    output = output.view(new_sizes);
+    output = output.transpose(0, dim);
 
     // calculate inverse indices
-    Tensor inverse_indices_dim = at::empty({0}, self.type().toScalarType(kLong));
+    Tensor inverse_indices = at::empty({0}, self.type().toScalarType(kLong));
     if (return_inverse) {
       int64_t size = self.size(dim);
-      inverse_indices_dim.resize_(size);
+      inverse_indices.resize_(size);
       Tensor mask = at::empty(input_sorted.size(0), self.type().toScalarType(kLong));
       mask[0] = 1;
       for (int i = 0; i < input_sorted.size(0) - 1; ++i) {
         if (!at::equal(input_sorted[i], input_sorted[i+1])) {
           mask[i+1] = 1; 
-        }
-        else {
+        } else {
           mask[i+1] = 0;
         }
       }
 
       Tensor imask = at::cumsum(mask, 0) - 1;
       for (int i = 0; i < indices.size(0); ++i) {
-        inverse_indices_dim[indices[i]] = imask[i];
+        inverse_indices[indices[i]] = imask[i];
       }
     }
 
     THCudaCheck(cudaGetLastError());  
-    return std::tuple<Tensor, Tensor>(output_dim, inverse_indices_dim);
+    return std::tuple<Tensor, Tensor>(output, inverse_indices);
   }
 } // namespace
 
