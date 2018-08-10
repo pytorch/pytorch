@@ -213,7 +213,7 @@ __global__ void SigmoidCrossEntropyWithLogitsKernel(
   }
 }
 
-__global__ void SigmoidCrossEntropyGradientWithLogitsKernel(
+__global__ void SigmoidCrossEntropyWithLogitsGradientKernel(
     const int outer_size,
     const int inner_size,
     const bool log_D_trick,
@@ -299,7 +299,7 @@ bool SigmoidCrossEntropyWithLogitsGradientOp<float, CUDAContext>::
   auto* targets_ptr = targets.data<float>();
   auto* g_ptr = g.data<float>();
 
-  SigmoidCrossEntropyGradientWithLogitsKernel<<<
+  SigmoidCrossEntropyWithLogitsGradientKernel<<<
       CAFFE_GET_BLOCKS(outer_size * inner_size),
       CAFFE_CUDA_NUM_THREADS,
       0,
@@ -341,7 +341,7 @@ __global__ void WeightedSigmoidCrossEntropyWithLogitsKernel(
   }
 }
 
-__global__ void WeightedSigmoidCrossEntropyGradientWithLogitsKernel(
+__global__ void WeightedSigmoidCrossEntropyWithLogitsGradientKernel(
     const int outer_size,
     const int inner_size,
     const float* g_ptr,
@@ -414,7 +414,7 @@ bool WeightedSigmoidCrossEntropyWithLogitsGradientOp<float, CUDAContext>::
   auto* weights_ptr = weights.data<float>();
   auto* g_ptr = g.data<float>();
 
-  WeightedSigmoidCrossEntropyGradientWithLogitsKernel<<<
+  WeightedSigmoidCrossEntropyWithLogitsGradientKernel<<<
       CAFFE_GET_BLOCKS(outer_size * inner_size),
       CAFFE_CUDA_NUM_THREADS,
       0,
