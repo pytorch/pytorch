@@ -49,13 +49,6 @@ install_hip_thrust() {
     git clone --recursive https://github.com/ROCmSoftwarePlatform/cub-hip.git /data/Thrust/thrust/system/cuda/detail/cub-hip
 }
 
-# This will be removed after merging an upcoming PR.
-install_hcsparse() {
-    mkdir -p /opt/rocm/debians
-    curl https://s3.amazonaws.com/ossci-linux/hcsparse-master-907a505-Linux.deb -o /opt/rocm/debians/hcsparse.deb 
-    dpkg -i /opt/rocm/debians/hcsparse.deb
-}
-
 # Install an updated version of rocRand that's PyTorch compatible.
 install_rocrand() {
     mkdir -p /opt/rocm/debians
@@ -75,4 +68,3 @@ fi
 
 install_hip_thrust
 install_rocrand
-install_hcsparse
