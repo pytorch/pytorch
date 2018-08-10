@@ -395,9 +395,9 @@ class Tensor(torch._C._TensorBase):
 
     def __array__(self, dtype=None):
         if dtype is None:
-            return self.cpu().numpy()
+            return self.numpy()
         else:
-            return self.cpu().numpy().astype(dtype, copy=False)
+            return self.numpy().astype(dtype, copy=False)
 
     # Wrap Numpy array again in a suitable tensor when done, to support e.g.
     # `numpy.sin(tensor) -> tensor` or `numpy.greater(tensor, 0) -> ByteTensor`
