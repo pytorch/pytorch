@@ -168,7 +168,7 @@
 - name: ceil(Tensor self)
   self: zeros_like(grad)
 
-# For clamp, gradient is not defined at the boundaries. But empirically it's helpful 
+# For clamp, gradient is not defined at the boundaries. But empirically it's helpful
 # to be able to get gradient on min and max, so we return the subgradient 1 for these cases.
 - name: clamp(Tensor self, Scalar min, Scalar max)
   self: clamp_backward(grad, self, min, max)
@@ -1219,3 +1219,10 @@
 
 - name: stack(TensorList tensors, int64_t dim)
   tensors: unbind(grad, dim)
+
+# fused RNN kernels
+- name: _thnn_fused_lstm_cell(Tensor input_gates, Tensor hidden_gates, Tensor cx, Tensor input_bias, Tensor hidden_bias)
+  input_gates, hidden_gates, cx, input_bias, hidden_bias: _thnn_fused_lstm_cell_backward(grads[0], grads[1], cx, result1, result2, input_bias.defined())
+
+- name: _thnn_fused_gru_cell(Tensor input_gates, Tensor hidden_gates, Tensor hx, Tensor input_bias, Tensor hidden_bias)
+  input_gates, hidden_gates, hx, input_bias, hidden_bias: _thnn_fused_gru_cell_backward(grad, result1, input_bias.defined())

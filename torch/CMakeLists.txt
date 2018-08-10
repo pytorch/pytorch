@@ -109,6 +109,7 @@ add_custom_command(
   "${TOOLS_PATH}/autograd/gen_autograd.py"
   "${TOOLS_PATH}/autograd/gen_autograd_functions.py"
   "${TOOLS_PATH}/autograd/gen_variable_type.py"
+  "${TOOLS_PATH}/autograd/derivatives.yaml"
   "${TOOLS_PATH}/jit/gen_jit_dispatch.py"
   "${TOOLS_PATH}/jit/templates/register_aten_ops.cpp"
   "${TOOLS_PATH}/jit/templates/aten_interned_strings.h"
