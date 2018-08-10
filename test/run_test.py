@@ -51,6 +51,7 @@ ROCM_BLACKLIST = [
     'nccl',
     'nn',
     'sparse',
+    'utils',
 ]
 
 DISTRIBUTED_TESTS_CONFIG = {
