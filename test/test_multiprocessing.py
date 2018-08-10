@@ -108,7 +108,7 @@ def autograd_sharing(queue, ready, master_modified, device, is_parameter):
         is_ok &= type(var) == Parameter
     else:
         is_ok &= type(var) == torch.Tensor
-    var._grad = Variable(torch.ones(5, 5, device=device), requires_grad=False)
+    var._grad = torch.ones(5, 5, device=device)
 
     queue.put(is_ok)
 
@@ -411,7 +411,7 @@ class TestMultiprocessing(TestCase):
         p = ctx.Process(target=autograd_sharing, args=(queue, ready, master_modified, device, is_parameter))
         p.daemon = True
         p.start()
-        var._grad = Variable(torch.zeros(5, 5, device=device), requires_grad=False)
+        var._grad = torch.zeros(5, 5, device=device)
         queue.put(var)
 
         ready.wait()
@@ -429,8 +429,7 @@ class TestMultiprocessing(TestCase):
 
     def test_variable_sharing(self):
         for requires_grad in [True, False]:
-            var = Variable(torch.arange(1., 26).view(5, 5),
-                           requires_grad=requires_grad)
+            var = torch.arange(1., 26).view(5, 5).requires_grad_(requires_grad)
             self._test_autograd_sharing(var)
 
     def test_leaf_variable_sharing(self):
@@ -439,7 +438,7 @@ class TestMultiprocessing(TestCase):
             devices.append('cuda')
         for device in devices:
             for requires_grad in [True, False]:
-                var = Variable(torch.arange(1., 26, device=device).view(5, 5), requires_grad=requires_grad)
+                var = torch.arange(1., 26, device=device).view(5, 5).requires_grad_(requires_grad)
                 self.assertTrue(var.is_leaf)
                 ctx = mp.get_context('spawn') if device == 'cuda' else mp
                 ready = ctx.Event()
@@ -455,22 +454,19 @@ class TestMultiprocessing(TestCase):
     def test_non_leaf_variable_sharing(self):
         devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         for device in devices:
-            var0 = Variable(torch.arange(1., 26, device=device).view(5, 5), requires_grad=True)
+            var0 = torch.arange(1., 26, device=device).view(5, 5).requires_grad_(True)
             var = var0 * 2
-            # We can't do the pickling indirectly, e.g., with a queue.put,
-            # because pickling happens in a separate thread, so we can't catch
-            # the exception.
-            with open(os.devnull, "w") as devnull:
-                pickler = ForkingPickler(devnull)
-                self.assertRaisesRegex(RuntimeError, r'requires_grad', lambda: pickler.dump(var))
+            # Don't use a regular Queue; it uses a background thread (which
+            # means we can't catch the exceptions)
+            queue = mp.SimpleQueue()
+            self.assertRaisesRegex(RuntimeError, r'requires_grad', lambda: queue.put(var))
 
     @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
                      don't support multiprocessing with spawn start method")
     @unittest.skipIf(not TEST_CUDA_IPC, 'CUDA IPC not available')
     def test_cuda_variable_sharing(self):
         for requires_grad in [True, False]:
-            var = Variable(torch.arange(1., 26, device='cuda').view(5, 5),
-                           requires_grad=requires_grad)
+            var = torch.arange(1., 26, device='cuda').view(5, 5).requires_grad_(requires_grad)
             self._test_autograd_sharing(var, mp.get_context('spawn'))
 
     def test_parameter_sharing(self):
