@@ -44,7 +44,7 @@ TensorImpl* SparseTensorImpl::maybe_zero_dim(bool condition_when_zero_dim) {
            " changing dimensionality via maybe_zero_dim");
   return this;
 }
-void * SparseTensorImpl::unsafeGetTH(bool retain) {
+THTensor * SparseTensorImpl::unsafeGetTH(bool retain) {
   AT_ERROR("unsafeGetTH not supported for new style TensorImpl");
 }
 std::unique_ptr<Storage> SparseTensorImpl::storage() {

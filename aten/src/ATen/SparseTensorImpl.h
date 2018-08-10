@@ -61,7 +61,7 @@ public:
   IntList strides() const override;
   int64_t dim() const override;
   TensorImpl* maybe_zero_dim(bool condition_when_zero_dim) override;
-  void * unsafeGetTH(bool retain) override;
+  THTensor * unsafeGetTH(bool retain) override;
   std::unique_ptr<Storage> storage() override;
 
   // Some ops do some manual size fiddling.

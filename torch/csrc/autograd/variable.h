@@ -270,7 +270,7 @@ struct Variable::Impl : public at::TensorImpl {
   at::IntList sizes() const override;
   at::IntList strides() const override;
   int64_t dim() const override;
-  void* unsafeGetTH(bool retain) override;
+  THTensor* unsafeGetTH(bool retain) override;
   std::unique_ptr<at::Storage> storage() override;
   static const char* typeString();
 

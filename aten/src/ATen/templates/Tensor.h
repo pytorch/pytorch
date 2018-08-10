@@ -113,7 +113,7 @@ struct Tensor : public detail::TensorBase {
   template<typename T>
   T * data() const;
 
-  void * unsafeGetTH(bool retain) const {
+  THTensor * unsafeGetTH(bool retain) const {
     return pImpl->unsafeGetTH(retain);
   }
 

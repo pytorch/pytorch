@@ -20,6 +20,13 @@ struct THTensor
       , is_zero_dim_(false)
       {}
 
+    at::Backend backend_;
+    // INVARIANT: When storage is non-null, this scalar type must
+    // agree with the scalar type in storage
+    at::ScalarType scalar_type_;
+    bool is_variable_ = false;
+    bool is_wrapped_number_ = false;
+
     ~THTensor() {
       if (storage_) {
         THStorage_free(storage_);

@@ -305,13 +305,13 @@ CHECKED_CAST = {
 }
 
 CHECKED_USE = {
-    'THTensor*': '{}_->tensor',
-    'THSTensor*': '{}_->tensor',
-    'THIndexTensor*': '{}_->tensor',
-    'THBoolTensor*': '{}_->tensor',
-    'THIntegerTensor*': '{}_->tensor',
-    'THDenseTensor*': '{}_->tensor',
-    'THDenseIndexTensor*': '{}_->tensor',
+    'THTensor*': '{}_->unsafeGetTH(false)',
+    'THSTensor*': '{}_->unsafeGetTH(false)',
+    'THIndexTensor*': '{}_->unsafeGetTH(false)',
+    'THBoolTensor*': '{}_->unsafeGetTH(false)',
+    'THIntegerTensor*': '{}_->unsafeGetTH(false)',
+    'THDenseTensor*': '{}_->unsafeGetTH(false)',
+    'THDenseIndexTensor*': '{}_->unsafeGetTH(false)',
     'THStorage*': '{}_->pImpl()',
     'THGenerator*': '{}_->generator',
     'TensorList': "{0}_.data(), {0}_.size()",
@@ -320,13 +320,13 @@ CHECKED_USE = {
 CHECKED_USE_NULLABLE = CodeTemplate('${arg_name}_ ? ${usage} : NULL')
 
 ALLOC_NOARGS_WRAP = {
-    'THTensor*': 'new TensorImpl(Backend::${Backend}, ScalarType::${ScalarName})',
-    'THBoolTensor*': 'new TensorImpl(Backend::${Backend}, ScalarType::Byte)',
-    'THIndexTensor*': 'new TensorImpl(Backend::${Backend}, ScalarType::Long)',
-    'THIntegerTensor*': 'new TensorImpl(Backend::${Backend}, ScalarType::Int)',
+    'THTensor*': 'new TensorImpl(Backend::${Backend}, ScalarType::${ScalarName}, false)',
+    'THBoolTensor*': 'new TensorImpl(Backend::${Backend}, ScalarType::Byte, false)',
+    'THIndexTensor*': 'new TensorImpl(Backend::${Backend}, ScalarType::Long, false)',
+    'THIntegerTensor*': 'new TensorImpl(Backend::${Backend}, ScalarType::Int, false)',
     'THSTensor*': 'detail::new_Sparse${Tensor}()',
-    'THDenseTensor*': 'new TensorImpl(Backend::${Backend}, ScalarType::${ScalarName})',
-    'THDenseIndexTensor*': 'new TensorImpl(Backend::${Backend}, ScalarType::Long)'
+    'THDenseTensor*': 'new TensorImpl(Backend::${Backend}, ScalarType::${ScalarName}, false)',
+    'THDenseIndexTensor*': 'new TensorImpl(Backend::${Backend}, ScalarType::Long, false)'
 }
 
 ALLOC_WRAP = {

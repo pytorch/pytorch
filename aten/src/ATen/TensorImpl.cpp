@@ -12,8 +12,9 @@
 namespace at {
 
 Type& TensorImpl::type() const {
-  Type* base_type = &globalContext().getType(backend_, scalar_type_);
-  if (is_variable_) {
+  Type* base_type =
+      &globalContext().getType(tensor->backend_, tensor->scalar_type_);
+  if (tensor->is_variable_) {
     return detail::getVariableHooks().getVariableType(*base_type);
   } else {
     return *base_type;
@@ -55,13 +56,29 @@ void Tensor::backward(
   pImpl->backward(std::move(gradient), keep_graph, create_graph);
 }
 
-TensorImpl::TensorImpl(Backend backend, ScalarType scalar_type) {
-  backend_ = backend;
-  scalar_type_ = scalar_type;
+TensorImpl::TensorImpl(Backend backend, ScalarType scalar_type, bool is_variable) {
   auto type = &globalContext().getType(backend, scalar_type);
   Storage* storage = type->storage(true).release();
   StorageImpl* storage_impl = storage->pImpl();
   tensor = new THTensor(storage_impl);
+  tensor->backend_ = backend;
+  tensor->scalar_type_ = scalar_type;
+  tensor->is_variable_ = is_variable;
+}
+
+TensorImpl::TensorImpl(
+    Backend backend,
+    ScalarType scalar_type,
+    THTensor* tensor_,
+    bool is_variable) {
+  if (tensor_) {
+    tensor = tensor_;
+  } else {
+    tensor = new THTensor(nullptr);
+  }
+  tensor->is_variable_ = is_variable;
+  tensor->backend_ = backend;
+  tensor->scalar_type_ = scalar_type;
 }
 
 TensorImpl::~TensorImpl() {
@@ -100,11 +117,20 @@ TensorImpl* TensorImpl::maybe_zero_dim(bool condition_when_zero_dim) {
   return this;
 }
 
-void * TensorImpl::unsafeGetTH(bool retain) {
+THTensor* TensorImpl::unsafeGetTH(bool retain) {
   if (retain) {
     tensor->retain();
   }
   return tensor;
+}
+
+bool TensorImpl::is_wrapped_number() const {
+  return tensor->is_wrapped_number_;
+}
+
+void TensorImpl::set_wrapped_number(bool value) {
+  AT_ASSERT(dim() == 0);
+  tensor->is_wrapped_number_ = value;
 }
 
 std::unique_ptr<Storage> TensorImpl::storage() {

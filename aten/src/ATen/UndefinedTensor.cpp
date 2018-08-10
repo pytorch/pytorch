@@ -17,9 +17,10 @@ int64_t UndefinedTensor::dim() const {
   AT_ERROR("dim() called on undefined Tensor");
 }
 
-void * UndefinedTensor::unsafeGetTH(bool retain) {
+THTensor * UndefinedTensor::unsafeGetTH(bool retain) {
   AT_ERROR("unsafeGetTH(bool retain) called on undefined Tensor");
 }
+
 std::unique_ptr<Storage> UndefinedTensor::storage() {
   AT_ERROR("storage() called on undefined Tensor");
 }
