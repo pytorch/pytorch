@@ -183,9 +183,31 @@ static void prod_kernel_impl(Tensor& result, const Tensor& self, at::optional<in
   });
 }
 
+template<typename scalar_t>
+struct NormReduction {
+  static void apply(Tensor& res, const Tensor& self, Scalar p, int64_t dim, bool keepdim) {
+    std::cout << "NormReduction called" << std::endl;
+    auto out_ = res.data<scalar_t>();
+    auto data_ = self.data<scalar_t>();
+    auto numel = self.numel();
+    //if (!dim.has_value()) {
+    //  std::cout << "dim has no value, not supported yet, TODO" << std::endl;
+    //  return;
+    //}
+    //int64_t n = self.size(*dim);
+  }
+};
+
+static void norm_kernel_impl(Tensor& result, const Tensor& self, Scalar p, int64_t dim, bool keepdim) {
+  AT_DISPATCH_FLOATING_TYPES(self.type(), "norm", [&] {
+    NormReduction<scalar_t>::apply(result, self, p, dim, keepdim);
+  });
+}
+
 }  // anonymous namespace
 
 REGISTER_DISPATCH(sum_kernel, &sum_kernel_impl);
 REGISTER_DISPATCH(prod_kernel, &prod_kernel_impl);
+REGISTER_DISPATCH(norm_kernel, &norm_kernel_impl);
 
 }}  // namespace at::native

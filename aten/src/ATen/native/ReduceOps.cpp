@@ -19,6 +19,7 @@ namespace native {
 
 DEFINE_DISPATCH(sum_kernel);
 DEFINE_DISPATCH(prod_kernel);
+DEFINE_DISPATCH(norm_kernel);
 
 static inline Tensor integer_upcast(const Tensor& self, optional<ScalarType> dtype) {
   ScalarType scalarType = self.type().scalarType();
@@ -584,6 +585,23 @@ Tensor& _sum_out(Tensor &result, const Tensor &self, IntList dims, bool keepdim)
   return reduce_multi_associative_out<_sum, _sum_out>(result, self, dims, keepdim);
 }
 
+Tensor& _norm_out_cpu(Tensor& result, const Tensor& self, Scalar p, int64_t dim_, bool keepdim) {
+  std::cout << "p = " << p << ", dim = " << dim_ << ", keepdim = " << keepdim << std::endl;
+  int64_t dim = maybe_wrap_dim(dim_, self.dim());
+  if (_dimreduce_return_trivial(result, self, 0, dim, keepdim))
+    return result;
+  if (self.is_contiguous() && result.is_contiguous()) {
+    _dimreduce_setup(result, self, dim);
+    norm_kernel(kCPU, result, self, p, dim, keepdim);
+    if (!keepdim) {
+      result.squeeze_(dim);
+    }
+    return result;
+  } else {
+    return at::_th_norm_out(result, self, p, dim, keepdim);
+  }
+}
+
 Tensor norm(const Tensor& self, Scalar p, int64_t dim, bool keepdim) {
   Tensor result = self.type().tensor();
   return at::native::norm_out(result, self, p, dim, keepdim);
@@ -597,7 +615,11 @@ Tensor &norm_out(Tensor &result, const Tensor &self, Scalar p, int64_t dim, bool
   if (_dimreduce_return_trivial(result, self, 0, dim, keepdim)) {
     return result;
   } else {
-    return at::_th_norm_out(result, self, p, dim, keepdim);
+    if (self.is_cuda()) {
+      return at::_th_norm_out(result, self, p, dim, keepdim);
+    } else {
+      return _norm_out_cpu(result, self, p, dim, keepdim);
+    }
   }
 }
 
