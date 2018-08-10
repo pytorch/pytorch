@@ -594,6 +594,18 @@ def adaptive_avg_pool3d(input, output_size):
 
 # Activation functions
 def dropout(input, p=0.5, training=False, inplace=False):
+    r"""
+    During training, randomly zeroes some of the elements of the input
+    tensor with probability :attr:`p` using samples from a Bernoulli
+    distribution.
+
+    See :class:`~torch.nn.Dropout` for details.
+
+    Args:
+        p: probability of an element to be zeroed. Default: 0.5
+        training: apply dropout if is True. Defualt: True
+        inplace: If set to ``True``, will do this operation in-place. Default: ``False``
+    """
     if p < 0 or p > 1:
         raise ValueError("dropout probability has to be between 0 and 1, "
                          "but got {}".format(p))
@@ -614,6 +626,16 @@ def alpha_dropout(input, p=0.5, training=False, inplace=False):
 
 
 def dropout2d(input, p=0.5, training=False, inplace=False):
+    r"""
+    Randomly zeroes whole channels of the input tensor.
+
+    See :class:`~torch.nn.Dropout2d` for details.
+
+    Args:
+        p: probability of an element to be zeroed. Default: 0.5
+        training: apply dropout if is True. Defualt: True
+        inplace: If set to ``True``, will do this operation in-place. Default: ``False``
+    """
     if p < 0 or p > 1:
         raise ValueError("dropout probability has to be between 0 and 1, "
                          "but got {}".format(p))
@@ -622,6 +644,16 @@ def dropout2d(input, p=0.5, training=False, inplace=False):
 
 
 def dropout3d(input, p=0.5, training=False, inplace=False):
+    r"""
+    Randomly zeroes whole channels (a channel is a (N, C) pair) of the input tensor.
+
+    See :class:`~torch.nn.Dropout3d` for details.
+
+    Args:
+        p: probability of an element to be zeroed. Default: 0.5
+        training: apply dropout if is True. Defualt: True
+        inplace: If set to ``True``, will do this operation in-place. Default: ``False``
+    """
     if p < 0 or p > 1:
         raise ValueError("dropout probability has to be between 0 and 1, "
                          "but got {}".format(p))
