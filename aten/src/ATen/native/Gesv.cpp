@@ -52,7 +52,7 @@ static inline bool isTransposeContiguous(Tensor& self) {
 template <typename scalar_t>
 static void applyGesv(Tensor& b, Tensor& A, std::vector<int64_t> infos) {
 #ifndef USE_LAPACK
-  AT_ERROR("gesv: LAPACK library not found in compilation");
+  AT_ERROR("gesv : Lapack library not found in compile time");
 #endif
   auto A_data = A.data<scalar_t>();
   auto b_data = b.data<scalar_t>();
@@ -82,7 +82,7 @@ std::tuple<Tensor&,Tensor&> _gesv_single_out_cpu(
     Tensor& sol, Tensor& lu,
     const Tensor& self, const Tensor& A) {
 #ifndef USE_LAPACK
-  AT_ERROR("gesv: LAPACK library not found in compilation");
+  AT_ERROR("gesv : Lapack library not found in compile time");
 #endif
   /* gesv takes two tensors (self, A) and returns (sol, lu).
    * The output Tensors (sol, lu) may be the same as input Tensors (self, A)
