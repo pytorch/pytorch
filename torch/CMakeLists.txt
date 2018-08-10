@@ -324,7 +324,7 @@ if(USE_ROCM)
   target_include_directories(torch PRIVATE
     /opt/rocm/include
     /opt/rocm/hcc/include
-    /opt/rocm/hipblas/include
+    /opt/rocm/rocblas/include
     /opt/rocm/hcsparse/include
     )
 endif()
