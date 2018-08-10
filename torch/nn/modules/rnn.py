@@ -547,6 +547,11 @@ class RNNCellBase(Module):
                 "hidden{} has inconsistent hidden_size: got {}, expected {}".format(
                     hidden_label, hx.size(1), self.hidden_size))
 
+    def reset_parameters(self):
+        stdv = 1.0 / math.sqrt(self.hidden_size)
+        for weight in self.parameters():
+            init.uniform_(weight, -stdv, stdv)
+
 
 class RNNCell(RNNCellBase):
     r"""An Elman RNN cell with tanh or ReLU non-linearity.
@@ -612,11 +617,6 @@ class RNNCell(RNNCellBase):
             self.register_parameter('bias_ih', None)
             self.register_parameter('bias_hh', None)
         self.reset_parameters()
-
-    def reset_parameters(self):
-        stdv = 1.0 / math.sqrt(self.hidden_size)
-        for weight in self.parameters():
-            init.uniform_(weight, -stdv, stdv)
 
     def forward(self, input, hx=None):
         self.check_forward_input(input)
@@ -714,11 +714,6 @@ class LSTMCell(RNNCellBase):
             self.register_parameter('bias_hh', None)
         self.reset_parameters()
 
-    def reset_parameters(self):
-        stdv = 1.0 / math.sqrt(self.hidden_size)
-        for weight in self.parameters():
-            init.uniform_(weight, -stdv, stdv)
-
     def forward(self, input, hx=None):
         self.check_forward_input(input)
         if hx is None:
@@ -800,11 +795,6 @@ class GRUCell(RNNCellBase):
             self.register_parameter('bias_ih', None)
             self.register_parameter('bias_hh', None)
         self.reset_parameters()
-
-    def reset_parameters(self):
-        stdv = 1.0 / math.sqrt(self.hidden_size)
-        for weight in self.parameters():
-            init.uniform_(weight, -stdv, stdv)
 
     def forward(self, input, hx=None):
         self.check_forward_input(input)
