@@ -24,7 +24,8 @@ class LengthsTileOp : public Operator<Context> {
     // Context::CopyFrom and math::Sum need the same context to avoid race
     // conditions
     // why? CPUContext is not used in Sum
-    lengths_host_.CopyFrom(lengths);
+    lengths_host_.CopyFrom(lengths, &context_);
+    context_.FinishDeviceComputation();
     auto lengths_size = lengths_host_.size();
     auto* lengths_data = lengths_host_.data<int32_t>();
 
