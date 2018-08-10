@@ -2,8 +2,6 @@
 #define THC_GENERIC_FILE "generic/THCTensor.h"
 #else
 
-typedef struct THCTensor THCTensor;
-
 // These used to be distinct types; for some measure of backwards compatibility and documentation
 // alias these to the single THCTensor type.
 #define THCudaTensor THCTensor

@@ -1,7 +1,5 @@
 #pragma once
 
-#include <ATen/Scalar.h>
-
 #include <ATen/Allocator.h>
 #include <ATen/ScalarType.h>
 #include <ATen/ScalarTypeUtils.h>
