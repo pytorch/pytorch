@@ -113,7 +113,7 @@ struct GraphFuser {
   // TODO: the fusion compiler has a lot of float-specific codegen
   // so for now we only consider nodes that operate on floating point numbers
   // and half values when running on a GPU with sufficient CUDA arch
-  bool hasSupportedType(Value* node) {
+  bool hasSupportedType(Value* node, bool allow_constant_numbers=false) {
     if (auto tt = node->type()->cast<TensorType>()) {
       if (tt->scalarType() == at::kFloat) return true;
       #ifdef USE_CUDA
@@ -125,7 +125,7 @@ struct GraphFuser {
         }
       #endif
     }
-    return false;
+    return allow_constant_numbers && node->type()->isSubtypeOf(NumberType::get());
   }
 
   bool areTensorsOfSameShape(at::ArrayRef<Value*> values) {
@@ -141,16 +141,37 @@ struct GraphFuser {
   }
 
   bool hasSupportedType(Node* node) {
-    return areTensorsOfSameShape(node->inputs()) &&
-           haveSupportedType(node->inputs()) &&
+    return haveSupportedShape(node->inputs()) &&
+           haveSupportedType(node->inputs(), /*allow_constant_numbers*/true) &&
            haveSupportedType(node->outputs());
   }
 
-  bool haveSupportedType(at::ArrayRef<Value*> list) {
+  bool haveSupportedType(at::ArrayRef<Value*> list, bool allow_constant_numbers=false) {
     for (Value *v : list) {
-      if (!hasSupportedType(v)) return false;
+      if (!hasSupportedType(v, allow_constant_numbers)) return false;
     }
     return true;
+  }
+
+  bool haveSupportedShape(at::ArrayRef<Value*> list) {
+    std::vector<Value*> tensor_values;
+    tensor_values.reserve(list.size());
+    for (Value * v : list) {
+      if (v->type()->cast<TensorType>()) {
+        tensor_values.push_back(v);
+        continue;
+      }
+      // XXX: For now, we support fusing tensor-scalar ops if the scalars
+      // are constant. They are directly inlined into the kernel body
+      if (v->type()->isSubtypeOf(NumberType::get()) &&
+          v->node()->kind() != prim::Constant) {
+        return false;
+      }
+    }
+    if (tensor_values.size() == 0) {
+      return true;
+    }
+    return areTensorsOfSameShape(tensor_values);
   }
 
 
@@ -159,15 +180,12 @@ struct GraphFuser {
     if (node->kind() == prim::FusionGroup) return true;
     if (!isSimpleMap(node)) return false;
 
-    if (node->matches("aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor", /*const=*/attr::alpha)) {
-      std::vector<Value*> inputs {node->namedInput(attr::self), node->namedInput(attr::other)};
-      return areTensorsOfSameShape(inputs) && haveSupportedType(inputs);
-    } else if (node->matches("aten::lt(Tensor self, Tensor other) -> Tensor") ||
-               node->matches("aten::le(Tensor self, Tensor other) -> Tensor") ||
-               node->matches("aten::gt(Tensor self, Tensor other) -> Tensor") ||
-               node->matches("aten::ge(Tensor self, Tensor other) -> Tensor") ||
-               node->matches("aten::eq(Tensor self, Tensor other) -> Tensor") ||
-               node->matches("aten::ne(Tensor self, Tensor other) -> Tensor")) {
+    if (node->matches("aten::lt(Tensor self, Tensor other) -> Tensor") ||
+        node->matches("aten::le(Tensor self, Tensor other) -> Tensor") ||
+        node->matches("aten::gt(Tensor self, Tensor other) -> Tensor") ||
+        node->matches("aten::ge(Tensor self, Tensor other) -> Tensor") ||
+        node->matches("aten::eq(Tensor self, Tensor other) -> Tensor") ||
+        node->matches("aten::ne(Tensor self, Tensor other) -> Tensor")) {
       // comparison operators produce Byte type, and it's ok, check only inputs
       return areTensorsOfSameShape(node->inputs()) && haveSupportedType(node->inputs());
     } else if (node->matches("aten::type_as(Tensor self, Tensor other) -> Tensor")) {
@@ -249,18 +267,35 @@ struct GraphFuser {
     return isFusableOnlyAsExitNode(node);
   }
 
+  bool checkDevices(Node * consumer, Value * producer) {
+    at::optional<int> consumer_device = getDevice(consumer);
+    at::optional<int> producer_device = getDevice(producer->node());
+
+    if (!consumer_device) {
+      return false;
+    }
+    // no producer device and isFusable -> producer is a Number
+    if (!producer_device) {
+      JIT_ASSERT(producer->type()->cast<NumberType>());
+      return true;
+    }
+    if (consumer_device != producer_device) {
+      return false;
+    }
+    // If CPU -> make sure we can compile on CPU, (X -> Y) <-> (!X || Y)
+    return (*consumer_device != kCPUDevice || sharedFusionCompiler().canCompileOnCPU());
+  }
+
   bool shouldFuse(Node * consumer, Value * producer) {
     // this handles cases where producer can be moved _into_ the fusion group of consumer.
     // TODO: extend to fusion of consumer into _producer's_ fusion blob
     // if the consumer allInputsAreThisProducer(consumer,producer)
     // we can move the consumer up into the producer.
     // but this requires better handling of merging fusion groups so it is not done now
-    at::optional<int> consumer_device = getDevice(consumer);
     Node *real_consumer = consumer->kind() == aten::cat ? consumer->namedInput(attr::tensors)->node() : consumer;
     return isFusable(producer->node()) &&
       allUsersAreThisConsumerOrOccurAfterIt(real_consumer, producer) &&
-      consumer_device && consumer_device == getDevice(producer->node()) &&
-      (*consumer_device != kCPUDevice || sharedFusionCompiler().canCompileOnCPU());
+      checkDevices(consumer, producer);
   }
 
   // insert a producer node into a consuming fusion group.
@@ -338,7 +373,7 @@ struct GraphFuser {
       inputs_map[input] = subgraph.inputs()[i++];
     }
     // add n's inputs to the fusion group's input list if we don't already have them
-    Node * insert_after = nullptr;
+    Node * insert_after = subgraph.block()->return_node(); // "front" of the graph
     for (auto input : n->inputs()) {
       if (inputs_map.count(input) == 0) {
         if (input->type()->isSubtypeOf(DynamicType::get())) {
@@ -352,7 +387,7 @@ struct GraphFuser {
           // cases we inline the constants directly in the body of the fused group.
           JIT_ASSERT(input->node()->kind() == prim::Constant);
           Node * in_const = subgraph.createClone(input->node(), [](Value*) -> Value* { throw std::runtime_error("unexpected input"); });
-          subgraph.prependNode(in_const);
+          in_const->insertAfter(insert_after);
           insert_after = in_const;
           inputs_map[input] = in_const->output();
         }
@@ -374,7 +409,7 @@ struct GraphFuser {
       subgraph.inputs()[p]->replaceAllUsesWith(in_graph->output());
       subgraph.eraseInput(p);
     }
-    return insert_after ? in_graph->insertAfter(insert_after) : subgraph.prependNode(in_graph);
+    return in_graph->insertAfter(insert_after);
   }
 
   // turn consumer node n into a fusion group with just n inside

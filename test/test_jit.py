@@ -1992,6 +1992,7 @@ class TestScript(JitTestCase):
         else:
             outputs_ge = ge(*inputs)
         self.assertEqual(outputs, outputs_ge)
+        return ge
 
         return ge
 
@@ -2310,6 +2311,24 @@ a")
             return len(a) == 0
 
         self.checkScript(func2, ())
+
+    def test_tensor_scalar_fusion(self):
+        def should_fuse(x):
+            z = 3.
+            y = x + z
+            return x * y
+
+        def should_not_fuse(x, z):
+            y = x + int(z)
+            return x * y
+
+        inputs = [torch.randn(2, 2, dtype=torch.float)]
+        ge = self.checkScript(should_fuse, inputs)
+        self.assertExpectedGraph(ge.graph_for(*inputs), subname='1')
+
+        inputs = [torch.randn(2, 2, dtype=torch.float), torch.tensor(3., dtype=torch.float)]
+        ge = self.checkScript(should_not_fuse, inputs)
+        self.assertExpectedGraph(ge.graph_for(*inputs), subname='2')
 
     def test_list_ops(self):
         def test_equality():
