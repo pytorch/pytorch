@@ -82,7 +82,8 @@ template <typename scalar_t>
     auto policy = thrust::cuda::par(allocator).on(stream);
 
     Tensor input_flat = self.transpose(dim, 0);
-    std::vector<int64_t> orig_sizes(input_flat.sizes().begin(), input_flat.sizes().end());
+    //std::vector<int64_t> orig_sizes(input_flat.sizes().begin(), input_flat.sizes().end());
+    auto orig_sizes = input_flat.sizes().vec();
     input_flat = input_flat.contiguous().view({input_flat.size(0), -1});
 
     scalar_t* input_flat_ptr = input_flat.data<scalar_t>();
@@ -97,10 +98,9 @@ template <typename scalar_t>
         for (int64_t i = 0; i < numel; ++i) {
           scalar_t lhs = input_flat_ptr[i + a * numel];
           scalar_t rhs = input_flat_ptr[i + b * numel];
-          if ( lhs < rhs) {
+          if (lhs < rhs) {
             return true;
-          }
-          else if ( lhs > rhs ) {
+          } else if (lhs > rhs) {
             return false;
           }
         }
@@ -115,15 +115,14 @@ template <typename scalar_t>
     int64_t* input_sorted_indices_ptr = input_sorted_indices.data<int64_t>();
     auto last = thrust::unique(policy, input_sorted_indices_ptr, input_sorted_indices_ptr + input_sorted_indices.numel(),
       [=] __device__ (int64_t a, int64_t b) -> bool {
-        bool eq = true;
         for (int64_t i = 0; i < numel; ++i) {
           scalar_t lhs = input_sorted_ptr[i + a * numel];
           scalar_t rhs = input_sorted_ptr[i + b * numel];
           if ( lhs != rhs ) {
-            eq = false;
+            return false;
           }
         }
-        return eq;
+        return true;
       });
     input_sorted_indices.resize_(last - input_sorted_indices_ptr);
     Tensor output_dim = input_sorted.index_select(0, input_sorted_indices);

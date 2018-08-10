@@ -67,8 +67,8 @@ std::tuple<Tensor, Tensor> _unique_dim_cpu_template(
   std::sort(indices.begin(), indices.end(),
     [&](int64_t a, int64_t b) -> bool {
       for (int64_t i = 0; i < numel; ++i) {
-        scalar_t lhs = input_flat_ptr[i + a * input_flat.size(1)];
-        scalar_t rhs = input_flat_ptr[i + b * input_flat.size(1)];
+        scalar_t lhs = input_flat_ptr[i + a * numel];
+        scalar_t rhs = input_flat_ptr[i + b * numel];
         if (lhs < rhs) {
           return true;
         }
