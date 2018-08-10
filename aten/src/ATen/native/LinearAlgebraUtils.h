@@ -40,17 +40,15 @@ static inline int64_t matrixStride(const Tensor& batched_matrices) {
   return batched_matrices.size(-1) * batched_matrices.size(-2);
 }
 
-// Returns the epsilon value for floating types
-static inline Tensor _get_epsilon(const Type& type) {
-  switch (type.scalarType()) {
-    case at::ScalarType::Half:
-      return type.tensor({}).fill_(std::numeric_limits<at::Half>::epsilon());
+// Returns the epsilon value for floating types except half
+static inline double _get_epsilon(const ScalarType& sc_type) {
+  switch (sc_type) {
     case at::ScalarType::Float:
-      return type.tensor({}).fill_(std::numeric_limits<float>::epsilon());
+      return static_cast<double>(std::numeric_limits<float>::epsilon());
     case at::ScalarType::Double:
-      return type.tensor({}).fill_(std::numeric_limits<double>::epsilon());
+      return std::numeric_limits<double>::epsilon();
     default:
-      AT_ERROR("This function doesn't handle non-floating type");
+      AT_ERROR("This function doesn't handle types other than float and double");
   }
 }
 

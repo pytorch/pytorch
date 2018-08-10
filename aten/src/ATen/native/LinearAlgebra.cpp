@@ -146,9 +146,8 @@ Tensor matrix_rank(const Tensor& self, bool symmetric) {
            "of floating types");
 
   Tensor S = _matrix_rank_helper(self, symmetric);
-  Tensor tol = _get_epsilon(self.type()) * std::max(self.size(0), self.size(1));
-  tol.mul_(S.max());
-  return (S > tol).sum();
+  double tol = _get_epsilon(self.type().scalarType()) * std::max(self.size(0), self.size(1));
+  return (S > S.max().mul_(tol)).sum();
 }
 
 static void check_1d(const Tensor& t, const char* arg, const char* fn) {
