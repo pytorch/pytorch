@@ -154,6 +154,8 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/passes/decompose_addmm.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/erase_number_types.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/graph_fuser.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/fusers/cpu/cpu_fusion_pass.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/fusers/cuda/cuda_fusion_pass.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/inplace_check.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/loop_unrolling.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/lower_grad_of.cpp
