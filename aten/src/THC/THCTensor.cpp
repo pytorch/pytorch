@@ -67,8 +67,9 @@ THCTensor *THCTensor_new(THCState *state, at::ScalarType scalar_type) {
 
 void THCTensor_resize(THCState *state, THCTensor *self, at::IntList size, at::IntList stride) {
   THArgCheck(size.data() != NULL, 2, "invalid size");
-  if(stride.data())
+  if(stride.data()) {
     THArgCheck(stride.size() == size.size(), 3, "invalid stride");
+  }
 
 #ifdef DEBUG
   THAssert(size.size() <= INT_MAX);
@@ -170,10 +171,10 @@ void THCTensor_set(THCState *state, THCTensor *self, THCTensor *src)
 
 void THCTensor_setStorage(THCState *state, THCTensor *self, THCStorage *storage_, ptrdiff_t storageOffset_, at::IntList size_, at::IntList stride_)
 {
-  if(size_.data() && stride_.data())
+  if (stride_.data()) {
     THArgCheck(size_.size() == stride_.size(), 5, "inconsistent size/stride sizes");
+  }
 
-  AT_CHECK(size_.data(), "size must not be null");
   THCTensor_setStorageNd(state,
                          self,
                          storage_,

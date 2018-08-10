@@ -82,10 +82,9 @@ THCTensor *THCTensor_(newWithTensor)(THCState *state, THCTensor *tensor)
 
 /* Storage init */
 THCTensor *THCTensor_(newWithStorage)(THCState *state, THCStorage *storage, ptrdiff_t storageOffset, at::IntList sizes, at::IntList strides) {
-  if (sizes.data() && strides.data()) {
+  if (strides.data()) {
     AT_CHECK(sizes.size() == strides.size(), "number of sizes and strides must match");
   }
-  AT_CHECK(sizes.data(), "size must not be null");
   THCTensor *self = new THCTensor(THCStorage_(new)(state));
   THCTensor_(setStorageNd)(state, self, storage, storageOffset, sizes.size(),
                            const_cast<int64_t*>(sizes.data()), const_cast<int64_t*>(strides.data()));

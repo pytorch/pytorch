@@ -72,10 +72,9 @@ THTensor *THTensor_(newWithTensor)(THTensor *tensor)
 
 /* Storage init */
 THTensor *THTensor_(newWithStorage)(THStorage *storage, ptrdiff_t storageOffset, at::IntList sizes, at::IntList strides) {
-  if (sizes.data() && strides.data()) {
+  if (strides.data()) {
     AT_CHECK(sizes.size() == strides.size(), "number of sizes and strides must match");
   }
-  AT_CHECK(sizes.data(), "size must not be null");
   THTensor *self = new THTensor(THStorage_(new)());
   THTensor_(setStorageNd)(self, storage, storageOffset, sizes.size(),
                           const_cast<int64_t*>(sizes.data()), const_cast<int64_t*>(strides.data()));
