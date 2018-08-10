@@ -185,20 +185,50 @@ static void prod_kernel_impl(Tensor& result, const Tensor& self, at::optional<in
 
 template<typename scalar_t>
 struct NormReduction {
-  static void apply(Tensor& res, const Tensor& self, Scalar p, int64_t dim, bool keepdim) {
-    std::cout << "NormReduction called" << std::endl;
+  static void apply(Tensor& res, const Tensor& self, Scalar p, at::optional<int64_t> dim, bool keepdim) {
+    //std::cout << "NormReduction called" << std::endl;
     auto out_ = res.data<scalar_t>();
     auto data_ = self.data<scalar_t>();
     auto numel = self.numel();
-    //if (!dim.has_value()) {
-    //  std::cout << "dim has no value, not supported yet, TODO" << std::endl;
-    //  return;
-    //}
-    //int64_t n = self.size(*dim);
+    if (!dim.has_value()) {
+      std::cout << "dim has no value, not supported yet, TODO" << std::endl;
+      return;
+    }
+
+    int64_t n = self.size(*dim);
+    int64_t stride = self.stride(*dim);
+    // A contiguous tensor does not need to hold a meaningful stride
+    // if the corresponding size is 1
+    if (n == 1) {
+      stride = 1;
+      for (int64_t i = self.ndimension() - 1; i > *dim; i--) {
+        stride *= self.size(i);
+      }
+    }
+
+    int64_t batch = numel / (n * stride);
+    if (stride == 1) {
+      parallel_for(0, batch, 1, [=](int64_t begin, int64_t end) {
+        for (int64_t b = begin; b < end; b++) {
+          const scalar_t* data = &data_[b * n];
+          scalar_t result = 0;
+          for (int64_t k = 0; k < n; k++){
+            // p == 2
+            result += data[k] * data[k];
+          }
+          out_[b] = std::sqrt(result);
+        }
+      });
+
+    } else {
+      std::cout << "not supported yet" << std::endl;
+    }
+
   }
+
 };
 
-static void norm_kernel_impl(Tensor& result, const Tensor& self, Scalar p, int64_t dim, bool keepdim) {
+static void norm_kernel_impl(Tensor& result, const Tensor& self, Scalar p, at::optional<int64_t> dim, bool keepdim) {
   AT_DISPATCH_FLOATING_TYPES(self.type(), "norm", [&] {
     NormReduction<scalar_t>::apply(result, self, p, dim, keepdim);
   });

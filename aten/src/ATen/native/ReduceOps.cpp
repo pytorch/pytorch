@@ -586,7 +586,7 @@ Tensor& _sum_out(Tensor &result, const Tensor &self, IntList dims, bool keepdim)
 }
 
 Tensor& _norm_out_cpu(Tensor& result, const Tensor& self, Scalar p, int64_t dim_, bool keepdim) {
-  std::cout << "p = " << p << ", dim = " << dim_ << ", keepdim = " << keepdim << std::endl;
+  //std::cout << "p = " << p << ", dim = " << dim_ << ", keepdim = " << keepdim << std::endl;
   int64_t dim = maybe_wrap_dim(dim_, self.dim());
   if (_dimreduce_return_trivial(result, self, 0, dim, keepdim))
     return result;
@@ -615,11 +615,15 @@ Tensor &norm_out(Tensor &result, const Tensor &self, Scalar p, int64_t dim, bool
   if (_dimreduce_return_trivial(result, self, 0, dim, keepdim)) {
     return result;
   } else {
+#if 1
     if (self.is_cuda()) {
       return at::_th_norm_out(result, self, p, dim, keepdim);
     } else {
       return _norm_out_cpu(result, self, p, dim, keepdim);
     }
+#else
+    return at::_th_norm_out(result, self, p, dim, keepdim);
+#endif
   }
 }
 
