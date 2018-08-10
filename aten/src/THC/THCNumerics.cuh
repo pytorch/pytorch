@@ -7,11 +7,6 @@
 #include "THCHalf.h"
 #include "ATen/ATen.h"
 #include "ATen/cuda/NumericLimits.cuh"
-// define constants like M_PI and C keywords for MSVC
-#ifdef _MSC_VER
-#define _USE_MATH_DEFINES
-#include <math.h>
-#endif
 
 // WARNING: THCNumerics is being deprecated. Please follow the comments
 // in this file to learn about new usages.
@@ -427,7 +422,14 @@ static inline __host__ __device__ half lgamma(half a) {
   }
 
   static inline __host__ __device__ bool isnan(half a) {
-    return ::isnan(static_cast<at::Half>(a));
+    #ifdef _MSC_VER
+      // @TODO: isnan doesn't seem to resolve in windows build properly
+      //        investigate if this could be a bug in CUDA Math API where 
+      //        the isnan, isinf aren't properly implemented 
+      return ::isnan((float)static_cast<at::Half>(a));
+    #else
+      return ::isnan(static_cast<at::Half>(a));
+    #endif
   }
 
   static inline __host__ __device__ bool isinf(half a) {
