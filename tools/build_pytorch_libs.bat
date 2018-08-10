@@ -91,7 +91,6 @@ IF "%CC%"=="gcc" IF "%CXX%"=="g++" (
   set BASIC_C_FLAGS=%BASIC_C_FLAGS: /= -%
   set LDFLAGS=%LDFLAGS:/LIBPATH:=-L%
   set USE_GCC=1
-  goto read_loop
 )
 
 IF "%USE_GCC%" == "1" (
