@@ -378,7 +378,6 @@ void THCudaBlas_HgemmStridedBatched(THCState *state, char transa, char transb, i
 }
 #endif
 
-#ifdef __HIP_PLATFORM_HCC__
 void THCudaBlas_SgemmBatched(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k,
                              float alpha, const float *a[], int64_t lda, const float *b[], int64_t ldb,
                              float beta, float *c[], int64_t ldc, int64_t batchCount)
@@ -388,6 +387,8 @@ void THCudaBlas_SgemmBatched(THCState *state, char transa, char transb, int64_t 
     THError("Cublas_SgemmBatched only supports m, n, k, lda, ldb, ldc, batchCount"
             "with the bound [val] <= %d", INT_MAX);
   }
+
+#ifdef __HIP_PLATFORM_HCC__
 
   const int64_t stridea = (transa == 'N' || transa == 'n') ? lda*k : lda*n;
   const int64_t strideb = (transb == 'N' || transb == 'n') ? ldb*n : ldb*k;
@@ -395,17 +396,7 @@ void THCudaBlas_SgemmBatched(THCState *state, char transa, char transb, int64_t 
 
   THCudaBlas_SgemmStridedBatched(state, transa, transb, m, n, k, alpha, *a, lda, stridea, *b, ldb, strideb, beta, *c, ldc, stridec, batchCount);
 
-}
 #else
-void THCudaBlas_SgemmBatched(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k,
-                             float alpha, const float *a[], int64_t lda, const float *b[], int64_t ldb,
-                             float beta, float *c[], int64_t ldc, int64_t batchCount)
-{
-  if( (m >= INT_MAX) || (n >= INT_MAX) || (k >= INT_MAX) || (lda >= INT_MAX)  || (ldb >= INT_MAX) || (ldc >= INT_MAX) || (batchCount >= INT_MAX) )
-  {
-    THError("Cublas_SgemmBatched only supports m, n, k, lda, ldb, ldc, batchCount"
-            "with the bound [val] <= %d", INT_MAX);
-  }
 
   adjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
   cublasOperation_t opa = convertTransToCublasOperation(transa);
@@ -417,8 +408,8 @@ void THCudaBlas_SgemmBatched(THCState *state, char transa, char transb, int64_t 
                                    opa, opb, (int)m, (int)n, (int)k,
                                    &alpha, a, (int)lda, b, (int)ldb, &beta, c, (int)ldc,
                                    (int)batchCount));
-}
 #endif
+}
 
 #if CUDA_VERSION >= 8000 || defined __HIP_PLATFORM_HCC__
 void THCudaBlas_SgemmStridedBatched(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k,
@@ -445,7 +436,6 @@ void THCudaBlas_SgemmStridedBatched(THCState *state, char transa, char transb, i
 }
 #endif
 
-#ifdef __HIP_PLATFORM_HCC__
 void THCudaBlas_DgemmBatched(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k,
                              double alpha, const double *a[], int64_t lda, const double *b[], int64_t ldb,
                              double beta, double *c[], int64_t ldc, int64_t batchCount)
@@ -455,24 +445,16 @@ void THCudaBlas_DgemmBatched(THCState *state, char transa, char transb, int64_t 
     THError("Cublas_DgemmBatched only supports m, n, k, lda, ldb, ldc, batchCount"
             "with the bound [val] <= %d", INT_MAX);
   }
+
+#ifdef __HIP_PLATFORM_HCC__
 
   const int64_t stridea = (transa == 'N' || transa == 'n') ? lda*k : lda*n;
   const int64_t strideb = (transb == 'N' || transb == 'n') ? ldb*n : ldb*k;
   const int64_t stridec = ldc*n;
-  
+
   THCudaBlas_DgemmStridedBatched(state, transa, transb, m, n, k, alpha, *a, lda, stridea, *b, ldb, strideb, beta, *c, ldc, stridec, batchCount);
 
-}
 #else
-void THCudaBlas_DgemmBatched(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k,
-                             double alpha, const double *a[], int64_t lda, const double *b[], int64_t ldb,
-                             double beta, double *c[], int64_t ldc, int64_t batchCount)
-{
-  if( (m >= INT_MAX) || (n >= INT_MAX) || (k >= INT_MAX) || (lda >= INT_MAX)  || (ldb >= INT_MAX) || (ldc >= INT_MAX) || (batchCount >= INT_MAX) )
-  {
-    THError("Cublas_DgemmBatched only supports m, n, k, lda, ldb, ldc, batchCount"
-            "with the bound [val] <= %d", INT_MAX);
-  }
 
   adjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
   cublasOperation_t opa = convertTransToCublasOperation(transa);
@@ -484,8 +466,8 @@ void THCudaBlas_DgemmBatched(THCState *state, char transa, char transb, int64_t 
                                    opa, opb, (int)m, (int)n, (int)k,
                                    &alpha, a, (int)lda, b, (int)ldb, &beta, c, (int)ldc,
                                    (int)batchCount));
-}
 #endif
+}
 
 #if CUDA_VERSION >= 8000 || defined __HIP_PLATFORM_HCC__
 void THCudaBlas_DgemmStridedBatched(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k,
