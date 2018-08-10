@@ -37,9 +37,10 @@ jobs:
           git submodule update --init
           .jenkins/pytorch/build.sh
     - persist_to_workspace:
-        root: /opt/conda/lib/python3.6/site-packages/torch
+        root: /
         paths:
-          - "*"
+          - opt/conda/lib/python3.6/site-packages/torch
+          - home/circleci/project/build/bin
   linux_xenial_cuda9_2_cudnn7_py3_gcc7_test:
     machine:
       image: default
@@ -77,8 +78,9 @@ jobs:
           id=$(docker run --runtime=nvidia -t -d -w /var/lib/jenkins 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7:226)
           pwd
           docker cp /home/circleci/project/. "$id:/var/lib/jenkins/workspace"
+          docker cp "/opt/workspace/home/circleci/project/build/bin" "$id:/var/lib/jenkins/workspace/build/bin"
           echo "mkdir -p /opt/conda/lib/python3.6/site-packages" | docker exec -u jenkins -i "$id" bash
-          docker cp "/opt/workspace" "$id:/opt/conda/lib/python3.6/site-packages/torch"
+          docker cp "/opt/workspace/opt/conda/lib/python3.6/site-packages/torch" "$id:/opt/conda/lib/python3.6/site-packages/torch"
           (echo "export SCCACHE_BUCKET=$SCCACHE_BUCKET" && echo 'sudo chown -R jenkins workspace /opt/conda/lib/python3.6/site-packages/torch && cd workspace && git submodule update --init && .jenkins/pytorch/test.sh') | docker exec -u jenkins -i "$id" bash
   macos_10_13_py3_build:
     macos:
