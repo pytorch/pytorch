@@ -399,6 +399,22 @@ def sparse_(tensor, sparsity, std=0.01):
     return tensor
 
 
+def init_as(tensor, target_tensor):
+    r"""Fills the input `Tensor` with values from the target tensor.
+
+        Args:
+            tensor: tensor: an n-dimensional `torch.Tensor`
+            target_tensor: an n-dimensional `torch.Tensor` with target values
+
+        Examples:
+            >>> w = torch.empty(3, 5)
+            >>> y = torch.ones(3, 5)
+            >>> nn.init.init_as(w, y)
+    """
+    with torch.no_grad():
+        tensor.copy_(target_tensor)
+
+
 # for backward compatibility
 def _make_deprecate(meth):
     new_name = meth.__name__
