@@ -759,10 +759,7 @@
 # Additionally, arguments `padding_mode` and `interpolation_mode` are cast to
 # enums defined in `native/GridSampler.h`. `cudnn_grid_sampler` doesn't take in
 # `interpolation_mode` because it only supports Bilinear interpolation mode.
-#
-# ssnl: Currently `interpolation_mode` is just a placeholder. It is not really
-#       used. Everywhere Bilinear is assumed. I will add Nearest soon.
-- func: grid_sampler(Tensor input, Tensor grid, int64_t padding_mode) -> Tensor
+- func: grid_sampler(Tensor input, Tensor grid, int64_t interpolation_mode, int64_t padding_mode) -> Tensor
   variants: function
 
 - func: grid_sampler_2d(Tensor input, Tensor grid, int64_t interpolation_mode, int64_t padding_mode) -> Tensor
