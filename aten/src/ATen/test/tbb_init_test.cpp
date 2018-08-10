@@ -4,14 +4,13 @@
 #include "test_seed.h"
 #include <thread>
 
-using namespace at;
 
 // This checks whether threads can see the global
 // numbers of threads set and also whether the scheduler
 // will throw an exception when multiple threads call
 // their first parallel construct.
 void test(int given_num_threads) {
-  auto t = ones({1000 * 1000}, CPU(kFloat));
+  auto t = at::ones({1000 * 1000}, at::CPU(at::kFloat));
   if (given_num_threads >= 0) {
     ASSERT(at::get_num_threads() == given_num_threads);
   } else {

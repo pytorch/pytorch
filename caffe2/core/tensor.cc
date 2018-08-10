@@ -16,6 +16,8 @@ CAFFE2_DEFINE_int64(
 
 namespace caffe2 {
 
+CAFFE_DEFINE_KNOWN_TYPE(Tensor);
+
 TensorPrinter::TensorPrinter(
     const std::string& tensor_name,
     const std::string& file_name,

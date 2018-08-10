@@ -310,6 +310,16 @@ RegisterOperators reg({
     };                                                                 \
   }),
 
+// Convert an python index (which may be negative) into an index usable for a
+// C++ container
+int64_t normalizeIndex(int64_t idx, int64_t list_size) {
+  if (idx < 0) {
+    // Handle negative indexing
+    idx = list_size + idx;
+  }
+  return idx;
+}
+
 template <typename T>
 Operation listSelect(Node* node) {
   return [=](Stack& stack) {
@@ -317,19 +327,12 @@ Operation listSelect(Node* node) {
     int64_t idx;
     pop(stack, list, idx);
     const int64_t list_size = list->elements().size();
-    if (idx >= list_size) {
+    const int64_t normalized_idx = normalizeIndex(idx, list_size);
+    if (normalized_idx < 0 || normalized_idx >= list_size) {
       throw std::out_of_range("list index out of range");
     }
 
-    if (idx < 0) {
-      // Handle negative indexing
-      idx = list_size + idx;
-      if (idx < 0) {
-        throw std::out_of_range("list index out of range");
-      }
-    }
-
-    auto element = list->elements().at(idx);
+    auto element = list->elements()[normalized_idx];
     push(stack, std::move(element));
     return 0;
   };
@@ -413,6 +416,42 @@ Operation listAdd(Node* node) {
   };
 }
 
+template <typename TList, typename TElement>
+Operation listSlice(Node* node) {
+  return [](Stack& stack) {
+    TList list;
+    int64_t start;
+    int64_t end;
+    int64_t step;
+
+    pop(stack, list, start, end, step);
+    const int64_t list_size = list->elements().size();
+
+    // clamp start and end to the bounds of the list
+    const auto normalized_start =
+        std::max((int64_t)0, normalizeIndex(start, list_size));
+    const auto normalized_end =
+        std::min(list_size, normalizeIndex(end, list_size));
+
+    std::vector<TElement> sliced_list;
+    if (normalized_end <= normalized_start) {
+      // early exit if the slice is trivially empty
+      push(stack, sliced_list);
+      return 0;
+    }
+
+    sliced_list.reserve(normalized_end - normalized_start);
+
+    for (auto i = normalized_start; i < normalized_end;) {
+      sliced_list.push_back(list->elements()[i]);
+      i += step;
+    }
+
+    push(stack, sliced_list);
+    return 0;
+  };
+}
+
 RegisterOperators reg2({
     Operator("aten::select(int[] a, int b) -> int", listSelect<Shared<IntList>>),
     Operator("aten::select(float[] a, int b) -> float", listSelect<Shared<DoubleList>>),
@@ -430,6 +469,15 @@ RegisterOperators reg2({
     Operator("aten::add(float[] a, float[] b) -> float[]", listAdd<Shared<DoubleList>, double>),
     Operator("aten::add(Tensor[] a, Tensor[] b) -> Tensor[]", listAdd<Shared<TensorList>, at::Tensor>),
 
+    Operator(
+        "aten::slice(int[] l, int start, int end=9223372036854775807, int step=1) -> int[]",
+        listSlice<Shared<IntList>, int64_t>),
+    Operator(
+        "aten::slice(float[] l, int start, int end=9223372036854775807, int step=1) -> float[]",
+        listSlice<Shared<DoubleList>, double>),
+    Operator(
+        "aten::slice(Tensor[] l, int start, int end=9223372036854775807, int step=1) -> Tensor[]",
+        listSlice<Shared<TensorList>, at::Tensor>),
 
     DEFINE_BINARY_OP(aten::add, a + b)
     DEFINE_BINARY_OP(aten::sub, a - b)
