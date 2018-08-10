@@ -65,18 +65,19 @@ if ([[ "$BUILD_ENVIRONMENT" == *cuda* ]] || [[ "$BUILD_ENVIRONMENT" == *gcc7* ]]
 fi
 
 # Target only our CI GPU machine's CUDA arch to speed up the build
-export TORCH_CUDA_ARCH_LIST=5.2
+export TORCH_CUDA_ARCH_LIST="5.2 6.0"
 
 if [[ "$BUILD_ENVIRONMENT" == *trusty-py3.6-gcc5.4* ]]; then
   export DEBUG=1
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *ppc64le* ]]; then
-  export TORCH_CUDA_ARCH_LIST=6.0
-  python setup.py install
-else
-  WERROR=1 python setup.py install
+# ppc64le build fails when WERROR=1
+# set only when building other archtectures
+if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]]; then
+  export WERROR=1
 fi
+
+python setup.py install
 
 # Add the test binaries so that they won't be git clean'ed away
 git add -f build/bin
