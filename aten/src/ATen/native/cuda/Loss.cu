@@ -8,8 +8,8 @@
 namespace at { namespace native {
 
 Tensor kl_div_loss_backward_cuda(const Tensor& grad, const Tensor& input, const Tensor& target, int64_t reduction) {
-  auto grad_input = grad.type().zeros_like(input);
-  auto grad_expand = grad.expand_as(input);
+  Tensor grad_input = grad.type().zeros_like(input);
+  Tensor grad_expand = grad.expand_as(input);
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "kl_div_loss_backward", [&]() {
     at::cuda::CUDA_tensor_apply3<scalar_t, scalar_t, scalar_t>(
         grad_input,
