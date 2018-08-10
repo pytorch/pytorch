@@ -134,7 +134,7 @@ union Constant
   double d;
   Constant(miopenDataType_t dataType, double value) {
     if (dataType == miopenHalf || dataType == miopenFloat) {
-      f = (float) value;
+      f = static_cast<float>(value);
     } else {
       d = value;
     }
