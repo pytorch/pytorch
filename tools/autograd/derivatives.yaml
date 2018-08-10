@@ -228,6 +228,9 @@
   self: grad * tensor
   tensor: grad * self
 
+- name: _fused_dropout(Tensor self, double p, Generator generator)
+  self: _fused_dropout_backward(grad, result1, p)
+
 - name: eig(Tensor self, bool eigenvectors)
   self: not_implemented("eig")
 
