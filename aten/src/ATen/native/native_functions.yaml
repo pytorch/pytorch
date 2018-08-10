@@ -2006,3 +2006,24 @@
     CUDA: _local_scalar_dense_cuda
   variants:
     - function
+
+# Fused RNN kernels
+- func: _thnn_fused_lstm_cell(Tensor input_gates, Tensor hidden_gates, Tensor cx, Tensor? input_bias={}, Tensor? hidden_bias={}) -> (Tensor, Tensor, Tensor)
+  dispatch:
+    CUDA: _thnn_fused_lstm_cell_cuda
+  variants: function
+
+- func: _thnn_fused_lstm_cell_backward(Tensor? grad_hy, Tensor? grad_cy, Tensor cx, Tensor cy, Tensor workspace, bool has_bias) -> (Tensor, Tensor, Tensor, Tensor, Tensor)
+  dispatch:
+    CUDA: _thnn_fused_lstm_cell_backward_cuda
+  variants: function
+
+- func: _thnn_fused_gru_cell(Tensor input_gates, Tensor hidden_gates, Tensor hx, Tensor? input_bias={}, Tensor? hidden_bias={}) -> (Tensor, Tensor)
+  dispatch:
+    CUDA: _thnn_fused_gru_cell_cuda
+  variants: function
+
+- func: _thnn_fused_gru_cell_backward(Tensor grad_hy, Tensor workspace, bool has_bias) -> (Tensor, Tensor, Tensor, Tensor, Tensor)
+  dispatch:
+    CUDA: _thnn_fused_gru_cell_backward_cuda
+  variants: function
