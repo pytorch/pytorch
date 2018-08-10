@@ -151,6 +151,7 @@ IS_LINUX = (platform.system() == 'Linux')
 
 FULL_CAFFE2 = check_env_flag('FULL_CAFFE2')
 BUILD_PYTORCH = check_env_flag('BUILD_PYTORCH')
+USE_CUDA_STATIC_LINK = check_env_flag('USE_CUDA_STATIC_LINK')
 
 NUM_JOBS = multiprocessing.cpu_count()
 max_jobs = os.getenv("MAX_JOBS")
@@ -239,8 +240,9 @@ for key, value in cfg_vars.items():
 
 
 ################################################################################
-# Version and create_version_file
+# Version, create_version_file, and package_name
 ################################################################################
+package_name = os.getenv('TORCH_PACKAGE_NAME', 'torch')
 version = '0.5.0a0'
 if os.getenv('PYTORCH_BUILD_VERSION'):
     assert os.getenv('PYTORCH_BUILD_NUMBER') is not None
@@ -320,6 +322,8 @@ def build_libs(libs):
         build_libs_cmd += ['--use-cuda']
         if IS_WINDOWS:
             my_env["NVTOOLEXT_HOME"] = NVTOOLEXT_HOME
+    if USE_CUDA_STATIC_LINK:
+        build_libs_cmd += ['--cuda-static-link']
     if USE_ROCM:
         build_libs_cmd += ['--use-rocm']
     if USE_NNPACK:
@@ -1021,15 +1025,37 @@ cmdclass = {
 }
 cmdclass.update(build_dep_cmds)
 
+install_requires = [
+    'protobuf',
+    'pyyaml',
+    'numpy',
+    'future',
+    'setuptools',
+    'six',
+] if FULL_CAFFE2 else []
+
+setup_requires = ['pytest-runner'] if FULL_CAFFE2 else []
+tests_require = ['pytest-cov', 'hypothesis'] if FULL_CAFFE2 else []
+
+entry_points = {}
+if FULL_CAFFE2:
+    entry_points = {
+        'console_scripts': [
+            'convert-caffe2-to-onnx = caffe2.python.onnx.bin.conversion:caffe2_to_onnx',
+            'convert-onnx-to-caffe2 = caffe2.python.onnx.bin.conversion:onnx_to_caffe2',
+        ]
+    }
+
 if __name__ == '__main__':
     setup(
-        name="torch",
+        name=package_name,
         version=version,
         description=("Tensors and Dynamic neural networks in "
                      "Python with strong GPU acceleration"),
         ext_modules=extensions,
         cmdclass=cmdclass,
         packages=packages,
+        entry_points=entry_points,
         package_data={
             'torch': [
                 'lib/*.so*',
@@ -1062,4 +1088,8 @@ if __name__ == '__main__':
                 'lib/include/torch/csrc/cuda/*.h',
                 'lib/include/torch/torch.h',
             ]
-        })
+        },
+        install_requires=install_requires,
+        setup_requires=setup_requires,
+        tests_require=tests_require,
+    )
