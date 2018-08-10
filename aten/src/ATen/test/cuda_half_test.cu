@@ -59,9 +59,8 @@ __host__ __device__ void test(){
   assert(::abs(::atan2(Half(7.0), Half(0.0)) - ::atan2(7.0f, 0.0f)) <= threshold);
   // note: can't use  namespace on isnan and isinf in device code
   #ifdef _MSC_VER
-    // @TODO: isnan doesn't seem to resolve in windows build properly
-    //        investigate if this could be a bug in CUDA Math API where 
-    //        the isnan, isinf aren't properly implemented 
+    // Windows requires this explicit conversion. The reason is unclear
+    // related issue with clang: https://reviews.llvm.org/D37906
     assert(::abs(::isnan((float)Half(0.0)) - ::isnan(0.0f)) <= threshold);
     assert(::abs(::isinf((float)Half(0.0)) - ::isinf(0.0f)) <= threshold);
   #else

@@ -423,9 +423,8 @@ static inline __host__ __device__ half lgamma(half a) {
 
   static inline __host__ __device__ bool isnan(half a) {
     #ifdef _MSC_VER
-      // @TODO: isnan doesn't seem to resolve in windows build properly
-      //        investigate if this could be a bug in CUDA Math API where 
-      //        the isnan, isinf aren't properly implemented 
+      // Windows requires this explicit conversion. The reason is unclear
+      // related issue with clang: https://reviews.llvm.org/D37906
       return ::isnan((float)static_cast<at::Half>(a));
     #else
       return ::isnan(static_cast<at::Half>(a));
@@ -437,9 +436,8 @@ static inline __host__ __device__ half lgamma(half a) {
     return __hisinf(a) != 0;
 #else
     #ifdef _MSC_VER
-      // @TODO: isinf doesn't seem to resolve in windows build properly
-      //        investigate if this could be a bug in CUDA Math API where 
-      //        the isnan, isinf aren't properly implemented 
+      // Windows requires this explicit conversion. The reason is unclear
+      // related issue with clang: https://reviews.llvm.org/D37906
       return ::isinf((float)static_cast<at::Half>(a));
     #else
       return ::isinf(static_cast<at::Half>(a));
