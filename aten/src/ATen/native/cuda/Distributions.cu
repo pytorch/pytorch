@@ -101,43 +101,47 @@ template<typename scalar_t, typename prob_t>
 void bernoulli_tensor_cuda_kernel(
     at::Tensor& ret, const at::Tensor& p,
     std::pair<uint64_t, uint64_t> seeds) {
-  at::cuda::CUDA_tensor_apply2<scalar_t, prob_t>(
+  at::cuda::CUDA_tensor_apply2<scalar_t, prob_t, 4>(
       ret, p,
       [seeds] __device__(
-          scalar_t& ret_val, const prob_t& p_val) {
+          scalar_t& v1, scalar_t& v2, scalar_t& v3, scalar_t& v4,
+          const prob_t& p1, const prob_t& p2, const prob_t& p3, const prob_t& p4) {
         curandStatePhilox4_32_10_t state;
         curand_init(
             seeds.first,
             blockIdx.x * blockDim.x + threadIdx.x,
             seeds.second,
             &state);
-        if (std::is_same<prob_t, double>::value) {
-          double x = curand_uniform_double(&state);
-          ret_val = static_cast<scalar_t>(x <= p_val);
-        } else {
-          float x = curand_uniform(&state);
-          ret_val = static_cast<scalar_t>(x <= p_val);
-        }
-      });
+        float4 rand = curand_uniform4(&state);
+        v1 = static_cast<scalar_t>(rand.x <= p1);
+        v2 = static_cast<scalar_t>(rand.y <= p2);
+        v3 = static_cast<scalar_t>(rand.z <= p3);
+        v4 = static_cast<scalar_t>(rand.w <= p4);
+      }
+    );
 }
 
 template<typename scalar_t>
 void bernoulli_scalar_cuda_kernel(
-    at::Tensor& ret, double p,
+    at::Tensor& ret, double p_,
     std::pair<uint64_t, uint64_t> seeds) {
-  at::cuda::CUDA_tensor_apply1<scalar_t>(
-      ret,
-      [seeds, p] __device__(
-          scalar_t& ret_val) {
+  float p = static_cast<float>(p_);
+  at::cuda::CUDA_tensor_apply1<scalar_t, 4>(
+      ret, [seeds, p] __device__(
+        scalar_t& v1, scalar_t& v2, scalar_t& v3, scalar_t& v4) {
         curandStatePhilox4_32_10_t state;
         curand_init(
             seeds.first,
             blockIdx.x * blockDim.x + threadIdx.x,
             seeds.second,
             &state);
-        double x = curand_uniform_double(&state);
-        ret_val = static_cast<scalar_t>(x <= p);
-      });
+        float4 rand = curand_uniform4(&state);
+        v1 = static_cast<scalar_t>(rand.x <= p);
+        v2 = static_cast<scalar_t>(rand.y <= p);
+        v3 = static_cast<scalar_t>(rand.z <= p);
+        v4 = static_cast<scalar_t>(rand.w <= p);
+      }
+    );
 }
 
 } // namespace
