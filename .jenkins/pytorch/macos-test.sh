@@ -16,7 +16,8 @@ fi
 export PATH="${PYTORCH_ENV_DIR}/miniconda3/bin:$PATH"
 source ${PYTORCH_ENV_DIR}/miniconda3/bin/activate
 conda install -y mkl mkl-include numpy pyyaml setuptools cmake cffi ninja
-rm -rf ${PYTORCH_ENV_DIR}/miniconda3/lib/python3.6/site-packages/torch*
+# NOTE: we don't need to remove old binaries for CircleCI build
+# rm -rf ${PYTORCH_ENV_DIR}/miniconda3/lib/python3.6/site-packages/torch*
 
 git submodule update --init --recursive
 export CMAKE_PREFIX_PATH=${PYTORCH_ENV_DIR}/miniconda3/
