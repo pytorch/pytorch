@@ -28,7 +28,7 @@ REGISTER_CPU_OPERATOR(Iter, IterOp<CPUContext>);
 REGISTER_CPU_OPERATOR(AtomicIter, AtomicIterOp<CPUContext>);
 
 #ifdef CAFFE2_USE_IDEEP
-REGISTER_IDEEP_OPERATOR(AtomicIter, IDEEPFallbackOp<AtomicIterOp<CPUContext>>);
+REGISTER_IDEEP_OPERATOR(AtomicIter, IDEEPFallbackOp<AtomicIterOp<CPUContext>, SkipIndices<0>>);
 #endif
 
 REGISTER_BLOB_SERIALIZER(
