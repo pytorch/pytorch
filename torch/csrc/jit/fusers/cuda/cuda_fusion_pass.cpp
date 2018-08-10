@@ -79,18 +79,18 @@ std::unordered_set<NodeKind> simple_mappable = {
   aten::rand_like,
 };
 
-bool isSimpleMap(Node *node) {
+bool isSimpleMap(Node* node) {
   // TODO: use signature matching
-  if(simple_mappable.count(node->kind()) == 0)
+  if (simple_mappable.count(node->kind()) == 0)
     return false;
-  if((node->kind() == aten::min || node->kind() == aten::max) && node->inputs().size() == 1)
+  if ((node->kind() == aten::min || node->kind() == aten::max) && node->inputs().size() == 1)
     return false;
   return true;
 }
 
 
 struct GraphFuser {
-  Block * block;
+  Block* block;
 
   // Used to order nodes so we always consider producer-consumer fusions
   // in reverse topological order.
@@ -99,71 +99,64 @@ struct GraphFuser {
   // Newly generated nodes will copy the location where they are inserted.
   std::unordered_map<Node*,size_t> topological_index;
 
-  GraphFuser(Block * block)
-  : block(block) {}
+  GraphFuser(Block * block) : block(block) {}
 
-  at::optional<int> getDevice(Node * node) {
-    if(node->kind() == prim::FusionGroup) {
+  at::optional<int> getDevice(Node* node) {
+    if (node->kind() == prim::FusionGroup) 
       return node->i(attr::device);
-    }
-    if(auto tt = node->output()->type()->cast<TensorType>()) {
+    
+    if (auto tt = node->output()->type()->cast<TensorType>())
       return tt->device();
-    }
+    
     return at::nullopt;
   }
   // TODO: the fusion compiler has a lot of float-specific codegen
   // so for now we only consider nodes that operate on floating point numbers
   // and half values when running on a GPU with sufficient CUDA arch
-  bool hasSupportedType(Value* node) {
+  bool isSupportedValue(Value* node) {
     if (auto tt = node->type()->cast<TensorType>()) {
       if (tt->device() == kCPUDevice) return false;
       if (tt->scalarType() == at::kFloat) return true;
-      #ifdef USE_CUDA
-        // Checks for half tensor on GPU
-        if (tt->device() != kCPUDevice
-          && CUDA_VERSION >= 9
-          && tt->scalarType() == at::ScalarType::Half) {
-          return true;
-        }
-      #endif
+      if (tt->scalarType() == at::ScalarType::Half && CUDA_VERSION >= 9)
+        return true;
     }
+
     return false;
+  }
+
+  bool allValuesSupported(at::ArrayRef<Value*> list) {
+    for (Value* v : list) 
+      if (!isSupportedValue(v)) return false;
+
+    return true;
   }
 
   bool areTensorsOfSameShape(at::ArrayRef<Value*> values) {
     auto expected_type = values.at(0)->type()->cast<TensorType>();
     if (!expected_type) return false;
-    for (Value * val : values) {
+    for (Value* val : values) {
       auto val_type = val->type()->cast<TensorType>();
       if (!val_type) return false;
-      if (expected_type->device() != val_type->device()) return false;
       if (expected_type->sizes() != val_type->sizes()) return false;
     }
+
     return true;
   }
 
-  bool hasSupportedType(Node* node) {
-    return areTensorsOfSameShape(node->inputs()) &&
-           haveSupportedType(node->inputs()) &&
-           haveSupportedType(node->outputs());
+  bool isNodeSupported(Node* node) {
+    return areTensorsOfSameShape(node->inputs()) 
+    && allValuesSupported(node->inputs()) 
+    && allValuesSupported(node->outputs());
   }
 
-  bool haveSupportedType(at::ArrayRef<Value*> list) {
-    for (Value *v : list) {
-      if (!hasSupportedType(v)) return false;
-    }
-    return true;
-  }
-
-
-  bool isFusable(Node * node) {
+  bool isFusable(Node* node) {
     if (node->owningBlock() != block) return false;
     if (node->kind() == prim::FusionGroup && node->i(attr::device) != kCPUDevice) return true;
     if (!isSimpleMap(node)) return false;
 
     if (node->matches("aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor", /*const=*/attr::alpha)) {
       std::vector<Value*> inputs {node->namedInput(attr::self), node->namedInput(attr::other)};
-      return areTensorsOfSameShape(inputs) && haveSupportedType(inputs);
+      return areTensorsOfSameShape(inputs) && allValuesSupported(inputs);
     } else if (node->matches("aten::lt(Tensor self, Tensor other) -> Tensor") ||
                node->matches("aten::le(Tensor self, Tensor other) -> Tensor") ||
                node->matches("aten::gt(Tensor self, Tensor other) -> Tensor") ||
@@ -171,20 +164,18 @@ struct GraphFuser {
                node->matches("aten::eq(Tensor self, Tensor other) -> Tensor") ||
                node->matches("aten::ne(Tensor self, Tensor other) -> Tensor")) {
       // comparison operators produce Byte type, and it's ok, check only inputs
-      return areTensorsOfSameShape(node->inputs()) && haveSupportedType(node->inputs());
+      return areTensorsOfSameShape(node->inputs()) && allValuesSupported(node->inputs());
     } else if (node->matches("aten::type_as(Tensor self, Tensor other) -> Tensor")) {
       // type_as can have different input types as long as output is float, check only output
-      return haveSupportedType(node->outputs());
+      return allValuesSupported(node->outputs());
     } else {
-      return hasSupportedType(node);
+      return isNodeSupported(node);
     }
   }
 
-  bool isFusableCatNode(Node * node) {
-    if (node->kind() != aten::cat)
-      return false;
-    if (!node->is_constant(attr::dim))
-      return false;
+  bool isFusableCatNode(Node* node) {
+    if (node->kind() != aten::cat) return false;
+    if (!node->is_constant(attr::dim)) return false;
 
     auto tensors_node = node->namedInput(attr::tensors)->node();
     if (tensors_node->kind() != prim::ListConstruct) return false;
