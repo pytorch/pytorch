@@ -1,5 +1,6 @@
 #include "Functions.h"
 #include <ATen/Utils.h>
+#include <ATen/TensorOptions.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/ExpandUtils.h>
@@ -49,10 +50,6 @@ void copy_range(variable_list& out, IndexRange range, at::ArrayRef<Tensor> t) {
   AT_ASSERT(range.second <= out.size());
   AT_ASSERTM(range.second - range.first == t.size(), "inconsistent range for TensorList output");
   std::copy(t.begin(), t.end(), out.begin() + range.first);
-}
-
-std::vector<Tensor> to_tensor_list(const variable_list& variables) {
-  return fmap(variables, [](const Variable &v) { return static_cast<Tensor>(v); } );
 }
 
 Tensor not_implemented(const char* name) {
@@ -155,8 +152,9 @@ Tensor sum_backward(const Tensor & grad, IntList sizes, IntList dims, bool keepd
       auto dims_to_unsqueeze = dim_list_to_bitset(dims, sizes.size());
       Tensor res = grad;
       for (size_t i = 0; i < sizes.size(); i++){
-	if (dims_to_unsqueeze[i])
-	  res = res.unsqueeze(i);
+        if (dims_to_unsqueeze[i]) {
+          res = res.unsqueeze(i);
+        }
       }
       return res.expand(sizes);
     }
@@ -384,11 +382,25 @@ Tensor cumsum_backward(const Tensor & x, int64_t dim) {
 }
 
 Tensor logsumexp_backward(Tensor grad, const Tensor & self, Tensor result, int64_t dim, bool keepdim) {
-  if (! keepdim) {
+  if (!keepdim && self.dim() != 0) {
     grad = grad.unsqueeze(dim);
     result = result.unsqueeze(dim);
   }
   return grad * (self - result).exp();
+}
+
+Tensor unbind_backward(const variable_list& grads, int64_t dim) {
+  IntList sizes;
+  at::TensorOptions o;
+  for (auto v : grads) {
+    if (v.defined()) {
+      sizes = v.sizes();
+      o = static_cast<Tensor>(v).options();
+      break;
+    }
+  }
+  auto grads_tensors = fmap(grads, [&](const Variable &v) { return (v.defined() ? static_cast<Tensor>(v): at::zeros({}, o).expand(sizes));});
+  return at::stack(grads_tensors, dim);
 }
 
 Tensor unsqueeze_to(const Tensor & self, IntList sizes) {
@@ -520,7 +532,7 @@ Tensor select_equals_backward(Tensor grad, const Tensor & input, const Tensor & 
 }
 
 Tensor index_select_backward(Tensor grad, int64_t dim, Tensor indices, IntList sizes, bool keepdim) {
-  if (!keepdim) {
+  if (!keepdim && sizes.size() > 0) {
     grad = grad.unsqueeze(dim);
     indices = indices.unsqueeze(dim);
   }

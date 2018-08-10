@@ -1304,6 +1304,15 @@ class TestAutograd(TestCase):
         grad = torch.randn(3, 10, 10)
         torch.autograd.backward([x, y, z], grad.unbind())
         self.assertEqual(stacked.grad.data, grad)
+        # check that it works with only one gradient provided (#9977)
+        for i in range(3):
+            stacked = torch.randn(3, 10, 10, requires_grad=True)
+            outs = stacked.unbind()
+            gi = grad.unbind()[i]
+            g, = torch.autograd.grad(outs[i], stacked, gi)
+            g_expected = torch.stack([gi if j == i else torch.zeros_like(gi)
+                                      for j in range(3)], dim=0)
+            self.assertEqual(g, g_expected)
 
     def test_put(self):
         root = torch.randn(4, 5, requires_grad=True)
@@ -2953,6 +2962,7 @@ method_tests = [
     ('zero_', (S, S, S), NO_ARGS),
     ('zero_', (), NO_ARGS, 'scalar'),
     ('logsumexp', (S, S), (1,)),
+    ('logsumexp', (), (0,), 'scalar'),
     ('norm', (S, S), (2,)),
     ('norm', (S, S), (0,), '0'),
     ('norm', (S, S), (0.5,), '0_5'),

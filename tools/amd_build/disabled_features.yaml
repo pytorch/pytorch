@@ -149,7 +149,6 @@
     "aten/src/ATen/native/cuda/CuFFTPlanCache.h",
     "aten/src/ATen/native/cuda/SpectralOps.cu",
     "aten/src/ATen/native/cuda/Distributions.cu",
-    "aten/src/ATen/native/cuda/Dropout.cu"
   ],
   "disabled_functions": [
     {
