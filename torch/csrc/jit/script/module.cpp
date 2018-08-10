@@ -2,6 +2,7 @@
 #include "torch/csrc/jit/script/module.h"
 #include "torch/csrc/jit/script/compiler.h"
 #include "torch/csrc/jit/script/error_report.h"
+#include "torch/csrc/jit/export.h"
 #include "torch/csrc/jit/operator.h"
 
 namespace torch { namespace jit { namespace script {
@@ -60,6 +61,10 @@ void Method::ensure_defined() {
     creator(*this);
     method_creator = nullptr;
   }
+}
+
+void Module::save(const std::string& filename) {
+  ExportModule(*this, filename);
 }
 
 }}}
