@@ -539,8 +539,10 @@ class Caffe2Backend(Backend):
         init_ops = []
         (init_ops if has_initializers else pred_ops).extend(init_net.Proto().op)
         pred_ops.extend(pred_mh.Proto().op)
+        initial_states = {initial_h, initial_c} if n.op_type == 'LSTM' else {initial_h}
+        external_inputs = [x for x in pred_mh.Proto().external_input if x not in initial_states]
 
-        return Caffe2Ops(pred_ops, init_ops, list(pred_mh.Proto().external_input))
+        return Caffe2Ops(pred_ops, init_ops, external_inputs)
 
     @classmethod
     def _create_control_op(cls, init_model, pred_model, n, opset_version):
