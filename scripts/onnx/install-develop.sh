@@ -11,11 +11,10 @@ pip install ninja
 
 # Install caffe2
 pip install -r "$top_dir/caffe2/requirements.txt"
-python setup_caffe2.py develop
 
 # Install onnx
 pip install -e "$tp2_dir/onnx"
 
 # Install pytorch
 pip install -r "$top_dir/requirements.txt"
-python setup.py build develop
+FULL_CAFFE2=1 python setup.py install
