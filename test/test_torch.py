@@ -7050,6 +7050,47 @@ class TestTorch(TestCase):
         self.assertEqual(r[:, :50].std(), 4, 0.3)
         self.assertEqual(r[:, 50:].std(), 1, 0.2)
 
+    def test_sobolengine_unscrambled_lowdim(self):
+        engine_1d = torch.quasirandom.SobolEngine(1)
+        expected_1d = torch.tensor([0.5, 0.75, 0.25, 0.375, 0.875, 0.625, 0.125, 0.1875, 0.6875, 0.9375])
+        actual_1d = engine_1d.draw(10)
+        self.assertEqual(actual_1d, expected_1d)
+        self.assertEqual(actual_1d.size(), torch.Size([10, 1]))
+
+        engine_3d = torch.quasirandom.SobolEngine(3)
+        expected_3d = torch.tensor([0.5, 0.75, 0.25, 0.625, 0.125, 0.375, 0.875, 0.3125, 0.8125, 0.5625])
+        actual_3d = engine_3d.draw(10)
+        self.assertEqual(actual_3d[:, 2], expected_3d)
+        self.assertEqual(actual_3d[:, 0], expected_1d)
+        self.assertEqual(actual_3d.size(), torch.Size([10, 3]))
+
+        engine_3d = torch.quasirandom.SobolEngine(3)
+        draws = torch.cat([engine_3d.draw() for _ in range(0, 10)])
+        self.assertEqual(draws, actual_3d)
+
+        engine_3d = torch.quasirandom.SobolEngine(3).fast_forward(5)
+        draws = engine_3d.draw(5)
+        self.assertEqual(draws, actual_3d[5:])
+        engine_3d.reset()
+        self.assertEqual(engine_3d.draw(3), actual_3d[:3])
+        engine_3d.fast_forward(2)
+        self.assertEqual(engine_3d.draw(5), actual_3d[5:])
+
+    def test_sobolengine_unscrambled_highdim(self):
+        from collections import Counter
+        engine = torch.quasirandom.SobolEngine(1111)
+        count1 = Counter(engine.draw().view(-1).tolist())
+        count2 = Counter(engine.draw().view(-1).tolist())
+        count3 = Counter(engine.draw().view(-1).tolist())
+        self.assertEqual(count1, Counter({0.5: 1111}))
+        self.assertEqual(count2, Counter({0.25: 580, 0.75: 531}))
+        self.assertEqual(count3, Counter({0.25: 531, 0.75: 580}))
+
+        engine = torch.quasirandom.SobolEngine(1111)
+        draws = engine.draw(1000)
+        self.assertTrue(torch.all(draws <= 1))
+        self.assertTrue(torch.all(draws >= 0))
+
     def test_parsing_int64(self):
         # accepts integer arguments
         x = torch.cumsum(torch.ones(5, 5), 0)
