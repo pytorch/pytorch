@@ -62,6 +62,18 @@
   dispatch:
      CUDA: masked_scale_cuda
 
+- func: _sobol_engine_draw(int64_t n, Tensor sobolstate, Tensor quasi, int64_t dimension, int64_t num_generated) -> (Tensor, int64_t)
+  variants: function
+
+- func: _sobol_engine_ff(int64_t n, Tensor sobolstate, Tensor quasi, int64_t dimension, int64_t num_generated) -> int64_t
+  variants: function
+
+- func: _sobol_engine_scramble(Tensor sobolstate, TensorList ltm, int64_t dimension) -> Tensor
+  variants: function
+
+- func: _sobol_engine_initialize_state(Tensor sobolstate, int64_t dimension) -> Tensor
+  variants: function
+
 - func: abs(Tensor self) -> Tensor
 
 - func: abs_(Tensor self) -> Tensor
