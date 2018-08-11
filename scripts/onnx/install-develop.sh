@@ -9,12 +9,10 @@ tp2_dir="$top_dir/third_party"
 
 pip install ninja
 
-# Install caffe2
-pip install -r "$top_dir/caffe2/requirements.txt"
-
 # Install onnx
 pip install -e "$tp2_dir/onnx"
 
-# Install pytorch
+# Install caffe2 and pytorch
+pip install -r "$top_dir/caffe2/requirements.txt"
 pip install -r "$top_dir/requirements.txt"
 FULL_CAFFE2=1 python setup.py build_deps develop 
