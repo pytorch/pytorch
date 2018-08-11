@@ -655,7 +655,8 @@ def _get_methods(cls):
 
 _compiled_methods_whitelist = {
     'forward', 'register_buffer', 'register_parameter', 'add_module',
-    '_apply', 'apply', 'cuda', 'cpu', 'type', 'float', 'double', 'half',
+    '_apply', 'apply', 'apply_local_tensors',
+    'cuda', 'cpu', 'type', 'float', 'double', 'half',
     'state_dict', 'load_state_dict', '_load_from_state_dict', 'parameters',
     'named_parameters', '_all_buffers', 'children', 'named_children', 'modules',
     'named_modules', 'zero_grad', 'share_memory', '_get_name', 'extra_repr',

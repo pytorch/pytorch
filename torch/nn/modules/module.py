@@ -180,24 +180,6 @@ class Module(object):
             raise KeyError("module name can't be empty string \"\"")
         self._modules[name] = module
 
-    def _apply(self, fn):
-        for module in self.children():
-            module._apply(fn)
-
-        for param in self._parameters.values():
-            if param is not None:
-                # Tensors stored in modules are graph leaves, and we don't
-                # want to create copy nodes, so we have to unpack the data.
-                param.data = fn(param.data)
-                if param._grad is not None:
-                    param._grad.data = fn(param._grad.data)
-
-        for key, buf in self._buffers.items():
-            if buf is not None:
-                self._buffers[key] = fn(buf)
-
-        return self
-
     def apply(self, fn):
         r"""Applies ``fn`` recursively to every submodule (as returned by ``.children()``)
         as well as self. Typical use includes initializing the parameters of a model
@@ -240,6 +222,51 @@ class Module(object):
             module.apply(fn)
         fn(self)
         return self
+
+    def apply_local_tensors(self, fn):
+        r"""Applies ``fn`` to the various tensors within the module.
+
+        This method differs from ``apply()`` in that it acts on the tensors
+        of the module rather than the module itself.
+
+        Specifically, the method will apply the given function to
+        tensor members, after detaching and with version tracking disabled
+        (i.e. on ``.data``). It operates non-recursively (hence "local").
+
+        Args:
+            fn (:class:`Tensor` -> :class:`Tensor`):
+                function to be applied to each tensor, returning the
+                desired new value of the tensor.
+
+        Returns:
+            Module: self
+
+        Example::
+
+            >>> # Converts model's non-batchnorm parameters to half precision.
+            >>> for m in model.modules()
+            >>>     if isinstance(m, torch.nn.modules.batchnorm._BatchNorm):
+            >>>         continue
+            >>>     m.apply_local_tensors(
+            >>>         lambda t: t.half() if t.is_floating_point() else t)
+        """
+        for param in self._parameters.values():
+            if param is not None:
+                # Tensors stored in modules are graph leaves, and we don't
+                # want to create copy nodes, so we have to unpack the data.
+                param.data = fn(param.data)
+                if param._grad is not None:
+                    param._grad.data = fn(param._grad.data)
+
+        for key, buf in self._buffers.items():
+            if buf is not None:
+                self._buffers[key] = fn(buf)
+
+        return self
+
+    def _apply(self, fn):
+        r"""Calls ``apply_local_tensors(fn)`` on the module and all submodules."""
+        return self.apply(lambda m: m.apply_local_tensors(fn))
 
     def cuda(self, device=None):
         r"""Moves all model parameters and buffers to the GPU.
