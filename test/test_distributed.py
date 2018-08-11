@@ -190,7 +190,7 @@ class _DistTestBase(object):
         nGPUs_per_process = nGPUs // world_size
         rank_to_GPU = {
             i: list(
-                visible_devices[i * nGPUs_per_process : (i + 1) * nGPUs_per_process]
+                visible_devices[i * nGPUs_per_process: (i + 1) * nGPUs_per_process]
             )
             for i in range(world_size)
         }
@@ -940,15 +940,15 @@ class _DistTestBase(object):
     def _test_DDP_2iter(
         self, model_base, model_DDP, input, target, loss, local_bs, rank, batch_size
     ):
-        for i in range(2):
+        for _ in range(2):
             # single cpu/gpu training
             self._test_DDP_helper(model_base, input, target, loss)
 
             # DDP training, DDP scatters subsets of input_cpu to nodes/GPUs
             self._test_DDP_helper(
                 model_DDP,
-                input[rank * local_bs : (rank + 1) * local_bs],
-                target[rank * local_bs : (rank + 1) * local_bs],
+                input[rank * local_bs: (rank + 1) * local_bs],
+                target[rank * local_bs: (rank + 1) * local_bs],
                 loss,
             )
 
@@ -1095,9 +1095,9 @@ if BACKEND == "tcp" or BACKEND == "gloo" or BACKEND == "nccl":
 
         def _join_and_reduce(self, fn):
             skip_ok = (
-                getattr(fn, "skip_if_no_cuda_distributed", False)
-                or getattr(fn, "skip_if_no_gpu", False)
-                or getattr(fn, "skip_if_small_worldsize", False)
+                getattr(fn, "skip_if_no_cuda_distributed", False) or
+                getattr(fn, "skip_if_no_gpu", False) or
+                getattr(fn, "skip_if_small_worldsize", False)
             )
             self.JOIN_TIMEOUT = get_timeout(self.id())
             for p in self.processes:
@@ -1114,10 +1114,10 @@ if BACKEND == "tcp" or BACKEND == "gloo" or BACKEND == "nccl":
                 # do this first so we don't give an error message about
                 # mismatched exit codes if the first isn't valid
                 assert (
-                    first_process.exitcode == 0
-                    or first_process.exitcode == SKIP_IF_NO_CUDA_EXIT_CODE
-                    or first_process.exitcode == SKIP_IF_NO_GPU_EXIT_CODE
-                    or first_process.exitcode == SKIP_IF_SMALL_WORLDSIZE_EXIT_CODE
+                    first_process.exitcode == 0 or
+                    first_process.exitcode == SKIP_IF_NO_CUDA_EXIT_CODE or
+                    first_process.exitcode == SKIP_IF_NO_GPU_EXIT_CODE or
+                    first_process.exitcode == SKIP_IF_SMALL_WORLDSIZE_EXIT_CODE
                 )
 
                 if first_process.exitcode == SKIP_IF_NO_CUDA_EXIT_CODE:
