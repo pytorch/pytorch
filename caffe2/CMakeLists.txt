@@ -229,6 +229,10 @@ else()
 target_compile_options(caffe2 INTERFACE "$<$<COMPILE_LANGUAGE:CXX>:-std=c++11>")
 endif()
 
+# Note(jiayq): This is not complete yet, but in the end we will need to deal with
+# explicit hidden visibility.
+target_compile_options(caffe2 PRIVATE "-fvisibility=hidden")
+
 target_compile_options(caffe2 PRIVATE "-DCAFFE2_BUILD_MAIN_LIB")
 if (MSVC AND NOT BUILD_SHARED_LIBS)
   # Note [Supporting both static and dynamic libraries on Window]
