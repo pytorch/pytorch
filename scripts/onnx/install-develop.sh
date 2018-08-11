@@ -17,4 +17,4 @@ pip install -e "$tp2_dir/onnx"
 
 # Install pytorch
 pip install -r "$top_dir/requirements.txt"
-FULL_CAFFE2=1 python setup.py install
+FULL_CAFFE2=1 python setup.py build_deps develop 
