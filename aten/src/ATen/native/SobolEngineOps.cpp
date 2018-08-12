@@ -4,7 +4,6 @@
 #include "ATen/native/SobolEngineOpsUtils.h"
 
 #include <vector>
-#include <iostream>
 
 namespace at {
 namespace native {
@@ -74,7 +73,6 @@ Tensor _sobol_engine_scramble(const Tensor& sobolstate, TensorList ltm, int64_t 
   // The m^{th} row in the d^{th} square matrix in `ltm` can be obtained by ltm_rows[d*MAXBIT + m]
   // m and d are zero-indexed
   Tensor diag_true = at::native::eye(MAXBIT, wsobolstate.options()) == 1;
-  std::cout << diag_true;
   std::vector<Tensor> ltm_rows;
   for (int64_t d = 0; d < dimension; ++d) {
     auto chunked_ltm = at::native::unbind(at::where(diag_true, at::ones({}, wsobolstate.options()), ltm[d]), 0);
