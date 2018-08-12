@@ -1,5 +1,9 @@
 #include "ATen/cuda/CUDAContext.h"
+#include "ATen/cuda/Exceptions.h"
+#include "ATen/Error.h"
+
 #include "THC/THCGeneral.h"
+
 
 namespace at { namespace cuda { 
 
@@ -14,6 +18,10 @@ int64_t current_device() {
   int cur_device;
   AT_CUDA_CHECK(cudaGetDevice(&cur_device));
   return cur_device;
+}
+
+void set_device(int64_t device) {
+  AT_CUDA_CHECK(cudaSetDevice((int)device));
 }
 
 cudaDeviceProp* getCurrentDeviceProperties() {

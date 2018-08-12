@@ -3,6 +3,7 @@
 
 #include "ATen/cuda/CUDAContext.h"
 #include "ATen/cuda/CUDAGuard.h"
+#include "ATen/cuda/CUDAEvent.h"
 
 #include "cuda_runtime.h"
 
@@ -199,4 +200,44 @@ TEST_CASE("CUDAGuardIsMovable") {
   REQUIRE(third.original_streams().size() == device_count);
   REQUIRE(third.original_device() == 0);
   REQUIRE(third.last_device() == 1);
+}
+
+TEST_CASE("CUDAEvent Syncs") {
+  const auto stream = at::cuda::createCUDAStream();
+  at::cuda::CUDAEvent event;
+
+  REQUIRE(!event.happened());
+
+  event.recordOnce(stream);
+
+  const auto wait_stream0 = at::cuda::createCUDAStream();
+  const auto wait_stream1 = at::cuda::createCUDAStream();
+
+  event.block(wait_stream0);
+  event.block(wait_stream1);
+
+  cudaStreamSynchronize(wait_stream0);
+  REQUIRE(event.happened());
+}
+
+TEST_CASE("Cross-Device Events") {
+  if (at::cuda::getNumGPUs() < 2) return;
+
+  const auto stream0 = at::cuda::createCUDAStream();
+  at::cuda::CUDAEvent event0;
+
+  at::cuda::set_device(1);
+  const auto stream1 = at::cuda::createCUDAStream();
+  at::cuda::CUDAEvent event1;
+
+  event0.record(stream0);
+  event1.record(stream1);
+
+  event0 = std::move(event1);
+
+  REQUIRE(event0.device() == 1);
+
+  event0.block(stream0);
+  cudaStreamSynchronize(stream0);
+  REQUIRE(event0.happened());
 }
