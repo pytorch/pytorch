@@ -19,7 +19,7 @@ class CudnnConvTransposeOpBase : public ConvTransposeUnpoolBase<CUDAContext> {
         deterministic_(
             this->template GetSingleArgument<int>("deterministic", 0)),
         cudnn_state_(this->template GetSingleArgument<int>("cudnn_state", 0)),
-        force_algo_(OperatorBase::GetRepeatedArgument<int>(
+        force_algo_(this->template GetRepeatedArgument<int>(
             "force_algo",
             vector<int>{-1, -1, -1})),
         enable_tensor_core_(

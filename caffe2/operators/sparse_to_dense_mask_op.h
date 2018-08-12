@@ -18,7 +18,7 @@ class SparseToDenseMaskBase : public Operator<Context> {
   SparseToDenseMaskBase(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws) {
     std::vector<int64_t> mask =
-        OperatorBase::template GetRepeatedArgument<int64_t>("mask");
+        this->template GetRepeatedArgument<int64_t>("mask");
     featuresCount_ = mask.size();
 
     CAFFE_ENFORCE(!mask.empty(), "mask can't be empty");

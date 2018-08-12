@@ -23,7 +23,7 @@ class CreateBlobsQueueOp final : public Operator<Context> {
     const auto enforceUniqueName =
         GetSingleArgument("enforce_unique_name", false);
     const auto fieldNames =
-        OperatorBase::template GetRepeatedArgument<std::string>("field_names");
+        this->template GetRepeatedArgument<std::string>("field_names");
     CAFFE_ENFORCE_EQ(this->OutputSize(), 1);
     auto queuePtr = Operator<Context>::Outputs()[0]
                         ->template GetMutable<std::shared_ptr<BlobsQueue>>();
@@ -208,7 +208,7 @@ class WeightedSampleDequeueBlobsOp final : public Operator<Context> {
         table_idx_blob_(
             OperatorBase::GetSingleArgument<int>("table_idx_blob", -1)) {
     CAFFE_ENFORCE_LT(table_idx_blob_, OutputSize() - 1);
-    vector<float> weights = OperatorBase::GetRepeatedArgument<float>("weights");
+    vector<float> weights = this->template GetRepeatedArgument<float>("weights");
     if (weights.empty()) {
       weights.resize(InputSize(), 1.0f);
     }

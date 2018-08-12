@@ -37,9 +37,9 @@ class SparseMatrixReshapeOp : public Operator<Context> {
         "Argument `new_shape` is missing.");
 
     vector<TIndex> old_shape =
-        OperatorBase::GetRepeatedArgument<TIndex>("old_shape");
+        this->template GetRepeatedArgument<TIndex>("old_shape");
     vector<TIndex> new_shape =
-        OperatorBase::GetRepeatedArgument<TIndex>("new_shape");
+        this->template GetRepeatedArgument<TIndex>("new_shape");
 
     CAFFE_ENFORCE(
         old_shape.size() == 2,

@@ -195,7 +195,7 @@ class CreateTreeCursorOp : public Operator<CPUContext> {
  public:
   CreateTreeCursorOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator(operator_def, ws),
-        fields_(OperatorBase::GetRepeatedArgument<std::string>("fields")) {}
+        fields_(this->template GetRepeatedArgument<std::string>("fields")) {}
 
   bool RunOnDevice() override {
     *OperatorBase::Output<std::unique_ptr<TreeCursor>>(0) =
@@ -240,7 +240,7 @@ class CheckDatasetConsistencyOp : public Operator<CPUContext> {
  public:
   CheckDatasetConsistencyOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator(operator_def, ws),
-        iterator_(OperatorBase::GetRepeatedArgument<std::string>("fields")) {}
+        iterator_(this->template GetRepeatedArgument<std::string>("fields")) {}
 
   bool RunOnDevice() override {
     std::vector<const TLength*> lengths;
@@ -300,7 +300,7 @@ class PackRecordsOp : public Operator<CPUContext> {
  public:
   PackRecordsOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator(operator_def, ws),
-        fields_(OperatorBase::GetRepeatedArgument<std::string>("fields")) {}
+        fields_(this->template GetRepeatedArgument<std::string>("fields")) {}
 
   bool RunOnDevice() override {
     // There should be one input per field
@@ -344,7 +344,7 @@ class UnPackRecordsOp : public Operator<CPUContext> {
  public:
   UnPackRecordsOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator(operator_def, ws),
-        fields_(OperatorBase::GetRepeatedArgument<std::string>("fields")) {}
+        fields_(this->template GetRepeatedArgument<std::string>("fields")) {}
 
   bool RunOnDevice() override {
     const auto* inputs = Input(0).template data<SharedTensorVectorPtr>();
@@ -983,7 +983,7 @@ class TrimDatasetOp : public Operator<CPUContext> {
  public:
   TrimDatasetOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator(operator_def, ws),
-        iterator_(OperatorBase::GetRepeatedArgument<std::string>("fields")),
+        iterator_(this->template GetRepeatedArgument<std::string>("fields")),
         multiple_of_(this->template GetSingleArgument<int>("multiple_of", 1)) {
     CAFFE_ENFORCE_GE(multiple_of_, 1);
   }

@@ -15,7 +15,7 @@ class BBoxTransformOp final : public Operator<Context> {
  public:
   BBoxTransformOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        weights_(OperatorBase::GetRepeatedArgument<T>(
+        weights_(this->template GetRepeatedArgument<T>(
             "weights",
             vector<T>{1.0f, 1.0f, 1.0f, 1.0f})),
         apply_scale_(

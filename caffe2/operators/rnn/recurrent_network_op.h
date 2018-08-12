@@ -224,9 +224,9 @@ class RecurrentNetworkOp final : public Operator<Context> {
       const OperatorDef& operator_def,
       Workspace* sharedWs) {
     const auto states =
-        OperatorBase::GetRepeatedArgument<std::string>("recurrent_states");
+        this->template GetRepeatedArgument<std::string>("recurrent_states");
     const auto inputs =
-        OperatorBase::GetRepeatedArgument<int>("initial_recurrent_state_ids");
+        this->template GetRepeatedArgument<int>("initial_recurrent_state_ids");
     CAFFE_ENFORCE_EQ(states.size(), inputs.size(), "states/inputs mismatch");
     std::vector<detail::RecurrentInput> ris;
     for (auto i = 0; i < states.size(); ++i) {
@@ -244,11 +244,11 @@ class RecurrentNetworkOp final : public Operator<Context> {
 
   std::vector<detail::OffsetAlias> constructAliases() {
     const auto& src =
-        OperatorBase::GetRepeatedArgument<std::string>("alias_src");
+        this->template GetRepeatedArgument<std::string>("alias_src");
     const auto& dst =
-        OperatorBase::GetRepeatedArgument<std::string>("alias_dst");
+        this->template GetRepeatedArgument<std::string>("alias_dst");
     const auto& offset =
-        OperatorBase::GetRepeatedArgument<int32_t>("alias_offset");
+        this->template GetRepeatedArgument<int32_t>("alias_offset");
     CAFFE_ENFORCE(
         src.size() == offset.size(), "alias_src/alias_offset mismatch");
     CAFFE_ENFORCE(
@@ -272,7 +272,7 @@ class RecurrentNetworkOp final : public Operator<Context> {
     */
   void initializeBlobsToRecomputeOnBackward(Workspace* sharedBlobsWs) {
     std::vector<std::string> v;
-    const auto& blobs = OperatorBase::GetRepeatedArgument<std::string>(
+    const auto& blobs = this->template GetRepeatedArgument<std::string>(
         "recompute_blobs_on_backward", v);
     for (const auto& b : blobs) {
       // Note: if the blob already was created, this is a no-op.
@@ -408,7 +408,7 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
         timestep_(this->template GetSingleArgument<std::string>(
             "timestep",
             "timestep")),
-        gradInputs_(OperatorBase::template GetRepeatedArgument<int32_t>(
+        gradInputs_(this->template GetRepeatedArgument<int32_t>(
             "outputs_with_grads")) {
     CAFFE_ENFORCE(ws);
 
@@ -417,7 +417,7 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
     links_ = constructLinks();
     params_ = constructParams(operator_def);
     recurrentGradients_ = constructRecurrentGradients(operator_def);
-    recurrentInputIds_ = OperatorBase::template GetRepeatedArgument<int32_t>(
+    recurrentInputIds_ = this->template GetRepeatedArgument<int32_t>(
         "initial_recurrent_state_ids");
 
     /* Add operators to the backward step net to handle accumulation of
@@ -466,9 +466,9 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
 
   std::vector<detail::Param> constructParams(const OperatorDef& operator_def) {
     std::vector<detail::Param> params;
-    const auto& param = OperatorBase::GetRepeatedArgument<int32_t>("param");
+    const auto& param = this->template GetRepeatedArgument<int32_t>("param");
     const auto& param_grads =
-        OperatorBase::GetRepeatedArgument<string>("param_grads");
+        this->template GetRepeatedArgument<string>("param_grads");
     CAFFE_ENFORCE(
         param_grads.empty() || param_grads.size() == param.size(),
         param.size(),
@@ -495,11 +495,11 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
       const OperatorDef& operator_def) {
     std::vector<detail::RecurrentGradient> rgs;
     const auto& recurrent =
-        OperatorBase::GetRepeatedArgument<std::string>("recurrent_states");
+        this->template GetRepeatedArgument<std::string>("recurrent_states");
     const auto& alias_src =
-        OperatorBase::GetRepeatedArgument<std::string>("alias_src");
+        this->template GetRepeatedArgument<std::string>("alias_src");
     const auto& offset =
-        OperatorBase::GetRepeatedArgument<int32_t>("alias_offset");
+        this->template GetRepeatedArgument<int32_t>("alias_offset");
 
     for (auto i = 0; i < recurrent.size(); ++i) {
       detail::RecurrentGradient rg;

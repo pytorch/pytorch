@@ -187,13 +187,13 @@ private:
   }
   std::vector<int64_t> readIntList(const std::string & name) {
     CAFFE_ENFORCE(OperatorBase::HasArgument(name));
-    return OperatorBase::GetRepeatedArgument<int64_t>(name, {});
+    return this->template GetRepeatedArgument<int64_t>(name, {});
   }
   template <int N>
   std::array<bool, N> readBoolMask(const std::string& name) {
     CAFFE_ENFORCE(OperatorBase::HasArgument(name));
     std::vector<int64_t> ints =
-        OperatorBase::GetRepeatedArgument<int64_t>(name, {});
+        this->template GetRepeatedArgument<int64_t>(name, {});
     std::array<bool, N> result;
     for (size_t i = 0; i < N; ++i) {
       result[i] = ints.at(i);

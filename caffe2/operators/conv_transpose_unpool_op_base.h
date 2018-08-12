@@ -23,10 +23,10 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
             static_cast<LegacyPadding>(this->template GetSingleArgument<int>(
                 "legacy_pad",
                 LegacyPadding::NOTSET))),
-        kernel_(OperatorBase::GetRepeatedArgument<int>("kernels")),
-        stride_(OperatorBase::GetRepeatedArgument<int>("strides")),
-        pads_(OperatorBase::GetRepeatedArgument<int>("pads")),
-        adj_(OperatorBase::GetRepeatedArgument<int>("adjs")),
+        kernel_(this->template GetRepeatedArgument<int>("kernels")),
+        stride_(this->template GetRepeatedArgument<int>("strides")),
+        pads_(this->template GetRepeatedArgument<int>("pads")),
+        adj_(this->template GetRepeatedArgument<int>("adjs")),
         order_(StringToStorageOrder(
             this->template GetSingleArgument<string>("order", "NCHW"))),
         shared_buffer_(

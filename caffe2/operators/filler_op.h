@@ -22,9 +22,9 @@ class FillerOp : public Operator<Context> {
  public:
   FillerOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        shape_(OperatorBase::GetRepeatedArgument<int64_t>("shape")),
+        shape_(this->template GetRepeatedArgument<int64_t>("shape")),
         extra_shape_(ToVectorTIndex(
-            OperatorBase::GetRepeatedArgument<int>("extra_shape"))),
+            this->template GetRepeatedArgument<int>("extra_shape"))),
         input_as_shape_(
             this->template GetSingleArgument<bool>("input_as_shape", false)) {
     if (InputSize()) {

@@ -74,7 +74,7 @@ TensorRTOp::TensorRTOp(const OperatorDef& operator_def, Workspace* ws)
       // Pull the weights from workspace and assembly it back to the onnx model,
       // notice that since we may have rewritten the net, we need to map the
       // weight names
-      auto initializers = OperatorBase::GetRepeatedArgument<std::string>("initializers");
+      auto initializers = this->template GetRepeatedArgument<std::string>("initializers");
       CAFFE_ENFORCE_EQ(
           initializers.size() % 2, 0, "initializers should come in pairs");
       std::unordered_set<std::string> initializer_set;
@@ -113,7 +113,7 @@ TensorRTOp::TensorRTOp(const OperatorDef& operator_def, Workspace* ws)
     if (!is_input) {
       // For output, we try to get its output size hint
       const std::string key = MakeString("output_size_hint_", output_idx);
-      auto output_size_hint = OperatorBase::GetRepeatedArgument<int>(key);
+      auto output_size_hint = this->template GetRepeatedArgument<int>(key);
       if (!output_size_hint.empty()) {
         std::vector<TIndex> dims;
         for (const auto v : output_size_hint) {

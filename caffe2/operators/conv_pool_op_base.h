@@ -36,10 +36,10 @@ class ConvPoolOpBase : public Operator<Context> {
                 LegacyPadding::NOTSET))),
         global_pooling_(
             this->template GetSingleArgument<int>("global_pooling", 0)),
-        kernel_(OperatorBase::GetRepeatedArgument<int>("kernels")),
-        dilation_(OperatorBase::GetRepeatedArgument<int>("dilations")),
-        stride_(OperatorBase::GetRepeatedArgument<int>("strides")),
-        pads_(OperatorBase::GetRepeatedArgument<int>("pads")),
+        kernel_(this->template GetRepeatedArgument<int>("kernels")),
+        dilation_(this->template GetRepeatedArgument<int>("dilations")),
+        stride_(this->template GetRepeatedArgument<int>("strides")),
+        pads_(this->template GetRepeatedArgument<int>("pads")),
         float16_compute_(
             this->template GetSingleArgument<bool>("float16_compute", false)),
         group_(this->template GetSingleArgument<int>("group", 1)),

@@ -79,14 +79,14 @@ class LoadOp final : public Operator<Context> {
         strip_prefix_(
             this->template GetSingleArgument<string>("strip_prefix", "")),
         db_name_(this->template GetSingleArgument<string>("db", "")),
-        db_names_(OperatorBase::GetRepeatedArgument<string>("dbs")),
+        db_names_(this->template GetRepeatedArgument<string>("dbs")),
         db_type_(this->template GetSingleArgument<string>("db_type", "")),
         keep_device_(this->template GetSingleArgument<int>("keep_device", 0)),
         load_all_(this->template GetSingleArgument<int>("load_all", 0)),
         allow_incomplete_(
             this->template GetSingleArgument<bool>("allow_incomplete", false)),
         blob_names_(
-            OperatorBase::GetRepeatedArgument<string>("source_blob_names")) {
+            this->template GetRepeatedArgument<string>("source_blob_names")) {
     if (InputSize() == 0) {
       CAFFE_ENFORCE_GT(db_type_.size(), 0, "Must specify a db type.");
       if (db_names_.empty()) {
@@ -418,7 +418,7 @@ class SaveOp final : public Operator<Context> {
         db_name_(this->template GetSingleArgument<string>("db", "")),
         db_type_(this->template GetSingleArgument<string>("db_type", "")),
         blob_names_(
-            OperatorBase::GetRepeatedArgument<string>("blob_name_overrides")) {
+            this->template GetRepeatedArgument<string>("blob_name_overrides")) {
     CAFFE_ENFORCE_GT(db_name_.size(), 0, "Must specify a db name.");
     CAFFE_ENFORCE_GT(db_type_.size(), 0, "Must specify a db type.");
     CAFFE_ENFORCE(

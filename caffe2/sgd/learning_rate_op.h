@@ -129,7 +129,7 @@ class LearningRateOp final : public Operator<Context> {
       return new ConstantWarmupLearningRate<T>(multiplier, num_iter);
     } else if (policy == "composite") {
       std::vector<int> sub_policy_num_iters =
-          OperatorBase::template GetRepeatedArgument<int>(
+          this->template GetRepeatedArgument<int>(
               "sub_policy_num_iters");
       std::list<CompositeLearningRateItem<T>> sub_policies;
       CAFFE_ENFORCE_GT(

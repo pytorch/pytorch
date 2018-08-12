@@ -22,7 +22,7 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
         deterministic_(
             this->template GetSingleArgument<int>("deterministic", 0)),
         cudnn_state_(this->template GetSingleArgument<int>("cudnn_state", 0)),
-        force_algo_(OperatorBase::GetRepeatedArgument<int>("force_algo", vector<int>{-1,-1,-1})),
+        force_algo_(this->template GetRepeatedArgument<int>("force_algo", vector<int>{-1,-1,-1})),
         enable_tensor_core_(this->template GetSingleArgument<bool>("enable_tensor_core", 1)) {
     CHECK(!deterministic_ || !exhaustive_search_);
     CAFFE_ENFORCE(group_ > 0);

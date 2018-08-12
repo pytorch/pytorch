@@ -14,7 +14,7 @@ class ByteWeightDequantOp : public Operator<Context> {
       : Operator<Context>(operator_def, ws),
         min_(this->template GetSingleArgument<float>("min", -3)),
         max_(this->template GetSingleArgument<float>("max", 3)),
-        shape_(OperatorBase::GetRepeatedArgument<int>("shape")) {}
+        shape_(this->template GetRepeatedArgument<int>("shape")) {}
 
   USE_OPERATOR_FUNCTIONS(Context);
   using Operator<Context>::Operator;

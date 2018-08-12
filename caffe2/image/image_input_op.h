@@ -199,7 +199,7 @@ ImageInputOp<Context>::ImageInputOp(
       // output type only supported with CUDA and use_gpu_transform for now
       output_type_(
           cast::GetCastDataType(ArgumentHelper(operator_def), "output_type")),
-      random_scale_(OperatorBase::template GetRepeatedArgument<int>(
+      random_scale_(this->template GetRepeatedArgument<int>(
           "random_scale",
           {-1, -1})),
       max_decode_error_ratio_(OperatorBase::template GetSingleArgument<float>(
@@ -212,16 +212,16 @@ ImageInputOp<Context>::ImageInputOp(
     minsize_ = random_scale_[0];
   }
 
-  mean_ = OperatorBase::template GetRepeatedArgument<float>(
+  mean_ = this->template GetRepeatedArgument<float>(
     "mean_per_channel",
     {OperatorBase::template GetSingleArgument<float>("mean", 0.)});
 
-  std_ = OperatorBase::template GetRepeatedArgument<float>(
+  std_ = this->template GetRepeatedArgument<float>(
     "std_per_channel",
     {OperatorBase::template GetSingleArgument<float>("std", 1.)});
 
   vector<int> additional_output_sizes =
-      OperatorBase::template GetRepeatedArgument<int>(
+      this->template GetRepeatedArgument<int>(
           "output_sizes", vector<int>(OutputSize() - 2, 1));
   additional_inputs_count_ = OutputSize() - 2;
 

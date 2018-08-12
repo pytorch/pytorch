@@ -31,7 +31,7 @@ class SplitOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   SplitOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        split_(OperatorBase::GetRepeatedArgument<int>("split")) {
+        split_(this->template GetRepeatedArgument<int>("split")) {
     CAFFE_ENFORCE(
         !(OperatorBase::HasArgument("axis") &&
           OperatorBase::HasArgument("order")),
