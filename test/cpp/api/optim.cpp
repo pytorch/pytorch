@@ -35,7 +35,8 @@ bool test_optimizer_xor(Options options) {
   const int64_t kBatchSize = 4;
   const int64_t kMaximumNumberOfEpochs = 3000;
 
-  auto optimizer = OptimizerClass(model->parameters(), options);
+  auto optimizer = OptimizerClass(std::vector<torch::Tensor>(), options);
+  optimizer.add_parameters(model->parameters());
 
   float running_loss = 1;
   int epoch = 0;
@@ -257,4 +258,23 @@ TEST_CASE("Optim/ExternalVectorOfParameters") {
   REQUIRE(parameters[0].allclose(original_parameters[0] - 1.0));
   REQUIRE(parameters[1].allclose(original_parameters[1] - 1.0));
   REQUIRE(parameters[2].allclose(original_parameters[2] - 1.0));
+}
+
+TEST_CASE("Optim/AddParameter/LBFGS") {
+  torch::manual_seed(0);
+
+  std::vector<torch::Tensor> parameters = {torch::randn({5, 5})};
+  std::vector<torch::Tensor> original_parameters = {parameters[0].clone()};
+
+  // Set all gradients to one
+  for (auto& parameter : parameters) {
+    parameter.grad() = torch::ones_like(parameter);
+  }
+
+  LBFGS optimizer(std::vector<torch::Tensor>(), 1.0);
+  optimizer.add_parameters(parameters);
+
+  optimizer.step([]() { return torch::tensor(1); });
+
+  // REQUIRE this doesn't throw
 }
