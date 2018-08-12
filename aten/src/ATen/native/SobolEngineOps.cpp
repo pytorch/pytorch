@@ -29,7 +29,7 @@ std::tuple<Tensor, Tensor> _sobol_engine_draw(const Tensor& quasi, int64_t n, co
     num_generated++;
   }
 
-  return std::make_tuple(at::native::cat(result, 0).toType(at::kFloat).mul_(RECIPD), wquasi);
+  return std::make_tuple(at::native::stack(result, 0).toType(at::kFloat).mul_(RECIPD), wquasi);
 }
 
 /// This is the core function to fast-forward a `SobolEngine` given

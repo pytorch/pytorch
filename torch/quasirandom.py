@@ -92,7 +92,7 @@ class SobolEngine(object):
         Args:
             n (Int): The number of steps to fast-forward by.
         """
-        self.quasi = torch._sobol_engine_ff(n, self.sobolstate, self.quasi, self.dimension, self.num_generated)
+        self.quasi = torch._sobol_engine_ff(self.quasi, n, self.sobolstate, self.dimension, self.num_generated)
         self.num_generated += n
         return self
 
