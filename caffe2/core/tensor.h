@@ -77,7 +77,7 @@ inline int canonical_axis_index_(int axis_index, int ndims) {
  * the allocation and de-allocation of such memory. We make a simplified
  * assumption that the memory is always contiguous.
  */
-class Tensor {
+class CAFFE2_API Tensor {
  public:
   Tensor() = delete;
   explicit Tensor(DeviceType device_type)
@@ -903,7 +903,7 @@ void TensorVectorResize(
     int size,
     DeviceType type);
 
-class TensorPrinter {
+class CAFFE2_API TensorPrinter {
  public:
   explicit TensorPrinter(
       const std::string& tensor_name = "",
