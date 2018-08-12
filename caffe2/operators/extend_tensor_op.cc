@@ -16,7 +16,7 @@ class ExtendTensorOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   ExtendTensorOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        growthPct_(OperatorBase::GetSingleArgument<int>("growthPct", 40)) {}
+        growthPct_(this->template GetSingleArgument<int>("growthPct", 40)) {}
 
   bool RunOnDevice() override {
     auto& old_tensor = Input(0);

@@ -129,7 +129,7 @@ class CuDNNPoolOp : public ConvPoolOpBase<CUDAContext> {
     // Figure out the pooling descriptor.
     if (operator_def.type().substr(0, 7) == "MaxPool") {
       bool deterministic =
-          OperatorBase::GetSingleArgument<bool>("deterministic", false);
+          this->template GetSingleArgument<bool>("deterministic", false);
 #if CUDNN_VERSION_MIN(6, 0, 0)
       mode_ =
           deterministic ? CUDNN_POOLING_MAX_DETERMINISTIC : CUDNN_POOLING_MAX;
@@ -310,7 +310,7 @@ class CuDNNPoolGradientOp : public ConvPoolOpBase<CUDAContext> {
         operator_def.type() == "MaxPool2DGradient" ||
         operator_def.type() == "MaxPool3DGradient") {
       bool deterministic =
-          OperatorBase::GetSingleArgument<bool>("deterministic", false);
+          this->template GetSingleArgument<bool>("deterministic", false);
 #if CUDNN_VERSION_MIN(6, 0, 0)
       mode_ =
           deterministic ? CUDNN_POOLING_MAX_DETERMINISTIC : CUDNN_POOLING_MAX;

@@ -114,7 +114,7 @@ class IsMemberOfOp final : public Operator<Context> {
   IsMemberOfOp(const OperatorDef& op, Workspace* ws)
       : Operator<Context>(op, ws) {
     auto dtype =
-        static_cast<TensorProto_DataType>(OperatorBase::GetSingleArgument<int>(
+        static_cast<TensorProto_DataType>(this->template GetSingleArgument<int>(
             "dtype", TensorProto_DataType_UNDEFINED));
     switch (dtype) {
       case TensorProto_DataType_INT32:

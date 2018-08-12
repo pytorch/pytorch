@@ -24,10 +24,10 @@ class MIOPENPoolOp : public ConvPoolOpBase<HIPContext> {
   MIOPENPoolOp(const OperatorDef& operator_def, Workspace* ws)
       : ConvPoolOpBase<HIPContext>(operator_def, ws),
         miopen_wrapper_(&context_),
-        alpha_(OperatorBase::GetSingleArgument<float>("alpha", 1.0)),
-        beta_(OperatorBase::GetSingleArgument<float>("beta", 0.0)),
+        alpha_(this->template GetSingleArgument<float>("alpha", 1.0)),
+        beta_(this->template GetSingleArgument<float>("beta", 0.0)),
         do_backward_(
-            OperatorBase::GetSingleArgument<bool>("do_backward", true)),
+            this->template GetSingleArgument<bool>("do_backward", true)),
         poolWs_(nullptr),
         poolWsSize_(0)
 
@@ -149,8 +149,8 @@ class MIOPENPoolGradientOp : public ConvPoolOpBase<HIPContext> {
   MIOPENPoolGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : ConvPoolOpBase<HIPContext>(operator_def, ws),
         miopen_wrapper_(&context_),
-        alpha_(OperatorBase::GetSingleArgument<float>("alpha", 1.0)),
-        beta_(OperatorBase::GetSingleArgument<float>("beta", 0.0)),
+        alpha_(this->template GetSingleArgument<float>("alpha", 1.0)),
+        beta_(this->template GetSingleArgument<float>("beta", 0.0)),
         poolWs_(nullptr),
         poolWsSize_(0),
         bwdPoolScratch_(nullptr) {

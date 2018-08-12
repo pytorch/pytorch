@@ -74,12 +74,12 @@ class PrintOp final : public Operator<Context> {
       : Operator<Context>(operator_def, ws),
         tensor_printer_(
             operator_def.input(0),
-            OperatorBase::GetSingleArgument<int>("to_file", 0)
+            this->template GetSingleArgument<int>("to_file", 0)
                 ? ws->RootFolder() + "/" + operator_def.input(0) +
                     kPrintFileExtension
                 : "",
-            OperatorBase::GetSingleArgument<int>("limit", 0)),
-        every_n_(OperatorBase::GetSingleArgument<int>("every_n", 1)) {
+            this->template GetSingleArgument<int>("limit", 0)),
+        every_n_(this->template GetSingleArgument<int>("every_n", 1)) {
     CAFFE_ENFORCE_GE(every_n_, 1);
   }
 
@@ -369,7 +369,7 @@ class WeightedSumGradientOp : public Operator<Context> {
 
   WeightedSumGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        grad_on_w_(OperatorBase::GetSingleArgument<bool>("grad_on_w", false)) {}
+        grad_on_w_(this->template GetSingleArgument<bool>("grad_on_w", false)) {}
 
   template <typename DstType>
   bool DoRunWithType() {
@@ -879,7 +879,7 @@ class LengthsToWeightsOp : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   LengthsToWeightsOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        power_(OperatorBase::GetSingleArgument<float>("power", 0.5)) {}
+        power_(this->template GetSingleArgument<float>("power", 0.5)) {}
 
   bool RunOnDevice() override {
     return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(this, Input(0));
@@ -1231,10 +1231,10 @@ class AccumulateHistogramOp : public Operator<Context> {
   AccumulateHistogramOp(const OperatorDef& def, Workspace* ws)
       : Operator<Context>(def, ws),
         lower_bound_(
-            OperatorBase::GetSingleArgument<float>("lower_bound", 0.0)),
+            this->template GetSingleArgument<float>("lower_bound", 0.0)),
         upper_bound_(
-            OperatorBase::GetSingleArgument<float>("upper_bound", 1.0)),
-        num_buckets_(OperatorBase::GetSingleArgument<int>("num_buckets", 1)) {
+            this->template GetSingleArgument<float>("upper_bound", 1.0)),
+        num_buckets_(this->template GetSingleArgument<int>("num_buckets", 1)) {
     CAFFE_ENFORCE_GT(num_buckets_, 0);
     // 2 more for histograms < lower_bound, >= upper_bound respectively
     num_output_buckets_ = num_buckets_ + 2;

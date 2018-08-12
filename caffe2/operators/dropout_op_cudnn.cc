@@ -16,9 +16,9 @@ class CuDNNDropoutOp final : public Operator<CUDAContext> {
   CuDNNDropoutOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<CUDAContext>(operator_def, ws),
         cudnn_wrapper_(&context_),
-        ratio_(OperatorBase::GetSingleArgument<float>("ratio", 0.5)),
+        ratio_(this->template GetSingleArgument<float>("ratio", 0.5)),
         is_test_(
-            OperatorBase::GetSingleArgument<int>(OpSchema::Arg_IsTest, 0)),
+            this->template GetSingleArgument<int>(OpSchema::Arg_IsTest, 0)),
         states_initialized_(false),
         random_seed_(operator_def.device_option().random_seed()) {
     CAFFE_ENFORCE_GE(ratio_, 0);
@@ -78,9 +78,9 @@ class CuDNNDropoutGradientOp final : public Operator<CUDAContext> {
   CuDNNDropoutGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<CUDAContext>(operator_def, ws),
         cudnn_wrapper_(&context_),
-        ratio_(OperatorBase::GetSingleArgument<float>("ratio", 0.5)),
+        ratio_(this->template GetSingleArgument<float>("ratio", 0.5)),
         is_test_(
-            OperatorBase::GetSingleArgument<int>(OpSchema::Arg_IsTest, 0)),
+            this->template GetSingleArgument<int>(OpSchema::Arg_IsTest, 0)),
         states_initialized_(false),
         random_seed_(operator_def.device_option().random_seed()) {
     CAFFE_ENFORCE_GE(ratio_, 0);

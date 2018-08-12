@@ -21,7 +21,7 @@ class OnnxifiOp final : public Operator<Context> {
     lib_ = onnx::initOnnxifiLibrary();
     CAFFE_ENFORCE(lib_, "Cannot initialize ONNXIFI library");
     auto onnx_model_str =
-        OperatorBase::GetSingleArgument<std::string>("onnx_model", "");
+        this->template GetSingleArgument<std::string>("onnx_model", "");
     CAFFE_ENFORCE(!onnx_model_str.empty(), "onnx_model cannot be empty");
 
     // Setup input/output descriptor templates

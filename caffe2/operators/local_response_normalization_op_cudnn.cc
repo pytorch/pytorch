@@ -12,10 +12,10 @@ class CuDNNLRNOp final : public Operator<CUDAContext> {
   CuDNNLRNOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<CUDAContext>(operator_def, ws),
         cudnn_wrapper_(&context_),
-        size_(OperatorBase::GetSingleArgument<int>("size", 0)),
-        alpha_(OperatorBase::GetSingleArgument<float>("alpha", 0)),
-        beta_(OperatorBase::GetSingleArgument<float>("beta", 0)),
-        bias_(OperatorBase::GetSingleArgument<float>("bias", 1)) {
+        size_(this->template GetSingleArgument<int>("size", 0)),
+        alpha_(this->template GetSingleArgument<float>("alpha", 0)),
+        beta_(this->template GetSingleArgument<float>("beta", 0)),
+        bias_(this->template GetSingleArgument<float>("bias", 1)) {
     CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&data_desc_));
 
     CUDNN_ENFORCE(cudnnCreateLRNDescriptor(&norm_desc_));
@@ -54,10 +54,10 @@ class CuDNNLRNGradientOp final : public Operator<CUDAContext> {
   CuDNNLRNGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<CUDAContext>(operator_def, ws),
         cudnn_wrapper_(&context_),
-        size_(OperatorBase::GetSingleArgument<int>("size", 0)),
-        alpha_(OperatorBase::GetSingleArgument<float>("alpha", 0)),
-        beta_(OperatorBase::GetSingleArgument<float>("beta", 0)),
-        bias_(OperatorBase::GetSingleArgument<float>("bias", 1)) {
+        size_(this->template GetSingleArgument<int>("size", 0)),
+        alpha_(this->template GetSingleArgument<float>("alpha", 0)),
+        beta_(this->template GetSingleArgument<float>("beta", 0)),
+        bias_(this->template GetSingleArgument<float>("bias", 1)) {
     CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&data_desc_));
 
     CUDNN_ENFORCE(cudnnCreateLRNDescriptor(&norm_desc_));

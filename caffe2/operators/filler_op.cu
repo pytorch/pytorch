@@ -44,7 +44,7 @@ bool DiagonalFillOp<CUDAContext>::FillWithType(Tensor* output) {
   // first fill everything with 0
   math::Set<T, CUDAContext>(size, T(0), data, &context_);
 
-  T value = OperatorBase::GetSingleArgument<T>("value", 0);
+  T value = this->template GetSingleArgument<T>("value", 0);
   TIndex step_size = GetStepSize(output);
   int num_diagonal_elements = ceil((float)size / step_size);
 

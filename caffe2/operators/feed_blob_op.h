@@ -14,7 +14,7 @@ class FeedBlobOp : public Operator<Context> {
     CAFFE_ENFORCE(
         OperatorBase::HasSingleArgumentOfType<string>("value"),
         "value argument must exist and be passed as a string");
-    value_ = OperatorBase::GetSingleArgument<string>("value", "");
+    value_ = this->template GetSingleArgument<string>("value", "");
   }
 
   bool RunOnDevice() override {

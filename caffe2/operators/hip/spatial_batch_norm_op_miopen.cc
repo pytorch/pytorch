@@ -30,8 +30,8 @@ class MIOpenSpatialBNOp final : public SpatialBNOp<HIPContext> {
   MIOpenSpatialBNOp(const OperatorDef& operator_def, Workspace* ws)
       : SpatialBNOp<HIPContext>(operator_def, ws),
         miopen_wrapper_(&context_),
-        alpha_(OperatorBase::GetSingleArgument<float>("alpha", 1.0)),
-        beta_(OperatorBase::GetSingleArgument<float>("beta", 0.0)),
+        alpha_(this->template GetSingleArgument<float>("alpha", 1.0)),
+        beta_(this->template GetSingleArgument<float>("beta", 0.0)),
         mode_(miopenBNSpatial) {
     CAFFE_ENFORCE_EQ(
         order_, StorageOrder::NCHW, "Only NCHW order is supported right now.");
@@ -70,8 +70,8 @@ class MIOpenSpatialBNGradientOp final : public SpatialBNGradientOp<HIPContext> {
   MIOpenSpatialBNGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : SpatialBNGradientOp<HIPContext>(operator_def, ws),
         miopen_wrapper_(&context_),
-        alpha_(OperatorBase::GetSingleArgument<float>("alpha", 1.0)),
-        beta_(OperatorBase::GetSingleArgument<float>("beta", 0.0)),
+        alpha_(this->template GetSingleArgument<float>("alpha", 1.0)),
+        beta_(this->template GetSingleArgument<float>("beta", 0.0)),
         mode_(miopenBNSpatial) {
     MIOPEN_ENFORCE(miopenCreateTensorDescriptor(&data_desc_));
     MIOPEN_ENFORCE(miopenCreateTensorDescriptor(&bn_param_desc_));

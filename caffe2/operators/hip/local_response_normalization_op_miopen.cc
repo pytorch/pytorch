@@ -28,10 +28,10 @@ class MIOPEN_LRNOP final : public Operator<HIPContext> {
       : Operator<HIPContext>(operator_def, ws),
         miopen_wrapper_(&context_),
         mode_(miopenLRNCrossChannel),
-        size_(OperatorBase::GetSingleArgument<int>("size", 0)),
-        alpha_(OperatorBase::GetSingleArgument<float>("alpha", 0)),
-        beta_(OperatorBase::GetSingleArgument<float>("beta", 0)),
-        bias_(OperatorBase::GetSingleArgument<float>("bias", 1)) {
+        size_(this->template GetSingleArgument<int>("size", 0)),
+        alpha_(this->template GetSingleArgument<float>("alpha", 0)),
+        beta_(this->template GetSingleArgument<float>("beta", 0)),
+        bias_(this->template GetSingleArgument<float>("bias", 1)) {
     MIOPEN_ENFORCE(miopenCreateTensorDescriptor(&data_desc_));
     MIOPEN_ENFORCE(miopenCreateLRNDescriptor(&norm_desc_));
     MIOPEN_ENFORCE(
@@ -67,12 +67,12 @@ class MIOPENLRNGradientOp final : public Operator<HIPContext> {
       : Operator<HIPContext>(operator_def, ws),
         miopen_wrapper_(&context_),
         mode_(miopenLRNCrossChannel),
-        size_(OperatorBase::GetSingleArgument<int>("size", 0)),
-        alpha_(OperatorBase::GetSingleArgument<float>("alpha", 0)),
-        beta_(OperatorBase::GetSingleArgument<float>("beta", 0)),
-        bias_(OperatorBase::GetSingleArgument<float>("bias", 1)),
+        size_(this->template GetSingleArgument<int>("size", 0)),
+        alpha_(this->template GetSingleArgument<float>("alpha", 0)),
+        beta_(this->template GetSingleArgument<float>("beta", 0)),
+        bias_(this->template GetSingleArgument<float>("bias", 1)),
         do_backward_(
-            OperatorBase::GetSingleArgument<bool>("do_backward", false)),
+            this->template GetSingleArgument<bool>("do_backward", false)),
         bwdLRNWs_(nullptr),
         bwdLRNScratch_(nullptr) {
     MIOPEN_ENFORCE(miopenCreateTensorDescriptor(&data_desc_));

@@ -454,8 +454,8 @@ class ReadNextBatchOp : public Operator<CPUContext> {
  public:
   ReadNextBatchOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator(operator_def, ws),
-        batchSize_(OperatorBase::GetSingleArgument<int>("batch_size", 1)),
-        enforceBatchSize_(OperatorBase::GetSingleArgument<bool>(
+        batchSize_(this->template GetSingleArgument<int>("batch_size", 1)),
+        enforceBatchSize_(this->template GetSingleArgument<bool>(
             "enforce_batch_size",
             false)) {}
 
@@ -580,9 +580,9 @@ class SortAndShuffleOp : public Operator<CPUContext> {
   SortAndShuffleOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator(operator_def, ws),
         sort_by_field_idx_(
-            OperatorBase::GetSingleArgument<int>("sort_by_field_idx", 1)),
-        batch_size_(OperatorBase::GetSingleArgument<int>("batch_size", 1)),
-        shuffle_size_(OperatorBase::GetSingleArgument<int>("shuffle_size", 1)) {
+            this->template GetSingleArgument<int>("sort_by_field_idx", 1)),
+        batch_size_(this->template GetSingleArgument<int>("batch_size", 1)),
+        shuffle_size_(this->template GetSingleArgument<int>("shuffle_size", 1)) {
   }
 
   bool RunOnDevice() override {
@@ -664,10 +664,10 @@ class ReadRandomBatchOp : public Operator<CPUContext> {
  public:
   ReadRandomBatchOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator(operator_def, ws),
-        batchSize_(OperatorBase::GetSingleArgument<int>("batch_size", 1)),
+        batchSize_(this->template GetSingleArgument<int>("batch_size", 1)),
         enforceBatchSize_(
-            OperatorBase::GetSingleArgument<bool>("enforce_batch_size", false)),
-        loopOver_(OperatorBase::GetSingleArgument<bool>("loop_over", false)) {}
+            this->template GetSingleArgument<bool>("enforce_batch_size", false)),
+        loopOver_(this->template GetSingleArgument<bool>("loop_over", false)) {}
   bool RunOnDevice() override {
     auto& cursor = OperatorBase::Input<std::unique_ptr<TreeCursor>>(0);
     auto& idxblob = Input(1);
@@ -919,7 +919,7 @@ class CollectTensorOp final : public Operator<Context> {
   CollectTensorOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         numToCollect_(
-            OperatorBase::GetSingleArgument<int>("num_to_collect", -1)),
+            this->template GetSingleArgument<int>("num_to_collect", -1)),
         numVisited_(0) {
     CAFFE_ENFORCE(numToCollect_ > 0);
   }
@@ -984,7 +984,7 @@ class TrimDatasetOp : public Operator<CPUContext> {
   TrimDatasetOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator(operator_def, ws),
         iterator_(OperatorBase::GetRepeatedArgument<std::string>("fields")),
-        multiple_of_(OperatorBase::GetSingleArgument<int>("multiple_of", 1)) {
+        multiple_of_(this->template GetSingleArgument<int>("multiple_of", 1)) {
     CAFFE_ENFORCE_GE(multiple_of_, 1);
   }
 

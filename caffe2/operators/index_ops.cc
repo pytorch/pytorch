@@ -120,7 +120,7 @@ class IndexCreateOp: public Operator<CPUContext> {
  public:
   IndexCreateOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator(operator_def, ws),
-        maxElements_(OperatorBase::GetSingleArgument<int>(
+        maxElements_(this->template GetSingleArgument<int>(
             "max_elements",
             std::numeric_limits<int>::max())) {}
 
@@ -163,7 +163,7 @@ class IndexLoadOp: public Operator<CPUContext> {
   IndexLoadOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator(operator_def, ws),
         skipFirstEntry_(
-            OperatorBase::GetSingleArgument<int>("skip_first_entry", 0)) {}
+            this->template GetSingleArgument<int>("skip_first_entry", 0)) {}
 
   bool RunOnDevice() override {
     return DispatchHelper<IndexKeyTypes>::call(this, Input(1));

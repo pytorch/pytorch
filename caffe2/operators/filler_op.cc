@@ -15,7 +15,7 @@ template <>
 template <typename T>
 bool DiagonalFillOp<CPUContext>::FillWithType(Tensor* output) {
   VerifyOutputShape(output);
-  T value = OperatorBase::GetSingleArgument<T>("value", 0);
+  T value = this->template GetSingleArgument<T>("value", 0);
   auto* data = output->template mutable_data<T>();
   // first fill everything with 0
   math::Set<T, CPUContext>(output->size(), T(0), data, &context_);

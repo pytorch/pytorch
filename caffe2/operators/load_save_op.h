@@ -44,9 +44,9 @@ class DBExistsOp final : public Operator<Context> {
       : Operator<Context>(operator_def, ws),
         ws_(ws),
         absolute_path_(
-            OperatorBase::GetSingleArgument<int>("absolute_path", false)),
-        db_name_(OperatorBase::GetSingleArgument<string>("db_name", "")),
-        db_type_(OperatorBase::GetSingleArgument<string>("db_type", "")) {}
+            this->template GetSingleArgument<int>("absolute_path", false)),
+        db_name_(this->template GetSingleArgument<string>("db_name", "")),
+        db_type_(this->template GetSingleArgument<string>("db_type", "")) {}
 
   bool RunOnDevice() override {
     string full_db_name =
@@ -74,17 +74,17 @@ class LoadOp final : public Operator<Context> {
       : Operator<Context>(operator_def, ws),
         ws_(ws),
         absolute_path_(
-            OperatorBase::GetSingleArgument<int>("absolute_path", false)),
-        add_prefix_(OperatorBase::GetSingleArgument<string>("add_prefix", "")),
+            this->template GetSingleArgument<int>("absolute_path", false)),
+        add_prefix_(this->template GetSingleArgument<string>("add_prefix", "")),
         strip_prefix_(
-            OperatorBase::GetSingleArgument<string>("strip_prefix", "")),
-        db_name_(OperatorBase::GetSingleArgument<string>("db", "")),
+            this->template GetSingleArgument<string>("strip_prefix", "")),
+        db_name_(this->template GetSingleArgument<string>("db", "")),
         db_names_(OperatorBase::GetRepeatedArgument<string>("dbs")),
-        db_type_(OperatorBase::GetSingleArgument<string>("db_type", "")),
-        keep_device_(OperatorBase::GetSingleArgument<int>("keep_device", 0)),
-        load_all_(OperatorBase::GetSingleArgument<int>("load_all", 0)),
+        db_type_(this->template GetSingleArgument<string>("db_type", "")),
+        keep_device_(this->template GetSingleArgument<int>("keep_device", 0)),
+        load_all_(this->template GetSingleArgument<int>("load_all", 0)),
         allow_incomplete_(
-            OperatorBase::GetSingleArgument<bool>("allow_incomplete", false)),
+            this->template GetSingleArgument<bool>("allow_incomplete", false)),
         blob_names_(
             OperatorBase::GetRepeatedArgument<string>("source_blob_names")) {
     if (InputSize() == 0) {
@@ -412,11 +412,11 @@ class SaveOp final : public Operator<Context> {
       : Operator<Context>(operator_def, ws),
         ws_(ws),
         absolute_path_(
-            OperatorBase::GetSingleArgument<int>("absolute_path", false)),
+            this->template GetSingleArgument<int>("absolute_path", false)),
         strip_prefix_(
-            OperatorBase::GetSingleArgument<string>("strip_prefix", "")),
-        db_name_(OperatorBase::GetSingleArgument<string>("db", "")),
-        db_type_(OperatorBase::GetSingleArgument<string>("db_type", "")),
+            this->template GetSingleArgument<string>("strip_prefix", "")),
+        db_name_(this->template GetSingleArgument<string>("db", "")),
+        db_type_(this->template GetSingleArgument<string>("db_type", "")),
         blob_names_(
             OperatorBase::GetRepeatedArgument<string>("blob_name_overrides")) {
     CAFFE_ENFORCE_GT(db_name_.size(), 0, "Must specify a db name.");
@@ -519,8 +519,8 @@ class CheckpointOp final : public Operator<Context> {
  public:
   CheckpointOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        db_pattern_(OperatorBase::GetSingleArgument<string>("db", "")),
-        every_(OperatorBase::GetSingleArgument<int>("every", 1)),
+        db_pattern_(this->template GetSingleArgument<string>("db", "")),
+        every_(this->template GetSingleArgument<int>("every", 1)),
         ws_(ws),
         save_op_def_(operator_def) {
     CAFFE_ENFORCE_GT(

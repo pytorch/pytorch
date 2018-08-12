@@ -262,7 +262,7 @@ bool PoolOp<float, CUDAContext, LpPool>::RunOnDeviceWithOrderNCHW() {
           pad_t(),
           pad_l(),
           Y->template mutable_data<float>(),
-          OperatorBase::GetSingleArgument<float>("p", 2.0));
+          this->template GetSingleArgument<float>("p", 2.0));
   return true;
 }
 
@@ -292,7 +292,7 @@ bool PoolOp<float, CUDAContext, LpPool>::RunOnDeviceWithOrderNHWC() {
           pad_t(),
           pad_l(),
           Y->template mutable_data<float>(),
-          OperatorBase::GetSingleArgument<float>("p", 2.0));
+          this->template GetSingleArgument<float>("p", 2.0));
   return true;
 }
 
@@ -328,7 +328,7 @@ bool PoolGradientOp<float, CUDAContext, LpPool>::
           pad_t(),
           pad_l(),
           dX->template mutable_data<float>(),
-          OperatorBase::GetSingleArgument<float>("p", 2.0));
+          this->template GetSingleArgument<float>("p", 2.0));
   return true;
 }
 
@@ -364,7 +364,7 @@ bool PoolGradientOp<float, CUDAContext, LpPool>::
           pad_t(),
           pad_l(),
           dX->template mutable_data<float>(),
-          OperatorBase::GetSingleArgument<float>("p", 2.0));
+          this->template GetSingleArgument<float>("p", 2.0));
   return true;
 }
 

@@ -67,10 +67,10 @@ class SparseToDenseMaskOp : public SparseToDenseMaskBase<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   SparseToDenseMaskOp(const OperatorDef& operator_def, Workspace* ws)
       : SparseToDenseMaskBase<Context>(operator_def, ws) {
-    returnPresenceMask_ = OperatorBase::template GetSingleArgument<bool>(
+    returnPresenceMask_ = this->template GetSingleArgument<bool>(
         "return_presence_mask", false);
     maxSkippedSparseIndices_ =
-        OperatorBase::template GetSingleArgument<int32_t>(
+        this->template GetSingleArgument<int32_t>(
             "max_skipped_indices", kMaxSkippedSparseIndices);
   }
 

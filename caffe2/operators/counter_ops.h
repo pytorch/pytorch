@@ -47,7 +47,7 @@ class CreateCounterOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   CreateCounterOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        init_count_(OperatorBase::GetSingleArgument<T>("init_count", 0)) {
+        init_count_(this->template GetSingleArgument<T>("init_count", 0)) {
     CAFFE_ENFORCE_LE(0, init_count_, "negative init_count is not permitted.");
   }
 
@@ -67,7 +67,7 @@ class ResetCounterOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   ResetCounterOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        init_count_(OperatorBase::GetSingleArgument<T>("init_count", 0)) {
+        init_count_(this->template GetSingleArgument<T>("init_count", 0)) {
     CAFFE_ENFORCE_LE(0, init_count_, "negative init_count is not permitted.");
   }
 

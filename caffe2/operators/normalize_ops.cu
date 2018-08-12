@@ -103,7 +103,7 @@ bool NormalizeGradientOp<float, CUDAContext>::RunOnDevice() {
   dX->ResizeLike(X);
 
   const auto canonical_axis =
-      X.canonical_axis_index(OperatorBase::GetSingleArgument<int>("axis", -1));
+      X.canonical_axis_index(this->template GetSingleArgument<int>("axis", -1));
   int N = X.dim32(canonical_axis);
   int M = X.size() / N;
   const int SF = X.size_from_dim(canonical_axis + 1);

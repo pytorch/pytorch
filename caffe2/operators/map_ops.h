@@ -54,7 +54,7 @@ class CreateMapOp final : public Operator<Context> {
 
   bool RunOnDevice() override {
     TensorProto::DataType key_dtype =
-        static_cast<TensorProto::DataType>(OperatorBase::GetSingleArgument<int>(
+        static_cast<TensorProto::DataType>(this->template GetSingleArgument<int>(
             "key_dtype", TensorProto_DataType_INT32));
 
     return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
@@ -64,7 +64,7 @@ class CreateMapOp final : public Operator<Context> {
   template <typename KEY_T>
   bool DoRunWithType() {
     TensorProto::DataType value_dtype =
-        static_cast<TensorProto::DataType>(OperatorBase::GetSingleArgument<int>(
+        static_cast<TensorProto::DataType>(this->template GetSingleArgument<int>(
             "value_dtype", TensorProto_DataType_INT32));
 
     return DispatchHelper<
@@ -83,7 +83,7 @@ class CreateMapOp final : public Operator<Context> {
   template <typename KEY_T>
   bool DoRunWithOtherType2() {
     TensorProto::DataType value_dtype =
-        static_cast<TensorProto::DataType>(OperatorBase::GetSingleArgument<int>(
+        static_cast<TensorProto::DataType>(this->template GetSingleArgument<int>(
             "value_dtype", TensorProto_DataType_INT32));
 
     CAFFE_THROW(

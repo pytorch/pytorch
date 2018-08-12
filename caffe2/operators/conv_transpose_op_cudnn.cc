@@ -11,19 +11,19 @@ class CudnnConvTransposeOpBase : public ConvTransposeUnpoolBase<CUDAContext> {
   CudnnConvTransposeOpBase(const OperatorDef& operator_def, Workspace* ws)
       : ConvTransposeUnpoolBase<CUDAContext>(operator_def, ws),
         cudnn_wrapper_(&context_),
-        cudnn_ws_nbytes_limit_(OperatorBase::GetSingleArgument<size_t>(
+        cudnn_ws_nbytes_limit_(this->template GetSingleArgument<size_t>(
             "ws_nbytes_limit",
             kCONV_CUDNN_WORKSPACE_LIMIT_BYTES)),
         exhaustive_search_(
-            OperatorBase::GetSingleArgument<int>("exhaustive_search", 0)),
+            this->template GetSingleArgument<int>("exhaustive_search", 0)),
         deterministic_(
-            OperatorBase::GetSingleArgument<int>("deterministic", 0)),
-        cudnn_state_(OperatorBase::GetSingleArgument<int>("cudnn_state", 0)),
+            this->template GetSingleArgument<int>("deterministic", 0)),
+        cudnn_state_(this->template GetSingleArgument<int>("cudnn_state", 0)),
         force_algo_(OperatorBase::GetRepeatedArgument<int>(
             "force_algo",
             vector<int>{-1, -1, -1})),
         enable_tensor_core_(
-            OperatorBase::GetSingleArgument<bool>("enable_tensor_core", 1)) {
+            this->template GetSingleArgument<bool>("enable_tensor_core", 1)) {
     CAFFE_ENFORCE(!deterministic_ || !exhaustive_search_);
 
     bool individual_force_algo = OperatorBase::HasArgument("force_algo_fwd") ||
@@ -37,11 +37,11 @@ class CudnnConvTransposeOpBase : public ConvTransposeUnpoolBase<CUDAContext> {
     } else {
       force_algo_ = std::vector<int>{-1, -1, -1};
       force_algo_[ALGO_FWD] =
-          OperatorBase::GetSingleArgument<int>("force_algo_fwd", -1);
+          this->template GetSingleArgument<int>("force_algo_fwd", -1);
       force_algo_[ALGO_DGRAD] =
-          OperatorBase::GetSingleArgument<int>("force_algo_dgrad", -1);
+          this->template GetSingleArgument<int>("force_algo_dgrad", -1);
       force_algo_[ALGO_WGRAD] =
-          OperatorBase::GetSingleArgument<int>("force_algo_wgrad", -1);
+          this->template GetSingleArgument<int>("force_algo_wgrad", -1);
     }
 
     CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&bottom_desc_));
@@ -105,7 +105,7 @@ class CudnnConvTransposeGradientOp final : public CudnnConvTransposeOpBase {
  public:
   CudnnConvTransposeGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : CudnnConvTransposeOpBase(operator_def, ws),
-        no_bias_(OperatorBase::GetSingleArgument<bool>("no_bias", false)) {
+        no_bias_(this->template GetSingleArgument<bool>("no_bias", false)) {
     CAFFE_ENFORCE(
         !(no_bias_ && OutputSize() == 3),
         "If bias is not present, you should not have 3 grad output.");
