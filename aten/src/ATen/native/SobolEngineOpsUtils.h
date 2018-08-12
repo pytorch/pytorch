@@ -9,16 +9,20 @@ static inline int bit_length(const int n) {
   return nbits;
 }
 
+/// Function to get the position of the rightmost zero in the bit representation of an integer
 static inline int rightmost_zero(const int n) {
   int z, i;
   for (z = n, i = 0; z % 2 == 1; z /= 2, i++);
   return i;
 }
 
+/// Function to get a subsequence of bits in the representation of an integer starting from
+/// `pos` and of length `length`
 static inline int bitsubseq(const int n, const int pos, const int length=1) {
   return (n >> pos) & ((1 << length) - 1);
 }
 
+/// Function to perform the inner product between a vector and a random Bernoulli vector
 static inline int cdot_pow2(const at::Tensor& vec) {
   at::Tensor pow2s = at::pow(2, at::native::arange(0, vec.size(0))).toType(at::kInt);
   return at::dot(vec, pow2s).toCInt();
@@ -28,7 +32,7 @@ static inline int cdot_pow2(const at::Tensor& vec) {
 /// without notice
 
 static constexpr int MAXBIT = 30;
-static constexpr int LARGEST_NUMBER = 2 << 30;
+static constexpr int LARGEST_NUMBER = 1 << 30;
 static constexpr float RECIPD = 1.0 / LARGEST_NUMBER;
 
 static constexpr int poly[1111] = {

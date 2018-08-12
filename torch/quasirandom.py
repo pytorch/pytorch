@@ -33,15 +33,15 @@ class SobolEngine(object):
             >>> soboleng.draw(10)
             tensor(...)
         """
-        if dimen > 1111 or dimen < 1:
+        if dimension > 1111 or dimension < 1:
             raise ValueError("Supported range of dimensionality for SobolEngine is [1, 1111]")
 
         self.seed = seed
         self.scramble = scramble
         self.dimension = dimension
 
-        self.sobolstate = torch.zeros(dimension, self.MAXBIT, dtype=torch.int)
-        torch._sobol_engine_initialize_state(self.sobolstate, self.dimension)
+        self.sobolstate = torch._sobol_engine_initialize_state(torch.zeros(dimension, self.MAXBIT, dtype=torch.long),
+                                                               self.dimension)
 
         if scramble:
             g = torch.Generator()
@@ -49,16 +49,16 @@ class SobolEngine(object):
                 g.manual_seed(self.seed)
 
             self.shift = torch.mv(torch.randint(2, (self.dimension, self.MAXBIT), generator=g),
-                                  torch.pow(2, torch.arange(0, self.MAXBIT))).to(torch.int)
+                                  torch.pow(2, torch.arange(0, self.MAXBIT, dtype=torch.float))).to(torch.long)
 
             # TODO: can be replaced with torch.tril(torch.randint(2, (dimension, MAXBIT, MAXBIT)))
             #       once a batched version is introduced
-            ltm = [torch.tril(torch.randint(2, (self.MAXBIT, self.MAXBIT), generator=g)).to(torch.int)
+            ltm = [torch.tril(torch.randint(2, (self.MAXBIT, self.MAXBIT), generator=g)).to(torch.long)
                    for _ in range(0, self.dimension)]
 
-            torch._sobol_engine_scramble(self.sobolstate, ltm, self.dimension)
+            self.sobolstate = torch._sobol_engine_scramble(self.sobolstate, ltm, self.dimension)
         else:
-            self.shift = torch.zeros(self.dimension, dtype=torch.int)
+            self.shift = torch.zeros(self.dimension, dtype=torch.long)
 
         self.quasi = self.shift.clone()
         self.num_generated = 0
@@ -71,9 +71,10 @@ class SobolEngine(object):
         Args:
             n (Int, optional): The length of sequence of points to draw. Default: 1.
         """
-        result = torch._sobol_engine_draw(n, self.sobolstate, self.quasi, self.dimension, self.num_generated)
-        self.num_generated = result[1]
-        return result[0]
+        result, self.quasi = torch._sobol_engine_draw(self.quasi, n, self.sobolstate,
+                                                      self.dimension, self.num_generated)
+        self.num_generated += n
+        return result
 
     def reset(self):
         """
@@ -91,6 +92,14 @@ class SobolEngine(object):
         Args:
             n (Int): The number of steps to fast-forward by.
         """
-        result = torch._sobol_engine_ff(n, self.sobolstate, self.quasi, self.dimension, self.num_generated)
-        self.num_generated = result
+        self.quasi = torch._sobol_engine_ff(n, self.sobolstate, self.quasi, self.dimension, self.num_generated)
+        self.num_generated += n
         return self
+
+    def __repr__(self):
+        fmt_string = ['dimension={}'.format(self.dimension)]
+        if self.scramble:
+            fmt_string += ['scramble=True']
+        if self.seed is not None:
+            fmt_string += ['seed={}'.format(self.seed)]
+        return self.__class__.__name__ + '(' + ', '.join(fmt_string) + ')'
