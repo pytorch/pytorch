@@ -21,6 +21,8 @@
 #include <mkl_vsl.h>
 #endif
 
+#include "ATen/core/Macros.h"
+
 #cmakedefine USE_BLAS
 #cmakedefine USE_LAPACK
 #cmakedefine BLAS_F2C
@@ -32,18 +34,9 @@
 # define TH_EXTERNC extern
 #endif
 
-#ifdef _WIN32
-# if defined(ATen_cpu_EXPORTS) || defined(caffe2_EXPORTS)
-#  define TH_API TH_EXTERNC __declspec(dllexport)
-#  define TH_CPP_API __declspec(dllexport)
-# else
-#  define TH_API TH_EXTERNC __declspec(dllimport)
-#  define TH_CPP_API __declspec(dllimport)
-# endif
-#else
-# define TH_API TH_EXTERNC
-# define TH_CPP_API
-#endif
+// TODO: Merge the *_API macros.
+#define TH_API TH_EXTERNC AT_CORE_API
+#define TH_CPP_API AT_CORE_API
 
 #ifdef _WIN32
 # define TH_NO_RETURN __declspec(noreturn)
