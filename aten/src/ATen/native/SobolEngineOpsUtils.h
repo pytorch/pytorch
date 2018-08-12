@@ -13,7 +13,7 @@ static inline int bit_length(const int n) {
 static inline int rightmost_zero(const int n) {
   int z, i;
   for (z = n, i = 0; z % 2 == 1; z /= 2, i++);
-  return i;
+  return i + 1;
 }
 
 /// Function to get a subsequence of bits in the representation of an integer starting from

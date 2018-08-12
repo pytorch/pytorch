@@ -25,7 +25,7 @@ std::tuple<Tensor, Tensor> _sobol_engine_draw(const Tensor& quasi, int64_t n, co
   for (int64_t i = 0; i < n; ++i) {
     int64_t l = rightmost_zero(num_generated);
     Tensor inter_res = wquasi.__ixor__(sobolstate.select(1, l - 1));
-    result.emplace_back(inter_res);
+    result.emplace_back(inter_res.clone());
     num_generated++;
   }
 
