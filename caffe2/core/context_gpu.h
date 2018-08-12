@@ -22,7 +22,7 @@
 
 namespace caffe2 {
 
-enum class CAFFE2_API CudaMemoryPoolType {
+enum class CudaMemoryPoolType {
   NONE = 0,
   CUB = 1,
   THC = 2,
