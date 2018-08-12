@@ -74,7 +74,8 @@ fi
 WERROR=1 python setup.py install
 
 # Add the test binaries so that they won't be git clean'ed away
-git add -f build/bin
+# NOTE: since we don't upload a new Docker image after the build step, we don't need this for CircleCI build
+# git add -f build/bin
 
 # Testing ATen install
 if [[ "$BUILD_ENVIRONMENT" != *cuda* ]]; then
@@ -109,3 +110,8 @@ if [[ "$BUILD_TEST_LIBTORCH" == "1" ]]; then
   # pytorch folder) so that it doesn't get cleaned away prior to docker push.
   WERROR=1 VERBOSE=1 tools/cpp_build/build_caffe2.sh "$PWD/../cpp-build"
 fi
+
+# NOTE: persist binaries for CircleCI build
+mkdir -p pytorch-ci-env/
+cp -r /opt/conda/lib/python3.6/site-packages/torch pytorch-ci-env/torch
+cp -r build/bin pytorch-ci-env/cpp_test_bin
