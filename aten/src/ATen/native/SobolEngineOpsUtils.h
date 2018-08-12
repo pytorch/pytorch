@@ -3,14 +3,15 @@
 #include "ATen/ATen.h"
 
 /// Function to return the minimum of number of bits to represent the integer `n`
-static inline int bit_length(const int n) {
+static inline int bit_length(const int64_t n) {
   int nbits, nloc;
   for (nloc = n, nbits = 0; nloc > 0; nloc /= 2, nbits++);
   return nbits;
 }
 
 /// Function to get the position of the rightmost zero in the bit representation of an integer
-static inline int rightmost_zero(const int n) {
+/// This value is not the zero-indexed position but one-indexed position
+static inline int rightmost_zero(const int64_t n) {
   int z, i;
   for (z = n, i = 0; z % 2 == 1; z /= 2, i++);
   return i + 1;
@@ -18,14 +19,14 @@ static inline int rightmost_zero(const int n) {
 
 /// Function to get a subsequence of bits in the representation of an integer starting from
 /// `pos` and of length `length`
-static inline int bitsubseq(const int n, const int pos, const int length=1) {
+static inline int64_t bitsubseq(const int64_t n, const int pos, const int length) {
   return (n >> pos) & ((1 << length) - 1);
 }
 
 /// Function to perform the inner product between a vector and a random Bernoulli vector
-static inline int cdot_pow2(const at::Tensor& vec) {
-  at::Tensor pow2s = at::pow(2, at::native::arange(0, vec.size(0))).toType(at::kInt);
-  return at::dot(vec, pow2s).toCInt();
+static inline int64_t cdot_pow2(const at::Tensor& vec) {
+  at::Tensor pow2s = at::pow(2, at::native::_dim_arange(vec, 0));
+  return at::native::dot(pow2s, vec).toCLong();
 }
 
 /// All definitions below this point are data. These are constant, and should not be modified

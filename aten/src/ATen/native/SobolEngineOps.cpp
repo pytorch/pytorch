@@ -4,6 +4,7 @@
 #include "ATen/native/SobolEngineOpsUtils.h"
 
 #include <vector>
+#include <iostream>
 
 namespace at {
 namespace native {
@@ -68,30 +69,31 @@ Tensor _sobol_engine_scramble(const Tensor& sobolstate, TensorList ltm, int64_t 
   // Require the rows of each of the matrices in `ltm`.
   // Why is this caching these rows separately okay?
   // A simple calculation show the number of slices to be dimension * MAXBIT * MAXBIT
-  // Instead, by performing `dimension` chunking operations (1 per lower triangular
+  // Instead, by performing `dimension` unbind operations (1 per lower triangular
   // matrix), we can save some time, since MAXBIT = 30.
-  Tensor eye_maxbit = at::native::eye(MAXBIT, at::ScalarType::Byte);
-  std::vector<std::vector<Tensor>> ltm_rows;
+  // The m^{th} row in the d^{th} square matrix in `ltm` can be obtained by ltm_rows[d*MAXBIT + m]
+  // m and d are zero-indexed
+  Tensor diag_true = at::native::eye(MAXBIT, wsobolstate.options()) == 1;
+  std::cout << diag_true;
+  std::vector<Tensor> ltm_rows;
   for (int64_t d = 0; d < dimension; ++d) {
-    ltm_rows.emplace_back(at::native::chunk(at::native::where(eye_maxbit,
-                                                              at::ones({}, ltm[d].options()),
-                                                              ltm[d]), MAXBIT));
+    auto chunked_ltm = at::native::unbind(at::where(diag_true, at::ones({}, wsobolstate.options()), ltm[d]), 0);
+    ltm_rows.insert(ltm_rows.end(), chunked_ltm.begin(), chunked_ltm.end());
   }
 
   // Main scrambling loop
   for (int64_t d = 0; d < dimension; ++d) {
     for (int64_t j = 0; j < MAXBIT; ++j) {
-      int64_t vdj = ss_a[d][j];
-      int l = 1, t2 = 0;
-      for (int64_t p = MAXBIT; p >= 0; --p) {
-        int lsmdp = cdot_pow2(ltm_rows[d][p].view(-1));
-        int t1 = 0;
+      int64_t vdj = ss_a[d][j], l = 1, t2 = 0;
+      for (int64_t p = MAXBIT - 1; p >= 0; --p) {
+        int64_t lsmdp = cdot_pow2(ltm_rows[d * MAXBIT + p]);
+        int64_t t1 = 0;
         for (int64_t k = 0; k < MAXBIT; ++k) {
           t1 += (bitsubseq(lsmdp, k, 1) * bitsubseq(vdj, k, 1));
         }
         t1 = t1 % 2;
         t2 = t2 + t1 * l;
-        l <<= 1;
+        l = l << 1;
       }
       ss_a[d][j] = t2;
     }
