@@ -5,6 +5,10 @@ namespace at { namespace native {
 
 namespace {
 
+// Windows doesn't like passing those addresses directly to templates, but this is fine...
+constexpr static auto tanh_ptr = &at::tanh;
+constexpr static auto relu_ptr = &at::relu;
+
 template<typename T>
 using pair_of = std::pair<T, T>;
 
@@ -620,8 +624,8 @@ std::tuple<Tensor, Tensor> NAME(                                               \
 }
 
 ONE_HIDDEN_RNN(gru, GRUCell)
-ONE_HIDDEN_RNN(rnn_tanh, SimpleCell<at::tanh>)
-ONE_HIDDEN_RNN(rnn_relu, SimpleCell<at::relu>)
+ONE_HIDDEN_RNN(rnn_tanh, SimpleCell<tanh_ptr>)
+ONE_HIDDEN_RNN(rnn_relu, SimpleCell<relu_ptr>)
 
 std::tuple<Tensor, Tensor, Tensor> lstm(
       const Tensor& _input, TensorList hx,
@@ -679,13 +683,13 @@ Tensor gru_cell(
 Tensor rnn_tanh_cell(
     const Tensor& input, const Tensor& hx,
     const Tensor& w_ih, const Tensor& w_hh, const Tensor& b_ih, const Tensor& b_hh) {
-  return SimpleCell<at::tanh>{}(input, hx, CellParams{w_ih, w_hh, b_ih, b_hh});
+  return SimpleCell<tanh_ptr>{}(input, hx, CellParams{w_ih, w_hh, b_ih, b_hh});
 }
 
 Tensor rnn_relu_cell(
     const Tensor& input, const Tensor& hx,
     const Tensor& w_ih, const Tensor& w_hh, const Tensor& b_ih, const Tensor& b_hh) {
-  return SimpleCell<at::relu>{}(input, hx, CellParams{w_ih, w_hh, b_ih, b_hh});
+  return SimpleCell<relu_ptr>{}(input, hx, CellParams{w_ih, w_hh, b_ih, b_hh});
 }
 
 }}  // namespace at::native
