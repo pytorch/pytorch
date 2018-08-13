@@ -43,7 +43,7 @@ using namespace torch::autograd::generated;
 namespace torch { namespace autograd {
 
 VariableType::VariableType(Context* context, Type* baseType)
-  : Type(context, /*is_variable=*/true, /*is_undefined=*/false)
+  : Type(context, baseType->type_id(), /*is_variable=*/true, /*is_undefined=*/false)
   , baseType(baseType)
   , id_(context->freshTypeID()) {
   str = std::string("Variable[") + baseType->toString() + "]";
