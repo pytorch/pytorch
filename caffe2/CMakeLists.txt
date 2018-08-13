@@ -7,7 +7,7 @@ include(../cmake/Codegen.cmake)
 add_subdirectory(utils)
 
 # ---[ ATen build
-if(BUILD_ATEN)
+if (NOT ANDROID AND NOT IOS)
   set(__caffe2_CMAKE_POSITION_INDEPENDENT_CODE ${CMAKE_POSITION_INDEPENDENT_CODE})
   set(CMAKE_POSITION_INDEPENDENT_CODE ON)
   set(AT_LINK_STYLE INTERFACE)
@@ -351,18 +351,16 @@ endif()
 # ---[ Caffe2 HIP sources.
 if(USE_ROCM)
   # Call again since Caffe2_HIP_INCLUDES is extended with ATen include dirs.
-  if(BUILD_ATEN)
-    # Get Compile Definitions from the directory (FindHIP.cmake bug)
-    get_directory_property(MY_DEFINITIONS COMPILE_DEFINITIONS)
-    if(MY_DEFINITIONS)
-      foreach(_item ${MY_DEFINITIONS})
-        LIST(APPEND HIP_HCC_FLAGS "-D${_item}")
-      endforeach()
-    endif()
-
-    # Call again since Caffe2_HIP_INCLUDES is extended with ATen include dirs.
-    hip_include_directories(${Caffe2_HIP_INCLUDES})
+  # Get Compile Definitions from the directory (FindHIP.CMake bug)
+  get_directory_property(MY_DEFINITIONS COMPILE_DEFINITIONS)
+  if(MY_DEFINITIONS)
+    foreach(_item ${MY_DEFINITIONS})
+      LIST(APPEND HIP_HCC_FLAGS "-D${_item}")
+    endforeach()
   endif()
+
+  # Call again since Caffe2_HIP_INCLUDES is extended with ATen include dirs.
+  hip_include_directories(${Caffe2_HIP_INCLUDES})
   IF(BUILD_CAFFE2)
      set_source_files_properties(${Caffe2_HIP_SRCS} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
   ENDIF()
@@ -444,7 +442,7 @@ if(BUILD_CAFFE2)
   set(__aten_test_dir "test/aten")
 endif()
 # Todo - Set up ATen tests for ROCm in an upcoming PR
-if(BUILD_ATEN AND NOT USE_ROCM)
+if(NOT USE_ROCM)
   foreach(test_src ${ATen_CPU_TEST_SRCS})
     get_filename_component(test_name ${test_src} NAME_WE)
     add_executable(${test_name} "${test_src}")
