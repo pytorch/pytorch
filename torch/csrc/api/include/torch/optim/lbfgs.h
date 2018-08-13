@@ -31,13 +31,13 @@ class LBFGS : public LossClosureOptimizer {
   template <typename ParameterContainer>
   explicit LBFGS(ParameterContainer&& parameters, const LBFGSOptions& options)
       : LossClosureOptimizer(std::forward<ParameterContainer>(parameters)),
-        options_(options),
-        ro(options_.history_size_),
-        al(options_.history_size_) {}
+        options(options),
+        ro(options.history_size_),
+        al(options.history_size_) {}
 
   torch::Tensor step(LossClosure closure) override;
 
-  const LBFGSOptions& options() const noexcept;
+  LBFGSOptions options;
 
   template <class Archive>
   void serialize(Archive& ar) {
@@ -52,12 +52,10 @@ class LBFGS : public LossClosureOptimizer {
 
  private:
   friend class cereal::access;
-  LBFGS() : options_(0) {}
+  LBFGS() : options(0) {}
 
   at::Tensor gather_flat_grad();
   void add_grad(const torch::Scalar& step_size, const at::Tensor& update);
-
-  LBFGSOptions options_;
 
   at::Tensor d{torch::empty({0})};
   at::Tensor H_diag{torch::empty({0})};
