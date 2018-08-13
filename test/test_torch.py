@@ -7632,6 +7632,13 @@ class TestTorch(TestCase):
         self.assertEqual(x.__repr__(), str(x))
         self.assertExpected(str(x), subname='requires_grad')
 
+        # test non-contiguous print
+        # sliced tensor should have > PRINT_OPTS.threshold elements
+        x = torch.ones(100, 2, 2, 10)
+        y = x.as_strided(size=(100, 2, 10), stride=(2 * 2 * 10, 2 * 10, 1))
+        self.assertEqual(str(y), y.__repr__())
+        self.assertExpected(str(y), subname='non_contiguous')
+
     def test_sizeof(self):
         sizeof_empty = torch.randn(0).storage().__sizeof__()
         sizeof_10 = torch.randn(10).storage().__sizeof__()
