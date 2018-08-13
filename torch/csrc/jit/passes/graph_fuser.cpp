@@ -236,20 +236,10 @@ struct GraphFuser {
     return true;
   }
 
-  // XXX: this is O(n) where n is the number of outputs of the FusionGroup
   bool isFusedConcatOutput(Value * producer) {
     JIT_ASSERT(producer->node()->kind() == prim::FusionGroup);
-    auto * fusion_group = producer->node();
-
-    // Find the output index
-    auto outputs = fusion_group->outputs();
-    auto it = std::find(outputs.begin(), outputs.end(), producer);
-    JIT_ASSERT(it != outputs.end());
-    int64_t output_index = it - outputs.begin();
-
-    // Find the relevant node
-    auto subgraph = fusion_group->g(attr::Subgraph);
-    auto * value = subgraph->outputs()[output_index];
+    auto subgraph = producer->node()->g(attr::Subgraph);
+    auto * value = subgraph->outputs().at(producer->offset());
     return value->node()->kind() == prim::FusedConcat;
   }
 
