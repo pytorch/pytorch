@@ -13,8 +13,6 @@ typedef struct at_Tensor_Impl at_Tensor_Impl;
 #define THTensor at_Tensor_Impl
 #endif
 
-#define THCTensor THTensor
-
 // These used to be distinct types; for some measure of backwards compatibility and documentation
 // alias these to the single THTensor type.
 #define THFloatTensor THTensor
