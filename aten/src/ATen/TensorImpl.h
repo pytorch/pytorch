@@ -6,6 +6,8 @@
 #include "ATen/Retainable.h"
 #include "ATen/ScalarType.h"
 #include "ATen/core/optional.h"
+#include "ATen/core/TensorTypeId.h"
+#include "ATen/core/TensorTypeIdRegistration.h"
 
 struct THTensor;
 
@@ -18,9 +20,9 @@ struct Tensor;
 
 namespace at {
 struct AT_API TensorImpl : public Retainable {
-  explicit TensorImpl(Backend backend, ScalarType scalar_type, THTensor * tensor, bool is_variable)
-  : backend_(backend), scalar_type_(scalar_type), is_variable_(is_variable), tensor(tensor) {}
-  TensorImpl(Backend backend, ScalarType scalar_type);
+  explicit TensorImpl(TensorTypeId type_id, ScalarType scalar_type, THTensor * tensor, bool is_variable)
+  : type_id_(type_id), scalar_type_(scalar_type), is_variable_(is_variable), tensor(tensor) {}
+  TensorImpl(TensorTypeId type_id, ScalarType scalar_type);
 
   virtual ~TensorImpl();
 
@@ -94,7 +96,7 @@ struct AT_API TensorImpl : public Retainable {
   virtual void set_data(Tensor new_data);
 
 protected:
-  Backend backend_;
+  TensorTypeId type_id_;
   // INVARIANT: When storage is non-null, this scalar type must
   // agree with the scalar type in storage
   ScalarType scalar_type_;
