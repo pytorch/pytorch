@@ -71,6 +71,12 @@ TensorImpl::TensorImpl(
   }
 }
 
+TensorImpl::~TensorImpl() {
+  if (storage_) {
+    storage_->release();
+  }
+}
+
 IntList TensorImpl::sizes() const {
   return sizes_;
 }

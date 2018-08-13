@@ -39,7 +39,7 @@ struct AT_API TensorImpl : public Retainable {
         scalar_type_(scalar_type),
         is_variable_(is_variable) {}
 
-  virtual ~TensorImpl() {};
+  ~TensorImpl();
 
   virtual void release_resources() override;
 
