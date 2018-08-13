@@ -236,12 +236,35 @@ struct GraphFuser {
     return true;
   }
 
+  // XXX: this is O(n) where n is the number of outputs of the FusionGroup
+  bool isFusedConcatOutput(Value * producer) {
+    JIT_ASSERT(producer->node()->kind() == prim::FusionGroup);
+    auto * fusion_group = producer->node();
+
+    // Find the output index
+    auto outputs = fusion_group->outputs();
+    auto it = std::find(outputs.begin(), outputs.end(), producer);
+    JIT_ASSERT(it != outputs.end());
+    int64_t output_index = it - outputs.begin();
+
+    // Find the relevant node
+    auto subgraph = fusion_group->g(attr::Subgraph);
+    auto * value = subgraph->outputs()[output_index];
+    return value->node()->kind() == prim::FusedConcat;
+  }
+
   bool shouldFuse(Node * consumer, Value * producer) {
     // this handles cases where producer can be moved _into_ the fusion group of consumer.
     // TODO: extend to fusion of consumer into _producer's_ fusion blob
     // if the consumer allInputsAreThisProducer(consumer,producer)
     // we can move the consumer up into the producer.
     // but this requires better handling of merging fusion groups so it is not done now
+    bool producer_is_fusion_group = producer->node()->kind() == prim::FusionGroup;
+    if (producer_is_fusion_group && isFusedConcatOutput(producer)) {
+      // the output of a prim::FusedConcat node cannot be an input
+      // to any node inside a prim::FusionGroup.
+      return false;
+    }
     at::optional<int> consumer_device = getDevice(consumer);
     Node *real_consumer = consumer->kind() == aten::cat ? consumer->namedInput(attr::tensors)->node() : consumer;
     return isFusable(producer->node()) &&
