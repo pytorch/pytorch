@@ -207,7 +207,11 @@ struct GraphFuser {
   // because it is not a simple map, can be put in a fusion group
   // as long as no items in the group read the output of concat
   bool isFusableAsExitNode(Node * node) {
-    return isFusable(node) || isFusableCatNode(node);
+    return isFusable(node) || isFusableOnlyAsExitNode(node);
+  }
+
+  bool isFusableOnlyAsExitNode(Node * node) {
+    return isFusableCatNode(node) || node->kind() == prim::FusedConcat;
   }
 
   // necessary condition for fusion. If all of the uses of producer are consumer
@@ -236,11 +240,13 @@ struct GraphFuser {
     return true;
   }
 
-  bool isFusedConcatOutput(Value * producer) {
-    JIT_ASSERT(producer->node()->kind() == prim::FusionGroup);
+  bool mustRemainAsFusionGroupOutput(Value * producer) {
+    if (producer->node()->kind() != prim::FusionGroup) {
+      return false;
+    }
     auto subgraph = producer->node()->g(attr::Subgraph);
-    auto * value = subgraph->outputs().at(producer->offset());
-    return value->node()->kind() == prim::FusedConcat;
+    auto * node = subgraph->outputs().at(producer->offset())->node();
+    return isFusableOnlyAsExitNode(node);
   }
 
   bool shouldFuse(Node * consumer, Value * producer) {
@@ -249,12 +255,6 @@ struct GraphFuser {
     // if the consumer allInputsAreThisProducer(consumer,producer)
     // we can move the consumer up into the producer.
     // but this requires better handling of merging fusion groups so it is not done now
-    bool producer_is_fusion_group = producer->node()->kind() == prim::FusionGroup;
-    if (producer_is_fusion_group && isFusedConcatOutput(producer)) {
-      // the output of a prim::FusedConcat node cannot be an input
-      // to any node inside a prim::FusionGroup.
-      return false;
-    }
     at::optional<int> consumer_device = getDevice(consumer);
     Node *real_consumer = consumer->kind() == aten::cat ? consumer->namedInput(attr::tensors)->node() : consumer;
     return isFusable(producer->node()) &&
@@ -572,6 +572,8 @@ struct GraphFuser {
       for(auto producer : inputs) {
         // Don't fuse accross stage boundaries
         if (producer->stage() != consumer->stage()) continue;
+        // Don't fuse if producer must come from a FusionGroup exit node
+        if (mustRemainAsFusionGroupOutput(producer)) continue;
         if(tryToMoveChunk(consumer,producer)) {
           // the chunk before this consumer was re-arranged to allow fusion,
           // we scan this consumer again to perform the fusion
