@@ -6,7 +6,6 @@
 #include "torch/csrc/jit/assertions.h"
 
 #include <ATen/ATen.h>
-#include <ATen/Allocator.h>
 
 #include <unordered_map>
 #include <vector>
