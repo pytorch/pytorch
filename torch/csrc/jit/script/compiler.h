@@ -17,20 +17,9 @@ struct CallsiteDescriptor {
   bool allow_varargs;
 };
 
-struct TypedDef {
-  TypedDef(Def def, at::optional<FunctionSchema> schema)
-    : def(std::move(def)), schema(std::move(schema)) {}
-
-  TypedDef(Def def)
-    : def(std::move(def)), schema(at::nullopt) {}
-
-  Def def;
-  at::optional<FunctionSchema> schema;
-};
-
-static inline std::vector<Value*> toValues(Graph& g, at::ArrayRef<NamedValue> nvs) {
-  return fmap(nvs, [&](const NamedValue& v) {
-    return v.value(g);
+static inline std::vector<Value*> toValues(at::ArrayRef<NamedValue> nvs) {
+  return fmap(nvs, [](const NamedValue& v) {
+    return v.value;
   });
 }
 
@@ -135,7 +124,7 @@ using Resolver = std::function<std::shared_ptr<
     SugaredValue>(const std::string& name, Method& m, const SourceRange& loc)>;
 TORCH_API void defineMethodsInModule(
   Module & m,
-  const std::vector<TypedDef>& definitions,
+  const std::vector<Def>& definitions,
   const std::vector<Resolver>& resolvers, /* determines how we handle free variables in each definition*/
   std::shared_ptr<SugaredValue> self /* if non-null, the first argument to each def, is bound to this value */
 );

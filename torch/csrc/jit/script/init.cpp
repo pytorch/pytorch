@@ -401,22 +401,6 @@ Resolver pythonResolver(ResolutionCallback rcb) {
 void initJitScriptBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
-  py::class_<TypedDef>(m, "TypedDef")
-    .def(py::init<Def>());
-
-  m.def("_pack_typed_def", [](Def &def, std::vector<TypePtr> arg_types, std::vector<TypePtr> return_types, bool method=false) {
-    std::vector<Argument> arguments, returns;
-    size_t i = method ? 1 : 0;
-    for (auto arg_type : arg_types) {
-      arguments.push_back(Argument(def.decl().params()[i++].ident().name(), arg_type, {}, {}, false));
-    }
-    for (auto ret_type : return_types) {
-      returns.push_back(Argument("", ret_type, {}, {}, false));
-    }
-
-    return TypedDef(def, FunctionSchema(def.name().name(), arguments, returns));
-  });
-
   // torch.jit.ScriptModule is a subclass of this C++ object.
   // Methods here are prefixed with _ since they should not be
   // public.
@@ -441,14 +425,9 @@ void initJitScriptBindings(PyObject* module) {
         for(auto & callback : rcbs) {
           resolvers.push_back(pythonResolver(callback));
         }
-        std::vector<TypedDef> typed_defs;
-        for (auto & def : defs) {
-          auto schema = extractSchemaFromDef(def, true);
-          typed_defs.emplace_back(def, schema);
-        }
         defineMethodsInModule(
           *m,
-          typed_defs,
+          defs,
           resolvers,
           std::make_shared<ModuleValue>(m));
       })
