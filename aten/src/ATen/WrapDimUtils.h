@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ATen/Tensor.h"
+#include "ATen/TensorImpl.h"
 #include <sstream>
 
 namespace at {
