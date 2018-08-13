@@ -981,8 +981,7 @@ void testCustomOperators() {
     REQUIRE(op->schema().arguments[1].name == "_1");
     REQUIRE(op->schema().arguments[1].type->kind() == TypeKind::DynamicType);
 
-    REQUIRE(op->schema().returns->size() == 1);
-    REQUIRE((*op->schema().returns)[0].type->kind() == TypeKind::DynamicType);
+    REQUIRE(op->schema().returns[0].type->kind() == TypeKind::DynamicType);
 
     Stack stack;
     push(stack, 2.0f, autograd::make_variable(at::ones(5)));
@@ -1010,8 +1009,8 @@ void testCustomOperators() {
     REQUIRE(op->schema().arguments[1].name == "b");
     REQUIRE(op->schema().arguments[1].type->kind() == TypeKind::DynamicType);
 
-    REQUIRE(op->schema().returns->size() == 1);
-    REQUIRE((*op->schema().returns)[0].type->kind() == TypeKind::DynamicType);
+    REQUIRE(op->schema().returns.size() == 1);
+    REQUIRE(op->schema().returns[0].type->kind() == TypeKind::DynamicType);
 
     Stack stack;
     push(stack, 2.0f, autograd::make_variable(at::ones(5)));
@@ -1044,8 +1043,8 @@ void testCustomOperators() {
     REQUIRE(op->schema().arguments[2].name == "tensors");
     REQUIRE(op->schema().arguments[2].type->isSubtypeOf(ListType::ofTensors()));
 
-    REQUIRE(op->schema().returns->size() == 1);
-    REQUIRE((*op->schema().returns)[0].type->isSubtypeOf(ListType::ofFloats()));
+    REQUIRE(op->schema().returns.size() == 1);
+    REQUIRE(op->schema().returns[0].type->isSubtypeOf(ListType::ofFloats()));
 
     Stack stack;
     push(stack, std::vector<int64_t>{1, 2});

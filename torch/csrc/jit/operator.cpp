@@ -232,19 +232,15 @@ std::string canonicalSchemaString(const FunctionSchema& schema) {
     out << arg.type->str() << " " << arg.name;
   }
 
-  if (schema.returns) {
-    out << ") -> ";
-    if (schema.returns->size() == 1) {
-      out << schema.returns->at(0).type->str();
-    } else if (schema.returns->size() > 1) {
-      out << "(";
-      for (size_t i = 0; i < schema.returns->size(); ++i) {
-        if (i > 0) out << ", ";
-        out << (*schema.returns)[i].type->str();
-      }
-      out << ")";
+  out << ") -> ";
+  if (schema.returns.size() == 1) {
+    out << schema.returns.at(0).type->str();
+  } else if (schema.returns.size() > 1) {
+    out << "(";
+    for (size_t i = 0; i < schema.returns.size(); ++i) {
+      if (i > 0) out << ", ";
+      out << schema.returns[i].type->str();
     }
-  } else {
     out << ")";
   }
   return out.str();

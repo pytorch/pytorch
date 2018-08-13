@@ -160,12 +160,10 @@ FunctionSchema inferAndCheckSchema(const std::string& schemaOrName) {
       providedSchema.arguments,
       inferredSchema,
       providedSchema);
-      AT_CHECK(inferredSchema.returns);
-      AT_CHECK(providedSchema.returns);
   checkArgumentVector(
       "return value",
-      *inferredSchema.returns,
-      *providedSchema.returns,
+      inferredSchema.returns,
+      providedSchema.returns,
       inferredSchema,
       providedSchema);
   return providedSchema;

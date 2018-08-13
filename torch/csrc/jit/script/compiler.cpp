@@ -515,8 +515,7 @@ static Value* tryEmitBuiltin(
     for(int64_t i = 0; i < *value; ++i)
       n->addOutput();
   } else {
-    JIT_ASSERT(op->schema().returns);
-    for(auto & ret : *op->schema().returns) {
+    for(auto & ret : op->schema().returns) {
       n->addOutput()->setType(ret.type);
     }
   }
@@ -689,9 +688,9 @@ struct to_ir {
           results = createTupleUnpack(result).vec();
         }
       }
-      if (typed_def.schema && typed_def.schema->returns && typed_def.schema->returns->size() != results.size()) {
+      if (typed_def.schema && !typed_def.schema->is_varret && typed_def.schema->returns.size() != results.size()) {
         throw ErrorReport(def.range()) << "Number of type annotations for function"
-          << " return (" << typed_def.schema->returns->size() << ") does not match"
+          << " return (" << typed_def.schema->returns.size() << ") does not match"
           << " the number of returns from the function (" << results.size() << ")!";
       }
       auto range = return_stmt.range();
@@ -708,8 +707,8 @@ struct to_ir {
         }
         graph->registerOutput(r);
         TypePtr type = DynamicType::get();
-        if (typed_def.schema && typed_def.schema->returns) {
-          type = typed_def.schema->returns->at(return_type_idx).type;
+        if (typed_def.schema && !typed_def.schema->is_varret) {
+          type = typed_def.schema->returns.at(return_type_idx).type;
           if (!r->type()->isSubtypeOf(type)) {
             throw ErrorReport(return_stmt.range()) << "Return value at position "
               << return_type_idx << " was annotated as having type " << type->str()
@@ -1625,11 +1624,15 @@ std::vector<Argument> parseReturnsFromDecl(Decl decl) {
 FunctionSchema extractSchemaFromDef(const Def &def, bool is_method) {
     auto name = def.name().name();
     std::vector<Argument> args = parseArgsFromDecl(def.decl(), is_method);
-    at::optional<std::vector<Argument>> returns = at::nullopt;
+    std::vector<Argument> returns;
+    bool is_varret;
     if (def.decl().return_type().present()) {
       returns = parseReturnsFromDecl(def.decl());
+      is_varret = false;
+    } else {
+      is_varret = true;
     }
-    return FunctionSchema(name, args, returns);
+    return FunctionSchema(name, args, returns, false, is_varret);
 }
 
 void defineMethodsInModule(Module & m, const std::string& source, const Resolver& resolver, SugaredValuePtr self) {
