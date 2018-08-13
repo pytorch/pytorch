@@ -119,7 +119,7 @@ ${return_call} at::native::${native_type_method_dispatch}(/* native_actuals */ $
 
 # add non-virtual declaration to Tensor.h
 TENSOR_METHOD_DECLARATION = CodeTemplate("""\
-${return_type} ${api_name}(${method_formals_with_defaults})${const_mark};
+AT_API ${return_type} ${api_name}(${method_formals_with_defaults})${const_mark};
 """)
 # add non-virtual declaration to Tensor.cpp
 TENSOR_METHOD_DEFINITION = CodeTemplate("""\
@@ -295,6 +295,7 @@ CHECKED_CAST = {
         CodeTemplate(
             'check_generator<${Backend}Generator>(${arg_name}, &globalContext().defaultGenerator(backend()))'),
     # This is a cast done via direct-construction
+    'IntListStride': CodeTemplate('at::IntList ${result_name} = get_intlist_stride_th(${arg_name});'),
     'real': CodeTemplate('${arg_name}.to${ScalarName}()'),
     'accreal': CodeTemplate('${arg_name}.to${AccScalarName}()'),
     'TensorList': CodeTemplate(

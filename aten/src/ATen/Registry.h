@@ -114,7 +114,7 @@ class AT_API Registry {
 };
 
 template <class SrcType, class ObjectPtrType, class... Args>
-class AT_API Registerer {
+class Registerer {
  public:
   Registerer(
       const SrcType& key,
