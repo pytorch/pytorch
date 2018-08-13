@@ -50,7 +50,7 @@ static inline bool isTransposeContiguous(Tensor& self) {
 }
 
 template <typename scalar_t>
-static void applyGesv(Tensor& b, Tensor& A, std::vector<int64_t>& infos) {
+static void applyGesv(Tensor& b, Tensor& A, std::vector<int64_t> infos) {
 #ifndef USE_LAPACK
   AT_ERROR("gesv : Lapack library not found in compile time");
 #endif
