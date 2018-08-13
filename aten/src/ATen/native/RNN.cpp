@@ -11,6 +11,15 @@ using pair_of = std::pair<T, T>;
 template<typename T>
 using tpair_of = std::tuple<T, T>;
 
+// Those could have been function pointers, but MSVC chokes on function pointers as template parameters
+struct tanh_f {
+  Tensor operator()(const Tensor& t) const { return at::tanh(t); }
+};
+
+struct relu_f {
+  Tensor operator()(const Tensor& t) const { return at::relu(t); }
+};
+
 struct PackedSequence {
   PackedSequence() = default;
   PackedSequence(Tensor _data, Tensor _batch_sizes)
@@ -142,10 +151,10 @@ struct Cell {
   virtual hidden_type operator()(const Tensor& input, const hidden_type& hidden, const CellParams& params) const = 0;
 };
 
-template<Tensor (*nonlinearity)(const Tensor&)>
+template<typename nonlinearity>
 struct SimpleCell : Cell<Tensor> {
   hidden_type operator()(const Tensor& input, const hidden_type& hidden, const CellParams& params) const override {
-    return nonlinearity(linear(input, params.w_ih, params.b_ih) + linear(hidden, params.w_hh, params.b_hh));
+    return nonlinearity{}(linear(input, params.w_ih, params.b_ih) + linear(hidden, params.w_hh, params.b_hh));
   }
 };
 
@@ -620,8 +629,8 @@ std::tuple<Tensor, Tensor> NAME(                                               \
 }
 
 ONE_HIDDEN_RNN(gru, GRUCell)
-ONE_HIDDEN_RNN(rnn_tanh, SimpleCell<&at::tanh>)
-ONE_HIDDEN_RNN(rnn_relu, SimpleCell<&at::relu>)
+ONE_HIDDEN_RNN(rnn_tanh, SimpleCell<tanh_f>)
+ONE_HIDDEN_RNN(rnn_relu, SimpleCell<relu_f>)
 
 std::tuple<Tensor, Tensor, Tensor> lstm(
       const Tensor& _input, TensorList hx,
@@ -679,13 +688,13 @@ Tensor gru_cell(
 Tensor rnn_tanh_cell(
     const Tensor& input, const Tensor& hx,
     const Tensor& w_ih, const Tensor& w_hh, const Tensor& b_ih, const Tensor& b_hh) {
-  return SimpleCell<&at::tanh>{}(input, hx, CellParams{w_ih, w_hh, b_ih, b_hh});
+  return SimpleCell<tanh_f>{}(input, hx, CellParams{w_ih, w_hh, b_ih, b_hh});
 }
 
 Tensor rnn_relu_cell(
     const Tensor& input, const Tensor& hx,
     const Tensor& w_ih, const Tensor& w_hh, const Tensor& b_ih, const Tensor& b_hh) {
-  return SimpleCell<&at::relu>{}(input, hx, CellParams{w_ih, w_hh, b_ih, b_hh});
+  return SimpleCell<relu_f>{}(input, hx, CellParams{w_ih, w_hh, b_ih, b_hh});
 }
 
 }}  // namespace at::native
