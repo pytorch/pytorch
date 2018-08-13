@@ -237,4 +237,15 @@ void load(Archive& archive, torch::Tensor& tensor) {
         tensor.numel() * tensor.data().type().elementSizeInBytes());
   }
 }
+
+template <class Archive>
+void save(Archive& archive, const at::Tensor& tensor) {
+  save(archive, torch::Tensor(tensor));
+}
+
+template <class Archive>
+void load(Archive& archive, at::Tensor& tensor) {
+  torch::Tensor variable(tensor);
+  load(archive, variable);
+}
 } // namespace cereal

@@ -125,7 +125,7 @@ void check_exact_values(
         REQUIRE(parameters.at(p)->defined());
         auto computed = parameters.at(p)->flatten();
         auto expected = expected_parameters.at(i / kSampleEvery).at(p);
-        if (!computed.allclose(expected, /*rtol=*/1e-3, /*atol=*/1e-5)) {
+        if (!computed.allclose(expected, /*rtol=*/1e-3, /*atol=*/5e-4)) {
           std::cout << "Iteration " << i << ": " << computed
                     << " != " << expected << " (parameter " << p << ")"
                     << std::endl;
@@ -189,26 +189,82 @@ TEST_CASE("Optim/XORConvergence/AdamWithAmsgrad") {
 }
 
 TEST_CASE("Optim/ProducesPyTorchValues/Adam") {
+  check_exact_values<Adam>(AdamOptions(1.0), expected_parameters::Adam);
+}
+
+TEST_CASE("Optim/ProducesPyTorchValues/AdamWithWeightDecay") {
   check_exact_values<Adam>(
-      AdamOptions(1.0).weight_decay(1e-6), expected_parameters::Adam);
+      AdamOptions(1.0).weight_decay(1e-2),
+      expected_parameters::Adam_with_weight_decay);
+}
+
+TEST_CASE("Optim/ProducesPyTorchValues/AdamWithWeightDecayAndAMSGrad") {
+  check_exact_values<Adam>(
+      AdamOptions(1.0).weight_decay(1e-6).amsgrad(true),
+      expected_parameters::Adam_with_weight_decay_and_amsgrad);
 }
 
 TEST_CASE("Optim/ProducesPyTorchValues/Adagrad") {
   check_exact_values<Adagrad>(
+      AdagradOptions(1.0), expected_parameters::Adagrad);
+}
+
+TEST_CASE("Optim/ProducesPyTorchValues/AdagradWithWeightDecay") {
+  check_exact_values<Adagrad>(
+      AdagradOptions(1.0).weight_decay(1e-2),
+      expected_parameters::Adagrad_with_weight_decay);
+}
+
+TEST_CASE("Optim/ProducesPyTorchValues/AdagradWithWeightDecayAndLRDecay") {
+  check_exact_values<Adagrad>(
       AdagradOptions(1.0).weight_decay(1e-6).lr_decay(1e-3),
-      expected_parameters::Adagrad);
+      expected_parameters::Adagrad_with_weight_decay_and_lr_decay);
 }
 
 TEST_CASE("Optim/ProducesPyTorchValues/RMSprop") {
   check_exact_values<RMSprop>(
-      RMSpropOptions(0.1).momentum(0.9).weight_decay(1e-6),
-      expected_parameters::RMSprop);
+      RMSpropOptions(0.1), expected_parameters::RMSprop);
+}
+
+TEST_CASE("Optim/ProducesPyTorchValues/RMSpropWithWeightDecay") {
+  check_exact_values<RMSprop>(
+      RMSpropOptions(0.1).weight_decay(1e-2),
+      expected_parameters::RMSprop_with_weight_decay);
+}
+
+TEST_CASE("Optim/ProducesPyTorchValues/RMSpropWithWeightDecayAndCentered") {
+  check_exact_values<RMSprop>(
+      RMSpropOptions(0.1).weight_decay(1e-6).centered(true),
+      expected_parameters::RMSprop_with_weight_decay_and_centered);
+}
+
+TEST_CASE(
+    "Optim/ProducesPyTorchValues/RMSpropWithWeightDecayAndCenteredAndMomentum") {
+  check_exact_values<RMSprop>(
+      RMSpropOptions(0.1).weight_decay(1e-6).centered(true).momentum(0.9),
+      expected_parameters::RMSprop_with_weight_decay_and_centered_and_momentum);
 }
 
 TEST_CASE("Optim/ProducesPyTorchValues/SGD") {
+  check_exact_values<SGD>(SGDOptions(0.1), expected_parameters::SGD);
+}
+
+TEST_CASE("Optim/ProducesPyTorchValues/SGDWithWeightDecay") {
   check_exact_values<SGD>(
-      SGDOptions(0.1).momentum(0.9).weight_decay(1e-6),
-      expected_parameters::SGD);
+      SGDOptions(0.1).weight_decay(1e-2),
+      expected_parameters::SGD_with_weight_decay);
+}
+
+TEST_CASE("Optim/ProducesPyTorchValues/SGDWithWeightDecayAndMomentum") {
+  check_exact_values<SGD>(
+      SGDOptions(0.1).weight_decay(1e-2).momentum(0.9),
+      expected_parameters::SGD_with_weight_decay_and_momentum);
+}
+
+TEST_CASE("Optim/ProducesPyTorchValues/SGDWithWeightDecayAndNesterovMomentum") {
+  check_exact_values<SGD>(
+      SGDOptions(0.1).weight_decay(1e-6).momentum(0.9).nesterov(true),
+      expected_parameters::SGD_with_weight_decay_and_nesterov_momentum);
 }
 
 TEST_CASE("Optim/ZeroGrad") {
@@ -271,7 +327,7 @@ TEST_CASE("Optim/AddParameter/LBFGS") {
     parameter.grad() = torch::ones_like(parameter);
   }
 
-  LBFGS optimizer(std::vector<torch::Tensor>(), 1.0);
+  LBFGS optimizer(std::vector<torch::Tensor>{}, 1.0);
   optimizer.add_parameters(parameters);
 
   optimizer.step([]() { return torch::tensor(1); });

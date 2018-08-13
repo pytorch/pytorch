@@ -20,7 +20,7 @@ EmbeddingImpl::EmbeddingImpl(EmbeddingOptions options)
 void EmbeddingImpl::reset() {
   weight = register_parameter(
       "weight", torch::empty({options.count_, options.dimension_}));
-  weight.data().normal_(0, 1);
+  weight.normal_(0, 1);
 }
 
 Tensor EmbeddingImpl::forward(Tensor input) {
