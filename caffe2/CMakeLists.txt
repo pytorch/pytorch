@@ -59,8 +59,7 @@ else()
   list(APPEND Caffe2_CPU_SRCS ${ATen_CORE_SRCS})
   list(APPEND Caffe2_CPU_INCLUDE ${ATen_CORE_INCLUDE})
   list(APPEND Caffe2_CPU_TEST_SRCS ${ATen_CORE_TEST_SRCS})
-  # TODO: We should probably install the headers, but I don't know
-  # how to do that.
+  # See cmake/Codegen.cmake for header installation
 endif()
 
 # ---[ Torch build
