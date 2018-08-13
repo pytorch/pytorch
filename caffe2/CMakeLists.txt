@@ -168,8 +168,8 @@ endif()
 
 # ---[ List of libraries to link with
 if (BUILD_CAFFE2)
-  add_library(caffe2_protos STATIC $<TARGET_OBJECTS:Caffe_PROTO> $<TARGET_OBJECTS:Caffe2_PROTO>)
-  add_dependencies(caffe2_protos Caffe_PROTO Caffe2_PROTO)
+  add_library(caffe2_protos STATIC $<TARGET_OBJECTS:Caffe2_PROTO>)
+  add_dependencies(caffe2_protos Caffe2_PROTO)
 else()
   # Do not include caffe2 or caffe protos, but rather have it only be
   # a library to attach local protobuf.
@@ -315,11 +315,7 @@ if(USE_CUDA)
   # it. We will then manually add the cudart library as interface libs.
   set(__tmp ${CUDA_LIBRARIES})
   set(CUDA_LIBRARIES PRIVATE ${CUDA_LIBRARIES})
-  if(CAFFE2_STATIC_LINK_CUDA)
-    torch_cuda_based_add_library(caffe2_gpu STATIC ${Caffe2_GPU_SRCS})
-  else()
-    torch_cuda_based_add_library(caffe2_gpu ${Caffe2_GPU_SRCS})
-  endif()
+  torch_cuda_based_add_library(caffe2_gpu ${Caffe2_GPU_SRCS})
   set(CUDA_LIBRARIES ${__tmp})
   target_link_libraries(caffe2_gpu INTERFACE caffe2::cudart)
 

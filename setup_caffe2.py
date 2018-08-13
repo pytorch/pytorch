@@ -162,19 +162,17 @@ class build_py(setuptools.command.build_py.build_py):
     def run(self):
         self.run_command('create_version')
         self.run_command('cmake_build')
-        for d in ['caffe', 'caffe2']:
-            for src in glob.glob(
-                    os.path.join(CMAKE_BUILD_DIR, d, 'proto', '*.py')):
-                dst = os.path.join(
-                    TOP_DIR, os.path.relpath(src, CMAKE_BUILD_DIR))
-                self.copy_file(src, dst)
+        for src in glob.glob(
+                os.path.join(CMAKE_BUILD_DIR, 'caffe2', 'proto', '*.py')):
+            dst = os.path.join(
+                TOP_DIR, os.path.relpath(src, CMAKE_BUILD_DIR))
+            self.copy_file(src, dst)
         setuptools.command.build_py.build_py.run(self)
 
 
 class build_ext(setuptools.command.build_ext.build_ext):
     def get_outputs(self):
-        return [os.path.join(self.build_lib, d)
-                for d in ['caffe', 'caffe2']]
+        return [os.path.join(self.build_lib, 'caffe2')]
 
     def run(self):
         self.run_command('cmake_build')
