@@ -63,7 +63,7 @@ TensorImpl::TensorImpl(
     TensorTypeId type_id,
     ScalarType scalar_type,
     bool is_variable)
-    : type_id_(type_id), scalar_type_(scalar_type) {
+    : type_id_(type_id), scalar_type_(scalar_type), is_variable_(is_variable) {
   auto type = &globalContext().getType(tensorTypeIdToBackend(type_id), scalar_type);
   try {
     Storage* storage = type->storage(true).release();
@@ -105,6 +105,7 @@ TensorImpl* TensorImpl::maybe_zero_dim(bool condition_when_zero_dim) {
   if (set_zero_dim) {
     THTensor_resizeDim(this, 0);
   }
+  return this;
 }
 
 void * TensorImpl::unsafeGetTH(bool retain) {
