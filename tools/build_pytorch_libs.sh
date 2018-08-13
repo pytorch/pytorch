@@ -18,6 +18,7 @@ USE_MKLDNN=0
 USE_GLOO_IBVERBS=0
 USE_DISTRIBUTED_MW=0
 FULL_CAFFE2=0
+CAFFE2_STATIC_LINK_CUDA=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
       --use-cuda)
@@ -177,6 +178,7 @@ function build() {
               -DTH_LIB_PATH="$INSTALL_DIR/lib" \
               -DTH_LIBRARIES="$INSTALL_DIR/lib/libTH$LD_POSTFIX" \
               -DCAFFE2_LIBRARIES="$INSTALL_DIR/lib/libcaffe2$LD_POSTFIX" \
+              -DCAFFE2_STATIC_LINK_CUDA=$CAFFE2_STATIC_LINK_CUDA \
               -DTHNN_LIBRARIES="$INSTALL_DIR/lib/libTHNN$LD_POSTFIX" \
               -DTHCUNN_LIBRARIES="$INSTALL_DIR/lib/libTHCUNN$LD_POSTFIX" \
               -DTHS_LIBRARIES="$INSTALL_DIR/lib/libTHS$LD_POSTFIX" \
