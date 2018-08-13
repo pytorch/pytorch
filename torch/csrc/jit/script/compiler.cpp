@@ -1598,7 +1598,8 @@ std::vector<Argument> parseArgsFromDecl(Decl decl, bool is_method) {
   for (; i < decl.params().size(); ++i) {
     auto decl_arg = decl.params()[i];
     auto arg = Argument(decl_arg.ident().name(), parseTypeFromExpr(decl_arg.type()),
-                        /*N =*/{}, /*default_value =*/{}, /*kwarg_only =*/false);
+                        /*N =*/at::nullopt, /*default_value =*/at::nullopt,
+                        /*kwarg_only =*/false);
     retval.push_back(arg);
   }
   return retval;
@@ -1616,8 +1617,8 @@ std::vector<Argument> parseReturnsFromDecl(Decl decl) {
     }
     return retval;
   } else {
-    return {Argument("", parsed_type, /*N =*/{}, /*default_value =*/{},
-                     /*kwarg_only =*/false)};
+    return {Argument("", parsed_type, /*N =*/at::nullopt,
+                     /*default_value =*/at::nullopt, /*kwarg_only =*/false)};
   }
 }
 
