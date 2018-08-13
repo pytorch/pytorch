@@ -10,6 +10,7 @@
 #include <cereal/access.hpp>
 #include <cereal/cereal.hpp>
 
+#include <cstddef>
 #include <utility>
 #include <vector>
 

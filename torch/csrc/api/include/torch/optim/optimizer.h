@@ -69,7 +69,8 @@ class OptimizerBase {
   /// Additionally, zeros out the buffers when this is called on the index
   at::Tensor& buffer_at(std::vector<at::Tensor>& buffers, size_t index) {
     if (buffers.size() <= index) {
-      for (auto i = buffers.size(); i <= index; i++) {
+      buffers.reserve(index);
+      for (auto i = buffers.size(); i <= index; ++i) {
         buffers.push_back(torch::zeros_like(parameters_.at(i)));
       }
     }
