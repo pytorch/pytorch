@@ -76,7 +76,7 @@ fi
 # only use for "python setup.py install" line
 if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]]; then
   WERROR=1 python setup.py install
-else if [[ "$BUILD_ENVIRONMENT" == *ppc64le* ]]; then
+elif [[ "$BUILD_ENVIRONMENT" == *ppc64le* ]]; then
   python setup.py install
 fi
 
