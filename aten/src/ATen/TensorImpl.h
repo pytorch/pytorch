@@ -35,7 +35,6 @@ struct AT_API TensorImpl : public Retainable {
         storage_offset_(0),
         sizes_{0},
         strides_{1},
-        is_zero_dim_(false),
         type_id_(type_id),
         scalar_type_(scalar_type),
         is_variable_(is_variable) {}
@@ -118,12 +117,6 @@ struct AT_API TensorImpl : public Retainable {
 
   std::vector<int64_t> sizes_;
   std::vector<int64_t> strides_;
-
-  // TODO: get rid of this, use the sizes_/strides_ .size() instead.
-  // This requires making sure TH code can handle zero dims (empty sizes, strides).
-  // Short-term plan is to dispatch dim/size/stride through a function that gives these
-  // in a "legacy" format, i.e. 0-dim becomes 1-dim.  Then medium term we remove the legacy calls.
-  bool is_zero_dim_;
 
   template <typename T>
   inline T * data() const {

@@ -73,15 +73,11 @@ TensorImpl::TensorImpl(
 }
 
 IntList TensorImpl::sizes() const {
-  // NB: dim in tensor is not synchronized with THTensor, so it's
-  // important to apply dim here
-  return IntList(sizes_.data(), dim());
+  return sizes_;
 }
 
 IntList TensorImpl::strides() const {
-  // NB: dim in tensor is not synchronized with THTensor, so it's
-  // important to apply dim here
-  return IntList(strides_.data(), dim());
+  return strides_;
 }
 
 void TensorImpl::release_resources() {
@@ -91,7 +87,7 @@ void TensorImpl::release_resources() {
 }
 
 int64_t TensorImpl::dim() const {
-  return is_zero_dim_ ? 0 : sizes_.size();
+  return sizes_.size();
 }
 
 int64_t TensorImpl::size(int64_t d) const {
@@ -105,9 +101,10 @@ int64_t TensorImpl::stride(int64_t d) const {
 }
 
 TensorImpl* TensorImpl::maybe_zero_dim(bool condition_when_zero_dim) {
-  bool is_zero_dim = (condition_when_zero_dim && sizes().size() == 1 && size(0) == 1) || dim() == 0;
-  is_zero_dim_ = is_zero_dim;
-  return this;
+  bool set_zero_dim = condition_when_zero_dim && this->sizes().size() == 1 && this->size(0) == 1;
+  if (set_zero_dim) {
+    THTensor_resizeDim(this, 0);
+  }
 }
 
 void * TensorImpl::unsafeGetTH(bool retain) {

@@ -43,18 +43,14 @@ ROCM_BLACKLIST = [
     'c10d',
     'cpp_extensions',
     'cuda',
-    'dataloader',
     'distributed',
     'distributions',
-    'indexing',
     'jit',
     'legacy_nn',
     'multiprocessing',
     'nccl',
     'nn',
-    'optim',
     'sparse',
-    'torch',
     'utils',
 ]
 
