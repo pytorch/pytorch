@@ -7,6 +7,34 @@ namespace torch {
 namespace jit {
 namespace script {
 
+
+Decl mergeTypesFromTypeComment(Decl decl, Decl type_annotation_decl) {
+  // HACK this whole method is one big hack right now.
+  bool is_method_guess = false;
+  if (decl.params().size() == type_annotation_decl.params().size() + 1) {
+    is_method_guess = true;
+  }
+  if (!is_method_guess && decl.params().size() != type_annotation_decl.params().size()) {
+    throw ErrorReport(type_annotation_decl.range()) << "Number of type annotations ("
+      << type_annotation_decl.params().size() << ") did not match the number of "
+      << "function parameters (" << decl.params().size() << ")";
+  }
+  auto old = decl.params();
+  auto _new = type_annotation_decl.params();
+  // Merge signature idents and ranges with annotation types
+
+  std::vector<Param> new_params;
+  size_t i = is_method_guess ? 1 : 0;
+  size_t j = 0;
+  if (is_method_guess) {
+    new_params.push_back(old[0]);
+  }
+  for (; i < decl.params().size(); ++i, ++j) {
+    new_params.push_back(Param::create(old[i].range(), old[i].ident(), _new[j].type()));
+  }
+  return Decl::create(decl.range(), List<Param>::create(decl.range(), new_params), type_annotation_decl.return_type());
+}
+
 struct Parser {
   explicit Parser(const std::string& str)
       : L(str), shared(sharedParserData()) {}
@@ -414,7 +442,7 @@ struct Parser {
     }
     return c(TK_LIST, r, std::move(stmts));
   }
-  TreeRef parseDecl() {
+  Decl parseDecl() {
     auto paramlist = parseList('(', ',', ')', &Parser::parseParam);
     // Parse return type annotation
     TreeRef return_type;
@@ -429,37 +457,10 @@ struct Parser {
     return Decl::create(paramlist.range(), List<Param>(paramlist), Maybe<Expr>(return_type));
   }
 
-  Decl mergeTypesFromTypeComment(Decl decl, Decl type_annotation_decl) {
-    // HACK this whole method is one big hack right now.
-    bool is_method_guess = false;
-    if (decl.params().size() == type_annotation_decl.params().size() + 1) {
-      is_method_guess = true;
-    }
-    if (!is_method_guess && decl.params().size() != type_annotation_decl.params().size()) {
-      throw ErrorReport(type_annotation_decl.range()) << "Number of type annotations ("
-        << type_annotation_decl.params().size() << ") did not match the number of "
-        << "function parameters (" << decl.params().size() << ")";
-    }
-    auto old = decl.params();
-    auto _new = type_annotation_decl.params();
-    // Merge signature idents and ranges with annotation types
-
-    std::vector<Param> new_params;
-    size_t i = is_method_guess ? 1 : 0;
-    size_t j = 0;
-    if (is_method_guess) {
-      new_params.push_back(old[0]);
-    }
-    for (; i < decl.params().size(); ++i, ++j) {
-      new_params.push_back(Param::create(old[i].range(), old[i].ident(), _new[j].type()));
-    }
-    return Decl::create(decl.range(), List<Param>::create(decl.range(), new_params), type_annotation_decl.return_type());
-  }
-
   TreeRef parseFunction() {
     L.expect(TK_DEF);
     auto name = parseIdent();
-    auto decl = Decl(parseDecl());
+    auto decl = parseDecl();
 
     // Handle type annotations specified in a type comment as the first line of
     // the function.

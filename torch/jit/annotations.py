@@ -142,25 +142,16 @@ def parse_type_line(type_line):
 
     return arg_types, ret_types
 
-_def_end_regex = re.compile(r'.*\)\s*:.*')
-_def_end_regex_py3 = re.compile(r'.*\)\s*->\s*.*:.*')
-
-
 def get_type_line(source):
     """Tries to find the line containing a comment with the type annotation."""
     lines = source.split('\n')
 
-    def strip_comment(line):
-        return line[:line.index('#') if '#' in line else None]
+    type_line = None
+    for line in lines:
+        if '# type:' in line:
+            type_line = line.strip()
+            break
 
-    i = 0
-    while not _def_end_regex.match(strip_comment(lines[i])) and not _def_end_regex_py3.match(strip_comment(lines[i])):
-        i += 1
-    i += 1
-
-    type_line = lines[i].strip()
-    if not type_line.startswith('# type:'):
-        return None
     return type_line
 
 

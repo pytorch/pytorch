@@ -141,7 +141,7 @@ class Builder(object):
         return method(ctx, node)
 
 
-def build_def(ctx, py_def, type_line=None):
+def build_def(ctx, py_def, type_line):
     returns = []
     ret_body = []
     body = py_def.body
@@ -153,7 +153,8 @@ def build_def(ctx, py_def, type_line=None):
         return_type = build_expr(ctx, py_def.returns)
     decl = Decl(r, param_list, return_type)
     if type_line is not None:
-        decl = torch._C.merge_decl_types_from_comment(decl, type_line)
+        type_comment_decl = torch._C.parse_type_comment(type_line)
+        decl = torch._C.merge_type_from_type_comment(decl, type_comment_decl)
     return Def(Ident(r, py_def.name),
                decl,
                build_stmts(ctx, body))

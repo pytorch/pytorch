@@ -553,11 +553,12 @@ void initJitScriptBindings(PyObject* module) {
     return compileFunction(def, pythonResolver(rcb));
   });
 
-  m.def("merge_decl_types_from_comment", [](Decl decl, const std::string& line) {
-    Parser p(line);
-    auto type_comment_decl = Decl(p.parseTypeComment(true));
-    return p.mergeTypesFromTypeComment(decl, type_comment_decl);
+  m.def("parse_type_comment", [](const std::string& comment) {
+    Parser p(comment);
+    return Decl(p.parseTypeComment(true));
   });
+
+  m.def("merge_type_from_type_comment", &mergeTypesFromTypeComment);
 
 }
 
