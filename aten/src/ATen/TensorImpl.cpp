@@ -64,11 +64,10 @@ TensorImpl::TensorImpl(
     ScalarType scalar_type,
     bool is_variable)
     : type_id_(type_id), scalar_type_(scalar_type), is_variable_(is_variable) {
-  auto type = &globalContext().getType(tensorTypeIdToBackend(type_id), scalar_type);
-  try {
+  if (type_id != UndefinedTensorId() && scalar_type != ScalarType::Undefined) {
+    auto type = &globalContext().getType(tensorTypeIdToBackend(type_id), scalar_type);
     Storage* storage = type->storage(true).release();
     storage_ = storage->pImpl();
-  } catch (const at::Error& e) {
   }
 }
 
