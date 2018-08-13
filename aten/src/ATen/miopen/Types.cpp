@@ -17,7 +17,6 @@ miopenDataType_t getMiopenDataType(const at::Tensor& tensor) {
 }
 
 int64_t miopen_version() {
-  //return MIOPEN_VERSION_TWEAK;
   return (MIOPEN_VERSION_MAJOR<<8) + (MIOPEN_VERSION_MINOR<<4) + MIOPEN_VERSION_PATCH;
 }
 
