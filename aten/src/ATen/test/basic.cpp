@@ -226,7 +226,7 @@ static void test(Type & type) {
   }
   SECTION("indexing by Scalar") {
     Tensor tensor = arange(0, 10, kInt);
-    Tensor one = ones({1}, kInt);
+    Tensor one = ones({}, kInt);
     for (int64_t i = 0; i < tensor.numel(); ++i) {
       REQUIRE(tensor[i].equal(one * i));
     }

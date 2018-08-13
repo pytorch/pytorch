@@ -399,7 +399,7 @@ class Graph {
     return result;
   }
 
-  const size_t getNodesCount() const {
+  size_t getNodesCount() const {
     return (size_t)nodes_.size();
   }
 

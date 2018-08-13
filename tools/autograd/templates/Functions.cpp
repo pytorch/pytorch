@@ -152,8 +152,9 @@ Tensor sum_backward(const Tensor & grad, IntList sizes, IntList dims, bool keepd
       auto dims_to_unsqueeze = dim_list_to_bitset(dims, sizes.size());
       Tensor res = grad;
       for (size_t i = 0; i < sizes.size(); i++){
-	if (dims_to_unsqueeze[i])
-	  res = res.unsqueeze(i);
+        if (dims_to_unsqueeze[i]) {
+          res = res.unsqueeze(i);
+        }
       }
       return res.expand(sizes);
     }
@@ -381,7 +382,7 @@ Tensor cumsum_backward(const Tensor & x, int64_t dim) {
 }
 
 Tensor logsumexp_backward(Tensor grad, const Tensor & self, Tensor result, int64_t dim, bool keepdim) {
-  if (! keepdim) {
+  if (!keepdim && self.dim() != 0) {
     grad = grad.unsqueeze(dim);
     result = result.unsqueeze(dim);
   }
@@ -524,6 +525,16 @@ Tensor repeat_backward(Tensor grad, int64_t input_dims, IntList repeats) {
   return grad;
 }
 
+// p1m == 1 - p
+Tensor _fused_dropout_backward(Tensor grad, Tensor mask, double p1m) {
+  if (grad.requires_grad()) {
+    // Use autograd-friendly backward if double backward is required
+    return grad * (mask.type_as(grad) * (1. / p1m));
+  } else {
+    return grad._masked_scale(mask, 1. / p1m);
+  }
+}
+
 Tensor select_equals_backward(Tensor grad, const Tensor & input, const Tensor & value) {
   auto grad_input = zeros_like(input);
   grad_input.masked_fill_(input == value, grad);
@@ -531,7 +542,7 @@ Tensor select_equals_backward(Tensor grad, const Tensor & input, const Tensor & 
 }
 
 Tensor index_select_backward(Tensor grad, int64_t dim, Tensor indices, IntList sizes, bool keepdim) {
-  if (!keepdim) {
+  if (!keepdim && sizes.size() > 0) {
     grad = grad.unsqueeze(dim);
     indices = indices.unsqueeze(dim);
   }

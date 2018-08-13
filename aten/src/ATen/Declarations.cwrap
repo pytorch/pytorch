@@ -58,7 +58,7 @@
         - THStorage* source
         - long storage_offset
         - IntListSize size
-        - arg: IntListStride stride
+        - arg: IntList stride
           default: {}
 ]]
 [[
@@ -2267,39 +2267,42 @@
         - THTensor* other
 ]]
 [[
-  name: _th_clamp_
+  name: _th_clamp
   cname: clamp
   variants:
     - method
     - function
   return: argument 0
   arguments:
-    - THTensor* self
+    - arg: THTensor* result
+      output: True
     - THTensor* self
     - real min
     - real max
 ]]
 [[
-  name: _th_clamp_min_
+  name: _th_clamp_min
   cname: cmaxValue
   variants:
     - method
     - function
   return: argument 0
   arguments:
-    - THTensor* self
+    - arg: THTensor* result
+      output: True
     - THTensor* self
     - real min
 ]]
 [[
-  name: _th_clamp_max_
+  name: _th_clamp_max
   cname: cminValue
   variants:
     - method
     - function
   return: argument 0
   arguments:
-    - THTensor* self
+    - arg: THTensor* result
+      output: True
     - THTensor* self
     - real max
 ]]
@@ -3405,13 +3408,13 @@
     - cname: newWithSize
       arguments:
         - IntListSize size
-        - arg: IntListStride stride
+        - IntList stride
     - cname: newWithStorage
       arguments:
         - THStorage* storage
         - int64_t storageOffset
         - IntListSize size
-        - arg: IntListStride stride
+        - arg: IntList stride
           default: {}
 ]]
 
