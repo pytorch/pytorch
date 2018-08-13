@@ -93,8 +93,7 @@ Tensor Variable::Impl::detach() const {
 
 void Variable::Impl::detach_() {
   if (is_view_) {
-    throw std::runtime_error(
-        "Can't detach views in-place. Use detach() instead");
+    AT_ERROR("Can't detach views in-place. Use detach() instead");
   }
   set_requires_grad(false);
   grad_fn_.reset();
