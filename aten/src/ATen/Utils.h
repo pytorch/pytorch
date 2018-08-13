@@ -65,7 +65,7 @@ static inline std::vector<TH*> tensor_list_checked_cast(ArrayRef<TBase> tensors,
     // dynamic cast for the test
     auto result = dynamic_cast<T*>(expr);
     if (result) {
-      casted[i] = result->tensor;
+      casted[i] = result;
     } else {
       AT_ERROR("Expected a Tensor of RTTI type ", typeid(T).name(), " but found a type ", typeid(*expr).name(),
                " for sequence element ", i, " in sequence argument at position #", pos, " '", name, "'");
