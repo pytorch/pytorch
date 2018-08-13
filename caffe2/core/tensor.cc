@@ -70,10 +70,10 @@ TypeMeta GetTensorType(const void* c) {
 }
 
 // TODO(jerryzh): Remove
-static CaffeMap<TypeIdentifier, TypeCall> type_call_registry_{
+static CaffeMap<at::DataType, TypeCall> type_call_registry_{
     {TypeMeta::Id<Tensor>(), GetTensorType}};
 
-TypeCall GetTypeCallFunction(TypeIdentifier id) {
+TypeCall GetTypeCallFunction(at::DataType id) {
   auto f = type_call_registry_.find(id);
   if (f == type_call_registry_.end()) {
     return nullptr;
@@ -81,7 +81,7 @@ TypeCall GetTypeCallFunction(TypeIdentifier id) {
   return f->second;
 }
 
-void RegisterTypeCallFunction(TypeIdentifier id, TypeCall c) {
+void RegisterTypeCallFunction(at::DataType id, TypeCall c) {
   type_call_registry_[id] = c;
 }
 
@@ -98,12 +98,12 @@ vector<TIndex> GetTensorInfo(
 }
 
 // since we only have one tensor, probably need to remove this at some point?
-static CaffeMap<TypeIdentifier, TensorInfoCall> tensor_info_call_registry_{
+static CaffeMap<at::DataType, TensorInfoCall> tensor_info_call_registry_{
     {TypeMeta::Id<Tensor>(), GetTensorInfo}};
 
 // TODO: Remove this code in a separate diff, since we only have one
 // GetTensorInfo function now
-TensorInfoCall GetTensorInfoFunction(TypeIdentifier id) {
+TensorInfoCall GetTensorInfoFunction(at::DataType id) {
   auto f = tensor_info_call_registry_.find(id);
   if (f == tensor_info_call_registry_.end()) {
     return nullptr;
@@ -111,7 +111,7 @@ TensorInfoCall GetTensorInfoFunction(TypeIdentifier id) {
   return f->second;
 }
 
-void RegisterTensorInfoFunction(TypeIdentifier id, TensorInfoCall c) {
+void RegisterTensorInfoFunction(at::DataType id, TensorInfoCall c) {
   tensor_info_call_registry_[id] = c;
 }
 
