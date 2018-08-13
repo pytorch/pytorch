@@ -205,7 +205,7 @@ void initJITBindings(PyObject *module) {
       })
      .def("get_debug_state", [](GraphExecutor& ge) {
         return ge.getDebugState();
-      })
+      });
 
     py::class_<PyTorchFileWriter>(m, "PyTorchFileWriter")
       .def(py::init<std::string>())
