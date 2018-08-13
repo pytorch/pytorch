@@ -2399,7 +2399,7 @@ a")
                 q = x
             return x
 
-        ast = torch.jit.frontend.get_jit_ast(fn)
+        ast = torch.jit.frontend.get_jit_ast(fn, is_method=False)
         self.assertExpected(str(ast))
 
     def _make_scalar_vars(self, arr, dtype):

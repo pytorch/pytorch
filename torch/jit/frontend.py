@@ -124,13 +124,13 @@ def build_stmts(ctx, stmts):
     return list(filter(None, stmts))
 
 
-def get_jit_ast(fn):
+def get_jit_ast(fn, is_method):
     source = dedent(inspect.getsource(fn))
     py_ast = ast.parse(source)
     if len(py_ast.body) != 1 or not isinstance(py_ast.body[0], ast.FunctionDef):
         raise RuntimeError("expected a single top-level function")
     type_line = torch.jit.annotations.get_type_line(source)
-    return build_def(SourceRangeFactory(source), py_ast.body[0], type_line)
+    return build_def(SourceRangeFactory(source), py_ast.body[0], type_line, is_method)
 
 
 class Builder(object):
@@ -141,7 +141,7 @@ class Builder(object):
         return method(ctx, node)
 
 
-def build_def(ctx, py_def, type_line):
+def build_def(ctx, py_def, type_line, is_method):
     returns = []
     ret_body = []
     body = py_def.body
@@ -154,7 +154,7 @@ def build_def(ctx, py_def, type_line):
     decl = Decl(r, param_list, return_type)
     if type_line is not None:
         type_comment_decl = torch._C.parse_type_comment(type_line)
-        decl = torch._C.merge_type_from_type_comment(decl, type_comment_decl)
+        decl = torch._C.merge_type_from_type_comment(decl, type_comment_decl, is_method)
     return Def(Ident(r, py_def.name),
                decl,
                build_stmts(ctx, body))

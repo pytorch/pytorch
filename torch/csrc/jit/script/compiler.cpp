@@ -1638,7 +1638,7 @@ void defineMethodsInModule(Module & m, const std::string& source, const Resolver
   std::vector<Def> definitions;
   std::vector<Resolver> resolvers;
   while (p.lexer().cur().kind != TK_EOF) {
-    auto def = Def(p.parseFunction());
+    auto def = Def(p.parseFunction(/*is_method=*/bool(self)));
     definitions.push_back(def);
     resolvers.push_back(resolver);
   }

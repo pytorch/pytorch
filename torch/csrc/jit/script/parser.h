@@ -8,25 +8,25 @@ namespace jit {
 namespace script {
 
 
-Decl mergeTypesFromTypeComment(Decl decl, Decl type_annotation_decl) {
-  // HACK this whole method is one big hack right now.
-  bool is_method_guess = false;
-  if (decl.params().size() == type_annotation_decl.params().size() + 1) {
-    is_method_guess = true;
+Decl mergeTypesFromTypeComment(Decl decl, Decl type_annotation_decl, bool is_method) {
+  auto expected_num_annotations = decl.params().size();
+  if (is_method) {
+    // `self` argument
+    expected_num_annotations -= 1;
   }
-  if (!is_method_guess && decl.params().size() != type_annotation_decl.params().size()) {
+  if (expected_num_annotations != type_annotation_decl.params().size()) {
     throw ErrorReport(type_annotation_decl.range()) << "Number of type annotations ("
       << type_annotation_decl.params().size() << ") did not match the number of "
-      << "function parameters (" << decl.params().size() << ")";
+      << "function parameters (" << expected_num_annotations << ")";
   }
   auto old = decl.params();
   auto _new = type_annotation_decl.params();
   // Merge signature idents and ranges with annotation types
 
   std::vector<Param> new_params;
-  size_t i = is_method_guess ? 1 : 0;
+  size_t i = is_method ? 1 : 0;
   size_t j = 0;
-  if (is_method_guess) {
+  if (is_method) {
     new_params.push_back(old[0]);
   }
   for (; i < decl.params().size(); ++i, ++j) {
@@ -457,7 +457,7 @@ struct Parser {
     return Decl::create(paramlist.range(), List<Param>(paramlist), Maybe<Expr>(return_type));
   }
 
-  TreeRef parseFunction() {
+  TreeRef parseFunction(bool is_method) {
     L.expect(TK_DEF);
     auto name = parseIdent();
     auto decl = parseDecl();
@@ -467,7 +467,7 @@ struct Parser {
     L.expect(TK_INDENT);
     if (L.nextIf(TK_TYPE_COMMENT)) {
       auto type_annotation_decl = Decl(parseTypeComment());
-      decl = mergeTypesFromTypeComment(decl, type_annotation_decl);
+      decl = mergeTypesFromTypeComment(decl, type_annotation_decl, is_method);
     }
 
     auto stmts_list = parseStatements(false);

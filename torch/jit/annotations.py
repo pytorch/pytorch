@@ -142,6 +142,7 @@ def parse_type_line(type_line):
 
     return arg_types, ret_types
 
+
 def get_type_line(source):
     """Tries to find the line containing a comment with the type annotation."""
     lines = source.split('\n')

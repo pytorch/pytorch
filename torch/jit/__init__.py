@@ -347,7 +347,7 @@ class CompilationUnit(object):
 
 def script(fn, optimize=True, _frames_up=0):
     rcb = createResolutionCallback(_frames_up + 1)
-    ast = get_jit_ast(fn)
+    ast = get_jit_ast(fn, is_method=False)
     graph = _jit_script_compile(ast, rcb)
     mod = ScriptModule()
     mod._create_method_from_graph('forward', graph)
@@ -378,7 +378,7 @@ def script_method(fn):
     # createResolutionCallback internally adds 1 to get us to the scope of this
     # function (the calling function). Adding 2 gets us to the proper surrounding scope.
     rcb = createResolutionCallback(frames_up=2)
-    ast = get_jit_ast(fn)
+    ast = get_jit_ast(fn, is_method=True)
     return ScriptMethodStub(rcb, ast, fn)
 
 
