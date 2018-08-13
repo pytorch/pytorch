@@ -13,8 +13,8 @@ class LarsOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   LarsOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        offset_(OperatorBase::GetSingleArgument<float>("offset", 0.5)),
-        lr_min_(OperatorBase::GetSingleArgument<float>("lr_min", 0.02)) {}
+        offset_(this->template GetSingleArgument<float>("offset", 0.5)),
+        lr_min_(this->template GetSingleArgument<float>("lr_min", 0.02)) {}
 
   bool RunOnDevice() override {
     auto& X = Input(0);

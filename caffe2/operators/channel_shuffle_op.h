@@ -15,7 +15,7 @@ class ChannelShuffleOp final : public Operator<Context> {
   ChannelShuffleOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         order_(StringToStorageOrder(
-            OperatorBase::GetSingleArgument<std::string>("order", "NCHW"))),
+            this->template GetSingleArgument<std::string>("order", "NCHW"))),
         OP_SINGLE_ARG(int, "group", group_, 1) {
     CAFFE_ENFORCE_NE(order_, StorageOrder::UNKNOWN);
   }
@@ -42,7 +42,7 @@ class ChannelShuffleGradientOp final : public Operator<Context> {
   ChannelShuffleGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         order_(StringToStorageOrder(
-            OperatorBase::GetSingleArgument<std::string>("order", "NCHW"))),
+            this->template GetSingleArgument<std::string>("order", "NCHW"))),
         OP_SINGLE_ARG(int, "group", group_, 1) {
     CAFFE_ENFORCE_NE(order_, StorageOrder::UNKNOWN);
   }
