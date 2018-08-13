@@ -3,7 +3,7 @@
 #include "torch/csrc/Device.h"
 #include "torch/csrc/Dtype.h"
 #include "torch/csrc/Layout.h"
-#include "torch/csrc/jit/export.h"
+#include "torch/csrc/jit/import.h"
 #include "torch/csrc/jit/script/compiler.h"
 
 #include "torch/csrc/jit/python_tracer.h"
@@ -384,17 +384,6 @@ static void gatherParametersAndBuffers(std::vector<at::Tensor*> & values, const 
   }
 }
 
-Stack createStack(const py::tuple& tuple, const Method& method) {
-  auto relevant_inputs = method.graph()->inputs().slice(0, method.num_inputs());
-  return createStack(tuple, relevant_inputs);
-}
-
-py::object runMethodFromPython(Method& m, py::args args) {
-  auto stack = createStack(args, m);
-  m.run(stack);
-  return wrapStack(std::move(stack), m.graph()->outputs());
-}
-
 Resolver pythonResolver(ResolutionCallback rcb) {
   return [=](const std::string& name,
              Method& m,
@@ -432,20 +421,10 @@ void initJitScriptBindings(PyObject* module) {
   // public.
   py::class_<Module, std::shared_ptr<Module>>(m, "ScriptModule")
       .def(py::init<>())
-      .def("export", [](const std::shared_ptr<Module> m) {
-        std::string module;
-        RawDataExportMap export_map;
-        std::tie(module, export_map) = ExportModule(m);
-        std::unordered_map<std::string, py::bytes> python_serialized_export_map;
-        for (auto& kv : export_map) {
-          auto t = kv.second;
-          size_t copy_bytes = t.type().elementSizeInBytes() * t.numel();
-          // TODO: this is an unecessary copy. In theory we can directly return
-          // the map from identifier to Tensor, but we need some API in Python
-          // to get raw `bytes` containing the raw tensor data.
-          python_serialized_export_map[kv.first] = py::bytes(static_cast<const char*>(t.data_ptr()), copy_bytes);
-        }
-        return std::make_tuple(py::bytes(module), python_serialized_export_map);
+      .def("save", &Module::save)
+      .def("_load", [](const std::shared_ptr<script::Module> module,
+                       const std::string& filename) {
+        ImportIRModule(module, filename);
       })
       .def("_set_optimized", &Module::set_optimized)
       .def(
@@ -550,7 +529,8 @@ void initJitScriptBindings(PyObject* module) {
       .def("graph_for", [](Module& self, py::args args) {
         if (self.find_method("forward")) {
           Method & m = self.get_method("forward");
-          return m.graph_for(createStack(args, m.graph()->inputs()));
+          return m.graph_for(
+              evilDeprecatedBadCreateStackDoNotUse(args, m.graph()->inputs()));
         }
         throw std::runtime_error("Attempted to call graph_for on a Module without a compiled forward()");
       })
@@ -561,16 +541,14 @@ void initJitScriptBindings(PyObject* module) {
         //
         // There is a thin wrapper on top of this method in the C++ version of
         // ScriptModule.
-        return runMethodFromPython(self.get_method("forward"), args);
+        return invokeScriptMethodFromPython(self.get_method("forward"), args);
       });
 
   py::class_<Method>(m, "ScriptMethod", py::dynamic_attr())
     .def("graph", [&](Method& self) {
       return self.graph();
     })
-    .def("__call__", [](Method& m, py::args args) -> py::object {
-      return runMethodFromPython(m, args);
-    })
+    .def("__call__", invokeScriptMethodFromPython)
     .def_property_readonly("graph", [](Method& m) {
       return m.graph();
     })
@@ -578,7 +556,7 @@ void initJitScriptBindings(PyObject* module) {
     .def("propagate_and_assign_input_and_output_shapes", &Method::propagate_and_assign_input_and_output_shapes)
     .def("params", &Method::params)
     .def("graph_for", [](Method& self, py::args args) {
-      return self.graph_for(createStack(args, self.graph()->inputs()));
+      return self.graph_for(evilDeprecatedBadCreateStackDoNotUse(args, self.graph()->inputs()));
     })
     .def("set_arg_and_return_types", [](Method &self, TypedDef &typed_def, bool method) {
       std::vector<Argument> arg_type_args, return_type_args;

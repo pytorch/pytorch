@@ -57,7 +57,7 @@ private:
   const typename Schema::dispatch::dispatch_key_type dispatch_key_;
   bool owns_registration_;
 
-  DISABLE_COPY_AND_ASSIGN(KernelRegistrar);
+  AT_DISABLE_COPY_AND_ASSIGN(KernelRegistrar);
 };
 
 /**

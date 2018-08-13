@@ -15,9 +15,9 @@ void THNN_(GatedLinear_updateOutput)(
       dim + TH_INDEX_BASE, nIn);
 
   const int64_t inputSize = THTensor_(size)(input, dim) / 2;
-  THLongStorage *newSizes = THTensor_(newSizeOf)(input);
-  THLongStorage_set(newSizes, dim, inputSize);
-  THTensor_(resize)(output, newSizes, NULL);
+  std::vector<int64_t> newSizes = THTensor_sizesLegacyNoScalars(input);
+  newSizes[dim] = inputSize;
+  THTensor_(resize)(output, newSizes, {});
 
   // halve tensor
   THTensor *firstHalf = THTensor_(newNarrow)(input, dim, 0, inputSize);
@@ -27,7 +27,6 @@ void THNN_(GatedLinear_updateOutput)(
   THTensor_(sigmoid)(output, secondHalf);
   THTensor_(cmul)(output, output, firstHalf);
 
-  THLongStorage_free(newSizes);
   THTensor_(free)(firstHalf);
   THTensor_(free)(secondHalf);
 }

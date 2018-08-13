@@ -9,6 +9,10 @@
 
 #include "THCTensorInfo.cuh"
 
+int THCTensor_nDimension(THCState *state, const THCTensor *self) {
+  return THTensor_nDimension(self);
+}
+
 int THCTensor_nDimensionLegacyNoScalars(THCState *state, const THCTensor *self) {
   return THTensor_nDimensionLegacyNoScalars(self);
 }
@@ -36,12 +40,6 @@ int64_t THCTensor_strideLegacyNoScalars(THCState *state, const THCTensor *self, 
   return THTensor_strideLegacyNoScalars(self, dim);
 }
 
-THLongStorage *THCTensor_newSizeOf(THCState *state, THCTensor *self) {
-  THLongStorage *size = THLongStorage_newWithSize(self->dim());
-  THLongStorage_rawCopy(size, THTensor_getSizePtr(self));
-  return size;
-}
-
 THCTensor *THCTensor_new(THCState *state, at::ScalarType scalar_type) {
   switch(scalar_type) {
     case at::ScalarType::Byte:
@@ -67,12 +65,15 @@ THCTensor *THCTensor_new(THCState *state, at::ScalarType scalar_type) {
   }
 }
 
-void THCTensor_resize(THCState *state, THCTensor *self, THLongStorage *size, THLongStorage *stride) {
-  THArgCheck(size != NULL, 2, "invalid size");
-  if(stride)
-    THArgCheck(stride->size() == size->size(), 3, "invalid stride");
+void THCTensor_resize(THCState *state, THCTensor *self, at::IntList size, at::IntList stride) {
+  if(stride.data()) {
+    THArgCheck(stride.size() == size.size(), 3, "invalid stride");
+  }
 
-  THCTensor_resizeNd(state, self, size->size(), THLongStorage_data(size), (stride ? THLongStorage_data(stride) : NULL));
+#ifdef DEBUG
+  THAssert(size.size() <= INT_MAX);
+#endif
+  THCTensor_resizeNd(state, self, size.size(), size.data(), stride.data());
 }
 
 void THCTensor_resizeAs(THCState *state, THCTensor *self, THCTensor *src) {
@@ -95,17 +96,12 @@ void THCTensor_resizeAs(THCState *state, THCTensor *self, THCTensor *src) {
     THCTensor_resizeNd(state, self, src->dim(), THTensor_getSizePtr(src), NULL);
 }
 
-void THCTensor_resizeNd(THCState *state, THCTensor *self, int nDimension, int64_t *size, int64_t *stride)
+void THCTensor_resizeNd(THCState *state, THCTensor *self, int nDimension, const int64_t *size, const int64_t *stride)
 {
+  AT_CHECK(nDimension >= 0, "resizeNd nDimension must be non-negative");
   int d;
   ptrdiff_t totalSize;
   bool hascorrectsize = true;
-
-#ifndef USE_TH_SCALAR
-  AT_CHECK(nDimension > 0, "resizeNd nDimension must be greater than 0");
-#else
-  AT_CHECK(nDimension >= 0, "resizeNd nDimension must be non-negative");
-#endif
 
   for(d = 0; d < nDimension; d++)
   {
@@ -172,7 +168,22 @@ void THCTensor_set(THCState *state, THCTensor *self, THCTensor *src)
                            THTensor_getStridePtr(src));
 }
 
-void THCTensor_setStorageNd(THCState *state, THCTensor *self, THCStorage *storage, ptrdiff_t storageOffset, int nDimension, int64_t *size, int64_t *stride)
+void THCTensor_setStorage(THCState *state, THCTensor *self, THCStorage *storage_, ptrdiff_t storageOffset_, at::IntList size_, at::IntList stride_)
+{
+  if (stride_.data()) {
+    THArgCheck(size_.size() == stride_.size(), 5, "inconsistent size/stride sizes");
+  }
+
+  THCTensor_setStorageNd(state,
+                         self,
+                         storage_,
+                         storageOffset_,
+                         size_.size(),
+                         size_.data(),
+                         stride_.data());
+}
+
+void THCTensor_setStorageNd(THCState *state, THCTensor *self, THCStorage *storage, ptrdiff_t storageOffset, int nDimension, const int64_t *size, const int64_t *stride)
 {
   /* storage */
   if(THTensor_getStoragePtr(self) != storage)
@@ -212,11 +223,7 @@ void THCTensor_squeeze1d(THCState *state, THCTensor *self, THCTensor *src, int d
 
   THCTensor_set(state, self, src);
 
-#ifdef TH_SCALAR
   if(src->size(dimension) == 1)
-#else
-  if(src->size(dimension) == 1 && src->dim() > 1)
-#endif
   {
     for(d = dimension; d < self->dim()-1; d++)
     {
@@ -285,7 +292,7 @@ ptrdiff_t THCTensor_nElement(THCState *state, const THCTensor *self) {
   {
     ptrdiff_t nElement = 1;
     int d;
-    for(d = 0; d < THTensor_nDimensionLegacyAll(self); d++)
+    for(d = 0; d < THTensor_nDimension(self); d++)
       nElement *= self->size(d);
     return nElement;
   }

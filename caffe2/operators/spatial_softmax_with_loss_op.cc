@@ -217,14 +217,14 @@ bool SpatialSoftmaxWithLossGradientOp<float, CPUContext>::RunOnDevice() {
   }
 
   if (total_weight > 0) {
-    math::Scale<float, CPUContext>(
+    math::Scale<float, float, CPUContext>(
         dX->size(),
         scale_ / total_weight,
         dX->data<float>(),
         dX_data,
         &context_);
   }
-  math::Scale<float, CPUContext>(
+  math::Scale<float, float, CPUContext>(
       dX->size(),
       d_avg_loss.data<float>(),
       dX->data<float>(),

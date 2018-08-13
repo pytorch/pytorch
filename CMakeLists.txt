@@ -288,11 +288,6 @@ include_directories(BEFORE ${PROJECT_BINARY_DIR})
 
 include_directories(BEFORE ${PROJECT_SOURCE_DIR}/aten/src/)
 
-# ---[ Old caffe protobuf
-if(BUILD_CAFFE2)
-  add_subdirectory(caffe/proto)
-endif()
-
 # ---[ Main build
 add_subdirectory(caffe2)
 

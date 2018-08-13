@@ -62,8 +62,13 @@ SparseTensor new_sparse(const SparseType& dtype) {
   AT_ASSERT(!dtype.is_undefined());
   AT_ASSERT(!dtype.is_variable());
   AT_ASSERT(dtype.is_sparse());
-  // TODO: Hmm... this const_cast business seems a bit dodgy
-  return SparseTensor(new SparseTensorImpl(dtype.backend(), dtype.scalarType()), /* retain */ false);
+  TensorTypeId type_id;
+  if (dtype.is_cuda()) {
+    type_id = SparseCUDATensorId();
+  } else {
+    type_id = SparseCPUTensorId();
+  }
+  return SparseTensor(new SparseTensorImpl(type_id, dtype.scalarType()), /* retain */ false);
 }
 
 /*** Helper methods ***/

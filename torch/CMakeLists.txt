@@ -109,6 +109,7 @@ add_custom_command(
   "${TOOLS_PATH}/autograd/gen_autograd.py"
   "${TOOLS_PATH}/autograd/gen_autograd_functions.py"
   "${TOOLS_PATH}/autograd/gen_variable_type.py"
+  "${TOOLS_PATH}/autograd/derivatives.yaml"
   "${TOOLS_PATH}/jit/gen_jit_dispatch.py"
   "${TOOLS_PATH}/jit/templates/register_aten_ops.cpp"
   "${TOOLS_PATH}/jit/templates/aten_interned_strings.h"
@@ -199,7 +200,7 @@ if (NOT NO_API AND NOT USE_ROCM)
 
 endif()
 
-add_library(torch SHARED ${TORCH_SRCS})
+add_library(torch ${TORCH_SRCS})
 
 target_compile_definitions(torch PRIVATE _THP_CORE)
 
@@ -324,7 +325,7 @@ if(USE_ROCM)
   target_include_directories(torch PRIVATE
     /opt/rocm/include
     /opt/rocm/hcc/include
-    /opt/rocm/hipblas/include
+    /opt/rocm/rocblas/include
     /opt/rocm/hcsparse/include
     )
 endif()

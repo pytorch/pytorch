@@ -399,6 +399,10 @@ class Graph {
     return result;
   }
 
+  size_t getNodesCount() const {
+    return (size_t)nodes_.size();
+  }
+
   const std::vector<EdgeRef> getMutableEdges() {
     std::vector<EdgeRef> result;
     for (auto& e : edges_) {

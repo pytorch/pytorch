@@ -36,7 +36,7 @@ struct AT_API SparseTensorImpl : public TensorImpl {
 
 public:
   // Public for now...
-  explicit SparseTensorImpl(at::Backend, at::ScalarType);
+  explicit SparseTensorImpl(at::TensorTypeId, at::ScalarType);
 
   int64_t nnz() const { return values_.size(0); }
   int64_t sparseDims() const { return sparseDims_; }
