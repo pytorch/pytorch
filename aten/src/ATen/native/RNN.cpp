@@ -496,7 +496,10 @@ std::tuple<Tensor, Tensor> unpack_hidden(const tpair_of<Tensor>& hidden) {
 }
 
 template<typename hidden_type>
-hidden_type pack_hidden(const Tensor& hx, const Tensor& cx) = delete;
+hidden_type pack_hidden(const Tensor& hx, const Tensor& cx) {
+  static_assert(std::is_same<hidden_type, void>::value, "pack_hidden not implemented for this type");
+  AT_ERROR("NOT IMPLEMENTED");
+}
 
 template<>
 Tensor pack_hidden<Tensor>(const Tensor& hx, const Tensor& cx) {
