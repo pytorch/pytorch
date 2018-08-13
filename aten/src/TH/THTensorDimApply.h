@@ -9,7 +9,7 @@
 #define TH_TENSOR_DIM_APPLY3_SIZE_EQ_EXCEPT_DIM(TENSOR1, TENSOR2, TENSOR3, DIMENSION) \
 { \
   int shape_check_flag = 0;                                             \
-  for(TH_TENSOR_DIM_APPLY_i = 0; TH_TENSOR_DIM_APPLY_i < TENSOR1->dim(); TH_TENSOR_DIM_APPLY_i++) \
+  for(TH_TENSOR_DIM_APPLY_i = 0; TH_TENSOR_DIM_APPLY_i < THTensor_nDimensionLegacyNoScalars(TENSOR1); TH_TENSOR_DIM_APPLY_i++) \
   { \
     if (TH_TENSOR_DIM_APPLY_i == DIMENSION) \
       continue; \
@@ -42,10 +42,10 @@
   if( (DIMENSION < 0) || (DIMENSION >= THTensor_nDimensionLegacyNoScalars(TENSOR1)) ) \
     THError("invalid dimension %d (expected to be 0 <= dim < %d)", DIMENSION, THTensor_nDimensionLegacyNoScalars(TENSOR1)); \
   int same_dims = 1;                                                    \
-  if( TENSOR1->dim() != TENSOR2->dim() ) {                    \
+  if( THTensor_nDimensionLegacyNoScalars(TENSOR1) != THTensor_nDimensionLegacyNoScalars(TENSOR2) ) { \
     same_dims = 0;                                                      \
   } \
-  if( TENSOR1->dim() != TENSOR3->dim() ) { \
+  if( THTensor_nDimensionLegacyNoScalars(TENSOR1) != THTensor_nDimensionLegacyNoScalars(TENSOR3) ) { \
     same_dims = 0;                                   \
   } \
   if (same_dims == 0) { \
@@ -147,7 +147,7 @@
 \
   if( (DIMENSION < 0) || (DIMENSION >= THTensor_nDimensionLegacyNoScalars(TENSOR1)) ) \
     THError("invalid dimension %d (expected to be 0 <= dim < %d)", DIMENSION, THTensor_nDimensionLegacyAll(TENSOR1)); \
-  if( TENSOR1->dim() != TENSOR2->dim() ) {                    \
+  if( THTensor_nDimensionLegacyNoScalars(TENSOR1) != THTensor_nDimensionLegacyNoScalars(TENSOR2)) { \
     AT_ERROR("inconsistent tensor size, expected ", #TENSOR1, " ", TENSOR1->sizes(), " and ", #TENSOR2, " ", TENSOR2->sizes(), " to have the same number of dimensions");        \
   }                                                                     \
   TH_UNUSED int shape_check_flag = 0;                                             \
@@ -182,7 +182,7 @@
     if(THTensor_nDimensionLegacyNoScalars(TENSOR1) == 1) \
        break; \
  \
-    for(TH_TENSOR_DIM_APPLY_i = 0; TH_TENSOR_DIM_APPLY_i < TENSOR1->dim(); TH_TENSOR_DIM_APPLY_i++) \
+    for(TH_TENSOR_DIM_APPLY_i = 0; TH_TENSOR_DIM_APPLY_i < THTensor_nDimensionLegacyNoScalars(TENSOR1); TH_TENSOR_DIM_APPLY_i++) \
     { \
       if(TH_TENSOR_DIM_APPLY_i == DIMENSION) \
       { \

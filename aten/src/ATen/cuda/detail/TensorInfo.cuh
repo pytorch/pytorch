@@ -11,6 +11,7 @@ namespace detail {
 // CUDA kernel argument that defines tensor layout
 template <typename T, typename IndexType>
 struct TensorInfo {
+  TensorInfo();
   TensorInfo(T* p,
              int dim,
              IndexType sz[MAX_TENSORINFO_DIMS],
@@ -48,6 +49,12 @@ struct TensorInfo {
 };
 
 template <typename T, typename IndexType>
+TensorInfo<T, IndexType>::TensorInfo() {
+  data = nullptr;
+  dims = 0;
+}
+
+template <typename T, typename IndexType>
 TensorInfo<T, IndexType>::TensorInfo(T* p,
                                      int dim,
                                      IndexType sz[MAX_TENSORINFO_DIMS],
@@ -73,7 +80,7 @@ template <typename T, typename IndexType>
 int
 TensorInfo<T, IndexType>::collapseDims(const int excludeDim) {
 
-  AT_CHECK(excludeDim >= -1 && excludeDim < dims, 
+  AT_CHECK(excludeDim >= -1 && excludeDim < dims,
     "expected excluded dim between -1 and dims - 1");
 
   int stopDim = (excludeDim == -1) ? dims : excludeDim;
@@ -87,12 +94,12 @@ TensorInfo<T, IndexType>::collapseDims(const int excludeDim) {
       if (sizes[oldIndex] == 1) {
         continue;
       }
-      
+
       ++newIndex;
       sizes[newIndex] = sizes[oldIndex];
       strides[newIndex] = strides[oldIndex];
       ++oldIndex;
-      break; 
+      break;
     }
 
     // Collapses dims
@@ -100,7 +107,7 @@ TensorInfo<T, IndexType>::collapseDims(const int excludeDim) {
       if (sizes[oldIndex] == 1) {
         continue;
       }
-  
+
       if (strides[newIndex] == sizes[oldIndex] * strides[oldIndex]) {
         sizes[newIndex] *= sizes[oldIndex];
         strides[newIndex] = strides[oldIndex];
@@ -113,7 +120,7 @@ TensorInfo<T, IndexType>::collapseDims(const int excludeDim) {
 
     // Handles excludeDim being set (oldIndex == excludeDim)
     if (oldIndex != dims) {
-      
+
       // Preserves excluded dimension
       ++newIndex;
       sizes[newIndex] = sizes[oldIndex];
@@ -146,7 +153,7 @@ struct IndexToOffset {
   static __host__ __device__ IndexType get(
     IndexType linearId,
     const TensorInfo<T, IndexType>& info) {
-    
+
     IndexType offset = 0;
 
     // Uses static dims

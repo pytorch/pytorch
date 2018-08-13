@@ -39,12 +39,17 @@ def reduce_event(event):
 
 
 def rebuild_tensor(cls, storage, metadata):
-    storage_offset, size, stride = metadata
-    return torch._utils._rebuild_tensor(storage, storage_offset, size, stride)
+    storage_offset, size, stride, requires_grad, backward_hooks = metadata
+    t = torch._utils._rebuild_tensor(storage, storage_offset, size, stride)
+    if cls == torch.nn.parameter.Parameter:
+        t = torch.nn.parameter.Parameter(t)
+    t.requires_grad = requires_grad
+    t._backward_hooks = backward_hooks
+    return t
 
 
 def rebuild_cuda_tensor(tensor_cls, tensor_size, tensor_stride, tensor_offset,
-                        storage_cls, storage_device, storage_handle, storage_size):
+                        storage_cls, storage_device, storage_handle, storage_size, requires_grad, backward_hooks):
 
     storage = storage_from_cache(storage_cls, storage_handle)
     if storage is None:
@@ -52,11 +57,22 @@ def rebuild_cuda_tensor(tensor_cls, tensor_size, tensor_stride, tensor_offset,
         storage = storage_cls._new_shared_cuda(storage_device, storage_handle, storage_size)
         shared_cache[storage_handle] = storage._weak_ref(StorageRef)
 
-    return torch._utils._rebuild_tensor(storage, tensor_offset, tensor_size, tensor_stride)
+    t = torch._utils._rebuild_tensor(storage, tensor_offset, tensor_size, tensor_stride)
+    if tensor_cls == torch.nn.parameter.Parameter:
+        t = torch.nn.parameter.Parameter(t)
+    t.requires_grad = requires_grad
+    t._backward_hooks = backward_hooks
+    return t
 
 
 def reduce_tensor(tensor):
     storage = tensor.storage()
+
+    if tensor.requires_grad and not tensor.is_leaf:
+        raise RuntimeError("Cowardly refusing to serialize non-leaf tensor which requires_grad, "
+                           "since autograd does not support crossing process boundaries.  "
+                           "If you just want to transfer the data, call detach() on the tensor "
+                           "before serializing (e.g., putting it on the queue).")
 
     # Note [CUDA IPC and the caching allocator]
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -123,9 +139,11 @@ def reduce_tensor(tensor):
                  type(storage),
                  device,
                  handle,
-                 storage_size))
+                 storage_size,
+                 tensor.requires_grad,
+                 tensor._backward_hooks))
 
-    metadata = (tensor.storage_offset(), tensor.size(), tensor.stride())
+    metadata = (tensor.storage_offset(), tensor.size(), tensor.stride(), tensor.requires_grad, tensor._backward_hooks)
     return (rebuild_tensor, (type(tensor), storage, metadata))
 
 
@@ -215,3 +233,4 @@ def init_reductions():
 
     # TODO: Maybe this should be in tensor_classes? :)
     ForkingPickler.register(torch.Tensor, reduce_tensor)
+    ForkingPickler.register(torch.nn.parameter.Parameter, reduce_tensor)
