@@ -19,6 +19,7 @@
 #include "nomnigraph/Support/Pointer.h"
 #include "nomnigraph/Transformations/SubgraphMatcher.h"
 
+#include <sstream>
 #include <string>
 #include <type_traits>
 #include <vector>
@@ -421,7 +422,20 @@ void coalesceInsertedDataDependencies(repr::NNModule* m);
 template <NNGraph* G>
 struct NodeHelper {};
 
-using NNNodeMatchCriteria = std::function<bool(NNGraph::NodeRef)>;
+struct NNNodeMatchCriteria {
+  const std::function<bool(NNGraph::NodeRef)> predicate;
+  const std::string debugString;
+
+  NNNodeMatchCriteria(
+      const std::function<bool(NNGraph::NodeRef)>& predicate,
+      const std::string& debugString = "No debug string specified")
+      : predicate(predicate), debugString(debugString){};
+};
+
+std::ostream& operator<<(
+    std::ostream& oss,
+    const NNNodeMatchCriteria& criteria);
+
 using NNSubtree = nom::matcher::SubtreeMatchCriteria<NNNodeMatchCriteria>;
 
 bool hasSingleOutputAndConsumer(NNGraph::NodeRef nodeRef);
@@ -429,8 +443,9 @@ bool hasSingleOutputAndConsumer(NNGraph::NodeRef nodeRef);
 template <typename NodeType>
 NNNodeMatchCriteria matchNodeTypeWithPredicate(
     const std::function<bool(NNGraph::NodeRef, const NodeType&)> predicate,
-    bool expectedSingleOutputAndConsumer = false) {
-  return
+    bool expectedSingleOutputAndConsumer = false,
+    const std::string& debugString = "matchNodeTypeWithPredicate") {
+  return NNNodeMatchCriteria(
       [&predicate, expectedSingleOutputAndConsumer](NNGraph::NodeRef nodeRef) {
         NOM_REQUIRE_OR_RET_FALSE(is<NodeType>(nodeRef));
         if (expectedSingleOutputAndConsumer) {
@@ -438,18 +453,22 @@ NNNodeMatchCriteria matchNodeTypeWithPredicate(
         }
         NodeType* node = get<NodeType>(nodeRef);
         return predicate(nodeRef, *node);
-      };
+      },
+      debugString);
 };
 
 template <typename NodeType>
 NNNodeMatchCriteria matchNodeType(
-    bool expectedSingleOutputAndConsumer = false) {
-  return [expectedSingleOutputAndConsumer](NNGraph::NodeRef nodeRef) {
-    if (expectedSingleOutputAndConsumer) {
-      NOM_REQUIRE_OR_RET_FALSE(hasSingleOutputAndConsumer(nodeRef));
-    }
-    return is<NodeType>(nodeRef);
-  };
+    bool expectedSingleOutputAndConsumer = false,
+    const std::string& debugString = "matchNodeType") {
+  return NNNodeMatchCriteria(
+      [expectedSingleOutputAndConsumer](NNGraph::NodeRef nodeRef) {
+        if (expectedSingleOutputAndConsumer) {
+          NOM_REQUIRE_OR_RET_FALSE(hasSingleOutputAndConsumer(nodeRef));
+        }
+        return is<NodeType>(nodeRef);
+      },
+      debugString);
 }
 
 NNNodeMatchCriteria matchAnyNode();
@@ -458,7 +477,7 @@ struct NNNodeMatch {
   static bool isMatch(
       const NNGraph::NodeRef& node,
       const NNNodeMatchCriteria& criteria) {
-    return criteria(node);
+    return criteria.predicate(node);
   }
 };
 
