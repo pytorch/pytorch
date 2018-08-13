@@ -451,7 +451,6 @@ class TestJit(JitTestCase):
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
-    @unittest.skipIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")
     def test_concat_fusion_invariant_cuda(self):
         # Invariant: the output of prim::FusedConcat may
         # not be an input to any node inside the FusionGroup.
