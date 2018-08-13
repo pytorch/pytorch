@@ -1014,47 +1014,25 @@ class TestSparse(TestCase):
         with self.assertRaisesRegex(RuntimeError, "indices and values must have same nnz"):
             torch.sparse_coo_tensor(indices, values, sizes)
 
-    def test_factory_zero_nnz(self):
+    def _test_factory_tensor_shape(self, i_shape, v_shape, size, expected_size):
         device = 'cuda' if self.is_cuda else 'cpu'
-        t = torch.sparse_coo_tensor(torch.empty(1, 0), torch.empty(0, 2, 4, 0), device=device)
-        expected_indices = torch.empty((1, 0), dtype=torch.long, device=device)
-        expected_values = torch.empty((0, 2, 4, 0), dtype=torch.long, device=device)
-        expected_size = torch.Size([0, 2, 4, 0])
+        if size:
+            t = torch.sparse_coo_tensor(torch.empty(i_shape), torch.empty(v_shape), torch.Size(size), device=device)
+        else:
+            t = torch.sparse_coo_tensor(torch.empty(i_shape), torch.empty(v_shape), device=device)
+        expected_indices = torch.empty(i_shape, device=device)
+        expected_values = torch.empty(v_shape, device=device)
+        expected_size = torch.Size(expected_size)
         self.assertEqual(t._indices(), expected_indices)
         self.assertEqual(t._values(), expected_values)
         self.assertEqual(t.size(), expected_size)
 
-        t = torch.sparse_coo_tensor(torch.empty(3, 0), torch.empty(0, 2, 4, 0), device=device)
-        expected_indices = torch.empty((3, 0), dtype=torch.long, device=device)
-        expected_values = torch.empty((0, 2, 4, 0), dtype=torch.long, device=device)
-        expected_size = torch.Size([0, 0, 0, 2, 4, 0])
-        self.assertEqual(t._indices(), expected_indices)
-        self.assertEqual(t._values(), expected_values)
-        self.assertEqual(t.size(), expected_size)
-
-        t = torch.sparse_coo_tensor(torch.empty(1, 0), torch.empty(0, 2, 4, 0), size=(0, 2, 4, 0), device=device)
-        expected_indices = torch.empty((1, 0), dtype=torch.long, device=device)
-        expected_values = torch.empty((0, 2, 4, 0), dtype=torch.long, device=device)
-        expected_size = torch.Size([0, 2, 4, 0])
-        self.assertEqual(t._indices(), expected_indices)
-        self.assertEqual(t._values(), expected_values)
-        self.assertEqual(t.size(), expected_size)
-
-        t = torch.sparse_coo_tensor(torch.empty(3, 0), torch.empty(0, 2, 4, 0), size=(0, 0, 0, 2, 4, 0), device=device)
-        expected_indices = torch.empty((3, 0), dtype=torch.long, device=device)
-        expected_values = torch.empty((0, 2, 4, 0), dtype=torch.long, device=device)
-        expected_size = torch.Size([0, 0, 0, 2, 4, 0])
-        self.assertEqual(t._indices(), expected_indices)
-        self.assertEqual(t._values(), expected_values)
-        self.assertEqual(t.size(), expected_size)
-
-        t = torch.sparse_coo_tensor(torch.empty(3, 0), torch.empty(0, 2, 4, 0), size=(1, 2, 3, 2, 4, 0), device=device)
-        expected_indices = torch.empty((3, 0), dtype=torch.long, device=device)
-        expected_values = torch.empty((0, 2, 4, 0), dtype=torch.long, device=device)
-        expected_size = torch.Size([1, 2, 3, 2, 4, 0])
-        self.assertEqual(t._indices(), expected_indices)
-        self.assertEqual(t._values(), expected_values)
-        self.assertEqual(t.size(), expected_size)
+    def test_factory_nnz_zero(self):
+        self._test_factory_tensor_shape([1, 0], [0, 2, 4, 0], None, [0, 2, 4, 0])
+        self._test_factory_tensor_shape([3, 0], [0, 2, 4, 0], None, [0, 0, 0, 2, 4, 0])
+        self._test_factory_tensor_shape([1, 0], [0, 2, 4, 0], [0, 2, 4, 0], [0, 2, 4, 0])
+        self._test_factory_tensor_shape([3, 0], [0, 2, 4, 0], [0, 0, 0, 2, 4, 0], [0, 0, 0, 2, 4, 0])
+        self._test_factory_tensor_shape([3, 0], [0, 2, 4, 0], [1, 2, 3, 2, 4, 0], [1, 2, 3, 2, 4, 0])
 
     def test_factory_dense_dims(self):
         indices = self.IndexTensor([[0]])
@@ -1146,6 +1124,49 @@ class TestSparse(TestCase):
             self.assertEqual(t, t + y)
 
         do_test(self.SparseTensor())
+
+    def _test_resize_shape(self, x_i, x_v, x_size, y_i, y_v, y_size):
+        x = torch.sparse_coo_tensor(torch.zeros(x_i), torch.randn(x_v), torch.Size(x_size))
+        x_dense = x.to_dense()
+        y = torch.sparse_coo_tensor(torch.zeros(y_i), torch.randn(y_v), torch.Size(y_size))
+        y_dense = y.to_dense()
+        x.resize_as_(y)
+        x_dense.resize_as_(y_dense)
+        self.assertEqual(x.shape, y.shape)
+        self.assertEqual(x._sparseDims(), y._sparseDims())
+        self.assertEqual(x._denseDims(), y._denseDims())
+        self.assertEqual(x.to_dense(), x_dense)
+
+    def test_resize(self):
+        # 1. Add dims to dense dimensions [Supported]
+        self._test_resize_shape([1, 1], [1, 2, 3], [2, 2, 3],
+                                [1, 1], [1, 2, 3, 4], [2, 2, 3, 4])
+
+        # 2. Remove dims from dense dimensions [Supported]
+        self._test_resize_shape([1, 1], [1, 2, 3], [2, 2, 3],
+                                [1, 1], [1, 2], [2, 2])
+
+        # 3. Change the size of some dense dimensions [Supported]
+        self._test_resize_shape([1, 1], [1, 2, 3], [2, 2, 3],
+                                [1, 1], [1, 2, 2], [2, 2, 2])
+
+        # 4. Expand the size of some sparse dimensions [Supported]
+        self._test_resize_shape([1, 1], [1, 2, 3], [2, 2, 3],
+                                [1, 1], [1, 2, 3], [4, 2, 3])
+
+        # 5. Change the shapes of both sparse and dense dimensions when nnz is zero [Supported]
+        self._test_resize_shape([1, 0], [0, 2, 3], [2, 2, 3],
+                                [2, 1], [1, 2, 4, 5], [1, 1, 2, 4, 5])
+
+        # 6. Change the number of sparse dimensions on a non-empty sparse tensor [Not Supported]
+        with self.assertRaisesRegex(RuntimeError, "changing the number of sparse dimensions"):
+            self._test_resize_shape([1, 1], [1, 2, 3], [2, 2, 3],
+                                    [2, 1], [1, 2, 3], [1, 2, 2, 3])
+
+        # 7. Shrink the size of some sparse dimensions on a non-empty sparse tensor [Not Supported]
+        with self.assertRaisesRegex(RuntimeError, "shrinking the size of sparse dimensions"):
+            self._test_resize_shape([1, 1], [1, 2, 3], [2, 2, 3],
+                                    [1, 1], [1, 2, 3], [1, 2, 3])
 
     def test_is_nonzero(self):
         self.assertTrue(torch.sparse_coo_tensor(([0],), 1., (1,)).is_nonzero())

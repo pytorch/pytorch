@@ -63,7 +63,7 @@ void SparseTensorImpl::set_indices_and_values_unsafe(const Tensor& indices, cons
   auto dense_size_original = sizes().slice(sparseDims_);
   std::vector<int64_t> expected_values_size_vec = {values.size(0)};
   expected_values_size_vec.insert(expected_values_size_vec.end(), dense_size_original.begin(), dense_size_original.end());
-  ArrayRef<int64_t> expected_values_size(expected_values_size_vec);
+  IntList expected_values_size(expected_values_size_vec);
   auto new_values_size = values.sizes();
   AT_CHECK(
     std::equal(expected_values_size.begin(), expected_values_size.end(), new_values_size.begin()),
@@ -73,7 +73,6 @@ void SparseTensorImpl::set_indices_and_values_unsafe(const Tensor& indices, cons
   indices_ = indices;
   values_ = values;
 
-  nnz_ = values.size(0);
   coalesced_ = false;
 }
 

@@ -1744,7 +1744,7 @@ class TestNN(NNTestCase):
 
     def test_embedding_sparse_empty_tensor(self):
         embedding = nn.Embedding(0, 0, sparse=True)
-        input = torch.LongTensor()
+        input = torch.tensor([], dtype=torch.int64)
         embedding(input).sum().backward()
         self.assertTrue(embedding.weight.grad.is_sparse)
         self.assertEqual(embedding.weight.grad.shape, embedding.weight.shape)

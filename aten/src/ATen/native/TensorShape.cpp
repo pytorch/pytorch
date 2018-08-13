@@ -5,6 +5,7 @@
 #include "ATen/WrapDimUtils.h"
 #include "ATen/core/Error.h"
 #include "ATen/core/optional.h"
+#include "ATen/native/sparse/SparseUtils.h"
 
 #include <algorithm>
 #include <vector>
@@ -410,7 +411,7 @@ static inline Tensor & sparse_transpose_(Tensor & self, int64_t dim0, int64_t di
     auto sizes = self.sizes().vec();
     std::swap(sizes[dim0], sizes[dim1]);
 
-    return self.sparse_resize_(sizes, self._sparseDims(), self._denseDims());
+    _get_sparse_impl(self)->raw_resize_(self._sparseDims(), self._denseDims(), sizes);
   } else {
     auto indices = self._indices();
     auto row0 = indices.select(0, dim0);
@@ -425,8 +426,9 @@ static inline Tensor & sparse_transpose_(Tensor & self, int64_t dim0, int64_t di
     auto sizes = self.sizes().vec();
     std::swap(sizes[dim0], sizes[dim1]);
 
-    return self.sparse_resize_(sizes, self._indices().size(0), self._values().dim() - 1);
+    _get_sparse_impl(self)->raw_resize_(self._indices().size(0), self._values().dim() - 1, sizes);
   }
+  return self;
 }
 
 Tensor & transpose_(Tensor & self, int64_t dim0, int64_t dim1) {
