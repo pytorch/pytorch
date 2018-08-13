@@ -260,10 +260,7 @@ class JitTestCase(TestCase):
         else:
             recording_inputs = reference_tensors
 
-        if isinstance(func, torch._C.Graph):
-            ge = torch._C.GraphExecutor(func, optimize)
-        else:
-            ge = torch.jit.trace(*input_tensors, optimize=optimize)(func)
+        ge = torch.jit.trace(*input_tensors, optimize=optimize)(func)
 
         if verbose:
             print(ge.graph)
@@ -914,10 +911,9 @@ class TestJit(JitTestCase):
         def fn(x):
             return MyInplaceFn.apply(x)
 
-        x = torch.randn(5, 5)
-        ge = torch._C.GraphExecutor(fn, (x,))
-        with self.assertRaisesRegex(RuntimeError, 'inplace MyInplaceFn'):
-            ge(x)
+        x = torch.tensor([0.], requires_grad=True)
+        with self.assertRaisesRegex(RuntimeError, 'in-place operation'):
+            trace, _ = torch.jit.get_trace_graph(fn, (x,))
 
     def do_trace_size(self, requires_grad):
         def fn(x):
@@ -1163,10 +1159,12 @@ class TestJit(JitTestCase):
             return a * b / (a - b) + b
         V = Variable
         a, b = V(torch.rand(1)), V(torch.rand(1))
-        ge = torch._C.GraphExecutor(foo, (a, b))
+        ge, _ = torch.jit.get_trace_graph(foo, (a, b))
+        m = torch.jit.ScriptModule()
+        m._create_method_from_graph("forward", ge.graph())
         a, b = V(torch.rand(1), requires_grad=True), V(
             torch.rand(1), requires_grad=True)
-        r, = ge(a, b)
+        r, = m.forward(a, b)
         da, db = torch.autograd.grad(r + 3, [a, b], create_graph=True)
 
         l2 = (da * db + db * db)

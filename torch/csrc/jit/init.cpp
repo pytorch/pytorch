@@ -206,13 +206,6 @@ void initJITBindings(PyObject *module) {
      .def("get_debug_state", [](GraphExecutor& ge) {
         return ge.getDebugState();
       })
-      .def("__call__", [](GraphExecutor& ge, py::args args) -> py::object {
-        const auto & graph = ge.graph();
-        auto stack = evilDeprecatedBadCreateStackDoNotUse(args, graph->inputs());
-        ge.run(stack);
-        return createPyObjectForStack(std::move(stack));
-      });
-
 
     py::class_<PyTorchFileWriter>(m, "PyTorchFileWriter")
       .def(py::init<std::string>())
