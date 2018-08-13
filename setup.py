@@ -886,14 +886,18 @@ if USE_CUDA:
 if USE_ROCM:
     rocm_include_path = '/opt/rocm/include'
     hcc_include_path = '/opt/rocm/hcc/include'
-    hipblas_include_path = '/opt/rocm/hipblas/include'
+    rocblas_include_path = '/opt/rocm/rocblas/include'
     hipsparse_include_path = '/opt/rocm/hcsparse/include'
+    hiprand_include_path = '/opt/rocm/hiprand/include'
+    rocrand_include_path = '/opt/rocm/rocrand/include'
     hip_lib_path = '/opt/rocm/hip/lib'
     hcc_lib_path = '/opt/rocm/hcc/lib'
     include_dirs.append(rocm_include_path)
     include_dirs.append(hcc_include_path)
-    include_dirs.append(hipblas_include_path)
+    include_dirs.append(rocblas_include_path)
     include_dirs.append(hipsparse_include_path)
+    include_dirs.append(hiprand_include_path)
+    include_dirs.append(rocrand_include_path)
     include_dirs.append(tmp_install_path + "/include/THCUNN")
     extra_link_args.append('-L' + hip_lib_path)
     extra_link_args.append('-Wl,-rpath,' + hip_lib_path)

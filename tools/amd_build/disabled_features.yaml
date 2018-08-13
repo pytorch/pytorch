@@ -4,17 +4,14 @@
       {
         "path": "aten/src/THC/THCBlas.cu",
         "functions": {
-          "cublasSgemmEx": "HIPBLAS_STATUS_INTERNAL_ERROR",
-          "cublasSgetrfBatched": "HIPBLAS_STATUS_INTERNAL_ERROR",
-          "cublasDgetrfBatched": "HIPBLAS_STATUS_INTERNAL_ERROR",
-          "cublasSgetrsBatched": "HIPBLAS_STATUS_INTERNAL_ERROR",
-          "cublasDgetrsBatched": "HIPBLAS_STATUS_INTERNAL_ERROR",
-          "cublasSgetriBatched": "HIPBLAS_STATUS_INTERNAL_ERROR",
-          "cublasDgetriBatched": "HIPBLAS_STATUS_INTERNAL_ERROR"
+          "cublasSgemmEx": "rocblas_status_internal_error",
+          "cublasSgetrfBatched": "rocblas_status_internal_error",
+          "cublasDgetrfBatched": "rocblas_status_internal_error",
+          "cublasSgetrsBatched": "rocblas_status_internal_error",
+          "cublasDgetrsBatched": "rocblas_status_internal_error",
+          "cublasSgetriBatched": "rocblas_status_internal_error",
+          "cublasDgetriBatched": "rocblas_status_internal_error"
         },
-        "constants": {
-            "HIPBLAS_DATA_HALF": "0"
-        }
       },
       {
         "path": "aten/src/THC/THCStream.cpp",
@@ -79,6 +76,31 @@
         }
       },
       {
+        "path": "aten/src/THC/THCTensorRandom.cu",
+        "s_constants": {
+          "struct curandStateMtgp32*": "curandStateMtgp32*"
+        }
+      },
+      {
+        "path": "aten/src/THC/THCTensorRandom.h",
+        "s_constants": {
+          "struct curandStateMtgp32*": "curandStateMtgp32*"
+        }
+      },
+      {
+        "path": "aten/src/THCUNN/generic/RReLU.cu",
+        "s_constants": {
+          "struct curandStateMtgp32*": "curandStateMtgp32*"
+        }
+      },
+      {
+        "path": "aten/src/THC/THCGenerator.hpp",
+        "s_constants": {
+          "struct curandStateMtgp32*": "curandStateMtgp32*",
+          "struct mtgp32_kernel_params": "mtgp32_kernel_params"
+        }
+      },
+      {
         "path": "aten/src/ATen/native/cuda/CuFFTUtils.h",
         "s_constants": {
           "#include <cufft.h>": "",
@@ -127,7 +149,6 @@
     "aten/src/ATen/native/cuda/CuFFTPlanCache.h",
     "aten/src/ATen/native/cuda/SpectralOps.cu",
     "aten/src/ATen/native/cuda/Distributions.cu",
-    "aten/src/ATen/native/cuda/Dropout.cu"
   ],
   "disabled_functions": [
     {
@@ -187,6 +208,13 @@
       "path": "aten/src/THC/generic/THCTensor.cu",
       "functions": [
         "THCTensor_(getTextureObject)"
+      ]
+    },
+    {
+      "path": "aten/src/THC/THCTensorRandom.cu",
+      "functions": [
+        "THCRandom_setRNGState",
+        "set_rngstate_kernel"
       ]
     }
   ]

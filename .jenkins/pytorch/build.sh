@@ -30,7 +30,6 @@ cmake --version
 pip install -r requirements.txt || true
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
-  # This is necessary in order to cross compile (or else we'll have missing GPU device).
   export MAX_JOBS=4
   # This is necessary in order to cross compile (or else we'll have missing GPU device).
   export HCC_AMDGPU_TARGET=gfx900
