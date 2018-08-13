@@ -212,87 +212,45 @@ struct NormReduction {
     }
     int64_t batch = numel / n;
 
-#if 1
-    if (stride == 1) {
-      parallel_for(0, batch, 1, [=](int64_t begin, int64_t end) {
-        for (int64_t b = begin; b < end; b++) {
-          const scalar_t* data = &data_[b * n];
-          scalar_t result = 0.0;
-          if (pval == 0) {
-            for (int64_t k = 0; k < n; k++) {
-              result += (data[k] != 0.0);
-            }
-            out_[b] = result;
-          } else if (pval == 1) {
-            for (int64_t k = 0; k < n; k++) {
-              result += std::abs(data[k]);
-            }
-            out_[b] = result;
-          } else if (pval == 2) {
-            for (int64_t k = 0; k < n; k++) {
-              result += data[k] * data[k];
-            }
-            out_[b] = std::sqrt(result);
-          } else if (pval == 3) {
-            for (int64_t k = 0; k < n; k++) {
-              result += std::abs(data[k] * data[k] * data[k]);
-            }
-            out_[b] = std::pow(result, 1.0/3);
-          } else if (std::isinf(pval)) {
-            for (int64_t k = 0; k < n; k++) {
-              result = std::abs(data[k]) > result ? std::abs(data[k]) : result;
-            }
-            out_[b] = result;
-          } else {
-            for (int64_t k = 0; k < n; k++) {
-              result += std::pow(std::abs(data[k]), pval);
-            }
-            out_[b] = std::pow(result, 1.0/pval);
+    parallel_for(0, batch, 1, [=](int64_t begin, int64_t end) {
+      for (int64_t bi = begin; bi < end; bi++) {
+        int64_t b = bi / stride;
+        int64_t i = bi % stride;
+        const scalar_t* data = &data_[b * n * stride + i];
+        scalar_t result = 0.0;
+        if (pval == 0) {
+          for (int64_t k = 0; k < n; k++) {
+            result += (data[k * stride] != 0.0);
           }
-        }
-      });
-    } else {
-      parallel_for(0, batch, 1, [=](int64_t begin, int64_t end) {
-        for (int64_t bi = begin; bi < end; bi++) {
-          int64_t b = bi / stride;
-          int64_t i = bi % stride;
-          const scalar_t* data = &data_[b * n * stride + i];
-          scalar_t result = 0.0;
-          if (pval == 0) {
-            for (int64_t k = 0; k < n; k++) {
-              result += (data[k * stride] != 0.0);
-            }
-            out_[bi] = result;
-          } else if (pval == 1) {
-            for (int64_t k = 0; k < n; k++) {
-              result += std::abs(data[k * stride]);
-            }
-            out_[bi] = result;
-          } else if (pval == 2) {
-            for (int64_t k = 0; k < n; k++) {
-              result += data[k * stride] * data[k * stride];
-            }
-            out_[bi] = std::sqrt(result);
-          } else if (pval == 3) {
-            for (int64_t k = 0; k < n; k++) {
-              result += std::abs(data[k * stride] * data[k * stride] * data[k * stride]);
-            }
-            out_[bi] = std::pow(result, 1.0/3);
-          } else if (std::isinf(pval)) {
-            for (int64_t k = 0; k < n; k++) {
-              result = std::abs(data[k * stride]) > result ? std::abs(data[k * stride]) : result;
-            }
-            out_[bi] = result;
-          } else {
-            for (int64_t k = 0; k < n; k++) {
-              result += std::pow(std::abs(data[k * stride]), pval);
-            }
-            out_[bi] = std::pow(result, 1.0/pval);
+          out_[bi] = result;
+        } else if (pval == 1) {
+          for (int64_t k = 0; k < n; k++) {
+            result += std::abs(data[k * stride]);
           }
+          out_[bi] = result;
+        } else if (pval == 2) {
+          for (int64_t k = 0; k < n; k++) {
+            result += data[k * stride] * data[k * stride];
+          }
+          out_[bi] = std::sqrt(result);
+        } else if (pval == 3) {
+          for (int64_t k = 0; k < n; k++) {
+            result += std::abs(data[k * stride] * data[k * stride] * data[k * stride]);
+          }
+          out_[bi] = std::pow(result, 1.0/3);
+        } else if (std::isinf(pval)) {
+          for (int64_t k = 0; k < n; k++) {
+            result = std::abs(data[k * stride]) > result ? std::abs(data[k * stride]) : result;
+          }
+          out_[bi] = result;
+        } else {
+          for (int64_t k = 0; k < n; k++) {
+            result += std::pow(std::abs(data[k * stride]), pval);
+          }
+          out_[bi] = std::pow(result, 1.0/pval);
         }
-      });
-    }
-#endif
+      }
+    });
   }
 
 };
