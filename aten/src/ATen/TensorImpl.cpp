@@ -4,6 +4,7 @@
 #include <ATen/Tensor.h>
 #include <ATen/core/optional.h>
 #include <ATen/Context.h>
+#include <ATen/Backend.h>
 
 #include <ATen/detail/VariableHooksInterface.h>
 
@@ -12,7 +13,10 @@
 namespace at {
 
 Type& TensorImpl::type() const {
-  Type* base_type = &globalContext().getType(backend_, scalar_type_);
+  // Select backend from the hard-coded ones that the legacy ATen dispatcher
+  // knows about
+  Backend backend = tensorTypeIdToBackend(type_id_);
+  Type* base_type = &globalContext().getType(backend, scalar_type_);
   if (is_variable_) {
     return detail::getVariableHooks().getVariableType(*base_type);
   } else {
@@ -56,11 +60,11 @@ void Tensor::backward(
 }
 
 TensorImpl::TensorImpl(
-    Backend backend,
+    TensorTypeId type_id,
     ScalarType scalar_type,
     bool is_variable)
-    : TensorImpl(nullptr, backend, scalar_type, is_variable) {
-  auto type = &globalContext().getType(backend_, scalar_type_);
+    : type_id_(type_id), scalar_type_(scalar_type) {
+  auto type = &globalContext().getType(tensorTypeIdToBackend(type_id), scalar_type);
   try {
     Storage* storage = type->storage(true).release();
     storage_ = storage->pImpl();

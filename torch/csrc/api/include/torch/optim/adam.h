@@ -30,11 +30,11 @@ class Adam : public Optimizer {
   template <typename ParameterContainer>
   explicit Adam(ParameterContainer&& parameters, const AdamOptions& options)
       : Optimizer(std::forward<ParameterContainer>(parameters)),
-        options_(options),
+        options(options),
         step_buffers_(parameters_.size(), 0),
         exp_average_buffers_(zero_buffers_like(parameters_)),
         exp_average_sq_buffers_(zero_buffers_like(parameters_)) {
-    if (options_.amsgrad_) {
+    if (options.amsgrad_) {
       max_exp_average_sq_buffers_ = zero_buffers_like(parameters_);
     }
   }
@@ -49,13 +49,11 @@ class Adam : public Optimizer {
        CEREAL_NVP(max_exp_average_sq_buffers_));
   }
 
-  const AdamOptions& options() const noexcept;
+  AdamOptions options;
 
  private:
   friend class cereal::access;
-  Adam() : options_(0) {}
-
-  AdamOptions options_;
+  Adam() : options(0) {}
 
   std::vector<int64_t> step_buffers_;
   std::vector<Tensor> exp_average_buffers_;

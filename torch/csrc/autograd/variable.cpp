@@ -23,7 +23,7 @@ namespace torch {
 namespace autograd {
 Variable::Impl::Impl(at::Tensor data, bool requires_grad, Edge gradient_edge)
     : TensorImpl(
-          data.type().backend(),
+          data.type().type_id(),
           data.type().scalarType(),
           /* is variable */ true),
       data_(std::move(data)),
@@ -96,8 +96,7 @@ Tensor Variable::Impl::detach() const {
 
 void Variable::Impl::detach_() {
   if (is_view_) {
-    throw std::runtime_error(
-        "Can't detach views in-place. Use detach() instead");
+    AT_ERROR("Can't detach views in-place. Use detach() instead");
   }
   set_requires_grad(false);
   grad_fn_.reset();
@@ -134,7 +133,7 @@ void Variable::Impl::set_data(Tensor new_data) {
   
   // Updates metadata
   scalar_type_ = new_data.type().scalarType();
-  backend_ = new_data.type().backend();
+  type_id_ = new_data.type().type_id();
   is_variable_ = true;
   data_ = std::move(new_data);
 }

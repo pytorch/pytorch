@@ -5,6 +5,8 @@
 
 #include "ATen/StorageImpl.h"
 #include "ATen/core/optional.h"
+#include "ATen/core/TensorTypeId.h"
+#include "ATen/core/TensorTypeIdRegistration.h"
 
 struct THTensor;
 
@@ -17,16 +19,16 @@ struct Tensor;
 
 namespace at {
 struct AT_API TensorImpl : public Retainable {
-  TensorImpl(Backend backend, ScalarType scalar_type, bool is_variable = false);
+  TensorImpl(TensorTypeId type_id, ScalarType scalar_type, bool is_variable = false);
   TensorImpl(StorageImpl* storage, bool is_variable = false)
       : TensorImpl(
             storage,
-            detail::get_backend(storage),
+            backendToTensorTypeId(detail::get_backend(storage)),
             storage->scalar_type(),
             is_variable) {}
   TensorImpl(
       StorageImpl* storage,
-      Backend backend,
+      TensorTypeId type_id,
       ScalarType scalar_type,
       bool is_variable = false)
       : storage_(storage),
@@ -34,7 +36,7 @@ struct AT_API TensorImpl : public Retainable {
         sizes_{0},
         strides_{1},
         is_zero_dim_(false),
-        backend_(backend),
+        type_id_(type_id),
         scalar_type_(scalar_type),
         is_variable_(is_variable) {}
 
@@ -155,7 +157,7 @@ struct AT_API TensorImpl : public Retainable {
   int64_t stride(int64_t d) const;
 
 protected:
-  Backend backend_;
+  TensorTypeId type_id_;
   // INVARIANT: When storage is non-null, this scalar type must
   // agree with the scalar type in storage
   ScalarType scalar_type_;

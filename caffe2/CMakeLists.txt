@@ -59,8 +59,7 @@ else()
   list(APPEND Caffe2_CPU_SRCS ${ATen_CORE_SRCS})
   list(APPEND Caffe2_CPU_INCLUDE ${ATen_CORE_INCLUDE})
   list(APPEND Caffe2_CPU_TEST_SRCS ${ATen_CORE_TEST_SRCS})
-  # TODO: We should probably install the headers, but I don't know
-  # how to do that.
+  # See cmake/Codegen.cmake for header installation
 endif()
 
 # ---[ Torch build
@@ -308,15 +307,9 @@ list(APPEND Caffe2_MAIN_LIBS caffe2_library)
 
 # ---[ CUDA library.
 if(USE_CUDA)
-  # A hack to deal with cuda library dependencies and modern CMake: the
-  # CUDA_ADD_LIBRARY includes a target_link_libraries, and as a result,
-  # one cannot use PUBLIC/PRIVATE/INTERFACE for the target anymore. This
-  # hack adds the PRIVATE keywords to CUDA_LIBRARIES so we can deal with
-  # it. We will then manually add the cudart library as interface libs.
-  set(__tmp ${CUDA_LIBRARIES})
-  set(CUDA_LIBRARIES PRIVATE ${CUDA_LIBRARIES})
+  set(CUDA_LINK_LIBRARIES_KEYWORD PRIVATE)
   torch_cuda_based_add_library(caffe2_gpu ${Caffe2_GPU_SRCS})
-  set(CUDA_LIBRARIES ${__tmp})
+  set(CUDA_LINK_LIBRARIES_KEYWORD)
   target_link_libraries(caffe2_gpu INTERFACE caffe2::cudart)
 
   target_include_directories(

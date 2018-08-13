@@ -180,7 +180,7 @@ if(${check_name}.type().is_sparse()) {
 }""")
 
 BUFFER_DEFINITION = CodeTemplate("""\
-auto ${name}_ = new TensorImpl(Backend::${Backend}, ScalarType::${ScalarName}, ${THTensor}_new(), false);
+auto ${name}_ = new TensorImpl(${Backend}TensorId(), ScalarType::${ScalarName}, ${THTensor}_new(), false);
 auto ${name} = Tensor(${name}_, false);""")
 
 CONDITIONAL_INITIALIZER = CodeTemplate("""\
@@ -323,13 +323,13 @@ CHECKED_USE = {
 CHECKED_USE_NULLABLE = CodeTemplate('${arg_name}_ ? ${usage} : NULL')
 
 ALLOC_NOARGS_WRAP = {
-    'THTensor*': 'new TensorImpl(Backend::${Backend}, ScalarType::${ScalarName})',
-    'THBoolTensor*': 'new TensorImpl(Backend::${Backend}, ScalarType::Byte)',
-    'THIndexTensor*': 'new TensorImpl(Backend::${Backend}, ScalarType::Long)',
-    'THIntegerTensor*': 'new TensorImpl(Backend::${Backend}, ScalarType::Int)',
+    'THTensor*': 'new TensorImpl(${Backend}TensorId(), ScalarType::${ScalarName})',
+    'THBoolTensor*': 'new TensorImpl(${Backend}TensorId(), ScalarType::Byte)',
+    'THIndexTensor*': 'new TensorImpl(${Backend}TensorId(), ScalarType::Long)',
+    'THIntegerTensor*': 'new TensorImpl(${Backend}TensorId(), ScalarType::Int)',
     'THSTensor*': 'detail::new_Sparse${Tensor}()',
-    'THDenseTensor*': 'new TensorImpl(Backend::${Backend}, ScalarType::${ScalarName})',
-    'THDenseIndexTensor*': 'new TensorImpl(Backend::${Backend}, ScalarType::Long)'
+    'THDenseTensor*': 'new TensorImpl(${Backend}TensorId(), ScalarType::${ScalarName})',
+    'THDenseIndexTensor*': 'new TensorImpl(${Backend}TensorId(), ScalarType::Long)'
 }
 
 ALLOC_WRAP = {
