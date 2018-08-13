@@ -29,13 +29,13 @@ class Adagrad : public Optimizer {
       ParameterContainer&& parameters,
       const AdagradOptions& options)
       : Optimizer(std::forward<ParameterContainer>(parameters)),
-        options_(options),
+        options(options),
         sum_(zero_buffers_like(parameters_)),
         step_(parameters_.size(), 0) {}
 
   void step() override;
 
-  const AdagradOptions& options() const noexcept;
+  AdagradOptions options;
 
   template <class Archive>
   void serialize(Archive& ar) {
@@ -45,12 +45,10 @@ class Adagrad : public Optimizer {
 
  private:
   friend class cereal::access;
-  Adagrad() : options_(0) {}
-
-  AdagradOptions options_;
+  Adagrad() : options(0) {}
 
   std::vector<Tensor> sum_;
-  std::vector<double> step_;
+  std::vector<int64_t> step_;
 };
 } // namespace optim
 } // namespace torch

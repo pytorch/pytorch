@@ -1,4 +1,9 @@
 #pragma once
+
+#include <ATen/core/TensorTypeId.h>
+#include <ATen/core/TensorTypeIdRegistration.h>
+#include <ATen/core/Error.h>
+
 #include <stdexcept>
 
 namespace at {
@@ -35,6 +40,39 @@ static inline Backend toDense(Backend b) {
       return Backend::CPU;
     case Backend::SparseCUDA:
       return Backend::CUDA;
+    default:
+      throw std::runtime_error("Unknown backend");
+  }
+}
+
+static inline Backend tensorTypeIdToBackend(TensorTypeId t) {
+  if (t == CPUTensorId()) {
+    return Backend::CPU;
+  } else if (t == CUDATensorId()) {
+    return Backend::CUDA;
+  } else if (t == SparseCPUTensorId()) {
+    return Backend::SparseCPU;
+  } else if (t == SparseCUDATensorId()) {
+    return Backend::SparseCUDA;
+  } else if (t == UndefinedTensorId()) {
+    return Backend::Undefined;
+  } else {
+    AT_ERROR("Unrecognized tensor type ID: ", t);
+  }
+}
+
+static inline TensorTypeId backendToTensorTypeId(Backend b) {
+  switch (b) {
+    case Backend::CPU:
+      return CPUTensorId();
+    case Backend::CUDA:
+      return CUDATensorId();
+    case Backend::SparseCPU:
+      return SparseCPUTensorId();
+    case Backend::SparseCUDA:
+      return SparseCUDATensorId();
+    case Backend::Undefined:
+      return UndefinedTensorId();
     default:
       throw std::runtime_error("Unknown backend");
   }

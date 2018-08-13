@@ -16,7 +16,7 @@
 
 namespace at {
 
-class TensorTypeIdCreator final {
+class AT_CORE_API TensorTypeIdCreator final {
  public:
   TensorTypeIdCreator();
 
@@ -29,13 +29,10 @@ class TensorTypeIdCreator final {
  private:
   std::atomic<details::_tensorTypeId_underlyingType> last_id_;
 
-  static constexpr at::TensorTypeId max_id_ = TensorTypeId(
-      std::numeric_limits<details::_tensorTypeId_underlyingType>::max());
-
   AT_DISABLE_COPY_AND_ASSIGN(TensorTypeIdCreator);
 };
 
-class TensorTypeIdRegistry final {
+class AT_CORE_API TensorTypeIdRegistry final {
  public:
   TensorTypeIdRegistry();
 
@@ -49,7 +46,7 @@ class TensorTypeIdRegistry final {
   AT_DISABLE_COPY_AND_ASSIGN(TensorTypeIdRegistry);
 };
 
-class TensorTypeIds final {
+class AT_CORE_API TensorTypeIds final {
  public:
   static TensorTypeIds& singleton();
 
@@ -71,7 +68,7 @@ inline constexpr at::TensorTypeId TensorTypeIds::undefined() noexcept {
   return TensorTypeIdCreator::undefined();
 }
 
-class TensorTypeIdRegistrar final {
+class AT_CORE_API TensorTypeIdRegistrar final {
  public:
   TensorTypeIdRegistrar();
   ~TensorTypeIdRegistrar();
@@ -88,12 +85,18 @@ inline at::TensorTypeId TensorTypeIdRegistrar::id() const noexcept {
   return id_;
 }
 
-} // namespace at
-
-#define AT_DECLARE_TENSOR_TYPE(TensorName) at::TensorTypeId TensorName();
+#define AT_DECLARE_TENSOR_TYPE(TensorName) AT_CORE_API at::TensorTypeId TensorName();
 
 #define AT_DEFINE_TENSOR_TYPE(TensorName)           \
   at::TensorTypeId TensorName() {                   \
     static TensorTypeIdRegistrar registration_raii; \
     return registration_raii.id();                  \
   }
+
+AT_DECLARE_TENSOR_TYPE(UndefinedTensorId);
+AT_DECLARE_TENSOR_TYPE(CPUTensorId); // Caffe2 supported
+AT_DECLARE_TENSOR_TYPE(CUDATensorId); // Caffe2 supported
+AT_DECLARE_TENSOR_TYPE(SparseCPUTensorId);
+AT_DECLARE_TENSOR_TYPE(SparseCUDATensorId);
+
+} // namespace at

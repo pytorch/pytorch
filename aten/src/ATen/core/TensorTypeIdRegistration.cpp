@@ -4,8 +4,6 @@
 
 namespace at {
 
-constexpr at::TensorTypeId TensorTypeIdCreator::max_id_;
-
 TensorTypeIds::TensorTypeIds() : creator_(), registry_() {}
 
 TensorTypeIds& TensorTypeIds::singleton() {
@@ -16,9 +14,10 @@ TensorTypeIds& TensorTypeIds::singleton() {
 TensorTypeIdCreator::TensorTypeIdCreator() : last_id_(0) {}
 
 at::TensorTypeId TensorTypeIdCreator::create() {
+
   auto id = TensorTypeId(++last_id_);
 
-  if (id == max_id_) {
+  if (last_id_ == 0) { // overflow happened!
     // If this happens in prod, we have to change
     // details::_tensorTypeId_underlyingType to uint16_t.
     AT_ERROR(
@@ -58,5 +57,11 @@ TensorTypeIdRegistrar::TensorTypeIdRegistrar()
 TensorTypeIdRegistrar::~TensorTypeIdRegistrar() {
   TensorTypeIds::singleton().deregister(id_);
 }
+
+AT_DEFINE_TENSOR_TYPE(UndefinedTensorId);
+AT_DEFINE_TENSOR_TYPE(CPUTensorId);
+AT_DEFINE_TENSOR_TYPE(CUDATensorId);
+AT_DEFINE_TENSOR_TYPE(SparseCPUTensorId);
+AT_DEFINE_TENSOR_TYPE(SparseCUDATensorId);
 
 } // namespace at
