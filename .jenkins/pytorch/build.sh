@@ -73,11 +73,12 @@ fi
 
 # ppc64le build fails when WERROR=1
 # set only when building other archtectures
+# only use for "python setup.py install" line
 if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]]; then
-  export WERROR=1
+  WERR="WERROR=1" 
 fi
 
-python setup.py install
+$WERR python setup.py install
 
 # Add the test binaries so that they won't be git clean'ed away
 git add -f build/bin
