@@ -19,7 +19,7 @@ from torch.utils.trainer.plugins import *
 from torch.utils.trainer.plugins.plugin import Plugin
 from torch.autograd._functions.utils import prepare_onnx_paddings
 from torch.autograd._functions.utils import check_onnx_broadcast
-from common import IS_WINDOWS, IS_PPC, TEST_WITH_ROCM
+from common import IS_WINDOWS, IS_PPC, skipIfRocm
 
 HAS_CUDA = torch.cuda.is_available()
 
@@ -412,7 +412,7 @@ class TestFFI(TestCase):
 
     @unittest.skipIf(not HAS_CFFI or not HAS_CUDA, "ffi tests require cffi package")
     @unittest.skipIf(IS_WINDOWS, "ffi doesn't currently work on Windows")
-    @unittest.skipIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")
+    @skipIfRocm
     def test_gpu(self):
         create_extension(
             name='gpulib',
@@ -616,7 +616,7 @@ class TestBottleneck(TestCase):
         self._check_cuda(out)
 
     @unittest.skipIf(not HAS_CUDA, 'No CUDA')
-    @unittest.skipIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")
+    @skipIfRocm
     def test_bottleneck_cuda(self):
         rc, out, err = self._run_bottleneck('bottleneck/test_cuda.py')
         self.assertEqual(rc, 0, 'Run failed with\n{}'.format(err))
