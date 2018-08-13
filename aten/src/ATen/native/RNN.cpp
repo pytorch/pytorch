@@ -350,7 +350,7 @@ struct ReversedPackedLayer : Layer<PackedSequence, hidden_type, CellParams> {
       int64_t batch_size = batch_sizes[i];
       int64_t inc = batch_size - last_batch_size;
       if (inc > 0) {
-        hidden = hidden_concat({hidden, hidden_slice(input_hidden, last_batch_size, batch_size)});
+        hidden = hidden_concat(ArrayRef<hidden_type>{hidden, hidden_slice(input_hidden, last_batch_size, batch_size)});
       }
 
       auto step_input = input.data.narrow(0, input_offset - batch_size, batch_size);
