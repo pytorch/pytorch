@@ -75,10 +75,11 @@ fi
 # set only when building other archtectures
 # only use for "python setup.py install" line
 if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]]; then
-  WERR="WERROR=1" 
+  WERROR=1 python setup.py install
+else if [[ "$BUILD_ENVIRONMENT" == *ppc64le* ]]; then
+  python setup.py install
 fi
 
-$WERR python setup.py install
 
 # Add the test binaries so that they won't be git clean'ed away
 git add -f build/bin
