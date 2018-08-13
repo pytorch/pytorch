@@ -1,7 +1,7 @@
 #ifdef USE_CUDA
 
 #include "torch/csrc/jit/fusers/cuda/cuda_fusion_pass.h"
-#include "torch/csrc/jit/fusion_compiler.h"
+#include "torch/csrc/jit/fusers/cuda/cuda_fuser.h"
 #include "torch/csrc/jit/autodiff.h"
 #include "torch/csrc/jit/assertions.h"
 
@@ -81,9 +81,9 @@ std::unordered_set<NodeKind> simple_mappable = {
 
 bool isSimpleMap(Node* node) {
   // TODO: use signature matching
-  if (simple_mappable.count(node->kind()) == 0)
-    return false;
-  if ((node->kind() == aten::min || node->kind() == aten::max) && node->inputs().size() == 1)
+  if (simple_mappable.count(node->kind()) == 0) return false;
+  if ((node->kind() == aten::min || node->kind() == aten::max) 
+    && node->inputs().size() == 1)
     return false;
   return true;
 }

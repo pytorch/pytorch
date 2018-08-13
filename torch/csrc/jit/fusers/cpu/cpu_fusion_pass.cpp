@@ -1,6 +1,6 @@
 #include "torch/csrc/jit/fusers/cpu/cpu_fusion_pass.h"
 
-#include "torch/csrc/jit/fusion_compiler.h"
+#include "torch/csrc/jit/fusers/cpu/cpu_fuser.h"
 #include "torch/csrc/jit/autodiff.h"
 #include "torch/csrc/jit/assertions.h"
 
@@ -252,14 +252,13 @@ struct GraphFuser {
     && allUsersAreThisConsumerOrOccurAfterIt(real_consumer, producer) 
     && consumer_device 
     && *consumer_device == kCPUDevice 
-    && consumer_device == getDevice(producer->node()) 
-    && sharedFusionCompiler().canCompileOnCPU();
+    && consumer_device == getDevice(producer->node());
   }
 
   // insert a producer node into a consuming fusion group.
   // DOES NOT WORK if n is a consumer of an output of the fusion group
   // returns the node _inside_ the group that represents the node
-  Graph & getSubgraph(Node* n) {
+  Graph& getSubgraph(Node* n) {
     JIT_ASSERT(n->kind() == prim::FusionGroup);
     return *n->g(attr::Subgraph);
   }
