@@ -1127,15 +1127,11 @@ class TestSparse(TestCase):
 
     def _test_resize_shape(self, x_i, x_v, x_size, y_i, y_v, y_size):
         x = torch.sparse_coo_tensor(torch.zeros(x_i), torch.randn(x_v), torch.Size(x_size))
-        x_dense = x.to_dense()
         y = torch.sparse_coo_tensor(torch.zeros(y_i), torch.randn(y_v), torch.Size(y_size))
-        y_dense = y.to_dense()
         x.resize_as_(y)
-        x_dense.resize_as_(y_dense)
         self.assertEqual(x.shape, y.shape)
         self.assertEqual(x._sparseDims(), y._sparseDims())
         self.assertEqual(x._denseDims(), y._denseDims())
-        self.assertEqual(x.to_dense(), x_dense)
 
     def test_resize(self):
         # 1. Add dims to dense dimensions [Supported]
