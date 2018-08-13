@@ -133,19 +133,6 @@ class Registerer {
 };
 
 /**
- * CAFFE_ANONYMOUS_VARIABLE(str) introduces an identifier starting with
- * str and ending with a number that varies with the line.
- * Pretty much a copy from 'folly/Preprocessor.h'
- */
-#define CAFFE_CONCATENATE_IMPL(s1, s2) s1##s2
-#define CAFFE_CONCATENATE(s1, s2) CAFFE_CONCATENATE_IMPL(s1, s2)
-#ifdef __COUNTER__
-#define CAFFE_ANONYMOUS_VARIABLE(str) CAFFE_CONCATENATE(str, __COUNTER__)
-#else
-#define CAFFE_ANONYMOUS_VARIABLE(str) CAFFE_CONCATENATE(str, __LINE__)
-#endif
-
-/**
  * CAFFE_DECLARE_TYPED_REGISTRY is a macro that expands to a function
  * declaration, as well as creating a convenient typename for its corresponding
  * registerer.

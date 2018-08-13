@@ -146,6 +146,26 @@ using std::vector;
 #define CAFFE2_OBSERVER_API CAFFE2_IMPORT
 #endif
 
+/**
+ * CAFFE_ANONYMOUS_VARIABLE(str) introduces an identifier starting with
+ * str and ending with a number that varies with the line.
+ * Pretty much a copy from 'folly/Preprocessor.h'
+ */
+#define CAFFE_CONCATENATE_IMPL(s1, s2) s1##s2
+#define CAFFE_CONCATENATE(s1, s2) CAFFE_CONCATENATE_IMPL(s1, s2)
+#ifdef __COUNTER__
+#define CAFFE_ANONYMOUS_VARIABLE(str) CAFFE_CONCATENATE(str, __COUNTER__)
+#else
+#define CAFFE_ANONYMOUS_VARIABLE(str) CAFFE_CONCATENATE(str, __LINE__)
+#endif
+/**
+ * A helper line in macro definition that would allow one to force a macro
+ * to end with a semicolon, when the macro is used outside a function. It is
+ * similar to the equivalent of the "do {} while(0)" trick in in-function
+ * macros.
+ */
+#define MACRO_SEMICOLON_GUARD                                                  \
+  extern void CAFFE_ANONYMOUS_VARIABLE(macros_should_end_with_semicolon)()
 
 #if defined(_MSC_VER)
 #define NOMINMAX

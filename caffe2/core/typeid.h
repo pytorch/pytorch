@@ -87,8 +87,8 @@ static const char* DemangleType() {
 #endif // __GXX_RTTI
 }
 
-// A utility function to return an exception std::string by prepending its exception
-// type before its what() content.
+// A utility function to return an exception std::string by prepending its
+// exception type before its what() content.
 std::string GetExceptionString(const std::exception& e);
 
 std::mutex& gTypeRegistrationMutex();
@@ -141,7 +141,8 @@ class TypeMeta {
    * type, use TypeMeta::Make<T>().
    */
   TypeMeta() noexcept
-      : id_(TypeIdentifier::uninitialized()), itemsize_(0), ctor_(nullptr), copy_(nullptr), dtor_(nullptr) {}
+      : id_(TypeIdentifier::uninitialized()), itemsize_(0), ctor_(nullptr),
+        copy_(nullptr), dtor_(nullptr) {}
 
   /**
    * Copy constructor.
@@ -391,21 +392,23 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
 // and as a result, we define these two macros slightly differently.
 
 #ifdef _MSC_VER
-#define CAFFE_KNOWN_TYPE(T)                                                        \
-  template <>                                                                      \
-  CAFFE2_EXPORT TypeIdentifier TypeMeta::Id<T>() {                                    \
-    static const TypeIdentifier type_id = TypeIdentifier::createTypeId();                \
-    static TypeNameRegisterer<T> registerer(type_id, #T);                          \
-    return type_id;                                                                \
-  }
+#define CAFFE_KNOWN_TYPE(T)                                                    \
+  template <>                                                                  \
+  CAFFE2_EXPORT TypeIdentifier TypeMeta::Id<T>() {                             \
+    static const TypeIdentifier type_id = TypeIdentifier::createTypeId();      \
+    static TypeNameRegisterer<T> registerer(type_id, #T);                      \
+    return type_id;                                                            \
+  }                                                                            \
+  MACRO_SEMICOLON_GUARD
 #else // _MSC_VER
-#define CAFFE_KNOWN_TYPE(T)                                                        \
-  template <>                                                                      \
-  TypeIdentifier TypeMeta::Id<T>() {                                                  \
-    static const TypeIdentifier type_id = TypeIdentifier::createTypeId();                \
-    static TypeNameRegisterer<T> registerer(type_id, #T);                          \
-    return type_id;                                                                \
-  }
+#define CAFFE_KNOWN_TYPE(T)                                                    \
+  template <>                                                                  \
+  TypeIdentifier TypeMeta::Id<T>() {                                           \
+    static const TypeIdentifier type_id = TypeIdentifier::createTypeId();      \
+    static TypeNameRegisterer<T> registerer(type_id, #T);                      \
+    return type_id;                                                            \
+  }                                                                            \
+  MACRO_SEMICOLON_GUARD
 #endif
 
 /**
@@ -415,28 +418,31 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
  * for your own types to allocate dynamic ids for them.
  */
 #ifdef _MSC_VER
-#define CAFFE_DECLARE_KNOWN_TYPE(PreallocatedId, T)              \
-  template <>                                                    \
-  inline CAFFE2_EXPORT TypeIdentifier TypeMeta::Id<T>() { \
-    return TypeIdentifier(PreallocatedId);                          \
-  }
+#define CAFFE_DECLARE_KNOWN_TYPE(PreallocatedId, T)                            \
+  template <>                                                                  \
+  inline CAFFE2_EXPORT TypeIdentifier TypeMeta::Id<T>() {                      \
+    return TypeIdentifier(PreallocatedId);                                     \
+  }                                                                            \
+  MACRO_SEMICOLON_GUARD
 #else // _MSC_VER
-#define CAFFE_DECLARE_KNOWN_TYPE(PreallocatedId, T) \
-  template <>                                       \
-  inline TypeIdentifier TypeMeta::Id<T>() {  \
-    return TypeIdentifier(PreallocatedId);             \
-  }
+#define CAFFE_DECLARE_KNOWN_TYPE(PreallocatedId, T)                            \
+  template <>                                                                  \
+  inline TypeIdentifier TypeMeta::Id<T>() {                                    \
+    return TypeIdentifier(PreallocatedId);                                     \
+  }                                                                            \
+  MACRO_SEMICOLON_GUARD
 #endif
 
 #define CONCAT_IMPL(x, y) x##y
 #define MACRO_CONCAT(x, y) CONCAT_IMPL(x, y)
 
-#define CAFFE_DEFINE_KNOWN_TYPE(T)                             \
-  namespace {                                                  \
-  TypeNameRegisterer<T> MACRO_CONCAT(registerer, __COUNTER__)( \
-      TypeMeta::Id<T>(),                                       \
-      #T);                                                     \
-  }
+#define CAFFE_DEFINE_KNOWN_TYPE(T)                                             \
+  namespace {                                                                  \
+  TypeNameRegisterer<T> MACRO_CONCAT(registerer, __COUNTER__)(                 \
+      TypeMeta::Id<T>(),                                                       \
+      #T);                                                                     \
+  }                                                                            \
+  MACRO_SEMICOLON_GUARD
 
 class Tensor;
 
