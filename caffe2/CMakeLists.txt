@@ -59,8 +59,7 @@ else()
   list(APPEND Caffe2_CPU_SRCS ${ATen_CORE_SRCS})
   list(APPEND Caffe2_CPU_INCLUDE ${ATen_CORE_INCLUDE})
   list(APPEND Caffe2_CPU_TEST_SRCS ${ATen_CORE_TEST_SRCS})
-  # TODO: We should probably install the headers, but I don't know
-  # how to do that.
+  # See cmake/Codegen.cmake for header installation
 endif()
 
 # ---[ Torch build
@@ -325,6 +324,14 @@ if(USE_CUDA)
   # linking; libculibos and cublas must be last.
   target_link_libraries(
       caffe2_gpu PUBLIC caffe2 ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
+
+  # See Note [Supporting both static and dynamic libraries on Window]
+  # TODO: I'm actually not sure why this is necessary, because caffe2_gpu
+  # should depend on caffe2 (which itself would give us the necessary
+  # macro definition).
+  if (MSVC AND NOT BUILD_SHARED_LIBS)
+      target_compile_options(caffe2_gpu PUBLIC "-DAT_CORE_STATIC_WINDOWS=1")
+  endif()
 
   # Set standard properties on the target
   aten_set_target_props(caffe2_gpu)
