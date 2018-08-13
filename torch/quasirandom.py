@@ -1,38 +1,40 @@
 import torch
 
 class SobolEngine(object):
+    """
+    The ``SobolEngine`` is an engine for generating (scrambled) Sobol sequences.
+    Sobol sequences are an example of low discrepancy quasi-random sequences.
+
+    This implementation of an engine for Sobol sequences is capable of sampling sequences up to
+    a maximum dimension of 1111. It uses direction numbers to generate these sequences, and these
+    numbers have been adapted from `here <http://web.maths.unsw.edu.au/~fkuo/sobol/joe-kuo-old.1111>`_.
+
+    References:
+      - Art B. Owen. Scrambling Sobol and Niederreiter-Xing points. Journal of
+        Complexity, 14(4):466-489, December 1998.
+
+      - I. M. Sobol. The distribution of points in a cube and the accurate
+        evaluation of integrals. Zh. Vychisl. Mat. i Mat. Phys., 7:784-802, 1967.
+
+    Args:
+        dimension (Int): The dimensionality of the sequence to be drawn
+        scramble (bool, optional): Setting this to ``True`` will produce scrambled Sobol sequences.
+                                   Scrambling is capable of producing better Sobol sequences.
+                                   Default: ``False``.
+        seed (Int, optional): This is the seed for the scrambling. The seed of the random number
+                              generator is set to this, if specified. Default: ``None``
+
+    Examples::
+
+        >>> soboleng = torch.quasirandom.SobolEngine(dimension=5, scramble=False)
+        >>> soboleng.draw(3)
+        tensor([[0.5000, 0.5000, 0.5000, 0.5000, 0.5000],
+                [0.7500, 0.2500, 0.7500, 0.2500, 0.7500],
+                [0.2500, 0.7500, 0.2500, 0.7500, 0.2500]])
+    """
     MAXBIT = 30
 
     def __init__(self, dimension, scramble=False, seed=None):
-        """
-        The ``SobolEngine`` is an engine for generating (scrambled) Sobol sequences.
-        Sobol sequences are an example of low discrepancy quasi-random sequences.
-
-        This implementation of an engine for Sobol sequences is capable of sampling sequences up to
-        a maximum dimension of 1111. It uses direction numbers to generate these sequences, and these
-        numbers have been adapted from `here <http://web.maths.unsw.edu.au/~fkuo/sobol/joe-kuo-old.1111>`_.
-
-        References:
-          -  Art B. Owen. Scrambling Sobol and Niederreiter-Xing points. Journal of
-             Complexity, 14(4):466-489, December 1998.
-
-           - I. M. Sobol. The distribution of points in a cube and the accurate
-             evaluation of integrals. Zh. Vychisl. Mat. i Mat. Phys., 7:784-802, 1967.
-
-        Args:
-            dimension (Int): The dimensionality of the sequence to be drawn
-            scramble (bool, optional): Setting this to ``True`` will produce scrambled Sobol sequences.
-                                       Scrambling is capable of producing better Sobol sequences.
-                                       Default: ``False``. The scrambling used here is `Owen Scrambling`_
-            seed (Int, optional): This is the seed for the scrambling. The seed of the random number
-                                  generator is set to this, if specified. Default: ``None``
-
-        Examples::
-
-            >>> soboleng = torch.quasirandom.SobolEngine(dimension=10, scramble=False)
-            >>> soboleng.draw(10)
-            tensor(...)
-        """
         if dimension > 1111 or dimension < 1:
             raise ValueError("Supported range of dimensionality for SobolEngine is [1, 1111]")
 
