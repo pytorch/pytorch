@@ -256,6 +256,7 @@ else:
         version += '+' + sha[:7]
     except Exception:
         pass
+print("Building wheel {}-{}".format(package_name, version))
 
 
 class create_version_file(PytorchCommand):
