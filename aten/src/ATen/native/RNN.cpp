@@ -423,7 +423,7 @@ apply_layer_stack(const Layer<io_type, hidden_type, weight_type>& layer, const i
 // HELPERS SIMPLIFYING DISPATCH TO FUNCTIONS ABOVE
 ////////////////////////////////////////////////////////////////////////////////
 
-template<typename CellType, template<typename> typename LayerT, template<typename> typename BidirLayerT, typename io_type>
+template<typename CellType, template<typename> class LayerT, template<typename> class BidirLayerT, typename io_type>
 LayerOutput<io_type, std::vector<typename CellType::hidden_type>> _rnn_impl(
       const io_type& input,
       const std::vector<CellParams>& params,
@@ -440,7 +440,7 @@ LayerOutput<io_type, std::vector<typename CellType::hidden_type>> _rnn_impl(
   }
 }
 
-template<typename CellType, template<typename> typename LayerT, template<typename> typename BidirLayerT, typename io_type>
+template<typename CellType, template<typename> class LayerT, template<typename> class BidirLayerT, typename io_type>
 std::tuple<io_type, Tensor> _rnn_impl_with_concat(
       const io_type& input,
       const std::vector<CellParams>& params,
@@ -450,7 +450,7 @@ std::tuple<io_type, Tensor> _rnn_impl_with_concat(
   return std::make_tuple(result.outputs, at::stack(result.final_hidden, 0));
 }
 
-template<template<typename> typename LayerT, template<typename> typename BidirLayerT, typename io_type>
+template<template<typename> class LayerT, template<typename> class BidirLayerT, typename io_type>
 std::tuple<io_type, Tensor, Tensor> _lstm_impl(
       const io_type& input,
       const std::vector<CellParams>& params, const Tensor& hx, const Tensor& cx,
