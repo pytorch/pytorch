@@ -1,7 +1,5 @@
-#include "caffe2/core/typeid.h"
-#include "caffe2/core/logging.h"
-#include "caffe2/core/scope_guard.h"
-#include "caffe2/core/tensor.h"
+#include <ATen/core/typeid.h>
+#include <ATen/core/Error.h>
 
 #include <atomic>
 
@@ -28,26 +26,9 @@ std::mutex& gTypeRegistrationMutex() {
   return g_type_registration_mutex;
 }
 
-#if defined(_MSC_VER)
-// Windows does not have cxxabi.h, so we will simply return the original.
-string Demangle(const char* name) {
-  return string(name);
-}
-#else
-string Demangle(const char* name) {
-  int status = 0;
-  auto demangled = ::abi::__cxa_demangle(name, nullptr, nullptr, &status);
-  if (demangled) {
-    auto guard = caffe2::MakeGuard([demangled]() { free(demangled); });
-    return string(demangled);
-  }
-  return name;
-}
-#endif
-
 string GetExceptionString(const std::exception& e) {
 #ifdef __GXX_RTTI
-  return Demangle(typeid(e).name()) + ": " + e.what();
+  return at::demangle(typeid(e).name()) + ": " + e.what();
 #else
   return string("Exception (no RTTI available): ") + e.what();
 #endif // __GXX_RTTI
@@ -56,20 +37,21 @@ string GetExceptionString(const std::exception& e) {
 void TypeMeta::_ThrowRuntimeTypeLogicError(const std::string& msg) {
   // In earlier versions it used to be std::abort() but it's a bit hard-core
   // for a library
-  CAFFE_THROW(msg);
+  AT_ERROR(msg);
 }
 
 TypeIdentifier TypeIdentifier::createTypeId() {
   static std::atomic<TypeIdentifier::underlying_type> counter(
       TypeMeta::Id<_CaffeHighestPreallocatedTypeId>().underlyingId());
   const TypeIdentifier::underlying_type new_value = ++counter;
-  if (new_value == std::numeric_limits<TypeIdentifier::underlying_type>::max()) {
-    throw std::logic_error("Ran out of available type ids. If you need more than 2^16 CAFFE_KNOWN_TYPEs, we need to increase TypeIdentifier to use more than 16 bit.");
+  if (new_value ==
+      std::numeric_limits<TypeIdentifier::underlying_type>::max()) {
+    throw std::logic_error(
+        "Ran out of available type ids. If you need more than 2^16 CAFFE_KNOWN_TYPEs, we need to increase TypeIdentifier to use more than 16 bit.");
   }
   return TypeIdentifier(new_value);
 }
 
-CAFFE_DEFINE_KNOWN_TYPE(Tensor);
 CAFFE_DEFINE_KNOWN_TYPE(float);
 CAFFE_DEFINE_KNOWN_TYPE(int);
 CAFFE_DEFINE_KNOWN_TYPE(std::string);
@@ -102,9 +84,9 @@ namespace {
 // for unintializied blob. You should not use this struct yourself - it is
 // intended to be only instantiated once here.
 struct UninitializedTypeNameRegisterer {
-    UninitializedTypeNameRegisterer() {
-      gTypeNames()[TypeIdentifier::uninitialized()] = "nullptr (uninitialized)";
-    }
+  UninitializedTypeNameRegisterer() {
+    gTypeNames()[TypeIdentifier::uninitialized()] = "nullptr (uninitialized)";
+  }
 };
 static UninitializedTypeNameRegisterer g_uninitialized_type_name_registerer;
 
