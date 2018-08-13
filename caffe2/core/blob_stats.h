@@ -15,8 +15,8 @@ struct BlobStatGetter {
 
 struct BlobStatRegistry {
  private:
-  std::unordered_map<TypeIdentifier, std::unique_ptr<BlobStatGetter>> map_;
-  void doRegister(TypeIdentifier id, std::unique_ptr<BlobStatGetter>&& v);
+  std::unordered_map<at::DataType, std::unique_ptr<BlobStatGetter>> map_;
+  void doRegister(at::DataType id, std::unique_ptr<BlobStatGetter>&& v);
 
  public:
   template <typename T, typename Getter>
@@ -27,7 +27,7 @@ struct BlobStatRegistry {
     }
   };
 
-  const BlobStatGetter* get(TypeIdentifier id);
+  const BlobStatGetter* get(at::DataType id);
   static BlobStatRegistry& instance();
 };
 

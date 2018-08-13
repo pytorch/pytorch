@@ -502,7 +502,7 @@ class Tensor {
       Deleter d = nullptr) {
     meta_ = meta;
     CAFFE_ENFORCE_WITH_CALLER(
-        meta_.id() != TypeIdentifier::uninitialized(),
+        meta_.id() != at::DataType::uninitialized(),
         "To share with a raw external pointer you need to have meta "
         "already set.");
     CAFFE_ENFORCE_WITH_CALLER(
@@ -624,7 +624,7 @@ class Tensor {
    */
   inline void* raw_mutable_data() {
     CAFFE_ENFORCE_WITH_CALLER(
-        meta_.id() != TypeIdentifier::uninitialized(),
+        meta_.id() != at::DataType::uninitialized(),
         "Calling raw_mutable_data() without meta, but the current meta is "
         "of unknown type.");
     return raw_mutable_data(meta_);
@@ -859,16 +859,16 @@ constexpr int k_limit_default_ = 1000;
 
 // Type call registry
 typedef TypeMeta (*TypeCall)(const void*);
-TypeCall GetTypeCallFunction(TypeIdentifier id);
-void RegisterTypeCallFunction(TypeIdentifier id, TypeCall c);
+TypeCall GetTypeCallFunction(at::DataType id);
+void RegisterTypeCallFunction(at::DataType id, TypeCall c);
 
 // Shape call registry
 typedef vector<TIndex> (*TensorInfoCall)(
     const void*,
     size_t* capacity,
     DeviceOption* device);
-TensorInfoCall GetTensorInfoFunction(TypeIdentifier id);
-void RegisterTensorInfoFunction(TypeIdentifier id, TensorInfoCall c);
+TensorInfoCall GetTensorInfoFunction(at::DataType id);
+void RegisterTensorInfoFunction(at::DataType id, TensorInfoCall c);
 
 // resize helper function
 void TensorVectorResize(

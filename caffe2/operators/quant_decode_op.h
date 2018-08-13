@@ -73,7 +73,7 @@ inline void DecodeGeneral(
     Tensor* outDecoded,
     bool resizeOnly) {
   const static std::map<
-      std::pair<TypeIdentifier, TypeIdentifier>,
+      std::pair<at::DataType, at::DataType>,
       std::function<void(
           const Tensor& codebook,
           const Tensor& codes,
