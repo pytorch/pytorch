@@ -543,7 +543,7 @@ LayerOutput<Tensor, hidden_type> _cudnn_impl(
   int64_t hidden_size = hx.size(2);
 
   AT_CHECK(_batch_sizes.dim() == 1, "batch_sizes tensor should be 1D");
-  IntList batch_sizes { _batch_sizes.data<int64_t>(), _batch_sizes.size(0) };
+  IntList batch_sizes { _batch_sizes.data<int64_t>(), static_cast<size_t>(_batch_sizes.size(0)) };
   // cudnn_output = std::tuple<output, hy, cy, reserve, new_weight_buf>
   auto cudnn_output = at::_cudnn_rnn(
       input, params, has_biases ? 4 : 2, weight_buf,
