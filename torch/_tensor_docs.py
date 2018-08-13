@@ -576,7 +576,7 @@ In-place version of :meth:`~Tensor.cosh`
 
 add_docstr_all('cpu',
                r"""
-cuda() -> Tensor
+cpu() -> Tensor
 
 Returns a copy of this object in CPU memory.
 
