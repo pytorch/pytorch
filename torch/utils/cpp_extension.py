@@ -23,8 +23,12 @@ def _find_cuda_home():
     if cuda_home is None:
         # Guess #2
         if sys.platform == 'win32':
-            cuda_home = glob.glob(
+            cuda_homes = glob.glob(
                 'C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v*.*')
+            if len(cuda_homes) == 0:
+                cuda_home = ''
+            else:
+                cuda_home = cuda_homes[0]
         else:
             cuda_home = '/usr/local/cuda'
         if not os.path.exists(cuda_home):

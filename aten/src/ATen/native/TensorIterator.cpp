@@ -110,7 +110,9 @@ void TensorIterator::compute_common_type() {
 
 DimVector TensorIterator::compatible_stride(int element_size) const {
   auto stride = DimVector();
-  stride.push_back(element_size);
+  if (ndim() > 0) {
+    stride.push_back(element_size);
+  }
   for (int i = 0; i < ndim() - 1; i++) {
     stride.push_back(shape_[i] * stride[i]);
   }

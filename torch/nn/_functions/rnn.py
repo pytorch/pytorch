@@ -3,9 +3,11 @@ from torch.autograd import NestedIOFunction
 import torch.backends.cudnn as cudnn
 from .. import functional as F
 import torch
-from .thnn import rnnFusedPointwise as fusedBackend
 import itertools
 from functools import partial
+
+_cuda_fused_lstm_cell = torch._C._VariableFunctions._thnn_fused_lstm_cell
+_cuda_fused_gru_cell = torch._C._VariableFunctions._thnn_fused_gru_cell
 
 try:
     import torch.backends.cudnn.rnn
@@ -27,8 +29,8 @@ def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
     if input.is_cuda:
         igates = F.linear(input, w_ih)
         hgates = F.linear(hidden[0], w_hh)
-        state = fusedBackend.LSTMFused.apply
-        return state(igates, hgates, hidden[1]) if b_ih is None else state(igates, hgates, hidden[1], b_ih, b_hh)
+        # Slice off the workspace arg (used only for backward)
+        return _cuda_fused_lstm_cell(igates, hgates, hidden[1], b_ih, b_hh)[:2]
 
     hx, cx = hidden
     gates = F.linear(input, w_ih, b_ih) + F.linear(hx, w_hh, b_hh)
@@ -47,12 +49,10 @@ def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
 
 
 def GRUCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
-
     if input.is_cuda:
         gi = F.linear(input, w_ih)
         gh = F.linear(hidden, w_hh)
-        state = fusedBackend.GRUFused.apply
-        return state(gi, gh, hidden) if b_ih is None else state(gi, gh, hidden, b_ih, b_hh)
+        return _cuda_fused_gru_cell(gi, gh, hidden, b_ih, b_hh)[0]
 
     gi = F.linear(input, w_ih, b_ih)
     gh = F.linear(hidden, w_hh, b_hh)
