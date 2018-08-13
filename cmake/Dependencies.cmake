@@ -551,7 +551,7 @@ if(BUILD_CAFFE2 OR (NOT ANDROID AND NOT IOS))
 endif()
 
 # ---[ ROCm
-if(USE_ROCM AND NOT BUILD_CAFFE2)
+if(USE_ROCM)
  include_directories(SYSTEM ${HIP_PATH}/include)
  include_directories(SYSTEM ${ROCBLAS_PATH}/include)
  include_directories(SYSTEM ${HIPSPARSE_PATH}/include)
