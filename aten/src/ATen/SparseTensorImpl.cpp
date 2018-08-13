@@ -31,7 +31,7 @@ namespace {
 // we don't currently support zero-size dimensions, so we can't actually
 // do this; so we just allocate zero-size tensors for everything.
 SparseTensorImpl::SparseTensorImpl(at::TensorTypeId type_id, at::ScalarType scalar_type)
-    : TensorImpl(type_id, scalar_type)
+    : TensorImpl(type_id, scalar_type, false)
     , size_{0}
     , sparseDims_(1)
     , denseDims_(0)
