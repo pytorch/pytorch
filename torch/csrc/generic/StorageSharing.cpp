@@ -291,45 +291,23 @@ static PyObject * THPStorage_(newSharedCuda)(PyObject *_unused, PyObject *args)
 // pointer.
 //
 // NB: This does NOT preserve object identity when you call it multiple times
-static PyObject * THPStorage_(weakRef)(THPStorage *self, PyObject *weak_ref_class) {
+static PyObject * THPStorage_(weakRef)(THPStorage *self, PyObject *args) {
   HANDLE_TH_ERRORS
   THStorage* storage = self->cdata;
-
   THStorage_weakRetain(storage);
-
-  THPObjectPtr args(Py_BuildValue("(N)", PyLong_FromVoidPtr(storage)));
-  if (!args) return NULL;
-  THPObjectPtr ref(PyObject_Call(weak_ref_class, args, NULL));
-  if (!ref) return NULL;
-
-  // We need to also add a finalizer with an owning reference to the weak class,
-  // so that we can keep the "weak" object live until it should actually be
-  // cleared form the map.
-  // Access to storage->finalizer protected by GIL
-  torch::PyObjectFinalizer* finalizer = new torch::PyObjectFinalizer(ref.get());
-  std::swap(storage->finalizer_, finalizer->next_);
-  storage->finalizer_.reset(finalizer);
-
-  return ref.release();
+  return PyLong_FromVoidPtr(storage);
   END_HANDLE_TH_ERRORS
 }
 
 PyObject * THPStorage_(newWithWeakPtr)(PyObject *_unused, PyObject *arg)
 {
   HANDLE_TH_ERRORS
-  THPObjectPtr ref(PyObject_GetAttrString(arg, "cdata"));
-  if (!ref) {
-    return NULL;
-  } else if (ref.get() == Py_None) {
-    Py_RETURN_NONE;
-  }
-  THPUtils_assert(THPUtils_checkLong(ref.get()),
-      "_new_with_weak_ptr(): arg.cdata must be an 'int'");
-  THStorage *weak_storage = (THStorage*)PyLong_AsVoidPtr(ref.get());
+  THPUtils_assert(THPUtils_checkLong(arg),
+      "_new_with_weak_ptr(): arg must be an 'int'");
+  THStorage *weak_storage = (THStorage*)PyLong_AsVoidPtr(arg);
   if (auto* storage = THStorage_weakLock(weak_storage)) {
     return THPStorage_(New)(storage);
   }
-
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -346,6 +324,15 @@ PyObject * THPStorage_(freeWeakRef)(PyObject *_unused, PyObject *arg)
   THStorage_weakFree(weak_storage);
 
   Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject * THPStorage_(expired)(PyObject *_unused, PyObject *arg)
+{
+  HANDLE_TH_ERRORS
+  THPUtils_assert(THPUtils_checkLong(arg), "_expired(): arg must be an 'int'");
+  THStorage *weak_storage = (THStorage*)PyLong_AsVoidPtr(arg);
+  return PyBool_FromLong(weak_storage->use_count() == 0);
   END_HANDLE_TH_ERRORS
 }
 
@@ -390,8 +377,9 @@ static PyMethodDef THPStorage_(sharingMethods)[] = {
   {"_new_shared_filename", (PyCFunction)THPStorage_(newSharedFilename), METH_VARARGS | METH_STATIC, NULL},
   {"_new_using_filename", (PyCFunction)THPStorage_(pyNewFilenameStorage), METH_VARARGS | METH_STATIC, NULL},
 #endif
-  {"_weak_ref", (PyCFunction)THPStorage_(weakRef), METH_O, NULL},
+  {"_weak_ref", (PyCFunction)THPStorage_(weakRef), METH_NOARGS, NULL},
   {"_free_weak_ref", (PyCFunction)THPStorage_(freeWeakRef), METH_O | METH_STATIC, NULL},
+  {"_expired", (PyCFunction)THPStorage_(expired), METH_O | METH_STATIC, NULL},
   {"_shared_decref", (PyCFunction)THPStorage_(sharedDecref), METH_NOARGS, NULL},
   {"_shared_incref", (PyCFunction)THPStorage_(sharedIncref), METH_NOARGS, NULL},
   {"_get_shared_fd", (PyCFunction)THPStorage_(sharedFd), METH_NOARGS, NULL},

@@ -22,7 +22,7 @@ install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/../caffe2
         FILES_MATCHING PATTERN "*.h")
 if (NOT BUILD_ATEN)
   install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/core
-          DESTINATION include/ATen/core
+          DESTINATION include/ATen
           FILES_MATCHING PATTERN "*.h")
 endif()
 install(FILES ${CMAKE_BINARY_DIR}/caffe2/core/macros.h
