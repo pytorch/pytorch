@@ -12,12 +12,12 @@ graph(%x : Double(2, 4, 5)) {
   %5 : int = prim::Constant[value=2147483647]()
   %6 : int = prim::Constant[value=0]()
   %y : Dynamic[] = prim::Loop(%5, %6, %y.3)
-    block0(%7 : int, %10 : Dynamic[]) {
+    block0(%8 : int, %9 : Dynamic[]) {
       %y.4 : Dynamic[] = prim::ListConstruct(%x, %x, %x)
       %11 : int = prim::Constant[value=0]()
       -> (%11, %y.4)
     }
-  %13 : int = prim::Constant[value=1]()
-  %14 : Dynamic = aten::cat(%y, %13)
-  return (%14);
+  %12 : int = prim::Constant[value=1]()
+  %13 : Dynamic = aten::cat(%y, %12)
+  return (%13);
 }

@@ -666,6 +666,20 @@ class TestJit(JitTestCase):
         torch._C._jit_pass_shape_analysis(graph, (x, y), False)
         self.assertExpectedGraph(graph)
 
+    def test_shape_analysis_list_loops(self):
+        def list_control(x):
+            y = [x]
+            if True:
+                y = [x, x]
+            while False:
+                y = [x, x, x]
+            return torch.cat(y, dim=1)
+
+        x = torch.zeros(2, 4, 5)
+        graph = torch.jit.script(list_control).graph
+        torch._C._jit_pass_shape_analysis(graph, (x,), False)
+        self.assertExpectedGraph(graph)
+
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA_MULTI_GPU, "needs non-zero device")
     def test_fuse_last_device(self):
@@ -2104,19 +2118,6 @@ a")
                 x = [2, 3]
             return
         self.checkScript(reassign, (), optimize=True)
-
-        def shape_analysis(x):
-            y = [x]
-            if True:
-                y = [x, x]
-            while False:
-                y = [x, x, x]
-            return torch.cat(y, dim=1)
-
-        x = torch.zeros(2, 4, 5)
-        graph = torch.jit.script(shape_analysis).graph
-        torch._C._jit_pass_shape_analysis(graph, (x,), False)
-        self.assertExpected(str(graph))
 
         def reassign_arity_change():
             x = [1]

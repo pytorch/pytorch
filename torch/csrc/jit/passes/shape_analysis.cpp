@@ -265,10 +265,9 @@ void PropagateShapeOnNode(Node * node, bool insert_expands) {
   }
   if (node->matches("aten::cat(Tensor[] tensors, int dim) -> Tensor", /*with_const=*/attr::dim)) {
     auto list_node = node->namedInput(attr::tensors)->node();
-    if (list_node->kind() == prim::Loop || list_node->kind() == prim::If) {
-      goto cat_fail;;
+    if (list_node->kind() != prim::ListConstruct) {
+      goto cat_fail;
     }
-    JIT_ASSERT(list_node->kind() == prim::ListConstruct);
     auto tensors = list_node->inputs();
     if (tensors.size() > 0) {
       auto input_types = fmap(tensors, [](Value *v) { return v->type()->cast<TensorType>(); });
