@@ -50,7 +50,7 @@ static inline bool isTransposeContiguous(Tensor& self) {
 }
 
 template <typename scalar_t>
-static void applyGesv(Tensor& b, Tensor& A, std::vector<int64_t> infos) {
+static void applyGesv(Tensor& b, Tensor& A, std::vector<int64_t>& infos) {
 #ifndef USE_LAPACK
   AT_ERROR("gesv : Lapack library not found in compile time");
 #endif
@@ -195,9 +195,9 @@ std::tuple<Tensor,Tensor> _gesv_helper_cpu(const Tensor& self, const Tensor& A) 
 }
 
 std::tuple<Tensor,Tensor> _gesv_single(const Tensor& self, const Tensor& A) {
-  auto A_ = self.type().tensor();
-  auto b_ = self.type().tensor();
-  return self.type()._gesv_single_out(b_, A_, self, A);
+  auto sol = self.type().tensor();
+  auto lu = self.type().tensor();
+  return self.type()._gesv_single_out(sol, lu, self, A);
 }
 
 // Supports arbitrary batch dimensions for self and A
