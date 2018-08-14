@@ -7,6 +7,7 @@ lib = None
 
 __all__ = ['range_push', 'range_pop', 'mark']
 
+colors=[]
 
 def windows_nvToolsExt_lib():
     lib_path = windows_nvToolsExt_path()
@@ -73,3 +74,26 @@ def mark(msg):
     if _libnvToolsExt() is None:
         raise RuntimeError('Unable to load nvToolsExt library')
     return lib.nvtxMarkA(ctypes.c_char_p(msg.encode("ascii")))
+
+class nvtxEventAttributes_t(ctypes.Structure):
+    """
+    A C struct containing essential attributes and optional
+    attributes about a CUDA event. 
+    """
+    _fields_ = [('version', ctypes.c_ushort),
+                ('size', ctypes.c_ushort),
+                ('colorType', ctypes.c_int),
+                ('color', ctypes.c_uint),
+                ('msgType', ctypes.c_int),
+                ('msg', ctypes.c_char_p)
+               ]
+
+    def __init__(self, message, color, version=DEFAULT,
+                 size, colorType=0xFF00FF00):
+        
+        # Set to fields to zero as per NVTX documentation
+        for attr_name in [field[0] for field in _fields_]:
+            setattr(self, attr_name, 0)
+
+        # Now use user-defined values for the fields
+        super(EventAttributes, self).__init__(version, size, versionint(colorType), color, versionint(msgType), msg)
