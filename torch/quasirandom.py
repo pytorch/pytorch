@@ -1,5 +1,6 @@
 import torch
 
+
 class SobolEngine(object):
     """
     The ``SobolEngine`` is an engine for generating (scrambled) Sobol sequences.
