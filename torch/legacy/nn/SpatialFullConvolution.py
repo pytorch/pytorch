@@ -191,9 +191,9 @@ class SpatialFullConvolution(Module):
         )
 
     def type(self, type=None, tensorCache=None):
-        if self.finput is not None:
+        if hasattr(self, 'finput') and self.finput is not None:
             self.finput = torch.Tensor()
-        if self.fgradInput is not None:
+        if hasattr(self, 'fgradInput') and self.fgradInput is not None:
             self.fgradInput = torch.Tensor()
         return super(SpatialFullConvolution, self).type(type, tensorCache)
 
