@@ -6266,7 +6266,7 @@ class TestJitGenerated(TestCase):
     pass
 
 
-class TestCustomOperators(TestCase):
+class TestCustomOperators(JitTestCase):
 
     def test_dynamic_op_registry(self):
         from torch._ops import _OpNamespace
@@ -6350,6 +6350,11 @@ class TestCustomOperators(TestCase):
     #     ):
     #         torch.ops.aten.leaky_relu(torch.ones(5), foo=torch.ones(5))
 
+    def test_script_graph_contains_custom_op(self):
+        @torch.jit.script
+        def func(x):
+            return torch.ops.aten.relu(x)
+        self.assertExpected(canonical(func.graph))
 
 # UBSAN per-function exclusions don't seem to work with OpenMP pragmas,
 # and we have to disable the failing tests here instead.

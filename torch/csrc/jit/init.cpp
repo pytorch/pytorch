@@ -246,7 +246,7 @@ void initJITBindings(PyObject *module) {
       return py::cpp_function([op](py::args args, py::kwargs kwargs) {
         return invokeOperatorFromPython(
             *op, std::move(args), std::move(kwargs));
-      }, py::doc(docstring.str().c_str()));
+      }, py::name(qualified_name.c_str()), py::doc(docstring.str().c_str()));
     } catch (const at::Error& error) {
       throw std::runtime_error(error.what_without_backtrace());
     }
