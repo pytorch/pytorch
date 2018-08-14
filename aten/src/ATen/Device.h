@@ -111,9 +111,11 @@ struct Device {
   DeviceType type_;
   int32_t index_ = -1;
 };
-} // namespace at
 
 AT_API std::ostream& operator<<(std::ostream& stream, const at::Device& device);
+
+} // namespace at
+
 
 namespace std {
   template<> struct hash<at::Device>

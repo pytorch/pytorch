@@ -1,7 +1,6 @@
 #include "torch/csrc/python_headers.h"
 
 #include "torch/csrc/jit/ir.h"
-#include "torch/csrc/jit/import.h"
 #include "torch/csrc/jit/pybind.h"
 #include "torch/csrc/jit/python_tracer.h"
 #include "torch/csrc/utils/pybind.h"
@@ -484,22 +483,5 @@ void initPythonIRBindings(PyObject * module_) {
   py::class_<Use>(m,"Use")
   .def_readonly("user",&Use::user)
   .def_readonly("offset",&Use::offset);
-
-  m.def("_jit_import_graph", [](const std::string& serialized_graph) {
-    std::vector<at::Tensor> initializers;
-    auto graph = ImportIRGraph(serialized_graph, initializers);
-    std::vector<torch::autograd::Variable> variables;
-    variables.reserve(initializers.size());
-    for (auto& tensor : initializers) {
-      variables.push_back(torch::autograd::make_variable(
-          std::move(tensor), /*requires_grad=*/false));
-    }
-    return std::make_tuple(graph, variables);
-  });
-  m.def("_jit_import_module", [](const std::shared_ptr<script::Module> module,
-                                 const std::string& serialized_module,
-                                 const std::unordered_map<std::string, std::string>& storages) {
-    ImportIRModule(module, serialized_module, storages);
-  });
 }
 }}
