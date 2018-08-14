@@ -45,10 +45,6 @@ std::ostream& operator<<(std::ostream & out, Backend b) {
   return out << toString(b);
 }
 
-std::ostream& operator<<(std::ostream & out, ScalarType t) {
-  return out << toString(t);
-}
-
 std::ostream& operator<<(std::ostream & out, const Type& t) {
   return out << t.toString();
 }

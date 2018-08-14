@@ -4,6 +4,7 @@
 
 #include <torch/tensor.h>
 #include <torch/optim.h>
+#include <torch/utils.h>
 
 #include "cereal/archives/binary.hpp"
 #include "cereal/types/polymorphic.hpp"
@@ -168,12 +169,13 @@ loadBinary(BinaryInputArchive& archive, void* data, size_t size) {
 // Gradients will not be saved for variables
 template <class Archive>
 void save(Archive& archive, torch::Tensor const& tensor) {
+  torch::NoGradGuard guard;
   if (!tensor.defined()) {
     int32_t typeId = ::torch::detail::scalarTypeId(torch::Dtype::Undefined);
     archive(CEREAL_NVP(typeId));
     return;
   } else {
-    int32_t typeId = ::torch::detail::scalarTypeId(tensor.data().type().scalarType());
+    int32_t typeId = ::torch::detail::scalarTypeId(tensor.dtype());
     archive(CEREAL_NVP(typeId));
   }
   auto sizes = std::vector<int64_t>();
@@ -199,6 +201,7 @@ void save(Archive& archive, torch::Tensor const& tensor) {
  **/
 template <class Archive>
 void load(Archive& archive, torch::Tensor& tensor) {
+  torch::NoGradGuard guard;
   torch::Dtype type;
   int32_t typeId;
   archive(CEREAL_NVP(typeId));
@@ -214,19 +217,19 @@ void load(Archive& archive, torch::Tensor& tensor) {
   archive(CEREAL_NVP(backendId), CEREAL_NVP(sizes));
 
   at::Backend backend = ::torch::detail::backendFromId(backendId);
-  if (!tensor.defined() || tensor.data().type().scalarType() != type) {
+  if (!tensor.defined() || tensor.dtype() != type) {
     tensor = torch::empty({}, torch::getType(backend, type));
   }
   tensor.data().resize_(sizes);
 
   if (tensor.type().is_cuda()) {
     // should actually use cudamemcpy probably
-    auto cputensor = torch::empty(sizes, tensor.data().type().scalarType());
+    auto cputensor = torch::empty(sizes, tensor.dtype());
     agimpl::loadBinary(
         archive,
         cputensor.data_ptr(),
         cputensor.numel() * cputensor.type().elementSizeInBytes());
-    tensor.copy_(cputensor);
+    tensor.data().copy_(cputensor.data());
   } else {
     agimpl::loadBinary(
         archive,

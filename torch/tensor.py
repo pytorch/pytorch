@@ -9,6 +9,9 @@ from torch._six import imap
 from torch._C import _add_docstr
 
 
+# NB: If you subclass Tensor, and want to share the subclassed class
+# across processes, you must also update torch/multiprocessing/reductions.py
+# to define a ForkingPickler serialization mode for the class.
 class Tensor(torch._C._TensorBase):
     def __deepcopy__(self, memo):
         if not self.is_leaf:
@@ -234,6 +237,10 @@ class Tensor(torch._C._TensorBase):
         r"""See :func:`torch.argmin`"""
         return torch.argmin(self, dim, keepdim)
 
+    def argsort(self, dim=None, descending=False):
+        r"""See :func: `torch.argsort`"""
+        return torch.argsort(self, dim, descending)
+
     def btrifact(self, info=None, pivot=True):
         r"""See :func:`torch.btrifact`
         """
@@ -311,7 +318,7 @@ class Tensor(torch._C._TensorBase):
             return output
 
     def __rsub__(self, other):
-        return -self + other
+        return torch.sub(other, self)
 
     def __rdiv__(self, other):
         if self.dtype.is_floating_point:
@@ -384,6 +391,8 @@ class Tensor(torch._C._TensorBase):
         return sorted(keys)
 
     # Numpy array interface, to support `numpy.asarray(tensor) -> ndarray`
+    __array_priority__ = 1000    # prefer Tensor ops over numpy ones
+
     def __array__(self, dtype=None):
         if dtype is None:
             return self.cpu().numpy()

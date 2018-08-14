@@ -33,7 +33,7 @@ class CopyIDEEPToCPUOp final : public IDEEPOperator {
     const auto& input_blob = OperatorBase::InputBlob(0);
     if (input_blob.template IsType<Tensor>(CPU)) {
       VLOG(2) << "Directing sharing of TensorCPU";
-      const auto& X = OperatorBase::Input<TensorCPU>(0);
+      const auto& X = OperatorBase::Input<Tensor>(0, CPU);
       auto* Y = OperatorBase::Output<Tensor>(0, CPU);
       Y->CopyFrom(X);
     } else {

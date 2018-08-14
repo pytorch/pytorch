@@ -31,11 +31,6 @@ graph {
       f: 0
       type: FLOAT
     }
-    attribute {
-      name: "broadcast"
-      i: 1
-      type: INT
-    }
   }
   name: "torch-jit-export"
   input {
@@ -88,5 +83,5 @@ graph {
   }
 }
 opset_import {
-  version: 6
+  version: 7
 }

@@ -79,7 +79,7 @@ PyObject* tensor_to_numpy(const at::Tensor& tensor) {
   if (PyArray_SetBaseObject((PyArrayObject*)array.get(), py_tensor) == -1) {
     return NULL;
   }
-  tensor.storage()->clear_flag(Storage::RESIZABLE);
+  tensor.storage()->pImpl()->set_resizable(false);
 
   return array.release();
 }
@@ -117,6 +117,11 @@ at::Tensor tensor_from_numpy(PyObject* obj) {
 
   void* data_ptr = PyArray_DATA(array);
   auto& type = CPU(numpy_dtype_to_aten(PyArray_TYPE(array)));
+  if (!PyArray_EquivByteorders(PyArray_DESCR(array)->byteorder, NPY_NATIVE)) {
+    throw ValueError(
+        "given numpy array has byte order different from the native byte order. "
+        "Conversion between byte orders is currently not supported.");
+  }
   Py_INCREF(obj);
   return type.tensorFromBlob(data_ptr, sizes, strides, [obj](void* data) {
     AutoGIL gil;

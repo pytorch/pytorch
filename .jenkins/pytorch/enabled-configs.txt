@@ -41,3 +41,4 @@ pytorch-docker-build-test
 short-perf-test-cpu
 short-perf-test-gpu
 py2-clang3.8-rocm1.7.1-ubuntu16.04-build
+py2-clang3.8-rocm1.7.1-ubuntu16.04-test

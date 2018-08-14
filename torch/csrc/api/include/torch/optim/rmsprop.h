@@ -33,7 +33,7 @@ class RMSprop : public Optimizer {
       ParameterContainer&& parameters,
       const RMSpropOptions& options)
       : Optimizer(std::forward<ParameterContainer>(parameters)),
-        options_(options),
+        options(options),
         square_average_buffers_(zero_buffers_like(parameters_)) {
     if (options.centered_ > 0) {
       grad_average_buffers_ = zero_buffers_like(parameters_);
@@ -45,7 +45,7 @@ class RMSprop : public Optimizer {
 
   void step() override;
 
-  const RMSpropOptions& options() const noexcept;
+  RMSpropOptions options;
 
   template <class Archive>
   void serialize(Archive& ar) {
@@ -56,9 +56,7 @@ class RMSprop : public Optimizer {
 
  private:
   friend class cereal::access;
-  RMSprop() : options_(0) {}
-
-  RMSpropOptions options_;
+  RMSprop() : options(0) {}
 
   std::vector<Tensor> square_average_buffers_;
   std::vector<Tensor> momentum_buffers_;

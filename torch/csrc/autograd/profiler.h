@@ -185,7 +185,7 @@ struct TORCH_API RecordFunction {
 using thread_event_lists = std::vector<std::vector<Event>>;
 // NOTE: changing profiler modes is **NOT THREAD SAFE**. You should ensure that
 // there no autograd functions are being executed when these function are used.
-TORCH_API void enableProfiler(ProfilerState state);
+TORCH_API void enableProfiler(ProfilerState new_state);
 TORCH_API thread_event_lists disableProfiler();
 
 } // namespace profiler

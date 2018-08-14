@@ -8,6 +8,8 @@
 #include "torch/csrc/jit/interned_strings.h"
 #include "torch/csrc/jit/resource_guard.h"
 #include "torch/csrc/jit/source_location.h"
+#include "torch/csrc/jit/source_range.h"
+#include "torch/csrc/jit/constants.h"
 #include "torch/csrc/jit/function_schema.h"
 #include "torch/csrc/jit/ivalue.h"
 #include "torch/csrc/jit/type.h"
@@ -19,7 +21,7 @@
 #include "torch/csrc/WindowsTorchApiMacro.h"
 
 #include <ATen/ATen.h>
-#include "ATen/ArrayRef.h"
+#include "ATen/core/ArrayRef.h"
 
 #include <algorithm>
 #include <atomic>
@@ -54,7 +56,7 @@ struct Value;
 
 TORCH_API std::ostream& operator<<(std::ostream & out, const Graph & g);
 TORCH_API std::ostream& operator<<(std::ostream & out, const Type & t);
-TORCH_API std::ostream& operator<<(std::ostream & out, const Node & t);
+TORCH_API std::ostream& operator<<(std::ostream & out, const Node & n);
 
 // A list of nodes, with inputs and outputs
 struct Block;
@@ -683,7 +685,9 @@ public:
     return *schema_;
   }
 
-  virtual ~Node() {}
+  void dump() const;
+
+  virtual ~Node() = default;
 private:
   std::pair<Value*, const Argument&> findInput(Symbol name);
   void findSchema() const;
@@ -889,8 +893,7 @@ public:
   , block_(new Block(this, nullptr))
   , insert_before_(return_node()) {}
 
-  Graph()
-  : Graph( std::make_shared<Scope>()) {}
+  Graph() : Graph(std::make_shared<Scope>()) {}
 
   at::ArrayRef<Value*> inputs() {
     return block_->inputs();
@@ -986,7 +989,6 @@ public:
   Node * createUndefined() {
     return create(prim::Undefined);
   }
-
   Node * createFusionGroup(int device) {
     auto n = create(prim::FusionGroup, 0);
     n->g_(attr::Subgraph,std::make_shared<Graph>(scope_root_));
@@ -1027,6 +1029,18 @@ public:
     result->output()->setType(type);
     return result;
   }
+  Node* createIntToFloat(Value* value) {
+    JIT_ASSERT(*value->type() == *IntType::get());
+    auto* result = create(prim::IntToFloat, {value});
+    result->output()->setType(FloatType::get());
+    return result;
+  }
+  Node* createFloatToInt(Value* value) {
+    JIT_ASSERT(*value->type() == *FloatType::get());
+    auto* result = create(prim::FloatToInt, {value});
+    result->output()->setType(IntType::get());
+    return result;
+  }
   Node* createPythonOp(
       THPObjectPtr&& pyobj,
       const std::string& cconv,
@@ -1051,6 +1065,12 @@ public:
       }
     }
     return r;
+  }
+
+  Value* insertConstant(
+      IValue val,
+      at::optional<SourceRange> loc = at::nullopt) {
+    return jit::insertConstant(*this, std::move(val), loc);
   }
 
   Node * appendNode(Node * n) {
@@ -1111,7 +1131,7 @@ public:
     return oss.str();
   }
 
-  friend std::ostream& operator<<(std::ostream & out, const Graph & g);
+  friend TORCH_API std::ostream& operator<<(std::ostream & out, const Graph & g);
   TORCH_API std::shared_ptr<Graph> copy();
 
 private:

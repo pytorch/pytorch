@@ -59,20 +59,21 @@ struct ArgumentSpec {
     for(int32_t i = 0; i < num_inputs; i++) {
       auto & pod = pods[i];
       pod.is_tensor = static_cast<uint32_t>(inputs[i].isTensor());
-      if (!pod.is_tensor) continue;
-      at::Tensor t = inputs[i].toTensor();
-      pod.defined = t.defined();
-      if (pod.defined) {
-        pod.type = static_cast<int>(t.type().scalarType());
-        pod.device = (!t.type().is_cuda()) ? -1 : t.get_device();
-        pod.requires_grad = with_grad && autograd::as_variable_ref(t).requires_grad();
-        total_dims += t.ndimension();
-        auto sizes = t.sizes();
-        std::copy(sizes.begin(),sizes.end(), next_dim);
-        next_dim += sizes.size();
-        auto strides = t.strides();
-        std::copy(strides.begin(), strides.end(), next_dim);
-        next_dim += strides.size();
+      if (pod.is_tensor) {
+        at::Tensor t = inputs[i].toTensor();
+        pod.defined = t.defined();
+        if (pod.defined) {
+          pod.type = static_cast<int>(t.type().scalarType());
+          pod.device = (!t.type().is_cuda()) ? -1 : t.get_device();
+          pod.requires_grad = with_grad && autograd::as_variable_ref(t).requires_grad();
+          total_dims += t.ndimension();
+          auto sizes = t.sizes();
+          std::copy(sizes.begin(),sizes.end(), next_dim);
+          next_dim += sizes.size();
+          auto strides = t.strides();
+          std::copy(strides.begin(), strides.end(), next_dim);
+          next_dim += strides.size();
+        }
       }
       // each POD has a running tally of all dimensions including its own
       pod.total_dims = total_dims;

@@ -1,7 +1,7 @@
 #pragma once
 
 #include <ATen/ScalarType.h>
-#include <ATen/Error.h>
+#include <ATen/core/Error.h>
 
 #include <iostream>
 
@@ -20,7 +20,6 @@ inline Layout layout_from_backend(Backend backend) {
       return Layout::Strided;
   }
 }
-} // namespace at
 
 inline std::ostream& operator<<(std::ostream& stream, at::Layout layout) {
   switch (layout) {
@@ -32,3 +31,5 @@ inline std::ostream& operator<<(std::ostream& stream, at::Layout layout) {
       AT_ERROR("Unknown layout");
   }
 }
+
+} // namespace at

@@ -62,12 +62,12 @@ class BlobFeederBase {
 
 CAFFE2_EXPORT CAFFE_DECLARE_TYPED_REGISTRY(
     BlobFetcherRegistry,
-    CaffeTypeId,
+    TypeIdentifier,
     BlobFetcherBase,
     std::unique_ptr);
 #define REGISTER_BLOB_FETCHER(id, ...) \
   CAFFE_REGISTER_TYPED_CLASS(BlobFetcherRegistry, id, __VA_ARGS__)
-inline unique_ptr<BlobFetcherBase> CreateFetcher(CaffeTypeId id) {
+inline unique_ptr<BlobFetcherBase> CreateFetcher(TypeIdentifier id) {
   return BlobFetcherRegistry()->Create(id);
 }
 
@@ -168,7 +168,7 @@ class TensorFeeder : public BlobFeederBase {
     const auto npy_type = PyArray_TYPE(array);
     const TypeMeta& meta = NumpyTypeToCaffe(npy_type);
     CAFFE_ENFORCE(
-        meta.id() != CaffeTypeId::uninitialized(),
+        meta.id() != TypeIdentifier::uninitialized(),
         "This numpy data type is not supported: ",
         PyArray_TYPE(array),
         ".");

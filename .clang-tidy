@@ -2,6 +2,7 @@
 # NOTE: there must be no spaces before the '-', so put the comma first.
 Checks: '
   *
+  ,clang-analyzer-*
   ,modernize-*
   ,-cert-err58-cpp
   ,-cert-err60-cpp
@@ -9,6 +10,7 @@ Checks: '
   ,-cppcoreguidelines-owning-memory
   ,-cppcoreguidelines-pro-bounds-array-to-pointer-decay
   ,-cppcoreguidelines-pro-bounds-constant-array-index
+  ,-cppcoreguidelines-pro-type-member-init
   ,-cppcoreguidelines-pro-type-static-cast-downcast
   ,-cppcoreguidelines-pro-type-vararg
   ,-cppcoreguidelines-special-member-functions
@@ -23,9 +25,11 @@ Checks: '
   ,-hicpp-braces-around-statements
   ,-hicpp-explicit-conversions
   ,-hicpp-no-array-decay
+  ,-hicpp-signed-bitwise
   ,-hicpp-special-member-functions
   ,-hicpp-vararg
   ,-llvm-header-guard
+  ,-llvm-include-order
   ,-llvm-namespace-comment
   ,-misc-unused-parameters
   ,-modernize-make-unique
@@ -34,7 +38,6 @@ Checks: '
   ,-readability-braces-around-statements
   ,-readability-else-after-return
   ,-readability-named-parameter
-  ,clang-analyzer-*
   '
 WarningsAsErrors: ''
 HeaderFilterRegex: 'torch/csrc/'

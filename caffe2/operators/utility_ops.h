@@ -1,17 +1,18 @@
 #ifndef CAFFE2_OPERATORS_UTILITY_OPS_H_
 #define CAFFE2_OPERATORS_UTILITY_OPS_H_
 
-#include <math.h>
+#include <cmath>
+#include <map>
+#include <utility>
 
 #include "caffe2/core/common_omp.h"
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/core/types.h"
+#include "caffe2/operators/gather_op.h"
+#include "caffe2/utils/conversions.h"
 #include "caffe2/utils/math.h"
-
-#include <map>
-#include <utility>
 
 namespace caffe2 {
 
@@ -330,7 +331,7 @@ class WeightedSumOp : public Operator<Context> {
     int size = X0.size();
     auto* output = Output(0);
     output->ResizeLike(X0);
-    math::Scale<DstType, Context>(
+    math::Scale<float, DstType, Context>(
         size,
         weight0.template data<float>(),
         X0.template data<DstType>(),
@@ -387,7 +388,7 @@ class WeightedSumGradientOp : public Operator<Context> {
       auto* cur_dX = Output(i);
       cur_dX->ResizeLike(dY);
 
-      math::Scale<DstType, Context>(
+      math::Scale<float, DstType, Context>(
           size,
           cur_w.template data<float>(),
           dY_data,
@@ -520,8 +521,8 @@ class ScatterWeightedSumOp : public Operator<Context> {
       for (int i = 0; i < K; ++i) {
         Index idx = idxs[i];
         // double-checking the indices, but it's fine as it's DCHECK only
-        DCHECK(0 <= idx && idx < N) << "Index out of bounds: " << idx
-                                    << ", range 0 to " << N;
+        DCHECK(0 <= idx && idx < N)
+            << "Index out of bounds: " << idx << ", range 0 to " << N;
         math::AxpyFixedSize<T, Context, FixedSize>(
             block_size,
             w,
@@ -661,8 +662,8 @@ class ScatterAssignOp : public Operator<Context> {
     for (int i = 0; i < K; ++i) {
       Index idx = idxs[i];
       // double-checking the indices, but it's fine as it's DCHECK only
-      DCHECK(0 <= idx && idx < N) << "Index out of bounds: " << idx
-                                  << ", range 0 to " << N;
+      DCHECK(0 <= idx && idx < N)
+          << "Index out of bounds: " << idx << ", range 0 to " << N;
       context_.template CopySameDevice<T>(
           block_size, slicesData + block_size * i, data + block_size * idx);
     }
@@ -1016,56 +1017,6 @@ class LengthsToShapeOp : public Operator<Context> {
 
     return true;
   }
-};
-
-template <class Context>
-class GatherOp : public Operator<Context> {
- public:
-  USE_OPERATOR_CONTEXT_FUNCTIONS;
-  USE_SIMPLE_CTOR_DTOR(GatherOp);
-
-  bool RunOnDevice() override {
-    return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
-        this, OperatorBase::Input<Tensor>(INDICES, CPU));
-  }
-
-  template <typename Index>
-  bool DoRunWithType() {
-    // If we endup using it on GPU doing O(N) memcpy is probably not best :)
-    // TODO: implement prefetching if it starts mattering (TF does it)
-    auto& data = Input(DATA);
-    auto& indices = Input(INDICES);
-    auto* output = Output(0);
-
-    CAFFE_ENFORCE_GE(data.ndim(), 1, "DATA should be at least 1-D");
-    auto shape = indices.dims();
-    shape.insert(shape.end(), data.dims().begin() + 1, data.dims().end());
-    output->Resize(shape);
-
-    int block_size = data.size_from_dim(1);
-    auto block_bytesize = data.size_from_dim(1) * data.meta().itemsize();
-    int N = indices.size();
-
-    auto src_base = static_cast<const char*>(data.raw_data());
-    const Index* idxs = indices.template data<Index>();
-    auto out = static_cast<char*>(output->raw_mutable_data(data.meta()));
-
-    for (int i = 0; i < N; ++i) {
-      auto idx = idxs[i];
-      CAFFE_ENFORCE(
-          0 <= idx && idx < data.dim(0),
-          "INDICES element is out of DATA bounds, id=",
-          idx,
-          " data_dim=",
-          data.dim(0));
-      auto src = src_base + idx * block_bytesize;
-      context_.CopyItemsSameDevice(
-          data.meta(), block_size, src, out + block_bytesize * i);
-    }
-    return true;
-  }
-
-  INPUT_TAGS(DATA, INDICES);
 };
 
 template <class Context>

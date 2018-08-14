@@ -1,6 +1,6 @@
 graph(%0 : Double(3, 4)) {
   %2 : Double(3, 4) = aten::neg(%0), scope: traced_fn1
-  %3 : int = prim::Constant[value=1]()
+  %3 : Long() = prim::Constant[value={1}]()
   %4 : int = prim::Constant[value=1]()
   %5 : Double(3, 4) = aten::add(%2, %3, %4)
   return (%5);

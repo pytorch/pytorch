@@ -13,6 +13,7 @@ from caffe2.proto import caffe2_pb2
 from caffe2.python import brew, core, workspace
 import caffe2.python.hypothesis_test_util as hu
 from caffe2.python.model_helper import ModelHelper
+import caffe2.python._import_c_extension as C
 
 
 def _cudnn_supports(
@@ -35,6 +36,20 @@ def _cudnn_supports(
             # Dilation and NHWC not supported together
             return False
     return True
+
+
+def _cudnn_convolution_algo_count(direction):
+    try:
+        if direction == "fwd":
+            return st.integers(0, C.cudnn_convolution_fwd_algo_count - 1)
+        elif direction == "dgrad":
+            return st.integers(0, C.cudnn_convolution_bwd_data_algo_count - 1)
+        elif direction == "wgrad":
+            return st.integers(0, C.cudnn_convolution_bwd_filter_algo_count - 1)
+        else:
+            assert False
+    except Exception:
+        return st.sampled_from([-1])
 
 
 class TestConvolution(hu.HypothesisTestCase):
@@ -125,7 +140,8 @@ class TestConvolution(hu.HypothesisTestCase):
                                                     kernel, size,
                                                     input_channels,
                                                     output_channels, batch_size,
-                                                    engine, use_bias, gc, dc):
+                                                    engine, use_bias,
+                                                    gc, dc):
         X = np.random.rand(
             batch_size, size, size, input_channels).astype(np.float32) - 0.5
         w = np.random.rand(
@@ -178,10 +194,15 @@ class TestConvolution(hu.HypothesisTestCase):
            order=st.sampled_from(["NCHW", "NHWC"]),
            engine=st.sampled_from(["", "CUDNN", "MKLDNN"]),
            use_bias=st.booleans(),
+           force_algo_fwd=_cudnn_convolution_algo_count("fwd"),
+           force_algo_dgrad=_cudnn_convolution_algo_count("dgrad"),
+           force_algo_wgrad=_cudnn_convolution_algo_count("wgrad"),
            **hu.gcs)
     def test_convolution_gradients(self, op_type, stride, pad, kernel, dilation,
                                    size, input_channels, output_channels,
-                                   batch_size, order, engine, use_bias, gc, dc):
+                                   batch_size, order, engine, use_bias, 
+                                   force_algo_fwd, force_algo_dgrad, force_algo_wgrad,
+                                   gc, dc):
         dkernel = dilation * (kernel - 1) + 1
 
         if engine == 'CUDNN':
@@ -201,6 +222,9 @@ class TestConvolution(hu.HypothesisTestCase):
             pad=pad,
             order=order,
             engine=engine,
+            force_algo_fwd=force_algo_fwd,
+            force_algo_dgrad=force_algo_dgrad,
+            force_algo_wgrad=force_algo_wgrad,
         )
         X = np.random.rand(
             batch_size, size, size, input_channels).astype(np.float32) - 0.5
@@ -219,13 +243,29 @@ class TestConvolution(hu.HypothesisTestCase):
                 self.assertDeviceChecks(dc, op, inputs, [0])
             return
 
-        self.assertDeviceChecks(dc, op, inputs, [0])
+        try:
+            self.assertDeviceChecks(dc, op, inputs, [0])
+        except RuntimeError as e:
+            es = str(e)
+            if "status == CUDNN_STATUS_SUCCESS" not in es \
+               or "CUDNN_STATUS_NOT_SUPPORTED" not in es \
+               or force_algo_fwd == 0: # CUDNN_CONVOLUTION_FWD_ALGO_IMPLICIT_GEMM should
+                                       # always have implementation
+                raise e
+
         for i in range(len(inputs)):
-            self.assertGradientChecks(gc, op, inputs, i, [0])
+            try:
+                self.assertGradientChecks(gc, op, inputs, i, [0])
+            except RuntimeError as e:
+                es = str(e)
+                if "status == CUDNN_STATUS_SUCCESS" not in es \
+                   or "CUDNN_STATUS_NOT_SUPPORTED" not in es:
+                    raise e
 
     def _nd_convolution_nchw(self, n, input_channels, output_channels,
                              batch_size, stride, size, kernel, dilation, pad,
-                             use_bias, gc, dc):
+                             use_bias, force_algo_fwd, force_algo_dgrad,
+                             force_algo_wgrad, gc, dc):
         dkernel = dilation * (kernel - 1) + 1
         for op_type in ["Conv", "Conv" + str(n) + "D"]:
             op = core.CreateOperator(
@@ -238,6 +278,9 @@ class TestConvolution(hu.HypothesisTestCase):
                 pads=[pad] * n * 2,
                 order="NCHW",
                 engine="",
+                force_algo_fwd=force_algo_fwd,
+                force_algo_dgrad=force_algo_dgrad,
+                force_algo_wgrad=force_algo_wgrad,
             )
 
             input_dims = [batch_size, input_channels]
@@ -269,13 +312,20 @@ class TestConvolution(hu.HypothesisTestCase):
            dilation=st.integers(1, 3),
            pad=st.integers(0, 3),
            use_bias=st.booleans(),
+           force_algo_fwd=_cudnn_convolution_algo_count("fwd"),
+           force_algo_dgrad=_cudnn_convolution_algo_count("dgrad"),
+           force_algo_wgrad=_cudnn_convolution_algo_count("wgrad"),
            **hu.gcs)
     def test_1d_convolution_nchw(self, input_channels, output_channels,
                                  batch_size, stride, size, kernel, dilation,
-                                 pad, use_bias, gc, dc):
+                                 pad, use_bias,
+                                 force_algo_fwd, force_algo_dgrad,
+                                 force_algo_wgrad,
+                                 gc, dc):
         self._nd_convolution_nchw(
             1, input_channels, output_channels, batch_size, stride, size,
-            kernel, dilation, pad, use_bias, gc, dc
+            kernel, dilation, pad, use_bias, force_algo_fwd, force_algo_dgrad,
+            force_algo_wgrad, gc, dc
         )
 
     @given(input_channels=st.integers(1, 2),
@@ -287,13 +337,20 @@ class TestConvolution(hu.HypothesisTestCase):
            dilation=st.integers(1, 2),
            pad=st.integers(0, 2),
            use_bias=st.booleans(),
+           force_algo_fwd=_cudnn_convolution_algo_count("fwd"),
+           force_algo_dgrad=_cudnn_convolution_algo_count("dgrad"),
+           force_algo_wgrad=_cudnn_convolution_algo_count("wgrad"),
            **hu.gcs)
     def test_3d_convolution_nchw(self, input_channels, output_channels,
                                  batch_size, stride, size, kernel, dilation,
-                                 pad, use_bias, gc, dc):
+                                 pad, use_bias,
+                                 force_algo_fwd, force_algo_dgrad,
+                                 force_algo_wgrad,
+                                 gc, dc):
         self._nd_convolution_nchw(
             3, input_channels, output_channels, batch_size, stride, size,
-            kernel, dilation, pad, use_bias, gc, dc
+            kernel, dilation, pad, use_bias, force_algo_fwd, force_algo_dgrad,
+            force_algo_wgrad, gc, dc
         )
 
     @given(op_type=st.sampled_from(["Conv", "Conv3D"]),
@@ -304,9 +361,14 @@ class TestConvolution(hu.HypothesisTestCase):
            dilation=st.integers(1, 2),
            pad=st.integers(0, 2),
            use_bias=st.booleans(),
+           force_algo_fwd=_cudnn_convolution_algo_count("fwd"),
+           force_algo_dgrad=_cudnn_convolution_algo_count("dgrad"),
+           force_algo_wgrad=_cudnn_convolution_algo_count("wgrad"),
            **hu.gcs)
     def test_3d_convolution_cudnn_nchw(self, op_type, batch_size, stride, size,
-                                       kernel, dilation, pad, use_bias, gc, dc):
+                                       kernel, dilation, pad, use_bias,
+                                       force_algo_fwd, force_algo_dgrad,
+                                       force_algo_wgrad, gc, dc):
         input_channels = 1
         output_channels = 1
         n = 3
@@ -323,6 +385,9 @@ class TestConvolution(hu.HypothesisTestCase):
             pads=[pad] * n * 2,
             order=order,
             engine="CUDNN",
+            force_algo_fwd=force_algo_fwd,
+            force_algo_dgrad=force_algo_dgrad,
+            force_algo_wgrad=force_algo_wgrad,
         )
 
         input_dims = [batch_size, input_channels]
@@ -340,9 +405,24 @@ class TestConvolution(hu.HypothesisTestCase):
                 self.assertDeviceChecks(dc, op, inputs, [0])
             return
 
-        self.assertDeviceChecks(dc, op, inputs, [0])
+        try:
+            self.assertDeviceChecks(dc, op, inputs, [0])
+        except RuntimeError as e:
+            es = str(e)
+            if "status == CUDNN_STATUS_SUCCESS" not in es \
+               or "CUDNN_STATUS_NOT_SUPPORTED" not in es \
+               or force_algo_fwd == 0: # CUDNN_CONVOLUTION_FWD_ALGO_IMPLICIT_GEMM should
+                                       # always have implementation
+                raise e
+
         for i in range(len(inputs)):
-            self.assertGradientChecks(gc, op, inputs, i, [0])
+            try:
+                self.assertGradientChecks(gc, op, inputs, i, [0])
+            except RuntimeError as e:
+                es = str(e)
+                if "status == CUDNN_STATUS_SUCCESS" not in es \
+                   or "CUDNN_STATUS_NOT_SUPPORTED" not in es:
+                    raise e
 
     @given(op_type=st.sampled_from(["Conv", "Conv2D"]),
            stride=st.integers(1, 3),
@@ -423,9 +503,9 @@ class TestConvolution(hu.HypothesisTestCase):
            net_type=st.sampled_from(
                ["simple", "dag"] +
                (["async_dag"] if workspace.has_gpu_support or workspace.has_hip_support else [])),
-           do=st.sampled_from(hu.device_options),
-           engine=st.sampled_from(["CUDNN", ""]))
-    def test_convolution_sync(self, net_type, num_workers, do, engine):
+           engine=st.sampled_from(["CUDNN", ""]),
+           **hu.gcs_no_hip)
+    def test_convolution_sync(self, net_type, num_workers, engine, gc, dc):
         m = ModelHelper(name="test_model")
         n = 1
         d = 2
@@ -477,8 +557,8 @@ class TestConvolution(hu.HypothesisTestCase):
         m.net.SquaredL2Distance(["0_0_flat", "label"], "xent")
         m.net.AveragedLoss("xent", "loss")
         input_to_grad = m.AddGradientOperators(["loss"])
-        m.Proto().device_option.CopyFrom(do)
-        m.param_init_net.Proto().device_option.CopyFrom(do)
+        m.Proto().device_option.CopyFrom(gc)
+        m.param_init_net.Proto().device_option.CopyFrom(gc)
         m.Proto().type = net_type
         m.Proto().num_workers = num_workers
         self.ws.run(m.param_init_net)
@@ -490,10 +570,10 @@ class TestConvolution(hu.HypothesisTestCase):
             for input_blob in input_blobs:
                 self.ws.create_blob(input_blob).feed(
                     np.random.randn(n, d, h, w).astype(np.float32),
-                    device_option=do)
+                    device_option=gc)
                 self.ws.create_blob("label").feed(
                     np.random.randn(n, d * h * w).astype(np.float32),
-                    device_option=do)
+                    device_option=gc)
             self.ws.run(m.net)
             gradients = [
                 self.ws.blobs[str(input_to_grad[input_blob])].fetch()
@@ -549,8 +629,13 @@ class TestConvolution(hu.HypothesisTestCase):
     @given(op_type=st.sampled_from(["Conv", "Conv2D"]), N=st.integers(1, 4),
            G=st.integers(1, 4), DX=st.integers(1, 4), DY=st.integers(1, 4),
            H=st.integers(1, 4), W=st.integers(1, 4), use_bias=st.booleans(),
+           force_algo_fwd=_cudnn_convolution_algo_count("fwd"),
+           force_algo_dgrad=_cudnn_convolution_algo_count("dgrad"),
+           force_algo_wgrad=_cudnn_convolution_algo_count("wgrad"),
            **hu.gcs)
-    def test_1x1_conv(self, op_type, N, G, DX, DY, H, W, use_bias, gc, dc):
+    def test_1x1_conv(self, op_type, N, G, DX, DY, H, W, use_bias,
+                      force_algo_fwd, force_algo_dgrad,
+                      force_algo_wgrad, gc, dc):
         op = core.CreateOperator(
             op_type,
             ["X", "filter", "bias"] if use_bias else ["X", "filter"],
@@ -564,6 +649,9 @@ class TestConvolution(hu.HypothesisTestCase):
             kernel=1,
             order="NCHW",
             group=G,
+            force_algo_fwd=force_algo_fwd,
+            force_algo_dgrad=force_algo_dgrad,
+            force_algo_wgrad=force_algo_wgrad,
         )
         C = G * DX
         M = G * DY

@@ -360,7 +360,7 @@ class WorkersPool {
     counter_to_decrement_when_ready_.Wait();
   }
 
-  DISABLE_COPY_AND_ASSIGN(WorkersPool);
+  AT_DISABLE_COPY_AND_ASSIGN(WorkersPool);
   std::vector<std::unique_ptr<Worker, AlignedDeleter<Worker>>> workers_;
   // The BlockingCounter used to wait for the workers.
   BlockingCounter counter_to_decrement_when_ready_;

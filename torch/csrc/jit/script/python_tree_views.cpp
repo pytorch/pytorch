@@ -97,6 +97,9 @@ void initTreeViewBindings(PyObject *module) {
   m.def("FalseLiteral", [](const SourceRange& range) {
     return Expr(Compound::create(TK_FALSE, range, {}));
   });
+  m.def("NoneLiteral", [](const SourceRange& range) {
+    return Expr(Compound::create(TK_NONE, range, {}));
+  });
   py::class_<Type, TreeView>(m, "Type");
   py::class_<TensorType, Type>(m, "TensorType")
     .def(py::init(&TensorType::create));
@@ -171,6 +174,10 @@ void initTreeViewBindings(PyObject *module) {
     .def(py::init([](const SourceRange& range, std::string value) {
       return Const::create(range, value);
     }));
+  py::class_<StringLiteral, Expr>(m, "StringLiteral")
+    .def(py::init([](const SourceRange& range, std::string value) {
+      return StringLiteral::create(range, value);
+    }));
   py::class_<Apply, Expr>(m, "Apply")
     .def(py::init([](const Expr& expr, std::vector<Expr> args, std::vector<Attribute> kwargs) {
       auto r = expr.range();
@@ -189,6 +196,10 @@ void initTreeViewBindings(PyObject *module) {
   py::class_<ListLiteral, Expr>(m, "ListLiteral")
     .def(py::init([](const SourceRange& range, std::vector<Expr> args) {
       return ListLiteral::create(range, wrap_list(range, std::move(args)));
+    }));
+  py::class_<TupleLiteral, Expr>(m, "TupleLiteral")
+    .def(py::init([](const SourceRange& range, std::vector<Expr> args) {
+      return TupleLiteral::create(range, wrap_list(range, std::move(args)));
     }));
   py::class_<Gather, Expr>(m, "Gather")
     .def(py::init([](const Expr& base, const Expr& index) {

@@ -71,6 +71,8 @@ template <typename T, class Context>
 void Not(const int N, const T* x, T* y, Context* context);
 template <typename T, class Context>
 void Powx(const int N, const T* a, const T b, T* y, Context* context);
+template <typename T, class Context>
+void Inv(const int N, const T* x, T* y, Context* context);
 
 #define CAFFE2_DECLARE_COMPARE_OP(Comp)                                      \
   template <typename T, class Context>                                       \
@@ -184,6 +186,7 @@ void ReduceMin(
     const int* dims,
     const int num_axes,
     const int* axes,
+    const T alpha,
     const T* X,
     T* Y,
     Context* context);
@@ -194,6 +197,7 @@ void ReduceMax(
     const int* dims,
     const int num_axes,
     const int* axes,
+    const T alpha,
     const T* X,
     T* Y,
     Context* context);
@@ -204,6 +208,7 @@ void ReduceSum(
     const int* dims,
     const int num_axes,
     const int* axes,
+    const T alpha,
     const T* X,
     T* Y,
     Context* context);
@@ -214,6 +219,7 @@ void ReduceMean(
     const int* dims,
     const int num_axes,
     const int* axes,
+    const T alpha,
     const T* X,
     T* Y,
     Context* context);
@@ -224,6 +230,7 @@ void ReduceL1(
     const int* dims,
     const int num_axes,
     const int* axes,
+    const T alpha,
     const T* X,
     T* Y,
     Context* context);
@@ -234,6 +241,7 @@ void ReduceL2(
     const int* dims,
     const int num_axes,
     const int* axes,
+    const T alpha,
     const T* X,
     T* Y,
     Context* context);
@@ -245,6 +253,7 @@ void Broadcast(
     const int* X_dims,
     const int Y_ndim,
     const int* Y_dims,
+    const T alpha,
     const T* X,
     T* Y,
     Context* context);
@@ -462,14 +471,24 @@ void Select(
     T* y,
     Context* context);
 
-template <typename T, class Context>
-void Scale(const int N, const float alpha, const T* x, T* y, Context* context);
+template <typename TAlpha, typename TData, class Context>
+void Scale(
+    const int N,
+    const TAlpha alpha,
+    const TData* x,
+    TData* y,
+    Context* context);
 
 // Different from the Scale function above, if alpha is passed in
 // as a pointer, we will assume that it lives on the Context device,
 // for example on GPU.
-template <typename T, class Context>
-void Scale(const int N, const float* alpha, const T* x, T* y, Context* context);
+template <typename TAlpha, typename TData, class Context>
+void Scale(
+    const int N,
+    const TAlpha* alpha,
+    const TData* x,
+    TData* y,
+    Context* context);
 
 template <typename T, class Context>
 void Axpy(const int N, const float alpha, const T* x, T* y, Context* context);

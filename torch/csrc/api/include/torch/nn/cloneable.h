@@ -3,10 +3,10 @@
 #include <torch/nn/module.h>
 #include <torch/tensor.h>
 
-#include <ATen/Error.h>
 #include <ATen/OptionsGuard.h>
 #include <ATen/TensorOptions.h>
-#include <ATen/optional.h>
+#include <ATen/core/Error.h>
+#include <ATen/core/optional.h>
 
 #include <memory>
 #include <utility>
@@ -21,7 +21,7 @@ namespace nn {
 /// `clone()` method. We do not want to use this pattern in the base class,
 /// because then storing a module would always require templatizing it.
 template <typename Derived>
-class Cloneable : public Module {
+class Cloneable : public virtual Module {
  public:
   using Module::Module;
 

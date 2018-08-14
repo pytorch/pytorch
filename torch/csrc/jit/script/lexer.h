@@ -7,7 +7,7 @@
 #include <unordered_map>
 #include <vector>
 #include "torch/csrc/jit/assertions.h"
-#include "torch/csrc/jit/source_location.h"
+#include "torch/csrc/jit/source_range.h"
 
 
 namespace torch {
@@ -34,6 +34,7 @@ namespace script {
   _(TK_EQUIVALENT, "equivalent", "<=>")          \
   _(TK_IDENT, "ident", "")                       \
   _(TK_STRING, "string", "")                     \
+  _(TK_STRINGLITERAL, "string_literal", "")      \
   _(TK_CONST, "const", "")                       \
   _(TK_LIST, "list", "")                         \
   _(TK_OPTION, "option", "")                     \
@@ -59,6 +60,7 @@ namespace script {
   _(TK_IF_EXPR, "if", "")                        \
   _(TK_TRUE, "True", "True")                     \
   _(TK_FALSE, "False", "False")                  \
+  _(TK_NONE, "None", "None")                     \
   _(TK_AND, "and", "and")                        \
   _(TK_OR, "or", "or")                           \
   _(TK_NOT, "not", "not")                        \
@@ -74,6 +76,7 @@ namespace script {
   _(TK_GATHER, "gather", "")                     \
   _(TK_NOTHING, "nothing", "")                   \
   _(TK_LIST_LITERAL, "list-literal", "")         \
+  _(TK_TUPLE_LITERAL, "tuple-literal", "")       \
   _(TK_FOR, "for", "for")                        \
   _(TK_IN, "in", "in")                           \
   _(TK_STARRED, "starred", "")                   \
@@ -185,6 +188,42 @@ struct SharedParserData {
     *len = endptr - startptr;
     return *len > 0;
   }
+
+  bool isCharCount(char c, const std::string& str, size_t start, int len) {
+    //count checks from [start, start + len)
+    return start + len <= str.size() && std::count(str.begin() + start, str.begin() + start + len, c) == len;
+  }
+
+  // python conconcatenates all adjacent strings "a" "b" == "ab"
+  // strings can be enclosed with 1 or 3 single or double quotes
+  // if enclosed with 3 quotes newlines are valid
+  // as elsewhere, backslash and new line should be ignored
+  bool isString(const std::string& str, size_t start, size_t* len) {
+    char quote = str[start];
+    if (quote != '\"' && quote != '\'')
+      return false;
+    int quote_len = isCharCount(quote, str, start, 3) ? 3 : 1;
+
+    //end is now set past the opening quotation marks
+    size_t end = start + quote_len;
+    while(end < str.size() && !isCharCount(quote, str, end, quote_len)) {
+      if (str[end] == '\n' && quote_len != 3) {
+        return false;
+      }
+      //handle escaped characters. advances past escaped quotation marks,
+      //escaped newlines and escaped backslashes
+      if (str[end] == '\\') {
+        end++;
+      }
+      end++;
+    }
+    //set length equal to the complete string including quotations
+    *len = end - start + quote_len;
+    //if end finished without going past the last character of the string than
+    //there is a match
+    return end < str.size();
+  }
+
   bool isblank(int n) {
     return isspace(n) && n != '\n';
   }
@@ -242,6 +281,12 @@ struct SharedParserData {
       *kind = TK_NUMBER;
       return true;
     }
+    // check for string
+    if (isString(str, pos, len)) {
+      *kind = TK_STRINGLITERAL;
+      return true;
+    }
+
     // check for either an ident or a token
     // ident tracks whether what we have scanned so far could be an identifier
     // matched indicates if we have found any match.
@@ -308,80 +353,6 @@ struct SharedParserData {
 };
 
 SharedParserData& sharedParserData();
-
-// a range of a shared string 'file_' with functions to help debug by highlight
-// that
-// range.
-struct SourceRange : public SourceLocation {
-  SourceRange(
-      const std::shared_ptr<std::string>& file_,
-      size_t start_,
-      size_t end_)
-      : file_(file_), start_(start_), end_(end_) {}
-  const std::string text() const {
-    return file().substr(start(), end() - start());
-  }
-  size_t size() const {
-    return end() - start();
-  }
-
-  static const size_t CONTEXT = 10;
-  virtual void highlight(std::ostream& out) const override {
-    const std::string& str = file();
-    size_t begin_line = start(); // beginning of line to highlight
-    size_t end_line = start(); // end of line to highlight
-    while (begin_line > 0 && str[begin_line - 1] != '\n')
-      --begin_line;
-    while (end_line < str.size() && str[end_line] != '\n')
-      ++end_line;
-    JIT_ASSERT(begin_line == 0 || str[begin_line - 1] == '\n');
-    JIT_ASSERT(end_line == str.size() || str[end_line] == '\n');
-
-    size_t begin_highlight = begin_line; // beginning of context, CONTEXT lines before the highlight line
-    for(size_t i = 0; begin_highlight > 0; --begin_highlight) {
-      if(str[begin_highlight - 1] == '\n')
-        ++i;
-      if(i >= CONTEXT)
-        break;
-    }
-    JIT_ASSERT(begin_highlight == 0 || str[begin_highlight - 1] == '\n');
-
-    size_t end_highlight = end_line; // end of context, CONTEXT lines after the highlight line
-    for(size_t i = 0; end_highlight < str.size(); ++end_highlight) {
-      if(str[end_highlight] == '\n')
-        ++i;
-      if(i >= CONTEXT)
-        break;
-    }
-    JIT_ASSERT(end_highlight == str.size() || str[end_highlight] == '\n');
-
-    out << str.substr(begin_highlight, end_line - begin_highlight) << "\n";
-    out << std::string(start() - begin_line, ' ');
-    size_t len = std::min(size(), end_line - start());
-    out << std::string(len, '~')
-        << (len < size() ? "...  <--- HERE" : " <--- HERE");
-    out << str.substr(end_line, end_highlight - end_line);
-    if (str.size() > 0 && str.back() != '\n')
-      out << "\n";
-  }
-  const std::string& file() const {
-    return *file_;
-  }
-  const std::shared_ptr<std::string>& file_ptr() const {
-    return file_;
-  }
-  size_t start() const {
-    return start_;
-  }
-  size_t end() const {
-    return end_;
-  }
-
- private:
-  std::shared_ptr<std::string> file_;
-  size_t start_;
-  size_t end_;
-};
 
 struct Token {
   int kind;

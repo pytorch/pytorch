@@ -1819,18 +1819,6 @@ class TestCuda(TestCase):
     def test_random_neg_values(self):
         TestTorch._test_random_neg_values(self, use_cuda=True)
 
-    def test_overlapped_indices(self):
-        a = torch.arange(0, 128).view(32, 4).cuda()
-        b = torch.arange(0, 128).view(32, 4).cuda()
-        b = b.set_(b.storage(), storage_offset=0, size=(65, 64), stride=(1, 1))
-        b += 5
-        b = b.set_(b.storage(),
-                   storage_offset=0,
-                   size=a.size(),
-                   stride=a.stride())
-        a += 5
-        self.assertEqual(a, b)
-
     def test_bincount_cuda(self):
         TestTorch._test_bincount(self, device='cuda')
         # ensure CUDA code coverage

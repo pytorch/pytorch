@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/Half.h>
+#include <ATen/core/Half.h>
 #include "THHalf.h"
 
 // Type traits to convert types to TH-specific types. Used primarily to

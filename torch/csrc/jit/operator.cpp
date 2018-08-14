@@ -104,6 +104,9 @@ struct SchemaParser {
       case TK_FALSE:
         L.next();
         return false;
+      case TK_NONE:
+        L.next();
+        return IValue();
       case TK_IDENT: {
         auto tok = L.next();
         auto text = tok.text();
@@ -160,11 +163,8 @@ struct SchemaParser {
   }
 
   IValue parseTensorDefault(const SourceRange& range) {
-    if("None" == L.expect(TK_IDENT).text()) {
-      return at::Tensor();
-    } else {
-      throw ErrorReport(range) << "invalid tensor default value";
-    }
+    L.expect(TK_NONE);
+    return IValue();
   }
   void parseDefaultValue(Argument& arg) {
     auto range = L.cur().range;
@@ -248,8 +248,12 @@ std::string canonicalSchemaString(const FunctionSchema& schema) {
 
 using OperatorMap = std::unordered_map<Symbol, std::vector<std::shared_ptr<Operator>>>;
 struct OperatorRegistry  {
-  OperatorMap operators;
+private:
   std::mutex lock;
+  OperatorMap operators;
+  // list of operators whose schema have not yet been parsed, and must
+  // be registered before any call to lookup an opeator
+  std::vector<std::shared_ptr<Operator>> to_register;
   // Those two maps are used to implement lookupByLiteral, which is needed for the n->match(...) calls.
   // Basically, every function schema is assigned a unique string you can use to match it. However,
   // parsing those strings or comparing and hashing them character by character would be very slow, so
@@ -260,18 +264,26 @@ struct OperatorRegistry  {
   // by performing a lookup in the operators_by_sig map.
   std::unordered_map<std::string, std::shared_ptr<Operator>> operators_by_sig;
   std::unordered_map<const char *, std::shared_ptr<Operator>> operators_by_sig_literal;
-  void registerOperator(Operator&& op){
+
+  // XXX - caller must be holding lock
+  void registerPendingOperators() {
+    for(auto op : to_register) {
+      Symbol sym = Symbol::fromQualString(op->schema().name);
+      operators[sym].push_back(op);
+      operators_by_sig[canonicalSchemaString(op->schema())] = op;
+    }
+    to_register.clear();
+  }
+
+public:
+  void registerOperator(Operator&& op) {
     std::lock_guard<std::mutex> guard(lock);
-
-    Symbol sym = Symbol::fromQualString(op.schema.name);
-    auto op_ptr = std::make_shared<Operator>(std::move(op));
-
-    operators[sym].push_back(op_ptr);
-
-    operators_by_sig[canonicalSchemaString(op.schema)] = op_ptr;
+    to_register.push_back(std::make_shared<Operator>(std::move(op)));
   }
 
   const std::shared_ptr<Operator>& lookupByLiteral(const char * name) {
+    std::lock_guard<std::mutex> guard(lock);
+    registerPendingOperators();
     auto it = operators_by_sig_literal.find(name);
     if (it == operators_by_sig_literal.end()) {
       auto op_ptr_it = operators_by_sig.find(name);
@@ -283,14 +295,16 @@ struct OperatorRegistry  {
         }
       }
 #endif
-      JIT_ASSERTM(op_ptr_it != operators_by_sig.end(), "Couldn't find an operator for %s", name);
+      JIT_ASSERTM(op_ptr_it != operators_by_sig.end(), "Couldn't find an operator for ", name);
       it = operators_by_sig_literal.emplace_hint(it, name, op_ptr_it->second);
     }
     return it->second;
   }
 
+
   const std::vector<std::shared_ptr<Operator>>& getOperators(Symbol name) {
     std::lock_guard<std::mutex> guard(lock);
+    registerPendingOperators();
     static std::vector<std::shared_ptr<Operator>> empty;
     auto it = operators.find(name);
     if(it != operators.end())
@@ -322,80 +336,31 @@ FunctionSchema parseSchema(const std::string& schema) {
   return script::SchemaParser(schema).parseDeclarations().at(0);
 }
 
-at::optional<AttributeKind> attributeKindOf(TypePtr type) {
-  switch(type->kind()) {
-    case TypeKind::IntType: return AttributeKind::i;
-    case TypeKind::FloatType: return AttributeKind::f;
-    case TypeKind::NumberType: return AttributeKind::t;
-    case TypeKind::ListType:
-      if(type->isSubtypeOf(ListType::ofInts()))
-        return AttributeKind::is;
-      else
-        return at::nullopt;
-    default:
-      return at::nullopt;
-  }
-}
-
-bool typeMatches(TypePtr actual, TypePtr formal) {
-  return actual->isSubtypeOf(formal);
-}
-
 bool Operator::matches(const Node* node) const {
-  if (node->kind().toQualString() != schema.name) {
+  // wrong name
+  if (node->kind().toQualString() != schema().name) {
     return false;
   }
-  size_t attributes_size = node->numAttributes();
-  size_t attributes_seen = 0;
-  auto inputs_size = node->inputs().size();
-  size_t input_i = 0;
-  for(size_t arg_i = 0; arg_i < schema.arguments.size(); ++arg_i) {
-    at::optional<AttributeKind> attribute_kind;
-    const Argument& arg = schema.arguments[arg_i];
-    if(attributes_size > 0 && (attribute_kind = attributeKindOf(arg.type))) {
-      auto name = Symbol::fromQualString("attr::" + arg.name);
-      if(!node->hasAttribute(name) || node->kindOf(name) != *attribute_kind) {
-        // std::cout << "missing attribute: " << name << "\n";
-        return false;
-      }
-      attributes_seen++;
-    } else if(*arg.type == *ListType::ofTensors()) {
-      // Tensor[] is handled as varargs, consume inputs until the remaining required arguments
-      // XXX - there can only be a single Tensor[] in a declaration
-      size_t remaining_required = 0;
-      for(size_t j = arg_i + 1; j < schema.arguments.size(); ++j){
-        // remaining arguments are only those that won't be consumed from attributes
-        if(attributes_size == 0 || !attributeKindOf(schema.arguments[j].type))
-          remaining_required++;
-      }
-      while(inputs_size - input_i > remaining_required) {
-        auto input = node->inputs()[input_i++];
-        if(!typeMatches(input->type(), DynamicType::get())) {
-          // std::cout << "vararg argument is not Dynamic\n";
-          return false;
-        }
-      }
-    } else {
-      if(input_i == inputs_size) {
-        // std::cout << "not enough inputs\n";
-        return false;
-      }
-      auto input = node->inputs()[input_i++];
-      if(!typeMatches(input->type(), arg.type)) {
-        // std::cout << "argument " << arg_i << " has the wrong type\n";
-        return false;
-      }
+  at::ArrayRef<const Value*> actuals = node->inputs();
+  const auto& formals = schema().arguments;
+
+  // not enough inputs
+  if(actuals.size() < formals.size())
+    return false;
+
+  for(size_t i = 0; i < formals.size(); ++i) {
+    // mismatched input type
+    if (!actuals[i]->type()->isSubtypeOf(formals[i].type)) {
+      return false;
     }
   }
 
-  if(!schema.is_vararg && input_i != inputs_size) {
+  // too many inputs
+  if(!schema().is_vararg && actuals.size() != formals.size()) {
     // std::cout << "not all inputs used\n" << input_i << " " << inputs_size << "\n";
     return false;
   }
-  if(!schema.is_vararg && attributes_seen != attributes_size) {
-    // std::cout << "not all attributes used\n" << attributes_seen << " " << attributes_size << "\n";
-    return false;
-  }
+
   return true;
 }
 
@@ -426,7 +391,7 @@ const Operator& getOperatorFor(const Node* node) {
   er << "\ncandidates were:\n";
   const auto& candidates = getAllOperatorsFor(node->kind());
   for(auto & candidate : candidates) {
-    er << "  " << candidate->schema << "\n";
+    er << "  " << candidate->schema() << "\n";
   }
   throw er;
 }
@@ -436,7 +401,7 @@ OperatorSet::OperatorSet(std::initializer_list<const char *> sig_literals) {
   auto & registry = getRegistry();
   for (const char * sig : sig_literals) {
     auto op = registry.lookupByLiteral(sig);
-    ops[Symbol::fromQualString(op->schema.name)].push_back(op);
+    ops[Symbol::fromQualString(op->schema().name)].push_back(op);
   }
 }
 
