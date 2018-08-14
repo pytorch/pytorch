@@ -246,10 +246,11 @@ jobs:
       - checkout
       - run:
           name: Build
+          environment:
+            BUILD_ENVIRONMENT: pytorch-macos-10.13-py3
           command: |
             set -ex
             export SCCACHE_BUCKET=ossci-compiler-cache
-            export BUILD_ENVIRONMENT=pytorch-macos-10.13-py3
             git submodule update --init
             chmod a+x .jenkins/pytorch/macos-build.sh
             .jenkins/pytorch/macos-build.sh
@@ -272,9 +273,10 @@ jobs:
           at: /Users/distiller/pytorch-ci-env
       - run:
           name: Build
+          environment:
+            BUILD_ENVIRONMENT: pytorch-macos-10.13-py3
           command: |
             set -ex
-            export BUILD_ENVIRONMENT=pytorch-macos-10.13-py3
             git submodule update --init
             chmod a+x .jenkins/pytorch/macos-test.sh
             .jenkins/pytorch/macos-test.sh
@@ -288,6 +290,7 @@ jobs:
           name: Build
           environment:
             JOB_BASE_NAME: pytorch-macos-10.13-cuda9.2-cudnn7-py3-build
+            BUILD_ENVIRONMENT: pytorch-macos-10.13-cuda9.2-cudnn7-py3
           command: |
             set -ex
 
