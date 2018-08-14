@@ -1,5 +1,4 @@
-#ifdef USE_CUDA
-#ifndef _WIN32
+#if defined USE_CUDA && !(defined _WIN32) && !(defined USE_ROCM)
 
 #include "torch/csrc/jit/fusers/cuda/cuda_fuser_interface.h"
 #include "torch/csrc/jit/fusers/cuda/cuda_fuser.h"
@@ -956,78 +955,6 @@ std::vector<bool> TensorDesc::findContiguous(
 
 
 } // namespace cudafuser
-} // namespace jit
-} // namespace torch
-
-#else // _WIN32
-
-/*
-* The following block provides a dummy implementation of classes defined in
-* cuda_fuser.h. This block appears on Windows builds.
-*/
-
-#include "torch/csrc/jit/fusion_compiler.h"
-#include "torch/csrc/jit/ir.h"
-#include "torch/csrc/jit/code_template.h"
-#include "torch/csrc/jit/resource_guard.h"
-#include "torch/csrc/utils/disallow_copy.h"
-#include "ATen/ATen.h"
-#include "torch/csrc/cuda/cuda_check.h"
-
-#include <nvrtc.h>
-#include <cuda.h>
-#include <cuda_runtime.h>
-
-#include <string>
-#include <algorithm>
-#include <unordered_map>
-#include <vector>
-#include <sstream>
-#include <iostream>
-
-namespace torch { namespace jit { namespace cudafuser {
-
-
-CUDAFusionCompiler::CUDAFusionCompiler() {}
-
-void CUDAFusionCompiler::debugLaunchGraph(
-  Graph& graph
-, int device
-, at::ArrayRef<at::Tensor> inputs
-, at::ArrayRef<at::Tensor> outputs) {}
-
-CompiledCUDAFusionFunction::CompiledCUDAFusionFunction(
-  const std::string& name
-, AnnotatedGraph& agraph) {}
-
-std::shared_ptr<CompiledCUDAFusionFunction> CUDAFusionCompiler::getOrCompile(
-  AnnotatedGraph& agraph) {
-  return nullptr;
-}
-
-std::shared_ptr<CompiledCUDAFusionFunction> CUDAFusionCompiler::getOrCompile(
-  Graph& graph
-, int device
-, at::ArrayRef<at::Tensor> inputs
-, at::ArrayRef<at::Tensor> outputs) {
-  return nullptr;
-}
-
-void CompiledCUDAFusionFunction::launch_with_tensors(
-  at::ArrayRef<at::Tensor> inputs
-, at::ArrayRef<at::Tensor> outputs) {}
-
-void CompiledCUDAFusionFunction::launch(
-  at::ArrayRef<at::Tensor> inputs
-, std::vector<at::Tensor>& outputs) {}
-
-} // namespace torch
-} // namespace jit
-} // namespace cudafuser
- 
-#endif // _WIN32
-
-namespace torch { namespace jit { 
 
 /*
 * Interface functions.
@@ -1052,4 +979,4 @@ std::shared_ptr<CompiledFusionFunction> getCUDAFusionFunction(Node* fusion_group
 } // namespace jit
 } // namespace torch
 
-#endif // USE_CUDA
+#endif // defined USE_CUDA && !(defined _WIN32) && !(defined USE_ROCM)

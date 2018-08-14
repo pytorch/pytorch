@@ -31,6 +31,11 @@ using Catch::StartsWith;
 #include "torch/csrc/jit/custom_operator.h"
 #include "torch/csrc/variable_tensor_functions.h"
 
+#include "torch/csrc/jit/fusers/cpu/cpu_fuser.h"
+#if defined USE_CUDA && !(defined _WIN32) && !(defined USE_ROCM)
+  #include "torch/csrc/jit/fusers/cuda/cuda_fuser.h"
+#endif // defined USE_CUDA && !(defined _WIN32) && !(defined USE_ROCM)
+
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/autograd/engine.h"
 #include "torch/csrc/jit/passes/shape_analysis.h"
@@ -41,7 +46,6 @@ using Catch::StartsWith;
 #include "torch/csrc/jit/ivalue.h"
 
 #include "onnx/onnx_pb.h"
-
 
 #include <ATen/ATen.h>
 
@@ -134,188 +138,190 @@ Value * appendNewNode(NodeKind kind, Graph& graph, ArrayRef<Value*> inputs) {
 }
 
 static void fusionTests() {
-  // FusionCompiler comp;
+#if defined USE_CUDA && !(defined _WIN32) && !(defined USE_ROCM)
+  cudafuser::CUDAFusionCompiler cuda_compiler;
 
-  // auto testSimple = [&] {
-  //   Graph graph;
-  //   Var i0 = Var::asNewInput(graph);
-  //   Var i1 = Var::asNewInput(graph);
-  //   auto o0 = i0 * i1;
-  //   o0.addAsOutput();
-  //   auto a = at::rand({3,4}, at::kCUDA);
-  //   auto b = at::rand({4,3}, at::kCUDA).transpose(0,1);
-  //   auto o = at::zeros({3,4}, at::kCUDA);
-  //   comp.debugLaunchGraph(graph, 0, {a,b}, {o});
-  //   auto o2 = a*b;
-  //   float max_diff = (o2 - o).abs().max().toCDouble();
-  //   //std::cout << "max diff: " << max_diff << "\n";
-  //   REQUIRE(max_diff == 0);
-  // };
-  // testSimple();
+  auto testSimple = [&] {
+    Graph graph;
+    Var i0 = Var::asNewInput(graph);
+    Var i1 = Var::asNewInput(graph);
+    auto o0 = i0 * i1;
+    o0.addAsOutput();
+    auto a = at::rand({3,4}, at::kCUDA);
+    auto b = at::rand({4,3}, at::kCUDA).transpose(0,1);
+    auto o = at::zeros({3,4}, at::kCUDA);
+    cuda_compiler.debugLaunchGraph(graph, 0, {a,b}, {o});
+    auto o2 = a*b;
+    float max_diff = (o2 - o).abs().max().toCDouble();
+    //std::cout << "max diff: " << max_diff << "\n";
+    REQUIRE(max_diff == 0);
+  };
+  testSimple();
 
-  // auto testOne = [&](int ti, int tj, int toi, int toj) {
+  auto testOne = [&](int ti, int tj, int toi, int toj) {
 
-  //   Graph graph;
+    Graph graph;
 
-  //   Var i0 = Var::asNewInput(graph);
-  //   Var i1 = Var::asNewInput(graph);
-  //   Var i2 = Var::asNewInput(graph);
-  //   Var i3 = Var::asNewInput(graph);
-  //   Var i4 = Var::asNewInput(graph);
+    Var i0 = Var::asNewInput(graph);
+    Var i1 = Var::asNewInput(graph);
+    Var i2 = Var::asNewInput(graph);
+    Var i3 = Var::asNewInput(graph);
+    Var i4 = Var::asNewInput(graph);
 
-  //   auto p22 =  i4.sigmoid();
-  //   auto p20 = i3.sigmoid();
-  //   auto p18 = i2.tanh();
-  //   auto p16 = i1.sigmoid();
-  //   auto p14 = p20 * i0;
-  //   auto p11 = p22 * p18;
-  //   auto o1 = p14 + p11;
-  //   auto p5 = o1.tanh();
-  //   auto o0 = p16 * p5;
-  //   o0.addAsOutput();
-  //   o1.addAsOutput();
+    auto p22 =  i4.sigmoid();
+    auto p20 = i3.sigmoid();
+    auto p18 = i2.tanh();
+    auto p16 = i1.sigmoid();
+    auto p14 = p20 * i0;
+    auto p11 = p22 * p18;
+    auto o1 = p14 + p11;
+    auto p5 = o1.tanh();
+    auto o0 = p16 * p5;
+    o0.addAsOutput();
+    o1.addAsOutput();
 
-  //   graph.lint();
+    graph.lint();
 
-  //   std::vector<at::Tensor> inputs;
-  //   std::vector<at::Tensor> outputs;
-  //   // We want to generate input/output tensors with dimension 128x128x32, but
-  //   // with different internal strides.  To do this, we generate a tensor
-  //   // with the "wrong" dimensions, and then use transpose to get an appropriately
-  //   // sized view.
-  //   for(size_t i = 0; i < graph.inputs().size(); i++) {
-  //     std::vector<int64_t> dims = {128, 128, 32};
-  //     std::swap(dims[ti],dims[tj]);
-  //     inputs.push_back(at::rand(dims, at::kCUDA).transpose(ti, tj));
-  //   }
-  //   for(size_t i = 0; i < graph.outputs().size(); i++) {
-  //     std::vector<int64_t> dims = {128, 128, 32};
-  //     std::swap(dims[toi],dims[toj]);
-  //     outputs.push_back(at::zeros(dims, at::kCUDA).transpose(toi,toj));
-  //   }
+    std::vector<at::Tensor> inputs;
+    std::vector<at::Tensor> outputs;
+    // We want to generate input/output tensors with dimension 128x128x32, but
+    // with different internal strides.  To do this, we generate a tensor
+    // with the "wrong" dimensions, and then use transpose to get an appropriately
+    // sized view.
+    for(size_t i = 0; i < graph.inputs().size(); i++) {
+      std::vector<int64_t> dims = {128, 128, 32};
+      std::swap(dims[ti],dims[tj]);
+      inputs.push_back(at::rand(dims, at::kCUDA).transpose(ti, tj));
+    }
+    for(size_t i = 0; i < graph.outputs().size(); i++) {
+      std::vector<int64_t> dims = {128, 128, 32};
+      std::swap(dims[toi],dims[toj]);
+      outputs.push_back(at::zeros(dims, at::kCUDA).transpose(toi,toj));
+    }
 
-  //   auto t22 = inputs[4].sigmoid();
-  //   auto t20 = inputs[3].sigmoid();
-  //   auto t18 = inputs[2].tanh();
-  //   auto t16 = inputs[1].sigmoid();
-  //   auto t14 = t20*inputs[0];
-  //   auto t11 = t22*t18;
-  //   auto out1 = t14+t11;
-  //   auto t5 = out1.tanh();
-  //   auto out0 = t16*t5;
-
-
-  //   //auto out0 = inputs[0]*inputs[1];
-  //   comp.debugLaunchGraph(graph, 0, inputs, outputs);
-  //   REQUIRE(out0.is_same_size(outputs.front()));
-  //   float max_diff = (outputs.front() - out0).abs().max().toCDouble();
-  //   REQUIRE(max_diff < 1e-6);
-
-  // };
-  // testOne(0,0,0,0);
-  // testOne(0,1,0,0);
-  // testOne(1,2,0,0);
-  // testOne(0,2,0,0);
-
-  // testOne(0,0,0,1);
-  // testOne(0,1,1,2);
-  // testOne(1,2,0,2);
+    auto t22 = inputs[4].sigmoid();
+    auto t20 = inputs[3].sigmoid();
+    auto t18 = inputs[2].tanh();
+    auto t16 = inputs[1].sigmoid();
+    auto t14 = t20*inputs[0];
+    auto t11 = t22*t18;
+    auto out1 = t14+t11;
+    auto t5 = out1.tanh();
+    auto out0 = t16*t5;
 
 
-  // auto createFusedConcat = [](Graph & graph, at::ArrayRef<Value*> inputs, int64_t dim) -> Value* {
-  //   return graph.insertNode(graph.create(prim::FusedConcat, inputs)->i_(attr::dim, dim))->output();
-  // };
+    //auto out0 = inputs[0]*inputs[1];
+    cuda_compiler.debugLaunchGraph(graph, 0, inputs, outputs);
+    REQUIRE(out0.is_same_size(outputs.front()));
+    float max_diff = (outputs.front() - out0).abs().max().toCDouble();
+    REQUIRE(max_diff < 1e-6);
 
-  // auto testConcat = [&](int dim) {
-  //   Graph graph;
-  //   Var i0 = Var::asNewInput(graph);
-  //   Var i1 = Var::asNewInput(graph);
-  //   auto o0 = i0 * i1;
-  //   o0.addAsOutput();
-  //   Var(createFusedConcat(graph, {i0, o0}, dim)).addAsOutput();
+  };
+  testOne(0,0,0,0);
+  testOne(0,1,0,0);
+  testOne(1,2,0,0);
+  testOne(0,2,0,0);
 
-  //   auto a = at::rand({3,4,5}, at::kCUDA);
-  //   auto b = at::rand({4,3,5}, at::kCUDA).transpose(0,1);
-  //   auto o = at::zeros({3,4,5}, at::kCUDA);
+  testOne(0,0,0,1);
+  testOne(0,1,1,2);
+  testOne(1,2,0,2);
 
-  //   auto o_r = a*b;
-  //   auto o2_r = at::cat({a, o_r}, dim);
-  //   auto o2 = at::zeros(o2_r.sizes(), at::kCUDA);
-  //   comp.debugLaunchGraph(graph, 0, {a,b}, {o, o2});
 
-  //   float max_diff = (o_r - o).abs().max().toCDouble();
-  //   REQUIRE(max_diff == 0);
-  //   float max_diff2 = (o2_r - o2).abs().max().toCDouble();
-  //   REQUIRE(max_diff2 == 0);
-  // };
-  // testConcat(0);
-  // testConcat(1);
-  // testConcat(2);
+  auto createFusedConcat = [](Graph & graph, at::ArrayRef<Value*> inputs, int64_t dim) -> Value* {
+    return graph.insertNode(graph.create(prim::FusedConcat, inputs)->i_(attr::dim, dim))->output();
+  };
+
+  auto testConcat = [&](int dim) {
+    Graph graph;
+    Var i0 = Var::asNewInput(graph);
+    Var i1 = Var::asNewInput(graph);
+    auto o0 = i0 * i1;
+    o0.addAsOutput();
+    Var(createFusedConcat(graph, {i0, o0}, dim)).addAsOutput();
+
+    auto a = at::rand({3,4,5}, at::kCUDA);
+    auto b = at::rand({4,3,5}, at::kCUDA).transpose(0,1);
+    auto o = at::zeros({3,4,5}, at::kCUDA);
+
+    auto o_r = a*b;
+    auto o2_r = at::cat({a, o_r}, dim);
+    auto o2 = at::zeros(o2_r.sizes(), at::kCUDA);
+    cuda_compiler.debugLaunchGraph(graph, 0, {a,b}, {o, o2});
+
+    float max_diff = (o_r - o).abs().max().toCDouble();
+    REQUIRE(max_diff == 0);
+    float max_diff2 = (o2_r - o2).abs().max().toCDouble();
+    REQUIRE(max_diff2 == 0);
+  };
+  testConcat(0);
+  testConcat(1);
+  testConcat(2);
+
+#endif // defined USE_CUDA && !(defined _WIN32) && !(defined USE_ROCM)
 }
 
 struct Attr : public Attributes<Attr> {};
 void attributesTest() {
-  // auto one = attr::alpha;
-  // auto two = attr::device;
-  // auto three = attr::end;
-  // auto four = attr::perm;
-  // Attr attr;
-  // attr.f_(one,3.4)->i_(two,5)->s_(three,"what");
-  // REQUIRE(attr.f(one) == 3.4);
-  // REQUIRE(attr.s(three) == "what");
-  // REQUIRE(attr.i(two) == 5);
-  // attr.s_(one,"no");
-  // REQUIRE(attr.s(one) == "no");
-  // REQUIRE(attr.hasAttribute(three));
-  // REQUIRE(!attr.hasAttribute(four));
-  // attr.ss_(two, {"hi", "now"});
-  // REQUIRE(attr.ss(two).at(1) == "now");
+  auto one = attr::alpha;
+  auto two = attr::device;
+  auto three = attr::end;
+  auto four = attr::perm;
+  Attr attr;
+  attr.f_(one,3.4)->i_(two,5)->s_(three,"what");
+  REQUIRE(attr.f(one) == 3.4);
+  REQUIRE(attr.s(three) == "what");
+  REQUIRE(attr.i(two) == 5);
+  attr.s_(one,"no");
+  REQUIRE(attr.s(one) == "no");
+  REQUIRE(attr.hasAttribute(three));
+  REQUIRE(!attr.hasAttribute(four));
+  attr.ss_(two, {"hi", "now"});
+  REQUIRE(attr.ss(two).at(1) == "now");
 
-  // Attr attr2;
-  // attr2.copyAttributes(attr);
-  // REQUIRE(attr2.s(one) == "no");
-  // attr2.f_(one,5);
-  // REQUIRE(attr.s(one) == "no");
-  // REQUIRE(attr2.f(one) == 5);
+  Attr attr2;
+  attr2.copyAttributes(attr);
+  REQUIRE(attr2.s(one) == "no");
+  attr2.f_(one,5);
+  REQUIRE(attr.s(one) == "no");
+  REQUIRE(attr2.f(one) == 5);
 }
 
 void internedStringsTests () {
-
-  // REQUIRE(prim::Param == Symbol::prim("Param"));
-  // REQUIRE(prim::Return == Symbol::prim("Return"));
-  // REQUIRE(prim::Return.toUnqualString() == std::string("Return"));
-  // REQUIRE(prim::Return.toQualString() == std::string("prim::Return"));
-  // Symbol newsym = Symbol::aten("__NEW_SYMBOL");
-  // size_t symstart = newsym;
-  // REQUIRE(newsym.toQualString() == std::string("aten::__NEW_SYMBOL"));
-  // // TODO: This test is a bit too close to the implementation details.
-  // REQUIRE(Symbol::aten("What") == symstart+1);
-  // REQUIRE(Symbol::aten("What2") == symstart+2);
-  // REQUIRE(Symbol::aten("What") == symstart+1);
-  // REQUIRE(Symbol::aten("What2") == symstart+2);
-  // REQUIRE(Symbol(symstart+2).toUnqualString() == std::string("What2"));
+  REQUIRE(prim::Param == Symbol::prim("Param"));
+  REQUIRE(prim::Return == Symbol::prim("Return"));
+  REQUIRE(prim::Return.toUnqualString() == std::string("Return"));
+  REQUIRE(prim::Return.toQualString() == std::string("prim::Return"));
+  Symbol newsym = Symbol::aten("__NEW_SYMBOL");
+  size_t symstart = newsym;
+  REQUIRE(newsym.toQualString() == std::string("aten::__NEW_SYMBOL"));
+  // TODO: This test is a bit too close to the implementation details.
+  REQUIRE(Symbol::aten("What") == symstart+1);
+  REQUIRE(Symbol::aten("What2") == symstart+2);
+  REQUIRE(Symbol::aten("What") == symstart+1);
+  REQUIRE(Symbol::aten("What2") == symstart+2);
+  REQUIRE(Symbol(symstart+2).toUnqualString() == std::string("What2"));
 }
 
 void fromQualStringTests() {
-  // REQUIRE(Symbol::fromQualString("prim::Param") == Symbol::prim("Param"));
-  // REQUIRE(Symbol::fromQualString("aten::mm") == Symbol::aten("mm"));
-  // REQUIRE(Symbol::fromQualString("onnx::LSTM") == Symbol::onnx("LSTM"));
-  // REQUIRE(Symbol::fromQualString("attr::value") == Symbol::attr("value"));
-  // REQUIRE(Symbol::fromQualString("scope::") == Symbol::scope(""));
-  // REQUIRE(Symbol::fromQualString("::").toUnqualString() == std::string(""));
-  // REQUIRE(Symbol::fromQualString("::").ns().toQualString() == std::string("namespaces::"));
-  // REQUIRE(Symbol::fromQualString("new_ns::param").toUnqualString() == std::string("param"));
-  // REQUIRE(Symbol::fromQualString("new_ns::param").ns().toUnqualString() == std::string("new_ns"));
-  // REQUIRE(Symbol::fromQualString("new_ns::param").ns() == Symbol::fromQualString("namespaces::new_ns"));
+  REQUIRE(Symbol::fromQualString("prim::Param") == Symbol::prim("Param"));
+  REQUIRE(Symbol::fromQualString("aten::mm") == Symbol::aten("mm"));
+  REQUIRE(Symbol::fromQualString("onnx::LSTM") == Symbol::onnx("LSTM"));
+  REQUIRE(Symbol::fromQualString("attr::value") == Symbol::attr("value"));
+  REQUIRE(Symbol::fromQualString("scope::") == Symbol::scope(""));
+  REQUIRE(Symbol::fromQualString("::").toUnqualString() == std::string(""));
+  REQUIRE(Symbol::fromQualString("::").ns().toQualString() == std::string("namespaces::"));
+  REQUIRE(Symbol::fromQualString("new_ns::param").toUnqualString() == std::string("param"));
+  REQUIRE(Symbol::fromQualString("new_ns::param").ns().toUnqualString() == std::string("new_ns"));
+  REQUIRE(Symbol::fromQualString("new_ns::param").ns() == Symbol::fromQualString("namespaces::new_ns"));
 
-  // auto bad_inputs = {"scope", ":", ""};
-  // for (auto input : bad_inputs) {
-  //   try {
-  //     Symbol::fromQualString(input);
-  //     REQUIRE(0);
-  //   } catch (std::runtime_error c) {
-  //   }
-  // }
+  auto bad_inputs = {"scope", ":", ""};
+  for (auto input : bad_inputs) {
+    try {
+      Symbol::fromQualString(input);
+      REQUIRE(0);
+    } catch (std::runtime_error c) {
+    }
+  }
 }
 
 at::Tensor t_use(at::Tensor x) {

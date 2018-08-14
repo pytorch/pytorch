@@ -1,6 +1,7 @@
+#if defined USE_CUDA && !(defined _WIN32) && !(defined USE_ROCM)
 #pragma once
 
-#ifdef USE_CUDA
+#include "torch/csrc/jit/fusers/cpu/cpu_fuser.h"
 
 #include "torch/csrc/jit/ir.h"
 
@@ -13,4 +14,4 @@ TORCH_API void FuseCUDAGraph(std::shared_ptr<Graph>& graph);
 } // namespace jit
 } // namespace torch
 
-#endif // USE_CUDA
+#endif // defined USE_CUDA && !(defined _WIN32) && !(defined USE_ROCM)

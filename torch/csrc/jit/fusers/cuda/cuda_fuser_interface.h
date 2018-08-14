@@ -1,4 +1,4 @@
-#ifdef USE_CUDA
+#if defined USE_CUDA && !(defined _WIN32) && !(defined USE_ROCM)
 #pragma once
 
 #include "torch/csrc/jit/ir.h"
@@ -17,4 +17,4 @@ std::shared_ptr<CompiledFusionFunction> getCUDAFusionFunction(Node* fusion_group
 } // namespace jit
 } // namespace torch
 
-#endif // USE_CUDA
+#endif // defined USE_CUDA && !(defined _WIN32) && !(defined USE_ROCM)
