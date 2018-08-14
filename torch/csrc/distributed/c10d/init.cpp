@@ -9,6 +9,10 @@
 #include <c10d/ProcessGroupNCCL.hpp>
 #endif
 
+#ifdef USE_C10D_MPI
+#include <c10d/ProcessGroupMPI.hpp>
+#endif
+
 #include <c10d/TCPStore.hpp>
 #include <gloo/transport/tcp/device.h>
 #include <pybind11/chrono.h>
@@ -286,6 +290,13 @@ PyObject* c10d_init(PyObject* _unused) {
   shared_ptr_class_<::c10d::ProcessGroupNCCL>(
       module, "ProcessGroupNCCL", processGroup)
       .def(py::init<const std::shared_ptr<::c10d::Store>&, int, int>());
+#endif
+
+#ifdef USE_C10D_MPI
+  shared_ptr_class_<::c10d::ProcessGroupMPI>(
+      module, "ProcessGroupMPI", processGroup)
+      .def(py::init(
+          []() { return ::c10d::ProcessGroupMPI::createProcessGroupMPI(); }));
 #endif
 
   shared_ptr_class_<::c10d::ProcessGroup::Work>(module, "Work")

@@ -63,6 +63,9 @@ endfunction()
 if(DISTRIBUTED_NCCL_FOUND)
   option(USE_C10D_NCCL "USE C10D NCCL" ON)
 endif()
+if(MPI_FOUND)
+  option(USE_C10D_MPI "USE C10D MPI" ON)
+endif()
 configure_file(cmake/Def.hpp.in ${CMAKE_BINARY_DIR}/include/c10d/Def.hpp @ONLY)
 
 set(C10D_SRCS
