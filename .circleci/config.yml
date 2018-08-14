@@ -279,6 +279,39 @@ jobs:
             chmod a+x .jenkins/pytorch/macos-test.sh
             .jenkins/pytorch/macos-test.sh
 
+  macos_10_13_cuda9_2_cudnn7_py3_build:
+    macos:
+      xcode: "8.2"
+    steps:
+      - checkout
+      - run:
+          name: Build
+          environment:
+            JOB_BASE_NAME: pytorch-macos-10.13-cuda9.2-cudnn7-py3-build
+          command: |
+            set -ex
+
+            # Install CUDA 9.2
+            sudo rm -rf ~/cuda_9.2.64_mac_installer.app || true
+            curl https://s3.amazonaws.com/ossci-macos/cuda_9.2.64_mac_installer.zip -o ~/cuda_9.2.64_mac_installer.zip
+            unzip ~/cuda_9.2.64_mac_installer.zip -d ~/
+            sudo ~/cuda_9.2.64_mac_installer.app/Contents/MacOS/CUDAMacOSXInstaller --accept-eula --no-window
+            sudo cp /usr/local/cuda/lib/libcuda.dylib /Developer/NVIDIA/CUDA-9.2/lib/libcuda.dylib
+            sudo rm -rf /usr/local/cuda || true
+
+            # Install cuDNN 7.1 for CUDA 9.2
+            curl https://s3.amazonaws.com/ossci-macos/cudnn-9.2-osx-x64-v7.1.tgz -o ~/cudnn-9.2-osx-x64-v7.1.tgz
+            rm -rf ~/cudnn-9.2-osx-x64-v7.1 && mkdir ~/cudnn-9.2-osx-x64-v7.1
+            tar -xzvf ~/cudnn-9.2-osx-x64-v7.1.tgz -C ~/cudnn-9.2-osx-x64-v7.1
+            sudo cp ~/cudnn-9.2-osx-x64-v7.1/cuda/include/cudnn.h /Developer/NVIDIA/CUDA-9.2/include/
+            sudo cp ~/cudnn-9.2-osx-x64-v7.1/cuda/lib/libcudnn* /Developer/NVIDIA/CUDA-9.2/lib/
+            sudo chmod a+r /Developer/NVIDIA/CUDA-9.2/include/cudnn.h /Developer/NVIDIA/CUDA-9.2/lib/libcudnn*
+
+            export SCCACHE_BUCKET=ossci-compiler-cache
+            git submodule update --init
+            chmod a+x .jenkins/pytorch/macos-build.sh
+            .jenkins/pytorch/macos-build.sh
+
 workflows:
   version: 2
   build:
@@ -314,3 +347,4 @@ workflows:
       - macos_10_13_py3_test:
           requires:
             - macos_10_13_py3_build
+      - macos_10_13_cuda9_2_cudnn7_py3_build
