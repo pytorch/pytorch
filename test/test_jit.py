@@ -157,8 +157,8 @@ def get_fn(file_name, script_path):
     return fn
 
 
-def get_execution_plan(graph_executor):
-    execution_plans = graph_executor.execution_plans.values()
+def get_execution_plan(graph_executor_state):
+    execution_plans = graph_executor_state.execution_plans.values()
     num_plans = len(execution_plans)
     if num_plans != 1:
         raise RuntimeError('This test assumes this GraphExecutor should '
@@ -175,7 +175,9 @@ def backward_graph(script_module):
         raise RuntimeError('Error: tried to get grad_executor of function '
                            'that hasn\'t run backward yet.')
     bwd_plan = get_execution_plan(fwd_plan.grad_executor)
-    return bwd_plan._graph_copy()
+    # Running JIT passes requires that we own the graph (with a shared_ptr).
+    # The debug state struct does not own its graph so we make a copy of it.
+    return bwd_plan.graph.copy()
 
 
 # Python equivalents for the empty list construction builtins. We need

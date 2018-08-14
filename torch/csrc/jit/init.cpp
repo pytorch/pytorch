@@ -120,9 +120,6 @@ void initJITBindings(PyObject *module) {
       });
 
   py::class_<ExecutionPlanState>(m, "ExecutionPlanState")
-    .def("_graph_copy", [](ExecutionPlanState& s) {
-      return s.graph->copy();
-    })
     .def_property_readonly("graph", [](ExecutionPlanState& s) {
       return s.graph;
     })
@@ -194,7 +191,7 @@ void initJITBindings(PyObject *module) {
       .def_property_readonly("graph", [](GraphExecutor& ge) {
         return ge.graph();
       })
-      .def("get_debug_state", [](GraphExecutor& ge) {
+     .def("get_debug_state", [](GraphExecutor& ge) {
         return ge.getDebugState();
       })
       .def("__call__", [](GraphExecutor& ge, py::args args) -> py::object {
