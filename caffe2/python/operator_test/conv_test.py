@@ -37,6 +37,15 @@ def _cudnn_supports(
             return False
     return True
 
+def _miopen_supports(
+        dilation=False,
+        nhwc=False,
+        backward=False,
+):
+    """Return True if MIOPEN supports this configuration."""
+    if nhwc or dilation:
+        return False
+    return True
 
 def _cudnn_convolution_algo_count(direction):
     try:
@@ -192,7 +201,7 @@ class TestConvolution(hu.HypothesisTestCase):
            output_channels=st.integers(1, 8),
            batch_size=st.integers(1, 3),
            order=st.sampled_from(["NCHW", "NHWC"]),
-           engine=st.sampled_from(["", "CUDNN", "MKLDNN"]),
+           engine=st.sampled_from(["", "MIOPEN" if workspace.has_hip_support else "CUDNN", "MKLDNN"]),
            use_bias=st.booleans(),
            force_algo_fwd=_cudnn_convolution_algo_count("fwd"),
            force_algo_dgrad=_cudnn_convolution_algo_count("dgrad"),
@@ -206,6 +215,10 @@ class TestConvolution(hu.HypothesisTestCase):
         dkernel = dilation * (kernel - 1) + 1
 
         if engine == 'CUDNN':
+            assume(_cudnn_supports(dilation=(dilation > 1),
+                                   nhwc=(order == 'NHWC'),
+                                   backward=True))
+        if engine == 'MIOPEN':
             assume(_cudnn_supports(dilation=(dilation > 1),
                                    nhwc=(order == 'NHWC'),
                                    backward=True))
@@ -451,8 +464,12 @@ class TestConvolution(hu.HypothesisTestCase):
 
         for order in ["NCHW", "NHWC"]:
             engine_list = ['']
-            if _cudnn_supports(dilation=(dilation > 1), nhwc=(order == 'NHWC')):
-                engine_list.append('CUDNN')
+            if workspace.has_hip_support:
+                if _miopen_supports(dilation=(dilation > 1), nhwc=(order == 'NHWC')):
+                    engine_list.append('MIOPEN')
+            else:
+                if _cudnn_supports(dilation=(dilation > 1), nhwc=(order == 'NHWC')):
+                    engine_list.append('CUDNN')
 
             for engine in engine_list:
                 op = core.CreateOperator(
@@ -503,9 +520,9 @@ class TestConvolution(hu.HypothesisTestCase):
            net_type=st.sampled_from(
                ["simple", "dag"] +
                (["async_dag"] if workspace.has_gpu_support or workspace.has_hip_support else [])),
-           engine=st.sampled_from(["CUDNN", ""]),
-           **hu.gcs_no_hip)
-    def test_convolution_sync(self, net_type, num_workers, engine, gc, dc):
+           do=st.sampled_from(hu.device_options),
+           engine=st.sampled_from(["CUDNN", ""]))
+    def test_convolution_sync(self, net_type, num_workers, do, engine):
         m = ModelHelper(name="test_model")
         n = 1
         d = 2
@@ -557,8 +574,8 @@ class TestConvolution(hu.HypothesisTestCase):
         m.net.SquaredL2Distance(["0_0_flat", "label"], "xent")
         m.net.AveragedLoss("xent", "loss")
         input_to_grad = m.AddGradientOperators(["loss"])
-        m.Proto().device_option.CopyFrom(gc)
-        m.param_init_net.Proto().device_option.CopyFrom(gc)
+        m.Proto().device_option.CopyFrom(do)
+        m.param_init_net.Proto().device_option.CopyFrom(do)
         m.Proto().type = net_type
         m.Proto().num_workers = num_workers
         self.ws.run(m.param_init_net)
@@ -570,10 +587,10 @@ class TestConvolution(hu.HypothesisTestCase):
             for input_blob in input_blobs:
                 self.ws.create_blob(input_blob).feed(
                     np.random.randn(n, d, h, w).astype(np.float32),
-                    device_option=gc)
+                    device_option=do)
                 self.ws.create_blob("label").feed(
                     np.random.randn(n, d * h * w).astype(np.float32),
-                    device_option=gc)
+                    device_option=do)
             self.ws.run(m.net)
             gradients = [
                 self.ws.blobs[str(input_to_grad[input_blob])].fetch()
@@ -623,8 +640,7 @@ class TestConvolution(hu.HypothesisTestCase):
                             f(**kwargs)
                     else:
                         f(**kwargs)
-                        self.assertEqual(model.Proto().op[-1].engine,
-                                         expected_engine)
+                        self.assertEqual(model.Proto().op[-1].engine, expected_engine)
 
     @given(op_type=st.sampled_from(["Conv", "Conv2D"]), N=st.integers(1, 4),
            G=st.integers(1, 4), DX=st.integers(1, 4), DY=st.integers(1, 4),

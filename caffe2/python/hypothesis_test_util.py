@@ -278,7 +278,7 @@ gcs = dict(
 )
 
 gcs_cpu_only = dict(gc=st.sampled_from([cpu_do]), dc=st.just([cpu_do]))
-gcs_gpu_only = dict(gc=st.sampled_from([gpu_do]), dc=st.just([gpu_do]))
+gcs_gpu_only = dict(gc=st.sampled_from([gpu_do]+[hip_do]), dc=st.just([gpu_do]+[hip_do]))
 gcs_no_hip = dict(gc=st.sampled_from(_device_options_no_hip), dc=st.just(_device_options_no_hip))
 
 

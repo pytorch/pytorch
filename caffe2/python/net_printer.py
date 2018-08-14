@@ -8,6 +8,7 @@ from __future__ import unicode_literals
 from caffe2.proto.caffe2_pb2 import OperatorDef, NetDef
 from caffe2.python.checkpoint import Job
 from caffe2.python.core import Net, ExecutionStep, Plan
+from caffe2.python import workspace
 from caffe2.python.task import Task, TaskGroup, WorkspaceType, TaskOutput
 from collections import defaultdict
 from contextlib import contextmanager
@@ -267,12 +268,13 @@ def call(op, inputs=None, outputs=None, factor_prefixes=False):
 
 
 def format_device_option(dev_opt):
+    gpu_id = dev_opt.hip_gpu_id if workspace.has_hip_support else dev_opt.cuda_gpu_id
     if not dev_opt or not (
-            dev_opt.device_type or dev_opt.cuda_gpu_id or dev_opt.node_name):
+            dev_opt.device_type or gpu_id or dev_opt.node_name):
         return None
     return call(
         'DeviceOption',
-        [dev_opt.device_type, dev_opt.cuda_gpu_id, "'%s'" % dev_opt.node_name])
+        [dev_opt.device_type, gpu_id, "'%s'" % dev_opt.node_name])
 
 
 @Printer.register(OperatorDef)

@@ -7,7 +7,7 @@ from hypothesis import assume, given
 import hypothesis.strategies as st
 
 from caffe2.proto import caffe2_pb2
-from caffe2.python import core
+from caffe2.python import core, workspace
 import caffe2.python.hypothesis_test_util as hu
 
 
@@ -47,10 +47,10 @@ class TestBooleanMaskOp(hu.HypothesisTestCase):
 
     @staticmethod
     def _dtype_conversion(x, dtype, gc, dc):
-        """SequenceMask only supports fp16 with CUDA."""
+        """SequenceMask only supports fp16 with CUDA/HIP."""
         if dtype == np.float16:
-            assume(gc.device_type == caffe2_pb2.CUDA)
-            dc = [d for d in dc if d.device_type == caffe2_pb2.CUDA]
+            assume(gc.device_type == caffe2_pb2.HIP if workspace.has_hip_support else caffe2_pb2.CUDA)
+            dc = [d for d in dc if d.device_type == (caffe2_pb2.HIP if workspace.has_hip_support else caffe2_pb2.CUDA)]
             x = x.astype(dtype)
         return x, dc
 
