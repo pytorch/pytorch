@@ -10,19 +10,19 @@
 namespace caffe2 {
 
 template <>
-template <typename T>
-bool TanhGradientFunctor<CPUContext>::Forward(
+template <>
+bool TanhGradientFunctor<CPUContext>::Forward<float>(
     const std::vector<int>& Y_dims,
     const std::vector<int>& /* dY_dims */,
-    const T* Y,
-    const T* dY,
-    T* dX,
+    const float* Y,
+    const float* dY,
+    float* dX,
     CPUContext* /* context */) const {
   const int size = std::accumulate(
       Y_dims.cbegin(), Y_dims.cend(), 1, std::multiplies<int>());
-  ConstEigenVectorArrayMap<T> dY_arr(dY, size);
-  ConstEigenVectorArrayMap<T> Y_arr(Y, size);
-  EigenVectorMap<T>(dX, size) = dY_arr * (1 - Y_arr * Y_arr);
+  ConstEigenVectorArrayMap<float> dY_arr(dY, size);
+  ConstEigenVectorArrayMap<float> Y_arr(Y, size);
+  EigenVectorMap<float>(dX, size) = dY_arr * (1 - Y_arr * Y_arr);
   return true;
 }
 
