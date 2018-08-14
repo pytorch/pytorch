@@ -50,7 +50,6 @@ void ThrowEnforceNotMet(
     LOG(FATAL) << e.msg_stack()[0];
   }
   throw e;
-  return; // to suppress old compiler warning
 }
 
 static std::function<void(const OperatorDef&)> OperatorLogger =

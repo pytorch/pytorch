@@ -88,6 +88,12 @@ using std::vector;
 #define CAFFE2_ALIGNED(x) __attribute__((aligned(x)))
 #endif
 
+#if defined(_MSC_VER)
+#define CAFFE2_NORETURN __declspec(noreturn)
+#else
+#define CAFFE2_NORETURN __attribute__((noreturn))
+#endif
+
 /**
  * Macro for marking functions as having public visibility.
  * Ported from folly/CPortability.h
