@@ -5,6 +5,7 @@ docker_config_defaults: &docker_config_defaults
     aws_secret_access_key: $CIRCLECI_AWS_SECRET_KEY
 
 linux_cpu_build_test_defaults: &linux_cpu_build_test_defaults
+  resource_class: large
   working_directory: /var/lib/jenkins/workspace
   steps:
   - checkout
@@ -17,6 +18,7 @@ linux_cpu_build_test_defaults: &linux_cpu_build_test_defaults
         .jenkins/pytorch/test.sh
 
 linux_cuda_build_defaults: &linux_cuda_build_defaults
+  resource_class: large
   working_directory: /var/lib/jenkins/workspace
   steps:
   - checkout
@@ -32,34 +34,48 @@ linux_cuda_build_defaults: &linux_cuda_build_defaults
       paths:
         - "*"
 
-linux_cuda_test_command_defaults: &linux_cuda_test_command_defaults
-  command: |
-    set -x
-    sudo pip install awscli
-    curl -L https://nvidia.github.io/nvidia-docker/gpgkey | sudo apt-key add -
-    echo "deb https://nvidia.github.io/libnvidia-container/ubuntu14.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
-    echo "deb https://nvidia.github.io/nvidia-container-runtime/ubuntu14.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
-    echo "deb https://nvidia.github.io/nvidia-docker/ubuntu14.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
-    sudo apt-get update
-    sudo apt-get install linux-headers-$(uname -r)
-    sudo apt-get install linux-image-generic
-    wget 'https://s3.amazonaws.com/ossci-linux/nvidia_driver/NVIDIA-Linux-x86_64-396.26.run'
-    sudo /bin/bash ./NVIDIA-Linux-x86_64-396.26.run -s --no-drm
-    sudo apt-get install -y nvidia-docker2
-    sudo pkill -SIGHUP dockerd
-    nvidia-smi
-    export AWS_ACCESS_KEY_ID=AKIAIUHRTFRLXI6HBUCQ
-    export AWS_SECRET_ACCESS_KEY=$CIRCLECI_AWS_SECRET_KEY
-    eval $(aws ecr get-login --region us-east-1 --no-include-email)
-    docker pull ${DOCKER_IMAGE}
-    id=$(docker run --runtime=nvidia -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
-    pwd
-    mkdir -p /home/circleci/project/build
-    cp -r /opt/workspace/cpp_test_bin /home/circleci/project/build/bin
-    docker cp /home/circleci/project/. "$id:/var/lib/jenkins/workspace"
-    echo "mkdir -p /opt/conda/lib/python3.6/site-packages" | docker exec -u jenkins -i "$id" bash
-    docker cp "/opt/workspace/torch" "$id:/opt/conda/lib/python3.6/site-packages/torch"
-    (echo "export SCCACHE_BUCKET=$SCCACHE_BUCKET" && echo 'sudo chown -R jenkins workspace /opt/conda/lib/python3.6/site-packages/torch && cd workspace && git submodule update --init && .jenkins/pytorch/test.sh') | docker exec -u jenkins -i "$id" bash
+linux_cuda_test_defaults: &linux_cuda_test_defaults
+  machine:
+    image: default
+  resource_class: gpu.small
+  steps:
+  - checkout
+  - run:
+      name: Prepare workspace
+      command: |
+        sudo mkdir -p /opt/workspace
+        sudo chmod -R 777 /opt/workspace
+  - attach_workspace:
+      at: /opt/workspace
+  - run:
+      name: Build
+      command: |
+        set -x
+        sudo pip install awscli
+        curl -L https://nvidia.github.io/nvidia-docker/gpgkey | sudo apt-key add -
+        echo "deb https://nvidia.github.io/libnvidia-container/ubuntu14.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
+        echo "deb https://nvidia.github.io/nvidia-container-runtime/ubuntu14.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
+        echo "deb https://nvidia.github.io/nvidia-docker/ubuntu14.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
+        sudo apt-get update
+        sudo apt-get install linux-headers-$(uname -r)
+        sudo apt-get install linux-image-generic
+        wget 'https://s3.amazonaws.com/ossci-linux/nvidia_driver/NVIDIA-Linux-x86_64-396.26.run'
+        sudo /bin/bash ./NVIDIA-Linux-x86_64-396.26.run -s --no-drm
+        sudo apt-get install -y nvidia-docker2
+        sudo pkill -SIGHUP dockerd
+        nvidia-smi
+        export AWS_ACCESS_KEY_ID=AKIAIUHRTFRLXI6HBUCQ
+        export AWS_SECRET_ACCESS_KEY=$CIRCLECI_AWS_SECRET_KEY
+        eval $(aws ecr get-login --region us-east-1 --no-include-email)
+        docker pull ${DOCKER_IMAGE}
+        id=$(docker run --runtime=nvidia -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
+        pwd
+        mkdir -p /home/circleci/project/build
+        cp -r /opt/workspace/cpp_test_bin /home/circleci/project/build/bin
+        docker cp /home/circleci/project/. "$id:/var/lib/jenkins/workspace"
+        echo "mkdir -p /opt/conda/lib/python3.6/site-packages" | docker exec -u jenkins -i "$id" bash
+        docker cp "/opt/workspace/torch" "$id:/opt/conda/lib/python3.6/site-packages/torch"
+        (echo "export SCCACHE_BUCKET=$SCCACHE_BUCKET" && echo 'sudo chown -R jenkins workspace /opt/conda/lib/python3.6/site-packages/torch && cd workspace && git submodule update --init && .jenkins/pytorch/test.sh') | docker exec -u jenkins -i "$id" bash
 
 
 version: 2
@@ -68,34 +84,19 @@ jobs:
     docker:
       - image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.6-gcc7:226
         <<: *docker_config_defaults
-    resource_class: large
     <<: *linux_cpu_build_test_defaults
 
   linux_xenial_cuda9_2_cudnn7_py3_gcc7_build:
     docker:
       - image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7:226
         <<: *docker_config_defaults
-    resource_class: large
     <<: *linux_cuda_build_defaults
 
   linux_xenial_cuda9_2_cudnn7_py3_gcc7_test:
-    machine:
-      image: default
-    resource_class: gpu.small
-    steps:
-    - checkout
-    - run:
-        name: Prepare workspace
-        command: |
-          sudo mkdir -p /opt/workspace
-          sudo chmod -R 777 /opt/workspace
-    - attach_workspace:
-        at: /opt/workspace
-    - run:
-        name: Build
-        environment:
-          DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7:226"
-        <<: *linux_cuda_test_command_defaults
+    environment:
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7:226"
+    <<: *linux_cuda_test_defaults
+
 
   macos_10_13_py3_build:
     macos:
