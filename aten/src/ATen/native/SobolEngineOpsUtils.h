@@ -23,11 +23,11 @@ static inline int64_t bitsubseq(const int64_t n, const int pos, const int length
   return (n >> pos) & ((1 << length) - 1);
 }
 
-/// Function to perform the inner product between a vector and a random Bernoulli vector
-static inline int64_t cdot_pow2(const at::Tensor& vec) {
-  at::Tensor pow2s = vec.type().toScalarType(at::kLong)._arange(vec.size(0) - 1, -1, -1);
-  pow2s = at::pow(2, pow2s);
-  return at::native::dot(pow2s, vec).toCLong();
+/// Function to perform the inner product between a batched square matrix and a power of 2 vector
+static inline at::Tensor cdot_pow2(const at::Tensor& bmat) {
+  at::Tensor inter = bmat.type().toScalarType(at::kLong)._arange(bmat.size(-1) - 1, -1, -1);
+  inter = at::pow(2, inter).expand_as(bmat);
+  return at::mul(inter, bmat).sum(-1);
 }
 
 /// All definitions below this point are data. These are constant, and should not be modified

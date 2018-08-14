@@ -7136,7 +7136,7 @@ class TestTorch(TestCase):
         self.assertEqual(engine_3d.draw(5), actual_3d[5:])
 
     def test_sobolengine_scrambled_highdim(self):
-        engine = torch.quasirandom.SobolEngine(100)
+        engine = torch.quasirandom.SobolEngine(1111, scramble=True)
         draws = engine.draw(1000)
         self.assertTrue(torch.all(draws <= 1))
         self.assertTrue(torch.all(draws >= 0))

@@ -50,13 +50,13 @@ class SobolEngine(object):
             if self.seed is not None:
                 g.manual_seed(self.seed)
 
-            self.shift = torch.mv(torch.randint(2, (self.dimension, self.MAXBIT), generator=g),
-                                  torch.pow(2, torch.arange(0, self.MAXBIT, dtype=torch.double))).to(torch.long)
+            self.shift = torch.mv(torch.randint(2, (self.dimension, self.MAXBIT), dtype=torch.float, generator=g),
+                                  torch.pow(2, torch.arange(0, self.MAXBIT, dtype=torch.float))).to(torch.long)
 
             # TODO: can be replaced with torch.tril(torch.randint(2, (dimension, MAXBIT, MAXBIT)))
             #       once a batched version is introduced
             ltm = torch.randint(2, (self.dimension, self.MAXBIT, self.MAXBIT), dtype=torch.long, generator=g)
-            ltm = list(map(lambda x: x.tril(), ltm.unbind(0)))
+            ltm = torch.stack(list(map(torch.tril, ltm.unbind(0))))
 
             self.sobolstate = torch._sobol_engine_scramble(self.sobolstate, ltm, self.dimension)
         else:

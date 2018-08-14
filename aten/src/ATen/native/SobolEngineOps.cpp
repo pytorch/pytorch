@@ -56,35 +56,32 @@ Tensor _sobol_engine_ff(const Tensor& quasi, int64_t n, const Tensor& sobolstate
 /// `SobolEngine`. Arguments are a randomized `sobolstate` state variables
 /// and a list of random lower triangular matrices consisting of 0s and 1s. `dimension` is
 /// passed explicitly again.
-Tensor _sobol_engine_scramble(const Tensor& sobolstate, TensorList ltm, int64_t dimension) {
+Tensor _sobol_engine_scramble(const Tensor& sobolstate, const Tensor& ltm, int64_t dimension) {
   Tensor wsobolstate = sobolstate.clone();
   AT_CHECK(sobolstate.type().scalarType() == at::ScalarType::Long,
            "sobolstate needs to be of type ", at::ScalarType::Long);
+  AT_CHECK(ltm.dim() == 3 && ltm.size(-1) == ltm.size(-2),
+           "ltm needs to be batch of square matrices");
 
   // Require a tensor accessor for `sobolstate`
   auto ss_a = wsobolstate.accessor<int64_t, 2>();
 
   // For every tensor in the list of tensors, the diagonals are made 1
-  // Require the rows of each of the matrices in `ltm`.
-  // Why is this caching these rows separately okay?
-  // A simple calculation show the number of slices to be dimension * MAXBIT * MAXBIT
-  // Instead, by performing `dimension` unbind operations (1 per lower triangular
-  // matrix), we can save some time, since MAXBIT = 30.
-  // The m^{th} row in the d^{th} square matrix in `ltm` can be obtained by ltm_rows[d*MAXBIT + m]
-  // m and d are zero-indexed
-  Tensor diag_true = at::native::eye(MAXBIT, wsobolstate.options()) == 1;
-  std::vector<Tensor> ltm_rows;
-  for (int64_t d = 0; d < dimension; ++d) {
-    auto chunked_ltm = at::native::unbind(at::where(diag_true, at::ones({}, wsobolstate.options()), ltm[d]), 0);
-    ltm_rows.insert(ltm_rows.end(), chunked_ltm.begin(), chunked_ltm.end());
-  }
+  // Require the the a dot product of every row with a specific vector of each of the matrices in `ltm`.
+  // Instead, we perform an element-wise product of all the matrices and sum over the last dimension.
+  // The required product of the m^{th} row in the d^{th} square matrix in `ltm` can be accessed
+  // using ltm_d_a[d][m] m and d are zero-indexed
+  Tensor diag_true = (at::native::eye(MAXBIT, wsobolstate.options()) == 1).expand_as(ltm);
+  diag_true = at::where(diag_true, at::ones({}, ltm.options()), ltm);
+  Tensor ltm_dots = cdot_pow2(diag_true);
+  auto ltm_d_a = ltm_dots.accessor<int64_t, 2>();
 
   // Main scrambling loop
   for (int64_t d = 0; d < dimension; ++d) {
     for (int64_t j = 0; j < MAXBIT; ++j) {
       int64_t vdj = ss_a[d][j], l = 1, t2 = 0;
       for (int64_t p = MAXBIT - 1; p >= 0; --p) {
-        int64_t lsmdp = cdot_pow2(ltm_rows[d * MAXBIT + p]);
+        int64_t lsmdp = ltm_d_a[d][p];
         int64_t t1 = 0;
         for (int64_t k = 0; k < MAXBIT; ++k) {
           t1 += (bitsubseq(lsmdp, k, 1) * bitsubseq(vdj, k, 1));
