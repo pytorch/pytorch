@@ -170,7 +170,10 @@ using NodeKind = Symbol;
 struct Value {
   TH_DISALLOW_COPY_AND_ASSIGN(Value);
   Value(Node * node_, size_t offset_);
-private:
+  Value(Value&&) = default;
+  Value();
+
+ private:
   friend struct Node;
   friend struct Graph;
   Node * node_;
@@ -254,6 +257,8 @@ public:
 
 struct Node : public Attributes<Node> {
   TH_DISALLOW_COPY_AND_ASSIGN(Node);
+  Node(Node&&) = default;
+  Node(NodeKind);
   friend struct Graph;
   friend struct Block;
   friend struct Value;
@@ -1192,6 +1197,8 @@ inline Value::Value(Node * node_, size_t offset_)
   node_->graph_->all_values.emplace(this);
 }
 
+inline Value::Value() : node_(nullptr), offset_(0), type_(DynamicType::get()) {}
+
 inline Value* Value::setType(const TypePtr type) {
   JIT_ASSERT(type);
   type_ = type;
@@ -1232,6 +1239,14 @@ inline Node::Node(Graph * graph_, NodeKind kind_) :
   schema_(nullptr) {
   graph_->all_nodes.emplace(this);
 }
+
+inline Node::Node(NodeKind kind_)
+    : kind_(kind_),
+      graph_(nullptr),
+      owning_block_(nullptr),
+      stage_(0),
+      scope_(nullptr),
+      schema_(nullptr) {}
 
 inline void Node::eraseOutput(size_t i) {
   JIT_ASSERT(i < outputs_.size());
