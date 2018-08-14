@@ -199,11 +199,12 @@ NNNodeMatchCriteria matchAnyNode() {
       [](NNGraph::NodeRef /* unused */) { return true; }, "matchAnyNode");
 }
 
-NNSubtree operatorTree(
+NNMatchGraph::NodeRef operatorTree(
+    NNMatchGraph& g,
     const NNNodeMatchCriteria& root,
-    const std::vector<NNSubtree>& childrenCriteria,
+    const std::vector<NNMatchGraph::NodeRef>& childrenCriteria,
     int count) {
-  return NNSubtree(matchAnyNode(), {NNSubtree(root, childrenCriteria)}, count);
+  return tree(g, matchAnyNode(), {tree(g, root, childrenCriteria)}, count);
 }
 
 } // namespace nn
