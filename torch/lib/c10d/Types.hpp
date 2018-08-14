@@ -7,10 +7,6 @@ namespace c10d {
 enum class CollectiveType : std::uint8_t {
   BROADCAST,
   ALLREDUCE,
-  REDUCE,
-  ALLGATHER,
-  GATHER,
-  SCATTER,
   UNUSED,
 };
 
