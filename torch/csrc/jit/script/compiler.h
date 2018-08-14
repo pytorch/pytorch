@@ -28,9 +28,9 @@ struct TypedDef {
   at::optional<FunctionSchema> schema;
 };
 
-static inline std::vector<Value*> toValues(at::ArrayRef<NamedValue> nvs) {
-  return fmap(nvs, [](const NamedValue& v) {
-    return v.value;
+static inline std::vector<Value*> toValues(Graph& g, at::ArrayRef<NamedValue> nvs) {
+  return fmap(nvs, [&](const NamedValue& v) {
+    return v.value(g);
   });
 }
 
@@ -146,7 +146,7 @@ TORCH_API std::shared_ptr<Graph> compileFunction(TypedDef def, const Resolver& r
 
 // pack outputs of a function following python rules. If there is a single value return
 // a SimpleValue, otherwise pack all the values into a Tuple.
-TORCH_API std::shared_ptr<SugaredValue> packOutputs(Graph& g, at::ArrayRef<Value*> values);
+TORCH_API Value* packOutputs(Graph& g, at::ArrayRef<Value*> values);
 TORCH_API std::vector<Value*> inlineCallTo(Graph& g, Graph& callee, ArrayRef<Value*> inputs);
 TORCH_API void ensureSizeMatches(SourceRange loc, size_t expected, size_t actual, const std::string& what);
 TORCH_API void ensureTensors(const SourceRange& range, at::ArrayRef<Value*> values);
@@ -162,6 +162,16 @@ TORCH_API at::optional<std::vector<Value*>> tryMatchSchema(
   at::ArrayRef<NamedValue> attributes,
   std::ostream& failure_messages);
 
+
+TORCH_API Value* emitBuiltinCall(
+  const SourceRange& loc,
+  Graph& graph,
+  Symbol name,
+  at::ArrayRef<NamedValue> inputs,
+  at::ArrayRef<NamedValue> attributes,
+  // if true, emitBuiltinCall will throw an exception if this builtin does not exist,
+  // otherwise it will return nullptr if the builtin is not found.
+  bool required);
 
 } // namespace script
 } // namespace jit

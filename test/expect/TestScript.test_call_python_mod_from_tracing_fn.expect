@@ -1,8 +1,8 @@
 graph(%0 : Double(3, 4)) {
   %1 : Double(4, 3) = prim::Constant[value=<Tensor>](), scope: PythonMod
-  %3 : Double(3, 3) = aten::mm(%0, %1), scope: PythonMod
-  %4 : Long() = prim::Constant[value={1}]()
-  %5 : int = prim::Constant[value=1]()
-  %6 : Double(3, 3) = aten::add(%3, %4, %5)
-  return (%6);
+  %2 : Double(3, 3) = aten::mm(%0, %1), scope: PythonMod
+  %3 : Long() = prim::Constant[value={1}]()
+  %4 : int = prim::Constant[value=1]()
+  %5 : Double(3, 3) = aten::add(%2, %3, %4)
+  return (%5);
 }
