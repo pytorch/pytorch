@@ -73,9 +73,9 @@ linux_cuda_test_defaults: &linux_cuda_test_defaults
         mkdir -p /home/circleci/project/build
         cp -r /opt/workspace/cpp_test_bin /home/circleci/project/build/bin
         docker cp /home/circleci/project/. "$id:/var/lib/jenkins/workspace"
-        echo "mkdir -p /opt/conda/lib/python3.6/site-packages" | docker exec -u jenkins -i "$id" bash
-        docker cp "/opt/workspace/torch" "$id:/opt/conda/lib/python3.6/site-packages/torch"
-        (echo "export SCCACHE_BUCKET=$SCCACHE_BUCKET" && echo 'sudo chown -R jenkins workspace /opt/conda/lib/python3.6/site-packages/torch && cd workspace && git submodule update --init && .jenkins/pytorch/test.sh') | docker exec -u jenkins -i "$id" bash
+        echo "mkdir -p /opt/conda/lib/python${PYTHON_VERSION}/site-packages" | docker exec -u jenkins -i "$id" bash
+        docker cp "/opt/workspace/torch" "$id:/opt/conda/lib/python${PYTHON_VERSION}/site-packages/torch"
+        (echo "export SCCACHE_BUCKET=$SCCACHE_BUCKET" && echo 'sudo chown -R jenkins workspace /opt/conda/lib/python${PYTHON_VERSION}/site-packages/torch && cd workspace && git submodule update --init && .jenkins/pytorch/test.sh') | docker exec -u jenkins -i "$id" bash
 
 
 version: 2
@@ -86,6 +86,42 @@ jobs:
         <<: *docker_config_defaults
     <<: *linux_cpu_build_test_defaults
 
+  linux_xenial_cuda8_cudnn6_py3_build:
+    docker:
+      - image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn6-py3:226
+        <<: *docker_config_defaults
+    <<: *linux_cuda_build_defaults
+
+  linux_xenial_cuda8_cudnn6_py3_test:
+    environment:
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn6-py3:226"
+      PYTHON_VERSION: "3.6"
+    <<: *linux_cuda_test_defaults
+
+  linux_xenial_cuda9_cudnn7_py2_build:
+    docker:
+      - image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py2:226
+        <<: *docker_config_defaults
+    <<: *linux_cuda_build_defaults
+
+  linux_xenial_cuda9_cudnn7_py2_test:
+    environment:
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py2:226"
+      PYTHON_VERSION: "2.7"
+    <<: *linux_cuda_test_defaults
+
+  linux_xenial_cuda9_cudnn7_py3_build:
+    docker:
+      - image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:226
+        <<: *docker_config_defaults
+    <<: *linux_cuda_build_defaults
+
+  linux_xenial_cuda9_cudnn7_py3_test:
+    environment:
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:226"
+      PYTHON_VERSION: "3.6"
+    <<: *linux_cuda_test_defaults
+
   linux_xenial_cuda9_2_cudnn7_py3_gcc7_build:
     docker:
       - image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7:226
@@ -95,8 +131,8 @@ jobs:
   linux_xenial_cuda9_2_cudnn7_py3_gcc7_test:
     environment:
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7:226"
+      PYTHON_VERSION: "3.6"
     <<: *linux_cuda_test_defaults
-
 
   macos_10_13_py3_build:
     macos:
@@ -143,6 +179,18 @@ workflows:
   build:
     jobs:
       - linux_trusty_py3_6_gcc7_build
+      - linux_xenial_cuda8_cudnn6_py3_build
+      - linux_xenial_cuda8_cudnn6_py3_test:
+          requires:
+            - linux_xenial_cuda8_cudnn6_py3_build
+      - linux_xenial_cuda9_cudnn7_py2_build
+      - linux_xenial_cuda9_cudnn7_py2_test:
+          requires:
+            - linux_xenial_cuda9_cudnn7_py2_build
+      - linux_xenial_cuda9_cudnn7_py3_build
+      - linux_xenial_cuda9_cudnn7_py3_test:
+          requires:
+            - linux_xenial_cuda9_cudnn7_py3_build
       - linux_xenial_cuda9_2_cudnn7_py3_gcc7_build
       - linux_xenial_cuda9_2_cudnn7_py3_gcc7_test:
           requires:
