@@ -1,5 +1,27 @@
 import torch._C
 
+import contextlib
+import ctypes
+import sys
+
+
+# Query `hasattr` only once.
+_SET_GLOBAL_FLAGS = hasattr(sys, 'getdlopenflags') and hasattr(sys, 'setdlopenflags')
+
+
+@contextlib.contextmanager
+def dl_open_guard():
+    """
+    Context manager to set the RTLD_GLOBAL dynamic linker flag while we open a
+    shared library to load custom operators.
+    """
+    if _SET_GLOBAL_FLAGS:
+        old_flags = sys.getdlopenflags()
+        sys.setdlopenflags(old_flags | ctypes.RTLD_GLOBAL)
+    yield
+    if _SET_GLOBAL_FLAGS:
+        sys.setdlopenflags(old_flags)
+
 
 class _OpNamespace(object):
     """
@@ -33,11 +55,25 @@ class _OpNamespace(object):
 
 
 class _Ops(object):
+    def __init__(self):
+        self.loaded_libraries = set()
+
     def __getattr__(self, name):
         # Here we are creating `torch.ops.my_namespace`
         namespace = _OpNamespace(name)
         setattr(self, name, namespace)
         return namespace
+
+    def load_library(shared_library_path):
+        """
+        Loads a shared library from the given path into the current process.
+        """
+        self.loaded_libraries.add(shared_library_path)
+        with dl_open_guard():
+            # Import the shared library into the process, thus running its
+            # static (global) initialization code in order to register custom
+            # operators with the JIT.
+            ctypes.CDLL(shared_library_path)
 
 
 # The ops "namespace"
