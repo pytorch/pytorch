@@ -51,7 +51,15 @@ while [[ $# -gt 0 ]]; do
     shift
 done
 
-CMAKE_INSTALL=${CMAKE_INSTALL-make install}
+CMAKE_GENERATOR=${CMAKE_GENERATOR-}
+CMAKE_INSTALLER=${CMAKE_INSTALLER-make}
+CMAKE_INSTALL="${CMAKE_INSTALLER} install"
+if [[ ${CMAKE_INSTALLER} == ninja ]];
+then
+    BUILD_INSTRUCTIONS_FILE=build.ninja
+else
+    BUILD_INSTRUCTIONS_FILE=Makefile
+fi
 
 BUILD_SHARED_LIBS=${BUILD_SHARED_LIBS-ON}
 
@@ -160,7 +168,8 @@ function build() {
   # TODO: The *_LIBRARIES cmake variables should eventually be
   # deprecated because we are using .cmake files to handle finding
   # installed libraries instead
-  ${CMAKE_VERSION} ../../$1 -DCMAKE_MODULE_PATH="$BASE_DIR/cmake/Modules_CUDA_fix" \
+  if [[ ! -f ${BUILD_INSTRUCTIONS_FILE} ]]; then
+     ${CMAKE_VERSION} ../../$1 -DCMAKE_MODULE_PATH="$BASE_DIR/cmake/Modules_CUDA_fix" \
               ${CMAKE_GENERATOR} \
               -DTorch_FOUND="1" \
               -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
@@ -195,6 +204,7 @@ function build() {
               -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
               ${@:2} \
               -DCMAKE_EXPORT_COMPILE_COMMANDS=1
+  fi
   ${CMAKE_INSTALL} -j"$NUM_JOBS"
   popd
 
@@ -259,8 +269,8 @@ function build_caffe2() {
 
   mkdir -p build
   pushd build
-  ${CMAKE_VERSION} .. \
-  ${CMAKE_GENERATOR} \
+  if [[ ! -f ${BUILD_INSTRUCTIONS_FILE} ]]; then
+     ${CMAKE_VERSION} .. ${CMAKE_GENERATOR} \
       -DBUILDING_WITH_TORCH_LIBS=ON \
       -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
       -DBUILD_CAFFE2=$FULL_CAFFE2 \
@@ -290,6 +300,7 @@ function build_caffe2() {
       # STOP!!! Are you trying to add a C or CXX flag?  Add it
       # to CMakeLists.txt and aten/CMakeLists.txt, not here.
       # We need the vanilla cmake build to work.
+  fi
   ${CMAKE_INSTALL} -j"$NUM_JOBS"
 
   # Install Python proto files
