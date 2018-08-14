@@ -281,7 +281,7 @@ jobs:
 
   macos_10_13_cuda9_2_cudnn7_py3_build:
     macos:
-      xcode: "8.2"
+      xcode: "9.0"
     steps:
       - checkout
       - run:
