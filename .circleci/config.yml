@@ -64,12 +64,14 @@ linux_cpu_test_defaults: &linux_cpu_test_defaults
         docker pull ${DOCKER_IMAGE}
         id=$(docker run -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
         pwd
+        echo "declare -x PYTHON_VERSION=${PYTHON_VERSION}" > /home/circleci/project/env
+        echo "declare -x SCCACHE_BUCKET=${SCCACHE_BUCKET}" >> /home/circleci/project/env
         mkdir -p /home/circleci/project/build
         cp -r /opt/workspace/cpp_test_bin /home/circleci/project/build/bin
         docker cp /home/circleci/project/. "$id:/var/lib/jenkins/workspace"
         echo "mkdir -p /opt/conda/lib/python${PYTHON_VERSION}/site-packages" | docker exec -u jenkins -i "$id" bash
         docker cp "/opt/workspace/torch" "$id:/opt/conda/lib/python${PYTHON_VERSION}/site-packages/torch"
-        (echo "export SCCACHE_BUCKET=$SCCACHE_BUCKET" && echo 'sudo chown -R jenkins workspace /opt/conda/lib/python${PYTHON_VERSION}/site-packages/torch && cd workspace && git submodule update --init && .jenkins/pytorch/test.sh') | docker exec -u jenkins -i "$id" bash
+        (echo "source ./workspace/env" && echo 'sudo chown -R jenkins workspace /opt/conda/lib/python${PYTHON_VERSION}/site-packages/torch && cd workspace && git submodule update --init && .jenkins/pytorch/test.sh') | docker exec -u jenkins -i "$id" bash
 
 linux_cuda_build_defaults: &linux_cuda_build_defaults
   resource_class: large
@@ -127,12 +129,14 @@ linux_cuda_test_defaults: &linux_cuda_test_defaults
         docker pull ${DOCKER_IMAGE}
         id=$(docker run --runtime=nvidia -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
         pwd
+        echo "declare -x PYTHON_VERSION=${PYTHON_VERSION}" > /home/circleci/project/env
+        echo "declare -x SCCACHE_BUCKET=${SCCACHE_BUCKET}" >> /home/circleci/project/env
         mkdir -p /home/circleci/project/build
         cp -r /opt/workspace/cpp_test_bin /home/circleci/project/build/bin
         docker cp /home/circleci/project/. "$id:/var/lib/jenkins/workspace"
         echo "mkdir -p /opt/conda/lib/python${PYTHON_VERSION}/site-packages" | docker exec -u jenkins -i "$id" bash
         docker cp "/opt/workspace/torch" "$id:/opt/conda/lib/python${PYTHON_VERSION}/site-packages/torch"
-        (echo "export SCCACHE_BUCKET=$SCCACHE_BUCKET" && echo 'sudo chown -R jenkins workspace /opt/conda/lib/python${PYTHON_VERSION}/site-packages/torch && cd workspace && git submodule update --init && .jenkins/pytorch/test.sh') | docker exec -u jenkins -i "$id" bash
+        (echo "source ./workspace/env" && echo 'sudo chown -R jenkins workspace /opt/conda/lib/python${PYTHON_VERSION}/site-packages/torch && cd workspace && git submodule update --init && .jenkins/pytorch/test.sh') | docker exec -u jenkins -i "$id" bash
 
 
 version: 2
