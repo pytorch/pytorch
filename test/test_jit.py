@@ -1992,7 +1992,6 @@ class TestScript(JitTestCase):
         else:
             outputs_ge = ge(*inputs)
         self.assertEqual(outputs, outputs_ge)
-        return ge
 
         return ge
 
