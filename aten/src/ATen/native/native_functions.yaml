@@ -381,8 +381,10 @@
   variants: function
 
 - func: conv_tbc(Tensor self, Tensor weight, Tensor bias, int64_t pad) -> Tensor
+  variants: function
 
 - func: conv_tbc_backward(Tensor self, Tensor input, Tensor weight, Tensor bias, int64_t pad) -> (Tensor, Tensor, Tensor)
+  variants: function
 
 # NB: we inherit the goofy argument order from PyTorch torch.nn.functional
 - func: conv_transpose1d(Tensor input, Tensor weight, Tensor bias={}, IntList[1] stride=1, IntList[1] padding=0, IntList[1] output_padding=0, int64_t groups=1, IntList[1] dilation=1) -> Tensor
@@ -566,7 +568,6 @@
 - func: det(Tensor self) -> Tensor
 
 - func: diagflat(Tensor self, int64_t offset=0) -> Tensor
-  variants: function
 
 - func: diagonal(Tensor self, int64_t offset=0, int64_t dim1=0, int64_t dim2=1) -> Tensor
 
@@ -1023,6 +1024,7 @@
     CUDA: log_softmax_cuda
 
 - func: log_softmax_backward_data(Tensor grad_output, Tensor output, int64_t dim, Tensor self) -> Tensor
+  variants: function
   dispatch:
     CPU: log_softmax_backward_cpu
     CUDA: log_softmax_backward_cuda
@@ -1480,6 +1482,7 @@
     CUDA: softmax_cuda
 
 - func: softmax_backward_data(Tensor grad_output, Tensor output, int64_t dim, Tensor self) -> Tensor
+  variants: function
   dispatch:
     CPU: softmax_backward_cpu
     CUDA: softmax_backward_cuda

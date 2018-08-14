@@ -569,4 +569,30 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce(
   return enqueue(entry);
 }
 
+std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::reduce(
+    std::vector<at::Tensor>& /* unused */,
+    const ReduceOptions& /* unused */) {
+  throw std::runtime_error("ProcessGroupGloo does not support reduce");
+}
+
+std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allgather(
+    std::vector<std::vector<at::Tensor>>& /* unused */,
+    std::vector<at::Tensor>& /* unused */) {
+  throw std::runtime_error("ProcessGroupGloo does not support allgather");
+}
+
+std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::gather(
+    std::vector<std::vector<at::Tensor>>& /* unused */,
+    std::vector<at::Tensor>& /* unused */,
+    const GatherOptions& /* unused */) {
+  throw std::runtime_error("ProcessGroupGloo does not support gather");
+}
+
+std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::scatter(
+    std::vector<at::Tensor>& /* unused */,
+    std::vector<std::vector<at::Tensor>>& /* unused */,
+    const ScatterOptions& /* unused */) {
+  throw std::runtime_error("ProcessGroupGloo does not support scatter");
+}
+
 } // namespace c10d

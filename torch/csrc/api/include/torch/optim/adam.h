@@ -30,14 +30,7 @@ class Adam : public Optimizer {
   template <typename ParameterContainer>
   explicit Adam(ParameterContainer&& parameters, const AdamOptions& options)
       : Optimizer(std::forward<ParameterContainer>(parameters)),
-        options(options),
-        step_buffers_(parameters_.size(), 0),
-        exp_average_buffers_(zero_buffers_like(parameters_)),
-        exp_average_sq_buffers_(zero_buffers_like(parameters_)) {
-    if (options.amsgrad_) {
-      max_exp_average_sq_buffers_ = zero_buffers_like(parameters_);
-    }
-  }
+        options(options) {}
 
   void step() override;
 
@@ -56,9 +49,9 @@ class Adam : public Optimizer {
   Adam() : options(0) {}
 
   std::vector<int64_t> step_buffers_;
-  std::vector<Tensor> exp_average_buffers_;
-  std::vector<Tensor> exp_average_sq_buffers_;
-  std::vector<Tensor> max_exp_average_sq_buffers_;
+  std::vector<at::Tensor> exp_average_buffers_;
+  std::vector<at::Tensor> exp_average_sq_buffers_;
+  std::vector<at::Tensor> max_exp_average_sq_buffers_;
 };
 
 } // namespace optim

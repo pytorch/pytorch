@@ -142,10 +142,13 @@ working on:
 - Working on the Python bindings?  Run `python setup.py develop` to rebuild
   (NB: no `build` here!)
 
-- Working on `torch/csrc` or `aten`?  Run `python setup.py build_caffe2` to
+- Working on `torch/csrc` or `aten`?  Run `python setup.py rebuild_libtorch` to
   rebuild and avoid having to rebuild other dependent libraries we
-  depend on.  The other valid targets are listed in `dep_libs` in `setup.py`
-  (prepend `build_` to get a target).
+  depend on.
+
+- Working on one of the other dependent libraries? The other valid
+  targets are listed in `dep_libs` in `setup.py`. prepend `build_` to
+  get a target, and run as e.g. `python setup.py build_gloo`.
 
 - Working on a test binary?  Run `(cd build && ninja bin/test_binary_name)` to
   rebuild only that test binary (without rerunning cmake).  (Replace `ninja` with
