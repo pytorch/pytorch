@@ -321,13 +321,13 @@ CHECKED_USE = {
 CHECKED_USE_NULLABLE = CodeTemplate('${arg_name}_ ? ${usage} : NULL')
 
 ALLOC_NOARGS_WRAP = {
-    'THTensor*': 'new TensorImpl(${Backend}TensorId(), ScalarType::${ScalarName})',
-    'THBoolTensor*': 'new TensorImpl(${Backend}TensorId(), ScalarType::Byte)',
-    'THIndexTensor*': 'new TensorImpl(${Backend}TensorId(), ScalarType::Long)',
-    'THIntegerTensor*': 'new TensorImpl(${Backend}TensorId(), ScalarType::Int)',
+    'THTensor*': 'new TensorImpl(${Backend}TensorId(), ScalarType::${ScalarName}, false)',
+    'THBoolTensor*': 'new TensorImpl(${Backend}TensorId(), ScalarType::Byte, false)',
+    'THIndexTensor*': 'new TensorImpl(${Backend}TensorId(), ScalarType::Long, false)',
+    'THIntegerTensor*': 'new TensorImpl(${Backend}TensorId(), ScalarType::Int, false)',
     'THSTensor*': 'detail::new_Sparse${Tensor}()',
-    'THDenseTensor*': 'new TensorImpl(${Backend}TensorId(), ScalarType::${ScalarName})',
-    'THDenseIndexTensor*': 'new TensorImpl(${Backend}TensorId(), ScalarType::Long)'
+    'THDenseTensor*': 'new TensorImpl(${Backend}TensorId(), ScalarType::${ScalarName}, false)',
+    'THDenseIndexTensor*': 'new TensorImpl(${Backend}TensorId(), ScalarType::Long, false)'
 }
 
 ALLOC_WRAP = {

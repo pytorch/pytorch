@@ -19,8 +19,8 @@ struct Tensor;
 
 namespace at {
 struct AT_API TensorImpl : public Retainable {
-  TensorImpl(TensorTypeId type_id, ScalarType scalar_type, bool is_variable = false);
-  TensorImpl(StorageImpl* storage, bool is_variable = false)
+  TensorImpl(TensorTypeId type_id, ScalarType scalar_type, bool is_variable);
+  TensorImpl(StorageImpl* storage, bool is_variable)
       : TensorImpl(
             storage,
             backendToTensorTypeId(detail::get_backend(storage)),
@@ -30,7 +30,7 @@ struct AT_API TensorImpl : public Retainable {
       StorageImpl* storage,
       TensorTypeId type_id,
       ScalarType scalar_type,
-      bool is_variable = false)
+      bool is_variable)
       : storage_(storage),
         storage_offset_(0),
         sizes_{0},
