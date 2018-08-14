@@ -732,8 +732,6 @@ def preprocessor(filepath, stats, hipify_caffe2):
 
                 if constants.API_CAFFE2 in meta_data and not hipify_caffe2:
                     continue
-                if constants.API_RAND in meta_data and hipify_caffe2:
-                    continue
 
                 if output_source.find(cuda_type) > -1:
                     # Check if supported
@@ -741,10 +739,7 @@ def preprocessor(filepath, stats, hipify_caffe2):
                         stats["unsupported_calls"].append((cuda_type, filepath))
 
                 if cuda_type in output_source:
-                    if hipify_caffe2:
-                        pattern = r'({0})'.format(re.escape(cuda_type))
-                    else:
-                        pattern = r'(\b{0}\b)'.format(re.escape(cuda_type))
+                    pattern = r'({0})'.format(re.escape(cuda_type))
                     output_source = re.sub(pattern, hip_type, output_source)
 
         # Perform Kernel Launch Replacements
