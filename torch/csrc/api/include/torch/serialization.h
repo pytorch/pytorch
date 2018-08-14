@@ -197,8 +197,7 @@ inline void loadBinary(BinaryInputArchive& archive, void* data, size_t size) {
 
 // Gradients will not be saved for variables
 template <class Archive>
-void save(Archive& archive, torch::Tensor const& tensor) {
-  torch::NoGradGuard guard;
+void save(Archive& archive, const torch::Tensor& tensor) {
   if (!tensor.defined()) {
     int32_t typeId = ::torch::detail::scalarTypeId(torch::Dtype::Undefined);
     archive(CEREAL_NVP(typeId));
@@ -213,13 +212,13 @@ void save(Archive& archive, torch::Tensor const& tensor) {
     sizes.push_back(s);
   }
   auto contig = tensor.toBackend(torch::kCPU).contiguous();
-  int32_t backend = ::torch::detail::backendId(tensor.data().type().backend());
+  int32_t backend = ::torch::detail::backendId(tensor.type().backend());
 
   archive(CEREAL_NVP(backend), CEREAL_NVP(sizes));
   agimpl::saveBinary(
       archive,
       contig.data_ptr(),
-      tensor.numel() * tensor.data().type().elementSizeInBytes());
+      tensor.numel() * tensor.type().elementSizeInBytes());
 }
 
 /**
@@ -249,54 +248,10 @@ void load(Archive& archive, torch::Tensor& tensor) {
   if (!tensor.defined() || tensor.dtype() != type) {
     tensor = torch::empty({}, torch::getType(backend, type));
   }
-  tensor.data().resize_(sizes);
-
-  if (tensor.type().is_cuda()) {
-    // should actually use cudamemcpy probably
-    auto cputensor = torch::empty(sizes, tensor.dtype());
-    agimpl::loadBinary(
-        archive,
-        cputensor.data_ptr(),
-        cputensor.numel() * cputensor.type().elementSizeInBytes());
-    tensor.data().copy_(cputensor.data());
-  } else {
-    agimpl::loadBinary(
-        archive,
-        tensor.data_ptr(),
-        tensor.numel() * tensor.data().type().elementSizeInBytes());
-  }
-}
-
-template <class Archive>
-void save(Archive& archive, const at::Tensor& tensor) {
-  save(archive, torch::Tensor(tensor));
-}
-
-// NOTE: Temporary copy pasta of load from above! `Variable` is implicitly
-// convertible to `at::Tensor`, but this does not apply to references. Delete
-// the old function when you change this!
-template <class Archive>
-void load(Archive& archive, at::Tensor& tensor) {
-  torch::NoGradGuard guard;
-  torch::Dtype type;
-  int32_t typeId;
-  archive(CEREAL_NVP(typeId));
-  type = ::torch::detail::scalarTypeFromId(typeId);
-  if (type == torch::Dtype::Undefined) {
-    tensor = torch::Tensor();
-    return;
-  }
-
-  int32_t backendId;
-  auto sizes = std::vector<int64_t>();
-  auto buf = std::vector<uint8_t>();
-  archive(CEREAL_NVP(backendId), CEREAL_NVP(sizes));
-
-  at::Backend backend = ::torch::detail::backendFromId(backendId);
-  if (!tensor.defined() || tensor.dtype() != type) {
-    tensor = torch::empty({}, torch::getType(backend, type));
-  }
+  const auto required_grad = tensor.requires_grad();
+  tensor.set_requires_grad(false);
   tensor.resize_(sizes);
+  tensor.set_requires_grad(required_grad);
 
   if (tensor.type().is_cuda()) {
     // should actually use cudamemcpy probably
@@ -305,7 +260,7 @@ void load(Archive& archive, at::Tensor& tensor) {
         archive,
         cputensor.data_ptr(),
         cputensor.numel() * cputensor.type().elementSizeInBytes());
-    tensor.copy_(cputensor.data());
+    tensor.copy_(cputensor);
   } else {
     agimpl::loadBinary(
         archive,
