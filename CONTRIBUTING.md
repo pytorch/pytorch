@@ -19,9 +19,9 @@ If you are not familiar with creating a Pull Request, here are some guides:
 - https://help.github.com/articles/creating-a-pull-request/
 
 
-## Developing locally with PyTorch
+## Developing PyTorch
 
-To locally develop with PyTorch, here are some tips:
+To develop PyTorch on your machine, here are some tips:
 
 1. Uninstall all existing pytorch installs
 ```
@@ -30,7 +30,7 @@ pip uninstall torch
 pip uninstall torch # run this command twice
 ```
 
-2. Locally clone a copy of PyTorch from source:
+2. Clone a copy of PyTorch from source:
 
 ```
 git clone https://github.com/pytorch/pytorch
