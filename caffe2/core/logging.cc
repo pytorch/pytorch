@@ -39,7 +39,7 @@ void SetStackTraceFetcher(std::function<string(void)> fetcher) {
   *GetFetchStackTrace() = fetcher;
 }
 
-[[noreturn]] void ThrowEnforceNotMet(
+void ThrowEnforceNotMet(
     const char* file,
     const int line,
     const char* condition,
@@ -50,6 +50,7 @@ void SetStackTraceFetcher(std::function<string(void)> fetcher) {
     LOG(FATAL) << e.msg_stack()[0];
   }
   throw e;
+  return; // to suppress old compiler warning
 }
 
 static std::function<void(const OperatorDef&)> OperatorLogger =

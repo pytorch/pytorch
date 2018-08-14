@@ -35,7 +35,7 @@ namespace caffe2 {
 CAFFE2_API bool InitCaffeLogging(int* argc, char** argv);
 CAFFE2_API void UpdateLoggingLevelsFromFlags();
 
-CAFFE2_API [[noreturn]] void ThrowEnforceNotMet(
+CAFFE2_API void ThrowEnforceNotMet(
     const char* file,
     const int line,
     const char* condition,
