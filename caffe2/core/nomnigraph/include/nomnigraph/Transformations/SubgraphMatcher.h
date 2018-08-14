@@ -2,6 +2,7 @@
 #define NOM_TRANFORMATIONS_SUBGRAPH_MATCHER_H
 
 #include <functional>
+#include <sstream>
 #include <vector>
 
 namespace nom {
@@ -39,6 +40,26 @@ class SubtreeMatchCriteria {
     return SubtreeMatchCriteria(root, {}, count, true);
   }
 
+  std::string debugString() const {
+    std::ostringstream out;
+    out << "{rootCriteria = '" << root_ << "'";
+    if (count_ != 1) {
+      out << ", count = " << count_;
+    }
+    if (nonTerminal_) {
+      out << ", nonTerminal = " << nonTerminal_;
+    }
+    if (!children_.empty()) {
+      out << ", childrenCriteria = [";
+      for (auto& child : children_) {
+        out << child.debugString() << ", ";
+      }
+      out << "]";
+    }
+    out << "}";
+    return out.str();
+  }
+
  private:
   NodeMatchCriteria root_;
   std::vector<SubtreeMatchCriteria> children_;
@@ -47,6 +68,38 @@ class SubtreeMatchCriteria {
 
   template <typename, typename, typename>
   friend class SubgraphMatcher;
+};
+
+template <typename GraphType>
+class SubtreeMatchResult {
+ public:
+  static SubtreeMatchResult<GraphType> notMatched(
+      const std::string& debugMessage) {
+    return SubtreeMatchResult<GraphType>(false, debugMessage);
+  }
+
+  static SubtreeMatchResult<GraphType> notMatched() {
+    return SubtreeMatchResult<GraphType>(false, "Debug message is not enabled");
+  }
+
+  static SubtreeMatchResult<GraphType> matched() {
+    return SubtreeMatchResult<GraphType>(true, "");
+  }
+
+  bool isMatch() const {
+    return isMatch_;
+  }
+
+  std::string getDebugMessage() const {
+    return debugMessage_;
+  }
+
+ private:
+  SubtreeMatchResult(bool isMatch, const std::string& debugMessage)
+      : isMatch_(isMatch), debugMessage_(debugMessage) {}
+
+  const bool isMatch_;
+  const std::string debugMessage_;
 };
 
 /*
@@ -68,17 +121,25 @@ struct SubgraphMatcher {
   // The flag invertGraphTraversal specify if we should follow out edges or
   // in edges. The default is true which is useful for a functional
   // intepretation of a dataflow graph.
-  static bool isSubtreeMatch(
+  static SubtreeMatchResult<GraphType> isSubtreeMatch(
       typename GraphType::NodeRef root,
       const SubtreeMatchCriteria<NodeMatchCriteria>& criteria,
-      bool invertGraphTraversal = true) {
+      bool invertGraphTraversal = true,
+      bool debug = false) {
     if (!isNodeMatch(root, criteria.root_)) {
-      return false;
+      if (debug) {
+        std::ostringstream debugMessage;
+        debugMessage << "Subtree root at " << root
+                     << " does not match criteria " << criteria.debugString();
+        return SubtreeMatchResult<GraphType>::notMatched(debugMessage.str());
+      } else {
+        return SubtreeMatchResult<GraphType>::notMatched();
+      }
     }
     if (criteria.nonTerminal_) {
       // This is sufficient to be a match if this criteria specifies a non
       // terminal node.
-      return true;
+      return SubtreeMatchResult<GraphType>::matched();
     }
     auto& edges =
         invertGraphTraversal ? root->getInEdges() : root->getOutEdges();
@@ -111,11 +172,23 @@ struct SubgraphMatcher {
         auto edge = edges[currentEdgeIdx];
         auto child = invertGraphTraversal ? edge->tail() : edge->head();
 
-        if (!isSubtreeMatch(child, childrenCriteria, invertGraphTraversal)) {
+        if (!isSubtreeMatch(child, childrenCriteria, invertGraphTraversal)
+                 .isMatch()) {
           if (!isStarCount) {
             // If the current criteria isn't a * pattern, this indicates a
             // failure.
-            return false;
+            if (debug) {
+              std::ostringstream debugMessage;
+              debugMessage << "Child node at " << child
+                           << " does not match child criteria "
+                           << childrenCriteria.debugString() << ". We expected "
+                           << expectedCount << " matches but only found "
+                           << countMatch << ".";
+              return SubtreeMatchResult<GraphType>::notMatched(
+                  debugMessage.str());
+            } else {
+              return SubtreeMatchResult<GraphType>::notMatched();
+            }
           } else {
             // Otherwise, we should move on to the next children criteria.
             break;
@@ -128,15 +201,33 @@ struct SubgraphMatcher {
       if (countMatch < expectedCount) {
         // Fails because there are not enough matches as specified by the
         // criteria.
-        return false;
+        if (debug) {
+          std::ostringstream debugMessage;
+          debugMessage << "Expected " << expectedCount
+                       << " matches for child criteria "
+                       << childrenCriteria.debugString() << " but only found "
+                       << countMatch;
+          return SubtreeMatchResult<GraphType>::notMatched(debugMessage.str());
+        } else {
+          return SubtreeMatchResult<GraphType>::notMatched();
+        }
       }
     }
 
     if (currentEdgeIdx < numEdges) {
       // Fails because there are unmatched edges.
-      return false;
+      if (debug) {
+        std::ostringstream debugMessage;
+        debugMessage << "Unmatched children for subtree root at " << root
+                     << ". There are " << numEdges
+                     << " children, but only found " << currentEdgeIdx
+                     << " matches for the children criteria.";
+        return SubtreeMatchResult<GraphType>::notMatched(debugMessage.str());
+      } else {
+        return SubtreeMatchResult<GraphType>::notMatched();
+      }
     }
-    return true;
+    return SubtreeMatchResult<GraphType>::matched();
   }
 
   // Utility to transform a graph by looking for subtrees that match
@@ -161,7 +252,7 @@ struct SubgraphMatcher {
       if (!graph.hasNode(nodeRef)) {
         continue;
       }
-      if (isSubtreeMatch(nodeRef, criteria, invertGraphTraversal)) {
+      if (isSubtreeMatch(nodeRef, criteria, invertGraphTraversal).isMatch()) {
         if (!replaceFunction(graph, nodeRef)) {
           // If replaceFunction returns false, it means that we should abort
           // the entire procedure.
