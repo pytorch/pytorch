@@ -1889,8 +1889,8 @@ class TestDistributions(TestCase):
         self.assertEqual(Gamma(0.5, 0.5).sample((1,)).size(), (1,))
 
         def ref_log_prob(idx, x, log_prob):
-            a = alpha.view(-1)[idx].detach()
-            b = beta.view(-1)[idx].detach()
+            a = alpha.view(-1)[idx].detach().cpu()
+            b = beta.view(-1)[idx].detach().cpu()
             expected = scipy.stats.gamma.logpdf(x.cpu(), a, scale=1 / b)
             self.assertAlmostEqual(log_prob, expected, places=3)
 
