@@ -22,7 +22,7 @@ import tempfile
 import shutil
 import warnings
 from test_autograd import method_tests, create_input, unpack_variables, \
-    exclude_tensor_method, EXCLUDE_GRADCHECK, EXCLUDE_FUNCTIONAL
+    exclude_tensor_method, non_differentiable, EXCLUDE_GRADCHECK, EXCLUDE_FUNCTIONAL
 from copy import deepcopy
 import random
 
@@ -5871,6 +5871,13 @@ EXCLUDE_TRACED = {
     'test_split_dim_neg0',
     'test_gesv',
     'test_inverse',
+
+    # nn functional test
+    # schema not found for onnx node
+    'test_nn_instance_norm',
+
+    # output no dependence with traced input, tracer confusion
+    'test_nn_rrelu',
 }
 
 # known to be failing in script
@@ -5935,17 +5942,44 @@ EXCLUDE_SCRIPT = {
     'test_nn_feature_alpha_dropout',
     'test_nn_gumbel_softmax',
 
+    'test_nn_adaptive_max_pool1d',
+    'test_nn_adaptive_max_pool2d',
+    'test_nn_adaptive_max_pool3d',
 
 
     # argument has custom behavior
     'test_nn_fractional_max_pool2d',
     'test_nn_embedding',
     'test_nn_embedding_bag',
-    'test_nn_batch_norm'
+    'test_nn_batch_norm',
+    'test_nn_nll_loss',
+    'test_nn_unfold',
+    'test_nn_max_unpool2d',
+    'test_nn_ctc_loss',
+
+    # argument type not supported
+    'test_nn_affine_grid',
+
     # unknown builtin op
     'test_nn_tanhshrink',
     'test_nn_softsign',
     'test_nn_softmin',
+    'test_nn_local_response_norm',
+    'test_nn_poisson_nll_loss',
+    'test_nn_cross_entropy',
+    'test_nn_binary_cross_entropy_with_logits',
+    'test_nn_multilabel_soft_margin_loss',
+    'test_nn_pixel_shuffle',
+    'test_nn_interpolate',
+    'test_nn_pad',
+    'test_nn_cosine_similarity',
+    'test_nn_normalize',
+    'test_nn_fold',
+    'test_nn_linear',
+    'test_nn_max_unpool1d',
+    'test_nn_lp_pool1d',
+    'test_nn_lp_pool2d',
+    'test_nn_instance_norm',
 }
 
 
@@ -6202,6 +6236,7 @@ S = 5
 
 # NB: JIT script tests for all nn functional interfaces, script mode does
 # not support in_place operations yet, so no inplace operation tests added.
+# removed all the deprecated functions
 #
 # (
 #   method name,
@@ -6212,7 +6247,7 @@ S = 5
 #   fn mapping output to part that should be gradcheck'ed,   // optional
 # )
 nn_functional_tests = [
-    # TODO: default  arguments for None type not supported, add
+    # TODO: default arguments for None type not supported, add
     # manually as argument, remove when ATen default arg system ready
     ('conv1d', (S, S, S), ((S, S, S), None)),
     ('conv2d', (S, S, S, S), ((S, S, S, S), None)),
@@ -6228,17 +6263,17 @@ nn_functional_tests = [
     ('max_pool1d', (S, S, S), (2, 1)),
     ('max_pool2d', (S, S, S, S), (2, 1)),
     ('max_pool3d', (S, S, S, S, S), (2, 1)),
-    ('max_unpool1d', torch.tensor([2, 4]), (torch.tensor([1, 3]), 2, 2, 0)),
-    # ('max_unpool2d', (S, 1, S), ((M, S),), 'broadcast_all'),
-    # ('max_unpool3d', (S, 1, S), ((M, S),), 'broadcast_all'),
-    # ('lp_pool1d', (S, S, S), ((S, S, S),)),
-    # ('lp_pool2d', (S, S, S), ((S, S, S),)),
-    # ('adaptive_max_pool1d', (S, S, S), ((S, S),), 'broadcast_rhs'),
-    # ('adaptive_max_pool2d', (S, S, S), ((S, S),), 'broadcast_rhs'),
-    # ('adaptive_max_pool3d', (S, S, S), ((S, S),), 'broadcast_rhs'),
-    # ('adaptive_avg_pool1d', (S, S, S), ((S, S),), 'broadcast_rhs'),
-    # ('adaptive_avg_pool2d', (S, S, S), ((S, S),), 'broadcast_rhs'),
-    # ('adaptive_avg_pool3d', (S, S, S), ((S, S),), 'broadcast_rhs'),
+    ('max_unpool1d', torch.tensor([[[2., 4]]]), (torch.tensor([[[1, 3]]]), 2, 2, 0)),
+    ('max_unpool2d', torch.tensor([[[[2., 4]]]]), (torch.tensor([[[[1, 3]]]]), 2, 2, 0)),
+    # ('max_unpool3d', torch.tensor([[[[[2., 4]]]]]), (torch.tensor([[[[[1, 3]]]]]), 2, 2, 0)),
+    ('lp_pool1d', (S, S, S), (2, 3, 2,)),
+    ('lp_pool2d', (S, S, S, S), (2, 3, 2,)),
+    ('adaptive_max_pool1d', (S, S, S), (5,)),
+    ('adaptive_max_pool2d', (S, S, S, S), ([5, 7],)),
+    ('adaptive_max_pool3d', (S, S, S, S, S), ([3, 2, 2],)),
+    ('adaptive_avg_pool1d', (S, S, S), (5,)),
+    ('adaptive_avg_pool2d', (S, S, S, S), ([5, 7],)),
+    ('adaptive_avg_pool3d', (S, S, S, S, S), ([3, 2, 2],)),
     ('dropout', (S, S, S), (0.5,)),
     ('alpha_dropout', (S, S, S), (0.5,)),
     ('dropout2d', (S, S, S), (0.5,)),
@@ -6252,57 +6287,54 @@ nn_functional_tests = [
     ('selu', (S, S, S), (),),
     ('celu', (S, S, S), (0.9,),),
     ('leaky_relu', (S, S, S), (0.02,),),
-    ('rrelu', (S, S, S), (0.1, 0.3,),),
+    ('rrelu', (S, S), (0.1, 0.3, False, None),),
     ('hardshrink', (S, S, S), (0.4,),),
     ('tanhshrink', (S, S, S), (),),
     ('softsign', (S, S, S), (),),
     ('softplus', (S, S, S), (),),
     ('softmin', (S, S, S), (0,),),
     ('softmax', (S, S, S), (0,),),
-    ('gumbel_softmax', (S, S), (),),
+    # distribution sampling make result different in every run
+    # ('gumbel_softmax', (S, S), (2,),),
     ('log_softmax', (S, S, S), (0,),),
-    ('linear', (S, S), (),),
-    ('bilinear', (S, S, S), (),),
+    ('linear', (S, S), ((M, S), None),),
+    ('bilinear', (S, S, S), ((S, S, M), torch.zeros(M, S, M), None),),
     ('embedding', torch.tensor([[1, 2, 4, 5], [4, 3, 2, 5]]), (torch.rand(6, 3), ),),
     ('embedding_bag', torch.tensor([1, 2, 4, 2]), (torch.rand(5, 3), torch.tensor([0, 4]),),),
-    # batch norm running_mean, running_var is not a parameter, no derivatives
-    # ('batch_norm', (S, S), (torch.randn(S), torch.ones(S), ),),
-    # ('instance_norm', (S, S, S), (torch.zeros(S), torch.ones(S)),),
+    ('batch_norm', (S, S), (non_differentiable(torch.randn(S)), non_differentiable(torch.ones(S)), ),),
+    ('instance_norm', (S, S, S), (non_differentiable(torch.zeros(S)), non_differentiable(torch.ones(S))),),
     ('layer_norm', (S, S, S, S), ([5], None, None),),
-    ('group_norm', (S, S, S), (1, 5),),
-    ('local_response_norm', (S, S, S), (),),
-    ('ctc_loss', (S, S, S), (),),
-    ('nll_loss', (S, S, S), (),),
-    ('poisson_nll_loss', (S, S, S), (),),
-    ('kl_div', (S, S, S), (),),
-    ('cross_entropy', (S, S, S), (),),
-    ('binary_cross_entropy', (S, S, S), (),),
-    ('binary_cross_entropy_with_logits', (S, S, S), (),),
-    ('smooth_l1_loss', (S, S, S), (),),
-    ('l1_loss', (S, S, S), (),),
-    ('mse_loss', (S, S, S), (),),
-    ('margin_loss', (S, S, S), (),),
-    ('margin_ranking_loss', (S, S, S), (),),
-    ('hinge_embedding_loss', (S, S, S), (),),
-    ('multilabel_margin_loss', (S, S, S), (),),
-    ('soft_margin_loss', (S, S, S), (),),
-    ('multilabel_soft_margin_loss', (S, S, S), (),),
-    ('cosine_embedding_loss', (S, S, S), (),),
-    ('multi_margin_loss', (S, S, S), (),),
-    ('pixel_shuffle', (S, S, S), (),),
-    ('upsample', (S, S, S), (),),
-    ('interpolate', (S, S, S), (),),
-    ('upsample_nearest', (S, S, S), (),),
-    ('upsample_bilinear', (S, S, S), (),),
-    ('grid_sample', (S, S, S), (),),
-    ('affine_grid', (S, S, S), (),),
-    ('pad', (S, S, S), (),),
-    ('pairwise_distance', (S, S, S), (),),
-    ('consine_similarity', (S, S, S), (),),
-    ('triplet_margin_loss', (S, S, S), (),),
+    ('group_norm', (S, S, S), (1, torch.Tensor(5), None),),
+    ('local_response_norm', (S, S, S), (2, ),),
+    # ('ctc_loss', torch.randn(50, 16, 20).log_softmax(2).detach().requires_grad_(), (torch.randint(1, 21, (16, 30),
+    # dtype=torch.long), torch.full((16,), 50, dtype=torch.long), torch.randint(10,30,(16,), dtype=torch.long))),
+    ('nll_loss', F.log_softmax(torch.randn(3, 5), dim=0), (torch.tensor([1, 0, 4]), None, None),),
+    ('poisson_nll_loss', (S, 2), ((S, 2),),),
+    ('kl_div', F.log_softmax(torch.randn(S, 10), 1), (F.softmax(torch.randn(S, 10), 1),),),
+    ('cross_entropy', (3, S), (torch.randint(S, (3,), dtype=torch.int64),),),
+    # ('binary_cross_entropy', torch.randn(3, 2).sigmoid(), (non_differentiable(torch.rand(3, 2)),),),
+    ('binary_cross_entropy_with_logits', (3,), (torch.empty(3).random_(2), ),),
+    ('smooth_l1_loss', (3, S), (non_differentiable(torch.rand(3, S)),),),
+    ('l1_loss', (3, S), (non_differentiable(torch.rand(3, S)),),),
+    ('mse_loss', (3, S), (non_differentiable(torch.rand(3, S)),),),
+    ('margin_ranking_loss', (3, S), ((3, S), (S,)),),
+    ('hinge_embedding_loss', (3, S), (non_differentiable(torch.rand(3, S)),),),
+    # ('multilabel_margin_loss', torch.tensor([[0.2, -0.2, 0.07]]), (torch.tensor([[0, 0, 1]]),),),
+    ('soft_margin_loss', (3, S), (non_differentiable(torch.rand(3, S)),),),
+    ('multilabel_soft_margin_loss', (3, S), (non_differentiable(torch.rand(3, S)),),),
+    ('cosine_embedding_loss', (S, S), ((S, S), non_differentiable(torch.rand(S,))),),
+    # ('multi_margin_loss', (S, S), (non_differentiable(torch.randint(S, (S, ), dtype=torch.int64)),),),
+    ('pixel_shuffle', (1, 9, 4, 4), (3,),),
+    ('interpolate', torch.zeros(3, 3).view(1, 1, 3, 3), (2,),),
+    # ('grid_sample', (S, S, S, S), (non_differentiable(torch.rand(S, S, S, 2)),),),
+    ('affine_grid', (S, 2, 3), (torch.Size([S, 1, 7, 7]),),),
+    ('pad', (3, 3, 4, 2), ([1, 1],),),
+    ('pairwise_distance', (S, S), ((S, S),),),
+    ('cosine_similarity', (S, S), ((S, S),),),
+    ('triplet_margin_loss', (S, S), ((S, S), (S, S)),),
     ('normalize', (S, S, S), (),),
-    ('unfold', (S, S, S), (),),
-    ('fold', (S, S, S), (),),
+    ('unfold', (S, S, S, S), ([2, 3]),),
+    ('fold', (1, 3 * 2 * 2, 12), ([4, 5], [2, 2]),),
 ]
 
 
@@ -6342,14 +6374,17 @@ def add_test(
                 # FixMe: run grad checks on inplace self
                 if is_inplace:
                     self_variable.requires_grad = False
+
                 # need to record this because methods can change the size (e.g. unsqueeze)
                 args_variable, kwargs_variable = create_input(args, requires_grad=not is_inplace, call_kwargs=kwargs)
+
                 self_tensor = deepcopy(self_variable.data)
                 args_tensor = deepcopy(unpack_variables(args_variable))
 
                 if test_type == 'nn_op':
                     # fix the seed for tests
                     torch.manual_seed(2)
+
                     output_variable = getattr(F, name)(self_variable, *args_variable, **kwargs_variable)
 
                     def fn(*inputs, **kwargs):
@@ -6371,8 +6406,7 @@ def add_test(
                     output_variable = getattr(self_variable, name)(*args_variable, **kwargs_variable)
 
                     def fn(*inputs, **kwargs):
-                        # output = getattr(inputs[0], name)(*inputs[1:], **kwargs)
-                        output = getattr(F, name)(*inputs, **kwargs)
+                        output = getattr(inputs[0], name)(*inputs[1:], **kwargs)
                         return output_process_fn(output)
 
                     if not is_inplace and name not in EXCLUDE_GRADCHECK and not exclude_tensor_method(name, test_name):
@@ -6421,7 +6455,6 @@ for test in method_tests:
     add_test(*test)
 
 for test in nn_functional_tests:
-    # print(*test)
     add_test(*test, test_type='nn_op')
 
 
