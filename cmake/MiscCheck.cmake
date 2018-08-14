@@ -83,22 +83,26 @@ endif()
 cmake_pop_check_state()
 
 # ---[ Check for NUMA support
-cmake_push_check_state(RESET)
-set(CMAKE_REQUIRED_FLAGS "-std=c++11")
-CHECK_CXX_SOURCE_COMPILES(
+if (USE_NUMA)
+  cmake_push_check_state(RESET)
+  set(CMAKE_REQUIRED_FLAGS "-std=c++11")
+  CHECK_CXX_SOURCE_COMPILES(
     "#include <numa.h>
     #include <numaif.h>
 
     int main(int argc, char** argv) {
     }" CAFFE2_IS_NUMA_AVAILABLE)
-
-if (CAFFE2_IS_NUMA_AVAILABLE)
-  message(STATUS "NUMA is available")
+  if (CAFFE2_IS_NUMA_AVAILABLE)
+    message(STATUS "NUMA is available")
+  else()
+    message(STATUS "NUMA is not available")
+    set(CAFFE2_DISABLE_NUMA 1)
+  endif()
+  cmake_pop_check_state()
 else()
-  message(STATUS "NUMA is not available")
+  message(STATUS "NUMA is disabled")
   set(CAFFE2_DISABLE_NUMA 1)
 endif()
-cmake_pop_check_state()
 
 # ---[ Check if we want to turn off deprecated warning due to glog.
 # Note(jiayq): on ubuntu 14.04, the default glog install uses ext/hash_set that
@@ -155,6 +159,15 @@ check_cxx_compiler_flag("-fvisibility-inlines-hidden" COMPILER_SUPPORTS_HIDDEN_I
 if (${COMPILER_SUPPORTS_HIDDEN_INLINE_VISIBILITY})
   set(CAFFE2_VISIBILITY_FLAG "-fvisibility-inlines-hidden")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CAFFE2_VISIBILITY_FLAG}")
+endif()
+
+# ---[ Checks if linker supports -rdynamic. `-rdynamic` tells linker
+# -to add all (including unused) symbols into the dynamic symbol
+# -table. We need this to get symbols when generating backtrace at
+# -runtime.
+check_cxx_compiler_flag("-rdynamic" COMPILER_SUPPORTS_RDYNAMIC)
+if (${COMPILER_SUPPORTS_RDYNAMIC})
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -rdynamic")
 endif()
 
 # ---[ If we are using msvc, set no warning flags

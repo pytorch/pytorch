@@ -28,9 +28,9 @@ struct TypedDef {
   at::optional<FunctionSchema> schema;
 };
 
-static inline std::vector<Value*> toValues(at::ArrayRef<NamedValue> nvs) {
-  return fmap(nvs, [](const NamedValue& v) {
-    return v.value;
+static inline std::vector<Value*> toValues(Graph& g, at::ArrayRef<NamedValue> nvs) {
+  return fmap(nvs, [&](const NamedValue& v) {
+    return v.value(g);
   });
 }
 
@@ -68,7 +68,7 @@ struct SugaredValue : public std::enable_shared_from_this<SugaredValue> {
     SourceRange loc,
     Method & m,
     // note: names for args will be 'argument 0', 'argument 1', etc..
-    at::ArrayRef<NamedValue> inputs,
+    at::ArrayRef<NamedValue> inputs_,
     at::ArrayRef<NamedValue> attributes,
     size_t n_binders) {
 // n_binders is always set to the number of variables an expression is
@@ -89,7 +89,7 @@ struct SugaredValue : public std::enable_shared_from_this<SugaredValue> {
     throw ErrorReport(loc) << "cannot call a " << kind();
   }
 
-  virtual ~SugaredValue() {}
+  virtual ~SugaredValue() = default;
 };
 
 // most things in the environment are just simple value types
@@ -131,7 +131,8 @@ struct TORCH_API BuiltinFunction : public SugaredValue {
     size_t n_binders) override;
 };
 
-using Resolver = std::function<std::shared_ptr<SugaredValue>(const std::string& name)>;
+using Resolver = std::function<std::shared_ptr<
+    SugaredValue>(const std::string& name, Method& m, const SourceRange& loc)>;
 TORCH_API void defineMethodsInModule(
   Module & m,
   const std::vector<TypedDef>& definitions,
@@ -145,7 +146,7 @@ TORCH_API std::shared_ptr<Graph> compileFunction(TypedDef def, const Resolver& r
 
 // pack outputs of a function following python rules. If there is a single value return
 // a SimpleValue, otherwise pack all the values into a Tuple.
-TORCH_API std::shared_ptr<SugaredValue> packOutputs(Graph& g, at::ArrayRef<Value*> values);
+TORCH_API Value* packOutputs(Graph& g, at::ArrayRef<Value*> values);
 TORCH_API std::vector<Value*> inlineCallTo(Graph& g, Graph& callee, ArrayRef<Value*> inputs);
 TORCH_API void ensureSizeMatches(SourceRange loc, size_t expected, size_t actual, const std::string& what);
 TORCH_API void ensureTensors(const SourceRange& range, at::ArrayRef<Value*> values);
@@ -161,6 +162,16 @@ TORCH_API at::optional<std::vector<Value*>> tryMatchSchema(
   at::ArrayRef<NamedValue> attributes,
   std::ostream& failure_messages);
 
+
+TORCH_API Value* emitBuiltinCall(
+  const SourceRange& loc,
+  Graph& graph,
+  Symbol name,
+  at::ArrayRef<NamedValue> inputs,
+  at::ArrayRef<NamedValue> attributes,
+  // if true, emitBuiltinCall will throw an exception if this builtin does not exist,
+  // otherwise it will return nullptr if the builtin is not found.
+  bool required);
 
 } // namespace script
 } // namespace jit

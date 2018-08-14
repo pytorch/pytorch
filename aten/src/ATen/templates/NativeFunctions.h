@@ -40,7 +40,7 @@ inline Tensor from_blob(
 
 // These functions are defined in native/TensorFactories.cpp.
 #define TENSOR(T, S, _1)                                               \
-  Tensor tensor(ArrayRef<T> values, const TensorOptions& options);     \
+  AT_API Tensor tensor(ArrayRef<T> values, const TensorOptions& options);     \
   inline Tensor tensor(                                                \
       std::initializer_list<T> values, const TensorOptions& options) { \
     return native::tensor(ArrayRef<T>(values), options);               \

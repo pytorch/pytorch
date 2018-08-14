@@ -66,20 +66,18 @@ OPERATOR_SCHEMA(NHWC2NCHW)
 The operator switches the order of data in a tensor from NHWC- sample index N,
 height H, width H and channels C, to the NCHW order.
 )DOC")
-    .Input(0, "data", "The input data (Tensor<float>) in the NHWC order.")
-    .Output(
-        0,
-        "output",
-        "The output tensor (Tensor<float>) in the NCHW order.");
+    .Input(0, "data", "The input data (Tensor) in the NHWC order.")
+    .Output(0, "output", "The output tensor (Tensor) in the NCHW order.");
 
-OPERATOR_SCHEMA(NCHW2NHWC).NumInputs(1).NumOutputs(1)
-  .SetDoc(R"DOC(
+OPERATOR_SCHEMA(NCHW2NHWC)
+    .NumInputs(1)
+    .NumOutputs(1)
+    .SetDoc(R"DOC(
 The operator switches the order of data in a tensor from NCHW- sample index N,
 channels C, height H and width W, to the NHWC order.
 )DOC")
-  .Input(0, "data", "The input data (Tensor<float>) in the NCHW order.")
-  .Output(0, "output", "The output tensor (Tensor<float>) in the NHWC order.");
-
+    .Input(0, "data", "The input data (Tensor) in the NCHW order.")
+    .Output(0, "output", "The output tensor (Tensor) in the NHWC order.");
 
 class GetNHWC2NCHWGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;

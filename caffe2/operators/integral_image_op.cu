@@ -144,7 +144,7 @@ bool IntegralImageOp<float, CUDAContext>::RunOnDevice() {
       cols_out,
       chans,
       X.data<float>(),
-      Y->mutable_data<float>());
+      Y->template mutable_data<float>());
   // Integral image over columns of the integral image over rows
   const int col_pass_size = X.dim32(0) * chans * cols_out;
   ColPassKernel<<<
@@ -152,7 +152,11 @@ bool IntegralImageOp<float, CUDAContext>::RunOnDevice() {
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(
-      col_pass_size, rows_out, cols_out, chans, Y->mutable_data<float>());
+      col_pass_size,
+      rows_out,
+      cols_out,
+      chans,
+      Y->template mutable_data<float>());
   return true;
 }
 
@@ -161,8 +165,8 @@ bool IntegralImageGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0); // Original input to "forward" op
   auto& dY = Input(1); // Gradient of net w.r.t. output of "forward" op
                        // (aka "gradOutput")
-  auto* dX = Output(0); // Gradient of net w.r.t. input to "forward" op
-                        // (aka "gradInput")
+  auto* dX = Output(0); // Gradient of net w.r.t. input to
+                        // "forward" op (aka "gradInput")
 
   dX->ResizeLike(X);
   // Row pass reduces shape of dY from (N, C, H + 1, W + 1)
@@ -199,7 +203,7 @@ bool IntegralImageGradientOp<float, CUDAContext>::RunOnDevice() {
       cols_out,
       chans,
       row_pass_buffer_.data<float>(),
-      dX->mutable_data<float>());
+      dX->template mutable_data<float>());
   return true;
 }
 

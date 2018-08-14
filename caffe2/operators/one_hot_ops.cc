@@ -92,8 +92,8 @@ template <>
 void OneHotOp<CPUContext>::DoOneHotOp(
     TIndex batch_size,
     TIndex index_size,
-    const Tensor<CPUContext>& indices,
-    Tensor<CPUContext>* one_hots) {
+    const Tensor& indices,
+    Tensor* one_hots) {
   const TIndex* indices_ptr = indices.template data<TIndex>();
   float* one_hots_ptr = one_hots->template mutable_data<float>();
   memset(one_hots_ptr, 0, one_hots->nbytes());
@@ -172,6 +172,9 @@ class SegmentOneHotOp : public Operator<CPUContext> {
   SegmentOneHotOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator(operator_def, ws) {}
 
+  // TODO: enable input filler
+  DISABLE_INPUT_FILLERS(CPUContext)
+
   bool RunOnDevice() override {
     auto& lengths = Input(0);
     auto& indices = Input(1);
@@ -187,7 +190,7 @@ class SegmentOneHotOp : public Operator<CPUContext> {
     auto* indices_ptr = indices.data<int64_t>();
     auto* one_hots = Output(0);
     one_hots->Resize(batch_size, index_size);
-    auto* one_hots_ptr = one_hots->mutable_data<float>();
+    auto* one_hots_ptr = one_hots->template mutable_data<float>();
     if (one_hots->size() == 0) {
       return true;
     }

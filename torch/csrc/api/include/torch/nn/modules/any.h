@@ -9,7 +9,7 @@
 #include <torch/csrc/utils/variadic.h>
 
 #include <ATen/Device.h>
-#include <ATen/optional.h>
+#include <ATen/core/optional.h>
 
 #include <memory>
 #include <type_traits>
@@ -315,7 +315,7 @@ struct AnyModule::Holder : public AnyModule::Placeholder {
   std::unique_ptr<Placeholder> clone(
       at::optional<Device> device) const override {
     return torch::make_unique<Holder>(
-        std::static_pointer_cast<ModuleType>(module->clone(device)));
+        std::dynamic_pointer_cast<ModuleType>(module->clone(device)));
   }
 
   /// The actual concrete module instance.

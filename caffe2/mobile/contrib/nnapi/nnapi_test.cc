@@ -55,7 +55,7 @@ static void test_relu(int N, int C, int H, int W) {
   // CPU reference
   Workspace ws;
   {
-    auto* t = ws.CreateBlob("X_cpu")->GetMutable<TensorCPU>();
+    auto* t = ws.CreateBlob("X_cpu")->GetMutableTensor(CPU);
     t->Resize(N, H, W, C);
     CPUContext ctx;
     math::RandGaussian<float, CPUContext>(
@@ -81,7 +81,7 @@ static void test_relu(int N, int C, int H, int W) {
   NetDef initNet;
   NNApi model(initNet, netdef, &ws);
   std::vector<TensorCPU*> inputs, outputs;
-  inputs.push_back(ws.GetBlob("X_cpu")->GetMutable<TensorCPU>());
+  inputs.push_back(ws.GetBlob("X_cpu")->GetMutableTensor(CPU));
   EXPECT_TRUE(model.run(inputs, &outputs));
   const auto& t_nn = *outputs[0];
 
@@ -103,21 +103,21 @@ static void test_conv_NHWC(
     int stride_w) {
   Workspace ws;
   {
-    auto* t = ws.CreateBlob("X_cpu")->GetMutable<TensorCPU>();
+    auto* t = ws.CreateBlob("X_cpu")->GetMutableTensor(CPU);
     t->Resize(N, H, W, C);
     CPUContext ctx;
     math::RandGaussian<float, CPUContext>(
         t->size(), 0, 30, t->mutable_data<float>(), &ctx);
   }
   {
-    auto* t = ws.CreateBlob("W")->GetMutable<TensorCPU>();
+    auto* t = ws.CreateBlob("W")->GetMutableTensor(CPU);
     t->Resize(K, kernel, kernel, C);
     CPUContext ctx;
     math::RandGaussian<float, CPUContext>(
         t->size(), 0, 30, t->mutable_data<float>(), &ctx);
   }
   {
-    auto* t = ws.CreateBlob("B")->GetMutable<TensorCPU>();
+    auto* t = ws.CreateBlob("B")->GetMutableTensor(CPU);
     t->Resize(K);
     CPUContext ctx;
     math::RandGaussian<float, CPUContext>(
@@ -189,7 +189,7 @@ static void test_conv_NHWC(
   NetDef initNet;
   NNApi model(initNet, netdef, &ws);
   std::vector<TensorCPU*> inputs, outputs;
-  inputs.push_back(ws.GetBlob("X_cpu")->GetMutable<TensorCPU>());
+  inputs.push_back(ws.GetBlob("X_cpu")->GetMutableTensor(CPU));
   EXPECT_TRUE(model.run(inputs, &outputs));
   const auto& t_nn = *outputs[0];
 
@@ -211,21 +211,21 @@ static void test_depthwise_conv_NHWC(
     int stride_w) {
   Workspace ws;
   {
-    auto* t = ws.CreateBlob("X_cpu")->GetMutable<TensorCPU>();
+    auto* t = ws.CreateBlob("X_cpu")->GetMutableTensor(CPU);
     t->Resize(N, H, W, C);
     CPUContext ctx;
     math::RandGaussian<float, CPUContext>(
         t->size(), 0, 30, t->mutable_data<float>(), &ctx);
   }
   {
-    auto* t = ws.CreateBlob("W")->GetMutable<TensorCPU>();
+    auto* t = ws.CreateBlob("W")->GetMutableTensor(CPU);
     t->Resize(1, kernel, kernel, D);
     CPUContext ctx;
     math::RandGaussian<float, CPUContext>(
         t->size(), 0, 30, t->mutable_data<float>(), &ctx);
   }
   {
-    auto* t = ws.CreateBlob("B")->GetMutable<TensorCPU>();
+    auto* t = ws.CreateBlob("B")->GetMutableTensor(CPU);
     t->Resize(D);
     CPUContext ctx;
     math::RandGaussian<float, CPUContext>(
@@ -406,7 +406,7 @@ static void test_depthwise_conv_NHWC(
   NetDef initNet;
   NNApi model(initNet, netdef, &ws);
   std::vector<TensorCPU*> inputs, outputs;
-  inputs.push_back(ws.GetBlob("X_cpu")->GetMutable<TensorCPU>());
+  inputs.push_back(ws.GetBlob("X_cpu")->GetMutableTensor(CPU));
   EXPECT_TRUE(model.run(inputs, &outputs));
   const auto& t_nn = *outputs[0];
 
@@ -428,7 +428,7 @@ static void test_pooling(
     int stride_w) {
   Workspace ws;
   {
-    auto* t = ws.CreateBlob("X_cpu")->GetMutable<TensorCPU>();
+    auto* t = ws.CreateBlob("X_cpu")->GetMutableTensor(CPU);
     t->Resize(N, H, W, C);
     CPUContext ctx;
     math::RandGaussian<float, CPUContext>(
@@ -496,7 +496,7 @@ static void test_pooling(
   NetDef initNet;
   NNApi model(initNet, netdef, &ws);
   std::vector<TensorCPU*> inputs, outputs;
-  inputs.push_back(ws.GetBlob("X_cpu")->GetMutable<TensorCPU>());
+  inputs.push_back(ws.GetBlob("X_cpu")->GetMutableTensor(CPU));
   EXPECT_TRUE(model.run(inputs, &outputs));
   const auto& t_nn = *outputs[0];
 
@@ -506,7 +506,7 @@ static void test_pooling(
 static void test_softmax(int N, int C, int H = 1, int W = 1) {
   Workspace ws;
   {
-    auto* t = ws.CreateBlob("X_cpu")->GetMutable<TensorCPU>();
+    auto* t = ws.CreateBlob("X_cpu")->GetMutableTensor(CPU);
     if (H == 1 && W == 1) {
       t->Resize(N, C);
     } else {
@@ -538,7 +538,7 @@ static void test_softmax(int N, int C, int H = 1, int W = 1) {
   NetDef initNet;
   NNApi model(initNet, netdef, &ws);
   std::vector<TensorCPU*> inputs, outputs;
-  inputs.push_back(ws.GetBlob("X_cpu")->GetMutable<TensorCPU>());
+  inputs.push_back(ws.GetBlob("X_cpu")->GetMutableTensor(CPU));
   EXPECT_TRUE(model.run(inputs, &outputs));
   const auto& t_nn = *outputs[0];
 

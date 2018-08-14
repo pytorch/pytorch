@@ -35,9 +35,9 @@ class StatRegistryExportOp : public Operator<CPUContext> {
     keys->Resize(data.size());
     values->Resize(data.size());
     timestamps->Resize(data.size());
-    auto* pkeys = keys->mutable_data<std::string>();
-    auto* pvals = values->mutable_data<int64_t>();
-    auto* ptimestamps = timestamps->mutable_data<int64_t>();
+    auto* pkeys = keys->template mutable_data<std::string>();
+    auto* pvals = values->template mutable_data<int64_t>();
+    auto* ptimestamps = timestamps->template mutable_data<int64_t>();
     int i = 0;
     for (const auto& stat : data) {
       pkeys[i] = std::move(stat.key);
@@ -153,7 +153,7 @@ struct TimerGetAndEndOp : public Operator<CPUContext> {
   bool RunOnDevice() override {
     int64_t nanos = OperatorBase::Input<TimerInstance*>(0)->get_ns();
     OperatorBase::Input<TimerInstance*>(0)->end();
-    auto* res = OperatorBase::Output<TensorCPU>(0);
+    auto* res = Output(0);
     res->Resize(1);
     res->template mutable_data<int64_t>()[0] = nanos;
     return true;
@@ -166,7 +166,7 @@ struct TimerGetOp : public Operator<CPUContext> {
 
   bool RunOnDevice() override {
     int64_t nanos = OperatorBase::Input<TimerInstance*>(0)->get_ns();
-    auto* res = OperatorBase::Output<TensorCPU>(0);
+    auto* res = Output(0);
     res->Resize();
     res->template mutable_data<int64_t>()[0] = nanos;
     return true;

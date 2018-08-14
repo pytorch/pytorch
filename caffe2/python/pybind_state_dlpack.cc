@@ -15,7 +15,7 @@ const DLDeviceType* CaffeToDLDeviceType(int device_type) {
 }
 
 const DLDataType* CaffeToDLType(const TypeMeta& meta) {
-  static std::map<CaffeTypeId, DLDataType> dl_type_map{
+  static std::map<TypeIdentifier, DLDataType> dl_type_map{
       {TypeMeta::Id<int8_t>(), DLDataType{0, 8, 1}},
       {TypeMeta::Id<int16_t>(), DLDataType{0, 16, 1}},
       {TypeMeta::Id<int32_t>(), DLDataType{0, 32, 1}},

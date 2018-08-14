@@ -6,8 +6,8 @@
 
 #include "ATen/Dispatch.h"
 #include "ATen/Parallel.h"
+#include "ATen/core/optional.h"
 #include "ATen/cpu/vec256/vec256.h"
-#include "ATen/optional.h"
 
 namespace at { namespace native { namespace {
 

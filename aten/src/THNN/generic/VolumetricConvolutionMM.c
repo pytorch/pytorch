@@ -2,6 +2,8 @@
 #define TH_GENERIC_FILE "generic/VolumetricConvolutionMM.c"
 #else
 
+#include <ATen/div_rtn.h>
+
 #define CONV3D_OMP_THRESHOLD 20
 
 static void inline THNN_(VolumetricConvolutionMM_shapeCheck)(
@@ -76,9 +78,9 @@ static void inline THNN_(VolumetricConvolutionMM_shapeCheck)(
       exactInputDepth, exactInputHeight, exactInputWidth, kT, kH, kW);
   }
 
-  outputDepth  = (exactInputDepth - kT) / dT + 1;
-  outputHeight = (exactInputHeight - kH) / dH + 1;
-  outputWidth  = (exactInputWidth - kW) / dW + 1;
+  outputDepth  = div_rtn<int64_t>(exactInputDepth - kT, dT) + 1;
+  outputHeight = div_rtn<int64_t>(exactInputHeight - kH, dH) + 1;
+  outputWidth  = div_rtn<int64_t>(exactInputWidth - kW, dW) + 1;
 
 
   if (outputDepth < 1 || outputWidth < 1 || outputHeight < 1) {
@@ -100,7 +102,7 @@ static void inline THNN_(VolumetricConvolutionMM_shapeCheck)(
       int64_t nOutputPlane = weight->size(0);
       THNN_CHECK_DIM_SIZE(gradOutput, ndim, dimf, nOutputPlane);
     } else if (bias != NULL) {
-      int64_t nOutputPlane = bias->size(0);
+      int64_t nOutputPlane = THTensor_sizeLegacyNoScalars(bias, 0);
       THNN_CHECK_DIM_SIZE(gradOutput, ndim, dimf, nOutputPlane);
     }
     THNN_CHECK_DIM_SIZE(gradOutput, ndim, dimt, outputDepth);
@@ -689,7 +691,7 @@ static void THNN_(VolumetricConvolutionMM_accGradParameters_frame)(
   }
 
   if (gradBias) {
-    for (i = 0; i < gradBias->size(0); i++)
+    for (i = 0; i < THTensor_sizeLegacyNoScalars(gradBias, 0); i++)
     {
       int64_t k;
       real sum = 0;

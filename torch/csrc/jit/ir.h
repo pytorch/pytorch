@@ -8,9 +8,12 @@
 #include "torch/csrc/jit/interned_strings.h"
 #include "torch/csrc/jit/resource_guard.h"
 #include "torch/csrc/jit/source_location.h"
+#include "torch/csrc/jit/source_range.h"
+#include "torch/csrc/jit/constants.h"
 #include "torch/csrc/jit/function_schema.h"
 #include "torch/csrc/jit/ivalue.h"
 #include "torch/csrc/jit/type.h"
+#include "torch/csrc/jit/named_value.h"
 
 #include "torch/csrc/utils/disallow_copy.h"
 #include "torch/csrc/utils/functional.h"
@@ -19,7 +22,7 @@
 #include "torch/csrc/WindowsTorchApiMacro.h"
 
 #include <ATen/ATen.h>
-#include "ATen/ArrayRef.h"
+#include "ATen/core/ArrayRef.h"
 
 #include <algorithm>
 #include <atomic>
@@ -54,7 +57,7 @@ struct Value;
 
 TORCH_API std::ostream& operator<<(std::ostream & out, const Graph & g);
 TORCH_API std::ostream& operator<<(std::ostream & out, const Type & t);
-TORCH_API std::ostream& operator<<(std::ostream & out, const Node & t);
+TORCH_API std::ostream& operator<<(std::ostream & out, const Node & n);
 
 // A list of nodes, with inputs and outputs
 struct Block;
@@ -181,7 +184,7 @@ private:
 public:
   Value* setType(const TypePtr type);
   void inferTypeFrom(const at::Tensor& output) {
-    setType(std::make_shared<TensorType>(output));
+    setType(TensorType::create(output));
   }
   const TypePtr & type() const {
     JIT_ASSERT(type_ != nullptr);
@@ -683,7 +686,9 @@ public:
     return *schema_;
   }
 
-  virtual ~Node() {}
+  void dump() const;
+
+  virtual ~Node() = default;
 private:
   std::pair<Value*, const Argument&> findInput(Symbol name);
   void findSchema() const;
@@ -889,8 +894,7 @@ public:
   , block_(new Block(this, nullptr))
   , insert_before_(return_node()) {}
 
-  Graph()
-  : Graph( std::make_shared<Scope>()) {}
+  Graph() : Graph(std::make_shared<Scope>()) {}
 
   at::ArrayRef<Value*> inputs() {
     return block_->inputs();
@@ -986,7 +990,6 @@ public:
   Node * createUndefined() {
     return create(prim::Undefined);
   }
-
   Node * createFusionGroup(int device) {
     auto n = create(prim::FusionGroup, 0);
     n->g_(attr::Subgraph,std::make_shared<Graph>(scope_root_));
@@ -995,13 +998,13 @@ public:
   }
   Node* createTuple(at::ArrayRef<Value*> values) {
     auto types = fmap(values, [](Value* v) { return v->type(); });
-    auto tt = std::make_shared<TupleType>(std::move(types));
+    auto tt = TupleType::create(std::move(types));
     auto n = create(prim::TupleConstruct, values);
     n->output()->setType(tt);
     return n;
   }
   Node* createTupleUnpack(Value * v) {
-    TupleType* tt = v->type()->expect<TupleType>();
+    TupleTypePtr tt = v->type()->expect<TupleType>();
     auto n = create(prim::TupleUnpack, {v}, 0);
     for(auto & element : tt->elements()) {
       n->addOutput()->setType(element);
@@ -1011,9 +1014,9 @@ public:
   Node* createList(const TypePtr& elem_type, at::ArrayRef<Value*> values) {
     auto n = create(prim::ListConstruct, values);
     for(const auto & v : values) {
-      JIT_ASSERT(v->type()->isSubtypeOf(*elem_type));
+      JIT_ASSERT(v->type()->isSubtypeOf(elem_type));
     }
-    n->output()->setType(std::make_shared<ListType>(elem_type));
+    n->output()->setType(ListType::create(elem_type));
     return n;
   }
   Node* createNumToTensor(Value* value) {
@@ -1025,6 +1028,18 @@ public:
   Node* createTensorToNum(const TypePtr& type, Value* value) {
     auto* result = create(prim::TensorToNum, {value});
     result->output()->setType(type);
+    return result;
+  }
+  Node* createIntToFloat(Value* value) {
+    JIT_ASSERT(*value->type() == *IntType::get());
+    auto* result = create(prim::IntToFloat, {value});
+    result->output()->setType(FloatType::get());
+    return result;
+  }
+  Node* createFloatToInt(Value* value) {
+    JIT_ASSERT(*value->type() == *FloatType::get());
+    auto* result = create(prim::FloatToInt, {value});
+    result->output()->setType(IntType::get());
     return result;
   }
   Node* createPythonOp(
@@ -1052,6 +1067,19 @@ public:
     }
     return r;
   }
+
+  Value* insertConstant(
+      IValue val,
+      at::optional<SourceRange> loc = at::nullopt) {
+    return jit::insertConstant(*this, std::move(val), loc);
+  }
+
+  // schema-driven insert
+  // this inserts a node into the graph with inputs determined from args and kwargs using Python
+  // argument matching rules, and checks that the op matches a known schema
+  // if this node successfully completes, it guarentees the node is a correctly-formed invocation
+  // of opname
+  Value* insert(Symbol opname, at::ArrayRef<NamedValue> args, at::ArrayRef<NamedValue> kwargs = {});
 
   Node * appendNode(Node * n) {
     return block_->appendNode(n);
@@ -1111,7 +1139,7 @@ public:
     return oss.str();
   }
 
-  friend std::ostream& operator<<(std::ostream & out, const Graph & g);
+  friend TORCH_API std::ostream& operator<<(std::ostream & out, const Graph & g);
   TORCH_API std::shared_ptr<Graph> copy();
 
 private:

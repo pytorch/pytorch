@@ -2,6 +2,8 @@
 #define TH_GENERIC_FILE "generic/Col2Im.c"
 #else
 
+#include <ATen/div_rtn.h>
+
 // Note [im2col/col2im output padding]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // Our implementations of im2col and col2im take both the input height/width as
@@ -124,7 +126,7 @@ static inline void THNN_(Col2Im_shapeCheck)(
   THArgCheck(dW > 0 && dH > 0, 8,
              "dilation should be greater than zero, but got dH: %d dW: %d", dH, dW);
 
-  int64_t ndim = THTensor_(nDimension)(input);
+  int64_t ndim = THTensor_(nDimensionLegacyNoScalars)(input);
   THNN_ARGCHECK(!input->is_empty() && (ndim == 2 || ndim == 3), 2, input,
                 "Expected non-empty 2D or 3D input tensor, but got input of shape %s");
 
@@ -138,8 +140,8 @@ static inline void THNN_(Col2Im_shapeCheck)(
   }
 
   int64_t inputLength  = input->size(batch_dim + 2);
-  int64_t nBlocksH = 1 + (outputHeight + 2 * padH - dH * (kH - 1) - 1) / sH;
-  int64_t nBlocksW = 1 + ( outputWidth + 2 * padW - dW * (kW - 1) - 1) / sW;
+  int64_t nBlocksH = div_rtn<int64_t>(outputHeight + 2 * padH - dH * (kH - 1) - 1, sH) + 1;
+  int64_t nBlocksW = div_rtn<int64_t>(outputWidth + 2 * padW - dW * (kW - 1) - 1, sW) + 1;
 
   if (inputLength != (nBlocksH * nBlocksW)) {
     THError("Given output_size=(%d, %d), kernel_size=(%d, %d), "

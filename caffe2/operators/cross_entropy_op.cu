@@ -43,10 +43,17 @@ bool LabelCrossEntropyOp<float, CUDAContext>::RunOnDevice() {
       (label.ndim() == 1) || (label.ndim() == 2 && label.dim32(1) == 1));
   CAFFE_ENFORCE_EQ(label.dim32(0), N);
   Y->Resize(vector<TIndex>(size_t(1), N));
-  LabelCrossEntropyKernel<<<CAFFE_GET_BLOCKS(N), CAFFE_CUDA_NUM_THREADS,
-                            0, context_.cuda_stream()>>>(
-      N, D, X.data<float>(), label.data<int>(), kLOG_THRESHOLD(),
-      Y->mutable_data<float>());
+  LabelCrossEntropyKernel<<<
+      CAFFE_GET_BLOCKS(N),
+      CAFFE_CUDA_NUM_THREADS,
+      0,
+      context_.cuda_stream()>>>(
+      N,
+      D,
+      X.data<float>(),
+      label.data<int>(),
+      kLOG_THRESHOLD(),
+      Y->template mutable_data<float>());
   return true;
 }
 
@@ -71,11 +78,19 @@ bool LabelCrossEntropyGradientOp<float, CUDAContext>::RunOnDevice() {
   CAFFE_ENFORCE_EQ(dY.dim32(0), N);
   dX->ResizeLike(X);
   math::Set<float, CUDAContext>(
-      dX->size(), 0.f, dX->mutable_data<float>(), &context_);
-  LabelCrossEntropyGradientKernel<<<CAFFE_GET_BLOCKS(N), CAFFE_CUDA_NUM_THREADS,
-                                    0, context_.cuda_stream()>>>(
-      N, D, X.data<float>(), label.data<int>(), dY.data<float>(),
-      kLOG_THRESHOLD(), dX->mutable_data<float>());
+      dX->size(), 0.f, dX->template mutable_data<float>(), &context_);
+  LabelCrossEntropyGradientKernel<<<
+      CAFFE_GET_BLOCKS(N),
+      CAFFE_CUDA_NUM_THREADS,
+      0,
+      context_.cuda_stream()>>>(
+      N,
+      D,
+      X.data<float>(),
+      label.data<int>(),
+      dY.data<float>(),
+      kLOG_THRESHOLD(),
+      dX->template mutable_data<float>());
   return true;
 }
 
@@ -104,9 +119,12 @@ bool MakeTwoClassOp<float, CUDAContext>::RunOnDevice() {
   CAFFE_ENFORCE_LT(X.size(), std::numeric_limits<int>::max() / 2);
   Y->Resize(shape);
   int N = X.size();
-  MakeTwoClassKernel<<<CAFFE_GET_BLOCKS(N), CAFFE_CUDA_NUM_THREADS,
-                       0, context_.cuda_stream()>>>(
-      N, X.data<float>(), Y->mutable_data<float>());
+  MakeTwoClassKernel<<<
+      CAFFE_GET_BLOCKS(N),
+      CAFFE_CUDA_NUM_THREADS,
+      0,
+      context_.cuda_stream()>>>(
+      N, X.data<float>(), Y->template mutable_data<float>());
   return true;
 }
 
@@ -121,9 +139,12 @@ bool MakeTwoClassGradientOp<float, CUDAContext>::RunOnDevice() {
   CAFFE_ENFORCE_LT(dY.size(), std::numeric_limits<int>::max());
   dX->Resize(shape);
   int N = dX->size();
-  MakeTwoClassGradientKernel<<<CAFFE_GET_BLOCKS(N), CAFFE_CUDA_NUM_THREADS,
-                               0, context_.cuda_stream()>>>(
-      N, dY.data<float>(), dX->mutable_data<float>());
+  MakeTwoClassGradientKernel<<<
+      CAFFE_GET_BLOCKS(N),
+      CAFFE_CUDA_NUM_THREADS,
+      0,
+      context_.cuda_stream()>>>(
+      N, dY.data<float>(), dX->template mutable_data<float>());
   return true;
 }
 
@@ -234,7 +255,7 @@ bool SigmoidCrossEntropyWithLogitsOp<float, CUDAContext>::RunOnDevice() {
     std::vector<TIndex> dims(logits.dims().begin(), logits.dims().end() - 1);
     out->Resize(dims);
   }
-  auto* out_ptr = out->mutable_data<float>();
+  auto* out_ptr = out->template mutable_data<float>();
 
   auto* logits_ptr = logits.data<float>();
   auto* targets_ptr = targets.data<float>();
@@ -272,7 +293,7 @@ bool SigmoidCrossEntropyWithLogitsGradientOp<float, CUDAContext>::
 
   auto* out = Output(0);
   out->ResizeLike(logits);
-  auto* out_ptr = out->mutable_data<float>();
+  auto* out_ptr = out->template mutable_data<float>();
 
   auto* logits_ptr = logits.data<float>();
   auto* targets_ptr = targets.data<float>();
@@ -356,7 +377,7 @@ bool WeightedSigmoidCrossEntropyWithLogitsOp<float, CUDAContext>::
     std::vector<TIndex> dims(logits.dims().begin(), logits.dims().end() - 1);
     out->Resize(dims);
   }
-  auto* out_ptr = out->mutable_data<float>();
+  auto* out_ptr = out->template mutable_data<float>();
 
   auto* logits_ptr = logits.data<float>();
   auto* targets_ptr = targets.data<float>();
@@ -386,7 +407,7 @@ bool WeightedSigmoidCrossEntropyWithLogitsGradientOp<float, CUDAContext>::
 
   auto* out = Output(0);
   out->ResizeLike(logits);
-  auto* out_ptr = out->mutable_data<float>();
+  auto* out_ptr = out->template mutable_data<float>();
 
   auto* logits_ptr = logits.data<float>();
   auto* targets_ptr = targets.data<float>();

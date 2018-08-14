@@ -60,10 +60,10 @@ getTensorInfo(THCState* state, TensorType* t) {
   IndexType sz[MAX_CUTORCH_DIMS];
   IndexType st[MAX_CUTORCH_DIMS];
 
-  int dims = THCTensor_nDimension(state, t);
+  int dims = THCTensor_nDimensionLegacyNoScalars(state, t);
   for (int i = 0; i < dims; ++i) {
-    sz[i] = THCTensor_size(state, t, i);
-    st[i] = THCTensor_stride(state, t, i);
+    sz[i] = THTensor_sizeLegacyNoScalars(t, i);
+    st[i] = THTensor_strideLegacyNoScalars(t, i);
   }
 
   return TensorInfo<ScalarType, IndexType>(

@@ -19,9 +19,57 @@ namespace torch { namespace jit { namespace tracer {
 ////////////////////////////////////////////////////////////////////////////////
 namespace detail {
 
+template<typename T>
+void genericAddInput(Node *n, T value) {
+  n->addInput(n->owningGraph()->insertConstant(value));
+}
+
+void badArgType() {
+  AT_ERROR("Found an unsupported argument type in the JIT tracer. File a bug report.");
+}
+
 thread_local std::shared_ptr<TracingState> tracing_state;
 
 } // namespace detail
+
+void addInputs(Node *n, const char * name, int64_t value)            { detail::genericAddInput(n, value); }
+void addInputs(Node *n, const char * name, bool value)               { detail::genericAddInput(n, value); }
+void addInputs(Node *n, const char * name, double value)             { detail::genericAddInput(n, value); }
+void addInputs(Node *n, const char * name, const at::Scalar& value)  { detail::genericAddInput(n, value); }
+void addInputs(Node *n, const char * name, const at::Tensor& value)  { n->addInput(getValueTrace(value)); }
+void addInputs(Node *n, const char * name, const std::string& value)         { detail::badArgType(); }
+void addInputs(Node *n, const char * name, const at::SparseTensorRef& value) { detail::badArgType(); }
+
+void addInputs(Node *n, const char * name, at::TensorList value) {
+  Graph *g = n->owningGraph();
+  Node *list_node = g->appendNode(g->createList(DynamicType::get(), fmap(value, getValueTrace)));
+  n->addInput(list_node->output());
+}
+
+void addInputs(Node *n, const char * name, at::IntList value) {
+  using ArgumentStash = jit::tracer::ArgumentStash;
+  std::vector<Value*> info = ArgumentStash::hasIntList(name) ?
+    ArgumentStash::popIntList(name) :
+    ArgumentStash::IntListTrace(value.size());
+
+  auto& g = getTracingState()->graph;
+  for (size_t i = 0; i < info.size(); ++i) {
+    if (info[i] != nullptr) continue;
+    info[i] = g->insertConstant(value[i]);
+  }
+  for (jit::Value* v : info) {
+    if (*v->type() != *jit::IntType::get()) {
+      throw std::runtime_error(
+        "Type mismatch in setposattr for IntList. Check that your program "
+        "is valid without tracing, and please file a bug report if it is.");
+    }
+  }
+  n->addInput(g->insertNode(g->createList(jit::IntType::get(), info))->output());
+}
+
+void addInputs(Node *n, const char * name, const ArrayRef<double>& value) {
+  AT_ERROR("Tracing float lists currently not supported!");
+}
 
 const std::shared_ptr<TracingState>& getTracingState() {
   return detail::tracing_state;
@@ -36,24 +84,15 @@ TracingState::TracingState()
 
 TracingState::~TracingState() = default;
 
-PreTraceInfo preRecordTrace(Symbol op,
-                            at::ArrayRef<Variable> inputs) {
-  return makePreTraceInfo(inputs, [&op](const std::shared_ptr<TracingState>& state, Graph& graph) {
-    return graph.create(op, 0 /* initial outputs */);
-  });
-}
-
-void postRecordTrace(const PreTraceInfo& info,
+void postRecordTrace(Node* node,
                      at::ArrayRef<Variable> outputs) {
-  auto assignOutput = [&info](const Variable & output, Value * value) {
+  for (size_t i = 0; i < outputs.size(); i++) {
+    auto & output = outputs[i];
+    Value * value = node->addOutput();
     if (output.defined()) {
       value->inferTypeFrom(output.data());
       setValueTrace(output, value);
     }
-  };
-
-  for (size_t i = 0; i < outputs.size(); i++) {
-    assignOutput(outputs[i], info.n->addOutput());
   }
 }
 
@@ -64,7 +103,7 @@ autograd::Variable getSizeOf(const autograd::Variable& var, int64_t dim) {
   auto size_var = autograd::make_variable(at::Scalar(var.size(dim)).toTensor());
   auto* value = getValueTrace(var);
   WithInsertPoint ipoint { graph->block() };
-  auto* node = graph->insertNode(graph->create(aten::size, {value, insertConstant(*graph, dim)}));
+  auto* node = graph->insertNode(graph->create(aten::size, {value, graph->insertConstant(dim)}));
   node->output()->setType(jit::IntType::get());
 
   auto ten =

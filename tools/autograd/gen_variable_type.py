@@ -46,12 +46,6 @@ DONT_RECORD_TRACE = {
 
 # These functions have their names recorded under trace renamed,
 RENAME_TRACE = {
-    'th_add': 'add',
-    's_native_add': 'add',
-    'th_sub': 'sub',
-    's_native_sub': 'sub',
-    'th_mul': 'mul',
-    's_native_mul': 'mul',
     'th_addmm': 'addmm',
     's_native_addmm': 'addmm',
     'zero': 'zeros_like',
@@ -132,21 +126,21 @@ RECORD_FUNCTION = CodeTemplate("""\
 profiler::RecordFunction profiler("${name}");""")
 
 PRE_RECORD_TRACE = CodeTemplate("""\
-jit::tracer::PreTraceInfo trace_info;
+torch::jit::Node* node = nullptr;
 if (jit::tracer::isTracing()) {
-  trace_info = jit::tracer::preRecordTrace( jit::aten::${trace_name}, ${trace_inputs} );
-  if (!jit::tracer::ArgumentStash::empty()) {
-    ${record_positional_attributes}
-    AT_ASSERT(jit::tracer::ArgumentStash::empty());
-  } else {
-    ${record_attributes}
-  }
+  auto& graph = jit::tracer::getTracingState()->graph;
+  node = graph->create(jit::aten::${trace_name}, /*outputs=*/0);
+  jit::tracer::recordSourceLocation(node);
+  ${add_trace_inputs}
+  graph->appendNode(node);
 }
 """)
 
+ADD_TRACE_INPUT = CodeTemplate("""jit::tracer::addInputs(node, "${input}", ${input});""")
+
 POST_RECORD_TRACE = CodeTemplate("""\
 if (jit::tracer::isTracing()) {
-  jit::tracer::postRecordTrace( trace_info,  ${trace_outputs} );
+  jit::tracer::postRecordTrace(node, ArrayRef<Variable>(${trace_outputs}) );
 }
 """)
 
@@ -183,12 +177,6 @@ def should_trace(declaration):
     # However, we can't use DONT_RECORD_TRACE, because we must only disable
     # these for overloads that come from native (the TH overloads still "work")
     overload = [arg['simple_type'] for arg in declaration['arguments'] if not arg.get('output', False)]
-    if base_name == 'add' and overload == ['Tensor', 'Tensor', 'Scalar']:
-        return False
-    if base_name == 'sub' and overload == ['Tensor', 'Tensor', 'Scalar']:
-        return False
-    if base_name == 'mul' and overload == ['Tensor', 'Tensor', 'Scalar']:
-        return False
     if base_name == 'addmm' and overload == ['Tensor', 'Tensor', 'Tensor', 'Scalar', 'Scalar']:
         return False
     return True
@@ -358,6 +346,8 @@ def emit_body(declaration):
             elif arg['type'] == 'TensorList':
                 name += '_'
                 expr = 'make_saved_variable_list({})'.format(arg['name'])
+            elif arg['type'] == 'IntList':
+                expr = expr + ".vec()"
             stmts.append('grad_fn->{} = {};'.format(name, expr))
         return stmts
 
@@ -387,55 +377,12 @@ def emit_body(declaration):
         if not should_trace(declaration):
             return ('', '')
 
-        # Note [clang-802.0.42 tuple overload bug]
-        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        # Originally, my plan for emit_$ecord_trace was to keep it as
-        # simple as possible, if at the expense of some somewhat ugly
-        # overloads.  So this meant we had a 'recordTrace' function
-        # with overloads like this:
-        #
-        #   recordTrace(..., const Variable& out)
-        #   recordTrace(..., const std::tuple<Variable, Variable>& out)
-        #
-        # Unfortunately, this triggers a bug in clang-802.0.42
-        # (widely used in macOS Sierra 10.12.6) wherein a Variable is
-        # implicitly convertible into a std::tuple<Variable, Variable>;
-        # a minimal repro can be seen below here:
-        #
-        #   #include <tuple>
-        #   struct T {};
-        #   void f(const std::tuple<T, T>&) {}
-        #   void g(T& x) { f(x); }
-        #
-        # To work around this bug, the code generator is a bit more
-        # complicated, and is taught how to handle this situation.
-
         local = {}
 
-        tensor_args = [arg for arg in declaration['arguments'] if arg['simple_type'] in {'Tensor', 'TensorList'}]
-        local['tensor_args'] = [arg['name'] for arg in tensor_args]
-        if any(arg['simple_type'] == 'TensorList' for arg in tensor_args):
-            # Allocate a temporary vector with flatten and pass it in
-            local['trace_inputs'] = CodeTemplate("flatten_tensor_args( $tensor_args )").substitute(local)
-        else:
-            local['trace_inputs'] = CodeTemplate("{ ${tensor_args} }").substitute(local)
-
-        local['record_attributes'] = []
-        for arg in declaration['arguments']:
-            if arg['simple_type'] in {'Tensor', 'TensorList'}:
-                continue
-            attr_name = RENAME_ATTRIBUTES.get((declaration['name'], arg['name']), arg['name'])
-            local['record_attributes'].append(RECORD_ATTRIBUTE.substitute(attr_name=attr_name, name=arg['name']))
-
-        local['record_positional_attributes'] = []
-        for i, arg in enumerate(declaration['arguments']):
-            if arg['simple_type'] == 'Tensor':
-                continue
-            if arg['simple_type'] == 'TensorList':
-                local['record_positional_attributes'] = POSITIONAL_ATTR_NYI
-                break
-            local['record_positional_attributes'].append(
-                RECORD_POSITIONAL_ATTRIBUTE.substitute(name=arg['name'], i=i))
+        add_trace_inputs = []
+        for argument in declaration['arguments']:
+            add_trace_inputs.append(ADD_TRACE_INPUT.substitute(input=argument['name']))
+        local['add_trace_inputs'] = '\n'.join(add_trace_inputs)
 
         # Record inplace operations as out-of-place operations (e.g.,
         # not add_ but add)

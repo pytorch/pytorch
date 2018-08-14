@@ -5,7 +5,9 @@
 
 #include "ATen/Retainable.h"
 #include "ATen/ScalarType.h"
-#include "ATen/optional.h"
+#include "ATen/core/optional.h"
+#include "ATen/core/TensorTypeId.h"
+#include "ATen/core/TensorTypeIdRegistration.h"
 
 struct THTensor;
 
@@ -18,22 +20,25 @@ struct Tensor;
 
 namespace at {
 struct AT_API TensorImpl : public Retainable {
-  explicit TensorImpl(Type * type, THTensor * tensor)
-  : type_(type), tensor(tensor) {}
+  explicit TensorImpl(TensorTypeId type_id, ScalarType scalar_type, THTensor * tensor, bool is_variable)
+  : type_id_(type_id), scalar_type_(scalar_type), is_variable_(is_variable), tensor(tensor) {}
+  TensorImpl(TensorTypeId type_id, ScalarType scalar_type);
 
   virtual ~TensorImpl();
 
   virtual void release_resources() override;
 
-  Type & type() const {
-    return *type_;
-  }
+  // The implementation of this method will have to be hoisted out and
+  // hooked in, so that Caffe2 doesn't need to know about Context
+  // TODO: This really really needs to be inlined.
+  Type & type() const;
+
   const char * toString() const;
   virtual IntList sizes() const;
   virtual IntList strides() const;
   virtual int64_t dim() const;
   virtual void * unsafeGetTH(bool retain);
-  virtual std::unique_ptr<Storage> storage() = 0;
+  virtual std::unique_ptr<Storage> storage();
   friend struct Type;
 
   int64_t numel() {
@@ -50,6 +55,19 @@ struct AT_API TensorImpl : public Retainable {
   // we also prevent this from getting marked as a zero dim tensor if it is not
   // the right shape afterall.
   virtual TensorImpl* maybe_zero_dim(bool condition_when_zero_dim);
+
+  // True if a tensor was auto-wrapped from a C++ or Python number.
+  // Wrapped numbers do not participate in the result type computation for
+  // mixed-type operations if there are any Tensors that are not wrapped
+  // numbers. Otherwise, they behave like their non-wrapped equivalents.
+  // See [Result type computation] in TensorIterator.h.
+  bool is_wrapped_number() const {
+    return is_wrapped_number_;
+  }
+  void set_wrapped_number(bool value) {
+    AT_ASSERT(dim() == 0);
+    is_wrapped_number_ = value;
+  }
 
   // ~~~~~ Autograd API ~~~~~
   // Some methods below are defined in TensorImpl.cpp because Tensor is an
@@ -78,7 +96,12 @@ struct AT_API TensorImpl : public Retainable {
   virtual void set_data(Tensor new_data);
 
 protected:
-  Type * type_;
+  TensorTypeId type_id_;
+  // INVARIANT: When storage is non-null, this scalar type must
+  // agree with the scalar type in storage
+  ScalarType scalar_type_;
+  bool is_variable_ = false;
+  bool is_wrapped_number_ = false;
 public:
   THTensor * tensor;
 };

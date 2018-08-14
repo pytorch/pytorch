@@ -37,11 +37,11 @@ TEST(OperatorFallbackTest, IncrementByOneOp) {
       "IncrementByOne", "", vector<string>{"X"},
       vector<string>{"X"});
   Workspace ws;
-  TensorCPU source_tensor(vector<TIndex>{2, 3});
+  Tensor source_tensor(vector<TIndex>{2, 3}, CPU);
   for (int i = 0; i < 6; ++i) {
     source_tensor.mutable_data<float>()[i] = i;
   }
-  ws.CreateBlob("X")->GetMutable<TensorCPU>()->CopyFrom(source_tensor);
+  ws.CreateBlob("X")->GetMutableTensor(CPU)->CopyFrom(source_tensor);
   unique_ptr<OperatorBase> op(CreateOperator(op_def, &ws));
   EXPECT_TRUE(op.get() != nullptr);
   EXPECT_TRUE(op->Run());
@@ -61,16 +61,16 @@ TEST(OperatorFallbackTest, GPUIncrementByOneOp) {
       vector<string>{"X"});
   op_def.mutable_device_option()->set_device_type(CUDA);
   Workspace ws;
-  TensorCPU source_tensor(vector<TIndex>{2, 3});
+  Tensor source_tensor(vector<TIndex>{2, 3}, CPU);
   for (int i = 0; i < 6; ++i) {
     source_tensor.mutable_data<float>()[i] = i;
   }
-  ws.CreateBlob("X")->GetMutable<TensorCUDA>()->CopyFrom(source_tensor);
+  ws.CreateBlob("X")->GetMutableTensor(CUDA)->CopyFrom(source_tensor);
   unique_ptr<OperatorBase> op(CreateOperator(op_def, &ws));
   EXPECT_TRUE(op.get() != nullptr);
   EXPECT_TRUE(op->Run());
   const TensorCUDA& output = ws.GetBlob("X")->Get<TensorCUDA>();
-  TensorCPU output_cpu(output);
+  Tensor output_cpu(output, CPU);
   EXPECT_EQ(output.ndim(), 2);
   EXPECT_EQ(output.dim(0), 2);
   EXPECT_EQ(output.dim(1), 3);

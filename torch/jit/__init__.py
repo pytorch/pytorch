@@ -38,7 +38,13 @@ def scope(scope_name):
             tracing_state.pop_scope()
 
 
-def get_trace_graph(f, args=tuple(), kwargs=None):
+def load(filename):
+    m = ScriptModule()
+    m._load(filename)
+    return m
+
+
+def get_trace_graph(f, args=(), kwargs=None):
     """
     Trace a function or model, returning a tuple consisting of the both the
     *trace* of an execution, as well as the original return value.
@@ -403,9 +409,12 @@ def batch(batch_size=1, optimize=True, _frames_up=0):
                 else:
                     new_args.append(arg)
             res = res_mod(*new_args)
-            # assert len(res) / 3 == 0
-            # result = [BatchTensor(*res[i * 3: i * 3 + 3]) for i in range(len(res) // 3)]
-            result = BatchTensor(*res)
+            assert len(res) % 3 == 0
+            if len(res) % 3 != 0:
+                raise "non-batched-tensor output is not supported yet"
+            result = [BatchTensor(*res[i * 3: i * 3 + 3]) for i in range(len(res) // 3)]
+            if len(result) == 1:
+                return result[0]
             return result
         wrapper.__doc__ = fn.__doc__
         return wrapper

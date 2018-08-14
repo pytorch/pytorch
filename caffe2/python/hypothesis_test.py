@@ -630,7 +630,7 @@ class TestOperators(hu.HypothesisTestCase):
            beta=st.floats(min_value=0.1, max_value=0.9),
            lambda1=st.floats(min_value=0.001, max_value=0.1),
            lambda2=st.floats(min_value=0.001, max_value=0.1),
-           engine=st.sampled_from([None]),
+           engine=st.sampled_from([None, "SIMD"]),
            **hu.gcs_cpu_only)
     def test_gftrl_sgd(self, inputs, in_place, alpha, beta, lambda1, lambda2,
                       engine, gc, dc):
@@ -763,12 +763,13 @@ class TestOperators(hu.HypothesisTestCase):
         self.assertReferenceChecks(gc, op, [var, nz, indices, grad, alpha],
                                    ftrl)
 
+    # TODO: (bddppq) test_unique keeps running into segfault on rocm 1.8.2
     @given(input=hu.tensor(max_value=20,
                            max_dim=1,
                            dtype=np.int32,
                            elements=st.integers(min_value=0, max_value=10)),
            with_remapping=st.booleans(),
-           **hu.gcs)
+           **hu.gcs_no_hip)
     def test_unique(self, input, with_remapping, gc, dc):
         op = core.CreateOperator(
             "Unique",

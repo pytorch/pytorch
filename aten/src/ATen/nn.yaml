@@ -58,7 +58,7 @@
 
 # Activation functions
 
-- name: elu(Tensor self, Scalar alpha=1, Scalar scale=1)
+- name: elu(Tensor self, Scalar alpha=1, Scalar scale=1, Scalar input_scale=1)
   cname: ELU
   has_inplace: True
   scalar_check:
@@ -274,11 +274,3 @@
 - name: thnn_conv_dilated3d(Tensor self, Tensor weight, IntList[3] kernel_size, Tensor bias={}, IntList[3] stride=1, IntList[3] padding=0, IntList[3] dilation=1)
   cname: VolumetricDilatedConvolution
   buffers: [columns, ones]
-
-# Vision
-
-- name: thnn_grid_sampler_bilinear2d(Tensor self, Tensor grid, int64_t padding_mode)
-  cname: SpatialGridSamplerBilinear
-
-- name: thnn_grid_sampler_bilinear3d(Tensor self, Tensor grid, int64_t padding_mode)
-  cname: VolumetricGridSamplerBilinear
