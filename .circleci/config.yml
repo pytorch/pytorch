@@ -17,6 +17,60 @@ linux_cpu_build_test_defaults: &linux_cpu_build_test_defaults
         .jenkins/pytorch/build.sh
         .jenkins/pytorch/test.sh
 
+linux_cpu_build_defaults: &linux_cpu_build_defaults
+  resource_class: large
+  working_directory: /var/lib/jenkins/workspace
+  steps:
+  - checkout
+  - run:
+      name: Build
+      command: |
+        export SCCACHE_BUCKET=ossci-compiler-cache
+        git submodule update --init
+        .jenkins/pytorch/build.sh
+        mkdir -p pytorch-ci-env/
+        cp -r /opt/conda/lib/python3.6/site-packages/torch pytorch-ci-env/torch
+        cp -r build/bin pytorch-ci-env/cpp_test_bin
+  - persist_to_workspace:
+      root: /var/lib/jenkins/workspace/pytorch-ci-env
+      paths:
+        - "*"
+
+linux_cpu_test_defaults: &linux_cpu_test_defaults
+  machine:
+    image: default
+  resource_class: large
+  steps:
+  - checkout
+  - run:
+      name: Prepare workspace
+      command: |
+        sudo mkdir -p /opt/workspace
+        sudo chmod -R 777 /opt/workspace
+  - attach_workspace:
+      at: /opt/workspace
+  - run:
+      name: Build
+      command: |
+        set -x
+        sudo pip install awscli
+        sudo apt-get update
+        sudo apt-get install linux-headers-$(uname -r)
+        sudo apt-get install linux-image-generic
+        sudo pkill -SIGHUP dockerd
+        export AWS_ACCESS_KEY_ID=AKIAIUHRTFRLXI6HBUCQ
+        export AWS_SECRET_ACCESS_KEY=$CIRCLECI_AWS_SECRET_KEY
+        eval $(aws ecr get-login --region us-east-1 --no-include-email)
+        docker pull ${DOCKER_IMAGE}
+        id=$(docker run -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
+        pwd
+        mkdir -p /home/circleci/project/build
+        cp -r /opt/workspace/cpp_test_bin /home/circleci/project/build/bin
+        docker cp /home/circleci/project/. "$id:/var/lib/jenkins/workspace"
+        echo "mkdir -p /opt/conda/lib/python${PYTHON_VERSION}/site-packages" | docker exec -u jenkins -i "$id" bash
+        docker cp "/opt/workspace/torch" "$id:/opt/conda/lib/python${PYTHON_VERSION}/site-packages/torch"
+        (echo "export SCCACHE_BUCKET=$SCCACHE_BUCKET" && echo 'sudo chown -R jenkins workspace /opt/conda/lib/python${PYTHON_VERSION}/site-packages/torch && cd workspace && git submodule update --init && .jenkins/pytorch/test.sh') | docker exec -u jenkins -i "$id" bash
+
 linux_cuda_build_defaults: &linux_cuda_build_defaults
   resource_class: large
   working_directory: /var/lib/jenkins/workspace
@@ -29,6 +83,9 @@ linux_cuda_build_defaults: &linux_cuda_build_defaults
         export TORCH_CUDA_ARCH_LIST=5.2
         git submodule update --init
         .jenkins/pytorch/build.sh
+        mkdir -p pytorch-ci-env/
+        cp -r /opt/conda/lib/python3.6/site-packages/torch pytorch-ci-env/torch
+        cp -r build/bin pytorch-ci-env/cpp_test_bin
   - persist_to_workspace:
       root: /var/lib/jenkins/workspace/pytorch-ci-env
       paths:
@@ -80,11 +137,23 @@ linux_cuda_test_defaults: &linux_cuda_test_defaults
 
 version: 2
 jobs:
-  linux_trusty_py3_6_gcc7_build:
+  linux_trusty_py3_6_gcc7_build_test:
     docker:
       - image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.6-gcc7:226
         <<: *docker_config_defaults
     <<: *linux_cpu_build_test_defaults
+
+  linux_xenial_py3_clang5_asan_build:
+    docker:
+      - image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-asan:226
+        <<: *docker_config_defaults
+    <<: *linux_cpu_build_defaults
+
+  linux_xenial_py3_clang5_asan_test:
+    environment:
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-asan:226"
+      PYTHON_VERSION: "3.6"
+    <<: *linux_cpu_test_defaults
 
   linux_xenial_cuda8_cudnn6_py3_build:
     docker:
@@ -178,7 +247,11 @@ workflows:
   version: 2
   build:
     jobs:
-      - linux_trusty_py3_6_gcc7_build
+      - linux_trusty_py3_6_gcc7_build_test
+      - linux_xenial_py3_clang5_asan_build
+      - linux_xenial_py3_clang5_asan_test:
+          requires:
+            - linux_xenial_py3_clang5_asan_build
       - linux_xenial_cuda8_cudnn6_py3_build
       - linux_xenial_cuda8_cudnn6_py3_test:
           requires:
