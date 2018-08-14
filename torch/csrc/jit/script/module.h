@@ -152,6 +152,10 @@ struct Method {
     return ss.str();
   }
 
+  GraphExecutorState getDebugState() {
+    return get_executor().getDebugState();
+  }
+
 private:
   std::string name_;
   std::shared_ptr<Graph> graph_; // for debugging and for inlining
