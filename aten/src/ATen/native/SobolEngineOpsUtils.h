@@ -25,7 +25,8 @@ static inline int64_t bitsubseq(const int64_t n, const int pos, const int length
 
 /// Function to perform the inner product between a vector and a random Bernoulli vector
 static inline int64_t cdot_pow2(const at::Tensor& vec) {
-  at::Tensor pow2s = at::pow(2, at::native::_dim_arange(vec, 0));
+  at::Tensor pow2s = vec.type().toScalarType(at::kLong)._arange(vec.size(0) - 1, -1, -1);
+  pow2s = at::pow(2, pow2s);
   return at::native::dot(pow2s, vec).toCLong();
 }
 
