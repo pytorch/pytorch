@@ -56,16 +56,28 @@ int64_t Variable::Impl::dim() const {
   return data_.dim();
 }
 
+int64_t Variable::Impl::size(int64_t d) const {
+  return data_.size(d);
+}
+int64_t Variable::Impl::stride(int64_t d) const {
+  return data_.stride(d);
+}
+
 const char* Variable::Impl::typeString() {
   return "VariableType";
 }
 
-void* Variable::Impl::unsafeGetTH(bool retain) {
-  return data_.unsafeGetTH(retain);
-}
-
 std::unique_ptr<at::Storage> Variable::Impl::storage() {
   return data_.storage();
+}
+
+at::StorageImpl* Variable::Impl::storageImpl() const {
+{
+  return data_.unsafeGetTensorImpl()->storageImpl();
+}
+
+ptrdiff_t Variable::Impl::storage_offset() const {
+  return data_.storage_offset();
 }
 
 std::shared_ptr<Function> Variable::Impl::get_grad_accumulator() {

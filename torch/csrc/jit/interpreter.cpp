@@ -349,9 +349,6 @@ public:
   virtual int64_t dim() const override {
     throw std::runtime_error("dim() on ContainerTensor");
   }
-  virtual void * unsafeGetTH(bool retain) override {
-    throw std::runtime_error("unsafeGetTH() on ContainerTensor");
-  }
   virtual std::unique_ptr<at::Storage> storage() override {
     throw std::runtime_error("storage() on ContainerTensor");
   }

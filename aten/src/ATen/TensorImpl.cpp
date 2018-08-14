@@ -63,7 +63,13 @@ TensorImpl::TensorImpl(
     TensorTypeId type_id,
     ScalarType scalar_type,
     bool is_variable)
-    : type_id_(type_id), scalar_type_(scalar_type), is_variable_(is_variable) {
+    : storage_(nullptr),
+      storage_offset_(0),
+      sizes_{0},
+      strides_{1},
+      type_id_(type_id),
+      scalar_type_(scalar_type),
+      is_variable_(is_variable) {
   if (type_id != UndefinedTensorId() && scalar_type != ScalarType::Undefined) {
     auto type = &globalContext().getType(tensorTypeIdToBackend(type_id), scalar_type);
     Storage* storage = type->storage(true).release();
@@ -109,13 +115,6 @@ TensorImpl* TensorImpl::maybe_zero_dim(bool condition_when_zero_dim) {
   bool set_zero_dim = condition_when_zero_dim && this->sizes().size() == 1 && this->size(0) == 1;
   if (set_zero_dim) {
     THTensor_resizeDim(this, 0);
-  }
-  return this;
-}
-
-void * TensorImpl::unsafeGetTH(bool retain) {
-  if (retain) {
-    this->retain();
   }
   return this;
 }

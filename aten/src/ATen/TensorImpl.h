@@ -52,7 +52,6 @@ struct AT_API TensorImpl : public Retainable {
   virtual IntList sizes() const;
   virtual IntList strides() const;
   virtual int64_t dim() const;
-  virtual void * unsafeGetTH(bool retain);
   virtual std::unique_ptr<Storage> storage();
   friend struct Type;
 
@@ -120,34 +119,37 @@ struct AT_API TensorImpl : public Retainable {
 
   template <typename T>
   inline T * data() const {
-    return storage_->data<T>() + storage_offset_;
+    return storageImpl()->data<T>() + storage_offset_;
   }
 
   template <typename T>
   inline T * unsafe_data() const {
-    return storage_->unsafe_data<T>() + storage_offset_;
+    return storageImpl()->unsafe_data<T>() + storage_offset_;
   }
 
-  at::ScalarType scalar_type() const {
-    return storage_->scalar_type();
+  inline at::ScalarType scalar_type() const {
+    return storageImpl()->scalar_type();
   }
 
-  ptrdiff_t storage_offset() const {
+  virtual ptrdiff_t storage_offset() const {
     return storage_offset_;
   }
 
   // represents that numel() == 0.
   inline bool is_empty() const {
     for (int64_t i = 0; i < dim(); ++i) {
-      if (sizes_[i] == 0) {
+      if (sizes()[i] == 0) {
         return true;
       }
     }
     return false;
   }
 
-  int64_t size(int64_t d) const;
-  int64_t stride(int64_t d) const;
+  virtual int64_t size(int64_t d) const;
+  virtual int64_t stride(int64_t d) const;
+
+  // TODO: get rid of this.
+  virtual at::StorageImpl* storageImpl() const { return storage_; }
 
 protected:
   TensorTypeId type_id_;
