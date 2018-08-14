@@ -6337,18 +6337,24 @@ class TestCustomOperators(JitTestCase):
             "Unknown keyword argument 'foo' for operator 'aten::leaky_relu'"
         ):
             torch.ops.aten.leaky_relu(torch.ones(5), foo=torch.ones(5))
-    #
-    # def test_passing_and_returning_lists(self):
-    #     a, b = torch.ones(5), torch.zeros(5)
-    #     output = torch.ops.aten.stack([a, b])
-    #     self.assertEqual(output, torch.ones(10))
-    #
-    # def test_throws_for_tuples(self):
-    #     with self.assertRaisesRegex(
-    #         RuntimeError,
-    #         "Unknown keyword argument 'foo' for operator 'aten::leaky_relu'"
-    #     ):
-    #         torch.ops.aten.leaky_relu(torch.ones(5), foo=torch.ones(5))
+
+    def test_passing_and_returning_lists(self):
+        # Replace with actual test once we support lists.
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Lists and tuples are not supported yet"
+        ):
+            a, b = torch.ones(5), torch.zeros(5)
+            output = torch.ops.aten.stack([a, b])
+            self.assertEqual(output, torch.ones(10))
+
+    def test_passing_and_returning_tuples(self):
+        # Replace with actual test once we support tuples.
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Lists and tuples are not supported yet"
+        ):
+            torch.ops.aten.max_pool2d(torch.ones(5, 5), [2, 2])
 
     def test_script_graph_contains_custom_op(self):
         @torch.jit.script
