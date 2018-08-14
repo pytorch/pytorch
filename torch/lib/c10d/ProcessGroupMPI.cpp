@@ -52,23 +52,26 @@ bool cudaAwareMpiCheck() {
 }
 
 // Checking the input tensor's validity
-void checkSingleTensor(const std::vector<at::Tensor>& tensors) {
-  if (tensors.size() != 1) {
-    throw std::runtime_error(
-        "MPI process group only supports a single "
-        "tensor op");
-  }
-  if (!tensors[0].is_contiguous()) {
+void checkSingleTensorHelper(const at::Tensor& tensor) {
+  if (!tensor.is_contiguous()) {
     throw std::runtime_error("input tensor has to be contiguous");
   }
-  if (tensors[0].is_sparse()) {
+  if (tensor.is_sparse()) {
     throw std::runtime_error("input tensor has to be dense");
   }
-  if (tensors[0].is_cuda() && !cudaAwareMpiCheck()) {
+  if (tensor.is_cuda() && !cudaAwareMpiCheck()) {
     throw std::runtime_error(
         "CUDA tensor detected and the MPI used doesn't "
         "have CUDA-aware MPI support");
   }
+}
+
+void checkSingleTensor(const std::vector<at::Tensor>& tensors) {
+  if (tensors.size() != 1) {
+    throw std::runtime_error(
+        "MPI process group does not support multi-GPU collectives");
+  }
+  checkSingleTensorHelper(tensors[0]);
 }
 
 void checkSameSizeAndType(
@@ -79,8 +82,7 @@ void checkSameSizeAndType(
         (tensors[i].type() != tensor.type())) {
       throw std::runtime_error("Tensors are not equal in size or data type");
     }
-    std::vector<at::Tensor> temp{tensors[i]};
-    checkSingleTensor(temp);
+    checkSingleTensorHelper(tensors[i]);
   }
 }
 
@@ -390,7 +392,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::gather(
     }
   } else {
     if (outputTensors.size() != 1) {
-      throw std::runtime_error("Gather: only single tensor op supported");
+      throw std::runtime_error("Gather: multi-GPU collective is not supported");
     }
     if (static_cast<size_t>(size_) != outputTensors[0].size()) {
       throw std::runtime_error(
@@ -455,7 +457,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::scatter(
     }
   } else {
     if (inputTensors.size() != 1) {
-      throw std::runtime_error("Gather: only single tensor op supported");
+      throw std::runtime_error("Gather: multi-GPU collective is not supported");
     }
     if (static_cast<size_t>(size_) != inputTensors[0].size()) {
       throw std::runtime_error(
