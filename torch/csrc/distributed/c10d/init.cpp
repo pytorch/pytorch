@@ -237,7 +237,7 @@ PyObject* c10d_init(PyObject* _unused) {
               py::call_guard<py::gil_scoped_release>())
 
           .def(
-              "recvAnysource",
+              "recv_anysource",
               &::c10d::ProcessGroup::recvAnysource,
               py::call_guard<py::gil_scoped_release>())
 
