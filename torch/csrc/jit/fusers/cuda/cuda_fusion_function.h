@@ -39,8 +39,12 @@ struct CUDAFusionFunction : public CompiledFusionFunction {
     return output_desc;
   }
 
+  // Note: this call to cuModuleUnload is intentionally unchecked
+  // Shutdown unloads the driver and can destroy the fusion functions, and
+  // if the driver is unloaded first then cuModuleUnload will fail. 
+  // This is OK.
   virtual ~CUDAFusionFunction() override {
-    CU_WARN(cuModuleUnload(module));
+    cuModuleUnload(module);
   }
 
 private:
