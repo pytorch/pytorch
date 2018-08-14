@@ -28,7 +28,7 @@ struct TensorDesc {
   : TensorDesc(type, TensorDesc::findContiguous(sizes, strides)) {}
   TensorDesc(const at::Tensor& t)
     : TensorDesc(t.type().scalarType(), t.sizes(), t.strides()) {}
-  TensorDesc(TensorTypePtr type)
+  TensorDesc(CompleteTensorTypePtr type)
     : TensorDesc(type->scalarType(), type->sizes(), type->strides()) {}
 
   // number of dimensions after contiguity compression
@@ -88,7 +88,7 @@ struct PartitionDesc {
   // Constructor for chunk descriptors
   // tensor_type: the type of the input to the chunk node
   // ignored: XXX: Compiler gets confused without this arg
-  PartitionDesc(TensorTypePtr tensor_type, size_t chunks, size_t dim, bool ignored)
+  PartitionDesc(CompleteTensorTypePtr tensor_type, size_t chunks, size_t dim, bool ignored)
   : nSubtensors(chunks), dim(dim) {
     (void)ignored;
     JIT_ASSERT(chunks > 1);

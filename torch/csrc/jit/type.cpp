@@ -7,7 +7,7 @@
 namespace torch { namespace jit {
 
 std::ostream& operator<<(std::ostream & out, const Type & t) {
-  if(auto value = t.cast<TensorType>()) {
+  if(auto value = t.cast<CompleteTensorType>()) {
     out << at::toString(value->scalarType()) << "(";
     auto& sizes = value->sizes();
     auto& strides = value->strides();

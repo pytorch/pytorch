@@ -141,7 +141,7 @@ void EncoderBase::EncodeValueInfo(
   onnx::TypeProto_Tensor* tensor_type = t->mutable_tensor_type();
 
   onnx::TensorShapeProto* shape = tensor_type->mutable_shape();
-  if (TensorTypePtr node_type = n->type()->cast<TensorType>()) {
+  if (CompleteTensorTypePtr node_type = n->type()->cast<CompleteTensorType>()) {
     const std::vector<std::int64_t>& sizes = node_type->sizes();
     for (size_t i = 0; i < sizes.size(); i++) {
       shape->add_dim();
@@ -469,9 +469,9 @@ void ModuleEncoder::EncodeTypeInfo(
   auto kind = type->kind();
   if (kind == TypeKind::DynamicType) {
     type_proto->set_denotation("DynamicType");
-  } else if (kind == TypeKind::TensorType) {
-    type_proto->set_denotation("TensorType");
-    TensorTypePtr node_type = type->cast<TensorType>();
+  } else if (kind == TypeKind::CompleteTensorType) {
+    type_proto->set_denotation("CompleteTensorType");
+    CompleteTensorTypePtr node_type = type->cast<CompleteTensorType>();
     const std::vector<std::int64_t>& sizes = node_type->sizes();
 
     // store the sizes and strides in the dims field of TensorShapeProto

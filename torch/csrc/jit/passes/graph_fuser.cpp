@@ -148,7 +148,7 @@ struct GraphFuser {
     if(node->kind() == prim::FusionGroup) {
       return Device::fromIndex(node->i(attr::device));
     }
-    if(auto tt = node->output()->type()->cast<TensorType>()) {
+    if(auto tt = node->output()->type()->cast<CompleteTensorType>()) {
       return Device::fromIndex(tt->device());
     }
     if (node->output()->type()->isSubtypeOf(NumberType::get())) {
@@ -161,7 +161,7 @@ struct GraphFuser {
   // so for now we only consider nodes that operate on floating point numbers
   // and half values when running on a GPU with sufficient CUDA arch
   bool hasSupportedType(Value* node) {
-    if (auto tt = node->type()->cast<TensorType>()) {
+    if (auto tt = node->type()->cast<CompleteTensorType>()) {
       if (tt->scalarType() == at::kFloat) return true;
       #ifdef USE_CUDA
         // Checks for half tensor on GPU
@@ -176,10 +176,10 @@ struct GraphFuser {
   }
 
   bool areTensorsOfSameShape(at::ArrayRef<Value*> values) {
-    auto expected_type = values.at(0)->type()->cast<TensorType>();
+    auto expected_type = values.at(0)->type()->cast<CompleteTensorType>();
     if (!expected_type) return false;
     for (Value * val : values) {
-      auto val_type = val->type()->cast<TensorType>();
+      auto val_type = val->type()->cast<CompleteTensorType>();
       if (!val_type) return false;
       if (expected_type->device() != val_type->device()) return false;
       if (expected_type->sizes() != val_type->sizes()) return false;
@@ -275,10 +275,10 @@ struct GraphFuser {
     auto tensors = tensors_node->inputs();
 
     // Our fusion code assumes that all inputs have the same shapes, so we need to check this too.
-    auto expected = tensors.at(0)->type()->cast<TensorType>();
+    auto expected = tensors.at(0)->type()->cast<CompleteTensorType>();
     if (!expected) return false;
     return std::all_of(tensors.begin(), tensors.end(), [&expected](Value *v) {
-        auto actual = v->type()->cast<TensorType>();
+        auto actual = v->type()->cast<CompleteTensorType>();
         return actual && actual->sizes() == expected->sizes();
     });
   }
@@ -369,7 +369,7 @@ struct GraphFuser {
 
   at::optional<at::IntList> mapSize(Node * node) {
     if (isSimpleMap(node)) {
-      auto type = node->output()->type()->cast<TensorType>();
+      auto type = node->output()->type()->cast<CompleteTensorType>();
       if (!type) {
         return at::nullopt;
       }
@@ -377,7 +377,7 @@ struct GraphFuser {
     }
     if (node->kind() == prim::FusionGroup) {
       // inputs are guaranteed to be the map_size
-      auto type = node->inputs().at(0)->type()->cast<TensorType>();
+      auto type = node->inputs().at(0)->type()->cast<CompleteTensorType>();
       JIT_ASSERT(type);
       return at::optional<at::IntList>(at::in_place, type->sizes());
     }
@@ -386,7 +386,7 @@ struct GraphFuser {
       // a condition for aten::cat to be fusible.
       Node * list_construct = node->namedInput(attr::tensors)->node();
       JIT_ASSERT(areTensorsOfSameShape(list_construct->inputs()));
-      auto type = list_construct->inputs().at(0)->type()->cast<TensorType>();
+      auto type = list_construct->inputs().at(0)->type()->cast<CompleteTensorType>();
       return at::optional<at::IntList>(at::in_place, type->sizes());
     }
     if (node->kind() == aten::chunk) {
@@ -394,7 +394,7 @@ struct GraphFuser {
       // This is a condition for the graph fuser to operate on
       // aten::chunk nodes and is checked elsewhere.
       JIT_ASSERT(areTensorsOfSameShape(node->outputs()));
-      auto type = node->outputs().at(0)->type()->cast<TensorType>();
+      auto type = node->outputs().at(0)->type()->cast<CompleteTensorType>();
       return at::optional<at::IntList>(at::in_place, type->sizes());
     }
     return at::nullopt;
@@ -437,7 +437,7 @@ struct GraphFuser {
 
     auto tensor_inputs = tensorInputs(node);
     for (auto * producer: tensor_inputs) {
-      auto type = producer->type()->cast<TensorType>();
+      auto type = producer->type()->cast<CompleteTensorType>();
       JIT_ASSERT(type);
       if (equalSizes(map_size, type->sizes())) {
         continue;
@@ -681,7 +681,7 @@ struct GraphFuser {
     }
     // and chunks evenly divides the tensor
     int64_t dim = chunk->get<int64_t>(attr::dim).value();
-    auto expected_type = chunk->namedInput(attr::self)->type()->cast<TensorType>();
+    auto expected_type = chunk->namedInput(attr::self)->type()->cast<CompleteTensorType>();
     if (!expected_type) {
       return false;
     }
@@ -863,7 +863,7 @@ struct GraphFuser {
     //  = Node* for chunk_output_idx'th output of the chunk(inputs[input_nr])
     std::vector<std::vector<Value*>> chunked_inputs;
     for (auto input : producer_for_chunk_node->inputs()) {
-      auto input_type = input->type()->cast<TensorType>();
+      auto input_type = input->type()->cast<CompleteTensorType>();
       // XXX: we only work with pointwise ops in here, so we know it is valid to push
       // the concat only through tensor arguments (and all other args can be safely ignored).
       if (!input_type)
@@ -882,7 +882,7 @@ struct GraphFuser {
 
       chunked_inputs.emplace_back(); // alas, to not be C++17
       for (auto chunk_sel : chunk->outputs()) {
-          auto chunk_sel_type = chunk_sel->type()->expect<TensorType>();
+          auto chunk_sel_type = chunk_sel->type()->expect<CompleteTensorType>();
           Value * input_chunk_sel = input_chunk->addOutput();
           input_chunk_sel->setType(
             input_type->withSizesStrides(chunk_sel_type->sizes(),
@@ -898,7 +898,7 @@ struct GraphFuser {
       Node * chunked_op = block->owningGraph()->create(producer_for_chunk_node->kind());
       chunked_op->copyAttributes(*producer_for_chunk_node);
       // Invariant: mappable operators always produce contiguous output
-      chunked_op->output()->setType(chunk_sel->type()->cast<TensorType>()->contiguous());
+      chunked_op->output()->setType(chunk_sel->type()->cast<CompleteTensorType>()->contiguous());
       auto chunked_inputs_it = chunked_inputs.begin();
       for (size_t i = 0; i < original_inputs.size(); ++i) {
         if (original_inputs[i]->type()->isSubtypeOf(DynamicType::get())) {
