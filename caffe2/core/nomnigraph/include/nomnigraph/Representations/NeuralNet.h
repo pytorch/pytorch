@@ -242,6 +242,8 @@ using NNCFGraph = nom::repr::ControlFlowGraph<NNGraph>;
 struct NNModule {
   NNGraph dataFlow;
   NNCFGraph controlFlow;
+  std::unordered_set<NNGraph::NodeRef> inputs;
+  std::unordered_set<NNGraph::NodeRef> outputs;
   NNModule(const NNModule&) = delete;
   NNModule(NNModule&&) = default;
   NNModule() {}

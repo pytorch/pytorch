@@ -7663,6 +7663,13 @@ class TestTorch(TestCase):
         self.assertEqual(x.__repr__(), str(x))
         self.assertExpected(str(x), subname='requires_grad')
 
+        # test non-contiguous print
+        # sliced tensor should have > PRINT_OPTS.threshold elements
+        x = torch.ones(100, 2, 2, 10)
+        y = x.as_strided(size=(100, 2, 10), stride=(2 * 2 * 10, 2 * 10, 1))
+        self.assertEqual(str(y), y.__repr__())
+        self.assertExpected(str(y), subname='non_contiguous')
+
     def test_sizeof(self):
         sizeof_empty = torch.randn(0).storage().__sizeof__()
         sizeof_10 = torch.randn(10).storage().__sizeof__()
@@ -7918,7 +7925,7 @@ class TestTorch(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_ctor_with_numpy_array(self):
-        dtypes = [
+        correct_dtypes = [
             np.double,
             np.float,
             np.float16,
@@ -7927,7 +7934,11 @@ class TestTorch(TestCase):
             np.int16,
             np.uint8
         ]
-        for dtype in dtypes:
+
+        incorrect_byteorder = '>' if sys.byteorder == 'little' else '<'
+        incorrect_dtypes = map(lambda t: incorrect_byteorder + t, ['d', 'f'])
+
+        for dtype in correct_dtypes:
             array = np.array([1, 2, 3, 4], dtype=dtype)
 
             # Upcast
