@@ -262,8 +262,7 @@ void testScatter(int iter = 1) {
       allInputTensors[i] = std::vector<std::vector<at::Tensor>>(1);
       allInputTensors[i][0].resize(worldSize);
       for (auto j = 0; j < worldSize; ++j) {
-        allInputTensors[i][0][j] =
-            at::ones({16, 16}) * rank * i;
+        allInputTensors[i][0][j] = at::ones({16, 16}) * rank * i;
       }
     } else {
       allInputTensors[i] = std::vector<std::vector<at::Tensor>>();
@@ -326,7 +325,7 @@ void testSendRecv(bool recvAnysource, int iter = 10000) {
       // Wait for work to complete
       if (!work->wait()) {
         std::cerr << "Exception received: " << work->exception().what()
-          << std::endl;
+                  << std::endl;
         pg->abort();
       }
     }
@@ -342,7 +341,7 @@ void testSendRecv(bool recvAnysource, int iter = 10000) {
         works.push_back(std::move(work));
       } else {
         std::shared_ptr<::c10d::ProcessGroup::Work> work =
-          pg->recvAnysource(tensors, &srcRanks[i]);
+            pg->recvAnysource(tensors, &srcRanks[i]);
       }
       ++i;
     }
@@ -350,7 +349,7 @@ void testSendRecv(bool recvAnysource, int iter = 10000) {
       // Wait for work to complete
       if (!work->wait()) {
         std::cerr << "Exception received: " << work->exception().what()
-          << std::endl;
+                  << std::endl;
         pg->abort();
       }
     }

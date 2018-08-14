@@ -595,17 +595,20 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::scatter(
 }
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::send(
-    std::vector<at::Tensor>& tensors, int dstRank) {
+    std::vector<at::Tensor>& /* unused */,
+    int /* unused */) {
   throw std::runtime_error("ProcessGroupNCCL does not support send");
 }
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::recv(
-    std::vector<at::Tensor>& tensors, int srcRank) {
+    std::vector<at::Tensor>& /* unused */,
+    int /* unused */) {
   throw std::runtime_error("ProcessGroupNCCL does not support recv");
 }
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::recvAnysource(
-    std::vector<at::Tensor>& tensors, int* srcRank) {
+    std::vector<at::Tensor>& /* unused */,
+    int* /* unused */) {
   throw std::runtime_error("ProcessGroupNCCL does not support recv");
 }
 

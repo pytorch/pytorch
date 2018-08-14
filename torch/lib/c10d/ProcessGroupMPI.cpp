@@ -509,7 +509,8 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::scatter(
 }
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::send(
-    std::vector<at::Tensor>& tensors, int dstRank) {
+    std::vector<at::Tensor>& tensors,
+    int dstRank) {
   checkSingleTensor(tensors);
   std::function<void(std::unique_ptr<WorkEntry>&)> runFunc =
       [dstRank](std::unique_ptr<WorkEntry>& entry) {
@@ -528,7 +529,8 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::send(
 }
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::recv(
-    std::vector<at::Tensor>& tensors, int srcRank) {
+    std::vector<at::Tensor>& tensors,
+    int srcRank) {
   checkSingleTensor(tensors);
   std::function<void(std::unique_ptr<WorkEntry>&)> runFunc =
       [srcRank](std::unique_ptr<WorkEntry>& entry) {
@@ -548,7 +550,8 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::recv(
 }
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::recvAnysource(
-    std::vector<at::Tensor>& tensors, int* srcRank) {
+    std::vector<at::Tensor>& tensors,
+    int* srcRank) {
   checkSingleTensor(tensors);
   std::function<void(std::unique_ptr<WorkEntry>&)> runFunc =
       [srcRank](std::unique_ptr<WorkEntry>& entry) {
@@ -571,7 +574,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::recvAnysource(
 }
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::barrier() {
-   std::function<void(std::unique_ptr<WorkEntry>&)> runFunc =
+  std::function<void(std::unique_ptr<WorkEntry>&)> runFunc =
       [](std::unique_ptr<WorkEntry>& entry) {
         MPI_CHECK(MPI_Barrier(MPI_COMM_WORLD));
       };

@@ -596,17 +596,20 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::scatter(
 }
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::send(
-    std::vector<at::Tensor>& tensors, int dstRank) {
+    std::vector<at::Tensor>& /* unused */,
+    int /* unused */) {
   throw std::runtime_error("ProcessGroupGloo does not support send");
 }
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::recv(
-    std::vector<at::Tensor>& tensors, int srcRank) {
+    std::vector<at::Tensor>& /* unused */,
+    int /* unused */) {
   throw std::runtime_error("ProcessGroupGloo does not support recv");
 }
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::recvAnysource(
-    std::vector<at::Tensor>& tensors, int* srcRank) {
+    std::vector<at::Tensor>& /* unused */,
+    int* /* unused */) {
   throw std::runtime_error("ProcessGroupGloo does not support recv");
 }
 

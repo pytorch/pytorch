@@ -113,13 +113,16 @@ class ProcessGroup {
       const ScatterOptions& opts = ScatterOptions()) = 0;
 
   virtual std::shared_ptr<ProcessGroup::Work> send(
-      std::vector<at::Tensor>& tensors, int dstRank) = 0;
+      std::vector<at::Tensor>& tensors,
+      int dstRank) = 0;
 
   virtual std::shared_ptr<ProcessGroup::Work> recv(
-      std::vector<at::Tensor>& tensors, int srcRank) = 0;
+      std::vector<at::Tensor>& tensors,
+      int srcRank) = 0;
 
   virtual std::shared_ptr<ProcessGroup::Work> recvAnysource(
-      std::vector<at::Tensor>& tensors, int* srcRank) = 0;
+      std::vector<at::Tensor>& tensors,
+      int* srcRank) = 0;
 
   virtual std::shared_ptr<ProcessGroup::Work> barrier() = 0;
 

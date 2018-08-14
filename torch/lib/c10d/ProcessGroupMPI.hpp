@@ -133,13 +133,16 @@ class ProcessGroupMPI : public ProcessGroup {
       const ScatterOptions& opts = ScatterOptions()) override;
 
   std::shared_ptr<ProcessGroup::Work> send(
-      std::vector<at::Tensor>& tensors, int dstRank);
+      std::vector<at::Tensor>& tensors,
+      int dstRank);
 
   std::shared_ptr<ProcessGroup::Work> recv(
-      std::vector<at::Tensor>& tensors, int srcRank);
+      std::vector<at::Tensor>& tensors,
+      int srcRank);
 
   std::shared_ptr<ProcessGroup::Work> recvAnysource(
-      std::vector<at::Tensor>& tensor, int* srcRank);
+      std::vector<at::Tensor>& tensor,
+      int* srcRank);
 
   std::shared_ptr<ProcessGroup::Work> barrier();
 

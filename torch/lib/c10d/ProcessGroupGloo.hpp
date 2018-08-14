@@ -263,13 +263,16 @@ class ProcessGroupGloo : public ProcessGroup {
       const ScatterOptions& opts = ScatterOptions()) override;
 
   std::shared_ptr<ProcessGroup::Work> send(
-      std::vector<at::Tensor>& tensors, int dstRank) override;
+      std::vector<at::Tensor>& tensors,
+      int dstRank) override;
 
   std::shared_ptr<ProcessGroup::Work> recv(
-      std::vector<at::Tensor>& tensors, int srcRank) override;
+      std::vector<at::Tensor>& tensors,
+      int srcRank) override;
 
   std::shared_ptr<ProcessGroup::Work> recvAnysource(
-      std::vector<at::Tensor>& tensors, int* srcRank) override;
+      std::vector<at::Tensor>& tensors,
+      int* srcRank) override;
 
   std::shared_ptr<ProcessGroup::Work> barrier() override;
 
