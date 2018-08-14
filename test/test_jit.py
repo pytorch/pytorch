@@ -5606,6 +5606,23 @@ def func(t):
         fn = self._get_py3_code(code, 'instance')
         self.assertExpected(fn.__getattr__('foo').pretty_print_schema())
 
+    def test_remove_index_lists(self):
+        def test_indexing(x, y):
+            return x[y, y]
+
+        x = torch.rand(3, 4, 5)
+        y = torch.arange(2)
+        test_indexing = torch.jit.trace(x, y)(test_indexing)
+
+        reference = test_indexing(x, y)
+
+        torch._C._jit_pass_eliminate_index_lists(test_indexing.graph)
+        torch._C._jit_pass_dce(test_indexing.graph)
+        torch._C._jit_pass_lint(test_indexing.graph)
+
+        compare = test_indexing(x, y)
+        np.testing.assert_allclose(reference, compare)
+
 
 class TestEndToEndHybridFrontendModels(JitTestCase):
 
