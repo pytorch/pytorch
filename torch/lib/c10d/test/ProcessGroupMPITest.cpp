@@ -43,8 +43,8 @@ void testAllreduce(int iter = 1000) {
   for (int i = 0; i < iter; ++i) {
     const auto expected = worldSize * i;
     auto data = allTensors[i][0].data<float>();
-    for (auto i = 0; i < allTensors[i][0].numel(); ++i) {
-      if (data[i] != expected) {
+    for (auto j = 0; j < allTensors[i][0].numel(); ++j) {
+      if (data[j] != expected) {
         throw std::runtime_error("BOOM!");
       }
     }
@@ -86,9 +86,215 @@ void testBroadcast(int iter = 10000) {
   for (int i = 0; i < iter; ++i) {
     const auto expected = i;
     auto data = allTensors[i][0].data<float>();
-    for (auto i = 0; i < allTensors[i][0].numel(); ++i) {
-      if (data[i] != expected) {
+    for (auto j = 0; j < allTensors[i][0].numel(); ++j) {
+      if (data[j] != expected) {
         throw std::runtime_error("BOOM!");
+      }
+    }
+  }
+}
+
+void testReduce(int iter = 10000) {
+  auto pg = c10d::ProcessGroupMPI::createProcessGroupMPI();
+  // Generate inputs
+  std::vector<std::vector<at::Tensor>> allTensors(iter);
+
+  for (auto i = 0; i < iter; ++i) {
+    auto tensor = at::ones(at::CPU(at::kFloat), {16, 16}) * i;
+    allTensors[i] = std::vector<at::Tensor>({tensor});
+  }
+
+  std::vector<std::shared_ptr<::c10d::ProcessGroup::Work>> works;
+  for (auto& tensors : allTensors) {
+    // Kick off work
+    std::shared_ptr<::c10d::ProcessGroup::Work> work = pg->reduce(tensors);
+    works.push_back(std::move(work));
+  }
+
+  for (auto& work : works) {
+    // Wait for work to complete
+    if (!work->wait()) {
+      std::cerr << "Exception received: " << work->exception().what()
+                << std::endl;
+      pg->abort();
+    }
+  }
+
+  // Get the world size
+  auto worldSize = pg->getSize();
+
+  if (pg->getRank() == 0) {
+    // Verify outputs
+    for (int i = 0; i < iter; ++i) {
+      const auto expected = worldSize * i;
+      auto data = allTensors[i][0].data<float>();
+      for (auto j = 0; j < allTensors[i][0].numel(); ++j) {
+        if (data[j] != expected) {
+          throw std::runtime_error("BOOM!");
+        }
+      }
+    }
+  }
+}
+
+void testAllgather(int iter = 10000) {
+  auto pg = c10d::ProcessGroupMPI::createProcessGroupMPI();
+  std::vector<std::vector<at::Tensor>> allTensors(iter);
+  std::vector<std::vector<std::vector<at::Tensor>>> allOutputTensors(iter);
+
+  // Get the world size
+  auto worldSize = pg->getSize();
+  auto rank = pg->getRank();
+
+  // Generate inputs
+  for (auto i = 0; i < iter; ++i) {
+    auto tensor = at::ones(at::CPU(at::kFloat), {16, 16}) * i * rank;
+    allTensors[i] = std::vector<at::Tensor>({tensor});
+    allOutputTensors[i] = std::vector<std::vector<at::Tensor>>(1);
+    allOutputTensors[i][0].resize(worldSize);
+    for (auto j = 0; j < worldSize; ++j) {
+      allOutputTensors[i][0][j] = at::zeros(at::CPU(at::kFloat), {16, 16});
+    }
+  }
+
+  std::vector<std::shared_ptr<::c10d::ProcessGroup::Work>> works;
+  for (size_t i = 0; i < allTensors.size(); ++i) {
+    // Kick off work
+    std::shared_ptr<::c10d::ProcessGroup::Work> work =
+        pg->allgather(allOutputTensors[i], allTensors[i]);
+    works.push_back(std::move(work));
+  }
+
+  for (auto& work : works) {
+    // Wait for work to complete
+    if (!work->wait()) {
+      std::cerr << "Exception received: " << work->exception().what()
+                << std::endl;
+      pg->abort();
+    }
+  }
+
+  // Verify outputs
+  for (int i = 0; i < iter; ++i) {
+    for (int j = 0; j < worldSize; ++j) {
+      const auto expected = i * j;
+      auto data = allOutputTensors[i][0][j].data<float>();
+      for (auto k = 0; k < allOutputTensors[i][0][j].numel(); ++k) {
+        if (data[k] != expected) {
+          throw std::runtime_error("BOOM!");
+        }
+      }
+    }
+  }
+}
+
+void testGather(int iter = 10000) {
+  auto pg = c10d::ProcessGroupMPI::createProcessGroupMPI();
+  std::vector<std::vector<at::Tensor>> allTensors(iter);
+  std::vector<std::vector<std::vector<at::Tensor>>> allOutputTensors(iter);
+
+  // Get the world size
+  auto worldSize = pg->getSize();
+  auto rank = pg->getRank();
+
+  // Generate inputs
+  for (auto i = 0; i < iter; ++i) {
+    auto tensor = at::ones(at::CPU(at::kFloat), {16, 16}) * i * rank;
+    allTensors[i] = std::vector<at::Tensor>({tensor});
+    if (rank == 0) {
+      allOutputTensors[i] = std::vector<std::vector<at::Tensor>>(1);
+      allOutputTensors[i][0].resize(worldSize);
+      for (auto j = 0; j < worldSize; ++j) {
+        allOutputTensors[i][0][j] = at::zeros(at::CPU(at::kFloat), {16, 16});
+      }
+    } else {
+      allOutputTensors[i] = std::vector<std::vector<at::Tensor>>();
+    }
+  }
+
+  std::vector<std::shared_ptr<::c10d::ProcessGroup::Work>> works;
+  for (size_t i = 0; i < allTensors.size(); ++i) {
+    // Kick off work
+    std::shared_ptr<::c10d::ProcessGroup::Work> work =
+        pg->gather(allOutputTensors[i], allTensors[i]);
+    works.push_back(std::move(work));
+  }
+
+  for (auto& work : works) {
+    // Wait for work to complete
+    if (!work->wait()) {
+      std::cerr << "Exception received: " << work->exception().what()
+                << std::endl;
+      pg->abort();
+    }
+  }
+  // Verify outputs
+  if (rank == 0) {
+    for (int i = 0; i < iter; ++i) {
+      for (int j = 0; j < worldSize; ++j) {
+        const auto expected = i * j;
+        auto data = allOutputTensors[i][0][j].data<float>();
+        for (auto k = 0; k < allOutputTensors[i][0][j].numel(); ++k) {
+          if (data[k] != expected) {
+            throw std::runtime_error("BOOM!");
+          }
+        }
+      }
+    }
+  }
+}
+
+void testScatter(int iter = 1) {
+  auto pg = c10d::ProcessGroupMPI::createProcessGroupMPI();
+
+  std::vector<std::vector<std::vector<at::Tensor>>> allInputTensors(iter);
+  std::vector<std::vector<at::Tensor>> allTensors(iter);
+
+  // Get the world size
+  auto worldSize = pg->getSize();
+  auto rank = pg->getRank();
+
+  // Generate inputs
+  for (auto i = 0; i < iter; ++i) {
+    auto tensor = at::zeros(at::CPU(at::kFloat), {16, 16});
+    allTensors[i] = std::vector<at::Tensor>({tensor});
+    if (rank == 0) {
+      allInputTensors[i] = std::vector<std::vector<at::Tensor>>(1);
+      allInputTensors[i][0].resize(worldSize);
+      for (auto j = 0; j < worldSize; ++j) {
+        allInputTensors[i][0][j] =
+            at::ones(at::CPU(at::kFloat), {16, 16}) * rank * i;
+      }
+    } else {
+      allInputTensors[i] = std::vector<std::vector<at::Tensor>>();
+    }
+  }
+
+  std::vector<std::shared_ptr<::c10d::ProcessGroup::Work>> works;
+  for (size_t i = 0; i < allTensors.size(); ++i) {
+    // Kick off work
+    std::shared_ptr<::c10d::ProcessGroup::Work> work =
+        pg->scatter(allTensors[i], allInputTensors[i]);
+    works.push_back(std::move(work));
+  }
+
+  for (auto& work : works) {
+    // Wait for work to complete
+    if (!work->wait()) {
+      std::cerr << "Exception received: " << work->exception().what()
+                << std::endl;
+      pg->abort();
+    }
+  }
+  // Verify outputs
+  for (int i = 0; i < iter; ++i) {
+    for (int j = 0; j < worldSize; ++j) {
+      const auto expected = i * j;
+      auto data = allTensors[i][0].data<float>();
+      for (auto k = 0; k < allTensors[i][0].numel(); ++k) {
+        if (data[k] != expected) {
+          throw std::runtime_error("BOOM!");
+        }
       }
     }
   }
@@ -104,6 +310,10 @@ int main(int argc, char** argv) {
 
   testAllreduce();
   testBroadcast();
+  testReduce();
+  testAllgather();
+  testGather();
+  testScatter();
 
   std::cout << "Test successful" << std::endl;
 #else
