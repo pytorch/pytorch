@@ -2429,6 +2429,15 @@ a")
             return a == [0, 0, 0, 0, 4]
         self.checkScript(test_append_loop_if, ())
 
+        def test_nested_loop():
+            a = _construct_empty_int_list()
+            for i in range(2):
+                for j in range(2):
+                    a.append(i + j)
+
+            return a == [0, 1, 1, 2]
+        self.checkScript(test_append_loop_if, ())
+
     def test_func_call(self):
         script = '''
         def add(a, b):

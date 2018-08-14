@@ -69,19 +69,24 @@ class AnnotateEffectsImpl {
     if (node->kind() == prim::Loop) {
       JIT_ASSERT(node->blocks().size() == 1);
       auto block = node->blocks().at(0);
-      auto newToken = visitBlock(block, curToken);
-
-      if (newToken != curToken) {
-        // Register the world token as a loop-carried dependency
-        block->addInput()->setType(WorldType::get());
-        block->registerOutput(curToken);
-
-        // Thread the world token through the loop node.
-        node->addInput(curToken);
-        return node->addOutput()->setType(WorldType::get());
+      if (!shouldAddFence(block)) {
+        // Bail out early if there's no mutable variables used inside
+        return curToken;
       }
-      return curToken;
+
+      // Register the world token as a loop carried dependency
+      auto beginLoopToken = block->addInput()->setType(WorldType::get());
+      auto endLoopToken = visitBlock(block, beginLoopToken);
+      block->registerOutput(endLoopToken);
+
+      JIT_ASSERT(endLoopToken != beginLoopToken);
+
+      // Thread the world token through the loop node
+      node->addInput(curToken);
+      return node->addOutput()->setType(WorldType::get());
     }
+
+    JIT_ASSERT(node->blocks().size() == 0);
 
     if (shouldAddFence(node)) {
       return addFenceForNode(node, curToken);
@@ -108,8 +113,25 @@ class AnnotateEffectsImpl {
       return true;
     }
 
+    // Check that any sub-blocks
+    for (auto block : node->blocks()) {
+      if (shouldAddFence(block)) {
+        return true;
+      }
+    }
+
     return false;
   }
+
+  bool shouldAddFence(Block* block) {
+    for (auto node : block->nodes()) {
+      if (shouldAddFence(node)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
 
   // Create a memory fence around a node, using the world token
   // Input:
