@@ -4,7 +4,7 @@
 
 #include <ATen/cuda/CUDAConfig.h>
 
-#if !AT_MIOPEN_ENABLED()
+#if !AT_ROCM_ENABLED()
 
 namespace at { namespace native {
 
@@ -27,7 +27,7 @@ std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm_backward(
 
 }}  // namespace at::native
 
-#else // AT_MIOPEN_ENABLED
+#else // AT_ROCM_ENABLED
 
 #include <ATen/miopen/Descriptors.h>
 #include <ATen/miopen/Types.h>

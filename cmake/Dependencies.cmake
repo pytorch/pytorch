@@ -1219,10 +1219,10 @@ if (BUILD_ATEN)
 
   IF (NOT USE_ROCM)
     MESSAGE(STATUS "MIOpen not found. Compiling without MIOpen support")
-    set(AT_MIOPEN_ENABLED 0)
+    set(AT_ROCM_ENABLED 0)
   ELSE()
     INCLUDE_DIRECTORIES(BEFORE ${MIOPEN_INCLUDE_DIRS})
-    set(AT_MIOPEN_ENABLED 1)
+    set(AT_ROCM_ENABLED 1)
   ENDIF()
 
   if (NO_MKLDNN)
