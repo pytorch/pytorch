@@ -4,7 +4,7 @@ file(GLOB_RECURSE NOMNI_TEST_SRCS *test.cc)
 exclude(NOMNI_SRCS "${NOMNI_SRCS}" "${NOMNI_TEST_SRCS}")
 
 add_library(nomnigraph STATIC "${NOMNI_SRCS}")
-add_dependencies(nomnigraph Caffe_PROTO Caffe2_PROTO)
+add_dependencies(nomnigraph Caffe2_PROTO)
 
 target_include_directories(nomnigraph PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/include>

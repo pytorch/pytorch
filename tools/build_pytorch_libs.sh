@@ -41,6 +41,9 @@ while [[ $# -gt 0 ]]; do
       --full-caffe2)
           FULL_CAFFE2=1
           ;;
+      --cuda-static-link)
+          CAFFE2_STATIC_LINK_CUDA=1
+          ;;
       *)
           break
           ;;
@@ -49,6 +52,8 @@ while [[ $# -gt 0 ]]; do
 done
 
 CMAKE_INSTALL=${CMAKE_INSTALL-make install}
+
+BUILD_SHARED_LIBS=${BUILD_SHARED_LIBS-ON}
 
 # Save user specified env vars, we will manually propagate them
 # to cmake.  We copy distutils semantics, referring to
@@ -263,9 +268,10 @@ function build_caffe2() {
       -DBUILD_ATEN=ON \
       -DBUILD_PYTHON=$FULL_CAFFE2 \
       -DBUILD_BINARY=OFF \
-      -DBUILD_SHARED_LIBS=ON \
+      -DBUILD_SHARED_LIBS=$BUILD_SHARED_LIBS \
       -DONNX_NAMESPACE=$ONNX_NAMESPACE \
       -DUSE_CUDA=$USE_CUDA \
+      -DCAFFE2_STATIC_LINK_CUDA=$CAFFE2_STATIC_LINK_CUDA \
       -DUSE_ROCM=$USE_ROCM \
       -DUSE_NNPACK=$USE_NNPACK \
       -DCUDNN_INCLUDE_DIR=$CUDNN_INCLUDE_DIR \
@@ -289,9 +295,6 @@ function build_caffe2() {
   # Install Python proto files
   if [[ $FULL_CAFFE2 -ne 0 ]]; then
     find . -name proto
-    for proto_file in ./caffe/proto/*.py; do
-      cp $proto_file "$BASE_DIR/caffe/proto/"
-    done
     for proto_file in ./caffe2/proto/*.py; do
       cp $proto_file "$BASE_DIR/caffe2/proto/"
     done

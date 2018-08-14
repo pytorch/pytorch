@@ -786,6 +786,34 @@ def exp(g, self):
     return g.op("Exp", self)
 
 
+@parse_args('v', 'f', 'i')
+def dropout(g, input, p, train):
+    r, _ = g.op("Dropout", input, ratio_f=p, outputs=2)
+    return r
+
+
+def _unsupported_dropout(name):
+    @parse_args('v', 'f', 'i')
+    def feature_dropout(g, input, p, train):
+        # NB: In inference mode, FeatureDropout is exported as an identity op.
+        from torch.onnx.symbolic import _unimplemented
+        if train:
+            return _unimplemented(name, "training mode")
+        return input
+    return feature_dropout
+
+
+feature_dropout = _unsupported_dropout("feature_dropout")
+alpha_dropout = _unsupported_dropout("alpha_dropout")
+feature_alpha_dropout = _unsupported_dropout("feature_alpha_dropout")
+
+# See Note [Export inplace]
+dropout_ = dropout
+feature_dropout_ = feature_dropout
+alpha_dropout_ = alpha_dropout
+feature_alpha_dropout_ = feature_alpha_dropout
+
+
 @parse_args('v', 't', 'i', 'i')
 def norm(g, self, p, dim, keepdim):
     if p == 1:

@@ -27,6 +27,6 @@ AT_CORE_API std::string DeviceTypeName(
     at::DeviceType d,
     bool lower_case = false);
 
-} // namespace at
-
 AT_CORE_API std::ostream& operator<<(std::ostream& stream, at::DeviceType type);
+
+} // namespace at
