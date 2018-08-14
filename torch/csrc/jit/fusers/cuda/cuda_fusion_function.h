@@ -4,12 +4,12 @@
 #include "ATen/ATen.h"
 
 #include "torch/csrc/utils/disallow_copy.h"
-#include "torch/csrc/cuda/cuda_check.h" // TODO: replace 
 
 #include "torch/csrc/jit/fusers/fuser_interface.h"
 #include "torch/csrc/jit/fusers/cuda/annotated_graph.h"
 #include "torch/csrc/jit/fusers/cuda/tensor_desc.h"
 #include "torch/csrc/jit/fusers/cuda/concat_desc.h"
+#include "torch/csrc/jit/fusers/cuda/cuda_check.h"
 
 #include "cuda.h"
 #include "cuda_runtime_api.h"
@@ -40,7 +40,7 @@ struct CUDAFusionFunction : public CompiledFusionFunction {
   }
 
   virtual ~CUDAFusionFunction() override {
-    TORCH_CU_CHECK(cuModuleUnload(module));
+    CU_WARN(cuModuleUnload(module));
   }
 
 private:

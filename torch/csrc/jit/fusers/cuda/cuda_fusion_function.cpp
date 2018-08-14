@@ -89,7 +89,7 @@ CUDAFusionFunction::CUDAFusionFunction(
 : name{name}, input_desc{agraph.input_desc}, output_desc{agraph.output_desc} {
   at::DeviceGuard device_guard(agraph.device);
 
-  TORCH_CUDA_CHECK(cudaGetDeviceProperties(&prop, agraph.device));
+  CUDA_ASSERT(cudaGetDeviceProperties(&prop, agraph.device));
   checkCUDAVersion(prop);
 
   std::stringstream cu;
@@ -98,7 +98,7 @@ CUDAFusionFunction::CUDAFusionFunction(
   has_random = ret.second;
   compilation_unit = cu.str();
   nvrtcProgram program;
-  TORCH_NVRTC_CHECK(nvrtcCreateProgram(&program, compilation_unit.c_str(), NULL, 0, nullptr, nullptr));
+  NVRTC_ASSERT(nvrtcCreateProgram(&program, compilation_unit.c_str(), NULL, 0, nullptr, nullptr));
 
   std::string compute = "--gpu-architecture=compute_" + std::to_string(prop.major) + std::to_string(prop.minor);
   std::vector<const char *> args = {"--std=c++11", compute.c_str(), "-default-device"};
@@ -112,19 +112,19 @@ CUDAFusionFunction::CUDAFusionFunction(
     throw std::runtime_error(cu.str());
   }
   ResourceGuard holdProgram([&] {
-    TORCH_NVRTC_CHECK(nvrtcDestroyProgram(&program));
+    NVRTC_ASSERT(nvrtcDestroyProgram(&program));
   });
-  TORCH_NVRTC_CHECK(result);
+  NVRTC_ASSERT(result);
 
   size_t ptx_size;
-  TORCH_NVRTC_CHECK(nvrtcGetPTXSize(program, &ptx_size));
+  NVRTC_ASSERT(nvrtcGetPTXSize(program, &ptx_size));
   ptx.resize(ptx_size);
-  TORCH_NVRTC_CHECK(nvrtcGetPTX(program, ptx.data()));
+  NVRTC_ASSERT(nvrtcGetPTX(program, ptx.data()));
 
-  TORCH_CU_CHECK(cuModuleLoadData(&module, ptx.data()));
-  TORCH_CU_CHECK(cuModuleGetFunction(&function, module, name.c_str()));
+  CU_ASSERT(cuModuleLoadData(&module, ptx.data()));
+  CU_ASSERT(cuModuleGetFunction(&function, module, name.c_str()));
 
-  TORCH_CU_CHECK(cuOccupancyMaxActiveBlocksPerMultiprocessor(
+  CU_ASSERT(cuOccupancyMaxActiveBlocksPerMultiprocessor(
     &maxBlocks, function, 128, 0));
   maxBlocks *= prop.multiProcessorCount;
 }
@@ -230,7 +230,7 @@ void CUDAFusionFunction::launch_raw(uint32_t numel, void** arguments) {
   // so make sure we initialize the Driver API's context
   // cudaFree(0) accomplishes this.
   CUcontext pctx = 0;
-  TORCH_CU_CHECK(cuCtxGetCurrent(&pctx));
+  CU_ASSERT(cuCtxGetCurrent(&pctx));
 
   if (!pctx) {
     std::unique_lock<std::mutex> cudaFreeMutexLock(
@@ -238,8 +238,8 @@ void CUDAFusionFunction::launch_raw(uint32_t numel, void** arguments) {
     cudaFree(0);
   }
 
-  CUstream stream = at::cuda::getCurrentCUDAStream();
-  TORCH_CU_CHECK(cuLaunchKernel(
+  auto stream = at::cuda::getCurrentCUDAStream();
+  CU_ASSERT(cuLaunchKernel(
     function
   , numBlocks, 1, 1
   , blockSize, 1, 1
