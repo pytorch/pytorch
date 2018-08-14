@@ -142,6 +142,8 @@ struct Tensor : public detail::TensorBase {
     AT_CHECK(dim() == N, "expected ", N, " dims but tensor has ", dim());
     return TensorAccessor<T,N>(data<T>(),sizes().data(),strides().data());
   }
+  template<typename T, size_t N>
+  TensorAccessor<T,N> accessor() && = delete;
 
   Tensor operator-() const;
   Tensor& operator+=(const Tensor & other);
