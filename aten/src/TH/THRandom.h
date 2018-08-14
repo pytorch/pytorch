@@ -50,34 +50,37 @@ TH_API double THRandom_uniform(THGenerator *_generator, double a, double b);
 TH_API float THRandom_uniformFloat(THGenerator *_generator, float a, float b);
 
 /** Generates a random number from a normal distribution.
-    (With mean #mean# and standard deviation #stdv >= 0#).
+	(With mean #mean# and standard deviation #stdv >= 0#).
 */
 TH_API double THRandom_normal(THGenerator *_generator, double mean, double stdv);
 
 /** Generates a random number from an exponential distribution.
-    The density is $p(x) = lambda * exp(-lambda * x)$, where
-    lambda is a positive number.
+	The density is $p(x) = lambda * exp(-lambda * x)$, where
+	lambda is a positive number.
 */
 TH_API double THRandom_exponential(THGenerator *_generator, double lambda);
 
 /** Returns a random number from a Cauchy distribution.
-    The Cauchy density is $p(x) = sigma/(pi*(sigma^2 + (x-median)^2))$
+	The Cauchy density is $p(x) = sigma/(pi*(sigma^2 + (x-median)^2))$
 */
 TH_API double THRandom_cauchy(THGenerator *_generator, double median, double sigma);
 
 /** Generates a random number from a log-normal distribution.
-    (#mean > 0# is the mean of the log-normal distribution
-    and #stdv# is its standard deviation).
+	(#mean > 0# is the mean of the log-normal distribution
+	and #stdv# is its standard deviation).
 */
 TH_API double THRandom_logNormal(THGenerator *_generator, double mean, double stdv);
 
 /** Generates a random number from a geometric distribution.
-    It returns an integer #i#, where $p(i) = (1-p) * p^(i-1)$.
-    p must satisfy $0 < p < 1$.
+	It returns an integer #i#, where $p(i) = (1-p) * p^(i-1)$.
+	p must satisfy $0 < p < 1$.
 */
 TH_API int THRandom_geometric(THGenerator *_generator, double p);
 
-/* Returns true with probability $p$ and false with probability $1-p$ (p > 0). */
+/* Returns true with double probability $p$ and false with probability $1-p$ (p > 0). */
 TH_API int THRandom_bernoulli(THGenerator *_generator, double p);
+
+/* Returns true with float probability $p$ and false with probability $1-p$ (p > 0). */
+TH_API int THRandom_bernoulliFloat(THGenerator *_generator, float p);
 
 #endif

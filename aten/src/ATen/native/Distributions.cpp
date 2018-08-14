@@ -13,10 +13,7 @@
 #include "ATen/native/DispatchStub.h"
 #include "ATen/native/cpu/UnaryOpsKernel.h"
 
-#ifdef _OPENMP
-#include <omp.h>
-#endif
-
+#include <type_traits>
 #include <functional>
 #include <cpuinfo.h>
 
@@ -121,14 +118,22 @@ Tensor& bernoulli_out(Tensor& result, const Tensor& self, Generator* gen) {
 }
 
 Tensor& bernoulli_tensor_cpu_(Tensor& self, const Tensor& p_, Generator* gen) {
-  auto p = std::get<0>(expand_inplace(self, p_.toType(CPU(kDouble))));
   AT_DISPATCH_ALL_TYPES(self.type(), "bernoulli_tensor_cpu_", [&] {
     THGenerator* generator = get_generator(gen);
     std::lock_guard<std::mutex> lock(generator->mutex);
-    CPU_tensor_apply2<scalar_t, double>(
+    if (std::is_same<scalar_t, double>::value || p_.type().scalarType() == kDouble) {
+      auto p = std::get<0>(expand_inplace(self, p_.toType(CPU(kDouble))));
+      CPU_tensor_apply2<scalar_t, double>(
         self, p, [generator](scalar_t& ret_val, double& p_val) {
           ret_val = static_cast<scalar_t>(THRandom_bernoulli(generator, p_val));
         });
+    } else {
+      auto p = std::get<0>(expand_inplace(self, p_.toType(CPU(kFloat))));
+      CPU_tensor_apply2<scalar_t, float>(
+        self, p, [generator](scalar_t& ret_val, float& p_val) {
+          ret_val = static_cast<scalar_t>(THRandom_bernoulliFloat(generator, p_val));
+        });
+    }
   });
   return self;
 }
