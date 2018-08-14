@@ -30,9 +30,6 @@
 #include <sstream>
 #include <iostream>
 #include <dlfcn.h>
-#include <unistd.h>
-
-THCGenerator* THCRandom_getGenerator(THCState* state);
 
 namespace torch { namespace jit { namespace cudafuser {
 
@@ -48,21 +45,6 @@ static bool programExists(const std::string& program) {
   std::string cmd = format(check_exists_string, env);
   return 0 == system(cmd.c_str());
 }
-
-namespace { 
-
-static int ceilDiv(int a, int b) { return (a + b - 1) / b; }
-
-std::ostream& operator<<(std::ostream& out, const TensorDesc& d) {
-  out << d.scalar_type << "[";
-  for(auto b : d.contiguity)
-    out << b << ";";
-  out << "]";
-  return out;
-}
-
-
-} // anonymous namespace
 
 static const std::string so_template = "/tmp/pytorch_fuserXXXXXX.so";
 static const std::string cpp_template = "/tmp/pytorch_fuserXXXXXX.cpp";
@@ -84,12 +66,8 @@ static const std::string compile_string =
 #endif
   "-std=c++11 -fPIC ${fopenmp} -shared \"${cpp_file}\" -o \"${so_file}\" -lm";
 
-namespace {
-
 ////////////////////////////////////////////////////////////////////////////////
 // Code generation
-
-namespace codegen {
 
 /*with type_as not checking type of its input, a fusion group can have non-fp32 tensor as input.
 Correct code for this case is generated, however, nvrtc does not know how to handle int*_t integer types,
@@ -549,196 +527,6 @@ std::pair<std::vector<ConcatDesc>, bool> emitCompilationUnit(
 
 ////////////////////////////////////////////////////////////////////////////////
 
-} // codegen namespace
-} // anonymous namespace
-
-// Host-side view of TensorInfo (that visivle for the kernel is defined above).
-// Note dims[0] - we need to dynamically allocate the dims.
-struct TensorInfo {
-  void* data;
-  #pragma GCC diagnostic ignored "-Wpedantic"
-    uint32_t sizes_strides[0];
-  #pragma GCC diagnostic pop
-
-  uint32_t* sizes(size_t nDim) { return &sizes_strides[0]; }
-  uint32_t* strides(size_t nDim) { return &sizes_strides[nDim]; }
-};
-
-
-struct TempFile {
-  TH_DISALLOW_COPY_AND_ASSIGN(TempFile);
-  TempFile(const std::string & t, int suffix) {
-    // mkstemps edits its first argument in places
-    // so we make a copy of the string here, including null terminator
-    std::vector<char> tt(t.c_str(), t.c_str() + t.size() + 1);
-    int fd = mkstemps(tt.data(), suffix);
-    JIT_ASSERT(fd != -1);
-    file_ = fdopen(fd, "r+");
-
-    // - 1 becuase tt.size() includes the null terminator,
-    // but std::string does not expect one
-    name_ = std::string(tt.begin(), tt.end() - 1);
-  }
-  const std::string & name() const {
-    return name_;
-  }
-  void sync() {
-    fflush(file_);
-  }
-  void write(const std::string & str) {
-    size_t result = fwrite(str.c_str(), 1, str.size(), file_);
-    JIT_ASSERT(str.size() == result);
-  }
-  FILE* file()  {
-    return file_;
-  }
-  ~TempFile() {
-    if(file_ != nullptr) {
-      // unlink first to ensure another mkstemps doesn't
-      // race between close and unlink
-      unlink(name_.c_str());
-      fclose(file_);
-    }
-  }
-private:
-  FILE* file_ = nullptr;
-  std::string name_;
-};
-
-static void* checkDL(void* x) {
-  if(!x) {
-    AT_ERROR("error in dlopen or dlsym: ", dlerror());
-  }
-  return x;
-}
-
-struct DynamicLibrary {
-  TH_DISALLOW_COPY_AND_ASSIGN(DynamicLibrary);
-  DynamicLibrary(const char* name) {
-    handle = checkDL(dlopen(name, RTLD_LOCAL | RTLD_NOW));
-  }
-  void* sym(const char* name) {
-    JIT_ASSERT(handle);
-    return checkDL(dlsym(handle, name));
-  }
-  ~DynamicLibrary() {
-    if(!handle) return;
-    dlclose(handle);
-  }
-private:
-  void* handle = nullptr;
-};
-
-/*
-* CUDAFusionFunction
-*/
-void checkCUDAVersion(const cudaDeviceProp& prop) {
-  if ((prop.major >= 6 && CUDA_VERSION < 8000) ||
-      (prop.major >= 7 && CUDA_VERSION < 9000)) {
-    std::stringstream err_string;
-    err_string << "In CompiledCUDAFusionFunction, PyTorch compiled with insufficient CUDA version: "
-         << CUDA_VERSION << " for the current GPU device " << prop.name
-         << " with device capability " << prop.major << "." << prop.minor;
-    throw std::runtime_error(err_string.str());
-  }
-}
-
-struct CUDAFusionFunction : public CompiledCUDAFusionFunction {
-  CUDAFusionFunction(const std::string& name, AnnotatedGraph& agraph)
-  : CompiledCUDAFusionFunction(name, agraph) {
-    at::DeviceGuard device_guard(agraph.device);
-
-    TORCH_CUDA_CHECK(cudaGetDeviceProperties(&prop, agraph.device));
-    checkCUDAVersion(prop);
-
-    std::stringstream cu;
-    auto ret = codegen::emitCompilationUnit(cu, name, agraph, true);
-    concat_desc = std::move(ret.first);
-    has_random = ret.second;
-    compilation_unit = cu.str();
-    nvrtcProgram program;
-    TORCH_NVRTC_CHECK(nvrtcCreateProgram(&program, compilation_unit.c_str(), NULL, 0, nullptr, nullptr));
-
-    std::string compute = "--gpu-architecture=compute_" + std::to_string(prop.major) + std::to_string(prop.minor);
-    std::vector<const char *> args = {"--std=c++11", compute.c_str(), "-default-device"};
-    nvrtcResult result = nvrtcCompileProgram(program, args.size(), args.data());
-    if (result == NVRTC_ERROR_COMPILATION) {
-      size_t logsize;
-      nvrtcGetProgramLogSize(program, &logsize);
-      std::vector<char> log(logsize);
-      nvrtcGetProgramLog(program, log.data());
-      cu << log.data();
-      throw std::runtime_error(cu.str());
-    }
-    ResourceGuard holdProgram([&] {
-      TORCH_NVRTC_CHECK(nvrtcDestroyProgram(&program));
-    });
-    TORCH_NVRTC_CHECK(result);
-
-    size_t ptx_size;
-    TORCH_NVRTC_CHECK(nvrtcGetPTXSize(program, &ptx_size));
-    ptx.resize(ptx_size);
-    TORCH_NVRTC_CHECK(nvrtcGetPTX(program, ptx.data()));
-
-    TORCH_CU_CHECK(cuModuleLoadData(&module, ptx.data()));
-    TORCH_CU_CHECK(cuModuleGetFunction(&function, module, name.c_str()));
-
-    TORCH_CU_CHECK(cuOccupancyMaxActiveBlocksPerMultiprocessor(
-      &maxBlocks, function, 128, 0));
-    maxBlocks *= prop.multiProcessorCount;
-  }
-
-  virtual ~CUDAFusionFunction() override {
-    TORCH_CU_CHECK(cuModuleUnload(module));
-  }
-
-private:
-  virtual at::Backend backend() const override {
-    return at::kCUDA;
-  }
-
-  virtual uint64_t get_rand_offset(uint32_t numel) override {
-     int numBlocks = std::min(maxBlocks, ceilDiv(numel, blockSize));
-     return 4 * (ceil(numel/(4 * blockSize * numBlocks)) + 1);
-  }
-
-  virtual void launch_raw(uint32_t numel, void** arguments) override {
-     int numBlocks = std::min(maxBlocks, ceilDiv(numel, blockSize));
-
-     //std::cout << "maxBlocks = " << maxBlocks << " needed blocks: " << ceilDiv(numel,blockSize)
-     //          << " numblocks =  " << numBlocks;
-
-     // it is possible that this is the first cuda call on this thread
-     // so make sure we initialize the Driver API's context
-     // cudaFree(0) accomplishes this.
-     CUcontext pctx = 0;
-     TORCH_CU_CHECK(cuCtxGetCurrent(&pctx));
-     if (!pctx) {
-        std::unique_lock<std::mutex> cudaFreeMutexLock(
-            *(THCCachingAllocator_getCudaFreeMutex()));
-        cudaFree(0);
-     }
-     CUstream stream = at::cuda::getCurrentCUDAStream();
-     TORCH_CU_CHECK(cuLaunchKernel(
-       function,
-       numBlocks, 1, 1,
-       blockSize, 1, 1,
-       0, stream,
-       arguments,
-       nullptr));
-  }
-  std::vector<char> ptx;
-  CUmodule module;
-  CUfunction function;
-
-  // we record prop/device so if they are availiable for launch heuristics
-  // querying at launch is too slow for device properties.
-  int device;
-  cudaDeviceProp prop;
-  int blockSize = 128;
-  int maxBlocks;
-};
-
 /*
 * CUDAFusionCompiler implementation.
 */
@@ -750,7 +538,7 @@ CUDAFusionCompiler::CUDAFusionCompiler() {
   config_.debug = debug_env && atoi(debug_env) != 0;
 }
 
-std::shared_ptr<CompiledCUDAFusionFunction> CUDAFusionCompiler::getOrCompile(
+std::shared_ptr<CUDAFusionFunction> CUDAFusionCompiler::getOrCompile(
   AnnotatedGraph& agraph) {
   std::stringstream key;
   key << *agraph.graph << "\n";
@@ -765,14 +553,14 @@ std::shared_ptr<CompiledCUDAFusionFunction> CUDAFusionCompiler::getOrCompile(
   if (it == cache.end()) {
     JIT_ASSERT(agraph.device != kCPUDevice);
     std::string name = "kernel_" + std::to_string(cache.size());
-    CompiledCUDAFusionFunction* raw_func = new CUDAFusionFunction(name, agraph);
-    it = cache.emplace(key_, std::shared_ptr<CompiledCUDAFusionFunction>(raw_func)).first;
+    CUDAFusionFunction* raw_func = new CUDAFusionFunction(name, agraph);
+    it = cache.emplace(key_, std::shared_ptr<CUDAFusionFunction>(raw_func)).first;
   }
 
   return it->second;
 }
 
-std::shared_ptr<CompiledCUDAFusionFunction> CUDAFusionCompiler::getOrCompile(
+std::shared_ptr<CUDAFusionFunction> CUDAFusionCompiler::getOrCompile(
   Graph& graph
 , int device
 , at::ArrayRef<at::Tensor> inputs
@@ -791,168 +579,6 @@ void CUDAFusionCompiler::debugLaunchGraph(
   auto func = getOrCompile(graph, device, inputs, outputs);
   func->launch_with_tensors(inputs, outputs);
 }
-
-namespace {
-
-// Tries to compress sizes and strides according to cont. Emits the result t
-// c_sizes, c_strides and throws an error on failure (if can't compress)
-void compressContiguous(
-  at::IntList sizes
-, at::IntList strides
-, const std::vector<bool> &cont
-, uint32_t* c_sizes
-, uint32_t* c_strides) {
-  size_t compressed_dims = 0;
-  size_t cur = 0;
-  size_t ndim = sizes.size();
-  while(cur < ndim) {
-    size_t total_size = sizes[cur];
-    cur++;
-    while(cont[cur-1] && cur < ndim) {
-      JIT_ASSERT(strides[cur-1] == sizes[cur]*strides[cur]);
-      total_size *= sizes[cur];
-      cur++;
-    }
-   // cur starts pointing at the beginning of run to compress
-   // cur ends one _after_ the terminating false or end of list.
-   // total_size is the size of all dimensions [begin,end)
-   // examples:
-   // f = not cont.
-   // t = cont.
-   // x = don't care, including past end of list
-   // s = start of cur
-   // e = end of cur
-
-
-   // f x x x
-   // s e
-
-   //  t f x x
-   //  s   e
-
-   //  t t f x
-   //  s     e
-
-    c_sizes[compressed_dims] = total_size;
-    c_strides[compressed_dims] = strides[cur-1];
-    compressed_dims++;
-  }
-  JIT_ASSERT(!cont.back() || strides.back() == 1);
-}
-
-} // anonymous namespace
-
-/*
-* CompiledCUDAFusionFunction implementation.
-*/
-CompiledCUDAFusionFunction::CompiledCUDAFusionFunction(
-  const std::string& name
-, AnnotatedGraph& agraph)
-: name(name)
-, input_desc(agraph.input_desc)
-, output_desc(agraph.output_desc) {}
-
-void CompiledCUDAFusionFunction::launch_with_tensors(
-  at::ArrayRef<at::Tensor> inputs
-, at::ArrayRef<at::Tensor> outputs) {
-  at::DeviceGuard device_guard(inputs);
-  JIT_ASSERT(inputs.size() == input_desc.size());
-  JIT_ASSERT(outputs.size() == output_desc.size());
-  size_t flat_outputs_size = 0;
-  for(auto& c : concat_desc)
-    flat_outputs_size += c.nSubtensors;
-  // XXX: this code assumes that inputs are 32-bit addressable
-  // XXX: this code assumes that all inputs are of the same size
-  JIT_ASSERT(inputs[0].numel() <= std::numeric_limits<uint32_t>::max());
-  uint32_t numel = inputs[0].numel();
-  at::IntList map_size = inputs[0].sizes();
-  // Compute the storage needed to store TensorInfo structs for inputs and outputs.
-  size_t uncompressedDim = input_desc.at(0).contiguity.size();
-  size_t maxPossibleTensorInfoSize = sizeof(TensorInfo) + 2 * sizeof(uint32_t) * uncompressedDim;
-  size_t maxPossibleBufferSize = maxPossibleTensorInfoSize * (inputs.size() + flat_outputs_size);
-  std::vector<char> buffer(maxPossibleBufferSize);
-  char* buffer_next = buffer.data();
-  // A vector of arguments to the kernel. It's (numel, *input_descs, *output_descs)
-  std::vector<void*> arguments;
-  arguments.reserve(3 + inputs.size() + flat_outputs_size);
-  // Asserts that t's dims can be compressed in the same way as in desc
-  // (that's what the kernel assumes), and appends it to the arguments vector.
-  auto addTensorInfo = [&](TensorDesc& desc, const at::Tensor& t) {
-    size_t nDim = desc.nDim(); // NOTE: this is the compressed dim
-    JIT_ASSERT(nDim <= uncompressedDim); // We'd overflow the space otherwise
-    auto ti = reinterpret_cast<TensorInfo*>(buffer_next);
-    ti->data = t.data_ptr();
-    compressContiguous(t.sizes(), t.strides(), desc.contiguity, ti->sizes(nDim), ti->strides(nDim));
-    buffer_next += maxPossibleTensorInfoSize;
-    arguments.push_back(ti);
-  };
-  arguments.push_back(&numel);
-  for (size_t i = 0; i < input_desc.size(); ++i)
-    addTensorInfo(input_desc[i], inputs[i]);
-  for (size_t i = 0; i < output_desc.size(); ++i) {
-    auto& c = concat_desc[i];
-    at::Tensor o = outputs[i];
-    if(c.nSubtensors == 1) {
-      o.resize_(map_size);
-      addTensorInfo(output_desc[i], outputs[i]);
-    } else {
-      size_t small_size = map_size[c.dim];
-      std::vector<int64_t> concat_size(map_size.begin(), map_size.end());
-      concat_size[c.dim] = small_size * c.nSubtensors;
-      o.resize_(concat_size);
-      size_t offset = 0;
-      for(size_t j = 0; j < c.nSubtensors; ++j) {
-        // because the concatenated_output stays live, the underlying data
-        // in this view remains live through the end of this function
-        // so there is not need to hold onto this tensor
-        auto view = o.narrow(c.dim, offset, small_size);
-        addTensorInfo(*c.subtensorDesc, view);
-        offset += small_size;
-      }
-    }
-  }
-
-  // If the kernel call contains a random op, we need to pass in random seeds as
-  // well.
-  if (has_random) {
-    auto gen_ = THCRandom_getGenerator(at::globalContext().getTHCState());
-    uint64_t offset =
-        gen_->state.philox_seed_offset.fetch_add(this->get_rand_offset(numel));
-    arguments.push_back(&gen_->state.initial_seed);
-    arguments.push_back(&offset);
-  }
-
-  launch_raw(numel, arguments.data());
-}
-
-void CompiledCUDAFusionFunction::launch(
-  at::ArrayRef<at::Tensor> inputs
-, std::vector<at::Tensor>& outputs) {
-  at::DeviceGuard guard(inputs.back());
-  outputs.clear();
-  outputs.reserve(outputDescriptors().size());
-  for(auto& od : outputDescriptors()) {
-    outputs.push_back(torch::getType(backend(),od.scalar_type).tensor());
-  }
-
-  launch_with_tensors(inputs, outputs);
-}
-
-/*
-* TensorDesc implementation.
-*/
-std::vector<bool> TensorDesc::findContiguous(
-    const at::IntList& sizes,
-    const at::IntList& strides) {
-  JIT_ASSERT(sizes.size() == strides.size());
-  std::vector<bool> cont(sizes.size());
-  for(size_t i = 0; i < sizes.size(); ++i) {
-    int64_t expected_stride = (i + 1 < sizes.size()) ? sizes[i+1]*strides[i+1] : 1;
-    cont[i] = strides[i] == expected_stride;
-  }
-  return cont;
-}
-
 
 } // namespace cudafuser
 
