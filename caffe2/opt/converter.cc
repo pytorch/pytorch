@@ -254,9 +254,7 @@ repr::NNModule convertToNNModule(caffe2::NetDef &net, std::unordered_map<std::st
   /// \brief For the construction of the control flow graph we keep track
   /// of a current basic block, which we split up as we come accross control
   /// flow operations such as if and while.
-  // std::unique_ptr<repr::BasicBlockType<repr::NNGraph>> currentBasicBlock =
-  auto bbNode =
-      cfg.createNode(util::make_unique<repr::BasicBlockType<repr::NNGraph>>());
+  auto bbNode = cfg.createNode(repr::BasicBlockType<repr::NNGraph>());
 
   for (auto &op : *net.mutable_op()) {
     auto opNode = dfg.createNode(); // Create an empty node for the operator.
@@ -283,7 +281,7 @@ repr::NNModule convertToNNModule(caffe2::NetDef &net, std::unordered_map<std::st
     }
 
     opNode->resetData(convertToNeuralNetOperator(op));
-    auto currentBasicBlock = bbNode->mutableData()->get();
+    auto currentBasicBlock = bbNode->mutableData();
     currentBasicBlock->pushInstructionNode(opNode);
   }
 
@@ -343,8 +341,8 @@ caffe2::NetDef convertToCaffe2Proto(repr::NNModule &m, const caffe2::NetDef& old
     if (bbNode->getOutEdges().size() > 1) {
       CAFFE_THROW("Control flow not yet supported in Caffe2 converter.");
     }
-    auto bb = bbNode->data().get();
-    for (const auto &instrNode : bb->getInstructions()) {
+    auto bb = bbNode->data();
+    for (const auto& instrNode : bb.getInstructions()) {
       caffe2::OperatorDef op = convertToOperatorDef(instrNode);
 
       for (const auto &inEdge : instrNode->getInEdges()) {

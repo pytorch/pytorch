@@ -40,3 +40,36 @@ IRNode::~IRNode() {
       // error if new types are added to this wrapper.
   }
 }
+
+namespace nom {
+
+void convert(torch::jit::Graph& jit_graph, NeuralNet* nn) {
+  auto* block = jit_graph.block();
+
+  auto basic_block =
+      nn->controlFlow.createNode(repr::BasicBlockType<DFGraph>());
+  auto nn_bb = basic_block->mutableData();
+
+  std::unordered_map<torch::jit::Value*, nom::DFGraph::NodeRef> output_map;
+  for (auto it = block->nodes().begin(); it != block->nodes().end(); ++it) {
+    auto* node = *it;
+    auto nn_op = nn->dataFlow.createNode(torch::jit::Node(node->kind()));
+    nn_bb->pushInstructionNode(nn_op);
+
+    for (auto* input : node->inputs()) {
+      if (output_map.find(input) == output_map.end()) {
+        auto nn_input = nn->dataFlow.createNode(torch::jit::Value());
+        output_map[input] = nn_input;
+      }
+      nn->dataFlow.createEdge(output_map[input], nn_op);
+    }
+
+    for (auto* output : node->outputs()) {
+      auto nn_val = nn->dataFlow.createNode(torch::jit::Value());
+      output_map[output] = nn_val;
+      nn->dataFlow.createEdge(nn_op, nn_val);
+    }
+  }
+}
+
+} // namespace nom

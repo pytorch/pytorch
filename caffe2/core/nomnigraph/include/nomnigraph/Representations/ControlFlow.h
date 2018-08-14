@@ -39,9 +39,6 @@ class BasicBlock {
   }
 
   void pushInstructionNode(NodeRef node) {
-    assert(
-        isa<Instruction>(node->data()) &&
-        "Cannot push non-instruction node to basic block.");
     Instructions.emplace_back(node);
     trackNode(node);
   }
@@ -102,7 +99,7 @@ struct ControlFlowGraphImpl {
 
 template <typename T, typename... U>
 struct ControlFlowGraphImpl<Graph<T, U...>> {
-  using type = Graph<std::unique_ptr<BasicBlock<T, U...>>, int>;
+  using type = Graph<BasicBlock<T, U...>, int>;
   using bbType = BasicBlock<T, U...>;
 };
 

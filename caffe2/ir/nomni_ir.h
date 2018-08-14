@@ -44,4 +44,6 @@ struct NeuralNet {
   CFGraph controlFlow;
 };
 
+void convert(torch::jit::Graph&, NeuralNet*);
+
 } // namespace nom
