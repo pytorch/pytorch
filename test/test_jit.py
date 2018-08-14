@@ -86,16 +86,66 @@ def LSTMCellC(*args, **kwargs):
     return torch.cat((hy, cy))
 
 
+def LSTMCellS(x, hx, cx, w_ih, w_hh, b_ih, b_hh):
+    gates = x.mm(w_ih.t()) + hx.mm(w_hh.t()) + b_ih + b_hh
+    ingate, forgetgate, cellgate, outgate = gates.chunk(4, 1)
+    ingate = F.sigmoid(ingate)
+    forgetgate = F.sigmoid(forgetgate)
+    cellgate = F.tanh(cellgate)
+    outgate = F.sigmoid(outgate)
+    cy = (forgetgate * cx) + (ingate * cellgate)
+    hy = outgate * F.tanh(cy)
+    return hy, cy
+
+
+# Code reference: https://github.com/pytorch/translate/blob/master/pytorch_translate/rnn_cell.py#L27:44
+def MiLSTMCell(x, hx, cx, w_ih, w_hh, alpha, beta_i, beta_h, bias):
+    Wx = x.mm(w_ih.t())
+    Uz = hx.mm(w_hh.t())
+    # Section 2.1 in https://arxiv.org/pdf/1606.06630.pdf
+    gates = alpha * Wx * Uz + beta_i * Wx + beta_h * Uz + bias
+    # Same as LSTMCell after this point
+    ingate, forgetgate, cellgate, outgate = gates.chunk(4, 1)
+    ingate = ingate.sigmoid()
+    forgetgate = forgetgate.sigmoid()
+    cellgate = cellgate.tanh()
+    outgate = outgate.sigmoid()
+    cy = (forgetgate * cx) + (ingate * cellgate)
+    hy = outgate * cy.tanh()
+    return hy, cy
+
+
 def canonical(graph):
     return str(torch._C._jit_pass_canonicalize(graph))
 
 
-def get_lstm_inputs(device):
+def get_lstm_inputs(device, training=False):
     input = torch.randn(3, 10, dtype=torch.float, device=device)
     hx = torch.randn(3, 20, dtype=torch.float, device=device)
     cx = torch.randn(3, 20, dtype=torch.float, device=device)
     module = nn.LSTMCell(10, 20).to(device, torch.float)  # Just to allocate weights with correct sizes
-    return (input, hx, cx) + tuple(p.requires_grad_(False) for p in module.parameters())
+    if training:
+        params = tuple(module.parameters())
+    else:
+        params = tuple(p.requires_grad_(False) for p in module.parameters())
+    return (input, hx, cx) + params
+
+
+def get_milstm_inputs(device, training=False):
+    minibatch = 3
+    input_size = 10
+    hidden_size = 20
+    x = torch.randn(minibatch, input_size, device=device, dtype=torch.float)
+    hx = torch.randn(minibatch, hidden_size, device=device, dtype=torch.float)
+    cx = torch.randn(minibatch, hidden_size, device=device, dtype=torch.float)
+
+    ih = torch.randn(4 * hidden_size, input_size, device=device, dtype=torch.float, requires_grad=training)
+    hh = torch.randn(4 * hidden_size, hidden_size, device=device, dtype=torch.float, requires_grad=training)
+    alpha = torch.randn(4 * hidden_size, dtype=torch.float, device=device, requires_grad=training)
+    ibeta = torch.randn(4 * hidden_size, dtype=torch.float, device=device, requires_grad=training)
+    hbeta = torch.randn(4 * hidden_size, dtype=torch.float, device=device, requires_grad=training)
+    bias = torch.randn(4 * hidden_size, dtype=torch.float, device=device, requires_grad=training)
+    return x, hx, cx, ih, hh, alpha, ibeta, hbeta, bias
 
 
 def get_fn(file_name, script_path):
@@ -105,6 +155,29 @@ def get_fn(file_name, script_path):
     spec.loader.exec_module(module)
     fn = module.fn
     return fn
+
+
+def get_execution_plan(graph_executor_state):
+    execution_plans = graph_executor_state.execution_plans.values()
+    num_plans = len(execution_plans)
+    if num_plans != 1:
+        raise RuntimeError('This test assumes this GraphExecutor should '
+                           'only have one execution plan, got: {}'.format(num_plans))
+    return list(execution_plans)[0]
+
+
+def backward_graph(script_module):
+    if not isinstance(script_module, torch.jit.ScriptModule):
+        raise RuntimeError('Expected ScriptModule')
+    ge_state = script_module.get_debug_state()
+    fwd_plan = get_execution_plan(ge_state)
+    if fwd_plan.grad_executor is None:
+        raise RuntimeError('Error: tried to get grad_executor of function '
+                           'that hasn\'t run backward yet.')
+    bwd_plan = get_execution_plan(fwd_plan.grad_executor)
+    # Running JIT passes requires that we own the graph (with a shared_ptr).
+    # The debug state struct does not own its graph so we make a copy of it.
+    return bwd_plan.graph.copy()
 
 
 # Python equivalents for the empty list construction builtins. We need
@@ -1897,6 +1970,8 @@ class TestScript(JitTestCase):
             outputs_ge = ge(*inputs)
         self.assertEqual(outputs, outputs_ge)
 
+        return ge
+
     def test_script_cu(self):
         cu = torch.jit.CompilationUnit('''
             def foo(a):
@@ -2360,6 +2435,30 @@ a")
         outputs = [torch.ones(20, 10, 10)] * 3
 
         self.assertEqual(cu.test_fuser_multiple_blocks(*inputs), outputs)
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @skipIfRocm
+    def test_lstm_fusion_cuda(self):
+        inputs = get_lstm_inputs('cuda', training=True)
+        module = self.checkScript(LSTMCellS, inputs)
+        self.assertExpectedGraph(module.graph_for(*inputs), subname='forward')
+
+        hy, cy = module(*inputs)
+        (hy + cy).sum().backward()
+        self.assertExpectedGraph(backward_graph(module), subname='backward')
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @skipIfRocm
+    def test_milstm_fusion_cuda(self):
+        inputs = get_milstm_inputs('cuda', training=True)
+        module = self.checkScript(MiLSTMCell, inputs)
+        self.assertExpectedGraph(module.graph_for(*inputs), subname='forward')
+
+        hy, cy = module(*inputs)
+        (hy + cy).sum().backward()
+        self.assertExpectedGraph(backward_graph(module), subname='backward')
 
     def test_dropout_script(self):
 
