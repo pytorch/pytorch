@@ -443,18 +443,10 @@ See :func:`torch.bernoulli`. Returns a result tensor where each
 
 add_docstr_all('bernoulli_',
                r"""
-.. function:: bernoulli_() -> Tensor
-
-In-place version of :func:`torch.bernoulli`. Fills each location ``self[i]``
-with an independent sample from :math:`\text{Bernoulli}(\texttt{self[i]})`.
-
-
-.. function:: bernoulli_(p=0.5) -> Tensor
+bernoulli_(p=0.5) -> Tensor
 
 Fills each location of ``self`` with an independent sample from
 :math:`\text{Bernoulli}(\texttt{p})`.
-
-In-place version of :meth:`~Tensor.bernoulli`
 """)
 
 add_docstr_all('bincount',

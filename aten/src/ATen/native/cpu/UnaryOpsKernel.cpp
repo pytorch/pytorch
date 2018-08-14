@@ -118,7 +118,9 @@ static void sigmoid_kernel(Tensor& result, const Tensor& self) {
 
 #if !AT_MKL_ENABLED()
 void bernoulli_mkl_kernel(Tensor &output, const double p, Generator* gen) {
-  AT_ASSERT(false, "ATen not compiled with MKL");
+  // Use AT_ASSERTM because this should never be reached, and AT_ASSERTM tells
+  // users to report this as a bug.
+  AT_ASSERTM(false, "ATen not compiled with MKL");
 }
 #else
 void bernoulli_mkl_kernel(Tensor &self, const double p, Generator* gen) {
