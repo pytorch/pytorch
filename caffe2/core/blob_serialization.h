@@ -26,13 +26,13 @@ constexpr auto kChunkIdSeparator = "#%";
 // The Blob serialization registry and serializer creator functions.
 CAFFE_DECLARE_TYPED_REGISTRY(
     BlobSerializerRegistry,
-    TypeIdentifier,
+    at::DataType,
     BlobSerializerBase,
     std::unique_ptr);
 #define REGISTER_BLOB_SERIALIZER(id, ...) \
   CAFFE_REGISTER_TYPED_CLASS(BlobSerializerRegistry, id, __VA_ARGS__)
 // Creates an operator with the given operator definition.
-inline unique_ptr<BlobSerializerBase> CreateSerializer(TypeIdentifier id) {
+inline unique_ptr<BlobSerializerBase> CreateSerializer(at::DataType id) {
   return BlobSerializerRegistry()->Create(id);
 }
 

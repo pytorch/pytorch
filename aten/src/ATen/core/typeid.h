@@ -22,7 +22,7 @@
 #include "ATen/core/Half.h"
 #include "ATen/core/IdWrapper.h"
 
-// TODO: This file is still in the caffe2 namespace, despite living
+// TODO: Parts of this file are still in the caffe2 namespace, despite living
 // in the ATen directory.  This is because the macro CAFFE_DECLARE_KNOWN_TYPE
 // defines a template specialization, which relies on the namespace of TypeMeta
 // matching the namespace where the macro is called.  This requires us to
@@ -30,59 +30,55 @@
 // is not fixed at the moment.
 
 namespace caffe2 {
-class TypeIdentifier;
+class TypeMeta;
 }
 
-std::ostream& operator<<(std::ostream& stream, caffe2::TypeIdentifier typeId);
-
-namespace caffe2 {
-
-class TypeMeta;
+namespace at {
 
 /**
  * A type id is a unique id for a given C++ type.
  * You need to register your types using CAFFE_KNOWN_TYPE(MyType) to be able to
- * use TypeIdentifier with custom types. This is for example used to store the
+ * use at::DataType with custom types. This is for example used to store the
  * dtype of tensors.
  */
-class TypeIdentifier final : public at::IdWrapper<TypeIdentifier, uint16_t> {
+class DataType final : public at::IdWrapper<at::DataType, uint16_t> {
  public:
-  static TypeIdentifier createTypeId();
+  static at::DataType createTypeId();
 
-  friend std::ostream& ::operator<<(
+  friend std::ostream& operator<<(
       std::ostream& stream,
-      TypeIdentifier typeId);
-  friend bool operator<(TypeIdentifier lhs, TypeIdentifier rhs);
+      at::DataType typeId);
+  friend bool operator<(at::DataType lhs, at::DataType rhs);
 
   // This is 8, because 0 is uint8_t (due to ScalarType BC constraint)
-  static constexpr TypeIdentifier uninitialized() {
-    return TypeIdentifier(8);
+  static constexpr at::DataType uninitialized() {
+    return at::DataType(8);
   }
 
  private:
-  constexpr explicit TypeIdentifier(uint16_t id) : IdWrapper(id) {}
-  friend class TypeMeta;
+  constexpr explicit DataType(uint16_t id) : IdWrapper(id) {}
+  friend class caffe2::TypeMeta;
 };
-
-// Allow usage in std::map / std::set
-// TODO Disallow this and rather use std::unordered_map/set everywhere
-inline bool operator<(TypeIdentifier lhs, TypeIdentifier rhs) {
-  return lhs.underlyingId() < rhs.underlyingId();
-}
-
-} // namespace caffe2
-
-AT_DEFINE_HASH_FOR_IDWRAPPER(caffe2::TypeIdentifier)
 
 inline std::ostream& operator<<(
     std::ostream& stream,
-    caffe2::TypeIdentifier typeId) {
+    at::DataType typeId) {
   return stream << typeId.underlyingId();
 }
 
+// Allow usage in std::map / std::set
+// TODO Disallow this and rather use std::unordered_map/set everywhere
+inline bool operator<(at::DataType lhs, at::DataType rhs) {
+  return lhs.underlyingId() < rhs.underlyingId();
+}
+
+} // namespace at
+
+AT_DEFINE_HASH_FOR_IDWRAPPER(at::DataType)
+
 namespace caffe2 {
 
-std::unordered_map<TypeIdentifier, std::string>& gTypeNames();
+std::unordered_map<at::DataType, std::string>& gTypeNames();
 std::unordered_set<std::string>& gRegisteredTypeNames();
 
 // A utility function to return an exception std::string by prepending its
@@ -93,7 +89,7 @@ std::mutex& gTypeRegistrationMutex();
 
 template <typename T>
 struct TypeNameRegisterer {
-  TypeNameRegisterer(TypeIdentifier id, const std::string& literal_name) {
+  TypeNameRegisterer(at::DataType id, const std::string& literal_name) {
     std::lock_guard<std::mutex> guard(gTypeRegistrationMutex());
 #ifdef __GXX_RTTI
     (void)literal_name;
@@ -145,7 +141,7 @@ class TypeMeta {
    * type, use TypeMeta::Make<T>().
    */
   TypeMeta() noexcept
-      : id_(TypeIdentifier::uninitialized()),
+      : id_(at::DataType::uninitialized()),
         itemsize_(0),
         ctor_(nullptr),
         copy_(nullptr),
@@ -167,7 +163,7 @@ class TypeMeta {
   // TypeMeta can only be created by Make, making sure that we do not
   // create incorrectly mixed up TypeMeta objects.
   TypeMeta(
-      TypeIdentifier i,
+      at::DataType i,
       size_t s,
       PlacementNew* ctor,
       TypedCopy* copy,
@@ -184,7 +180,7 @@ class TypeMeta {
   /**
    * Returns the type id.
    */
-  const TypeIdentifier& id() const noexcept {
+  const at::DataType& id() const noexcept {
     return id_;
   }
   /**
@@ -237,7 +233,7 @@ class TypeMeta {
    * is generated during run-time. Do NOT serialize the id for storage.
    */
   template <typename T>
-  AT_CORE_API static TypeIdentifier Id();
+  AT_CORE_API static at::DataType Id();
 
   /**
    * Returns the item size of the type. This is equivalent to sizeof(T).
@@ -366,7 +362,7 @@ class TypeMeta {
   }
 
  private:
-  TypeIdentifier id_;
+  at::DataType id_;
   size_t itemsize_;
   PlacementNew* ctor_;
   TypedCopy* copy_;
@@ -403,16 +399,16 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
 #ifdef _MSC_VER
 #define CAFFE_KNOWN_TYPE(T)                                               \
   template <>                                                             \
-  AT_CORE_API TypeIdentifier TypeMeta::Id<T>() {                          \
-    static const TypeIdentifier type_id = TypeIdentifier::createTypeId(); \
+  AT_CORE_API at::DataType TypeMeta::Id<T>() {                          \
+    static const at::DataType type_id = at::DataType::createTypeId(); \
     static TypeNameRegisterer<T> registerer(type_id, #T);                 \
     return type_id;                                                       \
   }
 #else // _MSC_VER
 #define CAFFE_KNOWN_TYPE(T)                                               \
   template <>                                                             \
-  TypeIdentifier TypeMeta::Id<T>() {                                      \
-    static const TypeIdentifier type_id = TypeIdentifier::createTypeId(); \
+  at::DataType TypeMeta::Id<T>() {                                      \
+    static const at::DataType type_id = at::DataType::createTypeId(); \
     static TypeNameRegisterer<T> registerer(type_id, #T);                 \
     return type_id;                                                       \
   }
@@ -427,14 +423,14 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
 #ifdef _MSC_VER
 #define CAFFE_DECLARE_KNOWN_TYPE(PreallocatedId, T)     \
   template <>                                           \
-  inline AT_CORE_API TypeIdentifier TypeMeta::Id<T>() { \
-    return TypeIdentifier(PreallocatedId);              \
+  inline AT_CORE_API at::DataType TypeMeta::Id<T>() { \
+    return at::DataType(PreallocatedId);              \
   }
 #else // _MSC_VER
 #define CAFFE_DECLARE_KNOWN_TYPE(PreallocatedId, T) \
   template <>                                       \
-  inline TypeIdentifier TypeMeta::Id<T>() {         \
-    return TypeIdentifier(PreallocatedId);          \
+  inline at::DataType TypeMeta::Id<T>() {         \
+    return at::DataType(PreallocatedId);          \
   }
 #endif
 

@@ -9,10 +9,26 @@
 
 using std::string;
 
+namespace at {
+
+at::DataType DataType::createTypeId() {
+  static std::atomic<at::DataType::underlying_type> counter(
+      caffe2::TypeMeta::Id<caffe2::_CaffeHighestPreallocatedTypeId>().underlyingId());
+  const at::DataType::underlying_type new_value = ++counter;
+  if (new_value ==
+      std::numeric_limits<at::DataType::underlying_type>::max()) {
+    throw std::logic_error(
+        "Ran out of available type ids. If you need more than 2^16 CAFFE_KNOWN_TYPEs, we need to increase at::DataType to use more than 16 bit.");
+  }
+  return at::DataType(new_value);
+}
+
+}
+
 namespace caffe2 {
 
-std::unordered_map<TypeIdentifier, string>& gTypeNames() {
-  static std::unordered_map<TypeIdentifier, string> g_type_names;
+std::unordered_map<at::DataType, string>& gTypeNames() {
+  static std::unordered_map<at::DataType, string> g_type_names;
   return g_type_names;
 }
 
@@ -38,18 +54,6 @@ void TypeMeta::_ThrowRuntimeTypeLogicError(const std::string& msg) {
   // In earlier versions it used to be std::abort() but it's a bit hard-core
   // for a library
   AT_ERROR(msg);
-}
-
-TypeIdentifier TypeIdentifier::createTypeId() {
-  static std::atomic<TypeIdentifier::underlying_type> counter(
-      TypeMeta::Id<_CaffeHighestPreallocatedTypeId>().underlyingId());
-  const TypeIdentifier::underlying_type new_value = ++counter;
-  if (new_value ==
-      std::numeric_limits<TypeIdentifier::underlying_type>::max()) {
-    throw std::logic_error(
-        "Ran out of available type ids. If you need more than 2^16 CAFFE_KNOWN_TYPEs, we need to increase TypeIdentifier to use more than 16 bit.");
-  }
-  return TypeIdentifier(new_value);
 }
 
 CAFFE_DEFINE_KNOWN_TYPE(float);
@@ -85,7 +89,7 @@ namespace {
 // intended to be only instantiated once here.
 struct UninitializedTypeNameRegisterer {
   UninitializedTypeNameRegisterer() {
-    gTypeNames()[TypeIdentifier::uninitialized()] = "nullptr (uninitialized)";
+    gTypeNames()[at::DataType::uninitialized()] = "nullptr (uninitialized)";
   }
 };
 static UninitializedTypeNameRegisterer g_uninitialized_type_name_registerer;
