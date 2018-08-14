@@ -7155,7 +7155,7 @@ class TestTorch(TestCase):
         draws = engine.draw(1000)
         self.assertTrue(torch.all(draws <= 1))
         self.assertTrue(torch.all(draws >= 0))
-        
+
     def test_parsing_int64(self):
         # accepts integer arguments
         x = torch.cumsum(torch.ones(5, 5), 0)
