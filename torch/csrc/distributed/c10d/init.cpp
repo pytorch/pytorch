@@ -51,6 +51,20 @@ PyObject* c10d_init(PyObject* _unused) {
       .value("MIN", ::c10d::ReduceOp::MIN)
       .value("MAX", ::c10d::ReduceOp::MAX);
 
+  py::class_<::c10d::ReduceOptions>(module, "ReduceOptions")
+      .def(py::init<>())
+      .def_readwrite("reduceOp", &::c10d::ReduceOptions::reduceOp)
+      .def_readwrite("rootRank", &::c10d::ReduceOptions::rootRank)
+      .def_readwrite("rootTensor", &::c10d::ReduceOptions::rootTensor);
+
+  py::class_<::c10d::ScatterOptions>(module, "ScatterOptions")
+      .def(py::init<>())
+      .def_readwrite("rootRank", &::c10d::ScatterOptions::rootRank);
+
+  py::class_<::c10d::GatherOptions>(module, "GatherOptions")
+      .def(py::init<>())
+      .def_readwrite("rootRank", &::c10d::GatherOptions::rootRank);
+
   auto store =
       shared_ptr_class_<::c10d::Store>(module, "Store")
           // Convert from std::string to std::vector<uint8>.
@@ -122,6 +136,90 @@ PyObject* c10d_init(PyObject* _unused) {
               },
               py::arg("tensor"),
               py::arg("op") = ::c10d::ReduceOp::SUM,
+              py::call_guard<py::gil_scoped_release>())
+
+          .def(
+              "reduce",
+              &::c10d::ProcessGroup::reduce,
+              py::call_guard<py::gil_scoped_release>())
+
+          .def(
+              "reduce",
+              [](::c10d::ProcessGroup& pg,
+                 at::Tensor& x,
+                 int rootRank,
+                 ::c10d::ReduceOp op) {
+                ::c10d::ReduceOptions opts;
+                opts.reduceOp = op;
+                opts.rootRank = rootRank;
+                std::vector<at::Tensor> xs = {x};
+                return pg.reduce(xs, opts);
+              },
+              py::arg("tensor"),
+              py::arg("root"),
+              py::arg("op") = ::c10d::ReduceOp::SUM,
+              py::call_guard<py::gil_scoped_release>())
+
+          .def(
+              "allgather",
+              &::c10d::ProcessGroup::allgather,
+              py::call_guard<py::gil_scoped_release>())
+
+          .def(
+              "allgather",
+              [](::c10d::ProcessGroup& pg,
+                 std::vector<at::Tensor>& output,
+                 at::Tensor& input) {
+                std::vector<std::vector<at::Tensor>> outputs = {output};
+                std::vector<at::Tensor> inputs = {input};
+                return pg.allgather(outputs, inputs);
+              },
+              py::arg("output_tensors"),
+              py::arg("tensor"),
+              py::call_guard<py::gil_scoped_release>())
+
+          .def(
+              "gather",
+              &::c10d::ProcessGroup::gather,
+              py::call_guard<py::gil_scoped_release>())
+
+          .def(
+              "gather",
+              [](::c10d::ProcessGroup& pg,
+                 std::vector<at::Tensor>& output,
+                 at::Tensor& input,
+                 int rootRank) {
+                ::c10d::GatherOptions opts;
+                opts.rootRank = rootRank;
+                std::vector<std::vector<at::Tensor>> outputs = {output};
+                std::vector<at::Tensor> inputs = {input};
+                return pg.gather(outputs, inputs, opts);
+              },
+              py::arg("output_tensors"),
+              py::arg("tensor"),
+              py::arg("root"),
+              py::call_guard<py::gil_scoped_release>())
+
+          .def(
+              "scatter",
+              &::c10d::ProcessGroup::scatter,
+              py::call_guard<py::gil_scoped_release>())
+
+          .def(
+              "scatter",
+              [](::c10d::ProcessGroup& pg,
+                 at::Tensor& output,
+                 std::vector<at::Tensor>& input,
+                 int rootRank) {
+                ::c10d::ScatterOptions opts;
+                opts.rootRank = rootRank;
+                std::vector<std::vector<at::Tensor>> inputs = {input};
+                std::vector<at::Tensor> outputs = {output};
+                return pg.scatter(outputs, inputs, opts);
+              },
+              py::arg("output_tensor"),
+              py::arg("tensors"),
+              py::arg("root"),
               py::call_guard<py::gil_scoped_release>());
 
   auto processGroupGloo = shared_ptr_class_<::c10d::ProcessGroupGloo>(
