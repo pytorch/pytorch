@@ -231,7 +231,10 @@ endif()
 
 # Note(jiayq): This is not complete yet, but in the end we will need to deal with
 # explicit hidden visibility.
-target_compile_options(caffe2 PRIVATE "-fvisibility=hidden")
+# This line is here so that when testing build, we can enable it to properly test
+# annotation of public symbols. When finally doing proper build with all symbols
+# annotated, we will enable this line and have it wrapped with gcc/clang checks.
+# target_compile_options(caffe2 PRIVATE "-fvisibility=hidden")
 
 target_compile_options(caffe2 PRIVATE "-DCAFFE2_BUILD_MAIN_LIB")
 if (MSVC AND NOT BUILD_SHARED_LIBS)
