@@ -137,9 +137,45 @@ linux_cuda_test_defaults: &linux_cuda_test_defaults
 
 version: 2
 jobs:
+  linux_trusty_py2_7_9_build_test:
+    docker:
+      - image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py2.7.9:226
+        <<: *docker_config_defaults
+    <<: *linux_cpu_build_test_defaults
+
+  linux_trusty_py2_7_build_test:
+    docker:
+      - image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py2.7:226
+        <<: *docker_config_defaults
+    <<: *linux_cpu_build_test_defaults
+
+  linux_trusty_py3_5_build_test:
+    docker:
+      - image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.5:226
+        <<: *docker_config_defaults
+    <<: *linux_cpu_build_test_defaults
+
+  linux_trusty_py3_6_gcc4_8_build_test:
+    docker:
+      - image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.6-gcc4.8:226
+        <<: *docker_config_defaults
+    <<: *linux_cpu_build_test_defaults
+
+  linux_trusty_py3_6_gcc5_4_build_test:
+    docker:
+      - image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.6-gcc5.4:226
+        <<: *docker_config_defaults
+    <<: *linux_cpu_build_test_defaults
+
   linux_trusty_py3_6_gcc7_build_test:
     docker:
       - image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.6-gcc7:226
+        <<: *docker_config_defaults
+    <<: *linux_cpu_build_test_defaults
+
+  linux_trusty_pynightly_build_test:
+    docker:
+      - image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-pynightly:226
         <<: *docker_config_defaults
     <<: *linux_cpu_build_test_defaults
 
@@ -247,7 +283,13 @@ workflows:
   version: 2
   build:
     jobs:
+      - linux_trusty_py2_7_9_build_test
+      - linux_trusty_py2_7_build_test
+      - linux_trusty_py3_5_build_test
+      - linux_trusty_py3_6_gcc4_8_build_test
+      - linux_trusty_py3_6_gcc5_4_build_test
       - linux_trusty_py3_6_gcc7_build_test
+      - linux_trusty_pynightly_build_test
       - linux_xenial_py3_clang5_asan_build
       - linux_xenial_py3_clang5_asan_test:
           requires:
