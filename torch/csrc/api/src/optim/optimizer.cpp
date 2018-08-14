@@ -29,10 +29,9 @@ void OptimizerBase::add_parameters(const ParameterCursor& cursor) {
 
 void OptimizerBase::zero_grad() {
   for (auto& parameter : parameters_) {
-    auto& grad = parameter.grad();
-    if (grad.defined()) {
-      grad = grad.detach();
-      Tensor(grad).data().zero_();
+    if (parameter.grad().defined()) {
+      parameter.grad().detach_();
+      parameter.grad().zero_();
     }
   }
 }

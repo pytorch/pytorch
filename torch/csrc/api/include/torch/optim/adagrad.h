@@ -29,9 +29,7 @@ class Adagrad : public Optimizer {
       ParameterContainer&& parameters,
       const AdagradOptions& options)
       : Optimizer(std::forward<ParameterContainer>(parameters)),
-        options(options),
-        sum_(zero_buffers_like(parameters_)),
-        step_(parameters_.size(), 0) {}
+        options(options) {}
 
   void step() override;
 
@@ -47,7 +45,7 @@ class Adagrad : public Optimizer {
   friend class cereal::access;
   Adagrad() : options(0) {}
 
-  std::vector<Tensor> sum_;
+  std::vector<at::Tensor> sum_;
   std::vector<int64_t> step_;
 };
 } // namespace optim
