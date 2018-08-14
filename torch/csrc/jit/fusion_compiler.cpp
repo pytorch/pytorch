@@ -422,7 +422,7 @@ static at::optional<Node&> usedInFusedChunk(Value * input) {
   // If input is an input to prim::FusedChunk, it will only have one use.
   auto * node = input->uses().at(0).user;
   if (node->kind() == prim::FusedChunk) {
-		JIT_ASSERT(input->uses().size() == 1);
+        JIT_ASSERT(input->uses().size() == 1);
     return *node;
   } else {
     return at::nullopt;
@@ -466,7 +466,7 @@ std::tuple<std::vector<PartitionDesc>,std::vector<PartitionDesc>,bool> emitCompi
       if (auto chunk = usedInFusedChunk(p)) {
         int64_t dim = chunk->i(attr::dim);
         int64_t chunks = chunk->i(attr::chunks);
-				auto tensor_type = p->type()->cast<TensorType>();
+        auto tensor_type = p->type()->cast<CompleteTensorType>();
         chunk_desc.emplace_back(tensor_type, chunks, dim, false);
 
         for (auto * o : chunk->outputs()) {
@@ -512,7 +512,7 @@ std::tuple<std::vector<PartitionDesc>,std::vector<PartitionDesc>,bool> emitCompi
     env.d("formal",formal_count++);
 
     // Acquires and converts (if needed) inputs
-    auto pt = p->type()->cast<TensorType>();
+    auto pt = p->type()->cast<CompleteTensorType>();
     if (use_cuda && pt && pt->scalarType() == at::ScalarType::Half) {
       env.s(
         "access"
@@ -548,7 +548,7 @@ std::tuple<std::vector<PartitionDesc>,std::vector<PartitionDesc>,bool> emitCompi
     env.s("node",valueName(o));
 
     // Acquires and converts (if needed) outputs
-    auto ot = o->type()->cast<TensorType>();
+    auto ot = o->type()->cast<CompleteTensorType>();
     if (use_cuda && ot && ot->scalarType() == at::ScalarType::Half) {
       body << format("${access} = __float2half(${node});\n",env);
       has_half_tensor = true;
@@ -1080,11 +1080,11 @@ std::shared_ptr<CompiledFusionFunction> FusionCompiler::getOrCompile(Node* fusio
   auto & graph = *fusion_group->g(attr::Subgraph);
   AnnotatedGraph agraph(graph, fusion_group->i(attr::device));
   for(auto & input : graph.inputs()) {
-    auto t = input->type()->expect<TensorType>();
+    auto t = input->type()->expect<CompleteTensorType>();
     agraph.input_desc.emplace_back(t);
   }
   for(auto & output : graph.outputs()) {
-    auto t = output->type()->expect<TensorType>();
+    auto t = output->type()->expect<CompleteTensorType>();
     agraph.output_desc.emplace_back(t);
   }
   return getOrCompile(agraph);

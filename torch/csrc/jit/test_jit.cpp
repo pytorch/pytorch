@@ -649,7 +649,7 @@ std::string toString(std::shared_ptr<Graph>& graph) {
 void testDifferentiate(std::ostream & out) {
   auto graph = std::make_shared<Graph>();
   at::ScalarType s = at::ScalarType::Float;
-  auto type = TensorType::create(s, -1, {2, 3, 4}, {12, 4, 1});
+  auto type = CompleteTensorType::create(s, -1, {2, 3, 4}, {12, 4, 1});
 
   // Build up a fake graph
   auto a = SymbolicVariable::asNewInput(*graph, type);
@@ -676,7 +676,7 @@ void testDifferentiate(std::ostream & out) {
 void testDifferentiateWithRequiresGrad(std::ostream & out) {
   auto graph = std::make_shared<Graph>();
   at::ScalarType s = at::ScalarType::Float;
-  auto type = TensorType::create(s, -1, {2, 3, 4}, {12, 4, 1});
+  auto type = CompleteTensorType::create(s, -1, {2, 3, 4}, {12, 4, 1});
 
   // Build up a fake graph
   auto a = SymbolicVariable::asNewInput(*graph, type);
@@ -809,8 +809,8 @@ void shapeAnalysisTest() {
   PropagateInputShapes(*g, spec);
   at::Tensor r0, r1;
   std::tie(r0, r1) = lstm(input, hx, cx, w_ih, w_hh);
-  auto o0 = g->outputs()[0]->type()->expect<TensorType>();
-  auto o1 = g->outputs()[1]->type()->expect<TensorType>();
+  auto o0 = g->outputs()[0]->type()->expect<CompleteTensorType>();
+  auto o1 = g->outputs()[1]->type()->expect<CompleteTensorType>();
   REQUIRE(o0->sizes() == std::vector<int64_t>(r0.sizes().begin(), r0.sizes().end()));
   REQUIRE(o1->sizes() == std::vector<int64_t>(r1.sizes().begin(), r1.sizes().end()));
 

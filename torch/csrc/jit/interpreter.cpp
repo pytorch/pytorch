@@ -719,8 +719,8 @@ struct InterpreterStateImpl {
     current_pc = pc;
     current_stage++;
   }
-  const TensorType & tensorTypeForInput(size_t i) const {
-    return *function->preprocess.stage_input_types.at(current_stage).at(i)->expect<TensorType>();
+  const CompleteTensorType & tensorTypeForInput(size_t i) const {
+    return *function->preprocess.stage_input_types.at(current_stage).at(i)->expect<CompleteTensorType>();
   }
   int get(const ListHandle<int> & list, int i) {
     return int_data[list.start + i];
@@ -786,7 +786,7 @@ void InterpreterState::runOneStage(Stack & stack) {
   return pImpl->runOneStage(stack);
 }
 
-const TensorType & InterpreterState::tensorTypeForInput(size_t i) const {
+const CompleteTensorType & InterpreterState::tensorTypeForInput(size_t i) const {
   return pImpl->tensorTypeForInput(i);
 }
 
