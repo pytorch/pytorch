@@ -206,8 +206,14 @@ target_compile_definitions(torch PRIVATE _THP_CORE)
 
 # until they can be unified, keep these lists synced with setup.py
 if(MSVC)
+  if (${CMAKE_BUILD_TYPE} MATCHES "Debug")
+    set (MSVC_RUNTIME_LIBRARY_FLAG "/MDd")
+  else()
+    set (MSVC_RUNTIME_LIBRARY_FLAG "/MD")
+  endif()
+  
   target_compile_options(torch PRIVATE
-    /MD
+    ${MSVC_RUNTIME_LIBRARY_OPTION}
     /Z7
     /EHa
     /DNOMINMAX
