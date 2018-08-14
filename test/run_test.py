@@ -15,7 +15,6 @@ import torch
 from torch.utils import cpp_extension
 
 TESTS = [
-    'affine',
     'autograd',
     'cpp_extensions',
     'c10d',
