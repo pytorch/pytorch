@@ -22,6 +22,8 @@ namespace torch { namespace jit { namespace cudafuser {
 
 struct CUDAFusionFunction : public CompiledFusionFunction {
   TH_DISALLOW_COPY_AND_ASSIGN(CUDAFusionFunction);
+
+  friend class CUDAFuser;
   
   CUDAFusionFunction(const std::string& name, AnnotatedGraph& agraph);
 

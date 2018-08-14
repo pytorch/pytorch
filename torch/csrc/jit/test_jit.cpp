@@ -33,7 +33,7 @@ using Catch::StartsWith;
 
 #include "torch/csrc/jit/fusers/cpu/cpu_fuser.h"
 #if defined USE_CUDA && !(defined _WIN32) && !(defined USE_ROCM)
-  #include "torch/csrc/jit/fusers/cuda/cuda_fuser.h"
+  #include "torch/csrc/jit/fusers/cuda/cuda_fuser_interface.h"
 #endif // defined USE_CUDA && !(defined _WIN32) && !(defined USE_ROCM)
 
 #include "torch/csrc/autograd/variable.h"
@@ -139,7 +139,6 @@ Value * appendNewNode(NodeKind kind, Graph& graph, ArrayRef<Value*> inputs) {
 
 static void fusionTests() {
 #if defined USE_CUDA && !(defined _WIN32) && !(defined USE_ROCM)
-  cudafuser::CUDAFusionCompiler cuda_compiler;
 
   auto testSimple = [&] {
     Graph graph;
@@ -150,7 +149,7 @@ static void fusionTests() {
     auto a = at::rand({3,4}, at::kCUDA);
     auto b = at::rand({4,3}, at::kCUDA).transpose(0,1);
     auto o = at::zeros({3,4}, at::kCUDA);
-    cuda_compiler.debugLaunchGraph(graph, 0, {a,b}, {o});
+    debugCUDALaunchGraph(graph, 0, {a,b}, {o});
     auto o2 = a*b;
     float max_diff = (o2 - o).abs().max().toCDouble();
     //std::cout << "max diff: " << max_diff << "\n";
@@ -211,7 +210,7 @@ static void fusionTests() {
 
 
     //auto out0 = inputs[0]*inputs[1];
-    cuda_compiler.debugLaunchGraph(graph, 0, inputs, outputs);
+    debugCUDALaunchGraph(graph, 0, inputs, outputs);
     REQUIRE(out0.is_same_size(outputs.front()));
     float max_diff = (outputs.front() - out0).abs().max().toCDouble();
     REQUIRE(max_diff < 1e-6);
@@ -246,7 +245,7 @@ static void fusionTests() {
     auto o_r = a*b;
     auto o2_r = at::cat({a, o_r}, dim);
     auto o2 = at::zeros(o2_r.sizes(), at::kCUDA);
-    cuda_compiler.debugLaunchGraph(graph, 0, {a,b}, {o, o2});
+    debugCUDALaunchGraph(graph, 0, {a,b}, {o, o2});
 
     float max_diff = (o_r - o).abs().max().toCDouble();
     REQUIRE(max_diff == 0);

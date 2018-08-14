@@ -157,6 +157,7 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/fusers/cpu/cpu_fusion_pass.cpp
   ${TORCH_SRC_DIR}/csrc/jit/fusers/cpu/cpu_fuser.cpp
   ${TORCH_SRC_DIR}/csrc/jit/fusers/cuda/cuda_fusion_pass.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/fusers/cuda/cuda_fuser_interface.cpp
   ${TORCH_SRC_DIR}/csrc/jit/fusers/cuda/cuda_fuser.cpp
   ${TORCH_SRC_DIR}/csrc/jit/fusers/cuda/tensor_desc.cpp
   ${TORCH_SRC_DIR}/csrc/jit/fusers/cuda/cuda_fusion_function.cpp

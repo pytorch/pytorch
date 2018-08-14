@@ -3,7 +3,6 @@
 #include "torch/csrc/jit/fusers/cuda/cuda_fusion_function.h"
 
 #include "ATen/ATen.h"
-#include "ATen/DeviceGuard.h"
 #include "ATen/cuda/CUDAContext.h"
 #include "THC/THC.h"
 #include "THC/THCGenerator.hpp"
@@ -24,16 +23,12 @@ THCGenerator* THCRandom_getGenerator(THCState* state);
 
 namespace torch { namespace jit { namespace cudafuser {
 
-static void checkCUDAVersion(const cudaDeviceProp& prop) {
-  if ((prop.major >= 6 && CUDA_VERSION < 8000) ||
-      (prop.major >= 7 && CUDA_VERSION < 9000)) {
-    std::stringstream err_string;
-    err_string << "In CompiledCUDAFusionFunction, PyTorch compiled with insufficient CUDA version: "
-         << CUDA_VERSION << " for the current GPU device " << prop.name
-         << " with device capability " << prop.major << "." << prop.minor;
-    throw std::runtime_error(err_string.str());
-  }
-}
+CUDAFusionFunction::CUDAFusionFunction(
+  const std::string& name
+, AnnotatedGraph& agraph)
+: name{name}
+, input_desc{agraph.input_desc}
+, output_desc{agraph.output_desc} { }
 
 // Tries to compress sizes and strides according to cont. Emits the result t
 // c_sizes, c_strides and throws an error on failure (if can't compress)
@@ -82,52 +77,6 @@ static void compressContiguous(
 }
 
 static int ceilDiv(int a, int b) { return (a + b - 1) / b; }
-
-CUDAFusionFunction::CUDAFusionFunction(
-  const std::string& name
-, AnnotatedGraph& agraph)
-: name{name}, input_desc{agraph.input_desc}, output_desc{agraph.output_desc} {
-  at::DeviceGuard device_guard(agraph.device);
-
-  CUDA_ASSERT(cudaGetDeviceProperties(&prop, agraph.device));
-  checkCUDAVersion(prop);
-
-  std::stringstream cu;
-  auto ret = emitCompilationUnit(cu, name, agraph, true);
-  concat_desc = std::move(ret.first);
-  has_random = ret.second;
-  compilation_unit = cu.str();
-  nvrtcProgram program;
-  NVRTC_ASSERT(nvrtcCreateProgram(&program, compilation_unit.c_str(), NULL, 0, nullptr, nullptr));
-
-  std::string compute = "--gpu-architecture=compute_" + std::to_string(prop.major) + std::to_string(prop.minor);
-  std::vector<const char *> args = {"--std=c++11", compute.c_str(), "-default-device"};
-  nvrtcResult result = nvrtcCompileProgram(program, args.size(), args.data());
-  if (result == NVRTC_ERROR_COMPILATION) {
-    size_t logsize;
-    nvrtcGetProgramLogSize(program, &logsize);
-    std::vector<char> log(logsize);
-    nvrtcGetProgramLog(program, log.data());
-    cu << log.data();
-    throw std::runtime_error(cu.str());
-  }
-  ResourceGuard holdProgram([&] {
-    NVRTC_ASSERT(nvrtcDestroyProgram(&program));
-  });
-  NVRTC_ASSERT(result);
-
-  size_t ptx_size;
-  NVRTC_ASSERT(nvrtcGetPTXSize(program, &ptx_size));
-  ptx.resize(ptx_size);
-  NVRTC_ASSERT(nvrtcGetPTX(program, ptx.data()));
-
-  CU_ASSERT(cuModuleLoadData(&module, ptx.data()));
-  CU_ASSERT(cuModuleGetFunction(&function, module, name.c_str()));
-
-  CU_ASSERT(cuOccupancyMaxActiveBlocksPerMultiprocessor(
-    &maxBlocks, function, 128, 0));
-  maxBlocks *= prop.multiProcessorCount;
-}
 
 void CUDAFusionFunction::launch_with_tensors(
   at::ArrayRef<at::Tensor> inputs
@@ -220,6 +169,7 @@ uint64_t CUDAFusionFunction::get_rand_offset(uint32_t numel) {
   return 4 * (ceil(numel/(4 * blockSize * numBlocks)) + 1);
 }
 
+// TODO: combine with launch_with_tensors
 void CUDAFusionFunction::launch_raw(uint32_t numel, void** arguments) {
   int numBlocks = std::min(maxBlocks, ceilDiv(numel, blockSize));
 

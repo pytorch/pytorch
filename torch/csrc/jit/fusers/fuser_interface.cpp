@@ -1,9 +1,9 @@
 #include "torch/csrc/jit/fusers/fuser_interface.h"
 #include "torch/csrc/jit/fusers/cpu/cpu_fuser_interface.h"
 
-#ifdef USE_CUDA
+#if defined USE_CUDA && !(defined _WIN32) && !(defined USE_ROCM)
   #include "torch/csrc/jit/fusers/cuda/cuda_fuser_interface.h"
-#endif 
+#endif // defined USE_CUDA && !(defined _WIN32) && !(defined USE_ROCM) 
 
 namespace torch { namespace jit { 
 
@@ -11,9 +11,9 @@ std::shared_ptr<CompiledFusionFunction> getFusionFunction(Node* fusion_group) {
   const auto device = fusion_group->i(attr::device);
   if (device == kCPUDevice) return getCPUFusionFunction(fusion_group);
 
-  #ifdef USE_CUDA 
+  #if defined USE_CUDA && !(defined _WIN32) && !(defined USE_ROCM) 
     return getCUDAFusionFunction(fusion_group);
-  #endif // USE_CUDA
+  #endif // defined USE_CUDA && !(defined _WIN32) && !(defined USE_ROCM)
 
   throw std::runtime_error("CUDA device requested for fusion but USE_CUDA is undefined");  
 }

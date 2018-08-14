@@ -13,6 +13,11 @@ namespace torch { namespace jit {
 
 std::shared_ptr<CompiledFusionFunction> getCUDAFusionFunction(Node* fusion_group);
 
+void debugCUDALaunchGraph(
+    Graph& graph
+  , int device
+  , at::ArrayRef<at::Tensor> inputs
+  , at::ArrayRef<at::Tensor> outputs);
 
 } // namespace jit
 } // namespace torch
