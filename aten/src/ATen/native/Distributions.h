@@ -3,6 +3,22 @@
 #include <nvfunctional>
 #endif
 
+#include "ATen/ATen.h"
+#include "ATen/CPUGenerator.h"
+#include "ATen/CheckGenerator.h"
+#include "ATen/Generator.h"
+#include "TH/THGenerator.hpp"
+
+namespace at {namespace native {
+
+inline THGenerator* get_generator(at::Generator* gen) {
+  auto default_gen = &at::globalContext().defaultGenerator(at::Backend::CPU);
+  auto gen_ = at::check_generator<at::CPUGenerator>(gen, default_gen);
+  return gen_->generator;
+}
+
+}}  // namespace at::native
+
 namespace {
 
 #ifdef __CUDA_ARCH__
