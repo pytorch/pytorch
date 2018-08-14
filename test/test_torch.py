@@ -7107,6 +7107,40 @@ class TestTorch(TestCase):
         self.assertTrue(torch.all(draws <= 1))
         self.assertTrue(torch.all(draws >= 0))
 
+    def test_sobolengine_scrambled_lowdim(self):
+        engine_1d = torch.quasirandom.SobolEngine(1, scramble=True, seed=1729)
+        expected_1d = [0.16478512, 0.43221009, 0.84261382, 0.99750268, 0.27460563,
+                       0.01084163, 0.73373985, 0.65039611, 0.12329865, 0.35587373]
+        actual_1d = engine_1d.draw(10)
+        self.assertEqual(actual_1d.flatten(), torch.tensor(expected_1d))
+        self.assertEqual(actual_1d.size(), torch.Size([10, 1]))
+
+        engine_3d = torch.quasirandom.SobolEngine(3, scramble=True, seed=1729)
+        expected_3d = [0.32642800, 0.17881306, 0.68837059, 0.46492538, 0.91789097,
+                       0.58075899, 0.03642474, 0.68229187, 0.20051685, 0.30083340]
+        actual_3d = engine_3d.draw(10)
+        self.assertEqual(actual_3d[:, 2], torch.tensor(expected_3d))
+        self.assertEqual(actual_3d.size(), torch.Size([10, 3]))
+
+        engine_3d = torch.quasirandom.SobolEngine(3, scramble=True, seed=1729)
+        draws = torch.cat([engine_3d.draw() for _ in range(0, 10)])
+        self.assertEqual(draws, actual_3d)
+
+        engine_3d = torch.quasirandom.SobolEngine(3, scramble=True, seed=1729)
+        engine_3d.fast_forward(5)
+        draws = engine_3d.draw(5)
+        self.assertEqual(draws, actual_3d[5:])
+        engine_3d.reset()
+        self.assertEqual(engine_3d.draw(3), actual_3d[:3])
+        engine_3d.fast_forward(2)
+        self.assertEqual(engine_3d.draw(5), actual_3d[5:])
+
+    def test_sobolengine_scrambled_highdim(self):
+        engine = torch.quasirandom.SobolEngine(100)
+        draws = engine.draw(1000)
+        self.assertTrue(torch.all(draws <= 1))
+        self.assertTrue(torch.all(draws >= 0))
+        
     def test_parsing_int64(self):
         # accepts integer arguments
         x = torch.cumsum(torch.ones(5, 5), 0)
