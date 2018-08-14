@@ -2311,7 +2311,10 @@ a")
 
         self.checkScript(func2, ())
 
-    def test_tensor_scalar_fusion(self):
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @skipIfRocm
+    def test_tensor_scalar_fusion_cuda(self):
         def should_fuse(x):
             z = 3.
             y = x + z
@@ -2321,11 +2324,14 @@ a")
             y = x + int(z)
             return x * y
 
-        inputs = [torch.randn(2, 2, dtype=torch.float)]
+        inputs = [torch.randn(2, 2, dtype=torch.float, device='cuda')]
         ge = self.checkScript(should_fuse, inputs)
         self.assertExpectedGraph(ge.graph_for(*inputs), subname='1')
 
-        inputs = [torch.randn(2, 2, dtype=torch.float), torch.tensor(3., dtype=torch.float)]
+        inputs = [
+            torch.randn(2, 2, dtype=torch.float, device='cuda'),
+            torch.tensor(3., dtype=torch.float, device='cuda'),
+        ]
         ge = self.checkScript(should_not_fuse, inputs)
         self.assertExpectedGraph(ge.graph_for(*inputs), subname='2')
 
