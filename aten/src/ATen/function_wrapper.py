@@ -119,7 +119,7 @@ ${return_call} at::native::${native_type_method_dispatch}(/* native_actuals */ $
 
 # add non-virtual declaration to Tensor.h
 TENSOR_METHOD_DECLARATION = CodeTemplate("""\
-${return_type} ${api_name}(${method_formals_with_defaults})${const_mark};
+AT_API ${return_type} ${api_name}(${method_formals_with_defaults})${const_mark};
 """)
 # add non-virtual declaration to Tensor.cpp
 TENSOR_METHOD_DEFINITION = CodeTemplate("""\
@@ -180,7 +180,7 @@ if(${check_name}.type().is_sparse()) {
 }""")
 
 BUFFER_DEFINITION = CodeTemplate("""\
-auto ${name}_ = new TensorImpl(Backend::${Backend}, ScalarType::${ScalarName}, ${THTensor}_new(), false);
+auto ${name}_ = new TensorImpl(${Backend}TensorId(), ScalarType::${ScalarName}, ${THTensor}_new(), false);
 auto ${name} = Tensor(${name}_, false);""")
 
 CONDITIONAL_INITIALIZER = CodeTemplate("""\
@@ -295,6 +295,7 @@ CHECKED_CAST = {
         CodeTemplate(
             'check_generator<${Backend}Generator>(${arg_name}, &globalContext().defaultGenerator(backend()))'),
     # This is a cast done via direct-construction
+    'IntListStride': CodeTemplate('at::IntList ${result_name} = get_intlist_stride_th(${arg_name});'),
     'real': CodeTemplate('${arg_name}.to${ScalarName}()'),
     'accreal': CodeTemplate('${arg_name}.to${AccScalarName}()'),
     'TensorList': CodeTemplate(
@@ -320,23 +321,23 @@ CHECKED_USE = {
 CHECKED_USE_NULLABLE = CodeTemplate('${arg_name}_ ? ${usage} : NULL')
 
 ALLOC_NOARGS_WRAP = {
-    'THTensor*': 'new TensorImpl(Backend::${Backend}, ScalarType::${ScalarName})',
-    'THBoolTensor*': 'new TensorImpl(Backend::${Backend}, ScalarType::Byte)',
-    'THIndexTensor*': 'new TensorImpl(Backend::${Backend}, ScalarType::Long)',
-    'THIntegerTensor*': 'new TensorImpl(Backend::${Backend}, ScalarType::Int)',
+    'THTensor*': 'new TensorImpl(${Backend}TensorId(), ScalarType::${ScalarName})',
+    'THBoolTensor*': 'new TensorImpl(${Backend}TensorId(), ScalarType::Byte)',
+    'THIndexTensor*': 'new TensorImpl(${Backend}TensorId(), ScalarType::Long)',
+    'THIntegerTensor*': 'new TensorImpl(${Backend}TensorId(), ScalarType::Int)',
     'THSTensor*': 'detail::new_Sparse${Tensor}()',
-    'THDenseTensor*': 'new TensorImpl(Backend::${Backend}, ScalarType::${ScalarName})',
-    'THDenseIndexTensor*': 'new TensorImpl(Backend::${Backend}, ScalarType::Long)'
+    'THDenseTensor*': 'new TensorImpl(${Backend}TensorId(), ScalarType::${ScalarName})',
+    'THDenseIndexTensor*': 'new TensorImpl(${Backend}TensorId(), ScalarType::Long)'
 }
 
 ALLOC_WRAP = {
-    'THTensor*': 'new TensorImpl(Backend::${Backend}, ScalarType::${ScalarName}, ${arguments}, false)',
-    'THBoolTensor*': 'new TensorImpl(Backend::${Backend}, ScalarType::Byte, ${arguments}, false)',
-    'THIndexTensor*': 'new TensorImpl(Backend::${Backend}, ScalarType::Long, ${arguments}, false)',
-    'THIntegerTensor*': 'new TensorImpl(Backend::${Backend}, ScalarType::Int, ${arguments}, false)',
+    'THTensor*': 'new TensorImpl(${Backend}TensorId(), ScalarType::${ScalarName}, ${arguments}, false)',
+    'THBoolTensor*': 'new TensorImpl(${Backend}TensorId(), ScalarType::Byte, ${arguments}, false)',
+    'THIndexTensor*': 'new TensorImpl(${Backend}TensorId(), ScalarType::Long, ${arguments}, false)',
+    'THIntegerTensor*': 'new TensorImpl(${Backend}TensorId(), ScalarType::Int, ${arguments}, false)',
     'THSTensor*': 'new Sparse${Tensor}(${arguments})',
-    'THDenseTensor*': 'new TensorImpl(Backend::${Backend}, ScalarType::${ScalarName}, ${arguments}, false)',
-    'THDenseIndexTensor*': 'new TensorImpl(Backend::${Backend}, ScalarType::Long, ${arguments}, false)',
+    'THDenseTensor*': 'new TensorImpl(${Backend}TensorId(), ScalarType::${ScalarName}, ${arguments}, false)',
+    'THDenseIndexTensor*': 'new TensorImpl(${Backend}TensorId(), ScalarType::Long, ${arguments}, false)',
 }
 
 # Replacements for constants when calling into TH
