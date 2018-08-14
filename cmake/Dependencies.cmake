@@ -1218,6 +1218,7 @@ if (BUILD_ATEN)
   ENDIF()
 
   IF (NOT USE_ROCM)
+    message("disabling ROCM because NOT USE_ROCM is set")
     MESSAGE(STATUS "MIOpen not found. Compiling without MIOpen support")
     set(AT_ROCM_ENABLED 0)
   ELSE()
