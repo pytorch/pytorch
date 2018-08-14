@@ -2,8 +2,8 @@
 
 #include <map>
 
-#include <mpi.h>
 #include <mpi-ext.h> // Needed for CUDA-aware check
+#include <mpi.h>
 
 namespace c10d {
 

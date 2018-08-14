@@ -198,9 +198,7 @@ PyObject* c10d_init(PyObject* _unused) {
   shared_ptr_class_<::c10d::ProcessGroupMPI>(
       module, "ProcessGroupMPI", processGroup)
       .def(py::init(
-          []() {
-            return ::c10d::ProcessGroupMPI::createProcessGroupMPI();
-          }));
+          []() { return ::c10d::ProcessGroupMPI::createProcessGroupMPI(); }));
 #endif
 
   shared_ptr_class_<::c10d::ProcessGroup::Work>(module, "Work")
