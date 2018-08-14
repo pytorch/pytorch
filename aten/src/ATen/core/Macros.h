@@ -18,13 +18,11 @@
 #else // !defined(AT_CORE_STATIC_WINDOWS)
 #define AT_CORE_API
 #endif // !defined(AT_CORE_STATIC_WINDOWS)
-#endif  // _WIN32
-
+#else  // _WIN32
 #if defined(__GNUC__)
 #define AT_CORE_API __attribute__((__visibility__("default")))
-#else // defined(__GNUC__)
-#define AT_CORE_API
 #endif // defined(__GNUC__)
+#endif  // _WIN32
 
 // Disable the copy and assignment operator for a class. Note that this will
 // disable the usage of the class in std containers.
