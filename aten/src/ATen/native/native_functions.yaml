@@ -1158,6 +1158,9 @@
   variants: function
   deprecated: true
 
+- func: pad_sequence(TensorList tensors, bool batch_first=false, Scalar padding_value=0) -> Tensor
+  variants: function
+
 - func: pairwise_distance(Tensor x1, Tensor x2, double p=2, double eps=1e-6, bool keepdim=false) -> Tensor
   variants: function
 
