@@ -3,6 +3,10 @@
 
 #include "ATen/native/SobolEngineOpsUtils.h"
 
+#ifdef _OPENMP
+#include <omp.h>
+#endif
+
 #include <vector>
 
 namespace at {
@@ -15,21 +19,24 @@ namespace native {
 /// `sobolstate`.
 std::tuple<Tensor, Tensor> _sobol_engine_draw(const Tensor& quasi, int64_t n, const Tensor& sobolstate,
                                               int64_t dimension, int64_t num_generated) {
-  Tensor wquasi = quasi.clone();
-  std::vector<Tensor> result;
   AT_CHECK(sobolstate.type().scalarType() == at::ScalarType::Long,
            "sobolstate needs to be of type ", at::ScalarType::Long);
-  AT_CHECK(wquasi.type().scalarType() == at::ScalarType::Long,
+  AT_CHECK(quasi.type().scalarType() == at::ScalarType::Long,
            "quasi needs to be of type ", at::ScalarType::Long);
 
+  /// Performing one `unbind` operation and caching the result to prevent `n`
+  /// `select` operations.
+  std::vector<Tensor> sobolstate_unbind = at::native::unbind(sobolstate, 1);
+  Tensor wquasi = quasi.clone();
+
+  std::vector<Tensor> result;
   for (int64_t i = 0; i < n; ++i) {
-    int64_t l = rightmost_zero(num_generated);
-    Tensor inter_res = wquasi.__ixor__(sobolstate.select(1, l - 1));
-    result.emplace_back(inter_res.clone());
+    int64_t l = rightmost_zero(num_generated) - 1;
+    result.emplace_back(wquasi.__ixor__(sobolstate_unbind[l]).clone());
     num_generated++;
   }
 
-  return std::make_tuple(at::native::stack(result, 0).toType(at::kFloat).mul_(RECIPD), wquasi);
+  return std::make_tuple(at::native::stack(result).toType(at::kFloat).mul_(RECIPD), wquasi);
 }
 
 /// This is the core function to fast-forward a `SobolEngine` given
@@ -38,15 +45,19 @@ std::tuple<Tensor, Tensor> _sobol_engine_draw(const Tensor& quasi, int64_t n, co
 /// specified above.
 Tensor _sobol_engine_ff(const Tensor& quasi, int64_t n, const Tensor& sobolstate,
                         int64_t dimension, int64_t num_generated) {
-  Tensor wquasi = quasi.clone();
   AT_CHECK(sobolstate.type().scalarType() == at::ScalarType::Long,
            "sobolstate needs to be of type ", at::ScalarType::Long);
-  AT_CHECK(wquasi.type().scalarType() == at::ScalarType::Long,
+  AT_CHECK(quasi.type().scalarType() == at::ScalarType::Long,
            "quasi needs to be of type ", at::ScalarType::Long);
 
+  /// Performing one `unbind` operation and caching the result to prevent `n`
+  /// `select` operations.
+  std::vector<Tensor> sobolstate_unbind = at::native::unbind(sobolstate, 1);
+  Tensor wquasi = quasi.clone();
+
   for (int64_t i = 0; i < n; ++i) {
-    int64_t l = rightmost_zero(num_generated);
-    wquasi.__ixor__(sobolstate.select(1, l - 1));
+    int64_t l = rightmost_zero(num_generated) - 1;
+    wquasi.__ixor__(sobolstate_unbind[l]);
     num_generated++;
   }
   return wquasi;
@@ -77,6 +88,9 @@ Tensor _sobol_engine_scramble(const Tensor& sobolstate, const Tensor& ltm, int64
   auto ltm_d_a = ltm_dots.accessor<int64_t, 2>();
 
   // Main scrambling loop
+  #ifdef _OPENMP
+  #pragma omp parallel for
+  #endif
   for (int64_t d = 0; d < dimension; ++d) {
     for (int64_t j = 0; j < MAXBIT; ++j) {
       int64_t vdj = ss_a[d][j], l = 1, t2 = 0;

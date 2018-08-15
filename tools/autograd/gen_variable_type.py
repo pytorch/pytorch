@@ -76,6 +76,9 @@ DONT_REQUIRE_DERIVATIVE = {
     # These are only implemented on integral types
     '__and__', '__iand__', '__ilshift__', '__ior__', '__irshift__', '__ixor__',
     '__lshift__', '__or__', '__rshift__', '__xor__',
+    # These work on integral data types, and hence don't require derivative
+    '_sobol_engine_draw', '_sobol_engine_ff', '_sobol_engine_scramble',
+    '_sobol_engine_initialize_state',
 }
 
 METHOD_DECLARATION = CodeTemplate("""\
