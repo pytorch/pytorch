@@ -36,23 +36,17 @@ struct GraphFuser {
     
     return at::nullopt;
   }
-  // TODO: the fusion compiler has a lot of float-specific codegen
-  // so for now we only consider nodes that operate on floating point numbers
-  // and half values when running on a GPU with sufficient CUDA arch
-  bool isSupportedValue(Value* node) {
-    if (auto tt = node->type()->cast<TensorType>()) {
-      if (tt->device() == kCPUDevice) return false;
-      if (tt->scalarType() == at::kFloat) return true;
-      if (tt->scalarType() == at::ScalarType::Half && CUDA_VERSION >= 9)
-        return true;
-    }
-
-    return false;
-  }
 
   bool allValuesSupported(at::ArrayRef<Value*> list) {
-    for (Value* v : list) 
-      if (!isSupportedValue(v)) return false;
+    for (Value* v : list)
+
+      if (auto tt = v->type()->cast<TensorType>()) {
+	if (tt->device() == kCPUDevice ||
+	    (tt->scalarType() != at::kFloat &&
+	     tt->scalarType() != at::ScalarType::Half && CUDA_VERSION >= 9)
+	    ) return false;
+      }else
+	return false;
 
     return true;
   }
@@ -67,12 +61,6 @@ struct GraphFuser {
     }
 
     return true;
-  }
-
-  bool isNodeSupported(Node* node) {
-    return areTensorsOfSameShape(node->inputs()) 
-    && allValuesSupported(node->inputs()) 
-    && allValuesSupported(node->outputs());
   }
 
   bool isFusable(Node* node) {
@@ -95,7 +83,10 @@ struct GraphFuser {
       // type_as can have different input types as long as output is float, check only output
       return allValuesSupported(node->outputs());
     } else {
-      return isNodeSupported(node);
+      return areTensorsOfSameShape(node->inputs())
+	&& allValuesSupported(node->inputs())
+	&& allValuesSupported(node->outputs());
+
     }
   }
 
@@ -119,14 +110,6 @@ struct GraphFuser {
         auto actual = v->type()->cast<TensorType>();
         return actual && actual->sizes() == expected->sizes() && actual->device() != kCPUDevice;
     });
-  }
-
-  // Can this node produce an _output_ of a fusion group?
-  // all Fusable nodes can do this, but additionally Concat, which normally cannot be fused
-  // because it is not a simple map, can be put in a fusion group
-  // as long as no items in the group read the output of concat
-  bool isFusableAsExitNode(Node* node) {
-    return isFusable(node) || isFusableCatNode(node);
   }
 
   // necessary condition for fusion. If all of the uses of producer are consumer
@@ -456,9 +439,14 @@ struct GraphFuser {
   }
 
   // returns where to continue scanning, and whether any fusion was made
-  std::pair<graph_node_list::iterator, bool> scanNode(Node* consumer) {
+  std::pair<graph_node_list::iterator, bool>
+  scanNode(Node* consumer) {
     auto stage_guard = block->owningGraph()->setStageTemporary(consumer->stage());
-    if(isFusableAsExitNode(consumer)) {
+
+    // Can this node produce an _output_ of a fusion group?
+    // all Fusable nodes can do this, but additionally Concat can
+    // as long as no items in the group read the output of concat
+    if(isFusable(consumer) || isFusableCatNode(consumer)) {
       value_list inputs;
       auto consumer_inputs = consumer->kind() == aten::cat ?
         consumer->namedInput(attr::tensors)->node()->inputs() :
