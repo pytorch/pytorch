@@ -369,7 +369,7 @@ class Depthwise3x3ConvGradientOp final : public ConvPoolOpBase<CUDAContext> {
   Depthwise3x3ConvGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : cudnn_wrapper_(&context_),
         ConvPoolOpBase<CUDAContext>(operator_def, ws),
-        no_bias_(OperatorBase::GetSingleArgument<int>("no_bias", 0)) {
+        no_bias_(this->template GetSingleArgument<int>("no_bias", 0)) {
     CAFFE_ENFORCE(
         !(no_bias_ && OutputSize() == 3),
         "If bias is not present, you should not have 3 grad output.");

@@ -13,7 +13,7 @@ bool PoolOp<float, CPUContext, LpPool>::RunOnDeviceWithOrderNCHW() {
   auto& X = Input(0);
   auto* Y = Output(0);
   ConvPoolOpBase::SetOutputSize(X, Y, X.dim32(1));
-  const auto p = OperatorBase::GetSingleArgument<float>("p", 2.0);
+  const auto p = this->template GetSingleArgument<float>("p", 2.0);
   const auto inv_p = 1.0 / p;
 
   const float* Xdata = X.data<float>();
@@ -63,7 +63,7 @@ bool PoolOp<float, CPUContext, LpPool>::RunOnDeviceWithOrderNHWC() {
   int channels = X.dim32(3);
   ConvPoolOpBase::SetOutputSize(X, Y, channels);
 
-  const auto p = OperatorBase::GetSingleArgument<float>("p", 2.0);
+  const auto p = this->template GetSingleArgument<float>("p", 2.0);
   const auto inv_p = 1.0 / p;
 
   const float* Xdata = X.data<float>();
@@ -109,7 +109,7 @@ bool PoolGradientOp<float, CPUContext, LpPool>::RunOnDeviceWithOrderNCHW() {
   const auto& Y = Input(1);
   auto& dY = Input(2);
   auto* dX = Output(0);
-  const auto p = OperatorBase::GetSingleArgument<float>("p", 2.0);
+  const auto p = this->template GetSingleArgument<float>("p", 2.0);
   const auto inv_p = 1.0 / p;
 
   // TODO(Yangqing): Add shape checks.
@@ -180,7 +180,7 @@ bool PoolGradientOp<float, CPUContext, LpPool>::RunOnDeviceWithOrderNHWC() {
   int height = X.dim32(1);
   int width = X.dim32(2);
   ConvPoolOpBase<CPUContext>::ComputePads({height, width});
-  const auto p = OperatorBase::GetSingleArgument<float>("p", 2.0);
+  const auto p = this->template GetSingleArgument<float>("p", 2.0);
   const auto inv_p = 1.0 / p;
 
   int pooled_height = dY.dim32(1);

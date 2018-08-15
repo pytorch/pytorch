@@ -26,9 +26,9 @@ class MIOPENReluOp final : public Operator<HIPContext> {
   MIOPENReluOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<HIPContext>(operator_def, ws),
         miopen_wrapper_(&context_),
-        alpha_(OperatorBase::GetSingleArgument<float>("alpha", 1.0)),
-        beta_(OperatorBase::GetSingleArgument<float>("beta", 0.0)),
-        power_(OperatorBase::GetSingleArgument<double>("power", 1.0)) {
+        alpha_(this->template GetSingleArgument<float>("alpha", 1.0)),
+        beta_(this->template GetSingleArgument<float>("beta", 0.0)),
+        power_(this->template GetSingleArgument<double>("power", 1.0)) {
     MIOPEN_ENFORCE(miopenCreateTensorDescriptor(&data_desc_));
     MIOPEN_ENFORCE(miopenCreateActivationDescriptor(&activ_desc_));
     MIOPEN_ENFORCE(miopenSetActivationDescriptor(
@@ -115,9 +115,9 @@ class MIOPENReluGradientOp final : public Operator<HIPContext> {
   MIOPENReluGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<HIPContext>(operator_def, ws),
         miopen_wrapper_(&context_),
-        alpha_(OperatorBase::GetSingleArgument<float>("alpha", 1.0)),
-        beta_(OperatorBase::GetSingleArgument<float>("beta", 0.0)),
-        power_(OperatorBase::GetSingleArgument<double>("power", 1.0)) {
+        alpha_(this->template GetSingleArgument<float>("alpha", 1.0)),
+        beta_(this->template GetSingleArgument<float>("beta", 0.0)),
+        power_(this->template GetSingleArgument<double>("power", 1.0)) {
     MIOPEN_ENFORCE(miopenCreateTensorDescriptor(&data_desc_));
     MIOPEN_ENFORCE(miopenCreateActivationDescriptor(&activ_desc_));
     MIOPEN_ENFORCE(miopenSetActivationDescriptor(

@@ -15,7 +15,7 @@ class ReservoirSamplingOp final : public Operator<Context> {
   ReservoirSamplingOp(const OperatorDef operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         numToCollect_(
-            OperatorBase::GetSingleArgument<int>("num_to_collect", -1)) {
+            this->template GetSingleArgument<int>("num_to_collect", -1)) {
     CAFFE_ENFORCE(numToCollect_ > 0);
   }
 

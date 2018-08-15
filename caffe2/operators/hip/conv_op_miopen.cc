@@ -31,14 +31,14 @@ class MIOPENConvOpBase : public ConvPoolOpBase<HIPContext> {
   MIOPENConvOpBase(const OperatorDef& operator_def, Workspace* ws)
       : ConvPoolOpBase<HIPContext>(operator_def, ws),
         miopen_wrapper_(&context_),
-        miopen_ws_nbytes_limit_(OperatorBase::GetSingleArgument<size_t>(
+        miopen_ws_nbytes_limit_(this->template GetSingleArgument<size_t>(
             "ws_nbytes_limit",
             kCONV_MIOPEN_WORKSPACE_LIMIT_BYTES)),
-        miopen_state_(OperatorBase::GetSingleArgument<size_t>("miopen_state", 0)),
-        alpha_(OperatorBase::GetSingleArgument<float>("alpha", 1.0)),
-        beta_(OperatorBase::GetSingleArgument<float>("beta", 0.0)),
+        miopen_state_(this->template GetSingleArgument<size_t>("miopen_state", 0)),
+        alpha_(this->template GetSingleArgument<float>("alpha", 1.0)),
+        beta_(this->template GetSingleArgument<float>("beta", 0.0)),
         exhaustive_search_(
-            OperatorBase::GetSingleArgument<bool>("exhaustive_search", false)) {
+            this->template GetSingleArgument<bool>("exhaustive_search", false)) {
     MIOPEN_ENFORCE(miopenCreateTensorDescriptor(&bottom_desc_));
     MIOPEN_ENFORCE(miopenCreateTensorDescriptor(&bias_desc_));
     MIOPEN_ENFORCE(miopenCreateTensorDescriptor(&weight_desc_));
@@ -98,11 +98,11 @@ class MIOPENConvOp final : public MIOPENConvOpBase {
   MIOPENConvOp(const OperatorDef& operator_def, Workspace* ws)
       : MIOPENConvOpBase(operator_def, ws),
         requestAlgoCount_(
-            OperatorBase::GetSingleArgument<int>("requestAlgoCount_", 1)),
+            this->template GetSingleArgument<int>("requestAlgoCount_", 1)),
         returnedAlgoCount_(
-            OperatorBase::GetSingleArgument<int>("returnedAlgoCount_", 1)),
+            this->template GetSingleArgument<int>("returnedAlgoCount_", 1)),
         bestAlgoFound_(
-            OperatorBase::GetSingleArgument<bool>("bestAlgoFound_", false)),
+            this->template GetSingleArgument<bool>("bestAlgoFound_", false)),
         fwdConvWs_(nullptr),
         fwdConvWsSize_(0),
         fwdAlgo_(miopenConvolutionFwdAlgoGEMM) {}
@@ -140,15 +140,15 @@ class MIOPENConvGradientOp final : public MIOPENConvOpBase {
  public:
   MIOPENConvGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : MIOPENConvOpBase(operator_def, ws),
-        no_bias_(OperatorBase::GetSingleArgument<int>("no_bias", 0)),
+        no_bias_(this->template GetSingleArgument<int>("no_bias", 0)),
         requestAlgoCount_(
-            OperatorBase::GetSingleArgument<int>("requestAlgoCount_", 1)),
+            this->template GetSingleArgument<int>("requestAlgoCount_", 1)),
         returnedAlgoCount_(
-            OperatorBase::GetSingleArgument<int>("returnedAlgoCount_", 1)),
+            this->template GetSingleArgument<int>("returnedAlgoCount_", 1)),
         bestDataAlgoFound_(
-            OperatorBase::GetSingleArgument<bool>("bestAlgoFound", false)),
+            this->template GetSingleArgument<bool>("bestAlgoFound", false)),
         bestWeightAlgoFound_(
-            OperatorBase::GetSingleArgument<bool>("bestAlgoFound", false)),
+            this->template GetSingleArgument<bool>("bestAlgoFound", false)),
         bwdWeightWs_(nullptr),
         bwdWeightWsSize_(0),
         bwdDataWs_(nullptr),

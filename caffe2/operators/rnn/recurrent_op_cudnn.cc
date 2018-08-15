@@ -70,23 +70,23 @@ void RecurrentBaseOp<T>::initialize(
   const int seqLength = input.dim(0);
   const int batchSize = input.dim(1);
   const int inputDim = input.dim(2);
-  const int hiddenSize = OperatorBase::GetSingleArgument<int>("hidden_size", 0);
+  const int hiddenSize = this->template GetSingleArgument<int>("hidden_size", 0);
   CAFFE_ENFORCE_GT(hiddenSize, 0);
   const auto bidirectional =
-      OperatorBase::GetSingleArgument<int>("bidirectional", 0);
+      this->template GetSingleArgument<int>("bidirectional", 0);
   CAFFE_ENFORCE(bidirectional == 0 || bidirectional == 1);
   const auto numDirections = bidirectional == 1 ? 2 : 1;
   const auto outputDim = hiddenSize * numDirections;
   const auto rnnDirection =
       bidirectional == 1 ? CUDNN_BIDIRECTIONAL : CUDNN_UNIDIRECTIONAL;
-  const auto numLayers = OperatorBase::GetSingleArgument<int>("num_layers", 0);
+  const auto numLayers = this->template GetSingleArgument<int>("num_layers", 0);
   CAFFE_ENFORCE_GT(numLayers, 0);
   const auto& rnnModeStr =
-      OperatorBase::GetSingleArgument<string>("rnn_mode", "");
+      this->template GetSingleArgument<string>("rnn_mode", "");
   CAFFE_ENFORCE(rnnModeStr == "lstm" || rnnModeStr == "gru");
   const auto rnnMode = rnnModeStr == "lstm" ? CUDNN_LSTM : CUDNN_GRU;
   const auto& rnnInputStr =
-      OperatorBase::GetSingleArgument<string>("input_mode", "");
+      this->template GetSingleArgument<string>("input_mode", "");
   CAFFE_ENFORCE(rnnInputStr == "linear" || rnnInputStr == "skip");
   const auto rnnInput =
       rnnInputStr == "linear" ? CUDNN_LINEAR_INPUT : CUDNN_SKIP_INPUT;
@@ -96,7 +96,7 @@ void RecurrentBaseOp<T>::initialize(
     if (dropoutStates) {
       size_t stateSize;
       float dropout_param =
-          OperatorBase::GetSingleArgument<float>("dropout", 1.0);
+          this->template GetSingleArgument<float>("dropout", 1.0);
       if (dropout_param < 1.0) {
         CUDNN_ENFORCE(cudnnDropoutGetStatesSize(
             cudnn_wrapper_.inline_cudnn_handle(), &stateSize));
@@ -108,7 +108,7 @@ void RecurrentBaseOp<T>::initialize(
             dropout_param,
             dropoutStates->template mutable_data<T>(),
             stateSize,
-            OperatorBase::GetSingleArgument<int>("seed", 0)));
+            this->template GetSingleArgument<int>("seed", 0)));
       }
     }
   }
@@ -256,7 +256,7 @@ bool RecurrentOp<T>::RunOnDevice() {
     return this->Output(i)->template mutable_data<T>();
   };
 
-  if (OperatorBase::GetSingleArgument<int>(OpSchema::Arg_IsTest, 0)) {
+  if (this->template GetSingleArgument<int>(OpSchema::Arg_IsTest, 0)) {
     cudnn_wrapper_.with_cudnn_state(0, [&](CuDNNState* state) {
       CUDNN_ENFORCE(cudnnRNNForwardInference(
           state->cudnn_handle(),
@@ -414,11 +414,11 @@ bool RecurrentParamAccessOp<T, mode>::RunOnDevice() {
         paramsSize / 4, Input(1).size(), "Incorrect weight initialization");
   }
 
-  int layer = OperatorBase::GetSingleArgument<int>("layer", 0);
+  int layer = this->template GetSingleArgument<int>("layer", 0);
   std::string param_type =
-      OperatorBase::GetSingleArgument<string>("param_type", "");
+      this->template GetSingleArgument<string>("param_type", "");
   std::string input_type =
-      OperatorBase::GetSingleArgument<string>("input_type", "");
+      this->template GetSingleArgument<string>("input_type", "");
 
   // Mapping to CUDNN constants
   std::map<string, int> weight_constants = {{"input_gate_w", 0},

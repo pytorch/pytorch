@@ -42,8 +42,8 @@ class LearningRateAdaptionOp final : public Operator<Context> {
  public:
   LearningRateAdaptionOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        lr_alpha_(OperatorBase::GetSingleArgument<float>("lr_alpha", 0.01f)),
-        normalized_lr_adaption_(OperatorBase::GetSingleArgument<bool>(
+        lr_alpha_(this->template GetSingleArgument<float>("lr_alpha", 0.01f)),
+        normalized_lr_adaption_(this->template GetSingleArgument<bool>(
             "normalized_lr_adaption",
             true)) {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;

@@ -253,16 +253,16 @@ VideoInputOp<Context>::VideoInputOp(
           OperatorBase::template GetSingleArgument<int>("batch_size", 0)),
       clip_per_video_(
           OperatorBase::template GetSingleArgument<int>("clip_per_video", 1)),
-      mean_rgb_(OperatorBase::template GetRepeatedArgument<float>(
+      mean_rgb_(this->template GetRepeatedArgument<float>(
           "mean_rgb_per_channel",
           {OperatorBase::template GetSingleArgument<float>("mean_rgb", 128.)})),
-      inv_std_rgb_(OperatorBase::template GetRepeatedArgument<float>(
+      inv_std_rgb_(this->template GetRepeatedArgument<float>(
           "std_rgb_per_channel",
           {OperatorBase::template GetSingleArgument<float>("std_rgb", 1.)})),
-      mean_of_(OperatorBase::template GetRepeatedArgument<float>(
+      mean_of_(this->template GetRepeatedArgument<float>(
           "mean_of_per_channel",
           {OperatorBase::template GetSingleArgument<float>("mean_of", 0.)})),
-      inv_std_of_(OperatorBase::template GetRepeatedArgument<float>(
+      inv_std_of_(this->template GetRepeatedArgument<float>(
           "std_of_per_channel",
           {OperatorBase::template GetSingleArgument<float>("std_of", 1.)})),
       channels_rgb_(

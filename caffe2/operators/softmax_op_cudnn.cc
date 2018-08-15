@@ -18,7 +18,7 @@ class CuDNNSoftmaxOp final : public Operator<CUDAContext> {
   explicit CuDNNSoftmaxOp(const OperatorDef& def, Workspace* ws)
       : Operator<CUDAContext>(def, ws),
         cudnn_wrapper_(&context_),
-        axis_(OperatorBase::GetSingleArgument<int>("axis", 1)) {
+        axis_(this->template GetSingleArgument<int>("axis", 1)) {
     CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&desc_));
   }
 
@@ -80,7 +80,7 @@ class CuDNNSoftmaxGradientOp final : public Operator<CUDAContext> {
   explicit CuDNNSoftmaxGradientOp(const OperatorDef& def, Workspace* ws)
       : Operator<CUDAContext>(def, ws),
         cudnn_wrapper_(&context_),
-        axis_(OperatorBase::GetSingleArgument<int>("axis", 1)) {
+        axis_(this->template GetSingleArgument<int>("axis", 1)) {
     CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&desc_));
   }
 

@@ -31,19 +31,19 @@ class SplitOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   SplitOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        split_(OperatorBase::GetRepeatedArgument<int>("split")) {
+        split_(this->template GetRepeatedArgument<int>("split")) {
     CAFFE_ENFORCE(
         !(OperatorBase::HasArgument("axis") &&
           OperatorBase::HasArgument("order")),
         "You shouldn't specify both the dim to split, and the order "
         "in the case of 4-D images.");
     if (OperatorBase::HasArgument("axis")) {
-      axis_ = OperatorBase::GetSingleArgument<int>("axis", -1);
+      axis_ = this->template GetSingleArgument<int>("axis", -1);
       // only exists for computing the gradient of a Concat with 'add_axis'
-      add_axis_ = OperatorBase::GetSingleArgument<int>("add_axis", 0);
+      add_axis_ = this->template GetSingleArgument<int>("add_axis", 0);
     } else {
       axis_ = GetDimFromOrderString(
-          OperatorBase::GetSingleArgument<string>("order", "NCHW"));
+          this->template GetSingleArgument<string>("order", "NCHW"));
       add_axis_ = 0;
     }
   }
@@ -70,10 +70,10 @@ class SplitByLengthsOp final : public Operator<Context> {
         "You shouldn't specify both the dim to split, and the order "
         "in the case of 4-D images.");
     if (OperatorBase::HasArgument("axis")) {
-      axis_ = OperatorBase::GetSingleArgument<int>("axis", 0);
+      axis_ = this->template GetSingleArgument<int>("axis", 0);
     } else {
       axis_ = GetDimFromOrderString(
-          OperatorBase::GetSingleArgument<string>("order", "NCHW"));
+          this->template GetSingleArgument<string>("order", "NCHW"));
     }
   }
 
@@ -99,11 +99,11 @@ class ConcatOp final : public Operator<Context> {
         "You shouldn't specify both the dim to concat, and the order "
         "in the case of 4-D images.");
     if (OperatorBase::HasArgument("axis")) {
-      axis_ = OperatorBase::GetSingleArgument<int>("axis", -1);
-      add_axis_ = OperatorBase::GetSingleArgument<int>("add_axis", 0);
+      axis_ = this->template GetSingleArgument<int>("axis", -1);
+      add_axis_ = this->template GetSingleArgument<int>("add_axis", 0);
     } else {
       axis_ = GetDimFromOrderString(
-          OperatorBase::GetSingleArgument<string>("order", "NCHW"));
+          this->template GetSingleArgument<string>("order", "NCHW"));
       add_axis_ = 0;
     }
   }

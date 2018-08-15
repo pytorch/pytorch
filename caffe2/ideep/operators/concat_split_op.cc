@@ -59,7 +59,7 @@ class IDEEPSplitOp final : public IDEEPOperator {
 
   IDEEPSplitOp(const OperatorDef& operator_def, Workspace* ws)
       : IDEEPOperator(operator_def, ws),
-        axis_offset_(OperatorBase::GetRepeatedArgument<int>("split")) {
+        axis_offset_(this->template GetRepeatedArgument<int>("split")) {
     CAFFE_ENFORCE(
       !(OperatorBase::HasArgument("axis") && OperatorBase::HasArgument("order")),
         "You shouldn't specify both the dim to split, and the order "

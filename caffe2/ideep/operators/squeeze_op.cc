@@ -10,7 +10,7 @@ class IDEEPSqueezeOp final : public IDEEPOperator {
 
   IDEEPSqueezeOp(const OperatorDef& operator_def, Workspace* ws)
       : IDEEPOperator(operator_def, ws),
-        dims_(OperatorBase::GetRepeatedArgument<int>("dims")) {
+        dims_(this->template GetRepeatedArgument<int>("dims")) {
     auto originalSize = dims_.size();
     CAFFE_ENFORCE(originalSize > 0, "Parameter `dims` must be provided.");
 

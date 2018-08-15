@@ -267,7 +267,7 @@ class PythonOpBase : public Operator<Context> {
     auto pickled = OperatorBase::template GetSingleArgument<std::string>(
         pickled_builder_arg_name, "");
     auto forced_cpu_outputs_arg =
-        OperatorBase::template GetRepeatedArgument<int>("forced_cpu_outputs");
+        this->template GetRepeatedArgument<int>("forced_cpu_outputs");
     forced_cpu_outputs_.insert(
         forced_cpu_outputs_arg.begin(), forced_cpu_outputs_arg.end());
     CAFFE_ENFORCE(
