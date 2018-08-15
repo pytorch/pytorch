@@ -54,7 +54,7 @@ class Dropout(_DropoutNd):
 
 
 class Dropout2d(_DropoutNd):
-    r"""Randomly zeroes whole channels (a channel is a (N, C) pair) of the input tensor.
+    r"""Randomly zeroes whole channels (a channel a 2D slice of dimensions H, W) of the input tensor.
     The channels to zero-out are randomized on every forward call.
 
     Usually the input comes from :class:`nn.Conv2d` modules.
@@ -93,7 +93,7 @@ class Dropout2d(_DropoutNd):
 
 
 class Dropout3d(_DropoutNd):
-    r"""Randomly zeroes whole channels (a channel is a (N, C) pair) of the input tensor.
+    r"""Randomly zeroes whole channels (a channel is a 3D slice of dimensions D, H, W) of the input tensor.
     The channels to zero are randomized on every forward call.
 
     Usually the input comes from :class:`nn.Conv3d` modules.
