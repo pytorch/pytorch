@@ -73,10 +73,8 @@ void gpu_nullary_kernel(TensorIterator& iter, const func_t& f) {
     return;
   }
   if (iter.is_trivial_1d()) {
-    auto strides = iter.get_inner_strides();
-    int stride0 = strides[0];
     launch_kernel<512, 1>(numel, [=]__device__(int idx) {
-      reinterpret_cast<arg0_t*>(out_data)[stride0 * idx] = f();
+      reinterpret_cast<arg0_t*>(out_data)[idx] = f();
     });
   } else {
     auto offset_calc = make_offset_calculator<1>(iter);
@@ -109,12 +107,9 @@ void gpu_unary_kernel(TensorIterator& iter, const func_t& f) {
       return f(a);
     });
   } else if (iter.is_trivial_1d()) {
-    auto strides = iter.get_inner_strides();
-    int stride0 = strides[0];
-    int stride1 = strides[1];
     launch_kernel<512, 1>(numel, [=]__device__(int idx) {
-      reinterpret_cast<arg0_t*>(out_data)[stride0 * idx] =
-                  f(reinterpret_cast<const arg1_t*>(in1_data)[stride1 * idx]);
+      reinterpret_cast<arg0_t*>(out_data)[idx] =
+                  f(reinterpret_cast<const arg1_t*>(in1_data)[idx]);
     });
   } else {
     auto offset_calc = make_offset_calculator<2>(iter);
