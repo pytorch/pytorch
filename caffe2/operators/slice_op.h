@@ -204,8 +204,8 @@ class SliceOp : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   SliceOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        starts_(OperatorBase::GetRepeatedArgument<SIndex>("starts")),
-        ends_(OperatorBase::GetRepeatedArgument<SIndex>("ends")),
+        starts_(this->template GetRepeatedArgument<SIndex>("starts")),
+        ends_(this->template GetRepeatedArgument<SIndex>("ends")),
         statically_inited_(false) {}
 
   bool RunOnDevice() override {
@@ -261,8 +261,8 @@ class SliceGradientOp : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   SliceGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        starts_(OperatorBase::GetRepeatedArgument<SIndex>("starts")),
-        ends_(OperatorBase::GetRepeatedArgument<SIndex>("ends")),
+        starts_(this->template GetRepeatedArgument<SIndex>("starts")),
+        ends_(this->template GetRepeatedArgument<SIndex>("ends")),
         statically_inited_(false) {}
 
   bool RunOnDevice() override {
