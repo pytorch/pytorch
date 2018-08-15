@@ -27,7 +27,6 @@
 #include <vector>
 #include <sstream>
 #include <iostream>
-#include <dlfcn.h>
 
 namespace torch { namespace jit { namespace cudafuser {
 
