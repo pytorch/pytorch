@@ -1,7 +1,5 @@
 #pragma once
 
-#include <ATen/ATen.h>
-
 #include <cstdio>
 #include <cstring>
 #include <cerrno>
@@ -82,10 +80,6 @@ namespace {
     oss << msg << " : " << strerror(errno);
     throw std::runtime_error(oss.str());
   }
-
-  void deleter(void * ptr) {
-    free(ptr);
-  }
 }  // namespace
 
 class PyTorchFileReader {
@@ -129,7 +123,7 @@ class PyTorchFileReader {
     auto size = read64BitIntegerLittleEndian();
     seekToNextAlignmentBoundary();
     auto ptr = malloc(size);
-    at::DataPtr retval(ptr, ptr, deleter, at::kCPU);
+    at::DataPtr retval(ptr, ptr, free, at::kCPU);
     if (!std::fread(ptr, size, 1, fp)) {
       wrapPErrorAndThrow("Failed to read data from record");
     }
