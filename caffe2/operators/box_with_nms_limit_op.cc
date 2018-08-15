@@ -8,24 +8,6 @@
 
 namespace caffe2 {
 
-namespace {
-
-template <class Derived, class Func>
-vector<int> filter_with_indices(
-    const Eigen::ArrayBase<Derived>& array,
-    const vector<int>& indices,
-    const Func& func) {
-  vector<int> ret;
-  for (auto& cur : indices) {
-    if (func(array[cur])) {
-      ret.push_back(cur);
-    }
-  }
-  return ret;
-}
-
-} // namespace
-
 template <>
 bool BoxWithNMSLimitOp<CPUContext>::RunOnDevice() {
   const auto& tscores = Input(0);
@@ -129,7 +111,9 @@ bool BoxWithNMSLimitOp<CPUContext>::RunOnDevice() {
             [&cur_scores](int lhs, int rhs) {
               return cur_scores(lhs) > cur_scores(rhs);
             });
-        keeps[j] = utils::nms_cpu(cur_boxes, cur_scores, inds, nms_thres_);
+        int keep_max = detections_per_im_ > 0 ? detections_per_im_ : -1;
+        keeps[j] =
+            utils::nms_cpu(cur_boxes, cur_scores, inds, nms_thres_, keep_max);
       }
       total_keep_count += keeps[j].size();
     }
@@ -144,41 +128,47 @@ bool BoxWithNMSLimitOp<CPUContext>::RunOnDevice() {
 
     // Limit to max_per_image detections *over all classes*
     if (detections_per_im_ > 0 && total_keep_count > detections_per_im_) {
-      // merge all scores together and sort
+      // merge all scores (represented by indices) together and sort
       auto get_all_scores_sorted = [&scores, &keeps, total_keep_count]() {
-        EArrXf ret(total_keep_count);
+        // flatten keeps[i][j] to [pair(i, keeps[i][j]), ...]
+        // first: class index (1 ~ keeps.size() - 1),
+        // second: values in keeps[first]
+        using KeepIndex = std::pair<int, int>;
+        vector<KeepIndex> ret(total_keep_count);
 
         int ret_idx = 0;
         for (int i = 1; i < keeps.size(); i++) {
           auto& cur_keep = keeps[i];
-          auto cur_scores = scores.col(i);
-          auto cur_ret = ret.segment(ret_idx, cur_keep.size());
-          utils::GetSubArray(cur_scores, utils::AsEArrXt(keeps[i]), &cur_ret);
-          ret_idx += cur_keep.size();
+          for (auto& ckv : cur_keep) {
+            ret[ret_idx++] = {i, ckv};
+          }
         }
 
-        std::sort(ret.data(), ret.data() + ret.size());
+        std::sort(
+            ret.data(),
+            ret.data() + ret.size(),
+            [&scores](const KeepIndex& lhs, const KeepIndex& rhs) {
+              return scores(lhs.second, lhs.first) >
+                  scores(rhs.second, rhs.first);
+            });
 
         return ret;
       };
 
-      // Compute image thres based on all classes
+      // Pick the first `detections_per_im_` boxes with highest scores
       auto all_scores_sorted = get_all_scores_sorted();
       DCHECK_GT(all_scores_sorted.size(), detections_per_im_);
-      auto image_thresh =
-          all_scores_sorted[all_scores_sorted.size() - detections_per_im_];
 
-      total_keep_count = 0;
-      // filter results with image_thresh
-      for (int j = 1; j < num_classes; j++) {
-        auto& cur_keep = keeps[j];
-        auto cur_scores = scores.col(j);
-        keeps[j] = filter_with_indices(
-            cur_scores, cur_keep, [&image_thresh](float sc) {
-              return sc >= image_thresh;
-            });
-        total_keep_count += keeps[j].size();
+      // Reconstruct keeps from `all_scores_sorted`
+      for (auto& cur_keep : keeps) {
+        cur_keep.clear();
       }
+      for (int i = 0; i < detections_per_im_; i++) {
+        DCHECK_GT(all_scores_sorted.size(), i);
+        auto& cur = all_scores_sorted[i];
+        keeps[cur.first].push_back(cur.second);
+      }
+      total_keep_count = detections_per_im_;
     }
     total_keep_per_batch[b] = total_keep_count;
 
