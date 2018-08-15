@@ -603,8 +603,20 @@ def dropout(input, p=0.5, training=False, inplace=False):
 
     Args:
         p: probability of an element to be zeroed. Default: 0.5
-        training: apply dropout if is True. Defualt: True
+        training: apply dropout if is True. Defualt: False
         inplace: If set to ``True``, will do this operation in-place. Default: ``False``
+
+    Examples::
+
+        >>> input = torch.randn(5)
+        >>> input
+        tensor([ 0.2000,  0.0599, -1.7443, -1.3099,  0.6752])
+
+        >>> torch.nn.functional.dropout(input, p=1.0)
+        tensor([ 0.2000,  0.0599, -1.7443, -1.3099,  0.6752])
+
+        >>> torch.nn.functional.dropout(input, p=1.0, training=True)
+        tensor([ 0.,  0., -0., -0.,  0.])
     """
     if p < 0 or p > 1:
         raise ValueError("dropout probability has to be between 0 and 1, "
@@ -633,7 +645,7 @@ def dropout2d(input, p=0.5, training=False, inplace=False):
 
     Args:
         p: probability of an element to be zeroed. Default: 0.5
-        training: apply dropout if is True. Defualt: True
+        training: apply dropout if is True. Defualt: False
         inplace: If set to ``True``, will do this operation in-place. Default: ``False``
     """
     if p < 0 or p > 1:
@@ -651,7 +663,7 @@ def dropout3d(input, p=0.5, training=False, inplace=False):
 
     Args:
         p: probability of an element to be zeroed. Default: 0.5
-        training: apply dropout if is True. Defualt: True
+        training: apply dropout if is True. Defualt: False
         inplace: If set to ``True``, will do this operation in-place. Default: ``False``
     """
     if p < 0 or p > 1:
