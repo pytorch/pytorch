@@ -76,15 +76,13 @@ void gpu_nullary_kernel(TensorIterator& iter, const func_t& f) {
     auto strides = iter.get_inner_strides();
     int stride0 = strides[0];
     launch_kernel<512, 1>(numel, [=]__device__(int idx) {
-      arg0_t* out = (arg0_t*)&out_data[stride0 * idx];
-      *out = f();
+      reinterpret_cast<arg0_t*>(out_data)[stride0 * idx] = f();
     });
   } else {
     auto offset_calc = make_offset_calculator<1>(iter);
     launch_kernel<128, 4>(numel, [=]__device__(int idx) {
       auto offsets = offset_calc.get(idx);
-      arg0_t* out = (arg0_t*)&out_data[offsets[0]];
-      *out = f();
+      reinterpret_cast<arg0_t*>(out_data)[offsets[0]] = f();
     });
   }
 }
@@ -115,17 +113,15 @@ void gpu_unary_kernel(TensorIterator& iter, const func_t& f) {
     int stride0 = strides[0];
     int stride1 = strides[1];
     launch_kernel<512, 1>(numel, [=]__device__(int idx) {
-      arg0_t* out = (arg0_t*)&out_data[stride0 * idx];
-      arg1_t* in1 = (arg1_t*)&in1_data[stride1 * idx];
-      *out = f(*in1);
+      reinterpret_cast<arg0_t*>(out_data)[stride0 * idx] =
+                  f(reinterpret_cast<const arg1_t*>(in1_data)[stride1 * idx]);
     });
   } else {
     auto offset_calc = make_offset_calculator<2>(iter);
     launch_kernel<128, 4>(numel, [=]__device__(int idx) {
       auto offsets = offset_calc.get(idx);
-      arg0_t* out = (arg0_t*)&out_data[offsets[0]];
-      arg1_t* in1 = (arg1_t*)&in1_data[offsets[1]];
-      *out = f(*in1);
+      reinterpret_cast<arg0_t*>(out_data)[offsets[0]] =
+                  f(reinterpret_cast<const arg1_t*>(in1_data)[offsets[1]]);
     });
   }
 }
