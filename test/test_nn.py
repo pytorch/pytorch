@@ -787,6 +787,23 @@ class TestNN(NNTestCase):
         self.assertEqual(num_params(n), 3)
         self.assertEqual(num_params(s), 3)
 
+    def test_sequential_multiple_input(self):
+        class Add(nn.Module):
+            def forward(self, x, y):
+                return x + y
+
+        class Flatten(nn.Module):
+            def forward(self, x):
+                return x.flatten()
+
+        add_and_flatten = nn.Sequential(Add(), Flatten())
+
+        a = torch.tensor([[1, 2], [3, 4]])
+        b = torch.tensor([[10, 20], [30, 40]])
+        result = add_and_flatten(a, b)
+        expected = torch.tensor([11, 22, 33, 44])
+        self.assertEqual(result, expected)
+
     def test_named_parameters(self):
         def num_params(module):
             return len(dict(module.named_parameters()))
