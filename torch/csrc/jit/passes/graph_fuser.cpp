@@ -3,14 +3,18 @@
 #include "torch/csrc/jit/fusers/cpu/cpu_fusion_pass.h"
 #include "torch/csrc/jit/fusers/cuda/cuda_fusion_pass.h"
 
+#include "torch/csrc/jit/fusers/cpu/cpu_fuser_interface.h"
+
 namespace torch { namespace jit {
 
 void FuseGraph(std::shared_ptr<Graph>& graph) {
-  FuseCPUGraph(graph);
-  #ifdef USE_CUDA
+  if (canCompileOnCPU()) FuseCPUGraph(graph);
+
+  #if defined USE_CUDA && !(defined _WIN32) && !(defined USE_ROCM)
     FuseCUDAGraph(graph);
-  #endif // USE_CUDA
+  #endif // defined USE_CUDA && !(defined _WIN32) && !(defined USE_ROCM)
 }
 
 } // namespace jit
 } // namespace torch
+
