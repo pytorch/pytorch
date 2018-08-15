@@ -75,7 +75,7 @@ at::StorageImpl* Variable::Impl::storageImpl() const {
   return data_.unsafeGetTensorImpl()->storageImpl();
 }
 
-ptrdiff_t Variable::Impl::storage_offset() const {
+int64_t Variable::Impl::storage_offset() const {
   return data_.storage_offset();
 }
 

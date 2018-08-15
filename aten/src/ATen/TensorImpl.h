@@ -112,7 +112,7 @@ struct AT_API TensorImpl : public Retainable {
   // Note: storage->size() may be greater than the recorded size
   // of a tensor
   at::StorageImpl* storage_;
-  ptrdiff_t storage_offset_;
+  int64_t storage_offset_;
 
   std::vector<int64_t> sizes_;
   std::vector<int64_t> strides_;
@@ -131,7 +131,7 @@ struct AT_API TensorImpl : public Retainable {
     return scalar_type_;
   }
 
-  virtual ptrdiff_t storage_offset() const {
+  virtual int64_t storage_offset() const {
     return storage_offset_;
   }
 

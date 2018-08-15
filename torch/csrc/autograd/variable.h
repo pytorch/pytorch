@@ -275,7 +275,7 @@ struct Variable::Impl : public at::TensorImpl {
   int64_t dim() const override;
   std::unique_ptr<at::Storage> storage() override;
   at::StorageImpl* storageImpl() const override;
-  ptrdiff_t storage_offset() const override;
+  int64_t storage_offset() const override;
 
   static const char* typeString();
 

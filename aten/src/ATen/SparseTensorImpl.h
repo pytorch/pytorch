@@ -66,7 +66,7 @@ public:
   TensorImpl* maybe_zero_dim(bool condition_when_zero_dim) override;
   std::unique_ptr<Storage> storage() override;
   at::StorageImpl* storageImpl() const override;
-  ptrdiff_t storage_offset() const override;
+  int64_t storage_offset() const override;
 
   // Some ops do some manual size fiddling.
   // TODO: Figure out a more safe way to provide this functionality

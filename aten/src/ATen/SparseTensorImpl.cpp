@@ -68,7 +68,7 @@ std::unique_ptr<Storage> SparseTensorImpl::storage() {
 at::StorageImpl* SparseTensorImpl::storageImpl() const {
   AT_ERROR("sparse tensors do not have storage");
 }
-ptrdiff_t SparseTensorImpl::storage_offset() const {
+int64_t SparseTensorImpl::storage_offset() const {
   AT_ERROR("sparse tensors do not have storage");
 }
 void SparseTensorImpl::set_indices_and_values(const Tensor& indices, const Tensor& values) {
