@@ -32,21 +32,13 @@ namespace {
 // do this; so we just allocate zero-size tensors for everything.
 SparseTensorImpl::SparseTensorImpl(at::TensorTypeId type_id, at::ScalarType scalar_type)
     : TensorImpl(type_id, scalar_type, false)
-    , size_{0}
     , sparseDims_(1)
     , denseDims_(0)
     , indices_(globalContext().getTypeOpt(sparseTensorIdToDenseBackend(type_id), ScalarType::Long)->tensor())
     , values_(globalContext().getTypeOpt(sparseTensorIdToDenseBackend(type_id), scalar_type)->tensor()) {}
 
-IntList SparseTensorImpl::sizes() const {
-  return size_;
-}
 IntList SparseTensorImpl::strides() const {
   AT_ERROR("sparse tensors do not have strides");
-}
-int64_t SparseTensorImpl::size(int64_t d) const {
-  d = at::maybe_wrap_dim(d, dim(), false);
-  return size_[d];
 }
 int64_t SparseTensorImpl::stride(int64_t d) const {
   AT_ERROR("sparse tensors do not have strides");

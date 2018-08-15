@@ -22,12 +22,6 @@ struct AT_API SparseTensorImpl : public TensorImpl {
   // 4) For _values.shape, the non-nnz dimensions may be smaller than the corresponding dimension size, e.g.
   //    a shape (2,3) sparse tensor with _sparseDims == 1, may have _values.shape: (nnz, <=2, <=3).
 
-
-  // The true size of the sparse tensor (e.g., if you called to_dense()
-  // on it).  When THTensor merges into TensorImpl, this field
-  // should move to the parent class.
-  std::vector<int64_t> size_;
-
   // The number of non-zero elements.
   int64_t nnz_ = 0;
 
@@ -57,9 +51,7 @@ public:
   Tensor indices() const { return indices_; }
   Tensor values() const { return values_; }
 
-  IntList sizes() const override;
   IntList strides() const override;
-  int64_t size(int64_t d) const override;
   int64_t stride(int64_t d) const override;
 
   int64_t dim() const override;
@@ -70,16 +62,16 @@ public:
 
   // Some ops do some manual size fiddling.
   // TODO: Figure out a more safe way to provide this functionality
-  std::vector<int64_t>& _sizes_mut() { return size_; }
+  std::vector<int64_t>& _sizes_mut() { return sizes_; }
 
   // WARNING: This function does NOT preserve invariants of sparseDims/denseDims with
   // respect to indices and values
   void raw_resize_(int64_t sparseDims, int64_t denseDims, ArrayRef<int64_t> size) {
     // UGHHHHH.  Legacy special case
     if (size.size() == 0) {
-      size_ = {0};
+      sizes_ = {0};
     } else {
-      size_ = size.vec();
+      sizes_ = size.vec();
     }
     sparseDims_ = sparseDims;
     denseDims_ = denseDims;
