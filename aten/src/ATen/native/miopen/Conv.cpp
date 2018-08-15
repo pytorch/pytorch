@@ -3,7 +3,7 @@
 #include <ATen/Config.h>
 #include <ATen/cuda/CUDAConfig.h>
 
-#if !AT_MIOPEN_ENABLED()
+#if !AT_ROCM_ENABLED()
 
 namespace at { namespace native {
 
@@ -72,7 +72,7 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> miopen_convolution_transpose_backwa
 
 }}
 
-#else  // AT_MIOPEN_ENABLED
+#else  // AT_ROCM_ENABLED
 
 #include "THC/THC.h"
 

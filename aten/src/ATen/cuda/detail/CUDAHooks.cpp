@@ -120,7 +120,7 @@ bool CUDAHooks::compiledWithCuDNN() const {
 }
 
 bool CUDAHooks::compiledWithMIOpen() const {
-  return AT_MIOPEN_ENABLED();
+  return AT_ROCM_ENABLED();
 }
 
 bool CUDAHooks::supportsDilatedConvolutionWithCuDNN() const {
