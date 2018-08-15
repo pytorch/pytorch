@@ -3014,6 +3014,7 @@ class TestKL(TestCase):
             (binomial30, binomial30),
             (binomial_vectorized_count, binomial_vectorized_count),
             (categorical, categorical),
+            (Categorical(torch.ones(1,10)), Categorical(torch.ones(3,10))),
             (chi2, chi2),
             (chi2, exponential),
             (chi2, gamma),
@@ -3175,12 +3176,6 @@ class TestKL(TestCase):
         actual_kl = kl_divergence(MultivariateNormal(loc[0], scale_tril=scale_tril[0]),
                                   MultivariateNormal(loc[1], scale_tril=scale_tril[1]))
         self.assertEqual(expected_kl, actual_kl)
-
-    def test_kl_categorical_categorical_broadcasted(self):
-        p_dist = Categorical(torch.ones(1, 10))
-        q_dist = Categorical(torch.ones(3, 10))
-        kl = kl_divergence(p_dist, q_dist)
-        self.assertEqual(kl, torch.zeros(3))
 
     def test_kl_lowrank_multivariate_normal(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
