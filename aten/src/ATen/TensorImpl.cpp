@@ -101,6 +101,7 @@ IntList TensorImpl::strides() const {
 void TensorImpl::release_resources() {
   if (storage_) {
     storage_->release();
+    storage_ = nullptr;
   }
 }
 
