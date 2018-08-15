@@ -48,7 +48,6 @@ double THCudaBlas_Ddot(THCState *state, int64_t n, double *x, int64_t incx, doub
   return 0;
 }
 
-#ifdef CUDA_HALF_TENSOR
 half THCudaBlas_Hdot(THCState *state, int64_t n, half *x, int64_t incx, half *y, int64_t incy)
 {
 #if CUDA_VERSION >= 8000
@@ -77,7 +76,6 @@ half THCudaBlas_Hdot(THCState *state, int64_t n, half *x, int64_t incx, half *y,
   return THC_float2half(0);
 #endif
 }
-#endif
 
 /* Level 2 */
 
@@ -262,7 +260,6 @@ void THCudaBlas_Sgemm(THCState *state, char transa, char transb, int64_t m, int6
           "with the bound [val] <= %d", INT_MAX);
 }
 
-#ifdef CUDA_HALF_TENSOR
 // In CUDA 8.0, definition of data types for sgemmex changed
 #if CUDA_VERSION < 8000
 #  define CUDA_R_16F CUBLAS_DATA_HALF
@@ -321,7 +318,6 @@ void THCudaBlas_Hgemm(THCState *state, char transa, char transb, int64_t m, int6
   THError("Cublas_Hgemm only supports m, n, k, lda, ldb, ldc"
           "with th bound [val] <= %d", INT_MAX);
 }
-#endif
 
 void THCudaBlas_Dgemm(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k, double alpha, double *a, int64_t lda, double *b, int64_t ldb, double beta, double *c, int64_t ldc)
 {
