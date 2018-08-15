@@ -3176,6 +3176,12 @@ class TestKL(TestCase):
                                   MultivariateNormal(loc[1], scale_tril=scale_tril[1]))
         self.assertEqual(expected_kl, actual_kl)
 
+    def test_kl_categorical_categorical_broadcasted(self):
+        p_dist = Categorical(torch.ones(1, 10))
+        q_dist = Categorical(torch.ones(3, 10))
+        kl = kl_divergence(p_dist, q_dist)
+        self.assertEqual(kl, torch.zeros(3))
+
     def test_kl_lowrank_multivariate_normal(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         n = 5  # Number of tests for lowrank_multivariate_normal
