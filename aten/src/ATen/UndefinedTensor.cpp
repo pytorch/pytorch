@@ -25,7 +25,7 @@ int64_t UndefinedTensor::dim() const {
   AT_ERROR("dim() called on undefined Tensor");
 }
 
-ptrdiff_t UndefinedTensor::storage_offset() const {
+int64_t UndefinedTensor::storage_offset() const {
   AT_ERROR("storage_offset() called on an undefined Tensor");
 }
 
