@@ -256,6 +256,7 @@ else:
         version += '+' + sha[:7]
     except Exception:
         pass
+print("Building wheel {}-{}".format(package_name, version))
 
 
 class create_version_file(PytorchCommand):
@@ -598,6 +599,13 @@ class install(setuptools.command.install.install):
         setuptools.command.install.install.run(self)
 
 
+class rebuild_libtorch(distutils.command.build.build):
+    def run(self):
+        if subprocess.call(['ninja', 'install'], cwd='build') != 0:
+            print("Failed to run `ninja install` for the `rebuild_libtorch` command")
+            sys.exit(1)
+
+
 class clean(distutils.command.clean.clean):
 
     def run(self):
@@ -776,7 +784,6 @@ main_sources = [
     "torch/csrc/autograd/python_variable.cpp",
     "torch/csrc/autograd/python_variable_indexing.cpp",
     "torch/csrc/byte_order.cpp",
-    "torch/csrc/finalizer.cpp",
     "torch/csrc/jit/batched/BatchTensor.cpp",
     "torch/csrc/jit/init.cpp",
     "torch/csrc/jit/ivalue.cpp",
@@ -886,14 +893,18 @@ if USE_CUDA:
 if USE_ROCM:
     rocm_include_path = '/opt/rocm/include'
     hcc_include_path = '/opt/rocm/hcc/include'
-    hipblas_include_path = '/opt/rocm/hipblas/include'
+    rocblas_include_path = '/opt/rocm/rocblas/include'
     hipsparse_include_path = '/opt/rocm/hcsparse/include'
+    hiprand_include_path = '/opt/rocm/hiprand/include'
+    rocrand_include_path = '/opt/rocm/rocrand/include'
     hip_lib_path = '/opt/rocm/hip/lib'
     hcc_lib_path = '/opt/rocm/hcc/lib'
     include_dirs.append(rocm_include_path)
     include_dirs.append(hcc_include_path)
-    include_dirs.append(hipblas_include_path)
+    include_dirs.append(rocblas_include_path)
     include_dirs.append(hipsparse_include_path)
+    include_dirs.append(hiprand_include_path)
+    include_dirs.append(rocrand_include_path)
     include_dirs.append(tmp_install_path + "/include/THCUNN")
     extra_link_args.append('-L' + hip_lib_path)
     extra_link_args.append('-Wl,-rpath,' + hip_lib_path)
@@ -1019,6 +1030,7 @@ cmdclass = {
     'build_ext': build_ext,
     'build_deps': build_deps,
     'build_module': build_module,
+    'rebuild_libtorch': rebuild_libtorch,
     'develop': develop,
     'install': install,
     'clean': clean,

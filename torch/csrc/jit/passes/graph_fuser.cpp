@@ -17,4 +17,3 @@ void FuseGraph(std::shared_ptr<Graph>& graph) {
 
 } // namespace jit
 } // namespace torch
-

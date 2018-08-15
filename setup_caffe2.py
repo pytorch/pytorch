@@ -131,7 +131,6 @@ class cmake_build(Caffe2Command):
             # configure
             cmake_args = [
                 find_executable('cmake'),
-                '-DUSE_ATEN=ON',
                 '-DBUILD_SHARED_LIBS=OFF',
                 '-DPYTHON_EXECUTABLE:FILEPATH={}'.format(sys.executable),
                 '-DPYTHON_INCLUDE_DIR={}'.format(sysconfig.get_python_inc()),

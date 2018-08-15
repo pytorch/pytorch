@@ -114,20 +114,20 @@ class IsMemberOfOp final : public Operator<Context> {
   IsMemberOfOp(const OperatorDef& op, Workspace* ws)
       : Operator<Context>(op, ws) {
     auto dtype =
-        static_cast<TensorProto_DataType>(OperatorBase::GetSingleArgument<int>(
+        static_cast<TensorProto_DataType>(this->template GetSingleArgument<int>(
             "dtype", TensorProto_DataType_UNDEFINED));
     switch (dtype) {
       case TensorProto_DataType_INT32:
-        values_.set(OperatorBase::GetRepeatedArgument<int32_t>(VALUE_TAG));
+        values_.set(this->template GetRepeatedArgument<int32_t>(VALUE_TAG));
         break;
       case TensorProto_DataType_INT64:
-        values_.set(OperatorBase::GetRepeatedArgument<int64_t>(VALUE_TAG));
+        values_.set(this->template GetRepeatedArgument<int64_t>(VALUE_TAG));
         break;
       case TensorProto_DataType_BOOL:
-        values_.set(OperatorBase::GetRepeatedArgument<bool>(VALUE_TAG));
+        values_.set(this->template GetRepeatedArgument<bool>(VALUE_TAG));
         break;
       case TensorProto_DataType_STRING:
-        values_.set(OperatorBase::GetRepeatedArgument<std::string>(VALUE_TAG));
+        values_.set(this->template GetRepeatedArgument<std::string>(VALUE_TAG));
         break;
       case TensorProto_DataType_UNDEFINED:
         // If dtype is not provided, values_ will be filled the first time that
@@ -151,7 +151,7 @@ class IsMemberOfOp final : public Operator<Context> {
     output->ResizeLike(input);
 
     if (!values_.has_values()) {
-      values_.set(OperatorBase::GetRepeatedArgument<T>(VALUE_TAG));
+      values_.set(this->template GetRepeatedArgument<T>(VALUE_TAG));
     }
     const auto& values = values_.get<T>();
 

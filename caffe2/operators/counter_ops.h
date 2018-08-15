@@ -47,12 +47,12 @@ class CreateCounterOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   CreateCounterOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        init_count_(OperatorBase::GetSingleArgument<T>("init_count", 0)) {
+        init_count_(this->template GetSingleArgument<T>("init_count", 0)) {
     CAFFE_ENFORCE_LE(0, init_count_, "negative init_count is not permitted.");
   }
 
   bool RunOnDevice() override {
-    *OperatorBase::Output<std::unique_ptr<Counter<T>>>(0) =
+    *this->template Output<std::unique_ptr<Counter<T>>>(0) =
         std::unique_ptr<Counter<T>>(new Counter<T>(init_count_));
     return true;
   }
@@ -67,12 +67,12 @@ class ResetCounterOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   ResetCounterOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        init_count_(OperatorBase::GetSingleArgument<T>("init_count", 0)) {
+        init_count_(this->template GetSingleArgument<T>("init_count", 0)) {
     CAFFE_ENFORCE_LE(0, init_count_, "negative init_count is not permitted.");
   }
 
   bool RunOnDevice() override {
-    auto& counterPtr = OperatorBase::Input<std::unique_ptr<Counter<T>>>(0);
+    auto& counterPtr = this->template Input<std::unique_ptr<Counter<T>>>(0);
     auto previous = counterPtr->reset(init_count_);
     if (OutputSize() == 1) {
       auto* output = Output(0);
@@ -95,7 +95,7 @@ class CountDownOp final : public Operator<Context> {
       : Operator<Context>(operator_def, ws) {}
 
   bool RunOnDevice() override {
-    auto& counterPtr = OperatorBase::Input<std::unique_ptr<Counter<T>>>(0);
+    auto& counterPtr = this->template Input<std::unique_ptr<Counter<T>>>(0);
     auto* output = Output(0);
     output->Resize(std::vector<int>{});
     *output->template mutable_data<bool>() = counterPtr->countDown();
@@ -112,7 +112,7 @@ class CheckCounterDoneOp final : public Operator<Context> {
       : Operator<Context>(operator_def, ws) {}
 
   bool RunOnDevice() override {
-    auto& counterPtr = OperatorBase::Input<std::unique_ptr<Counter<T>>>(0);
+    auto& counterPtr = this->template Input<std::unique_ptr<Counter<T>>>(0);
     auto* output = Output(0);
     output->Resize(std::vector<int>{});
     *output->template mutable_data<bool>() = counterPtr->checkIfDone();
@@ -129,7 +129,7 @@ class CountUpOp final : public Operator<Context> {
       : Operator<Context>(operator_def, ws) {}
 
   bool RunOnDevice() override {
-    auto& counterPtr = OperatorBase::Input<std::unique_ptr<Counter<T>>>(0);
+    auto& counterPtr = this->template Input<std::unique_ptr<Counter<T>>>(0);
     auto* output = Output(0);
     output->Resize(std::vector<int>{});
     *output->template mutable_data<T>() = counterPtr->countUp();
@@ -146,7 +146,7 @@ class RetrieveCountOp final : public Operator<Context> {
       : Operator<Context>(operator_def, ws) {}
 
   bool RunOnDevice() override {
-    auto& counterPtr = OperatorBase::Input<std::unique_ptr<Counter<T>>>(0);
+    auto& counterPtr = this->template Input<std::unique_ptr<Counter<T>>>(0);
     auto* output = Output(0);
     output->Resize(std::vector<int>{});
     *output->template mutable_data<T>() = counterPtr->retrieve();

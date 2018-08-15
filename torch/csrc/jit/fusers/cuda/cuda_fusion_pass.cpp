@@ -338,6 +338,19 @@ struct GraphFuser {
     return node->kind() == aten::split || node->kind() == aten::chunk;
   }
 
+  bool isFusableOnlyAsExitNode(Node* node) {
+    return isFusableCatNode(node) || node->kind() == prim::FusedConcat;
+  }
+
+  bool mustRemainAsFusionGroupOutput(Value* producer) {
+    if (producer->node()->kind() != prim::FusionGroup) {
+      return false;
+    }
+    auto subgraph = producer->node()->g(attr::Subgraph);
+    auto* node = subgraph->outputs().at(producer->offset())->node();
+    return isFusableOnlyAsExitNode(node);
+  }
+
   // in places where op can be fused into a consumer but chunk is in the way
   // distribute chunk to op's operands:
   // replace a,b = chunk(op(x,y,z)) with:
@@ -446,7 +459,7 @@ struct GraphFuser {
     // Can this node produce an _output_ of a fusion group?
     // all Fusable nodes can do this, but additionally Concat can
     // as long as no items in the group read the output of concat
-    if(isFusable(consumer) || isFusableCatNode(consumer)) {
+    if(isFusable(consumer) || isFusableOnlyAsExitNode(consumer)) {
       value_list inputs;
       auto consumer_inputs = consumer->kind() == aten::cat ?
         consumer->namedInput(attr::tensors)->node()->inputs() :
@@ -454,7 +467,7 @@ struct GraphFuser {
       // handle inputs in reverse topological order as well...
       // otherwise in f(a,a+b) it will appear a is used twice if we consider
       // the f-a fusion before the f-(a+b) fusion first.
-      for(auto i : consumer_inputs) {
+      for (auto i : consumer_inputs) {
         if (i->node()->owningBlock() == block) {
           inputs.push_back(i);
           JIT_ASSERT(topological_index.count(i->node()) > 0);
@@ -463,9 +476,11 @@ struct GraphFuser {
       std::sort(inputs.begin(), inputs.end(), [&](Value* a, Value* b) {
         return topological_index.at(a->node()) > topological_index.at(b->node());
       });
-      for(auto producer : inputs) {
+      for (auto producer : inputs) {
         // Don't fuse accross stage boundaries
         if (producer->stage() != consumer->stage()) continue;
+        // Don't fuse if producer must come from a FusionGroup exit node
+        if (mustRemainAsFusionGroupOutput(producer)) continue;
         if(tryToMoveChunk(consumer,producer)) {
           // the chunk before this consumer was re-arranged to allow fusion,
           // we scan this consumer again to perform the fusion

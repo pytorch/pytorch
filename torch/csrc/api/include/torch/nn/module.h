@@ -205,7 +205,7 @@ std::shared_ptr<ModuleType> Module::register_module(
     std::string name,
     std::shared_ptr<ModuleType> module) {
   auto& base_module = children_.insert(std::move(name), std::move(module));
-  return std::static_pointer_cast<ModuleType>(base_module);
+  return std::dynamic_pointer_cast<ModuleType>(base_module);
 }
 
 template <typename ModuleType>

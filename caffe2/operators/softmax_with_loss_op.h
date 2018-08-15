@@ -13,11 +13,11 @@ class SoftmaxWithLossOp final : public Operator<Context> {
  public:
   SoftmaxWithLossOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        scale_(OperatorBase::GetSingleArgument<float>("scale", 1.)),
-        label_prob_mode_(OperatorBase::GetSingleArgument<int>("label_prob", 0)),
+        scale_(this->template GetSingleArgument<float>("scale", 1.)),
+        label_prob_mode_(this->template GetSingleArgument<int>("label_prob", 0)),
         order_(StringToStorageOrder(
-            OperatorBase::GetSingleArgument<string>("order", "NCHW"))),
-        axis_(OperatorBase::GetSingleArgument<int>("axis", 1)) {
+            this->template GetSingleArgument<string>("order", "NCHW"))),
+        axis_(this->template GetSingleArgument<int>("axis", 1)) {
     CAFFE_ENFORCE(scale_ >= 0);
     CAFFE_ENFORCE_EQ(
         order_, StorageOrder::NCHW, "Only NCHW order is supported right now.");
@@ -46,12 +46,12 @@ class SoftmaxWithLossGradientOp final : public Operator<Context> {
  public:
   SoftmaxWithLossGradientOp(const OperatorDef& def, Workspace* ws)
       : Operator<Context>(def, ws),
-        scale_(OperatorBase::GetSingleArgument<float>("scale", 1.)),
-        label_prob_mode_(OperatorBase::GetSingleArgument<int>("label_prob", 0)),
+        scale_(this->template GetSingleArgument<float>("scale", 1.)),
+        label_prob_mode_(this->template GetSingleArgument<int>("label_prob", 0)),
         order_(StringToStorageOrder(
-            OperatorBase::GetSingleArgument<string>("order", "NCHW"))),
-        only_loss_(OperatorBase::GetSingleArgument<bool>("only_loss", false)),
-        axis_(OperatorBase::GetSingleArgument<int>("axis", 1)) {
+            this->template GetSingleArgument<string>("order", "NCHW"))),
+        only_loss_(this->template GetSingleArgument<bool>("only_loss", false)),
+        axis_(this->template GetSingleArgument<int>("axis", 1)) {
     CAFFE_ENFORCE(scale_ >= 0);
     CAFFE_ENFORCE_EQ(
         order_, StorageOrder::NCHW, "Only NCHW order is supported right now.");

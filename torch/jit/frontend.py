@@ -124,12 +124,13 @@ def build_stmts(ctx, stmts):
     return list(filter(None, stmts))
 
 
-def get_jit_ast(fn):
+def get_jit_ast(fn, is_method):
     source = dedent(inspect.getsource(fn))
     py_ast = ast.parse(source)
     if len(py_ast.body) != 1 or not isinstance(py_ast.body[0], ast.FunctionDef):
         raise RuntimeError("expected a single top-level function")
-    return build_def(SourceRangeFactory(source), py_ast.body[0])
+    type_line = torch.jit.annotations.get_type_line(source)
+    return build_def(SourceRangeFactory(source), py_ast.body[0], type_line, is_method)
 
 
 class Builder(object):
@@ -140,14 +141,22 @@ class Builder(object):
         return method(ctx, node)
 
 
-def build_def(ctx, py_def):
+def build_def(ctx, py_def, type_line, is_method):
     returns = []
     ret_body = []
     body = py_def.body
     r = ctx.make_range(py_def.lineno, py_def.col_offset,
                        py_def.col_offset + len("def"))
+    param_list = build_param_list(ctx, py_def.args)
+    return_type = None
+    if getattr(py_def, 'returns', None) is not None:
+        return_type = build_expr(ctx, py_def.returns)
+    decl = Decl(r, param_list, return_type)
+    if type_line is not None:
+        type_comment_decl = torch._C.parse_type_comment(type_line)
+        decl = torch._C.merge_type_from_type_comment(decl, type_comment_decl, is_method)
     return Def(Ident(r, py_def.name),
-               build_param_list(ctx, py_def.args),
+               decl,
                build_stmts(ctx, body))
 
 
@@ -166,11 +175,13 @@ def build_param_list(ctx, py_args):
 def build_param(ctx, py_arg):
     # NB: In Python3 py_arg is a pair of (str arg, expr? annotation)
     #     In Python2 py_arg is a Name (Expr subclass)
-    if getattr(py_arg, 'annotation', None) is not None:
-        raise ValueError("Compiled functions don't support annotations")
     name = py_arg.id if PY2 else py_arg.arg
     r = ctx.make_range(py_arg.lineno, py_arg.col_offset, py_arg.col_offset + len(name))
-    return Param(TensorType(r), Ident(r, name))
+    if getattr(py_arg, 'annotation', None) is not None:
+        annotation_expr = build_expr(ctx, py_arg.annotation)
+    else:
+        annotation_expr = Var(Ident(r, 'Tensor'))
+    return Param(annotation_expr, Ident(r, name))
 
 
 class StmtBuilder(Builder):
@@ -414,15 +425,20 @@ class ExprBuilder(Builder):
         base = build_expr(ctx, expr.value)
         sub_type = type(expr.slice)
         if sub_type is ast.Index:
-            index = build_expr(ctx, expr.slice.value)
-            return Gather(base, index)
+            if isinstance(expr.slice.value, ast.Tuple) or isinstance(expr.slice.value, ast.List):
+                indices = []
+                for index_expr in expr.slice.value.elts:
+                    indices.append(build_expr(ctx, index_expr))
+                return Subscript(base, indices)
+            else:
+                return Subscript(base, [build_expr(ctx, expr.slice.value)])
         elif sub_type is ast.Slice:
             lower = build_expr(ctx, expr.slice.lower) if expr.slice.lower is not None else None
             upper = build_expr(ctx, expr.slice.upper) if expr.slice.upper is not None else None
             if expr.slice.step is not None:
                 step = build_expr(ctx, expr.slice.step)
                 raise NotSupportedError(step.range(), "slices with ranges are not supported yet")
-            return Slice(base, lower, upper)
+            return Subscript(base, [SliceExpr(base.range(), lower, upper)])
         elif sub_type is ast.ExtSlice:
             raise NotSupportedError(base.range(), "slicing multiple dimensions at the same time isn't supported yet")
         else:  # Ellipsis (can only happen in Python 2)
