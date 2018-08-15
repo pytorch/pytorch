@@ -1,8 +1,8 @@
-  %4 = aten::lt(i, 3)
-  %5 = prim::TensorToNum(%4)
-  while %5
+  t4 = aten::lt(i, 3)
+  t5 = prim::TensorToNum(t4)
+  while t5:
     a = aten::mul(a, a)
     i = aten::add(i, 1, 1)
-    %15 = aten::lt(i, 3)
-    %5 = prim::TensorToNum(%15)
+    t14 = aten::lt(i, 3)
+    t5 = prim::TensorToNum(t14)
   return a

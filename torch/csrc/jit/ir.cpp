@@ -282,7 +282,7 @@ std::ostream& prettyPrintValue(
     }
 
     if (isdigit(name.at(0))) {
-      out << "%";
+      out << "t";
     }
     out << name;
   }
@@ -306,7 +306,7 @@ std::ostream& prettyPrintInputs(
   return out;
 }
 
-std::ostream& prettyPrintNodeVisitor(
+std::ostream& prettyPrintNode(
   std::ostream & out,
   const Node* root,
   int level,
@@ -314,7 +314,7 @@ std::ostream& prettyPrintNodeVisitor(
   alias_list& aliases
 );
 
-std::ostream& prettyPrintBlockVisitor(
+std::ostream& prettyPrintBlock(
   std::ostream & out,
   const Block* root,
   int level,
@@ -322,10 +322,10 @@ std::ostream& prettyPrintBlockVisitor(
   alias_list& aliases
 ) {
   for (const auto* node : root->nodes()) {
-    prettyPrintNodeVisitor(out, node, level, constants, aliases);
+    prettyPrintNode(out, node, level, constants, aliases);
   }
 
-  prettyPrintNodeVisitor(out, root->return_node(), level, constants, aliases);
+  prettyPrintNode(out, root->return_node(), level, constants, aliases);
 
   return out;
 }
@@ -344,7 +344,7 @@ std::ostream& prettyPrintIf(
   out << ":" << std::endl;
 
   // Print node contents
-  prettyPrintBlockVisitor(out, if_block, level + 1, constants, aliases);
+  prettyPrintBlock(out, if_block, level + 1, constants, aliases);
   // Print if block output
   int if_count = 0;
   for (const auto* output_value : node->outputs()) {
@@ -358,7 +358,7 @@ std::ostream& prettyPrintIf(
 
   indent(out, level);
   out << "else:" << std::endl;
-  prettyPrintBlockVisitor(out, else_block, level + 1, constants, aliases);
+  prettyPrintBlock(out, else_block, level + 1, constants, aliases);
   int else_count = 0;
   for (const auto* output_value : node->outputs()) {
     indent(out, level + 1);
@@ -381,6 +381,7 @@ std::ostream& prettyPrintLoop(
 ) {
   out << "while ";
   prettyPrintValue(out, node->inputs()[1], constants, aliases);
+  out << ":";
 
   out << std::endl;
   auto body_block = node->blocks()[0];
@@ -397,13 +398,13 @@ std::ostream& prettyPrintLoop(
   aliases[body_block->return_node()->inputs()[0]->readableName()] = node->inputs()[1]->uniqueName();
 
   // for (auto block_input : body_block->param_node())
-  prettyPrintBlockVisitor(out, body_block, level + 1, constants, aliases);
+  prettyPrintBlock(out, body_block, level + 1, constants, aliases);
 
   return out;
 }
 
 // Handles iterating over nodes/subblocks
-std::ostream& prettyPrintNodeVisitor(
+std::ostream& prettyPrintNode(
   std::ostream & out,
   const Node* node,
   int level,
@@ -458,14 +459,35 @@ std::ostream& prettyPrintNodeVisitor(
 }
 
 std::ostream& Graph::prettyPrint(std::ostream & out) {
-  constant_list empty_constants;
-  alias_list empty_aliases;
-  // Print body
-  prettyPrintBlockVisitor(out, block(), 1, empty_constants, empty_aliases);
+  // This is used to track constants and display the literal value instead of
+  // the name
+  constant_list constants;
 
+  // This is used to rename loop-carried dependencies to their outer-scoped
+  // counterparts
+  alias_list aliases;
+
+  // Print body
+  prettyPrintBlock(out, block(), 1, constants, aliases);
+
+  // Print returns
   indent(out, 1);
-  out << "return ";
-  prettyPrintValue(out, block()->return_node()->inputs()[0], empty_constants, empty_aliases);
+  const auto& returns = block()->return_node()->inputs();
+  if (returns.size() > 0) {
+    out << "return ";
+    std::string delimiter = "";
+    if (returns.size() > 1) {
+      out << "(";
+      for (const auto* return_node : returns) {
+        out << delimiter;
+        prettyPrintValue(out, return_node, constants, aliases);
+        delimiter = ", ";
+      }
+      out << ")";
+    } else {
+      prettyPrintValue(out, returns[0], constants, aliases);
+    }
+  }
   out << std::endl;
   return out;
 }

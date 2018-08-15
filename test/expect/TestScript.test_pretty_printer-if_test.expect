@@ -1,6 +1,6 @@
-  %2 = aten::lt(a, b)
-  %3 = prim::TensorToNum(%2)
-  if %3:
+  t2 = aten::lt(a, b)
+  t3 = prim::TensorToNum(t2)
+  if t3:
     c = b
   else:
     c = a
