@@ -1793,6 +1793,10 @@ class TestTorch(TestCase):
             expected = np.einsum(test[0], *[t.numpy() for t in test[1:]])
             self.assertEqual(expected.shape, actual.shape, test[0])
             self.assertTrue(np.allclose(expected, actual.numpy()), test[0])
+            # test vararg
+            actual2 = torch.einsum(test[0], *test[1:])
+            self.assertEqual(expected.shape, actual2.shape, test[0])
+            self.assertTrue(np.allclose(expected, actual2.numpy()), test[0])
 
             def do_einsum(*args):
                 return torch.einsum(test[0], args)
