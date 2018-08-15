@@ -40,6 +40,18 @@ MATH_UTILS_DECL T Cube(const T x) {
   return x * x * x;
 }
 
+// Function uses casting from int to unsigned to compare if value of
+// parameter a is greater or equal to zero and lower than value of
+// parameter b. The b parameter is of type signed and is always
+// positive,
+// therefore its value is always lower than 0x800... where casting
+// negative value of a parameter converts it to value higher than
+// 0x800...
+// The casting allows to use one condition instead of two.
+MATH_UTILS_DECL bool IsAGeZeroAndALtB(const int a, const int b) {
+  return static_cast<unsigned int>(a) < static_cast<unsigned>(b);
+}
+
 // Increase the index digits by one based on dims.
 void IncreaseIndexInDims(const int n, const int* dims, int* index);
 

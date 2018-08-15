@@ -509,36 +509,6 @@ void Axpby(
     Context* context);
 
 template <typename T, class Context, StorageOrder kOrder>
-void Im2ColNd(
-    const int N,
-    const int img_size,
-    const int col_size,
-    const int* img_shape,
-    const int* col_shape,
-    const int* kernel_shape,
-    const int* stride,
-    const int* dilation,
-    const int* pad,
-    const T* img_data,
-    T* col_data,
-    Context* context);
-
-template <typename T, class Context, StorageOrder kOrder>
-void Col2ImNd(
-    const int N,
-    const int img_size,
-    const int col_size,
-    const int* img_shape,
-    const int* col_shape,
-    const int* kernel_shape,
-    const int* stride,
-    const int* dilation,
-    const int* pad,
-    const T* col_data,
-    T* img_data,
-    Context* context);
-
-template <typename T, class Context, StorageOrder kOrder>
 void Im2Col(
     const int channels,
     const int height,
@@ -557,7 +527,22 @@ void Im2Col(
     T* col_data,
     Context* context);
 
-template <typename T, class Context, int order>
+template <typename T, class Context, StorageOrder kOrder>
+void Im2ColNd(
+    const int N,
+    const int img_size,
+    const int col_size,
+    const int* img_shape,
+    const int* col_shape,
+    const int* kernel_shape,
+    const int* stride,
+    const int* dilation,
+    const int* pad,
+    const T* img_data,
+    T* col_data,
+    Context* context);
+
+template <typename T, class Context, StorageOrder kOrder>
 void Col2Im(
     const int channels,
     const int height,
@@ -572,6 +557,21 @@ void Col2Im(
     const int pad_r,
     const int stride_h,
     const int stride_w,
+    const T* col_data,
+    T* img_data,
+    Context* context);
+
+template <typename T, class Context, StorageOrder kOrder>
+void Col2ImNd(
+    const int N,
+    const int img_size,
+    const int col_size,
+    const int* img_shape,
+    const int* col_shape,
+    const int* kernel_shape,
+    const int* stride,
+    const int* dilation,
+    const int* pad,
     const T* col_data,
     T* img_data,
     Context* context);
@@ -610,19 +610,19 @@ void CopyMatrix(
     Context* context);
 
 template <typename T, class Context>
-void CopyVector(const int N, const T* A, T* B, Context* context);
+void CopyMatrix(
+    const int M,
+    const int N,
+    const T* A,
+    const int A_outer_stride,
+    const int A_inner_stride,
+    T* B,
+    const int B_outer_stride,
+    const int B_inner_stride,
+    Context* context);
 
-// Function uses casting from int to unsigned to compare if value of
-// parameter a is greater or equal to zero and lower than value of
-// parameter b. The b parameter is of type signed and is always
-// positive,
-// therefore its value is always lower than 0x800... where casting
-// negative value of a parameter converts it to value higher than
-// 0x800...
-// The casting allows to use one condition instead of two.
-inline bool is_a_ge_zero_and_a_lt_b(int a, int b) {
-  return static_cast<unsigned>(a) < static_cast<unsigned>(b);
-}
+template <typename T, class Context>
+void CopyVector(const int N, const T* A, T* B, Context* context);
 
 // Calculates ceil(a / b). User must be careful to ensure that there
 // is no overflow or underflow in the calculation.
