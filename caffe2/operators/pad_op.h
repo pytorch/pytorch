@@ -25,9 +25,9 @@ class PadImageOp final : public ConvPoolOpBase<Context> {
   PadImageOp(const OperatorDef& operator_def, Workspace* ws)
       : ConvPoolOpBase<Context>(operator_def, ws),
         mode_(StringToPadMode(
-            OperatorBase::GetSingleArgument<string>("mode", "constant"))),
+            this->template GetSingleArgument<string>("mode", "constant"))),
         value_(static_cast<T>(
-            OperatorBase::GetSingleArgument<float>("value", 0.0))) {
+            this->template GetSingleArgument<float>("value", 0.0))) {
     CAFFE_ENFORCE(
         legacy_pad_ == LegacyPadding::NOTSET,
         "Padding layer only supports explicit pad values.");
@@ -65,7 +65,7 @@ class PadImageGradientOp final : public ConvPoolOpBase<Context> {
   PadImageGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : ConvPoolOpBase<Context>(operator_def, ws),
         mode_(StringToPadMode(
-            OperatorBase::GetSingleArgument<string>("mode", "constant"))) {
+            this->template GetSingleArgument<string>("mode", "constant"))) {
     CAFFE_ENFORCE(
         legacy_pad_ == LegacyPadding::NOTSET,
         "Padding layer only supports explicit pad values.");
