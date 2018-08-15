@@ -2,6 +2,8 @@
 #define TH_GENERIC_FILE "generic/THTensor.h"
 #else
 
+/* a la lua? dim, storageoffset, ...  et les methodes ? */
+
 #ifdef __cplusplus
 #include <ATen/TensorImpl.h>
 #endif
