@@ -1,3 +1,4 @@
+#if !(defined _WIN32)
 #pragma once
 
 #include "torch/csrc/jit/ir.h"
@@ -16,3 +17,5 @@ bool canCompileOnCPU();
 
 } // namespace jit
 } // namespace torch
+
+#endif // !(defined _WIN32)

@@ -727,76 +727,11 @@ std::vector<bool> TensorDesc::findContiguous(
 } // namespace jit
 } // namespace torch
 
-#else // _WIN32
-
-/*
-* The following block provides a dummy implementation of classes defined in
-* cpu_fuser.h. This block appears on Windows builds.
-*/
-
-#include "torch/csrc/jit/fusion_compiler.h"
-#include "torch/csrc/jit/ir.h"
-#include "torch/csrc/jit/code_template.h"
-#include "torch/csrc/jit/resource_guard.h"
-#include "torch/csrc/utils/disallow_copy.h"
-
-#include "ATen/ATen.h"
-
-#include <string>
-#include <algorithm>
-#include <unordered_map>
-#include <vector>
-#include <sstream>
-#include <iostream>
-
-namespace torch { namespace jit { namespace cpufuser {
-
-// CPUFusionCompiler
-CPUFusionCompiler::CPUFusionCompiler() {}
-
-void CPUFusionCompiler::debugLaunchGraph(
-  Graph& graph
-, int device
-, at::ArrayRef<at::Tensor> inputs
-, at::ArrayRef<at::Tensor> outputs) {}
-
-std::shared_ptr<CompiledCPUFusionFunction> CPUFusionCompiler::getOrCompile(
-  AnnotatedGraph& agraph) {
-  return nullptr;
-}
-
-std::shared_ptr<CompiledCPUFusionFunction> CPUFusionCompiler::getOrCompile(
-  Graph& graph
-, int device
-, at::ArrayRef<at::Tensor> inputs
-, at::ArrayRef<at::Tensor> outputs) {
-  return nullptr;
-}
-
-// CompiledCPUFusionFunction
-CompiledCPUFusionFunction::CompiledCPUFusionFunction(
-  const std::string& name
-, AnnotatedGraph& agraph) {}
-
-void CompiledCPUFusionFunction::launch_with_tensors(
-  at::ArrayRef<at::Tensor> inputs
-, at::ArrayRef<at::Tensor> outputs) {}
-
-void CompiledCPUFusionFunction::launch(
-  at::ArrayRef<at::Tensor> inputs
-, std::vector<at::Tensor>& outputs) {}
-
-} // namespace cpufuser
-} // namespace jit
-} // namespace torch
-
-#endif // _WIN32
-
-namespace torch { namespace jit { 
-
 /*
 * Interface functions.
 */
+namespace torch { namespace jit { 
+
 std::shared_ptr<CompiledFusionFunction> getCPUFusionFunction(Node* fusion_group) {
   auto& graph = *fusion_group->g(attr::Subgraph);
   cpufuser::AnnotatedGraph agraph(graph, fusion_group->i(attr::device));
@@ -821,3 +756,5 @@ bool canCompileOnCPU() {
 
 } // namespace jit
 } // namespace torch
+
+#endif // _WIN32

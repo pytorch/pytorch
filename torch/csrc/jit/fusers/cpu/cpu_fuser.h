@@ -1,3 +1,4 @@
+#if !(defined _WIN32)
 #pragma once
 
 #include "torch/csrc/jit/fusers/fuser_interface.h"
@@ -187,3 +188,5 @@ private:
 } // namespace cpufuser
 } // namespace jit
 } // namespace torch
+
+#endif // !(defined _WIN32)

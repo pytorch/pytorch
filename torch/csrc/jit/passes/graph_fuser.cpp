@@ -8,7 +8,9 @@
 namespace torch { namespace jit {
 
 void FuseGraph(std::shared_ptr<Graph>& graph) {
-  if (canCompileOnCPU()) FuseCPUGraph(graph);
+  #if !(defined _WIN32)
+    if (canCompileOnCPU()) FuseCPUGraph(graph);
+  #endif // !(defined _WIN32)
 
   #if defined USE_CUDA && !(defined _WIN32) && !(defined USE_ROCM)
     FuseCUDAGraph(graph);

@@ -1,3 +1,4 @@
+#if !(defined _WIN32)
 #pragma once
 
 #include "torch/csrc/jit/ir.h"
@@ -10,3 +11,5 @@ TORCH_API void FuseCPUGraph(std::shared_ptr<Graph>& graph);
 
 } // namespace jit
 } // namespace torch
+
+#endif // !(defined _WIN32)

@@ -1,3 +1,4 @@
+#if !(defined _WIN32)
 #include "torch/csrc/jit/fusers/cpu/cpu_fusion_pass.h"
 
 #include "torch/csrc/jit/fusers/cpu/cpu_fuser.h"
@@ -647,3 +648,5 @@ void FuseCPUGraph(std::shared_ptr<Graph>& graph) {
 
 } // namespace jit
 } // namespace torch
+
+#endif // !(defined _WIN32)
