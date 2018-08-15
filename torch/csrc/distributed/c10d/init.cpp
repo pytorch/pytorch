@@ -224,6 +224,26 @@ PyObject* c10d_init(PyObject* _unused) {
               py::arg("output_tensor"),
               py::arg("tensors"),
               py::arg("root"),
+              py::call_guard<py::gil_scoped_release>())
+
+          .def(
+              "send",
+              &::c10d::ProcessGroup::send,
+              py::call_guard<py::gil_scoped_release>())
+
+          .def(
+              "recv",
+              &::c10d::ProcessGroup::recv,
+              py::call_guard<py::gil_scoped_release>())
+
+          .def(
+              "recv_anysource",
+              &::c10d::ProcessGroup::recvAnysource,
+              py::call_guard<py::gil_scoped_release>())
+
+          .def(
+              "barrier",
+              &::c10d::ProcessGroup::barrier,
               py::call_guard<py::gil_scoped_release>());
 
   auto processGroupGloo = shared_ptr_class_<::c10d::ProcessGroupGloo>(
