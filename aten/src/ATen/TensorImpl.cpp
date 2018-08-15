@@ -62,8 +62,9 @@ void Tensor::backward(
 TensorImpl::TensorImpl(TensorTypeId type_id, ScalarType scalar_type)
     : type_id_(type_id), scalar_type_(scalar_type) {
   auto type = &globalContext().getType(tensorTypeIdToBackend(type_id), scalar_type);
-  Storage* storage = type->storage(true).release();
+  auto storage = type->storage(true);
   StorageImpl* storage_impl = storage->pImpl();
+  storage_impl->retain();
   tensor = new THTensor(storage_impl);
 }
 
