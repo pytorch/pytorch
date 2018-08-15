@@ -5,6 +5,7 @@
 #include "torch/csrc/jit/autodiff.h"
 #include "torch/csrc/jit/assertions.h"
 
+#include "torch/csrc/jit/fusers/cuda/simple_ops.h"
 #include "cuda.h" // for CUDA_VERSION
 
 #include <unordered_map>
@@ -12,81 +13,6 @@
 namespace torch { namespace jit {
 
 namespace {
-
-// What is a simple mappable operator?  It is:
-//    - Has an output with the same sizes as its input
-//    - Single output
-//    - Can handle non-contiguous input
-//    - Produces contiguous output
-// Some of these restrictions may be relaxable, but you should
-// carefully read the code first, as we rely on these assumptions.
-std::unordered_set<NodeKind> simple_mappable = {
-  aten::__and__,
-  aten::__lshift__,
-  aten::__or__,
-  aten::__rshift__,
-  aten::__xor__,
-  aten::abs,
-  aten::acos,
-  aten::add,
-  aten::asin,
-  aten::atan,
-  aten::atan2,
-  aten::ceil,
-  aten::cos,
-  aten::cosh,
-  aten::div,
-  aten::eq,
-  aten::exp,
-  aten::expm1,
-  aten::floor,
-  aten::fmod,
-  aten::frac,
-  aten::ge,
-  aten::gt,
-  aten::le,
-  aten::lgamma,
-  aten::log,
-  aten::log10,
-  aten::log1p,
-  aten::log2,
-  aten::lt,
-  aten::max,
-  aten::min,
-  aten::mul,
-  aten::ne,
-  aten::neg,
-  aten::pow,
-  aten::reciprocal,
-  aten::relu,
-  aten::remainder,
-  aten::round,
-  aten::rsqrt,
-  aten::sigmoid,
-  aten::sin,
-  aten::sinh,
-  aten::sqrt,
-  aten::sub,
-  aten::tan,
-  aten::tanh,
-  aten::trunc,
-  aten::type_as,
-  aten::_sigmoid_backward,
-  aten::_tanh_backward,
-  // TODO support those
-  //aten::clamp,
-  //aten::lerp,
-  aten::rand_like,
-};
-
-bool isSimpleMap(Node* node) {
-  // TODO: use signature matching
-  if (simple_mappable.count(node->kind()) == 0) return false;
-  if ((node->kind() == aten::min || node->kind() == aten::max) 
-    && node->inputs().size() == 1)
-    return false;
-  return true;
-}
 
 
 struct GraphFuser {
@@ -110,23 +36,17 @@ struct GraphFuser {
     
     return at::nullopt;
   }
-  // TODO: the fusion compiler has a lot of float-specific codegen
-  // so for now we only consider nodes that operate on floating point numbers
-  // and half values when running on a GPU with sufficient CUDA arch
-  bool isSupportedValue(Value* node) {
-    if (auto tt = node->type()->cast<TensorType>()) {
-      if (tt->device() == kCPUDevice) return false;
-      if (tt->scalarType() == at::kFloat) return true;
-      if (tt->scalarType() == at::ScalarType::Half && CUDA_VERSION >= 9)
-        return true;
-    }
-
-    return false;
-  }
 
   bool allValuesSupported(at::ArrayRef<Value*> list) {
-    for (Value* v : list) 
-      if (!isSupportedValue(v)) return false;
+    for (Value* v : list)
+
+      if (auto tt = v->type()->cast<TensorType>()) {
+	if (tt->device() == kCPUDevice ||
+	    (tt->scalarType() != at::kFloat &&
+	     tt->scalarType() != at::ScalarType::Half && CUDA_VERSION >= 9)
+	    ) return false;
+      }else
+	return false;
 
     return true;
   }
@@ -143,16 +63,10 @@ struct GraphFuser {
     return true;
   }
 
-  bool isNodeSupported(Node* node) {
-    return areTensorsOfSameShape(node->inputs()) 
-    && allValuesSupported(node->inputs()) 
-    && allValuesSupported(node->outputs());
-  }
-
   bool isFusable(Node* node) {
     if (node->owningBlock() != block) return false;
     if (node->kind() == prim::FusionGroup && node->i(attr::device) != kCPUDevice) return true;
-    if (!isSimpleMap(node)) return false;
+    if (!jit::isSimpleMap(node)) return false;
 
     if (node->matches("aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor", /*const=*/attr::alpha)) {
       std::vector<Value*> inputs {node->namedInput(attr::self), node->namedInput(attr::other)};
@@ -169,7 +83,10 @@ struct GraphFuser {
       // type_as can have different input types as long as output is float, check only output
       return allValuesSupported(node->outputs());
     } else {
-      return isNodeSupported(node);
+      return areTensorsOfSameShape(node->inputs())
+	&& allValuesSupported(node->inputs())
+	&& allValuesSupported(node->outputs());
+
     }
   }
 
@@ -193,14 +110,6 @@ struct GraphFuser {
         auto actual = v->type()->cast<TensorType>();
         return actual && actual->sizes() == expected->sizes() && actual->device() != kCPUDevice;
     });
-  }
-
-  // Can this node produce an _output_ of a fusion group?
-  // all Fusable nodes can do this, but additionally Concat, which normally cannot be fused
-  // because it is not a simple map, can be put in a fusion group
-  // as long as no items in the group read the output of concat
-  bool isFusableAsExitNode(Node* node) {
-    return isFusable(node) || isFusableCatNode(node);
   }
 
   // necessary condition for fusion. If all of the uses of producer are consumer
@@ -530,9 +439,14 @@ struct GraphFuser {
   }
 
   // returns where to continue scanning, and whether any fusion was made
-  std::pair<graph_node_list::iterator, bool> scanNode(Node* consumer) {
+  std::pair<graph_node_list::iterator, bool>
+  scanNode(Node* consumer) {
     auto stage_guard = block->owningGraph()->setStageTemporary(consumer->stage());
-    if(isFusableAsExitNode(consumer)) {
+
+    // Can this node produce an _output_ of a fusion group?
+    // all Fusable nodes can do this, but additionally Concat can
+    // as long as no items in the group read the output of concat
+    if(isFusable(consumer) || isFusableCatNode(consumer)) {
       value_list inputs;
       auto consumer_inputs = consumer->kind() == aten::cat ?
         consumer->namedInput(attr::tensors)->node()->inputs() :
