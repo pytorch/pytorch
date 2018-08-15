@@ -439,35 +439,33 @@ class TestDataLoader(TestCase):
 
     def test_RandomSampler(self):
 
-        def sample_stat(sampler, num_samples):
-            bin = {}
-            minval, maxval = num_samples, 0
-            for s in sampler:
-                bin[s] = bin.get(s, 0) + 1
-                minval = min(minval, s)
-                maxval = max(maxval, s)
-
-            count_repeated = 0
-            for val in bin.values():
-                if val > 1:
-                    count_repeated += 1
-            return (count_repeated, minval, maxval)
-
+        from collections import Counter
         from torch.utils.data import RandomSampler
-        n = len(self.dataset)
-        sampler_with_replacement = RandomSampler(self.dataset, n, True)
+
+        def sample_stat(sampler, num_samples):
+            counts = Counter(sampler)
+            count_repeated = sum(val > 1 for val in counts.values())
+            return (count_repeated, min(counts.keys()), max(counts.keys()))
+
+        # test sample with replacement
+        n = len(self.dataset) + 1  # ensure at least one sample is drawn more than once
+        sampler_with_replacement = RandomSampler(self.dataset, replacement=True, num_samples=n)
         count_repeated, minval, maxval = sample_stat(sampler_with_replacement, n)
         self.assertTrue(count_repeated > 0)
         self.assertTrue(minval >= 0)
-        self.assertTrue(maxval < n)
+        self.assertTrue(maxval < len(self.dataset))
 
+        # test sample without replacement
         sampler_without_replacement = RandomSampler(self.dataset)
-        count_repeated, minval, maxval = sample_stat(sampler_without_replacement, n)
+        count_repeated, minval, maxval = sample_stat(sampler_without_replacement, len(self.dataset))
         self.assertTrue(count_repeated == 0)
         self.assertTrue(minval == 0)
-        self.assertTrue(maxval == n - 1)
+        self.assertTrue(maxval == len(self.dataset) - 1)
 
-        self.assertRaises(ValueError, lambda: RandomSampler(self.dataset, n))
+        # raise error when replacement=False and num_samples is not None
+        self.assertRaises(ValueError, lambda: RandomSampler(self.dataset, num_samples=len(self.dataset)))
+
+        self.assertRaises(ValueError, lambda: RandomSampler(self.dataset, num_samples=0))
 
     @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
                      don't support multiprocessing with spawn start method")
