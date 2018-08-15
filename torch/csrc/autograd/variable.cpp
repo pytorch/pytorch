@@ -22,7 +22,7 @@
 namespace torch {
 namespace autograd {
 Variable::Impl::Impl(at::Tensor data, bool requires_grad, Edge gradient_edge)
-    : TensorImpl(data.type().backend(), data.type().scalarType(), nullptr, /* is variable */ true),
+    : TensorImpl(data.type().type_id(), data.type().scalarType(), nullptr, /* is variable */ true),
       data_(std::move(data)),
       grad_fn_(std::move(gradient_edge.function)),
       requires_grad_(false),
@@ -93,8 +93,7 @@ Tensor Variable::Impl::detach() const {
 
 void Variable::Impl::detach_() {
   if (is_view_) {
-    throw std::runtime_error(
-        "Can't detach views in-place. Use detach() instead");
+    AT_ERROR("Can't detach views in-place. Use detach() instead");
   }
   set_requires_grad(false);
   grad_fn_.reset();
@@ -117,13 +116,22 @@ void Variable::Impl::backward(
 }
 
 void Variable::Impl::set_data(Tensor new_data) {
-  if (new_data.type() != data_.type()) {
-    scalar_type_ = new_data.type().scalarType();
-    backend_ = new_data.type().backend();
-    is_variable_ = true;
-    // Clear grad_accumulator if it exists, since it stores the old type info.
-    grad_accumulator_.reset();
+  // Resets gradient accumulator if metadata is out of date
+  std::lock_guard<std::mutex> lock(mutex_);
+  auto prior_accumulator = grad_accumulator_.lock();
+  if (prior_accumulator) {
+    const auto prior_device = prior_accumulator->input_metadata(0).device();
+    const auto new_device = new_data.is_cuda() ? new_data.get_device() : -1;
+    
+    if (new_data.type() != data_.type() || prior_device != new_device) {
+      grad_accumulator_.reset();
+    }
   }
+  
+  // Updates metadata
+  scalar_type_ = new_data.type().scalarType();
+  type_id_ = new_data.type().type_id();
+  is_variable_ = true;
   data_ = std::move(new_data);
 }
 
@@ -160,7 +168,10 @@ std::shared_ptr<Function>& Variable::ViewImpl::get_grad_fn() {
     fn->stride = strides().vec();
     fn->storage_offset = data_.storage_offset();
     fn->set_next_edges(collect_next_edges(base_));
-    fn->add_input_metadata(base_.type(), sizes());
+    fn->add_input_metadata(
+      base_.type()
+    , sizes() // Note: sizes(), not base_.sizes(), is intentional
+    , base_.is_cuda() ? base_.get_device() : -1);
     grad_fn_ = std::move(fn);
     attr_version = current_version;
   }

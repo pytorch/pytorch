@@ -360,7 +360,7 @@ struct THCNumerics<half> {
     #endif
   }
 
-}; 
+};
 
 // DEPRECATED: use math functions from std and cuda math API (if needed)
 //             note that the functions exp10,rsqrt,erfinv,frac and cinv

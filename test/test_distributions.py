@@ -3056,6 +3056,7 @@ class TestKL(TestCase):
             (Bernoulli(0), Bernoulli(1)),
             (Bernoulli(1), Bernoulli(0)),
             (Categorical(torch.tensor([0.9, 0.1])), Categorical(torch.tensor([1., 0.]))),
+            (Categorical(torch.tensor([[0.9, 0.1], [.9, .1]])), Categorical(torch.tensor([1., 0.]))),
             (Beta(1, 2), Uniform(0.25, 1)),
             (Beta(1, 2), Uniform(0, 0.75)),
             (Beta(1, 2), Uniform(0.25, 0.75)),

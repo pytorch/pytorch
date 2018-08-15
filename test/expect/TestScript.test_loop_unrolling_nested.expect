@@ -13,7 +13,7 @@ graph(%x : Dynamic) {
       %13 : int = aten::mul(%11, %12)
       %14 : int = aten::sub(%7, %13)
       %15 : Dynamic, %y.4 : Dynamic = prim::Loop(%11, %8, %9, %6)
-        block0(%j.1 : int, %18 : Dynamic, %19 : Dynamic) {
+        block0(%j.1 : int, %18 : int, %19 : Dynamic) {
           %20 : int = prim::Constant[value=1]()
           %y.13 : Dynamic = aten::add(%19, %18, %20)
           %22 : int = prim::Constant[value=1]()
@@ -50,7 +50,7 @@ graph(%x : Dynamic) {
           -> (%50, %52, %y.12)
         }
       %53 : Dynamic, %y.3 : Dynamic = prim::Loop(%14, %8, %15, %y.4)
-        block0(%j : int, %56 : Dynamic, %57 : Dynamic) {
+        block0(%j : int, %56 : int, %57 : Dynamic) {
           %58 : int = prim::Constant[value=1]()
           %y.5 : Dynamic = aten::add(%57, %56, %58)
           %60 : int = prim::Constant[value=1]()

@@ -20,12 +20,12 @@ class YellowFinOp final : public Operator<Context> {
   YellowFinOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         curv_win_width_(
-            OperatorBase::GetSingleArgument<int>("curv_win_width", 20)),
-        nesterov_(OperatorBase::GetSingleArgument<int>("nesterov", false)),
+            this->template GetSingleArgument<int>("curv_win_width", 20)),
+        nesterov_(this->template GetSingleArgument<int>("nesterov", false)),
         zero_debias_(
-            OperatorBase::GetSingleArgument<bool>("zero_debias", true)),
-        epsilon_(OperatorBase::GetSingleArgument<T>("epsilon", 1e-6f)),
-        beta_(OperatorBase::GetSingleArgument<T>("beta", 0.999f)) {}
+            this->template GetSingleArgument<bool>("zero_debias", true)),
+        epsilon_(this->template GetSingleArgument<T>("epsilon", 1e-6f)),
+        beta_(this->template GetSingleArgument<T>("beta", 0.999f)) {}
 
  protected:
   // GetLrMu and MomentumSgdUpdate have different implementations for GPU and

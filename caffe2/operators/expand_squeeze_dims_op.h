@@ -12,7 +12,7 @@ class ExpandDimsOp : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   ExpandDimsOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        dims_(OperatorBase::GetRepeatedArgument<int>("dims")) {
+        dims_(this->template GetRepeatedArgument<int>("dims")) {
     auto originalSize = dims_.size();
     CAFFE_ENFORCE(originalSize > 0, "Parameter `dims` must be provided.");
     std::sort(dims_.begin(), dims_.end());
@@ -55,7 +55,7 @@ class SqueezeOp : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   SqueezeOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        dims_(OperatorBase::GetRepeatedArgument<int>("dims")) {
+        dims_(this->template GetRepeatedArgument<int>("dims")) {
     auto originalSize = dims_.size();
     CAFFE_ENFORCE(originalSize > 0, "Parameter `dims` must be provided.");
 
@@ -112,7 +112,7 @@ class SqueezeOp : public Operator<Context> {
   vector<int> dims_;
 
  public:
-  DISABLE_COPY_AND_ASSIGN(SqueezeOp);
+  AT_DISABLE_COPY_AND_ASSIGN(SqueezeOp);
 };
 } // namespace caffe2
 #endif // CAFFE2_OPERATORS_EXPAND_SQUEEZE_DIMS_OP_H_

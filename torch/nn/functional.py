@@ -1,4 +1,4 @@
-"""Functional interface"""
+r"""Functional interface"""
 
 import warnings
 import math
@@ -14,6 +14,8 @@ from ._functions import vision
 from ._functions.thnn.fold import Col2Im, Im2Col
 from .modules.utils import _single, _pair, _triple, _list_with_default
 from . import grad
+
+_VF = torch._C._VariableFunctions
 
 
 class _Reduction:
@@ -249,7 +251,7 @@ def conv_tbc(input, weight, bias, pad=0):
         bias: bias of shape (:math:`out\_channels`)
         pad: number of timesteps to pad
     """
-    return input.conv_tbc(weight, bias, pad)
+    return torch.conv_tbc(input, weight, bias, pad)
 
 
 # Pooling
@@ -592,7 +594,11 @@ def adaptive_avg_pool3d(input, output_size):
 
 # Activation functions
 def dropout(input, p=0.5, training=False, inplace=False):
-    return _functions.dropout.Dropout.apply(input, p, training, inplace)
+    if p < 0 or p > 1:
+        raise ValueError("dropout probability has to be between 0 and 1, "
+                         "but got {}".format(p))
+    f = _VF.dropout_ if inplace else _VF.dropout
+    return f(input, p, training)
 
 
 def alpha_dropout(input, p=0.5, training=False, inplace=False):
@@ -600,19 +606,35 @@ def alpha_dropout(input, p=0.5, training=False, inplace=False):
 
     See :class:`~torch.nn.AlphaDropout` for details.
     """
-    return _functions.dropout.AlphaDropout.apply(input, p, training, inplace)
+    if p < 0 or p > 1:
+        raise ValueError("dropout probability has to be between 0 and 1, "
+                         "but got {}".format(p))
+    f = _VF.alpha_dropout_ if inplace else _VF.alpha_dropout
+    return f(input, p, training)
 
 
 def dropout2d(input, p=0.5, training=False, inplace=False):
-    return _functions.dropout.FeatureDropout.apply(input, p, training, inplace)
+    if p < 0 or p > 1:
+        raise ValueError("dropout probability has to be between 0 and 1, "
+                         "but got {}".format(p))
+    f = _VF.feature_dropout_ if inplace else _VF.feature_dropout
+    return f(input, p, training)
 
 
 def dropout3d(input, p=0.5, training=False, inplace=False):
-    return _functions.dropout.FeatureDropout.apply(input, p, training, inplace)
+    if p < 0 or p > 1:
+        raise ValueError("dropout probability has to be between 0 and 1, "
+                         "but got {}".format(p))
+    f = _VF.feature_dropout_ if inplace else _VF.feature_dropout
+    return f(input, p, training)
 
 
 def feature_alpha_dropout(input, p=0.5, training=False, inplace=False):
-    return _functions.dropout.FeatureAlphaDropout.apply(input, p, training, inplace)
+    if p < 0 or p > 1:
+        raise ValueError("dropout probability has to be between 0 and 1, "
+                         "but got {}".format(p))
+    f = _VF.feature_alpha_dropout_ if inplace else _VF.feature_alpha_dropout
+    return f(input, p, training)
 
 
 def threshold(input, threshold, value, inplace=False):
@@ -2103,58 +2125,81 @@ def upsample_bilinear(input, size=None, scale_factor=None):
     return interpolate(input, size, scale_factor, mode='bilinear', align_corners=True)
 
 
-GRID_SAMPLE_MODE_ZEROS = 0
-GRID_SAMPLE_MODE_BORDER = 1
+GRID_SAMPLE_INTERPOLATION_MODES = {
+    'bilinear': 0,
+    'nearest': 1,
+}
+
+GRID_SAMPLE_PADDING_MODES = {
+    'zeros': 0,
+    'border': 1,
+    'reflection': 2,
+}
 
 
 def grid_sample(input, grid, mode='bilinear', padding_mode='zeros'):
     r"""Given an :attr:`input` and a flow-field :attr:`grid`, computes the
-    `output` using input pixel locations from the grid.
+    ``output`` using :attr:`input` values and pixel locations from :attr:`grid`.
 
-    Uses bilinear interpolation to sample the input pixels.
-    Currently, only spatial (4 dimensional) and volumetric (5 dimensional)
-    inputs are supported.
+    Currently, only spatial (4-D) and volumetric (5-D) :attr:`input` are
+    supported.
 
-    For each output location, :attr:`grid` has `x`, `y`
-    input pixel locations which are used to compute output.
-    In the case of 5D inputs, :attr:`grid` has `x`, `y`, `z` pixel locations.
+    In the spatial (4-D) case, for :attr:`input` with shape
+    :math:`(N, C, H_\text{in}, W_\text{in})` and :attr:`grid` with shape
+    :math:`(N, H_\text{out}, W_\text{out}, 2)`, the output will have shape
+    :math:`(N, C, H_\text{out}, W_\text{out})`.
 
-    .. Note::
-        To avoid confusion in notation, let's note that `x` corresponds to the `width` dimension `IW`,
-        `y` corresponds to the height dimension `IH` and `z` corresponds to the `depth` dimension `ID`.
+    For each output location ``output[n, :, h, w]``, the size-2 vector
+    ``grid[n, h, w]`` specifies :attr:`input` pixel locations ``x`` and ``y``,
+    which are used to interpolate the output value ``output[n, :, h, w]``.
+    In the case of 5D inputs, ``grid[n, d, h, w]`` specifies the
+    ``x``, ``y``, ``z`` pixel locations for interpolating
+    ``output[n, :, d, h, w]``. :attr:`mode` argument specifies ``nearest`` or
+    ``bilinear`` interpolation method to sample the input pixels.
 
-    :attr:`grid` has values in the range of `[-1, 1]`. This is because the
-    pixel locations are normalized by the input height and width.
+    :attr:`grid` should have most values in the range of ``[-1, 1]``. This is
+    because the pixel locations are normalized by the :attr:`input` spatial
+    dimensions. For example, values ``x = -1, y = -1`` is the left-top pixel of
+    :attr:`input`, and values  ``x = 1, y = 1`` is the right-bottom pixel of
+    :attr:`input`.
 
-    For example, values: x: -1, y: -1 is the left-top pixel of the input, and
-    values: x: 1, y: 1 is the right-bottom pixel of the input.
+    If :attr:`grid` has values outside the range of ``[-1, 1]``, those locations
+    are handled as defined by :attr:`padding_mode`. Options are
 
-    If :attr:`grid` has values outside the range of `[-1, 1]`, those locations
-    are handled as defined by `padding_mode`. Options are `zeros` or `border`,
-    defining those locations to use 0 or image border values as contribution
-    to the bilinear interpolation.
+        * ``padding_mode="zeros"``: use ``0`` for out-of-bound values,
+        * ``padding_mode="border"``: use border values for out-of-bound values,
+        * ``padding_mode="reflection"``: use values at locations reflected by
+          the border for out-of-bound values. For location far away from the
+          border, it will keep being reflected until becoming in bound, e.g.,
+          (normalized) pixel location ``x = -3.5`` reflects by ``-1`` and
+          becomes ``x' = 2.5``, then reflects by border ``1`` and becomes
+          ``x'' = -0.5``.
 
-    .. Note:: This function is used in building Spatial Transformer Networks
+    .. Note:: This function is often used in building Spatial Transformer Networks.
 
     Args:
-        input (Tensor): input batch (N x C x IH x IW) or (N x C x ID x IH x IW)
-        grid (Tensor): flow-field of size (N x OH x OW x 2) or (N x OD x OH x OW x 3)
+        input (Tensor): input of shape :math:`(N, C, H_\text{in}, W_\text{in})` (4-D case)
+                        or :math:`(N, C, D_\text{in}, H_\text{in}, W_\text{in})` (5-D case)
+        grid (Tensor): flow-field of shape :math:`(N, H_\text{out}, W_\text{out}, 2)` (4-D case)
+                       or :math:`(N, D_\text{out}, H_\text{out}, W_\text{out}, 3)` (5-D case)
+        mode (str): interpolation mode to calculate output values
+            'bilinear' | 'nearest'. Default: 'bilinear'
         padding_mode (str): padding mode for outside grid values
-            'zeros' | 'border'. Default: 'zeros'
+            'zeros' | 'border' | 'reflection'. Default: 'zeros'
 
     Returns:
         output (Tensor): output Tensor
 
     """
-    if mode != 'bilinear':
-        raise NotImplementedError("nn.functional.grid_sample got unsupported mode: '{}'".format(mode))
-    if padding_mode == 'zeros':
-        padding_mode = GRID_SAMPLE_MODE_ZEROS
-    elif padding_mode == 'border':
-        padding_mode = GRID_SAMPLE_MODE_BORDER
-    else:
-        raise ValueError("padding_mode needs to be 'zeros' or 'border', but got {}".format(padding_mode))
-    return torch.grid_sampler(input, grid, padding_mode)
+    if mode not in GRID_SAMPLE_INTERPOLATION_MODES:
+        raise ValueError("nn.functional.grid_sample(): expected mode to be "
+                         "'bilinear' or 'nearest', but got: '{}'".format(mode))
+    if padding_mode not in GRID_SAMPLE_PADDING_MODES:
+        raise ValueError("nn.functional.grid_sample(): expected padding_mode "
+                         "to be 'zeros', 'border', or 'reflection', "
+                         "but got: '{}'".format(padding_mode))
+    return torch.grid_sampler(input, grid, GRID_SAMPLE_INTERPOLATION_MODES[mode],
+                              GRID_SAMPLE_PADDING_MODES[padding_mode])
 
 
 def affine_grid(theta, size):

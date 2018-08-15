@@ -80,8 +80,13 @@ test_aten() {
     # NB: the ATen test binaries don't have RPATH set, so it's necessary to
     # put the dynamic libraries somewhere were the dynamic linker can find them.
     # This is a bit of a hack.
-    ln -s "$TORCH_LIB_PATH"/libcaffe2* build/bin
-    ln -s "$TORCH_LIB_PATH"/libnccl* build/bin
+    if [[ "$BUILD_ENVIRONMENT" == *ppc64le* ]]; then
+      SUDO=sudo 
+    fi
+
+    ${SUDO} ln -s "$TORCH_LIB_PATH"/libcaffe2* build/bin
+    ${SUDO} ln -s "$TORCH_LIB_PATH"/libnccl* build/bin
+
     ls build/bin
     aten/tools/run_tests.sh build/bin
   fi
@@ -108,13 +113,14 @@ test_torchvision() {
 test_libtorch() {
   if [[ "$BUILD_TEST_LIBTORCH" == "1" ]]; then
      echo "Testing libtorch"
+     CPP_BUILD="$PWD/../cpp-build"
      if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
-       ./build/bin/test_jit
+       "$CPP_BUILD"/caffe2/bin/test_jit
      else
-       ./build/bin/test_jit "[cpu]"
+       "$CPP_BUILD"/caffe2/bin/test_jit "[cpu]"
      fi
      python tools/download_mnist.py --quiet -d test/cpp/api/mnist
-     OMP_NUM_THREADS=2 ./build/bin/test_api
+     OMP_NUM_THREADS=2 "$CPP_BUILD"/caffe2/bin/test_api
   fi
 }
 

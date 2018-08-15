@@ -25,6 +25,28 @@ struct TestNodeMatch {
 
 using TestGraph = Graph<NodeType>;
 using TestMatcher = SubgraphMatcher<TestGraph, Criteria, TestNodeMatch>;
+using TestMatchGraph = MatchGraph<Criteria>;
+using TestMatchNode = MatchNode<Criteria>;
+
+// Have just one TestMatchGraph in the tests to make it less verbose to create
+// the match graphs.
+TestMatchGraph graph;
+// Call reset before creating a new TestMatchGraph.
+void reset() {
+  graph = TestMatchGraph();
+}
+
+// Helper methods to make it less verbose to create match graphs.
+TestMatchGraph::NodeRef Tree(
+    const Criteria& root,
+    const std::vector<TestMatchGraph::NodeRef>& children = {},
+    int count = 1) {
+  return tree(graph, root, children, count, false);
+}
+
+TestMatchGraph::NodeRef NonTerminal(const Criteria& root, int count = 1) {
+  return tree(graph, root, {}, count, true);
+}
 
 Criteria any() {
   return Criteria("*");
@@ -33,11 +55,11 @@ Criteria any() {
 // Make it more concise to create matching criteria in dataflow graph.
 // For example, operatorTree("opA", ...) will refer to a tree like this:
 // ... -> opA -> opA_Output
-SubtreeMatchCriteria<Criteria> operatorTree(
+TestMatchGraph::NodeRef operatorTree(
     const Criteria& root,
-    const std::vector<SubtreeMatchCriteria<Criteria>>& childrenCriteria = {},
+    const std::vector<TestMatchGraph::NodeRef>& childrenCriteria = {},
     int count = 1) {
-  return tree(any(), {tree(root, childrenCriteria)}, count);
+  return Tree(any(), {Tree(root, childrenCriteria)}, count);
 }
 
 std::map<std::string, std::string> TestGraphNodePrinter(
@@ -158,21 +180,21 @@ struct DataFlowTestGraph {
   }
 };
 
-SubtreeMatchCriteria<Criteria> DataFlowTestGraphCriteria() {
+TestMatchGraph::NodeRef DataFlowTestGraphCriteria() {
   // clang-format off
-  return tree(
-      Criteria("opG"),{
-        operatorTree("opF", {
-            // Note: we currently don't enforce that these 2 opC nodes
-            // have to be the same.
-            operatorTree("opB", {
-              operatorTree("opC", {
-                treeStar(Criteria("input"))
-              }, 2),
-            })
-        }),
-        tree(any()) // matches dataI
-      });
+  return Tree(
+    Criteria("opG"),{
+      operatorTree("opF", {
+          // Note: we currently don't enforce that these 2 opC nodes
+          // have to be the same.
+          operatorTree("opB", {
+            operatorTree("opC", {
+              Tree(Criteria("input"), {}, TestMatchNode::kStarCount)
+            }, 2),
+          })
+      }),
+      Tree(any()) // matches dataI
+    });
   // clang-format on
 }
 
@@ -180,6 +202,13 @@ TestGraph::NodeRef getInNode(TestGraph::NodeRef node, int index) {
   return node->getInEdges()[index]->tail();
 }
 
+bool isSubtreeMatch(
+    TestGraph::NodeRef nodeRef,
+    const TestMatchGraph::NodeRef& criteria,
+    bool invertGraphTraversal = true) {
+  return TestMatcher::isSubtreeMatch(nodeRef, criteria, invertGraphTraversal)
+      .isMatch();
+}
 } // namespace matcher
 
 } // namespace nom
@@ -223,20 +252,34 @@ TEST(SubgraphMatcher, IsSubtreeMatch) {
   N3     N4   N6   N7
   */
 
-  auto subtree = tree(any(), {tree(any()), tree(any())});
-  EXPECT_FALSE(TestMatcher::isSubtreeMatch(n1, subtree, false));
-  EXPECT_FALSE(TestMatcher::isSubtreeMatch(n4, subtree, false));
+  reset();
+  auto subtree = Tree(any(), {Tree(any()), Tree(any())});
+  EXPECT_FALSE(isSubtreeMatch(n1, subtree, false));
+  EXPECT_FALSE(isSubtreeMatch(n4, subtree, false));
 
-  EXPECT_TRUE(TestMatcher::isSubtreeMatch(n2, subtree, false));
-  EXPECT_TRUE(TestMatcher::isSubtreeMatch(n5, subtree, false));
+  EXPECT_TRUE(isSubtreeMatch(n2, subtree, false));
+  EXPECT_TRUE(isSubtreeMatch(n5, subtree, false));
 
-  subtree = tree(Criteria("5"), {tree(any()), tree(any())});
-  EXPECT_FALSE(TestMatcher::isSubtreeMatch(n2, subtree, false));
-  EXPECT_TRUE(TestMatcher::isSubtreeMatch(n5, subtree, false));
+  reset();
+  subtree = Tree(Criteria("5"), {Tree(any()), Tree(any())});
+  EXPECT_FALSE(isSubtreeMatch(n2, subtree, false));
+  EXPECT_TRUE(isSubtreeMatch(n5, subtree, false));
 
-  subtree = tree(any(), {tree(any()), tree(Criteria("4"))});
-  EXPECT_TRUE(TestMatcher::isSubtreeMatch(n2, subtree, false));
-  EXPECT_FALSE(TestMatcher::isSubtreeMatch(n5, subtree, false));
+  reset();
+  subtree = Tree(any(), {Tree(any()), Tree(Criteria("4"))});
+  EXPECT_TRUE(isSubtreeMatch(n2, subtree, false));
+  EXPECT_FALSE(isSubtreeMatch(n5, subtree, false));
+
+  reset();
+  // Accepts non terminal node
+  subtree = Tree(any(), {NonTerminal(any()), NonTerminal(any())});
+  EXPECT_TRUE(isSubtreeMatch(n1, subtree, false));
+  EXPECT_TRUE(isSubtreeMatch(n2, subtree, false));
+  EXPECT_TRUE(isSubtreeMatch(n5, subtree, false));
+  EXPECT_FALSE(isSubtreeMatch(n3, subtree, false));
+  EXPECT_FALSE(isSubtreeMatch(n4, subtree, false));
+  EXPECT_FALSE(isSubtreeMatch(n6, subtree, false));
+  EXPECT_FALSE(isSubtreeMatch(n7, subtree, false));
 }
 
 // Test subtree matching in which * (repeated) matching of children is allowed.
@@ -259,69 +302,88 @@ TEST(SubgraphMatcher, IsSubtreeMatchRepeated) {
   graph.createEdge(n1, n5B);
   graph.createEdge(n1, n5C);
 
-  auto subtree = tree(any(), {tree(Criteria("2"))});
-  EXPECT_FALSE(TestMatcher::isSubtreeMatch(n1, subtree, false));
+  reset();
+  auto subtree = Tree(any(), {Tree(Criteria("2"))});
+  EXPECT_FALSE(isSubtreeMatch(n1, subtree, false));
 
-  subtree = tree(any(), {treeStar(Criteria("2"))});
-  EXPECT_FALSE(TestMatcher::isSubtreeMatch(n1, subtree, false));
+  reset();
+  subtree = Tree(any(), {Tree(Criteria("2"), {}, TestMatchNode::kStarCount)});
+  EXPECT_FALSE(isSubtreeMatch(n1, subtree, false));
 
+  reset();
   // clang-format off
-  subtree = tree(any(), {
-    tree(Criteria("2")),
-    tree(Criteria("3"), {}, 2),
-    tree(Criteria("4"), {}, 2),
-    tree(Criteria("5"), {}, 3)
+  subtree = Tree(any(), {
+    Tree(Criteria("2")),
+    Tree(Criteria("3"), {}, 2),
+    Tree(Criteria("4"), {}, 2),
+    Tree(Criteria("5"), {}, 3)
   });
-  EXPECT_TRUE(TestMatcher::isSubtreeMatch(n1, subtree, false));
+  EXPECT_TRUE(isSubtreeMatch(n1, subtree, false));
 
-  subtree = tree(any(), {
-    tree(Criteria("2")),
-    tree(Criteria("3"), {}, 2),
-    tree(Criteria("4"), {}, 2),
-    treeStar(Criteria("5"))
+  reset();
+  subtree = Tree(any(), {
+    Tree(Criteria("2")),
+    Tree(Criteria("3"), {}, 2),
+    Tree(Criteria("4"), {}, 2),
+    Tree(Criteria("5"), {}, 4)
   });
-  EXPECT_TRUE(TestMatcher::isSubtreeMatch(n1, subtree, false));
+  // Failes because exepected 4 matches of n5 but found 3.
+  EXPECT_FALSE(isSubtreeMatch(n1, subtree, false));
 
-  subtree = tree(any(), {
-    tree(Criteria("2")),
-    treeStar(Criteria("3")),
-    tree(Criteria("4"), {}, 2),
-    treeStar(Criteria("5"))
+  reset();
+  subtree = Tree(any(), {
+    Tree(Criteria("2")),
+    Tree(Criteria("3"), {}, 2),
+    Tree(Criteria("4"), {}, 2),
+    Tree(Criteria("5"), {}, TestMatchNode::kStarCount)
   });
-  EXPECT_TRUE(TestMatcher::isSubtreeMatch(n1, subtree, false));
+  EXPECT_TRUE(isSubtreeMatch(n1, subtree, false));
 
-  subtree = tree(any(), {
-    tree(Criteria("2")),
-    treeStar(Criteria("3")),
+  reset();
+  subtree = Tree(any(), {
+    Tree(Criteria("2")),
+    Tree(Criteria("3"), {}, TestMatchNode::kStarCount),
+    Tree(Criteria("4"), {}, 2),
+    Tree(Criteria("5"), {}, TestMatchNode::kStarCount)
+  });
+  EXPECT_TRUE(isSubtreeMatch(n1, subtree, false));
+
+  reset();
+  subtree = Tree(any(), {
+    Tree(Criteria("2")),
+    Tree(Criteria("3"), {}, TestMatchNode::kStarCount),
   });
   // Fails because there are unmatched edges.
-  EXPECT_FALSE(TestMatcher::isSubtreeMatch(n1, subtree, false));
+  EXPECT_FALSE(isSubtreeMatch(n1, subtree, false));
 
-  subtree = tree(any(), {
-    tree(Criteria("2")),
-    tree(Criteria("3"), {}, 2),
-    tree(Criteria("4")),
-    tree(Criteria("5"), {}, 3)
+  reset();
+  subtree = Tree(any(), {
+    Tree(Criteria("2")),
+    Tree(Criteria("3"), {}, 2),
+    Tree(Criteria("4")),
+    Tree(Criteria("5"), {}, 3)
   });
   // Fails because the count is wrong; we have 2 edges to node N4 while
   // the pattern expects only 1.
-  EXPECT_FALSE(TestMatcher::isSubtreeMatch(n1, subtree, false));
+  EXPECT_FALSE(isSubtreeMatch(n1, subtree, false));
   // clang-format on
 }
 
 TEST(SubgraphMatcher, IsSubtreeMatchRealistic) {
+  reset();
   auto graph = DataFlowTestGraph();
   auto subtree = DataFlowTestGraphCriteria();
 
-  EXPECT_FALSE(TestMatcher::isSubtreeMatch(graph.opF, subtree));
-  EXPECT_FALSE(TestMatcher::isSubtreeMatch(graph.opC, subtree));
-  EXPECT_FALSE(TestMatcher::isSubtreeMatch(graph.opB, subtree));
-  EXPECT_FALSE(TestMatcher::isSubtreeMatch(graph.dataOut, subtree));
+  EXPECT_FALSE(isSubtreeMatch(graph.opF, subtree));
+  EXPECT_FALSE(isSubtreeMatch(graph.opC, subtree));
+  EXPECT_FALSE(isSubtreeMatch(graph.opB, subtree));
+  EXPECT_FALSE(isSubtreeMatch(graph.dataOut, subtree));
 
-  EXPECT_TRUE(TestMatcher::isSubtreeMatch(graph.opG, subtree));
+  EXPECT_TRUE(isSubtreeMatch(graph.opG, subtree));
 }
 
 TEST(SubgraphMatcher, ReplaceSubtreeRealistic) {
+  reset();
   auto graph = DataFlowTestGraph();
   auto subtree = DataFlowTestGraphCriteria();
 

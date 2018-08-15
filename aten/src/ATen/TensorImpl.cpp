@@ -1,8 +1,10 @@
 #include <ATen/TensorImpl.h>
 
+#include "ATen/Context.h"
 #include <ATen/Tensor.h>
 #include <ATen/core/optional.h>
 #include <ATen/Context.h>
+#include <ATen/Backend.h>
 
 #include <ATen/detail/VariableHooksInterface.h>
 
@@ -11,7 +13,10 @@
 namespace at {
 
 Type& TensorImpl::type() const {
-  Type* base_type = &globalContext().getType(backend_, scalar_type_);
+  // Select backend from the hard-coded ones that the legacy ATen dispatcher
+  // knows about
+  Backend backend = tensorTypeIdToBackend(type_id_);
+  Type* base_type = &globalContext().getType(backend, scalar_type_);
   if (is_variable_) {
     return detail::getVariableHooks().getVariableType(*base_type);
   } else {
@@ -54,6 +59,14 @@ void Tensor::backward(
   pImpl->backward(std::move(gradient), keep_graph, create_graph);
 }
 
+TensorImpl::TensorImpl(TensorTypeId type_id, ScalarType scalar_type)
+    : type_id_(type_id), scalar_type_(scalar_type) {
+  auto type = &globalContext().getType(tensorTypeIdToBackend(type_id), scalar_type);
+  Storage* storage = type->storage(true).release();
+  StorageImpl* storage_impl = storage->pImpl();
+  tensor = new THTensor(storage_impl);
+}
+
 TensorImpl::~TensorImpl() {
   if (tensor) tensor->release();
 }
@@ -78,16 +91,12 @@ void TensorImpl::release_resources() {
 }
 
 int64_t TensorImpl::dim() const {
-  if(THTensor_isZeroDim(tensor)) {
-    return 0;
-  }
   return tensor->dim();
 }
 
 TensorImpl* TensorImpl::maybe_zero_dim(bool condition_when_zero_dim) {
   AT_CHECK(tensor, "TensorImpl without THTensor in maybe_zero_dim");
-  bool is_zero_dim = condition_when_zero_dim && tensor->sizes().size() == 1 && tensor->size(0) == 1;
-  THTensor_setIsZeroDim(tensor, is_zero_dim);
+  THTensor_maybe_zero_dim(tensor, condition_when_zero_dim);
   return this;
 }
 
@@ -96,6 +105,12 @@ void * TensorImpl::unsafeGetTH(bool retain) {
     tensor->retain();
   }
   return tensor;
+}
+
+std::unique_ptr<Storage> TensorImpl::storage() {
+  StorageImpl* storage = tensor->storage_;
+  storage->retain();
+  return std::unique_ptr<Storage>(new Storage(storage));
 }
 
 } // namespace at

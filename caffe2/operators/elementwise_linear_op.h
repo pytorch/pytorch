@@ -11,7 +11,7 @@ class ElementwiseLinearOp final : public Operator<Context> {
  public:
   ElementwiseLinearOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        axis_(OperatorBase::GetSingleArgument<int>("axis", 1)) {}
+        axis_(this->template GetSingleArgument<int>("axis", 1)) {}
 
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   bool RunOnDevice() override;
@@ -25,7 +25,7 @@ class ElementwiseLinearGradientOp final : public Operator<Context> {
  public:
   ElementwiseLinearGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        axis_(OperatorBase::GetSingleArgument<int>("axis", 1)) {}
+        axis_(this->template GetSingleArgument<int>("axis", 1)) {}
 
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   bool RunOnDevice() override;

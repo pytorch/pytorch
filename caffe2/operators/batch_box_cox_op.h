@@ -15,7 +15,7 @@ class BatchBoxCoxOp final : public Operator<Context> {
   BatchBoxCoxOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         min_block_size_(
-            OperatorBase::GetSingleArgument<int>("min_block_size", 256)) {}
+            this->template GetSingleArgument<int>("min_block_size", 256)) {}
 
   bool RunOnDevice() override {
     return DispatchHelper<TensorTypes<float, double>>::call(this, Input(DATA));

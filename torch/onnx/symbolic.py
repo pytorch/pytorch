@@ -710,6 +710,12 @@ def type_as(g, self, other):
         return g.op("ATen", self, other, operator_s="type_as")
 
 
+@parse_args('v', 'is', 'v', 'v', 'f', 'i')
+def layer_norm(g, self, normalized_shape, weight, bias, eps, cudnn_enable):
+    return g.op("ATen", self, weight, bias, normalized_shape_i=normalized_shape,
+                eps_f=eps, cudnn_enable_i=cudnn_enable, operator_s="layer_norm")
+
+
 # ignore clone operators that are inserted by PyTorch autograd
 def clone(g, input):
     return input
@@ -784,6 +790,34 @@ def eq(g, self, other):
 
 def exp(g, self):
     return g.op("Exp", self)
+
+
+@parse_args('v', 'f', 'i')
+def dropout(g, input, p, train):
+    r, _ = g.op("Dropout", input, ratio_f=p, outputs=2)
+    return r
+
+
+def _unsupported_dropout(name):
+    @parse_args('v', 'f', 'i')
+    def feature_dropout(g, input, p, train):
+        # NB: In inference mode, FeatureDropout is exported as an identity op.
+        from torch.onnx.symbolic import _unimplemented
+        if train:
+            return _unimplemented(name, "training mode")
+        return input
+    return feature_dropout
+
+
+feature_dropout = _unsupported_dropout("feature_dropout")
+alpha_dropout = _unsupported_dropout("alpha_dropout")
+feature_alpha_dropout = _unsupported_dropout("feature_alpha_dropout")
+
+# See Note [Export inplace]
+dropout_ = dropout
+feature_dropout_ = feature_dropout
+alpha_dropout_ = alpha_dropout
+feature_alpha_dropout_ = feature_alpha_dropout
 
 
 @parse_args('v', 't', 'i', 'i')

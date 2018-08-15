@@ -119,7 +119,7 @@ ${return_call} at::native::${native_type_method_dispatch}(/* native_actuals */ $
 
 # add non-virtual declaration to Tensor.h
 TENSOR_METHOD_DECLARATION = CodeTemplate("""\
-${return_type} ${api_name}(${method_formals_with_defaults})${const_mark};
+AT_API ${return_type} ${api_name}(${method_formals_with_defaults})${const_mark};
 """)
 # add non-virtual declaration to Tensor.cpp
 TENSOR_METHOD_DEFINITION = CodeTemplate("""\
@@ -180,7 +180,7 @@ if(${check_name}.type().is_sparse()) {
 }""")
 
 BUFFER_DEFINITION = CodeTemplate("""\
-auto ${name}_ = new ${Tensor}(${THTensor}_new());
+auto ${name}_ = new TensorImpl(${Backend}TensorId(), ScalarType::${ScalarName}, ${THTensor}_new(), false);
 auto ${name} = Tensor(${name}_, false);""")
 
 CONDITIONAL_INITIALIZER = CodeTemplate("""\
@@ -211,7 +211,6 @@ TYPE_FORMAL_GENERIC = {
     'THStorage*': 'Storage &',
     'THGenerator*': 'Generator *',
     'IntListSize': 'IntList',
-    'IntListStride': 'IntList',
     'accreal': 'Scalar',
     'real': 'Scalar',
     'long': 'int64_t',
@@ -228,7 +227,6 @@ DYNAMIC_TYPE = {
     'THStorage*': 'Storage',
     'THGenerator*': 'Generator*',
     'IntListSize': 'IntList',
-    'IntListStride': 'IntList',
     'accreal': 'accreal',
     'real': 'real',
     'long': 'int64_t',
@@ -255,7 +253,7 @@ TYPE_RETURN = {
 CHECKED_CAST = {
     'THTensor*':
         CodeTemplate(
-            'checked_cast_tensor<${Tensor}>('
+            'checked_cast_tensor<TensorImpl>('
             '${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay}, '
             'Backend::${Backend}, ScalarType::${ScalarName})'),
     'THSTensor*':
@@ -265,27 +263,27 @@ CHECKED_CAST = {
             'Backend::${Backend}, ScalarType::${ScalarName})'),
     'THBoolTensor*':
         CodeTemplate(
-            'checked_cast_tensor<${Backend}ByteTensor>('
+            'checked_cast_tensor<TensorImpl>('
             '${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay}, '
             'Backend::${Backend}, ScalarType::Byte)'),
     'THIndexTensor*':
         CodeTemplate(
-            'checked_cast_tensor<${Backend}LongTensor>('
+            'checked_cast_tensor<TensorImpl>('
             '${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay}, '
             'Backend::${Backend}, ScalarType::Long)'),
     'THIntegerTensor*':
         CodeTemplate(
-            'checked_cast_tensor<${Backend}IntTensor>('
+            'checked_cast_tensor<TensorImpl>('
             '${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay}, '
             'Backend::${Backend}, ScalarType::Int)'),
     'THDenseTensor*':
         CodeTemplate(
-            'checked_cast_tensor<${DenseTensor}>('
+            'checked_cast_tensor<TensorImpl>('
             '${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay}, '
             'Backend::${DenseBackend}, ScalarType::${ScalarName})'),
     'THDenseIndexTensor*':
         CodeTemplate(
-            'checked_cast_tensor<${DenseBackend}LongTensor>('
+            'checked_cast_tensor<TensorImpl>('
             '${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay}, '
             'Backend::${DenseBackend}, ScalarType::Long)'),
     'THStorage*':
@@ -297,18 +295,15 @@ CHECKED_CAST = {
         CodeTemplate(
             'check_generator<${Backend}Generator>(${arg_name}, &globalContext().defaultGenerator(backend()))'),
     # This is a cast done via direct-construction
-    'IntListSize': CodeTemplate('at::IntList ${result_name} = get_intlist_size_th(${arg_name});'),
     'IntListStride': CodeTemplate('at::IntList ${result_name} = get_intlist_stride_th(${arg_name});'),
     'real': CodeTemplate('${arg_name}.to${ScalarName}()'),
     'accreal': CodeTemplate('${arg_name}.to${AccScalarName}()'),
     'TensorList': CodeTemplate(
-            'tensor_list_checked_cast<${Tensor}, Tensor, '
+            'tensor_list_checked_cast<TensorImpl, Tensor, '
             '${THTensor}>(${arg_name},"${arg_name}",${arg_pos}, '
             'Backend::${Backend}, ScalarType::${ScalarName})'),
     'IntList': CodeTemplate('check_intlist<${size}>(${arg_name}, "${arg_name}", ${arg_pos}${,default_init})')
 }
-
-DIRECT_CONSTRUCTION_CHECKED_CAST = {'IntListSize', 'IntListStride'}
 
 CHECKED_USE = {
     'THTensor*': '{}_->tensor',
@@ -326,23 +321,23 @@ CHECKED_USE = {
 CHECKED_USE_NULLABLE = CodeTemplate('${arg_name}_ ? ${usage} : NULL')
 
 ALLOC_NOARGS_WRAP = {
-    'THTensor*': 'detail::new_${Tensor}()',
-    'THBoolTensor*': 'detail::new_${Backend}ByteTensor()',
-    'THIndexTensor*': 'detail::new_${Backend}LongTensor()',
-    'THIntegerTensor*': 'detail::new_${Backend}IntTensor()',
+    'THTensor*': 'new TensorImpl(${Backend}TensorId(), ScalarType::${ScalarName})',
+    'THBoolTensor*': 'new TensorImpl(${Backend}TensorId(), ScalarType::Byte)',
+    'THIndexTensor*': 'new TensorImpl(${Backend}TensorId(), ScalarType::Long)',
+    'THIntegerTensor*': 'new TensorImpl(${Backend}TensorId(), ScalarType::Int)',
     'THSTensor*': 'detail::new_Sparse${Tensor}()',
-    'THDenseTensor*': 'detail::new_${DenseTensor}()',
-    'THDenseIndexTensor*': 'detail::new_${DenseBackend}LongTensor()',
+    'THDenseTensor*': 'new TensorImpl(${Backend}TensorId(), ScalarType::${ScalarName})',
+    'THDenseIndexTensor*': 'new TensorImpl(${Backend}TensorId(), ScalarType::Long)'
 }
 
 ALLOC_WRAP = {
-    'THTensor*': 'new ${Tensor}(${arguments})',
-    'THBoolTensor*': 'new ${Backend}ByteTensor(${arguments})',
-    'THIndexTensor*': 'new ${Backend}LongTensor(${arguments})',
-    'THIntegerTensor*': 'new ${Backend}IntTensor(${arguments})',
+    'THTensor*': 'new TensorImpl(${Backend}TensorId(), ScalarType::${ScalarName}, ${arguments}, false)',
+    'THBoolTensor*': 'new TensorImpl(${Backend}TensorId(), ScalarType::Byte, ${arguments}, false)',
+    'THIndexTensor*': 'new TensorImpl(${Backend}TensorId(), ScalarType::Long, ${arguments}, false)',
+    'THIntegerTensor*': 'new TensorImpl(${Backend}TensorId(), ScalarType::Int, ${arguments}, false)',
     'THSTensor*': 'new Sparse${Tensor}(${arguments})',
-    'THDenseTensor*': 'new ${DenseTensor}(${arguments})',
-    'THDenseIndexTensor*': 'new ${DenseBackend}LongTensor(${arguments})',
+    'THDenseTensor*': 'new TensorImpl(${Backend}TensorId(), ScalarType::${ScalarName}, ${arguments}, false)',
+    'THDenseIndexTensor*': 'new TensorImpl(${Backend}TensorId(), ScalarType::Long, ${arguments}, false)',
 }
 
 # Replacements for constants when calling into TH
@@ -1374,19 +1369,12 @@ def create_derived(backend_type_env, declarations):
                     if 'default_init' in arg:
                         default_init.append(arg['default_init'])
 
-                    if arg['type'] in DIRECT_CONSTRUCTION_CHECKED_CAST:
-                        body.append(CHECKED_CAST[arg['type']].substitute(
-                            env, arg_name=arg['name'], arg_pos=count,
-                            null_okay=null_okay, default_init=default_init,
-                            size=arg.get('size'),
-                            result_name=arg['name'] + '_'))
-                    else:
-                        check_cast = CHECKED_CAST[arg['type']].substitute(
-                            env, arg_name=arg['name'], arg_pos=count,
-                            null_okay=null_okay, default_init=default_init,
-                            size=arg.get('size'))
-                        body.append("auto {}_ = {};".format(
-                            arg['name'], check_cast))
+                    check_cast = CHECKED_CAST[arg['type']].substitute(
+                        env, arg_name=arg['name'], arg_pos=count,
+                        null_okay=null_okay, default_init=default_init,
+                        size=arg.get('size'))
+                    body.append("auto {}_ = {};".format(
+                        arg['name'], check_cast))
                 if drop_argument(arg, option) or replace_with_null(arg):
                     body.append(
                         "(void) {}_; //silence unused warning".format(arg['name']))

@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/stack.h>
+#include <torch/csrc/jit/tracer.h>
 #include <torch/csrc/utils/variadic.h>
 
 #include <caffe2/utils/Metaprogramming.h>
@@ -56,6 +57,25 @@ FunctionSchema createFunctionSchemaFromTraits(const std::string& name) {
   return {name, arguments, returns};
 }
 
+template <size_t... Is, typename... Types>
+Node* getTracedNode(
+    const FunctionSchema& schema,
+    const std::tuple<Types...>& tuple) {
+  auto symbol = Symbol::fromQualString(schema.name);
+  const auto& graph = tracer::getTracingState()->graph;
+  Node* node = graph->create(std::move(symbol), /*outputs=*/0);
+  tracer::recordSourceLocation(node);
+
+  // Hack to call addInputs for the parameter pack in a sequenced fashion.
+  // https://stackoverflow.com/questions/12030538/calling-a-function-for-each-variadic-template-argument-and-an-array
+  int _[] = {(tracer::addInputs(node, schema.arguments[Is].name.c_str(), std::get<Is>(tuple)), 0)...};
+  (void)_;
+
+  graph->appendNode(node);
+
+  return node;
+}
+
 /// Does two things for an operator implementation and a tuple of arguments:
 /// 1. Pops all necessary arguments off the stack into the tuple's elements,
 /// 2. Unpacks the tuple and calls the operator implementation.
@@ -66,12 +86,25 @@ template <
     typename... Types,
     size_t... Is>
 ReturnType callOperatorWithTuple(
+    const FunctionSchema& schema,
     Implementation&& implementation,
     Stack& stack,
     std::tuple<Types...>& tuple,
     Indices<Is...>) {
+  Node* node = nullptr;
+  if (jit::tracer::isTracing()) {
+    node = getTracedNode<Is...>(schema, tuple);
+  }
+
   pop(stack, std::get<Is>(tuple)...);
-  return std::forward<Implementation>(implementation)(std::get<Is>(tuple)...);
+  auto result =
+      std::forward<Implementation>(implementation)(std::get<Is>(tuple)...);
+
+  if (jit::tracer::isTracing()) {
+    jit::tracer::postRecordTrace(node, result);
+  }
+
+  return result;
 }
 
 void checkArgumentVector(
@@ -175,9 +208,10 @@ Operator createOperator(
 
   auto schema = torch::jit::detail::inferAndCheckSchema<Traits>(schemaOrName);
 
-  return Operator(schema, [implementation](Stack& stack) {
+  return Operator(schema, [implementation, schema](Stack& stack) {
     ArgumentTuple tuple;
     auto result = torch::jit::detail::callOperatorWithTuple<ReturnType>(
+        schema,
         std::move(implementation),
         stack,
         tuple,

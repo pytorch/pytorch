@@ -79,7 +79,7 @@ void THTensor_(max)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
   int in_dims = THTensor_(nDimensionLegacyAll)(t);
   THTensor_(preserveReduceDimSemantics)(values_, in_dims, dimension, keepdim);
   THLongTensor_preserveReduceDimSemantics(indices_, in_dims, dimension, keepdim);
-  std::vector<int64_t> dim = t->sizes().vec();
+  std::vector<int64_t> dim = THTensor_sizesLegacyNoScalars(t);
   dim[dimension] = 1;
   THTensor_(resize)(values_, dim, {});
   THLongTensor_resize(indices_, dim, {});
@@ -160,7 +160,7 @@ void THTensor_(min)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
   int in_dims = THTensor_(nDimensionLegacyAll)(t);
   THTensor_(preserveReduceDimSemantics)(values_, in_dims, dimension, keepdim);
   THLongTensor_preserveReduceDimSemantics(indices_, in_dims, dimension, keepdim);
-  std::vector<int64_t> dim = t->sizes().vec();
+  std::vector<int64_t> dim = THTensor_sizesLegacyNoScalars(t);
   dim[dimension] = 1;
   THTensor_(resize)(values_, dim, {});
   THLongTensor_resize(indices_, dim, {});
@@ -239,7 +239,7 @@ void THTensor_(sum)(THTensor *r_, THTensor *t, int dimension, int keepdim)
       dimension + TH_INDEX_BASE);
 
   THTensor_(preserveReduceDimSemantics)(r_, THTensor_(nDimensionLegacyAll)(t), dimension, keepdim);
-  std::vector<int64_t> dim = t->sizes().vec();
+  std::vector<int64_t> dim = THTensor_sizesLegacyNoScalars(t);
   dim[dimension] = 1;
   THTensor_(resize)(r_, dim, {});
 
@@ -316,7 +316,7 @@ void THTensor_(prod)(THTensor *r_, THTensor *t, int dimension, int keepdim)
       dimension + TH_INDEX_BASE);
 
   THTensor_(preserveReduceDimSemantics)(r_, THTensor_(nDimensionLegacyAll)(t), dimension, keepdim);
-  std::vector<int64_t> dim = t->sizes().vec();
+  std::vector<int64_t> dim = THTensor_sizesLegacyNoScalars(t);
   dim[dimension] = 1;
   THTensor_(resize)(r_, dim, {});
 
@@ -890,11 +890,7 @@ void THTensor_(sort)(THTensor *rt_, THLongTensor *ri_, THTensor *t, int dimensio
 
   THTensor_(resizeAs)(rt_, t);
   THTensor_(copy)(rt_, t);
-
-  {
-    std::vector<int64_t> size = t->sizes().vec();
-    THLongTensor_resize(ri_, size, {});
-  }
+  THLongTensor_resize(ri_, t->sizes(), {});
 
   if(descendingOrder)
   {
@@ -1051,7 +1047,7 @@ void THTensor_(mode)(THTensor *values_, THLongTensor *indices_, THTensor *t, int
   int in_dims = THTensor_(nDimensionLegacyAll)(t);
   THTensor_(preserveReduceDimSemantics)(values_, in_dims, dimension, keepdim);
   THLongTensor_preserveReduceDimSemantics(indices_, in_dims, dimension, keepdim);
-  std::vector<int64_t> dim = t->sizes().vec();
+  std::vector<int64_t> dim = THTensor_sizesLegacyNoScalars(t);
   dim[dimension] = 1;
   THTensor_(resize)(values_, dim, {});
   THLongTensor_resize(indices_, dim, {});
@@ -1118,7 +1114,7 @@ void THTensor_(kthvalue)(THTensor *values_, THLongTensor *indices_, THTensor *t,
   int in_dims = THTensor_(nDimensionLegacyAll)(t);
   THTensor_(preserveReduceDimSemantics)(values_, in_dims, dimension, keepdim);
   THLongTensor_preserveReduceDimSemantics(indices_, in_dims, dimension, keepdim);
-  std::vector<int64_t> dim = t->sizes().vec();
+  std::vector<int64_t> dim = THTensor_sizesLegacyNoScalars(t);
   dim[dimension] = 1;
   THTensor_(resize)(values_, dim, {});
   THLongTensor_resize(indices_, dim, {});
@@ -1181,7 +1177,9 @@ void THTensor_(topk)(THTensor *rt_, THLongTensor *ri_, THTensor *t, int64_t k, i
   int64_t *tmpi__data = THLongTensor_data(tmpIndices);
 
   std::vector<int64_t> topKSize = t->sizes().vec();
-  topKSize[dim] = k;
+  if (topKSize.size() > 0) { // handle 0-dim vs 1-dim differences.
+    topKSize[dim] = k;
+  }
   THTensor_(resize)(rt_, topKSize, {});
   THLongTensor_resize(ri_, topKSize, {});
 
@@ -1631,7 +1629,7 @@ void THTensor_(logicalAnd)(THTensor *r_, THTensor *t, int dimension, int keepdim
       dimension + TH_INDEX_BASE);
 
   THTensor_(preserveReduceDimSemantics)(r_, THTensor_(nDimensionLegacyAll)(t), dimension, keepdim);
-  std::vector<int64_t> dim = t->sizes().vec();
+  std::vector<int64_t> dim = THTensor_sizesLegacyNoScalars(t);
   dim[dimension] = 1;
   THTensor_(resize)(r_, dim, {});
 
@@ -1708,7 +1706,7 @@ void THTensor_(logicalAny)(THTensor *r_, THTensor *t, int dimension, int keepdim
       dimension + TH_INDEX_BASE);
 
   THTensor_(preserveReduceDimSemantics)(r_, THTensor_(nDimensionLegacyAll)(t), dimension, keepdim);
-  std::vector<int64_t> dim = t->sizes().vec();
+  std::vector<int64_t> dim = THTensor_sizesLegacyNoScalars(t);
   dim[dimension] = 1;
   THTensor_(resize)(r_, dim, {});
 
@@ -1860,7 +1858,7 @@ void THTensor_(std)(THTensor *r_, THTensor *t, int dimension, int biased, int ke
       dimension + TH_INDEX_BASE);
 
   THTensor_(preserveReduceDimSemantics)(r_, THTensor_(nDimensionLegacyAll)(t), dimension, keepdim);
-  std::vector<int64_t> dim = t->sizes().vec();
+  std::vector<int64_t> dim = THTensor_sizesLegacyNoScalars(t);
   dim[dimension] = 1;
   THTensor_(resize)(r_, dim, {});
 
@@ -1901,7 +1899,7 @@ void THTensor_(var)(THTensor *r_, THTensor *t, int dimension, int biased, int ke
       dimension + TH_INDEX_BASE);
 
   THTensor_(preserveReduceDimSemantics)(r_, THTensor_(nDimensionLegacyAll)(t), dimension, keepdim);
-  std::vector<int64_t> dim = t->sizes().vec();
+  std::vector<int64_t> dim = THTensor_sizesLegacyNoScalars(t);
   dim[dimension] = 1;
   THTensor_(resize)(r_, dim, {});
 
@@ -1942,7 +1940,7 @@ void THTensor_(norm)(THTensor *r_, THTensor *t, real value, int dimension, int k
       dimension + TH_INDEX_BASE);
 
   THTensor_(preserveReduceDimSemantics)(r_, THTensor_(nDimensionLegacyAll)(t), dimension, keepdim);
-  std::vector<int64_t> dim = t->sizes().vec();
+  std::vector<int64_t> dim = THTensor_sizesLegacyNoScalars(t);
   dim[dimension] = 1;
   THTensor_(resize)(r_, dim, {});
 

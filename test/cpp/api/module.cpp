@@ -289,7 +289,7 @@ TEST_CASE("module/clone") {
     a->module->weight.data() += 1;
     a->module->value = 123;
 
-    auto b = std::static_pointer_cast<NestedModule>(a->clone());
+    auto b = std::dynamic_pointer_cast<NestedModule>(a->clone());
 
     REQUIRE(!pointer_equal(b->module->weight, a->module->weight));
     REQUIRE(

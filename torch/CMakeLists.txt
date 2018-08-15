@@ -109,6 +109,7 @@ add_custom_command(
   "${TOOLS_PATH}/autograd/gen_autograd.py"
   "${TOOLS_PATH}/autograd/gen_autograd_functions.py"
   "${TOOLS_PATH}/autograd/gen_variable_type.py"
+  "${TOOLS_PATH}/autograd/derivatives.yaml"
   "${TOOLS_PATH}/jit/gen_jit_dispatch.py"
   "${TOOLS_PATH}/jit/templates/register_aten_ops.cpp"
   "${TOOLS_PATH}/jit/templates/aten_interned_strings.h"
@@ -199,14 +200,20 @@ if (NOT NO_API AND NOT USE_ROCM)
 
 endif()
 
-add_library(torch SHARED ${TORCH_SRCS})
+add_library(torch ${TORCH_SRCS})
 
 target_compile_definitions(torch PRIVATE _THP_CORE)
 
 # until they can be unified, keep these lists synced with setup.py
 if(MSVC)
+  if (${CMAKE_BUILD_TYPE} MATCHES "Debug")
+    set (MSVC_RUNTIME_LIBRARY_FLAG "/MDd")
+  else()
+    set (MSVC_RUNTIME_LIBRARY_FLAG "/MD")
+  endif()
+  
   target_compile_options(torch PRIVATE
-    /MD
+    ${MSVC_RUNTIME_LIBRARY_OPTION}
     /Z7
     /EHa
     /DNOMINMAX
@@ -324,7 +331,7 @@ if(USE_ROCM)
   target_include_directories(torch PRIVATE
     /opt/rocm/include
     /opt/rocm/hcc/include
-    /opt/rocm/hipblas/include
+    /opt/rocm/rocblas/include
     /opt/rocm/hcsparse/include
     )
 endif()
@@ -389,7 +396,6 @@ if (BUILD_TORCH_TEST AND NOT MSVC AND NOT APPLE AND NOT USE_ROCM)
   if (USE_CUDA)
     target_link_libraries(test_jit ${CUDA_LIBRARIES})
   endif()
-
 endif()
 
 if (BUILD_TORCH_TEST AND NOT NO_API AND NOT USE_ROCM)
@@ -438,5 +444,4 @@ if (BUILD_TORCH_TEST AND NOT NO_API AND NOT USE_ROCM)
         -Wno-unused-but-set-parameter)
     endif()
   endif()
-
 endif()

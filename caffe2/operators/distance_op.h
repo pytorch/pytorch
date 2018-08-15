@@ -130,8 +130,8 @@ class DotProductWithPaddingOp : public Operator<Context> {
  public:
   DotProductWithPaddingOp(const OperatorDef& def, Workspace* ws)
       : Operator<Context>(def, ws),
-        pad_value_(OperatorBase::GetSingleArgument<float>("pad_value", 0.0)),
-        replicate_(OperatorBase::GetSingleArgument<bool>("replicate", false)) {}
+        pad_value_(this->template GetSingleArgument<float>("pad_value", 0.0)),
+        replicate_(this->template GetSingleArgument<bool>("replicate", false)) {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   bool RunOnDevice() override;
@@ -182,8 +182,8 @@ class DotProductWithPaddingGradientOp final : public Operator<Context> {
  public:
   DotProductWithPaddingGradientOp(const OperatorDef& def, Workspace* ws)
       : Operator<Context>(def, ws),
-        pad_value_(OperatorBase::GetSingleArgument<float>("pad_value", 0.0)),
-        replicate_(OperatorBase::GetSingleArgument<bool>("replicate", false)) {}
+        pad_value_(this->template GetSingleArgument<float>("pad_value", 0.0)),
+        replicate_(this->template GetSingleArgument<bool>("replicate", false)) {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   bool RunOnDevice() override {

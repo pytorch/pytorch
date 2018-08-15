@@ -12,7 +12,7 @@ class AssertOp final : public Operator<Context> {
   AssertOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         error_msg_(
-            OperatorBase::GetSingleArgument<std::string>("error_msg", "")) {}
+            this->template GetSingleArgument<std::string>("error_msg", "")) {}
 
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
