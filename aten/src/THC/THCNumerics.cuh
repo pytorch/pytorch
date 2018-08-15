@@ -306,9 +306,9 @@ struct THCNumerics<half> {
 
   static inline __host__ __device__ half frac(half a) {
     #ifdef __CUDA_ARCH__
-        return a - static_cast<at::Half>(::trunc(static_cast<at::Half>(a)));
+        return static_cast<at::Half>(a) - static_cast<at::Half>(::trunc(static_cast<at::Half>(a)));
     #else // __CUDA_ARCH__
-        return a - static_cast<at::Half>(::floor(static_cast<at::Half>(a)));
+        return static_cast<at::Half>(a) - static_cast<at::Half>(::floor(static_cast<at::Half>(a)));
     #endif
   }
 

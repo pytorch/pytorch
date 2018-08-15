@@ -11,13 +11,18 @@
 
 using namespace at;
 
-__host__ __device__ void test(){
+__device__ void test(){
   
   // test half construction and implicit conversions in device
   assert(Half(3) == Half(3.0f));
   assert(static_cast<Half>(3.0f) == Half(3.0f));
   // there is no float <=> __half implicit conversion
   assert(static_cast<Half>(3.0f) == 3.0f);
+
+  __half a = __float2half(3.0f);
+  __half b = __float2half(2.0f);
+  __half c = a - Half(b);
+  assert(static_cast<Half>(c) == Half(1.0));
 
   // asserting if the  functions used on 
   // half types give almost equivalent results when using
