@@ -134,7 +134,6 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/cuda/comm.cpp
   ${TORCH_SRC_DIR}/csrc/jit/autodiff.cpp
   ${TORCH_SRC_DIR}/csrc/jit/export.cpp
-  ${TORCH_SRC_DIR}/csrc/jit/fusion_compiler.cpp
   ${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops.cpp
   ${TORCH_SRC_DIR}/csrc/jit/graph_executor.cpp
   ${TORCH_SRC_DIR}/csrc/jit/import.cpp

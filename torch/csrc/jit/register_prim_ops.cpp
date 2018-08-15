@@ -3,7 +3,6 @@
 #include "torch/csrc/autograd/generated/variable_factories.h"
 #include "torch/csrc/autograd/profiler.h"
 #include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/jit/fusion_compiler.h"
 #include "torch/csrc/jit/graph_executor.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/operator.h"
@@ -36,18 +35,19 @@ RegisterOperators reg({
     Operator(
         prim::FusionGroup,
         [](Node* node) {
-          auto fusion_fn = sharedFusionCompiler().getOrCompile(node);
+          int fusion_fn; // TODO: revert this with below
+          // auto fusion_fn = sharedFusionCompiler().getOrCompile(node);
           auto num_inputs = node->inputs().size();
           return [fusion_fn, num_inputs](Stack& stack) {
-            autograd::profiler::RecordFunction record("FusionGroup");
-            std::vector<at::Tensor> toutputs;
-            // TODO: have fusion_fn work off of a stack as well
-            auto tinputs = fmap(last(stack, num_inputs), [](const IValue& v) {
-              return v.toTensor();
-            });
-            fusion_fn->launch(tinputs, toutputs);
-            drop(stack, num_inputs);
-            stack.insert(stack.end(), toutputs.begin(), toutputs.end());
+            // autograd::profiler::RecordFunction record("FusionGroup");
+            // std::vector<at::Tensor> toutputs;
+            // // TODO: have fusion_fn work off of a stack as well
+            // auto tinputs = fmap(last(stack, num_inputs), [](const IValue& v) {
+            //   return v.toTensor();
+            // });
+            // fusion_fn->launch(tinputs, toutputs);
+            // drop(stack, num_inputs);
+            // stack.insert(stack.end(), toutputs.begin(), toutputs.end());
             return 0;
           };
         }),

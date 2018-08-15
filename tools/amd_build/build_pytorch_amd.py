@@ -41,7 +41,7 @@ for root, _, files in os.walk(os.path.join(proj_dir, "aten/src/ATen")):
 
 # Make various replacements inside AMD_BUILD/torch directory
 ignore_files = ["csrc/autograd/profiler.h", "csrc/autograd/profiler.cpp",
-                "csrc/cuda/cuda_check.h", "csrc/jit/fusion_compiler.cpp"]
+                "csrc/cuda/cuda_check.h"]
 for root, _directories, files in os.walk(os.path.join(proj_dir, "torch")):
     for filename in files:
         if filename.endswith(".cpp") or filename.endswith(".h"):
