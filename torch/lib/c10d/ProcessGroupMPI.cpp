@@ -2,6 +2,7 @@
 
 #include <map>
 
+#include <mpi.h>
 #include <mpi-ext.h> // Needed for CUDA-aware check
 
 namespace c10d {
@@ -407,7 +408,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::gather(
         auto data = (*entry->src)[0];
         void* recvbuf = nullptr;
         at::Tensor flatOutputTensor;
-        std::vector<at::Tensor>* outputDataVec;
+        std::vector<at::Tensor>* outputDataVec = nullptr;
 
         if (rank_ == opts.rootRank) {
           outputDataVec = entry->dst;
@@ -505,6 +506,81 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::scatter(
         new WorkEntry(nullptr, &outputTensors, std::move(runFunc)));
     return enqueue(std::move(entry));
   }
+}
+
+std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::send(
+    std::vector<at::Tensor>& tensors,
+    int dstRank) {
+  checkSingleTensor(tensors);
+  std::function<void(std::unique_ptr<WorkEntry>&)> runFunc =
+      [dstRank](std::unique_ptr<WorkEntry>& entry) {
+        auto data = (*entry->src)[0];
+        MPI_CHECK(MPI_Send(
+            data.data_ptr(),
+            data.numel(),
+            mpiDatatype.at(data.type().scalarType()),
+            dstRank,
+            0,
+            MPI_COMM_WORLD));
+      };
+  auto entry = std::unique_ptr<WorkEntry>(
+      new WorkEntry(&tensors, nullptr, std::move(runFunc)));
+  return enqueue(std::move(entry));
+}
+
+std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::recv(
+    std::vector<at::Tensor>& tensors,
+    int srcRank) {
+  checkSingleTensor(tensors);
+  std::function<void(std::unique_ptr<WorkEntry>&)> runFunc =
+      [srcRank](std::unique_ptr<WorkEntry>& entry) {
+        auto data = (*entry->src)[0];
+        MPI_CHECK(MPI_Recv(
+            data.data_ptr(),
+            data.numel(),
+            mpiDatatype.at(data.type().scalarType()),
+            srcRank,
+            0,
+            MPI_COMM_WORLD,
+            MPI_STATUS_IGNORE));
+      };
+  auto entry = std::unique_ptr<WorkEntry>(
+      new WorkEntry(&tensors, nullptr, std::move(runFunc)));
+  return enqueue(std::move(entry));
+}
+
+std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::recvAnysource(
+    std::vector<at::Tensor>& tensors,
+    int* srcRank) {
+  checkSingleTensor(tensors);
+  std::function<void(std::unique_ptr<WorkEntry>&)> runFunc =
+      [srcRank](std::unique_ptr<WorkEntry>& entry) {
+        auto data = (*entry->src)[0];
+        MPI_Status status;
+        MPI_CHECK(MPI_Recv(
+            data.data_ptr(),
+            data.numel(),
+            mpiDatatype.at(data.type().scalarType()),
+            MPI_ANY_SOURCE,
+            0,
+            MPI_COMM_WORLD,
+            &status));
+        *(entry->srcRank) = status.MPI_SOURCE;
+      };
+  auto entry = std::unique_ptr<WorkEntry>(
+      new WorkEntry(&tensors, nullptr, std::move(runFunc)));
+  entry->srcRank = srcRank;
+  return enqueue(std::move(entry));
+}
+
+std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::barrier() {
+  std::function<void(std::unique_ptr<WorkEntry>&)> runFunc =
+      [](std::unique_ptr<WorkEntry>& entry) {
+        MPI_CHECK(MPI_Barrier(MPI_COMM_WORLD));
+      };
+  auto entry = std::unique_ptr<WorkEntry>(
+      new WorkEntry(nullptr, nullptr, std::move(runFunc)));
+  return enqueue(std::move(entry));
 }
 
 } // namespace c10d

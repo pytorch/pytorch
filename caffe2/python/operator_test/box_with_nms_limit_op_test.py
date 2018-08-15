@@ -146,6 +146,69 @@ class TestBoxWithNMSLimitOp(hu.HypothesisTestCase):
 
         self.assertReferenceChecks(gc, op, [scores, boxes], ref)
 
+    @given(det_per_im=st.integers(1, 3), **HU_CONFIG)
+    def test_detections_per_im_same_thresh(self, det_per_im, gc):
+        in_centers = [(0, 0), (20, 20), (50, 50)]
+        in_scores = [0.7, 0.7, 0.7]
+        boxes, scores = gen_multiple_boxes(in_centers, in_scores, 10, 2)
+
+        gt_centers = [(20, 20), (0, 0), (50, 50)][:det_per_im]
+        gt_scores = [0.7, 0.7, 0.7][:det_per_im]
+        gt_boxes, gt_scores = gen_multiple_boxes(gt_centers, gt_scores, 1, 1)
+        gt_classes = np.ones(gt_boxes.shape[0], dtype=np.float32)
+
+        op = get_op(
+            2, 3,
+            {"score_thresh": 0.5, "nms": 0.9, "detections_per_im": det_per_im}
+        )
+
+        # boxes output could be in any order
+        def verify(inputs, outputs):
+            # check scores
+            np.testing.assert_allclose(
+                outputs[0], gt_scores.flatten(), atol=1e-4, rtol=1e-4,
+            )
+            # check classes
+            np.testing.assert_allclose(
+                outputs[2], gt_classes, atol=1e-4, rtol=1e-4,
+            )
+            self.assertEqual(outputs[1].shape, gt_boxes.shape)
+
+        self.assertValidationChecks(gc, op, [scores, boxes], verify, as_kwargs=False)
+
+    @given(num_classes=st.integers(2, 10), **HU_CONFIG)
+    def test_detections_per_im_same_thresh_multiclass(self, num_classes, gc):
+        in_centers = [(0, 0), (20, 20), (50, 50)]
+        in_scores = [0.6, 0.7, 0.7]
+        boxes, scores = gen_multiple_boxes(in_centers, in_scores, 10, num_classes)
+
+        det_per_im = 1
+        gt_centers = [(20, 20), (50, 50)]
+        gt_scores = [0.7, 0.7]
+        gt_boxes, gt_scores = gen_multiple_boxes(gt_centers, gt_scores, 1, 1)
+
+        op = get_op(
+            2, 3,
+            {"score_thresh": 0.5, "nms": 0.9, "detections_per_im": det_per_im}
+        )
+
+        # boxes output could be in any order
+        def verify(inputs, outputs):
+            # check scores
+            self.assertEqual(outputs[0].shape, (1,))
+            self.assertEqual(outputs[0][0], gt_scores[0])
+
+            # check boxes
+            self.assertTrue(
+                np.allclose(outputs[1], gt_boxes[0, :], atol=1e-4, rtol=1e-4) or
+                np.allclose(outputs[1], gt_boxes[1, :], atol=1e-4, rtol=1e-4)
+            )
+
+            # check class
+            self.assertNotEqual(outputs[2][0], 0)
+
+        self.assertValidationChecks(gc, op, [scores, boxes], verify, as_kwargs=False)
+
 
 if __name__ == "__main__":
     unittest.main()

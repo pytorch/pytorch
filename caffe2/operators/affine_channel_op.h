@@ -18,7 +18,7 @@ class AffineChannelOp final : public Operator<Context> {
   AffineChannelOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         order_(StringToStorageOrder(
-            OperatorBase::GetSingleArgument<std::string>("order", "NCHW"))),
+            this->template GetSingleArgument<std::string>("order", "NCHW"))),
         OP_SINGLE_ARG(bool, "is_learnable", is_learnable_, false) {
     CAFFE_ENFORCE_NE(order_, StorageOrder::UNKNOWN);
   }
@@ -114,7 +114,7 @@ class AffineChannelGradientOp final : public Operator<Context> {
   AffineChannelGradientOp(const OperatorDef& def, Workspace* ws)
       : Operator<Context>(def, ws),
         order_(StringToStorageOrder(
-            OperatorBase::GetSingleArgument<std::string>("order", "NCHW"))),
+            this->template GetSingleArgument<std::string>("order", "NCHW"))),
         OP_SINGLE_ARG(bool, "is_learnable", is_learnable_, false) {
     CAFFE_ENFORCE_NE(order_, StorageOrder::UNKNOWN);
   }

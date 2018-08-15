@@ -11,6 +11,7 @@
 #include "torch/csrc/jit/constants.h"
 #include "torch/csrc/jit/passes/to_batch.h"
 #include "torch/csrc/jit/function_schema.h"
+#include "torch/csrc/jit/script/parser.h"
 
 #include <torch/csrc/api/include/torch/detail/ordered_dict.h>
 
@@ -400,22 +401,6 @@ Resolver pythonResolver(ResolutionCallback rcb) {
 void initJitScriptBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
-  py::class_<TypedDef>(m, "TypedDef")
-    .def(py::init<Def>());
-
-  m.def("_pack_typed_def", [](Def &def, std::vector<TypePtr> arg_types, std::vector<TypePtr> return_types, bool method=false) {
-    std::vector<Argument> arguments, returns;
-    size_t i = method ? 1 : 0;
-    for (auto arg_type : arg_types) {
-      arguments.push_back(Argument(def.params()[i++].ident().name(), arg_type, {}, {}, false));
-    }
-    for (auto ret_type : return_types) {
-      returns.push_back(Argument("", ret_type, {}, {}, false));
-    }
-
-    return TypedDef(def, FunctionSchema(def.name().name(), arguments, returns));
-  });
-
   // torch.jit.ScriptModule is a subclass of this C++ object.
   // Methods here are prefixed with _ since they should not be
   // public.
@@ -435,7 +420,7 @@ void initJitScriptBindings(PyObject* module) {
             auto self = has_self ? std::make_shared<ModuleValue>(m) : nullptr;
             return defineMethodsInModule(*m, script, pythonResolver(rcb), self);
           })
-      .def("_create_methods", [](std::shared_ptr<Module> m, const std::vector<TypedDef>& defs, const std::vector<ResolutionCallback>& rcbs) {
+      .def("_create_methods", [](std::shared_ptr<Module> m, const std::vector<Def>& defs, const std::vector<ResolutionCallback>& rcbs) {
         std::vector<Resolver> resolvers;
         for(auto & callback : rcbs) {
           resolvers.push_back(pythonResolver(callback));
@@ -565,24 +550,22 @@ void initJitScriptBindings(PyObject* module) {
     .def("graph_for", [](Method& self, py::args args) {
       return self.graph_for(evilDeprecatedBadCreateStackDoNotUse(args, self.graph()->inputs()));
     })
-    .def("set_arg_and_return_types", [](Method &self, TypedDef &typed_def, bool method) {
-      std::vector<Argument> arg_type_args, return_type_args;
-      size_t i = 0;
-      if (typed_def.schema) {
-        for (const auto &arg_type : typed_def.schema->arguments) {
-          arg_type_args.push_back(Argument(typed_def.def.params()[i++].ident().name(), arg_type.type, {}, {}, false));
-        }
-        for (const auto &return_type : typed_def.schema->returns) {
-          return_type_args.push_back(Argument("", return_type.type, {}, {}, false));
-        }
-        self.setSchema(FunctionSchema(self.name(), arg_type_args, return_type_args));
-      }
+    .def("forward_schema", [](Method &self, Def &def, bool is_method) {
+      auto schema = extractSchemaFromDef(def, is_method);
+      self.setSchema(schema);
     })
     .def("pretty_print_schema", &Method::prettyPrintSchema);
 
-  m.def("_jit_script_compile", [](const TypedDef &typed_def, ResolutionCallback rcb) {
-    return compileFunction(typed_def, pythonResolver(rcb));
+  m.def("_jit_script_compile", [](const Def &def, ResolutionCallback rcb) {
+    return compileFunction(def, pythonResolver(rcb));
   });
+
+  m.def("parse_type_comment", [](const std::string& comment) {
+    Parser p(comment);
+    return Decl(p.parseTypeComment(true));
+  });
+
+  m.def("merge_type_from_type_comment", &mergeTypesFromTypeComment);
 
 }
 

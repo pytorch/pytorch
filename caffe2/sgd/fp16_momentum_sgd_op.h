@@ -26,13 +26,13 @@ class FP16MomentumSGDUpdateOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   FP16MomentumSGDUpdateOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        momentum_(OperatorBase::GetSingleArgument<float>("momentum", 0.0)),
+        momentum_(this->template GetSingleArgument<float>("momentum", 0.0)),
         weight_decay_(
-            OperatorBase::GetSingleArgument<float>("weight_decay", 0.0)),
-        nesterov_(OperatorBase::GetSingleArgument<int>("nesterov", 0)),
+            this->template GetSingleArgument<float>("weight_decay", 0.0)),
+        nesterov_(this->template GetSingleArgument<int>("nesterov", 0)),
         // when set, fp32_update will read in the fp16 data but
         // perform all the compute in fp32 precision.
-        fp32_update_(OperatorBase::GetSingleArgument<int>("fp32_update", 0)) {}
+        fp32_update_(this->template GetSingleArgument<int>("fp32_update", 0)) {}
 
   bool RunOnDevice() override {
     auto device_type = Context::GetDeviceType();
