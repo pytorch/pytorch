@@ -5,6 +5,7 @@
 #include "torch/csrc/jit/autodiff.h"
 #include "torch/csrc/jit/assertions.h"
 
+#include "torch/csrc/jit/fusers/cuda/simple_ops.h"
 #include "cuda.h" // for CUDA_VERSION
 
 #include <unordered_map>
@@ -12,81 +13,6 @@
 namespace torch { namespace jit {
 
 namespace {
-
-// What is a simple mappable operator?  It is:
-//    - Has an output with the same sizes as its input
-//    - Single output
-//    - Can handle non-contiguous input
-//    - Produces contiguous output
-// Some of these restrictions may be relaxable, but you should
-// carefully read the code first, as we rely on these assumptions.
-std::unordered_set<NodeKind> simple_mappable = {
-  aten::__and__,
-  aten::__lshift__,
-  aten::__or__,
-  aten::__rshift__,
-  aten::__xor__,
-  aten::abs,
-  aten::acos,
-  aten::add,
-  aten::asin,
-  aten::atan,
-  aten::atan2,
-  aten::ceil,
-  aten::cos,
-  aten::cosh,
-  aten::div,
-  aten::eq,
-  aten::exp,
-  aten::expm1,
-  aten::floor,
-  aten::fmod,
-  aten::frac,
-  aten::ge,
-  aten::gt,
-  aten::le,
-  aten::lgamma,
-  aten::log,
-  aten::log10,
-  aten::log1p,
-  aten::log2,
-  aten::lt,
-  aten::max,
-  aten::min,
-  aten::mul,
-  aten::ne,
-  aten::neg,
-  aten::pow,
-  aten::reciprocal,
-  aten::relu,
-  aten::remainder,
-  aten::round,
-  aten::rsqrt,
-  aten::sigmoid,
-  aten::sin,
-  aten::sinh,
-  aten::sqrt,
-  aten::sub,
-  aten::tan,
-  aten::tanh,
-  aten::trunc,
-  aten::type_as,
-  aten::_sigmoid_backward,
-  aten::_tanh_backward,
-  // TODO support those
-  //aten::clamp,
-  //aten::lerp,
-  aten::rand_like,
-};
-
-bool isSimpleMap(Node* node) {
-  // TODO: use signature matching
-  if (simple_mappable.count(node->kind()) == 0) return false;
-  if ((node->kind() == aten::min || node->kind() == aten::max) 
-    && node->inputs().size() == 1)
-    return false;
-  return true;
-}
 
 
 struct GraphFuser {
@@ -152,7 +78,7 @@ struct GraphFuser {
   bool isFusable(Node* node) {
     if (node->owningBlock() != block) return false;
     if (node->kind() == prim::FusionGroup && node->i(attr::device) != kCPUDevice) return true;
-    if (!isSimpleMap(node)) return false;
+    if (!jit::isSimpleMap(node)) return false;
 
     if (node->matches("aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor", /*const=*/attr::alpha)) {
       std::vector<Value*> inputs {node->namedInput(attr::self), node->namedInput(attr::other)};
