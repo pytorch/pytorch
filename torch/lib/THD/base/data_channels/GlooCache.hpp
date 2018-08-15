@@ -295,10 +295,12 @@ struct algorithm_spec<CollectiveType::ALL_REDUCE, T> {
     size_t unused_count, THDReduceOp op
   ) {
     int stream = UNUSED_STREAM;
-    if (device == DeviceType::CUDA) {
-      auto cuda_stream = THCState_getCurrentStream(THDGetCudaState());
-      stream = THDGetStreamId(cuda_stream);
-    }
+    #ifdef USE_CUDA
+      if (device == DeviceType::CUDA) {
+        auto cuda_stream = THCState_getCurrentStream(THDGetCudaState());
+        stream = THDGetStreamId(cuda_stream);
+      }
+    #endif // USE_CUDA
     return std::make_tuple(CollectiveType::ALL_REDUCE, group_id, device, stream,
                            input_bytes, input_bytes, op, UNUSED_RANK);
   }
@@ -365,10 +367,12 @@ struct algorithm_spec<CollectiveType::BROADCAST, T> {
     size_t unused_count, rank_type src_rank
   ) {
     int stream = UNUSED_STREAM;
-    if (device == DeviceType::CUDA) {
-      auto cuda_stream = THCState_getCurrentStream(THDGetCudaState());
-      stream = THDGetStreamId(cuda_stream);
-    }
+    #ifdef USE_CUDA
+      if (device == DeviceType::CUDA) {
+        auto cuda_stream = THCState_getCurrentStream(THDGetCudaState());
+        stream = THDGetStreamId(cuda_stream);
+      }
+    #endif // USE_CUDA
     return std::make_tuple(CollectiveType::BROADCAST, group_id, device, stream,
                            input_bytes, input_bytes, UNUSED_OP, src_rank);
   }
