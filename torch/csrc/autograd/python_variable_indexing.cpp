@@ -98,9 +98,9 @@ static Variable applySelect(const Variable& self, int64_t dim, int64_t index) {
     throw IndexError("index %lld is out of bounds for dimension %lld with size %lld",
       index, dim, size);
   }
-  if (index < 0) {
-    index += size;
-  }
+  // if the index is negative, do not normalize it because that would fix the index
+  // on the current tensor size in the tracer.
+  // aten::select also works on negative indices
   return self.select(dim, index);
 }
 

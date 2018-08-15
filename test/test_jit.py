@@ -4572,6 +4572,17 @@ def func(t):
         a = torch.arange(0, 8)
         self.assertEqual(foo_script(a), foo_trace(a))
 
+    def test_tracing_indexing(self):
+        @torch.jit.trace(torch.zeros(10))
+        def foo_trace(x):
+            return x[-2]
+
+        @torch.jit.script
+        def foo_script(x):
+            return x[-2]
+
+        a = torch.arange(0, 8)
+        self.assertEqual(foo_script(a), foo_trace(a))
 
     def test_index_select_shape_prop(self):
 
