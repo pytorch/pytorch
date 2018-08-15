@@ -31,6 +31,7 @@
 #include "caffe2/core/context.h"
 #include "caffe2/utils/cpu_neon.h"
 #include "caffe2/utils/eigen_utils.h"
+#include "caffe2/utils/fixed_divisor.h"
 
 #include "Eigen/Core"
 #include "Eigen/Dense"
@@ -2388,7 +2389,294 @@ void Select<float, CPUContext>(
   }
 }
 
+template <>
+void CopyMatrix<CPUContext>(
+    const size_t itemsize,
+    const int M,
+    const int N,
+    const void* A,
+    const int lda,
+    void* B,
+    const int ldb,
+    CPUContext* /*context*/,
+    TypeMeta::TypedCopy copy) {
+  if (A == nullptr || B == nullptr) {
+    return;
+  }
+  if (lda == N && ldb == N) {
+    // can coalese to a single memcpy of size M * N
+    if (copy) {
+      copy(static_cast<const char*>(A), static_cast<char*>(B), N * M);
+    } else {
+      memcpy(
+          static_cast<char*>(B), static_cast<const char*>(A), itemsize * N * M);
+    }
+    return;
+  }
+
+  for (int i = 0; i < M; ++i) {
+    if (copy) {
+      copy(
+          static_cast<const char*>(A) + lda * i * itemsize,
+          static_cast<char*>(B) + ldb * i * itemsize,
+          N);
+    } else {
+      memcpy(
+          static_cast<char*>(B) + ldb * i * itemsize,
+          static_cast<const char*>(A) + lda * i * itemsize,
+          itemsize * N);
+    }
+  }
+}
+
+#ifdef CAFFE2_USE_MKL
+
+#define DELEGATE_COPY_MATRIX_FUNCTION(T, Func)  \
+  template <>                                   \
+  void CopyMatrix<T, CPUContext>(               \
+      const int M,                              \
+      const int N,                              \
+      const T* A,                               \
+      const int lda,                            \
+      T* B,                                     \
+      const int ldb,                            \
+      CPUContext* /* context */) {              \
+    Func('R', 'N', M, N, T(1), A, lda, B, ldb); \
+  }                                             \
+  template <>                                   \
+  void CopyMatrix<T, CPUContext>(               \
+      const int M,                              \
+      const int N,                              \
+      const T* A,                               \
+      const int A_outer_stride,                 \
+      const int A_inner_stride,                 \
+      T* B,                                     \
+      const int B_outer_stride,                 \
+      const int B_inner_stride,                 \
+      CPUContext* /* context */) {              \
+    Func##2(                                    \
+        'R',                                    \
+        'N',                                    \
+        M,                                      \
+        N,                                      \
+        T(1),                                   \
+        A,                                      \
+        A_outer_stride,                         \
+        A_inner_stride,                         \
+        B,                                      \
+        B_outer_stride,                         \
+        B_inner_stride);                        \
+  }
+DELEGATE_COPY_MATRIX_FUNCTION(float, mkl_somatcopy)
+DELEGATE_COPY_MATRIX_FUNCTION(double, mkl_domatcopy)
+#undef DELEGATE_COPY_MATRIX_FUNCTION
+
+#endif // CAFFE2_USE_MKL
+
+#define CAFFE2_SPECIALIZED_COPY_MATRIX(T)                                \
+  template <>                                                            \
+  void CopyMatrix<T, CPUContext>(                                        \
+      const int M,                                                       \
+      const int N,                                                       \
+      const T* A,                                                        \
+      const int lda,                                                     \
+      T* B,                                                              \
+      const int ldb,                                                     \
+      CPUContext* /* context */) {                                       \
+    if (M == 0 || N == 0) {                                              \
+      return;                                                            \
+    }                                                                    \
+    if (lda == N) {                                                      \
+      if (ldb == N) {                                                    \
+        std::memcpy(B, A, sizeof(T) * M * N);                            \
+      } else {                                                           \
+        EigenOuterStridedMatrixMap<T>(B, N, M, EigenOuterStride(ldb)) =  \
+            ConstEigenMatrixMap<T>(A, N, M);                             \
+      }                                                                  \
+    } else {                                                             \
+      if (ldb == N) {                                                    \
+        EigenMatrixMap<T>(B, N, M) = ConstEigenOuterStridedMatrixMap<T>( \
+            A, N, M, EigenOuterStride(lda));                             \
+      } else {                                                           \
+        EigenOuterStridedMatrixMap<T>(B, N, M, EigenOuterStride(ldb)) =  \
+            ConstEigenOuterStridedMatrixMap<T>(                          \
+                A, N, M, EigenOuterStride(lda));                         \
+      }                                                                  \
+    }                                                                    \
+  }                                                                      \
+  template <>                                                            \
+  void CopyMatrix<T, CPUContext>(                                        \
+      const int M,                                                       \
+      const int N,                                                       \
+      const T* A,                                                        \
+      const int A_outer_stride,                                          \
+      const int A_inner_stride,                                          \
+      T* B,                                                              \
+      const int B_outer_stride,                                          \
+      const int B_inner_stride,                                          \
+      CPUContext* context) {                                             \
+    if (A_inner_stride == 1 && B_inner_stride == 1) {                    \
+      CopyMatrix<T, CPUContext>(                                         \
+          M, N, A, A_outer_stride, B, B_outer_stride, context);          \
+      return;                                                            \
+    }                                                                    \
+    EigenStridedMatrixMap<T>(                                            \
+        B, N, M, EigenStride(B_outer_stride, B_inner_stride)) =          \
+        ConstEigenStridedMatrixMap<T>(                                   \
+            A, N, M, EigenStride(A_outer_stride, A_inner_stride));       \
+  }
+
+#ifndef CAFFE2_USE_MKL
+CAFFE2_SPECIALIZED_COPY_MATRIX(float)
+CAFFE2_SPECIALIZED_COPY_MATRIX(double)
+#endif // CAFFE2_USE_MKL
+
+CAFFE2_SPECIALIZED_COPY_MATRIX(int)
+CAFFE2_SPECIALIZED_COPY_MATRIX(TIndex)
+#ifdef CAFFE2_UNIQUE_LONG_TYPEMETA
+CAFFE2_SPECIALIZED_COPY_MATRIX(long)
+#endif
+CAFFE2_SPECIALIZED_COPY_MATRIX(std::uint8_t)
+CAFFE2_SPECIALIZED_COPY_MATRIX(std::uint16_t)
+
+#undef CAFFE2_SPECIALIZXED_COPY_MATRIX
+
 namespace {
+
+template <typename T>
+void Im2ColZeroPaddingAndNoDilationNCHW(
+    const int C,
+    const int H,
+    const int W,
+    const int kernel_h,
+    const int kernel_w,
+    const int stride_h,
+    const int stride_w,
+    const T* img_data,
+    T* col_data,
+    CPUContext* context) {
+  const int output_h = (H - kernel_h) / stride_h + 1;
+  const int output_w = (W - kernel_w) / stride_w + 1;
+  const int output_size = output_h * output_w;
+  for (int c = 0; c < C; ++c) {
+    for (int kh = 0; kh < kernel_h; ++kh) {
+      for (int kw = 0; kw < kernel_w; ++kw) {
+        const T* src = img_data + kh * W + kw;
+        if (stride_w == 1) {
+          CopyMatrix<T, CPUContext>(
+              output_h,
+              output_w,
+              src,
+              stride_h * W,
+              col_data,
+              output_w,
+              context);
+        } else {
+          CopyMatrix<T, CPUContext>(
+              output_h,
+              output_w,
+              src,
+              stride_h * W,
+              stride_w,
+              col_data,
+              output_w,
+              1,
+              context);
+        }
+        col_data += output_size;
+      }
+    }
+    img_data += H * W;
+  }
+}
+
+template <typename T>
+void Col2ImZeroPaddingAndNoDilationNCHW(
+    const int C,
+    const int H,
+    const int W,
+    const int kernel_h,
+    const int kernel_w,
+    const int stride_h,
+    const int stride_w,
+    const T* col_data,
+    T* img_data,
+    CPUContext* context) {
+  Set<T, CPUContext>(C * H * W, T(0), img_data, context);
+  const int output_h = (H - kernel_h) / stride_h + 1;
+  const int output_w = (W - kernel_w) / stride_w + 1;
+  const int output_size = output_h * output_w;
+  for (int c = 0; c < C; ++c) {
+    for (int kh = 0; kh < kernel_h; ++kh) {
+      for (int kw = 0; kw < kernel_w; ++kw) {
+        T* dst = img_data + kh * W + kw;
+        if (stride_w == 1) {
+          EigenOuterStridedArrayMap<T>(
+              dst, output_w, output_h, EigenOuterStride(stride_h * W)) +=
+              ConstEigenArrayMap<T>(col_data, output_w, output_h);
+        } else {
+          EigenStridedArrayMap<T>(
+              dst, output_w, output_h, EigenStride(stride_h * W, stride_w)) +=
+              ConstEigenArrayMap<T>(col_data, output_w, output_h);
+        }
+        col_data += output_size;
+      }
+    }
+    img_data += H * W;
+  }
+}
+
+template <typename T>
+void Im2ColZeroPaddingAndNoDilationNHWC(
+    const int C,
+    const int H,
+    const int W,
+    const int kernel_h,
+    const int kernel_w,
+    const int stride_h,
+    const int stride_w,
+    const T* img_data,
+    T* col_data,
+    CPUContext* context) {
+  const int output_h = (H - kernel_h) / stride_h + 1;
+  const int output_w = (W - kernel_w) / stride_w + 1;
+  const int kernel_size = kernel_h * kernel_w;
+  for (int yh = 0; yh < output_h; ++yh) {
+    for (int yw = 0; yw < output_w; ++yw) {
+      const T* src = img_data + (yh * stride_h * W + yw * stride_w) * C;
+      CopyMatrix<T, CPUContext>(
+          kernel_h, kernel_w * C, src, W * C, col_data, kernel_w * C, context);
+      col_data += kernel_size * C;
+    }
+  }
+}
+
+template <typename T>
+void Col2ImZeroPaddingAndNoDilationNHWC(
+    const int C,
+    const int H,
+    const int W,
+    const int kernel_h,
+    const int kernel_w,
+    const int stride_h,
+    const int stride_w,
+    const T* col_data,
+    T* img_data,
+    CPUContext* context) {
+  Set<T, CPUContext>(H * W * C, T(0), img_data, context);
+  const int output_h = (H - kernel_h) / stride_h + 1;
+  const int output_w = (W - kernel_w) / stride_w + 1;
+  const int kernel_size = kernel_h * kernel_w;
+  for (int yh = 0; yh < output_h; ++yh) {
+    for (int yw = 0; yw < output_w; ++yw) {
+      T* dst = img_data + (yh * stride_h * W + yw * stride_w) * C;
+      EigenOuterStridedArrayMap<T>(
+          dst, kernel_w * C, kernel_h, EigenOuterStride(W * C)) +=
+          ConstEigenArrayMap<T>(col_data, kernel_w * C, kernel_h);
+      col_data += kernel_size * C;
+    }
+  }
+}
 
 template <typename T, bool kCol2Im>
 void Im2ColNdNCHWImpl(
@@ -2402,23 +2690,25 @@ void Im2ColNdNCHWImpl(
     const int* dilation,
     const int* pad,
     const float* X_data,
-    float* Y_data,
-    CPUContext* context) {
+    float* Y_data) {
   if (kCol2Im) {
-    Set<T, CPUContext>(img_size, 0, Y_data, context);
+    std::memset(Y_data, 0, img_size * sizeof(float));
   }
   const int outer_size = col_shape[0];
   const int inner_size = col_size / outer_size;
   const int kernel_size = std::accumulate(
       kernel_shape, kernel_shape + N, 1, std::multiplies<int>());
+  std::vector<FixedDivisor<int>> kernel_shape_div(N);
+  for (int i = 0; i < N; ++i) {
+    kernel_shape_div[i] = FixedDivisor<int>(kernel_shape[i]);
+  }
   std::vector<int> d_offset(N, 0);
   std::vector<int> d_iter(N, 0);
   for (int i = 0; i < outer_size; ++i) {
     // Loop over spatial axes in reverse order to compute a per-axis offset.
     int offset = i;
     for (int d_i = N - 1; d_i >= 0; --d_i) {
-      d_offset[d_i] = offset % kernel_shape[d_i];
-      offset /= kernel_shape[d_i];
+      kernel_shape_div[d_i].DivMod(offset, &offset, &d_offset[d_i]);
     }
     for (int j = 0; j < inner_size; ++j) {
       // Loop over spatial axes in forward order to compute the indices in the
@@ -2429,7 +2719,7 @@ void Im2ColNdNCHWImpl(
       for (int d_i = 0; d_i < N; ++d_i) {
         const int d_img = d_iter[d_i] * stride[d_i] - pad[d_i] +
             d_offset[d_i] * dilation[d_i];
-        is_padding |= d_img < 0 || d_img >= img_shape[d_i + 1];
+        is_padding |= !utils::IsAGeZeroAndALtB(d_img, img_shape[d_i + 1]);
         img_index = img_index * img_shape[d_i + 1] + d_img;
       }
       if (!kCol2Im) {
@@ -2457,7 +2747,7 @@ void Im2ColNd<float, CPUContext, StorageOrder::NCHW>(
     const int* pad,
     const float* img_data,
     float* col_data,
-    CPUContext* context) {
+    CPUContext* /* context */) {
   Im2ColNdNCHWImpl<float, false>(
       N,
       img_size,
@@ -2469,8 +2759,7 @@ void Im2ColNd<float, CPUContext, StorageOrder::NCHW>(
       dilation,
       pad,
       img_data,
-      col_data,
-      context);
+      col_data);
 }
 
 template <>
@@ -2486,7 +2775,7 @@ void Col2ImNd<float, CPUContext, StorageOrder::NCHW>(
     const int* pad,
     const float* col_data,
     float* img_data,
-    CPUContext* context) {
+    CPUContext* /* context */) {
   Im2ColNdNCHWImpl<float, true>(
       N,
       img_size,
@@ -2498,15 +2787,14 @@ void Col2ImNd<float, CPUContext, StorageOrder::NCHW>(
       dilation,
       pad,
       col_data,
-      img_data,
-      context);
+      img_data);
 }
 
 template <>
 void Im2Col<float, CPUContext, StorageOrder::NCHW>(
-    const int channels,
-    const int height,
-    const int width,
+    const int C,
+    const int H,
+    const int W,
     const int kernel_h,
     const int kernel_w,
     const int dilation_h,
@@ -2519,103 +2807,47 @@ void Im2Col<float, CPUContext, StorageOrder::NCHW>(
     const int stride_w,
     const float* img_data,
     float* col_data,
-    CPUContext* /*context*/) {
-  const int output_h =
-      (height + pad_b + pad_t - (dilation_h * (kernel_h - 1) + 1)) / stride_h +
-      1;
-  const int output_w =
-      (width + pad_l + pad_r - (dilation_w * (kernel_w - 1) + 1)) / stride_w +
-      1;
-
+    CPUContext* context) {
   // Fast path for zero padding and no dilation
-  // From Torch, THNN_(unfolded_copy)
-  if (dilation_h == 1 && dilation_w == 1 && pad_l == 0 && pad_r == 0 &&
-      pad_t == 0 && pad_b == 0) {
-    for (auto k = 0; k < channels * kernel_h * kernel_w; k++) {
-      const auto nip = k / (kernel_h * kernel_w);
-      const auto rest = k % (kernel_h * kernel_w);
-      const auto kh = rest / kernel_w;
-      const auto kw = rest % kernel_w;
-      auto* dst = col_data + nip * (kernel_h * kernel_w * output_h * output_w) +
-          kh * (kernel_w * output_h * output_w) + kw * (output_h * output_w);
-      const auto* src = img_data + nip * (height * width);
-      for (auto y = 0; y < output_h; y++) {
-        const auto iy = y * stride_h + kh;
-        const auto ix = kw;
-        if (stride_w == 1) {
-          memcpy(
-              dst + (y * output_w),
-              src + (iy * width + ix),
-              sizeof(float) * output_w);
-        } else {
-          for (auto x = 0; x < output_w; x++) {
-            memcpy(
-                dst + (y * output_w + x),
-                src + (iy * width + ix + x * stride_w),
-                sizeof(float));
-          }
-        }
-      }
-    }
-    return;
-  }
-
-  // Fast path for equal padding
-  if (pad_l == pad_r && pad_t == pad_b) {
-    // From Intel, https://github.com/BVLC/caffe/pull/3536
-    const int pad_h = pad_t;
-    const int pad_w = pad_l;
-    const int channel_size = height * width;
-    for (int channel = channels; channel--; img_data += channel_size) {
-      for (int kernel_row = 0; kernel_row < kernel_h; kernel_row++) {
-        for (int kernel_col = 0; kernel_col < kernel_w; kernel_col++) {
-          int input_row = -pad_h + kernel_row * dilation_h;
-          for (int output_rows = output_h; output_rows; output_rows--) {
-            if (!is_a_ge_zero_and_a_lt_b(input_row, height)) {
-              for (int output_cols = output_w; output_cols; output_cols--) {
-                *(col_data++) = 0;
-              }
-            } else {
-              int input_col = -pad_w + kernel_col * dilation_w;
-              for (int output_col = output_w; output_col; output_col--) {
-                if (is_a_ge_zero_and_a_lt_b(input_col, width)) {
-                  *(col_data++) = img_data[input_row * width + input_col];
-                } else {
-                  *(col_data++) = 0;
-                }
-                input_col += stride_w;
-              }
-            }
-            input_row += stride_h;
-          }
-        }
-      }
-    }
+  if (pad_t == 0 && pad_l == 0 && pad_b == 0 && pad_r == 0 && dilation_h == 1 &&
+      dilation_w == 1) {
+    Im2ColZeroPaddingAndNoDilationNCHW<float>(
+        C,
+        H,
+        W,
+        kernel_h,
+        kernel_w,
+        stride_h,
+        stride_w,
+        img_data,
+        col_data,
+        context);
     return;
   }
 
   // Baseline
-  const int dkernel_h = dilation_h * (kernel_h - 1) + 1;
-  const int dkernel_w = dilation_w * (kernel_w - 1) + 1;
-
-  int height_col = (height + pad_t + pad_b - dkernel_h) / stride_h + 1;
-  int width_col = (width + pad_l + pad_r - dkernel_w) / stride_w + 1;
-
-  int channels_col = channels * kernel_h * kernel_w;
-  for (int c = 0; c < channels_col; ++c) {
-    int w_offset = c % kernel_w;
-    int h_offset = (c / kernel_w) % kernel_h;
-    int c_im = c / kernel_h / kernel_w;
-    for (int h = 0; h < height_col; ++h) {
-      for (int w = 0; w < width_col; ++w) {
-        int h_pad = h * stride_h - pad_t + h_offset * dilation_h;
-        int w_pad = w * stride_w - pad_l + w_offset * dilation_w;
-        if (h_pad >= 0 && h_pad < height && w_pad >= 0 && w_pad < width) {
-          col_data[(c * height_col + h) * width_col + w] =
-              img_data[(c_im * height + h_pad) * width + w_pad];
-        } else {
-          col_data[(c * height_col + h) * width_col + w] = 0;
+  const int output_h =
+      (H + pad_b + pad_t - (dilation_h * (kernel_h - 1) + 1)) / stride_h + 1;
+  const int output_w =
+      (W + pad_l + pad_r - (dilation_w * (kernel_w - 1) + 1)) / stride_w + 1;
+  const int output_size = output_h * output_w;
+  for (int c = 0; c < C; ++c) {
+    for (int kh = 0; kh < kernel_h; ++kh) {
+      for (int kw = 0; kw < kernel_w; ++kw) {
+        for (int h = 0; h < output_h; ++h) {
+          const int h_pad = h * stride_h - pad_t + kh * dilation_h;
+          if (!utils::IsAGeZeroAndALtB(h_pad, H)) {
+            std::memset(col_data + h * output_w, 0, output_w * sizeof(float));
+            continue;
+          }
+          for (int w = 0; w < output_w; ++w) {
+            const int w_pad = w * stride_w - pad_l + kw * dilation_w;
+            col_data[h * output_w + w] = utils::IsAGeZeroAndALtB(w_pad, W)
+                ? img_data[(c * H + h_pad) * W + w_pad]
+                : 0;
+          }
         }
+        col_data += output_size;
       }
     }
   }
@@ -2623,9 +2855,9 @@ void Im2Col<float, CPUContext, StorageOrder::NCHW>(
 
 template <>
 void Im2Col<float, CPUContext, StorageOrder::NHWC>(
-    const int channels,
-    const int height,
-    const int width,
+    const int C,
+    const int H,
+    const int W,
     const int kernel_h,
     const int kernel_w,
     const int dilation_h,
@@ -2638,29 +2870,46 @@ void Im2Col<float, CPUContext, StorageOrder::NHWC>(
     const int stride_w,
     const float* img_data,
     float* col_data,
-    CPUContext* /*context*/) {
+    CPUContext* context) {
+  // Fast path for zero padding and no dilation
+  if (pad_t == 0 && pad_l == 0 && pad_b == 0 && pad_r == 0 && dilation_h == 1 &&
+      dilation_w == 1) {
+    Im2ColZeroPaddingAndNoDilationNHWC<float>(
+        C,
+        H,
+        W,
+        kernel_h,
+        kernel_w,
+        stride_h,
+        stride_w,
+        img_data,
+        col_data,
+        context);
+    return;
+  }
+
   const int dkernel_h = dilation_h * (kernel_h - 1) + 1;
   const int dkernel_w = dilation_w * (kernel_w - 1) + 1;
-
-  int height_col = (height + pad_t + pad_b - dkernel_h) / stride_h + 1;
-  int width_col = (width + pad_l + pad_r - dkernel_w) / stride_w + 1;
-
+  const int output_h = (H + pad_b + pad_t - dkernel_h) / stride_h + 1;
+  const int output_w = (W + pad_l + pad_r - dkernel_w) / stride_w + 1;
   int h_pad = -pad_t;
-  for (int h = 0; h < height_col; ++h) {
+  for (int h = 0; h < output_h; ++h) {
     int w_pad = -pad_l;
-    for (int w = 0; w < width_col; ++w) {
+    for (int w = 0; w < output_w; ++w) {
       for (int ih = h_pad; ih < h_pad + dkernel_h; ih += dilation_h) {
+        if (!utils::IsAGeZeroAndALtB(ih, H)) {
+          std::memset(col_data, 0, sizeof(float) * kernel_w * C);
+          col_data += kernel_w * C;
+          continue;
+        }
         for (int iw = w_pad; iw < w_pad + dkernel_w; iw += dilation_w) {
-          if (ih >= 0 && ih < height && iw >= 0 && iw < width) {
-            memcpy(
-                col_data,
-                img_data + (ih * width + iw) * channels,
-                sizeof(float) * channels);
+          if (utils::IsAGeZeroAndALtB(iw, W)) {
+            std::memcpy(
+                col_data, img_data + (ih * W + iw) * C, sizeof(float) * C);
           } else {
-            // This should be simply padded with zero.
-            memset(col_data, 0, sizeof(float) * channels);
+            std::memset(col_data, 0, sizeof(float) * C);
           }
-          col_data += channels;
+          col_data += C;
         }
       }
       w_pad += stride_w;
@@ -2671,9 +2920,9 @@ void Im2Col<float, CPUContext, StorageOrder::NHWC>(
 
 template <>
 void Col2Im<float, CPUContext, StorageOrder::NCHW>(
-    const int channels,
-    const int height,
-    const int width,
+    const int C,
+    const int H,
+    const int W,
     const int kernel_h,
     const int kernel_w,
     const int dilation_h,
@@ -2687,99 +2936,47 @@ void Col2Im<float, CPUContext, StorageOrder::NCHW>(
     const float* col_data,
     float* img_data,
     CPUContext* context) {
-  const int output_h =
-      (height + pad_b + pad_t - (dilation_h * (kernel_h - 1) + 1)) / stride_h +
-      1;
-  const int output_w =
-      (width + pad_l + pad_r - (dilation_w * (kernel_w - 1) + 1)) / stride_w +
-      1;
-
-  Set<float, CPUContext>(height * width * channels, 0, img_data, context);
-
   // Fast path for zero padding and no dilation
-  // From Torch, modified THNN_(unfolded_acc)
-  if (dilation_h == 1 && dilation_w == 1 && pad_l == 0 && pad_r == 0 &&
-      pad_t == 0 && pad_b == 0) {
-    for (auto k = 0; k < channels * kernel_h * kernel_w; k++) {
-      const auto nip = k / (kernel_h * kernel_w);
-      const auto rest = k % (kernel_h * kernel_w);
-      const auto kh = rest / kernel_w;
-      const auto kw = rest % kernel_w;
-      const auto* dst = col_data +
-          nip * (kernel_h * kernel_w * output_h * output_w) +
-          kh * (kernel_w * output_h * output_w) + kw * (output_h * output_w);
-      auto* src = img_data + nip * (height * width);
-      for (auto y = 0; y < output_h; y++) {
-        const auto iy = y * stride_h + kh;
-        const auto ix = kw;
-        if (stride_w == 1) {
-          auto offsrc = src + (iy * width + ix);
-          const auto offdst = dst + (y * output_w);
-          for (auto i = 0; i < output_w; ++i) {
-            offsrc[i] += offdst[i];
-          }
-        } else {
-          for (auto x = 0; x < output_w; x++) {
-            auto offsrc = src + (iy * width + ix + x * stride_w);
-            const auto offdst = dst + (y * output_w + x);
-            *offsrc += *offdst;
-          }
-        }
-      }
-    }
-    return;
-  }
-
-  // Fast path for equal padding
-  if (pad_l == pad_r && pad_t == pad_b) {
-    // From Intel, https://github.com/BVLC/caffe/pull/3536
-    const int pad_h = pad_t;
-    const int pad_w = pad_l;
-    const int channel_size = height * width;
-    for (int channel = channels; channel--; img_data += channel_size) {
-      for (int kernel_row = 0; kernel_row < kernel_h; kernel_row++) {
-        for (int kernel_col = 0; kernel_col < kernel_w; kernel_col++) {
-          int input_row = -pad_h + kernel_row * dilation_h;
-          for (int output_rows = output_h; output_rows; output_rows--) {
-            if (!is_a_ge_zero_and_a_lt_b(input_row, height)) {
-              col_data += output_w;
-            } else {
-              int input_col = -pad_w + kernel_col * dilation_w;
-              for (int output_col = output_w; output_col; output_col--) {
-                if (is_a_ge_zero_and_a_lt_b(input_col, width)) {
-                  img_data[input_row * width + input_col] += *col_data;
-                }
-                ++col_data;
-                input_col += stride_w;
-              }
-            }
-            input_row += stride_h;
-          }
-        }
-      }
-    }
+  if (pad_t == 0 && pad_l == 0 && pad_b == 0 && pad_r == 0 && dilation_h == 1 &&
+      dilation_w == 1) {
+    Col2ImZeroPaddingAndNoDilationNCHW<float>(
+        C,
+        H,
+        W,
+        kernel_h,
+        kernel_w,
+        stride_h,
+        stride_w,
+        col_data,
+        img_data,
+        context);
     return;
   }
 
   // Fallback
-  const int dkernel_h = dilation_h * (kernel_h - 1) + 1;
-  const int dkernel_w = dilation_w * (kernel_w - 1) + 1;
-
-  int height_col = (height + pad_t + pad_b - dkernel_h) / stride_h + 1;
-  int width_col = (width + pad_l + pad_r - dkernel_w) / stride_w + 1;
-  int channels_col = channels * kernel_h * kernel_w;
-  for (int c = 0; c < channels_col; ++c) {
-    int w_offset = c % kernel_w;
-    int h_offset = (c / kernel_w) % kernel_h;
-    int c_im = c / kernel_h / kernel_w;
-    for (int h = 0; h < height_col; ++h) {
-      for (int w = 0; w < width_col; ++w) {
-        int h_pad = h * stride_h - pad_t + h_offset * dilation_h;
-        int w_pad = w * stride_w - pad_l + w_offset * dilation_w;
-        if (h_pad >= 0 && h_pad < height && w_pad >= 0 && w_pad < width) {
-          img_data[(c_im * height + h_pad) * width + w_pad] +=
-              col_data[(c * height_col + h) * width_col + w];
+  Set<float, CPUContext>(C * H * W, 0.0f, img_data, context);
+  const int output_h =
+      (H + pad_t + pad_b - (dilation_h * (kernel_h - 1) + 1)) / stride_h + 1;
+  const int output_w =
+      (W + pad_l + pad_r - (dilation_w * (kernel_w - 1) + 1)) / stride_w + 1;
+  const int output_size = output_h * output_w;
+  for (int c = 0; c < C; ++c) {
+    for (int kh = 0; kh < kernel_h; ++kh) {
+      for (int kw = 0; kw < kernel_w; ++kw) {
+        for (int h = 0; h < output_h; ++h) {
+          const int h_pad = h * stride_h - pad_t + kh * dilation_h;
+          if (!utils::IsAGeZeroAndALtB(h_pad, H)) {
+            continue;
+          }
+          for (int w = 0; w < output_w; ++w) {
+            const int w_pad = w * stride_w - pad_l + kw * dilation_w;
+            if (utils::IsAGeZeroAndALtB(w_pad, W)) {
+              img_data[(c * H + h_pad) * W + w_pad] +=
+                  col_data[h * output_w + w];
+            }
+          }
         }
+        col_data += output_size;
       }
     }
   }
@@ -2787,9 +2984,9 @@ void Col2Im<float, CPUContext, StorageOrder::NCHW>(
 
 template <>
 void Col2Im<float, CPUContext, StorageOrder::NHWC>(
-    const int channels,
-    const int height,
-    const int width,
+    const int C,
+    const int H,
+    const int W,
     const int kernel_h,
     const int kernel_w,
     const int dilation_h,
@@ -2803,24 +3000,44 @@ void Col2Im<float, CPUContext, StorageOrder::NHWC>(
     const float* col_data,
     float* img_data,
     CPUContext* context) {
+  // Fast path for zero padding and no dilation
+  if (pad_t == 0 && pad_l == 0 && pad_b == 0 && pad_r == 0 && dilation_h == 1 &&
+      dilation_w == 1) {
+    Col2ImZeroPaddingAndNoDilationNHWC<float>(
+        C,
+        H,
+        W,
+        kernel_h,
+        kernel_w,
+        stride_h,
+        stride_w,
+        col_data,
+        img_data,
+        context);
+    return;
+  }
+
+  Set<float, CPUContext>(H * W * C, 0, img_data, context);
   const int dkernel_h = dilation_h * (kernel_h - 1) + 1;
   const int dkernel_w = dilation_w * (kernel_w - 1) + 1;
-
-  Set<float, CPUContext>(height * width * channels, 0, img_data, context);
-  int height_col = (height + pad_t + pad_b - dkernel_h) / stride_h + 1;
-  int width_col = (width + pad_l + pad_r - dkernel_w) / stride_w + 1;
+  const int output_h = (H + pad_t + pad_b - dkernel_h) / stride_h + 1;
+  const int output_w = (W + pad_l + pad_r - dkernel_w) / stride_w + 1;
   int h_pad = -pad_t;
-  for (int h = 0; h < height_col; ++h) {
+  for (int h = 0; h < output_h; ++h) {
     int w_pad = -pad_l;
-    for (int w = 0; w < width_col; ++w) {
+    for (int w = 0; w < output_w; ++w) {
       for (int ih = h_pad; ih < h_pad + dkernel_h; ih += dilation_h) {
+        if (!utils::IsAGeZeroAndALtB(ih, H)) {
+          col_data += kernel_w * C;
+          continue;
+        }
         for (int iw = w_pad; iw < w_pad + dkernel_w; iw += dilation_w) {
-          if (ih >= 0 && ih < height && iw >= 0 && iw < width) {
-            auto* img_data_patch = img_data + (ih * width + iw) * channels;
+          if (utils::IsAGeZeroAndALtB(iw, W)) {
+            float* img_data_patch = img_data + (ih * W + iw) * C;
             Add<float, CPUContext>(
-                channels, img_data_patch, col_data, img_data_patch, context);
+                C, img_data_patch, col_data, img_data_patch, context);
           }
-          col_data += channels;
+          col_data += C;
         }
       }
       w_pad += stride_w;
@@ -2912,113 +3129,6 @@ void BiasCHW<float, CPUContext>(
     image += image_size;
   }
 }
-
-template <>
-void CopyMatrix<CPUContext>(
-    const size_t itemsize,
-    const int M,
-    const int N,
-    const void* A,
-    const int lda,
-    void* B,
-    const int ldb,
-    CPUContext* /*context*/,
-    TypeMeta::TypedCopy copy) {
-  if (A == nullptr || B == nullptr) {
-    return;
-  }
-  if (lda == N && ldb == N) {
-    // can coalese to a single memcpy of size M * N
-    if (copy) {
-      copy(static_cast<const char*>(A), static_cast<char*>(B), N * M);
-    } else {
-      memcpy(
-          static_cast<char*>(B), static_cast<const char*>(A), itemsize * N * M);
-    }
-    return;
-  }
-
-  for (int i = 0; i < M; ++i) {
-    if (copy) {
-      copy(
-          static_cast<const char*>(A) + lda * i * itemsize,
-          static_cast<char*>(B) + ldb * i * itemsize,
-          N);
-    } else {
-      memcpy(
-          static_cast<char*>(B) + ldb * i * itemsize,
-          static_cast<const char*>(A) + lda * i * itemsize,
-          itemsize * N);
-    }
-  }
-}
-
-#ifdef CAFFE2_USE_MKL
-
-#define DELEGATE_COPY_MATRIX_FUNCTION(T, Func)  \
-  template <>                                   \
-  void CopyMatrix<T, CPUContext>(               \
-      const int M,                              \
-      const int N,                              \
-      const T* A,                               \
-      const int lda,                            \
-      T* B,                                     \
-      const int ldb,                            \
-      CPUContext* /* context */) {              \
-    Func('R', 'N', M, N, T(1), A, lda, B, ldb); \
-  }
-DELEGATE_COPY_MATRIX_FUNCTION(float, mkl_somatcopy)
-DELEGATE_COPY_MATRIX_FUNCTION(double, mkl_domatcopy)
-#undef DELEGATE_COPY_MATRIX_FUNCTION
-
-#endif // CAFFE2_USE_MKL
-
-#define CAFFE2_SPECIALIZED_COPY_MATRIX(T)                                \
-  template <>                                                            \
-  void CopyMatrix<T, CPUContext>(                                        \
-      const int M,                                                       \
-      const int N,                                                       \
-      const T* A,                                                        \
-      const int lda,                                                     \
-      T* B,                                                              \
-      const int ldb,                                                     \
-      CPUContext* /* context */) {                                       \
-    if (M == 0 || N == 0) {                                              \
-      return;                                                            \
-    }                                                                    \
-    if (lda == N) {                                                      \
-      if (ldb == N) {                                                    \
-        std::memcpy(B, A, sizeof(T) * M * N);                            \
-      } else {                                                           \
-        EigenOuterStridedMatrixMap<T>(B, N, M, EigenOuterStride(ldb)) =  \
-            ConstEigenMatrixMap<T>(A, N, M);                             \
-      }                                                                  \
-    } else {                                                             \
-      if (ldb == N) {                                                    \
-        EigenMatrixMap<T>(B, N, M) = ConstEigenOuterStridedMatrixMap<T>( \
-            A, N, M, EigenOuterStride(lda));                             \
-      } else {                                                           \
-        EigenOuterStridedMatrixMap<T>(B, N, M, EigenOuterStride(ldb)) =  \
-            ConstEigenOuterStridedMatrixMap<T>(                          \
-                A, N, M, EigenOuterStride(lda));                         \
-      }                                                                  \
-    }                                                                    \
-  }
-
-#ifndef CAFFE2_USE_MKL
-CAFFE2_SPECIALIZED_COPY_MATRIX(float)
-CAFFE2_SPECIALIZED_COPY_MATRIX(double)
-#endif // CAFFE2_USE_MKL
-
-CAFFE2_SPECIALIZED_COPY_MATRIX(int)
-CAFFE2_SPECIALIZED_COPY_MATRIX(TIndex)
-#ifdef CAFFE2_UNIQUE_LONG_TYPEMETA
-CAFFE2_SPECIALIZED_COPY_MATRIX(long)
-#endif
-CAFFE2_SPECIALIZED_COPY_MATRIX(std::uint8_t)
-CAFFE2_SPECIALIZED_COPY_MATRIX(std::uint16_t)
-
-#undef CAFFE2_SPECIALIZXED_COPY_MATRIX
 
 #define CAFFE2_SPECIALIZED_COPYVECTOR(T)                            \
   template <>                                                       \
