@@ -6066,7 +6066,6 @@ def check_against_reference(self, func, reference_func, args, kwargs=None, allow
     # test no gradients case
     outputs = reference_func(*nograd_inputs, **kwargs)
     outputs_test = func(*nograd_inputs, **kwargs)
-
     self.assertEqual(outputs, outputs_test)
 
     # test single grad case
@@ -6084,7 +6083,6 @@ def check_against_reference(self, func, reference_func, args, kwargs=None, allow
 
     outputs = reference_func(*recording_inputs, **kwargs)
     l1 = allSum(outputs)
-
     grads = torch.autograd.grad(l1, recording_tensors, create_graph=True,
                                 allow_unused=allow_unused)
     l2 = (allSum(grads) * l1)
@@ -6353,9 +6351,8 @@ def add_test(
         dim_args_idx=(),
         skipTestIf=(),
         output_process_fn=lambda x: x,
-        kwargs=None,
-        test_type='tensor_op'):
-    basic_test_name = name
+        kwargs=None):
+    basic_test_name = 'test_' + name
     if variant_name != '':
         basic_test_name += '_' + variant_name
 
@@ -6364,11 +6361,6 @@ def add_test(
         new_args = [arg * dim_perm[dim_args_idx.index(i)] if i in dim_args_idx else arg for i, arg in enumerate(args)]
         test_name = basic_test_name + ''.join('_neg' + str(i) for i, idx in enumerate(dim_perm) if idx < 0)
         new_args = tuple(new_args)
-
-        if test_type == 'nn_op':
-            test_name = 'test_nn_' + test_name
-        else:
-            test_name = 'test_' + test_name
 
         # for-loop bodies don't define scopes, so we have to save the variables
         # we want to close over in some way
@@ -6381,21 +6373,30 @@ def add_test(
                 # FixMe: run grad checks on inplace self
                 if is_inplace:
                     self_variable.requires_grad = False
-
                 # need to record this because methods can change the size (e.g. unsqueeze)
                 args_variable, kwargs_variable = create_input(args, requires_grad=not is_inplace, call_kwargs=kwargs)
-
                 self_tensor = deepcopy(self_variable.data)
                 args_tensor = deepcopy(unpack_variables(args_variable))
+                output_variable = getattr(self_variable, name)(*args_variable, **kwargs_variable)
 
-                if test_type == 'nn_op':
-                    # fix the seed for tests
-                    torch.manual_seed(2)
+                def fn(*inputs, **kwargs):
+                    output = getattr(inputs[0], name)(*inputs[1:], **kwargs)
+                    return output_process_fn(output)
 
-                    output_variable = getattr(F, name)(self_variable, *args_variable, **kwargs_variable)
+                if not is_inplace and name not in EXCLUDE_GRADCHECK and not exclude_tensor_method(name, test_name):
+                    if test_name not in EXCLUDE_TRACED:
+                        check_against_reference(self, create_traced_fn(fn),
+                                                fn, (self_variable,) + args_variable, kwargs_variable)
 
+                    if not is_magic_method and test_name not in EXCLUDE_SCRIPT:
+                        check_against_reference(self,
+                                                create_script_fn(name, 'method', output_process_fn),
+                                                fn, (self_variable,) + args_variable, kwargs_variable)
+
+                # functional interface tests
+                if hasattr(torch, name) and name not in EXCLUDE_FUNCTIONAL:
                     def fn(*inputs, **kwargs):
-                        output = getattr(F, name)(*inputs, **kwargs)
+                        output = getattr(torch, name)(*inputs, **kwargs)
                         return output_process_fn(output)
 
                     f_args_variable = (self_variable,) + args_variable
@@ -6406,42 +6407,8 @@ def add_test(
 
                     if not is_inplace and test_name not in EXCLUDE_SCRIPT:
                         check_against_reference(self,
-                                                create_script_fn(name, 'nn_functional', output_process_fn),
+                                                create_script_fn(name, 'functional', output_process_fn),
                                                 fn, f_args_variable, kwargs_variable)
-
-                else:
-                    output_variable = getattr(self_variable, name)(*args_variable, **kwargs_variable)
-
-                    def fn(*inputs, **kwargs):
-                        output = getattr(inputs[0], name)(*inputs[1:], **kwargs)
-                        return output_process_fn(output)
-
-                    if not is_inplace and name not in EXCLUDE_GRADCHECK and not exclude_tensor_method(name, test_name):
-                        if test_name not in EXCLUDE_TRACED:
-                            check_against_reference(self, create_traced_fn(fn),
-                                                    fn, (self_variable,) + args_variable, kwargs_variable)
-
-                        if not is_magic_method and test_name not in EXCLUDE_SCRIPT:
-                            check_against_reference(self,
-                                                    create_script_fn(name, 'method', output_process_fn),
-                                                    fn, (self_variable,) + args_variable, kwargs_variable)
-
-                    # functional interface tests
-                    if hasattr(torch, name) and name not in EXCLUDE_FUNCTIONAL:
-                        def fn(*inputs, **kwargs):
-                            output = getattr(torch, name)(*inputs, **kwargs)
-                            return output_process_fn(output)
-
-                        f_args_variable = (self_variable,) + args_variable
-                        f_args_tensor = (self_tensor,) + args_tensor
-
-                        if not is_inplace and test_name not in EXCLUDE_TRACED:
-                            check_against_reference(self, create_traced_fn(fn), fn, f_args_variable, kwargs_variable)
-
-                        if not is_inplace and test_name not in EXCLUDE_SCRIPT:
-                            check_against_reference(self,
-                                                    create_script_fn(name, 'functional', output_process_fn),
-                                                    fn, f_args_variable, kwargs_variable)
 
             check(name)
             inplace_name = name + '_'
@@ -6450,20 +6417,55 @@ def add_test(
             if hasattr(torch.ones(1), inplace_name) and not broadcast_skip_inplace:
                 check(inplace_name)
 
-        assert not hasattr(TestJitGenerated, test_name), 'Two tests have the same name: ' + test_name
+        post_add_test(test_name, skipTestIf, do_test)
 
-        for skip in skipTestIf:
-            do_test = skip(do_test)
 
-        if not (TEST_WITH_UBSAN and test_name in UBSAN_BLACKLISTED_TESTS):
-            setattr(TestJitGenerated, test_name, do_test)
+def add_nn_test(name, self_size, args, skipTestIf=(), output_process_fn=lambda x: x, kwargs=None):
+    test_name = 'test_nn_' + name
+
+    def do_test(self, name=name, args=args, test_name=test_name):
+        torch.manual_seed(2)
+
+        self_variable = create_input((self_size,))[0][0]
+
+        # need to record this because methods can change the size (e.g. unsqueeze)
+        args_variable, kwargs_variable = create_input(args, call_kwargs=kwargs)
+
+        self_tensor = deepcopy(self_variable.data)
+        args_tensor = deepcopy(unpack_variables(args_variable))
+
+        output_variable = getattr(F, name)(self_variable, *args_variable, **kwargs_variable)
+
+        def fn(*inputs, **kwargs):
+            output = getattr(F, name)(*inputs, **kwargs)
+            return output_process_fn(output)
+
+        f_args_variable = (self_variable,) + args_variable
+        f_args_tensor = (self_tensor,) + args_tensor
+
+        if test_name not in EXCLUDE_SCRIPT:
+            check_against_reference(self,
+                                    create_script_fn(name, 'nn_functional', output_process_fn),
+                                    fn, f_args_variable, kwargs_variable)
+
+    post_add_test(test_name, skipTestIf, do_test)
+
+
+def post_add_test(test_name, skipTestIf, do_test):
+    assert not hasattr(TestJitGenerated, test_name), 'Two tests have the same name: ' + test_name
+
+    for skip in skipTestIf:
+        do_test = skip(do_test)
+
+    if not (TEST_WITH_UBSAN and test_name in UBSAN_BLACKLISTED_TESTS):
+        setattr(TestJitGenerated, test_name, do_test)
+
 
 for test in method_tests:
     add_test(*test)
 
 for test in nn_functional_tests:
-    add_test(*test, test_type='nn_op')
-
+    add_nn_test(*test)
 
 if __name__ == '__main__':
     run_tests()
