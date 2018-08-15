@@ -159,10 +159,6 @@ void gpu_binary_kernel(TensorIterator& iter, const func_t& f) {
     arg0_t* out_data = static_cast<arg0_t*>(iter.data_ptr(0));
     const arg1_t* in1_data = static_cast<const arg1_t*>(iter.data_ptr(1));
     const arg1_t* in2_data = static_cast<const arg2_t*>(iter.data_ptr(2));
-    auto strides = iter.get_inner_strides();
-    int stride0 = strides[0];
-    int stride1 = strides[1];
-    int stride2 = strides[2];
     launch_kernel<512, 1>(numel, [=]__device__(int idx) {
       out_data[idx] = f(in1_data[idx], in2_data[idx]);
     });
