@@ -525,6 +525,26 @@ class TestNN(NNTestCase):
             d_params.append(p.grad)
         return params, d_params
 
+    def _create_basic_net(self):
+        class Layer(nn.Module):
+            def __init__(self):
+                super(Layer, self).__init__()
+                self.layer_dummy_param = Parameter(torch.Tensor(3, 5))
+                self.register_buffer('layer_dummy_buf', torch.zeros(1, 3, 3, 7))
+
+        class Net(nn.Module):
+            def __init__(self):
+                super(Net, self).__init__()
+                self.l1 = Layer()
+                self.dummy_param = Parameter(torch.Tensor(3, 5))
+                self.register_buffer('dummy_buf', torch.zeros(7, 3, 3, 1))
+
+        l = Layer()
+        n = Net()
+        s = nn.Sequential(n, n)
+
+        return l, n, s
+
     def test_module_backcompat(self):
         from torch.serialization import SourceChangeWarning
         path = download_file('https://download.pytorch.org/test_data/linear.pt')
@@ -769,51 +789,57 @@ class TestNN(NNTestCase):
             self.assertLess(abs(output.data.std() - std), 0.1)
             output.backward(input)
 
-    def test_parameters(self):
-        def num_params(module):
-            return len(list(module.parameters()))
+    def test_parameters_and_named_parameters(self):
+        def names(named_parameters):
+            return [k for k, _ in named_parameters]
 
-        class Net(nn.Module):
-            def __init__(self):
-                super(Net, self).__init__()
-                self.l1 = l
-                self.l2 = l
-                self.param = Parameter(torch.Tensor(3, 5))
+        l, n, s = self._create_basic_net()
 
-        l = nn.Linear(10, 20)
-        n = Net()
-        s = nn.Sequential(n, n, n, n)
-        self.assertEqual(num_params(l), 2)
-        self.assertEqual(num_params(n), 3)
-        self.assertEqual(num_params(s), 3)
+        self.assertEqual(len(list(l.parameters())), 1)
+        self.assertEqual(
+            names(l.named_parameters()),
+            ['layer_dummy_param'])
 
-    def test_named_parameters(self):
-        def num_params(module):
-            return len(dict(module.named_parameters()))
+        self.assertEqual(len(list(n.parameters())), 2)
+        self.assertEqual(
+            names(n.named_parameters()),
+            ['dummy_param', 'l1.layer_dummy_param'])
 
-        class Net(nn.Module):
-            def __init__(self):
-                super(Net, self).__init__()
-                self.l1 = l
-                self.l2 = l
-                self.param = Parameter(torch.Tensor(3, 5))
+        self.assertEqual(len(list(n.parameters(recurse=False))), 1)
+        self.assertEqual(
+            names(n.named_parameters(recurse=False)),
+            ['dummy_param'])
 
-        l = nn.Linear(10, 20)
-        n = Net()
-        s = nn.Sequential(n, n, n, n)
+        self.assertEqual(len(list(s.parameters())), 2)
+        self.assertEqual(
+            names(s.named_parameters()),
+            ['0.dummy_param', '0.l1.layer_dummy_param'])
 
-        for name in dict(l.named_parameters()).keys():
-            self.assertTrue(name in ['bias', 'weight'])
+    def test_buffers_and_named_buffers(self):
+        def names(named_buffers):
+            return [k for k, _ in named_buffers]
 
-        for name in dict(n.named_parameters()).keys():
-            self.assertTrue(name in ['l1.bias', 'l1.weight', 'param'])
+        l, n, s = self._create_basic_net()
 
-        for name in dict(s.named_parameters()).keys():
-            self.assertTrue(name in ['0.l1.bias', '0.l1.weight', '0.param'])
+        self.assertEqual(len(list(l.buffers())), 1)
+        self.assertEqual(
+            names(l.named_buffers()),
+            ['layer_dummy_buf'])
 
-        self.assertEqual(num_params(l), 2)
-        self.assertEqual(num_params(n), 3)
-        self.assertEqual(num_params(s), 3)
+        self.assertEqual(len(list(n.buffers())), 2)
+        self.assertEqual(
+            names(n.named_buffers()),
+            ['dummy_buf', 'l1.layer_dummy_buf'])
+
+        self.assertEqual(len(list(n.buffers(recurse=False))), 1)
+        self.assertEqual(
+            names(n.named_buffers(recurse=False)),
+            ['dummy_buf'])
+
+        self.assertEqual(len(list(s.buffers())), 2)
+        self.assertEqual(
+            names(s.named_buffers()),
+            ['0.dummy_buf', '0.l1.layer_dummy_buf'])
 
     def test_call_supports_python_dict_output(self):
         class Net(nn.Module):
