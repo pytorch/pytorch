@@ -21,7 +21,7 @@ void eraseIndexWithLists(Block* block) {
       WithInsertPoint guard(n);
       Value *self = index_node->inputs()[0]; // Note this is carried across iterations
       for (size_t dim = 0; dim < n->inputs().size(); ++dim) {
-        at::ArrayRef<NamedValue> input_args = {
+        std::vector<NamedValue> input_args = {
           /*self=*/NamedValue(self),
           /*dim=*/NamedValue(g->insertConstant((int64_t)dim)),
           /*index=*/NamedValue(n->inputs()[dim])
