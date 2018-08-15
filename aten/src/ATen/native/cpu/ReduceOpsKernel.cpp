@@ -199,10 +199,8 @@ struct NormReduction {
       *out_ = reduce_all(data_, numel,  pval);
       return;
     }
-
     int64_t n = self.size(*dim);
     int64_t stride = self.stride(*dim);
-    //std::cout << "NormReduction called, p = " << p << ", pval = " << pval << ", stride = " << stride << std::endl;
     // A contiguous tensor does not need to hold a meaningful stride
     // if the corresponding size is 1
     if (n == 1) {
@@ -271,7 +269,6 @@ struct NormReduction {
         }
         return result;
   }
-
 };
 
 static void norm_kernel_impl(Tensor& result, const Tensor& self, Scalar p, at::optional<int64_t> dim) {
