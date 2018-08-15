@@ -191,7 +191,7 @@ void initJITBindings(PyObject *module) {
       .def_property_readonly("graph", [](GraphExecutor& ge) {
         return ge.graph();
       })
-      .def("get_debug_state", [](GraphExecutor& ge) {
+     .def("get_debug_state", [](GraphExecutor& ge) {
         return ge.getDebugState();
       })
       .def("__call__", [](GraphExecutor& ge, py::args args) -> py::object {

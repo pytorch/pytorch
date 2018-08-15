@@ -26,9 +26,9 @@ class RmsPropOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   RmsPropOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        decay_(OperatorBase::GetSingleArgument<float>("decay", 0.9f)),
-        momentum_(OperatorBase::GetSingleArgument<float>("momentum", 0.0f)),
-        epsilon_(OperatorBase::GetSingleArgument<float>("epsilon", 1e-5f)) {}
+        decay_(this->template GetSingleArgument<float>("decay", 0.9f)),
+        momentum_(this->template GetSingleArgument<float>("momentum", 0.0f)),
+        epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5f)) {}
   bool RunOnDevice() override {
     CAFFE_ENFORCE(Input(LR).size() == 1);
     CAFFE_ENFORCE(Input(GRAD).size() == Input(MEAN_SQUARES).size());

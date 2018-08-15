@@ -72,10 +72,10 @@ class SigmoidCrossEntropyWithLogitsOp final : public Operator<Context> {
       const OperatorDef& operator_def,
       Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        log_D_trick_(OperatorBase::template GetSingleArgument<bool>(
+        log_D_trick_(this->template GetSingleArgument<bool>(
             "log_D_trick",
             false)),
-        unjoined_lr_loss_(OperatorBase::template GetSingleArgument<bool>(
+        unjoined_lr_loss_(this->template GetSingleArgument<bool>(
             "unjoined_lr_loss",
             false)) {
     CAFFE_ENFORCE(
@@ -98,10 +98,10 @@ class SigmoidCrossEntropyWithLogitsGradientOp final : public Operator<Context> {
       const OperatorDef& operator_def,
       Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        log_D_trick_(OperatorBase::template GetSingleArgument<bool>(
+        log_D_trick_(this->template GetSingleArgument<bool>(
             "log_D_trick",
             false)),
-        unjoined_lr_loss_(OperatorBase::template GetSingleArgument<bool>(
+        unjoined_lr_loss_(this->template GetSingleArgument<bool>(
             "unjoined_lr_loss",
             false)) {}
 

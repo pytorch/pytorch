@@ -30,7 +30,7 @@ from torch.autograd.gradcheck import gradgradcheck
 from torch.nn import Parameter
 from torch.nn.parallel._functions import Broadcast
 from common import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, \
-    TEST_SCIPY, IS_WINDOWS, download_file, PY3, PY34, to_gpu, \
+    TEST_NUMPY, TEST_SCIPY, IS_WINDOWS, download_file, PY3, PY34, to_gpu, \
     get_function_arglist, skipCUDAMemoryLeakCheckIf
 from common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, \
     TEST_CUDNN_VERSION
@@ -41,6 +41,10 @@ from common_nn import NNTestCase, ModuleTest, CriterionTest, TestBase, \
 
 if TEST_SCIPY:
     from scipy import stats
+    import scipy.ndimage
+
+if TEST_NUMPY:
+    import numpy as np
 
 ALL_TENSORTYPES = [torch.float,
                    torch.double,
@@ -5226,6 +5230,207 @@ class TestNN(NNTestCase):
             self.assertEqual(out_cpu, out_cuda)
             self.assertEqual(input_cpu.grad, input_gpu.grad)
 
+    @unittest.skipIf(not (TEST_SCIPY and TEST_NUMPY), "Scipy and/or numpy not found")
+    def test_affine_2d_rotate0(self):
+        for device in device_():
+            input_size = [1, 1, 3, 3]
+            input_ary = np.array(np.random.random(input_size), dtype=np.float32)
+            output_size = [1, 1, 5, 5]
+            angle_rad = 0.
+
+            transform_tensor, transform_ary, offset = \
+                _buildEquivalentAffineTransforms2d(device, input_size, output_size, angle_rad)
+
+            scipy_ary = scipy.ndimage.affine_transform(
+                input_ary[0, 0],
+                transform_ary,
+                offset=offset,
+                output_shape=output_size[2:],
+                order=1,
+                mode='nearest',
+                prefilter=False)
+
+            affine_tensor = torch.nn.functional.affine_grid(
+                transform_tensor,
+                torch.Size(output_size)
+            )
+
+            gridsample_ary = torch.nn.functional.grid_sample(
+                torch.tensor(input_ary, device=device).to(device),
+                affine_tensor,
+                padding_mode='border'
+            ).to('cpu').numpy()
+
+            assert np.abs(scipy_ary.mean() - gridsample_ary.mean()) < 1e-6
+            assert np.abs(scipy_ary - gridsample_ary).max() < 1e-6
+
+    @unittest.skipIf(not (TEST_SCIPY and TEST_NUMPY), "Scipy and/or numpy not found")
+    def test_affine_2d_rotate90(self):
+        for device, input_size2dsq, output_size2dsq in \
+                itertools.product(device_(), input_size2dsq_(), output_size2dsq_()):
+            input_size = input_size2dsq
+            input_ary = np.array(np.random.random(input_size), dtype=np.float32)
+            output_size = output_size2dsq
+            angle_rad = 0.25 * math.pi * 2
+
+            transform_tensor, transform_ary, offset = \
+                _buildEquivalentAffineTransforms2d(device, input_size, output_size, angle_rad)
+
+            scipy_ary = scipy.ndimage.affine_transform(
+                input_ary[0, 0],
+                transform_ary,
+                offset=offset,
+                output_shape=output_size[2:],
+                order=1,
+                mode='nearest',
+                prefilter=True)
+
+            if input_size2dsq == output_size2dsq:
+                assert np.abs(scipy_ary.mean() - input_ary.mean()) < 1e-6
+            assert np.abs(scipy_ary[0, 0] - input_ary[0, 0, 0, -1]).max() < 1e-6
+            assert np.abs(scipy_ary[0, -1] - input_ary[0, 0, -1, -1]).max() < 1e-6
+            assert np.abs(scipy_ary[-1, -1] - input_ary[0, 0, -1, 0]).max() < 1e-6
+            assert np.abs(scipy_ary[-1, 0] - input_ary[0, 0, 0, 0]).max() < 1e-6
+
+            affine_tensor = torch.nn.functional.affine_grid(
+                transform_tensor,
+                torch.Size(output_size)
+            )
+
+            gridsample_ary = torch.nn.functional.grid_sample(
+                torch.tensor(input_ary, device=device).to(device),
+                affine_tensor,
+                padding_mode='border'
+            ).to('cpu').numpy()
+
+            assert np.abs(scipy_ary.mean() - gridsample_ary.mean()) < 1e-6
+            assert np.abs(scipy_ary - gridsample_ary).max() < 1e-6
+
+    @unittest.skipIf(not (TEST_SCIPY and TEST_NUMPY), "Scipy and/or numpy not found")
+    def test_affine_2d_rotate45(self):
+        for device in device_():
+            input_size = [1, 1, 3, 3]
+            input_ary = np.array(np.zeros(input_size), dtype=np.float32)
+            input_ary[0, 0, 0, :] = 0.5
+            input_ary[0, 0, 2, 2] = 1.0
+            output_size = [1, 1, 3, 3]
+            angle_rad = 0.125 * math.pi * 2
+
+            transform_tensor, transform_ary, offset = \
+                _buildEquivalentAffineTransforms2d(device, input_size, output_size, angle_rad)
+
+            scipy_ary = scipy.ndimage.affine_transform(
+                input_ary[0, 0],
+                transform_ary,
+                offset=offset,
+                output_shape=output_size[2:],
+                order=1,
+                mode='nearest',
+                prefilter=False)
+
+            affine_tensor = torch.nn.functional.affine_grid(
+                transform_tensor,
+                torch.Size(output_size)
+            )
+
+            gridsample_ary = torch.nn.functional.grid_sample(
+                torch.tensor(input_ary, device=device).to(device),
+                affine_tensor,
+                padding_mode='border'
+            ).to('cpu').numpy()
+
+            assert np.abs(scipy_ary - gridsample_ary).max() < 1e-6
+
+    @unittest.skipIf(not (TEST_SCIPY and TEST_NUMPY), "Scipy and/or numpy not found")
+    def test_affine_2d_rotateRandom(self):
+        for device, angle_rad, input_size2d, output_size2d in \
+                itertools.product(device_(), angle_rad_(), input_size2d_(), output_size2d_()):
+
+            input_size = input_size2d
+            input_ary = np.array(np.random.random(input_size), dtype=np.float32).round(3)
+            output_size = output_size2d
+
+            input_ary[0, 0, 0, 0] = 2
+            input_ary[0, 0, 0, -1] = 4
+            input_ary[0, 0, -1, 0] = 6
+            input_ary[0, 0, -1, -1] = 8
+
+            transform_tensor, transform_ary, grid_ary = \
+                _buildEquivalentAffineTransforms2d(device, input_size, output_size, angle_rad)
+
+            scipy_ary = scipy.ndimage.affine_transform(
+                input_ary[0, 0],
+                transform_ary,
+                output_shape=output_size[2:],
+                order=1,
+                mode='nearest',
+                prefilter=False)
+
+            affine_tensor = torch.nn.functional.affine_grid(
+                transform_tensor,
+                torch.Size(output_size)
+            )
+
+            gridsample_ary = torch.nn.functional.grid_sample(
+                torch.tensor(input_ary, device=device).to(device),
+                affine_tensor,
+                padding_mode='border'
+            ).to('cpu').numpy()
+
+            for r in range(affine_tensor.size(1)):
+                for c in range(affine_tensor.size(2)):
+                    grid_out = np.dot(grid_ary, [r, c, 1])
+                    assert np.allclose(affine_tensor[0, r, c], grid_out[:2], atol=1e-5)
+
+            assert np.abs(scipy_ary - gridsample_ary).max() < 1e-5
+
+    @unittest.skipIf(not (TEST_SCIPY and TEST_NUMPY), "Scipy and/or numpy not found")
+    def test_affine_3d_rotateRandom(self):
+        for device, angle_rad, axis_vector, input_size3d, output_size3d in \
+                itertools.product(device_(), angle_rad_(), axis_vector_(), input_size3d_(), output_size3d_()):
+            input_size = input_size3d
+            input_ary = np.array(np.random.random(input_size), dtype=np.float32)
+            output_size = output_size3d
+
+            input_ary[0, 0, 0, 0, 0] = 2
+            input_ary[0, 0, 0, 0, -1] = 3
+            input_ary[0, 0, 0, -1, 0] = 4
+            input_ary[0, 0, 0, -1, -1] = 5
+            input_ary[0, 0, -1, 0, 0] = 6
+            input_ary[0, 0, -1, 0, -1] = 7
+            input_ary[0, 0, -1, -1, 0] = 8
+            input_ary[0, 0, -1, -1, -1] = 9
+
+            transform_tensor, transform_ary, grid_ary = \
+                _buildEquivalentAffineTransforms3d(device, input_size, output_size, angle_rad, axis_vector)
+
+            scipy_ary = scipy.ndimage.affine_transform(
+                input_ary[0, 0],
+                transform_ary,
+                output_shape=output_size[2:],
+                order=1,
+                mode='nearest',
+                prefilter=False)
+
+            affine_tensor = torch.nn.functional.affine_grid(
+                transform_tensor,
+                torch.Size(output_size)
+            )
+
+            gridsample_ary = torch.nn.functional.grid_sample(
+                torch.tensor(input_ary, device=device).to(device),
+                affine_tensor,
+                padding_mode='border'
+            ).to('cpu').numpy()
+
+            for i in range(affine_tensor.size(1)):
+                for r in range(affine_tensor.size(2)):
+                    for c in range(affine_tensor.size(3)):
+                        grid_out = np.dot(grid_ary, [i, r, c, 1])
+                        assert np.allclose(affine_tensor[0, i, r, c], grid_out[:3], atol=1e-5)
+
+            assert np.abs(scipy_ary - gridsample_ary).max() < 1e-5
+
     def test_upsamplingNearest1d(self):
         m = nn.Upsample(size=4, mode='nearest')
         in_t = torch.ones(1, 1, 2)
@@ -8358,6 +8563,189 @@ add_test(NewModuleTest(
     constructor=lambda: _AdaptiveLogSoftmaxWithLoss(16, 10, [2, 6]),
     input_size=(4, 16),
     fullname='AdaptiveLogSoftmax'))
+
+
+# The following are helpers for TestNN.test_affine_*
+if torch.cuda.is_available():
+    def device_():
+        return ['cpu', 'cuda']
+else:
+    def device_():
+        return ['cpu']
+
+
+def angle_rad_():
+    return [r * math.pi * 2 for r in [0.0, 0.5, 0.25, 0.125, random.random()]]
+
+
+def axis_vector_():
+    t = (random.random(), random.random(), random.random())
+    l = sum(x ** 2 for x in t) ** 0.5
+
+    return [(1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0), tuple(x / l for x in t)]
+
+
+def input_size2d_():
+    return [[1, 1, 3, 5], [1, 1, 3, 3], [1, 1, 4, 4], [1, 1, 3, 4]]
+
+
+def output_size2d_():
+    return [[1, 1, 5, 3], [1, 1, 3, 5], [1, 1, 4, 3], [1, 1, 5, 5], [1, 1, 6, 6]]
+
+
+def input_size2dsq_():
+    return [[1, 1, 2, 2], [1, 1, 3, 3], [1, 1, 4, 4], [1, 1, 6, 6]]
+
+
+def output_size2dsq_():
+    return [[1, 1, 2, 2], [1, 1, 3, 3], [1, 1, 4, 4], [1, 1, 5, 5], [1, 1, 6, 6]]
+
+
+def input_size3d_():
+    return [[1, 1, 2, 2, 2], [1, 1, 2, 3, 4], [1, 1, 3, 3, 3], [1, 1, 4, 4, 4], [1, 1, 3, 4, 5]]
+
+
+def input_size3dsq_():
+    return [[1, 1, 2, 2, 2], [1, 1, 3, 3, 3], [1, 1, 4, 4, 4], [1, 1, 6, 6, 6]]
+
+
+def output_size3dsq_():
+    return [[1, 1, 2, 2, 2], [1, 1, 3, 3, 3], [1, 1, 4, 4, 4], [1, 1, 5, 5, 5], [1, 1, 6, 6, 6]]
+
+
+def output_size3d_():
+    return [[1, 1, 2, 2, 2], [1, 1, 3, 3, 3], [1, 1, 3, 4, 5], [1, 1, 4, 3, 2], [1, 1, 5, 5, 5], [1, 1, 6, 6, 6]]
+
+
+def _buildEquivalentAffineTransforms2d(device, input_size, output_size, angle_rad):
+    input_center = [(x - 1) / 2.0 for x in input_size]
+    output_center = [(x - 1) / 2.0 for x in output_size]
+
+    s = math.sin(angle_rad)
+    c = math.cos(angle_rad)
+
+    intrans_ary = np.array([
+        [1, 0, input_center[2]],
+        [0, 1, input_center[3]],
+        [0, 0, 1],
+    ], dtype=np.float64)
+
+    inscale_ary = np.array([
+        [input_center[2], 0, 0],
+        [0, input_center[3], 0],
+        [0, 0, 1],
+    ], dtype=np.float64)
+
+    rotation_ary = np.array([
+        [c, -s, 0],
+        [s, c, 0],
+        [0, 0, 1],
+    ], dtype=np.float64)
+
+    outscale_ary = np.array([
+        [1.0 / output_center[2], 0, 0],
+        [0, 1.0 / output_center[3], 0],
+        [0, 0, 1],
+    ], dtype=np.float64)
+
+    outtrans_ary = np.array([
+        [1, 0, -output_center[2]],
+        [0, 1, -output_center[3]],
+        [0, 0, 1],
+    ], dtype=np.float64)
+
+    reorder_ary = np.array([
+        [0, 1, 0],
+        [1, 0, 0],
+        [0, 0, 1],
+    ], dtype=np.float64)
+
+    transform_ary = np.dot(np.dot(np.dot(np.dot(
+        intrans_ary,
+        inscale_ary),
+        rotation_ary.T),
+        outscale_ary),
+        outtrans_ary)
+    grid_ary = np.dot(np.dot(np.dot(reorder_ary, rotation_ary.T), outscale_ary), outtrans_ary)
+
+    transform_tensor = torch.from_numpy((rotation_ary)).to(device, torch.float32)
+    transform_tensor = transform_tensor[:2].unsqueeze(0)
+
+    return transform_tensor, transform_ary, grid_ary
+
+
+def _buildEquivalentAffineTransforms3d(device, input_size, output_size, angle_rad, axis_vector):
+    input_center = [(x - 1) / 2.0 for x in input_size]
+    output_center = [(x - 1) / 2.0 for x in output_size]
+
+    s = math.sin(angle_rad)
+    c = math.cos(angle_rad)
+    c1 = 1 - c
+
+    intrans_ary = np.array([
+        [1, 0, 0, input_center[2]],
+        [0, 1, 0, input_center[3]],
+        [0, 0, 1, input_center[4]],
+        [0, 0, 0, 1],
+    ], dtype=np.float64)
+
+    inscale_ary = np.array([
+        [input_center[2], 0, 0, 0],
+        [0, input_center[3], 0, 0],
+        [0, 0, input_center[4], 0],
+        [0, 0, 0, 1],
+    ], dtype=np.float64)
+
+    l, m, n = axis_vector
+    scipyRotation_ary = np.array([
+        [l * l * c1 + c, m * l * c1 - n * s, n * l * c1 + m * s, 0],
+        [l * m * c1 + n * s, m * m * c1 + c, n * m * c1 - l * s, 0],
+        [l * n * c1 - m * s, m * n * c1 + l * s, n * n * c1 + c, 0],
+        [0, 0, 0, 1],
+    ], dtype=np.float64)
+
+    z, y, x = axis_vector
+    torchRotation_ary = np.array([
+        [x * x * c1 + c, y * x * c1 - z * s, z * x * c1 + y * s, 0],
+        [x * y * c1 + z * s, y * y * c1 + c, z * y * c1 - x * s, 0],
+        [x * z * c1 - y * s, y * z * c1 + x * s, z * z * c1 + c, 0],
+        [0, 0, 0, 1],
+    ], dtype=np.float64)
+
+    outscale_ary = np.array([
+        [1.0 / output_center[2], 0, 0, 0],
+        [0, 1.0 / output_center[3], 0, 0],
+        [0, 0, 1.0 / output_center[4], 0],
+        [0, 0, 0, 1],
+    ], dtype=np.float64)
+
+    outtrans_ary = np.array([
+        [1, 0, 0, -output_center[2]],
+        [0, 1, 0, -output_center[3]],
+        [0, 0, 1, -output_center[4]],
+        [0, 0, 0, 1],
+    ], dtype=np.float64)
+
+    reorder_ary = np.array([
+        [0, 0, 1, 0],
+        [0, 1, 0, 0],
+        [1, 0, 0, 0],
+        [0, 0, 0, 1],
+    ], dtype=np.float64)
+
+    transform_ary = np.dot(np.dot(np.dot(np.dot(
+        intrans_ary,
+        inscale_ary),
+        np.linalg.inv(scipyRotation_ary)),
+        outscale_ary),
+        outtrans_ary)
+    grid_ary = np.dot(np.dot(np.dot(reorder_ary, np.linalg.inv(scipyRotation_ary)), outscale_ary), outtrans_ary)
+
+    transform_tensor = torch.from_numpy((torchRotation_ary)).to(device, torch.float32)
+    transform_tensor = transform_tensor[:3].unsqueeze(0)
+
+    return transform_tensor, transform_ary, grid_ary
+# end TestNN.test_affine_* helpers
 
 
 num_shards = os.environ.get('TEST_NN_NUM_SHARDS', None)

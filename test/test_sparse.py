@@ -367,28 +367,23 @@ class TestSparse(TestCase):
             y = y.transpose(i, j)
             self.assertEqual(self.safeToDense(x), y)
 
-    def test_transpose_coalesce_invariant(self):
-        # If a sparse tensor is coalesced, its transpose should be the same
-        # If a sparse tensor is uncoalesed, its transpose should be the same
-        x_coalesced = self._gen_sparse(2, 3, 4)[0].coalesce()
-        x_indices = x_coalesced._indices()
-        x_values = x_coalesced._values()
+    @cpu_only
+    def test_coalesce_transpose_mm(self):
+        def test_shape(di, dj, dk):
+            x, _, _ = self._gen_sparse(2, 20, [dj, di])
+            y = torch.randn(dj, dk)
 
-        y_uncoalesced = self.SparseTensor(
-            torch.cat([x_indices, x_indices], dim=1),
-            torch.cat([x_values, x_values]),
-            x_coalesced.size())
+            x_coalesced = x.coalesce()
+            self.assertTrue(x_coalesced.is_coalesced())
 
-        self.assertTrue(x_coalesced.is_coalesced())
-        self.assertFalse(y_uncoalesced.is_coalesced())
+            x_coalesced_t = x.t()
+            self.assertFalse(x_coalesced_t.is_coalesced())
 
-        self.assertTrue(x_coalesced.transpose(0, 1).is_coalesced())
-        self.assertFalse(y_uncoalesced.transpose(0, 1).is_coalesced())
+            res = torch.mm(x_coalesced_t, y)
+            expected = torch.mm(self.safeToDense(x_coalesced_t), y)
+            self.assertEqual(res, expected)
 
-        x_coalesced.transpose_(0, 1)
-        y_uncoalesced.transpose_(0, 1)
-        self.assertTrue(x_coalesced.is_coalesced())
-        self.assertFalse(y_uncoalesced.is_coalesced())
+        test_shape(10, 20, 30)
 
     def test_t_empty(self):
         x = self.SparseTensor(2, 3)

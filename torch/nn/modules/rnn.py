@@ -522,6 +522,21 @@ class GRU(RNNBase):
 
 class RNNCellBase(Module):
 
+    def __init__(self, input_size, hidden_size, bias, num_chunks):
+        super(RNNCellBase, self).__init__()
+        self.input_size = input_size
+        self.hidden_size = hidden_size
+        self.bias = bias
+        self.weight_ih = Parameter(torch.Tensor(num_chunks * hidden_size, input_size))
+        self.weight_hh = Parameter(torch.Tensor(num_chunks * hidden_size, hidden_size))
+        if bias:
+            self.bias_ih = Parameter(torch.Tensor(num_chunks * hidden_size))
+            self.bias_hh = Parameter(torch.Tensor(num_chunks * hidden_size))
+        else:
+            self.register_parameter('bias_ih', None)
+            self.register_parameter('bias_hh', None)
+        self.reset_parameters()
+
     def extra_repr(self):
         s = '{input_size}, {hidden_size}'
         if 'bias' in self.__dict__ and self.bias is not True:
@@ -546,6 +561,11 @@ class RNNCellBase(Module):
             raise RuntimeError(
                 "hidden{} has inconsistent hidden_size: got {}, expected {}".format(
                     hidden_label, hx.size(1), self.hidden_size))
+
+    def reset_parameters(self):
+        stdv = 1.0 / math.sqrt(self.hidden_size)
+        for weight in self.parameters():
+            init.uniform_(weight, -stdv, stdv)
 
 
 class RNNCell(RNNCellBase):
@@ -598,25 +618,8 @@ class RNNCell(RNNCellBase):
     """
 
     def __init__(self, input_size, hidden_size, bias=True, nonlinearity="tanh"):
-        super(RNNCell, self).__init__()
-        self.input_size = input_size
-        self.hidden_size = hidden_size
-        self.bias = bias
+        super(RNNCell, self).__init__(input_size, hidden_size, bias, num_chunks=1)
         self.nonlinearity = nonlinearity
-        self.weight_ih = Parameter(torch.Tensor(hidden_size, input_size))
-        self.weight_hh = Parameter(torch.Tensor(hidden_size, hidden_size))
-        if bias:
-            self.bias_ih = Parameter(torch.Tensor(hidden_size))
-            self.bias_hh = Parameter(torch.Tensor(hidden_size))
-        else:
-            self.register_parameter('bias_ih', None)
-            self.register_parameter('bias_hh', None)
-        self.reset_parameters()
-
-    def reset_parameters(self):
-        stdv = 1.0 / math.sqrt(self.hidden_size)
-        for weight in self.parameters():
-            init.uniform_(weight, -stdv, stdv)
 
     def forward(self, input, hx=None):
         self.check_forward_input(input)
@@ -700,24 +703,7 @@ class LSTMCell(RNNCellBase):
     """
 
     def __init__(self, input_size, hidden_size, bias=True):
-        super(LSTMCell, self).__init__()
-        self.input_size = input_size
-        self.hidden_size = hidden_size
-        self.bias = bias
-        self.weight_ih = Parameter(torch.Tensor(4 * hidden_size, input_size))
-        self.weight_hh = Parameter(torch.Tensor(4 * hidden_size, hidden_size))
-        if bias:
-            self.bias_ih = Parameter(torch.Tensor(4 * hidden_size))
-            self.bias_hh = Parameter(torch.Tensor(4 * hidden_size))
-        else:
-            self.register_parameter('bias_ih', None)
-            self.register_parameter('bias_hh', None)
-        self.reset_parameters()
-
-    def reset_parameters(self):
-        stdv = 1.0 / math.sqrt(self.hidden_size)
-        for weight in self.parameters():
-            init.uniform_(weight, -stdv, stdv)
+        super(LSTMCell, self).__init__(input_size, hidden_size, bias, num_chunks=4)
 
     def forward(self, input, hx=None):
         self.check_forward_input(input)
@@ -787,24 +773,7 @@ class GRUCell(RNNCellBase):
     """
 
     def __init__(self, input_size, hidden_size, bias=True):
-        super(GRUCell, self).__init__()
-        self.input_size = input_size
-        self.hidden_size = hidden_size
-        self.bias = bias
-        self.weight_ih = Parameter(torch.Tensor(3 * hidden_size, input_size))
-        self.weight_hh = Parameter(torch.Tensor(3 * hidden_size, hidden_size))
-        if bias:
-            self.bias_ih = Parameter(torch.Tensor(3 * hidden_size))
-            self.bias_hh = Parameter(torch.Tensor(3 * hidden_size))
-        else:
-            self.register_parameter('bias_ih', None)
-            self.register_parameter('bias_hh', None)
-        self.reset_parameters()
-
-    def reset_parameters(self):
-        stdv = 1.0 / math.sqrt(self.hidden_size)
-        for weight in self.parameters():
-            init.uniform_(weight, -stdv, stdv)
+        super(GRUCell, self).__init__(input_size, hidden_size, bias, num_chunks=3)
 
     def forward(self, input, hx=None):
         self.check_forward_input(input)

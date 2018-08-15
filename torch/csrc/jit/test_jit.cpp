@@ -981,7 +981,6 @@ void testCustomOperators() {
     REQUIRE(op->schema().arguments[1].name == "_1");
     REQUIRE(op->schema().arguments[1].type->kind() == TypeKind::DynamicType);
 
-    REQUIRE(op->schema().returns.size() == 1);
     REQUIRE(op->schema().returns[0].type->kind() == TypeKind::DynamicType);
 
     Stack stack;

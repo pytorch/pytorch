@@ -52,11 +52,12 @@ TEST(NeuralNetGraph, ReplaceGraph) {
       });
   // clang-format on
 
-  EXPECT_FALSE(NNSubgraphMatcher::isSubtreeMatch(sum, pattern));
-  EXPECT_FALSE(NNSubgraphMatcher::isSubtreeMatch(reluOutput, pattern));
-  EXPECT_FALSE(NNSubgraphMatcher::isSubtreeMatch(input1, pattern));
+  EXPECT_FALSE(NNSubgraphMatcher::isSubtreeMatch(sum, pattern).isMatch());
+  EXPECT_FALSE(
+      NNSubgraphMatcher::isSubtreeMatch(reluOutput, pattern).isMatch());
+  EXPECT_FALSE(NNSubgraphMatcher::isSubtreeMatch(input1, pattern).isMatch());
 
-  EXPECT_TRUE(NNSubgraphMatcher::isSubtreeMatch(relu, pattern));
+  EXPECT_TRUE(NNSubgraphMatcher::isSubtreeMatch(relu, pattern).isMatch());
 
   NNSubgraphMatcher::replaceSubtree(
       graph, pattern, [](NNGraph& g, NNGraph::NodeRef relu) {

@@ -6,8 +6,7 @@
 #include "ATen/WrapDimUtils.h"
 #include "ATen/core/Error.h"
 #include "ATen/core/optional.h"
-#include "ATen/native/sparse/SparseUtils.h"
-
+#include <ATen/native/sparse/SparseUtils.h>
 #include <algorithm>
 #include <vector>
 
@@ -389,6 +388,8 @@ static inline Tensor & sparse_transpose_(Tensor & self, int64_t dim0, int64_t di
     tmp.copy_(row0);
     row0.copy_(row1);
     row1.copy_(tmp);
+
+    _get_sparse_impl(self)->set_coalesced(false);
 
     auto sizes = self.sizes().vec();
     std::swap(sizes[dim0], sizes[dim1]);

@@ -25,21 +25,23 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   const int N = X.dim32(0), C = X.dim32(1);
   CAFFE_ENFORCE_EQ(X.ndim(), filter.ndim());
   const int M = filter.dim32(0);
-  CAFFE_ENFORCE(
-      C == filter.dim32(1) * group_,
+  CAFFE_ENFORCE_EQ(
+      C,
+      filter.dim32(1) * group_,
       "Convolution op: input channels does not match: # of input channels ",
       C,
       " is not equal to kernel channels * group:",
       filter.dim32(1),
       "*",
       group_);
-  CAFFE_ENFORCE(
-      M % group_ == 0,
+  CAFFE_ENFORCE_EQ(
+      M % group_,
+      0,
       "The number of output channels is not divisible by group.");
 
   int kernel_dims_size = 1;
   for (int i = 0; i < kernel_.size(); ++i) {
-    CAFFE_ENFORCE(filter.dim32(i + 2) == kernel_[i]);
+    CAFFE_ENFORCE_EQ(filter.dim32(i + 2), kernel_[i]);
     kernel_dims_size *= kernel_[i];
   }
 
@@ -180,21 +182,22 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNCHW() {
 // The implementations.
 template <typename T, class Context>
 bool ConvOp<T, Context>::RunOnDeviceWithOrderNHWC() {
-  const Tensor& X = Input(INPUT);
-  auto& filter = Input(FILTER);
-  Tensor* Y = Output(0);
-  const int N = X.dim32(0), H = X.dim32(1), W = X.dim32(2), C = X.dim32(3);
-
   CAFFE_ENFORCE_EQ(
       kernel_.size(),
       2,
       "Only 2d convolution is supported for NHWC storage type");
 
-  CAFFE_ENFORCE(X.ndim(), filter.ndim());
+  const Tensor& X = Input(INPUT);
+  auto& filter = Input(FILTER);
+  Tensor* Y = Output(0);
+  CAFFE_ENFORCE_EQ(X.ndim(), 4);
+  const int N = X.dim32(0), H = X.dim32(1), W = X.dim32(2), C = X.dim32(3);
+
+  CAFFE_ENFORCE_EQ(X.ndim(), filter.ndim());
   const int M = filter.dim32(0);
-  CAFFE_ENFORCE(filter.dim32(1) == kernel_h());
-  CAFFE_ENFORCE(filter.dim32(2) == kernel_w());
-  CAFFE_ENFORCE(filter.dim32(3) == C);
+  CAFFE_ENFORCE_EQ(filter.dim32(1), kernel_h());
+  CAFFE_ENFORCE_EQ(filter.dim32(2), kernel_w());
+  CAFFE_ENFORCE_EQ(filter.dim32(3), C);
 
   ConvPoolOpBase<Context>::SetOutputSize(X, Y, filter.dim32(0));
   // The dimension of each kernel
@@ -637,11 +640,11 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
 
   const int N = X.dim32(0), H = X.dim32(1), W = X.dim32(2), C = X.dim32(3);
   ConvPoolOpBase<Context>::ComputePads({H, W});
-  CAFFE_ENFORCE(4 == filter.ndim());
+  CAFFE_ENFORCE_EQ(filter.ndim(), 4);
   const int M = filter.dim32(0);
-  CAFFE_ENFORCE(filter.dim32(1) == kernel_h());
-  CAFFE_ENFORCE(filter.dim32(2) == kernel_w());
-  CAFFE_ENFORCE(filter.dim32(3) == C);
+  CAFFE_ENFORCE_EQ(filter.dim32(1), kernel_h());
+  CAFFE_ENFORCE_EQ(filter.dim32(2), kernel_w());
+  CAFFE_ENFORCE_EQ(filter.dim32(3), C);
   dfilter->ResizeLike(filter);
 
   // The dimension of each kernel

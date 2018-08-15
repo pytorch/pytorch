@@ -420,8 +420,14 @@ class OperatorBase : public Observable<OperatorBase> {
 
 // OP_SINGLE_ARG provides a shorter initialization choice for initialization of
 // member variables for the class constructors.
+// This is a workaround for CUDA9.2 and GCC7
+#if defined(CUDART_VERSION) && CUDART_VERSION >= 9020 && __GNUC__ >= 7
+#define OP_SINGLE_ARG(type, name, variable, default)                           \
+  variable(this->template GetSingleArgument<type>(name, (default)))
+#else
 #define OP_SINGLE_ARG(type, name, variable, default)                           \
   variable(OperatorBase::GetSingleArgument<type>(name, (default)))
+#endif
 
 // INPUT_TAGS and OUTPUT_TAGS are optional features to name the indices of the
 // operator's inputs and outputs, in order to avoid confusion. For example, for
@@ -686,6 +692,8 @@ class Operator : public OperatorBase {
   /* using override */ using OperatorBase::GetRepeatedArgument;     \
   /* using override */ using OperatorBase::InputIsType;             \
   /* using override */ using OperatorBase::InputSize;               \
+  /* using override */ using OperatorBase::Output;                  \
+  /* using override */ using OperatorBase::Input;                   \
   /* using override */ using OperatorBase::OutputSize
 
 #define USE_OPERATOR_FUNCTIONS(context)                    \
