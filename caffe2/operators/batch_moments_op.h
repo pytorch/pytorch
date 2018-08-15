@@ -15,7 +15,7 @@ class BatchMomentsOp final : public Operator<Context> {
   BatchMomentsOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         order_(StringToStorageOrder(
-            OperatorBase::GetSingleArgument<std::string>("order", "NCHW"))) {
+            this->template GetSingleArgument<std::string>("order", "NCHW"))) {
     CAFFE_ENFORCE_NE(order_, StorageOrder::UNKNOWN);
   }
 
@@ -65,7 +65,7 @@ class BatchMomentsGradientOp final : public Operator<Context> {
   BatchMomentsGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         order_(StringToStorageOrder(
-            OperatorBase::GetSingleArgument<std::string>("order", "NCHW"))) {
+            this->template GetSingleArgument<std::string>("order", "NCHW"))) {
     CAFFE_ENFORCE_NE(order_, StorageOrder::UNKNOWN);
   }
 
