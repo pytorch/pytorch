@@ -87,6 +87,47 @@ bool isSimpleMap(Node *node) {
   return true;
 }
 
+enum class DeviceType { Unknown, AnyDevice, CPU, CUDA };
+
+struct Device {
+
+  DeviceType type() {
+    return type_;
+  }
+
+  int index() {
+    JIT_ASSERT(can_have_index(type_));
+    return index_;
+  }
+
+  static Device fromIndex(int index) {
+    JIT_ASSERT(index >= kCPUDevice);
+    if (index == kCPUDevice) {
+      return Device(DeviceType::CPU, index);
+    }
+    return Device(DeviceType::CUDA, index);
+  }
+
+  static Device AnyDevice() {
+    return Device(DeviceType::AnyDevice, 0);
+  }
+
+  static Device Unknown() {
+    return Device(DeviceType::Unknown, 0);
+  }
+
+private:
+  DeviceType type_;
+  int index_;
+
+  Device(DeviceType type, int index)
+  : type_(type), index_(index) {}
+
+  bool can_have_index(DeviceType type) {
+    return type == DeviceType::CPU || type == DeviceType::CUDA;
+  }
+};
+
 
 struct GraphFuser {
   Block * block;
@@ -101,15 +142,19 @@ struct GraphFuser {
   GraphFuser(Block * block)
   : block(block) {}
 
-  at::optional<int> getDevice(Node * node) {
+  Device getDevice(Node * node) {
     if(node->kind() == prim::FusionGroup) {
-      return node->i(attr::device);
+      return Device::fromIndex(node->i(attr::device));
     }
     if(auto tt = node->output()->type()->cast<TensorType>()) {
-      return tt->device();
+      return Device::fromIndex(tt->device());
     }
-    return at::nullopt;
+    if (node->output()->type()->isSubtypeOf(NumberType::get())) {
+      return Device::AnyDevice();
+    }
+    return Device::Unknown();
   }
+
   // TODO: the fusion compiler has a lot of float-specific codegen
   // so for now we only consider nodes that operate on floating point numbers
   // and half values when running on a GPU with sufficient CUDA arch
@@ -267,23 +312,36 @@ struct GraphFuser {
     return isFusableOnlyAsExitNode(node);
   }
 
-  bool checkDevices(Node * consumer, Value * producer) {
-    at::optional<int> consumer_device = getDevice(consumer);
-    at::optional<int> producer_device = getDevice(producer->node());
+  bool compatibleDevices(Node * consumer, Value * producer) {
+    auto consumer_device = getDevice(consumer);
+    auto producer_device = getDevice(producer->node());
 
-    if (!consumer_device) {
+    if (consumer_device.type() == DeviceType::Unknown ||
+        producer_device.type() == DeviceType::Unknown) {
       return false;
     }
-    // no producer device and isFusable -> producer is a Number
-    if (!producer_device) {
-      JIT_ASSERT(producer->type()->cast<NumberType>());
+
+    if (consumer_device.type() == DeviceType::CPU ||
+        producer_device.type() == DeviceType::CPU) {
+      if (!sharedFusionCompiler().canCompileOnCPU()) {
+        return false;
+      }
+    }
+
+    if (consumer_device.type() == DeviceType::AnyDevice ||
+        producer_device.type() == DeviceType::AnyDevice) {
       return true;
     }
-    if (consumer_device != producer_device) {
-      return false;
+
+    if (consumer_device.type() == producer_device.type()) {
+      if (consumer_device.type() == DeviceType::CUDA) {
+        return consumer_device.index() == producer_device.index();
+      }
+      JIT_ASSERT(consumer_device.type() == DeviceType::CPU);
+      return true;
     }
-    // If CPU -> make sure we can compile on CPU, (X -> Y) <-> (!X || Y)
-    return (*consumer_device != kCPUDevice || sharedFusionCompiler().canCompileOnCPU());
+
+    return false;
   }
 
   bool shouldFuse(Node * consumer, Value * producer) {
@@ -295,7 +353,7 @@ struct GraphFuser {
     Node *real_consumer = consumer->kind() == aten::cat ? consumer->namedInput(attr::tensors)->node() : consumer;
     return isFusable(producer->node()) &&
       allUsersAreThisConsumerOrOccurAfterIt(real_consumer, producer) &&
-      checkDevices(consumer, producer);
+      compatibleDevices(consumer, producer);
   }
 
   // insert a producer node into a consuming fusion group.
@@ -373,7 +431,7 @@ struct GraphFuser {
       inputs_map[input] = subgraph.inputs()[i++];
     }
     // add n's inputs to the fusion group's input list if we don't already have them
-    Node * insert_after = subgraph.block()->return_node(); // "front" of the graph
+    WithInsertPoint guard(*subgraph.nodes().begin());
     for (auto input : n->inputs()) {
       if (inputs_map.count(input) == 0) {
         if (input->type()->isSubtypeOf(DynamicType::get())) {
@@ -387,8 +445,7 @@ struct GraphFuser {
           // cases we inline the constants directly in the body of the fused group.
           JIT_ASSERT(input->node()->kind() == prim::Constant);
           Node * in_const = subgraph.createClone(input->node(), [](Value*) -> Value* { throw std::runtime_error("unexpected input"); });
-          in_const->insertAfter(insert_after);
-          insert_after = in_const;
+          subgraph.insertNode(in_const);
           inputs_map[input] = in_const->output();
         }
       }
@@ -409,13 +466,13 @@ struct GraphFuser {
       subgraph.inputs()[p]->replaceAllUsesWith(in_graph->output());
       subgraph.eraseInput(p);
     }
-    return in_graph->insertAfter(insert_after);
+    return subgraph.insertNode(in_graph);
   }
 
   // turn consumer node n into a fusion group with just n inside
   // to prepare for fusion and replace uses of n with the new group
   Node * createSingletonFusionGroup(Node * n) {
-    auto group = block->owningGraph()->createFusionGroup(getDevice(n).value());
+    auto group = block->owningGraph()->createFusionGroup(getDevice(n).index());
     // propogate position information for the new node so we can always
     // have a valid mapping
     topological_index[group] = topological_index[n];
