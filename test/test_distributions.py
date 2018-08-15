@@ -3014,7 +3014,7 @@ class TestKL(TestCase):
             (binomial30, binomial30),
             (binomial_vectorized_count, binomial_vectorized_count),
             (categorical, categorical),
-            (Categorical(torch.ones(1,10)), Categorical(torch.ones(3,10))),
+            (Categorical(torch.ones(1, 10)), Categorical(torch.ones(3, 10))),
             (chi2, chi2),
             (chi2, exponential),
             (chi2, gamma),
