@@ -31,19 +31,19 @@ namespace {
 // we don't currently support zero-size dimensions, so we can't actually
 // do this; so we just allocate zero-size tensors for everything.
 SparseTensorImpl::SparseTensorImpl(at::TensorTypeId type_id, at::ScalarType scalar_type)
-    : TensorImpl(type_id, scalar_type, nullptr, false)
-    , size_{0}
+    : TensorImpl(type_id, scalar_type, false)
     , sparseDims_(1)
     , denseDims_(0)
     , indices_(globalContext().getTypeOpt(sparseTensorIdToDenseBackend(type_id), ScalarType::Long)->tensor())
     , values_(globalContext().getTypeOpt(sparseTensorIdToDenseBackend(type_id), scalar_type)->tensor()) {}
 
-IntList SparseTensorImpl::sizes() const {
-  return size_;
-}
 IntList SparseTensorImpl::strides() const {
   AT_ERROR("sparse tensors do not have strides");
 }
+int64_t SparseTensorImpl::stride(int64_t d) const {
+  AT_ERROR("sparse tensors do not have strides");
+}
+
 int64_t SparseTensorImpl::dim() const {
   return sparseDims_ + denseDims_;
 }
@@ -54,13 +54,15 @@ TensorImpl* SparseTensorImpl::maybe_zero_dim(bool condition_when_zero_dim) {
            " changing dimensionality via maybe_zero_dim");
   return this;
 }
-void * SparseTensorImpl::unsafeGetTH(bool retain) {
-  AT_ERROR("unsafeGetTH not supported for new style TensorImpl");
-}
 std::unique_ptr<Storage> SparseTensorImpl::storage() {
   AT_ERROR("sparse tensors do not have storage");
 }
-
+at::StorageImpl* SparseTensorImpl::storageImpl() const {
+  AT_ERROR("sparse tensors do not have storage");
+}
+int64_t SparseTensorImpl::storage_offset() const {
+  AT_ERROR("sparse tensors do not have storage");
+}
 void SparseTensorImpl::set_indices_and_values(const Tensor& indices, const Tensor& values) {
   // TODO: Explicit empty test is needed because we don't handle size zero
   // dimensions at the moment

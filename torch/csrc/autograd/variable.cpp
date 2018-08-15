@@ -22,7 +22,10 @@
 namespace torch {
 namespace autograd {
 Variable::Impl::Impl(at::Tensor data, bool requires_grad, Edge gradient_edge)
-    : TensorImpl(data.type().type_id(), data.type().scalarType(), nullptr, /* is variable */ true),
+    : TensorImpl(
+          data.type().type_id(),
+          data.type().scalarType(),
+          /* is variable */ true),
       data_(std::move(data)),
       grad_fn_(std::move(gradient_edge.function)),
       requires_grad_(false),
@@ -53,16 +56,27 @@ int64_t Variable::Impl::dim() const {
   return data_.dim();
 }
 
+int64_t Variable::Impl::size(int64_t d) const {
+  return data_.size(d);
+}
+int64_t Variable::Impl::stride(int64_t d) const {
+  return data_.stride(d);
+}
+
 const char* Variable::Impl::typeString() {
   return "VariableType";
 }
 
-void* Variable::Impl::unsafeGetTH(bool retain) {
-  return data_.unsafeGetTH(retain);
-}
-
 std::unique_ptr<at::Storage> Variable::Impl::storage() {
   return data_.storage();
+}
+
+at::StorageImpl* Variable::Impl::storageImpl() const {
+  return data_.unsafeGetTensorImpl()->storageImpl();
+}
+
+int64_t Variable::Impl::storage_offset() const {
+  return data_.storage_offset();
 }
 
 std::shared_ptr<Function> Variable::Impl::get_grad_accumulator() {
