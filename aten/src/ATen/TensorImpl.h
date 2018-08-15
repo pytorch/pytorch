@@ -128,7 +128,7 @@ struct AT_API TensorImpl : public Retainable {
   }
 
   inline at::ScalarType scalar_type() const {
-    return storageImpl()->scalar_type();
+    return scalar_type_;
   }
 
   virtual ptrdiff_t storage_offset() const {
