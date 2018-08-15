@@ -160,10 +160,6 @@ void gpu_binary_kernel(TensorIterator& iter, const func_t& f) {
       return f(a, b);
     });
   } else if (iter.is_trivial_1d()) {
-    auto strides = iter.get_inner_strides();
-    int stride0 = strides[0];
-    int stride1 = strides[1];
-    int stride2 = strides[2];
     launch_kernel<512, 1>(numel, [=]__device__(int idx) {
       reinterpret_cast<arg0_t*>(out_data)[idx] =
                         f(reinterpret_cast<const arg1_t*>(in1_data)[idx],
