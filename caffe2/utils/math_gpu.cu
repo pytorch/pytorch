@@ -2371,11 +2371,13 @@ __global__ void Im2ColNCHWCUDAKernel(
         const int h = h_in + dh;
         const int w = w_in + dw;
 #if __CUDA_ARCH__ >= 350
-        *col_data_ptr = (h >= 0 && w >= 0 && h < input_h && w < input_w)
+        *col_data_ptr = utils::IsAGeZeroAndALtB(h, input_h) &&
+                utils::IsAGeZeroAndALtB(w, input_w)
             ? __ldg(img_data_ptr + dh * input_w + dw)
             : 0;
 #else
-        *col_data_ptr = (h >= 0 && w >= 0 && h < input_h && w < input_w)
+        *col_data_ptr = utils::IsAGeZeroAndALtB(h, input_h) &&
+                utils::IsAGeZeroAndALtB(w, input_w)
             ? img_data_ptr[dh * input_w + dw]
             : 0;
 #endif
@@ -2420,11 +2422,13 @@ __global__ void Im2ColNHWCCUDAKernel(
         const int h = h_in + dh;
         const int w = w_in + dw;
 #if __CUDA_ARCH__ >= 350
-        *col_data_ptr = (h >= 0 && w >= 0 && h < input_h && w < input_w)
+        *col_data_ptr = utils::IsAGeZeroAndALtB(h, input_h) &&
+                utils::IsAGeZeroAndALtB(w, input_w)
             ? __ldg(img_data + (h * input_w + w) * channels + channel_in)
             : 0;
 #else
-        *col_data_ptr = (h >= 0 && w >= 0 && h < input_h && w < input_w)
+        *col_data_ptr = utils::IsAGeZeroAndALtB(h, input_h) &&
+                utils::IsAGeZeroAndALtB(w, input_w)
             ? img_data[(h * input_w + w) * channels + channel_in]
             : 0;
 #endif
@@ -2580,7 +2584,7 @@ __global__ void Im2ColNdNCHWCUDAKernel(
       for (int d_i = 0; d_i < N; ++d_i) {
         const int d_img = d_iter[d_i] * stride.data[d_i] - pad.data[d_i] +
             d_offset[d_i] * dilation.data[d_i];
-        is_padding |= d_img < 0 || d_img >= img_shape.data[d_i + 1];
+        is_padding |= !utils::IsAGeZeroAndALtB(d_img, img_shape.data[d_i + 1]);
         img_index = img_index * img_shape.data[d_i + 1] + d_img;
       }
 #if __CUDA_ARCH__ >= 350
