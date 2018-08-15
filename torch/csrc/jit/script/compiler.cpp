@@ -612,36 +612,41 @@ std::shared_ptr<SugaredValue> BuiltinFunction::call(
 
 struct to_ir {
   to_ir(
-      TypedDef typed_def,
+      Def def,
       FunctionTable& function_table,
       const Resolver& resolver,
       SugaredValuePtr self,
       Method& method) // method being constructed
       : method(method)
       , graph(method.graph())
-      , def(typed_def.def)
+      , def(def)
       , function_table(function_table)
       , resolver(resolver)
       , environment_stack(nullptr) {
     pushFrame(graph->block());
 
+    auto schema = extractSchemaFromDef(def, bool(self));
+
     std::vector<Argument> arguments, returns; // for schema
     // inputs
-    auto it = def.params().begin();
-    auto end = def.params().end();
+    auto it = def.decl().params().begin();
+    auto end = def.decl().params().end();
     // Type annotations exclude explicitly typing the "self" parameter, so in the
     // case that this is a method with self we expect one fewer parameter annotation
     // than the number of parameters this Def takes.
-    auto expected_annotation_size = self ? def.params().size() - 1 : def.params().size();
-    if (typed_def.schema && typed_def.schema->arguments.size() != expected_annotation_size) {
-      throw ErrorReport(def.params().range()) << "Number of type annotations for"
-        << " function parameters (" << typed_def.schema->arguments.size() << ")"
+    if (self && def.decl().params().size() == 0) {
+      throw ErrorReport(def.decl().params().range()) << "methods must have a self argument";
+    }
+    auto expected_annotation_size = self ? def.decl().params().size() - 1 : def.decl().params().size();
+    if (schema.arguments.size() != expected_annotation_size) {
+      throw ErrorReport(def.decl().params().range()) << "Number of type annotations for"
+        << " function parameters (" << arguments.size() << ")"
         << " does not match the number of parameters on the function ("
         << expected_annotation_size << ")!";
     }
     if(self) {
       if(it == end)
-        throw ErrorReport(def.params().range()) << "methods must have a self argument";
+        throw ErrorReport(def.decl().params().range()) << "methods must have a self argument";
       environment_stack->setSugaredVar(def.range(), (*it).ident().name(), self);
       ++it;
     }
@@ -653,12 +658,7 @@ struct to_ir {
       environment_stack->setVar((*it).ident().range(), name, new_input);
 
       // Record the type for the schema and set the Type on the Value*
-      // TypePtr arg_type = DynamicType::get();
-      if (typed_def.schema) {
-        arguments.push_back(typed_def.schema->arguments.at(arg_annotation_idx++));
-      } else {
-        arguments.emplace_back(name, DynamicType::get());
-      }
+      arguments.push_back(schema.arguments.at(arg_annotation_idx++));
       new_input->setType(arguments.back().type);
     }
     // body
@@ -685,9 +685,9 @@ struct to_ir {
           results = createTupleUnpack(result).vec();
         }
       }
-      if (typed_def.schema && typed_def.schema->returns.size() != results.size()) {
+      if (!schema.is_varret && schema.returns.size() != results.size()) {
         throw ErrorReport(def.range()) << "Number of type annotations for function"
-          << " return (" << typed_def.schema->returns.size() << ") does not match"
+          << " return (" << schema.returns.size() << ") does not match"
           << " the number of returns from the function (" << results.size() << ")!";
       }
       auto range = return_stmt.range();
@@ -704,8 +704,8 @@ struct to_ir {
         }
         graph->registerOutput(r);
         TypePtr type = DynamicType::get();
-        if (typed_def.schema) {
-          type = typed_def.schema->returns.at(return_type_idx).type;
+        if (!schema.is_varret) {
+          type = schema.returns.at(return_type_idx).type;
           if (!r->type()->isSubtypeOf(type)) {
             throw ErrorReport(return_stmt.range()) << "Return value at position "
               << return_type_idx << " was annotated as having type " << type->str()
@@ -1351,13 +1351,19 @@ private:
       case TK_NONE: {
         return emitNone(tree->range());
       } break;
-      case TK_SLICE: {
-        return emitSlice(Slice(tree));
-      } break;
-      case TK_GATHER: {
-        const auto gather = Gather(tree);
-        return emitGather(
-            gather.range(), {gather.value(), gather.indices()});
+      case TK_SUBSCRIPT: {
+        const auto subscript = Subscript(tree);
+        auto slice_exprs = subscript.subscript_exprs();
+        if (slice_exprs.size() != 1) {
+          // TODO Implement multidimensional slice
+          throw ErrorReport(subscript.range()) << "Subscripting multiple dimensions is currently not supported\n";
+        }
+        if (slice_exprs[0].kind() == TK_SLICE_EXPR) {
+          return emitSlice(subscript);
+        } else {
+          return emitGather(
+              subscript.range(), TreeList{subscript.value(), slice_exprs[0]});
+        }
       } break;
       case TK_IF_EXPR: {
         return emitTernaryIf(TernaryIf(tree));
@@ -1413,10 +1419,15 @@ private:
     return insertConstant(*graph, c.text(), c.range());
   }
 
-  // Desugars slice syntactic sugar foo[begin:end]
-  Value* emitSlice(const Slice& slice) {
-    const auto& loc = slice.range();
-    TreeList inputs = {slice.value(), slice.startOr(0)};
+  // Desugars slice syntactic sugar tensor[begin:end] -> tensor.slice(begin,
+  // end).
+  Value* emitSlice(const Subscript& subscript) {
+    const auto& loc = subscript.range();
+    // TODO: implement multidimensional slice
+    JIT_ASSERT(subscript.subscript_exprs().size() == 1);
+    JIT_ASSERT(subscript.subscript_exprs()[0].kind() == TK_SLICE_EXPR);
+    auto slice_exp = SliceExpr(subscript.subscript_exprs()[0]);
+    TreeList inputs = {subscript.value(), slice_exp.startOr(0)};
     const auto applyInputs = Compound::create(TK_LIST, loc, std::move(inputs));
     const auto input_values = getNamedValues(
         applyInputs->trees(),
@@ -1436,10 +1447,10 @@ private:
 
     args.push_back(begin);
 
-    const auto has_end = slice.end().present();
+    const auto has_end = slice_exp.end().present();
     if (has_end) {
       // If the user specified an `end` index, pass it down
-      args.emplace_back(loc, "end", emitExpr(Expr(slice.end().get()), identity));
+      args.emplace_back(loc, "end", emitExpr(Expr(slice_exp.end().get()), identity));
     }
 
     return emitBuiltinCall(loc, *graph, aten::slice, args, {step}, true);
@@ -1498,16 +1509,16 @@ std::vector<Value*> inlineCallTo(Graph& g, Graph& callee, ArrayRef<Value*> input
   return outputs;
 }
 
-void defineMethodsInModule(Module & m, const std::vector<TypedDef>& definitions, const std::vector<Resolver>& resolvers, SugaredValuePtr self) {
+void defineMethodsInModule(Module & m, const std::vector<Def>& definitions, const std::vector<Resolver>& resolvers, SugaredValuePtr self) {
   FunctionTable table;
   JIT_ASSERT(definitions.size() == resolvers.size());
   auto resolver_it = resolvers.begin();
   std::vector<Method*> methods;
-  for(TypedDef typed_def : definitions) {
-    const std::string& name = typed_def.def.name().name();
+  for(Def def : definitions) {
+    const std::string& name = def.name().name();
     Resolver resolver = *resolver_it++;
-    auto creator = [typed_def, &table, resolver, self](Method& method) {
-      to_ir(typed_def, table, resolver, self,  method);
+    auto creator = [def, &table, resolver, self](Method& method) {
+      to_ir(def, table, resolver, self,  method);
     };
     Method& method = m.create_method(name, creator);
     // if self is defined, then these are methods and do not go into the global namespace
@@ -1524,22 +1535,120 @@ void defineMethodsInModule(Module & m, const std::vector<TypedDef>& definitions,
   }
 }
 
+const std::unordered_map<std::string, TypePtr> &ident_to_type_lut() {
+  static std::unordered_map<std::string, TypePtr> map = {
+    {"Tensor", DynamicType::get()},
+    {"int", IntType::get()},
+    {"float", FloatType::get()},
+  };
+  return map;
+}
+
+TypePtr parseTypeFromExpr(Expr expr);
+
+const std::unordered_map<std::string, std::function<TypePtr(Subscript)>> &subscript_to_type_fns() {
+  static std::unordered_map<std::string, std::function<TypePtr(Subscript)>> map = {
+    {"Tuple", [](Subscript subscript) -> TypePtr {
+      std::vector<TypePtr> subscript_expr_types;
+      for (auto expr : subscript.subscript_exprs()) {
+        subscript_expr_types.push_back(parseTypeFromExpr(expr));
+      }
+      return TupleType::create(subscript_expr_types);
+    }},
+  };
+  return map;
+}
+
+TypePtr parseTypeFromExpr(Expr expr) {
+  if (expr.kind() == TK_VAR) {
+    auto ident = Var(expr).name();
+    auto itr = ident_to_type_lut().find(ident.name());
+    if (itr != ident_to_type_lut().end()) {
+      return itr->second;
+    }
+    throw ErrorReport(expr.range()) << "Unknown type name " << ident.name();
+  } else if (expr.kind() == TK_SUBSCRIPT) {
+    auto subscript = Subscript(expr);
+    if (subscript.value().kind() != TK_VAR) {
+      throw ErrorReport(subscript.value().range()) << "Subscripted type must be a type identifier";
+    }
+    auto value_name = Var(subscript.value()).name().name();
+    if (!subscript_to_type_fns().count(value_name)) {
+      throw ErrorReport(subscript.range()) << "Type " << value_name << " cannot be subscripted";
+    }
+    return subscript_to_type_fns().at(value_name)(subscript);
+  } else if (expr.kind() == '.') {
+    auto select = Select(expr);
+    if (select.value().kind() == TK_VAR && Var(select.value()).name().name() == "torch"
+        && select.selector().name() == "Tensor") {
+      return ident_to_type_lut().at("Tensor");
+    }
+    std::cout << select << std::endl;
+  }
+  throw ErrorReport(expr.range()) << "Expression of type " << kindToString(expr.kind())
+                                  << " cannot be used in a type expression";
+}
+
+std::vector<Argument> parseArgsFromDecl(Decl decl, bool is_method) {
+  std::vector<Argument> retval;
+  size_t i = is_method ? 1 : 0;
+  for (; i < decl.params().size(); ++i) {
+    auto decl_arg = decl.params()[i];
+    auto arg = Argument(decl_arg.ident().name(), parseTypeFromExpr(decl_arg.type()),
+                        /*N =*/at::nullopt, /*default_value =*/at::nullopt,
+                        /*kwarg_only =*/false);
+    retval.push_back(arg);
+  }
+  return retval;
+}
+
+std::vector<Argument> parseReturnsFromDecl(Decl decl) {
+  JIT_ASSERT(decl.return_type().present());
+  auto parsed_type = parseTypeFromExpr(decl.return_type().get());
+  if (auto tuple_type = parsed_type->cast<TupleType>()) {
+    // Flatten a single return type of type Tuple into its constituent types
+    std::vector<Argument> retval;
+    for (auto type_ptr : tuple_type->elements()) {
+      retval.emplace_back("", type_ptr, /*N =*/at::nullopt,
+                          /*default_value =*/at::nullopt, /*kwarg_only =*/false);
+    }
+    return retval;
+  } else {
+    return {Argument("", parsed_type, /*N =*/at::nullopt,
+                     /*default_value =*/at::nullopt, /*kwarg_only =*/false)};
+  }
+}
+
+FunctionSchema extractSchemaFromDef(const Def &def, bool is_method) {
+    auto name = def.name().name();
+    std::vector<Argument> args = parseArgsFromDecl(def.decl(), is_method);
+    std::vector<Argument> returns;
+    bool is_varret;
+    if (def.decl().return_type().present()) {
+      returns = parseReturnsFromDecl(def.decl());
+      is_varret = false;
+    } else {
+      is_varret = true;
+    }
+    return FunctionSchema(name, args, returns, false, is_varret);
+}
+
 void defineMethodsInModule(Module & m, const std::string& source, const Resolver& resolver, SugaredValuePtr self) {
   Parser p(source);
-  std::vector<TypedDef> definitions;
+  std::vector<Def> definitions;
   std::vector<Resolver> resolvers;
   while (p.lexer().cur().kind != TK_EOF) {
-    // TODO: Function schema
-    definitions.emplace_back(Def(p.parseFunction()), at::nullopt);
+    auto def = Def(p.parseFunction(/*is_method=*/bool(self)));
+    definitions.push_back(def);
     resolvers.push_back(resolver);
   }
   defineMethodsInModule(m, definitions, resolvers, self);
 }
 
-std::shared_ptr<Graph> compileFunction(TypedDef typed_def, const Resolver& resolver) {
+std::shared_ptr<Graph> compileFunction(Def def, const Resolver& resolver) {
   Module m;
-  defineMethodsInModule(m, {typed_def}, {resolver}, nullptr);
-  return m.get_method(typed_def.def.name().name()).graph();
+  defineMethodsInModule(m, {def}, {resolver}, nullptr);
+  return m.get_method(def.name().name()).graph();
 }
 
 std::vector<std::shared_ptr<SugaredValue>> SimpleValue::asTuple(SourceRange loc, Method& m) {
