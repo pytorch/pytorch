@@ -20,7 +20,6 @@
 #include "caffe2/core/types.h"
 #include "caffe2/core/workspace.h"
 #include "caffe2/proto/caffe2.pb.h"
-#include "caffe2/utils/filler.h"
 #include "caffe2/utils/proto_utils.h"
 
 namespace caffe2 {
@@ -604,76 +603,6 @@ class Operator : public OperatorBase {
   }
 
   void SyncDevice() final {}
-
-  virtual std::vector<TensorFiller<Context>> InputFillers(
-      const std::vector<std::vector<TIndex>>& shapes) {
-    CAFFE_ENFORCE(shapes.size() == Inputs().size());
-    std::vector<TensorFiller<Context>> fillers;
-    for (const auto& shape : shapes) {
-      fillers.emplace_back(shape, &context_);
-    }
-
-    return fillers;
-  }
-
-#define DISABLE_INPUT_FILLERS(Context)                                 \
-  std::vector<TensorFiller<Context>> InputFillers(                     \
-      const std::vector<std::vector<TIndex>>& /* unused */) override { \
-    throw UnsupportedOperatorFeature(                                  \
-        OperatorBase::type() + " does not have input fillers");        \
-  }
-
-  void SparseLengthsFillerHelper(
-      const std::vector<std::vector<TIndex>>& shapes,
-      size_t value_index,
-      size_t length_index,
-      std::vector<TensorFiller<Context>>* fillers) {
-    CAFFE_ENFORCE_EQ(shapes[length_index].size(), 1);
-    (*fillers)[length_index].SparseLengths(shapes[value_index].front());
-  }
-
-  void SparseSegmentsFillerHelper(
-      const std::vector<std::vector<TIndex>>& shapes,
-      size_t value_index,
-      size_t segment_index,
-      std::vector<TensorFiller<Context>>* fillers) {
-    CAFFE_ENFORCE_EQ(shapes[segment_index].size(), 1);
-    // TODO (mnaumov): distribution of value
-    (*fillers)[value_index].Min(0).Max(shapes[value_index].front() * 2);
-    (*fillers)[segment_index].SparseSegments(shapes[value_index].front() - 1);
-  }
-
-// The helper is build sparse input with values and lengths; e.g.:
-// values  = [1, 2, 3, 2, 4, 6, 7, 3, 6]
-//            \_____/  \________/  \__/
-// lengths =    [3,        4,       2]
-#define USE_VALUE_LENGTH_INPUT_FILLERS(Context, value_index, length_index) \
-  std::vector<TensorFiller<Context>> InputFillers(                         \
-      const std::vector<std::vector<TIndex>>& shapes) override {           \
-    CAFFE_ENFORCE_EQ(shapes.size(), Operator<Context>::Inputs().size());   \
-    auto fillers = Operator<Context>::InputFillers(shapes);                \
-    Operator<Context>::SparseLengthsFillerHelper(                          \
-        shapes, value_index, length_index, &fillers);                      \
-    return fillers;                                                        \
-  }
-
-  // The helper is build sparse input with values, keys, and lengths; e.g.:
-  // values  = [1, 2, 3, 2, 4, 6, 7, 3, 6]
-  // keys    = [0, 1, 4, 0, 1, 2, 5, 1, 2]
-  //            \_____/  \________/  \__/
-  // lengths =    [3,        4,       2]
-#define USE_VALUE_KEY_LENGTH_INPUT_FILLERS(                              \
-    Context, value_index, key_index, length_index)                       \
-  std::vector<TensorFiller<Context>> InputFillers(                       \
-      const std::vector<std::vector<TIndex>>& shapes) override {         \
-    CAFFE_ENFORCE_EQ(shapes.size(), Operator<Context>::Inputs().size()); \
-    auto fillers = Operator<Context>::InputFillers(shapes);              \
-    Operator<Context>::SparseLengthsFillerHelper(                        \
-        shapes, key_index, length_index, &fillers);                      \
-    Operator<Context>::SparseSegmentsFillerHelper(                       \
-        shapes, value_index, key_index, &fillers);                       \
-    return fillers;                                                      \
-  }
 
  protected:
   void RecordEvent(const char* err_msg = nullptr) final {

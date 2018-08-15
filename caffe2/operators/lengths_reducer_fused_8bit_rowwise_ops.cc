@@ -9,6 +9,10 @@ REGISTER_CPU_OPERATOR(
 OPERATOR_SCHEMA(SparseLengthsSumFused8BitRowwise)
     .NumInputs(3)
     .NumOutputs(1)
+    .ValueKeyLengthInputFillers(
+        SparseLengthsFused8BitRowwiseOp<CPUContext>::DATA,
+        SparseLengthsFused8BitRowwiseOp<CPUContext>::INDICES,
+        SparseLengthsFused8BitRowwiseOp<CPUContext>::LENGTHS)
     .SetDoc(R"DOC(
 Performs the same operation as SparseLengthsSum, but operating on
 8-bit rowwise quantized matrices with fused storage (where each row
@@ -37,6 +41,7 @@ REGISTER_CPU_OPERATOR(
 OPERATOR_SCHEMA(SparseLengthsWeightedSumFused8BitRowwise)
     .NumInputs(4)
     .NumOutputs(1)
+    .DisallowInputFillers() // TODO: Enable the fillers
     .SetDoc(R"DOC(
 Performs the same operation as SparseLengthsWeightedSum,
 but operating on 8-bit rowwise quantized matrices with fused storage
@@ -73,6 +78,10 @@ REGISTER_CPU_OPERATOR(
 OPERATOR_SCHEMA(SparseLengthsMeanFused8BitRowwise)
     .NumInputs(3)
     .NumOutputs(1)
+    .ValueKeyLengthInputFillers(
+        SparseLengthsFused8BitRowwiseOp<CPUContext, false, true>::DATA,
+        SparseLengthsFused8BitRowwiseOp<CPUContext, false, true>::INDICES,
+        SparseLengthsFused8BitRowwiseOp<CPUContext, false, true>::LENGTHS)
     .SetDoc(R"DOC(
 Performs the same operation as SparseLengthsMean, but
 operating on 8-bit rowwise quantized matrices with fused storage
