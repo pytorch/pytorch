@@ -2,6 +2,7 @@
 
 #include <torch/nn/module.h>
 #include <torch/tensor.h>
+#include <torch/utils.h>
 
 #include <ATen/OptionsGuard.h>
 #include <ATen/TensorOptions.h>
@@ -37,6 +38,8 @@ class Cloneable : public virtual Module {
     auto options = DefaultTensorOptions::get();
     OptionsGuard options_guard(
         options.device(device.value_or(options.device())));
+
+    NoGradGuard no_grad;
 
     const auto& self = static_cast<const Derived&>(*this);
     auto copy = std::make_shared<Derived>(self);
