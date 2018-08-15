@@ -13,8 +13,7 @@ except ImportError:
 
 
 def _select_rnn_impl(mode, input_size, hidden_size, num_layers=1, batch_first=False,
-                     dropout=0, train=True, bidirectional=False, variable_length=False,
-                     dropout_state=None, flat_weight=None):
+                     dropout=0, train=True, bidirectional=False, dropout_state=None):
     hidden_is_tensor = True
     if mode == 'RNN_RELU':
         impl = torch._C._VariableFunctions.rnn_relu
@@ -31,18 +30,11 @@ def _select_rnn_impl(mode, input_size, hidden_size, num_layers=1, batch_first=Fa
     def forward(input, weight, hidden, batch_sizes):
         has_biases = len(weight[0]) == 4
         weight = sum(weight, type(weight[0])())
-        if cudnn.is_acceptable(input):
-            dropout_seed = int(torch.IntTensor(1).random_())
-            with torch.cuda.device(input.get_device()):
-                dropout_ts = cudnn.rnn.init_dropout_state(dropout, train, dropout_seed, dropout_state)
+
+        if batch_sizes is None:
+            result = impl(input, hidden, weight, has_biases, num_layers, dropout, train, bidirectional, batch_first)
         else:
-            dropout_ts = None
-        if not variable_length:
-            result = impl(input, hidden, weight, has_biases, num_layers, dropout, train, bidirectional,
-                          batch_first, flat_weight, dropout_ts)
-        else:
-            result = impl(input, batch_sizes, hidden, weight, has_biases, num_layers, dropout, train,
-                          bidirectional, flat_weight, dropout_ts)
+            result = impl(input, batch_sizes, hidden, weight, has_biases, num_layers, dropout, train, bidirectional)
         return result[0], (result[1] if hidden_is_tensor else result[1:])
 
     return forward
