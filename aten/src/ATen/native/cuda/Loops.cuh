@@ -63,6 +63,8 @@ template<typename func_t>
 void gpu_nullary_kernel(TensorIterator& iter, const func_t& f) {
   ASSERT_HOST_DEVICE_LAMBDA(func_t);
 
+  char* out_data = (char*)iter.data_ptr(0);
+
   using traits = function_traits<func_t>;
   using arg0_t = typename traits::result_type;
 
@@ -71,17 +73,14 @@ void gpu_nullary_kernel(TensorIterator& iter, const func_t& f) {
     return;
   }
   if (iter.is_trivial_1d()) {
-    arg0_t* out_data = static_cast<arg0_t*>(iter.data_ptr(0));
     launch_kernel<512, 1>(numel, [=]__device__(int idx) {
-      out_data[idx] = f();
+      reinterpret_cast<arg0_t*>(out_data)[idx] = f();
     });
   } else {
-    char* out_data = (char*)iter.data_ptr(0);
     auto offset_calc = make_offset_calculator<1>(iter);
     launch_kernel<128, 4>(numel, [=]__device__(int idx) {
       auto offsets = offset_calc.get(idx);
-      arg0_t* out = (arg0_t*)&out_data[offsets[0]];
-      *out = f();
+      reinterpret_cast<arg0_t*>(out_data)[offsets[0]] = f();
     });
   }
 }
@@ -89,6 +88,9 @@ void gpu_nullary_kernel(TensorIterator& iter, const func_t& f) {
 template<typename func_t>
 void gpu_unary_kernel(TensorIterator& iter, const func_t& f) {
   ASSERT_HOST_DEVICE_LAMBDA(func_t);
+
+  char* out_data = (char*)iter.data_ptr(0);
+  const char* in1_data = (char*)iter.data_ptr(1);
 
   using traits = unary_function_traits<func_t>;
   using arg0_t = typename traits::result_type;
@@ -105,20 +107,16 @@ void gpu_unary_kernel(TensorIterator& iter, const func_t& f) {
       return f(a);
     });
   } else if (iter.is_trivial_1d()) {
-    arg0_t* out_data = static_cast<arg0_t*>(iter.data_ptr(0));
-    const arg1_t* in1_data = static_cast<const arg1_t*>(iter.data_ptr(1));
     launch_kernel<512, 1>(numel, [=]__device__(int idx) {
-      out_data[idx] = f(in1_data[idx]);
+      reinterpret_cast<arg0_t*>(out_data)[idx] =
+                  f(reinterpret_cast<const arg1_t*>(in1_data)[idx]);
     });
   } else {
     auto offset_calc = make_offset_calculator<2>(iter);
-    char* out_data = (char*)iter.data_ptr(0);
-    const char* in1_data = (char*)iter.data_ptr(1);
     launch_kernel<128, 4>(numel, [=]__device__(int idx) {
       auto offsets = offset_calc.get(idx);
-      arg0_t* out = (arg0_t*)&out_data[offsets[0]];
-      arg1_t* in1 = (arg1_t*)&in1_data[offsets[1]];
-      *out = f(*in1);
+      reinterpret_cast<arg0_t*>(out_data)[offsets[0]] =
+                  f(reinterpret_cast<const arg1_t*>(in1_data)[offsets[1]]);
     });
   }
 }
@@ -133,6 +131,10 @@ void gpu_binary_kernel(TensorIterator& iter, const func_t& f) {
     }
     return;
   }
+
+  char* out_data = (char*)iter.data_ptr(0);
+  const char* in1_data = (char*)iter.data_ptr(1);
+  const char* in2_data = (char*)iter.data_ptr(2);
 
   using traits = binary_function_traits<func_t>;
   using arg0_t = typename traits::result_type;
@@ -156,17 +158,18 @@ void gpu_binary_kernel(TensorIterator& iter, const func_t& f) {
       return f(a, b);
     });
   } else if (iter.is_trivial_1d()) {
-    arg0_t* out_data = static_cast<arg0_t*>(iter.data_ptr(0));
-    const arg1_t* in1_data = static_cast<const arg1_t*>(iter.data_ptr(1));
-    const arg2_t* in2_data = static_cast<const arg2_t*>(iter.data_ptr(2));
+    auto strides = iter.get_inner_strides();
+    int stride0 = strides[0];
+    int stride1 = strides[1];
+    int stride2 = strides[2];
     launch_kernel<512, 1>(numel, [=]__device__(int idx) {
-      out_data[idx] = f(in1_data[idx], in2_data[idx]);
+      arg0_t* out = (arg0_t*)&out_data[stride0 * idx];
+      arg1_t* in1 = (arg1_t*)&in1_data[stride1 * idx];
+      arg2_t* in2 = (arg2_t*)&in2_data[stride2 * idx];
+      *out = f(*in1, *in2);
     });
   } else {
     auto offset_calc = make_offset_calculator<3>(iter);
-    char* out_data = (char*)iter.data_ptr(0);
-    const char* in1_data = (char*)iter.data_ptr(1);
-    const char* in2_data = (char*)iter.data_ptr(2);
     launch_kernel<128, 4>(numel, [=]__device__(int idx) {
       auto offsets = offset_calc.get(idx);
       arg0_t* out = (arg0_t*)&out_data[offsets[0]];
