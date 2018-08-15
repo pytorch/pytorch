@@ -81,6 +81,7 @@
           "struct curandStateMtgp32*": "curandStateMtgp32*",
           "__host__ void THCRandom_getRNGState": "extern \"C\" __host__ void THCRandom_getRNGState",
           "__host__ void THCRandom_setRNGState": "extern \"C\" __host__ void THCRandom_setRNGState",
+          "state[threadIdx.x].k = kernel;" : "state[threadIdx.x].set_params(kernel);"
         }
       },
       {
@@ -210,13 +211,6 @@
       "path": "aten/src/THC/generic/THCTensor.cu",
       "functions": [
         "THCTensor_(getTextureObject)"
-      ]
-    },
-    {
-      "path": "aten/src/THC/THCTensorRandom.cu",
-      "functions": [
-        "THCRandom_setRNGState",
-        "set_rngstate_kernel"
       ]
     }
   ]
