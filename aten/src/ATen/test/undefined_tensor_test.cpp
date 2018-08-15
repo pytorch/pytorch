@@ -23,7 +23,6 @@ TEST_CASE( "undefined tensor test", "[]" ) {
   REQUIRE_THROWS_WITH(und.strides(), Catch::Contains("strides"));
   REQUIRE_THROWS_WITH(und.dim(), Catch::Contains("dim"));
   REQUIRE_THROWS_WITH([]() {return Tensor();}() = Scalar(5), Catch::Contains("UndefinedType"));
-  REQUIRE_THROWS_WITH(und.unsafeGetTensorImpl(), Catch::Contains("unsafeGetTensorImpl"));
   REQUIRE_THROWS_WITH(und.add(und), Catch::Contains("add"));
   REQUIRE_THROWS_WITH(und.add(ft), Catch::Contains("add"));
   REQUIRE_THROWS_WITH(ft.add(und), Catch::Contains("add"));
