@@ -9,16 +9,12 @@ bool NHWC2NCHWOp<float, CPUContext>::RunOnDevice() {
   CAFFE_ENFORCE(X.ndim() == 4);
   const int N = X.dim32(0), H = X.dim32(1), W = X.dim32(2), C = X.dim32(3);
   Y->Resize(N, C, H, W);
-  const float* Xdata = X.data<float>();
-  float* Ydata = Y->mutable_data<float>();
-  for (int n = 0; n < N; ++n) {
-    for (int h = 0; h < H; ++h) {
-      for (int w = 0; w < W; ++w) {
-        for (int c = 0; c < C; ++c) {
-          Ydata[((n * C + c) * H + h) * W + w] = *(Xdata++);
-        }
-      }
-    }
+  if (X.size() > 0) {
+    const float* Xdata = X.data<float>();
+    float* Ydata = Y->template mutable_data<float>();
+    std::array<int, 4> dims = {N, H, W, C};
+    std::array<int, 4> axes = {0, 3, 1, 2};
+    math::Transpose(4, dims.data(), axes.data(), Xdata, Ydata, &context_);
   }
   return true;
 }
@@ -30,20 +26,15 @@ bool NCHW2NHWCOp<float, CPUContext>::RunOnDevice() {
   CAFFE_ENFORCE(X.ndim() == 4);
   const int N = X.dim32(0), C = X.dim32(1), H = X.dim32(2), W = X.dim32(3);
   Y->Resize(N, H, W, C);
-  const float* Xdata = X.data<float>();
-  float* Ydata = Y->mutable_data<float>();
-  for (int n = 0; n < N; ++n) {
-    for (int c = 0; c < C; ++c) {
-      for (int h = 0; h < H; ++h) {
-        for (int w = 0; w < W; ++w) {
-          Ydata[((n * H + h) * W + w) * C + c] = *(Xdata++);
-        }
-      }
-    }
+  if (X.size() > 0) {
+    const float* Xdata = X.data<float>();
+    float* Ydata = Y->template mutable_data<float>();
+    std::array<int, 4> dims = {N, C, H, W};
+    std::array<int, 4> axes = {0, 2, 3, 1};
+    math::Transpose(4, dims.data(), axes.data(), Xdata, Ydata, &context_);
   }
   return true;
 }
-
 
 REGISTER_CPU_OPERATOR(NHWC2NCHW, NHWC2NCHWOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(NCHW2NHWC, NCHW2NHWCOp<float, CPUContext>);
@@ -100,4 +91,4 @@ class GetNCHW2NHWCGradient : public GradientMakerBase {
   }
 };
 REGISTER_GRADIENT(NCHW2NHWC, GetNCHW2NHWCGradient);
-}  // namespace caffe2
+} // namespace caffe2
