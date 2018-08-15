@@ -214,7 +214,7 @@ struct GRUCell : Cell<Tensor> {
 // LAYER IMPLEMENTATIONS
 //
 // Layers are scan-like higher-order functions, which take in cells, and
-// transform them to fuctions of signature
+// transform them to functions of signature
 //
 // (io_type input, hidden_type hidden, param_type params) -> (io_type, hidden_type)
 //
@@ -305,7 +305,12 @@ struct PackedLayer : Layer<PackedSequence, hidden_type, CellParams> {
     int64_t* batch_sizes = input.batch_sizes.data<int64_t>();
     int64_t last_batch_size = batch_sizes[0];
 
-    // TODO: use split with sizes?
+    // Batch sizes is a sequence of decreasing lengths, which are offsets
+    // into a 1D list of inputs. At every step we slice out batch_size elements,
+    // and possibly account for the decrease in the batch size since the last step,
+    // which requires us to slice the hidden state (since some sequences
+    // are completed now). The sliced parts are also saved, because we will need
+    // to return a tensor of final hidden state.
     auto hidden = input_hidden;
     for (int64_t i = 0; i < num_steps; ++i) {
       int64_t batch_size = batch_sizes[i];
@@ -345,6 +350,10 @@ struct ReversedPackedLayer : Layer<PackedSequence, hidden_type, CellParams> {
     int64_t* batch_sizes = input.batch_sizes.data<int64_t>();
     int64_t last_batch_size = batch_sizes[num_steps - 1];
 
+    // Here the situation is similar to that above, except we start out with
+    // the smallest batch size (and a small set of hidden states we actually use),
+    // and progressively expand the hidden states, as we move backwards over the
+    // 1D list of inputs.
     auto hidden = hidden_slice(input_hidden, 0, batch_sizes[num_steps - 1]);
     for (int64_t i = num_steps - 1; i >= 0; --i) {
       int64_t batch_size = batch_sizes[i];
