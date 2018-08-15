@@ -207,7 +207,11 @@ struct GraphFuser {
   // because it is not a simple map, can be put in a fusion group
   // as long as no items in the group read the output of concat
   bool isFusableAsExitNode(Node * node) {
-    return isFusable(node) || isFusableCatNode(node);
+    return isFusable(node) || isFusableOnlyAsExitNode(node);
+  }
+
+  bool isFusableOnlyAsExitNode(Node * node) {
+    return isFusableCatNode(node) || node->kind() == prim::FusedConcat;
   }
 
   // necessary condition for fusion. If all of the uses of producer are consumer
@@ -234,6 +238,15 @@ struct GraphFuser {
       }
     }
     return true;
+  }
+
+  bool mustRemainAsFusionGroupOutput(Value * producer) {
+    if (producer->node()->kind() != prim::FusionGroup) {
+      return false;
+    }
+    auto subgraph = producer->node()->g(attr::Subgraph);
+    auto * node = subgraph->outputs().at(producer->offset())->node();
+    return isFusableOnlyAsExitNode(node);
   }
 
   bool shouldFuse(Node * consumer, Value * producer) {
@@ -559,6 +572,8 @@ struct GraphFuser {
       for(auto producer : inputs) {
         // Don't fuse accross stage boundaries
         if (producer->stage() != consumer->stage()) continue;
+        // Don't fuse if producer must come from a FusionGroup exit node
+        if (mustRemainAsFusionGroupOutput(producer)) continue;
         if(tryToMoveChunk(consumer,producer)) {
           // the chunk before this consumer was re-arranged to allow fusion,
           // we scan this consumer again to perform the fusion

@@ -281,14 +281,11 @@ Returns True if all elements in the tensor are non-zero, False otherwise.
 
 Example::
 
-    >>> a = torch.randn(1, 3).mul(2).byte()
+    >>> a = torch.randn(1, 3).byte() % 2
     >>> a
-
-     1  1  0
-    [torch.ByteTensor of size 1x3]
-
+    tensor([[1, 0, 0]], dtype=torch.uint8)
     >>> a.all()
-    False
+    tensor(0, dtype=torch.uint8)
 
 .. function:: all(dim, keepdim=False, out=None) -> Tensor
 
@@ -307,22 +304,15 @@ Args:
 
 Example::
 
-    >>> a = torch.randn(4, 2).mul(2).byte()
+    >>> a = torch.randn(4, 2).byte() % 2
     >>> a
-
-     1  1
-     1  0
-     0  0
-     1  0
-    [torch.ByteTensor of size 4x2]
-
+    tensor([[0, 0],
+            [0, 0],
+            [0, 1],
+            [1, 1]], dtype=torch.uint8)
     >>> a.all(dim=1)
+    tensor([0, 0, 0, 1], dtype=torch.uint8)
 
-     1
-     0
-     0
-     0
-    [torch.ByteTensor of size 4]
 """)
 
 add_docstr_all('any',
@@ -333,14 +323,11 @@ Returns True if any elements in the tensor are non-zero, False otherwise.
 
 Example::
 
-    >>> a = torch.randn(1, 3).mul(2).byte()
+    >>> a = torch.randn(1, 3).byte() % 2
     >>> a
-
-     1  1  0
-    [torch.ByteTensor of size 1x3]
-
+    tensor([[0, 0, 1]], dtype=torch.uint8)
     >>> a.any()
-    True
+    tensor(1, dtype=torch.uint8)
 
 .. function:: any(dim, keepdim=False, out=None) -> Tensor
 
@@ -359,22 +346,15 @@ Args:
 
 Example::
 
-    >>> a = torch.randn(4, 2).mul(2).byte()
+    >>> a = torch.randn(4, 2).byte() % 2
     >>> a
-
-     1  1
-     1  0
-     0  0
-     1  0
-    [torch.ByteTensor of size 4x2]
-
+    tensor([[1, 0],
+            [0, 0],
+            [0, 1],
+            [0, 0]], dtype=torch.uint8)
     >>> a.any(dim=1)
+    tensor([1, 0, 1, 0], dtype=torch.uint8)
 
-     1
-     1
-     0
-     1
-    [torch.ByteTensor of size 4]
 """)
 
 add_docstr_all('apply_',
@@ -459,6 +439,13 @@ bernoulli_() -> Tensor
 In-place version of :meth:`~Tensor.bernoulli`
 """)
 
+add_docstr_all('bincount',
+               r"""
+bincount(weights=None, minlength=0) -> Tensor
+
+See :func:`torch.bincount`
+""")
+
 add_docstr_all('bmm',
                r"""
 bmm(batch2) -> Tensor
@@ -471,6 +458,13 @@ add_docstr_all('btrifact_with_info',
 btrifact_with_info(pivot=True) -> (Tensor, Tensor, Tensor)
 
 See :func:`torch.btrifact_with_info`
+""")
+
+add_docstr_all('btrisolve',
+               r"""
+btrisolve(LU_data, LU_pivots) -> Tensor
+
+See :func:`torch.btrisolve`
 """)
 
 add_docstr_all('cauchy_',
@@ -580,6 +574,16 @@ cosh_() -> Tensor
 In-place version of :meth:`~Tensor.cosh`
 """)
 
+add_docstr_all('cpu',
+               r"""
+cpu() -> Tensor
+
+Returns a copy of this object in CPU memory.
+
+If this object is already in CPU memory and on the correct device,
+then no copy is performed and the original object is returned.
+""")
+
 add_docstr_all('cross',
                r"""
 cross(other, dim=-1) -> Tensor
@@ -630,6 +634,20 @@ add_docstr_all('diag',
 diag(diagonal=0) -> Tensor
 
 See :func:`torch.diag`
+""")
+
+add_docstr_all('diagflat',
+               r"""
+diagflat(diagonal=0) -> Tensor
+
+See :func:`torch.diagflat`
+""")
+
+add_docstr_all('diagonal',
+               r"""
+diagonal(offset=0, dim1=0, dim2=1) -> Tensor
+
+See :func:`torch.diagonal`
 """)
 
 add_docstr_all('dim',
@@ -717,11 +735,25 @@ erf() -> Tensor
 See :func:`torch.erf`
 """)
 
+add_docstr_all('erf_',
+               r"""
+erf_() -> Tensor
+
+In-place version of :meth:`~Tensor.erf`
+""")
+
 add_docstr_all('erfc',
                r"""
-erf() -> Tensor
+erfc() -> Tensor
 
 See :func:`torch.erfc`
+""")
+
+add_docstr_all('erfc_',
+               r"""
+erfc_() -> Tensor
+
+In-place version of :meth:`~Tensor.erfc`
 """)
 
 add_docstr_all('erfinv',
@@ -729,6 +761,13 @@ add_docstr_all('erfinv',
 erfinv() -> Tensor
 
 See :func:`torch.erfinv`
+""")
+
+add_docstr_all('erfinv_',
+               r"""
+erfinv_() -> Tensor
+
+In-place version of :meth:`~Tensor.erfinv`
 """)
 
 add_docstr_all('exp',
@@ -782,6 +821,13 @@ add_docstr_all('floor',
 floor() -> Tensor
 
 See :func:`torch.floor`
+""")
+
+add_docstr_all('flip',
+               r"""
+flip(dims) -> Tensor
+
+See :func:`torch.flip`
 """)
 
 add_docstr_all('floor_',
@@ -914,6 +960,13 @@ add_docstr_all('gt_',
 gt_(other) -> Tensor
 
 In-place version of :meth:`~Tensor.gt`
+""")
+
+add_docstr_all('hardshrink',
+               r"""
+hardshrink(lambd=0.5) -> Tensor
+
+See :func:`torch.nn.functional.hardshrink`
 """)
 
 add_docstr_all('histc',
@@ -1721,6 +1774,13 @@ resize_as_(tensor) -> Tensor
 
 Resizes the :attr:`self` tensor to be the same size as the specified
 :attr:`tensor`. This is equivalent to ``self.resize_(tensor.size())``.
+""")
+
+add_docstr_all('rot90',
+               r"""
+rot90(k, dims) -> Tensor
+
+See :func:`torch.rot90`
 """)
 
 add_docstr_all('round',

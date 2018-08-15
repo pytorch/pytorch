@@ -525,6 +525,16 @@ Tensor repeat_backward(Tensor grad, int64_t input_dims, IntList repeats) {
   return grad;
 }
 
+// p1m == 1 - p
+Tensor _fused_dropout_backward(Tensor grad, Tensor mask, double p1m) {
+  if (grad.requires_grad()) {
+    // Use autograd-friendly backward if double backward is required
+    return grad * (mask.type_as(grad) * (1. / p1m));
+  } else {
+    return grad._masked_scale(mask, 1. / p1m);
+  }
+}
+
 Tensor select_equals_backward(Tensor grad, const Tensor & input, const Tensor & value) {
   auto grad_input = zeros_like(input);
   grad_input.masked_fill_(input == value, grad);

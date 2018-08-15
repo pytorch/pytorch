@@ -14,7 +14,6 @@ $storage_tensor_headers
 #include "ATen/Allocator.h"
 #include "ATen/DeviceGuard.h"
 #include "ATen/NativeFunctions.h"
-#include "ATen/THSizeStrideCompat.h"
 #include "ATen/UndefinedTensor.h"
 #include "ATen/Utils.h"
 #include "ATen/WrapDimUtils.h"
@@ -40,7 +39,7 @@ static int getPointerDevice(void* ptr) {
 #endif
 
 ${Type}::${Type}(Context* context)
-  : Type(context, /*is_variable=*/false, /*is_undefined=*/false) {}
+  : Type(context, ${Backend}TensorId(), /*is_variable=*/false, /*is_undefined=*/false) {}
 ScalarType ${Type}::scalarType() const {
   return ScalarType::${ScalarName};
 }
@@ -96,7 +95,7 @@ std::unique_ptr<Storage> ${Type}::storageWithAllocator(int64_t size, Allocator* 
 Tensor ${Type}::unsafeTensorFromTH(void * th_pointer, bool retain) const {
   if (retain)
     ${THTensor}_retain(${state,} (${THTensor}*) th_pointer);
-  return Tensor(new TensorImpl(Backend::${Backend}, ScalarType::${ScalarName},
+  return Tensor(new TensorImpl(${Backend}TensorId(), ScalarType::${ScalarName},
         (${THTensor}*)(th_pointer), false), false);
 }
 std::unique_ptr<Storage> ${Type}::unsafeStorageFromTH(void * th_pointer, bool retain) const {

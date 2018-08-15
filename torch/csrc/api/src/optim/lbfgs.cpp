@@ -15,10 +15,6 @@ namespace optim {
 LBFGSOptions::LBFGSOptions(double learning_rate)
     : learning_rate_(learning_rate) {}
 
-const LBFGSOptions& LBFGS::options() const noexcept {
-  return options_;
-}
-
 at::Tensor LBFGS::gather_flat_grad() {
   std::vector<at::Tensor> views;
   for (auto& parameter : parameters_) {
@@ -46,14 +42,14 @@ torch::Tensor LBFGS::step(LossClosure closure) {
   at::Tensor flat_grad = gather_flat_grad();
   torch::Scalar abs_grad_sum = torch::Scalar(flat_grad.abs().sum());
 
-  if (torch::Scalar(abs_grad_sum).toFloat() <= options_.tolerance_grad_) {
+  if (torch::Scalar(abs_grad_sum).toFloat() <= options.tolerance_grad_) {
     return loss;
   }
 
   at::Tensor ONE = flat_grad.type().scalarTensor(1);
 
   int64_t n_iter = 0;
-  while (n_iter < options_.max_iter_) {
+  while (n_iter < options.max_iter_) {
     n_iter++;
     state_n_iter++;
 
@@ -69,7 +65,7 @@ torch::Tensor LBFGS::step(LossClosure closure) {
       if (ys.toFloat() > 1e-10) {
         // updating memory
 
-        if (old_dirs.size() == options_.history_size_) {
+        if (old_dirs.size() == options.history_size_) {
           // shift history by one (limited memory)
           old_dirs.pop_front();
           old_stps.pop_front();
@@ -114,15 +110,15 @@ torch::Tensor LBFGS::step(LossClosure closure) {
     // reset initial guess for step size
     if (n_iter == 1) {
       t = torch::Scalar(
-          at::min(ONE, ONE / abs_grad_sum) * options_.learning_rate_);
+          at::min(ONE, ONE / abs_grad_sum) * options.learning_rate_);
     } else {
-      t = options_.learning_rate_;
+      t = options.learning_rate_;
     }
 
     torch::Scalar gtd = torch::Scalar(flat_grad.dot(d));
     add_grad(t, d);
     int64_t ls_func_evals = 0;
-    if (n_iter != options_.max_iter_) {
+    if (n_iter != options.max_iter_) {
       // re-evaluate function only if not in last iteration
       // the reason we do this: in a stochastic setting,
       // no use to re-evaluate that function here
@@ -138,21 +134,21 @@ torch::Tensor LBFGS::step(LossClosure closure) {
      * Check conditions
      */
 
-    if (n_iter == options_.max_iter_) {
+    if (n_iter == options.max_iter_) {
       break;
-    } else if (current_evals >= options_.max_eval_) {
+    } else if (current_evals >= options.max_eval_) {
       break;
-    } else if (abs_grad_sum.toFloat() <= options_.tolerance_grad_) {
+    } else if (abs_grad_sum.toFloat() <= options.tolerance_grad_) {
       break;
-    } else if (gtd.toFloat() > -options_.tolerance_grad_) {
+    } else if (gtd.toFloat() > -options.tolerance_grad_) {
       break;
     } else if (
         torch::Scalar(d.mul(t).abs_().sum()).toFloat() <=
-        options_.tolerance_change_) {
+        options.tolerance_change_) {
       break;
     } else if (
         std::abs(loss.toCFloat() - prev_loss.toFloat()) <
-        options_.tolerance_change_) {
+        options.tolerance_change_) {
       break;
     }
   }

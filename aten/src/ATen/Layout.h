@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/ScalarType.h>
+#include <ATen/Backend.h>
 #include <ATen/core/Error.h>
 
 #include <iostream>

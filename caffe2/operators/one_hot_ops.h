@@ -27,7 +27,7 @@ class OneHotOp final : public Operator<Context> {
         "indices input must be 1D tensor of data type TIndex");
 
     // Index size input must be in CPU context
-    auto& index_size_tensor = OperatorBase::Input<Tensor>(1, CPU);
+    auto& index_size_tensor = this->template Input<Tensor>(1, CPU);
     CAFFE_ENFORCE_EQ(
         index_size_tensor.size(),
         1,

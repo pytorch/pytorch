@@ -13,7 +13,7 @@ class AccumulateOp final : public Operator<Context> {
   AccumulateOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         gamma_(static_cast<T>(
-            OperatorBase::template GetSingleArgument<float>("gamma", 1.0))) {}
+            this->template GetSingleArgument<float>("gamma", 1.0))) {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   bool RunOnDevice() override {

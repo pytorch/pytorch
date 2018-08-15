@@ -16,6 +16,7 @@
 
 #include <exception>
 
+#include "ATen/core/Error.h"
 #include "ATen/core/Backtrace.h"
 #include "ATen/core/Macros.h"
 #include "ATen/core/Half.h"
@@ -105,11 +106,17 @@ struct TypeNameRegisterer {
     // no duplicated names registered - this could be done by checking the
     // uniqueness of names.
     if (gRegisteredTypeNames().count(name)) {
-      std::cerr << "Type name " << name
-                << " registered twice. This should "
-                   "not happen. Do you have duplicated CAFFE_KNOWN_TYPE?"
-                << std::endl;
-      throw std::runtime_error("TypeNameRegisterer error with type " + name);
+      AT_ERROR("typeid.h: Type name ", name, " was registered twice.  "
+               "This should not happen.  Things to check:\n"
+               "1. Did you add a new CAFFE_KNOWN_TYPE?  If so, check that "
+               "it is not duplicated with an existing CAFFE_KNOWN_TYPE.\n"
+               "2. Did you build and install PyTorch and Caffe2 separately? "
+               "For example, this would be the case if you ran scripts/onnx/install.sh or "
+               "scripts/onnx/install-develop.sh prior to Aug 12, 2018 "
+               "(commit 1756daaa7530d).  If so, rebuild using the environment variable "
+               " FULL_CAFFE2=1 (if you build latest master, the ONNX scripts are "
+               "updated to do this for you.) "
+               "For more context, see https://github.com/pytorch/pytorch/issues/10460");
     }
     gRegisteredTypeNames().insert(name);
     gTypeNames()[id] = name;
@@ -450,34 +457,34 @@ class Tensor;
 
 struct _CaffeHighestPreallocatedTypeId final {};
 
-CAFFE_DECLARE_KNOWN_TYPE(0, uint8_t);
-CAFFE_DECLARE_KNOWN_TYPE(1, int8_t);
-CAFFE_DECLARE_KNOWN_TYPE(2, int16_t);
-CAFFE_DECLARE_KNOWN_TYPE(3, int);
-CAFFE_DECLARE_KNOWN_TYPE(4, int64_t);
-CAFFE_DECLARE_KNOWN_TYPE(5, at::Half);
-CAFFE_DECLARE_KNOWN_TYPE(6, float);
-CAFFE_DECLARE_KNOWN_TYPE(7, double);
+CAFFE_DECLARE_KNOWN_TYPE(0, uint8_t)
+CAFFE_DECLARE_KNOWN_TYPE(1, int8_t)
+CAFFE_DECLARE_KNOWN_TYPE(2, int16_t)
+CAFFE_DECLARE_KNOWN_TYPE(3, int)
+CAFFE_DECLARE_KNOWN_TYPE(4, int64_t)
+CAFFE_DECLARE_KNOWN_TYPE(5, at::Half)
+CAFFE_DECLARE_KNOWN_TYPE(6, float)
+CAFFE_DECLARE_KNOWN_TYPE(7, double)
 // 8 = undefined type id
 
-CAFFE_DECLARE_KNOWN_TYPE(9, Tensor);
-CAFFE_DECLARE_KNOWN_TYPE(10, std::string);
-CAFFE_DECLARE_KNOWN_TYPE(11, bool);
-CAFFE_DECLARE_KNOWN_TYPE(12, uint16_t);
-CAFFE_DECLARE_KNOWN_TYPE(13, char);
-CAFFE_DECLARE_KNOWN_TYPE(14, std::unique_ptr<std::mutex>);
-CAFFE_DECLARE_KNOWN_TYPE(15, std::unique_ptr<std::atomic<bool>>);
-CAFFE_DECLARE_KNOWN_TYPE(16, std::vector<int32_t>);
-CAFFE_DECLARE_KNOWN_TYPE(17, std::vector<int64_t>);
-CAFFE_DECLARE_KNOWN_TYPE(18, std::vector<unsigned long>);
-CAFFE_DECLARE_KNOWN_TYPE(19, bool*);
-CAFFE_DECLARE_KNOWN_TYPE(20, char*);
-CAFFE_DECLARE_KNOWN_TYPE(21, int*);
+CAFFE_DECLARE_KNOWN_TYPE(9, Tensor)
+CAFFE_DECLARE_KNOWN_TYPE(10, std::string)
+CAFFE_DECLARE_KNOWN_TYPE(11, bool)
+CAFFE_DECLARE_KNOWN_TYPE(12, uint16_t)
+CAFFE_DECLARE_KNOWN_TYPE(13, char)
+CAFFE_DECLARE_KNOWN_TYPE(14, std::unique_ptr<std::mutex>)
+CAFFE_DECLARE_KNOWN_TYPE(15, std::unique_ptr<std::atomic<bool>>)
+CAFFE_DECLARE_KNOWN_TYPE(16, std::vector<int32_t>)
+CAFFE_DECLARE_KNOWN_TYPE(17, std::vector<int64_t>)
+CAFFE_DECLARE_KNOWN_TYPE(18, std::vector<unsigned long>)
+CAFFE_DECLARE_KNOWN_TYPE(19, bool*)
+CAFFE_DECLARE_KNOWN_TYPE(20, char*)
+CAFFE_DECLARE_KNOWN_TYPE(21, int*)
 
 #ifdef CAFFE2_UNIQUE_LONG_TYPEMETA
-CAFFE_DECLARE_KNOWN_TYPE(22, long);
-CAFFE_DECLARE_KNOWN_TYPE(23, std::vector<long>);
+CAFFE_DECLARE_KNOWN_TYPE(22, long)
+CAFFE_DECLARE_KNOWN_TYPE(23, std::vector<long>)
 #endif // CAFFE2_UNIQUE_LONG_TYPEMETA
 
-CAFFE_DECLARE_KNOWN_TYPE(24, _CaffeHighestPreallocatedTypeId);
+CAFFE_DECLARE_KNOWN_TYPE(24, _CaffeHighestPreallocatedTypeId)
 } // namespace caffe2

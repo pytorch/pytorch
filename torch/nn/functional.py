@@ -15,6 +15,8 @@ from ._functions.thnn.fold import Col2Im, Im2Col
 from .modules.utils import _single, _pair, _triple, _list_with_default
 from . import grad
 
+_VF = torch._C._VariableFunctions
+
 
 class _Reduction:
     # NB: Keep this class in sync with enums in THNN/Reduction.h
@@ -249,7 +251,7 @@ def conv_tbc(input, weight, bias, pad=0):
         bias: bias of shape (:math:`out\_channels`)
         pad: number of timesteps to pad
     """
-    return input.conv_tbc(weight, bias, pad)
+    return torch.conv_tbc(input, weight, bias, pad)
 
 
 # Pooling
@@ -592,7 +594,11 @@ def adaptive_avg_pool3d(input, output_size):
 
 # Activation functions
 def dropout(input, p=0.5, training=False, inplace=False):
-    return _functions.dropout.Dropout.apply(input, p, training, inplace)
+    if p < 0 or p > 1:
+        raise ValueError("dropout probability has to be between 0 and 1, "
+                         "but got {}".format(p))
+    f = _VF.dropout_ if inplace else _VF.dropout
+    return f(input, p, training)
 
 
 def alpha_dropout(input, p=0.5, training=False, inplace=False):
@@ -600,19 +606,35 @@ def alpha_dropout(input, p=0.5, training=False, inplace=False):
 
     See :class:`~torch.nn.AlphaDropout` for details.
     """
-    return _functions.dropout.AlphaDropout.apply(input, p, training, inplace)
+    if p < 0 or p > 1:
+        raise ValueError("dropout probability has to be between 0 and 1, "
+                         "but got {}".format(p))
+    f = _VF.alpha_dropout_ if inplace else _VF.alpha_dropout
+    return f(input, p, training)
 
 
 def dropout2d(input, p=0.5, training=False, inplace=False):
-    return _functions.dropout.FeatureDropout.apply(input, p, training, inplace)
+    if p < 0 or p > 1:
+        raise ValueError("dropout probability has to be between 0 and 1, "
+                         "but got {}".format(p))
+    f = _VF.feature_dropout_ if inplace else _VF.feature_dropout
+    return f(input, p, training)
 
 
 def dropout3d(input, p=0.5, training=False, inplace=False):
-    return _functions.dropout.FeatureDropout.apply(input, p, training, inplace)
+    if p < 0 or p > 1:
+        raise ValueError("dropout probability has to be between 0 and 1, "
+                         "but got {}".format(p))
+    f = _VF.feature_dropout_ if inplace else _VF.feature_dropout
+    return f(input, p, training)
 
 
 def feature_alpha_dropout(input, p=0.5, training=False, inplace=False):
-    return _functions.dropout.FeatureAlphaDropout.apply(input, p, training, inplace)
+    if p < 0 or p > 1:
+        raise ValueError("dropout probability has to be between 0 and 1, "
+                         "but got {}".format(p))
+    f = _VF.feature_alpha_dropout_ if inplace else _VF.feature_alpha_dropout
+    return f(input, p, training)
 
 
 def threshold(input, threshold, value, inplace=False):
