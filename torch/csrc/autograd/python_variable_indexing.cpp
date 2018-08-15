@@ -67,9 +67,9 @@ static void invalid_index(PyObject* obj) {
 }
 
 static Variable applySlice(const Variable& self, int64_t dim, PyObject* slice, bool ensure_view=false) {
-  Py_ssize_t start, stop, step, slicelength;
+  Py_ssize_t start, stop, step;
   auto length = self.size(dim);
-  if (!THPUtils_parseSlice(slice, length, &start, &stop, &step, &slicelength)) {
+  if (!THPUtils_unpackSlice(slice, &start, &stop, &step)) {
     throw python_error();
   }
   if (step == 0) {

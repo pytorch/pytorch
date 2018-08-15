@@ -4560,6 +4560,19 @@ def func(t):
 
         self.assertEqual(8, bar(torch.ones(1, 1)))
 
+    def test_tracing_slicing(self):
+        @torch.jit.trace(torch.zeros(10))
+        def foo_trace(x):
+            return x[-1:-3]
+
+        @torch.jit.script
+        def foo_script(x):
+            return x[-1:-3]
+
+        a = torch.arange(0, 8)
+        self.assertEqual(foo_script(a), foo_trace(a))
+
+
     def test_index_select_shape_prop(self):
 
         @torch.jit.script
