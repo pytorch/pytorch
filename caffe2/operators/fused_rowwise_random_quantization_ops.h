@@ -44,7 +44,7 @@ struct CwiseRandQuantizeOp {
     uint8_t q =
         floor_times + (random_ ? dist(gen_) : p > 0.5); // quantized value
     // (1 << bitwidth_) - 1 is to avoid contamination when q is dirty data
-    return maxq_ & q;
+    return (uint8_t)(maxq_ & q);
   }
 
   CPUContext::rand_gen_type& gen_;
@@ -62,7 +62,7 @@ template <typename T>
 struct CwiseLeftShiftOrOp {
   CwiseLeftShiftOrOp(const size_t& s) : shift_(s) {}
   const T operator()(const T& orval, const T& shiftval) const {
-    return orval | (T)(shiftval << shift_);
+    return (T)(orval | (shiftval << shift_));
   }
   const size_t shift_; // bits per data
 };
@@ -125,8 +125,8 @@ class FloatToFusedRandRowwiseQuantizedOp : public Operator<Context> {
     tail = tail ? data_per_byte - tail : 0;
     // How many bytes in the output
     size_t segment_size = (input_columns + data_per_byte - 1) / data_per_byte;
-    const std::vector<TIndex> output_dimensions = {input_rows,
-                                                   10 + segment_size};
+    const std::vector<TIndex> output_dimensions = {
+        input_rows, static_cast<TIndex>(10 + segment_size)};
     output->Resize(output_dimensions);
 
     const auto* input_data = input.template data<float>();
@@ -170,7 +170,7 @@ class FloatToFusedRandRowwiseQuantizedOp : public Operator<Context> {
             cwiserand); // some last buckets may have unused data
         EigenVectorArrayMap<uint8_t> output_seg(output_row + 10, stride);
         // shift and concatenate current ones
-        output_seg = output_seg.binaryExpr(qvals, cwiseshftor);
+        output_seg = output_seg.binaryExpr(qvals.cast<uint8_t>(), cwiseshftor);
       }
     }
 
@@ -212,7 +212,8 @@ class FusedRandRowwiseQuantizedToFloatOp : public Operator<Context> {
         "Unsupported bitwidth");
     const size_t tail = input_data[1];
     const size_t output_columns = (input_columns - 10) * (8 / bitwidth) - tail;
-    const std::vector<TIndex> output_dimensions = {input_rows, output_columns};
+    const std::vector<TIndex> output_dimensions = {
+        input_rows, static_cast<TIndex>(output_columns)};
     output->Resize(output_dimensions);
     auto* output_data = output->template mutable_data<float>();
     for (size_t row = 0; row < input_rows; ++row) {
@@ -249,7 +250,7 @@ class FusedRandRowwiseQuantizedToFloatOp : public Operator<Context> {
         EigenVectorArrayMap<float> sub_output_row(
             output_data + row * output_columns + start, stride);
         ConstEigenVectorArrayMap<uint8_t> input_seg(input_row + 10, stride);
-        sub_output_row = input_seg.unaryExpr(cwisedec);
+        sub_output_row = input_seg.unaryExpr(cwisedec).cast<float>();
       }
       // scaling and biasing
       output_row = output_row * gap + minimum_element;
