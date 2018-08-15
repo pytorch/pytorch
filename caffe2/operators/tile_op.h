@@ -16,8 +16,8 @@ class TileOp : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   TileOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        tiles_(OperatorBase::GetSingleArgument<int32_t>("tiles", 1)),
-        axis_(OperatorBase::GetSingleArgument<int32_t>("axis", 0)) {}
+        tiles_(this->template GetSingleArgument<int32_t>("tiles", 1)),
+        axis_(this->template GetSingleArgument<int32_t>("axis", 0)) {}
   ~TileOp() {}
 
   bool RunOnDevice() override {
@@ -131,8 +131,8 @@ class TileGradientOp : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   TileGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        tiles_(OperatorBase::GetSingleArgument<int32_t>("tiles", 1)),
-        axis_(OperatorBase::GetSingleArgument<int32_t>("axis", 0)) {}
+        tiles_(this->template GetSingleArgument<int32_t>("tiles", 1)),
+        axis_(this->template GetSingleArgument<int32_t>("axis", 0)) {}
   ~TileGradientOp() {}
 
   bool RunOnDevice() override {

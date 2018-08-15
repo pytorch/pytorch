@@ -8,9 +8,7 @@
 // alias these to the single THCTensor type.
 #define THCudaTensor THCTensor
 #define THCudaDoubleTensor THCTensor
-#ifdef CUDA_HALF_TENSOR
 #define THCudaHalfTensor THCTensor
-#endif
 #define THCudaByteTensor THCTensor
 #define THCudaCharTensor THCTensor
 #define THCudaShortTensor THCTensor

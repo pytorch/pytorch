@@ -133,11 +133,13 @@ struct Tensor : public detail::TensorBase {
   #undef TO_C_TYPE
 
   template<typename T, size_t N>
-  TensorAccessor<T,N> accessor() const {
+  TensorAccessor<T,N> accessor() const& {
     static_assert(N > 0, "accessor is used for indexing tensor, for scalars use *data<T>()");
     AT_CHECK(dim() == N, "expected ", N, " dims but tensor has ", dim());
     return TensorAccessor<T,N>(data<T>(),sizes().data(),strides().data());
   }
+  template<typename T, size_t N>
+  TensorAccessor<T,N> accessor() && = delete;
 
   Tensor operator-() const;
   Tensor& operator+=(const Tensor & other);

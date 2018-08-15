@@ -7,7 +7,10 @@ import numbers
 from .module import Module
 from ..parameter import Parameter
 from ..utils.rnn import PackedSequence
+from .._functions.rnn import get_rnn_impl as _get_rnn_impl
 from .. import init
+
+_VF = torch._C._VariableFunctions
 
 
 class RNNBase(Module):
@@ -177,7 +180,7 @@ class RNNBase(Module):
             flat_weight = None
 
         self.check_forward_args(input, hx, batch_sizes)
-        func = self._backend.RNN(
+        func = _get_rnn_impl(
             self.mode,
             self.input_size,
             self.hidden_size,
@@ -522,6 +525,21 @@ class GRU(RNNBase):
 
 class RNNCellBase(Module):
 
+    def __init__(self, input_size, hidden_size, bias, num_chunks):
+        super(RNNCellBase, self).__init__()
+        self.input_size = input_size
+        self.hidden_size = hidden_size
+        self.bias = bias
+        self.weight_ih = Parameter(torch.Tensor(num_chunks * hidden_size, input_size))
+        self.weight_hh = Parameter(torch.Tensor(num_chunks * hidden_size, hidden_size))
+        if bias:
+            self.bias_ih = Parameter(torch.Tensor(num_chunks * hidden_size))
+            self.bias_hh = Parameter(torch.Tensor(num_chunks * hidden_size))
+        else:
+            self.register_parameter('bias_ih', None)
+            self.register_parameter('bias_hh', None)
+        self.reset_parameters()
+
     def extra_repr(self):
         s = '{input_size}, {hidden_size}'
         if 'bias' in self.__dict__ and self.bias is not True:
@@ -546,6 +564,11 @@ class RNNCellBase(Module):
             raise RuntimeError(
                 "hidden{} has inconsistent hidden_size: got {}, expected {}".format(
                     hidden_label, hx.size(1), self.hidden_size))
+
+    def reset_parameters(self):
+        stdv = 1.0 / math.sqrt(self.hidden_size)
+        for weight in self.parameters():
+            init.uniform_(weight, -stdv, stdv)
 
 
 class RNNCell(RNNCellBase):
@@ -598,25 +621,8 @@ class RNNCell(RNNCellBase):
     """
 
     def __init__(self, input_size, hidden_size, bias=True, nonlinearity="tanh"):
-        super(RNNCell, self).__init__()
-        self.input_size = input_size
-        self.hidden_size = hidden_size
-        self.bias = bias
+        super(RNNCell, self).__init__(input_size, hidden_size, bias, num_chunks=1)
         self.nonlinearity = nonlinearity
-        self.weight_ih = Parameter(torch.Tensor(hidden_size, input_size))
-        self.weight_hh = Parameter(torch.Tensor(hidden_size, hidden_size))
-        if bias:
-            self.bias_ih = Parameter(torch.Tensor(hidden_size))
-            self.bias_hh = Parameter(torch.Tensor(hidden_size))
-        else:
-            self.register_parameter('bias_ih', None)
-            self.register_parameter('bias_hh', None)
-        self.reset_parameters()
-
-    def reset_parameters(self):
-        stdv = 1.0 / math.sqrt(self.hidden_size)
-        for weight in self.parameters():
-            init.uniform_(weight, -stdv, stdv)
 
     def forward(self, input, hx=None):
         self.check_forward_input(input)
@@ -624,9 +630,9 @@ class RNNCell(RNNCellBase):
             hx = input.new_zeros(input.size(0), self.hidden_size, requires_grad=False)
         self.check_forward_hidden(input, hx)
         if self.nonlinearity == "tanh":
-            func = self._backend.RNNTanhCell
+            func = _VF.rnn_tanh_cell
         elif self.nonlinearity == "relu":
-            func = self._backend.RNNReLUCell
+            func = _VF.rnn_relu_cell
         else:
             raise RuntimeError(
                 "Unknown nonlinearity: {}".format(self.nonlinearity))
@@ -700,24 +706,7 @@ class LSTMCell(RNNCellBase):
     """
 
     def __init__(self, input_size, hidden_size, bias=True):
-        super(LSTMCell, self).__init__()
-        self.input_size = input_size
-        self.hidden_size = hidden_size
-        self.bias = bias
-        self.weight_ih = Parameter(torch.Tensor(4 * hidden_size, input_size))
-        self.weight_hh = Parameter(torch.Tensor(4 * hidden_size, hidden_size))
-        if bias:
-            self.bias_ih = Parameter(torch.Tensor(4 * hidden_size))
-            self.bias_hh = Parameter(torch.Tensor(4 * hidden_size))
-        else:
-            self.register_parameter('bias_ih', None)
-            self.register_parameter('bias_hh', None)
-        self.reset_parameters()
-
-    def reset_parameters(self):
-        stdv = 1.0 / math.sqrt(self.hidden_size)
-        for weight in self.parameters():
-            init.uniform_(weight, -stdv, stdv)
+        super(LSTMCell, self).__init__(input_size, hidden_size, bias, num_chunks=4)
 
     def forward(self, input, hx=None):
         self.check_forward_input(input)
@@ -726,7 +715,7 @@ class LSTMCell(RNNCellBase):
             hx = (hx, hx)
         self.check_forward_hidden(input, hx[0], '[0]')
         self.check_forward_hidden(input, hx[1], '[1]')
-        return self._backend.LSTMCell(
+        return _VF.lstm_cell(
             input, hx,
             self.weight_ih, self.weight_hh,
             self.bias_ih, self.bias_hh,
@@ -787,31 +776,14 @@ class GRUCell(RNNCellBase):
     """
 
     def __init__(self, input_size, hidden_size, bias=True):
-        super(GRUCell, self).__init__()
-        self.input_size = input_size
-        self.hidden_size = hidden_size
-        self.bias = bias
-        self.weight_ih = Parameter(torch.Tensor(3 * hidden_size, input_size))
-        self.weight_hh = Parameter(torch.Tensor(3 * hidden_size, hidden_size))
-        if bias:
-            self.bias_ih = Parameter(torch.Tensor(3 * hidden_size))
-            self.bias_hh = Parameter(torch.Tensor(3 * hidden_size))
-        else:
-            self.register_parameter('bias_ih', None)
-            self.register_parameter('bias_hh', None)
-        self.reset_parameters()
-
-    def reset_parameters(self):
-        stdv = 1.0 / math.sqrt(self.hidden_size)
-        for weight in self.parameters():
-            init.uniform_(weight, -stdv, stdv)
+        super(GRUCell, self).__init__(input_size, hidden_size, bias, num_chunks=3)
 
     def forward(self, input, hx=None):
         self.check_forward_input(input)
         if hx is None:
             hx = input.new_zeros(input.size(0), self.hidden_size, requires_grad=False)
         self.check_forward_hidden(input, hx)
-        return self._backend.GRUCell(
+        return _VF.gru_cell(
             input, hx,
             self.weight_ih, self.weight_hh,
             self.bias_ih, self.bias_hh,

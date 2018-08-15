@@ -15,7 +15,7 @@ class FindOp final : public Operator<Context> {
   FindOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         missing_value_(
-            OperatorBase::GetSingleArgument<int>("missing_value", -1)) {}
+            this->template GetSingleArgument<int>("missing_value", -1)) {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   USE_DISPATCH_HELPER;
 

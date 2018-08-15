@@ -10,6 +10,7 @@
 #include <cereal/access.hpp>
 #include <cereal/cereal.hpp>
 
+#include <cstddef>
 #include <utility>
 #include <vector>
 
@@ -30,11 +31,7 @@ class SGD : public Optimizer {
   template <typename ParameterContainer>
   explicit SGD(ParameterContainer&& parameters, const SGDOptions& options)
       : Optimizer(std::forward<ParameterContainer>(parameters)),
-        options(options) {
-    if (options.momentum_ > 0) {
-      momentum_buffers_ = zero_buffers_like(parameters_);
-    }
-  }
+        options(options) {}
 
   void step() override;
 
@@ -49,7 +46,7 @@ class SGD : public Optimizer {
   friend class cereal::access;
   SGD() : options(0) {}
 
-  std::vector<Tensor> momentum_buffers_;
+  std::vector<at::Tensor> momentum_buffers_;
   /// Counts how often `step()` is called, for dampening.
   size_t iteration_{0};
 };

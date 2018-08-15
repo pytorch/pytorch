@@ -3,8 +3,12 @@
 
 namespace caffe2 {
 
-__global__ void NHWC2NCHWKernel(const int N, const int HW, const int C,
-                                const float* X, float* Y) {
+__global__ void NHWC2NCHWKernel(
+    const int N,
+    const int HW,
+    const int C,
+    const float* X,
+    float* Y) {
   CUDA_1D_KERNEL_LOOP(i, N * HW * C) {
     const int c = i % C;
     const int hw = i / C % HW;
@@ -13,8 +17,12 @@ __global__ void NHWC2NCHWKernel(const int N, const int HW, const int C,
   }
 }
 
-__global__ void NCHW2NHWCKernel(const int N, const int C, const int HW,
-                                const float* X, float* Y) {
+__global__ void NCHW2NHWCKernel(
+    const int N,
+    const int C,
+    const int HW,
+    const float* X,
+    float* Y) {
   CUDA_1D_KERNEL_LOOP(i, N * C * HW) {
     const int hw = i % HW;
     const int c = i / HW % C;
@@ -27,15 +35,26 @@ template <>
 bool NHWC2NCHWOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0);
   auto* Y = Output(0);
-  DCHECK_EQ(X.ndim(), 4);
-  const int N = X.dim32(0), H = X.dim32(1), W = X.dim32(2), C = X.dim32(3);
-  Y->Resize(N, C, H, W);
+
+  auto ndim = X.ndim();
+  DCHECK_GE(ndim, 3);
+  const int N = X.dim32(0), C = X.dim32(ndim - 1);
+  vector<TIndex> Y_dims(ndim);
+  Y_dims[0] = N;
+  Y_dims[1] = C;
+  size_t image_size = 1;
+  for (auto i = 2; i < ndim; ++i) {
+    Y_dims[i] = X.dim32(i - 1);
+    image_size *= Y_dims[i];
+  }
+  Y->Resize(Y_dims);
+
   NHWC2NCHWKernel<<<
       CAFFE_GET_BLOCKS(X.size()),
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(
-      N, H * W, C, X.data<float>(), Y->template mutable_data<float>());
+      N, image_size, C, X.data<float>(), Y->template mutable_data<float>());
   return true;
 }
 
@@ -43,15 +62,26 @@ template <>
 bool NCHW2NHWCOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0);
   auto* Y = Output(0);
-  DCHECK_EQ(X.ndim(), 4);
-  const int N = X.dim32(0), C = X.dim32(1), H = X.dim32(2), W = X.dim32(3);
-  Y->Resize(N, H, W, C);
+
+  auto ndim = X.ndim();
+  DCHECK_GE(X.ndim(), 3);
+  const int N = X.dim32(0), C = X.dim32(1);
+  vector<TIndex> Y_dims(ndim);
+  Y_dims[0] = N;
+  size_t image_size = 1;
+  for (auto i = 1; i < ndim - 1; ++i) {
+    Y_dims[i] = X.dim32(i + 1);
+    image_size *= Y_dims[i];
+  }
+  Y_dims[ndim - 1] = C;
+  Y->Resize(Y_dims);
+
   NCHW2NHWCKernel<<<
       CAFFE_GET_BLOCKS(X.size()),
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(
-      N, C, H * W, X.data<float>(), Y->template mutable_data<float>());
+      N, C, image_size, X.data<float>(), Y->template mutable_data<float>());
   return true;
 }
 
