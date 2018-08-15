@@ -43,7 +43,7 @@ class SobolEngine(object):
         self.scramble = scramble
         self.dimension = dimension
 
-        self.sobolstate = torch._sobol_engine_initialize_state(torch.zeros(dimension, self.MAXBIT, dtype=torch.long),
+        self.sobolstate = torch._sobol_engine_initialize_state(torch.zeros(dimension, self.MAXBIT).to(torch.long),
                                                                self.dimension)
 
         if self.scramble:
@@ -56,12 +56,12 @@ class SobolEngine(object):
 
             # TODO: can be replaced with torch.tril(torch.randint(2, (dimension, MAXBIT, MAXBIT)))
             #       once a batched version is introduced
-            ltm = torch.randint(2, (self.dimension, self.MAXBIT, self.MAXBIT), dtype=torch.long, generator=g)
+            ltm = torch.randint(2, (self.dimension, self.MAXBIT, self.MAXBIT), generator=g).to(torch.long)
             ltm = torch.stack(list(map(torch.tril, ltm.unbind(0))))
 
             self.sobolstate = torch._sobol_engine_scramble(self.sobolstate, ltm, self.dimension)
         else:
-            self.shift = torch.zeros(self.dimension, dtype=torch.long)
+            self.shift = torch.zeros(self.dimension).to(torch.long)
 
         self.quasi = self.shift.clone()
         self.num_generated = 0

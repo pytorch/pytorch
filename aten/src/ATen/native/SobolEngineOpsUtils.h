@@ -10,11 +10,11 @@ static inline int bit_length(const int64_t n) {
 }
 
 /// Function to get the position of the rightmost zero in the bit representation of an integer
-/// This value is not the zero-indexed position but one-indexed position
+/// This value is the zero-indexed position
 static inline int rightmost_zero(const int64_t n) {
   int z, i;
   for (z = n, i = 0; z % 2 == 1; z /= 2, i++);
-  return i + 1;
+  return i;
 }
 
 /// Function to get a subsequence of bits in the representation of an integer starting from
