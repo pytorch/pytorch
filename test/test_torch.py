@@ -217,6 +217,10 @@ class TestTorch(TestCase):
         # TODO: add torch.* tests when we have proper namespacing on ATen functions
         # test_namespace(torch)
 
+    @unittest.skipIf(not TEST_NUMPY, 'no np?')
+    def test_fail(self):
+        print(1 / 0)
+
     def test_dot(self):
         types = {
             'torch.DoubleTensor': 1e-8,
