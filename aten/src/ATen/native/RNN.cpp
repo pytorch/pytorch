@@ -148,6 +148,7 @@ Tensor linear(const Tensor& input, const Tensor& weight, /* optional */ const Te
 template<typename hidden_type_tmpl>
 struct Cell {
   using hidden_type = hidden_type_tmpl;
+  virtual ~Cell() {} // This is really dumb, but enables projects with -Wnon-virtual-dtor to compile...
   virtual hidden_type operator()(const Tensor& input, const hidden_type& hidden, const CellParams& params) const = 0;
 };
 
@@ -230,6 +231,7 @@ struct LayerOutput {
 template<typename io_type, typename hidden_type, typename param_type>
 struct Layer {
   using output_type = LayerOutput<io_type, hidden_type>;
+  virtual ~Layer() {} // This is really dumb, but enables projects with -Wnon-virtual-dtor to compile...
   virtual output_type operator()(const io_type& input, const hidden_type& input_hidden, const param_type& params) const = 0;
 };
 
