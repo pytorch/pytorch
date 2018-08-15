@@ -1,8 +1,8 @@
 #pragma once
 
-#include <ATen/Error.h>
-#include <ATen/Half.h>
 #include <ATen/Type.h>
+#include <ATen/core/Error.h>
+#include <ATen/core/Half.h>
 
 #define AT_PRIVATE_CASE_TYPE(enum_type, type, ...) \
   case enum_type: {                                \

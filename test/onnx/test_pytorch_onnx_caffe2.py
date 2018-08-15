@@ -688,6 +688,54 @@ class TestCaffe2Backend(unittest.TestCase):
             x = Variable(torch.randn(*shape))
             self.run_model_test(MyModel(), train=False, input=(x), batch_size=BATCH_SIZE, use_gpu=False)
 
+    def test_layer_norm(self):
+        shape = (20, 5, 10, 10)
+
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super(MyModel, self).__init__()
+                self.ln = torch.nn.LayerNorm([5, 10, 10])
+
+            def forward(self, x):
+                return self.ln(x)
+
+        x = torch.randn(*shape)
+        self.run_model_test(MyModel(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
+
+    def test_repeat(self):
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super(MyModel, self).__init__()
+
+            def forward(self, x):
+                return x.repeat(1, 2, 3, 4)
+
+        x = Variable(torch.randn(4, 3, 2, 1), requires_grad=True)
+        self.run_model_test(MyModel(), train=False, input=(x), batch_size=BATCH_SIZE, use_gpu=False)
+
+    def test_repeat_dim_overflow(self):
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super(MyModel, self).__init__()
+
+            def forward(self, x):
+                return x.repeat(1, 2, 3, 4)
+
+        x = Variable(torch.randn(1, 2), requires_grad=True)
+        self.run_model_test(MyModel(), train=False, input=(x), batch_size=BATCH_SIZE, use_gpu=False)
+
+    def test_repeat_dynamic(self):
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super(MyModel, self).__init__()
+
+            def forward(self, x, y):
+                return x.repeat(y.size()[0] / 2, y.size()[1] * 2)
+
+        x = Variable(torch.randn(1, 2), requires_grad=True)
+        y = Variable(torch.randn(2, 4), requires_grad=True)
+        self.run_model_test(MyModel(), train=False, input=(x, y), batch_size=BATCH_SIZE, use_gpu=False)
+
     def test_mean(self):
         shape = (3, 4, 5)
         for params in [{}] + [{'dim': i} for i in range(len(shape))]:

@@ -181,6 +181,31 @@ void coalesceInsertedDataDependencies(repr::NNModule* m) {
   }
 }
 
+std::ostream& operator<<(
+    std::ostream& oss,
+    const NNNodeMatchCriteria& criteria) {
+  return oss << criteria.debugString;
+}
+
+bool hasSingleOutputAndConsumer(NNGraph::NodeRef nodeRef) {
+  auto nodeOutputs = nn::getOutputs(nodeRef);
+  NOM_REQUIRE_OR_RET_FALSE(nodeOutputs.size() == 1);
+  auto nodeConsumers = nn::getConsumers(nodeOutputs.front());
+  return nodeConsumers.size() == 1;
+}
+
+NNNodeMatchCriteria matchAnyNode() {
+  return NNNodeMatchCriteria(
+      [](NNGraph::NodeRef /* unused */) { return true; }, "matchAnyNode");
+}
+
+NNSubtree operatorTree(
+    const NNNodeMatchCriteria& root,
+    const std::vector<NNSubtree>& childrenCriteria,
+    int count) {
+  return NNSubtree(matchAnyNode(), {NNSubtree(root, childrenCriteria)}, count);
+}
+
 } // namespace nn
 
 } // namespace repr

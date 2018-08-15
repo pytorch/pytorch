@@ -235,7 +235,7 @@ class RNNBase(Module):
 
 
 class RNN(RNNBase):
-    r"""Applies a multi-layer Elman RNN with `tanh` or `ReLU` non-linearity to an
+    r"""Applies a multi-layer Elman RNN with :math:`tanh` or :math:`ReLU` non-linearity to an
     input sequence.
 
 
@@ -243,8 +243,7 @@ class RNN(RNNBase):
     function:
 
     .. math::
-
-        h_t = \tanh(w_{ih} x_t + b_{ih}  +  w_{hh} h_{(t-1)} + b_{hh})
+        h_t = \text{tanh}(w_{ih} x_t + b_{ih} + w_{hh} h_{(t-1)} + b_{hh})
 
     where :math:`h_t` is the hidden state at time `t`, :math:`x_t` is
     the input at time `t`, and :math:`h_{(t-1)}` is the hidden state of the
@@ -307,7 +306,7 @@ class RNN(RNNBase):
 
     .. note::
         All the weights and biases are initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`
-        where :math:`k = \frac{1}{\text{hidden_size}}`
+        where :math:`k = \frac{1}{\text{hidden\_size}}`
 
     Examples::
 
@@ -342,15 +341,14 @@ class LSTM(RNNBase):
     function:
 
     .. math::
-
-            \begin{array}{ll}
+        \begin{array}{ll} \\
             i_t = \sigma(W_{ii} x_t + b_{ii} + W_{hi} h_{(t-1)} + b_{hi}) \\
             f_t = \sigma(W_{if} x_t + b_{if} + W_{hf} h_{(t-1)} + b_{hf}) \\
             g_t = \tanh(W_{ig} x_t + b_{ig} + W_{hg} h_{(t-1)} + b_{hg}) \\
             o_t = \sigma(W_{io} x_t + b_{io} + W_{ho} h_{(t-1)} + b_{ho}) \\
             c_t = f_t c_{(t-1)} + i_t g_t \\
-            h_t = o_t \tanh(c_t)
-            \end{array}
+            h_t = o_t \tanh(c_t) \\
+        \end{array}
 
     where :math:`h_t` is the hidden state at time `t`, :math:`c_t` is the cell
     state at time `t`, :math:`x_t` is the input at time `t`, :math:`h_{(t-1)}`
@@ -419,7 +417,7 @@ class LSTM(RNNBase):
 
     .. note::
         All the weights and biases are initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`
-        where :math:`k = \frac{1}{\text{hidden_size}}`
+        where :math:`k = \frac{1}{\text{hidden\_size}}`
 
     Examples::
 
@@ -442,13 +440,12 @@ class GRU(RNNBase):
     function:
 
     .. math::
-
-            \begin{array}{ll}
+        \begin{array}{ll}
             r_t = \sigma(W_{ir} x_t + b_{ir} + W_{hr} h_{(t-1)} + b_{hr}) \\
             z_t = \sigma(W_{iz} x_t + b_{iz} + W_{hz} h_{(t-1)} + b_{hz}) \\
             n_t = \tanh(W_{in} x_t + b_{in} + r_t (W_{hn} h_{(t-1)}+ b_{hn})) \\
-            h_t = (1 - z_t) n_t + z_t h_{(t-1)} \\
-            \end{array}
+            h_t = (1 - z_t) n_t + z_t h_{(t-1)}
+        \end{array}
 
     where :math:`h_t` is the hidden state at time `t`, :math:`x_t` is the input
     at time `t`, :math:`h_{(t-1)}` is the hidden state of the previous layer
@@ -509,7 +506,7 @@ class GRU(RNNBase):
 
     .. note::
         All the weights and biases are initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`
-        where :math:`k = \frac{1}{\text{hidden_size}}`
+        where :math:`k = \frac{1}{\text{hidden\_size}}`
 
     Examples::
 
@@ -524,6 +521,21 @@ class GRU(RNNBase):
 
 
 class RNNCellBase(Module):
+
+    def __init__(self, input_size, hidden_size, bias, num_chunks):
+        super(RNNCellBase, self).__init__()
+        self.input_size = input_size
+        self.hidden_size = hidden_size
+        self.bias = bias
+        self.weight_ih = Parameter(torch.Tensor(num_chunks * hidden_size, input_size))
+        self.weight_hh = Parameter(torch.Tensor(num_chunks * hidden_size, hidden_size))
+        if bias:
+            self.bias_ih = Parameter(torch.Tensor(num_chunks * hidden_size))
+            self.bias_hh = Parameter(torch.Tensor(num_chunks * hidden_size))
+        else:
+            self.register_parameter('bias_ih', None)
+            self.register_parameter('bias_hh', None)
+        self.reset_parameters()
 
     def extra_repr(self):
         s = '{input_size}, {hidden_size}'
@@ -549,6 +561,11 @@ class RNNCellBase(Module):
             raise RuntimeError(
                 "hidden{} has inconsistent hidden_size: got {}, expected {}".format(
                     hidden_label, hx.size(1), self.hidden_size))
+
+    def reset_parameters(self):
+        stdv = 1.0 / math.sqrt(self.hidden_size)
+        for weight in self.parameters():
+            init.uniform_(weight, -stdv, stdv)
 
 
 class RNNCell(RNNCellBase):
@@ -587,7 +604,7 @@ class RNNCell(RNNCellBase):
 
     .. note::
         All the weights and biases are initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`
-        where :math:`k = \frac{1}{\text{hidden_size}}`
+        where :math:`k = \frac{1}{\text{hidden\_size}}`
 
     Examples::
 
@@ -601,25 +618,8 @@ class RNNCell(RNNCellBase):
     """
 
     def __init__(self, input_size, hidden_size, bias=True, nonlinearity="tanh"):
-        super(RNNCell, self).__init__()
-        self.input_size = input_size
-        self.hidden_size = hidden_size
-        self.bias = bias
+        super(RNNCell, self).__init__(input_size, hidden_size, bias, num_chunks=1)
         self.nonlinearity = nonlinearity
-        self.weight_ih = Parameter(torch.Tensor(hidden_size, input_size))
-        self.weight_hh = Parameter(torch.Tensor(hidden_size, hidden_size))
-        if bias:
-            self.bias_ih = Parameter(torch.Tensor(hidden_size))
-            self.bias_hh = Parameter(torch.Tensor(hidden_size))
-        else:
-            self.register_parameter('bias_ih', None)
-            self.register_parameter('bias_hh', None)
-        self.reset_parameters()
-
-    def reset_parameters(self):
-        stdv = 1.0 / math.sqrt(self.hidden_size)
-        for weight in self.parameters():
-            init.uniform_(weight, -stdv, stdv)
 
     def forward(self, input, hx=None):
         self.check_forward_input(input)
@@ -688,7 +688,7 @@ class LSTMCell(RNNCellBase):
 
     .. note::
         All the weights and biases are initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`
-        where :math:`k = \frac{1}{\text{hidden_size}}`
+        where :math:`k = \frac{1}{\text{hidden\_size}}`
 
     Examples::
 
@@ -703,24 +703,7 @@ class LSTMCell(RNNCellBase):
     """
 
     def __init__(self, input_size, hidden_size, bias=True):
-        super(LSTMCell, self).__init__()
-        self.input_size = input_size
-        self.hidden_size = hidden_size
-        self.bias = bias
-        self.weight_ih = Parameter(torch.Tensor(4 * hidden_size, input_size))
-        self.weight_hh = Parameter(torch.Tensor(4 * hidden_size, hidden_size))
-        if bias:
-            self.bias_ih = Parameter(torch.Tensor(4 * hidden_size))
-            self.bias_hh = Parameter(torch.Tensor(4 * hidden_size))
-        else:
-            self.register_parameter('bias_ih', None)
-            self.register_parameter('bias_hh', None)
-        self.reset_parameters()
-
-    def reset_parameters(self):
-        stdv = 1.0 / math.sqrt(self.hidden_size)
-        for weight in self.parameters():
-            init.uniform_(weight, -stdv, stdv)
+        super(LSTMCell, self).__init__(input_size, hidden_size, bias, num_chunks=4)
 
     def forward(self, input, hx=None):
         self.check_forward_input(input)
@@ -776,7 +759,7 @@ class GRUCell(RNNCellBase):
 
     .. note::
         All the weights and biases are initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`
-        where :math:`k = \frac{1}{\text{hidden_size}}`
+        where :math:`k = \frac{1}{\text{hidden\_size}}`
 
     Examples::
 
@@ -790,24 +773,7 @@ class GRUCell(RNNCellBase):
     """
 
     def __init__(self, input_size, hidden_size, bias=True):
-        super(GRUCell, self).__init__()
-        self.input_size = input_size
-        self.hidden_size = hidden_size
-        self.bias = bias
-        self.weight_ih = Parameter(torch.Tensor(3 * hidden_size, input_size))
-        self.weight_hh = Parameter(torch.Tensor(3 * hidden_size, hidden_size))
-        if bias:
-            self.bias_ih = Parameter(torch.Tensor(3 * hidden_size))
-            self.bias_hh = Parameter(torch.Tensor(3 * hidden_size))
-        else:
-            self.register_parameter('bias_ih', None)
-            self.register_parameter('bias_hh', None)
-        self.reset_parameters()
-
-    def reset_parameters(self):
-        stdv = 1.0 / math.sqrt(self.hidden_size)
-        for weight in self.parameters():
-            init.uniform_(weight, -stdv, stdv)
+        super(GRUCell, self).__init__(input_size, hidden_size, bias, num_chunks=3)
 
     def forward(self, input, hx=None):
         self.check_forward_input(input)

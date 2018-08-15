@@ -29,9 +29,9 @@ class GroupSpatialSoftmaxOp final : public Operator<Context> {
  public:
   GroupSpatialSoftmaxOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        num_classes_(OperatorBase::GetSingleArgument<int>("num_classes", 81)),
+        num_classes_(this->template GetSingleArgument<int>("num_classes", 81)),
         order_(StringToStorageOrder(
-            OperatorBase::GetSingleArgument<string>("order", "NCHW"))) {
+            this->template GetSingleArgument<string>("order", "NCHW"))) {
     CAFFE_ENFORCE_EQ(
         order_, StorageOrder::NCHW, "Only NCHW order is supported right now.");
   }
@@ -52,9 +52,9 @@ class GroupSpatialSoftmaxGradientOp final : public Operator<Context> {
  public:
   GroupSpatialSoftmaxGradientOp(const OperatorDef& def, Workspace* ws)
       : Operator<Context>(def, ws),
-        num_classes_(OperatorBase::GetSingleArgument<int>("num_classes", 81)),
+        num_classes_(this->template GetSingleArgument<int>("num_classes", 81)),
         order_(StringToStorageOrder(
-            OperatorBase::GetSingleArgument<string>("order", "NCHW"))) {
+            this->template GetSingleArgument<string>("order", "NCHW"))) {
     CAFFE_ENFORCE_EQ(
         order_, StorageOrder::NCHW, "Only NCHW order is supported right now.");
   }

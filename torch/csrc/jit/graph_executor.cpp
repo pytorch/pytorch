@@ -80,11 +80,11 @@ struct ExecutionPlanAutogradFunction : public autograd::Function {
     });
   }
 
-  void capture(const IValue & val) {
+  void capture(const IValue & val, bool is_output) {
     const bool is_tensor = val.isTensor();
     is_var_capture.push_back(is_tensor);
     if (is_tensor) {
-      var_captures.emplace_back(Variable(val.toTensor()), false);
+      var_captures.emplace_back(Variable(val.toTensor()), is_output);
     } else {
       ivalue_captures.push_back(val);
     }
@@ -160,12 +160,12 @@ private:
   // Capture (save) inputs that would be required to subsequently run backwards
   void captureInputs(ExecutionPlanAutogradFunction & grad_fn, at::ArrayRef<IValue> inputs) const {
     for (size_t offset : grad.df_input_captured_inputs) {
-      grad_fn.capture(inputs[offset]);
+      grad_fn.capture(inputs[offset], /*is_output*/false);
     }
   }
   void captureOutputs(ExecutionPlanAutogradFunction & grad_fn, at::ArrayRef<IValue> outputs) const {
     for (size_t offset : grad.df_input_captured_outputs) {
-      grad_fn.capture(outputs[offset]);
+      grad_fn.capture(outputs[offset], /*is_output*/true);
     }
   }
 
@@ -241,14 +241,7 @@ struct GraphExecutorImpl {
   , symbolically_differentiable(symbolically_differentiable)
   , may_introduce_gradient(calcMayIntroduceGradient(this->graph->block())) {}
   GraphExecutorImpl(std::shared_ptr<Graph> graph, bool optimize)
-  : GraphExecutorImpl(graph, optimize, isDifferentiable(*graph)) {
-    for(auto input : graph->inputs()) {
-      JIT_ASSERTM(input->type()->kind() != TypeKind::TupleType, "tuples cannot be inputs to the graph");
-    }
-    for(auto output : graph->outputs()) {
-      JIT_ASSERTM(output->type()->kind() != TypeKind::TupleType, "tuples cannot be outputs to the graph");
-    }
-  }
+  : GraphExecutorImpl(graph, optimize, isDifferentiable(*graph)) {}
 
   // entry point where execution begins
   void run(Stack & stack) {

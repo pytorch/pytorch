@@ -373,7 +373,7 @@ class AbstractReduceFrontOrBackGradientOp : public Operator<Context> {
   template <int FixedSize>
   bool DoRunWithValue() {
     auto& reduction_grad = Input(REDUCTION_GRAD);
-    auto& source_shape = OperatorBase::Input<Tensor>(SOURCE_SHAPE, CPU);
+    auto& source_shape = this->template Input<Tensor>(SOURCE_SHAPE, CPU);
 
     auto* data_grads = Output(0);
 
@@ -1964,6 +1964,11 @@ segments, i.e. len(*LENGTHS*).
       GradientNeedIndices>;
 };
 
+OpSchema::Cost CostInferenceForSparseLengths(
+    const OperatorDef& def,
+    const vector<TensorShape>& inputs,
+    bool use_weight);
+
 template <
     typename T,
     typename SIndex,
@@ -2015,6 +2020,13 @@ i.e. `len(LENGTHS)`. Other dimensions are inherited from the input tensor.
           return out;
         });
     ReducerDef::PopulateSchema(schema);
+
+    schema.CostInferenceFunction(
+        [](const OperatorDef& def,
+           const vector<TensorShape>& inputs) -> OpSchema::Cost {
+          return CostInferenceForSparseLengths(
+              def, inputs, strcmp(OpDef::name, "WeightedSum") == 0);
+        });
   }
   using Reducer = typename ReducerDef::template Reducer<T, Context>;
   using ReducerGradient =

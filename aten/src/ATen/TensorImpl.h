@@ -5,7 +5,9 @@
 
 #include "ATen/Retainable.h"
 #include "ATen/ScalarType.h"
-#include "ATen/optional.h"
+#include "ATen/core/optional.h"
+#include "ATen/core/TensorTypeId.h"
+#include "ATen/core/TensorTypeIdRegistration.h"
 
 struct THTensor;
 
@@ -18,22 +20,25 @@ struct Tensor;
 
 namespace at {
 struct AT_API TensorImpl : public Retainable {
-  explicit TensorImpl(Type * type, THTensor * tensor)
-  : type_(type), tensor(tensor) {}
+  explicit TensorImpl(TensorTypeId type_id, ScalarType scalar_type, THTensor * tensor, bool is_variable)
+  : type_id_(type_id), scalar_type_(scalar_type), is_variable_(is_variable), tensor(tensor) {}
+  TensorImpl(TensorTypeId type_id, ScalarType scalar_type);
 
   virtual ~TensorImpl();
 
   virtual void release_resources() override;
 
-  Type & type() const {
-    return *type_;
-  }
+  // The implementation of this method will have to be hoisted out and
+  // hooked in, so that Caffe2 doesn't need to know about Context
+  // TODO: This really really needs to be inlined.
+  Type & type() const;
+
   const char * toString() const;
   virtual IntList sizes() const;
   virtual IntList strides() const;
   virtual int64_t dim() const;
   virtual void * unsafeGetTH(bool retain);
-  virtual std::unique_ptr<Storage> storage() = 0;
+  virtual std::unique_ptr<Storage> storage();
   friend struct Type;
 
   int64_t numel() {
@@ -91,8 +96,12 @@ struct AT_API TensorImpl : public Retainable {
   virtual void set_data(Tensor new_data);
 
 protected:
+  TensorTypeId type_id_;
+  // INVARIANT: When storage is non-null, this scalar type must
+  // agree with the scalar type in storage
+  ScalarType scalar_type_;
+  bool is_variable_ = false;
   bool is_wrapped_number_ = false;
-  Type * type_;
 public:
   THTensor * tensor;
 };

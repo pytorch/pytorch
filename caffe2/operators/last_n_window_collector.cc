@@ -46,8 +46,7 @@ class LastNWindowCollectorOp : public Operator<Context> {
       }
     }
 
-    auto dims = input.dims();
-    auto num_entries = dims[0];
+    auto num_entries = input.dims()[0];
 
     if (OutputSize() > NUM_VISITED) {
       auto* num_visited_tensor = Output(NUM_VISITED);
@@ -60,8 +59,14 @@ class LastNWindowCollectorOp : public Operator<Context> {
       *num_visited += num_entries;
     }
 
-    dims[0] = numToCollect_;
-    output->Reserve(dims, &context_);
+    if (!output_initialized) {
+      auto dims = input.dims();
+      dims[0] = 0;
+      output->Resize(dims);
+      // pass meta to output
+      output->raw_mutable_data(input.meta());
+      output->ReserveSpace(numToCollect_);
+    }
 
     if (num_entries == 0) {
       if (!output_initialized) {
@@ -73,10 +78,14 @@ class LastNWindowCollectorOp : public Operator<Context> {
 
     auto num_to_copy = std::min<int32_t>(num_entries, numToCollect_);
     auto output_batch_size = output_initialized ? output->dim(0) : 0;
-    dims[0] = std::min<size_t>(numToCollect_, output_batch_size + num_to_copy);
-    if (output_batch_size < numToCollect_) {
-      output->Resize(dims);
+    auto output_num =
+        std::min<size_t>(numToCollect_, output_batch_size + num_to_copy);
+
+    // output_num is >= output_batch_size
+    if (output_num > output_batch_size) {
+      output->ExtendTo(output_num, 50, &context_);
     }
+
     auto* output_data =
         static_cast<char*>(output->raw_mutable_data(input.meta()));
 

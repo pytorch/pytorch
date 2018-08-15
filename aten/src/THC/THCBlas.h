@@ -31,7 +31,7 @@ THC_API void THCudaBlas_SgemmBatched(THCState *state, char transa, char transb, 
 THC_API void THCudaBlas_DgemmBatched(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k,
                                      double alpha, const double *a[], int64_t lda, const double *b[], int64_t ldb,
                                      double beta, double *c[], int64_t ldc, int64_t batchCount);
-#if CUDA_VERSION >= 8000
+#if CUDA_VERSION >= 8000 || defined __HIP_PLATFORM_HCC__
 THC_API void THCudaBlas_SgemmStridedBatched(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k,
                                      float alpha, const float *a, int64_t lda, int64_t strideA, const float *b, int64_t ldb, int64_t strideB,
                                      float beta, float *c, int64_t ldc, int64_t strideC, int64_t batchCount);

@@ -66,6 +66,10 @@ class OperatorBase : public Observable<OperatorBase> {
   // Get the inputs and outputs as specific types.
   template <typename T>
   inline const T& Input(int idx) {
+    static_assert(
+        !std::is_same<T, Tensor>::value,
+        "You should use Input<Tensor>(int, DeviceType) for "
+        "Tensor.");
     DCHECK_LT(idx, inputs_.size());
     try {
       return inputs_.at(idx)->template Get<T>();
@@ -106,6 +110,10 @@ class OperatorBase : public Observable<OperatorBase> {
 
   template <typename T>
   inline T* Output(int idx) {
+    static_assert(
+        !std::is_same<T, Tensor>::value,
+        "You should use Output<Tensor>(int, DeviceType) for "
+        "Tensor.");
     return outputs_.at(idx)->template GetMutable<T>();
   }
 
@@ -134,6 +142,10 @@ class OperatorBase : public Observable<OperatorBase> {
 
   template <typename T>
   inline bool InputIsType(int idx) {
+    static_assert(
+        !std::is_same<T, Tensor>::value,
+        "You should use InputIsType<Tensor>(int, DeviceType) for "
+        "Tensor.");
     return inputs_.at(idx)->template IsType<T>();
   }
 
@@ -148,6 +160,10 @@ class OperatorBase : public Observable<OperatorBase> {
 
   template <typename T>
   inline bool OutputIsType(int idx) {
+    static_assert(
+        !std::is_same<T, Tensor>::value,
+        "You should use OutputIsType<Tensor>(int, DeviceType) for "
+        "Tensor.");
     return outputs_.at(idx)->template IsType<T>();
   }
 
@@ -323,6 +339,10 @@ class OperatorBase : public Observable<OperatorBase> {
     return !event_;
   }
 
+  virtual void SyncDevice() {
+    CAFFE_NOT_IMPLEMENTED;
+  }
+
   // Checks whether stream is ready to execute new computation,
   // used in stream allocation optimization to skip stream that is currently
   // busy. Depends on context and operator's device, returns true by default
@@ -388,7 +408,7 @@ class OperatorBase : public Observable<OperatorBase> {
   // An event used by asynchronous execution.
   std::unique_ptr<Event> event_;
 
-  DISABLE_COPY_AND_ASSIGN(OperatorBase);
+  AT_DISABLE_COPY_AND_ASSIGN(OperatorBase);
 };
 
 // If your operator does not need any specialized contructor or destructor,
@@ -400,8 +420,14 @@ class OperatorBase : public Observable<OperatorBase> {
 
 // OP_SINGLE_ARG provides a shorter initialization choice for initialization of
 // member variables for the class constructors.
+// This is a workaround for CUDA9.2 and GCC7
+#if defined(CUDART_VERSION) && CUDART_VERSION >= 9020 && __GNUC__ >= 7
+#define OP_SINGLE_ARG(type, name, variable, default)                           \
+  variable(this->template GetSingleArgument<type>(name, (default)))
+#else
 #define OP_SINGLE_ARG(type, name, variable, default)                           \
   variable(OperatorBase::GetSingleArgument<type>(name, (default)))
+#endif
 
 // INPUT_TAGS and OUTPUT_TAGS are optional features to name the indices of the
 // operator's inputs and outputs, in order to avoid confusion. For example, for
@@ -577,6 +603,8 @@ class Operator : public OperatorBase {
     return &context_;
   }
 
+  void SyncDevice() final {}
+
   virtual std::vector<TensorFiller<Context>> InputFillers(
       const std::vector<std::vector<TIndex>>& shapes) {
     CAFFE_ENFORCE(shapes.size() == Inputs().size());
@@ -664,6 +692,8 @@ class Operator : public OperatorBase {
   /* using override */ using OperatorBase::GetRepeatedArgument;     \
   /* using override */ using OperatorBase::InputIsType;             \
   /* using override */ using OperatorBase::InputSize;               \
+  /* using override */ using OperatorBase::Output;                  \
+  /* using override */ using OperatorBase::Input;                   \
   /* using override */ using OperatorBase::OutputSize
 
 #define USE_OPERATOR_FUNCTIONS(context)                    \

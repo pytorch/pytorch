@@ -319,6 +319,20 @@ struct AT_CUDA_API RNNDescriptor
   }
 };
 
+#if CUDNN_VERSION >= 7000
+
+struct AT_CUDA_API CTCLossDescriptor
+  : public Descriptor<cudnnCTCLossStruct,
+                      &cudnnCreateCTCLossDescriptor,
+                      &cudnnDestroyCTCLossDescriptor>
+{
+  void set(cudnnDataType_t datatype) {
+    AT_CUDNN_CHECK(cudnnSetCTCLossDescriptor(mut_desc(), datatype));
+  }
+};
+
+#endif
+
 union Constant
 {
   float f;

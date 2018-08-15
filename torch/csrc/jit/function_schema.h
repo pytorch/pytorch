@@ -8,7 +8,7 @@ namespace torch { namespace jit {
 
 // schema as used in the compiler for resolving function calls and reporting
 // errors. These objects should be constructed from C10 schema once those
-// are availiable
+// are available.
 struct Argument {
   Argument(
       std::string name = "",
@@ -55,8 +55,8 @@ struct FunctionSchema {
       bool is_varret = false)
       : FunctionSchema(
             name.toQualString(),
-            std::move(arguments),
-            std::move(returns),
+            std::move(std::move(arguments)),
+            std::move(std::move(returns)),
             is_vararg,
             is_varret) {}
 

@@ -189,7 +189,7 @@ class Subgraph {
     return nodes_;
   }
 
-  const size_t getNodesCount() const {
+  size_t getNodesCount() const {
     return (size_t)nodes_.size();
   }
 
@@ -397,6 +397,10 @@ class Graph {
       result.emplace_back(&n);
     }
     return result;
+  }
+
+  size_t getNodesCount() const {
+    return (size_t)nodes_.size();
   }
 
   const std::vector<EdgeRef> getMutableEdges() {

@@ -15,6 +15,7 @@
 #ifdef USE_CUDA
 #include "ATen/cuda/CUDAContext.h"
 #include "THC/THC.h"
+#include <THC/THCGenerator.hpp>
 #include "torch/csrc/cuda/cuda_check.h"
 #include <nvrtc.h>
 #include <cuda.h>
@@ -29,6 +30,10 @@
 #include <iostream>
 #include <dlfcn.h>
 #include <unistd.h>
+
+#ifdef USE_CUDA
+THCGenerator* THCRandom_getGenerator(THCState* state);
+#endif
 
 namespace torch { namespace jit {
 
@@ -78,6 +83,7 @@ typedef signed char int8_t;
 typedef short int  int16_t;
 typedef long long int int64_t;
 ${HalfHeader}
+${RandHeader}
 #endif
 typedef ${IndexType} IndexType;
 template<typename T, size_t N>
@@ -88,11 +94,113 @@ struct TensorInfo {
 };
 )");
 
+// We rewrite the code for philox RNG from curand as nvrtc couldn't resolve the
+// curand header correctly.
+constexpr auto rand_support_literal = R"(
+
+  class Philox {
+  public:
+    __device__ inline Philox(unsigned long long seed,
+                             unsigned long long subsequence,
+                             unsigned long long offset) {
+      key.x = (unsigned int)seed;
+      key.y = (unsigned int)(seed >> 32);
+      counter = make_uint4(0, 0, 0, 0);
+      counter.z = (unsigned int)(subsequence);
+      counter.w = (unsigned int)(subsequence >> 32);
+      STATE = 0;
+      incr_n(offset / 4);
+    }
+
+    __device__ inline unsigned long operator()() {
+      if(STATE == 0) {
+        uint4 counter_ = counter;
+        uint2 key_ = key;
+        for(int i = 0; i < 9; i++) {
+          counter_ = single_round(counter_, key_);
+          key_.x += (kPhilox10A); key_.y += (kPhilox10B);
+        }
+        output = single_round(counter_, key_);
+        incr();
+      }
+      unsigned long ret;
+      switch(STATE) {
+        case 0: ret = output.x; break;
+        case 1: ret = output.y; break;
+        case 2: ret = output.z; break;
+        case 3: ret = output.w; break;
+      }
+      STATE = (STATE + 1) % 4;
+      return ret;
+    }
+
+  private:
+    uint4 counter;
+    uint4 output;
+    uint2 key;
+    unsigned int STATE;
+    __device__ inline void incr_n(unsigned long long n) {
+      unsigned int nlo = (unsigned int)(n);
+      unsigned int nhi = (unsigned int)(n >> 32);
+      counter.x += nlo;
+      if (counter.x < nlo)
+        nhi++;
+      counter.y += nhi;
+      if (nhi <= counter.y)
+        return;
+      if (++counter.z)
+        return;
+      ++counter.w;
+    }
+    __device__ inline void incr() {
+      if (++counter.x)
+        return;
+      if (++counter.y)
+        return;
+      if (++counter.z)
+        return;
+      ++counter.w;
+    }
+    __device__ unsigned int mulhilo32(unsigned int a, unsigned int b,
+                                      unsigned int *result_high) {
+      *result_high = __umulhi(a, b);
+      return a*b;
+    }
+
+    __device__ inline uint4 single_round(uint4 ctr, uint2 key) {
+      unsigned int hi0;
+      unsigned int hi1;
+      unsigned int lo0 = mulhilo32(kPhiloxSA, ctr.x, &hi0);
+      unsigned int lo1 = mulhilo32(kPhiloxSB, ctr.z, &hi1);
+
+      uint4 ret = {hi1 ^ ctr.y ^ key.x, lo1, hi0 ^ ctr.w ^ key.y, lo0};
+      return ret;
+    }
+
+    static const unsigned long kPhilox10A = 0x9E3779B9;
+    static const unsigned long kPhilox10B = 0xBB67AE85;
+    static const unsigned long kPhiloxSA = 0xD2511F53;
+    static const unsigned long kPhiloxSB = 0xCD9E8D57;
+  };
+
+  // Inverse of 2^32.
+  #define M_RAN_INVM32 2.3283064e-10f
+  __device__  __inline__ float uniform(unsigned int x) {
+    return x * M_RAN_INVM32;
+  }
+)";
+
+constexpr auto rand_param = ",unsigned long long seed, unsigned long long offset";
+constexpr auto rand_init = R"(
+  int idx = blockIdx.x*blockDim.x + threadIdx.x;
+  Philox rnd(seed, idx, offset);
+)";
 auto cuda_compilation_unit_template = CodeTemplate(R"(
 ${type_declarations}
 
 extern "C" __global__
-void ${kernelName}(IndexType totalElements, ${formals}) {
+void ${kernelName}(IndexType totalElements, ${formals} ${RandParam}) {
+  ${RandInit}
   for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
         linearIndex < totalElements;
         linearIndex += gridDim.x * blockDim.x) {
@@ -280,9 +388,10 @@ std::string encodeRHS(Node * n) {
     {aten::remainder, "remainderf(${0}, ${1})"},
     {aten::pow, "powf(${0}, ${1})"},
 
-    // binary with alpha
+    //alpha
     {aten::add, "${0} + ${2}*${1}"},
     {aten::sub, "(${0} - ${2}*${1})"},
+    {aten::rand_like, "uniform(rnd())"},
 
     // simple derivatives
     {aten::_sigmoid_backward, "${0} * ${1} * (1.f - ${1})"},
@@ -309,10 +418,12 @@ std::string encodeRHS(Node * n) {
   return format(str, env);
 }
 
-std::vector<ConcatDesc> emitCompilationUnit(std::ostream & out,
-                                            const std::string & name,
-                                            AnnotatedGraph & agraph,
-                                            bool use_cuda) {
+std::pair<std::vector<ConcatDesc>, bool> emitCompilationUnit(
+    std::ostream& out,
+    const std::string& name,
+    AnnotatedGraph& agraph,
+    bool use_cuda) {
+  bool has_random = false;
   Graph& subgraph = *agraph.graph;
   TemplateEnv env;
   env.s("kernelName",name);
@@ -345,18 +456,14 @@ std::vector<ConcatDesc> emitCompilationUnit(std::ostream & out,
     size_t i = 0;
     for(auto o : subgraph.outputs()) {
       auto & desc = agraph.output_desc[i++];
-      if(o->node()->kind() != aten::cat) {
+      if(o->node()->kind() != prim::FusedConcat) {
         emitFormal(o, desc);
         concat_desc.emplace_back();
         flat_output_nodes.push_back(o);
       } else {
         auto cat = o->node();
-        auto tensor_inputs = cat->inputs();
-        // We need to drop the dim arg
-        tensor_inputs = tensor_inputs.slice(0, tensor_inputs.size() - 1);
-        size_t nInputs = tensor_inputs.size();
-        concat_desc.emplace_back(desc, nInputs, cat->get<int64_t>(attr::dim).value());
-        for(auto c : tensor_inputs) {
+        concat_desc.emplace_back(desc, cat->inputs().size(), cat->i(attr::dim));
+        for(auto c : cat->inputs()) {
           emitFormal(c, *concat_desc.back().subtensorDesc);
           flat_output_nodes.push_back(c);
         }
@@ -386,8 +493,14 @@ std::vector<ConcatDesc> emitCompilationUnit(std::ostream & out,
   }
 
   for(auto n : subgraph.nodes()) {
-    if(n->kind() == aten::cat)
-      continue; // Concat nodes by narrowing the output Tensors before the kernel runs
+    // FusedConcat nodes work by narrowing the output Tensors before the kernel runs
+    if (n->kind() == prim::FusedConcat)
+      continue;
+    if(n->kind() == aten::rand_like) {
+      has_random = true;
+      if(!use_cuda)
+        throw std::runtime_error("Fusion doesn't support rand on CPU");
+    }
     env.s("node",valueName(n->output()));
     env.s("rhs", encodeRHS(n));
     body << format("auto ${node} = ${rhs};\n",env);
@@ -415,6 +528,16 @@ std::vector<ConcatDesc> emitCompilationUnit(std::ostream & out,
     env.s("HalfHeader", "");
   }
 
+  if (has_random) {
+    env.s("RandHeader", rand_support_literal);
+    env.s("RandParam", rand_param);
+    env.s("RandInit", rand_init);
+  } else {
+    env.s("RandHeader", "");
+    env.s("RandParam", "");
+    env.s("RandInit", "");
+  }
+
   env.s("tensorOffsets",tensorOffsets.str());
   env.s("kernelBody",body.str());
   env.v("formals",formals);
@@ -426,7 +549,7 @@ std::vector<ConcatDesc> emitCompilationUnit(std::ostream & out,
     out << cpu_compilation_unit_template.format(env);
   }
 
-  return concat_desc;
+  return std::make_pair(std::move(concat_desc), has_random);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -521,7 +644,7 @@ void CompiledFusionFunction::launch_with_tensors(at::ArrayRef<at::Tensor> inputs
   char * buffer_next = buffer.data();
   // A vector of arguments to the kernel. It's (numel, *input_descs, *output_descs)
   std::vector<void*> arguments;
-  arguments.reserve(1 + inputs.size() + flat_outputs_size);
+  arguments.reserve(3 + inputs.size() + flat_outputs_size);
   // Asserts that t's dims can be compressed in the same way as in desc
   // (that's what the kernel assumes), and appends it to the arguments vector.
   auto addTensorInfo = [&](TensorDesc & desc, const at::Tensor & t) {
@@ -558,6 +681,19 @@ void CompiledFusionFunction::launch_with_tensors(at::ArrayRef<at::Tensor> inputs
       }
     }
   }
+
+  // If the kernel call contains a random op, we need to pass in random seeds as
+  // well.
+  #ifdef USE_CUDA
+  if(has_random && this->backend() == at::kCUDA) {
+    auto gen_ = THCRandom_getGenerator(at::globalContext().getTHCState());
+    uint64_t offset =
+        gen_->state.philox_seed_offset.fetch_add(this->get_rand_offset(numel));
+    arguments.push_back(&gen_->state.initial_seed);
+    arguments.push_back(&offset);
+  }
+  #endif
+
   launch_raw(numel, arguments.data());
 }
 
@@ -593,13 +729,15 @@ struct CUDAFusionFunction : public CompiledFusionFunction {
     checkCUDAVersion(prop);
 
     std::stringstream cu;
-    concat_desc = codegen::emitCompilationUnit(cu, name, agraph, true);
+    auto ret = codegen::emitCompilationUnit(cu, name, agraph, true);
+    concat_desc = std::move(ret.first);
+    has_random = ret.second;
     compilation_unit = cu.str();
     nvrtcProgram program;
     TORCH_NVRTC_CHECK(nvrtcCreateProgram(&program, compilation_unit.c_str(), NULL, 0, nullptr, nullptr));
 
     std::string compute = "--gpu-architecture=compute_" + std::to_string(prop.major) + std::to_string(prop.minor);
-    std::vector<const char *> args = {"--std=c++11", compute.c_str()};
+    std::vector<const char *> args = {"--std=c++11", compute.c_str(), "-default-device"};
     nvrtcResult result = nvrtcCompileProgram(program, args.size(), args.data());
     if (result == NVRTC_ERROR_COMPILATION) {
       size_t logsize;
@@ -633,8 +771,13 @@ protected:
   virtual at::Backend backend() const override {
     return at::kCUDA;
   }
+  virtual uint64_t get_rand_offset(uint32_t numel) override {
+     int numBlocks = std::min(maxBlocks, ceilDiv(numel, blockSize));
+     return 4 * (ceil(numel/(4 * blockSize * numBlocks)) + 1);
+  }
   virtual void launch_raw(uint32_t numel, void ** arguments) override {
      int numBlocks = std::min(maxBlocks, ceilDiv(numel, blockSize));
+
      //std::cout << "maxBlocks = " << maxBlocks << " needed blocks: " << ceilDiv(numel,blockSize)
      //          << " numblocks =  " << numBlocks;
 
@@ -789,7 +932,10 @@ struct CPUFusionFunction : public CompiledFusionFunction {
     TempFile cpp_file(cpp_template, 4);
 
     std::stringstream cu;
-    concat_desc = codegen::emitCompilationUnit(cu, name, agraph, false);
+    auto ret = codegen::emitCompilationUnit(cu, name, agraph, false);
+    concat_desc = std::move(ret.first);
+    has_random = ret.second;
+    JIT_ASSERT(!has_random);
     compilation_unit = cu.str();
     cpp_file.write(compilation_unit);
     cpp_file.sync();
@@ -805,6 +951,9 @@ struct CPUFusionFunction : public CompiledFusionFunction {
 protected:
   virtual at::Backend backend() const override {
     return at::kCPU;
+  }
+  virtual uint64_t get_rand_offset(uint32_t numel) override {
+     return numel;
   }
   virtual void launch_raw(uint32_t numel, void ** arguments) override {
     kernel(numel, arguments);

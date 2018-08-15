@@ -204,8 +204,8 @@ class SliceOp : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   SliceOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        starts_(OperatorBase::GetRepeatedArgument<SIndex>("starts")),
-        ends_(OperatorBase::GetRepeatedArgument<SIndex>("ends")),
+        starts_(this->template GetRepeatedArgument<SIndex>("starts")),
+        ends_(this->template GetRepeatedArgument<SIndex>("ends")),
         statically_inited_(false) {}
 
   bool RunOnDevice() override {
@@ -245,7 +245,7 @@ class SliceOp : public Operator<Context> {
         output, data, starts_host_, ends_host_, &context_);
   }
 
-  DISABLE_COPY_AND_ASSIGN(SliceOp);
+  AT_DISABLE_COPY_AND_ASSIGN(SliceOp);
 
  private:
   std::vector<SIndex> starts_;
@@ -261,8 +261,8 @@ class SliceGradientOp : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   SliceGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        starts_(OperatorBase::GetRepeatedArgument<SIndex>("starts")),
-        ends_(OperatorBase::GetRepeatedArgument<SIndex>("ends")),
+        starts_(this->template GetRepeatedArgument<SIndex>("starts")),
+        ends_(this->template GetRepeatedArgument<SIndex>("ends")),
         statically_inited_(false) {}
 
   bool RunOnDevice() override {
@@ -304,7 +304,7 @@ class SliceGradientOp : public Operator<Context> {
     }
   }
 
-  DISABLE_COPY_AND_ASSIGN(SliceGradientOp);
+  AT_DISABLE_COPY_AND_ASSIGN(SliceGradientOp);
 
  private:
   std::vector<SIndex> starts_;

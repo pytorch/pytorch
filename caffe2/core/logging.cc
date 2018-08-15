@@ -12,15 +12,6 @@ CAFFE2_DEFINE_bool(caffe2_use_fatal_for_enforce, false,
                    "of throwing an exception.");
 
 namespace caffe2 {
-std::string StripBasename(const std::string &full_path) {
-  const char kSeparator = '/';
-  size_t pos = full_path.rfind(kSeparator);
-  if (pos != std::string::npos) {
-    return full_path.substr(pos + 1, std::string::npos);
-  } else {
-    return full_path;
-  }
-}
 
 size_t ReplaceAll(string& s, const char* from, const char* to) {
   CAFFE_ENFORCE(from && *from);
@@ -48,6 +39,19 @@ void SetStackTraceFetcher(std::function<string(void)> fetcher) {
   *GetFetchStackTrace() = fetcher;
 }
 
+[[noreturn]] void ThrowEnforceNotMet(
+    const char* file,
+    const int line,
+    const char* condition,
+    const std::string& msg,
+    const void* caller) {
+  at::Error e(file, line, condition, msg, (*GetFetchStackTrace())(), caller);
+  if (FLAGS_caffe2_use_fatal_for_enforce) {
+    LOG(FATAL) << e.msg_stack()[0];
+  }
+  throw e;
+}
+
 static std::function<void(const OperatorDef&)> OperatorLogger =
     [](const OperatorDef&) { return; };
 
@@ -59,68 +63,33 @@ std::function<void(const OperatorDef&)> GetOperatorLogger() {
   return OperatorLogger;
 }
 
-EnforceNotMet::EnforceNotMet(
-    const char* file,
-    const int line,
-    const char* condition,
-    const string& msg,
-    const void* caller)
-    : msg_stack_{MakeString(
-          "[enforce fail at ",
-          StripBasename(std::string(file)),
-          ":",
-          line,
-          "] ",
-          condition,
-          ". ",
-          msg,
-          " ")},
-      stack_trace_((*GetFetchStackTrace())()) {
-  if (FLAGS_caffe2_use_fatal_for_enforce) {
-    LOG(FATAL) << msg_stack_[0];
-  }
-  caller_ = caller;
-  full_msg_ = this->msg();
-}
-
-void EnforceNotMet::AppendMessage(const string& msg) {
-  msg_stack_.push_back(msg);
-  full_msg_ = this->msg();
-}
-
-string EnforceNotMet::msg() const {
-  return std::accumulate(msg_stack_.begin(), msg_stack_.end(), string("")) +
-      stack_trace_;
-}
-
-const char* EnforceNotMet::what() const noexcept {
-  return full_msg_.c_str();
-}
-
-const void* EnforceNotMet::caller() const noexcept {
-  return caller_;
-}
-
 }  // namespace caffe2
 
 
 #ifdef CAFFE2_USE_GOOGLE_GLOG
 
 #ifdef CAFFE2_USE_GFLAGS
+// When GLOG depends on GFLAGS, these variables are being defined in GLOG
+// directly via the GFLAGS definition, so we will use DECLARE_* to declare
+// them, and use them in Caffe2.
 // GLOG's minloglevel
-CAFFE2_DECLARE_int(minloglevel);
+DECLARE_int32(minloglevel);
 // GLOG's verbose log value.
-CAFFE2_DECLARE_int(v);
+DECLARE_int32(v);
 // GLOG's logtostderr value
-CAFFE2_DECLARE_bool(logtostderr);
+DECLARE_bool(logtostderr);
+#endif // CAFFE2_USE_GFLAGS
 
-#else
-
+// Provide easy access to the above variables, regardless whether GLOG is
+// dependent on GFLAGS or not. Note that the namespace (fLI, fLB) is actually
+// consistent between GLOG and GFLAGS, so we can do the below declaration
+// consistently.
+namespace caffe2 {
 using fLI::FLAGS_minloglevel;
 using fLI::FLAGS_v;
 using fLB::FLAGS_logtostderr;
+}  // namespace caffe2
 
-#endif // CAFFE2_USE_GFLAGS
 
 CAFFE2_DEFINE_int(caffe2_log_level, google::GLOG_ERROR,
                   "The minimum log level that caffe2 will output.");
@@ -236,7 +205,7 @@ MessageLogger::MessageLogger(const char *file, int line, int severity)
           //<< ":" << std::setw(2) << timeinfo->tm_min
           //<< ":" << std::setw(2) << timeinfo->tm_sec
           //<< "." << std::setw(9) << ns.count() % 1000000000
-          << " " << StripBasename(std::string(file)) << ":" << line << "] ";
+          << " " << at::detail::StripBasename(std::string(file)) << ":" << line << "] ";
 }
 
 // Output the contents of the stream to the proper channel on destruction.
