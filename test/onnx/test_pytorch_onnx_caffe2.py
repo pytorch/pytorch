@@ -688,6 +688,29 @@ class TestCaffe2Backend(unittest.TestCase):
             x = Variable(torch.randn(*shape))
             self.run_model_test(MyModel(), train=False, input=(x), batch_size=BATCH_SIZE, use_gpu=False)
 
+    def test_layer_norm(self):
+        shape = (20, 5, 10, 10)
+
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super(MyModel, self).__init__()
+                self.ln = torch.nn.LayerNorm([5, 10, 10])
+
+            def forward(self, x):
+                return self.ln(x)
+
+        x = torch.randn(*shape)
+        self.run_model_test(MyModel(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
+
+    def test_index_desugar(self):
+        class TestIndexing(torch.nn.Module):
+            def forward(self, x, y):
+                return x[y, y]
+
+        x = torch.rand(3, 4, 5)
+        y = torch.arange(2)
+        self.run_model_test(TestIndexing(), train=False, input=(x,y), batch_size=BATCH_SIZE, use_gpu=False)
+
     def test_repeat(self):
         class MyModel(torch.nn.Module):
             def __init__(self):

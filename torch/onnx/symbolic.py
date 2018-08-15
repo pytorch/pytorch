@@ -710,6 +710,12 @@ def type_as(g, self, other):
         return g.op("ATen", self, other, operator_s="type_as")
 
 
+@parse_args('v', 'is', 'v', 'v', 'f', 'i')
+def layer_norm(g, self, normalized_shape, weight, bias, eps, cudnn_enable):
+    return g.op("ATen", self, weight, bias, normalized_shape_i=normalized_shape,
+                eps_f=eps, cudnn_enable_i=cudnn_enable, operator_s="layer_norm")
+
+
 # ignore clone operators that are inserted by PyTorch autograd
 def clone(g, input):
     return input
