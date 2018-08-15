@@ -59,10 +59,7 @@ void Tensor::backward(
   pImpl->backward(std::move(gradient), keep_graph, create_graph);
 }
 
-TensorImpl::TensorImpl(
-    TensorTypeId type_id,
-    ScalarType scalar_type,
-    bool is_variable)
+TensorImpl::TensorImpl(TensorTypeId type_id, ScalarType scalar_type, bool is_variable)
     : storage_(nullptr),
       storage_offset_(0),
       sizes_{0},
@@ -76,6 +73,17 @@ TensorImpl::TensorImpl(
     Storage* storage = type->storage(true).release();
     storage_ = storage->pImpl();
   }
+}
+
+TensorImpl::TensorImpl(StorageImpl* storage, TensorTypeId type_id, bool is_variable)
+      : storage_(storage),
+        storage_offset_(0),
+        sizes_{0},
+        strides_{1},
+        type_id_(type_id),
+        scalar_type_(storage->scalar_type()),
+        is_variable_(is_variable) {
+  AT_CHECK(storage_, "storage passed to TensorImpl must be non-null");
 }
 
 TensorImpl::~TensorImpl() {
