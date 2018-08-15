@@ -37,9 +37,6 @@ class SparseToDenseMaskBase : public Operator<Context> {
     }
   }
 
-  // TODO: enable the filler
-  DISABLE_INPUT_FILLERS(Context)
-
  protected:
   const int64_t kMaxDenseSize = 1024 * 128;
 

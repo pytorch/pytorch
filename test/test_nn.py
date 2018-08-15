@@ -1614,6 +1614,8 @@ class TestNN(NNTestCase):
         test('softmax', 0)
         test('log_softmax', 0)
         test('leaky_relu', 0.2)
+        test('threshold', 3, 2)
+        test('threshold', 3, 2, inplace=True)
 
     def test_nonlinearity_propagate_nan(self):
         self._test_nonlinearity_propagate_nan('cpu')
@@ -3493,7 +3495,7 @@ class TestNN(NNTestCase):
                              dtype2prec[dtype])
             self.assertEqual(m.weight.grad.data,
                              torch.cat([m1.weight.grad.data, m2.weight.grad.data], 0),
-                             dtype2prec[dtype])
+                             1e-1 if dtype == torch.half else dtype2prec[dtype])
 
     # Very similar to test_Conv2d_naive_groups but with special care to handle
     # the number of groups == number of input channels
@@ -3836,7 +3838,7 @@ class TestNN(NNTestCase):
         x_leaf.grad.data.zero_()
         unpacked.sum().backward()
 
-        self.assertEqual(x_leaf.grad, grad_x)
+        self.assertEqual(x_leaf.grad, grad_x, dtype2prec[dtype])
         for p1, p2 in zip(lstm.parameters(), lstm2.parameters()):
             self.assertEqual(p1.grad, p2.grad, dtype2prec[dtype])
 
@@ -3950,7 +3952,7 @@ class TestNN(NNTestCase):
             self.assertEqual(output_cuda, output_cpu)
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
-    @repeat_test_for_types(ALL_TENSORTYPES)
+    @repeat_test_for_types(NO_HALF_TENSORTYPES)
     def test_cuda_rnn_fused(self, dtype=torch.float):
 
         def copy_rnn(rnn1, rnn2):
@@ -3968,14 +3970,14 @@ class TestNN(NNTestCase):
         num_layers = 2
         seq_length = 7
         batch = 6
-        input_val = torch.randn(seq_length, batch, input_size, device="cuda", dtype=dtype)
-        grad_output = torch.randn(seq_length, batch, hidden_size, device="cuda", dtype=dtype)
-        hx_val = torch.randn(num_layers, batch, hidden_size, device="cuda", dtype=dtype)
-        grad_hy = torch.randn(num_layers, batch, hidden_size, device="cuda", dtype=dtype)
+        input_val = torch.randn(seq_length, batch, input_size, dtype=dtype)
+        grad_output = torch.randn(seq_length, batch, hidden_size, dtype=dtype)
+        hx_val = torch.randn(num_layers, batch, hidden_size, dtype=dtype)
+        grad_hy = torch.randn(num_layers, batch, hidden_size, dtype=dtype)
         with torch.backends.cudnn.flags(enabled=False):
             for module in (nn.GRU, nn.LSTM):
                 for bias in (True, False):
-                    rnn = module(input_size, hidden_size, num_layers, bias=bias).to("cuda", dtype)
+                    rnn = module(input_size, hidden_size, num_layers, bias=bias).to(dtype)
                     rnn_cuda = module(input_size, hidden_size, num_layers, bias=bias).to("cuda", dtype)
                     copy_rnn(rnn, rnn_cuda)
 

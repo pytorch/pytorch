@@ -2108,3 +2108,40 @@
   dispatch:
     CUDA: _thnn_fused_gru_cell_backward_cuda
   variants: function
+
+# RNN cells and layers
+- func: lstm(Tensor input, TensorList hx, TensorList params, bool has_biases, int64_t num_layers, double dropout, bool train, bool bidirectional, bool batch_first, Tensor? cudnn_weight_buf={}, Tensor? cudnn_dropout_state={}) -> (Tensor, Tensor, Tensor)
+  variants: function
+
+- func: lstm(Tensor data, Tensor batch_sizes, TensorList hx, TensorList params, bool has_biases, int64_t num_layers, double dropout, bool train, bool bidirectional, Tensor? cudnn_weight_buf={}, Tensor? cudnn_dropout_state={}) -> (Tensor, Tensor, Tensor)
+  variants: function
+
+- func: gru(Tensor input, Tensor hx, TensorList params, bool has_biases, int64_t num_layers, double dropout, bool train, bool bidirectional, bool batch_first, Tensor? cudnn_weight_buf={}, Tensor? cudnn_dropout_state={}) -> (Tensor, Tensor)
+  variants: function
+
+- func: gru(Tensor data, Tensor batch_sizes, Tensor hx, TensorList params, bool has_biases, int64_t num_layers, double dropout, bool train, bool bidirectional, Tensor? cudnn_weight_buf={}, Tensor? cudnn_dropout_state={}) -> (Tensor, Tensor)
+  variants: function
+
+- func: rnn_tanh(Tensor input, Tensor hx, TensorList params, bool has_biases, int64_t num_layers, double dropout, bool train, bool bidirectional, bool batch_first, Tensor? cudnn_weight_buf={}, Tensor? cudnn_dropout_state={}) -> (Tensor, Tensor)
+  variants: function
+
+- func: rnn_tanh(Tensor data, Tensor batch_sizes, Tensor hx, TensorList params, bool has_biases, int64_t num_layers, double dropout, bool train, bool bidirectional, Tensor? cudnn_weight_buf={}, Tensor? cudnn_dropout_state={}) -> (Tensor, Tensor)
+  variants: function
+
+- func: rnn_relu(Tensor input, Tensor hx, TensorList params, bool has_biases, int64_t num_layers, double dropout, bool train, bool bidirectional, bool batch_first, Tensor? cudnn_weight_buf={}, Tensor? cudnn_dropout_state={}) -> (Tensor, Tensor)
+  variants: function
+
+- func: rnn_relu(Tensor data, Tensor batch_sizes, Tensor hx, TensorList params, bool has_biases, int64_t num_layers, double dropout, bool train, bool bidirectional, Tensor? cudnn_weight_buf={}, Tensor? cudnn_dropout_state={}) -> (Tensor, Tensor)
+  variants: function
+
+- func: lstm_cell(Tensor input, TensorList hx, Tensor w_ih, Tensor w_hh, Tensor? b_ih={}, Tensor? b_hh={}) -> (Tensor, Tensor)
+  variants: function
+
+- func: gru_cell(Tensor input, Tensor hx, Tensor w_ih, Tensor w_hh, Tensor? b_ih={}, Tensor? b_hh={}) -> Tensor
+  variants: function
+
+- func: rnn_tanh_cell(Tensor input, Tensor hx, Tensor w_ih, Tensor w_hh, Tensor? b_ih={}, Tensor? b_hh={}) -> Tensor
+  variants: function
+
+- func: rnn_relu_cell(Tensor input, Tensor hx, Tensor w_ih, Tensor w_hh, Tensor? b_ih={}, Tensor? b_hh={}) -> Tensor
+  variants: function

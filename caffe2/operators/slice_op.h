@@ -212,9 +212,6 @@ class SliceOp : public Operator<Context> {
     return RunOnDeviceImpl(Input(0), Output(0));
   }
 
-  // This cannot be enabled given the output dims depends on the input
-  DISABLE_INPUT_FILLERS(Context)
-
  protected:
   bool RunOnDeviceImpl(const Tensor& data, Tensor* output) {
     if (InputSize() > 1) {

@@ -1072,9 +1072,6 @@ install_requires = [
     'six',
 ] if FULL_CAFFE2 else []
 
-setup_requires = ['pytest-runner'] if FULL_CAFFE2 else []
-tests_require = ['pytest-cov', 'hypothesis'] if FULL_CAFFE2 else []
-
 entry_points = {}
 if FULL_CAFFE2:
     entry_points = {
@@ -1128,6 +1125,4 @@ if __name__ == '__main__':
             ]
         },
         install_requires=install_requires,
-        setup_requires=setup_requires,
-        tests_require=tests_require,
     )
