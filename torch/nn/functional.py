@@ -627,7 +627,7 @@ def alpha_dropout(input, p=0.5, training=False, inplace=False):
 
 def dropout2d(input, p=0.5, training=True, inplace=False):
     r"""
-    Randomly zeroes whole channels of the input tensor.
+    Randomly zeroes whole channels (a channel a 2D slice of dimensions H, W) of the input tensor.
 
     See :class:`~torch.nn.Dropout2d` for details.
 
@@ -645,7 +645,7 @@ def dropout2d(input, p=0.5, training=True, inplace=False):
 
 def dropout3d(input, p=0.5, training=True, inplace=False):
     r"""
-    Randomly zeroes whole channels (a channel is a (N, C) pair) of the input tensor.
+    Randomly zeroes whole channels (a channel is a 3D slice of dimensions D, H, W) of the input tensor.
 
     See :class:`~torch.nn.Dropout3d` for details.
 
