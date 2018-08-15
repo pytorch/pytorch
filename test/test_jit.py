@@ -5878,6 +5878,9 @@ EXCLUDE_TRACED = {
 
     # output no dependence with traced input, tracer confusion
     'test_nn_rrelu',
+
+    # aten op has additional cudnn argument
+    'test_nn_group_norm',
 }
 
 # known to be failing in script
@@ -5940,7 +5943,6 @@ EXCLUDE_SCRIPT = {
     'test_nn_dropout2d',
     'test_nn_dropout3d',
     'test_nn_feature_alpha_dropout',
-    'test_nn_gumbel_softmax',
 
     'test_nn_adaptive_max_pool1d',
     'test_nn_adaptive_max_pool2d',
@@ -5952,10 +5954,11 @@ EXCLUDE_SCRIPT = {
     'test_nn_embedding',
     'test_nn_embedding_bag',
     'test_nn_batch_norm',
+    # aten op has additional cudnn argument
+    'test_nn_group_norm',
     'test_nn_nll_loss',
     'test_nn_unfold',
     'test_nn_max_unpool2d',
-    'test_nn_ctc_loss',
 
     # argument type not supported
     'test_nn_affine_grid',
@@ -6081,6 +6084,7 @@ def check_against_reference(self, func, reference_func, args, kwargs=None, allow
 
     outputs = reference_func(*recording_inputs, **kwargs)
     l1 = allSum(outputs)
+
     grads = torch.autograd.grad(l1, recording_tensors, create_graph=True,
                                 allow_unused=allow_unused)
     l2 = (allSum(grads) * l1)
@@ -6265,7 +6269,6 @@ nn_functional_tests = [
     ('max_pool3d', (S, S, S, S, S), (2, 1)),
     ('max_unpool1d', torch.tensor([[[2., 4]]]), (torch.tensor([[[1, 3]]]), 2, 2, 0)),
     ('max_unpool2d', torch.tensor([[[[2., 4]]]]), (torch.tensor([[[[1, 3]]]]), 2, 2, 0)),
-    # ('max_unpool3d', torch.tensor([[[[[2., 4]]]]]), (torch.tensor([[[[[1, 3]]]]]), 2, 2, 0)),
     ('lp_pool1d', (S, S, S), (2, 3, 2,)),
     ('lp_pool2d', (S, S, S, S), (2, 3, 2,)),
     ('adaptive_max_pool1d', (S, S, S), (5,)),
@@ -6294,8 +6297,6 @@ nn_functional_tests = [
     ('softplus', (S, S, S), (),),
     ('softmin', (S, S, S), (0,),),
     ('softmax', (S, S, S), (0,),),
-    # distribution sampling make result different in every run
-    # ('gumbel_softmax', (S, S), (2,),),
     ('log_softmax', (S, S, S), (0,),),
     ('linear', (S, S), ((M, S), None),),
     ('bilinear', (S, S, S), ((S, S, M), torch.zeros(M, S, M), None),),
@@ -6306,27 +6307,21 @@ nn_functional_tests = [
     ('layer_norm', (S, S, S, S), ([5], None, None),),
     ('group_norm', (S, S, S), (1, torch.Tensor(5), None),),
     ('local_response_norm', (S, S, S), (2, ),),
-    # ('ctc_loss', torch.randn(50, 16, 20).log_softmax(2).detach().requires_grad_(), (torch.randint(1, 21, (16, 30),
-    # dtype=torch.long), torch.full((16,), 50, dtype=torch.long), torch.randint(10,30,(16,), dtype=torch.long))),
     ('nll_loss', F.log_softmax(torch.randn(3, 5), dim=0), (torch.tensor([1, 0, 4]), None, None),),
     ('poisson_nll_loss', (S, 2), ((S, 2),),),
     ('kl_div', F.log_softmax(torch.randn(S, 10), 1), (F.softmax(torch.randn(S, 10), 1),),),
     ('cross_entropy', (3, S), (torch.randint(S, (3,), dtype=torch.int64),),),
-    # ('binary_cross_entropy', torch.randn(3, 2).sigmoid(), (non_differentiable(torch.rand(3, 2)),),),
     ('binary_cross_entropy_with_logits', (3,), (torch.empty(3).random_(2), ),),
     ('smooth_l1_loss', (3, S), (non_differentiable(torch.rand(3, S)),),),
     ('l1_loss', (3, S), (non_differentiable(torch.rand(3, S)),),),
     ('mse_loss', (3, S), (non_differentiable(torch.rand(3, S)),),),
     ('margin_ranking_loss', (3, S), ((3, S), (S,)),),
     ('hinge_embedding_loss', (3, S), (non_differentiable(torch.rand(3, S)),),),
-    # ('multilabel_margin_loss', torch.tensor([[0.2, -0.2, 0.07]]), (torch.tensor([[0, 0, 1]]),),),
     ('soft_margin_loss', (3, S), (non_differentiable(torch.rand(3, S)),),),
     ('multilabel_soft_margin_loss', (3, S), (non_differentiable(torch.rand(3, S)),),),
     ('cosine_embedding_loss', (S, S), ((S, S), non_differentiable(torch.rand(S,))),),
-    # ('multi_margin_loss', (S, S), (non_differentiable(torch.randint(S, (S, ), dtype=torch.int64)),),),
     ('pixel_shuffle', (1, 9, 4, 4), (3,),),
     ('interpolate', torch.zeros(3, 3).view(1, 1, 3, 3), (2,),),
-    # ('grid_sample', (S, S, S, S), (non_differentiable(torch.rand(S, S, S, 2)),),),
     ('affine_grid', (S, 2, 3), (torch.Size([S, 1, 7, 7]),),),
     ('pad', (3, 3, 4, 2), ([1, 1],),),
     ('pairwise_distance', (S, S), ((S, S),),),
@@ -6335,6 +6330,18 @@ nn_functional_tests = [
     ('normalize', (S, S, S), (),),
     ('unfold', (S, S, S, S), ([2, 3]),),
     ('fold', (1, 3 * 2 * 2, 12), ([4, 5], [2, 2]),),
+
+    # distribution sampling make result different in every run for below ops:
+    # ('gumbel_softmax', (S, S), (2,),),
+    #
+    #  No high order gradient for the below ops
+    # ('multilabel_margin_loss', torch.tensor([[0.2, -0.2, 0.07]]), (torch.tensor([[0, 0, 1]]),),),
+    # ('max_unpool3d', torch.tensor([[[[[2., 4]]]]]), (torch.tensor([[[[[1, 3]]]]]), 2, 2, 0)),
+    # ('grid_sample', (S, S, S, S), (non_differentiable(torch.rand(S, S, S, 2)),),),
+    # ('multi_margin_loss', (S, S), (non_differentiable(torch.randint(S, (S, ), dtype=torch.int64)),),),
+    # ('binary_cross_entropy', torch.randn(3, 2).sigmoid(), (non_differentiable(torch.rand(3, 2)),),),
+    # ('ctc_loss', torch.randn(S, S, S).log_softmax(2).detach().requires_grad_(), (torch.randint(1, S + 1, (S, S),
+    # dtype=torch.long), torch.full((S,), S, dtype=torch.long), torch.randint(1,S,(S,), dtype=torch.long))),
 ]
 
 
