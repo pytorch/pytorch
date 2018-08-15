@@ -44,6 +44,14 @@ IntList SparseTensorImpl::sizes() const {
 IntList SparseTensorImpl::strides() const {
   AT_ERROR("sparse tensors do not have strides");
 }
+int64_t SparseTensorImpl::size(int64_t d) const {
+  d = at::maybe_wrap_dim(d, dim(), false);
+  return size_[d];
+}
+int64_t SparseTensorImpl::stride(int64_t d) const {
+  AT_ERROR("sparse tensors do not have strides");
+}
+
 int64_t SparseTensorImpl::dim() const {
   return sparseDims_ + denseDims_;
 }
@@ -57,7 +65,12 @@ TensorImpl* SparseTensorImpl::maybe_zero_dim(bool condition_when_zero_dim) {
 std::unique_ptr<Storage> SparseTensorImpl::storage() {
   AT_ERROR("sparse tensors do not have storage");
 }
-
+at::StorageImpl* SparseTensorImpl::storageImpl() const {
+  AT_ERROR("sparse tensors do not have storage");
+}
+ptrdiff_t SparseTensorImpl::storage_offset() const {
+  AT_ERROR("sparse tensors do not have storage");
+}
 void SparseTensorImpl::set_indices_and_values(const Tensor& indices, const Tensor& values) {
   // TODO: Explicit empty test is needed because we don't handle size zero
   // dimensions at the moment

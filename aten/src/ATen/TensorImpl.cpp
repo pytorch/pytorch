@@ -70,7 +70,8 @@ TensorImpl::TensorImpl(
       type_id_(type_id),
       scalar_type_(scalar_type),
       is_variable_(is_variable) {
-  if (type_id != UndefinedTensorId() && scalar_type != ScalarType::Undefined) {
+  if (type_id != UndefinedTensorId() && scalar_type != ScalarType::Undefined
+      && type_id != SparseCPUTensorId() && type_id != SparseCUDATensorId()) {
     auto type = &globalContext().getType(tensorTypeIdToBackend(type_id), scalar_type);
     Storage* storage = type->storage(true).release();
     storage_ = storage->pImpl();
