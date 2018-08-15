@@ -75,9 +75,11 @@ class Optimizer(object):
         if current_scope is None:
             return self.get_cpu_blob_name(base_str)
 
-        if current_scope.device_type == caffe2_pb2.CUDA:
+        if current_scope.device_type == caffe2_pb2.CUDA or current_scope.device_type == caffe2_pb2.HIP:
             return self.get_gpu_blob_name(
-                base_str, current_scope.cuda_gpu_id, current_scope.node_name
+                base_str, 
+                current_scope.hip_gpu_id if workspace.has_hip_support else current_scope.cuda_gpu_id, 
+                current_scope.node_name
             )
         else:
             return self.get_cpu_blob_name(base_str, current_scope.node_name)
@@ -121,7 +123,7 @@ class Optimizer(object):
         if self._local_lr_multiplier is not None:
             current_scope = scope.CurrentDeviceScope()
             if (current_scope is not None
-                    and current_scope.device_type == caffe2_pb2.CUDA
+                    and current_scope.device_type == (caffe2_pb2.HIP if workspace.has_hip_support else caffe2_pb2.CUDA)
                     and not self._local_lr_multiplier_on_gpu):
                 local_lr_multiplier = net.CopyFromCPUInput(
                     self._local_lr_multiplier,
@@ -204,14 +206,6 @@ class Optimizer(object):
         raise NotImplementedError(
             "Optimizer Need to Implement `scale_learning_rate` method.")
 
-    def create_lars_inputs(self, param_init_net, weight_decay, trust, lr_max):
-        wd = param_init_net.ConstantFill([], "weight_decay",
-            shape=[1], value=weight_decay)
-        trust = param_init_net.ConstantFill([], "trust", shape=[1], value=trust)
-        lr_max = param_init_net.ConstantFill([], "lr_max", shape=[1],
-            value=lr_max)
-        return wd, trust, lr_max
-
 
 class SgdOptimizer(Optimizer):
     def __init__(self, base_learning_rate=0.01, policy='fixed',
@@ -241,18 +235,15 @@ class SgdOptimizer(Optimizer):
         if self.lars is not None and not isinstance(grad, core.GradientSlice):
             assert self.lars >= 0, (
                 'Lars offset must be nonnegative, got {}'.format(self.lars))
-            wd, trust, lr_max = self.create_lars_inputs(
-                param_init_net, 0.0, 1.0, np.finfo(np.float32).max)
             lr_lars_multiplier = net.Lars(
-                [param, grad, wd, trust, lr_max],
+                [param, grad],
                 self.make_unique_blob_name(str(param) + "_lars"),
-                offset=self.lars,
-                lr_min=0.0)
+                offset=self.lars)
             current_scope = scope.CurrentDeviceScope()
             self._add_local_lr_multiplier(
                 lr_lars_multiplier,
                 is_gpu_blob=(current_scope is not None
-                    and current_scope.device_type == caffe2_pb2.CUDA),
+                    and current_scope.device_type == (caffe2_pb2.HIP if workspace.has_hip_support else caffe2_pb2.CUDA)),
             )
 
         # We need negative sign for LR when used directly with WeightedSum
@@ -273,7 +264,7 @@ class SgdOptimizer(Optimizer):
         # to include device information.
         ONE = param_init_net.ConstantFill(
             [],
-            "ONE_{}_{}{}".format(dev.device_type, dev.cuda_gpu_id, dev.node_name),
+            "ONE_{}_{}{}".format(dev.device_type, dev.hip_gpu_id if workspace.has_hip_support else dev.cuda_gpu_id, dev.node_name),
             shape=[1],
             value=1.0
         )
@@ -482,12 +473,12 @@ class WeightDecayBuilder(Optimizer):
 
         ONE = param_init_net.ConstantFill(
             [],
-            "ONE_{}_{}".format(dev.device_type, dev.cuda_gpu_id),
+            "ONE_{}_{}".format(dev.device_type, dev.hip_gpu_id if workspace.has_hip_support else dev.cuda_gpu_id),
             shape=[1],
             value=1.0
         )
         WD = param_init_net.ConstantFill(
-            [], "wd_{}_{}".format(dev.device_type, dev.cuda_gpu_id),
+            [], "wd_{}_{}".format(dev.device_type, dev.hip_gpu_id if workspace.has_hip_support else dev.cuda_gpu_id),
             shape=[1], value=self.weight_decay
         )
 
@@ -531,19 +522,15 @@ class AdagradOptimizer(Optimizer):
         if self.lars is not None and not isinstance(grad, core.GradientSlice):
             assert self.lars >= 0, (
                 'Lars offset must be nonnegative, got {}'.format(self.lars))
-            wd, trust, lr_max = self.create_lars_inputs(
-                param_init_net, 0.0, 1.0, np.finfo(np.float32).max)
             lr_lars_multiplier = net.Lars(
-                [param, grad, wd, trust, lr_max],
+                [param, grad],
                 self.make_unique_blob_name(str(param) + "_lars"),
-                offset=self.lars,
-                lr_min=0.0)
-
+                offset=self.lars)
             current_scope = scope.CurrentDeviceScope()
             self._add_local_lr_multiplier(
                 lr_lars_multiplier,
                 is_gpu_blob=(current_scope is not None
-                    and current_scope.device_type == caffe2_pb2.CUDA),
+                    and current_scope.device_type == (caffe2_pb2.HIP if workspace.has_hip_support else caffe2_pb2.CUDA)),
             )
 
         lr, _ = self.build_lr(
@@ -656,18 +643,15 @@ class WngradOptimizer(Optimizer):
         if self.lars is not None and not isinstance(grad, core.GradientSlice):
             assert self.lars >= 0, (
                 'Lars offset must be nonnegative, got {}'.format(self.lars))
-            wd, trust, lr_max = self.create_lars_inputs(
-                param_init_net, 0.0, 1.0, np.finfo(np.float32).max)
             lr_lars_multiplier = net.Lars(
-                [param, grad, wd, trust, lr_max],
+                [param, grad],
                 self.make_unique_blob_name(str(param) + "_lars"),
-                offset=self.lars,
-                lr_min=0.0)
+                offset=self.lars)
             current_scope = scope.CurrentDeviceScope()
             self._add_local_lr_multiplier(
                 lr_lars_multiplier,
                 is_gpu_blob=(current_scope is not None
-                    and current_scope.device_type == caffe2_pb2.CUDA),
+                    and current_scope.device_type == (caffe2_pb2.HIP if workspace.has_hip_support else caffe2_pb2.CUDA)),
             )
 
         lr, _ = self.build_lr(
@@ -1144,7 +1128,7 @@ class RmsPropOptimizer(Optimizer):
 
         ONE = param_init_net.ConstantFill(
             [],
-            "ONE_{}_{}".format(dev.device_type, dev.cuda_gpu_id),
+            "ONE_{}_{}".format(dev.device_type, dev.hip_gpu_id if workspace.has_hip_support else dev.cuda_gpu_id),
             shape=[1],
             value=1.0
         )
@@ -1439,8 +1423,7 @@ def build_ftrl(model, engine="SIMD", **kwargs):
 
 
 def build_gftrl(model, engine="", **kwargs):
-    if engine == "SIMD":
-        assert core.IsOperator('GFtrl_ENGINE_SIMD')
+    # SIMD version of GFTRL is not supported
     gftrl_optimizer = GFtrlOptimizer(engine=engine, **kwargs)
     return _build(model, gftrl_optimizer)
 

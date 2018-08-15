@@ -570,7 +570,10 @@ def ExtractPredictorNet(
                             rename_list(step_op.output)
                             if device is not None:
                                 step_op.device_option.device_type = device.device_type
-                                step_op.device_option.cuda_gpu_id = device.cuda_gpu_id
+                                if workspace.has_hip_support:
+                                    step_op.device_option.hip_gpu_id = device.hip_gpu_id
+                                else:
+                                    step_op.device_option.cuda_gpu_id = device.cuda_gpu_id
 
                         rename_list(arg.n.external_input)
                         rename_list(arg.n.external_output)
@@ -584,7 +587,10 @@ def ExtractPredictorNet(
 
             if device is not None:
                 op.device_option.device_type = device.device_type
-                op.device_option.cuda_gpu_id = device.cuda_gpu_id
+                if workspace.has_hip_support:
+                    op.device_option.hip_gpu_id = device.hip_gpu_id
+                else:
+                    op.device_option.cuda_gpu_id = device.cuda_gpu_id
             validate_op(op)
             predict_proto.op.extend([op])
             known_blobs.update(op.output)

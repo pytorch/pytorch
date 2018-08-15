@@ -405,8 +405,8 @@ class TestElementwiseBroadcast(hu.HypothesisTestCase):
         np.testing.assert_array_almost_equal(out, res)
         self.assertDeviceChecks(dc, op, [X, Y], [0])
 
-        # fp64 is not supported with the CUDA op
-        dc_cpu_only = [d for d in dc if d.device_type != caffe2_pb2.CUDA]
+        # fp64 is not supported with the CUDA/HIP op
+        dc_cpu_only = [d for d in dc if (d.device_type != caffe2_pb2.CUDA or d.device_type != caffe2_pb2.HIP)]
         self.assertDeviceChecks(dc_cpu_only, op, [X, Y], [0])
 
     @unittest.skipIf(not workspace.has_gpu_support, "No gpu support")

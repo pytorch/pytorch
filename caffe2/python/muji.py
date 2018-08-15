@@ -25,8 +25,12 @@ def OnGPU(gpu_id):
   specified gpu id.
   """
     device_option = caffe2_pb2.DeviceOption()
-    device_option.device_type = caffe2_pb2.CUDA
-    device_option.cuda_gpu_id = gpu_id
+    if workspace.has_hip_support:
+        device_option.device_type = caffe2_pb2.HIP  
+        device_option.hip_gpu_id = gpu_id
+    else:
+        device_option.device_type = caffe2_pb2.CUDA
+        device_option.cuda_gpu_id = gpu_id
     return device_option
 
 
@@ -48,7 +52,7 @@ def Allreduce(net, blobs, reduced_affix="_reduced", gpu_indices=None):
             "gpu_indices length and blobs length mismatch: %d vs %d" %
             (len(gpu_indices), len(blobs))
         )
-    pattern = workspace.GetCudaPeerAccessPattern()
+    pattern = workspace.GetHipPeerAccessPattern() if workspace.has_hip_support else workspace.GetCudaPeerAccessPattern()
     if len(blobs) == 2 and pattern.shape[0] >= 2 and np.all(pattern[:2, :2]):
         return Allreduce2(net, blobs, reduced_affix, gpu_indices)
     elif len(blobs) == 4 and pattern.shape[0] >= 4 and np.all(pattern[:4, :4]):

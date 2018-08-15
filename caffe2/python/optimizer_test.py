@@ -77,7 +77,7 @@ class TestMultiPrecisionSgd(
             tensor = workspace.FetchBlob(param)
             np.testing.assert_allclose(np.array([1.0]), tensor, atol=1e-5)
 
-    @unittest.skipIf(not workspace.has_gpu_support, "No GPU support")
+    @unittest.skipIf(not workspace.has_gpu_support and not workspace.has_hip_support , "No GPU support")
     def testGPUDense(self):
         super(TestMultiPrecisionSgd, self).testGPUDense(core.DataType.FLOAT16)
 
@@ -434,11 +434,11 @@ class TestYellowFin(OptimizerTestBase, TestCase):
                 )
 
     @unittest.skip("Results might vary too much. Only for individual use.")
-    @unittest.skipIf(not workspace.has_gpu_support, "No gpu support")
+    @unittest.skipIf(not workspace.has_gpu_support and not workspace.has_hip_support, "No gpu support")
     def test_caffe2_gpu_vs_numpy(self):
         n_dim = 1000000
         n_iter = 50
-        gpu_device_opt = core.DeviceOption(caffe2_pb2.CUDA, 0)
+        gpu_device_opt = core.DeviceOption(caffe2_pb2.HIP if workspace.has_hip_support else caffe2_pb2.CUDA, 0)
         with core.DeviceScope(gpu_device_opt):
             for zero_debias in [False, True]:
                 for grad_coef in [1.0, 0.1, 0.01]:
