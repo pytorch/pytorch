@@ -2,7 +2,7 @@
 
 namespace caffe2 {
 
-const BlobStatGetter* BlobStatRegistry::get(TypeIdentifier id) {
+const BlobStatGetter* BlobStatRegistry::get(at::DataType id) {
   auto it = map_.find(id);
   if (it == map_.end()) {
     return nullptr;
@@ -16,7 +16,7 @@ BlobStatRegistry& BlobStatRegistry::instance() {
 }
 
 void BlobStatRegistry::doRegister(
-    TypeIdentifier id,
+    at::DataType id,
     std::unique_ptr<BlobStatGetter>&& v) {
   // don't use CAFFE_ENFORCE_EQ to avoid static initialization order fiasco.
   if (map_.count(id) > 0) {
