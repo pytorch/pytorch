@@ -470,6 +470,45 @@ class ModelHelper(object):
             _known_working_ops
         )))
 
+    def GetCompleteNet(self):
+        r""" Return param_init_net + net Net.
+        Returns:
+          'core.Net' containing param_init_net and net
+        """
+        new_net = self.param_init_net.Clone(
+            self.name + "_complete_net", keep_schema=True)
+        # add init net info to debug info
+        for op in new_net.Proto().op:
+            op.debug_info = op.debug_info + "/param_init_net"
+        new_net.AppendNet(self.net)
+        return new_net
+
+    def ConstructInitTrainNetfromNet(self, net):
+        r""" construct init net and train net from complete_net
+        Inputs:
+          net: 'core.Net' containing param_init_net and train net
+        """
+        param_op_mask = []
+        train_op_mask = []
+        for idx, op in enumerate(net.Proto().op):
+            if op.debug_info.endswith("/param_init_net"):
+                param_op_mask.append(idx)
+            else:
+                train_op_mask.append(idx)
+
+        self.param_init_net = net.Clone(
+            net.Name() + "/generated_param_init_net",
+            keep_schema=True,
+            op_id_mask=param_op_mask,
+            update_external_list=True,
+        )
+        self.net = net.Clone(
+            net.Name() + "/generated_net",
+            keep_schema=True,
+            op_id_mask=train_op_mask,
+            update_external_list=True,
+        )
+
 
 def ExtractPredictorNet(
     net_proto,
