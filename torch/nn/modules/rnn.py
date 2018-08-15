@@ -111,8 +111,8 @@ class RNNBase(Module):
             self._param_buf_size = weight_buf.size(0)
             self._data_ptrs = list(p.data.data_ptr() for p in self.parameters())
 
-    def _apply(self, fn):
-        ret = super(RNNBase, self)._apply(fn)
+    def apply_local_tensors(self, fn):
+        ret = super(RNNBase, self).apply_local_tensors(fn)
         self.flatten_parameters()
         return ret
 
