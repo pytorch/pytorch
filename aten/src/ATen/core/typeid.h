@@ -72,6 +72,10 @@ inline std::ostream& operator<<(
 
 } // namespace caffe2
 
+namespace at {
+using DataType = caffe2::TypeIdentifier;
+}
+
 AT_DEFINE_HASH_FOR_IDWRAPPER(caffe2::TypeIdentifier)
 
 namespace caffe2 {
