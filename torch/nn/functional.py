@@ -593,7 +593,7 @@ def adaptive_avg_pool3d(input, output_size):
 
 
 # Activation functions
-def dropout(input, p=0.5, training=False, inplace=False):
+def dropout(input, p=0.5, training=True, inplace=False):
     r"""
     During training, randomly zeroes some of the elements of the input
     tensor with probability :attr:`p` using samples from a Bernoulli
@@ -603,20 +603,8 @@ def dropout(input, p=0.5, training=False, inplace=False):
 
     Args:
         p: probability of an element to be zeroed. Default: 0.5
-        training: apply dropout if is True. Defualt: False
+        training: apply dropout if is True. Defualt: True
         inplace: If set to ``True``, will do this operation in-place. Default: ``False``
-
-    Examples::
-
-        >>> input = torch.randn(5)
-        >>> input
-        tensor([ 0.2000,  0.0599, -1.7443, -1.3099,  0.6752])
-
-        >>> torch.nn.functional.dropout(input, p=1.0)
-        tensor([ 0.2000,  0.0599, -1.7443, -1.3099,  0.6752])
-
-        >>> torch.nn.functional.dropout(input, p=1.0, training=True)
-        tensor([ 0.,  0., -0., -0.,  0.])
     """
     if p < 0 or p > 1:
         raise ValueError("dropout probability has to be between 0 and 1, "
@@ -637,7 +625,7 @@ def alpha_dropout(input, p=0.5, training=False, inplace=False):
     return f(input, p, training)
 
 
-def dropout2d(input, p=0.5, training=False, inplace=False):
+def dropout2d(input, p=0.5, training=True, inplace=False):
     r"""
     Randomly zeroes whole channels of the input tensor.
 
@@ -645,7 +633,7 @@ def dropout2d(input, p=0.5, training=False, inplace=False):
 
     Args:
         p: probability of an element to be zeroed. Default: 0.5
-        training: apply dropout if is True. Defualt: False
+        training: apply dropout if is True. Defualt: True
         inplace: If set to ``True``, will do this operation in-place. Default: ``False``
     """
     if p < 0 or p > 1:
@@ -655,7 +643,7 @@ def dropout2d(input, p=0.5, training=False, inplace=False):
     return f(input, p, training)
 
 
-def dropout3d(input, p=0.5, training=False, inplace=False):
+def dropout3d(input, p=0.5, training=True, inplace=False):
     r"""
     Randomly zeroes whole channels (a channel is a (N, C) pair) of the input tensor.
 
@@ -663,7 +651,7 @@ def dropout3d(input, p=0.5, training=False, inplace=False):
 
     Args:
         p: probability of an element to be zeroed. Default: 0.5
-        training: apply dropout if is True. Defualt: False
+        training: apply dropout if is True. Defualt: True
         inplace: If set to ``True``, will do this operation in-place. Default: ``False``
     """
     if p < 0 or p > 1:
