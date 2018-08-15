@@ -78,7 +78,9 @@
       {
         "path": "aten/src/THC/THCTensorRandom.cu",
         "s_constants": {
-          "struct curandStateMtgp32*": "curandStateMtgp32*"
+          "struct curandStateMtgp32*": "curandStateMtgp32*",
+          "__host__ void THCRandom_getRNGState": "extern \"C\" __host__ void THCRandom_getRNGState",
+          "__host__ void THCRandom_setRNGState": "extern \"C\" __host__ void THCRandom_setRNGState",
         }
       },
       {
