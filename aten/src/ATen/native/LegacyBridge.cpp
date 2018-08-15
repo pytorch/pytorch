@@ -21,7 +21,7 @@ namespace {
 // can just use the native mechanism straight.
 
 // TODO: Maybe the foo_ variants should call th_foo_
-
+/*
 Tensor norm(const Tensor & self, Scalar p) {
   if (_has_native(self)) {
     return native_norm(self, p);
@@ -29,7 +29,7 @@ Tensor norm(const Tensor & self, Scalar p) {
     return th_norm(self, p);
   }
 }
-
+*/
 Tensor clone(const Tensor& self) {
   if (_has_native(self)) {
     return native_clone(self);

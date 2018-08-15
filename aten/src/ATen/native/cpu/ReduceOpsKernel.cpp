@@ -185,20 +185,22 @@ static void prod_kernel_impl(Tensor& result, const Tensor& self, at::optional<in
 
 template<typename scalar_t>
 struct NormReduction {
-  static void apply(Tensor& res, const Tensor& self, Scalar p, at::optional<int64_t> dim, bool keepdim) {
+  static void apply(Tensor& res, const Tensor& self, Scalar p, at::optional<int64_t> dim) {
     auto out_ = res.data<scalar_t>();
     auto data_ = self.data<scalar_t>();
     auto numel = self.numel();
-    if (!dim.has_value()) {
-      std::cout << "dim has no value, not supported yet, TODO" << std::endl;
-      return;
-    }
     auto pval = 0.0;
     if (p.isIntegral()){
       pval = p.to<int64_t>();
     } else if (p.isFloatingPoint()) {
       pval = p.to<float>();
     }
+    if (!dim.has_value()) {
+      *out_ = reduce_all(data_, numel,  p);
+      //std::cout << "dim has no value, not supported yet, TODO" << std::endl;
+      return;
+    }
+
     int64_t n = self.size(*dim);
     int64_t stride = self.stride(*dim);
     //std::cout << "NormReduction called, p = " << p << ", pval = " << pval << ", stride = " << stride << std::endl;
@@ -212,52 +214,144 @@ struct NormReduction {
     }
     int64_t batch = numel / n;
 
-    parallel_for(0, batch, 1, [=](int64_t begin, int64_t end) {
-      for (int64_t bi = begin; bi < end; bi++) {
-        int64_t b = bi / stride;
-        int64_t i = bi % stride;
-        const scalar_t* data = &data_[b * n * stride + i];
+#if 1
+    if (stride == 1) {
+      parallel_for(0, batch, 1, [=](int64_t begin, int64_t end) {
+        for (int64_t b = begin; b < end; b++) {
+          const scalar_t* data = &data_[b * n];
+          scalar_t result = 0.0;
+          if (pval == 0) {
+            for (int64_t k = 0; k < n; k++) {
+              result += (data[k] != 0.0);
+            }
+            out_[b] = result;
+          } else if (pval == 1) {
+            for (int64_t k = 0; k < n; k++) {
+              result += std::abs(data[k]);
+            }
+            out_[b] = result;
+          } else if (pval == 2) {
+            for (int64_t k = 0; k < n; k++) {
+              result += data[k] * data[k];
+            }
+            out_[b] = std::sqrt(result);
+          } else if (pval == 3) {
+            for (int64_t k = 0; k < n; k++) {
+              result += std::abs(data[k] * data[k] * data[k]);
+            }
+            out_[b] = std::pow(result, 1.0/3);
+          } else if (std::isinf(pval)) {
+            for (int64_t k = 0; k < n; k++) {
+              result = std::abs(data[k]) > result ? std::abs(data[k]) : result;
+            }
+            out_[b] = result;
+          } else {
+            for (int64_t k = 0; k < n; k++) {
+              result += std::pow(std::abs(data[k]), pval);
+            }
+            out_[b] = std::pow(result, 1.0/pval);
+          }
+        }
+      });
+    } else {
+      parallel_for(0, batch, 1, [=](int64_t begin, int64_t end) {
+        for (int64_t bi = begin; bi < end; bi++) {
+          int64_t b = bi / stride;
+          int64_t i = bi % stride;
+          const scalar_t* data = &data_[b * n * stride + i];
+          scalar_t result = 0.0;
+          if (pval == 0) {
+            for (int64_t k = 0; k < n; k++) {
+              result += (data[k * stride] != 0.0);
+            }
+            out_[bi] = result;
+          } else if (pval == 1) {
+            for (int64_t k = 0; k < n; k++) {
+              result += std::abs(data[k * stride]);
+            }
+            out_[bi] = result;
+          } else if (pval == 2) {
+            for (int64_t k = 0; k < n; k++) {
+              result += data[k * stride] * data[k * stride];
+            }
+            out_[bi] = std::sqrt(result);
+          } else if (pval == 3) {
+            for (int64_t k = 0; k < n; k++) {
+              result += std::abs(data[k * stride] * data[k * stride] * data[k * stride]);
+            }
+            out_[bi] = std::pow(result, 1.0/3);
+          } else if (std::isinf(pval)) {
+            for (int64_t k = 0; k < n; k++) {
+              result = std::abs(data[k * stride]) > result ? std::abs(data[k * stride]) : result;
+            }
+            out_[bi] = result;
+          } else {
+            for (int64_t k = 0; k < n; k++) {
+              result += std::pow(std::abs(data[k * stride]), pval);
+            }
+            out_[bi] = std::pow(result, 1.0/pval);
+          }
+        }
+      });
+    }
+#endif
+  }
+
+  static scalar_t reduce_all(const scalar_t* data_, int64_t size,  Scalar p) {
+    auto pval = 0.0;
+    if (p.isIntegral()){
+      pval = p.to<int64_t>();
+    } else if (p.isFloatingPoint()) {
+      pval = p.to<float>();
+    }
+    scalar_t sum = parallel_reduce(
+      0,
+      size,
+      internal::GRAIN_SIZE,
+      (scalar_t)0,
+      [=](int64_t begin, int64_t end, scalar_t init) {
+        const scalar_t* data = &data_[begin];
+        int64_t n = end - begin;
         scalar_t result = 0.0;
         if (pval == 0) {
           for (int64_t k = 0; k < n; k++) {
-            result += (data[k * stride] != 0.0);
+            result += (data[k] != 0.0);
           }
-          out_[bi] = result;
         } else if (pval == 1) {
           for (int64_t k = 0; k < n; k++) {
-            result += std::abs(data[k * stride]);
+            result += std::abs(data[k]);
           }
-          out_[bi] = result;
         } else if (pval == 2) {
           for (int64_t k = 0; k < n; k++) {
-            result += data[k * stride] * data[k * stride];
+            result += data[k] * data[k];
           }
-          out_[bi] = std::sqrt(result);
+          result = std::sqrt(result);
         } else if (pval == 3) {
           for (int64_t k = 0; k < n; k++) {
-            result += std::abs(data[k * stride] * data[k * stride] * data[k * stride]);
+            result += std::abs(data[k] * data[k] * data[k]);
           }
-          out_[bi] = std::pow(result, 1.0/3);
+          result = std::pow(result, 1.0/3);
         } else if (std::isinf(pval)) {
           for (int64_t k = 0; k < n; k++) {
-            result = std::abs(data[k * stride]) > result ? std::abs(data[k * stride]) : result;
+            result = std::abs(data[k]) > result ? std::abs(data[k]) : result;
           }
-          out_[bi] = result;
         } else {
           for (int64_t k = 0; k < n; k++) {
-            result += std::pow(std::abs(data[k * stride]), pval);
+            result += std::pow(std::abs(data[k]), pval);
           }
-          out_[bi] = std::pow(result, 1.0/pval);
+          result = std::pow(result, 1.0/pval);
         }
-      }
-    });
+        return result;
+      },
+      std::plus<scalar_t>());
+    return sum;
   }
 
 };
 
-static void norm_kernel_impl(Tensor& result, const Tensor& self, Scalar p, at::optional<int64_t> dim, bool keepdim) {
+static void norm_kernel_impl(Tensor& result, const Tensor& self, Scalar p, at::optional<int64_t> dim) {
   AT_DISPATCH_FLOATING_TYPES(self.type(), "norm", [&] {
-    NormReduction<scalar_t>::apply(result, self, p, dim, keepdim);
+    NormReduction<scalar_t>::apply(result, self, p, dim);
   });
 }
 
