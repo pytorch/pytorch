@@ -35,7 +35,7 @@ RegisterOperators reg({
     Operator(
         prim::FusionGroup,
         [](Node* node) {
-          int fusion_fn; // TODO: revert this with below
+          int fusion_fn = 0; // TODO: revert this with below
           // auto fusion_fn = sharedFusionCompiler().getOrCompile(node);
           auto num_inputs = node->inputs().size();
           return [fusion_fn, num_inputs](Stack& stack) {

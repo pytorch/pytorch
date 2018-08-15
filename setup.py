@@ -685,8 +685,6 @@ else:
         # braces warnings, see
         # https://bugs.llvm.org/show_bug.cgi?id=21629
         '-Wno-missing-braces',
-        # gcc7 seems to report spurious warnings with this enabled
-        "-Wno-stringop-overflow",
     ]
     if check_env_flag('WERROR'):
         extra_compile_args.append('-Werror')
