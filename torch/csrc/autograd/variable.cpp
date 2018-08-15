@@ -72,7 +72,6 @@ std::unique_ptr<at::Storage> Variable::Impl::storage() {
 }
 
 at::StorageImpl* Variable::Impl::storageImpl() const {
-{
   return data_.unsafeGetTensorImpl()->storageImpl();
 }
 
