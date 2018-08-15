@@ -1,0 +1,4 @@
+sphinx
+-e git://github.com/snide/sphinx_rtd_theme.git#egg=sphinx_rtd_theme
+breathe
+exhale

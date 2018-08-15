@@ -1,0 +1,118 @@
+body {
+    font-family: "Lato","proxima-nova","Helvetica Neue",Arial,sans-serif;
+}
+
+/* Default header fonts are ugly */
+h1, h2, .rst-content .toctree-wrapper p.caption, h3, h4, h5, h6, legend, p.caption {
+    font-family: "Lato","proxima-nova","Helvetica Neue",Arial,sans-serif;
+}
+
+/* Use white for docs background */
+.wy-side-nav-search {
+    background-color: #fff;
+}
+
+.wy-nav-content-wrap, .wy-menu li.current > a  {
+    background-color: #fff;
+}
+
+@media screen and (min-width: 1400px) {
+    .wy-nav-content-wrap {
+        background-color: rgba(0, 0, 0, 0.0470588);
+    }
+
+    .wy-nav-content {
+        background-color: #fff;
+    }
+}
+
+/* Fixes for mobile */
+.wy-nav-top {
+    background-color: #fff;
+    background-image: url('../img/pytorch-logo-dark.svg');
+    background-repeat: no-repeat;
+    background-position: center;
+    padding: 0;
+    margin: 0.4045em 0.809em;
+    color: #333;
+}
+
+.wy-nav-top > a {
+    display: none;
+}
+
+@media screen and (max-width: 768px) {
+    .wy-side-nav-search>a img.logo {
+        height: 60px;
+    }
+}
+
+/* This is needed to ensure that logo above search scales properly */
+.wy-side-nav-search a {
+    display: block;
+}
+
+/* This ensures that multiple constructors will remain in separate lines. */
+.rst-content dl:not(.docutils) dt {
+    display: table;
+}
+
+/* Use our red for literals (it's very similar to the original color) */
+.rst-content tt.literal, .rst-content tt.literal, .rst-content code.literal {
+    color: #F05732;
+}
+
+.rst-content tt.xref, a .rst-content tt, .rst-content tt.xref,
+.rst-content code.xref, a .rst-content tt, a .rst-content code {
+    color: #404040;
+}
+
+/* Change link colors (except for the menu) */
+
+a {
+    color: #F05732;
+}
+
+a:hover {
+    color: #F05732;
+}
+
+
+a:visited {
+    color: #D44D2C;
+}
+
+.wy-menu a {
+    color: #b3b3b3;
+}
+
+.wy-menu a:hover {
+    color: #b3b3b3;
+}
+
+/* Default footer text is quite big */
+footer {
+    font-size: 80%;
+}
+
+footer .rst-footer-buttons {
+    font-size: 125%; /* revert footer settings - 1/80% = 125% */
+}
+
+footer p {
+    font-size: 100%;
+}
+
+/* For hidden headers that appear in TOC tree */
+/* see http://stackoverflow.com/a/32363545/3343043 */
+.rst-content .hidden-section {
+    display: none;
+}
+
+nav .hidden-section {
+    display: inherit;
+}
+
+.wy-side-nav-search>div.version {
+    color: #000;
+}
