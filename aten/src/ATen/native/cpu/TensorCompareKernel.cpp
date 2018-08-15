@@ -25,9 +25,6 @@ bool _isnan(double val) {
   return std::isnan(val);
 }
 
-#define isnan_break(val) \
-  if (_isnan<scalar_t>(val)) break;
-
 template <typename scalar_t, typename index_t>
 struct Reduction {
   static void apply(Tensor& res, Tensor& res_indices, const Tensor& self, at::optional<int64_t> dim, bool greater) {
@@ -57,7 +54,9 @@ struct Reduction {
             bool cmp = greater ? (result > value) : (result < value);
             result = cmp ? result : value;
             result_index = cmp ? result_index : k;
-            isnan_break(result);
+            if (_isnan<scalar_t>(result)) {
+              break;
+            }
           }
           out_[b] = result;
           indices_[b] = result_index;
@@ -76,7 +75,9 @@ struct Reduction {
             bool cmp = greater ? (result > value) : (result < value);
             result = cmp ? result : value;
             result_index = cmp ? result_index : k;
-            isnan_break(result);
+            if (_isnan<scalar_t>(result)) {
+              break;
+            }
           }
           out_[b * stride + i] = result;
           indices_[b * stride + i] = result_index;
