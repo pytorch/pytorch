@@ -60,35 +60,33 @@ void Tensor::backward(
 }
 
 TensorImpl::TensorImpl(TensorTypeId type_id, ScalarType scalar_type, bool is_variable)
-    : storage_(nullptr),
+    : TensorImpl(nullptr, type_id, scalar_type, is_variable) {
+  // UndefinedTensors and SparseTensors don't have storages.
+  if (type_id != UndefinedTensorId() && scalar_type != ScalarType::Undefined
+      && type_id != SparseCPUTensorId() && type_id != SparseCUDATensorId()) {
+    auto type = &globalContext().getType(tensorTypeIdToBackend(type_id), scalar_type);
+    auto storage = type->storage(true);
+    storage_ = storage->pImpl();
+    storage_->retain();
+  }
+}
+
+TensorImpl::TensorImpl(StorageImpl* storage, TensorTypeId type_id, bool is_variable)
+    : TensorImpl(storage, type_id, storage->scalar_type(), is_variable) {}
+
+TensorImpl::TensorImpl(StorageImpl* storage, TensorTypeId type_id, ScalarType scalar_type, bool is_variable)
+    : storage_(storage),
       storage_offset_(0),
       sizes_{0},
       strides_{1},
       type_id_(type_id),
       scalar_type_(scalar_type),
-      is_variable_(is_variable) {
-  if (type_id != UndefinedTensorId() && scalar_type != ScalarType::Undefined
-      && type_id != SparseCPUTensorId() && type_id != SparseCUDATensorId()) {
-    auto type = &globalContext().getType(tensorTypeIdToBackend(type_id), scalar_type);
-    Storage* storage = type->storage(true).release();
-    storage_ = storage->pImpl();
-  }
-}
-
-TensorImpl::TensorImpl(StorageImpl* storage, TensorTypeId type_id, bool is_variable)
-      : storage_(storage),
-        storage_offset_(0),
-        sizes_{0},
-        strides_{1},
-        type_id_(type_id),
-        scalar_type_(storage->scalar_type()),
-        is_variable_(is_variable) {
-  AT_CHECK(storage_, "storage passed to TensorImpl must be non-null");
-}
+      is_variable_(is_variable) {}
 
 TensorImpl::~TensorImpl() {
   if (storage_) {
     storage_->release();
+    storage_ = nullptr;
   }
 }
 

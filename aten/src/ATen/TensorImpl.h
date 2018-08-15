@@ -142,5 +142,8 @@ protected:
   ScalarType scalar_type_;
   bool is_variable_ = false;
   bool is_wrapped_number_ = false;
+
+private:
+  TensorImpl(StorageImpl* storage, TensorTypeId type_id, ScalarType scalar_type, bool is_variable);
 };
 } // namespace at
