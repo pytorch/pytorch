@@ -297,12 +297,12 @@ at::Tensor ModuleDecoder::buildTensorCommon(
   // Find or create the storage
   auto storage_it = storage_map_.find(record_number);
   if (storage_it == storage_map_.end()) {
-    std::shared_ptr<void> storage_ptr;
+    at::DataPtr storage_ptr;
     int64_t size;
     std::tie(storage_ptr, size) = file_reader_.getRecordWithKey(record_number);
     auto storage = std::make_shared<at::Storage>(
       at::CPU(type).scalarType(),
-      at::InefficientSharedPtrContext::makeDataPtr(storage_ptr.get(), storage_ptr, at::kCPU),
+      std::move(storage_ptr),
       size,
       nullptr);
     storage_map_.insert(std::make_pair(record_number, storage));
