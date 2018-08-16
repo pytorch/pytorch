@@ -12,18 +12,21 @@
 
 #define AT_CORE_EXPORT
 #define AT_CORE_IMPORT
-#define AT_CORE_API
 
 #ifdef _WIN32
   #ifndef AT_CORE_STATIC_WINDOWS
+    #undef AT_CORE_EXPORT
+    #undef AT_CORE_IMPORT
     #define AT_CORE_EXPORT __declspec(dllexport)
     #define AT_CORE_IMPORT __declspec(dllimport)
   #endif // !defined(AT_CORE_STATIC_WINDOWS)
 #else  // _WIN32
   #if defined(__GNUC__) || defined(__llvm__)
+    #undef AT_CORE_EXPORT
+    #undef AT_CORE_IMPORT
     #define AT_CORE_EXPORT __attribute__((__visibility__("default")))
     #define AT_CORE_IMPORT AT_CORE_EXPORT
-  #endif // defined(__GNUC__)
+  #endif // defined(__GNUC__) || defined(__llvm__)
 #endif  // _WIN32
 
 #if defined(CAFFE2_BUILD_MAIN_LIBS) || defined(ATen_cpu_EXPORTS) || defined(caffe2_EXPORTS)
