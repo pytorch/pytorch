@@ -14,6 +14,7 @@
 #include <vector>
 #include <sstream>
 #include <iostream>
+#include <cstdlib>
 
 namespace torch { namespace jit { namespace cpufuser {
 
