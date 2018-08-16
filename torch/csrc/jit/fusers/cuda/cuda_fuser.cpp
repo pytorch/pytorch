@@ -27,13 +27,13 @@
 #include <vector>
 #include <sstream>
 #include <iostream>
+#include <cstdlib>
 
 namespace torch { namespace jit { namespace cudafuser {
 
 // Note: there is only one CUDAFuser
-static CUDAFuser fuser;
-
 CUDAFuser& getCUDAFuser() {
+  static CUDAFuser fuser;
   return fuser;
 }
 
