@@ -280,128 +280,128 @@ static std::string encodeRHS(Node* n) {
   return format(str, env);
 }
 
-// static std::pair<std::vector<ConcatDesc>, bool> emitCompilationUnit(
-//     std::ostream& out,
-//     const std::string& name,
-//     AnnotatedGraph& agraph,
-//     bool use_cuda) {
-//   bool has_random = false;
-//   Graph& subgraph = *agraph.graph;
-//   TemplateEnv env;
-//   env.s("kernelName",name);
-//   // TODO: handle cases where we need to generate > 2^32 element tensors
-//   env.s("IndexType","unsigned int"); //avoiding slow header includes to get uint32_t
+static std::pair<std::vector<ConcatDesc>, bool> emitCompilationUnit(
+    std::ostream& out,
+    const std::string& name,
+    AnnotatedGraph& agraph,
+    bool use_cuda) {
+  bool has_random = false;
+  Graph& subgraph = *agraph.graph;
+  TemplateEnv env;
+  env.s("kernelName",name);
+  // TODO: handle cases where we need to generate > 2^32 element tensors
+  env.s("IndexType","unsigned int"); //avoiding slow header includes to get uint32_t
 
-//   std::stringstream body;
-//   std::stringstream tensorOffsets;
-//   std::vector<std::string> formals;
-//   std::vector<std::string> argument_loads;
-//   auto emitFormal = [&](Value* n, const TensorDesc& desc) {
-//     std::string tensor = "t" + std::to_string(formals.size()); //can't be unique() because Param may be an output
-//     size_t nDim = desc.nDim();
-//     emitIndexingFor(tensorOffsets, tensor, nDim,  desc.lastIsContiguous());
-//     env.s("tensor",tensor);
-//     env.d("formal_index", formals.size() + 1); // + 1 because the first argument is the linearIndex
-//     env.d("nDim",nDim);
-//     env.s("scalar_type",scalarTypeName(desc.scalar_type));
-//     formals.push_back(format("TensorInfo<${scalar_type},${nDim}> ${tensor}",env));
-//     argument_loads.push_back(format("*static_cast<TensorInfo<${scalar_type},${nDim}>*>(args[${formal_index}])",env));
-//   };
-//   {
-//     size_t i = 0;
-//     for(auto p : subgraph.inputs())
-//       emitFormal(p,agraph.input_desc[i++]);
-//   }
-//   std::vector<ConcatDesc> concat_desc;
-//   std::vector<Value*> flat_output_nodes;
-//   {
-//     size_t i = 0;
-//     for(auto o : subgraph.outputs()) {
-//       auto & desc = agraph.output_desc[i++];
-//       if(o->node()->kind() != prim::FusedConcat) {
-//         emitFormal(o, desc);
-//         concat_desc.emplace_back();
-//         flat_output_nodes.push_back(o);
-//       } else {
-//         auto cat = o->node();
-//         concat_desc.emplace_back(desc, cat->inputs().size(), cat->i(attr::dim));
-//         for(auto c : cat->inputs()) {
-//           emitFormal(c, *concat_desc.back().subtensorDesc);
-//           flat_output_nodes.push_back(c);
-//         }
-//       }
-//     }
-//   }
+  std::stringstream body;
+  std::stringstream tensorOffsets;
+  std::vector<std::string> formals;
+  std::vector<std::string> argument_loads;
+  auto emitFormal = [&](Value* n, const TensorDesc& desc) {
+    std::string tensor = "t" + std::to_string(formals.size()); //can't be unique() because Param may be an output
+    size_t nDim = desc.nDim();
+    emitIndexingFor(tensorOffsets, tensor, nDim,  desc.lastIsContiguous());
+    env.s("tensor",tensor);
+    env.d("formal_index", formals.size() + 1); // + 1 because the first argument is the linearIndex
+    env.d("nDim",nDim);
+    env.s("scalar_type",scalarTypeName(desc.scalar_type));
+    formals.push_back(format("TensorInfo<${scalar_type},${nDim}> ${tensor}",env));
+    argument_loads.push_back(format("*static_cast<TensorInfo<${scalar_type},${nDim}>*>(args[${formal_index}])",env));
+  };
+  {
+    size_t i = 0;
+    for(auto p : subgraph.inputs())
+      emitFormal(p,agraph.input_desc[i++]);
+  }
+  std::vector<ConcatDesc> concat_desc;
+  std::vector<Value*> flat_output_nodes;
+  {
+    size_t i = 0;
+    for(auto o : subgraph.outputs()) {
+      auto & desc = agraph.output_desc[i++];
+      if(o->node()->kind() != prim::FusedConcat) {
+        emitFormal(o, desc);
+        concat_desc.emplace_back();
+        flat_output_nodes.push_back(o);
+      } else {
+        auto cat = o->node();
+        concat_desc.emplace_back(desc, cat->inputs().size(), cat->i(attr::dim));
+        for(auto c : cat->inputs()) {
+          emitFormal(c, *concat_desc.back().subtensorDesc);
+          flat_output_nodes.push_back(c);
+        }
+      }
+    }
+  }
 
-//   size_t formal_count = 0;
-//   for(auto p : subgraph.inputs()) {
-//     env.s("node",valueName(p));
-//     env.d("formal",formal_count++);
+  size_t formal_count = 0;
+  for(auto p : subgraph.inputs()) {
+    env.s("node",valueName(p));
+    env.d("formal",formal_count++);
 
-//     // Acquires and converts (if needed) inputs
-//     auto pt = p->type()->cast<TensorType>();
-//     env.s("access", format("t${formal}.data[t${formal}_offset]", env));
+    // Acquires and converts (if needed) inputs
+    auto pt = p->type()->cast<TensorType>();
+    env.s("access", format("t${formal}.data[t${formal}_offset]", env));
 
-//     //TODO: actual type propagation rather than relying on auto..
-//     body << format("auto ${node} = ${access};\n",env);
-//   }
+    //TODO: actual type propagation rather than relying on auto..
+    body << format("auto ${node} = ${access};\n",env);
+  }
 
-//   for(auto n : subgraph.nodes()) {
-//     // FusedConcat nodes work by narrowing the output Tensors before the kernel runs
-//     if (n->kind() == prim::FusedConcat)
-//       continue;
-//     if(n->kind() == aten::rand_like) {
-//       has_random = true;
-//       if(!use_cuda)
-//         throw std::runtime_error("Fusion doesn't support rand on CPU");
-//     }
-//     env.s("node",valueName(n->output()));
-//     env.s("rhs", encodeRHS(n));
-//     body << format("auto ${node} = ${rhs};\n",env);
-//   }
+  for(auto n : subgraph.nodes()) {
+    // FusedConcat nodes work by narrowing the output Tensors before the kernel runs
+    if (n->kind() == prim::FusedConcat)
+      continue;
+    if(n->kind() == aten::rand_like) {
+      has_random = true;
+      if(!use_cuda)
+        throw std::runtime_error("Fusion doesn't support rand on CPU");
+    }
+    env.s("node",valueName(n->output()));
+    env.s("rhs", encodeRHS(n));
+    body << format("auto ${node} = ${rhs};\n",env);
+  }
 
-//   for(auto o : flat_output_nodes) {
-//     env.d("formal",formal_count++);
-//     env.s("access",format("t${formal}.data[t${formal}_offset]",env));
-//     env.s("node",valueName(o));
+  for(auto o : flat_output_nodes) {
+    env.d("formal",formal_count++);
+    env.s("access",format("t${formal}.data[t${formal}_offset]",env));
+    env.s("node",valueName(o));
 
-//     // Acquires and converts (if needed) outputs
-//     auto ot = o->type()->cast<TensorType>();
-//     body << format("${access} = ${node};\n",env);
-//   }
+    // Acquires and converts (if needed) outputs
+    auto ot = o->type()->cast<TensorType>();
+    body << format("${access} = ${node};\n",env);
+  }
 
-//   env.s("tensorOffsets",tensorOffsets.str());
-//   env.s("kernelBody",body.str());
-//   env.v("formals",formals);
-//   env.v("argument_loads",argument_loads);
-//   env.s("type_declarations", type_declarations_template.format(env));
-//   out << cpu_compilation_unit_template.format(env);
+  env.s("tensorOffsets",tensorOffsets.str());
+  env.s("kernelBody",body.str());
+  env.v("formals",formals);
+  env.v("argument_loads",argument_loads);
+  env.s("type_declarations", type_declarations_template.format(env));
+  out << cpu_compilation_unit_template.format(env);
 
-//   return std::make_pair(std::move(concat_desc), has_random);
-// }
+  return std::make_pair(std::move(concat_desc), has_random);
+}
 
-// // Host-side view of TensorInfo (that visivle for the kernel is defined above).
-// // Note dims[0] - we need to dynamically allocate the dims.
-// struct TensorInfo {
-//   void* data;
-//   #pragma GCC diagnostic ignored "-Wpedantic"
-//     uint32_t sizes_strides[0];
-//   #pragma GCC diagnostic pop
+// Host-side view of TensorInfo (that visivle for the kernel is defined above).
+// Note dims[0] - we need to dynamically allocate the dims.
+struct TensorInfo {
+  void* data;
+  #pragma GCC diagnostic ignored "-Wpedantic"
+    uint32_t sizes_strides[0];
+  #pragma GCC diagnostic pop
 
-//   uint32_t* sizes(size_t nDim) { return &sizes_strides[0]; }
-//   uint32_t* strides(size_t nDim) { return &sizes_strides[nDim]; }
-// };
+  uint32_t* sizes(size_t nDim) { return &sizes_strides[0]; }
+  uint32_t* strides(size_t nDim) { return &sizes_strides[nDim]; }
+};
 
-// static const std::string disas_string =
-//   "objdump -M  intel -d \"${so_file}\"";
+static const std::string disas_string =
+  "objdump -M  intel -d \"${so_file}\"";
 
-// static void disas(const std::string& so_file) {
-//   TemplateEnv env;
-//   env.s("so_file", so_file);
-//   std::string cmd = format(disas_string, env);
-//   int r = system(cmd.c_str());
-//   JIT_ASSERT(r == 0);
-// }
+static void disas(const std::string& so_file) {
+  TemplateEnv env;
+  env.s("so_file", so_file);
+  std::string cmd = format(disas_string, env);
+  int r = system(cmd.c_str());
+  JIT_ASSERT(r == 0);
+}
 
 CPUFusionFunction::CPUFusionFunction(
   const std::string& name
@@ -411,97 +411,97 @@ CPUFusionFunction::CPUFusionFunction(
   TempFile so_file(so_template, 3);
   TempFile cpp_file(cpp_template, 4);
 
-  // std::stringstream cu;
-  // auto ret = emitCompilationUnit(cu, name, agraph, false);
-  // concat_desc = std::move(ret.first);
-  // has_random = ret.second;
-  // JIT_ASSERT(!has_random);
-  // compilation_unit = cu.str();
-  // cpp_file.write(compilation_unit);
-  // cpp_file.sync();
-  // runCompiler(config, cpp_file.name(), so_file.name());
-  // if(config.debug) disas(so_file.name());
-  // so_lib.reset(new DynamicLibrary(so_file.name().c_str()));
-  // #pragma GCC diagnostic ignored "-Wpedantic"
-  //   kernel = reinterpret_cast<void(*)(uint32_t, void**)>(so_lib->sym(name.c_str()));
-  // #pragma GCC diagnostic pop
+  std::stringstream cu;
+  auto ret = emitCompilationUnit(cu, name, agraph, false);
+  concat_desc = std::move(ret.first);
+  has_random = ret.second;
+  JIT_ASSERT(!has_random);
+  compilation_unit = cu.str();
+  cpp_file.write(compilation_unit);
+  cpp_file.sync();
+  runCompiler(config, cpp_file.name(), so_file.name());
+  if(config.debug) disas(so_file.name());
+  so_lib.reset(new DynamicLibrary(so_file.name().c_str()));
+  #pragma GCC diagnostic ignored "-Wpedantic"
+    kernel = reinterpret_cast<void(*)(uint32_t, void**)>(so_lib->sym(name.c_str()));
+  #pragma GCC diagnostic pop
 }
 
 void CPUFusionFunction::launch_with_tensors(
   at::ArrayRef<at::Tensor> inputs
 , at::ArrayRef<at::Tensor> outputs) {
-  // at::DeviceGuard device_guard(inputs);
-  // JIT_ASSERT(inputs.size() == input_desc.size());
-  // JIT_ASSERT(outputs.size() == output_desc.size());
-  // size_t flat_outputs_size = 0;
-  // for(auto& c : concat_desc)
-  //   flat_outputs_size += c.nSubtensors;
-  // // XXX: this code assumes that inputs are 32-bit addressable
-  // // XXX: this code assumes that all inputs are of the same size
-  // JIT_ASSERT(inputs[0].numel() <= std::numeric_limits<uint32_t>::max());
-  // uint32_t numel = inputs[0].numel();
-  // at::IntList map_size = inputs[0].sizes();
-  // // Compute the storage needed to store TensorInfo structs for inputs and outputs.
-  // size_t uncompressedDim = input_desc.at(0).contiguity.size();
-  // size_t maxPossibleTensorInfoSize = sizeof(TensorInfo) + 2 * sizeof(uint32_t) * uncompressedDim;
-  // size_t maxPossibleBufferSize = maxPossibleTensorInfoSize * (inputs.size() + flat_outputs_size);
-  // std::vector<char> buffer(maxPossibleBufferSize);
-  // char* buffer_next = buffer.data();
-  // // A vector of arguments to the kernel. It's (numel, *input_descs, *output_descs)
-  // std::vector<void*> arguments;
-  // arguments.reserve(3 + inputs.size() + flat_outputs_size);
-  // // Asserts that t's dims can be compressed in the same way as in desc
-  // // (that's what the kernel assumes), and appends it to the arguments vector.
-  // auto addTensorInfo = [&](TensorDesc& desc, const at::Tensor& t) {
-  //   size_t nDim = desc.nDim(); // NOTE: this is the compressed dim
-  //   JIT_ASSERT(nDim <= uncompressedDim); // We'd overflow the space otherwise
-  //   auto ti = reinterpret_cast<TensorInfo*>(buffer_next);
-  //   ti->data = t.data_ptr();
-  //   compressContiguous(t.sizes(), t.strides(), desc.contiguity, ti->sizes(nDim), ti->strides(nDim));
-  //   buffer_next += maxPossibleTensorInfoSize;
-  //   arguments.push_back(ti);
-  // };
+  at::DeviceGuard device_guard(inputs);
+  JIT_ASSERT(inputs.size() == input_desc.size());
+  JIT_ASSERT(outputs.size() == output_desc.size());
+  size_t flat_outputs_size = 0;
+  for(auto& c : concat_desc)
+    flat_outputs_size += c.nSubtensors;
+  // XXX: this code assumes that inputs are 32-bit addressable
+  // XXX: this code assumes that all inputs are of the same size
+  JIT_ASSERT(inputs[0].numel() <= std::numeric_limits<uint32_t>::max());
+  uint32_t numel = inputs[0].numel();
+  at::IntList map_size = inputs[0].sizes();
+  // Compute the storage needed to store TensorInfo structs for inputs and outputs.
+  size_t uncompressedDim = input_desc.at(0).contiguity.size();
+  size_t maxPossibleTensorInfoSize = sizeof(TensorInfo) + 2 * sizeof(uint32_t) * uncompressedDim;
+  size_t maxPossibleBufferSize = maxPossibleTensorInfoSize * (inputs.size() + flat_outputs_size);
+  std::vector<char> buffer(maxPossibleBufferSize);
+  char* buffer_next = buffer.data();
+  // A vector of arguments to the kernel. It's (numel, *input_descs, *output_descs)
+  std::vector<void*> arguments;
+  arguments.reserve(3 + inputs.size() + flat_outputs_size);
+  // Asserts that t's dims can be compressed in the same way as in desc
+  // (that's what the kernel assumes), and appends it to the arguments vector.
+  auto addTensorInfo = [&](TensorDesc& desc, const at::Tensor& t) {
+    size_t nDim = desc.nDim(); // NOTE: this is the compressed dim
+    JIT_ASSERT(nDim <= uncompressedDim); // We'd overflow the space otherwise
+    auto ti = reinterpret_cast<TensorInfo*>(buffer_next);
+    ti->data = t.data_ptr();
+    compressContiguous(t.sizes(), t.strides(), desc.contiguity, ti->sizes(nDim), ti->strides(nDim));
+    buffer_next += maxPossibleTensorInfoSize;
+    arguments.push_back(ti);
+  };
 
-//   arguments.push_back(&numel);
-//   for (size_t i = 0; i < input_desc.size(); ++i)
-//     addTensorInfo(input_desc[i], inputs[i]);
-//   for (size_t i = 0; i < output_desc.size(); ++i) {
-//     auto& c = concat_desc[i];
-//     at::Tensor o = outputs[i];
-//     if(c.nSubtensors == 1) {
-//       o.resize_(map_size);
-//       addTensorInfo(output_desc[i], outputs[i]);
-//     } else {
-//       size_t small_size = map_size[c.dim];
-//       std::vector<int64_t> concat_size(map_size.begin(), map_size.end());
-//       concat_size[c.dim] = small_size * c.nSubtensors;
-//       o.resize_(concat_size);
-//       size_t offset = 0;
-//       for(size_t j = 0; j < c.nSubtensors; ++j) {
-//         // because the concatenated_output stays live, the underlying data
-//         // in this view remains live through the end of this function
-//         // so there is not need to hold onto this tensor
-//         auto view = o.narrow(c.dim, offset, small_size);
-//         addTensorInfo(*c.subtensorDesc, view);
-//         offset += small_size;
-//       }
-//     }
-//   }
+  arguments.push_back(&numel);
+  for (size_t i = 0; i < input_desc.size(); ++i)
+    addTensorInfo(input_desc[i], inputs[i]);
+  for (size_t i = 0; i < output_desc.size(); ++i) {
+    auto& c = concat_desc[i];
+    at::Tensor o = outputs[i];
+    if(c.nSubtensors == 1) {
+      o.resize_(map_size);
+      addTensorInfo(output_desc[i], outputs[i]);
+    } else {
+      size_t small_size = map_size[c.dim];
+      std::vector<int64_t> concat_size(map_size.begin(), map_size.end());
+      concat_size[c.dim] = small_size * c.nSubtensors;
+      o.resize_(concat_size);
+      size_t offset = 0;
+      for(size_t j = 0; j < c.nSubtensors; ++j) {
+        // because the concatenated_output stays live, the underlying data
+        // in this view remains live through the end of this function
+        // so there is not need to hold onto this tensor
+        auto view = o.narrow(c.dim, offset, small_size);
+        addTensorInfo(*c.subtensorDesc, view);
+        offset += small_size;
+      }
+    }
+  }
 
-//   launch_raw(numel, arguments.data());
+  launch_raw(numel, arguments.data());
 }
 
 void CPUFusionFunction::launch(
   at::ArrayRef<at::Tensor> inputs
 , std::vector<at::Tensor>& outputs) {
-  // at::DeviceGuard guard(inputs.back());
-  // outputs.clear();
-  // outputs.reserve(outputDescriptors().size());
-  // for (auto& od : outputDescriptors()) {
-  //   outputs.push_back(torch::getType(backend(),od.scalar_type).tensor());
-  // }
+  at::DeviceGuard guard(inputs.back());
+  outputs.clear();
+  outputs.reserve(outputDescriptors().size());
+  for (auto& od : outputDescriptors()) {
+    outputs.push_back(torch::getType(backend(),od.scalar_type).tensor());
+  }
 
-  // launch_with_tensors(inputs, outputs);
+  launch_with_tensors(inputs, outputs);
 }
 
 } // namespace cpufuser
