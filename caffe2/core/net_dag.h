@@ -26,7 +26,7 @@
 
 namespace caffe2 {
 
-class DAGNetBase : public NetBase {
+class CAFFE2_API DAGNetBase : public NetBase {
  public:
   DAGNetBase(const std::shared_ptr<const NetDef>& net_def, Workspace* ws);
   ~DAGNetBase() override;
@@ -87,7 +87,7 @@ class DAGNetBase : public NetBase {
   AT_DISABLE_COPY_AND_ASSIGN(DAGNetBase);
 };
 
-class DAGNet : public DAGNetBase {
+class CAFFE2_API DAGNet : public DAGNetBase {
  public:
   using DAGNetBase::DAGNetBase;
 

@@ -27,7 +27,7 @@ namespace caffe2 {
 class OperatorBase;
 typedef ObserverBase<OperatorBase> OperatorObserver;
 
-class OperatorBase : public Observable<OperatorBase> {
+class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
  public:
   explicit OperatorBase(const OperatorDef& operator_def, Workspace* ws);
   virtual ~OperatorBase() noexcept {}
@@ -447,7 +447,7 @@ class OperatorBase : public Observable<OperatorBase> {
 // run on different devices. You should then implement the RunOnDevice()
 // function.
 template <class Context>
-class Operator : public OperatorBase {
+class CAFFE2_API Operator : public OperatorBase {
  public:
   explicit Operator(const OperatorDef& operator_def, Workspace* ws)
       : OperatorBase(operator_def, ws), context_(operator_def.device_option()) {
@@ -797,7 +797,7 @@ typedef Registry<
     std::unique_ptr<OperatorBase>,
     const OperatorDef&,
     Workspace*>* (*RegistryFunction)();
-std::map<int32_t, OperatorRegistry*>* gDeviceTypeRegistry();
+CAFFE2_API std::map<int32_t, OperatorRegistry*>* gDeviceTypeRegistry();
 
 struct DeviceTypeRegisterer {
   explicit DeviceTypeRegisterer(int32_t type, RegistryFunction func) {
