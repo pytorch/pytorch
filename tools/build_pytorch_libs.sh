@@ -80,9 +80,7 @@ if [ "$(uname)" == 'Darwin' ]; then
   fi
 fi
 
-cd "$(dirname "$0")/.."
-PWD=`printf "%q\n" "$(pwd)"`
-BASE_DIR="$PWD"
+BASE_DIR=$(cd $(dirname "$0")/.. && printf "%q\n" "$(pwd)")
 TORCH_LIB_DIR="$BASE_DIR/torch/lib"
 INSTALL_DIR="$TORCH_LIB_DIR/tmp_install"
 THIRD_PARTY_DIR="$BASE_DIR/third_party"
@@ -257,9 +255,7 @@ function build_caffe2() {
     EXTRA_CAFFE2_CMAKE_FLAGS+=("-DCMAKE_PREFIX_PATH=$CMAKE_PREFIX_PATH")
   fi
 
-  mkdir -p build
-  pushd build
-  ${CMAKE_VERSION} .. \
+  ${CMAKE_VERSION} $BASE_DIR \
   ${CMAKE_GENERATOR} \
       -DBUILDING_WITH_TORCH_LIBS=ON \
       -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
@@ -296,10 +292,9 @@ function build_caffe2() {
   if [[ $FULL_CAFFE2 -ne 0 ]]; then
     find . -name proto
     for proto_file in ./caffe2/proto/*.py; do
-      cp $proto_file "$BASE_DIR/caffe2/proto/"
+      cp $proto_file "../caffe2/proto/"
     done
   fi
-  popd
 
   # Fix rpaths of shared libraries
   if [[ $(uname) == 'Darwin' ]]; then
@@ -313,7 +308,7 @@ function build_caffe2() {
 }
 
 # In the torch/lib directory, create an installation directory
-mkdir -p torch/lib/tmp_install
+mkdir -p $INSTALL_DIR
 
 # Build
 for arg in "$@"; do
@@ -326,9 +321,7 @@ for arg in "$@"; do
         build gloo $GLOO_FLAGS
         popd
     elif [[ "$arg" == "caffe2" ]]; then
-        pushd $BASE_DIR
         build_caffe2
-        popd
     elif [[ "$arg" == "THD" ]]; then
         pushd "$TORCH_LIB_DIR"
         build THD $THD_FLAGS
@@ -348,7 +341,7 @@ for arg in "$@"; do
     fi
 done
 
-pushd torch/lib
+pushd $TORCH_LIB_DIR
 
 # If all the builds succeed we copy the libraries, headers,
 # binaries to torch/lib
