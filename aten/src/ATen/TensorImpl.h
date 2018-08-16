@@ -3,8 +3,7 @@
 #include <atomic>
 #include <memory>
 
-#include "ATen/Retainable.h"
-#include "ATen/ScalarType.h"
+#include "ATen/StorageImpl.h"
 #include "ATen/core/optional.h"
 #include "ATen/core/TensorTypeId.h"
 #include "ATen/core/TensorTypeIdRegistration.h"
@@ -20,9 +19,8 @@ struct Tensor;
 
 namespace at {
 struct AT_API TensorImpl : public Retainable {
-  explicit TensorImpl(TensorTypeId type_id, ScalarType scalar_type, THTensor * tensor, bool is_variable)
-  : type_id_(type_id), scalar_type_(scalar_type), is_variable_(is_variable), tensor(tensor) {}
-  TensorImpl(TensorTypeId type_id, ScalarType scalar_type);
+  TensorImpl(TensorTypeId type_id, ScalarType scalar_type, bool is_variable);
+  TensorImpl(StorageImpl* storage, TensorTypeId type_id, bool is_variable);
 
   virtual ~TensorImpl();
 
@@ -37,7 +35,6 @@ struct AT_API TensorImpl : public Retainable {
   virtual IntList sizes() const;
   virtual IntList strides() const;
   virtual int64_t dim() const;
-  virtual void * unsafeGetTH(bool retain);
   virtual std::unique_ptr<Storage> storage();
   friend struct Type;
 
@@ -95,6 +92,49 @@ struct AT_API TensorImpl : public Retainable {
 
   virtual void set_data(Tensor new_data);
 
+  // TODO: make these protected
+  // Note: storage->size() may be greater than the recorded size
+  // of a tensor
+  at::StorageImpl* storage_;
+  int64_t storage_offset_;
+
+  std::vector<int64_t> sizes_;
+  std::vector<int64_t> strides_;
+
+  template <typename T>
+  inline T * data() const {
+    return storageImpl()->data<T>() + storage_offset_;
+  }
+
+  template <typename T>
+  inline T * unsafe_data() const {
+    return storageImpl()->unsafe_data<T>() + storage_offset_;
+  }
+
+  inline at::ScalarType scalar_type() const {
+    return scalar_type_;
+  }
+
+  virtual int64_t storage_offset() const {
+    return storage_offset_;
+  }
+
+  // represents that numel() == 0.
+  inline bool is_empty() const {
+    for (int64_t i = 0; i < dim(); ++i) {
+      if (sizes()[i] == 0) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  virtual int64_t size(int64_t d) const;
+  virtual int64_t stride(int64_t d) const;
+
+  // TODO: get rid of this.
+  virtual at::StorageImpl* storageImpl() const { return storage_; }
+
 protected:
   TensorTypeId type_id_;
   // INVARIANT: When storage is non-null, this scalar type must
@@ -102,7 +142,8 @@ protected:
   ScalarType scalar_type_;
   bool is_variable_ = false;
   bool is_wrapped_number_ = false;
-public:
-  THTensor * tensor;
+
+private:
+  TensorImpl(StorageImpl* storage, TensorTypeId type_id, ScalarType scalar_type, bool is_variable);
 };
 } // namespace at
