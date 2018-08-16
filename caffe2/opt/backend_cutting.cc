@@ -290,16 +290,30 @@ void ReplaceSubgraph(
   }
 }
 
-void PruneUnrefereredNodes(NNGraph* g) {
+void PruneUnrefereredNodes(NNModule* nn) {
+  auto& g = nn->dataFlow;
   std::vector<NodeRef> to_delete;
-  for (auto node : g->getMutableNodes()) {
+  for (auto node : g.getMutableNodes()) {
     if (!nn::hasProducer(node) &&
         !nn::hasConsumer(node)) {
       to_delete.push_back(node);
     }
   }
   for (auto i : to_delete) {
-    g->deleteNode(i);
+    if (nn::is<NeuralNetData>(i)) {
+      auto name = nn::get<NeuralNetData>(i)->getName();
+      auto it = nn->inputs.find(i);
+      if (it != nn->inputs.end()) {
+        VLOG(2) << "Removing external input " << name;
+        nn->inputs.erase(it);
+      }
+      it = nn->outputs.find(i);
+      if (it != nn->outputs.end()) {
+        VLOG(2) << "Removing external output " << name;
+        nn->outputs.erase(it);
+      }
+    }
+    g.deleteNode(i);
   }
 }
 
@@ -373,15 +387,9 @@ caffe2::NetDef OptimizeForBackend(
 
   // Prune dangling nodes, because after transformation, some weights might be
   // absorbed
-  PruneUnrefereredNodes(&dfg);
+  PruneUnrefereredNodes(&nn);
 
   auto new_net = convertToCaffe2Proto(nn);
-  for (const auto& i: net.external_input()) {
-    new_net.add_external_input(i);
-  }
-  for (const auto& i: net.external_output()) {
-    new_net.add_external_output(i);
-  }
   new_net.set_name(net.name() + "_opt");
   return new_net;
 }

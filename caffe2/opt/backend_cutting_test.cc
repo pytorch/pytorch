@@ -1,5 +1,6 @@
 #include "caffe2/core/common.h"
 #include "caffe2/opt/backend_cutting.h"
+#include "caffe2/core/logging.h"
 #include "caffe2/utils/string_utils.h"
 
 #include <gtest/gtest.h>
@@ -45,6 +46,11 @@ namespace {
 TEST(BackendCuttingTest, line) {
   caffe2::NetDef net;
   net.add_external_input("X");
+  // Adding weights as external intputs to test weight absorption
+  net.add_external_input("W0");
+  net.add_external_input("W1");
+  net.add_external_input("b0");
+  net.add_external_input("b1");
   net.add_external_output("Y");
   auto* op = net.add_op();
   op->set_type("CopyIn");
