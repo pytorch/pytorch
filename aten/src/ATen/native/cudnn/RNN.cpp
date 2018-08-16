@@ -1099,8 +1099,8 @@ struct DropoutState {
 
 DropoutState& get_dropout_state(const Type& tp, double dropout_p, bool train) {
   // Each state is slightly over 2MB and initialized lazily, so it's fine to cache them.
-  static std::vector<DropoutState> ten_dropout_state_cache { cuda::getNumGPUs() };
-  static std::vector<DropoutState> var_dropout_state_cache { cuda::getNumGPUs() };
+  static std::vector<DropoutState> ten_dropout_state_cache { static_cast<size_t>(cuda::getNumGPUs()) };
+  static std::vector<DropoutState> var_dropout_state_cache { static_cast<size_t>(cuda::getNumGPUs()) };
   static std::mutex state_cache_mut;
 
   int device = cuda::current_device();
