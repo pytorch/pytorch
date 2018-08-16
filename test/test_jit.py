@@ -741,6 +741,20 @@ class TestJit(JitTestCase):
         self.assertExpectedGraph(trace)
         self.assertExportImport(trace, (x, y))
 
+    def test_recursive_cse(self):
+        x = torch.tensor([0.1])
+        y = torch.tensor([0.2])
+
+        def fn(x, y):
+            z = x
+            if x + y > x:
+                z = x + y
+            return z
+
+        graph = torch.jit.script(fn).graph
+        self.run_pass('cse', graph)
+        self.assertExpectedGraph(graph)
+
     def test_scalar(self):
         # NB: must not require grad; if it requires grad, it's always a Tensor
         x = torch.tensor(2.)
