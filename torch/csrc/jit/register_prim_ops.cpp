@@ -396,14 +396,20 @@ RegisterOperators reg({
             throw std::runtime_error(ss.str());
           }
         }),
+    // Select element in the `b`th position from list `a`
+    // Equivalent to `a[b]` in Python.
     Operator("prim::ListSelect(int[] a, int b) -> int", listSelect<Shared<IntList>>),
     Operator("prim::ListSelect(float[] a, int b) -> float", listSelect<Shared<DoubleList>>),
     Operator("prim::ListSelect(Tensor[] a, int b) -> Tensor", listSelect<Shared<TensorList>>),
 
+    // Return the size of list `a`
+    // Equivalent to `len(a)` in Python.
     Operator("prim::len(int[] a) -> int", listLen<Shared<IntList>>),
     Operator("prim::len(float[] a) -> int", listLen<Shared<DoubleList>>),
     Operator("prim::len(Tensor[] a) -> int", listLen<Shared<TensorList>>),
 
+    // Return a slice of list `l`, with a specified start, end, and step length
+    // Equivalent to `l[start:end:step]` in Python.
     Operator(
         "prim::ListSlice(int[] l, int start, int end=9223372036854775807, int step=1) -> int[]",
         listSlice<Shared<IntList>, int64_t>),
@@ -470,10 +476,14 @@ RegisterOperators reg({
     };                                                                 \
   }),
 RegisterOperators reg2({
+    // Return True iff lists `a` and `b` are elementwise equal
+    // Equivalent to `a == b` in Python.
     Operator("aten::eq(int[] a, int[] b) -> int", listEq<Shared<IntList>>),
     Operator("aten::eq(float[] a, float[] b) -> int", listEq<Shared<DoubleList>>),
     Operator("aten::eq(Tensor[] a, Tensor[] b) -> int", listEq<Shared<TensorList>>),
 
+    // Concatenate list `a` with list `b` and return the result.
+    // Equivalent to `a + b` in Python.
     Operator("aten::add(int[] a, int[] b) -> int[]", listAdd<Shared<IntList>, int64_t>),
     Operator("aten::add(float[] a, float[] b) -> float[]", listAdd<Shared<DoubleList>, double>),
     Operator("aten::add(Tensor[] a, Tensor[] b) -> Tensor[]", listAdd<Shared<TensorList>, at::Tensor>),
