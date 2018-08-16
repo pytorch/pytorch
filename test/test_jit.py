@@ -2082,14 +2082,14 @@ a")
             if True:
                 x = [2, 3]
             return
-        self.checkScript(reassign, (), optimize=True)
+        self.checkScript(reassign, (), optimize=False)
 
         def reassign_arity_change():
             x = [1]
             if True:
                 x = [1, 2, 3]
             return
-        self.checkScript(reassign_arity_change, (), optimize=True)
+        self.checkScript(reassign_arity_change, (), optimize=False)
 
         def reassign_from_empty_literal():
             x = []
@@ -2097,7 +2097,7 @@ a")
                 x = [1, 2, 3]
             return
         with self.assertRaisesRegex(RuntimeError, "Empty list literals not allowed"):
-            self.checkScript(reassign_from_empty_literal, (), optimize=True)
+            self.checkScript(reassign_from_empty_literal, (), optimize=False)
 
         def reassign_from_empty_builtin():
             x = _construct_empty_int_list()
@@ -2110,7 +2110,7 @@ a")
             if True:
                 z = [torch.randn([1])]
             return
-        self.checkScript(reassign_from_empty_builtin, (), optimize=True)
+        self.checkScript(reassign_from_empty_builtin, (), optimize=False)
 
         def reassign_bad_type():
             x = [1]
@@ -2118,7 +2118,7 @@ a")
                 x = [1.0]
             return
         with self.assertRaisesRegex(RuntimeError, "previously has type"):
-            self.checkScript(reassign_bad_type, (), optimize=True)
+            self.checkScript(reassign_bad_type, (), optimize=False)
 
         def reassign_nested():
             x = _construct_empty_int_list()
@@ -2128,7 +2128,7 @@ a")
                     x = [1.0]
             return
         with self.assertRaisesRegex(RuntimeError, "previously has type"):
-            self.checkScript(reassign_nested, (), optimize=True)
+            self.checkScript(reassign_nested, (), optimize=False)
 
     def test_func_call(self):
         script = '''
