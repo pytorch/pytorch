@@ -263,8 +263,8 @@ class CAFFE2_API OpSchema {
   Arg(const char* name, const char* description, bool required = false);
 
 #define DECLARE_STANDARD_ARG(name, str)     \
-  CAFFE2_API static const char* Arg_##name; \
-  CAFFE2_API OpSchema& Arg##name(const char* description);
+  static const char* Arg_##name; \
+  OpSchema& Arg##name(const char* description);
 
   DECLARE_STANDARD_ARG(IsTest, is_test)
 

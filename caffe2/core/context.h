@@ -206,7 +206,7 @@ class CAFFE2_API CPUStaticContext : public BaseStaticContext {
   }
 
  protected:
-  CAFFE2_API static MemoryAllocationReporter reporter_;
+  static MemoryAllocationReporter reporter_;
 
  private:
   static void ReportAndDelete(void* ptr) {
