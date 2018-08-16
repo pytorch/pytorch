@@ -171,6 +171,7 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/fusers/cpu/graph_fuser.cpp
   ${TORCH_SRC_DIR}/csrc/jit/fusers/cpu/fusion_compiler.cpp
   ${TORCH_SRC_DIR}/csrc/jit/fusers/cpu/tensor_desc.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/fusers/cpu/cpu_fusion_function.cpp
   ${TORCH_SRC_DIR}/csrc/jit/test_jit.cpp
   ${TORCH_SRC_DIR}/csrc/jit/tracer.cpp
   ${TORCH_SRC_DIR}/csrc/jit/type.cpp

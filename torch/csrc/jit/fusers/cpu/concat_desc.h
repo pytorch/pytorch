@@ -3,6 +3,8 @@
 
 #include "torch/csrc/jit/fusers/cpu/tensor_desc.h"
 
+#include "torch/csrc/WindowsTorchApiMacro.h"
+
 #include "torch/csrc/jit/assertions.h"
 
 #include <memory>
@@ -10,7 +12,7 @@
 
 namespace torch { namespace jit { namespace cpufuser {
 
-struct ConcatDesc {
+TORCH_API struct ConcatDesc {
   size_t nSubtensors; // == 1 for outputs that are not concats, otherwise it is the number tensors concatenated
   size_t dim; // dimension along which the concat occurs
   std::unique_ptr<TensorDesc> subtensorDesc; // descriptor for the subtensor, if it exists

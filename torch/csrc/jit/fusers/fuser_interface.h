@@ -13,12 +13,12 @@ namespace torch { namespace jit {
  
  constexpr int kCPUDevice = -1;
  
- TORCH_API struct CompiledFusionFunction {
+ TORCH_API struct FusionFunction {
   // Note: creates new tensors for outputs
   virtual void launch(
     at::ArrayRef<at::Tensor> inputs
   , std::vector<at::Tensor>& outputs) = 0;
-   virtual ~CompiledFusionFunction() = default;
+   virtual ~FusionFunction() = default;
 };
 
 TORCH_API void FuseCPUGraph(std::shared_ptr<Graph>& graph);
