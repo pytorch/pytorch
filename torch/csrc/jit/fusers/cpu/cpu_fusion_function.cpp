@@ -184,8 +184,7 @@ namespace torch { namespace jit { namespace cpufuser {
 //   }
 
 //   switch(type) {
-//     #define DEFINE_CASE(ctype,name,_) \
-//       case at::ScalarType::name: return #ctype;
+//     #define DEFINE_CASE(ctype,name,_) case at::ScalarType::name: return #ctype;
 //     AT_FORALL_SCALAR_TYPES_EXCEPT_HALF(DEFINE_CASE)
 //     #undef DEFINE_CASE
 //     default:
