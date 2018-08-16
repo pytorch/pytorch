@@ -1,6 +1,7 @@
 #include <caffe2/ideep/operators/operator_fallback_ideep.h>
 #include <caffe2/ideep/utils/ideep_operator.h>
 
+#include <caffe2/operators/accuracy_op.h>
 #include <caffe2/operators/bbox_transform_op.h>
 #include <caffe2/operators/box_with_nms_limit_op.h>
 #include <caffe2/operators/channel_shuffle_op.h>
@@ -9,12 +10,16 @@
 #include <caffe2/operators/cross_entropy_op.h>
 #include <caffe2/operators/ctc_beam_search_decoder_op.h>
 #include <caffe2/operators/ctc_greedy_decoder_op.h>
+#include <caffe2/operators/distance_op.h>
 #include <caffe2/operators/dropout_op.h>
+#include <caffe2/operators/elementwise_add_op.h>
+#include <caffe2/operators/elementwise_mul_op.h>
 #include <caffe2/operators/elementwise_ops.h>
 #include <caffe2/operators/filler_op.h>
 #include <caffe2/operators/flatten_op.h>
 #include <caffe2/operators/generate_proposals_op.h>
 #include <caffe2/operators/given_tensor_fill_op.h>
+#include <caffe2/operators/leaky_relu_op.h>
 #include <caffe2/operators/load_save_op.h>
 #include <caffe2/operators/loss_op.h>
 #include <caffe2/operators/pad_op.h>
@@ -22,9 +27,12 @@
 #include <caffe2/operators/reshape_op.h>
 #include <caffe2/operators/roi_align_op.h>
 #include <caffe2/operators/roi_align_rotated_op.h>
+#include <caffe2/operators/scale_op.h>
 #include <caffe2/operators/softmax_op.h>
+#include <caffe2/operators/tanh_op.h>
 #include <caffe2/operators/transpose_op.h>
 #include <caffe2/operators/utility_ops.h>
+#include <caffe2/sgd/adam_op.h>
 #include <caffe2/sgd/iter_op.h>
 #include <caffe2/sgd/learning_rate_op.h>
 
@@ -142,4 +150,52 @@ REGISTER_IDEEP_OPERATOR(
 REGISTER_IDEEP_OPERATOR(
     WeightedSum,
     IDEEPFallbackOp<WeightedSumOp<CPUContext>>);
+
+REGISTER_IDEEP_OPERATOR(
+    LeakyRelu,
+    IDEEPFallbackOp<LeakyReluOp<float, CPUContext>>);
+REGISTER_IDEEP_OPERATOR(
+    Mul,
+    IDEEPFallbackOp<
+        BinaryElementwiseOp<NumericTypes, CPUContext, MulFunctor<CPUContext>>>);
+REGISTER_IDEEP_OPERATOR(
+    Tanh,
+    IDEEPFallbackOp<UnaryElementwiseOp<
+        TensorTypes<float>,
+        CPUContext,
+        TanhFunctor<CPUContext>>>);
+REGISTER_IDEEP_OPERATOR(
+    L1Distance,
+    IDEEPFallbackOp<L1DistanceOp<float, CPUContext>>);
+REGISTER_IDEEP_OPERATOR(Scale, IDEEPFallbackOp<ScaleOp<CPUContext>>);
+REGISTER_IDEEP_OPERATOR(
+    Accuracy,
+    IDEEPFallbackOp<AccuracyOp<float, CPUContext>>);
+
+REGISTER_IDEEP_OPERATOR(
+    AddGradient,
+    IDEEPFallbackOp<BinaryElementwiseGradientOp<
+        NumericTypes,
+        CPUContext,
+        AddFunctor<CPUContext>>>);
+REGISTER_IDEEP_OPERATOR(
+    TanhGradient,
+    IDEEPFallbackOp<BinaryElementwiseOp<
+        TensorTypes<float>,
+        CPUContext,
+        TanhGradientFunctor<CPUContext>>>);
+REGISTER_IDEEP_OPERATOR(
+    ConvTransposeGradient,
+    IDEEPFallbackOp<ConvTransposeGradientOp<float, CPUContext>>);
+REGISTER_IDEEP_OPERATOR(
+    LeakyReluGradient,
+    IDEEPFallbackOp<LeakyReluGradientOp<float, CPUContext>>);
+REGISTER_IDEEP_OPERATOR(
+    MulGradient,
+    IDEEPFallbackOp<BinaryElementwiseGradientOp<
+        NumericTypes,
+        CPUContext,
+        MulFunctor<CPUContext>>>);
+REGISTER_IDEEP_OPERATOR(Adam, IDEEPFallbackOp<AdamOp<float, CPUContext>>);
+
 } // namespace caffe2
