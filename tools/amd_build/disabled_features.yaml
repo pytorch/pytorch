@@ -51,12 +51,6 @@
         }
       },
       {
-        "path": "aten/src/ATen/native/cuda/Distributions.cu",
-        "s_constants": {
-          "#include <nvfunctional>": ""
-        }
-      },
-      {
         "path": "aten/src/THC/THCNumerics.cuh",
         "s_constants": {
           "#ifdef __CUDA_ARCH__": "#if defined(__CUDA_ARCH__) || defined(__HIP_PLATFORM_HCC__)",
