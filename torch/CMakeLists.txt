@@ -134,7 +134,6 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/cuda/comm.cpp
   ${TORCH_SRC_DIR}/csrc/jit/autodiff.cpp
   ${TORCH_SRC_DIR}/csrc/jit/export.cpp
-  ${TORCH_SRC_DIR}/csrc/jit/fusion_compiler.cpp
   ${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops.cpp
   ${TORCH_SRC_DIR}/csrc/jit/graph_executor.cpp
   ${TORCH_SRC_DIR}/csrc/jit/import.cpp
@@ -154,6 +153,14 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/passes/decompose_addmm.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/erase_number_types.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/graph_fuser.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/fusers/fuser_interface.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/fusers/cpu/cpu_fusion_pass.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/fusers/cpu/cpu_fuser.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/fusers/cuda/cuda_fusion_pass.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/fusers/cuda/cuda_fuser_interface.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/fusers/cuda/cuda_fuser.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/fusers/cuda/tensor_desc.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/fusers/cuda/cuda_fusion_function.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/inplace_check.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/loop_unrolling.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/lower_grad_of.cpp
