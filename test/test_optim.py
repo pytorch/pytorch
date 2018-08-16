@@ -365,6 +365,7 @@ class TestOptim(TestCase):
             lambda params: optim.Adagrad(params, lr=1e-1)
         )
 
+    @skipIfRocm
     def test_adamax(self):
         self._test_rosenbrock(
             lambda params: optim.Adamax(params, lr=1e-1),
