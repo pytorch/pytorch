@@ -24,17 +24,17 @@ std::tuple<Tensor, Tensor> _sobol_engine_draw(const Tensor& quasi, int64_t n, co
   /// `select` operations.
   std::vector<Tensor> sobolstate_unbind = at::native::unbind(sobolstate, 1);
 
-  /// Considering a vector of `n` Tensors of size `dimension` to store the results in.
-  std::vector<Tensor> result = at::native::empty({n, dimension}).unbind(0);
+  /// Considering a vector of `n` Tensors to store the results in.
+  std::vector<Tensor> result;
   Tensor wquasi = quasi.clone();
 
   for (int64_t i = 0; i < n; ++i) {
     int64_t l = rightmost_zero(num_generated);
-    result[i].copy_(wquasi.__ixor__(sobolstate_unbind[l]));  // TODO: not working
+    result.emplace_back(wquasi.__ixor__(sobolstate_unbind[l]).clone());
     num_generated++;
   }
 
-  return std::make_tuple(at::native::stack(result, 0).mul_(RECIPD), wquasi);
+  return std::make_tuple(at::native::stack(result, 0).toType(at::kFloat).mul_(RECIPD), wquasi);
 }
 
 /// This is the core function to fast-forward a `SobolEngine` given

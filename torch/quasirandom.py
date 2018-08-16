@@ -24,6 +24,8 @@ class SobolEngine(object):
                                    Default: ``False``.
         seed (Int, optional): This is the seed for the scrambling. The seed of the random number
                               generator is set to this, if specified. Default: ``None``
+        device: Device string. This sets the saves the states of the ``SobolEngine`` in :attr:`device`.
+                Subsequent sampling / fast-forwarding / resetting is done on :attr:`device`. Default: 'cpu'
 
     Examples::
 
@@ -35,16 +37,17 @@ class SobolEngine(object):
     """
     MAXBIT = 30
 
-    def __init__(self, dimension, scramble=False, seed=None):
+    def __init__(self, dimension, scramble=False, seed=None, device='cpu'):
         if dimension > 1111 or dimension < 1:
             raise ValueError("Supported range of dimensionality for SobolEngine is [1, 1111]")
 
         self.seed = seed
         self.scramble = scramble
         self.dimension = dimension
+        self.device = device
 
-        self.sobolstate = torch._sobol_engine_initialize_state(torch.zeros(dimension, self.MAXBIT).to(torch.long),
-                                                               self.dimension)
+        self.sobolstate = torch.zeros(dimension, self.MAXBIT).to(dtype=torch.long, device=self.device)
+        self.sobolstate = torch._sobol_engine_initialize_state(self.sobolstate, self.dimension)
 
         if self.scramble:
             g = torch.Generator()
@@ -52,16 +55,17 @@ class SobolEngine(object):
                 g.manual_seed(self.seed)
 
             self.shift = torch.mv(torch.randint(2, (self.dimension, self.MAXBIT), dtype=torch.float, generator=g),
-                                  torch.pow(2, torch.arange(0, self.MAXBIT, dtype=torch.float))).to(torch.long)
+                                  torch.pow(2, torch.arange(0, self.MAXBIT, dtype=torch.float)))
+            self.shift = self.shift.to(dtype=torch.long, device=self.device)
 
             # TODO: can be replaced with torch.tril(torch.randint(2, (dimension, MAXBIT, MAXBIT)))
             #       once a batched version is introduced
             ltm = torch.randint(2, (self.dimension, self.MAXBIT, self.MAXBIT), generator=g).to(torch.long)
-            ltm = torch.stack(list(map(torch.tril, ltm.unbind(0))))
+            ltm = torch.stack(list(map(torch.tril, ltm.unbind(0)))).to(device=self.device)
 
             self.sobolstate = torch._sobol_engine_scramble(self.sobolstate, ltm, self.dimension)
         else:
-            self.shift = torch.zeros(self.dimension).to(torch.long)
+            self.shift = torch.zeros(self.dimension).to(dtype=torch.long, device=self.device)
 
         self.quasi = self.shift.clone()
         self.num_generated = 0
@@ -105,4 +109,6 @@ class SobolEngine(object):
             fmt_string += ['scramble=True']
         if self.seed is not None:
             fmt_string += ['seed={}'.format(self.seed)]
+        if self.device != 'cpu':
+            fmt_string += ['device={}'.format(self.device)]
         return self.__class__.__name__ + '(' + ', '.join(fmt_string) + ')'
