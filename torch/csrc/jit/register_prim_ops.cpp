@@ -32,7 +32,13 @@ Operation noop(Node* n) {
 }
 
 RegisterOperators reg({
-
+    Operator(
+        prim::MemoryFence,
+        [](Node* node) {
+          return [](Stack& stack) {
+            return 0;
+          };
+        }),
     Operator(
         prim::FusionGroup,
         [](Node* node) {
@@ -452,6 +458,20 @@ Operation listSlice(Node* node) {
   };
 }
 
+template <typename TList, typename TElement>
+Operation listAppend(Node* node) {
+  return [](Stack& stack) {
+    TList a;
+    TElement el;
+    pop(stack, a, el);
+
+    a->elements().push_back(el);
+
+    return 0;
+  };
+}
+
+
 RegisterOperators reg2({
     Operator("aten::select(int[] a, int b) -> int", listSelect<Shared<IntList>>),
     Operator("aten::select(float[] a, int b) -> float", listSelect<Shared<DoubleList>>),
@@ -478,6 +498,10 @@ RegisterOperators reg2({
     Operator(
         "aten::slice(Tensor[] l, int start, int end=9223372036854775807, int step=1) -> Tensor[]",
         listSlice<Shared<TensorList>, at::Tensor>),
+
+    Operator("aten::append(int[] list, int el) -> ()", listAppend<Shared<IntList>, int64_t>),
+    Operator("aten::append(float[] list, float el) -> ()", listAppend<Shared<DoubleList>, double>),
+    Operator("aten::append(Tensor[] list, Tensor el) -> ()", listAppend<Shared<TensorList>, at::Tensor>),
 
     DEFINE_BINARY_OP(aten::add, a + b)
     DEFINE_BINARY_OP(aten::sub, a - b)

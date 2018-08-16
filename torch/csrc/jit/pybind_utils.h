@@ -64,6 +64,8 @@ inline IValue toIValue(py::object&& obj, const TypePtr& type) {
         AT_ERROR("Lists and tuples are not supported yet");
       case TypeKind::NumberType:
         AT_ERROR("Insufficient type information to convert input");
+      case TypeKind::WorldType:
+        AT_ERROR("World arguments should not be passed in by users");
     }
   AT_ERROR("Missing cases in toIValue! File a bug report.");
 }

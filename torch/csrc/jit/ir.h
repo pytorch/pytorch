@@ -544,7 +544,7 @@ public:
     return {blocks_.data(), blocks_.size()};
   }
 
-  // Insert unattached 'this' node after 'n' in the topological order.
+  // Insert unattached 'this' node before 'n' in the topological order.
   // Returns this (for chaining).
   //
   // Given:   %3 = f(%1, %2)

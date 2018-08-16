@@ -42,6 +42,8 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
     out << "None";
   } else if(t.kind() == TypeKind::StringType) {
     out << "string";
+  } else if(t.kind() == TypeKind::WorldType) {
+    out << "World";
   } else {
     AT_ERROR("unknown type kind");
   }
@@ -66,6 +68,10 @@ FloatTypePtr FloatType::get() {
 }
 NoneTypePtr NoneType::get() {
   static auto value = NoneType::create();
+  return value;
+}
+WorldTypePtr WorldType::get() {
+  static auto value = WorldType::create();
   return value;
 }
 StringTypePtr StringType::get() {

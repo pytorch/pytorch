@@ -53,7 +53,9 @@ _(prim, AutogradAdd) \
 _(prim, GradOf) \
 _(prim, AnyDefined) \
 _(prim, FusedConcat) \
+_(prim, MemoryFence) \
 _(aten, __not__) \
+_(aten, append) \
 FORALL_ATEN_BASE_SYMBOLS(_) \
 _(onnx, Add) \
 _(onnx, Concat) \

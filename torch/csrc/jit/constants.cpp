@@ -88,6 +88,14 @@ RegisterOperators reg({
             push(stack, s);
             return 0;
           };
+        } else if (type == WorldType::get()) {
+          return [](Stack& stack) {
+            // World doesn't have an IValue equivalent since it's a dummy type.
+            // TODO(suo): We can write a pass to erase all World tokens, which
+            // would eliminate the runtime overhead here.
+            push(stack, 0);
+            return 0;
+          };
         } else {
           std::stringstream ss;
           ss << "constant literal not supported for: " << type->str();

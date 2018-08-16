@@ -54,6 +54,7 @@ struct SchemaParser {
       {"float", FloatType::get() },
       {"int", IntType::get() },
       {"bool", IntType::get() }, // TODO: add separate bool type
+      {"World", WorldType::get() },
     };
     auto tok = L.expect(TK_IDENT);
     auto text = tok.text();
