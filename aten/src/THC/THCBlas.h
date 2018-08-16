@@ -7,9 +7,7 @@
 /* Level 1 */
 THC_API float THCudaBlas_Sdot(THCState *state, int64_t n, float *x, int64_t incx, float *y, int64_t incy);
 THC_API double THCudaBlas_Ddot(THCState *state, int64_t n, double *x, int64_t incx, double *y, int64_t incy);
-#ifdef CUDA_HALF_TENSOR
 THC_API half THCudaBlas_Hdot(THCState *state, int64_t n, half *x, int64_t incx, half *y, int64_t incy);
-#endif
 
 /* Level 2 */
 THC_API void THCudaBlas_Sgemv(THCState *state, char trans, int64_t m, int64_t n, float alpha, float *a, int64_t lda, float *x, int64_t incx, float beta, float *y, int64_t incy);
@@ -21,9 +19,7 @@ THC_API void THCudaBlas_Dger(THCState *state, int64_t m, int64_t n, double alpha
 THC_API void THCudaBlas_Sgemm(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k, float alpha, float *a, int64_t lda, float *b, int64_t ldb, float beta, float *c, int64_t ldc);
 THC_API void THCudaBlas_Dgemm(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k, double alpha, double *a, int64_t lda, double *b, int64_t ldb, double beta, double *c, int64_t ldc);
 
-#ifdef CUDA_HALF_TENSOR
 THC_API void THCudaBlas_Hgemm(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k, half alpha, half *a, int64_t lda, half *b, int64_t ldb, half beta, half *c, int64_t ldc);
-#endif
 
 THC_API void THCudaBlas_SgemmBatched(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k,
                                      float alpha, const float *a[], int64_t lda, const float *b[], int64_t ldb,

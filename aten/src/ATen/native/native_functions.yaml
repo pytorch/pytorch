@@ -381,8 +381,10 @@
   variants: function
 
 - func: conv_tbc(Tensor self, Tensor weight, Tensor bias, int64_t pad) -> Tensor
+  variants: function
 
 - func: conv_tbc_backward(Tensor self, Tensor input, Tensor weight, Tensor bias, int64_t pad) -> (Tensor, Tensor, Tensor)
+  variants: function
 
 # NB: we inherit the goofy argument order from PyTorch torch.nn.functional
 - func: conv_transpose1d(Tensor input, Tensor weight, Tensor bias={}, IntList[1] stride=1, IntList[1] padding=0, IntList[1] output_padding=0, int64_t groups=1, IntList[1] dilation=1) -> Tensor
@@ -566,7 +568,6 @@
 - func: det(Tensor self) -> Tensor
 
 - func: diagflat(Tensor self, int64_t offset=0) -> Tensor
-  variants: function
 
 - func: diagonal(Tensor self, int64_t offset=0, int64_t dim1=0, int64_t dim2=1) -> Tensor
 
@@ -1023,6 +1024,7 @@
     CUDA: log_softmax_cuda
 
 - func: log_softmax_backward_data(Tensor grad_output, Tensor output, int64_t dim, Tensor self) -> Tensor
+  variants: function
   dispatch:
     CPU: log_softmax_backward_cpu
     CUDA: log_softmax_backward_cuda
@@ -1480,6 +1482,7 @@
     CUDA: softmax_cuda
 
 - func: softmax_backward_data(Tensor grad_output, Tensor output, int64_t dim, Tensor self) -> Tensor
+  variants: function
   dispatch:
     CPU: softmax_backward_cpu
     CUDA: softmax_backward_cuda
@@ -2104,4 +2107,41 @@
 - func: _thnn_fused_gru_cell_backward(Tensor grad_hy, Tensor workspace, bool has_bias) -> (Tensor, Tensor, Tensor, Tensor, Tensor)
   dispatch:
     CUDA: _thnn_fused_gru_cell_backward_cuda
+  variants: function
+
+# RNN cells and layers
+- func: lstm(Tensor input, TensorList hx, TensorList params, bool has_biases, int64_t num_layers, double dropout, bool train, bool bidirectional, bool batch_first, Tensor? cudnn_weight_buf={}, Tensor? cudnn_dropout_state={}) -> (Tensor, Tensor, Tensor)
+  variants: function
+
+- func: lstm(Tensor data, Tensor batch_sizes, TensorList hx, TensorList params, bool has_biases, int64_t num_layers, double dropout, bool train, bool bidirectional, Tensor? cudnn_weight_buf={}, Tensor? cudnn_dropout_state={}) -> (Tensor, Tensor, Tensor)
+  variants: function
+
+- func: gru(Tensor input, Tensor hx, TensorList params, bool has_biases, int64_t num_layers, double dropout, bool train, bool bidirectional, bool batch_first, Tensor? cudnn_weight_buf={}, Tensor? cudnn_dropout_state={}) -> (Tensor, Tensor)
+  variants: function
+
+- func: gru(Tensor data, Tensor batch_sizes, Tensor hx, TensorList params, bool has_biases, int64_t num_layers, double dropout, bool train, bool bidirectional, Tensor? cudnn_weight_buf={}, Tensor? cudnn_dropout_state={}) -> (Tensor, Tensor)
+  variants: function
+
+- func: rnn_tanh(Tensor input, Tensor hx, TensorList params, bool has_biases, int64_t num_layers, double dropout, bool train, bool bidirectional, bool batch_first, Tensor? cudnn_weight_buf={}, Tensor? cudnn_dropout_state={}) -> (Tensor, Tensor)
+  variants: function
+
+- func: rnn_tanh(Tensor data, Tensor batch_sizes, Tensor hx, TensorList params, bool has_biases, int64_t num_layers, double dropout, bool train, bool bidirectional, Tensor? cudnn_weight_buf={}, Tensor? cudnn_dropout_state={}) -> (Tensor, Tensor)
+  variants: function
+
+- func: rnn_relu(Tensor input, Tensor hx, TensorList params, bool has_biases, int64_t num_layers, double dropout, bool train, bool bidirectional, bool batch_first, Tensor? cudnn_weight_buf={}, Tensor? cudnn_dropout_state={}) -> (Tensor, Tensor)
+  variants: function
+
+- func: rnn_relu(Tensor data, Tensor batch_sizes, Tensor hx, TensorList params, bool has_biases, int64_t num_layers, double dropout, bool train, bool bidirectional, Tensor? cudnn_weight_buf={}, Tensor? cudnn_dropout_state={}) -> (Tensor, Tensor)
+  variants: function
+
+- func: lstm_cell(Tensor input, TensorList hx, Tensor w_ih, Tensor w_hh, Tensor? b_ih={}, Tensor? b_hh={}) -> (Tensor, Tensor)
+  variants: function
+
+- func: gru_cell(Tensor input, Tensor hx, Tensor w_ih, Tensor w_hh, Tensor? b_ih={}, Tensor? b_hh={}) -> Tensor
+  variants: function
+
+- func: rnn_tanh_cell(Tensor input, Tensor hx, Tensor w_ih, Tensor w_hh, Tensor? b_ih={}, Tensor? b_hh={}) -> Tensor
+  variants: function
+
+- func: rnn_relu_cell(Tensor input, Tensor hx, Tensor w_ih, Tensor w_hh, Tensor? b_ih={}, Tensor? b_hh={}) -> Tensor
   variants: function

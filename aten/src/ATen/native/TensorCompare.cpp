@@ -5,6 +5,7 @@
 #include "ATen/NativeFunctions.h"
 #include "ATen/core/Error.h"
 #include "ReduceOpsUtils.h"
+#include "cpu/TensorCompareKernel.h"
 
 namespace {
 template <typename scalar_t>
@@ -28,6 +29,9 @@ void where_cpu(
 } // namespace
 
 namespace at { namespace native {
+
+DEFINE_DISPATCH(max_kernel);
+DEFINE_DISPATCH(min_kernel);
 
 bool allclose(const Tensor& self, const Tensor& other, double rtol, double atol, bool equal_nan) {
   return at::isclose(self, other, rtol, atol, equal_nan).all().toCByte();
@@ -146,6 +150,21 @@ std::tuple<Tensor &,Tensor &> mode_out(Tensor& values, Tensor& indices,
   }
 }
 
+std::tuple<Tensor &,Tensor &> _max_out_cpu(Tensor& max, Tensor& max_indices,
+                                        const Tensor& self, int64_t dim, bool keepdim) {
+  if (self.is_contiguous() && max.is_contiguous() && max_indices.is_contiguous()) {
+    _dimreduce_setup(max, self, dim);
+    _dimreduce_setup(max_indices, self, dim);
+    max_kernel(kCPU, max, max_indices, self, dim);
+    if (!keepdim) {
+      max.squeeze_(dim);
+      max_indices.squeeze_(dim);
+    }
+    return std::tuple<Tensor &,Tensor &>{max, max_indices};
+  }
+  return at::_th_max_out(max, max_indices, self, dim, keepdim);
+}
+
 std::tuple<Tensor, Tensor> max(const Tensor& self, int64_t dim, bool keepdim) {
   Tensor max = self.type().tensor();
   Tensor max_indices = self.type().toScalarType(kLong).tensor();
@@ -162,12 +181,31 @@ std::tuple<Tensor &,Tensor &> max_out(Tensor& max, Tensor& max_indices,
     max_indices.resize_({}).fill_(0);
     return std::forward_as_tuple(max, max_indices);
   } else {
-    return at::_th_max_out(max, max_indices, self, dim, keepdim);
+    if (self.is_cuda()) {
+      return at::_th_max_out(max, max_indices, self, dim, keepdim);
+    } else {
+      return _max_out_cpu(max, max_indices, self, dim, keepdim);
+    }
   }
 }
 
 Tensor max_values(const Tensor& self, int64_t dim, bool keepdim) {
   return std::get<0>(self.max(dim, keepdim));
+}
+
+std::tuple<Tensor &,Tensor &> _min_out_cpu(Tensor& min, Tensor& min_indices,
+                                        const Tensor& self, int64_t dim, bool keepdim) {
+  if (self.is_contiguous() && min.is_contiguous() && min_indices.is_contiguous()) {
+    _dimreduce_setup(min, self, dim);
+    _dimreduce_setup(min_indices, self, dim);
+    min_kernel(kCPU, min, min_indices, self, dim);
+    if (!keepdim) {
+      min.squeeze_(dim);
+      min_indices.squeeze_(dim);
+    }
+    return std::tuple<Tensor &,Tensor &>{min, min_indices};
+  }
+  return at::_th_min_out(min, min_indices, self, dim, keepdim);
 }
 
 std::tuple<Tensor, Tensor> min(const Tensor& self, int64_t dim, bool keepdim) {
@@ -186,7 +224,11 @@ std::tuple<Tensor &,Tensor &> min_out(Tensor& min, Tensor& min_indices,
     min_indices.resize_({}).fill_(0);
     return std::forward_as_tuple(min, min_indices);
   } else {
-    return at::_th_min_out(min, min_indices, self, dim, keepdim);
+    if (self.is_cuda()) {
+      return at::_th_min_out(min, min_indices, self, dim, keepdim);
+    } else {
+      return _min_out_cpu(min, min_indices, self, dim, keepdim);
+    }
   }
 }
 

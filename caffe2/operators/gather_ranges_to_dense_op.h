@@ -21,7 +21,7 @@ class GatherRangesToDenseOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   GatherRangesToDenseOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        lengths_(OperatorBase::GetRepeatedArgument<int>("lengths")) {
+        lengths_(this->template GetRepeatedArgument<int>("lengths")) {
     CAFFE_ENFORCE_GT(lengths_.size(), 0, "There has to be at least one length");
     for (auto length : lengths_) {
       CAFFE_ENFORCE_GT(length, 0, "Each length should be positive");
@@ -30,7 +30,7 @@ class GatherRangesToDenseOp final : public Operator<Context> {
 
   bool RunOnDevice() override {
     return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
-        this, OperatorBase::Input<Tensor>(RANGES, CPU));
+        this, this->template Input<Tensor>(RANGES, CPU));
   }
 
   template <typename Index>

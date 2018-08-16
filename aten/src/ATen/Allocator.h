@@ -4,7 +4,6 @@
 #include <stddef.h>
 
 #include <ATen/Device.h>
-#include <ATen/Retainable.h>
 #include <ATen/core/Error.h>
 #include <ATen/core/UniqueVoidPtr.h>
 
