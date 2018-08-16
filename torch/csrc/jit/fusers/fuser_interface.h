@@ -1,5 +1,8 @@
 #pragma once
+
 #include "torch/csrc/jit/ir.h"
+
+#include "torch/csrc/WindowsTorchApiMacro.h"
 
 #include "ATen/ATen.h"
 
