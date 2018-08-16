@@ -40,7 +40,7 @@ extensions = [
     'exhale'
 ]
 
-breathe_projects = {"PyTorch": "xml"}
+breathe_projects = {"PyTorch": "build/xml"}
 breathe_default_project = "PyTorch"
 
 # Setup the exhale extension
