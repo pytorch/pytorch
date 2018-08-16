@@ -106,7 +106,8 @@ size_t ReplaceAll(string& s, const char* from, const char* to);
 
 CAFFE2_API void SetStackTraceFetcher(std::function<string(void)> fetcher);
 
-CAFFE2_API void SetOperatorLogger(std::function<void(const OperatorDef&)> tracer);
+CAFFE2_API void SetOperatorLogger(
+    std::function<void(const OperatorDef&)> tracer);
 std::function<void(const OperatorDef&)> GetOperatorLogger();
 
 using EnforceNotMet = at::Error;

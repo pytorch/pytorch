@@ -45,7 +45,8 @@ class TypeMeta;
  * use TypeIdentifier with custom types. This is for example used to store the
  * dtype of tensors.
  */
-class AT_CORE_API TypeIdentifier final : public at::IdWrapper<TypeIdentifier, uint16_t> {
+class AT_CORE_API TypeIdentifier final
+    : public at::IdWrapper<TypeIdentifier, uint16_t> {
  public:
   static TypeIdentifier createTypeId();
 
@@ -428,10 +429,10 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
  * for your own types to allocate dynamic ids for them.
  */
 #ifdef _MSC_VER
-#define CAFFE_DECLARE_KNOWN_TYPE(PreallocatedId, T)       \
-  template <>                                             \
-  inline AT_CORE_API TypeIdentifier TypeMeta::Id<T>() {   \
-    return TypeIdentifier(PreallocatedId);                \
+#define CAFFE_DECLARE_KNOWN_TYPE(PreallocatedId, T)     \
+  template <>                                           \
+  inline AT_CORE_API TypeIdentifier TypeMeta::Id<T>() { \
+    return TypeIdentifier(PreallocatedId);              \
   }
 #else // _MSC_VER
 #define CAFFE_DECLARE_KNOWN_TYPE(PreallocatedId, T) \

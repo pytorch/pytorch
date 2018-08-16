@@ -35,12 +35,16 @@ CAFFE2_API bool ReadStringFromFile(const char* filename, string* str);
 CAFFE2_API bool WriteStringToFile(const string& str, const char* filename);
 
 // Common interfaces that are supported by both lite and full protobuf.
-CAFFE2_API bool ReadProtoFromBinaryFile(const char* filename, MessageLite* proto);
+CAFFE2_API bool ReadProtoFromBinaryFile(
+    const char* filename,
+    MessageLite* proto);
 inline bool ReadProtoFromBinaryFile(const string filename, MessageLite* proto) {
   return ReadProtoFromBinaryFile(filename.c_str(), proto);
 }
 
-CAFFE2_API void WriteProtoToBinaryFile(const MessageLite& proto, const char* filename);
+CAFFE2_API void WriteProtoToBinaryFile(
+    const MessageLite& proto,
+    const char* filename);
 inline void WriteProtoToBinaryFile(const MessageLite& proto,
                                    const string& filename) {
   return WriteProtoToBinaryFile(proto, filename.c_str());
@@ -55,10 +59,11 @@ inline bool ParseFromString(const string& spec, MessageLite* proto) {
 }
 } // namespace TextFormat
 
-
 CAFFE2_API string ProtoDebugString(const MessageLite& proto);
 
-CAFFE2_API bool ParseProtoFromLargeString(const string& str, MessageLite* proto);
+CAFFE2_API bool ParseProtoFromLargeString(
+    const string& str,
+    MessageLite* proto);
 
 // Text format MessageLite wrappers: these functions do nothing but just
 // allowing things to compile. It will produce a runtime error if you are using
@@ -111,7 +116,9 @@ inline bool ReadProtoFromTextFile(const string filename, Message* proto) {
   return ReadProtoFromTextFile(filename.c_str(), proto);
 }
 
-CAFFE2_API void WriteProtoToTextFile(const Message& proto, const char* filename);
+CAFFE2_API void WriteProtoToTextFile(
+    const Message& proto,
+    const char* filename);
 inline void WriteProtoToTextFile(const Message& proto, const string& filename) {
   return WriteProtoToTextFile(proto, filename.c_str());
 }
@@ -293,7 +300,9 @@ class CAFFE2_API ArgumentHelper {
 
 // Helper methods to get an argument from OperatorDef or NetDef given argument
 // name. Throws if argument does not exist.
-CAFFE2_API const Argument& GetArgument(const OperatorDef& def, const string& name);
+CAFFE2_API const Argument& GetArgument(
+    const OperatorDef& def,
+    const string& name);
 CAFFE2_API const Argument& GetArgument(const NetDef& def, const string& name);
 
 // Helper methods to query a boolean argument flag from OperatorDef or NetDef
