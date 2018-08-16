@@ -556,6 +556,8 @@ void runOptimization(std::shared_ptr<Graph> & graph, bool graphMustSupportVariab
     // it works fine on variables.
     BatchMM(graph);
     FuseGraph(graph);
+    // After FuseGraph some common subexpressions may come back
+    EliminateCommonSubexpression(graph);
   }
 }
 

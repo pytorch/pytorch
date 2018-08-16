@@ -2,6 +2,7 @@
 #include "torch/csrc/jit/fusion_compiler.h"
 #include "torch/csrc/jit/autodiff.h"
 #include "torch/csrc/jit/assertions.h"
+#include "ATen/ExpandUtils.h"
 #include <unordered_map>
 
 #ifdef USE_CUDA
@@ -186,8 +187,7 @@ struct GraphFuser {
   }
 
   bool hasSupportedType(Node* node) {
-    return areTensorsOfSameShape(node->inputs()) &&
-           haveSupportedType(node->inputs()) &&
+    return haveSupportedType(node->inputs()) &&
            haveSupportedType(node->outputs());
   }
 
@@ -204,6 +204,11 @@ struct GraphFuser {
     });
   }
 
+  // Checks if the node is fusible into a FusionGroup. A node is fusible if:
+  // - it is a FusionGroup
+  // - it is a simple map op and its inputs/outputs have compatible types.
+  // NB: two nodes that are fusible might not be fused together
+  // if they don't have compatible map_size.
   bool isFusable(Node * node) {
     if (node->owningBlock() != block) return false;
     if (node->kind() == prim::FusionGroup) return true;
@@ -224,7 +229,7 @@ struct GraphFuser {
         node->matches("aten::div(Tensor self, Scalar other) -> Tensor", /*const=*/attr::other) ||
         node->matches("aten::div(Scalar other, Tensor self) -> Tensor", /*const=*/attr::other)) {
       auto inputs = tensorInputs(node);
-      return areTensorsOfSameShape(inputs) && haveSupportedType(inputs);
+      return haveSupportedType(inputs);
     }
     else if (
         node->matches("aten::lt(Tensor self, Tensor other) -> Tensor") ||
@@ -244,7 +249,7 @@ struct GraphFuser {
         node->matches("aten::ne(Scalar other, Tensor self) -> Tensor", /*const=*/attr::other)) {
       // comparison operators produce Byte type, and it's ok, check only inputs
       auto inputs = tensorInputs(node);
-      return areTensorsOfSameShape(inputs) && haveSupportedType(inputs);
+      return haveSupportedType(inputs);
     } else if (node->matches("aten::type_as(Tensor self, Tensor other) -> Tensor")) {
       // type_as can have different input types as long as output is float, check only output
       return haveSupportedType(node->outputs());
@@ -361,6 +366,48 @@ struct GraphFuser {
     return true;
   }
 
+  at::optional<at::IntList> mapSize(Node * node) {
+    if (isSimpleMap(node)) {
+      auto type = node->output()->type()->cast<TensorType>();
+      if (!type) {
+        return at::nullopt;
+      }
+      return at::optional<at::IntList>(at::in_place, type->sizes());
+    }
+    if (node->kind() == prim::FusionGroup) {
+      // inputs are guaranteed to be the map_size
+      auto type = node->inputs().at(0)->type()->cast<TensorType>();
+      JIT_ASSERT(type);
+      return at::optional<at::IntList>(at::in_place, type->sizes());
+    }
+    if (node->kind() == aten::cat) {
+      // Assuming all inputs to aten::cat are same size. This is
+      // a condition for aten::cat to be fusible.
+      Node * list_construct = node->namedInput(attr::tensors)->node();
+      JIT_ASSERT(areTensorsOfSameShape(list_construct->inputs()));
+      auto type = list_construct->inputs().at(0)->type()->cast<TensorType>();
+      return at::optional<at::IntList>(at::in_place, type->sizes());
+    }
+    if (node->kind() == aten::chunk) {
+      // Assuming all outputs to aten::chunk are same size.
+      // This is a condition for the graph fuser to operate on
+      // aten::chunk nodes and is checked elsewhere.
+      JIT_ASSERT(areTensorsOfSameShape(node->outputs()));
+      auto type = node->outputs().at(0)->type()->cast<TensorType>();
+      return at::optional<at::IntList>(at::in_place, type->sizes());
+    }
+    return at::nullopt;
+  }
+
+  bool haveSameMapSize(Node * consumer, Node * producer) {
+    auto consumer_map_size = mapSize(consumer);
+    auto producer_map_size = mapSize(producer);
+    if (!consumer_map_size || !producer_map_size) {
+      return false;
+    }
+    return std::equal(consumer_map_size->begin(), consumer_map_size->end(), producer_map_size->begin());
+  }
+
   bool shouldFuse(Node * consumer, Value * producer) {
     // this handles cases where producer can be moved _into_ the fusion group of consumer.
     // TODO: extend to fusion of consumer into _producer's_ fusion blob
@@ -369,8 +416,44 @@ struct GraphFuser {
     // but this requires better handling of merging fusion groups so it is not done now
     Node *real_consumer = consumer->kind() == aten::cat ? consumer->namedInput(attr::tensors)->node() : consumer;
     return isFusable(producer->node()) &&
+      haveSameMapSize(consumer, producer->node()) &&
       allUsersAreThisConsumerOrOccurAfterIt(real_consumer, producer) &&
       compatibleDevices(consumer, producer);
+  }
+
+  void maybeInsertExplicitExpands(Node * node) {
+    if (!isSimpleMap(node)) {
+      return;
+    }
+    WithInsertPoint guard(node);
+
+    auto map_size = mapSize(node).value();
+    auto * graph = node->owningGraph();
+
+    auto tensor_inputs = tensorInputs(node);
+    for (auto * producer: tensor_inputs) {
+      auto type = producer->type()->cast<TensorType>();
+      JIT_ASSERT(type);
+      if (std::equal(map_size.begin(), map_size.end(), type->sizes().begin())) {
+        continue;
+      }
+      // Insert explicit expand node when input doesn't have correct size.
+      //
+      // XXX: This hardcodes the "map size" for this FusionGroup.
+      // If we want to make the graph fuser more general in the future,
+      // we could use aten::broadcast_tensors or add a primitive op that broadcasts.
+      auto * expand = graph->insert(
+          aten::expand,
+          {producer, graph->insertConstant(IValue(map_size)), graph->insertConstant(0)})->node();
+      {
+        std::vector<int64_t> sizes, strides;
+        std::tie(sizes, strides) = at::inferExpandGeometry(
+            type->sizes(), type->strides(), map_size);
+        expand->output()->setType(type->withSizesStrides(sizes, strides));
+      }
+      topological_index[expand] = topological_index[producer->node()];
+      node->replaceInputWith(producer, expand->output());
+    }
   }
 
   // insert a producer node into a consuming fusion group.
@@ -438,6 +521,7 @@ struct GraphFuser {
 
   Node * mergeNodeIntoGroup(Node* group, Node * n) {
     JIT_ASSERT(n->kind() != prim::FusionGroup);
+    maybeInsertExplicitExpands(n);
     auto & subgraph = getSubgraph(group);
     // map from nodes in the surrounding graph to parameters in the fusion
     // group's subgraph that correspond to them
@@ -489,6 +573,7 @@ struct GraphFuser {
   // turn consumer node n into a fusion group with just n inside
   // to prepare for fusion and replace uses of n with the new group
   Node * createSingletonFusionGroup(Node * n) {
+    maybeInsertExplicitExpands(n);
     auto group = block->owningGraph()->createFusionGroup(getDevice(n).index());
     // propogate position information for the new node so we can always
     // have a valid mapping
@@ -582,7 +667,12 @@ struct GraphFuser {
       return false;
     // and the thing being chunked is fusable into the consumer
     Value * producer_for_chunk = chunk->namedInput(attr::self);
-    if (!isFusable(producer_for_chunk->node()) || !allUsersAreThisConsumer(chunk,producer_for_chunk))
+    if (!isFusable(producer_for_chunk->node()) ||
+        !allUsersAreThisConsumer(chunk,producer_for_chunk) ||
+        !areTensorsOfSameShape(chunk->outputs()) ||
+        // After moving the chunk, op will have the same map_size as chunk.
+        // This checks if op will have same map_size as consumer after the move.
+        !haveSameMapSize(consumer, chunk))
       return false;
     // and all uses of the chunk are in this consumer
     for (auto s : chunk->outputs()) {
@@ -591,6 +681,15 @@ struct GraphFuser {
           return false;
       }
     }
+
+    // First, we'll add explicit expands where necessary to make the chunk
+    // move valid. Let's say we have:
+    // %z = aten::mul(%x, %y)
+    // %z.1, %z.2 = aten::chunk(%z, ...)
+    // ... = prim::FusionGroup(%z.1, %z.2, ...)
+    // It's possible that %x and %y do not have the same size as %z and
+    // need to be expanded first so that they can be chunked like %z
+    maybeInsertExplicitExpands(producer_for_chunk->node());
 
     // multiple return operators
     Node * producer_for_chunk_node = producer_for_chunk->node();
