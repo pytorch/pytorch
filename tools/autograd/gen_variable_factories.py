@@ -7,7 +7,7 @@ import re
 from .utils import CodeTemplate, write
 
 FUNCTION_TEMPLATE = CodeTemplate("""\
-inline autograd::Variable ${name}(${formals}) {
+inline at::Tensor ${name}(${formals}) {
   at::Tensor tensor = at::${name}(${actuals});
   return autograd::make_variable(tensor, /*requires_grad=*/${requires_grad});
 }

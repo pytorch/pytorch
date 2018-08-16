@@ -290,6 +290,8 @@ TEST_CASE("sequential") {
 
     // Verify that the clone is deep, i.e. parameters of modules are cloned too.
 
+    torch::NoGradGuard no_grad;
+
     auto params1 = sequential->parameters();
     auto params2 = clone->parameters();
     REQUIRE(params1.size() == params2.size());
@@ -297,7 +299,7 @@ TEST_CASE("sequential") {
       REQUIRE(!pointer_equal(param.value, params2[param.key]));
       REQUIRE(param->device() == params2[param.key].device());
       REQUIRE(param->allclose(params2[param.key]));
-      param->data().add_(2);
+      param->add_(2);
     }
     for (auto& param : params1) {
       REQUIRE(!param->allclose(params2[param.key]));

@@ -19,62 +19,48 @@ namespace caffe2 {
 
 template <typename T, class Context>
 bool ConvOp<T, Context>::RunOnDeviceWithOrderNCHW() {
-  const Tensor& X = Input(INPUT);
-  auto& filter = Input(FILTER);
-  Tensor* Y = Output(0);
-  const int N = X.dim32(0), C = X.dim32(1);
+  const auto& X = Input(INPUT);
+  const auto& filter = Input(FILTER);
+  auto* Y = Output(0);
+  const int N = X.dim32(0);
+  const int C = X.dim32(1);
+  const int G = group_;
   CAFFE_ENFORCE_EQ(X.ndim(), filter.ndim());
   const int M = filter.dim32(0);
   CAFFE_ENFORCE_EQ(
       C,
-      filter.dim32(1) * group_,
+      filter.dim32(1) * G,
       "Convolution op: input channels does not match: # of input channels ",
       C,
-      " is not equal to kernel channels * group:",
+      " is not equal to kernel channels * group: ",
       filter.dim32(1),
       "*",
-      group_);
+      G);
   CAFFE_ENFORCE_EQ(
-      M % group_,
-      0,
-      "The number of output channels is not divisible by group.");
+      M % G, 0, "The number of output channels is not divisible by group.");
 
-  int kernel_dims_size = 1;
-  for (int i = 0; i < kernel_.size(); ++i) {
+  int kernel_size = 1;
+  for (std::size_t i = 0; i < kernel_.size(); ++i) {
     CAFFE_ENFORCE_EQ(filter.dim32(i + 2), kernel_[i]);
-    kernel_dims_size *= kernel_[i];
+    kernel_size *= kernel_[i];
   }
+  ConvPoolOpBase<Context>::SetOutputSize(X, Y, M);
+  const vector<int> X_dims = GetDims(X);
+  const vector<int> Y_dims = GetDims(*Y);
+  const int X_HxW = X.size() / (N * C);
+  const int Y_HxW = Y->size() / (N * M);
+  const vector<int> img_shape(X.dims().cbegin() + 1, X.dims().cend());
+  vector<int> buffer_shape(Y_dims.size() + 1);
+  buffer_shape[0] = C * kernel_size;
+  std::copy(Y_dims.cbegin(), Y_dims.cend(), buffer_shape.begin() + 1);
 
-  ConvPoolOpBase<Context>::SetOutputSize(X, Y, filter.dim32(0));
-
-  const vector<int> input_dims = GetDims(X);
-  const vector<int> output_dims = GetDims(*Y);
-  const int input_image_size = this->GetDimsSize(X);
-  const int output_image_size = this->GetDimsSize(*Y);
-
-  vector<int> img_shape;
-  img_shape.assign(X.dims().begin() + 1, X.dims().end());
-
-  vector<int> buffer_shape;
-  buffer_shape.push_back(C / group_ * kernel_dims_size);
-  buffer_shape.insert(
-      buffer_shape.end(), output_dims.begin(), output_dims.end());
-
-  if (kernel_.size() != 2) {
-    SetDeviceTensor(img_shape, &img_shape_device_);
-    SetDeviceTensor(buffer_shape, &col_buffer_shape_device_);
-  }
-
-  const int col_buffer_size =
-      (C / group_) * kernel_dims_size * output_image_size;
+  const int buffer_size = C * kernel_size * Y_HxW;
 
   // The dimension of each kernel
-  const int kernel_dim = C / group_ * kernel_dims_size;
-  // The offset corresponding to a single input image, and a single output
-  // image.
-  const int input_offset = C / group_ * input_image_size;
-  const int output_offset = Y->size() / Y->dim32(0) / group_;
-  const int filter_offset = filter.size() / group_;
+  const int kernel_dim = C / G * kernel_size;
+  const int X_stride = C * X_HxW;
+  const int Y_stride = M * Y_HxW;
+  const int filter_stride = filter.size() / G;
 
   // The col buffer is stored in CHW order as well - kernel_dim, and the height
   // and width.
@@ -87,68 +73,84 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNCHW() {
     CAFFE_ENFORCE_EQ(bias.dim32(0), M);
     bias_data = bias.template data<T>();
     ConvPoolOpBase<Context>::template SetBiasMultiplier<T>(
-        output_image_size, &bias_multiplier_);
+        Y_HxW, &bias_multiplier_);
   }
   T* Y_data = Y->template mutable_data<T>();
 
   // Shortcut for 1x1 conv.
-  if (kernel_dims_size == 1 && !HasPad() && !HasStride()) {
-    const int HxW = X.size() / (N * C);
+  if (kernel_size == 1 && !HasPad() && !HasStride()) {
     return Run1x1ConvOnDeviceWithOrderNCHW(
-        N, C, HxW, M, X_data, filter_data, bias_data, Y_data);
+        N, C, X_HxW, M, X_data, filter_data, bias_data, Y_data);
   }
 
-  auto f = [&](Tensor* col_buffer) {
+  const auto func = [&](Tensor* col_buffer) {
     col_buffer->Resize(buffer_shape);
     T* col_buffer_data = col_buffer->template mutable_data<T>();
     // Im2Col, followed by gemm.
     for (int image_id = 0; image_id < N; ++image_id) {
-      for (int group_id = 0; group_id < group_; ++group_id) {
-        if (kernel_.size() == 2) {
-          math::Im2Col<T, Context, StorageOrder::NCHW>(
-              C / group_,
-              input_dims[0],
-              input_dims[1],
-              kernel_h(),
-              kernel_w(),
-              dilation_h(),
-              dilation_w(),
-              pad_t(),
-              pad_l(),
-              pad_b(),
-              pad_r(),
-              stride_h(),
-              stride_w(),
-              X_data + group_id * input_offset,
-              col_buffer_data,
-              &context_);
-        } else {
-          math::Im2ColNd<T, Context, StorageOrder::NCHW>(
-              kernel_.size(),
-              C * input_image_size,
-              col_buffer_size,
-              img_shape.data(),
-              buffer_shape.data(),
-              kernel_.data(),
-              stride_.data(),
-              dilation_.data(),
-              pads_.data(),
-              X_data + group_id * input_offset,
-              col_buffer_data,
-              &context_);
-        }
-        // Weight term
+      if (kernel_.size() == 2) {
+        math::Im2Col<T, Context, StorageOrder::NCHW>(
+            C,
+            X_dims[0],
+            X_dims[1],
+            kernel_h(),
+            kernel_w(),
+            dilation_h(),
+            dilation_w(),
+            pad_t(),
+            pad_l(),
+            pad_b(),
+            pad_r(),
+            stride_h(),
+            stride_w(),
+            X_data,
+            col_buffer_data,
+            &context_);
+      } else {
+        math::Im2ColNd<T, Context, StorageOrder::NCHW>(
+            kernel_.size(),
+            C * X_HxW,
+            buffer_size,
+            img_shape.data(),
+            buffer_shape.data(),
+            kernel_.data(),
+            stride_.data(),
+            dilation_.data(),
+            pads_.data(),
+            X_data,
+            col_buffer_data,
+            &context_);
+      }
+      // Weight term
+      if (G == 1) {
         math::Gemm<T, Context>(
             CblasNoTrans,
             CblasNoTrans,
-            M / group_,
-            output_image_size,
+            M,
+            Y_HxW,
             kernel_dim,
-            1,
-            filter_data + group_id * filter_offset,
+            1.0f,
+            filter_data,
             col_buffer_data,
-            0,
-            Y_data + group_id * output_offset,
+            0.0f,
+            Y_data,
+            &context_);
+      } else {
+        math::GemmStridedBatched<T, Context>(
+            CblasNoTrans,
+            CblasNoTrans,
+            G,
+            M / G,
+            Y_HxW,
+            kernel_dim,
+            1.0f,
+            filter_data,
+            filter_stride,
+            col_buffer_data,
+            buffer_size / G,
+            0.0f,
+            Y_data,
+            Y_stride / G,
             &context_);
       }
       if (bias_data != nullptr) {
@@ -158,23 +160,23 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNCHW() {
             CblasNoTrans,
             CblasNoTrans,
             M,
-            output_image_size,
+            Y_HxW,
             1,
-            1,
+            1.0f,
             bias_data,
             bias_multiplier_.template data<T>(),
-            1,
+            1.0f,
             Y_data,
             &context_);
       }
-      X_data += input_offset * group_;
-      Y_data += output_offset * group_;
+      X_data += X_stride;
+      Y_data += Y_stride;
     }
   };
   if (FLAGS_caffe2_force_shared_col_buffer || shared_buffer_) {
-    runWithSharedBuffer<Context>(ws_, f);
+    runWithSharedBuffer<Context>(ws_, func);
   } else {
-    f(&col_buffer_);
+    func(&col_buffer_);
   }
   return true;
 }

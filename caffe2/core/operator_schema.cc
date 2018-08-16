@@ -400,7 +400,7 @@ std::vector<TensorFiller> OpSchema::SupplyDenseFillers(
   return fillers;
 }
 
-std::ostream& operator<<(std::ostream& out, const OpSchema& schema) {
+CAFFE2_EXPORT std::ostream& operator<<(std::ostream& out, const OpSchema& schema) {
   if (!schema.args().empty()) {
     out << "Arguments:" << std::endl;
     for (const auto& arg : schema.args()) {

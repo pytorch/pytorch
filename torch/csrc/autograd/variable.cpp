@@ -122,12 +122,12 @@ void Variable::Impl::set_data(Tensor new_data) {
   if (prior_accumulator) {
     const auto prior_device = prior_accumulator->input_metadata(0).device();
     const auto new_device = new_data.is_cuda() ? new_data.get_device() : -1;
-    
+
     if (new_data.type() != data_.type() || prior_device != new_device) {
       grad_accumulator_.reset();
     }
   }
-  
+
   // Updates metadata
   scalar_type_ = new_data.type().scalarType();
   type_id_ = new_data.type().type_id();
