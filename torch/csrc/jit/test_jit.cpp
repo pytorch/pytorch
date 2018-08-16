@@ -12,7 +12,6 @@ using Catch::StartsWith;
 #endif
 
 #include "torch/csrc/jit/assertions.h"
-#include "torch/csrc/jit/fusion_compiler.h"
 #include "torch/csrc/jit/code_template.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/attributes.h"
@@ -32,6 +31,10 @@ using Catch::StartsWith;
 #include "torch/csrc/jit/custom_operator.h"
 #include "torch/csrc/variable_tensor_functions.h"
 
+#if defined USE_CUDA && !(defined _WIN32) && !(defined USE_ROCM)
+  #include "torch/csrc/jit/fusers/cuda/cuda_fuser_interface.h"
+#endif // defined USE_CUDA && !(defined _WIN32) && !(defined USE_ROCM)
+
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/autograd/engine.h"
 #include "torch/csrc/jit/passes/shape_analysis.h"
@@ -42,7 +45,6 @@ using Catch::StartsWith;
 #include "torch/csrc/jit/ivalue.h"
 
 #include "onnx/onnx_pb.h"
-
 
 #include <ATen/ATen.h>
 
@@ -78,7 +80,6 @@ static std::ostream & operator<<(std::ostream & out, const std::vector<T> & list
 }
 static auto ct = CodeTemplate(R"(
 int foo($args) {
-
     $bar
         $bar
     $a+$b
@@ -88,7 +89,6 @@ int notest(int a${,empty,})
 )");
 static auto ct_expect = R"(
 int foo(hi, 8) {
-
     what
     on many
     lines...
@@ -134,9 +134,8 @@ Value * appendNewNode(NodeKind kind, Graph& graph, ArrayRef<Value*> inputs) {
   return graph.appendNode(graph.create(kind,inputs))->output();
 }
 
-
 static void fusionTests() {
-  FusionCompiler comp;
+#if defined USE_CUDA && !(defined _WIN32) && !(defined USE_ROCM)
 
   auto testSimple = [&] {
     Graph graph;
@@ -147,7 +146,7 @@ static void fusionTests() {
     auto a = at::rand({3,4}, at::kCUDA);
     auto b = at::rand({4,3}, at::kCUDA).transpose(0,1);
     auto o = at::zeros({3,4}, at::kCUDA);
-    comp.debugLaunchGraph(graph, 0, {a,b}, {o});
+    debugCUDALaunchGraph(graph, 0, {a,b}, {o});
     auto o2 = a*b;
     float max_diff = (o2 - o).abs().max().toCDouble();
     //std::cout << "max diff: " << max_diff << "\n";
@@ -208,7 +207,7 @@ static void fusionTests() {
 
 
     //auto out0 = inputs[0]*inputs[1];
-    comp.debugLaunchGraph(graph, 0, inputs, outputs);
+    debugCUDALaunchGraph(graph, 0, inputs, outputs);
     REQUIRE(out0.is_same_size(outputs.front()));
     float max_diff = (outputs.front() - out0).abs().max().toCDouble();
     REQUIRE(max_diff < 1e-6);
@@ -243,7 +242,7 @@ static void fusionTests() {
     auto o_r = a*b;
     auto o2_r = at::cat({a, o_r}, dim);
     auto o2 = at::zeros(o2_r.sizes(), at::kCUDA);
-    comp.debugLaunchGraph(graph, 0, {a,b}, {o, o2});
+    debugCUDALaunchGraph(graph, 0, {a,b}, {o, o2});
 
     float max_diff = (o_r - o).abs().max().toCDouble();
     REQUIRE(max_diff == 0);
@@ -253,10 +252,11 @@ static void fusionTests() {
   testConcat(0);
   testConcat(1);
   testConcat(2);
+
+#endif // defined USE_CUDA && !(defined _WIN32) && !(defined USE_ROCM)
 }
 
-struct Attr : public Attributes<Attr> {
-};
+struct Attr : public Attributes<Attr> {};
 void attributesTest() {
   auto one = attr::alpha;
   auto two = attr::device;
@@ -283,7 +283,6 @@ void attributesTest() {
 }
 
 void internedStringsTests () {
-
   REQUIRE(prim::Param == Symbol::prim("Param"));
   REQUIRE(prim::Return == Symbol::prim("Return"));
   REQUIRE(prim::Return.toUnqualString() == std::string("Return"));
@@ -1205,4 +1204,5 @@ TEST_CASE( "jit test CUDA", "[cuda]" ) {
 
 #endif
 
-}}
+}
+}

@@ -134,7 +134,6 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/cuda/comm.cpp
   ${TORCH_SRC_DIR}/csrc/jit/autodiff.cpp
   ${TORCH_SRC_DIR}/csrc/jit/export.cpp
-  ${TORCH_SRC_DIR}/csrc/jit/fusion_compiler.cpp
   ${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops.cpp
   ${TORCH_SRC_DIR}/csrc/jit/graph_executor.cpp
   ${TORCH_SRC_DIR}/csrc/jit/import.cpp
@@ -168,6 +167,16 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/script/compiler.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/lexer.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/module.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/fusers/fuser_interface.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/fusers/cpu/graph_fuser.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/fusers/cpu/tensor_desc.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/fusers/cpu/fusion_compiler.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/fusers/cpu/cpu_fusion_function.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/fusers/cuda/cuda_fuser.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/fusers/cuda/cuda_fuser_interface.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/fusers/cuda/cuda_fusion_function.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/fusers/cuda/cuda_fusion_pass.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/fusers/cuda/tensor_desc.cpp
   ${TORCH_SRC_DIR}/csrc/jit/test_jit.cpp
   ${TORCH_SRC_DIR}/csrc/jit/tracer.cpp
   ${TORCH_SRC_DIR}/csrc/jit/type.cpp
