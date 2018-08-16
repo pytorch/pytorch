@@ -303,7 +303,7 @@ def build_libs(libs):
     if IS_WINDOWS:
         build_libs_cmd = ['tools\\build_pytorch_libs.bat']
     else:
-        build_libs_cmd = ['bash', os.path.join('..', 'tools', 'build_pytorch_libs.sh')]
+        build_libs_cmd = ['bash', 'tools/build_pytorch_libs.sh']
     my_env = os.environ.copy()
     my_env["PYTORCH_PYTHON"] = sys.executable
     my_env["CMAKE_PREFIX_PATH"] = full_site_packages
@@ -347,14 +347,7 @@ def build_libs(libs):
 
     my_env["BUILD_TORCH"] = "ON"
 
-    try:
-        os.mkdir('build')
-    except OSError:
-        pass
-
-    kwargs = {'cwd': 'build'} if not IS_WINDOWS else {}
-
-    if subprocess.call(build_libs_cmd + libs, env=my_env, **kwargs) != 0:
+    if subprocess.call(build_libs_cmd + libs, env=my_env) != 0:
         print("Failed to run '{}'".format(' '.join(build_libs_cmd + libs)))
         sys.exit(1)
 
