@@ -101,7 +101,7 @@ def init_process_group(backend, init_method='env://', **kwargs):
                                       group_name, rank)
     _initialized = _INITIALIZED_PG
 
-    if _backend == dist_backend.NCCL:
+    if _backend in [dist_backend.MPI, dist_backend.NCCL]:
         atexit.register(destroy_process_group)
 
     if not torch._C._dist_init_extension(False, reduce_op, group):

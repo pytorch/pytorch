@@ -85,7 +85,7 @@ DataChannelMPI::DataChannelMPI()
 {}
 
 
-DataChannelMPI::~DataChannelMPI() {
+void DataChannelMPI::destroy() {
   for (auto& group : _groups) {
     auto comm = group.second.first;
     if (comm != MPI_COMM_WORLD && comm != MPI_COMM_NULL)
@@ -94,9 +94,6 @@ DataChannelMPI::~DataChannelMPI() {
 
   MPI_Finalize();
 }
-
-
-void DataChannelMPI::destroy() {}
 
 
 bool DataChannelMPI::init() {

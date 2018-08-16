@@ -32,7 +32,7 @@ struct DataChannelMPI : DataChannel {
   };
 
   DataChannelMPI();
-  virtual ~DataChannelMPI();
+  virtual ~DataChannelMPI() = default;
 
   bool init() override;
   void destroy() override;
