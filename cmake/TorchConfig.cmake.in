@@ -17,51 +17,31 @@
 #
 #   torch_add_custom_op_library(<name> <source_files>)
 
-include(FindPackageHandleStandardArgs)
-
-get_filename_component(PYTORCH_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../" ABSOLUTE)
-set(PYTORCH_BUILD_PATH "${PYTORCH_ROOT}/tools/cpp_build/build")
+SET(TORCH_ROOT "${CMAKE_CURRENT_LIST_DIR}/../")
 
 set(TORCH_INCLUDE_DIRS
-  "${PYTORCH_ROOT}"
-  "${PYTORCH_ROOT}/aten/src"
-  "${PYTORCH_BUILD_PATH}/install/include"
-  "${PYTORCH_BUILD_PATH}/install/include/ATen"
-  "${PYTORCH_BUILD_PATH}/install/include/TH"
+  "${TORCH_ROOT}"
+  "${TORCH_ROOT}/aten/src"
+  "${CMAKE_CURRENT_LIST_DIR}/build/aten/src"
+  "${CMAKE_CURRENT_LIST_DIR}/build/caffe2/aten/src"
+  "${CMAKE_CURRENT_LIST_DIR}/build/caffe2/aten/src/TH"
 )
 
-find_library(TORCH_LIBRARY torch
-  PATHS "${PYTORCH_BUILD_PATH}/install/lib" NO_DEFAULT_PATH)
+find_library(TORCH_LIBRARY torch PATHS "${CMAKE_CURRENT_LIST_DIR}/lib" NO_DEFAULT_PATH)
+find_library(CAFFE2_LIBRARY caffe2 PATHS "${CMAKE_CURRENT_LIST_DIR}/lib" NO_DEFAULT_PATH)
 
-find_library(CAFFE2_LIBRARY caffe2
-  PATHS "${PYTORCH_BUILD_PATH}/install/lib" NO_DEFAULT_PATH)
-
-mark_as_advanced(TORCH_LIBRARY TORCH_INCLUDE_DIRS)
-
-# If possible, link CUDA.
-find_package(CUDA)
-if (CUDA_FOUND)
-  find_library(CAFFE2_CUDA_LIBRARY caffe2_gpu
-    PATHS "${PYTORCH_BUILD_PATH}/install/lib" NO_DEFAULT_PATH)
+if (@USE_CUDA@)
+  find_package(CUDA REQUIRED)
+  find_library(CAFFE2_CUDA_LIBRARY caffe2_gpu PATHS "${CMAKE_CURRENT_LIST_DIR}/lib" NO_DEFAULT_PATH)
   set(TORCH_CUDA_LIBRARIES -L${CUDA_TOOLKIT_ROOT_DIR}/lib64 cuda nvrtc cudart nvToolsExt)
   list(APPEND TORCH_INCLUDE_DIRS ${CUDA_TOOLKIT_INCLUDE})
 endif()
 
-add_library(Torch SHARED IMPORTED)
-set_target_properties(Torch PROPERTIES
-  IMPORTED_LOCATION "${TORCH_LIBRARY}"
-  INTERFACE_INCLUDE_DIRECTORIES "${TORCH_INCLUDE_DIRS}"
-  INTERFACE_LINK_LIBRARIES "${CAFFE2_LIBRARY};${CAFFE2_CUDA_LIBRARY};${TORCH_CUDA_LIBRARIES}"
-  CXX_STANDARD 11
-)
-
-set(TORCH_LIBRARIES Torch)
-
-find_package_handle_standard_args(
-  TORCH
-  DEFAULT_MSG
-  TORCH_LIBRARY
-  TORCH_INCLUDE_DIRS)
+set(TORCH_LIBRARIES
+  ${TORCH_LIBRARY}
+  ${CAFFE2_LIBRARY}
+  ${CAFFE2_CUDA_LIBRARY}
+  ${TORCH_CUDA_LIBRARIES})
 
 # Creates a shared library <name> with the correct include directories
 # and linker flags set to include Torch header files and link with Torch
