@@ -17,7 +17,7 @@ AdamOptions::AdamOptions(double learning_rate)
 
 void Adam::step() {
   for (size_t i = 0; i < parameters_.size(); ++i) {
-    at::Tensor p = parameters_.at(i);
+    Tensor p = parameters_.at(i);
     if (!p.grad().defined()) {
       continue;
     }
@@ -35,7 +35,7 @@ void Adam::step() {
     exp_average_sq.mul_(options.beta2_)
         .addcmul_(p.grad(), p.grad(), 1 - options.beta2_);
 
-    at::Tensor denom = exp_average_sq;
+    Tensor denom = exp_average_sq;
     if (options.amsgrad_) {
       auto& max_exp_average_sq = buffer_at(max_exp_average_sq_buffers_, i);
       max_exp_average_sq = torch::max(max_exp_average_sq, exp_average_sq);
