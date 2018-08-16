@@ -1,27 +1,26 @@
-// #ifndef _WIN32
+#ifndef _WIN32
 
-// #include "torch/csrc/jit/fusers/cpu/fusion_compiler.h"
+#include "torch/csrc/jit/fusers/cpu/fusion_compiler.h"
 
-// #include "torch/csrc/jit/ir.h"
-// #include "torch/csrc/jit/code_template.h"
-// #include "torch/csrc/jit/assertions.h"
+#include "torch/csrc/jit/ir.h"
+#include "torch/csrc/jit/code_template.h"
+#include "torch/csrc/jit/assertions.h"
 
-// #include "ATen/ATen.h"
+#include "ATen/ATen.h"
 
-// #include <string>
-// #include <algorithm>
-// #include <unordered_map>
-// #include <vector>
-// #include <sstream>
-// #include <iostream>
+#include <string>
+#include <algorithm>
+#include <unordered_map>
+#include <vector>
+#include <sstream>
+#include <iostream>
 
-
-// namespace torch { namespace jit { namespace cpufuser {
+namespace torch { namespace jit { namespace cpufuser {
 
 // // Note: there is only one CPUFusionCompiler
-// static CPUFusionCompiler compiler;
+static CPUFusionCompiler compiler;
 
-// CPUFusionCompiler& getCompiler() { return compiler; }
+CPUFusionCompiler& getCompiler() { return compiler; }
 
 // static const std::string check_exists_string =
 //   "which '${program}' > /dev/null";
@@ -81,9 +80,9 @@
 //   func->launch_with_tensors(inputs, outputs);
 // }
 
-// } // namespace cpufuser
-// } // namespace jit
-// } // namespace torch
+} // namespace cpufuser
+} // namespace jit
+} // namespace torch
 
 // /*
 // * Interface functions.
@@ -112,7 +111,7 @@
 // // }
 
 
-// // } // namespace jit
-// // } // namespace torch
+// } // namespace jit
+// } // namespace torch
 
-// #endif // _WIN32
+#endif // _WIN32
