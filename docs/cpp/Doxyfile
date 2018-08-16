@@ -58,7 +58,7 @@ PROJECT_LOGO           =
 # entered, it will be relative to the location where doxygen was started. If
 # left blank the current directory will be used.
 
-OUTPUT_DIRECTORY       = output
+OUTPUT_DIRECTORY       =
 
 # If the CREATE_SUBDIRS tag is set to YES then doxygen will create 4096 sub-
 # directories (in 2 levels) under the output directory of each output format and
@@ -792,34 +792,7 @@ WARN_LOGFILE           =
 # spaces. See also FILE_PATTERNS and EXTENSION_MAPPING
 # Note: If this tag is empty the current directory is searched.
 
-INPUT                  =  ../../../torch/csrc/api/include \
-                          ../../../torch/csrc/api/src \
-                          ../../../aten/src/ATen/ATen.h \
-                          ../../../aten/src/ATen/Backend.h \
-                          ../../../aten/src/ATen/Context.h \
-                          ../../../aten/src/ATen/Device.h \
-                          ../../../aten/src/ATen/DeviceGuard.h \
-                          ../../../aten/src/ATen/Layout.h \
-                          ../../../aten/src/ATen/OptionsGuard.h \
-                          ../../../aten/src/ATen/Scalar.h \
-                          ../../../aten/src/ATen/TensorOptions.h \
-                          ../../../aten/src/ATen/core/ArrayRef.h \
-                          ../../../aten/src/ATen/core/DeviceType.h \
-                          ../../../aten/src/ATen/core/Error.h \
-                          ../../../aten/src/ATen/core/Half.h \
-                          ../../../aten/src/ATen/core/ScalarType.h \
-                          ../../../aten/src/ATen/cuda/CUDAGuard.h \
-                          ../../../aten/src/ATen/cuda/CUDAStream.h \
-                          ../../../aten/src/ATen/cuda/CUDAHalf.h \
-                          ../../../aten/src/ATen/cuda/CUDAContext.h \
-                          ../../../aten/src/ATen/cuda/PinnedMemoryAllocator.h \
-                          ../../../aten/src/ATen/cudnn/Descriptors.h \
-                          ../../../aten/src/ATen/cudnn/Handles.h \
-                          ../../../aten/src/ATen/cudnn/Types.h \
-                          ../../../aten/src/ATen/cudnn/Utils.h \
-                          ../../../aten/src/ATen/mkl/Descriptors.h \
-                          ../../../build/aten/src/ATen/Tensor.h \
-                          ../../../build/aten/src/ATen/Functions.h \
+INPUT                  =  ../../aten/src/ATen/Device.h \
 
 
 # This tag can be used to specify the character encoding of the source files
@@ -1090,7 +1063,7 @@ IGNORE_PREFIX          =
 # If the GENERATE_HTML tag is set to YES, doxygen will generate HTML output
 # The default value is: YES.
 
-GENERATE_HTML          = YES
+GENERATE_HTML          = NO
 
 # The HTML_OUTPUT tag is used to specify where the HTML docs will be put. If a
 # relative path is entered the value of OUTPUT_DIRECTORY will be put in front of
