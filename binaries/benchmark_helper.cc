@@ -15,6 +15,8 @@
  */
 
 #include <string>
+#include <chrono>
+#include <thread>
 
 #include "binaries/benchmark_helper.h"
 #include "caffe2/core/blob_serialization.h"
@@ -241,7 +243,7 @@ void runNetwork(
     caffe2::wipe_cache();
   }
   if (sleep_before_run > 0) {
-    sleep(sleep_before_run);
+    std::this_thread::sleep_for(std::chrono::seconds(sleep_before_run));
   }
   LOG(INFO) << "Main runs.";
   CAFFE_ENFORCE(
