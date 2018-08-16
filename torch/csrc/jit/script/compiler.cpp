@@ -1,5 +1,6 @@
 #include "torch/csrc/jit/script/compiler.h"
 #include "torch/csrc/jit/passes/lower_tuples.h"
+#include "torch/csrc/jit/passes/annotate_effects.h"
 #include "torch/csrc/jit/operator.h"
 #include "torch/csrc/jit/interpreter.h"
 #include "torch/csrc/jit/ir.h"
@@ -542,31 +543,49 @@ static std::string prefixLine(const std::string& str, std::string prefix) {
 Value* emitBuiltinCall(
   const SourceRange& loc,
   Graph& graph,
-  Symbol name,
+  at::ArrayRef<Symbol> names,
   at::ArrayRef<NamedValue> inputs,
   at::ArrayRef<NamedValue> attributes,
   // if true, emitBuiltinCall will throw an exception if this builtin does not exist,
   // otherwise it will return nullptr if the builtin is not found.
   bool required) {
 
-  const auto& variants = getAllOperatorsFor(name);
+  size_t num_variants_found = 0;
   std::stringstream failure_messages;
-  for (const std::shared_ptr<Operator>& op : variants) {
-    if (auto result = tryEmitBuiltin(
-            op, failure_messages, loc, graph, name, inputs, attributes)) {
-      return result;
+  for (const auto& name : names) {
+    const auto& variants = getAllOperatorsFor(name);
+    num_variants_found += variants.size();
+
+    for (const std::shared_ptr<Operator>& op : variants) {
+      if (auto result = tryEmitBuiltin(
+              op, failure_messages, loc, graph, name, inputs, attributes)) {
+        return result;
+      }
     }
   }
   // none of the options worked
   if(!required) {
     return nullptr;
   }
-  if(variants.size() == 0) {
+  if(num_variants_found == 0) {
     throw ErrorReport(loc) << "unknown builtin op";
   }
   throw ErrorReport(loc) << "arguments for call are not valid:\n"
                          << prefixLine(failure_messages.str(), "  ")
                          << "for call at";
+}
+
+Value* emitBuiltinCall(
+  const SourceRange& loc,
+  Graph& graph,
+  Symbol name,
+  at::ArrayRef<NamedValue> inputs,
+  at::ArrayRef<NamedValue> attributes,
+  // if true, emitBuiltinCall will throw an exception if this builtin does not exist,
+  // otherwise it will return nullptr if the builtin is not found.
+  bool required) {
+  return emitBuiltinCall(
+      loc, graph, at::ArrayRef<Symbol>{name}, inputs, attributes, required);
 }
 
 static Value* ensureTensor(const SourceRange& range, Value* v) {
@@ -607,7 +626,16 @@ std::shared_ptr<SugaredValue> BuiltinFunction::call(
   if (value)
     inputs.push_back(*value);
   inputs.insert(inputs.end(), inputs_.begin(), inputs_.end());
-  return std::make_shared<SimpleValue>(emitBuiltinCall(loc, *m.graph(), Symbol::aten(name), inputs, attributes, true));
+  return std::make_shared<SimpleValue>(emitBuiltinCall(
+      loc,
+      *m.graph(),
+      {
+          Symbol::aten(name),
+          Symbol::prim(name),
+      },
+      inputs,
+      attributes,
+      true));
 }
 
 struct to_ir {
@@ -718,6 +746,7 @@ struct to_ir {
     }
 
     method.setSchema({def.name().name(), std::move(arguments), std::move(returns)});
+    AnnotateEffects(graph);
     // remove any uses of tuples that we inserted
     LowerTuples(graph);
   }
@@ -1248,7 +1277,13 @@ private:
     if (it != function_table.end()) {
       return std::make_shared<SimpleValue>(packOutputs(*graph, method.emit_call_to(ident.range(), it->second, inputs, attributes)));
     }
-    if(auto result = emitBuiltinCall(ident.range(), *method.graph(), Symbol::aten(ident.name()), inputs, attributes, false)) {
+    if (auto result = emitBuiltinCall(
+            ident.range(),
+            *method.graph(),
+            {Symbol::aten(ident.name()), Symbol::prim(ident.name())},
+            inputs,
+            attributes,
+            /*required=*/false)) {
       return std::make_shared<SimpleValue>(result);
     }
     // it wasn't known built in, so treat it like standard apply
@@ -1453,7 +1488,8 @@ private:
       args.emplace_back(loc, "end", emitExpr(Expr(slice_exp.end().get()), identity));
     }
 
-    return emitBuiltinCall(loc, *graph, aten::slice, args, {step}, true);
+    return emitBuiltinCall(
+        loc, *graph, {aten::slice, prim::ListSlice}, args, {step}, true);
 }
 
   // Desugars gather syntactic sugar foo[i]
@@ -1470,7 +1506,7 @@ private:
     if (gatherable.value(*graph)->type()->kind() == TypeKind::ListType) {
       // if it's a list, emit a regular index selection op
       return emitBuiltinCall(
-                 loc, *graph, aten::select, {gatherable, idx}, {}, true);
+                 loc, *graph, prim::ListSelect, {gatherable, idx}, {}, true);
 
     } else {
       // if it's a single tensor, map tensor[idx] -> tensor.select(0, idx)

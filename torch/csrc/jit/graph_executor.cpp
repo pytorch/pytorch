@@ -7,6 +7,7 @@
 #include "torch/csrc/jit/interpreter.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/tracer.h"
+#include "torch/csrc/jit/passes/annotate_effects.h"
 #include "torch/csrc/jit/passes/batch_mm.h"
 #include "torch/csrc/jit/passes/common_subexpression_elimination.h"
 #include "torch/csrc/jit/passes/create_autodiff_subgraphs.h"
@@ -557,6 +558,9 @@ void runOptimization(std::shared_ptr<Graph> & graph, bool graphMustSupportVariab
     BatchMM(graph);
     FuseGraph(graph);
   }
+  // This must run last, since the effect annotations prevent other
+  // optimizations from reordering instructions
+  UnAnnotateEffects(graph);
 }
 
 }}
