@@ -43,7 +43,7 @@ inline void PrintOffendingKey(const string& key) {
  * objects.
  */
 template <class SrcType, class ObjectPtrType, class... Args>
-class Registry {
+class CAFFE2_API Registry {
  public:
   typedef std::function<ObjectPtrType(Args...)> Creator;
 
@@ -112,7 +112,7 @@ class Registry {
 };
 
 template <class SrcType, class ObjectPtrType, class... Args>
-class Registerer {
+class CAFFE2_API Registerer {
  public:
   Registerer(
       const SrcType& key,
