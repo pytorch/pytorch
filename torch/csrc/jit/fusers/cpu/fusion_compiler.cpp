@@ -39,13 +39,7 @@ static bool programExists(const std::string& program) {
   return 0 == system(cmd.c_str());
 }
 
-std::ostream& operator<<(std::ostream& out, const TensorDesc& d) {
-  out << d.scalar_type << "[";
-  for(auto b : d.contiguity)
-    out << b << ";";
-  out << "]";
-  return out;
-}
+
 
 static const std::string so_template = "/tmp/pytorch_fuserXXXXXX.so";
 static const std::string cpp_template = "/tmp/pytorch_fuserXXXXXX.cpp";
@@ -699,21 +693,6 @@ void CompiledCPUFusionFunction::launch(
   }
 
   launch_with_tensors(inputs, outputs);
-}
-
-/*
-* TensorDesc implementation.
-*/
-std::vector<bool> TensorDesc::findContiguous(
-    const at::IntList& sizes,
-    const at::IntList& strides) {
-  JIT_ASSERT(sizes.size() == strides.size());
-  std::vector<bool> cont(sizes.size());
-  for(size_t i = 0; i < sizes.size(); ++i) {
-    int64_t expected_stride = (i + 1 < sizes.size()) ? sizes[i+1]*strides[i+1] : 1;
-    cont[i] = strides[i] == expected_stride;
-  }
-  return cont;
 }
 
 } // namespace cpufuser
