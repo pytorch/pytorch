@@ -167,8 +167,7 @@ class CAFFE2_API BaseContext {
     }
   }
 
-  CAFFE2_API static BaseStaticContext*
-      static_context_[COMPILE_TIME_MAX_DEVICE_TYPES];
+  static BaseStaticContext* static_context_[COMPILE_TIME_MAX_DEVICE_TYPES];
 
   template <int d>
   friend struct StaticContextFunctionRegisterer;
