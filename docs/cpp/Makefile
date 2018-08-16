@@ -20,5 +20,5 @@ help:
 	@$(SPHINXBUILD) -M $@ "$(SOURCEDIR)" "$(BUILDDIR)" $(SPHINXOPTS) $(O)
 
 clean:
-	@echo "Removing everything under 'build'.."
+	@echo "Removing everything under 'build'..."
 	@rm -r $(BUILDDIR)/html/ $(BUILDDIR)/doctrees $(BUILDDIR)/xml

@@ -792,8 +792,34 @@ WARN_LOGFILE           =
 # spaces. See also FILE_PATTERNS and EXTENSION_MAPPING
 # Note: If this tag is empty the current directory is searched.
 
-INPUT                  =  ../../aten/src/ATen/Device.h \
-
+INPUT                  =  ../../torch/csrc/api/include \
+                          ../../torch/csrc/api/src \
+                          ../../aten/src/ATen/ATen.h \
+                          ../../aten/src/ATen/Backend.h \
+                          ../../aten/src/ATen/Context.h \
+                          ../../aten/src/ATen/Device.h \
+                          ../../aten/src/ATen/DeviceGuard.h \
+                          ../../aten/src/ATen/Layout.h \
+                          ../../aten/src/ATen/OptionsGuard.h \
+                          ../../aten/src/ATen/Scalar.h \
+                          ../../aten/src/ATen/TensorOptions.h \
+                          ../../aten/src/ATen/core/ArrayRef.h \
+                          ../../aten/src/ATen/core/DeviceType.h \
+                          ../../aten/src/ATen/core/Error.h \
+                          ../../aten/src/ATen/core/Half.h \
+                          ../../aten/src/ATen/core/ScalarType.h \
+                          ../../aten/src/ATen/cuda/CUDAGuard.h \
+                          ../../aten/src/ATen/cuda/CUDAStream.h \
+                          ../../aten/src/ATen/cuda/CUDAHalf.h \
+                          ../../aten/src/ATen/cuda/CUDAContext.h \
+                          ../../aten/src/ATen/cuda/PinnedMemoryAllocator.h \
+                          ../../aten/src/ATen/cudnn/Descriptors.h \
+                          ../../aten/src/ATen/cudnn/Handles.h \
+                          ../../aten/src/ATen/cudnn/Types.h \
+                          ../../aten/src/ATen/cudnn/Utils.h \
+                          ../../aten/src/ATen/mkl/Descriptors.h \
+                          ../../build/aten/src/ATen/Tensor.h \
+                          ../../build/aten/src/ATen/Functions.h \
 
 # This tag can be used to specify the character encoding of the source files
 # that doxygen parses. Internally doxygen uses the UTF-8 encoding. Doxygen uses
