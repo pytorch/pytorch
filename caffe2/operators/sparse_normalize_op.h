@@ -6,7 +6,7 @@
 namespace caffe2 {
 
 template <typename T, class Context>
-class SparseNormalizeOp final : public Operator<Context> {
+class CAFFE2_API SparseNormalizeOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   SparseNormalizeOp(const OperatorDef& operator_def, Workspace* ws)
