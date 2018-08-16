@@ -1,16 +1,16 @@
-// #if !(defined _WIN32)
+#if !(defined _WIN32)
 
-// #include "torch/csrc/jit/fusers/cpu/cpu_fusion_function.h"
+#include "torch/csrc/jit/fusers/cpu/cpu_fusion_function.h"
 
-// #include "torch/csrc/jit/code_template.h"
-// #include "torch/csrc/jit/resource_guard.h"
-// #include "torch/csrc/jit/constants.h"
+#include "torch/csrc/jit/code_template.h"
+#include "torch/csrc/jit/resource_guard.h"
+#include "torch/csrc/jit/constants.h"
 
-// #include "torch/csrc/variable_tensor_functions.h"
+#include "torch/csrc/variable_tensor_functions.h"
 
-// #include "ATen/DeviceGuard.h"
+#include "ATen/DeviceGuard.h"
 
-// namespace torch { namespace jit { namespace cpufuser {
+namespace torch { namespace jit { namespace cpufuser {
 
 // static const std::string so_template = "/tmp/pytorch_fuserXXXXXX.so";
 // static const std::string cpp_template = "/tmp/pytorch_fuserXXXXXX.cpp";
@@ -428,7 +428,6 @@
 //   #pragma GCC diagnostic pop
 // }
 
-
 // void CPUFusionFunction::launch_with_tensors(
 //   at::ArrayRef<at::Tensor> inputs
 // , at::ArrayRef<at::Tensor> outputs) {
@@ -499,15 +498,15 @@
 //   at::DeviceGuard guard(inputs.back());
 //   outputs.clear();
 //   outputs.reserve(outputDescriptors().size());
-//   for(auto& od : outputDescriptors()) {
+//   for (auto& od : outputDescriptors()) {
 //     outputs.push_back(torch::getType(backend(),od.scalar_type).tensor());
 //   }
 
 //   launch_with_tensors(inputs, outputs);
 // }
 
-// } // namespace cpufuser
-// } // namespace jit
-// } // namespace torch
+} // namespace cpufuser
+} // namespace jit
+} // namespace torch
 
-// #endif // !(defined _WIN32)
+#endif // !(defined _WIN32)

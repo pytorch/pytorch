@@ -1,30 +1,30 @@
-// #if !(defined _WIN32)
-// #pragma once
+#if !(defined _WIN32)
+#pragma once
 
-// #include "torch/csrc/jit/fusers/fuser_interface.h"
+#include "torch/csrc/jit/fusers/fuser_interface.h"
 
-// #include "torch/csrc/jit/fusers/cpu/concat_desc.h"
-// #include "torch/csrc/jit/fusers/cpu/temp_file.h"
-// #include "torch/csrc/jit/fusers/cpu/fusion_compiler_config.h"
-// #include "torch/csrc/jit/fusers/cpu/annotated_graph.h"
+#include "torch/csrc/jit/fusers/cpu/concat_desc.h"
+#include "torch/csrc/jit/fusers/cpu/temp_file.h"
+#include "torch/csrc/jit/fusers/cpu/fusion_compiler_config.h"
+#include "torch/csrc/jit/fusers/cpu/annotated_graph.h"
 
-// #include "torch/csrc/jit/ir.h"
-// #include "torch/csrc/jit/assertions.h"
+#include "torch/csrc/jit/ir.h"
+#include "torch/csrc/jit/assertions.h"
 
-// #include "torch/csrc/WindowsTorchApiMacro.h"
-// #include "torch/csrc/utils/disallow_copy.h"
+#include "torch/csrc/WindowsTorchApiMacro.h"
+#include "torch/csrc/utils/disallow_copy.h"
 
-// #include "ATen/ATen.h"
+#include "ATen/ATen.h"
 
-// #include <string>
-// #include <vector>
-// #include <sstream>
-// #include <memory>
+#include <string>
+#include <vector>
+#include <sstream>
+#include <memory>
 
-// namespace torch { namespace jit { namespace cpufuser {
+namespace torch { namespace jit { namespace cpufuser {
 
-// TORCH_API struct CPUFusionFunction : public torch::jit::FusionFunction {
-//   TH_DISALLOW_COPY_AND_ASSIGN(CPUFusionFunction);
+TORCH_API struct CPUFusionFunction : public torch::jit::FusionFunction {
+  TH_DISALLOW_COPY_AND_ASSIGN(CPUFusionFunction);
 
 //   CPUFusionFunction(
 //     const std::string& name
@@ -81,10 +81,10 @@
 //   // an output is actually a concatenation of
 //   // many subtensors that the fusion group produces
 //   std::vector<ConcatDesc> concat_desc;
-// };
+};
 
-// } // namespace cpufuser
-// } // namespace jit
-// } // namespace torch
+} // namespace cpufuser
+} // namespace jit
+} // namespace torch
 
-// #endif // !(defined _WIN32)
+#endif // !(defined _WIN32)
