@@ -4242,7 +4242,7 @@ class TestTorch(TestCase):
 
     @staticmethod
     def _test_matrix_rank(self, conv_fn):
-        a = torch.eye(10)
+        a = conv_fn(torch.eye(10))
         self.assertEqual(torch.matrix_rank(a).item(), 10)
         self.assertEqual(torch.matrix_rank(a, True).item(), 10)
 
@@ -4250,7 +4250,7 @@ class TestTorch(TestCase):
         self.assertEqual(torch.matrix_rank(a).item(), 9)
         self.assertEqual(torch.matrix_rank(a, True).item(), 9)
 
-        a = torch.randn(24, 42)
+        a = conv_fn(torch.randn(24, 42))
         self.assertEqual(torch.matrix_rank(a), torch.matrix_rank(a.t()))
         aaT = torch.mm(a, a.t())
         self.assertEqual(torch.matrix_rank(aaT), torch.matrix_rank(aaT, True))
@@ -4259,16 +4259,16 @@ class TestTorch(TestCase):
 
         if TEST_NUMPY:
             from numpy.linalg import matrix_rank
-            a = torch.randn(35, 75)
-            self.assertEqual(torch.matrix_rank(a).item(), matrix_rank(a.numpy()))
-            self.assertEqual(torch.matrix_rank(a, 0.01).item(), matrix_rank(a.numpy(), 0.01))
+            a = conv_fn(torch.randn(35, 75))
+            self.assertEqual(torch.matrix_rank(a).item(), matrix_rank(a.cpu().numpy()))
+            self.assertEqual(torch.matrix_rank(a, 0.01).item(), matrix_rank(a.cpu().numpy(), 0.01))
 
             aaT = torch.mm(a, a.t())
-            self.assertEqual(torch.matrix_rank(aaT).item(), matrix_rank(aaT.numpy()))
-            self.assertEqual(torch.matrix_rank(aaT, 0.01).item(), matrix_rank(aaT.numpy(), 0.01))
-            self.assertEqual(torch.matrix_rank(aaT, True).item(), matrix_rank(aaT.numpy(), True))
+            self.assertEqual(torch.matrix_rank(aaT).item(), matrix_rank(aaT.cpu().numpy()))
+            self.assertEqual(torch.matrix_rank(aaT, 0.01).item(), matrix_rank(aaT.cpu().numpy(), 0.01))
+            self.assertEqual(torch.matrix_rank(aaT, True).item(), matrix_rank(aaT.cpu().numpy(), True))
             self.assertEqual(torch.matrix_rank(aaT, 0.01, True).item(),
-                             matrix_rank(aaT.numpy(), 0.01, True))
+                             matrix_rank(aaT.cpu().numpy(), 0.01, True))
 
     @skipIfNoLapack
     def test_matrix_rank(self):

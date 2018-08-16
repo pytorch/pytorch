@@ -1,5 +1,4 @@
 #include "ATen/ATen.h"
-#include "ATen/core/ScalarType.h"
 #include "ATen/ExpandUtils.h"
 #include "ATen/NativeFunctions.h"
 #include "ATen/native/LinearAlgebraUtils.h"
