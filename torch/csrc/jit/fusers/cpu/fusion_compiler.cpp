@@ -19,9 +19,10 @@
 namespace torch { namespace jit { namespace cpufuser {
 
 // // Note: there is only one CPUFusionCompiler
-static CPUFusionCompiler compiler;
-
-CPUFusionCompiler& getCompiler() { return compiler; }
+CPUFusionCompiler& getCompiler() { 
+  static CPUFusionCompiler compiler;
+  return compiler; 
+}
 
 static const std::string check_exists_string = "which '${program}' > /dev/null";
 
