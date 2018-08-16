@@ -53,6 +53,8 @@ _(prim, AutogradAdd) \
 _(prim, GradOf) \
 _(prim, AnyDefined) \
 _(prim, FusedConcat) \
+_(prim, ListSelect) \
+_(prim, ListSlice) \
 _(aten, __not__) \
 FORALL_ATEN_BASE_SYMBOLS(_) \
 _(onnx, Add) \

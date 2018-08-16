@@ -31,6 +31,149 @@ Operation noop(Node* n) {
   return [](Stack& stack) { return 0; };
 }
 
+// Convert an python index (which may be negative) into an index usable for a
+// C++ container
+int64_t normalizeIndex(int64_t idx, int64_t list_size) {
+  if (idx < 0) {
+    // Handle negative indexing
+    idx = list_size + idx;
+  }
+  return idx;
+}
+
+template <typename T>
+Operation listSelect(Node* node) {
+  return [=](Stack& stack) {
+    T list;
+    int64_t idx;
+    pop(stack, list, idx);
+    const int64_t list_size = list->elements().size();
+    const int64_t normalized_idx = normalizeIndex(idx, list_size);
+    if (normalized_idx < 0 || normalized_idx >= list_size) {
+      throw std::out_of_range("list index out of range");
+    }
+
+    auto element = list->elements()[normalized_idx];
+    push(stack, std::move(element));
+    return 0;
+  };
+}
+
+template <typename T>
+Operation listLen(Node* node) {
+  return [=](Stack& stack) {
+    T a;
+    pop(stack, a);
+    const int64_t size = a->elements().size();
+    push(stack, size);
+    return 0;
+  };
+}
+
+template <typename T>
+Operation listEq(Node* node) {
+  return [=](Stack& stack) {
+    T a;
+    T b;
+    pop(stack, a, b);
+    if (a->elements() == b->elements()) {
+      push(stack, 1);
+    } else {
+      push(stack, 0);
+    }
+    return 0;
+  };
+}
+
+// Specialization for at::Tensor, since it doesn't define operator==
+template <>
+Operation listEq<Shared<TensorList>>(Node* node) {
+  return [=](Stack& stack) {
+    Shared<TensorList> a;
+    Shared<TensorList> b;
+    pop(stack, a, b);
+    if (a->elements().size() != b->elements().size()) {
+      push(stack, 0);
+      return 0;
+    }
+
+    for (size_t i = 0; i < a->elements().size(); ++i) {
+      const auto& a_element = a->elements()[i];
+      const auto& b_element = b->elements()[i];
+      // This preserves Python's semantics, which uses eq() to compare two
+      // elements, then passes the result to bool().
+      // see: https://docs.python.org/3.4/reference/datamodel.html#object.__ge__
+      const auto cmp_result = a_element.eq(b_element);
+      if (!cmp_result.is_nonzero()) {
+        push(stack, 0);
+        return 0;
+      }
+    }
+
+    push(stack, 1);
+    return 0;
+  };
+}
+
+template <class TList, class TElement>
+Operation listAdd(Node* node) {
+  return [=](Stack& stack) {
+    TList a;
+    TList b;
+    pop(stack, a, b);
+
+    std::vector<TElement> ret;
+    const auto total_size = a->elements().size() + b->elements().size();
+    ret.reserve(total_size);
+    for (const auto& a_element : a->elements()) {
+      ret.push_back(a_element);
+    }
+    for (const auto& b_element : b->elements()) {
+      ret.push_back(b_element);
+    }
+
+    push(stack, ret);
+    return 0;
+  };
+}
+
+template <typename TList, typename TElement>
+Operation listSlice(Node* node) {
+  return [](Stack& stack) {
+    TList list;
+    int64_t start;
+    int64_t end;
+    int64_t step;
+
+    pop(stack, list, start, end, step);
+    const int64_t list_size = list->elements().size();
+
+    // clamp start and end to the bounds of the list
+    const auto normalized_start =
+        std::max((int64_t)0, normalizeIndex(start, list_size));
+    const auto normalized_end =
+        std::min(list_size, normalizeIndex(end, list_size));
+
+    std::vector<TElement> sliced_list;
+    if (normalized_end <= normalized_start) {
+      // early exit if the slice is trivially empty
+      push(stack, sliced_list);
+      return 0;
+    }
+
+    sliced_list.reserve(normalized_end - normalized_start);
+
+    for (auto i = normalized_start; i < normalized_end;) {
+      sliced_list.push_back(list->elements()[i]);
+      i += step;
+    }
+
+    push(stack, sliced_list);
+    return 0;
+  };
+}
+
+
 RegisterOperators reg({
 
     Operator(
@@ -253,6 +396,23 @@ RegisterOperators reg({
             throw std::runtime_error(ss.str());
           }
         }),
+    Operator("prim::ListSelect(int[] a, int b) -> int", listSelect<Shared<IntList>>),
+    Operator("prim::ListSelect(float[] a, int b) -> float", listSelect<Shared<DoubleList>>),
+    Operator("prim::ListSelect(Tensor[] a, int b) -> Tensor", listSelect<Shared<TensorList>>),
+
+    Operator("prim::len(int[] a) -> int", listLen<Shared<IntList>>),
+    Operator("prim::len(float[] a) -> int", listLen<Shared<DoubleList>>),
+    Operator("prim::len(Tensor[] a) -> int", listLen<Shared<TensorList>>),
+
+    Operator(
+        "prim::ListSlice(int[] l, int start, int end=9223372036854775807, int step=1) -> int[]",
+        listSlice<Shared<IntList>, int64_t>),
+    Operator(
+        "prim::ListSlice(float[] l, int start, int end=9223372036854775807, int step=1) -> float[]",
+        listSlice<Shared<DoubleList>, double>),
+    Operator(
+        "prim::ListSlice(Tensor[] l, int start, int end=9223372036854775807, int step=1) -> Tensor[]",
+        listSlice<Shared<TensorList>, at::Tensor>),
 });
 
 // define implementations for primitive number ops
@@ -309,158 +469,7 @@ RegisterOperators reg({
       return 0;                                                        \
     };                                                                 \
   }),
-
-// Convert an python index (which may be negative) into an index usable for a
-// C++ container
-int64_t normalizeIndex(int64_t idx, int64_t list_size) {
-  if (idx < 0) {
-    // Handle negative indexing
-    idx = list_size + idx;
-  }
-  return idx;
-}
-
-template <typename T>
-Operation listSelect(Node* node) {
-  return [=](Stack& stack) {
-    T list;
-    int64_t idx;
-    pop(stack, list, idx);
-    const int64_t list_size = list->elements().size();
-    const int64_t normalized_idx = normalizeIndex(idx, list_size);
-    if (normalized_idx < 0 || normalized_idx >= list_size) {
-      throw std::out_of_range("list index out of range");
-    }
-
-    auto element = list->elements()[normalized_idx];
-    push(stack, std::move(element));
-    return 0;
-  };
-}
-
-template <typename T>
-Operation listLen(Node* node) {
-  return [=](Stack& stack) {
-    T a;
-    pop(stack, a);
-    const int64_t size = a->elements().size();
-    push(stack, size);
-    return 0;
-  };
-}
-
-template <typename T>
-Operation listEq(Node* node) {
-  return [=](Stack& stack) {
-    T a;
-    T b;
-    pop(stack, a, b);
-    if (a->elements() == b->elements()) {
-      push(stack, 1);
-    } else {
-      push(stack, 0);
-    }
-    return 0;
-  };
-}
-
-// Specialization for at::Tensor, since it doesn't define operator==
-template <>
-Operation listEq<Shared<TensorList>>(Node* node) {
-  return [=](Stack& stack) {
-    Shared<TensorList> a;
-    Shared<TensorList> b;
-    pop(stack, a, b);
-    if (a->elements().size() != b->elements().size()) {
-      push(stack, 0);
-      return 0;
-    }
-
-    for (size_t i = 0; i < a->elements().size(); ++i) {
-      const auto& a_element = a->elements()[i];
-      const auto& b_element = b->elements()[i];
-      // This preserves Python's semantics, which uses eq() to compare two
-      // elements, then passes the result to bool().
-      // see: https://docs.python.org/3.4/reference/datamodel.html#object.__ge__
-      const auto cmp_result = a_element.eq(b_element);
-      if (!cmp_result.is_nonzero()) {
-        push(stack, 0);
-        return 0;
-      }
-    }
-
-    push(stack, 1);
-    return 0;
-  };
-}
-
-template <class TList, class TElement>
-Operation listAdd(Node* node) {
-  return [=](Stack& stack) {
-    TList a;
-    TList b;
-    pop(stack, a, b);
-
-    std::vector<TElement> ret;
-    const auto total_size = a->elements().size() + b->elements().size();
-    ret.reserve(total_size);
-    for (const auto& a_element : a->elements()) {
-      ret.push_back(a_element);
-    }
-    for (const auto& b_element : b->elements()) {
-      ret.push_back(b_element);
-    }
-
-    push(stack, ret);
-    return 0;
-  };
-}
-
-template <typename TList, typename TElement>
-Operation listSlice(Node* node) {
-  return [](Stack& stack) {
-    TList list;
-    int64_t start;
-    int64_t end;
-    int64_t step;
-
-    pop(stack, list, start, end, step);
-    const int64_t list_size = list->elements().size();
-
-    // clamp start and end to the bounds of the list
-    const auto normalized_start =
-        std::max((int64_t)0, normalizeIndex(start, list_size));
-    const auto normalized_end =
-        std::min(list_size, normalizeIndex(end, list_size));
-
-    std::vector<TElement> sliced_list;
-    if (normalized_end <= normalized_start) {
-      // early exit if the slice is trivially empty
-      push(stack, sliced_list);
-      return 0;
-    }
-
-    sliced_list.reserve(normalized_end - normalized_start);
-
-    for (auto i = normalized_start; i < normalized_end;) {
-      sliced_list.push_back(list->elements()[i]);
-      i += step;
-    }
-
-    push(stack, sliced_list);
-    return 0;
-  };
-}
-
 RegisterOperators reg2({
-    Operator("aten::select(int[] a, int b) -> int", listSelect<Shared<IntList>>),
-    Operator("aten::select(float[] a, int b) -> float", listSelect<Shared<DoubleList>>),
-    Operator("aten::select(Tensor[] a, int b) -> Tensor", listSelect<Shared<TensorList>>),
-
-    Operator("aten::len(int[] a) -> int", listLen<Shared<IntList>>),
-    Operator("aten::len(float[] a) -> int", listLen<Shared<DoubleList>>),
-    Operator("aten::len(Tensor[] a) -> int", listLen<Shared<TensorList>>),
-
     Operator("aten::eq(int[] a, int[] b) -> int", listEq<Shared<IntList>>),
     Operator("aten::eq(float[] a, float[] b) -> int", listEq<Shared<DoubleList>>),
     Operator("aten::eq(Tensor[] a, Tensor[] b) -> int", listEq<Shared<TensorList>>),
@@ -468,16 +477,6 @@ RegisterOperators reg2({
     Operator("aten::add(int[] a, int[] b) -> int[]", listAdd<Shared<IntList>, int64_t>),
     Operator("aten::add(float[] a, float[] b) -> float[]", listAdd<Shared<DoubleList>, double>),
     Operator("aten::add(Tensor[] a, Tensor[] b) -> Tensor[]", listAdd<Shared<TensorList>, at::Tensor>),
-
-    Operator(
-        "aten::slice(int[] l, int start, int end=9223372036854775807, int step=1) -> int[]",
-        listSlice<Shared<IntList>, int64_t>),
-    Operator(
-        "aten::slice(float[] l, int start, int end=9223372036854775807, int step=1) -> float[]",
-        listSlice<Shared<DoubleList>, double>),
-    Operator(
-        "aten::slice(Tensor[] l, int start, int end=9223372036854775807, int step=1) -> Tensor[]",
-        listSlice<Shared<TensorList>, at::Tensor>),
 
     DEFINE_BINARY_OP(aten::add, a + b)
     DEFINE_BINARY_OP(aten::sub, a - b)
