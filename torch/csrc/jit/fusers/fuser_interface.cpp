@@ -2,9 +2,6 @@
 
 namespace torch { namespace jit { 
 
-void FuseCPUGraph(std::shared_ptr<Graph>& graph) {
-}
-
 void FuseCUDAGraph(std::shared_ptr<Graph>& graph) {
   
 }
