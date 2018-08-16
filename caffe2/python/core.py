@@ -1613,7 +1613,8 @@ class Net(object):
         blob_remap=None,
         op_id_mask=None,
         remap_funcs=None,
-        keep_schema=True
+        keep_schema=True,
+        update_external_list=False,
     ):
         """
         Clone this net.
@@ -1687,6 +1688,24 @@ class Net(object):
                 )
 
         new_net._attr_dict.update(self._attr_dict)
+        if update_external_list:
+            # external input list
+            existing_outputs = set()
+            used_outputs = set()
+            del new_net.Proto().external_input[:]
+            del new_net.Proto().external_output[:]
+            for op in new_net.Proto().op:
+                for ib in op.input:
+                    if ib not in existing_outputs:
+                        new_net.Proto().external_input.extend([ib])
+                    else:
+                        used_outputs.add(ib)
+                for ob in op.output:
+                    existing_outputs.add(ob)
+            # external outputs
+            for ob in existing_outputs:
+                if ob not in used_outputs:
+                    new_net.Proto().external_output.extend([ob])
         return new_net
 
     def ClonePartial(self, name, inputs, outputs, remap_funcs=None):
@@ -1757,6 +1776,60 @@ class Net(object):
     def Proto(self):
         self._InvalidateLookupTables()
         return self._net
+
+    def reroute_tensor(self, tensor, new_producer, can_modify=None):
+        r""" reroute tensor to new_producer. And feed new tensor to consumers
+        and interseciton with can_modify if provided.
+        Inputs:
+            tensor: str or blob_reference the tensor to reroute
+            new_producer: an op takes in tensor gives new_tesnor
+            can_modify: a list/set of operators that consumes tensor and can be
+            modified
+
+        Returns:
+            reroute_cnt: how many consumer op has been changed
+
+        Note: assume no inplace blob in net
+        """
+        if tensor in self.external_inputs:
+            op_idx = -1
+        else:
+            assert tensor in new_producer.input, \
+                "new producer {} is not taking in {}".format(new_producer.type, tensor)
+            # assuming that the net has no inplace blob
+            # TODO: add ssa info in tensor
+            op_idx = -2
+            for index, op in enumerate(self.Proto().op):
+                if_found = False
+                for o in op.output:
+                    if o == tensor:
+                        # tensor should not be modified yet.
+                        if_found = True
+                        op_idx = index
+                        break
+                if if_found:
+                    break
+
+        assert op_idx >= -1
+        temp_ops = self.Proto().op[op_idx + 1:]
+        del self.Proto().op[op_idx + 1:]
+        self.Proto().op.extend([new_producer])
+        self.Proto().op.extend(temp_ops)
+
+        new_tensor = new_producer.output[0]
+        # modify external outputs
+        if tensor in self.external_outputs:
+            new_list = [new_tensor if b == tensor else b for b in self.external_outputs]
+            del self.Proto().external_output[:]
+            self.Proto().external_output.extend(new_list)
+
+        # modify consumers
+        reroute_cnt = 0
+        for op in self.Proto().op:
+            if op in can_modify:  # this is not necessarily true
+                remap_input(op, {tensor: new_tensor})
+                reroute_cnt = reroute_cnt + 1
+        return reroute_cnt
 
     def PopulateProtoWithFileName(self):
         net_tb = workspace.operator_tracebacks.get(self.Name(), None)
@@ -2182,6 +2255,12 @@ class Net(object):
 
     def extend_ops(self, new_ops):
         return self._ExtendOps(new_ops)
+
+
+def remap_input(op, blob_name_remapping):
+    new_list = [blob_name_remapping.get(b, b) for b in op.input]
+    del op.input[:]
+    op.input.extend(new_list)
 
 
 def copy_func_between_devices(src, dst):

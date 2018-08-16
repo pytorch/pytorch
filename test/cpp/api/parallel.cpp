@@ -86,8 +86,8 @@ TEST_CASE("Parallel/Replicate", "[multi-cuda]") {
   for (size_t i = 0; i < original_parameters.size(); ++i) {
     REQUIRE(replica1_parameters[i]->allclose(*original_parameters[i]));
     REQUIRE(
-        replica1_parameters[i]->data().data<float>() !=
-        original_parameters[i]->data().data<float>());
+        replica1_parameters[i].data<float>() !=
+        original_parameters[i].data<float>());
   }
 
   auto replica2_parameters = replicas[1]->parameters();
@@ -99,8 +99,8 @@ TEST_CASE("Parallel/Replicate", "[multi-cuda]") {
   for (size_t i = 0; i < original_parameters.size(); ++i) {
     REQUIRE(replica2_parameters[i]->allclose(*original_parameters[i]));
     REQUIRE(
-        replica2_parameters[i]->data().data<float>() !=
-        original_parameters[i]->data().data<float>());
+        replica2_parameters[i].data<float>() !=
+        original_parameters[i].data<float>());
   }
 }
 

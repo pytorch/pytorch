@@ -24,7 +24,7 @@ import itertools
 import onnx.backend
 
 import caffe2
-from caffe2.python import core, workspace, rnn_cell, gru_cell
+from caffe2.python import core, workspace, rnn_cell, gru_cell, dyndep
 from caffe2.python.model_helper import ModelHelper
 from caffe2.proto import caffe2_pb2
 import caffe2.python.utils
@@ -45,6 +45,9 @@ from caffe2.python.onnx.backend_cpp_rep import Caffe2CppRep
 import caffe2.python._import_c_extension as C
 
 import warnings
+
+dyndep.InitOpsLibrary("@/caffe2/caffe2/contrib/aten:aten_op")
+
 
 def force_unicode(s):
     try:
@@ -861,7 +864,6 @@ class Caffe2Backend(Backend):
                 c2ops = cls._onnx_node_to_caffe2_op(
                     None, None, node, opset_version)
             except Exception as e:
-                success = False
                 print('ONNX FATAL:', e)
                 continue
             net.op.extend(c2ops.init_ops)

@@ -244,7 +244,10 @@ Tensor _bincount_cuda_template(
   if (minlength < 0) {
     AT_ERROR("minlength should be >= 0");
   }
-  if (self.dim() != 1 || self.numel() == 0 ||
+  if (self.dim() == 1 && self.numel() == 0) {
+    return native::zeros({minlength}, device(kCUDA).dtype(kLong));
+  }
+  if (self.dim() != 1 ||
       (!std::is_same<input_t, uint8_t>::value &&
        *self.min().toBackend(kCPU).data<input_t>() < 0)) {
     AT_ERROR("bincount only supports 1-d non-negative integral inputs.");
