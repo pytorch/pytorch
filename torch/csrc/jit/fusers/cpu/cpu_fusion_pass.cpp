@@ -1,4 +1,5 @@
 #if !(defined _WIN32)
+#include "torch/csrc/jit/fusers/cpu/cpu_fuser_interface.h"
 #include "torch/csrc/jit/fusers/cpu/cpu_fuser.h"
 #include "torch/csrc/jit/autodiff.h"
 #include "torch/csrc/jit/assertions.h"
