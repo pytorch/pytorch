@@ -36,7 +36,7 @@ constexpr int kCannotComputeNumOutputs = -1;
  *     OPERATOR_SCHEMA(name)
  *         .NumInputs(2).NumOutputs(1).AllowInplace({{0, 0}});
  */
-class OpSchema {
+class CAFFE2_API OpSchema {
  public:
   OpSchema() : type_("unknown"), file_("unknown"), line_(0) {}
   OpSchema(const string& type, const string& file, const int line)
@@ -444,7 +444,7 @@ class OpSchema {
 /**
  * @brief A registry to hold all the operator schemas.
  */
-class OpSchemaRegistry {
+class CAFFE2_API OpSchemaRegistry {
  public:
   static OpSchema&
   NewSchema(const string& key, const string& file, const int line) {

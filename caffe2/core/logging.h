@@ -32,10 +32,10 @@ CAFFE2_DECLARE_bool(caffe2_use_fatal_for_enforce);
 
 namespace caffe2 {
 // Functions that we use for initialization.
-bool InitCaffeLogging(int* argc, char** argv);
-void UpdateLoggingLevelsFromFlags();
+CAFFE2_API bool InitCaffeLogging(int* argc, char** argv);
+CAFFE2_API void UpdateLoggingLevelsFromFlags();
 
-[[noreturn]] void ThrowEnforceNotMet(
+CAFFE2_API CAFFE2_NORETURN void ThrowEnforceNotMet(
     const char* file,
     const int line,
     const char* condition,
@@ -58,7 +58,7 @@ constexpr bool IsUsingGoogleLogging() {
  * cases, such as when you want to write a tutorial or something. Normally, use
  * the commandline flags to set the log level.
  */
-void ShowLogInfoToStderr();
+CAFFE2_API void ShowLogInfoToStderr();
 
 inline void MakeStringInternal(std::stringstream& /*ss*/) {}
 
@@ -104,9 +104,9 @@ inline string Join(const string& delimiter, const Container& v) {
 // Returns number of replacements
 size_t ReplaceAll(string& s, const char* from, const char* to);
 
-void SetStackTraceFetcher(std::function<string(void)> fetcher);
+CAFFE2_API void SetStackTraceFetcher(std::function<string(void)> fetcher);
 
-void SetOperatorLogger(std::function<void(const OperatorDef&)> tracer);
+CAFFE2_API void SetOperatorLogger(std::function<void(const OperatorDef&)> tracer);
 std::function<void(const OperatorDef&)> GetOperatorLogger();
 
 using EnforceNotMet = at::Error;
@@ -164,9 +164,9 @@ using EnforceNotMet = at::Error;
 
 namespace enforce_detail {
 
-struct EnforceOK {};
+struct CAFFE2_API EnforceOK {};
 
-class EnforceFailMessage {
+class CAFFE2_API EnforceFailMessage {
  public:
 #ifdef _MSC_VER
   // MSVC + NVCC ignores constexpr and will issue a warning if included.
