@@ -55,7 +55,7 @@ void propagateNode(Node* n) {
   auto graph = n->owningGraph();
   WithInsertPoint guard(n);
   for (size_t i = 0; i < outputs.size(); ++i) {
-    auto new_output = insertConstant(*graph, outputs[i]);
+    auto new_output = graph->insertConstant(outputs[i]);
     n->outputs()[i]->replaceAllUsesWith(new_output);
     // let dce elimination remove n
   }
@@ -78,7 +78,8 @@ void inlineIf(Block *body, Node * n) {
 
 bool isTrueConstant(Value *val) {
   at::optional<bool> maybe_value = constant_as<bool>(val);
-  return maybe_value && *maybe_value;
+  JIT_ASSERT(maybe_value);
+  return *maybe_value;
 }
 
 void inlineIf(Node *n) {
