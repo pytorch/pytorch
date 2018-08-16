@@ -28,9 +28,9 @@
 namespace torch { namespace jit { namespace cpufuser {
 
 TORCH_API struct CPUFusionCompiler {
-//   TH_DISALLOW_COPY_AND_ASSIGN(CPUFusionCompiler);
+  TH_DISALLOW_COPY_AND_ASSIGN(CPUFusionCompiler);
 
-//   CPUFusionCompiler();
+  CPUFusionCompiler();
 
 //   // ignores types in graph, and uses specific contiguity annotations
 //   std::shared_ptr<CPUFusionFunction> getOrCompile(
@@ -55,8 +55,8 @@ TORCH_API struct CPUFusionCompiler {
 
 //   bool canCompileOnCPU() const { return config_.cxx.size() > 0; }
 
-// private:
-//   CPUFusionCompilerConfig config_;
+private:
+  CPUFusionCompilerConfig config_;
 //   std::unordered_map<
 //     std::string
 //   , std::shared_ptr<CPUFusionFunction>> cache;
