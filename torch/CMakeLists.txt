@@ -167,6 +167,7 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/script/compiler.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/lexer.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/module.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/fusers/fuser_interface.cpp
   ${TORCH_SRC_DIR}/csrc/jit/test_jit.cpp
   ${TORCH_SRC_DIR}/csrc/jit/tracer.cpp
   ${TORCH_SRC_DIR}/csrc/jit/type.cpp
