@@ -78,7 +78,8 @@ Node* getTracedNode(
 /// Does two things for an operator implementation and a tuple of arguments:
 /// 1. Pops all necessary arguments off the stack into the tuple's elements,
 /// 2. Unpacks the tuple and calls the operator implementation.
-/// The result of the implementation call is returned.
+/// If tracing is currently enabled, this function will also take care of
+/// tracing the operator call.
 template <typename Implementation, typename... Types, size_t... Is>
 void callOperatorWithTuple(
     const FunctionSchema& schema,

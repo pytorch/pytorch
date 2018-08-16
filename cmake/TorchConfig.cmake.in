@@ -22,9 +22,9 @@ SET(TORCH_ROOT "${CMAKE_CURRENT_LIST_DIR}/../")
 set(TORCH_INCLUDE_DIRS
   "${TORCH_ROOT}"
   "${TORCH_ROOT}/aten/src"
-  "${CMAKE_CURRENT_LIST_DIR}/build/aten/src"
-  "${CMAKE_CURRENT_LIST_DIR}/build/caffe2/aten/src"
-  "${CMAKE_CURRENT_LIST_DIR}/build/caffe2/aten/src/TH"
+  "${CMAKE_CURRENT_LIST_DIR}/aten/src"
+  "${CMAKE_CURRENT_LIST_DIR}/caffe2/aten/src"
+  "${CMAKE_CURRENT_LIST_DIR}/caffe2/aten/src/TH"
 )
 
 find_library(TORCH_LIBRARY torch PATHS "${CMAKE_CURRENT_LIST_DIR}/lib" NO_DEFAULT_PATH)
