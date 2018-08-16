@@ -32,13 +32,13 @@ static bool programExists(const std::string& program) {
   return 0 == system(cmd.c_str());
 }
 
-// CPUFusionCompiler::CPUFusionCompiler() {
-//   const char* cxx_env = getenv("CXX");
-//   if (cxx_env != nullptr) config_.cxx = cxx_env;
-//   if (!programExists(config_.cxx)) config_.cxx = "";
-//   const char* debug_env = getenv("PYTORCH_FUSION_DEBUG");
-//   config_.debug = debug_env && atoi(debug_env) != 0;
-// }
+CPUFusionCompiler::CPUFusionCompiler() {
+  const char* cxx_env = getenv("CXX");
+  if (cxx_env != nullptr) config_.cxx = cxx_env;
+  if (!programExists(config_.cxx)) config_.cxx = "";
+  const char* debug_env = getenv("PYTORCH_FUSION_DEBUG");
+  config_.debug = debug_env && atoi(debug_env) != 0;
+}
 
 // std::shared_ptr<CPUFusionFunction> CPUFusionCompiler::getOrCompile(
 //   AnnotatedGraph& agraph) {

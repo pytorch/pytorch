@@ -30,7 +30,7 @@ namespace torch { namespace jit { namespace cpufuser {
 TORCH_API struct CPUFusionCompiler {
   TH_DISALLOW_COPY_AND_ASSIGN(CPUFusionCompiler);
 
-  CPUFusionCompiler() = default;
+  CPUFusionCompiler();
 
   // CPUFusionCompiler();
 
