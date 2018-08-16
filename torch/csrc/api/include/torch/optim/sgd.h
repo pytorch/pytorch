@@ -46,7 +46,7 @@ class SGD : public Optimizer {
   friend class cereal::access;
   SGD() : options(0) {}
 
-  std::vector<at::Tensor> momentum_buffers_;
+  std::vector<Tensor> momentum_buffers_;
   /// Counts how often `step()` is called, for dampening.
   size_t iteration_{0};
 };

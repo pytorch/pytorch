@@ -184,8 +184,7 @@ TEST_CASE("Tensor/UsesOptionsThatAreSupplied") {
 
 TEST_CASE("FromBlob") {
   std::vector<int32_t> v = {1, 2, 3};
-  auto tensor = torch::from_blob(
-      reinterpret_cast<void*>(v.data()), v.size(), torch::kInt32);
+  auto tensor = torch::from_blob(v.data(), v.size(), torch::kInt32);
   REQUIRE(tensor.is_variable());
   REQUIRE(tensor.numel() == 3);
   REQUIRE(tensor[0].toCInt() == 1);
