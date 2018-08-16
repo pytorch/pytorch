@@ -102,7 +102,7 @@ TEST_CASE("rnn") {
     torch::Tensor diff = next.state - output.state;
 
     // Hiddens changed
-    REQUIRE(diff.data().abs().sum().toCFloat() > 1e-3);
+    REQUIRE(diff.abs().sum().toCFloat() > 1e-3);
   }
 
   SECTION("outputs") {
@@ -110,15 +110,15 @@ TEST_CASE("rnn") {
     LSTM model(2, 2);
     for (auto& v : model->parameters()) {
       float size = v->numel();
-      auto p = static_cast<float*>(v->data().storage()->pImpl()->data());
+      auto p = static_cast<float*>(v->storage()->pImpl()->data());
       for (size_t i = 0; i < size; i++) {
         p[i] = i / size;
       }
     }
 
     auto x = torch::empty({3, 4, 2}, torch::requires_grad());
-    float size = x.data().numel();
-    auto p = static_cast<float*>(x.data().storage()->pImpl()->data());
+    float size = x.numel();
+    auto p = static_cast<float*>(x.storage()->pImpl()->data());
     for (size_t i = 0; i < size; i++) {
       p[i] = (size - i) / size;
     }
@@ -129,7 +129,7 @@ TEST_CASE("rnn") {
     REQUIRE(out.output.size(1) == 4);
     REQUIRE(out.output.size(2) == 2);
 
-    auto flat = out.output.data().view(3 * 4 * 2);
+    auto flat = out.output.view(3 * 4 * 2);
     float c_out[] = {0.4391, 0.5402, 0.4330, 0.5324, 0.4261, 0.5239,
                      0.4183, 0.5147, 0.6822, 0.8064, 0.6726, 0.7968,
                      0.6620, 0.7860, 0.6501, 0.7741, 0.7889, 0.9003,
@@ -143,7 +143,7 @@ TEST_CASE("rnn") {
     REQUIRE(out.state.size(1) == 1);
     REQUIRE(out.state.size(2) == 4);
     REQUIRE(out.state.size(3) == 2);
-    flat = out.state.data().view(16);
+    flat = out.state.view(16);
     float h_out[] = {0.7889,
                      0.9003,
                      0.7769,
@@ -207,7 +207,7 @@ TEST_CASE("rnn_cuda", "[cuda]") {
     torch::Tensor diff = next.state - output.state;
 
     // Hiddens changed
-    REQUIRE(diff.data().abs().sum().toCFloat() > 1e-3);
+    REQUIRE(diff.abs().sum().toCFloat() > 1e-3);
   }
 
   SECTION("lstm") {

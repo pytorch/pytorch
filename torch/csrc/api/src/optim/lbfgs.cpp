@@ -15,19 +15,19 @@ namespace optim {
 LBFGSOptions::LBFGSOptions(double learning_rate)
     : learning_rate_(learning_rate) {}
 
-at::Tensor LBFGS::gather_flat_grad() {
-  std::vector<at::Tensor> views;
+Tensor LBFGS::gather_flat_grad() {
+  std::vector<Tensor> views;
   for (auto& parameter : parameters_) {
-    views.push_back(torch::Tensor(parameter.grad()).data().view(-1));
+    views.push_back(autograd::Variable(parameter.grad()).data().view(-1));
   }
   return at::cat(views);
 }
 
-void LBFGS::add_grad(const torch::Scalar& step_size, const at::Tensor& update) {
+void LBFGS::add_grad(const torch::Scalar& step_size, const Tensor& update) {
   int64_t offset = 0;
   for (auto& parameter : parameters_) {
     int64_t numel = parameter.numel();
-    at::Tensor& pd = parameter.data();
+    Tensor& pd = autograd::Variable(parameter).data();
     pd.add_(update.slice(0, offset, offset + numel, 1).view_as(pd), step_size);
     offset += numel;
   }
@@ -39,14 +39,14 @@ torch::Tensor LBFGS::step(LossClosure closure) {
   int64_t current_evals = 1;
   func_evals += 1;
 
-  at::Tensor flat_grad = gather_flat_grad();
+  Tensor flat_grad = gather_flat_grad();
   torch::Scalar abs_grad_sum = torch::Scalar(flat_grad.abs().sum());
 
   if (torch::Scalar(abs_grad_sum).toFloat() <= options.tolerance_grad_) {
     return loss;
   }
 
-  at::Tensor ONE = flat_grad.type().scalarTensor(1);
+  Tensor ONE = flat_grad.type().scalarTensor(1);
 
   int64_t n_iter = 0;
   while (n_iter < options.max_iter_) {
@@ -58,8 +58,8 @@ torch::Tensor LBFGS::step(LossClosure closure) {
       H_diag = ONE;
       prev_flat_grad = flat_grad.clone();
     } else {
-      at::Tensor y = flat_grad.sub(prev_flat_grad);
-      at::Tensor s = d.mul(t);
+      Tensor y = flat_grad.sub(prev_flat_grad);
+      Tensor s = d.mul(t);
       torch::Scalar ys = torch::Scalar(y.dot(s));
 
       if (ys.toFloat() > 1e-10) {
@@ -85,7 +85,7 @@ torch::Tensor LBFGS::step(LossClosure closure) {
         ro.at(i) = ONE / old_dirs.at(i).dot(old_stps.at(i));
       }
 
-      at::Tensor q = flat_grad.neg();
+      Tensor q = flat_grad.neg();
       for (int64_t i = num_old - 1; i >= 0; i--) {
         al.at(i) = old_stps.at(i).dot(q) * ro.at(i);
         q.add_(old_dirs.at(i), torch::Scalar(-al.at(i)));
@@ -93,11 +93,11 @@ torch::Tensor LBFGS::step(LossClosure closure) {
 
       // Multiply by initial Hessian
       // r/d is the final direction
-      at::Tensor r = q.mul(H_diag);
+      Tensor r = q.mul(H_diag);
       d = r;
 
       for (int64_t i = 0; i < num_old; i++) {
-        at::Tensor be_i = old_dirs.at(i).dot(r) * ro.at(i);
+        Tensor be_i = old_dirs.at(i).dot(r) * ro.at(i);
         r.add_(old_stps.at(i), torch::Scalar(al.at(i) - be_i));
       }
       prev_flat_grad.copy_(flat_grad);
