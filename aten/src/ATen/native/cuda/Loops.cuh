@@ -73,8 +73,11 @@ void gpu_nullary_kernel(TensorIterator& iter, const func_t& f) {
     return;
   }
   if (iter.is_trivial_1d()) {
+    auto strides = iter.get_inner_strides();
+    int stride0 = strides[0];
     launch_kernel<512, 1>(numel, [=]__device__(int idx) {
-      reinterpret_cast<arg0_t*>(out_data)[idx] = f();
+      arg0_t* out = (arg0_t*)&out_data[stride0 * idx];
+      *out = f();
     });
   } else {
     auto offset_calc = make_offset_calculator<1>(iter);
@@ -108,9 +111,13 @@ void gpu_unary_kernel(TensorIterator& iter, const func_t& f) {
       return f(a);
     });
   } else if (iter.is_trivial_1d()) {
-    launch_kernel<512, 1>(numel, [=]__device__(int idx) {
-      reinterpret_cast<arg0_t*>(out_data)[idx] =
-                  f(reinterpret_cast<const arg1_t*>(in1_data)[idx]);
+    auto strides = iter.get_inner_strides();
+    int stride0 = strides[0];
+    int stride1 = strides[1];
+    launch_kernel<512, 1>(numel, [out_data, stride0, stride1, in1_data, f]__device__(int idx) {
+      arg0_t* out = (arg0_t*)&out_data[stride0 * idx];
+      arg1_t* in1 = (arg1_t*)&in1_data[stride1 * idx];
+      *out = f(*in1);
     });
   } else {
     auto offset_calc = make_offset_calculator<2>(iter);
@@ -160,10 +167,15 @@ void gpu_binary_kernel(TensorIterator& iter, const func_t& f) {
       return f(a, b);
     });
   } else if (iter.is_trivial_1d()) {
-    launch_kernel<512, 1>(numel, [=]__device__(int idx) {
-      reinterpret_cast<arg0_t*>(out_data)[idx] =
-                        f(reinterpret_cast<const arg1_t*>(in1_data)[idx],
-                          reinterpret_cast<const arg2_t*>(in2_data)[idx]);
+    auto strides = iter.get_inner_strides();
+    int stride0 = strides[0];
+    int stride1 = strides[1];
+    int stride2 = strides[2];
+    launch_kernel<512, 1>(numel, [stride0, stride1, out_data, in1_data, f, stride2, in2_data]__device__(int idx) {
+      arg0_t* out = (arg0_t*)&out_data[stride0 * idx];
+      arg1_t* in1 = (arg1_t*)&in1_data[stride1 * idx];
+      arg2_t* in2 = (arg2_t*)&in2_data[stride2 * idx];
+      *out = f(*in1, *in2);
     });
   } else {
     auto offset_calc = make_offset_calculator<3>(iter);
