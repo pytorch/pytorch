@@ -85,34 +85,4 @@ void CPUFusionCompiler::debugLaunchGraph(
 } // namespace jit
 } // namespace torch
 
-// /*
-// * Interface functions.
-// */
-// // namespace torch { namespace jit { 
-
-// // std::shared_ptr<CompiledFusionFunction> getCPUFusionFunction(Node* fusion_group) {
-// //   auto& graph = *fusion_group->g(attr::Subgraph);
-// //   cpufuser::AnnotatedGraph agraph(graph, fusion_group->i(attr::device));
-  
-// //   for(auto& input : graph.inputs()) {
-// //     auto t = input->type()->expect<TensorType>();
-// //     agraph.input_desc.emplace_back(t);
-// //   }
-
-// //   for(auto& output : graph.outputs()) {
-// //     auto t = output->type()->expect<TensorType>();
-// //     agraph.output_desc.emplace_back(t);
-// //   }
-
-// //   return cpufuser::compiler.getOrCompile(agraph);
-// // }
-
-// // bool canCompileOnCPU() {
-// //   return cpufuser::compiler.canCompileOnCPU();
-// // }
-
-
-// } // namespace jit
-// } // namespace torch
-
 #endif // _WIN32
