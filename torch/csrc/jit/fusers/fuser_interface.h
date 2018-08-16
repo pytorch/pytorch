@@ -24,7 +24,7 @@ namespace torch { namespace jit {
 TORCH_API void FuseCPUGraph(std::shared_ptr<Graph>& graph);
 TORCH_API void FuseCUDAGraph(std::shared_ptr<Graph>& graph);
 
-//  TORCH_API std::shared_ptr<CompiledFusionFunction> getFusionFunction(Node* fusion_group);
+TORCH_API std::shared_ptr<FusionFunction> getFusionFunction(Node* fusion_group);
  
 } // namespace jit
 } // namespace torch
