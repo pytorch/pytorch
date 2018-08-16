@@ -18,7 +18,7 @@ class SparseToDenseMaskBase : public Operator<Context> {
   SparseToDenseMaskBase(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws) {
     std::vector<int64_t> mask =
-        OperatorBase::template GetRepeatedArgument<int64_t>("mask");
+        this->template GetRepeatedArgument<int64_t>("mask");
     featuresCount_ = mask.size();
 
     CAFFE_ENFORCE(!mask.empty(), "mask can't be empty");
@@ -36,9 +36,6 @@ class SparseToDenseMaskBase : public Operator<Context> {
       }
     }
   }
-
-  // TODO: enable the filler
-  DISABLE_INPUT_FILLERS(Context)
 
  protected:
   const int64_t kMaxDenseSize = 1024 * 128;
@@ -67,10 +64,10 @@ class SparseToDenseMaskOp : public SparseToDenseMaskBase<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   SparseToDenseMaskOp(const OperatorDef& operator_def, Workspace* ws)
       : SparseToDenseMaskBase<Context>(operator_def, ws) {
-    returnPresenceMask_ = OperatorBase::template GetSingleArgument<bool>(
+    returnPresenceMask_ = this->template GetSingleArgument<bool>(
         "return_presence_mask", false);
     maxSkippedSparseIndices_ =
-        OperatorBase::template GetSingleArgument<int32_t>(
+        this->template GetSingleArgument<int32_t>(
             "max_skipped_indices", kMaxSkippedSparseIndices);
   }
 

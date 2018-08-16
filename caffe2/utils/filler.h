@@ -3,27 +3,25 @@
 
 #include <sstream>
 
-#include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
+#include "caffe2/core/tensor.h"
 #include "caffe2/utils/math.h"
 
 namespace caffe2 {
 
-template <class Context_t>
 class TensorFiller {
  public:
-  template <class Type>
-  void Fill(Tensor* tensor) const {
-    CAFFE_ENFORCE(context_, "context is null");
+  template <class Type, class Context>
+  void Fill(Tensor* tensor, Context* context) const {
+    CAFFE_ENFORCE(context, "context is null");
     CAFFE_ENFORCE(tensor, "tensor is null");
     auto min = static_cast<Type>(min_);
     auto max = static_cast<Type>(max_);
     CAFFE_ENFORCE_LE(min, max);
 
-    Tensor temp_tensor(shape_, Context_t::GetDeviceType());
+    Tensor temp_tensor(shape_, Context::GetDeviceType());
     tensor->swap(temp_tensor);
     Type* data = tensor->template mutable_data<Type>();
-    Context_t* context = static_cast<Context_t*>(context_);
 
     // TODO: Come up with a good distribution abstraction so that
     // the users could plug in their own distribution.
@@ -31,11 +29,10 @@ class TensorFiller {
       auto fixed_sum = static_cast<Type>(fixed_sum_);
       CAFFE_ENFORCE_LE(min * tensor->size(), fixed_sum);
       CAFFE_ENFORCE_GE(max * tensor->size(), fixed_sum);
-      math::RandFixedSum<Type, Context_t>(
+      math::RandFixedSum<Type, Context>(
           tensor->size(), min, max, fixed_sum_, data, context);
     } else {
-      math::RandUniform<Type, Context_t>(
-          tensor->size(), min, max, data, context);
+      math::RandUniform<Type, Context>(tensor->size(), min, max, data, context);
     }
   }
 
@@ -76,29 +73,14 @@ class TensorFiller {
     return *this;
   }
 
-  // Use new context so that it is independent from its operator
-  TensorFiller& Context(Context_t* context) {
-    context_ = (void*)context;
-    return *this;
-  }
-
   template <class Type>
-  TensorFiller(
-      const std::vector<TIndex>& shape,
-      Type fixed_sum,
-      Context_t* context)
-      : shape_(shape),
-        has_fixed_sum_(true),
-        fixed_sum_((double)fixed_sum),
-        context_((void*)context) {}
+  TensorFiller(const std::vector<TIndex>& shape, Type fixed_sum)
+      : shape_(shape), has_fixed_sum_(true), fixed_sum_((double)fixed_sum) {}
 
-  TensorFiller(const std::vector<TIndex>& shape, Context_t* context)
-      : shape_(shape),
-        has_fixed_sum_(false),
-        fixed_sum_(0),
-        context_((void*)context) {}
+  TensorFiller(const std::vector<TIndex>& shape)
+      : shape_(shape), has_fixed_sum_(false), fixed_sum_(0) {}
 
-  TensorFiller() : TensorFiller({}, (Context_t*)nullptr) {}
+  TensorFiller() : TensorFiller(std::vector<TIndex>()) {}
 
   std::string DebugString() const {
     std::stringstream stream;
@@ -118,7 +100,6 @@ class TensorFiller {
   double max_ = 1.0;
   bool has_fixed_sum_;
   double fixed_sum_;
-  void* context_;
 };
 
 } // namespace caffe2

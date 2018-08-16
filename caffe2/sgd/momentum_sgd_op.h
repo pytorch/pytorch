@@ -41,8 +41,8 @@ class MomentumSGDOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   MomentumSGDOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        momentum_(OperatorBase::GetSingleArgument<T>("momentum", 0.0)),
-        nesterov_(OperatorBase::GetSingleArgument<int>("nesterov", 0)) {}
+        momentum_(this->template GetSingleArgument<T>("momentum", 0.0)),
+        nesterov_(this->template GetSingleArgument<int>("nesterov", 0)) {}
 
   bool RunOnDevice() override {
     auto device_type = Context::GetDeviceType();
@@ -81,8 +81,8 @@ class MomentumSGDUpdateOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   MomentumSGDUpdateOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        momentum_(OperatorBase::GetSingleArgument<T>("momentum", 0.0)),
-        nesterov_(OperatorBase::GetSingleArgument<int>("nesterov", 0)) {}
+        momentum_(this->template GetSingleArgument<T>("momentum", 0.0)),
+        nesterov_(this->template GetSingleArgument<int>("nesterov", 0)) {}
 
   bool RunOnDevice() override {
     auto device_type = Context::GetDeviceType();
@@ -121,8 +121,8 @@ class SparseMomentumSGDUpdateOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   SparseMomentumSGDUpdateOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        momentum_(OperatorBase::GetSingleArgument<T>("momentum", 0.0)),
-        nesterov_(OperatorBase::GetSingleArgument<int>("nesterov", 0)) {}
+        momentum_(this->template GetSingleArgument<T>("momentum", 0.0)),
+        nesterov_(this->template GetSingleArgument<int>("nesterov", 0)) {}
 
   bool RunOnDevice() override {
     // Resize [potentially] out-of-place blobs

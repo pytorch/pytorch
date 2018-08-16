@@ -599,6 +599,13 @@ class install(setuptools.command.install.install):
         setuptools.command.install.install.run(self)
 
 
+class rebuild_libtorch(distutils.command.build.build):
+    def run(self):
+        if subprocess.call(['ninja', 'install'], cwd='build') != 0:
+            print("Failed to run `ninja install` for the `rebuild_libtorch` command")
+            sys.exit(1)
+
+
 class clean(distutils.command.clean.clean):
 
     def run(self):
@@ -1023,6 +1030,7 @@ cmdclass = {
     'build_ext': build_ext,
     'build_deps': build_deps,
     'build_module': build_module,
+    'rebuild_libtorch': rebuild_libtorch,
     'develop': develop,
     'install': install,
     'clean': clean,
@@ -1037,9 +1045,6 @@ install_requires = [
     'setuptools',
     'six',
 ] if FULL_CAFFE2 else []
-
-setup_requires = ['pytest-runner'] if FULL_CAFFE2 else []
-tests_require = ['pytest-cov', 'hypothesis'] if FULL_CAFFE2 else []
 
 entry_points = {}
 if FULL_CAFFE2:
@@ -1094,6 +1099,4 @@ if __name__ == '__main__':
             ]
         },
         install_requires=install_requires,
-        setup_requires=setup_requires,
-        tests_require=tests_require,
     )

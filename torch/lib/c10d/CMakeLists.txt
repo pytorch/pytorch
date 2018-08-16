@@ -63,6 +63,9 @@ endfunction()
 if(DISTRIBUTED_NCCL_FOUND)
   option(USE_C10D_NCCL "USE C10D NCCL" ON)
 endif()
+if(MPI_FOUND)
+  option(USE_C10D_MPI "USE C10D MPI" ON)
+endif()
 configure_file(cmake/Def.hpp.in ${CMAKE_BINARY_DIR}/include/c10d/Def.hpp @ONLY)
 
 set(C10D_SRCS
@@ -138,7 +141,7 @@ target_include_directories(c10d PRIVATE ${CMAKE_BINARY_DIR}/include)
 
 install(TARGETS c10d ARCHIVE DESTINATION lib)
 
-option(BUILD_EXAMPLES "Build examples" OFF)
+option(BUILD_EXAMPLES "Build examples" ON)
 if(BUILD_EXAMPLES)
   add_subdirectory(example)
 endif()

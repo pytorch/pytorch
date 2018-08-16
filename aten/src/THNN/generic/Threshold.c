@@ -24,7 +24,7 @@ void THNN_(Threshold_updateOutput)(
   {
     THTensor_(resizeAs)(output, input);
     TH_TENSOR_APPLY2(real, output, real, input,
-      *output_data = (*input_data > threshold) ? *input_data : val;
+      *output_data = (*input_data <= threshold) ? val : *input_data;  // this order propagates NaN
     );
   }
 }
@@ -52,10 +52,10 @@ void THNN_(Threshold_updateGradInput)(
   {
     THTensor_(resizeAs)(gradInput, input);
     TH_TENSOR_APPLY3(real, gradInput, real, gradOutput, real, input,
-      if ((*input_data) > threshold)
-        *gradInput_data = *gradOutput_data;
-      else
+      if ((*input_data) <= threshold)
         *gradInput_data = 0;
+      else
+        *gradInput_data = *gradOutput_data;  // let NaN case pass through here
     );
   }
 }
