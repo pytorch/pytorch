@@ -41,46 +41,46 @@ TORCH_API struct CPUFusionFunction : public torch::jit::FusionFunction {
 //     at::ArrayRef<at::Tensor> inputs
 //   , at::ArrayRef<at::Tensor> outputs);
 
-//   const std::vector<TensorDesc>& outputDescriptors() const {
-//     return output_desc;
-//   }
+  const std::vector<TensorDesc>& outputDescriptors() const {
+    return output_desc;
+  }
 
-// private:
-//   at::Backend backend() const { 
-//     return at::kCPU; 
-//   }
+private:
+  at::Backend backend() const { 
+    return at::kCPU; 
+  }
 
-//   uint64_t get_rand_offset(uint32_t numel) {
-//     return numel;
-//   }
+  uint64_t get_rand_offset(uint32_t numel) {
+    return numel;
+  }
 
-//   // arguments is a list of pointers to the arguments for the compiled CUDA/CPU
-//   // code.
-//   // The format of arguments is suitable for directly passing to a call to
-//   // cuLaunchKernel as the kernel arguments.
-//   // Currently the first argument is a pointer to numel (for passing to
-//   // CUDA code), and the remainder are pointers to the TensorInfo<T> structs
-//   // that compiled code uses to load Tensor data.
-//   // launch_with_tensors handles packing at::Tensors into this arguments array.
-//   // CPU code uses the same convension so that launch_with_tensors can be shared.
-//   void launch_raw(uint32_t numel, void** arguments) {
-//     kernel(numel, arguments);
-//   }
+  // arguments is a list of pointers to the arguments for the compiled CUDA/CPU
+  // code.
+  // The format of arguments is suitable for directly passing to a call to
+  // cuLaunchKernel as the kernel arguments.
+  // Currently the first argument is a pointer to numel (for passing to
+  // CUDA code), and the remainder are pointers to the TensorInfo<T> structs
+  // that compiled code uses to load Tensor data.
+  // launch_with_tensors handles packing at::Tensors into this arguments array.
+  // CPU code uses the same convension so that launch_with_tensors can be shared.
+  void launch_raw(uint32_t numel, void** arguments) {
+    kernel(numel, arguments);
+  }
 
-//   std::unique_ptr<DynamicLibrary> so_lib;
-//   void (*kernel)(uint32_t, void**) = nullptr;
+  std::unique_ptr<DynamicLibrary> so_lib;
+  void (*kernel)(uint32_t, void**) = nullptr;
 
-//   bool has_random;
-//   std::string name;
-//   // We keep these around for debugging
-//   std::string compilation_unit;
-//   std::vector<TensorDesc> input_desc;
-//   std::vector<TensorDesc> output_desc;
+  bool has_random;
+  std::string name;
+  // We keep these around for debugging
+  std::string compilation_unit;
+  std::vector<TensorDesc> input_desc;
+  std::vector<TensorDesc> output_desc;
 
-//   // same size as output_desc, describes whether
-//   // an output is actually a concatenation of
-//   // many subtensors that the fusion group produces
-//   std::vector<ConcatDesc> concat_desc;
+  // same size as output_desc, describes whether
+  // an output is actually a concatenation of
+  // many subtensors that the fusion group produces
+  std::vector<ConcatDesc> concat_desc;
 };
 
 } // namespace cpufuser

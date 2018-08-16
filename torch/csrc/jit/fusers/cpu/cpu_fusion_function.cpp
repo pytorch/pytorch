@@ -12,273 +12,273 @@
 
 namespace torch { namespace jit { namespace cpufuser {
 
-// static const std::string so_template = "/tmp/pytorch_fuserXXXXXX.so";
-// static const std::string cpp_template = "/tmp/pytorch_fuserXXXXXX.cpp";
+static const std::string so_template = "/tmp/pytorch_fuserXXXXXX.so";
+static const std::string cpp_template = "/tmp/pytorch_fuserXXXXXX.cpp";
 
-// // NB: -march=native not supported on PPC64 g++.  It's a bit annoying
-// // to do a configure-style test to decide whether or not the g++
-// // actually supports it or not, so we heuristically use the host
-// // compiler to predict if the runtime compiler supports the option we
-// // want.  This probably won't work if you're cross-compiling.
-// // NB: -march=native is disabled because it has caused problems where
-// // compiler and assembler do not agree on what native instruction they
-// // understand for AVX512. When we need better CPU performance this
-// // optimization can be re-enabled by tracking down the platforms where
-// // this error occurs and only selectively disabling it.
-// static const std::string compile_string =
-//   "\"${cxx}\" -O3 -g "
-// #ifndef __PPC64__
-// //  "-march=native "
-// #endif
-//   "-std=c++11 -fPIC ${fopenmp} -shared \"${cpp_file}\" -o \"${so_file}\" -lm";
+// NB: -march=native not supported on PPC64 g++.  It's a bit annoying
+// to do a configure-style test to decide whether or not the g++
+// actually supports it or not, so we heuristically use the host
+// compiler to predict if the runtime compiler supports the option we
+// want.  This probably won't work if you're cross-compiling.
+// NB: -march=native is disabled because it has caused problems where
+// compiler and assembler do not agree on what native instruction they
+// understand for AVX512. When we need better CPU performance this
+// optimization can be re-enabled by tracking down the platforms where
+// this error occurs and only selectively disabling it.
+static const std::string compile_string =
+  "\"${cxx}\" -O3 -g "
+#ifndef __PPC64__
+//  "-march=native "
+#endif
+  "-std=c++11 -fPIC ${fopenmp} -shared \"${cpp_file}\" -o \"${so_file}\" -lm";
 
-// static void runCompiler(
-//   CPUFusionCompilerConfig& config
-// , const std::string& cpp_file
-// , const std::string& so_file) {
-//   TemplateEnv env;
-//   env.s("cxx", config.cxx);
-//   env.s("fopenmp", config.openmp ? "-fopenmp" : "");
-//   env.s("cpp_file",cpp_file);
-//   env.s("so_file",so_file);
-//   std::string result = format(compile_string,env);
-//   int r = system(result.c_str());
-//   if(config.openmp && r != 0) {
-//     std::cerr << "warning: pytorch jit fuser failed to compile with openmp, trying without it...\n";
-//     config.openmp = false; // disable for future compiles
-//     return runCompiler(config, cpp_file, so_file);
-//   }
-//   JIT_ASSERTM(r == 0, "Failed to compile a fused CPU kernel");
-// }
+static void runCompiler(
+  CPUFusionCompilerConfig& config
+, const std::string& cpp_file
+, const std::string& so_file) {
+  TemplateEnv env;
+  env.s("cxx", config.cxx);
+  env.s("fopenmp", config.openmp ? "-fopenmp" : "");
+  env.s("cpp_file",cpp_file);
+  env.s("so_file",so_file);
+  std::string result = format(compile_string,env);
+  int r = system(result.c_str());
+  if(config.openmp && r != 0) {
+    std::cerr << "warning: pytorch jit fuser failed to compile with openmp, trying without it...\n";
+    config.openmp = false; // disable for future compiles
+    return runCompiler(config, cpp_file, so_file);
+  }
+  JIT_ASSERTM(r == 0, "Failed to compile a fused CPU kernel");
+}
 
-//   // Tries to compress sizes and strides according to cont. Emits the result t
-// // c_sizes, c_strides and throws an error on failure (if can't compress)
-// static void compressContiguous(
-//   at::IntList sizes
-// , at::IntList strides
-// , const std::vector<bool>& cont
-// , uint32_t* c_sizes
-// , uint32_t* c_strides) {
-//   size_t compressed_dims = 0;
-//   size_t cur = 0;
-//   size_t ndim = sizes.size();
-//   while (cur < ndim) {
-//     size_t total_size = sizes[cur];
-//     cur++;
-//     while(cont[cur-1] && cur < ndim) {
-//       JIT_ASSERT(strides[cur-1] == sizes[cur]*strides[cur]);
-//       total_size *= sizes[cur];
-//       cur++;
-//     }
-//    // cur starts pointing at the beginning of run to compress
-//    // cur ends one _after_ the terminating false or end of list.
-//    // total_size is the size of all dimensions [begin,end)
-//    // examples:
-//    // f = not cont.
-//    // t = cont.
-//    // x = don't care, including past end of list
-//    // s = start of cur
-//    // e = end of cur
+  // Tries to compress sizes and strides according to cont. Emits the result t
+// c_sizes, c_strides and throws an error on failure (if can't compress)
+static void compressContiguous(
+  at::IntList sizes
+, at::IntList strides
+, const std::vector<bool>& cont
+, uint32_t* c_sizes
+, uint32_t* c_strides) {
+  size_t compressed_dims = 0;
+  size_t cur = 0;
+  size_t ndim = sizes.size();
+  while (cur < ndim) {
+    size_t total_size = sizes[cur];
+    cur++;
+    while(cont[cur-1] && cur < ndim) {
+      JIT_ASSERT(strides[cur-1] == sizes[cur]*strides[cur]);
+      total_size *= sizes[cur];
+      cur++;
+    }
+   // cur starts pointing at the beginning of run to compress
+   // cur ends one _after_ the terminating false or end of list.
+   // total_size is the size of all dimensions [begin,end)
+   // examples:
+   // f = not cont.
+   // t = cont.
+   // x = don't care, including past end of list
+   // s = start of cur
+   // e = end of cur
 
 
-//    // f x x x
-//    // s e
+   // f x x x
+   // s e
 
-//    //  t f x x
-//    //  s   e
+   //  t f x x
+   //  s   e
 
-//    //  t t f x
-//    //  s     e
+   //  t t f x
+   //  s     e
 
-//     c_sizes[compressed_dims] = total_size;
-//     c_strides[compressed_dims] = strides[cur-1];
-//     compressed_dims++;
-//   }
-//   JIT_ASSERT(!cont.back() || strides.back() == 1);
-// }
+    c_sizes[compressed_dims] = total_size;
+    c_strides[compressed_dims] = strides[cur-1];
+    compressed_dims++;
+  }
+  JIT_ASSERT(!cont.back() || strides.back() == 1);
+}
 
-// /*with type_as not checking type of its input, a fusion group can have non-fp32 tensor as input.
-// Correct code for this case is generated, however, nvrtc does not know how to handle int*_t integer types,
-// so typedefs help it handle those cases*/
+/*with type_as not checking type of its input, a fusion group can have non-fp32 tensor as input.
+Correct code for this case is generated, however, nvrtc does not know how to handle int*_t integer types,
+so typedefs help it handle those cases*/
 
-// auto type_declarations_template = CodeTemplate(R"(
-// typedef ${IndexType} IndexType;
-// template<typename T, size_t N>
-// struct TensorInfo {
-//   T * data;
-//   IndexType sizes[N];
-//   IndexType strides[N];
-// };
-// )");
+auto type_declarations_template = CodeTemplate(R"(
+typedef ${IndexType} IndexType;
+template<typename T, size_t N>
+struct TensorInfo {
+  T * data;
+  IndexType sizes[N];
+  IndexType strides[N];
+};
+)");
 
-// auto cpu_compilation_unit_template = CodeTemplate(R"(
-// #include <cstddef>
-// #include <cstdint>
-// #include <math.h>
-// ${type_declarations}
-// #define OMP_THRESHOLD 100000
-// static void ${kernelName}_kernel(IndexType totalElements, ${formals}) {
-//   #pragma omp parallel for if(totalElements > OMP_THRESHOLD)
-//   for (IndexType linearIndex = 0;
-//         linearIndex < totalElements;
-//         linearIndex += 1) {
-//       // Convert `linearIndex` into an offset of tensor:
-//       ${tensorOffsets}
-//       // calculate the results
-//       ${kernelBody}
-//     }
-// }
-// extern "C"
-// void ${kernelName}(IndexType totalElements, void ** args) {
-//   ${kernelName}_kernel(totalElements ${,argument_loads});
-// }
-// )");
+auto cpu_compilation_unit_template = CodeTemplate(R"(
+#include <cstddef>
+#include <cstdint>
+#include <math.h>
+${type_declarations}
+#define OMP_THRESHOLD 100000
+static void ${kernelName}_kernel(IndexType totalElements, ${formals}) {
+  #pragma omp parallel for if(totalElements > OMP_THRESHOLD)
+  for (IndexType linearIndex = 0;
+        linearIndex < totalElements;
+        linearIndex += 1) {
+      // Convert `linearIndex` into an offset of tensor:
+      ${tensorOffsets}
+      // calculate the results
+      ${kernelBody}
+    }
+}
+extern "C"
+void ${kernelName}(IndexType totalElements, void ** args) {
+  ${kernelName}_kernel(totalElements ${,argument_loads});
+}
+)");
 
-// // curDimIndex = linearId % sizes[i]; // % sizes[i] is not needed for d == 0, because we already guard for numel outside the index calculation
-// // offset += curDimIndex*strides[i]; // *strides[i] is optional if list_is_cont becaause strides.back() == 1
-// // linearId /= sizes[i];
-// auto dim_calc = CodeTemplate(R"(
-// //printf("tensor ${tensor} sizes[${d}] = %d, strides[${d}] = %d\n", ${tensor}.sizes[${d}],${tensor}.strides[${d}]);
-// size_t ${tensor}_dimIndex${d} = ${tensor}_linearIndex ${mod_sizes};
-// ${tensor}_offset += ${tensor}_dimIndex${d} ${times_stride};
-// )");
+// curDimIndex = linearId % sizes[i]; // % sizes[i] is not needed for d == 0, because we already guard for numel outside the index calculation
+// offset += curDimIndex*strides[i]; // *strides[i] is optional if list_is_cont becaause strides.back() == 1
+// linearId /= sizes[i];
+auto dim_calc = CodeTemplate(R"(
+//printf("tensor ${tensor} sizes[${d}] = %d, strides[${d}] = %d\n", ${tensor}.sizes[${d}],${tensor}.strides[${d}]);
+size_t ${tensor}_dimIndex${d} = ${tensor}_linearIndex ${mod_sizes};
+${tensor}_offset += ${tensor}_dimIndex${d} ${times_stride};
+)");
 
-// static void emitIndexingFor(
-//   std::ostream& out
-// , const std::string& tensor
-// , int ndim
-// , bool last_is_cont) {
-//   TemplateEnv env;
-//   env.s("tensor",tensor);
-//   out << format("IndexType ${tensor}_offset = 0;\n",env);
-//   out << format("IndexType ${tensor}_linearIndex = linearIndex;\n",env);
-//   for(int d = ndim - 1; d >= 0; --d) {
-//     env.d("d",d);
-//     env.s("mod_sizes", d > 0 ? format("% ${tensor}.sizes[${d}]",env) : "");
-//     env.s("times_stride",(d < ndim - 1 || !last_is_cont) ?
-//       format("* ${tensor}.strides[${d}]",env) : "");
-//     out << dim_calc.format(env);
-//     if(d > 0) {
-//       out << format("${tensor}_linearIndex /= ${tensor}.sizes[${d}];\n",env);
-//     }
-//   }
-// }
+static void emitIndexingFor(
+  std::ostream& out
+, const std::string& tensor
+, int ndim
+, bool last_is_cont) {
+  TemplateEnv env;
+  env.s("tensor",tensor);
+  out << format("IndexType ${tensor}_offset = 0;\n",env);
+  out << format("IndexType ${tensor}_linearIndex = linearIndex;\n",env);
+  for(int d = ndim - 1; d >= 0; --d) {
+    env.d("d",d);
+    env.s("mod_sizes", d > 0 ? format("% ${tensor}.sizes[${d}]",env) : "");
+    env.s("times_stride",(d < ndim - 1 || !last_is_cont) ?
+      format("* ${tensor}.strides[${d}]",env) : "");
+    out << dim_calc.format(env);
+    if(d > 0) {
+      out << format("${tensor}_linearIndex /= ${tensor}.sizes[${d}];\n",env);
+    }
+  }
+}
 
-// static std::string valueName(Value* n) {
-//   return "n" + std::to_string(n->unique());
-// }
+static std::string valueName(Value* n) {
+  return "n" + std::to_string(n->unique());
+}
 
-// static std::string scalarValue(int64_t v) {
-//   return std::to_string(v);
-// }
+static std::string scalarValue(int64_t v) {
+  return std::to_string(v);
+}
 
-// static std::string scalarValue(double v) {
-//   std::ostringstream out;
-//   out << std::scientific << v << "f";
-//   return out.str();
-// }
+static std::string scalarValue(double v) {
+  std::ostringstream out;
+  out << std::scientific << v << "f";
+  return out.str();
+}
 
-// static const char* scalarTypeName(at::ScalarType type) {
-//   if (type == at::ScalarType::Half) {
-//     return "half";
-//   }
+static const char* scalarTypeName(at::ScalarType type) {
+  if (type == at::ScalarType::Half) {
+    return "half";
+  }
 
-//   switch(type) {
-//     #define DEFINE_CASE(ctype,name,_) case at::ScalarType::name: return #ctype;
-//     AT_FORALL_SCALAR_TYPES_EXCEPT_HALF(DEFINE_CASE)
-//     #undef DEFINE_CASE
-//     default:
-//       throw std::runtime_error("unknown scalar type");
-//   }
-// }
+  switch(type) {
+    #define DEFINE_CASE(ctype,name,_) case at::ScalarType::name: return #ctype;
+    AT_FORALL_SCALAR_TYPES_EXCEPT_HALF(DEFINE_CASE)
+    #undef DEFINE_CASE
+    default:
+      throw std::runtime_error("unknown scalar type");
+  }
+}
 
-// static std::string encodeRHS(Node* n) {
-//   static std::unordered_map<NodeKind, std::string> simple_map_ops = {
-//     // unary
-//     {aten::abs, "absf(${0})"},
-//     {aten::sigmoid, "1.f / (1.f + expf(-${0}))"},
-//     {aten::relu, "${0} < 0 ? 0.f : ${0} "},
-//     {aten::log, "logf(${0})"},
-//     {aten::log10, "log10f(${0})"},
-//     {aten::log1p, "log1pf(${0})"},
-//     {aten::log2,  "log2f(${0})"},
-//     {aten::lgamma, "lgammaf(${0})"},
-//     {aten::exp, "expf(${0})"},
-//     {aten::expm1, "expm1f(${0})"},
-//     {aten::cos, "cosf(${0})"},
-//     {aten::acos, "acosf(${0})"},
-//     {aten::cosh, "coshf(${0})"},
-//     {aten::sin, "sinf(${0})"},
-//     {aten::asin, "asinf(${0})"},
-//     {aten::sinh, "sinhf(${0})"},
-//     {aten::tan, "tanf(${0})"},
-//     {aten::atan, "atanf(${0})"},
-//     {aten::tanh, "tanhf(${0})"},
-//     {aten::sqrt, "sqrtf(${0})"},
-//     {aten::rsqrt, "rsqrtf(${0})"},
-//     {aten::ceil, "ceilf(${0})"},
-//     {aten::floor, "floorf(${0})"},
-//     {aten::round, "roundf(${0})"},
-//     {aten::trunc, "truncf(${0})"},
-//     {aten::frac, "fracf(${0})"},
-//     {aten::reciprocal, "reciprocalf(${0})"},
-//     {aten::neg, "-${0}"},
-//     //simple binary
-//     {aten::atan2, "atan2(${0}, ${1})"},
-//     {aten::min, "fminf(${0}, ${1})"},
-//     {aten::max, "fmaxf(${0}, ${1})"},
+static std::string encodeRHS(Node* n) {
+  static std::unordered_map<NodeKind, std::string> simple_map_ops = {
+    // unary
+    {aten::abs, "absf(${0})"},
+    {aten::sigmoid, "1.f / (1.f + expf(-${0}))"},
+    {aten::relu, "${0} < 0 ? 0.f : ${0} "},
+    {aten::log, "logf(${0})"},
+    {aten::log10, "log10f(${0})"},
+    {aten::log1p, "log1pf(${0})"},
+    {aten::log2,  "log2f(${0})"},
+    {aten::lgamma, "lgammaf(${0})"},
+    {aten::exp, "expf(${0})"},
+    {aten::expm1, "expm1f(${0})"},
+    {aten::cos, "cosf(${0})"},
+    {aten::acos, "acosf(${0})"},
+    {aten::cosh, "coshf(${0})"},
+    {aten::sin, "sinf(${0})"},
+    {aten::asin, "asinf(${0})"},
+    {aten::sinh, "sinhf(${0})"},
+    {aten::tan, "tanf(${0})"},
+    {aten::atan, "atanf(${0})"},
+    {aten::tanh, "tanhf(${0})"},
+    {aten::sqrt, "sqrtf(${0})"},
+    {aten::rsqrt, "rsqrtf(${0})"},
+    {aten::ceil, "ceilf(${0})"},
+    {aten::floor, "floorf(${0})"},
+    {aten::round, "roundf(${0})"},
+    {aten::trunc, "truncf(${0})"},
+    {aten::frac, "fracf(${0})"},
+    {aten::reciprocal, "reciprocalf(${0})"},
+    {aten::neg, "-${0}"},
+    //simple binary
+    {aten::atan2, "atan2(${0}, ${1})"},
+    {aten::min, "fminf(${0}, ${1})"},
+    {aten::max, "fmaxf(${0}, ${1})"},
 
-//     //binary with other
-//     // TODO: some of these ops will not get generated because
-//     // we only work on float inputs/outputs, but they are here to record
-//     // that they are valid mappable ops once we handle more type
-//     {aten::__and__, "${0} && ${1}"},
-//     {aten::__lshift__, "${0} << ${1}"},
-//     {aten::__or__, "${0} || ${1}"},
-//     {aten::__rshift__, "${0} >> ${1}"},
-//     {aten::__xor__, "${0} ^ ${1}"},
-//     {aten::div, "${0} / ${1}"},
-//     {aten::eq, "${0} == ${1}"},
-//     {aten::fmod, "fmodf(${0}, ${1})"},
-//     {aten::ge, "(${0} >= ${1})"},
-//     {aten::gt, "${0} > ${1}"},
-//     {aten::le, "(${0} <= ${1})"},
-//     {aten::lt, "${0} < ${1}"},
-//     {aten::type_as, "(${0})"}, //everything is implicitly convertible to float
-//     {aten::mul, "${0} * ${1}"},
-//     {aten::ne, "${0} != ${1}"},
-//     {aten::remainder, "remainderf(${0}, ${1})"},
-//     {aten::pow, "powf(${0}, ${1})"},
+    //binary with other
+    // TODO: some of these ops will not get generated because
+    // we only work on float inputs/outputs, but they are here to record
+    // that they are valid mappable ops once we handle more type
+    {aten::__and__, "${0} && ${1}"},
+    {aten::__lshift__, "${0} << ${1}"},
+    {aten::__or__, "${0} || ${1}"},
+    {aten::__rshift__, "${0} >> ${1}"},
+    {aten::__xor__, "${0} ^ ${1}"},
+    {aten::div, "${0} / ${1}"},
+    {aten::eq, "${0} == ${1}"},
+    {aten::fmod, "fmodf(${0}, ${1})"},
+    {aten::ge, "(${0} >= ${1})"},
+    {aten::gt, "${0} > ${1}"},
+    {aten::le, "(${0} <= ${1})"},
+    {aten::lt, "${0} < ${1}"},
+    {aten::type_as, "(${0})"}, //everything is implicitly convertible to float
+    {aten::mul, "${0} * ${1}"},
+    {aten::ne, "${0} != ${1}"},
+    {aten::remainder, "remainderf(${0}, ${1})"},
+    {aten::pow, "powf(${0}, ${1})"},
 
-//     //alpha
-//     {aten::add, "${0} + ${2}*${1}"},
-//     {aten::sub, "(${0} - ${2}*${1})"},
-//     {aten::rand_like, "uniform(rnd())"},
+    //alpha
+    {aten::add, "${0} + ${2}*${1}"},
+    {aten::sub, "(${0} - ${2}*${1})"},
+    {aten::rand_like, "uniform(rnd())"},
 
-//     // simple derivatives
-//     {aten::_sigmoid_backward, "${0} * ${1} * (1.f - ${1})"},
-//     {aten::_tanh_backward,    "${0} * (1.f - ${1} * ${1})"},
-//   };
+    // simple derivatives
+    {aten::_sigmoid_backward, "${0} * ${1} * (1.f - ${1})"},
+    {aten::_tanh_backward,    "${0} * (1.f - ${1} * ${1})"},
+  };
 
-//   if (n->kind() == prim::Constant) {
-//     auto val = toIValue(n->output()).value();
-//     if (val.isDouble()) {
-//       return scalarValue(val.toDouble());
-//     } else {
-//       JIT_ASSERT(val.isInt());
-//       return scalarValue(val.toInt());
-//     }
-//   }
+  if (n->kind() == prim::Constant) {
+    auto val = toIValue(n->output()).value();
+    if (val.isDouble()) {
+      return scalarValue(val.toDouble());
+    } else {
+      JIT_ASSERT(val.isInt());
+      return scalarValue(val.toInt());
+    }
+  }
 
-//   TemplateEnv env;
-//   size_t i = 0;
-//   for(auto in : n->inputs()) {
-//     env.s(std::to_string(i++), valueName(in));
-//   }
+  TemplateEnv env;
+  size_t i = 0;
+  for(auto in : n->inputs()) {
+    env.s(std::to_string(i++), valueName(in));
+  }
 
-//   const auto& str = simple_map_ops.at(n->kind());
-//   return format(str, env);
-// }
+  const auto& str = simple_map_ops.at(n->kind());
+  return format(str, env);
+}
 
 // static std::pair<std::vector<ConcatDesc>, bool> emitCompilationUnit(
 //     std::ostream& out,
