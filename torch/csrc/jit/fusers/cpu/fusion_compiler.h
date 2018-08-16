@@ -32,36 +32,34 @@ TORCH_API struct CPUFusionCompiler {
 
   CPUFusionCompiler();
 
-  // CPUFusionCompiler();
+  // ignores types in graph, and uses specific contiguity annotations
+  std::shared_ptr<CPUFusionFunction> getOrCompile(
+    AnnotatedGraph& agraph);
 
-//   // ignores types in graph, and uses specific contiguity annotations
-//   std::shared_ptr<CPUFusionFunction> getOrCompile(
-//     AnnotatedGraph& agraph);
+  // uses inputs/outputs as examples to infer continuity, does not run the graph
+  std::shared_ptr<CPUFusionFunction> getOrCompile(
+    Graph& graph
+  , int device
+  , at::ArrayRef<at::Tensor> inputs
+  , at::ArrayRef<at::Tensor> outputs);
 
-//   // uses inputs/outputs as examples to infer continuity, does not run the graph
-//   std::shared_ptr<CPUFusionFunction> getOrCompile(
-//     Graph& graph
-//   , int device
-//   , at::ArrayRef<at::Tensor> inputs
-//   , at::ArrayRef<at::Tensor> outputs);
+// debugging function that lets you do everything from compilation to execution
+  // in one step.
+  // this should not be used in the hot path of execution because it has to serialize
+  // the graph each time
+  void debugLaunchGraph(
+    Graph& graph
+  , int device
+  , at::ArrayRef<at::Tensor> inputs
+  , at::ArrayRef<at::Tensor> outputs);
 
-// // debugging function that lets you do everything from compilation to execution
-//   // in one step.
-//   // this should not be used in the hot path of execution because it has to serialize
-//   // the graph each time
-//   void debugLaunchGraph(
-//     Graph& graph
-//   , int device
-//   , at::ArrayRef<at::Tensor> inputs
-//   , at::ArrayRef<at::Tensor> outputs);
-
-//   bool canCompileOnCPU() const { return config_.cxx.size() > 0; }
+  bool canCompileOnCPU() const { return config_.cxx.size() > 0; }
 
 private:
   CPUFusionCompilerConfig config_;
-//   std::unordered_map<
-//     std::string
-//   , std::shared_ptr<CPUFusionFunction>> cache;
+  std::unordered_map<
+    std::string
+  , std::shared_ptr<CPUFusionFunction>> cache;
 };
 
 TORCH_API CPUFusionCompiler& getCompiler();

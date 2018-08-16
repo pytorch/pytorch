@@ -41,45 +41,45 @@ CPUFusionCompiler::CPUFusionCompiler() {
   config_.debug = debug_env && atoi(debug_env) != 0;
 }
 
-// std::shared_ptr<CPUFusionFunction> CPUFusionCompiler::getOrCompile(
-//   AnnotatedGraph& agraph) {
-//   std::stringstream key;
-//   key << *agraph.graph << "\n";
-//   key << "device " << agraph.device << "\n";
-//   for (auto& i : agraph.input_desc) key << i << "\n";
-//   for (auto& i : agraph.output_desc) key << i << "\n";
-//   std::string key_ = key.str();
+std::shared_ptr<CPUFusionFunction> CPUFusionCompiler::getOrCompile(
+  AnnotatedGraph& agraph) {
+  std::stringstream key;
+  key << *agraph.graph << "\n";
+  key << "device " << agraph.device << "\n";
+  for (auto& i : agraph.input_desc) key << i << "\n";
+  for (auto& i : agraph.output_desc) key << i << "\n";
+  std::string key_ = key.str();
 
-//   auto it = cache.find(key_);
-//   if (it == cache.end()) {
-//     JIT_ASSERT(agraph.device == kCPUDevice);
-//     JIT_ASSERT(canCompileOnCPU());
-//     std::string name = "kernel_" + std::to_string(cache.size());
-//     CPUFusionFunction* raw_func = new CPUFusionFunction(name, agraph, config_);
-//     it = cache.emplace(key_, std::shared_ptr<CPUFusionFunction>(raw_func)).first;
-//   }
-//   return it->second;
-// }
+  auto it = cache.find(key_);
+  if (it == cache.end()) {
+    JIT_ASSERT(agraph.device == kCPUDevice);
+    JIT_ASSERT(canCompileOnCPU());
+    std::string name = "kernel_" + std::to_string(cache.size());
+    CPUFusionFunction* raw_func = new CPUFusionFunction(name, agraph, config_);
+    it = cache.emplace(key_, std::shared_ptr<CPUFusionFunction>(raw_func)).first;
+  }
+  return it->second;
+}
 
-// std::shared_ptr<CPUFusionFunction> CPUFusionCompiler::getOrCompile(
-//   Graph& graph
-// , int device
-// , at::ArrayRef<at::Tensor> inputs
-// , at::ArrayRef<at::Tensor> outputs) {
-//   AnnotatedGraph agraph(graph, device);
-//   for(auto& i : inputs) agraph.input_desc.emplace_back(i);
-//   for(auto& i : outputs) agraph.output_desc.emplace_back(i);
-//   return getOrCompile(agraph);
-// }
+std::shared_ptr<CPUFusionFunction> CPUFusionCompiler::getOrCompile(
+  Graph& graph
+, int device
+, at::ArrayRef<at::Tensor> inputs
+, at::ArrayRef<at::Tensor> outputs) {
+  AnnotatedGraph agraph(graph, device);
+  for(auto& i : inputs) agraph.input_desc.emplace_back(i);
+  for(auto& i : outputs) agraph.output_desc.emplace_back(i);
+  return getOrCompile(agraph);
+}
 
-// void CPUFusionCompiler::debugLaunchGraph(
-//   Graph& graph
-// , int device
-// , at::ArrayRef<at::Tensor> inputs
-// , at::ArrayRef<at::Tensor> outputs) {
-//   auto func = getOrCompile(graph, device, inputs, outputs);
-//   func->launch_with_tensors(inputs, outputs);
-// }
+void CPUFusionCompiler::debugLaunchGraph(
+  Graph& graph
+, int device
+, at::ArrayRef<at::Tensor> inputs
+, at::ArrayRef<at::Tensor> outputs) {
+  auto func = getOrCompile(graph, device, inputs, outputs);
+  func->launch_with_tensors(inputs, outputs);
+}
 
 } // namespace cpufuser
 } // namespace jit

@@ -403,64 +403,64 @@ static std::string encodeRHS(Node* n) {
 //   JIT_ASSERT(r == 0);
 // }
 
-// CPUFusionFunction::CPUFusionFunction(
-//   const std::string& name
-// , AnnotatedGraph& agraph
-// , CPUFusionCompilerConfig& config)
-// : name{name}, input_desc{agraph.input_desc}, output_desc{agraph.output_desc} {
-//   TempFile so_file(so_template, 3);
-//   TempFile cpp_file(cpp_template, 4);
+CPUFusionFunction::CPUFusionFunction(
+  const std::string& name
+, AnnotatedGraph& agraph
+, CPUFusionCompilerConfig& config)
+: name{name}, input_desc{agraph.input_desc}, output_desc{agraph.output_desc} {
+  TempFile so_file(so_template, 3);
+  TempFile cpp_file(cpp_template, 4);
 
-//   std::stringstream cu;
-//   auto ret = emitCompilationUnit(cu, name, agraph, false);
-//   concat_desc = std::move(ret.first);
-//   has_random = ret.second;
-//   JIT_ASSERT(!has_random);
-//   compilation_unit = cu.str();
-//   cpp_file.write(compilation_unit);
-//   cpp_file.sync();
-//   runCompiler(config, cpp_file.name(), so_file.name());
-//   if(config.debug) disas(so_file.name());
-//   so_lib.reset(new DynamicLibrary(so_file.name().c_str()));
-//   #pragma GCC diagnostic ignored "-Wpedantic"
-//     kernel = reinterpret_cast<void(*)(uint32_t, void**)>(so_lib->sym(name.c_str()));
-//   #pragma GCC diagnostic pop
-// }
+  // std::stringstream cu;
+  // auto ret = emitCompilationUnit(cu, name, agraph, false);
+  // concat_desc = std::move(ret.first);
+  // has_random = ret.second;
+  // JIT_ASSERT(!has_random);
+  // compilation_unit = cu.str();
+  // cpp_file.write(compilation_unit);
+  // cpp_file.sync();
+  // runCompiler(config, cpp_file.name(), so_file.name());
+  // if(config.debug) disas(so_file.name());
+  // so_lib.reset(new DynamicLibrary(so_file.name().c_str()));
+  // #pragma GCC diagnostic ignored "-Wpedantic"
+  //   kernel = reinterpret_cast<void(*)(uint32_t, void**)>(so_lib->sym(name.c_str()));
+  // #pragma GCC diagnostic pop
+}
 
-// void CPUFusionFunction::launch_with_tensors(
-//   at::ArrayRef<at::Tensor> inputs
-// , at::ArrayRef<at::Tensor> outputs) {
-//   at::DeviceGuard device_guard(inputs);
-//   JIT_ASSERT(inputs.size() == input_desc.size());
-//   JIT_ASSERT(outputs.size() == output_desc.size());
-//   size_t flat_outputs_size = 0;
-//   for(auto& c : concat_desc)
-//     flat_outputs_size += c.nSubtensors;
-//   // XXX: this code assumes that inputs are 32-bit addressable
-//   // XXX: this code assumes that all inputs are of the same size
-//   JIT_ASSERT(inputs[0].numel() <= std::numeric_limits<uint32_t>::max());
-//   uint32_t numel = inputs[0].numel();
-//   at::IntList map_size = inputs[0].sizes();
-//   // Compute the storage needed to store TensorInfo structs for inputs and outputs.
-//   size_t uncompressedDim = input_desc.at(0).contiguity.size();
-//   size_t maxPossibleTensorInfoSize = sizeof(TensorInfo) + 2 * sizeof(uint32_t) * uncompressedDim;
-//   size_t maxPossibleBufferSize = maxPossibleTensorInfoSize * (inputs.size() + flat_outputs_size);
-//   std::vector<char> buffer(maxPossibleBufferSize);
-//   char* buffer_next = buffer.data();
-//   // A vector of arguments to the kernel. It's (numel, *input_descs, *output_descs)
-//   std::vector<void*> arguments;
-//   arguments.reserve(3 + inputs.size() + flat_outputs_size);
-//   // Asserts that t's dims can be compressed in the same way as in desc
-//   // (that's what the kernel assumes), and appends it to the arguments vector.
-//   auto addTensorInfo = [&](TensorDesc& desc, const at::Tensor& t) {
-//     size_t nDim = desc.nDim(); // NOTE: this is the compressed dim
-//     JIT_ASSERT(nDim <= uncompressedDim); // We'd overflow the space otherwise
-//     auto ti = reinterpret_cast<TensorInfo*>(buffer_next);
-//     ti->data = t.data_ptr();
-//     compressContiguous(t.sizes(), t.strides(), desc.contiguity, ti->sizes(nDim), ti->strides(nDim));
-//     buffer_next += maxPossibleTensorInfoSize;
-//     arguments.push_back(ti);
-//   };
+void CPUFusionFunction::launch_with_tensors(
+  at::ArrayRef<at::Tensor> inputs
+, at::ArrayRef<at::Tensor> outputs) {
+  // at::DeviceGuard device_guard(inputs);
+  // JIT_ASSERT(inputs.size() == input_desc.size());
+  // JIT_ASSERT(outputs.size() == output_desc.size());
+  // size_t flat_outputs_size = 0;
+  // for(auto& c : concat_desc)
+  //   flat_outputs_size += c.nSubtensors;
+  // // XXX: this code assumes that inputs are 32-bit addressable
+  // // XXX: this code assumes that all inputs are of the same size
+  // JIT_ASSERT(inputs[0].numel() <= std::numeric_limits<uint32_t>::max());
+  // uint32_t numel = inputs[0].numel();
+  // at::IntList map_size = inputs[0].sizes();
+  // // Compute the storage needed to store TensorInfo structs for inputs and outputs.
+  // size_t uncompressedDim = input_desc.at(0).contiguity.size();
+  // size_t maxPossibleTensorInfoSize = sizeof(TensorInfo) + 2 * sizeof(uint32_t) * uncompressedDim;
+  // size_t maxPossibleBufferSize = maxPossibleTensorInfoSize * (inputs.size() + flat_outputs_size);
+  // std::vector<char> buffer(maxPossibleBufferSize);
+  // char* buffer_next = buffer.data();
+  // // A vector of arguments to the kernel. It's (numel, *input_descs, *output_descs)
+  // std::vector<void*> arguments;
+  // arguments.reserve(3 + inputs.size() + flat_outputs_size);
+  // // Asserts that t's dims can be compressed in the same way as in desc
+  // // (that's what the kernel assumes), and appends it to the arguments vector.
+  // auto addTensorInfo = [&](TensorDesc& desc, const at::Tensor& t) {
+  //   size_t nDim = desc.nDim(); // NOTE: this is the compressed dim
+  //   JIT_ASSERT(nDim <= uncompressedDim); // We'd overflow the space otherwise
+  //   auto ti = reinterpret_cast<TensorInfo*>(buffer_next);
+  //   ti->data = t.data_ptr();
+  //   compressContiguous(t.sizes(), t.strides(), desc.contiguity, ti->sizes(nDim), ti->strides(nDim));
+  //   buffer_next += maxPossibleTensorInfoSize;
+  //   arguments.push_back(ti);
+  // };
 
 //   arguments.push_back(&numel);
 //   for (size_t i = 0; i < input_desc.size(); ++i)
@@ -489,20 +489,20 @@ static std::string encodeRHS(Node* n) {
 //   }
 
 //   launch_raw(numel, arguments.data());
-// }
+}
 
-// void CPUFusionFunction::launch(
-//   at::ArrayRef<at::Tensor> inputs
-// , std::vector<at::Tensor>& outputs) {
-//   at::DeviceGuard guard(inputs.back());
-//   outputs.clear();
-//   outputs.reserve(outputDescriptors().size());
-//   for (auto& od : outputDescriptors()) {
-//     outputs.push_back(torch::getType(backend(),od.scalar_type).tensor());
-//   }
+void CPUFusionFunction::launch(
+  at::ArrayRef<at::Tensor> inputs
+, std::vector<at::Tensor>& outputs) {
+  // at::DeviceGuard guard(inputs.back());
+  // outputs.clear();
+  // outputs.reserve(outputDescriptors().size());
+  // for (auto& od : outputDescriptors()) {
+  //   outputs.push_back(torch::getType(backend(),od.scalar_type).tensor());
+  // }
 
-//   launch_with_tensors(inputs, outputs);
-// }
+  // launch_with_tensors(inputs, outputs);
+}
 
 } // namespace cpufuser
 } // namespace jit
