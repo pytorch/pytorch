@@ -40,13 +40,6 @@ struct CUDAEvent {
   // Constructors
   CUDAEvent(unsigned int flags = DEFAULT_FLAGS)
     : internals_(detail::CUDAEvent_create(flags)) {}
-  /* implicit */ CUDAEvent(CUDAEventInternals* internals, bool retain = false)
-    : internals_{internals} {
-    AT_ASSERT(internals_);
-    if (retain) {
-      detail::CUDAEvent_retain(internals_);
-    }
-  }
 
   ~CUDAEvent() { detail::CUDAEvent_uncheckedFree(internals_); }
 

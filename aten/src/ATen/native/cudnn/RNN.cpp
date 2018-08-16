@@ -1111,6 +1111,10 @@ DropoutState& get_dropout_state(const Type& tp, double dropout_p, bool train) {
     int64_t seed = at::empty({}, at::kLong).random_().toCLong();
     state.buffer = at::_cudnn_init_dropout_state(
       tp.toScalarType(at::kByte), dropout_p, train, seed);
+    // NB: This event will be already constructed by now, but CUDA actually binds the event
+    // to a device at creation time, and all events in the cache initially are assigned to
+    // the one that was active when this function is called for the first time.
+    state.event = cuda::CUDAEvent{};
   }
   return state;
 }
