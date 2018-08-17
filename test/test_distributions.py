@@ -3180,6 +3180,7 @@ class TestKL(TestCase):
                                   MultivariateNormal(loc[1], scale_tril=scale_tril[1]))
         self.assertEqual(expected_kl, actual_kl)
 
+    @skipIfRocm
     def test_kl_lowrank_multivariate_normal(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         n = 5  # Number of tests for lowrank_multivariate_normal
@@ -3272,6 +3273,7 @@ class TestKL(TestCase):
                     'Actual {}'.format(kl.shape),
                 ]))
 
+    @skipIfRocm
     def test_entropy_monte_carlo(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         for Dist, params in EXAMPLES:
