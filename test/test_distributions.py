@@ -740,6 +740,7 @@ class TestDistributions(TestCase):
                                 msg='{} example {}/{}, .rsample() does not require grad'.format(
                                     Dist.__name__, i + 1, len(params)))
 
+    @skipIfRocm
     def test_enumerate_support_type(self):
         for Dist, params in EXAMPLES:
             for i, param in enumerate(params):
@@ -2146,6 +2147,7 @@ class TestDistributions(TestCase):
             x = Beta(Tensor([1e-6]), Tensor([1e-6])).sample()[0]
             self.assertTrue(np.isfinite(x) and x > 0, 'Invalid Beta.sample(): {}'.format(x))
 
+    @skipIfRocm
     def test_independent_shape(self):
         for Dist, params in EXAMPLES:
             for i, param in enumerate(params):
