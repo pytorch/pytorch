@@ -3154,6 +3154,7 @@ class TestKL(TestCase):
                 'Actual (analytic): {}'.format(actual),
             ]))
 
+    @skipIfRocm
     def test_kl_multivariate_normal_batched(self):
         b = 7  # Number of batches
         loc = [torch.randn(b, 3) for _ in range(0, 2)]
@@ -3165,6 +3166,7 @@ class TestKL(TestCase):
                                   MultivariateNormal(loc[1], scale_tril=scale_tril[1]))
         self.assertEqual(expected_kl, actual_kl)
 
+    @skipIfRocm
     def test_kl_multivariate_normal_batched_broadcasted(self):
         b = 7  # Number of batches
         loc = [torch.randn(b, 3) for _ in range(0, 2)]
