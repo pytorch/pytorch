@@ -42,6 +42,21 @@ namespace {
   }
 }
 
+// N0 -> MyConv -> N1
+TEST(BackendCuttingTest, unit) {
+  caffe2::NetDef net;
+  AddConv(&net, 0);
+  net.add_external_input("N0");
+  net.add_external_input("W0");
+  net.add_external_input("b0");
+  net.add_external_output("N1");
+  auto net_opt = caffe2::opt::OptimizeForBackend(net, Supports, Transform);
+  EXPECT_EQ(1, net_opt.op_size());
+  EXPECT_EQ(1, net_opt.external_input_size());
+  EXPECT_EQ(1, net_opt.external_output_size());
+}
+
+
 // X -> CopyIn -> MyConv -> MyConv -> CopyOut -> Y
 TEST(BackendCuttingTest, line) {
   caffe2::NetDef net;
