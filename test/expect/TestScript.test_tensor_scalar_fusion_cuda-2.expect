@@ -1,0 +1,8 @@
+graph(%x : Float(2, 2)
+      %z : Float()) {
+  %2 : int = prim::TensorToNum(%z)
+  %3 : int = prim::Constant[value=1]()
+  %y : Dynamic = aten::add(%x, %2, %3)
+  %5 : Dynamic = aten::mul(%x, %y)
+  return (%5);
+}

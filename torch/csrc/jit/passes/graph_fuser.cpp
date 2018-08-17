@@ -87,6 +87,47 @@ bool isSimpleMap(Node *node) {
   return true;
 }
 
+enum class DeviceType { Unknown, AnyDevice, CPU, CUDA };
+
+struct Device {
+
+  DeviceType type() {
+    return type_;
+  }
+
+  int index() {
+    JIT_ASSERT(can_have_index(type_));
+    return index_;
+  }
+
+  static Device fromIndex(int index) {
+    JIT_ASSERT(index >= kCPUDevice);
+    if (index == kCPUDevice) {
+      return Device(DeviceType::CPU, index);
+    }
+    return Device(DeviceType::CUDA, index);
+  }
+
+  static Device AnyDevice() {
+    return Device(DeviceType::AnyDevice, 0);
+  }
+
+  static Device Unknown() {
+    return Device(DeviceType::Unknown, 0);
+  }
+
+private:
+  DeviceType type_;
+  int index_;
+
+  Device(DeviceType type, int index)
+  : type_(type), index_(index) {}
+
+  bool can_have_index(DeviceType type) {
+    return type == DeviceType::CPU || type == DeviceType::CUDA;
+  }
+};
+
 
 struct GraphFuser {
   Block * block;
@@ -101,15 +142,19 @@ struct GraphFuser {
   GraphFuser(Block * block)
   : block(block) {}
 
-  at::optional<int> getDevice(Node * node) {
+  Device getDevice(Node * node) {
     if(node->kind() == prim::FusionGroup) {
-      return node->i(attr::device);
+      return Device::fromIndex(node->i(attr::device));
     }
     if(auto tt = node->output()->type()->cast<TensorType>()) {
-      return tt->device();
+      return Device::fromIndex(tt->device());
     }
-    return at::nullopt;
+    if (node->output()->type()->isSubtypeOf(NumberType::get())) {
+      return Device::AnyDevice();
+    }
+    return Device::Unknown();
   }
+
   // TODO: the fusion compiler has a lot of float-specific codegen
   // so for now we only consider nodes that operate on floating point numbers
   // and half values when running on a GPU with sufficient CUDA arch
@@ -153,23 +198,53 @@ struct GraphFuser {
     return true;
   }
 
+  value_list tensorInputs(Node * node) {
+    return filter(node->inputs(), [](Value * v) {
+      return v->type()->isSubtypeOf(DynamicType::get());
+    });
+  }
 
   bool isFusable(Node * node) {
     if (node->owningBlock() != block) return false;
     if (node->kind() == prim::FusionGroup) return true;
     if (!isSimpleMap(node)) return false;
 
-    if (node->matches("aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor", /*const=*/attr::alpha)) {
-      std::vector<Value*> inputs {node->namedInput(attr::self), node->namedInput(attr::other)};
+    if (node->matches("aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
+          /*const=*/attr::alpha) ||
+        node->matches("aten::add(Tensor self, Scalar other, Scalar alpha) -> Tensor",
+          /*const=*/{attr::other, attr::alpha}) ||
+        node->matches("aten::add(Scalar other, Tensor self) -> Tensor", /*const=*/attr::other) ||
+        node->matches("aten::sub(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
+          /*const=*/attr::alpha) ||
+        node->matches("aten::sub(Tensor self, Scalar other, Scalar alpha) -> Tensor",
+          /*const=*/{attr::other, attr::alpha}) ||
+        node->matches("aten::sub(Scalar other, Tensor self) -> Tensor", /*const=*/attr::other) ||
+        node->matches("aten::mul(Tensor self, Scalar other) -> Tensor", /*const=*/attr::other) ||
+        node->matches("aten::mul(Scalar other, Tensor self) -> Tensor", /*const=*/attr::other) ||
+        node->matches("aten::div(Tensor self, Scalar other) -> Tensor", /*const=*/attr::other) ||
+        node->matches("aten::div(Scalar other, Tensor self) -> Tensor", /*const=*/attr::other)) {
+      auto inputs = tensorInputs(node);
       return areTensorsOfSameShape(inputs) && haveSupportedType(inputs);
-    } else if (node->matches("aten::lt(Tensor self, Tensor other) -> Tensor") ||
-               node->matches("aten::le(Tensor self, Tensor other) -> Tensor") ||
-               node->matches("aten::gt(Tensor self, Tensor other) -> Tensor") ||
-               node->matches("aten::ge(Tensor self, Tensor other) -> Tensor") ||
-               node->matches("aten::eq(Tensor self, Tensor other) -> Tensor") ||
-               node->matches("aten::ne(Tensor self, Tensor other) -> Tensor")) {
+    }
+    else if (
+        node->matches("aten::lt(Tensor self, Tensor other) -> Tensor") ||
+        node->matches("aten::lt(Tensor self, Scalar other) -> Tensor", /*const=*/attr::other) ||
+        node->matches("aten::lt(Scalar other, Tensor self) -> Tensor", /*const=*/attr::other) ||
+        node->matches("aten::le(Tensor self, Tensor other) -> Tensor") ||
+        node->matches("aten::le(Tensor self, Scalar other) -> Tensor", /*const=*/attr::other) ||
+        node->matches("aten::le(Scalar other, Tensor self) -> Tensor", /*const=*/attr::other) ||
+        node->matches("aten::ge(Tensor self, Tensor other) -> Tensor") ||
+        node->matches("aten::ge(Tensor self, Scalar other) -> Tensor", /*const=*/attr::other) ||
+        node->matches("aten::ge(Scalar other, Tensor self) -> Tensor", /*const=*/attr::other) ||
+        node->matches("aten::eq(Tensor self, Tensor other) -> Tensor") ||
+        node->matches("aten::eq(Tensor self, Scalar other) -> Tensor", /*const=*/attr::other) ||
+        node->matches("aten::eq(Scalar other, Tensor self) -> Tensor", /*const=*/attr::other) ||
+        node->matches("aten::ne(Tensor self, Tensor other) -> Tensor") ||
+        node->matches("aten::ne(Tensor self, Scalar other) -> Tensor", /*const=*/attr::other) ||
+        node->matches("aten::ne(Scalar other, Tensor self) -> Tensor", /*const=*/attr::other)) {
       // comparison operators produce Byte type, and it's ok, check only inputs
-      return areTensorsOfSameShape(node->inputs()) && haveSupportedType(node->inputs());
+      auto inputs = tensorInputs(node);
+      return areTensorsOfSameShape(inputs) && haveSupportedType(inputs);
     } else if (node->matches("aten::type_as(Tensor self, Tensor other) -> Tensor")) {
       // type_as can have different input types as long as output is float, check only output
       return haveSupportedType(node->outputs());
@@ -249,18 +324,53 @@ struct GraphFuser {
     return isFusableOnlyAsExitNode(node);
   }
 
+  // unknown (u) any (a) cpu (c) cuda (g) compatibility:
+  // x u a c g   y = yes
+  // u . . . .   . = no
+  // a . n y y
+  // c . y y .
+  // g . y . y
+  bool compatibleDevices(Node * consumer, Value * producer) {
+    auto consumer_device = getDevice(consumer);
+    auto producer_device = getDevice(producer->node());
+
+    if (consumer_device.type() == DeviceType::Unknown ||
+        producer_device.type() == DeviceType::Unknown) {
+      return false;
+    }
+
+    if (consumer_device.type() == DeviceType::CUDA &&
+        producer_device.type() == DeviceType::CPU) {
+      return false;
+    } else if (producer_device.type() == DeviceType::CUDA &&
+               consumer_device.type() == DeviceType::CPU) {
+      return false;
+    } else if (producer_device.type() == DeviceType::AnyDevice &&
+               consumer_device.type() == DeviceType::AnyDevice) {
+      // XXX: This case means we're fusing operations on non-constant numbers.
+      // The graph fuser doesn't support this at the moment (#9940).
+      return false;
+    }
+
+    // At this point, the devices are matched. Last thing to check
+    // is that if we're compiling on CPU, the fusion compiler works.
+    if (consumer_device.type() == DeviceType::CPU ||
+        producer_device.type() == DeviceType::CPU) {
+      return sharedFusionCompiler().canCompileOnCPU();
+    }
+    return true;
+  }
+
   bool shouldFuse(Node * consumer, Value * producer) {
     // this handles cases where producer can be moved _into_ the fusion group of consumer.
     // TODO: extend to fusion of consumer into _producer's_ fusion blob
     // if the consumer allInputsAreThisProducer(consumer,producer)
     // we can move the consumer up into the producer.
     // but this requires better handling of merging fusion groups so it is not done now
-    at::optional<int> consumer_device = getDevice(consumer);
     Node *real_consumer = consumer->kind() == aten::cat ? consumer->namedInput(attr::tensors)->node() : consumer;
     return isFusable(producer->node()) &&
       allUsersAreThisConsumerOrOccurAfterIt(real_consumer, producer) &&
-      consumer_device && consumer_device == getDevice(producer->node()) &&
-      (*consumer_device != kCPUDevice || sharedFusionCompiler().canCompileOnCPU());
+      compatibleDevices(consumer, producer);
   }
 
   // insert a producer node into a consuming fusion group.
@@ -338,7 +448,7 @@ struct GraphFuser {
       inputs_map[input] = subgraph.inputs()[i++];
     }
     // add n's inputs to the fusion group's input list if we don't already have them
-    Node * insert_after = nullptr;
+    WithInsertPoint guard(*subgraph.nodes().begin());
     for (auto input : n->inputs()) {
       if (inputs_map.count(input) == 0) {
         if (input->type()->isSubtypeOf(DynamicType::get())) {
@@ -352,8 +462,7 @@ struct GraphFuser {
           // cases we inline the constants directly in the body of the fused group.
           JIT_ASSERT(input->node()->kind() == prim::Constant);
           Node * in_const = subgraph.createClone(input->node(), [](Value*) -> Value* { throw std::runtime_error("unexpected input"); });
-          subgraph.prependNode(in_const);
-          insert_after = in_const;
+          subgraph.insertNode(in_const);
           inputs_map[input] = in_const->output();
         }
       }
@@ -374,13 +483,13 @@ struct GraphFuser {
       subgraph.inputs()[p]->replaceAllUsesWith(in_graph->output());
       subgraph.eraseInput(p);
     }
-    return insert_after ? in_graph->insertAfter(insert_after) : subgraph.prependNode(in_graph);
+    return subgraph.insertNode(in_graph);
   }
 
   // turn consumer node n into a fusion group with just n inside
   // to prepare for fusion and replace uses of n with the new group
   Node * createSingletonFusionGroup(Node * n) {
-    auto group = block->owningGraph()->createFusionGroup(getDevice(n).value());
+    auto group = block->owningGraph()->createFusionGroup(getDevice(n).index());
     // propogate position information for the new node so we can always
     // have a valid mapping
     topological_index[group] = topological_index[n];
