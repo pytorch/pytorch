@@ -751,6 +751,7 @@ class TestDistributions(TestCase):
                 except NotImplementedError:
                     pass
 
+    @skipIfRocm
     def test_lazy_property_grad(self):
         x = torch.randn(1, requires_grad=True)
 
@@ -1635,6 +1636,7 @@ class TestDistributions(TestCase):
         self.assertEqual(m1.precision_matrix, m2.precision_matrix)
         self.assertEqual(m1.entropy(), m2.entropy())
 
+    @skipIfRocm
     def test_lowrank_multivariate_normal_moments(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         mean = torch.randn(5)
