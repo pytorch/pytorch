@@ -389,9 +389,9 @@ class TestDataLoader(TestCase):
         num_workers = 6
         dataset = SynchronizedSeedDataset(num_workers, num_workers)
         dataloader = DataLoader(dataset, batch_size=1, num_workers=num_workers)
-        seeds = set()
+        seeds = []
         for batch in dataloader:
-            seeds.add(id(batch[0]))
+            seeds.append(batch[0])
         self.assertEqual(len(seeds), num_workers)
 
     def test_worker_init_fn(self):
