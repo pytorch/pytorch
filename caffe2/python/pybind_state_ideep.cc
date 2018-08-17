@@ -112,8 +112,9 @@ public:
     auto g = MakeGuard([&]() { Py_XDECREF(array); });
     const auto npy_type = PyArray_TYPE(array);
     const TypeMeta &meta = NumpyTypeToCaffe(npy_type);
-    CAFFE_ENFORCE(
-        meta.id() != TypeIdentifier::uninitialized(),
+    CAFFE_ENFORCE_NE(
+        meta.id(),
+        TypeIdentifier::uninitialized(),
         "This numpy data type is not supported: ",
         PyArray_TYPE(array), ".");
 
@@ -126,32 +127,25 @@ public:
     }
 
     switch (npy_type) {
-    case NPY_OBJECT:
-    case NPY_UNICODE:
-      CAFFE_THROW("IDeep doesn't support string");
-      break;
-    default:
-      auto type = type_transform(meta);
-      if (tensor->get_dims() != adims || type != tensor->get_data_type()) {
-        tensor->resize(adims, type);
-      }
-      tensor->reorder_from(adims, type,
-                           static_cast<void *>(PyArray_DATA(array)));
+      case NPY_OBJECT:
+      case NPY_UNICODE:
+        CAFFE_THROW("IDeep doesn't support string");
+        break;
+      default:
+        auto type = type_transform(meta);
+        if (tensor->get_dims() != adims || type != tensor->get_data_type()) {
+          tensor->resize(adims, type);
+        }
+        tensor->reorder_from(adims, type,
+                             static_cast<void *>(PyArray_DATA(array)));
     }
   }
 
   bool ZeroDim(PyArrayObject *array) {
     int ndim = PyArray_NDIM(array);
     npy_intp *npy_dims = PyArray_DIMS(array);
-    if (ndim == 0) {
-      return true;
-    }
-    for (int i = 0; i < ndim; i++) {
-      if (npy_dims[i] == 0) {
-        return true;
-      }
-    }
-    return false;
+    return ndim == 0 ||
+      std::find(npy_dims, npy_dims + ndim, 0) != npy_dims + ndim;
   }
 
   void Feed(const DeviceOption &option, PyArrayObject *original_array,

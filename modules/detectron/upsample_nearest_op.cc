@@ -16,8 +16,8 @@
 
 #include "upsample_nearest_op.h"
 #ifdef CAFFE2_USE_IDEEP
-#include <caffe2/ideep/operators/operator_fallback_ideep.h>
-#include <caffe2/ideep/utils/ideep_operator.h>
+#include "caffe2/ideep/operators/operator_fallback_ideep.h"
+#include "caffe2/ideep/utils/ideep_operator.h"
 #endif
 
 namespace caffe2 {

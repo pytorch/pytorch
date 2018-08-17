@@ -53,11 +53,7 @@ class UpsampleNearestOp final : public Operator<Context> {
 
     auto& X = Input(0);
     auto* Y = Output(0);
-
-    vector<TIndex> out_shape;
-    for (int i = 0; i < X.ndim(); ++i) {
-      out_shape.push_back(X.dim32(i));
-    }
+    auto out_shape = X.dims();
     out_shape[X.ndim() - 1] *= scale_;
     out_shape[X.ndim() - 2] *= scale_;
     Y->Resize(out_shape);
@@ -75,8 +71,8 @@ class UpsampleNearestOp final : public Operator<Context> {
       d3 = Y->dim32(3);
     }
 
-    const float *input_data = X.template data<T>();
-    float *output_data = Y->template mutable_data<T>();
+    const T *input_data = X.template data<T>();
+    T *output_data = Y->template mutable_data<T>();
 
     for (int ii = 0; ii < Y->size(); ii++) {
       int ipidx = translate_idx(ii, d1, d2, d3, scale_);
