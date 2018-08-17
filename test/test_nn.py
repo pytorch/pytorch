@@ -773,7 +773,7 @@ class TestNN(NNTestCase):
 
         # check eval mode doesn't change anything
         for inplace in [True, False]:
-            module = cls(p, inplace)
+            module = cls(p, inplace).eval()
             self.assertEqual(input, module(input))
 
         # Check that these don't raise errors
