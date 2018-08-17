@@ -119,7 +119,7 @@ ${return_call} at::native::${native_type_method_dispatch}(/* native_actuals */ $
 
 # add non-virtual declaration to Tensor.h
 TENSOR_METHOD_DECLARATION = CodeTemplate("""\
-AT_API ${return_type} ${api_name}(${method_formals_with_defaults})${const_mark};
+${return_type} ${api_name}(${method_formals_with_defaults})${const_mark};
 """)
 # add non-virtual declaration to Tensor.cpp
 TENSOR_METHOD_DEFINITION = CodeTemplate("""\
@@ -143,7 +143,7 @@ static inline ${return_type} ${api_name}(${formals}) {
 """)
 # add a native declaration for a native function
 NATIVE_DECLARATION = CodeTemplate("""\
-AT_API ${return_type} ${native_type_method_dispatch}(${formals_with_defaults});
+${return_type} ${native_type_method_dispatch}(${formals_with_defaults});
 """)
 
 # special method definition for factory functions in Functions.h
