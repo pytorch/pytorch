@@ -2320,6 +2320,8 @@ a")
             y = x + z
             return x * y
 
+        # XXX: right now we only support fusing scalars if
+        # they're constant (#9940)
         def should_not_fuse(x, z):
             y = x + int(z)
             return x * y

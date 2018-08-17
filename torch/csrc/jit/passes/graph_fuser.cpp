@@ -158,7 +158,7 @@ struct GraphFuser {
   // TODO: the fusion compiler has a lot of float-specific codegen
   // so for now we only consider nodes that operate on floating point numbers
   // and half values when running on a GPU with sufficient CUDA arch
-  bool hasSupportedType(Value* node, bool allow_constant_numbers=false) {
+  bool hasSupportedType(Value* node) {
     if (auto tt = node->type()->cast<TensorType>()) {
       if (tt->scalarType() == at::kFloat) return true;
       #ifdef USE_CUDA
@@ -170,7 +170,7 @@ struct GraphFuser {
         }
       #endif
     }
-    return allow_constant_numbers && node->type()->isSubtypeOf(NumberType::get());
+    return false;
   }
 
   bool areTensorsOfSameShape(at::ArrayRef<Value*> values) {
@@ -186,53 +186,68 @@ struct GraphFuser {
   }
 
   bool hasSupportedType(Node* node) {
-    return haveSupportedShape(node->inputs()) &&
-           haveSupportedType(node->inputs(), /*allow_constant_numbers*/true) &&
+    return areTensorsOfSameShape(node->inputs()) &&
+           haveSupportedType(node->inputs()) &&
            haveSupportedType(node->outputs());
   }
 
   bool haveSupportedType(at::ArrayRef<Value*> list, bool allow_constant_numbers=false) {
     for (Value *v : list) {
-      if (!hasSupportedType(v, allow_constant_numbers)) return false;
+      if (!hasSupportedType(v)) return false;
     }
     return true;
   }
 
-  bool haveSupportedShape(at::ArrayRef<Value*> list) {
-    std::vector<Value*> tensor_values;
-    tensor_values.reserve(list.size());
-    for (Value * v : list) {
-      if (v->type()->cast<TensorType>()) {
-        tensor_values.push_back(v);
-        continue;
-      }
-      // XXX: For now, we support fusing tensor-scalar ops if the scalars
-      // are constant. They are directly inlined into the kernel body
-      if (v->type()->isSubtypeOf(NumberType::get()) &&
-          v->node()->kind() != prim::Constant) {
-        return false;
+  value_list tensorInputs(Node * node) {
+    std::vector<Value*> result;
+    result.reserve(node->inputs().size());
+    for (auto * v : node->inputs()) {
+      if (v->type()->isSubtypeOf(DynamicType::get())) {
+        result.push_back(v);
       }
     }
-    if (tensor_values.size() == 0) {
-      return true;
-    }
-    return areTensorsOfSameShape(tensor_values);
+    return result;
   }
-
 
   bool isFusable(Node * node) {
     if (node->owningBlock() != block) return false;
     if (node->kind() == prim::FusionGroup) return true;
     if (!isSimpleMap(node)) return false;
 
-    if (node->matches("aten::lt(Tensor self, Tensor other) -> Tensor") ||
+    if (node->matches("aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
+          /*const=*/attr::alpha) ||
+        node->matches("aten::add(Tensor self, Scalar other, Scalar alpha) -> Tensor",
+          /*const=*/{attr::other, attr::alpha}) ||
+        node->matches("aten::add(Scalar other, Tensor self) -> Tensor",
+          /*const=*/attr::other) ||
+        node->matches("aten::sub(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
+          /*const=*/attr::alpha) ||
+        node->matches("aten::sub(Tensor self, Scalar other, Scalar alpha) -> Tensor",
+          /*const=*/{attr::other, attr::alpha}) ||
+        node->matches("aten::sub(Scalar other, Tensor self) -> Tensor",
+          /*const=*/attr::other)) {
+      auto inputs = tensorInputs(node);
+      return areTensorsOfSameShape(inputs) && haveSupportedType(inputs);
+    }
+    else if (
+        node->matches("aten::lt(Tensor self, Tensor other) -> Tensor") ||
+        node->matches("aten::lt(Tensor self, Scalar other) -> Tensor", /*const=*/attr::other) ||
+        node->matches("aten::lt(Scalar other, Tensor self) -> Tensor", /*const=*/attr::other) ||
         node->matches("aten::le(Tensor self, Tensor other) -> Tensor") ||
-        node->matches("aten::gt(Tensor self, Tensor other) -> Tensor") ||
+        node->matches("aten::le(Tensor self, Scalar other) -> Tensor", /*const=*/attr::other) ||
+        node->matches("aten::le(Scalar other, Tensor self) -> Tensor", /*const=*/attr::other) ||
         node->matches("aten::ge(Tensor self, Tensor other) -> Tensor") ||
+        node->matches("aten::ge(Tensor self, Scalar other) -> Tensor", /*const=*/attr::other) ||
+        node->matches("aten::ge(Scalar other, Tensor self) -> Tensor", /*const=*/attr::other) ||
         node->matches("aten::eq(Tensor self, Tensor other) -> Tensor") ||
-        node->matches("aten::ne(Tensor self, Tensor other) -> Tensor")) {
+        node->matches("aten::eq(Tensor self, Scalar other) -> Tensor", /*const=*/attr::other) ||
+        node->matches("aten::eq(Scalar other, Tensor self) -> Tensor", /*const=*/attr::other) ||
+        node->matches("aten::ne(Tensor self, Tensor other) -> Tensor") ||
+        node->matches("aten::ne(Tensor self, Scalar other) -> Tensor", /*const=*/attr::other) ||
+        node->matches("aten::ne(Scalar other, Tensor self) -> Tensor", /*const=*/attr::other)) {
       // comparison operators produce Byte type, and it's ok, check only inputs
-      return areTensorsOfSameShape(node->inputs()) && haveSupportedType(node->inputs());
+      auto inputs = tensorInputs(node);
+      return areTensorsOfSameShape(inputs) && haveSupportedType(inputs);
     } else if (node->matches("aten::type_as(Tensor self, Tensor other) -> Tensor")) {
       // type_as can have different input types as long as output is float, check only output
       return haveSupportedType(node->outputs());
@@ -312,6 +327,12 @@ struct GraphFuser {
     return isFusableOnlyAsExitNode(node);
   }
 
+  // unknown (u) any (a) cpu (c) cuda (g) compatibility:
+  // x u a c g   y = yes
+  // u . . . .   . = no
+  // a . y y y
+  // c . y y .
+  // g . y . y
   bool compatibleDevices(Node * consumer, Value * producer) {
     auto consumer_device = getDevice(consumer);
     auto producer_device = getDevice(producer->node());
@@ -321,27 +342,26 @@ struct GraphFuser {
       return false;
     }
 
+    if (consumer_device.type() == DeviceType::CUDA &&
+        producer_device.type() == DeviceType::CPU) {
+      return false;
+    } else if (producer_device.type() == DeviceType::CUDA &&
+               consumer_device.type() == DeviceType::CPU) {
+      return false;
+    } else if (producer_device.type() == DeviceType::AnyDevice &&
+               consumer_device.type() == DeviceType::AnyDevice) {
+      // XXX: This case means we're fusing operations on non-constant numbers.
+      // The graph fuser doesn't support this at the moment (#9940).
+      JIT_ASSERT(false);
+    }
+
+    // At this point, the devices are matched. Last thing to check
+    // is that if we're compiling on CPU, the fusion compiler works.
     if (consumer_device.type() == DeviceType::CPU ||
         producer_device.type() == DeviceType::CPU) {
-      if (!sharedFusionCompiler().canCompileOnCPU()) {
-        return false;
-      }
+      return sharedFusionCompiler().canCompileOnCPU();
     }
-
-    if (consumer_device.type() == DeviceType::AnyDevice ||
-        producer_device.type() == DeviceType::AnyDevice) {
-      return true;
-    }
-
-    if (consumer_device.type() == producer_device.type()) {
-      if (consumer_device.type() == DeviceType::CUDA) {
-        return consumer_device.index() == producer_device.index();
-      }
-      JIT_ASSERT(consumer_device.type() == DeviceType::CPU);
-      return true;
-    }
-
-    return false;
+    return true;
   }
 
   bool shouldFuse(Node * consumer, Value * producer) {
