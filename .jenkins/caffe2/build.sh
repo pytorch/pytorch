@@ -186,10 +186,12 @@ fi
 # sccache will fail for CUDA builds if all cores are used for compiling
 if [[ "${BUILD_ENVIRONMENT}" == *-cuda* ]] && [ -n "${SCCACHE}" ]; then
   MAX_JOBS=`expr $(nproc) - 1`
+#ROCM builds often encounter OOM issue, so reduce the number of build threads
+elif [[ "${BUILD_ENVIRONMENT}" == *-rocm* ]]; then
+  MAX_JOBS=2
 else
   MAX_JOBS=$(nproc)
 fi
-
 
 
 ###############################################################################
