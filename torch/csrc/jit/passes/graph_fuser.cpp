@@ -191,7 +191,7 @@ struct GraphFuser {
            haveSupportedType(node->outputs());
   }
 
-  bool haveSupportedType(at::ArrayRef<Value*> list, bool allow_constant_numbers=false) {
+  bool haveSupportedType(at::ArrayRef<Value*> list) {
     for (Value *v : list) {
       if (!hasSupportedType(v)) return false;
     }
@@ -199,14 +199,9 @@ struct GraphFuser {
   }
 
   value_list tensorInputs(Node * node) {
-    std::vector<Value*> result;
-    result.reserve(node->inputs().size());
-    for (auto * v : node->inputs()) {
-      if (v->type()->isSubtypeOf(DynamicType::get())) {
-        result.push_back(v);
-      }
-    }
-    return result;
+    return filter(node->inputs(), [](Value * v) {
+      return v->type()->isSubtypeOf(DynamicType::get());
+    });
   }
 
   bool isFusable(Node * node) {
@@ -332,7 +327,7 @@ struct GraphFuser {
   // unknown (u) any (a) cpu (c) cuda (g) compatibility:
   // x u a c g   y = yes
   // u . . . .   . = no
-  // a . y y y
+  // a . n y y
   // c . y y .
   // g . y . y
   bool compatibleDevices(Node * consumer, Value * producer) {
@@ -354,7 +349,7 @@ struct GraphFuser {
                consumer_device.type() == DeviceType::AnyDevice) {
       // XXX: This case means we're fusing operations on non-constant numbers.
       // The graph fuser doesn't support this at the moment (#9940).
-      JIT_ASSERT(false);
+      return false;
     }
 
     // At this point, the devices are matched. Last thing to check
