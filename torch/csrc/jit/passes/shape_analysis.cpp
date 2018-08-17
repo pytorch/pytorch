@@ -243,7 +243,24 @@ void PropagateShapeOnNode(Node * node, bool insert_expands) {
       }
       return;
     }
-    case prim::TensorToNum:
+    case prim::ScalarToNum:
+      if (auto err = checkScalarToNum(node->input()->type(), node->output()->type())) {
+        throw std::runtime_error(*err);
+      }
+    case prim::TensorToNum: {
+      if (auto ten = node->input()->type()->cast<TensorType>()) {
+        int64_t numel = 1;
+        for (int64_t size : ten->sizes()) {
+          numel *= size;
+        }
+        if (numel != 1) {
+          std::stringstream ss;
+          ss << "Tensor with " << numel << " elements could not be converted to Scalar\n";
+          throw std::runtime_error(ss.str());
+        }
+      }
+      return;
+    }
     case prim::NumToTensor:
       return; // correct num type is already set
     case prim::Constant: {

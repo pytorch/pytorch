@@ -21,6 +21,7 @@ static void EraseNumberTypesOnBlock(Block* block) {
         }
       } break;
       case prim::TensorToNum:
+      case prim::ScalarToNum:
       case prim::NumToTensor: {
         it->output()->replaceAllUsesWith(it->inputs()[0]);
         // Let DCE cleanup

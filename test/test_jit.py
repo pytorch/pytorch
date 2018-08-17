@@ -2220,27 +2220,54 @@ a")
         with self.assertRaisesRegex(RuntimeError, 'Cannot call methods on numbers'):
                     torch.jit.script(func)
 
-    # testing implicit conversion of tensors to scalars
-    def test_promote(self):
+    # testing implicit conversion of tensors to scalars to match function arguments
+    def test_scalar_to_num_conversions(self):
         @torch.jit.script
         def multiple_defs(x):
             c = 1
             x = x + c
             return x
 
+        self.assertTrue("ScalarToNum" not in str(multiple_defs.graph))
+
         @torch.jit.script
-        def tensor_to_num(x, dim):
-            return x.unsqueeze(dim)
+        def tensor_to_int_script(x, tensor):
+            return x.unsqueeze(tensor)
 
-        # testing unnecessary conversion is not happening
-        self.assertTrue("TensorToNum" not in str(multiple_defs.graph))
+        def tensor_to_int(x, tensor):
+            return x.unsqueeze(tensor)
 
-        x = torch.randn(1)
-        dim = torch.zeros(1)
-        tensor_to_num(x, dim)
-        dim = torch.zeros(2, 2)
-        with self.assertRaisesRegex(RuntimeError, 'cannot be converted to Scalar'):
-                    tensor_to_num(x, dim)
+        @torch.jit.script
+        def tensor_to_float_script(x, tensor):
+            return x.addcmul(tensor, tensor, tensor)
+
+        def tensor_to_float(x, tensor):
+            return x.addcmul(tensor, tensor, tensor)
+
+        x = torch.zeros(10)
+        # float tensor, float tensor with grad, int tensor (can't set grad on int tensor)
+        tensors = [torch.tensor(1.1),
+                   torch.tensor(1.1, requires_grad=True),
+                   torch.tensor(0),
+                   torch.tensor([2])]
+
+        script_funs = [tensor_to_int_script, tensor_to_float_script]
+        funs = [tensor_to_int, tensor_to_float]
+
+        # return the result, or whether exception was thrown
+        def test_func(func, x, tensor):
+            try:
+                result = func(x, tensor)
+            except RuntimeError as e:
+                result = True
+            except TypeError as e:
+                result = True
+            return result
+
+        # assert result or exception equal for each (function, inputs)
+        for tensor in tensors:
+            for i in range(len(script_funs)):
+                self.assertEqual(test_func(script_funs[i], x, tensor), test_func(funs[i], x, tensor))
 
     def test_keyword(self):
         @torch.jit.script
