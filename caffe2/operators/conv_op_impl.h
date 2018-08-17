@@ -199,11 +199,11 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   const int M = filter.dim32(0);
   CAFFE_ENFORCE_EQ(filter.dim32(1), kernel_h());
   CAFFE_ENFORCE_EQ(filter.dim32(2), kernel_w());
-  CAFFE_ENFORCE_EQ(filter.dim32(3), C / group_);
+  CAFFE_ENFORCE_EQ(filter.dim32(3), C);
 
   ConvPoolOpBase<Context>::SetOutputSize(X, Y, filter.dim32(0));
   // The dimension of each kernel
-  const int kernel_dim = kernel_h() * kernel_w() * (C / group_);
+  const int kernel_dim = kernel_h() * kernel_w() * C;
   // The offset corresponding to a single input image, and a single output
   // image.
   const int input_offset = H * W * C;
@@ -224,7 +224,7 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   }
   // Specialized path for 1 by 1 convolution with stride 1, pad 0 - we
   // can skip im2col.
-  if (kernel_dim == (C / group_) && !HasPad() && !HasStride()) {
+  if (kernel_dim == C && !HasPad() && !HasStride()) {
     const int HxW = X.size() / (N * C);
     if (bias_data != nullptr) {
       ConvPoolOpBase<Context>::template SetBiasMultiplier<T>(
@@ -260,26 +260,20 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNHWC() {
           stride_w(),
           X_data,
           col_buffer_data,
-          &context_,
-          group_);
+          &context_);
       // Weight term
-      for (int group_id = 0; group_id < group_; ++group_id) {
-        math::GemmEx<T, Context>(
-            CblasNoTrans,
-            CblasTrans,
-            output_image_size,
-            M / group_,
-            kernel_dim,
-            1,
-            col_buffer_data + group_id * kernel_dim,
-            group_ * kernel_dim,
-            filter_data + group_id * (M / group_) * kernel_dim,
-            kernel_dim,
-            0,
-            Y_data + group_id * (M / group_),
-            M,
-            &context_);
-      }
+      math::Gemm<T, Context>(
+          CblasNoTrans,
+          CblasTrans,
+          output_image_size,
+          M,
+          kernel_dim,
+          1,
+          col_buffer_data,
+          filter_data,
+          0,
+          Y_data,
+          &context_);
       if (bias_data != nullptr) {
         // Bias term
         math::Gemm<T, Context>(
@@ -400,24 +394,19 @@ bool ConvOp<T, Context>::Run1x1ConvOnDeviceWithOrderNHWC(
     const T* bias,
     T* Y) {
   const int G = group_;
-  const int kernel_dim = C / G;
-  for (int group_id = 0; group_id < group_; ++group_id) {
-    math::GemmEx<T, Context>(
-        CblasNoTrans,
-        CblasTrans,
-        N * HxW,
-        M / group_,
-        kernel_dim,
-        1.0f,
-        X + group_id * kernel_dim,
-        C,
-        filter + group_id * (M / group_) * kernel_dim,
-        kernel_dim,
-        0.0f,
-        Y + group_id * (M / group_),
-        M,
-        &context_);
-  }
+  CAFFE_ENFORCE_EQ(G, 1);
+  math::Gemm<T, Context>(
+      CblasNoTrans,
+      CblasTrans,
+      N * HxW,
+      M,
+      C,
+      1.0f,
+      X,
+      filter,
+      0.0f,
+      Y,
+      &context_);
   if (bias != nullptr) {
     const T* bias_multiplier_data = bias_multiplier_.template data<T>();
     math::Gemm<T, Context>(
@@ -657,11 +646,11 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   const int M = filter.dim32(0);
   CAFFE_ENFORCE_EQ(filter.dim32(1), kernel_h());
   CAFFE_ENFORCE_EQ(filter.dim32(2), kernel_w());
-  CAFFE_ENFORCE_EQ(filter.dim32(3), C / group_);
+  CAFFE_ENFORCE_EQ(filter.dim32(3), C);
   dfilter->ResizeLike(filter);
 
   // The dimension of each kernel
-  const int kernel_dim = kernel_h() * kernel_w() * (C / group_);
+  const int kernel_dim = kernel_h() * kernel_w() * C;
   // The offset corresponding to a single input image, and a single output
   // image.
   const int input_offset = H * W * C;
@@ -670,7 +659,7 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   const int output_image_size = dY.dim32(1) * dY.dim32(2);
   // The col buffer is stored in CHW order as well - kernel_dim, and the height
   // and width.
-  col_buffer_.Resize(output_image_size, group_ * kernel_dim);
+  col_buffer_.Resize(output_image_size, kernel_dim);
 
   const T* Xdata = X.template data<T>();
   const T* const filter_data = filter.template data<T>();
@@ -717,26 +706,20 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
         stride_w(),
         Xdata,
         col_buffer_data,
-        &context_,
-        group_);
+        &context_);
     // Gradient with respect to filter.
-    for (int group_id = 0; group_id < group_; ++group_id) {
-      math::GemmEx<T, Context>(
-          CblasTrans,
-          CblasNoTrans,
-          M / group_,
-          kernel_dim,
-          output_image_size,
-          1,
-          dYdata + output_offset * image_id + group_id * (M / group_),
-          M,
-          col_buffer_data + group_id * kernel_dim,
-          group_ * kernel_dim,
-          1,
-          dfilter_data + group_id * (M / group_) * kernel_dim,
-          kernel_dim,
-          &context_);
-    }
+    math::Gemm<T, Context>(
+        CblasTrans,
+        CblasNoTrans,
+        M,
+        kernel_dim,
+        output_image_size,
+        1,
+        dYdata + output_offset * image_id,
+        col_buffer_data,
+        1,
+        dfilter_data,
+        &context_);
     if (!no_bias_) {
       // Gradient with respect to bias
       math::Gemv<T, Context>(
@@ -760,23 +743,18 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
     T* dXdata = dX->template mutable_data<T>();
     for (int image_id = 0; image_id < N; ++image_id) {
       // Compute gradient into col_buffer.
-      for (int group_id = 0; group_id < group_; ++group_id) {
-        math::GemmEx<T, Context>(
-            CblasNoTrans,
-            CblasNoTrans,
-            output_image_size,
-            kernel_dim,
-            M / group_,
-            1,
-            dYdata + output_offset * image_id + group_id * (M / group_),
-            M,
-            filter_data + group_id * (M / group_) * kernel_dim,
-            kernel_dim,
-            0,
-            col_buffer_data + group_id * kernel_dim,
-            group_ * kernel_dim,
-            &context_);
-      }
+      math::Gemm<T, Context>(
+          CblasNoTrans,
+          CblasNoTrans,
+          output_image_size,
+          kernel_dim,
+          M,
+          1,
+          dYdata + output_offset * image_id,
+          filter_data,
+          0,
+          col_buffer_data,
+          &context_);
       math::Col2Im<T, Context, StorageOrder::NHWC>(
           C,
           H,
@@ -793,8 +771,7 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
           stride_w(),
           col_buffer_data,
           dXdata,
-          &context_,
-          group_);
+          &context_);
       dXdata += input_offset;
     }
   }

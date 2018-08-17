@@ -2718,8 +2718,7 @@ void Im2Col<float, CUDAContext, StorageOrder::NCHW>(
     const int stride_w,
     const float* img_data,
     float* col_data,
-    CUDAContext* context,
-    const int /* groups */) {
+    CUDAContext* context) {
   const int dkernel_h = dilation_h * (kernel_h - 1) + 1;
   const int dkernel_w = dilation_w * (kernel_w - 1) + 1;
   const int output_h = (height + pad_t + pad_b - dkernel_h) / stride_h + 1;
@@ -2764,10 +2763,7 @@ void Im2Col<float, CUDAContext, StorageOrder::NHWC>(
     const int stride_w,
     const float* img_data,
     float* col_data,
-    CUDAContext* context,
-    const int groups) {
-  CAFFE_ENFORCE_EQ(groups, 1, "groups must be 1 for GPU Im2col");
-
+    CUDAContext* context) {
   const int dkernel_h = dilation_h * (kernel_h - 1) + 1;
   const int dkernel_w = dilation_w * (kernel_w - 1) + 1;
   const int output_h = (height + pad_t + pad_b - dkernel_h) / stride_h + 1;
@@ -2812,8 +2808,7 @@ void Col2Im<float, CUDAContext, StorageOrder::NCHW>(
     const int stride_w,
     const float* col_data,
     float* img_data,
-    CUDAContext* context,
-    const int /* groups */) {
+    CUDAContext* context) {
   const int dkernel_h = dilation_h * (kernel_h - 1) + 1;
   const int dkernel_w = dilation_w * (kernel_w - 1) + 1;
   const int output_h = (height + pad_t + pad_b - dkernel_h) / stride_h + 1;
@@ -2858,10 +2853,7 @@ void Col2Im<float, CUDAContext, StorageOrder::NHWC>(
     const int stride_w,
     const float* col_data,
     float* img_data,
-    CUDAContext* context,
-    const int groups) {
-  CAFFE_ENFORCE_EQ(groups, 1, "groups must be 1 for GPU Col2im");
-
+    CUDAContext* context) {
   const int dkernel_h = dilation_h * (kernel_h - 1) + 1;
   const int dkernel_w = dilation_w * (kernel_w - 1) + 1;
   const int output_h = (height + pad_t + pad_b - dkernel_h) / stride_h + 1;
