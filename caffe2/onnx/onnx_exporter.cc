@@ -428,8 +428,9 @@ ConvertedResult OnnxExporter::CreateCastNodes(
     std::transform(
         c2_dtype.begin(), c2_dtype.end(), c2_dtype.begin(), ::toupper);
     if (c2_dtype == "FLOAT") {
-    } else if (c2_dtype == "INT32") {
       onnx_dtype = ::ONNX_NAMESPACE::TensorProto::FLOAT;
+    } else if (c2_dtype == "INT32") {
+      onnx_dtype = ::ONNX_NAMESPACE::TensorProto::INT32;
     } else if (c2_dtype == "BOOL") {
       onnx_dtype = ::ONNX_NAMESPACE::TensorProto::BOOL;
     } else if (c2_dtype == "UINT8") {
