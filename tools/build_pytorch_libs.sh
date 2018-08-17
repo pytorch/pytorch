@@ -130,8 +130,8 @@ CUDA_NVCC_FLAGS=$C_FLAGS
 if [[ -z "$CUDA_DEVICE_DEBUG" ]]; then
   CUDA_DEVICE_DEBUG=0
 fi
-if [ -z "$NUM_JOBS" ]; then
-  NUM_JOBS="$(getconf _NPROCESSORS_ONLN)"
+if [ -z "$MAX_JOBS" ]; then
+  MAX_JOBS="$(getconf _NPROCESSORS_ONLN)"
 fi
 
 BUILD_TYPE="Release"
@@ -193,7 +193,7 @@ function build() {
               -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
               ${@:2} \
               -DCMAKE_EXPORT_COMPILE_COMMANDS=1
-  ${CMAKE_INSTALL} -j"$NUM_JOBS"
+  ${CMAKE_INSTALL} -j"$MAX_JOBS"
   popd
 
   # Fix rpaths of shared libraries
@@ -225,8 +225,8 @@ function build_nccl() {
               -DCMAKE_CXX_FLAGS="$C_FLAGS $CPP_FLAGS $USER_CFLAGS" \
               -DCMAKE_SHARED_LINKER_FLAGS="$USER_LDFLAGS" \
               -DCMAKE_UTILS_PATH="$BASE_DIR/cmake/public/utils.cmake" \
-              -DNUM_JOBS="$NUM_JOBS"
-  ${CMAKE_INSTALL} -j"$NUM_JOBS"
+              -DNUM_JOBS="$MAX_JOBS"
+  ${CMAKE_INSTALL} -j"$MAX_JOBS"
   mkdir -p ${INSTALL_DIR}/lib
   cp "lib/libnccl.so.1" "${INSTALL_DIR}/lib/libnccl.so.1"
   if [ ! -f "${INSTALL_DIR}/lib/libnccl.so" ]; then
@@ -286,7 +286,7 @@ function build_caffe2() {
       # STOP!!! Are you trying to add a C or CXX flag?  Add it
       # to CMakeLists.txt and aten/CMakeLists.txt, not here.
       # We need the vanilla cmake build to work.
-  ${CMAKE_INSTALL} -j"$NUM_JOBS"
+  ${CMAKE_INSTALL} -j"$MAX_JOBS"
 
   # Install Python proto files
   if [[ $FULL_CAFFE2 -ne 0 ]]; then
