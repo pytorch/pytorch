@@ -15,7 +15,7 @@
 
 namespace at {
 
-struct ${Type} final : public Type {
+struct AT_API ${Type} final : public Type {
   explicit ${Type}(Context* context);
   virtual ScalarType scalarType() const override;
   virtual Backend backend() const override;

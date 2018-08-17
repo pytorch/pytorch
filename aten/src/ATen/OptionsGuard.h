@@ -9,7 +9,7 @@
 namespace at {
 
 /// A wrapper over a thread local TensorOptions instance.
-struct DefaultTensorOptions {
+struct AT_API DefaultTensorOptions {
   /// Returns the current thread local default options.
   /// Defined in OptionsGuard.cpp because we can't use optional in headers, due
   /// to Windows and other compilers.
@@ -27,7 +27,7 @@ struct DefaultTensorOptions {
 /// RAII guard that stores the current default options upon construction, sets
 /// the current default options to the ones given to its constructor, and
 /// finally resets the options back to the original ones in the destructor.
-struct OptionsGuard {
+struct AT_API OptionsGuard {
   /// Stores the current default options and sets them to the given ones.
   explicit OptionsGuard(const TensorOptions& options)
       : original_(DefaultTensorOptions::get()) {
