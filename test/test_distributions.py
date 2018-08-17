@@ -713,6 +713,7 @@ class TestDistributions(TestCase):
             actual = dist(param).enumerate_support()
             self.assertEqual(actual, expected)
 
+    @skipIfRocm
     def test_sample_detached(self):
         for Dist, params in EXAMPLES:
             for i, param in enumerate(params):
@@ -725,6 +726,7 @@ class TestDistributions(TestCase):
                                  msg='{} example {}/{}, .sample() is not detached'.format(
                                      Dist.__name__, i + 1, len(params)))
 
+    @skipIfRocm
     def test_rsample_requires_grad(self):
         for Dist, params in EXAMPLES:
             for i, param in enumerate(params):
