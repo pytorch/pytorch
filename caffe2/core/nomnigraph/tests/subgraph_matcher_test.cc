@@ -369,6 +369,177 @@ TEST(SubgraphMatcher, IsSubtreeMatchRepeated) {
   // clang-format on
 }
 
+TEST(SubgraphMatcher, DagMatching) {
+  reset();
+
+  // clang-format off
+  auto n4match = Tree(Criteria("4"), {
+    Tree(Criteria("5"))
+  });
+  auto subtree = Tree(Criteria("1"), {
+    Tree(Criteria("2"), {
+      n4match
+    }),
+    Tree(Criteria("3"), {
+      n4match
+    }),
+  });
+  // clang-format on
+
+  {
+    TestGraph graph;
+    auto n1 = graph.createNode("1");
+    auto n2 = graph.createNode("2");
+    auto n3 = graph.createNode("3");
+    auto n4 = graph.createNode("4");
+    auto n5 = graph.createNode("5");
+
+    graph.createEdge(n1, n2);
+    graph.createEdge(n1, n3);
+    graph.createEdge(n2, n4);
+    graph.createEdge(n3, n4);
+    graph.createEdge(n4, n5);
+
+    /*       N1
+           /     \
+        N2         N3
+            \   /
+             N4
+             |
+             N5
+    */
+
+    EXPECT_TRUE(isSubtreeMatch(n1, subtree, false));
+  }
+
+  {
+    TestGraph graph;
+    auto n1 = graph.createNode("1");
+    auto n2 = graph.createNode("2");
+    auto n3 = graph.createNode("3");
+    auto n4A = graph.createNode("4");
+    auto n4B = graph.createNode("4");
+    auto n5 = graph.createNode("5");
+
+    graph.createEdge(n1, n2);
+    graph.createEdge(n1, n3);
+    graph.createEdge(n2, n4A);
+    graph.createEdge(n3, n4B);
+    graph.createEdge(n4A, n5);
+    graph.createEdge(n4B, n5);
+
+    /*       N1
+           /    \
+        N2       N3
+        /          \
+       N4A        N4B
+          \     /
+            N5
+    */
+
+    // This should fail because n4A and n4B are not the same node.
+    EXPECT_FALSE(isSubtreeMatch(n1, subtree, false));
+  }
+}
+
+TEST(SubgraphMatcher, DagMatchingMultiEdges) {
+  reset();
+
+  // clang-format off
+  auto n2match = Tree(Criteria("2"));
+  auto subtree = Tree(Criteria("1"), {
+    n2match,
+    n2match
+  });
+  // clang-format on
+
+  {
+    TestGraph graph;
+    auto n1 = graph.createNode("1");
+    auto n2 = graph.createNode("2");
+
+    graph.createEdge(n1, n2);
+    graph.createEdge(n1, n2);
+
+    EXPECT_TRUE(isSubtreeMatch(n1, subtree, false));
+  }
+
+  {
+    TestGraph graph;
+    auto n1 = graph.createNode("1");
+    auto n2A = graph.createNode("2");
+    auto n2B = graph.createNode("2");
+
+    graph.createEdge(n1, n2A);
+    graph.createEdge(n1, n2B);
+
+    EXPECT_FALSE(isSubtreeMatch(n1, subtree, false));
+  }
+}
+
+TEST(SubgraphMatcher, DagMatchingRandomLargeGraph) {
+  reset();
+  // clang-format off
+  auto n4match = Tree(any(), {
+    NonTerminal(any(), 1)
+  });
+  auto subtree = Tree(any(), {
+    Tree(any(), {
+      n4match
+    }),
+    Tree(any(), {
+      n4match
+    }),
+  });
+  // clang-format on
+  /*       N1
+         /     \
+      N2         N3
+          \   /
+           N4
+           |
+           N5
+  */
+
+  // Look for the diamond pattern in a random large graph.
+  TestGraph graph;
+  std::vector<nom::Graph<std::string>::NodeRef> nodes;
+
+  // Here we create a test graph and then randomly embed the above
+  // pattern into the graph repeatedly (numPatterns times).
+  // The actual number of match will be less than numPatterns because the
+  // embedded patterns can overlap which become unmatched subgraphs.
+  const int numNodes = 50000;
+  const int numPatterns = 5000;
+
+  for (int i = 0; i < numNodes; i++) {
+    auto node = graph.createNode("Node");
+    nodes.emplace_back(node);
+  }
+
+  TestRandom random(517);
+  for (int i = 0; i < numPatterns; i++) {
+    std::vector<int> nodeIdx;
+    for (int k = 0; k < 5; k++) {
+      nodeIdx.emplace_back(random.nextInt() % numNodes);
+    }
+    graph.createEdge(nodes[nodeIdx[0]], nodes[nodeIdx[1]]);
+    graph.createEdge(nodes[nodeIdx[0]], nodes[nodeIdx[2]]);
+    graph.createEdge(nodes[nodeIdx[1]], nodes[nodeIdx[3]]);
+    graph.createEdge(nodes[nodeIdx[2]], nodes[nodeIdx[3]]);
+    graph.createEdge(nodes[nodeIdx[3]], nodes[nodeIdx[4]]);
+  }
+  EXPECT_EQ(graph.getEdgesCount(), 5 * numPatterns);
+
+  int countMatch = 0;
+  for (auto node : graph.getMutableNodes()) {
+    if (isSubtreeMatch(node, subtree, false)) {
+      countMatch++;
+    }
+  }
+  EXPECT_EQ(countMatch, 1072);
+}
+
 TEST(SubgraphMatcher, IsSubtreeMatchRealistic) {
   reset();
   auto graph = DataFlowTestGraph();
