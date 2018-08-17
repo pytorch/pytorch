@@ -5823,6 +5823,7 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
 
         self.checkTrace(Policy(), (torch.rand(1, 4),))
 
+    @skipIfRocm
     def test_snli(self):
         # TODO:
         #   1) nn.LSTM is called as a Python function https://github.com/pytorch/pytorch/issues/8449
