@@ -1645,6 +1645,7 @@ class TestDistributions(TestCase):
         empirical_var = samples.var(0)
         self.assertEqual(d.variance, empirical_var, prec=0.02)
 
+    @skipIfRocm
     def test_multivariate_normal_shape(self):
         mean = torch.randn(5, 3, requires_grad=True)
         mean_no_batch = torch.randn(3, requires_grad=True)
@@ -1750,6 +1751,7 @@ class TestDistributions(TestCase):
                                     'MultivariateNormal(loc={}, scale_tril={})'.format(mean, scale_tril),
                                     multivariate=True)
 
+    @skipIfRocm
     def test_multivariate_normal_properties(self):
         loc = torch.randn(5)
         scale_tril = transform_to(constraints.lower_cholesky)(torch.randn(5, 5))
