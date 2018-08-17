@@ -729,9 +729,9 @@ class Module(object):
         for module_prefix, module in modules:
             members = get_members_fn(module)
             for k, v in members:
-                if v is None or v in memo:
+                if v is None or id(v) in memo:
                     continue
-                memo.add(v)
+                memo.add(id(v))
                 name = module_prefix + ('.' if module_prefix else '') + k
                 yield name, v
 
@@ -858,8 +858,8 @@ class Module(object):
         """
         memo = set()
         for name, module in self._modules.items():
-            if module is not None and module not in memo:
-                memo.add(module)
+            if module is not None and id(module) not in memo:
+                memo.add(id(module))
                 yield name, module
 
     def modules(self):
@@ -917,8 +917,8 @@ class Module(object):
 
         if memo is None:
             memo = set()
-        if self not in memo:
-            memo.add(self)
+        if id(self) not in memo:
+            memo.add(id(self))
             yield prefix, self
             for name, module in self._modules.items():
                 if module is None:

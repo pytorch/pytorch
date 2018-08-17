@@ -92,7 +92,7 @@ class SGD(Optimizer):
                 if weight_decay != 0:
                     d_p.add_(weight_decay, p.data)
                 if momentum != 0:
-                    param_state = self.state[p]
+                    param_state = self.state[id(p)]
                     if 'momentum_buffer' not in param_state:
                         buf = param_state['momentum_buffer'] = torch.zeros_like(p.data)
                         buf.mul_(momentum).add_(d_p)

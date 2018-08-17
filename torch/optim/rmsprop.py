@@ -64,7 +64,7 @@ class RMSprop(Optimizer):
                 grad = p.grad.data
                 if grad.is_sparse:
                     raise RuntimeError('RMSprop does not support sparse gradients')
-                state = self.state[p]
+                state = self.state[id(p)]
 
                 # State initialization
                 if len(state) == 0:

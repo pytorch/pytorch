@@ -135,9 +135,9 @@ class Optimizer(object):
         for k, v in state_dict['state'].items():
             if k in id_map:
                 param = id_map[k]
-                state[param] = cast(param, v)
+                state[id(param)] = cast(param, v)
             else:
-                state[k] = v
+                state[id(k)] = v
 
         # Update parameter groups, setting their 'params' value
         def update_group(group, new_group):
@@ -201,9 +201,9 @@ class Optimizer(object):
 
         param_set = set()
         for group in self.param_groups:
-            param_set.update(set(group['params']))
+            param_set.update(set(map(id, group['params'])))
 
-        if not param_set.isdisjoint(set(param_group['params'])):
+        if not param_set.isdisjoint(set(map(id, param_group['params']))):
             raise ValueError("some parameters appear in more than one parameter group")
 
         self.param_groups.append(param_group)

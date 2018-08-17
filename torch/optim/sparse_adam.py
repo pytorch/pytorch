@@ -53,7 +53,7 @@ class SparseAdam(Optimizer):
                 if not grad.is_sparse:
                     raise RuntimeError('SparseAdam does not support dense gradients, please consider Adam instead')
 
-                state = self.state[p]
+                state = self.state[id(p)]
 
                 # State initialization
                 if len(state) == 0:

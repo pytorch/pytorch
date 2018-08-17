@@ -394,9 +394,6 @@ class Tensor(torch._C._TensorBase):
             raise TypeError('iteration over a 0-d tensor')
         return iter(imap(lambda i: self[i], range(self.size(0))))
 
-    def __hash__(self):
-        return id(self)
-
     def __dir__(self):
         tensor_methods = dir(self.__class__)
         tensor_methods.remove('volatile')  # deprecated

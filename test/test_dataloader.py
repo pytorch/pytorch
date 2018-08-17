@@ -391,7 +391,7 @@ class TestDataLoader(TestCase):
         dataloader = DataLoader(dataset, batch_size=1, num_workers=num_workers)
         seeds = set()
         for batch in dataloader:
-            seeds.add(batch[0])
+            seeds.add(id(batch[0]))
         self.assertEqual(len(seeds), num_workers)
 
     def test_worker_init_fn(self):

@@ -693,9 +693,9 @@ class TracedModule(ScriptModule):
             self._name = 'TracedModule[' + type(orig).__name__ + ']'
 
         def check_unique(param):
-            if param in id_set:
+            if id(param) in id_set:
                 raise ValueError("TracedModules don't support parameter sharing between modules")
-            id_set.add(param)
+            id_set.add(id(param))
 
         self.training = orig.training
 

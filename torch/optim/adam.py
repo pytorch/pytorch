@@ -66,7 +66,7 @@ class Adam(Optimizer):
                     raise RuntimeError('Adam does not support sparse gradients, please consider SparseAdam instead')
                 amsgrad = group['amsgrad']
 
-                state = self.state[p]
+                state = self.state[id(p)]
 
                 # State initialization
                 if len(state) == 0:

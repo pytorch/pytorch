@@ -2648,7 +2648,7 @@ class TestTorch(TestCase):
                 self.assertEqual(prob_dist.dim(), 2)
                 self.assertEqual(sample_indices.size(1), n_sample)
                 for i in range(n_row):
-                    row_samples = {}
+                    row_samples = []
                     zero_prob_idx = zero_prob_indices[i]
                     for j in range(n_sample):
                         sample_idx = sample_indices[i, j]
@@ -2656,7 +2656,7 @@ class TestTorch(TestCase):
                             self.assertNotEqual(sample_idx, zero_prob_idx,
                                                 "sampled an index with zero probability")
                         self.assertNotIn(sample_idx, row_samples, "sampled an index twice")
-                        row_samples[sample_idx] = True
+                        row_samples.append(sample_idx)
 
             # vector
             n_col = 4
@@ -2919,7 +2919,7 @@ class TestTorch(TestCase):
             if hasattr(large_expanded, fn) and fn not in ['masked_scatter', 'masked_fill']:
                 # run through tensor versions of functions
                 # and verify fully expanded inputs give same results
-                expanded = {large: large_expanded, small: small_expanded, small2: small2_expanded}
+                expanded = {id(large): large_expanded, id(small): small_expanded, id(small2): small2_expanded}
 
                 def tensorfn(myfn, t1, t2):
                     if fn == "lerp":
@@ -2936,16 +2936,16 @@ class TestTorch(TestCase):
                                              (small2, small, large), (small2, large, small)]:
                     if first is None:
                         break  # ignore last iter when small2 is None
-                    method_expanded = getattr(expanded[first], fn)
+                    method_expanded = getattr(expanded[id(first)], fn)
                     method = getattr(first, fn)
-                    r1 = tensorfn(method_expanded, expanded[second], expanded[third])
+                    r1 = tensorfn(method_expanded, expanded[id(second)], expanded[id(third)])
                     r2 = tensorfn(method, second, third)
                     self.assertEqual(r1, r2)
 
             # now for torch. versions of functions
             if hasattr(torch, fn):
                 fntorch = getattr(torch, fn)
-                expanded = {large: large_expanded, small: small_expanded, small2: small2_expanded}
+                expanded = {id(large): large_expanded, id(small): small_expanded, id(small2): small2_expanded}
 
                 def torchfn(t1, t2, t3):
                     if fn == "lerp":
@@ -2966,7 +2966,7 @@ class TestTorch(TestCase):
                                              (small2, small, large), (small2, large, small)]:
                     if first is None:
                         break  # ignore last iter when small2 is None
-                    r1 = torchfn(expanded[first], expanded[second], expanded[third])
+                    r1 = torchfn(expanded[id(first)], expanded[id(second)], expanded[id(third)])
                     r2 = torchfn(first, second, third)
                     self.assertEqual(r1, r2)
 
@@ -3268,15 +3268,15 @@ class TestTorch(TestCase):
             self.assertTrue(check_order(mxx[j][k - 1], mxx[j][k]),
                             'torch.sort ({}) values unordered for {}'.format(order, task))
 
-        seen = set()
+        seen = []
         indicesCorrect = True
         size = x.size(x.dim() - 1)
         for k in range(size):
-            seen.clear()
+            seen = []
             for j in range(size):
                 self.assertEqual(x[k][ixx[k][j]], mxx[k][j],
                                  'torch.sort ({}) indices wrong for {}'.format(order, task))
-                seen.add(ixx[k][j])
+                seen.append(ixx[k][j])
             self.assertEqual(len(seen), size)
 
     @skipIfRocm
