@@ -1321,17 +1321,26 @@ class TestJit(JitTestCase):
         self.run_pass('constant_propagation', constant_prop.graph)
         self.assertExpected(canonical(constant_prop.graph))
 
-    # TODO: implement
-    @unittest.expectedFailure
     def test_constant_prop_if_constant(self):
         @torch.jit.script
-        def constant_prop():
-            b = 3
-            if True:
-                b = 1
-            if False:
-                b = 2
-            return b
+        def constant_prop(a, b):
+            c0 = 1
+            c1 = 1
+            c2 = 1
+            if a:  # -> c0, c1
+                if b:  # -> c0
+                    if True:  # -> c0
+                        c0 = c0 + 1
+                        if False:
+                            c1 = c1 + 1
+                            c2 = c2 + 1
+            else:  # -> c0, c1
+                c1 = c1 + 1
+
+            if True:  # inlined
+                c0 = c0 + 1  # dynamic
+                c2 = c2 + 4  # set to 5
+            return a + c0 + c1 + c2
 
         self.run_pass('constant_propagation', constant_prop.graph)
         self.assertExpected(canonical(constant_prop.graph))
@@ -2214,14 +2223,14 @@ a")
             if True:
                 x = [2, 3]
             return
-        self.checkScript(reassign, (), optimize=True)
+        self.checkScript(reassign, (), optimize=False)
 
         def reassign_arity_change():
             x = [1]
             if True:
                 x = [1, 2, 3]
             return
-        self.checkScript(reassign_arity_change, (), optimize=True)
+        self.checkScript(reassign_arity_change, (), optimize=False)
 
         def reassign_from_empty_literal():
             x = []
@@ -2229,7 +2238,7 @@ a")
                 x = [1, 2, 3]
             return
         with self.assertRaisesRegex(RuntimeError, "Empty list literals not allowed"):
-            self.checkScript(reassign_from_empty_literal, (), optimize=True)
+            self.checkScript(reassign_from_empty_literal, (), optimize=False)
 
         def reassign_from_empty_builtin():
             x = _construct_empty_int_list()
@@ -2242,7 +2251,7 @@ a")
             if True:
                 z = [torch.randn([1])]
             return
-        self.checkScript(reassign_from_empty_builtin, (), optimize=True)
+        self.checkScript(reassign_from_empty_builtin, (), optimize=False)
 
         def reassign_bad_type():
             x = [1]
@@ -2250,7 +2259,7 @@ a")
                 x = [1.0]
             return
         with self.assertRaisesRegex(RuntimeError, "previously has type"):
-            self.checkScript(reassign_bad_type, (), optimize=True)
+            self.checkScript(reassign_bad_type, (), optimize=False)
 
         def reassign_nested():
             x = _construct_empty_int_list()
@@ -2260,7 +2269,7 @@ a")
                     x = [1.0]
             return
         with self.assertRaisesRegex(RuntimeError, "previously has type"):
-            self.checkScript(reassign_nested, (), optimize=True)
+            self.checkScript(reassign_nested, (), optimize=False)
 
     def test_list_gather(self):
         def index():
