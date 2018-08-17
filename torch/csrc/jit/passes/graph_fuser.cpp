@@ -1,4 +1,5 @@
 #include "torch/csrc/jit/passes/graph_fuser.h"
+#include "torch/csrc/jit/passes/common_subexpression_elimination.h"
 #include "torch/csrc/jit/fusion_compiler.h"
 #include "torch/csrc/jit/autodiff.h"
 #include "torch/csrc/jit/assertions.h"
@@ -399,13 +400,17 @@ struct GraphFuser {
     return at::nullopt;
   }
 
+  bool equalSizes(at::IntList a, at::IntList b) {
+    return a.size() == b.size() && std::equal(a.begin(), a.end(), b.begin());
+  }
+
   bool haveSameMapSize(Node * consumer, Node * producer) {
     auto consumer_map_size = mapSize(consumer);
     auto producer_map_size = mapSize(producer);
     if (!consumer_map_size || !producer_map_size) {
       return false;
     }
-    return std::equal(consumer_map_size->begin(), consumer_map_size->end(), producer_map_size->begin());
+    return equalSizes(*consumer_map_size, *producer_map_size);
   }
 
   bool shouldFuse(Node * consumer, Value * producer) {
@@ -434,7 +439,7 @@ struct GraphFuser {
     for (auto * producer: tensor_inputs) {
       auto type = producer->type()->cast<TensorType>();
       JIT_ASSERT(type);
-      if (std::equal(map_size.begin(), map_size.end(), type->sizes().begin())) {
+      if (equalSizes(map_size, type->sizes())) {
         continue;
       }
       // Insert explicit expand node when input doesn't have correct size.
@@ -845,6 +850,8 @@ struct GraphFuser {
 
 void FuseGraph(std::shared_ptr<Graph>& graph) {
   GraphFuser(graph->block()).run();
+  // After FuseGraph some common subexpressions may come back
+  EliminateCommonSubexpression(graph);
 }
 
 }}
