@@ -143,7 +143,7 @@ static inline ${return_type} ${api_name}(${formals}) {
 """)
 # add a native declaration for a native function
 NATIVE_DECLARATION = CodeTemplate("""\
-${return_type} ${native_type_method_dispatch}(${formals_with_defaults});
+AT_API ${return_type} ${native_type_method_dispatch}(${formals_with_defaults});
 """)
 
 # special method definition for factory functions in Functions.h
