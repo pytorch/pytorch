@@ -3129,6 +3129,7 @@ class TestKL(TestCase):
 
     # Multivariate normal has a separate Monte Carlo based test due to the requirement of random generation of
     # positive (semi) definite matrices. n is set to 5, but can be increased during testing.
+    @skipIfRocm
     def test_kl_multivariate_normal(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         n = 5  # Number of tests for multivariate_normal
@@ -3219,6 +3220,7 @@ class TestKL(TestCase):
                 'Actual (analytic): {}'.format(actual_full_lowrank),
             ]))
 
+    @skipIfRocm
     def test_kl_lowrank_multivariate_normal_batched(self):
         b = 7  # Number of batches
         loc = [torch.randn(b, 3) for _ in range(0, 2)]
