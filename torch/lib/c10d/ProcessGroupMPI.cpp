@@ -279,7 +279,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::broadcast(
   checkSingleTensor(tensors);
   std::function<void(std::unique_ptr<WorkEntry>&)> runFunc =
       [opts](std::unique_ptr<WorkEntry>& entry) {
-        auto data = (*entry->src)[0];
+        auto data = (entry->src)[0];
         MPI_CHECK(MPI_Bcast(
             data.data_ptr(),
             data.numel(),
@@ -296,17 +296,18 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::allreduce(
     std::vector<at::Tensor>& tensors,
     const AllreduceOptions& opts) {
   checkSingleTensor(tensors);
+
   std::function<void(std::unique_ptr<WorkEntry>&)> runFunc =
-      [opts](std::unique_ptr<WorkEntry>& entry) {
-        auto data = (*entry->src)[0];
-        MPI_CHECK(MPI_Allreduce(
+    [opts](std::unique_ptr<WorkEntry>& entry) {
+      auto data = (entry->src)[0];
+      MPI_CHECK(MPI_Allreduce(
             MPI_IN_PLACE,
             data.data_ptr(),
             data.numel(),
             mpiDatatype.at(data.type().scalarType()),
             mpiOp.at(opts.reduceOp),
             MPI_COMM_WORLD));
-      };
+    };
   auto entry = std::unique_ptr<WorkEntry>(
       new WorkEntry(&tensors, nullptr, std::move(runFunc)));
   return enqueue(std::move(entry));
@@ -319,8 +320,8 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::reduce(
 
   std::function<void(std::unique_ptr<WorkEntry>&)> runFunc =
       [opts, this](std::unique_ptr<WorkEntry>& entry) {
-        auto data = (*entry->src)[0];
-        auto dataPtr = (*entry->src)[0].data_ptr();
+        auto data = (entry->src)[0];
+        auto dataPtr = (entry->src)[0].data_ptr();
         void* sendbuf = (rank_ == opts.rootRank) ? MPI_IN_PLACE : dataPtr;
         void* recvbuf = (rank_ == opts.rootRank) ? dataPtr : nullptr;
 
@@ -357,8 +358,8 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::allgather(
 
   std::function<void(std::unique_ptr<WorkEntry>&)> runFunc =
       [](std::unique_ptr<WorkEntry>& entry) {
-        auto data = (*entry->src)[0];
-        std::vector<at::Tensor>& outputDataVec = *(entry->dst);
+        auto data = (entry->src)[0];
+        std::vector<at::Tensor>& outputDataVec = entry->dst;
         auto flatOutputTensor = newLikeFlat(outputDataVec);
 
         MPI_CHECK(MPI_Allgather(
@@ -405,14 +406,12 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::gather(
 
   std::function<void(std::unique_ptr<WorkEntry>&)> runFunc =
       [opts, this](std::unique_ptr<WorkEntry>& entry) {
-        auto data = (*entry->src)[0];
+        auto data = (entry->src)[0];
         void* recvbuf = nullptr;
         at::Tensor flatOutputTensor;
-        std::vector<at::Tensor>* outputDataVec = nullptr;
 
         if (rank_ == opts.rootRank) {
-          outputDataVec = entry->dst;
-          flatOutputTensor = newLikeFlat(*outputDataVec);
+          flatOutputTensor = newLikeFlat(entry->dst);
           recvbuf = flatOutputTensor.data_ptr();
         }
         MPI_CHECK(MPI_Gather(
@@ -426,9 +425,10 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::gather(
             MPI_COMM_WORLD));
 
         if (rank_ == opts.rootRank) {
+          std::vector<at::Tensor>& outputDataVec = entry->dst;
           // copy the flattened output tensors to the outputs
-          for (size_t i = 0; i < outputDataVec->size(); ++i) {
-            outputDataVec->at(i).copy_(flatOutputTensor[i]);
+          for (size_t i = 0; i < outputDataVec.size(); ++i) {
+            outputDataVec.at(i).copy_(flatOutputTensor[i]);
           }
         }
       };
@@ -470,19 +470,18 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::scatter(
 
   std::function<void(std::unique_ptr<WorkEntry>&)> runFunc =
       [opts, this](std::unique_ptr<WorkEntry>& entry) {
-        auto data = (*entry->dst)[0];
+        auto data = (entry->dst)[0];
         void* sendbuf = nullptr;
         at::Tensor flatInputTensor;
-        std::vector<at::Tensor>* inputDataVec;
 
         if (rank_ == opts.rootRank) {
-          inputDataVec = entry->src;
-          flatInputTensor = newLikeFlat(*inputDataVec);
+          std::vector<at::Tensor>& inputDataVec = entry->src;
+          flatInputTensor = newLikeFlat(inputDataVec);
           sendbuf = flatInputTensor.data_ptr();
 
           // copy the input tensors to the flatten large send buffer
-          for (size_t i = 0; i < inputDataVec->size(); ++i) {
-            flatInputTensor[i].copy_(inputDataVec->at(i));
+          for (size_t i = 0; i < inputDataVec.size(); ++i) {
+            flatInputTensor[i].copy_(inputDataVec.at(i));
           }
         }
 
@@ -514,7 +513,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::send(
   checkSingleTensor(tensors);
   std::function<void(std::unique_ptr<WorkEntry>&)> runFunc =
       [dstRank](std::unique_ptr<WorkEntry>& entry) {
-        auto data = (*entry->src)[0];
+        auto data = (entry->src)[0];
         MPI_CHECK(MPI_Send(
             data.data_ptr(),
             data.numel(),
@@ -534,7 +533,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::recv(
   checkSingleTensor(tensors);
   std::function<void(std::unique_ptr<WorkEntry>&)> runFunc =
       [srcRank](std::unique_ptr<WorkEntry>& entry) {
-        auto data = (*entry->src)[0];
+        auto data = (entry->src)[0];
         MPI_CHECK(MPI_Recv(
             data.data_ptr(),
             data.numel(),
@@ -555,7 +554,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::recvAnysource(
   checkSingleTensor(tensors);
   std::function<void(std::unique_ptr<WorkEntry>&)> runFunc =
       [srcRank](std::unique_ptr<WorkEntry>& entry) {
-        auto data = (*entry->src)[0];
+        auto data = (entry->src)[0];
         MPI_Status status;
         MPI_CHECK(MPI_Recv(
             data.data_ptr(),
