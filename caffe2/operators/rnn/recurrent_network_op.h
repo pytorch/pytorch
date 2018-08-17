@@ -58,8 +58,9 @@ inline void UpdateTimestepBlob(Workspace* ws, std::string blob_name, int t) {
   timestepBlob->GetMutableTensor(CPU)->template mutable_data<int32_t>()[0] = t;
 }
 
-std::map<string, string> GetRecurrentMapping(
-  const std::vector<detail::Link>& links, bool backward);
+CAFFE2_API std::map<string, string> GetRecurrentMapping(
+    const std::vector<detail::Link>& links,
+    bool backward);
 
 template <typename T, typename Context>
 void applyOffsetAlias(
@@ -150,15 +151,15 @@ void initializeRecurrentInput(
   }
 }
 
-void PrependOps(std::vector<OperatorDef> ops, NetDef* netdef);
+CAFFE2_API void PrependOps(std::vector<OperatorDef> ops, NetDef* netdef);
 
-void AddApplyLinkOps(
+CAFFE2_API void AddApplyLinkOps(
     const vector<Link>& links,
     std::string timestep,
     const DeviceOption& device_option,
     NetDef* netdef);
 
-void extractLinks(
+CAFFE2_API void extractLinks(
     OperatorBase* op,
     const std::string& internalArg,
     const std::string& externalArg,
@@ -166,7 +167,8 @@ void extractLinks(
     const std::string& windowArg,
     std::vector<detail::Link>* links);
 
-NetDef extractNetDef(const OperatorDef& op, const std::string& argName);
+CAFFE2_API NetDef
+extractNetDef(const OperatorDef& op, const std::string& argName);
 } // namespace detail
 
 template <class Context>
