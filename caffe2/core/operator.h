@@ -24,7 +24,7 @@
 
 namespace caffe2 {
 
-class OperatorBase;
+class CAFFE2_API OperatorBase;
 typedef ObserverBase<OperatorBase> OperatorObserver;
 
 class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
@@ -944,12 +944,12 @@ class UnsupportedOperatorFeature : public std::exception {
 
 // Creates an operator with the given operator definition.
 // Throws on error and never returns nullptr
-unique_ptr<OperatorBase> CreateOperator(
+CAFFE2_API unique_ptr<OperatorBase> CreateOperator(
     const OperatorDef& operator_def,
     Workspace* ws,
     int net_position = OperatorBase::kNoNetPositionSet);
 
-const std::string OpRegistryKey(
+CAFFE2_API const std::string OpRegistryKey(
     const std::string& op_type,
     const std::string& engine = "");
 

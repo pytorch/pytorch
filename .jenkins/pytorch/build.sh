@@ -42,11 +42,11 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # This environment variable enabled HCC Optimizations that speed up the linking stage.
   # https://github.com/RadeonOpenCompute/hcc#hcc-with-thinlto-linking
   export KMTHINLTO=1
-  
+
   # Need the libc++1 and libc++abi1 libraries to allow torch._C to load at runtime
   sudo apt-get install libc++1
   sudo apt-get install libc++abi1
-  
+
   python tools/amd_build/build_pytorch_amd.py
   USE_ROCM=1 python setup.py install --user
   exit 0
@@ -118,5 +118,9 @@ if [[ "$BUILD_TEST_LIBTORCH" == "1" ]]; then
   echo "Building libtorch"
   # NB: Install outside of source directory (at the same level as the root
   # pytorch folder) so that it doesn't get cleaned away prior to docker push.
-  WERROR=1 VERBOSE=1 tools/cpp_build/build_caffe2.sh "$PWD/../cpp-build"
+  BUILD_LIBTORCH_PY=$PWD/tools/build_libtorch.py
+  mkdir -p ../cpp-build/caffe2
+  pushd ../cpp-build/caffe2
+  WERROR=1 VERBOSE=1 DEBUG=1 python $BUILD_LIBTORCH_PY
+  popd
 fi
