@@ -3252,6 +3252,7 @@ class TestKL(TestCase):
         self.assertEqual(kl_divergence(Bernoulli(1), Bernoulli(1)), 0)
         self.assertEqual(kl_divergence(Categorical(torch.tensor([0., 1.])), Categorical(torch.tensor([0., 1.]))), 0)
 
+    @skipIfRocm
     def test_kl_shape(self):
         for Dist, params in EXAMPLES:
             for i, param in enumerate(params):
@@ -4002,6 +4003,7 @@ class TestValidation(TestCase):
         super(TestCase, self).setUp()
         Distribution.set_default_validate_args(True)
 
+    @skipIfRocm
     def test_valid(self):
         for Dist, params in EXAMPLES:
             for i, param in enumerate(params):
