@@ -218,14 +218,16 @@ struct GraphFuser {
           /*const=*/attr::alpha) ||
         node->matches("aten::add(Tensor self, Scalar other, Scalar alpha) -> Tensor",
           /*const=*/{attr::other, attr::alpha}) ||
-        node->matches("aten::add(Scalar other, Tensor self) -> Tensor",
-          /*const=*/attr::other) ||
+        node->matches("aten::add(Scalar other, Tensor self) -> Tensor", /*const=*/attr::other) ||
         node->matches("aten::sub(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
           /*const=*/attr::alpha) ||
         node->matches("aten::sub(Tensor self, Scalar other, Scalar alpha) -> Tensor",
           /*const=*/{attr::other, attr::alpha}) ||
-        node->matches("aten::sub(Scalar other, Tensor self) -> Tensor",
-          /*const=*/attr::other)) {
+        node->matches("aten::sub(Scalar other, Tensor self) -> Tensor", /*const=*/attr::other) ||
+        node->matches("aten::mul(Tensor self, Scalar other) -> Tensor", /*const=*/attr::other) ||
+        node->matches("aten::mul(Scalar other, Tensor self) -> Tensor", /*const=*/attr::other) ||
+        node->matches("aten::div(Tensor self, Scalar other) -> Tensor", /*const=*/attr::other) ||
+        node->matches("aten::div(Scalar other, Tensor self) -> Tensor", /*const=*/attr::other)) {
       auto inputs = tensorInputs(node);
       return areTensorsOfSameShape(inputs) && haveSupportedType(inputs);
     }
