@@ -39,15 +39,14 @@ std::string getPythonInterpreterStackTrace() {
   return stack_trace.str();
 }
 
-// This is a temporary constructor so that we can write python tests of
-// the executor. It does not have most of the functionality of CompiledFunction
-// such as being able to hold parameters...
 std::shared_ptr<torch::jit::Graph> createGraphByTracing(
         py::function func,
-        tracer::variable_list trace_inputs,
-        size_t num_func_inputs) {
+        Stack trace_inputs,
+        at::optional<size_t> num_real_inputs) {
+  size_t num_func_inputs = num_real_inputs.value_or(trace_inputs.size());
   auto enter_info = tracer::enter(std::move(trace_inputs));
   try {
+
     py::tuple py_inputs(num_func_inputs);
     for(size_t i = 0; i < num_func_inputs; ++i) {
       py_inputs[i] = py::cast(enter_info.second[i]);
@@ -128,8 +127,8 @@ void initPythonTracerBindings(PyObject* module) {
       return s.graph;
     });
 
-  m.def("_tracer_enter", [](variable_list trace_inputs) {
-    return tracer::enter(std::move(trace_inputs));
+  m.def("_tracer_enter", [](py::args trace_inputs) {
+    return tracer::enter(toStack(trace_inputs));
   });
   m.def("_tracer_exit", [](variable_list var_outputs) {
     tracer::exit(var_outputs);

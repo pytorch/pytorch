@@ -85,4 +85,25 @@ ListTypePtr ListType::ofFloats() {
   return value;
 }
 
+TypePtr inferTypeFrom(const IValue& value) {
+  if (value.isTensor()) {
+    return TensorType::create(value.toTensor());
+  } else if (value.isDouble()) {
+    return FloatType::get();
+  } else if (value.isInt()) {
+    return IntType::get();
+  } else if (value.isString()) {
+    return StringType::get();
+  } else if (value.isIntList()) {
+    return ListType::ofInts();
+  } else if (value.isTensorList()) {
+    return ListType::ofTensors();
+  } else if (value.isDoubleList()) {
+    return ListType::ofFloats();
+  } else if (value.isTuple()) {
+    return TupleType::create(fmap(value.toTuple()->elements(), inferTypeFrom));
+  }
+  AT_ASSERTM(false, "Unhandled IValue kind in inferTypeFrom");
+}
+
 }} // namespace torch::jit

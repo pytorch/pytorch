@@ -1,0 +1,6 @@
+graph(%0 : Double(2, 2)
+      %1 : Tuple) {
+  %2 : Double(2, 2), %3 : Double(2, 2) = prim::TupleUnpack(%1)
+  %4 : Double(2, 2) = aten::mul(%0, %3)
+  return (%4);
+}

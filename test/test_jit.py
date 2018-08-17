@@ -917,6 +917,15 @@ class TestJit(JitTestCase):
     def test_trace_size_with_grad(self):
         self.do_trace_size(True)
 
+    def test_trace_tuple(self):
+        def fn(x, y):
+            return x * y[1]
+
+        x, y = torch.randn(2, 2), (torch.ones(2, 2), torch.randn(2, 2))
+        traced_fn = torch.jit.trace(x, y)(fn)
+        self.assertEqual(traced_fn(x, y), fn(x, y))
+        self.assertExpectedGraph(traced_fn.graph)
+
     # TODO: implement
     @unittest.expectedFailure
     def test_output_unflatten(self):
