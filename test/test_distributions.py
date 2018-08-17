@@ -1578,6 +1578,7 @@ class TestDistributions(TestCase):
                                  (mean_multi_batch, cov_factor_batched, cov_diag_batched))
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @skipIfRocm
     def test_lowrank_multivariate_normal_log_prob(self):
         mean = torch.randn(3, requires_grad=True)
         cov_factor = torch.randn(3, 1, requires_grad=True)
@@ -1611,6 +1612,7 @@ class TestDistributions(TestCase):
         self.assertAlmostEqual(0.0, (batched_prob - unbatched_prob).abs().max(), places=3)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @skipIfRocm
     def test_lowrank_multivariate_normal_sample(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         mean = torch.randn(5, requires_grad=True)
@@ -1699,6 +1701,7 @@ class TestDistributions(TestCase):
         self._gradcheck_log_prob(MultivariateNormal, (mean_no_batch, None, None, scale_tril_batched))
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @skipIfRocm
     def test_multivariate_normal_log_prob(self):
         mean = torch.randn(3, requires_grad=True)
         tmp = torch.randn(3, 10)
@@ -1736,6 +1739,7 @@ class TestDistributions(TestCase):
         self.assertAlmostEqual(0.0, (batched_prob - unbatched_prob).abs().max(), places=3)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @skipIfRocm
     def test_multivariate_normal_sample(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         mean = torch.randn(3, requires_grad=True)
@@ -3637,6 +3641,7 @@ class TestAgainstScipy(TestCase):
             )
         ]
 
+    @skipIfRocm
     def test_mean(self):
         for pytorch_dist, scipy_dist in self.distribution_pairs:
             if isinstance(pytorch_dist, (Cauchy, HalfCauchy)):
@@ -3647,6 +3652,7 @@ class TestAgainstScipy(TestCase):
             else:
                 self.assertEqual(pytorch_dist.mean, scipy_dist.mean(), allow_inf=True, message=pytorch_dist)
 
+    @skipIfRocm
     def test_variance_stddev(self):
         for pytorch_dist, scipy_dist in self.distribution_pairs:
             if isinstance(pytorch_dist, (Cauchy, HalfCauchy)):
@@ -3662,6 +3668,7 @@ class TestAgainstScipy(TestCase):
                 self.assertEqual(pytorch_dist.variance, scipy_dist.var(), allow_inf=True, message=pytorch_dist)
                 self.assertEqual(pytorch_dist.stddev, scipy_dist.var() ** 0.5, message=pytorch_dist)
 
+    @skipIfRocm
     def test_cdf(self):
         for pytorch_dist, scipy_dist in self.distribution_pairs:
             samples = pytorch_dist.sample((5,))
@@ -3671,6 +3678,7 @@ class TestAgainstScipy(TestCase):
                 continue
             self.assertEqual(cdf, scipy_dist.cdf(samples), message=pytorch_dist)
 
+    @skipIfRocm
     def test_icdf(self):
         for pytorch_dist, scipy_dist in self.distribution_pairs:
             samples = torch.rand((5,) + pytorch_dist.batch_shape)
