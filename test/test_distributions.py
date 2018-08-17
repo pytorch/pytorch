@@ -2176,6 +2176,7 @@ class TestDistributions(TestCase):
                     except NotImplementedError:
                         pass
 
+    @skipIfRocm
     def test_cdf_icdf_inverse(self):
         # Tests the invertibility property on the distributions
         for Dist, params in EXAMPLES:
@@ -2195,6 +2196,7 @@ class TestDistributions(TestCase):
                     'icdf(cdf(x)) = {}'.format(actual),
                 ]))
 
+    @skipIfRocm
     def test_cdf_log_prob(self):
         # Tests if the differentiation of the CDF gives the PDF at a given value
         for Dist, params in EXAMPLES:
