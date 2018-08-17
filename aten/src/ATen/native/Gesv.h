@@ -10,7 +10,7 @@ static inline bool isTransposeContiguous(Tensor& self) {
 }
 
 /* gesv takes (self, A) and returns (sol, lu).
- * (i)  output tensors (sol, lu) may be same as input tensor (self, A)
+ * (i)  output tensors (sol, lu) may be same as input tensors (self, A)
  * (ii) for 2D matrices, .t_() represents their column-major format
  *
  * Cases:
