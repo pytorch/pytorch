@@ -7,7 +7,7 @@ from itertools import product
 import torch
 import torch.cuda
 from torch.nn.functional import _Reduction
-from common import TestCase, to_gpu, freeze_rng_state, is_iterable
+from common import TestCase, to_gpu, freeze_rng_state, is_iterable, TEST_WITH_ROCM
 from common_cuda import TEST_CUDA
 from torch.autograd.gradcheck import get_numerical_jacobian, iter_tensors
 import torch.backends.cudnn
@@ -125,7 +125,8 @@ module_tests = [
         module_name='ELU',
         constructor_args=(2.,),
         input_size=(3, 2, 5),
-        reference_fn=lambda x, _: torch.where(x >= 0, x, 2 * (x.exp() - 1))
+        reference_fn=lambda x, _: torch.where(x >= 0, x, 2 * (x.exp() - 1)),
+        test_cuda=(not TEST_WITH_ROCM),
     ),
     # TODO: reference function
     dict(
@@ -720,6 +721,7 @@ criterion_tests = [
         reference_fn=lambda i, t, m:
             cosineembeddingloss_reference(i[0], i[1], t, reduction=get_reduction(m)),
         check_sum_reduction=True,
+        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         module_name='CosineEmbeddingLoss',
@@ -730,6 +732,7 @@ criterion_tests = [
             cosineembeddingloss_reference(i[0], i[1], t, margin=0.7, reduction=get_reduction(m)),
         desc='margin',
         check_sum_reduction=True,
+        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         module_name='MarginRankingLoss',
