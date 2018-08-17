@@ -184,7 +184,7 @@ class _DistributedDataParallelC10d(Module):
                 if not param_tuple[0].requires_grad:
                     continue
                 for p in param_tuple:
-                    self.bucket_map[p] = (bucket_idx, idx)
+                    self.bucket_map[id(p)] = (bucket_idx, idx)
                 self.bucket_sizes[bucket_idx] += 1
 
         self.buckets = [[[None for _ in range(self.bucket_sizes[i])]
@@ -280,7 +280,7 @@ class _DistributedDataParallelC10d(Module):
                     self._grad_accs.append(grad_acc)
 
     def _make_param_hook(self, param, device_idx):
-        bucket_idx, bucket_offset = self.bucket_map[param]
+        bucket_idx, bucket_offset = self.bucket_map[id(param)]
 
         def distributed_data_parallel_hook(*unused):
             if param.grad.requires_grad:

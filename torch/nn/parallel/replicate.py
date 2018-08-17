@@ -8,14 +8,14 @@ def replicate(network, devices, detach=False):
     num_replicas = len(devices)
 
     params = list(network.parameters())
-    param_indices = {param: idx for idx, param in enumerate(params)}
+    param_indices = {id(param): idx for idx, param in enumerate(params)}
     param_copies = Broadcast.apply(devices, *params)
     if len(params) > 0:
         param_copies = [param_copies[i:i + len(params)]
                         for i in range(0, len(param_copies), len(params))]
 
     buffers = list(network.buffers())
-    buffer_indices = {buf: idx for idx, buf in enumerate(buffers)}
+    buffer_indices = {id(buf): idx for idx, buf in enumerate(buffers)}
     buffer_copies = comm.broadcast_coalesced(buffers, devices)
 
     modules = list(network.modules())
@@ -49,7 +49,7 @@ def replicate(network, devices, detach=False):
                     replica = module_copies[j][i]
                     replica._parameters[key] = None
             else:
-                param_idx = param_indices[param]
+                param_idx = param_indices[id(param)]
                 for j in range(num_replicas):
                     replica = module_copies[j][i]
                     replica._parameters[key] = param_copies[j][param_idx].detach() \
@@ -60,7 +60,7 @@ def replicate(network, devices, detach=False):
                     replica = module_copies[j][i]
                     replica._buffers[key] = None
             else:
-                buffer_idx = buffer_indices[buf]
+                buffer_idx = buffer_indices[id(buf)]
                 for j in range(num_replicas):
                     replica = module_copies[j][i]
                     replica._buffers[key] = buffer_copies[j][buffer_idx]
