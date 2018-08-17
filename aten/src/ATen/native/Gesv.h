@@ -4,9 +4,9 @@
 namespace at { namespace native {
 
 static inline bool isTransposeContiguous(Tensor& self) {
- return self.dim() == 2 &&
-        self.stride(0) == 1 &&
-        self.stride(1) == self.size(0);
+  return self.dim() == 2 &&
+          self.stride(0) == 1 &&
+          self.stride(1) == self.size(0);
 }
 
 /* gesv takes (self, A) and returns (sol, lu).
