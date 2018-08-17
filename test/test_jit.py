@@ -555,6 +555,7 @@ class TestJit(JitTestCase):
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @skipIfRocm
     def test_fusion_rand(self):
         class M(torch.jit.ScriptModule):
             __constants__ = ['d']
@@ -6068,6 +6069,7 @@ class TestPytorchExportModes(JitTestCase):
                            export_type=torch.onnx.ExportTypes.DIRECTORY)
         shutil.rmtree(d)
 
+    @skipIfRocm
     def test_aten_fallback(self):
         class ModelWithAtenNotONNXOp(nn.Module):
             def forward(self, x, y):
