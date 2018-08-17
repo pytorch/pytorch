@@ -1885,6 +1885,7 @@ class TestDistributions(TestCase):
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @skipIfRocm
     def test_gamma_gpu_shape(self):
         alpha = torch.tensor(torch.exp(torch.randn(2, 3).cuda()), requires_grad=True)
         beta = torch.tensor(torch.exp(torch.randn(2, 3).cuda()), requires_grad=True)
