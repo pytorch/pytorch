@@ -24,7 +24,7 @@ namespace caffe2 {
 
 class NetBase;
 
-struct StopOnSignal {
+struct CAFFE2_API StopOnSignal {
   StopOnSignal()
       : handler_(std::make_shared<SignalHandler>(
             SignalHandler::Action::STOP,
@@ -44,7 +44,7 @@ struct StopOnSignal {
  * runtime: (1) all blobs, and (2) all instantiated networks. It is the owner of
  * all these objects and deals with the scaffolding logistics.
  */
-class Workspace {
+class CAFFE2_API Workspace {
  public:
   typedef std::function<bool(int)> ShouldContinue;
   typedef CaffeMap<string, unique_ptr<Blob> > BlobMap;

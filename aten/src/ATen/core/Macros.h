@@ -7,19 +7,30 @@
 // static library (in which case, saying the symbol is coming
 // from a DLL would be incorrect).
 
+#define AT_CORE_EXPORT
+#define AT_CORE_IMPORT
+
 #ifdef _WIN32
-#if !defined(AT_CORE_STATIC_WINDOWS)
-#if defined(ATen_cpu_EXPORTS) || defined(caffe2_EXPORTS)
-#define AT_CORE_API __declspec(dllexport)
-#else
-#define AT_CORE_API __declspec(dllimport)
-#endif
-#else
-#define AT_CORE_API
-#endif
-#else
-#define AT_CORE_API
-#endif
+  #ifndef AT_CORE_STATIC_WINDOWS
+    #undef AT_CORE_EXPORT
+    #undef AT_CORE_IMPORT
+    #define AT_CORE_EXPORT __declspec(dllexport)
+    #define AT_CORE_IMPORT __declspec(dllimport)
+  #endif // !defined(AT_CORE_STATIC_WINDOWS)
+#else  // _WIN32
+  #if defined(__GNUC__) || defined(__llvm__)
+    #undef AT_CORE_EXPORT
+    #undef AT_CORE_IMPORT
+    #define AT_CORE_EXPORT __attribute__((__visibility__("default")))
+    #define AT_CORE_IMPORT AT_CORE_EXPORT
+  #endif // defined(__GNUC__) || defined(__llvm__)
+#endif  // _WIN32
+
+#if defined(CAFFE2_BUILD_MAIN_LIBS) || defined(ATen_cpu_EXPORTS) || defined(caffe2_EXPORTS)
+  #define AT_CORE_API AT_CORE_EXPORT
+#else // defined(CAFFE2_BUILD_MAIN_LIBS) || defined(ATen_cpu_EXPORTS) || defined(caffe2_EXPORTS)
+  #define AT_CORE_API AT_CORE_IMPORT
+#endif // defined(CAFFE2_BUILD_MAIN_LIBS) || defined(ATen_cpu_EXPORTS) || defined(caffe2_EXPORTS)
 
 // Disable the copy and assignment operator for a class. Note that this will
 // disable the usage of the class in std containers.

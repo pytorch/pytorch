@@ -203,7 +203,7 @@ TEST_CASE("serialization") {
       loss.backward();
       optimizer.step();
 
-      running_loss = running_loss * 0.99 + loss.data().sum().toCFloat() * 0.01;
+      running_loss = running_loss * 0.99 + loss.sum().toCFloat() * 0.01;
       REQUIRE(epoch < 3000);
       epoch++;
     }
@@ -314,7 +314,7 @@ TEST_CASE("serialization_cuda", "[cuda]") {
     loss.backward();
     optimizer.step();
 
-    running_loss = running_loss * 0.99 + loss.data().sum().toCFloat() * 0.01;
+    running_loss = running_loss * 0.99 + loss.sum().toCFloat() * 0.01;
     REQUIRE(epoch < 3000);
     epoch++;
   }

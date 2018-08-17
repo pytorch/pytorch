@@ -13,6 +13,7 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/core/registry.h"
 #include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/utils/filler.h"
 
 namespace caffe2 {
 
@@ -35,10 +36,11 @@ constexpr int kCannotComputeNumOutputs = -1;
  *     OPERATOR_SCHEMA(name)
  *         .NumInputs(2).NumOutputs(1).AllowInplace({{0, 0}});
  */
-class OpSchema {
+class CAFFE2_API OpSchema {
  public:
-  OpSchema() : file_("unknown"), line_(0) {}
-  OpSchema(const string& file, const int line) : file_(file), line_(line) {}
+  OpSchema() : type_("unknown"), file_("unknown"), line_(0) {}
+  OpSchema(const string& type, const string& file, const int line)
+      : type_(type), file_(file), line_(line) {}
 
   /**
    * @brief Returns the file that the op schema is registered from.
@@ -261,8 +263,8 @@ class OpSchema {
   Arg(const char* name, const char* description, bool required = false);
 
 #define DECLARE_STANDARD_ARG(name, str)     \
-  CAFFE2_API static const char* Arg_##name; \
-  CAFFE2_API OpSchema& Arg##name(const char* description);
+  static const char* Arg_##name; \
+  OpSchema& Arg##name(const char* description);
 
   DECLARE_STANDARD_ARG(IsTest, is_test)
 
@@ -358,7 +360,33 @@ class OpSchema {
     return device_inference_function_(def);
   }
 
+  // The helper is build sparse input with values, keys, and lengths; e.g.:
+  // values  = [1, 2, 3, 2, 4, 6, 7, 3, 6]
+  // keys    = [0, 1, 4, 0, 1, 2, 5, 1, 2]
+  //            \_____/  \________/  \__/
+  // lengths =    [3,        4,       2]
+  OpSchema& ValueKeyLengthInputFillers(
+      size_t value_index,
+      size_t key_index,
+      size_t length_index);
+
+  // The helper is build sparse input with values and lengths; e.g.:
+  // values  = [1, 2, 3, 2, 4, 6, 7, 3, 6]
+  //            \_____/  \________/  \__/
+  // lengths =    [3,        4,       2]
+  OpSchema& ValueLengthInputFillers(size_t value_index, size_t length_index);
+
+  OpSchema& DisallowInputFillers();
+
+  std::vector<TensorFiller> InputFillers(
+      const std::vector<std::vector<TIndex>>& shapes) const;
+
  private:
+  std::vector<TensorFiller> SupplyDenseFillers(
+      const std::vector<std::vector<TIndex>>& shapes);
+
+ private:
+  string type_;
   string file_;
   string doc_;
   string onnx_schema_;
@@ -404,12 +432,19 @@ class OpSchema {
         vector<DeviceOption> out_dev(def.output_size(), op_device);
         return std::make_pair(in_dev, out_dev);
       };
+
+  std::function<std::vector<TensorFiller>(
+      const std::vector<std::vector<TIndex>>&)>
+      filler_supplier_ =
+          [this](const std::vector<std::vector<TIndex>>& shapes) {
+            return SupplyDenseFillers(shapes);
+          };
 };
 
 /**
  * @brief A registry to hold all the operator schemas.
  */
-class OpSchemaRegistry {
+class CAFFE2_API OpSchemaRegistry {
  public:
   static OpSchema&
   NewSchema(const string& key, const string& file, const int line) {
@@ -424,7 +459,7 @@ class OpSchemaRegistry {
                 << " line " << schema.line();
       abort();
     }
-    m.emplace(std::make_pair(key, OpSchema(file, line)));
+    m.emplace(std::make_pair(key, OpSchema(key, file, line)));
     return m[key];
   }
 

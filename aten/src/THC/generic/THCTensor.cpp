@@ -63,13 +63,13 @@ real *THCTensor_(data)(THCState *state, const THCTensor *self)
 /* Empty init */
 THCTensor *THCTensor_(new)(THCState *state)
 {
-  return new THCTensor(THCStorage_(new)(state));
+  return new THCTensor(THCStorage_(new)(state), at::CUDATensorId(), false);
 }
 
 /* Pointer-copy init */
 THCTensor *THCTensor_(newWithTensor)(THCState *state, THCTensor *tensor)
 {
-  THCTensor *self = new THCTensor(THCStorage_(new)(state));
+  THCTensor *self = new THCTensor(THCStorage_(new)(state), at::CUDATensorId(), false);
   THCTensor_(setStorageNd)(state,
                            self,
                            THTensor_getStoragePtr(tensor),
@@ -85,7 +85,7 @@ THCTensor *THCTensor_(newWithStorage)(THCState *state, THCStorage *storage, ptrd
   if (strides.data()) {
     AT_CHECK(sizes.size() == strides.size(), "number of sizes and strides must match");
   }
-  THCTensor *self = new THCTensor(THCStorage_(new)(state));
+  THCTensor *self = new THCTensor(THCStorage_(new)(state), at::CUDATensorId(), false);
   THCTensor_(setStorageNd)(state, self, storage, storageOffset, sizes.size(),
                            const_cast<int64_t*>(sizes.data()), const_cast<int64_t*>(strides.data()));
 

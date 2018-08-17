@@ -105,7 +105,7 @@ namespace gflags = google;
 #define CAFFE2_GFLAGS_DECLARE_WRAPPER(type, real_type, name)                   \
   DECLARE_##type(name);                                                        \
   namespace caffe2 {                                                           \
-    extern real_type& FLAGS_##name ;                                           \
+    CAFFE2_IMPORT extern real_type& FLAGS_##name;                              \
   }  // namespace caffe2
 
 #define CAFFE2_DECLARE_int(name)                                               \

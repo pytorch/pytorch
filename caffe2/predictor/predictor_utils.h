@@ -7,15 +7,15 @@
 namespace caffe2 {
 namespace predictor_utils {
 
-const NetDef getNet(const MetaNetDef& def, const std::string& name);
+CAFFE2_API const NetDef getNet(const MetaNetDef& def, const std::string& name);
 
-std::unique_ptr<MetaNetDef> extractMetaNetDef(
+CAFFE2_API std::unique_ptr<MetaNetDef> extractMetaNetDef(
     db::Cursor* cursor,
     const std::string& key);
 
 // Extract the MetaNetDef from `db`, and run the global init net on the
 // `master` workspace.
-std::unique_ptr<MetaNetDef> runGlobalInitialization(
+CAFFE2_API std::unique_ptr<MetaNetDef> runGlobalInitialization(
     std::unique_ptr<db::DBReader> db,
     Workspace* master);
 

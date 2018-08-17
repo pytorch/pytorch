@@ -30,12 +30,6 @@
 // is not fixed at the moment.
 
 namespace caffe2 {
-class TypeIdentifier;
-}
-
-std::ostream& operator<<(std::ostream& stream, caffe2::TypeIdentifier typeId);
-
-namespace caffe2 {
 
 class TypeMeta;
 
@@ -45,11 +39,11 @@ class TypeMeta;
  * use TypeIdentifier with custom types. This is for example used to store the
  * dtype of tensors.
  */
-class TypeIdentifier final : public at::IdWrapper<TypeIdentifier, uint16_t> {
+class AT_CORE_API TypeIdentifier final : public at::IdWrapper<TypeIdentifier, uint16_t> {
  public:
   static TypeIdentifier createTypeId();
 
-  friend std::ostream& ::operator<<(
+  friend std::ostream& operator<<(
       std::ostream& stream,
       TypeIdentifier typeId);
   friend bool operator<(TypeIdentifier lhs, TypeIdentifier rhs);
@@ -70,26 +64,30 @@ inline bool operator<(TypeIdentifier lhs, TypeIdentifier rhs) {
   return lhs.underlyingId() < rhs.underlyingId();
 }
 
-} // namespace caffe2
-
-AT_DEFINE_HASH_FOR_IDWRAPPER(caffe2::TypeIdentifier)
-
 inline std::ostream& operator<<(
     std::ostream& stream,
     caffe2::TypeIdentifier typeId) {
   return stream << typeId.underlyingId();
 }
 
+} // namespace caffe2
+
+namespace at {
+using DataType = caffe2::TypeIdentifier;
+}
+
+AT_DEFINE_HASH_FOR_IDWRAPPER(caffe2::TypeIdentifier)
+
 namespace caffe2 {
 
-std::unordered_map<TypeIdentifier, std::string>& gTypeNames();
-std::unordered_set<std::string>& gRegisteredTypeNames();
+AT_CORE_API std::unordered_map<TypeIdentifier, std::string>& gTypeNames();
+AT_CORE_API std::unordered_set<std::string>& gRegisteredTypeNames();
 
 // A utility function to return an exception std::string by prepending its
-// exception type before its what() content.
-std::string GetExceptionString(const std::exception& e);
+// exception type before its what() content
+AT_CORE_API std::string GetExceptionString(const std::exception& e);
 
-std::mutex& gTypeRegistrationMutex();
+AT_CORE_API std::mutex& gTypeRegistrationMutex();
 
 template <typename T>
 struct TypeNameRegisterer {
@@ -136,7 +134,7 @@ struct TypeNameRegisterer {
  * stores some additional data such as the item size and the name of the type
  * for run-time inspection.
  */
-class TypeMeta {
+class AT_CORE_API TypeMeta {
  public:
   using PlacementNew = void(void*, size_t);
   using TypedCopy = void(const void*, void*, size_t);
@@ -393,30 +391,14 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
  *
  * NOTE: the macro needs to be invoked in ::caffe2 namespace
  */
-// Implementation note: in MSVC, we will need to prepend the AT_CORE_API
-// keyword in order to get things compiled properly. in Linux, gcc seems to
-// create attribute ignored error for explicit template instantiations, see
-//   http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2017/p0537r0.html
-//   https://gcc.gnu.org/bugzilla/show_bug.cgi?id=51930
-// and as a result, we define these two macros slightly differently.
 
-#ifdef _MSC_VER
 #define CAFFE_KNOWN_TYPE(T)                                               \
   template <>                                                             \
-  AT_CORE_API TypeIdentifier TypeMeta::Id<T>() {                          \
+  AT_CORE_EXPORT TypeIdentifier TypeMeta::Id<T>() {                       \
     static const TypeIdentifier type_id = TypeIdentifier::createTypeId(); \
     static TypeNameRegisterer<T> registerer(type_id, #T);                 \
     return type_id;                                                       \
   }
-#else // _MSC_VER
-#define CAFFE_KNOWN_TYPE(T)                                               \
-  template <>                                                             \
-  TypeIdentifier TypeMeta::Id<T>() {                                      \
-    static const TypeIdentifier type_id = TypeIdentifier::createTypeId(); \
-    static TypeNameRegisterer<T> registerer(type_id, #T);                 \
-    return type_id;                                                       \
-  }
-#endif
 
 /**
  * CAFFE_DECLARE_KNOWN_TYPE and CAFFE_DEFINE_KNOWN_TYPE are used
@@ -424,19 +406,11 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
  * can be resolved at compile time. Please use CAFFE_KNOWN_TYPE() instead
  * for your own types to allocate dynamic ids for them.
  */
-#ifdef _MSC_VER
-#define CAFFE_DECLARE_KNOWN_TYPE(PreallocatedId, T)     \
-  template <>                                           \
-  inline AT_CORE_API TypeIdentifier TypeMeta::Id<T>() { \
-    return TypeIdentifier(PreallocatedId);              \
+#define CAFFE_DECLARE_KNOWN_TYPE(PreallocatedId, T)                       \
+  template <>                                                             \
+  AT_CORE_EXPORT inline AT_CORE_API TypeIdentifier TypeMeta::Id<T>() {    \
+    return TypeIdentifier(PreallocatedId);                                \
   }
-#else // _MSC_VER
-#define CAFFE_DECLARE_KNOWN_TYPE(PreallocatedId, T) \
-  template <>                                       \
-  inline TypeIdentifier TypeMeta::Id<T>() {         \
-    return TypeIdentifier(PreallocatedId);          \
-  }
-#endif
 
 #define CONCAT_IMPL(x, y) x##y
 #define MACRO_CONCAT(x, y) CONCAT_IMPL(x, y)

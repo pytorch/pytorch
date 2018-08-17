@@ -42,12 +42,13 @@ TEST(NeuralNetGraph, ReplaceGraph) {
         reluOutput
   */
 
+  auto mg = NNMatchGraph();
   // clang-format off
-  auto pattern = NNSubtree(
+  auto pattern = tree(mg,
       matchNodeType<Relu>(), {
-          operatorTree(
+          operatorTree(mg,
               matchNodeType<Sum>(), {
-                NNSubtree::nonTerminal(matchNodeType<Tensor>(), 2)
+                tree(mg, matchNodeType<Tensor>(), {}, 2, true)
               }),
       });
   // clang-format on

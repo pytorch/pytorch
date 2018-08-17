@@ -8,7 +8,7 @@
 namespace caffe2 {
 
 template <typename T, class Context>
-class LarsOp final : public Operator<Context> {
+class CAFFE2_API LarsOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   LarsOp(const OperatorDef& operator_def, Workspace* ws)
