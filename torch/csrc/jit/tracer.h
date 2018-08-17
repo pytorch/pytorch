@@ -4,6 +4,7 @@
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/jit/assertions.h"
 #include "torch/csrc/jit/constants.h"
+#include "torch/csrc/jit/stack.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/utils/functional.h"
 #include "torch/csrc/utils/functional.h"
@@ -153,22 +154,41 @@ inline Value* getOutputTrace(const std::shared_ptr<TracingState>& state, const V
 // Start tracing, treating 'inputs' as inputs to the trace, which can be
 // varied on subsequent invocations of the trace.  Any other variables
 // will be treated as constants.
-inline std::pair<std::shared_ptr<TracingState>, variable_list> enter(
-    variable_list inputs) {
+inline std::pair<std::shared_ptr<TracingState>, Stack> enter(Stack inputs) {
   if (isTracing()) {
     AT_ERROR("Tracing can't be nested");
   }
   auto state = std::make_shared<TracingState>();
   setTracingState(state);
-  for (auto& input : inputs) {
-    auto * value_state = state->value_map[input];
-    if (value_state) {
-      // See Note [Repeated inputs] in tracer.cpp
-      input = input.view(input.sizes());
+  // XXX: this function mutates input
+  const std::function<IValue(IValue, TypePtr, Value*)> add_input = [&](IValue input, TypePtr type, Value* value) -> IValue {
+    value->setType(type);
+    if (type->isSubtypeOf(DynamicType::get())) {
+      auto input_tensor = input.toTensor();
+      auto name = Variable(input_tensor).name();
+      if (state->value_map.find(input_tensor) != state->value_map.end()) {
+        input_tensor = input_tensor.view(input_tensor.sizes());
+      }
+      value->setUniqueName(name);
+      state->value_map[input_tensor] = value;
+      return input_tensor;
+    } else if (auto tuple_type = type->cast<TupleType>()) {
+      auto unpack_node = state->graph->insertNode(state->graph->createTupleUnpack(value));
+      auto elem_values = unpack_node->outputs();
+      auto elem_types = tuple_type->elements();
+      Stack elems = input.toTuple()->elements();
+      size_t num_elems = elems.size();
+      AT_ASSERT(elem_values.size() == num_elems && elem_types.size() == num_elems);
+      for (size_t i = 0; i < num_elems; ++i) {
+        elems[i] = add_input(elems[i], elem_types[i], elem_values[i]);
+      }
+      return Tuple::create(std::move(elems));
+    } else {
+      AT_ERROR("Only tensors or tuples of tensors can be inputs to traced functions");
     }
-    auto input_node = state->graph->addInput(input.name());
-    input_node->inferTypeFrom(input.data());
-    state->value_map[input] = input_node;
+  };
+  for (IValue& input : inputs) {
+    input = add_input(input, inferTypeFrom(input), state->graph->addInput());
   }
   return std::make_pair(state, inputs);
 }

@@ -212,6 +212,20 @@ RegisterOperators reg({
           };
         }),
     Operator(
+        prim::TupleUnpack,
+        [](Node* node) {
+          size_t N = node->outputs().size();
+          return [=](Stack& stack) {
+            auto t = pop(stack).toTuple();
+            const auto & elems = t->elements();
+            if (elems.size() != N) {
+              AT_ERROR("Expected a tuple of ", N, " elements, but got ", elems.size());
+            }
+            stack.insert(stack.end(), elems.begin(), elems.end());
+            return 0;
+          };
+        }),
+    Operator(
         prim::ListConstruct,
         [](Node* node) -> Operation {
           size_t num_inputs = node->inputs().size();
