@@ -1,5 +1,6 @@
 #include "caffe2/core/common.h"
 #include "caffe2/opt/backend_cutting.h"
+#include "caffe2/core/logging.h"
 #include "caffe2/utils/string_utils.h"
 
 #include <gtest/gtest.h>
@@ -41,10 +42,30 @@ namespace {
   }
 }
 
+// N0 -> MyConv -> N1
+TEST(BackendCuttingTest, unit) {
+  caffe2::NetDef net;
+  AddConv(&net, 0);
+  net.add_external_input("N0");
+  net.add_external_input("W0");
+  net.add_external_input("b0");
+  net.add_external_output("N1");
+  auto net_opt = caffe2::opt::OptimizeForBackend(net, Supports, Transform);
+  EXPECT_EQ(1, net_opt.op_size());
+  EXPECT_EQ(1, net_opt.external_input_size());
+  EXPECT_EQ(1, net_opt.external_output_size());
+}
+
+
 // X -> CopyIn -> MyConv -> MyConv -> CopyOut -> Y
 TEST(BackendCuttingTest, line) {
   caffe2::NetDef net;
   net.add_external_input("X");
+  // Adding weights as external intputs to test weight absorption
+  net.add_external_input("W0");
+  net.add_external_input("W1");
+  net.add_external_input("b0");
+  net.add_external_input("b1");
   net.add_external_output("Y");
   auto* op = net.add_op();
   op->set_type("CopyIn");
