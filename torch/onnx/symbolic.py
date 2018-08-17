@@ -1066,6 +1066,7 @@ def rnn_trace_override_symbolic(cell_type, func, sym, g, input, weights, hiddens
     inputs = list(itertools.chain.from_iterable(
         [[input], flattened_weights, hiddens,
             [batch_sizes] if batch_sizes else []]))
+
     outputs = g.wrapPyFuncWithSymbolic(
         forward_flattened_wrapper,
         inputs,
