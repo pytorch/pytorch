@@ -771,6 +771,11 @@ class TestNN(NNTestCase):
         output.backward(input)
         self.assertLess(abs(input_var.grad.data.mean() - (1 - p)), 0.05)
 
+        # check eval mode doesn't change anything
+        for inplace in [True, False]:
+            module = cls(p, inplace).eval()
+            self.assertEqual(input, module(input))
+
         # Check that these don't raise errors
         module.__repr__()
         str(module)
