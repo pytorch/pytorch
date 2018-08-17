@@ -222,5 +222,5 @@ class TestTransformations(test_util.TestCase):
             preTransformOutput,
             postTransformOutput,
             rtol=1e-02,
-            atol=1e-04
+            atol=1e-03
         )

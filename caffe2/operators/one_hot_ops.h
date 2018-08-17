@@ -13,9 +13,6 @@ class OneHotOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  // TODO: enable input filler
-  DISABLE_INPUT_FILLERS(Context)
-
   OneHotOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws) {}
 
@@ -27,7 +24,7 @@ class OneHotOp final : public Operator<Context> {
         "indices input must be 1D tensor of data type TIndex");
 
     // Index size input must be in CPU context
-    auto& index_size_tensor = OperatorBase::Input<Tensor>(1, CPU);
+    auto& index_size_tensor = this->template Input<Tensor>(1, CPU);
     CAFFE_ENFORCE_EQ(
         index_size_tensor.size(),
         1,
@@ -61,8 +58,6 @@ class BatchOneHotOp final : public Operator<Context> {
   BatchOneHotOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws) {}
 
-  USE_VALUE_KEY_LENGTH_INPUT_FILLERS(Context, X, VALS, LENS)
-
   bool RunOnDevice() override {
     return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(this, Input(X));
   }
@@ -70,8 +65,9 @@ class BatchOneHotOp final : public Operator<Context> {
   template <typename T>
   bool DoRunWithType();
 
- protected:
   INPUT_TAGS(X, LENS, VALS);
+
+ protected:
   OUTPUT_TAGS(ONE_HOT);
 
  private:
@@ -87,9 +83,6 @@ class BatchBucketOneHotOp final : public Operator<Context> {
       : Operator<Context>(operator_def, ws) {}
 
   bool RunOnDevice() override;
-
-  // TODO: enable input filler
-  DISABLE_INPUT_FILLERS(Context)
 
  protected:
   INPUT_TAGS(X, LENS, BOUNDARIES);

@@ -17,10 +17,10 @@ constexpr size_t gCaffe2Alignment = 32;
 using MemoryDeleter = void (*)(void*);
 
 // A helper function that is basically doing nothing.
-void NoDelete(void*);
+CAFFE2_API void NoDelete(void*);
 
 // A virtual allocator class to do memory allocation and deallocation.
-struct CPUAllocator {
+struct CAFFE2_API CPUAllocator {
   CPUAllocator() {}
   virtual ~CPUAllocator() noexcept {}
   virtual std::pair<void*, MemoryDeleter> New(size_t nbytes) = 0;
@@ -29,7 +29,7 @@ struct CPUAllocator {
 
 // A virtual struct that is used to report Caffe2's memory allocation and
 // deallocation status
-class MemoryAllocationReporter {
+class CAFFE2_API MemoryAllocationReporter {
  public:
   MemoryAllocationReporter() : allocated_(0) {}
   void New(void* ptr, size_t nbytes);
@@ -41,7 +41,7 @@ class MemoryAllocationReporter {
   size_t allocated_;
 };
 
-struct DefaultCPUAllocator final : CPUAllocator {
+struct CAFFE2_API DefaultCPUAllocator final : CPUAllocator {
   DefaultCPUAllocator() {}
   ~DefaultCPUAllocator() override {}
   std::pair<void*, MemoryDeleter> New(size_t nbytes) override {
@@ -78,10 +78,10 @@ struct DefaultCPUAllocator final : CPUAllocator {
 };
 
 // Get the CPU Alloctor.
-CPUAllocator* GetCPUAllocator();
+CAFFE2_API CPUAllocator* GetCPUAllocator();
 // Sets the CPU allocator to the given allocator: the caller gives away the
 // ownership of the pointer.
-void SetCPUAllocator(CPUAllocator* alloc);
+CAFFE2_API void SetCPUAllocator(CPUAllocator* alloc);
 
 } // namespace caffe2
 

@@ -14,7 +14,7 @@ def replicate(network, devices, detach=False):
         param_copies = [param_copies[i:i + len(params)]
                         for i in range(0, len(param_copies), len(params))]
 
-    buffers = list(network._all_buffers())
+    buffers = list(network.buffers())
     buffer_indices = {buf: idx for idx, buf in enumerate(buffers)}
     buffer_copies = comm.broadcast_coalesced(buffers, devices)
 

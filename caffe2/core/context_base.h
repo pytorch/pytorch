@@ -19,7 +19,7 @@ class BaseContext;
    functions that are invoked statically before in Tensor class, e.g. New,
    We will merge this with Allocator later.
  */
-class BaseStaticContext {
+class CAFFE2_API BaseStaticContext {
  public:
   virtual ~BaseStaticContext() noexcept {}
 
@@ -48,7 +48,7 @@ class BaseStaticContext {
  * functions in the BaseContext class.
  * TODO: add docs after this is finalized.
  */
-class BaseContext {
+class CAFFE2_API BaseContext {
  public:
   virtual ~BaseContext() noexcept {}
 
@@ -167,8 +167,7 @@ class BaseContext {
     }
   }
 
-  CAFFE2_API static BaseStaticContext*
-      static_context_[COMPILE_TIME_MAX_DEVICE_TYPES];
+  static BaseStaticContext* static_context_[COMPILE_TIME_MAX_DEVICE_TYPES];
 
   template <int d>
   friend struct StaticContextFunctionRegisterer;

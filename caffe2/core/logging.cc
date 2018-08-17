@@ -39,7 +39,7 @@ void SetStackTraceFetcher(std::function<string(void)> fetcher) {
   *GetFetchStackTrace() = fetcher;
 }
 
-[[noreturn]] void ThrowEnforceNotMet(
+void ThrowEnforceNotMet(
     const char* file,
     const int line,
     const char* condition,
@@ -69,20 +69,27 @@ std::function<void(const OperatorDef&)> GetOperatorLogger() {
 #ifdef CAFFE2_USE_GOOGLE_GLOG
 
 #ifdef CAFFE2_USE_GFLAGS
+// When GLOG depends on GFLAGS, these variables are being defined in GLOG
+// directly via the GFLAGS definition, so we will use DECLARE_* to declare
+// them, and use them in Caffe2.
 // GLOG's minloglevel
-CAFFE2_DECLARE_int(minloglevel);
+DECLARE_int32(minloglevel);
 // GLOG's verbose log value.
-CAFFE2_DECLARE_int(v);
+DECLARE_int32(v);
 // GLOG's logtostderr value
-CAFFE2_DECLARE_bool(logtostderr);
+DECLARE_bool(logtostderr);
+#endif // CAFFE2_USE_GFLAGS
 
-#else
-
+// Provide easy access to the above variables, regardless whether GLOG is
+// dependent on GFLAGS or not. Note that the namespace (fLI, fLB) is actually
+// consistent between GLOG and GFLAGS, so we can do the below declaration
+// consistently.
+namespace caffe2 {
 using fLI::FLAGS_minloglevel;
 using fLI::FLAGS_v;
 using fLB::FLAGS_logtostderr;
+}  // namespace caffe2
 
-#endif // CAFFE2_USE_GFLAGS
 
 CAFFE2_DEFINE_int(caffe2_log_level, google::GLOG_ERROR,
                   "The minimum log level that caffe2 will output.");

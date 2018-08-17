@@ -54,13 +54,13 @@ real *THTensor_(data)(const THTensor *self) {
 /* Empty init */
 THTensor *THTensor_(new)(void)
 {
-  return new THTensor(THStorage_(new)());
+  return new THTensor(THStorage_(new)(), at::CPUTensorId(), false);
 }
 
 /* Pointer-copy init */
 THTensor *THTensor_(newWithTensor)(THTensor *tensor)
 {
-  THTensor *self = new THTensor(THStorage_(new)());
+  THTensor *self = new THTensor(THStorage_(new)(), at::CPUTensorId(), false);
   THTensor_(setStorageNd)(self,
                           THTensor_getStoragePtr(tensor),
                           tensor->storage_offset(),
@@ -75,7 +75,7 @@ THTensor *THTensor_(newWithStorage)(THStorage *storage, ptrdiff_t storageOffset,
   if (strides.data()) {
     AT_CHECK(sizes.size() == strides.size(), "number of sizes and strides must match");
   }
-  THTensor *self = new THTensor(THStorage_(new)());
+  THTensor *self = new THTensor(THStorage_(new)(), at::CPUTensorId(), false);
   THTensor_(setStorageNd)(self, storage, storageOffset, sizes.size(),
                           const_cast<int64_t*>(sizes.data()), const_cast<int64_t*>(strides.data()));
 

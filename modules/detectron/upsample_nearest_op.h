@@ -29,7 +29,7 @@ class UpsampleNearestOp final : public Operator<Context> {
  public:
   UpsampleNearestOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        scale_(OperatorBase::GetSingleArgument<int>("scale", 2)) {
+        scale_(this->template GetSingleArgument<int>("scale", 2)) {
     DCHECK_GE(scale_, 1);
   }
   USE_OPERATOR_CONTEXT_FUNCTIONS;
@@ -94,7 +94,7 @@ class UpsampleNearestGradientOp final : public Operator<Context> {
  public:
   UpsampleNearestGradientOp(const OperatorDef& def, Workspace* ws)
       : Operator<Context>(def, ws),
-        scale_(OperatorBase::GetSingleArgument<int>("scale", 2)) {
+        scale_(this->template GetSingleArgument<int>("scale", 2)) {
     DCHECK_GE(scale_, 1);
   }
   USE_OPERATOR_CONTEXT_FUNCTIONS;

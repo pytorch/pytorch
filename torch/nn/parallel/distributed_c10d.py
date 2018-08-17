@@ -162,7 +162,7 @@ class _DistributedDataParallelC10d(Module):
 
         for dev_idx, module in enumerate(self._module_copies):
             self.modules_params_data[dev_idx] = [p.data for p in module.parameters()]
-            self.modules_buffers_data[dev_idx] = [b.data for b in module._all_buffers()]
+            self.modules_buffers_data[dev_idx] = [b.data for b in module.buffers()]
 
         bucket_bytes_cap = bucket_cap_mb * MB
 

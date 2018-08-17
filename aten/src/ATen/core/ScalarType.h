@@ -2,6 +2,7 @@
 
 #include "ATen/core/ArrayRef.h"
 #include "ATen/core/Half.h"
+#include "ATen/core/typeid.h"
 
 #include <cstdint>
 #include <iostream>
@@ -37,6 +38,31 @@ enum class ScalarType {
   Undefined, // 8
   NumOptions
 };
+
+static inline DataType scalarTypeToDataType(ScalarType scalar_type) {
+#define DEFINE_CASE(ctype,name,_) \
+  case ScalarType:: name : return caffe2::TypeMeta::Id<ctype>();
+
+  switch(scalar_type) {
+    AT_FORALL_SCALAR_TYPES(DEFINE_CASE)
+    case ScalarType::Undefined: return DataType::uninitialized();
+    default: AT_ERROR("Unrecognized Scalartype ", scalar_type, " (please report this error)");
+  }
+#undef DEFINE_CASE
+}
+
+static inline ScalarType dataTypeToScalarType(DataType dtype) {
+#define DEFINE_IF(ctype,name,_) \
+  if (dtype == caffe2::TypeMeta::Id<ctype>()) { \
+    return ScalarType:: name; \
+  }
+  AT_FORALL_SCALAR_TYPES(DEFINE_IF)
+#undef DEFINE_IF
+  if (dtype == at::DataType::uninitialized()) {
+    return ScalarType::Undefined;
+  }
+  AT_ERROR("Unsupported DataType in ATen: ", dtype, " (please report this error)");
+}
 
 #define DEFINE_CONSTANT(_,name,_2) \
 constexpr ScalarType k##name = ScalarType::name;

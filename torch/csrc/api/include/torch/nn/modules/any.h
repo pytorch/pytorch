@@ -5,6 +5,7 @@
 #include <torch/nn/pimpl.h>
 #include <torch/tensor.h>
 
+#include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/utils/memory.h>
 #include <torch/csrc/utils/variadic.h>
 
@@ -194,20 +195,16 @@ class AnyModule::Value {
   /// Constructs the `Value` from value type.
   template <
       typename T,
-      typename = torch::disable_if_t<std::is_same<at::Tensor, T>::value>>
+      typename =
+          torch::disable_if_t<std::is_same<autograd::Variable, T>::value>>
   explicit Value(T&& value)
       : content_(
             torch::make_unique<Holder<decay_t<T>>>(std::forward<T>(value))) {}
 
-  /// Constructs the `Value`, but converts an `at::Tensor` to a `torch::Tensor`
-  /// implicitly if the `at::Tensor` is really a `torch::Tensor` (a variable).
-  explicit Value(at::Tensor tensor) {
-    if (tensor.is_variable()) {
-      content_ = torch::make_unique<Holder<torch::Tensor>>(std::move(tensor));
-    } else {
-      content_ = torch::make_unique<Holder<at::Tensor>>(std::move(tensor));
-    }
-  }
+  /// Constructs the `Value` from an `autograd::Variable`, first converting it
+  /// to a `torch::Tensor`.
+  explicit Value(autograd::Variable variable)
+      : Value(Tensor(std::move(variable))) {}
 
   /// The static type of the object we store in the `Value`, which erases the
   /// actual object's type, allowing us only to check the `type_info` of the
@@ -315,7 +312,7 @@ struct AnyModule::Holder : public AnyModule::Placeholder {
   std::unique_ptr<Placeholder> clone(
       at::optional<Device> device) const override {
     return torch::make_unique<Holder>(
-        std::static_pointer_cast<ModuleType>(module->clone(device)));
+        std::dynamic_pointer_cast<ModuleType>(module->clone(device)));
   }
 
   /// The actual concrete module instance.

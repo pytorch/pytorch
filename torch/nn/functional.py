@@ -251,7 +251,7 @@ def conv_tbc(input, weight, bias, pad=0):
         bias: bias of shape (:math:`out\_channels`)
         pad: number of timesteps to pad
     """
-    return input.conv_tbc(weight, bias, pad)
+    return torch.conv_tbc(input, weight, bias, pad)
 
 
 # Pooling

@@ -19,9 +19,6 @@ class BatchSparseToDenseOp : public Operator<Context> {
         OP_SINGLE_ARG(T, "default_value", default_value_, static_cast<T>(0)) {}
   bool RunOnDevice() override;
 
-  // TODO: enable the filler
-  DISABLE_INPUT_FILLERS(Context)
-
  private:
   TIndex dense_last_dim_;
   T default_value_;

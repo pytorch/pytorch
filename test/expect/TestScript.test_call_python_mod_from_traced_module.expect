@@ -1,10 +1,10 @@
 graph(%0 : Double(3, 4)
       %1 : Double(4, 5)
       %2 : Double(5, 7)) {
-  %4 : Double(3, 5) = aten::mm(%0, %1), scope: TracedModule
-  %6 : Double(3, 7) = aten::mm(%4, %2), scope: TracedModule/PythonModule[mod]
-  %7 : Long() = prim::Constant[value={1}](), scope: TracedModule
-  %8 : int = prim::Constant[value=1](), scope: TracedModule
-  %9 : Double(3, 7) = aten::add(%6, %7, %8), scope: TracedModule
-  return (%9);
+  %3 : Double(3, 5) = aten::mm(%0, %1), scope: TracedModule
+  %4 : Double(3, 7) = aten::mm(%3, %2), scope: TracedModule/PythonModule[mod]
+  %5 : Long() = prim::Constant[value={1}](), scope: TracedModule
+  %6 : int = prim::Constant[value=1](), scope: TracedModule
+  %7 : Double(3, 7) = aten::add(%4, %5, %6), scope: TracedModule
+  return (%7);
 }

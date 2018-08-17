@@ -68,13 +68,13 @@ class PairwiseSimilarity(ModelLayer):
             y_embeddings_norm = net.Normalize(self.y_embeddings(), axis=1)
             Y = net.BatchMatMul(
                 [x_embeddings_norm, y_embeddings_norm],
-                [x_embeddings_norm + '_matmul'],
+                [self.get_next_blob_reference(x_embeddings_norm + '_matmul')],
                 trans_b=1,
             )
         elif self.pairwise_similarity_func == "dot":
             Y = net.BatchMatMul(
                 [self.x_embeddings(), self.y_embeddings()],
-                [self.x_embeddings() + '_matmul'],
+                [self.get_next_blob_reference(self.x_embeddings() + '_matmul')],
                 trans_b=1,
             )
         else:

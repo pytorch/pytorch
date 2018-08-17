@@ -41,7 +41,8 @@ MANUAL_IMPLEMENTATIONS = {
 # NO EFFECT otherwise.
 DONT_RECORD_TRACE = {
     'convolution', 'conv1d', 'conv2d', 'conv3d', 'conv_transpose1d',
-    'conv_transpose2d', 'conv_transpose3d',
+    'conv_transpose2d', 'conv_transpose3d', 'lstm_cell', 'gru_cell',
+    'rnn_tanh_cell', 'rnn_relu_cell',
 }
 
 # These functions have their names recorded under trace renamed,
