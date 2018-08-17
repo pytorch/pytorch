@@ -44,6 +44,8 @@ CAFFE2_API void set_device(int64_t device);
 
 CAFFE2_API cudaDeviceProp* getCurrentDeviceProperties();
 
+CAFFE2_API int warp_size();
+
 CAFFE2_API cudaDeviceProp* getDeviceProperties(int64_t device);
 
 /* Streams */

@@ -33,7 +33,15 @@ static inline bool is_binary_contiguous_s2(const int64_t* strides) {
          strides[2] == 0;
 }
 
-#define LOOP_HEADER(traits, data, strides) \
+// result is
+static inline bool is_reduction(char** data, const int64_t* strides) {
+  return strides[0] == 0 &&
+         strides[1] == 0 &&
+         data[0] == data[1];
+}
+
+#define LOOP_HEADER(func_t, data, strides) \
+  using traits = binary_function_traits<func_t>; \
   using arg0_t = typename traits::result_type; \
   using arg1_t = typename traits::arg1_t; \
   using arg2_t = typename traits::arg2_t; \
@@ -42,19 +50,23 @@ static inline bool is_binary_contiguous_s2(const int64_t* strides) {
   const char* in2_ptr = data[2]; \
   int64_t s0 = strides[0], s1 = strides[1], s2 = strides[2];
 
-#define VEC_LOOP_HEADER(traits, data, strides) \
+#define VEC_HEADER(func_t) \
+  using traits = binary_function_traits<func_t>; \
   using scalar_t = typename traits::result_type; \
-  using Vec = Vec256<scalar_t>; \
+  using Vec = Vec256<scalar_t>;
+
+#define VEC_LOOP_HEADER(func_t, data) \
+  VEC_HEADER(func_t) \
   char* out_ptr = data[0]; \
   const char* in1_ptr = data[1]; \
-  const char* in2_ptr = data[2]; \
+  const char* in2_ptr = data[2];
 
 
 // Basic loop binary operation (two inputs, one output). May be auto-vectorized
 // by the compiler.
-template <typename traits, typename func_t>
+template <typename func_t>
 static inline void binary_loop(char** data, const int64_t* strides, int64_t i, int64_t n, func_t op) {
-  LOOP_HEADER(traits, data, strides)
+  LOOP_HEADER(func_t, data, strides)
   for (; i < n; i++) {
     arg1_t in1 = *(arg1_t*)(in1_ptr + i * s1);
     arg2_t in2 = *(arg2_t*)(in2_ptr + i * s2);
@@ -63,9 +75,10 @@ static inline void binary_loop(char** data, const int64_t* strides, int64_t i, i
   }
 }
 
-template <typename traits, typename func_t, typename vec_func_t>
-static inline void vectorized_binary_loop(char** data, const int64_t* strides, int64_t n, func_t op, vec_func_t vop) {
-  VEC_LOOP_HEADER(traits, data, strides)
+// computes out = op(in1, in2)
+template <typename func_t, typename vec_func_t>
+static inline void vectorized_binary_loop(char** data, int64_t n, func_t op, vec_func_t vop) {
+  VEC_LOOP_HEADER(func_t, data)
   int64_t i = 0;
   for (; i <= n - 2 * Vec::size; i += 2 * Vec::size) {
     auto a1 = Vec::loadu(in1_ptr + i * sizeof(scalar_t));
@@ -77,12 +90,14 @@ static inline void vectorized_binary_loop(char** data, const int64_t* strides, i
     out1.store(out_ptr + i * sizeof(scalar_t));
     out2.store(out_ptr + (i + Vec::size) * sizeof(scalar_t));
   }
-  binary_loop<traits>(data, strides, i, n, op);
+  int64_t strides[] = { sizeof(scalar_t), sizeof(scalar_t), sizeof(scalar_t) };
+  binary_loop(data, strides, i, n, op);
 }
 
-template <typename traits, typename func_t, typename vec_func_t>
-static inline void vectorized_binary_loop_s1(char** data, const int64_t* strides, int64_t n, func_t op, vec_func_t vop) {
-  VEC_LOOP_HEADER(traits, data, strides)
+// computes out = op(in1, in2) where in1 is a constant
+template <typename func_t, typename vec_func_t>
+static inline void vectorized_binary_loop_s1(char** data, int64_t n, func_t op, vec_func_t vop) {
+  VEC_LOOP_HEADER(func_t, data)
   int64_t i = 0;
   auto a = Vec(*(scalar_t*)in1_ptr);
   for (; i <= n - 2 * Vec::size; i += 2 * Vec::size) {
@@ -93,12 +108,14 @@ static inline void vectorized_binary_loop_s1(char** data, const int64_t* strides
     out1.store(out_ptr + i * sizeof(scalar_t));
     out2.store(out_ptr + (i + Vec::size) * sizeof(scalar_t));
   }
-  binary_loop<traits>(data, strides, i, n, op);
+  int64_t strides[] = { sizeof(scalar_t), 0, sizeof(scalar_t) };
+  binary_loop(data, strides, i, n, op);
 }
 
-template <typename traits, typename func_t, typename vec_func_t>
-static inline void vectorized_binary_loop_s2(char** data, const int64_t* strides, int64_t n, func_t op, vec_func_t vop) {
-  VEC_LOOP_HEADER(traits, data, strides)
+// computes out = op(in1, in2) where in2 is a constant
+template <typename func_t, typename vec_func_t>
+static inline void vectorized_binary_loop_s2(char** data, int64_t n, func_t op, vec_func_t vop) {
+  VEC_LOOP_HEADER(func_t, data)
   int64_t i = 0;
   auto b = Vec(*(scalar_t*)in2_ptr);
   for (; i <= n - 2 * Vec::size; i += 2 * Vec::size) {
@@ -109,7 +126,86 @@ static inline void vectorized_binary_loop_s2(char** data, const int64_t* strides
     out1.store(out_ptr + i * sizeof(scalar_t));
     out2.store(out_ptr + (i + Vec::size) * sizeof(scalar_t));
   }
-  binary_loop<traits>(data, strides, i, n, op);
+  int64_t strides[] = { sizeof(scalar_t), sizeof(scalar_t), 0 };
+  binary_loop(data, strides, i, n, op);
+}
+
+template <typename func_t, typename vec_func_t>
+static inline void reduction128(char** data, int64_t n, int64_t stride, func_t op, vec_func_t vop, bool reduce) {
+  VEC_HEADER(func_t)
+  char* out_ptr = data[0];
+  char* in_ptr = data[1];
+  Vec acc[4];
+  for  (int j = 0; j < 4; j++) {
+    acc[j] = Vec::loadu(in_ptr + j * Vec::size * sizeof(scalar_t));
+  }
+  for (int64_t i = 1; i < n; i++) {
+    const char* ptr = in_ptr + stride * i;
+    acc[0] = vop(acc[0], Vec::loadu(ptr + (0 * Vec::size * sizeof(scalar_t))));
+    acc[1] = vop(acc[1], Vec::loadu(ptr + (1 * Vec::size * sizeof(scalar_t))));
+    acc[2] = vop(acc[2], Vec::loadu(ptr + (2 * Vec::size * sizeof(scalar_t))));
+    acc[3] = vop(acc[3], Vec::loadu(ptr + (3 * Vec::size * sizeof(scalar_t))));
+  }
+  if (reduce) {
+    scalar_t buffer[Vec::size];
+    acc[0] = vop(vop(acc[0], acc[1]), vop(acc[2], acc[3]));
+    acc[0].store(buffer);
+    for (int j = 1; j < Vec::size; j++) {
+      buffer[0] = op(buffer[0], buffer[j]);
+    }
+    auto dst = (scalar_t*)out_ptr;
+    *dst = op(*dst, buffer[0]);
+  } else {
+    for (int j = 0; j < 4; j++) {
+      auto dst = out_ptr + j * Vec::size * sizeof(scalar_t);
+      acc[j] = vop(acc[j], Vec::loadu(dst));
+      acc[j].store(dst);
+    }
+  }
+}
+
+template <typename F>
+static inline void UNARY_OUTER_LOOP(char* data[2], const int64_t strides[2], int64_t n, F f) {
+  for (int j = 0; j < n; j++) {
+    f();
+    data[0] += strides[0];
+    data[1] += strides[1];
+  }
+}
+
+// computes the reduction out = op(out, in)
+template <typename func_t, typename vec_func_t>
+static inline void vectorized_inner_reduction(char** data, int64_t n, func_t op, vec_func_t vop) {
+  VEC_HEADER(func_t)
+  int64_t vector_stride = 4 * Vec::size * sizeof(scalar_t);
+  int64_t count = n / (4 * Vec::size);
+  if (count > 0) {
+    reduction128(data, count, vector_stride, op, vop, /*reduce=*/true);
+  }
+  char* ptrs[3] = { data[0], data[0], data[1] };
+  int64_t strides[] = { 0, 0, sizeof(scalar_t) };
+  binary_loop(ptrs, strides, count * 4 * Vec::size, n, op);
+}
+
+// computes the reduction out = op(out, in)
+template <typename func_t, typename vec_func_t>
+static inline void vectorized_outer_reduction(char** data, int64_t inner_stride, int64_t size0, int64_t size1, func_t op, vec_func_t vop) {
+  VEC_HEADER(func_t)
+
+  // reduce down each column of 4 * Vec::size elements (128 bytes)
+  int64_t outer_stride[2] = { 128, 128 };
+  UNARY_OUTER_LOOP(data, outer_stride, size1 / (4 * Vec::size), [&] {
+    reduction128(data, size0, inner_stride, op, vop, /*reduce=*/false);
+  });
+
+  // reduce down the remaining columns
+  int64_t step[] = { sizeof(scalar_t), sizeof(scalar_t) };
+  int64_t remaining = size1 % (4 * Vec::size);
+  UNARY_OUTER_LOOP(data, step, remaining, [&] {
+    char* ptrs[3] = { data[0], data[0], data[1] };
+    int64_t strides[] = { 0, 0, inner_stride };
+    binary_loop(ptrs, strides, 0, size0, op);
+  });
 }
 
 template <typename func_t>
@@ -119,13 +215,13 @@ void binary_kernel(TensorIterator& iter, func_t op) {
   iter.for_each([&](int ntensor, char** data, const int64_t* strides, int64_t n) {
     // Specializations to encourage auto-vectorization (trick from Numpy's loops.c.src)
     if (is_binary_contiguous<traits>(strides)) {
-      binary_loop<traits>(data, strides, 0, n, op);
+      binary_loop(data, strides, 0, n, op);
     } else if (is_binary_contiguous_s1<traits>(strides)) {
-      binary_loop<traits>(data, strides, 0, n, op);
+      binary_loop(data, strides, 0, n, op);
     } else if (is_binary_contiguous_s2<traits>(strides)) {
-      binary_loop<traits>(data, strides, 0, n, op);
+      binary_loop(data, strides, 0, n, op);
     } else {
-      binary_loop<traits>(data, strides, 0, n, op);
+      binary_loop(data, strides, 0, n, op);
     }
   });
 }
@@ -142,13 +238,13 @@ void binary_kernel_vec(TensorIterator& iter, func_t op, vec_func_t vop) {
 
   iter.for_each([&](int ntensor, char** data, const int64_t* strides, int64_t n) {
     if (is_binary_contiguous<traits>(strides)) {
-      vectorized_binary_loop<traits>(data, strides, n, op, vop);
+      vectorized_binary_loop(data, n, op, vop);
     } else if (is_binary_contiguous_s1<traits>(strides)) {
-      vectorized_binary_loop_s1<traits>(data, strides, n, op, vop);
+      vectorized_binary_loop_s1(data, n, op, vop);
     } else if (is_binary_contiguous_s2<traits>(strides)) {
-      vectorized_binary_loop_s2<traits>(data, strides, n, op, vop);
+      vectorized_binary_loop_s2(data, n, op, vop);
     } else {
-      binary_loop<traits>(data, strides, 0, n, op);
+      binary_loop(data, strides, 0, n, op);
     }
   });
 }

@@ -20,6 +20,22 @@ inline int64_t divup(int64_t x, int64_t y) {
   return (x + y - 1) / y;
 }
 
+inline int get_max_threads() {
+#ifdef _OPENMP
+  return omp_get_max_threads();
+#else
+  return 1;
+#endif
+}
+
+inline int get_thread_num() {
+#ifdef _OPENMP
+  return omp_get_thread_num();
+#else
+  return 0;
+#endif
+}
+
 template <class F>
 inline void parallel_for(
     const int64_t begin,

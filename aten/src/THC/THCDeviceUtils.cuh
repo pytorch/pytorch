@@ -107,6 +107,15 @@ __device__ __forceinline__ T WARP_SHFL_DOWN(T value, unsigned int delta, int wid
     return __shfl_down(value, delta, width);
 #endif
 }
+template <>
+__device__ __forceinline__ at::Half WARP_SHFL_DOWN(at::Half value, unsigned int delta, int width, unsigned int mask)
+{
+#if CUDA_VERSION >= 9000
+    return __shfl_down_sync(mask, (__half)value, delta, width);
+#else
+    return __shfl_down((__half)value, delta, width);
+#endif
+}
 
 
 #endif // THC_DEVICE_UTILS_INC

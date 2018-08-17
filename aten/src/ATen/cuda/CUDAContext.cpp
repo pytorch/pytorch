@@ -1,7 +1,7 @@
 #include "ATen/cuda/CUDAContext.h"
 #include "THC/THCGeneral.hpp"
 
-namespace at { namespace cuda { 
+namespace at { namespace cuda {
 
 /* Device info */
 int64_t getNumGPUs() {
@@ -18,6 +18,10 @@ int64_t current_device() {
 
 void set_device(int64_t device) {
   AT_CUDA_CHECK(cudaSetDevice((int)device));
+}
+
+int warp_size() {
+  return getCurrentDeviceProperties()->warpSize;
 }
 
 cudaDeviceProp* getCurrentDeviceProperties() {
