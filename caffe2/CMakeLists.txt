@@ -340,6 +340,12 @@ if(USE_CUDA)
       target_compile_options(caffe2_gpu PUBLIC "-DAT_CORE_STATIC_WINDOWS=1")
   endif()
 
+#  target_compile_options(caffe2_gpu PRIVATE "-DCAFFE2_BUILD_MAIN_LIB")
+
+  if (MSVC)
+      target_compile_definitions(caffe2_gpu PRIVATE "-DCAFFE2_BUILD_MAIN_LIB")
+  endif()
+
   # Set standard properties on the target
   aten_set_target_props(caffe2_gpu)
 
