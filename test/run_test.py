@@ -44,7 +44,6 @@ ROCM_BLACKLIST = [
     'cpp_extensions',
     'cuda',
     'distributed',
-    'jit',
     'legacy_nn',
     'multiprocessing',
     'nccl',
