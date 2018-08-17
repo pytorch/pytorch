@@ -1655,6 +1655,21 @@
     CPU: _s_where_cpu
     CUDA: _s_where_cuda
 
+- func: norm_except_dim(Tensor v, int64_t pow=2, int64_t dim=0) -> Tensor
+  variants: function
+
+- func: weight_norm(Tensor v, Tensor g, int64_t dim=0) -> Tensor
+  variants: function
+
+- func: weight_norm_fused(Tensor v, Tensor g, int64_t dim=0) -> (Tensor,Tensor)
+  variants: function
+
+- func: weight_norm_fused_backward(Tensor grad_w, Tensor saved_v, Tensor saved_g, Tensor saved_norms, int64_t dim) -> (Tensor, Tensor)
+  variants: function
+
+- func: weight_norm_differentiable_backward(Tensor grad_w, Tensor saved_v, Tensor saved_g, Tensor saved_norms, int64_t dim) -> (Tensor, Tensor)
+  variants: function
+
 - func: zeros(IntList size, TensorOptions options={}) -> Tensor
   variants: function
 
