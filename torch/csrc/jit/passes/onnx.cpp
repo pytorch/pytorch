@@ -1,38 +1,24 @@
 #include "torch/csrc/utils/pybind.h"
 #include "torch/csrc/jit/passes/onnx.h"
+#include "torch/csrc/jit/passes/dead_code_elimination.h"
 #include "torch/csrc/autograd/function.h"
 #include "torch/csrc/autograd/symbolic.h"
+#include "torch/csrc/jit/assertions.h"
 #include "torch/csrc/utils/functional.h"
 #include <unordered_map>
 #include <sstream>
 
 namespace torch { namespace jit {
 
-namespace {
-
-bool hasHandleOutput(Node *node) {
-  auto last_output = node->outputs().back();
-  return last_output->isHandle();
-}
-
-bool hasUsedHandle(Node *node) {
-  if (!hasHandleOutput(node)) return false;
-  return node->outputs().back()->uses().size() > 0;
-}
-
-
-} // anonymous namespace
-
-// Transform PythonOps and Cpp Ops into Node's that match ONNX semantics.
-// Argument aten indicates whether we should export ops as "ATen" ONNX ops if possible.
-std::shared_ptr<Graph> ToONNX(std::shared_ptr<Graph>& graph, bool aten) {
+// Transform PythonOps into Nodes that match ONNX semantics.
+std::shared_ptr<Graph> ToONNX(std::shared_ptr<Graph>& graph, ::torch::onnx::OperatorExportTypes operator_export_type) {
   auto new_graph = std::make_shared<Graph>(graph->scope_root());
   std::unordered_map<Value*, Value*> env;
-  BlockToONNX(graph->block(), new_graph->block(), aten, env);
+  BlockToONNX(graph->block(), new_graph->block(), operator_export_type, env);
   return new_graph;
 }
 
-void BlockToONNX(Block* old_block, Block* new_block, bool aten, std::unordered_map<Value*, Value*> env) {
+void BlockToONNX(Block* old_block, Block* new_block, ::torch::onnx::OperatorExportTypes operator_export_type, std::unordered_map<Value*, Value*> env) {
   torch::autograd::SymbolicContext ctx;
   ctx.block = new_block;
 
@@ -59,15 +45,14 @@ void BlockToONNX(Block* old_block, Block* new_block, bool aten, std::unordered_m
   auto setOutputs = [&](const std::string& op_name, Node * node, const value_list & outputs) {
     auto old_outputs = node->outputs();
     // Count all outputs, excluding Handles
-    bool has_handle = hasHandleOutput(node);
-    auto num_old_outputs = old_outputs.size() - (has_handle ? 1 : 0);
+    auto num_old_outputs = old_outputs.size();
     if (outputs.size() != num_old_outputs) {
       std::ostringstream ss;
       ss << "symbolic for " << op_name << " produced an incorrect number of outputs (expected ";
       ss << num_old_outputs << ", but got " << outputs.size() << ")";
       throw std::runtime_error(ss.str());
     }
-    for (std::size_t i = 0; i < num_old_outputs; ++i) {
+    for (size_t i = 0; i < num_old_outputs; ++i) {
       auto old = old_outputs[i];
       if (outputs[i]) {
         // Allow symbolic() to skip specifying the type of the return node.
@@ -91,10 +76,6 @@ void BlockToONNX(Block* old_block, Block* new_block, bool aten, std::unordered_m
           throw std::runtime_error(ss.str());
         }
       }
-    }
-    if (has_handle) {
-      JIT_ASSERT(old_outputs.back()->uses().empty());
-      env[old_outputs.back()] = nullptr;
     }
   };
 
@@ -144,7 +125,7 @@ void BlockToONNX(Block* old_block, Block* new_block, bool aten, std::unordered_m
 
     WithInsertPoint insert_point_guard(ctx.block);
     WithCurrentScope scope_guard(*ctx.block->owningGraph(), n->scope());
-    py::object raw_output = onnx.attr("_run_symbolic_function")(ctx.block->owningGraph(), n, py_inputs, env, aten);
+    py::object raw_output = onnx.attr("_run_symbolic_function")(ctx.block->owningGraph(), n, py_inputs, env, operator_export_type);
 
     // TODO: Assert it's an ATen identifier???
     // (Sometimes it's not...)
@@ -199,18 +180,9 @@ void BlockToONNX(Block* old_block, Block* new_block, bool aten, std::unordered_m
 
   // Finally, visit all nodes in the graph
   for (auto node : old_block->nodes()) {
-    if (hasUsedHandle(node)) {
-      // Nothing we can do here. The handle is used, so we'll need to capture the
-      // original state and can't do anything with this op (we don't know what the
-      // backward is).
-      cloneNode(node);
-      continue;
-    }
     // Needed so that symbolic calls create nodes with correct stages.
     auto stage_guard = ctx.block->owningGraph()->setStageTemporary(node->stage());
-    IR_IFM(node, CppOp)
-      cloneNode(node);
-    IR_ELSEIFM(PythonOp)
+    IR_IFM(node, PythonOp)
       callPySymbolicMethod(value);
     IR_ELSE()
       callPySymbolicFunction(node);
@@ -223,6 +195,7 @@ void BlockToONNX(Block* old_block, Block* new_block, bool aten, std::unordered_m
 
   // Copy stage from original graph
   ctx.block->owningGraph()->setStage(old_block->owningGraph()->stage());
+  EliminateDeadCode(ctx.block);
 }
 
 }}

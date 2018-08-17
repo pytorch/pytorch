@@ -15,17 +15,12 @@ class Binomial(Distribution):
 
         >>> m = Binomial(100, torch.tensor([0 , .2, .8, 1]))
         >>> x = m.sample()
-         0
-         22
-         71
-         100
-        [torch.FloatTensor of size 4]]
+        tensor([   0.,   22.,   71.,  100.])
 
-        >>> m = Binomial(torch.Tensor([[5.], [10.]]), torch.Tensor([0.5, 0.8]))
+        >>> m = Binomial(torch.tensor([[5.], [10.]]), torch.tensor([0.5, 0.8]))
         >>> x = m.sample()
-         4  5
-         7  6
-        [torch.FloatTensor of size (2,2)]
+        tensor([[ 4.,  5.],
+                [ 7.,  6.]])
 
     Args:
         total_count (int or Tensor): number of Bernoulli trials

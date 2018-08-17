@@ -8,4 +8,8 @@
 #error "AT_MKL_ENABLED should not be visible in public headers"
 #endif
 
+#ifdef AT_MKLDNN_ENABLED
+#error "AT_MKLDNN_ENABLED should not be visible in public headers"
+#endif
+
 auto main() -> int {}

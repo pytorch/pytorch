@@ -26,7 +26,8 @@ static inline void argErrorHandler(int arg, const char * msg, void * data) {
 }
 
 Context::Context()
-: thc_state(nullptr, [](THCState* p){ /* no-op */ } ) {
+: next_id(static_cast<size_t>(TypeID::NumOptions))
+, thc_state(nullptr, [](THCState* p){ /* no-op */ } ) {
 
   THSetDefaultErrorHandler(errorHandler,nullptr);
   THSetDefaultArgErrorHandler(argErrorHandler,nullptr);
@@ -36,6 +37,8 @@ Context::Context()
   Type::registerCPU(this);
 }
 
+// TODO: This could be bad juju if someone calls globalContext() in the
+// destructor of an object with static lifetime.
 Context & globalContext() {
   static Context globalContext_;
   return globalContext_;

@@ -75,7 +75,7 @@ void NUMAMove(void* ptr, size_t size, int numa_node_id) {
   size_t page_start_ptr = (((size_t)ptr) & ~(getpagesize() - 1));
   size_t offset = ((size_t)ptr) - page_start_ptr;
   // Avoid extra dynamic allocation and NUMA api calls
-  CAFFE_ENFORCE(numa_node_id >= 0 && numa_node_id < sizeof(unsigned long) * 8);
+  CAFFE_ENFORCE(numa_node_id >= 0 && (unsigned)numa_node_id < sizeof(unsigned long) * 8);
   unsigned long mask = 1UL << numa_node_id;
   CAFFE_ENFORCE(
       mbind(

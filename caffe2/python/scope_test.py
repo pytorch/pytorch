@@ -89,6 +89,31 @@ class TestScope(unittest.TestCase):
 
         self.assertEquals(scope.CurrentDeviceScope(), None)
 
+    def testTags(self):
+        self.assertEquals(scope.CurrentDeviceScope(), None)
+
+        extra_info1 = ["key1:value1"]
+        extra_info2 = ["key2:value2"]
+        extra_info3 = ["key3:value3"]
+
+        extra_info_1_2 = ["key1:value1", "key2:value2"]
+        extra_info_1_2_3 = ["key1:value1", "key2:value2", "key3:value3"]
+
+        with scope.DeviceScope(core.DeviceOption(0, extra_info=extra_info1)):
+            self.assertEquals(scope.CurrentDeviceScope().extra_info, extra_info1)
+
+            with scope.DeviceScope(core.DeviceOption(0, extra_info=extra_info2)):
+                self.assertEquals(scope.CurrentDeviceScope().extra_info, extra_info_1_2)
+
+                with scope.DeviceScope(core.DeviceOption(0, extra_info=extra_info3)):
+                    self.assertEquals(
+                        scope.CurrentDeviceScope().extra_info, extra_info_1_2_3
+                    )
+
+                self.assertEquals(scope.CurrentDeviceScope().extra_info, extra_info_1_2)
+            self.assertEquals(scope.CurrentDeviceScope().extra_info, extra_info1)
+        self.assertEquals(scope.CurrentDeviceScope(), None)
+
     def testMultiThreaded(self):
         """
         Test that name/device scope are properly local to the thread

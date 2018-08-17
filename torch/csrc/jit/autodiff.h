@@ -1,9 +1,12 @@
 #pragma once
 
+#include "torch/csrc/WindowsTorchApiMacro.h"
 #include "torch/csrc/jit/ir.h"
 
 #include <ATen/ATen.h>
+
 #include <vector>
+#include <memory>
 
 namespace torch { namespace jit {
 
@@ -29,8 +32,11 @@ using value_list = std::vector<Value*>;
 //   df_input_captures = {I0, O2, O0} // Order matches the prefix of inputs to df
 //                        x   t   y
 //   df_output_vjps = {0}     // i.e. connect next_edge[0] of grad_fn to x's (grad_fn, output_nr).
+//
+// Terminology: vjp = vector-jacobian product
+
 struct Gradient {
-  operator bool() const {
+  explicit operator bool() const {
     return df != nullptr;
   }
   std::shared_ptr<Graph> f;
@@ -39,7 +45,7 @@ struct Gradient {
   // Describes how to construct outputs of f from what its graph will return.
   // This is necessary because some trailing outputs are intermediates produced
   // only to be saved for df (and should be ignored).
-  std::size_t f_real_outputs;
+  size_t f_real_outputs;
 
   // df inputs are split into two sections: vjps (aka grad_outputs) and captures.
   // VJPs are "seeds" for the gradient computation given for each input capture
@@ -47,16 +53,16 @@ struct Gradient {
   // Captures are values the need to be saved when f is run. We handle inputs
   // specially, because this allows us to avoid adding extra vjps as df inputs.
 
-  std::vector<std::size_t> df_input_vjps; // Offsets into f's outputs.
+  std::vector<size_t> df_input_vjps; // Offsets into f's outputs.
   // capture can come from inputs or outputs
-  std::vector<std::size_t> df_input_captured_inputs; // Offsets into f's inputs
-  std::vector<std::size_t> df_input_captured_outputs; // Offsets into f's outputs
+  std::vector<size_t> df_input_captured_inputs; // Offsets into f's inputs
+  std::vector<size_t> df_input_captured_outputs; // Offsets into f's outputs
 
 
   // df will produce vjps for a subset of inputs of f that required grad.
   // df_output_vjps[idx] == inp_idx means that idx-th output of df produces a vjp
   // for inp_idx-th input of f.
-  std::vector<std::size_t> df_output_vjps; // Offsets into f's inputs.
+  std::vector<size_t> df_output_vjps; // Offsets into f's inputs.
 
   // How to use gradient to implement a differentiable autograd function:
   // When running f:
@@ -81,11 +87,11 @@ struct Gradient {
 };
 // XXX: When calling this function, graph should have complete type information.
 // Use the shape analysis pass to fill in the gaps if it doesn't.
-Gradient differentiate(std::shared_ptr<Graph>& graph, const std::vector<bool>& requires_grad);
+TORCH_API Gradient differentiate(std::shared_ptr<Graph>& graph, const std::vector<bool>& requires_grad);
 
 // can we take a derivative of this node symbolically?
-bool isDifferentiable(Node * n);
-bool isDifferentiable(Graph & g);
-bool isZero(Value * v);
+TORCH_API bool isDifferentiable(Node * n);
+TORCH_API bool isDifferentiable(Graph & g);
+TORCH_API bool isZero(Value * v);
 
 }}

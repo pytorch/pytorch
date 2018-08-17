@@ -17,10 +17,10 @@ THC_API void THCTensor_(calculateMode)(THCState *state,
   // calculations to get an offset
   real *data = THCTensor_(data)(state, input);
   for (int i = 0; i < THLongStorage_size(position); ++i) {
-    data += THLongStorage_data(position)[i] * THCTensor_(stride)(state, input, i);
+    data += THLongStorage_data(position)[i] * THTensor_strideLegacyNoScalars(input, i);
   }
 
-  int64_t nElement = THCTensor_(size)(state, input, THCTensor_(nDimension)(state, input) - 1);
+  int64_t nElement = THCTensor_(sizeLegacyNoScalars)(state, input, THCTensor_(nDimensionLegacyAll)(state, input) - 1);
   THCThrustAllocator thrustAlloc(state);
 
   // Wrap input data, sortBuffer, in Thrust device vectors
@@ -121,8 +121,8 @@ THC_API void THCTensor_(calculateMode)(THCState *state,
 
   for (int i = 0; i < THLongStorage_size(position); ++i) {
     int64_t pos = THLongStorage_data(position)[i];
-    valuesOffset += THCTensor_(stride)(state, values, i) * pos;
-    indicesOffset += THCudaLongTensor_stride(state, indices, i) * pos;
+    valuesOffset += THTensor_strideLegacyNoScalars(values, i) * pos;
+    indicesOffset += THTensor_strideLegacyNoScalars(indices, i) * pos;
   }
   THCStorage_(set)(state, THCTensor_(storage)(state, values), valuesOffset, mode);
   THCudaLongStorage_set(state, THCudaLongTensor_storage(state, indices), indicesOffset, index);
@@ -137,7 +137,7 @@ THC_API void THCTensor_(dimApplyMode)(THCState *state,
                                int dimension,
                                THLongStorage *position,
                                int curDim) {
-  int64_t ndim = THCTensor_(nDimension)(state, input);
+  int64_t ndim = THCTensor_(nDimensionLegacyAll)(state, input);
 
   // Because we have transposed the Tensor, the data for the dimension we are mode'ing along
   // is always in the innermost dimension
@@ -145,8 +145,8 @@ THC_API void THCTensor_(dimApplyMode)(THCState *state,
     THCTensor_(calculateMode)(state, values, indices, input, sortBuffer, dimension, position);
   } else {
     // Loop through the values and recurse
-    for (int i = 0; i < THCTensor_(size)(state, input, curDim); ++i) {
-      position->data[curDim] = i;
+    for (int i = 0; i < THCTensor_(sizeLegacyNoScalars)(state, input, curDim); ++i) {
+      THLongStorage_data(position)[curDim] = i;
       THCTensor_(dimApplyMode)(state, values, indices, input, sortBuffer, dimension, position, curDim + 1);
     }
   }
@@ -161,7 +161,6 @@ THC_API void THCTensor_(mode)(THCState *state,
                               THCTensor *input,
                               int dimension,
                               int keepdim) {
-  THLongStorage *dim;
   THCTensor *transposed, *contiguous, *valuesTransposed;
   THLongStorage *position;
   THCudaLongStorage *sortBuffer;
@@ -172,23 +171,22 @@ THC_API void THCTensor_(mode)(THCState *state,
   THAssert(THCTensor_(checkGPU)(state, 1, values));
 
   // Verify they are asking for a valid dimension
-  ndim = THCTensor_(nDimension)(state, input);
+  ndim = THCTensor_(nDimensionLegacyAll)(state, input);
   THArgCheck(dimension >= 0 && dimension < ndim, 4, "Dimension of out bounds");
 
-  sliceSize = THCTensor_(size)(state, input, dimension);
+  sliceSize = THCTensor_(sizeLegacyNoScalars)(state, input, dimension);
   slices = THCTensor_(nElement)(state, input) / sliceSize;
 
   // Resize output value, index Tensors to appropriate sizes (i.e. the same as
   // the input Tensor, except at dim=dimension, the size is 1)
-  TensorUtils<THCTensor>::preserveReduceDimSemantics(
+  THCTensor_preserveReduceDimSemantics(
       state, values, ndim, dimension, keepdim);
-  TensorUtils<THCudaLongTensor>::preserveReduceDimSemantics(
+  THCTensor_preserveReduceDimSemantics(
       state, indices, ndim, dimension, keepdim);
-  dim = THCTensor_(newSizeOf)(state, input);
-  THLongStorage_set(dim, dimension, 1);
-  THCTensor_(resize)(state, values, dim, NULL);
-  THCudaLongTensor_resize(state, indices, dim, NULL);
-  THLongStorage_free(dim);
+  std::vector<int64_t> dim = THTensor_sizesLegacyNoScalars(input);
+  dim[dimension] = 1;
+  THCTensor_(resize)(state, values, dim, {});
+  THCudaLongTensor_resize(state, indices, dim, {});
 
   // If sliceSize is 1, copy input to values and set indices
   if (sliceSize == 1) {
@@ -209,7 +207,7 @@ THC_API void THCTensor_(mode)(THCState *state,
   // 3. Can use 32-bit index math for indexing (mainly just for implementation conciseness, could be changed)
   if (sliceSize <= MAX_BLOCK_SIZE &&
       slices <= MAX_GRID_SIZE &&
-      TensorUtils<THCTensor>::canUse32BitIndexMath(state, input)) {
+      THCTensor_canUse32BitIndexMath(state, input)) {
     // Beginning our optimized implementation. First thing we want to do is to transpose
     // the input Tensor along the sort dimension, and then make it contiguous
     transposed = THCTensor_(newTranspose)(state, input, dimension, ndim - 1);
@@ -222,8 +220,8 @@ THC_API void THCTensor_(mode)(THCState *state,
     indicesTransposed = THCudaLongTensor_newTranspose(state, indices, dimension, ndim-1);
 
     // Set-up TensorInfo structs for passing to kernel
-    TensorInfo<real, unsigned int> tiValues = getTensorInfo<THCTensor, unsigned int>(state, valuesTransposed);
-    TensorInfo<int64_t, unsigned int> tiIndices = getTensorInfo<THCudaLongTensor, unsigned int>(state, indicesTransposed);
+    TensorInfo<real, unsigned int> tiValues = getTensorInfo<real, THCTensor, unsigned int>(state, valuesTransposed);
+    TensorInfo<int64_t, unsigned int> tiIndices = getTensorInfo<int64_t, THCudaLongTensor, unsigned int>(state, indicesTransposed);
 
     // The number of blocks is the number of slices that we need to calculate the mode for. Each block
     // is responsible for computing a single mode

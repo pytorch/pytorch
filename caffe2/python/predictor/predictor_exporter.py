@@ -36,7 +36,7 @@ def get_predictor_exporter_helper(submodelNetName):
 class PredictorExportMeta(collections.namedtuple(
     'PredictorExportMeta',
         'predict_net, parameters, inputs, outputs, shapes, name, \
-        extra_init_net, net_type, num_workers')):
+        extra_init_net, net_type, num_workers, trainer_prefix')):
     """
     Metadata to be used for serializaing a net.
 
@@ -50,6 +50,8 @@ class PredictorExportMeta(collections.namedtuple(
     net_type is the type field in caffe2 NetDef - can be 'simple', 'dag', etc.
 
     num_workers specifies for net type 'dag' how many threads should run ops
+
+    trainer_prefix specifies the type of trainer.
     """
     def __new__(
         cls,
@@ -62,6 +64,7 @@ class PredictorExportMeta(collections.namedtuple(
         extra_init_net=None,
         net_type=None,
         num_workers=None,
+        trainer_prefix=None,
     ):
         inputs = [str(i) for i in inputs]
         outputs = [str(o) for o in outputs]
@@ -82,7 +85,7 @@ class PredictorExportMeta(collections.namedtuple(
         assert isinstance(predict_net, (caffe2_pb2.NetDef, caffe2_pb2.PlanDef))
         return super(PredictorExportMeta, cls).__new__(
             cls, predict_net, parameters, inputs, outputs, shapes, name,
-            extra_init_net, net_type, num_workers)
+            extra_init_net, net_type, num_workers, trainer_prefix)
 
     def inputs_name(self):
         return utils.get_comp_name(predictor_constants.INPUTS_BLOB_TYPE,
@@ -109,12 +112,16 @@ class PredictorExportMeta(collections.namedtuple(
                                    self.name)
 
     def train_init_plan_name(self):
-        return utils.get_comp_name(predictor_constants.TRAIN_INIT_PLAN_TYPE,
+        plan_name = utils.get_comp_name(predictor_constants.TRAIN_INIT_PLAN_TYPE,
                                    self.name)
+        return self.trainer_prefix + '_' + plan_name \
+            if self.trainer_prefix else plan_name
 
     def train_plan_name(self):
-        return utils.get_comp_name(predictor_constants.TRAIN_PLAN_TYPE,
+        plan_name = utils.get_comp_name(predictor_constants.TRAIN_PLAN_TYPE,
                                    self.name)
+        return self.trainer_prefix + '_' + plan_name \
+            if self.trainer_prefix else plan_name
 
 
 def prepare_prediction_net(filename, db_type, device_option=None):

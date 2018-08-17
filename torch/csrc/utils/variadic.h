@@ -172,7 +172,6 @@ using disable_if_contains_t =
 
 template <typename Function, typename... Ts>
 void apply(Function function, Ts&&... ts) {
-  //
   // https://stackoverflow.com/questions/13978916/inserting-a-variadic-argument-list-into-a-vector
   // Creates a dummy array, so that each function call is evaluated in order.
   // `(function(), 0)` is because `function` should (!) return `void`, so

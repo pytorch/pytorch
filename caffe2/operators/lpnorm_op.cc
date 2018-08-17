@@ -1,5 +1,9 @@
 #include "caffe2/operators/lpnorm_op.h"
 
+#include "caffe2/core/operator.h"
+#include "caffe2/core/types.h"
+#include "caffe2/utils/eigen_utils.h"
+
 namespace caffe2 {
 
 template <>
@@ -11,12 +15,12 @@ bool LpNormOp<float, CPUContext>::RunOnDevice() {
   const float size = average_ ? (float)X.size() : 1.0f;
   CAFFE_ENFORCE_GT(size, 0);
   if (p_ == 1) {
-    *(norm->mutable_data<float>()) =
+    *(norm->template mutable_data<float>()) =
         (ConstEigenVectorMap<float>(X_data, X.size()).array()).abs().sum() /
         size;
     // L1(x) = sum(|x|), L1_average(x) = sum(\x\) / x.size()
   } else if (p_ == 2) {
-    *(norm->mutable_data<float>()) =
+    *(norm->template mutable_data<float>()) =
         (ConstEigenVectorMap<float>(X_data, X.size()).array()).square().sum() /
         size;
     // L2(x) = (sum(|x|^2)), L2_average(x) = sum(|x|^2) / x.size()
@@ -39,15 +43,17 @@ bool LpNormGradientOp<float, CPUContext>::RunOnDevice() {
     for (int i = 0; i < X.size(); ++i) {
       float temp = (X.data<float>())[i];
       if (temp < -kEps) {
-        dX->mutable_data<float>()[i] = -(dnorm.data<float>())[0] / size;
+        dX->template mutable_data<float>()[i] =
+            -(dnorm.data<float>())[0] / size;
       } else if (temp > kEps) {
-        dX->mutable_data<float>()[i] = (dnorm.data<float>())[0] / size;
+        dX->template mutable_data<float>()[i] = (dnorm.data<float>())[0] / size;
       } else {
-        dX->mutable_data<float>()[i] = 0;
+        dX->template mutable_data<float>()[i] = 0;
       }
     }
   } else if (p_ == 2) {
-    EigenVectorMap<float>(dX->mutable_data<float>(), X.size()).array() =
+    EigenVectorMap<float>(dX->template mutable_data<float>(), X.size())
+        .array() =
         ConstEigenVectorMap<float>(X.data<float>(), X.size()).array() * 2.0f *
         ((dnorm.data<float>())[0] / size);
   }
@@ -64,19 +70,73 @@ OPERATOR_SCHEMA(LpNorm)
     .NumInputs(1)
     .NumOutputs(1)
     .SetDoc(R"DOC(
-Given one input float tensor X, and produces one output float tensor
-of the Lp norm of tensor X, computed as Lp(x) = sum over |x^p|,
-in which p is either 1 or 2(currently only supports l1 and l2 norm),
-determined by the argument p.
+This op computes the $L_p$ norm of the one dimensional input tensor $X$, and outputs a one dimensional output tensor $Y$. Here, the $L_p$ norm is calculated as
+
+$$L_p(\mathbf{x}) = \sum_i x_i^p$$
+
+This op supports $p$ values of 1 or 2. If the average argument is set, the norm is calculated as Lp_averaged_norm(x) is defined as Lp_averaged_norm(x) = LpNorm(x) / size(x).
+
+Github Links:
+
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/lpnorm_op.h
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/lpnorm_op.cc
+
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "LpNorm",
+    ["X"],
+    ["Y"],
+    p=2
+)
+X = np.array([5., 2.])
+print("X:\n",X)
+
+# Feed X into workspace
+workspace.FeedBlob("X", X.astype(np.float32))
+
+workspace.RunOperatorOnce(op)
+print("Y:\n", workspace.FetchBlob("Y"))
+
+```
+
+**Result**
+
+```
+
+X:
+ [5. 2.]
+Y:
+ [29.]
+
+```
+
+</details>
+
 )DOC")
-    .Input(0, "X", "1D input tensor")
+    .Input(0, "X", "1D Input tensor of data to be operated on.")
     .Output(0, "Z", "1D output tensor")
-    .Arg("p", "Order of the norm in p-norm")
+    .Arg(
+        "p",
+        "*(type: int; default: 2, possible values: {1,2})* Order of the norm in p-norm.")
     .Arg(
         "average",
-        "whehther we calculate norm or averaged_norm."
-        "The Lp_averaged_norm(x) is defined as"
-        "Lp_averaged_norm(x) = LpNorm(x) / size(x)");
+        "*(type: bool; default: False)* Whether we calculate norm or averaged_norm.The Lp_averaged_norm(x) is defined as Lp_averaged_norm(x) = LpNorm(x) / size(x)")
+    .TensorInferenceFunction([](const OperatorDef& /* unused */,
+                                const vector<TensorShape>& in) {
+      std::vector<TIndex> output_dims(1);
+      output_dims[0] = 1; // 1
+      return vector<TensorShape>{
+          CreateTensorShape(vector<TIndex>{output_dims}, in[0].data_type())};
+    });
 
 OPERATOR_SCHEMA(LpNormGradient)
     .NumInputs(2)

@@ -1,18 +1,22 @@
-#include "Layout.h"
+#include "torch/csrc/Layout.h"
 
-#include <cstring>
-#include <structmember.h>
 #include "torch/csrc/Exceptions.h"
 #include "torch/csrc/utils/object_ptr.h"
 #include "torch/csrc/utils/python_strings.h"
 
-PyObject *THPLayout_New(bool is_strided, const std::string& name)
+#include <ATen/Layout.h>
+
+#include <structmember.h>
+#include <cstring>
+#include <string>
+
+PyObject *THPLayout_New(at::Layout layout, const std::string& name)
 {
   auto type = (PyTypeObject*)&THPLayoutType;
   auto self = THPObjectPtr{type->tp_alloc(type, 0)};
   if (!self) throw python_error();
   auto self_ = reinterpret_cast<THPLayout*>(self.get());
-  self_->is_strided = is_strided;
+  self_->layout = layout;
   std::strncpy (self_->name, name.c_str(), LAYOUT_NAME_LEN);
   self_->name[LAYOUT_NAME_LEN] = '\0';
   return self.release();

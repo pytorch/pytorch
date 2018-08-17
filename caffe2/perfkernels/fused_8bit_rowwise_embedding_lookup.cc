@@ -4,6 +4,7 @@
 #include "caffe2/perfkernels/common.h"
 #include "caffe2/perfkernels/typed_axpy.h"
 #include "caffe2/utils/cpuid.h"
+#include "caffe2/utils/eigen_utils.h"
 #include "caffe2/utils/math.h"
 
 namespace caffe2 {
@@ -71,7 +72,7 @@ static void Fused8BitRowwiseEmbeddingLookupGenericSlow(
     }
     if (normalize_by_lengths && lengths[m]) {
       // hack: context is not really used
-      math::Scale<OutType, CPUContext>(
+      math::Scale<float, OutType, CPUContext>(
           block_size, 1.f / lengths[m], out, out, nullptr);
     }
     out += block_size;

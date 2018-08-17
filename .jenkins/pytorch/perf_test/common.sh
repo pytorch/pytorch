@@ -11,7 +11,7 @@ get_runtime_of_command () {
 
   # runtime=$( { time ($@ &> /dev/null); } 2>&1 1>/dev/null)
   runtime=$( { time $@; } 2>&1 1>/dev/null)
-  if [[ $runtime == *"Warning"* ]] || [[ $runtime == *"Error"* ]]; then
+  if [[ $runtime == *"Error"* ]]; then
     exit 1
   fi
   runtime=${runtime#+++ $@}

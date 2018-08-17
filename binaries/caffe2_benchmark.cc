@@ -5,6 +5,7 @@
 #include "binaries/benchmark_helper.h"
 
 using std::make_shared;
+using std::map;
 using std::string;
 using std::vector;
 
@@ -61,11 +62,19 @@ CAFFE2_DEFINE_bool(
     run_individual,
     false,
     "Whether to benchmark individual operators.");
+CAFFE2_DEFINE_int(
+    sleep_before_run,
+    0,
+    "The seconds to sleep before starting the benchmarking.");
 CAFFE2_DEFINE_bool(
     text_output,
     false,
     "Whether to write out output in text format for regression purpose.");
 CAFFE2_DEFINE_int(warmup, 0, "The number of iterations to warm up.");
+CAFFE2_DEFINE_bool(
+    wipe_cache,
+    false,
+    "Whether to evict the cache before running network.");
 
 int main(int argc, char** argv) {
   caffe2::GlobalInit(&argc, &argv);
@@ -75,26 +84,23 @@ int main(int argc, char** argv) {
 
   auto workspace = make_shared<caffe2::Workspace>(new caffe2::Workspace());
   bool run_on_gpu = backendCudaSet(caffe2::FLAGS_backend);
-
-  // support other device type in the future?
-  caffe2::DeviceType run_dev = run_on_gpu ? caffe2::CUDA : caffe2::CPU;
-
   // Run initialization network.
   caffe2::NetDef init_net_def;
   CAFFE_ENFORCE(ReadProtoFromFile(caffe2::FLAGS_init_net, &init_net_def));
-  setDeviceType(&init_net_def, run_dev);
   setOperatorEngine(&init_net_def, caffe2::FLAGS_backend);
   CAFFE_ENFORCE(workspace->RunNetOnce(init_net_def));
 
   // Run main network.
   caffe2::NetDef net_def;
   CAFFE_ENFORCE(ReadProtoFromFile(caffe2::FLAGS_net, &net_def));
-  setDeviceType(&net_def, run_dev);
   setOperatorEngine(&net_def, caffe2::FLAGS_backend);
+
+  map<string, caffe2::TensorProtos> tensor_protos_map;
 
   loadInput(
       workspace,
       run_on_gpu,
+      tensor_protos_map,
       caffe2::FLAGS_input,
       caffe2::FLAGS_input_file,
       caffe2::FLAGS_input_dims,
@@ -103,9 +109,12 @@ int main(int argc, char** argv) {
   runNetwork(
       workspace,
       net_def,
+      tensor_protos_map,
+      caffe2::FLAGS_wipe_cache,
       caffe2::FLAGS_run_individual,
       caffe2::FLAGS_warmup,
-      caffe2::FLAGS_iter);
+      caffe2::FLAGS_iter,
+      caffe2::FLAGS_sleep_before_run);
 
   writeOutput(
       workspace,

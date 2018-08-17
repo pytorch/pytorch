@@ -25,7 +25,7 @@ class OptimizationPass {
  public:
   OptimizationPass(NNModule* nn) : nn_(nn) {}
   virtual void run() = 0;
-  virtual ~OptimizationPass() = 0;
+  virtual ~OptimizationPass(){}
 
  protected:
   NNModule* nn_;
@@ -34,6 +34,7 @@ class OptimizationPass {
 class WorkspaceOptimizationPass : public OptimizationPass {
  public:
   WorkspaceOptimizationPass(NNModule* nn, Workspace* ws) : OptimizationPass(nn), ws_(ws) {}
+  virtual ~WorkspaceOptimizationPass(){}
 
  protected:
   Workspace* ws_;
@@ -42,26 +43,28 @@ class WorkspaceOptimizationPass : public OptimizationPass {
 CAFFE_DECLARE_REGISTRY(WorkspaceOptimizationPassRegistry, WorkspaceOptimizationPass, NNModule*, Workspace*);
 #define REGISTER_WS_OPT_PASS(clsname) \
   CAFFE_REGISTER_CLASS(WorkspaceOptimizationPassRegistry, clsname, clsname)
-#define REGISTER_WS_OPT_PASS_FROM_FUNC(passname, funcname) \
-  class passname : public WorkspaceOptimizationPass { \
-   public: \
+#define REGISTER_WS_OPT_PASS_FROM_FUNC(passname, funcname)      \
+  class passname : public WorkspaceOptimizationPass {           \
+   public:                                                      \
     using WorkspaceOptimizationPass::WorkspaceOptimizationPass; \
-    void run() override { \
-      funcname(nn_, ws_); \
-    } \
-  };
+    void run() override {                                       \
+      funcname(nn_, ws_);                                       \
+    }                                                           \
+  };                                                            \
+  REGISTER_WS_OPT_PASS(passname);
 
 CAFFE_DECLARE_REGISTRY(OptimizationPassRegistry, OptimizationPass, NNModule*);
 #define REGISTER_OPT_PASS(clsname) \
   CAFFE_REGISTER_CLASS(OptimizationPassRegistry, clsname, clsname)
 #define REGISTER_OPT_PASS_FROM_FUNC(passname, funcname) \
-  class passname : public OptimizationPass { \
-   public: \
-    using OptimizationPass::OptimizationPass; \
-    void run() override { \
-      funcname(nn_); \
-    } \
-  };
+  class passname : public OptimizationPass {            \
+   public:                                              \
+    using OptimizationPass::OptimizationPass;           \
+    void run() override {                               \
+      funcname(nn_);                                    \
+    }                                                   \
+  };                                                    \
+  REGISTER_OPT_PASS(passname);
 
 } // namespace caffe2
 

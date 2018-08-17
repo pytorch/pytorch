@@ -35,7 +35,7 @@ def main(args):
     input_name = args.input_name
     output_name = args.output_name
 
-    iters = int(args.iters)
+    iters = int(args.instances)
     for i in range(iters):
         input_blob_name = input_name + (str(i) if i > 0 and args.chain else '')
         output_blob_name = output_name + str(i + 1)
@@ -85,8 +85,8 @@ if __name__ == "__main__":
                         default="data")
     parser.add_argument("--output_name", help="Name of the output blob.",
                         default="output")
-    parser.add_argument("--iters",
-                        help="Number of iterations to run the operator.",
+    parser.add_argument("--instances",
+                        help="Number of instances to run the operator.",
                         default="1")
     parser.add_argument("-d", "--debug", help="Print debug information.",
                         action='store_true')

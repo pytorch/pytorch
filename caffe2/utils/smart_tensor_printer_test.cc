@@ -30,7 +30,7 @@ void printTensorAndCheck(const std::vector<T>& values) {
   testing::internal::CaptureStderr();
   CPUContext cpuContext;
 
-  Tensor<CPUContext> tensor(
+  Tensor tensor(
       std::vector<TIndex>{static_cast<TIndex>(values.size())},
       values,
       &cpuContext);

@@ -49,22 +49,15 @@ def ref_adagrad(param_in, mom_in, grad, lr, epsilon, using_fp16=False,
 
 
 def adagrad_sparse_test_helper(parent_test, inputs, lr, epsilon,
-        data_strategy, engine, ref_adagrad, gc, dc):
+     engine, ref_adagrad, gc, dc):
     param, momentum, grad = inputs
     momentum = np.abs(momentum)
     lr = np.array([lr], dtype=np.float32)
 
     # Create an indexing array containing values that are lists of indices,
     # which index into grad
-    indices = data_strategy.draw(
-        hu.tensor(dtype=np.int64,
-                  elements=st.sampled_from(np.arange(grad.shape[0]))),
-    )
-    hypothesis.note('indices.shape: %s' % str(indices.shape))
-
-    # For now, the indices must be unique
-    hypothesis.assume(np.array_equal(np.unique(indices.flatten()),
-                                     np.sort(indices.flatten())))
+    indices = np.random.choice(np.arange(grad.shape[0]),
+        size=np.random.randint(grad.shape[0]), replace=False)
 
     # Sparsify grad
     grad = grad[indices]

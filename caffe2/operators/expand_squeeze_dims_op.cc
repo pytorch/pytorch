@@ -47,30 +47,110 @@ OPERATOR_SCHEMA(ExpandDims)
       return out;
     })
     .SetDoc(R"DOC(
-Insert single-dimensional entries to the shape of a tensor.
-Takes one required argument `dims`, a list of dimensions that will be inserted.
-Dimension indices in `dims` are as seen in the output tensor. For example:
+The *ExpandDims* op inserts single-dimensional entries into the shape of the input tensor *data,* and produces a single output tensor *expanded*. The op also takes an argument *dims* with a list of dimensions for where to add the single dimensional entries. If the same blob is provided as input and output, the operation is copy-free. This is the exact inverse operation of *Squeeze*.
 
-  Given a tensor such that tensor.Shape() = [3, 4, 5], then
-  ExpandDims(tensor, dims=[0, 4]).Shape() == [1, 3, 4, 5, 1])
+Github Links:
 
-If the same blob is provided in input and output, the operation is copy-free.
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/expand_squeeze_dims_op.h
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/expand_squeeze_dims_op.cc
+
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "ExpandDims",
+    ["data"],
+    ["expanded"],
+    dims=[0,1],
+)
+
+workspace.FeedBlob("data", np.zeros((100,100)).astype(np.float32))
+print("data.shape:", workspace.FetchBlob("data").shape)
+
+workspace.RunOperatorOnce(op)
+print("expanded.shape:", workspace.FetchBlob("expanded").shape)
+
+```
+
+**Result**
+
+```
+
+data.shape: (100, 100)
+expanded.shape: (1, 1, 100, 100)
+
+```
+
+</details>
+
+
+
 )DOC")
-    .Input(0, "data", "Original tensor")
-    .Output(0, "expanded", "Reshaped tensor with same data as input.");
+    .Input(0, "data", "Input tensor of data to be operated on.")
+    .Output(0, "expanded", "Reshaped tensor with same data as input.")
+    .Arg("dims", "*(type: [int])* List of dimensions of *data* to add single dimensional entry.");
 
 OPERATOR_SCHEMA(Squeeze)
     .NumInputs(1)
     .NumOutputs(1)
     .AllowInplace({{0, 0}})
     .SetDoc(R"DOC(
-Remove single-dimensional entries from the shape of a tensor.
-Takes a parameter `dims` with a list of dimension to squeeze.
-If the same blob is provided in input and output, the operation is copy-free.
-This is the exact inverse operation of ExpandDims given the same `dims` arg.
+The *Squeeze* op removes single-dimensional entries from the shape of the input tensor *data,* and produces a single output tensor *squeezed*. The op also takes an argument *dims* with a list of dimensions to squeeze. If the same blob is provided as input and output, the operation is copy-free. This is the exact inverse operation of *ExpandDims* given the same *dims* argument.
+
+Github Links:
+
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/expand_squeeze_dims_op.h
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/expand_squeeze_dims_op.cc
+
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "Squeeze",
+    ["data"],
+    ["squeezed"],
+    dims=[0,1],
+)
+
+workspace.FeedBlob("data", np.zeros((1,1,100,100)).astype(np.float32))
+print("data.shape:", workspace.FetchBlob("data").shape)
+
+workspace.RunOperatorOnce(op)
+print("squeezed.shape:", workspace.FetchBlob("squeezed").shape)
+
+```
+
+**Result**
+
+```
+
+data.shape: (1, 1, 100, 100)
+squeezed.shape: (100, 100)
+
+```
+
+</details>
+
 )DOC")
-    .Input(0, "data", "Tensors with at least max(dims) dimensions.")
+    .Input(0, "data", "Input tensor of data to be operated on.")
     .Output(0, "squeezed", "Reshaped tensor with same data as input.")
+    .Arg("dims", "*(type: [int])* List of dimensions of *data* to squeeze out.")
     .TensorInferenceFunction([](const OperatorDef& def,
                                 const vector<TensorShape>& in) {
       ArgumentHelper helper(def);

@@ -15,12 +15,12 @@ class BatchMatMulOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   BatchMatMulOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        trans_a_(OperatorBase::GetSingleArgument<int>("trans_a", 0)),
-        trans_b_(OperatorBase::GetSingleArgument<int>("trans_b", 0)),
-        broadcast_(OperatorBase::GetSingleArgument<int>("broadcast", 0)),
-        use_scratch_(OperatorBase::GetSingleArgument<int>("use_scratch", 0)) {
+        trans_a_(this->template GetSingleArgument<int>("trans_a", 0)),
+        trans_b_(this->template GetSingleArgument<int>("trans_b", 0)),
+        broadcast_(this->template GetSingleArgument<int>("broadcast", 0)),
+        use_scratch_(this->template GetSingleArgument<int>("use_scratch", 0)) {
     if (use_scratch_) {
-      scratch_ = std::make_shared<Tensor<Context>>();
+      scratch_ = std::make_shared<Tensor>(Context::GetDeviceType());
     }
   }
 
@@ -255,7 +255,7 @@ class BatchMatMulOp final : public Operator<Context> {
 
       // TODO(T23893772): doing this in a loop is likely going to be slow on GPU
       for (size_t p = 0; p < num_outer_batches; ++p) {
-        math::GemmBatched<T, Context, Engine>(
+        math::GemmStridedBatched<T, Context, Engine>(
             trans_a_ ? CblasTrans : CblasNoTrans,
             trans_b_ ? CblasTrans : CblasNoTrans,
             num_sub_batches,
@@ -264,11 +264,13 @@ class BatchMatMulOp final : public Operator<Context> {
             K,
             1.0f,
             data_A + p * A_stride,
+            M * K,
             data_B + p * B_stride,
+            K * N,
             0.0f,
             Y_data + p * Y_stride,
-            &context_,
-            use_scratch_ ? scratch_.get() : nullptr);
+            M * N,
+            &context_);
       }
     }
     return true;
@@ -280,7 +282,7 @@ class BatchMatMulOp final : public Operator<Context> {
   bool broadcast_;
 
   bool use_scratch_;
-  std::shared_ptr<Tensor<Context>> scratch_;
+  std::shared_ptr<Tensor> scratch_;
 };
 
 } // namespace caffe2

@@ -1,10 +1,10 @@
 #include "ATen/UndefinedType.h"
-#include "ATen/Error.h"
+#include "ATen/core/Error.h"
 
 namespace at {
 
 UndefinedType::UndefinedType(Context* context)
-: Type(context, /*is_variable_or_undefined=*/true) {}
+    : Type(context, UndefinedTensorId(), /*is_variable=*/false, /*is_undefined=*/true) {}
 ScalarType UndefinedType::scalarType() const {
   return ScalarType::Undefined;
 }
@@ -15,10 +15,10 @@ bool UndefinedType::is_cuda() const { return false; }
 bool UndefinedType::is_sparse() const { return false; }
 bool UndefinedType::is_distributed() const { return false; }
 
-std::unique_ptr<Storage> UndefinedType::storage() const {
+std::unique_ptr<Storage> UndefinedType::storage(bool resizable) const {
   AT_ERROR("storage not defined for UndefinedType");
 }
-std::unique_ptr<Storage> UndefinedType::storage(size_t size) const {
+std::unique_ptr<Storage> UndefinedType::storage(size_t size, bool resizable) const {
   AT_ERROR("storage(size_t) not defined for UndefinedType");
 }
 std::unique_ptr<Storage> UndefinedType::storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const {
@@ -27,7 +27,7 @@ std::unique_ptr<Storage> UndefinedType::storageFromBlob(void * data, int64_t siz
 std::unique_ptr<Storage> UndefinedType::unsafeStorageFromTH(void * th_pointer, bool retain) const {
   AT_ERROR("unsafeStorageFromTH not defined for UndefinedType");
 }
-std::unique_ptr<Storage> UndefinedType::storageWithAllocator(int64_t size, std::unique_ptr<Allocator> allocator) const {
+std::unique_ptr<Storage> UndefinedType::storageWithAllocator(int64_t size, Allocator* allocator) const {
   AT_ERROR("storageWithAllocator not defined for UndefinedType");
 }
 Tensor UndefinedType::unsafeTensorFromTH(void * th_pointer, bool retain) const {
@@ -44,7 +44,7 @@ TypeID UndefinedType::ID() const {
   return TypeID::Undefined;
 }
 
-std::size_t UndefinedType::elementSizeInBytes() const {
+size_t UndefinedType::elementSizeInBytes() const {
   AT_ERROR("elementSizeInBytes not defined for UndefinedType");
 }
 

@@ -3,24 +3,24 @@ import glob
 import warnings
 from itertools import chain
 
-from .env import IS_WINDOWS, IS_DARWIN, IS_CONDA, CONDA_DIR, check_env_flag, \
+from .env import IS_WINDOWS, IS_DARWIN, IS_CONDA, CONDA_DIR, check_negative_env_flag, \
     gather_paths
 
-from .cuda import WITH_CUDA, CUDA_HOME
+from .cuda import USE_CUDA, CUDA_HOME
 
 
-WITH_NCCL = WITH_CUDA and not IS_DARWIN and not IS_WINDOWS
-WITH_SYSTEM_NCCL = False
+USE_NCCL = USE_CUDA and not IS_DARWIN and not IS_WINDOWS
+USE_SYSTEM_NCCL = False
 NCCL_LIB_DIR = None
 NCCL_SYSTEM_LIB = None
 NCCL_INCLUDE_DIR = None
 NCCL_ROOT_DIR = None
-WITH_STATIC_NCCL = os.getenv("USE_STATIC_NCCL")
+USE_STATIC_NCCL = os.getenv("USE_STATIC_NCCL")
 LIBNCCL_PREFIX = "libnccl"
-if WITH_STATIC_NCCL is not None:
+if USE_STATIC_NCCL is not None:
     LIBNCCL_PREFIX = "libnccl_static"
 
-if WITH_CUDA and not check_env_flag('NO_SYSTEM_NCCL'):
+if USE_CUDA and not check_negative_env_flag('USE_SYSTEM_NCCL'):
     ENV_ROOT = os.getenv('NCCL_ROOT_DIR', None)
     LIB_DIR = os.getenv('NCCL_LIB_DIR', None)
     INCLUDE_DIR = os.getenv('NCCL_INCLUDE_DIR', None)
@@ -71,5 +71,5 @@ if WITH_CUDA and not check_env_flag('NO_SYSTEM_NCCL'):
             NCCL_INCLUDE_DIR = path
             break
     if NCCL_LIB_DIR is not None and NCCL_INCLUDE_DIR is not None:
-        WITH_SYSTEM_NCCL = True
+        USE_SYSTEM_NCCL = True
         NCCL_ROOT_DIR = os.path.commonprefix((NCCL_LIB_DIR, NCCL_INCLUDE_DIR))

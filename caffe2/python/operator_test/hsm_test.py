@@ -170,7 +170,7 @@ class TestHsm(hu.HypothesisTestCase):
             op, [s + '_grad' for s in op.output])
 
         loss, _ = grad_checker.GetLossAndGrad(
-            op, grad_ops, X, op.input[0], g_input[0], [0]
+            op, grad_ops, [X, w, b, labels], op.input, 0, g_input[0], [0]
         )
         self.assertAlmostEqual(loss, 44.269, delta=0.001)
 

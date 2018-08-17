@@ -2,6 +2,13 @@
 
 namespace torch { namespace autograd {
 
-thread_local bool GradMode::_enabled = 1;
+thread_local bool GradMode_enabled = 1;
 
+bool GradMode::is_enabled() {
+  return GradMode_enabled;
+}
+
+void GradMode::set_enabled(bool enabled) {
+  GradMode_enabled = enabled;
+}
 }}

@@ -26,14 +26,14 @@ void fill_tensor(int64_t scalar, Tensor& t_) {
 // double (using a4 as a target). We also exercise on a zero_dim and empty
 // tensor.
 void test(Type& type, IntList shape, int64_t a = 0, int64_t b = 1) {
-  auto zero_dim = type.tensor({});
+  auto zero_dim = at::empty({}, type);
   zero_dim.fill_(2);
   zero_dim.exp_();
   AT_DISPATCH_FLOATING_TYPES(zero_dim.type(), "test0", [&] {
     ASSERT(zero_dim.data<scalar_t>()[0] == std::exp(2));
   });
 
-  auto empty_t = type.tensor({0});
+  auto empty_t = at::empty({0}, type);
   empty_t.fill_(3);
   empty_t.exp_();
 

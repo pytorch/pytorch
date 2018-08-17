@@ -1,61 +1,59 @@
-#include <cmath>
+#include "caffe2/operators/tan_op.h"
+
+#include <algorithm>
+#include <functional>
 
 #include "caffe2/core/context_gpu.h"
-#include "caffe2/operators/elementwise_op.h"
 
 namespace caffe2 {
 
 template <typename T>
-__global__ void TanKernel(const int N, const T* X, T* Y) {
-  CUDA_1D_KERNEL_LOOP(i, N) {
-    Y[i] = tan(X[i]);
-  }
+inline __host__ __device__ T Square(const T& x) {
+  return x * x;
 }
 
 template <typename T>
-__global__ void TanGradientKernel(const int N, const T* X, const T* dY, T* dX) {
+__global__ void
+TanGradientCUDAKernel(const int N, const T* dY, const T* X, T* dX) {
   CUDA_1D_KERNEL_LOOP(i, N) {
-    dX[i] = dY[i] / pow(cos(X[i]), 2);
+#if __CUDA_ARCH__ >= 350
+    dX[i] = __ldg(dY + i) / Square(cos(__ldg(X + i)));
+#else
+    dX[i] = dY[i] / Square(cos(X[i]));
+#endif
   }
 }
 
-struct TanCUDAFunctor {
-  template <typename T>
-  inline void
-  operator()(const int n, const T* x, T* y, CUDAContext* device_context) {
-    TanKernel<T>
-        <<<CAFFE_GET_BLOCKS(n),
-           CAFFE_CUDA_NUM_THREADS,
-           0,
-           device_context->cuda_stream()>>>(n, x, y);
-    return;
-  }
-};
-
-struct TanGradientCUDAFunctor {
-  template <typename T>
-  inline void Run(
-      const int n,
-      const T* x,
-      const T* dy,
-      T* dx,
-      CUDAContext* device_context) {
-    TanGradientKernel<T>
-        <<<CAFFE_GET_BLOCKS(n),
-           CAFFE_CUDA_NUM_THREADS,
-           0,
-           device_context->cuda_stream()>>>(n, x, dy, dx);
-    return;
-  }
-};
+template <>
+template <typename T>
+bool TanGradientFunctor<CUDAContext>::Forward(
+    const std::vector<int>& X_dims,
+    const std::vector<int>& /* dY_dims */,
+    const T* X,
+    const T* dY,
+    T* dX,
+    CUDAContext* context) const {
+  const int size = std::accumulate(
+      X_dims.cbegin(), X_dims.cend(), 1, std::multiplies<int>());
+  TanGradientCUDAKernel<T>
+      <<<CAFFE_GET_BLOCKS(size),
+         CAFFE_CUDA_NUM_THREADS,
+         0,
+         context->cuda_stream()>>>(size, dY, X, dX);
+  return true;
+}
 
 REGISTER_CUDA_OPERATOR(
     Tan,
-    UnaryElementwiseOp<TensorTypes<float>, CUDAContext, TanCUDAFunctor>);
+    UnaryElementwiseOp<
+        TensorTypes<float>,
+        CUDAContext,
+        TanFunctor<CUDAContext>>);
 REGISTER_CUDA_OPERATOR(
     TanGradient,
     BinaryElementwiseOp<
         TensorTypes<float>,
         CUDAContext,
-        WithoutBroadcast<TanGradientCUDAFunctor>>);
+        TanGradientFunctor<CUDAContext>>);
+
 } // namespace caffe2

@@ -1,4 +1,5 @@
 #include "ATen/Context.h"
+#include "ATen/cuda/CUDAContext.h"
 #include "ATen/Dispatch.h"
 #include "ATen/NativeFunctions.h"
 #include "ATen/cuda/PinnedMemoryAllocator.h"
@@ -51,7 +52,7 @@ static magma_queue_t createMagmaQueue(const Tensor& tensor) {
   magma_queue_t magma_queue;
   magma_queue_create_from_cuda(
       tensor.get_device(),
-      context.getCurrentCUDAStream(),
+      at::cuda::getCurrentCUDAStream(),
       THCState_getCurrentBlasHandle(context.getTHCState()),
       THCState_getCurrentSparseHandle(context.getTHCState()),
       &magma_queue);
@@ -73,14 +74,14 @@ static inline magma_int_t magma_int_cast(int64_t value, const char* varname) {
 template<class T>
 static inline std::unique_ptr<Storage> pin_memory(int64_t size, Tensor dummy) {
   int64_t adjusted_size = size * sizeof(T);
-  auto allocator = std::unique_ptr<Allocator>(new cuda::PinnedMemoryAllocator());
+  auto* allocator = cuda::getPinnedMemoryAllocator();
   auto& backend = dummy.type().toBackend(kCPU).toScalarType(kByte);
-  return backend.storageWithAllocator(adjusted_size, std::move(allocator));
+  return backend.storageWithAllocator(adjusted_size, allocator);
 }
 
 #define ALLOCATE_ARRAY(name, type, size, dummy_tensor) \
   auto storage_##name = pin_memory<type>(size, dummy_tensor); \
-  name = reinterpret_cast<type*>(storage_##name->data());
+  name = reinterpret_cast<type*>(storage_##name->pImpl()->data());
 
 template <typename scalar_t>
 static void applyGesv(Tensor& b, Tensor& A, std::vector<int64_t> infos) {

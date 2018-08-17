@@ -124,8 +124,7 @@ auto ConvParams::use_mkldnn(const at::Tensor& input) const -> bool {
          input.type().scalarType() == kFloat && // only on CPU Float Tensors
          !is_dilated() && // doesn't support dilation
          !transposed && // or transposed tensors
-         input.ndimension() == 4 && // must be in NCHW format
-         groups == 1;
+         input.ndimension() == 4; // must be in NCHW format
 #endif
   return false;
 }
@@ -151,9 +150,9 @@ static void check_input_shape_forward(const at::Tensor& input,
 
   if (weight_dim != k) {
     std::stringstream ss;
-    ss << "Expected " << k << "-dimensional weight for " << k
-       << "-dimensional input " << input.sizes() << ", but got weight of size "
-       << weight.sizes() << " instead";
+    ss << "Expected " << weight_dim << "-dimensional input for " << weight_dim
+       << "-dimensional weight " << weight.sizes() << ", but got input of size "
+       << input.sizes() << " instead";
     throw std::runtime_error(ss.str());
   }
   if (weight.size(0) < groups) {
@@ -167,8 +166,8 @@ static void check_input_shape_forward(const at::Tensor& input,
   if (!transposed) {
     if (input.size(1) != (weight.size(1) * groups)) {
       std::stringstream ss;
-      ss << "Given groups=" << groups << ", weight" << weight.sizes()
-         << ", so expected input" << input.sizes() << " to have "
+      ss << "Given groups=" << groups << ", weight of size " << weight.sizes()
+         << ", expected input" << input.sizes() << " to have "
          << (weight.size(1) * groups) << " channels, but got " << input.size(1)
          << " channels instead";
       throw std::runtime_error(ss.str());
@@ -183,8 +182,8 @@ static void check_input_shape_forward(const at::Tensor& input,
   } else { // transposed
     if (input.size(1) != weight.size(0)) {
       std::stringstream ss;
-      ss << "Given transposed=" << transposed << ", weight" << weight.sizes()
-         << ", so expected input" << input.sizes() << " to have "
+      ss << "Given transposed=" << transposed << ", weight of size " << weight.sizes()
+         << ", expected input" << input.sizes() << " to have "
          << weight.size(0) << " channels, but got " << input.size(1)
          << " channels instead";
       throw std::runtime_error(ss.str());
@@ -295,11 +294,11 @@ at::Tensor _convolution(
   auto input = input_r.contiguous();
   auto weight = weight_r;
   auto bias = bias_r;
-  auto k = input.ndimension();
+  auto k = weight.ndimension();
   int64_t dim = k - 2;
 
   if (dim <= 0) {
-    throw std::runtime_error("input has less dimensions than expected");
+    throw std::runtime_error("weight should have at least two dimensions");
   }
 
   ConvParams params;
@@ -369,7 +368,7 @@ at::Tensor _convolution(
       throw std::runtime_error(ss.str());
     }
 
-    output = at::mkldnn_convolution(input, weight, bias, params.padding, params.stride, params.dilation);
+    output = at::mkldnn_convolution(input, weight, bias, params.padding, params.stride, params.dilation, params.groups);
 #endif
   } else {
     if (params.groups == 1) {
@@ -403,11 +402,11 @@ at::Tensor _convolution_nogroup(
     bool transposed, IntList output_padding) {
 
   ConvParams params;
-  params.stride = stride;
-  params.padding = padding;
-  params.dilation = dilation;
+  params.stride = stride.vec();
+  params.padding = padding.vec();
+  params.dilation = dilation.vec();
   params.transposed = transposed;
-  params.output_padding = output_padding;
+  params.output_padding = output_padding.vec();
   params.groups = 1;
   params.benchmark = false;
   params.deterministic = false;
@@ -475,11 +474,11 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward(
   auto weight = weight_r;
 
   ConvParams params;
-  params.stride = stride_;
-  params.padding = padding_;
-  params.dilation = dilation_;
+  params.stride = stride_.vec();
+  params.padding = padding_.vec();
+  params.dilation = dilation_.vec();
   params.transposed = transposed_;
-  params.output_padding = output_padding_;
+  params.output_padding = output_padding_.vec();
   params.groups = groups_;
   params.benchmark = benchmark;
   params.deterministic = deterministic;

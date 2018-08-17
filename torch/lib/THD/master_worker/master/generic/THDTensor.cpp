@@ -37,19 +37,19 @@ ptrdiff_t THDTensor_(storageOffset)(const THDTensor *self) {
   return self->storageOffset;
 }
 
-int THDTensor_(nDimension)(const THDTensor *self) {
+int THDTensor_(nDimensionLegacyNoScalars)(const THDTensor *self) {
   return self->nDimension;
 }
 
 int64_t THDTensor_(size)(const THDTensor *self, int dim) {
   THArgCheck((dim >= 0) && (dim < self->nDimension), 2, "dimension %d out of range of %dD tensor",
-      dim+1, THDTensor_(nDimension)(self));
+      dim+1, THDTensor_(nDimensionLegacyNoScalars)(self));
   return self->size[dim];
 }
 
 int64_t THDTensor_(stride)(const THDTensor *self, int dim) {
   THArgCheck((dim >= 0) && (dim < self->nDimension), 2, "dimension %d out of range of %dD tensor", dim+1,
-      THDTensor_(nDimension)(self));
+      THDTensor_(nDimensionLegacyNoScalars)(self));
   return self->stride[dim];
 }
 
@@ -670,7 +670,7 @@ void THDTensor_(unfold)(THDTensor *self, THDTensor *src,
   newSize[self->nDimension] = size;
   newStride[self->nDimension] = self->stride[dimension];
 
-  for (std::size_t d = 0; d < self->nDimension; d++) {
+  for (size_t d = 0; d < self->nDimension; d++) {
     if (d == dimension) {
       newSize[d] = (self->size[d] - size) / step + 1;
       newStride[d] = step * self->stride[d];
@@ -709,7 +709,7 @@ void THDTensor_(squeeze)(THDTensor *self, THDTensor *src) {
 
   THDTensor_(set)(self, src);
 
-  for (std::size_t d = 0; d < src->nDimension; d++) {
+  for (size_t d = 0; d < src->nDimension; d++) {
     if (src->size[d] != 1) {
       if (d != ndim) {
         self->size[ndim] = src->size[d];
@@ -783,7 +783,7 @@ int THDTensor_(isContiguous)(const THDTensor *self) {
 int THDTensor_(isSameSizeAs)(const THDTensor *self, const THDTensor *src) {
   if (self->nDimension != src->nDimension)
     return 0;
-  for (std::size_t d = 0; d < self->nDimension; d++)
+  for (size_t d = 0; d < self->nDimension; d++)
     if (self->size[d] != src->size[d])
       return 0;
   return 1;
@@ -795,7 +795,7 @@ int THDTensor_(isSetTo)(const THDTensor *self, const THDTensor *src) {
   if (self->storage == src->storage &&
       self->storageOffset == src->storageOffset &&
       self->nDimension == src->nDimension) {
-    for (std::size_t d = 0; d < self->nDimension; d++) {
+    for (size_t d = 0; d < self->nDimension; d++) {
       if (self->size[d] != src->size[d] || self->stride[d] != src->stride[d])
         return 0;
     }
@@ -807,7 +807,7 @@ int THDTensor_(isSetTo)(const THDTensor *self, const THDTensor *src) {
 int THDTensor_(isSize)(const THDTensor *self, const THLongStorage *dims) {
   if (self->nDimension != THLongStorage_size(dims))
     return 0;
-  for (std::size_t d = 0; d < self->nDimension; d++)
+  for (size_t d = 0; d < self->nDimension; d++)
     if (self->size[d] != THLongStorage_get(dims, d))
       return 0;
   return 1;
@@ -818,7 +818,7 @@ ptrdiff_t THDTensor_(nElement)(const THDTensor *self) {
     return 0;
   } else {
     ptrdiff_t nElement = 1;
-    for (std::size_t d = 0; d < self->nDimension; d++) {
+    for (size_t d = 0; d < self->nDimension; d++) {
       nElement *= self->size[d];
     }
     return nElement;
@@ -826,8 +826,7 @@ ptrdiff_t THDTensor_(nElement)(const THDTensor *self) {
 }
 
 void THDTensor_(retain)(THDTensor *tensor) {
-  if (tensor->flag & TH_TENSOR_REFCOUNTED)
-    tensor->refcount++;
+  tensor->refcount++;
 }
 
 void THDTensor_(free)(THDTensor *tensor) {
@@ -1039,7 +1038,7 @@ void THDTensor_(addcdiv)(THDTensor *self, THDTensor *src1, real value, THDTensor
 
 void THDTensor_(addmv)(THDTensor *self, real beta, THDTensor *src, real alpha, THDTensor *mat,  THDTensor *vec) {
   if ((mat->nDimension != 2) || (vec->nDimension != 1))
-    THError("matrix and vector expected, got %dD, %dD", mat->nDimension, vec->nDimension);
+    THError("2D tensor and 1D tensor expected, got %dD, %dD tensors", mat->nDimension, vec->nDimension);
 
   if (mat->size[1] != vec->size[0]) {
     THDDescBuff bm = THDTensor_(sizeDesc)(mat);
@@ -1048,7 +1047,7 @@ void THDTensor_(addmv)(THDTensor *self, real beta, THDTensor *src, real alpha, T
   }
 
   if (src->nDimension != 1)
-    THError("vector expected, got src: %dD", src->nDimension);
+    THError("1D tensor expected, got src: %dD tensor", src->nDimension);
 
   if (src->size[0] != mat->size[0]) {
     THDDescBuff bt = THDTensor_(sizeDesc)(src);
@@ -1068,7 +1067,7 @@ void THDTensor_(addmv)(THDTensor *self, real beta, THDTensor *src, real alpha, T
 
 void THDTensor_(addmm)(THDTensor *self, real beta, THDTensor *src, real alpha, THDTensor *mat1, THDTensor *mat2) {
   if ((mat1->nDimension != 2) || (mat2->nDimension != 2))
-    THError("matrices expected, got %dD, %dD tensors", mat1->nDimension, mat2->nDimension);
+    THError("2D tensors expected, got %dD, %dD tensors", mat1->nDimension, mat2->nDimension);
 
   if (mat1->size[1] != mat2->size[0]) {
     THDDescBuff bm1 = THDTensor_(sizeDesc)(mat1);
@@ -1077,7 +1076,7 @@ void THDTensor_(addmm)(THDTensor *self, real beta, THDTensor *src, real alpha, T
   }
 
   if (src->nDimension != 2)
-    THError("matrix expected, got %dD tensor for t", src->nDimension);
+    THError("2D tensors expected, got %dD tensor for t", src->nDimension);
 
   if ((src->size[0] != mat1->size[0]) || (src->size[1] != mat2->size[1])) {
     THDDescBuff bt  = THDTensor_(sizeDesc)(src);
@@ -1247,7 +1246,7 @@ void THDTensor_(sign)(THDTensor *self, THDTensor *src) {
 }
 
 accreal THDTensor_(trace)(THDTensor *self) {
-  THArgCheck(self->nDimension == 2, 1, "expected a matrix");
+  THArgCheck(self->nDimension == 2, 1, "expected a 2D tensor");
 
   masterCommandChannel->sendMessage(
     packMessage(Functions::tensorTrace, self),

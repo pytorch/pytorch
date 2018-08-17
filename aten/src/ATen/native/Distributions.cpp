@@ -1,9 +1,9 @@
 #include "ATen/ATen.h"
 #include "ATen/CPUApplyUtils.h"
 #include "ATen/Dispatch.h"
-#include "ATen/Error.h"
 #include "ATen/ExpandUtils.h"
 #include "ATen/NativeFunctions.h"
+#include "ATen/core/Error.h"
 
 #include "ATen/CPUGenerator.h"
 #include "ATen/CheckGenerator.h"
@@ -145,18 +145,8 @@ Tensor& bernoulli_(Tensor& self, const Tensor& p_, Generator* gen) {
 }
 
 Tensor& bernoulli_(Tensor& self, double p, Generator* gen) {
-  if (!self.is_cuda()) {
-    AT_DISPATCH_ALL_TYPES(self.type(), "bernoulli_", [&] {
-      THGenerator* generator = get_generator(gen);
-      std::lock_guard<std::mutex> lock(generator->mutex);
-      CPU_tensor_apply1<scalar_t>(self, [generator, p](scalar_t& ret_val) {
-        ret_val = (scalar_t)THRandom_bernoulli(generator, p);
-      });
-    });
+    self._bernoulli_(p, gen);
     return self;
-  }
-  Tensor probs = self.type().toScalarType(kDouble).tensor({}).fill_(p);
-  return native::bernoulli_(self, probs, gen);
 }
 
 Tensor& bernoulli_(Tensor& self) {
@@ -180,7 +170,7 @@ Tensor _standard_gamma_grad_cpu(const Tensor& self, const Tensor& output) {
  */
 
 Tensor _s_poisson_cpu(const Tensor& lambda, Generator *gen) {
-  Tensor ret = at::zeros(lambda.type(), lambda.sizes());
+  Tensor ret = at::zeros(lambda.sizes(), lambda.type());
   AT_DISPATCH_FLOATING_TYPES(ret.type(), "poisson", [&] {
     THGenerator* generator = get_generator(gen);
     std::lock_guard<std::mutex> lock(generator->mutex);
@@ -194,7 +184,7 @@ Tensor _s_poisson_cpu(const Tensor& lambda, Generator *gen) {
 }
 
 Tensor _s_gamma_cpu(const Tensor& alpha, Generator *gen) {
-  Tensor ret = alpha.type().zeros(alpha.sizes());
+  Tensor ret = at::zeros(alpha.sizes(), alpha.type());
   AT_DISPATCH_FLOATING_TYPES(ret.type(), "gamma", [&] {
     THGenerator* generator = get_generator(gen);
     std::lock_guard<std::mutex> lock(generator->mutex);

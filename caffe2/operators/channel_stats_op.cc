@@ -1,4 +1,5 @@
 #include "caffe2/operators/channel_stats_op.h"
+#include "caffe2/utils/eigen_utils.h"
 
 namespace caffe2 {
 
@@ -16,8 +17,10 @@ bool ChannelStatsOp<CPUContext>::RunOnDevice() {
 
   Output(SUM)->Resize(C);
   Output(SUMSQ)->Resize(C);
-  EigenVectorArrayMap<float> sum(Output(SUM)->mutable_data<float>(), C);
-  EigenVectorArrayMap<float> sumsq(Output(SUMSQ)->mutable_data<float>(), C);
+  EigenVectorArrayMap<float> sum(
+      Output(SUM)->template mutable_data<float>(), C);
+  EigenVectorArrayMap<float> sumsq(
+      Output(SUMSQ)->template mutable_data<float>(), C);
 
   sum.setZero();
   sumsq.setZero();

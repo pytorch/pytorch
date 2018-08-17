@@ -38,7 +38,7 @@ class Caffe2Frontend(object):
     # ONNX makes a BC breaking change to semantics of operators, having this set
     # to an accurate number will prevent our models form exporting.  However,
     # we should strive to keep this up-to-date as much as possible.
-    target_opset_version = 6
+    target_opset_version = 8
 
     _renamed_operators = {
         'SpatialBN': 'BatchNormalization',
@@ -136,7 +136,6 @@ class Caffe2Frontend(object):
     @classmethod
     def caffe2_op_to_onnx_node(cls, op_def, shapes):
         if C.support_onnx_export(op_def.type):
-            shape_list = list(shapes.values())
             node_strs, tensor_strs = C.export_to_onnx(cls._dummy_name, op_def.SerializeToString(), shapes)
             nodes = []
             for s in node_strs:

@@ -22,11 +22,11 @@ class FillerOp : public Operator<Context> {
  public:
   FillerOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        shape_(ToVectorTIndex(OperatorBase::GetRepeatedArgument<int>("shape"))),
+        shape_(this->template GetRepeatedArgument<int64_t>("shape")),
         extra_shape_(ToVectorTIndex(
-            OperatorBase::GetRepeatedArgument<int>("extra_shape"))),
+            this->template GetRepeatedArgument<int>("extra_shape"))),
         input_as_shape_(
-            OperatorBase::GetSingleArgument<bool>("input_as_shape", false)) {
+            this->template GetSingleArgument<bool>("input_as_shape", false)) {
     if (InputSize()) {
       if (shape_.size() != 0) {
         CAFFE_THROW(
@@ -41,7 +41,7 @@ class FillerOp : public Operator<Context> {
         CAFFE_THROW("An input must be given if input_as_shape is true");
       }
       if (shape_.size() == 0 &&
-          OperatorBase::HasSingleArgumentOfType<int>("shape")) {
+          this->template HasSingleArgumentOfType<int>("shape")) {
         CAFFE_THROW("Fill 'shape' argument was a scalar, list expected");
       }
     }
@@ -56,7 +56,7 @@ class FillerOp : public Operator<Context> {
       auto shape = vector<TIndex>{};
       if (input_as_shape_) {
         // Shape input must be in CPU context
-        auto& input = OperatorBase::Input<Tensor<CPUContext>>(0);
+        auto& input = this->template Input<Tensor>(0, CPU);
         CAFFE_ENFORCE_EQ(
             input.ndim(),
             1,
@@ -76,7 +76,7 @@ class FillerOp : public Operator<Context> {
     return Fill(output);
   }
 
-  virtual bool Fill(Tensor<Context>* output) = 0;
+  virtual bool Fill(Tensor* output) = 0;
 
  protected:
   vector<TIndex> shape_;
@@ -90,14 +90,14 @@ class UniformFillOp final : public FillerOp<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   UniformFillOp(const OperatorDef& operator_def, Workspace* ws)
       : FillerOp<Context>(operator_def, ws),
-        min_(OperatorBase::template GetSingleArgument<T>("min", 0)),
-        max_(OperatorBase::template GetSingleArgument<T>("max", 1)) {
+        min_(this->template GetSingleArgument<T>("min", 0)),
+        max_(this->template GetSingleArgument<T>("max", 1)) {
     if (InputSize() == 3) {
       CAFFE_ENFORCE(
-          !OperatorBase::HasSingleArgumentOfType<T>("min"),
+          !this->template HasSingleArgumentOfType<T>("min"),
           "Cannot set both min arg and min input blob");
       CAFFE_ENFORCE(
-          !OperatorBase::HasSingleArgumentOfType<T>("max"),
+          !this->template HasSingleArgumentOfType<T>("max"),
           "Cannot set both max arg and max input blob");
     } else {
       CAFFE_ENFORCE_LT(
@@ -105,7 +105,7 @@ class UniformFillOp final : public FillerOp<Context> {
     }
   }
 
-  bool Fill(Tensor<Context>* output) override {
+  bool Fill(Tensor* output) override {
     T min = min_;
     T max = max_;
     if (InputSize() == 3) {
@@ -142,7 +142,7 @@ class UniqueUniformFillOp final : public FillerOp<Context> {
   UniqueUniformFillOp(const OperatorDef& operator_def, Workspace* ws)
       : FillerOp<Context>(operator_def, ws) {
     TensorProto_DataType dtype =
-        static_cast<TensorProto_DataType>(OperatorBase::GetSingleArgument<int>(
+        static_cast<TensorProto_DataType>(this->template GetSingleArgument<int>(
             "dtype", TensorProto_DataType_INT32));
 
     switch (dtype) {
@@ -163,25 +163,25 @@ class UniqueUniformFillOp final : public FillerOp<Context> {
     }
   }
 
-  bool Fill(Tensor<Context>* output) override {
+  bool Fill(Tensor* output) override {
     return (this->*body_)(output);
   }
 
  private:
   template <typename T>
   void CheckRange() {
-    CAFFE_ENFORCE(OperatorBase::HasSingleArgumentOfType<T>("min"));
-    CAFFE_ENFORCE(OperatorBase::HasSingleArgumentOfType<T>("max"));
+    CAFFE_ENFORCE(this->template HasSingleArgumentOfType<T>("min"));
+    CAFFE_ENFORCE(this->template HasSingleArgumentOfType<T>("max"));
     CAFFE_ENFORCE_LT(
-        OperatorBase::GetSingleArgument<T>("min", 0),
-        OperatorBase::GetSingleArgument<T>("max", 0),
+        this->template GetSingleArgument<T>("min", 0),
+        this->template GetSingleArgument<T>("max", 0),
         "Max value should be bigger than min value.");
   }
 
   template <typename T>
-  bool FillWithType(Tensor<Context>* output) {
-    T min = OperatorBase::GetSingleArgument<T>("min", 0);
-    T max = OperatorBase::GetSingleArgument<T>("max", 0);
+  bool FillWithType(Tensor* output) {
+    T min = this->template GetSingleArgument<T>("min", 0);
+    T max = this->template GetSingleArgument<T>("max", 0);
 
     const T* avoid_data = nullptr;
     size_t avoid_size = 0;
@@ -201,7 +201,7 @@ class UniqueUniformFillOp final : public FillerOp<Context> {
     return true;
   }
 
-  bool (UniqueUniformFillOp::*body_)(Tensor<Context>* output);
+  bool (UniqueUniformFillOp::*body_)(Tensor* output);
 };
 
 template <class Context>
@@ -211,16 +211,16 @@ class ConstantFillOp final : public FillerOp<Context> {
   ConstantFillOp(const OperatorDef& operator_def, Workspace* ws)
       : FillerOp<Context>(operator_def, ws) {
     TensorProto_DataType dtype =
-        static_cast<TensorProto_DataType>(OperatorBase::GetSingleArgument<int>(
+        static_cast<TensorProto_DataType>(this->template GetSingleArgument<int>(
             "dtype", TensorProto_DataType_FLOAT));
 
     if (!OperatorBase::HasArgument("dtype") &&
         OperatorBase::HasArgument("value")) {
       // If 'dtype' is not provided, infer type based on the type of 'value'
       // Currently, single argument contains either float, int64 or bytes
-      if (OperatorBase::HasSingleArgumentOfType<float>("value")) {
+      if (this->template HasSingleArgumentOfType<float>("value")) {
         dtype = TensorProto_DataType_FLOAT;
-      } else if (OperatorBase::HasSingleArgumentOfType<int64_t>("value")) {
+      } else if (this->template HasSingleArgumentOfType<int64_t>("value")) {
         dtype = TensorProto_DataType_INT64;
       } else {
         CAFFE_THROW("Argument 'value' is of unexpected type");
@@ -268,13 +268,13 @@ class ConstantFillOp final : public FillerOp<Context> {
     }
   }
 
-  bool Fill(Tensor<Context>* output) override {
+  bool Fill(Tensor* output) override {
     return (this->*body_)(output);
   }
 
   template <typename T>
-  bool FillWithType(Tensor<Context>* output) {
-    T value = OperatorBase::GetSingleArgument<T>("value", 0);
+  bool FillWithType(Tensor* output) {
+    T value = this->template GetSingleArgument<T>("value", 0);
     auto* data = output->template mutable_data<T>();
     if (output->size()) {
       math::Set<T, Context>(output->size(), value, data, &context_);
@@ -282,8 +282,8 @@ class ConstantFillOp final : public FillerOp<Context> {
     return true;
   }
 
-  bool FillWithString(Tensor<Context>* output) {
-    auto value = OperatorBase::GetSingleArgument<std::string>("value", "");
+  bool FillWithString(Tensor* output) {
+    auto value = this->template GetSingleArgument<std::string>("value", "");
     auto* data = output->template mutable_data<std::string>();
     for (int i = 0; i < output->size(); ++i) {
       data[i] = value;
@@ -292,7 +292,7 @@ class ConstantFillOp final : public FillerOp<Context> {
   }
 
  private:
-  bool (ConstantFillOp::*body_)(Tensor<Context>* output);
+  bool (ConstantFillOp::*body_)(Tensor* output);
 };
 
 template <class Context>
@@ -302,16 +302,16 @@ class DiagonalFillOp final : public FillerOp<Context> {
   DiagonalFillOp(const OperatorDef& operator_def, Workspace* ws)
       : FillerOp<Context>(operator_def, ws) {
     TensorProto_DataType dtype =
-        static_cast<TensorProto_DataType>(OperatorBase::GetSingleArgument<int>(
+        static_cast<TensorProto_DataType>(this->template GetSingleArgument<int>(
             "dtype", TensorProto_DataType_FLOAT));
 
     if (!OperatorBase::HasArgument("dtype") &&
         OperatorBase::HasArgument("value")) {
       // If 'dtype' is not provided, infer type based on the type of 'value'
       // Currently, single argument contains either float, int64 or bytes
-      if (OperatorBase::HasSingleArgumentOfType<float>("value")) {
+      if (this->template HasSingleArgumentOfType<float>("value")) {
         dtype = TensorProto_DataType_FLOAT;
-      } else if (OperatorBase::HasSingleArgumentOfType<int64_t>("value")) {
+      } else if (this->template HasSingleArgumentOfType<int64_t>("value")) {
         dtype = TensorProto_DataType_INT64;
       } else {
         CAFFE_THROW("Argument 'value' is of unexpected type");
@@ -355,19 +355,19 @@ class DiagonalFillOp final : public FillerOp<Context> {
     }
   }
 
-  bool Fill(Tensor<Context>* output) override {
+  bool Fill(Tensor* output) override {
     return (this->*body_)(output);
   }
 
   template <typename T>
-  bool FillWithType(Tensor<Context>* output);
+  bool FillWithType(Tensor* output);
 
  private:
-  void VerifyOutputShape(Tensor<Context>* output) {
+  void VerifyOutputShape(Tensor* output) {
     CAFFE_ENFORCE(output->ndim() >= 2, "Input shape must be >= 2D");
   }
 
-  TIndex GetStepSize(Tensor<Context>* output) {
+  TIndex GetStepSize(Tensor* output) {
     TIndex step;
     if (output->ndim() == 2) {
       step = output->dim(1) + 1;
@@ -393,7 +393,7 @@ class DiagonalFillOp final : public FillerOp<Context> {
     return step;
   }
 
-  bool (DiagonalFillOp::*body_)(Tensor<Context>* output);
+  bool (DiagonalFillOp::*body_)(Tensor* output);
 };
 
 template <typename T, class Context>
@@ -402,12 +402,12 @@ class GaussianFillOp final : public FillerOp<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   GaussianFillOp(const OperatorDef& operator_def, Workspace* ws)
       : FillerOp<Context>(operator_def, ws),
-        mean_(OperatorBase::template GetSingleArgument<float>("mean", 0)),
-        std_(OperatorBase::template GetSingleArgument<float>("std", 1)) {
+        mean_(this->template GetSingleArgument<float>("mean", 0)),
+        std_(this->template GetSingleArgument<float>("std", 1)) {
     DCHECK_GT(std_, 0) << "Standard deviation should be nonnegative.";
   }
 
-  bool Fill(Tensor<Context>* output) override {
+  bool Fill(Tensor* output) override {
     math::RandGaussian<T, Context>(
         output->size(),
         mean_,
@@ -429,7 +429,7 @@ class XavierFillOp final : public FillerOp<Context> {
   XavierFillOp(const OperatorDef& operator_def, Workspace* ws)
       : FillerOp<Context>(operator_def, ws) {}
 
-  bool Fill(Tensor<Context>* output) override {
+  bool Fill(Tensor* output) override {
     const int fan_in = output->size() / output->dim32(0);
     T scale = std::sqrt(T(3) / fan_in);
     math::RandUniform<T, Context>(
@@ -449,7 +449,7 @@ class MSRAFillOp final : public FillerOp<Context> {
   MSRAFillOp(const OperatorDef& operator_def, Workspace* ws)
       : FillerOp<Context>(operator_def, ws) {}
 
-  bool Fill(Tensor<Context>* output) override {
+  bool Fill(Tensor* output) override {
     const int fan_out = output->size() / output->dim32(1);
     T scale = std::sqrt(T(2) / fan_out);
     math::RandGaussian<T, Context>(
@@ -472,7 +472,7 @@ class RangeFillOp final : public FillerOp<Context> {
   RangeFillOp(const OperatorDef& operator_def, Workspace* ws)
       : FillerOp<Context>(operator_def, ws) {}
 
-  bool Fill(Tensor<Context>* output) override;
+  bool Fill(Tensor* output) override;
 };
 
 template <class Context>
@@ -524,12 +524,12 @@ inline std::vector<TensorShape> FillerTensorInference(
       out[0].set_unknown_shape(true);
       return out;
     }
-    for (int d : in[0].dims()) {
+    for (auto d : in[0].dims()) {
       out[0].add_dims(d);
     }
   } else {
-    auto shape = helper.GetRepeatedArgument<int>("shape");
-    for (int d : shape) {
+    auto shape = helper.GetRepeatedArgument<int64_t>("shape");
+    for (auto d : shape) {
       out[0].add_dims(d);
     }
   }

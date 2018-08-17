@@ -11,14 +11,25 @@
 #include "torch/csrc/autograd/functions/tensor.h"
 #include "torch/csrc/autograd/functions/basic_ops.h"
 #include "torch/csrc/jit/tracer.h"
+#include "torch/csrc/jit/constants.h"
 #include "torch/csrc/jit/symbolic_variable.h"
-#include "torch/csrc/jit/tensor_conversions.h"
-#include "torch/csrc/utils/variadic.h"
+#include "torch/csrc/jit/ir.h"
 
-#include <initializer_list>
-#include <iostream>
-#include <functional>
+#include "torch/csrc/utils/variadic.h"
+#include "torch/csrc/autograd/functions/utils.h"
+
+#include <ATen/detail/VariableHooksInterface.h>
+
+#include <array>
 #include <cstddef>
+#include <functional>
+#include <initializer_list>
+#include <memory>
+#include <stdexcept>
+#include <string>
+#include <tuple>
+#include <utility>
+#include <vector>
 
 #ifdef _MSC_VER
 #ifdef Type
@@ -30,69 +41,11 @@ using namespace at;
 using namespace torch::autograd::generated;
 
 namespace torch { namespace autograd {
-// Helper methods for working with Attributes (torch/csrc/jit/attributes.h)
-
-// The overloaded accessors are convenient for the generated code (since we
-// don't want to make the codegen do the dispatch manually)
-static void setattr(jit::Node* n, jit::Symbol name, int64_t v)             { n->i_(name, v); }
-static void setattr(jit::Node* n, jit::Symbol name, const at::Scalar& v)   { n->t_(name, v.toTensor()); }
-static void setattr(jit::Node* n, jit::Symbol name, SparseTensor s)        { n->t_(name, s.tref); }
-static void setattr(jit::Node* n, jit::Symbol name, const at::IntList& v)  { n->is_(name, v); }
-static void setattr(jit::Node* n, jit::Symbol name, bool v)                { n->i_(name, v); }
-static void setattr(jit::Node* n, jit::Symbol name, double v)              { n->f_(name, v); }
-static void setattr(jit::Node* n, jit::Symbol name, std::string v)         { n->s_(name, v); }
-template<std::size_t N>
-static void setattr(jit::Node* n, jit::Symbol name, std::array<bool, N> v) { n->is_(name, std::vector<int64_t>(v.begin(), v.end())); }
-
-template<typename T>
-static jit::Value* createConstant(jit::Node* n, T value) {
-  return n->owningGraph()->createConstant(jit::as_tensor(value))->insertBefore(n)->output();
-}
-
-template<typename T>
-static void genericInsertInput(jit::Node* n, size_t idx, T value) {
-  n->insertInput(idx, createConstant(n, value));
-}
-
-void failPositionalAttr() {
-  throw std::runtime_error("unsupported type in setposattr. File a bug report!");
-}
-
-static void setposattr(jit::Node* n, size_t idx, const char *name, int64_t v)             { genericInsertInput(n, idx, v); }
-static void setposattr(jit::Node* n, size_t idx, const char *name, const at::Scalar& v)   { genericInsertInput(n, idx, v); }
-static void setposattr(jit::Node* n, size_t idx, const char *name, SparseTensor s)        { failPositionalAttr(); }
-static void setposattr(jit::Node* n, size_t idx, const char *name, const at::IntList& v)  {
-  using ArgumentStash = jit::tracer::ArgumentStash;
-  if (ArgumentStash::hasIntList(name)) {
-    auto info = ArgumentStash::popIntList(name);
-    for (size_t i = 0; i < info.size(); ++i) {
-      if (info[i] != nullptr) continue;
-      info[i] = createConstant(n, v[i]);
-    }
-    jit::TensorType expected_type {at::kLong, -1, {}};
-    for (jit::Value* v : info) {
-      if (*v->type() != expected_type) {
-        throw std::runtime_error(
-          "Type mismatch in setposattr for IntList. Check that your program "
-          "is valid without tracing, and please file a bug report if it is.");
-      }
-    }
-    jit::WithInsertPoint insert_point{n};
-    auto symbolic_info = fmap<jit::SymbolicVariable>(info);
-    auto size = jit::SymbolicVariable::stack(symbolic_info, 0);
-    n->insertInput(idx, size);
-  } else {
-    return genericInsertInput(n, idx, v);
-  }
-}
-static void setposattr(jit::Node* n, size_t idx, const char *name, bool v)                { genericInsertInput(n, idx, v); }
-static void setposattr(jit::Node* n, size_t idx, const char *name, double v)              { genericInsertInput(n, idx, v); }
-template<std::size_t N>
-static void setposattr(jit::Node* n, size_t idx, const char *name, std::array<bool, N> v) { failPositionalAttr(); }
 
 VariableType::VariableType(Context* context, Type* baseType)
-  : Type(context, /*is_variable_or_undefined=*/true)
-  , baseType(baseType) {
+  : Type(context, baseType->type_id(), /*is_variable=*/true, /*is_undefined=*/false)
+  , baseType(baseType)
+  , id_(context->freshTypeID()) {
   str = std::string("Variable[") + baseType->toString() + "]";
 }
 
@@ -106,10 +59,10 @@ bool VariableType::is_cuda() const { return baseType->is_cuda(); }
 bool VariableType::is_sparse() const { return baseType->is_sparse(); }
 bool VariableType::is_distributed() const { return baseType->is_distributed(); }
 
-std::unique_ptr<Storage> VariableType::storage() const {
+std::unique_ptr<Storage> VariableType::storage(bool resizable) const {
   return baseType->storage();
 }
-std::unique_ptr<Storage> VariableType::storage(size_t size) const {
+std::unique_ptr<Storage> VariableType::storage(size_t size, bool resizable) const {
   return baseType->storage(size);
 }
 std::unique_ptr<Storage> VariableType::storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const {
@@ -118,8 +71,8 @@ std::unique_ptr<Storage> VariableType::storageFromBlob(void * data, int64_t size
 std::unique_ptr<Storage> VariableType::unsafeStorageFromTH(void * th_pointer, bool retain) const {
   return baseType->unsafeStorageFromTH(th_pointer, retain);
 }
-std::unique_ptr<Storage> VariableType::storageWithAllocator(int64_t size, std::unique_ptr<Allocator> allocator) const {
-  return baseType->storageWithAllocator(size, std::move(allocator));
+std::unique_ptr<Storage> VariableType::storageWithAllocator(int64_t size, Allocator* allocator) const {
+  return baseType->storageWithAllocator(size, allocator);
 }
 Tensor VariableType::unsafeTensorFromTH(void * th_pointer, bool retain) const {
   return make_variable(baseType->unsafeTensorFromTH(th_pointer, retain), /*requires_grad=*/false);
@@ -141,49 +94,93 @@ Type & VariableType::toScalarType(ScalarType s) const {
   return *getType(baseType->toScalarType(s));
 }
 TypeID VariableType::ID() const {
-  throw std::runtime_error("VariableType::ID() not implemented");
+  return static_cast<TypeID>(id_);
 }
 
 const char * VariableType::typeString() {
   return "VariableType";
 }
 
-// Pre-condition: backend/scalar_type is a valid type in the type_registry
-void register_variable_type_for(at::Context* context, at::Backend backend, at::ScalarType scalar_type) {
-  auto* baseType = context->type_registry[static_cast<int>(at::IsVariable::NotVariable)][static_cast<int>(backend)][static_cast<int>(scalar_type)].get();
+std::vector<std::unique_ptr<Type>> type_to_variable_type;
+
+// XXX - this is not threadsafe with uses of Variables
+void register_variable_type_for(Type* baseType) {
   AT_ASSERT(baseType);
-  context->type_registry[static_cast<int>(at::IsVariable::Variable)][static_cast<int>(backend)][static_cast<int>(scalar_type)].reset(new VariableType(context, baseType));
+  size_t base_id = static_cast<size_t>(baseType->ID());
+  if(type_to_variable_type.size() <= base_id) {
+    type_to_variable_type.resize(base_id + 1);
+  }
+  type_to_variable_type[base_id].reset(new VariableType(&at::globalContext(), baseType));
 }
 
 struct VariableTypeRegistry {
-  static constexpr int MaxTypes = static_cast<int>(at::TypeID::NumOptions);
-
   VariableTypeRegistry() {
     auto& context = at::globalContext();
     for (int p = 0; p < static_cast<int>(Backend::NumOptions); ++p) {
-      for (int s = 0; s < static_cast<int>(ScalarType::NumOptions); s++) {
-        auto baseType = context.type_registry[static_cast<int>(at::IsVariable::NotVariable)][p][s].get();
+      for (int s = 0; s < static_cast<int>(ScalarType::NumOptions); ++s) {
+        auto baseType = context.getTypeRaw(static_cast<Backend>(p), static_cast<ScalarType>(s));
         if (baseType && baseType->backend() != Backend::Undefined) {
-          register_variable_type_for(&context, static_cast<Backend>(p), static_cast<ScalarType>(s));
+          register_variable_type_for(baseType);
         }
       }
     }
   }
-
-  std::once_flag init_flag;
 };
 
+struct VariableHooks : public at::VariableHooksInterface {
+  VariableHooks(at::VariableHooksArgs) {}
+  void registerVariableTypeFor(at::Context*, at::Backend, at::ScalarType) const override;
+  at::Type& getVariableType(const at::Type&) const override;
+};
+
+// Sigh, the registry doesn't support namespaces :(
+using at::RegistererVariableHooksRegistry;
+using at::VariableHooksRegistry;
+
+// WARNING: YOU MUST DO THE NEXT TWO STATIC INITIALIZERS IN THIS ORDER.
+//
+// If you do it in the other order, this is what can happen if
+// these static initializers are called before Context is
+// initialized:
+//
+//    - VariableHooks::registerVariableTypeFor will be activated
+//      to register a variable type
+//
+//    - We run the constructor of VariableTypeRegistry, which
+//      calls at::globalContext()
+//
+//    - Context is not initialized yet, so we call the constructor
+//      of Context
+//
+//    - We register CPU types, calling VariableHooks::registerVariableTypeFor
+//
+//    - We register the CPU type as a variable type
+//
+//    - In VariableTypeRegistry, we try to register the Variable type AGAIN!!
+//      Disaster.
+//
 static VariableTypeRegistry registry;
+REGISTER_VARIABLE_HOOKS(VariableHooks)
+
+// Pre-condition: backend/scalar_type is a valid type in the type_registry
+void VariableHooks::registerVariableTypeFor(at::Context* context, at::Backend backend, at::ScalarType scalar_type) const {
+  auto* baseType = context->getTypeRaw(backend, scalar_type);
+  register_variable_type_for(baseType);
+}
+
+at::Type& VariableHooks::getVariableType(const at::Type& baseType) const {
+  return *VariableType::getType(baseType);
+}
 
 bool VariableType::isVariableType(const at::Type& type) {
-  static const auto* undefined_ty = &globalContext().getType(at::Backend::Undefined, at::ScalarType::Undefined);
-  return type.is_variable_or_undefined() && &type != undefined_ty;
+  return type.is_variable();
 }
 
 at::Type* VariableType::getType(const at::Type& baseType) {
-  return globalContext().type_registry[static_cast<int>(at::IsVariable::Variable)]
-                                      [static_cast<int>(baseType.backend())]
-                                      [static_cast<int>(baseType.scalarType())].get();
+  auto id = static_cast<size_t>(baseType.ID());
+  if(id >= type_to_variable_type.size())
+    return nullptr;
+  return type_to_variable_type[id].get();
 }
 
 at::Type* VariableType::getType(const at::Tensor& tensor) {
@@ -193,33 +190,30 @@ at::Type* VariableType::getType(const at::Tensor& tensor) {
   return getType(tensor.type());
 }
 
-std::vector<at::Type*> VariableType::allCPUTypes() {
+namespace {
+std::vector<at::Type*> allTypesForBackends(at::ArrayRef<at::Backend> backends) {
   auto& context = at::globalContext();
   std::vector<Type*> res;
-  // CPU and Sparse CPU
-  res.reserve(2 * static_cast<int>(ScalarType::NumOptions));
-  for (auto p : { Backend::CPU, Backend::SparseCPU }) {
+  res.reserve(backends.size() * static_cast<int>(ScalarType::NumOptions));
+  for (auto p : backends) {
     for (int s = 0; s < static_cast<int>(ScalarType::NumOptions); s++) {
-      auto* r = context.type_registry[static_cast<int>(at::IsVariable::Variable)][static_cast<int>(p)][s].get();
-      if (r) res.emplace_back(r);
+      auto baseType = context.getTypeRaw(static_cast<Backend>(p), static_cast<ScalarType>(s));
+      if (baseType) {
+        res.emplace_back(VariableType::getType(*baseType));
+      }
     }
   }
   return res;
 }
+}
+
+std::vector<at::Type*> VariableType::allCPUTypes() {
+  return allTypesForBackends({ Backend::CPU, Backend::SparseCPU });
+}
 
 std::vector<at::Type*> VariableType::allCUDATypes() {
-  auto& context = at::globalContext();
-  context.lazyInitCUDA();
-  std::vector<Type*> res;
-  // CUDA and Sparse CUDA
-  res.reserve(2 * static_cast<int>(ScalarType::NumOptions));
-  for (auto p : { Backend::CUDA, Backend::SparseCUDA }) {
-    for (int s = 0; s < static_cast<int>(ScalarType::NumOptions); s++) {
-      auto* r = context.type_registry[static_cast<int>(at::IsVariable::Variable)][static_cast<int>(p)][s].get();
-      if (r) res.emplace_back(r);
-    }
-  }
-  return res;
+  at::globalContext().lazyInitCUDA();
+  return allTypesForBackends({ Backend::CUDA, Backend::SparseCUDA });
 }
 
 Variable & VariableType::checked_cast_variable(const Tensor & t, const char * name, int pos) {
@@ -236,8 +230,8 @@ Tensor & VariableType::unpack(const Tensor & t, const char * name, int pos) {
   return checked_cast_variable(t, name, pos).data();
 }
 
-SparseTensor VariableType::unpack(SparseTensor t, const char * name, int pos) {
-  return SparseTensor(checked_cast_variable(t.tref, name, pos).data());
+SparseTensorRef VariableType::unpack(SparseTensorRef t, const char * name, int pos) {
+  return SparseTensorRef(checked_cast_variable(t.tref, name, pos).data());
 }
 
 Tensor VariableType::unpack_opt(const Tensor & t, const char * name, int pos) {
@@ -311,24 +305,15 @@ static Tensor as_view(const Tensor & base, Tensor tensor) {
   return make_variable_view(std::move(base_var), std::move(tensor));
 }
 
-struct ComputeRequiresGrad : IterArgs<ComputeRequiresGrad> {
-  bool out = false;
-  using IterArgs<ComputeRequiresGrad>::operator();
-  void operator()(const at::Tensor& tensor) {
-    const auto& var = static_cast<const Variable&>(tensor);
-    if (var.defined() && var.requires_grad()) {
-      out = true;
-    }
+static std::vector<Tensor> as_view(const Tensor & base, std::vector<Tensor> tensors) {
+  auto base_var = Variable(base);
+  if (base_var.is_view()) {
+    base_var = base_var.base();
   }
-  bool short_circuit() { return out; }
-};
-
-template<typename... Args>
-static bool compute_requires_grad(Args&&... args) {
-  if (!GradMode::is_enabled()) {
-    return false;
+  for(Tensor &tensor : tensors) {
+    tensor = make_variable_view(base_var, std::move(tensor));
   }
-  return ComputeRequiresGrad().apply(std::forward<Args>(args)...).out;
+  return tensors;
 }
 
 static void check_no_requires_grad(const Tensor& tensor, const char* name) {
@@ -359,35 +344,21 @@ static void throw_error_out_requires_grad(const char* name) {
 
 static void rebase_history(Variable& var, std::shared_ptr<Function> grad_fn) {
   if (grad_fn && var.defined()) {
-    grad_fn->set_num_inputs(1);
+    grad_fn->add_input_metadata(var);
     var.rebase_history({std::move(grad_fn), 0});
   }
 }
 
 static void rebase_history(ArrayRef<Variable> vars, std::shared_ptr<Function> grad_fn) {
   if (grad_fn) {
-    grad_fn->set_num_inputs(vars.size());
-    uint32_t output_nr = 0;
     for (auto& var : vars) {
       if (var.defined()) {
         // TODO: eliminate const_cast
+        auto output_nr = grad_fn->add_input_metadata(var);
         const_cast<Variable&>(var).rebase_history({grad_fn, output_nr});
+      } else {
+        grad_fn->add_input_metadata(Function::undefined_input());
       }
-      output_nr++;
-    }
-  }
-}
-
-static void set_history(ArrayRef<Variable> vars, std::shared_ptr<Function> grad_fn) {
-  if (grad_fn) {
-    grad_fn->set_num_inputs(vars.size());
-    uint32_t output_nr = 0;
-    for (auto& var : vars) {
-      if (var.defined()) {
-        // TODO: eliminate const_cast
-        const_cast<Variable&>(var).set_gradient_edge({grad_fn, output_nr});
-      }
-      output_nr++;
     }
   }
 }
@@ -401,7 +372,7 @@ struct Flatten : IterArgs<Flatten> {
   }
 };
 
-template<typename... Args> inline variable_list flatten(Args&&... args) {
+template<typename... Args> inline variable_list flatten_tensor_args(Args&&... args) {
   variable_list out;
   out.reserve(count_tensors(std::forward<Args>(args)...));
   Flatten(out).apply(std::forward<Args>(args)...);
@@ -428,9 +399,10 @@ Tensor & VariableType::s_copy_(Tensor & self, const Tensor & src, bool non_block
   if (requires_grad) {
     grad_fn = std::make_shared<CopyBackwards>();
     grad_fn->set_next_edges(collect_next_edges(self, src));
-    grad_fn->set_num_inputs(1);
     grad_fn->src_type = &src.type();
-    grad_fn->src_device = src.is_cuda() ? src.get_device() : -1;
+    if (src.is_cuda()) {
+      grad_fn->src_device = src.get_device();
+    }
   }
   baseType->s_copy_(self_, src_, non_blocking);
   increment_version(self);
@@ -472,7 +444,7 @@ Tensor VariableType::contiguous(const Tensor & self) const {
 static std::vector<std::vector<int64_t>> to_args_sizes(TensorList tensors) {
   std::vector<std::vector<int64_t>> args_sizes(tensors.size());
   for (size_t i = 0; i < tensors.size(); ++i) {
-    args_sizes[i] = tensors[i].sizes();
+    args_sizes[i] = tensors[i].sizes().vec();
   }
   return args_sizes;
 }

@@ -102,7 +102,7 @@ struct Graph {
    */
   void DeactivateSubgraph(std::vector<int> subgraph);
 
-  const size_t size() const {
+  size_t size() const {
     return nodes_.size();
   }
 

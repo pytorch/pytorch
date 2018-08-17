@@ -32,7 +32,7 @@ namespace python {
 class Int8TensorFetcher : public BlobFetcherBase {
  public:
   pybind11::object Fetch(const Blob& blob) override {
-    const caffe2::int8::Int8TensorCPU src =
+    const caffe2::int8::Int8TensorCPU& src =
         blob.template Get<caffe2::int8::Int8TensorCPU>();
     const int numpy_type = CaffeToNumpyType(src.t.meta());
     CAFFE_ENFORCE(numpy_type != -1, "Int8Tensor contains unknown type data");
@@ -45,8 +45,7 @@ class Int8TensorFetcher : public BlobFetcherBase {
     void* ptr = static_cast<void*>(
         PyArray_DATA(reinterpret_cast<PyArrayObject*>(data_array.ptr())));
     CPUContext context;
-    context.template CopyBytes<CPUContext, CPUContext>(
-        src.t.nbytes(), src.t.raw_data(), ptr);
+    context.CopyBytesSameDevice(src.t.nbytes(), src.t.raw_data(), ptr);
     context.FinishDeviceComputation();
 
     auto result = pybind11::cast<pybind11::object>(

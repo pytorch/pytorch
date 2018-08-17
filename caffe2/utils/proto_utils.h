@@ -8,16 +8,13 @@
 #endif  // !CAFFE2_USE_LITE_PROTO
 
 #include "caffe2/core/logging.h"
+#include "caffe2/utils/proto_wrap.h"
 #include "caffe2/proto/caffe2.pb.h"
 
 namespace caffe2 {
 
 using std::string;
 using ::google::protobuf::MessageLite;
-
-// A wrapper function to shut down protobuf library (this is needed in ASAN
-// testing and valgrind cases to avoid protobuf appearing to "leak" memory).
-void ShutdownProtobufLibrary();
 
 // A wrapper function to return device name string for use in blob serialization
 // / deserialization. This should have one to one correspondence with
@@ -26,24 +23,24 @@ void ShutdownProtobufLibrary();
 // Note that we can't use DeviceType_Name, because that is only available in
 // protobuf-full, and some platforms (like mobile) may want to use
 // protobuf-lite instead.
-std::string DeviceTypeName(const int32_t& d);
+CAFFE2_API std::string DeviceTypeName(const int32_t& d);
 
-int DeviceId(const DeviceOption& option);
+CAFFE2_API int DeviceId(const DeviceOption& option);
 
 // Returns if the two DeviceOptions are pointing to the same device.
-bool IsSameDevice(const DeviceOption& lhs, const DeviceOption& rhs);
+CAFFE2_API bool IsSameDevice(const DeviceOption& lhs, const DeviceOption& rhs);
 
 // Common interfaces that reads file contents into a string.
-bool ReadStringFromFile(const char* filename, string* str);
-bool WriteStringToFile(const string& str, const char* filename);
+CAFFE2_API bool ReadStringFromFile(const char* filename, string* str);
+CAFFE2_API bool WriteStringToFile(const string& str, const char* filename);
 
 // Common interfaces that are supported by both lite and full protobuf.
-bool ReadProtoFromBinaryFile(const char* filename, MessageLite* proto);
+CAFFE2_API bool ReadProtoFromBinaryFile(const char* filename, MessageLite* proto);
 inline bool ReadProtoFromBinaryFile(const string filename, MessageLite* proto) {
   return ReadProtoFromBinaryFile(filename.c_str(), proto);
 }
 
-void WriteProtoToBinaryFile(const MessageLite& proto, const char* filename);
+CAFFE2_API void WriteProtoToBinaryFile(const MessageLite& proto, const char* filename);
 inline void WriteProtoToBinaryFile(const MessageLite& proto,
                                    const string& filename) {
   return WriteProtoToBinaryFile(proto, filename.c_str());
@@ -59,9 +56,9 @@ inline bool ParseFromString(const string& spec, MessageLite* proto) {
 } // namespace TextFormat
 
 
-string ProtoDebugString(const MessageLite& proto);
+CAFFE2_API string ProtoDebugString(const MessageLite& proto);
 
-bool ParseProtoFromLargeString(const string& str, MessageLite* proto);
+CAFFE2_API bool ParseProtoFromLargeString(const string& str, MessageLite* proto);
 
 // Text format MessageLite wrappers: these functions do nothing but just
 // allowing things to compile. It will produce a runtime error if you are using
@@ -102,19 +99,19 @@ inline bool ReadProtoFromFile(const string& filename, MessageLite* proto) {
 using ::google::protobuf::Message;
 
 namespace TextFormat {
-bool ParseFromString(const string& spec, Message* proto);
+CAFFE2_API bool ParseFromString(const string& spec, Message* proto);
 } // namespace TextFormat
 
-string ProtoDebugString(const Message& proto);
+CAFFE2_API string ProtoDebugString(const Message& proto);
 
-bool ParseProtoFromLargeString(const string& str, Message* proto);
+CAFFE2_API bool ParseProtoFromLargeString(const string& str, Message* proto);
 
-bool ReadProtoFromTextFile(const char* filename, Message* proto);
+CAFFE2_API bool ReadProtoFromTextFile(const char* filename, Message* proto);
 inline bool ReadProtoFromTextFile(const string filename, Message* proto) {
   return ReadProtoFromTextFile(filename.c_str(), proto);
 }
 
-void WriteProtoToTextFile(const Message& proto, const char* filename);
+CAFFE2_API void WriteProtoToTextFile(const Message& proto, const char* filename);
 inline void WriteProtoToTextFile(const Message& proto, const string& filename) {
   return WriteProtoToTextFile(proto, filename.c_str());
 }
@@ -186,8 +183,8 @@ inline OperatorDef CreateOperatorDef(
       engine);
 }
 
-bool HasOutput(const OperatorDef& op, const std::string& output);
-bool HasInput(const OperatorDef& op, const std::string& input);
+CAFFE2_API bool HasOutput(const OperatorDef& op, const std::string& output);
+CAFFE2_API bool HasInput(const OperatorDef& op, const std::string& input);
 
 /**
  * @brief A helper class to index into arguments.
@@ -197,7 +194,7 @@ bool HasInput(const OperatorDef& op, const std::string& input);
  * does not copy the operator def, so one would need to make sure that the
  * lifetime of the OperatorDef object outlives that of the ArgumentHelper.
  */
-class ArgumentHelper {
+class CAFFE2_API ArgumentHelper {
  public:
   template <typename Def>
   static bool HasArgument(const Def& def, const string& name) {
@@ -235,6 +232,18 @@ class ArgumentHelper {
       const Def& def,
       const string& name) {
     return ArgumentHelper(def).GetRepeatedMessageArgument<MessageType>(name);
+  }
+
+  template <typename Def>
+  static bool RemoveArgument(Def& def, int index) {
+    if (index >= def.arg_size()) {
+      return false;
+    }
+    if (index < def.arg_size() - 1) {
+      def.mutable_arg()->SwapElements(index, def.arg_size() - 1);
+    }
+    def.mutable_arg()->RemoveLast();
+    return true;
   }
 
   explicit ArgumentHelper(const OperatorDef& def);
@@ -280,24 +289,38 @@ class ArgumentHelper {
   CaffeMap<string, Argument> arg_map_;
 };
 
-const Argument& GetArgument(const OperatorDef& def, const string& name);
-bool GetFlagArgument(
+// **** Arguments Utils *****
+
+// Helper methods to get an argument from OperatorDef or NetDef given argument
+// name. Throws if argument does not exist.
+CAFFE2_API const Argument& GetArgument(const OperatorDef& def, const string& name);
+CAFFE2_API const Argument& GetArgument(const NetDef& def, const string& name);
+
+// Helper methods to query a boolean argument flag from OperatorDef or NetDef
+// given argument name. If argument does not exist, return default value.
+// Throws if argument exists but the type is not boolean.
+CAFFE2_API bool GetFlagArgument(
     const OperatorDef& def,
     const string& name,
-    bool def_value = false);
+    bool default_value = false);
+CAFFE2_API bool GetFlagArgument(
+    const NetDef& def,
+    const string& name,
+    bool default_value = false);
 
-Argument* GetMutableArgument(
+CAFFE2_API Argument* GetMutableArgument(
     const string& name,
     const bool create_if_missing,
     OperatorDef* def);
 
 template <typename T>
-Argument MakeArgument(const string& name, const T& value);
+CAFFE2_API Argument MakeArgument(const string& name, const T& value);
 
 template <typename T>
 inline void AddArgument(const string& name, const T& value, OperatorDef* def) {
   GetMutableArgument(name, true, def)->CopyFrom(MakeArgument(name, value));
 }
+// **** End Arguments Utils *****
 
 bool inline operator==(const DeviceOption& dl, const DeviceOption& dr) {
   return IsSameDevice(dl, dr);

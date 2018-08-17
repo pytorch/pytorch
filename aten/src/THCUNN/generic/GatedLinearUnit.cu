@@ -12,22 +12,21 @@ void THNN_(GatedLinear_updateOutput)(
 
   // size output to half of input
   dim = dim - TH_INDEX_BASE;
-  const int64_t nIn = THCTensor_(size)(state, input, dim);
+  const int64_t nIn = THCTensor_(sizeLegacyNoScalars)(state, input, dim);
   THArgCheck(nIn % 2 == 0, 2, "Halving dimension must be even. Dim %d is size %ld",
       dim + TH_INDEX_BASE, nIn);
   const int64_t inputSize = THCTensor_(size)(state, input, dim) / 2;
-  THLongStorage *newSizes = THCTensor_(newSizeOf)(state, input);
-  THLongStorage_set(newSizes, dim, inputSize);
-  THCTensor_(resize)(state, output, newSizes, NULL);
+  std::vector<int64_t> newSizes = THTensor_sizesLegacyNoScalars(input);
+  newSizes[dim] = inputSize;
+  THCTensor_(resize)(state, output, newSizes, {});
 
   // halve tensor
   THCTensor *firstHalf = THCTensor_(newNarrow)(state, input, dim, 0, inputSize);
   THCTensor *secondHalf = THCTensor_(newNarrow)(state, input, dim, inputSize, inputSize);
 
   // x = x1:cmul( sigmoid(x2) )
-  THC_pointwiseApply3(state, output, secondHalf, firstHalf, gatedLinearCSigMul_functor<real, accreal>());
+  THC_pointwiseApply3<real, real, real>(state, output, secondHalf, firstHalf, gatedLinearCSigMul_functor<real, accreal>());
 
-  THLongStorage_free(newSizes);
   THCTensor_(free)(state, firstHalf);
   THCTensor_(free)(state, secondHalf);
 }
@@ -51,7 +50,7 @@ void THNN_(GatedLinear_updateGradInput)(
   THCTensor *gradInputfirstHalf = THCTensor_(newNarrow)(state, gradInput, dim, 0, inputSize);
   const int64_t stride_i = THCTensor_(stride)(state, input, dim) * inputSize;
   const int64_t stride_gI = THCTensor_(stride)(state, gradInput, dim) * inputSize;
-  THC_pointwiseApply3(state, gradInputfirstHalf, gradOutput, firstHalf, gatedLinearDerivative<real,accreal>(stride_i, stride_gI)); 
+  THC_pointwiseApply3<real, real, real>(state, gradInputfirstHalf, gradOutput, firstHalf, gatedLinearDerivative<real,accreal>(stride_i, stride_gI)); 
   THCTensor_(free)(state, firstHalf);
   THCTensor_(free)(state, gradInputfirstHalf);
 }

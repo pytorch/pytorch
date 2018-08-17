@@ -5,7 +5,7 @@
 
 #include "torch/csrc/THP.h"
 #include "Module.h"
-#ifdef WITH_DISTRIBUTED_MW
+#ifdef USE_DISTRIBUTED_MW
 #include "Storage.h"
 #include "../PtrWrapper.h"
 #ifdef _THP_CORE

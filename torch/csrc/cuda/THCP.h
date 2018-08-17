@@ -5,9 +5,7 @@
 #include <TH/TH.h>
 #include <THC/THC.h>
 #include <THC/THCHalf.h>
-
-#include <THS/THS.h>
-#include <THCS/THCS.h>
+#include <THC/THCTensor.hpp>
 
 #include "torch/csrc/THP.h"
 #include "serialization.h"

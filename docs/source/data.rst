@@ -13,5 +13,5 @@ torch.utils.data
 .. autoclass:: torch.utils.data.RandomSampler
 .. autoclass:: torch.utils.data.SubsetRandomSampler
 .. autoclass:: torch.utils.data.WeightedRandomSampler
+.. autoclass:: torch.utils.data.BatchSampler
 .. autoclass:: torch.utils.data.distributed.DistributedSampler
-.. autoclass:: torch.utils.data.distributed.BatchSampler

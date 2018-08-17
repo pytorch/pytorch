@@ -4,11 +4,17 @@
 #include <string>
 #include <unordered_map>
 
-#include "THCCachingAllocator.h"
+#include "caffe2/core/THCCachingAllocator_gpu.h"
 #include "cub/util_allocator.cuh"
 
+// Needed to be included first to check the CAFFE2_USE_CUDNN macros.
+#include "caffe2/core/macros.h"
+
 #include "caffe2/core/asan.h"
+#include "caffe2/core/blob_stats.h"
+#ifdef CAFFE2_USE_CUDNN
 #include "caffe2/core/common_cudnn.h"
+#endif // CAFFE2_USE_CUDNN
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/core/init.h"
 #include "caffe2/core/logging.h"
@@ -53,8 +59,6 @@ CAFFE2_DEFINE_int(
 
 namespace caffe2 {
 
-CAFFE_KNOWN_TYPE(Tensor<CUDAContext>);
-
 thread_local ThreadLocalCUDAObjects CUDAContext::cuda_objects_;
 
 // TODO(jiayq): these variables shouldn't be currently accessed during static
@@ -93,19 +97,6 @@ static long g_last_rep = 0;
 
 CudaMemoryPoolType GetCudaMemoryPoolType() {
   return g_cuda_memory_pool_type;
-}
-
-vector<TIndex> GetCUDATensorInfo(
-    const void* c,
-    bool* shares_data,
-    size_t* capacity,
-    DeviceOption* device) {
-  vector<TIndex> dims =
-      GetTensorInfo<CUDAContext>(c, shares_data, capacity, device);
-  const Tensor<CUDAContext>* tc = static_cast<const Tensor<CUDAContext>*>(c);
-  device->set_device_type(CUDA);
-  device->set_cuda_gpu_id(GetGPUIDForPointer(tc->raw_data()));
-  return dims;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -158,16 +149,10 @@ static void Caffe2InitializeCuda() {
     }
   }
 
-  RegisterTypeCallFunction(
-    TypeMeta::Id<Tensor<CUDAContext>>(),
-    GetTensorType<CUDAContext>
-  );
-
-  RegisterTensorInfoFunction(
-      TypeMeta::Id<Tensor<CUDAContext>>(), GetCUDATensorInfo);
-
+#ifdef CAFFE2_USE_CUDNN
   // Check the versions of cuDNN that were compiled and linked with are compatible
   CheckCuDNNVersions();
+#endif // CAFFE2_USE_CUDNN
 }
 
 static void SetUpCub() {
@@ -245,7 +230,7 @@ struct Caffe2CudaInitializerHelper {
     }
   }
 };
-}  // namespace
+} // namespace
 
 /**
  * A utility function to rectify the gpu id. If the context specifies the
@@ -321,7 +306,7 @@ void TrackMemoryAlloc(size_t nbytes) {
 }
 }
 
-std::pair<void*, MemoryDeleter> CUDAContext::New(size_t nbytes) {
+std::pair<void*, MemoryDeleter> CUDAStaticContext::New(size_t nbytes) const {
   // Lock the mutex
   std::lock_guard<std::mutex> lock(CUDAContext::mutex());
   // A one-time caffe2 cuda initializer.
@@ -359,7 +344,7 @@ std::pair<void*, MemoryDeleter> CUDAContext::New(size_t nbytes) {
   return {nullptr, Delete};
 }
 
-void CUDAContext::Delete(void* ptr) {
+void CUDAStaticContext::Delete(void* ptr) {
   // lock the mutex
   std::lock_guard<std::mutex> lock(CUDAContext::mutex());
 
@@ -410,5 +395,12 @@ void CUDAContext::Delete(void* ptr) {
   }
   }
 }
+
+BaseStaticContext* GetCUDAStaticContext() {
+  static CUDAStaticContext context;
+  return &context;
+}
+
+REGISTER_STATIC_CONTEXT(CUDA, GetCUDAStaticContext());
 
 }  // namespace caffe2

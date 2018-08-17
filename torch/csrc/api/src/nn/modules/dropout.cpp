@@ -1,42 +1,50 @@
 #include <torch/nn/modules/dropout.h>
 
-namespace torch { namespace nn {
-namespace detail {
+#include <torch/tensor.h>
 
-template <typename T>
-DropoutBase<T>::DropoutBase(double rate) : rate_(rate) {
-  AT_CHECK(rate >= 0, "Dropout rate must not be less than zero");
-  AT_CHECK(rate < 1, "Dropout rate must be less than one");
+#include <ATen/core/Error.h>
+
+#include <cstddef>
+#include <vector>
+
+namespace torch {
+namespace nn {
+namespace detail {
+template <typename Derived>
+DropoutImplBase<Derived>::DropoutImplBase(DropoutOptions options_)
+    : options(options_) {
+  AT_CHECK(options.rate_ >= 0, "Dropout rate must not be less than zero");
+  AT_CHECK(options.rate_ <= 1, "Dropout rate must not be greater than one");
 }
 
-template <typename T>
-void DropoutBase<T>::reset() {}
+template <typename Derived>
+void DropoutImplBase<Derived>::reset() {}
 
-template <typename T>
-variable_list DropoutBase<T>::forward(variable_list input) {
-  if (rate_ == 0 || !is_training()) {
+template <typename Derived>
+Tensor DropoutImplBase<Derived>::forward(Tensor input) {
+  if (options.rate_ == 0 || !this->is_training()) {
     return input;
   }
-  variable_list output;
-  for (const auto& value : input) {
-    const auto noise = (noise_mask(value).uniform_(0, 1) > rate_)
-                           .toType(value.type().scalarType())
-                           .mul_(1.0f / (1.0f - rate_));
-    output.push_back(value * noise);
-  }
-  return output;
+
+  auto scale = 1.0f / (1.0f - options.rate_);
+  auto boolean_mask = noise_mask(input).uniform_(0, 1) > options.rate_;
+  auto noise = boolean_mask.to(input.dtype()).mul_(scale);
+
+  return input * noise;
 }
 
-template class DropoutBase<Dropout>;
-template class DropoutBase<Dropout2d>;
+template class DropoutImplBase<DropoutImpl>;
+template class DropoutImplBase<Dropout2dImpl>;
 } // namespace detail
 
-Variable Dropout::noise_mask(Variable input) const {
-  return at::empty_like(input);
+DropoutOptions::DropoutOptions(double rate) : rate_(rate) {}
+
+Tensor DropoutImpl::noise_mask(Tensor input) const {
+  return torch::empty_like(input);
 }
 
-Variable Dropout2d::noise_mask(Variable input) const {
-  return input.type().empty({input.size(0), input.size(1), 1, 1});
+Tensor Dropout2dImpl::noise_mask(Tensor input) const {
+  return torch::empty({input.size(0), input.size(1), 1, 1}, input.options());
 }
-
-}} // namespace torch::nn
+} // namespace nn
+} // namespace torch

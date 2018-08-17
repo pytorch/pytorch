@@ -71,7 +71,7 @@ class ProfiledRange {
 
  private:
   nvtxRangeId_t range_ = 0;
-  DISABLE_COPY_AND_ASSIGN(ProfiledRange);
+  AT_DISABLE_COPY_AND_ASSIGN(ProfiledRange);
 };
 
 #else
@@ -81,7 +81,7 @@ class ProfiledRange {
   ProfiledRange(const OperatorDef& def, Color color) {}
 
  private:
-  DISABLE_COPY_AND_ASSIGN(ProfiledRange);
+  AT_DISABLE_COPY_AND_ASSIGN(ProfiledRange);
 };
 
 #endif // ifdef CAFFE2_USE_NVTX
@@ -114,7 +114,7 @@ int AsyncDAGNet::stream(const DeviceOption& device_option) {
   if (device_option.device_type() == CUDA) {
     int gpu_id = device_option.cuda_gpu_id();
     CAFFE_ENFORCE_GE(gpu_id, 0, "Invalid gpu id: " + caffe2::to_string(gpu_id));
-    if (gpu_id >= stream_counters_.size()) {
+    if ((unsigned)gpu_id >= stream_counters_.size()) {
       stream_counters_.resize(gpu_id + 1, 0);
     }
     do {

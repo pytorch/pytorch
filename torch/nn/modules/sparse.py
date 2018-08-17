@@ -3,6 +3,7 @@ from torch.nn.parameter import Parameter
 
 from .module import Module
 from .. import functional as F
+from .. import init
 
 
 class Embedding(Module):
@@ -17,17 +18,20 @@ class Embedding(Module):
         embedding_dim (int): the size of each embedding vector
         padding_idx (int, optional): If given, pads the output with the embedding vector at :attr:`padding_idx`
                                          (initialized to zeros) whenever it encounters the index.
-        max_norm (float, optional): If given, will renormalize the embeddings to always have a norm lesser than this
-        norm_type (float, optional): The p of the p-norm to compute for the max_norm option
-        scale_grad_by_freq (bool, optional): if given, this will scale gradients by the frequency of
-                                                the words in the mini-batch.
-        sparse (bool, optional): if ``True``, gradient w.r.t. weight matrix will be a sparse tensor. See Notes for
-                                    more details regarding sparse gradients.
+        max_norm (float, optional): If given, will renormalize the embedding vectors to have a norm lesser than
+                                    this before extracting.
+        norm_type (float, optional): The p of the p-norm to compute for the max_norm option. Default ``2``.
+        scale_grad_by_freq (boolean, optional): if given, this will scale gradients by the inverse of frequency of
+                                                the words in the mini-batch. Default ``False``.
+        sparse (bool, optional): if ``True``, gradient w.r.t. :attr:`weight` matrix will be a sparse tensor.
+                                 See Notes for more details regarding sparse gradients.
 
     Attributes:
         weight (Tensor): the learnable weights of the module of shape (num_embeddings, embedding_dim)
+                         initialized from :math:`\mathcal{N}(0, 1)`
 
     Shape:
+
         - Input: LongTensor of arbitrary shape containing the indices to extract
         - Output: `(*, embedding_dim)`, where `*` is the input shape
 
@@ -98,9 +102,10 @@ class Embedding(Module):
         self.sparse = sparse
 
     def reset_parameters(self):
-        self.weight.data.normal_(0, 1)
+        init.normal_(self.weight)
         if self.padding_idx is not None:
-            self.weight.data[self.padding_idx].fill_(0)
+            with torch.no_grad():
+                self.weight[self.padding_idx].fill_(0)
 
     def forward(self, input):
         return F.embedding(
@@ -160,53 +165,52 @@ class EmbeddingBag(Module):
     r"""Computes sums or means of 'bags' of embeddings, without instantiating the
     intermediate embeddings.
 
-    For bags of constant length,
-        * nn.EmbeddingBag with `mode=sum` is equivalent to nn.Embedding followed by `torch.sum(dim=1)`
-        * with `mode=mean` is equivalent to nn.Embedding followed by `torch.mean(dim=1)`
-        * with `mode=max` is equivalent to nn.Embedding followed by `torch.max(dim=1)`
+    For bags of constant length, this class
 
-    However, nn.EmbeddingBag is much more time and memory efficient than using a chain of these
+        * with ``mode="sum"`` is equivalent to :class:`~torch.nn.Embedding` followed by ``torch.sum(dim=1)``,
+        * with ``mode="mean"`` is equivalent to :class:`~torch.nn.Embedding` followed by ``torch.mean(dim=1)``,
+        * with ``mode="max"`` is equivalent to :class:`~torch.nn.Embedding` followed by ``torch.max(dim=1)``.
+
+    However, :class:`~torch.nn.EmbeddingBag` is much more time and memory efficient than using a chain of these
     operations.
 
     Args:
         num_embeddings (int): size of the dictionary of embeddings
         embedding_dim (int): the size of each embedding vector
-        max_norm (float, optional): If given, will renormalize the embeddings to always have a norm lesser than this
-        norm_type (float, optional): The p of the p-norm to compute for the max_norm option
-        scale_grad_by_freq (bool, optional): if given, this will scale gradients by the frequency of
-                                                the words in the dictionary. Note: this option is not supported when
-                                                using max mode.
-        mode (string, optional): 'sum' | 'mean' | 'max'. Specifies the way to reduce the bag. Default: 'mean'
-        sparse (bool, optional): if ``True``, gradient w.r.t. weight matrix will be a sparse tensor. See Notes for
-                                    more details regarding sparse gradients. Note: this option is not supported when
-                                    using max mode.
+        max_norm (float, optional): If given, will renormalize the embedding vectors to have a norm lesser than
+                                    this before extracting.
+        norm_type (float, optional): The p of the p-norm to compute for the max_norm option. Default ``2``.
+        scale_grad_by_freq (boolean, optional): if given, this will scale gradients by the inverse of frequency of
+                                                the words in the mini-batch. Default ``False``.
+                                                Note: this option is not supported when ``mode="max"``.
+        mode (string, optional): ``"sum"``, ``"mean"`` or ``"max"``. Specifies the way to reduce the bag.
+                                 Default: ``"mean"``
+        sparse (bool, optional): if ``True``, gradient w.r.t. :attr:`weight` matrix will be a sparse tensor. See
+                                 Notes for more details regarding sparse gradients. Note: this option is not
+                                 supported when ``mode="max"``.
 
     Attributes:
-        weight (Tensor): the learnable weights of the module of shape (num_embeddings, embedding_dim)
+        weight (Tensor): the learnable weights of the module of shape ``(num_embeddings x embedding_dim)``
+                         initialized from :math:`\mathcal{N}(0, 1)`.
 
-    Inputs: input, offsets
-        - **input** (``N`` or ``B x N``): LongTensor containing the indices of the embeddings
-                                to extract. When `input` is 1D Tensor of shape `N`,
-                                an `offsets` Tensor is given, that contains the
-                                starting position of each new sequence in the
-                                mini-batch.
-        - **offsets** (``B`` or ``None``): LongTensor containing the starting positions of
-                                   each sample in a mini-batch of variable length
-                                   sequences. If `input` is 2D (``B x N``), then offsets
-                                   does not need to be given, as the `input` is
-                                   treated as a mini-batch of fixed length sequences
-                                   of length `N` each.
+    Inputs: :attr:`input` (LongTensor) and :attr:`offsets` (LongTensor, optional)
 
+        - If :attr:`input` is 2D of shape ``B x N``,
 
-    Shape:
-        - Input: LongTensor `N`, N = number of embeddings to extract
-                 (or) LongTensor ``B x N``, B = number of sequences in mini-batch,
-                                        N = number of embeddings per sequence
-        - Offsets: LongTensor `B`, B = number of bags. The values are the
-                   offsets in `input` for each bag, i.e. the cumsum of lengths.
-                   Offsets is not given if Input is 2D ``B x N`` Tensor,
-                   the input is considered to be of fixed-length sequences
-        - Output: `(B, embedding_dim)`
+          it will be treated as ``B`` bags (sequences) each of fixed length ``N``, and
+          this will return ``B`` values aggregated in a way depending on the :attr:`mode`.
+          :attr:`offsets` is ignored and required to be ``None`` in this case.
+
+        - If :attr:`input` is 1D of shape ``N``,
+
+          it will be treated as a concatenation of multiple bags (sequences).
+          :attr:`offsets` is required to be a 1D tensor containing the
+          starting index positions of each bag in :attr:`input`. Therefore,
+          for :attr:`offsets` of shape ``B``, :attr:`input` will be viewed as
+          having ``B`` bags. Empty bags (i.e., having 0-length) will have
+          returned vectors filled by zeros.
+
+    Output shape: ``B x embedding_dim``
 
     Examples::
 
@@ -236,10 +240,10 @@ class EmbeddingBag(Module):
         self.reset_parameters()
 
     def reset_parameters(self):
-        self.weight.data.normal_(0, 1)
+        init.normal_(self.weight)
 
     def forward(self, input, offsets=None):
-        return F.embedding_bag(self.weight, input, offsets,
+        return F.embedding_bag(input, self.weight, offsets,
                                self.max_norm, self.norm_type,
                                self.scale_grad_by_freq, self.mode, self.sparse)
 

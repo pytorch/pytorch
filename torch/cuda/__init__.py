@@ -27,7 +27,7 @@ _cudart = None
 
 
 def find_cuda_windows_lib():
-    proc = Popen(['where', 'cudart64*.dll'], stdout=PIPE, stderr=PIPE)
+    proc = Popen(['where', 'cudart64*.dll'], stdout=PIPE, stderr=PIPE, stdin=PIPE)
     out, err = proc.communicate()
     out = out.decode().strip()
     if len(out) > 0:
@@ -216,7 +216,7 @@ class device(object):
     """
 
     def __init__(self, idx):
-        self.idx = idx
+        self.idx = int(idx)
         self.prev_idx = -1
 
     def __enter__(self):

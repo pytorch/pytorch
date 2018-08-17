@@ -1,3 +1,9 @@
+// define constants like M_PI and C keywords for MSVC
+#ifdef _MSC_VER
+#define _USE_MATH_DEFINES
+#include <math.h>
+#endif
+
 #include "ATen/ATen.h"
 #include "ATen/Dispatch.h"
 #include "ATen/ExpandUtils.h"
@@ -24,6 +30,64 @@
 namespace at {
 namespace native {
 
+Tensor clamp(const Tensor& self, Scalar min, Scalar max) {
+  Tensor result = self.type().tensor();
+  return clamp_out(result, self, min, max);
+}
+
+Tensor clamp_max(const Tensor& self, Scalar max) {
+  Tensor result = self.type().tensor();
+  return clamp_max_out(result, self, max);
+}
+
+Tensor clamp_min(const Tensor& self, Scalar min) {
+  Tensor result = self.type().tensor();
+  return clamp_min_out(result, self, min);
+}
+
+Tensor& _clamp__cpu(Tensor& self, Scalar min, Scalar max) {
+  if (!std::isnan(min.toDouble()) && !std::isnan(max.toDouble())) {
+    return _th_clamp_out(self, self, min, max);
+  } else if (std::isnan(min.toDouble())) {
+    return _th_clamp_max_out(self, self, max);
+  } else if (std::isnan(max.toDouble())) {
+    return _th_clamp_min_out(self, self, min);
+  } else {
+    return self;
+  }
+}
+
+Tensor& _clamp_out_cpu(
+    Tensor& result,
+    const Tensor& self,
+    Scalar min,
+    Scalar max) {
+  if (!std::isnan(min.toDouble()) && !std::isnan(max.toDouble())) {
+    _th_clamp_out(result, self, min, max);
+  } else if (std::isnan(min.toDouble())) {
+    _th_clamp_max_out(result, self, max);
+  } else if (std::isnan(max.toDouble())) {
+    _th_clamp_min_out(result, self, min);
+  }
+  return result;
+}
+
+Tensor& _clamp_max__cpu(Tensor& self, Scalar max) {
+  return _th_clamp_max_out(self, self, max);
+}
+
+Tensor& _clamp_max_out_cpu(Tensor& result, const Tensor& self, Scalar max) {
+  return _th_clamp_max_out(result, self, max);
+}
+
+Tensor& _clamp_min__cpu(Tensor& self, Scalar min) {
+  return _th_clamp_min_out(self, self, min);
+}
+
+Tensor& _clamp_min_out_cpu(Tensor& result, const Tensor& self, Scalar min) {
+  return _th_clamp_min_out(result, self, min);
+}
+
 Tensor& fill_(Tensor& self, Scalar value) {
   return self._fill_(value);
 }
@@ -32,116 +96,115 @@ Tensor& fill_(Tensor& self, const Tensor& value) {
   return self._fill_(value);
 }
 
-// NB: If you use this macro, you may also need to add a CUDA forwarding
-// stub in CUDAUnaryOps
-#define IMPLEMENT_UNARY_OP_PREQUEL(op)                           \
-  Tensor op(const Tensor& self) {                                \
-    Tensor result = self.type().tensor();                        \
-    return at::op##_out(result, self);                           \
-  }
-
-#define IMPLEMENT_UNARY_OP_FLOAT_CMATH(op, opfn)                          \
-  Tensor& _##op##__cpu(Tensor& self_) {                                   \
-    if (self_.numel() > 0) {                                              \
-      Tensor self = sort_strides(self_);                                  \
-      AT_DISPATCH_FLOATING_TYPES(self.type(), op, [&] {                   \
-        CPU_tensor_parallel_apply1<scalar_t>(                             \
-            self, [](scalar_t& y) { y = opfn(y); });                      \
-      });                                                                 \
-    }                                                                     \
-    return self_;                                                         \
-  }                                                                       \
-  Tensor& _##op##_out_cpu(Tensor& result, const Tensor& self) {           \
-    result.resize_(self.sizes());                                         \
-    if (result.numel() > 0) {                                             \
-      AT_DISPATCH_FLOATING_TYPES(self.type(), op, [&] {                   \
-        CPU_tensor_parallel_apply2<scalar_t, scalar_t>(                   \
-            result, self, [](scalar_t& y, scalar_t& x) { y = opfn(x); }); \
-      });                                                                 \
-    }                                                                     \
-    return result;                                                        \
-  }
-
-#define IMPLEMENT_UNARY_OP_VEC(op, opfn)                                    \
-  Tensor& _##op##__cpu(Tensor& self_) {                                     \
-    if (self_.numel() > 0) {                                                \
-      Tensor self = sort_strides(self_);                                    \
-      if (self.is_contiguous()) {                                           \
-        op##Impl(self, self);                                               \
-      } else {                                                              \
-        AT_DISPATCH_FLOATING_TYPES(self.type(), op, [&] {                   \
-          CPU_tensor_parallel_apply1<scalar_t>(                             \
-              self, [](scalar_t& y) { y = opfn(y); });                      \
-        });                                                                 \
-      }                                                                     \
-    }                                                                       \
-    return self_;                                                           \
-  }                                                                         \
-  Tensor& _##op##_out_cpu(Tensor& result, const Tensor& self) {             \
-    result.resize_(self.sizes());                                           \
-    if (result.numel() > 0) {                                               \
-      if (result.is_contiguous() && self.is_contiguous()) {                 \
-        op##Impl(result, self);                                             \
-      } else {                                                              \
-        AT_DISPATCH_FLOATING_TYPES(self.type(), op, [&] {                   \
-          CPU_tensor_parallel_apply2<scalar_t, scalar_t>(                   \
-              result, self, [](scalar_t& y, scalar_t& x) { y = opfn(x); }); \
-        });                                                                 \
-      }                                                                     \
-    }                                                                       \
-    return result;                                                          \
-  }
-
-IMPLEMENT_UNARY_OP_PREQUEL(abs)
-IMPLEMENT_UNARY_OP_PREQUEL(acos)
-IMPLEMENT_UNARY_OP_PREQUEL(asin)
-IMPLEMENT_UNARY_OP_PREQUEL(atan)
-IMPLEMENT_UNARY_OP_PREQUEL(ceil)
-IMPLEMENT_UNARY_OP_PREQUEL(cos)
-IMPLEMENT_UNARY_OP_PREQUEL(cosh)
-IMPLEMENT_UNARY_OP_PREQUEL(erf)
-IMPLEMENT_UNARY_OP_PREQUEL(exp)
-IMPLEMENT_UNARY_OP_PREQUEL(expm1)
-IMPLEMENT_UNARY_OP_PREQUEL(floor)
-IMPLEMENT_UNARY_OP_PREQUEL(log)
-IMPLEMENT_UNARY_OP_PREQUEL(log10)
-IMPLEMENT_UNARY_OP_PREQUEL(log1p)
-IMPLEMENT_UNARY_OP_PREQUEL(log2)
-IMPLEMENT_UNARY_OP_PREQUEL(round)
-IMPLEMENT_UNARY_OP_PREQUEL(sin)
-IMPLEMENT_UNARY_OP_PREQUEL(sinh)
-IMPLEMENT_UNARY_OP_PREQUEL(sqrt)
-IMPLEMENT_UNARY_OP_PREQUEL(rsqrt)
-IMPLEMENT_UNARY_OP_PREQUEL(tan)
-IMPLEMENT_UNARY_OP_PREQUEL(trunc)
-
-Tensor tanh(const Tensor& self) {
-  Tensor result = self.type().tensor();
-  return at::tanh_out(result, self);
+Tensor mvlgamma(const Tensor& self, int64_t p) {
+  AT_CHECK(at::isFloatingType(self.type().scalarType()),
+           "mvlgamma is not implemented for ", self.type());
+  AT_CHECK((self > 0.5 * (p - 1.)).all().toCByte(),
+           "Condition for computing multivariate log-gamma not met");
+  AT_CHECK(p >= 1, "p has to be greater than or equal to 1");
+  Tensor args = native::arange(-p / 2. + 0.5, 0.5, 0.5, self.options());
+  args = args.add(self.unsqueeze(-1));
+  return args.lgamma_().sum(-1).add_(p * (p - 1) * std::log(M_PI) / 4.);
 }
 
-IMPLEMENT_UNARY_OP_VEC(abs, std::abs)
-IMPLEMENT_UNARY_OP_VEC(acos, std::acos)
-IMPLEMENT_UNARY_OP_VEC(asin, std::asin)
-IMPLEMENT_UNARY_OP_VEC(atan, std::atan)
-IMPLEMENT_UNARY_OP_VEC(ceil, std::ceil)
-IMPLEMENT_UNARY_OP_FLOAT_CMATH(cos, std::cos)
-IMPLEMENT_UNARY_OP_FLOAT_CMATH(cosh, std::cosh)
-IMPLEMENT_UNARY_OP_VEC(erf, std::erf)
-IMPLEMENT_UNARY_OP_VEC(exp, std::exp)
-IMPLEMENT_UNARY_OP_VEC(expm1, std::expm1)
-IMPLEMENT_UNARY_OP_VEC(floor, std::floor)
-IMPLEMENT_UNARY_OP_VEC(log, std::log)
-IMPLEMENT_UNARY_OP_VEC(log10, std::log10)
-IMPLEMENT_UNARY_OP_VEC(log1p, std::log1p)
-IMPLEMENT_UNARY_OP_VEC(log2, std::log2)
-IMPLEMENT_UNARY_OP_VEC(round, std::round)
-IMPLEMENT_UNARY_OP_VEC(rsqrt, 1 / std::sqrt)
-IMPLEMENT_UNARY_OP_FLOAT_CMATH(sin, std::sin)
-IMPLEMENT_UNARY_OP_FLOAT_CMATH(sinh, std::sinh)
-IMPLEMENT_UNARY_OP_VEC(sqrt, std::sqrt)
-IMPLEMENT_UNARY_OP_FLOAT_CMATH(tan, std::tan)
-IMPLEMENT_UNARY_OP_VEC(tanh, std::tanh)
-IMPLEMENT_UNARY_OP_VEC(trunc, std::trunc)
+Tensor& mvlgamma_(Tensor& self, int64_t p) {
+  AT_CHECK(at::isFloatingType(self.type().scalarType()),
+           "mvlgamma is not implemented for ", self.type());
+  AT_CHECK((self > 0.5 * (p - 1.)).all().toCByte(),
+           "Condition for computing multivariate log-gamma not met");
+  AT_CHECK(p >= 1, "p has to be greater than or equal to 1");
+  Tensor args = native::arange(-p / 2. + 0.5, 0.5, 0.5, self.options());
+  args = args.add(self.unsqueeze(-1));
+  return self.copy_(args.lgamma_().sum(-1).add_(p * (p - 1) * std::log(M_PI) / 4.));
+}
+
+// NB: If you use this macro, you may also need to add a CUDA forwarding
+// stub in CUDAUnaryOps
+
+#define IMPLEMENT_UNARY_OP_VEC(op)                              \
+  Tensor op(const Tensor& self) {                               \
+    Tensor result = self.type().tensor();                       \
+    return at::op##_out(result, self);                          \
+  }                                                             \
+  Tensor& _##op##__cpu(Tensor& self_) {                         \
+    if (self_.numel() > 0) {                                    \
+      Tensor self = sort_strides(self_);                        \
+      op##Impl(kCPU, self, self);                               \
+    }                                                           \
+    return self_;                                               \
+  }                                                             \
+  Tensor& _##op##_out_cpu(Tensor& result, const Tensor& self) { \
+    result.resize_(self.sizes());                               \
+    if (result.numel() > 0) {                                   \
+      op##Impl(kCPU, result, self);                             \
+    }                                                           \
+    return result;                                              \
+  }
+
+#define IMPLEMENT_UNARY_OP_TH(op)                               \
+  Tensor op(const Tensor& self) {                               \
+    Tensor result = self.type().tensor();                       \
+    return at::op##_out(result, self);                          \
+  }                                                             \
+  Tensor& _##op##__cpu(Tensor& self) {                          \
+    return at::op##_out(self, self);                            \
+  }                                                             \
+  Tensor& _##op##_out_cpu(Tensor& result, const Tensor& self) { \
+    result.resize_(self.sizes());                               \
+    return at::_##op##_out(result, self);                       \
+  }
+
+// NB: Temp. defaulting to TH implementation of abs due to issues with Apple
+
+IMPLEMENT_UNARY_OP_TH(abs)
+IMPLEMENT_UNARY_OP_VEC(acos)
+IMPLEMENT_UNARY_OP_VEC(asin)
+IMPLEMENT_UNARY_OP_VEC(atan)
+IMPLEMENT_UNARY_OP_VEC(ceil)
+IMPLEMENT_UNARY_OP_VEC(cos)
+IMPLEMENT_UNARY_OP_TH(cosh)
+IMPLEMENT_UNARY_OP_VEC(erf)
+IMPLEMENT_UNARY_OP_VEC(erfc)
+IMPLEMENT_UNARY_OP_VEC(exp)
+IMPLEMENT_UNARY_OP_VEC(expm1)
+IMPLEMENT_UNARY_OP_VEC(floor)
+IMPLEMENT_UNARY_OP_VEC(log)
+IMPLEMENT_UNARY_OP_VEC(log10)
+IMPLEMENT_UNARY_OP_VEC(log1p)
+IMPLEMENT_UNARY_OP_VEC(log2)
+IMPLEMENT_UNARY_OP_VEC(round)
+IMPLEMENT_UNARY_OP_VEC(rsqrt)
+IMPLEMENT_UNARY_OP_VEC(sigmoid)
+IMPLEMENT_UNARY_OP_VEC(sin)
+IMPLEMENT_UNARY_OP_TH(sinh)
+IMPLEMENT_UNARY_OP_VEC(sqrt)
+IMPLEMENT_UNARY_OP_VEC(tan)
+IMPLEMENT_UNARY_OP_VEC(tanh)
+IMPLEMENT_UNARY_OP_VEC(trunc)
+
+DEFINE_DISPATCH(absImpl);
+DEFINE_DISPATCH(acosImpl);
+DEFINE_DISPATCH(asinImpl);
+DEFINE_DISPATCH(atanImpl);
+DEFINE_DISPATCH(ceilImpl);
+DEFINE_DISPATCH(cosImpl);
+DEFINE_DISPATCH(erfImpl);
+DEFINE_DISPATCH(erfcImpl);
+DEFINE_DISPATCH(expImpl);
+DEFINE_DISPATCH(expm1Impl);
+DEFINE_DISPATCH(floorImpl);
+DEFINE_DISPATCH(logImpl);
+DEFINE_DISPATCH(log10Impl);
+DEFINE_DISPATCH(log1pImpl);
+DEFINE_DISPATCH(log2Impl);
+DEFINE_DISPATCH(roundImpl);
+DEFINE_DISPATCH(rsqrtImpl);
+DEFINE_DISPATCH(sigmoidImpl);
+DEFINE_DISPATCH(sinImpl);
+DEFINE_DISPATCH(sqrtImpl);
+DEFINE_DISPATCH(tanImpl);
+DEFINE_DISPATCH(tanhImpl);
+DEFINE_DISPATCH(truncImpl);
+
 }
 } // namespace at

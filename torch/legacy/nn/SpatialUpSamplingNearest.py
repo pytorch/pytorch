@@ -38,17 +38,24 @@ class SpatialUpSamplingNearest(Module):
             self._backend.library_state,
             input,
             self.output,
-            self.scale_factor
+            outputSize[ydim],
+            outputSize[xdim]
         )
         return self.output
 
     def updateGradInput(self, input, gradOutput):
         self.gradInput.resize_as_(input)
+        assert input.dim() == 4
+        input_size = input.size()
         self._backend.SpatialUpSamplingNearest_updateGradInput(
             self._backend.library_state,
-            input,
             gradOutput,
             self.gradInput,
-            self.scale_factor
+            input_size[0],
+            input_size[1],
+            input_size[2],
+            input_size[3],
+            gradOutput.shape[2],
+            gradOutput.shape[3]
         )
         return self.gradInput

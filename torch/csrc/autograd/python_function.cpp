@@ -15,11 +15,21 @@
 #include "torch/csrc/autograd/python_cpp_function.h"
 #include "torch/csrc/autograd/python_hook.h"
 #include "torch/csrc/autograd/saved_variable.h"
+#include "torch/csrc/autograd/python_anomaly_mode.h"
 #include "torch/csrc/jit/tracer.h"
+#include "torch/csrc/jit/python_tracer.h"
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/utils/auto_gil.h"
-#include "torch/csrc/utils/auto_gpu.h"
 #include "torch/csrc/Exceptions.h"
+
+#include <exception>
+#include <functional>
+#include <memory>
+#include <stdexcept>
+#include <string>
+#include <tuple>
+#include <utility>
+#include <vector>
 
 using namespace torch;
 using namespace torch::autograd;
@@ -35,17 +45,16 @@ namespace torch { namespace autograd {
 
 VariableInfo::VariableInfo(const Variable& var)
   : type(&var.type())
-  , device(-1)
-  , size(var.sizes())
+  , size(var.sizes().vec())
   , requires_grad(var.requires_grad()) {
   if (var.type().is_cuda()) {
     device = var.get_device();
   }
 }
 
-Variable VariableInfo::zeros(AutoGPU& gpu_guard) const {
-  gpu_guard.setDevice(device);
-  return at::zeros(*type, size);
+Variable VariableInfo::zeros(at::DeviceGuard& device_guard) const {
+  device_guard.set_index(device);
+  return at::zeros(size, *type);
 }
 
 auto PyFunction::legacy_apply(const variable_list& inputs) -> variable_list {
@@ -95,9 +104,9 @@ auto PyFunction::legacy_apply(const variable_list& inputs) -> variable_list {
 // NOTE: this function is written in a way that assumes it's only called for backward;
 // it's used by engine.cpp.  This is responsible for forwarding a call from
 // C++'s Function::apply to a Python method "apply".
-auto PyFunction::apply(const variable_list& inputs) -> variable_list {
+auto PyFunction::apply(variable_list&& inputs) -> variable_list {
   AutoGIL gil;
-  AutoGPU _gpu_guard(-1);
+  at::DeviceGuard _device_guard;
   THPFunction* py_fn = (THPFunction*)obj;
 
   THPObjectPtr _legacy(PyObject_GetAttrString(obj, "_is_legacy"));
@@ -115,7 +124,7 @@ auto PyFunction::apply(const variable_list& inputs) -> variable_list {
     if (inputs[i].defined()) {
       input = THPVariable_Wrap(inputs[i]);
     } else {
-      input = THPVariable_Wrap(output_info[i].zeros(_gpu_guard));
+      input = THPVariable_Wrap(output_info[i].zeros(_device_guard));
     }
     if (!input) throw python_error();
     PyTuple_SET_ITEM(pyInputs.get(), i, input);
@@ -172,7 +181,7 @@ auto PyFunction::apply(const variable_list& inputs) -> variable_list {
     if (output == Py_None) {
       auto& info = input_info[results.size()];
       if (info.requires_grad) {
-        results.emplace_back(info.zeros(_gpu_guard));
+        results.emplace_back(info.zeros(_device_guard));
       } else {
         results.emplace_back();
       }
@@ -206,7 +215,7 @@ auto PyFunction::release_variables() -> void {
   f->has_freed_buffers = 1;
 }
 
-auto PyFunction::name() -> std::string {
+auto PyFunction::name() const -> std::string {
   AutoGIL gil;
   auto f = (THPFunction*) obj;
   auto name = std::string(Py_TYPE(f)->tp_name);
@@ -244,7 +253,7 @@ static int THPFunction_traverse(THPFunction *self, visitproc visit, void *arg)
 
 static int THPFunction_clear(THPFunction *self)
 {
-  self->cdata.set_num_inputs(0);
+  self->cdata.clear_input_metadata();
 
   Py_CLEAR(self->needs_input_grad);
 
@@ -292,7 +301,6 @@ PyObject *THPFunction_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
   new (&self->input_info) std::vector<VariableInfo>();
   new (&self->saved_variables) std::vector<SavedVariable>();
   new (&self->is_variable_input) std::vector<bool>();
-  self->cdata.set_num_inputs(0);
   return obj;
 }
 
@@ -407,7 +415,7 @@ static void _wrap_outputs(THPFunction *self,
     } else if (is_input) {
       // An input has been returned, but it wasn't modified. Return it as a view
       // so that we can attach a new grad_fn to the Variable.
-      var = var.slice();
+      var = var.view_as(var);
       var.set_gradient_edge({cdata, output_nr});
     } else if (cdata) {
       var.set_gradient_edge({cdata, output_nr});
@@ -424,6 +432,10 @@ static void _wrap_outputs(THPFunction *self,
     // Note that output Variables may be repeated. In that case, the last call
     // to set_history wins.
     auto var = as_variable(obj, i);
+    if (cdata) {
+      auto output_nr = cdata->add_input_metadata(var);
+      AT_ASSERT(i == (int)output_nr);
+    }
     set_history(var, i, is_input, is_modified, is_differentiable);
 
     if (is_executable) {
@@ -538,7 +550,7 @@ std::pair<UnpackedInput, InputFlags> unpack_input(PyObject *args) {
 }
 
 static void _assert_not_tracing(const char* name, const variable_list& input_vars) {
-  if (tracer::isTracingVar(input_vars)) {
+  if (tracer::isTracing()) {
     std::ostringstream oss;
     oss << "Attempted to trace " << name;
     oss << ", but tracing of legacy functions is not supported";
@@ -546,12 +558,12 @@ static void _assert_not_tracing(const char* name, const variable_list& input_var
   }
 }
 
-static jit::tracer::PreTraceInfo _trace_pre_record(
+static Node* _trace_pre_record(
     PyObject* op_obj,
     PyObject *input_objects,
     const variable_list& input_vars) {
-  if (!tracer::isTracingVar(input_vars)) {
-    return jit::tracer::PreTraceInfo();
+  if (!jit::tracer::isTracing()) {
+    return nullptr;
   }
 
   // Save scalar args and the calling convention
@@ -581,12 +593,12 @@ static jit::tracer::PreTraceInfo _trace_pre_record(
 }
 
 static void _trace_post_record(
-    const jit::tracer::PreTraceInfo& trace_info,
+    Node* node,
     PyObject* op_obj,
     const variable_list& input_vars,
     PyObject *output_objects,
     bool is_inplace) {
-  if (!trace_info.state) {
+  if (!jit::tracer::isTracing()) {
     return;
   }
 
@@ -598,16 +610,15 @@ static void _trace_post_record(
     output_vars[i] = var->cdata;
   }
 
-  jit::tracer::postRecordTrace(trace_info, output_vars);
+  jit::tracer::postRecordTrace(node, output_vars);
 
-  auto state_lock = trace_info.state->lock();
-  trace_info.n->i_(attr::inplace, is_inplace);
-  
+  node->i_(attr::inplace, is_inplace);
+
 }
 
 PyObject* process_outputs(PyObject *op_obj, THPFunction* grad_fn, const UnpackedInput& unpacked,
                           PyObject *inputs, THPObjectPtr&& raw_output, bool is_executable,
-                          const jit::tracer::PreTraceInfo& trace_info) {
+                          Node* node) {
   bool unpack_output = ensure_tuple(raw_output);
 
   auto num_outputs = PyTuple_GET_SIZE(raw_output.get());
@@ -615,7 +626,7 @@ PyObject* process_outputs(PyObject *op_obj, THPFunction* grad_fn, const Unpacked
   THPObjectPtr outputs(PyTuple_New(num_outputs));
   if (!outputs) throw python_error();
 
-  grad_fn->cdata.set_num_inputs(num_outputs);
+  grad_fn->cdata.clear_input_metadata();
 
   // Record type, device, and size information about inputs
   if (is_executable) {
@@ -628,12 +639,7 @@ PyObject* process_outputs(PyObject *op_obj, THPFunction* grad_fn, const Unpacked
 
   bool is_inplace = static_cast<bool>(grad_fn->dirty_tensors);
   _wrap_outputs(grad_fn, inputs, raw_output, outputs, is_executable);
-  // NOTE: _trace_post_record has to run before _save_variables, because we need
-  // to assign traces to outputs before we convert them to SavedVariables.
-  // On the other hand, it needs to go after _mark_non_differentiable, because
-  // it might be wraping backwards in Evals, and _mark_non_differentiable uses
-  // grad_fn pointer equality for error checking.
-  _trace_post_record(trace_info, op_obj, unpacked.input_vars, outputs, is_inplace);
+  _trace_post_record(node, op_obj, unpacked.input_vars, outputs, is_inplace);
   if (is_executable) {
     _save_variables(grad_fn);
   } else {
@@ -681,7 +687,7 @@ PyObject *THPFunction_do_forward(THPFunction *self, PyObject *_inputs)
   }
 
   return process_outputs(nullptr, self, unpacked_input, _inputs, std::move(raw_output),
-                         is_executable, jit::tracer::PreTraceInfo());
+                         is_executable, nullptr);
   END_HANDLE_TH_ERRORS
 }
 
@@ -702,11 +708,7 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *inputs)
   InputFlags& input_info = info_pair.second;
 
   // Record input nodes if tracing
-  auto trace_info = _trace_pre_record(cls, inputs, unpacked_input.input_vars);
-  if (trace_info.state) {
-    // TODO: ezyang suggests this is unused and can be removed
-    ctx->is_traced = true;
-  }
+  auto* node = _trace_pre_record(cls, inputs, unpacked_input.input_vars);
 
   // Initialize backward function (and ctx)
   bool is_executable = input_info.is_executable;
@@ -735,7 +737,7 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *inputs)
   }
 
   return process_outputs(cls, ctx, unpacked_input, inputs, std::move(tensor_outputs),
-                         is_executable, trace_info);
+                         is_executable, node);
   END_HANDLE_TH_ERRORS
 }
 
@@ -746,7 +748,7 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *inputs)
 
 static void _prepare_grads(THPFunction *self, THPObjectPtr& raw_grads, bool is_grad_output)
 {
-  AutoGPU gpu_guard(-1);
+  at::DeviceGuard device_guard;
   int num_grads = PyTuple_GET_SIZE(raw_grads.get());
   // First, check if any of grads is None. If not, there's nothing to do
   bool has_none = false;
@@ -762,11 +764,11 @@ static void _prepare_grads(THPFunction *self, THPObjectPtr& raw_grads, bool is_g
 
   // Look for Nones and replace them with new buffers
   auto& grads_info = is_grad_output ? self->output_info : self->input_info;
-  TORCH_ASSERT(grads_info.size() == (size_t)num_grads);
+  AT_ASSERT(grads_info.size() == (size_t)num_grads);
   for (int i = 0; i < num_grads; i++) {
     PyObject *grad = PyTuple_GET_ITEM(raw_grads.get(), i);
     if (grad == Py_None) {
-      grad = THPVariable_Wrap(grads_info[i].zeros(gpu_guard));
+      grad = THPVariable_Wrap(grads_info[i].zeros(device_guard));
       if (!grad) throw python_error();
     } else {
       Py_INCREF(grad);
@@ -934,6 +936,13 @@ PyObject *THPFunction_next_functions(THPFunction *self, void *_unused)
   return result.release();
 }
 
+PyObject *THPFunction_metadata(THPFunction *self, void *_unused)
+{
+  auto metadata = static_cast<PyAnomalyMetadata*>(self->cdata.metadata())->dict();
+
+  Py_INCREF(metadata);
+  return metadata;
+}
 
 typedef PyObject *(*getter)(PyObject *, void *);
 typedef int (*setter)(PyObject *, PyObject *, void *);
@@ -990,7 +999,7 @@ static struct PyGetSetDef THPFunction_properties[] = {
   {"dirty_tensors", &getObject<&THPFunction::dirty_tensors>, &setObject<&THPFunction::dirty_tensors>, nullptr, nullptr},
   {"needs_input_grad", &getObject<&THPFunction::needs_input_grad>, nullptr, nullptr, nullptr},
   {"requires_grad", getRequiresGrad, nullptr, nullptr, nullptr},
-  {"_is_tracing", &getMember<char, &THPFunction::is_traced, PyBool_FromLong>, nullptr, nullptr, nullptr},
+  {"metadata", (getter)THPFunction_metadata, nullptr, nullptr, nullptr},
   {nullptr}
 };
 

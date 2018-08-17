@@ -18,10 +18,10 @@ class FullyConnectedOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   FullyConnectedOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        axis_(OperatorBase::GetSingleArgument<int32_t>("axis", 1)),
-        axis_w_(OperatorBase::GetSingleArgument<int32_t>("axis_w", 1)),
+        axis_(this->template GetSingleArgument<int32_t>("axis", 1)),
+        axis_w_(this->template GetSingleArgument<int32_t>("axis_w", 1)),
         float16_compute_(
-            OperatorBase::GetSingleArgument<bool>("float16_compute", false)) {}
+            this->template GetSingleArgument<bool>("float16_compute", false)) {}
   ~FullyConnectedOp() {}
 
   template <
@@ -144,7 +144,8 @@ class FullyConnectedOp final : public Operator<Context> {
   // A local vector to cache the output shape so we don't need to recreate
   // a vector object every time we run Run().
   vector<TIndex> Y_shape_cache_;
-  Tensor<Context> bias_multiplier_;
+  Tensor bias_multiplier_{Context::GetDeviceType()};
+  ;
 
   bool float16_compute_;
 };
@@ -158,10 +159,10 @@ class FullyConnectedGradientOp : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   FullyConnectedGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        axis_(OperatorBase::GetSingleArgument<int32_t>("axis", 1)),
-        axis_w_(OperatorBase::GetSingleArgument<int32_t>("axis_w", 1)),
+        axis_(this->template GetSingleArgument<int32_t>("axis", 1)),
+        axis_w_(this->template GetSingleArgument<int32_t>("axis_w", 1)),
         float16_compute_(
-            OperatorBase::GetSingleArgument<bool>("float16_compute", false)) {}
+            this->template GetSingleArgument<bool>("float16_compute", false)) {}
   ~FullyConnectedGradientOp() {}
 
   template <
@@ -184,8 +185,28 @@ class FullyConnectedGradientOp : public Operator<Context> {
     const auto canonical_axis_w = W.canonical_axis_index(axis_w_);
     const int N = TransposeWeight ? W.size_to_dim(canonical_axis_w)
                                   : W.size_from_dim(canonical_axis_w);
-    CAFFE_ENFORCE(M * K == X.size());
-    CAFFE_ENFORCE(K * N == W.size());
+
+    auto dimErrorString = [&]() {
+      return MakeString(
+          "Dimension mismatch: ",
+          "X: ",
+          X.dims(),
+          ", W: ",
+          W.dims(),
+          ", dY: ",
+          dY.dims(),
+          ", axis: ",
+          axis_,
+          ", M: ",
+          M,
+          ", N: ",
+          N,
+          ", K: ",
+          K);
+    };
+
+    CAFFE_ENFORCE(M * K == X.size(), dimErrorString());
+    CAFFE_ENFORCE(K * N == W.size(), dimErrorString());
 
     auto* dW = Output(0);
     auto* db = Output(1);
@@ -292,7 +313,7 @@ class FullyConnectedGradientOp : public Operator<Context> {
  protected:
   size_t axis_{1};
   size_t axis_w_{1};
-  Tensor<Context> bias_multiplier_;
+  Tensor bias_multiplier_{Context::GetDeviceType()};
   bool float16_compute_;
 };
 

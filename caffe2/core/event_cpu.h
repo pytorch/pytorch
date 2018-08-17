@@ -19,7 +19,7 @@ struct CPUEventWrapper {
   std::condition_variable cv_completed_;
   std::atomic<int> status_;
   std::string err_msg_;
-  EventCallbackFunction callback_;
+  std::vector<EventCallbackFunction> callbacks_;
 };
 
 void EventCreateCPU(const DeviceOption& option, Event* event);

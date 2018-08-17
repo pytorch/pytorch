@@ -82,7 +82,14 @@ def IsOperatorWithEngine(op_type, engine):
     return C.op_registry_key(op_type, engine) in _REGISTERED_OPERATORS
 
 
-def DeviceOption(device_type, cuda_gpu_id=0, random_seed=None, node_name=None):
+def DeviceOption(
+    device_type,
+    cuda_gpu_id=0,
+    random_seed=None,
+    node_name=None,
+    numa_node_id=None,
+    extra_info=None,
+):
     option = caffe2_pb2.DeviceOption()
     option.device_type = device_type
     option.cuda_gpu_id = cuda_gpu_id
@@ -90,6 +97,11 @@ def DeviceOption(device_type, cuda_gpu_id=0, random_seed=None, node_name=None):
         option.node_name = node_name
     if random_seed is not None:
         option.random_seed = random_seed
+    if numa_node_id is not None:
+        assert device_type == caffe2_pb2.CPU
+        option.numa_node_id = numa_node_id
+    if extra_info is not None:
+        option.extra_info.extend(extra_info)
     return option
 
 
@@ -1601,7 +1613,8 @@ class Net(object):
         blob_remap=None,
         op_id_mask=None,
         remap_funcs=None,
-        keep_schema=True
+        keep_schema=True,
+        update_external_list=False,
     ):
         """
         Clone this net.
@@ -1675,6 +1688,24 @@ class Net(object):
                 )
 
         new_net._attr_dict.update(self._attr_dict)
+        if update_external_list:
+            # external input list
+            existing_outputs = set()
+            used_outputs = set()
+            del new_net.Proto().external_input[:]
+            del new_net.Proto().external_output[:]
+            for op in new_net.Proto().op:
+                for ib in op.input:
+                    if ib not in existing_outputs:
+                        new_net.Proto().external_input.extend([ib])
+                    else:
+                        used_outputs.add(ib)
+                for ob in op.output:
+                    existing_outputs.add(ob)
+            # external outputs
+            for ob in existing_outputs:
+                if ob not in used_outputs:
+                    new_net.Proto().external_output.extend([ob])
         return new_net
 
     def ClonePartial(self, name, inputs, outputs, remap_funcs=None):
@@ -1706,7 +1737,7 @@ class Net(object):
             OrderedDict(inputs) if input_is_pair_list else
             OrderedDict(zip(inputs, inputs)))
         for output in outputs:
-            assert self.BlobIsDefined(output)
+            assert self.BlobIsDefined(output), "{} is not defined".format(output)
         input_names = {str(k): str(v) for k, v in viewitems(inputs)}
         output_names = [str(o) for o in outputs]
         proto = self._net
@@ -1745,6 +1776,60 @@ class Net(object):
     def Proto(self):
         self._InvalidateLookupTables()
         return self._net
+
+    def reroute_tensor(self, tensor, new_producer, can_modify=None):
+        r""" reroute tensor to new_producer. And feed new tensor to consumers
+        and interseciton with can_modify if provided.
+        Inputs:
+            tensor: str or blob_reference the tensor to reroute
+            new_producer: an op takes in tensor gives new_tesnor
+            can_modify: a list/set of operators that consumes tensor and can be
+            modified
+
+        Returns:
+            reroute_cnt: how many consumer op has been changed
+
+        Note: assume no inplace blob in net
+        """
+        if tensor in self.external_inputs:
+            op_idx = -1
+        else:
+            assert tensor in new_producer.input, \
+                "new producer {} is not taking in {}".format(new_producer.type, tensor)
+            # assuming that the net has no inplace blob
+            # TODO: add ssa info in tensor
+            op_idx = -2
+            for index, op in enumerate(self.Proto().op):
+                if_found = False
+                for o in op.output:
+                    if o == tensor:
+                        # tensor should not be modified yet.
+                        if_found = True
+                        op_idx = index
+                        break
+                if if_found:
+                    break
+
+        assert op_idx >= -1
+        temp_ops = self.Proto().op[op_idx + 1:]
+        del self.Proto().op[op_idx + 1:]
+        self.Proto().op.extend([new_producer])
+        self.Proto().op.extend(temp_ops)
+
+        new_tensor = new_producer.output[0]
+        # modify external outputs
+        if tensor in self.external_outputs:
+            new_list = [new_tensor if b == tensor else b for b in self.external_outputs]
+            del self.Proto().external_output[:]
+            self.Proto().external_output.extend(new_list)
+
+        # modify consumers
+        reroute_cnt = 0
+        for op in self.Proto().op:
+            if op in can_modify:  # this is not necessarily true
+                remap_input(op, {tensor: new_tensor})
+                reroute_cnt = reroute_cnt + 1
+        return reroute_cnt
 
     def PopulateProtoWithFileName(self):
         net_tb = workspace.operator_tracebacks.get(self.Name(), None)
@@ -1868,6 +1953,9 @@ class Net(object):
         self._ExtendOps(grad_ops)
         return input_to_grad
 
+    def AddArgument(self, arg_name, arg_value):
+        self._net.arg.extend([utils.MakeArgument(arg_name, arg_value)])
+
     def AddExternalInput(self, *inputs):
         assert len(inputs) > 0
         refs = []
@@ -1886,7 +1974,7 @@ class Net(object):
     def AddExternalOutput(self, *outputs):
         for output in outputs:
             assert isinstance(output, BlobReference)
-            assert self.BlobIsDefined(output)
+            assert self.BlobIsDefined(output), "{} is not defined".format(output)
         for output in outputs:
             self.Proto().external_output.extend([str(output)])
 
@@ -1932,9 +2020,10 @@ class Net(object):
                 self._input_record = schema.NewRecord(self, input_record)
         else:
             self._input_record = input_record
-            for blob in input_record.field_blobs():
-                if blob not in self.external_inputs:
-                    self.AddExternalInput(blob)
+
+        for blob in self._input_record.field_blobs():
+            if blob not in self.external_inputs:
+                self.AddExternalInput(blob)
         return self._input_record
 
     def recover_input_record_by_prefix(self, prefix):
@@ -1973,7 +2062,7 @@ class Net(object):
             'Tried to append to missing output record'
         )
         for blob in record.field_blobs():
-            assert self.BlobIsDefined(blob)
+            assert self.BlobIsDefined(blob), "{} is not defined".format(blob)
         for blob in record.field_blobs():
             self.AddExternalOutput(blob)
         self._output_record = self._output_record + schema.Struct(
@@ -2168,6 +2257,12 @@ class Net(object):
         return self._ExtendOps(new_ops)
 
 
+def remap_input(op, blob_name_remapping):
+    new_list = [blob_name_remapping.get(b, b) for b in op.input]
+    del op.input[:]
+    op.input.extend(new_list)
+
+
 def copy_func_between_devices(src, dst):
     CPU = caffe2_pb2.CPU
     CUDA = caffe2_pb2.CUDA
@@ -2256,6 +2351,8 @@ def InjectCrossDeviceCopies(net, blob_to_device=None, blob_remap=None,
     Assumptions:
       1. every external inputs of this net is already in blob_to_device!
       2. if not, this function will use net device option
+      3. InferOpBlobDevices might fail to get the correct inference for ops like
+         EnsureCPUOutput that could take in input from multiple places.
     '''
     new_net = net.Clone(net._net.name + '_cross_device', keep_schema=True)
     del new_net._net.op[:]
@@ -2715,6 +2812,8 @@ class Plan(object):
         assert isinstance(plan_proto, caffe2_pb2.PlanDef)
         plan = Plan(plan_proto.name)
         plan._plan.CopyFrom(plan_proto)
+        del plan._plan.network[:]
+        del plan._plan.execution_step[:]
 
         net_obj_dict = {}
         net_proto_dict = {}

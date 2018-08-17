@@ -1,8 +1,12 @@
 ##############################################################################
 # Macro to update cached options.
 macro (caffe2_update_option variable value)
-  get_property(__help_string CACHE ${variable} PROPERTY HELPSTRING)
-  set(${variable} ${value} CACHE BOOL ${__help_string} FORCE)
+  if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
+    get_property(__help_string CACHE ${variable} PROPERTY HELPSTRING)
+    set(${variable} ${value} CACHE BOOL ${__help_string} FORCE)
+  else()
+    set(${variable} ${value})
+  endif()
 endmacro()
 
 
@@ -105,6 +109,27 @@ function(caffe2_binary_target target_name_or_src)
   install(TARGETS ${__target} DESTINATION bin)
 endfunction()
 
+function(caffe2_hip_binary_target target_name_or_src)
+  if (${ARGN})
+    set(__target ${target_name_or_src})
+    prepend(__srcs "${CMAKE_CURRENT_SOURCE_DIR}/" "${ARGN}")
+  else()
+    get_filename_component(__target ${target_name_or_src} NAME_WE)
+    prepend(__srcs "${CMAKE_CURRENT_SOURCE_DIR}/" "${target_name_or_src}")
+  endif()
+
+  # These two lines are the only differences between
+  # caffe2_hip_binary_target and caffe2_binary_target
+  set_source_files_properties(${__srcs} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+  hip_add_executable(${__target} ${__srcs})
+
+  target_link_libraries(${__target} ${Caffe2_MAIN_LIBS})
+  # If we have Caffe2_MODULES defined, we will also link with the modules.
+  if (DEFINED Caffe2_MODULES)
+    target_link_libraries(${__target} ${Caffe2_MODULES})
+  endif()
+  install(TARGETS ${__target} DESTINATION bin)
+endfunction()
 
 ##############################################################################
 # Multiplex between loading executables for CUDA versus HIP (AMD Software Stack).
@@ -138,6 +163,34 @@ endmacro()
 
 
 ##############################################################################
+# Get the NVCC arch flags specified by TORCH_CUDA_ARCH_LIST and CUDA_ARCH_NAME.
+# Usage:
+#   torch_cuda_get_nvcc_gencode_flag(variable_to_store_flags)
+#
+macro(torch_cuda_get_nvcc_gencode_flag store_var)
+  # setting nvcc arch flags
+  if ((NOT EXISTS ${TORCH_CUDA_ARCH_LIST}) AND (DEFINED ENV{TORCH_CUDA_ARCH_LIST}))
+    message(WARNING
+        "In the future we will require one to explicitly pass "
+        "TORCH_CUDA_ARCH_LIST to cmake instead of implicitly setting it as an "
+        "env variable. This will become a FATAL_ERROR in future version of "
+        "pytorch.")
+    set(TORCH_CUDA_ARCH_LIST $ENV{TORCH_CUDA_ARCH_LIST})
+  endif()
+  if (EXISTS ${CUDA_ARCH_NAME})
+    message(WARNING
+        "CUDA_ARCH_NAME is no longer used. Use TORCH_CUDA_ARCH_LIST instead. "
+        "Right now, CUDA_ARCH_NAME is ${CUDA_ARCH_NAME} and "
+        "TORCH_CUDA_ARCH_LIST is ${TORCH_CUDA_ARCH_LIST}.")
+    set(TORCH_CUDA_ARCH_LIST TORCH_CUDA_ARCH_LIST ${CUDA_ARCH_NAME})
+  endif()
+
+  # Invoke cuda_select_nvcc_arch_flags from proper cmake FindCUDA.
+  cuda_select_nvcc_arch_flags(${store_var} ${TORCH_CUDA_ARCH_LIST})
+endmacro()
+
+
+##############################################################################
 # Add ATen compile options.
 # Usage:
 #   aten_compile_options(lib_name)
@@ -148,6 +201,7 @@ function(aten_compile_options libname)
     -Wextra
     -fexceptions
     -Wno-missing-field-initializers
+    -Wno-strict-overflow
     -Wno-type-limits
     -Wno-unused-parameter
     -Wno-unknown-warning-option

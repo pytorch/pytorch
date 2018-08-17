@@ -16,7 +16,7 @@ static std::unique_ptr<at::Storage> createStorage(RPCType type) {
   throw std::invalid_argument("passed character doesn't represent a storage type");
 }
 
-static std::unique_ptr<at::Storage> createStorage(RPCType type, std::size_t size) {
+static std::unique_ptr<at::Storage> createStorage(RPCType type, size_t size) {
   std::unique_ptr<at::Storage> storage = createStorage(type);
   storage->resize(size);
   return storage;
@@ -76,24 +76,24 @@ static void storageNewWithSize(rpc::RPCMessage& raw_message) {
   );
 }
 
-static void storageNewWithSizeN(rpc::RPCMessage& raw_message, std::size_t size) {
+static void storageNewWithSizeN(rpc::RPCMessage& raw_message, size_t size) {
   RPCType storage_type = unpackType(raw_message);
   object_id_type storage_id = unpackStorage(raw_message);
   std::unique_ptr<at::Storage> storage = createStorage(storage_type, size);
   RPCType value_type = peekType(raw_message);
   if (isInteger(value_type)) {
     int64_t values[size];
-    for (std::size_t i = 0; i < size; i++)
+    for (size_t i = 0; i < size; i++)
       values[i] = unpackInteger(raw_message);
     finalize(raw_message);
-    for (std::size_t i = 0; i < size; i++)
+    for (size_t i = 0; i < size; i++)
       storage->fast_set(i, values[i]);
   } else if (isFloat(value_type)) {
     double values[size];
-    for (std::size_t i = 0; i < size; i++)
+    for (size_t i = 0; i < size; i++)
       values[i] = unpackInteger(raw_message);
     finalize(raw_message);
-    for (std::size_t i = 0; i < size; i++)
+    for (size_t i = 0; i < size; i++)
       storage->fast_set(i, values[i]);
   } else {
     throw std::invalid_argument("expected scalar type");

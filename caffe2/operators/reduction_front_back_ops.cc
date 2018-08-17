@@ -142,17 +142,70 @@ REGISTER_GRADIENT(ReduceBackSum, GetReduceBackSumGradient);
 OPERATOR_SCHEMA(ReduceFrontSum)
     .NumInputs(1, 2)
     .NumOutputs(1)
-    .Arg("num_reduce_dims", "Number of dimensions to reduce.")
+    .Arg("num_reduce_dims", "(*int*): number of dimensions to reduce (default=1)")
     .SetDoc(R"DOC(
-Reduces the input tensor along the first dimension of the input
-tensor by applying 'Sum'.  When lengths is given, sum is only computed
-with subsets of elements correspondingly.
+Reduces the input tensor along the last dimension of the by applying **sum**.
+
+Can reduce more than one of the "first" dimensions by setting `num_reduce_dim`.
+
+A second (optional) input, `lengths`, can be passed, which enforces that only a subset of the elements are considered in the sum operation.
+- If input tensor `X` has shape $(d_0, d_1, d_2, ..., d_n)$, `lengths` must have shape $(d_1 * d_2 * ... * d_{n})$.
+- The values of the `lengths` tensor determine how many of the values to consider for each vector in the $d_{0}$ dimension.
+
+For example, if $X = [[1,5,2,9],[4,1,8,2],[2,7,0,3]]$ and $lengths = [2,3,1,2]$, then $Y = [sum(1,4), sum(5,1,7), sum(2), sum(9,2)] = [2.5, 4.333, 2, 5.5]$
+
+Github Links:
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/reduction_front_back_ops.cc
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "ReduceFrontSum",
+    ["X"],
+    ["Y"],
+    num_reduce_dim=2
+)
+
+workspace.FeedBlob("X", np.random.randint(10, size=(2,3,3)).astype(np.float32))
+print("X:", workspace.FetchBlob("X"))
+workspace.RunOperatorOnce(op)
+print("Y:", workspace.FetchBlob("Y"))
+
+```
+
+**Result**
+
+```
+
+X:
+[[[4. 1. 1.]
+  [0. 6. 7.]
+  [7. 8. 6.]]
+
+ [[5. 7. 7.]
+  [0. 1. 6.]
+  [2. 9. 0.]]]
+Y: [18. 32. 27.]
+
+```
+
+</details>
+
 )DOC")
-    .Input(0, "data_in", "(T<D1..., Dn>) Input data.")
+    .Input(0, "X", "(*Tensor`<float>`*): input tensor")
     .Input(
         1,
         "lengths",
-        "Num of elements in each sample, should have size D2 x D3 x ... x Dn.")
+        "(*Tensor`<int>`*): number of elements in each sample")
+    .Output(0,"Y","(*Tensor`<float>`*): reduced tensor")
     .TensorInferenceFunction([](const OperatorDef& def,
                                 const vector<TensorShape>& in) {
       REDUCTION_OP_SHAPE_INFERENCE(true)
@@ -162,17 +215,71 @@ OPERATOR_SCHEMA(ReduceFrontSumGradient).NumInputs(2, 3).NumOutputs(1);
 OPERATOR_SCHEMA(ReduceBackSum)
     .NumInputs(1, 2)
     .NumOutputs(1)
-    .Arg("num_reduce_dims", "Number of dimensions to reduce.")
+    .Arg("num_reduce_dims", "(*int*): number of dimensions to reduce (default=1)")
     .SetDoc(R"DOC(
-Reduces the input tensor along the last dimension of the
-input tensor by applying 'Sum'.  When lengths is given, sum is only computed
-with subsets of elements correspondingly.
+Reduces the input tensor along the last dimension of the by applying **sum**.
+
+Can reduce more than one of the "last" dimensions by setting `num_reduce_dim`.
+
+A second (optional) input, `lengths`, can be passed, which enforces that only a subset of the elements are considered in the sum operation.
+- If input tensor `X` has shape $(d_0, d_1, d_2, ..., d_n)$, `lengths` must have shape $(d_0 * d_1 * d_2 * ... * d_{n-1})$.
+- The values of the `lengths` tensor determine how many of the values to consider for each vector in the $d_{n-1}$ dimension.
+
+For example if $X = [[1,5,2,9],[4,1,8,2],[2,7,0,3]]$ and $lengths = [2,3,1]$, then $Y = [sum(1,5), sum(4,1,8), sum(2)] = [6, 13, 2]$
+
+
+Github Links:
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/reduction_front_back_ops.cc
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "ReduceBackSum",
+    ["X"],
+    ["Y"],
+    num_reduce_dim=2
+)
+
+workspace.FeedBlob("X", np.random.randint(10, size=(1,2,3,3)).astype(np.float32))
+print("X:", workspace.FetchBlob("X"))
+workspace.RunOperatorOnce(op)
+print("Y:", workspace.FetchBlob("Y"))
+
+```
+
+**Result**
+
+```
+
+X:
+[[[[2. 7. 7.]
+   [1. 1. 0.]
+   [9. 7. 2.]]
+
+  [[6. 6. 4.]
+   [1. 2. 6.]
+   [6. 6. 3.]]]]
+Y: [[36. 40.]]
+
+```
+
+</details>
+
 )DOC")
-    .Input(0, "data_in", "(T<D1..., Dn>) Input data.")
+    .Input(0, "X", "(*Tensor`<float>`*): input tensor")
     .Input(
         1,
         "lengths",
-        "Num of elements in each sample, should have size D1 x D2 x ... x D(n-1).")
+        "(*Tensor`<int>`*): number of elements in each sample")
+    .Output(0,"Y","(*Tensor`<float>`*): reduced tensor")
     .TensorInferenceFunction([](const OperatorDef& def,
                                 const vector<TensorShape>& in) {
       REDUCTION_OP_SHAPE_INFERENCE(false)
@@ -288,17 +395,70 @@ REGISTER_GRADIENT(ReduceFrontMean, GetReduceFrontMeanGradient);
 OPERATOR_SCHEMA(ReduceFrontMean)
     .NumInputs(1, 2)
     .NumOutputs(1)
-    .Arg("num_reduce_dims", "Number of dimensions to reduce.")
+    .Arg("num_reduce_dims", "(*int*): number of dimensions to reduce (default=1)")
     .SetDoc(R"DOC(
-Reduces the input tensor along the first dimension of the input
-tensor by applying 'Mean'. When lengths is given, mean is only computed
-with subsets of elements correspondingly.
+Reduces the input tensor along the last dimension of the by applying **mean**.
+
+Can reduce more than one of the "first" dimensions by setting `num_reduce_dim`.
+
+A second (optional) input, `lengths`, can be passed, which enforces that only a subset of the elements are considered in the mean operation.
+- If input tensor `X` has shape $(d_0, d_1, d_2, ..., d_n)$, `lengths` must have shape $(d_1 * d_2 * ... * d_{n})$.
+- The values of the `lengths` tensor determine how many of the values to consider for each vector in the $d_{0}$ dimension.
+
+For example if $X = [[1,5,2,9],[4,1,8,2],[2,7,0,3]]$ and $lengths = [2,3,1,2]$, then $Y = [mean(1,4), mean(5,1,7), mean(2), mean(9,2)] = [2.5, 4.333, 2, 5.5]$
+
+Github Links:
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/reduction_front_back_ops.cc
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "ReduceFrontMean",
+    ["X"],
+    ["Y"],
+    num_reduce_dim=2
+)
+
+workspace.FeedBlob("X", np.random.randint(10, size=(2,3,3)).astype(np.float32))
+print("X:", workspace.FetchBlob("X"))
+workspace.RunOperatorOnce(op)
+print("Y:", workspace.FetchBlob("Y"))
+
+```
+
+**Result**
+
+```
+
+X:
+[[[5. 0. 9.]
+  [4. 1. 1.]
+  [9. 0. 8.]]
+
+ [[2. 6. 7.]
+  [6. 2. 6.]
+  [0. 4. 5.]]]
+Y: [4.3333335    2.1666667     6.]
+
+```
+
+</details>
+
 )DOC")
-    .Input(0, "data_in", "(T<D1..., Dn>) Input data.")
+    .Input(0, "X", "(*Tensor`<float>`*): input tensor")
     .Input(
         1,
         "lengths",
-        "Num of elements in each sample, should have size D2 x D3 x ... x Dn.")
+        "(*Tensor`<int>`*): number of elements in each sample")
+    .Output(0,"Y","(*Tensor`<float>`*): reduced tensor")
     .TensorInferenceFunction([](const OperatorDef& def,
                                 const vector<TensorShape>& in) {
       REDUCTION_OP_SHAPE_INFERENCE(true)
@@ -327,17 +487,71 @@ REGISTER_GRADIENT(ReduceBackMean, GetReduceBackMeanGradient);
 OPERATOR_SCHEMA(ReduceBackMean)
     .NumInputs(1, 2)
     .NumOutputs(1)
-    .Arg("num_reduce_dims", "Number of dimensions to reduce.")
+    .Arg("num_reduce_dims", "(*int*): number of dimensions to reduce (default=1)")
     .SetDoc(R"DOC(
-Reduces the input tensor along the last dimension of the input
-tensor by applying 'Mean'. When lengths is given, mean is only computed
-with subsets of elements correspondingly.
+Reduces the input tensor along the last dimension of the by applying **mean**.
+
+Can reduce more than one of the "last" dimensions by setting `num_reduce_dim`.
+
+A second (optional) input, `lengths`, can be passed, which enforces that only a subset of the elements are considered in the mean operation.
+- If input tensor `X` has shape $(d_0, d_1, d_2, ..., d_n)$, `lengths` must have shape $(d_0 * d_1 * d_2 * ... * d_{n-1})$.
+- The values of the `lengths` tensor determine how many of the values to consider for each vector in the $d_{n-1}$ dimension.
+
+For example if $X = [[1,5,2,9],[4,1,8,2],[2,7,0,3]]$ and $lengths = [2,3,1]$, then $Y = [mean(1,5), mean(4,1,8), mean(2)] = [3, 4.333, 2]$
+
+
+Github Links:
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/reduction_front_back_ops.cc
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "ReduceBackMean",
+    ["X"],
+    ["Y"],
+    num_reduce_dim=2
+)
+
+workspace.FeedBlob("X", np.random.randint(10, size=(1,2,3,3)).astype(np.float32))
+print("X:", workspace.FetchBlob("X"))
+workspace.RunOperatorOnce(op)
+print("Y:", workspace.FetchBlob("Y"))
+
+```
+
+**Result**
+
+```
+
+X:
+[[[[5. 9. 0.]
+   [8. 4. 0.]
+   [2. 2. 4.]]
+
+  [[9. 0. 9.]
+   [7. 9. 7.]
+   [1. 0. 2.]]]]
+Y: [[3.7777777 4.888889 ]]
+
+```
+
+</details>
+
 )DOC")
-    .Input(0, "data_in", "(T<D1..., Dn>) Input data.")
+    .Input(0, "X", "(*Tensor`<float>`*): input tensor")
     .Input(
         1,
         "lengths",
-        "Num of elements in each sample, should have size D1 x D2 x ... x D(n-1).")
+        "(*Tensor`<int>`*): number of elements in each sample")
+    .Output(0,"Y","(*Tensor`<float>`*): reduced tensor")
     .TensorInferenceFunction([](const OperatorDef& def,
                                 const vector<TensorShape>& in) {
       REDUCTION_OP_SHAPE_INFERENCE(false)
@@ -469,17 +683,70 @@ REGISTER_GRADIENT(ReduceBackMax, GetReduceBackMaxGradient);
 OPERATOR_SCHEMA(ReduceFrontMax)
     .NumInputs(1, 2)
     .NumOutputs(1)
-    .Arg("num_reduce_dims", "Number of dimensions to reduce")
+    .Arg("num_reduce_dims", "(*int*): number of dimensions to reduce (default=1)")
     .SetDoc(R"DOC(
-Reduces the input tensor along the first dimension of the input
-tensor by applying 'Max'. When lengths is given, max is only computed
-with subsets of elements correspondingly.
+Reduces the input tensor along the last dimension of the by applying **max**.
+
+Can reduce more than one of the "first" dimensions by setting `num_reduce_dim`.
+
+A second (optional) input, `lengths`, can be passed, which enforces that only a subset of the elements are considered in the max operation.
+- If input tensor `X` has shape $(d_0, d_1, d_2, ..., d_n)$, `lengths` must have shape $(d_1 * d_2 * ... * d_{n})$.
+- The values of the `lengths` tensor determine how many of the values to consider for each vector in the $d_{0}$ dimension.
+
+For example if $X = [[1,5,2,9],[4,1,8,2],[2,7,0,3]]$ and $lengths = [2,3,1,2]$, then $Y = [max(1,4), max(5,1,7), max(2), max(9,2)] = [4, 7, 2, 9]$
+
+Github Links:
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/reduction_front_back_ops.cc
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "ReduceFrontMax",
+    ["X"],
+    ["Y"],
+    num_reduce_dim=2
+)
+
+workspace.FeedBlob("X", np.random.randint(10, size=(2,3,3)).astype(np.float32))
+print("X:", workspace.FetchBlob("X"))
+workspace.RunOperatorOnce(op)
+print("Y:", workspace.FetchBlob("Y"))
+
+```
+
+**Result**
+
+```
+
+X:
+[[[2. 8. 1.]
+  [9. 6. 6.]
+  [7. 7. 0.]]
+
+ [[4. 3. 9.]
+  [9. 2. 7.]
+  [6. 4. 7.]]]
+Y: [9. 8. 9.]
+
+```
+
+</details>
+
 )DOC")
-    .Input(0, "data_in", "(T<D1..., Dn>) Input data.")
+    .Input(0, "X", "(*Tensor`<float>`*): input tensor")
     .Input(
         1,
         "lengths",
-        "Num of elements in each sample, should have size D2 x D3 ... x Dn.")
+        "(*Tensor`<int>`*): number of elements in each sample")
+    .Output(0,"Y","(*Tensor`<float>`*): reduced tensor")
     .TensorInferenceFunction([](const OperatorDef& def,
                                 const vector<TensorShape>& in) {
       REDUCTION_OP_SHAPE_INFERENCE(true)
@@ -489,17 +756,71 @@ OPERATOR_SCHEMA(ReduceFrontMaxGradient).NumInputs(3, 4).NumOutputs(1);
 OPERATOR_SCHEMA(ReduceBackMax)
     .NumInputs(1, 2)
     .NumOutputs(1)
-    .Arg("num_reduce_dims", "Number of dimensions to reduce")
+    .Arg("num_reduce_dims", "(*int*): number of dimensions to reduce (default=1)")
     .SetDoc(R"DOC(
-Reduces the input tensor along the last dimension of the
-input tensor by applying 'Max'. When lengths is given, max is only computed
-with subsets of elements correspondingly.
+Reduces the input tensor along the last dimension of the by applying **max**.
+
+Can reduce more than one of the "last" dimensions by setting `num_reduce_dim`.
+
+A second (optional) input, `lengths`, can be passed, which enforces that only a subset of the elements are considered in the max operation.
+- If input tensor `X` has shape $(d_0, d_1, d_2, ..., d_n)$, `lengths` must have shape $(d_0 * d_1 * d_2 * ... * d_{n-1})$.
+- The values of the `lengths` tensor determine how many of the values to consider for each vector in the $d_{n-1}$ dimension.
+
+For example if $X = [[1,5,2,9],[4,1,8,2],[2,7,0,3]]$ and $lengths = [2,3,1]$, then $Y = [max(1,5), max(4,1,8), max(2)] = [5, 8, 2]$
+
+
+Github Links:
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/reduction_front_back_ops.cc
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "ReduceBackMax",
+    ["X"],
+    ["Y"],
+    num_reduce_dim=2
+)
+
+workspace.FeedBlob("X", np.random.randint(10, size=(1,2,3,3)).astype(np.float32))
+print("X:", workspace.FetchBlob("X"))
+workspace.RunOperatorOnce(op)
+print("Y:", workspace.FetchBlob("Y"))
+
+```
+
+**Result**
+
+```
+
+X:
+[[[[2. 5. 1.]
+   [6. 1. 9.]
+   [8. 5. 9.]]
+
+  [[5. 7. 8.]
+   [9. 9. 6.]
+   [6. 5. 0.]]]]
+Y: [[9. 9.]]
+
+```
+
+</details>
+
 )DOC")
-    .Input(0, "data_in", "(T<D1..., Dn>) Input data.")
+    .Input(0, "X", "(*Tensor`<float>`*): input tensor")
     .Input(
         1,
         "lengths",
-        "Num of elements in each sample, should have size D1 x D2 x ... x D(n-1).")
+        "(*Tensor`<int>`*): number of elements in each sample")
+    .Output(0,"Y","(*Tensor`<float>`*): reduced tensor")
     .TensorInferenceFunction([](const OperatorDef& def,
                                 const vector<TensorShape>& in) {
       REDUCTION_OP_SHAPE_INFERENCE(false)

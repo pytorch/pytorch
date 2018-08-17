@@ -16,7 +16,6 @@ export ASAN_OPTIONS=detect_leaks=0:symbolize=1
 
 # TODO: Make the ASAN flags a more unified env var
 CC="clang" CXX="clang++" LDSHARED="clang --shared" \
-  LDFLAGS="-stdlib=libstdc++" \
-  CFLAGS="-fsanitize=address -shared-libasan" \
+  CFLAGS="-fsanitize=address -fsanitize=undefined -fno-sanitize-recover=all -shared-libasan" \
   NO_CUDA=1 \
   python setup.py install

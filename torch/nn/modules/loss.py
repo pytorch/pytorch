@@ -5,24 +5,21 @@ from .module import Module
 from .container import Sequential
 from .activation import LogSoftmax
 from .. import functional as F
-
-
-def _assert_no_grad(tensor):
-    assert not tensor.requires_grad, \
-        "nn criterions don't compute the gradient w.r.t. targets - please " \
-        "mark these tensors as not requiring gradients"
+from ..functional import _Reduction
 
 
 class _Loss(Module):
-    def __init__(self, size_average=True, reduce=True):
+    def __init__(self, size_average=None, reduce=None, reduction='elementwise_mean'):
         super(_Loss, self).__init__()
-        self.size_average = size_average
-        self.reduce = reduce
+        if size_average is not None or reduce is not None:
+            self.reduction = _Reduction.legacy_get_string(size_average, reduce)
+        else:
+            self.reduction = reduction
 
 
 class _WeightedLoss(_Loss):
-    def __init__(self, weight=None, size_average=True, reduce=True):
-        super(_WeightedLoss, self).__init__(size_average, reduce)
+    def __init__(self, weight=None, size_average=None, reduce=None, reduction='elementwise_mean'):
+        super(_WeightedLoss, self).__init__(size_average, reduce, reduction)
         self.register_buffer('weight', weight)
 
 
@@ -39,12 +36,13 @@ class L1Loss(_Loss):
     where :math:`N` is the batch size. If reduce is ``True``, then:
 
     .. math::
-        \ell(x, y) = \begin{cases}
-            \operatorname{mean}(L), & \text{if}\; \text{size_average} = \text{True},\\
-            \operatorname{sum}(L),  & \text{if}\; \text{size_average} = \text{False}.
+        \ell(x, y) =
+        \begin{cases}
+            \operatorname{mean}(L), & \text{if size\_average} = \text{True;}\\
+            \operatorname{sum}(L),  & \text{if size\_average} = \text{False.}
         \end{cases}
 
-    `x` and `y` arbitrary shapes with a total of `n` elements each.
+    `x` and `y` are tensors of arbitrary shapes with a total of `n` elements each.
 
     The sum operation still operates over all the elements, and divides by `n`.
 
@@ -52,15 +50,21 @@ class L1Loss(_Loss):
     `size_average=False`.
 
     Args:
-        size_average (bool, optional): By default, the losses are averaged
-            over each loss element in the batch. Note that for some losses, there
-            multiple elements per sample. If the field :attr:`size_average` is set to
-            ``False``, the losses are instead summed for each minibatch. Ignored
+        size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
+            the losses are averaged over each loss element in the batch. Note that for
+            some losses, there multiple elements per sample. If the field :attr:`size_average`
+            is set to ``False``, the losses are instead summed for each minibatch. Ignored
             when reduce is ``False``. Default: ``True``
-        reduce (bool, optional): By default, the losses are averaged or summed
-            for each minibatch. When reduce is ``False``, the loss function returns
-            a loss per input/target element instead and ignores size_average.
-            Default: ``True``
+        reduce (bool, optional): Deprecated (see :attr:`reduction`). By default, the
+            losses are averaged or summed over observations for each minibatch depending
+            on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
+            batch element instead and ignores :attr:`size_average`. Default: ``True``
+        reduction (string, optional): Specifies the reduction to apply to the output:
+            'none' | 'elementwise_mean' | 'sum'. 'none': no reduction will be applied,
+            'elementwise_mean': the sum of the output will be divided by the number of
+            elements in the output, 'sum': the output will be summed. Note: :attr:`size_average`
+            and :attr:`reduce` are in the process of being deprecated, and in the meantime,
+            specifying either of those two args will override :attr:`reduction`. Default: 'elementwise_mean'
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
@@ -77,13 +81,11 @@ class L1Loss(_Loss):
         >>> output = loss(input, target)
         >>> output.backward()
     """
-    def __init__(self, size_average=True, reduce=True):
-        super(L1Loss, self).__init__(size_average, reduce)
+    def __init__(self, size_average=None, reduce=None, reduction='elementwise_mean'):
+        super(L1Loss, self).__init__(size_average, reduce, reduction)
 
     def forward(self, input, target):
-        _assert_no_grad(target)
-        return F.l1_loss(input, target, size_average=self.size_average,
-                         reduce=self.reduce)
+        return F.l1_loss(input, target, reduction=self.reduction)
 
 
 class NLLLoss(_WeightedLoss):
@@ -112,7 +114,7 @@ class NLLLoss(_WeightedLoss):
     .. math::
         \ell(x, y) = L = \{l_1,\dots,l_N\}^\top, \quad
         l_n = - w_{y_n} x_{n,y_n}, \quad
-        w_{c} = \text{weight}[c] \cdot \mathbb{1}\{c \not= \text{ignore_index}\},
+        w_{c} = \text{weight}[c] \cdot \mathbb{1}\{c \not= \text{ignore\_index}\},
 
     where :math:`N` is the batch size. If :attr:`reduce` is ``True`` (default),
     then
@@ -120,9 +122,9 @@ class NLLLoss(_WeightedLoss):
     .. math::
         \ell(x, y) = \begin{cases}
             \sum_{n=1}^N \frac{1}{\sum_{n=1}^N w_{y_n}} l_n, & \text{if}\;
-            \text{size_average} = \text{True},\\
+            \text{size\_average} = \text{True},\\
             \sum_{n=1}^N l_n,  & \text{if}\;
-            \text{size_average} = \text{False}.
+            \text{size\_average} = \text{False}.
         \end{cases}
 
     Can also be used for higher dimension inputs, such as 2D images, by providing
@@ -134,19 +136,25 @@ class NLLLoss(_WeightedLoss):
         weight (Tensor, optional): a manual rescaling weight given to each
             class. If given, it has to be a Tensor of size `C`. Otherwise, it is
             treated as if having all ones.
-        size_average (bool, optional): By default, the losses are averaged
-            over each loss element in the batch. Note that for some losses, there
-            multiple elements per sample. If the field :attr:`size_average` is set to
-            ``False``, the losses are instead summed for each minibatch. Ignored
+        size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
+            the losses are averaged over each loss element in the batch. Note that for
+            some losses, there multiple elements per sample. If the field :attr:`size_average`
+            is set to ``False``, the losses are instead summed for each minibatch. Ignored
             when reduce is ``False``. Default: ``True``
         ignore_index (int, optional): Specifies a target value that is ignored
             and does not contribute to the input gradient. When
             :attr:`size_average` is ``True``, the loss is averaged over
             non-ignored targets.
-        reduce (bool, optional): By default, the losses are averaged or summed
-            for each minibatch. When :attr:`reduce` is ``False``, the loss
-            function returns a loss per batch instead and
-            ignores :attr:`size_average`. Default: ``True``
+        reduce (bool, optional): Deprecated (see :attr:`reduction`). By default, the
+            losses are averaged or summed over observations for each minibatch depending
+            on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
+            batch element instead and ignores :attr:`size_average`. Default: ``True``
+        reduction (string, optional): Specifies the reduction to apply to the output:
+            'none' | 'elementwise_mean' | 'sum'. 'none': no reduction will be applied,
+            'elementwise_mean': the sum of the output will be divided by the number of
+            elements in the output, 'sum': the output will be summed. Note: :attr:`size_average`
+            and :attr:`reduce` are in the process of being deprecated, and in the meantime,
+            specifying either of those two args will override :attr:`reduction`. Default: 'elementwise_mean'
 
     Shape:
         - Input: :math:`(N, C)` where `C = number of classes`, or
@@ -179,27 +187,27 @@ class NLLLoss(_WeightedLoss):
         >>> data = torch.randn(N, 16, 10, 10)
         >>> m = nn.Conv2d(16, C, (3, 3))
         >>> # each element in target has to have 0 <= value < C
-        >>> target = torch.tensor(N, 8, 8).random_(0, C)
+        >>> target = torch.empty(N, 8, 8, dtype=torch.long).random_(0, C)
         >>> output = loss(m(data), target)
         >>> output.backward()
     """
 
-    def __init__(self, weight=None, size_average=True, ignore_index=-100, reduce=True):
-        super(NLLLoss, self).__init__(weight, size_average, reduce)
+    def __init__(self, weight=None, size_average=None, ignore_index=-100,
+                 reduce=None, reduction='elementwise_mean'):
+        super(NLLLoss, self).__init__(weight, size_average, reduce, reduction)
         self.ignore_index = ignore_index
 
     def forward(self, input, target):
-        _assert_no_grad(target)
-        return F.nll_loss(input, target, self.weight, self.size_average,
-                          self.ignore_index, self.reduce)
+        return F.nll_loss(input, target, weight=self.weight, ignore_index=self.ignore_index, reduction=self.reduction)
 
 
 class NLLLoss2d(NLLLoss):
-    def __init__(self, weight=None, size_average=True, ignore_index=-100, reduce=True):
+    def __init__(self, weight=None, size_average=None, ignore_index=-100,
+                 reduce=None, reduction='elementwise_mean'):
         warnings.warn("NLLLoss2d has been deprecated. "
                       "Please use NLLLoss instead as a drop-in replacement and see "
                       "http://pytorch.org/docs/master/nn.html#torch.nn.NLLLoss for more details.")
-        super(NLLLoss2d, self).__init__(weight, size_average, ignore_index, reduce)
+        super(NLLLoss2d, self).__init__(weight, size_average, ignore_index, reduce, reduction)
 
 
 class PoissonNLLLoss(_Loss):
@@ -226,17 +234,23 @@ class PoissonNLLLoss(_Loss):
 
             .. math::
                 \text{target}*\log(\text{target}) - \text{target} + 0.5 * \log(2\pi\text{target}).
-        size_average (bool, optional): By default, the losses are averaged
-            over each loss element in the batch. Note that for some losses, there
-            multiple elements per sample. If the field :attr:`size_average` is set to
-            ``False``, the losses are instead summed for each minibatch. Ignored
+        size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
+            the losses are averaged over each loss element in the batch. Note that for
+            some losses, there multiple elements per sample. If the field :attr:`size_average`
+            is set to ``False``, the losses are instead summed for each minibatch. Ignored
             when reduce is ``False``. Default: ``True``
         eps (float, optional): Small value to avoid evaluation of :math:`\log(0)` when
             :attr:`log_input == False`. Default: 1e-8
-        reduce (bool, optional): By default, the losses are averaged
-            over observations for each minibatch, or summed, depending on
-            size_average. When reduce is ``False``, returns a loss per input/target
-            element instead and ignores `size_average`. Default: ``True``
+        reduce (bool, optional): Deprecated (see :attr:`reduction`). By default, the
+            losses are averaged or summed over observations for each minibatch depending
+            on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
+            batch element instead and ignores :attr:`size_average`. Default: ``True``
+        reduction (string, optional): Specifies the reduction to apply to the output:
+            'none' | 'elementwise_mean' | 'sum'. 'none': no reduction will be applied,
+            'elementwise_mean': the sum of the output will be divided by the number of
+            elements in the output, 'sum': the output will be summed. Note: :attr:`size_average`
+            and :attr:`reduce` are in the process of being deprecated, and in the meantime,
+            specifying either of those two args will override :attr:`reduction`. Default: 'elementwise_mean'
 
     Examples::
 
@@ -246,16 +260,16 @@ class PoissonNLLLoss(_Loss):
         >>> output = loss(log_input, target)
         >>> output.backward()
     """
-    def __init__(self, log_input=True, full=False, size_average=True, eps=1e-8, reduce=True):
-        super(PoissonNLLLoss, self).__init__(size_average, reduce)
+    def __init__(self, log_input=True, full=False, size_average=None,
+                 eps=1e-8, reduce=None, reduction='elementwise_mean'):
+        super(PoissonNLLLoss, self).__init__(size_average, reduce, reduction)
         self.log_input = log_input
         self.full = full
         self.eps = eps
 
     def forward(self, log_input, target):
-        _assert_no_grad(target)
-        return F.poisson_nll_loss(log_input, target, self.log_input, self.full,
-                                  self.size_average, self.eps, self.reduce)
+        return F.poisson_nll_loss(log_input, target, log_input=self.log_input, full=self.full,
+                                  eps=self.eps, reduction=self.reduction)
 
 
 class KLDivLoss(_Loss):
@@ -277,15 +291,15 @@ class KLDivLoss(_Loss):
 
     .. math::
         l(x,y) = L := \{ l_1,\dots,l_N \}, \quad
-        l_n = y_n \cdot \left( \log y_n - x_n \right),
+        l_n = y_n \cdot \left( \log y_n - x_n \right)
 
     where the index :math:`N` spans all dimensions of ``input`` and :math:`L` has the same
     shape as ``input``. If :attr:`reduce` is ``True`` (the default), then:
 
     .. math::
         \ell(x, y) = \begin{cases}
-            \operatorname{mean}(L), & \text{if}\; \text{size_average} = \text{True},\\
-            \operatorname{sum}(L),  & \text{if}\; \text{size_average} = \text{False}.
+            \operatorname{mean}(L), & \text{if}\; \text{size\_average} = \text{True},\\
+            \operatorname{sum}(L),  & \text{if}\; \text{size\_average} = \text{False}.
         \end{cases}
 
     By default, the losses are averaged for each minibatch over observations
@@ -314,15 +328,21 @@ class KLDivLoss(_Loss):
 
 
     Args:
-        size_average (bool, optional): By default, the losses are averaged
-            over each loss element in the batch. Note that for some losses, there
-            multiple elements per sample. If the field :attr:`size_average` is set to
-            ``False``, the losses are instead summed for each minibatch. Ignored
+        size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
+            the losses are averaged over each loss element in the batch. Note that for
+            some losses, there multiple elements per sample. If the field :attr:`size_average`
+            is set to ``False``, the losses are instead summed for each minibatch. Ignored
             when reduce is ``False``. Default: ``True``
-        reduce (bool, optional): By default, the losses are averaged
-            over observations for each minibatch, or summed, depending on
-            size_average. When reduce is ``False``, returns a loss per input/target
-            element instead and ignores size_average. Default: ``True``
+        reduce (bool, optional): Deprecated (see :attr:`reduction`). By default, the
+            losses are averaged or summed over observations for each minibatch depending
+            on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
+            batch element instead and ignores :attr:`size_average`. Default: ``True``
+        reduction (string, optional): Specifies the reduction to apply to the output:
+            'none' | 'elementwise_mean' | 'sum'. 'none': no reduction will be applied,
+            'elementwise_mean': the sum of the output will be divided by the number of
+            elements in the output, 'sum': the output will be summed. Note: :attr:`size_average`
+            and :attr:`reduce` are in the process of being deprecated, and in the meantime,
+            specifying either of those two args will override :attr:`reduction`. Default: 'elementwise_mean'
 
     Shape:
         - input: :math:`(N, *)` where `*` means, any number of additional
@@ -332,12 +352,11 @@ class KLDivLoss(_Loss):
             the same shape as the input
 
     """
-    def __init__(self, size_average=True, reduce=True):
-        super(KLDivLoss, self).__init__(size_average, reduce)
+    def __init__(self, size_average=None, reduce=None, reduction='elementwise_mean'):
+        super(KLDivLoss, self).__init__(size_average, reduce, reduction)
 
     def forward(self, input, target):
-        _assert_no_grad(target)
-        return F.kl_div(input, target, size_average=self.size_average, reduce=self.reduce)
+        return F.kl_div(input, target, reduction=self.reduction)
 
 
 class MSELoss(_Loss):
@@ -353,9 +372,10 @@ class MSELoss(_Loss):
     where :math:`N` is the batch size. If reduce is ``True``, then:
 
     .. math::
-        \ell(x, y) = \begin{cases}
-            \operatorname{mean}(L), & \text{if}\; \text{size_average} = \text{True},\\
-            \operatorname{sum}(L),  & \text{if}\; \text{size_average} = \text{False}.
+        \ell(x, y) =
+        \begin{cases}
+            \operatorname{mean}(L), & \text{if}\; \text{size\_average} = \text{True},\\
+            \operatorname{sum}(L),  & \text{if}\; \text{size\_average} = \text{False}.
         \end{cases}
 
     The sum operation still operates over all the elements, and divides by `n`.
@@ -367,15 +387,21 @@ class MSELoss(_Loss):
     `size_average`.
 
     Args:
-        size_average (bool, optional): By default, the losses are averaged
-            over each loss element in the batch. Note that for some losses, there
-            multiple elements per sample. If the field :attr:`size_average` is set to
-            ``False``, the losses are instead summed for each minibatch. Ignored
+        size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
+            the losses are averaged over each loss element in the batch. Note that for
+            some losses, there multiple elements per sample. If the field :attr:`size_average`
+            is set to ``False``, the losses are instead summed for each minibatch. Ignored
             when reduce is ``False``. Default: ``True``
-        reduce (bool, optional): By default, the losses are averaged
-           over observations for each minibatch, or summed, depending on
-           size_average. When reduce is ``False``, returns a loss per input/target
-           element instead and ignores size_average. Default: ``True``
+        reduce (bool, optional): Deprecated (see :attr:`reduction`). By default, the
+            losses are averaged or summed over observations for each minibatch depending
+            on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
+            batch element instead and ignores :attr:`size_average`. Default: ``True``
+        reduction (string, optional): Specifies the reduction to apply to the output:
+            'none' | 'elementwise_mean' | 'sum'. 'none': no reduction will be applied,
+            'elementwise_mean': the sum of the output will be divided by the number of
+            elements in the output, 'sum': the output will be summed. Note: :attr:`size_average`
+            and :attr:`reduce` are in the process of being deprecated, and in the meantime,
+            specifying either of those two args will override :attr:`reduction`. Default: 'elementwise_mean'
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
@@ -390,12 +416,11 @@ class MSELoss(_Loss):
         >>> output = loss(input, target)
         >>> output.backward()
     """
-    def __init__(self, size_average=True, reduce=True):
-        super(MSELoss, self).__init__(size_average, reduce)
+    def __init__(self, size_average=None, reduce=None, reduction='elementwise_mean'):
+        super(MSELoss, self).__init__(size_average, reduce, reduction)
 
     def forward(self, input, target):
-        _assert_no_grad(target)
-        return F.mse_loss(input, target, size_average=self.size_average, reduce=self.reduce)
+        return F.mse_loss(input, target, reduction=self.reduction)
 
 
 class BCELoss(_WeightedLoss):
@@ -412,8 +437,8 @@ class BCELoss(_WeightedLoss):
 
     .. math::
         \ell(x, y) = \begin{cases}
-            \operatorname{mean}(L), & \text{if}\; \text{size_average} = \text{True},\\
-            \operatorname{sum}(L),  & \text{if}\; \text{size_average} = \text{False}.
+            \operatorname{mean}(L), & \text{if}\; \text{size\_average} = \text{True},\\
+            \operatorname{sum}(L),  & \text{if}\; \text{size\_average} = \text{False}.
         \end{cases}
 
     This is used for measuring the error of a reconstruction in for example
@@ -424,15 +449,21 @@ class BCELoss(_WeightedLoss):
         weight (Tensor, optional): a manual rescaling weight given to the loss
             of each batch element. If given, has to be a Tensor of size
             "nbatch".
-        size_average (bool, optional): By default, the losses are averaged
-            over each loss element in the batch. Note that for some losses, there
-            multiple elements per sample. If the field :attr:`size_average` is set to
-            ``False``, the losses are instead summed for each minibatch. Ignored
+        size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
+            the losses are averaged over each loss element in the batch. Note that for
+            some losses, there multiple elements per sample. If the field :attr:`size_average`
+            is set to ``False``, the losses are instead summed for each minibatch. Ignored
             when reduce is ``False``. Default: ``True``
-        reduce (bool, optional): By default, the losses are averaged or summed over
-            observations for each minibatch depending on size_average. When reduce
-            is False, returns a loss per input/target element instead and ignores
-            size_average. Default: True
+        reduce (bool, optional): Deprecated (see :attr:`reduction`). By default, the
+            losses are averaged or summed over observations for each minibatch depending
+            on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
+            batch element instead and ignores :attr:`size_average`. Default: ``True``
+        reduction (string, optional): Specifies the reduction to apply to the output:
+            'none' | 'elementwise_mean' | 'sum'. 'none': no reduction will be applied,
+            'elementwise_mean': the sum of the output will be divided by the number of
+            elements in the output, 'sum': the output will be summed. Note: :attr:`size_average`
+            and :attr:`reduce` are in the process of being deprecated, and in the meantime,
+            specifying either of those two args will override :attr:`reduction`. Default: 'elementwise_mean'
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
@@ -450,14 +481,11 @@ class BCELoss(_WeightedLoss):
         >>> output = loss(m(input), target)
         >>> output.backward()
     """
-    def __init__(self, weight=None, size_average=True, reduce=True):
-        super(BCELoss, self).__init__(weight, size_average, reduce)
+    def __init__(self, weight=None, size_average=None, reduce=None, reduction='elementwise_mean'):
+        super(BCELoss, self).__init__(weight, size_average, reduce, reduction)
 
     def forward(self, input, target):
-        _assert_no_grad(target)
-        return F.binary_cross_entropy(input, target, weight=self.weight,
-                                      size_average=self.size_average,
-                                      reduce=self.reduce)
+        return F.binary_cross_entropy(input, target, weight=self.weight, reduction=self.reduction)
 
 
 class BCEWithLogitsLoss(_Loss):
@@ -477,27 +505,50 @@ class BCEWithLogitsLoss(_Loss):
 
     .. math::
         \ell(x, y) = \begin{cases}
-            \operatorname{mean}(L), & \text{if}\; \text{size_average} = \text{True},\\
-            \operatorname{sum}(L),  & \text{if}\; \text{size_average} = \text{False}.
+            \operatorname{mean}(L), & \text{if size\_average} = \text{True},\\
+            \operatorname{sum}(L),  & \text{if size\_average} = \text{False}.
         \end{cases}
 
     This is used for measuring the error of a reconstruction in for example
     an auto-encoder. Note that the targets `t[i]` should be numbers
     between 0 and 1.
 
+    It's possible to trade off recall and precision by adding weights to positive examples.
+    In this case the loss can be described as:
+
+    .. math::
+        \ell(x, y) = L = \{l_1,\dots,l_N\}^\top, \quad
+        l_n = - w_n \left[ p_n t_n \cdot \log \sigma(x_n)
+        + (1 - t_n) \cdot \log (1 - \sigma(x_n)) \right],
+
+    where :math:`p_n` is the positive weight of class :math:`n`.
+    :math:`p_n > 1` increases the recall, :math:`p_n < 1` increases the precision.
+
+    For example, if a dataset contains 100 positive and 300 negative examples of a single class,
+    then `pos_weight` for the class should be equal to :math:`\frac{300}{100}=3`.
+    The loss would act as if the dataset contains math:`3\times 100=300` positive examples.
+
     Args:
         weight (Tensor, optional): a manual rescaling weight given to the loss
             of each batch element. If given, has to be a Tensor of size
             "nbatch".
-        size_average (bool, optional): By default, the losses are averaged
-            over each loss element in the batch. Note that for some losses, there
-            multiple elements per sample. If the field :attr:`size_average` is set to
-            ``False``, the losses are instead summed for each minibatch. Ignored
+        size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
+            the losses are averaged over each loss element in the batch. Note that for
+            some losses, there multiple elements per sample. If the field :attr:`size_average`
+            is set to ``False``, the losses are instead summed for each minibatch. Ignored
             when reduce is ``False``. Default: ``True``
-        reduce (bool, optional): By default, the losses are averaged or summed over
-            observations for each minibatch depending on size_average. When reduce
-            is False, returns a loss per input/target element instead and ignores
-            size_average. Default: True
+        reduce (bool, optional): Deprecated (see :attr:`reduction`). By default, the
+            losses are averaged or summed over observations for each minibatch depending
+            on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
+            batch element instead and ignores :attr:`size_average`. Default: ``True``
+        reduction (string, optional): Specifies the reduction to apply to the output:
+            'none' | 'elementwise_mean' | 'sum'. 'none': no reduction will be applied,
+            'elementwise_mean': the sum of the output will be divided by the number of
+            elements in the output, 'sum': the output will be summed. Note: :attr:`size_average`
+            and :attr:`reduce` are in the process of being deprecated, and in the meantime,
+            specifying either of those two args will override :attr:`reduction`. Default: 'elementwise_mean'
+        pos_weight (Tensor, optional): a weight of positive examples.
+                Must be a vector with length equal to the number of classes.
 
      Shape:
          - Input: :math:`(N, *)` where `*` means, any number of additional
@@ -512,20 +563,16 @@ class BCEWithLogitsLoss(_Loss):
         >>> output = loss(input, target)
         >>> output.backward()
     """
-    def __init__(self, weight=None, size_average=True, reduce=True):
-        super(BCEWithLogitsLoss, self).__init__(size_average, reduce)
+    def __init__(self, weight=None, size_average=None, reduce=None, reduction='elementwise_mean', pos_weight=None):
+        super(BCEWithLogitsLoss, self).__init__(size_average, reduce, reduction)
         self.register_buffer('weight', weight)
+        self.register_buffer('pos_weight', pos_weight)
 
     def forward(self, input, target):
-        if self.weight is not None:
-            return F.binary_cross_entropy_with_logits(input, target,
-                                                      self.weight,
-                                                      self.size_average,
-                                                      reduce=self.reduce)
-        else:
-            return F.binary_cross_entropy_with_logits(input, target,
-                                                      size_average=self.size_average,
-                                                      reduce=self.reduce)
+        return F.binary_cross_entropy_with_logits(input, target,
+                                                  self.weight,
+                                                  pos_weight=self.pos_weight,
+                                                  reduction=self.reduction)
 
 
 class HingeEmbeddingLoss(_Loss):
@@ -533,7 +580,7 @@ class HingeEmbeddingLoss(_Loss):
     containing values (`1` or `-1`).
     This is usually used for measuring whether two inputs are similar or
     dissimilar, e.g. using the L1 pairwise distance as `x`, and is typically
-    used for learning nonlinear embeddings or semi-supervised learning::
+    used for learning nonlinear embeddings or semi-supervised learning.
 
     The loss function for :math:`n`-th sample in the mini-batch is
 
@@ -547,23 +594,29 @@ class HingeEmbeddingLoss(_Loss):
 
     .. math::
         \ell(x, y) = \begin{cases}
-            \operatorname{mean}(L), & \text{if}\; \text{size_average} = \text{True},\\
-            \operatorname{sum}(L),  & \text{if}\; \text{size_average} = \text{False}.
+            \operatorname{mean}(L), & \text{if size\_average} = \text{True},\\
+            \operatorname{sum}(L),  & \text{if size\_average} = \text{False}.
         \end{cases}
 
     where :math:`L = \{l_1,\dots,l_N\}^\top`.
 
     Args:
         margin (float, optional): Has a default value of `1`.
-        size_average (bool, optional): By default, the losses are averaged
-            over each loss element in the batch. Note that for some losses, there
-            multiple elements per sample. If the field :attr:`size_average` is set to
-            ``False``, the losses are instead summed for each minibatch. Ignored
+        size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
+            the losses are averaged over each loss element in the batch. Note that for
+            some losses, there multiple elements per sample. If the field :attr:`size_average`
+            is set to ``False``, the losses are instead summed for each minibatch. Ignored
             when reduce is ``False``. Default: ``True``
-        reduce (bool, optional): By default, the losses are averaged or summed over
-            observations for each minibatch depending on :attr:`size_average`. When
-            :attr:`reduce` is ``False``, returns a loss per batch element instead and
-            ignores :attr:`size_average`. Default: ``True``
+        reduce (bool, optional): Deprecated (see :attr:`reduction`). By default, the
+            losses are averaged or summed over observations for each minibatch depending
+            on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
+            batch element instead and ignores :attr:`size_average`. Default: ``True``
+        reduction (string, optional): Specifies the reduction to apply to the output:
+            'none' | 'elementwise_mean' | 'sum'. 'none': no reduction will be applied,
+            'elementwise_mean': the sum of the output will be divided by the number of
+            elements in the output, 'sum': the output will be summed. Note: :attr:`size_average`
+            and :attr:`reduce` are in the process of being deprecated, and in the meantime,
+            specifying either of those two args will override :attr:`reduction`. Default: 'elementwise_mean'
 
     Shape:
         - Input: Tensor of arbitrary shape. The sum operation operates over all the elements.
@@ -571,13 +624,12 @@ class HingeEmbeddingLoss(_Loss):
         - Output: scalar. If reduce is ``False``, then same shape as the input
     """
 
-    def __init__(self, margin=1.0, size_average=True, reduce=True):
-        super(HingeEmbeddingLoss, self).__init__(size_average, reduce)
+    def __init__(self, margin=1.0, size_average=None, reduce=None, reduction='elementwise_mean'):
+        super(HingeEmbeddingLoss, self).__init__(size_average, reduce, reduction)
         self.margin = margin
 
     def forward(self, input, target):
-        return F.hinge_embedding_loss(input, target, self.margin, self.size_average,
-                                      self.reduce)
+        return F.hinge_embedding_loss(input, target, margin=self.margin, reduction=self.reduction)
 
 
 class MultiLabelMarginLoss(_Loss):
@@ -589,8 +641,10 @@ class MultiLabelMarginLoss(_Loss):
     .. math::
         \text{loss}(x, y) = \sum_{ij}\frac{\max(0, 1 - (x[y[j]] - x[i]))}{\text{x.size}(0)}
 
-    where `i == 0` to `x.size(0)`, `j == 0` to `y.size(0)`,
-    :math:`y[j] \geq 0`, and :math:`i \neq y[j]` for all `i` and `j`.
+    where :math:`i == 0` to :math:`x.size(0)`, \
+    :math:`j == 0` to :math:`y.size(0)`, \
+    :math:`y[j] \geq 0`, \
+    and :math:`i \neq y[j]` for all :math:`i` and :math:`j`.
 
     `y` and `x` must have the same size.
 
@@ -600,15 +654,21 @@ class MultiLabelMarginLoss(_Loss):
     This allows for different samples to have variable amounts of target classes
 
     Args:
-        size_average (bool, optional): By default, the losses are averaged
-            over each loss element in the batch. Note that for some losses, there
-            multiple elements per sample. If the field :attr:`size_average` is set to
-            ``False``, the losses are instead summed for each minibatch. Ignored
+        size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
+            the losses are averaged over each loss element in the batch. Note that for
+            some losses, there multiple elements per sample. If the field :attr:`size_average`
+            is set to ``False``, the losses are instead summed for each minibatch. Ignored
             when reduce is ``False``. Default: ``True``
-        reduce (bool, optional): By default, the losses are averaged or summed over
-            observations for each minibatch depending on :attr:`size_average`. When
-            :attr:`reduce` is ``False``, returns a loss per batch element instead and
-            ignores :attr:`size_average`. Default: ``True``
+        reduce (bool, optional): Deprecated (see :attr:`reduction`). By default, the
+            losses are averaged or summed over observations for each minibatch depending
+            on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
+            batch element instead and ignores :attr:`size_average`. Default: ``True``
+        reduction (string, optional): Specifies the reduction to apply to the output:
+            'none' | 'elementwise_mean' | 'sum'. 'none': no reduction will be applied,
+            'elementwise_mean': the sum of the output will be divided by the number of
+            elements in the output, 'sum': the output will be summed. Note: :attr:`size_average`
+            and :attr:`reduce` are in the process of being deprecated, and in the meantime,
+            specifying either of those two args will override :attr:`reduction`. Default: 'elementwise_mean'
 
     Shape:
         - Input: :math:`(C)` or :math:`(N, C)` where `N` is the batch size and `C`
@@ -616,13 +676,11 @@ class MultiLabelMarginLoss(_Loss):
         - Target: :math:`(C)` or :math:`(N, C)`, same shape as the input.
         - Output: scalar. If `reduce` is False, then `(N)`.
     """
-    def __init__(self, size_average=True, reduce=True):
-        super(MultiLabelMarginLoss, self).__init__(size_average, reduce)
+    def __init__(self, size_average=None, reduce=None, reduction='elementwise_mean'):
+        super(MultiLabelMarginLoss, self).__init__(size_average, reduce, reduction)
 
     def forward(self, input, target):
-        _assert_no_grad(target)
-        return F.multilabel_margin_loss(input, target, size_average=self.size_average,
-                                        reduce=self.reduce)
+        return F.multilabel_margin_loss(input, target, reduction=self.reduction)
 
 
 class SmoothL1Loss(_Loss):
@@ -650,15 +708,21 @@ class SmoothL1Loss(_Loss):
     The division by `n` can be avoided if one sets :attr:`size_average` to ``False``
 
     Args:
-        size_average (bool, optional): By default, the losses are averaged
-            over each loss element in the batch. Note that for some losses, there
-            multiple elements per sample. If the field :attr:`size_average` is set to
-            ``False``, the losses are instead summed for each minibatch. Ignored
+        size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
+            the losses are averaged over each loss element in the batch. Note that for
+            some losses, there multiple elements per sample. If the field :attr:`size_average`
+            is set to ``False``, the losses are instead summed for each minibatch. Ignored
             when reduce is ``False``. Default: ``True``
-        reduce (bool, optional): By default, the losses are averaged or summed
-            over elements. When reduce is ``False``, the loss function returns
-            a loss per input/target element instead and ignores size_average.
-            Default: ``True``
+        reduce (bool, optional): Deprecated (see :attr:`reduction`). By default, the
+            losses are averaged or summed over observations for each minibatch depending
+            on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
+            batch element instead and ignores :attr:`size_average`. Default: ``True``
+        reduction (string, optional): Specifies the reduction to apply to the output:
+            'none' | 'elementwise_mean' | 'sum'. 'none': no reduction will be applied,
+            'elementwise_mean': the sum of the output will be divided by the number of
+            elements in the output, 'sum': the output will be summed. Note: :attr:`size_average`
+            and :attr:`reduce` are in the process of being deprecated, and in the meantime,
+            specifying either of those two args will override :attr:`reduction`. Default: 'elementwise_mean'
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
@@ -668,13 +732,11 @@ class SmoothL1Loss(_Loss):
           :math:`(N, *)`, same shape as the input
 
     """
-    def __init__(self, size_average=True, reduce=True):
-        super(SmoothL1Loss, self).__init__(size_average, reduce)
+    def __init__(self, size_average=None, reduce=None, reduction='elementwise_mean'):
+        super(SmoothL1Loss, self).__init__(size_average, reduce, reduction)
 
     def forward(self, input, target):
-        _assert_no_grad(target)
-        return F.smooth_l1_loss(input, target, size_average=self.size_average,
-                                reduce=self.reduce)
+        return F.smooth_l1_loss(input, target, reduction=self.reduction)
 
 
 class SoftMarginLoss(_Loss):
@@ -686,15 +748,21 @@ class SoftMarginLoss(_Loss):
         \text{loss}(x, y) = \sum_i \frac{\log(1 + \exp(-y[i]*x[i]))}{\text{x.nelement}()}
 
     Args:
-        size_average (bool, optional): By default, the losses are averaged
-            over each loss element in the batch. Note that for some losses, there
-            multiple elements per sample. If the field :attr:`size_average` is set to
-            ``False``, the losses are instead summed for each minibatch. Ignored
+        size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
+            the losses are averaged over each loss element in the batch. Note that for
+            some losses, there multiple elements per sample. If the field :attr:`size_average`
+            is set to ``False``, the losses are instead summed for each minibatch. Ignored
             when reduce is ``False``. Default: ``True``
-        reduce (bool, optional): By default, the losses are averaged or summed over
-            observations for each minibatch depending on :attr:`size_average`. When
-            :attr:`reduce` is ``False``, returns a loss per batch element instead and
-            ignores :attr:`size_average`. Default: ``True``
+        reduce (bool, optional): Deprecated (see :attr:`reduction`). By default, the
+            losses are averaged or summed over observations for each minibatch depending
+            on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
+            batch element instead and ignores :attr:`size_average`. Default: ``True``
+        reduction (string, optional): Specifies the reduction to apply to the output:
+            'none' | 'elementwise_mean' | 'sum'. 'none': no reduction will be applied,
+            'elementwise_mean': the sum of the output will be divided by the number of
+            elements in the output, 'sum': the output will be summed. Note: :attr:`size_average`
+            and :attr:`reduce` are in the process of being deprecated, and in the meantime,
+            specifying either of those two args will override :attr:`reduction`. Default: 'elementwise_mean'
 
     Shape:
         - Input: Tensor of arbitrary shape.
@@ -702,13 +770,11 @@ class SoftMarginLoss(_Loss):
         - Output: scalar. If reduce is ``False``, then same shape as the input
 
     """
-    def __init__(self, size_average=True, reduce=True):
-        super(SoftMarginLoss, self).__init__(size_average, reduce)
+    def __init__(self, size_average=None, reduce=None, reduction='elementwise_mean'):
+        super(SoftMarginLoss, self).__init__(size_average, reduce, reduction)
 
     def forward(self, input, target):
-        _assert_no_grad(target)
-        return F.soft_margin_loss(input, target, size_average=self.size_average,
-                                  reduce=self.reduce)
+        return F.soft_margin_loss(input, target, reduction=self.reduction)
 
 
 class CrossEntropyLoss(_WeightedLoss):
@@ -749,19 +815,25 @@ class CrossEntropyLoss(_WeightedLoss):
 
     Args:
         weight (Tensor, optional): a manual rescaling weight given to each class.
-           If given, has to be a Tensor of size `C`
-        size_average (bool, optional): By default, the losses are averaged
-           over each loss element in the batch. Note that for some losses, there
-           multiple elements per sample. If the field size_average is set to
-           ``False``, the losses are instead summed for each minibatch. Ignored
-           when reduce is ``False``. Default: ``True``
+            If given, has to be a Tensor of size `C`
+        size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
+            the losses are averaged over each loss element in the batch. Note that for
+            some losses, there multiple elements per sample. If the field :attr:`size_average`
+            is set to ``False``, the losses are instead summed for each minibatch. Ignored
+            when reduce is ``False``. Default: ``True``
         ignore_index (int, optional): Specifies a target value that is ignored
             and does not contribute to the input gradient. When `size_average` is
             ``True``, the loss is averaged over non-ignored targets.
-        reduce (bool, optional): By default, the losses are averaged or summed over
-            observations for each minibatch depending on `size_average`. When reduce
-            is ``False``, returns a loss per batch instead and ignores
-            size_average. Default: ``True``
+        reduce (bool, optional): Deprecated (see :attr:`reduction`). By default, the
+            losses are averaged or summed over observations for each minibatch depending
+            on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
+            batch element instead and ignores :attr:`size_average`. Default: ``True``
+        reduction (string, optional): Specifies the reduction to apply to the output:
+            'none' | 'elementwise_mean' | 'sum'. 'none': no reduction will be applied,
+            'elementwise_mean': the sum of the output will be divided by the number of
+            elements in the output, 'sum': the output will be summed. Note: :attr:`size_average`
+            and :attr:`reduce` are in the process of being deprecated, and in the meantime,
+            specifying either of those two args will override :attr:`reduction`. Default: 'elementwise_mean'
 
     Shape:
         - Input: :math:`(N, C)` where `C = number of classes`, or
@@ -784,14 +856,14 @@ class CrossEntropyLoss(_WeightedLoss):
         >>> output.backward()
     """
 
-    def __init__(self, weight=None, size_average=True, ignore_index=-100, reduce=True):
-        super(CrossEntropyLoss, self).__init__(weight, size_average, reduce)
+    def __init__(self, weight=None, size_average=None, ignore_index=-100,
+                 reduce=None, reduction='elementwise_mean'):
+        super(CrossEntropyLoss, self).__init__(weight, size_average, reduce, reduction)
         self.ignore_index = ignore_index
 
     def forward(self, input, target):
-        _assert_no_grad(target)
-        return F.cross_entropy(input, target, self.weight, self.size_average,
-                               self.ignore_index, self.reduce)
+        return F.cross_entropy(input, target, weight=self.weight,
+                               ignore_index=self.ignore_index, reduction=self.reduction)
 
 
 class MultiLabelSoftMarginLoss(_WeightedLoss):
@@ -800,7 +872,7 @@ class MultiLabelSoftMarginLoss(_WeightedLoss):
     For each sample in the minibatch:
 
     .. math::
-        loss(x, y) = - \sum_i y[i] * \log((1 + \exp(-x[i]))^{-1})
+        loss(x, y) = - \frac{1}{C} * \sum_i y[i] * \log((1 + \exp(-x[i]))^{-1})
                          + (1-y[i]) * \log\left(\frac{\exp(-x[i])}{(1 + \exp(-x[i]))}\right)
 
     where `i == 0` to `x.nElement()-1`, `y[i]  in {0,1}`.
@@ -809,15 +881,21 @@ class MultiLabelSoftMarginLoss(_WeightedLoss):
         weight (Tensor, optional): a manual rescaling weight given to each
             class. If given, it has to be a Tensor of size `C`. Otherwise, it is
             treated as if having all ones.
-        size_average (bool, optional): By default, the losses are averaged
-            over each loss element in the batch. Note that for some losses, there
-            multiple elements per sample. If the field :attr:`size_average` is set to
-            ``False``, the losses are instead summed for each minibatch. Ignored
+        size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
+            the losses are averaged over each loss element in the batch. Note that for
+            some losses, there multiple elements per sample. If the field :attr:`size_average`
+            is set to ``False``, the losses are instead summed for each minibatch. Ignored
             when reduce is ``False``. Default: ``True``
-        reduce (bool, optional): By default, the losses are averaged or summed over
-            observations for each minibatch depending on :attr:`size_average`. When
-            :attr:`reduce` is ``False``, returns a loss per batch element instead and
-            ignores :attr:`size_average`. Default: ``True``
+        reduce (bool, optional): Deprecated (see :attr:`reduction`). By default, the
+            losses are averaged or summed over observations for each minibatch depending
+            on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
+            batch element instead and ignores :attr:`size_average`. Default: ``True``
+        reduction (string, optional): Specifies the reduction to apply to the output:
+            'none' | 'elementwise_mean' | 'sum'. 'none': no reduction will be applied,
+            'elementwise_mean': the sum of the output will be divided by the number of
+            elements in the output, 'sum': the output will be summed. Note: :attr:`size_average`
+            and :attr:`reduce` are in the process of being deprecated, and in the meantime,
+            specifying either of those two args will override :attr:`reduction`. Default: 'elementwise_mean'
 
     Shape:
         - Input: :math:`(N, C)` where `N` is the batch size and `C` is the number of classes.
@@ -825,12 +903,11 @@ class MultiLabelSoftMarginLoss(_WeightedLoss):
         - Output: scalar. If `reduce` is False, then `(N)`.
     """
 
-    def __init__(self, weight=None, size_average=True, reduce=True):
-        super(MultiLabelSoftMarginLoss, self).__init__(weight, size_average, reduce)
+    def __init__(self, weight=None, size_average=None, reduce=None, reduction='elementwise_mean'):
+        super(MultiLabelSoftMarginLoss, self).__init__(weight, size_average, reduce, reduction)
 
     def forward(self, input, target):
-        return F.multilabel_soft_margin_loss(input, target, self.weight, self.size_average,
-                                             self.reduce)
+        return F.multilabel_soft_margin_loss(input, target, weight=self.weight, reduction=self.reduction)
 
 
 class CosineEmbeddingLoss(_Loss):
@@ -852,24 +929,29 @@ class CosineEmbeddingLoss(_Loss):
     Args:
         margin (float, optional): Should be a number from `-1` to `1`, `0` to `0.5`
             is suggested. If `margin` is missing, the default value is `0`.
-        size_average (bool, optional): By default, the losses are averaged
-            over each loss element in the batch. Note that for some losses, there
-            multiple elements per sample. If the field :attr:`size_average` is set to
-            ``False``, the losses are instead summed for each minibatch. Ignored
+        size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
+            the losses are averaged over each loss element in the batch. Note that for
+            some losses, there multiple elements per sample. If the field :attr:`size_average`
+            is set to ``False``, the losses are instead summed for each minibatch. Ignored
             when reduce is ``False``. Default: ``True``
-        reduce (bool, optional): By default, the losses are averaged or summed over
-            observations for each minibatch depending on :attr:`size_average`. When
-            :attr:`reduce` is ``False``, returns a loss per batch element instead and
-            ignores :attr:`size_average`. Default: ``True``
+        reduce (bool, optional): Deprecated (see :attr:`reduction`). By default, the
+            losses are averaged or summed over observations for each minibatch depending
+            on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
+            batch element instead and ignores :attr:`size_average`. Default: ``True``
+        reduction (string, optional): Specifies the reduction to apply to the output:
+            'none' | 'elementwise_mean' | 'sum'. 'none': no reduction will be applied,
+            'elementwise_mean': the sum of the output will be divided by the number of
+            elements in the output, 'sum': the output will be summed. Note: :attr:`size_average`
+            and :attr:`reduce` are in the process of being deprecated, and in the meantime,
+            specifying either of those two args will override :attr:`reduction`. Default: 'elementwise_mean'
     """
 
-    def __init__(self, margin=0, size_average=True, reduce=True):
-        super(CosineEmbeddingLoss, self).__init__(size_average, reduce)
+    def __init__(self, margin=0, size_average=None, reduce=None, reduction='elementwise_mean'):
+        super(CosineEmbeddingLoss, self).__init__(size_average, reduce, reduction)
         self.margin = margin
 
     def forward(self, input1, input2, target):
-        return F.cosine_embedding_loss(input1, input2, target, self.margin, self.size_average,
-                                       self.reduce)
+        return F.cosine_embedding_loss(input1, input2, target, margin=self.margin, reduction=self.reduction)
 
 
 class MarginRankingLoss(_Loss):
@@ -887,15 +969,21 @@ class MarginRankingLoss(_Loss):
 
     Args:
         margin (float, optional): Has a default value of `0`.
-        size_average (bool, optional): By default, the losses are averaged
-            over each loss element in the batch. Note that for some losses, there
-            multiple elements per sample. If the field :attr:`size_average` is set to
-            ``False``, the losses are instead summed for each minibatch. Ignored
+        size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
+            the losses are averaged over each loss element in the batch. Note that for
+            some losses, there multiple elements per sample. If the field :attr:`size_average`
+            is set to ``False``, the losses are instead summed for each minibatch. Ignored
             when reduce is ``False``. Default: ``True``
-        reduce (bool, optional): By default, the losses are averaged or summed over
-            observations for each minibatch depending on :attr:`size_average`. When
-            :attr:`reduce` is ``False``, returns a loss per batch element instead and
-            ignores :attr:`size_average`. Default: ``True``
+        reduce (bool, optional): Deprecated (see :attr:`reduction`). By default, the
+            losses are averaged or summed over observations for each minibatch depending
+            on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
+            batch element instead and ignores :attr:`size_average`. Default: ``True``
+        reduction (string, optional): Specifies the reduction to apply to the output:
+            'none' | 'elementwise_mean' | 'sum'. 'none': no reduction will be applied,
+            'elementwise_mean': the sum of the output will be divided by the number of
+            elements in the output, 'sum': the output will be summed. Note: :attr:`size_average`
+            and :attr:`reduce` are in the process of being deprecated, and in the meantime,
+            specifying either of those two args will override :attr:`reduction`. Default: 'elementwise_mean'
 
     Shape:
         - Input: :math:`(N, D)` where `N` is the batch size and `D` is the size of a sample.
@@ -903,13 +991,12 @@ class MarginRankingLoss(_Loss):
         - Output: scalar. If `reduce` is False, then `(N)`.
     """
 
-    def __init__(self, margin=0, size_average=True, reduce=True):
-        super(MarginRankingLoss, self).__init__(size_average, reduce)
+    def __init__(self, margin=0, size_average=None, reduce=None, reduction='elementwise_mean'):
+        super(MarginRankingLoss, self).__init__(size_average, reduce, reduction)
         self.margin = margin
 
     def forward(self, input1, input2, target):
-        return F.margin_ranking_loss(input1, input2, target, self.margin, self.size_average,
-                                     self.reduce)
+        return F.margin_ranking_loss(input1, input2, target, margin=self.margin, reduction=self.reduction)
 
 
 class MultiMarginLoss(_WeightedLoss):
@@ -941,20 +1028,26 @@ class MultiMarginLoss(_WeightedLoss):
         weight (Tensor, optional): a manual rescaling weight given to each
             class. If given, it has to be a Tensor of size `C`. Otherwise, it is
             treated as if having all ones.
-        size_average (bool, optional): By default, the losses are averaged
-            over each loss element in the batch. Note that for some losses, there
-            multiple elements per sample. If the field :attr:`size_average` is set to
-            ``False``, the losses are instead summed for each minibatch. Ignored
+        size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
+            the losses are averaged over each loss element in the batch. Note that for
+            some losses, there multiple elements per sample. If the field :attr:`size_average`
+            is set to ``False``, the losses are instead summed for each minibatch. Ignored
             when reduce is ``False``. Default: ``True``
-        reduce (bool, optional): By default, the losses are averaged or summed over
-            observations for each minibatch depending on :attr:`size_average`. When
-            :attr:`reduce` is ``False``, returns a loss per batch element instead and
-            ignores :attr:`size_average`. Default: ``True``
-
+        reduce (bool, optional): Deprecated (see :attr:`reduction`). By default, the
+            losses are averaged or summed over observations for each minibatch depending
+            on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
+            batch element instead and ignores :attr:`size_average`. Default: ``True``
+        reduction (string, optional): Specifies the reduction to apply to the output:
+            'none' | 'elementwise_mean' | 'sum'. 'none': no reduction will be applied,
+            'elementwise_mean': the sum of the output will be divided by the number of
+            elements in the output, 'sum': the output will be summed. Note: :attr:`size_average`
+            and :attr:`reduce` are in the process of being deprecated, and in the meantime,
+            specifying either of those two args will override :attr:`reduction`. Default: 'elementwise_mean'
     """
 
-    def __init__(self, p=1, margin=1, weight=None, size_average=True, reduce=True):
-        super(MultiMarginLoss, self).__init__(weight, size_average, reduce)
+    def __init__(self, p=1, margin=1, weight=None, size_average=None,
+                 reduce=None, reduction='elementwise_mean'):
+        super(MultiMarginLoss, self).__init__(weight, size_average, reduce, reduction)
         if p != 1 and p != 2:
             raise ValueError("only p == 1 and p == 2 supported")
         assert weight is None or weight.dim() == 1
@@ -962,8 +1055,8 @@ class MultiMarginLoss(_WeightedLoss):
         self.margin = margin
 
     def forward(self, input, target):
-        return F.multi_margin_loss(input, target, self.p, self.margin, self.weight,
-                                   self.size_average, self.reduce)
+        return F.multi_margin_loss(input, target, p=self.p, margin=self.margin,
+                                   weight=self.weight, reduction=self.reduction)
 
 
 class TripletMarginLoss(_Loss):
@@ -983,7 +1076,11 @@ class TripletMarginLoss(_Loss):
     .. math::
         L(a, p, n) = \max \{d(a_i, p_i) - d(a_i, n_i) + {\rm margin}, 0\}
 
-    where :math:`d(x_i, y_i) = \left\lVert {\bf x}_i - {\bf y}_i \right\rVert_p`.
+
+    where
+
+    .. math::
+        d(x_i, y_i) = \left\lVert {\bf x}_i - {\bf y}_i \right\rVert_p
 
     Args:
         margin (float, optional): Default: `1`.
@@ -991,15 +1088,21 @@ class TripletMarginLoss(_Loss):
         swap (float, optional): The distance swap is described in detail in the paper
             `Learning shallow convolutional feature descriptors with triplet losses` by
             V. Balntas, E. Riba et al. Default: ``False``.
-        size_average (bool, optional): By default, the losses are averaged
-            over each loss element in the batch. Note that for some losses, there
-            multiple elements per sample. If the field :attr:`size_average` is set to
-            ``False``, the losses are instead summed for each minibatch. Ignored
+        size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
+            the losses are averaged over each loss element in the batch. Note that for
+            some losses, there multiple elements per sample. If the field :attr:`size_average`
+            is set to ``False``, the losses are instead summed for each minibatch. Ignored
             when reduce is ``False``. Default: ``True``
-        reduce (bool, optional): By default, the losses are averaged or summed over
-            observations for each minibatch depending on :attr:`size_average`. When
-            :attr:`reduce` is ``False``, returns a loss per batch element instead and
-            ignores :attr:`size_average`. Default: ``True``
+        reduce (bool, optional): Deprecated (see :attr:`reduction`). By default, the
+            losses are averaged or summed over observations for each minibatch depending
+            on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
+            batch element instead and ignores :attr:`size_average`. Default: ``True``
+        reduction (string, optional): Specifies the reduction to apply to the output:
+            'none' | 'elementwise_mean' | 'sum'. 'none': no reduction will be applied,
+            'elementwise_mean': the sum of the output will be divided by the number of
+            elements in the output, 'sum': the output will be summed. Note: :attr:`size_average`
+            and :attr:`reduce` are in the process of being deprecated, and in the meantime,
+            specifying either of those two args will override :attr:`reduction`. Default: 'elementwise_mean'
 
     Shape:
         - Input: :math:`(N, D)` where `D` is the vector dimension.
@@ -1016,16 +1119,72 @@ class TripletMarginLoss(_Loss):
         http://www.iis.ee.ic.ac.uk/%7Evbalnt/shallow_descr/TFeat_paper.pdf
     """
 
-    def __init__(self, margin=1.0, p=2, eps=1e-6, swap=False, size_average=True, reduce=True):
-        super(TripletMarginLoss, self).__init__(size_average, reduce)
+    def __init__(self, margin=1.0, p=2, eps=1e-6, swap=False, size_average=None,
+                 reduce=None, reduction='elementwise_mean'):
+        super(TripletMarginLoss, self).__init__(size_average, reduce, reduction)
         self.margin = margin
         self.p = p
         self.eps = eps
         self.swap = swap
 
     def forward(self, anchor, positive, negative):
-        return F.triplet_margin_loss(anchor, positive, negative, self.margin, self.p,
-                                     self.eps, self.swap, self.size_average, self.reduce)
+        return F.triplet_margin_loss(anchor, positive, negative, margin=self.margin, p=self.p,
+                                     eps=self.eps, swap=self.swap, reduction=self.reduction)
+
+
+class CTCLoss(_Loss):
+    r"""The Connectionist Temporal Classification loss.
+
+    Args:
+        blank (int, optional): blank label. Default :math:`0`.
+        reduction (string, optional): Specifies the reduction to apply to the output:
+            'none' | 'elementwise_mean' | 'sum'. 'none': no reduction will be applied,
+            'elementwise_mean': the output losses will be divided by the target lengths and
+            then the mean over the batch is taken. Default: 'elementwise_mean'
+
+    Inputs:
+        log_probs: Tensor of size :math:`(T, N, C)` where `C = number of characters in alphabet including blank`,
+            `T = input length`, and `N = batch size`.
+            The logarithmized probabilities of the outputs
+            (e.g. obtained with :func:`torch.nn.functional.log_softmax`).
+        targets: Tensor of size :math:`(N, S)` or `(sum(target_lenghts))`.
+            Targets (cannot be blank). In the second form, the targets are assumed to be concatenated.
+        input_lengths: Tuple or tensor of size :math:`(N)`.
+            Lengths of the inputs (must each be :math:`\leq T`)
+        target_lengths: Tuple or tensor of size  :math:`(N)`.
+            Lengths of the targets
+
+
+    Example::
+
+        >>> ctc_loss = nn.CTCLoss()
+        >>> log_probs = torch.randn(50, 16, 20).log_softmax(2).detach().requires_grad_()
+        >>> targets = torch.randint(1, 21, (16, 30), dtype=torch.long)
+        >>> input_lengths = torch.full((16,), 50, dtype=torch.long)
+        >>> target_lengths = torch.randint(10,30,(16,), dtype=torch.long)
+        >>> loss = ctc_loss(log_probs, targets, input_lengths, target_lengths)
+        >>> loss.backward()
+
+    Reference:
+        A. Graves et al.: Connectionist Temporal Classification:
+        Labelling Unsegmented Sequence Data with Recurrent Neural Networks:
+        https://www.cs.toronto.edu/~graves/icml_2006.pdf
+
+    .. Note::
+        In order to use CuDNN, the following must be satisfied: :attr:`targets` must be
+        in concatenated format, all :attr:`input_lengths` must be `T`.  :math:`blank=0`,
+        :attr:`target_lengths` :math:`\leq 256`, the integer arguments must be of
+        dtype :attr:`torch.int32`.
+
+        The regular implementation uses the (more common in PyTorch) `torch.long` dtype.
+    """
+
+    def __init__(self, blank=0, reduction='elementwise_mean'):
+        super(CTCLoss, self).__init__(reduction=reduction)
+        self.blank = blank
+
+    def forward(self, log_probs, targets, input_lengths, target_lengths):
+        return F.ctc_loss(log_probs, targets, input_lengths, target_lengths, self.blank, self.reduction)
 
 # TODO: L1HingeEmbeddingCriterion
 # TODO: MSECriterion weight

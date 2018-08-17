@@ -5,7 +5,7 @@ from __future__ import unicode_literals
 
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core
-from hypothesis import assume, given, settings
+from hypothesis import assume, given, settings, HealthCheck
 import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
 import numpy as np
@@ -75,7 +75,7 @@ class TestFcOperator(hu.HypothesisTestCase):
             self.assertGradientChecks(gc, op, [X, W, b], i, [0],
                                       threshold=threshold, stepsize=stepsize)
 
-    @settings(max_examples=50)
+    @settings(max_examples=50, suppress_health_check=[HealthCheck.filter_too_much])
     @given(n=st.integers(1, 5),
            m=st.integers(0, 5),
            k=st.integers(1, 5),
@@ -86,7 +86,7 @@ class TestFcOperator(hu.HypothesisTestCase):
     def test_fc(self, **kwargs):
         self._run_test(transposed=False, **kwargs)
 
-    @settings(max_examples=50)
+    @settings(max_examples=50, suppress_health_check=[HealthCheck.filter_too_much])
     @given(n=st.integers(1, 5),
            m=st.integers(0, 5),
            k=st.integers(1, 5),

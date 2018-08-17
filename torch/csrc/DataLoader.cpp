@@ -120,7 +120,9 @@ static PyObject *THPModule_errorIfAnyWorkerFails(PyObject *module) {
       if (infop.si_code == CLD_EXITED && infop.si_status != EXIT_SUCCESS) {  // exit with error
         std::ostringstream oss;
         oss << "DataLoader worker (pid " << worker_pid << ") exited "
-            << "unexpectedly with exit code " << infop.si_status << ".";
+            << "unexpectedly with exit code " << infop.si_status << ". "
+            << "Details are lost due to multiprocessing. Rerunning with "
+            << "num_workers=0 may give better error trace.";
         // This is necessary. Otherwise, the runtime error will kill the other
         // workers, and trigger this again.
         pid_set->clear();
@@ -128,7 +130,9 @@ static PyObject *THPModule_errorIfAnyWorkerFails(PyObject *module) {
       }  else if (infop.si_code == CLD_KILLED || infop.si_code == CLD_DUMPED) {  // killed by signal
         std::ostringstream oss;
         oss << "DataLoader worker (pid " << worker_pid << ") is killed "
-            << "by signal: " << strsignal(infop.si_status) << ".";
+            << "by signal: " << strsignal(infop.si_status) << ". "
+            << "Details are lost due to multiprocessing. Rerunning with "
+            << "num_workers=0 may give better error trace.";
         // This is necessary. Otherwise, the runtime error will kill the other
         // workers, and trigger this again.
         pid_set->clear();

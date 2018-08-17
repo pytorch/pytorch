@@ -4,9 +4,10 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 import numpy as np
-from caffe2.python import core
+from caffe2.python import core, workspace
 import caffe2.python.hypothesis_test_util as hu
 from hypothesis import given
+import hypothesis.strategies as st
 
 
 class LpnormTest(hu.HypothesisTestCase):
@@ -71,3 +72,20 @@ class LpnormTest(hu.HypothesisTestCase):
             rtol=1e-4,
             atol=1e-4
         )
+
+    @given(x=hu.tensor(
+        min_dim=1, max_dim=10, dtype=np.float32,
+        elements=st.integers(min_value=-100, max_value=100)),
+        p=st.integers(1, 2),
+        average=st.integers(0, 1)
+    )
+    def test_lpnorm_shape_inference(self, x, p, average):
+        workspace.FeedBlob('x', x)
+
+        net = core.Net("lpnorm_test")
+        result = net.LpNorm(['x'], p=p, average=bool(average))
+        (shapes, types) = workspace.InferShapesAndTypes([net])
+        workspace.RunNetOnce(net)
+
+        self.assertEqual(shapes[result], list(workspace.blobs[result].shape))
+        self.assertEqual(types[result], core.DataType.FLOAT)

@@ -15,7 +15,7 @@ bool StringJoinOp<CPUContext>::DoRunWithType() {
   int rowSize = (input.ndim() == 2) ? input.dim(1) : 1;
   if (this->axis_ == 0) {
     output->Resize(input.dim(0));
-    auto* outputData = output->mutable_data<std::string>();
+    auto* outputData = output->template mutable_data<std::string>();
 
     int offset = 0;
     for (int i = 0; i < input.dim(0); ++i) {
@@ -29,7 +29,7 @@ bool StringJoinOp<CPUContext>::DoRunWithType() {
     }
   } else if (this->axis_ == 1) {
     output->Resize(input.dim(1));
-    auto* outputData = output->mutable_data<std::string>();
+    auto* outputData = output->template mutable_data<std::string>();
 
     for (int j = 0; j < input.dim(1); ++j) {
       std::stringstream stream;

@@ -11,8 +11,7 @@ class Chi2(Gamma):
 
         >>> m = Chi2(torch.tensor([1.0]))
         >>> m.sample()  # Chi2 distributed with shape df=1
-         0.1046
-        [torch.FloatTensor of size 1]
+        tensor([ 0.1046])
 
     Args:
         df (float or Tensor): shape parameter of the distribution

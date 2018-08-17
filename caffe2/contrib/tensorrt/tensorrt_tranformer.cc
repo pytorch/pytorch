@@ -42,21 +42,9 @@ std::unordered_map<std::string, TensorShape> InferShapes(
 
 void DumpModel(const ::ONNX_NAMESPACE::ModelProto& model, const std::string& fname) {
   std::ofstream ff(fname);
-  for (const auto& t : model.graph().initializer()) {
-    ff << "tensor: " << t.name() << std::endl;
-    ff << "  dims: ";
-    for (auto i : t.dims()) {
-      ff << i << " ";
-    }
-    ff << std::endl;
-    int i = 0;
-    for (auto i : t.float_data()) {
-      ff << "    " << i << std::endl;
-      if (++i > 10) {
-        break;
-      }
-    }
-  }
+  std::string body;
+  ::google::protobuf::TextFormat::PrintToString(model.graph(), &body);
+  ff << body << std::endl;
   ff.close();
 }
 
@@ -107,10 +95,10 @@ void BlobToTensorProto(
   }
 
   // Set values
-  if (blob->template IsType<TensorCPU>()) {
+  if (blob->template IsType<Tensor>(CPU)) {
     const auto& cpu_tensor = blob->template Get<TensorCPU>();
     CPUTensorToTensorProto(cpu_tensor, t);
-  } else if (blob->template IsType<TensorCUDA>()) {
+  } else if (blob->template IsType<Tensor>(CUDA)) {
     const auto& cuda_tensor = blob->template Get<TensorCUDA>();
     const auto cpu_tensor = TensorCPU(cuda_tensor, context);
     context->FinishDeviceComputation();
@@ -390,16 +378,16 @@ NetDef TensorRTTransformer::SubnetToTrtOp(
     onnx_model.mutable_graph()->add_input()->CopyFrom(i);
   }
 
+  // Debug stuff
+  if (debug_builder_) {
+    DumpModel(onnx_model, "debug.onnxtxt");
+  }
+
   // Convert weights to initializing tensors if we are building serializable trt
   // op or defer it to construction time of trt op
   if (build_serializable_op_) {
     BuildInitializationList(
         ws, onnx_model.mutable_graph(), &initialization_list);
-  }
-
-  // Debug stuff
-  if (debug_builder_) {
-    DumpModel(onnx_model, "debug.onnx");
   }
 
   // Onnx model is ready. Call onnx-trt to convert to one trt c2 op
@@ -491,7 +479,7 @@ void TensorRTTransformer::Transform(
   auto trt_builder = tensorrt::TrtObject(nvinfer1::createInferBuilder(logger));
   auto trt_network = tensorrt::TrtObject(trt_builder->createNetwork());
   auto importer =
-      tensorrt::TrtObject(nvonnxparser::createParser(*trt_network, logger));
+      tensorrt::TrtObject(nvonnxparser::createParser(trt_network.get(), logger));
 
   // function to tell whether TensorRT supports a given C2 op or not
   auto supports =

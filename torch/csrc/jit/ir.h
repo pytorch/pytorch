@@ -1,24 +1,28 @@
+
 #pragma once
 
 #include "torch/csrc/jit/attributes.h"
+#include "torch/csrc/jit/assertions.h"
 #include "torch/csrc/jit/generic_if.h"
 #include "torch/csrc/jit/graph_node_list.h"
 #include "torch/csrc/jit/interned_strings.h"
 #include "torch/csrc/jit/resource_guard.h"
 #include "torch/csrc/jit/source_location.h"
+#include "torch/csrc/jit/source_range.h"
+#include "torch/csrc/jit/constants.h"
+#include "torch/csrc/jit/function_schema.h"
+#include "torch/csrc/jit/ivalue.h"
 #include "torch/csrc/jit/type.h"
-#include "torch/csrc/jit/variable_flags.h"
+#include "torch/csrc/jit/named_value.h"
 
-#include "torch/csrc/utils/auto_gpu.h"
 #include "torch/csrc/utils/disallow_copy.h"
 #include "torch/csrc/utils/functional.h"
 #include "torch/csrc/utils/object_ptr.h"
 #include "torch/csrc/utils/python_stub.h"
-
-#include "torch/csrc/assertions.h"
+#include "torch/csrc/WindowsTorchApiMacro.h"
 
 #include <ATen/ATen.h>
-#include "ATen/ArrayRef.h"
+#include "ATen/core/ArrayRef.h"
 
 #include <algorithm>
 #include <atomic>
@@ -51,9 +55,9 @@ struct Node;
 // Tensor or an opaque Handle object, as determined by type().
 struct Value;
 
-std::ostream& operator<<(std::ostream & out, const Graph & g);
-std::ostream& operator<<(std::ostream & out, const Type & t);
-std::ostream& operator<<(std::ostream & out, const Node & t);
+TORCH_API std::ostream& operator<<(std::ostream & out, const Graph & g);
+TORCH_API std::ostream& operator<<(std::ostream & out, const Type & t);
+TORCH_API std::ostream& operator<<(std::ostream & out, const Node & n);
 
 // A list of nodes, with inputs and outputs
 struct Block;
@@ -178,20 +182,13 @@ private:
   std::string unique_name_;
   TypePtr type_;
 public:
-  Value* setType(const TypePtr type) {
-    JIT_ASSERT(type);
-    type_ = type;
-    return this;
-  }
+  Value* setType(const TypePtr type);
   void inferTypeFrom(const at::Tensor& output) {
-    setType(std::make_shared<TensorType>(output));
+    setType(TensorType::create(output));
   }
   const TypePtr & type() const {
     JIT_ASSERT(type_ != nullptr);
     return type_;
-  }
-  bool isHandle() const {
-    return type()->kind() == TypeKind::HandleType;
   }
   bool isTensor() const {
     return type()->kind() == TypeKind::TensorType;
@@ -202,7 +199,7 @@ public:
   bool hasUniqueName() const {
     return unique_name_ != "";
   }
-  Value* setUniqueName(const std::string & name);
+  TORCH_API Value* setUniqueName(const std::string & name);
   std::string uniqueName() const {
     if (hasUniqueName())
       return unique_name_;
@@ -292,6 +289,12 @@ private:
   std::shared_ptr<SourceLocation> source_location_;
   size_t stage_;
   Scope* scope_;
+  // Assumes FunctionSchemas are persistent, so we don't manage their lifetime.
+  // This field is effective a cache that's populated on attribute lookups and
+  // invalidated every time we perform an operation that could potentially change
+  // the schema.
+  // note: mutable because schema_ is effectively a cache
+  mutable const FunctionSchema* schema_;
 protected:
   Node(Graph * graph_, NodeKind kind_); //defined after graph
 public:
@@ -375,7 +378,7 @@ public:
       outputs()[i]->replaceAllUsesWith(n->outputs()[i]);
     }
   }
-  // lots of things like chunk have a single input or singel output, so we have a
+  // lots of things like chunk have a single input or single output, so we have a
   // helper to make accessing it easier
   Value * input() {
     JIT_ASSERT(inputs_.size() == 1);
@@ -393,8 +396,25 @@ public:
   Value * input(size_t i) {
     return inputs_.at(i);
   }
-  const Value * input(size_t i) const {
+  Value * input(size_t i) const {
     return inputs_.at(i);
+  }
+
+  Value* namedInput(Symbol name) const;
+
+  at::optional<IValue> get(Symbol name) const;
+
+  template<typename T>
+  at::optional<T> get(Symbol name) const {
+    if(auto v = get(name))
+      return v->template to<T>();
+    return at::nullopt;
+  }
+
+
+  // Returns true if the value of input name is statically known
+  bool is_constant(Symbol name) {
+    return static_cast<bool>(get(name));
   }
 
   // Graphs
@@ -419,6 +439,7 @@ public:
   // Result:  %3 = f(%1, %2, %4)
   Value* addInput(Value * node) {
     JIT_ASSERT(graph_ == node->owningGraph());
+    schema_ = nullptr;
     node->uses_.emplace_back(this, inputs_.size());
     inputs_.push_back(node);
     return node;
@@ -428,6 +449,7 @@ public:
   // arguments. Returns the added node for ease of chaining.
   Value* insertInput(size_t i, Value* node) {
     JIT_ASSERT(graph_ == node->owningGraph());
+    schema_ = nullptr;
     // First we update the offsets for all existing inputs that will reside
     // after the one we're inserting. Concretely, these are the inputs at
     // indices [i, # input). Since we're inserting one input before all of
@@ -452,6 +474,7 @@ public:
   // Result:  %3 = f(%1, %4)
   Value * replaceInput(size_t i, Value * newValue) {
     JIT_ASSERT(newValue->owningGraph() == graph_);
+    schema_ = nullptr;
     Value * old = dropInput(i);
     inputs_[i] = newValue;
     newValue->uses_.emplace_back(this, i);
@@ -467,6 +490,7 @@ public:
   void replaceInputWith(Value * from, Value * to) {
     JIT_ASSERT(from->owningGraph() == graph_);
     JIT_ASSERT(to->owningGraph() == graph_);
+    schema_ = nullptr;
     size_t i = 0;
     for(auto input : inputs()) {
       if(input == from)
@@ -477,10 +501,12 @@ public:
 
   Value* addOutput() {
     outputs_.push_back(new Value(this, outputs_.size()));
+    schema_ = nullptr;
     return outputs_.back();
   }
 
   Value* insertOutput(size_t i) {
+    schema_ = nullptr;
     outputs_.insert(outputs_.begin() + i, new Value(this, i));
     for (size_t itr = i + 1; itr < outputs_.size(); ++itr) {
       outputs_[itr]->setOffset(outputs_[itr]->offset() + 1);
@@ -590,6 +616,7 @@ public:
   // Execute: %3.removeInput(1)
   // Result: %3 = f(%1)
   void removeInput(size_t i) {
+    schema_ = nullptr;
     dropInput(i);
     // everything after this input shifts left,
     // so we need to update their use offsets to match
@@ -606,6 +633,7 @@ public:
   // Execute: %3.removeAllInputs()
   // Result: %3 = f()
   void removeAllInputs() {
+    schema_ = nullptr;
     for(size_t i = 0; i < inputs().size(); ++i)
       dropInput(i);
     inputs_.clear();
@@ -642,12 +670,28 @@ public:
   }
   template<typename T>
   T* expect() {
-    JIT_ASSERTM(T::Kind == kind(), "expected a %s but found a %s", T::Kind.toDisplayString(), kind().toDisplayString());
+    JIT_ASSERTM(
+        T::Kind == kind(),
+        "expected a ", T::Kind.toDisplayString(),
+        " but found a ", kind().toDisplayString());
     return static_cast<T*>(this);
   }
 
-  virtual ~Node() {}
+  // XXX: this function is meant to be used with string literals only!
+  bool matches(const char *signature_literal, at::ArrayRef<Symbol> const_inputs={});
+
+  const FunctionSchema& schema() const {
+    if (!schema_)
+      findSchema();
+    return *schema_;
+  }
+
+  void dump() const;
+
+  virtual ~Node() = default;
 private:
+  std::pair<Value*, const Argument&> findInput(Symbol name);
+  void findSchema() const;
   // Lookup iterator in use list of _input i_ that corresponds to its use of _this_
   use_list::iterator findUseForInput(size_t i) {
     auto & input_uses = inputs_[i]->uses_;
@@ -787,7 +831,7 @@ struct Block {
   // to the inputs, nodes, and outputs of this block
   // value_map is used whenever a node in src references a free variable
   // in src to look up its corresponding value
-  void cloneFrom(Block * src, std::function<Value*(Value*)> value_map);
+  TORCH_API void cloneFrom(Block * src, std::function<Value*(Value*)> value_map);
 private:
   // should only be called in the constructor
   Node* initOutput(Node* p) {
@@ -850,8 +894,7 @@ public:
   , block_(new Block(this, nullptr))
   , insert_before_(return_node()) {}
 
-  Graph()
-  : Graph( std::make_shared<Scope>()) {}
+  Graph() : Graph(std::make_shared<Scope>()) {}
 
   at::ArrayRef<Value*> inputs() {
     return block_->inputs();
@@ -947,14 +990,6 @@ public:
   Node * createUndefined() {
     return create(prim::Undefined);
   }
-  Node * createConstant(const at::Tensor& ref) {
-    JIT_ASSERT(ref.defined());
-    AutoGPU guard(ref.type().is_cuda() ? ref.get_device() : -1);
-    auto n = create(prim::Constant);
-    n->t_(attr::value, ref.clone());
-    n->output()->inferTypeFrom(ref);
-    return n;
-  }
   Node * createFusionGroup(int device) {
     auto n = create(prim::FusionGroup, 0);
     n->g_(attr::Subgraph,std::make_shared<Graph>(scope_root_));
@@ -963,24 +998,54 @@ public:
   }
   Node* createTuple(at::ArrayRef<Value*> values) {
     auto types = fmap(values, [](Value* v) { return v->type(); });
-    auto tt = std::make_shared<TupleType>(std::move(types));
+    auto tt = TupleType::create(std::move(types));
     auto n = create(prim::TupleConstruct, values);
     n->output()->setType(tt);
     return n;
   }
   Node* createTupleUnpack(Value * v) {
-    TupleType* tt = v->type()->expect<TupleType>();
+    TupleTypePtr tt = v->type()->expect<TupleType>();
     auto n = create(prim::TupleUnpack, {v}, 0);
     for(auto & element : tt->elements()) {
       n->addOutput()->setType(element);
     }
     return n;
   }
+  Node* createList(const TypePtr& elem_type, at::ArrayRef<Value*> values) {
+    auto n = create(prim::ListConstruct, values);
+    for(const auto & v : values) {
+      JIT_ASSERT(v->type()->isSubtypeOf(elem_type));
+    }
+    n->output()->setType(ListType::create(elem_type));
+    return n;
+  }
+  Node* createNumToTensor(Value* value) {
+    auto typ = value->type();
+    Node * result = create(prim::NumToTensor, {value});
+    result->output()->setType(TensorType::fromNumberType(typ));
+    return result;
+  }
+  Node* createTensorToNum(const TypePtr& type, Value* value) {
+    auto* result = create(prim::TensorToNum, {value});
+    result->output()->setType(type);
+    return result;
+  }
+  Node* createIntToFloat(Value* value) {
+    JIT_ASSERT(*value->type() == *IntType::get());
+    auto* result = create(prim::IntToFloat, {value});
+    result->output()->setType(FloatType::get());
+    return result;
+  }
+  Node* createFloatToInt(Value* value) {
+    JIT_ASSERT(*value->type() == *FloatType::get());
+    auto* result = create(prim::FloatToInt, {value});
+    result->output()->setType(IntType::get());
+    return result;
+  }
   Node* createPythonOp(
       THPObjectPtr&& pyobj,
       const std::string& cconv,
       pyobj_list&& scalar_args);
-  Node * createCppOp(const std::shared_ptr<torch::autograd::Function> & fn);
   // clone n, making a new node in _this_ graph.
   // use node_map to translate inputs of n to inputs of the cloned node
   // if copy_blocks is false, it will not recursively clone the nested blocks
@@ -1002,6 +1067,19 @@ public:
     }
     return r;
   }
+
+  Value* insertConstant(
+      IValue val,
+      at::optional<SourceRange> loc = at::nullopt) {
+    return jit::insertConstant(*this, std::move(val), loc);
+  }
+
+  // schema-driven insert
+  // this inserts a node into the graph with inputs determined from args and kwargs using Python
+  // argument matching rules, and checks that the op matches a known schema
+  // if this node successfully completes, it guarentees the node is a correctly-formed invocation
+  // of opname
+  Value* insert(Symbol opname, at::ArrayRef<NamedValue> args, at::ArrayRef<NamedValue> kwargs = {});
 
   Node * appendNode(Node * n) {
     return block_->appendNode(n);
@@ -1042,9 +1120,9 @@ public:
   }
 
   // Checks well-formedness and invariants of graph
-  void lint() const;
+  TORCH_API void lint() const;
   // for use in debugger
-  void dump() const;
+  TORCH_API void dump() const;
 
   ~Graph() {
     for (const Node * n : all_nodes)
@@ -1061,8 +1139,8 @@ public:
     return oss.str();
   }
 
-  friend std::ostream& operator<<(std::ostream & out, const Graph & g);
-  std::shared_ptr<Graph> copy();
+  friend TORCH_API std::ostream& operator<<(std::ostream & out, const Graph & g);
+  TORCH_API std::shared_ptr<Graph> copy();
 
 private:
 
@@ -1122,6 +1200,15 @@ inline Value::Value(Node * node_, size_t offset_)
   node_->graph_->all_values.emplace(this);
 }
 
+inline Value* Value::setType(const TypePtr type) {
+  JIT_ASSERT(type);
+  type_ = type;
+  for (Use & use : uses_) {
+    use.user->schema_ = nullptr;
+  }
+  return this;
+}
+
 inline Graph * Value::owningGraph() {
   return node()->owningGraph();
 }
@@ -1149,13 +1236,15 @@ inline Node::Node(Graph * graph_, NodeKind kind_) :
   graph_(graph_),
   owning_block_(nullptr),
   stage_(graph_->new_node_stage_),
-  scope_(graph_->current_scope_) {
+  scope_(graph_->current_scope_),
+  schema_(nullptr) {
   graph_->all_nodes.emplace(this);
 }
 
 inline void Node::eraseOutput(size_t i) {
   JIT_ASSERT(i < outputs_.size());
   JIT_ASSERT(outputs_[i]->uses().size() == 0);
+  schema_ = nullptr;
   Value * n = outputs_[i];
   outputs_.erase(outputs_.begin() + i);
   owningGraph()->freeValue(n);
@@ -1165,12 +1254,14 @@ inline void Node::eraseOutput(size_t i) {
 }
 
 inline Block * Node::addBlock() {
+  schema_ = nullptr;
   blocks_.push_back(new Block(owningGraph(), this));
   return blocks_.back();
 }
 
 inline void Node::eraseBlock(size_t i) {
   JIT_ASSERT(i < blocks_.size());
+  schema_ = nullptr;
   Block * n = blocks_[i];
   blocks_.erase(blocks_.begin() + i);
   n->destroy();
@@ -1264,6 +1355,7 @@ inline void Block::destroy() {
  // execute a Python function, used for Ops we can't optimize but that we want to optimize around
 struct PythonOp : public Node {
   static constexpr Symbol Kind = prim::PythonOp;
+
   PythonOp(Graph * graph)
   : Node(graph,prim::PythonOp) {}
   PythonOp* init(
@@ -1275,17 +1367,6 @@ struct PythonOp : public Node {
     this->cconv = cconv;
     return this;
   }
-  virtual Node * allocNewInstance(Graph * g) override {
-    return new PythonOp(g);
-  }
-  // recover the autograd.Function instance, if this PythonOp's function
-  // was originally SomeFunction.apply
-  // used in ONNX for discovering symbolics
-  at::optional<THPObjectPtr> autogradFunction() const;
-
-  //TODO: make this non-autograd specific
-  //remove is_legacy, avoid THPObjectPtr to avoid big PyTorch dependency
-
   // The Python object which contains the implementation of this function.
   // This is either a class (non-legacy) or an object (legacy).  See
   // TraceInterpreterState for execution semantics.
@@ -1297,45 +1378,29 @@ struct PythonOp : public Node {
   // Scalar arguments to the Python function.  Not necessarily passed to
   // the function in this order; see cconv for the correct order.
   std::vector<THPObjectPtr> scalar_args;
-  std::string name() const;
-  virtual void cloneFrom(Node * other_) override;
+  virtual std::string name() const = 0;
+  virtual void writeScalars(std::ostream& out) const = 0;
+  void cloneFrom(Node * other_) override = 0;
+  Node * allocNewInstance(Graph * g) override = 0;
+  // recover the autograd.Function instance, if this PythonOp's function
+  // was originally SomeFunction.apply
+  // used in ONNX for discovering symbolics
+  virtual at::optional<THPObjectPtr> autogradFunction() const = 0;
+
 };
+// patched in when python bindings are loaded
+TORCH_API PythonOp* allocPythonOp(Graph* g);
+TORCH_API void setAllocPythonOp(PythonOp* (*v)(Graph* g));
+
 inline Node* Graph::createPythonOp(
     THPObjectPtr&& pyobj,
     const std::string& cconv,
     pyobj_list&& scalar_args) {
-  auto op = new PythonOp(this);
+  auto op = allocPythonOp(this);
   return op->init(
       std::move(pyobj),
       cconv,
       std::move(scalar_args));
-}
-
-// A Cpp operator is an operator which dispatches directly to an autograd function.
-// TODO: These are not executable without reentrant engine.
-struct CppOp : public Node {
-  static constexpr Symbol Kind = prim::CppOp;
-  CppOp(Graph * g)
-  : Node(g,prim::CppOp) {}
-  std::shared_ptr<torch::autograd::Function> fn;
-  std::string name() const;
-  CppOp* init(std::shared_ptr<torch::autograd::Function> fn) {
-    JIT_ASSERT(fn);
-    this->fn = std::move(fn);
-    return this;
-  }
-  virtual Node * allocNewInstance(Graph * g) override {
-    return new CppOp(g);
-  }
-  virtual void cloneFrom(Node * other_) override {
-    Node::cloneFrom(other_);
-    auto other = other_->cast<CppOp>();
-    this->fn = other->fn;
-  }
-};
-inline Node * Graph::createCppOp(const std::shared_ptr<torch::autograd::Function> & fn) {
-  auto op = new CppOp(this);
-  return op->init(fn);
 }
 
 inline graph_node_list_iterator Node::iterator() {
@@ -1351,6 +1416,6 @@ inline const_graph_node_list_iterator Node::reverseIterator() const {
   return iterator().reverse();
 }
 
-void LintGraph(std::shared_ptr<Graph>& graph);
+TORCH_API void LintGraph(std::shared_ptr<Graph>& graph);
 
 }} // namespace torch::jit

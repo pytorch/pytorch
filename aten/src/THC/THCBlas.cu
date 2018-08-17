@@ -48,7 +48,6 @@ double THCudaBlas_Ddot(THCState *state, int64_t n, double *x, int64_t incx, doub
   return 0;
 }
 
-#ifdef CUDA_HALF_TENSOR
 half THCudaBlas_Hdot(THCState *state, int64_t n, half *x, int64_t incx, half *y, int64_t incy)
 {
 #if CUDA_VERSION >= 8000
@@ -77,13 +76,21 @@ half THCudaBlas_Hdot(THCState *state, int64_t n, half *x, int64_t incx, half *y,
   return THC_float2half(0);
 #endif
 }
-#endif
 
 /* Level 2 */
+
+void adjustLdLevel2(int64_t m, int64_t n, int64_t *lda)
+{
+  // Note: leading dimensions generally are checked that they are > 0 and at least as big the result
+  // requires (even if the value won't be used).
+  // TODO: why does Level3 check trans but this doesn't?
+  if (n <= 1)
+    *lda = std::max<int64_t>(m, 1);
+}
+
 void THCudaBlas_Sgemv(THCState *state, char trans, int64_t m, int64_t n, float alpha, float *a, int64_t lda, float *x, int64_t incx, float beta, float *y, int64_t incy)
 {
-  if(n == 1)
-    lda = m;
+  adjustLdLevel2(m, n, &lda);
 
   cublasOperation_t op;
   if (trans == 't') op = CUBLAS_OP_T;
@@ -113,8 +120,7 @@ void THCudaBlas_Sgemv(THCState *state, char trans, int64_t m, int64_t n, float a
 
 void THCudaBlas_Dgemv(THCState *state, char trans, int64_t m, int64_t n, double alpha, double *a, int64_t lda, double *x, int64_t incx, double beta, double *y, int64_t incy)
 {
-  if(n == 1)
-    lda = m;
+  adjustLdLevel2(m, n, &lda);
 
   cublasOperation_t op;
   if (trans == 't') op = CUBLAS_OP_T;
@@ -144,8 +150,7 @@ void THCudaBlas_Dgemv(THCState *state, char trans, int64_t m, int64_t n, double 
 
 void THCudaBlas_Sger(THCState *state, int64_t m, int64_t n, float alpha, float *x, int64_t incx, float *y, int64_t incy, float *a, int64_t lda)
 {
-  if(n == 1)
-    lda = m;
+  adjustLdLevel2(m, n, &lda);
 
   if( (m <= INT_MAX) && (n <= INT_MAX) && (lda <= INT_MAX)  && (incx <= INT_MAX) && (incy <= INT_MAX) )
     {
@@ -166,8 +171,7 @@ void THCudaBlas_Sger(THCState *state, int64_t m, int64_t n, float alpha, float *
 
 void THCudaBlas_Dger(THCState *state, int64_t m, int64_t n, double alpha, double *x, int64_t incx, double *y, int64_t incy, double *a, int64_t lda)
 {
-  if(n == 1)
-    lda = m;
+  adjustLdLevel2(m, n, &lda);
 
   if( (m <= INT_MAX) && (n <= INT_MAX) && (lda <= INT_MAX)  && (incx <= INT_MAX) && (incy <= INT_MAX) )
     {
@@ -197,41 +201,44 @@ cublasOperation_t convertTransToCublasOperation(char trans) {
   }
 }
 
-void adjustLd(char transa, char transb, int64_t m, int64_t n, int64_t k, int64_t *lda, int64_t *ldb, int64_t *ldc)
+void adjustLdLevel3(char transa, char transb, int64_t m, int64_t n, int64_t k, int64_t *lda, int64_t *ldb, int64_t *ldc)
 {
   int transa_ = ((transa == 't') || (transa == 'T'));
   int transb_ = ((transb == 't') || (transb == 'T'));
 
-  if(n == 1)
-    *ldc = m;
+  // Note: leading dimensions generally are checked that they are > 0 and at least as big the result
+  // requires (even if the value won't be used).
+  if(n <= 1)
+    *ldc = std::max<int64_t>(m, 1);
 
   if(transa_)
   {
-    if(m == 1)
-      *lda = k;
+    if(m <= 1)
+      *lda = std::max<int64_t>(k, 1);
   }
   else
   {
-    if(k == 1)
-      *lda = m;
+    if(k <= 1)
+      *lda = std::max<int64_t>(m, 1);
   }
 
   if(transb_)
   {
-    if(k == 1)
-      *ldb = n;
+    if(k <= 1)
+      *ldb = std::max<int64_t>(n, 1);
   }
   else
   {
-    if(n == 1)
-      *ldb = k;
+    if(n <= 1)
+      *ldb = std::max<int64_t>(k, 1);
   }
+
 }
 
 /* Level 3 */
 void THCudaBlas_Sgemm(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k, float alpha, float *a, int64_t lda, float *b, int64_t ldb, float beta, float *c, int64_t ldc)
 {
-  adjustLd(transa, transb, m, n, k, &lda, &ldb, &ldc);
+  adjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
   cublasOperation_t opa = convertTransToCublasOperation(transa);
   cublasOperation_t opb = convertTransToCublasOperation(transb);
 
@@ -253,7 +260,6 @@ void THCudaBlas_Sgemm(THCState *state, char transa, char transb, int64_t m, int6
           "with the bound [val] <= %d", INT_MAX);
 }
 
-#ifdef CUDA_HALF_TENSOR
 // In CUDA 8.0, definition of data types for sgemmex changed
 #if CUDA_VERSION < 8000
 #  define CUDA_R_16F CUBLAS_DATA_HALF
@@ -261,7 +267,7 @@ void THCudaBlas_Sgemm(THCState *state, char transa, char transb, int64_t m, int6
 
 void THCudaBlas_Hgemm(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k, half alpha, half *a, int64_t lda, half *b, int64_t ldb, half beta, half *c, int64_t ldc)
 {
-  adjustLd(transa, transb, m, n, k, &lda, &ldb, &ldc);
+  adjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
   cublasOperation_t opa = convertTransToCublasOperation(transa);
   cublasOperation_t opb = convertTransToCublasOperation(transb);
 
@@ -289,13 +295,17 @@ void THCudaBlas_Hgemm(THCState *state, char transa, char transb, int64_t m, int6
 #else
       cudaDeviceProp* prop = THCState_getCurrentDeviceProperties(state);
       if (prop->major >= 5){
+#ifndef __HIP_PLATFORM_HCC__
         THCublasCheck(cublasSetMathMode(handle, CUBLAS_TENSOR_OP_MATH));
-        THCublasCheck(cublasGemmEx(handle, opa, opb,
+#endif
+	THCublasCheck(cublasGemmEx(handle, opa, opb,
                                    i_m, i_n, i_k, &fAlpha,
                                    a, CUDA_R_16F, i_lda, b, CUDA_R_16F,
                                    i_ldb, &fBeta, c, CUDA_R_16F, i_ldc,
                                    CUDA_R_32F, CUBLAS_GEMM_DFALT_TENSOR_OP));
-        THCublasCheck(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
+#ifndef __HIP_PLATFORM_HCC__
+	THCublasCheck(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
+#endif
       }else{
         THCublasCheck(cublasSgemmEx(handle, opa, opb,
                                     i_m, i_n, i_k, &fAlpha,
@@ -308,11 +318,10 @@ void THCudaBlas_Hgemm(THCState *state, char transa, char transb, int64_t m, int6
   THError("Cublas_Hgemm only supports m, n, k, lda, ldb, ldc"
           "with th bound [val] <= %d", INT_MAX);
 }
-#endif
 
 void THCudaBlas_Dgemm(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k, double alpha, double *a, int64_t lda, double *b, int64_t ldb, double beta, double *c, int64_t ldc)
 {
-  adjustLd(transa, transb, m, n, k, &lda, &ldb, &ldc);
+  adjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
   cublasOperation_t opa = convertTransToCublasOperation(transa);
   cublasOperation_t opb = convertTransToCublasOperation(transb);
 
@@ -346,7 +355,7 @@ void THCudaBlas_HgemmStridedBatched(THCState *state, char transa, char transb, i
             "with the bound [val] <= %d", INT_MAX);
   }
 
-  adjustLd(transa, transb, m, n, k, &lda, &ldb, &ldc);
+  adjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
   cublasOperation_t opa = convertTransToCublasOperation(transa);
   cublasOperation_t opb = convertTransToCublasOperation(transb);
 
@@ -375,7 +384,17 @@ void THCudaBlas_SgemmBatched(THCState *state, char transa, char transb, int64_t 
             "with the bound [val] <= %d", INT_MAX);
   }
 
-  adjustLd(transa, transb, m, n, k, &lda, &ldb, &ldc);
+#ifdef __HIP_PLATFORM_HCC__
+
+  const int64_t stridea = (transa == 'N' || transa == 'n') ? lda*k : lda*n;
+  const int64_t strideb = (transb == 'N' || transb == 'n') ? ldb*n : ldb*k;
+  const int64_t stridec = ldc*n;
+
+  THCudaBlas_SgemmStridedBatched(state, transa, transb, m, n, k, alpha, *a, lda, stridea, *b, ldb, strideb, beta, *c, ldc, stridec, batchCount);
+
+#else
+
+  adjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
   cublasOperation_t opa = convertTransToCublasOperation(transa);
   cublasOperation_t opb = convertTransToCublasOperation(transb);
 
@@ -385,9 +404,10 @@ void THCudaBlas_SgemmBatched(THCState *state, char transa, char transb, int64_t 
                                    opa, opb, (int)m, (int)n, (int)k,
                                    &alpha, a, (int)lda, b, (int)ldb, &beta, c, (int)ldc,
                                    (int)batchCount));
+#endif
 }
 
-#if CUDA_VERSION >= 8000
+#if CUDA_VERSION >= 8000 || defined __HIP_PLATFORM_HCC__
 void THCudaBlas_SgemmStridedBatched(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k,
                              float alpha, const float *a, int64_t lda, int64_t strideA, const float *b, int64_t ldb, int64_t strideB,
                              float beta, float *c, int64_t ldc, int64_t strideC, int64_t batchCount)
@@ -399,7 +419,7 @@ void THCudaBlas_SgemmStridedBatched(THCState *state, char transa, char transb, i
             "with the bound [val] <= %d", INT_MAX);
   }
 
-  adjustLd(transa, transb, m, n, k, &lda, &ldb, &ldc);
+  adjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
   cublasOperation_t opa = convertTransToCublasOperation(transa);
   cublasOperation_t opb = convertTransToCublasOperation(transb);
 
@@ -422,7 +442,17 @@ void THCudaBlas_DgemmBatched(THCState *state, char transa, char transb, int64_t 
             "with the bound [val] <= %d", INT_MAX);
   }
 
-  adjustLd(transa, transb, m, n, k, &lda, &ldb, &ldc);
+#ifdef __HIP_PLATFORM_HCC__
+
+  const int64_t stridea = (transa == 'N' || transa == 'n') ? lda*k : lda*n;
+  const int64_t strideb = (transb == 'N' || transb == 'n') ? ldb*n : ldb*k;
+  const int64_t stridec = ldc*n;
+
+  THCudaBlas_DgemmStridedBatched(state, transa, transb, m, n, k, alpha, *a, lda, stridea, *b, ldb, strideb, beta, *c, ldc, stridec, batchCount);
+
+#else
+
+  adjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
   cublasOperation_t opa = convertTransToCublasOperation(transa);
   cublasOperation_t opb = convertTransToCublasOperation(transb);
 
@@ -432,9 +462,10 @@ void THCudaBlas_DgemmBatched(THCState *state, char transa, char transb, int64_t 
                                    opa, opb, (int)m, (int)n, (int)k,
                                    &alpha, a, (int)lda, b, (int)ldb, &beta, c, (int)ldc,
                                    (int)batchCount));
+#endif
 }
 
-#if CUDA_VERSION >= 8000
+#if CUDA_VERSION >= 8000 || defined __HIP_PLATFORM_HCC__
 void THCudaBlas_DgemmStridedBatched(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k,
                              double alpha, const double *a, int64_t lda, int64_t strideA, const double *b, int64_t ldb, int64_t strideB,
                              double beta, double *c, int64_t ldc, int64_t strideC, int64_t batchCount)
@@ -445,7 +476,7 @@ void THCudaBlas_DgemmStridedBatched(THCState *state, char transa, char transb, i
             "with the bound [val] <= %d", INT_MAX);
   }
 
-  adjustLd(transa, transb, m, n, k, &lda, &ldb, &ldc);
+  adjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
   cublasOperation_t opa = convertTransToCublasOperation(transa);
   cublasOperation_t opb = convertTransToCublasOperation(transb);
 

@@ -85,7 +85,7 @@ bool ParseCaffeCommandLineFlags(int* pargc, char*** pargv) {
 
     string key;
     string value;
-    int prefix_idx = arg.find('=');
+    size_t prefix_idx = arg.find('=');
     if (prefix_idx == string::npos) {
       // If there is no equality char in the arg, it means that the
       // arg is specified in the next argument.

@@ -2,7 +2,7 @@
 
 #include "../THD.h"
 #include <TH/TH.h>
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
 #include <THC/THC.h>
 #endif
 

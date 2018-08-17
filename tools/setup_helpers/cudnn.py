@@ -1,22 +1,20 @@
 import os
 import glob
 
-from .env import IS_WINDOWS, IS_CONDA, CONDA_DIR, check_env_flag, gather_paths
-from .cuda import WITH_CUDA, CUDA_HOME
+from .env import IS_WINDOWS, IS_CONDA, CONDA_DIR, check_negative_env_flag, gather_paths, lib_paths_from_base
+from .cuda import USE_CUDA, CUDA_HOME
 
 
-WITH_CUDNN = False
+USE_CUDNN = False
 CUDNN_LIB_DIR = None
 CUDNN_INCLUDE_DIR = None
 CUDNN_LIBRARY = None
 WITH_STATIC_CUDNN = os.getenv("USE_STATIC_CUDNN")
 
-if WITH_CUDA and not check_env_flag('NO_CUDNN'):
+if USE_CUDA and not check_negative_env_flag('USE_CUDNN'):
     lib_paths = list(filter(bool, [
-        os.getenv('CUDNN_LIB_DIR'),
-        os.path.join(CUDA_HOME, 'lib/x64'),
-        os.path.join(CUDA_HOME, 'lib'),
-        os.path.join(CUDA_HOME, 'lib64'),
+        os.getenv('CUDNN_LIB_DIR')
+    ] + lib_paths_from_base(CUDA_HOME) + [
         '/usr/lib/x86_64-linux-gnu/',
         '/usr/lib/powerpc64le-linux-gnu/',
         '/usr/lib/aarch64-linux-gnu/',
@@ -34,6 +32,7 @@ if WITH_CUDA and not check_env_flag('NO_CUDNN'):
         'C_INCLUDE_PATH',
         'CPLUS_INCLUDE_PATH',
     ])))
+    # Add CUDA related dirs to candidate list
     if IS_CONDA:
         lib_paths.append(os.path.join(CONDA_DIR, 'lib'))
         include_paths.append(os.path.join(CONDA_DIR, 'include'))
@@ -55,6 +54,13 @@ if WITH_CUDA and not check_env_flag('NO_CUDNN'):
 
     if CUDNN_INCLUDE_VERSION is None:
         pass
+
+    # Check for standalone cuDNN libraries
+    if CUDNN_INCLUDE_DIR is not None:
+        cudnn_path = os.path.join(os.path.dirname(CUDNN_INCLUDE_DIR))
+        cudnn_lib_paths = lib_paths_from_base(cudnn_path)
+        lib_paths.extend(cudnn_lib_paths)
+
     for path in lib_paths:
         if path is None or not os.path.exists(path):
             continue
@@ -87,4 +93,4 @@ if WITH_CUDA and not check_env_flag('NO_CUDNN'):
         real_cudnn_lib_dir = os.path.realpath(CUDNN_LIB_DIR)
         assert os.path.dirname(real_cudnn_library) == real_cudnn_lib_dir, (
             'cudnn library and lib_dir must agree')
-        WITH_CUDNN = True
+        USE_CUDNN = True

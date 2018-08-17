@@ -13,7 +13,7 @@ class BaseInputAccessor {
  public:
   BaseInputAccessor() {}
 
-  bool observeInput(const Tensor<CPUContext>& dataInput) {
+  bool observeInput(const Tensor& dataInput) {
     data_ = dataInput.raw_data();
     return dataInput.template IsType<TData>();
   }
@@ -373,7 +373,7 @@ class AbstractReduceFrontOrBackGradientOp : public Operator<Context> {
   template <int FixedSize>
   bool DoRunWithValue() {
     auto& reduction_grad = Input(REDUCTION_GRAD);
-    auto& source_shape = OperatorBase::Input<TensorCPU>(SOURCE_SHAPE);
+    auto& source_shape = this->template Input<Tensor>(SOURCE_SHAPE, CPU);
 
     auto* data_grads = Output(0);
 
@@ -1898,18 +1898,19 @@ struct AbstractLengthsDef {
   static constexpr const char* basename = "Lengths";
   static constexpr const char* doc = R"DOC(
 Applies '{op}' to each segment of the input tensor. Segments are defined
-by their LENGTHS.
+by their *LENGTHS*. *LENGTHS* is a vector that maps each of the slices of
+*DATA* to a particular segment. Values belonging to the same segment are
+aggregated together and considered for the '{op}' operation.
 
-LENGTHS is a vector that maps each of the first dimension slices of the
-DATA to a particular group (segment). Values belonging to the same segment are
-aggregated together.
+For example *LENGTHS = [2, 1]* stands for segments *DATA[0..1]* and *DATA[2]*
 
-For example LENGTHS = [2, 1] stands for segments DATA[0..1] and DATA[2]
-
-The first dimension of the output is equal to the number of input segments,
-i.e. `len(LENGTHS)`. Other dimensions are inherited from the input tensor.
+The sum of elements in *LENGTHS* must equal the number of elements in the first
+dimension of *DATA*. The length of *OUTPUT* is equal to the number of input
+segments, i.e. len(*LENGTHS*).
 
 {op_doc}
+
+{extra}
   )DOC";
   static void PopulateSchema(OpSchema& schema) {
     schema.Input(0, "DATA", "Input tensor, slices of which are aggregated.");
@@ -1963,6 +1964,11 @@ i.e. `len(LENGTHS)`. Other dimensions are inherited from the input tensor.
       GradientNeedIndices>;
 };
 
+OpSchema::Cost CostInferenceForSparseLengths(
+    const OperatorDef& def,
+    const vector<TensorShape>& inputs,
+    bool use_weight);
+
 template <
     typename T,
     typename SIndex,
@@ -2006,7 +2012,21 @@ i.e. `len(LENGTHS)`. Other dimensions are inherited from the input tensor.
         "OUTPUT",
         "Aggregated output tensor. Has the first dimension of K "
         "(the number of segments).");
+    schema.TensorInferenceFunction(
+        [](const OperatorDef&, const std::vector<TensorShape>& input_types) {
+          std::vector<TensorShape> out(1);
+          out[0] = input_types[0];
+          out[0].set_dims(0, input_types[Reducer::kInputCount + 1].dims(0));
+          return out;
+        });
     ReducerDef::PopulateSchema(schema);
+
+    schema.CostInferenceFunction(
+        [](const OperatorDef& def,
+           const vector<TensorShape>& inputs) -> OpSchema::Cost {
+          return CostInferenceForSparseLengths(
+              def, inputs, strcmp(OpDef::name, "WeightedSum") == 0);
+        });
   }
   using Reducer = typename ReducerDef::template Reducer<T, Context>;
   using ReducerGradient =

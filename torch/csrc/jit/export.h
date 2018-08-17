@@ -1,6 +1,8 @@
 #pragma once
 
 #include "torch/csrc/jit/ir.h"
+#include "torch/csrc/jit/script/module.h"
+#include "torch/csrc/onnx/onnx.h"
 
 namespace torch { namespace jit {
 
@@ -14,19 +16,26 @@ namespace torch { namespace jit {
 // file contents being the raw tensor data.
 using RawDataExportMap = std::unordered_map<std::string, at::Tensor>;
 
-std::tuple<std::string, RawDataExportMap> ExportGraph(
+TORCH_API std::tuple<std::string, RawDataExportMap> ExportGraph(
     const std::shared_ptr<Graph>& graph,
     const std::vector<at::Tensor>& initializers,
     int64_t onnx_opset_version,
     bool defer_weight_export = false,
-    bool export_raw_ir = false);
+    ::torch::onnx::OperatorExportTypes operator_export_type
+      = ::torch::onnx::OperatorExportTypes::ONNX);
 
 // For testing purposes
-std::string PrettyPrintExportedGraph(
+TORCH_API std::string PrettyPrintExportedGraph(
     const std::shared_ptr<Graph>& graph,
     const std::vector<at::Tensor> & initializers,
     int64_t onnx_opset_version,
     bool defer_weight_export,
-    bool export_raw_ir);
+    ::torch::onnx::OperatorExportTypes operator_export_type
+      = ::torch::onnx::OperatorExportTypes::ONNX,
+    bool google_printer = false);
+
+TORCH_API void ExportModule(
+    const script::Module& module,
+    const std::string& filename);
 
 }}

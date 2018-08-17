@@ -52,7 +52,7 @@ class Cursor {
    */
   virtual bool Valid() = 0;
 
-  DISABLE_COPY_AND_ASSIGN(Cursor);
+  AT_DISABLE_COPY_AND_ASSIGN(Cursor);
 };
 
 /**
@@ -71,7 +71,7 @@ class Transaction {
    */
   virtual void Commit() = 0;
 
-  DISABLE_COPY_AND_ASSIGN(Transaction);
+  AT_DISABLE_COPY_AND_ASSIGN(Transaction);
 };
 
 /**
@@ -99,7 +99,7 @@ class DB {
  protected:
   Mode mode_;
 
-  DISABLE_COPY_AND_ASSIGN(DB);
+  AT_DISABLE_COPY_AND_ASSIGN(DB);
 };
 
 // Database classes are registered by their names so we can do optional
@@ -226,7 +226,7 @@ class DBReader {
     *value = cursor_->value();
 
     // In sharded mode, each read skips num_shards_ records
-    for (int s = 0; s < num_shards_; s++) {
+    for (uint32_t s = 0; s < num_shards_; s++) {
       cursor_->Next();
       if (!cursor_->Valid()) {
         MoveToBeginning();
@@ -270,7 +270,7 @@ class DBReader {
 
   void MoveToBeginning() const {
     cursor_->SeekToFirst();
-    for (auto s = 0; s < shard_id_; s++) {
+    for (uint32_t s = 0; s < shard_id_; s++) {
       cursor_->Next();
       CAFFE_ENFORCE(
           cursor_->Valid(), "Db has less rows than shard id: ", s, shard_id_);
@@ -285,7 +285,7 @@ class DBReader {
   uint32_t num_shards_;
   uint32_t shard_id_;
 
-  DISABLE_COPY_AND_ASSIGN(DBReader);
+  AT_DISABLE_COPY_AND_ASSIGN(DBReader);
 };
 
 class DBReaderSerializer : public BlobSerializerBase {

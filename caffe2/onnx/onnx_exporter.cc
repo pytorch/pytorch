@@ -3,6 +3,7 @@
 #include "caffe2/onnx/helper.h"
 #include "caffe2/proto/caffe2_legacy.pb.h"
 #include "caffe2/utils/map_utils.h"
+#include "caffe2/utils/proto_utils.h"
 
 #include <unordered_set>
 
@@ -221,6 +222,19 @@ const std::unordered_map<std::string, OnnxExporter::SpecialOpConverter>&
 OnnxExporter::get_special_operators() const {
   const static std::unordered_map<std::string, OnnxExporter::SpecialOpConverter>
       kSpecialOperators = {
+          {"ArgMax", &OnnxExporter::CreateArgMaxMinOpNodes},
+          {"ArgMin", &OnnxExporter::CreateArgMaxMinOpNodes},
+          {"Add", &OnnxExporter::CreateBinaryElementwiseOpNodes},
+          {"Sub", &OnnxExporter::CreateBinaryElementwiseOpNodes},
+          {"Mul", &OnnxExporter::CreateBinaryElementwiseOpNodes},
+          {"Div", &OnnxExporter::CreateBinaryElementwiseOpNodes},
+          {"Pow", &OnnxExporter::CreateBinaryElementwiseOpNodes},
+          {"And", &OnnxExporter::CreateBinaryElementwiseOpNodes},
+          {"Or", &OnnxExporter::CreateBinaryElementwiseOpNodes},
+          {"Xor", &OnnxExporter::CreateBinaryElementwiseOpNodes},
+          {"Equal", &OnnxExporter::CreateBinaryElementwiseOpNodes},
+          {"Greater", &OnnxExporter::CreateBinaryElementwiseOpNodes},
+          {"Less", &OnnxExporter::CreateBinaryElementwiseOpNodes},
           {"Cast", &OnnxExporter::CreateCastNodes},
           {"Conv", &OnnxExporter::CreateConvPoolNodes},
           {"ConvTranspose", &OnnxExporter::CreateConvPoolNodes},
@@ -231,7 +245,8 @@ OnnxExporter::get_special_operators() const {
           {"LRN", &OnnxExporter::CreateLrnNodes},
           {"Reshape", &OnnxExporter::CreateReshapeNodes},
           {"Slice", &OnnxExporter::CreateSliceNodes},
-          {"ChannelShuffle", &OnnxExporter::CreateChannelShuffleNodes}};
+          {"ChannelShuffle", &OnnxExporter::CreateChannelShuffleNodes},
+          {"ResizeNearest", &OnnxExporter::CreateUpsampleNodes}};
   return kSpecialOperators;
 }
 
@@ -278,7 +293,9 @@ bool OnnxExporter::IsBlackListed(const caffe2::Argument& arg) {
       kBlackListString = {{"order", {"NCHW"}}};
   const static std::unordered_map<std::string, std::unordered_set<int64_t>>
       kBlackListInt = {{"cudnn_exhaustive_search", {0, 1}},
-                       {"use_cudnn", {0, 1}}};
+                       {"use_cudnn", {0, 1}},
+                       {"is_test", {0, 1}},
+                       {"broadcast", {0, 1}}};
 
   if (arg.has_i()) {
     const auto it = kBlackListInt.find(arg.name());
@@ -333,6 +350,68 @@ ConvertedResult OnnxExporter::CommonCaffe2OpToOnnxNodes(
       auto* attr = node.add_attribute();
       CopyCaffe2ArgToOnnxAttr(attr, def.type(), a);
     }
+  }
+  return result;
+}
+
+ConvertedResult OnnxExporter::CreateArgMaxMinOpNodes(
+    const caffe2::OperatorDef& def,
+    const std::unordered_map<std::string, caffe2::TensorShape>& shapes) {
+  auto result = CommonCaffe2OpToOnnxNodes(def);
+  auto& nodes = result.first;
+
+  CAFFE_ENFORCE_EQ(nodes.size(), 1);
+  auto& node = nodes.back();
+
+  if (!ArgumentHelper::HasArgument(def, "axis")) {
+    const auto& x = def.input(0);
+    const auto& x_shape = shapes.at(x);
+    node.add_attribute()->CopyFrom(
+        MakeAttribute("axis", x_shape.dims().size() - 1));
+  }
+
+  return result;
+}
+
+ConvertedResult OnnxExporter::CreateBinaryElementwiseOpNodes(
+    const caffe2::OperatorDef& def,
+    const std::unordered_map<std::string, caffe2::TensorShape>& shapes) {
+  caffe2::OperatorDef mdef(def); // The modified def without broadcast and axis
+  const auto& x = mdef.input(0);
+  const auto& y = def.input(1); // Refer to the old def, later won't change it.
+  const auto& x_shape = shapes.at(x);
+  const auto& y_shape = shapes.at(y);
+  for (int i = 0; i < mdef.arg_size(); ++i) {
+    const auto& arg = mdef.arg(i);
+    if (arg.name() == "broadcast") {
+      ArgumentHelper::RemoveArgument(mdef, i);
+      break;
+    }
+  }
+  std::vector<int64_t> axes;
+  for (int i = 0; i < mdef.arg_size(); ++i) {
+    const auto& arg = mdef.arg(i);
+    if (arg.name() == "axis") {
+      int64_t axis = arg.i();
+      if (x_shape.dims().size() - axis != y_shape.dims().size()) {
+        // The upper bound (excluded) of expanded y.
+        int64_t end_dim =
+            y_shape.dims().size() - 1 - axis + x_shape.dims().size();
+        axes.resize(end_dim - y_shape.dims().size());
+        std::iota(axes.begin(), axes.end(), y_shape.dims().size());
+        mdef.set_input(1, dummy_->NewDummyName());
+      }
+      ArgumentHelper::RemoveArgument(mdef, i);
+      break;
+    }
+  }
+
+  auto result = CommonCaffe2OpToOnnxNodes(mdef);
+  if (axes.size() != 0) {
+    result.first.insert(
+        result.first.begin(),
+        MakeNode(
+            "Unsqueeze", {y}, {mdef.input(1)}, {MakeAttribute("axes", axes)}));
   }
   return result;
 }
@@ -603,6 +682,41 @@ ConvertedResult OnnxExporter::CreateChannelShuffleNodes(
   return result;
 }
 
+ConvertedResult OnnxExporter::CreateUpsampleNodes(
+    const caffe2::OperatorDef& def,
+    const std::unordered_map<std::string, caffe2::TensorShape>& shapes) {
+  float width_scale = 1.0;
+  float height_scale = 1.0;
+  for (const auto& a : def.arg()) {
+    if (a.name() == "width_scale") {
+      width_scale = a.f();
+    } else if (a.name() == "height_scale") {
+      height_scale = a.f();
+    }
+  }
+  CAFFE_ENFORCE_GT(width_scale, 0);
+  CAFFE_ENFORCE_GT(height_scale, 0);
+
+  auto x = def.input(0);
+  const auto& x_shape = shapes.at(x);
+  CAFFE_ENFORCE_GE(x_shape.dims().size(), 2);
+
+  std::vector<float> scales(x_shape.dims().size(), 1.0);
+  scales[scales.size() - 2] = height_scale;
+  scales[scales.size() - 1] = width_scale;
+
+  ConvertedResult result;
+  auto& nodes = result.first;
+  std::vector<std::string> inputs(def.input().begin(), def.input().end());
+  std::vector<std::string> outputs(def.output().begin(), def.output().end());
+  auto node = MakeNode("Upsample", inputs, outputs, def.name());
+  node.add_attribute()->CopyFrom(MakeAttribute("scales", scales));
+  node.add_attribute()->CopyFrom(MakeAttribute("mode", "nearest"));
+  nodes.emplace_back(node);
+
+  return result;
+}
+
 ConvertedResult OnnxExporter::CreateSliceNodes(
     const caffe2::OperatorDef& def,
     const std::unordered_map<std::string, caffe2::TensorShape>& shapes) {
@@ -743,11 +857,15 @@ ConvertedResult OnnxExporter::CreateGemmNodes(
   }
 
   auto gemm_y_output = (has_axis) ? dummy_->NewDummyName() : y;
+  std::vector<AttributeProto> attrs = {MakeAttribute("transB", 1L)};
+  if (legacy_mode_) {
+    attrs.emplace_back(MakeAttribute("broadcast", 1));
+  }
   nodes.emplace_back(MakeNode(
       "Gemm",
       {x, w, b},
       {gemm_y_output},
-      {MakeAttribute("transB", 1L), MakeAttribute("broadcast", 1)},
+      attrs,
       def.name()));
 
   if (has_axis) {

@@ -15,14 +15,15 @@ class MKLSumOp final : public MKLOperator<T> {
   MKLSumOp(const OperatorDef& operator_def, Workspace* ws)
       : MKLOperator<T>(operator_def, ws) {
     coefficients_.resize(this->InputSize(), 1);
-    // caffe2::AddOp support broadcast but dnnSumCreate() doesn't.
-    bool broadcast = OperatorBase::GetSingleArgument<bool>("broadcast", false);
-    OPERATOR_NEEDS_FEATURE(
-        !broadcast, "Broadcast is not yet supported with MKLDNN.");
   }
 
   bool RunOnDevice() override {
     const MKLMemory<T>& X0 = Input(0);
+    // caffe2::AddOp support broadcast but dnnSumCreate() doesn't.
+    for (auto i = 0; i < this->InputSize(); ++i) {
+      const MKLMemory<T>& Xi = Input(i);
+      CAFFE_ENFORCE_EQ(X0.dims(), Xi.dims(), "Broadcast is not yet supported with MKLDNN.");
+    }
     MKLMemory<T>* Y = Output(0);
     bool dims_changed;
     CHECK_INPUT_DIMS(X0, dims_changed);
@@ -41,7 +42,6 @@ class MKLSumOp final : public MKLOperator<T> {
     input_views_.resize(this->InputSize());
     for (auto i = 0; i < this->InputSize(); ++i) {
       const MKLMemory<T>& Xi = Input(i);
-      CAFFE_ENFORCE_EQ(X0.dims(), Xi.dims());
       // Input layouts might be different depending on preceding primitives.
       // Create a consistent view as dnnSumCreate expects it that way.
       input_views_[i] = Xi.View(X0.layout());

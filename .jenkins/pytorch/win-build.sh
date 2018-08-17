@@ -1,6 +1,13 @@
 #!/bin/bash
 
 # If you want to rebuild, run this with REBUILD=1
+# If you want to build with CUDA, run this with USE_CUDA=1
+# If you want to build without CUDA, run this with USE_CUDA=0
+
+if [ ! -f setup.py ]; then
+  echo "ERROR: Please run this build script from PyTorch root directory."
+  exit 1
+fi
 
 COMPACT_JOB_NAME=pytorch-win-ws2016-cuda9-cudnn7-py3-build
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
@@ -31,25 +38,51 @@ EOL
 
 cat >ci_scripts/build_pytorch.bat <<EOL
 
-set PATH=C:\\Program Files\\CMake\\bin;C:\\Program Files\\7-Zip;C:\\curl-7.57.0-win64-mingw\\bin;C:\\Program Files\\Git\\cmd;C:\\Program Files\\Amazon\\AWSCLI;%PATH%
+set PATH=C:\\Program Files\\CMake\\bin;C:\\Program Files\\7-Zip;C:\\ProgramData\\chocolatey\\bin;C:\\Program Files\\Git\\cmd;C:\\Program Files\\Amazon\\AWSCLI;%PATH%
 
 :: Install MKL
-if "%REBUILD%"=="" ( aws s3 cp s3://ossci-windows/mkl_2018.2.185.7z mkl.7z --quiet && 7z x -aoa mkl.7z -omkl )
+if "%REBUILD%"=="" (
+  if "%BUILD_ENVIRONMENT%"=="" (
+    curl -k https://s3.amazonaws.com/ossci-windows/mkl_2018.2.185.7z --output mkl.7z
+  ) else (
+    aws s3 cp s3://ossci-windows/mkl_2018.2.185.7z mkl.7z --quiet
+  )
+  7z x -aoa mkl.7z -omkl
+)
 set CMAKE_INCLUDE_PATH=%cd%\\mkl\\include
 set LIB=%cd%\\mkl\\lib;%LIB
 
 :: Install MAGMA
-if "%REBUILD%"=="" ( aws s3 cp s3://ossci-windows/magma_cuda90_release_mkl_2018.2.185.7z magma_cuda90_release_mkl_2018.2.185.7z --quiet && 7z x -aoa magma_cuda90_release_mkl_2018.2.185.7z -omagma )
+if "%REBUILD%"=="" (
+  if "%BUILD_ENVIRONMENT%"=="" (
+    curl -k https://s3.amazonaws.com/ossci-windows/magma_cuda90_release_mkl_2018.2.185.7z --output magma_cuda90_release_mkl_2018.2.185.7z
+  ) else (
+    aws s3 cp s3://ossci-windows/magma_cuda90_release_mkl_2018.2.185.7z magma_cuda90_release_mkl_2018.2.185.7z --quiet
+  )
+  7z x -aoa magma_cuda90_release_mkl_2018.2.185.7z -omagma
+)
 set MAGMA_HOME=%cd%\\magma
 
 :: Install sccache
 mkdir %CD%\\tmp_bin
-if "%REBUILD%"=="" ( aws s3 cp s3://ossci-windows/sccache.exe %CD%\\tmp_bin\\sccache.exe --quiet )
+if "%REBUILD%"=="" (
+  :check_sccache
+  %CD%\\tmp_bin\\sccache.exe --show-stats || (
+    taskkill /im sccache.exe /f /t || ver > nul
+    del %CD%\\tmp_bin\\sccache.exe
+    if "%BUILD_ENVIRONMENT%"=="" (
+      curl -k https://s3.amazonaws.com/ossci-windows/sccache.exe --output %CD%\\tmp_bin\\sccache.exe
+    ) else (
+      aws s3 cp s3://ossci-windows/sccache.exe %CD%\\tmp_bin\\sccache.exe
+    )
+    goto :check_sccache
+  )
+)
 
 :: Install Miniconda3
 if "%REBUILD%"=="" (
   IF EXIST C:\\Jenkins\\Miniconda3 ( rd /s /q C:\\Jenkins\\Miniconda3 )
-  curl https://repo.continuum.io/miniconda/Miniconda3-latest-Windows-x86_64.exe -O
+  curl -k https://repo.continuum.io/miniconda/Miniconda3-latest-Windows-x86_64.exe -O
   .\Miniconda3-latest-Windows-x86_64.exe /InstallationType=JustMe /RegisterPython=0 /S /AddToPath=0 /D=C:\\Jenkins\\Miniconda3
 )
 call C:\\Jenkins\\Miniconda3\\Scripts\\activate.bat C:\\Jenkins\\Miniconda3
@@ -70,9 +103,10 @@ set CUDNN_LIB_DIR=C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v9.0\\l
 set CUDA_TOOLKIT_ROOT_DIR=C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v9.0
 set CUDNN_ROOT_DIR=C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v9.0
 
+:: Target only our CI GPU machine's CUDA arch to speed up the build
 set TORCH_CUDA_ARCH_LIST=5.2
 
-sccache --stop-server || set ERRORLEVEL=0
+sccache --stop-server
 sccache --start-server
 sccache --zero-stats
 set CC=sccache cl
@@ -82,24 +116,40 @@ set DISTUTILS_USE_SDK=1
 
 set CMAKE_GENERATOR=Ninja
 
-if "%REBUILD%"=="" (
-  set NO_CUDA=1
-  python setup.py install
-)
-if %errorlevel% neq 0 exit /b %errorlevel%
-if "%REBUILD%"=="" (
-  sccache --show-stats
-  sccache --zero-stats
-  rd /s /q C:\\Jenkins\\Miniconda3\\Lib\\site-packages\\torch
-  copy %CD%\\tmp_bin\\sccache.exe tmp_bin\\nvcc.exe
+if not "%USE_CUDA%"=="1" (
+  if "%REBUILD%"=="" (
+    set NO_CUDA=1
+    python setup.py install
+  )
+  if errorlevel 1 exit /b 1
+  if not errorlevel 0 exit /b 1
 )
 
-set CUDA_NVCC_EXECUTABLE=%CD%\\tmp_bin\\nvcc
+if not "%USE_CUDA%"=="0" (
+  if "%REBUILD%"=="" (
+    sccache --show-stats
+    sccache --zero-stats
+    rd /s /q C:\\Jenkins\\Miniconda3\\Lib\\site-packages\\torch
+    copy %CD%\\tmp_bin\\sccache.exe tmp_bin\\nvcc.exe
+  )
 
-if "%REBUILD%"=="" set NO_CUDA=
+  set CUDA_NVCC_EXECUTABLE=%CD%\\tmp_bin\\nvcc
 
-python setup.py install && sccache --show-stats && 7z a %IMAGE_COMMIT_TAG%.7z C:\\Jenkins\\Miniconda3\\Lib\\site-packages\\torch && python ci_scripts\\upload_image.py %IMAGE_COMMIT_TAG%.7z
+  if "%REBUILD%"=="" set NO_CUDA=0
+
+  python setup.py install && sccache --show-stats && (
+    if "%BUILD_ENVIRONMENT%"=="" (
+      echo "NOTE: To run \`import torch\`, please make sure to activate the conda environment by running \`call C:\\Jenkins\\Miniconda3\\Scripts\\activate.bat C:\\Jenkins\\Miniconda3\` in Command Prompt before running Git Bash."
+    ) else (
+      7z a %IMAGE_COMMIT_TAG%.7z C:\\Jenkins\\Miniconda3\\Lib\\site-packages\\torch && python ci_scripts\\upload_image.py %IMAGE_COMMIT_TAG%.7z
+    )
+  )
+)
 
 EOL
 
-ci_scripts/build_pytorch.bat && echo "BUILD PASSED"
+ci_scripts/build_pytorch.bat
+if [ ! -f $IMAGE_COMMIT_TAG.7z ] && [ ! ${BUILD_ENVIRONMENT} == "" ]; then
+    exit 1
+fi
+echo "BUILD PASSED"

@@ -15,7 +15,7 @@
 
 #include <ATen/ATen.h>
 
-#include "Types.hpp"
+#include <c10d/Types.hpp>
 
 namespace c10d {
 
@@ -23,7 +23,7 @@ namespace c10d {
 inline std::string toString(at::IntList l) {
   std::stringstream ss;
   ss << "(";
-  for (int i = 0; i < l.size(); i++) {
+  for (size_t i = 0; i < l.size(); i++) {
     if (i > 0) {
       ss << ", ";
     }
@@ -42,7 +42,7 @@ inline void assertSameSizeAndType(const std::vector<at::Tensor>& tensors) {
   // Ensure all tensors have identical type and shape
   auto& type = tensors[0].type();
   auto sizes = tensors[0].sizes();
-  for (auto i = 1; i < tensors.size(); i++) {
+  for (size_t i = 1; i < tensors.size(); i++) {
     if (tensors[i].type() != type) {
       const std::string expected = type.toString();
       const std::string actual = tensors[i].type().toString();
@@ -60,22 +60,43 @@ inline void assertSameSizeAndType(const std::vector<at::Tensor>& tensors) {
   }
 }
 
+inline at::Tensor newLikeFlat(std::vector<std::vector<at::Tensor>>& tensors) {
+  if (tensors.size() == 0 || tensors[0].size() == 0) {
+    throw std::runtime_error("Received an empty list");
+  }
+  auto& t = tensors[0][0];
+  at::DeviceGuard gpuGuard(t.is_cuda() ? t.get_device() : -1);
+  std::vector<int64_t> sizes{static_cast<int64_t>(tensors[0].size()),
+                             static_cast<int64_t>(tensors.size())};
+  sizes.insert(sizes.end(), t.sizes().begin(), t.sizes().end());
+  return t.type().tensor(sizes);
+}
+
+inline at::Tensor newLikeFlat(std::vector<at::Tensor>& tensors) {
+  if (tensors.size() == 0) {
+    throw std::runtime_error("Received an empty list");
+  }
+  auto& t = tensors[0];
+  at::DeviceGuard gpuGuard(t.is_cuda() ? t.get_device() : -1);
+  std::vector<int64_t> sizes{static_cast<int64_t>(tensors.size())};
+  sizes.insert(sizes.end(), t.sizes().begin(), t.sizes().end());
+  return t.type().tensor(sizes);
+}
+
 inline std::vector<std::vector<int64_t>> getSizes(
     const std::vector<at::Tensor>& tensors) {
   std::vector<std::vector<int64_t>> sizes(tensors.size());
-  for (auto i = 0; i < tensors.size(); i++) {
-    sizes[i] = tensors[i].sizes();
+  for (size_t i = 0; i < tensors.size(); i++) {
+    sizes[i] = tensors[i].sizes().vec();
   }
   return sizes;
 }
 
 inline std::vector<int> getDevices(const std::vector<at::Tensor>& tensors) {
-  std::vector<int> devices;
-  const auto& type = tensors[0].type();
-  if (type.is_cuda()) {
-    devices.resize(tensors.size());
-    for (auto i = 0; i < tensors.size(); i++) {
-      devices[i] = tensors[i].storage()->getDevice();
+  std::vector<int> devices(tensors.size(), -1);
+  if (tensors[0].type().is_cuda()) {
+    for (size_t i = 0; i < tensors.size(); i++) {
+      devices[i] = tensors[i].storage()->pImpl()->getDevice();
     }
   }
   return devices;
@@ -84,8 +105,8 @@ inline std::vector<int> getDevices(const std::vector<at::Tensor>& tensors) {
 template <typename T>
 std::vector<T*> getDataPointers(const std::vector<at::Tensor>& tensors) {
   std::vector<T*> ptrs(tensors.size());
-  for (auto i = 0; i < tensors.size(); i++) {
-    ptrs[i] = static_cast<T*>(tensors[i].storage()->data());
+  for (size_t i = 0; i < tensors.size(); i++) {
+    ptrs[i] = static_cast<T*>(tensors[i].storage()->pImpl()->data());
   }
   return ptrs;
 }
@@ -102,20 +123,6 @@ using SizeType = uint64_t;
     if (errno != 0)                                           \
       throw std::system_error(errno, std::system_category()); \
   }
-
-inline PortType convertToPort(int64_t port) {
-  if ((port < 0) || (port >= std::numeric_limits<PortType>::max()))
-    throw std::domain_error("invalid port (value out of range)");
-
-  return static_cast<PortType>(port);
-}
-
-inline RankType convertToRank(int64_t rank, int64_t min = 0) {
-  if ((rank < min) || (rank >= std::numeric_limits<RankType>::max()))
-    throw std::domain_error("invalid rank (value out of range)");
-
-  return static_cast<RankType>(rank);
-}
 
 // Helper resource guard class
 class ResourceGuard {

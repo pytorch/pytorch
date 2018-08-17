@@ -86,13 +86,17 @@ from .fishersnedecor import FisherSnedecor
 from .gamma import Gamma
 from .geometric import Geometric
 from .gumbel import Gumbel
+from .half_cauchy import HalfCauchy
+from .half_normal import HalfNormal
 from .independent import Independent
 from .kl import kl_divergence, register_kl
 from .laplace import Laplace
 from .log_normal import LogNormal
 from .logistic_normal import LogisticNormal
+from .lowrank_multivariate_normal import LowRankMultivariateNormal
 from .multinomial import Multinomial
 from .multivariate_normal import MultivariateNormal
+from .negative_binomial import NegativeBinomial
 from .normal import Normal
 from .one_hot_categorical import OneHotCategorical
 from .pareto import Pareto
@@ -103,6 +107,7 @@ from .studentT import StudentT
 from .transformed_distribution import TransformedDistribution
 from .transforms import *
 from .uniform import Uniform
+from .weibull import Weibull
 
 __all__ = [
     'Bernoulli',
@@ -125,6 +130,7 @@ __all__ = [
     'LogisticNormal',
     'Multinomial',
     'MultivariateNormal',
+    'NegativeBinomial',
     'Normal',
     'OneHotCategorical',
     'Pareto',
@@ -133,6 +139,7 @@ __all__ = [
     'StudentT',
     'Poisson',
     'Uniform',
+    'Weibull',
     'TransformedDistribution',
     'biject_to',
     'kl_divergence',

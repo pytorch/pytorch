@@ -19,8 +19,7 @@ class Geometric(Distribution):
 
         >>> m = Geometric(torch.tensor([0.3]))
         >>> m.sample()  # underlying Bernoulli has 30% chance 1; 70% chance 0
-         2
-        [torch.FloatTensor of size 1]
+        tensor([ 2.])
 
     Args:
         probs (Number, Tensor): the probabilty of sampling `1`. Must be in range (0, 1]
@@ -75,4 +74,4 @@ class Geometric(Distribution):
         return value * (-probs).log1p() + self.probs.log()
 
     def entropy(self):
-        return binary_cross_entropy_with_logits(self.logits, self.probs, reduce=False) / self.probs
+        return binary_cross_entropy_with_logits(self.logits, self.probs, reduction='none') / self.probs

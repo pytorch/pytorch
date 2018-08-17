@@ -1,17 +1,18 @@
 #ifndef CAFFE2_OPERATORS_UTILITY_OPS_H_
 #define CAFFE2_OPERATORS_UTILITY_OPS_H_
 
-#include <math.h>
+#include <cmath>
+#include <map>
+#include <utility>
 
 #include "caffe2/core/common_omp.h"
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/core/types.h"
+#include "caffe2/operators/gather_op.h"
+#include "caffe2/utils/conversions.h"
 #include "caffe2/utils/math.h"
-
-#include <map>
-#include <utility>
 
 namespace caffe2 {
 
@@ -26,7 +27,7 @@ class NanCheckOp final : public Operator<Context> {
 
  private:
   TensorPrinter tensorPrinter_;
-  Tensor<Context> scratch_;
+  Tensor scratch_{Context::GetDeviceType()};
 };
 
 struct GetNanCheckGradient : public GradientMakerBase {
@@ -54,7 +55,7 @@ class WallClockTimeOp final : public Operator<Context> {
             std::chrono::high_resolution_clock::now().time_since_epoch())
             .count());
 
-    TensorCPU* output = OperatorBase::Output<TensorCPU>(0);
+    TensorCPU* output = Output(0);
     output->Resize();
     *output->template mutable_data<int64_t>() = nanoseconds;
 
@@ -73,12 +74,12 @@ class PrintOp final : public Operator<Context> {
       : Operator<Context>(operator_def, ws),
         tensor_printer_(
             operator_def.input(0),
-            OperatorBase::GetSingleArgument<int>("to_file", 0)
+            this->template GetSingleArgument<int>("to_file", 0)
                 ? ws->RootFolder() + "/" + operator_def.input(0) +
                     kPrintFileExtension
                 : "",
-            OperatorBase::GetSingleArgument<int>("limit", 0)),
-        every_n_(OperatorBase::GetSingleArgument<int>("every_n", 1)) {
+            this->template GetSingleArgument<int>("limit", 0)),
+        every_n_(this->template GetSingleArgument<int>("every_n", 1)) {
     CAFFE_ENFORCE_GE(every_n_, 1);
   }
 
@@ -90,8 +91,8 @@ class PrintOp final : public Operator<Context> {
       return true;
     }
 
-    if (!OperatorBase::InputIsType<Tensor<Context>>(0) &&
-        !OperatorBase::InputIsType<TensorCPU>(0)) {
+    if (!this->template InputIsType<Tensor>(0, Context::GetDeviceType()) &&
+        !this->template InputIsType<Tensor>(0, CPU)) {
       LOG(INFO) << "Blob of type: "
                 << OperatorBase::Inputs().at(0)->meta().name();
       return true;
@@ -112,9 +113,9 @@ class PrintOp final : public Operator<Context> {
         unsigned char,
         std::string>;
 
-    if (OperatorBase::InputIsType<TensorCPU>(0)) {
+    if (this->template InputIsType<Tensor>(0, CPU)) {
       return DispatchHelper<Types>::call(
-          this, OperatorBase::Input<TensorCPU>(0));
+          this, this->template Input<Tensor>(0, CPU));
     } else {
       return DispatchHelper<Types>::call(this, Input(0));
     }
@@ -127,9 +128,9 @@ class PrintOp final : public Operator<Context> {
     // pointing to the right instantiation. Note that tensor_copy_if_needed
     // will handle memory deallocation itself so no smart pointer is needed.
     const TensorCPU* tensor;
-    TensorCPU tensor_copy_if_needed;
-    if (OperatorBase::InputIsType<TensorCPU>(0)) {
-      tensor = &OperatorBase::Input<TensorCPU>(0);
+    Tensor tensor_copy_if_needed(CPU);
+    if (this->template InputIsType<Tensor>(0, CPU)) {
+      tensor = &this->template Input<Tensor>(0, CPU);
     } else {
       tensor_copy_if_needed.CopyFrom(Input(0), &context_);
       // Make sure that the copy is finished.
@@ -215,7 +216,7 @@ class FlattenToVecOp : public Operator<Context> {
         input.dims().size(), 1, "The rank of the tensor must be >= 1.");
     output->Resize(input.size());
 
-    context_.template CopyItems<Context, Context>(
+    context_.CopyItemsSameDevice(
         input.meta(),
         input.size(),
         input.raw_data(),
@@ -237,7 +238,7 @@ class ResizeLikeOp : public Operator<Context> {
     auto* output = Output(0);
     CAFFE_ENFORCE_EQ(input0.size(), input1.size());
     output->ResizeLike(Input(1));
-    context_.template CopyItems<Context, Context>(
+    context_.CopyItemsSameDevice(
         input0.meta(),
         input0.size(),
         input0.raw_data(),
@@ -330,7 +331,7 @@ class WeightedSumOp : public Operator<Context> {
     int size = X0.size();
     auto* output = Output(0);
     output->ResizeLike(X0);
-    math::Scale<DstType, Context>(
+    math::Scale<float, DstType, Context>(
         size,
         weight0.template data<float>(),
         X0.template data<DstType>(),
@@ -368,7 +369,7 @@ class WeightedSumGradientOp : public Operator<Context> {
 
   WeightedSumGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        grad_on_w_(OperatorBase::GetSingleArgument<bool>("grad_on_w", false)) {}
+        grad_on_w_(this->template GetSingleArgument<bool>("grad_on_w", false)) {}
 
   template <typename DstType>
   bool DoRunWithType() {
@@ -387,7 +388,7 @@ class WeightedSumGradientOp : public Operator<Context> {
       auto* cur_dX = Output(i);
       cur_dX->ResizeLike(dY);
 
-      math::Scale<DstType, Context>(
+      math::Scale<float, DstType, Context>(
           size,
           cur_w.template data<float>(),
           dY_data,
@@ -520,8 +521,8 @@ class ScatterWeightedSumOp : public Operator<Context> {
       for (int i = 0; i < K; ++i) {
         Index idx = idxs[i];
         // double-checking the indices, but it's fine as it's DCHECK only
-        DCHECK(0 <= idx && idx < N) << "Index out of bounds: " << idx
-                                    << ", range 0 to " << N;
+        DCHECK(0 <= idx && idx < N)
+            << "Index out of bounds: " << idx << ", range 0 to " << N;
         math::AxpyFixedSize<T, Context, FixedSize>(
             block_size,
             w,
@@ -532,10 +533,10 @@ class ScatterWeightedSumOp : public Operator<Context> {
     }
     return true;
   }
-  Tensor<CPUContext> x_data_host_;
-  Tensor<CPUContext> weights_host_;
-  Tensor<Context> x_data_device_;
-  Tensor<Context> weights_device_;
+  Tensor x_data_host_{CPU};
+  Tensor weights_host_{CPU};
+  Tensor x_data_device_{Context::GetDeviceType()};
+  Tensor weights_device_{Context::GetDeviceType()};
 };
 
 /**
@@ -661,9 +662,9 @@ class ScatterAssignOp : public Operator<Context> {
     for (int i = 0; i < K; ++i) {
       Index idx = idxs[i];
       // double-checking the indices, but it's fine as it's DCHECK only
-      DCHECK(0 <= idx && idx < N) << "Index out of bounds: " << idx
-                                  << ", range 0 to " << N;
-      context_.template Copy<T, Context, Context>(
+      DCHECK(0 <= idx && idx < N)
+          << "Index out of bounds: " << idx << ", range 0 to " << N;
+      context_.template CopySameDevice<T>(
           block_size, slicesData + block_size * i, data + block_size * idx);
     }
   }
@@ -678,8 +679,8 @@ class CopyOp : public Operator<Context> {
   USE_SIMPLE_CTOR_DTOR(CopyOp);
 
   bool RunOnDevice() override {
-    auto& input = OperatorBase::Input<Tensor<SrcContext>>(0);
-    auto* output = OperatorBase::Output<Tensor<DstContext>>(0);
+    auto& input = this->template Input<Tensor>(0, SrcContext::GetDeviceType());
+    auto* output = this->template Output<Tensor>(0, DstContext::GetDeviceType());
     output->ResizeLike(input);
     this->context_.template CopyItems<SrcContext, DstContext>(
         input.meta(),
@@ -869,7 +870,7 @@ class LengthsToWeightsOp : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   LengthsToWeightsOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        power_(OperatorBase::GetSingleArgument<float>("power", 0.5)) {}
+        power_(this->template GetSingleArgument<float>("power", 0.5)) {}
 
   bool RunOnDevice() override {
     return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(this, Input(0));
@@ -934,7 +935,7 @@ class HasElementsOp : public Operator<Context> {
 
   bool RunOnDevice() override {
     auto& input = Input(0);
-    auto* output = OperatorBase::Output<TensorCPU>(0);
+    auto* output = Output(0);
     output->Resize(std::vector<TIndex>{});
     *output->template mutable_data<bool>() = input.size() > 0;
     return true;
@@ -949,7 +950,7 @@ class IsEmptyOp : public Operator<Context> {
 
   bool RunOnDevice() override {
     auto& input = Input(0);
-    auto* output = OperatorBase::Output<TensorCPU>(0);
+    auto* output = Output(0);
     output->Resize(std::vector<TIndex>{});
     *output->template mutable_data<bool>() = (input.size() == 0);
     return true;
@@ -1010,56 +1011,6 @@ class LengthsToShapeOp : public Operator<Context> {
 };
 
 template <class Context>
-class GatherOp : public Operator<Context> {
- public:
-  USE_OPERATOR_CONTEXT_FUNCTIONS;
-  USE_SIMPLE_CTOR_DTOR(GatherOp);
-
-  bool RunOnDevice() override {
-    return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
-        this, OperatorBase::Input<TensorCPU>(INDICES));
-  }
-
-  template <typename Index>
-  bool DoRunWithType() {
-    // If we endup using it on GPU doing O(N) memcpy is probably not best :)
-    // TODO: implement prefetching if it starts mattering (TF does it)
-    auto& data = Input(DATA);
-    auto& indices = Input(INDICES);
-    auto* output = Output(0);
-
-    CAFFE_ENFORCE_GE(data.ndim(), 1, "DATA should be at least 1-D");
-    auto shape = indices.dims();
-    shape.insert(shape.end(), data.dims().begin() + 1, data.dims().end());
-    output->Resize(shape);
-
-    int block_size = data.size_from_dim(1);
-    auto block_bytesize = data.size_from_dim(1) * data.meta().itemsize();
-    int N = indices.size();
-
-    auto src_base = static_cast<const char*>(data.raw_data());
-    const Index* idxs = indices.template data<Index>();
-    auto out = static_cast<char*>(output->raw_mutable_data(data.meta()));
-
-    for (int i = 0; i < N; ++i) {
-      auto idx = idxs[i];
-      CAFFE_ENFORCE(
-          0 <= idx && idx < data.dim(0),
-          "INDICES element is out of DATA bounds, id=",
-          idx,
-          " data_dim=",
-          data.dim(0));
-      auto src = src_base + idx * block_bytesize;
-      context_.template CopyItems<Context, Context>(
-          data.meta(), block_size, src, out + block_bytesize * i);
-    }
-    return true;
-  }
-
-  INPUT_TAGS(DATA, INDICES);
-};
-
-template <class Context>
 class GatherRangesOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
@@ -1067,7 +1018,7 @@ class GatherRangesOp : public Operator<Context> {
 
   bool RunOnDevice() override {
     return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
-        this, OperatorBase::Input<TensorCPU>(RANGES));
+        this, this->template Input<Tensor>(RANGES, CPU));
   }
 
   template <typename Index>
@@ -1114,7 +1065,7 @@ class GatherRangesOp : public Operator<Context> {
       auto rangeSizeBytes = rangeLength * itemsize;
       CAFFE_ENFORCE(outputOffsetBytes < outputSize * itemsize);
       CAFFE_ENFORCE(rangeStart + rangeLength <= data.size());
-      context_.template CopyItems<Context, Context>(
+      context_.CopyItemsSameDevice(
           data.meta(),
           rangeLength,
           rawData + rangeStart * itemsize,
@@ -1146,7 +1097,7 @@ class LengthsGatherOp : public Operator<Context> {
 
   bool RunOnDevice() override {
     return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
-        this, OperatorBase::Input<TensorCPU>(INDICES));
+        this, this->template Input<Tensor>(INDICES, CPU));
   }
 
   template <typename Index>
@@ -1193,7 +1144,7 @@ class LengthsGatherOp : public Operator<Context> {
     for (size_t i = 0; i < indices.size(); ++i) {
       auto idx = indices_data[i];
       auto length = lengths_data[idx];
-      context_.template CopyItems<Context, Context>(
+      context_.CopyItemsSameDevice(
           items.meta(),
           length * block_size,
           src_base + offsets_[idx] * block_bytesize,
@@ -1243,7 +1194,7 @@ class UnsafeCoalesceOp final : public Operator<Context> {
     size_t coalesced_offset = 0;
     for (auto i = 0; i < InputSize(); ++i) {
       const auto input_nbytes = Input(i).nbytes();
-      context_.template CopyBytes<Context, Context>(
+      context_.CopyBytesSameDevice(
           input_nbytes,
           (const uint8_t*)Input(i).raw_data(),
           coalesced->template mutable_data<uint8_t>() + coalesced_offset);
@@ -1271,10 +1222,10 @@ class AccumulateHistogramOp : public Operator<Context> {
   AccumulateHistogramOp(const OperatorDef& def, Workspace* ws)
       : Operator<Context>(def, ws),
         lower_bound_(
-            OperatorBase::GetSingleArgument<float>("lower_bound", 0.0)),
+            this->template GetSingleArgument<float>("lower_bound", 0.0)),
         upper_bound_(
-            OperatorBase::GetSingleArgument<float>("upper_bound", 1.0)),
-        num_buckets_(OperatorBase::GetSingleArgument<int>("num_buckets", 1)) {
+            this->template GetSingleArgument<float>("upper_bound", 1.0)),
+        num_buckets_(this->template GetSingleArgument<int>("num_buckets", 1)) {
     CAFFE_ENFORCE_GT(num_buckets_, 0);
     // 2 more for histograms < lower_bound, >= upper_bound respectively
     num_output_buckets_ = num_buckets_ + 2;
@@ -1344,7 +1295,7 @@ class RangeOp : public Operator<Context> {
     if (std::is_same<Context, TensorCPU>::value) {
       return Input(index).template data<T>()[0];
     } else {
-      local_.template CopyFrom<Context>(Input(index));
+      local_.CopyFrom(Input(index));
       return local_.template data<T>()[0];
     }
   }
@@ -1400,11 +1351,73 @@ class RangeOp : public Operator<Context> {
   }
 
   template <typename T>
-  bool DoRunOnDevice(const T& start, const T& step, Tensor<Context>* output);
+  bool DoRunOnDevice(const T& start, const T& step, Tensor* output);
 
  private:
   // local CPU tensor for copying constants.
-  TensorCPU local_;
+  Tensor local_{CPU};
+};
+
+class ThrowExceptionOp : public Operator<CPUContext> {
+ public:
+  ThrowExceptionOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<CPUContext>(operator_def, ws),
+        message_(GetSingleArgument<std::string>(
+            "message",
+            "Exception from ThrowExceptionOp")) {}
+
+  bool RunOnDevice() override {
+    CAFFE_THROW(message_);
+  }
+
+ private:
+  const std::string message_;
+};
+
+class ThrowChildThreadExceptionOp : public Operator<CPUContext> {
+ public:
+  ThrowChildThreadExceptionOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<CPUContext>(operator_def, ws),
+        message_(GetSingleArgument<std::string>(
+            "message",
+            "Exception from ThrowChildThreadExceptionOp")) {}
+
+  bool RunOnDevice() override {
+    std::thread t([this]() { CAFFE_THROW(this->message_); });
+
+    t.join();
+    return true;
+  }
+
+ private:
+  const std::string message_;
+};
+
+class LogFatalOp : public Operator<CPUContext> {
+ public:
+  LogFatalOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<CPUContext>(operator_def, ws),
+        message_(GetSingleArgument<std::string>(
+            "message",
+            "Logging from LogFatalOp")) {}
+
+  bool RunOnDevice() override {
+    LOG(FATAL) << message_;
+    return true;
+  }
+
+ private:
+  const std::string message_;
+};
+
+class FailOp : public Operator<CPUContext> {
+ public:
+  FailOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<CPUContext>(operator_def, ws) {}
+
+  bool RunOnDevice() override {
+    return false;
+  }
 };
 
 } // namespace caffe2

@@ -143,7 +143,6 @@ TEST(ObserverTest, TestDAGNetBase) {
   ws.CreateBlob("in");
   NetDef net_def;
   unique_ptr<NetBase> net(CreateNetTestHelper(&ws, true));
-  EXPECT_EQ(caffe2::dynamic_cast_if_rtti<DAGNetBase*>(net.get()), net.get());
   unique_ptr<DummyObserver<NetBase>> net_ob =
       make_unique<DummyObserver<NetBase>>(net.get());
   net.get()->AttachObserver(std::move(net_ob));

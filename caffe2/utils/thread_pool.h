@@ -9,10 +9,11 @@
 #include <utility>
 
 #include "caffe2/core/numa.h"
+#include "caffe2/utils/thread_name.h"
 
 namespace caffe2 {
 
-class TaskThreadPool {
+class CAFFE2_API TaskThreadPool {
  private:
   struct task_element_t {
     bool run_with_id;
@@ -115,6 +116,7 @@ class TaskThreadPool {
  private:
   /// @brief Entry point for pool threads.
   void main_loop(std::size_t index) {
+    setThreadName("CaffeTaskThread");
     NUMABind(numa_node_id_);
 
     while (running_) {

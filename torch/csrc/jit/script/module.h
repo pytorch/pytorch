@@ -5,10 +5,21 @@
 #include "torch/csrc/jit/passes/shape_analysis.h"
 #include "torch/csrc/jit/argument_spec.h"
 #include "torch/csrc/jit/function_schema.h"
+#include "torch/csrc/jit/assertions.h"
 #include "torch/csrc/jit/named_value.h"
+#include "torch/csrc/jit/source_range.h"
 
-#include <ATen/optional.h>
+#include <torch/csrc/api/include/torch/detail/ordered_dict.h>
+
+#include <ATen/core/ArrayRef.h>
+#include <ATen/core/optional.h>
+
 #include <functional>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <unordered_map>
+#include <vector>
 
 // This file contains classes which assist in desugaring Python style
 // modules and their methods into flattened graphs which don't have any
@@ -24,8 +35,6 @@ namespace torch { namespace jit { namespace script {
 //     ...
 // Note: because Method/Module are exposed to python these
 // classes use python method naming conventions
-
-struct SourceRange;
 
 struct Method {
   Method(std::string name, bool optimize,
@@ -44,14 +53,14 @@ struct Method {
     }
   }
 
-  variable_tensor_list run(variable_tensor_list && inputs) {
-    std::call_once(executor_init, [&]{
-      executor = GraphExecutor(graph(), optimize);
-    });
-    for(auto tp : member_inputs) {
-      inputs.push_back(*tp);
+  void run(Stack & stack) {
+    for(at::Tensor* tp : member_inputs) {
+      stack.push_back(*tp);
     }
-    return executor.run(std::move(inputs));
+    get_executor().run(stack);
+  }
+  std::shared_ptr<Graph> graph_for(const Stack& inputs) {
+    return get_executor().graphFor(inputs);
   }
   std::shared_ptr<Graph> graph() const {
     return graph_;
@@ -85,12 +94,15 @@ struct Method {
 
   std::shared_ptr<Graph> propagate_shapes(std::vector<at::Tensor> inputs, bool with_grad=false) {
     auto retval = graph_->copy();
-    for (auto inp : member_inputs) {
-      inputs.push_back(*inp);
+    Stack stack;
+    stack.reserve(inputs.size() + member_inputs.size());
+    for (at::Tensor & i : inputs) {
+      stack.emplace_back(std::move(i));
     }
-    PropagateInputShapes(
-      *retval,
-      ArgumentSpec(with_grad, variable_tensor_list(std::move(inputs))));
+    for (at::Tensor* inp : member_inputs) {
+      stack.push_back(*inp);
+    }
+    PropagateInputShapes(*retval, ArgumentSpec(with_grad, std::move(stack)));
     return retval;
   }
 
@@ -100,21 +112,20 @@ struct Method {
       inputs.push_back(*inp);
     }
     if (propagate) {
-      auto inputs_copy = inputs;
-      PropagateInputShapes(*retval, ArgumentSpec(with_grad, variable_tensor_list(std::move(inputs_copy))));
+      PropagateInputShapes(*retval, ArgumentSpec(with_grad, fmap<IValue>(inputs)));
     }
     JIT_ASSERT(retval->inputs().size() == inputs.size());
     for (size_t i=0; i < retval->inputs().size(); ++i) {
       auto scalar_type = inputs[i].type().scalarType();
       auto sizes = inputs[i].sizes();
-      auto type = std::make_shared<torch::jit::TensorType>(scalar_type, -1, sizes);
+      auto type = torch::jit::TensorType::create(scalar_type, -1, sizes);
       retval->inputs()[i]->setType(type);
     }
     JIT_ASSERT(retval->outputs().size() == outputs.size());
     for (size_t i=0; i < retval->outputs().size(); ++i) {
       auto scalar_type = outputs[i].type().scalarType();
       auto sizes = outputs[i].sizes();
-      auto type = std::make_shared<torch::jit::TensorType>(scalar_type, -1, sizes);
+      auto type = torch::jit::TensorType::create(scalar_type, -1, sizes);
       retval->outputs()[i]->setType(type);
     }
     return retval;
@@ -128,10 +139,35 @@ struct Method {
     schema.reset(new FunctionSchema(std::move(schema_)));
     return *this;
   }
+
+  const FunctionSchema& getSchema() const {
+    AT_ASSERT(schema != nullptr);
+    return *schema;
+  }
+
+  std::string prettyPrintSchema() const {
+    JIT_ASSERT(schema);
+    std::stringstream ss;
+    ss << *schema;
+    return ss.str();
+  }
+
+  GraphExecutorState getDebugState() {
+    return get_executor().getDebugState();
+  }
+
 private:
   std::string name_;
   std::shared_ptr<Graph> graph_; // for debugging and for inlining
   bool optimize;
+
+  GraphExecutor& get_executor() {
+    std::call_once(executor_init, [&]{
+      executor = GraphExecutor(graph(), optimize);
+    });
+    return executor;
+  }
+
   GraphExecutor executor; // for execution
   // member_inputs are a list of additional arguments appended to graph that are
   // inputs that come from the members of the Module or its submodules.
@@ -189,69 +225,12 @@ private:
   std::unique_ptr<at::Tensor> parameter;
 };
 
-// simple ordered dict used only in Module
-// contains only the minimum necessary functionality for Module
-template<typename T>
-struct OrderedDict {
-  OrderedDict(const char * what)
-  : what(what) {}
-  // note: slight difference from python here.
-  // we do not allow for insertion of an already existing value,
-  // because we not allow allow methods or submodules to be updated
-  // once created
-  T& insert(const std::string& name,  T&& value) {
-    if(index_.count(name) != 0) {
-      std::stringstream ss;
-      ss << "module " << what << "'" << name << "' already defined.";
-      throw std::runtime_error(ss.str());
-    }
-    values_.push_back(std::move(value));
-    index_[name] = values_.size() - 1;
-    return values_.back();
-  }
-  at::optional<T&> find(const std::string& str) {
-    auto it = index_.find(str);
-    if(it == index_.end())
-      return at::nullopt;
-    return at::optional<T&>(values_.at(it->second));
-  }
-  at::optional<const T&> find(const std::string& str) const {
-    auto it = index_.find(str);
-    if(it == index_.end())
-      return at::nullopt;
-    return at::optional<const T&>(values_.at(it->second));
-  }
-  T& get(const std::string& name) {
-    if(auto v = find(name)) {
-      return *v;
-    }
-    std::stringstream ss;
-    ss << "module " << what << "'" << name << "' is not defined.";
-    throw std::runtime_error(ss.str());
-  }
-  const T& get(const std::string& name) const {
-    if(auto v = find(name)) {
-      return *v;
-    }
-    std::stringstream ss;
-    ss << "module " << what << "'" << name << "' is not defined.";
-    throw std::runtime_error(ss.str());
-  }
-  const std::vector<T>& values() const {
-    return values_;
-  }
-private:
-  std::unordered_map<std::string, size_t> index_;
-  std::vector<T> values_;
-  const char * what;
-};
-
-struct Module : public std::enable_shared_from_this<Module> {
+struct Module {
   TH_DISALLOW_COPY_AND_ASSIGN(Module);
   Module()
-  : modules("modules")
-  , parameters("parameters")
-  , methods("methods")
+  : modules("Module")
+  , parameters("Parameter")
+  , methods("Method")
   , optimize(true) {}
 
   // note this doesn't change the flags of existing methods just ones
@@ -292,11 +271,11 @@ struct Module : public std::enable_shared_from_this<Module> {
   }
 
   autograd::Variable get_parameter(const std::string& name) const {
-    return static_cast<autograd::Variable&>(*parameter_slot(name));
+    return autograd::as_variable_ref(*parameter_slot(name));
   }
 
   // each module owns its method. The reference returned here
-  // is guarenteed to stay valid until this module has been destoryed
+  // is guarenteed to stay valid until this module has been destroyed
   Method& get_method(const std::string& name) const {
     return *methods.get(name);
   }
@@ -305,39 +284,40 @@ struct Module : public std::enable_shared_from_this<Module> {
     return modules.get(name).module;
   }
 
-  const std::vector<NamedModule>& get_modules() const {
-    return modules.values();
+  const torch::detail::OrderedDict<std::string, NamedModule>& get_modules() const {
+    return modules;
   }
-  const  std::vector<NamedParameter>& get_parameters() const {
-    return parameters.values();
+  const torch::detail::OrderedDict<std::string, NamedParameter>& get_parameters() const {
+    return parameters;
   }
-  const  std::vector<std::unique_ptr<Method>>& get_methods() const {
-    return methods.values();
+  const torch::detail::OrderedDict<std::string, std::unique_ptr<Method>>& get_methods() const {
+    return methods;
   }
 
-
-  at::optional<NamedParameter&> find_parameter(const std::string& name) {
+  NamedParameter* find_parameter(const std::string& name) {
     return parameters.find(name);
   }
-  at::optional<NamedModule&> find_module(const std::string& name) {
+  NamedModule* find_module(const std::string& name) {
     return modules.find(name);
   }
-  at::optional<Method&> find_method(const std::string& name) {
-    if(auto pm = methods.find(name))
-      return at::optional<Method&>(**pm);
-    return at::nullopt;
+  Method* find_method(const std::string& name) {
+    if (auto* pm = methods.find(name)) {
+      return pm->get();
+    }
+    return nullptr;
   }
 
+  void save(const std::string& filename);
 
-private:
+ private:
 
   // invariant: to ensure member_inputs of Methods stay valid,
   // it is only legal to _add_ new modules and parameters.
   // removing them will allow member_inputs to point to invalid parameters
   // no such restriction exists for methods
-  OrderedDict<NamedModule> modules;
-  OrderedDict<NamedParameter> parameters;
-  OrderedDict<std::unique_ptr<Method>> methods;
+  torch::detail::OrderedDict<std::string, NamedModule> modules;
+  torch::detail::OrderedDict<std::string, NamedParameter> parameters;
+  torch::detail::OrderedDict<std::string, std::unique_ptr<Method>> methods;
   bool optimize;
 };
 

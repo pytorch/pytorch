@@ -6,10 +6,10 @@ from copy import deepcopy
 
 import torch
 import torch.legacy.nn as nn
-from common_nn import NNTestCase, ModuleTest, CriterionTest, iter_tensors, \
-    module_tests, criterion_tests, TEST_CUDA, PRECISION
-from torch.autograd.gradcheck import get_numerical_jacobian
 from common import to_gpu, freeze_rng_state, run_tests
+from common_nn import NNTestCase, ModuleTest, CriterionTest, iter_tensors, \
+    module_tests, criterion_tests, PRECISION
+from torch.autograd.gradcheck import get_numerical_jacobian
 from torch.autograd import Variable
 
 
@@ -618,6 +618,10 @@ def prepare_tests():
         test_params = deepcopy(test_params)
         name = test_params.pop('module_name')
         name = name_remap.get(name, name)
+        # hardshrink is deprecated in nn
+        if name == "HardShrink":
+            continue
+
         test_params['constructor'] = getattr(nn, name)
         test = OldModuleTest(**test_params)
         add_test(test)
@@ -625,6 +629,9 @@ def prepare_tests():
         test_params = deepcopy(test_params)
         name = test_params.pop('module_name')
         name = name_remap.get(name, name.replace('Loss', 'Criterion'))
+        # hardshrink is deprecated in nn
+        if name == "HardShrink":
+            continue
 
         # nn.NLLLoss2d is deprecated, but there is a NLLLoss test for 2d
         if name == 'ClassNLLCriterion' and 'desc' in test_params.keys() and '2d' in test_params['desc']:
@@ -652,6 +659,7 @@ def require_grad(input):
 
 
 class TestNN(NNTestCase):
+    _do_cuda_memory_leak_check = True
 
     def _numerical_jacobian(self, module, input, jacobian_input=True, jacobian_parameters=True):
         def fw(input):
@@ -685,14 +693,18 @@ class TestNN(NNTestCase):
 
         return module.backward(input, grad_output)
 
-    def _forward_criterion(self, criterion, input, target):
+    def _forward_criterion(self, criterion, input, target, extra_args=None):
+        if extra_args is None:
+            extra_args = tuple()
         with torch.no_grad():
-            return criterion.forward(input, target)
+            return criterion.forward(input, target, *extra_args)
 
-    def _backward_criterion(self, criterion, input, target, gradOutput=None):
+    def _backward_criterion(self, criterion, input, target, gradOutput=None, extra_args=None):
+        if extra_args is None:
+            extra_args = tuple()
         # Ignore gradOutput. It's used for non-legacy tests.
         with torch.no_grad():
-            return criterion.backward(input, target)
+            return criterion.backward(input, target, *extra_args)
 
     def _zero_grad_parameters(self, module):
         return module.zeroGradParameters()

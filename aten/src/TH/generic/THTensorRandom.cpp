@@ -2,6 +2,14 @@
 #define TH_GENERIC_FILE "generic/THTensorRandom.cpp"
 #else
 
+#include <cmath>
+
+#ifdef _OPENMP
+#include <omp.h>
+#endif
+
+#include <cpuinfo.h>
+
 #include "THGenerator.hpp"
 
 void THTensor_(random)(THTensor *self, THGenerator *_generator)
@@ -51,10 +59,93 @@ void THTensor_(geometric)(THTensor *self, THGenerator *_generator, double p)
   TH_TENSOR_APPLY(real, self, *self_data = (real)THRandom_geometric(_generator, p););
 }
 
+#ifdef TH_BLAS_MKL
+#define BERNOULLI_OMP 800
+#define TH_OMP_OVERHEAD_THRESHOLD_COPY 20000
+
+void THTensor_(iBernoulli_generate_copy)(THTensor *self, THGenerator *_generator, const double p)
+{
+  int64_t seed = THRandom_random(_generator);
+  int64_t n = THTensor_(nElement)(self);
+  int contig = THTensor_(isContiguous)(self);
+  int *tmp = NULL;
+  THIntTensor* intTensor = NULL;
+
+  if (contig) {
+#ifdef TH_REAL_IS_INT
+    tmp = THIntTensor_data(self);
+#else
+    tmp = (int*)THAlloc(n*sizeof(int));
+#endif
+  } else {
+    intTensor = THIntTensor_new();
+    THIntTensor_resizeNd(intTensor, self->dim(), THTensor_getSizePtr(self), nullptr);
+    tmp = THIntTensor_data(intTensor);
+  }
+
+#ifdef _OPENMP
+  size_t nthr = !omp_in_parallel() && n >= BERNOULLI_OMP ? omp_get_num_threads() : 1;
+#pragma omp parallel num_threads(nthr) firstprivate(nthr)
+  {
+    size_t tid = omp_get_thread_num();
+    int64_t seg_len_tmp = n / nthr;
+    int64_t line_index_offset = tid * seg_len_tmp;
+    int64_t line_seg_len = (tid == nthr - 1)? (n-line_index_offset) : seg_len_tmp;
+#else
+  {
+    int64_t line_index_offset = 0;
+    int64_t line_seg_len = n;
+#endif
+
+    if (line_seg_len > 0) {
+      VSLStreamStatePtr stream;
+      vslNewStream(&stream, VSL_BRNG_MCG31, seed);
+      vslSkipAheadStream(stream, line_index_offset);
+      viRngBernoulli(VSL_RNG_METHOD_BERNOULLI_ICDF, stream, line_seg_len,
+        tmp + line_index_offset, p);
+      vslDeleteStream(&stream);
+
+#ifndef TH_REAL_IS_INT
+      if (contig) {
+        real* self_seg = THTensor_(data)(self) + line_index_offset;
+        int* tmp_seg = tmp + line_index_offset;
+        THVector_(cvtFromInt)(self_seg, tmp_seg, line_seg_len);
+      }
+#endif
+    }
+  }
+
+  if(contig) {
+#ifndef TH_REAL_IS_INT
+    THFree(tmp);
+#endif
+  } else {
+#ifdef _OPENMP
+    TH_TENSOR_APPLY2_OMP(n, 1, 0, int, intTensor, real, self, *self_data = *intTensor_data;, TH_OMP_OVERHEAD_THRESHOLD_COPY)
+#else
+    TH_TENSOR_APPLY2(int, intTensor, real, self, *self_data = *intTensor_data;)
+#endif
+    THIntTensor_free(intTensor);
+  }
+
+}
+
+#endif
+
 void THTensor_(bernoulli)(THTensor *self, THGenerator *_generator, double p)
 {
+#ifdef TH_BLAS_MKL
+  if(cpuinfo_initialize() && cpuinfo_vendor_intel == cpuinfo_get_processor(0)->core->vendor) {
+    std::lock_guard<std::mutex> lock(_generator->mutex);
+    THTensor_(iBernoulli_generate_copy)(self, _generator, p);
+  } else {
+    std::lock_guard<std::mutex> lock(_generator->mutex);
+    TH_TENSOR_APPLY(real, self, *self_data = (real)THRandom_bernoulli(_generator, p););
+  }
+#else
   std::lock_guard<std::mutex> lock(_generator->mutex);
   TH_TENSOR_APPLY(real, self, *self_data = (real)THRandom_bernoulli(_generator, p););
+#endif
 }
 
 void THTensor_(bernoulli_FloatTensor)(THTensor *self, THGenerator *_generator, THFloatTensor *p)
@@ -103,7 +194,7 @@ void THTensor_(normal)(THTensor *self, THGenerator *_generator, double mean, dou
   std::lock_guard<std::mutex> lock(_generator->mutex);
   const int64_t size = THTensor_(numel)(self);
   if (size >= 16 && THTensor_(isContiguous)(self)) {
-    THVector_(normal_fill)(self->storage->data, size, _generator, mean, stddev);
+    THVector_(normal_fill)(THStorage_(data)(THTensor_getStoragePtr(self)), size, _generator, mean, stddev);
   } else {
     TH_TENSOR_APPLY(real, self, *self_data = (real)THRandom_normal(_generator, mean, stddev););
   }
@@ -193,9 +284,9 @@ void THTensor_(multinomialAliasSetup)(THTensor *probs, THLongTensor *J, THTensor
       small = THLongTensor_fastGet1d(smaller, small_c-1);
 
       THLongTensor_fastSet1d(J, small, large);
-      q_data[large * q->stride[0]] -= 1.0 - THTensor_(fastGet1d)(q, small);
+      q_data[large * q->stride(0)] -= 1.0 - THTensor_(fastGet1d)(q, small);
 
-      if(q_data[large * q->stride[0]] < 1.0)
+      if(q_data[large * q->stride(0)] < 1.0)
         {
           THLongTensor_fastSet1d(smaller, small_c-1, large);
           large_c -= 1;
@@ -226,7 +317,7 @@ void THTensor_(multinomialAliasSetup)(THTensor *probs, THLongTensor *J, THTensor
     {
       for (i=0; i < inputsize; i++)
         {
-          q_data[i*q->stride[0]] /= q_max;
+          q_data[i*q->stride(0)] /= q_max;
         }
     }
   for (i=0; i < inputsize; i++)
@@ -266,7 +357,7 @@ void THTensor_(multinomialAliasDraw)(THLongTensor *self, THGenerator *_generator
 void THTensor_(multinomial)(THLongTensor *self, THGenerator *_generator, THTensor *prob_dist, int n_sample, int with_replacement)
 {
   std::lock_guard<std::mutex> lock(_generator->mutex);
-  int64_t start_dim = THTensor_(nDimension)(prob_dist);
+  int64_t start_dim = THTensor_(nDimensionLegacyAll)(prob_dist);
   int64_t n_dist;
   int64_t n_categories;
   THDoubleTensor* cum_dist;
@@ -307,17 +398,21 @@ void THTensor_(multinomial)(THLongTensor *self, THGenerator *_generator, THTenso
     for (j=0; j<n_categories; j++)
     {
       val = THStorage_(get)( \
-        prob_dist->storage, \
-        prob_dist->storageOffset+i*prob_dist->stride[0]+j*prob_dist->stride[1] \
+        THTensor_getStoragePtr(prob_dist), \
+        prob_dist->storage_offset()+i*prob_dist->stride(0)+j*prob_dist->stride(1) \
       );
       THArgCheckWithCleanup((val >= 0),
                             THCleanup(THDoubleTensor_free(cum_dist); if (start_dim == 1) THTensor_(squeeze1d)(prob_dist, prob_dist, 0);),
                             2,
                             "invalid multinomial distribution (encountering probability entry < 0)");
+      THArgCheckWithCleanup((std::isfinite(val)),
+                            THCleanup(THDoubleTensor_free(cum_dist); if (start_dim == 1) THTensor_(squeeze1d)(prob_dist, prob_dist, 0);),
+                            2,
+                            "invalid multinomial distribution (encountering probability entry = infinity or NaN)");
       sum += val;
       THDoubleStorage_set(
-        cum_dist->storage, \
-        cum_dist->storageOffset+j*cum_dist->stride[0], \
+        THTensor_getStoragePtr(cum_dist), \
+        cum_dist->storage_offset()+j*cum_dist->stride(0), \
         sum \
       );
     }
@@ -331,7 +426,7 @@ void THTensor_(multinomial)(THLongTensor *self, THGenerator *_generator, THTenso
     {
       for (j=0; j<n_categories; j++)
       {
-        THDoubleTensor_data(cum_dist)[j*cum_dist->stride[0]] /= sum;
+        THDoubleTensor_data(cum_dist)[j*cum_dist->stride(0)] /= sum;
       }
     }
 
@@ -347,14 +442,14 @@ void THTensor_(multinomial)(THLongTensor *self, THGenerator *_generator, THTenso
       double cum_prob;
       int sample_idx;
       /* Make sure the last cumulative distribution bucket sums to 1 */
-      THDoubleTensor_data(cum_dist)[(n_categories-1)*cum_dist->stride[0]] = 1;
+      THDoubleTensor_data(cum_dist)[(n_categories-1)*cum_dist->stride(0)] = 1;
 
       while(right_pointer - left_pointer > 0)
       {
           mid_pointer = left_pointer + (right_pointer - left_pointer) / 2;
           cum_prob = THDoubleStorage_get( \
-            cum_dist->storage, \
-            cum_dist->storageOffset+mid_pointer*cum_dist->stride[0] \
+            THTensor_getStoragePtr(cum_dist), \
+            cum_dist->storage_offset()+mid_pointer*cum_dist->stride(0) \
           );
           if (cum_prob < uniform_sample)
           {
@@ -369,8 +464,8 @@ void THTensor_(multinomial)(THLongTensor *self, THGenerator *_generator, THTenso
 
        /* store in result tensor (will be incremented for lua compat by wrapper) */
       THLongStorage_set( \
-        self->storage, \
-        self->storageOffset+i*self->stride[0]+j*self->stride[1], \
+        THTensor_getStoragePtr(self), \
+        self->storage_offset()+i*self->stride(0)+j*self->stride(1), \
         sample_idx \
       );
 
@@ -385,22 +480,22 @@ void THTensor_(multinomial)(THLongTensor *self, THGenerator *_generator, THTenso
         if (sample_idx != 0)
         {
           new_val = THDoubleStorage_get( \
-            cum_dist->storage, \
-            cum_dist->storageOffset+(sample_idx-1)*cum_dist->stride[0] \
+            THTensor_getStoragePtr(cum_dist), \
+            cum_dist->storage_offset()+(sample_idx-1)*cum_dist->stride(0) \
           );
         }
         /* marginal cumulative mass (i.e. original probability) of sample */
         diff = THDoubleStorage_get( \
-          cum_dist->storage, \
-          cum_dist->storageOffset+sample_idx*cum_dist->stride[0] \
+          THTensor_getStoragePtr(cum_dist), \
+          cum_dist->storage_offset()+sample_idx*cum_dist->stride(0) \
         ) - new_val;
         /* new sum of marginals is not one anymore... */
         sum = 1.0 - diff;
         for (k=0; k<n_categories; k++)
         {
           new_val = THDoubleStorage_get( \
-            cum_dist->storage, \
-            cum_dist->storageOffset+k*cum_dist->stride[0] \
+            THTensor_getStoragePtr(cum_dist), \
+            cum_dist->storage_offset()+k*cum_dist->stride(0) \
           );
           if (k >= sample_idx)
           {
@@ -410,8 +505,8 @@ void THTensor_(multinomial)(THLongTensor *self, THGenerator *_generator, THTenso
           /* make total marginals sum to one */
           new_val /= sum;
           THDoubleStorage_set( \
-            cum_dist->storage, \
-            cum_dist->storageOffset+k*cum_dist->stride[0], \
+            THTensor_getStoragePtr(cum_dist), \
+            cum_dist->storage_offset()+k*cum_dist->stride(0), \
             new_val \
           );
         }

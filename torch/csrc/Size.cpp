@@ -14,7 +14,7 @@ struct THPSize {
 
 PyObject * THPSize_New(const torch::autograd::Variable& var)
 {
-  if (!torch::jit::tracer::isTracing(var)) {
+  if (!torch::jit::tracer::isTracing()) {
     auto sizes = var.sizes();
     return THPSize_NewFromSizes(var.dim(), sizes.data());
   }
@@ -38,10 +38,10 @@ PyObject * THPSize_NewFromSizes(int dim, const int64_t *sizes)
   return self.release();
 }
 
-static bool isTracedVar(PyObject *item) {
+static bool isTracedZeroDimVar(PyObject *item) {
   if (!THPVariable_Check(item)) return false;
   auto & var = reinterpret_cast<THPVariable*>(item)->cdata;
-  return torch::jit::tracer::isTracing(var);
+  return var.dim() == 0 && torch::jit::tracer::getValueTrace(var);
 }
 
 static PyObject * THPSize_pynew(PyTypeObject *type, PyObject *args, PyObject *kwargs)
@@ -50,10 +50,25 @@ static PyObject * THPSize_pynew(PyTypeObject *type, PyObject *args, PyObject *kw
   if (self) {
     for (Py_ssize_t i = 0; i < PyTuple_Size(self); ++i) {
       PyObject *item = PyTuple_GET_ITEM(self.get(), i);
-      if (!THPUtils_checkLong(item) && !isTracedVar(item)) {
-        return PyErr_Format(PyExc_TypeError, "torch.Size() takes an iterable of 'int' (item %zd is '%s')",
-            i, Py_TYPE(item)->tp_name);
+      if (THPUtils_checkLong(item)) {
+        continue;
       }
+      if (torch::jit::tracer::isTracing() && isTracedZeroDimVar(item)) {
+        continue;
+      }
+      // item.__index__() works with 0-dim tensors and tensors with one element
+      THPObjectPtr number(PyNumber_Index(item));
+      if (number && THPUtils_checkLong(number.get())) {
+        Py_INCREF(number.get());
+        auto status = PyTuple_SetItem(self, i, number.get());
+        if (status != 0) {
+          throw python_error();
+        }
+        continue;
+      }
+      return PyErr_Format(PyExc_TypeError,
+                          "torch.Size() takes an iterable of 'int' (item %zd is '%s')",
+                          i, Py_TYPE(item)->tp_name);
     }
   }
   return self.release();

@@ -148,6 +148,11 @@ def _symbolic_pack_padded_sequence(g, input, lengths, batch_first=False, padding
     # optimization pass to remove this later. It is an error if all
     # PackPadded operators cannot be optimized out.
 
+    if not isinstance(input, torch._C.Value):
+        raise RuntimeError("PackPadded requires `input` to be a Tensor")
+    if not isinstance(lengths, torch._C.Value):
+        raise RuntimeError("PackPadded requires `lengths` to be a Tensor")
+
     def _onnx_symbolic_pack_padded_sequence(g, input, lengths):
         if batch_first:
             input = g.op('Transpose', input, perm_i=[1, 0, 2])
@@ -168,8 +173,7 @@ def _symbolic_pack_padded_sequence(g, input, lengths, batch_first=False, padding
     return tuple(o for o in outputs)
 
 
-pack_padded_sequence = torch.onnx.symbolic_override_first_arg_based(
-    _symbolic_pack_padded_sequence)(pack_padded_sequence)
+pack_padded_sequence = torch.onnx.symbolic_override(_symbolic_pack_padded_sequence)(pack_padded_sequence)
 
 
 def pad_packed_sequence(sequence, batch_first=False, padding_value=0.0, total_length=None):
@@ -264,8 +268,7 @@ def _symbolic_pad_packed_sequence(g, input, batch_first=False, padding_value=0.0
     return data, lengths
 
 
-pad_packed_sequence = torch.onnx.symbolic_override_packed_sequence_based(
-    _symbolic_pad_packed_sequence)(pad_packed_sequence)
+pad_packed_sequence = torch.onnx.symbolic_override(_symbolic_pad_packed_sequence)(pad_packed_sequence)
 
 
 def pad_sequence(sequences, batch_first=False, padding_value=0):
@@ -274,10 +277,9 @@ def pad_sequence(sequences, batch_first=False, padding_value=0):
     ``pad_sequence`` stacks a list of Tensors along a new dimension,
     and pads them to equal length. For example, if the input is list of
     sequences with size ``L x *`` and if batch_first is False, and ``T x B x *``
-    otherwise. The list of sequences should be sorted in the order of
-    decreasing length.
+    otherwise.
 
-    `B` is batch size. It's equal to the number of elements in ``sequences``.
+    `B` is batch size. It is equal to the number of elements in ``sequences``.
     `T` is length of the longest sequence.
     `L` is length of the sequence.
     `*` is any number of trailing dimensions, including none.
@@ -292,7 +294,7 @@ def pad_sequence(sequences, batch_first=False, padding_value=0):
 
     Note:
         This function returns a Tensor of size ``T x B x *`` or ``B x T x *`` where `T` is the
-            length of longest sequence.
+            length of the longest sequence.
         Function assumes trailing dimensions and type of all the Tensors
             in sequences are same.
 
@@ -300,7 +302,7 @@ def pad_sequence(sequences, batch_first=False, padding_value=0):
         sequences (list[Tensor]): list of variable length sequences.
         batch_first (bool, optional): output will be in ``B x T x *`` if True, or in
             ``T x B x *`` otherwise
-        padding_value (float, optional): value for padded elements.
+        padding_value (float, optional): value for padded elements. Default: 0.
 
     Returns:
         Tensor of size ``T x B x *`` if batch_first is False
@@ -310,8 +312,8 @@ def pad_sequence(sequences, batch_first=False, padding_value=0):
     # assuming trailing dimensions and type of all the Tensors
     # in sequences are same and fetching those from sequences[0]
     max_size = sequences[0].size()
-    max_len, trailing_dims = max_size[0], max_size[1:]
-    prev_l = max_len
+    trailing_dims = max_size[1:]
+    max_len = max([s.size(0) for s in sequences])
     if batch_first:
         out_dims = (len(sequences), max_len) + trailing_dims
     else:
@@ -320,11 +322,6 @@ def pad_sequence(sequences, batch_first=False, padding_value=0):
     out_tensor = sequences[0].data.new(*out_dims).fill_(padding_value)
     for i, tensor in enumerate(sequences):
         length = tensor.size(0)
-        # temporary sort check, can be removed when we handle sorting internally
-        if prev_l < length:
-            raise ValueError(
-                "sequences must be sorted in the order of decreasing length")
-        prev_l = length
         # use index notation to prevent duplicate references to the tensor
         if batch_first:
             out_tensor[i, :length, ...] = tensor

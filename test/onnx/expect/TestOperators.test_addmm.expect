@@ -1,6 +1,6 @@
 ir_version: 3
 producer_name: "pytorch"
-producer_version: "0.3"
+producer_version: "0.4"
 graph {
   node {
     input: "0"
@@ -17,11 +17,6 @@ graph {
       name: "beta"
       f: 1
       type: FLOAT
-    }
-    attribute {
-      name: "broadcast"
-      i: 1
-      type: INT
     }
   }
   node {
@@ -105,5 +100,5 @@ graph {
   }
 }
 opset_import {
-  version: 6
+  version: 7
 }

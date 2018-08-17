@@ -64,7 +64,11 @@ def run_and_parse_first_match(run_lambda, command, regex):
 
 
 def get_conda_packages(run_lambda):
-    out = run_and_read_all(run_lambda, 'conda list | grep "torch\|soumith"')
+    if get_platform() == 'win32':
+        grep_cmd = 'findstr /R "torch soumith"'
+    else:
+        grep_cmd = 'grep "torch\|soumith"'
+    out = run_and_read_all(run_lambda, 'conda list | ' + grep_cmd)
     if out is None:
         return out
     # Comment starting at beginning of line
@@ -81,12 +85,14 @@ def get_cmake_version(run_lambda):
 
 
 def get_nvidia_driver_version(run_lambda):
-    return run_and_parse_first_match(run_lambda, 'nvidia-smi', r'Driver Version: (.*?) ')
+    smi = get_nvidia_smi()
+    return run_and_parse_first_match(run_lambda, smi, r'Driver Version: (.*?) ')
 
 
 def get_gpu_info(run_lambda):
+    smi = get_nvidia_smi()
     uuid_regex = re.compile(' \(UUID: .+?\)')
-    rc, out, _ = run_lambda('nvidia-smi -L')
+    rc, out, _ = run_lambda(smi + ' -L')
     if rc is not 0:
         return None
     # Anonymize GPUs by removing their UUID
@@ -99,7 +105,11 @@ def get_running_cuda_version(run_lambda):
 
 def get_cudnn_version(run_lambda):
     """This will return a list of libcudnn.so; it's hard to tell which one is being used"""
-    rc, out, _ = run_lambda('find /usr/local /usr/lib -type f -name "libcudnn*" 2> /dev/null')
+    if get_platform() == 'win32':
+        cudnn_cmd = 'where /R "%CUDA_PATH%\\bin" cudnn*.dll'
+    else:
+        cudnn_cmd = 'find /usr/local /usr/lib -type f -name "libcudnn*" 2> /dev/null'
+    rc, out, _ = run_lambda(cudnn_cmd)
     # find will return 1 if there are permission errors or if not found
     if len(out) == 0:
         return None
@@ -108,6 +118,13 @@ def get_cudnn_version(run_lambda):
     # Alphabetize the result because the order is non-deterministic otherwise
     result = '\n'.join(sorted(out.split('\n')))
     return 'Probably one of the following:\n{}'.format(result)
+
+
+def get_nvidia_smi():
+    smi = 'nvidia-smi'
+    if get_platform() == 'win32':
+        smi = '"C:\\Program Files\\NVIDIA Corporation\\NVSMI\\%s"' % smi
+    return smi
 
 
 def get_platform():
@@ -172,7 +189,11 @@ def get_os(run_lambda):
 def get_pip_packages(run_lambda):
     # People generally have `pip` as `pip` or `pip3`
     def run_with_pip(pip):
-        return run_and_read_all(run_lambda, pip + ' list --format=legacy | grep "torch\|numpy"')
+        if get_platform() == 'win32':
+            grep_cmd = 'findstr /R "numpy torch"'
+        else:
+            grep_cmd = 'grep "torch\|numpy"'
+        return run_and_read_all(run_lambda, pip + ' list --format=legacy | ' + grep_cmd)
 
     if not PY3:
         return 'pip', run_with_pip('pip')

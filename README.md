@@ -1,4 +1,4 @@
-<p align="center"><img width="40%" src="docs/source/_static/img/pytorch-logo-dark.png" /></p>
+![PyTorch Logo](https://github.com/pytorch/pytorch/blob/master/docs/source/_static/img/pytorch-logo-dark.png)
 
 --------------------------------------------------------------------------------
 
@@ -27,37 +27,21 @@ We are in an early-release beta. Expect some adventures and rough edges.
 | Linux GPU | [![Build Status](https://ci.pytorch.org/jenkins/job/pytorch-master/badge/icon)](https://ci.pytorch.org/jenkins/job/pytorch-master/) | [![Build Status](https://ci.pytorch.org/jenkins/job/pytorch-master/badge/icon)](https://ci.pytorch.org/jenkins/job/pytorch-master/) |
 | Windows GPU | <center>—</center> | [![Build Status](https://ci.pytorch.org/jenkins/job/pytorch-builds/job/pytorch-win-ws2016-cuda9-cudnn7-py3-trigger/badge/icon)](https://ci.pytorch.org/jenkins/job/pytorch-builds/job/pytorch-win-ws2016-cuda9-cudnn7-py3-trigger/)
 
+See also the [ci.pytorch.org HUD](https://ezyang.github.io/pytorch-ci-hud/build/pytorch-master).
+
 
 ## More about PyTorch
 
 At a granular level, PyTorch is a library that consists of the following components:
 
-<table>
-<tr>
-    <td><b> torch </b></td>
-    <td> a Tensor library like NumPy, with strong GPU support </td>
-</tr>
-<tr>
-    <td><b> torch.autograd </b></td>
-    <td> a tape-based automatic differentiation library that supports all differentiable Tensor operations in torch </td>
-</tr>
-<tr>
-    <td><b> torch.nn </b></td>
-    <td> a neural networks library deeply integrated with autograd designed for maximum flexibility </td>
-</tr>
-<tr>
-    <td><b> torch.multiprocessing  </b></td>
-    <td> Python multiprocessing, but with magical memory sharing of torch Tensors across processes. Useful for data loading and Hogwild training. </td>
-</tr>
-<tr>
-    <td><b> torch.utils </b></td>
-    <td> DataLoader, Trainer and other utility functions for convenience </td>
-</tr>
-<tr>
-    <td><b> torch.legacy(.nn/.optim) </b></td>
-    <td> legacy code that has been ported over from torch for backward compatibility reasons </td>
-</tr>
-</table>
+| Component | Description |
+| ---- | --- |
+| **torch** | a Tensor library like NumPy, with strong GPU support |
+| **torch.autograd** | a tape-based automatic differentiation library that supports all differentiable Tensor operations in torch |
+| **torch.nn** | a neural networks library deeply integrated with autograd designed for maximum flexibility |
+| **torch.multiprocessing** | Python multiprocessing, but with magical memory sharing of torch Tensors across processes. Useful for data loading and Hogwild training |
+| **torch.utils** | DataLoader, Trainer and other utility functions for convenience |
+| **torch.legacy(.nn/.optim)** | legacy code that has been ported over from torch for backward compatibility reasons |
 
 Usually one uses PyTorch either as:
 
@@ -70,10 +54,10 @@ Elaborating further:
 
 If you use NumPy, then you have used Tensors (a.k.a ndarray).
 
-<p align=center><img width="30%" src="docs/source/_static/img/tensor_illustration.png" /></p>
+![Tensor illustration](https://github.com/pytorch/pytorch/blob/master/docs/source/_static/img/tensor_illustration.png)
 
-PyTorch provides Tensors that can live either on the CPU or the GPU, and accelerate
-compute by a huge amount.
+PyTorch provides Tensors that can live either on the CPU or the GPU, and accelerates the
+computation by a huge amount.
 
 We provide a wide variety of tensor routines to accelerate and fit your scientific computation needs
 such as slicing, indexing, math operations, linear algebra, reductions.
@@ -97,7 +81,7 @@ from several research papers on this topic, as well as current and past work suc
 While this technique is not unique to PyTorch, it's one of the fastest implementations of it to date.
 You get the best of speed and flexibility for your crazy research.
 
-<p align=center><img width="80%" src="docs/source/_static/img/dynamic_graph.gif" /></p>
+![Dynamic graph](https://github.com/pytorch/pytorch/blob/master/docs/source/_static/img/dynamic_graph.gif)
 
 ### Python First
 
@@ -139,9 +123,8 @@ and with minimal abstractions.
 You can write new neural network layers in Python using the torch API
 [or your favorite NumPy-based libraries such as SciPy](http://pytorch.org/tutorials/advanced/numpy_extensions_tutorial.html).
 
-If you want to write your layers in C/C++, we provide an extension API based on
-[cffi](http://cffi.readthedocs.io/en/latest/) that is efficient and with minimal boilerplate.
-There is no wrapper code that needs to be written. You can see [a tutorial here](http://pytorch.org/tutorials/advanced/c_extension.html) and [an example here](https://github.com/pytorch/extension-ffi).
+If you want to write your layers in C/C++, we provide a convenient extension API that is efficient and with minimal boilerplate.
+There is no wrapper code that needs to be written. You can see [a tutorial here](http://pytorch.org/tutorials/advanced/cpp_extension.html) and [an example here](https://github.com/pytorch/extension-cpp).
 
 
 ## Installation
@@ -165,7 +148,9 @@ If you want to compile with CUDA support, install
 If you want to disable CUDA support, export environment variable `NO_CUDA=1`.
 Other potentially useful environment variables may be found in `setup.py`.
 
-If you want to build on Windows, Visual Studio 2017 and NVTX are also needed.
+If you want to build on Windows, Visual Studio 2017 14.11 toolset and NVTX are also needed.
+Especially, for CUDA 8 build on Windows, there will be an additional requirement for VS 2015 Update 3 and a patch for it.
+The details of the patch can be found out [here](https://support.microsoft.com/en-gb/help/4020481/fix-link-exe-crashes-with-a-fatal-lnk1000-error-when-you-use-wholearch).
 
 #### Install optional dependencies
 
@@ -175,7 +160,7 @@ export CMAKE_PREFIX_PATH="$(dirname $(which conda))/../" # [anaconda root direct
 
 # Install basic dependencies
 conda install numpy pyyaml mkl mkl-include setuptools cmake cffi typing
-conda install -c intel mkl-dnn
+conda install -c mingfeima mkldnn
 
 # Add LAPACK support for the GPU
 conda install -c pytorch magma-cuda80 # or magma-cuda90 if CUDA 9
@@ -213,8 +198,12 @@ On Windows
 set "VS150COMNTOOLS=C:\Program Files (x86)\Microsoft Visual Studio\2017\Enterprise\VC\Auxiliary\Build"
 set CMAKE_GENERATOR=Visual Studio 15 2017 Win64
 set DISTUTILS_USE_SDK=1
-REM The following line is needed for Python 2.7, but the support for it is very experimental.
+REM The following two lines are needed for Python 2.7, but the support for it is very experimental.
 set MSSdk=1
+set FORCE_PY27_BUILD=1
+REM As for CUDA 8, VS2015 Update 3 is also required to build PyTorch. Use the following two lines.
+set "PREBUILD_COMMAND=%VS140COMNTOOLS%\..\..\VC\vcvarsall.bat"
+set PREBUILD_COMMAND_ARGS=x64
 
 call "%VS150COMNTOOLS%\vcvarsall.bat" x64 -vcvars_ver=14.11
 python setup.py install
@@ -222,7 +211,7 @@ python setup.py install
 
 ### Docker image
 
-Dockerfile is supplied to build images with cuda support and cudnn v7. Build as usual
+Dockerfile is supplied to build images with cuda support and cudnn v7. You can pass -e PYTHON_VERSION=x.y flag to specificy which python to be used by Miniconda, or leave it unset to use the default. Build as usual
 ```
 docker build -t pytorch -f docker/pytorch/Dockerfile .
 ```
@@ -245,14 +234,14 @@ on [our website](http://pytorch.org/previous-versions/).
 ## Getting Started
 
 Three pointers to get you started:
-- [Tutorials: get you started with understanding and using PyTorch](http://pytorch.org/tutorials/)
+- [Tutorials: get you started with understanding and using PyTorch](https://pytorch.org/tutorials/)
 - [Examples: easy to understand pytorch code across all domains](https://github.com/pytorch/examples)
 - [The API Reference](http://pytorch.org/docs/)
 
 ## Communication
 * forums: discuss implementations, research, etc. http://discuss.pytorch.org
 * GitHub issues: bug reports, feature requests, install issues, RFCs, thoughts, etc.
-* Slack: general chat, online discussions, collaboration etc. https://pytorch.slack.com/ . Our slack channel is invite-only to promote a healthy balance between power-users and beginners. If you need a slack invite, ping us at soumith@pytorch.org
+* Slack: general chat, online discussions, collaboration etc. https://pytorch.slack.com/ . Our slack channel is invite-only to promote a healthy balance between power-users and beginners. If you need a slack invite, ping us at slack@pytorch.org
 * newsletter: no-noise, one-way email newsletter with important announcements about pytorch. You can sign-up here: http://eepurl.com/cbG0rv
 
 ## Releases and Contributing

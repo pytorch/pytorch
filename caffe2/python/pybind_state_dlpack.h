@@ -23,7 +23,7 @@ const TypeMeta& DLTypeToCaffe(const DLDataType& dl_type);
 template <class Context>
 class DLPackWrapper {
  public:
-  DLPackWrapper(Tensor<Context>* tensor, DeviceOption device_option)
+  DLPackWrapper(Tensor* tensor, DeviceOption device_option)
       : tensor(tensor), device_option(device_option) {}
 
   py::object data() {
@@ -39,7 +39,7 @@ class DLPackWrapper {
     if (tensor->size() <= 0) {
       tensor->Resize(0);
     }
-    if (tensor->meta().id() == 0) {
+    if (tensor->meta().id() == TypeIdentifier::uninitialized()) {
       // treat uninitialized tensor as float tensor
       tensor->template mutable_data<float>();
     }
@@ -120,7 +120,7 @@ class DLPackWrapper {
         });
   }
 
-  Tensor<Context>* tensor;
+  Tensor* tensor;
   DeviceOption device_option;
   DLManagedTensor managed_tensor;
 };

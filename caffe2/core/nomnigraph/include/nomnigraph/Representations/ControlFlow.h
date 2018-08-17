@@ -49,7 +49,7 @@ class BasicBlock {
     return Instructions;
   }
 
-  const bool hasInstruction(NodeRef instr) const {
+  bool hasInstruction(NodeRef instr) const {
     return Nodes.hasNode(instr);
   }
 

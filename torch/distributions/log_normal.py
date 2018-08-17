@@ -16,12 +16,11 @@ class LogNormal(TransformedDistribution):
 
         >>> m = LogNormal(torch.tensor([0.0]), torch.tensor([1.0]))
         >>> m.sample()  # log-normal distributed with mean=0 and stddev=1
-         0.1046
-        [torch.FloatTensor of size 1]
+        tensor([ 0.1046])
 
     Args:
         loc (float or Tensor): mean of log of distribution
-        scale (float or Tensor): standard deviation of log ofthe distribution
+        scale (float or Tensor): standard deviation of log of the distribution
     """
     arg_constraints = {'loc': constraints.real, 'scale': constraints.positive}
     support = constraints.positive

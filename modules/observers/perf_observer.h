@@ -1,5 +1,6 @@
 #pragma once
 
+#include "caffe2/core/common.h"
 #include "caffe2/core/net.h"
 #include "caffe2/core/observer.h"
 #include "caffe2/core/timer.h"
@@ -8,7 +9,8 @@
 
 namespace caffe2 {
 
-class PerfNetObserver : public NetObserver {
+
+class CAFFE2_OBSERVER_API PerfNetObserver : public NetObserver {
  public:
   explicit PerfNetObserver(NetBase* subject_);
   virtual ~PerfNetObserver();
@@ -43,6 +45,7 @@ class PerfOperatorObserver : public ObserverBase<OperatorBase> {
   virtual ~PerfOperatorObserver();
 
   double getMilliseconds() const;
+  std::vector<TensorShape> getTensorShapes() const;
 
  private:
   void Start() override;
@@ -57,5 +60,6 @@ class PerfOperatorObserver : public ObserverBase<OperatorBase> {
   // costly here and a raw pointer is a cheapest sholution
   PerfNetObserver* netObserver_;
   double milliseconds_;
+  std::vector<TensorShape> tensor_shapes_;
 };
 } // namespace caffe2

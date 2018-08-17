@@ -8,25 +8,25 @@ namespace at { namespace native {
 
 at::Tensor mkldnn_convolution(
     const at::Tensor& input, const at::Tensor& weight, const at::Tensor& bias,
-    IntList padding, IntList stride, IntList dilation) {
+    IntList padding, IntList stride, IntList dilation, int64_t groups) {
   throw std::runtime_error("mkldnn_convolution_forward: ATen not compiled with MKLDNN support");
 }
 
 at::Tensor mkldnn_convolution_backward_input(
     IntList input_size, const at::Tensor& grad_output, const at::Tensor& weight,
-    IntList padding, IntList stride, IntList dilation, bool bias_defined) {
+    IntList padding, IntList stride, IntList dilation, int64_t groups, bool bias_defined) {
   throw std::runtime_error("mkldnn_convolution_backward_input: ATen not compiled with MKLDNN support");
 }
 
 std::tuple<at::Tensor,at::Tensor> mkldnn_convolution_backward_weights(
     IntList weight_size, const at::Tensor& grad_output, const at::Tensor& input,
-    IntList padding, IntList stride, IntList dilation, bool bias_defined) {
+    IntList padding, IntList stride, IntList dilation, int64_t groups, bool bias_defined) {
   throw std::runtime_error("mkldnn_convolution_backward_weights: ATen not compiled with MKLDNN support");
 }
 
 std::tuple<at::Tensor,at::Tensor,at::Tensor> mkldnn_convolution_backward(
     const at::Tensor& input, const at::Tensor& grad_output_t, const at::Tensor& weight,
-    IntList padding, IntList stride, IntList dilation, std::array<bool,3> output_mask) {
+    IntList padding, IntList stride, IntList dilation, int64_t groups, std::array<bool,3> output_mask) {
   throw std::runtime_error("mkldnn_convolution_backward: ATen not compiled with MKLDNN support");
 }
 
@@ -52,7 +52,7 @@ constexpr int max_dim = 3;
 
 std::vector<int64_t> conv_output_size(
     IntList input_size, IntList weight_size,
-    IntList padding, IntList stride, IntList dilation)
+    IntList padding, IntList stride, IntList dilation, int64_t groups)
 {
   auto dim = input_size.size();
   std::vector<int64_t> output_size(dim);
@@ -68,12 +68,14 @@ std::vector<int64_t> conv_output_size(
 
 at::Tensor mkldnn_convolution(
     const at::Tensor& input, const at::Tensor& weight, const at::Tensor& bias,
-    IntList padding, IntList stride, IntList dilation)
+    IntList padding, IntList stride, IntList dilation, int64_t groups)
 {
   auto output = input.type().tensor(conv_output_size(
-    input.sizes(), weight.sizes(), padding, stride, dilation));
+    input.sizes(), weight.sizes(), padding, stride, dilation, groups));
 
   auto cpu_engine = CpuEngine::Instance().get_engine();
+
+  int32_t g = groups;
   
   int32_t n = input.size(0);
   int32_t ic = input.size(1);
@@ -95,11 +97,11 @@ at::Tensor mkldnn_convolution(
   auto data_t = memory::data_type::f32;
   auto format_any = memory::format::any;
   auto format_nchw = memory::format::nchw;
-  auto format_oihw = memory::format::oihw;
+  auto format_weight = (g!= 1) ? memory::format::goihw : memory::format::oihw;
   auto format_x = memory::format::x;
 
   memory::dims input_tz = {n, ic, ih, iw};
-  memory::dims weight_tz = {oc, ic, kh, kw};
+  memory::dims weight_tz = (g!= 1) ? memory::dims{g, oc/g, ic/g, kh, kw} : memory::dims{oc, ic, kh, kw};
   memory::dims bias_tz = {oc};
   memory::dims output_tz = {n, oc, oh, ow};
   memory::dims _stride = {sh, sw};
@@ -127,7 +129,7 @@ at::Tensor mkldnn_convolution(
 
   auto input_usr_memory = memory({{{input_tz}, data_t, format_nchw}, cpu_engine},
     input.data_ptr());
-  auto weight_usr_memory = memory({{{weight_tz}, data_t,  format_oihw}, cpu_engine},
+  auto weight_usr_memory = memory({{{weight_tz}, data_t,  format_weight}, cpu_engine},
     weight.data_ptr());
   auto output_usr_memory = memory({{{output_tz}, data_t, format_nchw}, cpu_engine},
     output.data_ptr());
@@ -178,11 +180,13 @@ at::Tensor mkldnn_convolution(
 
 Tensor mkldnn_convolution_backward_input(
     IntList input_size, const at::Tensor& grad_output, const at::Tensor& weight,
-    IntList padding, IntList stride, IntList dilation, bool bias_defined)
+    IntList padding, IntList stride, IntList dilation, int64_t groups, bool bias_defined)
 {
   auto grad_input = grad_output.type().tensor(input_size);
 
   auto cpu_engine = CpuEngine::Instance().get_engine();
+
+  int32_t g = groups;
 
   int32_t n = grad_input.size(0);
   int32_t ic = grad_input.size(1);
@@ -204,10 +208,10 @@ Tensor mkldnn_convolution_backward_input(
   auto data_t = memory::data_type::f32;
   auto format_any = memory::format::any;
   auto format_nchw = memory::format::nchw;
-  auto format_oihw = memory::format::oihw;
+  auto format_weight = (g!= 1) ? memory::format::goihw : memory::format::oihw;
 
   memory::dims input_tz = {n, ic, ih, iw};
-  memory::dims weight_tz = {oc, ic, kh, kw};
+  memory::dims weight_tz = (g!= 1) ? memory::dims{g, oc/g, ic/g, kh, kw} : memory::dims{oc, ic, kh, kw};
   memory::dims bias_tz = {oc};
   memory::dims output_tz = {n, oc, oh, ow};
   memory::dims _stride = {sh, sw};
@@ -245,7 +249,7 @@ Tensor mkldnn_convolution_backward_input(
 
   auto grad_output_usr_memory = memory({{{output_tz}, data_t, format_nchw}, cpu_engine},
     grad_output.data_ptr());
-  auto weight_usr_memory = memory({{{weight_tz}, data_t, format_oihw}, cpu_engine},
+  auto weight_usr_memory = memory({{{weight_tz}, data_t, format_weight}, cpu_engine},
     weight.data_ptr());
   auto grad_input_usr_memory = memory({{{input_tz}, data_t, format_nchw}, cpu_engine},
     grad_input.data_ptr());
@@ -288,7 +292,7 @@ Tensor mkldnn_convolution_backward_input(
 
 std::tuple<at::Tensor, at::Tensor> mkldnn_convolution_backward_weights(
     IntList weight_size, const at::Tensor& grad_output, const at::Tensor& input,
-    IntList padding, IntList stride, IntList dilation, bool bias_defined)
+    IntList padding, IntList stride, IntList dilation, int64_t groups, bool bias_defined)
 {
   auto grad_weight = grad_output.type().tensor(weight_size);
 
@@ -298,6 +302,8 @@ std::tuple<at::Tensor, at::Tensor> mkldnn_convolution_backward_weights(
   }
 
   auto cpu_engine = CpuEngine::Instance().get_engine();
+
+  int32_t g = groups;
 
   int32_t n = input.size(0);
   int32_t ic = input.size(1);
@@ -319,11 +325,11 @@ std::tuple<at::Tensor, at::Tensor> mkldnn_convolution_backward_weights(
   auto data_t = memory::data_type::f32;
   auto format_any = memory::format::any;
   auto format_nchw = memory::format::nchw;
-  auto format_oihw = memory::format::oihw;
+  auto format_weight = (g!= 1) ? memory::format::goihw : memory::format::oihw;
   auto format_x = memory::format::x;
 
   memory::dims input_tz = {n, ic, ih, iw};
-  memory::dims weight_tz = {oc, ic, kh, kw};
+  memory::dims weight_tz = (g!= 1) ? memory::dims{g, oc/g, ic/g, kh, kw} : memory::dims{oc, ic, kh, kw};
   memory::dims bias_tz = {oc};
   memory::dims output_tz = {n, oc, oh, ow};
   memory::dims _stride = {sh, sw};
@@ -369,7 +375,7 @@ std::tuple<at::Tensor, at::Tensor> mkldnn_convolution_backward_weights(
     input.data_ptr());
   auto grad_output_usr_memory = memory({{{output_tz}, data_t, format_nchw}, cpu_engine},
     grad_output.data_ptr());
-  auto grad_weight_usr_memory = memory({{{weight_tz}, data_t, format_oihw}, cpu_engine},
+  auto grad_weight_usr_memory = memory({{{weight_tz}, data_t, format_weight}, cpu_engine},
     grad_weight.data_ptr());
   std::shared_ptr<memory> grad_bias_memory;
 
@@ -419,18 +425,18 @@ std::tuple<at::Tensor, at::Tensor> mkldnn_convolution_backward_weights(
 
 std::tuple<at::Tensor,at::Tensor,at::Tensor> mkldnn_convolution_backward(
     const at::Tensor& input, const at::Tensor& grad_output_t, const at::Tensor& weight,
-    IntList padding, IntList stride, IntList dilation, std::array<bool,3> output_mask)
+    IntList padding, IntList stride, IntList dilation, int64_t groups, std::array<bool,3> output_mask)
 {
   Tensor grad_output = grad_output_t.contiguous();
 
   Tensor grad_input, grad_weight, grad_bias;
   if (output_mask[0]) {
     grad_input = at::mkldnn_convolution_backward_input(
-      input.sizes(), grad_output, weight, padding, stride, dilation, output_mask[2]);
+      input.sizes(), grad_output, weight, padding, stride, dilation, groups, output_mask[2]);
   }
   if (output_mask[1] || output_mask[2]) {
     std::tie(grad_weight, grad_bias) = at::mkldnn_convolution_backward_weights(
-      weight.sizes(), grad_output, input, padding, stride, dilation, output_mask[2]);
+      weight.sizes(), grad_output, input, padding, stride, dilation, groups, output_mask[2]);
   }
 
   return std::tuple<Tensor, Tensor, Tensor>{grad_input, grad_weight, grad_bias};

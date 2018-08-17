@@ -162,6 +162,11 @@ vector<float> SimpleNet::TEST_Benchmark(
             memory_bytes_read_per_op_type[op_type] += cost.bytes_read;
             memory_bytes_written_per_op_type[op_type] += cost.bytes_written;
             param_bytes_per_op_type[op_type] += cost.params_bytes;
+          } else {
+            flops_per_op.emplace_back(0);
+            memory_bytes_read_per_op.emplace_back(0);
+            memory_bytes_written_per_op.emplace_back(0);
+            param_bytes_per_op.emplace_back(0);
           }
         }
         timer.Start();
@@ -178,7 +183,7 @@ vector<float> SimpleNet::TEST_Benchmark(
         ++idx;
       }
     }
-    int idx = 0;
+    size_t idx = 0;
     for (auto& op : operators_) {
       const string& op_type = op->debug_def().type();
       const string& print_name =
@@ -189,7 +194,9 @@ vector<float> SimpleNet::TEST_Benchmark(
       std::stringstream flops_str;
       if (idx < flops_per_op.size() && flops_per_op[idx]) {
         flops_str << " (" << to_string(1.0e-9 * flops_per_op[idx]) << " GFLOP, "
-                  << to_string(1.0e-6 * flops_per_op[idx] / time_per_op[idx])
+                  << to_string(
+                         1.0e-6 * flops_per_op[idx] / time_per_op[idx] *
+                         main_runs)
                   << " GFLOPS)";
       }
       std::stringstream memory_bytes_read_str;
@@ -232,7 +239,7 @@ vector<float> SimpleNet::TEST_Benchmark(
     metric_per_op_type_vec_vec.emplace_back(&memory_bytes_read_per_op_type);
     metric_per_op_type_vec_vec.emplace_back(&memory_bytes_written_per_op_type);
     metric_per_op_type_vec_vec.emplace_back(&param_bytes_per_op_type);
-    for (int i = 0; i < metric_per_op_type_vec_vec.size(); ++i) {
+    for (size_t i = 0; i < metric_per_op_type_vec_vec.size(); ++i) {
       std::cout << metric[i] << " per operator type:" << std::endl;
       auto* item = metric_per_op_type_vec_vec[i];
       std::vector<std::pair<string, float>> metric_per_op_type_vec(
@@ -260,7 +267,7 @@ vector<float> SimpleNet::TEST_Benchmark(
     }
   }
   // We will reuse time_per_op to return the result of BenchmarkNet.
-  for (int i = 0; i < time_per_op.size(); ++i) {
+  for (size_t i = 0; i < time_per_op.size(); ++i) {
     time_per_op[i] /= main_runs;
   }
   if (FLAGS_caffe2_simple_net_benchmark_run_whole_net) {

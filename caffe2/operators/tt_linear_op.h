@@ -9,6 +9,7 @@
 #include "Eigen/Dense"
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
+#include "caffe2/utils/eigen_utils.h"
 #include "caffe2/utils/math.h"
 
 namespace caffe2 {
@@ -19,9 +20,9 @@ class TTLinearOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   TTLinearOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        inp_sizes_(OperatorBase::GetRepeatedArgument<int>("inp_sizes")),
-        out_sizes_(OperatorBase::GetRepeatedArgument<int>("out_sizes")),
-        tt_ranks_(OperatorBase::GetRepeatedArgument<int>("tt_ranks")),
+        inp_sizes_(this->template GetRepeatedArgument<int>("inp_sizes")),
+        out_sizes_(this->template GetRepeatedArgument<int>("out_sizes")),
+        tt_ranks_(this->template GetRepeatedArgument<int>("tt_ranks")),
         Y_temp_(unique_ptr<Blob>(new Blob())) {}
   ~TTLinearOp() {}
 
@@ -51,7 +52,7 @@ class TTLinearOp final : public Operator<Context> {
     int cores_idx = 0;
 
     // Temporary buffer to facilitate multiplication of TT-cores with input
-    auto Y_buf = Y_temp_->GetMutable<Tensor<Context>>();
+    auto Y_buf = Y_temp_->GetMutableTensor(Context::GetDeviceType());
     Y_buf->ResizeLike(X);
     Y_buf->CopyFrom(X);
 
@@ -103,7 +104,7 @@ class TTLinearOp final : public Operator<Context> {
 
       // Resize operation
       Y_buf->Resize(Y->dim32(0), Y->dim32(1));
-      context_.template Copy<float, CPUContext, CPUContext>(
+      context_.template CopyFromCPU<float>(
           Y->size(),
           Y->template data<float>(),
           Y_buf->template mutable_data<float>());
@@ -159,7 +160,7 @@ class TTLinearOp final : public Operator<Context> {
   }
 
  protected:
-  Tensor<Context> bias_multiplier_;
+  Tensor bias_multiplier_{Context::GetDeviceType()};
   std::vector<int> inp_sizes_;
   std::vector<int> out_sizes_;
   std::vector<int> tt_ranks_;
@@ -180,7 +181,7 @@ class TTLinearGradientOp : public Operator<Context> {
   }
 
  protected:
-  Tensor<Context> bias_multiplier_;
+  Tensor bias_multiplier_{Context::GetDeviceType()};
 };
 
 } // namespace caffe2

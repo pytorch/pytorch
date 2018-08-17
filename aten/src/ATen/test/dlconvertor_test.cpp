@@ -17,7 +17,7 @@ TEST_CASE( "dlconvertor", "[cpu]" ) {
 
   INFO( "convert ATen to DLTensor" );
 
-  Tensor a = rand(CPU(at::kFloat), {3,4});
+  Tensor a = rand({3,4});
   DLManagedTensor* dlMTensor = toDLPack(a);
 
   INFO( "convert DLTensor to ATen" );
@@ -25,4 +25,3 @@ TEST_CASE( "dlconvertor", "[cpu]" ) {
 
   REQUIRE(a.equal(b));
 }
-

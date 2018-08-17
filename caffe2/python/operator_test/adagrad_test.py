@@ -105,12 +105,10 @@ class TestAdagrad(hu.HypothesisTestCase):
                         allow_nan=False, allow_infinity=False),
            epsilon=st.floats(min_value=0.01, max_value=0.99,
                              allow_nan=False, allow_infinity=False),
-           data_strategy=st.data(),
            **hu.gcs)
-    def test_sparse_adagrad(self, inputs, lr, epsilon,
-                            data_strategy, gc, dc):
+    def test_sparse_adagrad(self, inputs, lr, epsilon, gc, dc):
         return adagrad_sparse_test_helper(self, inputs, lr, epsilon,
-            data_strategy, None, ref_adagrad, gc, dc)
+            None, ref_adagrad, gc, dc)
 
     @given(inputs=hu.tensors(n=2),
            lr=st.floats(min_value=0.01, max_value=0.99,

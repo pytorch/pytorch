@@ -35,6 +35,7 @@ import onnx.numpy_helper
 import onnx.defs
 import onnx.optimizer
 import onnx.shape_inference
+import onnx.utils
 from onnx.backend.base import Backend, Device, DeviceType, namedtupledict
 
 from caffe2.python.onnx.workspace import Workspace
@@ -139,7 +140,7 @@ class Caffe2Backend(Backend):
     # If you increase this, make SURE you cross-reference all BC-breaking
     # changes from one version to the next, and any that you did not
     # implement, mark as broken in _broken_operators
-    _known_opset_version = 6
+    _known_opset_version = 7
 
     # This dictionary will record operators which are KNOWN to be
     # broken, so we give a good error message rather than do something
@@ -177,7 +178,8 @@ class Caffe2Backend(Backend):
         'Squeeze':              {'axes': 'dims'},
         'Unsqueeze':            {'axes': 'dims'},
         'Transpose':            {'perm': 'axes'},
-        'Upsample':             {'mode': ''},
+        'Upsample':             {'mode': '',
+                                 'scales': ''},
         'ConvTranspose':        {'output_padding': 'adjs'},
         'Selu':                 {'gamma': 'scale'},
         'If':                   {'then_branch': 'then_net',
@@ -193,6 +195,7 @@ class Caffe2Backend(Backend):
         'RNN': '_create_rnn_variant',
         'Loop': '_create_loop',
         'If': '_create_if',
+        'Upsample': '_create_upsample',
     }
 
     # Dummy name generator
@@ -210,34 +213,35 @@ class Caffe2Backend(Backend):
         super(Caffe2Backend, cls).run_node(node, inputs, device=device,
                                            outputs_info=outputs_info, opset_version=opset_version)
 
+        value_infos = []
         device_option = get_device_option(Device(device))
         ws = Workspace()
         with core.DeviceScope(device_option):  # temporary!
             if isinstance(inputs, dict):
                 for key, value in inputs.items():
                     ws.FeedBlob(key, value)
+                    value_infos.append(onnx.helper.make_tensor_value_info(
+                        name=key,
+                        elem_type=onnx.mapping.NP_TYPE_TO_TENSOR_TYPE[value.dtype],
+                        shape=value.shape).SerializeToString())
             else:
                 assert len(node.input) == len(inputs), "{}: expected {} but got {}".format(
                     node.op_type, len(node.input), len(inputs))
                 for key, value in zip(node.input, inputs):
                     ws.FeedBlob(key, value)
+                    value_infos.append(onnx.helper.make_tensor_value_info(
+                        name=key,
+                        elem_type=onnx.mapping.NP_TYPE_TO_TENSOR_TYPE[value.dtype],
+                        shape=value.shape).SerializeToString())
 
             ops = []
             cbackend = C.Caffe2Backend(cls._dummy_name)
-            ops_str = cbackend.convert_node(node.SerializeToString(), opset_version)
+            ops_str = cbackend.convert_node(node.SerializeToString(), value_infos, opset_version)
             for s in ops_str[0] + ops_str[1]:
                 op = caffe2_pb2.OperatorDef()
                 op.ParseFromString(s)
                 op.device_option.CopyFrom(device_option)
                 ops.append(op)
-            # For testing
-            if "ONNX_CAFFE2_DEBUG" in os.environ:
-                init_ops, ops2, _ = cls._onnx_node_to_caffe2_op(
-                    None, None, node, opset_version or cls._known_opset_version)
-                ops2 = init_ops + ops2
-                for op in ops2:
-                    op.device_option.CopyFrom(device_option)
-                print("\nC++:\n{}\nPython:\n{}".format(ops, ops2))
             ws.RunOperatorsOnce(ops)
             output_values = [ws.FetchBlob(name) for name in node.output]
             return namedtupledict('Outputs', node.output)(*output_values)
@@ -376,6 +380,18 @@ class Caffe2Backend(Backend):
 
         return outputs
 
+    @classmethod
+    def _create_upsample(cls, init_model, pred_model, n, opset_version):
+        c2_op = cls._common_onnx_node_to_caffe2_op(init_model, pred_model, n, opset_version)
+        if opset_version >= 7:
+            if len(n.attrs['scales']) != 4:
+                raise ValueError("The scales argument should have size 4")
+            elif not (np.isclose(n.attrs['scales'][0], 1) and np.isclose(n.attrs['scales'][1], 1)):
+                raise ValueError("The first two elements in the scales argument must be 1")
+            c2_op.arg.extend([caffe2.python.utils.MakeArgument('height_scale', n.attrs['scales'][2])])
+            c2_op.arg.extend([caffe2.python.utils.MakeArgument('width_scale', n.attrs['scales'][3])])
+
+        return c2_op
 
     @classmethod
     def _create_rnn_variant(cls, init_model, pred_model, n, opset_version):
@@ -628,35 +644,6 @@ class Caffe2Backend(Backend):
 
 
     @classmethod
-    def _substitute_raw_value(cls, tp, raw_values_dict):
-        if tp.HasField('raw_data') and tp.raw_data == bytes(b'__EXTERNAL'):
-            if tp.name not in raw_values_dict:
-                raise RuntimeError('TensorProto for value {} referenced raw data but it was not found!'.format(tp.name))
-            else:
-                tp.raw_data = raw_values_dict[tp.name]
-
-    @classmethod
-    def _visit_and_substitute_raw_values(cls, nodes, raw_values_dict):
-        for node in nodes:
-            for attr in node.attribute:
-                if attr.HasField('t'):
-                    cls._substitute_raw_value(attr.t, raw_values_dict)
-                for t in attr.tensors:
-                    cls._substitute_raw_value(t, raw_values_dict)
-                if attr.HasField('g'):
-                    cls._visit_and_substitute_raw_values(attr.g.node, raw_values_dict)
-                for g in attr.graphs:
-                    cls._visit_and_substitute_raw_values(g.node, raw_values_dict)
-
-    @classmethod
-    def _external_value_resolution_pass(cls, model, raw_values_dict):
-        for init in model.graph.initializer:
-            cls._substitute_raw_value(init, raw_values_dict)
-
-        cls._visit_and_substitute_raw_values(model.graph.node, raw_values_dict)
-
-
-    @classmethod
     def _direct_initialize_parameters(cls, initializer, ws, device_option):
         for tp in initializer:
             ws.FeedBlob(tp.name, onnx.numpy_helper.to_array(tp), device_option)
@@ -705,7 +692,8 @@ class Caffe2Backend(Backend):
         initializer of the predict_graph, "img" is not initalized. We don't have a check for this, since
         there is no way we can know which blob is the input of the predict_graph.
         '''
-        super(Caffe2Backend, cls).prepare(model, device, **kwargs)
+        if not kwargs.pop('no_check_UNSAFE', False):
+            super(Caffe2Backend, cls).prepare(model, device, **kwargs)
         opset_version = None
         for imp in model.opset_import:
             if not imp.HasField("domain") or imp.domain == "":
@@ -722,82 +710,34 @@ class Caffe2Backend(Backend):
 
         model = onnx.shape_inference.infer_shapes(model)
 
-        # Check whether we have RNN related ops
-        pred_model = cls.optimize_onnx(model, predict=True)
-        rnn_nodes = []
-        for node in pred_model.graph.node:
-            if node.op_type in {'LSTM', 'GRU', 'RNN'}:
-                rnn_nodes.append(node)
+        ws = Workspace()
+        device_option = get_device_option(Device(device))
 
-        # Build the C++ backend
-        # TODO: build a predictor that supports GPU
-        #       And for RNN nets, we need to avoid adding init_net
-        use_cpp_backend = device == 'CPU' and not rnn_nodes
-        # use python backend for now
-        use_cpp_backend = False
-        if use_cpp_backend:
-            c2_rnn_ops = []
-            if rnn_nodes:
-                init_model = cls.optimize_onnx(model, init=True)
-                for node in rnn_nodes:
-                    c2ops = cls._onnx_node_to_caffe2_op(
-                        init_model, pred_model, node, opset_version)
-                    init_ops = [x.SerializeToString() for x in c2ops.init_ops]
-                    ops = [x.SerializeToString() for x in c2ops.ops]
-                    external_inputs = c2ops.interface_blobs
-                    c2_rnn_ops.append(C.Caffe2Ops(init_ops, ops, external_inputs))
-                del init_model
+        init_net, predict_net = cls._onnx_model_to_caffe2_net(model, device, opset_version, False)
 
-            cbackend = C.Caffe2Backend(cls._dummy_name)
-            if raw_values_dict:
-                cls._external_value_resolution_pass(model, raw_values_dict)
-            rep = cbackend.prepare(model.SerializeToString(), device, c2_rnn_ops)
-            # For testing
-            # Dump the net descriptions to file for comparison with the Python ones
-            if "ONNX_CAFFE2_DEBUG" in os.environ:
-                pred_net_str = rep.pred_net()
-                pn = caffe2_pb2.NetDef()
-                pn.ParseFromString(pred_net_str)
-                init_net_str = rep.init_net()
-                inn = caffe2_pb2.NetDef()
-                inn.ParseFromString(init_net_str)
-                with open("cpp.txt", "w") as f:
-                    f.write("pred_net: \n{}".format(pn))
+        if raw_values_dict:
+            cls._external_value_resolution_pass(model, raw_values_dict)
 
-            rep_wrapper = Caffe2CppRep(rep)
-            return rep_wrapper
-        else:
-            ws = Workspace()
-            device_option = get_device_option(Device(device))
+        # Directly load initializer data into blobs in workspace
+        cls._direct_initialize_parameters(
+            model.graph.initializer,
+            ws,
+            device_option,
+        )
 
-            init_net, predict_net = cls._onnx_model_to_caffe2_net(model, device, opset_version, False)
+        initialized = {init.name for init in model.graph.initializer}
 
-            if raw_values_dict:
-                cls._external_value_resolution_pass(model, raw_values_dict)
+        cls._direct_initialize_inputs(
+            model.graph.input,
+            initialized,
+            ws,
+            device_option,
+        )
 
-            # Directly load initializer data into blobs in workspace
-            cls._direct_initialize_parameters(
-                model.graph.initializer,
-                ws,
-                device_option,
-            )
+        uninitialized = [value_info.name for value_info in model.graph.input if value_info.name not in initialized]
 
-            initialized = {init.name for init in model.graph.initializer}
-
-            cls._direct_initialize_inputs(
-                model.graph.input,
-                initialized,
-                ws,
-                device_option,
-            )
-
-            uninitialized = [value_info.name for value_info in model.graph.input if value_info.name not in initialized]
-
-            if "ONNX_CAFFE2_DEBUG" in os.environ:
-                with open("python.txt", "w") as f:
-                    f.write("pred_net: \n{}".format(predict_net))
-            retval = Caffe2Rep(init_net, predict_net, ws, uninitialized)
-            return retval
+        retval = Caffe2Rep(init_net, predict_net, ws, uninitialized)
+        return retval
 
 
     @classmethod
@@ -805,7 +745,20 @@ class Caffe2Backend(Backend):
     def _onnx_node_to_caffe2_op(cls, init_model, pred_model, node_def, opset_version):
         cbackend = C.Caffe2Backend(cls._dummy_name)
         if cbackend.support_onnx_import(node_def.op_type):
-            op_strs = cbackend.convert_node(node_def.SerializeToString(), opset_version)
+
+            # extract value infos from pred model (value infos of
+            # node's inputs that are in init model should be all
+            # available in pred model)
+            value_infos = []
+            for name in node_def.input:
+                if pred_model is not None:
+                    for vi in itertools.chain(pred_model.graph.input,
+                                              pred_model.graph.output,
+                                              pred_model.graph.value_info):
+                        if vi.name == name:
+                            value_infos.append(vi.SerializeToString())
+
+            op_strs = cbackend.convert_node(node_def.SerializeToString(), value_infos, opset_version)
             init_ops = []
             for s in op_strs[0]:
                 op = caffe2_pb2.OperatorDef()
@@ -854,6 +807,7 @@ class Caffe2Backend(Backend):
         c2_op.output.extend(onnx_node.outputs)
         c2_op.name = onnx_node.name
 
+
         onnx_op_type = onnx_node.op_type
         broken_version = cls._broken_operators.get(onnx_op_type, float('Inf'))
         if broken_version <= opset_version:
@@ -872,13 +826,17 @@ class Caffe2Backend(Backend):
                 return cls._global_renamed_attrs[k]
             return k
         c2_op.arg.extend(onnx_node.attrs.caffe2(kmap=kmap))
-        if c2_op.type in cls._broadcast_operators:
-            already_broadcast = False
-            for arg in c2_op.arg:
-                if arg.name == 'broadcast':
-                    already_broadcast = True
-            if not already_broadcast:
-                c2_op.arg.extend([caffe2.python.utils.MakeArgument('broadcast', 1)])
+
+        if opset_version < 7:
+            # onnx opset 7 and newest caffe2 have adopted full onnx broadcast semantics
+            # so we don't need this hack anymore
+            if c2_op.type in cls._broadcast_operators:
+                already_broadcast = False
+                for arg in c2_op.arg:
+                    if arg.name == 'broadcast':
+                        already_broadcast = True
+                if not already_broadcast:
+                    c2_op.arg.extend([caffe2.python.utils.MakeArgument('broadcast', 1)])
 
         return c2_op
 
@@ -903,7 +861,6 @@ class Caffe2Backend(Backend):
                 c2ops = cls._onnx_node_to_caffe2_op(
                     None, None, node, opset_version)
             except Exception as e:
-                success = False
                 print('ONNX FATAL:', e)
                 continue
             net.op.extend(c2ops.init_ops)
@@ -919,6 +876,7 @@ class Caffe2Backend(Backend):
     def _onnx_model_to_caffe2_net(cls, onnx_model, device, opset_version, include_initializers):
         device_option = get_device_option(Device(device))
 
+        onnx_model = onnx.utils.polish_model(onnx_model)
         init_model = cls.optimize_onnx(onnx_model, init=True)
         pred_model = cls.optimize_onnx(onnx_model, predict=True)
 
@@ -971,6 +929,14 @@ class Caffe2Backend(Backend):
             return workspace.has_gpu_support
         return False
 
+    @classmethod
+    def is_compatible(cls, model, device='CPU', **kwargs):
+        if hasattr(super(Caffe2Backend, cls), 'is_compatible') \
+           and callable(super(Caffe2Backend, cls).is_compatible):
+            if not super(Caffe2Backend, cls).is_compatible(model, device, **kwargs):
+                return False
+        # TODO: should have an unspported list of operators, be optimistic for now
+        return True
 
 prepare = Caffe2Backend.prepare
 
@@ -981,3 +947,5 @@ run_node = Caffe2Backend.run_node
 run_model = Caffe2Backend.run_model
 
 supports_device = Caffe2Backend.supports_device  # noqa
+
+is_compatible = Caffe2Backend.is_compatible

@@ -5,14 +5,13 @@ from torch.autograd import Function
 from torch.autograd.function import once_differentiable
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
-from torch.distributions.utils import _finfo, broadcast_all
+from torch.distributions.utils import _finfo, broadcast_all, clamp_probs
 
 
 def _dirichlet_sample_nograd(concentration):
     probs = torch._standard_gamma(concentration)
     probs /= probs.sum(-1, True)
-    eps = _finfo(probs).eps
-    return probs.clamp_(min=eps, max=1 - eps)
+    return clamp_probs(probs)
 
 
 # This helper is exposed for testing.
@@ -44,9 +43,7 @@ class Dirichlet(ExponentialFamily):
 
         >>> m = Dirichlet(torch.tensor([0.5, 0.5]))
         >>> m.sample()  # Dirichlet distributed with concentrarion concentration
-         0.1046
-         0.8954
-        [torch.FloatTensor of size 2]
+        tensor([ 0.1046,  0.8954])
 
     Args:
         concentration (Tensor): concentration parameter of the distribution

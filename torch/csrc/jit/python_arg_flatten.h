@@ -14,7 +14,7 @@ namespace torch { namespace jit { namespace python {
 struct IODescriptor {
   struct VariableMetadata {
     VariableMetadata(const autograd::Variable& var)
-      : sizes(var.sizes())
+      : sizes(var.sizes().vec())
       , type(var.type().scalarType())
       , device(var.type().is_cuda() ? var.get_device() : -1)
       , requires_grad(var.requires_grad()) {}
@@ -24,7 +24,7 @@ struct IODescriptor {
              std::tie(o.device, o.requires_grad, o.type, o.sizes);
     }
 
-    static std::size_t hash(const VariableMetadata& m) {
+    static size_t hash(const VariableMetadata& m) {
       return get_hash(m.sizes, m.device, m.requires_grad, m.type);
     }
 
@@ -39,7 +39,7 @@ struct IODescriptor {
            std::tie(o.structure, o.metadata, o.grad_enabled);
   }
 
-  static std::size_t hash(const IODescriptor& o) {
+  static size_t hash(const IODescriptor& o) {
     return get_hash(o.structure, o.metadata, o.grad_enabled);
   }
 
@@ -104,7 +104,7 @@ struct ParsedArgs {
 
 
 ParsedArgs flatten(py::handle obj);
-PyObject* unflatten(at::ArrayRef<autograd::Variable> outputs,
+PyObject* unflatten(at::ArrayRef<autograd::Variable> vars,
                     const IODescriptor& structure);
 
 }}} // namespace torch::jit::python

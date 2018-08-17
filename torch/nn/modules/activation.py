@@ -82,17 +82,19 @@ class ReLU(Threshold):
 
 
 class RReLU(Module):
-    r"""Applies the randomized leaky rectified liner unit function element-wise
-    described in the paper
+    r"""Applies the randomized leaky rectified liner unit function, element-wise,
+    as described in the paper:
+
     `Empirical Evaluation of Rectified Activations in Convolutional Network`_.
 
     The function is defined as:
 
     .. math::
-        \text{RReLU}(x) = \begin{cases}
+        \text{RReLU}(x) =
+        \begin{cases}
             x & \text{if } x \geq 0 \\
             ax & \text{ otherwise }
-        \end{cases},
+        \end{cases}
 
     where :math:`a` is randomly sampled from uniform distribution
     :math:`\mathcal{U}(\text{lower}, \text{upper})`.
@@ -118,6 +120,7 @@ class RReLU(Module):
     .. _`Empirical Evaluation of Rectified Activations in Convolutional Network`:
         https://arxiv.org/abs/1505.00853
     """
+
     def __init__(self, lower=1. / 8, upper=1. / 3, inplace=False):
         super(RReLU, self).__init__()
         self.lower = lower
@@ -194,7 +197,10 @@ class Hardtanh(Module):
 
 
 class ReLU6(Hardtanh):
-    r"""Applies the element-wise function :math:`\text{ReLU6}(x) = \min(\max(0,x), 6)`
+    r"""Applies the element-wise function:
+
+    .. math::
+        \text{ReLU6}(x) = \min(\max(0,x), 6)
 
     Args:
         inplace: can optionally do the operation in-place. Default: ``False``
@@ -222,7 +228,11 @@ class ReLU6(Hardtanh):
 
 
 class Sigmoid(Module):
-    r"""Applies the element-wise function :math:`\text{Sigmoid}(x) = \frac{1}{1 + \exp(-x)}`
+    r"""Applies the element-wise function:
+
+    .. math::
+        \text{Sigmoid}(x) = \frac{1}{1 + \exp(-x)}
+
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
@@ -243,8 +253,10 @@ class Sigmoid(Module):
 
 
 class Tanh(Module):
-    r"""Applies element-wise,
-    :math:`\text{Tanh}(x) = \tanh(x) = \frac{e^x - e^{-x}} {e^x + e^{-x}}`
+    r"""Applies the element-wise function:
+
+    .. math::
+        \text{Tanh}(x) = \tanh(x) = \frac{e^x - e^{-x}} {e^x + e^{-x}}
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
@@ -265,8 +277,10 @@ class Tanh(Module):
 
 
 class ELU(Module):
-    r"""Applies element-wise,
-    :math:`\text{ELU}(x) = \max(0,x) + \min(0, \alpha * (\exp(x) - 1))`
+    r"""Applies the element-wise function:
+
+    .. math::
+        \text{ELU}(x) = \max(0,x) + \min(0, \alpha * (\exp(x) - 1))
 
     Args:
         alpha: the :math:`\alpha` value for the ELU formulation. Default: 1.0
@@ -299,9 +313,54 @@ class ELU(Module):
         return 'alpha={}{}'.format(self.alpha, inplace_str)
 
 
+class CELU(Module):
+    r"""Applies the element-wise function:
+
+    .. math::
+        \text{CELU}(x) = \max(0,x) + \min(0, \alpha * (\exp(x/\alpha) - 1))
+
+    More details can be found in the paper `Continuously Differentiable Exponential Linear Units`_ .
+
+    Args:
+        alpha: the :math:`\alpha` value for the CELU formulation. Default: 1.0
+        inplace: can optionally do the operation in-place. Default: ``False``
+
+    Shape:
+        - Input: :math:`(N, *)` where `*` means, any number of additional
+          dimensions
+        - Output: :math:`(N, *)`, same shape as the input
+
+    .. image:: scripts/activation_images/CELU.png
+
+    Examples::
+
+        >>> m = nn.CELU()
+        >>> input = torch.randn(2)
+        >>> output = m(input)
+
+    .. _`Continuously Differentiable Exponential Linear Units`:
+        https://arxiv.org/abs/1704.07483
+    """
+
+    def __init__(self, alpha=1., inplace=False):
+        super(CELU, self).__init__()
+        self.alpha = alpha
+        self.inplace = inplace
+
+    def forward(self, input):
+        return F.celu(input, self.alpha, self.inplace)
+
+    def extra_repr(self):
+        inplace_str = ', inplace' if self.inplace else ''
+        return 'alpha={}{}'.format(self.alpha, inplace_str)
+
+
 class SELU(Module):
-    r"""Applies element-wise,
-    :math:`\text{SELU}(x) = \text{scale} * (\max(0,x) + \min(0, \alpha * (\exp(x) - 1)))`,
+    r"""Applied element-wise, as:
+
+    .. math::
+        \text{SELU}(x) = \text{scale} * (\max(0,x) + \min(0, \alpha * (\exp(x) - 1)))
+
     with :math:`\alpha = 1.6732632423543772848170429916717` and
     :math:`\text{scale} = 1.0507009873554804934193349852946`.
 
@@ -340,8 +399,8 @@ class SELU(Module):
 
 class GLU(Module):
     r"""Applies the gated linear unit function
-    :math:`{GLU}(a, b)= a \otimes \sigma(b)` where `a` is the first half of
-    the input vector and `b` is the second half.
+    :math:`{GLU}(a, b)= a \otimes \sigma(b)` where :math:`a` is the first half
+    of the input vector and :math:`b` is the second half.
 
     Args:
         dim (int): the dimension on which to split the input. Default: -1
@@ -370,8 +429,7 @@ class GLU(Module):
 
 
 class Hardshrink(Module):
-    r"""Applies the hard shrinkage function element-wise
-    Hardshrink is defined as:
+    r"""Applies the hard shrinkage function element-wise:
 
     .. math::
         \text{HardShrink}(x) =
@@ -410,14 +468,19 @@ class Hardshrink(Module):
 
 
 class LeakyReLU(Module):
-    r"""Applies element-wise,
-    :math:`\text{LeakyReLU}(x) = \max(0, x) + \text{negative_slope} * \min(0, x)` or
+    r"""Applies the element-wise function:
+
+    .. math::
+        \text{LeakyReLU}(x) = \max(0, x) + \text{negative\_slope} * \min(0, x)
+
+
+    or
 
     .. math::
         \text{LeakyRELU}(x) =
         \begin{cases}
         x, & \text{ if } x \geq 0 \\
-        \text{negative_slope} \times x, & \text{ otherwise }
+        \text{negative\_slope} \times x, & \text{ otherwise }
         \end{cases}
 
     Args:
@@ -452,7 +515,9 @@ class LeakyReLU(Module):
 
 
 class LogSigmoid(Module):
-    r"""Applies element-wise :math:`\text{LogSigmoid}(x) = \log\left(\frac{ 1 }{ 1 + \exp(-x)}\right)`
+    r"""Applies the element-wise function:
+
+    .. math:`\text{LogSigmoid}(x) = \log\left(\frac{ 1 }{ 1 + \exp(-x)}\right)`
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
@@ -473,7 +538,10 @@ class LogSigmoid(Module):
 
 
 class Softplus(Module):
-    r"""Applies element-wise :math:`\text{Softplus}(x) = \frac{1}{\beta} * \log(1 + \exp(\beta * x))`
+    r"""Applies the element-wise function:
+
+    .. math::
+        \text{Softplus}(x) = \frac{1}{\beta} * \log(1 + \exp(\beta * x))
 
     SoftPlus is a smooth approximation to the ReLU function and can be used
     to constrain the output of a machine to always be positive.
@@ -512,9 +580,7 @@ class Softplus(Module):
 
 
 class Softshrink(Module):
-    r"""Applies the soft shrinkage function elementwise
-
-    SoftShrinkage function is defined as:
+    r"""Applies the soft shrinkage function elementwise:
 
     .. math::
         \text{SoftShrinkage}(x) =
@@ -553,8 +619,12 @@ class Softshrink(Module):
 
 
 class PReLU(Module):
-    r"""Applies element-wise the function
-    :math:`\text{PReLU}(x) = \max(0,x) + a * \min(0,x)` or
+    r"""Applies the element-wise function:
+
+    .. math::
+        \text{PReLU}(x) = \max(0,x) + a * \min(0,x)
+
+    or
 
     .. math::
         \text{PReLU}(x) =
@@ -602,7 +672,10 @@ class PReLU(Module):
 
 
 class Softsign(Module):
-    r"""Applies element-wise, the function :math:`\text{SoftSign}(x) = \frac{x}{ 1 + |x|}`
+    r"""Applies the element-wise function:
+
+    .. math::
+        \text{SoftSign}(x) = \frac{x}{ 1 + |x|}
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
@@ -623,7 +696,10 @@ class Softsign(Module):
 
 
 class Tanhshrink(Module):
-    r"""Applies element-wise, :math:`\text{Tanhshrink}(x) = x - \text{Tanh}(x)`
+    r"""Applies the element-wise function:
+
+    .. math::
+        \text{Tanhshrink}(x) = x - \text{Tanh}(x)
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
@@ -648,7 +724,8 @@ class Softmin(Module):
     rescaling them so that the elements of the n-dimensional output Tensor
     lie in the range `(0, 1)` and sum to 1
 
-    :math:`\text{Softmin}(x_{i}) = \frac{\exp(-x_i)}{\sum_j \exp(-x_j)}`
+    .. math::
+        \text{Softmin}(x_{i}) = \frac{\exp(-x_i)}{\sum_j \exp(-x_j)}
 
     Shape:
         - Input: any shape
@@ -668,6 +745,7 @@ class Softmin(Module):
         >>> input = torch.randn(2, 3)
         >>> output = m(input)
     """
+
     def __init__(self, dim=None):
         super(Softmin, self).__init__()
         self.dim = dim
@@ -681,8 +759,10 @@ class Softmax(Module):
     rescaling them so that the elements of the n-dimensional output Tensor
     lie in the range (0,1) and sum to 1
 
-    Softmax is defined as
-    :math:`\text{Softmax}(x_{i}) = \frac{\exp(x_i)}{\sum_j \exp(x_j)}`
+    Softmax is defined as:
+
+    .. math::
+        \text{Softmax}(x_{i}) = \frac{\exp(x_i)}{\sum_j \exp(x_j)}
 
     Shape:
         - Input: any shape
@@ -749,10 +829,11 @@ class Softmax2d(Module):
 
 
 class LogSoftmax(Module):
-    r"""Applies the `Log(Softmax(x))` function to an n-dimensional input Tensor.
-    The LogSoftmax formulation can be simplified as
+    r"""Applies the :math:`\log(\text{Softmax}(x))` function to an n-dimensional
+    input Tensor. The LogSoftmax formulation can be simplified as:
 
-    :math:`\text{LogSoftmax}(x_{i}) = \log\left(\frac{\exp(x_i) }{ \sum_j \exp(x_j)} \right)`
+    .. math::
+        \text{LogSoftmax}(x_{i}) = \log\left(\frac{\exp(x_i) }{ \sum_j \exp(x_j)} \right)
 
     Shape:
         - Input: any shape

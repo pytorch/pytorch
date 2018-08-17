@@ -5,14 +5,14 @@
 #include <functional>
 
 #include "ATen/ATenGeneral.h"
-#include "ATen/ArrayRef.h"
-#include "ATen/Generator.h"
-#include "ATen/Half.h"
-#include "ATen/SparseTensorRef.h"
-#include "ATen/ScalarType.h"
-#include "ATen/Scalar.h"
-#include "ATen/Tensor.h"
 #include "ATen/Allocator.h"
+#include "ATen/Generator.h"
+#include "ATen/Scalar.h"
+#include "ATen/ScalarType.h"
+#include "ATen/SparseTensorRef.h"
+#include "ATen/Tensor.h"
+#include "ATen/core/ArrayRef.h"
+#include "ATen/core/Half.h"
 
 // To solve the conflict of s_addr in inaddr.h
 #ifdef _MSC_VER
@@ -98,7 +98,7 @@ struct AT_API Type {
   virtual Tensor unsafeTensorFromTH(void * th_pointer, bool retain) const = 0;
   virtual std::unique_ptr<Storage> unsafeStorageFromTH(void * th_pointer, bool retain) const = 0;
   virtual const char * toString() const = 0;
-  virtual std::size_t elementSizeInBytes() const = 0;
+  virtual size_t elementSizeInBytes() const = 0;
   virtual Type & toBackend(Backend b) const;
   virtual Type & toScalarType(ScalarType s) const;
   Context& get_context() const { return *context; }
@@ -133,8 +133,8 @@ struct AT_API Type {
   virtual Tensor & ones_like_out(Tensor & result, const Tensor & input) const;
   virtual Tensor ones_like(const Tensor & input) const;
   virtual int64_t numel(const Tensor & self) const;
-  virtual Tensor & set_(Tensor & self, Storage & storage) const;
-  virtual Tensor & set_(Tensor & self, Storage & sourceStorage, int64_t storage_offset, IntList size, IntList stride={}) const;
+  virtual Tensor & set_(Tensor & self, Storage & source) const;
+  virtual Tensor & set_(Tensor & self, Storage & source, int64_t storage_offset, IntList size, IntList stride={}) const;
   virtual Tensor & set_(Tensor & self, const Tensor & source) const;
   virtual Tensor & set_(Tensor & self) const;
   virtual Tensor & fill_(Tensor & self, Scalar value) const;
@@ -366,6 +366,9 @@ struct AT_API Type {
   virtual Tensor & erf_(Tensor & self) const;
   virtual Tensor & erf_out(Tensor & result, const Tensor & self) const;
   virtual Tensor erf(const Tensor & self) const;
+  virtual Tensor & erfc_(Tensor & self) const;
+  virtual Tensor & erfc_out(Tensor & result, const Tensor & self) const;
+  virtual Tensor erfc(const Tensor & self) const;
   virtual Tensor & erfinv_(Tensor & self) const;
   virtual Tensor & erfinv_out(Tensor & result, const Tensor & self) const;
   virtual Tensor erfinv(const Tensor & self) const;
@@ -747,12 +750,6 @@ struct AT_API Type {
   virtual Tensor glu_forward(const Tensor & self, int64_t dim) const;
   virtual Tensor & glu_backward_out(Tensor & grad_input, const Tensor & grad_output, const Tensor & self, int64_t dim) const;
   virtual Tensor glu_backward(const Tensor & grad_output, const Tensor & self, int64_t dim) const;
-  virtual Tensor & hardshrink_out(Tensor & output, const Tensor & self, Scalar lambd=0.5) const;
-  virtual Tensor hardshrink(const Tensor & self, Scalar lambd=0.5) const;
-  virtual Tensor & hardshrink_forward_out(Tensor & output, const Tensor & self, Scalar lambd) const;
-  virtual Tensor hardshrink_forward(const Tensor & self, Scalar lambd) const;
-  virtual Tensor & hardshrink_backward_out(Tensor & grad_input, const Tensor & grad_output, const Tensor & self, Scalar lambd) const;
-  virtual Tensor hardshrink_backward(const Tensor & grad_output, const Tensor & self, Scalar lambd) const;
   virtual Tensor & hardtanh_out(Tensor & output, const Tensor & self, Scalar min_val=-1, Scalar max_val=1) const;
   virtual Tensor hardtanh(const Tensor & self, Scalar min_val=-1, Scalar max_val=1) const;
   virtual Tensor & hardtanh_forward_out(Tensor & output, const Tensor & self, Scalar min_val, Scalar max_val) const;

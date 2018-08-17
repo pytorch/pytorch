@@ -35,6 +35,10 @@ class CuDNNSoftmaxOp final : public Operator<CUDAContext> {
     const int D = X.size_from_dim(canonical_axis);
 
     Y->ResizeLike(X);
+    auto* Y_data = Y->template mutable_data<T>();
+    if (N == 0) {
+      return true;
+    }
     if (dims_ != X.dims()) {
       CUDNN_ENFORCE(cudnnSetTensor4dDescriptor(
           desc_,
@@ -55,7 +59,7 @@ class CuDNNSoftmaxOp final : public Operator<CUDAContext> {
         X.template data<T>(),
         cudnnTypeWrapper<T>::kZero(),
         desc_,
-        Y->template mutable_data<T>()));
+        Y_data));
     return true;
   }
 
@@ -95,6 +99,10 @@ class CuDNNSoftmaxGradientOp final : public Operator<CUDAContext> {
 
     CHECK_EQ(Y.dims(), dY.dims());
     dX->ResizeLike(Y);
+    auto* dX_data = dX->template mutable_data<T>();
+    if (N == 0) {
+      return true;
+    }
     if (dims_ != Y.dims()) {
       CUDNN_ENFORCE(cudnnSetTensor4dDescriptor(
           desc_,
@@ -117,7 +125,7 @@ class CuDNNSoftmaxGradientOp final : public Operator<CUDAContext> {
         dY.template data<T>(),
         cudnnTypeWrapper<T>::kZero(),
         desc_,
-        dX->template mutable_data<T>()));
+        dX_data));
     return true;
   }
 

@@ -19,9 +19,9 @@ If you are not familiar with creating a Pull Request, here are some guides:
 - https://help.github.com/articles/creating-a-pull-request/
 
 
-## Developing locally with PyTorch
+## Developing PyTorch
 
-To locally develop with PyTorch, here are some tips:
+To develop PyTorch on your machine, here are some tips:
 
 1. Uninstall all existing pytorch installs
 ```
@@ -30,7 +30,7 @@ pip uninstall torch
 pip uninstall torch # run this command twice
 ```
 
-2. Locally clone a copy of PyTorch from source:
+2. Clone a copy of PyTorch from source:
 
 ```
 git clone https://github.com/pytorch/pytorch
@@ -71,6 +71,9 @@ For example:
 - test functionality
 
 You do not need to repeatedly install after modifying python files.
+
+In case you want to reinstall, make sure that you uninstall pytorch first by running `pip uninstall torch`
+and `python setup.py clean`. Then you can install in `build develop` mode again.
 
 ## Unit testing
 
@@ -136,19 +139,20 @@ not very optimized for incremental rebuilds, this will actually be very slow.
 Far better is to only request rebuilds of the parts of the project you are
 working on:
 
-- Working on `torch/csrc`?  Run `python setup.py develop` to rebuild
+- Working on the Python bindings?  Run `python setup.py develop` to rebuild
   (NB: no `build` here!)
 
-- Working on `torch/lib/TH`, did not make any cmake changes, and just want to
-  see if it compiles?  Run `(cd torch/lib/build/TH && make install -j$(getconf _NPROCESSORS_ONLN))`.  This
-  applies for any other subdirectory of `torch/lib`.  **Warning: Changes you
-  make here will not be visible from Python.**  See below.
+- Working on `torch/csrc` or `aten`?  Run `python setup.py rebuild_libtorch` to
+  rebuild and avoid having to rebuild other dependent libraries we
+  depend on.
 
-- Working on `torch/lib` and want to run your changes / rerun cmake?  Run
-  `python setup.py build_deps`.  Note that this will rerun cmake for
-  every subdirectory in TH; if you are only working on one project,
-  consider editing `torch/lib/build_all.sh` and commenting out the
-  `build` lines of libraries you are not working on.
+- Working on one of the other dependent libraries? The other valid
+  targets are listed in `dep_libs` in `setup.py`. prepend `build_` to
+  get a target, and run as e.g. `python setup.py build_gloo`.
+
+- Working on a test binary?  Run `(cd build && ninja bin/test_binary_name)` to
+  rebuild only that test binary (without rerunning cmake).  (Replace `ninja` with
+  `make` if you don't have ninja installed).
 
 On the initial build, you can also speed things up with the environment
 variables `DEBUG` and `NO_CUDA`.
@@ -165,7 +169,7 @@ Make sure you continue to pass these flags on subsequent builds.
 
 ### Code completion and IDE support
 
-When using `python setup.py develop`, PyTorch will generate 
+When using `python setup.py develop`, PyTorch will generate
 a `compile_commands.json` file that can be used by many editors
 to provide command completion and error highlighting for PyTorch's
 C++ code. You need to `pip install ninja` to generate accurate
@@ -176,12 +180,12 @@ information for the code in `torch/csrc`. More information at:
 
 #### Use Ninja
 Python `setuptools` is pretty dumb, and always rebuilds every C file in a
-project.  If you install the ninja build system with `pip install ninja`, 
+project.  If you install the ninja build system with `pip install ninja`,
 then PyTorch will use it to track dependencies correctly.
 
 #### Use CCache
 
-Even when dependencies are tracked with file modification, 
+Even when dependencies are tracked with file modification,
 there are many situations where files get rebuilt when a previous
 compilation was exactly the same.
 
@@ -226,9 +230,9 @@ export CUDA_NVCC_EXECUTABLE=~/ccache/cuda/nvcc
 
 If you are working on the CUDA code, here are some useful CUDA debugging tips:
 
-1. `CUDA_DEBUG=1` will enable CUDA debugging symbols (-g -G). This is particularly
-    helpful in debugging device code. However, it will slow down the build process,
-    so use wisely.
+1. `CUDA_DEVICE_DEBUG=1` will enable CUDA device function debug symbols (`-g -G`).
+    This will be particularly helpful in debugging device code. However, it will
+    slow down the build process for about 50% (compared to only `DEBUG=1`), so use wisely.
 2. `cuda-gdb` and `cuda-memcheck` are your best CUDA debugging friends. Unlike`gdb`,
    `cuda-gdb` can display actual values in a CUDA tensor (rather than all zeros).
 
@@ -247,7 +251,7 @@ than Linux, which are worth keeping in mind when fixing these problems.
    which follow the convention `*_API`, e.g., `AT_API` inside ATen. (Every separate
    shared library needs a unique macro name, because symbol visibility is on a per
    shared library basis.)
-   
+
    The upshot is if you see an "unresolved external" error in your Windows build, this
    is probably because you forgot to mark a function with `*_API`.  However, there is
    one important counterexample to this principle: if you want a *templated* function

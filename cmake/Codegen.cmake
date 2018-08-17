@@ -1,3 +1,9 @@
+# This ill-named file does a number of things:
+# - Installs Caffe2 header files (this has nothing to do with code generation)
+# - Configures caffe2/core/macros.h
+# - Creates an ATen target for its generated C++ files and adds it
+#   as a dependency
+
 if (DEFINED ENV{PYTORCH_PYTHON})
   message(STATUS "Using python found in $ENV{PYTORCH_PYTHON}")
   set(PYCMD "$ENV{PYTORCH_PYTHON}")
@@ -14,6 +20,11 @@ configure_file(
 install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/../caffe2
         DESTINATION include
         FILES_MATCHING PATTERN "*.h")
+if (NOT BUILD_ATEN)
+  install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/core
+          DESTINATION include/ATen
+          FILES_MATCHING PATTERN "*.h")
+endif()
 install(FILES ${CMAKE_BINARY_DIR}/caffe2/core/macros.h
         DESTINATION include/caffe2/core)
 
@@ -83,7 +94,7 @@ if (BUILD_ATEN)
     IF(MSVC)
       LIST(APPEND CPU_CAPABILITY_FLAGS "${MSVC_OPT_FLAG}/arch:AVX2")
     ELSE(MSVC)
-      LIST(APPEND CPU_CAPABILITY_FLAGS "-O3 -mavx2")
+      LIST(APPEND CPU_CAPABILITY_FLAGS "-O3 -mavx2 -mfma")
     ENDIF(MSVC)
   ENDIF(CXX_AVX2_FOUND)
 
@@ -120,14 +131,14 @@ if (BUILD_ATEN)
   SET(GEN_COMMAND
       ${PYCMD} ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/gen.py
       --source-path ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen
-      --output-dir ${CMAKE_BINARY_DIR}/aten/src/ATen
+      --install_dir ${CMAKE_BINARY_DIR}/aten/src/ATen
       ${cwrap_files}
   )
 
   EXECUTE_PROCESS(
       COMMAND ${GEN_COMMAND}
         --output-dependencies ${CMAKE_BINARY_DIR}/aten/src/ATen/generated_cpp.txt
-        --output-dir ${CMAKE_BINARY_DIR}/aten/src/ATen
+        --install_dir ${CMAKE_BINARY_DIR}/aten/src/ATen
       RESULT_VARIABLE RETURN_VALUE
   )
   if (NOT RETURN_VALUE EQUAL 0)
@@ -143,7 +154,7 @@ if (BUILD_ATEN)
 
   add_custom_command(OUTPUT ${generated_cpp} ${cuda_generated_cpp}
     COMMAND ${GEN_COMMAND}
-      --output-dir ${CMAKE_BINARY_DIR}/aten/src/ATen
+      --install_dir ${CMAKE_BINARY_DIR}/aten/src/ATen
     DEPENDS ${all_python} ${all_templates} ${cwrap_files})
 
   # Generated headers used from a CUDA (.cu) file are

@@ -69,7 +69,7 @@ namespace torch { namespace jit {
 
 static inline py::tuple tuple_tail(const py::tuple & tup) {
   py::tuple r(tup.size() - 1);
-  for(std::size_t i = 1; i < tup.size(); i++) {
+  for(size_t i = 1; i < tup.size(); i++) {
     r[i-1] = tup[i];
   }
   return r;

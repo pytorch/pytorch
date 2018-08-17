@@ -1,7 +1,8 @@
 import torch
+from torch._six import nan
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
-from torch.distributions.utils import probs_to_logits, logits_to_probs, log_sum_exp, lazy_property, broadcast_all
+from torch.distributions.utils import probs_to_logits, logits_to_probs, lazy_property, broadcast_all
 
 
 class Categorical(Distribution):
@@ -21,7 +22,8 @@ class Categorical(Distribution):
     If :attr:`probs` is 2D, it is treated as a batch of relative probability
     vectors.
 
-    .. note:: :attr:`probs` will be normalized to be summing to 1.
+    .. note:: :attr:`probs` must be non-negative, finite and have a non-zero sum,
+              and it will be normalized to sum to 1.
 
     See also: :func:`torch.multinomial`
 
@@ -29,8 +31,7 @@ class Categorical(Distribution):
 
         >>> m = Categorical(torch.tensor([ 0.25, 0.25, 0.25, 0.25 ]))
         >>> m.sample()  # equal probability of 0, 1, 2, 3
-         3
-        [torch.LongTensor of size 1]
+        tensor(3)
 
     Args:
         probs (Tensor): event probabilities
@@ -45,7 +46,7 @@ class Categorical(Distribution):
         if probs is not None:
             self.probs = probs / probs.sum(-1, keepdim=True)
         else:
-            self.logits = logits - log_sum_exp(logits)
+            self.logits = logits - logits.logsumexp(dim=-1, keepdim=True)
         self._param = self.probs if probs is not None else self.logits
         self._num_events = self._param.size()[-1]
         batch_shape = self._param.size()[:-1] if self._param.ndimension() > 1 else torch.Size()
@@ -72,11 +73,11 @@ class Categorical(Distribution):
 
     @property
     def mean(self):
-        return self.probs.new_tensor(float('nan')).expand(self._extended_shape())
+        return self.probs.new_tensor(nan).expand(self._extended_shape())
 
     @property
     def variance(self):
-        return self.probs.new_tensor(float('nan')).expand(self._extended_shape())
+        return self.probs.new_tensor(nan).expand(self._extended_shape())
 
     def sample(self, sample_shape=torch.Size()):
         sample_shape = self._extended_shape(sample_shape)

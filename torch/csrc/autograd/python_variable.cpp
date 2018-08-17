@@ -1,9 +1,9 @@
 #include "torch/csrc/autograd/python_variable.h"
 
 #include "THP.h"
-#include "torch/csrc/Device.h"
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/Exceptions.h"
+#include "torch/csrc/Device.h"
 #include "torch/csrc/Size.h"
 #include "torch/csrc/Types.h"
 #include "torch/csrc/autograd/edge.h"
@@ -16,7 +16,6 @@
 #include "torch/csrc/autograd/generated/VariableType.h"
 #include "torch/csrc/autograd/utils/python_error_messages.h"
 #include "torch/csrc/autograd/utils/wrap_outputs.h"
-#include "torch/csrc/jit/tracer_state.h"
 #include "torch/csrc/tensor/python_tensor.h"
 #include "torch/csrc/utils/auto_gil.h"
 #include "torch/csrc/utils/cuda_lazy_init.h"
@@ -26,10 +25,10 @@
 
 #include <ATen/ATen.h>
 
-#include <list>
-#include <memory>
 #include <structmember.h>
-#include <sstream>
+#include <memory>
+#include <utility>
+#include <vector>
 
 using namespace at;
 using namespace torch;
@@ -126,7 +125,7 @@ static void THPVariable_dealloc(THPVariable* self)
 static PyObject *THPVariable_pynew(PyTypeObject *type, PyObject *args, PyObject *kwargs)
 {
   HANDLE_TH_ERRORS
-  auto& default_type = torch::tensor::get_default_tensor_type();
+  auto& default_type = torch::tensors::get_default_tensor_type();
   auto tensor = torch::utils::legacy_tensor_ctor(default_type, args, kwargs);
   return THPVariable_NewWithVar(type, std::move(tensor));
   END_HANDLE_TH_ERRORS
@@ -157,7 +156,7 @@ PyObject *THPVariable_get_cdata(THPVariable *self)
 {
   HANDLE_TH_ERRORS
   auto& var = self->cdata;
-  return PyLong_FromVoidPtr(var.unsafeGetTH(false));
+  return PyLong_FromVoidPtr(var.data().unsafeGetTensorImpl());
   END_HANDLE_TH_ERRORS
 }
 
@@ -366,7 +365,7 @@ PyObject *THPVariable_is_sparse(THPVariable *self)
   END_HANDLE_TH_ERRORS
 }
 
-PyObject *THPVariable_dtype(THPVariable *self)
+static PyObject *THPVariable_dtype(THPVariable *self)
 {
   HANDLE_TH_ERRORS
   auto& self_ = self->cdata;
@@ -374,24 +373,16 @@ PyObject *THPVariable_dtype(THPVariable *self)
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPVariable_layout(THPVariable* self, PyObject* args) {
+static PyObject * THPVariable_layout(THPVariable* self) {
   HANDLE_TH_ERRORS
   auto& self_ = self->cdata;
   return torch::autograd::utils::wrap(torch::getLayout(self_.type().backend()));
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPVariable_device(THPVariable* self, PyObject* args) {
+static PyObject * THPVariable_device(THPVariable* self) {
   HANDLE_TH_ERRORS
-  auto& self_ = self->cdata;
-  if (self_.type().is_cuda()) {
-    torch::Device device(torch::DeviceType::CUDA, self_.get_device(), false);
-    return THPDevice_New(device);
-  }
-  else {
-    torch::Device device(torch::DeviceType::CPU, -1, true);
-    return THPDevice_New(device);
-  }
+  return THPDevice_New(torch::tensors::getDevice(self->cdata));
   END_HANDLE_TH_ERRORS
 }
 
@@ -413,9 +404,9 @@ static struct PyGetSetDef THPVariable_properties[] = {
   {"shape", (getter)THPVariable_get_shape, nullptr, nullptr, nullptr},
   {"is_cuda", (getter)THPVariable_is_cuda, nullptr, nullptr, nullptr},
   {"is_sparse", (getter)THPVariable_is_sparse, nullptr, nullptr, nullptr},
-  {"dtype", (getter)THPVariable_dtype, NULL, NULL, NULL},
-  {"layout", (getter)THPVariable_layout, NULL, NULL, NULL},
-  {"device", (getter)THPVariable_device, NULL, NULL, NULL},
+  {"dtype", (getter)THPVariable_dtype, nullptr, nullptr, nullptr},
+  {"layout", (getter)THPVariable_layout, nullptr, nullptr, nullptr},
+  {"device", (getter)THPVariable_device, nullptr, nullptr, nullptr},
   {nullptr}
 };
 

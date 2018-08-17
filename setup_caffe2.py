@@ -137,6 +137,7 @@ class cmake_build(Caffe2Command):
                 '-DBUILD_TEST=OFF',
                 '-DBUILD_BENCHMARK=OFF',
                 '-DBUILD_BINARY=OFF',
+                '-DCMAKE_EXPORT_COMPILE_COMMANDS=ON',
             ]
             if NINJA:
                 cmake_args.extend(['-G', 'Ninja'])
@@ -160,19 +161,17 @@ class build_py(setuptools.command.build_py.build_py):
     def run(self):
         self.run_command('create_version')
         self.run_command('cmake_build')
-        for d in ['caffe', 'caffe2']:
-            for src in glob.glob(
-                    os.path.join(CMAKE_BUILD_DIR, d, 'proto', '*.py')):
-                dst = os.path.join(
-                    TOP_DIR, os.path.relpath(src, CMAKE_BUILD_DIR))
-                self.copy_file(src, dst)
+        for src in glob.glob(
+                os.path.join(CMAKE_BUILD_DIR, 'caffe2', 'proto', '*.py')):
+            dst = os.path.join(
+                TOP_DIR, os.path.relpath(src, CMAKE_BUILD_DIR))
+            self.copy_file(src, dst)
         setuptools.command.build_py.build_py.run(self)
 
 
 class build_ext(setuptools.command.build_ext.build_ext):
     def get_outputs(self):
-        return [os.path.join(self.build_lib, d)
-                for d in ['caffe', 'caffe2']]
+        return [os.path.join(self.build_lib, 'caffe2')]
 
     def run(self):
         self.run_command('cmake_build')
@@ -219,6 +218,9 @@ ext_modules = [
     setuptools.Extension(
         name=str('caffe2.python.caffe2_pybind11_state_gpu'),
         sources=[]),
+    setuptools.Extension(
+        name=str('caffe2.python.caffe2_pybind11_state_hip'),
+        sources=[]),
 ]
 
 ################################################################################
@@ -261,4 +263,10 @@ setuptools.setup(
     author='jiayq',
     author_email='jiayq@fb.com',
     url='https://caffe2.ai',
+    entry_points={
+        'console_scripts': [
+            'convert-caffe2-to-onnx = caffe2.python.onnx.bin.conversion:caffe2_to_onnx',
+            'convert-onnx-to-caffe2 = caffe2.python.onnx.bin.conversion:onnx_to_caffe2',
+        ]
+    },
 )

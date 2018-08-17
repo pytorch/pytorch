@@ -71,6 +71,12 @@ def DeviceScope(scope, node_name=None):
     if old_scope and old_scope.HasField('node_name') and \
             not new_scope.HasField('node_name'):
         new_scope.node_name = old_scope.node_name
+
+    # nested scope should inherit the extra_info and merged it with new extra_info
+    if old_scope and hasattr(old_scope, 'extra_info'):
+        new_scope.extra_info.extend(old_scope.extra_info)
+    new_scope.extra_info.sort()
+
     _threadlocal_scope.devicescope = new_scope
     try:
         yield

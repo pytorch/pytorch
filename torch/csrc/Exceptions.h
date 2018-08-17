@@ -4,12 +4,10 @@
 #include <stdexcept>
 #include <string>
 
-#ifndef NO_PYTHON
-
-#include "ATen/Error.h"
+#include "ATen/core/Error.h"
 #include "THP_export.h"
-#include "torch/csrc/utils/object_ptr.h"
 #include "torch/csrc/utils/auto_gil.h"
+#include "torch/csrc/utils/object_ptr.h"
 
 #define HANDLE_TH_ERRORS                                                       \
   try {
@@ -135,22 +133,3 @@ struct ValueError : public PyTorchError {
 };
 
 } // namespace torch
-
-#else
-
-namespace torch {
-
-struct PyTorchError : public std::exception {
-  virtual const char* what() const noexcept override {
-    return msg.c_str();
-  }
-  std::string msg;
-};
-
-struct ValueError : public PyTorchError {
-  ValueError(const char *format, ...);
-};
-
-} // namespace torch
-
-#endif

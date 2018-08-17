@@ -5,20 +5,8 @@
 namespace c10d {
 
 enum class CollectiveType : std::uint8_t {
-  ALLGATHER = 0,
-  GATHER,
-  SCATTER,
-  ALLREDUCE,
-  REDUCE,
   BROADCAST,
-  SEND,
-  BARRIER,
-  UNUSED,
-};
-
-enum class DeviceType : std::uint8_t {
-  CPU = 0,
-  CUDA,
+  ALLREDUCE,
   UNUSED,
 };
 
@@ -37,6 +25,20 @@ struct BroadcastOptions {
 
 struct AllreduceOptions {
   ReduceOp reduceOp = ReduceOp::SUM;
+};
+
+struct ReduceOptions {
+  ReduceOp reduceOp = ReduceOp::SUM;
+  int rootRank = 0;
+  int rootTensor = 0;
+};
+
+struct ScatterOptions {
+  int rootRank = 0;
+};
+
+struct GatherOptions {
+  int rootRank = 0;
 };
 
 } // namespace c10d

@@ -2,11 +2,18 @@
 #define THC_GENERIC_FILE "generic/THCStorage.h"
 #else
 
-#define TH_STORAGE_REFCOUNTED 1
-#define TH_STORAGE_RESIZABLE  2
-#define TH_STORAGE_FREEMEM    4
+#define THCStorage THStorage
 
-typedef struct THCStorage THCStorage;
+// These used to be distinct types; for some measure of backwards compatibility and documentation
+// alias these to the single THCStorage type.
+#define THCudaStorage       THCStorage
+#define THCudaDoubleStorage THCStorage
+#define THCudaHalfStorage   THCStorage
+#define THCudaByteStorage   THCStorage
+#define THCudaCharStorage   THCStorage
+#define THCudaShortStorage  THCStorage
+#define THCudaIntStorage    THCStorage
+#define THCudaLongStorage   THCStorage
 
 THC_API real* THCStorage_(data)(THCState *state, const THCStorage*);
 THC_API ptrdiff_t THCStorage_(size)(THCState *state, const THCStorage*);
@@ -24,24 +31,18 @@ THC_API THCStorage* THCStorage_(newWithSize3)(THCState *state, real, real, real)
 THC_API THCStorage* THCStorage_(newWithSize4)(THCState *state, real, real, real, real);
 THC_API THCStorage* THCStorage_(newWithMapping)(THCState *state, const char *filename, ptrdiff_t size, int shared);
 
-/* takes ownership of data */
-THC_API THCStorage* THCStorage_(newWithData)(THCState *state, real *data, ptrdiff_t size);
-
+#ifdef __cplusplus
 THC_API THCStorage* THCStorage_(newWithAllocator)(
   THCState *state, ptrdiff_t size,
-  THCDeviceAllocator* allocator,
-  void *allocatorContext);
+  at::Allocator* allocator);
 THC_API THCStorage* THCStorage_(newWithDataAndAllocator)(
-  THCState *state, real* data, ptrdiff_t size,
-  THCDeviceAllocator* allocator,
-  void *allocatorContext);
+  THCState *state, at::DataPtr&& data, ptrdiff_t size,
+  at::Allocator* allocator);
+#endif
 
 THC_API void THCStorage_(setFlag)(THCState *state, THCStorage *storage, const char flag);
 THC_API void THCStorage_(clearFlag)(THCState *state, THCStorage *storage, const char flag);
 THC_API void THCStorage_(retain)(THCState *state, THCStorage *storage);
-
-/* used by StorageSharing */
-THC_API int THCStorage_(retainIfLive)(THCState *state, THCStorage *storage);
 
 THC_API void THCStorage_(free)(THCState *state, THCStorage *storage);
 THC_API void THCStorage_(resize)(THCState *state, THCStorage *storage, ptrdiff_t size);

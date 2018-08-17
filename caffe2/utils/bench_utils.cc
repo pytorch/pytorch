@@ -1,9 +1,9 @@
+#include <cpuinfo.h>
 #include <stdint.h>
 #include <stdlib.h>
 
-#include <cpuinfo.h>
-
 #include "caffe2/core/logging.h"
+#include "caffe2/utils/bench_utils.h"
 
 namespace caffe2 {
 

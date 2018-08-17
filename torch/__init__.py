@@ -8,9 +8,11 @@ It has a CUDA counterpart, that enables you to run your tensor computations
 on an NVIDIA GPU with compute capability >= 3.0.
 """
 
+import os
 import sys
 import platform
 from ._utils import _import_dotted_name
+from ._utils_internal import get_file_path, prepare_multiprocessing_environment
 from .version import __version__
 from ._six import string_classes as _string_classes
 
@@ -51,9 +53,13 @@ if platform.system() == 'Windows':
         else:
             return ''
 
+    py_dll_path = _dl_flags.path.join(_dl_flags.path.dirname(sys.executable), 'Library\\bin')
+    th_dll_path = _dl_flags.path.dirname(__file__) + '\\lib\\'
+
+    dll_paths = [th_dll_path, py_dll_path, get_nvToolsExt_path(), _dl_flags.environ['PATH']]
+
     # then add the path to env
-    _dl_flags.environ['PATH'] = _dl_flags.path.dirname(
-        __file__) + '\\lib\\;' + get_nvToolsExt_path() + ';' + _dl_flags.environ['PATH']
+    _dl_flags.environ['PATH'] = ';'.join(dll_paths)
 
 else:
     # first check if the os package has the required flags
@@ -233,8 +239,8 @@ _tensor_classes = set()
 def manager_path():
     if platform.system() == 'Windows':
         return b""
-    import os
-    path = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'lib', 'torch_shm_manager')
+    path = get_file_path('torch', 'lib', 'torch_shm_manager')
+    prepare_multiprocessing_environment(get_file_path('torch'))
     if not os.path.exists(path):
         raise RuntimeError("Unable to find torch_shm_manager at " + path)
     return path.encode('utf-8')
@@ -245,6 +251,8 @@ _C._initExtension(manager_path())
 del manager_path
 
 for name in dir(_C._VariableFunctions):
+    if name in ["__dir__", "__doc__"]:
+        continue
     globals()[name] = getattr(_C._VariableFunctions, name)
 
 ################################################################################
@@ -283,6 +291,7 @@ import torch.jit
 import torch.random
 import torch.distributions
 import torch.testing
+import torch.backends.cuda
 import torch.backends.mkl
 from torch.autograd import no_grad, enable_grad, set_grad_enabled
 
@@ -291,3 +300,12 @@ _C._init_names(list(torch._storage_classes))
 # attach docstrings to torch and tensor functions
 from . import _torch_docs, _tensor_docs, _storage_docs
 del _torch_docs, _tensor_docs, _storage_docs
+
+
+def compiled_with_cxx11_abi():
+    r"""Returns whether PyTorch was built with _GLIBCXX_USE_CXX11_ABI=1"""
+    return _C._GLIBCXX_USE_CXX11_ABI
+
+
+# Import the ops "namespace"
+from torch._ops import ops

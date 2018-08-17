@@ -1,3 +1,19 @@
+/**
+ * Copyright (c) 2016-present, Facebook, Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 #ifndef CAFFE2_OPERATORS_FULLY_CONNECTED_OP_SPARSE_H_
 #define CAFFE2_OPERATORS_FULLY_CONNECTED_OP_SPARSE_H_
 
@@ -90,7 +106,7 @@ class FullyConnectedOp_SPARSE final : public Operator<Context> {
     const auto& jw = Input(3);
     // Notice that we do not need to transpose b
     const auto& b = Input(4);
-    auto* Yt = Output(0); //transposed Y
+    auto* Yt = Output(0); // transposed Y
     // here we assume X is k-by-m
     CAFFE_ENFORCE_EQ(Xt.ndim(), 2);
     CAFFE_ENFORCE_EQ(b.ndim(), 1);
@@ -124,7 +140,7 @@ class FullyConnectedOp_SPARSE final : public Operator<Context> {
   }
 
  protected:
-  Tensor<Context> bias_multiplier_;
+  Tensor bias_multiplier_{Context::GetDeviceType()};
 };
 
 

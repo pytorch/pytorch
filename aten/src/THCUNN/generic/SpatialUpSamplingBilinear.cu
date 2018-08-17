@@ -16,8 +16,8 @@ static inline void THNN_(SpatialUpSamplingBilinear_shapeCheck)
              " but got input (H: %d, W: %d) output (H: %d, W: %d)",
              inputHeight, inputWidth, outputHeight, outputWidth);
   if (input != NULL) {
-     THCUNN_argCheck(state, input->nDimension == 4, 2, input,
-                     "4D input tensor expected but got: %s");
+     THCUNN_argCheck(state, !input->is_empty() && input->dim() == 4, 2, input,
+                     "non-empty 4D input tensor expected but got: %s");
   }
 
   if (gradOutput != NULL) {
@@ -45,7 +45,7 @@ void THNN_(SpatialUpSamplingBilinear_updateOutput)(
         nbatch, channels,
         inputHeight, inputWidth,
         outputHeight, outputWidth);
-  input = THCTensor_(newContiguous)(state, input);
+
   THCUNN_assertSameGPU(state, 2, input, output);
   THCTensor_(resize4d)(state, output,
                        THCTensor_(size)(state, input, 0),
@@ -64,7 +64,6 @@ void THNN_(SpatialUpSamplingBilinear_updateOutput)(
   caffe_gpu_interp2_kernel<real, accreal> <<<THCCeilDiv(num_kernels, num_threads), num_threads ,
    0 , stream>>>(num_kernels, rheight, rwidth, align_corners, idata, odata);
   THCudaCheck(cudaGetLastError());
-  THCTensor_(free)(state, input);
 }
 
 
@@ -85,7 +84,6 @@ void THNN_(SpatialUpSamplingBilinear_updateGradInput)(
         nbatch, nchannels,
         inputHeight, inputWidth,
         outputHeight, outputWidth);
-  gradInput = THCTensor_(newContiguous)(state, gradInput);
   gradOutput = THCTensor_(newContiguous)(state, gradOutput);
   THCUNN_assertSameGPU(state, 2, gradOutput, gradInput);
   THCTensor_(resize4d)(state, gradInput, nbatch, nchannels, inputHeight, inputWidth);
@@ -101,7 +99,6 @@ void THNN_(SpatialUpSamplingBilinear_updateGradInput)(
   caffe_gpu_interp2_kernel_backward<real ,accreal> <<<THCCeilDiv(num_kernels, num_threads),
   num_threads, 0, stream>>>(num_kernels, rheight, rwidth, align_corners, data1, data2);
   THCudaCheck(cudaGetLastError());
-  THCTensor_(free)(state, gradInput);
   THCTensor_(free)(state, gradOutput);
 }
 

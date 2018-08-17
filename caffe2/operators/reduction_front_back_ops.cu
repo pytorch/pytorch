@@ -279,7 +279,7 @@ __global__ void columnwise_max_kernel(
     const int length = lengths == nullptr ? rows : lengths[colIndex];
     for (int rowIndex = threadIdx.x; rowIndex < length;
          rowIndex += blockDim.x) {
-      mx = max(mx, data[rowIndex * cols + colIndex]);
+      mx = fmaxf(mx, data[rowIndex * cols + colIndex]);
     }
     mx = BlockReduce(temp_storage).Reduce(mx, cub::Max());
     if (threadIdx.x == 0) {
@@ -302,7 +302,7 @@ __global__ void rowwise_max_kernel(
     const int length = lengths == nullptr ? cols : lengths[rowIndex];
     for (int colIndex = threadIdx.x; colIndex < length;
          colIndex += blockDim.x) {
-      mx = max(mx, data[rowIndex * cols + colIndex]);
+      mx = fmaxf(mx, data[rowIndex * cols + colIndex]);
     }
     mx = BlockReduce(temp_storage).Reduce(mx, cub::Max());
     if (threadIdx.x == 0) {

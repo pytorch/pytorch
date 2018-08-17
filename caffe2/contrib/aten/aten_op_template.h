@@ -54,23 +54,27 @@ private:
     #undef DEFINE_CASE
   }
 
-  at::Type & typeFor(const Tensor<Context> & ten) {
+  at::Type& typeFor(const Tensor& ten) {
     return at::getType(backend(), atScalarTypeFor(ten.meta()));
   }
-  at::Tensor tensorWrapping(const Tensor<Context>& ten_) {
-    auto& ten = const_cast<Tensor<Context>&>(ten_);
+  at::Tensor tensorWrapping(const Tensor& ten_) {
+    auto& ten = const_cast<Tensor&>(ten_);
     return typeFor(ten).tensorFromBlob(ten.raw_mutable_data(), ten.dims());
   }
-  at::Tensor loadInput(size_t i) {
-    return tensorWrapping(Input(i));
+
+  at::Tensor peek(size_t i, size_t N) {
+    auto real_idx = InputSize() - N + i;
+    return tensorWrapping(Input(real_idx));
   }
-  std::vector<at::Tensor> loadInputsAtOffset(size_t s) {
+
+  std::vector<at::Tensor> peekSlice(size_t i, size_t len, size_t N) {
     std::vector<at::Tensor> results;
-    for (size_t i = s; i < InputSize(); i++) {
-      results.push_back(loadInput(i));
+    for (size_t ii = i; ii < i + len; ++ii) {
+      results.push_back(peek(ii, N));
     }
     return results;
   }
+
   at::ScalarType atScalarTypeFor(const TypeMeta & meta) {
     #define DEFINE_IF(ctype,aten_name,_) \
     if(meta.Match<ctype>()) { \
@@ -78,9 +82,13 @@ private:
     }
     AT_FORALL_SCALAR_TYPES(DEFINE_IF)
     #undef DEFINE_IF
+    // Special case for bool, since the type in ATen is actually Byte
+    if (meta.Match<bool>()) {
+      return at::kByte;
+    }
     CAFFE_THROW("Unknown type meta"); // TODO: improve error message...
   }
-  void assignTo(Tensor<Context> * dst, const at::Tensor & src_) {
+  void assignTo(Tensor* dst, const at::Tensor& src_) {
     at::Tensor src = src_.contiguous();
     auto at_sizes = src.sizes();
     std::vector<int64_t> dims(at_sizes.begin(),at_sizes.end());
@@ -113,7 +121,7 @@ private:
     return s.toLong();
   }
 
-  void assignTo(Tensor<Context> * dst, at::Type & inferred_type, at::Scalar scalar) {
+  void assignTo(Tensor* dst, at::Type& inferred_type, at::Scalar scalar) {
     switch(inferred_type.scalarType()) {
       #define DEFINE_CASE(ctype,aten_name,native) \
         case at::k##aten_name: { \
@@ -126,8 +134,8 @@ private:
         CAFFE_THROW("Unknown ATen Type");
     }
   }
-  template<typename T>
-  void assignToValue(Tensor<Context> * dst, T v) {
+  template <typename T>
+  void assignToValue(Tensor* dst, T v) {
     dst->Resize(std::vector<TIndex>());
     math::Set(1, v, dst->template mutable_data<T>(), &context_);
   }

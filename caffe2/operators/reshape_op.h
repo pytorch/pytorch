@@ -16,7 +16,7 @@ class ReshapeOp : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   ReshapeOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        new_shape_(OperatorBase::GetRepeatedArgument<int64_t>("shape")) {}
+        new_shape_(this->template GetRepeatedArgument<int64_t>("shape")) {}
 
   bool RunOnDevice() override {
     if (InputSize() == 2) {
@@ -35,9 +35,7 @@ class ReshapeOp : public Operator<Context> {
 
  protected:
   template <typename T>
-  void DoRunWithTypeImpl(
-      const Tensor<Context>& input,
-      Tensor<Context>* output) {
+  void DoRunWithTypeImpl(const Tensor& input, Tensor* output) {
     vector<int64_t> actual_new_shape = new_shape_;
     if (InputSize() == 2) {
       CAFFE_ENFORCE(
@@ -52,13 +50,12 @@ class ReshapeOp : public Operator<Context> {
 
       // Bit awkward, but needed so works on both CPU and CUDA contexts
       std::vector<T> tmpv(shape.size());
-      context_.template CopyBytes<Context, CPUContext>(
-          shape.size() * sizeof(T), shape_data, &tmpv[0]);
+      context_.CopyBytesToCPU(shape.size() * sizeof(T), shape_data, &tmpv[0]);
       actual_new_shape.assign(tmpv.begin(), tmpv.begin() + shape.size());
     }
 
     // Copy over the dimensions for those that are specified zero.
-    for (int i = 0; i < actual_new_shape.size(); ++i) {
+    for (int i = 0; i < actual_new_shape.size() && i < input.ndim(); ++i) {
       if (actual_new_shape[i] == 0) {
         actual_new_shape[i] = input.dim(i);
       }
@@ -81,8 +78,17 @@ class ReshapeOp : public Operator<Context> {
         size *= dim;
       }
     }
+    if (size == 0 && total_size != 0) {
+      CAFFE_THROW("Can not reshape a non-zero size (", total_size, ") tensor to zero size.");
+    }
 
     if (unknown_idx != -1) {
+      CAFFE_ENFORCE_NE(
+          size,
+          0,
+          "New shape at dim ",
+          unknown_idx,
+          " can not be inferred since new size is zero.");
       CAFFE_ENFORCE(
           total_size % size == 0,
           "Argument `shape` does not agree with the input data.",
@@ -115,7 +121,7 @@ class ReshapeOp : public Operator<Context> {
     output->Resize(actual_new_shape);
     if (output != &input) {
       // If we are not doing in-place computation, a copy is needed.
-      context_.template CopyItems<Context, Context>(
+      context_.CopyItemsSameDevice(
           input.meta(),
           input.size(),
           input.raw_data(),

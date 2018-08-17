@@ -87,7 +87,7 @@ def checkpoint(function, *args):
         args: tuple containing inputs to the :attr:`function`
 
     Returns:
-        Output of running :attr:`function` on *:attr:`args`
+        Output of running :attr:`function` on :attr:`*args`
     """
     return CheckpointFunction.apply(function, *args)
 
@@ -120,7 +120,7 @@ def checkpoint_sequential(functions, segments, *inputs):
         inputs: tuple of Tensors that are inputs to :attr:`functions`
 
     Returns:
-        Output of running :attr:`functions` sequentially on *:attr:`inputs`
+        Output of running :attr:`functions` sequentially on :attr:`*inputs`
 
     Example:
         >>> model = nn.Sequential(...)

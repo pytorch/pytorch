@@ -91,8 +91,7 @@ bool BooleanMaskOp<CPUContext>::RunOnDevice() {
       const auto* src = inPtr + lastStart * innerSizeBytes;
       auto* dst = outPtr + outStart * innerSizeBytes;
       int numItems = i - lastStart;
-      context_.template CopyItems<CPUContext, CPUContext>(
-          data.meta(), numItems * innerSize, src, dst);
+      context_.CopyItemsSameDevice(data.meta(), numItems * innerSize, src, dst);
       outStart += numItems;
       lastStart = -1;
     }
@@ -117,25 +116,110 @@ OPERATOR_SCHEMA(BooleanMask)
     .NumInputs(2)
     .NumOutputs(1, 2)
     .SetDoc(R"DOC(
-Given a data tensor and a 1D boolean mask tensor, returns a tensor containing
-only the elements corresponding to positions where the mask is true.
+Given a 1D `data` tensor and a boolean `mask` tensor of the same shape, returns a `masked_data` tensor containing only the elements corresponding to positions where the `mask` is True, and a `masked_indices` tensor containing the indices of the True elements.
+
+
+Github Links:
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/boolean_mask_ops.cc
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "BooleanMask",
+    ["data", "mask"],
+    ["masked_data", "masked_indices"]
+)
+
+workspace.FeedBlob("data", np.array([1,2,3,4,5,6]))
+workspace.FeedBlob("mask", np.array([True,False,False,True,True,False]))
+print("data:", workspace.FetchBlob("data"))
+print("mask:", workspace.FetchBlob("mask"))
+workspace.RunOperatorOnce(op)
+print("masked_data:", workspace.FetchBlob("masked_data"))
+print("masked_indices:", workspace.FetchBlob("masked_indices"))
+
+```
+
+**Result**
+
+```
+
+data: [1 2 3 4 5 6]
+mask: [ True False False  True  True False]
+masked_data: [1 4 5]
+masked_indices: [0 3 4]
+
+```
+
+</details>
+
 )DOC")
-    .Input(0, "data", "The 1D, original data tensor.")
-    .Input(1, "mask", "A tensor of bools of same shape as `data`.")
-    .Output(0, "masked_data", "A tensor of same type as `data`.")
-    .Output(1, "masked_indices", "A tensor for indices.");
+    .Input(0, "data", "(*Tensor*): 1D input tensor")
+    .Input(1, "mask", "(*Tensor`<bool>`*): tensor of bools which determines the input elements that will be left in the `masked_data` output tensor; same shape as `data`")
+    .Output(0, "masked_data", "(*Tensor*): 1D tensor of same type as `data` input that contains the masked input tensor")
+    .Output(1, "masked_indices", "(*Tensor`<int>`*): 1D tensor of indices of the True elements in the `mask` tensor");
 
 OPERATOR_SCHEMA(BooleanMaskLengths)
     .NumInputs(2)
     .NumOutputs(1)
     .SetDoc(R"DOC(
-Given a tensor of int32 segment lengths and a mask (boolean) tensor, return
-the segment lengths of a corresponding segmented tensor after BooleanMask is
-applied.
+Given a tensor of int32 `lengths` tensor representing segment lengths and a `mask` (boolean) tensor, return the segment lengths of the corresponding segmented tensor after **BooleanMask** is applied.
+
+If `lengths` tensor is $[a_1, a_2, ..., a_n]$, then length of `mask` tensor must be $a_1 + a_2 + ... + a_n$.
+
+
+Github Links:
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/boolean_mask_ops.cc
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "BooleanMaskLengths",
+    ["lengths", "mask"],
+    ["masked_lengths"]
+)
+
+workspace.FeedBlob("lengths", np.array([1,3,2], dtype=np.int32))
+workspace.FeedBlob("mask", np.array([False,True,True,False,True,True]))
+print("lengths:", workspace.FetchBlob("lengths"))
+print("mask:", workspace.FetchBlob("mask"))
+workspace.RunOperatorOnce(op)
+print("masked_lengths:", workspace.FetchBlob("masked_lengths"))
+
+```
+
+**Result**
+
+```
+
+lengths: [1 3 2]
+mask: [False  True  True False  True  True]
+masked_lengths: [0 2 2]
+
+```
+
+</details>
+
 )DOC")
-    .Input(0, "lengths", "A 1D int32 tensor representing segment lengths.")
-    .Input(1, "mask", "A 1D bool tensor of values to keep.")
-    .Output(0, "masked_lengths", "Segment lengths of a masked tensor.");
+    .Input(0, "lengths", "(*Tensor`<int>`*): input tensor containing segment lengths")
+    .Input(1, "mask", "(*Tensor`<bool>`*): A 1D bool tensor of values to keep.")
+    .Output(0, "masked_lengths", "(*Tensor`<int>`*): 1D tensor of same type as inputs that contains the sequence");
 
 NO_GRADIENT(BooleanMask)
 NO_GRADIENT(BooleanMaskLengths);
@@ -271,9 +355,9 @@ bool SequenceMaskOp<CPUContext>::RunOnDevice() {
 template <>
 template <class T>
 bool SequenceMaskOp<CPUContext>::DoRunWithType() {
-  const Tensor<CPUContext>* input = &Input(0);
-  const Tensor<CPUContext>* sequence_lengths = nullptr;
-  const Tensor<CPUContext>* window_centers = nullptr;
+  const Tensor* input = &Input(0);
+  const Tensor* sequence_lengths = nullptr;
+  const Tensor* window_centers = nullptr;
 
   if (mode_ == "sequence") {
     sequence_lengths = &Input(1);
@@ -328,7 +412,7 @@ bool SequenceMaskOp<CPUContext>::DoRunWithType() {
           SequenceFunctor(
               sequence_lengths->data<int>(), sequence_lengths->size()),
           fill_val,
-          output->mutable_data<T>());
+          output->template mutable_data<T>());
     } else {
       MaskWithFunctor(
           left,
@@ -338,7 +422,7 @@ bool SequenceMaskOp<CPUContext>::DoRunWithType() {
           SequenceFunctor(
               sequence_lengths->data<int>(), sequence_lengths->size()),
           fill_val,
-          output->mutable_data<T>());
+          output->template mutable_data<T>());
     }
   } else if (mode_ == "window") {
     MaskWithFunctor(
@@ -348,7 +432,7 @@ bool SequenceMaskOp<CPUContext>::DoRunWithType() {
         input->data<T>(),
         WindowFunctor(window_centers->data<int>(), radius_),
         fill_val,
-        output->mutable_data<T>());
+        output->template mutable_data<T>());
   } else if (mode_ == "upper") {
     MaskWithFunctor(
         left,
@@ -357,7 +441,7 @@ bool SequenceMaskOp<CPUContext>::DoRunWithType() {
         input->data<T>(),
         UpperFunctor(),
         fill_val,
-        output->mutable_data<T>());
+        output->template mutable_data<T>());
   } else if (mode_ == "lower") {
     MaskWithFunctor(
         left,
@@ -366,7 +450,7 @@ bool SequenceMaskOp<CPUContext>::DoRunWithType() {
         input->data<T>(),
         LowerFunctor(),
         fill_val,
-        output->mutable_data<T>());
+        output->template mutable_data<T>());
   } else if (mode_ == "upperdiag") {
     MaskWithFunctor(
         left,
@@ -375,7 +459,7 @@ bool SequenceMaskOp<CPUContext>::DoRunWithType() {
         input->data<T>(),
         UpperDiagFunctor(),
         fill_val,
-        output->mutable_data<T>());
+        output->template mutable_data<T>());
   } else if (mode_ == "lowerdiag") {
     MaskWithFunctor(
         left,
@@ -384,7 +468,7 @@ bool SequenceMaskOp<CPUContext>::DoRunWithType() {
         input->data<T>(),
         LowerDiagFunctor(),
         fill_val,
-        output->mutable_data<T>());
+        output->template mutable_data<T>());
   } else {
     CAFFE_ENFORCE(false, "Unsupported mode for SequenceMaskOp!");
     return false;

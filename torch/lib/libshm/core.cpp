@@ -10,26 +10,16 @@
 std::unordered_map<std::string, ClientSocket> managers;
 std::string manager_executable_path;
 
-void libshm_init(const char *manager_exec_path) {
-  manager_executable_path = std::string(manager_exec_path);
-}
-
-libshm_context * libshm_context_new(const char *manager_handle, const char *filename, int flags) {
-  libshm_context *ctx = new libshm_context();
-  if (!manager_handle) {
-    ctx->manager_handle = nullptr;
-  } else {
-    size_t handle_length = std::strlen(manager_handle);
-    ctx->manager_handle = new char[handle_length+1];
-    memcpy(ctx->manager_handle, manager_handle, handle_length+1);
+AllocInfo get_alloc_info(const char* filename) {
+  AllocInfo info = {0};
+  info.pid = getpid();
+  info.free = false;
+  size_t len = strlen(filename);
+  if (len >= sizeof(info.filename)) {
+    throw std::runtime_error("THMapAllocatorContext_filename too long");
   }
-  ctx->th_context = THMapAllocatorContext_new(filename, flags);
-  return ctx;
-}
-
-void libshm_context_free(libshm_context *ctx) {
-  delete[] ctx->manager_handle;
-  delete ctx;
+  memcpy(info.filename, filename, len + 1);
+  return info;
 }
 
 void start_manager() {
@@ -73,77 +63,64 @@ void start_manager() {
   managers.emplace(std::move(handle), std::move(manager));
 }
 
-ClientSocket& get_manager_socket(char *manager_handle) {
-  std::string str_handle(manager_handle);
-  auto it = managers.find(str_handle);
+ClientSocket& get_manager_socket(const std::string& manager_handle) {
+  auto it = managers.find(manager_handle);
   if (it == managers.end()) {
-    auto socket = ClientSocket(str_handle);
-    auto result = managers.emplace(std::move(str_handle), std::move(socket));
+    auto socket = ClientSocket(manager_handle);
+    auto result = managers.emplace(manager_handle, std::move(socket));
     return result.first->second;
   } else {
     return it->second;
   }
 }
 
-char * copy_handle(const std::string &handle) {
-  char *new_handle = new char[handle.length()+1];
-  memcpy(new_handle, handle.c_str(), handle.length() + 1);
-  return new_handle;
+void libshm_init(const char *manager_exec_path) {
+  manager_executable_path = std::string(manager_exec_path);
 }
 
-AllocInfo get_alloc_info(libshm_context *ctx) {
-  AllocInfo info = {0};
-  info.pid = getpid();
-  info.free = false;
-  const char *filename = THMapAllocatorContext_filename(ctx->th_context);
-  size_t len = strlen(filename);
-  if (len >= sizeof(info.filename)) {
-    throw std::runtime_error("THMapAllocatorContext_filename too long");
-  }
-  memcpy(info.filename, filename, len + 1);
-  return info;
-}
-
-void * libshm_alloc(void *_ctx, ptrdiff_t size) {
+THManagedMapAllocatorInit::THManagedMapAllocatorInit(const char* manager_handle, const char* filename)
+  : manager_handle_(manager_handle ? manager_handle : "") {
   // TODO: unlock GIL when contacting the manager
-  auto *ctx = (libshm_context*)_ctx;
   try {
-    THMapAllocatorContext *th_context = ctx->th_context;
     ClientSocket *socket;
-    if (ctx->manager_handle) {
-      socket = &get_manager_socket(ctx->manager_handle);
+    if (!manager_handle_.empty()) {
+      socket = &get_manager_socket(manager_handle_);
     } else {
-      if (managers.size() == 0)
-          start_manager();
+      if (managers.size() == 0) {
+        start_manager();
+      }
       const auto &manager = managers.begin();
-      ctx->manager_handle = copy_handle(manager->first);
+      manager_handle_ = manager->first;
       socket = &manager->second;
     }
-    AllocInfo info = get_alloc_info(ctx);
+    AllocInfo info = get_alloc_info(filename);
     socket->register_allocation(info);
   } catch(std::exception &e) {
     THError(e.what());
   }
-  return THRefcountedMapAllocator.malloc(ctx->th_context, size);
 }
 
-void * libshm_realloc(void *_ctx, void *data, ptrdiff_t size) {
-  THError("cannot realloc shared memory");
-  return NULL;
-}
+THManagedMapAllocator::THManagedMapAllocator(const char *manager_handle, const char *filename, int flags, ptrdiff_t size)
+  : THManagedMapAllocatorInit(manager_handle, filename), THRefcountedMapAllocator(filename, flags, size) {}
 
-void libshm_free(void *_ctx, void *data) {
-  auto *ctx = (libshm_context*)_ctx;
-  AllocInfo info = get_alloc_info(ctx);
+void THManagedMapAllocator::close() {
+  if (closed_) return;
+  AllocInfo info = get_alloc_info(filename());
   info.free = true;
-  ClientSocket &socket = get_manager_socket(ctx->manager_handle);
-  THRefcountedMapAllocator.free(ctx->th_context, data);
-  libshm_context_free(ctx);
+  ClientSocket &socket = get_manager_socket(manager_handle_);
+  THRefcountedMapAllocator::close();
   socket.register_deallocation(info);
 }
 
-THAllocator THManagedSharedAllocator = {
-  libshm_alloc,
-  libshm_realloc,
-  libshm_free,
-};
+static void deleteTHManagedMapAllocator(void* ptr) {
+  delete static_cast<THManagedMapAllocator*>(ptr);
+}
+
+at::DataPtr THManagedMapAllocator::makeDataPtr(const char* manager_handle, const char* filename, int flags, ptrdiff_t size) {
+  auto* context = new THManagedMapAllocator(manager_handle, filename, flags, size);
+  return {context->data(), context, &deleteTHManagedMapAllocator, at::kCPU};
+}
+
+THManagedMapAllocator* THManagedMapAllocator::fromDataPtr(const at::DataPtr& dptr) {
+  return dptr.cast_context<THManagedMapAllocator>(&deleteTHManagedMapAllocator);
+}

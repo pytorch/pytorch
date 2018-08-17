@@ -2,6 +2,10 @@
 
 #include <fstream>
 
+#include <torch/optim.h>
+#include <torch/tensor.h>
+#include <torch/utils.h>
+
 #include "cereal/archives/binary.hpp"
 #include "cereal/types/polymorphic.hpp"
 
@@ -49,34 +53,52 @@ namespace detail {
 // wrt changes in ATen; see e.g. https://git.io/vxd6R
 // The mapping is consistent with the ScalarType enum as of pytorch version
 // v0.1.11-7675-ge94c67e.
-inline int32_t scalarTypeId(at::ScalarType type) {
+inline int32_t scalarTypeId(torch::Dtype type) {
   switch (type) {
-    case at::ScalarType::Byte: return 0;
-    case at::ScalarType::Char: return 1;
-    case at::ScalarType::Short: return 2;
-    case at::ScalarType::Int: return 3;
-    case at::ScalarType::Long: return 4;
-    case at::ScalarType::Half: return 5;
-    case at::ScalarType::Float: return 6;
-    case at::ScalarType::Double: return 7;
-    case at::ScalarType::Undefined: return 8;
+    case torch::Dtype::Byte:
+      return 0;
+    case torch::Dtype::Char:
+      return 1;
+    case torch::Dtype::Short:
+      return 2;
+    case torch::Dtype::Int:
+      return 3;
+    case torch::Dtype::Long:
+      return 4;
+    case torch::Dtype::Half:
+      return 5;
+    case torch::Dtype::Float:
+      return 6;
+    case torch::Dtype::Double:
+      return 7;
+    case torch::Dtype::Undefined:
+      return 8;
     default:
       throw std::runtime_error(
           "Unknown scalar type: " + std::to_string(static_cast<int>(type)));
   }
 }
 
-inline at::ScalarType scalarTypeFromId(int32_t id) {
+inline torch::Dtype scalarTypeFromId(int32_t id) {
   switch (id) {
-    case 0: return at::ScalarType::Byte;
-    case 1: return at::ScalarType::Char;
-    case 2: return at::ScalarType::Short;
-    case 3: return at::ScalarType::Int;
-    case 4: return at::ScalarType::Long;
-    case 5: return at::ScalarType::Half;
-    case 6: return at::ScalarType::Float;
-    case 7: return at::ScalarType::Double;
-    case 8: return at::ScalarType::Undefined;
+    case 0:
+      return torch::Dtype::Byte;
+    case 1:
+      return torch::Dtype::Char;
+    case 2:
+      return torch::Dtype::Short;
+    case 3:
+      return torch::Dtype::Int;
+    case 4:
+      return torch::Dtype::Long;
+    case 5:
+      return torch::Dtype::Half;
+    case 6:
+      return torch::Dtype::Float;
+    case 7:
+      return torch::Dtype::Double;
+    case 8:
+      return torch::Dtype::Undefined;
     default:
       throw std::runtime_error("Unknown scalar type id: " + std::to_string(id));
   }
@@ -84,11 +106,16 @@ inline at::ScalarType scalarTypeFromId(int32_t id) {
 
 inline int32_t backendId(at::Backend backend) {
   switch (backend) {
-    case at::Backend::CPU: return 0;
-    case at::Backend::CUDA: return 1;
-    case at::Backend::SparseCPU: return 2;
-    case at::Backend::SparseCUDA: return 3;
-    case at::Backend::Undefined: return 4;
+    case at::Backend::CPU:
+      return 0;
+    case at::Backend::CUDA:
+      return 1;
+    case at::Backend::SparseCPU:
+      return 2;
+    case at::Backend::SparseCUDA:
+      return 3;
+    case at::Backend::Undefined:
+      return 4;
     default:
       throw std::runtime_error(
           "Unknown backend: " + std::to_string(static_cast<int>(backend)));
@@ -97,11 +124,16 @@ inline int32_t backendId(at::Backend backend) {
 
 inline at::Backend backendFromId(int32_t id) {
   switch (id) {
-    case 0: return at::Backend::CPU;
-    case 1: return at::Backend::CUDA;
-    case 2: return at::Backend::SparseCPU;
-    case 3: return at::Backend::SparseCUDA;
-    case 4: return at::Backend::Undefined;
+    case 0:
+      return at::Backend::CPU;
+    case 1:
+      return at::Backend::CUDA;
+    case 2:
+      return at::Backend::SparseCPU;
+    case 3:
+      return at::Backend::SparseCUDA;
+    case 4:
+      return at::Backend::Undefined;
     default:
       throw std::runtime_error("Unknown backend id: " + std::to_string(id));
   }
@@ -111,47 +143,52 @@ inline at::Backend backendFromId(int32_t id) {
 } // namespace torch
 
 // This is super ugly and I don't know how to simplify it
-CEREAL_REGISTER_TYPE(torch::SGD);
-CEREAL_REGISTER_POLYMORPHIC_RELATION(torch::OptimizerImpl, torch::SGD);
-CEREAL_REGISTER_TYPE(torch::Adagrad);
+CEREAL_REGISTER_TYPE(torch::optim::SGD);
 CEREAL_REGISTER_POLYMORPHIC_RELATION(
-    torch::OptimizerImpl,
-    torch::Adagrad);
-CEREAL_REGISTER_TYPE(torch::RMSprop);
+    torch::optim::Optimizer,
+    torch::optim::SGD);
+CEREAL_REGISTER_TYPE(torch::optim::Adagrad);
 CEREAL_REGISTER_POLYMORPHIC_RELATION(
-    torch::OptimizerImpl,
-    torch::RMSprop);
-CEREAL_REGISTER_TYPE(torch::Adam);
-CEREAL_REGISTER_POLYMORPHIC_RELATION(torch::OptimizerImpl, torch::Adam);
+    torch::optim::Optimizer,
+    torch::optim::Adagrad);
+CEREAL_REGISTER_TYPE(torch::optim::RMSprop);
+CEREAL_REGISTER_POLYMORPHIC_RELATION(
+    torch::optim::Optimizer,
+    torch::optim::RMSprop);
+CEREAL_REGISTER_TYPE(torch::optim::Adam);
+CEREAL_REGISTER_POLYMORPHIC_RELATION(
+    torch::optim::Optimizer,
+    torch::optim::Adam);
 
 namespace cereal {
 
 namespace agimpl {
 
 template <class Archive>
-void saveBinary(Archive& archive, void const* data, std::size_t size) {
+void saveBinary(Archive& archive, void const* data, size_t size) {
   // In general, there's no direct `saveBinary`-like method on archives
   std::vector<char> v(
       static_cast<char const*>(data), static_cast<char const*>(data) + size);
   archive(v);
 }
 template <>
-inline void
-saveBinary(BinaryOutputArchive& archive, void const* data, std::size_t size) {
+inline void saveBinary(
+    BinaryOutputArchive& archive,
+    void const* data,
+    size_t size) {
   // Writes to output stream without extra copy
   archive.saveBinary(data, size);
 }
 
 template <class Archive>
-void loadBinary(Archive& archive, void* data, std::size_t size) {
+void loadBinary(Archive& archive, void* data, size_t size) {
   // In general, there's no direct `loadBinary`-like method on archives
   std::vector<char> v(size);
   archive(v);
   std::memcpy(data, v.data(), size);
 }
 template <>
-inline void
-loadBinary(BinaryInputArchive& archive, void* data, std::size_t size) {
+inline void loadBinary(BinaryInputArchive& archive, void* data, size_t size) {
   // Read from input stream without extra copy
   archive.loadBinary(data, size);
 }
@@ -160,13 +197,13 @@ loadBinary(BinaryInputArchive& archive, void* data, std::size_t size) {
 
 // Gradients will not be saved for variables
 template <class Archive>
-void save(Archive& archive, at::Tensor const& tensor) {
+void save(Archive& archive, const torch::Tensor& tensor) {
   if (!tensor.defined()) {
-    int32_t typeId = ::torch::detail::scalarTypeId(at::ScalarType::Undefined);
+    int32_t typeId = ::torch::detail::scalarTypeId(torch::Dtype::Undefined);
     archive(CEREAL_NVP(typeId));
     return;
   } else {
-    int32_t typeId = ::torch::detail::scalarTypeId(tensor.type().scalarType());
+    int32_t typeId = ::torch::detail::scalarTypeId(tensor.dtype());
     archive(CEREAL_NVP(typeId));
   }
   auto sizes = std::vector<int64_t>();
@@ -174,7 +211,7 @@ void save(Archive& archive, at::Tensor const& tensor) {
   for (auto s : tensor.sizes()) {
     sizes.push_back(s);
   }
-  auto contig = tensor.toBackend(at::kCPU).contiguous();
+  auto contig = tensor.toBackend(torch::kCPU).contiguous();
   int32_t backend = ::torch::detail::backendId(tensor.type().backend());
 
   archive(CEREAL_NVP(backend), CEREAL_NVP(sizes));
@@ -191,13 +228,14 @@ void save(Archive& archive, at::Tensor const& tensor) {
  * 2. Otherwise, overwrite the provided tensor with the right type and backend
  **/
 template <class Archive>
-void load(Archive& archive, at::Tensor& tensor) {
-  at::ScalarType type;
+void load(Archive& archive, torch::Tensor& tensor) {
+  torch::NoGradGuard guard;
+  torch::Dtype type;
   int32_t typeId;
   archive(CEREAL_NVP(typeId));
   type = ::torch::detail::scalarTypeFromId(typeId);
-  if (type == at::ScalarType::Undefined) {
-    tensor = at::Tensor();
+  if (type == torch::Dtype::Undefined) {
+    tensor = torch::Tensor();
     return;
   }
 
@@ -207,14 +245,17 @@ void load(Archive& archive, at::Tensor& tensor) {
   archive(CEREAL_NVP(backendId), CEREAL_NVP(sizes));
 
   at::Backend backend = ::torch::detail::backendFromId(backendId);
-  if (!tensor.defined() || tensor.type().scalarType() != type) {
-    tensor = at::getType(backend, type).tensor();
+  if (!tensor.defined() || tensor.dtype() != type) {
+    tensor = torch::empty({}, torch::getType(backend, type));
   }
+  const auto required_grad = tensor.requires_grad();
+  tensor.set_requires_grad(false);
   tensor.resize_(sizes);
+  tensor.set_requires_grad(required_grad);
 
   if (tensor.type().is_cuda()) {
     // should actually use cudamemcpy probably
-    auto cputensor = at::CPU(tensor.type().scalarType()).tensor(sizes);
+    auto cputensor = torch::empty(sizes, tensor.dtype());
     agimpl::loadBinary(
         archive,
         cputensor.data_ptr(),
@@ -227,10 +268,4 @@ void load(Archive& archive, at::Tensor& tensor) {
         tensor.numel() * tensor.type().elementSizeInBytes());
   }
 }
-
-template <class Archive>
-void load(Archive& archive, tag::Variable& var) {
-  load(archive, var.data());
-}
-
 } // namespace cereal

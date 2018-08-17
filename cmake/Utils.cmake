@@ -137,8 +137,6 @@ function(caffe_autogen_init_py_files)
   list(REMOVE_DUPLICATES python_paths_need_init_py)
   # Since the _pb2.py files are yet to be created, we will need to manually
   # add them to the list.
-  list(APPEND python_paths_need_init_py ${CMAKE_BINARY_DIR}/caffe)
-  list(APPEND python_paths_need_init_py ${CMAKE_BINARY_DIR}/caffe/proto)
   list(APPEND python_paths_need_init_py ${CMAKE_BINARY_DIR}/caffe2/proto)
 
   foreach(tmp ${python_paths_need_init_py})
@@ -188,6 +186,25 @@ function(dedent outvar text)
 endfunction()
 
 
+function(pycmd_no_exit outvar exitcode cmd)
+  # Use PYTHON_EXECUTABLE if it is defined, otherwise default to python
+  if ("${PYTHON_EXECUTABLE}" STREQUAL "")
+    set(_python_exe "python")
+  else()
+    set(_python_exe "${PYTHON_EXECUTABLE}")
+  endif()
+  # run the actual command
+  execute_process(
+    COMMAND "${_python_exe}" -c "${cmd}"
+    RESULT_VARIABLE _exitcode
+    OUTPUT_VARIABLE _output)
+  # Remove supurflous newlines (artifacts of print)
+  string(STRIP "${_output}" _output)
+  set(${outvar} "${_output}" PARENT_SCOPE)
+  set(${exitcode} "${_exitcode}" PARENT_SCOPE)
+endfunction()
+
+
 ###
 # Helper function to run `python -c "<cmd>"` and capture the results of stdout
 #
@@ -204,17 +221,8 @@ endfunction()
 #
 function(pycmd outvar cmd)
   dedent(_dedent_cmd "${cmd}")
-  # Use PYTHON_EXECUTABLE if it is defined, otherwise default to python
-  if ("${PYTHON_EXECUTABLE}" STREQUAL "")
-    set(_python_exe "python")
-  else()
-    set(_python_exe "${PYTHON_EXECUTABLE}")
-  endif()
-  # run the actual command
-  execute_process(
-    COMMAND "${_python_exe}" -c "${_dedent_cmd}"
-    RESULT_VARIABLE _exitcode
-    OUTPUT_VARIABLE _output)
+  pycmd_no_exit(_output _exitcode "${_dedent_cmd}")
+
   if(NOT ${_exitcode} EQUAL 0)
     message(ERROR " Failed when running python code: \"\"\"\n${_dedent_cmd}\n\"\"\"")
     message(FATAL_ERROR " Python command failed with error code: ${_exitcode}")
@@ -251,3 +259,59 @@ function(print_target_properties tgt)
     endif()
   endforeach(prop)
 endfunction(print_target_properties)
+
+
+###
+# Helper function to add style warning options to the given target
+# Optionally pass in the second argument ($ARGV1) which will force -Werror if
+# it evaluates to true.
+function(target_enable_style_warnings TARGET)
+  if(MSVC)
+    # TODO Also add some warning options that MSVC can understand
+    set(WARNING_OPTIONS "")
+  else()
+    set(WARNING_OPTIONS
+            -Wall
+            -Wextra
+            -Wold-style-cast
+            -Wno-missing-braces
+            -Wcast-align
+            -Wcast-qual
+            -Wctor-dtor-privacy
+            -Wdisabled-optimization
+            -Wformat=2
+            -Winit-self
+            -Wmissing-include-dirs
+            -Woverloaded-virtual
+            -Wredundant-decls
+            -Wno-shadow
+            -Wsign-promo
+            -Wno-strict-overflow
+            -fdiagnostics-show-option
+            -Wno-conversion
+            -Wpedantic
+            -Wundef
+            )
+    # -Wno-gnu-zero-variadic-macro-arguments is not available in GCC-4.8.5. Set
+    # only when using clang.
+    # Compared against https://gcc.gnu.org/onlinedocs/gcc-4.8.5/gcc/Option-Summary.html
+    if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
+      list(APPEND WARNING_OPTIONS "-Wno-gnu-zero-variadic-macro-arguments")
+    endif()
+    set(WERROR $ENV{WERROR})
+    if (${ARGC} GREATER 1)
+      # accessing ${ARGV1} is UB when ${ARGC} <= 1
+      # CMake doesn't do smart AND, so we have to use a nested `if`
+      if (${ARGV1})
+        set(WERROR TRUE)
+      endif()
+    endif()
+    if (WERROR)
+      list(APPEND WARNING_OPTIONS "-Werror")
+    endif()
+  endif()
+  if(APPLE)
+    set(WARNING_OPTIONS -Wno-gnu-zero-variadic-macro-arguments)
+  endif()
+  target_compile_options(${TARGET} PRIVATE ${WARNING_OPTIONS})
+endfunction()

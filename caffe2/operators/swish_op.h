@@ -1,9 +1,17 @@
-#pragma once
+#ifndef CAFFE2_OPERATORS_SWISH_OP_H_
+#define CAFFE2_OPERATORS_SWISH_OP_H_
 
-#include "caffe2/core/operator.h"
+#include "caffe2/operators/elementwise_ops.h"
 #include "caffe2/utils/math.h"
 
 namespace caffe2 {
+
+template <class Context>
+struct SwishFunctor {
+  template <typename T>
+  bool operator()(const int N, const T* X, T* Y, Context* context) const;
+};
+
 template <class Context>
 class SwishGradientOp final : public Operator<Context> {
  public:
@@ -22,15 +30,6 @@ class SwishGradientOp final : public Operator<Context> {
   OUTPUT_TAGS(DX);
 };
 
-class GetSwishGradient : public GradientMakerBase {
-  using GradientMakerBase::GradientMakerBase;
-  vector<OperatorDef> GetGradientDefs() override {
-    return SingleGradientDef(
-        "SwishGradient",
-        "",
-        vector<string>{I(0), O(0), GO(0)},
-        vector<string>{GI(0)});
-  }
-};
-
 } // namespace caffe2
+
+#endif // CAFFE2_OPERATORS_SWISH_OP_H_

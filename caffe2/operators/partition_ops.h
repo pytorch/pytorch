@@ -81,7 +81,7 @@ class GatherByKeyOp : public Operator<CPUContext> {
         if (currentShard != -1) {
           auto inStartOffset = inStartOffsets_[currentShard];
           auto numItems = i - outStartOffset;
-          context_.template CopyItems<CPUContext, CPUContext>(
+          context_.CopyItemsSameDevice(
               meta,
               numItems * blockSize,
               inputDatas_[currentShard] +
@@ -183,7 +183,7 @@ class PartitionOpBase : public Operator<CPUContext> {
         auto bs = block_sizes_[i];
         auto meta = metas_[i];
         // special case for small bs?
-        context_.template CopyItems<CPUContext, CPUContext>(
+        context_.CopyItemsSameDevice(
             meta,
             bs,
             static_cast<const char*>(raw_datas_[i]) + p * bs * meta.itemsize(),
@@ -221,7 +221,7 @@ class PartitionOp : public PartitionOpBase {
     return true;
   }
 
-  DISABLE_COPY_AND_ASSIGN(PartitionOp);
+  AT_DISABLE_COPY_AND_ASSIGN(PartitionOp);
 };
 
 class LengthsPartitionOp : public PartitionOpBase {
@@ -287,7 +287,7 @@ class LengthsPartitionOp : public PartitionOpBase {
     return true;
   }
 
-  DISABLE_COPY_AND_ASSIGN(LengthsPartitionOp);
+  AT_DISABLE_COPY_AND_ASSIGN(LengthsPartitionOp);
 
   vector<int32_t*> out_length_;
 };

@@ -2,20 +2,17 @@
 #define THC_GENERIC_FILE "generic/MSECriterion.cu"
 #else
 
-#include "THCApply.cuh"
-
 void THNN_(MSECriterion_updateOutput)(
            THCState *state,
            THCTensor *input,
            THCTensor *target,
            THCTensor *output,
-           bool sizeAverage,
-           bool reduce)
+           int64_t reduction)
 {
   THCUNN_check_shape(state, input, target);
   THCUNN_assertSameGPU(state, 3, input, target, output);
 
-  if (reduce) {
+  if (reduction != Reduction::None) {
     THCTensor_(resize1d)(state, output, 1);
 
     ptrdiff_t size = THCTensor_(nElement)(state, input);
@@ -33,7 +30,7 @@ void THNN_(MSECriterion_updateOutput)(
       input_data, input_data+size, target_data, (accreal) 0,
       thrust::plus<accreal>(), mse_functor<real, accreal>());
 
-    if (sizeAverage)
+    if (reduction == Reduction::ElementwiseMean)
       sum /= size;
 
     THCTensor_(free)(state, input);
@@ -44,7 +41,7 @@ void THNN_(MSECriterion_updateOutput)(
   }
 
   THCTensor_(resizeAs)(state, output, input);
-  THC_pointwiseApply3(
+  THC_pointwiseApply3<real, real, real>(
       state,
       input,
       target,
@@ -58,17 +55,16 @@ void THNN_(MSECriterion_updateGradInput)(
            THCTensor *target,
            THCTensor *gradOutput,
            THCTensor *gradInput,
-           bool sizeAverage,
-           bool reduce)
+           int64_t reduction)
 {
   THCUNN_check_shape(state, input, target);
   THCUNN_assertSameGPU(state, 4, input, target, gradInput, gradOutput);
 
-  if (reduce) {
+  if (reduction != Reduction::None) {
     ptrdiff_t size = THCTensor_(nElement)(state, input);
 
     THCUNN_check_dim_size(state, gradOutput, 1, 0, 1);
-    accreal norm = sizeAverage ? (accreal)(2)/size : (accreal)(2);
+    accreal norm = reduction == Reduction::ElementwiseMean ? (accreal)(2)/size : (accreal)(2);
     norm *= ScalarConvert<real, accreal>::to(THCTensor_(get1d)(state, gradOutput, 0));
 
     input = THCTensor_(newContiguous)(state, input);

@@ -59,48 +59,98 @@ OPERATOR_SCHEMA(BooleanUnmask)
     .NumInputs([](int n) { return n > 0 && n % 2 == 0; })
     .NumOutputs(1)
     .SetDoc(R"DOC(
-Given a series of mask and values, reconstruct values together according
-to masks.
-
-A comprehensive example:
-  mask1   = True, False, True, False, False
-  values1 = 1.0, 3.0
-  mask2   = False, True, False, False, False
-  values2 = 2.0
-  mask3   = False, False, False, True, True
-  values3 = 4.0, 5.0
+Given a series of masks and values, reconstruct values together according to masks. A comprehensive example:
+```
+mask1   = True, False, True, False, False
+values1 = 1.0, 3.0
+mask2   = False, True, False, False, False
+values2 = 2.0
+mask3   = False, False, False, True, True
+values3 = 4.0, 5.0
+```
 
 Reconstruct by:
-  output = net.BooleanUnmask([mask1, values1, mask2, values2, mask3, values3], ["output"])
 
-We get:
-  output = 1.0, 2.0, 3.0, 4.0, 5.0
+```
+output = net.BooleanUnmask([mask1, values1, mask2, values2, mask3, values3], ["output"])
+output = 1.0, 2.0, 3.0, 4.0, 5.0
+```
 
-Note that for all mask positions, there must be at least one True. If for a
-field there are multiple True's, we will accept the first value. For example:
+Note that for all mask positions, there must be at least one True. This is not allowed:
 
+```
+mask1   = True, False
+values1 = 1.0
+mask2   = False, False
+values2 =
 
-Example 1:
-  mask1   = True, False
-  values1 = 1.0
-  mask2   = False, False
-  values2 =
+output = net.BooleanUnmask([mask1, values1, mask2, values2], ["output"])
+```
 
-This is not allowed:
-  output = net.BooleanUnmask([mask1, values1, mask2, values2], ["output"])
+If there are multiple True values for a field, we accept the first value, and no longer expect a value for that location:
 
-Example 2:
-  mask1   = True, False
-  values1 = 1.0
-  mask2   = True, True
-  values2 = 2.0, 2.0
+```
+mask1   = True, False
+values1 = 1.0
+mask2   = True, True
+values2 = 2.0
 
-  output = net.BooleanUnmask([mask1, values1, mask2, values2], ["output"])
+output = net.BooleanUnmask([mask1, values1, mask2, values2], ["output"])
+output = 1.0, 2.0
+```
 
-We get:
-  output = 1.0, 2.0
+*** Note that we alternate `data` and `mask` inputs
+
+Github Links:
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/boolean_unmask_ops.cc
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "BooleanUnmask",
+    ["mask1", "data1", "mask2", "data2"],
+    ["unmasked_data"]
+)
+
+workspace.FeedBlob("mask1", np.array([True,False,False,True,True,False]))
+workspace.FeedBlob("data1", np.array([1,4,5]))
+workspace.FeedBlob("mask2", np.array([False,True,True,False,False,True]))
+workspace.FeedBlob("data2", np.array([2,3,6]))
+
+print("data1:", workspace.FetchBlob("data1"))
+print("mask1:", workspace.FetchBlob("mask1"))
+print("data2:", workspace.FetchBlob("data2"))
+print("mask2:", workspace.FetchBlob("mask2"))
+workspace.RunOperatorOnce(op)
+print("unmasked_data:", workspace.FetchBlob("unmasked_data"))
+
+```
+
+**Result**
+
+```
+
+data1: [1 4 5]
+mask1: [ True False False  True  True False]
+data2: [2 3 6]
+mask2: [False  True  True False False  True]
+unmasked_data: [1 2 3 4 5 6]
+
+```
+
+</details>
 )DOC")
-    .Output(0, "unmasked_data", "The final reconstructed unmasked data");
+    .Input(0,"data","(*Tensor*): 1D input tensor(s)")
+    .Input(1,"mask","(*Tensor`<bool>`*): 1D boolean mask tensor(s)")
+    .Output(0, "unmasked_data", "(*Tensor*): 1D tensor of same type as `data` input that contains the unmasked input tensor");
 
 NO_GRADIENT(BooleanUnmask)
 }

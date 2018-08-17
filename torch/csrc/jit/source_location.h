@@ -35,7 +35,7 @@ inline std::ostream& operator<<(std::ostream& out, const SourceLocation& sl) {
 struct StringSourceLocation : public SourceLocation {
   StringSourceLocation(std::string context)
   : context(std::move(context)) {}
-  virtual void highlight(std::ostream & out) const override {
+  void highlight(std::ostream & out) const override {
     out << context;
   }
 private:

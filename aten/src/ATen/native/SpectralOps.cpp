@@ -7,6 +7,7 @@
 #include "ATen/ATen.h"
 #include "ATen/Config.h"
 #include "ATen/NativeFunctions.h"
+#include "ATen/detail/CUDAHooksInterface.h"
 #include "ATen/native/SpectralOpsUtils.h"
 
 #include <algorithm>
@@ -36,7 +37,7 @@ static inline Tensor _fft(const Tensor &self, const int64_t signal_ndim,
     throw std::runtime_error(ss.str());
   }
 
-  auto signal_tensor_ndim = signal_ndim + static_cast<int>(complex_input);  // add complex dim
+  auto signal_tensor_ndim = signal_ndim + static_cast<int64_t>(complex_input);  // add complex dim
   if (self.dim() < signal_tensor_ndim) {
     std::ostringstream ss;
     ss << "Given signal_ndim=" << signal_ndim << ", expected an input tensor "
@@ -83,7 +84,7 @@ static inline Tensor _fft(const Tensor &self, const int64_t signal_ndim,
        << signal_ndim << "D, but got signal_sizes=" << signal_sizes;
     throw std::runtime_error(ss.str());
   }
-  std::vector<int64_t> output_sizes(signal_ndim + 1 + static_cast<int>(complex_output));
+  std::vector<int64_t> output_sizes(signal_ndim + 1 + static_cast<int64_t>(complex_output));
   output_sizes[0] = input.size(0);  // batch size
   std::vector<int64_t> checked_signal_sizes(signal_ndim);
   for (int64_t i = 0; i < signal_ndim; i++) {
@@ -133,13 +134,31 @@ static inline Tensor _fft(const Tensor &self, const int64_t signal_ndim,
     // slightly faster path for non-batch mode
     output = output.squeeze(0);
   } else if (batch_ndim > 1) {
-    auto output_ndim = self.dim() + static_cast<int>(complex_output) - static_cast<int>(complex_input);
+    auto output_ndim = self.dim() + static_cast<int64_t>(complex_output) - static_cast<int64_t>(complex_input);
     std::vector<int64_t> unflatten_output_shape(output_ndim);
     std::copy(self_shape.begin(), self_shape.begin() + batch_ndim, unflatten_output_shape.begin());
     std::copy(output_sizes.begin() + 1, output_sizes.end(), unflatten_output_shape.begin() + batch_ndim);
     output = output.reshape(unflatten_output_shape);
   }
   return output;
+}
+
+// We call the following methods via CUDA hooks because they are really only
+// valid when CUDA is available. See native/cuda/CuFFTPlanCache.h for more details.
+int64_t _cufft_get_plan_cache_max_size() {
+  return detail::getCUDAHooks().cuFFTGetPlanCacheMaxSize();
+}
+
+void _cufft_set_plan_cache_max_size(int64_t max_size) {
+  detail::getCUDAHooks().cuFFTSetPlanCacheMaxSize(max_size);
+}
+
+int64_t _cufft_get_plan_cache_size() {
+  return detail::getCUDAHooks().cuFFTGetPlanCacheSize();
+}
+
+void _cufft_clear_plan_cache() {
+  detail::getCUDAHooks().cuFFTClearPlanCache();
 }
 
 Tensor fft(const Tensor& self, const int64_t signal_ndim, const bool normalized) {
@@ -169,26 +188,24 @@ Tensor irfft(const Tensor& self, const int64_t signal_ndim, const bool normalize
 }
 
 
-Tensor stft(const Tensor& self, const int64_t frame_length,
-                                const int64_t hop, const int64_t fft_size,
-                                const bool normalized, const bool onesided,
-                                const Tensor& window, const int64_t pad_end) {
+Tensor stft(const Tensor& self, const int64_t n_fft, const int64_t hop_length,
+            const int64_t win_length, const Tensor& window,
+            const bool normalized, const bool onesided) {
   #define REPR(SS) \
-    SS << "stft(" << self.type() << self.sizes() << ", frame_length=" \
-       << frame_length << ", hop=" << hop << ", fft_size=" << fft_size \
-       << ", normalized=" << normalized << ", onesided=" << onesided << \
-       ", window="; \
+    SS << "stft(" << self.type() << self.sizes() << ", n_fft=" << n_fft \
+       << ", hop_length=" << hop_length << ", win_length=" << win_length \
+       << ", window="; \
     if (window.defined()) { \
       SS << window.type() << "{" << window.sizes() << "}"; \
     } else { \
       SS << "None"; \
     } \
-    SS << ", pad_end=" << pad_end << ")"
+    SS << ", normalized=" << normalized << ", onesided=" << onesided << ")"
 
   if (!at::isFloatingType(self.type().scalarType()) || self.dim() > 2 || self.dim() < 1) {
     std::ostringstream ss;
     REPR(ss) << ": expected a 1D or 2D tensor of floating types";
-    throw std::runtime_error(ss.str());
+    AT_ERROR(ss.str());
   }
   Tensor input = self;
   if (self.dim() == 1) {
@@ -196,66 +213,52 @@ Tensor stft(const Tensor& self, const int64_t frame_length,
   }
   int64_t batch = input.size(0);
   int64_t len = input.size(1);
-  if (pad_end < 0) {
+  if (n_fft <= 0 || n_fft > len) {
     std::ostringstream ss;
-    REPR(ss) << ": expected pad_end >= 0, but got pad_end=" << pad_end;
+    REPR(ss) << ": expected 0 < n_fft < " << len
+             << ", but got n_fft=" << win_length;
+    AT_ERROR(ss.str());
+  }
+  if (hop_length <= 0) {
+    std::ostringstream ss;
+    REPR(ss) << ": expected hop_length > 0, but got hop_length=" << hop_length;
     throw std::runtime_error(ss.str());
   }
-  // pad zeros
-  if (pad_end != 0) {
-    Tensor padded_input = at::zeros(self.type(), {batch, len + pad_end});
-    padded_input.narrow(1, 0, len).copy_(input);
-    len += pad_end;
-    input = padded_input;
-  }
-  if (frame_length <= 0 || frame_length > len) {
+  if (win_length <= 0 || win_length > n_fft) {
     std::ostringstream ss;
-    REPR(ss) << ": expected 0 < frame_length < " << len
-             << ", but got frame_length=" << frame_length;
-    throw std::runtime_error(ss.str());
+    REPR(ss) << ": expected 0 < win_length <= n_fft, but got win_length="
+             << win_length;
+    AT_ERROR(ss.str());
   }
-  if (hop <= 0) {
+  if (window.defined() && (window.dim() != 1 || window.size(0) != win_length)) {
     std::ostringstream ss;
-    REPR(ss) << " expected hop > 0, but got hop=" << hop;
-    throw std::runtime_error(ss.str());
-  }
-  if (fft_size <= 0) {
-    std::ostringstream ss;
-    REPR(ss) << " expected fft_size > 0, but got fft_size=" << fft_size;
-    throw std::runtime_error(ss.str());
-  }
-  if (window.defined() && (window.dim() != 1 || window.size(0) != frame_length)) {
-    std::ostringstream ss;
-    REPR(ss) << ": expected a 1D window tensor of size equal to "
-             << "frame_length=" << frame_length
-             << ", but got window with size " << window.sizes();
-    throw std::runtime_error(ss.str());
+    REPR(ss) << ": expected a 1D window tensor of size equal to win_length="
+             << win_length << ", but got window with size " << window.sizes();
+    AT_ERROR(ss.str());
   }
   #undef REPR
-  int64_t return_size = onesided ? infer_ft_real_to_complex_onesided_size(fft_size) : fft_size;
-  // build ft kernel
-  // k[omega, t] = cos (2 pi omega t / N) - j sin (2 pi omega t / N)
-  double N = static_cast<double>(fft_size);
-  auto freq_arange = at::arange(self.type(), 0, return_size).mul_(M_PI * 2. / N);
-  auto time_arange = at::arange(self.type(), 0, frame_length);
-  auto arange_2d = at::ger(freq_arange, time_arange);
-  auto re_kernel = arange_2d.cos();
-  auto im_kernel = arange_2d.sin().neg_();
-  auto kernel = at::cat({re_kernel, im_kernel}, 0);
-  if (window.defined()) {
-    kernel *= window.view({1, -1});
+  auto window_ = window;
+  if (win_length < n_fft) {
+    // pad center
+    window_ = at::zeros({n_fft}, self.options());
+    auto left = (n_fft - win_length) / 2;
+    if (window.defined()) {
+      window_.narrow(0, left, win_length).copy_(window);
+    } else {
+      window_.narrow(0, left, win_length).fill_(1);
+    }
   }
-  if (normalized) {
-    double T = static_cast<double>(frame_length);
-    kernel.div_(std::sqrt(T));
+  int64_t n_frames = 1 + (len - n_fft) / hop_length;
+  // time2col
+  input = input.as_strided(
+    {batch, n_frames, n_fft},
+    {input.stride(0), hop_length * input.stride(1), input.stride(1)}
+  );
+  if (window_.defined()) {
+    input = input.mul(window_);
   }
-  // prepare for conv1d
-  input = input.view({batch, 1, len});
-  kernel = kernel.view({return_size * 2, 1, frame_length});
-  // conv is actually correlation, so we are good
-  auto conv_out = at::conv1d(input, kernel, {}, hop).squeeze_(-1);
-  // transpose to [batch x time x freq x (re/im)]
-  auto out = conv_out.view({batch, 2, return_size, -1}).transpose_(1, -1);
+  // rfft and transpose to get (batch x fft_size x num_frames)
+  auto out = input.rfft(1, normalized, onesided).transpose_(1, 2);
   if (self.dim() == 1) {
     return out.squeeze_(0);
   } else {

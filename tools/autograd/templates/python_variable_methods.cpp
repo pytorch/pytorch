@@ -8,8 +8,9 @@
 #include "torch/csrc/autograd/python_variable.h"
 #include "torch/csrc/autograd/utils/python_error_messages.h"
 #include "torch/csrc/autograd/utils/wrap_outputs.h"
+#include "torch/csrc/autograd/utils/python_arg_parsing.h"
 #include "torch/csrc/jit/tracer.h"
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
 #include "torch/csrc/cuda/Stream.h"
 #endif
 #include "torch/csrc/utils/cuda_lazy_init.h"
@@ -25,12 +26,18 @@
 #include "torch/csrc/utils/tensor_numpy.h"
 #include "torch/csrc/utils/tensor_types.h"
 
+#include <ATen/ATen.h>
+#include <ATen/core/optional.h>
+
 #include "python_variable_methods_dispatch.h"
 
-using at::Tensor;
+#include <stdexcept>
+
+using at::DeviceGuard;
+using at::Backend;
 using at::Scalar;
 using at::ScalarType;
-using at::Backend;
+using at::Tensor;
 using namespace torch::autograd::utils;
 
 namespace torch { namespace autograd {
@@ -48,80 +55,6 @@ static PyObject * THPVariable_apply_(PyObject* self, PyObject* arg)
   END_HANDLE_TH_ERRORS
 }
 
-static Tensor dispatch_clamp(const Tensor & self, Scalar min, Scalar max) {
-  AutoNoGIL no_gil;
-  AutoGPU auto_gpu(self);
-  return self.clamp(min, max);
-}
-static Tensor dispatch_clamp_min(const Tensor & self, Scalar min) {
-  AutoNoGIL no_gil;
-  AutoGPU auto_gpu(self);
-  return self.clamp_min(min);
-}
-static Tensor dispatch_clamp_max(const Tensor & self, Scalar max) {
-  AutoNoGIL no_gil;
-  AutoGPU auto_gpu(self);
-  return self.clamp_max(max);
-}
-
-static PyObject * THPVariable_clamp(PyObject* self, PyObject* args, PyObject* kwargs)
-{
-  HANDLE_TH_ERRORS
-  static PythonArgParser parser({
-    "clamp(Scalar min=None, Scalar max=None)",
-  }, /*traceable=*/true);
-  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  ParsedArgs<2> parsed_args;
-  auto r = parser.parse(args, kwargs, parsed_args);
-  if (!r.isNone(0) && !r.isNone(1)) {
-    return THPVariable_Wrap(dispatch_clamp(self_, r.scalar(0), r.scalar(1)));
-  } else if (!r.isNone(0)) {
-    return THPVariable_Wrap(dispatch_clamp_min(self_, r.scalar(0)));
-  } else if (!r.isNone(1)) {
-    return THPVariable_Wrap(dispatch_clamp_max(self_, r.scalar(1)));
-  } else {
-    throw std::runtime_error("At least one of 'min' or 'max' must not be None");
-  }
-  END_HANDLE_TH_ERRORS
-}
-
-static Tensor & dispatch_clamp_(Tensor & self, Scalar min, Scalar max) {
-  AutoNoGIL no_gil;
-  AutoGPU auto_gpu(self);
-  return self.clamp_(min, max);
-}
-static Tensor & dispatch_clamp_min_(Tensor & self, Scalar min) {
-  AutoNoGIL no_gil;
-  AutoGPU auto_gpu(self);
-  return self.clamp_min_(min);
-}
-static Tensor & dispatch_clamp_max_(Tensor & self, Scalar max) {
-  AutoNoGIL no_gil;
-  AutoGPU auto_gpu(self);
-  return self.clamp_max_(max);
-}
-
-static PyObject * THPVariable_clamp_(PyObject* self, PyObject* args, PyObject* kwargs)
-{
-  HANDLE_TH_ERRORS
-  static PythonArgParser parser({
-    "clamp_(Scalar min=None, Scalar max=None)",
-  }, /*traceable=*/true);
-  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  ParsedArgs<2> parsed_args;
-  auto r = parser.parse(args, kwargs, parsed_args);
-  if (!r.isNone(0) && !r.isNone(1)) {
-    return THPVariable_Wrap(dispatch_clamp_(self_, r.scalar(0), r.scalar(1)));
-  } else if (!r.isNone(0)) {
-    return THPVariable_Wrap(dispatch_clamp_min_(self_, r.scalar(0)));
-  } else if (!r.isNone(1)) {
-    return THPVariable_Wrap(dispatch_clamp_max_(self_, r.scalar(1)));
-  } else {
-    throw std::runtime_error("At least one of 'min' or 'max' must not be None");
-  }
-  END_HANDLE_TH_ERRORS
-}
-
 static PyObject * THPVariable_size(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
@@ -133,7 +66,7 @@ static PyObject * THPVariable_size(PyObject* self, PyObject* args, PyObject* kwa
   ParsedArgs<3> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
-    if (jit::tracer::isTracing(self_)) {
+    if (jit::tracer::isTracing()) {
       return wrap(jit::tracer::getSizeOf(self_, r.toInt64(0)));
     } else {
       return wrap(self_.size(r.toInt64(0)));
@@ -180,7 +113,7 @@ static PyObject * THPVariable_dim(PyObject* self, PyObject* args)
 
 static Tensor dispatch_contiguous(const Tensor & self) {
   AutoNoGIL no_gil;
-  AutoGPU auto_gpu(self);
+  DeviceGuard device_guard(self);
   return self.contiguous();
 }
 
@@ -199,7 +132,7 @@ static PyObject * THPVariable_contiguous(PyObject* self, PyObject* args)
 
 static Tensor dispatch_copy_(Tensor & self, const Tensor & other, bool non_blocking) {
   AutoNoGIL no_gil;
-  AutoGPU auto_gpu(self);
+  DeviceGuard device_guard(self);
   return self.copy_(other, non_blocking);
 }
 
@@ -236,7 +169,7 @@ static PyObject * THPVariable_detach_(PyObject* self, PyObject* args)
 
 static double dispatch_to_CDouble(const Tensor & self) {
   AutoNoGIL no_gil;
-  AutoGPU auto_gpu(self);
+  DeviceGuard device_guard(self);
   if (self.numel() != 1) {
     throw ValueError("only one element tensors can be converted to Python scalars");
   }
@@ -245,7 +178,7 @@ static double dispatch_to_CDouble(const Tensor & self) {
 
 static int64_t dispatch_to_CLong(const Tensor & self) {
   AutoNoGIL no_gil;
-  AutoGPU auto_gpu(self);
+  DeviceGuard device_guard(self);
   if (self.numel() != 1) {
     throw ValueError("only one element tensors can be converted to Python scalars");
   }
@@ -288,7 +221,7 @@ static PyObject * THPVariable_index_scalar(PyObject* self, PyObject* args) {
 
 static Tensor dispatch_invert(const Tensor & self) {
   AutoNoGIL no_gil;
-  AutoGPU auto_gpu(self);
+  DeviceGuard device_guard(self);
   return 1 - self;
 }
 
@@ -325,11 +258,14 @@ static PyObject * THPVariable_cuda(PyObject* self, PyObject* args, PyObject* kwa
   auto backend = self_.is_sparse() ? at::kSparseCUDA : at::kCUDA;
   auto& type = self_.type().toBackend(backend);
   auto device_obj = r.device(0);
-  if (!r.isNone(0) && device_obj.type != DeviceType::CUDA) {
+  if (!r.isNone(0) && device_obj.is_cpu()) {
     throw std::runtime_error("Invalid device, must be cuda device");
   }
-  auto device = (device_obj.is_default || device_obj.type == DeviceType::CPU) ? -1 : device_obj.index;
-  return THPVariable_Wrap(torch::utils::dispatch_type_conversion(self_, type, device, r.toBool(1)));
+  int32_t device_index = -1;
+  if (device_obj.has_index() && device_obj.is_cuda()) {
+    device_index = device_obj.index();
+  }
+  return THPVariable_Wrap(torch::utils::dispatch_type_conversion(self_, type, device_index, r.toBool(1)));
   END_HANDLE_TH_ERRORS
 }
 
@@ -398,7 +334,7 @@ static PyObject * THPVariable_numpy(PyObject* self, PyObject* arg)
 static PyObject * THPVariable_record_stream(PyObject* self, PyObject* arg)
 {
   HANDLE_TH_ERRORS
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   if (!THCPStream_Check(arg)) {
     return PyErr_Format(PyExc_TypeError, "expected Stream object");
@@ -486,7 +422,7 @@ static PyObject * THPVariable_new(PyObject* self, PyObject* args, PyObject* kwar
 {
   HANDLE_TH_ERRORS
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  AutoGPU auto_gpu(self_);
+  DeviceGuard device_guard(self_);
   return THPVariable_Wrap(torch::utils::legacy_tensor_new(self_.type(), args, kwargs));
   END_HANDLE_TH_ERRORS
 }
@@ -495,7 +431,7 @@ static PyObject * THPVariable_new_empty(PyObject* self, PyObject* args, PyObject
 {
   HANDLE_TH_ERRORS
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  AutoGPU auto_gpu(self_);
+  DeviceGuard device_guard(self_);
   return THPVariable_Wrap(torch::utils::new_empty(self_.type(), args, kwargs));
   END_HANDLE_TH_ERRORS
 }
@@ -504,7 +440,7 @@ static PyObject * THPVariable_new_full(PyObject* self, PyObject* args, PyObject*
 {
   HANDLE_TH_ERRORS
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  AutoGPU auto_gpu(self_);
+  DeviceGuard device_guard(self_);
   return THPVariable_Wrap(torch::utils::new_full(self_.type(), args, kwargs));
   END_HANDLE_TH_ERRORS
 }
@@ -513,7 +449,7 @@ static PyObject * THPVariable_new_ones(PyObject* self, PyObject* args, PyObject*
 {
   HANDLE_TH_ERRORS
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  AutoGPU auto_gpu(self_);
+  DeviceGuard device_guard(self_);
   return THPVariable_Wrap(torch::utils::new_ones(self_.type(), args, kwargs));
   END_HANDLE_TH_ERRORS
 }
@@ -522,7 +458,7 @@ static PyObject * THPVariable_new_tensor(PyObject* self, PyObject* args, PyObjec
 {
   HANDLE_TH_ERRORS
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  AutoGPU auto_gpu(self_);
+  DeviceGuard device_guard(self_);
   return THPVariable_Wrap(torch::utils::new_tensor(self_.type(), args, kwargs));
   END_HANDLE_TH_ERRORS
 }
@@ -531,7 +467,7 @@ static PyObject * THPVariable_new_zeros(PyObject* self, PyObject* args, PyObject
 {
   HANDLE_TH_ERRORS
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  AutoGPU auto_gpu(self_);
+  DeviceGuard device_guard(self_);
   return THPVariable_Wrap(torch::utils::new_zeros(self_.type(), args, kwargs));
   END_HANDLE_TH_ERRORS
 }
@@ -558,31 +494,22 @@ static PyObject * THPVariable_storage_type(PyObject* self, PyObject* arg)
 static PyObject * THPVariable_to(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
-  static PythonArgParser parser({
-    "to(Device device, ScalarType dtype=None)",
-    "to(ScalarType dtype)",
-    "to(Tensor other)",
-  });
-  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  ParsedArgs<2> parsed_args;
-  auto r = parser.parse(args, kwargs, parsed_args);
-  if (r.idx == 0) {
-    auto device = r.device(0);
-    auto deviceAutoGPU = device.deviceInt64();
-    auto scalarType = r.scalartypeWithDefault(1, self_.type().scalarType());
-    auto& layout = *torch::getLayout(self_.type().backend());
-    auto& type = torch::getType(scalarType, layout, device.type);
-    return THPVariable_Wrap(torch::utils::dispatch_type_conversion(self_, type, deviceAutoGPU, false));
-  } else if (r.idx == 1) {
-    auto scalarType = r.scalartype(0);
-    auto& type = self_.type().toScalarType(scalarType);
+  auto parsed = parse_to_conversion(args, kwargs);
+  auto& device = std::get<0>(parsed);
+  auto& scalarType = std::get<1>(parsed);
+  auto non_blocking = std::get<2>(parsed);
+  if (!device) {
+    // device not given
+    auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+    auto& type = self_.type().toScalarType(scalarType.value_or(self_.type().scalarType()));
     return THPVariable_Wrap(torch::utils::dispatch_type_conversion(self_, type));
-  } else if (r.idx == 2) {
-    auto other = r.tensor(0);
-    auto& type = other.type();
-    auto deviceType = torch::getDeviceType(type);
-    auto deviceAutoGPU = (deviceType == DeviceType::CPU) ? -1 : other.get_device();
-    return THPVariable_Wrap(torch::utils::dispatch_type_conversion(self_, type, deviceAutoGPU, false));
+  } else {
+    // device and maybe dtype are given
+    auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+    auto& layout = *torch::getLayout(self_.type().backend());
+    auto& type = torch::getType(scalarType.value_or(self_.type().scalarType()), layout, device->type());
+    const int32_t device_index = type.is_cuda() ? device->index() : -1;
+    return THPVariable_Wrap(torch::utils::dispatch_type_conversion(self_, type, device_index, non_blocking));
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -660,8 +587,6 @@ PyMethodDef variable_methods[] = {
   {"apply_", (PyCFunction)THPVariable_apply_, METH_O, NULL},
   {"byte", (PyCFunction)THPVariable_byte, METH_NOARGS, NULL},
   {"char", (PyCFunction)THPVariable_char, METH_NOARGS, NULL},
-  {"clamp", (PyCFunction)THPVariable_clamp, METH_VARARGS | METH_KEYWORDS, NULL},
-  {"clamp_", (PyCFunction)THPVariable_clamp_, METH_VARARGS | METH_KEYWORDS, NULL},
   {"contiguous", (PyCFunction)THPVariable_contiguous, METH_NOARGS, NULL},
   {"copy_", (PyCFunction)THPVariable_copy_, METH_VARARGS | METH_KEYWORDS, NULL},
   {"cpu", (PyCFunction)THPVariable_cpu, METH_NOARGS, NULL},

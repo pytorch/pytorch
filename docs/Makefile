@@ -23,6 +23,13 @@ docset: html
 	cp $(SPHINXPROJ).docset/icon.png $(SPHINXPROJ).docset/icon@2x.png
 	convert $(SPHINXPROJ).docset/icon@2x.png -resize 16x16 $(SPHINXPROJ).docset/icon.png
 
+html-stable:
+	# stable differs from `make html` in two ways:
+	# 1) The stable logo is used instead of the unstable logo
+	# 2) There will not be a link to the stable docs.
+	# See conf.py for more details.
+	RELEASE=1 make html
+
 .PHONY: help Makefile docset
 
 # Catch-all target: route all unknown targets to Sphinx using the new

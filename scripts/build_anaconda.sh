@@ -7,6 +7,10 @@
 #
 # Usage:
 #  ./build_anaconda.sh [--cuda X.Y] [--cudnn Z]
+#                      [--name package_name]
+#                      [--suffix package_name_suffix]
+#                      [--skip-tests]
+#                      [--install-locally]
 #                      [--full] [--integrated]
 #                      [--conda <flag forwared to conda-build>]...
 #                      [<flags forwarded to cmake>]...
@@ -114,7 +118,7 @@ if [[ -n $CONDA_INSTALL_LOCALLY ]]; then
   install_locally=1
 fi
 if [[ -n $INTEGRATED ]]; then
-  pytorch_too=1
+  integrated=1
 fi
 
 # Parameters passed in by command line. These override those set by environment
@@ -140,6 +144,9 @@ while [[ $# -gt 0 ]]; do
     --install-locally)
       install_locally=1
       ;;
+    --meta-only)
+      stop_after_meta=1
+      ;;
     --cuda)
       shift
       cuda_ver="$1"
@@ -152,10 +159,7 @@ while [[ $# -gt 0 ]]; do
       build_full=1
       ;;
     --integrated)
-      pytorch_too=1
-      ;;
-    --pytorch-too)
-      pytorch_too=1
+      integrated=1
       ;;
     --slim)
       slim=1
@@ -193,7 +197,7 @@ fi
 ###########################################################
 # Set the build version
 export PYTORCH_BUILD_DATE="$(date +"%Y.%m.%d")"
-if [[ -n $pytorch_too ]]; then
+if [[ -n $integrated ]]; then
   export PYTORCH_BUILD_VERSION="$(date +"%Y.%m.%d")"
 else
   export PYTORCH_BUILD_VERSION="0.8.dev"
@@ -212,13 +216,8 @@ else
 fi
 
 # Read the python version
-PYTHON_VERSION="$(python --version 2>&1 | grep --only-matching '[0-9]\.[0-9]\.[0-9]*')"
-if [[ "$PYTHON_VERSION" == 3.6* ]]; then
-  # This is needed or else conda tries to move packages to python3/site-packages
-  # instead of python3.6/site-packages. Specifically 3.6 because that's what
-  # the latest Anaconda version is
-  conda_args+=(" --python 3.6")
-fi
+python_version="$(python --version 2>&1 | grep --only-matching '[0-9]\.[0-9]\.[0-9]*')"
+conda_args+=(" --python ${python_version:0:3}")
 
 
 ###########################################################
@@ -227,7 +226,7 @@ fi
 # And copy the meta.yaml to the correct build folder
 pytorch_root="$( cd "$(dirname "$0")"/.. ; pwd -P)"
 build_dir="${pytorch_root}/conda"
-if [[ -n $pytorch_too ]]; then
+if [[ -n $integrated ]]; then
   \cp -r "${build_dir}/caffe2/meta.yaml" "${build_dir}/integrated/meta.yaml"
   build_dir="${build_dir}/integrated"
 elif [[ -n $build_full ]]; then
@@ -246,7 +245,7 @@ portable_sed "s#path:.*#path: $pytorch_root#" $meta_yaml
 build_string='py{{py}}'
 if [[ -z $package_name ]]; then
   package_name='caffe2'
-  if [[ -n $pytorch_too ]]; then
+  if [[ -n $integrated ]]; then
     package_name="pytorch-${package_name}"
   fi
 fi
@@ -277,7 +276,7 @@ portable_sed "s/name: caffe2.*\$/name: ${package_name}/" $meta_yaml
 ###########################################################
 # Handle tests
 ###########################################################
-if [[ -n $pytorch_too ]]; then
+if [[ -n $integrated ]]; then
   # Removed until https://github.com/conda/conda/issues/7245 is resolved
   #if [[ -n $cuda_ver ]]; then
   #  append_to_section 'test' 'requires:'
@@ -297,17 +296,17 @@ fi
 # Add packages required for all Caffe2 builds
 add_package 'glog'
 add_package 'gflags'
+add_package 'mkl' '>=2018'
+add_package 'mkl-include'
+add_package 'typing'
+append_to_section 'build' '- pyyaml'
 caffe2_cmake_args+=("-DUSE_LEVELDB=OFF")
 caffe2_cmake_args+=("-DUSE_LMDB=OFF")
 
 
 # Add packages required for pytorch
-if [[ -n $pytorch_too ]]; then
+if [[ -n $integrated ]]; then
   add_package 'cffi'
-  add_package 'mkl' '>=2018'
-  add_package 'mkl-include'
-  add_package 'typing'
-  append_to_section 'build' '- pyyaml'
   append_to_section 'build' '- setuptools'
   #caffe2_cmake_args+=("-DBLAS=MKL")
   if [[ -n $cuda_ver ]]; then
@@ -324,7 +323,7 @@ if [[ -n $pytorch_too ]]; then
 fi
 
 if [[ -z $slim ]]; then
-  add_package 'opencv'
+  add_package 'opencv' '<3.4'
 else
   caffe2_cmake_args+=("-DUSE_OPENCV=OFF")
 fi
@@ -347,7 +346,7 @@ else
   # Flags required for CPU for Caffe2
   caffe2_cmake_args+=("-DUSE_CUDA=OFF")
   caffe2_cmake_args+=("-DUSE_NCCL=OFF")
-  #if [[ -z $pytorch_too ]]; then
+  #if [[ -z $integrated ]]; then
   #  #caffe2_cmake_args+=("-DBLAS=MKL")
   #  #add_package 'mkl'
   #  #add_package 'mkl-include'
@@ -355,13 +354,8 @@ else
 fi
 
 # Change flags based on target gcc ABI
+# Default conda channels use gcc 7.2, conda-forge uses gcc 4.8.5
 if [[ "$(uname)" != 'Darwin' && "$GCC_USE_C11" -eq 0 ]]; then
-  # opencv 3.3.1 in conda-forge doesn't have imgcodecs, and opencv 3.1.0
-  # requires numpy 1.12
-  remove_lines_with 'opencv'
-  add_package 'opencv' '==3.1.0'
-
-  # Default conda channels use gcc 7.2, conda-forge uses gcc 4.8.5
   caffe2_cmake_args+=("-DCMAKE_CXX_FLAGS=-D_GLIBCXX_USE_CXX11_ABI=0")
   conda_channel+=('-c conda-forge')
 fi
@@ -385,12 +379,19 @@ fi
 # Show what the final meta.yaml looks like
 echo "Finalized meta.yaml is"
 cat $meta_yaml
+if [[ -n $stop_after_meta ]]; then
+  exit 0
+fi
 
 
 ###########################################################
 # Build Caffe2 with conda-build
 ###########################################################
-CAFFE2_CMAKE_ARGS=${caffe2_cmake_args[@]} CUDA_VERSION=$cuda_ver conda build $build_dir ${conda_channel[@]} ${conda_args[@]}
+CAFFE2_CMAKE_ARGS=${caffe2_cmake_args[@]} \
+    CUDA_VERSION=$cuda_ver \
+    conda build $build_dir \
+        ${conda_channel[@]} \
+        ${conda_args[@]}
 
 # Install Caffe2 from the built package into the local conda environment
 if [[ -n $install_locally ]]; then

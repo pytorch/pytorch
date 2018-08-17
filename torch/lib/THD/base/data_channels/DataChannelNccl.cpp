@@ -1,7 +1,8 @@
 #include "../Cuda.hpp"
-#include "../../../../csrc/utils/auto_gpu.h"
 #include "DataChannelNccl.hpp"
 #include "DataChannelUtils.hpp"
+
+#include <ATen/ATen.h>
 
 #include <cuda.h>
 #include <THC/THC.h>
@@ -159,7 +160,7 @@ void DataChannelNccl::destroy() {
   _destroySockets();
 
   // Guard GPU device
-  AutoGPU gpuGuard;
+  at::DeviceGuard gpuGuard;
 
   /**
    * Destroy the CUDA and NCCL resources
@@ -186,11 +187,11 @@ void DataChannelNccl::_destroyNcclResources(THDGroup groupId) {
       // Devices used for this group ID
       auto devices = getDevicesList(_groupDevices[groupId][i]);
       // Guard GPU device
-      AutoGPU gpuGuard;
+      at::DeviceGuard gpuGuard;
       // Destroy the CUDA events
       size_t idx = 0;
       for (auto& event : *(_groupNcclResources[groupId][i].ncclCudaEvents())) {
-        gpuGuard.setDevice(devices[idx++]);
+        gpuGuard.set_index(devices[idx++]);
         THCudaCheck(cudaEventSynchronize(event));
         THCudaCheck(cudaEventDestroy(event));
       }
@@ -301,18 +302,18 @@ NcclResourcePair DataChannelNccl::_getNcclResourcePair(
   broadcastUniqueNcclId(&ncclId);
 
   // Guard GPU device
-  AutoGPU gpuGuard;
+  at::DeviceGuard gpuGuard;
 
   // Now creating the CUDA events
   for (size_t i = 0; i < input.size(); ++i) {
-    gpuGuard.setDevice(input[i].get_device());
+    gpuGuard.set_index(input[i].get_device());
     THCudaCheck(cudaEventCreate(&((*events)[i])));
   }
   // Create the communicator on each device of the input
   NCCL_CHECK(ncclGroupStart());
   for (size_t i = 0; i < input.size(); ++i) {
     int nRanks = int(_numProcesses) * input.size();
-    gpuGuard.setDevice(input[i].get_device());
+    gpuGuard.set_index(input[i].get_device());
     NCCL_CHECK(ncclCommInitRank(&((*comms)[i]),
                                 nRanks,
                                 ncclId,
@@ -422,7 +423,7 @@ void DataChannelNccl::allReduce(std::vector<at::Tensor>& data,
   auto events = ncclResourcePair.second;
 
   // Guard GPU device
-  AutoGPU gpuGuard;
+  at::DeviceGuard gpuGuard;
 
   std::unique_lock<std::mutex> cudaFreeMutexLock(
       *(THCCachingAllocator_getCudaFreeMutex()));
@@ -430,7 +431,7 @@ void DataChannelNccl::allReduce(std::vector<at::Tensor>& data,
   NCCL_CHECK(ncclGroupStart());
   for (size_t i = 0; i < data.size(); ++i) {
 
-    gpuGuard.setDevice(data[i].get_device());
+    gpuGuard.set_index(data[i].get_device());
     auto stream = THCState_getCurrentStream(THDGetCudaState());
 
     NCCL_CHECK(ncclAllReduce(data[i].data_ptr(),
@@ -473,7 +474,7 @@ void DataChannelNccl::allGather(std::vector<at::Tensor>& output,
   auto events = ncclResourcePair.second;
 
   // Guard GPU device
-  AutoGPU gpuGuard;
+  at::DeviceGuard gpuGuard;
 
   std::unique_lock<std::mutex> cudaFreeMutexLock(
       *(THCCachingAllocator_getCudaFreeMutex()));
@@ -481,7 +482,7 @@ void DataChannelNccl::allGather(std::vector<at::Tensor>& output,
   NCCL_CHECK(ncclGroupStart());
   for (size_t i = 0; i < input.size(); ++i) {
 
-    gpuGuard.setDevice(input[i].get_device());
+    gpuGuard.set_index(input[i].get_device());
     auto stream = THCState_getCurrentStream(THDGetCudaState());
 
     NCCL_CHECK(ncclAllGather(input[i].data_ptr(),
@@ -525,7 +526,7 @@ void DataChannelNccl::reduce(std::vector<at::Tensor>& data,
   auto events = ncclResourcePair.second;
 
   // Guard GPU device
-  AutoGPU gpuGuard;
+  at::DeviceGuard gpuGuard;
 
   std::unique_lock<std::mutex> cudaFreeMutexLock(
       *(THCCachingAllocator_getCudaFreeMutex()));
@@ -533,7 +534,7 @@ void DataChannelNccl::reduce(std::vector<at::Tensor>& data,
   NCCL_CHECK(ncclGroupStart());
   for (size_t i = 0; i < data.size(); ++i) {
 
-    gpuGuard.setDevice(data[i].get_device());
+    gpuGuard.set_index(data[i].get_device());
     auto stream = THCState_getCurrentStream(THDGetCudaState());
 
     NCCL_CHECK(ncclReduce(data[i].data_ptr(),
@@ -577,7 +578,7 @@ void DataChannelNccl::broadcast(std::vector<at::Tensor>& data,
   auto events = ncclResourcePair.second;
 
   // Guard GPU device
-  AutoGPU gpuGuard;
+  at::DeviceGuard gpuGuard;
 
   std::unique_lock<std::mutex> cudaFreeMutexLock(
       *(THCCachingAllocator_getCudaFreeMutex()));
@@ -585,7 +586,7 @@ void DataChannelNccl::broadcast(std::vector<at::Tensor>& data,
   NCCL_CHECK(ncclGroupStart());
   for (size_t i = 0; i < data.size(); ++i) {
 
-    gpuGuard.setDevice(data[i].get_device());
+    gpuGuard.set_index(data[i].get_device());
     auto stream = THCState_getCurrentStream(THDGetCudaState());
 
     NCCL_CHECK(ncclBcast(data[i].data_ptr(),

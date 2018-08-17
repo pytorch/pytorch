@@ -1,6 +1,6 @@
 #include "caffe2/opt/backend_cutting.h"
-#include "caffe2/opt/converter.h"
 #include "caffe2/core/logging.h"
+#include "caffe2/opt/converter.h"
 #include "nomnigraph/Converters/Dot.h"
 #include "nomnigraph/Representations/NeuralNet.h"
 
@@ -43,9 +43,9 @@ std::string ShowNode(NodeRef node) {
     return MakeString("Tensor: ", nn_tensor->getName());
   } else if (nn::is<NeuralNetOperator>(node)) {
     const auto* nn_op = nn::get<NeuralNetOperator>(node);
-    const auto* op_def = dyn_cast<Caffe2Annotation>(nn_op->getAnnotation())->getOperatorDef();
-    CAFFE_ENFORCE(op_def);
-    return MakeString("Op: ", op_def->type());
+    const auto& op_def =
+        dyn_cast<Caffe2Annotation>(nn_op->getAnnotation())->getOperatorDef();
+    return MakeString("Op: ", op_def.type());
   } else {
     CAFFE_THROW("Known node");
   }
@@ -57,12 +57,11 @@ void DumpGraph(NNGraph* g) {
     assert(node->data() && "Node doesn't have data, can't render it");
     if (isa<NeuralNetOperator>(node->data())) {
       auto* op = dyn_cast<NeuralNetOperator>(node->data().get());
-      labelMap["label"] =
-          op->getName() + " (" + caffe2::to_string((unsigned long long)node) + ")";
+      labelMap["label"] = op->getName() + " (" +
+          caffe2::to_string((unsigned long long)node) + ")";
       auto* annotation = op->getAnnotation();
       if (annotation && isa<Caffe2Annotation>(annotation)) {
-        auto device_annotation =
-            dyn_cast<Caffe2Annotation>(annotation);
+        auto device_annotation = dyn_cast<Caffe2Annotation>(annotation);
         labelMap["label"] += "\\n[" + device_annotation->getDevice() + "]";
         auto hash = std::hash<std::string>{}(device_annotation->getDevice());
         std::stringstream hex_stream;
@@ -104,10 +103,10 @@ void Explore(
 
     // Check if the node is supported, stop exploring further if not supported
     if (nn::is<NeuralNetOperator>(node)) {
-      const auto* nn_op =
-        nn::get<NeuralNetOperator>(node);
-      const auto* op_def = dyn_cast<Caffe2Annotation>(nn_op->getAnnotation())->getOperatorDef();
-      bool wanted = context->predicate(*op_def);
+      const auto* nn_op = nn::get<NeuralNetOperator>(node);
+      const auto& op_def =
+          dyn_cast<Caffe2Annotation>(nn_op->getAnnotation())->getOperatorDef();
+      bool wanted = context->predicate(op_def);
       wanted = context->find_supported ? wanted : (!wanted);
       if (!wanted) {
         context->frontier.emplace(node);
@@ -189,9 +188,12 @@ caffe2::NetDef ConvertToC2Net(
   for (auto node : sub.nodes) {
     if (nn::is<NeuralNetOperator>(node)) {
       const auto* nn_op = nn::get<NeuralNetOperator>(node);
-      assert(isa<Caffe2Annotation>(nn_op->getAnnotation()) && "Cannot get caffe2 op from NNOp");
-      const auto* op_def = dyn_cast<Caffe2Annotation>(nn_op->getAnnotation())->getOperatorDef();
-      net.add_op()->CopyFrom(*op_def);
+      assert(
+          isa<Caffe2Annotation>(nn_op->getAnnotation()) &&
+          "Cannot get caffe2 op from NNOp");
+      const auto& op_def =
+          dyn_cast<Caffe2Annotation>(nn_op->getAnnotation())->getOperatorDef();
+      net.add_op()->CopyFrom(op_def);
     }
   }
   for (const auto kv : sub.external_input_refs) {
@@ -208,8 +210,9 @@ caffe2::NetDef ConvertToC2Net(
 
 void DetectBoundaryReferences(
     TransformSubgraph* subgraph,
-    const std::unordered_map<NodeRef, GroupAnnotation>& infos) {
-  for (auto node: subgraph->nodes) {
+    const std::unordered_map<NodeRef, GroupAnnotation>& infos,
+    const std::unordered_set<std::string>& original_external_output) {
+  for (auto node : subgraph->nodes) {
     // inputs
     for (auto in_edge : node->getInEdges()) {
       auto parent_node = in_edge->tail();
@@ -226,12 +229,20 @@ void DetectBoundaryReferences(
     if (!nn::is<NeuralNetData>(node)) {
       continue;
     }
-    for (auto child_node : nn::getConsumers(node)) {
-      const auto& info = infos.at(child_node);
-      if (info.group != subgraph->group_id) {
-        const auto* nn_tensor = nn::get<const NeuralNetData>(node);
-        subgraph->external_output_refs.emplace(nn_tensor->getName(), node);
-        break;
+    // Note that although matched subgraph won't contain external inputs as we
+    // skip the initial input tensor of matching, it is possible to contain
+    // external outputs. We will mark these external outputs as boundary outputs
+    // too.
+    auto name = nn::get<const NeuralNetData>(node)->getName();
+    if (original_external_output.count(name)) {
+      subgraph->external_output_refs.emplace(name, node);
+    } else {
+      for (auto child_node : nn::getConsumers(node)) {
+        const auto& info = infos.at(child_node);
+        if (info.group != subgraph->group_id) {
+          subgraph->external_output_refs.emplace(name, node);
+          break;
+        }
       }
     }
   }
@@ -245,9 +256,8 @@ void ReplaceSubgraph(
   // tensors
   for (auto node : subgraph.nodes) {
     if (nn::is<NeuralNetData>(node) &&
-        subgraph.external_output_refs.find(
-            nn::get<const NeuralNetData>(node)->getName()) !=
-            subgraph.external_output_refs.end()) {
+        subgraph.external_output_refs.count(
+            nn::get<const NeuralNetData>(node)->getName())) {
       VLOG(2) << "Keeping " << ShowNode(node);
       continue;
     }
@@ -257,17 +267,18 @@ void ReplaceSubgraph(
 
   // Convert new NetDef back to NNGraph
   std::unordered_map<std::string, NodeRef> tensor_map;
-  for (const auto kv: subgraph.external_input_refs) {
+  for (const auto kv : subgraph.external_input_refs) {
     tensor_map.emplace(kv.first, kv.second);
   }
-  for (const auto kv: subgraph.external_output_refs) {
+  for (const auto kv : subgraph.external_output_refs) {
     tensor_map.emplace(kv.first, kv.second);
   }
   for (auto& op : *net_opt.mutable_op()) {
     auto op_node = g->createNode();
     for (const auto& input : op.input()) {
       if (!tensor_map.count(input)) {
-        tensor_map[input] = g->createNode(caffe2::make_unique<Tensor>(input));
+        tensor_map[input] =
+            g->createNode(caffe2::make_unique<nom::repr::Tensor>(input));
       }
 
       auto tensor_node = tensor_map[input];
@@ -276,38 +287,40 @@ void ReplaceSubgraph(
 
     for (const auto& output : op.output()) {
       if (!tensor_map.count(output)) {
-        tensor_map[output] = g->createNode(caffe2::make_unique<Tensor>(output));
+        tensor_map[output] =
+            g->createNode(caffe2::make_unique<nom::repr::Tensor>(output));
       }
       auto tensor_node = tensor_map[output];
       g->createEdge(op_node, tensor_node);
     }
 
-    op_node->resetData(convertToOperatorDef(op));
-    auto op_ref = dyn_cast<NeuralNetOperator>(op_node->data().get());
-    CAFFE_ENFORCE(op_node->data());
-
-    auto annotation = nom::util::make_unique<Caffe2Annotation>();
-    annotation->setOperatorDef(&op);
-
-    auto device_name = op.device_option().node_name();
-    if (device_name != "") {
-      annotation->setDevice(device_name);
-    }
-
-    op_ref->setAnnotation(std::move(annotation));
+    op_node->resetData(convertToNeuralNetOperator(op));
   }
 }
 
-void PruneUnrefereredNodes(NNGraph* g) {
+void PruneUnrefereredNodes(NNModule* nn) {
+  auto& g = nn->dataFlow;
   std::vector<NodeRef> to_delete;
-  for (auto node : g->getMutableNodes()) {
-    if (!nn::hasProducer(node) &&
-        !nn::hasConsumer(node)) {
+  for (auto node : g.getMutableNodes()) {
+    if (!nn::hasProducer(node) && !nn::hasConsumer(node)) {
       to_delete.push_back(node);
     }
   }
   for (auto i : to_delete) {
-    g->deleteNode(i);
+    if (nn::is<NeuralNetData>(i)) {
+      auto name = nn::get<NeuralNetData>(i)->getName();
+      auto it = nn->inputs.find(i);
+      if (it != nn->inputs.end()) {
+        VLOG(2) << "Removing external input " << name;
+        nn->inputs.erase(it);
+      }
+      it = nn->outputs.find(i);
+      if (it != nn->outputs.end()) {
+        VLOG(2) << "Removing external output " << name;
+        nn->outputs.erase(it);
+      }
+    }
+    g.deleteNode(i);
   }
 }
 
@@ -323,7 +336,7 @@ caffe2::NetDef OptimizeForBackend(
   // Initialize the group info and figure out the external/input output
   VisitorContext context(supports);
   std::vector<NodeRef> external_inputs;
-  std::vector<NodeRef> external_outputs;
+  std::unordered_set<std::string> external_outputs;
   for (auto node : dfg.getMutableNodes()) {
     context.infos.emplace(
         std::piecewise_construct,
@@ -335,7 +348,7 @@ caffe2::NetDef OptimizeForBackend(
         external_inputs.push_back(node);
       }
       if (!nn::hasConsumer(node)) {
-        external_outputs.push_back(node);
+        external_outputs.emplace(nn::get<const NeuralNetData>(node)->getName());
       }
     }
   }
@@ -351,11 +364,11 @@ caffe2::NetDef OptimizeForBackend(
        context.find_supported = !context.find_supported) {
     Explore(frontier, &context);
     if (context.find_supported) {
-    subs.emplace_back(
-        std::move(frontier),
-        std::move(context.current_group),
-        context.group,
-        context.find_supported);
+      subs.emplace_back(
+          std::move(frontier),
+          std::move(context.current_group),
+          context.group,
+          context.find_supported);
     }
 
     frontier.assign(context.frontier.begin(), context.frontier.end());
@@ -369,7 +382,7 @@ caffe2::NetDef OptimizeForBackend(
   opt_subnets.reserve(subs.size());
   for (auto& g : subs) {
     // Generate boundary input/output edges
-    DetectBoundaryReferences(&g, context.infos);
+    DetectBoundaryReferences(&g, context.infos, external_outputs);
 
     caffe2::NetDef subnet = ConvertToC2Net(g, context.infos);
     // Transform the subgraph protobuf def, note that we can have less external
@@ -381,15 +394,9 @@ caffe2::NetDef OptimizeForBackend(
 
   // Prune dangling nodes, because after transformation, some weights might be
   // absorbed
-  PruneUnrefereredNodes(&dfg);
+  PruneUnrefereredNodes(&nn);
 
   auto new_net = convertToCaffe2Proto(nn);
-  for (const auto& i: net.external_input()) {
-    new_net.add_external_input(i);
-  }
-  for (const auto& i: net.external_output()) {
-    new_net.add_external_output(i);
-  }
   new_net.set_name(net.name() + "_opt");
   return new_net;
 }

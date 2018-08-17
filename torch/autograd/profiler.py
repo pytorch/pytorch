@@ -543,7 +543,10 @@ def build_table(events, sort_by=None, header=None):
     if sort_by is not None:
         events = sorted(events, key=lambda evt: getattr(evt, sort_by))
 
-    max_name_length = max(len(evt.key) for evt in events)
+    name_lengths = [len(evt.key) for evt in events]
+    if len(name_lengths) == 0:
+        return ""
+    max_name_length = max(name_lengths)
     max_name_length += 4  # Add some nice padding
     col_width = 15
     col_format = '  {: >' + str(col_width) + '}'

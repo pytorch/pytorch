@@ -2,12 +2,15 @@
 #include "common.h"
 #include "THCHalf.h"
 #include "THCHalfAutoNumerics.cuh"
+#include "THCThrustAllocator.cuh"
+#include "THCApply.cuh"
 
 #include <thrust/functional.h>
 #include <thrust/device_ptr.h>
 #include <thrust/iterator/zip_iterator.h>
 #include <thrust/transform.h>
 #include <thrust/transform_reduce.h>
+#include <thrust/system/cuda/execution_policy.h>
 
 template <typename T>
 inline __host__ __device__ T eps();
@@ -17,6 +20,15 @@ inline __host__ __device__ float eps() { return 1e-12f; }
 
 template <>
 inline __host__ __device__ double eps() { return 1e-12; }
+
+template <typename T>
+inline __host__ __device__ T safe_log(T a) {
+  if (a == 0.)
+  {
+    return THCNumerics<T>::log(eps<T>());
+  }
+  return THCNumerics<T>::log(a);
+}
 
 template <typename Dtype, typename Acctype>
 struct bce_functor
@@ -28,7 +40,8 @@ struct bce_functor
     Dtype input = thrust::get<0>(x);
     Dtype t = thrust::get<1>(x);
     assert(input >= 0. && input <= 1.);
-    return - (t * THCNumerics<Acctype>::log(input + eps<Acctype>()) + (Acctype(1)- t) * THCNumerics<Acctype>::log(Acctype(1) - input + eps<Acctype>()));
+    return - (t * safe_log<Acctype>(ScalarConvert<Dtype, Acctype>::to(input))
+        + (Acctype(1) - t) * safe_log<Acctype>(Acctype(1) - input));
   }
 };
 
@@ -43,8 +56,8 @@ struct bce_updateOutput_no_reduce_functor
   {
     assert(*input >= 0. && *input <= 1.);
     *output = ScalarConvert<Acctype, Dtype>::to(
-        -(*target * THCNumerics<Acctype>::log(*input + eps<Acctype>()) +
-          (Acctype(1) - *target) * THCNumerics<Acctype>::log(Acctype(1) - *input + eps<Acctype>())));
+        -(*target * safe_log<Acctype>(ScalarConvert<Dtype, Acctype>::to(*input)) +
+          (Acctype(1) - *target) * safe_log<Acctype>(Acctype(1) - *input)));
   }
 };
 
@@ -59,8 +72,8 @@ struct bce_functor_weights
     Dtype t = thrust::get<1>(x);
     Dtype w = thrust::get<2>(x);
     assert(input >= 0. && input <= 1.);
-    return - w * (t * THCNumerics<Acctype>::log(input + eps<Acctype>()) +
-        (Acctype(1) - t) * THCNumerics<Acctype>::log(Acctype(1) - input + eps<Acctype>()));
+    return - w * (t * safe_log<Acctype>(ScalarConvert<Dtype, Acctype>::to(input)) +
+        (Acctype(1) - t) * safe_log<Acctype>(Acctype(1) - input));
   }
 };
 

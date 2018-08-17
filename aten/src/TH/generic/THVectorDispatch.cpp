@@ -239,6 +239,29 @@ void THVector_(copy)(real *y, const real *x, const ptrdiff_t n) {
   THVector_(copy_DISPATCHPTR)(y, x, n);
 }
 
+#ifndef TH_REAL_IS_INT
+static void (*THVector_(cvtFromInt_DISPATCHPTR))(real *, const int *, const ptrdiff_t) = &THVector_(cvtFromInt_DEFAULT);
+static FunctionDescription THVector_(cvtFromInt_DISPATCHTABLE)[] = {
+  #if defined(USE_AVX)
+    #if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
+      FUNCTION_IMPL(THVector_(cvtFromInt_AVX), SIMDExtension_AVX),
+    #endif
+  #endif
+  #if defined(USE_SSE2) || defined(USE_SSE3) || defined(USE_SSSE3) \
+          || defined(USE_SSE4_1) || defined(USE_SSE4_2)
+    #if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
+      FUNCTION_IMPL(THVector_(cvtFromInt_SSE), SIMDExtension_SSE),
+    #endif
+  #endif
+
+
+  FUNCTION_IMPL(THVector_(cvtFromInt_DEFAULT), SIMDExtension_DEFAULT)
+};
+void THVector_(cvtFromInt)(real *y, const int *x, const ptrdiff_t n) {
+  THVector_(cvtFromInt_DISPATCHPTR)(y, x, n);
+}
+#endif
+
 static void (*THVector_(normal_fill_DISPATCHPTR))(real *, const int64_t, THGenerator *, const real, const real) = &THVector_(normal_fill_DEFAULT);
 static FunctionDescription THVector_(normal_fill_DISPATCHTABLE)[] = {
   #if defined(TH_REAL_IS_FLOAT) && defined(USE_AVX2)
@@ -289,6 +312,10 @@ struct THVector_(startup) {
     INIT_DISPATCH_PTR(divs);
     INIT_DISPATCH_PTR(copy);
     INIT_DISPATCH_PTR(normal_fill);
+
+#ifndef TH_REAL_IS_INT
+    INIT_DISPATCH_PTR(cvtFromInt);
+#endif
 
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
     INIT_DISPATCH_PTR(sigmoid);

@@ -1,3 +1,5 @@
+import warnings
+
 import torch
 import torch.cuda.comm as comm
 from torch.autograd import Function
@@ -51,31 +53,40 @@ class Gather(Function):
         ctx.target_device = target_device
         ctx.dim = dim
         ctx.input_gpus = tuple(map(lambda i: i.get_device(), inputs))
+        if all(t.dim() == 0 for t in inputs) and dim == 0:
+            inputs = tuple(t.view(1) for t in inputs)
+            warnings.warn('Was asked to gather along dimension 0, but all '
+                          'input tensors were scalars; will instead unsqueeze '
+                          'and return a vector.')
+            ctx.unsqueezed_scalar = True
+        else:
+            ctx.unsqueezed_scalar = False
         ctx.input_sizes = tuple(map(lambda i: i.size(ctx.dim), inputs))
         return comm.gather(inputs, ctx.dim, ctx.target_device)
 
     @staticmethod
     def backward(ctx, grad_output):
-        return (None, None) + Scatter.apply(ctx.input_gpus, ctx.input_sizes, ctx.dim, grad_output)
+        scattered_grads = Scatter.apply(ctx.input_gpus, ctx.input_sizes, ctx.dim, grad_output)
+        if ctx.unsqueezed_scalar:
+            scattered_grads = tuple(g[0] for g in scattered_grads)
+        return (None, None) + scattered_grads
 
 
 class Scatter(Function):
 
     @staticmethod
     def forward(ctx, target_gpus, chunk_sizes, dim, input):
-        ctx.target_gpus = target_gpus
-        ctx.chunk_sizes = chunk_sizes
         ctx.dim = dim
         ctx.input_device = input.get_device() if input.is_cuda else -1
         streams = None
         if ctx.input_device == -1:
             # Perform CPU to GPU copies in a background stream
-            streams = [_get_stream(device) for device in ctx.target_gpus]
-        outputs = comm.scatter(input, ctx.target_gpus, ctx.chunk_sizes, ctx.dim, streams)
+            streams = [_get_stream(device) for device in target_gpus]
+        outputs = comm.scatter(input, target_gpus, chunk_sizes, ctx.dim, streams)
         # Synchronize with the copy stream
         if streams is not None:
             for i, output in enumerate(outputs):
-                with torch.cuda.device(ctx.target_gpus[i]):
+                with torch.cuda.device(target_gpus[i]):
                     main_stream = torch.cuda.current_stream()
                     main_stream.wait_stream(streams[i])
                     output.record_stream(main_stream)

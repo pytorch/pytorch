@@ -120,7 +120,7 @@ void THDBarrier(THDGroup group) {
 
 THDGroup THDNewGroup(const int *ranks, size_t len) {
   std::vector<rank_type> v_ranks(len);
-  for (std::size_t i = 0; i < len; ++i) {
+  for (size_t i = 0; i < len; ++i) {
     v_ranks[i] = convertToRank(ranks[i]);
   }
 

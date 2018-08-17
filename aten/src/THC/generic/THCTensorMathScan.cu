@@ -28,17 +28,17 @@ __host__ void THCTensor_(scanOuterDim)(THCState *state, THCTensor *tgt,
                                        THCTensor *src, int dimension,
                                        real init, BinaryOp binary_op)
 {
-  unsigned ndim = THCTensor_(nDimension)(state, src);
+  unsigned ndim = THCTensor_(nDimensionLegacyAll)(state, src);
   // Treat all outer dimensions (i.e. dim < dimension) as one.
   unsigned num_orows = 1;
   for (int dim = 0; dim < dimension; dim++) {
-    num_orows *= THCTensor_(size)(state, src, dim);
+    num_orows *= THCTensor_(sizeLegacyNoScalars)(state, src, dim);
   }
-  unsigned row_size = THCTensor_(size)(state, src, dimension);
+  unsigned row_size = THCTensor_(sizeLegacyNoScalars)(state, src, dimension);
   // Treat all inner dimensions (i.e. dim > dimension) as one.
   unsigned num_irows = 1;
   for (unsigned dim = dimension + 1; dim < ndim; dim++) {
-    num_irows *= THCTensor_(size)(state, src, dim);
+    num_irows *= THCTensor_(sizeLegacyNoScalars)(state, src, dim);
   }
 
   dim3 threads(min(512, num_irows));
@@ -57,13 +57,13 @@ __host__ void THCTensor_(scanInnermostDim)(THCState *state, THCTensor *tgt,
                                            THCTensor *src, real init,
                                            BinaryFunction binary_op)
 {
-  unsigned ndim = THCTensor_(nDimension)(state, src);
+  unsigned ndim = THCTensor_(nDimensionLegacyAll)(state, src);
   // Treat all outer dimensions as a single dimension.
   unsigned num_rows = 1;
   for (unsigned dim = 0; dim < ndim - 1; dim++) {
-    num_rows *= THCTensor_(size)(state, src, dim);
+    num_rows *= THCTensor_(sizeLegacyNoScalars)(state, src, dim);
   }
-  unsigned row_size = THCTensor_(size)(state, src, ndim - 1);
+  unsigned row_size = THCTensor_(sizeLegacyNoScalars)(state, src, ndim - 1);
 
   dim3 threads(16, 32);
   dim3 grid(min(1024, THCCeilDiv(num_rows, threads.y)));
@@ -79,7 +79,7 @@ void THCTensor_(scanDim)(THCState *state, THCTensor *self_, THCTensor *src,
                          int dimension, real init, BinaryFunction binary_op)
 {
   // "init" must be the identity element for binary_op
-  int ndim = THCTensor_(nDimension)(state, src);
+  int ndim = THCTensor_(nDimensionLegacyNoScalars)(state, src);
   THArgCheck(dimension >= 0 && dimension < ndim, 3, "dimension %d out of range",
       dimension + TH_INDEX_BASE);
 
@@ -87,16 +87,18 @@ void THCTensor_(scanDim)(THCState *state, THCTensor *self_, THCTensor *src,
   THCTensor *self = THCTensor_(newContiguous)(state, self_);
   src = THCTensor_(newContiguous)(state, src);
 
-#ifndef THC_REAL_IS_HALF
-  if (ndim == 1) {
-    // thrust does not take an "init"
-    THCTensor_(scanThrust)(state, self, src, binary_op);
-  } else
-#endif
-  if (dimension == ndim - 1) {
-    THCTensor_(scanInnermostDim)(state, self, src, init, binary_op);
-  } else {
-    THCTensor_(scanOuterDim)(state, self, src, dimension, init, binary_op);
+  if (!self->is_empty()) {
+  #ifndef THC_REAL_IS_HALF
+    if (ndim == 1) {
+      // thrust does not take an "init"
+      THCTensor_(scanThrust)(state, self, src, binary_op);
+    } else
+  #endif
+    if (dimension == ndim - 1) {
+      THCTensor_(scanInnermostDim)(state, self, src, init, binary_op);
+    } else {
+      THCTensor_(scanOuterDim)(state, self, src, dimension, init, binary_op);
+    }
   }
 
   THCTensor_(free)(state, src);

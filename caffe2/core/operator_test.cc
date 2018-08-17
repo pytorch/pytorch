@@ -57,18 +57,8 @@ class JustTestWithSomeOutput : public JustTest {
   }
 };
 
-class ThrowException : public Operator<CPUContext> {
- public:
-  explicit ThrowException(const OperatorDef& op_def, Workspace* ws)
-      : Operator<CPUContext>(op_def, ws) {}
-  bool RunOnDevice() override {
-    CAFFE_THROW("Throwing an exception.");
-  }
-};
-
 OPERATOR_SCHEMA(JustTest).NumInputs(0, 1).NumOutputs(0, 1);
 OPERATOR_SCHEMA(JustTestCPUOnly).NumInputs(0, 1).NumOutputs(0, 1);
-OPERATOR_SCHEMA(ThrowException).NumInputs(0).NumOutputs(0);
 OPERATOR_SCHEMA(JustTestWithSomeOutput);
 
 REGISTER_CPU_OPERATOR(JustTest, JustTest);
@@ -77,7 +67,6 @@ REGISTER_CPU_OPERATOR_WITH_ENGINE(JustTest, FOO, JustTestAndNeverConstructs);
 REGISTER_CPU_OPERATOR_WITH_ENGINE(JustTest, BAR, JustTestAndDoesConstruct);
 REGISTER_CPU_OPERATOR_WITH_ENGINE(JustTest, BAZ, JustTestAndDoesConstruct);
 REGISTER_CUDA_OPERATOR(JustTest, JustTest);
-REGISTER_CPU_OPERATOR(ThrowException, ThrowException);
 REGISTER_CPU_OPERATOR(JustTestWithSomeOutput, JustTestWithSomeOutput);
 
 TEST(OperatorTest, DeviceTypeRegistryWorks) {

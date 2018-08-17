@@ -8,9 +8,9 @@ void THNN_(SpatialConvolutionMap_updateOutput)(
   int dW, int dH)
 {
   THArgCheck(
-    weight != NULL && weight->nDimension == 3
-    && connTable != NULL && connTable->size[0] == weight->size[0], 4,
-    "3D weight tensor expected (connTable:size(%d) x kH x kW)", TH_INDEX_BASE
+    weight != NULL && !weight->is_empty() && weight->dim() == 3
+    && connTable != NULL && connTable->size(0) == weight->size(0), 4,
+    "non-empty 3D weight tensor expected (connTable:size(%d) x kH x kW)", TH_INDEX_BASE
   );
 
   int dimw = 2;
@@ -18,31 +18,31 @@ void THNN_(SpatialConvolutionMap_updateOutput)(
   int dimc = 0;
   int64_t nbatch = 1;
 
-  THArgCheck(input->nDimension == 3 || input->nDimension == 4, 2, "3D or 4D(batch mode) tensor expected");
+  THArgCheck(!input->is_empty() && (input->dim() == 3 || input->dim() == 4), 2, "non-empty 3D or 4D(batch mode) tensor expected");
 
-  if (input->nDimension == 4)
+  if (input->dim() == 4)
   {
-    nbatch = input->size[0];
+    nbatch = input->size(0);
     dimc++;
     dimw++;
     dimh++;
   }
 
-  const int64_t kH       = weight->size[1];
-  const int64_t kW       = weight->size[2];
+  const int64_t kH       = weight->size(1);
+  const int64_t kW       = weight->size(2);
 
-  THArgCheck(input->size[dimc] >= nInputPlane, 2, "invalid number of input planes");
-  THArgCheck(input->size[dimw] >= kW && input->size[dimh] >= kH, 2, "input image smaller than kernel size");
+  THArgCheck(input->size(dimc) >= nInputPlane, 2, "invalid number of input planes");
+  THArgCheck(input->size(dimw) >= kW && input->size(dimh) >= kH, 2, "input image smaller than kernel size");
 
-  const int64_t input_w  = input->size[dimw];
-  const int64_t input_h  = input->size[dimh];
+  const int64_t input_w  = input->size(dimw);
+  const int64_t input_h  = input->size(dimh);
   const int64_t output_w = (input_w - kW) / dW + 1;
   const int64_t output_h = (input_h - kH) / dH + 1;
 
-  if (input->nDimension == 3)
+  if (input->dim() == 3)
     THTensor_(resize3d)(output, nOutputPlane, output_h, output_w);
   else
-    THTensor_(resize4d)(output, input->size[0], nOutputPlane, output_h, output_w);
+    THTensor_(resize4d)(output, input->size(0), nOutputPlane, output_h, output_w);
 
   /* contiguous */
   input = THTensor_(newContiguous)(input);
@@ -73,7 +73,7 @@ void THNN_(SpatialConvolutionMap_updateOutput)(
         ptr_output[j] = z;
 
       /* convolve all maps */
-      int nweight = connTable->size[0];
+      int nweight = connTable->size(0);
       for (k = 0; k < nweight; k++)
       {
         /* get offsets for input/output */
@@ -109,28 +109,28 @@ void THNN_(SpatialConvolutionMap_updateGradInput)(
   int dW, int dH)
 {
   THArgCheck(
-    weight != NULL && weight->nDimension == 3
-    && connTable != NULL && connTable->size[0] == weight->size[0], 5,
-    "3D weight tensor expected (connTable:size(%d) x kH x kW)", TH_INDEX_BASE
+    weight != NULL && !weight->is_empty() && weight->dim() == 3
+    && connTable != NULL && connTable->size(0) == weight->size(0), 5,
+    "non-empty 3D weight tensor expected (connTable:size(%d) x kH x kW)", TH_INDEX_BASE
   );
 
   /* and dims */
   int dimw = 2;
   int dimh = 1;
   int64_t nbatch = 1;
-  if (input->nDimension == 4)
+  if (input->dim() == 4)
   {
-    nbatch = input->size[0];
+    nbatch = input->size(0);
     dimw++;
     dimh++;
   }
 
-  const int64_t input_h  = input->size[dimh];
-  const int64_t input_w  = input->size[dimw];
-  const int64_t output_h = gradOutput->size[dimh];
-  const int64_t output_w = gradOutput->size[dimw];
-  const int64_t kH       = weight->size[1];
-  const int64_t kW       = weight->size[2];
+  const int64_t input_h  = input->size(dimh);
+  const int64_t input_w  = input->size(dimw);
+  const int64_t output_h = gradOutput->size(dimh);
+  const int64_t output_w = gradOutput->size(dimw);
+  const int64_t kH       = weight->size(1);
+  const int64_t kW       = weight->size(2);
 
   /* contiguous */
   gradInput = THTensor_(newContiguous)(gradInput);
@@ -157,7 +157,7 @@ void THNN_(SpatialConvolutionMap_updateGradInput)(
     {
       int64_t k;
       /* backward all */
-      int nkernel = connTable->size[0];
+      int nkernel = connTable->size(0);
       for (k = 0; k < nkernel; k++)
       {
         int o = (int)connTable_data[k*2+1] - TH_INDEX_BASE;
@@ -196,8 +196,8 @@ void THNN_(SpatialConvolutionMap_accGradParameters)(
 {
   real scale = TH_CONVERT_ACCREAL_TO_REAL(scale_);
   THArgCheck(
-    gradWeight != NULL && gradWeight->nDimension == 3
-    && connTable != NULL && connTable->size[0] == gradWeight->size[0], 5,
+    gradWeight != NULL && !gradWeight->is_empty() && gradWeight->dim() == 3
+    && connTable != NULL && connTable->size(0) == gradWeight->size(0), 5,
     "3D gradWeight tensor expected (connTable:size(%d) x kH x kW)", TH_INDEX_BASE
   );
 
@@ -205,19 +205,19 @@ void THNN_(SpatialConvolutionMap_accGradParameters)(
   int dimw = 2;
   int dimh = 1;
   int64_t nbatch = 1;
-  if (input->nDimension == 4)
+  if (input->dim() == 4)
   {
-    nbatch = input->size[0];
+    nbatch = input->size(0);
     dimw++;
     dimh++;
   }
 
-  const int64_t input_h  = input->size[dimh];
-  const int64_t input_w  = input->size[dimw];
-  const int64_t output_h = gradOutput->size[dimh];
-  const int64_t output_w = gradOutput->size[dimw];
-  const int64_t kH       = gradWeight->size[1];
-  const int64_t kW       = gradWeight->size[2];
+  const int64_t input_h  = input->size(dimh);
+  const int64_t input_w  = input->size(dimw);
+  const int64_t output_h = gradOutput->size(dimh);
+  const int64_t output_w = gradOutput->size(dimw);
+  const int64_t kH       = gradWeight->size(1);
+  const int64_t kW       = gradWeight->size(2);
 
   /* contiguous */
   input = THTensor_(newContiguous)(input);
@@ -248,7 +248,7 @@ void THNN_(SpatialConvolutionMap_accGradParameters)(
   }
 
   /* gradients wrt weight */
-  const int nkernel = connTable->size[0];
+  const int nkernel = connTable->size(0);
 #pragma omp parallel for private(k)
   for (k = 0; k < nkernel; k++)
   {

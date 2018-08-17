@@ -136,9 +136,10 @@ void ROIAlignForward(
   DCHECK(roi_cols == 4 || roi_cols == 5);
 
   int n_rois = nthreads / channels / pooled_width / pooled_height;
-  // (n, c, ph, pw) is an element in the pooled output
-  // can be parallelized using omp
-  // #pragma omp parallel for num_threads(32)
+
+#ifdef _OPENMP
+#pragma omp parallel for
+#endif
   for (int n = 0; n < n_rois; n++) {
     int index_n = n * channels * pooled_width * pooled_height;
 
@@ -282,7 +283,7 @@ bool RoIAlignOp<float, CPUContext>::RunOnDevice() {
       Y->Resize(0, pooled_height_, pooled_width_, X.dim32(3));
     }
     // The following mutable_data calls are needed to allocate the tensors
-    Y->mutable_data<float>();
+    Y->template mutable_data<float>();
     return true;
   }
 
@@ -307,7 +308,7 @@ bool RoIAlignOp<float, CPUContext>::RunOnDevice() {
         sampling_ratio_,
         R.data<float>(),
         R.dim32(1),
-        Y->mutable_data<float>(),
+        Y->template mutable_data<float>(),
         order_);
   } else if (order_ == StorageOrder::NHWC) {
     Y->Resize(R.dim32(0), pooled_height_, pooled_width_, X.dim32(3));
@@ -324,7 +325,7 @@ bool RoIAlignOp<float, CPUContext>::RunOnDevice() {
         sampling_ratio_,
         R.data<float>(),
         R.dim32(1),
-        Y->mutable_data<float>(),
+        Y->template mutable_data<float>(),
         order_);
   }
 

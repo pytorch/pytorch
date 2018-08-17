@@ -1,4 +1,6 @@
 import torch
+import torch.nn.functional as F
+from torch._six import inf
 from operator import mul
 from functools import reduce
 import math
@@ -6,16 +8,40 @@ import math
 __all__ = [
     'argmax',
     'argmin',
-    'bartlett_window',
+    'argsort',
     'btrifact',
     'btriunpack',
-    'hamming_window',
-    'hann_window',
+    'einsum',
+    'broadcast_tensors',
+    'isfinite',
+    'isinf',
     'isnan',
     'split',
-    'unbind',
+    'stft',
     'unique',
 ]
+
+
+def broadcast_tensors(*tensors):
+    r"""broadcast_tensors(*tensors) -> List of Tensors
+
+    Broadcasts the given tensors according to :ref:`_broadcasting-semantics`.
+
+    Args:
+        *tensors: any number of tensors of the same type
+
+    Example::
+
+        >>> x = torch.arange(3).view(1, 3)
+        >>> y = torch.arange(2).view(2, 1)
+        >>> a, b = torch.broadcast_tensors(x, y)
+        >>> a.size()
+        torch.Size([2, 3])
+        >>> a
+        tensor([[0, 1, 2],
+                [0, 1, 2]])
+    """
+    return torch._C._VariableFunctions.broadcast_tensors(tensors)
 
 
 def split(tensor, split_size_or_sections, dim=0):
@@ -33,7 +59,7 @@ def split(tensor, split_size_or_sections, dim=0):
     Arguments:
         tensor (Tensor): tensor to split.
         split_size_or_sections (int) or (list(int)): size of a single chunk or
-        list of sizes for each chunk
+            list of sizes for each chunk
         dim (int): dimension along which to split the tensor.
     """
     # Overwriting reason:
@@ -90,18 +116,6 @@ def btrifact(A, info=None, pivot=True):
     return A.btrifact(info, pivot)
 
 
-def unbind(tensor, dim=0):
-    r"""Removes a tensor dimension.
-
-    Returns a tuple of all slices along a given dimension, already without it.
-
-    Arguments:
-        tensor (Tensor): the tensor to unbind
-        dim (int): dimension to remove
-    """
-    return tuple(tensor.select(dim, i) for i in range(tensor.size(dim)))
-
-
 def btriunpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
     r"""Unpacks the data and pivots from a batched LU factorization (btrifact) of a tensor.
 
@@ -151,145 +165,209 @@ def btriunpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
     return P, L, U
 
 
-def hann_window(window_length, periodic=True, dtype=torch.float32):
-    r"""Hann window function.
+def einsum(equation, *operands):
+    r"""einsum(equation, *operands) -> Tensor
 
-    This method computes the Hann window function:
+This function provides a way of computing multilinear expressions (i.e. sums of products) using the
+Einstein summation convention.
 
-    .. math::
-        w[n] = \frac{1}{2}\ \left[1 - \cos \left( \frac{2 \pi n}{N - 1} \right)\right] =
-                \sin^2 \left( \frac{\pi n}{N - 1} \right),
+Args:
+    equation (string): The equation is given in terms of lower case letters (indices) to be associated
+           with each dimension of the operands and result. The left hand side lists the operands
+           dimensions, separated by commas. There should be one index letter per tensor dimension.
+           The right hand side follows after `->` and gives the indices for the output.
+           If the `->` and right hand side are omitted, it implicitly defined as the alphabetically
+           sorted list of all indices appearing exactly once in the left hand side.
+           The indices not apprearing in the output are summed over after multiplying the operands
+           entries.
+           If an index appears several times for the same operand, a diagonal is taken.
+           Ellipses `...` represent a fixed number of dimensions. If the right hand side is inferred,
+           the ellipsis dimensions are at the beginning of the output.
+    operands (list of Tensors): The operands to compute the Einstein sum of.
+           Note that the operands are passed as a list, not as individual arguments.
 
-    where :math:`N` is the full window size.
+Examples::
 
-    The input :attr:`window_length` is a positive integer controlling the
-    returned window size. :attr:`periodic` flag determines whether the returned
-    window trims off the last duplicate value from the symmetric window and is
-    ready to be used as a periodic window with functions like
-    :meth:`torch.stft`. Therefore, if :attr:`periodic` is true, the :math:`N` in
-    above formula is in fact :math:`\text{window_length} + 1`. Also, we always have
-    ``torch.hann_window(L, periodic=True)`` equal to
-    ``torch.hann_window(L + 1, periodic=False)[:-1])``.
-
-    .. note::
-        If :attr:`window_length` :math:`=1`, the returned window contains a single value 1.
-
-    Arguments:
-        window_length (int): the size of returned window
-        periodic (bool, optional): If True, returns a window to be used as periodic
-            function. If False, return a symmetric window.
-        dtype (:class:`torch.dtype`, optional): the desired type of returned window.
-            Default: `torch.float32`
-
-    Returns:
-        Tensor: A 1-D tensor of size :math:`(\text{window_length},)` containing the window
-    """
-    if not dtype.is_floating_point:
-        raise ValueError("dtype must be a floating point type, but got dtype={}".format(dtype))
-    if window_length <= 0:
-        raise ValueError('window_length must be positive')
-    return hamming_window(window_length, periodic=periodic, alpha=0.5, beta=0.5, dtype=dtype)
+    >>> x = torch.randn(5)
+    >>> y = torch.randn(4)
+    >>> torch.einsum('i,j->ij', x, y)  # outer product
+    tensor([[-0.0570, -0.0286, -0.0231,  0.0197],
+            [ 1.2616,  0.6335,  0.5113, -0.4351],
+            [ 1.4452,  0.7257,  0.5857, -0.4984],
+            [-0.4647, -0.2333, -0.1883,  0.1603],
+            [-1.1130, -0.5588, -0.4510,  0.3838]])
 
 
-def hamming_window(window_length, periodic=True, alpha=0.54, beta=0.46, dtype=torch.float32):
-    r"""Hamming window function.
-
-    This method computes the Hamming window function:
-
-    .. math::
-        w[n] = \alpha - \beta\ \cos \left( \frac{2 \pi n}{N - 1} \right),
-
-    where :math:`N` is the full window size.
-
-    The input :attr:`window_length` is a positive integer controlling the
-    returned window size. :attr:`periodic` flag determines whether the returned
-    window trims off the last duplicate value from the symmetric window and is
-    ready to be used as a periodic window with functions like
-    :meth:`torch.stft`. Therefore, if :attr:`periodic` is true, the :math:`N` in
-    above formula is in fact :math:`\text{window_length} + 1`. Also, we always have
-    ``torch.hamming_window(L, periodic=True)`` equal to
-    ``torch.hamming_window(L + 1, periodic=False)[:-1])``.
-
-    .. note::
-        If :attr:`window_length` :math:`=1`, the returned window contains a single value 1.
-
-    .. note::
-        This is a generalized version of :meth:`torch.hann_window`.
-
-    Arguments:
-        window_length (int): the size of returned window
-        periodic (bool, optional): If True, returns a window to be used as periodic
-            function. If False, return a symmetric window.
-        dtype (:class:`torch.dtype`, optional): the desired type of returned window.
-            Default: `torch.float32`
-
-    Returns:
-        Tensor: A 1-D tensor of size :math:`(\text{window_length},)` containing the window
-    """
-    if not dtype.is_floating_point:
-        raise ValueError("dtype must be a floating point type, but got dtype={}".format(dtype))
-    if window_length <= 0:
-        raise ValueError('window_length must be positive')
-    if window_length == 1:
-        return torch.ones(window_length, dtype=dtype)
-    window_length += int(periodic)
-    window = torch.arange(window_length, dtype=dtype)
-    window = window.mul_(math.pi * 2 / (window_length - 1)).cos_().mul_(-beta).add_(alpha)
-    if periodic:
-        return window[:-1]
-    else:
-        return window
+    >>> A = torch.randn(3,5,4)
+    >>> l = torch.randn(2,5)
+    >>> r = torch.randn(2,4)
+    >>> torch.einsum('bn,anm,bm->ba', l, A, r) # compare torch.nn.functional.bilinear
+    tensor([[-0.3430, -5.2405,  0.4494],
+            [ 0.3311,  5.5201, -3.0356]])
 
 
-def bartlett_window(window_length, periodic=True, dtype=torch.float32):
-    r"""Bartlett window function.
+    >>> As = torch.randn(3,2,5)
+    >>> Bs = torch.randn(3,5,4)
+    >>> torch.einsum('bij,bjk->bik', As, Bs) # batch matrix multiplication
+    tensor([[[-1.0564, -1.5904,  3.2023,  3.1271],
+             [-1.6706, -0.8097, -0.8025, -2.1183]],
 
-    This method computes the Bartlett window function:
+            [[ 4.2239,  0.3107, -0.5756, -0.2354],
+             [-1.4558, -0.3460,  1.5087, -0.8530]],
 
-    .. math::
-        w[n] = 1 - \left| \frac{2n}{N-1} - 1 \right| = \begin{cases}
-            \frac{2n}{N - 1} & \text{if } 0 \leq n \leq \frac{N - 1}{2} \\
-            2 - \frac{2n}{N - 1} & \text{if } \frac{N - 1}{2} < n < N \\
-        \end{cases},
+            [[ 2.8153,  1.8787, -4.3839, -1.2112],
+             [ 0.3728, -2.1131,  0.0921,  0.8305]]])
 
-    where :math:`N` is the full window size.
+    >>> A = torch.randn(3, 3)
+    >>> torch.einsum('ii->i', A) # diagonal
+    tensor([-0.7825,  0.8291, -0.1936])
 
-    The input :attr:`window_length` is a positive integer controlling the
-    returned window size. :attr:`periodic` flag determines whether the returned
-    window trims off the last duplicate value from the symmetric window and is
-    ready to be used as a periodic window with functions like
-    :meth:`torch.stft`. Therefore, if :attr:`periodic` is true, the :math:`N` in
-    above formula is in fact :math:`\text{window_length} + 1`. Also, we always have
-    ``torch.bartlett_window(L, periodic=True)`` equal to
-    ``torch.bartlett_window(L + 1, periodic=False)[:-1])``.
+    >>> A = torch.randn(4, 3, 3)
+    >>> torch.einsum('...ii->...i', A) # batch diagonal
+    tensor([[-1.0864,  0.7292,  0.0569],
+            [-0.9725, -1.0270,  0.6493],
+            [ 0.5832, -1.1716, -1.5084],
+            [ 0.4041, -1.1690,  0.8570]])
 
-    .. note::
-        If :attr:`window_length` :math:`=1`, the returned window contains a single value 1.
+    >>> A = torch.randn(2, 3, 4, 5)
+    >>> torch.einsum('...ij->...ji', A).shape # batch permute
+    torch.Size([2, 3, 5, 4])
+"""
+    if len(operands) == 1 and isinstance(operands[0], (list, tuple)):
+        # the old interface of passing the operands as one list argument
+        operands = operands[0]
+    return torch._C._VariableFunctions.einsum(equation, operands)
+
+
+def isfinite(tensor):
+    r"""Returns a new tensor with boolean elements representing if each element is `Finite` or not.
 
     Arguments:
-        window_length (int): the size of returned window
-        periodic (bool, optional): If True, returns a window to be used as periodic
-            function. If False, return a symmetric window.
-        dtype (:class:`torch.dtype`, optional): the desired type of returned window.
-            Default: `torch.float32`
+        tensor (Tensor): A tensor to check
 
     Returns:
-        Tensor: A 1-D tensor of size :math:`(\text{window_length},)` containing the window
+        Tensor: A ``torch.ByteTensor`` containing a 1 at each location of finite elements and 0 otherwise
+
+    Example::
+
+        >>> torch.isfinite(torch.Tensor([1, float('inf'), 2, float('-inf'), float('nan')]))
+        tensor([ 1,  0,  1,  0,  0], dtype=torch.uint8)
     """
-    if not dtype.is_floating_point:
-        raise ValueError("dtype must be a floating point type, but got dtype={}".format(dtype))
-    if window_length <= 0:
-        raise ValueError('window_length must be positive')
-    if window_length == 1:
-        return torch.ones(window_length, dtype=dtype)
-    window_length += int(periodic)
-    window = torch.arange(window_length, dtype=dtype).mul_(2.0 / (window_length - 1))
-    first_half_size = ((window_length - 1) >> 1) + 1
-    window.narrow(0, first_half_size, window_length - first_half_size).mul_(-1).add_(2)
-    if periodic:
-        return window[:-1]
-    else:
-        return window
+    if not isinstance(tensor, torch.Tensor):
+        raise ValueError("The argument is not a tensor", str(tensor))
+    return (tensor == tensor) & (tensor.abs() != inf)
+
+
+def isinf(tensor):
+    r"""Returns a new tensor with boolean elements representing if each element is `+/-INF` or not.
+
+    Arguments:
+        tensor (Tensor): A tensor to check
+
+    Returns:
+        Tensor: A ``torch.ByteTensor`` containing a 1 at each location of `+/-INF` elements and 0 otherwise
+
+    Example::
+
+        >>> torch.isinf(torch.Tensor([1, float('inf'), 2, float('-inf'), float('nan')]))
+        tensor([ 0,  1,  0,  1,  0], dtype=torch.uint8)
+    """
+    if not isinstance(tensor, torch.Tensor):
+        raise ValueError("The argument is not a tensor", str(tensor))
+    return tensor.abs() == inf
+
+
+def stft(input, n_fft, hop_length=None, win_length=None, window=None,
+         center=True, pad_mode='reflect', normalized=False, onesided=True):
+    r"""Short-time Fourier transform (STFT).
+
+    Ignoring the optional batch dimension, this method computes the following
+    expression:
+
+    .. math::
+        X[m, \omega] = \sum_{k = 0}^{\text{win\_length}}%
+                            window[k]\ input[m \times hop_length + k]\ %
+                            e^{- j \frac{2 \pi \cdot \omega k}{\text{win\_length}}},
+
+    where :math:`m` is the index of the sliding window, and :math:`\omega` is
+    the frequency that :math:`0 \leq \omega < \text{n\_fft}`. When
+    :attr:`onesided` is the default value ``True``,
+
+    * :attr:`input` must be either a 1-D time sequenceor 2-D a batch of time
+      sequences.
+
+    * If :attr:`hop_length` is ``None`` (default), it is treated as equal to
+      ``floor(n_fft / 4)``.
+
+    * If :attr:`win_length` is ``None`` (default), it is treated as equal to
+      :attr:`n_fft`.
+
+    * :attr:`window` can be a 1-D tensor of size :attr:`win_length`, e.g., from
+      :meth:`torch.hann_window`. If :attr:`window` is ``None`` (default), it is
+      treated as if having :math:`1` everywhere in the window. If
+      :math:`\text{win\_length} < \text{n\_fft}`, :attr:`window` will be padded on
+      both sides to length :attr:`n_fft` before being applied.
+
+    * If :attr:`center` is ``True`` (default), :attr:`input` will be padded on
+      both sides so that the :math:`t`-th frame is centered at time
+      :math:`t \times \text{hop\_length}`. Otherwise, the :math:`t`-th frame
+      begins at time  :math:`t \times \text{hop\_length}`.
+
+    * :attr:`pad_mode` determines the padding method used on :attr:`input` when
+      :attr:`center` is ``True``. See :meth:`torch.nn.functional.pad` for
+      all available options. Default is ``"reflect"``.
+
+    * If :attr:`onesided` is ``True`` (default), only values for :math:`\omega`
+      in :math:`\left[0, 1, 2, \dots, \left\lfloor \frac{\text{n\_fft}}{2} \right\rfloor + 1\right]`
+      are returned because the real-to-complex Fourier transform satisfies the
+      conjugate symmetry, i.e., :math:`X[m, \omega] = X[m, \text{n\_fft} - \omega]^*`.
+
+    * If :attr:`normalized` is ``True`` (default is ``False``), the function
+      returns the normalized STFT results, i.e., multiplied by :math:`(\text{frame\_length})^{-0.5}`.
+
+    Returns the real and the imaginary parts together as one tensor of size
+    :math:`(* \times N \times T \times 2)`, where :math:`*` is the optional
+    batch size of :attr:`input`, :math:`N` is the number of frequencies where
+    STFT is applied, :math:`T` is the total number of frames used, and each pair
+    in the last dimension represents a complex number as the real part and the
+    imaginary part.
+
+    .. warning::
+      This function changed signature at version 0.4.1. Calling with the
+      previous signature may cause error or return incorrect result.
+
+    Arguments:
+        input (Tensor): the input tensor
+        n_fft (int, optional): size of Fourier transform
+        hop_length (int): the distance between neighboring sliding window
+            frames. Default: ``None`` (treated as equal to ``floor(n_fft / 4)``)
+        win_length (int): the size of window frame and STFT filter.
+            Default: ``None``  (treated as equal to :attr:`n_fft`)
+        window (Tensor, optional): the optional window function.
+            Default: ``None`` (treated as window of all :math:`1`s)
+        center (bool, optional): whether to pad :attr:`input` on both sides so
+            that the :math:`t`-th frame is centered at time :math:`t \times \text{hop\_length}`.
+            Default: ``True``
+        pad_mode (string, optional): controls the padding method used when
+            :attr:`center` is ``True``. Default: ``"reflect"``
+        normalized (bool, optional): controls whether to return the normalized STFT results
+             Default: ``False``
+        onesided (bool, optional): controls whether to return half of results to
+            avoid redundancy Default: ``True``
+
+    Returns:
+        Tensor: A tensor containing the STFT result with shape described above
+
+    """
+    # TODO: after having proper ways to map Python strings to ATen Enum, move
+    #       this and F.pad to ATen.
+    if center:
+        signal_dim = input.dim()
+        extended_shape = [1] * (3 - signal_dim) + list(input.size())
+        pad = int(n_fft // 2)
+        input = F.pad(input.view(extended_shape), (pad, pad), pad_mode)
+        input = input.view(input.shape[-signal_dim:])
+    return torch._C._VariableFunctions.stft(input, n_fft, hop_length, win_length, window, normalized, onesided)
 
 
 def isnan(tensor):
@@ -307,7 +385,7 @@ def isnan(tensor):
         tensor([ 0,  1,  0], dtype=torch.uint8)
     """
     if not isinstance(tensor, torch.Tensor):
-        raise ValueError("The argument is not a tensor")
+        raise ValueError("The argument is not a tensor", str(tensor))
     return tensor != tensor
 
 
@@ -424,3 +502,36 @@ def argmin(input, dim=None, keepdim=False):
     if dim is None:
         return torch._argmin(input.contiguous().view(-1), dim=0, keepdim=False)
     return torch._argmin(input, dim, keepdim)
+
+
+def argsort(input, dim=None, descending=False):
+    """Returns the indices that sort a tensor along a given dimension in ascending
+    order by value.
+
+    This is the second value returned by :meth:`torch.sort`.  See its documentation
+    for the exact semantics of this method.
+
+    Args:
+        input (Tensor): the input tensor
+        dim (int, optional): the dimension to sort along
+        descending (bool, optional): controls the sorting order (ascending or descending)
+
+    Example::
+
+        >>> a = torch.randn(4, 4)
+        >>> a
+        tensor([[ 0.0785,  1.5267, -0.8521,  0.4065],
+                [ 0.1598,  0.0788, -0.0745, -1.2700],
+                [ 1.2208,  1.0722, -0.7064,  1.2564],
+                [ 0.0669, -0.2318, -0.8229, -0.9280]])
+
+
+        >>> torch.argsort(a, dim=1)
+        tensor([[2, 0, 3, 1],
+                [3, 2, 1, 0],
+                [2, 1, 0, 3],
+                [3, 2, 1, 0]])
+    """
+    if dim is None:
+        return torch.sort(input, -1, descending)[1]
+    return torch.sort(input, dim, descending)[1]
