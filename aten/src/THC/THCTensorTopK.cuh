@@ -112,7 +112,6 @@ struct TopKTypeConfig<double> {
   }
 };
 
-#ifdef CUDA_HALF_TENSOR
 template <>
 struct TopKTypeConfig<half> {
   typedef uint32_t RadixType;
@@ -137,8 +136,7 @@ struct TopKTypeConfig<half> {
     return ScalarConvert<int, half>::to(0);
 #endif
   }
-};
-#endif // CUDA_HALF_TENSOR
+}; 
 
 // This function counts the distribution of all input values in a
 // slice we are selecting by radix digit at `radixDigitPos`, but only

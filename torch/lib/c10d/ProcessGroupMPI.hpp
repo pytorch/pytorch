@@ -32,6 +32,8 @@ struct WorkEntry {
   // For input and output tensors (in-place), we will always use src
   std::vector<at::Tensor>* src;
   std::vector<at::Tensor>* dst;
+  // src rank returned, for recv only
+  int* srcRank;
   std::function<void(std::unique_ptr<WorkEntry>&)> run;
 };
 
@@ -129,6 +131,20 @@ class ProcessGroupMPI : public ProcessGroup {
       std::vector<at::Tensor>& outputTensors,
       std::vector<std::vector<at::Tensor>>& inputTensors,
       const ScatterOptions& opts = ScatterOptions()) override;
+
+  std::shared_ptr<ProcessGroup::Work> send(
+      std::vector<at::Tensor>& tensors,
+      int dstRank);
+
+  std::shared_ptr<ProcessGroup::Work> recv(
+      std::vector<at::Tensor>& tensors,
+      int srcRank);
+
+  std::shared_ptr<ProcessGroup::Work> recvAnysource(
+      std::vector<at::Tensor>& tensor,
+      int* srcRank);
+
+  std::shared_ptr<ProcessGroup::Work> barrier();
 
   // Creating a new ProcessGroupMPI, will initiialize MPI if not initialized
   static std::shared_ptr<ProcessGroupMPI> createProcessGroupMPI();

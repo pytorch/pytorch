@@ -438,7 +438,7 @@ std::ostream& operator<<(
     std::ostream& oss,
     const NNNodeMatchCriteria& criteria);
 
-using NNSubtree = nom::matcher::SubtreeMatchCriteria<NNNodeMatchCriteria>;
+using NNMatchGraph = nom::matcher::MatchGraph<NNNodeMatchCriteria>;
 
 bool hasSingleOutputAndConsumer(NNGraph::NodeRef nodeRef);
 
@@ -489,9 +489,10 @@ using NNSubgraphMatcher =
 // This helper method makes it easy to create matching criteria in NNGraph.
 // For example, operatorTree(opMatch, ...) will refer to a tree like this:
 // ... -> opMatch -> opMatch_Output
-NNSubtree operatorTree(
+NNMatchGraph::NodeRef operatorTree(
+    NNMatchGraph& g,
     const NNNodeMatchCriteria& root,
-    const std::vector<NNSubtree>& childrenCriteria = {},
+    const std::vector<NNMatchGraph::NodeRef>& childrenCriteria = {},
     int count = 1);
 
 } // namespace nn

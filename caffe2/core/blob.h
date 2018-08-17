@@ -23,7 +23,7 @@ namespace caffe2 {
  * properly when the blob is deallocated or re-allocated with a new type. A blob
  * could contain anything, although the most common case is to contain a Tensor.
  */
-class Blob {
+class CAFFE2_API Blob {
  public:
   typedef void (*DestroyCall)(void*);
 

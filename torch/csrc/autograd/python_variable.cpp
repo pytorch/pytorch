@@ -156,7 +156,7 @@ PyObject *THPVariable_get_cdata(THPVariable *self)
 {
   HANDLE_TH_ERRORS
   auto& var = self->cdata;
-  return PyLong_FromVoidPtr(var.unsafeGetTH(false));
+  return PyLong_FromVoidPtr(var.data().unsafeGetTensorImpl());
   END_HANDLE_TH_ERRORS
 }
 

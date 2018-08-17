@@ -37,7 +37,6 @@ class Tags(object):
     EXCLUDE_FROM_ACCUMULATE_PRED = 'exclude_from_accumulate_pred'
     PREPROCESSING = 'preprocessing'
     HANDLE_AS_SPARSE_LAYER = 'handle_as_sparse_layer'
-    GRADIENT_FROM_PS = 'gradient_from_ps'
     PREFER_GPU = 'prefer_gpu'
     CPU_ONLY = 'cpu_only'
 

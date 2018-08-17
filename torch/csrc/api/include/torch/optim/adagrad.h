@@ -45,7 +45,7 @@ class Adagrad : public Optimizer {
   friend class cereal::access;
   Adagrad() : options(0) {}
 
-  std::vector<at::Tensor> sum_;
+  std::vector<Tensor> sum_;
   std::vector<int64_t> step_;
 };
 } // namespace optim

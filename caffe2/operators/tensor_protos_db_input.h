@@ -38,11 +38,11 @@ TensorProtosDBInput<Context>::TensorProtosDBInput(
     : PrefetchOperator<Context>(operator_def, ws),
       prefetched_blobs_(operator_def.output_size()),
       batch_size_(
-          OperatorBase::template GetSingleArgument<int>("batch_size", 0)) {}
+          this->template GetSingleArgument<int>("batch_size", 0)) {}
 
 template <class Context>
 bool TensorProtosDBInput<Context>::Prefetch() {
-  const db::DBReader& reader = OperatorBase::Input<db::DBReader>(0);
+  const db::DBReader& reader = this->template Input<db::DBReader>(0);
   TensorDeserializer deserializer;
   if (batch_size_ == 0) {
     // We do not need to construct a batch. As a result, we will simply

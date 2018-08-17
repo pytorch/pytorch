@@ -79,6 +79,7 @@ struct HashNodeCSE {
     JIT_ASSERT(k != nullptr);
     return get_hash(k->kind(),
                     k->stage(),
+                    fmap(k->outputs(), [](const Value *v) { return v->type()->kind(); }),
                     fmap(k->inputs(), [](const Value *v) { return v->unique(); }));
   }
 };
@@ -90,6 +91,15 @@ struct EqualNodeCSE {
 
     if (lhs->kind() != rhs->kind()) return false;
     if (lhs->stage() != rhs->stage()) return false;
+
+    // Check whether the output types are the same.
+    auto lhs_outputs = lhs->outputs();
+    auto rhs_outputs = rhs->outputs();
+    if (lhs_outputs.size() != rhs_outputs.size()) return false;
+    for (size_t i = 0; i < lhs_outputs.size(); ++i) {
+      if (*lhs_outputs[i]->type() != *rhs_outputs[i]->type())
+        return false;
+    }
 
     // Check whether the inputs are the same.
     auto lhs_inputs = lhs->inputs();
@@ -107,15 +117,40 @@ struct EqualNodeCSE {
 
 // The function implements common subexpression elimination.
 // Since the nodes are visited in topological order, one pass is enough.
-void EliminateCommonSubexpression(Block * block) {
+void EliminateCommonSubexpression(Block * block,
+                                  std::function<Node*(Node*)> parent_lookup_fn) {
   std::unordered_set<Node*, HashNodeCSE, EqualNodeCSE> subexprs;
   for (auto it = block->nodes().begin(); it != block->nodes().end(); ++ it) {
     auto node = *it;
     if (node->kind() == prim::PythonOp
         || node->kind() == prim::Print
-        || node->blocks().size() > 0
        ) {
       // Do NOT have enough information to do CSE on these nodes.
+      continue;
+    }
+
+    if (!node->blocks().empty()) {
+      // Traverse sub-blocks.
+      for (auto block : node->blocks()) {
+        EliminateCommonSubexpression(block,
+          [&](Node *n) {
+            auto existing = subexprs.find(n);
+            if (existing != subexprs.end()) {
+              return *existing;
+            }
+
+            return parent_lookup_fn(n);
+          });
+      }
+
+      continue;
+    }
+
+    // Check for CSE opportunities in the parent block.
+    auto parent_lookup = parent_lookup_fn(node);
+    if (parent_lookup) {
+      node->replaceAllUsesWith(parent_lookup);
+      it.destroyCurrent();
       continue;
     }
 

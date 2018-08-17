@@ -17,7 +17,7 @@ RMSpropOptions::RMSpropOptions(double learning_rate)
 /// https://github.com/pytorch/pytorch/blob/master/torch/optim/rmsprop.py
 void RMSprop::step() {
   for (size_t i = 0; i < parameters_.size(); ++i) {
-    at::Tensor p = parameters_.at(i);
+    Tensor p = parameters_.at(i);
     if (!p.grad().defined()) {
       continue;
     }
@@ -30,7 +30,7 @@ void RMSprop::step() {
     square_average.mul_(options.alpha_)
         .addcmul_(p.grad(), p.grad(), 1.0 - options.alpha_);
 
-    at::Tensor average;
+    Tensor average;
     if (options.centered_ > 0) {
       auto& grad_average = buffer_at(grad_average_buffers_, i);
       grad_average.mul_(options.alpha_).add_(p.grad(), 1.0 - options.alpha_);

@@ -2,15 +2,13 @@
 #define THC_GENERIC_FILE "generic/THCTensor.h"
 #else
 
-typedef struct THCTensor THCTensor;
+#define THCTensor THTensor
 
 // These used to be distinct types; for some measure of backwards compatibility and documentation
 // alias these to the single THCTensor type.
 #define THCudaTensor THCTensor
 #define THCudaDoubleTensor THCTensor
-#ifdef CUDA_HALF_TENSOR
 #define THCudaHalfTensor THCTensor
-#endif
 #define THCudaByteTensor THCTensor
 #define THCudaCharTensor THCTensor
 #define THCudaShortTensor THCTensor
