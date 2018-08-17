@@ -43,12 +43,6 @@ template<> void lapackGesv<double>(
 }
 #endif
 
-static inline bool isTransposeContiguous(Tensor& self) {
- return self.dim() == 2 &&
-        self.stride(0) == 1 &&
-        self.stride(1) == self.size(0);
-}
-
 template <typename scalar_t>
 static void applyGesv(Tensor& b, Tensor& A, std::vector<int64_t> infos) {
 #ifndef USE_LAPACK
@@ -84,85 +78,15 @@ std::tuple<Tensor&,Tensor&> _gesv_single_out_cpu(
 #ifndef USE_LAPACK
   AT_ERROR("gesv : Lapack library not found in compile time");
 #endif
-  /* gesv takes two tensors (self, A) and returns (sol, lu).
-   * The output Tensors (sol, lu) may be the same as input Tensors (self, A)
-   *
-   * Before passing pointers into Lapack, we need to ensure that:
-   * (i)  self and A are represented in column major format
-   * (ii) These pointers point to contiguous data for self and A.
-   *
-   * For 2D matrices, A.t() and self.t() represent their column major formats
-   *
-   * Case 1) The output tensor has the correct shape, but its elements do not
-   *         form a contiguous chunk of memory (i.e., it and its transpose are
-   *         not contiguous) eg. torch.gesv(... , out=(n[::2], ...)):
-   *         - Since shape is correct, we must not resize_ it. Instead, we
-   *           clone the input tensor into a buffer, use the buffer for Lapack
-   *           and finally copy the buffer to the output tensor
-   *
-   * Note: In both cases below, we resize_ if required. This helps to:
-   *       (i)  Make output tensors bigger and contiguous, if required, and
-   *       (ii) Unsqueeze potential 1D `sol`, eg. torch.gesv(b, A, out=(b, A))
-   *
-   * Case 2) output_tensor.t() is contiguous (tc_sol / tc_lu is true):
-   *         a) &input_tensor == &output_tensor:
-   *            - it's fine to use output_tensor.data() as-is. Do nothing.
-   *              (we need to transpose input_tensor for column-major anyway)
-   *         b) &input_tensor != &output_tensor:
-   *            - copy input_tensor.t() to output_tensor.t()
-   *
-   * Case 3) output_tensor.t() is not contiguous:
-   *         - resize_ should make non-contig/incorrectly-sized tensors usable
-   *         a) &input_tensor == &output_tensor:
-   *            - clone and copy input_tensor.t() to output_tensor (same tensor)
-   *         b) &input_tensor != &output_tensor:
-   *            - copy input_tensor.t() to output_tensor
-   */
-  int64_t bx = self.size(0);
-  int64_t by = (self.dim() == 1) ? 1 : self.size(1);
-  int64_t ax = A.size(0);
-  int64_t ay = A.size(1);
   int info = 0;
-  bool tc_sol = isTransposeContiguous(sol);
-  bool tc_lu = isTransposeContiguous(lu);
-  bool sol_correct_shape = sol.dim() == 2 &&
-                           sol.size(0) == bx && sol.size(1) == by;
-  bool lu_correct_shape = lu.dim() == 2 && lu.size(0) == ax && lu.size(1) == ay;
   Tensor temp_sol;
   Tensor temp_lu;
-
-  /* self is always viewable to {bx, by} since they are the dimensions
-   * of self (or by == 1). Basically a shortcut to see 1D `self` as 2D */
-  auto self_t = self.view({bx, by}).t_();
-
-  if (!tc_sol && !sol.is_contiguous() && sol_correct_shape) {
-    temp_sol = self_t.clone().t_();
-  } else if (tc_sol && &self != &sol) {
-    sol.t().resize_({by, bx}).copy_(self_t);
-  } else if (!tc_sol) {
-    sol.resize_({by, bx});
-    if (&self == &sol) {
-      /* &self == &sol, and may contain garbage after resize_ */
-      sol.copy_(self_t.clone()).t_();
-    } else {
-      sol.copy_(self_t).t_();
-    }
-  }
-
-  if (!tc_lu && !lu.is_contiguous() && lu_correct_shape) {
-    temp_lu = A.t().clone().t_();
-  } else if (tc_lu && &A != &lu) {
-    lu.t().resize_({ay, ax}).copy_(A.t());
-  } else if (!tc_lu) {
-    lu.resize_({ay, ax});
-    if (&A == &lu) {
-      lu.copy_(A.t().clone()).t_();
-    } else {
-      lu.copy_(A.t()).t_();
-    }
-  }
+  auto dim_b = prepareIOTensors(self, sol, temp_sol);
+  auto dim_A = prepareIOTensors(A, lu, temp_lu);
 
   AT_DISPATCH_FLOATING_TYPES(self.type(), "gesv", [&]{
+    auto bx = dim_b.first;
+    auto by = dim_b.second;
     auto A_ptr = temp_lu.defined() ? temp_lu.data<scalar_t>()
                                    : lu.data<scalar_t>();
     auto b_ptr = temp_sol.defined() ? temp_sol.data<scalar_t>()
@@ -170,7 +94,6 @@ std::tuple<Tensor&,Tensor&> _gesv_single_out_cpu(
     auto ipiv = at::empty({bx}, sol.options().dtype(kInt));
     lapackGesv<scalar_t>(bx, by, A_ptr, bx, ipiv.data<int>(), b_ptr, bx, &info);
   });
-
   checkErrors({info});
 
   if (temp_sol.defined()) {

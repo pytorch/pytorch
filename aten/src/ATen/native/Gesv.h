@@ -1,6 +1,55 @@
+#include <utility>
 #include "ATen/ATen.h"
 
 namespace at { namespace native {
+
+static inline bool isTransposeContiguous(Tensor& self) {
+ return self.dim() == 2 &&
+        self.stride(0) == 1 &&
+        self.stride(1) == self.size(0);
+}
+
+/* gesv takes (self, A) and returns (sol, lu).
+ * (i)  output tensors (sol, lu) may be same as input tensor (self, A)
+ * (ii) for 2D matrices, .t_() represents their column-major format
+ *
+ * Cases:
+ * 1) `out` has correct shape but elements do not form a contiguous
+ * chunk of memory. Since shape is correct, we don't resize_ it. Instead, we
+ * clone the input tensor into a buffer, use the buffer for Lapack and finally
+ * copy the buffer to the output tensor.
+ *
+ * 2) out.t() is contiguous:
+ *    (i)  &in == &out: use out.data() as is. Do nothing
+ *    (ii) &in != &out: copy in.t() to out.t()
+ * 3) out.t() is not contiguous:
+ *    - resize_ should fix contiguity/size issues
+ *    (i)  &in == &out: copy in.t().clone() to out (same tensor)
+ *    (ii) &in != &out: copy in.t() to out
+ */
+static inline std::pair<int64_t, int64_t>
+prepareIOTensors(const Tensor& in, Tensor& out, Tensor& temp) {
+  int64_t x = in.size(0);
+  int64_t y = (in.dim() == 1) ? 1 : in.size(1);
+  bool out_tc = isTransposeContiguous(out);
+  bool out_correct_shape = out.dim() == 2 &&
+                           out.size(0) == x && out.size(1) == y;
+  auto in_t = in.view({x, y}).t_();
+
+  if (!out_tc && !out.is_contiguous() && out_correct_shape) {
+    temp = in_t.clone().t_();
+  } else if (out_tc && &in != &out) {
+    out.t().resize_({y, x}).copy_(in_t);
+  } else if (!out_tc) {
+    out.resize_({y, x});
+    if (&in == &out) {
+      out.copy_(in_t.clone()).t_();
+    } else {
+      out.copy_(in_t).t_();
+    }
+  }
+  return std::make_pair(x, y);
+}
 
 static inline void checkInputs(const Tensor& self, const Tensor& A, bool batched) {
   if (batched) {

@@ -101,12 +101,6 @@ static inline std::unique_ptr<Storage> pin_memory(int64_t size, Tensor dummy) {
   return backend.storageWithAllocator(adjusted_size, allocator);
 }
 
-static inline bool isTransposeContiguous(Tensor& self) {
-  return self.dim() == 2 &&
-         self.stride(0) == 1 &&
-         self.stride(1) == self.size(0);
-}
-
 #define ALLOCATE_ARRAY(name, type, size, dummy_tensor) \
   auto storage_##name = pin_memory<type>(size, dummy_tensor); \
   name = reinterpret_cast<type*>(storage_##name->data());
@@ -172,50 +166,16 @@ std::tuple<Tensor&,Tensor&> _gesv_single_out_cuda(Tensor& sol, Tensor& lu,
 AT_ERROR("gesv: MAGMA library not found in "
     "compilation. Please rebuild with MAGMA.");
 #else
-  /* See Gesv.cpp for comments */
-  int64_t bx = self.size(0);
-  int64_t by = (self.dim() == 1) ? 1 : self.size(1);
-  int64_t ax = A.size(0);
-  int64_t ay = A.size(1);
-  int info;
+  int info = 0;
   int* ipiv;
-  bool tc_sol = isTransposeContiguous(sol);
-  bool tc_lu = isTransposeContiguous(lu);
-  bool sol_correct_shape = sol.dim() == 2 &&
-                           sol.size(0) == bx && sol.size(1) == by;
-  bool lu_correct_shape = lu.dim() == 2 && lu.size(0) == ax && lu.size(1) == ay;
   Tensor temp_sol;
   Tensor temp_lu;
-
-  auto self_t = self.view({bx, by}).t_();
-
-  if (!tc_sol && !sol.is_contiguous() && sol_correct_shape) {
-    temp_sol = self_t.clone().t_();
-  } else if (tc_sol && &self != &sol) {
-    sol.t().resize_({by, bx}).copy_(self_t);
-  } else if (!tc_sol) {
-    sol.resize_({by, bx});
-    if (&self == &sol) {
-      sol.copy_(self_t.clone()).t_();
-    } else {
-      sol.copy_(self_t).t_();
-    }
-  }
-
-  if (!tc_lu && !lu.is_contiguous() && lu_correct_shape) {
-    temp_lu = A.t().clone().t_();
-  } else if (tc_lu && &A != &lu) {
-    lu.t().resize_({ay, ax}).copy_(A.t());
-  } else if (!tc_lu) {
-    lu.resize_({ay, ax});
-    if (&A == &lu) {
-      lu.copy_(A.t().clone()).t_();
-    } else {
-      lu.copy_(A.t()).t_();
-    }
-  }
+  auto dim_b = prepareIOTensors(self, sol, temp_sol);
+  auto dim_A = prepareIOTensors(A, lu, temp_lu);
 
   AT_DISPATCH_FLOATING_TYPES(self.type(), "gesv", [&]{
+      auto bx = dim_b.first;
+      auto by = dim_b.second;
       auto A_ptr = temp_lu.defined() ? temp_lu.data<scalar_t>()
                                      : lu.data<scalar_t>();
       auto b_ptr = temp_sol.defined() ? temp_sol.data<scalar_t>()
@@ -223,7 +183,6 @@ AT_ERROR("gesv: MAGMA library not found in "
       ALLOCATE_ARRAY(ipiv, int, bx, sol);
       magmaGesv<scalar_t>(bx, by, A_ptr, bx, ipiv, b_ptr, bx, &info);
   });
-
   checkErrors({info});
 
   if (temp_sol.defined()) {
