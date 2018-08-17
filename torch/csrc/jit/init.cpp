@@ -22,6 +22,7 @@
 #include "torch/csrc/jit/passes/loop_unrolling.h"
 #include "torch/csrc/jit/passes/to_batch.h"
 #include "torch/csrc/jit/passes/specialize_undef.h"
+#include "torch/csrc/jit/passes/lower_tuples.h"
 #include "torch/csrc/jit/graph_executor.h"
 #include "torch/csrc/jit/script/init.h"
 #include "torch/csrc/jit/script/python_tree_views.h"
@@ -68,6 +69,7 @@ void initJITBindings(PyObject *module) {
   m.def("_jit_init", loadPythonClasses)
    .def("_jit_pass_onnx", ToONNX)
    .def("_jit_pass_onnx_peephole", PeepholeOptimizeONNX)
+   .def("_jit_pass_lower_tuples", LowerTuples)
    .def("_jit_pass_fuse", FuseGraph)
    .def("_jit_pass_dce", [](std::shared_ptr<Graph>& g) {
      return EliminateDeadCode(g); // overload resolution

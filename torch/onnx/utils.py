@@ -178,7 +178,7 @@ def _trace_and_get_graph_from_model(model, args, training):
         raise RuntimeError("state_dict changed after running the tracer; "
                            "something weird is happening in your model!")
 
-    return trace.graph(), torch_out
+    return trace, torch_out
 
 
 def _model_to_graph(model, args, f, verbose=False, training=False,
