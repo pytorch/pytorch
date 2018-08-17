@@ -118,6 +118,52 @@ private:
   TypePtr type;
 };
 
+// expressions like x.int()
+struct ScalarTypeCastValue : public SugaredValue {
+  ScalarTypeCastValue(std::string type_str, NamedValue self)
+  : type_str(type_str), self(self) {}
+  std::string kind() const override {
+    std::stringstream ss;
+    ss << "<" << type_str << " scalar cast primitive>";
+    return ss.str();
+  }
+  static const std::unordered_map<std::string, std::string> &method_to_type_map() {
+    static std::unordered_map<std::string, std::string> method_to_type = {
+      {"byte", "_cast_Byte"},
+      {"char", "_cast_Char"},
+      {"double", "_cast_Double"},
+      {"float", "_cast_Float"},
+      {"int", "_cast_Int"},
+      {"long", "_cast_Long"},
+      {"short", "_cast_Short"},
+      {"half", "_cast_Half"}
+    };
+    return method_to_type;
+  }
+  std::shared_ptr<SugaredValue> call(
+      SourceRange loc,
+      Method & m,
+      at::ArrayRef<NamedValue> inputs,
+      at::ArrayRef<NamedValue> attributes,
+      size_t n_binders) override {
+    if (!attributes.empty())
+      throw ErrorReport(loc) << "Cast method does not accept any keyword arguments";
+    if (inputs.size() != 0)
+      throw ErrorReport(loc) << "Cast method does not accept any arguments.";
+    Value *self_value = self.value(*m.graph());
+    if (auto tensor_type = self_value->type()->isSubtypeOf(DynamicType::get())) {
+      return std::make_shared<SimpleValue>(
+        emitBuiltinCall(loc, *m.graph(), Symbol::aten(method_to_type_map().at(type_str)),
+                        {self}, attributes, true));
+    } else {
+      throw ErrorReport(loc) << "Method-style casts are only supported on Tensors";
+    }
+  }
+ private:
+  std::string type_str;
+  NamedValue self;
+};
+
 // Auxiliary data structure for desugaring variable binding into our always
 // explicitly scoped language as we descend down
 // nested control structures in the frontend (which themselves don't introduce
@@ -1484,6 +1530,10 @@ private:
 // support syntax sugar for x.foo(y, z) by allowing x.foo to return a
 // callable value that will resolve to foo(x, y, z) when called.
 std::shared_ptr<SugaredValue> SimpleValue::attr(SourceRange loc, Method & m, const std::string& field) {
+  // Allow method-style casts on Tensor types. e.g. x.int()
+  if (value->type()->isSubtypeOf(DynamicType::get()) && ScalarTypeCastValue::method_to_type_map().count(field)) {
+    return std::make_shared<ScalarTypeCastValue>(field, NamedValue(loc, "self", value));
+  }
   return std::make_shared<BuiltinFunction>(field, NamedValue(loc, "self", value));
 }
 
@@ -1583,7 +1633,6 @@ TypePtr parseTypeFromExpr(Expr expr) {
         && select.selector().name() == "Tensor") {
       return ident_to_type_lut().at("Tensor");
     }
-    std::cout << select << std::endl;
   }
   throw ErrorReport(expr.range()) << "Expression of type " << kindToString(expr.kind())
                                   << " cannot be used in a type expression";
