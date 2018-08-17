@@ -36,6 +36,7 @@ bool SliceImpl(
     if (i >= starts.size()) {
       starts_idx[i] = 0;
       ends_idx[i] = data.dims()[i];
+      dst_sizes[i] = data.dims()[i];
       continue;
     }
     if (data.dims()[i] > 0) {
