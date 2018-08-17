@@ -4596,7 +4596,6 @@ def func(t):
         self.assertEqual(foo_trace(a), foo(a))
         self.assertNotEqual(foo_trace(a), foo_trace(b))
 
-
     def test_index_select_shape_prop(self):
 
         @torch.jit.script
