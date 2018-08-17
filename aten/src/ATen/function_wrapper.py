@@ -119,17 +119,17 @@ ${return_call} at::native::${native_type_method_dispatch}(/* native_actuals */ $
 
 # add non-virtual declaration to Tensor.h
 TENSOR_METHOD_DECLARATION = CodeTemplate("""\
-AT_API ${return_type} ${api_name}(${method_formals_with_defaults})${const_mark};
+AT_API ${return_type} ${api_name}(${method_sugar_formals_with_defaults})${const_mark};
 """)
 # add non-virtual declaration to Tensor.cpp
 TENSOR_METHOD_DEFINITION = CodeTemplate("""\
-inline ${return_type} Tensor::${api_name}(${method_formals})${const_mark} {
+inline ${return_type} Tensor::${api_name}(${method_sugar_formals})${const_mark} {
     return type().${api_name}(${method_actuals});
 }
 """)
 # add a method declaration in Functions.h
 FUNCTION_DECLARATION = CodeTemplate("""\
-static inline ${return_type} ${api_name}(${formals_with_defaults});
+static inline ${return_type} ${api_name}(${sugar_formals_with_defaults});
 """)
 # add a method declaration in Functions.h
 DEPRECATED_FUNCTION_DECLARATION = CodeTemplate("""\
@@ -137,7 +137,7 @@ AT_DEPRECATED(static inline ${return_type} ${api_name}(${formals_with_defaults})
 """)
 # add method definition in Functions.h
 FUNCTION_DEFINITION = CodeTemplate("""\
-static inline ${return_type} ${api_name}(${formals}) {
+static inline ${return_type} ${api_name}(${sugar_formals}) {
     return ${inferred_type}.${api_name}(${type_method_actuals});
 }
 """)
@@ -421,6 +421,7 @@ AtFormal = TypedDict('AtFormal', {
     'name': str,
     'type': str,
     'dynamic_type': str,
+    'sugar_type': str,
     'kwarg_only': bool,
     'is_nullable': bool,
     'default': str,
@@ -589,12 +590,15 @@ def create_generic(top_env, declarations):
     def translate_formal(argument, option):
         # type: (THFormal, FunctionOption) -> AtFormal
         type_str = TYPE_FORMAL_GENERIC.get(argument['type'], argument['type'])
+        sugar_type_str = TYPE_FORMAL_GENERIC.get(argument['sugar_type'], argument['sugar_type'])
         if type_str == 'Tensor &' and not is_mutable_formal_argument(argument, option):
             type_str = 'const ' + type_str
+            sugar_type_str = 'const ' + sugar_type_str
         translated = {
             'name': argument['name'],
             'type': type_str,
             'dynamic_type': DYNAMIC_TYPE.get(argument['type'], argument['type']),
+            'sugar_type': sugar_type_str,
         }  # type: AtFormal
         if 'kwarg_only' in argument:
             translated['kwarg_only'] = argument['kwarg_only']
@@ -648,11 +652,13 @@ def create_generic(top_env, declarations):
                 insert(argument)
         if any(has_output_mask(arg) for arg in option['arguments']):
             mask_size = sum(has_output_mask(arg) for arg in option['arguments'])
+            type_str = 'std::array<bool,{}>'.format(mask_size)
             insert({
                 'name': 'output_mask',
                 # NB: Lack of space in comma works around parsing
                 # problem in gen_variable_type.py
-                'type': 'std::array<bool,{}>'.format(mask_size),
+                'type': type_str,
+                'sugar_type': type_str,
                 'default': '{{' + ', '.join(['true'] * mask_size) + '}}',
             })
 
@@ -696,13 +702,13 @@ def create_generic(top_env, declarations):
                 return formal['name']
         return None
 
-    def format_formal(f):
+    def format_formal(f, type_key='type'):
         # type: (AtFormal) -> str
-        return '{} {}'.format(f['type'], f['name'])
+        return '{} {}'.format(f[type_key], f['name'])
 
-    def formal_with_default(f):
+    def formal_with_default(f, type_key='type'):
         # type: (AtFormal) -> str
-        s = format_formal(f)
+        s = format_formal(f, type_key)
         v = f.get('default')
         if v is None:
             return s
@@ -771,7 +777,9 @@ def create_generic(top_env, declarations):
         formals = get_formals(option)
         option['formals_list'] = formals
         option['formals'] = [format_formal(f) for f in formals]
+        option['sugar_formals'] = [format_formal(f, 'sugar_type') for f in formals]
         option['formals_with_defaults'] = [formal_with_default(f) for f in formals]
+        option['sugar_formals_with_defaults'] = [formal_with_default(f, 'sugar_type') for f in formals]
         option['returns'] = get_return_types(option)
         option['return_type'] = format_return_type(option['returns'])
         option['return_call'] = 'return ' if option['return_type'] != 'void' else ''
@@ -779,8 +787,12 @@ def create_generic(top_env, declarations):
 
         option['method_formals'] = [format_formal(f) for f in formals
                                     if f['name'] != 'self']
+        option['method_sugar_formals'] = [format_formal(f, 'sugar_type') for f in formals
+                                          if f['name'] != 'self']
         option['method_formals_with_defaults'] = (
             [formal_with_default(f) for f in formals if f['name'] != 'self'])
+        option['method_sugar_formals_with_defaults'] = (
+            [formal_with_default(f, 'sugar_type') for f in formals if f['name'] != 'self'])
         option['method_actuals'] = [
             f['name'] if f['name'] != 'self' else '*this' for f in formals]
 
@@ -921,8 +933,10 @@ def create_generic(top_env, declarations):
 
             if (option['inplace'] and argument['name'] == 'self') or argument.get('output', False):
                 argument['type'] = translate_map(False).get(argument['type'], argument['type'])
+                argument['sugar_type'] = translate_map(False).get(argument['sugar_type'], argument['sugar_type'])
             else:
                 argument['type'] = translate_map(True).get(argument['type'], argument['type'])
+                argument['sugar_type'] = translate_map(True).get(argument['sugar_type'], argument['sugar_type'])
 
             return argument
 
@@ -971,7 +985,9 @@ def create_generic(top_env, declarations):
         formals = native_get_formals(option)
         option['formals_list'] = formals
         option['formals'] = [format_formal(f) for f in formals]
+        option['sugar_formals'] = [format_formal(f, 'sugar_type') for f in formals]
         option['formals_with_defaults'] = [formal_with_default(f) for f in formals]
+        option['sugar_formals_with_defaults'] = [formal_with_default(f, 'sugar_type') for f in formals]
         option['returns'] = native_get_return_types(option)
         option['return_type'] = format_return_type(option['returns'])
         option['return_call'] = 'return ' if option['return_type'] != 'void' else ''
@@ -979,8 +995,12 @@ def create_generic(top_env, declarations):
 
         option['method_formals'] = [format_formal(f) for f in formals
                                     if f['name'] != 'self']
+        option['method_sugar_formals'] = [format_formal(f, 'sugar_type') for f in formals
+                                          if f['name'] != 'self']
         option['method_formals_with_defaults'] = (
             [formal_with_default(f) for f in formals if f['name'] != 'self'])
+        option['method_sugar_formals_with_defaults'] = (
+            [formal_with_default(f, 'sugar_type') for f in formals if f['name'] != 'self'])
         option['method_actuals'] = [
             f['name'] if f['name'] != 'self' else '*this' for f in formals]
 

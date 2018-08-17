@@ -60,6 +60,11 @@ def process_types_and_backends(option):
     for arg in option.get('arguments', []):
         if arg['type'] == 'THSTensor*':
             pairs.discard(('CUDA', 'Half'))
+        arg['sugar_type'] = arg['type']
+        match = re.match(r'ExpandingArray\s*<(\d+)>', arg['type'])
+        if match:
+            arg['type'] = 'IntList'
+            arg['size'] = int(match.group(1))
 
     # special case remove Half for cpu unless it is explicitly enabled,
     if not option.get('cpu_half', False):
