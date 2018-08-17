@@ -620,7 +620,10 @@ std::shared_ptr<SugaredValue> BuiltinFunction::call(
   if (value)
     inputs.push_back(*value);
   inputs.insert(inputs.end(), inputs_.begin(), inputs_.end());
-  return std::make_shared<SimpleValue>(emitBuiltinCall(loc, *m.graph(), Symbol::aten(name), inputs, attributes, true));
+  const auto symbol =
+      Symbol::fromQualString(namespace_.value_or("aten") + "::" + name);
+  return std::make_shared<SimpleValue>(
+      emitBuiltinCall(loc, *m.graph(), symbol, inputs, attributes, true));
 }
 
 struct to_ir {

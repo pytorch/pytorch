@@ -165,14 +165,48 @@ protected:
   py::object self;
 };
 
+// A Python value respresenting a custom op namespace object, like
+// `torch.ops.my_namespace`. When accessing an attribute, it is assumed that it
+// is the function under that custom op namespace we want to call, and a
+// `BuiltinFunction` value is returned for it.
+struct VISIBILITY_HIDDEN CustomOpNamespaceValue : public PythonValue {
+  explicit CustomOpNamespaceValue(py::object obj) : PythonValue(std::move(obj)) {}
+
+  std::shared_ptr<SugaredValue> attr(
+      SourceRange loc,
+      Method& m,
+      const std::string& field) override {
+    py::object member = getattr(loc, field);
+    AT_ASSERT(py::isinstance<py::function>(member));
+    const auto namespace_ = py::cast<std::string>(self.attr("name"));
+    return std::make_shared<BuiltinFunction>(namespace_, field, at::nullopt);
+  }
+};
+
+// The `torch.ops` value. All it does is create `CustomOpNamespaceValue`
+// objects when accessing attributes under it, e.g. `torch.ops.my_namespace`.
+struct VISIBILITY_HIDDEN CustomOpsValue : public PythonValue {
+  explicit CustomOpsValue(py::object obj) : PythonValue(std::move(obj)) {}
+
+  std::shared_ptr<SugaredValue> attr(
+      SourceRange loc,
+      Method& m,
+      const std::string& field) override {
+    py::object member = getattr(loc, field);
+    return std::make_shared<CustomOpNamespaceValue>(member);
+  }
+};
+
 struct VISIBILITY_HIDDEN PythonModuleValue : public PythonValue {
   explicit PythonModuleValue(py::object mod) : PythonValue(mod) {}
 
-  std::shared_ptr<SugaredValue> attr(SourceRange loc, Method & m, const std::string& field) override {
-      py::object member = getattr(loc, field);
-      return toSugaredValue(member, m, loc);
+  std::shared_ptr<SugaredValue> attr(
+      SourceRange loc,
+      Method& m,
+      const std::string& field) override {
+    py::object member = getattr(loc, field);
+    return toSugaredValue(member, m, loc);
   }
- private:
 };
 
 struct VISIBILITY_HIDDEN BuiltinPythonModuleValue : public PythonModuleValue {
@@ -183,6 +217,8 @@ struct VISIBILITY_HIDDEN BuiltinPythonModuleValue : public PythonModuleValue {
     py::object member = getattr(loc, field);
     if (py::isinstance<py::function>(member)) {
       return std::make_shared<BuiltinFunction>(field, at::nullopt);
+    } else if (field == "ops") {
+      return std::make_shared<CustomOpsValue>(member);
     }
     return toSugaredValue(member, m, loc, /*is_constant =*/true);
   }
