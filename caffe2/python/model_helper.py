@@ -258,22 +258,6 @@ class ModelHelper(object):
         ))
         return self._param_info_deprecated[-1]
 
-    # This method is deprecated, use get_param_info method
-    def param_info(self, grad_type=None, id=None):
-        logging.info("param_info method is DEPRECATED")
-        self._update_param_info_deprecated()
-        if id is not None:
-            assert grad_type is None
-            info = self._param_info_deprecated[id]
-            assert info.param_id == id
-            return info
-        elif grad_type is not None:
-            return [
-                info for info in self._param_info_deprecated
-                if info.grad_type() == grad_type]
-        else:
-            return self._param_info_deprecated
-
     def AddParameter(self, param, tags=None):
         assert isinstance(param, core.BlobReference)
         tags = self._normalize_tags(tags)
