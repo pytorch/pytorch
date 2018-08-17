@@ -3330,6 +3330,7 @@ class TestKL(TestCase):
 
 
 class TestConstraints(TestCase):
+    @skipIfRocm
     def test_params_contains(self):
         for Dist, params in EXAMPLES:
             for i, param in enumerate(params):
