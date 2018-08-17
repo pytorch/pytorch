@@ -320,7 +320,7 @@ Tensor matrix_power(const Tensor& a, int64_t n) {
            "matrix_power(", a.type(), "{", a.sizes(), "}): expected a tensor "
            "of floating types with dim at least 2");
   if (n == 0) {
-    return at::empty_like(a).copy_(at::eye(a.size(-2), a.options()).expand_as(a));
+    return a.clone().copy_(at::eye(a.size(-2), a.options()).expand_as(a));
   } else if (n < 0) {
     AT_CHECK(a.dim() == 2, "Negative powers for batch matrices are currently not supported");
     Tensor a_ = at::inverse(a);
