@@ -407,11 +407,11 @@ ENDFOREACH()
 INSTALL(FILES ${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml
   DESTINATION ${AT_INSTALL_SHARE_DIR}/ATen)
 
-# if(ATEN_NO_TEST)
-#   message("disable test because ATEN_NO_TEST is set")
-# else()
-#   add_subdirectory(test)
-# endif()
+if(ATEN_NO_TEST)
+  message("disable test because ATEN_NO_TEST is set")
+else()
+  add_subdirectory(test)
+endif()
 
 if (NOT CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   foreach(test_src ${ATen_CPU_TEST_SRCS})
