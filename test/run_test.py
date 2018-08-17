@@ -46,7 +46,6 @@ ROCM_BLACKLIST = [
     'distributed',
     'distributions',
     'jit',
-    'legacy_nn',
     'multiprocessing',
     'nccl',
     'nn',
