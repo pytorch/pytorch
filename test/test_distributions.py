@@ -1526,6 +1526,7 @@ class TestDistributions(TestCase):
                                         scipy.stats.norm(loc=loc, scale=scale),
                                         'Normal(mean={}, std={})'.format(loc, scale))
 
+    @skipIfRocm
     def test_lowrank_multivariate_normal_shape(self):
         mean = torch.randn(5, 3, requires_grad=True)
         mean_no_batch = torch.randn(3, requires_grad=True)
@@ -1619,6 +1620,7 @@ class TestDistributions(TestCase):
                                     'LowRankMultivariateNormal(loc={}, cov_factor={}, cov_diag={})'
                                     .format(mean, cov_factor, cov_diag), multivariate=True)
 
+    @skipIfRocm
     def test_lowrank_multivariate_normal_properties(self):
         loc = torch.randn(5)
         cov_factor = torch.randn(5, 2)
