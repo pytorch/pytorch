@@ -1,5 +1,10 @@
 #include "caffe2/sgd/iter_op.h"
 
+#ifdef CAFFE2_USE_IDEEP
+#include <caffe2/ideep/operators/operator_fallback_ideep.h>
+#include <caffe2/ideep/utils/ideep_operator.h>
+#endif
+
 namespace caffe2 {
 
 void MutexSerializer::Serialize(
@@ -21,6 +26,10 @@ void MutexDeserializer::Deserialize(const BlobProto& /* unused */, Blob* blob) {
 
 REGISTER_CPU_OPERATOR(Iter, IterOp<CPUContext>);
 REGISTER_CPU_OPERATOR(AtomicIter, AtomicIterOp<CPUContext>);
+
+#ifdef CAFFE2_USE_IDEEP
+REGISTER_IDEEP_OPERATOR(AtomicIter, IDEEPFallbackOp<AtomicIterOp<CPUContext>>);
+#endif
 
 REGISTER_BLOB_SERIALIZER(
     (TypeMeta::Id<std::unique_ptr<std::mutex>>()),
