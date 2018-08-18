@@ -1455,9 +1455,6 @@ private:
       case '.': {
         auto select = Select(tree);
         auto sv = emitSugaredExpr(select.value(), 1);
-        if (sv->asValue(select.range(), method)->type()->isSubtypeOf(NumberType::get())) {
-          throw ErrorReport(select) << "Cannot call methods on numbers";
-        }
         return sv->attr(select.range(), method, select.selector().name());
       }
       case TK_APPLY: {
@@ -1729,6 +1726,9 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(SourceRange loc, Method & m, con
     return std::make_shared<BuiltinFunction>(
         Symbol::aten(builtin_cast_methods().at(field)),
         NamedValue(loc, "self", value));
+  }
+  if (getValue()->type()->isSubtypeOf(NumberType::get())) {
+    throw ErrorReport(loc) << "Cannot call methods on numbers";
   }
   return std::make_shared<BuiltinFunction>(
       Symbol::aten(field), NamedValue(loc, "self", value));
