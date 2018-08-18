@@ -171,10 +171,10 @@ static void py_initialize_tensor_type(PyTypeObject& type, const char* name, PyOb
 
 static const char* get_module(Backend backend) {
   switch (backend) {
-    case kCPU: return "torch";
-    case kCUDA: return "torch.cuda";
-    case kSparseCPU: return "torch.sparse";
-    case kSparseCUDA: return "torch.cuda.sparse";
+    case Backend::CPU: return "torch";
+    case Backend::CUDA: return "torch.cuda";
+    case Backend::SparseCPU: return "torch.sparse";
+    case Backend::SparseCUDA: return "torch.cuda.sparse";
     default: AT_ERROR("invalid backend: ", toString(backend));
   }
 }
@@ -389,8 +389,8 @@ at::Type& get_default_tensor_type() {
 
 Device getDevice(const at::Tensor& tensor) {
   if (tensor.type().is_cuda()) {
-    return at::Device(at::kCUDA, tensor.get_device());
+    return at::Device(at::DeviceType::CUDA, tensor.get_device());
   }
-  return at::Device(at::kCPU);
+  return at::Device(at::DeviceType::CPU);
 }
 }} // namespace torch::tensors

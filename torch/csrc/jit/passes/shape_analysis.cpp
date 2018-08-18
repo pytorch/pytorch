@@ -45,7 +45,7 @@ IValue representativeValue(Value* v) {
     return *iv;
   }
   if (TensorTypePtr type = type_->cast<TensorType>()) {
-    auto backend = type->device() == -1 ? at::kCPU : at::kCUDA;
+    auto backend = type->device() == -1 ? at::Backend::CPU : at::Backend::CUDA;
     at::DeviceGuard device_guard(type->device());
     auto& attype = at::getType(backend, type->scalarType());
     auto t = attype.tensor(type->sizes(), type->strides()).zero_();

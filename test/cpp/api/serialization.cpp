@@ -59,7 +59,7 @@ TEST_CASE("serialization") {
       }
 
       auto x = torch::ones(
-          {5, 5}, torch::getType(torch::kCPU, static_cast<torch::Dtype>(i)));
+          {5, 5}, torch::getType(torch::Backend::CPU, static_cast<torch::Dtype>(i)));
       auto y = torch::empty({});
 
       std::stringstream ss;
