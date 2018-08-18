@@ -99,24 +99,27 @@ class IDEEPAdamOp final : public IDEEPOperator {
     const auto& grad = Input(GRAD);
     // TODO: Use itensor after 0-dim is supported. Now use CPU tensor.
     const auto& lr = OperatorBase::Input<TensorCPU>(LR);
-    const auto& out_params = Output(OUTPUT_PARAM);
-    const auto& out_moment1 = Output(OUTPUT_MOMENT_1);
-    const auto& out_moment2 = Output(OUTPUT_MOMENT_2);
+    auto* out_params = Output(OUTPUT_PARAM);
+    auto* out_moment1 = Output(OUTPUT_MOMENT_1);
+    auto* out_moment2 = Output(OUTPUT_MOMENT_2);
 
     CAFFE_ENFORCE(lr.size() == 1);
     CAFFE_ENFORCE(grad.get_nelems() == params.get_nelems());
     CAFFE_ENFORCE(grad.get_nelems() == moment_1.get_nelems());
     CAFFE_ENFORCE(grad.get_nelems() == moment_2.get_nelems());
-    out_params->reinit_like(params);
-    out_moment1->reinit_like(moment_1);
-    out_moment2->reinit_like(moment_2);
+    if(params != *out_params)
+        out_params->reinit(params.get_descriptor());
+    if(moment_1 != *out_moment1)
+        out_moment1->reinit(moment_1.get_descriptor());
+    if(moment_2 != *out_moment2)
+        out_moment2->reinit(moment_2.get_descriptor());
     const auto w = static_cast<float *>(params.get_data_handle());
     const auto g = static_cast<float *>(grad.get_data_handle());
     const auto m = static_cast<float *>(moment_1.get_data_handle());
     const auto v = static_cast<float *>(moment_2.get_data_handle());
-    const auto nw = static_cast<float *>(out_params->get_data_handle());
-    const auto nm = static_cast<float *>(out_moment1->get_data_handle());
-    const auto nv = static_cast<float *>(out_moment2->get_data_handle());
+    auto nw = static_cast<float *>(out_params->get_data_handle());
+    auto nm = static_cast<float *>(out_moment1->get_data_handle());
+    auto nv = static_cast<float *>(out_moment2->get_data_handle());
     const auto nlr = lr.template data<T>();
     const auto iter =
         OperatorBase::Input<TensorCPU>(ITER).template data<int64_t>()[0];
