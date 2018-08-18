@@ -288,7 +288,7 @@ struct FullBidirectionalLayer : Layer<Tensor, pair_of<dir_hidden_type>, pair_of<
 
   std::vector<Tensor> reverse(std::vector<Tensor>&& x) const {
     std::reverse(x.begin(), x.end());
-    return x;
+    return std::move(x);
   }
 
   FullLayer<dir_hidden_type> layer_;
