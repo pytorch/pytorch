@@ -35,16 +35,16 @@ class CAFFE2_API TaskThreadPool {
   bool complete_;
   std::size_t available_;
   std::size_t total_;
-  int numa_node_id_;
+  int device_id_;
 
  public:
-  explicit TaskThreadPool(std::size_t pool_size, int numa_node_id = -1)
+  explicit TaskThreadPool(std::size_t pool_size, int device_id = -1)
       : threads_(pool_size),
         running_(true),
         complete_(true),
         available_(pool_size),
         total_(pool_size),
-        numa_node_id_(numa_node_id) {
+        device_id_(device_id) {
     for (std::size_t i = 0; i < pool_size; ++i) {
       threads_[i] = std::thread(std::bind(&TaskThreadPool::main_loop, this, i));
     }
@@ -117,7 +117,7 @@ class CAFFE2_API TaskThreadPool {
   /// @brief Entry point for pool threads.
   void main_loop(std::size_t index) {
     setThreadName("CaffeTaskThread");
-    NUMABind(numa_node_id_);
+    NUMABind(device_id_);
 
     while (running_) {
       // Wait on condition variable while the task is empty and

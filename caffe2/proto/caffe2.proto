@@ -134,19 +134,16 @@ message DeviceOption {
   // [general] Options that need to be carried out before running the execution.
   // optional DeviceType device_type = 1 [ default = CPU ];
   optional int32 device_type = 1 [ default = 0 ]; // 0 is CPU.
-  // [CUDA specific] the cuda gpu id.
-  optional int32 cuda_gpu_id = 2;
+  // [general] ID of the pinned device. For CPU, if not set (defaults to -1),
+  // it means to run on arbitrary cpu.
+  optional int32 device_id = 2 [ default = -1 ];
   // [general] The random seed to start the device random number generator with.
   optional uint32 random_seed = 3;
   // [general] What node this op should execute on.
   // Used for net transformation purposes. Must be empty at execution time.
   optional string node_name = 4;
-  // [CPU and Linux specific] NUMA node id
-  optional int32 numa_node_id = 5 [default = -1];
   // [general] Extra information passed, not used at execution time currently.
   repeated string extra_info = 6;
-  // [HIP specific] the hip gpu id.
-  optional int32 hip_gpu_id = 7;
 }
 
 // Operator Definition.

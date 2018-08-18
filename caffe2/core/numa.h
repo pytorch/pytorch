@@ -9,13 +9,13 @@ namespace caffe2 {
 
 CAFFE2_API bool IsNUMAEnabled();
 
-CAFFE2_API void NUMABind(int numa_node_id);
+CAFFE2_API void NUMABind(int device_id);
 
 CAFFE2_API int GetNUMANode(const void* ptr);
 
 CAFFE2_API int GetNumNUMANodes();
 
-CAFFE2_API void NUMAMove(void* ptr, size_t size, int numa_node_id);
+CAFFE2_API void NUMAMove(void* ptr, size_t size, int device_id);
 
 CAFFE2_API int GetCurrentNUMANode();
 

@@ -28,13 +28,13 @@ std::string DeviceTypeName(const int32_t& d) {
 int DeviceId(const DeviceOption& option) {
   switch (option.device_type()) {
     case CPU:
-      return option.numa_node_id();
+      return option.device_id();
     case CUDA:
-      return option.cuda_gpu_id();
+      return option.device_id();
     case MKLDNN:
-      return option.numa_node_id();
+      return option.device_id();
     case HIP:
-      return option.hip_gpu_id();
+      return option.device_id();
     default:
       CAFFE_THROW("Unknown device id for device type: ", option.device_type());
   }
@@ -43,10 +43,10 @@ int DeviceId(const DeviceOption& option) {
 bool IsSameDevice(const DeviceOption& lhs, const DeviceOption& rhs) {
   return (
       lhs.device_type() == rhs.device_type() &&
-      lhs.cuda_gpu_id() == rhs.cuda_gpu_id() &&
-      lhs.hip_gpu_id() == rhs.hip_gpu_id() &&
+      lhs.device_id() == rhs.device_id() &&
+      lhs.device_id() == rhs.device_id() &&
       lhs.node_name() == rhs.node_name() &&
-      lhs.numa_node_id() == rhs.numa_node_id());
+      lhs.device_id() == rhs.device_id());
 }
 
 bool ReadStringFromFile(const char* filename, string* str) {

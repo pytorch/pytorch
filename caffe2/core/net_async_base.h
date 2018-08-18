@@ -158,7 +158,7 @@ class AsyncNetExecutorHelper : public ExecutorHelper {
 };
 
 std::shared_ptr<TaskThreadPool>
-GetAsyncNetCPUThreadPool(int numa_node_id, int pool_size, bool create_new);
+GetAsyncNetCPUThreadPool(int device_id, int pool_size, bool create_new);
 
 } // namespace caffe2
 

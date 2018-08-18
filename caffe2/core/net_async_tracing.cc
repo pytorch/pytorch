@@ -216,25 +216,25 @@ void Tracer::renameThreads() {
       continue;
     }
     auto* op = net_->GetOperators().at(event.op_id_);
-    int numa_node_id = DeviceId(op->device_option());
-    if (numa_node_id < 0) {
+    int device_id = DeviceId(op->device_option());
+    if (device_id < 0) {
       continue;
     }
     long tid = hasher(event.tid_);
 
     if (!tid_to_numa.count(tid)) {
-      tid_to_numa[tid] = numa_node_id;
+      tid_to_numa[tid] = device_id;
     } else {
-      CAFFE_ENFORCE_EQ(tid_to_numa[tid], numa_node_id);
+      CAFFE_ENFORCE_EQ(tid_to_numa[tid], device_id);
     }
 
-    if (!numa_counters.count(numa_node_id)) {
-      numa_counters[numa_node_id] = 1;
+    if (!numa_counters.count(device_id)) {
+      numa_counters[device_id] = 1;
     }
     if (!tids.count(tid)) {
-      tids[tid] = numa_counters[numa_node_id]++;
+      tids[tid] = numa_counters[device_id]++;
     }
-    event.thread_label_ = numa_multiplier * (numa_node_id + 1) + tids[tid];
+    event.thread_label_ = numa_multiplier * (device_id + 1) + tids[tid];
   }
 }
 

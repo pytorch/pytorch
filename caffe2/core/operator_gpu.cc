@@ -10,7 +10,7 @@ void Operator<CUDAContext>::SyncDevice() {
   cudaGetDevice(&device);
 
   cudaEvent_t ev;
-  cudaSetDevice(context->cuda_gpu_id());
+  cudaSetDevice(context->device_id());
   cudaEventCreateWithFlags(&ev, cudaEventDisableTiming);
   cudaEventRecord(ev, context->cuda_stream());
   cudaEventSynchronize(ev);
