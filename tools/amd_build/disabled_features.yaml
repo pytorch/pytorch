@@ -147,8 +147,6 @@
   "disabled_modules": [
     "aten/src/ATen/native/cuda/CuFFTUtils.h",
     "aten/src/ATen/native/cuda/CuFFTPlanCache.h",
-    "aten/src/ATen/native/cuda/SpectralOps.cu",
-    "aten/src/ATen/native/cuda/Distributions.cu",
   ],
   "disabled_functions": [
     {
@@ -174,7 +172,8 @@
       "functions": [
         "_s_poisson_cuda",
         "poisson_cuda_kernel",
-        "gamma_cuda_kernel"
+        "gamma_cuda_kernel",
+        "gamma_grad_cuda_kernel",
       ]
     },
     {
