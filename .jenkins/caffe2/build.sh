@@ -159,8 +159,6 @@ if [[ $BUILD_ENVIRONMENT == *rocm* ]]; then
   ########## HIPIFY Caffe2 operators
   ${PYTHON} "${ROOT_DIR}/tools/amd_build/build_pytorch_amd.py"
   ${PYTHON} "${ROOT_DIR}/tools/amd_build/build_caffe2_amd.py"
-
-  export USE_ROCM=1
 fi
 
 # Try to include Redis support for Linux builds
