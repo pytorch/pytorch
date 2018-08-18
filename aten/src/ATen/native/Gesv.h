@@ -27,13 +27,16 @@ static inline bool isTransposeContiguous(Tensor& self) {
  *    (i)  &in == &out: copy in.t().clone() to out (same tensor)
  *    (ii) &in != &out: copy in.t() to out
  */
-static inline std::pair<int64_t, int64_t>
-prepareIOTensors(const Tensor& in, Tensor& out, Tensor& temp) {
-  int64_t x = in.size(0);
-  int64_t y = (in.dim() == 1) ? 1 : in.size(1);
+static inline void prepareIOTensors(
+    const Tensor& in, Tensor& out, Tensor& temp,
+    int64_t& x, int64_t& y) {
+  x = in.size(0);
+  y = (in.dim() == 1) ? 1 : in.size(1);
   bool out_tc = isTransposeContiguous(out);
-  bool out_correct_shape = out.dim() == 2 &&
-                           out.size(0) == x && out.size(1) == y;
+  bool out_correct_shape =
+    out.dim() == 2 && out.size(0) == x && out.size(1) == y;
+
+  // view potential 1D `in` as 2D
   auto in_t = in.view({x, y}).t_();
 
   if (!out_tc && !out.is_contiguous() && out_correct_shape) {
@@ -48,7 +51,6 @@ prepareIOTensors(const Tensor& in, Tensor& out, Tensor& temp) {
       out.copy_(in_t).t_();
     }
   }
-  return std::make_pair(x, y);
 }
 
 static inline void checkInputs(const Tensor& self, const Tensor& A, bool batched) {
