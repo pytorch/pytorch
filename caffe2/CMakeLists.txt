@@ -49,7 +49,7 @@ if (NOT ANDROID AND NOT IOS)
 
   IF(USE_ROCM)
     # Set the HIP Variables
-    filter_list(Caffe2_HIP_SRCS ATen_CUDA_SRCS "\\.(cpp|cu)$")
+    set(Caffe2_HIP_SRCS ATen_CUDA_SRCS)
     set(Caffe2_HIP_INCLUDES ${Caffe2_HIP_INCLUDES} ${Caffe2_GPU_INCLUDE})
   ENDIF(USE_ROCM)
 else()
@@ -368,7 +368,8 @@ if(USE_ROCM)
   # Call again since Caffe2_HIP_INCLUDES is extended with ATen include dirs.
   hip_include_directories(${Caffe2_HIP_INCLUDES})
 
-  set_source_files_properties(${Caffe2_HIP_SRCS} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+  filter_list(__caffe2_hip_srcs_cpp Caffe2_HIP_SRCS "\\.(cc|cpp|cu)$")
+  set_source_files_properties(${__caffe2_hip_srcs_cpp} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
 
   # FindHIP.CMake checks if the SHARED flag is set and adds extra logic accordingly.
   hip_add_library(caffe2_hip ${Caffe2_HIP_SRCS})
