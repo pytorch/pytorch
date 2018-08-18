@@ -57,10 +57,6 @@ struct CUDAEvent {
     return *this;
   }
 
-  explicit operator bool() const noexcept {
-    return internals_ != nullptr;
-  }
-
   operator cudaEvent_t() const { return detail::CUDAEvent_event(internals_); }
 
   // Less than operator (to allow use in sets)
