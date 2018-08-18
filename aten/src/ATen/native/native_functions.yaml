@@ -2088,3 +2088,6 @@
 
 - func: rnn_relu_cell(Tensor input, Tensor hx, Tensor w_ih, Tensor w_hh, Tensor? b_ih={}, Tensor? b_hh={}) -> Tensor
   variants: function
+
+- func: _test_expanding_array(ExpandingArray<3> ea, int64_t value) -> bool
+  variants: function

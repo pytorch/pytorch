@@ -176,6 +176,10 @@ void test(Type & T, Type & AccT) {
     REQUIRE_ALLCLOSE(at::where(cond_scalar, x_scalar, y_scalar).unsqueeze(0),
                      at::where(cond_1d, x_1d, y_1d));
   }
+
+  SECTION( "expanding_array" ) {
+    REQUIRE(at::_test_expanding_array(9, 9));
+  }
 }
 
 TEST_CASE( "native test CPU", "[cpu]" ) {

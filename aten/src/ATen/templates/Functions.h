@@ -12,6 +12,7 @@
 #include "ATen/DeviceGuard.h"
 #include "ATen/TensorOptions.h"
 #include "THNN/Reduction.h"
+#include "ATen/ExpandingArray.h"
 
 namespace at {
 

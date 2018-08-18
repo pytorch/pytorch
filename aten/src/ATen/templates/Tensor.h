@@ -12,6 +12,7 @@
 #include "ATen/TensorBase.h"
 #include "ATen/TensorImpl.h"
 #include "ATen/core/optional.h"
+#include "ATen/ExpandingArray.h"
 
 namespace at {
 struct Generator;
