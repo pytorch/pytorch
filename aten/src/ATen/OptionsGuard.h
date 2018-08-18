@@ -13,7 +13,7 @@ struct DefaultTensorOptions {
   /// Returns the current thread local default options.
   /// Defined in OptionsGuard.cpp because we can't use optional in headers, due
   /// to Windows and other compilers.
-  AT_API static TensorOptions& get();
+  static TensorOptions& get();
 
  private:
   /// This is an optional because of compiler bugs that mis-initialize static
