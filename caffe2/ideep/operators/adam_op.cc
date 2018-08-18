@@ -66,7 +66,6 @@ void adam_ideep_compute_output_grad(
     float eps_hat,
     float correction,
     const float* lr) {
-
 #ifdef _OPENMP
     #pragma omp parallel for schedule(static)
 #endif
@@ -107,19 +106,19 @@ class IDEEPAdamOp final : public IDEEPOperator {
     CAFFE_ENFORCE(grad.get_nelems() == params.get_nelems());
     CAFFE_ENFORCE(grad.get_nelems() == moment_1.get_nelems());
     CAFFE_ENFORCE(grad.get_nelems() == moment_2.get_nelems());
-    if(params != *out_params)
-        out_params->reinit(params.get_descriptor());
-    if(moment_1 != *out_moment1)
-        out_moment1->reinit(moment_1.get_descriptor());
-    if(moment_2 != *out_moment2)
-        out_moment2->reinit(moment_2.get_descriptor());
-    const auto w = static_cast<float *>(params.get_data_handle());
-    const auto g = static_cast<float *>(grad.get_data_handle());
-    const auto m = static_cast<float *>(moment_1.get_data_handle());
-    const auto v = static_cast<float *>(moment_2.get_data_handle());
-    auto nw = static_cast<float *>(out_params->get_data_handle());
-    auto nm = static_cast<float *>(out_moment1->get_data_handle());
-    auto nv = static_cast<float *>(out_moment2->get_data_handle());
+    if (params != *out_params)
+      out_params->reinit(params.get_descriptor());
+    if (moment_1 != *out_moment1)
+      out_moment1->reinit(moment_1.get_descriptor());
+    if (moment_2 != *out_moment2)
+      out_moment2->reinit(moment_2.get_descriptor());
+    const auto w = static_cast<float*>(params.get_data_handle());
+    const auto g = static_cast<float*>(grad.get_data_handle());
+    const auto m = static_cast<float*>(moment_1.get_data_handle());
+    const auto v = static_cast<float*>(moment_2.get_data_handle());
+    auto nw = static_cast<float*>(out_params->get_data_handle());
+    auto nm = static_cast<float*>(out_moment1->get_data_handle());
+    auto nv = static_cast<float*>(out_moment2->get_data_handle());
     const auto nlr = lr.template data<T>();
     const auto iter =
         OperatorBase::Input<TensorCPU>(ITER).template data<int64_t>()[0];
@@ -143,9 +142,9 @@ class IDEEPAdamOp final : public IDEEPOperator {
           nlr);
     } else {
       auto* out_grad = Output(OUTPUT_GRAD);
-      if(grad != *out_grad)
+      if (grad != *out_grad)
         out_grad->reinit(grad.get_descriptor());
-      auto ng = static_cast<float *>(out_grad->get_data_handle());
+      auto ng = static_cast<float*>(out_grad->get_data_handle());
       adam_ideep_compute_output_grad(
           grad.get_nelems(),
           w,
