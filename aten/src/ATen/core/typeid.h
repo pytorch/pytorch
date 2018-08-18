@@ -379,6 +379,16 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
 }
 
 /**
+ * Note: Currently gcc has "visibility attribute ignored" warning for using
+ * AT_CORE_EXPORT below. We bypass it here for now.
+ */
+#ifdef _MSC_VER
+#define AT_CORE_EXPORT_MSVC_ONLY AT_CORE_EXPORT
+#else
+#define AT_CORE_EXPORT_MSVC_ONLY
+#endif
+
+/**
  * Register unique id for a type so it can be used in TypeMeta context, e.g. be
  * used as a type for Blob or for Tensor elements.
  *
@@ -391,10 +401,10 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
  *
  * NOTE: the macro needs to be invoked in ::caffe2 namespace
  */
-
 #define CAFFE_KNOWN_TYPE(T)                                               \
   template <>                                                             \
-  AT_CORE_EXPORT TypeIdentifier TypeMeta::Id<T>() {                       \
+  AT_CORE_EXPORT_MSVC_ONLY                                                \
+  TypeIdentifier TypeMeta::Id<T>() {                                      \
     static const TypeIdentifier type_id = TypeIdentifier::createTypeId(); \
     static TypeNameRegisterer<T> registerer(type_id, #T);                 \
     return type_id;                                                       \
@@ -406,10 +416,11 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
  * can be resolved at compile time. Please use CAFFE_KNOWN_TYPE() instead
  * for your own types to allocate dynamic ids for them.
  */
-#define CAFFE_DECLARE_KNOWN_TYPE(PreallocatedId, T)                       \
-  template <>                                                             \
-  AT_CORE_EXPORT inline AT_CORE_API TypeIdentifier TypeMeta::Id<T>() {    \
-    return TypeIdentifier(PreallocatedId);                                \
+#define CAFFE_DECLARE_KNOWN_TYPE(PreallocatedId, T)   \
+  template <>                                         \
+  AT_CORE_EXPORT_MSVC_ONLY                            \
+  inline TypeIdentifier TypeMeta::Id<T>() {           \
+    return TypeIdentifier(PreallocatedId);            \
   }
 
 #define CONCAT_IMPL(x, y) x##y
