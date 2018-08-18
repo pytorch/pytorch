@@ -49,7 +49,7 @@ if (NOT ANDROID AND NOT IOS)
 
   IF(USE_ROCM)
     # Set the HIP Variables
-    set(Caffe2_HIP_SRCS ${ATen_CUDA_SRCS})
+    set(Caffe2_HIP_SRCS ${Caffe2_HIP_SRCS} ${ATen_CUDA_SRCS})
     set(Caffe2_HIP_INCLUDES ${Caffe2_HIP_INCLUDES} ${Caffe2_GPU_INCLUDE})
   ENDIF(USE_ROCM)
 else()
