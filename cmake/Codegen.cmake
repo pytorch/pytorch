@@ -4,6 +4,24 @@
 # - Creates an ATen target for its generated C++ files and adds it
 #   as a dependency
 
+################################################################################
+# Helper functions
+################################################################################
+
+function(filter_list output input)
+    unset(result)
+    foreach(filename ${${input}})
+        foreach(pattern ${ARGN})
+            if("${filename}" MATCHES "${pattern}")
+                list(APPEND result "${filename}")
+            endif()
+        endforeach()
+    endforeach()
+    set(${output} ${result} PARENT_SCOPE)
+endfunction()
+
+################################################################################
+
 if (DEFINED ENV{PYTORCH_PYTHON})
   message(STATUS "Using python found in $ENV{PYTORCH_PYTHON}")
   set(PYCMD "$ENV{PYTORCH_PYTHON}")
