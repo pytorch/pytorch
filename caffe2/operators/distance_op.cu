@@ -116,7 +116,7 @@ bool SquaredL2DistanceGradientOp<float, CUDAContext>::RunOnDevice() {
           dX->template mutable_data<float>());
 
   // The gradient of the other side is basically the negative.
-  math::Scale<float, CUDAContext>(
+  math::Scale<float, float, CUDAContext>(
       X.size(),
       -1,
       dX->data<float>(),

@@ -18,6 +18,7 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <functional>
 #include <limits>
@@ -30,6 +31,7 @@
 #include "caffe2/core/context.h"
 #include "caffe2/utils/cpu_neon.h"
 #include "caffe2/utils/eigen_utils.h"
+#include "caffe2/utils/fixed_divisor.h"
 
 #include "Eigen/Core"
 #include "Eigen/Dense"
@@ -241,24 +243,6 @@ void Gemv<float, CPUContext>(
   }
 }
 
-#define CAFFE2_SPECIALIZED_SCALE(T)                                            \
-  template <>                                                                  \
-  void Scale<T, CPUContext>(                                                   \
-      const int n, const float alpha, const T* x, T* y, CPUContext* context) { \
-    EigenVectorMap<T>(y, n) = ConstEigenVectorMap<T>(x, n) * alpha;            \
-  }                                                                            \
-  template <>                                                                  \
-  void Scale<T, CPUContext>(                                                   \
-      const int n,                                                             \
-      const float* alpha,                                                      \
-      const T* x,                                                              \
-      T* y,                                                                    \
-      CPUContext* context) {                                                   \
-    EigenVectorMap<T>(y, n) = ConstEigenVectorMap<T>(x, n) * (*alpha);         \
-  }
-CAFFE2_SPECIALIZED_SCALE(float)
-#undef CAFFE2_SPECIALIZED_SCALE
-
 #define CAFFE2_SPECIALIZED_DOT(T)                                        \
   template <>                                                            \
   void Dot<T, CPUContext>(                                               \
@@ -380,22 +364,38 @@ void Gemv<float, CPUContext>(
   cblas_sgemv(CblasRowMajor, trans_A, M, N, alpha, A, N, x, 1, beta, y, 1);
 }
 
-#define CAFFE2_SPECIALIZED_SCALE(T, prefix)                             \
-  template <>                                                           \
-  void Scale<T, CPUContext>(                                            \
-      const int n, const float alpha, const T* x, T* y, CPUContext*) {  \
-    if (y != x)                                                         \
-      cblas_##prefix##copy(n, x, 1, y, 1);                              \
-    cblas_##prefix##scal(n, static_cast<float>(alpha), y, 1);           \
-  }                                                                     \
-  template <>                                                           \
-  void Scale<T, CPUContext>(                                            \
-      const int n, const float* alpha, const T* x, T* y, CPUContext*) { \
-    if (y != x)                                                         \
-      cblas_##prefix##copy(n, x, 1, y, 1);                              \
-    cblas_##prefix##scal(n, static_cast<float>(*alpha), y, 1);          \
+#define CAFFE2_SPECIALIZED_SCALE(TAlpha, TData, prefix)          \
+  template <>                                                    \
+  void Scale<TAlpha, TData, CPUContext>(                         \
+      const int n,                                               \
+      const TAlpha alpha,                                        \
+      const TData* x,                                            \
+      TData* y,                                                  \
+      CPUContext*) {                                             \
+    if (y != x) {                                                \
+      cblas_##prefix##copy(n, x, 1, y, 1);                       \
+    }                                                            \
+    if (alpha != TAlpha(1)) {                                    \
+      cblas_##prefix##scal(n, static_cast<TData>(alpha), y, 1);  \
+    }                                                            \
+  }                                                              \
+  template <>                                                    \
+  void Scale<TAlpha, TData, CPUContext>(                         \
+      const int n,                                               \
+      const TAlpha* alpha,                                       \
+      const TData* x,                                            \
+      TData* y,                                                  \
+      CPUContext*) {                                             \
+    if (y != x) {                                                \
+      cblas_##prefix##copy(n, x, 1, y, 1);                       \
+    }                                                            \
+    if (*alpha != TAlpha(1)) {                                   \
+      cblas_##prefix##scal(n, static_cast<TData>(*alpha), y, 1); \
+    }                                                            \
   }
-CAFFE2_SPECIALIZED_SCALE(float, s)
+CAFFE2_SPECIALIZED_SCALE(float, float, s)
+CAFFE2_SPECIALIZED_SCALE(double, double, d)
+CAFFE2_SPECIALIZED_SCALE(float, double, d)
 #undef CAFFE2_SPECIALIZED_SCALE
 
 #define CAFFE2_SPECIALIZED_DOT(T, prefix)                       \
@@ -453,6 +453,36 @@ CAFFE2_SPECIALIZED_AXPBY(float, s)
 #undef CAFFE2_SPECIALIZED_AXPBY
 
 #endif // CAFFE2_USE_EIGEN_FOR_BLAS
+
+#define CAFFE2_SPECIALIZED_SCALE(TAlpha, TData)                        \
+  template <>                                                          \
+  void Scale<TAlpha, TData, CPUContext>(                               \
+      const int n,                                                     \
+      const TAlpha alpha,                                              \
+      const TData* x,                                                  \
+      TData* y,                                                        \
+      CPUContext* /* context */) {                                     \
+    EigenVectorMap<TData>(y, n) =                                      \
+        ConstEigenVectorMap<TData>(x, n) * static_cast<TData>(alpha);  \
+  }                                                                    \
+  template <>                                                          \
+  void Scale<TAlpha, TData, CPUContext>(                               \
+      const int n,                                                     \
+      const TAlpha* alpha,                                             \
+      const TData* x,                                                  \
+      TData* y,                                                        \
+      CPUContext* /* context */) {                                     \
+    EigenVectorMap<TData>(y, n) =                                      \
+        ConstEigenVectorMap<TData>(x, n) * static_cast<TData>(*alpha); \
+  }
+#ifdef CAFFE2_USE_EIGEN_FOR_BLAS
+CAFFE2_SPECIALIZED_SCALE(float, float)
+CAFFE2_SPECIALIZED_SCALE(double, double)
+CAFFE2_SPECIALIZED_SCALE(float, double)
+#endif // CAFFE2_USE_EIGEN_FOR_BLAS
+CAFFE2_SPECIALIZED_SCALE(std::int32_t, std::int32_t)
+CAFFE2_SPECIALIZED_SCALE(std::int64_t, std::int64_t)
+#undef CAFFE2_SPECIALIZED_SCALE
 
 template <>
 void GemmBatched<float, CPUContext>(
@@ -662,17 +692,27 @@ DELEGATE_SIMPLE_BINARY_FUNCTION(double, Div, vdDiv)
     EigenVectorMap<T>(y, N) = ConstEigenVectorArrayMap<T>(x, N).expr();      \
   }
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Exp, exp)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Exp, exp)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Log, log)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Log, log)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Cos, cos)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Cos, cos)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Acos, acos)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Acos, acos)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Sin, sin)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Sin, sin)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Asin, asin)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Asin, asin)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Tan, tan)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Tan, tan)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Atan, atan)
-DELEGATE_SIMPLE_UNARY_FUNCTION(float, Abs, abs)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Atan, atan)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Sqr, square)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Sqr, square)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Sqrt, sqrt)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Sqrt, sqrt)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Rsqrt, rsqrt)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Rsqrt, rsqrt)
 
 #undef DELEGATE_SIMPLE_UNARY_FUNCTION
 
@@ -736,10 +776,10 @@ DELEGATE_COSH_FUNCTION(float)
 DELEGATE_COSH_FUNCTION(double)
 #undef DELEGATE_COSH_FUNCTION
 
-#define DELEGATE_INV_FUNCTION(T)                                        \
-  template <>                                                           \
-  void Inv<T, CPUContext>(const int N, const T* x, T* y, CPUContext*) { \
-    EigenVectorMap<T>(y, N) = ConstEigenVectorArrayMap<T>(x, N).inverse();\
+#define DELEGATE_INV_FUNCTION(T)                                           \
+  template <>                                                              \
+  void Inv<T, CPUContext>(const int N, const T* x, T* y, CPUContext*) {    \
+    EigenVectorMap<T>(y, N) = ConstEigenVectorArrayMap<T>(x, N).inverse(); \
   }
 DELEGATE_INV_FUNCTION(float)
 DELEGATE_INV_FUNCTION(double)
@@ -768,6 +808,19 @@ DELEGATE_SIGN_FUNCTION(double)
 DELEGATE_SIGN_FUNCTION(std::int32_t)
 DELEGATE_SIGN_FUNCTION(std::int64_t)
 #undef DELEGATE_SIGN_FUNCTION
+
+#define DELEGATE_ABS_FUNCTION(T)                                        \
+  template <>                                                           \
+  void Abs<T, CPUContext>(const int N, const T* x, T* y, CPUContext*) { \
+    EigenVectorMap<T>(y, N) = ConstEigenVectorArrayMap<T>(x, N).abs();  \
+  }
+#ifndef CAFFE2_USE_MKL
+DELEGATE_ABS_FUNCTION(float)
+DELEGATE_ABS_FUNCTION(double)
+#endif // CAFFE2_USE_MKL
+DELEGATE_ABS_FUNCTION(std::int32_t)
+DELEGATE_ABS_FUNCTION(std::int64_t)
+#undef DELEGATE_ABS_FUNCTION
 
 #define DELEGATE_CUBE_FUNCTION(T)                                        \
   template <>                                                            \
@@ -818,28 +871,55 @@ DEFINE_SIMPLE_BINARY_FUNCTION(Div, /)
 // Eigen or via custom code.
 ////////////////////////////////////////////////////////////////////////////////
 
-#define CAFFE2_SPECIALIZED_REDUCEMIN(T) \
-  template <>                           \
-  void ReduceMin<T, CPUContext>(        \
-      const int N,                      \
-      const T* x,                       \
-      T* y,                             \
-      Tensor* /*scratch_ptr*/,          \
-      CPUContext* /*context*/) {        \
-    *y = *std::min_element(x, x + N);   \
+#define CAFFE2_SPECIALIZED_SET(T)                                             \
+  template <>                                                                 \
+  void Set<T, CPUContext>(const size_t N, const T alpha, T* Y, CPUContext*) { \
+    if (N == 0) {                                                             \
+      return;                                                                 \
+    }                                                                         \
+    if (alpha == (T)0) {                                                      \
+      if (Y != nullptr) {                                                     \
+        std::memset(Y, 0, N * sizeof(T));                                     \
+      }                                                                       \
+    } else {                                                                  \
+      EigenVectorMap<T>(Y, N).setConstant(alpha);                             \
+    }                                                                         \
+  }
+
+CAFFE2_SPECIALIZED_SET(float);
+CAFFE2_SPECIALIZED_SET(double);
+CAFFE2_SPECIALIZED_SET(int8_t);
+CAFFE2_SPECIALIZED_SET(int16_t);
+CAFFE2_SPECIALIZED_SET(int);
+CAFFE2_SPECIALIZED_SET(int64_t);
+CAFFE2_SPECIALIZED_SET(bool);
+CAFFE2_SPECIALIZED_SET(char);
+CAFFE2_SPECIALIZED_SET(uint8_t);
+CAFFE2_SPECIALIZED_SET(uint16_t);
+#undef CAFFE2_SPECIALIZED_SET
+
+#define CAFFE2_SPECIALIZED_REDUCEMIN(T)                \
+  template <>                                          \
+  void ReduceMin<T, CPUContext>(                       \
+      const int N,                                     \
+      const T* x,                                      \
+      T* y,                                            \
+      Tensor* /*scratch_ptr*/,                         \
+      CPUContext* /*context*/) {                       \
+    *y = ConstEigenVectorArrayMap<T>(x, N).minCoeff(); \
   }
 CAFFE2_SPECIALIZED_REDUCEMIN(float)
 #undef CAFFE2_SPECIALIZED_REDUCEMIN
 
-#define CAFFE2_SPECIALIZED_REDUCEMAX(T) \
-  template <>                           \
-  void ReduceMax<T, CPUContext>(        \
-      const int N,                      \
-      const T* x,                       \
-      T* y,                             \
-      Tensor* /*scratch_ptr*/,          \
-      CPUContext* /*context*/) {        \
-    *y = *std::max_element(x, x + N);   \
+#define CAFFE2_SPECIALIZED_REDUCEMAX(T)                \
+  template <>                                          \
+  void ReduceMax<T, CPUContext>(                       \
+      const int N,                                     \
+      const T* x,                                      \
+      T* y,                                            \
+      Tensor* /*scratch_ptr*/,                         \
+      CPUContext* /*context*/) {                       \
+    *y = ConstEigenVectorArrayMap<T>(x, N).maxCoeff(); \
   }
 CAFFE2_SPECIALIZED_REDUCEMAX(float)
 CAFFE2_SPECIALIZED_REDUCEMAX(int32_t)
@@ -849,203 +929,502 @@ CAFFE2_SPECIALIZED_REDUCEMAX(int64_t)
 
 namespace {
 
-template <typename T, class Reducer>
-void ReduceTensor(
-    const int num_dims,
-    const int* dims,
-    const int num_axes,
-    const int* axes,
-    const Reducer& reducer,
-    const T& init,
+template <typename T>
+struct MinFunctor {
+  inline T operator()(const T a, const T b) const {
+    return std::min(a, b);
+  }
+};
+
+template <typename T>
+struct MaxFunctor {
+  inline T operator()(const T a, const T b) const {
+    return std::max(a, b);
+  }
+};
+
+template <typename T>
+struct L1NormFunctor {
+  inline T operator()(const T a, const T b) const {
+    return a + std::abs(b);
+  }
+};
+
+template <typename T>
+struct SquaredL2NormFunctor {
+  inline T operator()(const T a, const T b) const {
+    return a + b * b;
+  }
+};
+
+#define DELEGATE_ROWWISE_REDUCE_FUNCTION(Func, EigenOp)                    \
+  template <typename T>                                                    \
+  void Rowwise##Func(                                                      \
+      const int rows, const int cols, const T alpha, const T* X, T* Y) {   \
+    EigenVectorMap<T>(Y, rows) =                                           \
+        ConstEigenMatrixMap<T>(X, cols, rows).colwise().EigenOp() * alpha; \
+  }
+DELEGATE_ROWWISE_REDUCE_FUNCTION(ReduceMin, minCoeff)
+DELEGATE_ROWWISE_REDUCE_FUNCTION(ReduceMax, maxCoeff)
+DELEGATE_ROWWISE_REDUCE_FUNCTION(ReduceSum, sum)
+DELEGATE_ROWWISE_REDUCE_FUNCTION(ReduceMean, mean)
+DELEGATE_ROWWISE_REDUCE_FUNCTION(ReduceL1, template lpNorm<1>);
+DELEGATE_ROWWISE_REDUCE_FUNCTION(ReduceL2, norm)
+#undef DELEGATE_ROWWISE_REDUCE_FUNCTION
+
+#define DELEGATE_COLWISE_REDUCE_FUNCTION(Func, EigenOp)                    \
+  template <typename T>                                                    \
+  void Colwise##Func(                                                      \
+      const int rows, const int cols, const T alpha, const T* X, T* Y) {   \
+    EigenVectorMap<T>(Y, cols) =                                           \
+        ConstEigenMatrixMap<T>(X, cols, rows).rowwise().EigenOp() * alpha; \
+  }
+DELEGATE_COLWISE_REDUCE_FUNCTION(ReduceMin, minCoeff)
+DELEGATE_COLWISE_REDUCE_FUNCTION(ReduceMax, maxCoeff)
+DELEGATE_COLWISE_REDUCE_FUNCTION(ReduceSum, sum)
+DELEGATE_COLWISE_REDUCE_FUNCTION(ReduceMean, mean)
+DELEGATE_COLWISE_REDUCE_FUNCTION(ReduceL1, template lpNorm<1>);
+DELEGATE_COLWISE_REDUCE_FUNCTION(ReduceL2, norm)
+#undef DELEGATE_COLWISE_REDUCE_FUNCTION
+
+template <typename T>
+void BothEndsReduceMin(
+    const int pre,
+    const int mid,
+    const int nxt,
+    const T alpha,
     const T* X,
-    T* Y,
-    CPUContext* context) {
-  CAFFE_ENFORCE_LE(num_axes, num_dims);
-  if (X == Y) {
-    return;
+    T* Y) {
+  EigenVectorArrayMap<T> Y_arr(Y, mid);
+  Y_arr = ConstEigenArrayMap<T>(X, nxt, mid).colwise().minCoeff();
+  const T* X_ptr = X + mid * nxt;
+  // It seems there is some bug in eigen array::min so it cannot be implemented
+  // as ReduceSum below.
+  for (int i = 1; i < pre; ++i) {
+    for (int j = 0; j < mid; ++j) {
+      Y[j] = std::min(Y[j], ConstEigenVectorArrayMap<T>(X_ptr, nxt).minCoeff());
+      X_ptr += nxt;
+    }
   }
-  std::vector<int> Y_dims(dims, dims + num_dims);
-  for (int i = 0; i < num_axes; ++i) {
-    Y_dims[axes[i]] = 1;
-  }
-  const int X_size =
-      std::accumulate(dims, dims + num_dims, 1, std::multiplies<int>());
-  const int Y_size = std::accumulate(
-      Y_dims.cbegin(), Y_dims.cend(), 1, std::multiplies<int>());
-  Set<T, CPUContext>(Y_size, init, Y, context);
-  std::vector<int> index(num_dims, 0);
-  for (int X_index = 0; X_index < X_size; ++X_index) {
-    const int Y_index =
-        utils::GetIndexFromDims(num_dims, Y_dims.data(), index.data());
-    Y[Y_index] = reducer(Y[Y_index], X[X_index]);
-    utils::IncreaseIndexInDims(num_dims, dims, index.data());
+  if (alpha != T(1)) {
+    Y_arr *= alpha;
   }
 }
 
 template <typename T>
-void ReduceMeanImpl(
-    const int num_dims,
-    const int* dims,
-    const int num_axes,
-    const int* axes,
+void BothEndsReduceMax(
+    const int pre,
+    const int mid,
+    const int nxt,
+    const T alpha,
+    const T* X,
+    T* Y) {
+  EigenVectorArrayMap<T> Y_arr(Y, mid);
+  Y_arr = ConstEigenArrayMap<T>(X, nxt, mid).colwise().maxCoeff();
+  const T* X_ptr = X + mid * nxt;
+  for (int i = 1; i < pre; ++i) {
+    for (int j = 0; j < mid; ++j) {
+      Y[j] = std::max(Y[j], ConstEigenVectorArrayMap<T>(X_ptr, nxt).maxCoeff());
+      X_ptr += nxt;
+    }
+  }
+  if (alpha != T(1)) {
+    Y_arr *= alpha;
+  }
+}
+
+template <typename T>
+void BothEndsReduceSum(
+    const int pre,
+    const int mid,
+    const int nxt,
+    const T alpha,
+    const T* X,
+    T* Y) {
+  EigenVectorArrayMap<T> Y_arr(Y, mid);
+  Y_arr = ConstEigenArrayMap<T>(X, nxt, mid).colwise().sum();
+  const int stride = mid * nxt;
+  const T* X_ptr = X + stride;
+  for (int i = 1; i < pre; ++i) {
+    Y_arr += ConstEigenArrayMap<T>(X_ptr, nxt, mid).colwise().sum();
+    X_ptr += stride;
+  }
+  if (alpha != T(1)) {
+    Y_arr *= alpha;
+  }
+}
+
+template <typename T>
+void BothEndsReduceMean(
+    const int pre,
+    const int mid,
+    const int nxt,
+    const T alpha,
+    const T* X,
+    T* Y) {
+  EigenVectorArrayMap<T> Y_arr(Y, mid);
+  Y_arr = ConstEigenArrayMap<T>(X, nxt, mid).colwise().mean();
+  const int stride = mid * nxt;
+  const T* X_ptr = X + stride;
+  for (int i = 1; i < pre; ++i) {
+    Y_arr += ConstEigenArrayMap<T>(X_ptr, nxt, mid).colwise().mean();
+    X_ptr += stride;
+  }
+  if (alpha / static_cast<T>(pre) != 1) {
+    Y_arr *= alpha / static_cast<T>(pre);
+  }
+}
+
+template <typename T>
+void BothEndsReduceL1(
+    const int pre,
+    const int mid,
+    const int nxt,
+    const T alpha,
+    const T* X,
+    T* Y) {
+  EigenVectorArrayMap<T> Y_arr(Y, mid);
+  Y_arr = ConstEigenMatrixMap<T>(X, nxt, mid)
+              .colwise()
+              .template lpNorm<1>()
+              .array();
+  const int stride = mid * nxt;
+  const T* X_ptr = X + stride;
+  for (int i = 1; i < pre; ++i) {
+    Y_arr += ConstEigenMatrixMap<T>(X_ptr, nxt, mid)
+                 .colwise()
+                 .template lpNorm<1>()
+                 .array();
+    X_ptr += stride;
+  }
+  if (alpha != T(1)) {
+    Y_arr *= alpha;
+  }
+}
+
+template <typename T>
+void BothEndsReduceL2(
+    const int pre,
+    const int mid,
+    const int nxt,
+    const T alpha,
+    const T* X,
+    T* Y) {
+  EigenVectorArrayMap<T> Y_arr(Y, mid);
+  Y_arr = ConstEigenMatrixMap<T>(X, nxt, mid).colwise().squaredNorm().array();
+  const int stride = mid * nxt;
+  const T* X_ptr = X + stride;
+  for (int i = 1; i < pre; ++i) {
+    Y_arr +=
+        ConstEigenMatrixMap<T>(X_ptr, nxt, mid).colwise().squaredNorm().array();
+    X_ptr += stride;
+  }
+  Y_arr = Y_arr.sqrt() * alpha;
+}
+
+template <typename T, class Reducer>
+void ReduceTensor(
+    const int ndim,
+    const int* X_dims,
+    const int* Y_dims,
+    const Reducer& reducer,
+    const T init,
+    const T alpha,
     const T* X,
     T* Y,
     CPUContext* context) {
-  ReduceTensor(
-      num_dims, dims, num_axes, axes, std::plus<T>(), T(0), X, Y, context);
   const int X_size =
-      std::accumulate(dims, dims + num_dims, 1, std::multiplies<int>());
-  int scale = 1;
-  for (int i = 0; i < num_axes; ++i) {
-    scale *= dims[axes[i]];
+      std::accumulate(X_dims, X_dims + ndim, 1, std::multiplies<int>());
+  const int Y_size =
+      std::accumulate(Y_dims, Y_dims + ndim, 1, std::multiplies<int>());
+  Set<T, CPUContext>(Y_size, init, Y, context);
+  std::vector<int> index(ndim, 0);
+  for (int X_index = 0; X_index < X_size; ++X_index) {
+    const int Y_index = utils::GetIndexFromDims(ndim, Y_dims, index.data());
+    Y[Y_index] = reducer(Y[Y_index], X[X_index]);
+    utils::IncreaseIndexInDims(ndim, X_dims, index.data());
   }
-  const int Y_size = X_size / scale;
-  Scale<T, CPUContext>(Y_size, 1.0f / static_cast<float>(scale), Y, Y, context);
+  Scale<T, T, CPUContext>(Y_size, alpha, Y, Y, context);
 }
 
 } // namespace
 
-#define CAFFE2_SPECIALIZED_REDUCE_MIN(T)                       \
-  template <>                                                  \
-  void ReduceMin<T, CPUContext>(                               \
-      const int num_dims,                                      \
-      const int* dims,                                         \
-      const int num_axes,                                      \
-      const int* axes,                                         \
-      const T* X,                                              \
-      T* Y,                                                    \
-      CPUContext* context) {                                   \
-    ReduceTensor(                                              \
-        num_dims,                                              \
-        dims,                                                  \
-        num_axes,                                              \
-        axes,                                                  \
-        [](const T& a, const T& b) { return std::min(a, b); }, \
-        std::numeric_limits<T>::max(),                         \
-        X,                                                     \
-        Y,                                                     \
-        context);                                              \
+#define DELEGATE_REDUCE_FUNCTION(T, Func, reducer, init, is_norm)              \
+  template <>                                                                  \
+  void Func<T, CPUContext>(                                                    \
+      const int num_dims,                                                      \
+      const int* dims,                                                         \
+      const int num_axes,                                                      \
+      const int* axes,                                                         \
+      const T alpha,                                                           \
+      const T* X,                                                              \
+      T* Y,                                                                    \
+      CPUContext* context) {                                                   \
+    CAFFE_ENFORCE_LE(num_axes, num_dims);                                      \
+    std::vector<int> Y_dims_vector(dims, dims + num_dims);                     \
+    for (int i = 0; i < num_axes; ++i) {                                       \
+      Y_dims_vector[axes[i]] = 1;                                              \
+    }                                                                          \
+    const int* X_dims = dims;                                                  \
+    const int* Y_dims = Y_dims_vector.data();                                  \
+    const int X_size =                                                         \
+        std::accumulate(X_dims, X_dims + num_dims, 1, std::multiplies<int>()); \
+    const int Y_size =                                                         \
+        std::accumulate(Y_dims, Y_dims + num_dims, 1, std::multiplies<int>()); \
+    if (X_size == 0) {                                                         \
+      Set<T, CPUContext>(Y_size, alpha * init, Y, context);                    \
+      return;                                                                  \
+    }                                                                          \
+    if (alpha == T(0)) {                                                       \
+      Set<T, CPUContext>(Y_size, 0, Y, context);                               \
+      return;                                                                  \
+    }                                                                          \
+    if (std::equal(X_dims, X_dims + num_dims, Y_dims)) {                       \
+      if (is_norm) {                                                           \
+        Abs<T, CPUContext>(X_size, X, Y, context);                             \
+        Scale<T, T, CPUContext>(Y_size, alpha, Y, Y, context);                 \
+      } else {                                                                 \
+        Scale<T, T, CPUContext>(Y_size, alpha, X, Y, context);                 \
+      }                                                                        \
+      return;                                                                  \
+    }                                                                          \
+    int rows;                                                                  \
+    int cols;                                                                  \
+    if (utils::IsRowwiseReduce(num_dims, X_dims, Y_dims, &rows, &cols)) {      \
+      Rowwise##Func<T>(rows, cols, alpha, X, Y);                               \
+      return;                                                                  \
+    }                                                                          \
+    if (utils::IsColwiseReduce(num_dims, X_dims, Y_dims, &rows, &cols)) {      \
+      Colwise##Func<T>(rows, cols, alpha, X, Y);                               \
+      return;                                                                  \
+    }                                                                          \
+    int pre;                                                                   \
+    int mid;                                                                   \
+    int nxt;                                                                   \
+    if (utils::IsBothEndsReduce(num_dims, X_dims, Y_dims, &pre, &mid, &nxt)) { \
+      BothEnds##Func<T>(pre, mid, nxt, alpha, X, Y);                           \
+      return;                                                                  \
+    }                                                                          \
+    ReduceTensor(                                                              \
+        num_dims, X_dims, Y_dims, reducer, init, alpha, X, Y, context);        \
   }
-CAFFE2_SPECIALIZED_REDUCE_MIN(std::int32_t)
-CAFFE2_SPECIALIZED_REDUCE_MIN(std::int64_t)
-CAFFE2_SPECIALIZED_REDUCE_MIN(float)
-CAFFE2_SPECIALIZED_REDUCE_MIN(double)
-#undef CAFFE2_SPECIALIZED_REDUCE_MIN
 
-#define CAFFE2_SPECIALIZED_REDUCE_MAX(T)                       \
-  template <>                                                  \
-  void ReduceMax<T, CPUContext>(                               \
-      const int num_dims,                                      \
-      const int* dims,                                         \
-      const int num_axes,                                      \
-      const int* axes,                                         \
-      const T* X,                                              \
-      T* Y,                                                    \
-      CPUContext* context) {                                   \
-    ReduceTensor(                                              \
-        num_dims,                                              \
-        dims,                                                  \
-        num_axes,                                              \
-        axes,                                                  \
-        [](const T& a, const T& b) { return std::max(a, b); }, \
-        std::numeric_limits<T>::lowest(),                      \
-        X,                                                     \
-        Y,                                                     \
-        context);                                              \
-  }
-CAFFE2_SPECIALIZED_REDUCE_MAX(std::int32_t)
-CAFFE2_SPECIALIZED_REDUCE_MAX(std::int64_t)
-CAFFE2_SPECIALIZED_REDUCE_MAX(float)
-CAFFE2_SPECIALIZED_REDUCE_MAX(double)
-#undef CAFFE2_SPECIALIZED_REDUCE_MAX
+DELEGATE_REDUCE_FUNCTION(
+    float,
+    ReduceMin,
+    MinFunctor<float>(),
+    std::numeric_limits<float>::max(),
+    false)
+DELEGATE_REDUCE_FUNCTION(
+    double,
+    ReduceMin,
+    MinFunctor<double>(),
+    std::numeric_limits<double>::max(),
+    false)
+DELEGATE_REDUCE_FUNCTION(
+    std::int32_t,
+    ReduceMin,
+    MinFunctor<std::int32_t>(),
+    std::numeric_limits<std::int32_t>::max(),
+    false)
+DELEGATE_REDUCE_FUNCTION(
+    std::int64_t,
+    ReduceMin,
+    MinFunctor<std::int64_t>(),
+    std::numeric_limits<std::int64_t>::max(),
+    false)
 
-#define CAFFE2_SPECIALIZED_REDUCE_SUM(T)                                      \
-  template <>                                                                 \
-  void ReduceSum<T, CPUContext>(                                              \
-      const int num_dims,                                                     \
-      const int* dims,                                                        \
-      const int num_axes,                                                     \
-      const int* axes,                                                        \
-      const T* X,                                                             \
-      T* Y,                                                                   \
-      CPUContext* context) {                                                  \
-    ReduceTensor(                                                             \
-        num_dims, dims, num_axes, axes, std::plus<T>(), T(0), X, Y, context); \
-  }
-CAFFE2_SPECIALIZED_REDUCE_SUM(std::int32_t)
-CAFFE2_SPECIALIZED_REDUCE_SUM(std::int64_t)
-CAFFE2_SPECIALIZED_REDUCE_SUM(float)
-CAFFE2_SPECIALIZED_REDUCE_SUM(double)
-#undef CAFFE2_SPECIALIZED_REDUCE_SUM
+DELEGATE_REDUCE_FUNCTION(
+    float,
+    ReduceMax,
+    MaxFunctor<float>(),
+    std::numeric_limits<float>::lowest(),
+    false)
+DELEGATE_REDUCE_FUNCTION(
+    double,
+    ReduceMax,
+    MaxFunctor<double>(),
+    std::numeric_limits<double>::lowest(),
+    false)
+DELEGATE_REDUCE_FUNCTION(
+    std::int32_t,
+    ReduceMax,
+    MaxFunctor<std::int32_t>(),
+    std::numeric_limits<std::int32_t>::lowest(),
+    false)
+DELEGATE_REDUCE_FUNCTION(
+    std::int64_t,
+    ReduceMax,
+    MaxFunctor<std::int64_t>(),
+    std::numeric_limits<std::int64_t>::lowest(),
+    false)
 
-#define CAFFE2_SPECIALIZED_REDUCE_MEAN(T)                             \
-  template <>                                                         \
-  void ReduceMean<T, CPUContext>(                                     \
-      const int num_dims,                                             \
-      const int* dims,                                                \
-      const int num_axes,                                             \
-      const int* axes,                                                \
-      const T* X,                                                     \
-      T* Y,                                                           \
-      CPUContext* context) {                                          \
-    ReduceMeanImpl<T>(num_dims, dims, num_axes, axes, X, Y, context); \
+DELEGATE_REDUCE_FUNCTION(float, ReduceSum, std::plus<float>(), 0.0f, false)
+DELEGATE_REDUCE_FUNCTION(double, ReduceSum, std::plus<double>(), 0.0, false)
+DELEGATE_REDUCE_FUNCTION(
+    std::int32_t,
+    ReduceSum,
+    std::plus<std::int32_t>(),
+    0,
+    false)
+DELEGATE_REDUCE_FUNCTION(
+    std::int64_t,
+    ReduceSum,
+    std::plus<std::int64_t>(),
+    std::int64_t(0),
+    false)
+
+DELEGATE_REDUCE_FUNCTION(float, ReduceL1, L1NormFunctor<float>(), 0.0f, true)
+DELEGATE_REDUCE_FUNCTION(double, ReduceL1, L1NormFunctor<double>(), 0.0, true)
+DELEGATE_REDUCE_FUNCTION(
+    std::int32_t,
+    ReduceL1,
+    L1NormFunctor<std::int32_t>(),
+    0,
+    true)
+DELEGATE_REDUCE_FUNCTION(
+    std::int64_t,
+    ReduceL1,
+    L1NormFunctor<std::int64_t>(),
+    std::int64_t(0),
+    true)
+
+#undef DELEGATE_REDUCE_FUNCTION
+
+#define CAFFE2_SPECIALIZED_REDUCE_MEAN(T)                                      \
+  template <>                                                                  \
+  void ReduceMean<T, CPUContext>(                                              \
+      const int num_dims,                                                      \
+      const int* dims,                                                         \
+      const int num_axes,                                                      \
+      const int* axes,                                                         \
+      const T alpha,                                                           \
+      const T* X,                                                              \
+      T* Y,                                                                    \
+      CPUContext* context) {                                                   \
+    CAFFE_ENFORCE_LE(num_axes, num_dims);                                      \
+    std::vector<int> Y_dims_vector(dims, dims + num_dims);                     \
+    for (int i = 0; i < num_axes; ++i) {                                       \
+      Y_dims_vector[axes[i]] = 1;                                              \
+    }                                                                          \
+    const int* X_dims = dims;                                                  \
+    const int* Y_dims = Y_dims_vector.data();                                  \
+    const int X_size =                                                         \
+        std::accumulate(X_dims, X_dims + num_dims, 1, std::multiplies<int>()); \
+    const int Y_size =                                                         \
+        std::accumulate(Y_dims, Y_dims + num_dims, 1, std::multiplies<int>()); \
+    if (X_size == 0) {                                                         \
+      Set<T, CPUContext>(Y_size, 0, Y, context);                               \
+      return;                                                                  \
+    }                                                                          \
+    if (alpha == T(0)) {                                                       \
+      Set<T, CPUContext>(Y_size, 0, Y, context);                               \
+      return;                                                                  \
+    }                                                                          \
+    if (std::equal(X_dims, X_dims + num_dims, Y_dims)) {                       \
+      Scale<T, T, CPUContext>(X_size, alpha, X, Y, context);                   \
+      return;                                                                  \
+    }                                                                          \
+    int rows;                                                                  \
+    int cols;                                                                  \
+    if (utils::IsRowwiseReduce(num_dims, X_dims, Y_dims, &rows, &cols)) {      \
+      RowwiseReduceMean<T>(rows, cols, alpha, X, Y);                           \
+      return;                                                                  \
+    }                                                                          \
+    if (utils::IsColwiseReduce(num_dims, X_dims, Y_dims, &rows, &cols)) {      \
+      ColwiseReduceMean<T>(rows, cols, alpha, X, Y);                           \
+      return;                                                                  \
+    }                                                                          \
+    int pre;                                                                   \
+    int mid;                                                                   \
+    int nxt;                                                                   \
+    if (utils::IsBothEndsReduce(num_dims, X_dims, Y_dims, &pre, &mid, &nxt)) { \
+      BothEndsReduceMean<T>(pre, mid, nxt, alpha, X, Y);                       \
+      return;                                                                  \
+    }                                                                          \
+    const int scale = X_size / Y_size;                                         \
+    ReduceTensor(                                                              \
+        num_dims,                                                              \
+        X_dims,                                                                \
+        Y_dims,                                                                \
+        std::plus<T>(),                                                        \
+        T(0),                                                                  \
+        alpha / static_cast<T>(scale),                                         \
+        X,                                                                     \
+        Y,                                                                     \
+        context);                                                              \
   }
 CAFFE2_SPECIALIZED_REDUCE_MEAN(float)
+CAFFE2_SPECIALIZED_REDUCE_MEAN(double)
 #undef CAFFE2_SPECIALIZED_REDUCE_MEAN
 
-#define CAFFE2_SPECIALIZED_REDUCE_L1(T)                         \
-  template <>                                                   \
-  void ReduceL1<T, CPUContext>(                                 \
-      const int num_dims,                                       \
-      const int* dims,                                          \
-      const int num_axes,                                       \
-      const int* axes,                                          \
-      const T* X,                                               \
-      T* Y,                                                     \
-      CPUContext* context) {                                    \
-    ReduceTensor(                                               \
-        num_dims,                                               \
-        dims,                                                   \
-        num_axes,                                               \
-        axes,                                                   \
-        [](const T& a, const T& b) { return a + std::abs(b); }, \
-        T(0),                                                   \
-        X,                                                      \
-        Y,                                                      \
-        context);                                               \
-  }
-CAFFE2_SPECIALIZED_REDUCE_L1(float)
-#undef CAFFE2_SPECIALIZED_REDUCE_L1
-
-#define CAFFE2_SPECIALIZED_REDUCE_L2(T)                             \
-  template <>                                                       \
-  void ReduceL2<T, CPUContext>(                                     \
-      const int num_dims,                                           \
-      const int* dims,                                              \
-      const int num_axes,                                           \
-      const int* axes,                                              \
-      const T* X,                                                   \
-      T* Y,                                                         \
-      CPUContext* context) {                                        \
-    ReduceTensor(                                                   \
-        num_dims,                                                   \
-        dims,                                                       \
-        num_axes,                                                   \
-        axes,                                                       \
-        [](const T& a, const T& b) { return a + b * b; },           \
-        T(0),                                                       \
-        X,                                                          \
-        Y,                                                          \
-        context);                                                   \
-    std::vector<int> Y_dims(dims, dims + num_dims);                 \
-    for (int i = 0; i < num_axes; ++i) {                            \
-      Y_dims[axes[i]] = 1;                                          \
-    }                                                               \
-    const int Y_size = std::accumulate(                             \
-        Y_dims.cbegin(), Y_dims.cend(), 1, std::multiplies<int>()); \
-    Sqrt<T, CPUContext>(Y_size, Y, Y, context);                     \
+#define CAFFE2_SPECIALIZED_REDUCE_L2(T)                                        \
+  template <>                                                                  \
+  void ReduceL2<T, CPUContext>(                                                \
+      const int num_dims,                                                      \
+      const int* dims,                                                         \
+      const int num_axes,                                                      \
+      const int* axes,                                                         \
+      const T alpha,                                                           \
+      const T* X,                                                              \
+      T* Y,                                                                    \
+      CPUContext* context) {                                                   \
+    CAFFE_ENFORCE_LE(num_axes, num_dims);                                      \
+    std::vector<int> Y_dims_vector(dims, dims + num_dims);                     \
+    for (int i = 0; i < num_axes; ++i) {                                       \
+      Y_dims_vector[axes[i]] = 1;                                              \
+    }                                                                          \
+    const int* X_dims = dims;                                                  \
+    const int* Y_dims = Y_dims_vector.data();                                  \
+    const int X_size =                                                         \
+        std::accumulate(X_dims, X_dims + num_dims, 1, std::multiplies<int>()); \
+    const int Y_size =                                                         \
+        std::accumulate(Y_dims, Y_dims + num_dims, 1, std::multiplies<int>()); \
+    if (X_size == 0) {                                                         \
+      Set<T, CPUContext>(Y_size, 0, Y, context);                               \
+      return;                                                                  \
+    }                                                                          \
+    if (alpha == T(0)) {                                                       \
+      Set<T, CPUContext>(Y_size, 0, Y, context);                               \
+      return;                                                                  \
+    }                                                                          \
+    if (std::equal(X_dims, X_dims + num_dims, Y_dims)) {                       \
+      Abs<T, CPUContext>(X_size, X, Y, context);                               \
+      Scale<T, T, CPUContext>(Y_size, alpha, Y, Y, context);                   \
+      return;                                                                  \
+    }                                                                          \
+    int rows;                                                                  \
+    int cols;                                                                  \
+    if (utils::IsRowwiseReduce(num_dims, X_dims, Y_dims, &rows, &cols)) {      \
+      RowwiseReduceL2<T>(rows, cols, alpha, X, Y);                             \
+      return;                                                                  \
+    }                                                                          \
+    if (utils::IsColwiseReduce(num_dims, X_dims, Y_dims, &rows, &cols)) {      \
+      ColwiseReduceL2<T>(rows, cols, alpha, X, Y);                             \
+      return;                                                                  \
+    }                                                                          \
+    int pre;                                                                   \
+    int mid;                                                                   \
+    int nxt;                                                                   \
+    if (utils::IsBothEndsReduce(num_dims, X_dims, Y_dims, &pre, &mid, &nxt)) { \
+      BothEndsReduceL2<T>(pre, mid, nxt, alpha, X, Y);                         \
+      return;                                                                  \
+    }                                                                          \
+    ReduceTensor(                                                              \
+        num_dims,                                                              \
+        X_dims,                                                                \
+        Y_dims,                                                                \
+        SquaredL2NormFunctor<T>(),                                             \
+        T(0),                                                                  \
+        T(1),                                                                  \
+        X,                                                                     \
+        Y,                                                                     \
+        context);                                                              \
+    Sqrt<T, CPUContext>(Y_size, Y, Y, context);                                \
+    Scale<T, T, CPUContext>(Y_size, alpha, Y, Y, context);                     \
   }
 CAFFE2_SPECIALIZED_REDUCE_L2(float)
+CAFFE2_SPECIALIZED_REDUCE_L2(double)
 #undef CAFFE2_SPECIALIZED_REDUCE_L2
 
 namespace {
@@ -1056,40 +1435,44 @@ void BroadcastImpl(
     const int* X_dims,
     const int Y_ndim,
     const int* Y_dims,
+    const T alpha,
     const T* X,
-    T* Y) {
+    T* Y,
+    CPUContext* context) {
   CAFFE_ENFORCE_LE(X_ndim, Y_ndim);
-  std::vector<int> X_dims_ex(Y_ndim);
+  std::vector<int> X_dims_vector(Y_ndim);
   const int d = Y_ndim - X_ndim;
-  std::fill(X_dims_ex.begin(), X_dims_ex.begin() + d, 1);
+  std::fill(X_dims_vector.begin(), X_dims_vector.begin() + d, 1);
   for (int i = d; i < Y_ndim; ++i) {
     CAFFE_ENFORCE(X_dims[i - d] == 1 || X_dims[i - d] == Y_dims[i]);
-    X_dims_ex[i] = X_dims[i - d];
+    X_dims_vector[i] = X_dims[i - d];
   }
+  X_dims = X_dims_vector.data();
   const int Y_size =
       std::accumulate(Y_dims, Y_dims + Y_ndim, 1, std::multiplies<int>());
   std::vector<int> index(Y_ndim, 0);
   for (int Y_index = 0; Y_index < Y_size; ++Y_index) {
-    const int X_index =
-        utils::GetIndexFromDims(Y_ndim, X_dims_ex.data(), index.data());
+    const int X_index = utils::GetIndexFromDims(Y_ndim, X_dims, index.data());
     Y[Y_index] = X[X_index];
     utils::IncreaseIndexInDims(Y_ndim, Y_dims, index.data());
   }
+  Scale<T, T, CPUContext>(Y_size, alpha, Y, Y, context);
 }
 
 } // namespace
 
-#define CAFFE2_SPECIALIZED_BROADCAST(T)                     \
-  template <>                                               \
-  void Broadcast<T, CPUContext>(                            \
-      const int X_ndim,                                     \
-      const int* X_dims,                                    \
-      const int Y_ndim,                                     \
-      const int* Y_dims,                                    \
-      const T* X,                                           \
-      T* Y,                                                 \
-      CPUContext* /* context */) {                          \
-    BroadcastImpl<T>(X_ndim, X_dims, Y_ndim, Y_dims, X, Y); \
+#define CAFFE2_SPECIALIZED_BROADCAST(T)                                     \
+  template <>                                                               \
+  void Broadcast<T, CPUContext>(                                            \
+      const int X_ndim,                                                     \
+      const int* X_dims,                                                    \
+      const int Y_ndim,                                                     \
+      const int* Y_dims,                                                    \
+      const T alpha,                                                        \
+      const T* X,                                                           \
+      T* Y,                                                                 \
+      CPUContext* context) {                                                \
+    BroadcastImpl<T>(X_ndim, X_dims, Y_ndim, Y_dims, alpha, X, Y, context); \
   }
 CAFFE2_SPECIALIZED_BROADCAST(std::int32_t)
 CAFFE2_SPECIALIZED_BROADCAST(std::int64_t)
@@ -1098,6 +1481,63 @@ CAFFE2_SPECIALIZED_BROADCAST(double)
 #undef CAFFE2_SPECIALIZED_BROADCAST
 
 namespace {
+
+template <typename T>
+void RowwiseMoments(
+    const int rows,
+    const int cols,
+    const T* X,
+    T* mean,
+    T* variance) {
+  ConstEigenArrayMap<T> X_mat(X, cols, rows);
+  EigenVectorArrayMap<T> mean_arr(mean, rows);
+  EigenVectorArrayMap<T> variance_arr(variance, rows);
+  mean_arr = X_mat.colwise().mean();
+  variance_arr = X_mat.array().square().colwise().mean();
+  variance_arr -= mean_arr.square();
+}
+
+template <typename T>
+void ColwiseMoments(
+    const int rows,
+    const int cols,
+    const T* X,
+    T* mean,
+    T* variance) {
+  ConstEigenArrayMap<T> X_mat(X, cols, rows);
+  EigenVectorArrayMap<T> mean_arr(mean, cols);
+  EigenVectorArrayMap<T> variance_arr(variance, cols);
+  mean_arr = X_mat.rowwise().mean();
+  variance_arr = X_mat.array().square().rowwise().mean();
+  variance_arr -= mean_arr.square();
+}
+
+template <typename T>
+void BothEndsMoments(
+    const int pre,
+    const int mid,
+    const int nxt,
+    const T* X,
+    T* mean,
+    T* variance) {
+  EigenVectorArrayMap<T> mean_arr(mean, mid);
+  EigenVectorArrayMap<T> variance_arr(variance, mid);
+  mean_arr = ConstEigenArrayMap<T>(X, nxt, mid).colwise().mean();
+  variance_arr = ConstEigenArrayMap<T>(X, nxt, mid).square().colwise().mean();
+  const int stride = mid * nxt;
+  const T* X_ptr = X + stride;
+  for (int i = 1; i < pre; ++i) {
+    mean_arr += ConstEigenArrayMap<T>(X_ptr, nxt, mid).colwise().mean();
+    variance_arr +=
+        ConstEigenArrayMap<T>(X_ptr, nxt, mid).square().colwise().mean();
+    X_ptr += stride;
+  }
+  if (pre > 1) {
+    mean_arr /= static_cast<T>(pre);
+    variance_arr /= static_cast<T>(pre);
+  }
+  variance_arr -= mean_arr.square();
+}
 
 template <typename T>
 void MomentsImpl(
@@ -1109,30 +1549,59 @@ void MomentsImpl(
     T* mean,
     T* variance,
     CPUContext* context) {
-  std::vector<int> Y_dims(dims, dims + num_dims);
+  std::vector<int> Y_dims_vector(dims, dims + num_dims);
   for (int i = 0; i < num_axes; ++i) {
-    Y_dims[axes[i]] = 1;
+    Y_dims_vector[axes[i]] = 1;
   }
+  const int* X_dims = dims;
+  const int* Y_dims = Y_dims_vector.data();
   const int X_size =
-      std::accumulate(dims, dims + num_dims, 1, std::multiplies<int>());
-  const int Y_size = std::accumulate(
-      Y_dims.cbegin(), Y_dims.cend(), 1, std::multiplies<int>());
-  const int scale = X_size / Y_size;
+      std::accumulate(X_dims, X_dims + num_dims, 1, std::multiplies<int>());
+  const int Y_size =
+      std::accumulate(Y_dims, Y_dims + num_dims, 1, std::multiplies<int>());
+  if (X_size == 0) {
+    if (Y_size > 0) {
+      memset(mean, 0, sizeof(T) * Y_size);
+      memset(variance, 0, sizeof(T) * Y_size);
+    }
+    return;
+  }
+  if (std::equal(X_dims, X_dims + num_dims, Y_dims)) {
+    memcpy(mean, X, sizeof(T) * Y_size);
+    memset(variance, 0, sizeof(T) * Y_size);
+    return;
+  }
+  int rows;
+  int cols;
+  if (utils::IsRowwiseReduce(num_dims, X_dims, Y_dims, &rows, &cols)) {
+    RowwiseMoments<T>(rows, cols, X, mean, variance);
+    return;
+  }
+  if (utils::IsColwiseReduce(num_dims, X_dims, Y_dims, &rows, &cols)) {
+    ColwiseMoments<T>(rows, cols, X, mean, variance);
+    return;
+  }
+  int pre;
+  int mid;
+  int nxt;
+  if (utils::IsBothEndsReduce(num_dims, X_dims, Y_dims, &pre, &mid, &nxt)) {
+    BothEndsMoments<T>(pre, mid, nxt, X, mean, variance);
+    return;
+  }
   Set<T, CPUContext>(Y_size, T(0), mean, context);
   Set<T, CPUContext>(Y_size, T(0), variance, context);
   std::vector<int> index(num_dims, 0);
   for (int X_index = 0; X_index < X_size; ++X_index) {
-    const int Y_index =
-        utils::GetIndexFromDims(num_dims, Y_dims.data(), index.data());
+    const int Y_index = utils::GetIndexFromDims(num_dims, Y_dims, index.data());
     mean[Y_index] += X[X_index];
     variance[Y_index] += X[X_index] * X[X_index];
     utils::IncreaseIndexInDims(num_dims, dims, index.data());
   }
-  for (int Y_index = 0; Y_index < Y_size; ++Y_index) {
-    mean[Y_index] /= static_cast<T>(scale);
-    variance[Y_index] = variance[Y_index] / static_cast<T>(scale) -
-        mean[Y_index] * mean[Y_index];
-  }
+  const T scale = static_cast<T>(Y_size) / static_cast<T>(X_size);
+  Scale<T, T, CPUContext>(Y_size, scale, mean, mean, context);
+  EigenVectorArrayMap<T> variance_arr(variance, Y_size);
+  variance_arr =
+      variance_arr * scale - ConstEigenVectorArrayMap<T>(mean, Y_size).square();
 }
 
 } // namespace
@@ -1358,30 +1827,6 @@ DELEGATE_EIGEN_2D_BROADCAST_2ND_BINARY_FUNCTION(std::int64_t, Div, /)
 
 #undef DELEGATE_EIGEN_2D_BROADCAST_1ST_BINARY_FUNCTION
 #undef DELEGATE_EIGEN_2D_BROADCAST_2ND_BINARY_FUNCTION
-
-#define CAFFE2_SPECIALIZED_SET(T)                                             \
-  template <>                                                                 \
-  void Set<T, CPUContext>(const size_t N, const T alpha, T* Y, CPUContext*) { \
-    if (alpha == (T)0) {                                                      \
-      if (Y != nullptr) {                                                     \
-        memset(Y, 0, N * sizeof(T));                                          \
-      }                                                                       \
-    } else {                                                                  \
-      EigenVectorMap<T>(Y, N).setConstant(alpha);                             \
-    }                                                                         \
-  }
-
-CAFFE2_SPECIALIZED_SET(float);
-CAFFE2_SPECIALIZED_SET(double);
-CAFFE2_SPECIALIZED_SET(int8_t);
-CAFFE2_SPECIALIZED_SET(int16_t);
-CAFFE2_SPECIALIZED_SET(int);
-CAFFE2_SPECIALIZED_SET(int64_t);
-CAFFE2_SPECIALIZED_SET(bool);
-CAFFE2_SPECIALIZED_SET(char);
-CAFFE2_SPECIALIZED_SET(uint8_t);
-CAFFE2_SPECIALIZED_SET(uint16_t);
-#undef CAFFE2_SPECIALIZED_SET
 
 template <>
 void Not<bool, CPUContext>(
@@ -1685,7 +2130,7 @@ DEFINE_2D_BROADCAST_1ST_DIV_FUNCTION(std::int64_t)
     int pre;                                                                 \
     int mid;                                                                 \
     int nxt;                                                                 \
-    if (utils::IsMiddleBroadcastBinaryOp(                                    \
+    if (utils::IsBothEndsBroadcastBinaryOp(                                  \
             ndim,                                                            \
             A_dims_array.data(),                                             \
             B_dims_array.data(),                                             \
@@ -1944,7 +2389,294 @@ void Select<float, CPUContext>(
   }
 }
 
+template <>
+void CopyMatrix<CPUContext>(
+    const size_t itemsize,
+    const int M,
+    const int N,
+    const void* A,
+    const int lda,
+    void* B,
+    const int ldb,
+    CPUContext* /*context*/,
+    TypeMeta::TypedCopy copy) {
+  if (A == nullptr || B == nullptr) {
+    return;
+  }
+  if (lda == N && ldb == N) {
+    // can coalese to a single memcpy of size M * N
+    if (copy) {
+      copy(static_cast<const char*>(A), static_cast<char*>(B), N * M);
+    } else {
+      memcpy(
+          static_cast<char*>(B), static_cast<const char*>(A), itemsize * N * M);
+    }
+    return;
+  }
+
+  for (int i = 0; i < M; ++i) {
+    if (copy) {
+      copy(
+          static_cast<const char*>(A) + lda * i * itemsize,
+          static_cast<char*>(B) + ldb * i * itemsize,
+          N);
+    } else {
+      memcpy(
+          static_cast<char*>(B) + ldb * i * itemsize,
+          static_cast<const char*>(A) + lda * i * itemsize,
+          itemsize * N);
+    }
+  }
+}
+
+#ifdef CAFFE2_USE_MKL
+
+#define DELEGATE_COPY_MATRIX_FUNCTION(T, Func)  \
+  template <>                                   \
+  void CopyMatrix<T, CPUContext>(               \
+      const int M,                              \
+      const int N,                              \
+      const T* A,                               \
+      const int lda,                            \
+      T* B,                                     \
+      const int ldb,                            \
+      CPUContext* /* context */) {              \
+    Func('R', 'N', M, N, T(1), A, lda, B, ldb); \
+  }                                             \
+  template <>                                   \
+  void CopyMatrix<T, CPUContext>(               \
+      const int M,                              \
+      const int N,                              \
+      const T* A,                               \
+      const int A_outer_stride,                 \
+      const int A_inner_stride,                 \
+      T* B,                                     \
+      const int B_outer_stride,                 \
+      const int B_inner_stride,                 \
+      CPUContext* /* context */) {              \
+    Func##2(                                    \
+        'R',                                    \
+        'N',                                    \
+        M,                                      \
+        N,                                      \
+        T(1),                                   \
+        A,                                      \
+        A_outer_stride,                         \
+        A_inner_stride,                         \
+        B,                                      \
+        B_outer_stride,                         \
+        B_inner_stride);                        \
+  }
+DELEGATE_COPY_MATRIX_FUNCTION(float, mkl_somatcopy)
+DELEGATE_COPY_MATRIX_FUNCTION(double, mkl_domatcopy)
+#undef DELEGATE_COPY_MATRIX_FUNCTION
+
+#endif // CAFFE2_USE_MKL
+
+#define CAFFE2_SPECIALIZED_COPY_MATRIX(T)                                \
+  template <>                                                            \
+  void CopyMatrix<T, CPUContext>(                                        \
+      const int M,                                                       \
+      const int N,                                                       \
+      const T* A,                                                        \
+      const int lda,                                                     \
+      T* B,                                                              \
+      const int ldb,                                                     \
+      CPUContext* /* context */) {                                       \
+    if (M == 0 || N == 0) {                                              \
+      return;                                                            \
+    }                                                                    \
+    if (lda == N) {                                                      \
+      if (ldb == N) {                                                    \
+        std::memcpy(B, A, sizeof(T) * M * N);                            \
+      } else {                                                           \
+        EigenOuterStridedMatrixMap<T>(B, N, M, EigenOuterStride(ldb)) =  \
+            ConstEigenMatrixMap<T>(A, N, M);                             \
+      }                                                                  \
+    } else {                                                             \
+      if (ldb == N) {                                                    \
+        EigenMatrixMap<T>(B, N, M) = ConstEigenOuterStridedMatrixMap<T>( \
+            A, N, M, EigenOuterStride(lda));                             \
+      } else {                                                           \
+        EigenOuterStridedMatrixMap<T>(B, N, M, EigenOuterStride(ldb)) =  \
+            ConstEigenOuterStridedMatrixMap<T>(                          \
+                A, N, M, EigenOuterStride(lda));                         \
+      }                                                                  \
+    }                                                                    \
+  }                                                                      \
+  template <>                                                            \
+  void CopyMatrix<T, CPUContext>(                                        \
+      const int M,                                                       \
+      const int N,                                                       \
+      const T* A,                                                        \
+      const int A_outer_stride,                                          \
+      const int A_inner_stride,                                          \
+      T* B,                                                              \
+      const int B_outer_stride,                                          \
+      const int B_inner_stride,                                          \
+      CPUContext* context) {                                             \
+    if (A_inner_stride == 1 && B_inner_stride == 1) {                    \
+      CopyMatrix<T, CPUContext>(                                         \
+          M, N, A, A_outer_stride, B, B_outer_stride, context);          \
+      return;                                                            \
+    }                                                                    \
+    EigenStridedMatrixMap<T>(                                            \
+        B, N, M, EigenStride(B_outer_stride, B_inner_stride)) =          \
+        ConstEigenStridedMatrixMap<T>(                                   \
+            A, N, M, EigenStride(A_outer_stride, A_inner_stride));       \
+  }
+
+#ifndef CAFFE2_USE_MKL
+CAFFE2_SPECIALIZED_COPY_MATRIX(float)
+CAFFE2_SPECIALIZED_COPY_MATRIX(double)
+#endif // CAFFE2_USE_MKL
+
+CAFFE2_SPECIALIZED_COPY_MATRIX(int)
+CAFFE2_SPECIALIZED_COPY_MATRIX(TIndex)
+#ifdef CAFFE2_UNIQUE_LONG_TYPEMETA
+CAFFE2_SPECIALIZED_COPY_MATRIX(long)
+#endif
+CAFFE2_SPECIALIZED_COPY_MATRIX(std::uint8_t)
+CAFFE2_SPECIALIZED_COPY_MATRIX(std::uint16_t)
+
+#undef CAFFE2_SPECIALIZXED_COPY_MATRIX
+
 namespace {
+
+template <typename T>
+void Im2ColZeroPaddingAndNoDilationNCHW(
+    const int C,
+    const int H,
+    const int W,
+    const int kernel_h,
+    const int kernel_w,
+    const int stride_h,
+    const int stride_w,
+    const T* img_data,
+    T* col_data,
+    CPUContext* context) {
+  const int output_h = (H - kernel_h) / stride_h + 1;
+  const int output_w = (W - kernel_w) / stride_w + 1;
+  const int output_size = output_h * output_w;
+  for (int c = 0; c < C; ++c) {
+    for (int kh = 0; kh < kernel_h; ++kh) {
+      for (int kw = 0; kw < kernel_w; ++kw) {
+        const T* src = img_data + kh * W + kw;
+        if (stride_w == 1) {
+          CopyMatrix<T, CPUContext>(
+              output_h,
+              output_w,
+              src,
+              stride_h * W,
+              col_data,
+              output_w,
+              context);
+        } else {
+          CopyMatrix<T, CPUContext>(
+              output_h,
+              output_w,
+              src,
+              stride_h * W,
+              stride_w,
+              col_data,
+              output_w,
+              1,
+              context);
+        }
+        col_data += output_size;
+      }
+    }
+    img_data += H * W;
+  }
+}
+
+template <typename T>
+void Col2ImZeroPaddingAndNoDilationNCHW(
+    const int C,
+    const int H,
+    const int W,
+    const int kernel_h,
+    const int kernel_w,
+    const int stride_h,
+    const int stride_w,
+    const T* col_data,
+    T* img_data,
+    CPUContext* context) {
+  Set<T, CPUContext>(C * H * W, T(0), img_data, context);
+  const int output_h = (H - kernel_h) / stride_h + 1;
+  const int output_w = (W - kernel_w) / stride_w + 1;
+  const int output_size = output_h * output_w;
+  for (int c = 0; c < C; ++c) {
+    for (int kh = 0; kh < kernel_h; ++kh) {
+      for (int kw = 0; kw < kernel_w; ++kw) {
+        T* dst = img_data + kh * W + kw;
+        if (stride_w == 1) {
+          EigenOuterStridedArrayMap<T>(
+              dst, output_w, output_h, EigenOuterStride(stride_h * W)) +=
+              ConstEigenArrayMap<T>(col_data, output_w, output_h);
+        } else {
+          EigenStridedArrayMap<T>(
+              dst, output_w, output_h, EigenStride(stride_h * W, stride_w)) +=
+              ConstEigenArrayMap<T>(col_data, output_w, output_h);
+        }
+        col_data += output_size;
+      }
+    }
+    img_data += H * W;
+  }
+}
+
+template <typename T>
+void Im2ColZeroPaddingAndNoDilationNHWC(
+    const int C,
+    const int H,
+    const int W,
+    const int kernel_h,
+    const int kernel_w,
+    const int stride_h,
+    const int stride_w,
+    const T* img_data,
+    T* col_data,
+    CPUContext* context) {
+  const int output_h = (H - kernel_h) / stride_h + 1;
+  const int output_w = (W - kernel_w) / stride_w + 1;
+  const int kernel_size = kernel_h * kernel_w;
+  for (int yh = 0; yh < output_h; ++yh) {
+    for (int yw = 0; yw < output_w; ++yw) {
+      const T* src = img_data + (yh * stride_h * W + yw * stride_w) * C;
+      CopyMatrix<T, CPUContext>(
+          kernel_h, kernel_w * C, src, W * C, col_data, kernel_w * C, context);
+      col_data += kernel_size * C;
+    }
+  }
+}
+
+template <typename T>
+void Col2ImZeroPaddingAndNoDilationNHWC(
+    const int C,
+    const int H,
+    const int W,
+    const int kernel_h,
+    const int kernel_w,
+    const int stride_h,
+    const int stride_w,
+    const T* col_data,
+    T* img_data,
+    CPUContext* context) {
+  Set<T, CPUContext>(H * W * C, T(0), img_data, context);
+  const int output_h = (H - kernel_h) / stride_h + 1;
+  const int output_w = (W - kernel_w) / stride_w + 1;
+  const int kernel_size = kernel_h * kernel_w;
+  for (int yh = 0; yh < output_h; ++yh) {
+    for (int yw = 0; yw < output_w; ++yw) {
+      T* dst = img_data + (yh * stride_h * W + yw * stride_w) * C;
+      EigenOuterStridedArrayMap<T>(
+          dst, kernel_w * C, kernel_h, EigenOuterStride(W * C)) +=
+          ConstEigenArrayMap<T>(col_data, kernel_w * C, kernel_h);
+      col_data += kernel_size * C;
+    }
+  }
+}
 
 template <typename T, bool kCol2Im>
 void Im2ColNdNCHWImpl(
@@ -1958,23 +2690,25 @@ void Im2ColNdNCHWImpl(
     const int* dilation,
     const int* pad,
     const float* X_data,
-    float* Y_data,
-    CPUContext* context) {
+    float* Y_data) {
   if (kCol2Im) {
-    Set<T, CPUContext>(img_size, 0, Y_data, context);
+    std::memset(Y_data, 0, img_size * sizeof(float));
   }
   const int outer_size = col_shape[0];
   const int inner_size = col_size / outer_size;
   const int kernel_size = std::accumulate(
       kernel_shape, kernel_shape + N, 1, std::multiplies<int>());
+  std::vector<FixedDivisor<int>> kernel_shape_div(N);
+  for (int i = 0; i < N; ++i) {
+    kernel_shape_div[i] = FixedDivisor<int>(kernel_shape[i]);
+  }
   std::vector<int> d_offset(N, 0);
   std::vector<int> d_iter(N, 0);
   for (int i = 0; i < outer_size; ++i) {
     // Loop over spatial axes in reverse order to compute a per-axis offset.
     int offset = i;
     for (int d_i = N - 1; d_i >= 0; --d_i) {
-      d_offset[d_i] = offset % kernel_shape[d_i];
-      offset /= kernel_shape[d_i];
+      kernel_shape_div[d_i].DivMod(offset, &offset, &d_offset[d_i]);
     }
     for (int j = 0; j < inner_size; ++j) {
       // Loop over spatial axes in forward order to compute the indices in the
@@ -1985,7 +2719,7 @@ void Im2ColNdNCHWImpl(
       for (int d_i = 0; d_i < N; ++d_i) {
         const int d_img = d_iter[d_i] * stride[d_i] - pad[d_i] +
             d_offset[d_i] * dilation[d_i];
-        is_padding |= d_img < 0 || d_img >= img_shape[d_i + 1];
+        is_padding |= !utils::IsAGeZeroAndALtB(d_img, img_shape[d_i + 1]);
         img_index = img_index * img_shape[d_i + 1] + d_img;
       }
       if (!kCol2Im) {
@@ -2013,7 +2747,7 @@ void Im2ColNd<float, CPUContext, StorageOrder::NCHW>(
     const int* pad,
     const float* img_data,
     float* col_data,
-    CPUContext* context) {
+    CPUContext* /* context */) {
   Im2ColNdNCHWImpl<float, false>(
       N,
       img_size,
@@ -2025,8 +2759,7 @@ void Im2ColNd<float, CPUContext, StorageOrder::NCHW>(
       dilation,
       pad,
       img_data,
-      col_data,
-      context);
+      col_data);
 }
 
 template <>
@@ -2042,7 +2775,7 @@ void Col2ImNd<float, CPUContext, StorageOrder::NCHW>(
     const int* pad,
     const float* col_data,
     float* img_data,
-    CPUContext* context) {
+    CPUContext* /* context */) {
   Im2ColNdNCHWImpl<float, true>(
       N,
       img_size,
@@ -2054,15 +2787,14 @@ void Col2ImNd<float, CPUContext, StorageOrder::NCHW>(
       dilation,
       pad,
       col_data,
-      img_data,
-      context);
+      img_data);
 }
 
 template <>
 void Im2Col<float, CPUContext, StorageOrder::NCHW>(
-    const int channels,
-    const int height,
-    const int width,
+    const int C,
+    const int H,
+    const int W,
     const int kernel_h,
     const int kernel_w,
     const int dilation_h,
@@ -2075,103 +2807,50 @@ void Im2Col<float, CPUContext, StorageOrder::NCHW>(
     const int stride_w,
     const float* img_data,
     float* col_data,
-    CPUContext* /*context*/) {
-  const int output_h =
-      (height + pad_b + pad_t - (dilation_h * (kernel_h - 1) + 1)) / stride_h +
-      1;
-  const int output_w =
-      (width + pad_l + pad_r - (dilation_w * (kernel_w - 1) + 1)) / stride_w +
-      1;
+    CPUContext* context,
+    const int /* groups */) {
+  // In NCHW, the number of groups doesn't affect Im2Col.
 
   // Fast path for zero padding and no dilation
-  // From Torch, THNN_(unfolded_copy)
-  if (dilation_h == 1 && dilation_w == 1 && pad_l == 0 && pad_r == 0 &&
-      pad_t == 0 && pad_b == 0) {
-    for (auto k = 0; k < channels * kernel_h * kernel_w; k++) {
-      const auto nip = k / (kernel_h * kernel_w);
-      const auto rest = k % (kernel_h * kernel_w);
-      const auto kh = rest / kernel_w;
-      const auto kw = rest % kernel_w;
-      auto* dst = col_data + nip * (kernel_h * kernel_w * output_h * output_w) +
-          kh * (kernel_w * output_h * output_w) + kw * (output_h * output_w);
-      const auto* src = img_data + nip * (height * width);
-      for (auto y = 0; y < output_h; y++) {
-        const auto iy = y * stride_h + kh;
-        const auto ix = kw;
-        if (stride_w == 1) {
-          memcpy(
-              dst + (y * output_w),
-              src + (iy * width + ix),
-              sizeof(float) * output_w);
-        } else {
-          for (auto x = 0; x < output_w; x++) {
-            memcpy(
-                dst + (y * output_w + x),
-                src + (iy * width + ix + x * stride_w),
-                sizeof(float));
-          }
-        }
-      }
-    }
-    return;
-  }
-
-  // Fast path for equal padding
-  if (pad_l == pad_r && pad_t == pad_b) {
-    // From Intel, https://github.com/BVLC/caffe/pull/3536
-    const int pad_h = pad_t;
-    const int pad_w = pad_l;
-    const int channel_size = height * width;
-    for (int channel = channels; channel--; img_data += channel_size) {
-      for (int kernel_row = 0; kernel_row < kernel_h; kernel_row++) {
-        for (int kernel_col = 0; kernel_col < kernel_w; kernel_col++) {
-          int input_row = -pad_h + kernel_row * dilation_h;
-          for (int output_rows = output_h; output_rows; output_rows--) {
-            if (!is_a_ge_zero_and_a_lt_b(input_row, height)) {
-              for (int output_cols = output_w; output_cols; output_cols--) {
-                *(col_data++) = 0;
-              }
-            } else {
-              int input_col = -pad_w + kernel_col * dilation_w;
-              for (int output_col = output_w; output_col; output_col--) {
-                if (is_a_ge_zero_and_a_lt_b(input_col, width)) {
-                  *(col_data++) = img_data[input_row * width + input_col];
-                } else {
-                  *(col_data++) = 0;
-                }
-                input_col += stride_w;
-              }
-            }
-            input_row += stride_h;
-          }
-        }
-      }
-    }
+  if (pad_t == 0 && pad_l == 0 && pad_b == 0 && pad_r == 0 && dilation_h == 1 &&
+      dilation_w == 1) {
+    Im2ColZeroPaddingAndNoDilationNCHW<float>(
+        C,
+        H,
+        W,
+        kernel_h,
+        kernel_w,
+        stride_h,
+        stride_w,
+        img_data,
+        col_data,
+        context);
     return;
   }
 
   // Baseline
-  const int dkernel_h = dilation_h * (kernel_h - 1) + 1;
-  const int dkernel_w = dilation_w * (kernel_w - 1) + 1;
-
-  int height_col = (height + pad_t + pad_b - dkernel_h) / stride_h + 1;
-  int width_col = (width + pad_l + pad_r - dkernel_w) / stride_w + 1;
-
-  int channels_col = channels * kernel_h * kernel_w;
-  for (int c = 0; c < channels_col; ++c) {
-    int w_offset = c % kernel_w;
-    int h_offset = (c / kernel_w) % kernel_h;
-    int c_im = c / kernel_h / kernel_w;
-    for (int h = 0; h < height_col; ++h) {
-      for (int w = 0; w < width_col; ++w) {
-        int h_pad = h * stride_h - pad_t + h_offset * dilation_h;
-        int w_pad = w * stride_w - pad_l + w_offset * dilation_w;
-        if (h_pad >= 0 && h_pad < height && w_pad >= 0 && w_pad < width) {
-          col_data[(c * height_col + h) * width_col + w] =
-              img_data[(c_im * height + h_pad) * width + w_pad];
-        } else {
-          col_data[(c * height_col + h) * width_col + w] = 0;
+  const int output_h =
+      (H + pad_b + pad_t - (dilation_h * (kernel_h - 1) + 1)) / stride_h + 1;
+  const int output_w =
+      (W + pad_l + pad_r - (dilation_w * (kernel_w - 1) + 1)) / stride_w + 1;
+  const int output_size = output_h * output_w;
+  for (int c = 0; c < C; ++c) {
+    for (int kh = 0; kh < kernel_h; ++kh) {
+      for (int kw = 0; kw < kernel_w; ++kw) {
+        for (int h = 0; h < output_h; ++h) {
+          const int h_pad = h * stride_h - pad_t + kh * dilation_h;
+          if (!utils::IsAGeZeroAndALtB(h_pad, H)) {
+            std::memset(col_data + h * output_w, 0, output_w * sizeof(float));
+            continue;
+          }
+          for (int w = 0; w < output_w; ++w) {
+            const int w_pad = w * stride_w - pad_l + kw * dilation_w;
+            col_data[h * output_w + w] = utils::IsAGeZeroAndALtB(w_pad, W)
+                ? img_data[(c * H + h_pad) * W + w_pad]
+                : 0;
+          }
         }
+        col_data += output_size;
       }
     }
   }
@@ -2179,9 +2858,9 @@ void Im2Col<float, CPUContext, StorageOrder::NCHW>(
 
 template <>
 void Im2Col<float, CPUContext, StorageOrder::NHWC>(
-    const int channels,
-    const int height,
-    const int width,
+    const int C,
+    const int H,
+    const int W,
     const int kernel_h,
     const int kernel_w,
     const int dilation_h,
@@ -2194,42 +2873,94 @@ void Im2Col<float, CPUContext, StorageOrder::NHWC>(
     const int stride_w,
     const float* img_data,
     float* col_data,
-    CPUContext* /*context*/) {
+    CPUContext* context,
+    const int groups) {
+  // Fast path for zero padding and no dilation
+  if (pad_t == 0 && pad_l == 0 && pad_b == 0 && pad_r == 0 && dilation_h == 1 &&
+      dilation_w == 1 && groups == 1) {
+    Im2ColZeroPaddingAndNoDilationNHWC<float>(
+        C,
+        H,
+        W,
+        kernel_h,
+        kernel_w,
+        stride_h,
+        stride_w,
+        img_data,
+        col_data,
+        context);
+    return;
+  }
+
   const int dkernel_h = dilation_h * (kernel_h - 1) + 1;
   const int dkernel_w = dilation_w * (kernel_w - 1) + 1;
-
-  int height_col = (height + pad_t + pad_b - dkernel_h) / stride_h + 1;
-  int width_col = (width + pad_l + pad_r - dkernel_w) / stride_w + 1;
-
+  const int output_h = (H + pad_b + pad_t - dkernel_h) / stride_h + 1;
+  const int output_w = (W + pad_l + pad_r - dkernel_w) / stride_w + 1;
   int h_pad = -pad_t;
-  for (int h = 0; h < height_col; ++h) {
-    int w_pad = -pad_l;
-    for (int w = 0; w < width_col; ++w) {
-      for (int ih = h_pad; ih < h_pad + dkernel_h; ih += dilation_h) {
-        for (int iw = w_pad; iw < w_pad + dkernel_w; iw += dilation_w) {
-          if (ih >= 0 && ih < height && iw >= 0 && iw < width) {
-            memcpy(
-                col_data,
-                img_data + (ih * width + iw) * channels,
-                sizeof(float) * channels);
-          } else {
-            // This should be simply padded with zero.
-            memset(col_data, 0, sizeof(float) * channels);
+  if (groups == 1) {
+    for (int h = 0; h < output_h; ++h) {
+      int w_pad = -pad_l;
+      for (int w = 0; w < output_w; ++w) {
+        for (int ih = h_pad; ih < h_pad + dkernel_h; ih += dilation_h) {
+          if (!utils::IsAGeZeroAndALtB(ih, H)) {
+            std::memset(col_data, 0, sizeof(float) * kernel_w * C);
+            col_data += kernel_w * C;
+            continue;
           }
-          col_data += channels;
-        }
-      }
-      w_pad += stride_w;
-    }
-    h_pad += stride_h;
+          for (int iw = w_pad; iw < w_pad + dkernel_w; iw += dilation_w) {
+            if (utils::IsAGeZeroAndALtB(iw, W)) {
+              std::memcpy(
+                  col_data, img_data + (ih * W + iw) * C, sizeof(float) * C);
+            } else {
+              std::memset(col_data, 0, sizeof(float) * C);
+            }
+            col_data += C;
+          } // iw
+        } // ih
+        w_pad += stride_w;
+      } // w
+      h_pad += stride_h;
+    } // h
+  } else {
+    const int C_per_G = C / groups;
+    for (int h = 0; h < output_h; ++h) {
+      int w_pad = -pad_l;
+      for (int w = 0; w < output_w; ++w) {
+        int r = 0;
+        for (int ih = h_pad; ih < h_pad + dkernel_h; ih += dilation_h, ++r) {
+          int s = 0;
+          for (int iw = w_pad; iw < w_pad + dkernel_w; iw += dilation_w, ++s) {
+            if (utils::IsAGeZeroAndALtB(ih, H) &&
+                utils::IsAGeZeroAndALtB(iw, W)) {
+              for (int g = 0; g < groups; ++g) {
+                std::memcpy(
+                    col_data + ((g * kernel_h + r) * kernel_w + s) * C_per_G,
+                    img_data + (ih * W + iw) * C + g * C_per_G,
+                    sizeof(float) * C_per_G);
+              }
+            } else {
+              for (int g = 0; g < groups; ++g) {
+                std::memset(
+                    col_data + ((g * kernel_h + r) * kernel_w + s) * C_per_G,
+                    0,
+                    sizeof(float) * C_per_G);
+              }
+            }
+          } // iw
+        } // ih
+        col_data += kernel_h * kernel_w * C;
+        w_pad += stride_w;
+      } // w
+      h_pad += stride_h;
+    } // h
   }
 }
 
 template <>
 void Col2Im<float, CPUContext, StorageOrder::NCHW>(
-    const int channels,
-    const int height,
-    const int width,
+    const int C,
+    const int H,
+    const int W,
     const int kernel_h,
     const int kernel_w,
     const int dilation_h,
@@ -2242,100 +2973,51 @@ void Col2Im<float, CPUContext, StorageOrder::NCHW>(
     const int stride_w,
     const float* col_data,
     float* img_data,
-    CPUContext* context) {
-  const int output_h =
-      (height + pad_b + pad_t - (dilation_h * (kernel_h - 1) + 1)) / stride_h +
-      1;
-  const int output_w =
-      (width + pad_l + pad_r - (dilation_w * (kernel_w - 1) + 1)) / stride_w +
-      1;
-
-  Set<float, CPUContext>(height * width * channels, 0, img_data, context);
+    CPUContext* context,
+    const int /* groups */) {
+  // In NCHW, the number of groups doesn't affect Col2Im.
 
   // Fast path for zero padding and no dilation
-  // From Torch, modified THNN_(unfolded_acc)
-  if (dilation_h == 1 && dilation_w == 1 && pad_l == 0 && pad_r == 0 &&
-      pad_t == 0 && pad_b == 0) {
-    for (auto k = 0; k < channels * kernel_h * kernel_w; k++) {
-      const auto nip = k / (kernel_h * kernel_w);
-      const auto rest = k % (kernel_h * kernel_w);
-      const auto kh = rest / kernel_w;
-      const auto kw = rest % kernel_w;
-      const auto* dst = col_data +
-          nip * (kernel_h * kernel_w * output_h * output_w) +
-          kh * (kernel_w * output_h * output_w) + kw * (output_h * output_w);
-      auto* src = img_data + nip * (height * width);
-      for (auto y = 0; y < output_h; y++) {
-        const auto iy = y * stride_h + kh;
-        const auto ix = kw;
-        if (stride_w == 1) {
-          auto offsrc = src + (iy * width + ix);
-          const auto offdst = dst + (y * output_w);
-          for (auto i = 0; i < output_w; ++i) {
-            offsrc[i] += offdst[i];
-          }
-        } else {
-          for (auto x = 0; x < output_w; x++) {
-            auto offsrc = src + (iy * width + ix + x * stride_w);
-            const auto offdst = dst + (y * output_w + x);
-            *offsrc += *offdst;
-          }
-        }
-      }
-    }
-    return;
-  }
-
-  // Fast path for equal padding
-  if (pad_l == pad_r && pad_t == pad_b) {
-    // From Intel, https://github.com/BVLC/caffe/pull/3536
-    const int pad_h = pad_t;
-    const int pad_w = pad_l;
-    const int channel_size = height * width;
-    for (int channel = channels; channel--; img_data += channel_size) {
-      for (int kernel_row = 0; kernel_row < kernel_h; kernel_row++) {
-        for (int kernel_col = 0; kernel_col < kernel_w; kernel_col++) {
-          int input_row = -pad_h + kernel_row * dilation_h;
-          for (int output_rows = output_h; output_rows; output_rows--) {
-            if (!is_a_ge_zero_and_a_lt_b(input_row, height)) {
-              col_data += output_w;
-            } else {
-              int input_col = -pad_w + kernel_col * dilation_w;
-              for (int output_col = output_w; output_col; output_col--) {
-                if (is_a_ge_zero_and_a_lt_b(input_col, width)) {
-                  img_data[input_row * width + input_col] += *col_data;
-                }
-                ++col_data;
-                input_col += stride_w;
-              }
-            }
-            input_row += stride_h;
-          }
-        }
-      }
-    }
+  if (pad_t == 0 && pad_l == 0 && pad_b == 0 && pad_r == 0 && dilation_h == 1 &&
+      dilation_w == 1) {
+    Col2ImZeroPaddingAndNoDilationNCHW<float>(
+        C,
+        H,
+        W,
+        kernel_h,
+        kernel_w,
+        stride_h,
+        stride_w,
+        col_data,
+        img_data,
+        context);
     return;
   }
 
   // Fallback
-  const int dkernel_h = dilation_h * (kernel_h - 1) + 1;
-  const int dkernel_w = dilation_w * (kernel_w - 1) + 1;
-
-  int height_col = (height + pad_t + pad_b - dkernel_h) / stride_h + 1;
-  int width_col = (width + pad_l + pad_r - dkernel_w) / stride_w + 1;
-  int channels_col = channels * kernel_h * kernel_w;
-  for (int c = 0; c < channels_col; ++c) {
-    int w_offset = c % kernel_w;
-    int h_offset = (c / kernel_w) % kernel_h;
-    int c_im = c / kernel_h / kernel_w;
-    for (int h = 0; h < height_col; ++h) {
-      for (int w = 0; w < width_col; ++w) {
-        int h_pad = h * stride_h - pad_t + h_offset * dilation_h;
-        int w_pad = w * stride_w - pad_l + w_offset * dilation_w;
-        if (h_pad >= 0 && h_pad < height && w_pad >= 0 && w_pad < width) {
-          img_data[(c_im * height + h_pad) * width + w_pad] +=
-              col_data[(c * height_col + h) * width_col + w];
+  Set<float, CPUContext>(C * H * W, 0.0f, img_data, context);
+  const int output_h =
+      (H + pad_t + pad_b - (dilation_h * (kernel_h - 1) + 1)) / stride_h + 1;
+  const int output_w =
+      (W + pad_l + pad_r - (dilation_w * (kernel_w - 1) + 1)) / stride_w + 1;
+  const int output_size = output_h * output_w;
+  for (int c = 0; c < C; ++c) {
+    for (int kh = 0; kh < kernel_h; ++kh) {
+      for (int kw = 0; kw < kernel_w; ++kw) {
+        for (int h = 0; h < output_h; ++h) {
+          const int h_pad = h * stride_h - pad_t + kh * dilation_h;
+          if (!utils::IsAGeZeroAndALtB(h_pad, H)) {
+            continue;
+          }
+          for (int w = 0; w < output_w; ++w) {
+            const int w_pad = w * stride_w - pad_l + kw * dilation_w;
+            if (utils::IsAGeZeroAndALtB(w_pad, W)) {
+              img_data[(c * H + h_pad) * W + w_pad] +=
+                  col_data[h * output_w + w];
+            }
+          }
         }
+        col_data += output_size;
       }
     }
   }
@@ -2343,9 +3025,9 @@ void Col2Im<float, CPUContext, StorageOrder::NCHW>(
 
 template <>
 void Col2Im<float, CPUContext, StorageOrder::NHWC>(
-    const int channels,
-    const int height,
-    const int width,
+    const int C,
+    const int H,
+    const int W,
     const int kernel_h,
     const int kernel_w,
     const int dilation_h,
@@ -2358,30 +3040,82 @@ void Col2Im<float, CPUContext, StorageOrder::NHWC>(
     const int stride_w,
     const float* col_data,
     float* img_data,
-    CPUContext* context) {
+    CPUContext* context,
+    const int groups) {
+  // Fast path for zero padding and no dilation
+  if (pad_t == 0 && pad_l == 0 && pad_b == 0 && pad_r == 0 && dilation_h == 1 &&
+      dilation_w == 1 && groups == 1) {
+    Col2ImZeroPaddingAndNoDilationNHWC<float>(
+        C,
+        H,
+        W,
+        kernel_h,
+        kernel_w,
+        stride_h,
+        stride_w,
+        col_data,
+        img_data,
+        context);
+    return;
+  }
+
+  Set<float, CPUContext>(H * W * C, 0, img_data, context);
   const int dkernel_h = dilation_h * (kernel_h - 1) + 1;
   const int dkernel_w = dilation_w * (kernel_w - 1) + 1;
+  const int output_h = (H + pad_t + pad_b - dkernel_h) / stride_h + 1;
+  const int output_w = (W + pad_l + pad_r - dkernel_w) / stride_w + 1;
 
-  Set<float, CPUContext>(height * width * channels, 0, img_data, context);
-  int height_col = (height + pad_t + pad_b - dkernel_h) / stride_h + 1;
-  int width_col = (width + pad_l + pad_r - dkernel_w) / stride_w + 1;
   int h_pad = -pad_t;
-  for (int h = 0; h < height_col; ++h) {
-    int w_pad = -pad_l;
-    for (int w = 0; w < width_col; ++w) {
-      for (int ih = h_pad; ih < h_pad + dkernel_h; ih += dilation_h) {
-        for (int iw = w_pad; iw < w_pad + dkernel_w; iw += dilation_w) {
-          if (ih >= 0 && ih < height && iw >= 0 && iw < width) {
-            auto* img_data_patch = img_data + (ih * width + iw) * channels;
-            Add<float, CPUContext>(
-                channels, img_data_patch, col_data, img_data_patch, context);
+  if (groups == 1) {
+    for (int h = 0; h < output_h; ++h) {
+      int w_pad = -pad_l;
+      for (int w = 0; w < output_w; ++w) {
+        for (int ih = h_pad; ih < h_pad + dkernel_h; ih += dilation_h) {
+          if (!utils::IsAGeZeroAndALtB(ih, H)) {
+            col_data += kernel_w * C;
+            continue;
           }
-          col_data += channels;
-        }
-      }
-      w_pad += stride_w;
-    }
-    h_pad += stride_h;
+          for (int iw = w_pad; iw < w_pad + dkernel_w; iw += dilation_w) {
+            if (utils::IsAGeZeroAndALtB(iw, W)) {
+              float* img_data_patch = img_data + (ih * W + iw) * C;
+              Add<float, CPUContext>(
+                  C, img_data_patch, col_data, img_data_patch, context);
+            }
+            col_data += C;
+          } // iw
+        } // ih
+        w_pad += stride_w;
+      } // w
+      h_pad += stride_h;
+    } // h
+  } else {
+    const int C_per_G = C / groups;
+    for (int h = 0; h < output_h; ++h) {
+      int w_pad = -pad_l;
+      for (int w = 0; w < output_w; ++w) {
+        int r = 0;
+        for (int ih = h_pad; ih < h_pad + dkernel_h; ih += dilation_h, ++r) {
+          int s = 0;
+          for (int iw = w_pad; iw < w_pad + dkernel_w; iw += dilation_w, ++s) {
+            if (utils::IsAGeZeroAndALtB(ih, H) &&
+                utils::IsAGeZeroAndALtB(iw, W)) {
+              float* img_data_patch = img_data + (ih * W + iw) * C;
+              for (int g = 0; g < groups; ++g) {
+                Add<float, CPUContext>(
+                    C_per_G,
+                    img_data_patch + g * C_per_G,
+                    col_data + ((g * kernel_h + r) * kernel_w + s) * C_per_G,
+                    img_data_patch + g * C_per_G,
+                    context);
+              }
+            }
+          } // iw
+        } // ih
+        col_data += kernel_h * kernel_w * C;
+        w_pad += stride_w;
+      } // w
+      h_pad += stride_h;
+    } // h
   }
 }
 
@@ -2469,113 +3203,6 @@ void BiasCHW<float, CPUContext>(
   }
 }
 
-template <>
-void CopyMatrix<CPUContext>(
-    const size_t itemsize,
-    const int M,
-    const int N,
-    const void* A,
-    const int lda,
-    void* B,
-    const int ldb,
-    CPUContext* /*context*/,
-    TypeMeta::TypedCopy copy) {
-  if (A == nullptr || B == nullptr) {
-    return;
-  }
-  if (lda == N && ldb == N) {
-    // can coalese to a single memcpy of size M * N
-    if (copy) {
-      copy(static_cast<const char*>(A), static_cast<char*>(B), N * M);
-    } else {
-      memcpy(
-          static_cast<char*>(B), static_cast<const char*>(A), itemsize * N * M);
-    }
-    return;
-  }
-
-  for (int i = 0; i < M; ++i) {
-    if (copy) {
-      copy(
-          static_cast<const char*>(A) + lda * i * itemsize,
-          static_cast<char*>(B) + ldb * i * itemsize,
-          N);
-    } else {
-      memcpy(
-          static_cast<char*>(B) + ldb * i * itemsize,
-          static_cast<const char*>(A) + lda * i * itemsize,
-          itemsize * N);
-    }
-  }
-}
-
-#ifdef CAFFE2_USE_MKL
-
-#define DELEGATE_COPY_MATRIX_FUNCTION(T, Func)  \
-  template <>                                   \
-  void CopyMatrix<T, CPUContext>(               \
-      const int M,                              \
-      const int N,                              \
-      const T* A,                               \
-      const int lda,                            \
-      T* B,                                     \
-      const int ldb,                            \
-      CPUContext* /* context */) {              \
-    Func('R', 'N', M, N, T(1), A, lda, B, ldb); \
-  }
-DELEGATE_COPY_MATRIX_FUNCTION(float, mkl_somatcopy)
-DELEGATE_COPY_MATRIX_FUNCTION(double, mkl_domatcopy)
-#undef DELEGATE_COPY_MATRIX_FUNCTION
-
-#endif // CAFFE2_USE_MKL
-
-#define CAFFE2_SPECIALIZED_COPY_MATRIX(T)                                \
-  template <>                                                            \
-  void CopyMatrix<T, CPUContext>(                                        \
-      const int M,                                                       \
-      const int N,                                                       \
-      const T* A,                                                        \
-      const int lda,                                                     \
-      T* B,                                                              \
-      const int ldb,                                                     \
-      CPUContext* /* context */) {                                       \
-    if (M == 0 || N == 0) {                                              \
-      return;                                                            \
-    }                                                                    \
-    if (lda == N) {                                                      \
-      if (ldb == N) {                                                    \
-        std::memcpy(B, A, sizeof(T) * M * N);                            \
-      } else {                                                           \
-        EigenOuterStridedMatrixMap<T>(B, N, M, EigenOuterStride(ldb)) =  \
-            ConstEigenMatrixMap<T>(A, N, M);                             \
-      }                                                                  \
-    } else {                                                             \
-      if (ldb == N) {                                                    \
-        EigenMatrixMap<T>(B, N, M) = ConstEigenOuterStridedMatrixMap<T>( \
-            A, N, M, EigenOuterStride(lda));                             \
-      } else {                                                           \
-        EigenOuterStridedMatrixMap<T>(B, N, M, EigenOuterStride(ldb)) =  \
-            ConstEigenOuterStridedMatrixMap<T>(                          \
-                A, N, M, EigenOuterStride(lda));                         \
-      }                                                                  \
-    }                                                                    \
-  }
-
-#ifndef CAFFE2_USE_MKL
-CAFFE2_SPECIALIZED_COPY_MATRIX(float)
-CAFFE2_SPECIALIZED_COPY_MATRIX(double)
-#endif // CAFFE2_USE_MKL
-
-CAFFE2_SPECIALIZED_COPY_MATRIX(int)
-CAFFE2_SPECIALIZED_COPY_MATRIX(TIndex)
-#ifdef CAFFE2_UNIQUE_LONG_TYPEMETA
-CAFFE2_SPECIALIZED_COPY_MATRIX(long)
-#endif
-CAFFE2_SPECIALIZED_COPY_MATRIX(std::uint8_t)
-CAFFE2_SPECIALIZED_COPY_MATRIX(std::uint16_t)
-
-#undef CAFFE2_SPECIALIZXED_COPY_MATRIX
-
 #define CAFFE2_SPECIALIZED_COPYVECTOR(T)                            \
   template <>                                                       \
   void CopyVector<T, CPUContext>(                                   \
@@ -2604,6 +3231,13 @@ bool TransposeWithHPTT(
   for (int i = 0; i < ndim; ++i) {
     axes_cm[i] = cm_fn(axes[cm_fn(i)]);
     dims_cm[i] = dims[cm_fn(i)];
+  }
+
+  // HPTT doesn't handle 0 sized inputs.
+  for (auto dim : dims_cm) {
+    if (dim <= 0) {
+      return false;
+    }
   }
   auto plan = hptt::create_plan(
       axes_cm.data(),

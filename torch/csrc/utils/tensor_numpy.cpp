@@ -117,6 +117,11 @@ at::Tensor tensor_from_numpy(PyObject* obj) {
 
   void* data_ptr = PyArray_DATA(array);
   auto& type = CPU(numpy_dtype_to_aten(PyArray_TYPE(array)));
+  if (!PyArray_EquivByteorders(PyArray_DESCR(array)->byteorder, NPY_NATIVE)) {
+    throw ValueError(
+        "given numpy array has byte order different from the native byte order. "
+        "Conversion between byte orders is currently not supported.");
+  }
   Py_INCREF(obj);
   return type.tensorFromBlob(data_ptr, sizes, strides, [obj](void* data) {
     AutoGIL gil;
@@ -135,7 +140,7 @@ static int aten_to_dtype(const at::Type& type) {
         "can't convert sparse tensor to numpy. Use Tensor.to_dense() to "
         "convert to a dense tensor first.");
   }
-  if (type.backend() == kCPU) {
+  if (type.backend() == Backend::CPU) {
     switch (type.scalarType()) {
       case kDouble: return NPY_DOUBLE;
       case kFloat: return NPY_FLOAT;

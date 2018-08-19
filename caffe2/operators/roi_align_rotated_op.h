@@ -15,13 +15,13 @@ class RoIAlignRotatedOp final : public Operator<Context> {
   RoIAlignRotatedOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         order_(StringToStorageOrder(
-            OperatorBase::GetSingleArgument<string>("order", "NCHW"))),
+            this->template GetSingleArgument<string>("order", "NCHW"))),
         spatial_scale_(
-            OperatorBase::GetSingleArgument<float>("spatial_scale", 1.)),
-        pooled_height_(OperatorBase::GetSingleArgument<int>("pooled_h", 1)),
-        pooled_width_(OperatorBase::GetSingleArgument<int>("pooled_w", 1)),
+            this->template GetSingleArgument<float>("spatial_scale", 1.)),
+        pooled_height_(this->template GetSingleArgument<int>("pooled_h", 1)),
+        pooled_width_(this->template GetSingleArgument<int>("pooled_w", 1)),
         sampling_ratio_(
-            OperatorBase::GetSingleArgument<int>("sampling_ratio", -1)) {
+            this->template GetSingleArgument<int>("sampling_ratio", -1)) {
     DCHECK_GT(spatial_scale_, 0);
     DCHECK_GT(pooled_height_, 0);
     DCHECK_GT(pooled_width_, 0);

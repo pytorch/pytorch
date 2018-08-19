@@ -8,7 +8,7 @@
 #include "torch/csrc/autograd/variable_version.h"
 
 #include <ATen/ATen.h>
-#include <ATen/Error.h>
+#include <ATen/core/Error.h>
 
 #include <list>
 #include <memory>
@@ -263,15 +263,20 @@ struct Variable::Impl : public at::TensorImpl {
   TORCH_API explicit Impl(
       at::Tensor data,
       bool requires_grad = false,
-      Edge edge = Edge());
+      Edge gradient_edge = Edge());
 
   ~Impl() override;
 
   at::IntList sizes() const override;
   at::IntList strides() const override;
+  int64_t size(int64_t d) const override;
+  int64_t stride(int64_t d) const override;
+
   int64_t dim() const override;
-  void* unsafeGetTH(bool retain) override;
   std::unique_ptr<at::Storage> storage() override;
+  at::StorageImpl* storageImpl() const override;
+  int64_t storage_offset() const override;
+
   static const char* typeString();
 
   std::shared_ptr<Function> get_grad_accumulator();
@@ -298,7 +303,7 @@ struct Variable::Impl : public at::TensorImpl {
   }
 
   /// Accesses the gradient `Variable` of this `Variable`.
-  Tensor& grad() override {
+  Variable& grad() override {
     return grad_;
   }
   const Variable& grad() const override {
@@ -326,9 +331,6 @@ struct Variable::Impl : public at::TensorImpl {
 
   /// Reset all expensive fields to free up resources
   void release_resources() override;
-
-  // Make this field public so we can access it from `Variable`.
-  using at::TensorImpl::type_;
 
   std::string name;
   at::Tensor data_;

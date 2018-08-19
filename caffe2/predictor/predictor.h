@@ -9,7 +9,7 @@
 
 namespace caffe2 {
 
-class Predictor {
+class CAFFE2_API Predictor {
  public:
   using TensorVector = std::vector<TensorCPU*>;
   using TensorMap = std::unordered_map<std::string, TensorCPU*>;
@@ -28,7 +28,7 @@ class Predictor {
       const NetDef& run_net,
       Workspace* parent = nullptr,
       bool run_init = true,
-      int optimization = 0);
+      int optimization = 1);
 
   ~Predictor() {}
 

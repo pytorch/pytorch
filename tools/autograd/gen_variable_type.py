@@ -41,7 +41,8 @@ MANUAL_IMPLEMENTATIONS = {
 # NO EFFECT otherwise.
 DONT_RECORD_TRACE = {
     'convolution', 'conv1d', 'conv2d', 'conv3d', 'conv_transpose1d',
-    'conv_transpose2d', 'conv_transpose3d',
+    'conv_transpose2d', 'conv_transpose3d', 'lstm_cell', 'gru_cell',
+    'rnn_tanh_cell', 'rnn_relu_cell',
 }
 
 # These functions have their names recorded under trace renamed,
@@ -126,15 +127,21 @@ RECORD_FUNCTION = CodeTemplate("""\
 profiler::RecordFunction profiler("${name}");""")
 
 PRE_RECORD_TRACE = CodeTemplate("""\
-jit::tracer::PreTraceInfo trace_info;
+torch::jit::Node* node = nullptr;
 if (jit::tracer::isTracing()) {
-  trace_info = jit::tracer::preRecordTrace(jit::aten::${trace_name}, ${trace_inputs});
+  auto& graph = jit::tracer::getTracingState()->graph;
+  node = graph->create(jit::aten::${trace_name}, /*outputs=*/0);
+  jit::tracer::recordSourceLocation(node);
+  ${add_trace_inputs}
+  graph->appendNode(node);
 }
 """)
 
+ADD_TRACE_INPUT = CodeTemplate("""jit::tracer::addInputs(node, "${input}", ${input});""")
+
 POST_RECORD_TRACE = CodeTemplate("""\
 if (jit::tracer::isTracing()) {
-  jit::tracer::postRecordTrace( trace_info,  ${trace_outputs} );
+  jit::tracer::postRecordTrace(node, ArrayRef<Variable>(${trace_outputs}) );
 }
 """)
 
@@ -340,6 +347,8 @@ def emit_body(declaration):
             elif arg['type'] == 'TensorList':
                 name += '_'
                 expr = 'make_saved_variable_list({})'.format(arg['name'])
+            elif arg['type'] == 'IntList':
+                expr = expr + ".vec()"
             stmts.append('grad_fn->{} = {};'.format(name, expr))
         return stmts
 
@@ -370,7 +379,11 @@ def emit_body(declaration):
             return ('', '')
 
         local = {}
-        local['trace_inputs'] = sum([['"{}"'.format(arg['name']), arg['name']] for arg in declaration['arguments']], [])
+
+        add_trace_inputs = []
+        for argument in declaration['arguments']:
+            add_trace_inputs.append(ADD_TRACE_INPUT.substitute(input=argument['name']))
+        local['add_trace_inputs'] = '\n'.join(add_trace_inputs)
 
         # Record inplace operations as out-of-place operations (e.g.,
         # not add_ but add)

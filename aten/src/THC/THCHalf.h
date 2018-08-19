@@ -3,13 +3,6 @@
 
 #include "THCGeneral.h"
 
-/* We compile with CudaHalfTensor support if we have this: */
-#if CUDA_VERSION >= 7050 || CUDA_HAS_FP16 || defined(__HIP_PLATFORM_HCC__)
-#define CUDA_HALF_TENSOR 1
-#endif
-
-#ifdef CUDA_HALF_TENSOR
-
 #include <cuda_fp16.h>
 #include <stdint.h>
 
@@ -29,7 +22,5 @@ THC_API int THC_nativeHalfInstructions(THCState *state);
 
 /* Check for performant native fp16 support on the current device */
 THC_API int THC_fastHalfInstructions(THCState *state);
-
-#endif /* CUDA_HALF_TENSOR */
 
 #endif

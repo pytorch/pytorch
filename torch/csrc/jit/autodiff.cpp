@@ -9,6 +9,7 @@
 #include <torch/csrc/jit/assertions.h>
 
 #include <algorithm>
+#include <memory>
 
 namespace torch { namespace jit {
 
@@ -564,14 +565,13 @@ static void lambdaLiftReverse(Gradient& grad_desc, ReverseDetails& rev_info) {
   reverse_block->owningNode()->destroy();
 }
 
-Gradient differentiate(std::shared_ptr<Graph>& _graph, const std::vector<bool>& requires_grad) {
+Gradient differentiate(std::shared_ptr<Graph>& graph, const std::vector<bool>& requires_grad) {
   Gradient grad_desc;
   // Take ownership of the graph
-  JIT_ASSERTM(
-      _graph.use_count() == 1,
-      "differentiate will mutate and destroy the graph, so it requires "
-      "graph.use_count() == 1, but found ", _graph.use_count());
-  std::swap(_graph, grad_desc.f);
+  JIT_ASSERTM(graph.use_count() == 1,
+              "differentiate will mutate and destroy the graph, so it requires "
+              "graph.use_count() == 1, but found %d", graph.use_count());
+  std::swap(graph, grad_desc.f);
   // XXX: Take care when handling outputs - they can be duplicated!
 
   WithInsertPoint guard(grad_desc.f->block());

@@ -7,11 +7,9 @@
 #include <utility>
 
 #include "ATen/ATenGeneral.h"
-#include "ATen/Half.h"
 #include "ATen/ScalarType.h"
 #include "ATen/TensorBase.h"
-#include "ATen/Utils.h"
-
+#include "ATen/core/Half.h"
 
 namespace at {
 

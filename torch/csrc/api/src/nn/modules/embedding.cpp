@@ -1,6 +1,7 @@
 #include <torch/nn/modules/embedding.h>
 
 #include <torch/tensor.h>
+#include <torch/utils.h>
 
 #include <cstddef>
 #include <utility>
@@ -20,7 +21,8 @@ EmbeddingImpl::EmbeddingImpl(EmbeddingOptions options)
 void EmbeddingImpl::reset() {
   weight = register_parameter(
       "weight", torch::empty({options.count_, options.dimension_}));
-  weight.data().normal_(0, 1);
+  NoGradGuard guard;
+  weight.normal_(0, 1);
 }
 
 Tensor EmbeddingImpl::forward(Tensor input) {

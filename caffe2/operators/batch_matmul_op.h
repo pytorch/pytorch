@@ -15,10 +15,10 @@ class BatchMatMulOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   BatchMatMulOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        trans_a_(OperatorBase::GetSingleArgument<int>("trans_a", 0)),
-        trans_b_(OperatorBase::GetSingleArgument<int>("trans_b", 0)),
-        broadcast_(OperatorBase::GetSingleArgument<int>("broadcast", 0)),
-        use_scratch_(OperatorBase::GetSingleArgument<int>("use_scratch", 0)) {
+        trans_a_(this->template GetSingleArgument<int>("trans_a", 0)),
+        trans_b_(this->template GetSingleArgument<int>("trans_b", 0)),
+        broadcast_(this->template GetSingleArgument<int>("broadcast", 0)),
+        use_scratch_(this->template GetSingleArgument<int>("use_scratch", 0)) {
     if (use_scratch_) {
       scratch_ = std::make_shared<Tensor>(Context::GetDeviceType());
     }

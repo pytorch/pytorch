@@ -137,7 +137,7 @@ TEST_CASE("modules") {
     REQUIRE(x.ndimension() == 2);
     REQUIRE(x.size(0) == 1000);
     REQUIRE(x.size(1) == 100);
-    REQUIRE(x.data().min().toCFloat() == 0);
+    REQUIRE(x.min().toCFloat() == 0);
   }
 
   SECTION("embedding") {
@@ -191,7 +191,7 @@ TEST_CASE("modules") {
 
     dropout->eval();
     y = dropout->forward(x);
-    REQUIRE(y.data().sum().toCFloat() == 100);
+    REQUIRE(y.sum().toCFloat() == 100);
   }
 
   SECTION("param") {
@@ -232,12 +232,12 @@ TEST_CASE("modules") {
     }
     {
       auto functional = Functional(torch::relu);
-      REQUIRE(functional(torch::ones({})).data().toCFloat() == 1);
+      REQUIRE(functional(torch::ones({})).toCFloat() == 1);
       REQUIRE(functional(torch::ones({})).toCFloat() == 1);
       REQUIRE(functional(torch::ones({}) * -1).toCFloat() == 0);
     }
     {
-      auto functional = Functional(torch::elu, /*alpha=*/1, /*scale=*/0);
+      auto functional = Functional(torch::elu, /*alpha=*/1, /*scale=*/0, /*input_scale=*/1);
       REQUIRE(functional(torch::ones({})).toCFloat() == 0);
     }
   }

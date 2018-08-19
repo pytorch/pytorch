@@ -28,7 +28,7 @@ Tensor& add_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar 
     AT_ERROR("add(sparse, dense) is not supported. Use add(dense, sparse) instead.");
   }
   auto iter = TensorIterator::binary_op(result, self, other);
-  add_stub(iter->backend(), *iter, alpha);
+  add_stub(iter->device_type(), *iter, alpha);
   return result;
 }
 
@@ -53,7 +53,7 @@ Tensor& div_out(Tensor& result, const Tensor& self, const Tensor& other) {
     return at::_sparse_div_out(result, self, Scalar(other));
   }
   auto iter = TensorIterator::binary_op(result, self, other);
-  div_stub(iter->backend(), *iter);
+  div_stub(iter->device_type(), *iter);
   return result;
 }
 
@@ -74,7 +74,7 @@ Tensor& mul_out(Tensor& result, const Tensor& self, const Tensor& other) {
     return at::_sparse_mul_out(result, self, other);
   }
   auto iter = TensorIterator::binary_op(result, self, other);
-  mul_stub(iter->backend(), *iter);
+  mul_stub(iter->device_type(), *iter);
   return result;
 }
 
@@ -105,7 +105,7 @@ Tensor& sub_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar 
     AT_ERROR("sub(sparse, dense) is not supported. Use sub(dense, sparse) instead.");
   }
   auto iter = TensorIterator::binary_op(result, self, other);
-  sub_stub(iter->backend(), *iter, alpha);
+  sub_stub(iter->device_type(), *iter, alpha);
   return result;
 }
 

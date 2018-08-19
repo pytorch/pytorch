@@ -46,15 +46,15 @@ THPLayout* layout_registry
 at::Backend get_backend(bool is_cuda, bool is_sparse) {
   if (is_cuda) {
     if (is_sparse){
-      return at::kSparseCUDA;
+      return at::Backend::SparseCUDA;
     } else {
-      return at::kCUDA;
+      return at::Backend::CUDA;
     }
   } else {
     if (is_sparse){
-      return at::kSparseCPU;
+      return at::Backend::SparseCPU;
     } else {
-      return at::kCPU;
+      return at::Backend::CPU;
     }
   }
 }
@@ -69,7 +69,9 @@ at::Type* get_type(const std::string& name, bool is_cuda, bool is_sparse) {
 
 PyTypeObject* getPyTypeObject(const at::Storage& storage)
 {
-  auto it = attype_to_py_storage_type.find(&storage.pImpl()->type());
+  auto attype = at::globalContext().getTypeOpt(
+      at::detail::get_backend(storage.pImpl()), storage.pImpl()->scalar_type());
+  auto it = attype_to_py_storage_type.find(attype);
   if (it != attype_to_py_storage_type.end()) {
     return it->second;
   }

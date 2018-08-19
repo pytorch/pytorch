@@ -62,8 +62,8 @@ getTensorInfo(THCState* state, TensorType* t) {
 
   int dims = THCTensor_nDimensionLegacyNoScalars(state, t);
   for (int i = 0; i < dims; ++i) {
-    sz[i] = THCTensor_size(state, t, i);
-    st[i] = THCTensor_stride(state, t, i);
+    sz[i] = THTensor_sizeLegacyNoScalars(t, i);
+    st[i] = THTensor_strideLegacyNoScalars(t, i);
   }
 
   return TensorInfo<ScalarType, IndexType>(
@@ -80,16 +80,11 @@ struct ScalarInv {
   static __host__ __device__ T to(const T v) { return ((T) 1) / v; }
 };
 
-#ifdef CUDA_HALF_TENSOR
 template <>
 struct ScalarNegate<half> {
   static __host__ __device__ half to(const half v) {
 #ifdef __CUDA_ARCH__
-#ifdef CUDA_HALF_INSTRUCTIONS
-    return __hneg(v);
-#else
     return __float2half(-__half2float(v));
-#endif
 #else
 #if CUDA_VERSION < 9000 && !defined(__HIP_PLATFORM_HCC__)
     half out = v;
@@ -136,7 +131,5 @@ inline bool operator!=(half a, half b) {
   return araw.x != braw.x;
 #endif
 }
-
-#endif // CUDA_HALF_TENSOR
 
 #endif // THC_TENSOR_TYPE_UTILS_INC

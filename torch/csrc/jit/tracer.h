@@ -1,13 +1,17 @@
 #pragma once
 
-#include "torch/csrc/jit/assertions.h"
-#include "torch/csrc/jit/ir.h"
-#include "torch/csrc/jit/constants.h"
-#include "torch/csrc/WindowsTorchApiMacro.h"
-#include "torch/csrc/utils/functional.h"
-#include "torch/csrc/utils/variadic.h"
 #include "torch/csrc/autograd/function_hook.h"
 #include "torch/csrc/autograd/variable.h"
+#include "torch/csrc/jit/assertions.h"
+#include "torch/csrc/jit/constants.h"
+#include "torch/csrc/jit/ir.h"
+#include "torch/csrc/utils/functional.h"
+#include "torch/csrc/utils/functional.h"
+#include "torch/csrc/utils/variadic.h"
+#include "torch/csrc/utils/variadic.h"
+#include "torch/csrc/WindowsTorchApiMacro.h"
+
+#include <ATen/Backtrace.h>
 
 #include <memory>
 #include <mutex>
@@ -121,7 +125,7 @@ inline Value* getValueTrace(const Variable& var) {
   auto & value_map = getTracingState()->value_map;
   auto it = value_map.find(var);
   if (it == value_map.end()) {
-    Value *constant = insertConstant(*state->graph, var.data());
+    Value *constant = state->graph->insertConstant(var.data());
     constant->inferTypeFrom(var.data());
     it = value_map.emplace_hint(it, var, constant);
   }
@@ -187,17 +191,9 @@ inline void abandon() {
   setTracingState(nullptr);
 }
 
-// Pre-recorded information about the trace before we actually carry
-// out the trace
-struct PreTraceInfo {
-  Node *n;
-};
-
 
 TORCH_API void recordSourceLocation(Node* n);
 TORCH_API void setRecordSourceLocation(void (*v)(Node*));
-
-namespace detail {
 
 // NB: those serve both as an intermediate steps in addInputs below,
 // as well as the overloads that terminate template recursion
@@ -208,6 +204,7 @@ void addInputs(Node *n, const char * name, const at::Scalar& value);
 void addInputs(Node *n, const char * name, const at::Tensor& value);
 void addInputs(Node *n, const char * name, at::IntList value);
 void addInputs(Node *n, const char * name, at::TensorList value);
+void addInputs(Node *n, const char * name, const ArrayRef<double>& value);
 void addInputs(Node *n, const char * name, const std::string& value);
 void addInputs(Node *n, const char * name, const at::SparseTensorRef& value);
 
@@ -216,34 +213,23 @@ void addInputs(Node *n, const char * name, std::array<bool, N> value) {
   throw std::runtime_error("Found an unsupported argument type in the JIT tracer. File a bug report.");
 }
 
-template<typename T, typename... Args>
-void addInputs(Node *n, const char * arg_name, T arg, const char * next_arg_name, Args... args) {
-  addInputs(n, arg_name, arg);
-  addInputs(n, next_arg_name, args...);
+TORCH_API void postRecordTrace(Node* node, at::ArrayRef<Variable> outputs);
+
+inline void postRecordTrace(Node* node, at::ArrayRef<at::Tensor> tensors) {
+  postRecordTrace(node, fmap<Variable>(tensors));
 }
 
-} // namespace detail
-
-// NB: if you change this function, you might want to take a look at
-// preRecordPythonTrace from python_tracer.cpp
-template<typename... Args>
-PreTraceInfo preRecordTrace(Symbol op, Args... inputs) {
-  PreTraceInfo info;
-  auto & state = getTracingState();
-  auto & graph = state->graph;
-
-  Node * n = info.n = graph->create(op, /*outputs=*/0);
-  recordSourceLocation(n);
-
-  detail::addInputs(n, inputs...);
-
-  // NB: Order matters. This must append after inputs but before outputs.
-  graph->appendNode(n);
-
-  return info;
+template <
+    typename T,
+    typename = torch::enable_if_t<
+        (!std::is_convertible<torch::decay_t<T>, ArrayRef<Variable>>::value &&
+         !std::is_convertible<torch::decay_t<T>, ArrayRef<at::Tensor>>::value &&
+         !std::is_convertible<torch::decay_t<T>, Variable>::value)>>
+void postRecordTrace(Node* node, T&&) {
+  AT_ERROR(
+      "Found an unsupported argument type ", at::demangle_type<T>(),
+      " in the JIT tracer. File a bug report.");
 }
-
-TORCH_API void postRecordTrace(const PreTraceInfo& info, at::ArrayRef<Variable> outputs);
 
 TORCH_API autograd::Variable getSizeOf(const autograd::Variable& var, int64_t dim);
 

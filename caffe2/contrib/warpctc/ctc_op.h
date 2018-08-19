@@ -45,13 +45,24 @@ class CTCOp final : public Operator<Context> {
   bool RunOnDevice() override {
     // inputs
     const auto& inputs = Input(INPUTS);
+    const auto maxTimeSteps = inputs.dim(0);
     const auto minibatchSize = inputs.dim(1);
     const auto alphabetSize = inputs.dim(2);
     const auto& labels = OperatorBase::template Input<Tensor>(LABELS, CPU);
     const auto& labelLengths =
         OperatorBase::template Input<Tensor>(LABEL_LENGTHS, CPU);
-    const auto& inputLengths =
-        OperatorBase::template Input<Tensor>(INPUT_LENGTHS, CPU);
+
+    const int* inputLengthsData = nullptr;
+    if (InputSize() == 4) {
+      const auto& inputLengths =
+          OperatorBase::template Input<Tensor>(INPUT_LENGTHS, CPU);
+      inputLengthsData = inputLengths.template data<int>();
+    } else {
+      // Input lengths not passed in. Default to max timesteps for
+      // each item in minibatch.
+      default_input_lengths_.resize(minibatchSize, maxTimeSteps);
+      inputLengthsData = default_input_lengths_.data();
+    }
 
     // outputs
     Tensor* gradients = nullptr;
@@ -74,28 +85,40 @@ class CTCOp final : public Operator<Context> {
     size_t workspaceSizeBytes;
     CTC_CHECK(get_workspace_size(
         labelLengths.template data<int>(),
-        inputLengths.template data<int>(),
+        inputLengthsData,
         alphabetSize,
         minibatchSize,
         detail::workspaceInfo(context_),
         &workspaceSizeBytes));
     workspace->Resize(workspaceSizeBytes);
+    auto* workspaceData = workspace->template mutable_data<uint8_t>();
+
+    if (is_test_ && labels.dim(0) == 0) {
+      // compute_ctc_loss doesn't handle empty labels well
+      T* costsData = costs->template mutable_data<T>();
+      for (int i = 0; i < costs->size(); ++i) {
+        costsData[i] = 0;
+      }
+      return true;
+    }
+
     CTC_CHECK(compute_ctc_loss(
         inputs.template data<T>(),
         gradients ? gradients->template mutable_data<T>() : nullptr,
         labels.template data<int>(),
         labelLengths.template data<int>(),
-        inputLengths.template data<int>(),
+        inputLengthsData,
         alphabetSize,
         minibatchSize,
         costs->template mutable_data<T>(),
-        workspace->template mutable_data<uint8_t>(),
+        workspaceData,
         detail::workspaceInfo(context_)));
     return true;
   }
 
 private:
  bool is_test_;
+ std::vector<int> default_input_lengths_;
 
  INPUT_TAGS(INPUTS, LABELS, LABEL_LENGTHS, INPUT_LENGTHS);
 };

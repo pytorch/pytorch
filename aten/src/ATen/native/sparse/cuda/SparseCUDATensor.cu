@@ -81,7 +81,7 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
   int64_t newNnz = newEnd.first - indicesIter;
 
   indices1D.resize_({1, newNnz});
-  std::vector<int64_t> newValues_size(values.sizes());
+  auto newValues_size = values.sizes().vec();
   newValues_size[0] = newNnz;
   Tensor newValues = at::empty(newValues_size, values.options());
 

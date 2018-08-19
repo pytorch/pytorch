@@ -19,14 +19,14 @@ static ptrdiff_t THCTensor_(getSliceSize)(THCState *state, THCTensor *dst,
   ptrdiff_t dstSliceSize = 1;
   for (int d = 0; d < dstDims; d++) {
     if (d != dim) {
-      dstSliceSize *= dst->size(d);
+      dstSliceSize *= THTensor_sizeLegacyNoScalars(dst, d);
     }
   }
 
   if (src == nullptr) return dstSliceSize;
 
   THArgCheck(dim < srcDims, 3, "Indexing dim is out of bounds");
-  THArgCheck(THCudaLongTensor_nElement(state, index) == src->size(dim), 4,
+  THArgCheck(THCudaLongTensor_nElement(state, index) == THTensor_sizeLegacyNoScalars(src, dim), 4,
              "length of src.size[dim] is not equal to length of indices");
 
   ptrdiff_t srcSliceSize = 1;
@@ -36,8 +36,8 @@ static ptrdiff_t THCTensor_(getSliceSize)(THCState *state, THCTensor *dst,
 
   for (int d = 0; d < srcDims; d++) {
     if (d != dim) {
-      srcSliceSize *= src->size(d);
-      if (!mismatch && dst->size(d) != src->size(d)) mismatch = true;
+      srcSliceSize *= THTensor_sizeLegacyNoScalars(src, d);
+      if (!mismatch && THTensor_sizeLegacyNoScalars(dst, d) != THTensor_sizeLegacyNoScalars(src, d)) mismatch = true;
     }
   }
 
@@ -111,7 +111,7 @@ void THCTensor_(indexCopy)(THCState *state, THCTensor *dst, int dim, THCudaLongT
   // of the tensor `indices`.
   ptrdiff_t sliceSize = THCTensor_(getSliceSize)(state, dst, dim, indices, src);
   ptrdiff_t srcTotalSize = THCTensor_(nElement)(state, src);
-  int64_t dstCopyDimSize = THCTensor_(size)(state, dst, dim);
+  int64_t dstCopyDimSize = THCTensor_(sizeLegacyNoScalars)(state, dst, dim);
   ptrdiff_t numIndices = THCudaLongTensor_nElement(state, indices);
 
   if (sliceSize == 0) {
@@ -300,7 +300,7 @@ void THCTensor_(indexAdd)(THCState *state, THCTensor *dst, int dim, THCudaLongTe
   // of the tensor `indices`.
   ptrdiff_t sliceSize = THCTensor_(getSliceSize)(state, dst, dim, indices, src);
   ptrdiff_t srcTotalSize = THCTensor_(nElement)(state, src);
-  int64_t dstAddDimSize = THCTensor_(size)(state, dst, dim);
+  int64_t dstAddDimSize = THCTensor_(sizeLegacyNoScalars)(state, dst, dim);
   ptrdiff_t numIndices = THCudaLongTensor_nElement(state, indices);
 
   if (sliceSize == 0) {
@@ -422,7 +422,7 @@ void THCTensor_(indexFill)(THCState *state, THCTensor *dst, int dim, THCudaLongT
   ptrdiff_t sliceSize =
     THCTensor_(getSliceSize)(state, dst, dim, indices, nullptr);
   ptrdiff_t dstTotalSize = THCTensor_(nElement)(state, dst);
-  int64_t dstFillDimSize = THCTensor_(size)(state, dst, dim);
+  int64_t dstFillDimSize = THCTensor_(sizeLegacyNoScalars)(state, dst, dim);
   ptrdiff_t numIndices = THCudaLongTensor_nElement(state, indices);
 
   if (sliceSize == 0) {
@@ -535,22 +535,9 @@ void THCTensor_(indexSelect)(THCState *state, THCTensor *dst, THCTensor *src, in
   THArgCheck(dim < srcDims, 4, "Indexing dim is out of bounds");
   THArgCheck(srcDims > 0, 2, "Source tensor is empty");
 
-  THLongStorage *newSize;
-
-#ifndef USE_TH_SIZE_ZERO_DIM
-  if (numIndices == 0) {
-    newSize = THCTensor_(newSizeOf)(state, src);
-    THLongStorage_set(newSize, 0, numIndices);
-    THCTensor_(resize)(state, dst, newSize, NULL);
-    THLongStorage_free(newSize);
-    return;
-  }
-#endif
-
-  newSize = THCTensor_(newSizeOf)(state, src);
-  THLongStorage_set(newSize, dim, numIndices);
-  THCTensor_(resize)(state, dst, newSize, NULL);
-  THLongStorage_free(newSize);
+  std::vector<int64_t> newSize = THTensor_sizesLegacyNoScalars(src);
+  newSize[dim] = numIndices;
+  THCTensor_(resize)(state, dst, newSize, {});
 
   ptrdiff_t dstTotalSize = THCTensor_(nElement)(state, dst);
   if (dstTotalSize == 0) {
@@ -564,7 +551,7 @@ void THCTensor_(indexSelect)(THCState *state, THCTensor *dst, THCTensor *src, in
   // total size of the tensor ignoring dimension `dim`;
   // -the number of indices we are choosing, which is the total size
   // of the tensor `indices`.
-  int64_t srcSelectDimSize = THCTensor_(size)(state, src, dim);
+  int64_t srcSelectDimSize = THCTensor_(sizeLegacyNoScalars)(state, src, dim);
   ptrdiff_t sliceSize = dstTotalSize / numIndices;
 
   int mpc = THCState_getCurrentDeviceProperties(state)->multiProcessorCount;

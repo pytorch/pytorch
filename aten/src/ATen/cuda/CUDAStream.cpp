@@ -1,7 +1,8 @@
 #include "ATen/cuda/CUDAStream.h"
 #include "ATen/cuda/CUDAContext.h"
+#include "ATen/cuda/CUDAEvent.h"
 #include "ATen/cuda/Exceptions.h"
-#include "ATen/Error.h"
+#include "ATen/core/Error.h"
 
 #include <mutex>
 #include <atomic>
@@ -84,7 +85,7 @@ namespace detail {
     internals->device = current_device();
     #ifndef __HIP_PLATFORM_HCC__
       AT_CUDA_CHECK(cudaStreamCreateWithPriority(&internals->stream, flags, priority));
-    #else 
+    #else
       AT_CUDA_CHECK(cudaStreamCreateWithFlags(&internals->stream, flags));
     #endif // __HIP_PLATFORM_HCC__
     return internals;
@@ -173,6 +174,10 @@ namespace detail {
     }
   }
 
+  void CUDAStream_synchronize_with(CUDAStreamInternals* ptr, const CUDAEvent& event) {
+    AT_CUDA_CHECK(cudaStreamWaitEvent(ptr->stream, event, 0));
+  }
+
 } // namespace detail
 
   /*
@@ -192,6 +197,10 @@ namespace detail {
     AT_ASSERT(other.internals_);
 
     std::swap(internals_, other.internals_);
+  }
+
+  void CUDAStream::synchronize_with(const CUDAEvent& event) const {
+    detail::CUDAStream_synchronize_with(internals_, event);
   }
 
 } // namespace cuda

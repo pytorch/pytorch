@@ -13,14 +13,14 @@ class ScaleOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   ScaleOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        scale_(OperatorBase::GetSingleArgument<float>("scale", 1.0)) {}
+        scale_(this->template GetSingleArgument<float>("scale", 1.0)) {}
 
   template <typename T>
   bool DoRunWithType() {
     auto& X = Input(0);
     auto* Y = Output(0);
     Y->ResizeLike(X);
-    math::Scale<T, Context>(
+    math::Scale<float, T, Context>(
         X.size(),
         scale_,
         X.template data<T>(),
