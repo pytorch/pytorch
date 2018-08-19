@@ -247,17 +247,15 @@ class CosineAnnealingLR(_LRScheduler):
         T_max (int): Maximum number of iterations.
         eta_min (float): Minimum learning rate. Default: 0.
         last_epoch (int): The index of last epoch. Default: -1.
-        min_lr (float): A lower bound on the learning rate of all
-            param groups. Default: None.
 
     .. _SGDR\: Stochastic Gradient Descent with Warm Restarts:
         https://arxiv.org/abs/1608.03983
     """
 
-    def __init__(self, optimizer, T_max, eta_min=0, last_epoch=-1, min_lr=None):
+    def __init__(self, optimizer, T_max, eta_min=0, last_epoch=-1):
         self.T_max = T_max
         self.eta_min = eta_min
-        super(CosineAnnealingLR, self).__init__(optimizer, last_epoch, min_lr)
+        super(CosineAnnealingLR, self).__init__(optimizer, last_epoch)
 
     def get_lr(self):
         return [self.eta_min + (base_lr - self.eta_min) *
