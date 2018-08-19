@@ -120,6 +120,7 @@ struct AT_API TensorIterator {
   }
   ScalarType dtype(int arg) const { return type(arg).scalarType(); }
   Backend backend(int arg=0) const { return type(arg).backend(); }
+  DeviceType device_type(int arg=0) const { return type(arg).device_type(); }
   bool is_scalar(int arg) const;
   bool is_cpu_scalar(int arg) const;
 

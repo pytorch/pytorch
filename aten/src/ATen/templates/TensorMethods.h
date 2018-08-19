@@ -19,6 +19,14 @@ inline Tensor Tensor::toType(const Type & t, bool non_blocking) const {
   return t.copy(*this, non_blocking);
 }
 
+inline Tensor Tensor::cpu() const {
+  return toType(type().cpu());
+}
+
+inline Tensor Tensor::cuda() const {
+  return toType(type().cuda());
+}
+
 inline Tensor & Tensor::copy_(const Tensor & src, bool non_blocking) {
   return type().copy_(*this, src, non_blocking);
 }
