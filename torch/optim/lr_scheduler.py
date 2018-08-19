@@ -8,7 +8,7 @@ from .optimizer import Optimizer
 
 
 class _LRScheduler(object):
-    def __init__(self, optimizer, last_epoch=-1, min_lr=None):
+    def __init__(self, optimizer, last_epoch=-1, min_lr=0.0):
         if not isinstance(optimizer, Optimizer):
             raise TypeError('{} is not an Optimizer'.format(
                 type(optimizer).__name__))
@@ -51,10 +51,7 @@ class _LRScheduler(object):
             epoch = self.last_epoch + 1
         self.last_epoch = epoch
         for param_group, lr in zip(self.optimizer.param_groups, self.get_lr()):
-            if self.min_lr is None:
-                param_group['lr'] = lr
-            else:
-                param_group['lr'] = max(lr, self.min_lr)
+            param_group['lr'] = lr
 
 
 class LambdaLR(_LRScheduler):
@@ -125,7 +122,7 @@ class LambdaLR(_LRScheduler):
                 self.lr_lambdas[idx].__dict__.update(fn)
 
     def get_lr(self):
-        return [base_lr * lmbda(self.last_epoch)
+        return [max(self.min_lr, base_lr * lmbda(self.last_epoch))
                 for lmbda, base_lr in zip(self.lr_lambdas, self.base_lrs)]
 
 
@@ -162,7 +159,7 @@ class StepLR(_LRScheduler):
         super(StepLR, self).__init__(optimizer, last_epoch, min_lr)
 
     def get_lr(self):
-        return [base_lr * self.gamma ** (self.last_epoch // self.step_size)
+        return [max(self.min_lr, base_lr * self.gamma ** (self.last_epoch // self.step_size))
                 for base_lr in self.base_lrs]
 
 
@@ -201,7 +198,7 @@ class MultiStepLR(_LRScheduler):
         super(MultiStepLR, self).__init__(optimizer, last_epoch, min_lr)
 
     def get_lr(self):
-        return [base_lr * self.gamma ** bisect_right(self.milestones, self.last_epoch)
+        return [max(self.min_lr, base_lr * self.gamma ** bisect_right(self.milestones, self.last_epoch))
                 for base_lr in self.base_lrs]
 
 
@@ -222,7 +219,7 @@ class ExponentialLR(_LRScheduler):
         super(ExponentialLR, self).__init__(optimizer, last_epoch, min_lr)
 
     def get_lr(self):
-        return [base_lr * self.gamma ** self.last_epoch
+        return [max(self.min_lr, base_lr * self.gamma ** self.last_epoch)
                 for base_lr in self.base_lrs]
 
 
