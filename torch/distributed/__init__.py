@@ -158,7 +158,7 @@ def get_rank():
     r"""Returns the rank of current process.
 
     Rank is a unique identifier assigned to each process within a distributed
-    group. They are always consecutive integers ranging from ``0`` to 
+    group. They are always consecutive integers ranging from ``0`` to
     ``world_size``.
     """
     assert torch.distributed._initialized
@@ -268,8 +268,8 @@ def broadcast(tensor, src, group=group.WORLD):
     participating in the collective.
 
     Arguments:
-        tensor (Tensor): Data to be sent if :attr:`src` is the rank of 
-            current process, and tensor to be used to save received data 
+        tensor (Tensor): Data to be sent if :attr:`src` is the rank of
+            current process, and tensor to be used to save received data
             otherwise.
         src (int): Source rank.
         group (optional): Group of the collective.
@@ -286,7 +286,7 @@ def all_reduce_multigpu(tensor_list, op=reduce_op.SUM, group=group.WORLD):
     Therefore, the input tensor in the tensor list needs to be GPU tensors.
     Also, each tensor in the tensor list needs to reside on a different GPU.
 
-    After the call, all tensors in :attr:`tensor_list` will be bitwise identical 
+    After the call, all tensors in :attr:`tensor_list` will be bitwise identical
     in all processes.
 
     .. note::
