@@ -358,7 +358,7 @@ def orthogonal_(tensor, gain=1):
 
         with torch.no_grad():
             tensor[i:i + cols].view_as(q).copy_(q)
-            
+
     with torch.no_grad():
         tensor.mul_(gain)
     return tensor
