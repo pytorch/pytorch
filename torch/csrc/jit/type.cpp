@@ -25,6 +25,15 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
       }
     }
     out << ")";
+  } else if (auto value = t.cast<TensorType>()) {
+    out << at::toString(value->scalarType()) << "(";
+    for (int i = 0; i < value->dim(); ++i) {
+      if (i > 0) {
+        out << ", ";
+      }
+      out << "*";
+    }
+    out << ")";
   } else if(t.kind() == TypeKind::DynamicType) {
     out << "Dynamic";
   } else if(t.kind() == TypeKind::TupleType) {

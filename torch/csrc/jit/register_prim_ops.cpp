@@ -37,18 +37,10 @@ RegisterOperators reg({
     Operator(
         prim::FusionGroup,
         [](Node* node) {
-          auto fusion_fn = sharedFusionCompiler().getOrCompile(node);
-          auto num_inputs = node->inputs().size();
-          return [fusion_fn, num_inputs](Stack& stack) {
+          auto kernel_cache = sharedFusionCompiler().getOrCompile(node);
+          return [kernel_cache](Stack& stack) {
             autograd::profiler::RecordFunction record("FusionGroup");
-            std::vector<at::Tensor> toutputs;
-            // TODO: have fusion_fn work off of a stack as well
-            auto tinputs = fmap(last(stack, num_inputs), [](const IValue& v) {
-              return v.toTensor();
-            });
-            fusion_fn->launch(tinputs, toutputs);
-            drop(stack, num_inputs);
-            stack.insert(stack.end(), toutputs.begin(), toutputs.end());
+            kernel_cache->run(stack);
             return 0;
           };
         }),

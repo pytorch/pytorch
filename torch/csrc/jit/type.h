@@ -63,25 +63,23 @@ public:
   // template variable, returning nullptr if the cast is invalid..
   template<typename T>
   std::shared_ptr<T> cast() {
-    if (T::Kind == kind())
-      return std::static_pointer_cast<T>(shared_from_this());
-    return nullptr;
+    return std::dynamic_pointer_cast<T>(shared_from_this());
   }
   template<typename T>
   std::shared_ptr<const T> cast() const {
-    if (T::Kind == kind())
-      return std::static_pointer_cast<const T>(shared_from_this());
-    return nullptr;
+    return std::dynamic_pointer_cast<const T>(shared_from_this());
   }
   template<typename T>
   std::shared_ptr<T> expect() {
-    JIT_ASSERT(T::Kind == kind());
-    return std::static_pointer_cast<T>(shared_from_this());
+    auto r = std::dynamic_pointer_cast<T>(shared_from_this());
+    JIT_ASSERT(r);
+    return r;
   }
   template<typename T>
   std::shared_ptr<const T> expect() const {
-    JIT_ASSERT(T::Kind == kind());
-    return std::static_pointer_cast<const T>(shared_from_this());
+    auto r = std::dynamic_pointer_cast<const T>(shared_from_this());
+    JIT_ASSERT(r);
+    return r;
   }
   virtual ~Type() = default;
 };
@@ -134,6 +132,11 @@ struct TORCH_API TensorType : public Type {
     t->scalar_type_ = type;
     return t;
   }
+  TensorTypePtr withDim(int new_dim) {
+    auto t = TensorType::create(*this);
+    t->dim_ = new_dim;
+    return t;
+  }
 
   bool operator==(const Type& rhs) const override {
     if (rhs.kind() != TypeKind::TensorType)
@@ -152,6 +155,10 @@ struct TORCH_API TensorType : public Type {
     // str is used for user-facing error messages, where we
     // don't want to reveal underlying size information.
     return "Tensor";
+  }
+
+  static TensorTypePtr sliceSubtypes(const TensorTypePtr& type) {
+    return TensorType::create(type->scalarType(), type->device(), type->dim());
   }
 
 protected:
@@ -240,6 +247,10 @@ struct TORCH_API CompleteTensorType : public TensorType {
     return prod;
   }
   static TypePtr fromNumberType(TypePtr typ);
+
+  static CompleteTensorTypePtr sliceSubtypes(const CompleteTensorTypePtr& type) {
+    return CompleteTensorType::create(type->scalarType(), type->device(), type->sizes(), type->strides());
+  }
 
 private:
   CompleteTensorType(const at::Tensor& tensor)

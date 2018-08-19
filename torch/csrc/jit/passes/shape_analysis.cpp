@@ -81,7 +81,7 @@ at::optional<std::vector<std::shared_ptr<T>>> gatherTensorTypes(Node *node) {
       return at::nullopt;
     } else if (args[i].type->isSubtypeOf(DynamicType::get())) {
       if (auto type = node->input(i)->type()->cast<T>()) {
-        tensor_types.push_back(type);
+        tensor_types.push_back(T::sliceSubtypes(type));
       } else {
         return at::nullopt;
       }
@@ -196,10 +196,63 @@ bool canPropagateShapeByRunningIt(Node* node) {
   return true;
 }
 
-void PropagateTensorShapeOnNode(
+bool PropagateTensorShapeOnNode(
     Node * node, bool insert_expands, std::vector<TensorTypePtr> types);
-void PropagateCompleteShapeOnNode(
+bool PropagateCompleteShapeOnNode(
     Node * node, bool insert_expands, std::vector<CompleteTensorTypePtr> types);
+
+void PropagateCatShape(Node * cat_node) {
+  static const auto propagate_complete = [](Node * node, at::ArrayRef<Value*> tensors) -> bool {
+    auto input_types = fmap(tensors, [](Value *v) { return v->type()->cast<CompleteTensorType>(); });
+    if (!std::all_of(input_types.begin(), input_types.end(),
+        [](const CompleteTensorTypePtr& tp) { return tp != nullptr; })) {
+      return false;
+    }
+    if (!node->is_constant(attr::dim)) return false;
+    std::vector<int64_t> sizes = input_types[0]->sizes();
+    const int64_t dim = wrapDim(node->get<int64_t>(attr::dim).value(), sizes);
+    const int64_t ndim = sizes.size();
+
+    if (dim < 0 || dim >= ndim)
+      return false;
+
+    sizes[dim] = 0;
+    for (auto & tp : input_types) {
+      auto & tp_sizes = tp->sizes();
+      if (sizes.size() != tp_sizes.size())
+        return false;
+      for (int64_t i = 0; i < ndim; ++i) {
+        if (sizes[i] != tp_sizes[i] && i != dim) {
+          return false;
+        }
+      }
+      sizes[dim] += tp_sizes[dim];
+    }
+    node->output()->setType(input_types[0]->withSizes(sizes));
+    return true;
+  };
+  static const auto propagate = [](Node * node, at::ArrayRef<Value*> tensors) -> bool {
+    for (Value * v : tensors) {
+      if (auto type = v->type()->cast<TensorType>()) {
+        node->output()->setType(type);
+        return true;
+      }
+    }
+    return false;
+  };
+  auto list_node = cat_node->namedInput(attr::tensors)->node();
+  if (list_node->kind() == prim::ListConstruct) {
+    auto tensors = list_node->inputs();
+    if (!tensors.empty()) {
+      if (propagate_complete(cat_node, tensors)) {
+        return;
+      } else if (propagate(cat_node, tensors)) {
+        return;
+      }
+    }
+  }
+  setUnshapedType(cat_node);
+}
 
 void PropagateShapeOnNode(Node * node, bool insert_expands) {
   // These don't require the types, and have complicated schema. Return early after we process them.
@@ -248,6 +301,14 @@ void PropagateShapeOnNode(Node * node, bool insert_expands) {
       }
       return;
     }
+    // NB: We assume that all shapes are known within fused kernels
+    case prim::FusedConcat: {
+      auto example_type = node->inputs().at(0)->type()->expect<CompleteTensorType>();
+      auto sizes = example_type->sizes();
+      sizes[node->i(attr::dim)] *= node->inputs().size();
+      node->output()->setType(example_type->withSizes(sizes));
+      return;
+    }
     case prim::PythonOp:
     case prim::Print:
     case prim::Undefined: {
@@ -257,46 +318,20 @@ void PropagateShapeOnNode(Node * node, bool insert_expands) {
     default:
       break; // fall-through
   }
-  if (node->matches("aten::cat(Tensor[] tensors, int dim) -> Tensor", /*with_const=*/attr::dim)) {
-    auto list_node = node->namedInput(attr::tensors)->node();
-    JIT_ASSERT(list_node->kind() == prim::ListConstruct);
-    auto tensors = list_node->inputs();
-    if (tensors.size() > 0) {
-      auto input_types = fmap(tensors, [](Value *v) { return v->type()->cast<CompleteTensorType>(); });
-      if (std::all_of(input_types.begin(), input_types.end(),
-          [](const CompleteTensorTypePtr& tp) { return tp != nullptr; })) {
-        std::vector<int64_t> sizes = input_types[0]->sizes();
-        const int64_t dim = wrapDim(node->get<int64_t>(attr::dim).value(), sizes);
-        const int64_t ndim = sizes.size();
-
-        if (dim < 0 || dim >= ndim)
-          goto cat_fail;
-
-        sizes[dim] = 0;
-        for (auto & tp : input_types) {
-          auto & tp_sizes = tp->sizes();
-          if (sizes.size() != tp_sizes.size())
-            goto cat_fail;
-          for (int64_t i = 0; i < ndim; ++i) {
-            if (sizes[i] != tp_sizes[i] && i != dim) {
-              goto cat_fail;
-            }
-          }
-          sizes[dim] += tp_sizes[dim];
-        }
-        node->output()->setType(input_types[0]->withSizes(sizes));
-        return;
-      }
-    }
+  if (node->matches("aten::cat(Tensor[] tensors, int dim) -> Tensor")) {
+    return PropagateCatShape(node);
   }
-cat_fail:
 
   if (auto maybe_complete_types = gatherTensorTypes<CompleteTensorType>(node)) {
-    return PropagateCompleteShapeOnNode(node, insert_expands, std::move(*maybe_complete_types));
+    if (PropagateCompleteShapeOnNode(node, insert_expands, std::move(*maybe_complete_types))) {
+      return;
+    }
   }
 
   if (auto maybe_tensor_types = gatherTensorTypes<TensorType>(node)) {
-    return PropagateTensorShapeOnNode(node, insert_expands, std::move(*maybe_tensor_types));
+    if (PropagateTensorShapeOnNode(node, insert_expands, std::move(*maybe_tensor_types))) {
+      return;
+    }
   }
 
   if (canPropagateShapeByRunningIt(node))
@@ -304,46 +339,106 @@ cat_fail:
   return setUnshapedType(node);
 }
 
-void PropagateTensorShapeOnNode(Node * node, bool insert_expands,
+bool PropagateTensorShapeOnNode(Node * node, bool insert_expands,
                                 std::vector<TensorTypePtr> tensor_types) {
-  if (node->matches("aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor") ||
-      node->matches("aten::sub(Tensor self, Tensor other, *, Scalar alpha) -> Tensor") ||
-      node->matches("aten::mul(Tensor self, Tensor other) -> Tensor") ||
-      node->matches("aten::pow(Tensor self, Tensor exponent) -> Tensor") ||
-      node->matches("aten::min(Tensor self, Tensor other) -> Tensor") ||
-      node->matches("aten::max(Tensor self, Tensor other) -> Tensor") ||
-      node->matches("aten::lt(Tensor self, Tensor other) -> Tensor") ||
-      node->matches("aten::le(Tensor self, Tensor other) -> Tensor") ||
-      node->matches("aten::gt(Tensor self, Tensor other) -> Tensor") ||
-      node->matches("aten::ge(Tensor self, Tensor other) -> Tensor") ||
-      node->matches("aten::eq(Tensor self, Tensor other) -> Tensor") ||
-      node->matches("aten::ne(Tensor self, Tensor other) -> Tensor")) {
-    return;
-  } else if (node->matches("aten::neg(Tensor self) -> Tensor") ||
-             node->matches("aten::t(Tensor self) -> Tensor")) {
-    return;
-  } else if (node->matches("aten::mm(Tensor self, Tensor mat2) -> Tensor") ||
-             node->matches("aten::narrow(Tensor self, int dim, int start, int length) -> Tensor") ||
-             node->matches("aten::type_as(Tensor self, Tensor other) -> Tensor")) {
-    return;
-  } else if (node->matches("aten::sum(Tensor self) -> Tensor")) {
-    return;
-  } else if (node->matches("aten::sum(Tensor self, int[] dim, int keepdim) -> Tensor",
-             /*with_const=*/{attr::dim, attr::keepdim})) {
-    return;
-  } else if (node->matches("aten::squeeze(Tensor self, int dim) -> Tensor")) {
-    return;
-  } else if (node->matches("aten::unsqueeze(Tensor self, int dim) -> Tensor")) {
-    return;
-  } else if (node->matches("aten::view(Tensor self, int[] size) -> Tensor", /*with_const=*/attr::size) ||
-             node->matches("aten::expand(Tensor self, int[] size, *, int implicit) -> Tensor", /*with_const=*/attr::size)) {
-    return;
-  } else if (node->matches("aten::index_select(Tensor self, int dim, Tensor index) -> Tensor")) {
-    return;
+  static const auto broadcast = [](std::vector<TensorTypePtr>& tensor_types) -> TensorTypePtr {
+    JIT_ASSERT(!tensor_types.empty());
+    auto any_type = tensor_types[0];
+    auto max_dims = any_type->dim();
+    for (auto & type : tensor_types) {
+      max_dims = std::max(max_dims, type->dim());
+    }
+    return TensorType::create(any_type->scalarType(), any_type->device(), max_dims);
+  };
+  const auto getSingleOutputType = [&]() -> TypePtr {
+    if (node->matches("aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor") ||
+        node->matches("aten::sub(Tensor self, Tensor other, *, Scalar alpha) -> Tensor") ||
+        node->matches("aten::mul(Tensor self, Tensor other) -> Tensor") ||
+        node->matches("aten::pow(Tensor self, Tensor exponent) -> Tensor") ||
+        node->matches("aten::min(Tensor self, Tensor other) -> Tensor") ||
+        node->matches("aten::max(Tensor self, Tensor other) -> Tensor") ||
+        node->matches("aten::addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta, Scalar alpha) -> Tensor")) {
+      return broadcast(tensor_types);
+    } else if (node->matches("aten::add(Tensor self, Scalar other, Scalar alpha) -> Tensor") ||
+               node->matches("aten::sub(Tensor self, Scalar other, Scalar alpha) -> Tensor") ||
+               node->matches("aten::mul(Tensor self, Scalar other) -> Tensor") ||
+               node->matches("aten::pow(Tensor self, Scalar exponent) -> Tensor") ||
+               node->matches("aten::add(Scalar other, Tensor self) -> Tensor") ||
+               node->matches("aten::sub(Scalar other, Tensor self) -> Tensor") ||
+               node->matches("aten::mul(Scalar other, Tensor self) -> Tensor")) {
+      return tensor_types.at(0);
+    } else if (node->matches("aten::lt(Tensor self, Tensor other) -> Tensor") ||
+               node->matches("aten::le(Tensor self, Tensor other) -> Tensor") ||
+               node->matches("aten::gt(Tensor self, Tensor other) -> Tensor") ||
+               node->matches("aten::ge(Tensor self, Tensor other) -> Tensor") ||
+               node->matches("aten::eq(Tensor self, Tensor other) -> Tensor") ||
+               node->matches("aten::ne(Tensor self, Tensor other) -> Tensor")) {
+      return broadcast(tensor_types)->toScalarType(at::kByte);
+    } else if (node->matches("aten::lt(Tensor self, Scalar other) -> Tensor") ||
+               node->matches("aten::le(Tensor self, Scalar other) -> Tensor") ||
+               node->matches("aten::gt(Tensor self, Scalar other) -> Tensor") ||
+               node->matches("aten::ge(Tensor self, Scalar other) -> Tensor") ||
+               node->matches("aten::eq(Tensor self, Scalar other) -> Tensor") ||
+               node->matches("aten::ne(Tensor self, Scalar other) -> Tensor")) {
+      return tensor_types.at(0)->toScalarType(at::kByte);
+    } else if (node->matches("aten::neg(Tensor self) -> Tensor") ||
+               node->matches("aten::t(Tensor self) -> Tensor") ||
+               node->matches("aten::sigmoid(Tensor self) -> Tensor") ||
+               node->matches("aten::tanh(Tensor self) -> Tensor") ||
+               node->matches("aten::exp(Tensor self) -> Tensor") ||
+               node->matches("aten::relu(Tensor self) -> Tensor") ||
+               node->matches("aten::mm(Tensor self, Tensor mat2) -> Tensor") ||
+               node->matches("aten::narrow(Tensor self, int dim, int start, int length) -> Tensor") ||
+               node->matches("aten::index_select(Tensor self, int dim, Tensor index) -> Tensor")) {
+      return tensor_types.at(0);
+    } else if (node->matches("aten::type_as(Tensor self, Tensor other) -> Tensor")) {
+      return tensor_types.at(0)->toScalarType(tensor_types.at(1)->scalarType());
+    } else if (node->matches("aten::sum(Tensor self) -> Tensor")) {
+      // TODO: this depends on the dtype argument. why don't we have access to it in here?
+      // TODO: integral types are upcast
+      auto & t = tensor_types.at(0);
+      return TensorType::create(t->scalarType(), t->device(), 0);
+    } else if (node->matches("aten::sum(Tensor self, int[] dim, int keepdim) -> Tensor",
+              /*with_const=*/attr::keepdim)) {
+      auto & t = tensor_types.at(0);
+      bool keepdim = node->get<int64_t>(attr::keepdim).value();
+      if (!keepdim) {
+        if (auto dims = node->get<std::vector<int64_t>>(attr::dim)) {
+          // TODO: do we need to account for duplicates in dim here?
+          return t->withDim(t->dim() - dims->size());
+        }
+        return nullptr;
+      } else {
+        return t;
+      }
+      return nullptr;
+    } else if (node->matches("aten::unsqueeze(Tensor self, int dim) -> Tensor")) {
+      auto & t = tensor_types.at(0);
+      return t->withDim(t->dim() + 1);
+    } else if (node->matches("aten::view(Tensor self, int[] size) -> Tensor", /*with_const=*/attr::size) ||
+               node->matches("aten::expand(Tensor self, int[] size, *, int implicit) -> Tensor", /*with_const=*/attr::size)) {
+      return tensor_types.at(0)->withDim(node->get<std::vector<int64_t>>(attr::size)->size());
+    }
+    return nullptr;
+  };
+  if (node->outputs().size() == 1) {
+    if (auto type = getSingleOutputType()) {
+      node->output()->setType(type);
+      return true;
+    }
   }
+  if (node->matches("aten::chunk(Tensor self, int chunks, int dim) -> Tensor[]")) {
+    JIT_ASSERT(!tensor_types.empty());
+    for (Value * output : node->outputs()) {
+      output->setType(tensor_types[0]);
+    }
+    return true;
+  }
+  setUnshapedType(node);
+  return false;
 }
 
-void PropagateCompleteShapeOnNode(Node * node, bool insert_expands,
+bool PropagateCompleteShapeOnNode(Node * node, bool insert_expands,
                                   std::vector<CompleteTensorTypePtr> tensor_types) {
   // For expensive ops we can directly encode their shape propagation
   // here, otherwise we fallback to running a fake version of the op
@@ -356,7 +451,16 @@ void PropagateCompleteShapeOnNode(Node * node, bool insert_expands,
     // handled by the fallthrough because it's not always safe to run it due
     // to integer divide-by-zero.
     PropagateShapeOnNodeByRunningIt(node);
-    return;
+    return true;
+  } else if (node->matches("aten::add(Tensor self, Scalar other, Scalar alpha) -> Tensor") ||
+             node->matches("aten::sub(Tensor self, Scalar other, Scalar alpha) -> Tensor") ||
+             node->matches("aten::mul(Tensor self, Scalar other) -> Tensor") ||
+             node->matches("aten::pow(Tensor self, Scalar exponent) -> Tensor") ||
+             node->matches("aten::add(Scalar other, Tensor self) -> Tensor") ||
+             node->matches("aten::sub(Scalar other, Tensor self) -> Tensor") ||
+             node->matches("aten::mul(Scalar other, Tensor self) -> Tensor")) {
+    node->output()->setType(tensor_types.at(0));
+    return true;
   } else if (insert_expands && (
       node->matches("aten::pow(Tensor self, Tensor exponent) -> Tensor") ||
       node->matches("aten::min(Tensor self, Tensor other) -> Tensor") ||
@@ -372,9 +476,13 @@ void PropagateCompleteShapeOnNode(Node * node, bool insert_expands,
     // because the type casting logic in scalar cases is non-trivial.
     // It's better to just run them.
     broadcastBinary(node, tensor_types, 0, 1);
-  } else if (node->matches("aten::neg(Tensor self) -> Tensor")) {
+    PropagateShapeOnNodeByRunningIt(node);
+    return true;
+  } else if (node->matches("aten::neg(Tensor self) -> Tensor") ||
+             node->matches("aten::sigmoid(Tensor self) -> Tensor") ||
+             node->matches("aten::tanh(Tensor self) -> Tensor")) {
     node->output()->setType(tensor_types.at(0)->contiguous());
-    return;
+    return true;
   } else if (node->matches("aten::mm(Tensor self, Tensor mat2) -> Tensor")) {
     auto lhs_type = tensor_types.at(0);
     auto rhs_type = tensor_types.at(1);
@@ -382,7 +490,7 @@ void PropagateCompleteShapeOnNode(Node * node, bool insert_expands,
     node->output()->setType(CompleteTensorType::create(
       lhs_type->scalarType(), lhs_type->device(),
       at::IntList{lhs_type->sizes().at(0), rhs_type->sizes().at(1)}));
-    return;
+    return true;
   } else if (node->matches("aten::t(Tensor self) -> Tensor")) {
     auto tp = tensor_types.at(0);
     auto sizes = tp->sizes();
@@ -391,7 +499,7 @@ void PropagateCompleteShapeOnNode(Node * node, bool insert_expands,
     std::swap(sizes.at(0), sizes.at(1));
     std::swap(strides.at(0), strides.at(1));
     node->output()->setType(tp->withSizesStrides(sizes, strides));
-    return;
+    return true;
   } else if (node->matches("aten::narrow(Tensor self, int dim, int start, int length) -> Tensor",
                            /*with_const=*/{attr::dim, attr::length})) {
     auto tp = tensor_types.at(0);
@@ -401,10 +509,10 @@ void PropagateCompleteShapeOnNode(Node * node, bool insert_expands,
     SHAPE_ASSERT(dim >= 0 && static_cast<size_t>(dim) < sizes.size());
     sizes.at(dim) = length;
     node->output()->setType(tp->withSizesStrides(sizes, tp->strides()));
-    return;
+    return true;
   } else if (node->matches("aten::sum(Tensor self) -> Tensor")) {
     node->output()->setType(tensor_types.at(0)->withSizes({}));
-    return;
+    return true;
   } else if (node->matches("aten::sum(Tensor self, int[] dim, int keepdim) -> Tensor",
              /*with_const=*/{attr::dim, attr::keepdim})) {
     auto & tp = tensor_types.at(0);
@@ -421,7 +529,7 @@ void PropagateCompleteShapeOnNode(Node * node, bool insert_expands,
       }
     }
     node->output()->setType(tp->withSizes(sizes));
-    return;
+    return true;
   } else if (node->matches("aten::squeeze(Tensor self, int dim) -> Tensor", /*with_const=*/attr::dim)) {
     auto & tp = tensor_types.at(0);
     auto sizes = tp->sizes();
@@ -433,7 +541,7 @@ void PropagateCompleteShapeOnNode(Node * node, bool insert_expands,
       strides.erase(strides.begin() + dim);
     }
     node->output()->setType(tp->withSizesStrides(sizes, strides));
-    return;
+    return true;
   } else if (node->matches("aten::unsqueeze(Tensor self, int dim) -> Tensor", /*with_const=*/attr::dim)) {
     auto & tp = tensor_types.at(0);
     auto sizes = tp->sizes();
@@ -444,7 +552,7 @@ void PropagateCompleteShapeOnNode(Node * node, bool insert_expands,
     sizes.insert(sizes.begin() + dim, 1);
     strides.insert(strides.begin() + dim, new_stride);
     node->output()->setType(tp->withSizesStrides(sizes, strides));
-    return;
+    return true;
   } else if (node->matches("aten::view(Tensor self, int[] size) -> Tensor", /*with_const=*/attr::size)) {
     auto sizes = node->get<std::vector<int64_t>>(attr::size).value();
     bool inferred = false;
@@ -469,7 +577,7 @@ void PropagateCompleteShapeOnNode(Node * node, bool insert_expands,
       sizes[inferred_idx] = inferred_size;
     }
     node->output()->setType(tensor_types.at(0)->withSizes(sizes));
-    return;
+    return true;
   } else if (node->matches("aten::type_as(Tensor self, Tensor other) -> Tensor")) {
     if (tensor_types.at(0)->scalarType() == tensor_types.at(1)->scalarType()) {
       node->output()->setType(node->namedInput(attr::self)->type());
@@ -477,7 +585,7 @@ void PropagateCompleteShapeOnNode(Node * node, bool insert_expands,
       // This will be a copy, so the result will be contiguous
       node->output()->setType(tensor_types.at(1)->withSizes(tensor_types.at(0)->sizes()));
     }
-    return;
+    return true;
   } else if (node->matches("aten::expand(Tensor self, int[] size, *, int implicit) -> Tensor",
              /*with_const=*/attr::size)) {
     auto tp = tensor_types.at(0);
@@ -485,7 +593,7 @@ void PropagateCompleteShapeOnNode(Node * node, bool insert_expands,
     std::tie(sizes, strides) = at::inferExpandGeometry(
         tp->sizes(), tp->strides(), node->get<std::vector<int64_t>>(attr::size).value());
     node->output()->setType(tp->withSizesStrides(sizes, strides));
-    return;
+    return true;
   } else if (node->matches("aten::index_select(Tensor self, int dim, Tensor index) -> Tensor",
              /*with_const=*/attr::dim)) {
     auto ten = tensor_types.at(0);
@@ -496,26 +604,44 @@ void PropagateCompleteShapeOnNode(Node * node, bool insert_expands,
     std::vector<int64_t> sizes = ten->sizes();
     sizes[dim] = index->sizes()[0];
     node->output()->setType(ten->withSizes(sizes));
-    return;
+    return true;
+  } else if (node->kind() == prim::FusedChunk ||
+             node->matches("aten::chunk(Tensor self, int chunks, int dim) -> Tensor[]",
+                           /*with_const=*/{attr::chunks, attr::dim})) {
+    auto input_type = tensor_types.at(0);
+    auto sizes = input_type->sizes();
+    const auto & strides = input_type->strides();
+    int64_t dim, chunks;
+    if (node->kind() == prim::FusedChunk) {
+      dim = node->i(attr::dim);
+      chunks = node->i(attr::chunks);
+    } else {
+      dim = node->get<int64_t>(attr::dim).value();
+      chunks = node->get<int64_t>(attr::chunks).value();
+    }
+    sizes[dim] /= chunks;
+    for (Value * output : node->outputs()) {
+      output->setType(input_type->withSizesStrides(sizes, strides));
+    }
+
+    if (input_type->sizes().at(dim) % chunks != 0) {
+      sizes[dim] = input_type->sizes().at(dim) % chunks;
+      node->outputs().back()->setType(input_type->withSizesStrides(sizes, strides));
+    }
+    return true;
   } else if (node->kind() == onnx::Shape) {
     SHAPE_ASSERT(node->inputs().size() == 1 && node->outputs().size() == 1);
     std::vector<int64_t> dim_vec = {(int64_t)tensor_types.at(0)->sizes().size()};
     at::IntList dims(dim_vec);
     node->output()->setType(
         CompleteTensorType::create(at::kLong, -1, dims));
-    return;
+    return true;
   } else if (node->kind() == onnx::Reshape) {
     setUnshapedType(node);
-    return;
+    return true;
   }
-
-  // If we haven't managed to handle the op so far, we fall back to inferring the
-  // shapes by doing an example run of the op (if we can).
-  if (canPropagateShapeByRunningIt(node)) {
-    PropagateShapeOnNodeByRunningIt(node);
-  } else {
-    setUnshapedType(node);
-  }
+  setUnshapedType(node);
+  return false;
 }
 
 void PropagateShapeOnBlock(Block * block, bool insert_expands) {
@@ -540,6 +666,16 @@ void PropagateInputShapes(Graph & graph, const ArgumentSpec & spec) {
   JIT_ASSERT(graph.inputs().size() == spec.size());
   for(size_t i = 0; i < spec.size(); ++i) {
     auto argspec = spec.at(i);
+    if (!argspec.isTensor()) continue;
+    graph.inputs()[i]->setType(argspec);
+  }
+  PropagateShapeOnBlock(graph.block());
+}
+
+void PropagateInputShapes(Graph & graph, const CoarseArgumentSpec & spec) {
+  JIT_ASSERT(graph.inputs().size() == spec.size());
+  for(size_t i = 0; i < spec.size(); ++i) {
+    const auto & argspec = spec.at(i);
     if (!argspec.isTensor()) continue;
     graph.inputs()[i]->setType(argspec);
   }
