@@ -347,23 +347,19 @@ def orthogonal_(tensor, gain=1):
 
     rows = tensor.size(0)
     cols = tensor[0].numel()
-    flattened = tensor.new(rows, cols).normal_(0, 1)
+    flattened = tensor.new_empty(rows, cols).normal_(0, 1)
 
-    if rows < cols:
-        flattened.t_()
-
-    # Compute the qr factorization
-    q, r = torch.qr(flattened)
-    # Make Q uniform according to https://arxiv.org/pdf/math-ph/0609050.pdf
-    d = torch.diag(r, 0)
-    ph = d.sign()
-    q *= ph
-
-    if rows < cols:
+    for i in range(0, rows, cols):
+        # Compute the qr factorization
+        q, r = torch.qr(flattened[i:i + cols].t())
+        # Make Q uniform according to https://arxiv.org/pdf/math-ph/0609050.pdf
+        q *= torch.diag(r, 0).sign()
         q.t_()
 
+        with torch.no_grad():
+            tensor[i:i + cols].view_as(q).copy_(q)
+            
     with torch.no_grad():
-        tensor.view_as(q).copy_(q)
         tensor.mul_(gain)
     return tensor
 
