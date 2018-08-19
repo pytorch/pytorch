@@ -42,16 +42,26 @@ static void invalid_mask(const Tensor & self, int64_t idx, const Tensor & mask, 
   throw std::runtime_error(ss.str());
 }
 
-static void checkIndexTensorTypes(TensorList indices) {
+// Check index tensor types, throw runtime error if some tensor has illegal type,
+// return true if at least one tensor has long type (so that index wrap is necessary
+// for that tensor in order to support negative index), return false otherwise.
+static bool checkIndexTensorTypes(TensorList indices) {
+  bool need_wrap_indices = false;
   for (auto& tensor : indices) {
     if (tensor.defined()) {
       auto& type = tensor.type();
       auto scalarType = type.scalarType();
-      if (scalarType != kLong && scalarType != kByte) {
+      switch (scalarType) {
+      case kLong:
+        need_wrap_indices = true;
+      case kByte:
+        break;
+      default:
         throw std::runtime_error("tensors used as indices must be long or byte tensors");
       }
     }
   }
+  return need_wrap_indices;
 }
 
 static std::vector<Tensor> expandByteTensors(const Tensor & self, TensorList indices) {
@@ -69,15 +79,8 @@ static std::vector<Tensor> expandByteTensors(const Tensor & self, TensorList ind
       }
       // Replace with nonzeros
       auto nonzero = index.nonzero();
-      auto special_empty = false;
       for (int64_t j = 0; j < index.dim(); j++) {
-        if (special_empty) {
-          // We can't call select on an empty tensor so we just create an empty
-          // tensor.
-          result.emplace_back(nonzero.type().tensor());
-        } else {
-          result.emplace_back(nonzero.select(1, j));
-        }
+        result.emplace_back(nonzero.select(1, j));
       }
     } else {
       result.emplace_back(index);
@@ -123,7 +126,7 @@ transposeToFront(Tensor self, TensorList indices) {
 }
 
 static std::vector<int64_t> computeLinearStride(const Tensor & tensor) {
-  // computes the stride as if tensor were contigous
+  // computes the stride as if tensor were contiguous
   auto sizes = tensor.sizes();
   std::vector<int64_t> stride(tensor.dim());
   stride[tensor.dim() - 1] = 1;
@@ -156,7 +159,7 @@ static Tensor wrapIndexOnce(const Tensor & index, int64_t dim, int64_t dim_size)
   return index.remainder(dim_size);
 }
 
-static Tensor computeLinearIndex(const Tensor & src, TensorList indices) {
+static Tensor computeLinearIndex(const Tensor & src, TensorList indices, bool need_wrap_indices) {
   auto strides = computeLinearStride(src);
   Type& longType = src.type().toScalarType(kLong);
 
@@ -170,7 +173,8 @@ static Tensor computeLinearIndex(const Tensor & src, TensorList indices) {
     if (indices[i].defined()) {
       // Cast index to the longType matching src's backend
       // This allows us to support ie indexing a cuda tensor with a cpu tensor
-      Tensor index = (wrapIndexOnce(indices[i], i, src.size(i)) * strides[i]).toType(longType);
+      Tensor t = need_wrap_indices ? wrapIndexOnce(indices[i], i, src.size(i)) : indices[i];
+      Tensor index = (t * strides[i]).toType(longType);
       if (linearIndex.defined()) {
         linearIndex += index;
       } else {
@@ -211,7 +215,7 @@ static Tensor computeLinearIndex(const Tensor & src, TensorList indices) {
 }
 
 static std::tuple<Tensor, Tensor> makeLinearIndex(Tensor self, TensorList orig) {
-  checkIndexTensorTypes(orig);
+  bool need_wrap_indices = checkIndexTensorTypes(orig);
   // first expand ByteTensor (boolean masks) into 1 or more LongTensors
   auto indices = expandByteTensors(self, orig);
   // next broadcast all index tensors together
@@ -225,7 +229,7 @@ static std::tuple<Tensor, Tensor> makeLinearIndex(Tensor self, TensorList orig) 
   if (!hasContiguousSubspace(indices)) {
     std::tie(self, indices) = transposeToFront(self, indices);
   }
-  auto linearIndex = computeLinearIndex(self, indices);
+  auto linearIndex = computeLinearIndex(self, indices, need_wrap_indices);
   return std::make_tuple(self, linearIndex);
 }
 
