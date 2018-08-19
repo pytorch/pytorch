@@ -567,7 +567,7 @@ class TestCaffe2Backend(unittest.TestCase):
 
                 def forward(self, input):
                     return getattr(input, name)()
-            input = Variable(torch.empty(BATCH_SIZE, 10, 10).uniform_(4, 9))
+            input = Variable(torch.empty(BATCH_SIZE, 10, 10).uniform_())
             self.run_model_test(MyModel(), train=False, input=input, batch_size=BATCH_SIZE)
 
         test_func('cos')
