@@ -51,6 +51,10 @@ OnnxifiOp<float, CPUContext>::BuildInitializationList(
     std::vector<std::string>* weight_names,
     std::vector<std::vector<uint64_t>>* weight_shapes) {
   const std::vector<string>& ws_blobs = ws->Blobs();
+  // Since onnxTensorDescriptorV1.name will point into the memory in
+  // weight_names, we need to prevent weight_names from reallocating by
+  // reserving enough memory ahead of time
+  weight_names->reserve(ws_blobs.size());
   std::vector<onnxTensorDescriptorV1> descs;
   for (const auto& s : ws_blobs) {
     auto it = initialization_list->find(s);

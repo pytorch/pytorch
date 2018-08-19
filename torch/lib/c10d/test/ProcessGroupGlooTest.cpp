@@ -141,7 +141,7 @@ std::vector<std::vector<at::Tensor>> copyTensors(
     const auto& input = inputs[i];
     std::vector<at::Tensor> output(input.size());
     for (size_t j = 0; j < input.size(); j++) {
-      output[j] = input[j].toBackend(at::kCPU);
+      output[j] = input[j].cpu();
     }
     outputs[i] = std::move(output);
   }
@@ -261,22 +261,22 @@ int main(int argc, char** argv) {
 
   {
     TemporaryFile file;
-    testAllreduce(file.path, at::kCPU);
+    testAllreduce(file.path, at::Backend::CPU);
   }
 
   {
     TemporaryFile file;
-    testAllreduce(file.path, at::kCUDA);
+    testAllreduce(file.path, at::Backend::CUDA);
   }
 
   {
     TemporaryFile file;
-    testBroadcast(file.path, at::kCPU);
+    testBroadcast(file.path, at::Backend::CPU);
   }
 
   {
     TemporaryFile file;
-    testBroadcast(file.path, at::kCUDA);
+    testBroadcast(file.path, at::Backend::CUDA);
   }
 
   return 0;

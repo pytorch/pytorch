@@ -22,7 +22,7 @@ import tempfile
 import shutil
 import warnings
 from test_autograd import method_tests, create_input, unpack_variables, \
-    exclude_tensor_method, EXCLUDE_GRADCHECK, EXCLUDE_FUNCTIONAL
+    exclude_tensor_method, non_differentiable, EXCLUDE_GRADCHECK, EXCLUDE_FUNCTIONAL
 from copy import deepcopy
 import random
 
@@ -474,6 +474,21 @@ class TestJit(JitTestCase):
 
         self.assertExportImport(trace, (t,) + tuple(model.parameters()))
         self.assertExpectedONNXGraph(trace)
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @skipIfRocm
+    def test_broadcast_fusion_cuda(self):
+        def scaleshift(x, scale, shift):
+            return x * scale + shift
+
+        inputs = [
+            torch.randn(4, 4, dtype=torch.float, device='cuda'),
+            torch.randn(4, dtype=torch.float, device='cuda'),
+            torch.randn(4, dtype=torch.float, device='cuda'),
+        ]
+        ge = self.checkTrace(scaleshift, inputs)
+        self.assertExpectedGraph(ge.graph_for(*inputs))
 
     # TODO: Fuser doesn't work at all when inputs require grad. Fix that
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
@@ -1321,17 +1336,26 @@ class TestJit(JitTestCase):
         self.run_pass('constant_propagation', constant_prop.graph)
         self.assertExpected(canonical(constant_prop.graph))
 
-    # TODO: implement
-    @unittest.expectedFailure
     def test_constant_prop_if_constant(self):
         @torch.jit.script
-        def constant_prop():
-            b = 3
-            if True:
-                b = 1
-            if False:
-                b = 2
-            return b
+        def constant_prop(a, b):
+            c0 = 1
+            c1 = 1
+            c2 = 1
+            if a:  # -> c0, c1
+                if b:  # -> c0
+                    if True:  # -> c0
+                        c0 = c0 + 1
+                        if False:
+                            c1 = c1 + 1
+                            c2 = c2 + 1
+            else:  # -> c0, c1
+                c1 = c1 + 1
+
+            if True:  # inlined
+                c0 = c0 + 1  # dynamic
+                c2 = c2 + 4  # set to 5
+            return a + c0 + c1 + c2
 
         self.run_pass('constant_propagation', constant_prop.graph)
         self.assertExpected(canonical(constant_prop.graph))
@@ -2177,6 +2201,84 @@ a")
             func2.graph, (torch.zeros(1, 1, 1, 1, 4),), False)
         self.assertExpected(canonical(func2.graph), subname='2')
 
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "No CUDA")
+    def test_chunk_fusion_cuda(self):
+        def fn(x):
+            a, b, c = x.chunk(3, 1)
+            return a * b + c
+
+        inputs = [torch.randn(10, 6, dtype=torch.float, device='cuda')]
+
+        self.checkScript(fn, inputs)
+
+        fn_script = torch.jit.script(fn)
+        _ = fn_script(*inputs)
+        self.assertExpectedGraph(fn_script.graph_for(*inputs))
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "No CUDA")
+    def test_chunk_multiple_fusion_cuda(self):
+        # The arguments are intentionally used out of order as a test to see
+        # if the fusion compiler adds extra args in the correct order
+        def fn(s, x, y, z):
+            z1, z2 = z.chunk(2, 2)
+            x1, x2, x3 = x.chunk(3, 1)
+            y1, y2 = y.chunk(2, 0)
+            return s + x1 + x2 + x3 + y1 + y2 + z1 + z2
+
+        inputs = [
+            torch.randn(5, 2, 3, dtype=torch.float, device='cuda'),
+            torch.randn(5, 6, 3, dtype=torch.float, device='cuda'),
+            torch.randn(10, 2, 3, dtype=torch.float, device='cuda'),
+            torch.randn(5, 2, 6, dtype=torch.float, device='cuda'),
+        ]
+
+        self.checkScript(fn, inputs)
+
+        fn_script = torch.jit.script(fn)
+        _ = fn_script(*inputs)
+        self.assertExpectedGraph(fn_script.graph_for(*inputs))
+
+    @staticmethod
+    def _test_chunk_fusion_correctness(self, device='cpu'):
+        def chunk_4_0(x):
+            x0, x1, x2, x3 = x.chunk(4, 0)
+            return x0 + x1 + x2 + x3
+
+        def chunk_4_1(x):
+            x0, x1, x2, x3 = x.chunk(4, 1)
+            return x0 + x1 + x2 + x3
+
+        def chunk_4_last(x):
+            x0, x1, x2, x3 = x.chunk(4, 2)
+            return x0 + x1 + x2 + x3
+
+        fns = [chunk_4_0, chunk_4_1, chunk_4_last]
+        tensors = [
+            # splitSize = 1
+            torch.randn(4, 4, 4, dtype=torch.float, device=device),
+
+            # contiguous case
+            torch.randn(12, 8, 16, dtype=torch.float, device=device),
+
+            # non-contiguous case
+            torch.randn(12, 8, 16, dtype=torch.float, device=device).transpose(1, 2),
+        ]
+
+        for tensor in tensors:
+            for fn in fns:
+                self.checkScript(fn, [tensor])
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    def test_chunk_fusion_correctness(self):
+        return self._test_chunk_fusion_correctness(self, 'cpu')
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "No CUDA")
+    def test_chunk_fusion_correctness_cuda(self):
+        return self._test_chunk_fusion_correctness(self, 'cuda')
+
     def test_cat(self):
         @torch.jit.script
         def func(x):
@@ -2214,14 +2316,14 @@ a")
             if True:
                 x = [2, 3]
             return
-        self.checkScript(reassign, (), optimize=True)
+        self.checkScript(reassign, (), optimize=False)
 
         def reassign_arity_change():
             x = [1]
             if True:
                 x = [1, 2, 3]
             return
-        self.checkScript(reassign_arity_change, (), optimize=True)
+        self.checkScript(reassign_arity_change, (), optimize=False)
 
         def reassign_from_empty_literal():
             x = []
@@ -2229,7 +2331,7 @@ a")
                 x = [1, 2, 3]
             return
         with self.assertRaisesRegex(RuntimeError, "Empty list literals not allowed"):
-            self.checkScript(reassign_from_empty_literal, (), optimize=True)
+            self.checkScript(reassign_from_empty_literal, (), optimize=False)
 
         def reassign_from_empty_builtin():
             x = _construct_empty_int_list()
@@ -2242,7 +2344,7 @@ a")
             if True:
                 z = [torch.randn([1])]
             return
-        self.checkScript(reassign_from_empty_builtin, (), optimize=True)
+        self.checkScript(reassign_from_empty_builtin, (), optimize=False)
 
         def reassign_bad_type():
             x = [1]
@@ -2250,7 +2352,7 @@ a")
                 x = [1.0]
             return
         with self.assertRaisesRegex(RuntimeError, "previously has type"):
-            self.checkScript(reassign_bad_type, (), optimize=True)
+            self.checkScript(reassign_bad_type, (), optimize=False)
 
         def reassign_nested():
             x = _construct_empty_int_list()
@@ -2260,7 +2362,7 @@ a")
                     x = [1.0]
             return
         with self.assertRaisesRegex(RuntimeError, "previously has type"):
-            self.checkScript(reassign_nested, (), optimize=True)
+            self.checkScript(reassign_nested, (), optimize=False)
 
     def test_list_gather(self):
         def index():
@@ -2301,6 +2403,32 @@ a")
             return len(a) == 0
 
         self.checkScript(func2, ())
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @skipIfRocm
+    def test_tensor_scalar_fusion_cuda(self):
+        def should_fuse(x):
+            z = 3.
+            y = x + z
+            return x * y
+
+        # XXX: right now we only support fusing scalars if
+        # they're constant (#9940)
+        def should_not_fuse(x, z):
+            y = x + int(z)
+            return x * y
+
+        inputs = [torch.randn(2, 2, dtype=torch.float, device='cuda')]
+        ge = self.checkScript(should_fuse, inputs)
+        self.assertExpectedGraph(ge.graph_for(*inputs), subname='1')
+
+        inputs = [
+            torch.randn(2, 2, dtype=torch.float, device='cuda'),
+            torch.tensor(3., dtype=torch.float, device='cuda'),
+        ]
+        ge = self.checkScript(should_not_fuse, inputs)
+        self.assertExpectedGraph(ge.graph_for(*inputs), subname='2')
 
     def test_list_ops(self):
         def test_equality():
@@ -6090,6 +6218,16 @@ EXCLUDE_TRACED = {
     'test_split_dim_neg0',
     'test_gesv',
     'test_inverse',
+
+    # nn functional test
+    # schema not found for onnx node
+    'test_nn_instance_norm',
+
+    # output no dependence with traced input, tracer confusion
+    'test_nn_rrelu',
+
+    # aten op has additional cudnn argument
+    'test_nn_group_norm',
 }
 
 # known to be failing in script
@@ -6145,6 +6283,53 @@ EXCLUDE_SCRIPT = {
     'test_split_dim_neg0',
     'test_gesv',
     'test_inverse',
+    # skipped nn functional tests
+    # ops involves sampling which could not test
+    'test_nn_dropout',
+    'test_nn_alpha_dropout',
+    'test_nn_dropout2d',
+    'test_nn_dropout3d',
+    'test_nn_feature_alpha_dropout',
+
+    'test_nn_adaptive_max_pool1d',
+    'test_nn_adaptive_max_pool2d',
+    'test_nn_adaptive_max_pool3d',
+
+
+    # argument has custom behavior
+    'test_nn_fractional_max_pool2d',
+    'test_nn_embedding',
+    'test_nn_embedding_bag',
+    'test_nn_batch_norm',
+    # aten op has additional cudnn argument
+    'test_nn_group_norm',
+    'test_nn_nll_loss',
+    'test_nn_unfold',
+    'test_nn_max_unpool2d',
+
+    # argument type not supported
+    'test_nn_affine_grid',
+
+    # unknown builtin op
+    'test_nn_tanhshrink',
+    'test_nn_softsign',
+    'test_nn_softmin',
+    'test_nn_local_response_norm',
+    'test_nn_poisson_nll_loss',
+    'test_nn_cross_entropy',
+    'test_nn_binary_cross_entropy_with_logits',
+    'test_nn_multilabel_soft_margin_loss',
+    'test_nn_pixel_shuffle',
+    'test_nn_interpolate',
+    'test_nn_pad',
+    'test_nn_cosine_similarity',
+    'test_nn_normalize',
+    'test_nn_fold',
+    'test_nn_linear',
+    'test_nn_max_unpool1d',
+    'test_nn_lp_pool1d',
+    'test_nn_lp_pool2d',
+    'test_nn_instance_norm',
 }
 
 
@@ -6174,7 +6359,7 @@ def the_method({}):
 '''
 
 
-def create_script_fn(method_name, is_functional, output_process_fn):
+def create_script_fn(method_name, func_type, output_process_fn):
     def script_fn(*args, **kwargs):
         formals = []
         tensors = []
@@ -6190,10 +6375,15 @@ def create_script_fn(method_name, is_functional, output_process_fn):
         kwargs_str = ''
         for k, v in kwargs.items():
             kwargs_str += ', ' + k + '=' + str(v)
-        if is_functional:
+        if func_type == 'functional':
             call = 'torch.{}({}{})'.format(method_name, ', '.join(actuals), kwargs_str)
-        else:
+        elif func_type == 'method':
             call = '{}.{}({}{})'.format(actuals[0], method_name, ', '.join(actuals[1:]), kwargs_str)
+        elif func_type == 'nn_functional':
+            call = 'torch.nn.functional.{}({}{})'.format(method_name, ', '.join(actuals), kwargs_str)
+        else:
+            raise 'Unsupported function type'
+
         script = script_template.format(', '.join(formals), call)
         CU = torch.jit.CompilationUnit(script)
         return output_process_fn(CU.the_method(*tensors))
@@ -6400,6 +6590,116 @@ UBSAN_BLACKLISTED_TESTS = [
     "test_reciprocal_scalar",
 ]
 
+L = 20
+M = 10
+S = 5
+
+# NB: JIT script tests for all nn functional interfaces, script mode does
+# not support in_place operations yet, so no inplace operation tests added.
+# removed all the deprecated functions
+#
+# (
+#   method name,
+#   input size/constructing fn,
+#   args (tuple represents shape of a tensor arg),
+#   test variant name (will be used at test name suffix),    // optional
+#   indices for possible dim arg,                            // optional
+#   fn mapping output to part that should be gradcheck'ed,   // optional
+# )
+nn_functional_tests = [
+    # TODO: default arguments for None type not supported, add
+    # manually as argument, remove when ATen default arg system ready
+    ('conv1d', (S, S, S), ((S, S, S), None)),
+    ('conv2d', (S, S, S, S), ((S, S, S, S), None)),
+    ('conv3d', (S, S, S, S, S), ((S, S, S, S, S), None)),
+    ('conv_transpose1d', (S, S, S), ((S, S, S), None)),
+    ('conv_transpose2d', (S, S, S, S), ((S, S, S, S), None)),
+    ('conv_transpose3d', (S, S, S, S, S), ((S, S, S, S, S), None)),
+    ('conv_tbc', (S, S, S), ((S, S, S), (S,), 2)),
+    ('avg_pool1d', (S, S, S), (3,)),
+    ('avg_pool2d', (S, S, S, S), (3,)),
+    ('avg_pool3d', (S, S, S, S, S), (3,)),
+    ('fractional_max_pool2d', (S, S, S, S), (3, [2, 3], None)),
+    ('max_pool1d', (S, S, S), (2, 1)),
+    ('max_pool2d', (S, S, S, S), (2, 1)),
+    ('max_pool3d', (S, S, S, S, S), (2, 1)),
+    ('max_unpool1d', torch.tensor([[[2., 4]]]), (torch.tensor([[[1, 3]]]), 2, 2, 0)),
+    ('max_unpool2d', torch.tensor([[[[2., 4]]]]), (torch.tensor([[[[1, 3]]]]), 2, 2, 0)),
+    ('lp_pool1d', (S, S, S), (2, 3, 2,)),
+    ('lp_pool2d', (S, S, S, S), (2, 3, 2,)),
+    ('adaptive_max_pool1d', (S, S, S), (5,)),
+    ('adaptive_max_pool2d', (S, S, S, S), ([5, 7],)),
+    ('adaptive_max_pool3d', (S, S, S, S, S), ([3, 2, 2],)),
+    ('adaptive_avg_pool1d', (S, S, S), (5,)),
+    ('adaptive_avg_pool2d', (S, S, S, S), ([5, 7],)),
+    ('adaptive_avg_pool3d', (S, S, S, S, S), ([3, 2, 2],)),
+    ('dropout', (S, S, S), (0.5,)),
+    ('alpha_dropout', (S, S, S), (0.5,)),
+    ('dropout2d', (S, S, S), (0.5,)),
+    ('dropout3d', (S, S, S), (0.5,)),
+    ('feature_alpha_dropout', (S, S, S), (0.5,)),
+    ('threshold', (S, S, S), (0.1, 2),),
+    ('relu', (S, S, S), (),),
+    ('glu', (S - 1, S - 1, S - 1), (),),
+    ('hardtanh', (S, S, S), (-0.5, 0.5),),
+    ('elu', (S, S, S), (0.9,),),
+    ('selu', (S, S, S), (),),
+    ('celu', (S, S, S), (0.9,),),
+    ('leaky_relu', (S, S, S), (0.02,),),
+    ('rrelu', (S, S), (0.1, 0.3, False, None),),
+    ('hardshrink', (S, S, S), (0.4,),),
+    ('tanhshrink', (S, S, S), (),),
+    ('softsign', (S, S, S), (),),
+    ('softplus', (S, S, S), (),),
+    ('softmin', (S, S, S), (0,),),
+    ('softmax', (S, S, S), (0,),),
+    ('log_softmax', (S, S, S), (0,),),
+    ('linear', (S, S), ((M, S), None),),
+    ('bilinear', (S, S, S), ((S, S, M), torch.zeros(M, S, M), None),),
+    ('embedding', torch.tensor([[1, 2, 4, 5], [4, 3, 2, 5]]), (torch.rand(6, 3), ),),
+    ('embedding_bag', torch.tensor([1, 2, 4, 2]), (torch.rand(5, 3), torch.tensor([0, 4]),),),
+    ('batch_norm', (S, S), (non_differentiable(torch.randn(S)), non_differentiable(torch.ones(S)), ),),
+    ('instance_norm', (S, S, S), (non_differentiable(torch.zeros(S)), non_differentiable(torch.ones(S))),),
+    ('layer_norm', (S, S, S, S), ([5], None, None),),
+    ('group_norm', (S, S, S), (1, torch.Tensor(5), None),),
+    ('local_response_norm', (S, S, S), (2, ),),
+    ('nll_loss', F.log_softmax(torch.randn(3, 5), dim=0), (torch.tensor([1, 0, 4]), None, None),),
+    ('poisson_nll_loss', (S, 2), ((S, 2),),),
+    ('kl_div', F.log_softmax(torch.randn(S, 10), 1), (F.softmax(torch.randn(S, 10), 1),),),
+    ('cross_entropy', (3, S), (torch.randint(S, (3,), dtype=torch.int64),),),
+    ('binary_cross_entropy_with_logits', (3,), (torch.empty(3).random_(2), ),),
+    ('smooth_l1_loss', (3, S), (non_differentiable(torch.rand(3, S)),),),
+    ('l1_loss', (3, S), (non_differentiable(torch.rand(3, S)),),),
+    ('mse_loss', (3, S), (non_differentiable(torch.rand(3, S)),),),
+    ('margin_ranking_loss', (3, S), ((3, S), (S,)),),
+    ('hinge_embedding_loss', (3, S), (non_differentiable(torch.rand(3, S)),),),
+    ('soft_margin_loss', (3, S), (non_differentiable(torch.rand(3, S)),),),
+    ('multilabel_soft_margin_loss', (3, S), (non_differentiable(torch.rand(3, S)),),),
+    ('cosine_embedding_loss', (S, S), ((S, S), non_differentiable(torch.rand(S,))),),
+    ('pixel_shuffle', (1, 9, 4, 4), (3,),),
+    ('interpolate', torch.zeros(3, 3).view(1, 1, 3, 3), (2,),),
+    ('affine_grid', (S, 2, 3), (torch.Size([S, 1, 7, 7]),),),
+    ('pad', (3, 3, 4, 2), ([1, 1],),),
+    ('pairwise_distance', (S, S), ((S, S),),),
+    ('cosine_similarity', (S, S), ((S, S),),),
+    ('triplet_margin_loss', (S, S), ((S, S), (S, S)),),
+    ('normalize', (S, S, S), (),),
+    ('unfold', (S, S, S, S), ([2, 3]),),
+    ('fold', (1, 3 * 2 * 2, 12), ([4, 5], [2, 2]),),
+
+    # distribution sampling make result different in every run for below ops:
+    # ('gumbel_softmax', (S, S), (2,),),
+    #
+    #  No high order gradient for the below ops
+    # ('multilabel_margin_loss', torch.tensor([[0.2, -0.2, 0.07]]), (torch.tensor([[0, 0, 1]]),),),
+    # ('max_unpool3d', torch.tensor([[[[[2., 4]]]]]), (torch.tensor([[[[[1, 3]]]]]), 2, 2, 0)),
+    # ('grid_sample', (S, S, S, S), (non_differentiable(torch.rand(S, S, S, 2)),),),
+    # ('multi_margin_loss', (S, S), (non_differentiable(torch.randint(S, (S, ), dtype=torch.int64)),),),
+    # ('binary_cross_entropy', torch.randn(3, 2).sigmoid(), (non_differentiable(torch.rand(3, 2)),),),
+    # ('ctc_loss', torch.randn(S, S, S).log_softmax(2).detach().requires_grad_(), (torch.randint(1, S + 1, (S, S),
+    # dtype=torch.long), torch.full((S,), S, dtype=torch.long), torch.randint(1,S,(S,), dtype=torch.long))),
+]
+
 
 def add_test(
         name,
@@ -6431,7 +6731,7 @@ def add_test(
                 # FixMe: run grad checks on inplace self
                 if is_inplace:
                     self_variable.requires_grad = False
-                # need to record this because methods can change the szie (e.g. unsqueeze)
+                # need to record this because methods can change the size (e.g. unsqueeze)
                 args_variable, kwargs_variable = create_input(args, requires_grad=not is_inplace, call_kwargs=kwargs)
                 self_tensor = deepcopy(self_variable.data)
                 args_tensor = deepcopy(unpack_variables(args_variable))
@@ -6448,7 +6748,7 @@ def add_test(
 
                     if not is_magic_method and test_name not in EXCLUDE_SCRIPT:
                         check_against_reference(self,
-                                                create_script_fn(name, False, output_process_fn),
+                                                create_script_fn(name, 'method', output_process_fn),
                                                 fn, (self_variable,) + args_variable, kwargs_variable)
 
                 # functional interface tests
@@ -6465,7 +6765,7 @@ def add_test(
 
                     if not is_inplace and test_name not in EXCLUDE_SCRIPT:
                         check_against_reference(self,
-                                                create_script_fn(name, True, output_process_fn),
+                                                create_script_fn(name, 'functional', output_process_fn),
                                                 fn, f_args_variable, kwargs_variable)
 
             check(name)
@@ -6475,16 +6775,55 @@ def add_test(
             if hasattr(torch.ones(1), inplace_name) and not broadcast_skip_inplace:
                 check(inplace_name)
 
-        assert not hasattr(TestJitGenerated, test_name), 'Two tests have the same name: ' + test_name
+        post_add_test(test_name, skipTestIf, do_test)
 
-        for skip in skipTestIf:
-            do_test = skip(do_test)
 
-        if not (TEST_WITH_UBSAN and test_name in UBSAN_BLACKLISTED_TESTS):
-            setattr(TestJitGenerated, test_name, do_test)
+def add_nn_test(name, self_size, args, skipTestIf=(), output_process_fn=lambda x: x, kwargs=None):
+    test_name = 'test_nn_' + name
+
+    def do_test(self, name=name, args=args, test_name=test_name):
+        torch.manual_seed(2)
+
+        self_variable = create_input((self_size,))[0][0]
+
+        # need to record this because methods can change the size (e.g. unsqueeze)
+        args_variable, kwargs_variable = create_input(args, call_kwargs=kwargs)
+
+        self_tensor = deepcopy(self_variable.data)
+        args_tensor = deepcopy(unpack_variables(args_variable))
+
+        output_variable = getattr(F, name)(self_variable, *args_variable, **kwargs_variable)
+
+        def fn(*inputs, **kwargs):
+            output = getattr(F, name)(*inputs, **kwargs)
+            return output_process_fn(output)
+
+        f_args_variable = (self_variable,) + args_variable
+        f_args_tensor = (self_tensor,) + args_tensor
+
+        if test_name not in EXCLUDE_SCRIPT:
+            check_against_reference(self,
+                                    create_script_fn(name, 'nn_functional', output_process_fn),
+                                    fn, f_args_variable, kwargs_variable)
+
+    post_add_test(test_name, skipTestIf, do_test)
+
+
+def post_add_test(test_name, skipTestIf, do_test):
+    assert not hasattr(TestJitGenerated, test_name), 'Two tests have the same name: ' + test_name
+
+    for skip in skipTestIf:
+        do_test = skip(do_test)
+
+    if not (TEST_WITH_UBSAN and test_name in UBSAN_BLACKLISTED_TESTS):
+        setattr(TestJitGenerated, test_name, do_test)
+
 
 for test in method_tests:
     add_test(*test)
+
+for test in nn_functional_tests:
+    add_nn_test(*test)
 
 if __name__ == '__main__':
     run_tests()
