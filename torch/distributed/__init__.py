@@ -107,7 +107,7 @@ def init_master_worker(backend, init_method='env://', **kwargs):
                                         WARNING
     ================================================================================
     Master-worker mode is still experimental. The API will change without
-    notice and we're can't guarantee full correctness and expected performance yet.
+    notice and we do not guarantee full correctness and expected performance yet.
     We'll announce it once it's ready.
     """)
     world_size = kwargs.pop('world_size', -1)
