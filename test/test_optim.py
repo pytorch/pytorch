@@ -602,5 +602,56 @@ class TestLRScheduler(TestCase):
                                            epoch, target[epoch], param_group['lr']), delta=1e-5)
 
 
+class TestMinLR(TestCase):
+    def _setup(self):
+        self.net = nn.Linear(1, 1)
+        self.opt = SGD(self.net.parameters(), lr=1.0)
+
+    def test_lambda_lr(self):
+        self._setup()
+
+        scheduler = LambdaLR(self.opt, lambda epoch: 0.1**epoch, min_lr=0.1)
+
+        scheduler.step()
+        self.assertAlmostEqual(scheduler.get_lr()[0], 1.0)
+
+        scheduler.step()
+        self.assertAlmostEqual(scheduler.get_lr()[0], 0.1)
+
+        scheduler.step()
+        self.assertAlmostEqual(scheduler.get_lr()[0], 0.1)
+
+    def test_step_lr(self):
+        self._setup()
+
+        scheduler = StepLR(self.opt, 1, gamma=0.1, min_lr=0.1)
+
+        scheduler.step()
+        self.assertAlmostEqual(scheduler.get_lr()[0], 1.0)
+
+        scheduler.step()
+        self.assertAlmostEqual(scheduler.get_lr()[0], 0.1)
+
+        scheduler.step()
+        self.assertAlmostEqual(scheduler.get_lr()[0], 0.1)
+
+    def test_multi_step_lr(self):
+        self._setup()
+
+        scheduler = MultiStepLR(self.opt, [1, 3], gamma=0.1, min_lr=0.1)
+
+        scheduler.step()
+        self.assertAlmostEqual(scheduler.get_lr()[0], 1.0)
+
+        scheduler.step()
+        self.assertAlmostEqual(scheduler.get_lr()[0], 0.1)
+
+        scheduler.step()
+        self.assertAlmostEqual(scheduler.get_lr()[0], 0.1)
+
+        scheduler.step()
+        self.assertAlmostEqual(scheduler.get_lr()[0], 0.1)
+
+
 if __name__ == '__main__':
     run_tests()
