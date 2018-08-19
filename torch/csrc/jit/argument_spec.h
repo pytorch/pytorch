@@ -12,6 +12,98 @@ namespace torch { namespace jit {
 // GraphExecutor creates specializations of Graphs for different dimensionalitities
 // and types of inputs.
 
+struct CoarseArgumentInfo {
+  friend struct CoarseArgumentSpec;
+
+  bool isTensor() const {
+    return is_tensor_;
+  }
+  bool defined() const {
+    return defined_;
+  }
+  int device() const {
+    return device_;
+  }
+  bool requires_grad() const {
+    return requires_grad_;
+  }
+  int dim() const {
+    return dim_;
+  }
+  at::ScalarType type() const {
+    return at::ScalarType(type_);
+  }
+  operator TypePtr() const {
+    if (!defined())
+      return DynamicType::get();
+    return TensorType::create(type(), device(), dim());
+  }
+
+private:
+  unsigned is_tensor_ : 1;
+  unsigned defined_ : 1;
+  unsigned requires_grad_ : 6;
+  unsigned dim_ : 8;
+  int device_ : 8; // NOTE: this needs to be signed because we use -1 to represent CPU
+  unsigned type_ : 8;
+};
+
+static_assert(std::is_pod<CoarseArgumentInfo>::value,
+  "CoarseArgumentInfo is to be a POD struct");
+static_assert(sizeof(CoarseArgumentInfo) == sizeof(int32_t),
+  "CoarseArgumentInfo is expected to be a 32-bit struct");
+
+struct CoarseArgumentSpec {
+  CoarseArgumentSpec(bool with_grad, at::ArrayRef<IValue> inputs) {
+    args.resize(inputs.size());
+    int32_t num_inputs = inputs.size();
+    for (int32_t i = 0; i < num_inputs; ++i) {
+      auto & arg = args[i];
+      arg.is_tensor_ = static_cast<unsigned>(inputs[i].isTensor());
+      if (arg.is_tensor_) {
+        at::Tensor t = inputs[i].toTensor();
+        arg.defined_ = t.defined();
+        if (!arg.defined_) continue;
+        arg.requires_grad_ = with_grad && autograd::Variable(t).requires_grad();
+        arg.dim_ = t.dim();
+        arg.device_ = t.type().is_cuda() ? t.get_device() : -1;
+        arg.type_ = static_cast<unsigned>(t.type().scalarType());
+      }
+    }
+    // we precompute the hash_code to minimize the time inside of hash
+    // table operations where we may need to hold a compiler cache lock.
+    // NB: this breaks the strict aliasing rule.
+    const int32_t* raw_args_data = reinterpret_cast<const int32_t*>(args.data());
+    hash_code = hash_combine(0, num_inputs);
+    for (int32_t i = 0; i < num_inputs; ++i) {
+      hash_code = hash_combine(hash_code, raw_args_data[i]);
+    }
+  }
+
+  // equality is fast: check ninputs, and then check the raw array data,
+  // there are no size/stride indirections
+  bool operator==(const CoarseArgumentSpec & spec) const {
+    if (args.size() != spec.args.size()) return false;
+    return std::memcmp(args.data(), spec.args.data(), args.size() * sizeof(CoarseArgumentInfo)) == 0;
+  }
+  bool operator!=(const CoarseArgumentSpec & spec) const {
+    return !(*this == spec);
+  }
+  const CoarseArgumentInfo& at(size_t i) const {
+    return args[i];
+  }
+  size_t size() const {
+    return args.size();
+  }
+  size_t hashCode() const {
+    return hash_code;
+  }
+
+private:
+  size_t hash_code; // precomputed on construction
+  std::vector<CoarseArgumentInfo> args;
+};
+
 // ArgumentSpec represents one particular specialization.
 // It is designed so that it can be created, hashed, and compared quickly
 // since it is used along the hot-path of the JIT to check if the code
@@ -201,6 +293,12 @@ inline ArgumentInfo ArgumentSpec::at(size_t i) const {
 }}
 
 namespace std {
+  template<>
+  struct hash<torch::jit::CoarseArgumentSpec> {
+    size_t operator()(const torch::jit::CoarseArgumentSpec & spec) const {
+      return spec.hashCode();
+    }
+  };
   template<>
   struct hash<torch::jit::ArgumentSpec> {
     size_t operator()(const torch::jit::ArgumentSpec & spec) const {

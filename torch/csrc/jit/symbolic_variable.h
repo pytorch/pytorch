@@ -138,6 +138,13 @@ struct SymbolicVariable {
     JIT_ASSERT(inputs.size() > 0);
     return SymbolicVariable::stack(inputs, inputs[0].insertConstant(dim));
   }
+  static std::vector<SymbolicVariable> broadcast_tensors(ArrayRef<SymbolicVariable> inputs) {
+    JIT_ASSERT(inputs.size() > 0);
+    Graph *g = inputs[0].value()->owningGraph();
+    auto value_inputs = fmap(inputs, [](const SymbolicVariable & v) { return v.value(); });
+    Value * input_list = g->insertNode(g->createList(DynamicType::get(), value_inputs))->output();
+    return create(aten::broadcast_tensors, { input_list }, inputs.size());
+  }
   SymbolicVariable sum() const {
     return create(t("sum"), {*this})[0];
   }

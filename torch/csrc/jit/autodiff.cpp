@@ -61,12 +61,6 @@ bool isDifferentiable(Node * n) {
     }
     return true;
   }
-  if (n->matches("aten::squeeze(Tensor self) -> Tensor")) {
-    return static_cast<bool>(n->input()->type()->cast<CompleteTensorType>());
-  }
-  if (n->matches("aten::squeeze(Tensor self, int dim) -> Tensor")) {
-    return n->namedInput(attr::self)->type()->cast<CompleteTensorType>() && n->is_constant(attr::dim);
-  }
   if (n->matches("aten::expand(Tensor self, int[] size, *, int implicit) -> Tensor")) {
     return n->is_constant(attr::size) && n->is_constant(attr::implicit);
   }
