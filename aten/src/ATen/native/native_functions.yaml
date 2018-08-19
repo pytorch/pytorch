@@ -2014,6 +2014,8 @@
 - func: meshgrid(TensorList tensors) -> TensorList
   variants: function
 
+- func: _wrap_index_once(IndexTensor self, int64_t dim, int64_t dim_size) -> Tensor
+
 # This has a method dispatch to work around circular include problems
 - func: _local_scalar(Tensor self) -> Scalar
   variants:
