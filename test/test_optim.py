@@ -613,13 +613,13 @@ class TestMinLR(TestCase):
         scheduler = LambdaLR(self.opt, lambda epoch: 0.1**epoch, min_lr=0.1)
 
         scheduler.step()
-        self.assertAlmostEqual(scheduler.get_lr()[0], 1.0)
+        self.assertEqual(scheduler.get_lr()[0], 1.0)
 
         scheduler.step()
-        self.assertAlmostEqual(scheduler.get_lr()[0], 0.1)
+        self.assertEqual(scheduler.get_lr()[0], 0.1)
 
         scheduler.step()
-        self.assertAlmostEqual(scheduler.get_lr()[0], 0.1)
+        self.assertEqual(scheduler.get_lr()[0], 0.1)
 
     def test_step_lr(self):
         self._setup()
@@ -627,13 +627,13 @@ class TestMinLR(TestCase):
         scheduler = StepLR(self.opt, 1, gamma=0.1, min_lr=0.1)
 
         scheduler.step()
-        self.assertAlmostEqual(scheduler.get_lr()[0], 1.0)
+        self.assertEqual(scheduler.get_lr()[0], 1.0)
 
         scheduler.step()
-        self.assertAlmostEqual(scheduler.get_lr()[0], 0.1)
+        self.assertEqual(scheduler.get_lr()[0], 0.1)
 
         scheduler.step()
-        self.assertAlmostEqual(scheduler.get_lr()[0], 0.1)
+        self.assertEqual(scheduler.get_lr()[0], 0.1)
 
     def test_multi_step_lr(self):
         self._setup()
@@ -641,16 +641,16 @@ class TestMinLR(TestCase):
         scheduler = MultiStepLR(self.opt, [1, 3], gamma=0.1, min_lr=0.1)
 
         scheduler.step()
-        self.assertAlmostEqual(scheduler.get_lr()[0], 1.0)
+        self.assertEqual(scheduler.get_lr()[0], 1.0)
 
         scheduler.step()
-        self.assertAlmostEqual(scheduler.get_lr()[0], 0.1)
+        self.assertEqual(scheduler.get_lr()[0], 0.1)
 
         scheduler.step()
-        self.assertAlmostEqual(scheduler.get_lr()[0], 0.1)
+        self.assertEqual(scheduler.get_lr()[0], 0.1)
 
         scheduler.step()
-        self.assertAlmostEqual(scheduler.get_lr()[0], 0.1)
+        self.assertEqual(scheduler.get_lr()[0], 0.1)
 
 
 if __name__ == '__main__':
