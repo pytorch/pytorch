@@ -604,7 +604,7 @@ class TestLRScheduler(TestCase):
 
 class TestMinLR(TestCase):
     def _setup(self):
-        self.net = nn.Linear(1, 1)
+        self.net = torch.nn.Linear(1, 1)
         self.opt = SGD(self.net.parameters(), lr=1.0)
 
     def test_lambda_lr(self):
