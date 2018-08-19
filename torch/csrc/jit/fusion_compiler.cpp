@@ -774,7 +774,7 @@ void CompiledFusionFunction::launch_with_tensors(at::ArrayRef<at::Tensor> inputs
   // If the kernel call contains a random op, we need to pass in random seeds as
   // well.
   #ifdef USE_CUDA
-  if(has_random && this->backend() == at::kCUDA) {
+  if(has_random && this->backend() == at::Backend::CUDA) {
     auto gen_ = THCRandom_getGenerator(at::globalContext().getTHCState());
     uint64_t offset =
         gen_->state.philox_seed_offset.fetch_add(this->get_rand_offset(numel));
@@ -856,7 +856,7 @@ struct CUDAFusionFunction : public CompiledFusionFunction {
   }
 protected:
   virtual at::Backend backend() const override {
-    return at::kCUDA;
+    return at::Backend::CUDA;
   }
   virtual uint64_t get_rand_offset(uint32_t numel) override {
      int numBlocks = std::min(maxBlocks, ceilDiv(numel, blockSize));
@@ -1035,7 +1035,7 @@ struct CPUFusionFunction : public CompiledFusionFunction {
   }
 protected:
   virtual at::Backend backend() const override {
-    return at::kCPU;
+    return at::Backend::CPU;
   }
   virtual uint64_t get_rand_offset(uint32_t numel) override {
      return numel;

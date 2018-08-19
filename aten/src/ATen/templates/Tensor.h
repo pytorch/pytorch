@@ -154,6 +154,9 @@ struct Tensor : public detail::TensorBase {
   Tensor operator[](Tensor index) const;
   Tensor operator[](int64_t index) const;
 
+  Tensor cpu() const;
+  Tensor cuda() const;
+
   // ~~~~~ Autograd API ~~~~~
 
   Tensor& set_requires_grad(bool requires_grad) {
