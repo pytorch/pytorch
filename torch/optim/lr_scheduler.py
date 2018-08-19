@@ -65,7 +65,7 @@ class LambdaLR(_LRScheduler):
             functions, one for each group in optimizer.param_groups.
         last_epoch (int): The index of last epoch. Default: -1.
         min_lr (float): A lower bound on the learning rate of all
-            param groups. Default: None.
+            param groups. Default: 0.0.
 
     Example:
         >>> # Assuming optimizer has two groups.
@@ -78,7 +78,7 @@ class LambdaLR(_LRScheduler):
         >>>     validate(...)
     """
 
-    def __init__(self, optimizer, lr_lambda, last_epoch=-1, min_lr=None):
+    def __init__(self, optimizer, lr_lambda, last_epoch=-1, min_lr=0.0):
         self.optimizer = optimizer
         if not isinstance(lr_lambda, list) and not isinstance(lr_lambda, tuple):
             self.lr_lambdas = [lr_lambda] * len(optimizer.param_groups)
@@ -138,7 +138,7 @@ class StepLR(_LRScheduler):
             Default: 0.1.
         last_epoch (int): The index of last epoch. Default: -1.
         min_lr (float): A lower bound on the learning rate of all
-            param groups. Default: None.
+            param groups. Default: 0.0.
 
     Example:
         >>> # Assuming optimizer uses lr = 0.05 for all groups
@@ -153,7 +153,7 @@ class StepLR(_LRScheduler):
         >>>     validate(...)
     """
 
-    def __init__(self, optimizer, step_size, gamma=0.1, last_epoch=-1, min_lr=None):
+    def __init__(self, optimizer, step_size, gamma=0.1, last_epoch=-1, min_lr=0.0):
         self.step_size = step_size
         self.gamma = gamma
         super(StepLR, self).__init__(optimizer, last_epoch, min_lr)
@@ -175,7 +175,7 @@ class MultiStepLR(_LRScheduler):
             Default: 0.1.
         last_epoch (int): The index of last epoch. Default: -1.
         min_lr (float): A lower bound on the learning rate of all
-            param groups. Default: None.
+            param groups. Default: 0.0.
 
     Example:
         >>> # Assuming optimizer uses lr = 0.05 for all groups
@@ -189,7 +189,7 @@ class MultiStepLR(_LRScheduler):
         >>>     validate(...)
     """
 
-    def __init__(self, optimizer, milestones, gamma=0.1, last_epoch=-1, min_lr=None):
+    def __init__(self, optimizer, milestones, gamma=0.1, last_epoch=-1, min_lr=0.0):
         if not list(milestones) == sorted(milestones):
             raise ValueError('Milestones should be a list of'
                              ' increasing integers. Got {}', milestones)
@@ -211,10 +211,10 @@ class ExponentialLR(_LRScheduler):
         gamma (float): Multiplicative factor of learning rate decay.
         last_epoch (int): The index of last epoch. Default: -1.
         min_lr (float): A lower bound on the learning rate of all
-            param groups. Default: None.
+            param groups. Default: 0.0.
     """
 
-    def __init__(self, optimizer, gamma, last_epoch=-1, min_lr=None):
+    def __init__(self, optimizer, gamma, last_epoch=-1, min_lr=0.0):
         self.gamma = gamma
         super(ExponentialLR, self).__init__(optimizer, last_epoch, min_lr)
 
