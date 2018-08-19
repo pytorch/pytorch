@@ -89,7 +89,7 @@ Tensor inverse(const Tensor& self) {
 }
 
 Tensor& inverse_out(Tensor &result, const Tensor &self) {
-  AT_CHECK(self.type().backend() == kCPU || self.type().backend() == kCUDA,
+  AT_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
            "tensor should have CPU or CUDA backend");
   AT_CHECK(self.dim() == 2, "tensor should be 2 dimensional");
   AT_CHECK(self.size(0) == self.size(1), "tensor should be square");

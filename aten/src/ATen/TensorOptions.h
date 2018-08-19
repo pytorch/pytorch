@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/Backend.h>
 #include <ATen/Context.h>
 #include <ATen/Device.h>
 #include <ATen/DeviceGuard.h>
@@ -67,7 +68,7 @@ struct AT_API TensorOptions {
       type_ = &type;
     }
     this->dtype(type.scalarType());
-    this->device({type.backend(), device_index});
+    this->device({backendToDeviceType(type.backend()), device_index});
     this->layout(type.layout());
   }
 
@@ -84,7 +85,12 @@ struct AT_API TensorOptions {
   /// Constructs a `TensorOptions` object from a backend, forwarded to the
   /// `Device` constructor.
   /* implicit */ TensorOptions(Backend backend)
-      : TensorOptions(Device(backend)) {}
+      : TensorOptions(Device(backendToDeviceType(backend))) {}
+
+  /// Constructs a `TensorOptions` object from a device type, forwarded to the
+  /// `Device` constructor.
+  /* implicit */ TensorOptions(DeviceType device_type)
+      : TensorOptions(Device(device_type)) {}
 
   /// Constructs a `TensorOptions` object with the given dtype.
   /* implicit */ TensorOptions(ScalarType dtype) : TensorOptions() {
@@ -190,9 +196,9 @@ struct AT_API TensorOptions {
   Backend backend() const noexcept {
     Backend backend;
     if (device_.type() == Device::Type::CPU) {
-      backend = (layout_ == kStrided) ? kCPU : kSparseCPU;
+      backend = (layout_ == kStrided) ? Backend::CPU : Backend::SparseCPU;
     } else {
-      backend = (layout_ == kStrided) ? kCUDA : kSparseCUDA;
+      backend = (layout_ == kStrided) ? Backend::CUDA : Backend::SparseCUDA;
     }
     return backend;
   }

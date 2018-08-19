@@ -62,7 +62,7 @@ struct IODescriptor {
 };
 
 static inline std::ostream& operator<<(std::ostream& out, const IODescriptor::VariableMetadata& meta) {
-  auto & t = at::getType(meta.device < 0 ? at::kCPU : at::kCUDA, meta.type);
+  auto & t = at::getType(meta.device < 0 ? at::Backend::CPU : at::Backend::CUDA, meta.type);
   out << t << "(requires_grad=" << meta.requires_grad;
   if (meta.device > 0) {
     out << ", device=" << meta.device;

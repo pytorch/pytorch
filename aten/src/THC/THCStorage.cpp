@@ -22,7 +22,7 @@ void THCStorage_resize(THCState *state, THCStorage *self, ptrdiff_t size)
 
   if(size == 0)
   {
-    self->set_data_ptr(at::DataPtr(nullptr, at::Device(at::kCUDA, device)));
+    self->set_data_ptr(at::DataPtr(nullptr, at::Device(at::DeviceType::CUDA, device)));
     self->set_size(0);
   }
   else

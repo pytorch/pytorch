@@ -109,31 +109,31 @@ void test(Type& type, IntList shape, int64_t a = 0, int64_t b = 1) {
 }
 
 TEST_CASE("apply utils test 2-dim small contiguous", "[cpu]") {
-  manual_seed(123, at::Backend::CPU);
+  manual_seed(123, at::kCPU);
   test(CPU(kDouble), {2, 1}, -1, -1);
 }
 
 TEST_CASE("apply utils test 2-dim small", "[cpu]") {
-  manual_seed(123, at::Backend::CPU);
+  manual_seed(123, at::kCPU);
   test(CPU(kDouble), {2, 1});
 }
 
 TEST_CASE("apply utils test 2-dim", "[cpu]") {
-  manual_seed(123, at::Backend::CPU);
+  manual_seed(123, at::kCPU);
   test(CPU(kDouble), {20, 10});
 }
 
 TEST_CASE("apply utils test 3-dim", "[cpu]") {
-  manual_seed(123, at::Backend::CPU);
+  manual_seed(123, at::kCPU);
   test(CPU(kDouble), {3, 4, 2});
 }
 
 TEST_CASE("apply utils test 3-dim medium", "[cpu]") {
-  manual_seed(123, at::Backend::CPU);
+  manual_seed(123, at::kCPU);
   test(CPU(kDouble), {3, 40, 2});
 }
 
 TEST_CASE("apply utils test 10-dim", "[cpu]") {
-  manual_seed(123, at::Backend::CPU);
+  manual_seed(123, at::kCPU);
   test(CPU(kDouble), {3, 4, 2, 5, 2, 1, 3, 4, 2, 3});
 }

@@ -50,17 +50,17 @@ struct AT_API DispatchStub {
   static_assert(std::is_pointer<FnPtr>::value, "FnPtr should be a pointer type");
 
   template <typename... ArgTypes>
-  void operator()(Backend backend, ArgTypes&&... args) {
-    if (backend == Backend::CPU) {
+  void operator()(DeviceType device_type, ArgTypes&&... args) {
+    if (device_type == DeviceType::CPU) {
       if (!cpu_dispatch_ptr) {
         cpu_dispatch_ptr = choose_cpu_impl();
       }
       (*cpu_dispatch_ptr)(std::forward<ArgTypes>(args)...);
-    } else if (backend == Backend::CUDA) {
+    } else if (device_type == DeviceType::CUDA) {
       AT_ASSERTM(cuda_dispatch_ptr, "DispatchStub: missing CUDA kernel");
       (*cuda_dispatch_ptr)(std::forward<ArgTypes>(args)...);
     } else {
-      AT_ERROR("DispatchStub: unsupported backend", backend);
+      AT_ERROR("DispatchStub: unsupported device type", device_type);
     }
   }
 

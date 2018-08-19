@@ -2,6 +2,8 @@
 #include "THCGeneral.h"
 #include "THCHalf.h"
 
+#include <algorithm>
+
 float THCudaBlas_Sdot(THCState *state, int64_t n, float *x, int64_t incx, float *y, int64_t incy)
 {
   if (n == 1) {

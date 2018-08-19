@@ -75,7 +75,7 @@ template<class T>
 static inline std::unique_ptr<Storage> pin_memory(int64_t size, Tensor dummy) {
   int64_t adjusted_size = size * sizeof(T);
   auto* allocator = cuda::getPinnedMemoryAllocator();
-  auto& backend = dummy.type().toBackend(kCPU).toScalarType(kByte);
+  auto& backend = dummy.type().toBackend(Backend::CPU).toScalarType(kByte);
   return backend.storageWithAllocator(adjusted_size, allocator);
 }
 

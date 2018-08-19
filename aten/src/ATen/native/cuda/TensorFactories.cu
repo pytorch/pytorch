@@ -49,7 +49,7 @@ Tensor& randperm_out_cuda(Tensor& result, int64_t n, Generator* generator) {
     result.copy_(randperm_out_cuda(result_float, n, generator));
   } else {
     if (n < 30000) {  // For small inputs, we offload it to CPU instead.
-      auto result_cpu = result.type().toBackend(kCPU).tensor({n});
+      auto result_cpu = result.type().cpu().tensor({n});
       randperm_out(result_cpu, n, generator);
       result.copy_(result_cpu);
     } else {

@@ -211,7 +211,7 @@ void save(Archive& archive, const torch::Tensor& tensor) {
   for (auto s : tensor.sizes()) {
     sizes.push_back(s);
   }
-  auto contig = tensor.toBackend(torch::kCPU).contiguous();
+  auto contig = tensor.cpu().contiguous();
   int32_t backend = ::torch::detail::backendId(tensor.type().backend());
 
   archive(CEREAL_NVP(backend), CEREAL_NVP(sizes));

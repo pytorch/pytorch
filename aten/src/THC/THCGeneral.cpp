@@ -49,7 +49,7 @@ struct THDefaultDeviceAllocator final : public at::Allocator {
     if (size != 0) THCudaCheck(cudaMalloc(&p, size));
     int device;
     THCudaCheck(cudaGetDevice(&device));
-    return {p, p, &THDefaultDeviceDeleter, at::Device(at::kCUDA, device)};
+    return {p, p, &THDefaultDeviceDeleter, at::Device(at::DeviceType::CUDA, device)};
   }
   at::DeleterFnPtr raw_deleter() const override {
     return &THDefaultDeviceDeleter;
