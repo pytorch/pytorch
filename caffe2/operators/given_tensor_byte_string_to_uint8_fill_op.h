@@ -49,7 +49,7 @@ class GivenTensorByteStringToUInt8FillOp final : public FillerOp<Context> {
 
  private:
   void Extract() {
-    auto source_values = OperatorBase::GetRepeatedArgument<string>("values");
+    auto source_values = this->template GetRepeatedArgument<std::string>("values");
     DCHECK_EQ(source_values.size(), 1)
         << "expected size: 1 "
         << " given size: " << source_values.size();
