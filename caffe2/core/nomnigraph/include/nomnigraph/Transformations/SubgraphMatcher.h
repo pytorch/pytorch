@@ -5,6 +5,7 @@
 
 #include <functional>
 #include <sstream>
+#include <unordered_map>
 #include <vector>
 
 namespace nom {
@@ -108,7 +109,7 @@ class SubtreeMatchResult {
   }
 
   static SubtreeMatchResult<GraphType> matched() {
-    return SubtreeMatchResult<GraphType>(true, "");
+    return SubtreeMatchResult<GraphType>(true, "Matched");
   }
 
   bool isMatch() const {
@@ -151,7 +152,78 @@ struct SubgraphMatcher {
       const MatchNodeRef<NodeMatchCriteria>& rootCriteriaRef,
       bool invertGraphTraversal = true,
       bool debug = false) {
+    std::unordered_map<
+        MatchNodeRef<NodeMatchCriteria>,
+        typename GraphType::NodeRef>
+        matchedNodes;
+    return isSubtreeMatchInternal(
+        matchedNodes, root, rootCriteriaRef, invertGraphTraversal, debug);
+  }
+
+  // Utility to transform a graph by looking for subtrees that match
+  // a given pattern and then allow callers to mutate the graph based on
+  // subtrees that are found.
+  // The current implementation doesn't handle any graph transformation
+  // itself. Callers should be responsible for all intended mutation, including
+  // deleting nodes in the subtrees found by this algorithm.
+  // Note: if the replaceFunction lambda returns false, the entire procedure
+  // is aborted. This maybe useful in certain cases when we want to terminate
+  // the subtree search early.
+  // invertGraphTraversal flag: see documentation in isSubtreeMatch
+  static void replaceSubtree(
+      GraphType& graph,
+      const MatchNodeRef<NodeMatchCriteria>& criteria,
+      const std::function<
+          bool(GraphType& g, typename GraphType::NodeRef subtreeRoot)>&
+          replaceFunction,
+      bool invertGraphTraversal = true) {
+    for (auto nodeRef : graph.getMutableNodes()) {
+      // Make sure the node is still in the graph.
+      if (!graph.hasNode(nodeRef)) {
+        continue;
+      }
+      if (isSubtreeMatch(nodeRef, criteria, invertGraphTraversal).isMatch()) {
+        if (!replaceFunction(graph, nodeRef)) {
+          // If replaceFunction returns false, it means that we should abort
+          // the entire procedure.
+          break;
+        }
+      }
+    }
+  }
+
+ private:
+  static SubtreeMatchResult<GraphType> isSubtreeMatchInternal(
+      std::unordered_map<
+          MatchNodeRef<NodeMatchCriteria>,
+          typename GraphType::NodeRef>& matchedNodes,
+      typename GraphType::NodeRef root,
+      const MatchNodeRef<NodeMatchCriteria>& rootCriteriaRef,
+      bool invertGraphTraversal = true,
+      bool debug = false) {
     auto rootCriteriaNode = rootCriteriaRef->data();
+
+    if (rootCriteriaNode.getCount() == 1) {
+      auto matchedNodeEntry = matchedNodes.find(rootCriteriaRef);
+      if (matchedNodeEntry != matchedNodes.end()) {
+        // If rootCriteriaRef has been matched before (without multiplicity),
+        // we should look up the corresponding matched node in the graph
+        // and verify if it is the same.
+        auto matchedNode = matchedNodeEntry->second;
+        if (matchedNode == root) {
+          return SubtreeMatchResult<GraphType>::matched();
+        } else if (debug) {
+          std::ostringstream debugMessage;
+          debugMessage << "Subtree root at " << root << " is not the same as "
+                       << matchedNode << " which previously matched criteria "
+                       << debugString<NodeMatchCriteria>(rootCriteriaRef);
+          return SubtreeMatchResult<GraphType>::notMatched(debugMessage.str());
+        } else {
+          return SubtreeMatchResult<GraphType>::notMatched();
+        }
+      }
+    }
+
     if (!isNodeMatch(root, rootCriteriaNode.getCriteria())) {
       if (debug) {
         std::ostringstream debugMessage;
@@ -166,6 +238,7 @@ struct SubgraphMatcher {
     if (rootCriteriaNode.isNonTerminal()) {
       // This is sufficient to be a match if this criteria specifies a non
       // terminal node.
+      matchedNodes[rootCriteriaRef] = root;
       return SubtreeMatchResult<GraphType>::matched();
     }
     auto& edges =
@@ -200,7 +273,8 @@ struct SubgraphMatcher {
         auto edge = edges[currentEdgeIdx];
         auto child = invertGraphTraversal ? edge->tail() : edge->head();
 
-        if (!isSubtreeMatch(child, childrenCriteriaRef, invertGraphTraversal)
+        if (!isSubtreeMatchInternal(
+                 matchedNodes, child, childrenCriteriaRef, invertGraphTraversal)
                  .isMatch()) {
           if (!isStarCount) {
             // If the current criteria isn't a * pattern, this indicates a
@@ -256,39 +330,8 @@ struct SubgraphMatcher {
         return SubtreeMatchResult<GraphType>::notMatched();
       }
     }
+    matchedNodes[rootCriteriaRef] = root;
     return SubtreeMatchResult<GraphType>::matched();
-  }
-
-  // Utility to transform a graph by looking for subtrees that match
-  // a given pattern and then allow callers to mutate the graph based on
-  // subtrees that are found.
-  // The current implementation doesn't handle any graph transformation
-  // itself. Callers should be responsible for all intended mutation, including
-  // deleting nodes in the subtrees found by this algorithm.
-  // Note: if the replaceFunction lambda returns false, the entire procedure
-  // is aborted. This maybe useful in certain cases when we want to terminate
-  // the subtree search early.
-  // invertGraphTraversal flag: see documentation in isSubtreeMatch
-  static void replaceSubtree(
-      GraphType& graph,
-      const MatchNodeRef<NodeMatchCriteria>& criteria,
-      const std::function<
-          bool(GraphType& g, typename GraphType::NodeRef subtreeRoot)>&
-          replaceFunction,
-      bool invertGraphTraversal = true) {
-    for (auto nodeRef : graph.getMutableNodes()) {
-      // Make sure the node is still in the graph.
-      if (!graph.hasNode(nodeRef)) {
-        continue;
-      }
-      if (isSubtreeMatch(nodeRef, criteria, invertGraphTraversal).isMatch()) {
-        if (!replaceFunction(graph, nodeRef)) {
-          // If replaceFunction returns false, it means that we should abort
-          // the entire procedure.
-          break;
-        }
-      }
-    }
   }
 };
 
