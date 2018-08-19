@@ -147,6 +147,7 @@
   "disabled_modules": [
     "aten/src/ATen/native/cuda/CuFFTUtils.h",
     "aten/src/ATen/native/cuda/CuFFTPlanCache.h",
+    "aten/src/ATen/native/cuda/SpectralOps.cu",
   ],
   "disabled_functions": [
     {
