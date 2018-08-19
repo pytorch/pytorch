@@ -53,7 +53,7 @@ def init_process_group(backend, init_method='env://', **kwargs):
 
     Arguments:
         backend (str): Name of the backend to use. Depending on build-time configuration
-            valid values include: ``tcp``, ``mpi`` and ``gloo``.
+            valid values include: ``tcp``, ``mpi``, ``gloo`` and ``nccl``.
         init_method (str, optional): URL specifying how to initialize the package.
         world_size (int, optional): Number of processes participating in the job.
         rank (int, optional): Rank of the current process.
