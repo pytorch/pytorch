@@ -61,7 +61,7 @@ __device__ __forceinline__ void reduce_block_into_lanes
 
     #pragma unroll
     for(int i = 16; i >= lanes; i >>= 1)
-      final = reduceOp(final, __SHFL_DOWN(final, i));
+      final = reduceOp(final, WARP_SHFL_DOWN(final, i));
 
     if(tid < lanes) 
       x[tid] = final; // EpilogueOp
@@ -331,18 +331,17 @@ std::tuple<Tensor,Tensor> weight_norm_fused
        "weight_norm_fwd_first_dim_kernel",  
        [&]
        {
-         using cuda_scalar_t = apex::cuda::type<scalar_t>;
-         USING_ACCSCALAR_T
+         using accscalar_t = acc_type<scalar_t, true>;
 
          weight_norm_fwd_first_dim_kernel
            <<<v.size(0), 
               BLOCK, 
               BLOCK*sizeof(accscalar_t),
               stream>>>
-           (w.data<cuda_scalar_t>(), 
+           (w.data<scalar_t>(), 
             norms.data<accscalar_t>(),
-            v.data<cuda_scalar_t>(),  
-            g.data<cuda_scalar_t>(),  
+            v.data<scalar_t>(),  
+            g.data<scalar_t>(),  
             rowSize);
        });
   }
@@ -362,18 +361,17 @@ std::tuple<Tensor,Tensor> weight_norm_fused
        "weight_norm_fwd_last_dim_kernel",  
        [&]
        {
-         using cuda_scalar_t = apex::cuda::type<scalar_t>;
-         USING_ACCSCALAR_T
+         using accscalar_t = acc_type<scalar_t, true>;
         
          weight_norm_fwd_last_dim_kernel
            <<<(fast_dim_size+TILE_W-1)/TILE_W,
               dim3(TILE_W,TILE_H),
               (TILE_W*TILE_H + TILE_W)*sizeof(accscalar_t),
               stream>>>
-           (w.data<cuda_scalar_t>(),
+           (w.data<scalar_t>(),
             norms.data<accscalar_t>(),
-            v.data<cuda_scalar_t>(),
-            g.data<cuda_scalar_t>(),
+            v.data<scalar_t>(),
+            g.data<scalar_t>(),
             fast_dim_size,
             slower_dims_size);
        });
@@ -421,19 +419,18 @@ std::tuple<Tensor, Tensor> weight_norm_fused_backward
        "weight_norm_bwd_first_dim_kernel",  
        [&]
        {
-         using cuda_scalar_t = apex::cuda::type<scalar_t>;
-         USING_ACCSCALAR_T
+         using accscalar_t = acc_type<scalar_t, true>;
 
 	 weight_norm_bwd_first_dim_kernel
 	   <<<grad_w.size(0), 
 	      BLOCK, 
 	      BLOCK*sizeof(accscalar_t),
               stream>>>
-	   (grad_v.data<cuda_scalar_t>(),
-	    grad_g.data<cuda_scalar_t>(),
-	    grad_w.data<cuda_scalar_t>(),
-	    saved_v.data<cuda_scalar_t>(),
-	    saved_g.data<cuda_scalar_t>(),
+	   (grad_v.data<scalar_t>(),
+	    grad_g.data<scalar_t>(),
+	    grad_w.data<scalar_t>(),
+	    saved_v.data<scalar_t>(),
+	    saved_g.data<scalar_t>(),
 	    savedNorms.data<accscalar_t>(),
 	    rowSize);
        });
@@ -454,19 +451,18 @@ std::tuple<Tensor, Tensor> weight_norm_fused_backward
        "weight_norm_bwd_last_dim_kernel",  
        [&]
        {
-         using cuda_scalar_t = apex::cuda::type<scalar_t>;
-         USING_ACCSCALAR_T
+         using accscalar_t = acc_type<scalar_t, true>;
 
          weight_norm_bwd_last_dim_kernel
            <<<(fast_dim_size+TILE_W-1)/TILE_W,
               dim3(TILE_W,TILE_H), 
               (TILE_W*TILE_H + TILE_W)*sizeof(accscalar_t),
               stream>>>
-           (grad_v.data<cuda_scalar_t>(),
-            grad_g.data<cuda_scalar_t>(),
-            grad_w.data<cuda_scalar_t>(),
-            saved_v.data<cuda_scalar_t>(),
-            saved_g.data<cuda_scalar_t>(),
+           (grad_v.data<scalar_t>(),
+            grad_g.data<scalar_t>(),
+            grad_w.data<scalar_t>(),
+            saved_v.data<scalar_t>(),
+            saved_g.data<scalar_t>(),
             savedNorms.data<accscalar_t>(),
             fast_dim_size,
             slower_dims_size);
