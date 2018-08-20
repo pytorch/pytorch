@@ -61,7 +61,7 @@ if(BUILD_CAFFE2)
 endif()
 
 # ---[ BLAS
-if(NOT ANDROID AND NOT IOS)
+if(NOT BUILD_ATEN_MOBILE)
   set(BLAS "MKL" CACHE STRING "Selected BLAS library")
 else()
   set(BLAS "Eigen" CACHE STRING "Selected BLAS library")
@@ -512,7 +512,7 @@ if(USE_CUDA)
 endif()
 
 # ---[ HIP
-if(BUILD_CAFFE2 OR (NOT ANDROID AND NOT IOS))
+if(BUILD_CAFFE2 OR NOT BUILD_ATEN_MOBILE)
   include(${CMAKE_CURRENT_LIST_DIR}/public/LoadHIP.cmake)
   if(PYTORCH_FOUND_HIP)
     message(INFO "Compiling with HIP for AMD.")
@@ -539,7 +539,7 @@ if(BUILD_CAFFE2 OR (NOT ANDROID AND NOT IOS))
     set(Caffe2_HIP_DEPENDENCY_LIBS
       ${rocrand_LIBRARIES} ${hiprand_LIBRARIES} ${PYTORCH_HIP_HCC_LIBRARIES} ${PYTORCH_MIOPEN_LIBRARIES})
     # Additional libraries required by PyTorch AMD that aren't used by Caffe2 (not in Caffe2's docker image)
-    if(NOT ANDROID AND NOT IOS)
+    if(NOT BUILD_ATEN_MOBILE)
       set(Caffe2_HIP_DEPENDENCY_LIBS ${Caffe2_HIP_DEPENDENCY_LIBS} ${hipsparse_LIBRARIES})
     endif()
     # TODO: There is a bug in rocblas's cmake files that exports the wrong targets name in ${rocblas_LIBRARIES}
@@ -753,7 +753,7 @@ if (USE_NNAPI AND NOT ANDROID)
   caffe2_update_option(USE_NNAPI OFF)
 endif()
 
-if (NOT ANDROID AND NOT IOS)
+if (NOT BUILD_ATEN_MOBILE)
   if (BUILD_CAFFE2)
     list(APPEND Caffe2_DEPENDENCY_LIBS aten_op_header_gen)
     if (USE_CUDA)
@@ -817,7 +817,7 @@ if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
 endif()
 
 # --[ ATen checks
-if (NOT ANDROID AND NOT IOS)
+if (NOT BUILD_ATEN_MOBILE)
   set(TORCH_CUDA_ARCH_LIST $ENV{TORCH_CUDA_ARCH_LIST})
   set(TORCH_NVCC_FLAGS $ENV{TORCH_NVCC_FLAGS})
 

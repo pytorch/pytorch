@@ -38,7 +38,7 @@ configure_file(
 install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/../caffe2
         DESTINATION include
         FILES_MATCHING PATTERN "*.h")
-if (ANDROID OR IOS)
+if (BUILD_ATEN_MOBILE)
   install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/core
           DESTINATION include/ATen
           FILES_MATCHING PATTERN "*.h")
@@ -47,7 +47,7 @@ install(FILES ${CMAKE_BINARY_DIR}/caffe2/core/macros.h
         DESTINATION include/caffe2/core)
 
 # ---[ ATen specific
-if (NOT ANDROID AND NOT IOS)
+if (NOT BUILD_ATEN_MOBILE)
   # SET_SOURCE_FILES_PROPERTIES must be in the same CMakeLists.txt file as the target that includes the file
   # so we need to set these commands here rather than in src/TH
   IF(C_SSE4_1_FOUND AND C_SSE4_2_FOUND)

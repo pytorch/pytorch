@@ -7,7 +7,7 @@ include(../cmake/Codegen.cmake)
 add_subdirectory(utils)
 
 # ---[ ATen build
-if (NOT ANDROID AND NOT IOS)
+if (NOT BUILD_ATEN_MOBILE)
   set(__caffe2_CMAKE_POSITION_INDEPENDENT_CODE ${CMAKE_POSITION_INDEPENDENT_CODE})
   set(CMAKE_POSITION_INDEPENDENT_CODE ON)
   set(AT_LINK_STYLE INTERFACE)
