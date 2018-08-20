@@ -40,7 +40,7 @@ class EnsureCPUOutputOp : public Operator<Context> {
         input.size(),
         input.raw_data(),
         output->raw_mutable_data(input.meta()));
-
+    context_.FinishDeviceComputation();
     return true;
   }
 };
