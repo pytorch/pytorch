@@ -24,12 +24,12 @@ if (USE_CUDA)
 endif()
 
 if (USE_ROCM)
-  caffe2_hip_binary_target("hip/inspect_hip.cc")
-  caffe2_hip_binary_target("hip/print_core_object_sizes_hip.cc")
+  caffe2_binary_target("hip/inspect_hip.cc")
+  caffe2_binary_target("hip/print_core_object_sizes_hip.cc")
 
   if (BUILD_TEST)
     # Core overhead benchmark
-    caffe2_hip_binary_target("hip/core_overhead_benchmark_hip.cc")
+    caffe2_binary_target("hip/core_overhead_benchmark_hip.cc")
     target_link_libraries(core_overhead_benchmark_hip benchmark)
   endif()
 endif()
