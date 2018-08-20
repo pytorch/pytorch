@@ -545,6 +545,14 @@ if(BUILD_CAFFE2 OR (NOT ANDROID AND NOT IOS))
     # TODO: There is a bug in rocblas's cmake files that exports the wrong targets name in ${rocblas_LIBRARIES}
     list(APPEND Caffe2_HIP_DEPENDENCY_LIBS
       roc::rocblas)
+
+    # TODO: Currently pytorch hipify script uses a feature called
+    # "disabled_modules" that effectively ifdef out a file, but
+    # without doing extra processing in the callers, which results in
+    # some unresolved symbols in the shared lib
+    # (libcaffe2_hip.so). Remove this when all disabled_modules are
+    # eliminated.
+    set(CMAKE_EXE_LINKER_FLAGS "-Wl,--unresolved-symbols=ignore-in-shared-libs ${CMAKE_EXE_LINKER_FLAGS}")
   else()
     caffe2_update_option(USE_ROCM OFF)
   endif()
