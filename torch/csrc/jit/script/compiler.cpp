@@ -1387,12 +1387,10 @@ private:
       case TK_LIST_LITERAL: {
         auto ll = ListLiteral(tree);
         auto values = getValues(ll.inputs(), /*maybe_unpack=*/true, identity);
-        if (values.size() == 0) {
-          // If this is an empty list literal `[]`, construct an empty Tensor[]
-          return graph->insertNode(graph->createList(DynamicType::get(), {}))
-              ->output();
-        }
-        const auto elem_type = values.at(0)->type();
+
+        // If this is an empty list literal `[]`, construct an empty Tensor[]
+        const auto elem_type =
+            values.empty() ? DynamicType::get() : values.at(0)->type();
         for (auto v : values) {
           if (v->type() != elem_type) {
             throw ErrorReport(tree)
