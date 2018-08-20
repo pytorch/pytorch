@@ -7,7 +7,6 @@
 #include <tuple>
 #include <thrust/unique.h>
 #include <thrust/sort.h>
-#include <thrust/device_vector.h>
 
 namespace at {
 namespace native{
@@ -126,8 +125,8 @@ template <typename scalar_t>
     input_sorted_indices.resize_(last - input_sorted_indices_ptr);
     Tensor output = input_sorted.index_select(0, input_sorted_indices);
 
-    // // reshape back
-    std::vector<int64_t> new_sizes(orig_sizes.begin(), orig_sizes.end());
+    // reshape back
+    auto new_sizes = std::vector<int64_t>(orig_sizes);
     new_sizes[0] = -1;
     output = output.view(new_sizes);
     output = output.transpose(0, dim);
