@@ -586,6 +586,11 @@ class CompositeReaderBuilder(ReaderBuilder):
     def setup(self, **kwargs):
         for reader_builder in self._reader_builders:
             reader_builder.setup(**kwargs)
+            # limiter is stateful; it can only be used once. Since
+            # CompositeReader stops when one of the reader stops,
+            # this is fine.
+            if "limiter" in kwargs:
+                kwargs.pop("limiter")
 
     def new_reader(self, **kwargs):
         readers = []
