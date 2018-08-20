@@ -29,7 +29,7 @@ CAFFE2_DECLARE_int(caffe2_net_async_tracing_nth);
 namespace caffe2 {
 namespace tracing {
 
-struct TracerEvent {
+struct CAFFE2_API TracerEvent {
   int op_id_ = -1;
   int task_id_ = -1;
   int stream_id_ = -1;
