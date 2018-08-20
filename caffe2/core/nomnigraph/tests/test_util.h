@@ -34,6 +34,23 @@ struct NNEquality {
   }
 };
 
+// Very simple random number generator used to generate platform independent
+// random test data.
+class TestRandom {
+ public:
+  TestRandom(unsigned int seed) : seed_(seed){};
+
+  unsigned int nextInt() {
+    seed_ = A * seed_ + C;
+    return seed_;
+  }
+
+ private:
+  static const unsigned int A = 1103515245;
+  static const unsigned int C = 12345;
+  unsigned int seed_;
+};
+
 /** Our test graph looks like this:
  *           +-------+
  *           | entry |
