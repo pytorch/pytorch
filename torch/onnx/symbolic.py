@@ -266,6 +266,30 @@ def tanh(g, self):
     return g.op("Tanh", self)
 
 
+def sin(g, self):
+    return g.op("Sin", self)
+
+
+def cos(g, self):
+    return g.op("Cos", self)
+
+
+def tan(g, self):
+    return g.op("Tan", self)
+
+
+def asin(g, self):
+    return g.op("Asin", self)
+
+
+def acos(g, self):
+    return g.op("Acos", self)
+
+
+def atan(g, self):
+    return g.op("Atan", self)
+
+
 def sigmoid(g, self):
     return g.op("Sigmoid", self)
 
@@ -1066,6 +1090,7 @@ def rnn_trace_override_symbolic(cell_type, func, sym, g, input, weights, hiddens
     inputs = list(itertools.chain.from_iterable(
         [[input], flattened_weights, hiddens,
             [batch_sizes] if batch_sizes else []]))
+
     outputs = g.wrapPyFuncWithSymbolic(
         forward_flattened_wrapper,
         inputs,

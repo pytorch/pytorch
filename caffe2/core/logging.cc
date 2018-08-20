@@ -39,7 +39,7 @@ void SetStackTraceFetcher(std::function<string(void)> fetcher) {
   *GetFetchStackTrace() = fetcher;
 }
 
-[[noreturn]] void ThrowEnforceNotMet(
+void ThrowEnforceNotMet(
     const char* file,
     const int line,
     const char* condition,

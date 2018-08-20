@@ -45,39 +45,19 @@ struct logSigmoid_updateGradInput_functor
   }
 };
 
-#ifdef CUDA_HALF_TENSOR
 template <>
 struct logSigmoid_updateOutput_functor<half> {
   __device__ __forceinline__ void operator()(half* output, const half *input) const {
-#ifdef CUDA_HALF_INSTRUCTIONS
-    const half max = fmaxType(__float2half(0.f), __hneg(*input));
-    const half z = THCNumerics<half>::exp(__hneg(max)) + THCNumerics<half>::exp(__hneg(*input) - max);
-    *output = __hneg(max + THCNumerics<half>::log(z));
-#else
     float in = __half2float(*input);
     float max = fmaxType(0.f, -in);
     float z = THCNumerics<float>::exp(-max) + THCNumerics<float>::exp(-in - max);
     *output = __float2half(-(max + THCNumerics<float>::log(z)));
-#endif
   }
 };
 
 template <>
 struct logSigmoid_updateGradInput_functor<half> {
   __device__ __forceinline__ void operator()(half* gradInput, const half *input, const half *gradOutput) const {
-#ifdef CUDA_HALF_INSTRUCTIONS
-    const half one = __float2half(1.f);
-    const half zero = __float2half(0.f);
-    const half max = fmaxType(zero, __hneg(*input));
-    const half z = THCNumerics<half>::exp(__hneg(max)) + THCNumerics<half>::exp(__hneg(*input) - max);
-    half max_deriv = zero;
-    half sign = __hneg(one);
-    if(*input < zero){
-        max_deriv = __hneg(one);
-        sign = one;
-    }
-    *gradInput = __hmul(*gradOutput, (__hneg(max_deriv) - __hmul(sign, __hdiv(z - one, z))));
-#else
     const float in = __half2float(*input);
     const float max = fmaxType(0.f, -in);
     const float z = THCNumerics<float>::exp(-max) + THCNumerics<float>::exp(-in - max);
@@ -89,10 +69,8 @@ struct logSigmoid_updateGradInput_functor<half> {
         sign = 1.f;
     }
     *gradInput = __float2half(go * (-max_deriv - sign*((z - 1.f)/z)));
-#endif
   }
 };
-#endif
 
 #include "generic/LogSigmoid.cu"
 #include "THCGenerateFloatTypes.h"

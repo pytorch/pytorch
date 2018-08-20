@@ -252,8 +252,7 @@ ConstParameterCursor::ConstParameterCursor(const Module& module)
 }
 
 ConstParameterCursor::ConstParameterCursor(const ParameterCursor& cursor)
-    : detail::CursorBase<const autograd::Variable>(
-          copy_cursor_items<Item>(cursor)) {}
+    : detail::CursorBase<const Tensor>(copy_cursor_items<Item>(cursor)) {}
 
 // Buffer cursors
 
@@ -264,7 +263,6 @@ ConstBufferCursor::ConstBufferCursor(const Module& module)
     : detail::CursorBase<const Tensor>(Collector().collect_buffers(module)) {}
 
 ConstBufferCursor::ConstBufferCursor(const BufferCursor& cursor)
-    : detail::CursorBase<const autograd::Variable>(
-          copy_cursor_items<Item>(cursor)) {}
+    : detail::CursorBase<const Tensor>(copy_cursor_items<Item>(cursor)) {}
 } // namespace nn
 } // namespace torch

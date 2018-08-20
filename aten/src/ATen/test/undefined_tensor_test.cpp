@@ -9,7 +9,7 @@
 using namespace at;
 
 TEST_CASE( "undefined tensor test", "[]" ) {
-  manual_seed(123, at::Backend::CPU);
+  manual_seed(123, at::kCPU);
 
   // mainly test ops on undefined tensors don't segfault and give a reasonable errror message.
   Tensor und;
@@ -23,7 +23,6 @@ TEST_CASE( "undefined tensor test", "[]" ) {
   REQUIRE_THROWS_WITH(und.strides(), Catch::Contains("strides"));
   REQUIRE_THROWS_WITH(und.dim(), Catch::Contains("dim"));
   REQUIRE_THROWS_WITH([]() {return Tensor();}() = Scalar(5), Catch::Contains("UndefinedType"));
-  REQUIRE_THROWS_WITH(und.unsafeGetTH(true), Catch::Contains("unsafeGetTH"));
   REQUIRE_THROWS_WITH(und.add(und), Catch::Contains("add"));
   REQUIRE_THROWS_WITH(und.add(ft), Catch::Contains("add"));
   REQUIRE_THROWS_WITH(ft.add(und), Catch::Contains("add"));

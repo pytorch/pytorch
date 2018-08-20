@@ -33,15 +33,15 @@ CUDA_INCLUDES = """\
 
 COPY = CodeTemplate("""\
 ${THTensor}_copy${cuda}${src_scalar_name}(${state,}\
-static_cast<TensorImpl*>(dst.pImpl)->tensor, \
-static_cast<TensorImpl*>(src.pImpl)->tensor);
+static_cast<TensorImpl*>(dst.pImpl), \
+static_cast<TensorImpl*>(src.pImpl));
 """)
 
 COPY_ASYNC_CPU = CodeTemplate("""\
 if (non_blocking) {
     ${THTensor}_copyAsyncCPU(${state,}\
-static_cast<TensorImpl*>(dst.pImpl)->tensor, \
-static_cast<TensorImpl*>(src.pImpl)->tensor);
+static_cast<TensorImpl*>(dst.pImpl), \
+static_cast<TensorImpl*>(src.pImpl));
     break;
 }
 """)
@@ -49,8 +49,8 @@ static_cast<TensorImpl*>(src.pImpl)->tensor);
 COPY_ASYNC_CUDA = CodeTemplate("""\
 if (non_blocking) {
     ${THTensor}_copyAsyncCuda(${state,}\
-static_cast<TensorImpl*>(dst.pImpl)->tensor, \
-static_cast<TensorImpl*>(src.pImpl)->tensor);
+static_cast<TensorImpl*>(dst.pImpl), \
+static_cast<TensorImpl*>(src.pImpl));
     break;
 }
 """)

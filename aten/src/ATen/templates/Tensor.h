@@ -113,10 +113,6 @@ struct Tensor : public detail::TensorBase {
   template<typename T>
   T * data() const;
 
-  void * unsafeGetTH(bool retain) const {
-    return pImpl->unsafeGetTH(retain);
-  }
-
   // non-retaining
   TensorImpl * unsafeGetTensorImpl() const {
     return pImpl;
@@ -157,6 +153,9 @@ struct Tensor : public detail::TensorBase {
   Tensor operator[](Scalar index) const;
   Tensor operator[](Tensor index) const;
   Tensor operator[](int64_t index) const;
+
+  Tensor cpu() const;
+  Tensor cuda() const;
 
   // ~~~~~ Autograd API ~~~~~
 

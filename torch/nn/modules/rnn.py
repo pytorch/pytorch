@@ -7,7 +7,10 @@ import numbers
 from .module import Module
 from ..parameter import Parameter
 from ..utils.rnn import PackedSequence
+from .._functions.rnn import get_rnn_impl as _get_rnn_impl
 from .. import init
+
+_VF = torch._C._VariableFunctions
 
 
 class RNNBase(Module):
@@ -77,7 +80,6 @@ class RNNBase(Module):
         """
         any_param = next(self.parameters()).data
         if not any_param.is_cuda or not torch.backends.cudnn.is_acceptable(any_param):
-            self._data_ptrs = []
             return
 
         # If any parameters alias, we fall back to the slower, copying code path. This is
@@ -86,7 +88,6 @@ class RNNBase(Module):
         # Module.named_parameters().
         unique_data_ptrs = set(p.data_ptr() for l in self.all_weights for p in l)
         if len(unique_data_ptrs) != sum(len(l) for l in self.all_weights):
-            self._data_ptrs = []
             return
 
         with torch.cuda.device_of(any_param):
@@ -104,9 +105,6 @@ class RNNBase(Module):
                     weight_arr, weight_stride0,
                     self.input_size, rnn.get_cudnn_mode(self.mode), self.hidden_size, self.num_layers,
                     self.batch_first, bool(self.bidirectional))
-
-            self._param_buf_size = weight_buf.size(0)
-            self._data_ptrs = list(p.data.data_ptr() for p in self.parameters())
 
     def _apply(self, fn):
         ret = super(RNNBase, self)._apply(fn)
@@ -168,16 +166,8 @@ class RNNBase(Module):
             if self.mode == 'LSTM':
                 hx = (hx, hx)
 
-        has_flat_weights = list(p.data.data_ptr() for p in self.parameters()) == self._data_ptrs
-        if has_flat_weights:
-            first_data = next(self.parameters()).data
-            assert first_data.storage().size() == self._param_buf_size
-            flat_weight = first_data.new().set_(first_data.storage(), 0, torch.Size([self._param_buf_size]))
-        else:
-            flat_weight = None
-
         self.check_forward_args(input, hx, batch_sizes)
-        func = self._backend.RNN(
+        func = _get_rnn_impl(
             self.mode,
             self.input_size,
             self.hidden_size,
@@ -187,8 +177,6 @@ class RNNBase(Module):
             train=self.training,
             bidirectional=self.bidirectional,
             dropout_state=self.dropout_state,
-            variable_length=is_packed,
-            flat_weight=flat_weight
         )
         output, hidden = func(input, self.all_weights, hx, batch_sizes)
         if is_packed:
@@ -211,7 +199,6 @@ class RNNBase(Module):
 
     def __setstate__(self, d):
         super(RNNBase, self).__setstate__(d)
-        self.__dict__.setdefault('_data_ptrs', [])
         if 'all_weights' in d:
             self._all_weights = d['all_weights']
         if isinstance(self._all_weights[0][0], str):
@@ -627,9 +614,9 @@ class RNNCell(RNNCellBase):
             hx = input.new_zeros(input.size(0), self.hidden_size, requires_grad=False)
         self.check_forward_hidden(input, hx)
         if self.nonlinearity == "tanh":
-            func = self._backend.RNNTanhCell
+            func = _VF.rnn_tanh_cell
         elif self.nonlinearity == "relu":
-            func = self._backend.RNNReLUCell
+            func = _VF.rnn_relu_cell
         else:
             raise RuntimeError(
                 "Unknown nonlinearity: {}".format(self.nonlinearity))
@@ -712,7 +699,7 @@ class LSTMCell(RNNCellBase):
             hx = (hx, hx)
         self.check_forward_hidden(input, hx[0], '[0]')
         self.check_forward_hidden(input, hx[1], '[1]')
-        return self._backend.LSTMCell(
+        return _VF.lstm_cell(
             input, hx,
             self.weight_ih, self.weight_hh,
             self.bias_ih, self.bias_hh,
@@ -780,7 +767,7 @@ class GRUCell(RNNCellBase):
         if hx is None:
             hx = input.new_zeros(input.size(0), self.hidden_size, requires_grad=False)
         self.check_forward_hidden(input, hx)
-        return self._backend.GRUCell(
+        return _VF.gru_cell(
             input, hx,
             self.weight_ih, self.weight_hh,
             self.bias_ih, self.bias_hh,

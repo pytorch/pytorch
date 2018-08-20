@@ -156,7 +156,7 @@ PyObject *THPVariable_get_cdata(THPVariable *self)
 {
   HANDLE_TH_ERRORS
   auto& var = self->cdata;
-  return PyLong_FromVoidPtr(var.unsafeGetTH(false));
+  return PyLong_FromVoidPtr(var.data().unsafeGetTensorImpl());
   END_HANDLE_TH_ERRORS
 }
 
@@ -235,7 +235,7 @@ int THPVariable_set_grad(THPVariable *self, PyObject *py_grad)
       "can't assign Variable as its own grad");
 
   auto& grad = ((THPVariable*)py_grad)->cdata;
-  auto& sparseType = var.type().toBackend(var.is_cuda() ? kSparseCUDA : kSparseCPU);
+  auto& sparseType = var.type().toBackend(var.is_cuda() ? Backend::SparseCUDA : Backend::SparseCPU);
 
   THPUtils_assertRet(-1, grad.type() == var.type() || grad.type() == sparseType,
       "assigned grad has data of a different type");

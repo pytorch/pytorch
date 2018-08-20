@@ -330,7 +330,77 @@ int OpSchema::CalculateOutput(int num_input) const {
   }
 }
 
-std::ostream& operator<<(std::ostream& out, const OpSchema& schema) {
+static void SparseLengthsFillerHelper(
+    const std::vector<std::vector<TIndex>>& shapes,
+    size_t value_index,
+    size_t length_index,
+    std::vector<TensorFiller>* fillers) {
+  CAFFE_ENFORCE_EQ(shapes[length_index].size(), 1);
+  (*fillers)[length_index].SparseLengths(shapes[value_index].front());
+}
+
+static void SparseSegmentsFillerHelper(
+    const std::vector<std::vector<TIndex>>& shapes,
+    size_t value_index,
+    size_t segment_index,
+    std::vector<TensorFiller>* fillers) {
+  CAFFE_ENFORCE_EQ(shapes[segment_index].size(), 1);
+  // TODO (mnaumov): distribution of value
+  (*fillers)[value_index].Min(0).Max(shapes[value_index].front() * 2);
+  (*fillers)[segment_index].SparseSegments(shapes[value_index].front() - 1);
+}
+
+OpSchema& OpSchema::ValueKeyLengthInputFillers(
+    size_t value_index,
+    size_t key_index,
+    size_t length_index) {
+  // TODO (mnaumov): distribution of value
+  filler_supplier_ = [this, value_index, key_index, length_index](
+                         const std::vector<std::vector<TIndex>>& shapes) {
+    auto fillers = SupplyDenseFillers(shapes);
+    SparseLengthsFillerHelper(shapes, key_index, length_index, &fillers);
+    SparseSegmentsFillerHelper(shapes, value_index, key_index, &fillers);
+    return fillers;
+  };
+  return *this;
+}
+
+OpSchema& OpSchema::ValueLengthInputFillers(
+    size_t value_index,
+    size_t length_index) {
+  filler_supplier_ = [this, value_index, length_index](
+                         const std::vector<std::vector<TIndex>>& shapes) {
+    auto fillers = SupplyDenseFillers(shapes);
+    SparseLengthsFillerHelper(shapes, value_index, length_index, &fillers);
+    return fillers;
+  };
+  return *this;
+}
+
+OpSchema& OpSchema::DisallowInputFillers() {
+  filler_supplier_ =
+      [this](const std::vector<std::vector<TIndex>>& /* unused */) {
+        throw std::invalid_argument(type_ + " does not have input fillers");
+        return std::vector<TensorFiller>();
+      };
+  return *this;
+}
+
+std::vector<TensorFiller> OpSchema::InputFillers(
+    const std::vector<std::vector<TIndex>>& shapes) const {
+  return filler_supplier_(shapes);
+}
+
+std::vector<TensorFiller> OpSchema::SupplyDenseFillers(
+    const std::vector<std::vector<TIndex>>& shapes) {
+  std::vector<TensorFiller> fillers;
+  for (const auto& shape : shapes) {
+    fillers.emplace_back(shape);
+  }
+  return fillers;
+}
+
+CAFFE2_EXPORT std::ostream& operator<<(std::ostream& out, const OpSchema& schema) {
   if (!schema.args().empty()) {
     out << "Arguments:" << std::endl;
     for (const auto& arg : schema.args()) {
