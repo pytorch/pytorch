@@ -70,7 +70,7 @@ void ProfileOperatorObserver::Start() {
     int device;
     cudaGetDevice(&device);
 
-    cudaSetDevice(context->cuda_gpu_id());
+    cudaSetDevice(context->device_id());
     cudaEventCreate(&start_);
     cudaEventRecord(start_, context->cuda_stream());
 
@@ -92,7 +92,7 @@ void ProfileOperatorObserver::Stop() {
     int device;
     cudaGetDevice(&device);
 
-    cudaSetDevice(context->cuda_gpu_id());
+    cudaSetDevice(context->device_id());
     cudaEventCreate(&stop_);
     cudaEventRecord(stop_, context->cuda_stream());
     cudaEventSynchronize(stop_);

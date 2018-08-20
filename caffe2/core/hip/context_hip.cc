@@ -257,7 +257,7 @@ HIPContext::HIPContext(const int gpu_id)
 
 HIPContext::HIPContext(const DeviceOption& option)
     : gpu_id_(
-          option.has_hip_gpu_id() ? RectifyGPUID(option.hip_gpu_id())
+          option.has_device_id() ? RectifyGPUID(option.device_id())
                                   : CaffeHipGetDevice()),
       random_seed_(
           option.has_random_seed() ? option.random_seed()

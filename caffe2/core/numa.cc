@@ -18,8 +18,8 @@ bool IsNUMAEnabled() {
   return FLAGS_caffe2_cpu_numa_enabled && numa_available() >= 0;
 }
 
-void NUMABind(int numa_node_id) {
-  if (numa_node_id < 0) {
+void NUMABind(int device_id) {
+  if (device_id < 0) {
     return;
   }
   if (!IsNUMAEnabled()) {
@@ -28,12 +28,12 @@ void NUMABind(int numa_node_id) {
   }
 
   CAFFE_ENFORCE(
-      numa_node_id <= numa_max_node(),
-      "NUMA node id " + caffe2::to_string(numa_node_id) + " is unavailable");
+      device_id <= numa_max_node(),
+      "NUMA node id " + caffe2::to_string(device_id) + " is unavailable");
 
   auto bm = numa_allocate_nodemask();
   numa_bitmask_clearall(bm);
-  numa_bitmask_setbit(bm, numa_node_id);
+  numa_bitmask_setbit(bm, device_id);
   numa_bind(bm);
   numa_bitmask_free(bm);
 }
@@ -62,8 +62,8 @@ int GetNumNUMANodes() {
   return numa_num_configured_nodes();
 }
 
-void NUMAMove(void* ptr, size_t size, int numa_node_id) {
-  if (numa_node_id < 0) {
+void NUMAMove(void* ptr, size_t size, int device_id) {
+  if (device_id < 0) {
     return;
   }
   if (!IsNUMAEnabled()) {
@@ -75,8 +75,8 @@ void NUMAMove(void* ptr, size_t size, int numa_node_id) {
   size_t page_start_ptr = (((size_t)ptr) & ~(getpagesize() - 1));
   size_t offset = ((size_t)ptr) - page_start_ptr;
   // Avoid extra dynamic allocation and NUMA api calls
-  CAFFE_ENFORCE(numa_node_id >= 0 && (unsigned)numa_node_id < sizeof(unsigned long) * 8);
-  unsigned long mask = 1UL << numa_node_id;
+  CAFFE_ENFORCE(device_id >= 0 && (unsigned)device_id < sizeof(unsigned long) * 8);
+  unsigned long mask = 1UL << device_id;
   CAFFE_ENFORCE(
       mbind(
           (void*)page_start_ptr,
@@ -103,8 +103,8 @@ bool IsNUMAEnabled() {
   return false;
 }
 
-void NUMABind(int numa_node_id) {
-  if (numa_node_id >= 0) {
+void NUMABind(int device_id) {
+  if (device_id >= 0) {
     VLOG(1) << "NUMA is not enabled";
   }
 }
@@ -119,8 +119,8 @@ int GetNumNUMANodes() {
   return -1;
 }
 
-void NUMAMove(void* ptr, size_t size, int numa_node_id) {
-  if (numa_node_id >= 0) {
+void NUMAMove(void* ptr, size_t size, int device_id) {
+  if (device_id >= 0) {
     VLOG(1) << "NUMA is not enabled";
   }
 }

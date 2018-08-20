@@ -24,7 +24,7 @@ CAFFE2_DEFINE_int(
 namespace caffe2 {
 
 std::shared_ptr<TaskThreadPool>
-GetAsyncNetHIPThreadPool(int hip_gpu_id, int pool_size, bool create_new) {
+GetAsyncNetHIPThreadPool(int device_id, int pool_size, bool create_new) {
   // For GPU, use per device thread pools of predefined constant size
   if (pool_size != FLAGS_caffe2_threads_per_hip_gpu) {
     LOG(INFO) << "Overriding AMD HIP GPU pool size: using "
@@ -35,21 +35,21 @@ GetAsyncNetHIPThreadPool(int hip_gpu_id, int pool_size, bool create_new) {
 
   if (create_new) {
     LOG(INFO) << "Created new AMD HIP GPU pool, size: " << FLAGS_caffe2_threads_per_hip_gpu
-              << "; GPU id: " << hip_gpu_id;
+              << "; GPU id: " << device_id;
     return std::make_shared<TaskThreadPool>(FLAGS_caffe2_threads_per_hip_gpu);
   } else {
     std::lock_guard<std::mutex> lock(pool_mutex);
 
     std::shared_ptr<TaskThreadPool> shared_pool = nullptr;
-    if (pools.count(hip_gpu_id)) {
-      shared_pool = pools.at(hip_gpu_id).lock();
+    if (pools.count(device_id)) {
+      shared_pool = pools.at(device_id).lock();
     }
     if (!shared_pool) {
       LOG(INFO) << "Created shared AMD HIP GPU pool, size: "
-                << FLAGS_caffe2_threads_per_hip_gpu << "; GPU id: " << hip_gpu_id;
+                << FLAGS_caffe2_threads_per_hip_gpu << "; GPU id: " << device_id;
       shared_pool =
           std::make_shared<TaskThreadPool>(FLAGS_caffe2_threads_per_hip_gpu);
-      pools[hip_gpu_id] = shared_pool;
+      pools[device_id] = shared_pool;
     }
     return shared_pool;
   }
