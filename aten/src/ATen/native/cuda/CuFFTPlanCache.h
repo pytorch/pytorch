@@ -149,7 +149,11 @@ public:
     // TODO: Figure out why windows fails to compile
     //         at::optional<std::vector<long long int>> inembed_opt = at::nullopt;
     //       Then move the following to a helper function.
+#ifdef __HIP_PLATFORM_HCC__
+    std::vector<int> inembed(signal_ndim);
+#else
     std::vector<long long int> inembed(signal_ndim);
+#endif
     if (!clone_input) {
       auto istrides = input.strides();
       auto last_istride = istrides[signal_ndim];
@@ -252,7 +256,7 @@ public:
     // disable auto allocation of workspace to use THC allocator
     CUFFT_CHECK(cufftSetAutoAllocation(plan(), /* autoAllocate */ 0));
 
-    size_t ws_size_t = 0;
+    size_t ws_size_t;
 
     // make plan
     if (simple_layout) {
@@ -262,10 +266,11 @@ public:
       //
       // See NOTE [ cuFFT Embedded Strides ] in native/cuda/SpectralOps.cu.
 #ifdef __HIP_PLATFORM_HCC__
-      CUFFT_CHECK(hipfftMakePlanMany(&plan(), signal_ndim, signal_sizes.data(),
+      int sizes = *signal_sizes.data();
+      CUFFT_CHECK(hipfftMakePlanMany(&plan(), signal_ndim, &sizes,
         /* inembed */ nullptr, /* base_istride */ 1, /* idist */ 1,
         /* onembed */ nullptr, /* base_ostride */ 1, /* odist */ 1,
-	exec_type, batch));
+	exec_type, batch, &ws_size_t));
 #else
       CUFFT_CHECK(cufftXtMakePlanMany(plan(), signal_ndim, signal_sizes.data(),
         /* inembed */ nullptr, /* base_istride */ 1, /* idist */ 1, itype,
@@ -293,16 +298,22 @@ public:
       }
 
       // set odist, onembed, base_ostride
+      int odist = at::prod_intlist(output_sizes.slice(1, signal_ndim));
+      std::vector<int> onembed(output_sizes.data() + 1, output_sizes.data() + signal_ndim + 1);
+      int base_ostride = 1;
+
+      int sizes = *signal_sizes.data();
+      int istride = base_istride;
+      int iidist = idist;
+      CUFFT_CHECK(hipfftMakePlanMany(plan(), signal_ndim, &sizes,
+        inembed.data(), istride, iidist,
+        onembed.data(), base_ostride, odist,
+        exec_type, batch, &ws_size_t));
+#else
       long long int odist = at::prod_intlist(output_sizes.slice(1, signal_ndim));
       std::vector<long long int> onembed(output_sizes.data() + 1, output_sizes.data() + signal_ndim + 1);
       long long int base_ostride = 1;
 
-#ifdef __HIP_PLATFORM_HCC__
-      CUFFT_CHECK(hipfftMakePlanMany(&plan(), signal_ndim, signal_sizes.data(),
-        inembed.data(), base_istride, idist,
-        onembed.data(), base_ostride, odist,
-        exec_type, batch));
-#else
       CUFFT_CHECK(cufftXtMakePlanMany(plan(), signal_ndim, signal_sizes.data(),
             inembed.data(), base_istride, idist, itype,
             onembed.data(), base_ostride, odist, otype,
