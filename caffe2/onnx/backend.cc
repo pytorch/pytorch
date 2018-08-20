@@ -674,25 +674,54 @@ Caffe2Ops Caffe2Backend::CreateGemm(
 
   auto trans_a = onnx_node->attributes.get<int64_t>("transA", 0L);
   auto trans_b = onnx_node->attributes.get<int64_t>("transB", 0L);
-  auto broadcast = onnx_node->attributes.get<int64_t>("broadcast", 0L);
+  // Support broadcast by default when opset_version > 6.
+  auto broadcast =
+    onnx_node->attributes.get<int64_t>("broadcast",
+                                       (ctx.opset_version() > 6) ? 1L : 0L);
 
-  bool use_fc = false;
-  if ((!trans_a) && trans_b) {
-    if (broadcast) {
-      use_fc = true;
-    } else {
-      const auto input_c_vi_iter = ctx.value_infos().find(node.input(2));
-      if (input_c_vi_iter != ctx.value_infos().end() &&
-          input_c_vi_iter->second.type().tensor_type().shape().dim_size() ==
-              1) {
-        use_fc = true;
+  // If the c's shape information is available and c is a 1d tensor(except
+  // c is a scalar), use FC aggressively.
+  auto check_fc = [&]() -> bool {
+    const auto input_c_vi_iter = ctx.value_infos().find(node.input(2));
+
+    if (input_c_vi_iter == ctx.value_infos().end()) {
+      return false;
+    }
+
+    const auto input_c_shape =
+        input_c_vi_iter->second.type().tensor_type().shape();
+
+    if (input_c_shape.dim_size() != 1) {
+      return false;
+    }
+
+    // c is a scalar.
+    if (input_c_shape.dim(0).dim_value() == 1) {
+      const auto input_b_vi_iter = ctx.value_infos().find(node.input(1));
+
+      // If the b's shape is not available, skip FC.
+      if (input_b_vi_iter == ctx.value_infos().end()) {
+        return false;
+      }
+      const auto input_b_shape =
+          input_b_vi_iter->second.type().tensor_type().shape();
+      int input_b_last_dim_index = (trans_b) ? 0 : 1;
+      // If b's last dim is not 1, skip FC.
+      if (input_b_shape.dim(input_b_last_dim_index).dim_value() != 1) {
+        return false;
       }
     }
-  }
 
-  if (use_fc) {
+    return true;
+  };
+
+  if (!trans_a && broadcast && check_fc()) {
     auto* c2_op = ret.ops.Add();
-    BuildOperator(c2_op, "FC", {input_a, input_b, input_c}, {output});
+    if (trans_b) {
+      BuildOperator(c2_op, "FC", {input_a, input_b, input_c}, {output});
+    } else {
+      BuildOperator(c2_op, "FCTransposed", {input_a, input_b, input_c}, {output});
+    }
   } else {
     auto ab = dummy_->NewDummyName();
     caffe2::Argument arg_trans_a;
