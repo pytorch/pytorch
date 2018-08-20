@@ -25,11 +25,11 @@ using ConvertedResult =
 
 // Rewrite Caffe2 nets into SSA forms. Notice that we will preserve the external
 // output names for predict net.
-std::unordered_map<std::string, std::string> SsaRewrite(
+CAFFE2_API std::unordered_map<std::string, std::string> SsaRewrite(
     caffe2::NetDef* init_net,
     caffe2::NetDef* pred_net);
 
-class OnnxExporter {
+class CAFFE2_API OnnxExporter {
   using SpecialOpConverter = ConvertedResult (OnnxExporter::*)(
       const caffe2::OperatorDef&,
       const std::unordered_map<std::string, caffe2::TensorShape>&);

@@ -21,7 +21,7 @@ namespace caffe2 {
  * use a different registry and inherit from WorkspaceOptimizationPass.
  */
 
-class OptimizationPass {
+class CAFFE2_API OptimizationPass {
  public:
   OptimizationPass(NNModule* nn) : nn_(nn) {}
   virtual void run() = 0;
@@ -31,7 +31,7 @@ class OptimizationPass {
   NNModule* nn_;
 };
 
-class WorkspaceOptimizationPass : public OptimizationPass {
+class CAFFE2_API WorkspaceOptimizationPass : public OptimizationPass {
  public:
   WorkspaceOptimizationPass(NNModule* nn, Workspace* ws) : OptimizationPass(nn), ws_(ws) {}
   virtual ~WorkspaceOptimizationPass(){}

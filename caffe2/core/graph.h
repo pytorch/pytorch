@@ -16,7 +16,7 @@ namespace transform {
 /**
  *  Graph representation of an operator.
  */
-struct Node {
+struct CAFFE2_API Node {
  public:
   // Empty constructor for resize
   Node() {}
@@ -45,7 +45,7 @@ struct Node {
 /**
  *  Graph representation of a Netdef.
  */
-struct Graph {
+struct CAFFE2_API Graph {
  public:
   /**
    * Given a subgraph, gets all of the parents of the subgraph, as well as
@@ -155,7 +155,7 @@ struct Graph {
 
 // Adds an operator def to a netdef.
 // Returns the ptr, if you want to add anything extra (such as device_option)
-OperatorDef* AddOp(
+CAFFE2_API OperatorDef* AddOp(
     NetDef* netdef_ptr,
     string op_type,
     std::vector<string> inputs,
@@ -168,12 +168,12 @@ OperatorDef* AddOp(
  * For example, if we wanted to match an operator to Conv or FC, we can give:
  * "Conv|FC" as the type() of that op.
  */
-bool MatchStrings(string p, string s);
+CAFFE2_API bool MatchStrings(string p, string s);
 
 /**
  * This ensures that each named arg that exists in the pattern exists in g_op,
  * is equal in value.
  */
-bool MatchArguments(const OperatorDef& p_op, const OperatorDef& g_op);
+CAFFE2_API bool MatchArguments(const OperatorDef& p_op, const OperatorDef& g_op);
 
 } // namespace caffe2

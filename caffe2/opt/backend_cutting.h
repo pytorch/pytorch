@@ -9,7 +9,7 @@
 namespace caffe2 {
 namespace opt {
 
-caffe2::NetDef OptimizeForBackend(
+CAFFE2_API caffe2::NetDef OptimizeForBackend(
     caffe2::NetDef& net,
     std::function<bool(const caffe2::OperatorDef&)> supports,
     std::function<caffe2::NetDef(const caffe2::NetDef&)> transform_func);

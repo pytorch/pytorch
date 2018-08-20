@@ -18,7 +18,7 @@ namespace onnx {
 class OnnxExporter;
 }
 
-class OnnxifiTransformer {
+class CAFFE2_API OnnxifiTransformer {
  public:
   explicit OnnxifiTransformer(bool debug);
 

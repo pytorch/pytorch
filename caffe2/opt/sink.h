@@ -8,7 +8,7 @@
 namespace caffe2 {
 namespace opt {
 
-void sinkMaxPool(nom::repr::NNModule* nn);
+CAFFE2_API void sinkMaxPool(nom::repr::NNModule* nn);
 
 } // namespace opt
 } // namespace caffe2

@@ -8,7 +8,7 @@
 namespace caffe2 {
 namespace opt {
 
-void OptimizeForIdeep(
+CAFFE2_API void OptimizeForIdeep(
     nom::repr::NNModule* nn,
     caffe2::Workspace* ws,
     bool training_mode = false);

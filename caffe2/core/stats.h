@@ -40,7 +40,7 @@ struct CAFFE2_API ExportedStatValue {
 using ExportedStatList = std::vector<ExportedStatValue>;
 using ExportedStatMap = std::unordered_map<std::string, int64_t>;
 
-ExportedStatMap toMap(const ExportedStatList& stats);
+CAFFE2_API ExportedStatMap toMap(const ExportedStatList& stats);
 
 /**
  * @brief Holds a map of atomic counters keyed by name.
