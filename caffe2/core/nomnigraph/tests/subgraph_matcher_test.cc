@@ -41,11 +41,11 @@ TestMatchGraph::NodeRef Tree(
     const Criteria& root,
     const std::vector<TestMatchGraph::NodeRef>& children = {},
     int count = 1) {
-  return tree(graph, root, children, count, false);
+  return subgraph(graph, root, children, count, false);
 }
 
 TestMatchGraph::NodeRef NonTerminal(const Criteria& root, int count = 1) {
-  return tree(graph, root, {}, count, true);
+  return subgraph(graph, root, {}, count, true);
 }
 
 Criteria any() {
@@ -202,11 +202,11 @@ TestGraph::NodeRef getInNode(TestGraph::NodeRef node, int index) {
   return node->getInEdges()[index]->tail();
 }
 
-bool isSubtreeMatch(
+bool isSubgraphMatch(
     TestGraph::NodeRef nodeRef,
     const TestMatchGraph::NodeRef& criteria,
     bool invertGraphTraversal = true) {
-  return TestMatcher::isSubtreeMatch(nodeRef, criteria, invertGraphTraversal)
+  return TestMatcher::isSubgraphMatch(nodeRef, criteria, invertGraphTraversal)
       .isMatch();
 }
 } // namespace matcher
@@ -254,32 +254,32 @@ TEST(SubgraphMatcher, IsSubtreeMatch) {
 
   reset();
   auto subtree = Tree(any(), {Tree(any()), Tree(any())});
-  EXPECT_FALSE(isSubtreeMatch(n1, subtree, false));
-  EXPECT_FALSE(isSubtreeMatch(n4, subtree, false));
+  EXPECT_FALSE(isSubgraphMatch(n1, subtree, false));
+  EXPECT_FALSE(isSubgraphMatch(n4, subtree, false));
 
-  EXPECT_TRUE(isSubtreeMatch(n2, subtree, false));
-  EXPECT_TRUE(isSubtreeMatch(n5, subtree, false));
+  EXPECT_TRUE(isSubgraphMatch(n2, subtree, false));
+  EXPECT_TRUE(isSubgraphMatch(n5, subtree, false));
 
   reset();
   subtree = Tree(Criteria("5"), {Tree(any()), Tree(any())});
-  EXPECT_FALSE(isSubtreeMatch(n2, subtree, false));
-  EXPECT_TRUE(isSubtreeMatch(n5, subtree, false));
+  EXPECT_FALSE(isSubgraphMatch(n2, subtree, false));
+  EXPECT_TRUE(isSubgraphMatch(n5, subtree, false));
 
   reset();
   subtree = Tree(any(), {Tree(any()), Tree(Criteria("4"))});
-  EXPECT_TRUE(isSubtreeMatch(n2, subtree, false));
-  EXPECT_FALSE(isSubtreeMatch(n5, subtree, false));
+  EXPECT_TRUE(isSubgraphMatch(n2, subtree, false));
+  EXPECT_FALSE(isSubgraphMatch(n5, subtree, false));
 
   reset();
   // Accepts non terminal node
   subtree = Tree(any(), {NonTerminal(any()), NonTerminal(any())});
-  EXPECT_TRUE(isSubtreeMatch(n1, subtree, false));
-  EXPECT_TRUE(isSubtreeMatch(n2, subtree, false));
-  EXPECT_TRUE(isSubtreeMatch(n5, subtree, false));
-  EXPECT_FALSE(isSubtreeMatch(n3, subtree, false));
-  EXPECT_FALSE(isSubtreeMatch(n4, subtree, false));
-  EXPECT_FALSE(isSubtreeMatch(n6, subtree, false));
-  EXPECT_FALSE(isSubtreeMatch(n7, subtree, false));
+  EXPECT_TRUE(isSubgraphMatch(n1, subtree, false));
+  EXPECT_TRUE(isSubgraphMatch(n2, subtree, false));
+  EXPECT_TRUE(isSubgraphMatch(n5, subtree, false));
+  EXPECT_FALSE(isSubgraphMatch(n3, subtree, false));
+  EXPECT_FALSE(isSubgraphMatch(n4, subtree, false));
+  EXPECT_FALSE(isSubgraphMatch(n6, subtree, false));
+  EXPECT_FALSE(isSubgraphMatch(n7, subtree, false));
 }
 
 // Test subtree matching in which * (repeated) matching of children is allowed.
@@ -304,11 +304,11 @@ TEST(SubgraphMatcher, IsSubtreeMatchRepeated) {
 
   reset();
   auto subtree = Tree(any(), {Tree(Criteria("2"))});
-  EXPECT_FALSE(isSubtreeMatch(n1, subtree, false));
+  EXPECT_FALSE(isSubgraphMatch(n1, subtree, false));
 
   reset();
   subtree = Tree(any(), {Tree(Criteria("2"), {}, TestMatchNode::kStarCount)});
-  EXPECT_FALSE(isSubtreeMatch(n1, subtree, false));
+  EXPECT_FALSE(isSubgraphMatch(n1, subtree, false));
 
   reset();
   // clang-format off
@@ -318,7 +318,7 @@ TEST(SubgraphMatcher, IsSubtreeMatchRepeated) {
     Tree(Criteria("4"), {}, 2),
     Tree(Criteria("5"), {}, 3)
   });
-  EXPECT_TRUE(isSubtreeMatch(n1, subtree, false));
+  EXPECT_TRUE(isSubgraphMatch(n1, subtree, false));
 
   reset();
   subtree = Tree(any(), {
@@ -328,7 +328,7 @@ TEST(SubgraphMatcher, IsSubtreeMatchRepeated) {
     Tree(Criteria("5"), {}, 4)
   });
   // Failes because exepected 4 matches of n5 but found 3.
-  EXPECT_FALSE(isSubtreeMatch(n1, subtree, false));
+  EXPECT_FALSE(isSubgraphMatch(n1, subtree, false));
 
   reset();
   subtree = Tree(any(), {
@@ -337,7 +337,7 @@ TEST(SubgraphMatcher, IsSubtreeMatchRepeated) {
     Tree(Criteria("4"), {}, 2),
     Tree(Criteria("5"), {}, TestMatchNode::kStarCount)
   });
-  EXPECT_TRUE(isSubtreeMatch(n1, subtree, false));
+  EXPECT_TRUE(isSubgraphMatch(n1, subtree, false));
 
   reset();
   subtree = Tree(any(), {
@@ -346,7 +346,7 @@ TEST(SubgraphMatcher, IsSubtreeMatchRepeated) {
     Tree(Criteria("4"), {}, 2),
     Tree(Criteria("5"), {}, TestMatchNode::kStarCount)
   });
-  EXPECT_TRUE(isSubtreeMatch(n1, subtree, false));
+  EXPECT_TRUE(isSubgraphMatch(n1, subtree, false));
 
   reset();
   subtree = Tree(any(), {
@@ -354,7 +354,7 @@ TEST(SubgraphMatcher, IsSubtreeMatchRepeated) {
     Tree(Criteria("3"), {}, TestMatchNode::kStarCount),
   });
   // Fails because there are unmatched edges.
-  EXPECT_FALSE(isSubtreeMatch(n1, subtree, false));
+  EXPECT_FALSE(isSubgraphMatch(n1, subtree, false));
 
   reset();
   subtree = Tree(any(), {
@@ -365,7 +365,7 @@ TEST(SubgraphMatcher, IsSubtreeMatchRepeated) {
   });
   // Fails because the count is wrong; we have 2 edges to node N4 while
   // the pattern expects only 1.
-  EXPECT_FALSE(isSubtreeMatch(n1, subtree, false));
+  EXPECT_FALSE(isSubgraphMatch(n1, subtree, false));
   // clang-format on
 }
 
@@ -376,7 +376,7 @@ TEST(SubgraphMatcher, DagMatching) {
   auto n4match = Tree(Criteria("4"), {
     Tree(Criteria("5"))
   });
-  auto subtree = Tree(Criteria("1"), {
+  auto subgraph = Tree(Criteria("1"), {
     Tree(Criteria("2"), {
       n4match
     }),
@@ -409,7 +409,7 @@ TEST(SubgraphMatcher, DagMatching) {
              N5
     */
 
-    EXPECT_TRUE(isSubtreeMatch(n1, subtree, false));
+    EXPECT_TRUE(isSubgraphMatch(n1, subgraph, false));
   }
 
   {
@@ -438,7 +438,7 @@ TEST(SubgraphMatcher, DagMatching) {
     */
 
     // This should fail because n4A and n4B are not the same node.
-    EXPECT_FALSE(isSubtreeMatch(n1, subtree, false));
+    EXPECT_FALSE(isSubgraphMatch(n1, subgraph, false));
   }
 }
 
@@ -447,7 +447,7 @@ TEST(SubgraphMatcher, DagMatchingMultiEdges) {
 
   // clang-format off
   auto n2match = Tree(Criteria("2"));
-  auto subtree = Tree(Criteria("1"), {
+  auto subgraph = Tree(Criteria("1"), {
     n2match,
     n2match
   });
@@ -461,7 +461,7 @@ TEST(SubgraphMatcher, DagMatchingMultiEdges) {
     graph.createEdge(n1, n2);
     graph.createEdge(n1, n2);
 
-    EXPECT_TRUE(isSubtreeMatch(n1, subtree, false));
+    EXPECT_TRUE(isSubgraphMatch(n1, subgraph, false));
   }
 
   {
@@ -473,7 +473,7 @@ TEST(SubgraphMatcher, DagMatchingMultiEdges) {
     graph.createEdge(n1, n2A);
     graph.createEdge(n1, n2B);
 
-    EXPECT_FALSE(isSubtreeMatch(n1, subtree, false));
+    EXPECT_FALSE(isSubgraphMatch(n1, subgraph, false));
   }
 }
 
@@ -533,7 +533,7 @@ TEST(SubgraphMatcher, DagMatchingRandomLargeGraph) {
 
   int countMatch = 0;
   for (auto node : graph.getMutableNodes()) {
-    if (isSubtreeMatch(node, subtree, false)) {
+    if (isSubgraphMatch(node, subtree, false)) {
       countMatch++;
     }
   }
@@ -545,12 +545,12 @@ TEST(SubgraphMatcher, IsSubtreeMatchRealistic) {
   auto graph = DataFlowTestGraph();
   auto subtree = DataFlowTestGraphCriteria();
 
-  EXPECT_FALSE(isSubtreeMatch(graph.opF, subtree));
-  EXPECT_FALSE(isSubtreeMatch(graph.opC, subtree));
-  EXPECT_FALSE(isSubtreeMatch(graph.opB, subtree));
-  EXPECT_FALSE(isSubtreeMatch(graph.dataOut, subtree));
+  EXPECT_FALSE(isSubgraphMatch(graph.opF, subtree));
+  EXPECT_FALSE(isSubgraphMatch(graph.opC, subtree));
+  EXPECT_FALSE(isSubgraphMatch(graph.opB, subtree));
+  EXPECT_FALSE(isSubgraphMatch(graph.dataOut, subtree));
 
-  EXPECT_TRUE(isSubtreeMatch(graph.opG, subtree));
+  EXPECT_TRUE(isSubgraphMatch(graph.opG, subtree));
 }
 
 TEST(SubgraphMatcher, ReplaceSubtreeRealistic) {
@@ -558,7 +558,7 @@ TEST(SubgraphMatcher, ReplaceSubtreeRealistic) {
   auto graph = DataFlowTestGraph();
   auto subtree = DataFlowTestGraphCriteria();
 
-  TestMatcher::replaceSubtree(
+  TestMatcher::replaceSubgraph(
       graph.graph, subtree, [](TestGraph& g, TestGraph::NodeRef opG) {
         auto opFused = g.createNode("opFused");
 

@@ -44,23 +44,23 @@ TEST(NeuralNetGraph, ReplaceGraph) {
 
   auto mg = NNMatchGraph();
   // clang-format off
-  auto pattern = tree(mg,
+  auto pattern = subgraph(mg,
       matchNodeType<Relu>(), {
-          operatorTree(mg,
+          operatorSubgraph(mg,
               matchNodeType<Sum>(), {
-                tree(mg, matchNodeType<Tensor>(), {}, 2, true)
+                subgraph(mg, matchNodeType<Tensor>(), {}, 2, true)
               }),
       });
   // clang-format on
 
-  EXPECT_FALSE(NNSubgraphMatcher::isSubtreeMatch(sum, pattern).isMatch());
+  EXPECT_FALSE(NNSubgraphMatcher::isSubgraphMatch(sum, pattern).isMatch());
   EXPECT_FALSE(
-      NNSubgraphMatcher::isSubtreeMatch(reluOutput, pattern).isMatch());
-  EXPECT_FALSE(NNSubgraphMatcher::isSubtreeMatch(input1, pattern).isMatch());
+      NNSubgraphMatcher::isSubgraphMatch(reluOutput, pattern).isMatch());
+  EXPECT_FALSE(NNSubgraphMatcher::isSubgraphMatch(input1, pattern).isMatch());
 
-  EXPECT_TRUE(NNSubgraphMatcher::isSubtreeMatch(relu, pattern).isMatch());
+  EXPECT_TRUE(NNSubgraphMatcher::isSubgraphMatch(relu, pattern).isMatch());
 
-  NNSubgraphMatcher::replaceSubtree(
+  NNSubgraphMatcher::replaceSubgraph(
       graph, pattern, [](NNGraph& g, NNGraph::NodeRef relu) {
         auto sumOutput = getInputs(relu)[0];
         auto sum = getProducer(sumOutput);
