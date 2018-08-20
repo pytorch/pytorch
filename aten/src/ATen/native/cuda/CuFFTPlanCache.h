@@ -262,7 +262,7 @@ public:
       //
       // See NOTE [ cuFFT Embedded Strides ] in native/cuda/SpectralOps.cu.
 #ifdef __HIP_PLATFORM_HCC__
-      CUFFT_CHECK((hipfftPlanMany(plan(), signal_ndim, signal_sizes.data(),
+      CUFFT_CHECK(hipfftPlanMany(plan(), signal_ndim, signal_sizes.data(),
         /* inembed */ nullptr, /* base_istride */ 1, /* idist */ 1,
         /* onembed */ nullptr, /* base_ostride */ 1, /* odist */ 1,
 	exec_type, batch));
@@ -298,7 +298,7 @@ public:
       long long int base_ostride = 1;
 
 #ifdef __HIP_PLATFORM_HCC__
-      CUFFT_CHECK((hipfftPlanMany(plan(), signal_ndim, signal_sizes.data(),
+      CUFFT_CHECK(hipfftPlanMany(plan(), signal_ndim, signal_sizes.data(),
         inembed.data(), base_istride, idist,
         onembed.data(), base_ostride, odist,
         exec_type, batch));
