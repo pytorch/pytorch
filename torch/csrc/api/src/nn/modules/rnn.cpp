@@ -2,7 +2,6 @@
 
 #include <torch/nn/modules/dropout.h>
 #include <torch/tensor.h>
-#include <torch/tensor_list_view.h>
 #include <torch/utils.h>
 
 #include <ATen/core/Error.h>
@@ -91,8 +90,9 @@ void RNNImplBase<Derived>::reset() {
   }
 
   const auto stdv = 1.0 / std::sqrt(options.hidden_size_);
+  NoGradGuard no_grad;;
   for (auto& p : this->parameters()) {
-    p->data().uniform_(-stdv, stdv);
+    p->uniform_(-stdv, stdv);
   }
 }
 
@@ -169,7 +169,7 @@ RNNOutput RNNImplBase<Derived>::autograd_forward(Tensor input, Tensor state) {
     }
   }
 
-  auto state_output = torch::stack(TensorListView(new_state));
+  auto state_output = torch::stack(new_state);
   if (has_cell_state_) {
     state_output.transpose_(0, 1);
   }
@@ -186,7 +186,7 @@ void RNNImplBase<Derived>::flatten_parameters_for_cudnn() {
   std::unordered_set<void*> unique_data_ptrs;
   auto params = this->parameters();
   for (auto& p : params) {
-    unique_data_ptrs.insert(p->data().data_ptr());
+    unique_data_ptrs.insert(p->data_ptr());
   }
   // TODO PyTorch says: If any parameters alias, we fall back to the slower,
   // copying code path. This is a sufficient check, because overlapping
@@ -198,9 +198,9 @@ void RNNImplBase<Derived>::flatten_parameters_for_cudnn() {
   }
 
   {
-    NoGradGuard guard;
+    NoGradGuard no_grad;;
     flat_weights_ = torch::_cudnn_rnn_flatten_weight(
-        TensorListView(flat_weights()),
+        flat_weights(),
         /*weight_stride=*/options.with_bias_ ? 4 : 2,
         options.input_size_,
         static_cast<int64_t>(*cudnn_mode_),
@@ -210,7 +210,7 @@ void RNNImplBase<Derived>::flatten_parameters_for_cudnn() {
         /*bidirectional=*/false);
   }
   for (auto& p : params) {
-    data_ptrs_.emplace_back(p->data().data_ptr());
+    data_ptrs_.emplace_back(p->data_ptr());
   }
 }
 
@@ -236,7 +236,7 @@ RNNOutput RNNImplBase<Derived>::CUDNN_forward(Tensor input, Tensor state) {
   }
   std::vector<void*> weight_data_ptrs;
   for (auto& p : this->parameters()) {
-    weight_data_ptrs.emplace_back(p->data().data_ptr());
+    weight_data_ptrs.emplace_back(p->data_ptr());
   }
 
   AT_CHECK(
@@ -248,7 +248,7 @@ RNNOutput RNNImplBase<Derived>::CUDNN_forward(Tensor input, Tensor state) {
   // cudnn_output = std::tuple<output, hy, cy, reserve, new_weight_buf>
   auto cudnn_output = torch::_cudnn_rnn(
       /*input=*/input,
-      /*weight=*/TensorListView(flat_weights()),
+      /*weight=*/flat_weights(),
       /*weight_stride0=*/options.with_bias_ ? 4 : 2,
       /*weight_buf=*/flat_weights_,
       /*hx=*/hx,
@@ -266,7 +266,7 @@ RNNOutput RNNImplBase<Derived>::CUDNN_forward(Tensor input, Tensor state) {
   Tensor hidden_output = std::get<1>(cudnn_output);
   if (has_cell_state_) {
     auto cy = std::get<2>(cudnn_output);
-    hidden_output = torch::stack(TensorListView({hidden_output, cy}));
+    hidden_output = torch::stack({hidden_output, cy});
   }
 
   Tensor output = std::get<0>(cudnn_output);
@@ -371,7 +371,7 @@ Tensor LSTMImpl::cell_forward(Tensor input, Tensor state, int64_t layer) {
   auto cy = (forget_gate * cx) + (in_gate * cell_gate);
   auto hy = out_gate * cy.tanh();
 
-  return torch::stack(TensorListView{hy, cy}, 0);
+  return torch::stack({hy, cy}, 0);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ GRU ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -397,7 +397,7 @@ Tensor GRUImpl::cell_forward(Tensor input, Tensor state, int64_t layer) {
   auto new_gate = (gic[2] + reset_gate * ghc[2]).tanh_();
   auto hy = new_gate + input_gate * (hx - new_gate);
 
-  return torch::stack(TensorListView(hy));
+  return torch::stack(hy);
 }
 } // namespace nn
 } // namespace torch

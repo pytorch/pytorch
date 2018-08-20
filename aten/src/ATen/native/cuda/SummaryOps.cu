@@ -244,9 +244,12 @@ Tensor _bincount_cuda_template(
   if (minlength < 0) {
     AT_ERROR("minlength should be >= 0");
   }
-  if (self.dim() != 1 || self.numel() == 0 ||
+  if (self.dim() == 1 && self.numel() == 0) {
+    return native::zeros({minlength}, device(kCUDA).dtype(kLong));
+  }
+  if (self.dim() != 1 ||
       (!std::is_same<input_t, uint8_t>::value &&
-       *self.min().toBackend(kCPU).data<input_t>() < 0)) {
+       *self.min().cpu().data<input_t>() < 0)) {
     AT_ERROR("bincount only supports 1-d non-negative integral inputs.");
   }
 
@@ -265,7 +268,7 @@ Tensor _bincount_cuda_template(
     auto ret = cuda::CUDA_tensor_histogram<weights_t, input_t, true>(
         output, self, weights, nbins, 1);
   } else {
-    output = native::zeros({nbins}, device(kCUDA).dtype(kLong));
+    output = native::zeros({nbins}, device(DeviceType::CUDA).dtype(kLong));
     auto ret = cuda::CUDA_tensor_histogram<int64_t, input_t, false>(
         output, self, weights, nbins, 1);
   }

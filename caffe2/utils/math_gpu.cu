@@ -2371,11 +2371,13 @@ __global__ void Im2ColNCHWCUDAKernel(
         const int h = h_in + dh;
         const int w = w_in + dw;
 #if __CUDA_ARCH__ >= 350
-        *col_data_ptr = (h >= 0 && w >= 0 && h < input_h && w < input_w)
+        *col_data_ptr = utils::IsAGeZeroAndALtB(h, input_h) &&
+                utils::IsAGeZeroAndALtB(w, input_w)
             ? __ldg(img_data_ptr + dh * input_w + dw)
             : 0;
 #else
-        *col_data_ptr = (h >= 0 && w >= 0 && h < input_h && w < input_w)
+        *col_data_ptr = utils::IsAGeZeroAndALtB(h, input_h) &&
+                utils::IsAGeZeroAndALtB(w, input_w)
             ? img_data_ptr[dh * input_w + dw]
             : 0;
 #endif
@@ -2420,11 +2422,13 @@ __global__ void Im2ColNHWCCUDAKernel(
         const int h = h_in + dh;
         const int w = w_in + dw;
 #if __CUDA_ARCH__ >= 350
-        *col_data_ptr = (h >= 0 && w >= 0 && h < input_h && w < input_w)
+        *col_data_ptr = utils::IsAGeZeroAndALtB(h, input_h) &&
+                utils::IsAGeZeroAndALtB(w, input_w)
             ? __ldg(img_data + (h * input_w + w) * channels + channel_in)
             : 0;
 #else
-        *col_data_ptr = (h >= 0 && w >= 0 && h < input_h && w < input_w)
+        *col_data_ptr = utils::IsAGeZeroAndALtB(h, input_h) &&
+                utils::IsAGeZeroAndALtB(w, input_w)
             ? img_data[(h * input_w + w) * channels + channel_in]
             : 0;
 #endif
@@ -2580,7 +2584,7 @@ __global__ void Im2ColNdNCHWCUDAKernel(
       for (int d_i = 0; d_i < N; ++d_i) {
         const int d_img = d_iter[d_i] * stride.data[d_i] - pad.data[d_i] +
             d_offset[d_i] * dilation.data[d_i];
-        is_padding |= d_img < 0 || d_img >= img_shape.data[d_i + 1];
+        is_padding |= !utils::IsAGeZeroAndALtB(d_img, img_shape.data[d_i + 1]);
         img_index = img_index * img_shape.data[d_i + 1] + d_img;
       }
 #if __CUDA_ARCH__ >= 350
@@ -2714,7 +2718,8 @@ void Im2Col<float, CUDAContext, StorageOrder::NCHW>(
     const int stride_w,
     const float* img_data,
     float* col_data,
-    CUDAContext* context) {
+    CUDAContext* context,
+    const int /* groups */) {
   const int dkernel_h = dilation_h * (kernel_h - 1) + 1;
   const int dkernel_w = dilation_w * (kernel_w - 1) + 1;
   const int output_h = (height + pad_t + pad_b - dkernel_h) / stride_h + 1;
@@ -2759,7 +2764,10 @@ void Im2Col<float, CUDAContext, StorageOrder::NHWC>(
     const int stride_w,
     const float* img_data,
     float* col_data,
-    CUDAContext* context) {
+    CUDAContext* context,
+    const int groups) {
+  CAFFE_ENFORCE_EQ(groups, 1, "groups must be 1 for GPU NHWC Im2Col");
+
   const int dkernel_h = dilation_h * (kernel_h - 1) + 1;
   const int dkernel_w = dilation_w * (kernel_w - 1) + 1;
   const int output_h = (height + pad_t + pad_b - dkernel_h) / stride_h + 1;
@@ -2804,7 +2812,8 @@ void Col2Im<float, CUDAContext, StorageOrder::NCHW>(
     const int stride_w,
     const float* col_data,
     float* img_data,
-    CUDAContext* context) {
+    CUDAContext* context,
+    const int /* groups */) {
   const int dkernel_h = dilation_h * (kernel_h - 1) + 1;
   const int dkernel_w = dilation_w * (kernel_w - 1) + 1;
   const int output_h = (height + pad_t + pad_b - dkernel_h) / stride_h + 1;
@@ -2849,7 +2858,10 @@ void Col2Im<float, CUDAContext, StorageOrder::NHWC>(
     const int stride_w,
     const float* col_data,
     float* img_data,
-    CUDAContext* context) {
+    CUDAContext* context,
+    const int groups) {
+  CAFFE_ENFORCE_EQ(groups, 1, "groups must be 1 for GPU NHWC Col2Im");
+
   const int dkernel_h = dilation_h * (kernel_h - 1) + 1;
   const int dkernel_w = dilation_w * (kernel_w - 1) + 1;
   const int output_h = (height + pad_t + pad_b - dkernel_h) / stride_h + 1;

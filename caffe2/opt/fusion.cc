@@ -11,12 +11,17 @@ using namespace nom;
 // $$ X_{bn} = \frac{s(X - m)}{\sqrt{\sigma + \epsilon}} + b_{bn}$$
 // $$ X_{conv} = X * W + b_{conv} $$
 // thus, substituting $X$ with $X_{conv}$ in the BN equation we get:
-// $$X_{bn} = X * \frac{sW}{\sqrt{\sigma + \epsilon}} + \frac{s(b_{conv} - m)}{\sqrt{\sigma + \epsilon}} + b_{bn}$$
-// or
+// $$X_{bn} = X * \frac{sW}{\sqrt{\sigma + \epsilon}} + \frac{s(b_{conv} -
+// m)}{\sqrt{\sigma + \epsilon}} + b_{bn}$$ or
 // $$ W' = W\frac{s}{\sqrt{\sigma + \epsilon}}$$
 // $$ b' = (b_{conv} - m)\frac{s}{\sqrt{\sigma + \epsilon}} + b_{bn}$$
 bool fuseConvBNHelper(repr::NNModule* nn, caffe2::Workspace* ws) {
-  for (auto convNode : repr::nn::nodeIterator<repr::Conv>(nn->dataFlow)) {
+  size_t convOrder = 0;
+  for (auto node_pair : repr::nn::dataIterator<repr::Conv>(nn->dataFlow)) {
+    repr::NNGraph::NodeRef convNode;
+    repr::Conv* conv;
+    std::tie(conv, convNode) = node_pair;
+
     auto output = repr::nn::getOutputs(convNode).front();
     auto consumers = repr::nn::getConsumers(output);
     NOM_REQUIRE_OR_CONT(consumers.size() == 1);
@@ -31,9 +36,9 @@ bool fuseConvBNHelper(repr::NNModule* nn, caffe2::Workspace* ws) {
     auto bnOutput = bnOutputs.front();
 
     auto convInputs = repr::nn::getInputs(convNode);
-    CAFFE_ENFORCE(
-        convInputs.size() >= 3,
-        "Invalid convolution input size (TODO: optional bias)");
+    if (convInputs.size() < 2) {
+      continue;
+    }
 
     auto bnInputs = repr::nn::getInputs(bnNode);
     CAFFE_ENFORCE(
@@ -46,12 +51,45 @@ bool fuseConvBNHelper(repr::NNModule* nn, caffe2::Workspace* ws) {
   auto name##Data = name##Tensor->mutable_data<float>();
 
     EXPOSE_TENSOR_DATA(filter, 1, convInputs);
-    EXPOSE_TENSOR_DATA(biasConv, 2, convInputs);
 
     EXPOSE_TENSOR_DATA(scale, 1, bnInputs);
     EXPOSE_TENSOR_DATA(biasBN, 2, bnInputs);
     EXPOSE_TENSOR_DATA(mean, 3, bnInputs);
     EXPOSE_TENSOR_DATA(variance, 4, bnInputs);
+
+    if (convInputs.size() == 2) {
+      NOM_REQUIRE_OR_CONT(conv->getMutableAnnotation() != nullptr);
+      auto annotation =
+          dyn_cast<caffe2::Caffe2Annotation>(conv->getMutableAnnotation());
+      NOM_REQUIRE_OR_CONT(annotation != nullptr);
+      auto op = annotation->getOperatorDef();
+      auto convName = op.name();
+
+      while (true) {
+        auto convBiasName = convName + "_bias" + to_string(convOrder);
+        if (!ws->HasBlob(convBiasName)) {
+          auto convBiasTensor = make_unique<repr::Tensor>(convBiasName);
+          convBiasTensor->setType(repr::Tensor::DataType::Float);
+          auto convBiasNode = nn->dataFlow.createNode(
+              unique_dyn_cast<repr::NeuralNetData>(convBiasTensor));
+          nn->inputs.insert(convBiasNode);
+          nn->dataFlow.createEdge(convBiasNode, convNode);
+
+          auto* blob = ws->CreateBlob(convBiasName);
+          caffe2::TensorCPU* tensor = blob->GetMutableTensor(caffe2::CPU);
+          CHECK_NOTNULL(tensor);
+          // Get output channel
+          size_t c = filterTensor->dim32(0);
+          tensor->Resize(c);
+          tensor->mutable_data<float>();
+          break;
+        }
+        convOrder++;
+      }
+    }
+
+    convInputs = repr::nn::getInputs(convNode);
+    EXPOSE_TENSOR_DATA(biasConv, 2, convInputs);
 
 #undef EXPOSE_TENSOR_DATA
 

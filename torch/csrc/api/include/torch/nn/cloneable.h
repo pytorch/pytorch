@@ -2,6 +2,7 @@
 
 #include <torch/nn/module.h>
 #include <torch/tensor.h>
+#include <torch/utils.h>
 
 #include <ATen/OptionsGuard.h>
 #include <ATen/TensorOptions.h>
@@ -21,7 +22,7 @@ namespace nn {
 /// `clone()` method. We do not want to use this pattern in the base class,
 /// because then storing a module would always require templatizing it.
 template <typename Derived>
-class Cloneable : public Module {
+class Cloneable : public virtual Module {
  public:
   using Module::Module;
 
@@ -38,6 +39,8 @@ class Cloneable : public Module {
     OptionsGuard options_guard(
         options.device(device.value_or(options.device())));
 
+    NoGradGuard no_grad;
+
     const auto& self = static_cast<const Derived&>(*this);
     auto copy = std::make_shared<Derived>(self);
     copy->parameters_.clear();
@@ -52,11 +55,12 @@ class Cloneable : public Module {
         "and not the constructor?");
     for (const auto& parameter : parameters_) {
       if (device) {
-        copy->parameters_[parameter.key].data().copy_(
-            parameter->data(), /*non_blocking=*/true);
+        copy->parameters_[parameter.key].copy_(
+            *parameter, /*non_blocking=*/true);
       } else {
         at::detail::set_data(
-            copy->parameters_[parameter.key], parameter->data().clone());
+            copy->parameters_[parameter.key],
+            autograd::Variable(*parameter).data().clone());
       }
     }
     AT_CHECK(
@@ -67,11 +71,11 @@ class Cloneable : public Module {
         "and not the constructor?");
     for (const auto& buffer : buffers_) {
       if (device) {
-        copy->buffers_[buffer.key].data().copy_(
-            buffer->data(), /*non_blocking=*/true);
+        copy->buffers_[buffer.key].copy_(*buffer, /*non_blocking=*/true);
       } else {
         at::detail::set_data(
-            copy->buffers_[buffer.key], buffer->data().clone());
+            copy->buffers_[buffer.key],
+            autograd::Variable(*buffer).data().clone());
       }
     }
     AT_CHECK(

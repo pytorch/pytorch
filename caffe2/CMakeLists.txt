@@ -59,8 +59,7 @@ else()
   list(APPEND Caffe2_CPU_SRCS ${ATen_CORE_SRCS})
   list(APPEND Caffe2_CPU_INCLUDE ${ATen_CORE_INCLUDE})
   list(APPEND Caffe2_CPU_TEST_SRCS ${ATen_CORE_TEST_SRCS})
-  # TODO: We should probably install the headers, but I don't know
-  # how to do that.
+  # See cmake/Codegen.cmake for header installation
 endif()
 
 # ---[ Torch build
@@ -168,8 +167,8 @@ endif()
 
 # ---[ List of libraries to link with
 if (BUILD_CAFFE2)
-  add_library(caffe2_protos STATIC $<TARGET_OBJECTS:Caffe_PROTO> $<TARGET_OBJECTS:Caffe2_PROTO>)
-  add_dependencies(caffe2_protos Caffe_PROTO Caffe2_PROTO)
+  add_library(caffe2_protos STATIC $<TARGET_OBJECTS:Caffe2_PROTO>)
+  add_dependencies(caffe2_protos Caffe2_PROTO)
 else()
   # Do not include caffe2 or caffe protos, but rather have it only be
   # a library to attach local protobuf.
@@ -229,6 +228,13 @@ target_compile_options(caffe2 INTERFACE "-std=c++11")
 else()
 target_compile_options(caffe2 INTERFACE "$<$<COMPILE_LANGUAGE:CXX>:-std=c++11>")
 endif()
+
+# Note(jiayq): This is not complete yet, but in the end we will need to deal with
+# explicit hidden visibility.
+# This line is here so that when testing build, we can enable it to properly test
+# annotation of public symbols. When finally doing proper build with all symbols
+# annotated, we will enable this line and have it wrapped with gcc/clang checks.
+# target_compile_options(caffe2 PRIVATE "-fvisibility=hidden")
 
 target_compile_options(caffe2 PRIVATE "-DCAFFE2_BUILD_MAIN_LIB")
 if (MSVC AND NOT BUILD_SHARED_LIBS)
@@ -308,19 +314,9 @@ list(APPEND Caffe2_MAIN_LIBS caffe2_library)
 
 # ---[ CUDA library.
 if(USE_CUDA)
-  # A hack to deal with cuda library dependencies and modern CMake: the
-  # CUDA_ADD_LIBRARY includes a target_link_libraries, and as a result,
-  # one cannot use PUBLIC/PRIVATE/INTERFACE for the target anymore. This
-  # hack adds the PRIVATE keywords to CUDA_LIBRARIES so we can deal with
-  # it. We will then manually add the cudart library as interface libs.
-  set(__tmp ${CUDA_LIBRARIES})
-  set(CUDA_LIBRARIES PRIVATE ${CUDA_LIBRARIES})
-  if(CAFFE2_STATIC_LINK_CUDA)
-    torch_cuda_based_add_library(caffe2_gpu STATIC ${Caffe2_GPU_SRCS})
-  else()
-    torch_cuda_based_add_library(caffe2_gpu ${Caffe2_GPU_SRCS})
-  endif()
-  set(CUDA_LIBRARIES ${__tmp})
+  set(CUDA_LINK_LIBRARIES_KEYWORD PRIVATE)
+  torch_cuda_based_add_library(caffe2_gpu ${Caffe2_GPU_SRCS})
+  set(CUDA_LINK_LIBRARIES_KEYWORD)
   target_link_libraries(caffe2_gpu INTERFACE caffe2::cudart)
 
   target_include_directories(
@@ -336,6 +332,14 @@ if(USE_CUDA)
   target_link_libraries(
       caffe2_gpu PUBLIC caffe2 ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
 
+  # See Note [Supporting both static and dynamic libraries on Window]
+  # TODO: I'm actually not sure why this is necessary, because caffe2_gpu
+  # should depend on caffe2 (which itself would give us the necessary
+  # macro definition).
+  if (MSVC AND NOT BUILD_SHARED_LIBS)
+      target_compile_options(caffe2_gpu PUBLIC "-DAT_CORE_STATIC_WINDOWS=1")
+  endif()
+
   # Set standard properties on the target
   aten_set_target_props(caffe2_gpu)
 
@@ -348,7 +352,7 @@ endif()
 if(USE_ROCM)
   # Call again since Caffe2_HIP_INCLUDES is extended with ATen include dirs.
   if(BUILD_ATEN)
-    # Get Compile Definitions from the directory (FindHIP.CMake bug)
+    # Get Compile Definitions from the directory (FindHIP.cmake bug)
     get_directory_property(MY_DEFINITIONS COMPILE_DEFINITIONS)
     if(MY_DEFINITIONS)
       foreach(_item ${MY_DEFINITIONS})
@@ -364,7 +368,7 @@ if(USE_ROCM)
   ENDIF()
 
   # FindHIP.CMake checks if the SHARED flag is set and adds extra logic accordingly.
-  hip_add_library(caffe2_hip SHARED ${Caffe2_HIP_SRCS})
+  hip_add_library(caffe2_hip ${Caffe2_HIP_SRCS})
 
   # Since PyTorch files contain HIP headers, these flags are required for the necessary definitions to be added.
   set_target_properties(caffe2_hip PROPERTIES COMPILE_FLAGS ${HIP_HIPCC_FLAGS})

@@ -15,7 +15,7 @@ class BatchGatherOp final : public Operator<Context> {
 
   bool RunOnDevice() override {
     return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
-        this, OperatorBase::Input<Tensor>(INDICES, CPU));
+        this, this->template Input<Tensor>(INDICES, CPU));
   }
 
   template <typename TInd>
@@ -71,7 +71,7 @@ class BatchGatherGradientOp final : public Operator<Context> {
 
   bool RunOnDevice() override {
     return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
-        this, OperatorBase::Input<Tensor>(INDICES, CPU));
+        this, this->template Input<Tensor>(INDICES, CPU));
   }
 
   template <typename TInd>

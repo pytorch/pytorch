@@ -62,7 +62,7 @@ class GPUFallbackOp final : public Operator<CUDAContext> {
   bool RunOnDevice() override {
     bool need_sync = false;
     for (int i = 0; i < InputSize(); ++i) {
-      if (OperatorBase::InputIsType<Tensor>(i, CUDA)) {
+      if (this->template InputIsType<Tensor>(i, CUDA)) {
         local_input_blobs_[i]->GetMutableTensor(CPU)->CopyFrom(
             Input(i), &context_);
         need_sync = true;

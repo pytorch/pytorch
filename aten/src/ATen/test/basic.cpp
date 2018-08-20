@@ -57,7 +57,7 @@ static void test(Type & type) {
     REQUIRE(Scalar(z_sorted[0][0]).toFloat() < Scalar(z_sorted[0][1]).toFloat());
   }
 
-  if(type.backend() != kCUDA)
+  if(type.backend() != Backend::CUDA)
   SECTION( "randperm" ) {
     Tensor b = randperm(15, type);
     Tensor rv, ri;
@@ -226,7 +226,7 @@ static void test(Type & type) {
   }
   SECTION("indexing by Scalar") {
     Tensor tensor = arange(0, 10, kInt);
-    Tensor one = ones({1}, kInt);
+    Tensor one = ones({}, kInt);
     for (int64_t i = 0; i < tensor.numel(); ++i) {
       REQUIRE(tensor[i].equal(one * i));
     }
@@ -277,13 +277,13 @@ static void test(Type & type) {
 }
 
 TEST_CASE( "basic tests CPU", "[cpu]" ) {
-  manual_seed(123, at::Backend::CPU);
+  manual_seed(123, at::kCPU);
 
   test(CPU(kFloat));
 }
 
 TEST_CASE( "basic tests GPU", "[cuda]" ) {
-  manual_seed(123, at::Backend::CUDA);
+  manual_seed(123, at::kCUDA);
 
   if(at::hasCUDA()) {
     test(CUDA(kFloat));

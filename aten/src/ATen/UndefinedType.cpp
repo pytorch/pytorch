@@ -4,7 +4,7 @@
 namespace at {
 
 UndefinedType::UndefinedType(Context* context)
-    : Type(context, /*is_variable=*/false, /*is_undefined=*/true) {}
+    : Type(context, UndefinedTensorId(), /*is_variable=*/false, /*is_undefined=*/true) {}
 ScalarType UndefinedType::scalarType() const {
   return ScalarType::Undefined;
 }
@@ -15,10 +15,10 @@ bool UndefinedType::is_cuda() const { return false; }
 bool UndefinedType::is_sparse() const { return false; }
 bool UndefinedType::is_distributed() const { return false; }
 
-std::unique_ptr<Storage> UndefinedType::storage() const {
+std::unique_ptr<Storage> UndefinedType::storage(bool resizable) const {
   AT_ERROR("storage not defined for UndefinedType");
 }
-std::unique_ptr<Storage> UndefinedType::storage(size_t size) const {
+std::unique_ptr<Storage> UndefinedType::storage(size_t size, bool resizable) const {
   AT_ERROR("storage(size_t) not defined for UndefinedType");
 }
 std::unique_ptr<Storage> UndefinedType::storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const {

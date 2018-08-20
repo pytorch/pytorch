@@ -1,9 +1,9 @@
 #pragma once
 
 #include <torch/csrc/jit/function_schema.h>
-#include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/stack.h>
+#include <torch/csrc/jit/tracer.h>
 #include <torch/csrc/utils/variadic.h>
 
 #include <caffe2/utils/Metaprogramming.h>
@@ -56,25 +56,54 @@ FunctionSchema createFunctionSchemaFromTraits(const std::string& name) {
   return {name, arguments, returns};
 }
 
+template <size_t... Is, typename... Types>
+Node* getTracedNode(
+    const FunctionSchema& schema,
+    const std::tuple<Types...>& tuple) {
+  auto symbol = Symbol::fromQualString(schema.name);
+  const auto& graph = tracer::getTracingState()->graph;
+  Node* node = graph->create(std::move(symbol), /*outputs=*/0);
+  tracer::recordSourceLocation(node);
+
+  // Hack to call addInputs for the parameter pack in a sequenced fashion.
+  // https://stackoverflow.com/questions/12030538/calling-a-function-for-each-variadic-template-argument-and-an-array
+  int _[] = {(tracer::addInputs(node, schema.arguments[Is].name.c_str(), std::get<Is>(tuple)), 0)...};
+  (void)_;
+
+  graph->appendNode(node);
+
+  return node;
+}
+
 /// Does two things for an operator implementation and a tuple of arguments:
 /// 1. Pops all necessary arguments off the stack into the tuple's elements,
 /// 2. Unpacks the tuple and calls the operator implementation.
-/// The result of the implementation call is returned.
-template <
-    typename ReturnType,
-    typename Implementation,
-    typename... Types,
-    size_t... Is>
-ReturnType callOperatorWithTuple(
+/// If tracing is currently enabled, this function will also take care of
+/// tracing the operator call.
+template <typename Implementation, typename... Types, size_t... Is>
+void callOperatorWithTuple(
+    const FunctionSchema& schema,
     Implementation&& implementation,
     Stack& stack,
     std::tuple<Types...>& tuple,
     Indices<Is...>) {
+  Node* node = nullptr;
+  if (jit::tracer::isTracing()) {
+    node = getTracedNode<Is...>(schema, tuple);
+  }
+
   pop(stack, std::get<Is>(tuple)...);
-  return std::forward<Implementation>(implementation)(std::get<Is>(tuple)...);
+  auto result =
+      std::forward<Implementation>(implementation)(std::get<Is>(tuple)...);
+
+  if (jit::tracer::isTracing()) {
+    jit::tracer::postRecordTrace(node, result);
+  }
+
+  push(stack, IValue(std::move(result)));
 }
 
-void checkArgumentVector(
+inline void checkArgumentVector(
     const char* what,
     const std::vector<Argument>& inferred,
     const std::vector<Argument>& provided,
@@ -171,20 +200,54 @@ Operator createOperator(
       c10::guts::typelist::map_t<decay_t, typename Traits::parameter_types>;
   using ArgumentTuple =
       typename c10::guts::typelist::to_tuple<ArgumentTypes>::type;
-  using ReturnType = decay_t<typename Traits::return_type>;
 
   auto schema = torch::jit::detail::inferAndCheckSchema<Traits>(schemaOrName);
 
-  return Operator(schema, [implementation](Stack& stack) {
+  return Operator(schema, [implementation, schema](Stack& stack) {
     ArgumentTuple tuple;
-    auto result = torch::jit::detail::callOperatorWithTuple<ReturnType>(
+    torch::jit::detail::callOperatorWithTuple(
+        schema,
         std::move(implementation),
         stack,
         tuple,
         typename MakeIndices<std::tuple_size<ArgumentTuple>::value>::indices{});
-    pack(stack, std::move(result));
     return 0;
   });
 }
+
+/// Registration class for new operators. Effectively calls
+/// `torch::jit::registerOperator` for every supplied operator, but allows doing
+/// so in the global scope when a `RegisterOperators` object is assigned to a
+/// static variable. Also handles registration of user-defined, "custom"
+/// operators.
+struct TORCH_API RegisterOperators {
+  RegisterOperators() = default;
+
+  /// Registers a vector of already created `Operator`s.
+  RegisterOperators(std::vector<Operator> operators) {
+    for (Operator& o : operators) {
+      registerOperator(std::move(o));
+    }
+  }
+
+  /// Calls `op(...)` with the given operator name and implementation.
+  template <typename Implementation>
+  RegisterOperators(const std::string& name, Implementation&& implementation) {
+    op(name, std::forward<Implementation>(implementation));
+  }
+
+  /// Creates a new operator from a name and implementation function (function
+  /// pointer or function object/lambda) using `torch::jit::createOperator`, and
+  /// then registers the operator.
+  template <typename Implementation>
+  RegisterOperators& op(
+      const std::string& name,
+      Implementation&& implementation) {
+    registerOperator(
+        createOperator(name, std::forward<Implementation>(implementation)));
+    return *this;
+  }
+};
+
 } // namespace jit
 } // namespace torch

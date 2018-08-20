@@ -20,15 +20,14 @@
 #include "caffe2/core/types.h"
 #include "caffe2/core/workspace.h"
 #include "caffe2/proto/caffe2.pb.h"
-#include "caffe2/utils/filler.h"
 #include "caffe2/utils/proto_utils.h"
 
 namespace caffe2 {
 
-class OperatorBase;
+class CAFFE2_API OperatorBase;
 typedef ObserverBase<OperatorBase> OperatorObserver;
 
-class OperatorBase : public Observable<OperatorBase> {
+class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
  public:
   explicit OperatorBase(const OperatorDef& operator_def, Workspace* ws);
   virtual ~OperatorBase() noexcept {}
@@ -420,8 +419,14 @@ class OperatorBase : public Observable<OperatorBase> {
 
 // OP_SINGLE_ARG provides a shorter initialization choice for initialization of
 // member variables for the class constructors.
+// This is a workaround for CUDA9.2 and GCC7
+#if defined(CUDART_VERSION) && CUDART_VERSION >= 9020 && __GNUC__ >= 7
+#define OP_SINGLE_ARG(type, name, variable, default)                           \
+  variable(this->template GetSingleArgument<type>(name, (default)))
+#else
 #define OP_SINGLE_ARG(type, name, variable, default)                           \
   variable(OperatorBase::GetSingleArgument<type>(name, (default)))
+#endif
 
 // INPUT_TAGS and OUTPUT_TAGS are optional features to name the indices of the
 // operator's inputs and outputs, in order to avoid confusion. For example, for
@@ -442,7 +447,7 @@ class OperatorBase : public Observable<OperatorBase> {
 // run on different devices. You should then implement the RunOnDevice()
 // function.
 template <class Context>
-class Operator : public OperatorBase {
+class CAFFE2_API Operator : public OperatorBase {
  public:
   explicit Operator(const OperatorDef& operator_def, Workspace* ws)
       : OperatorBase(operator_def, ws), context_(operator_def.device_option()) {
@@ -599,76 +604,6 @@ class Operator : public OperatorBase {
 
   void SyncDevice() final {}
 
-  virtual std::vector<TensorFiller<Context>> InputFillers(
-      const std::vector<std::vector<TIndex>>& shapes) {
-    CAFFE_ENFORCE(shapes.size() == Inputs().size());
-    std::vector<TensorFiller<Context>> fillers;
-    for (const auto& shape : shapes) {
-      fillers.emplace_back(shape, &context_);
-    }
-
-    return fillers;
-  }
-
-#define DISABLE_INPUT_FILLERS(Context)                                 \
-  std::vector<TensorFiller<Context>> InputFillers(                     \
-      const std::vector<std::vector<TIndex>>& /* unused */) override { \
-    throw UnsupportedOperatorFeature(                                  \
-        OperatorBase::type() + " does not have input fillers");        \
-  }
-
-  void SparseLengthsFillerHelper(
-      const std::vector<std::vector<TIndex>>& shapes,
-      size_t value_index,
-      size_t length_index,
-      std::vector<TensorFiller<Context>>* fillers) {
-    CAFFE_ENFORCE_EQ(shapes[length_index].size(), 1);
-    (*fillers)[length_index].SparseLengths(shapes[value_index].front());
-  }
-
-  void SparseSegmentsFillerHelper(
-      const std::vector<std::vector<TIndex>>& shapes,
-      size_t value_index,
-      size_t segment_index,
-      std::vector<TensorFiller<Context>>* fillers) {
-    CAFFE_ENFORCE_EQ(shapes[segment_index].size(), 1);
-    // TODO (mnaumov): distribution of value
-    (*fillers)[value_index].Min(0).Max(shapes[value_index].front() * 2);
-    (*fillers)[segment_index].SparseSegments(shapes[value_index].front() - 1);
-  }
-
-// The helper is build sparse input with values and lengths; e.g.:
-// values  = [1, 2, 3, 2, 4, 6, 7, 3, 6]
-//            \_____/  \________/  \__/
-// lengths =    [3,        4,       2]
-#define USE_VALUE_LENGTH_INPUT_FILLERS(Context, value_index, length_index) \
-  std::vector<TensorFiller<Context>> InputFillers(                         \
-      const std::vector<std::vector<TIndex>>& shapes) override {           \
-    CAFFE_ENFORCE_EQ(shapes.size(), Operator<Context>::Inputs().size());   \
-    auto fillers = Operator<Context>::InputFillers(shapes);                \
-    Operator<Context>::SparseLengthsFillerHelper(                          \
-        shapes, value_index, length_index, &fillers);                      \
-    return fillers;                                                        \
-  }
-
-  // The helper is build sparse input with values, keys, and lengths; e.g.:
-  // values  = [1, 2, 3, 2, 4, 6, 7, 3, 6]
-  // keys    = [0, 1, 4, 0, 1, 2, 5, 1, 2]
-  //            \_____/  \________/  \__/
-  // lengths =    [3,        4,       2]
-#define USE_VALUE_KEY_LENGTH_INPUT_FILLERS(                              \
-    Context, value_index, key_index, length_index)                       \
-  std::vector<TensorFiller<Context>> InputFillers(                       \
-      const std::vector<std::vector<TIndex>>& shapes) override {         \
-    CAFFE_ENFORCE_EQ(shapes.size(), Operator<Context>::Inputs().size()); \
-    auto fillers = Operator<Context>::InputFillers(shapes);              \
-    Operator<Context>::SparseLengthsFillerHelper(                        \
-        shapes, key_index, length_index, &fillers);                      \
-    Operator<Context>::SparseSegmentsFillerHelper(                       \
-        shapes, value_index, key_index, &fillers);                       \
-    return fillers;                                                      \
-  }
-
  protected:
   void RecordEvent(const char* err_msg = nullptr) final {
     if (event_) {
@@ -686,6 +621,8 @@ class Operator : public OperatorBase {
   /* using override */ using OperatorBase::GetRepeatedArgument;     \
   /* using override */ using OperatorBase::InputIsType;             \
   /* using override */ using OperatorBase::InputSize;               \
+  /* using override */ using OperatorBase::Output;                  \
+  /* using override */ using OperatorBase::Input;                   \
   /* using override */ using OperatorBase::OutputSize
 
 #define USE_OPERATOR_FUNCTIONS(context)                    \
@@ -860,9 +797,9 @@ typedef Registry<
     std::unique_ptr<OperatorBase>,
     const OperatorDef&,
     Workspace*>* (*RegistryFunction)();
-std::map<int32_t, OperatorRegistry*>* gDeviceTypeRegistry();
+CAFFE2_API std::map<int32_t, OperatorRegistry*>* gDeviceTypeRegistry();
 
-struct DeviceTypeRegisterer {
+struct CAFFE2_API DeviceTypeRegisterer {
   explicit DeviceTypeRegisterer(int32_t type, RegistryFunction func) {
     if (gDeviceTypeRegistry()->count(type)) {
       std::cerr << "Device type " << type
@@ -986,7 +923,7 @@ struct StaticLinkingProtector {
 // specific engines that only implement a subset of the features required by
 // the original operator schema.
 // TODO(jiayq): make more feature-complete exception message.
-class UnsupportedOperatorFeature : public std::exception {
+class CAFFE2_API UnsupportedOperatorFeature : public std::exception {
  public:
   UnsupportedOperatorFeature(const string& msg) : msg_(msg) {}
   const char* what() const noexcept override {
@@ -1007,12 +944,12 @@ class UnsupportedOperatorFeature : public std::exception {
 
 // Creates an operator with the given operator definition.
 // Throws on error and never returns nullptr
-unique_ptr<OperatorBase> CreateOperator(
+CAFFE2_API unique_ptr<OperatorBase> CreateOperator(
     const OperatorDef& operator_def,
     Workspace* ws,
     int net_position = OperatorBase::kNoNetPositionSet);
 
-const std::string OpRegistryKey(
+CAFFE2_API const std::string OpRegistryKey(
     const std::string& op_type,
     const std::string& engine = "");
 
@@ -1024,40 +961,40 @@ using PerOpEnginePrefType =
     CaffeMap<int, CaffeMap<std::string, EnginePrefType>>;
 // {device_type -> EnginePrefType}
 using GlobalEnginePrefType = CaffeMap<int, EnginePrefType>;
-void SetPerOpEnginePref(const PerOpEnginePrefType& per_op_engine_pref);
-void SetGlobalEnginePref(const GlobalEnginePrefType& global_engine_pref);
-void SetEnginePref(
+CAFFE2_API void SetPerOpEnginePref(const PerOpEnginePrefType& per_op_engine_pref);
+CAFFE2_API void SetGlobalEnginePref(const GlobalEnginePrefType& global_engine_pref);
+CAFFE2_API void SetEnginePref(
     const PerOpEnginePrefType& per_op_engine_pref,
     const GlobalEnginePrefType& global_engine_pref);
-void SetOpEnginePref(
+CAFFE2_API void SetOpEnginePref(
     const std::string& op_type,
     const CaffeMap<int, EnginePrefType>& op_pref);
 
-TensorShape GetTensorShapeOfBlob(const Blob* b);
+CAFFE2_API TensorShape GetTensorShapeOfBlob(const Blob* b);
 
-TensorShapes InferBlobShapesAndTypes(
+CAFFE2_API TensorShapes InferBlobShapesAndTypes(
     CaffeMap<string, TensorShape>& blob_desc,
     const vector<NetDef*>& nets);
 
-TensorShapes InferBlobShapesAndTypesFromWorkspace(
+CAFFE2_API TensorShapes InferBlobShapesAndTypesFromWorkspace(
     Workspace* ws,
     const vector<NetDef*>& nets);
 
-TensorShapes InferBlobShapesAndTypesFromMap(
+CAFFE2_API TensorShapes InferBlobShapesAndTypesFromMap(
     const CaffeMap<std::string, std::vector<TIndex>>& blob_dimensions,
     const vector<NetDef*>& nets);
 
-TensorShapes InferBlobShapesAndTypesFromMap(
+CAFFE2_API TensorShapes InferBlobShapesAndTypesFromMap(
     const CaffeMap<std::string, std::vector<TIndex>>& blob_dimensions,
     const CaffeMap<std::string, TensorProto_DataType>& blob_types,
     const vector<NetDef*>& nets);
 
-std::map<string, std::pair<DeviceOption, DeviceOption>> ValidateTensorDevices(
+CAFFE2_API std::map<string, std::pair<DeviceOption, DeviceOption>> ValidateTensorDevices(
     OperatorBase& op,
     const OperatorDef& op_def);
 
 // Get a set of registered operator names
-std::set<std::string> GetRegisteredOperators();
+CAFFE2_API std::set<std::string> GetRegisteredOperators();
 
 }  // namespace caffe2
 

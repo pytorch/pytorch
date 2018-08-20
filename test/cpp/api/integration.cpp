@@ -8,7 +8,6 @@
 #include <torch/optim/optimizer.h>
 #include <torch/optim/sgd.h>
 #include <torch/tensor.h>
-#include <torch/tensor_list_view.h>
 #include <torch/utils.h>
 
 #include <test/cpp/api/util.h>
@@ -83,10 +82,8 @@ class CartPole {
     x_dot = x_dot + tau * xacc;
     theta = theta + tau * theta_dot;
     theta_dot = theta_dot + tau * thetaacc;
-    state.data()[0] = x;
-    state.data()[1] = x_dot;
-    state.data()[2] = theta;
-    state.data()[3] = theta_dot;
+    state = torch::tensor({x, x_dot, theta, theta_dot});
+
     done = x < -x_threshold || x > x_threshold ||
         theta < -theta_threshold_radians || theta > theta_threshold_radians ||
         step_ > 200;
@@ -166,7 +163,7 @@ bool test_mnist(
       }
     }
 
-    return data.toBackend(useGPU ? torch::kCUDA : torch::kCPU);
+    return data.toBackend(useGPU ? torch::Backend::CUDA : torch::Backend::CPU);
   };
 
   auto readLabels = [&](std::string fn) {
@@ -180,7 +177,7 @@ bool test_mnist(
     for (int i = 0; i < label_count; ++i) {
       a_data[i] = static_cast<int64_t>(rd.read_byte());
     }
-    return data.toBackend(useGPU ? torch::kCUDA : torch::kCPU);
+    return data.toBackend(useGPU ? torch::Backend::CUDA : torch::Backend::CPU);
   };
 
   auto trdata = readData("test/cpp/api/mnist/train-images-idx3-ubyte");
@@ -228,9 +225,9 @@ bool test_mnist(
   torch::NoGradGuard guard;
   auto result = std::get<1>(forward_op(tedata).max(1));
   torch::Tensor correct = (result == telabel).toType(torch::kFloat32);
-  std::cout << "Num correct: " << correct.data().sum().toCFloat() << " out of "
+  std::cout << "Num correct: " << correct.sum().toCFloat() << " out of "
             << telabel.size(0) << std::endl;
-  return correct.data().sum().toCFloat() > telabel.size(0) * 0.8;
+  return correct.sum().toCFloat() > telabel.size(0) * 0.8;
 }
 
 TEST_CASE("integration/cartpole") {
@@ -259,7 +256,7 @@ TEST_CASE("integration/cartpole") {
     auto out = forward(state);
     auto probs = torch::Tensor(std::get<0>(out));
     auto value = torch::Tensor(std::get<1>(out));
-    auto action = probs.data().multinomial(1)[0].toCInt();
+    auto action = probs.multinomial(1)[0].toCInt();
     // Compute the log prob of a multinomial distribution.
     // This should probably be actually implemented in autogradpp...
     auto p = probs / probs.sum(-1, true);
@@ -269,7 +266,7 @@ TEST_CASE("integration/cartpole") {
     return action;
   };
 
-  auto finishEpisode = [&]() {
+  auto finishEpisode = [&] {
     auto R = 0.;
     for (int i = rewards.size() - 1; i >= 0; i--) {
       R = rewards[i] + 0.99 * R;
@@ -285,11 +282,11 @@ TEST_CASE("integration/cartpole") {
       auto r = rewards[i] - saved_values[i].toCFloat();
       policy_loss.push_back(-r * saved_log_probs[i]);
       value_loss.push_back(torch::smooth_l1_loss(
-          saved_values[i], torch::ones({1}) * rewards[i]));
+          saved_values[i], torch::ones(1) * rewards[i]));
     }
 
-    auto loss = torch::stack(torch::TensorListView(policy_loss)).sum() +
-        torch::stack(torch::TensorListView(value_loss)).sum();
+    auto loss =
+        torch::stack(policy_loss).sum() + torch::stack(value_loss).sum();
 
     optimizer.zero_grad();
     loss.backward();
@@ -302,7 +299,7 @@ TEST_CASE("integration/cartpole") {
 
   auto env = CartPole();
   double running_reward = 10.0;
-  for (auto episode = 0;; episode++) {
+  for (size_t episode = 0;; episode++) {
     env.reset();
     auto state = env.getState();
     int t = 0;
@@ -326,8 +323,9 @@ TEST_CASE("integration/cartpole") {
               episode, t, running_reward);
     }
     */
-    if (running_reward > 150)
+    if (running_reward > 150) {
       break;
+    }
     REQUIRE(episode < 3000);
   }
 }

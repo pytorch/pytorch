@@ -78,7 +78,7 @@ class DoOp final : public Operator<Context> {
 
   bool RunOnDevice() override {
     auto* ws_stack =
-        OperatorBase::Output<detail::WorkspaceStack>(OutputSize() - 1);
+        this->template Output<detail::WorkspaceStack>(OutputSize() - 1);
     std::shared_ptr<Workspace> net_workspace;
     if (is_gradient_op_) {
       net_workspace =
