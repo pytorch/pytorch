@@ -254,9 +254,22 @@ struct Environment {
         throw ErrorReport(loc) << "Cannot re-assign '" << name << "' because it has type " << value->kind() <<
 	" and " << name << " is not a first-class value.  Only reassignments to first-class values are allowed";
       }
-      if(!as_simple_value->type()->isSubtypeOf(unshapedType(simple_parent->type()))) {
-        throw ErrorReport(loc) << "variable '" << name << "' previously has type " << simple_parent->type()->str()
-        << " but is now being assigned to a value of type " << as_simple_value->type()->str();
+      if (!as_simple_value->type()->isSubtypeOf(
+              unshapedType(simple_parent->type()))) {
+        std::stringstream errMsg;
+        errMsg << "variable '" << name << "' previously has type "
+               << simple_parent->type()->str()
+               << " but is now being assigned to a value of type "
+               << as_simple_value->type()->str();
+        // Special-cased error msg if we're trying to assign to a tensor list.
+        if (simple_parent->type()->kind() == TypeKind::ListType &&
+            as_simple_value->type()->kind() == TypeKind::ListType) {
+          errMsg << "\n. (Note: empty lists are constructed as Tensor[]; "
+                 << "if you want an empty list of a different type, "
+                 << "use `_construct_empty_foo_list`, "
+                 << "where `foo` is `int` or `float`)";
+        }
+        throw ErrorReport(loc) << errMsg;
       }
     }
     if (as_simple_value)
