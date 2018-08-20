@@ -68,8 +68,8 @@ public:
   // indices and values.
   //
   // NOTE: This function supports the following cases:
-  // 1. When we only change the size of some dense dimensions, while keeping the number of
-  // dense dimensions unchanged.
+  // 1. When we keep the number of dense dimensions unchanged, and NOT shrinking the size of
+  // any of the dense dimensions.
   // 2. When we keep the number of sparse dimensions unchanged, and NOT shrinking the size of
   // any of the sparse dimensions.
   // 3. When the sparse tensor has zero nnz, in which case we are free to change the shapes of
@@ -81,12 +81,16 @@ public:
   // 2. When we attempt to change the number of dense dimensions on a non-empty sparse tensor
   // (such an operation will behave differently from an equivalent dense tensor's resize method,
   // and for API consistency we don't support it).
-  // 3. When we attempt to shrink the size of any of the sparse dimensions (this could make
-  // some of the stored indices out-of-bound and thus unsafe).
+  // 3. When we attempt to shrink the size of any of the dense dimensions on a non-empty sparse tensor
+  // (such an operation will behave differently from an equivalent dense tensor's resize method,
+  // and for API consistency we don't support it).
+  // 4. When we attempt to shrink the size of any of the sparse dimensions on a non-empty sparse tensor
+  // (this could make some of the stored indices out-of-bound and thus unsafe).
   void resize_(int64_t sparseDims, int64_t denseDims, IntList size) {
     AT_CHECK(sparseDims + denseDims == size.size(), "number of dimensions must be sparseDims (", sparseDims, ") + denseDims (", denseDims, "), but got ", size.size());
     if (nnz() > 0) {
       bool shrinking_sparse_dims = false;
+      bool shrinking_dense_dims = false;
       auto sparse_size_original = sizes().slice(0, sparseDims);
       auto sparse_size_new = size.slice(0, sparseDims);
       for (int i = 0; i < sparseDims; i++) {
@@ -95,11 +99,19 @@ public:
           break;
         }
       }
+      auto dense_size_original = sizes().slice(sparseDims);
+      auto dense_size_new = size.slice(sparseDims);
+      for (int i = 0; i < denseDims; i++) {
+        if (dense_size_new[i] < dense_size_original[i]) {
+          shrinking_dense_dims = true;
+          break;
+        }
+      }
 
       auto alt_options_msg = "You could try the following options:\n\
 1. If you need an empty sparse tensor of this size, call `x=torch.sparse_coo_tensor(size)`.\n\
 2. If you need to resize this tensor, you have the following options:\n\
-    1. Keep the number of sparse dimensions constant and the size of them non-shrinking, and keep the number of dense dimensions constant, and then try the same call again.\n\
+    1. For both sparse and dense dimensions, keep the number of them constant and the size of them non-shrinking, and then try the same call again.\n\
     2. Or, create a new sparse tensor with the correct indices and values from this sparse tensor.";
 
       AT_CHECK(sparseDims == sparseDims_,
@@ -110,6 +122,9 @@ public:
 
       AT_CHECK(!shrinking_sparse_dims,
         "shrinking the size of sparse dimensions (from ", sparse_size_original, " to ", sparse_size_new, ") on a non-empty sparse tensor is not supported.\n", alt_options_msg);
+
+      AT_CHECK(!shrinking_dense_dims,
+        "shrinking the size of dense dimensions (from ", dense_size_original, " to ", dense_size_new, ") on a non-empty sparse tensor is not supported.\n", alt_options_msg);
     }
 
     if ((!size.equals(size_)) || (sparseDims != sparseDims_) || (denseDims != denseDims_)) {

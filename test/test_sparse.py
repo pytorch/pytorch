@@ -1121,17 +1121,30 @@ class TestSparse(TestCase):
         do_test(self.SparseTensor())
 
     def _test_resize_shape(self, x_i, x_v, x_size, y_i, y_v, y_size):
-        x = torch.sparse_coo_tensor(torch.zeros(x_i), torch.randn(x_v), torch.Size(x_size))
-        y = torch.sparse_coo_tensor(torch.zeros(y_i), torch.randn(y_v), torch.Size(y_size))
+        x_v_numel = torch.zeros(x_v).numel()
+        y_v_numel = torch.zeros(y_v).numel()
+        x = torch.sparse_coo_tensor(torch.zeros(x_i),
+                                    torch.arange(x_v_numel).resize_(x_v).to(torch.float),
+                                    torch.Size(x_size))
+        x_dense = x.to_dense()
+        y = torch.sparse_coo_tensor(torch.zeros(y_i),
+                                    torch.ones(y_v).to(torch.float),
+                                    torch.Size(y_size))
+        y_dense = y.to_dense()
         x.resize_as_(y)
+        x_dense.resize_as_(y_dense)
         self.assertEqual(x.shape, y.shape)
         self.assertEqual(x._sparseDims(), y._sparseDims())
         self.assertEqual(x._denseDims(), y._denseDims())
+        self.assertTrue(x_v_numel <= y_v_numel)  # We don't support shrinking the size of some dense dims
+        # Here we make sure that the original data are preserved after resizing
+        self.assertEqual(x.to_dense().view(-1)[0:x_v_numel].view(x_v),
+                         x_dense.view(-1)[0:x_v_numel].view(x_v))
 
     def test_resize(self):
-        # 1. Change the size of some dense dimensions [Supported]
+        # 1. Increase the size of some dense dimensions [Supported]
         self._test_resize_shape([1, 1], [1, 2, 3], [2, 2, 3],
-                                [1, 1], [1, 2, 2], [2, 2, 2])
+                                [1, 1], [1, 2, 4], [2, 2, 4])
 
         # 2. Expand the size of some sparse dimensions [Supported]
         self._test_resize_shape([1, 1], [1, 2, 3], [2, 2, 3],
@@ -1160,6 +1173,11 @@ class TestSparse(TestCase):
         with self.assertRaisesRegex(RuntimeError, "shrinking the size of sparse dimensions"):
             self._test_resize_shape([1, 1], [1, 2, 3], [2, 2, 3],
                                     [1, 1], [1, 2, 3], [1, 2, 3])
+
+        # 8. Shrink the size of some dense dimensions on a non-empty sparse tensor [Not Supported]
+        with self.assertRaisesRegex(RuntimeError, "shrinking the size of dense dimensions"):
+            self._test_resize_shape([1, 1], [1, 2, 3], [2, 2, 3],
+                                    [1, 1], [1, 2, 2], [2, 2, 2])
 
     def test_is_nonzero(self):
         self.assertTrue(torch.sparse_coo_tensor(([0],), 1., (1,)).is_nonzero())
