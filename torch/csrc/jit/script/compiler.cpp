@@ -269,7 +269,7 @@ struct Environment {
                  << "use `_construct_empty_foo_list`, "
                  << "where `foo` is `int` or `float`)";
         }
-        throw ErrorReport(loc) << errMsg;
+        throw ErrorReport(loc) << errMsg.str();
       }
     }
     if (as_simple_value)
