@@ -49,7 +49,6 @@ ROCM_BLACKLIST = [
     'legacy_nn',
     'multiprocessing',
     'nccl',
-    'nn',
     'utils',
 ]
 
