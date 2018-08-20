@@ -1375,9 +1375,9 @@ private:
         auto ll = ListLiteral(tree);
         auto values = getValues(ll.inputs(), /*maybe_unpack=*/true, identity);
         if (values.size() == 0) {
-          throw ErrorReport(tree) << "Empty list literals not allowed. "
-                                  << "Use _construct_empty_foo_list() instead. "
-                                  << "`foo` can be `int`, `float` or `tensor`";
+          // If this is an empty list literal `[]`, construct an empty Tensor[]
+          return graph->insertNode(graph->createList(DynamicType::get(), {}))
+              ->output();
         }
         const auto elem_type = values.at(0)->type();
         for (auto v : values) {
