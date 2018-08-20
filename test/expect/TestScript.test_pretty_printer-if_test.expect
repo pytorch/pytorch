@@ -1,7 +1,8 @@
-  t2 = aten::lt(a, b)
+def script(c2, c1):
+  t2 = aten::lt(c2, c1)
   t3 = prim::TensorToNum(t2)
   if t3:
-    c = b
+    c = c1
   else:
-    c = a
+    c = c2
   return c

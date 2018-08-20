@@ -256,192 +256,286 @@ std::ostream& operator<<(std::ostream & out, const Graph & g) {
   return out;
 }
 
-typedef std::unordered_map<std::string, std::string> alias_list;
-typedef std::unordered_map<std::string, std::pair<const Node*, Symbol>> constant_list;
+struct PrettyPrintPass {
+  std::unordered_map<std::string, std::string> aliases;
+  std::unordered_set<const Node*> seen_nodes;
+  std::unordered_map<std::string, std::pair<const Node*, Symbol>> constants;
+  std::unordered_set<const Value*> unresolved_values;
+};
 
-std::ostream& prettyPrintValue(
+template<class T>
+static void dualIterator(
+  at::ArrayRef<T> list_a,
+  at::ArrayRef<T> list_b,
+  const size_t offset_a,
+  const size_t offset_b,
+  std::function<void(T, T)> action
+) {
+  auto it_a = list_a.begin() + offset_a;
+  auto it_b = list_b.begin() + offset_b;
+
+  for (; it_a != list_a.end() && it_b != list_b.end(); ++it_a, ++it_b) {
+    action(*it_a, *it_b);
+  }
+}
+
+static std::ostream& prettyPrintNode(
+  std::ostream & out,
+  const Node* root,
+  const size_t level,
+  PrettyPrintPass& pass
+);
+
+static std::ostream& prettyPrintValue(
   std::ostream & out,
   const Value* val,
-  constant_list& constants,
-  alias_list& aliases
+  PrettyPrintPass& pass
 ) {
-  auto unique = val->uniqueName();
+  const auto unique = val->uniqueName();
   if (val->node()->kind() == prim::Constant) {
-    auto const_value = constants.find(unique);
-    if (const_value != constants.end()) {
+    const auto const_value = pass.constants.find(unique);
+    if (const_value != pass.constants.end()) {
       printAttributeValue(out, const_value->second.second, const_value->second.first);
     } else {
-      AT_ERROR("Could not find a constant");
+      AT_ERROR("Could not find a constant for value: ", unique);
     }
   } else {
-    auto name = val->readableName();
+    auto name = unique;
 
-    auto aliased_name = aliases.find(unique);
-    if (aliased_name != aliases.end()) {
+    auto aliased_name = pass.aliases.find(unique);
+    if (aliased_name != pass.aliases.end()) {
       name = aliased_name->second;
     }
 
     if (isdigit(name.at(0))) {
       out << "t";
+    } else {
+      // Make unique name a valid variable name (e.g. a.1 -> a1)
+      name.erase(std::remove(name.begin(), name.end(), '.'), name.end());
     }
+
     out << name;
   }
-return out;
+  return out;
 }
 
-std::ostream& prettyPrintInputs(
+static std::ostream& prettyPrintInputs(
   std::ostream & out,
   const Node* node,
-  constant_list& constants,
-  alias_list& aliases
+  PrettyPrintPass& pass
 ) {
   out << "(";
   auto delimiter = "";
   for (const auto* in_value : node->inputs()) {
     out << delimiter;
-    prettyPrintValue(out, in_value, constants, aliases);
+    prettyPrintValue(out, in_value, pass);
     delimiter = ", ";
   }
   out << ")";
   return out;
 }
 
-std::ostream& prettyPrintNode(
-  std::ostream & out,
-  const Node* root,
-  int level,
-  constant_list& constants,
-  alias_list& aliases
-);
-
-std::ostream& prettyPrintBlock(
+static std::ostream& prettyPrintBlock(
   std::ostream & out,
   const Block* root,
-  int level,
-  constant_list& constants,
-  alias_list& aliases
+  const size_t level,
+  PrettyPrintPass& pass
 ) {
   for (const auto* node : root->nodes()) {
-    prettyPrintNode(out, node, level, constants, aliases);
+    prettyPrintNode(out, node, level, pass);
   }
 
-  prettyPrintNode(out, root->return_node(), level, constants, aliases);
+  prettyPrintNode(out, root->return_node(), level, pass);
 
   return out;
 }
 
-std::ostream& prettyPrintIf(
+static void prettyPrintStmt(
+  std::ostream& out,
+  const Value* lhs,
+  const Value* rhs,
+  const size_t level,
+  PrettyPrintPass& pass
+) {
+  indent(out, level);
+  prettyPrintValue(out, lhs, pass);
+  out << " = ";
+  prettyPrintValue(out, rhs, pass);
+  out << std::endl;
+}
+
+static std::ostream& prettyPrintIf(
   std::ostream & out,
   const Node* node,
-  int level,
-  constant_list& constants,
-  alias_list& aliases
+  const size_t level,
+  PrettyPrintPass& pass
 ) {
+  indent(out, level);
   out << "if ";
-  auto if_block = node->blocks()[0];
-  auto else_block = node->blocks()[1];
-  prettyPrintValue(out, node->inputs()[0], constants, aliases);
+  const auto if_block = node->blocks()[0];
+  const auto else_block = node->blocks()[1];
+  prettyPrintValue(out, node->inputs()[0], pass);
   out << ":" << std::endl;
 
   // Print node contents
-  prettyPrintBlock(out, if_block, level + 1, constants, aliases);
+  prettyPrintBlock(out, if_block, level + 1, pass);
+
   // Print if block output
-  int if_count = 0;
-  for (const auto* output_value : node->outputs()) {
-    indent(out, level + 1);
-    prettyPrintValue(out, output_value, constants, aliases);
-    out << " = ";
-    prettyPrintValue(out, if_block->return_node()->inputs()[if_count++], constants, aliases);
-    out << std::endl;
-    if_count++;
-  }
+  dualIterator<const Value*>(
+    node->outputs(),
+    if_block->return_node()->inputs(),
+    0, 0,
+    [&](const Value* node_output, const Value* return_input) {
+      prettyPrintStmt(out, node_output, return_input, level + 1, pass);
+    }
+  );
 
   indent(out, level);
   out << "else:" << std::endl;
-  prettyPrintBlock(out, else_block, level + 1, constants, aliases);
-  int else_count = 0;
-  for (const auto* output_value : node->outputs()) {
-    indent(out, level + 1);
-    out << output_value->readableName();
-    out << " = ";
-    prettyPrintValue(out, else_block->return_node()->inputs()[else_count], constants, aliases);
-    out << std::endl;
-    else_count++;
-  }
+  prettyPrintBlock(out, else_block, level + 1, pass);
+  dualIterator<const Value*>(
+    node->outputs(),
+    else_block->return_node()->inputs(),
+    0, 0,
+    [&](const Value* node_output, const Value* return_input) {
+      prettyPrintStmt(out, node_output, return_input, level + 1, pass);
+    }
+  );
 
   return out;
 }
 
-std::ostream& prettyPrintLoop(
-  std::ostream & out,
-  const Node* node,
-  int level,
-  constant_list& constants,
-  alias_list& aliases
+static bool isValueUsed(
+  const Value* val,
+  PrettyPrintPass& pass
 ) {
-  out << "while ";
-  prettyPrintValue(out, node->inputs()[1], constants, aliases);
-  out << ":";
-
-  out << std::endl;
-  auto body_block = node->blocks()[0];
-
-  // Offset to skip loop trip count
-  int count = 1;
-  for (const auto* block_param : body_block->param_node()->outputs())  {
-    // add names to map
-    aliases[block_param->uniqueName()] = node->inputs()[count]->readableName();
-    count++;
+  if (pass.aliases.find(val->uniqueName()) != pass.aliases.end()) {
+    return true;
   }
-
-  // Add alias for loop condition
-  aliases[body_block->return_node()->inputs()[0]->readableName()] = node->inputs()[1]->uniqueName();
-
-  // for (auto block_input : body_block->param_node())
-  prettyPrintBlock(out, body_block, level + 1, constants, aliases);
-
-  return out;
+  return val->uses().size() > 0;
 }
 
-// Handles iterating over nodes/subblocks
-std::ostream& prettyPrintNode(
+static std::ostream& prettyPrintLoop(
   std::ostream & out,
   const Node* node,
-  int level,
-  constant_list& constants,
-  alias_list& aliases
+  const size_t level,
+  PrettyPrintPass& pass
 ) {
-  if (node->kind() == prim::Constant) {
-    // Add constant to current scope map
-    constants[node->outputs()[0]->uniqueName()] = std::make_pair(
-      node,
-      node->attributeNames()[0]
-    );
-    return out;
-  }
+  const auto body_block = node->blocks()[0];
 
-  if (node->kind() == prim::Return) {
-    // Handled elsewhere, do nothing
-    return out;
-  }
+  // Add temporaries for loop-carried dependencies
+  dualIterator<const Value*>(
+    node->inputs(),
+    body_block->param_node()->outputs(),
+    1, 0,
+    [&](const Value* node_input, const Value* param_output) {
+      if (isValueUsed(param_output, pass)) {
+        prettyPrintStmt(out, param_output, node_input, level, pass);
+      }
+    }
+  );
 
+  // Add an alias for the loop condition variable so it doesn't add an extra
+  // temporary for it
+  pass.aliases[body_block->param_node()->outputs()[0]->uniqueName()] = node->inputs()[1]->uniqueName();
+
+  // Loop header
   indent(out, level);
+  out << "while ";
+  prettyPrintValue(out, body_block->param_node()->outputs()[0], pass);
+  out << ":";
+  out << std::endl;
+
+  // Loop body
+  prettyPrintBlock(out, body_block, level + 1, pass);
+
+  // Re-assign block outputs to inputs for next iteration
+  dualIterator<const Value*>(
+    body_block->param_node()->outputs(),
+    body_block->return_node()->inputs(),
+    0, 0,
+    [&](const Value* param_output, const Value* return_input) {
+      if (isValueUsed(param_output, pass)) {
+        prettyPrintStmt(out, param_output, return_input, level + 1, pass);
+      }
+    }
+  );
+
+  // Add assign loop-dependencies to the outputs of the prim::Loop
+  dualIterator<const Value*>(
+    node->outputs(),
+    body_block->return_node()->inputs(),
+    0, 1,
+    [&](const Value* node_output, const Value* return_input) {
+      if (isValueUsed(node_output, pass)) {
+        prettyPrintStmt(out, node_output, return_input, level, pass);
+      }
+    }
+  );
+
+  return out;
+}
+
+static std::ostream& prettyPrintReturn(
+  std::ostream & out,
+  const Node* node,
+  const size_t level,
+  PrettyPrintPass& pass
+) {
+  indent(out, level);
+  const auto& returns = node->inputs();
+  if (returns.size() > 0) {
+    out << "return ";
+    std::string delimiter = "";
+    if (returns.size() > 1) {
+      out << "(";
+      for (const auto* return_node : returns) {
+        out << delimiter;
+        prettyPrintValue(out, return_node, pass);
+        delimiter = ", ";
+      }
+      out << ")";
+    } else {
+      prettyPrintValue(out, returns[0], pass);
+    }
+    out << std::endl;
+  }
+  return out;
+}
+
+static std::ostream& prettyPrintNode(
+  std::ostream & out,
+  const Node* node,
+  const size_t level,
+  PrettyPrintPass& pass
+) {
+  pass.seen_nodes.insert(node);
 
   // if there are subblocks on this node, visit them
   switch (node->kind()) {
   case prim::Loop:
-    prettyPrintLoop(out, node, level, constants, aliases);
+    prettyPrintLoop(out, node, level, pass);
     break;
   case prim::If:
-    prettyPrintIf(out, node, level, constants, aliases);
+    prettyPrintIf(out, node, level, pass);
     break;
+  case prim::Return:
+    // Handled elsewhere, do nothing
+    return out;
+  case prim::Constant:
+    pass.constants[node->outputs()[0]->uniqueName()] = std::make_pair(
+      node,
+      node->attributeNames()[0]
+    );
+    return out;
   default:
+    indent(out, level);
     // Print outputs
     if (node->outputs().size() > 0) {
       auto delim = "";
       for (const auto* output_value : node->outputs()) {
         out << delim;
-        prettyPrintValue(out, output_value, constants, aliases);
+        prettyPrintValue(out, output_value, pass);
         delim = ", ";
       }
       out << " = ";
@@ -450,7 +544,7 @@ std::ostream& prettyPrintNode(
     out << node->kind().toQualString();
 
     // Print instruction parameters
-    prettyPrintInputs(out, node, constants, aliases);
+    prettyPrintInputs(out, node, pass);
 
     out << std::endl;
   }
@@ -459,36 +553,22 @@ std::ostream& prettyPrintNode(
 }
 
 std::ostream& Graph::prettyPrint(std::ostream & out) {
-  // This is used to track constants and display the literal value instead of
-  // the name
-  constant_list constants;
-
-  // This is used to rename loop-carried dependencies to their outer-scoped
-  // counterparts
-  alias_list aliases;
+  PrettyPrintPass pass;
+  out << "def script";
+  std::string delimiter = "";
+  out << "(";
+  for (auto in : block()->param_node()->outputs()) {
+    out << delimiter;
+    prettyPrintValue(out, in, pass);
+    delimiter = ", ";
+  }
+  out << "):" << std::endl;
 
   // Print body
-  prettyPrintBlock(out, block(), 1, constants, aliases);
+  prettyPrintBlock(out, block(), 1, pass);
 
-  // Print returns
-  indent(out, 1);
-  const auto& returns = block()->return_node()->inputs();
-  if (returns.size() > 0) {
-    out << "return ";
-    std::string delimiter = "";
-    if (returns.size() > 1) {
-      out << "(";
-      for (const auto* return_node : returns) {
-        out << delimiter;
-        prettyPrintValue(out, return_node, constants, aliases);
-        delimiter = ", ";
-      }
-      out << ")";
-    } else {
-      prettyPrintValue(out, returns[0], constants, aliases);
-    }
-  }
-  out << std::endl;
+  prettyPrintReturn(out, block()->return_node(), 1, pass);
+
   return out;
 }
 
@@ -786,10 +866,6 @@ std::shared_ptr<Graph> Graph::copy() {
 Value* Value::setUniqueName(const std::string & name) {
   if (name.size() > 0 && name.find_first_not_of("0123456789") == std::string::npos) {
     throw std::runtime_error("names may not be integers: " + name);
-  }
-
-  if (!hasOriginalName()) {
-    original_name_ = name;
   }
 
   auto & names = node()->owningGraph()->unique_names_;

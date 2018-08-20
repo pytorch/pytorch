@@ -1,8 +1,15 @@
-  t4 = aten::lt(i, 3)
+def script(a1, i1):
+  t4 = aten::lt(i1, 3)
   t5 = prim::TensorToNum(t4)
+  t7 = a1
+  t9 = i1
   while t5:
-    a = aten::mul(a, a)
-    i = aten::add(i, 1, 1)
-    t14 = aten::lt(i, 3)
-    t5 = prim::TensorToNum(t14)
+    a2 = aten::mul(t7, t7)
+    i2 = aten::add(t9, 1, 1)
+    t14 = aten::lt(i2, 3)
+    t15 = prim::TensorToNum(t14)
+    t5 = t15
+    t7 = a2
+    t9 = i2
+  a = a2
   return a

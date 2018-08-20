@@ -32,7 +32,6 @@
 #include <memory>
 #include <unordered_set>
 #include <vector>
-#include <map>
 
 namespace torch { namespace autograd {
 
@@ -181,7 +180,6 @@ private:
   size_t stage_ = 0;           // 0-forward, 1-backward, 2-double-backward,...
   use_list uses_;
   std::string unique_name_;
-  std::string original_name_;
   TypePtr type_;
 public:
   Value* setType(TypePtr type);
@@ -204,25 +202,12 @@ public:
   bool hasUniqueName() const {
     return !unique_name_.empty();
   }
-  bool hasOriginalName() const {
-    return original_name_ != "";
-  }
   TORCH_API Value* setUniqueName(const std::string & name);
   std::string uniqueName() const {
     if (hasUniqueName())
       return unique_name_;
     return std::to_string(unique());
   }
-  const std::string& originalName() const {
-   return original_name_;
-  }
-  std::string readableName() const {
-    if (hasOriginalName()) {
-      return originalName();
-    } else {
-      return uniqueName();
-    }
- }
   Value* setStage(size_t s) {
     stage_ = s;
     return this;
