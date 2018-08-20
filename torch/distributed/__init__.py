@@ -359,7 +359,7 @@ def reduce_multigpu(tensor_list, dst, op=reduce_op.SUM, group=group.WORLD):
 def reduce(tensor, dst, op=reduce_op.SUM, group=group.WORLD):
     r"""Reduces the tensor data across all machines.
 
-    Only the process with rank :attr`dst` is going to receive the final result.
+    Only the process with rank :attr:`dst` is going to receive the final result.
 
     Arguments:
         tensor (Tensor): Input and output of the collective. The function
