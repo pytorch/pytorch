@@ -40,7 +40,8 @@ module_tests = [
         module_name='Linear',
         constructor_args=(10, 8),
         input_size=(4, 10),
-        reference_fn=lambda i, p: torch.mm(i, p[0].t()) + p[1].view(1, -1).expand(4, 8)
+        reference_fn=lambda i, p: torch.mm(i, p[0].t()) + p[1].view(1, -1).expand(4, 8),
+        test_cuda = (not TEST_WITH_ROCM)
     ),
     dict(
         module_name='Linear',
@@ -102,17 +103,20 @@ module_tests = [
         constructor_args=(1,),
         input_size=(10, 20),
         reference_fn=lambda i, _: torch.exp(i).div(torch.exp(i).sum(1, True).expand(10, 20)),
+        test_cuda = (not TEST_WITH_ROCM)
     ),
     dict(
         module_name='Softmax2d',
         input_size=(1, 3, 10, 20),
         reference_fn=lambda i, _: torch.exp(i).div(torch.exp(i).sum(1, False)),
+        test_cuda = (not TEST_WITH_ROCM)
     ),
     dict(
         module_name='LogSoftmax',
         constructor_args=(1,),
         input_size=(10, 20),
         reference_fn=lambda i, _: torch.exp(i).div_(torch.exp(i).sum(1, True).expand(10, 20)).log_(),
+        test_cuda = (not TEST_WITH_ROCM)
     ),
     dict(
         module_name='LogSoftmax',
@@ -120,6 +124,7 @@ module_tests = [
         input_size=(1, 3, 10, 20),
         reference_fn=lambda i, _: torch.exp(i).div_(torch.exp(i).sum(1, False)).log_(),
         desc='multiparam',
+        test_cuda = (not TEST_WITH_ROCM)
     ),
     dict(
         module_name='ELU',
@@ -199,6 +204,7 @@ module_tests = [
         input_size=(2, 3, 4),
         desc='1d_multiparam',
         reference_fn=lambda i, p: torch.clamp(i, min=0) + torch.clamp(i, max=0) * p[0][0],
+        test_cuda = (not TEST_WITH_ROCM)
     ),
     dict(
         module_name='PReLU',
@@ -212,6 +218,7 @@ module_tests = [
         input_size=(2, 3, 4, 5),
         desc='2d_multiparam',
         reference_fn=lambda i, p: torch.clamp(i, min=0) + torch.clamp(i, max=0) * p[0][0],
+        test_cuda = (not TEST_WITH_ROCM)
     ),
     dict(
         module_name='PReLU',
@@ -225,26 +232,31 @@ module_tests = [
         input_size=(2, 3, 4, 5, 6),
         desc='3d_multiparam',
         reference_fn=lambda i, p: torch.clamp(i, min=0) + torch.clamp(i, max=0) * p[0][0],
+        test_cuda = (not TEST_WITH_ROCM)
     ),
     dict(
         module_name='Softsign',
         input_size=(3, 2, 5),
         reference_fn=lambda i, _: i.div(1 + torch.abs(i)),
+        test_cuda = (not TEST_WITH_ROCM)
     ),
     dict(
         module_name='Softmin',
         constructor_args=(1,),
         input_size=(10, 20),
+        test_cuda = (not TEST_WITH_ROCM)
     ),
     dict(
         module_name='Softmin',
         constructor_args=(1,),
         input_size=(2, 3, 5, 10),
         desc='multidim',
+        test_cuda = (not TEST_WITH_ROCM)
     ),
     dict(
         module_name='Tanhshrink',
-        input_size=(2, 3, 4, 5)
+        input_size=(2, 3, 4, 5),
+        test_cuda = (not TEST_WITH_ROCM)
     ),
 ]
 
@@ -643,6 +655,7 @@ criterion_tests = [
         target_fn=lambda: torch.rand(5, 10).mul(2).floor(),
         reference_fn=lambda i, t, m: -(t * i.sigmoid().log() + (1 - t) * (-i).sigmoid().log()).sum() / i.numel(),
         check_gradgrad=False,
+        test_cuda = (not TEST_WITH_ROCM)
     ),
     dict(
         module_name='MultiMarginLoss',

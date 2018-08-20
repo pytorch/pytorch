@@ -1802,6 +1802,7 @@ class TestNN(NNTestCase):
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @repeat_test_for_types(ALL_TENSORTYPES)
+    @skipIfRocm
     def test_embedding_max_norm_cuda(self, dtype=torch.float):
         embedding = nn.Embedding(22, 5, max_norm=1.0).to("cuda", dtype=dtype)
         # nn.Embedding only takes LongTensor as input
@@ -1889,6 +1890,7 @@ class TestNN(NNTestCase):
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @repeat_test_for_types(ALL_TENSORTYPES)
+    @skipIfRocm
     def test_gumbel_softmax_st_cuda(self, dtype=torch.float):
         self._test_gumbel_softmax_st(True, dtype=dtype)
 
@@ -2056,6 +2058,7 @@ class TestNN(NNTestCase):
         y.backward(grad)
 
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
+    @skipIfRocm
     def test_contig_wrong_stride_cudnn(self):
         # x has to have batch_size 1 to test contiguous checks
         x = torch.randn(1, 16, 5, 5, device="cuda")
@@ -2077,6 +2080,7 @@ class TestNN(NNTestCase):
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @repeat_test_for_types(ALL_TENSORTYPES)
+    @skipIfRocm
     def test_embedding_bag_cuda(self, dtype=torch.float):
         self._test_EmbeddingBag(True, 'sum', False, dtype)
         self._test_EmbeddingBag(True, 'mean', False, dtype)
@@ -2248,6 +2252,7 @@ class TestNN(NNTestCase):
         self._test_InstanceNorm_general(nn.InstanceNorm1d, input, dtype=torch.float)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @skipIfRocm
     def test_InstanceNorm1d_general_cuda(self):
         b = random.randint(3, 5)
         c = random.randint(3, 5)
@@ -2267,6 +2272,7 @@ class TestNN(NNTestCase):
         self._test_InstanceNorm_general(nn.InstanceNorm2d, input, dtype=torch.float)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @skipIfRocm
     def test_InstanceNorm2d_general_cuda(self):
         b = random.randint(3, 5)
         c = random.randint(3, 5)
@@ -2288,6 +2294,7 @@ class TestNN(NNTestCase):
         self._test_InstanceNorm_general(nn.InstanceNorm3d, input, dtype=torch.float)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @skipIfRocm
     def test_InstanceNorm3d_general_cuda(self):
         b = random.randint(3, 5)
         c = random.randint(2, 5)
@@ -2352,6 +2359,7 @@ class TestNN(NNTestCase):
         self._test_LayerNorm_general()
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @skipIfRocm
     def test_LayerNorm_general_cuda(self):
         self._test_LayerNorm_general("cuda")
         self._test_LayerNorm_cuda_half()
@@ -2416,6 +2424,7 @@ class TestNN(NNTestCase):
         self._test_GroupNorm_general(dtype=torch.float)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @skipIfRocm
     def test_GroupNorm_general_cuda(self):
         self._test_GroupNorm_general("cuda", torch.float)
         self._test_GroupNorm_cuda_half()
@@ -2546,6 +2555,7 @@ class TestNN(NNTestCase):
         self._test_batchnorm_simple_average()
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @skipIfRocm
     def test_batchnorm_simple_average_cuda(self):
         self._test_batchnorm_simple_average(torch.cuda.FloatTensor)
 
@@ -2570,6 +2580,7 @@ class TestNN(NNTestCase):
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @repeat_test_for_types(ALL_TENSORTYPES)
+    @skipIfRocm
     def test_MaxPool3d_indices_cuda(self, dtype=torch.float):
         self._test_maxpool_indices(3, device="cuda", dtype=dtype)
 
@@ -3858,6 +3869,7 @@ class TestNN(NNTestCase):
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     @repeat_test_for_types(ALL_TENSORTYPES)
+    @skipIfRocm
     def test_variable_sequence_cuda(self, dtype=torch.float):
         self._test_variable_sequence("cuda", dtype)
 
@@ -3884,6 +3896,7 @@ class TestNN(NNTestCase):
         output = rnn(input, hx)
 
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
+    @skipIfRocm
     def test_cudnn_weight_format(self):
         rnns = [
             nn.LSTM(10, 20, batch_first=True),
@@ -3931,6 +3944,7 @@ class TestNN(NNTestCase):
             self.assertEqual(weight_data, all_vars[4].data)
 
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
+    @skipIfRocm
     def test_cudnn_weight_tying(self):
         rnns = [
             nn.LSTM(10, 20, batch_first=True, bidirectional=True),
@@ -3964,6 +3978,7 @@ class TestNN(NNTestCase):
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     @repeat_test_for_types(NO_HALF_TENSORTYPES)
+    @skipIfRocm
     def test_cuda_rnn_fused(self, dtype=torch.float):
 
         def copy_rnn(rnn1, rnn2):
@@ -4128,6 +4143,7 @@ class TestNN(NNTestCase):
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     @repeat_test_for_types(ALL_TENSORTYPES)
+    @skipIfRocm
     def test_rnn_retain_variables_cuda(self, dtype=torch.float):
         with torch.backends.cudnn.flags(enabled=False):
             self._test_rnn_retain_variables("cuda", dtype)
@@ -4275,6 +4291,7 @@ class TestNN(NNTestCase):
 
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
     @default_tensor_type(torch.FloatTensor)  # FIXME: just until torch.cuda.DoubleTensor.sum() implemented
+    @skipIfRocm
     def test_RNN_cpu_vs_cudnn_no_dropout(self):
         self._test_RNN_cpu_vs_cudnn(0)
 
@@ -4429,6 +4446,7 @@ class TestNN(NNTestCase):
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     @repeat_test_for_types(ALL_TENSORTYPES)
+    @skipIfRocm
     def test_noncontig_conv_grad_cuda(self, dtype=torch.float):
         # FIXME: remove after adding non-contiguous grad tests for all modules
         module = nn.Conv2d(3, 5, kernel_size=3, padding=1).to("cuda", dtype)
@@ -4628,6 +4646,7 @@ class TestNN(NNTestCase):
         gradgradcheck(func, [v])
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @skipIfRocm
     def test_batchnorm_cudnn_half(self):
         # THNN
         input = torch.randint(1, 10, (2, 3, 2, 2), dtype=torch.half, device="cuda", requires_grad=True)
@@ -4940,7 +4959,7 @@ class TestNN(NNTestCase):
         if TEST_CUDA:
             with self.assertRaisesRegex(RuntimeError, "expected input and grid to be on same device"):
                 F.grid_sample(input.cuda(), grid)
-
+    @skipIfRocm
     def test_grid_sample(self):
         def test(N, C, H, W, mode, padding_mode):
             def test_shape(N, C, IH, IW, H, W, mode, padding_mode):
@@ -5087,7 +5106,7 @@ class TestNN(NNTestCase):
                 if TEST_CUDNN:
                     with cudnn.flags(enabled=False):
                         test(N, C, H, W, mode, padding_mode)
-
+    @skipIfRocm
     def test_grid_sample_3d(self):
         def test(N, C, D, H, W, mode, padding_mode):
             def test_shape(N, C, ID, IH, IW, D, H, W, mode, padding_mode):
@@ -5200,7 +5219,7 @@ class TestNN(NNTestCase):
                     (input, grid)))
 
                 test(N, C, D, H, W, mode, padding_mode)
-
+    @skipIfRocm
     def test_affine_grid(self):
         # test known input on CPU
         input = Variable(torch.arange(1., 7).view(1, 2, 3))
@@ -5479,6 +5498,7 @@ class TestNN(NNTestCase):
         self._test_conv_noncontig_weights(self, torch.device('cpu'))
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @skipIfRocm
     def test_conv_noncontig_weights_cuda(self):
         self._test_conv_noncontig_weights(self, torch.device('cuda'))
 
@@ -5605,6 +5625,7 @@ class TestNN(NNTestCase):
                                                no_weight)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @skipIfRocm
     def test_cudnn_noncontiguous_weight(self):
         # Noncontiguous weights must be contiguous() before being
         # passed to cuDNN
@@ -6258,7 +6279,8 @@ new_criterion_tests = [
         reference_fn=lambda i, t, m:
             loss_reference_fns['NLLLossNd'](i, t, reduction=get_reduction(m)),
         check_sum_reduction=True,
-        desc='2d'
+        desc='2d',
+        test_cuda = (not TEST_WITH_ROCM),
     ),
     dict(
         module_name='NLLLoss',
@@ -6268,6 +6290,7 @@ new_criterion_tests = [
         reference_fn=lambda i, t, m:
             loss_reference_fns['NLLLossNd'](i, t, weight=get_weight(m)),
         desc='2d_weights',
+        test_cuda = (not TEST_WITH_ROCM)
     ),
     dict(
         module_name='NLLLoss',
@@ -6277,6 +6300,7 @@ new_criterion_tests = [
         reference_fn=lambda i, t, m:
             loss_reference_fns['NLLLossNd'](i, t, ignore_index=1),
         desc='2d_ignore_index',
+        test_cuda = (not TEST_WITH_ROCM)
     ),
     dict(
         module_name='NLLLoss',
@@ -6285,7 +6309,8 @@ new_criterion_tests = [
         reference_fn=lambda i, t, m:
             loss_reference_fns['NLLLossNd'](i, t, reduction=get_reduction(m)),
         check_sum_reduction=True,
-        desc='higher_dim'
+        desc='higher_dim',
+        test_cuda = (not TEST_WITH_ROCM)
     ),
     dict(
         module_name='NLLLoss',
@@ -6294,13 +6319,15 @@ new_criterion_tests = [
         reference_fn=lambda i, t, m:
             loss_reference_fns['NLLLossNd'](i, t, reduction=get_reduction(m)),
         check_sum_reduction=True,
-        desc='dim_is_3'
+        desc='dim_is_3',
+        test_cuda = (not TEST_WITH_ROCM)
     ),
     dict(
         module_name='PoissonNLLLoss',
         input_size=(2, 3, 4, 5),
         target_fn=lambda: torch.randn(2, 3, 4, 5).floor_().abs_(),
         desc='no_full_loss',  # without sterling approx
+        test_cuda = (not TEST_WITH_ROCM)
     ),
     dict(
         module_name='PoissonNLLLoss',
@@ -6308,6 +6335,7 @@ new_criterion_tests = [
         input_fn=lambda: torch.randn(2, 3, 4, 5).abs_().add_(0.001),
         target_fn=lambda: torch.randn(2, 3, 4, 5).floor_().abs_(),
         desc='full_loss',  # with sterling approx
+        test_cuda = (not TEST_WITH_ROCM)
     ),
     dict(
         module_name='L1Loss',
@@ -6380,6 +6408,7 @@ new_criterion_tests = [
         desc='weights',
         check_sum_reduction=True,
         check_gradgrad=False,
+        test_cuda = (not TEST_WITH_ROCM)
     ),
     dict(
         module_name='CTCLoss',
@@ -6448,7 +6477,7 @@ def poissonnllloss_no_reduce_test():
         constructor=wrap_functional(
             lambda i: F.poisson_nll_loss(i, t.type_as(i), reduction='none')),
         input_fn=lambda: torch.rand(10, 10),
-        pickle=False)
+        pickle=False, test_cuda = (not TEST_WITH_ROCM))
 
 
 def bceloss_no_reduce_test():
@@ -6540,7 +6569,7 @@ def kldivloss_with_target_no_reduce_test():
         input_fn=lambda: torch.rand(10, 10),
         reference_fn=lambda t, _:
             loss_reference_fns['KLDivLoss'](i.type_as(t), t, reduction='none'),
-        pickle=False)
+        pickle=False, test_cuda = (not TEST_WITH_ROCM))
 
 
 def kldivloss_no_reduce_test():
@@ -6892,7 +6921,7 @@ def multilabelsoftmarginloss_no_reduce_test():
         reference_fn=lambda i, m:
             (-(t * i.sigmoid().log() + (1 - t) * (-i).sigmoid().log())).sum(dim=1) / i.size(1),
         check_gradgrad=False,
-        pickle=False)
+        pickle=False, decorator = skipIfRocm)
 
 
 def multilabelsoftmarginloss_weights_no_reduce_test():
@@ -6908,7 +6937,7 @@ def multilabelsoftmarginloss_weights_no_reduce_test():
             (-(t * i.sigmoid().log() + (1 - t) * (-i).sigmoid().log()) * weights).sum(dim=1) / i.size(1),
         check_sum_reduction=True,
         check_gradgrad=False,
-        pickle=False)
+        pickle=False, decorator = skipIfRocm)
 
 
 def multimarginloss_no_reduce_test():
@@ -7185,6 +7214,7 @@ new_module_tests = [
         input_size=(4, 3, 15),
         cudnn=True,
         check_eval=True,
+        test_cuda = (not TEST_WITH_ROCM)
     ),
     dict(
         module_name='InstanceNorm1d',
@@ -7193,6 +7223,7 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='tracking_stats',
+        decorator = skipIfRocm
     ),
     dict(
         module_name='InstanceNorm2d',
@@ -7200,6 +7231,7 @@ new_module_tests = [
         input_size=(2, 3, 6, 6),
         cudnn=True,
         check_eval=True,
+        test_cuda = (not TEST_WITH_ROCM)
     ),
     dict(
         module_name='InstanceNorm2d',
@@ -7208,6 +7240,7 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='tracking_stats',
+        decorator = skipIfRocm 
     ),
     dict(
         module_name='InstanceNorm3d',
@@ -7215,6 +7248,7 @@ new_module_tests = [
         input_size=(2, 3, 4, 4, 4),
         cudnn=True,
         check_eval=True,
+        test_cuda = (not TEST_WITH_ROCM)
     ),
     dict(
         module_name='InstanceNorm3d',
@@ -7223,6 +7257,7 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='tracking_stats',
+        decorator = skipIfRocm
     ),
     dict(
         module_name='LayerNorm',
@@ -7231,6 +7266,7 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='1d_elementwise_affine',
+        test_cuda = (not TEST_WITH_ROCM)
     ),
     dict(
         module_name='LayerNorm',
@@ -7239,6 +7275,7 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='1d_no_elementwise_affine',
+        test_cuda = (not TEST_WITH_ROCM)
     ),
     dict(
         module_name='LayerNorm',
@@ -7247,6 +7284,7 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='3d_elementwise_affine',
+        test_cuda = (not TEST_WITH_ROCM)
     ),
     dict(
         module_name='LayerNorm',
@@ -7255,6 +7293,7 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='3d_no_elementwise_affine',
+        test_cuda = (not TEST_WITH_ROCM)
     ),
     dict(
         module_name='GroupNorm',
@@ -7263,6 +7302,7 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='1d_affine',
+        test_cuda = (not TEST_WITH_ROCM)
     ),
     dict(
         module_name='GroupNorm',
@@ -7270,7 +7310,8 @@ new_module_tests = [
         input_size=(4, 5, 5),
         cudnn=True,
         check_eval=True,
-        desc='1d_no_affine_IN',  # this setting is equivalent with InstanceNorm
+        desc='1d_no_affine_IN',  # this setting is equivalent with InstanceNormi
+        test_cuda = (not TEST_WITH_ROCM)
     ),
     dict(
         module_name='GroupNorm',
@@ -7279,6 +7320,7 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='1d_no_affine_LN',  # this setting is equivalent with LayerNorm
+        test_cuda = (not TEST_WITH_ROCM)
     ),
     dict(
         module_name='GroupNorm',
@@ -7287,6 +7329,7 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='2d_affine',
+        test_cuda = (not TEST_WITH_ROCM)
     ),
     dict(
         module_name='GroupNorm',
@@ -7295,6 +7338,7 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='2d_no_affine_IN',  # this setting is equivalent with InstanceNorm
+        test_cuda = (not TEST_WITH_ROCM)
     ),
     dict(
         module_name='GroupNorm',
@@ -7303,6 +7347,7 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='2d_no_affine_LN',  # this setting is equivalent with LayerNorm
+        test_cuda = (not TEST_WITH_ROCM)
     ),
     dict(
         module_name='Conv1d',
@@ -7590,19 +7635,22 @@ new_module_tests = [
         module_name='LocalResponseNorm',
         constructor_args=(3, ),
         input_size=(1, 5, 7),
-        desc='1d'
+        desc='1d',
+        test_cuda = (not TEST_WITH_ROCM)
     ),
     dict(
         module_name='LocalResponseNorm',
         constructor_args=(2, ),
         input_size=(1, 5, 7, 7),
-        desc='2d_uneven_pad'
+        desc='2d_uneven_pad',
+        test_cuda = (not TEST_WITH_ROCM)
     ),
     dict(
         module_name='LocalResponseNorm',
         constructor_args=(1, 1, 0.5, 2),
         input_size=(1, 5, 7, 7, 7),
-        desc='3d_custom_params'
+        desc='3d_custom_params',
+        test_cuda = (not TEST_WITH_ROCM)
     ),
     dict(
         module_name='ReflectionPad1d',
@@ -7792,6 +7840,8 @@ new_module_tests = [
         jacobian_input=False,
         check_gradgrad=False,
         desc='mean',
+        test_cuda = (not TEST_WITH_ROCM),
+        decorator = skipIfRocm
     ),
     dict(
         module_name='EmbeddingBag',
@@ -7800,6 +7850,8 @@ new_module_tests = [
         jacobian_input=False,
         check_gradgrad=False,
         desc='sum',
+        test_cuda = (not TEST_WITH_ROCM),
+        decorator = skipIfRocm
     ),
     dict(
         module_name='EmbeddingBag',
@@ -7815,6 +7867,8 @@ new_module_tests = [
         input_fn=lambda: torch.randperm(2).repeat(1, 2),
         jacobian_input=False,
         check_gradgrad=False,
+        decorator = skipIfRocm,
+        test_cuda = (not TEST_WITH_ROCM)
     ),
     dict(
         constructor=lambda: nn.Embedding(4, 3, sparse=True),
@@ -7822,6 +7876,7 @@ new_module_tests = [
         jacobian_input=False,
         fullname='Embedding_sparse',
         check_gradgrad=False,
+        test_cuda = (not TEST_WITH_ROCM)
     ),
     dict(
         constructor=lambda: nn.FractionalMaxPool2d(
@@ -8125,30 +8180,35 @@ new_module_tests = [
     dict(
         module_name='GLU',
         input_size=(5, 6),
+        test_cuda = (not TEST_WITH_ROCM)
     ),
     dict(
         module_name='GLU',
         constructor_args=(1,),
         input_size=(5, 6, 7),
-        desc='dim'
+        desc='dim',
+        test_cuda = (not TEST_WITH_ROCM)
     ),
     dict(
         constructor=wrap_functional(F.softmax, dim=-1),
         input_size=(2, 128),  # trigger the last-dim algo in CUDA
         fullname='softmax_lastdim',
         pickle=False,
+        test_cuda = (not TEST_WITH_ROCM)
     ),
     dict(
         constructor=wrap_functional(F.softmax, dim=1),
         input_size=(2, 128, 2, 2),  # trigger special case of spatial CUDA algo
         fullname='softmax_spatial_special',
         pickle=False,
+        test_cuda = (not TEST_WITH_ROCM)
     ),
     dict(
         constructor=wrap_functional(F.softmax, dim=1),
         input_size=(2, 2, 4, 4),  # regular spatial algorithm
         fullname='softmax_spatial',
         pickle=False,
+        test_cuda = (not TEST_WITH_ROCM)
     ),
     dict(
         constructor=wrap_functional(F.softmax, dim=0),
@@ -8176,30 +8236,35 @@ new_module_tests = [
         input_size=(2, 128),  # trigger the last-dim algo in CUDA
         fullname='log_softmax_lastdim',
         pickle=False,
+        test_cuda = (not TEST_WITH_ROCM)
     ),
     dict(
         constructor=wrap_functional(F.log_softmax, dim=1),
         input_size=(2, 128, 2, 2),  # trigger special case of spatial CUDA algo
         fullname='log_softmax_spatial_special',
         pickle=False,
+        test_cuda = (not TEST_WITH_ROCM)
     ),
     dict(
         constructor=wrap_functional(F.log_softmax, dim=1),
         input_size=(2, 2, 4, 4),  # regular spatial algorithm
         fullname='log_softmax_spatial',
         pickle=False,
+        test_cuda = (not TEST_WITH_ROCM)
     ),
     dict(
         constructor=wrap_functional(F.log_softmax, dim=0),
         input_size=(2, 3, 4, 5),
         fullname='log_softmax_dim0',
         pickle=False,
+        test_cuda = (not TEST_WITH_ROCM)
     ),
     dict(
         constructor=wrap_functional(F.log_softmax, dim=3),
         input_size=(2, 3, 4, 5),
         fullname='log_softmax_dim3',
         pickle=False,
+        test_cuda = (not TEST_WITH_ROCM)
     ),
     dict(
         constructor=wrap_functional(F.log_softmax, dim=0),
@@ -8291,6 +8356,7 @@ new_module_tests = [
         input_size=(),
         reference_fn=lambda i, _: torch.exp(i).div_(torch.exp(i).sum(0, False)).log_(),
         desc='multiparam_scalar',
+        test_cuda = (not TEST_WITH_ROCM)
     ),
     dict(
         module_name='ELU',
