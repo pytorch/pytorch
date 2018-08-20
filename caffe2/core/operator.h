@@ -799,7 +799,7 @@ typedef Registry<
     Workspace*>* (*RegistryFunction)();
 CAFFE2_API std::map<int32_t, OperatorRegistry*>* gDeviceTypeRegistry();
 
-struct DeviceTypeRegisterer {
+struct CAFFE2_API DeviceTypeRegisterer {
   explicit DeviceTypeRegisterer(int32_t type, RegistryFunction func) {
     if (gDeviceTypeRegistry()->count(type)) {
       std::cerr << "Device type " << type
@@ -923,7 +923,7 @@ struct StaticLinkingProtector {
 // specific engines that only implement a subset of the features required by
 // the original operator schema.
 // TODO(jiayq): make more feature-complete exception message.
-class UnsupportedOperatorFeature : public std::exception {
+class CAFFE2_API UnsupportedOperatorFeature : public std::exception {
  public:
   UnsupportedOperatorFeature(const string& msg) : msg_(msg) {}
   const char* what() const noexcept override {
@@ -961,40 +961,40 @@ using PerOpEnginePrefType =
     CaffeMap<int, CaffeMap<std::string, EnginePrefType>>;
 // {device_type -> EnginePrefType}
 using GlobalEnginePrefType = CaffeMap<int, EnginePrefType>;
-void SetPerOpEnginePref(const PerOpEnginePrefType& per_op_engine_pref);
-void SetGlobalEnginePref(const GlobalEnginePrefType& global_engine_pref);
-void SetEnginePref(
+CAFFE2_API void SetPerOpEnginePref(const PerOpEnginePrefType& per_op_engine_pref);
+CAFFE2_API void SetGlobalEnginePref(const GlobalEnginePrefType& global_engine_pref);
+CAFFE2_API void SetEnginePref(
     const PerOpEnginePrefType& per_op_engine_pref,
     const GlobalEnginePrefType& global_engine_pref);
-void SetOpEnginePref(
+CAFFE2_API void SetOpEnginePref(
     const std::string& op_type,
     const CaffeMap<int, EnginePrefType>& op_pref);
 
-TensorShape GetTensorShapeOfBlob(const Blob* b);
+CAFFE2_API TensorShape GetTensorShapeOfBlob(const Blob* b);
 
-TensorShapes InferBlobShapesAndTypes(
+CAFFE2_API TensorShapes InferBlobShapesAndTypes(
     CaffeMap<string, TensorShape>& blob_desc,
     const vector<NetDef*>& nets);
 
-TensorShapes InferBlobShapesAndTypesFromWorkspace(
+CAFFE2_API TensorShapes InferBlobShapesAndTypesFromWorkspace(
     Workspace* ws,
     const vector<NetDef*>& nets);
 
-TensorShapes InferBlobShapesAndTypesFromMap(
+CAFFE2_API TensorShapes InferBlobShapesAndTypesFromMap(
     const CaffeMap<std::string, std::vector<TIndex>>& blob_dimensions,
     const vector<NetDef*>& nets);
 
-TensorShapes InferBlobShapesAndTypesFromMap(
+CAFFE2_API TensorShapes InferBlobShapesAndTypesFromMap(
     const CaffeMap<std::string, std::vector<TIndex>>& blob_dimensions,
     const CaffeMap<std::string, TensorProto_DataType>& blob_types,
     const vector<NetDef*>& nets);
 
-std::map<string, std::pair<DeviceOption, DeviceOption>> ValidateTensorDevices(
+CAFFE2_API std::map<string, std::pair<DeviceOption, DeviceOption>> ValidateTensorDevices(
     OperatorBase& op,
     const OperatorDef& op_def);
 
 // Get a set of registered operator names
-std::set<std::string> GetRegisteredOperators();
+CAFFE2_API std::set<std::string> GetRegisteredOperators();
 
 }  // namespace caffe2
 
