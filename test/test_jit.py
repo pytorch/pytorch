@@ -555,6 +555,7 @@ class TestJit(JitTestCase):
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @skipIfRocm
     def test_fusion_rand(self):
         class M(torch.jit.ScriptModule):
             __constants__ = ['d']
@@ -777,6 +778,7 @@ class TestJit(JitTestCase):
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA_MULTI_GPU, "needs non-zero device")
+    @skipIfRocm
     def test_fuse_last_device(self):
         device = 'cuda:' + str(1)
         x = torch.tensor([0.4], dtype=torch.float, device=device)
@@ -1321,17 +1323,26 @@ class TestJit(JitTestCase):
         self.run_pass('constant_propagation', constant_prop.graph)
         self.assertExpected(canonical(constant_prop.graph))
 
-    # TODO: implement
-    @unittest.expectedFailure
     def test_constant_prop_if_constant(self):
         @torch.jit.script
-        def constant_prop():
-            b = 3
-            if True:
-                b = 1
-            if False:
-                b = 2
-            return b
+        def constant_prop(a, b):
+            c0 = 1
+            c1 = 1
+            c2 = 1
+            if a:  # -> c0, c1
+                if b:  # -> c0
+                    if True:  # -> c0
+                        c0 = c0 + 1
+                        if False:
+                            c1 = c1 + 1
+                            c2 = c2 + 1
+            else:  # -> c0, c1
+                c1 = c1 + 1
+
+            if True:  # inlined
+                c0 = c0 + 1  # dynamic
+                c2 = c2 + 4  # set to 5
+            return a + c0 + c1 + c2
 
         self.run_pass('constant_propagation', constant_prop.graph)
         self.assertExpected(canonical(constant_prop.graph))
@@ -2214,14 +2225,14 @@ a")
             if True:
                 x = [2, 3]
             return
-        self.checkScript(reassign, (), optimize=True)
+        self.checkScript(reassign, (), optimize=False)
 
         def reassign_arity_change():
             x = [1]
             if True:
                 x = [1, 2, 3]
             return
-        self.checkScript(reassign_arity_change, (), optimize=True)
+        self.checkScript(reassign_arity_change, (), optimize=False)
 
         def reassign_from_empty_literal():
             x = []
@@ -2229,7 +2240,7 @@ a")
                 x = [1, 2, 3]
             return
         with self.assertRaisesRegex(RuntimeError, "Empty list literals not allowed"):
-            self.checkScript(reassign_from_empty_literal, (), optimize=True)
+            self.checkScript(reassign_from_empty_literal, (), optimize=False)
 
         def reassign_from_empty_builtin():
             x = _construct_empty_int_list()
@@ -2242,7 +2253,7 @@ a")
             if True:
                 z = [torch.randn([1])]
             return
-        self.checkScript(reassign_from_empty_builtin, (), optimize=True)
+        self.checkScript(reassign_from_empty_builtin, (), optimize=False)
 
         def reassign_bad_type():
             x = [1]
@@ -2250,7 +2261,7 @@ a")
                 x = [1.0]
             return
         with self.assertRaisesRegex(RuntimeError, "previously has type"):
-            self.checkScript(reassign_bad_type, (), optimize=True)
+            self.checkScript(reassign_bad_type, (), optimize=False)
 
         def reassign_nested():
             x = _construct_empty_int_list()
@@ -2260,7 +2271,7 @@ a")
                     x = [1.0]
             return
         with self.assertRaisesRegex(RuntimeError, "previously has type"):
-            self.checkScript(reassign_nested, (), optimize=True)
+            self.checkScript(reassign_nested, (), optimize=False)
 
     def test_list_gather(self):
         def index():
@@ -5822,6 +5833,7 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
 
         self.checkTrace(Policy(), (torch.rand(1, 4),))
 
+    @skipIfRocm
     def test_snli(self):
         # TODO:
         #   1) nn.LSTM is called as a Python function https://github.com/pytorch/pytorch/issues/8449
@@ -6068,6 +6080,7 @@ class TestPytorchExportModes(JitTestCase):
                            export_type=torch.onnx.ExportTypes.DIRECTORY)
         shutil.rmtree(d)
 
+    @skipIfRocm
     def test_aten_fallback(self):
         class ModelWithAtenNotONNXOp(nn.Module):
             def forward(self, x, y):
@@ -6266,7 +6279,7 @@ class TestJitGenerated(TestCase):
     pass
 
 
-class TestCustomOperators(TestCase):
+class TestCustomOperators(JitTestCase):
 
     def test_dynamic_op_registry(self):
         from torch._ops import _OpNamespace
@@ -6337,19 +6350,30 @@ class TestCustomOperators(TestCase):
             "Unknown keyword argument 'foo' for operator 'aten::leaky_relu'"
         ):
             torch.ops.aten.leaky_relu(torch.ones(5), foo=torch.ones(5))
-    #
-    # def test_passing_and_returning_lists(self):
-    #     a, b = torch.ones(5), torch.zeros(5)
-    #     output = torch.ops.aten.stack([a, b])
-    #     self.assertEqual(output, torch.ones(10))
-    #
-    # def test_throws_for_tuples(self):
-    #     with self.assertRaisesRegex(
-    #         RuntimeError,
-    #         "Unknown keyword argument 'foo' for operator 'aten::leaky_relu'"
-    #     ):
-    #         torch.ops.aten.leaky_relu(torch.ones(5), foo=torch.ones(5))
 
+    def test_passing_and_returning_lists(self):
+        # Replace with actual test once we support lists.
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Lists and tuples are not supported yet"
+        ):
+            a, b = torch.ones(5), torch.zeros(5)
+            output = torch.ops.aten.stack([a, b])
+            self.assertEqual(output, torch.ones(10))
+
+    def test_passing_and_returning_tuples(self):
+        # Replace with actual test once we support tuples.
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Lists and tuples are not supported yet"
+        ):
+            torch.ops.aten.max_pool2d(torch.ones(5, 5), [2, 2])
+
+    def test_script_graph_contains_custom_op(self):
+        @torch.jit.script
+        def func(x):
+            return torch.ops.aten.relu(x)
+        self.assertExpected(canonical(func.graph))
 
 # UBSAN per-function exclusions don't seem to work with OpenMP pragmas,
 # and we have to disable the failing tests here instead.

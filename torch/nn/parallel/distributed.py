@@ -264,7 +264,7 @@ class DistributedDataParallel(Module):
 
         # module buffer sync
         if self.broadcast_buffers:
-            buffers = [b.data for b in self.module._all_buffers()]
+            buffers = [b.data for b in self.module.buffers()]
             if len(buffers) > 0:
                 # cross-node buffer sync
                 self._dist_broadcast_coalesced(buffers, self.broadcast_bucket_size)
@@ -273,7 +273,7 @@ class DistributedDataParallel(Module):
                     # intra-node buffer sync
                     result = broadcast_coalesced(buffers, self.device_ids, self.broadcast_bucket_size)
                     for tensors, module in zip(result[1:], self._module_copies[1:]):
-                        for tensor, buf in zip(tensors, module._all_buffers()):
+                        for tensor, buf in zip(tensors, module.buffers()):
                             buf.data.set_(tensor)
 
     def _register_grad_hooks(self):

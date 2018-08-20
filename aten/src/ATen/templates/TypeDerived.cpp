@@ -93,10 +93,11 @@ std::unique_ptr<Storage> ${Type}::storageWithAllocator(int64_t size, Allocator* 
         new Storage(ScalarType::${ScalarName}, size, allocator));
 }
 Tensor ${Type}::unsafeTensorFromTH(void * th_pointer, bool retain) const {
-  if (retain)
-    ${THTensor}_retain(${state,} (${THTensor}*) th_pointer);
-  return Tensor(new TensorImpl(${Backend}TensorId(), ScalarType::${ScalarName},
-        (${THTensor}*)(th_pointer), false), false);
+  TensorImpl* pimpl = (TensorImpl*)(th_pointer);
+  if (retain) {
+    pimpl->retain();
+  }
+  return Tensor(pimpl, false);
 }
 std::unique_ptr<Storage> ${Type}::unsafeStorageFromTH(void * th_pointer, bool retain) const {
   if (retain)

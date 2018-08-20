@@ -45,7 +45,6 @@ ROCM_BLACKLIST = [
     'cuda',
     'distributed',
     'distributions',
-    'jit',
     'multiprocessing',
     'nccl',
     'nn',

@@ -27,7 +27,6 @@ class ThreadsafeOperatorTable_ final {
     });
     if (!res) {
       std::ostringstream msg;
-      using ::operator<<;
       msg << "Tried to register conflicting kernels to the dispatcher: " << key;
       throw std::logic_error(msg.str());
     }

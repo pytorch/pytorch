@@ -615,6 +615,7 @@ is_empty:  True
 OPERATOR_SCHEMA(GatherRanges)
     .NumInputs(2)
     .NumOutputs(2)
+    .DisallowInputFillers()
     .SetDoc(R"DOC(
 Given DATA tensor of rank 1, and RANGES tensor of rank 3, gather
 corresponding ranges into a 1-D tensor OUTPUT.
