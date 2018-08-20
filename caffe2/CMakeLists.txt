@@ -415,7 +415,7 @@ if(BUILD_CAFFE2)
 
     foreach(test_src ${Caffe2_ALL_TEST_SRCS})
       get_filename_component(test_name ${test_src} NAME_WE)
-      caffe2_binary_target(${test_name} ${test_src})
+      caffe2_binary_target(${test_src})
       target_link_libraries(${test_name} gtest_main)
       add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
       if (INSTALL_TEST)
