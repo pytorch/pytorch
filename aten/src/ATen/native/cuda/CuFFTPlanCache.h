@@ -192,6 +192,37 @@ public:
                 inembed.begin());                      // begin of output
     }
 
+#ifdef __HIP_PLATFORM_HCC__
+
+    hipfftType exec_type;
+    if (input.type().scalarType() == ScalarType::Float) {
+      if (complex_input && complex_output) {
+	exec_type = HIPFFT_C2C;
+      } else if (complex_input && !complex_output) {
+	exec_type = HIPFFT_C2R;
+      } else if (!complex_input && complex_output) {
+	exec_type = HIPFFT_R2C;
+      } else {
+        throw std::runtime_error("hipFFT doesn't support r2r (float)");
+      }
+    } else if (input.type().scalarType() == ScalarType::Double) {
+      if (complex_input && complex_output) {
+        exec_type = HIPFFT_Z2Z;
+      } else if (complex_input && !complex_output) {
+        exec_type = HIPFFT_Z2D;
+      } else if (!complex_input && complex_output) {
+        exec_type = HIPFFT_D2Z;
+      } else {
+        throw std::runtime_error("hipFFT doesn't support r2r (double)");
+      }
+    } else {
+      std::ostringstream ss;
+      ss << "hipFFT doesn't support tensor of type: "
+         << at::toString(input.type().scalarType());
+      throw std::runtime_error(ss.str());
+    }
+
+#else
     cudaDataType itype, otype, exec_type;
     if (input.type().scalarType() == ScalarType::Float) {
       itype = complex_input ? CUDA_C_32F : CUDA_R_32F;
@@ -211,6 +242,7 @@ public:
          << at::toString(input.type().scalarType());
       throw std::runtime_error(ss.str());
     }
+#endif
 
     // create plan
     auto raw_plan_ptr = new cufftHandle();
@@ -220,7 +252,7 @@ public:
     // disable auto allocation of workspace to use THC allocator
     CUFFT_CHECK(cufftSetAutoAllocation(plan(), /* autoAllocate */ 0));
 
-    size_t ws_size_t;
+    size_t ws_size_t = 0;
 
     // make plan
     if (simple_layout) {
@@ -229,10 +261,17 @@ public:
       // by assuming base_istride = base_ostride = 1.
       //
       // See NOTE [ cuFFT Embedded Strides ] in native/cuda/SpectralOps.cu.
+#ifdef __HIP_PLATFORM_HCC__
+      CUFFT_CHECK((hipfftPlanMany(plan(), signal_ndim, signal_sizes.data(),
+        /* inembed */ nullptr, /* base_istride */ 1, /* idist */ 1,
+        /* onembed */ nullptr, /* base_ostride */ 1, /* odist */ 1,
+	exec_type, batch));
+#else
       CUFFT_CHECK(cufftXtMakePlanMany(plan(), signal_ndim, signal_sizes.data(),
         /* inembed */ nullptr, /* base_istride */ 1, /* idist */ 1, itype,
         /* onembed */ nullptr, /* base_ostride */ 1, /* odist */ 1, otype,
         batch, &ws_size_t, exec_type));
+#endif
     } else {
       // set idist (stride at batch dim)
       // set base_istride (stride at innermost dim of signal)
@@ -258,11 +297,18 @@ public:
       std::vector<long long int> onembed(output_sizes.data() + 1, output_sizes.data() + signal_ndim + 1);
       long long int base_ostride = 1;
 
+#ifdef __HIP_PLATFORM_HCC__
+      CUFFT_CHECK((hipfftPlanMany(plan(), signal_ndim, signal_sizes.data(),
+        inembed.data(), base_istride, idist,
+        onembed.data(), base_ostride, odist,
+        exec_type, batch));
+#else
       CUFFT_CHECK(cufftXtMakePlanMany(plan(), signal_ndim, signal_sizes.data(),
             inembed.data(), base_istride, idist, itype,
             onembed.data(), base_ostride, odist, otype,
             batch, &ws_size_t, exec_type));
-    }
+#endif
+      }
     ws_size = static_cast<int64_t>(ws_size_t);
   }
 
