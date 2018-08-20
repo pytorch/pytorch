@@ -68,8 +68,8 @@ public:
   // indices and values.
   //
   // NOTE: This function supports the following cases:
-  // 1. When we only change the shape of dense dimensions (adding/removing dims, or changing
-  // the size of some dims) and keeping the shape of sparse dimensions unchanged.
+  // 1. When we only change the size of some dense dimensions, while keeping the number of
+  // dense dimensions unchanged.
   // 2. When we keep the number of sparse dimensions unchanged, and NOT shrinking the size of
   // any of the sparse dimensions.
   // 3. When the sparse tensor has zero nnz, in which case we are free to change the shapes of
@@ -78,7 +78,10 @@ public:
   // This function DOESN'T support (and will throw an error) the following cases:
   // 1. When we attempt to change the number of sparse dimensions on a non-empty sparse tensor
   // (such an operation will invalidate the indices stored).
-  // 2. When we attempt to shrink the size of any of the sparse dimensions (this could make
+  // 2. When we attempt to change the number of dense dimensions on a non-empty sparse tensor
+  // (such an operation will behave differently from an equivalent dense tensor's resize method,
+  // and for API consistency we don't support it).
+  // 3. When we attempt to shrink the size of any of the sparse dimensions (this could make
   // some of the stored indices out-of-bound and thus unsafe).
   void resize_(int64_t sparseDims, int64_t denseDims, IntList size) {
     AT_CHECK(sparseDims + denseDims == size.size(), "number of dimensions must be sparseDims (", sparseDims, ") + denseDims (", denseDims, "), but got ", size.size());
@@ -96,11 +99,14 @@ public:
       auto alt_options_msg = "You could try the following options:\n\
 1. If you need an empty sparse tensor of this size, call `x=torch.sparse_coo_tensor(size)`.\n\
 2. If you need to resize this tensor, you have the following options:\n\
-    1. Keep the number of sparse dimensions constant and the size of them non-shrinking, and try the same call again.\n\
-    2. Or, create a new sparse tensor with this tensor's `values` and the correct indices.";
+    1. Keep the number of sparse dimensions constant and the size of them non-shrinking, and keep the number of dense dimensions constant, and then try the same call again.\n\
+    2. Or, create a new sparse tensor with the correct indices and values from this sparse tensor.";
 
       AT_CHECK(sparseDims == sparseDims_,
         "changing the number of sparse dimensions (from ", sparseDims_, " to ", sparseDims, ") on a non-empty sparse tensor is not supported.\n", alt_options_msg);
+
+      AT_CHECK(denseDims == denseDims_,
+        "changing the number of dense dimensions (from ", denseDims_, " to ", denseDims, ") on a non-empty sparse tensor is not supported.\n", alt_options_msg);
 
       AT_CHECK(!shrinking_sparse_dims,
         "shrinking the size of sparse dimensions (from ", sparse_size_original, " to ", sparse_size_new, ") on a non-empty sparse tensor is not supported.\n", alt_options_msg);

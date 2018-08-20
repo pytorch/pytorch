@@ -1129,25 +1129,27 @@ class TestSparse(TestCase):
         self.assertEqual(x._denseDims(), y._denseDims())
 
     def test_resize(self):
-        # 1. Add dims to dense dimensions [Supported]
-        self._test_resize_shape([1, 1], [1, 2, 3], [2, 2, 3],
-                                [1, 1], [1, 2, 3, 4], [2, 2, 3, 4])
-
-        # 2. Remove dims from dense dimensions [Supported]
-        self._test_resize_shape([1, 1], [1, 2, 3], [2, 2, 3],
-                                [1, 1], [1, 2], [2, 2])
-
-        # 3. Change the size of some dense dimensions [Supported]
+        # 1. Change the size of some dense dimensions [Supported]
         self._test_resize_shape([1, 1], [1, 2, 3], [2, 2, 3],
                                 [1, 1], [1, 2, 2], [2, 2, 2])
 
-        # 4. Expand the size of some sparse dimensions [Supported]
+        # 2. Expand the size of some sparse dimensions [Supported]
         self._test_resize_shape([1, 1], [1, 2, 3], [2, 2, 3],
                                 [1, 1], [1, 2, 3], [4, 2, 3])
 
-        # 5. Change the shapes of both sparse and dense dimensions when nnz is zero [Supported]
+        # 3. Change the shapes of both sparse and dense dimensions when nnz is zero [Supported]
         self._test_resize_shape([1, 0], [0, 2, 3], [2, 2, 3],
-                                [2, 1], [1, 2, 4, 5], [1, 1, 2, 4, 5])
+                                [2, 0], [0, 2, 4, 5], [1, 1, 2, 4, 5])
+
+        # 4. Add dims to dense dimensions [Not Supported]
+        with self.assertRaisesRegex(RuntimeError, "changing the number of dense dimensions"):
+            self._test_resize_shape([1, 1], [1, 2, 3], [2, 2, 3],
+                                    [1, 1], [1, 2, 3, 4], [2, 2, 3, 4])
+
+        # 5. Remove dims from dense dimensions [Not Supported]
+        with self.assertRaisesRegex(RuntimeError, "changing the number of dense dimensions"):
+            self._test_resize_shape([1, 1], [1, 2, 3], [2, 2, 3],
+                                    [1, 1], [1, 2], [2, 2])
 
         # 6. Change the number of sparse dimensions on a non-empty sparse tensor [Not Supported]
         with self.assertRaisesRegex(RuntimeError, "changing the number of sparse dimensions"):
