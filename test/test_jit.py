@@ -2205,6 +2205,7 @@ a")
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "No CUDA")
+    @skipIfRocm
     def test_chunk_fusion_cuda(self):
         def fn(x):
             a, b, c = x.chunk(3, 1)
@@ -2220,6 +2221,7 @@ a")
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "No CUDA")
+    @skipIfRocm
     def test_chunk_multiple_fusion_cuda(self):
         # The arguments are intentionally used out of order as a test to see
         # if the fusion compiler adds extra args in the correct order
@@ -2273,6 +2275,7 @@ a")
                 self.checkScript(fn, [tensor])
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @skipIfRocm
     def test_chunk_fusion_correctness(self):
         return self._test_chunk_fusion_correctness(self, 'cpu')
 
