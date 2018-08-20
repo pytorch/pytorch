@@ -340,8 +340,8 @@ if(USE_CUDA)
       target_compile_options(caffe2_gpu PUBLIC "-DAT_CORE_STATIC_WINDOWS=1")
   endif()
 
-#  target_compile_options(caffe2_gpu PRIVATE "-DCAFFE2_BUILD_MAIN_LIB")
-
+  # NB: This must be target_compile_definitions, not target_compile_options,
+  # as the latter is not respected by nvcc
   if (MSVC)
       target_compile_definitions(caffe2_gpu PRIVATE "-DCAFFE2_BUILD_MAIN_LIB")
   endif()
