@@ -5748,6 +5748,22 @@ def func(t):
         fn = self._get_py3_code(code, 'instance')
         self.assertExpected(fn.__getattr__('foo').pretty_print_schema())
 
+    def test_method_casts_script(self):
+        cast_types = [
+            'byte', 'char', 'double', 'float', 'int', 'long', 'short'
+        ]
+
+        for cast_type in cast_types:
+            cu = torch.jit.CompilationUnit('''
+            def cast_to(x):
+                return x.{cast_type}()
+            '''.format(cast_type=cast_type))
+
+            x = torch.rand(3, 4, 5) * 128
+            cu_result = cu.cast_to(x)
+            reference = getattr(x, cast_type)()
+            self.assertEqual(cu_result, reference)
+
 
 class TestEndToEndHybridFrontendModels(JitTestCase):
 
