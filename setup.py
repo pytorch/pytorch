@@ -920,6 +920,7 @@ if USE_ROCM:
     rocm_include_path = '/opt/rocm/include'
     hcc_include_path = '/opt/rocm/hcc/include'
     rocblas_include_path = '/opt/rocm/rocblas/include'
+    rocfft_include_path = '/opt/rocm/rocfft/include'
     hipsparse_include_path = '/opt/rocm/hcsparse/include'
     hiprand_include_path = '/opt/rocm/hiprand/include'
     rocrand_include_path = '/opt/rocm/rocrand/include'
@@ -928,6 +929,7 @@ if USE_ROCM:
     include_dirs.append(rocm_include_path)
     include_dirs.append(hcc_include_path)
     include_dirs.append(rocblas_include_path)
+    include_dirs.append(rocfft_include_path)
     include_dirs.append(hipsparse_include_path)
     include_dirs.append(hiprand_include_path)
     include_dirs.append(rocrand_include_path)

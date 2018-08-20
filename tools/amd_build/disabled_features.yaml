@@ -97,27 +97,6 @@
         }
       },
       {
-        "path": "aten/src/ATen/native/cuda/CuFFTUtils.h",
-        "s_constants": {
-          "#include <cufft.h>": "",
-          "#include <cufftXt.h>": ""
-        }
-      },
-      {
-        "path": "aten/src/ATen/native/cuda/CuFFTPlanCache.h",
-        "s_constants": {
-          "#include <cufft.h>": "",
-          "#include <cufftXt.h>": ""
-        }
-      },
-      {
-        "path": "aten/src/ATen/native/cuda/SpectralOps.cu",
-        "s_constants": {
-          "#include <cufft.h>": "",
-          "#include <cufftXt.h>": ""
-        }
-      },
-      {
         "path": "aten/src/ATen/native/cuda/RoiPooling.cu",
         "s_constants": {
             "RoiPooling2d_backward_kernel<<<": "RoiPooling2d_backward_kernel<float><<<"
@@ -141,9 +120,6 @@
       }
     ],
   "disabled_modules": [
-    "aten/src/ATen/native/cuda/CuFFTUtils.h",
-    "aten/src/ATen/native/cuda/CuFFTPlanCache.h",
-    "aten/src/ATen/native/cuda/SpectralOps.cu",
     "aten/src/ATen/native/cuda/Distributions.cu",
   ],
   "disabled_functions": [
