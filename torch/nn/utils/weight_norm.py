@@ -2,6 +2,7 @@ r"""
 Weight Normalization from https://arxiv.org/abs/1602.07868
 """
 from torch.nn.parameter import Parameter
+from torch import _weight_norm, norm_except_dim
 
 class WeightNorm(object):
     def __init__(self, name, dim):
@@ -11,7 +12,7 @@ class WeightNorm(object):
     def compute_weight(self, module):
         g = getattr(module, self.name + '_g')
         v = getattr(module, self.name + '_v')
-        return torch.weight_norm(v, g, self.dim))
+        return _weight_norm(v, g, self.dim)
 
     @staticmethod
     def apply(module, name, dim):
@@ -23,7 +24,7 @@ class WeightNorm(object):
         del module._parameters[name]
 
         # add g and v as new parameters and express w as g/||v|| * v
-        module.register_parameter(name + '_g', Parameter(torch.norm_except_dim(weight, dim).data))
+        module.register_parameter(name + '_g', Parameter(norm_except_dim(weight, 2, dim).data))
         module.register_parameter(name + '_v', Parameter(weight.data))
         setattr(module, name, fn.compute_weight(module))
 

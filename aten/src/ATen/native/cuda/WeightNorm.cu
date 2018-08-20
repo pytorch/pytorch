@@ -1,8 +1,11 @@
 #include "ATen/ATen.h"
-#include "ATen/NativeFunctions.h"
-#include "ATen/Dispatch.h"
-#include "ATen/cuda/CUDAApplyUtils.cuh"
-#include <THC/THCNumerics.cuh>
+#include "ATen/AccumulateType.h"
+#include "ATen/TensorUtils.h"
+#include "ATen/core/Error.h"
+
+#include "ATen/cuda/CUDAContext.h"
+#include <THC/THCDeviceUtils.cuh>
+#include <THC/THCTensorMathReduce.cuh>
 
 namespace at { 
 namespace native {
@@ -192,9 +195,9 @@ __global__ void weight_norm_bwd_first_dim_kernel
   (scalar_t* __restrict__ grad_v,
    scalar_t* __restrict__ grad_g,
    const scalar_t* __restrict__ grad_w,
-   const scalar_t* __restrict__ savedv,
-   const scalar_t* __restrict__ savedg,
-   const accscalar_t* __restrict__ savedNorms,
+   const scalar_t* __restrict__ saved_v,
+   const scalar_t* __restrict__ saved_g,
+   const accscalar_t* __restrict__ saved_norms,
    const int rowSize)
 {
   // For now, assign one block to each row.
@@ -215,8 +218,8 @@ __global__ void weight_norm_bwd_first_dim_kernel
   for(int i = tid; i < rowSize; i += stride ) 
   {
     accscalar_t grad_wi = scalar_cast<accscalar_t>(grad_w[i+rowStart]); 
-    accscalar_t savedvi = scalar_cast<accscalar_t>(savedv[i+rowStart]); 
-    thread_sum += grad_wi*savedvi; // AccumOp, could do Kahan here
+    accscalar_t saved_vi = scalar_cast<accscalar_t>(saved_v[i+rowStart]); 
+    thread_sum += grad_wi*saved_vi; // AccumOp, could do Kahan here
   }
 
   reduce_block_into_lanes(s, thread_sum, 1, ReduceAdd<accscalar_t>());
@@ -225,7 +228,7 @@ __global__ void weight_norm_bwd_first_dim_kernel
   // Could choose to save reciprocal of norm instead I suppose, but norms is probably
   // more handy to keep around.
   // Broadcast load; could use shared memory instead.
-  accscalar_t rnorm = 1.f/savedNorms[row];  
+  accscalar_t rnorm = 1.f/saved_norms[row];  
   accscalar_t rnorm3 = rnorm*rnorm*rnorm;
 
   // Write g gradients.
@@ -233,15 +236,15 @@ __global__ void weight_norm_bwd_first_dim_kernel
     grad_g[row] = scalar_cast<scalar_t>(result*rnorm);
 
   // Broadcast load, could use shared memory instead.
-  accscalar_t g_this_row = scalar_cast<accscalar_t>(savedg[row]);
+  accscalar_t g_this_row = scalar_cast<accscalar_t>(saved_g[row]);
    
   // Write v gradients.  We are reusing values that were loaded earlier, so there 
   // is an optimization opportunity here (store values persistently).
   for(int j = tid; j < rowSize; j += stride ) 
   {
     accscalar_t grad_wj = scalar_cast<accscalar_t>(grad_w[j+rowStart]);  
-    accscalar_t savedvj = scalar_cast<accscalar_t>(savedv[j+rowStart]);  
-    accscalar_t grad_vj = g_this_row*(rnorm*grad_wj - rnorm3*savedvj*result);
+    accscalar_t saved_vj = scalar_cast<accscalar_t>(saved_v[j+rowStart]);  
+    accscalar_t grad_vj = g_this_row*(rnorm*grad_wj - rnorm3*saved_vj*result);
     grad_v[j+rowStart] = scalar_cast<scalar_t>(grad_vj);
   }
 }
@@ -253,9 +256,9 @@ __global__ void weight_norm_bwd_last_dim_kernel
   (scalar_t* __restrict__ grad_v,
    scalar_t* __restrict__ grad_g,
    const scalar_t* __restrict__ grad_w,
-   const scalar_t* __restrict__ savedv,
-   const scalar_t* __restrict__ savedg,
-   const accscalar_t* __restrict__ savedNorms,
+   const scalar_t* __restrict__ saved_v,
+   const scalar_t* __restrict__ saved_g,
+   const accscalar_t* __restrict__ saved_norms,
    const int fast_dim_size,
    const int slower_dims_size)
 {
@@ -272,8 +275,8 @@ __global__ void weight_norm_bwd_last_dim_kernel
     while(slower_dims_location < slower_dims_size)
     {
       accscalar_t grad_wi = scalar_cast<accscalar_t>(grad_w[currentIdx]); 
-      accscalar_t savedvi = scalar_cast<accscalar_t>(savedv[currentIdx]); 
-      thread_sum += grad_wi*savedvi; // AccumOp, could do Kahan here
+      accscalar_t saved_vi = scalar_cast<accscalar_t>(saved_v[currentIdx]); 
+      thread_sum += grad_wi*saved_vi; // AccumOp, could do Kahan here
       currentIdx += blockDim.y*fast_dim_size;
       slower_dims_location += blockDim.y; 
     }
@@ -282,7 +285,7 @@ __global__ void weight_norm_bwd_last_dim_kernel
   accscalar_t result = s[threadIdx.x];
 
   // Broadcast load; could use shared memory instead.
-  accscalar_t rnorm = 1.f/savedNorms[fast_dim_location];  
+  accscalar_t rnorm = 1.f/saved_norms[fast_dim_location];  
   accscalar_t rnorm3 = rnorm*rnorm*rnorm;
 
   // Write g gradients.
@@ -290,7 +293,7 @@ __global__ void weight_norm_bwd_last_dim_kernel
     grad_g[fast_dim_location] = scalar_cast<scalar_t>(result*rnorm);
 
   // Entire block pulls these values, could use shared memory instead.
-  accscalar_t g_this_col = scalar_cast<accscalar_t>(savedg[fast_dim_location]);
+  accscalar_t g_this_col = scalar_cast<accscalar_t>(saved_g[fast_dim_location]);
 
   // Write v gradients.
   slower_dims_location = threadIdx.y;
@@ -299,13 +302,15 @@ __global__ void weight_norm_bwd_last_dim_kernel
     while(slower_dims_location < slower_dims_size)
     {
       accscalar_t grad_wj = scalar_cast<accscalar_t>(grad_w[currentIdx]);  
-      accscalar_t savedvj = scalar_cast<accscalar_t>(savedv[currentIdx]);  
-      accscalar_t grad_vj = g_this_col*(rnorm*grad_wj - rnorm3*savedvj*result);
+      accscalar_t saved_vj = scalar_cast<accscalar_t>(saved_v[currentIdx]);  
+      accscalar_t grad_vj = g_this_col*(rnorm*grad_wj - rnorm3*saved_vj*result);
       grad_v[currentIdx] = scalar_cast<scalar_t>(grad_vj);
       currentIdx += blockDim.y*fast_dim_size;
       slower_dims_location += blockDim.y; 
     } 
 }
+
+} // anonymous namespace
 
 std::tuple<Tensor,Tensor> weight_norm_fused
   (const Tensor & v,
@@ -324,8 +329,8 @@ std::tuple<Tensor,Tensor> weight_norm_fused
     for(int i = ndims - 1; i > 0; i--)
       rowSize *= v.size(i);
 
-    using namespace at;
-    cudaStream_t stream = globalContext().getCurrentCUDAStream();
+    cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+
     AT_DISPATCH_FLOATING_TYPES_AND_HALF
       (v.type(), 
        "weight_norm_fwd_first_dim_kernel",  
@@ -354,8 +359,8 @@ std::tuple<Tensor,Tensor> weight_norm_fused
 
     int fast_dim_size = v.size(ndims-1);
  
-    using namespace at;
-    cudaStream_t stream = globalContext().getCurrentCUDAStream();
+    cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+
     AT_DISPATCH_FLOATING_TYPES_AND_HALF
       (v.type(), 
        "weight_norm_fwd_last_dim_kernel",  
@@ -398,10 +403,10 @@ std::tuple<Tensor, Tensor> weight_norm_fused_backward
   AT_CHECK(saved_v.is_contiguous(), "saved_v must be contiguous");
   AT_CHECK(saved_g.is_contiguous(), "saved_g must be contiguous");
   AT_CHECK(saved_norms.is_contiguous(), "saved_norms must be contiguous");
-  AT_CHECK(dim == 0 || dim == v.dim() - 1, "fused kernels can only be applied for first or last dim")
+  AT_CHECK(dim == 0 || dim == saved_v.dim() - 1, "fused kernels can only be applied for first or last dim")
 
   auto grad_v = at::empty_like(saved_v);
-  auto grad_g = at::empty_live(saved_g);
+  auto grad_g = at::empty_like(saved_g);
 
   const int ndims = saved_v.dim();
 
@@ -412,8 +417,8 @@ std::tuple<Tensor, Tensor> weight_norm_fused_backward
     for(int i = ndims - 1; i > 0; i--)
       rowSize *= saved_v.size(i);
 
-    using namespace at;
-    cudaStream_t stream = globalContext().getCurrentCUDAStream();
+    cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+
     AT_DISPATCH_FLOATING_TYPES_AND_HALF
       (saved_v.type(), 
        "weight_norm_bwd_first_dim_kernel",  
@@ -431,7 +436,7 @@ std::tuple<Tensor, Tensor> weight_norm_fused_backward
 	    grad_w.data<scalar_t>(),
 	    saved_v.data<scalar_t>(),
 	    saved_g.data<scalar_t>(),
-	    savedNorms.data<accscalar_t>(),
+	    saved_norms.data<accscalar_t>(),
 	    rowSize);
        });
   }
@@ -444,8 +449,8 @@ std::tuple<Tensor, Tensor> weight_norm_fused_backward
 
     int fast_dim_size = saved_v.size(ndims-1);
 
-    using namespace at;
-    cudaStream_t stream = globalContext().getCurrentCUDAStream();
+    cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+
     AT_DISPATCH_FLOATING_TYPES_AND_HALF
       (saved_v.type(), 
        "weight_norm_bwd_last_dim_kernel",  
@@ -463,7 +468,7 @@ std::tuple<Tensor, Tensor> weight_norm_fused_backward
             grad_w.data<scalar_t>(),
             saved_v.data<scalar_t>(),
             saved_g.data<scalar_t>(),
-            savedNorms.data<accscalar_t>(),
+            saved_norms.data<accscalar_t>(),
             fast_dim_size,
             slower_dims_size);
        });
@@ -501,8 +506,8 @@ std::tuple<Tensor, Tensor> weight_norm_differentiable_backward
   AT_CHECK(saved_g.is_contiguous(), "saved_g must be contiguous");
   AT_CHECK(saved_norms.is_contiguous(), "saved_norms must be contiguous");
 
-  last_dim = saved_v.dim() - 1;
-  last_size = saved_v.size(last_dim);
+  int64_t last_dim = saved_v.dim() - 1;
+  int64_t last_size = saved_v.size(last_dim);
  
   // Like weight_norm_fused_backward, weight_norm_differentiable_backward should only ever be called
   // through a WeightNormFusedBackward object, so we expect that dim == 0 || dim == saved_v.size(-1)
@@ -510,27 +515,26 @@ std::tuple<Tensor, Tensor> weight_norm_differentiable_backward
 
   // saved_g and saved_norms are already shaped to broadcast over the correct dimensions
 
-  std::vector<int64_t> bcast_size(v.dim(), 1);
+  std::vector<int64_t> bcast_size(saved_v.dim(), 1);
 
   // Analytic backward path using differentiable primitive ops
   if(dim == 0)
   {
     bcast_size[0] = saved_v.size(0);
-    auto per_dim_sums = (grad_w*saved_v).view(saved_v.size(0), -1).sum(1).view(bcast_size);
+    auto per_dim_sums = (grad_w*saved_v).view({saved_v.size(0), -1}).sum(1).view(bcast_size);
     auto grad_v = (saved_g/saved_norms)*(grad_w - saved_v*(per_dim_sums/(saved_norms*saved_norms)));
     auto grad_g = per_dim_sums/saved_norms; 
     return std::tuple<Tensor, Tensor>{grad_v, grad_g};
   }
-  if(dim == last_dim)
+  else // dim == last_dim
   {
     bcast_size[last_dim] = last_size; 
-    auto per_dim_sums = (grad_w*saved_v).view(-1, last_size).sum(0).view(bcast_size);
+    auto per_dim_sums = (grad_w*saved_v).view({-1, last_size}).sum(0).view(bcast_size);
     auto grad_v = (saved_g/saved_norms)*(grad_w - saved_v*(per_dim_sums/(saved_norms*saved_norms)));
     auto grad_g = per_dim_sums/saved_norms; 
     return std::tuple<Tensor, Tensor>{grad_v, grad_g};
   }
 }
 
-} // anonymous namespace
 } // namespace native
 } // namespace at
