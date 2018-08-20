@@ -5617,7 +5617,7 @@ def func(t):
                 return x.{cast_type}()
             '''.format(cast_type=cast_type))
 
-            x = torch.rand(3, 4, 5) * 1000
+            x = torch.rand(3, 4, 5) * 128
             cu_result = cu.cast_to(x)
             reference = getattr(x, cast_type)()
             self.assertEqual(cu_result, reference)
