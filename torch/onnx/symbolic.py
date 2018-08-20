@@ -748,6 +748,8 @@ def clone(g, input):
 def abs(g, self):
     return g.op("Abs", self)
 
+def log(g, self):
+    return g.op("Log", self)
 
 def pow(g, self, exponent):
     exponent = _maybe_get_scalar(exponent)
