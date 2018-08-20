@@ -2281,6 +2281,7 @@ a")
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "No CUDA")
+    @skipIfRocm
     def test_chunk_fusion_correctness_cuda(self):
         return self._test_chunk_fusion_correctness(self, 'cuda')
 
