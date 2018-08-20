@@ -140,7 +140,7 @@ static int aten_to_dtype(const at::Type& type) {
         "can't convert sparse tensor to numpy. Use Tensor.to_dense() to "
         "convert to a dense tensor first.");
   }
-  if (type.backend() == kCPU) {
+  if (type.backend() == Backend::CPU) {
     switch (type.scalarType()) {
       case kDouble: return NPY_DOUBLE;
       case kFloat: return NPY_FLOAT;

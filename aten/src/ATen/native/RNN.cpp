@@ -519,7 +519,7 @@ std::tuple<Tensor, Tensor> NAME(                                               \
       int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first) { \
   if (at::cudnn_is_acceptable(_input)) {                                       \
     Tensor output, hy;                                                         \
-    NAME##_cudnn_stub(_input.type().backend(), output, hy, _input, hx, _params, has_biases, \
+    NAME##_cudnn_stub(_input.type().device_type(), output, hy, _input, hx, _params, has_biases, \
             num_layers, dropout_p, train, bidirectional, batch_first);         \
     return std::make_tuple(output, hy);                                        \
   }                                                                            \
@@ -539,7 +539,7 @@ std::tuple<Tensor, Tensor> NAME(                                               \
       int64_t num_layers, double dropout_p, bool train, bool bidirectional) {  \
   if (at::cudnn_is_acceptable(data)) {                                         \
     Tensor output, hy;                                                         \
-    NAME##_packed_cudnn_stub(data.type().backend(), output, hy, data, batch_sizes, hx, \
+    NAME##_packed_cudnn_stub(data.type().device_type(), output, hy, data, batch_sizes, hx, \
             _params, has_biases, num_layers, dropout_p, train, bidirectional); \
     return std::make_tuple(output, hy);                                        \
   }                                                                            \
@@ -567,7 +567,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
   AT_CHECK(hx.size() == 2, "lstm expects two hidden states");
   if (at::cudnn_is_acceptable(_input)) {
     Tensor output, hy, cy;
-    lstm_cudnn_stub(_input.type().backend(), output, hy, cy, _input, hx, _params, has_biases,
+    lstm_cudnn_stub(_input.type().device_type(), output, hy, cy, _input, hx, _params, has_biases,
             num_layers, dropout_p, train, bidirectional, batch_first);
     return std::make_tuple(output, hy, cy);
   }
@@ -588,7 +588,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
   AT_CHECK(hx.size() == 2, "lstm expects two hidden states");
   if (at::cudnn_is_acceptable(data)) {
     Tensor output, hy, cy;
-    lstm_packed_cudnn_stub(data.type().backend(), output, hy, cy, data, batch_sizes, hx,
+    lstm_packed_cudnn_stub(data.type().device_type(), output, hy, cy, data, batch_sizes, hx,
             _params, has_biases, num_layers, dropout_p, train, bidirectional);
     return std::make_tuple(output, hy, cy);
   }
