@@ -4297,6 +4297,14 @@ class TestTorch(TestCase):
         ahat = torch.mm(torch.mm(resv, torch.diag(rese)), resv.t())
         self.assertEqual(cov, ahat, 1e-8, 'VeV\' wrong')
 
+        # test eigenvectors=False
+        rese2 = torch.zeros(3)
+        resv2 = torch.randn(3, 3)
+        expected_resv2 = torch.zeros(3, 3)
+        torch.symeig(cov.clone(), False, out=(rese2, resv2))
+        self.assertEqual(rese, rese2)
+        self.assertEqual(resv2, expected_resv2)
+
         # test non-contiguous
         X = torch.rand(5, 5)
         X = X.t() * X

@@ -235,11 +235,11 @@ THC_API void THCTensor_(syev)(THCState *state, THCTensor *re_, THCTensor *rv_, T
     else if (info < 0)
       THError("MAGMA syev : Argument %d : illegal value", -info);
   }
-  if (jobzs[0] != 'N') {
-    THCTensor_(freeCopyTo)(state, input, rv_);
-  } else  {
+  if (jobzs[0] == 'N') {
     // If eigenvector is not needed, fill the result with zeros.
     THCTensor_(zero)(state, rv_);
+  } else  {
+    THCTensor_(freeCopyTo)(state, input, rv_);
   }
 #else
   THError(NoMagma(syev));
