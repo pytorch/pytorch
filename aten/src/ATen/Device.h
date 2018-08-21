@@ -22,7 +22,7 @@ namespace at {
 /// 1. A negative index represents the current device, a non-negative index
 /// represents a specific, concrete device,
 /// 2. When the device type is CPU, the device index must be zero.
-struct Device {
+struct AT_API Device {
   using Type = at::DeviceType;
 
   /// Constructs a new `Device` from a `DeviceType` and an optional device
