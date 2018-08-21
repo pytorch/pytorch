@@ -227,8 +227,16 @@ TypePtr ModuleDecoder::buildType(const onnx::TypeProto& type_proto) {
     // TODO: Don't use DynamicType here
     return DynamicType::get();
   } else if (kind == "CompleteTensorType") {
-    // TODO: Don't use DynamicType here
-    return DynamicType::get();
+    // first half of the dims are sizes and the second half are strides
+    auto total = shape_proto.dim_size();
+    std::vector<int64_t> sizes, strides;
+    for (int i = 0; i < total / 2; i++) {
+      sizes.push_back(shape_proto.dim(i).dim_value());
+    }
+    for (int i = total / 2; i < total; i++) {
+      strides.push_back(shape_proto.dim(i).dim_value());
+    }
+    return TensorType::create(onnxTypeToATenType(tensortype_proto.elem_type()), -1, sizes, strides);
   } else if (kind == "TupleType") {
     std::vector<TypePtr> elems;
     for (auto &subkind : shape_proto.dim()) {

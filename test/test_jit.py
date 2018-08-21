@@ -240,8 +240,8 @@ class JitTestCase(TestCase):
         return graph
 
     def checkTrace(self, func, reference_tensors, input_tensors=None,
-                   optimize=True, drop=None, allow_unused=False,
-                   verbose=False, inputs_require_grads=True, check_tolerance=1e-5):
+                   optimize=True, drop=None, allow_unused=False, verbose=False,
+                   inputs_require_grads=True, check_tolerance=1e-5, export_import=True):
         # TODO: check gradients for parameters, not just inputs
         def allSum(vs):
             # drop allows us to remove some values from ever being used
@@ -264,6 +264,9 @@ class JitTestCase(TestCase):
             ge = torch._C.GraphExecutor(func, optimize)
         else:
             ge = torch.jit.trace(*input_tensors, optimize=optimize, check_tolerance=check_tolerance)(func)
+
+        if export_import:
+            ge = self.getExportImportCopy(ge)
 
         if verbose:
             print(ge.graph)
@@ -6308,8 +6311,7 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
                 x = self.fc2(x)
                 return F.log_softmax(x, dim=1)
 
-        # FIXME: eval() is present because it works around the issue described
-        # in https://github.com/pytorch/pytorch/issues/8448
+        # eval() is present because dropout makes this nondeterministic
         self.checkTrace(Net().eval(), (torch.rand(5, 1, 28, 28),))
 
     def test_reinforcement_learning(self):
@@ -6327,9 +6329,7 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
         self.checkTrace(Policy(), (torch.rand(1, 4),))
 
     def test_snli(self):
-        # TODO:
-        #   1) nn.LSTM is called as a Python function https://github.com/pytorch/pytorch/issues/8449
-        #   2) Dropout is called as a Python function https://github.com/pytorch/pytorch/issues/8450
+        # TODO: nn.LSTM is called as a Python function https://github.com/pytorch/pytorch/issues/8449
         class Bottle(nn.Module):
 
             def forward(self, input):
@@ -6416,7 +6416,8 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
         premise = torch.LongTensor(48, 128).random_(0, 100)
         hypothesis = torch.LongTensor(24, 128).random_(0, 100)
 
-        self.checkTrace(SNLIClassifier(Config()), (premise, hypothesis), inputs_require_grads=False)
+        # TODO: toggle export_import once LSTM isn't a python op
+        self.checkTrace(SNLIClassifier(Config()), (premise, hypothesis), inputs_require_grads=False, export_import=False)
 
     def test_super_resolution(self):
         import torch.nn.init as init
@@ -6495,7 +6496,8 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
                     outputs = torch.cat((outputs, output), 1)
                 return outputs
 
-        self.checkTrace(Sequence(), (torch.rand(3, 4),))
+        # TODO: toggle export_import once above issues are fixed
+        self.checkTrace(Sequence(), (torch.rand(3, 4),), export_import=False)
 
     def test_vae(self):
         class VAE(nn.Module):
@@ -6529,8 +6531,7 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
                 z = self.reparameterize(mu, logvar)
                 return self.decode(z), mu, logvar
 
-        # FIXME: this fails under training because of the call to `randn_like`
-        # https://github.com/pytorch/pytorch/issues/8443
+        # eval() is present because randn_like makes this nondeterministic
         self.checkTrace(VAE().eval(), (torch.rand(128, 1, 28, 28),))
 
 
