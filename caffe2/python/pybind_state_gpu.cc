@@ -13,6 +13,8 @@
 #include "caffe2/core/common_cudnn.h"
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/operator_fallback_gpu.h"
+#include "caffe2/python/pybind_state_fetcher_feeder.h"
+#include "caffe2/python/pybind_state_registry.h"
 
 #ifdef CAFFE2_USE_TRT
 #include "caffe2/contrib/tensorrt/tensorrt_tranformer.h"
@@ -149,9 +151,10 @@ void addCUDAObjectMethods(py::module& m) {
 PYBIND11_MODULE(caffe2_pybind11_state_gpu, m) {
   m.doc() = "pybind11 stateful interface to Caffe2 workspaces - GPU edition";
 
-  addGlobalMethods(m);
+  for (const auto& addition : PybindAdditionRegistry()->Keys()) {
+    PybindAdditionRegistry()->Create(addition, m);
+  }
   addCUDAGlobalMethods(m);
-  addObjectMethods(m);
   addCUDAObjectMethods(m);
 }
 } // namespace python

@@ -10,6 +10,7 @@
 #include <pybind11/stl.h>
 
 #include "caffe2/mkl/mkl_utils.h"
+#include "caffe2/python/pybind_state_fetcher_feeder.h"
 
 #ifdef CAFFE2_HAS_MKL_DNN
 

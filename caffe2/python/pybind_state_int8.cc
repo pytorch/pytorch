@@ -20,6 +20,7 @@
 // for more details.
 #define NO_IMPORT_ARRAY
 #include "caffe2/python/pybind_state.h"
+#include "caffe2/python/pybind_state_fetcher_feeder.h"
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
