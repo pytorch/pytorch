@@ -68,6 +68,7 @@ class RReLU(ScriptModule):
 
 class Hardtanh(ScriptModule):
     __doc__ = nn.Hardtanh.__doc__
+    __constants__ = ['min_val', 'max_val']
 
     def __init__(self, min_val=-1, max_val=1, inplace=False, min_value=None, max_value=None):
         super(Hardtanh, self).__init__()
@@ -199,7 +200,7 @@ class LeakyReLU(ScriptModule):
 
     @torch.jit.script_method
     def forward(self, input):
-        return F.leaky_relu(input, self.negative_slope, self.inplace)
+        return F.leaky_relu(input, self.negative_slope)
 
     def extra_repr(self):
         inplace_str = ', inplace' if self.inplace else ''
@@ -308,7 +309,8 @@ class Softmax(ScriptModule):
 
     @torch.jit.script_method
     def forward(self, input):
-        return F.softmax(input, self.dim, _stacklevel=5)
+        # return F.softmax(input, self.dim, _stacklevel=5)
+        return F.softmax(input, self.dim)
 
 
 class Softmax2d(ScriptModule):
@@ -319,7 +321,8 @@ class Softmax2d(ScriptModule):
         # assert input.dim() == 4, 'Softmax2d requires a 4D tensor as input'
         if (input.dim() != 4):
             print("Error: Softmax2d requires a 4D tensor as input")
-        return F.softmax(input, 1, _stacklevel=5)
+        # return F.softmax(input, 1, _stacklevel=5)
+        return F.softmax(input, 1)
 
 
 class LogSoftmax(ScriptModule):
@@ -337,4 +340,5 @@ class LogSoftmax(ScriptModule):
 
     @torch.jit.script_method
     def forward(self, input):
-        return F.log_softmax(input, self.dim, _stacklevel=5)
+        # return F.log_softmax(input, self.dim, _stacklevel=5)
+        return F.log_softmax(input, self.dim)
