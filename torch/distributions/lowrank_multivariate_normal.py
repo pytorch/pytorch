@@ -110,7 +110,7 @@ class LowRankMultivariateNormal(Distribution):
                              .format(loc.shape, cov_factor.shape, cov_diag.shape))
         self.loc = loc_[..., 0]
         self.cov_diag = cov_diag_[..., 0]
-        batch_shape, event_shape = self.loc.shape[:-1], self.loc.shape[-1:]
+        batch_shape = self.loc.shape[:-1]
 
         self._capacitance_tril = _batch_capacitance_tril(self.cov_factor, self.cov_diag)
         super(LowRankMultivariateNormal, self).__init__(batch_shape, event_shape,
