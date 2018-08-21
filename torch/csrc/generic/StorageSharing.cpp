@@ -215,9 +215,9 @@ static PyObject * THPStorage_(shareCuda)(THPStorage *self)
 {
   HANDLE_TH_ERRORS
   THWStorage *storage = self->cdata;
-  at::DeviceGuard device_guard(storage->getDevice());
+  at::DeviceGuard device_guard(storage->device());
   THPObjectPtr tuple(PyTuple_New(4));
-  THPObjectPtr device(PyLong_FromLong(storage->getDevice()));
+  THPObjectPtr device(PyLong_FromLong(storage->device().index()));
   THPObjectPtr _handle(Py_None);
   Py_INCREF(Py_None);
   THPObjectPtr size(PyLong_FromLong(storage->size()));
@@ -320,7 +320,7 @@ PyObject * THPStorage_(freeWeakRef)(PyObject *_unused, PyObject *arg)
   THPUtils_assert(THPUtils_checkLong(arg),
       "_free_weak_ref(): arg must be an 'int'");
   THStorage *weak_storage = (THStorage*)PyLong_AsVoidPtr(arg);
-  weak_storage->_raw_weak_release();
+  weak_storage->_raw_weak_decweakref();
 
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS

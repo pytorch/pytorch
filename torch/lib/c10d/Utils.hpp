@@ -96,7 +96,7 @@ inline std::vector<int> getDevices(const std::vector<at::Tensor>& tensors) {
   std::vector<int> devices(tensors.size(), -1);
   if (tensors[0].type().is_cuda()) {
     for (size_t i = 0; i < tensors.size(); i++) {
-      devices[i] = tensors[i].storage().getDevice();
+      devices[i] = tensors[i].storage().device().index();
     }
   }
   return devices;

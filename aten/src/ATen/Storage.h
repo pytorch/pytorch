@@ -35,7 +35,7 @@ public:
   DeviceType device_type() const { return storage_impl_->device_type(); }
   at::Allocator* allocator() const { return storage_impl_.get()->allocator(); }
   at::ScalarType scalar_type() const { return storage_impl_->scalar_type(); }
-  int getDevice() const { return storage_impl_->getDevice(); }
+  at::Device device() const { return storage_impl_->device(); }
 
   StorageImpl* unsafeReleaseStorageImpl() {
     return storage_impl_.release();

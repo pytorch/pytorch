@@ -200,5 +200,6 @@ THTensor_compute_stride(at::IntList oldshape, at::IntList oldstride, at::IntList
 void THTensor_stealAndSetStoragePtr(THTensor* tensor, THStorage* storage) {
   // Caffe2 might have tensors whose storages are null, but we
   // don't allow it in PyTorch.
+  AT_ASSERT(storage);
   tensor->storage_ = at::Storage(storage);
 }

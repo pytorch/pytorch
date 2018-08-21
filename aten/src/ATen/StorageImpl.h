@@ -121,8 +121,8 @@ struct AT_API StorageImpl : public c10::intrusive_ptr_target {
   void set_allocator(at::Allocator* allocator) {
     allocator_ = allocator;
   }
-  int getDevice() const {
-    return data_ptr_.device().index();
+  Device device() const {
+    return data_ptr_.device();
   }
   void set_resizable(bool resizable) {
     resizable_ = resizable;
@@ -152,14 +152,14 @@ struct AT_API StorageImpl : public c10::intrusive_ptr_target {
     ptr.release();
     return wptr.release();
   }
-  void _raw_weak_retain() {
+  void _raw_weak_incweakref() {
     // NB: this is a weak reference
     auto wptr = c10::weak_intrusive_ptr<StorageImpl>::reclaim(this);
     auto wptr_copy = wptr;
     wptr_copy.release();
     wptr.release();
   }
-  void _raw_weak_release() {
+  void _raw_weak_decweakref() {
     // NB: this is a weak reference
     // Let it die
     c10::weak_intrusive_ptr<StorageImpl>::reclaim(this);
