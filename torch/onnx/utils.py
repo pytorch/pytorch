@@ -83,13 +83,22 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
             by the functions in symbolic.py are exported as ATen ops.
         export_raw_ir (bool, default False): [DEPRECATED. use operator_export_type]
             export the internal IR directly instead of converting it to ONNX ops.
+        operator_export_type (enum, default OperatorExportTypes.ONNX):
+            OperatorExportTypes.ONNX: all ops are exported as regular ONNX ops.
+            OperatorExportTypes.ONNX_ATEN: all ops are exported as ATen ops.
+            OperatorExportTypes.ONNX_ATEN_FALLBACK: if symbolic is missing,
+                                                    fall back on ATen op.
+            OperatorExportTypes.RAW: export raw ir.
     """
     if aten or export_raw_ir:
         assert operator_export_type is None
         assert aten ^ export_raw_ir
         operator_export_type = OperatorExportTypes.ATEN if aten else OperatorExportTypes.RAW
     elif operator_export_type is None:
-        operator_export_type = OperatorExportTypes.ONNX
+        if torch.onnx.PYTORCH_ONNX_CAFFE2_BUNDLE:
+            operator_export_type = OperatorExportTypes.ONNX_ATEN_FALLBACK
+        else:
+            operator_export_type = OperatorExportTypes.ONNX
     _export(model, args, f, export_params, verbose, training, input_names, output_names,
             operator_export_type=operator_export_type)
 
