@@ -499,6 +499,15 @@ public:
     }
   }
 
+  void replaceInputWithList(size_t i, ArrayRef<Value*> to) {
+    schema_ = nullptr;
+    removeInput(i);
+    for (auto* to_val : to) {
+      JIT_ASSERT(to_val->owningGraph() == graph_);
+      insertInput(i++, to_val);
+    }
+  }
+
   Value* addOutput() {
     outputs_.push_back(new Value(this, outputs_.size()));
     schema_ = nullptr;

@@ -466,6 +466,37 @@ static void speculateOps(Block* block) {
   }
 }
 
+static void eraseListConstruct(Block* block) {
+  for (auto it = block->nodes().begin(), end = block->nodes().end();
+       it != end;) {
+    Node* n = *it;
+    ++it;
+
+    for (auto b : n->blocks()) {
+      eraseListConstruct(b);
+    }
+
+    std::vector<std::tuple<size_t, std::vector<Value*>>> replacements;
+
+    size_t i = 0;
+    for (auto* input : n->inputs()) {
+      if (input->node()->kind() == prim::ListConstruct) {
+        auto* lc_node = input->node();
+        replacements.push_back(std::make_tuple(
+            i,
+            std::vector<Value*>(
+                lc_node->inputs().begin(), lc_node->inputs().end())));
+      }
+      i++;
+    }
+
+    for (auto ritr = replacements.rbegin(); ritr != replacements.rend();
+         ++ritr) {
+      n->replaceInputWithList(std::get<0>(*ritr), std::get<1>(*ritr));
+    }
+  }
+}
+
 // This optimization does ONNX-specific peephole optimizations.
 //
 // At the moment, here are the optimizations it does:
@@ -497,6 +528,7 @@ void PeepholeOptimizeONNX(std::shared_ptr<Graph>& graph) {
   eliminateNopTranspose(graph->block());
   fuseTransposeIntoGemm(graph->block());
   speculateOps(graph->block());
+  eraseListConstruct(graph->block());
 }
 
 }}
