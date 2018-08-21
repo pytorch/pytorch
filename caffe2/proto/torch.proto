@@ -8,7 +8,7 @@
 
 syntax = "proto2";
 
-package onnx;
+package torch;
 
 // Overview
 //
@@ -74,7 +74,10 @@ enum Version {
   //    - Added new message OperatorSetIdProto
   //    - Added opset_import in ModelProto
   // - For vendor extensions, added domain in NodeProto
-  IR_VERSION = 0x0000000000000003;
+  IR_VERSION_NEWEST = 0x0000000000000003;
+
+  // PYTORCH IR VERSION
+  IR_VERSION_NEWEST = 0x0000000100000003;
 }
 
 // Attributes
@@ -174,6 +177,9 @@ message NodeProto {
 
   // A human-readable documentation for this node. Markdown is allowed.
   optional string doc_string = 6;
+
+  // Additional annotations, attributes are defined in Schema
+  repeated AttributeProto annotation = 8;
 }
 
 // Models
@@ -182,6 +188,9 @@ message NodeProto {
 // associating its computation graph with metadata.
 //
 // The semantics of the model are described by the associated GraphProto.
+//
+// Model ==> Caffe2 MetaNetDef
+//       ==> PyTorch Module
 message ModelProto {
   // The version of the IR this model targets. See Version enum above.
   // This field MUST be present.
@@ -222,10 +231,28 @@ message ModelProto {
   optional string doc_string = 6;
 
   // The parameterized graph that is evaluated to execute the model.
+  // The main graph, in single graph case, it is ONNX compatible.
   optional GraphProto graph = 7;
 
+  // The remaining nets in MetaNetDef.
+  // Submodules and methods in PyTorch.
+  repeated GraphProto methods = 15;
+
   // Named metadata values; keys should be distinct.
+  // Many meta data in MetaNetDef and preditor are piggy backed here.
+  // 1) project
+  // 2) model_class
+  // 3) internal_version
+  // 4) predictor_type
+  // 5) predictor_id
+  // 6) execute_plan
+  // 7) applicationSpecificInfo (another string map, need to verify it has no duplicate.)
+  // 8) engine
+  // 9) publish time
   repeated StringStringEntryProto metadata_props = 14;
+
+  // Model name
+  optional string name = 16;
 };
 
 // StringStringEntryProto follows the pattern for cross-proto-version maps.
@@ -241,6 +268,8 @@ message StringStringEntryProto {
 // list of nodes that form a directed acyclic graph based on their inputs and outputs.
 // This is the equivalent of the "network" or "graph" in many deep learning
 // frameworks.
+// Graph ==> NetDef in Caffe2
+//       ==> Submodule/Method in PyTorch
 message GraphProto {
   // The nodes in the graph, sorted topologically.
   repeated NodeProto node = 1;
@@ -263,6 +292,9 @@ message GraphProto {
   // Information for the values in the graph. The ValueInfoProto.name's
   // must be distinct. It is optional for a value to appear in value_info list.
   repeated ValueInfoProto value_info = 13;
+
+  // Additional annotations.
+  repeated AttributeProto annotation = 14;
 
   // DO NOT USE the following fields, they were deprecated from earlier versions.
   // repeated string input = 3;
@@ -302,6 +334,7 @@ message TensorProto {
 
   // The shape of the tensor.
   repeated int64 dims = 1;
+  repeated int64 strides = 14;
 
   // The data type of the tensor.
   optional DataType data_type = 2;
@@ -313,6 +346,7 @@ message TensorProto {
     optional int64 begin = 1;
     optional int64 end = 2;
   }
+  // Used as offset in the external shared data.
   optional Segment segment = 3;
 
   // Tensor content must be organized in row-major order.
@@ -383,6 +417,12 @@ message TensorProto {
   // When this field is present, the data_type field MUST be
   // UINT32 or UINT64
   repeated uint64 uint64_data = 11 [packed = true];
+
+  // External data by file name
+  optional string external_data = 13;
+
+  // Device info
+  optional DeviceOption device_detail = 51;
 }
 
 // Defines a tensor shape. A dimension can be either an integer value
@@ -443,4 +483,46 @@ message OperatorSetIdProto {
   // The version of the operator set being identified.
   // This field MUST be present in this version of the IR.
   optional int64 version = 2;
+}
+
+// DeviceType that Caffe2 currently supports.
+// Note: if you add a device type, make sure you add the corresponding device
+// line in the DeviceTypeName() function in caffe2/utils/proto_utils.cc
+// and update ATen/core/DeviceType.h
+enum DeviceType {
+  CPU = 0;                    // In default, we will use CPU.
+  CUDA = 1;                   // CUDA.
+  MKLDNN = 2;                 // Reserved for explicit MKLDNN
+  OPENGL = 3;                 // OpenGL
+  OPENCL = 4;                 // OpenCL
+  IDEEP = 5;                  // IDEEP.
+  HIP = 6;                    // AMD HIP
+  // Change the following number if you add more devices in the code.
+  COMPILE_TIME_MAX_DEVICE_TYPES = 7;
+  ONLY_FOR_TEST = 20901701;   // This device type is only for test.
+}
+
+// Device-specific options. We do not distinguish DeviceOption protos for
+// different DeviceTypes, so currently all devices share the same DeviceOption
+// proto. Fields that are specific to a device type is ignored if the type does
+// not match.
+// Note: if you add fields to the DeviceOption, make sure you add the
+// corresponding changes to IsSameDevice() function in utils/proto_utils.{h,cc}.
+message DeviceOption {
+  // [general] Options that need to be carried out before running the execution.
+  // optional DeviceType device_type = 1 [ default = CPU ];
+  optional int32 device_type = 1 [ default = 0 ]; // 0 is CPU.
+  // [CUDA specific] the cuda gpu id.
+  optional int32 cuda_gpu_id = 2;
+  // [general] The random seed to start the device random number generator with.
+  optional uint32 random_seed = 3;
+  // [general] What node this op should execute on.
+  // Used for net transformation purposes. Must be empty at execution time.
+  optional string node_name = 4;
+  // [CPU and Linux specific] NUMA node id
+  optional int32 numa_node_id = 5 [default = -1];
+  // [general] Extra information passed, not used at execution time currently.
+  repeated string extra_info = 6;
+  // [HIP specific] the hip gpu id.
+  optional int32 hip_gpu_id = 7;
 }
