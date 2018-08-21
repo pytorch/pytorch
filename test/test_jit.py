@@ -2205,6 +2205,7 @@ a")
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "No CUDA")
+    @skipIfRocm
     def test_chunk_fusion_cuda(self):
         def fn(x):
             a, b, c = x.chunk(3, 1)
@@ -2220,6 +2221,7 @@ a")
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "No CUDA")
+    @skipIfRocm
     def test_chunk_multiple_fusion_cuda(self):
         # The arguments are intentionally used out of order as a test to see
         # if the fusion compiler adds extra args in the correct order
@@ -2273,11 +2275,13 @@ a")
                 self.checkScript(fn, [tensor])
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @skipIfRocm
     def test_chunk_fusion_correctness(self):
         return self._test_chunk_fusion_correctness(self, 'cpu')
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "No CUDA")
+    @skipIfRocm
     def test_chunk_fusion_correctness_cuda(self):
         return self._test_chunk_fusion_correctness(self, 'cuda')
 
@@ -2332,7 +2336,7 @@ a")
             if True:
                 x = [1, 2, 3]
             return
-        with self.assertRaisesRegex(RuntimeError, "Empty list literals not allowed"):
+        with self.assertRaisesRegex(RuntimeError, "previously has type Tensor\[\]"):
             self.checkScript(reassign_from_empty_literal, (), optimize=False)
 
         def reassign_from_empty_builtin():
@@ -5749,6 +5753,22 @@ def func(t):
         ''')
         fn = self._get_py3_code(code, 'instance')
         self.assertExpected(fn.__getattr__('foo').pretty_print_schema())
+
+    def test_method_casts_script(self):
+        cast_types = [
+            'byte', 'char', 'double', 'float', 'int', 'long', 'short'
+        ]
+
+        for cast_type in cast_types:
+            cu = torch.jit.CompilationUnit('''
+            def cast_to(x):
+                return x.{cast_type}()
+            '''.format(cast_type=cast_type))
+
+            x = torch.rand(3, 4, 5) * 128
+            cu_result = cu.cast_to(x)
+            reference = getattr(x, cast_type)()
+            self.assertEqual(cu_result, reference)
 
 
 class TestEndToEndHybridFrontendModels(JitTestCase):

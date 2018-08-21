@@ -13,23 +13,6 @@ IF(NOT MSVC)
   SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-absolute-value")
 ENDIF(NOT MSVC)
 
-################################################################################
-# Helper functions
-################################################################################
-
-function(filter_list output input)
-    unset(result)
-    foreach(filename ${${input}})
-        foreach(pattern ${ARGN})
-            if("${filename}" MATCHES "${pattern}")
-                list(APPEND result "${filename}")
-            endif()
-        endforeach()
-    endforeach()
-    set(${output} ${result} PARENT_SCOPE)
-endfunction()
-
-
 # Can be compiled standalone
 IF(NOT AT_INSTALL_BIN_DIR OR NOT AT_INSTALL_LIB_DIR OR NOT AT_INSTALL_INCLUDE_DIR OR NOT AT_INSTALL_SHARE_DIR)
   SET(AT_INSTALL_BIN_DIR "bin" CACHE PATH "AT install binary subdirectory")
