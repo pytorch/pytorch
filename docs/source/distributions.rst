@@ -131,6 +131,33 @@ Probability distributions - torch.distributions
     :undoc-members:
     :show-inheritance:
 
+:hidden:`HalfCauchy`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: torch.distributions.half_cauchy
+.. autoclass:: HalfCauchy
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
+:hidden:`HalfNormal`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: torch.distributions.half_normal
+.. autoclass:: HalfNormal
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
+:hidden:`Independent`
+~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: torch.distributions.independent
+.. autoclass:: Independent
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
 :hidden:`Laplace`
 ~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -149,11 +176,38 @@ Probability distributions - torch.distributions
     :undoc-members:
     :show-inheritance:
 
+:hidden:`LowRankMultivariateNormal`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: torch.distributions.lowrank_multivariate_normal
+.. autoclass:: LowRankMultivariateNormal
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
 :hidden:`Multinomial`
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 .. currentmodule:: torch.distributions.multinomial
 .. autoclass:: Multinomial
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
+:hidden:`MultivariateNormal`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: torch.distributions.multivariate_normal
+.. autoclass:: MultivariateNormal
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
+:hidden:`NegativeBinomial`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: torch.distributions.negative_binomial
+.. autoclass:: NegativeBinomial
     :members:
     :undoc-members:
     :show-inheritance:
@@ -238,8 +292,17 @@ Probability distributions - torch.distributions
     :members:
     :undoc-members:
     :show-inheritance:
+    
+:hidden:`Weibull`
+~~~~~~~~~~~~~~~~~~~~~~~
 
-KL Divergence
+.. currentmodule:: torch.distributions.weibull
+.. autoclass:: Weibull
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
+`KL Divergence`
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 .. automodule:: torch.distributions.kl
@@ -248,21 +311,21 @@ KL Divergence
 .. autofunction:: kl_divergence
 .. autofunction:: register_kl
 
-Transforms
+`Transforms`
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 .. automodule:: torch.distributions.transforms
     :members:
     :member-order: bysource
 
-Constraints
+`Constraints`
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 .. automodule:: torch.distributions.constraints
     :members:
     :member-order: bysource
 
-Constraint Registry
+`Constraint Registry`
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 .. automodule:: torch.distributions.constraint_registry

@@ -2,11 +2,13 @@ import torch
 from .module import Module
 from torch.nn.parameter import Parameter
 from .. import functional as F
+from .. import init
 
 
 # TODO: check contiguous in THNN
 # TODO: use separate backend functions?
 class _BatchNorm(Module):
+    _version = 2
 
     def __init__(self, num_features, eps=1e-5, momentum=0.1, affine=True,
                  track_running_stats=True):
@@ -25,33 +27,63 @@ class _BatchNorm(Module):
         if self.track_running_stats:
             self.register_buffer('running_mean', torch.zeros(num_features))
             self.register_buffer('running_var', torch.ones(num_features))
+            self.register_buffer('num_batches_tracked', torch.tensor(0, dtype=torch.long))
         else:
             self.register_parameter('running_mean', None)
             self.register_parameter('running_var', None)
+            self.register_parameter('num_batches_tracked', None)
         self.reset_parameters()
 
-    def reset_parameters(self):
+    def reset_running_stats(self):
         if self.track_running_stats:
             self.running_mean.zero_()
             self.running_var.fill_(1)
+            self.num_batches_tracked.zero_()
+
+    def reset_parameters(self):
+        self.reset_running_stats()
         if self.affine:
-            self.weight.data.uniform_()
-            self.bias.data.zero_()
+            init.uniform_(self.weight)
+            init.zeros_(self.bias)
 
     def _check_input_dim(self, input):
-        return NotImplemented
+        raise NotImplementedError
 
     def forward(self, input):
         self._check_input_dim(input)
 
+        exponential_average_factor = 0.0
+
+        if self.training and self.track_running_stats:
+            self.num_batches_tracked += 1
+            if self.momentum is None:  # use cumulative moving average
+                exponential_average_factor = 1.0 / self.num_batches_tracked.item()
+            else:  # use exponential moving average
+                exponential_average_factor = self.momentum
+
         return F.batch_norm(
             input, self.running_mean, self.running_var, self.weight, self.bias,
-            self.training or not self.track_running_stats, self.momentum, self.eps)
+            self.training or not self.track_running_stats,
+            exponential_average_factor, self.eps)
 
-    def __repr__(self):
-        return ('{name}({num_features}, eps={eps}, momentum={momentum},'
-                ' affine={affine}, track_running_stats={track_running_stats})'
-                .format(name=self.__class__.__name__, **self.__dict__))
+    def extra_repr(self):
+        return '{num_features}, eps={eps}, momentum={momentum}, affine={affine}, ' \
+               'track_running_stats={track_running_stats}'.format(**self.__dict__)
+
+    def _load_from_state_dict(self, state_dict, prefix, metadata, strict,
+                              missing_keys, unexpected_keys, error_msgs):
+        version = metadata.get('version', None)
+
+        if (version is None or version < 2) and self.track_running_stats:
+            # at version 2: added num_batches_tracked buffer
+            #               this should have a default value of 0
+            num_batches_tracked_key = prefix + 'num_batches_tracked'
+            if num_batches_tracked_key not in state_dict:
+                state_dict[num_batches_tracked_key] = torch.tensor(0, dtype=torch.long)
+
+        super(_BatchNorm, self)._load_from_state_dict(
+            state_dict, prefix, metadata, strict,
+            missing_keys, unexpected_keys, error_msgs)
 
 
 class BatchNorm1d(_BatchNorm):
@@ -65,9 +97,10 @@ class BatchNorm1d(_BatchNorm):
 
     The mean and standard-deviation are calculated per-dimension over
     the mini-batches and :math:`\gamma` and :math:`\beta` are learnable parameter vectors
-    of size `C` (where `C` is the input size).
+    of size `C` (where `C` is the input size). By default, the elements of :math:`\gamma` are sampled
+    from :math:`\mathcal{U}(0, 1)` and the elements of :math:`\beta` are set to 0.
 
-    By default, during training this layer keeps running estimates of its
+    Also by default, during training this layer keeps running estimates of its
     computed mean and variance, which are then used for normalization during
     evaluation. The running estimates are kept with a default :attr:`momentum`
     of 0.1.
@@ -93,7 +126,8 @@ class BatchNorm1d(_BatchNorm):
         eps: a value added to the denominator for numerical stability.
             Default: 1e-5
         momentum: the value used for the running_mean and running_var
-            computation. Default: 0.1
+            computation. Can be set to ``None`` for cumulative moving average
+            (i.e. simple average). Default: 0.1
         affine: a boolean value that when set to ``True``, this module has
             learnable affine parameters. Default: ``True``
         track_running_stats: a boolean value that when set to ``True``, this
@@ -105,7 +139,8 @@ class BatchNorm1d(_BatchNorm):
         - Input: :math:`(N, C)` or :math:`(N, C, L)`
         - Output: :math:`(N, C)` or :math:`(N, C, L)` (same shape as input)
 
-    Examples:
+    Examples::
+
         >>> # With Learnable Parameters
         >>> m = nn.BatchNorm1d(100)
         >>> # Without Learnable Parameters
@@ -134,9 +169,10 @@ class BatchNorm2d(_BatchNorm):
 
     The mean and standard-deviation are calculated per-dimension over
     the mini-batches and :math:`\gamma` and :math:`\beta` are learnable parameter vectors
-    of size `C` (where `C` is the input size).
+    of size `C` (where `C` is the input size). By default, the elements of :math:`\gamma` are sampled
+    from :math:`\mathcal{U}(0, 1)` and the elements of :math:`\beta` are set to 0.
 
-    By default, during training this layer keeps running estimates of its
+    Also by default, during training this layer keeps running estimates of its
     computed mean and variance, which are then used for normalization during
     evaluation. The running estimates are kept with a default :attr:`momentum`
     of 0.1.
@@ -162,7 +198,8 @@ class BatchNorm2d(_BatchNorm):
         eps: a value added to the denominator for numerical stability.
             Default: 1e-5
         momentum: the value used for the running_mean and running_var
-            computation. Default: 0.1
+            computation. Can be set to ``None`` for cumulative moving average
+            (i.e. simple average). Default: 0.1
         affine: a boolean value that when set to ``True``, this module has
             learnable affine parameters. Default: ``True``
         track_running_stats: a boolean value that when set to ``True``, this
@@ -174,7 +211,8 @@ class BatchNorm2d(_BatchNorm):
         - Input: :math:`(N, C, H, W)`
         - Output: :math:`(N, C, H, W)` (same shape as input)
 
-    Examples:
+    Examples::
+
         >>> # With Learnable Parameters
         >>> m = nn.BatchNorm2d(100)
         >>> # Without Learnable Parameters
@@ -203,9 +241,10 @@ class BatchNorm3d(_BatchNorm):
 
     The mean and standard-deviation are calculated per-dimension over
     the mini-batches and :math:`\gamma` and :math:`\beta` are learnable parameter vectors
-    of size `C` (where `C` is the input size).
+    of size `C` (where `C` is the input size). By default, the elements of :math:`\gamma` are sampled
+    from :math:`\mathcal{U}(0, 1)` and the elements of :math:`\beta` are set to 0.
 
-    By default, during training this layer keeps running estimates of its
+    Also by default, during training this layer keeps running estimates of its
     computed mean and variance, which are then used for normalization during
     evaluation. The running estimates are kept with a default :attr:`momentum`
     of 0.1.
@@ -232,7 +271,8 @@ class BatchNorm3d(_BatchNorm):
         eps: a value added to the denominator for numerical stability.
             Default: 1e-5
         momentum: the value used for the running_mean and running_var
-            computation. Default: 0.1
+            computation. Can be set to ``None`` for cumulative moving average
+            (i.e. simple average). Default: 0.1
         affine: a boolean value that when set to ``True``, this module has
             learnable affine parameters. Default: ``True``
         track_running_stats: a boolean value that when set to ``True``, this
@@ -244,7 +284,8 @@ class BatchNorm3d(_BatchNorm):
         - Input: :math:`(N, C, D, H, W)`
         - Output: :math:`(N, C, D, H, W)` (same shape as input)
 
-    Examples:
+    Examples::
+
         >>> # With Learnable Parameters
         >>> m = nn.BatchNorm3d(100)
         >>> # Without Learnable Parameters

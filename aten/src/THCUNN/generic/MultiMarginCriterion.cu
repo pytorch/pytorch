@@ -8,18 +8,17 @@ void THNN_(MultiMarginCriterion_updateOutput)(
            THCTensor *input,
            THCIndexTensor *target,
            THCTensor *output,
-           bool sizeAverage,
+           int64_t reduction,
            int p,
            THCTensor *weights,
-           accreal margin_,
-           bool reduce)
+           accreal margin_)
 {
   real margin = ScalarConvert<accreal, real>::to(margin_);
   THCUNN_assertSameGPU(state, 2, input, target);
   input = THCTensor_(newContiguous)(state, input);
   if(weights)
     weights = THCTensor_(newContiguous)(state, weights);
-  if (input->nDimension == 1)
+  if (THTensor_nDimensionLegacyNoScalars(input) == 1)
   {
     dim3 blocks(1);
     dim3 threads(MULTIMARGIN_THREADS);
@@ -31,8 +30,8 @@ void THNN_(MultiMarginCriterion_updateOutput)(
         THCTensor_(data)(state, input),
         THCIndexTensor_(data)(state, target),
         weights ? THCTensor_(data)(state, weights) : NULL,
-        1, input->size[0],
-        sizeAverage,
+        1, THTensor_sizeLegacyNoScalars(input, 0),
+        reduction == Reduction::ElementwiseMean,
         margin
       );
     }
@@ -43,24 +42,24 @@ void THNN_(MultiMarginCriterion_updateOutput)(
         THCTensor_(data)(state, input),
         THCIndexTensor_(data)(state, target),
         weights ? THCTensor_(data)(state, weights) : NULL,
-        1, input->size[0],
-        sizeAverage,
+        1, THTensor_sizeLegacyNoScalars(input, 0),
+        reduction == Reduction::ElementwiseMean,
         margin
       );
     }
     THCudaCheck(cudaGetLastError());
   }
-  else if (input->nDimension == 2)
+  else if (input->dim() == 2)
   {
-    int nframe = input->size[0];
-    THArgCheck((target->nDimension == 1) && (target->size[0] == nframe), 3,
+    int nframe = input->size(0);
+    THArgCheck(!target->is_empty() && (THTensor_nDimensionLegacyNoScalars(target) == 1) && (THTensor_sizeLegacyNoScalars(target, 0) == nframe), 3,
                "inconsistent target size");
-    dim3 blocks(input->size[0]);
+    dim3 blocks(input->size(0));
     dim3 threads(MULTIMARGIN_THREADS);
 
-    if (!reduce)
+    if (reduction == Reduction::None)
     {
-      THCTensor_(resize1d)(state, output, input->size[0]);
+      THCTensor_(resize1d)(state, output, input->size(0));
       if (p == 1)
       {
         cunn_MultiMarginCriterion_updateOutput_kernel<1, real, accreal> <<<blocks,threads, 0, THCState_getCurrentStream(state)>>>(
@@ -68,7 +67,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
           THCTensor_(data)(state, input),
           THCIndexTensor_(data)(state, target),
           weights ? THCTensor_(data)(state, weights) : NULL,
-          nframe, input->size[1],
+          nframe, input->size(1),
           false,
           margin
         );
@@ -80,7 +79,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
           THCTensor_(data)(state, input),
           THCIndexTensor_(data)(state, target),
           weights ? THCTensor_(data)(state, weights) : NULL,
-          nframe, input->size[1],
+          nframe, input->size(1),
           false,
           margin
         );
@@ -90,7 +89,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
     else
     {
       THCTensor_(resize1d)(state, output, 1);
-      THCTensor *output_ = THCTensor_(newWithSize1d)(state, input->size[0]);  // tmp output buffer
+      THCTensor *output_ = THCTensor_(newWithSize1d)(state, input->size(0));  // tmp output buffer
       if (p == 1)
       {
         cunn_MultiMarginCriterion_updateOutput_kernel<1, real, accreal> <<<blocks,threads, 0, THCState_getCurrentStream(state)>>>(
@@ -98,8 +97,8 @@ void THNN_(MultiMarginCriterion_updateOutput)(
           THCTensor_(data)(state, input),
           THCIndexTensor_(data)(state, target),
           weights ? THCTensor_(data)(state, weights) : NULL,
-          nframe, input->size[1],
-          sizeAverage,
+          nframe, input->size(1),
+          reduction == Reduction::ElementwiseMean,
           margin
         );
       }
@@ -110,8 +109,8 @@ void THNN_(MultiMarginCriterion_updateOutput)(
           THCTensor_(data)(state, input),
           THCIndexTensor_(data)(state, target),
           weights ? THCTensor_(data)(state, weights) : NULL,
-          input->size[0], input->size[1],
-          sizeAverage,
+          input->size(0), input->size(1),
+          reduction == Reduction::ElementwiseMean,
           margin
         );
       }
@@ -123,7 +122,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
   }
   else
   {
-    THError("vector or matrix expected");
+    AT_ERROR("non-empty vector or matrix expected, got sizes: ", input->sizes());
   }
 
   THCTensor_(free)(state, input);
@@ -137,11 +136,10 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
            THCIndexTensor *target,
            THCTensor *gradOutput,
            THCTensor *gradInput,
-           bool sizeAverage,
+           int64_t reduction,
            int p,
            THCTensor *weights,
-           accreal margin_,
-           bool reduce)
+           accreal margin_)
 {
   real margin = ScalarConvert<accreal, real>::to(margin_);
   THCUNN_assertSameGPU(state, 3, input, gradInput, target);
@@ -151,7 +149,7 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
   if(weights)
     weights = THCTensor_(newContiguous)(state, weights);
 
-  if (input->nDimension == 1)
+  if (THTensor_nDimensionLegacyNoScalars(input) == 1)
   {
     dim3 blocks(1);
     dim3 threads(MULTIMARGIN_THREADS);
@@ -164,10 +162,10 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
         THCTensor_(data)(state, input),
         THCIndexTensor_(data)(state, target),
         weights ? THCTensor_(data)(state, weights) : NULL,
-        1, gradInput->size[0],
-        sizeAverage,
+        1, THTensor_sizeLegacyNoScalars(gradInput, 0),
+        reduction == Reduction::ElementwiseMean,
         margin,
-        reduce
+        reduction != Reduction::None
       );
     }
     else if (p == 2)
@@ -178,20 +176,20 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
         THCTensor_(data)(state, input),
         THCIndexTensor_(data)(state, target),
         weights ? THCTensor_(data)(state, weights) : NULL,
-        1, gradInput->size[0],
-        sizeAverage,
+        1, THTensor_sizeLegacyNoScalars(gradInput, 0),
+        reduction == Reduction::ElementwiseMean,
         margin,
-        reduce
+        reduction != Reduction::None
       );
     }
     THCudaCheck(cudaGetLastError());
   }
-  else if (input->nDimension == 2)
+  else if (input->dim() == 2)
   {
-    int nframe = gradInput->size[0];
-    THArgCheck((target->nDimension == 1) && (target->size[0] == nframe), 3,
+    int nframe = gradInput->size(0);
+    THArgCheck(!target->is_empty() && (THTensor_nDimensionLegacyNoScalars(target) == 1) && (THTensor_sizeLegacyNoScalars(target, 0) == nframe), 3,
                "inconsistent target size");
-    dim3 blocks(gradInput->size[0]);
+    dim3 blocks(gradInput->size(0));
     dim3 threads(MULTIMARGIN_THREADS);
 
     if (p == 1)
@@ -202,10 +200,10 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
         THCTensor_(data)(state, input),
         THCIndexTensor_(data)(state, target),
         weights ? THCTensor_(data)(state, weights) : NULL,
-        nframe, gradInput->size[1],
-        sizeAverage,
+        nframe, gradInput->size(1),
+        reduction == Reduction::ElementwiseMean,
         margin,
-        reduce
+        reduction != Reduction::None
       );
     }
     else if (p == 2)
@@ -216,20 +214,21 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
         THCTensor_(data)(state, input),
         THCIndexTensor_(data)(state, target),
         weights ? THCTensor_(data)(state, weights) : NULL,
-        nframe, gradInput->size[1],
-        sizeAverage,
+        nframe, gradInput->size(1),
+        reduction == Reduction::ElementwiseMean,
         margin,
-        reduce
+        reduction != Reduction::None
       );
     }
     THCudaCheck(cudaGetLastError());
   }
   else
   {
-    THError("vector or matrix expected");
+    AT_ERROR("non-empty vector or matrix expected, got ", input->sizes());
   }
 
   THCTensor_(free)(state, input);
+  THCTensor_(free)(state, gradOutput);
   if(weights)
     THCTensor_(free)(state, weights);
 }

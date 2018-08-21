@@ -1,6 +1,7 @@
 import torch
-from torch.autograd import Variable
 import warnings
+from torch.distributions import constraints
+from torch.distributions.utils import lazy_property
 
 
 class Distribution(object):
@@ -10,10 +11,29 @@ class Distribution(object):
 
     has_rsample = False
     has_enumerate_support = False
+    _validate_args = False
+    support = None
+    arg_constraints = {}
 
-    def __init__(self, batch_shape=torch.Size(), event_shape=torch.Size()):
+    @staticmethod
+    def set_default_validate_args(value):
+        if value not in [True, False]:
+            raise ValueError
+        Distribution._validate_args = value
+
+    def __init__(self, batch_shape=torch.Size(), event_shape=torch.Size(), validate_args=None):
         self._batch_shape = batch_shape
         self._event_shape = event_shape
+        if validate_args is not None:
+            self._validate_args = validate_args
+        if self._validate_args:
+            for param, constraint in self.arg_constraints.items():
+                if constraints.is_dependent(constraint):
+                    continue  # skip constraints that cannot be checked
+                if param not in self.__dict__ and isinstance(getattr(type(self), param), lazy_property):
+                    continue  # skip checking lazily-constructed args
+                if not constraint.check(getattr(self, param)).all():
+                    raise ValueError("The parameter {} has invalid values".format(param))
 
     @property
     def batch_shape(self):
@@ -30,19 +50,20 @@ class Distribution(object):
         return self._event_shape
 
     @property
-    def params(self):
+    def arg_constraints(self):
         """
-        Returns a dictionary from param names to `Constraint` objects that
-        should be satisfied by each parameter of this distribution. For
-        distributions with multiple parameterization, only one complete
-        set of parameters should be specified in `.params`.
+        Returns a dictionary from argument names to
+        :class:`~torch.distributions.constraints.Constraint` objects that
+        should be satisfied by each argument of this distribution. Args that
+        are not tensors need not appear in this dict.
         """
         raise NotImplementedError
 
     @property
     def support(self):
         """
-        Returns a `Constraint` object representing this distribution's support.
+        Returns a :class:`~torch.distributions.constraints.Constraint` object
+        representing this distribution's support.
         """
         raise NotImplementedError
 
@@ -128,7 +149,7 @@ class Distribution(object):
         of the result will be `(cardinality,) + batch_shape + event_shape`
         (where `event_shape = ()` for univariate distributions).
 
-        Note that this enumerates over all batched variables in lock-step
+        Note that this enumerates over all batched tensors in lock-step
         `[[0, 0], [1, 1], ...]`. To iterate over the full Cartesian product
         use `itertools.product(m.enumerate_support())`.
 
@@ -146,6 +167,15 @@ class Distribution(object):
         """
         raise NotImplementedError
 
+    def perplexity(self):
+        """
+        Returns perplexity of distribution, batched over batch_shape.
+
+        Returns:
+            Tensor of shape batch_shape.
+        """
+        return torch.exp(self.entropy())
+
     def _extended_shape(self, sample_shape=torch.Size()):
         """
         Returns the size of the sample returned by the distribution, given
@@ -158,11 +188,12 @@ class Distribution(object):
         """
         return torch.Size(sample_shape + self._batch_shape + self._event_shape)
 
-    def _validate_log_prob_arg(self, value):
+    def _validate_sample(self, value):
         """
-        Argument validation for `log_prob` methods. The rightmost dimensions
-        of a value to be scored via `log_prob` must agree with the distribution's
-        batch and event shapes.
+        Argument validation for distribution methods such as `log_prob`,
+        `cdf` and `icdf`. The rightmost dimensions of a value to be
+        scored via these methods must agree with the distribution's batch
+        and event shapes.
 
         Args:
             value (Tensor): the tensor whose log probability is to be
@@ -185,6 +216,9 @@ class Distribution(object):
             if i != 1 and j != 1 and i != j:
                 raise ValueError('Value is not broadcastable with batch_shape+event_shape: {} vs {}.'.
                                  format(actual_shape, expected_shape))
+
+        if not self.support.check(value).all():
+            raise ValueError('The value argument must be within the support')
 
     def __repr__(self):
         return self.__class__.__name__ + '()'

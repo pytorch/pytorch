@@ -1,5 +1,5 @@
 #include <cstdint>
-#include "TH/THStorage.h"
+#include "TH/THStorageFunctions.h"
 #include "Traits.hpp"
 
 namespace thd { namespace rpc { namespace detail {
@@ -61,16 +61,16 @@ inline void _appendData(ByteArray& str, THLongStorage* arg) {
   _appendType(str, RPCType::LONG_STORAGE);
   _appendScalar<char>(str, arg == NULL);
   if (!arg) return;
-  _appendScalar<ptrdiff_t>(str, arg->size);
-  for (ptrdiff_t i = 0; i < arg->size; i++)
-    _appendScalar<int64_t>(str, arg->data[i]);
+  _appendScalar<ptrdiff_t>(str, THLongStorage_size(arg));
+  for (ptrdiff_t i = 0; i < THLongStorage_size(arg); i++)
+    _appendScalar<int64_t>(str, THLongStorage_get(arg, i));
 }
 
 template<typename T>
 inline void _appendData(ByteArray& str, const std::vector<T>& arg) {
   int l = arg.size();
   _appendData(str, l);
-  for (std::size_t i = 0; i < l; i++)
+  for (size_t i = 0; i < l; i++)
     __appendData(
         str,
         arg[i],

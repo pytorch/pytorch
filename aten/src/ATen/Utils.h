@@ -1,47 +1,74 @@
 #pragma once
 
-#include "ArrayRef.h"
-#include "ATenGeneral.h"
-#include "UndefinedTensor.h"
+#include "ATen/ATenGeneral.h"
+#include "ATen/StorageImpl.h"
+#include "ATen/UndefinedTensor.h"
+
+#include <ATen/core/ScalarType.h>
+#include "ATen/Formatting.h"
+#include "ATen/core/ArrayRef.h"
+#include "ATen/core/Error.h"
+
 #include <algorithm>
 #include <sstream>
 #include <typeinfo>
-#include "ATenAssert.h"
+#include <numeric>
+
+#if defined(__clang__)
+#define __ubsan_ignore_float_divide_by_zero__ __attribute__((no_sanitize("float-divide-by-zero")))
+#define __ubsan_ignore_vptr__ __attribute__((no_sanitize("vptr")))
+#else
+#define __ubsan_ignore_float_divide_by_zero__
+#define __ubsan_ignore_vptr__
+#endif
 
 namespace at {
 
-template <typename T, typename Base>
-static inline T* checked_cast_storage(Base* expr, const char * name, int pos) {
-  if (typeid(*expr) != typeid(T))
-    runtime_error("Expected object of type %s but found type %s for argument #%d '%s'",
-      T::typeString(),expr->type().toString(),pos,name);
+AT_API int _crash_if_asan(int);
+
+template <typename T>
+static inline T* checked_cast_storage(Storage* expr, const char * name, int pos, Backend backend, ScalarType scalar_type) {
+  if (at::detail::get_backend(expr->pImpl()) != backend) {
+    AT_ERROR("Expected object of backend ", backend, " but got backend ", at::detail::get_backend(expr->pImpl()),
+             " for argument #", pos, " '", name, "'");
+  }
+  if (expr->pImpl()->scalar_type() != scalar_type) {
+    AT_ERROR("Expected object of scalar type ", scalar_type, " but got scalar type ", expr->pImpl()->scalar_type(),
+             " for argument #", pos, " '", name, "'");
+  }
   return static_cast<T*>(expr);
 }
 
 template <typename T, typename Base>
-inline T* checked_cast_tensor(Base* expr, const char * name, int pos, bool allowNull) {
+inline T* checked_cast_tensor(Base* expr, const char * name, int pos, bool allowNull, Backend backend, ScalarType scalar_type) {
   if(allowNull && expr == UndefinedTensor::singleton()) {
     return nullptr;
   }
-  if (typeid(*expr) != typeid(T))
-    runtime_error("Expected object of type %s but found type %s for argument #%d '%s'",
-      T::typeString(),expr->type().toString(),pos,name);
+  if (expr->type().backend() != backend) {
+    AT_ERROR("Expected object of backend ", backend, " but got backend ", expr->type().backend(),
+             " for argument #", pos, " '", name, "'");
+  }
+  if (expr->type().scalarType() != scalar_type) {
+    AT_ERROR("Expected object of scalar type ", scalar_type, " but got scalar type ", expr->type().scalarType(),
+             " for argument #", pos, " '", name, "'");
+  }
   return static_cast<T*>(expr);
 }
 
 // Converts a TensorList (i.e. ArrayRef<Tensor> to the underlying TH* Tensor Pointer)
 template <typename T, typename TBase, typename TH>
-static inline std::vector<TH*> tensor_list_checked_cast(ArrayRef<TBase> tensors, const char * name, int pos) {
+static inline std::vector<TH*> tensor_list_checked_cast(ArrayRef<TBase> tensors, const char * name, int pos, Backend backend, ScalarType scalar_type) {
   std::vector<TH*> casted(tensors.size());
   for (unsigned int i = 0; i < tensors.size(); ++i) {
     auto *expr = tensors[i].pImpl;
+    // TODO: Use the backend, scalar_type arguments to replace this
+    // dynamic cast for the test
     auto result = dynamic_cast<T*>(expr);
     if (result) {
-      casted[i] = result->tensor;
+      casted[i] = result;
     } else {
-      runtime_error("Expected a Tensor of type %s but found a type %s for sequence element %u "
-                    " in sequence argument at position #%d '%s'",
-                    T::typeString(),expr->type().toString(),i,pos,name);
+      AT_ERROR("Expected a Tensor of RTTI type ", typeid(T).name(), " but found a type ", typeid(*expr).name(),
+               " for sequence element ", i, " in sequence argument at position #", pos, " '", name, "'");
 
     }
   }
@@ -59,11 +86,18 @@ std::array<int64_t, N> check_intlist(ArrayRef<int64_t> list, const char * name, 
     return res;
   }
   if (list.size() != N) {
-    runtime_error("Expected a list of %zd ints but got %zd for argument #%d '%s'",
-        N, list.size(), pos, name);
+    AT_ERROR("Expected a list of ", N, " ints but got ", list.size(), " for argument #", pos, " '", name, "'");
   }
   std::copy_n(list.begin(), N, res.begin());
   return res;
+}
+
+inline int64_t sum_intlist(ArrayRef<int64_t> list) {
+  return std::accumulate(list.begin(), list.end(), 0);
+}
+
+inline int64_t prod_intlist(ArrayRef<int64_t> list) {
+  return std::accumulate(list.begin(), list.end(), 1, std::multiplies<int64_t>());
 }
 
 } // at

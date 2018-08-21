@@ -1,4 +1,5 @@
 import torch
+from torch._six import inf
 from .Module import Module
 from .utils import clear
 
@@ -34,7 +35,7 @@ class Normalize(Module):
         self._output.resize_as_(input)
 
         # specialization for the infinity norm
-        if self.p == float('inf'):
+        if self.p == inf:
             if not self._indices:
                 self._indices = torch.cuda.FloatTensor() if torch.typename(self.output) == 'torch.cuda.FloatTensor' \
                     else torch.LongTensor()
@@ -72,7 +73,7 @@ class Normalize(Module):
             self.cross = input.new()
         # compute diagonal term with gradOutput
         self._gradInput.resize_(n, d)
-        if self.p == float('inf'):
+        if self.p == inf:
                 # specialization for the inf case
             torch.mul(self.norm.view(n, 1, 1).expand(n, d, 1), gradOutput, out=self._gradInput)
             self.buffer.resize_as_(input).zero_()
@@ -113,7 +114,7 @@ class Normalize(Module):
         self._gradInput.add_(-1, self.buffer)
 
         # reuse cross buffer for normalization
-        if self.p == float('inf'):
+        if self.p == inf:
             torch.mul(self.norm, self.norm, out=self.cross)
         else:
             torch.mul(self.normp, self.norm, out=self.cross)

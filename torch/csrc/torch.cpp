@@ -1,4 +1,4 @@
-#include <torch/torch.h>
+#include <torch/csrc/variable_tensor_functions.h>
 #include <torch/csrc/autograd/generated/VariableType.h>
 #include <torch/csrc/autograd/variable.h>
 
@@ -8,11 +8,15 @@ at::Type& getType(at::Backend backend, at::ScalarType type) {
 }
 
 at::Type& CPU(at::ScalarType type) {
-  return torch::getType(at::kCPU, type);
+  return torch::getType(at::Backend::CPU, type);
 }
 
 at::Type& CUDA(at::ScalarType type) {
-  return torch::getType(at::kCUDA, type);
+  return torch::getType(at::Backend::CUDA, type);
+}
+
+at::Tensor toTensor(const at::Scalar& scalar) {
+  return autograd::make_variable(scalar.toTensor());
 }
 
 void set_requires_grad(at::Tensor& tensor, bool requires_grad) noexcept {

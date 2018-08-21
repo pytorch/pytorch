@@ -27,7 +27,7 @@ _cudart = None
 
 
 def find_cuda_windows_lib():
-    proc = Popen(['where', 'cudart64*.dll'], stdout=PIPE, stderr=PIPE)
+    proc = Popen(['where', 'cudart64*.dll'], stdout=PIPE, stderr=PIPE, stdin=PIPE)
     out, err = proc.communicate()
     out = out.decode().strip()
     if len(out) > 0:
@@ -112,7 +112,7 @@ def _check_capability():
             warnings.warn(incorrect_binary_warn % (d, name, 8000, CUDA_VERSION))
         elif CUDA_VERSION < 9000 and major >= 7:
             warnings.warn(incorrect_binary_warn % (d, name, 9000, CUDA_VERSION))
-        elif capability == (3, 0) or capability == (5, 0) or major < 3:
+        elif capability == (3, 0) or major < 3:
             warnings.warn(old_gpu_warn % (d, name, major, capability[1]))
 
 
@@ -216,7 +216,7 @@ class device(object):
     """
 
     def __init__(self, idx):
-        self.idx = idx
+        self.idx = int(idx)
         self.prev_idx = -1
 
     def __enter__(self):
@@ -269,8 +269,7 @@ def get_device_name(device):
         device (int): device for which to return the name. This function is a
             no-op if this argument is negative.
     """
-    if device >= 0:
-        return torch._C._cuda_getDeviceName(device)
+    return get_device_properties(device).name
 
 
 def get_device_capability(device):
@@ -282,8 +281,8 @@ def get_device_capability(device):
     Returns:
         tuple(int, int): the major and minor cuda capability of the device
     """
-    if device >= 0:
-        return torch._C._cuda_getDeviceCapability(device)
+    prop = get_device_properties(device)
+    return prop.major, prop.minor
 
 
 def get_device_properties(device):

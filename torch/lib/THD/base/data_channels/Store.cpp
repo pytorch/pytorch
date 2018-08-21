@@ -46,7 +46,7 @@ void Store::StoreDeamon::deamon() {
   // receive the queries
   bool finished = false;
   while (!finished) {
-    for (std::size_t i = 0; i < _sockets.size(); i++) {
+    for (size_t i = 0; i < _sockets.size(); i++) {
       fds[i].revents = 0;
     }
 
@@ -60,7 +60,7 @@ void Store::StoreDeamon::deamon() {
       _keys_awaited.push_back(0);
       fds.push_back({ .fd = sock_fd, .events = POLLIN });
     }
-    for (std::size_t rank = 0; rank < _sockets.size(); rank++) {
+    for (size_t rank = 0; rank < _sockets.size(); rank++) {
       if (fds[rank + 1].revents == 0)
         continue;
 
@@ -114,7 +114,7 @@ void Store::StoreDeamon::query(rank_type rank) {
     size_type nargs;
     recv_bytes<size_type>(socket, &nargs, 1);
     std::vector<std::string> keys(nargs);
-    for (std::size_t i = 0; i < nargs; i++) {
+    for (size_t i = 0; i < nargs; i++) {
       keys[i] = recv_string(socket);
     }
     if (checkAndUpdate(keys)) {
@@ -187,7 +187,7 @@ void Store::wait(const std::vector<std::string>& keys) {
   send_value<QueryType>(_socket, QueryType::WAIT);
   size_type nkeys = keys.size();
   send_bytes<size_type>(_socket, &nkeys, 1, (nkeys > 0));
-  for (std::size_t i = 0; i < nkeys; i++) {
+  for (size_t i = 0; i < nkeys; i++) {
     send_string(_socket, keys[i], (i != (nkeys - 1)));
   }
   // after sending the query, wait for a 'stop_waiting' response

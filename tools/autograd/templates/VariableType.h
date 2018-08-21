@@ -4,6 +4,8 @@
 
 #include <ATen/ATen.h>
 
+#include <torch/csrc/WindowsTorchApiMacro.h>
+
 #include <cstdint> // for size_t
 #include <functional> // for function
 #include <memory> // for unique_ptr
@@ -17,23 +19,28 @@ using at::Context;
 using at::Generator;
 using at::IntList;
 using at::Scalar;
-using at::SparseTensor;
+using at::SparseTensorRef;
+using at::ScalarType;
 using at::Storage;
 using at::Tensor;
 using at::TensorList;
 using at::Type;
+using at::ScalarType;
+using at::optional;
 
-struct VariableType final : public at::Type {
+void register_variable_type_for(at::Type* baseType);
+
+struct TORCH_API VariableType final : public at::Type {
   VariableType(Context* context, at::Type* baseType);
   virtual at::ScalarType scalarType() const override;
   virtual at::Backend backend() const override;
   virtual bool is_cuda() const override;
   virtual bool is_sparse() const override;
   virtual bool is_distributed() const override;
-  virtual std::unique_ptr<at::Storage> storage() const override;
-  virtual std::unique_ptr<at::Storage> storage(size_t size) const override;
+  virtual std::unique_ptr<at::Storage> storage(bool resizable = false) const override;
+  virtual std::unique_ptr<at::Storage> storage(size_t size, bool resizable = false) const override;
   virtual std::unique_ptr<at::Storage> storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const override;
-  virtual std::unique_ptr<Storage> storageWithAllocator(int64_t size, std::unique_ptr<at::Allocator> allocator) const override;
+  virtual std::unique_ptr<Storage> storageWithAllocator(int64_t size, at::Allocator* allocator) const override;
   virtual std::unique_ptr<at::Generator> generator() const override;
   virtual const char * toString() const override;
   virtual at::TypeID ID() const override;
@@ -47,21 +54,24 @@ struct VariableType final : public at::Type {
   static at::Type* getType(const at::Type& baseType);
   static at::Type* getType(const at::Tensor& tensor);
   static bool isVariableType(const at::Type& type);
-  static std::vector<at::Type*> allTypes();
+  static std::vector<at::Type*> allCUDATypes();
+  static std::vector<at::Type*> allCPUTypes();
 
   virtual Tensor & s_copy_(Tensor & self, const Tensor & src, bool non_blocking) const override;
+  virtual Tensor & _s_copy_from(const Tensor & self, Tensor & dst, bool non_blocking) const override;
   ${type_derived_method_declarations}
 
 private:
   // checks that t is actually a Variable
   static Variable & checked_cast_variable(const Tensor & t, const char * name, int pos);
   static at::Tensor & unpack(const Tensor & t, const char * name, int pos);
-  static at::SparseTensor unpack(SparseTensor t, const char * name, int pos);
+  static at::SparseTensorRef unpack(SparseTensorRef t, const char * name, int pos);
   static at::Tensor unpack_opt(const Tensor & t, const char * name, int pos);
   static std::vector<at::Tensor> unpack(at::TensorList tl, const char *name, int pos);
 
   at::Type* baseType;
   std::string str;
+  size_t id_;
 };
 
 }} // namespace torch::autograd

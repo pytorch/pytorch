@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Config.h>
+#include <ATen/cuda/CUDAConfig.h>
 
 #if !AT_CUDNN_ENABLED()
 
@@ -26,6 +27,7 @@ std::tuple<Tensor, Tensor> cudnn_grid_sampler_backward(
 #include <ATen/cudnn/Descriptors.h>
 #include <ATen/cudnn/Types.h>
 #include <ATen/cudnn/Utils.h>
+#include <ATen/cuda/Exceptions.h>
 
 #include <ATen/TensorUtils.h>
 
@@ -86,7 +88,7 @@ Tensor cudnn_grid_sampler_forward(
 
   Constant one(dataType, 1);
   Constant zero(dataType, 0);
-  CUDNN_CHECK(cudnnSpatialTfSamplerForward(
+  AT_CUDNN_CHECK(cudnnSpatialTfSamplerForward(
       handle, desc.desc(),
       &one, idesc.desc(), input->data_ptr(),
       grid->data_ptr(),
@@ -128,7 +130,7 @@ std::tuple<Tensor, Tensor> cudnn_grid_sampler_backward(
 
   Constant one(dataType, 1);
   Constant zero(dataType, 0);
-  CUDNN_CHECK(cudnnSpatialTfSamplerBackward(
+  AT_CUDNN_CHECK(cudnnSpatialTfSamplerBackward(
     handle, desc.desc(),
     &one, idesc.desc(), input->data_ptr(),
     &zero, gdesc.desc(), grad_input_t.data_ptr(),

@@ -1,5 +1,7 @@
 CMAKE_MINIMUM_REQUIRED(VERSION 2.8)
-SET(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake ${CMAKE_MODULE_PATH})
+# TODO(jiayq): once we have unified CMake entry, remove this module path.
+SET(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../../../cmake/Modules ${CMAKE_MODULE_PATH})
+SET(Gloo_USE_CUDA TRUE)
 
 ################################################################################
 # Helper functions
@@ -38,26 +40,26 @@ IF(NOT HAS_THREAD_LOCAL)
                         "XCode 8 or newer.")
 ENDIF(NOT HAS_THREAD_LOCAL)
 
-FIND_PACKAGE(NCCL)
 
 FIND_PACKAGE(MPI)
 
 FIND_PACKAGE(Gloo)
 
-FIND_PACKAGE(ATen REQUIRED)
-INCLUDE_DIRECTORIES(${ATEN_INCLUDE_DIR})
+FIND_PACKAGE(Caffe2 REQUIRED)
+INCLUDE_DIRECTORIES(${CAFFE2_INCLUDE_DIR})
 
-IF(NO_CUDA)
+IF(NOT USE_CUDA)
   MESSAGE(STATUS "ignoring CUDA")
 ELSE()
   FIND_PACKAGE(CUDA 7.5)
   IF(CUDA_FOUND)
     INCLUDE_DIRECTORIES(${CUDA_INCLUDE_DIRS})
-    INCLUDE_DIRECTORIES("${CUDA_SDK_ROOT_DIR}/common/inc")
     LINK_DIRECTORIES("${CUDA_TOOLKIT_ROOT_DIR}/lib" "${CUDA_TOOLKIT_ROOT_DIR}/lib64")
 
-    ADD_DEFINITIONS(-DWITH_CUDA=1)
+    ADD_DEFINITIONS(-DUSE_CUDA=1)
   ENDIF()
+
+  FIND_PACKAGE(NCCL)
 ENDIF()
 
 IF(MPI_FOUND)
@@ -68,9 +70,9 @@ ENDIF()
 IF(GLOO_FOUND)
   ADD_DEFINITIONS(-DWITH_GLOO=1)
   MESSAGE(STATUS "Found Gloo, will compile with Gloo distributed backend")
-  IF(WITH_GLOO_IBVERBS)
+  IF(USE_GLOO_IBVERBS)
     MESSAGE(STATUS "Building the gloo backend with both TCP and infiniband support")
-    ADD_DEFINITIONS(-DWITH_GLOO_IBVERBS=1)
+    ADD_DEFINITIONS(-DUSE_GLOO_IBVERBS=1)
   ELSE()
     MESSAGE(STATUS "Building the gloo backend with TCP support only")
   ENDIF()
@@ -82,7 +84,7 @@ IF(NCCL_FOUND)
     MESSAGE(STATUS "NCCL Version 2 or higher found, will "
                    "compile with NCCL distributed backend")
     SET(DISTRIBUTED_NCCL_FOUND TRUE)
-    ADD_DEFINITIONS(-DWITH_DISTRIBUTED_NCCL=1)
+    ADD_DEFINITIONS(-DUSE_DISTRIBUTED_NCCL=1)
   ELSE()
     MESSAGE(STATUS "Found NCCL, but the NCCL version is either not 2+ or not "
                    "determinable, will not compile with NCCL distributed "
@@ -128,14 +130,20 @@ ENDIF()
 
 EXCLUDE_DIR(master_worker_cpp ".*/dispatch/.*\\.cpp$")
 
-SET(all_cpp ${base_cpp} ${process_group_cpp} ${master_worker_cpp})
-SET(all_h THD.h ${base_h} ${process_group_h} ${master_worker_h})
+SET(all_cpp ${base_cpp} ${process_group_cpp})
+SET(all_h THD.h ${base_h} ${process_group_h})
+
+IF(USE_DISTRIBUTED_MW)
+  ADD_DEFINITIONS(-DUSE_DISTRIBUTED_MW=1)
+  SET(all_cpp ${all_cpp} ${master_worker_cpp})
+  SET(all_h THD.h ${all_h} ${master_worker_h})
+ENDIF()
 
 EXCLUDE_DIR(all_cpp ".*/generic/.*\\.cpp$")
 
 # Need to include external NCCL first
 IF(DISTRIBUTED_NCCL_FOUND)
-  INCLUDE_DIRECTORIES(${NCCL_INCLUDE_DIR})
+  INCLUDE_DIRECTORIES(${NCCL_INCLUDE_DIRS})
   FILE(APPEND "${CMAKE_INSTALL_PREFIX}/THD_deps.txt" "${NCCL_LIBRARIES};")
 ENDIF()
 
@@ -144,7 +152,7 @@ INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR})
 ADD_LIBRARY(THD STATIC ${all_cpp})
 set_property(TARGET THD PROPERTY POSITION_INDEPENDENT_CODE ON)
 
-FILE(WRITE "${CMAKE_INSTALL_PREFIX}/THD_deps.txt" "${ATEN_LIBRARIES};")
+FILE(WRITE "${CMAKE_INSTALL_PREFIX}/THD_deps.txt" "${CAFFE2_LIBRARIES};")
 
 IF(MPI_FOUND)
   INCLUDE_DIRECTORIES(${MPI_INCLUDE_PATH})
@@ -163,7 +171,8 @@ ENDIF()
 
 IF(GLOO_FOUND)
   INCLUDE_DIRECTORIES(${GLOO_INCLUDE_DIR})
-  FILE(APPEND "${CMAKE_INSTALL_PREFIX}/THD_deps.txt" "${GLOO_LIBRARIES};")
+  FILE(APPEND "${CMAKE_INSTALL_PREFIX}/THD_deps.txt" "${Gloo_LIBRARY};")
+  FILE(APPEND "${CMAKE_INSTALL_PREFIX}/THD_deps.txt" "${Gloo_NATIVE_LIBRARY};")
 ENDIF()
 
 # Test executables
@@ -177,7 +186,7 @@ IF(THD_WITH_TESTS)
     SET(test_executable_name "test_${test_name}")
 
     ADD_EXECUTABLE(${test_executable_name} "test/${test_source_file}")
-    TARGET_LINK_LIBRARIES(${test_executable_name} THD ${ATEN_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT})
+    TARGET_LINK_LIBRARIES(${test_executable_name} THD ${CAFFE2_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT})
     SET_PROPERTY(TARGET ${test_executable_name} PROPERTY CXX_STANDARD 11)
     ADD_TEST(${test_name} ${test_executable_name})
   ENDFOREACH()

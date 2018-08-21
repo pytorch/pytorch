@@ -37,7 +37,7 @@ class cwrap(object):
     DEFAULT_PLUGIN_CLASSES = [ArgcountChecker, ConstantArguments, OptionalArguments,
                               ArgumentReferences, BeforeAfterCall, ReturnArguments, GILRelease]
 
-    def __init__(self, source, destination=None, plugins=None, default_plugins=True):
+    def __init__(self, source, destination=None, plugins=None, default_plugins=True, template_path=None):
         if destination is None:
             destination = source.replace('.cwrap', '.cpp')
 
@@ -58,7 +58,7 @@ class cwrap(object):
 
         # let each plugin do any post-processing of the wrapped file
         for plugin in self.plugins:
-            wrapper = plugin.process_full_file(wrapper)
+            wrapper = plugin.process_full_file(wrapper, template_path)
 
         # See Note [Unchanging results for ninja]
         try:

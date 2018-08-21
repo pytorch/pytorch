@@ -8,7 +8,7 @@ class AutoGPU(CWrapPlugin):
         self.condition = condition
 
     def process_pre_arg_assign(self, template, option):
-        if not option.get('auto_gpu', True):
+        if not option.get('device_guard', True):
             return template
-        call = 'AutoGPU auto_gpu(get_device(args));'
+        call = 'at::DeviceGuard device_guard(get_device(args));'
         return [call] + template

@@ -3,7 +3,7 @@ import torch
 import torch.multiprocessing as multiprocessing
 from torch._C import _set_worker_signal_handlers, _update_worker_pids, \
     _remove_worker_pids, _error_if_any_worker_fails
-from .sampler import SequentialSampler, RandomSampler, BatchSampler
+from . import SequentialSampler, RandomSampler, BatchSampler
 import signal
 import functools
 import collections
@@ -11,7 +11,14 @@ import re
 import sys
 import threading
 import traceback
-from torch._six import string_classes, int_classes
+import os
+import time
+from torch._six import string_classes, int_classes, FileNotFoundError
+
+IS_WINDOWS = sys.platform == "win32"
+if IS_WINDOWS:
+    import ctypes
+    from ctypes.wintypes import DWORD, BOOL, HANDLE
 
 if sys.version_info[0] == 2:
     import Queue as queue
@@ -30,8 +37,42 @@ class ExceptionWrapper(object):
 _use_shared_memory = False
 r"""Whether to use shared memory in default_collate"""
 
+MANAGER_STATUS_CHECK_INTERVAL = 5.0
 
-def _worker_loop(dataset, index_queue, data_queue, collate_fn, seed, init_fn, worker_id):
+if IS_WINDOWS:
+    # On Windows, the parent ID of the worker process remains unchanged when the manager process
+    # is gone, and the only way to check it through OS is to let the worker have a process handle
+    # of the manager and ask if the process status has changed.
+    class ManagerWatchdog(object):
+        def __init__(self):
+            self.manager_pid = os.getppid()
+
+            self.kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+            self.kernel32.OpenProcess.argtypes = (DWORD, BOOL, DWORD)
+            self.kernel32.OpenProcess.restype = HANDLE
+            self.kernel32.WaitForSingleObject.argtypes = (HANDLE, DWORD)
+            self.kernel32.WaitForSingleObject.restype = DWORD
+
+            # Value obtained from https://msdn.microsoft.com/en-us/library/ms684880.aspx
+            SYNCHRONIZE = 0x00100000
+            self.manager_handle = self.kernel32.OpenProcess(SYNCHRONIZE, 0, self.manager_pid)
+
+            if not self.manager_handle:
+                raise ctypes.WinError(ctypes.get_last_error())
+
+        def is_alive(self):
+            # Value obtained from https://msdn.microsoft.com/en-us/library/windows/desktop/ms687032.aspx
+            return self.kernel32.WaitForSingleObject(self.manager_handle, 0) != 0
+else:
+    class ManagerWatchdog(object):
+        def __init__(self):
+            self.manager_pid = os.getppid()
+
+        def is_alive(self):
+            return os.getppid() == self.manager_pid
+
+
+def _worker_loop(dataset, index_queue, data_queue, done_event, collate_fn, seed, init_fn, worker_id):
     global _use_shared_memory
     _use_shared_memory = True
 
@@ -45,12 +86,27 @@ def _worker_loop(dataset, index_queue, data_queue, collate_fn, seed, init_fn, wo
     random.seed(seed)
     torch.manual_seed(seed)
 
+    # Do not wait for putting thread to join when this worker exits. Otherwise,
+    # this worker may always be waiting to put and doesn't check index_queue
+    # and done_event for termination signal.
+    data_queue.cancel_join_thread()
+
     if init_fn is not None:
         init_fn(worker_id)
 
+    watchdog = ManagerWatchdog()
+
     while True:
-        r = index_queue.get()
-        if r is None:
+        try:
+            r = index_queue.get(timeout=MANAGER_STATUS_CHECK_INTERVAL)
+        except queue.Empty:
+            if watchdog.is_alive() and not done_event.is_set():
+                continue
+            else:
+                break
+        # use done_event so that we can get faster exiting signal even if there
+        # are still indices in index_queue
+        if r is None or done_event.is_set():
             break
         idx, batch_indices = r
         try:
@@ -59,9 +115,10 @@ def _worker_loop(dataset, index_queue, data_queue, collate_fn, seed, init_fn, wo
             data_queue.put((idx, ExceptionWrapper(sys.exc_info())))
         else:
             data_queue.put((idx, samples))
+            del samples
 
 
-def _worker_manager_loop(in_queue, out_queue, done_event, pin_memory, device_id):
+def _pin_memory_loop(in_queue, out_queue, done_event, pin_memory, device_id):
     if pin_memory:
         torch.cuda.set_device(device_id)
 
@@ -72,7 +129,7 @@ def _worker_manager_loop(in_queue, out_queue, done_event, pin_memory, device_id)
             if done_event.is_set():
                 return
             raise
-        if r is None:
+        if r is None or done_event.is_set():
             break
         if isinstance(r[1], ExceptionWrapper):
             out_queue.put(r)
@@ -103,7 +160,7 @@ def default_collate(batch):
 
     error_msg = "batch must contain tensors, numbers, dicts or lists; found {}"
     elem_type = type(batch[0])
-    if torch.is_tensor(batch[0]):
+    if isinstance(batch[0], torch.Tensor):
         out = None
         if _use_shared_memory:
             # If we're in a background process, concatenate directly into a
@@ -140,7 +197,7 @@ def default_collate(batch):
 
 
 def pin_memory_batch(batch):
-    if torch.is_tensor(batch):
+    if isinstance(batch, torch.Tensor):
         return batch.pin_memory()
     elif isinstance(batch, string_classes):
         return batch
@@ -192,42 +249,41 @@ class _DataLoaderIter(object):
         self.num_workers = loader.num_workers
         self.pin_memory = loader.pin_memory and torch.cuda.is_available()
         self.timeout = loader.timeout
-        self.done_event = threading.Event()
 
         self.sample_iter = iter(self.batch_sampler)
 
+        base_seed = torch.LongTensor(1).random_().item()
+
         if self.num_workers > 0:
             self.worker_init_fn = loader.worker_init_fn
-            self.index_queue = multiprocessing.SimpleQueue()
-            self.worker_result_queue = multiprocessing.SimpleQueue()
+            self.index_queues = [multiprocessing.Queue() for _ in range(self.num_workers)]
+            self.worker_queue_idx = 0
+            self.worker_result_queue = multiprocessing.Queue()
             self.batches_outstanding = 0
             self.worker_pids_set = False
             self.shutdown = False
             self.send_idx = 0
             self.rcvd_idx = 0
             self.reorder_dict = {}
+            self.done_event = multiprocessing.Event()
 
-            base_seed = torch.LongTensor(1).random_()[0]
             self.workers = [
                 multiprocessing.Process(
                     target=_worker_loop,
-                    args=(self.dataset, self.index_queue, self.worker_result_queue, self.collate_fn,
-                          base_seed + i, self.worker_init_fn, i))
+                    args=(self.dataset, self.index_queues[i],
+                          self.worker_result_queue, self.done_event,
+                          self.collate_fn, base_seed + i,
+                          self.worker_init_fn, i))
                 for i in range(self.num_workers)]
 
-            if self.pin_memory or self.timeout > 0:
+            if self.pin_memory:
                 self.data_queue = queue.Queue()
-                if self.pin_memory:
-                    maybe_device_id = torch.cuda.current_device()
-                else:
-                    # do not initialize cuda context if not necessary
-                    maybe_device_id = None
-                self.worker_manager_thread = threading.Thread(
-                    target=_worker_manager_loop,
+                self.pin_memory_thread = threading.Thread(
+                    target=_pin_memory_loop,
                     args=(self.worker_result_queue, self.data_queue, self.done_event, self.pin_memory,
-                          maybe_device_id))
-                self.worker_manager_thread.daemon = True
-                self.worker_manager_thread.start()
+                          torch.cuda.current_device()))
+                self.pin_memory_thread.daemon = True
+                self.pin_memory_thread.start()
             else:
                 self.data_queue = self.worker_result_queue
 
@@ -292,7 +348,8 @@ class _DataLoaderIter(object):
         indices = next(self.sample_iter, None)
         if indices is None:
             return
-        self.index_queue.put((self.send_idx, indices))
+        self.index_queues[self.worker_queue_idx].put((self.send_idx, indices))
+        self.worker_queue_idx = (self.worker_queue_idx + 1) % self.num_workers
         self.batches_outstanding += 1
         self.send_idx += 1
 
@@ -312,29 +369,29 @@ class _DataLoaderIter(object):
         raise NotImplementedError("_DataLoaderIter cannot be pickled")
 
     def _shutdown_workers(self):
-        try:
-            if not self.shutdown:
-                self.shutdown = True
-                self.done_event.set()
-                # if worker_manager_thread is waiting to put, make place for it
-                try:
-                    while not self.data_queue.empty():
-                        self.data_queue.get()
-                except FileNotFoundError:
-                    # FileNotFoundError can happen when we rebuild the fd
-                    # fetched from the queue but the socket is already closed
-                    # from the worker side (e.g. due to Python shutting down).
-                    pass
-                for _ in self.workers:
-                    self.index_queue.put(None)
-                # done_event should be sufficient to exit worker_manager_thread,
-                # but be safe here and put another None
-                self.worker_result_queue.put(None)
-        finally:
-            # removes pids no matter what
+        if not self.shutdown:
+            self.shutdown = True
+            # removes pids from the C side data structure first so worker
+            # termination afterwards won't trigger false positive error report.
             if self.worker_pids_set:
                 _remove_worker_pids(id(self))
                 self.worker_pids_set = False
+            self.done_event.set()
+            if self.pin_memory:
+                # Sending `None` to `pin_memory_thread` must be before
+                # stopping worker processes because the workers may leave
+                # corrupted data in `worker_result_queue`, causing
+                # `pin_memory_thread` unable to read and terminate properly.
+                self.worker_result_queue.put(None)
+            # Workers can't be waiting to put be cause their output queue
+            # is a multiprocessing.Queue and its .put is non-blocking.
+            # They can only be waiting to get, so we put `None` here.
+            for q in self.index_queues:
+                q.put(None)
+            for w in self.workers:
+                w.join()
+            if self.pin_memory:
+                self.pin_memory_thread.join()
 
     def __del__(self):
         if self.num_workers > 0:
@@ -375,13 +432,19 @@ class DataLoader(object):
 
     .. note:: By default, each worker will have its PyTorch seed set to
               ``base_seed + worker_id``, where ``base_seed`` is a long generated
-              by main process using its RNG. You may use ``torch.initial_seed()`` to access
-              this value in :attr:`worker_init_fn`, which can be used to set other seeds
-              (e.g. NumPy) before data loading.
+              by main process using its RNG. However, seeds for other libraies
+              may be duplicated upon initializing workers (w.g., NumPy), causing
+              each worker to return identical random numbers. (See
+              :ref:`dataloader-workers-random-seed` section in FAQ.) You may
+              use ``torch.initial_seed()`` to access the PyTorch seed for each
+              worker in :attr:`worker_init_fn`, and use it to set other seeds
+              before data loading.
 
     .. warning:: If ``spawn`` start method is used, :attr:`worker_init_fn` cannot be an
                  unpicklable object, e.g., a lambda function.
     """
+
+    __initialized = False
 
     def __init__(self, dataset, batch_size=1, shuffle=False, sampler=None, batch_sampler=None,
                  num_workers=0, collate_fn=default_collate, pin_memory=False, drop_last=False,
@@ -400,18 +463,19 @@ class DataLoader(object):
 
         if batch_sampler is not None:
             if batch_size > 1 or shuffle or sampler is not None or drop_last:
-                raise ValueError('batch_sampler is mutually exclusive with '
-                                 'batch_size, shuffle, sampler, and drop_last')
+                raise ValueError('batch_sampler option is mutually exclusive '
+                                 'with batch_size, shuffle, sampler, and '
+                                 'drop_last')
+            self.batch_size = None
+            self.drop_last = None
 
         if sampler is not None and shuffle:
-            raise ValueError('sampler is mutually exclusive with shuffle')
+            raise ValueError('sampler option is mutually exclusive with '
+                             'shuffle')
 
         if self.num_workers < 0:
-            raise ValueError('num_workers cannot be negative; '
+            raise ValueError('num_workers option cannot be negative; '
                              'use num_workers=0 to disable multiprocessing.')
-
-        if sys.platform == "win32" and self.num_workers > 0:
-            raise ValueError('num_workers > 0 is not supported on Windows')
 
         if batch_sampler is None:
             if sampler is None:
@@ -423,6 +487,14 @@ class DataLoader(object):
 
         self.sampler = sampler
         self.batch_sampler = batch_sampler
+        self.__initialized = True
+
+    def __setattr__(self, attr, val):
+        if self.__initialized and attr in ('batch_size', 'sampler', 'drop_last'):
+            raise ValueError('{} attribute should not be set after {} is '
+                             'initialized'.format(attr, self.__class__.__name__))
+
+        super(DataLoader, self).__setattr__(attr, val)
 
     def __iter__(self):
         return _DataLoaderIter(self)

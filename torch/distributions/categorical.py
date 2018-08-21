@@ -1,8 +1,8 @@
 import torch
-from torch.autograd import Variable, variable
+from torch._six import nan
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
-from torch.distributions.utils import probs_to_logits, logits_to_probs, log_sum_exp, lazy_property, broadcast_all
+from torch.distributions.utils import probs_to_logits, logits_to_probs, lazy_property, broadcast_all
 
 
 class Categorical(Distribution):
@@ -22,35 +22,35 @@ class Categorical(Distribution):
     If :attr:`probs` is 2D, it is treated as a batch of relative probability
     vectors.
 
-    .. note:: :attr:`probs` will be normalized to be summing to 1.
+    .. note:: :attr:`probs` must be non-negative, finite and have a non-zero sum,
+              and it will be normalized to sum to 1.
 
     See also: :func:`torch.multinomial`
 
     Example::
 
-        >>> m = Categorical(torch.Tensor([ 0.25, 0.25, 0.25, 0.25 ]))
+        >>> m = Categorical(torch.tensor([ 0.25, 0.25, 0.25, 0.25 ]))
         >>> m.sample()  # equal probability of 0, 1, 2, 3
-         3
-        [torch.LongTensor of size 1]
+        tensor(3)
 
     Args:
         probs (Tensor): event probabilities
         logits (Tensor): event log probabilities
     """
-    params = {'probs': constraints.simplex}
+    arg_constraints = {'probs': constraints.simplex}
     has_enumerate_support = True
 
-    def __init__(self, probs=None, logits=None):
+    def __init__(self, probs=None, logits=None, validate_args=None):
         if (probs is None) == (logits is None):
             raise ValueError("Either `probs` or `logits` must be specified, but not both.")
         if probs is not None:
             self.probs = probs / probs.sum(-1, keepdim=True)
         else:
-            self.logits = logits - log_sum_exp(logits)
+            self.logits = logits - logits.logsumexp(dim=-1, keepdim=True)
         self._param = self.probs if probs is not None else self.logits
         self._num_events = self._param.size()[-1]
-        batch_shape = self._param.size()[:-1]
-        super(Categorical, self).__init__(batch_shape)
+        batch_shape = self._param.size()[:-1] if self._param.ndimension() > 1 else torch.Size()
+        super(Categorical, self).__init__(batch_shape, validate_args=validate_args)
 
     def _new(self, *args, **kwargs):
         return self._param.new(*args, **kwargs)
@@ -73,11 +73,11 @@ class Categorical(Distribution):
 
     @property
     def mean(self):
-        return self.probs.new_tensor(float('nan')).expand(self._extended_shape())
+        return self.probs.new_tensor(nan).expand(self._extended_shape())
 
     @property
     def variance(self):
-        return self.probs.new_tensor(float('nan')).expand(self._extended_shape())
+        return self.probs.new_tensor(nan).expand(self._extended_shape())
 
     def sample(self, sample_shape=torch.Size()):
         sample_shape = self._extended_shape(sample_shape)
@@ -91,7 +91,8 @@ class Categorical(Distribution):
         return sample_2d.contiguous().view(sample_shape)
 
     def log_prob(self, value):
-        self._validate_log_prob_arg(value)
+        if self._validate_args:
+            self._validate_sample(value)
         value_shape = torch._C._infer_size(value.size(), self.batch_shape) if self.batch_shape else value.size()
         param_shape = value_shape + (self._num_events,)
         value = value.expand(value_shape)
@@ -109,6 +110,4 @@ class Categorical(Distribution):
         values = values.expand((-1,) + self._batch_shape)
         if self._param.is_cuda:
             values = values.cuda(self._param.get_device())
-        if isinstance(self._param, Variable):
-            values = Variable(values)
         return values

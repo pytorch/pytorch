@@ -13,6 +13,8 @@ struct ErrorReport : public std::exception {
   ErrorReport() : context(nullptr) {}
   explicit ErrorReport(const SourceRange& r)
       : context(std::make_shared<SourceRange>(r)) {}
+  explicit ErrorReport(std::shared_ptr<SourceLocation> loc)
+  : context(std::move(loc)) {}
   explicit ErrorReport(const TreeRef& tree) : ErrorReport(tree->range()) {}
   explicit ErrorReport(const Token& tok) : ErrorReport(tok.range) {}
   virtual const char* what() const noexcept override {
@@ -33,7 +35,7 @@ struct ErrorReport : public std::exception {
   friend const ErrorReport& operator<<(const ErrorReport& e, const T& t);
 
   mutable std::stringstream ss;
-  std::shared_ptr<SourceRange> context;
+  std::shared_ptr<SourceLocation> context;
   mutable std::string the_message;
 };
 

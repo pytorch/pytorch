@@ -2,6 +2,9 @@
 
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
 #include "torch/csrc/jit/interned_strings.h"
+#include "torch/csrc/jit/constants.h"
+#include "torch/csrc/jit/symbolic_variable.h"
+#include "torch/csrc/jit/assertions.h"
 #include "torch/csrc/utils/functional.h"
 
 #include <ATen/ATen.h>
@@ -65,7 +68,7 @@ namespace torch { namespace jit {
 // the trees we formed and fuse them.
 
 // Tunable parameter. Set to something larger if it turns out to be better.
-static constexpr std::size_t min_fusion_size = 2;
+static constexpr size_t min_fusion_size = 2;
 
 static std::array<int64_t, 2> as_array(at::IntList sizes) {
   JIT_ASSERT(sizes.size() == 2);
@@ -119,17 +122,16 @@ struct TreeToken {
     return token;
   }
 
-  operator bool() {
+  explicit operator bool() {
     return is_root;
   }
 
   std::vector<Node*> gatherMatMuls() {
-    static const Symbol mm_kind = kmm;
     std::vector<Node*> matmuls;
     std::vector<Node*> queue {node};
     while (!queue.empty()) {
       auto n = queue.back(); queue.pop_back();
-      if (n->kind() == mm_kind) {
+      if (n->kind() == aten::mm) {
         matmuls.push_back(n);
       } else {
         queue.push_back(n->inputs()[0]->node());
@@ -142,18 +144,16 @@ struct TreeToken {
 
 void BatchMMBlock(Block* block) {
   enum class Side { LHS, RHS };
-  static const Symbol mm_kind = kmm;
-  static const Symbol add_kind = kadd;
-  static const Symbol cat_kind = kcat;
-  static const Symbol dim_sym = kdim;
   auto graph = block->owningGraph();
 
   // Look for trees in the block
   std::unordered_map<Node*, TreeToken> tokens;
   for (auto node : block->nodes()) {
-    if (node->kind() == mm_kind) {
+    if (node->kind() == aten::mm &&
+        node->input(0)->type()->cast<TensorType>() &&
+        node->input(1)->type()->cast<TensorType>()) {
       tokens[node] = TreeToken::fromMM(node);
-    } else if (node->kind() == add_kind) {
+    } else if (node->kind() == aten::add) {
       // NOTE: x + 2 is add[other={2}](%x)
       if (node->inputs().size() != 2) continue;
       Node *lhs = node->inputs()[0]->node();
@@ -184,25 +184,25 @@ void BatchMMBlock(Block* block) {
     if (!root || root.tree_size < min_fusion_size)
       continue;
     auto matmuls = root.gatherMatMuls();
-    auto type = root.node->output()->type()->expect<TensorType>();
+    auto type_ = root.node->output()->type();
+    auto type = type_->expect<TensorType>();
 
     auto batch_inputs = [&](Side s, std::array<int64_t, 2> cat_sizes) -> Value* {
       int inputs_off = s == Side::LHS ? 0 : 1;
       int cat_dim    = s == Side::LHS ? 1 : 0;
       cat_sizes[cat_dim] *= matmuls.size(); // make them really cat_sizes
 
-      auto inputs = fmap(matmuls, [=](Node *mm) { return mm->inputs()[inputs_off]; });
-      Node *cat = graph->create(cat_kind, inputs)
-                       ->i_(dim_sym, cat_dim);
-      cat->insertBefore(root.node);
-      cat->output()->setType(type->withSizes(cat_sizes));
-      return cat->output();
+      WithInsertPoint iguard { root.node };
+      auto inputs = fmap(matmuls, [=](Node *mm) -> SymbolicVariable { return mm->inputs()[inputs_off]; });
+      auto cat_output = SymbolicVariable::cat(inputs, cat_dim).value();
+      cat_output->setType(type->withSizes(cat_sizes));
+      return cat_output;
     };
 
     auto lhs_batch = batch_inputs(Side::LHS, root.lhs_sizes);
     auto rhs_batch = batch_inputs(Side::RHS, root.rhs_sizes);
-    Node *batch_mm = graph->create(mm_kind, {lhs_batch, rhs_batch});
-    batch_mm->output()->setType(type->asShared());
+    Node *batch_mm = graph->create(aten::mm, {lhs_batch, rhs_batch});
+    batch_mm->output()->setType(type_);
     batch_mm->insertBefore(root.node);
     root.node->output()->replaceAllUsesWith(batch_mm->output());
     // NB: don't bother with cleaning up after yourself. We'll use DCE for that.

@@ -1,7 +1,11 @@
 r"""
 The ``distributions`` package contains parameterizable probability distributions
 and sampling functions. This allows the construction of stochastic computation
-graphs and stochastic gradient estimators for optimization.
+graphs and stochastic gradient estimators for optimization. This package
+generally follows the design of the `TensorFlow Distributions`_ package.
+
+.. _`TensorFlow Distributions`:
+    https://arxiv.org/abs/1711.10604
 
 It is not possible to directly backpropagate through random samples. However,
 there are two main methods for creating surrogate functions that can be
@@ -35,7 +39,7 @@ taking action :math:`a` in state :math:`s` given policy :math:`\pi^\theta`.
 
 In practice we would sample an action from the output of a network, apply this
 action in an environment, and then use ``log_prob`` to construct an equivalent
-loss function. Note that we use a negative because optimisers use gradient
+loss function. Note that we use a negative because optimizers use gradient
 descent, whilst the rule above assumes gradient ascent. With a categorical
 policy, the code for implementing REINFORCE would be as follows::
 
@@ -69,7 +73,6 @@ derivative would be as follows::
 
 from .bernoulli import Bernoulli
 from .beta import Beta
-from .transforms import *
 from .binomial import Binomial
 from .categorical import Categorical
 from .cauchy import Cauchy
@@ -77,16 +80,23 @@ from .chi2 import Chi2
 from .constraint_registry import biject_to, transform_to
 from .dirichlet import Dirichlet
 from .distribution import Distribution
-from .exponential import Exponential
 from .exp_family import ExponentialFamily
+from .exponential import Exponential
 from .fishersnedecor import FisherSnedecor
 from .gamma import Gamma
 from .geometric import Geometric
 from .gumbel import Gumbel
+from .half_cauchy import HalfCauchy
+from .half_normal import HalfNormal
+from .independent import Independent
 from .kl import kl_divergence, register_kl
 from .laplace import Laplace
 from .log_normal import LogNormal
+from .logistic_normal import LogisticNormal
+from .lowrank_multivariate_normal import LowRankMultivariateNormal
 from .multinomial import Multinomial
+from .multivariate_normal import MultivariateNormal
+from .negative_binomial import NegativeBinomial
 from .normal import Normal
 from .one_hot_categorical import OneHotCategorical
 from .pareto import Pareto
@@ -95,7 +105,9 @@ from .relaxed_bernoulli import RelaxedBernoulli
 from .relaxed_categorical import RelaxedOneHotCategorical
 from .studentT import StudentT
 from .transformed_distribution import TransformedDistribution
+from .transforms import *
 from .uniform import Uniform
+from .weibull import Weibull
 
 __all__ = [
     'Bernoulli',
@@ -112,9 +124,13 @@ __all__ = [
     'Gamma',
     'Geometric',
     'Gumbel',
+    'Independent',
     'Laplace',
     'LogNormal',
+    'LogisticNormal',
     'Multinomial',
+    'MultivariateNormal',
+    'NegativeBinomial',
     'Normal',
     'OneHotCategorical',
     'Pareto',
@@ -123,6 +139,7 @@ __all__ = [
     'StudentT',
     'Poisson',
     'Uniform',
+    'Weibull',
     'TransformedDistribution',
     'biject_to',
     'kl_divergence',

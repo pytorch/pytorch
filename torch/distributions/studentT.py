@@ -1,5 +1,6 @@
 from numbers import Number
 import torch
+from torch._six import inf, nan
 import math
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
@@ -13,37 +14,36 @@ class StudentT(Distribution):
 
     Example::
 
-        >>> m = StudentT(torch.Tensor([2.0]))
+        >>> m = StudentT(torch.tensor([2.0]))
         >>> m.sample()  # Student's t-distributed with degrees of freedom=2
-         0.1046
-        [torch.FloatTensor of size 1]
+        tensor([ 0.1046])
 
     Args:
         df (float or Tensor): degrees of freedom
     """
-    params = {'df': constraints.positive, 'loc': constraints.real, 'scale': constraints.positive}
+    arg_constraints = {'df': constraints.positive, 'loc': constraints.real, 'scale': constraints.positive}
     support = constraints.real
     has_rsample = True
 
     @property
     def mean(self):
         m = self.loc.clone()
-        m[self.df <= 1] = float('nan')
+        m[self.df <= 1] = nan
         return m
 
     @property
     def variance(self):
         m = self.df.clone()
         m[self.df > 2] = self.scale[self.df > 2].pow(2) * self.df[self.df > 2] / (self.df[self.df > 2] - 2)
-        m[(self.df <= 2) & (self.df > 1)] = float('inf')
-        m[self.df <= 1] = float('nan')
+        m[(self.df <= 2) & (self.df > 1)] = inf
+        m[self.df <= 1] = nan
         return m
 
-    def __init__(self, df, loc=0., scale=1.):
+    def __init__(self, df, loc=0., scale=1., validate_args=None):
         self.df, self.loc, self.scale = broadcast_all(df, loc, scale)
         self._chi2 = Chi2(df)
         batch_shape = torch.Size() if isinstance(df, Number) else self.df.size()
-        super(StudentT, self).__init__(batch_shape)
+        super(StudentT, self).__init__(batch_shape, validate_args=validate_args)
 
     def rsample(self, sample_shape=torch.Size()):
         # NOTE: This does not agree with scipy implementation as much as other distributions.
@@ -60,7 +60,8 @@ class StudentT(Distribution):
         return self.loc + self.scale * Y
 
     def log_prob(self, value):
-        self._validate_log_prob_arg(value)
+        if self._validate_args:
+            self._validate_sample(value)
         y = (value - self.loc) / self.scale
         Z = (self.scale.log() +
              0.5 * self.df.log() +

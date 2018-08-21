@@ -1,5 +1,7 @@
 #include "torch/csrc/jit/type.h"
 
+#include "torch/csrc/jit/assertions.h"
+
 #include <iostream>
 
 namespace torch { namespace jit {
@@ -23,22 +25,63 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
       }
     }
     out << ")";
-  } else if(t.kind() == TypeKind::HandleType) {
-    out << "Handle";
   } else if(t.kind() == TypeKind::DynamicType) {
     out << "Dynamic";
+  } else if(t.kind() == TypeKind::TupleType) {
+    out << "Tuple";
+  } else if(t.kind() == TypeKind::NumberType) {
+    out << "Number";
+  } else if(t.kind() == TypeKind::FloatType) {
+    out << "float";
+  } else if(t.kind() == TypeKind::IntType) {
+    out << "int";
+  } else if(t.kind() == TypeKind::ListType) {
+    auto prim = t.cast<ListType>()->getElementType();
+    out << *prim << "[]";
+  } else if(t.kind() == TypeKind::NoneType) {
+    out << "None";
+  } else if(t.kind() == TypeKind::StringType) {
+    out << "string";
   } else {
-    barf("unknown type kind");
+    AT_ERROR("unknown type kind");
   }
   return out;
 }
 
-TypePtr HandleType::get() {
-  static auto value = std::make_shared<HandleType>();
+DynamicTypePtr DynamicType::get() {
+  static auto value = DynamicType::create();
   return value;
 }
-TypePtr DynamicType::get() {
-  static auto value = std::make_shared<DynamicType>();
+NumberTypePtr NumberType::get() {
+  static auto value = NumberType::create();
+  return value;
+}
+IntTypePtr IntType::get() {
+  static auto value = IntType::create();
+  return value;
+}
+FloatTypePtr FloatType::get() {
+  static auto value = FloatType::create();
+  return value;
+}
+NoneTypePtr NoneType::get() {
+  static auto value = NoneType::create();
+  return value;
+}
+StringTypePtr StringType::get() {
+  static auto value = StringType::create();
+  return value;
+}
+ListTypePtr ListType::ofTensors() {
+  static auto value = ListType::create(DynamicType::get());
+  return value;
+}
+ListTypePtr ListType::ofInts() {
+  static auto value = ListType::create(IntType::get());
+  return value;
+}
+ListTypePtr ListType::ofFloats() {
+  static auto value = ListType::create(FloatType::get());
   return value;
 }
 

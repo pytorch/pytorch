@@ -1,13 +1,16 @@
 #define __STDC_FORMAT_MACROS
 
-#include <Python.h>
+#include "torch/csrc/python_headers.h"
 #include <structmember.h>
 
 #include <stdbool.h>
+// See Note [TH abstraction violation]
+//    - Used to get at allocator from storage
+#include <TH/THTensor.hpp>
+#include <THC/THCTensor.hpp>
 #include "THCP.h"
 
 #include "override_macros.h"
-#include "torch/csrc/allocators.h"
 #include "torch/csrc/copy_utils.h"
 #include "DynamicTypes.h"
 

@@ -17,19 +17,18 @@ class Geometric(Distribution):
 
     Example::
 
-        >>> m = Geometric(torch.Tensor([0.3]))
+        >>> m = Geometric(torch.tensor([0.3]))
         >>> m.sample()  # underlying Bernoulli has 30% chance 1; 70% chance 0
-         2
-        [torch.FloatTensor of size 1]
+        tensor([ 2.])
 
     Args:
         probs (Number, Tensor): the probabilty of sampling `1`. Must be in range (0, 1]
         logits (Number, Tensor): the log-odds of sampling `1`.
     """
-    params = {'probs': constraints.unit_interval}
+    arg_constraints = {'probs': constraints.unit_interval}
     support = constraints.nonnegative_integer
 
-    def __init__(self, probs=None, logits=None):
+    def __init__(self, probs=None, logits=None, validate_args=None):
         if (probs is None) == (logits is None):
             raise ValueError("Either `probs` or `logits` must be specified, but not both.")
         if probs is not None:
@@ -43,7 +42,7 @@ class Geometric(Distribution):
             batch_shape = torch.Size()
         else:
             batch_shape = probs_or_logits.size()
-        super(Geometric, self).__init__(batch_shape)
+        super(Geometric, self).__init__(batch_shape, validate_args=validate_args)
 
     @property
     def mean(self):
@@ -68,10 +67,11 @@ class Geometric(Distribution):
             return (u.log() / (-self.probs).log1p()).floor()
 
     def log_prob(self, value):
-        self._validate_log_prob_arg(value)
+        if self._validate_args:
+            self._validate_sample(value)
         value, probs = broadcast_all(value, self.probs.clone())
         probs[(probs == 1) & (value == 0)] = 0
         return value * (-probs).log1p() + self.probs.log()
 
     def entropy(self):
-        return binary_cross_entropy_with_logits(self.logits, self.probs, reduce=False) / self.probs
+        return binary_cross_entropy_with_logits(self.logits, self.probs, reduction='none') / self.probs

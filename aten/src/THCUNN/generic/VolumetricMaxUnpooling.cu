@@ -24,25 +24,25 @@ static inline void THNN_(VolumetricMaxUnpooling_shapeCheck)(
              "stride should be greater than zero, but got dT: %d dH: %d dW: %d",
              dT, dH, dW);
 
-  if (THCTensor_(nDimension)(state, input) == 4)
+  if (THCTensor_(nDimensionLegacyNoScalars)(state, input) == 4)
   {
     inputSlices = THCTensor_(size)(state, input, 0);
   }
-  else if (THCTensor_(nDimension)(state, input) == 5)
+  else if (THCTensor_(nDimensionLegacyNoScalars)(state, input) == 5)
   {
     inputSlices = THCTensor_(size)(state, input, 1);
   }
   else
   {
-    THArgCheck(false, 2, "4D or 5D tensor expected, got %d",
-               THCTensor_(nDimension)(state, input));
+    AT_ERROR("non-empty 4D or 5D tensor expected, got size: ",
+             input->sizes());
   }
 
   int dimw = 3;
   int dimh = 2;
   int dimt = 1;
   int dimn = 0;
-  if (input->nDimension == 5)
+  if (input->dim() == 5)
   {
     dimt++;
     dimw++;
@@ -51,14 +51,14 @@ static inline void THNN_(VolumetricMaxUnpooling_shapeCheck)(
   }
 
   if (gradOutput != NULL) {
-    if (oT != gradOutput->size[dimt] || oW != gradOutput->size[dimw] || oH != gradOutput->size[dimh])
+    if (oT != gradOutput->size(dimt) || oW != gradOutput->size(dimw) || oH != gradOutput->size(dimh))
     {
       THError(
         "Inconsistent gradOutput size. oT= %d, oH= %d, oW= %d, gradOutput: %dx%dx%d",
-        oT, oH, oW, gradOutput->size[dimt], gradOutput->size[dimh], gradOutput->size[dimw]);
+        oT, oH, oW, gradOutput->size(dimt), gradOutput->size(dimh), gradOutput->size(dimw));
     }
 
-    THCUNN_check_dim_size(state, gradOutput, input->nDimension, dimn, inputSlices);
+    THCUNN_check_dim_size(state, gradOutput, input->dim(), dimn, inputSlices);
   }
 }
 
@@ -83,8 +83,8 @@ void THNN_(VolumetricMaxUnpooling_updateOutput)(
         dT, dW, dH, padT, padW, padH);
   THCUNN_assertSameGPU(state, 3, input, indices, output);
 
-  int fiveDimensionalInput = THCTensor_(nDimension)(state, input) == 5;
-  if (THCTensor_(nDimension)(state, input) == 4)
+  int fiveDimensionalInput = THCTensor_(nDimensionLegacyNoScalars)(state, input) == 5;
+  if (THCTensor_(nDimensionLegacyNoScalars)(state, input) == 4)
   {
     /* sizes */
     batchSize   = 1;
@@ -117,24 +117,26 @@ void THNN_(VolumetricMaxUnpooling_updateOutput)(
 
   input = THCTensor_(newContiguous)(state, input);
   indices = THCIndexTensor_(newContiguous)(state, indices);
+  output = THCTensor_(newContiguous)(state, output);
   THCTensor_(zero)(state, output);
 
   if (fiveDimensionalInput) {
     // Collapse batch and feature dimensions
+    // newFoldBatchDim assumes contiguity so the newContiguous calls must
+    // preceed this
+    THCTensor *old_output = output;
     output = THCTensor_(newFoldBatchDim)(state, output);
+    THCTensor_(free)(state, old_output);
 
     THCTensor *old_input = input;
     input = THCTensor_(newFoldBatchDim)(state, input);
     THCTensor_(free)(state, old_input);
-    
+
     THCIndexTensor *old_indices = indices;
     indices = THCIndexTensor_(newFoldBatchDim)(state, indices);
     THCIndexTensor_(free)(state, old_indices);
-  } else {
-    THCTensor_(retain)(state, output);
   }
 
-  output = THCTensor_(newContiguous)(state, output);
   real* outputData = THCTensor_(data)(state, output);
 
   THCDeviceTensor<real, 4> cudaInput;
@@ -190,7 +192,7 @@ void THNN_(VolumetricMaxUnpooling_updateGradInput)(
         dT, dW, dH, padT, padW, padH);
   THCUNN_assertSameGPU(state, 4, input, indices, gradOutput, gradInput);
 
-  int fiveDimensionalInput = THCTensor_(nDimension)(state, input) == 5;
+  int fiveDimensionalInput = THCTensor_(nDimensionLegacyNoScalars)(state, input) == 5;
   if (!fiveDimensionalInput) /* 4D */
   {
     batchSize = 1;
@@ -221,7 +223,7 @@ void THNN_(VolumetricMaxUnpooling_updateGradInput)(
     THCIndexTensor *old_indices = indices;
     indices = THCIndexTensor_(newFoldBatchDim)(state, indices);
     THCIndexTensor_(free)(state, old_indices);
-  
+
     THCTensor *old_gradOutput = gradOutput;
     gradOutput = THCTensor_(newFoldBatchDim)(state, gradOutput);
     THCTensor_(free)(state, old_gradOutput);

@@ -3,8 +3,8 @@
 namespace at {
 
 struct Tensor;
-struct SparseTensor {
-  explicit SparseTensor(const Tensor& t): tref(t) {}
+struct SparseTensorRef {
+  explicit SparseTensorRef(const Tensor& t): tref(t) {}
   const Tensor& tref;
 };
 

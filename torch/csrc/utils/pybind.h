@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Python.h>
+#include "torch/csrc/python_headers.h"
 
 #include <ATen/ATen.h>
 #include <pybind11/pybind11.h>
@@ -32,7 +32,7 @@ struct type_caster<at::Tensor> {
 
   static handle
   cast(at::Tensor src, return_value_policy /* policy */, handle /* parent */) {
-    if (!torch::autograd::is_variable(src)) {
+    if (!src.is_variable()) {
       throw std::runtime_error(
           "Expected tensor's dynamic type to be Variable, not Tensor");
     }
@@ -40,4 +40,24 @@ struct type_caster<at::Tensor> {
   }
 };
 
+template<> struct type_caster<torch::autograd::Variable> {
+public:
+  PYBIND11_TYPE_CASTER(torch::autograd::Variable, _("torch::autograd::Variable"));
+  bool load(handle src, bool) {
+    PyObject *source = src.ptr();
+    if (THPVariable_Check(source)) {
+      value = ((THPVariable*)source)->cdata;
+      return true;
+    } else {
+      return false;
+    }
+  }
+  static handle cast(torch::autograd::Variable src, return_value_policy /* policy */, handle /* parent */) {
+    return handle(THPVariable_Wrap(src));
+  }
+};
+
+// http://pybind11.readthedocs.io/en/stable/advanced/cast/stl.html#c-17-library-containers
+template <typename T>
+struct type_caster<at::optional<T>> : optional_caster<at::optional<T>> {};
 }} // namespace pybind11::detail

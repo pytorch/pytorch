@@ -1,4 +1,4 @@
-#include <TH/THStorage.h>
+#include <TH/THStorageFunctions.h>
 #include <cstdint>
 #include <unordered_map>
 #include <memory>
@@ -192,7 +192,9 @@ static const std::unordered_map<rpc::function_id_type, dispatch_fn> functions {
     {Functions::tensorAbs, tensorAbs},
     {Functions::tensorSigmoid, tensorSigmoid},
     {Functions::tensorLog, tensorLog},
+    {Functions::tensorLog10, tensorLog10},
     {Functions::tensorLog1p, tensorLog1p},
+    {Functions::tensorLog2, tensorLog2},
     {Functions::tensorExp, tensorExp},
     {Functions::tensorExpm1, tensorExpm1},
     {Functions::tensorCos, tensorCos},
@@ -231,8 +233,10 @@ static const std::unordered_map<rpc::function_id_type, dispatch_fn> functions {
     {Functions::tensorLogspace, tensorLogspace},
     {Functions::tensorRand, tensorRand},
     {Functions::tensorRandn, tensorRandn},
-    {Functions::tensorLogicalall, tensorLogicalall},
-    {Functions::tensorLogicalany, tensorLogicalany},
+    {Functions::tensorLogicalAndAll, tensorLogicalAndAll},
+    {Functions::tensorLogicalAnd, tensorLogicalAnd},
+    {Functions::tensorLogicalAnyAll, tensorLogicalAnyAll},
+    {Functions::tensorLogicalAny, tensorLogicalAny},
     {Functions::tensorRandom, tensorRandom},
     {Functions::tensorGeometric, tensorGeometric},
     {Functions::tensorBernoulli, tensorBernoulli},

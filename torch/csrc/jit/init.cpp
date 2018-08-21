@@ -5,22 +5,46 @@
 #include "torch/csrc/jit/python_ir.h"
 #include "torch/csrc/jit/python_arg_flatten.h"
 #include "torch/csrc/jit/export.h"
-#include "torch/csrc/jit/python_compiled_function.h"
+#include "torch/csrc/jit/argument_spec.h"
+#include "torch/csrc/jit/passes/remove_expands.h"
 #include "torch/csrc/jit/passes/graph_fuser.h"
 #include "torch/csrc/jit/passes/onnx.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
+#include "torch/csrc/jit/passes/erase_number_types.h"
 #include "torch/csrc/jit/passes/common_subexpression_elimination.h"
 #include "torch/csrc/jit/passes/peephole.h"
 #include "torch/csrc/jit/passes/canonicalize.h"
 #include "torch/csrc/jit/passes/onnx/peephole.h"
+#include "torch/csrc/jit/passes/onnx/fixup_onnx_loop.h"
+#include "torch/csrc/jit/passes/shape_analysis.h"
+#include "torch/csrc/jit/passes/decompose_addmm.h"
+#include "torch/csrc/jit/passes/constant_propagation.h"
+#include "torch/csrc/jit/passes/loop_unrolling.h"
+#include "torch/csrc/jit/passes/to_batch.h"
+#include "torch/csrc/jit/passes/specialize_undef.h"
 #include "torch/csrc/jit/graph_executor.h"
 #include "torch/csrc/jit/script/init.h"
 #include "torch/csrc/jit/script/python_tree_views.h"
+#include "torch/csrc/jit/batched/BatchTensor.h"
+#include "torch/csrc/jit/pybind_utils.h"
+#include "torch/csrc/jit/function_schema.h"
+#include "torch/csrc/jit/serialization.h"
+#include "torch/csrc/jit/operator.h"
 
+#include <pybind11/functional.h>
+
+#include <memory>
+#include <sstream>
+#include <stdexcept>
+#include <string>
+#include <tuple>
+#include <utility>
 
 namespace torch  { namespace jit {
 
 namespace {
+
+using autograd::variable_list;
 
 bool loadPythonClasses() {
   // Leaving this code here, because it will likely be useful at some point
@@ -30,70 +54,6 @@ bool loadPythonClasses() {
   //PyObject *jit_dict = PyModule_GetDict(jit_module);
 
   return true;
-}
-
-template<void (*F)(std::shared_ptr<Graph>& graph)>
-void graph_pass(const std::shared_ptr<tracer::TracingState>& state) {
-  return F(state->graph);
-}
-
-struct PythonGraphExecutor : GraphExecutor {
-  using GraphExecutor::GraphExecutor;
-  variable_tensor_list run(variable_tensor_list && inputs) {
-    inputs.insert(inputs.end(), captures.begin(), captures.end());
-    return GraphExecutor::run(std::move(inputs));
-  }
-  variable_tensor_list captures;
-};
-
-// This is a temporary constructor so that we can write python tests of
-// the executor. It does not have most of the functionality of CompiledFunction
-// such as being able to hold parameters...
-PythonGraphExecutor createExecutorByTracing(
-        py::function func,
-        std::vector<tracer::TraceInput> inputs,
-        std::vector<tracer::TraceInput> captures,
-        bool optimize) {
-  std::vector<tracer::TraceInput> trace_inputs;
-  trace_inputs.insert(trace_inputs.end(), inputs.begin(), inputs.end());
-  trace_inputs.insert(trace_inputs.end(), captures.begin(), captures.end());
-  auto enter_info = tracer::enter(std::move(trace_inputs), 1);
-  py::tuple py_inputs(inputs.size());
-  for(size_t i = 0; i < inputs.size(); ++i) {
-    py_inputs[i] = py::cast(enter_info.second[i]);
-  }
-  // All conditions that could trigger this should be asserted on the Python side
-  for (size_t i = 0; i < captures.size(); ++i) {
-    // TODO: remove TraceInput, since everything is a Variable now
-    JIT_ASSERT(captures[i].variable.defined());
-    JIT_ASSERT(enter_info.second[i + inputs.size()].is_same(captures[i].variable));
-  }
-  // Call back into Python function
-  auto out = py::reinterpret_steal<py::object>(PyObject_CallObject(func.ptr(), py_inputs.ptr()));
-  if (!out)
-    throw py::error_already_set();
-  std::vector<autograd::Variable> outputs;
-  if(PyTuple_Check(out.ptr())) {
-    outputs = py::cast<std::vector<autograd::Variable>>(out);
-  } else {
-    outputs.push_back(py::cast<autograd::Variable>(out));
-  }
-  tracer::exit(outputs);
-  auto graph = enter_info.first->graph;
-  EliminateDeadCode(graph);
-  return PythonGraphExecutor(std::move(graph), optimize);
-}
-
-// we cannot use the default py:cast<autograd::Variable> because it currently
-// unwraps the data tensor in the conversion process
-// TODO: replace with bs type
-variable_tensor_list createVariableTensorList(py::tuple tuple, size_t reserve_extra_space = 0) {
-  variable_tensor_list result;
-  result.reserve(tuple.size() + reserve_extra_space);
-  for(auto e : tuple) {
-    result.push_back(py::cast<autograd::Variable>(e));
-  }
-  return result;
 }
 
 } // anonymous namespace
@@ -107,64 +67,197 @@ void initJITBindings(PyObject *module) {
 
   m.def("_jit_init", loadPythonClasses)
    .def("_jit_pass_onnx", ToONNX)
-   .def("_jit_pass_onnx_peephole", graph_pass<PeepholeOptimizeONNX>)
-   .def("_jit_pass_fuse", graph_pass<FuseGraph>)
-   .def("_jit_pass_dce", graph_pass<EliminateDeadCode>)
-   .def("_jit_pass_cse", graph_pass<EliminateCommonSubexpression>)
-   .def("_jit_pass_peephole", graph_pass<PeepholeOptimize>)
-   .def("_jit_pass_canonicalize", graph_pass<Canonicalize>)
-   .def("_jit_pass_lint", graph_pass<LintGraph>)
-   .def("_jit_run_cpp_tests", runJITCPPTests)
+   .def("_jit_pass_onnx_peephole", PeepholeOptimizeONNX)
+   .def("_jit_pass_fuse", FuseGraph)
+   .def("_jit_pass_dce", [](std::shared_ptr<Graph>& g) {
+     return EliminateDeadCode(g); // overload resolution
+   })
+   .def("_jit_pass_cse", [](std::shared_ptr<Graph>& g) {
+     return EliminateCommonSubexpression(g); // overload resolution
+   })
+   .def("_jit_pass_peephole", PeepholeOptimize)
+   .def("_jit_pass_canonicalize", [](const std::shared_ptr<Graph>& g) {
+     return Canonicalize(g);
+   })
+   .def("_jit_pass_lint", LintGraph)
+   .def("_jit_pass_shape_analysis", [](Graph& graph, py::tuple inputs, bool with_grad) {
+     PropagateInputShapes(graph, ArgumentSpec(with_grad, evilDeprecatedBadCreateStackDoNotUse(inputs, graph.inputs())));
+   })
+   .def("_jit_pass_remove_expands", RemoveExpands)
+   .def("_jit_pass_erase_number_types", EraseNumberTypes)
+   .def("_jit_pass_loop_unrolling", UnrollLoops)
+   .def("_jit_pass_constant_propagation", [](std::shared_ptr<Graph>& g) {
+     return ConstantPropagation(g);
+   })
+   .def("_jit_run_cpp_tests", [] {
+     // We have to release the GIL inside this method, because if we happen to
+     // initialize the autograd engine in these tests, the newly spawned worker threads will
+     // try to initialize their PyThreadState*, and they need the GIL for this.
+     AutoNoGIL _no_gil;
+     return runJITCPPTests();
+   })
    .def("_jit_flatten", [](py::handle& obj) {
      auto res =  python::flatten(obj);
      return std::make_pair(res.vars, res.desc);
    })
    .def("_jit_unflatten", [](autograd::variable_list vars, python::IODescriptor& desc) {
      return py::reinterpret_steal<py::object>(python::unflatten(vars, desc));
+   })
+   .def("_jit_pass_onnx_block", BlockToONNX)
+   .def("_jit_pass_fixup_onnx_loops", FixupONNXLoops)
+   .def("_jit_pass_decompose_addmm", DecomposeAddmm)
+    .def("_jit_pass_specialize_undef", specializeUndef)
+   .def("_jit_differentiate", [](Graph &g, const std::vector<bool>& requires_grad) {
+       // the python binding slightly differs in semantics
+       // it makes a copy of the input Graph, and works on that
+       // jit::differentiate mutates the input Graph
+       auto g_clone = g.copy();
+       return differentiate(g_clone, requires_grad);
    });
 
-  py::class_<PythonGraphExecutor>(m, "GraphExecutor")
+  py::class_<ArgumentSpec>(m, "ArgumentSpec")
+      .def("__repr__", [](ArgumentSpec& self) {
+        std::ostringstream s;
+        s << self;
+        return s.str();
+      });
+  py::class_<Code>(m, "Code")
+      .def("executors", [](Code& c) {
+        return py::make_iterator(c.executors().begin(), c.executors().end());
+      });
+
+  py::class_<ExecutionPlanState>(m, "ExecutionPlanState")
+    .def_property_readonly("graph", [](ExecutionPlanState& s) {
+      return s.graph;
+    })
+    .def_property_readonly("code", [](ExecutionPlanState& s) {
+      return s.f;
+    })
+    .def_property_readonly("grad_executor", [](ExecutionPlanState& s) {
+      return s.grad_executor.get();
+    });
+
+  py::class_<Gradient>(m, "Gradient")
+    .def_property_readonly("f", [](Gradient& m) {
+      return m.f;
+    })
+    .def_property_readonly("df", [](Gradient& m) {
+      return m.df;
+    })
+    .def_property_readonly("f_real_outputs", [](Gradient& m) {
+      return m.f_real_outputs;
+    })
+    .def_property_readonly("df_input_vjps", [](Gradient& m) {
+      return m.df_input_vjps;
+    })
+    .def_property_readonly("df_input_captured_inputs", [](Gradient& m) {
+      return m.df_input_captured_inputs;
+    })
+    .def_property_readonly("df_input_captured_outputs", [](Gradient& m) {
+      return m.df_input_captured_outputs;
+    })
+    .def_property_readonly("df_output_vjps", [](Gradient& m) {
+      return m.df_output_vjps;
+    });
+
+  py::class_<GraphExecutorState>(m, "GraphExecutorState")
+    .def_property_readonly("graph", [](GraphExecutorState& s) {
+      return s.graph;
+    })
+    .def_property_readonly("execution_plans", [](GraphExecutorState& s) {
+      return s.execution_plans;
+    })
+    .def_property_readonly("autograd_fallback", [](GraphExecutorState& s) {
+      return s.autograd_fallback;
+    })
+    .def_property_readonly("autograd_fallback_graph", [](GraphExecutorState& s) {
+      return s.autograd_fallback_graph;
+    });
+
+  py::class_<GraphExecutor>(m, "GraphExecutor", py::dynamic_attr())
       .def(
           py::init([](py::function func,
-                      std::vector<tracer::TraceInput> inputs,
-                      std::vector<tracer::TraceInput> captures,
+                      variable_list inputs,
                       bool optimize) {
-            return createExecutorByTracing(func, std::move(inputs), std::move(captures), optimize);
+              size_t num_inputs = inputs.size();
+              auto graph = tracer::createGraphByTracing(func, std::move(inputs), num_inputs);
+              return GraphExecutor(graph, optimize);
           }),
           py::arg("func"),
           py::arg("inputs"),
-          py::arg("captures") = std::vector<tracer::TraceInput>{},
           py::arg("optimize") = true)
       .def(
           py::init([](std::shared_ptr<Graph> graph, bool optimize) {
-            return PythonGraphExecutor(std::move(graph), optimize);
+            return GraphExecutor(std::move(graph), optimize);
           }),
           py::arg("graph"),
           py::arg("optimize") = true)
-      .def("set_captures", [](PythonGraphExecutor& ge, py::args args) {
-        ge.captures = createVariableTensorList(args);
+      .def("graph_for", [](GraphExecutor& ge, py::args args) {
+        return ge.graphFor(evilDeprecatedBadCreateStackDoNotUse(args, ge.graph()->inputs()));
       })
-      .def("__call__", [](PythonGraphExecutor& ge, py::args args) -> py::object {
-        auto inputs = createVariableTensorList(args, ge.captures.size());
-        auto outputs = ge.run(std::move(inputs));
-        // if we don't tell pybind these are variables it chokes on the
-        // conversion.
-        // TODO: fix conversions to be sane and make sure this works.
-        if(outputs.size() == 1) {
-          return py::cast(static_cast<autograd::Variable&>(outputs[0]));
-        } else {
-          py::tuple tuple(outputs.size());
-          for(size_t i = 0; i < outputs.size(); i++) {
-            tuple[i] = py::cast(static_cast<autograd::Variable&>(outputs[i]));
-          }
-          return tuple;
-        }
+      .def_property_readonly("graph", [](GraphExecutor& ge) {
+        return ge.graph();
+      })
+     .def("get_debug_state", [](GraphExecutor& ge) {
+        return ge.getDebugState();
+      })
+      .def("__call__", [](GraphExecutor& ge, py::args args) -> py::object {
+        const auto & graph = ge.graph();
+        auto stack = evilDeprecatedBadCreateStackDoNotUse(args, graph->inputs());
+        ge.run(stack);
+        return createPyObjectForStack(std::move(stack));
       });
+
+
+    py::class_<PyTorchFileWriter>(m, "PyTorchFileWriter")
+      .def(py::init<std::string>())
+      .def("write_record", &PyTorchFileWriter::writeRecord)
+      .def("write_end_of_file", &PyTorchFileWriter::writeEndOfFile);
+
+    py::class_<PyTorchFileReader>(m, "PyTorchFileReader")
+      .def(py::init<std::string>())
+      .def("get_record_with_key", [](PyTorchFileReader &self, uint64_t key) {
+        std::shared_ptr<void> data;
+        size_t size;
+        std::tie(data, size) = self.getRecordWithKey(key);
+        return py::bytes(reinterpret_cast<const char*>(data.get()), size);
+      })
+      .def("get_last_record", [](PyTorchFileReader &self){
+        std::shared_ptr<void> data;
+        size_t size;
+        std::tie(data, size) = self.getLastRecord();
+        return py::bytes(reinterpret_cast<const char*>(data.get()), size);
+      });
+
+  m.def("_jit_get_operation", [](const std::string& qualified_name) {
+    try {
+      auto symbol = Symbol::fromQualString(qualified_name);
+      auto operations = getAllOperatorsFor(std::move(symbol));
+      AT_CHECK(!operations.empty(), "No such operator ", qualified_name);
+      AT_CHECK(
+          operations.size() == 1,
+          "Found ", operations.size(), " overloads for operator ",
+          qualified_name, "! Overloads are not supported from Python.");
+      std::shared_ptr<Operator> op = operations[0];
+      AT_ASSERT(op != nullptr);
+      std::ostringstream docstring;
+      docstring << "Automatically bound operator '" << qualified_name
+                << "' with schema: " << op->schema();
+      return py::cpp_function([op](py::args args, py::kwargs kwargs) {
+        return invokeOperatorFromPython(
+            *op, std::move(args), std::move(kwargs));
+      }, py::name(qualified_name.c_str()), py::doc(docstring.str().c_str()));
+    } catch (const at::Error& error) {
+      throw std::runtime_error(error.what_without_backtrace());
+    }
+  }, py::arg("qualified_name"));
+
   initPythonIRBindings(module);
-  initPythonTracerBindings(module);
-  python::initCompilerMixin(module);
+  tracer::initPythonTracerBindings(module);
   script::initTreeViewBindings(module);
   script::initJitScriptBindings(module);
+  initBatchTensorBindings(module);
+  initRegisterBatchOpsBindings(module);
 }
 
 }}

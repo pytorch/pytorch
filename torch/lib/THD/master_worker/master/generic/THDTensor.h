@@ -10,7 +10,7 @@ typedef struct {
   THDStorage *storage;
   ptrdiff_t storageOffset;
 
-  int refcount;
+  std::atomic<int> refcount;
   char flag;
 
   // Additional fields
@@ -23,7 +23,7 @@ THD_API THDDescBuff THDTensor_(sizeDesc)(const THDTensor *tensor);
 /**** access methods ****/
 THD_API THDStorage* THDTensor_(storage)(const THDTensor *self);
 THD_API ptrdiff_t THDTensor_(storageOffset)(const THDTensor *self);
-THD_API int THDTensor_(nDimension)(const THDTensor *self);
+THD_API int THDTensor_(nDimensionLegacyNoScalars)(const THDTensor *self);
 THD_API int64_t THDTensor_(size)(const THDTensor *self, int dim);
 THD_API int64_t THDTensor_(stride)(const THDTensor *self, int dim);
 THD_API THLongStorage *THDTensor_(newSizeOf)(THDTensor *self);

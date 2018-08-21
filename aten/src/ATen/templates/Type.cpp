@@ -1,20 +1,28 @@
 #include "ATen/Type.h"
-#include "ATen/Tensor.h"
-#include "ATen/Storage.h"
-#include "ATen/Scalar.h"
-#include "ATen/SparseTensorRef.h"
+
+// ${generated_comment}
+
 #include "ATen/ExpandUtils.h"
 #include "ATen/NativeFunctions.h"
+#include "ATen/Scalar.h"
+#include "ATen/SparseTensorRef.h"
+#include "ATen/Storage.h"
+#include "ATen/Tensor.h"
+#include "ATen/TensorOptions.h"
 #include "ATen/UndefinedType.h"
+#include "ATen/DeviceGuard.h"
+
+#include <ATen/detail/VariableHooksInterface.h>
 
 #include <iostream>
-${type_headers}
+${cpu_type_headers}
 
 namespace at {
 
-void Type::registerAll(Context * context) {
-  ${type_registrations}
-  context->type_registry[static_cast<int>(Backend::Undefined)][static_cast<int>(ScalarType::Undefined)].reset(new UndefinedType(context));
+void Type::registerCPU(Context * context) {
+  ${cpu_type_registrations}
+  context->type_registry[static_cast<int>(Backend::Undefined)]
+                        [static_cast<int>(ScalarType::Undefined)].reset(new UndefinedType(context));
 }
 
 Tensor & Type::copy_(Tensor & self, const Tensor & src, bool non_blocking) const {
@@ -24,7 +32,8 @@ Tensor & Type::copy_(Tensor & self, const Tensor & src, bool non_blocking) const
 }
 
 Tensor Type::copy(const Tensor & src, bool non_blocking) const {
-  AT_ASSERT(src.defined(), "attempt to copy an undefined tensor");
+  // TODO(psag): have a DeviceGuard here
+  AT_CHECK(src.defined(), "attempt to copy an undefined tensor");
   if (is_sparse()) {
     auto indices = src._indices();
     auto values = src._values();
@@ -32,7 +41,7 @@ Tensor Type::copy(const Tensor & src, bool non_blocking) const {
     auto & this_dense_idx = this_dense.toScalarType(ScalarType::Long);
     auto indices_copy = this_dense_idx.copy(indices, non_blocking);
     auto values_copy = this_dense.copy(values, non_blocking);
-    return sparse_coo_tensor(indices_copy, values_copy, src.sizes());
+    return _sparse_coo_tensor_unsafe(indices_copy, values_copy, src.sizes());
   } else {
     Tensor r = this->tensor(src.sizes());
     r.copy_(src, non_blocking);
@@ -74,10 +83,10 @@ Tensor Type::tensorFromBlob(void * data, IntList sizes, IntList strides, const s
   auto storage = storageFromBlob(data, computeStorageSize(sizes, strides), deleter);
   return tensor(*storage, 0, sizes, strides);
 }
-Tensor Type::tensorWithAllocator(IntList sizes, std::unique_ptr<Allocator> allocator) const {
+Tensor Type::tensorWithAllocator(IntList sizes, Allocator* allocator) const {
   return tensorWithAllocator(sizes, defaultStrides(sizes), std::move(allocator));
 }
-Tensor Type::tensorWithAllocator(IntList sizes, IntList strides, std::unique_ptr<Allocator> allocator) const {
+Tensor Type::tensorWithAllocator(IntList sizes, IntList strides, Allocator* allocator) const {
   auto storage = storageWithAllocator(computeStorageSize(sizes, strides), std::move(allocator));
   return tensor(*storage, 0, sizes, strides);
 }

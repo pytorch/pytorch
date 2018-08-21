@@ -45,19 +45,18 @@ class Threshold(Module):
     def forward(self, input):
         return F.threshold(input, self.threshold, self.value, self.inplace)
 
-    def __repr__(self):
+    def extra_repr(self):
         inplace_str = ', inplace' if self.inplace else ''
-        return self.__class__.__name__ + ' (' \
-            + str(self.threshold) \
-            + ', ' + str(self.value) \
-            + inplace_str + ')'
+        return 'threshold={}, value={}{}'.format(
+            self.threshold, self.value, inplace_str
+        )
 
 
 class ReLU(Threshold):
     r"""Applies the rectified linear unit function element-wise
     :math:`\text{ReLU}(x)= \max(0, x)`
 
-    .. image:: _static/img/activation/ReLU.png
+    .. image:: scripts/activation_images/ReLU.png
 
     Args:
         inplace: can optionally do the operation in-place. Default: ``False``
@@ -77,24 +76,25 @@ class ReLU(Threshold):
     def __init__(self, inplace=False):
         super(ReLU, self).__init__(0, 0, inplace)
 
-    def __repr__(self):
+    def extra_repr(self):
         inplace_str = 'inplace' if self.inplace else ''
-        return self.__class__.__name__ + '(' \
-            + inplace_str + ')'
+        return inplace_str
 
 
 class RReLU(Module):
-    r"""Applies the randomized leaky rectified liner unit function element-wise
-    described in the paper
+    r"""Applies the randomized leaky rectified liner unit function, element-wise,
+    as described in the paper:
+
     `Empirical Evaluation of Rectified Activations in Convolutional Network`_.
 
     The function is defined as:
 
     .. math::
-        \text{RReLU}(x) = \begin{cases}
+        \text{RReLU}(x) =
+        \begin{cases}
             x & \text{if } x \geq 0 \\
             ax & \text{ otherwise }
-        \end{cases},
+        \end{cases}
 
     where :math:`a` is randomly sampled from uniform distribution
     :math:`\mathcal{U}(\text{lower}, \text{upper})`.
@@ -120,6 +120,7 @@ class RReLU(Module):
     .. _`Empirical Evaluation of Rectified Activations in Convolutional Network`:
         https://arxiv.org/abs/1505.00853
     """
+
     def __init__(self, lower=1. / 8, upper=1. / 3, inplace=False):
         super(RReLU, self).__init__()
         self.lower = lower
@@ -129,12 +130,9 @@ class RReLU(Module):
     def forward(self, input):
         return F.rrelu(input, self.lower, self.upper, self.training, self.inplace)
 
-    def __repr__(self):
+    def extra_repr(self):
         inplace_str = ', inplace' if self.inplace else ''
-        return self.__class__.__name__ + '(' \
-            + str(self.lower) \
-            + ', ' + str(self.upper) \
-            + inplace_str + ')'
+        return 'lower={}, upper={}{}'.format(self.lower, self.upper, inplace_str)
 
 
 class Hardtanh(Module):
@@ -152,7 +150,7 @@ class Hardtanh(Module):
     The range of the linear region :math:`[-1, 1]` can be adjusted using
     :attr:`min_val` and :attr:`max_val`.
 
-    .. image:: _static/img/activation/Hardtanh.png
+    .. image:: scripts/activation_images/Hardtanh.png
 
     Args:
         min_val: minimum value of the linear region range. Default: -1
@@ -191,16 +189,18 @@ class Hardtanh(Module):
     def forward(self, input):
         return F.hardtanh(input, self.min_val, self.max_val, self.inplace)
 
-    def __repr__(self):
+    def extra_repr(self):
         inplace_str = ', inplace' if self.inplace else ''
-        return self.__class__.__name__ + '(' \
-            + 'min_val=' + str(self.min_val) \
-            + ', max_val=' + str(self.max_val) \
-            + inplace_str + ')'
+        return 'min_val={}, max_val={}{}'.format(
+            self.min_val, self.max_val, inplace_str
+        )
 
 
 class ReLU6(Hardtanh):
-    r"""Applies the element-wise function :math:`\text{ReLU6}(x) = \min(\max(0,x), 6)`
+    r"""Applies the element-wise function:
+
+    .. math::
+        \text{ReLU6}(x) = \min(\max(0,x), 6)
 
     Args:
         inplace: can optionally do the operation in-place. Default: ``False``
@@ -210,7 +210,7 @@ class ReLU6(Hardtanh):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
-    .. image:: _static/img/activation/ReLU6.png
+    .. image:: scripts/activation_images/ReLU6.png
 
     Examples::
 
@@ -222,21 +222,24 @@ class ReLU6(Hardtanh):
     def __init__(self, inplace=False):
         super(ReLU6, self).__init__(0, 6, inplace)
 
-    def __repr__(self):
+    def extra_repr(self):
         inplace_str = 'inplace' if self.inplace else ''
-        return self.__class__.__name__ + '(' \
-            + inplace_str + ')'
+        return inplace_str
 
 
 class Sigmoid(Module):
-    r"""Applies the element-wise function :math:`\text{Sigmoid}(x) = \frac{1}{1 + \exp(-x)}`
+    r"""Applies the element-wise function:
+
+    .. math::
+        \text{Sigmoid}(x) = \frac{1}{1 + \exp(-x)}
+
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
-    .. image:: _static/img/activation/Sigmoid.png
+    .. image:: scripts/activation_images/Sigmoid.png
 
     Examples::
 
@@ -248,20 +251,19 @@ class Sigmoid(Module):
     def forward(self, input):
         return torch.sigmoid(input)
 
-    def __repr__(self):
-        return self.__class__.__name__ + '()'
-
 
 class Tanh(Module):
-    r"""Applies element-wise,
-    :math:`\text{Tanh}(x) = \tanh(x) = \frac{e^x - e^{-x}} {e^x + e^{-x}}`
+    r"""Applies the element-wise function:
+
+    .. math::
+        \text{Tanh}(x) = \tanh(x) = \frac{e^x - e^{-x}} {e^x + e^{-x}}
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
-    .. image:: _static/img/activation/Tanh.png
+    .. image:: scripts/activation_images/Tanh.png
 
     Examples::
 
@@ -273,13 +275,12 @@ class Tanh(Module):
     def forward(self, input):
         return torch.tanh(input)
 
-    def __repr__(self):
-        return self.__class__.__name__ + '()'
-
 
 class ELU(Module):
-    r"""Applies element-wise,
-    :math:`\text{ELU}(x) = \max(0,x) + \min(0, \alpha * (\exp(x) - 1))`
+    r"""Applies the element-wise function:
+
+    .. math::
+        \text{ELU}(x) = \max(0,x) + \min(0, \alpha * (\exp(x) - 1))
 
     Args:
         alpha: the :math:`\alpha` value for the ELU formulation. Default: 1.0
@@ -290,7 +291,7 @@ class ELU(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
-    .. image:: _static/img/activation/ELU.png
+    .. image:: scripts/activation_images/ELU.png
 
     Examples::
 
@@ -307,20 +308,63 @@ class ELU(Module):
     def forward(self, input):
         return F.elu(input, self.alpha, self.inplace)
 
-    def __repr__(self):
+    def extra_repr(self):
         inplace_str = ', inplace' if self.inplace else ''
-        return self.__class__.__name__ + '(' \
-            + 'alpha=' + str(self.alpha) \
-            + inplace_str + ')'
+        return 'alpha={}{}'.format(self.alpha, inplace_str)
+
+
+class CELU(Module):
+    r"""Applies the element-wise function:
+
+    .. math::
+        \text{CELU}(x) = \max(0,x) + \min(0, \alpha * (\exp(x/\alpha) - 1))
+
+    More details can be found in the paper `Continuously Differentiable Exponential Linear Units`_ .
+
+    Args:
+        alpha: the :math:`\alpha` value for the CELU formulation. Default: 1.0
+        inplace: can optionally do the operation in-place. Default: ``False``
+
+    Shape:
+        - Input: :math:`(N, *)` where `*` means, any number of additional
+          dimensions
+        - Output: :math:`(N, *)`, same shape as the input
+
+    .. image:: scripts/activation_images/CELU.png
+
+    Examples::
+
+        >>> m = nn.CELU()
+        >>> input = torch.randn(2)
+        >>> output = m(input)
+
+    .. _`Continuously Differentiable Exponential Linear Units`:
+        https://arxiv.org/abs/1704.07483
+    """
+
+    def __init__(self, alpha=1., inplace=False):
+        super(CELU, self).__init__()
+        self.alpha = alpha
+        self.inplace = inplace
+
+    def forward(self, input):
+        return F.celu(input, self.alpha, self.inplace)
+
+    def extra_repr(self):
+        inplace_str = ', inplace' if self.inplace else ''
+        return 'alpha={}{}'.format(self.alpha, inplace_str)
 
 
 class SELU(Module):
-    r"""Applies element-wise,
-    :math:`\text{SELU}(x) = \text{scale} * (\max(0,x) + \min(0, \alpha * (\exp(x) - 1)))`,
+    r"""Applied element-wise, as:
+
+    .. math::
+        \text{SELU}(x) = \text{scale} * (\max(0,x) + \min(0, \alpha * (\exp(x) - 1)))
+
     with :math:`\alpha = 1.6732632423543772848170429916717` and
     :math:`\text{scale} = 1.0507009873554804934193349852946`.
 
-    .. image:: _static/img/activation/SELU.png
+    .. image:: scripts/activation_images/SELU.png
 
     More details can be found in the paper `Self-Normalizing Neural Networks`_ .
 
@@ -348,15 +392,15 @@ class SELU(Module):
     def forward(self, input):
         return F.selu(input, self.inplace)
 
-    def __repr__(self):
-        inplace_str = '(inplace)' if self.inplace else ''
-        return self.__class__.__name__ + inplace_str
+    def extra_repr(self):
+        inplace_str = 'inplace' if self.inplace else ''
+        return inplace_str
 
 
 class GLU(Module):
     r"""Applies the gated linear unit function
-    :math:`{GLU}(a, b)= a \otimes \sigma(b)` where `a` is the first half of
-    the input vector and `b` is the second half.
+    :math:`{GLU}(a, b)= a \otimes \sigma(b)` where :math:`a` is the first half
+    of the input vector and :math:`b` is the second half.
 
     Args:
         dim (int): the dimension on which to split the input. Default: -1
@@ -380,13 +424,12 @@ class GLU(Module):
     def forward(self, input):
         return F.glu(input, self.dim)
 
-    def __repr__(self):
-        return '{}(dim={})'.format(self.__class__.__name__, self.dim)
+    def extra_repr(self):
+        return 'dim={}'.format(self.dim)
 
 
 class Hardshrink(Module):
-    r"""Applies the hard shrinkage function element-wise
-    Hardshrink is defined as:
+    r"""Applies the hard shrinkage function element-wise:
 
     .. math::
         \text{HardShrink}(x) =
@@ -404,7 +447,7 @@ class Hardshrink(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
-    .. image:: _static/img/activation/Hardshrink.png
+    .. image:: scripts/activation_images/Hardshrink.png
 
     Examples::
 
@@ -420,20 +463,24 @@ class Hardshrink(Module):
     def forward(self, input):
         return F.hardshrink(input, self.lambd)
 
-    def __repr__(self):
-        return self.__class__.__name__ + '(' \
-            + str(self.lambd) + ')'
+    def extra_repr(self):
+        return '{}'.format(self.lambd)
 
 
 class LeakyReLU(Module):
-    r"""Applies element-wise,
-    :math:`\text{LeakyReLU}(x) = \max(0, x) + \text{negative_slope} * \min(0, x)` or
+    r"""Applies the element-wise function:
+
+    .. math::
+        \text{LeakyReLU}(x) = \max(0, x) + \text{negative\_slope} * \min(0, x)
+
+
+    or
 
     .. math::
         \text{LeakyRELU}(x) =
         \begin{cases}
         x, & \text{ if } x \geq 0 \\
-        \text{negative_slope} \times x, & \text{ otherwise }
+        \text{negative\_slope} \times x, & \text{ otherwise }
         \end{cases}
 
     Args:
@@ -445,7 +492,7 @@ class LeakyReLU(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
-    .. image:: _static/img/activation/LeakyReLU.png
+    .. image:: scripts/activation_images/LeakyReLU.png
 
     Examples::
 
@@ -462,22 +509,22 @@ class LeakyReLU(Module):
     def forward(self, input):
         return F.leaky_relu(input, self.negative_slope, self.inplace)
 
-    def __repr__(self):
+    def extra_repr(self):
         inplace_str = ', inplace' if self.inplace else ''
-        return self.__class__.__name__ + '(' \
-            + str(self.negative_slope) \
-            + inplace_str + ')'
+        return 'negative_slope={}{}'.format(self.negative_slope, inplace_str)
 
 
 class LogSigmoid(Module):
-    r"""Applies element-wise :math:`\text{LogSigmoid}(x) = \log\left(\frac{ 1 }{ 1 + \exp(-x)}\right)`
+    r"""Applies the element-wise function:
+
+    .. math:`\text{LogSigmoid}(x) = \log\left(\frac{ 1 }{ 1 + \exp(-x)}\right)`
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
-    .. image:: _static/img/activation/LogSigmoid.png
+    .. image:: scripts/activation_images/LogSigmoid.png
 
     Examples::
 
@@ -489,12 +536,12 @@ class LogSigmoid(Module):
     def forward(self, input):
         return F.logsigmoid(input)
 
-    def __repr__(self):
-        return self.__class__.__name__ + '()'
-
 
 class Softplus(Module):
-    r"""Applies element-wise :math:`\text{Softplus}(x) = \frac{1}{\beta} * \log(1 + \exp(\beta * x))`
+    r"""Applies the element-wise function:
+
+    .. math::
+        \text{Softplus}(x) = \frac{1}{\beta} * \log(1 + \exp(\beta * x))
 
     SoftPlus is a smooth approximation to the ReLU function and can be used
     to constrain the output of a machine to always be positive.
@@ -511,7 +558,7 @@ class Softplus(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
-    .. image:: _static/img/activation/Softplus.png
+    .. image:: scripts/activation_images/Softplus.png
 
     Examples::
 
@@ -528,16 +575,12 @@ class Softplus(Module):
     def forward(self, input):
         return F.softplus(input, self.beta, self.threshold)
 
-    def __repr__(self):
-        return self.__class__.__name__ + '(' \
-            + 'beta=' + str(self.beta) \
-            + ', threshold=' + str(self.threshold) + ')'
+    def extra_repr(self):
+        return 'beta={}, threshold={}'.format(self.beta, self.threshold)
 
 
 class Softshrink(Module):
-    r"""Applies the soft shrinkage function elementwise
-
-    SoftShrinkage function is defined as:
+    r"""Applies the soft shrinkage function elementwise:
 
     .. math::
         \text{SoftShrinkage}(x) =
@@ -555,7 +598,7 @@ class Softshrink(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
-    .. image:: _static/img/activation/Softshrink.png
+    .. image:: scripts/activation_images/Softshrink.png
 
     Examples::
 
@@ -571,14 +614,17 @@ class Softshrink(Module):
     def forward(self, input):
         return F.softshrink(input, self.lambd)
 
-    def __repr__(self):
-        return self.__class__.__name__ + '(' \
-            + str(self.lambd) + ')'
+    def extra_repr(self):
+        return str(self.lambd)
 
 
 class PReLU(Module):
-    r"""Applies element-wise the function
-    :math:`\text{PReLU}(x) = \max(0,x) + a * \min(0,x)` or
+    r"""Applies the element-wise function:
+
+    .. math::
+        \text{PReLU}(x) = \max(0,x) + a * \min(0,x)
+
+    or
 
     .. math::
         \text{PReLU}(x) =
@@ -604,7 +650,7 @@ class PReLU(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
-    .. image:: _static/img/activation/PReLU.png
+    .. image:: scripts/activation_images/PReLU.png
 
     Examples::
 
@@ -621,20 +667,22 @@ class PReLU(Module):
     def forward(self, input):
         return F.prelu(input, self.weight)
 
-    def __repr__(self):
-        return self.__class__.__name__ + '(' \
-            + 'num_parameters=' + str(self.num_parameters) + ')'
+    def extra_repr(self):
+        return 'num_parameters={}'.format(self.num_parameters)
 
 
 class Softsign(Module):
-    r"""Applies element-wise, the function :math:`\text{SoftSign}(x) = \frac{x}{ 1 + |x|}`
+    r"""Applies the element-wise function:
+
+    .. math::
+        \text{SoftSign}(x) = \frac{x}{ 1 + |x|}
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
-    .. image:: _static/img/activation/Softsign.png
+    .. image:: scripts/activation_images/Softsign.png
 
     Examples::
 
@@ -646,19 +694,19 @@ class Softsign(Module):
     def forward(self, input):
         return F.softsign(input)
 
-    def __repr__(self):
-        return self.__class__.__name__ + '()'
-
 
 class Tanhshrink(Module):
-    r"""Applies element-wise, :math:`\text{Tanhshrink}(x) = x - \text{Tanh}(x)`
+    r"""Applies the element-wise function:
+
+    .. math::
+        \text{Tanhshrink}(x) = x - \text{Tanh}(x)
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
-    .. image:: _static/img/activation/Tanhshrink.png
+    .. image:: scripts/activation_images/Tanhshrink.png
 
     Examples::
 
@@ -670,23 +718,21 @@ class Tanhshrink(Module):
     def forward(self, input):
         return F.tanhshrink(input)
 
-    def __repr__(self):
-        return self.__class__.__name__ + '()'
-
 
 class Softmin(Module):
     r"""Applies the Softmin function to an n-dimensional input Tensor
     rescaling them so that the elements of the n-dimensional output Tensor
     lie in the range `(0, 1)` and sum to 1
 
-    :math:`\text{Softmin}(x_{i}) = \frac{\exp(-x_i)}{\sum_j \exp(-x_j)}`
+    .. math::
+        \text{Softmin}(x_{i}) = \frac{\exp(-x_i)}{\sum_j \exp(-x_j)}
 
     Shape:
         - Input: any shape
         - Output: same as input
 
     Arguments:
-        dim (int): A dimension along which Softmax will be computed (so every slice
+        dim (int): A dimension along which Softmin will be computed (so every slice
             along dim will sum to 1).
 
     Returns:
@@ -699,6 +745,7 @@ class Softmin(Module):
         >>> input = torch.randn(2, 3)
         >>> output = m(input)
     """
+
     def __init__(self, dim=None):
         super(Softmin, self).__init__()
         self.dim = dim
@@ -706,17 +753,16 @@ class Softmin(Module):
     def forward(self, input):
         return F.softmin(input, self.dim, _stacklevel=5)
 
-    def __repr__(self):
-        return self.__class__.__name__ + '()'
-
 
 class Softmax(Module):
     r"""Applies the Softmax function to an n-dimensional input Tensor
     rescaling them so that the elements of the n-dimensional output Tensor
     lie in the range (0,1) and sum to 1
 
-    Softmax is defined as
-    :math:`\text{Softmax}(x_{i}) = \frac{\exp(x_i)}{\sum_j \exp(x_j)}`
+    Softmax is defined as:
+
+    .. math::
+        \text{Softmax}(x_{i}) = \frac{\exp(x_i)}{\sum_j \exp(x_j)}
 
     Shape:
         - Input: any shape
@@ -754,9 +800,6 @@ class Softmax(Module):
     def forward(self, input):
         return F.softmax(input, self.dim, _stacklevel=5)
 
-    def __repr__(self):
-        return self.__class__.__name__ + '()'
-
 
 class Softmax2d(Module):
     r"""Applies SoftMax over features to each spatial location.
@@ -784,15 +827,13 @@ class Softmax2d(Module):
         assert input.dim() == 4, 'Softmax2d requires a 4D tensor as input'
         return F.softmax(input, 1, _stacklevel=5)
 
-    def __repr__(self):
-        return self.__class__.__name__ + '()'
-
 
 class LogSoftmax(Module):
-    r"""Applies the `Log(Softmax(x))` function to an n-dimensional input Tensor.
-    The LogSoftmax formulation can be simplified as
+    r"""Applies the :math:`\log(\text{Softmax}(x))` function to an n-dimensional
+    input Tensor. The LogSoftmax formulation can be simplified as:
 
-    :math:`\text{LogSoftmax}(x_{i}) = \log\left(\frac{\exp(x_i) }{ \sum_j \exp(x_j)} \right)`
+    .. math::
+        \text{LogSoftmax}(x_{i}) = \log\left(\frac{\exp(x_i) }{ \sum_j \exp(x_j)} \right)
 
     Shape:
         - Input: any shape
@@ -824,6 +865,3 @@ class LogSoftmax(Module):
 
     def forward(self, input):
         return F.log_softmax(input, self.dim, _stacklevel=5)
-
-    def __repr__(self):
-        return self.__class__.__name__ + '()'

@@ -7,25 +7,24 @@ void THNN_(MSECriterion_updateOutput)(
           THTensor *input,
           THTensor *target,
           THTensor *output,
-          bool sizeAverage,
-          bool reduce)
+          int64_t reduction)
 {
   THNN_CHECK_SHAPE(input, target);
 
-  if (reduce) {
+  if (reduction != Reduction::None) {
     THTensor_(resize1d)(output, 1);
 
-    real sum = 0;
+    accreal sum = 0;
 
     TH_TENSOR_APPLY2(real, input, real, target,
-      real z = (*input_data - *target_data);
+      accreal z = (*input_data - *target_data);
       sum += z*z;
     );
 
-    if (sizeAverage)
+    if (reduction == Reduction::ElementwiseMean)
       sum /= THTensor_(nElement)(input);
 
-    THTensor_(set1d)(output, 0, sum);
+    THTensor_(set1d)(output, 0, (real)sum);
     return;
   }
 
@@ -42,15 +41,14 @@ void THNN_(MSECriterion_updateGradInput)(
           THTensor *target,
           THTensor *gradOutput,
           THTensor *gradInput,
-          bool sizeAverage,
-          bool reduce)
+          int64_t reduction)
 {
   THNN_CHECK_SHAPE(input, target);
   THTensor_(resizeAs)(gradInput, input);
 
-  if (reduce) {
+  if (reduction != Reduction::None) {
     THNN_CHECK_DIM_SIZE(gradOutput, 1, 0, 1);
-    real norm = sizeAverage ? 2./((real)THTensor_(nElement)(input)) : 2.;
+    real norm = reduction == Reduction::ElementwiseMean ? 2./((real)THTensor_(nElement)(input)) : 2.;
     norm *= THTensor_(get1d)(gradOutput, 0);
     TH_TENSOR_APPLY3(real, gradInput, real, input, real, target,
       *gradInput_data = norm * (*input_data - *target_data);

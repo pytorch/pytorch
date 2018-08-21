@@ -6,7 +6,6 @@ from functools import wraps, reduce
 from string import Template
 import torch
 import torch.cuda
-from torch.autograd import Variable
 from torch._utils import _accumulate
 
 try:
@@ -33,8 +32,11 @@ def _generate_typedefs():
                 th_struct = 'struct ' + th_name
 
                 typedefs += ['typedef {} {};'.format(th_struct, th_name)]
-                module = torch if lib == 'TH' else torch.cuda
-                python_class = getattr(module, python_name)
+                # We have to assemble a string here, because we're going to
+                # do this lookup based on tensor.type(), which returns a
+                # string (not a type object, as this code was before)
+                python_module = 'torch.cuda' if lib == 'THCuda' else 'torch'
+                python_class = python_module + '.' + python_name
                 _cffi_to_torch[th_struct] = python_class
                 _torch_to_cffi[python_class] = th_struct
     return '\n'.join(typedefs) + '\n'
@@ -173,6 +175,8 @@ def create_extension(name, headers, sources, verbose=True, with_cuda=False,
 
     ffi = cffi.FFI()
     sources = [os.path.join(base_path, src) for src in sources]
+    # NB: TH headers are C99 now
+    kwargs['extra_compile_args'] = ['-std=c99'] + kwargs.get('extra_compile_args', [])
     ffi.set_source(cffi_wrapper_name, wrapper_source + all_headers_source,
                    sources=sources,
                    include_dirs=include_dirs,
@@ -190,8 +194,8 @@ def create_extension(name, headers, sources, verbose=True, with_cuda=False,
 def _wrap_function(function, ffi):
     @wraps(function)
     def safe_call(*args, **kwargs):
-        args = tuple(ffi.cast(_torch_to_cffi.get(type(arg), 'void') + '*', arg._cdata)
-                     if torch.is_tensor(arg) or torch.is_storage(arg) or isinstance(arg, Variable)
+        args = tuple(ffi.cast(_torch_to_cffi.get(arg.type(), 'void') + '*', arg._cdata)
+                     if isinstance(arg, torch.Tensor) or torch.is_storage(arg)
                      else arg
                      for arg in args)
         args = (function,) + args
@@ -202,6 +206,8 @@ def _wrap_function(function, ffi):
                 cdata = int(ffi.cast('uintptr_t', result))
                 cname = typeof.item.cname
                 if cname in _cffi_to_torch:
-                    return _cffi_to_torch[cname](cdata=cdata)
+                    # TODO: Maybe there is a less janky way to eval
+                    # off of this
+                    return eval(_cffi_to_torch[cname])(cdata=cdata)
         return result
     return safe_call

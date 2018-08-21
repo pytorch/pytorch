@@ -7,6 +7,34 @@ namespace torch {
 namespace jit {
 namespace script {
 
+
+Decl mergeTypesFromTypeComment(Decl decl, Decl type_annotation_decl, bool is_method) {
+  auto expected_num_annotations = decl.params().size();
+  if (is_method) {
+    // `self` argument
+    expected_num_annotations -= 1;
+  }
+  if (expected_num_annotations != type_annotation_decl.params().size()) {
+    throw ErrorReport(type_annotation_decl.range()) << "Number of type annotations ("
+      << type_annotation_decl.params().size() << ") did not match the number of "
+      << "function parameters (" << expected_num_annotations << ")";
+  }
+  auto old = decl.params();
+  auto _new = type_annotation_decl.params();
+  // Merge signature idents and ranges with annotation types
+
+  std::vector<Param> new_params;
+  size_t i = is_method ? 1 : 0;
+  size_t j = 0;
+  if (is_method) {
+    new_params.push_back(old[0]);
+  }
+  for (; i < decl.params().size(); ++i, ++j) {
+    new_params.push_back(Param::create(old[i].range(), old[i].ident(), _new[j].type()));
+  }
+  return Decl::create(decl.range(), List<Param>::create(decl.range(), new_params), type_annotation_decl.return_type());
+}
+
 struct Parser {
   explicit Parser(const std::string& str)
       : L(str), shared(sharedParserData()) {}
@@ -29,30 +57,54 @@ struct Parser {
         List<Expr>(makeList(range, std::move(inputs))),
         List<Attribute>(makeList(range, std::move(attributes))));
   }
+  // exp | expr, | expr, expr, ...
+  TreeRef parseExpOrExpTuple(int end) {
+    auto prefix = parseExp();
+    if(L.cur().kind == ',') {
+      std::vector<Expr> exprs = { prefix };
+      while(L.cur().kind != end) {
+        L.expect(',');
+        exprs.push_back(parseExp());
+      }
+      auto list = List<Expr>::create(prefix.range(), exprs);
+      prefix = TupleLiteral::create(list.range(), list);
+    }
+    return prefix;
+  }
   // things like a 1.0 or a(4) that are not unary/binary expressions
   // and have higher precedence than all of them
   TreeRef parseBaseExp() {
     TreeRef prefix;
     switch (L.cur().kind) {
-      case TK_NUMBER:
-      case TK_TRUE:
-      case TK_FALSE: {
+      case TK_NUMBER: {
         prefix = parseConst();
+      } break;
+      case TK_TRUE:
+      case TK_FALSE:
+      case TK_NONE: {
+        auto k = L.cur().kind;
+        auto r = L.cur().range;
+        prefix = c(k, r, {});
+        L.next();
       } break;
       case '(': {
         L.next();
-        prefix = parseExp();
+        if (L.nextIf(')')) {
+          /// here we have the empty tuple case
+          std::vector<Expr> vecExpr;
+          List<Expr> listExpr = List<Expr>::create(L.cur().range, vecExpr);
+          prefix = TupleLiteral::create(L.cur().range, listExpr);
+          break;
+        }
+        prefix = parseExpOrExpTuple(')');
         L.expect(')');
       } break;
-      case TK_FLOAT:
-      case TK_INT:
-      case TK_LONG: {
-        auto r = L.cur().range;
-        auto type = c(L.next().kind, r, {});
-        L.expect('(');
-        auto exp = parseExp();
-        L.expect(')');
-        prefix = Cast::create(r, Type(type), Expr(exp));
+      case '[': {
+        auto list = parseList('[', ',', ']', &Parser::parseExp);
+        prefix = ListLiteral::create(list.range(), List<Expr>(list));
+      } break;
+      case TK_STRINGLITERAL: {
+        prefix = parseStringLiteral();
       } break;
       default: {
         Ident name = parseIdent();
@@ -66,7 +118,7 @@ struct Parser {
       } else if (L.cur().kind == '(') {
         prefix = createApply(Expr(prefix));
       } else if (L.cur().kind == '[') {
-        prefix = parseSliceOrGather(prefix);
+        prefix = parseSubscript(prefix);
       } else {
         break;
       }
@@ -108,7 +160,17 @@ struct Parser {
       auto kind = L.cur().kind;
       auto pos = L.cur().range;
       L.next();
-      prefix = c(kind, pos, {parseExp(unary_prec)});
+      auto unary_kind = kind == '*' ? TK_STARRED :
+                        kind == '-' ? TK_UNARY_MINUS :
+                                      kind;
+      auto subexp = parseExp(unary_prec);
+      // fold '-' into constant numbers, so that attributes can accept
+      // things like -1
+      if(unary_kind == TK_UNARY_MINUS && subexp.kind() == TK_CONST) {
+        prefix = Const::create(subexp.range(), "-" + Const(subexp).text());
+      } else {
+        prefix = c(unary_kind, pos, {subexp});
+      }
     } else {
       prefix = parseBaseExp();
     }
@@ -149,46 +211,67 @@ struct Parser {
       L.expect(end);
     return List<T>::create(r, elements);
   }
-  TreeRef parseConst() {
-    // 'b' - boolean
-    // 'LL' 64-bit integer
-    // 'f' single-precision float
-    // 'i' 32-bit integer
-    // 'f' is default if '.' appears in the number
+
+  Const parseConst() {
     auto range = L.cur().range;
-    if (L.nextIf(TK_TRUE)) {
-      return c(TK_CONST, range, {d(1), s("b")});
-    } else if (L.nextIf(TK_FALSE)) {
-      return c(TK_CONST, range, {d(0), s("b")});
-    }
-    float mult = 1.0f;
-    while (L.nextIf('-')) {
-      mult *= -1.0f;
-    }
     auto t = L.expect(TK_NUMBER);
-    std::string type_ident =
-        (t.text().find('.') == std::string::npos) ? "i" : "f";
-    if (L.cur().kind == TK_IDENT) {
-      Token type_ident_tok = L.expect(TK_IDENT);
-      type_ident = type_ident_tok.text();
-      if (type_ident != "LL" && type_ident != "f") {
-        throw ErrorReport(type_ident_tok)
-            << "expected 'f' or 'LL' "
-            << "as numeric type identifier but found '" << type_ident << "'";
+    return Const::create(t.range, t.text());
+  }
+
+  bool isCharCount(char c, const std::string& str, size_t start, int len) {
+    //count checks from [start, start + len)
+    return start + len <= str.size() && std::count(str.begin() + start, str.begin() + start + len, c) == len;
+  }
+
+  std::string parseString(const SourceRange& range, const std::string &str) {
+    int quote_len = isCharCount(str[0], str, 0, 3) ? 3 : 1;
+    auto ret_str = str.substr(quote_len, str.size() - quote_len * 2);
+    size_t pos = ret_str.find('\\');
+    while(pos != std::string::npos) {
+      //invariant: pos has to escape a character because it is a valid string
+      char c = ret_str[pos + 1];
+      switch (ret_str[pos + 1]) {
+        case '\\':
+        case '\'':
+        case '\"':
+        case '\n':
+          break;
+        case 'a':
+          c = '\a';
+          break;
+        case 'b':
+          c = '\b';
+          break;
+        case 'f':
+          c = '\f';
+          break;
+        case 'n':
+          c = '\n';
+          break;
+        case 'v':
+          c = '\v';
+          break;
+        default:
+          throw ErrorReport(range) << " octal and hex escaped sequences are not supported";
       }
+      ret_str.replace(pos, /* num to erase */ 2, /* num copies */ 1, c);
+      pos = ret_str.find('\\', pos + 1);
     }
-    return c(TK_CONST, t.range, {d(mult * t.doubleValue()), s(type_ident)});
+    return ret_str;
   }
-  TreeRef parseAttributeValue() {
-    int kind = L.cur().kind;
-    switch (kind) {
-      case '[': {
-        auto list = parseList('[', ',', ']', &Parser::parseConst);
-        return ListLiteral::create(list.range(), List<Expr>(list));
-      } default:
-        return parseConst();
-    }
+
+  StringLiteral parseStringLiteral() {
+    auto range = L.cur().range;
+    std::stringstream ss;
+    while(L.cur().kind == TK_STRINGLITERAL)
+      ss << parseString(L.cur().range, L.next().text());
+    return StringLiteral::create(range, ss.str());
   }
+
+  Expr parseAttributeValue() {
+    return parseExp();
+  }
+
   void parseOperatorArguments(TreeList& inputs, TreeList& attributes) {
     L.expect('(');
     if (L.cur().kind != ')') {
@@ -206,69 +289,72 @@ struct Parser {
     L.expect(')');
   }
 
-  // OK: [a] (gather), [a:], [:a], [a:b], [:] (slice)
-  // Not OK: []
-  TreeRef parseSliceOrGather(TreeRef value) {
-    const auto range = L.cur().range;
-    L.expect('[');
-
-    // `first` will either be the gather indices, or the start of the slice.
+  // Parse expr's of the form [a:], [:b], [a:b], [:]
+  Expr parseSubscriptExp() {
     TreeRef first, second;
-
-    // Here we can either have a colon (which starts a slice), or an expression.
-    // If an expression, we don't know yet if it will be a slice or a gather.
+    auto range = L.cur().range;
     if (L.cur().kind != ':') {
       first = parseExp();
-      if (L.nextIf(']')) {
-        return Gather::create(range, Expr(value), Expr(first));
-      } else {
-        first = c(TK_OPTION, range, {first});
+    }
+    if (L.nextIf(':')) {
+      if (L.cur().kind != ',' && L.cur().kind != ']') {
+        second = parseExp();
       }
+      auto maybe_first = first ? Maybe<Expr>::create(range, Expr(first)) : Maybe<Expr>::create(range);
+      auto maybe_second = second ? Maybe<Expr>::create(range, Expr(second)) : Maybe<Expr>::create(range);
+      return SliceExpr::create(range, maybe_first, maybe_second);
     } else {
-      first = c(TK_OPTION, range, {});
+      return Expr(first);
     }
-    L.expect(':');
-    // Now we *may* have an expression.
-    if (L.cur().kind != ']') {
-      second = c(TK_OPTION, range, {parseExp()});
-    } else {
-      second = c(TK_OPTION, range, {});
-    }
-    L.expect(']');
+  }
 
-    return Slice::create(range, Expr(value), Maybe<Expr>(first), Maybe<Expr>(second));
+  TreeRef parseSubscript(TreeRef value) {
+    const auto range = L.cur().range;
+
+    auto subscript_exprs = parseList('[', ',', ']', &Parser::parseSubscriptExp);
+    return Subscript::create(range, Expr(value), subscript_exprs);
   }
+
   TreeRef parseParam() {
-    auto typ = parseType();
-    if (L.cur().kind != TK_IDENT && typ->trees()[0]->kind() == TK_IDENT) {
-      // oops, it wasn't a type but just a param without any type specified
-      return Param::create(
-          typ->range(), Ident(typ->trees()[0]), Type(c(TK_INFERRED, typ->range(), {})));
-    }
     auto ident = parseIdent();
-    return Param::create(typ->range(), Ident(ident), Type(typ));
+    TreeRef type;
+    if (L.nextIf(':')) {
+      type = parseExp();
+    } else {
+      type = Var::create(L.cur().range, Ident::create(L.cur().range, "Tensor"));
+    }
+    return Param::create(type->range(), Ident(ident), Expr(type));
   }
-  // TODO: these functions should be unnecessary, but we currently do not
-  // emit a TK_NEWLINE before a series of TK_DEDENT tokens
-  // so if we see a TK_DEDENT then we know a newline must have happened and
-  // ignore it. The real fix is to patch the lexer so TK_NEWLINE does get
-  // emited before a TK_INDENT
-  void expectEndOfLine() {
-    if (L.cur().kind != TK_DEDENT)
+
+  Param parseBareTypeAnnotation() {
+    auto type = parseExp();
+    return Param::create(type.range(), Ident::create(type.range(), ""), type);
+  }
+
+  TreeRef parseTypeComment(bool parse_full_line=false) {
+    auto range = L.cur().range;
+    if (parse_full_line) {
+      L.expect(TK_TYPE_COMMENT);
+    }
+    auto param_types = parseList('(', ',', ')', &Parser::parseBareTypeAnnotation);
+    TreeRef return_type;
+    if (L.nextIf(TK_ARROW)) {
+      return_type = Maybe<Expr>::create(L.cur().range, parseExp());
+    } else {
+      return_type = Maybe<Expr>::create(L.cur().range);
+    }
+    if (!parse_full_line)
       L.expect(TK_NEWLINE);
-  }
-  bool isEndOfLine() {
-    return L.cur().kind == TK_NEWLINE || L.cur().kind == TK_DEDENT;
+    return Decl::create(range, param_types, Maybe<Expr>(return_type));
   }
 
   // 'first' has already been parsed since expressions can exist
   // alone on a line:
   // first[,other,lhs] = rhs
-  Assign parseAssign(Ident first) {
-    List<Ident> list = parseOneOrMoreIdents(first);
+  Assign parseAssign(List<Expr> list) {
     auto red = parseOptionalReduction();
-    auto rhs = parseExp();
-    expectEndOfLine();
+    auto rhs = parseExpOrExpTuple(TK_NEWLINE);
+    L.expect(TK_NEWLINE);
     return Assign::create(list.range(), list, AssignKind(red), Expr(rhs));
   }
   TreeRef parseStmt() {
@@ -277,38 +363,29 @@ struct Parser {
         return parseIf();
       case TK_WHILE:
         return parseWhile();
+      case TK_FOR:
+        return parseFor();
       case TK_GLOBAL: {
         auto range = L.next().range;
         auto idents = parseList(TK_NOTHING, ',', TK_NOTHING, &Parser::parseIdent);
+        L.expect(TK_NEWLINE);
         return Global::create(range, idents);
       }
       case TK_RETURN: {
         auto range = L.next().range;
-        auto values = parseList(TK_NOTHING, ',', TK_NOTHING, &Parser::parseExp);
+        // XXX: TK_NEWLINE makes it accept an empty list
+        auto values = parseList(TK_NOTHING, ',', TK_NEWLINE, &Parser::parseExp);
         return Return::create(range, values);
       }
       default: {
-        Expr r = Expr(parseExp());
-        if (r.kind() == TK_VAR && !isEndOfLine()) {
-          return parseAssign(Var(r).name());
+        List<Expr> exprs = parseList(TK_NOTHING, ',', TK_NOTHING, &Parser::parseExp);
+        if (L.cur().kind != TK_NEWLINE) {
+          return parseAssign(exprs);
         } else {
-          expectEndOfLine();
-          return ExprStmt::create(r.range(), r);
+          L.expect(TK_NEWLINE);
+          return ExprStmt::create(exprs[0].range(), exprs);
         }
       }
-    }
-  }
-  TreeRef parseScalarType() {
-    switch (L.cur().kind) {
-      case TK_INT:
-      case TK_FLOAT:
-      case TK_LONG:
-      case TK_DOUBLE: {
-        auto t = L.next();
-        return c(t.kind, t.range, {});
-      }
-      default:
-        return parseIdent();
     }
   }
   TreeRef parseOptionalIdentList() {
@@ -319,19 +396,6 @@ struct Parser {
       list = c(TK_LIST, L.cur().range, {});
     }
     return list;
-  }
-  TreeRef parseType() {
-    return TensorType::create(SourceRange(std::make_shared<std::string>(""), 0, 0));
-  }
-  // 'first' has already been parsed, add the rest
-  // if they exist
-  // first[, the, rest]
-  List<Ident> parseOneOrMoreIdents(Ident first) {
-    std::vector<Ident> idents {first};
-    while (L.nextIf(',')) {
-      idents.push_back(parseIdent());
-    }
-    return List<Ident>::create(idents.back().range(), std::move(idents));
   }
   TreeRef parseIf() {
     auto r = L.cur().range;
@@ -354,24 +418,60 @@ struct Parser {
     auto body = parseStatements();
     return While::create(r, Expr(cond), List<Stmt>(body));
   }
-  TreeRef parseStatements() {
+  TreeRef parseFor() {
     auto r = L.cur().range;
-    L.expect(TK_INDENT);
+    L.expect(TK_FOR);
+    auto targets = parseList(TK_NOTHING, ',', TK_NOTHING, &Parser::parseExp);
+    L.expect(TK_IN);
+    auto itrs = parseList(TK_NOTHING, ',', TK_NOTHING, &Parser::parseExp);
+    L.expect(':');
+    auto body = parseStatements();
+    return For::create(r, targets, itrs, body);
+  }
+
+  TreeRef parseStatements(bool expect_indent=true) {
+    auto r = L.cur().range;
+    if (expect_indent)
+      L.expect(TK_INDENT);
     TreeList stmts;
-    while (true) {
-      stmts.push_back(parseStmt());
+    for (size_t i=0; ; ++i) {
+      auto stmt = parseStmt();
+      stmts.push_back(stmt);
       if (L.nextIf(TK_DEDENT))
         break;
     }
     return c(TK_LIST, r, std::move(stmts));
   }
-  TreeRef parseFunction() {
+  Decl parseDecl() {
+    auto paramlist = parseList('(', ',', ')', &Parser::parseParam);
+    // Parse return type annotation
+    TreeRef return_type;
+    if (L.nextIf(TK_ARROW)) {
+      // Exactly one expression for return type annotation
+      return_type = Maybe<Expr>::create(L.cur().range, parseExp());
+    } else {
+      // Default to returning single tensor. TODO: better sentinel value?
+      return_type = Maybe<Expr>::create(L.cur().range);
+    }
+    L.expect(':');
+    return Decl::create(paramlist.range(), List<Param>(paramlist), Maybe<Expr>(return_type));
+  }
+
+  TreeRef parseFunction(bool is_method) {
     L.expect(TK_DEF);
     auto name = parseIdent();
-    auto paramlist = parseList('(', ',', ')', &Parser::parseParam);
-    L.expect(':');
-    auto stmts_list = parseStatements();
-    return Def::create(name.range(), Ident(name), List<Param>(paramlist),
+    auto decl = parseDecl();
+
+    // Handle type annotations specified in a type comment as the first line of
+    // the function.
+    L.expect(TK_INDENT);
+    if (L.nextIf(TK_TYPE_COMMENT)) {
+      auto type_annotation_decl = Decl(parseTypeComment());
+      decl = mergeTypesFromTypeComment(decl, type_annotation_decl, is_method);
+    }
+
+    auto stmts_list = parseStatements(false);
+    return Def::create(name.range(), Ident(name), Decl(decl),
                        List<Stmt>(stmts_list));
   }
   Lexer& lexer() {
@@ -380,12 +480,6 @@ struct Parser {
 
  private:
   // short helpers to create nodes
-  TreeRef d(double v) {
-    return Number::create(v);
-  }
-  TreeRef s(const std::string& s) {
-    return String::create(s);
-  }
   TreeRef c(int kind, const SourceRange& range, TreeList&& trees) {
     return Compound::create(kind, range, std::move(trees));
   }

@@ -1,32 +1,32 @@
-#ifndef NO_PYTHON
-#include <Python.h>
-#endif
 #include "interpreter.h"
 
 #include "torch/csrc/autograd/edge.h"
 #include "torch/csrc/autograd/function.h"
-#include "torch/csrc/autograd/functions/special.h"
+#include "torch/csrc/autograd/generated/variable_factories.h"
 #include "torch/csrc/autograd/profiler.h"
 #include "torch/csrc/autograd/variable.h"
+#include "torch/csrc/jit/assertions.h"
 #include "torch/csrc/jit/fusion_compiler.h"
-#include "torch/csrc/jit/generated/aten_dispatch.h"
 #include "torch/csrc/jit/graph_executor.h"
 #include "torch/csrc/jit/ir.h"
-#include "torch/csrc/jit/tensor_conversions.h"
+#include "torch/csrc/jit/ivalue.h"
+#include "torch/csrc/jit/constants.h"
+#include "torch/csrc/jit/operator.h"
+#include "torch/csrc/variable_tensor_functions.h"
 
+#include <exception>
+#include <iostream>
+#include <memory>
+#include <mutex>
+#include <ostream>
+#include <stdexcept>
 #include <typeinfo>
-
-#ifndef NO_PYTHON
-#include "torch/csrc/autograd/python_engine.h"
-#include "torch/csrc/autograd/python_variable.h"
-#include "torch/csrc/jit/pybind.h"
-#include "torch/csrc/utils/auto_gil.h"
-
-namespace py = pybind11;
-#endif
+#include <unordered_map>
+#include <unordered_set>
+#include <utility>
+#include <vector>
 
 namespace torch { namespace jit {
-
 
 // Before we translate to intepreter instructions, we do
 // some preprocessing of the graph to turn it into a form that is closer
@@ -51,19 +51,80 @@ namespace torch { namespace jit {
 // * stage_input_types: the type annotations on the inputs to each stage
 //   these can be removed once the the backward tracer is no longer used
 
+namespace {
+
+// new_cond = (i < max_trip_count) && cond
+Value* createTripCountConjunctiveCondition(
+    Graph* g,
+    Value* cur_trip_count,
+    Value* max_trip_count,
+    Value* cond) {
+  // Emit initial comparison -- initial_trip_count < max_trip_count
+  Value* initial_comparison_value =
+      g->insertNode(g->create(aten::lt, {cur_trip_count, max_trip_count}, 1))
+          ->output()->setType(IntType::get());
+
+  // Replace initial condition with logical `and` of trip count and
+  // initial condition
+  Value* new_cond =
+      g->insertNode(
+           g->create(aten::__and__, {initial_comparison_value, cond}, 1))
+          ->output()->setType(IntType::get());
+  return new_cond;
+}
+
+} // namespace
 
 // this currently just _removes_ the trip count inputs and checks they are
 // unused. In the future they will be desugared into normal arithmetic to
 // provide a loop counter
 void desugarTripCounts(Block * b) {
   for(auto n : b->nodes()) {
-    if(n->kind() == kLoop) {
 
-      // remove the trip count from Loop inputs, we don't support it yet
-      n->removeInput(0);
-      JIT_ASSERT(n->blocks()[0]->inputs()[0]->uses().size() == 0 &&
-        "NYI - use of trip count variable");
-      n->blocks()[0]->eraseInput(0);
+    if(n->kind() == prim::Loop) {
+      auto g = n->owningGraph();
+      auto body_block = n->blocks()[0];
+
+      Value* block_trip_count_input = body_block->inputs()[0];
+      // Treat loop iteration number as a loop-carried dependency. We emit an
+      // increment at the end of the body block.
+      n->insertOutput(0);
+
+      Value* max_trip_count_value = n->input(0);
+      {
+        WithInsertPoint guard(n);
+        // int i = 0
+        Value* initial_trip_count = g->insertConstant(0);
+        // Set up initial iteration number value for loop-carried dependency
+        n->removeInput(0);
+        // Input 0 is now initial termination condition, insert this after that.
+        // LCD's start at index 1.
+        n->insertInput(1, initial_trip_count);
+
+        Value* new_cond = createTripCountConjunctiveCondition(
+            g, initial_trip_count, max_trip_count_value, n->input(0));
+        n->replaceInput(0, new_cond);
+      }
+
+      {
+        WithInsertPoint guard(body_block);
+        // Trip count is now a loop carried dependency. We emit an op to
+        // increment the trip count at the end of the body. Then, emit the same
+        // conjunctive stopping condition as above.
+
+        Value* const_one = g->insertConstant(1);
+
+        Value* inc_trip_count =
+            g->insertNode(g->create(
+                    aten::add, {block_trip_count_input, const_one}, 1))
+             ->output()->setType(IntType::get());
+        body_block->insertOutput(1, inc_trip_count);
+
+        Value* body_cond = createTripCountConjunctiveCondition(
+            g, inc_trip_count, max_trip_count_value, body_block->outputs()[0]);
+        body_block->eraseOutput(0);
+        body_block->insertOutput(0, body_cond);
+      }
     }
     for(auto sb : n->blocks()) {
       desugarTripCounts(sb);
@@ -82,17 +143,18 @@ static std::vector<std::vector<TypePtr>> flattenStages(Graph & graph) {
   auto it = graph.nodes().begin();
   for(size_t i = 0; i <= graph.stage(); i++) {
     stage_input_types.emplace_back();
-    auto store = graph.create(kStore, 0)->insertBefore(*it);
+    auto store = graph.create(prim::Store, 0)->insertBefore(*it);
     while(input_pos < graph.inputs().size() && graph.inputs()[input_pos]->stage() == i) {
       auto nv = store->addOutput();
       auto old_node = graph.inputs()[input_pos];
+      nv->setType(old_node->type());
       stage_input_types[i].push_back(old_node->type());
       old_node->replaceAllUsesWith(nv);
       input_pos++;
     }
     while(it != graph.nodes().end() && it->stage() == i)
       ++it;
-    auto load = graph.create(kLoad, 0)->insertBefore(*it);
+    auto load = graph.create(prim::Load, 0)->insertBefore(*it);
     while(output_pos < graph.outputs().size() && graph.outputs()[output_pos]->stage() == i) {
       load->addInput(graph.outputs()[output_pos]);
       output_pos++;
@@ -121,7 +183,7 @@ void dropUnused(Block *b) {
     }
     if(to_drop.size() == 0)
       return nullptr;
-    return b->owningGraph()->create(kDrop, to_drop, 0);
+    return b->owningGraph()->create(prim::Drop, to_drop, 0);
   };
 
   if(auto d = createDropIfUnused(b->inputs())) {
@@ -226,7 +288,7 @@ std::unordered_map<Node*, std::vector<uint8_t>> findLastUses(Graph & g) {
     Node * findOrCreateDropInstructionForNode(Node * n) {
       auto it = drop_for_node.find(n);
       if(it == drop_for_node.end()) {
-        auto drop_node = graph.create(kDrop, 0);
+        auto drop_node = graph.create(prim::Drop, 0);
         drop_node->insertAfter(n);
         it = drop_for_node.emplace(n, drop_node).first;
       }
@@ -270,15 +332,14 @@ struct PreprocessGraph {
 // which are annoying to handle since 99% of values are at::Tensor anyway
 // instead we create a fake subclass of TensorImpl that can be subclassed
 // to hold arbitrary things
+// Note: this is currently unused but will probably be useful in the future,
+// so we keep it around
 struct ContainerTensor : public at::TensorImpl {
 public:
   ContainerTensor()
-  : TensorImpl(&(at::globalContext().getType(at::Backend::Undefined,at::ScalarType::Undefined))) {}
+  : TensorImpl(at::UndefinedTensorId(), at::ScalarType::Undefined, /* is_variable */ false) {}
 
-  virtual ~ContainerTensor() {}
-  virtual const char * toString() const override {
-    throw std::runtime_error("toString() on ContainerTensor");
-  }
+  virtual ~ContainerTensor() = default;
   virtual at::IntList sizes() const override {
     throw std::runtime_error("sizes() on ContainerTensor");
   }
@@ -288,397 +349,10 @@ public:
   virtual int64_t dim() const override {
     throw std::runtime_error("dim() on ContainerTensor");
   }
-  virtual at::Scalar localScalar() override {
-    throw std::runtime_error("localScalar() on ContainerTensor");
-  }
-  virtual void * unsafeGetTH(bool retain) override {
-    throw std::runtime_error("unsafeGetTH() on ContainerTensor");
-  }
   virtual std::unique_ptr<at::Storage> storage() override {
     throw std::runtime_error("storage() on ContainerTensor");
   }
 };
-
-
-// Dummy function is the last function that the autograd engine calls
-// when evaluating Eval nodes. Its input tensors are the outputs that the
-// Eval node needs to produce.
-// We interscept these values using an Autograd callback. So the function itself
-// never runs.
-struct DummyFunction : autograd::Function {
-  virtual autograd::variable_list apply(const autograd::variable_list& inputs) override {
-    throw std::logic_error("DummyFunction::apply() called, but it should be blocked by a callback returning false");
-  }
-};
-
-// An AutogradHandle holds the information needed to run an Autograd backward pass
-// after running a forward operator (such as PythonOp, CppOp, or for double-backwards another Eval Op)
-// The EvalOperation uses AutogradHandle to perform this operation.
-struct AutogradHandle : public ContainerTensor {
-
-  // The inputs of DummyFunction are the gradients of the forward passes
-  // inputs, and the _outputs_ of the run of the Autograd engine computing backward.
-  // there is one entry in this list for each forward input that requires
-  // gradients
-  std::shared_ptr<DummyFunction> forward_inputs;
-
-  // there is one entry in this list for each output of the forward pass
-  // that represents the location in the backwaard pass where the gradient
-  // of this output should be inserted at the beginning of the backward pass
-  autograd::edge_list forward_outputs;
-};
-
-// HandleBuilder is used to construct the correct Autograd Handle objects
-// for use in a future stage.
-// It is used even when the future stage does not require a handle since
-// it also performs the conversions between Tensor and Variable, which
-// behave differently depending on whether a future handle needs to be
-// created.
-struct HandleBuilder {
-  HandleBuilder(bool requires_handle) {
-    if(requires_handle) {
-      handle = new AutogradHandle();
-      handle->forward_inputs = std::make_shared<DummyFunction>();
-    }
-  }
-  autograd::Variable addInput(at::Tensor && input, const VariableFlags & flags_) {
-    if(handle && flags_.requires_grad) {
-      auto variable = autograd::make_variable(std::move(input), /*requires_grad=*/false);
-      autograd::create_gradient_edge(variable, handle->forward_inputs);
-      return variable;
-    } else {
-      return autograd::make_variable(std::move(input), /*requires_grad=*/false);
-    }
-  }
-  at::Tensor addOutput(const autograd::Variable & output) {
-    if(handle) {
-      handle->forward_outputs.push_back(output.gradient_edge());
-    }
-    return output.data();
-  }
-  void writeTo(Stack & outputs) {
-    // outputs takes ownership of handle
-    if(handle) {
-      outputs.push_back(at::Tensor(handle, /*retain=*/false));
-      handle = nullptr;
-    }
-  }
-private:
-  AutogradHandle* handle = nullptr;
-};
-
-bool hasHandleOutput(Node * n) {
-  if(n->outputs().size() == 0)
-    return false;
-  auto & last = n->outputs().back();
-  return last->isHandle() && last->uses().size() > 0; // don't bother creating a handle if it is never used
-}
-
-#ifndef NO_PYTHON
-Operation createPythonOperation(PythonOp* op, bool values_are_variables) {
-  py::function func;
-  if (op->tracing_autograd_python_function) {
-    func = py::function(py::handle(op->pyobj.get()).attr("apply"));
-  } else {
-    func = py::reinterpret_borrow<py::function>(py::handle(op->pyobj.get()));
-  }
-  bool tracing_autograd_python_function = op->tracing_autograd_python_function;
-  bool has_handle = hasHandleOutput(op);
-  size_t num_inputs = 0;
-  for(auto arg_type : op->cconv) {
-    if(arg_type == 't')
-      num_inputs++;
-  }
-  return [=](Stack & stack) {
-    AutoGIL gil;
-    py::tuple py_inputs(op->cconv.size());
-    size_t i = 0;
-    size_t next_scalar = 0;
-    size_t next_tensor = 0;
-    HandleBuilder builder(has_handle);
-    // Note: The first branch here should be considered deprecated and will
-    // probably be removed in the future.
-    //
-    // tracing_autograd_python_function indicates that we need to hook this
-    // PythonOp up to autograd with the HandleBuilder
-    if (tracing_autograd_python_function) {
-      for (auto arg_type : op->cconv) {
-        if (arg_type == 's') {
-          py_inputs[i] = py::reinterpret_borrow<py::object>(
-              op->scalar_args[next_scalar++].get());
-        } else if (arg_type == 't') {
-          py_inputs[i] = py::reinterpret_steal<py::object>(
-              THPVariable_Wrap(builder.addInput(
-                  std::move(peek(stack, next_tensor, num_inputs)),
-                  op->var_flags.at(next_tensor))));
-          next_tensor++;
-        }
-        i++;
-      }
-      drop(stack, num_inputs);
-      py::object py_outputs(func(*py_inputs));
-      auto num_outputs = op->outputs().size();
-      auto addOutput = [&](py::handle entry) {
-        if (!THPVariable_Check(entry.ptr())) {
-          throw std::runtime_error(
-              "Function.apply returned a non-Variable output");
-        }
-        THPVariable* var = (THPVariable*)entry.ptr();
-        stack.push_back(builder.addOutput(var->cdata));
-      };
-      if (!PyTuple_Check(py_outputs.ptr())) {
-        if (num_outputs != 1) {
-          throw std::runtime_error(
-              "Function.apply returned the wrong number of outputs.");
-        }
-        addOutput(py_outputs);
-      } else {
-        auto output_tuple = py::tuple(py_outputs);
-        if (output_tuple.size() != num_outputs) {
-          throw std::runtime_error(
-              "Function.apply returned the wrong number of outputs.");
-        }
-        for (py::handle entry : output_tuple) {
-          addOutput(entry);
-        }
-      }
-      builder.writeTo(stack);
-      return 0;
-    } else {
-      // In this case we're not hooking this PythonOp up to autograd. We always
-      // pass in and return Variables to the PythonOp. The flag
-      // values_are_variables indicates that the actual inputs and outputs are
-      // Variable types. In the case that this is false, we must wrap up inputs
-      // Tensors into Variables and we must unwrap the outputs to Tensors. In
-      // the other case, we pass in inputs and return outputs as-is
-      for (auto arg_type : op->cconv) {
-        if (arg_type == 's') {
-          py_inputs[i] = py::reinterpret_borrow<py::object>(
-              op->scalar_args[next_scalar++].get());
-        } else if (arg_type == 't') {
-          auto var = peek(stack, next_tensor, num_inputs);
-          if (!values_are_variables) {
-            var = autograd::make_variable(var);
-          }
-          py_inputs[i] =
-              py::reinterpret_steal<py::object>(THPVariable_Wrap(var));
-          next_tensor++;
-        }
-        i++;
-      }
-      drop(stack, num_inputs);
-      py::object py_outputs(func(*py_inputs));
-
-      auto num_outputs = op->outputs().size();
-      auto addOutput = [&](py::handle entry) {
-        if (!THPVariable_Check(entry.ptr())) {
-          throw std::runtime_error(
-              "Function application returned a non-Variable output");
-        }
-        THPVariable* var = (THPVariable*)entry.ptr();
-        auto cdata = var->cdata;
-        stack.push_back(values_are_variables ? std::move(cdata) : cdata.data());
-      };
-
-      if (!PyTuple_Check(py_outputs.ptr())) {
-        if (num_outputs != 1) {
-          throw std::runtime_error(
-              "Function.apply returned the wrong number of outputs.");
-        }
-        addOutput(py_outputs);
-      } else {
-        auto output_tuple = py::tuple(py_outputs);
-        if (output_tuple.size() != num_outputs) {
-          throw std::runtime_error(
-              "Function application returned the wrong number of outputs.");
-        }
-        for (py::handle entry : py::tuple(py_outputs)) {
-          addOutput(entry);
-        }
-      }
-      return 0;
-    }
-  };
-}
-#else
-Operation createPythonOperation(PythonOp* op, bool values_are_variables) {
-  throw std::runtime_error("Trying to create Python operation from a C++ build");
-  return [=](Stack & stack) {
-    return 0;
-  };
-}
-#endif
-
-Operation createCppOperation(CppOp* op) {
-  std::shared_ptr<autograd::Function> func = op->fn;
-  bool has_handle = hasHandleOutput(op);
-  auto num_inputs = op->inputs().size();
-  return [=](Stack & stack) {
-    HandleBuilder builder(has_handle);
-    autograd::variable_list v_inputs;
-    for(size_t i = 0; i < num_inputs; i++) {
-      v_inputs.push_back(builder.addInput(std::move(peek(stack, i, num_inputs)), op->var_flags[i]));
-    }
-    drop(stack, num_inputs);
-    autograd::variable_list v_outputs = (*func)(v_inputs);
-    for(auto & output : v_outputs) {
-      stack.push_back(builder.addOutput(output));
-    }
-    builder.writeTo(stack);
-    return 0;
-  };
-}
-
-Operation createEvalOperation(CppOp * op) {
-  bool has_handle_output = hasHandleOutput(op);
-  auto num_inputs = op->inputs().size();
-  return [=](Stack & stack) {
-    at::Tensor handle_t = std::move(stack.back());
-    AutogradHandle * handle_in = dynamic_cast<AutogradHandle*>(handle_t.get());
-    JIT_ASSERT(handle_in);
-    HandleBuilder builder(has_handle_output);
-    auto& engine = torch::autograd::Engine::getDefaultEngine();
-    autograd::variable_list v_inputs;
-    for(size_t i = 0; i < num_inputs - 1; i++) {
-      v_inputs.push_back(builder.addInput(std::move(peek(stack, i, num_inputs)), op->var_flags[i]));
-    }
-    drop(stack, num_inputs);
-    // TODO: handle create_graph appropriately
-    bool create_graph = true;
-    // note: node handle_in->use_count() == 1 means that we are guarenteed that we have the only
-    // only copy of the handle. This might make it seem it is ok to pass keep_graph=False.
-    // However, it is possible for 'copied_next_fns' to grab functions used by _other_ handles,
-    // and these functions will be executed in this run. Since these other handles
-    // may still be alive, it is not safe to release the graph
-    // TODO: we could cache this list in AutogradHandle (it's read only)
-    autograd::edge_list output_edges;
-    const auto num_inputs = handle_in->forward_inputs->num_inputs();
-    output_edges.reserve(num_inputs);
-    for (uint32_t i = 0; i < num_inputs; ++i)
-      output_edges.emplace_back(handle_in->forward_inputs, i);
-    auto values = engine.execute(handle_in->forward_outputs, v_inputs, true, create_graph, output_edges);
-    for(auto & v : values)
-      stack.push_back(builder.addOutput(v));
-    builder.writeTo(stack);
-    return 0;
-  };
-}
-
-// Returns a function implementing functionality of a given node,
-// or nullptr if it's a no-op for autograd.
-Operation getOperation(jit::Node* node, bool values_are_variables) {
-  IR_IFM(node, PythonOp)
-    return createPythonOperation(value, values_are_variables);
-  IR_ELSEIFM(CppOp)
-    if(dynamic_cast<autograd::Eval*>(value->fn.get())) {
-      return createEvalOperation(value);
-    } else {
-      return createCppOperation(value);
-    }
-  IR_ELSEIF(FusionGroup)
-    auto fusion_fn = sharedFusionCompiler().getOrCompile(value);
-    auto num_inputs = value->inputs().size();
-    return [fusion_fn, num_inputs](Stack & stack) {
-      autograd::profiler::RecordFunction record("FusionGroup");
-      std::vector<at::Tensor> toutputs;
-      // TODO: have fusion_fn work off of a stack as well
-      fusion_fn->launch(last(stack, num_inputs), toutputs);
-      drop(stack, num_inputs);
-      stack.insert(stack.end(), toutputs.begin(), toutputs.end());
-      return 0;
-    };
-  IR_ELSEIF(Constant)
-  if (values_are_variables) {
-    auto t = torch::autograd::make_variable(value->t(kvalue), false);
-    return [t](Stack& stack) {
-      stack.push_back(t);
-      return 0;
-    };
-    } else {
-      auto t = value->t(kvalue);
-      return [t](Stack & stack) {
-        stack.push_back(t);
-        return 0;
-      };
-    }
-  IR_ELSEIF(Undefined)
-    return [](Stack & stack) {
-      stack.push_back(at::Tensor());
-      return 0;
-    };
-  IR_ELSEIF(ReplaceIfUndef)
-    return [](Stack & stack) {
-      auto alternate = pop(stack);
-      auto result = pop(stack);
-      if(result.defined()) {
-        stack.push_back(std::move(result));
-      } else {
-        stack.push_back(std::move(alternate));
-      }
-      return 0;
-    };
-  IR_ELSEIF(Print)
-    size_t num_inputs = value->inputs().size();
-    return [num_inputs](Stack & stack) {
-      bool first = true;
-      for (at::Tensor i : last(stack, num_inputs)) {
-        if (!first) std::cout << " ";
-        first = false;
-        if (auto tensor_impl = dynamic_cast<at::TensorImpl*>(i.get())) {
-          std::cout << at::Tensor(tensor_impl, true);
-        } else if (!i.defined()) {
-          std::cout << "<undefined tensor>";
-        } else {
-          std::cout << "<" << typeid(*i.get()).name() << " at " << i << ">";
-        }
-      }
-      drop(stack, num_inputs);
-      std::cout << std::endl;
-      return 0;
-    };
-  IR_ELSEIF(GraphExecutor)
-    GraphExecutor executor(value->g(kSubgraph));
-    auto num_inputs = value->inputs().size();
-    return [=](Stack& stack) mutable {
-      autograd::profiler::RecordFunction record("GraphExecutor");
-      auto inputs = last(stack, num_inputs);
-      variable_tensor_list tinputs(inputs.begin(), inputs.end());
-      drop(stack, num_inputs);
-      //TODO: has graph executor work from a stack as well
-      variable_tensor_list toutputs = executor.run(variable_tensor_list(std::move(tinputs)));
-      stack.insert(stack.end(), toutputs.begin(), toutputs.end());
-      return 0;
-    };
-
-
-  // Load x, y
-  // loads values from registers onto the stack, the actual callback does
-  // nothing since the stack manipulation is already encoded in inst.inputs
-  // and inst.outputs
-  IR_ELSEIF(Load)
-    return [=](Stack& stack) {
-      return 0;
-    };
-
-  // x, y = Store
-  // stores values from stack into registers, the actual callback does
-  // nothing since the stack manipulation is already encoded in inst.inputs
-  // and inst.outputs
-  IR_ELSEIF(Store)
-    return [=](Stack& stack) {
-      return 0;
-    };
-  IR_ELSEIF(Drop)
-    auto N = value->inputs().size();
-    return [=](Stack& stack) {
-      drop(stack, N);
-      return 0;
-    };
-  IR_ELSE()
-    return getTensorOp(node).op;
-  IR_END()
-}
-
 
 // We need some lists for inputs and outputs. To keep all the memory
 // contiguous we allocate a single vector and use offsets into the vector
@@ -713,52 +387,52 @@ int relativeJump(int from_inst, int to_inst) {
 }
 
 struct CodeImpl {
-  CodeImpl(std::shared_ptr<Graph>& graph_, bool values_are_variables)
-      : values_are_variables(values_are_variables), preprocess(*graph_) {
+  CodeImpl(std::shared_ptr<Graph>& graph_)
+      : preprocess(*graph_) {
     graph = preprocess.graph;
-    //std::cout << "into code graph:\n" << *graph << "\n";
+    // std::cout << "into code graph:\n" << *graph << "\n";
     insertNodesFromBlock(graph->block());
   }
 
   // jump when input is 0
   void createJumpZ(int from_inst, int to_inst) {
     auto & inst = instructions[from_inst];
-    JIT_ASSERT(inst.debug_name == kPlaceholder);
+    JIT_ASSERT(inst.debug_name == prim::Placeholder);
     auto offset = relativeJump(from_inst, to_inst);
     inst.callback = [offset](Stack & stack) {
-      auto t = tensor_as<int64_t>(pop(stack));
+      auto t = pop(stack).toInt();
       return (t == 0) ? offset : 0;
     };
-    inst.debug_name = kJumpZ;
+    inst.debug_name = prim::JumpZ;
   }
 
   // jump when input is not 0
   void createJumpNZ(int from_inst, int to_inst) {
     auto & inst = instructions[from_inst];
-    JIT_ASSERT(inst.debug_name == kPlaceholder);
+    JIT_ASSERT(inst.debug_name == prim::Placeholder);
     auto offset = relativeJump(from_inst, to_inst);
     inst.callback = [offset](Stack & stack) {
-      auto t = tensor_as<int64_t>(pop(stack));
+      auto t = pop(stack).toInt();
       return (t != 0) ? offset : 0;
     };
-    inst.debug_name = kJumpNZ;
+    inst.debug_name = prim::JumpNZ;
   }
 
   void createJump(int from_inst, int to_inst) {
     auto & inst = instructions[from_inst];
-    JIT_ASSERT(inst.debug_name == kPlaceholder);
+    JIT_ASSERT(inst.debug_name == prim::Placeholder);
     auto offset = relativeJump(from_inst, to_inst);
     inst.callback = [=](Stack & stack) {
       return offset;
     };
-    inst.debug_name = kJump;
+    inst.debug_name = prim::Jump;
   }
 
   void insertNodesFromBlock(Block* block) {
     for(auto node : block->nodes()) {
       const auto & source_location = node->getSourceLocation();
       switch(node->kind()) {
-        case kIf: {
+        case prim::If: {
           // x = if c:
           //   <then_block>
           //   -> (vt)
@@ -776,21 +450,21 @@ struct CodeImpl {
           //   x = vt
           // end:
 
-          // kPlaceholder instructions are replaced with branch instructions
+          // prim::Placeholder instructions are replaced with branch instructions
           // when the branch target locations are known
-          auto cond_branch = insertInstruction(kPlaceholder, source_location, node->inputs(), moveFlags(node), {});
+          auto cond_branch = insertInstruction(prim::Placeholder, source_location, node->inputs(), moveFlags(node), {});
           auto then_block = node->blocks()[0];
           auto else_block = node->blocks()[1];
           insertNodesFromBlock(else_block);
           insertAssign(source_location,else_block->outputs(), moveFlags(else_block), node->outputs());
-          auto jump = insertInstruction(kPlaceholder, source_location, {}, {}, {});
+          auto jump = insertInstruction(prim::Placeholder, source_location, {}, {}, {});
           auto then_block_start = instructions.size();
           insertNodesFromBlock(then_block);
           insertAssign(source_location, then_block->outputs(), moveFlags(then_block), node->outputs());
           createJump(jump, instructions.size());
           createJumpNZ(cond_branch, then_block_start);
         } break;
-        case kLoop: {
+        case prim::Loop: {
           // o0 = while c i0
           //        block 0: l0
           //          <body>
@@ -811,7 +485,7 @@ struct CodeImpl {
           insertAssign(source_location, node->inputs(), moveFlags(node), body_block->inputs());
           // after assign op: stack: ... <cond>
           // cond_branch consumes <cond> from top of the stack
-          auto cond_branch = insertInstruction(kPlaceholder, source_location,{}, {}, {});
+          auto cond_branch = insertInstruction(prim::Placeholder, source_location,{}, {}, {});
           // after branch: stack: ...
 
           auto entry = instructions.size();
@@ -819,7 +493,7 @@ struct CodeImpl {
           // before assign op: stack: ... <cond> <loop-carried-depdencies>
           insertAssign(source_location, body_block->outputs(), moveFlags(body_block), body_block->inputs());
           // after assign op: stack: ... <cond>
-          auto cond_branch_end = insertInstruction(kPlaceholder, source_location, {}, {}, {});
+          auto cond_branch_end = insertInstruction(prim::Placeholder, source_location, {}, {}, {});
           // after branch: stack: ...
 
           aliasRegistersTo(node->outputs(), body_block->inputs());
@@ -833,7 +507,7 @@ struct CodeImpl {
       // each stage ends with a load instruction
       // we record where these instructions occur, and use them to
       // exit the interpreter
-      if(node->kind() == kLoad) {
+      if(node->kind() == prim::Load) {
         stage_end.push_back(instructions.size());
       }
     }
@@ -841,7 +515,7 @@ struct CodeImpl {
 
   size_t insertInstruction(Node * n) {
     auto inst = insertInstruction(n->kind(), n->getSourceLocation(), n->inputs(), moveFlags(n) , n->outputs());
-    instructions[inst].callback = getOperation(n, values_are_variables);
+    instructions[inst].callback = getInterpreterOperation(n);
     return inst;
   }
   size_t insertInstruction(Symbol sym,
@@ -875,7 +549,7 @@ struct CodeImpl {
   }
 
   size_t insertAssign(std::shared_ptr<SourceLocation> debug_location, ArrayRef<Value*> inputs, ArrayRef<uint8_t> move_flags, ArrayRef<Value*> outputs) {
-    auto inst = insertInstruction(kAssign, std::move(debug_location),inputs, move_flags, outputs);
+    auto inst = insertInstruction(prim::Assign, std::move(debug_location),inputs, move_flags, outputs);
     // This node effectively forwards its inputs into different places in a register list.
     // We don't need to manipulate the stack in any way, because all inputs are also outputs,
     // and the interpreter will take care of putting them in correct places.
@@ -929,6 +603,29 @@ struct CodeImpl {
     return r;
   }
 
+  // Returns a function implementing functionality of a given node,
+  // or nullptr if it's a no-op for autograd.
+  Operation getInterpreterOperation(jit::Node* node) {
+    if(node->kind() != prim::GraphExecutor) {
+      return getOperation(node);
+    }
+    // recursive graph executors cannot be Operators because they
+    // have to register themselves with the interpreter so that
+    // we can provide useful debugging information
+
+    auto executor = std::make_shared<GraphExecutor>(node->g(attr::Subgraph));
+    graph_executors.emplace_back(executor.get());
+    return [=](Stack& stack) mutable {
+      autograd::profiler::RecordFunction record("GraphExecutor");
+      executor->run(stack);
+      return 0;
+    };
+  }
+
+  const std::vector<GraphExecutor*>& executors() {
+    return graph_executors;
+  }
+
   void dumpInstruction(std::ostream & out, size_t pc) const {
     auto writeList = [&](const ListHandle<int> & list) {
       for(int i = 0; i < list.size; i++) {
@@ -949,7 +646,9 @@ struct CodeImpl {
     };
     auto & inst = instructions.at(pc);
     writeList(inst.outputs);
-    out << " = " << inst.debug_name.toString() << " ";
+    // NB: debug names are the kind of operator used to select
+    // dispatch
+    out << " = " << inst.debug_name.toUnqualString() << " ";
     writeUseList(inst.inputs);
   }
   void dump(std::ostream & out) const {
@@ -965,7 +664,7 @@ struct CodeImpl {
   // It is also very useful for debugging interpreter problems to
   // keep this around.
   std::shared_ptr<Graph> graph;
-  bool values_are_variables;
+  std::vector<GraphExecutor*> graph_executors; // for debugging
   PreprocessGraph preprocess;
 
   std::unordered_map<size_t, int> unique_to_reg; // map from unique of nodes to register in register table
@@ -983,8 +682,8 @@ struct CodeImpl {
 
 // InterpreterState state that is held across stages and used to compute a Code
 struct InterpreterStateImpl {
-  InterpreterStateImpl(const Code & function_)
-  : function(function_.pImpl),
+  InterpreterStateImpl(const Code & code)
+  : function(code.pImpl),
     int_data(function->int_data.data()),
     bool_data(function->bool_data),
     registers(function->register_size) {
@@ -1059,7 +758,7 @@ struct InterpreterStateImpl {
   // in the case where it is true, then the interpreter and this array get copied
   // if this every becomes a bottleneck then we _should_ consider minimizing the
   // total number or register
-  std::vector<at::Tensor> registers;
+  std::vector<IValue> registers;
 
   // single buffer for input/output calls to ATen functions, so that we do not reallocate
   Stack stack;
@@ -1071,21 +770,30 @@ std::ostream & operator<<(std::ostream & out, const Code & code) {
   return out;
 }
 
-Code::Code(std::shared_ptr<Graph>& graph, bool values_are_variables)
-    : pImpl(new CodeImpl(graph, values_are_variables)) {}
-Code::~Code() {}
-InterpreterState::InterpreterState(const Code & function)
-: pImpl(new InterpreterStateImpl(function)) {}
-InterpreterState::~InterpreterState() {}
-void InterpreterState::runOneStage(Stack & stack) {
-    return pImpl->runOneStage(stack);
+Code::Code(std::shared_ptr<Graph>& graph)
+    : pImpl(new CodeImpl(graph)) {}
+Code::~Code() = default;
+
+const std::vector<GraphExecutor*>& Code::executors() {
+  return pImpl->executors();
 }
+
+InterpreterState::InterpreterState(const Code & code)
+  : pImpl(new InterpreterStateImpl(code)) {}
+InterpreterState::~InterpreterState() = default;
+
+void InterpreterState::runOneStage(Stack & stack) {
+  return pImpl->runOneStage(stack);
+}
+
 const TensorType & InterpreterState::tensorTypeForInput(size_t i) const {
   return pImpl->tensorTypeForInput(i);
 }
+
 InterpreterState InterpreterState::clone() const {
   return InterpreterState(new InterpreterStateImpl(*pImpl));
 }
+
 InterpreterState::InterpreterState(InterpreterStateImpl * pImpl) : pImpl(pImpl) {}
 
 }}

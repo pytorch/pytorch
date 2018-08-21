@@ -3,8 +3,8 @@
 #else
 
 #define UPDATE_OUTPUT_KERNEL_WIDTH(KW) case KW:                         \
-  cuda_VolumetricDilatedMaxPooling_updateOutput<KW><<<grid, block,             \
-    0, THCState_getCurrentStream(state)>>>(                             \
+  cuda_VolumetricDilatedMaxPooling_updateOutput<KW>                     \
+  <<<grid, block, 0, THCState_getCurrentStream(state)>>>(               \
     inputData, inputTime, inputHeight, inputWidth, \
     cudaIndices, cudaOutput, kT, kH, dT, dH, dW, padT, padH, padW,\
     dilationT, dilationH, dilationW, offsetZ); \
@@ -20,7 +20,7 @@ static inline void THNN_(VolumetricDilatedMaxPooling_shapeCheck)(
                          int padT, int padW, int padH,
                          int dilationT, int dilationW, int dilationH,
                          bool ceilMode) {
-  int ndim = input->nDimension;
+  int ndim = input->dim();
   int inputSlices;
   int inputTime;
   int inputHeight;
@@ -43,7 +43,7 @@ static inline void THNN_(VolumetricDilatedMaxPooling_shapeCheck)(
              "dilation should be greater than 0, but got dilationT: %d dilationH: %d dilationW: %d",
              dilationT, dilationH, dilationW);
 
-  if (input->nDimension == 5)
+  if (input->dim() == 5)
   {
     dimf++;
     dimt++;
@@ -51,7 +51,7 @@ static inline void THNN_(VolumetricDilatedMaxPooling_shapeCheck)(
     dimw++;
   }
 
-  if (THCTensor_(nDimension)(state, input) == 4)
+  if (THCTensor_(nDimensionLegacyNoScalars)(state, input) == 4)
   {
     /* sizes */
     inputSlices = THCTensor_(size)(state, input, 0);
@@ -59,7 +59,7 @@ static inline void THNN_(VolumetricDilatedMaxPooling_shapeCheck)(
     inputHeight = THCTensor_(size)(state, input, 2);
     inputWidth  = THCTensor_(size)(state, input, 3);
   }
-  else if (THCTensor_(nDimension)(state, input) == 5)
+  else if (THCTensor_(nDimensionLegacyNoScalars)(state, input) == 5)
   {
     /* sizes */
     inputSlices = THCTensor_(size)(state, input, 1);
@@ -69,7 +69,7 @@ static inline void THNN_(VolumetricDilatedMaxPooling_shapeCheck)(
   }
   else
   {
-    THArgError(2, "4D or 5D tensor expected, got %d", THCTensor_(nDimension)(state, input));
+    AT_ERROR("non-empty 4D or 5D tensor expected, got size: ", input->sizes());
   }
 
   THArgCheck(kT/2 >= padT && kW/2 >= padW && kH/2 >= padH, 13,
@@ -142,7 +142,7 @@ void THNN_(VolumetricDilatedMaxPooling_updateOutput)(
   int dimh = 2;
   int dimw = 3;
 
-  int fiveDimensionalInput = THCTensor_(nDimension)(state, input) == 5;
+  int fiveDimensionalInput = THCTensor_(nDimensionLegacyNoScalars)(state, input) == 5;
 
   if (fiveDimensionalInput)
   {
@@ -157,7 +157,7 @@ void THNN_(VolumetricDilatedMaxPooling_updateOutput)(
         dT, dW, dH, padT, padW, padH,
         dilationT, dilationW, dilationH, ceilMode);
 
-  if (THCTensor_(nDimension)(state, input) == 4)
+  if (THCTensor_(nDimensionLegacyNoScalars)(state, input) == 4)
   {
     /* sizes */
     batchSize   = 1;
@@ -177,7 +177,7 @@ void THNN_(VolumetricDilatedMaxPooling_updateOutput)(
   }
   else
   {
-    THArgError(2, "4D or 5D tensor expected, got %d", THCTensor_(nDimension)(state, input));
+    AT_ERROR("non-empty 4D or 5D tensor expected, got size: ", input->sizes());
   }
 
   if (ceilMode)
@@ -234,23 +234,16 @@ void THNN_(VolumetricDilatedMaxPooling_updateOutput)(
   } else {
     THCTensor_(retain)(state, output);
   }
-  
+
   real* inputData = THCTensor_(data)(state, input);
 
   THCDeviceTensor<real, 4> cudaOutput;
   cudaOutput = toDeviceTensor<real, 4>(state, output);
 
-  THLongStorage *indicesSize = THLongStorage_newWithSize(4);
-  int64_t indicesSizeRaw[4] = { batchSize * inputSlices,
-                            outputTime, outputHeight, outputWidth };
-  THLongStorage_rawCopy(indicesSize, indicesSizeRaw);
-
   THCIndexTensor *indices1 = THCIndexTensor_(newWithStorage)(
     state, THCIndexTensor_(storage)(state, indices),
     THCIndexTensor_(storageOffset)(state, indices),
-    indicesSize, NULL);
-
-  THLongStorage_free(indicesSize);
+    { batchSize * inputSlices, outputTime, outputHeight, outputWidth }, {});
 
   THCDeviceTensor<THCIndex_t, 4> cudaIndices =
     toDeviceTensor<THCIndex_t, 4>(state, indices1);
@@ -308,7 +301,6 @@ void THNN_(VolumetricDilatedMaxPooling_updateGradInput)(
   // TODO: gradOutput shape check
   // Resize and initialize result tensor.
   THCTensor_(resizeAs)(state, gradInput, input);
-  THCTensor_(newContiguous)(state, gradInput);
   THCTensor_(zero)(state, gradInput);
 
   int batchSize;
@@ -317,7 +309,7 @@ void THNN_(VolumetricDilatedMaxPooling_updateGradInput)(
   int outputTime, outputHeight, outputWidth;
   int inputTime, inputHeight, inputWidth;
 
-  int fiveDimensionalInput = THCTensor_(nDimension)(state, input) == 5;
+  int fiveDimensionalInput = THCTensor_(nDimensionLegacyNoScalars)(state, input) == 5;
 
   THCUNN_assertSameGPU(state, 4, input, indices, gradOutput, gradInput);
   THNN_(VolumetricDilatedMaxPooling_shapeCheck)(
@@ -366,19 +358,15 @@ void THNN_(VolumetricDilatedMaxPooling_updateGradInput)(
   cudaGradOutput = toDeviceTensor<real, 4>(state, gradOutput);
   real* gradInputData = THCTensor_(data)(state, gradInput);
 
-  THLongStorage *indicesSize = THLongStorage_newWithSize(4);
-  int64_t indicesSizeRaw[4] = { batchSize * inputSlices,
-                           outputTime, outputHeight, outputWidth };
-  THLongStorage_rawCopy(indicesSize, indicesSizeRaw);
   THCIndexTensor *indices1 = THCIndexTensor_(newWithStorage)(
     state, THCIndexTensor_(storage)(state, indices),
-    THCIndexTensor_(storageOffset)(state, indices), indicesSize, NULL);
-  THLongStorage_free(indicesSize);
+    THCIndexTensor_(storageOffset)(state, indices),
+    { batchSize * inputSlices, outputTime, outputHeight, outputWidth }, {});
 
   THCDeviceTensor<THCIndex_t, 4> cudaIndices =
     toDeviceTensor<THCIndex_t, 4>(state, indices1);
 
-  int totalZ = outputTime * inputSlices * batchSize;
+  int64_t totalZ = outputTime * inputSlices * batchSize;
   int offsetZ = 0;
   dim3 block(32, 8);
 

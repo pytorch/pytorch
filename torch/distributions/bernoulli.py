@@ -1,7 +1,6 @@
 from numbers import Number
 
 import torch
-from torch.autograd import Variable
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import broadcast_all, probs_to_logits, logits_to_probs, lazy_property
@@ -17,21 +16,20 @@ class Bernoulli(ExponentialFamily):
 
     Example::
 
-        >>> m = Bernoulli(torch.Tensor([0.3]))
+        >>> m = Bernoulli(torch.tensor([0.3]))
         >>> m.sample()  # 30% chance 1; 70% chance 0
-         0.0
-        [torch.FloatTensor of size 1]
+        tensor([ 0.])
 
     Args:
         probs (Number, Tensor): the probabilty of sampling `1`
         logits (Number, Tensor): the log-odds of sampling `1`
     """
-    params = {'probs': constraints.unit_interval}
+    arg_constraints = {'probs': constraints.unit_interval}
     support = constraints.boolean
     has_enumerate_support = True
     _mean_carrier_measure = 0
 
-    def __init__(self, probs=None, logits=None):
+    def __init__(self, probs=None, logits=None, validate_args=None):
         if (probs is None) == (logits is None):
             raise ValueError("Either `probs` or `logits` must be specified, but not both.")
         if probs is not None:
@@ -45,7 +43,7 @@ class Bernoulli(ExponentialFamily):
             batch_shape = torch.Size()
         else:
             batch_shape = self._param.size()
-        super(Bernoulli, self).__init__(batch_shape)
+        super(Bernoulli, self).__init__(batch_shape, validate_args=validate_args)
 
     def _new(self, *args, **kwargs):
         return self._param.new(*args, **kwargs)
@@ -76,16 +74,17 @@ class Bernoulli(ExponentialFamily):
             return torch.bernoulli(self.probs.expand(shape))
 
     def log_prob(self, value):
-        self._validate_log_prob_arg(value)
+        if self._validate_args:
+            self._validate_sample(value)
         logits, value = broadcast_all(self.logits, value)
-        return -binary_cross_entropy_with_logits(logits, value, reduce=False)
+        return -binary_cross_entropy_with_logits(logits, value, reduction='none')
 
     def entropy(self):
-        return binary_cross_entropy_with_logits(self.logits, self.probs, reduce=False)
+        return binary_cross_entropy_with_logits(self.logits, self.probs, reduction='none')
 
     def enumerate_support(self):
         values = self._new((2,))
-        torch.arange(2, out=values.data if isinstance(values, Variable) else values)
+        torch.arange(2, out=values)
         values = values.view((-1,) + (1,) * len(self._batch_shape))
         values = values.expand((-1,) + self._batch_shape)
         return values

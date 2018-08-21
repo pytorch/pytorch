@@ -25,6 +25,13 @@ import sys
 PY2 = sys.version_info[0] == 2
 PY3 = sys.version_info[0] == 3
 
+if PY2:
+    inf = float('inf')
+    nan = float('nan')
+else:
+    import math
+    inf = math.inf
+    nan = math.nan
 
 if PY2:
     string_classes = basestring
@@ -36,6 +43,12 @@ if PY2:
     int_classes = (int, long)
 else:
     int_classes = int
+
+
+if PY2:
+    FileNotFoundError = IOError
+else:
+    FileNotFoundError = FileNotFoundError
 
 
 def with_metaclass(meta, *bases):

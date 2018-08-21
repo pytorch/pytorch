@@ -7,17 +7,16 @@ void THNN_(ClassNLLCriterion_updateOutput)(
            THCTensor *input,
            THCIndexTensor *target,
            THCTensor *output,
-           bool sizeAverage,
+           int64_t reduction,
            THCTensor *weights,
            THCTensor *total_weight,
-           int64_t ignore_index,
-           bool reduce) {
-  if (THCIndexTensor_(nDimension)(state, target) > 1) {
+           int64_t ignore_index) {
+  if (THCIndexTensor_(nDimensionLegacyNoScalars)(state, target) > 1) {
     THError("multi-target not supported");
   }
 
-  int n_dims = THCTensor_(nDimension)(state, input);
-  int n_classes = THCTensor_(size)(state, input, n_dims - 1);
+  int n_dims = THCTensor_(nDimensionLegacyNoScalars)(state, input);
+  int n_classes = THCTensor_(sizeLegacyNoScalars)(state, input, n_dims - 1);
   ignore_index -= TH_INDEX_BASE;
 
   if (weights) {
@@ -30,10 +29,10 @@ void THNN_(ClassNLLCriterion_updateOutput)(
     );
   }
 
-  THArgCheck(n_dims <= 2 && n_dims > 0, 2, "vector or matrix expected");
+  THArgCheck(!input->is_empty() && (n_dims <= 2 && n_dims > 0), 2, "non-empty vector or matrix expected");
 
-  int64_t batch_size = n_dims == 1 ? 1 : THCTensor_(size)(state, input, 0);
-  int64_t num_targets = THCudaLongTensor_size(state, target, 0);
+  int64_t batch_size = n_dims == 1 ? 1 : THCTensor_(sizeLegacyNoScalars)(state, input, 0);
+  int64_t num_targets = THCudaLongTensor_sizeLegacyNoScalars(state, target, 0);
   THArgCheck(batch_size == num_targets,
       2, "mismatch between the batch size of input (%ld) and that of target (%ld)",
       batch_size, num_targets);
@@ -44,7 +43,7 @@ void THNN_(ClassNLLCriterion_updateOutput)(
             " but got weight tensor of shape: %s", n_classes, s1.str);
   }
 
-  if (!reduce && n_dims == 2) {
+  if (reduction == Reduction::None && n_dims == 2) {
     THCTensor_(resize1d)(state, output, batch_size);
     if (weights) {
       weights = THCTensor_(newContiguous)(state, weights);
@@ -68,10 +67,6 @@ void THNN_(ClassNLLCriterion_updateOutput)(
     return;
   }
 
-  if (!reduce && n_dims <= 1) {
-    sizeAverage = false;
-  }
-
   THCTensor_(resize1d)(state, output, 1);
   THCTensor_(resize1d)(state, total_weight, 1);
 
@@ -85,7 +80,7 @@ void THNN_(ClassNLLCriterion_updateOutput)(
   real *output_data = THCTensor_(data)(state, output);
   real *total_weight_data = THCTensor_(data)(state, total_weight);
 
-  if (THCTensor_(nDimension)(state, input) == 1) {
+  if (THCTensor_(nDimensionLegacyNoScalars)(state, input) == 1) {
     cunn_ClassNLLCriterion_updateOutput_kernel1<real>
       <<<1, 1, 0, THCState_getCurrentStream(state)>>>(
         output_data,
@@ -93,12 +88,12 @@ void THNN_(ClassNLLCriterion_updateOutput)(
         input_data,
         target_data,
         weights_data,
-        sizeAverage,
+        reduction == Reduction::ElementwiseMean,
         n_classes,
         ignore_index
     );
 
-  } else if (THCTensor_(nDimension)(state, input) == 2) {
+  } else if (THCTensor_(nDimensionLegacyNoScalars)(state, input) == 2) {
     cunn_ClassNLLCriterion_updateOutput_kernel<real, accreal>
       <<<1, NTHREADS, 0, THCState_getCurrentStream(state)>>>(
         output_data,
@@ -106,7 +101,7 @@ void THNN_(ClassNLLCriterion_updateOutput)(
         input_data,
         target_data,
         weights_data,
-        sizeAverage,
+        reduction == Reduction::ElementwiseMean,
         THCTensor_(size)(state, input, 0),
         THCTensor_(size)(state, input, 1),
         n_classes,
@@ -128,16 +123,15 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
            THCIndexTensor *target,
            THCTensor *gradOutput,
            THCTensor *gradInput,
-           bool sizeAverage,
+           int64_t reduction,
            THCTensor *weights,
            THCTensor *total_weight,
-           int64_t ignore_index,
-           bool reduce) {
-  if (THCIndexTensor_(nDimension)(state, target) > 1) {
+           int64_t ignore_index) {
+  if (THCIndexTensor_(nDimensionLegacyNoScalars)(state, target) > 1) {
     THError("multi-target not supported");
   }
 
-  int n_dims = THCTensor_(nDimension)(state, input);
+  int n_dims = THCTensor_(nDimensionLegacyNoScalars)(state, input);
   int n_classes = THCTensor_(size)(state, input, n_dims - 1);
 
   THCTensor_(resizeAs)(state, gradInput, input);
@@ -155,10 +149,10 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
     );
   }
 
-  THArgCheck(n_dims <= 2 && n_dims > 0, 2, "vector or matrix expected");
+  THArgCheck(!input->is_empty() && (n_dims <= 2 && n_dims > 0), 2, "non-empty vector or matrix expected");
 
   int64_t batch_size = n_dims == 1 ? 1 : THCTensor_(size)(state, input, 0);
-  int64_t num_targets = THCudaLongTensor_size(state, target, 0);
+  int64_t num_targets = THCudaLongTensor_sizeLegacyNoScalars(state, target, 0);
   THArgCheck(batch_size == num_targets,
       2, "mismatch between the batch size of input (%ld) and that of target (%ld)",
       batch_size, num_targets);
@@ -167,7 +161,7 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
     THError("weight tensor should be defined either for all or no classes");
   }
 
-  if (!reduce && n_dims == 2) {
+  if (reduction == Reduction::None && n_dims == 2) {
     THCUNN_check_dim_size(state, gradOutput, 1, 0, batch_size);
     if (weights) {
       weights = THCTensor_(newContiguous)(state, weights);
@@ -191,10 +185,6 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
     return;
   }
 
-  if (!reduce && n_dims <= 1) {
-    sizeAverage = false;
-  }
-
   ignore_index -= TH_INDEX_BASE;
 
   weights = weights ? THCTensor_(newContiguous)(state, weights) : NULL;
@@ -207,7 +197,7 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
   THCIndex_t  *target_data = THCIndexTensor_(data)(state, target);
   real *total_weight_data = THCTensor_(data)(state, total_weight);
 
-  if (THCTensor_(nDimension)(state, input) == 1) {
+  if (THCTensor_(nDimensionLegacyNoScalars)(state, input) == 1) {
     cunn_ClassNLLCriterion_updateGradInput_kernel1<real>
       <<<1, 1, 0, THCState_getCurrentStream(state)>>>(
         gradInput_data,
@@ -215,7 +205,7 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
         weights_data,
         target_data,
         total_weight_data,
-        sizeAverage,
+        reduction == Reduction::ElementwiseMean,
         n_classes,
         ignore_index
     );
@@ -227,7 +217,7 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
         target_data,
         weights_data,
         total_weight_data,
-        sizeAverage,
+        reduction == Reduction::ElementwiseMean,
         THCTensor_(size)(state, input, 0),
         THCTensor_(size)(state, input, 1),
         n_classes,

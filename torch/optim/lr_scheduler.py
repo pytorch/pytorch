@@ -1,7 +1,9 @@
+import types
 import math
+import torch
+from torch._six import inf
 from bisect import bisect_right
 from functools import partial
-
 from .optimizer import Optimizer
 
 
@@ -22,6 +24,23 @@ class _LRScheduler(object):
         self.base_lrs = list(map(lambda group: group['initial_lr'], optimizer.param_groups))
         self.step(last_epoch + 1)
         self.last_epoch = last_epoch
+
+    def state_dict(self):
+        """Returns the state of the scheduler as a :class:`dict`.
+
+        It contains an entry for every variable in self.__dict__ which
+        is not the optimizer.
+        """
+        return {key: value for key, value in self.__dict__.items() if key != 'optimizer'}
+
+    def load_state_dict(self, state_dict):
+        """Loads the schedulers state.
+
+        Arguments:
+            state_dict (dict): scheduler state. Should be an object returned
+                from a call to :meth:`state_dict`.
+        """
+        self.__dict__.update(state_dict)
 
     def get_lr(self):
         raise NotImplementedError
@@ -55,6 +74,7 @@ class LambdaLR(_LRScheduler):
         >>>     train(...)
         >>>     validate(...)
     """
+
     def __init__(self, optimizer, lr_lambda, last_epoch=-1):
         self.optimizer = optimizer
         if not isinstance(lr_lambda, list) and not isinstance(lr_lambda, tuple):
@@ -66,6 +86,37 @@ class LambdaLR(_LRScheduler):
             self.lr_lambdas = list(lr_lambda)
         self.last_epoch = last_epoch
         super(LambdaLR, self).__init__(optimizer, last_epoch)
+
+    def state_dict(self):
+        """Returns the state of the scheduler as a :class:`dict`.
+
+        It contains an entry for every variable in self.__dict__ which
+        is not the optimizer.
+        The learning rate lambda functions will only be saved if they are callable objects
+        and not if they are functions or lambdas.
+        """
+        state_dict = {key: value for key, value in self.__dict__.items() if key not in ('optimizer', 'lr_lambdas')}
+        state_dict['lr_lambdas'] = [None] * len(self.lr_lambdas)
+
+        for idx, fn in enumerate(self.lr_lambdas):
+            if not isinstance(fn, types.FunctionType):
+                state_dict['lr_lambdas'][idx] = fn.__dict__.copy()
+
+        return state_dict
+
+    def load_state_dict(self, state_dict):
+        """Loads the schedulers state.
+
+        Arguments:
+            state_dict (dict): scheduler state. Should be an object returned
+                from a call to :meth:`state_dict`.
+        """
+        lr_lambdas = state_dict.pop('lr_lambdas')
+        self.__dict__.update(state_dict)
+
+        for idx, fn in enumerate(lr_lambdas):
+            if fn is not None:
+                self.lr_lambdas[idx].__dict__.update(fn)
 
     def get_lr(self):
         return [base_lr * lmbda(self.last_epoch)
@@ -216,7 +267,11 @@ class ReduceLROnPlateau(object):
         factor (float): Factor by which the learning rate will be
             reduced. new_lr = lr * factor. Default: 0.1.
         patience (int): Number of epochs with no improvement after
-            which learning rate will be reduced. Default: 10.
+            which learning rate will be reduced. For example, if
+            `patience = 2`, then we will ignore the first 2 epochs
+            with no improvement, and will only decrease the LR after the
+            3rd epoch if the loss still hasn't improved then.
+            Default: 10.
         verbose (bool): If ``True``, prints a message to stdout for
             each update. Default: ``False``.
         threshold (float): Threshold for measuring the new optimum,
@@ -346,8 +401,15 @@ class ReduceLROnPlateau(object):
             raise ValueError('threshold mode ' + threshold_mode + ' is unknown!')
 
         if mode == 'min':
-            self.mode_worse = float('inf')
+            self.mode_worse = inf
         else:  # mode == 'max':
-            self.mode_worse = (-float('inf'))
+            self.mode_worse = -inf
 
         self.is_better = partial(self._cmp, mode, threshold_mode, threshold)
+
+    def state_dict(self):
+        return {key: value for key, value in self.__dict__.items() if key not in {'optimizer', 'is_better'}}
+
+    def load_state_dict(self, state_dict):
+        self.__dict__.update(state_dict)
+        self._init_is_better(mode=self.mode, threshold=self.threshold, threshold_mode=self.threshold_mode)

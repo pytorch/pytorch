@@ -130,6 +130,24 @@ void THVector_(divs_DEFAULT)(real *y, const real *x, const real c, const ptrdiff
     y[i] = x[i] / c;
 }
 
+#ifndef TH_REAL_IS_INT
+void THVector_(cvtFromInt_DEFAULT)(real *y, const int *x, const ptrdiff_t n)
+{
+  ptrdiff_t i = 0;
+
+  for(; i<n-4; i+=4)
+  {
+    y[i] = (real)x[i];
+    y[i+1] = (real)x[i+1];
+    y[i+2] = (real)x[i+2];
+    y[i+3] = (real)x[i+3];
+  }
+
+  for(; i < n; i++)
+    y[i] = (real)x[i];
+}
+#endif
+
 // Fills 16 normally distributed samples into data, interleaved with a
 // stride of 8, i.e. in order of ([0], [8]), ([1], [9]), ...
 static void THVector_(interleaved_normal_fill_16)(real *data,
@@ -234,11 +252,14 @@ VECTOR_IMPLEMENT_FUNCTION(log,TH_MATH_NAME(log))
 VECTOR_IMPLEMENT_FUNCTION(lgamma,TH_MATH_NAME(lgamma))
 VECTOR_IMPLEMENT_FUNCTION(digamma,TH_MATH_NAME(TH_digamma))
 VECTOR_IMPLEMENT_FUNCTION(trigamma,TH_MATH_NAME(TH_trigamma))
+VECTOR_IMPLEMENT_FUNCTION(log10,TH_MATH_NAME(log10))
 VECTOR_IMPLEMENT_FUNCTION(log1p,TH_MATH_NAME(log1p))
-VECTOR_IMPLEMENT_FUNCTION(sigmoid,TH_MATH_NAME(TH_sigmoid))
+VECTOR_IMPLEMENT_FUNCTION(log2,TH_MATH_NAME(log2))
+VECTOR_IMPLEMENT_FUNCTION(sigmoid_DEFAULT,TH_MATH_NAME(TH_sigmoid))
 VECTOR_IMPLEMENT_FUNCTION(exp,TH_MATH_NAME(exp))
 VECTOR_IMPLEMENT_FUNCTION(expm1,TH_MATH_NAME(expm1))
 VECTOR_IMPLEMENT_FUNCTION(erf,TH_MATH_NAME(erf))
+VECTOR_IMPLEMENT_FUNCTION(erfc,TH_MATH_NAME(erfc))
 VECTOR_IMPLEMENT_FUNCTION(erfinv, TH_erfinv)
 VECTOR_IMPLEMENT_FUNCTION(cos,TH_MATH_NAME(cos))
 VECTOR_IMPLEMENT_FUNCTION(acos,TH_MATH_NAME(acos))

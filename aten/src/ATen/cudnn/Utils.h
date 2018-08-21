@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/ATen.h>
+#include "ATen/cuda/Exceptions.h"
 #include "THC/THC.h"
 #include "cudnn-wrapper.h"
 #include "Handles.h"
@@ -9,7 +10,7 @@ namespace at { namespace native {
 
 inline void setCuDNNStreamToCurrent() {
   // TODO: Should getCurrentStream be a method on Context?
-  CUDNN_CHECK(cudnnSetStream(getCudnnHandle(), THCState_getCurrentStream(globalContext().thc_state)));
+  AT_CUDNN_CHECK(cudnnSetStream(getCudnnHandle(), THCState_getCurrentStream(globalContext().getTHCState())));
 }
 
 // cuDNN has a buggy check for tensor being contiguous (that is, it does

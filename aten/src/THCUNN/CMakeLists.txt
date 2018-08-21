@@ -8,7 +8,6 @@ ${CMAKE_CURRENT_SOURCE_DIR}/Col2Im.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/DistKLDivCriterion.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/ELU.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/FeatureLPPooling.cu
-${CMAKE_CURRENT_SOURCE_DIR}/FusedRNNKernel.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/GatedLinearUnit.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/HardTanh.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/Im2Col.cu
@@ -16,7 +15,6 @@ ${CMAKE_CURRENT_SOURCE_DIR}/IndexLinear.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/L1Cost.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/LeakyReLU.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/LogSigmoid.cu
-${CMAKE_CURRENT_SOURCE_DIR}/LogSoftMax.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/LookupTableBag.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/LookupTable.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/MarginCriterion.cu
@@ -28,7 +26,6 @@ ${CMAKE_CURRENT_SOURCE_DIR}/RReLU.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/Sigmoid.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SmoothL1Criterion.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SoftMarginCriterion.cu
-${CMAKE_CURRENT_SOURCE_DIR}/SoftMax.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SoftPlus.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SoftShrink.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SparseLinear.cu
@@ -45,7 +42,6 @@ ${CMAKE_CURRENT_SOURCE_DIR}/SpatialDilatedMaxPooling.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialFractionalMaxPooling.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialFullConvolution.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialFullDilatedConvolution.cu
-${CMAKE_CURRENT_SOURCE_DIR}/SpatialGridSamplerBilinear.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialMaxPooling.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialMaxUnpooling.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialReflectionPadding.cu
@@ -73,7 +69,6 @@ ${CMAKE_CURRENT_SOURCE_DIR}/VolumetricDilatedMaxPooling.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/VolumetricFractionalMaxPooling.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/VolumetricFullConvolution.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/VolumetricFullDilatedConvolution.cu
-${CMAKE_CURRENT_SOURCE_DIR}/VolumetricGridSamplerBilinear.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/VolumetricMaxPooling.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/VolumetricMaxUnpooling.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/VolumetricReplicationPadding.cu
@@ -85,9 +80,6 @@ set(ATen_CUDA_INCLUDE ${ATen_CUDA_INCLUDE}
   "${CMAKE_CURRENT_SOURCE_DIR}"
 PARENT_SCOPE)
 
-FILE(GLOB_RECURSE thcunn_h RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}" "*.cuh" "*.h")
-FOREACH(HEADER ${thcunn_h})
-  # https://stackoverflow.com/questions/11096471/how-can-i-install-a-hierarchy-of-files-using-cmake
-  GET_FILENAME_COMPONENT(DIR ${HEADER} DIRECTORY)
-  INSTALL(FILES ${HEADER} DESTINATION ${ATEN_INSTALL_INCLUDE_SUBDIR}/THCUNN)
-ENDFOREACH()
+install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+  DESTINATION ${ATEN_INSTALL_INCLUDE_SUBDIR}
+  FILES_MATCHING PATTERN "*.h" PATTERN "*.cuh")

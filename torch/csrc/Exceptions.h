@@ -4,11 +4,10 @@
 #include <stdexcept>
 #include <string>
 
-#ifndef NO_PYTHON
-
+#include "ATen/core/Error.h"
 #include "THP_export.h"
-#include "torch/csrc/utils/object_ptr.h"
 #include "torch/csrc/utils/auto_gil.h"
+#include "torch/csrc/utils/object_ptr.h"
 
 #define HANDLE_TH_ERRORS                                                       \
   try {
@@ -16,11 +15,15 @@
 #define END_HANDLE_TH_ERRORS_RET(retval)                                       \
   } catch (python_error &e) {                                                  \
     return retval;                                                             \
+  } catch (const at::Error &e) {                                               \
+    auto msg = torch::processErrorMsg(e.what_without_backtrace());              \
+    PyErr_SetString(PyExc_RuntimeError, msg.c_str());                          \
+    return retval;                                                             \
   } catch (torch::PyTorchError &e) {                                           \
     auto msg = torch::processErrorMsg(e.what());                               \
     PyErr_SetString(e.python_type(), msg.c_str());                             \
     return retval;                                                             \
-  } catch (std::exception &e) {                                                \
+  } catch (const std::exception &e) {                                          \
     auto msg = torch::processErrorMsg(e.what());                               \
     PyErr_SetString(PyExc_RuntimeError, msg.c_str());                          \
     return retval;                                                             \
@@ -130,22 +133,3 @@ struct ValueError : public PyTorchError {
 };
 
 } // namespace torch
-
-#else
-
-namespace torch {
-
-struct PyTorchError : public std::exception {
-  virtual const char* what() const noexcept override {
-    return msg.c_str();
-  }
-  std::string msg;
-};
-
-struct ValueError : public PyTorchError {
-  ValueError(const char *format, ...);
-};
-
-} // namespace torch
-
-#endif

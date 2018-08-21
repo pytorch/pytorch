@@ -8,19 +8,6 @@
 #include <stdexcept>
 
 namespace thd {
-RPCType type_traits<char>::type = RPCType::CHAR;
-RPCType type_traits<int8_t>::type = RPCType::CHAR;
-RPCType type_traits<uint8_t>::type = RPCType::UCHAR;
-RPCType type_traits<float>::type = RPCType::FLOAT;
-RPCType type_traits<double>::type = RPCType::DOUBLE;
-RPCType type_traits<int16_t>::type = RPCType::SHORT;
-RPCType type_traits<int32_t>::type = RPCType::INT;
-RPCType type_traits<uint32_t>::type = RPCType::UINT;
-RPCType type_traits<uint16_t>::type = RPCType::USHORT;
-RPCType type_traits<int64_t>::type = std::is_same<int64_t, long>::value ? RPCType::LONG : RPCType::LONG_LONG;
-RPCType type_traits<uint64_t>::type = std::is_same<uint64_t, unsigned long>::value ? RPCType::ULONG : RPCType::ULONG_LONG;
-RPCType type_traits<std::conditional<std::is_same<int64_t, long>::value, long long, long>::type>::type = std::is_same<int64_t, long>::value ? RPCType::LONG_LONG : RPCType::LONG;
-RPCType type_traits<std::conditional<std::is_same<uint64_t, unsigned long>::value, unsigned long long, unsigned long>::type>::type = std::is_same<uint64_t, unsigned long>::value ? RPCType::ULONG_LONG : RPCType::ULONG;
 namespace rpc {
 
 RPCMessage::RPCMessage()
@@ -28,7 +15,7 @@ RPCMessage::RPCMessage()
   , _offset(0)
 {}
 
-RPCMessage::RPCMessage(char* str, std::size_t size)
+RPCMessage::RPCMessage(char* str, size_t size)
   : _msg(str, size)
   , _offset(0)
 {}
@@ -59,7 +46,7 @@ RPCMessage::size_type RPCMessage::remaining() const {
   return _msg.length() - _offset;
 }
 
-const char* RPCMessage::read(std::size_t num_bytes) {
+const char* RPCMessage::read(size_t num_bytes) {
   if (_offset + num_bytes > _msg.length())
     throw std::out_of_range("invalid access: out of bounds");
   const char* ret_val = _msg.data() + _offset;
@@ -153,7 +140,7 @@ THLongStorage* unpackTHLongStorage(RPCMessage& raw_message) {
   if (is_null) return NULL;
   ptrdiff_t size = unpackScalar<ptrdiff_t>(raw_message);
   THLongStorage* storage = THLongStorage_newWithSize(size);
-  int64_t* data = storage->data;
+  int64_t* data = THLongStorage_data(storage);
 
   try {
     for (int i = 0; i < size; i++) {

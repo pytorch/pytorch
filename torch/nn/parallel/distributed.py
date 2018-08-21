@@ -77,7 +77,7 @@ class DistributedDataParallel(Module):
         Parameters are never broadcast between processes. The module performs
         an all-reduce step on gradients and assumes that they will be modified
         by the optimizer in all processes in the same way. Buffers
-        (e.g. BatchNorm stats) are broadcast form the module in process of rank
+        (e.g. BatchNorm stats) are broadcast from the module in process of rank
         0, to all other replicas in the system in every iteration.
 
     .. warning::
@@ -93,6 +93,9 @@ class DistributedDataParallel(Module):
                            the module at beginning of the forward function.
                            (default: True)
 
+    Attributes:
+        module (Module): the module to be parallelized
+
     Example::
 
         >>> torch.distributed.init_process_group(world_size=4, init_method='...')
@@ -102,6 +105,9 @@ class DistributedDataParallel(Module):
     def __init__(self, module, device_ids=None, output_device=None, dim=0,
                  broadcast_buffers=True):
         super(DistributedDataParallel, self).__init__()
+        if dist._backend not in (dist.dist_backend.NCCL, dist.dist_backend.GLOO):
+            raise ValueError('Invalid backend, only NCCL and GLOO backends are supported by DistributedDataParallel')
+
         if device_ids is None:
             device_ids = list(range(torch.cuda.device_count()))
         if output_device is None:
@@ -131,12 +137,13 @@ class DistributedDataParallel(Module):
             # TODO: we don't need to replicate params in here. they're always going to
             # be broadcasted using larger blocks in broadcast_coalesced, so it might be
             # better to not pollute the caches with these small blocks
-            self._module_copies = replicate(self.module, self.device_ids)
+            self._module_copies = replicate(self.module, self.device_ids, detach=True)
             self._module_copies[0] = self.module
+
             for module_copy in self._module_copies[1:]:
                 for param, copy_param in zip(self.module.parameters(), module_copy.parameters()):
-                    copy_param.detach_()
                     copy_param.requires_grad = param.requires_grad
+
         else:
             self._module_copies = [self.module]
 
@@ -212,7 +219,7 @@ class DistributedDataParallel(Module):
         self._sync_params()
         if len(self.device_ids) == 1:
             return self.module(*inputs[0], **kwargs[0])
-        outputs = self.parallel_apply(self._module_copies, inputs, kwargs)
+        outputs = self.parallel_apply(self._module_copies[:len(inputs)], inputs, kwargs)
         return self.gather(outputs, self.output_device)
 
     def scatter(self, inputs, kwargs, device_ids):
@@ -257,7 +264,7 @@ class DistributedDataParallel(Module):
 
         # module buffer sync
         if self.broadcast_buffers:
-            buffers = list(self.module._all_buffers())
+            buffers = [b.data for b in self.module.buffers()]
             if len(buffers) > 0:
                 # cross-node buffer sync
                 self._dist_broadcast_coalesced(buffers, self.broadcast_bucket_size)
@@ -266,8 +273,8 @@ class DistributedDataParallel(Module):
                     # intra-node buffer sync
                     result = broadcast_coalesced(buffers, self.device_ids, self.broadcast_bucket_size)
                     for tensors, module in zip(result[1:], self._module_copies[1:]):
-                        for tensor, buf in zip(tensors, module._all_buffers()):
-                            buf.set_(tensor)
+                        for tensor, buf in zip(tensors, module.buffers()):
+                            buf.data.set_(tensor)
 
     def _register_grad_hooks(self):
         self._grad_accs = []  # need to keep them in scope

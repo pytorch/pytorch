@@ -1,13 +1,17 @@
 #pragma once
 
-#include "torch/csrc/jit/ir.h"
-#include "torch/csrc/jit/tracer_state.h"
-#include "torch/csrc/assertions.h"
-#include "torch/csrc/utils/functional.h"
-#include "torch/csrc/utils/variadic.h"
 #include "torch/csrc/autograd/function_hook.h"
 #include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/utils/auto_unique_ptr.h"
+#include "torch/csrc/jit/assertions.h"
+#include "torch/csrc/jit/constants.h"
+#include "torch/csrc/jit/ir.h"
+#include "torch/csrc/utils/functional.h"
+#include "torch/csrc/utils/functional.h"
+#include "torch/csrc/utils/variadic.h"
+#include "torch/csrc/utils/variadic.h"
+#include "torch/csrc/WindowsTorchApiMacro.h"
+
+#include <ATen/Backtrace.h>
 
 #include <memory>
 #include <mutex>
@@ -16,124 +20,92 @@
 #include <cstdint>
 #include <unordered_map>
 
-
 namespace torch { namespace jit { namespace tracer {
 
 using torch::autograd::Variable;
 using variable_list = std::vector<Variable>;
 
-#ifndef NO_PYTHON
-std::string getPythonInterpreterStackTrace();
-#endif
+struct TORCH_API TracingState : public std::enable_shared_from_this<TracingState> {
+  TracingState();
+  ~TracingState();
 
-namespace detail {
+  using WeakTensor = at::WeakTensor;
 
-inline ValueTracingStateElem* getValueState(const std::shared_ptr<TracingState>& state, const Variable& var, bool alloc = true) {
-  auto& tracing_state = var.tracing_state();
-  for (auto it = tracing_state.begin(); it != tracing_state.end();) {
-    auto ts = it->state.lock();
-    // GC of invalidated tracing states
-    if (!ts) {
-      auto current_it = it++;
-      tracing_state.erase(current_it);
-      continue;
-    } else if (ts == state) {
-      return &(*it);
+  struct WeakTensorHasher {
+    size_t operator()(const WeakTensor& t) const {
+      return std::hash<void*>()(t.unsafeGetTensorImpl());
     }
-    ++it;
-  }
-  if (alloc) {
-    tracing_state.emplace_front();
-    auto & vts = tracing_state.front();
-    vts.state = state;
-    return &vts;
-  } else {
-    return nullptr;
-  }
-}
+  };
 
-inline bool isElemActive(const ValueTracingStateElem& vts) {
-  auto state = vts.state.lock();
-  return state && state->active;
-}
+  struct WeakTensorEq {
+    bool operator()(const WeakTensor& t1, const WeakTensor& t2) const {
+      return t1.unsafeGetTensorImpl() == t2.unsafeGetTensorImpl();
+    }
+  };
 
-inline std::vector<VariableFlags> getVarFlags(const variable_list& vars) {
-  return fmap(vars, &VariableFlags::of);
-}
-
-}
-
-
-// Should a function which takes 'vars' as inputs be traced?
-// It suffices for ONE variable to be tracing: any "untraced" variables
-// are treated as constants.
-//
-// NB: This code lives in the hotpath; make sure it is fast
-//
-// NB: Variable overload is not variadic because we don't actually
-// need it (in most cases if we have a variable_list it is already
-// flattened).
-inline bool isTracingVar(const Variable& var) {
-  if (!var.defined() || !var.has_tracing_state()) return false;
-  return std::any_of(var.tracing_state().begin(), var.tracing_state().end(), detail::isElemActive);
-}
-
-inline bool isTracingVar(at::ArrayRef<Variable> vars) {
-  // Reference to avoid refcount bump
-  for (const Variable& var : vars) {
-    if (isTracingVar(var)) return true;
-  }
-  return false;
-}
-
-struct IsTracing : IterArgs<IsTracing> {
-  bool out = false;
-  using IterArgs<IsTracing>::operator();
-  void operator()(const at::Tensor& var) {
-    out = out || isTracingVar(var);
-  }
-  bool short_circuit() { return out; }
+  std::unordered_map<WeakTensor, Value*, WeakTensorHasher, WeakTensorEq> value_map;
+  std::shared_ptr<Graph> graph;
 };
 
-// To be called with Tensor arguments from generated code
-template<typename... Args>
-inline bool isTracing(Args&&... args) {
-  return IsTracing().apply(std::forward<Args>(args)...).out;
-}
 
-// Retrieve the tracing state which a function applied with 'vars' should
-// be recorded to.  Precondition: isTracing(vars) == true.  At the moment,
-// we don't support mixing up variables from different traces; this code
-// will need to be revisited if that ever becomes supported.
-inline std::shared_ptr<TracingState> getTracingState(const variable_list& vars) {
-  std::shared_ptr<TracingState> state;
-  for (auto& var : vars) {
-    if (!var.defined() || !var.has_tracing_state()) continue;
-    for (auto & vts : var.tracing_state()) {
-      auto var_state = vts.state.lock();
-      if (!var_state || !var_state->active) continue;
-      if (!state) state = var_state;
-      JIT_ASSERT(var_state == state);
-    }
+// This is meant to be used as a thread local place, where we can store extra
+// info that gets lost when we call into ATen from Python bindings. One example
+// for when this happens is when we get an IntList argument with e.g. sizes for
+// view. When tracing, those might be tensors, which let us encode extra data
+// dependencies, but once they get to the ATen call where we actually have the
+// tracing logic, they get converted into a raw IntList, and we loose all
+// information. To prevent this, we temporarily stash it in here.
+struct ArgumentStash {
+  struct IntListTrace : std::vector<Value*> {
+    IntListTrace(int size)
+      : std::vector<Value*>(size, nullptr) {}
+  };
+
+  static bool empty() {
+    return stash.intlists.empty();
   }
-  JIT_ASSERT(state);
-  return state;
+
+  TORCH_API static void stashIntListElem(const std::string& arg_name,
+                                         size_t size,
+                                         size_t idx,
+                                         const Variable& var);
+
+  static bool hasIntList(const std::string& arg_name) {
+    return stash.intlists.count(arg_name) > 0;
+  }
+
+  static IntListTrace popIntList(const std::string& arg_name) {
+    auto info = std::move(stash.intlists.at(arg_name));
+    stash.intlists.erase(arg_name);
+    return info;
+  }
+
+private:
+  static thread_local ArgumentStash stash;
+  std::unordered_map<std::string, IntListTrace> intlists;
+};
+
+// Retrieve or set the current tracing state. Returns a nullptr if tracing is disabled.
+TORCH_API const std::shared_ptr<TracingState>& getTracingState();
+TORCH_API void setTracingState(std::shared_ptr<TracingState> state);
+
+inline bool isTracing() {
+  return static_cast<bool>(getTracingState());
 }
 
-// Having finished adding a new 'node' to the graph IR owned by TracingState 'state',
-// 'setValueTrace' associates this node with an output variable, so that further operations
-// involving this variable know which node in the IR to reference.
-inline void setValueTrace(const std::shared_ptr<TracingState>& state, const Variable& var, Value *value) {
+// Having finished adding a new 'node' to the graph IR 'setValueTrace' associates
+// this node with an output variable, so that further operations involving this
+// variable know which node in the IR to reference.
+inline void setValueTrace(const Variable& var, Value *value) {
   JIT_ASSERT(var.defined());
-  auto vts = detail::getValueState(state, var);
-  vts->trace = value;
+  getTracingState()->value_map[var] = value;
 }
 
 // Given a variable 'var', return the 'node' which represents the instruction
-// which computes the value of this variable in the IR.  When 'mustExist' is
-// false, we interpret untraced variables as constants that are just embedded
+// which computes the value of this variable in the IR.
+// Here, we interpret untraced variables as constants that are just embedded
 // in the graph.  This is useful to handle code which does things like this
-// (from torch.autograd.variable):
+// (from torch.autograd.variable, now moved to C++):
 //
 //    def mm(self, matrix):
 //      output = Variable(self.data.new(self.data.size(0), matrix.data.size(1)))
@@ -143,37 +115,21 @@ inline void setValueTrace(const std::shared_ptr<TracingState>& state, const Vari
 // update on, but subsequently ignores it because the alpha scaling factor is zero.
 // This is one of the cases where a Variable can be created inside of a trace, and
 // if we treat it as a constant, everything will work out.
-inline Value* getValueTrace(const std::shared_ptr<TracingState>& state, const Variable& var) {
+inline Value* getValueTrace(const Variable& var) {
+  auto &state = getTracingState();
   if (!var.defined()) {
     Node *n = state->graph->createUndefined();
     return state->graph->appendNode(n)->output();
   }
 
-  auto vts = detail::getValueState(state, var, true);
-  if (vts->trace) return vts->trace;
-
-  // HACK.  In an ideal world, buffers would be wrapped in variables, permitting
-  // us to trace them just like we normally would.  In fact, internally, within
-  // ATen, buffers get precisely this treatment.
-  //
-  // However, propagating this treatment would require us to do some fairly
-  // disruptive changes to Python userland, where buffers are expected to be
-  // passed around as plain tensors inside modules.  Some day we should do
-  // this, but for now, we wrap all buffers in one-off Variables.  This means
-  // they'll show up as constants when we trace.
-  //
-  // To deal with this, we cheat a little and consult the buffer map to
-  // see if the wrapped tensor corresponds to a buffer.  If it does, use
-  // that instead of making a constant.
-  auto it = state->buffer_map.find(var.data().unsafeGetTH(false));
-  if (it != state->buffer_map.end()) {
-    return it->second;
+  auto & value_map = getTracingState()->value_map;
+  auto it = value_map.find(var);
+  if (it == value_map.end()) {
+    Value *constant = state->graph->insertConstant(var.data());
+    constant->inferTypeFrom(var.data());
+    it = value_map.emplace_hint(it, var, constant);
   }
-
-  Value *constant = state->graph->appendNode(state->graph->createConstant(var.data()))->output();
-  constant->inferTypeFrom(var.data());
-  setValueTrace(state, var, constant);
-  return constant;
+  return it->second;
 }
 
 inline Value* getOutputTrace(const std::shared_ptr<TracingState>& state, const Variable& var, size_t output_no) {
@@ -182,112 +138,99 @@ inline Value* getOutputTrace(const std::shared_ptr<TracingState>& state, const V
     return state->graph->appendNode(n)->output();
   }
 
-  auto vts = detail::getValueState(state, var, false);
-  if (!vts) {
+  auto & value_map = getTracingState()->value_map;
+  auto it = value_map.find(var);
+  if (it == value_map.end()) {
     std::ostringstream os;
     os << "output " << output_no << " of traced region did not have observable "
        << "data dependence with trace inputs; this probably indicates your program "
        << "cannot be understood by the tracer.";
     throw std::runtime_error(os.str());
   }
-  return vts->trace;
+  return it->second;
 }
-
-// Only one field may be non-null
-struct TraceInput {
-  Variable variable;
-  at::Tensor buffer;
-  TraceInput(Variable variable) : variable(std::move(variable)) {}
-  TraceInput(at::Tensor buffer) : buffer(std::move(buffer)) {}
-  TraceInput() {}
-};
 
 // Start tracing, treating 'inputs' as inputs to the trace, which can be
 // varied on subsequent invocations of the trace.  Any other variables
 // will be treated as constants.
-//
-// NB: Why does this take an rvalue reference?  We need to get a non-const
-// reference to at::Tensor buffer to call unsafeGetTH, but you can't get this
-// out of a const vector (silly std::vector...)
-inline std::pair<std::shared_ptr<TracingState>, variable_list> enter(std::vector<TraceInput>&& trace_inputs, std::size_t num_stages) {
-  auto state = std::make_shared<TracingState>(num_stages);
-  variable_list inputs;
-  for (auto& trace_input : trace_inputs) {
-    if (trace_input.variable.defined()) {
-      JIT_ASSERT(!trace_input.buffer.defined());
-      auto input = trace_input.variable;
-      auto * value_state = detail::getValueState(state, input, false);
-      if (value_state) {
-        // See Note [Repeated inputs] in tracer.cpp
-        input = input.view(input.sizes());
-      }
-      auto input_node = state->graph->addInput(input.name());
-      setValueTrace(state, input, input_node);
-      input_node->inferTypeFrom(input.data());
-      inputs.push_back(input);
-    } else {
-      JIT_ASSERT(trace_input.buffer.defined());
-      // NON-owning reference.  Pointers may be dead!
-      auto& buffer = trace_input.buffer;
-      auto n = state->graph->addInput();
-      state->buffer_map.insert({buffer.unsafeGetTH(false), n});
-      n->inferTypeFrom(buffer);
-    }
+inline std::pair<std::shared_ptr<TracingState>, variable_list> enter(
+    variable_list inputs) {
+  if (isTracing()) {
+    AT_ERROR("Tracing can't be nested");
   }
-  // TODO: this might not work with the way we handle buffers
-  state->var_flags[0].first = detail::getVarFlags(inputs);
-  state->active = true;
-  state->inputs = inputs;
+  auto state = std::make_shared<TracingState>();
+  setTracingState(state);
+  for (auto& input : inputs) {
+    auto * value_state = state->value_map[input];
+    if (value_state) {
+      // See Note [Repeated inputs] in tracer.cpp
+      input = input.view(input.sizes());
+    }
+    auto input_node = state->graph->addInput(input.name());
+    input_node->inferTypeFrom(input.data());
+    state->value_map[input] = input_node;
+  }
   return std::make_pair(state, inputs);
 }
-
-namespace detail {
-
-// Exit code shared between exit and TraceExitHook::run
-inline void _exit(const std::shared_ptr<TracingState>& state, const variable_list& outputs) {
-  size_t i = 0;
-  for (auto& output : outputs) {
-    state->graph->registerOutput(getOutputTrace(state, output, i));
-    i++;
-  }
-  state->active = false;
-  state->var_flags[state->graph->stage()].second = detail::getVarFlags(outputs);
-}
-
-// Marks a backwards subgraph that should be traced as the next stage.
-// Mutates some of the outputs.
-void traceBackward(const std::shared_ptr<TracingState>& state, const variable_list& inputs,
-                   const variable_list& outputs);
-
-} // namespace detail
 
 // Exit a trace, treating 'outputs' as the outputs of the trace.  These
 // are the variables whose values will be computed upon subsequent
 // invocations of the trace.
 inline void exit(const variable_list& outputs) {
-  auto state = getTracingState(outputs);
-  detail::_exit(state, outputs);
-  detail::traceBackward(state, state->inputs, outputs);
-  state->inputs.clear();
+  auto & state = getTracingState();
+  size_t i = 0;
+  for (auto& output : outputs) {
+    state->graph->registerOutput(getOutputTrace(state, output, i));
+    i++;
+  }
+  setTracingState(nullptr);
 }
 
-// Marks part of the backward graph as non-traceable (i.e. one that should be replaced
-// with an Eval in the trace).
-void nontraceableBackwardSubgraph(const variable_list& inputs, const variable_list& outputs);
+// Abort tracing. Used to reset the state in case of errors.
+inline void abandon() {
+  setTracingState(nullptr);
+}
 
-// Pre-recorded information about the trace before we actually carry
-// out the trace
-struct PreTraceInfo {
-  std::shared_ptr<TracingState> state;
-  Node *n;
-};
 
-PreTraceInfo preRecordTrace(std::string op, at::ArrayRef<Variable> inputs);
-#ifndef NO_PYTHON
-PreTraceInfo preRecordPythonTrace(
-    THPObjectPtr pyobj, std::string arg_types, at::ArrayRef<Variable> inputs,
-    pyobj_list scalar_args);
-#endif
-void postRecordTrace(const PreTraceInfo& info, at::ArrayRef<Variable> outputs);
+TORCH_API void recordSourceLocation(Node* n);
+TORCH_API void setRecordSourceLocation(void (*v)(Node*));
+
+// NB: those serve both as an intermediate steps in addInputs below,
+// as well as the overloads that terminate template recursion
+void addInputs(Node *n, const char * name, int64_t value);
+void addInputs(Node *n, const char * name, bool value);
+void addInputs(Node *n, const char * name, double value);
+void addInputs(Node *n, const char * name, const at::Scalar& value);
+void addInputs(Node *n, const char * name, const at::Tensor& value);
+void addInputs(Node *n, const char * name, at::IntList value);
+void addInputs(Node *n, const char * name, at::TensorList value);
+void addInputs(Node *n, const char * name, const ArrayRef<double>& value);
+void addInputs(Node *n, const char * name, const std::string& value);
+void addInputs(Node *n, const char * name, const at::SparseTensorRef& value);
+
+template<size_t N>
+void addInputs(Node *n, const char * name, std::array<bool, N> value) {
+  throw std::runtime_error("Found an unsupported argument type in the JIT tracer. File a bug report.");
+}
+
+TORCH_API void postRecordTrace(Node* node, at::ArrayRef<Variable> outputs);
+
+inline void postRecordTrace(Node* node, at::ArrayRef<at::Tensor> tensors) {
+  postRecordTrace(node, fmap<Variable>(tensors));
+}
+
+template <
+    typename T,
+    typename = torch::enable_if_t<
+        (!std::is_convertible<torch::decay_t<T>, ArrayRef<Variable>>::value &&
+         !std::is_convertible<torch::decay_t<T>, ArrayRef<at::Tensor>>::value &&
+         !std::is_convertible<torch::decay_t<T>, Variable>::value)>>
+void postRecordTrace(Node* node, T&&) {
+  AT_ERROR(
+      "Found an unsupported argument type ", at::demangle_type<T>(),
+      " in the JIT tracer. File a bug report.");
+}
+
+TORCH_API autograd::Variable getSizeOf(const autograd::Variable& var, int64_t dim);
 
 }}} // namespace torch::jit::tracer
