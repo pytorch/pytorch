@@ -1,3 +1,5 @@
+#include "ATen/native/RNN.h"
+
 #include "ATen/ATen.h"
 #include "ATen/NativeFunctions.h"
 
@@ -286,7 +288,7 @@ struct FullBidirectionalLayer : Layer<Tensor, pair_of<dir_hidden_type>, pair_of<
 
   std::vector<Tensor> reverse(std::vector<Tensor>&& x) const {
     std::reverse(x.begin(), x.end());
-    return x;
+    return std::move(x);
   }
 
   FullLayer<dir_hidden_type> layer_;
@@ -499,100 +501,6 @@ std::tuple<io_type, Tensor, Tensor> _lstm_impl(
   return std::make_tuple(result.outputs, at::stack(hy, 0), at::stack(cy, 0));
 }
 
-////////////////////////////////////////////////////////////////////////////////
-// CUDNN BINDINGS
-////////////////////////////////////////////////////////////////////////////////
-
-// These must line up with the CUDNN mode codes:
-// https://docs.nvidia.com/deeplearning/sdk/cudnn-developer-guide/index.html#cudnnRNNMode_t
-enum class CuDNNMode { rnn_relu = 0, rnn_tanh = 1, lstm = 2, gru = 3 };
-
-std::tuple<Tensor, Tensor> unpack_hidden(const Tensor& hidden) {
-  return std::make_tuple(hidden, at::Tensor{});
-}
-
-std::tuple<Tensor, Tensor> unpack_hidden(const tpair_of<Tensor>& hidden) {
-  return hidden;
-}
-
-template<typename hidden_type>
-hidden_type pack_hidden(const Tensor& hx, const Tensor& cx) {
-  static_assert(std::is_same<hidden_type, void>::value, "pack_hidden not implemented for this type");
-  AT_ERROR("NOT IMPLEMENTED");
-}
-
-template<>
-Tensor pack_hidden<Tensor>(const Tensor& hx, const Tensor& cx) {
-  AT_ASSERT(cx.numel() == 0);
-  return hx;
-}
-
-template<>
-tpair_of<Tensor> pack_hidden<tpair_of<Tensor>>(const Tensor& hx, const Tensor& cx) {
-  return std::make_tuple(hx, cx);
-}
-
-const char * WEIGHT_FORMAT_WARN = "RNN module weights are not part of single contiguous "
-                                  "chunk of memory. This means they need to be compacted "
-                                  "at every call, possibly greatly increasing memory usage. "
-                                  "To compact weights again call flatten_parameters().";
-
-template<typename hidden_type>
-LayerOutput<Tensor, hidden_type> _cudnn_impl(
-      const Tensor& input, const Tensor& _batch_sizes,
-      const hidden_type& hidden,
-      TensorList params, bool has_biases,
-      CuDNNMode cudnn_mode, const Tensor& weight_buf, const Tensor& dropout_state,
-      int64_t num_layers, double dropout_p, bool train, bool bidirectional) {
-  if (!weight_buf.defined()) {
-    AT_WARN(WEIGHT_FORMAT_WARN);
-  }
-
-  Tensor hx, cx;
-  std::tie(hx, cx) = unpack_hidden(hidden);
-
-  int64_t hidden_size = hx.size(2);
-
-  AT_CHECK(_batch_sizes.dim() == 1, "batch_sizes tensor should be 1D");
-  IntList batch_sizes { _batch_sizes.data<int64_t>(), static_cast<size_t>(_batch_sizes.size(0)) };
-  // cudnn_output = std::tuple<output, hy, cy, reserve, new_weight_buf>
-  auto cudnn_output = at::_cudnn_rnn(
-      input, params, has_biases ? 4 : 2, weight_buf,
-      hx, cx, static_cast<int>(cudnn_mode), hidden_size,
-      num_layers, /*batch_first=*/false, dropout_p, train, bidirectional,
-      batch_sizes, dropout_state);
-
-  return {std::get<0>(cudnn_output),
-          pack_hidden<hidden_type>(std::get<1>(cudnn_output), std::get<2>(cudnn_output))};
-}
-
-template<typename hidden_type>
-LayerOutput<Tensor, hidden_type> _cudnn_impl(
-      const Tensor& input,
-      const hidden_type& hidden,
-      TensorList params, bool has_biases,
-      CuDNNMode cudnn_mode, const Tensor& weight_buf, const Tensor& dropout_state,
-      int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first) {
-  if (!weight_buf.defined()) {
-    AT_WARN(WEIGHT_FORMAT_WARN);
-  }
-
-  Tensor hx, cx;
-  std::tie(hx, cx) = unpack_hidden(hidden);
-
-  int64_t hidden_size = hx.size(2);
-
-  // cudnn_output = std::tuple<output, hy, cy, reserve, new_weight_buf>
-  auto cudnn_output = at::_cudnn_rnn(
-      input, params, has_biases ? 4 : 2, weight_buf,
-      hx, cx, static_cast<int>(cudnn_mode), hidden_size,
-      num_layers, batch_first, dropout_p, train, bidirectional,
-      /*batch_sizes=*/{}, dropout_state);
-
-  return {std::get<0>(cudnn_output),
-          pack_hidden<hidden_type>(std::get<1>(cudnn_output), std::get<2>(cudnn_output))};
-}
-
 } // anonymous namespace
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -600,16 +508,20 @@ LayerOutput<Tensor, hidden_type> _cudnn_impl(
 ////////////////////////////////////////////////////////////////////////////////
 
 #define ONE_HIDDEN_RNN(NAME, CELL)                                             \
+DEFINE_DISPATCH(NAME##_cudnn_stub);                                            \
+DEFINE_DISPATCH(NAME##_packed_cudnn_stub);                                     \
+REGISTER_NO_CPU_DISPATCH(NAME##_cudnn_stub, rnn_fn);                           \
+REGISTER_NO_CPU_DISPATCH(NAME##_packed_cudnn_stub, rnn_packed_fn);             \
+                                                                               \
 std::tuple<Tensor, Tensor> NAME(                                               \
       const Tensor& _input, const Tensor& hx,                                  \
       TensorList _params, bool has_biases,                                     \
-      int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first, \
-      const Tensor& cudnn_weight_buf, const Tensor& cudnn_dropout_state) {     \
+      int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first) { \
   if (at::cudnn_is_acceptable(_input)) {                                       \
-    auto result = _cudnn_impl(_input, hx, _params, has_biases,                 \
-        CuDNNMode::NAME, cudnn_weight_buf, cudnn_dropout_state,                \
-        num_layers, dropout_p, train, bidirectional, batch_first);             \
-    return std::make_tuple(result.outputs, result.final_hidden);               \
+    Tensor output, hy;                                                         \
+    NAME##_cudnn_stub(_input.type().device_type(), output, hy, _input, hx, _params, has_biases, \
+            num_layers, dropout_p, train, bidirectional, batch_first);         \
+    return std::make_tuple(output, hy);                                        \
   }                                                                            \
   auto input = batch_first ? _input.transpose(0, 1) : _input;                  \
   auto params = gather_params(_params, has_biases);                            \
@@ -624,12 +536,12 @@ std::tuple<Tensor, Tensor> NAME(                                               \
 std::tuple<Tensor, Tensor> NAME(                                               \
       const Tensor& data, const Tensor& batch_sizes, const Tensor& hx,         \
       TensorList _params, bool has_biases,                                     \
-      int64_t num_layers, double dropout_p, bool train, bool bidirectional,    \
-      const Tensor& cudnn_weight_buf, const Tensor& cudnn_dropout_state) {     \
+      int64_t num_layers, double dropout_p, bool train, bool bidirectional) {  \
   if (at::cudnn_is_acceptable(data)) {                                         \
-    auto result = _cudnn_impl(data, batch_sizes, hx, _params, has_biases,      \
-        CuDNNMode::NAME, cudnn_weight_buf, cudnn_dropout_state, num_layers, dropout_p, train, bidirectional); \
-    return std::make_tuple(result.outputs, result.final_hidden);               \
+    Tensor output, hy;                                                         \
+    NAME##_packed_cudnn_stub(data.type().device_type(), output, hy, data, batch_sizes, hx, \
+            _params, has_biases, num_layers, dropout_p, train, bidirectional); \
+    return std::make_tuple(output, hy);                                        \
   }                                                                            \
   PackedSequence input { data, batch_sizes };                                  \
   auto params = gather_params(_params, has_biases);                            \
@@ -643,16 +555,21 @@ ONE_HIDDEN_RNN(gru, GRUCell)
 ONE_HIDDEN_RNN(rnn_tanh, SimpleCell<tanh_f>)
 ONE_HIDDEN_RNN(rnn_relu, SimpleCell<relu_f>)
 
+DEFINE_DISPATCH(lstm_cudnn_stub);
+DEFINE_DISPATCH(lstm_packed_cudnn_stub);
+REGISTER_NO_CPU_DISPATCH(lstm_cudnn_stub, lstm_fn);
+REGISTER_NO_CPU_DISPATCH(lstm_packed_cudnn_stub, lstm_packed_fn);
+
 std::tuple<Tensor, Tensor, Tensor> lstm(
       const Tensor& _input, TensorList hx,
       TensorList _params, bool has_biases,
-      int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first,
-      const Tensor& cudnn_weight_buf, const Tensor& cudnn_dropout_state) {
+      int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first) {
   AT_CHECK(hx.size() == 2, "lstm expects two hidden states");
   if (at::cudnn_is_acceptable(_input)) {
-    auto result = _cudnn_impl(_input, std::make_tuple(hx[0], hx[1]), _params, has_biases,
-        CuDNNMode::lstm, cudnn_weight_buf, cudnn_dropout_state, num_layers, dropout_p, train, bidirectional, batch_first);
-    return std::make_tuple(result.outputs, std::get<0>(result.final_hidden), std::get<1>(result.final_hidden));
+    Tensor output, hy, cy;
+    lstm_cudnn_stub(_input.type().device_type(), output, hy, cy, _input, hx, _params, has_biases,
+            num_layers, dropout_p, train, bidirectional, batch_first);
+    return std::make_tuple(output, hy, cy);
   }
   auto input = batch_first ? _input.transpose(0, 1) : _input;
   auto params = gather_params(_params, has_biases);
@@ -667,13 +584,13 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
 std::tuple<Tensor, Tensor, Tensor> lstm(
       const Tensor& data, const Tensor& batch_sizes, TensorList hx,
       TensorList _params, bool has_biases,
-      int64_t num_layers, double dropout_p, bool train, bool bidirectional,
-      const Tensor& cudnn_weight_buf, const Tensor& cudnn_dropout_state) {
+      int64_t num_layers, double dropout_p, bool train, bool bidirectional) {
   AT_CHECK(hx.size() == 2, "lstm expects two hidden states");
   if (at::cudnn_is_acceptable(data)) {
-    auto result = _cudnn_impl(data, batch_sizes, std::make_tuple(hx[0], hx[1]), _params, has_biases,
-        CuDNNMode::lstm, cudnn_weight_buf, cudnn_dropout_state, num_layers, dropout_p, train, bidirectional);
-    return std::make_tuple(result.outputs, std::get<0>(result.final_hidden), std::get<1>(result.final_hidden));
+    Tensor output, hy, cy;
+    lstm_packed_cudnn_stub(data.type().device_type(), output, hy, cy, data, batch_sizes, hx,
+            _params, has_biases, num_layers, dropout_p, train, bidirectional);
+    return std::make_tuple(output, hy, cy);
   }
   PackedSequence input { data, batch_sizes };
   auto params = gather_params(_params, has_biases);

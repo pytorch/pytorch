@@ -776,6 +776,11 @@ class TestNN(NNTestCase):
         output.backward(input)
         self.assertLess(abs(input_var.grad.data.mean() - (1 - p)), 0.05)
 
+        # check eval mode doesn't change anything
+        for inplace in [True, False]:
+            module = cls(p, inplace).eval()
+            self.assertEqual(input, module(input))
+
         # Check that these don't raise errors
         module.__repr__()
         str(module)
@@ -2574,6 +2579,7 @@ class TestNN(NNTestCase):
         self._test_batchnorm_eval()
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @skipIfRocm
     def test_batchnorm_eval_cuda(self, dtype=torch.float):
         self._test_batchnorm_eval("cuda", dtype)
 
@@ -2814,6 +2820,7 @@ class TestNN(NNTestCase):
                 self.assertEqual(out.data, expected)
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    @skipIfRocm
     def test_data_parallel_multiple_input(self):
         class TestModule(nn.Module):
 
@@ -2953,6 +2960,7 @@ class TestNN(NNTestCase):
         out = dp.data_parallel(l, i)
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    @skipIfRocm
     def test_data_parallel_sparse(self):
         l = nn.Embedding(10, 5, sparse=True).to("cuda:1")
         i = torch.randint(10, (20, 5), device="cuda:1", dtype=torch.long)
@@ -3359,6 +3367,7 @@ class TestNN(NNTestCase):
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
+    @skipIfRocm
     def test_Conv2d_inconsistent_types_on_GPU_with_cudnn(self):
         inputs = Variable(torch.randn(4, 1, 7, 7).float().cuda())
         weights = Variable(torch.randn(1, 1, 3, 3).double().cuda())
@@ -4720,6 +4729,7 @@ class TestNN(NNTestCase):
         self._test_batchnorm_update_stats()
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @skipIfRocm
     def test_batchnorm_update_stats_cuda(self):
         self._test_batchnorm_update_stats("cuda", torch.float)
 

@@ -418,7 +418,19 @@ std::string encodeRHS(Node * n) {
   return format(str, env);
 }
 
-std::pair<std::vector<ConcatDesc>, bool> emitCompilationUnit(
+static at::optional<Node&> usedInFusedChunk(Value * input) {
+  // If input is an input to prim::FusedChunk, it will only have one use.
+  auto * node = input->uses().at(0).user;
+  if (node->kind() == prim::FusedChunk) {
+		JIT_ASSERT(input->uses().size() == 1);
+    return *node;
+  } else {
+    return at::nullopt;
+  }
+}
+
+// Returns: (input chunk metadata, output concat metadata, is_random)
+std::tuple<std::vector<PartitionDesc>,std::vector<PartitionDesc>,bool> emitCompilationUnit(
     std::ostream& out,
     const std::string& name,
     AnnotatedGraph& agraph,
@@ -445,12 +457,33 @@ std::pair<std::vector<ConcatDesc>, bool> emitCompilationUnit(
     formals.push_back(format("TensorInfo<${scalar_type},${nDim}> ${tensor}",env));
     argument_loads.push_back(format("*static_cast<TensorInfo<${scalar_type},${nDim}>*>(args[${formal_index}])",env));
   };
+
+  std::vector<PartitionDesc> chunk_desc;
+  std::vector<std::pair<Value*,TensorDesc&>> flat_inputs;
   {
-    size_t i = 0;
-    for(auto p : subgraph.inputs())
-      emitFormal(p,agraph.input_desc[i++]);
+    size_t input_index = 0;
+    for(auto p : subgraph.inputs()) {
+      if (auto chunk = usedInFusedChunk(p)) {
+        int64_t dim = chunk->i(attr::dim);
+        int64_t chunks = chunk->i(attr::chunks);
+				auto tensor_type = p->type()->cast<TensorType>();
+        chunk_desc.emplace_back(tensor_type, chunks, dim, false);
+
+        for (auto * o : chunk->outputs()) {
+          flat_inputs.emplace_back(o, *chunk_desc.back().subtensorDesc);
+        }
+        ++input_index;
+      } else {
+        flat_inputs.emplace_back(p, agraph.input_desc[input_index++]);
+        chunk_desc.emplace_back();
+      }
+    }
+    for (auto & input : flat_inputs) {
+      emitFormal(input.first, input.second);
+    }
   }
-  std::vector<ConcatDesc> concat_desc;
+
+  std::vector<PartitionDesc> concat_desc;
   std::vector<Value*> flat_output_nodes;
   {
     size_t i = 0;
@@ -473,7 +506,8 @@ std::pair<std::vector<ConcatDesc>, bool> emitCompilationUnit(
 
   bool has_half_tensor = false;
   size_t formal_count = 0;
-  for(auto p : subgraph.inputs()) {
+  for(auto input : flat_inputs) {
+    auto p = input.first;
     env.s("node",valueName(p));
     env.d("formal",formal_count++);
 
@@ -495,6 +529,8 @@ std::pair<std::vector<ConcatDesc>, bool> emitCompilationUnit(
   for(auto n : subgraph.nodes()) {
     // FusedConcat nodes work by narrowing the output Tensors before the kernel runs
     if (n->kind() == prim::FusedConcat)
+      continue;
+    if (n->kind() == prim::FusedChunk)
       continue;
     if(n->kind() == aten::rand_like) {
       has_random = true;
@@ -549,7 +585,7 @@ std::pair<std::vector<ConcatDesc>, bool> emitCompilationUnit(
     out << cpu_compilation_unit_template.format(env);
   }
 
-  return std::make_pair(std::move(concat_desc), has_random);
+  return std::make_tuple(std::move(chunk_desc), std::move(concat_desc), has_random);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -624,45 +660,98 @@ void compressContiguous(
 
 } // anonymous namespace
 
+// XXX: Assumes that after at::chunk, all inputs are the same size
+static std::vector<int64_t> computeMapSize(
+    const at::Tensor& tensor,
+    const PartitionDesc& chunkDesc) {
+  std::vector<int64_t> sizes(tensor.sizes().begin(), tensor.sizes().end());
+  // Should have been checked in graph fuser
+  JIT_ASSERT(sizes[chunkDesc.dim] % chunkDesc.nSubtensors == 0);
+  sizes[chunkDesc.dim] /= chunkDesc.nSubtensors;
+  return sizes;
+}
+
+// XXX: this code assumes that inputs are 32-bit addressable
+static uint32_t computeNumel(at::ArrayRef<int64_t> sizes) {
+  uint32_t result = 1;
+  if (sizes.size() == 0) {
+    return 1; // scalar tensor
+  }
+  for (int64_t size : sizes) {
+    result *= size;
+  }
+  return result;
+}
+
 void CompiledFusionFunction::launch_with_tensors(at::ArrayRef<at::Tensor> inputs, at::ArrayRef<at::Tensor> outputs) {
   at::DeviceGuard device_guard(inputs);
   JIT_ASSERT(inputs.size() == input_desc.size());
   JIT_ASSERT(outputs.size() == output_desc.size());
+  size_t flat_inputs_size = 0;
   size_t flat_outputs_size = 0;
+  for(auto & c : chunk_desc)
+    flat_inputs_size += c.nSubtensors;
   for(auto & c : concat_desc)
     flat_outputs_size += c.nSubtensors;
   // XXX: this code assumes that inputs are 32-bit addressable
   // XXX: this code assumes that all inputs are of the same size
   JIT_ASSERT(inputs[0].numel() <= std::numeric_limits<uint32_t>::max());
-  uint32_t numel = inputs[0].numel();
-  at::IntList map_size = inputs[0].sizes();
+
+  // Compute map_size, numel from the first input
+  at::IntList map_size;
+  uint32_t numel;
+  std::vector<int64_t> keep_alive_size;
+  if (chunk_desc[0].isNoop()) {
+    map_size = inputs[0].sizes();
+    numel = inputs[0].numel();
+  } else {
+    keep_alive_size = computeMapSize(inputs[0], chunk_desc[0]);
+    map_size = keep_alive_size;
+    numel = computeNumel(map_size);
+  }
+
   // Compute the storage needed to store TensorInfo structs for inputs and outputs.
   size_t uncompressedDim = input_desc.at(0).contiguity.size();
   size_t maxPossibleTensorInfoSize = sizeof(TensorInfo) + 2 * sizeof(uint32_t) * uncompressedDim;
-  size_t maxPossibleBufferSize = maxPossibleTensorInfoSize * (inputs.size() + flat_outputs_size);
+  size_t maxPossibleBufferSize = maxPossibleTensorInfoSize * (flat_inputs_size + flat_outputs_size);
   std::vector<char> buffer(maxPossibleBufferSize);
   char * buffer_next = buffer.data();
   // A vector of arguments to the kernel. It's (numel, *input_descs, *output_descs)
   std::vector<void*> arguments;
-  arguments.reserve(3 + inputs.size() + flat_outputs_size);
-  // Asserts that t's dims can be compressed in the same way as in desc
-  // (that's what the kernel assumes), and appends it to the arguments vector.
-  auto addTensorInfo = [&](TensorDesc & desc, const at::Tensor & t) {
+  arguments.reserve(3 + flat_inputs_size + flat_outputs_size);
+  auto addTensorInfoRaw = [&](TensorDesc & desc, void* data_ptr, at::IntList sizes, at::IntList strides) {
     size_t nDim = desc.nDim(); // NOTE: this is the compressed dim
     JIT_ASSERT(nDim <= uncompressedDim); // We'd overflow the space otherwise
     auto ti = reinterpret_cast<TensorInfo*>(buffer_next);
-    ti->data = t.data_ptr();
-    compressContiguous(t.sizes(), t.strides(), desc.contiguity, ti->sizes(nDim), ti->strides(nDim));
+    ti->data = data_ptr;
+    compressContiguous(sizes, strides, desc.contiguity, ti->sizes(nDim), ti->strides(nDim));
     buffer_next += maxPossibleTensorInfoSize;
     arguments.push_back(ti);
   };
+  // Asserts that t's dims can be compressed in the same way as in desc
+  // (that's what the kernel assumes), and appends it to the arguments vector.
+  auto addTensorInfo = [&](TensorDesc & desc, const at::Tensor & t) {
+    addTensorInfoRaw(desc, t.data_ptr(), t.sizes(), t.strides());
+  };
   arguments.push_back(&numel);
-  for (size_t i = 0; i < input_desc.size(); ++i)
-    addTensorInfo(input_desc[i], inputs[i]);
+  for (size_t i = 0; i < input_desc.size(); ++i) {
+    auto & chunk = chunk_desc[i];
+    const at::Tensor& tensor = inputs[i];
+    if (chunk.isNoop()) {
+      addTensorInfo(input_desc[i], tensor);
+    } else {
+      size_t chunk_offset = map_size[chunk.dim] * tensor.stride(chunk.dim) * elementSize(tensor.type().scalarType());
+      char * data_ptr = reinterpret_cast<char*>(tensor.data_ptr());
+      for (size_t chunks = 0; chunks < chunk.nSubtensors; ++chunks) {
+        addTensorInfoRaw(*chunk.subtensorDesc, data_ptr, map_size, tensor.strides());
+        data_ptr += chunk_offset;
+      }
+    }
+  }
   for (size_t i = 0; i < output_desc.size(); ++i) {
     auto & c = concat_desc[i];
     at::Tensor o = outputs[i];
-    if(c.nSubtensors == 1) {
+    if(c.isNoop()) {
       o.resize_(map_size);
       addTensorInfo(output_desc[i], outputs[i]);
     } else {
@@ -685,7 +774,7 @@ void CompiledFusionFunction::launch_with_tensors(at::ArrayRef<at::Tensor> inputs
   // If the kernel call contains a random op, we need to pass in random seeds as
   // well.
   #ifdef USE_CUDA
-  if(has_random && this->backend() == at::kCUDA) {
+  if(has_random && this->backend() == at::Backend::CUDA) {
     auto gen_ = THCRandom_getGenerator(at::globalContext().getTHCState());
     uint64_t offset =
         gen_->state.philox_seed_offset.fetch_add(this->get_rand_offset(numel));
@@ -729,9 +818,7 @@ struct CUDAFusionFunction : public CompiledFusionFunction {
     checkCUDAVersion(prop);
 
     std::stringstream cu;
-    auto ret = codegen::emitCompilationUnit(cu, name, agraph, true);
-    concat_desc = std::move(ret.first);
-    has_random = ret.second;
+    std::tie(chunk_desc, concat_desc, has_random) = codegen::emitCompilationUnit(cu, name, agraph, true);
     compilation_unit = cu.str();
     nvrtcProgram program;
     TORCH_NVRTC_CHECK(nvrtcCreateProgram(&program, compilation_unit.c_str(), NULL, 0, nullptr, nullptr));
@@ -769,7 +856,7 @@ struct CUDAFusionFunction : public CompiledFusionFunction {
   }
 protected:
   virtual at::Backend backend() const override {
-    return at::kCUDA;
+    return at::Backend::CUDA;
   }
   virtual uint64_t get_rand_offset(uint32_t numel) override {
      int numBlocks = std::min(maxBlocks, ceilDiv(numel, blockSize));
@@ -932,9 +1019,7 @@ struct CPUFusionFunction : public CompiledFusionFunction {
     TempFile cpp_file(cpp_template, 4);
 
     std::stringstream cu;
-    auto ret = codegen::emitCompilationUnit(cu, name, agraph, false);
-    concat_desc = std::move(ret.first);
-    has_random = ret.second;
+    std::tie(chunk_desc, concat_desc, has_random) = codegen::emitCompilationUnit(cu, name, agraph, false);
     JIT_ASSERT(!has_random);
     compilation_unit = cu.str();
     cpp_file.write(compilation_unit);
@@ -950,7 +1035,7 @@ struct CPUFusionFunction : public CompiledFusionFunction {
   }
 protected:
   virtual at::Backend backend() const override {
-    return at::kCPU;
+    return at::Backend::CPU;
   }
   virtual uint64_t get_rand_offset(uint32_t numel) override {
      return numel;

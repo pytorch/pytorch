@@ -211,6 +211,7 @@ module_tests = [
         input_size=(2, 3, 4, 5),
         desc='2d',
         reference_fn=lambda i, p: torch.clamp(i, min=0) + torch.clamp(i, max=0) * p[0][0],
+        #test_cuda = (not TEST_WITH_ROCM)
     ),
     dict(
         module_name='PReLU',
@@ -225,6 +226,7 @@ module_tests = [
         input_size=(2, 3, 4, 5, 6),
         reference_fn=lambda i, p: torch.clamp(i, min=0) + torch.clamp(i, max=0) * p[0][0],
         desc='3d',
+        #test_cuda = (not TEST_WITH_ROCM)
     ),
     dict(
         module_name='PReLU',
@@ -589,6 +591,7 @@ criterion_tests = [
         reference_fn=lambda i, t, m: -(t * i.log() + (1 - t) * (1 - i).log()).sum() /
             (i.numel() if get_reduction(m) else 1),
         check_gradgrad=False,
+        test_cuda = (not TEST_WITH_ROCM)
     ),
     dict(
         module_name='BCELoss',
@@ -599,6 +602,7 @@ criterion_tests = [
             (i.numel() if get_reduction(m) else 1),
         desc='weights',
         check_gradgrad=False,
+        test_cuda = (not TEST_WITH_ROCM)
     ),
     dict(
         module_name='CrossEntropyLoss',
@@ -619,6 +623,7 @@ criterion_tests = [
         reference_fn=lambda i, t, m:
             hingeembeddingloss_reference(i, t, reduction=get_reduction(m)),
         check_sum_reduction=True,
+        test_cuda = (not TEST_WITH_ROCM)
     ),
     dict(
         module_name='HingeEmbeddingLoss',
@@ -629,6 +634,7 @@ criterion_tests = [
             hingeembeddingloss_reference(i, t, margin=0.5, reduction=get_reduction(m)),
         desc='margin',
         check_sum_reduction=True,
+        test_cuda = (not TEST_WITH_ROCM)
     ),
     dict(
         module_name='MultiLabelMarginLoss',
@@ -734,7 +740,7 @@ criterion_tests = [
         reference_fn=lambda i, t, m:
             cosineembeddingloss_reference(i[0], i[1], t, reduction=get_reduction(m)),
         check_sum_reduction=True,
-        test_cuda=(not TEST_WITH_ROCM),
+        test_cuda = (not TEST_WITH_ROCM)
     ),
     dict(
         module_name='CosineEmbeddingLoss',
@@ -745,7 +751,7 @@ criterion_tests = [
             cosineembeddingloss_reference(i[0], i[1], t, margin=0.7, reduction=get_reduction(m)),
         desc='margin',
         check_sum_reduction=True,
-        test_cuda=(not TEST_WITH_ROCM),
+        test_cuda = (not TEST_WITH_ROCM)
     ),
     dict(
         module_name='MarginRankingLoss',
@@ -754,6 +760,7 @@ criterion_tests = [
         reference_fn=lambda i, t, m:
             marginrankingloss_reference(i[0], i[1], t, reduction=get_reduction(m)),
         check_sum_reduction=True,
+        test_cuda = (not TEST_WITH_ROCM)
     ),
     dict(
         module_name='MarginRankingLoss',
@@ -764,6 +771,7 @@ criterion_tests = [
             marginrankingloss_reference(i[0], i[1], t, margin=0.5, reduction=get_reduction(m)),
         desc='margin',
         check_sum_reduction=True,
+        test_cuda = (not TEST_WITH_ROCM)
     ),
 ]
 

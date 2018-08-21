@@ -8,7 +8,7 @@ using namespace at;
 
 TEST_CASE( "broadcast", "[]" ) {
 
-  manual_seed(123, at::Backend::CPU);
+  manual_seed(123, at::kCPU);
 
   Type & T = CPU(kFloat);
 

@@ -145,6 +145,9 @@ echo "Building in $BUILD_TYPE mode"
 
 # Used to build an individual library
 function build() {
+  if [[ -z "$CMAKE_ARGS" ]]; then
+    CMAKE_ARGS=()
+  fi
   # We create a build directory for the library, which will
   # contain the cmake output
   mkdir -p build/$1
@@ -192,7 +195,7 @@ function build() {
               -DCMAKE_DEBUG_POSTFIX="" \
               -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
               ${@:2} \
-              -DCMAKE_EXPORT_COMPILE_COMMANDS=1
+              -DCMAKE_EXPORT_COMPILE_COMMANDS=1 ${CMAKE_ARGS[@]}
   ${CMAKE_INSTALL} -j"$MAX_JOBS"
   popd
 
@@ -257,6 +260,7 @@ function build_caffe2() {
 
   ${CMAKE_VERSION} $BASE_DIR \
   ${CMAKE_GENERATOR} \
+      -DPYTHON_EXECUTABLE=$PYTORCH_PYTHON \
       -DBUILDING_WITH_TORCH_LIBS=ON \
       -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
       -DBUILD_CAFFE2=$FULL_CAFFE2 \

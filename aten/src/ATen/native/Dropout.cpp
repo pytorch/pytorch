@@ -81,7 +81,7 @@ ALIAS_SPECIALIZATION(_feature_alpha_dropout, true,  true )
 } // anomymous namepsace
 
 Tensor dropout(const Tensor& input, double p, bool train) {
-  if (is_fused_kernel_acceptable(input, p)) {
+  if (train && is_fused_kernel_acceptable(input, p)) {
     return std::get<0>(input._fused_dropout(1 - p));
   }
   return _dropout<false>(input, p, train);
