@@ -2,7 +2,7 @@
 #include "catch.hpp"
 
 #include "ATen/ATen.h"
-#include "THNN/Reduction.h"
+#include "ATen/core/Reduction.h"
 
 // for TH compat test only...
 struct THFloatTensor;

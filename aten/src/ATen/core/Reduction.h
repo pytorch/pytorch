@@ -1,5 +1,4 @@
-#ifndef REDUCE_H
-#define REDUCE_H
+#pragma once
 
 namespace Reduction {
 
@@ -13,5 +12,3 @@ enum Reduction {
   END
 };
 }
-
-#endif
