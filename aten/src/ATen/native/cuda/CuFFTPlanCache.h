@@ -298,6 +298,7 @@ public:
       }
 
       // set odist, onembed, base_ostride
+#ifdef __HIP_PLATFORM_HCC__
       int odist = at::prod_intlist(output_sizes.slice(1, signal_ndim));
       std::vector<int> onembed(output_sizes.data() + 1, output_sizes.data() + signal_ndim + 1);
       int base_ostride = 1;
