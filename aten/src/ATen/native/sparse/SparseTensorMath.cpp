@@ -3,6 +3,7 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/sparse/SparseUtils.h>
+#include "ATen/Parallel.h"
 
 #include <TH/THBlasUtils.h>
 
@@ -343,7 +344,7 @@ Tensor& add_out_dense_sparse_cpu(Tensor& r, const Tensor& dense, SparseTensorRef
 // mul(SparseTensor, SparseTensor)  [broadcasts]
 // --------------------------------------------------------------------
 
-SparseTensor& mul_out_sparse_cpu(SparseTensor& r, const Tensor& t_, const Tensor& src_) {
+SparseTensor& mul_out_sparse_cpu(SparseTensor& r, const SparseTensor& t_, const SparseTensor& src_) {
   if (src_.dim() == 0) {
     return mul_out_sparse_scalar(r, t_, Scalar(src_));
   } else if (t_.dim() == 0) {
@@ -443,12 +444,43 @@ SparseTensor& mul_out_sparse_cpu(SparseTensor& r, const Tensor& t_, const Tensor
 // mul(SparseTensor, DenseTensor) -> SparseTensor
 // --------------------------------------------------------------------
 
-SparseTensor& s_mul_out_sparse_dense_cpu(SparseTensor& r, const SparseTensor& t_, const Tensor& dense) {
+template <typename scalar_t>
+void mul_out_sparse_dense_cpu_worker(
+  const Tensor& r_indices,
+  Tensor& r_values,
+  const Tensor& dense,
+  int64_t t_nnz,
+  int64_t sparseDims) {
+
+  int64_t i;
+
+  auto r_indices_accessor = r_indices.accessor<int64_t, 2>();
+  auto r_accessor = r_values.accessor<scalar_t, 1>();
+  auto dense_ptr = dense.data<scalar_t>();
+  auto strides = dense.strides();
+
+  parallel_for(0, t_nnz, 10000, [&] (int64_t begin, int64_t end) {
+    for (int64_t i = begin; i < end; i++) {
+      int64_t dense_i = 0;
+      for (int64_t j = 0; j < sparseDims; j++) {
+        dense_i += r_indices_accessor[j][i] * strides[j];
+      }
+      scalar_t dense_val = dense_ptr[dense_i];
+      r_accessor[i] = r_accessor[i] * dense_val; // results may contain zero values
+    }
+  });
+}
+
+SparseTensor& mul_out_sparse_dense_cpu(SparseTensor& r, const SparseTensor& t_, const Tensor& dense) {
+  if (dense.dim() == 0) {
+    return mul_out_sparse_scalar(r, t_, Scalar(dense));
+  }
+
   AT_CHECK(t_.sizes().equals(dense.sizes()), "mul: expected 'self' and 'other' to have same sizes, but ", t_.sizes(), " != ", dense.sizes());
   AT_ASSERT(!t_.is_cuda()); // dispatch argument
   AT_CHECK(!r.is_cuda(), "mul: expected 'out' to be CPU tensor, but got CUDA tensor");
   AT_CHECK(!dense.is_cuda(), "mul: expected 'other' to be a CPU tensor, but got a CUDA tensor");
-  AT_CHECK(t_._values().dim() == 1, "only support mul(result, sparse, dense) with sparse._values() dim = 1, but found ", t_._values().dim());
+  AT_CHECK(t_._values().dim() == 1, "only support mul(result, sparse, dense) with sparse._values() dim = 1, but found ", t_._values().dim());  // hybrid sparse is not supported
 
   if (dense.numel() == 0 || t_._nnz() == 0) {
     return r.zero_();
@@ -457,58 +489,24 @@ SparseTensor& s_mul_out_sparse_dense_cpu(SparseTensor& r, const SparseTensor& t_
   SparseTensor t = t_.coalesce();
 
   int64_t sparseDims = t._sparseDims();
-  auto strides = dense.strides();
   int64_t t_nnz = t._nnz();
-  LongTensor t_indices = t._indices();
-  Tensor t_values = t._values();
-  LongTensor r_indices = t_indices.type().tensor({sparseDims, t_nnz});
-  Tensor r_values = _new_values_with_size_of(t_values, t_nnz).zero_();
-  r.resize_as_(t);
-  _get_sparse_impl(r)->set_indices_and_values(r_indices, r_values);
-
-  int64_t r_i = 0;
-  auto t_indices_accessor = t_indices.accessor<int64_t, 2>();
-  auto r_indices_accessor = r_indices.accessor<int64_t, 2>();
+  // LongTensor t_indices = t._indices();
+  // Tensor t_values = t._values();
+  LongTensor r_indices = t._indices().clone();
+  Tensor r_values = t._values().clone();
 
   AT_DISPATCH_ALL_TYPES(
-      r_values.type(), "mul_out_sparse", [&] {
-        auto r_accessor = r_values.accessor<scalar_t, 1>();
-        auto t_accessor = t_values.accessor<scalar_t, 1>();
-        auto dense_ptr = dense.data<scalar_t>();
-
-        for (int64_t i = 0; i < t_nnz; i++) {
-          // compute index of dense wrt sparse indices
-          int64_t dense_i = 0;
-          for (int64_t j = 0; j < sparseDims; j++) {
-            dense_i += t_indices_accessor[j][i] * strides[j];
-          }
-
-          scalar_t dense_val = dense_ptr[dense_i];
-          if (static_cast<double>(dense_val) == 0.0) continue;
-
-          r_accessor[r_i] = t_accessor[i] * dense_val;
-          for (int64_t k = 0; k < sparseDims; k++) {
-            r_indices_accessor[k][r_i] = t_indices_accessor[k][i];
-          }
-          r_i ++;
-        }
-      }
+    r_values.type(), "mul_out_sparse", [&] {
+      mul_out_sparse_dense_cpu_worker<scalar_t>(r_indices, r_values, dense, t_nnz, sparseDims);
+    }
   );
 
-  _get_sparse_impl(r)->set_nnz(r_i);
+  r.resize_as_(t);
+  _get_sparse_impl(r)->set_indices_and_values(r_indices, r_values);
+  _get_sparse_impl(r)->set_nnz(t_nnz);
   _get_sparse_impl(r)->set_coalesced(true);
 
   return r;
-}
-
-SparseTensor s_mul_sparse_dense_cpu(const SparseTensor& t, const Tensor& dense) {
-  SparseTensor r = t.type().tensor();
-  s_mul_out_sparse_dense_cpu(r, t, dense);
-  return r;
-}
-
-SparseTensor& s_mul_sparse_dense_cpu_(SparseTensor& t, const Tensor& dense) {
-  return s_mul_out_sparse_dense_cpu(t, t, dense);
 }
 
 // --------------------------------------------------------------------

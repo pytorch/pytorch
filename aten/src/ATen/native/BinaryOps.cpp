@@ -71,7 +71,12 @@ Tensor& mul_out(Tensor& result, const Tensor& self, const Tensor& other) {
     if (!result.defined()) {
       result = self.type().tensor();
     }
-    return at::_sparse_mul_out(result, self, other);
+    if (self.is_sparse() && other.is_sparse()) {
+      return at::_sparse_mul_out(result, self, other);
+    }
+    else {
+      return at::_sparse_dense_mul_out(result, self, other);
+    }
   }
   auto iter = TensorIterator::binary_op(result, self, other);
   mul_stub(iter->device_type(), *iter);

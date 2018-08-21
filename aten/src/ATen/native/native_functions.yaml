@@ -1523,6 +1523,12 @@
     SparseCPU: mul_out_sparse_scalar
     SparseCUDA: mul_out_sparse_scalar
 
+- func: _sparse_dense_mul_out(Tensor result, Tensor self, Tensor other) -> Tensor
+  variants: function
+  dispatch:
+    SparseCPU: mul_out_sparse_dense_cpu
+    SparseCUDA: mul_out_sparse_dense_cuda
+
 - func: split(Tensor self, int64_t split_size, int64_t dim=0) -> TensorList
 
 - func: split_with_sizes(Tensor self, IntList split_sizes, int64_t dim=0) -> TensorList
@@ -1859,12 +1865,6 @@
 - func: sub(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
 - func: sub_(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
   variants: method
-
-- func: s_native_sparse_dense_mul_(Tensor self, Tensor other) -> Tensor
-  variants: function
-  dispatch:
-    SparseCPU: s_mul_sparse_dense_cpu_
-    SparseCUDA: s_mul_sparse_dense_cuda_
 
 - func: s_native_addmm_out(Tensor result, Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   variants: function

@@ -470,14 +470,9 @@
   self: index_select_backward(grad, dim, result1, self.sizes(), keepdim)
 
 - name: mul(Tensor self, Tensor other)
-  self: grad * other
-  other: grad * self
+  self, other: mul_backward(grad, self, other)
 
 - name: mul(Tensor self, Scalar other)
-
-- name: s_native_sparse_dense_mul(Tensor self, Tensor other)
-  self: grad * other
-  other: grad * self
 
 - name: mv(Tensor self, Tensor vec)
   self: grad.ger(vec)

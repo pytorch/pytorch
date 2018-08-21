@@ -1961,6 +1961,18 @@ Tensor log1p_backward(const Tensor& grad, const Tensor& self) {
   return grad / (self + 1);
 }
 
+std::tuple<Tensor, Tensor> mul_backward(const Tensor& grad, const Tensor self, const Tensor other) {
+  if (self.is_sparse()) {
+    AT_ERROR(
+      "mul(Sparse, Dense) is made to be non-differentiable since ",
+      "local gradient of non-nnz at the sparse tensor are all 1s ",
+      "and it makes the tensor dense. Use a sparse_mul() operation ",
+      "which preserves sparsity of gradients, or report a bug if you "
+      "think this is an error.");
+  }
+  return std::tuple<Tensor, Tensor>(grad * other, grad * self);
+}
+
 } // anonymous namespace
 
 ${autograd_function_definitions}

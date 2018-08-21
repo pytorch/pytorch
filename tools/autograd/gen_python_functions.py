@@ -22,10 +22,9 @@ SKIP_PYTHON_BINDINGS = [
     '.*_forward_out', '_unsafe_view', 'tensor',
     'sparse_coo_tensor', 'th_sparse_coo_tensor', 'native_sparse_coo_tensor',
     '_arange.*', '_range.*', '_linspace.*', '_logspace.*',
-    '_sparse_add.*', '_sparse_div.*', '_sparse_mul.*', '_sparse_sub.*',
-    'index',
-    '_indexCopy_', 'max_values', 'min_values', 'argmax', 'argmin',
-    '_cumsum.*', '_cumprod.*', '_sum.*', '_prod.*', '_th_.*',
+    '_sparse_add.*', '_sparse_div.*', '_sparse_mul.*', '_sparse_dense_mul.*',
+    '_sparse_sub.*', 'index', '_indexCopy_', 'max_values', 'min_values', 'argmax',
+    'argmin', '_cumsum.*', '_cumprod.*', '_sum.*', '_prod.*', '_th_.*',
     'arange.*', 'range.*', '_gesv.*', '_getri.*', 'slice',
     '_local_scalar', '_local_scalar_dense',
     'max_pool1d', 'max_pool2d', 'max_pool3d'

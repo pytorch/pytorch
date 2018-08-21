@@ -424,26 +424,26 @@ class TestSparse(TestCase):
         test_shape(4, [3, 17, 19, 5])
         test_shape(2, [3, 17, 19, 5])
 
-    def test_mul_autograd(self):
-        if self.is_cuda:
-            i = torch.LongTensor([[0, 0, 1, 2, 2], [1, 2, 1, 0, 1]]).cuda()
-            v = torch.DoubleTensor([3, 3, 4, 1, 2]).cuda()
-            sparse_mat = torch.cuda.sparse.DoubleTensor(i, v, torch.Size([3, 3]))
-            dense_mat = torch.ones(3, 3).cuda()
-            x = torch.cuda.sparse.DoubleTensor(i, v, torch.Size([3, 3]))
-        else:
-            i = torch.LongTensor([[0, 0, 1, 2, 2], [1, 2, 1, 0, 1]])
-            v = torch.DoubleTensor([3, 3, 4, 1, 2])
-            sparse_mat = torch.sparse.DoubleTensor(i, v, torch.Size([3, 3]))
-            dense_mat = torch.ones(3, 3)
-            x = torch.sparse.DoubleTensor(i, v, torch.Size([3, 3]))
-
-        sparse_var = sparse_mat.requires_grad_()
-        dense_var = dense_mat.requires_grad_()
-
-        y = torch.mul(sparse_var, dense_var)
-        y.backward(x)
-        self.assertEqual(sparse_var.grad.to_dense(), x.to_dense())
+    # def test_mul_autograd(self):
+    #     if self.is_cuda:
+    #         i = torch.LongTensor([[0, 0, 1, 2, 2], [1, 2, 1, 0, 1]]).cuda()
+    #         v = torch.DoubleTensor([3, 3, 4, 1, 2]).cuda()
+    #         sparse_mat = torch.cuda.sparse.DoubleTensor(i, v, torch.Size([3, 3]))
+    #         dense_mat = torch.ones(3, 3).cuda()
+    #         x = torch.cuda.sparse.DoubleTensor(i, v, torch.Size([3, 3]))
+    #     else:
+    #         i = torch.LongTensor([[0, 0, 1, 2, 2], [1, 2, 1, 0, 1]])
+    #         v = torch.DoubleTensor([3, 3, 4, 1, 2])
+    #         sparse_mat = torch.sparse.DoubleTensor(i, v, torch.Size([3, 3]))
+    #         dense_mat = torch.ones(3, 3)
+    #         x = torch.sparse.DoubleTensor(i, v, torch.Size([3, 3]))
+    #
+    #     sparse_var = sparse_mat.requires_grad_()
+    #     dense_var = dense_mat.requires_grad_()
+    #
+    #     y = torch.mul(sparse_var, dense_var)
+    #     y.backward(x)
+    #     self.assertEqual(sparse_var.grad.to_dense(), x.to_dense())
 
     @cpu_only
     def test_mm(self):
