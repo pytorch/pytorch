@@ -1,8 +1,4 @@
-if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
-  if (NOT BUILD_ATEN)
-    return()
-  endif()
-else()
+if (NOT CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   cmake_minimum_required(VERSION 3.0 FATAL_ERROR)
   project(ATen CXX C)
   include(CMakeDependentOption)
@@ -14,9 +10,10 @@ else()
       USE_CUDNN "Use cuDNN" ON
       "USE_CUDA" OFF)
   option(ATEN_NO_TEST "Do not build ATen test binaries" OFF)
-
-  # Flag for shared dependencies
-  set(BUILD_ATEN ON)
+else()
+  if (BUILD_ATEN_MOBILE)
+    return()
+  endif()
 endif()
 
 # Find modules
