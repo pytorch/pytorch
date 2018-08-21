@@ -183,9 +183,104 @@ static void prod_kernel_impl(Tensor& result, const Tensor& self, at::optional<in
   });
 }
 
+template<typename scalar_t>
+struct NormReduction {
+  static void apply(Tensor& res, const Tensor& self, Scalar p, at::optional<int64_t> dim) {
+    auto out_ = res.data<scalar_t>();
+    auto data_ = self.data<scalar_t>();
+    auto numel = self.numel();
+    float pval = 0.0;
+    if (p.isIntegral()){
+      pval = p.to<int64_t>();
+    } else if (p.isFloatingPoint()) {
+      pval = p.to<float>();
+    }
+    if (!dim.has_value()) {
+      *out_ = reduce_all(data_, numel,  pval);
+      return;
+    }
+    int64_t n = self.size(*dim);
+    int64_t stride = self.stride(*dim);
+    // A contiguous tensor does not need to hold a meaningful stride
+    // if the corresponding size is 1
+    if (n == 1) {
+      stride = 1;
+      for (int64_t i = self.ndimension() - 1; i > *dim; i--) {
+        stride *= self.size(i);
+      }
+    }
+    int64_t batch = numel / n;
+    parallel_for(0, batch, 1, [=](int64_t begin, int64_t end) {
+      for (int64_t bi = begin; bi < end; bi++) {
+        int64_t b = bi / stride;
+        int64_t i = bi % stride;
+        const scalar_t* data = &data_[b * n * stride + i];
+        out_[bi] = norm_calc(data, n, stride, pval);
+      }
+    });
+  }
+
+  static scalar_t reduce_all(const scalar_t* data_, int64_t size,  float pval) {
+    scalar_t sum = parallel_reduce(
+      0,
+      size,
+      internal::GRAIN_SIZE,
+      (scalar_t)0,
+      [=](int64_t begin, int64_t end, scalar_t init) {
+        const scalar_t* data = &data_[begin];
+        int64_t n = end - begin;
+        scalar_t result = norm_calc(data, n, 1, pval);
+        return result;
+      },
+      std::plus<scalar_t>());
+    return sum;
+  }
+
+  static scalar_t norm_calc(const scalar_t* data, int64_t n, int64_t stride, float pval) {
+        scalar_t result = 0.0;
+        if (pval == 0) {
+          for (int64_t k = 0; k < n; k++) {
+            result += (data[k * stride] != 0.0);
+          }
+        } else if (pval == 1) {
+          for (int64_t k = 0; k < n; k++) {
+            result += std::abs(data[k * stride]);
+          }
+        } else if (pval == 2) {
+          for (int64_t k = 0; k < n; k++) {
+            result += data[k * stride] * data[k * stride];
+          }
+          result = std::sqrt(result);
+        } else if (pval == 3) {
+          for (int64_t k = 0; k < n; k++) {
+            result += std::abs(data[k * stride] * data[k * stride] * data[k * stride]);
+          }
+          result = std::pow(result, 1.0/3);
+        } else if (std::isinf(pval)) {
+          for (int64_t k = 0; k < n; k++) {
+            result = std::abs(data[k * stride]) > result ? std::abs(data[k * stride]) : result;
+          }
+          result = result;
+        } else {
+          for (int64_t k = 0; k < n; k++) {
+            result += std::pow(std::abs(data[k * stride]), pval);
+          }
+          result = std::pow(result, 1.0/pval);
+        }
+        return result;
+  }
+};
+
+static void norm_kernel_impl(Tensor& result, const Tensor& self, Scalar p, at::optional<int64_t> dim) {
+  AT_DISPATCH_FLOATING_TYPES(self.type(), "norm", [&] {
+    NormReduction<scalar_t>::apply(result, self, p, dim);
+  });
+}
+
 }  // anonymous namespace
 
 REGISTER_DISPATCH(sum_kernel, &sum_kernel_impl);
 REGISTER_DISPATCH(prod_kernel, &prod_kernel_impl);
+REGISTER_DISPATCH(norm_kernel, &norm_kernel_impl);
 
 }}  // namespace at::native
