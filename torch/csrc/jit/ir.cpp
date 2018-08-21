@@ -5,6 +5,7 @@
 #include "torch/csrc/autograd/function.h"
 #include "torch/csrc/jit/constants.h"
 #include "torch/csrc/jit/assertions.h"
+#include "torch/csrc/jit/script/compiler.h"
 
 #include <iostream>
 #include <unordered_map>
@@ -617,6 +618,15 @@ void Node::dump() const {
 
 void Node::findSchema() const {
   schema_ = &getOperatorFor(this).schema();
+}
+
+inline const SourceRange& fakeRange() {
+  static SourceRange range(std::make_shared<std::string>("<internally-created-node>"), 0, 1);
+  return range;
+}
+
+Value* Graph::insert(Symbol opname, at::ArrayRef<NamedValue> args, at::ArrayRef<NamedValue> kwargs) {
+  return script::emitBuiltinCall(fakeRange(), *this, opname, args, kwargs, /*required=*/true);
 }
 
 PythonOp* defaultAllocPythonOp(Graph*g) {

@@ -241,8 +241,9 @@ std::unique_ptr<repr::NeuralNetOperator> convertToNeuralNetOperator(
 /// \param net The caffe2 protobuf NetDef
 /// \param blobMap [optional][output] A pointer to a blobMap to be populated with all the output blobs of the NetDef by name->NodeRef
 repr::NNModule convertToNNModule(caffe2::NetDef &net, std::unordered_map<std::string, repr::NNGraph::NodeRef>* blobMapOut) {
-  repr::NNGraph dfg;
-  repr::NNCFGraph cfg;
+  repr::NNModule module;
+  repr::NNGraph& dfg = module.dataFlow;
+  repr::NNCFGraph& cfg = module.controlFlow;
   /// \brief We keep track of the producer of the blob.
   /// Because Caffe2 Nets are really just ordered operations
   /// we can just keep track of the most recent producer of
@@ -250,6 +251,11 @@ repr::NNModule convertToNNModule(caffe2::NetDef &net, std::unordered_map<std::st
   /// come by. If a new operator produces the blob we simply
   /// replace it in this map.
   std::unordered_map<std::string, repr::NNGraph::NodeRef> blobMap;
+
+  std::unordered_set<std::string> externalInputNames;
+  for (const auto& inputName : net.external_input()) {
+    externalInputNames.insert(inputName);
+  }
 
   /// \brief For the construction of the control flow graph we keep track
   /// of a current basic block, which we split up as we come accross control
@@ -267,6 +273,10 @@ repr::NNModule convertToNNModule(caffe2::NetDef &net, std::unordered_map<std::st
         auto tensor = util::make_unique<repr::Tensor>(input);
         blobMap[input] =
             dfg.createNode(unique_dyn_cast<repr::NeuralNetData>(tensor));
+        if (externalInputNames.count(input)) {
+          module.inputs.insert(blobMap[input]);
+          externalInputNames.erase(input);
+        }
       }
 
       auto tensorNode = blobMap[input];
@@ -287,9 +297,12 @@ repr::NNModule convertToNNModule(caffe2::NetDef &net, std::unordered_map<std::st
     currentBasicBlock->pushInstructionNode(opNode);
   }
 
-  repr::NNModule module;
-  module.dataFlow = std::move(dfg);
-  module.controlFlow = std::move(cfg);
+  for (const auto& outputName : net.external_output()) {
+    CAFFE_ENFORCE(
+        blobMap.count(outputName), "NetDef has ill-formed external_output");
+    module.outputs.insert(blobMap[outputName]);
+  }
+
   if (blobMapOut) {
     *blobMapOut = blobMap;
   }
@@ -327,6 +340,34 @@ caffe2::OperatorDef convertToOperatorDef(
 caffe2::NetDef convertToCaffe2Proto(repr::NNModule &m) {
   auto predictNet = caffe2::NetDef();
   return convertToCaffe2Proto(m, predictNet);
+}
+
+std::vector<std::string> mergeExternalTensors(
+    const std::unordered_set<repr::NNGraph::NodeRef>& currExternal,
+    const std::vector<std::string>& oldExternal) {
+  std::vector<std::string> out;
+
+  // Maximally preserve the order of external inputs and outputs.
+  std::unordered_set<std::string> newExternal;
+  for (const auto& tensorNode : currExternal) {
+    CAFFE_ENFORCE(
+        repr::nn::is<repr::NeuralNetData>(tensorNode),
+        "A non-tensor node was added to external inputs/outputs of the NNModule");
+    auto name = repr::nn::get<repr::NeuralNetData>(tensorNode)->getName();
+    newExternal.insert(name);
+  }
+
+  for (const auto& tensorName : oldExternal) {
+    if (newExternal.count(tensorName)) {
+      out.emplace_back(tensorName);
+      newExternal.erase(tensorName);
+    }
+  }
+  for (const auto& tensorName : newExternal) {
+    out.emplace_back(tensorName);
+  }
+
+  return out;
 }
 
 caffe2::NetDef convertToCaffe2Proto(repr::NNModule &m, const caffe2::NetDef& oldNet) {
@@ -387,6 +428,31 @@ caffe2::NetDef convertToCaffe2Proto(repr::NNModule &m, const caffe2::NetDef& old
       // Save the operator to the net.
       *predictNet.add_op() = op;
     }
+  }
+
+  // Maximally preserve the order of external inputs and outputs.
+  std::vector<std::string> oldExternalInputs;
+  std::vector<std::string> oldExternalOutputs;
+
+  for (const auto& inputName : predictNet.external_input()) {
+    oldExternalInputs.emplace_back(inputName);
+  }
+  for (const auto& outputName : predictNet.external_output()) {
+    oldExternalOutputs.emplace_back(outputName);
+  }
+
+  auto newExternalInputs = mergeExternalTensors(m.inputs, oldExternalInputs);
+  auto newExternalOutputs = mergeExternalTensors(m.outputs, oldExternalOutputs);
+
+  predictNet.clear_external_input();
+  predictNet.clear_external_output();
+
+  for (const auto& inputName : newExternalInputs) {
+    predictNet.add_external_input(inputName);
+  }
+
+  for (const auto& outputName : newExternalOutputs) {
+    predictNet.add_external_output(outputName);
   }
 
   return predictNet;

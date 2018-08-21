@@ -11,7 +11,7 @@
 #include <unordered_map>
 #include <unordered_set>
 
-constexpr int kKnownOpsetVersion = 6;
+constexpr int kKnownOpsetVersion = 7;
 
 namespace caffe2 {
 namespace onnx {

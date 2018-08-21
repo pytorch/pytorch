@@ -666,11 +666,10 @@ THC_reduceDimIndex(THCState *state,
   THCTensor_preserveReduceDimSemantics(
       state, tgt2_, src_dims, dimension, keepdim);
 
-  THLongStorage *dim = THCTensor_newSizeOf(state, src);
-  THLongStorage_set(dim, dimension, 1);
-  THCTensor_resize(state, tgt1_, dim, NULL);
-  THCTensor_resize(state, tgt2_, dim, NULL);
-  THLongStorage_free(dim);
+  std::vector<int64_t> dim = THTensor_sizesLegacyNoScalars(src);
+  dim[dimension] = 1;
+  THCTensor_resize(state, tgt1_, dim, {});
+  THCTensor_resize(state, tgt2_, dim, {});
 
   TensorTypeK *tgt1 = (TensorTypeK*)THCTensor_newContiguous<ScalarTypeK>(state, tgt1_);
   TensorTypeIndex *tgt2 = (TensorTypeIndex*)THCTensor_newContiguous<ScalarTypeIndex>(state, tgt2_);

@@ -155,16 +155,14 @@ function(caffe2_protobuf_generate_cpp_py srcs_var hdrs_var python_var)
     list(APPEND ${hdrs_var} "${CMAKE_CURRENT_BINARY_DIR}/${fil_we}.pb.h")
     list(APPEND ${python_var} "${CMAKE_CURRENT_BINARY_DIR}/${fil_we}_pb2.py")
 
+    # Add CAFFE2_API prefix to protobuf classes and methods in all cases
+    set(DLLEXPORT_STR "dllexport_decl=CAFFE2_API:")
+
     # Note: the following depends on PROTOBUF_PROTOC_EXECUTABLE. This
     # is done to make sure protoc is built before attempting to
     # generate sources if we're using protoc from the third_party
     # directory and are building it as part of the Caffe2 build. If
     # points to an existing path, it is a no-op.
-    if (MSVC)
-      set(DLLEXPORT_STR "dllexport_decl=CAFFE2_API:")
-    else()
-      set(DLLEXPORT_STR "")
-    endif()
 
     if (${CAFFE2_LINK_LOCAL_PROTOBUF})
       # We need to rewrite the pb.h files to route GetEmptyStringAlreadyInited

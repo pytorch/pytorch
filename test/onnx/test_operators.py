@@ -1,17 +1,10 @@
 from test_pytorch_common import TestCase, run_tests, skipIfNoLapack, flatten
-import test_onnx_common
 
 import torch
 import torch.onnx
 from torch.autograd import Variable, Function
 from torch.nn import Module
 import torch.nn as nn
-
-import onnx
-import onnx.checker
-import onnx.helper
-
-import google.protobuf.text_format
 
 import itertools
 import io
@@ -23,12 +16,25 @@ import os
 import shutil
 import sys
 import common
-from onnx import numpy_helper
-
-_onnx_test = False
 
 
-def export_to_string(model, inputs, *args, **kwargs):
+'''Usage: python test/onnx/test_operators.py [--no-onnx] [--produce-onnx-test-data]
+          --no-onnx: no onnx python dependence
+          --produce-onnx-test-data: generate onnx test data
+'''
+
+_onnx_test = False  # flag to produce onnx test cases.
+_onnx_dep = True  # flag to import onnx package.
+
+
+def export_to_pbtxt(model, inputs, *args, **kwargs):
+    return torch.onnx.export_to_pretty_string(
+        model, inputs, None, verbose=False, google_printer=True,
+        *args, **kwargs)
+
+
+def export_to_pb(model, inputs, *args, **kwargs):
+    kwargs['operator_export_type'] = torch.onnx.OperatorExportTypes.ONNX
     f = io.BytesIO()
     with torch.no_grad():
         torch.onnx.export(model, inputs, f, *args, **kwargs)
@@ -47,54 +53,56 @@ class FuncModule(Module):
 
 class TestOperators(TestCase):
 
-    def assertONNXExpected(self, binary_pb, subname=None):
-        model_def = onnx.ModelProto.FromString(binary_pb)
-        onnx.checker.check_model(model_def)
-        # doc_string contains stack trace in it, strip it
-        onnx.helper.strip_doc_string(model_def)
-        self.assertExpected(google.protobuf.text_format.MessageToString(model_def, float_format='.15g'), subname)
-        return model_def
-
     def assertONNX(self, f, args, params=tuple(), **kwargs):
         if isinstance(f, nn.Module):
             m = f
         else:
             m = FuncModule(f, params)
-        onnx_model_pb = export_to_string(m, args, **kwargs)
-        model_def = self.assertONNXExpected(onnx_model_pb)
-        if _onnx_test:
-            test_function = inspect.stack()[1][0].f_code.co_name
-            test_name = test_function[0:4] + "_operator" + test_function[4:]
-            output_dir = os.path.join(test_onnx_common.pytorch_operator_dir, test_name)
-            # Assume:
-            #     1) the old test should be delete before the test.
-            #     2) only one assertONNX in each test, otherwise will override the data.
-            assert not os.path.exists(output_dir), "{} should not exist!".format(output_dir)
-            os.makedirs(output_dir)
-            with open(os.path.join(output_dir, "model.onnx"), 'wb') as file:
-                file.write(model_def.SerializeToString())
-            data_dir = os.path.join(output_dir, "test_data_set_0")
-            os.makedirs(data_dir)
-            if isinstance(args, Variable):
-                args = (args,)
-            for index, var in enumerate(flatten(args)):
-                tensor = numpy_helper.from_array(var.data.numpy())
-                with open(os.path.join(data_dir, "input_{}.pb".format(index)), 'wb') as file:
-                    file.write(tensor.SerializeToString())
-            outputs = m(*args)
-            if isinstance(outputs, Variable):
-                outputs = (outputs,)
-            for index, var in enumerate(flatten(outputs)):
-                tensor = numpy_helper.from_array(var.data.numpy())
-                with open(os.path.join(data_dir, "output_{}.pb".format(index)), 'wb') as file:
-                    file.write(tensor.SerializeToString())
+        onnx_model_pbtxt = export_to_pbtxt(m, args, **kwargs)
+        subname = kwargs.pop('subname', None)
+        self.assertExpected(onnx_model_pbtxt, subname)
+        if _onnx_dep:
+            onnx_model_pb = export_to_pb(m, args, **kwargs)
+            import onnx
+            import onnx.checker
+            import onnx.numpy_helper
+            import test_onnx_common
+            model_def = onnx.ModelProto.FromString(onnx_model_pb)
+            onnx.checker.check_model(model_def)
+
+            if _onnx_test:
+                test_function = inspect.stack()[1][0].f_code.co_name
+                test_name = test_function[0:4] + "_operator" + test_function[4:]
+                output_dir = os.path.join(test_onnx_common.pytorch_operator_dir, test_name)
+                # Assume:
+                #     1) the old test should be delete before the test.
+                #     2) only one assertONNX in each test, otherwise will override the data.
+                assert not os.path.exists(output_dir), "{} should not exist!".format(output_dir)
+                os.makedirs(output_dir)
+                with open(os.path.join(output_dir, "model.onnx"), 'wb') as file:
+                    file.write(model_def.SerializeToString())
+                data_dir = os.path.join(output_dir, "test_data_set_0")
+                os.makedirs(data_dir)
+                if isinstance(args, Variable):
+                    args = (args,)
+                for index, var in enumerate(flatten(args)):
+                    tensor = onnx.numpy_helper.from_array(var.data.numpy())
+                    with open(os.path.join(data_dir, "input_{}.pb".format(index)), 'wb') as file:
+                        file.write(tensor.SerializeToString())
+                outputs = m(*args)
+                if isinstance(outputs, Variable):
+                    outputs = (outputs,)
+                for index, var in enumerate(flatten(outputs)):
+                    tensor = onnx.numpy_helper.from_array(var.data.numpy())
+                    with open(os.path.join(data_dir, "output_{}.pb".format(index)), 'wb') as file:
+                        file.write(tensor.SerializeToString())
 
     def assertONNXRaises(self, err, f, args, params=tuple(), **kwargs):
         if isinstance(f, nn.Module):
             m = f
         else:
             m = FuncModule(f, params)
-        self.assertExpectedRaises(err, lambda: export_to_string(m, args, **kwargs))
+        self.assertExpectedRaises(err, lambda: export_to_pbtxt(m, args, **kwargs))
 
     def assertONNXRaisesRegex(self, err, reg, f, args, params=tuple(), **kwargs):
         if isinstance(f, nn.Module):
@@ -102,7 +110,7 @@ class TestOperators(TestCase):
         else:
             m = FuncModule(f, params)
         with self.assertRaisesRegex(err, reg):
-            export_to_string(m, args, **kwargs)
+            export_to_pbtxt(m, args, **kwargs)
 
     def test_basic(self):
         x = Variable(torch.Tensor([0.4]), requires_grad=True)
@@ -208,7 +216,7 @@ class TestOperators(TestCase):
         # NB: Don't use expect test here, the type error wobbles depending
         # on Python version
         with self.assertRaisesRegex(TypeError, "occurred when translating MyFun"):
-            export_to_string(FuncModule(MyFun().apply), (x, y))
+            export_to_pbtxt(FuncModule(MyFun().apply), (x, y))
 
     # TODO: Do an nn style test for these
     def test_batchnorm(self):
@@ -350,6 +358,30 @@ class TestOperators(TestCase):
         x = Variable(torch.randn(3, 4), requires_grad=True)
         self.assertONNX(lambda x: x.exp(), x)
 
+    def test_sin(self):
+        x = Variable(torch.randn(3, 4), requires_grad=True)
+        self.assertONNX(lambda x: x.sin(), x)
+
+    def test_cos(self):
+        x = Variable(torch.randn(3, 4), requires_grad=True)
+        self.assertONNX(lambda x: x.cos(), x)
+
+    def test_tan(self):
+        x = Variable(torch.randn(3, 4), requires_grad=True)
+        self.assertONNX(lambda x: x.tan(), x)
+
+    def test_asin(self):
+        x = Variable(torch.rand(3, 4), requires_grad=True)
+        self.assertONNX(lambda x: x.asin(), x)
+
+    def test_acos(self):
+        x = Variable(torch.rand(3, 4), requires_grad=True)
+        self.assertONNX(lambda x: x.acos(), x)
+
+    def test_atan(self):
+        x = Variable(torch.randn(3, 4), requires_grad=True)
+        self.assertONNX(lambda x: x.atan(), x)
+
     def test_flatten(self):
         # Flatten is a special case of Reshape when the output is a 2-D tensor.
         x = Variable(torch.randn(1, 2, 3, 4), requires_grad=True)
@@ -454,11 +486,17 @@ class TestOperators(TestCase):
 
 
 if __name__ == '__main__':
-    onnx_test_flag = '--onnx-test'
+    no_onnx_dep_flag = '--no-onnx'
+    _onnx_dep = no_onnx_dep_flag not in common.UNITTEST_ARGS
+    if no_onnx_dep_flag in common.UNITTEST_ARGS:
+        common.UNITTEST_ARGS.remove(no_onnx_dep_flag)
+    onnx_test_flag = '--produce-onnx-test-data'
     _onnx_test = onnx_test_flag in common.UNITTEST_ARGS
     if onnx_test_flag in common.UNITTEST_ARGS:
         common.UNITTEST_ARGS.remove(onnx_test_flag)
     if _onnx_test:
+        _onnx_dep = True
+        import test_onnx_common
         for d in glob.glob(os.path.join(test_onnx_common.pytorch_operator_dir, "test_operator_*")):
             shutil.rmtree(d)
     run_tests()

@@ -32,7 +32,7 @@ Context::Context()
   THSetDefaultErrorHandler(errorHandler,nullptr);
   THSetDefaultArgErrorHandler(argErrorHandler,nullptr);
 
-  generator_registry[static_cast<int>(Backend::CPU)]
+  generator_registry[static_cast<int>(DeviceType::CPU)]
     .reset(new CPUGenerator(this));
   Type::registerCPU(this);
 }

@@ -20,17 +20,8 @@ install_ubuntu() {
                    miopen-hip \
                    miopengemm \
                    rocblas \
-                   hipblas \
-                   rocrand \
-                   hcsparse \
                    rocm-profiler \
                    cxlactivitylogger
-
-    pushd $HOME
-    # install hcrng
-    curl https://s3.amazonaws.com/ossci-linux/hcrng-master-a8c6a0b-Linux.deb -o hcrng.deb
-    dpkg -i hcrng.deb
-    rm hcrng.deb
 
     # hotfix a bug in hip's cmake files, this has been fixed in
     # https://github.com/ROCm-Developer-Tools/HIP/pull/516 but for
@@ -59,10 +50,17 @@ install_hip_thrust() {
 }
 
 # This will be removed after merging an upcoming PR.
-install_hcrng() {
+install_hcsparse() {
     mkdir -p /opt/rocm/debians
-    curl https://s3.amazonaws.com/ossci-linux/hcrng-master-a8c6a0b-Linux.deb -o /opt/rocm/debians/hcrng.deb 
-    dpkg -i /opt/rocm/debians/hcrng.deb
+    curl https://s3.amazonaws.com/ossci-linux/hcsparse-master-907a505-Linux.deb -o /opt/rocm/debians/hcsparse.deb 
+    dpkg -i /opt/rocm/debians/hcsparse.deb
+}
+
+# Install an updated version of rocRand that's PyTorch compatible.
+install_rocrand() {
+    mkdir -p /opt/rocm/debians
+    curl https://s3.amazonaws.com/ossci-linux/rocrand-1.8.0-Linux.deb -o /opt/rocm/debians/rocrand.deb 
+    dpkg -i /opt/rocm/debians/rocrand.deb
 }
 
 # Install Python packages depending on the base OS
@@ -76,4 +74,5 @@ else
 fi
 
 install_hip_thrust
-install_hcrng
+install_rocrand
+install_hcsparse

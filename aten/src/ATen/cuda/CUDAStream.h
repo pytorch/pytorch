@@ -15,11 +15,12 @@
 * The ATen Context interface should be preferred when working with streams.
 */
 
-// Forward-declares internals
 struct CUDAStreamInternals;
 
 namespace at {
 namespace cuda {
+
+struct CUDAEvent;
 
 namespace detail {
 
@@ -101,6 +102,8 @@ struct CUDAStream {
   int64_t device() const { return detail::CUDAStream_device(internals_); }
   cudaStream_t stream() const { return detail::CUDAStream_stream(internals_); }
   CUDAStreamInternals* internals() const { return internals_; }
+
+  void synchronize_with(const CUDAEvent& event) const;
 
 private:
   CUDAStreamInternals* internals_ = nullptr;

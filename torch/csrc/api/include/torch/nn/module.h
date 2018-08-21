@@ -205,7 +205,7 @@ std::shared_ptr<ModuleType> Module::register_module(
     std::string name,
     std::shared_ptr<ModuleType> module) {
   auto& base_module = children_.insert(std::move(name), std::move(module));
-  return std::static_pointer_cast<ModuleType>(base_module);
+  return std::dynamic_pointer_cast<ModuleType>(base_module);
 }
 
 template <typename ModuleType>
@@ -223,11 +223,12 @@ void Module::to_impl(Ts&&... ts) {
   }
   // Then move every parameter to the new dtype/device.
   for (auto& parameter : parameters_) {
-    at::detail::set_data(*parameter, parameter->data().to(ts...));
+    at::detail::set_data(
+        *parameter, autograd::Variable(*parameter).data().to(ts...));
   }
   // Then move every buffer to the new dtype/device.
   for (auto& buffer : buffers_) {
-    at::detail::set_data(*buffer, buffer->data().to(ts...));
+    at::detail::set_data(*buffer, autograd::Variable(*buffer).data().to(ts...));
   }
 }
 

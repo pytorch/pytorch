@@ -25,7 +25,7 @@ public:
     return type_registry[static_cast<int>(p)][static_cast<int>(s)].get();
   }
   Type * getTypeOpt(Backend p, ScalarType s) {
-    initCUDAIfNeeded(p);
+    if (p != Backend::Undefined) initCUDAIfNeeded(backendToDeviceType(p));
     auto type = getTypeRaw(p, s);
 
     if(!type) {
@@ -42,11 +42,11 @@ public:
     if (!type) AT_ERROR(toString(p), toString(s), "Type is not enabled.");
     return *type;
   }
-  Generator & defaultGenerator(Backend p) {
-    initCUDAIfNeeded(p);
-    auto & generator = generator_registry[static_cast<int>(p)];
+  Generator & defaultGenerator(DeviceType device_type) {
+    initCUDAIfNeeded(device_type);
+    auto & generator = generator_registry[static_cast<int>(device_type)];
     if(!generator)
-      AT_ERROR(toString(p), " backend type not enabled.");
+      AT_ERROR(DeviceTypeName(device_type), " backend type not enabled.");
     return *generator;
   }
   bool hasMKL() const;
@@ -64,7 +64,7 @@ public:
   THCState* lazyInitCUDA() {
     std::call_once(thc_init,[&] {
       thc_state = detail::getCUDAHooks().initCUDA();
-      generator_registry[static_cast<int>(Backend::CUDA)] =
+      generator_registry[static_cast<int>(DeviceType::CUDA)] =
         detail::getCUDAHooks().initCUDAGenerator(this);
       detail::getCUDAHooks().registerCUDATypes(this);
     });
@@ -95,16 +95,17 @@ public:
   bool deterministicCuDNN() const;
   void setDeterministicCuDNN(bool);
   std::unique_ptr<Generator>
-    generator_registry[static_cast<int>(Backend::NumOptions)];
+    generator_registry[static_cast<int>(DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES)];
 private:
   // NB: type_registry has nullptr for all CUDA backends until
   // CUDA initialization has occurred
   std::unique_ptr<Type> type_registry
     [static_cast<int>(Backend::NumOptions)]
     [static_cast<int>(ScalarType::NumOptions)];
-  void initCUDAIfNeeded(Backend p) {
-    if(p == Backend::CUDA)
+  void initCUDAIfNeeded(DeviceType p) {
+    if (p == DeviceType::CUDA) {
       lazyInitCUDA();
+    }
   }
   std::once_flag thc_init;
   bool enabled_cudnn = true;
@@ -130,6 +131,10 @@ static inline void init() {
 
 static inline Type& getType(Backend p, ScalarType s) {
   return globalContext().getType(p, s);
+}
+
+static inline Type& getType(DeviceType p, ScalarType s) {
+  return globalContext().getType(deviceTypeToBackend(p), s);
 }
 
 static inline Type& CPU(ScalarType s) {

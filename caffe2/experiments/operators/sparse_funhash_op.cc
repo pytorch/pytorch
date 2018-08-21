@@ -27,6 +27,7 @@ REGISTER_CPU_OPERATOR(
 OPERATOR_SCHEMA(SparseFunHash)
     .NumInputs(4, 5)
     .NumOutputs(1)
+    .DisallowInputFillers() // TODO: enable the filler
     .SetDoc(R"DOC(
 This layer compresses a fully-connected layer for sparse inputs
 via hashing.
@@ -65,7 +66,10 @@ randomly mapped from the weight vector, provided the input
     .Arg("num_outputs", "Number of outputs")
     .Arg("num_segments", "Number of segments");
 
-OPERATOR_SCHEMA(SparseFunHashGradient).NumInputs(5, 6).NumOutputs(2, 3);
+OPERATOR_SCHEMA(SparseFunHashGradient)
+    .NumInputs(5, 6)
+    .NumOutputs(2, 3)
+    .DisallowInputFillers();
 
 class GetSparseFunHashGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;

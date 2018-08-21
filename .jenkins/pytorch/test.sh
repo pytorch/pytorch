@@ -74,14 +74,19 @@ test_python_all_except_nn() {
 
 test_aten() {
   # Test ATen
-  if [[ "$BUILD_ENVIRONMENT" != *asan* ]]; then
+  if ([[ "$BUILD_ENVIRONMENT" != *asan* ]] && [[ "$BUILD_ENVIRONMENT" != *rocm* ]]); then
     echo "Running ATen tests with pytorch lib"
     TORCH_LIB_PATH=$(python -c "import site; print(site.getsitepackages()[0])")/torch/lib
     # NB: the ATen test binaries don't have RPATH set, so it's necessary to
     # put the dynamic libraries somewhere were the dynamic linker can find them.
     # This is a bit of a hack.
-    ln -s "$TORCH_LIB_PATH"/libcaffe2* build/bin
-    ln -s "$TORCH_LIB_PATH"/libnccl* build/bin
+    if [[ "$BUILD_ENVIRONMENT" == *ppc64le* ]]; then
+      SUDO=sudo 
+    fi
+
+    ${SUDO} ln -s "$TORCH_LIB_PATH"/libcaffe2* build/bin
+    ${SUDO} ln -s "$TORCH_LIB_PATH"/libnccl* build/bin
+
     ls build/bin
     aten/tools/run_tests.sh build/bin
   fi
@@ -101,7 +106,7 @@ test_torchvision() {
   # this should be a transient requirement...)
   # See https://github.com/pytorch/pytorch/issues/7525
   #time python setup.py install
-  pip install .
+  pip install --user .
   popd
 }
 

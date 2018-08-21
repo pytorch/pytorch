@@ -12,7 +12,7 @@
 
 namespace caffe2 {
 
-class Caffe2Annotation : public nom::repr::Annotation {
+class CAFFE2_API Caffe2Annotation : public nom::repr::Annotation {
 public:
   Caffe2Annotation() : Annotation(AnnotationKind::Caffe2) {}
   Caffe2Annotation(std::string device)
@@ -57,23 +57,23 @@ private:
   int DeviceType = caffe2::DeviceType::CPU;
 };
 
-nom::repr::NNModule convertToNNModule(caffe2::NetDef &net, std::unordered_map<std::string, nom::repr::NNGraph::NodeRef>* blobMapOut = nullptr);
+CAFFE2_API nom::repr::NNModule convertToNNModule(caffe2::NetDef &net, std::unordered_map<std::string, nom::repr::NNGraph::NodeRef>* blobMapOut = nullptr);
 
-caffe2::NetDef convertToCaffe2Proto(nom::repr::NNModule&);
+CAFFE2_API caffe2::NetDef convertToCaffe2Proto(nom::repr::NNModule&);
 
 // Pass in an oldNet to copy all the attributes of that network.
 // Be warned that transformations that modify the graph's inputs or outputs
 // are not reflected in changes to external_input or external_output.
-caffe2::NetDef convertToCaffe2Proto(nom::repr::NNModule&, const caffe2::NetDef& oldNet);
+CAFFE2_API caffe2::NetDef convertToCaffe2Proto(nom::repr::NNModule&, const caffe2::NetDef& oldNet);
 
 // Use these functions instead of the registry directly.
-std::unique_ptr<nom::repr::NeuralNetOperator> convertToNeuralNetOperator(
+CAFFE2_API std::unique_ptr<nom::repr::NeuralNetOperator> convertToNeuralNetOperator(
     const caffe2::OperatorDef& op);
 
-caffe2::OperatorDef convertToOperatorDef(
+CAFFE2_API caffe2::OperatorDef convertToOperatorDef(
     const nom::repr::NNGraph::NodeRef& instrNode);
 
-class Converter {
+class CAFFE2_API Converter {
  public:
   explicit Converter() {}
   virtual std::unique_ptr<nom::repr::NeuralNetOperator>

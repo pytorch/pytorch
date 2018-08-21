@@ -337,7 +337,7 @@ struct PreprocessGraph {
 struct ContainerTensor : public at::TensorImpl {
 public:
   ContainerTensor()
-  : TensorImpl(at::Backend::Undefined,at::ScalarType::Undefined, nullptr, /* is_variable */ false) {}
+  : TensorImpl(at::UndefinedTensorId(), at::ScalarType::Undefined, /* is_variable */ false) {}
 
   virtual ~ContainerTensor() = default;
   virtual at::IntList sizes() const override {
@@ -348,9 +348,6 @@ public:
   }
   virtual int64_t dim() const override {
     throw std::runtime_error("dim() on ContainerTensor");
-  }
-  virtual void * unsafeGetTH(bool retain) override {
-    throw std::runtime_error("unsafeGetTH() on ContainerTensor");
   }
   virtual std::unique_ptr<at::Storage> storage() override {
     throw std::runtime_error("storage() on ContainerTensor");

@@ -79,7 +79,7 @@ private:
   OperationCreator op_creator_;
 };
 
-const std::vector<std::shared_ptr<Operator>>& getAllOperatorsFor(Symbol name);
+TORCH_API const std::vector<std::shared_ptr<Operator>>& getAllOperatorsFor(Symbol name);
 std::shared_ptr<Operator> findOperatorFor(const Node* node);
 const Operator& getOperatorFor(const Node* node);
 
@@ -93,14 +93,6 @@ void registerOperator(Operator&& op);
 
 // XXX: this function is meant to be used with string literals only!
 Operator& sig(const char *signature_literal);
-
-struct TORCH_API RegisterOperators {
-  RegisterOperators(std::vector<Operator> operators) {
-    for(Operator& o : operators) {
-      registerOperator(std::move(o));
-    }
-  }
-};
 
 struct OperatorSet {
   OperatorSet(std::initializer_list<const char *> sig_literals);

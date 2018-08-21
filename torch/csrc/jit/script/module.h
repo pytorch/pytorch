@@ -140,11 +140,20 @@ struct Method {
     return *this;
   }
 
+  const FunctionSchema& getSchema() const {
+    AT_ASSERT(schema != nullptr);
+    return *schema;
+  }
+
   std::string prettyPrintSchema() const {
     JIT_ASSERT(schema);
     std::stringstream ss;
     ss << *schema;
     return ss.str();
+  }
+
+  GraphExecutorState getDebugState() {
+    return get_executor().getDebugState();
   }
 
 private:
@@ -297,6 +306,8 @@ struct Module {
     }
     return nullptr;
   }
+
+  void save(const std::string& filename);
 
  private:
 

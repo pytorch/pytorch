@@ -269,9 +269,14 @@ struct Variable::Impl : public at::TensorImpl {
 
   at::IntList sizes() const override;
   at::IntList strides() const override;
+  int64_t size(int64_t d) const override;
+  int64_t stride(int64_t d) const override;
+
   int64_t dim() const override;
-  void* unsafeGetTH(bool retain) override;
   std::unique_ptr<at::Storage> storage() override;
+  at::StorageImpl* storageImpl() const override;
+  int64_t storage_offset() const override;
+
   static const char* typeString();
 
   std::shared_ptr<Function> get_grad_accumulator();
@@ -298,7 +303,7 @@ struct Variable::Impl : public at::TensorImpl {
   }
 
   /// Accesses the gradient `Variable` of this `Variable`.
-  Tensor& grad() override {
+  Variable& grad() override {
     return grad_;
   }
   const Variable& grad() const override {

@@ -23,9 +23,9 @@
   cpu_half: True
   arguments:
     - THTensor* self
-    - arg: THSize* size
+    - arg: IntListSize size
       long_args: True
-    - CONSTANT NULL
+    - CONSTANT {}
 ]]
 [[
   name: set_
@@ -43,23 +43,23 @@
       scalar_check: False
       arguments:
         - THTensor* self
-        - CONSTANT NULL, 0, THLongStorageView({0}, THLongStorageViewKind::SIZE), NULL
+        - CONSTANT NULL, 0, {0}, {}
     - cname: setStorage
       scalar_check: False
       arguments:
         - THTensor* self
         - THStorage* source
         - CONSTANT 0
-        - CONSTANT __storage_size.get()
-        - CONSTANT NULL
+        - CONSTANT {static_cast<int64_t>(source.pImpl()->size())}
+        - CONSTANT {}
     - cname: setStorage
       arguments:
         - THTensor* self
         - THStorage* source
         - long storage_offset
-        - THSize* size
-        - arg: THStride* stride
-          default: NULL
+        - IntListSize size
+        - arg: IntList stride
+          default: {}
 ]]
 [[
   name: _fill_
@@ -171,7 +171,7 @@
   return: THTensor*
   arguments:
     - THTensor* self
-    - arg: THSize* size
+    - arg: IntListSize size
       long_args: True
 ]]
 [[
@@ -2267,39 +2267,42 @@
         - THTensor* other
 ]]
 [[
-  name: _th_clamp_
+  name: _th_clamp
   cname: clamp
   variants:
     - method
     - function
   return: argument 0
   arguments:
-    - THTensor* self
+    - arg: THTensor* result
+      output: True
     - THTensor* self
     - real min
     - real max
 ]]
 [[
-  name: _th_clamp_min_
+  name: _th_clamp_min
   cname: cmaxValue
   variants:
     - method
     - function
   return: argument 0
   arguments:
-    - THTensor* self
+    - arg: THTensor* result
+      output: True
     - THTensor* self
     - real min
 ]]
 [[
-  name: _th_clamp_max_
+  name: _th_clamp_max
   cname: cminValue
   variants:
     - method
     - function
   return: argument 0
   arguments:
-    - THTensor* self
+    - arg: THTensor* result
+      output: True
     - THTensor* self
     - real max
 ]]
@@ -2391,7 +2394,7 @@
     if (self_->dim() == 0) {
       throw std::runtime_error("Input must be 1-d or 2-d");
     }
-    ${THTensor}_diag(${state,}result_->tensor, self_->tensor, diagonal);
+    ${THTensor}_diag(${state,}result_, self_, diagonal);
     result_->maybe_zero_dim(self_->dim() == 0);
 ]]
 [[
@@ -2983,7 +2986,7 @@
     - arg: real tol
       default: -1
   aten_custom_call: |
-    ${THTensor}_pstrf(res1_->tensor, res2_->tensor, self_->tensor, (upper) ? "U" : "L", tol_);
+    ${THTensor}_pstrf(res1_, res2_, self_, (upper) ? "U" : "L", tol_);
     res2 -= 1;  // LAPACK returns 1-indexed pivots
 ]]
 [[
@@ -3393,8 +3396,8 @@
       arguments: []
     - cname: newWithSize
       arguments:
-        - THSize* size
-        - CONSTANT NULL
+        - IntListSize size
+        - CONSTANT {}
 ]]
 [[
   name: tensor
@@ -3404,15 +3407,15 @@
   options:
     - cname: newWithSize
       arguments:
-        - THSize* size
-        - arg: THStride* stride
+        - IntListSize size
+        - IntList stride
     - cname: newWithStorage
       arguments:
         - THStorage* storage
         - int64_t storageOffset
-        - THSize* size
-        - arg: THStride* stride
-          default: NULL
+        - IntListSize size
+        - arg: IntList stride
+          default: {}
 ]]
 
 # In theory, this could be a part of the above declaration. But in

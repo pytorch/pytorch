@@ -242,7 +242,8 @@ public:
  *      - a constexpr guts<const char*, n_args> parameter_names field (where n_args is
  *        the number of arguments in Signature)
  */
-template<class OpSchemaDef> class OpSchema final {
+template <class OpSchemaDef>
+class CAFFE2_API OpSchema final {
   // TODO static_assert OpSchemaDef isn't an instanciation of OpSchema. If yes, the caller probably passed an OpSchema somewhere where an OpSchemaDef was expected and wants a good error message.
 public:
   using metadata = details::OpMetadataSchema<OpSchemaDef>;

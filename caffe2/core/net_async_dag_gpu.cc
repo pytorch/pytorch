@@ -71,7 +71,7 @@ class ProfiledRange {
 
  private:
   nvtxRangeId_t range_ = 0;
-  DISABLE_COPY_AND_ASSIGN(ProfiledRange);
+  AT_DISABLE_COPY_AND_ASSIGN(ProfiledRange);
 };
 
 #else
@@ -81,7 +81,7 @@ class ProfiledRange {
   ProfiledRange(const OperatorDef& def, Color color) {}
 
  private:
-  DISABLE_COPY_AND_ASSIGN(ProfiledRange);
+  AT_DISABLE_COPY_AND_ASSIGN(ProfiledRange);
 };
 
 #endif // ifdef CAFFE2_USE_NVTX

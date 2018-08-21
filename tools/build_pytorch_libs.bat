@@ -75,6 +75,10 @@ IF NOT DEFINED MAX_JOBS (
   set MAX_JOBS=%NUMBER_OF_PROCESSORS%
 )
 
+IF NOT DEFINED BUILD_SHARED_LIBS (
+  set BUILD_SHARED_LIBS=ON
+)
+
 IF "%CMAKE_GENERATOR%"=="" (
   set CMAKE_GENERATOR_COMMAND=
   set MAKE_COMMAND=msbuild INSTALL.vcxproj /p:Configuration=Release
@@ -178,7 +182,7 @@ goto:eof
                   -DBUILD_TORCH="%BUILD_TORCH%" ^
                   -DNVTOOLEXT_HOME="%NVTOOLEXT_HOME%" ^
                   -DNO_API=ON ^
-                  -DBUILD_ATEN=ON ^
+                  -DBUILD_SHARED_LIBS="%BUILD_SHARED_LIBS%" ^
                   -DBUILD_PYTHON=OFF ^
                   -DBUILD_BINARY=OFF ^
                   -DONNX_NAMESPACE=%ONNX_NAMESPACE% ^

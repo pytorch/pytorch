@@ -152,7 +152,7 @@ struct IValue {
     std::swap(retainable, rhs.retainable);
     std::swap(tag, rhs.tag);
   }
-  // Accessors for subtypes are arragned together below
+  // Accessors for subtypes are arranged together below
   // While some of these accessors could be generated through templates,
   // we prefer to write them manually for clarity
 
@@ -259,7 +259,7 @@ struct IValue {
   }
 
   const std::vector<int64_t>& toIntListRef() const;
-  const std::vector<double>& toFloatListRef() const;
+  const std::vector<double>& toDoubleListRef() const;
   const std::vector<at::Tensor>& toTensorListRef() const;
 
   // ConstantString
@@ -374,6 +374,18 @@ struct IValue {
   TORCH_API friend std::ostream& operator<<(std::ostream & out, const IValue & v);
 
 private:
+  // NOTE: IValue tags are intentionally private. In the future we may encode
+  // this value different (e.g. using NaN boxing), and this would make it more
+  // costly to determine the tag for all types vs just determining if something
+  // is a particular type. Instead we want clients to use the `isX` methods when
+  // possible. If for perf. reasons you really, absolutely, must have a jump
+  // table, then we can revisit this.
+  enum class Tag : uint32_t {
+#define DEFINE_TAG(x) x,
+    TORCH_FORALL_TAGS(DEFINE_TAG)
+#undef DEFINE_TAG
+  };
+
   template<typename T>
   Shared<T> moveToRetainable() {
     Shared<T> t(static_cast<T*>(as_retainable), false);
@@ -389,11 +401,6 @@ private:
     tag = Tag::None;
     retainable = false;
   }
-  enum class Tag : uint32_t {
-    #define DEFINE_TAG(x) x,
-    TORCH_FORALL_TAGS(DEFINE_TAG)
-    #undef DEFINE_TAG
-  };
   union {
     at::TensorImpl* as_tensor_impl;
     at::Retainable* as_retainable;
@@ -425,11 +432,12 @@ DEFINE_TO(double, toDouble)
 DEFINE_TO(int64_t, toInt)
 DEFINE_TO(Shared<DoubleList>, toDoubleList)
 DEFINE_TO(Shared<IntList>, toIntList)
+DEFINE_TO(Shared<TensorList>, toTensorList)
 DEFINE_TO(Shared<ConstantString>, toString)
 DEFINE_TO(at::Scalar, toScalar)
 DEFINE_TO(bool, toInt)
 DEFINE_TO(std::vector<int64_t>, toIntListRef)
-DEFINE_TO(std::vector<double>, toFloatListRef)
+DEFINE_TO(std::vector<double>, toDoubleListRef)
 DEFINE_TO(std::vector<at::Tensor>, toTensorListRef)
 
 
@@ -493,7 +501,7 @@ inline const std::vector<int64_t>& IValue::toIntListRef() const {
   return toIntList()->elements();
 }
 
-inline const std::vector<double>& IValue::toFloatListRef() const {
+inline const std::vector<double>& IValue::toDoubleListRef() const {
   return toDoubleList()->elements();
 }
 
