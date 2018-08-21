@@ -34,13 +34,9 @@ void load_serialized_module_with_custom_op_and_execute(
       torch::jit::load(path_to_exported_script_module);
   assert(module != nullptr);
 
-  torch::jit::script::Method& forward = module->get_method("forward");
-
-  torch::jit::Stack stack;
-  torch::jit::push(stack, torch::ones(5));
-  forward.run(stack);
-  at::Tensor output;
-  torch::jit::pop(stack, output);
+  std::vector<torch::jit::IValue> inputs;
+  inputs.push_back(torch::ones(5));
+  auto output = module->forward(inputs).toTensor();
 
   assert(output.allclose(torch::ones(5) + 1));
 }

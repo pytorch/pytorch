@@ -59,6 +59,16 @@ struct Method {
     }
     get_executor().run(stack);
   }
+
+  IValue operator()(std::vector<IValue> inputs) {
+    run(inputs);
+    AT_CHECK(
+        inputs.size() == 1,
+        "Expected 1 return value, but found ",
+        inputs.size());
+    return inputs.front();
+  }
+
   std::shared_ptr<Graph> graph_for(const Stack& inputs) {
     return get_executor().graphFor(inputs);
   }
@@ -237,6 +247,10 @@ struct Module {
   // added afterward.
   void set_optimized(bool o) {
     optimize = o;
+  }
+
+  IValue forward(std::vector<IValue> inputs) {
+    return get_method("forward")(inputs);
   }
 
   void register_parameter(const std::string & name, autograd::Variable v, bool is_buffer) {
