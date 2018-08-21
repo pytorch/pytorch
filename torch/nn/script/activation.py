@@ -24,8 +24,6 @@ class Threshold(ScriptModule):
 
     @torch.jit.script_method
     def forward(self, input):
-        aa = torch.zeros([3, 6, 4]).fill_(0)
-        # aa.fill_(0)
         return F.threshold(input, self.threshold, self.value)
 
     def extra_repr(self):

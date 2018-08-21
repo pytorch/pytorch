@@ -6739,17 +6739,24 @@ class ScriptModuleTest(TestBase):
     def __init__(self, *args, **kwargs):
         super(ScriptModuleTest, self).__init__(*args, **kwargs)
         self.precision = kwargs.get('precision', 2e-4)
+        self.constructor_script = kwargs.get('constructor_script')
+        self.constructor = kwargs.get('constructor')
 
     def __call__(self, test_case):
-        module = self.constructor(*self.constructor_args)
         input = self._get_input()
+        script_module = self.constructor_script(*self.constructor_args)
+        orig_module = self.constructor(*self.constructor_args)
 
-        if self.reference_fn is not None:
-            out = test_case._forward(module, input)
-            ref_input = deepcopy(input)
-            expected_out = self.reference_fn(ref_input, test_case._get_parameters(module)[0])
-            test_case.assertEqual(out, expected_out)
-        self.test_noncontig(test_case, module, input)
+        output_script = script_module(input)
+        output_orig = orig_module(input)
+
+        test_case.assertEqual(output_script, output_orig, self.precision)
+
+        # if self.reference_fn is not None:
+            # out = test_case._forward(module, input)
+            # ref_input = deepcopy(input)
+            # expected_out = self.reference_fn(ref_input, test_case._get_parameters(module)[0])
+            # test_case.assertEqual(out, expected_out)
 
 
 
@@ -6993,6 +7000,115 @@ nn_functional_tests = [
     # dtype=torch.long), torch.full((S,), S, dtype=torch.long), torch.randint(1,S,(S,), dtype=torch.long))),
 ]
 
+nn_module_tests = [
+    dict(
+        module_name='Threshold',
+        constructor_args=(2, 1),
+        input_size=(2, 3, 4, 5),
+    ),
+    dict(
+        module_name='ReLU',
+        input_size=(2, 3, 4, 5),
+    ),
+    dict(
+        module_name='ReLU6',
+        input_size=(2, 3, 4, 5),
+        check_inplace=True,
+    ),
+    dict(
+        module_name='RReLU',
+        input_size=(1, 2, 2),
+    ),
+    dict(
+        module_name='Hardtanh',
+        input_size=(3, 2, 5),
+    ),
+    dict(
+        module_name='Sigmoid',
+        input_size=(2, 3, 4, 5)
+    ),
+    dict(
+        module_name='Tanh',
+        input_size=(2, 3, 4, 5)
+    ),
+    dict(
+        module_name='ELU',
+        constructor_args=(2.,),
+        input_size=(3, 2, 5),
+    ),
+    dict(
+        module_name='SELU',
+        input_size=(3, 2, 5),
+    ),
+    dict(
+        module_name='GLU',
+        constructor_args=(1,),
+        input_size=(5, 6, 7),
+        desc='dim'
+    ),
+    dict(
+        module_name='Hardshrink',
+        constructor_args=(2.,),
+        input_size=(4, 3, 2, 4),
+    ),
+    dict(
+        module_name='LeakyReLU',
+        constructor_args=(0.5,),
+        input_size=(3, 2, 5),
+        desc='with_negval'
+    ),
+    dict(
+        module_name='LogSigmoid',
+        input_size=(2, 3, 4),
+    ),
+    dict(
+        module_name='Softplus',
+        constructor_args=(2, -100),
+        input_size=(10, 20),
+        desc='beta_threshold',
+    ),
+    dict(
+        module_name='Softshrink',
+        constructor_args=(1,),
+        input_size=(3, 2, 5),
+        desc='lambda',
+    ),
+    dict(
+        module_name='PReLU',
+        constructor_args=(3,),
+        input_size=(2, 3, 4),
+        desc='1d_multiparam',
+    ),
+    dict(
+        module_name='Softsign',
+        input_size=(3, 2, 5),
+    ),
+    dict(
+        module_name='Tanhshrink',
+        input_size=(2, 3, 4, 5)
+    ),
+    dict(
+        module_name='Softmin',
+        constructor_args=(1,),
+        input_size=(2, 3, 5, 10),
+        desc='multidim',
+    ),
+    dict(
+        module_name='Softmax',
+        constructor_args=(1,),
+        input_size=(10, 20),
+    ),
+    dict(
+        module_name='Softmax2d',
+        input_size=(1, 3, 10, 20),
+    ),
+    dict(
+        module_name='LogSoftmax',
+        constructor_args=(1,),
+        input_size=(10, 20),
+    ),
+]
+
 
 def add_test(
         name,
@@ -7072,7 +7188,7 @@ def add_test(
 
 
 def add_nn_functional_test(name, self_size, args, skipTestIf=(), output_process_fn=lambda x: x, kwargs=None):
-    test_name = 'test_nn_' + name
+    test_name = 'test_nn_functional_' + name
 
     def do_test(self, name=name, args=args, test_name=test_name):
         torch.manual_seed(2)
@@ -7103,30 +7219,18 @@ def add_nn_functional_test(name, self_size, args, skipTestIf=(), output_process_
 
 
 def add_nn_module_test(test_params):
+    name = test_params.pop('module_name')
     if 'constructor' not in test_params:
-        name = test_params.pop('module_name')
-        test_params['constructor'] = getattr(nn.script, name)
+        import torch.nn.script as nnscript
+        test_params['constructor_script'] = getattr(nnscript, name)
+        test_params['constructor'] = getattr(nn, name)
 
+    # print(test_params)
     test = ScriptModuleTest(**test_params)
-    test_name = test.get_name()
+    test_name = 'test_nn_module_' + name
+    if test_params.get('desc'):
+        test_name += test_params['desc']
     post_add_test(test_name, (), lambda self, test=test: test(self))
-
-    if 'check_eval' in test_params:
-        # create a new test that is identical but that sets module.training to False
-        desc = test_params.get('desc', None)
-        test_params['desc'] = 'eval' if desc is None else desc + '_eval'
-
-        def gen_eval_constructor(constructor):
-            def eval_constructor(*args, **kwargs):
-                cons = constructor(*args, **kwargs)
-                cons.training = False
-                return cons
-            eval_constructor.__name__ = constructor.__name__
-            return eval_constructor
-
-        test_params['constructor'] = gen_eval_constructor(test_params['constructor'])
-        test = ScriptModuleTest(**test_params)
-        add_test(test, decorator)
 
 
 def post_add_test(test_name, skipTestIf, do_test):
@@ -7145,7 +7249,7 @@ for test in method_tests:
 for test in nn_functional_tests:
     add_nn_functional_test(*test)
 
-for test_params in module_tests:
+for test_params in nn_module_tests:
     add_nn_module_test(test_params)
 
 if __name__ == '__main__':
