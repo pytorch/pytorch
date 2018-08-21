@@ -315,5 +315,32 @@ Tensor& matmul_out(Tensor &result, const Tensor & tensor1, const Tensor & tensor
   return result;
 }
 
+Tensor frobenius_norm(const Tensor& self) {
+  IntList dim = {0, 1};
+  return at::native::frobenius_norm(self, dim);
 }
+
+Tensor frobenius_norm(const Tensor& self, IntList dim, bool keepdim) {
+  AT_CHECK(
+      dim.size() <= 2,
+      "Improper number of chosend dimensions to do frobenius norm.");
+  if (dim.size() == 0) {
+    Tensor result = self.type().tensor();
+    return at::native::norm_out(result, self, 2, self.dim(), keepdim);
+  }
+  if (dim.size() == 1) {
+    return at::native::norm(self, 2, dim[0], keepdim);
+  }
+  Tensor result = self.type().tensor();
+  return at::sqrt(at::native::sum(self * self, dim, keepdim));
 }
+
+Tensor nuclear_norm(const Tensor& self) {
+  AT_CHECK(
+      self.dim() == 2,
+      "Improper number of tensor dimensions to do nuclear norm.");
+  return at::native::sum(std::get<1>(at::svd(self)));
+}
+
+} // namespace native
+} // namespace at

@@ -2073,6 +2073,13 @@ class TestAutograd(TestCase):
         run_test((10,), 1)
         run_test((10,), 1.5)
 
+    def test_nuclear_norm_subgradient(self):
+        def run_test(input_size, expect_result):
+            input = torch.zeros(*input_size, requires_grad=True)
+            input.nuclear_norm().backward()
+            self.assertEqual(input.grad.data.abs().sum(), expect_result)
+        run_test((10, 10), 10)
+
     def test_pow_zero_tensor_gradient(self):
         def run_test(input_size, exponent):
             input = torch.zeros(*input_size, requires_grad=True)
@@ -2983,6 +2990,10 @@ method_tests = [
     ('norm', (), (3, 0), '3_dim_scalar', [1]),
     ('norm', (), (2, 0, True), 'keepdim_2_dim_scalar', [1]),
     ('norm', (), (3, 0, True), 'keepdim_3_dim_scalar', [1]),
+    ('nuclear_norm',(S, S), (), 'nuclear_norm_2_dim'),
+    ('frobenius_norm', torch.rand(S, S) + 5e-4, (), 'frobenius_norm_2_dim'),
+    ('frobenius_norm', torch.rand(S, S, S) + 5e-4, ([1, 2],), 'frobenius_norm_high_dim'),
+    ('frobenius_norm', torch.rand(S, S, S) + 5e-4, ([1, 2], True,), 'frobenius_norm_keep_dim'),
     ('clone', (S, M, S), NO_ARGS),
     ('clone', (), NO_ARGS, 'scalar'),
     ('dist', (S, S, S), ((S, S, S),)),

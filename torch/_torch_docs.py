@@ -2971,6 +2971,72 @@ Example::
             [ 2.]])
 """)
 
+add_docstr(torch.frobenius_norm,
+           r"""
+.. function:: frobenius_norm(input) -> Tensor
+
+Returns the frobenius norm of the :attr:`input` tensor.
+
+.. math::
+    ||x||_{F} = \sqrt{tr(xx^{H})}
+
+Args:
+    input (Tensor): the input tensor, should be a matrix (2-D tensor)
+Example::
+
+    >>> a = torch.randn(2, 3)
+    >>> a
+    tensor([[ 1.0043,  0.5987, -1.2026],
+            [ 1.7241, -2.6561,  0.8088]])
+    >>> a.frobenius_norm()
+    tensor(3.6735)
+
+.. function:: frobenius_norm(input, dim, keepdim=False) -> Tensor
+
+Returns the frobenius_norm of the :attr:`input` tensor in the given
+dimension :attr:`dim`.
+
+If :attr:`keepdim` is ``True``, the output tensor is of the same size as
+:attr:`input` except in the dimension :attr:`dim` where it is of size 1.
+Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting
+in the output tensor having 2 fewer dimension than :attr:`input`.
+
+Args:
+    input (Tensor): the input tensor
+    dim (int or tuple of python:ints): the dimension to reduce
+    keepdim (bool): whether the output tensor has :attr:`dim` retained or not
+
+Example::
+
+    >>> a = torch.randn(2, 3)
+    >>> a
+    tensor([[-0.6971,  1.1057, -0.3520],
+            [-2.1726, -1.0937,  0.6892]])
+    >>> a.frobenius_norm((0,1))
+    tensor(2.8677)
+    >>> a.frobenius_norm((0,1),True)
+    tensor([[2.8677]])
+""")
+
+add_docstr(torch.nuclear_norm,
+           r"""
+.. function:: nuclear_norm(input) -> Tensor
+
+Returns the nuclear norm of the :attr:`input` tensor.
+The nuclear norm is the sum of singular values.
+
+Args:
+    input (Tensor): the input tensor, should be a matrix (2-D tensor)
+Example::
+
+    >>> a = torch.randn(2, 3)
+    >>> a
+    tensor([[ 0.7075,  0.0129,  0.6276],
+            [-0.6148, -0.9945,  0.3772]])
+    >>> a.nuclear_norm()
+    tensor(2.1654)
+""")
+
 add_docstr(torch.normal,
            r"""
 .. function:: normal(mean, std, out=None) -> Tensor

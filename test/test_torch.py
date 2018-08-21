@@ -824,6 +824,37 @@ class TestTorch(TestCase):
     def test_norm_cuda(self):
         self._test_norm(self, device='cuda')
 
+    @staticmethod
+    def _test_frobenius_norm(self):
+        x = torch.randn(4, 2)
+        xn = x.cpu().numpy()
+        res = x.frobenius_norm().item()
+        expected = np.linalg.norm(xn, 'fro')
+        self.assertEqual(res, expected, "full reduction failed for frobenius norm")
+
+        x = torch.randn(4, 2, 3)
+        xn = x.cpu().numpy()
+        res = x.frobenius_norm((1, 2)).cpu().numpy()
+        expected = np.linalg.norm(xn, 'fro', (1, 2))
+        self.assertEqual(res, expected, "full reduction failed for frobenius norm")
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_frobenius_norm(self):
+        self._test_frobenius_norm(self)
+
+    @staticmethod
+    def _test_nuclear_norm(self):
+        # full reduction
+        x = torch.randn(4, 2)
+        xn = x.cpu().numpy()
+        res = x.nuclear_norm().item()
+        expected = np.linalg.norm(xn, 'nuc')
+        self.assertEqual(res, expected, "full reduction failed for nuclear norm")
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_nuclear_norm(self):
+        self._test_nuclear_norm(self)
+
     def test_dim_reduction_uint8_overflow(self):
         example = [[-1, 2, 1], [5, 3, 6]]
         x = torch.tensor(example, dtype=torch.uint8)
