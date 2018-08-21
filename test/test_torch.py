@@ -7039,6 +7039,16 @@ class TestTorch(TestCase):
         # not the data
         self.assertEqual(a, b)
 
+    def test_tensor_hash(self):
+        a = torch.randn(5, 5)
+        with self.assertRaisesRegex(TypeError, "unhashable type"):
+            hash(a)
+
+    def test_parameter_hash(self):
+        a = torch.nn.Parameter(torch.randn(5, 5))
+        with self.assertRaisesRegex(TypeError, "unhashable type"):
+            hash(a)
+
     def test_pickle(self):
         if sys.version_info[0] == 2:
             import cPickle as pickle
