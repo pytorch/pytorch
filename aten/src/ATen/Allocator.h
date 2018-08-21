@@ -100,11 +100,4 @@ struct AT_API InefficientStdFunctionContext {
   static at::DataPtr makeDataPtr(void* ptr, const std::function<void(void*)>& deleter, Device device);
 };
 
-struct AT_API InefficientSharedPtrContext {
-  std::shared_ptr<void> ptr_;
-  InefficientSharedPtrContext(const std::shared_ptr<void> ptr)
-    : ptr_(ptr) {}
-  static at::DataPtr makeDataPtr(void* ptr, const std::shared_ptr<void> shared_ptr, Device device);
-};
-
 }  // namespace at
