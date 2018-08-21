@@ -297,6 +297,9 @@ class JitTestCase(TestCase):
         if export_import:
             ge = self.getExportImportCopy(ge)
 
+        if export_import:
+            ge = self.getExportImportCopy(ge)
+
         if verbose:
             print(ge.graph)
 
