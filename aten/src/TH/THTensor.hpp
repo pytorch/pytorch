@@ -53,10 +53,7 @@ inline void THTensor_maybe_zero_dim(THTensor *tensor, bool condition_when_zero_d
 // nDimensionLegacyAll        corresponds to the ATen dimension, except scalars are viewed as 1-dimensional tensors
 //                            and tensors with a dimension of size zero are collapsed to 0-dimensional tensors.
 //
-// Eventually, everything should go through nDimension or tensor->dim().
-inline int THTensor_nDimension(const THTensor* tensor) {
-  return tensor->dim();
-}
+// Eventually, everything should go through tensor->dim().
 
 inline int THTensor_nDimensionLegacyNoScalars(const THTensor* tensor) {
   if (tensor->dim() == 0) {
