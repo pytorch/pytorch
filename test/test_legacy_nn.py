@@ -657,6 +657,9 @@ def prepare_tests():
         'KLDivLoss': 'DistKLDivCriterion',
     }
     for test in tests:
+        name = test.get_name()
+        if ((name == "test_Max" or name == "test_Min" or name == "test_Max_with_dimension" or name == "test_Min_with_dimension") and TEST_WITH_ROCM):
+            continue
         add_test(test)
     for test_params in module_tests:
         test_params = deepcopy(test_params)
