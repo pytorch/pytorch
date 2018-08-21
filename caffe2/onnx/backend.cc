@@ -1426,7 +1426,35 @@ void ConvertIntegralValueToCaffe2(caffe2::OperatorDef* c2_op,
       c2_values->add_ints(i);
     }
   }
+}
 
+template <>
+void ConvertIntegralValueToCaffe2<::google::protobuf::int64>(caffe2::OperatorDef* c2_op,
+                                                             caffe2::Argument* c2_values,
+                                                            const TensorProto& onnx_tensor) {
+  c2_op->set_type("GivenTensorInt64Fill");
+  auto* ints = c2_values->mutable_ints();
+  if (!TryConvertingTensorRawValues<::google::protobuf::int64>(
+          onnx_tensor, ints)) {
+    ints->CopyFrom(onnx_tensor.int64_data());
+  }
+}
+
+template <>
+void ConvertIntegralValueToCaffe2<::google::protobuf::uint64>(caffe2::OperatorDef* c2_op,
+                                                              caffe2::Argument* c2_values,
+                                                              const TensorProto& onnx_tensor) {
+  c2_op->set_type("GivenTensorInt64Fill");
+  ::google::protobuf::RepeatedField<::google::protobuf::uint64> tmp;
+  const ::google::protobuf::RepeatedField<::google::protobuf::uint64>* src =
+      &tmp;
+  if (!TryConvertingTensorRawValues<::google::protobuf::uint64>(
+          onnx_tensor, &tmp)) {
+    src = &onnx_tensor.uint64_data();
+  }
+  for (const auto i : *src) {
+    c2_values->add_ints(i);
+  }
 }
 
 void Caffe2Backend::BuildTensorFillingOp(
@@ -1460,24 +1488,9 @@ void Caffe2Backend::BuildTensorFillingOp(
       c2_values->add_floats(i);
     }
   } else if (onnx_tensor.data_type() == TensorProto::INT64) {
-    c2_op->set_type("GivenTensorInt64Fill");
-    auto* ints = c2_values->mutable_ints();
-    if (!TryConvertingTensorRawValues<::google::protobuf::int64>(
-            onnx_tensor, ints)) {
-      ints->CopyFrom(onnx_tensor.int64_data());
-    }
+    ConvertIntegralValueToCaffe2<::google::protobuf::int64>(c2_op, c2_values, onnx_tensor);
   } else if (onnx_tensor.data_type() == TensorProto::UINT32) {
-    c2_op->set_type("GivenTensorInt64Fill");
-    ::google::protobuf::RepeatedField<::google::protobuf::uint64> tmp;
-    const ::google::protobuf::RepeatedField<::google::protobuf::uint64>* src =
-        &tmp;
-    if (!TryConvertingTensorRawValues<::google::protobuf::uint64>(
-            onnx_tensor, &tmp)) {
-      src = &onnx_tensor.uint64_data();
-    }
-    for (const auto i : *src) {
-      c2_values->add_ints(i);
-    }
+    ConvertIntegralValueToCaffe2<::google::protobuf::uint64>(c2_op, c2_values, onnx_tensor);
   } else if (onnx_tensor.data_type() == TensorProto::BOOL) {
     ConvertIntegralValueToCaffe2<::google::protobuf::int8>(c2_op, c2_values, onnx_tensor);
   } else if (onnx_tensor.data_type() == TensorProto::UINT8) {
