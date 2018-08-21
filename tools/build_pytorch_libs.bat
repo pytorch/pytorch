@@ -183,7 +183,6 @@ goto:eof
                   -DNVTOOLEXT_HOME="%NVTOOLEXT_HOME%" ^
                   -DNO_API=ON ^
                   -DBUILD_SHARED_LIBS="%BUILD_SHARED_LIBS%" ^
-                  -DBUILD_ATEN=ON ^
                   -DBUILD_PYTHON=OFF ^
                   -DBUILD_BINARY=OFF ^
                   -DONNX_NAMESPACE=%ONNX_NAMESPACE% ^

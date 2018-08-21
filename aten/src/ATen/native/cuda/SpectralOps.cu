@@ -29,13 +29,16 @@ using namespace at::native::detail;
 // counting_iterator => index to fill
 struct cnt_to_dst_idx_functor : public thrust::unary_function<int64_t, int64_t>
 {
-  const int64_t last_dim_size;
-  const int64_t last_dim_start_slice;
-  const int64_t last_dim_to_fill_size;
+  int64_t last_dim_size;
+  int64_t last_dim_start_slice;
+  int64_t last_dim_to_fill_size;
 
   cnt_to_dst_idx_functor(int64_t last_dim_size, int64_t last_dim_start_slice) :
     last_dim_size(last_dim_size), last_dim_start_slice(last_dim_start_slice),
     last_dim_to_fill_size(last_dim_size - last_dim_start_slice) {}
+  
+  __host__ __device__
+  cnt_to_dst_idx_functor & operator=(const cnt_to_dst_idx_functor&) = default;
 
   __host__ __device__ __forceinline__
   int64_t operator()(const int64_t& i) const

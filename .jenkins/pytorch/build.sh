@@ -30,7 +30,6 @@ cmake --version
 pip install -r requirements.txt || true
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
-  export MAX_JOBS=4
   # This is necessary in order to cross compile (or else we'll have missing GPU device).
   export HCC_AMDGPU_TARGET=gfx900
 
@@ -48,6 +47,7 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   sudo apt-get install libc++abi1
 
   python tools/amd_build/build_pytorch_amd.py
+  python tools/amd_build/build_caffe2_amd.py
   USE_ROCM=1 python setup.py install --user
   exit 0
 fi
