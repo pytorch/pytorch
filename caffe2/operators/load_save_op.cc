@@ -162,10 +162,10 @@ print("Y:", workspace.FetchBlob("Y"))
         "length as number of output blobs.");
 
 OPERATOR_SCHEMA(Save)
-    .NumInputs(1, INT_MAX)
+    .NumInputs(0, INT_MAX)
     .NumOutputs(0)
     .SetDoc(R"DOC(
-Saves a set of blobs to a db. It takes $[1, \infty)$ number of inputs and has
+Saves a set of blobs to a db. It takes $[0, \infty)$ number of inputs and has
 no output. The contents of the inputs are written into the db using the
 settings specified by the arguments.
 
