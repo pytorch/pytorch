@@ -378,6 +378,8 @@ class Tensor(torch._C._TensorBase):
     __ge__ = _C._TensorBase.ge
     __abs__ = _C._TensorBase.abs
 
+    __hash__ = None
+
     def __len__(self):
         if self.dim() == 0:
             raise TypeError("len() of a 0-d tensor")
