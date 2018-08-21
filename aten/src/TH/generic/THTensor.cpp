@@ -16,11 +16,6 @@ ptrdiff_t THTensor_(storageOffset)(const THTensor *self)
   return self->storage_offset();
 }
 
-int THTensor_(nDimension)(const THTensor *self)
-{
-  return THTensor_nDimension(self);
-}
-
 int THTensor_(nDimensionLegacyNoScalars)(const THTensor *self)
 {
   return THTensor_nDimensionLegacyNoScalars(self);
@@ -554,7 +549,7 @@ ptrdiff_t THTensor_(nElement)(const THTensor *self)
   {
     ptrdiff_t nElement = 1;
     int d;
-    for(d = 0; d < THTensor_nDimension(self); d++)
+    for(d = 0; d < self->dim(); d++)
       nElement *= self->size(d);
     return nElement;
   }
@@ -655,10 +650,10 @@ THDescBuff THTensor_(desc)(const THTensor *tensor) {
   n += snprintf(str, L-n, "torch." _stringify(x) "Tensor of size ");
 #undef _stringify
   int i;
-  for(i = 0; i < THTensor_nDimension(tensor); i++) {
+  for(i = 0; i < tensor->dim(); i++) {
     if(n >= L) break;
     n += snprintf(str+n, L-n, "%" PRId64, tensor->size(i));
-    if(i < THTensor_nDimension(tensor)-1) {
+    if (i < tensor->dim() - 1) {
       n += snprintf(str+n, L-n, "x");
     }
   }
