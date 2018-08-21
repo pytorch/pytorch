@@ -21,6 +21,7 @@ struct Tensor;
 
 namespace at {
 struct AT_API TensorImpl : public Retainable {
+  TensorImpl() = delete;
   TensorImpl(TensorTypeId type_id, ScalarType scalar_type, bool is_variable);
   TensorImpl(Storage&& storage, TensorTypeId type_id, bool is_variable);
 
@@ -38,12 +39,10 @@ struct AT_API TensorImpl : public Retainable {
   virtual const Storage& storage();
   friend struct Type;
 
-  int64_t numel() {
-    int64_t n = 1;
-    for (auto s : sizes()) {
-      n *= s;
-    }
-    return n;
+  virtual int64_t numel() const;
+
+  virtual bool is_contiguous() const {
+    return is_contiguous_;
   }
 
   // this is called by the generated wrapper code when there are conditions
@@ -96,10 +95,6 @@ struct AT_API TensorImpl : public Retainable {
   // Note: storage->size() may be greater than the recorded size
   // of a tensor
   at::Storage storage_;
-  int64_t storage_offset_;
-
-  std::vector<int64_t> sizes_;
-  std::vector<int64_t> strides_;
 
   template <typename T>
   inline T * data() const {
@@ -121,18 +116,73 @@ struct AT_API TensorImpl : public Retainable {
 
   // represents that numel() == 0.
   inline bool is_empty() const {
-    for (int64_t i = 0; i < dim(); ++i) {
-      if (sizes()[i] == 0) {
-        return true;
-      }
-    }
-    return false;
+    return numel() == 0;
+  }
+
+  virtual void resize_dim(int64_t ndim) {
+    // NB: This is *truly* a resize; calling code (e.g., squeeze)
+    // assumes that old values are preserved
+    sizes_.resize(ndim);
+    strides_.resize(ndim);
+    refresh_numel();
+    refresh_contiguous();
+  }
+
+  virtual void set_size(int64_t dim, int64_t new_size) {
+    sizes_[dim] = new_size;
+    refresh_numel();
+    refresh_contiguous();
+  }
+
+  virtual void set_stride(int64_t dim, int64_t new_stride) {
+    strides_[dim] = new_stride;
+    refresh_numel();
+    refresh_contiguous();
+  }
+
+  virtual void set_storage_offset(int64_t storage_offset) {
+    storage_offset_ = storage_offset;
+    refresh_numel();
+    refresh_contiguous();
+  }
+
+  // WARNING: This function does not check if the requested
+  // sizes/strides are in bounds for the storage is allocated;
+  // this is the responsibility of the caller
+  void set_sizes_and_strides(at::IntList new_size, at::IntList new_stride) {
+    AT_CHECK(
+        new_size.size() == new_stride.size(),
+        "dimensionality of sizes (",
+        new_size.size(),
+        ") must match dimensionality of strides (",
+        new_stride.size(),
+        ")");
+    sizes_ = new_size.vec();
+    strides_ = new_stride.vec();
+    refresh_numel();
+    refresh_contiguous();
   }
 
   virtual int64_t size(int64_t d) const;
   virtual int64_t stride(int64_t d) const;
 
-protected:
+ private:
+  int64_t storage_offset_;
+  std::vector<int64_t> sizes_;
+  std::vector<int64_t> strides_;
+
+  bool is_contiguous_;
+  int64_t numel_;
+
+ protected:
+  void refresh_numel() {
+    int64_t n = 1;
+    for (auto s : sizes()) {
+      n *= s;
+    }
+    numel_ = n;
+  }
+  void refresh_contiguous();
   TensorTypeId type_id_;
   // INVARIANT: When storage is non-null, this scalar type must
   // agree with the scalar type in storage
@@ -140,7 +190,7 @@ protected:
   bool is_variable_ = false;
   bool is_wrapped_number_ = false;
 
-private:
+ private:
   TensorImpl(Storage&& storage, TensorTypeId type_id, ScalarType scalar_type, bool is_variable);
 };
 } // namespace at

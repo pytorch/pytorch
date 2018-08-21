@@ -267,6 +267,7 @@ struct Variable::Impl : public at::TensorImpl {
 
   ~Impl() override;
 
+  int64_t numel() const override;
   at::IntList sizes() const override;
   at::IntList strides() const override;
   int64_t size(int64_t d) const override;

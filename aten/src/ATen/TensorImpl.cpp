@@ -77,6 +77,8 @@ TensorImpl::TensorImpl(Storage&& storage, TensorTypeId type_id, ScalarType scala
       storage_offset_(0),
       sizes_{0},
       strides_{1},
+      is_contiguous_(true),
+      numel_(0),
       type_id_(type_id),
       scalar_type_(scalar_type),
       is_variable_(is_variable) {}
@@ -87,6 +89,34 @@ IntList TensorImpl::sizes() const {
 
 IntList TensorImpl::strides() const {
   return strides_;
+}
+
+int64_t TensorImpl::numel() const {
+#ifdef DEBUG
+  int64_t n = 1;
+  for (auto s : sizes()) {
+    n *= s;
+  }
+  AT_ASSERT(n == numel_);
+#endif
+  return numel_;
+}
+
+void TensorImpl::refresh_contiguous() {
+  is_contiguous_ = true;
+  if (is_empty())
+    return;
+  int64_t z = 1;
+  for (int64_t d = dim() - 1; d >= 0; d--) {
+    if (size(d) != 1) {
+      if (stride(d) == z) {
+        z *= size(d);
+      } else {
+        is_contiguous_ = false;
+        break;
+      }
+    }
+  }
 }
 
 void TensorImpl::release_resources() {
@@ -112,7 +142,7 @@ int64_t TensorImpl::stride(int64_t d) const {
 TensorImpl* TensorImpl::maybe_zero_dim(bool condition_when_zero_dim) {
   bool set_zero_dim = condition_when_zero_dim && this->sizes().size() == 1 && this->size(0) == 1;
   if (set_zero_dim) {
-    THTensor_resizeDim(this, 0);
+    resize_dim(0);
   }
   return this;
 }

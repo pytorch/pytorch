@@ -41,6 +41,10 @@ Variable::Impl::Impl(at::Tensor data, bool requires_grad, Edge gradient_edge)
 
 Variable::Impl::~Impl() = default;
 
+int64_t Variable::Impl::numel() const {
+  return data_.numel();
+}
+
 IntList Variable::Impl::sizes() const {
   return data_.sizes();
 }

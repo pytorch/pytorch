@@ -47,8 +47,13 @@ public:
 
   IntList sizes() const override;
   IntList strides() const override;
+  bool is_contiguous() const override;
   int64_t size(int64_t d) const override;
   int64_t stride(int64_t d) const override;
+  void resize_dim(int64_t ndim) override;
+  void set_size(int64_t dim, int64_t new_size) override;
+  void set_stride(int64_t dim, int64_t new_stride) override;
+  void set_storage_offset(int64_t storage_offset) override;
 
   int64_t dim() const override;
   TensorImpl* maybe_zero_dim(bool condition_when_zero_dim) override;
@@ -61,6 +66,7 @@ public:
     size_ = size.vec();
     sparseDims_ = sparseDims;
     denseDims_ = denseDims;
+    refresh_numel();
   }
 
   // NOTE: This function preserves invariants of sparseDims/denseDims with respect to
@@ -140,6 +146,7 @@ public:
     size_ = size.vec();
     sparseDims_ = sparseDims;
     denseDims_ = denseDims;
+    refresh_numel();
   }
 
   // NOTE: this function will resize the sparse tensor and also set `indices` and `values` to empty.
@@ -156,6 +163,7 @@ public:
     values_size.insert(values_size.end(), dense_size.begin(), dense_size.end());
     auto empty_values = values().type().tensor(values_size);
     set_indices_and_values_unsafe(empty_indices, empty_values);
+    refresh_numel();
   }
 
   void set_coalesced(bool coalesced) { coalesced_ = coalesced; }
