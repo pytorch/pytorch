@@ -6417,7 +6417,8 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
         hypothesis = torch.LongTensor(24, 128).random_(0, 100)
 
         # TODO: toggle export_import once LSTM isn't a python op
-        self.checkTrace(SNLIClassifier(Config()), (premise, hypothesis), inputs_require_grads=False, export_import=False)
+        self.checkTrace(SNLIClassifier(Config()), (premise, hypothesis), inputs_require_grads=False,
+                        export_import=False)
 
     def test_super_resolution(self):
         import torch.nn.init as init
