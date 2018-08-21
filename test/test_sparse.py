@@ -1136,7 +1136,6 @@ class TestSparse(TestCase):
         self.assertEqual(x.shape, y.shape)
         self.assertEqual(x._sparseDims(), y._sparseDims())
         self.assertEqual(x._denseDims(), y._denseDims())
-        self.assertTrue(x_v_numel <= y_v_numel)  # We don't support shrinking the size of some dense dims
         # Here we make sure that the original data are preserved after resizing
         self.assertEqual(x.to_dense().view(-1)[0:x_v_numel].view(x_v),
                          x_dense.view(-1)[0:x_v_numel].view(x_v))
