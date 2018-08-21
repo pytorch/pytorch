@@ -4298,8 +4298,9 @@ class TestTorch(TestCase):
         self.assertEqual(cov, ahat, 1e-8, 'VeV\' wrong')
 
         # test eigenvectors=False
-        rese2 = torch.zeros(3)
-        resv2 = torch.randn(3, 3)
+        cov = cov.cuda()
+        rese2 = torch.zeros(3).cuda()
+        resv2 = torch.randn(3, 3).cuda()
         expected_resv2 = torch.zeros(3, 3)
         torch.symeig(cov.clone(), False, out=(rese2, resv2))
         self.assertEqual(rese, rese2)
