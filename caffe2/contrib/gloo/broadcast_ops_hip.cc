@@ -1,8 +1,8 @@
 #include "broadcast_ops.h"
 
-#include "caffe2/core/context_gpu.h"
+#include "caffe2/core/hip/context_hip.h"
 
-#include <gloo/cuda_broadcast_one_to_all.h>
+#include <gloo/hip_broadcast_one_to_all.h>
 
 namespace caffe2 {
 namespace gloo {
@@ -10,16 +10,16 @@ namespace gloo {
 template <class Context>
 void BroadcastOp<Context>::initializeAlgorithm() {
   if (init_.template IsType<float>()) {
-    algorithm_.reset(new ::gloo::CudaBroadcastOneToAll<float>(
+    algorithm_.reset(new ::gloo::HipBroadcastOneToAll<float>(
         init_.context, init_.template getOutputs<float>(), init_.size, root_));
   } else if (init_.template IsType<long>()) {
-    algorithm_.reset(new ::gloo::CudaBroadcastOneToAll<long>(
+    algorithm_.reset(new ::gloo::HipBroadcastOneToAll<long>(
         init_.context, init_.template getOutputs<long>(), init_.size, root_));
   } else if (init_.template IsType<int>()) {
-    algorithm_.reset(new ::gloo::CudaBroadcastOneToAll<int>(
+    algorithm_.reset(new ::gloo::HipBroadcastOneToAll<int>(
         init_.context, init_.template getOutputs<int>(), init_.size, root_));
   } else if (init_.template IsType<float16>()) {
-    algorithm_.reset(new ::gloo::CudaBroadcastOneToAll<::gloo::float16>(
+    algorithm_.reset(new ::gloo::HipBroadcastOneToAll<::gloo::float16>(
         init_.context,
         init_.template getOutputs<::gloo::float16>(),
         init_.size,
@@ -31,7 +31,7 @@ void BroadcastOp<Context>::initializeAlgorithm() {
 
 namespace {
 
-REGISTER_CUDA_OPERATOR_WITH_ENGINE(Broadcast, GLOO, BroadcastOp<CUDAContext>);
+REGISTER_HIP_OPERATOR_WITH_ENGINE(Broadcast, GLOO, BroadcastOp<HIPContext>);
 
 } // namespace
 } // namespace gloo

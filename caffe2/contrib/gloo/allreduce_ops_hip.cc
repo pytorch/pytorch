@@ -1,11 +1,11 @@
 #include "allreduce_ops.h"
 
-#include "caffe2/core/context_gpu.h"
+#include "caffe2/core/hip/context_hip.h"
 #include "caffe2/core/logging.h"
 
-#include <gloo/cuda_allreduce_halving_doubling.h>
-#include <gloo/cuda_allreduce_ring.h>
-#include <gloo/cuda_allreduce_ring_chunked.h>
+#include <gloo/hip_allreduce_halving_doubling.h>
+#include <gloo/hip_allreduce_ring.h>
+#include <gloo/hip_allreduce_ring_chunked.h>
 #include <gloo/types.h>
 
 namespace caffe2 {
@@ -23,7 +23,7 @@ std::unique_ptr<::gloo::Algorithm> initializeAlgorithm(
   if (gpu_direct_) {
     if (context->getDevice()->hasGPUDirect()) {
       return std::unique_ptr<::gloo::Algorithm>(
-        new A<T, ::gloo::CudaDeviceWorkspace<T>>(context, ptrs, size));
+        new A<T, ::gloo::HipDeviceWorkspace<T>>(context, ptrs, size));
     } else {
       LOG(WARNING)
         << "GPUDirect not available; "
@@ -32,7 +32,7 @@ std::unique_ptr<::gloo::Algorithm> initializeAlgorithm(
   }
 
   return std::unique_ptr<::gloo::Algorithm>(
-    new A<T, ::gloo::CudaHostWorkspace<T>>(context, ptrs, size));
+    new A<T, ::gloo::HipHostWorkspace<T>>(context, ptrs, size));
 }
 
 } // namespace
@@ -41,14 +41,14 @@ template <class Context>
 void AllreduceOp<Context>::initializeHalvingDoubling() {
   if (init_.template IsType<float>()) {
     algorithm_ =
-      initializeAlgorithm<::gloo::CudaAllreduceHalvingDoubling, float>(
+      initializeAlgorithm<::gloo::HipAllreduceHalvingDoubling, float>(
         gpu_direct_,
         init_.context,
         init_.template getOutputs<float>(),
         init_.size);
   } else if (init_.template IsType<float16>()) {
     algorithm_ =
-      initializeAlgorithm<::gloo::CudaAllreduceHalvingDoubling, ::gloo::float16>(
+      initializeAlgorithm<::gloo::HipAllreduceHalvingDoubling, ::gloo::float16>(
         gpu_direct_,
         init_.context,
         init_.template getOutputs<::gloo::float16>(),
@@ -62,14 +62,14 @@ template <class Context>
 void AllreduceOp<Context>::initializeRingFull() {
   if (init_.template IsType<float>()) {
     algorithm_ =
-      initializeAlgorithm<::gloo::CudaAllreduceRing, float>(
+      initializeAlgorithm<::gloo::HipAllreduceRing, float>(
         gpu_direct_,
         init_.context,
         init_.template getOutputs<float>(),
         init_.size);
   } else if (init_.template IsType<float16>()) {
     algorithm_ =
-      initializeAlgorithm<::gloo::CudaAllreduceRing, ::gloo::float16>(
+      initializeAlgorithm<::gloo::HipAllreduceRing, ::gloo::float16>(
         gpu_direct_,
         init_.context,
         init_.template getOutputs<::gloo::float16>(),
@@ -83,14 +83,14 @@ template <class Context>
 void AllreduceOp<Context>::initializeRingChunked() {
   if (init_.template IsType<float>()) {
     algorithm_ =
-      initializeAlgorithm<::gloo::CudaAllreduceRingChunked, float>(
+      initializeAlgorithm<::gloo::HipAllreduceRingChunked, float>(
         gpu_direct_,
         init_.context,
         init_.template getOutputs<float>(),
         init_.size);
   } else if (init_.template IsType<float16>()) {
     algorithm_ =
-      initializeAlgorithm<::gloo::CudaAllreduceRingChunked, ::gloo::float16>(
+      initializeAlgorithm<::gloo::HipAllreduceRingChunked, ::gloo::float16>(
         gpu_direct_,
         init_.context,
         init_.template getOutputs<::gloo::float16>(),
@@ -102,7 +102,7 @@ void AllreduceOp<Context>::initializeRingChunked() {
 
 namespace {
 
-REGISTER_CUDA_OPERATOR_WITH_ENGINE(Allreduce, GLOO, AllreduceOp<CUDAContext>);
+REGISTER_HIP_OPERATOR_WITH_ENGINE(Allreduce, GLOO, AllreduceOp<HIPContext>);
 
 } // namespace
 } // namespace gloo
