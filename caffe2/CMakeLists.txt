@@ -207,7 +207,6 @@ target_link_libraries(caffe2_protos PUBLIC protobuf::libprotobuf)
 # Compile exposed libraries.
 list(APPEND Caffe2_CPU_SRCs $<TARGET_OBJECTS:c10>)
 add_library(caffe2 ${Caffe2_CPU_SRCS})
-target_compile_options(caffe2 PRIVATE "-fvisibility=hidden")
 caffe2_interface_library(caffe2_protos caffe2_protos_whole)
 target_link_libraries(caffe2 PRIVATE caffe2_protos_whole)
 if (${CAFFE2_LINK_LOCAL_PROTOBUF})
@@ -229,6 +228,13 @@ target_compile_options(caffe2 INTERFACE "-std=c++11")
 else()
 target_compile_options(caffe2 INTERFACE "$<$<COMPILE_LANGUAGE:CXX>:-std=c++11>")
 endif()
+
+# Note(jiayq): This is not complete yet, but in the end we will need to deal with
+# explicit hidden visibility.
+# This line is here so that when testing build, we can enable it to properly test
+# annotation of public symbols. When finally doing proper build with all symbols
+# annotated, we will enable this line and have it wrapped with gcc/clang checks.
+# target_compile_options(caffe2 PRIVATE "-fvisibility=hidden")
 
 target_compile_options(caffe2 PRIVATE "-DCAFFE2_BUILD_MAIN_LIB")
 if (MSVC AND NOT BUILD_SHARED_LIBS)
