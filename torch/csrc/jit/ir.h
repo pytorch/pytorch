@@ -1,6 +1,8 @@
 
 #pragma once
 
+#include "caffe2/utils/string_utils.h"
+
 #include "torch/csrc/jit/attributes.h"
 #include "torch/csrc/jit/assertions.h"
 #include "torch/csrc/jit/generic_if.h"
@@ -329,6 +331,17 @@ public:
   }
   void setScope(Scope* scope) {
     scope_ = scope;
+  }
+  void setScopeFromString(std::string scopeName) {
+    if (scopeName == "") {
+      return;
+    }
+    std::vector<std::string> result = caffe2::split('/', scopeName);
+    Scope* current = new Scope(NULL, Symbol::scope(result.at(0)));
+    for (std::vector<std::string>::iterator t=result.begin(); t!=result.end(); ++t) {
+      current = new Scope(current, Symbol::scope(*t));
+      this->setScope(current);
+    }
   }
   std::string scopeName() const {
     if (scope_ == NULL) {
@@ -933,7 +946,11 @@ public:
     return current_scope_;
   }
   void set_current_scope(Scope* scope) {
-    if (scope->getRoot() != scope_root_.get()) {
+    std::string name1 = scope->getRoot()->name().toDisplayString();
+    std::string name2 = scope_root_.get()->name().toDisplayString();
+    if (name1.find(name2) < 0 &&
+        name2.find(name1) < 0 &&
+        scope->getRoot() != scope_root_.get()) {
       throw std::runtime_error("trying to set a scope as current that does not belong to the Graph's scope trie");
     }
     current_scope_ = scope;
@@ -1072,6 +1089,13 @@ public:
       IValue val,
       at::optional<SourceRange> loc = at::nullopt) {
     return jit::insertConstant(*this, std::move(val), loc);
+  }
+
+  Value* insertConstantWithScope(
+      IValue val,
+      std::string scopeName = std::string(),
+      at::optional<SourceRange> loc = at::nullopt) {
+    return jit::insertConstantWithScope(*this, std::move(val), scopeName, loc);
   }
 
   // schema-driven insert

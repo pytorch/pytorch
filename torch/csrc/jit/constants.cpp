@@ -41,6 +41,46 @@ Value* insertConstant(
   return g.insertNode(n)->output();
 }
 
+// IValue -> Constant node
+Value* insertConstantWithScope(
+    Graph& g,
+    IValue val,
+    std::string scopeName,
+    at::optional<SourceRange> loc) {
+  Node * n = g.create(prim::Constant);
+  if(val.isTensor()) {
+    at::Tensor ref = std::move(val).toTensor();
+    JIT_ASSERT(ref.defined());
+    n->output()->inferTypeFrom(ref); // note: before t_ because of std::move(ref)
+    n->t_(attr::value, std::move(ref));
+  } else if(val.isInt()) {
+    n->i_(attr::value, val.toInt());
+    n->output()->setType(IntType::get());
+  } else if(val.isDouble()) {
+    n->f_(attr::value, val.toDouble());
+    n->output()->setType(FloatType::get());
+  } else if(val.isIntList()) {
+    n->is_(attr::value, val.toIntList()->elements());
+    n->output()->setType(ListType::ofInts());
+  } else if(val.isTensorList()) {
+    n->ts_(attr::value, fmap(val.toTensorList()->elements(), [](const at::Tensor & t) {
+      return autograd::Variable(t).data();
+    }));
+    n->output()->setType(ListType::ofTensors());
+  } else if(val.isString()) {
+    n->s_(attr::string, val.toString()->string());
+    n->output()->setType(StringType::get());
+  } else {
+    throw std::runtime_error("Unsupported value kind: " + val.tagKind());
+  }
+  if(loc)
+    n->setSourceLocation(std::make_shared<SourceRange>(*loc));
+  if (scopeName != "") {
+    n->setScopeFromString(scopeName);
+  }
+  return g.insertNode(n)->output();
+}
+
 RegisterOperators reg({
   // Implementation of constant node, computes and IValue
   Operator(

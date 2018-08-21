@@ -327,6 +327,7 @@ void initPythonIRBindings(PyObject * module_) {
     .NS(hasUses)
     .NS(eraseOutput)
     .NS(addOutput)
+    .NS(setScopeFromString)
     .NS(scopeName)
     .def("blocks", [](Node& n) {
       return py::make_iterator(n.blocks().begin(), n.blocks().end());
