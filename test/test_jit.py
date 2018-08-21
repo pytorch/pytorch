@@ -23,6 +23,8 @@ import shutil
 import warnings
 from test_autograd import method_tests, create_input, unpack_variables, \
     exclude_tensor_method, non_differentiable, EXCLUDE_GRADCHECK, EXCLUDE_FUNCTIONAL
+from test_nn import NewModuleTest
+from common_nn import module_tests, TestBase
 from copy import deepcopy
 import random
 
@@ -6733,6 +6735,24 @@ def check_against_reference(self, func, reference_func, args, kwargs=None, allow
         self.assertTrue(torch.allclose(g2, g2_test, atol=5e-4, rtol=1e-4))
 
 
+class ScriptModuleTest(TestBase):
+    def __init__(self, *args, **kwargs):
+        super(ScriptModuleTest, self).__init__(*args, **kwargs)
+        self.precision = kwargs.get('precision', 2e-4)
+
+    def __call__(self, test_case):
+        module = self.constructor(*self.constructor_args)
+        input = self._get_input()
+
+        if self.reference_fn is not None:
+            out = test_case._forward(module, input)
+            ref_input = deepcopy(input)
+            expected_out = self.reference_fn(ref_input, test_case._get_parameters(module)[0])
+            test_case.assertEqual(out, expected_out)
+        self.test_noncontig(test_case, module, input)
+
+
+
 class TestJitGenerated(TestCase):
     pass
 
@@ -7051,7 +7071,7 @@ def add_test(
         post_add_test(test_name, skipTestIf, do_test)
 
 
-def add_nn_test(name, self_size, args, skipTestIf=(), output_process_fn=lambda x: x, kwargs=None):
+def add_nn_functional_test(name, self_size, args, skipTestIf=(), output_process_fn=lambda x: x, kwargs=None):
     test_name = 'test_nn_' + name
 
     def do_test(self, name=name, args=args, test_name=test_name):
@@ -7082,6 +7102,33 @@ def add_nn_test(name, self_size, args, skipTestIf=(), output_process_fn=lambda x
     post_add_test(test_name, skipTestIf, do_test)
 
 
+def add_nn_module_test(test_params):
+    if 'constructor' not in test_params:
+        name = test_params.pop('module_name')
+        test_params['constructor'] = getattr(nn.script, name)
+
+    test = ScriptModuleTest(**test_params)
+    test_name = test.get_name()
+    post_add_test(test_name, (), lambda self, test=test: test(self))
+
+    if 'check_eval' in test_params:
+        # create a new test that is identical but that sets module.training to False
+        desc = test_params.get('desc', None)
+        test_params['desc'] = 'eval' if desc is None else desc + '_eval'
+
+        def gen_eval_constructor(constructor):
+            def eval_constructor(*args, **kwargs):
+                cons = constructor(*args, **kwargs)
+                cons.training = False
+                return cons
+            eval_constructor.__name__ = constructor.__name__
+            return eval_constructor
+
+        test_params['constructor'] = gen_eval_constructor(test_params['constructor'])
+        test = ScriptModuleTest(**test_params)
+        add_test(test, decorator)
+
+
 def post_add_test(test_name, skipTestIf, do_test):
     assert not hasattr(TestJitGenerated, test_name), 'Two tests have the same name: ' + test_name
 
@@ -7096,7 +7143,10 @@ for test in method_tests:
     add_test(*test)
 
 for test in nn_functional_tests:
-    add_nn_test(*test)
+    add_nn_functional_test(*test)
+
+for test_params in module_tests:
+    add_nn_module_test(test_params)
 
 if __name__ == '__main__':
     run_tests()
