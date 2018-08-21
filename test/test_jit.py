@@ -4789,6 +4789,12 @@ def func(t):
         self.assertEqual(r.dtype, torch.float)
         self.assertEqual(torch.zeros([1, 1, 2], dtype=torch.float), r)
 
+    def test_vararg_zeros(self):
+        def foo():
+            return torch.zeros(3, 4, 5, dtype=torch.int)
+
+        self.checkScript(foo, ())
+
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     def test_rand(self):
 
