@@ -38,8 +38,8 @@ class CAFFE2_API SignalHandler {
 // This works by setting up certain fatal signal handlers. Previous fatal
 // signal handlers will still be called when the signal is raised. Defaults
 // to being off.
-void setPrintStackTracesOnFatalSignal(bool print);
-bool printStackTracesOnFatalSignal();
+CAFFE2_API void setPrintStackTracesOnFatalSignal(bool print);
+CAFFE2_API bool printStackTracesOnFatalSignal();
 #endif // defined(CAFFE2_SUPPORTS_SIGNAL_HANDLER)
 
 }  // namespace caffe2

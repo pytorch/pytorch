@@ -8,7 +8,7 @@
 #include <vector>
 
 namespace caffe2 { namespace onnx {
-class Caffe2BackendRep {
+class CAFFE2_API Caffe2BackendRep {
  public:
   void Run(
       const caffe2::Predictor::TensorVector& inputs,

@@ -23,7 +23,7 @@ class Tensor;
 
 // An empty class as a placeholder for a math function that has no specific
 // engine specified.
-class DefaultEngine {};
+class CAFFE2_API DefaultEngine {};
 
 namespace math {
 

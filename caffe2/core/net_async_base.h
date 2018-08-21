@@ -31,7 +31,7 @@ namespace tracing {
 class Tracer;
 }
 
-class AsyncNetBase : public NetBase {
+class CAFFE2_API AsyncNetBase : public NetBase {
  public:
   AsyncNetBase(const std::shared_ptr<const NetDef>& net_def, Workspace* ws);
   ~AsyncNetBase() override;
