@@ -582,11 +582,6 @@ class Task(object):
             Task.TASK_SETUP, [self._step] + report_steps, self)
         instance_init_nets, instance_exit_nets = get_setup_nets(
             Task.TASK_INSTANCE_SETUP, [self._step] + report_steps, self)
-        if len(self._outputs) == 0:
-            output_net = core.Net('%s:output' % self.name)
-            self.add_output(output_net.ConstantFill(
-                [], 1, dtype=core.DataType.INT32, value=0))
-            task_exit_nets.append(output_net)
 
         # Add instance-level report steps
         body = self._step if not report_steps else core.execution_step(

@@ -497,6 +497,11 @@ void addObjectMethods(py::module& m) {
             return self->HasBlob(name);
           })
       .def(
+          "remove_blob",
+          [](Workspace* self, const std::string& name) -> py::bool_ {
+            return self->RemoveBlob(name);
+          })
+      .def(
           "_run_net",
           [](Workspace* self, py::bytes def) {
             caffe2::NetDef proto;
