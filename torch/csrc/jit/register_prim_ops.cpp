@@ -35,7 +35,7 @@ Operation noop(Node* n) {
 // using the rules from python_arg_parser FunctionParameter::check
 // tensor cannot have grad set, tensor must be 0 dim,
 // and if the dest is an int the source must be integral type
-void checkScalarToNum(at::Tensor t, bool toInt) {
+void checkImplicitTensorToNum(at::Tensor t, bool toInt) {
   if (autograd::as_variable_ref(t).requires_grad()) {
     throw std::runtime_error("Cannot input a tensor that requires grad as a scalar argument");
   }
@@ -90,13 +90,13 @@ RegisterOperators reg({
           }
         }),
     Operator(
-        prim::ScalarToNum,
+        prim::ImplicitTensorToNum,
         [](Node* node) -> Operation {
           if(node->output()->type() == IntType::get()) {
             return [](Stack& stack) {
               at::Tensor a;
               pop(stack, a);
-              checkScalarToNum(a, /*to int*/ true);
+              checkImplicitTensorToNum(a, /*to int*/true);
               at::DeviceGuard guard(a);
               push(stack, a.toCLong());
               return 0;
@@ -105,7 +105,7 @@ RegisterOperators reg({
             return [](Stack& stack) {
               at::Tensor a;
               pop(stack, a);
-              checkScalarToNum(a, /*to int*/ false);
+              checkImplicitTensorToNum(a, /*to int*/false);
               at::DeviceGuard guard(a);
               push(stack, a.toCDouble());
               return 0;

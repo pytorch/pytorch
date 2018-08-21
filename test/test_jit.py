@@ -2228,7 +2228,7 @@ a")
             x = x + c
             return x
 
-        self.assertTrue("ScalarToNum" not in str(multiple_defs.graph))
+        self.assertTrue("ImplicitTensorToNum" not in str(multiple_defs.graph))
 
         @torch.jit.script
         def tensor_to_int_script(x, tensor):
@@ -2239,10 +2239,10 @@ a")
 
         @torch.jit.script
         def tensor_to_float_script(x, tensor):
-            return x.addcmul(tensor, tensor, tensor)
+            return x.addcmul(tensor, tensor, value=tensor)
 
         def tensor_to_float(x, tensor):
-            return x.addcmul(tensor, tensor, tensor)
+            return x.addcmul(tensor, tensor, value=tensor)
 
         x = torch.zeros(10)
         # float tensor, float tensor with grad, int tensor (can't set grad on int tensor)
@@ -2427,10 +2427,13 @@ a")
         x = torch.rand(10, dtype=torch.float, requires_grad=True)
         self.assertEqual(func(x), torch.cat((x, x), dim=0))
 
-        with self.assertRaisesRegex(RuntimeError, "expected a value of type int"):
-            @torch.jit.script
-            def func(x):
-                return torch.cat((x, x), x, dim=0)
+        @torch.jit.script
+        def func2(x, y):
+            return torch.cat((x, x), y)
+
+        x = torch.rand([2, 2])
+        y = torch.tensor(1)
+        self.assertEqual(func2(x, y), torch.cat((x, x), y))
 
     def test_cat_lifts(self):
         @torch.jit.script

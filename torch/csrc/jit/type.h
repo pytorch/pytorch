@@ -459,11 +459,6 @@ inline TypePtr TensorType::fromNumberType(TypePtr typ) {
 // input because of a lack of operator support for NumberType
 TORCH_API at::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2);
 
-// check if the type can be cast to a scalar in a function call
-// will return an error message if incompatible
-// input must be a Tensor and dest must be a subtype of NumberType
-TORCH_API at::optional<std::string> checkScalarToNum(const TypePtr& source, const TypePtr& dest);
-
 template <typename T>
 TypePtr getTypePtr() {
 #define TYPE_STR(Type) #Type, " ",

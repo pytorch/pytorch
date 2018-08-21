@@ -69,7 +69,7 @@ void PeepholeOptimize(Block * block) {
           }
         }
       }
-    } else if(node->kind() == prim::TensorToNum || node->kind() == prim::ScalarToNum) {
+    } else if(node->kind() == prim::TensorToNum || node->kind() == prim::ImplicitTensorToNum) {
       Node* input_node = node->input()->node();
       if (input_node->kind() == prim::NumToTensor) {
         node->output()->replaceAllUsesWith(input_node->input());

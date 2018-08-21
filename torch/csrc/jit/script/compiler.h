@@ -145,8 +145,8 @@ TORCH_API void ensureTensors(const SourceRange& range, at::ArrayRef<Value*> valu
 // try to match a list if inputs and keyword 'attributes' to this schema,
 // if it works return the flat list of positional inputs to the call
 // if it returns nullopt, then failure_messages contains a good error report
-// set convert_tensor_to_num to true if TensorToNums should be inserted to make
-// the schema match
+// set convert_tensor_to_num to true if ImplicitTensorToNums should be inserted to
+// match the schema
 TORCH_API at::optional<std::vector<Value*>> tryMatchSchema(
   const FunctionSchema& schema,
   const SourceRange& loc,

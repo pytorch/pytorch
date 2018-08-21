@@ -114,7 +114,7 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
 
     std::stringstream failure_messages;
     at::optional<std::vector<Value*>> all_inputs =
-      tryMatchSchema(schema, loc, *m.graph(), inputs_, attributes, failure_messages, /* conv tensor_to_num */ false);
+      tryMatchSchema(schema, loc, *m.graph(), inputs_, attributes, failure_messages, /*conv_tensor_to_num*/true);
     if (!all_inputs)
       throw ErrorReport(loc) << failure_messages.str();
 

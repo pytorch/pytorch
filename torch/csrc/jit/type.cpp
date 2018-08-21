@@ -1,7 +1,6 @@
 #include "torch/csrc/jit/type.h"
 
 #include "torch/csrc/jit/assertions.h"
-// #include "torch/lib/include/ATen/core/ScalarType.h"
 
 #include <iostream>
 
@@ -86,7 +85,6 @@ ListTypePtr ListType::ofFloats() {
   return value;
 }
 
-<<<<<<< HEAD
 TypePtr inferTypeFrom(const IValue& value) {
   if (value.isTensor()) {
     return TensorType::create(value.toTensor());
@@ -150,24 +148,5 @@ at::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2) {
 
   return at::nullopt;
 }
-
-// using the rules from python_arg_parser FunctionParameter::check
-// tensor must be 0 dim, and if the dest is an int the source must be integral type
-at::optional<std::string> checkScalarToNum(const TypePtr& source, const TypePtr& dest) {
-  JIT_ASSERT(source->isSubtypeOf(DynamicType::get()));
-  JIT_ASSERT(dest->isSubtypeOf(NumberType::get()));
-  if (auto tensortype = source->cast<TensorType>()) {
-    if (tensortype->sizes().size() != 0) {
-      return std::string("Cannot input a tensor of dimension other than 0 as a scalar argument");
-    }
-    if (dest == IntType::get() && !isIntegralType(tensortype->scalarType())) {
-      std::stringstream ss;
-      ss << "Cannot input a tensor of type " << tensortype->scalarType() << " as an integral argument";
-      return ss.str();
-    }
-  }
-  return at::nullopt;
-}
-
 
 }} // namespace torch::jit

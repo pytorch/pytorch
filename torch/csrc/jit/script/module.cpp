@@ -42,13 +42,13 @@ std::vector<Value*> Method::emit_call_to(SourceRange loc, Method & callee, Array
   std::stringstream failure_messages;
   auto all_inputs = tryMatchSchema(
     callee.schema ? *callee.schema : defaultSchemaFor(callee),
-    loc, *graph(), args, kwargs, failure_messages, /*conv_tensors_to_nums*/ true);
+    loc, *graph(), args, kwargs, failure_messages, /*conv_tensors_to_nums*/true);
   if(!all_inputs)
     throw ErrorReport(loc) << failure_messages.str();
 
   // parameters to callee method (which become parameters to _this_ method
   // if they were not already)
-    for(at::Tensor* member : callee.member_inputs) {
+  for(at::Tensor* member : callee.member_inputs) {
     all_inputs->push_back(get_or_add_parameter(member));
   }
   return inlineCallTo(*graph(), *callee.graph(), *all_inputs);

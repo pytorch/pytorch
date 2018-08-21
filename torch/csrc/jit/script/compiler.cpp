@@ -491,13 +491,10 @@ Value* tryMatchArgument(
   //implicit conversion of tensors to scalars
   if(convert_tensors_to_nums && arg.type->isSubtypeOf(NumberType::get())
       && value->type()->isSubtypeOf(DynamicType::get())) {
-      auto err = checkScalarToNum(value->type(), arg.type);
-      if (!err) {
-        auto n = graph.createScalarToNum(arg.type, value);
-        value = graph.insertNode(n)
-          ->setSourceLocation(std::make_shared<SourceRange>(positional_inputs[i]->locOr(loc)))
-          ->output();
-    }
+      auto n = graph.createImplicitTensorToNum(arg.type, value);
+      value = graph.insertNode(n)
+        ->setSourceLocation(std::make_shared<SourceRange>(loc))
+        ->output();
   }
 
   if(!value->type()->isSubtypeOf(arg.type)) {
@@ -523,11 +520,11 @@ Value* tryCreateList(
     const SourceRange& loc,
     at::ArrayRef<NamedValue> varargs,
     std::function<std::ostream&()> err,
-    bool convert_tensors_to_nums) {
+    bool convert_tensor_to_num) {
   Argument elem_arg("", elem_type);
   std::vector<Value*> list_ctor;
   for(const auto& a : varargs) {
-    Value* av = tryMatchArgument(elem_arg, graph, loc, a, err, convert_tensors_to_nums);
+    Value* av = tryMatchArgument(elem_arg, graph, loc, a, err, convert_tensor_to_num);
     if(!av)
       return nullptr;
     list_ctor.push_back(av);
@@ -685,8 +682,7 @@ Value* emitBuiltinCall(
   const auto& variants = getAllOperatorsFor(name);
   std::stringstream failure_messages;
   //first we try to match the schema without any conversion
-  //if no schema matches then insert ScalarToTensor with float casts
-  //then int casts
+  //if no schema matches then insert ImplicitTensorToNum
   for(bool convert_tensors_to_nums : {false, true}) {
     //clear previous error messages
     failure_messages.str("");
