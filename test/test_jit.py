@@ -23,8 +23,7 @@ import shutil
 import warnings
 from test_autograd import method_tests, create_input, unpack_variables, \
     exclude_tensor_method, non_differentiable, EXCLUDE_GRADCHECK, EXCLUDE_FUNCTIONAL
-from test_nn import NewModuleTest
-from common_nn import module_tests, TestBase
+from common_nn import TestBase
 from copy import deepcopy
 import random
 
@@ -3651,13 +3650,6 @@ def func(t):
         with self.assertRaisesRegex(RuntimeError, "cannot be used as a tuple"):
             M()
 
-    def test_script_nn_module(self):
-        from torch.nn.script import Threshold, RReLU
-
-        # self.checkTrace(nnscript.Tanh(), (torch.rand(3, 4),))
-        self.checkTrace(RReLU(lower=0.1, upper=0.3), (torch.rand(3, 4),))
-        self.checkTrace(Threshold(threshold=0.5, value=0.1), (torch.rand(3, 4),))
-
     def test_script_sequential_for(self):
         class Sub(torch.jit.ScriptModule):
             def __init__(self):
@@ -6402,7 +6394,7 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
                     outputs = torch.cat((outputs, output), 1)
                 return outputs
 
-        self.checkTrace(Sequence(), (torch.rand(3, 4),), verbose=True)
+        self.checkTrace(Sequence(), (torch.rand(3, 4),))
 
     def test_vae(self):
         class VAE(nn.Module):
