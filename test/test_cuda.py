@@ -1730,17 +1730,7 @@ class TestCuda(TestCase):
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_symeig(self):
-        # Small case
-        tensor = torch.randn(3, 3).cuda()
-        tensor = torch.mm(tensor, tensor.t())
-        eigval, eigvec = torch.symeig(tensor, eigenvectors=True)
-        self.assertEqual(tensor, torch.mm(torch.mm(eigvec, eigval.diag()), eigvec.t()))
-
-        # Large case
-        tensor = torch.randn(257, 257).cuda()
-        tensor = torch.mm(tensor, tensor.t())
-        eigval, eigvec = torch.symeig(tensor, eigenvectors=True)
-        self.assertEqual(tensor, torch.mm(torch.mm(eigvec, eigval.diag()), eigvec.t()))
+        TestTorch._test_symeig(self, lambda t: t.cuda())
 
     def test_arange(self):
         for t in ['IntTensor', 'LongTensor', 'FloatTensor', 'DoubleTensor']:

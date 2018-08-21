@@ -4277,13 +4277,12 @@ class TestTorch(TestCase):
         Xhat = torch.mm(torch.mm(v, torch.diag(e.select(1, 0))), v.t())
         self.assertEqual(X, Xhat, 1e-8, 'VeV\' wrong')
 
-    @skipIfNoLapack
-    @skipIfRocm
-    def test_symeig(self):
-        xval = torch.rand(100, 3)
+    @staticmethod
+    def _test_symeig(self, conv_fn):
+        xval = conv_fn(torch.rand(100, 3))
         cov = torch.mm(xval.t(), xval)
-        rese = torch.zeros(3)
-        resv = torch.zeros(3, 3)
+        rese = conv_fn(torch.zeros(3))
+        resv = conv_fn(torch.zeros(3, 3))
 
         # First call to symeig
         self.assertTrue(resv.is_contiguous(), 'resv is not contiguous')
@@ -4298,24 +4297,28 @@ class TestTorch(TestCase):
         self.assertEqual(cov, ahat, 1e-8, 'VeV\' wrong')
 
         # test eigenvectors=False
-        cov = cov.cuda()
-        rese2 = torch.zeros(3).cuda()
-        resv2 = torch.randn(3, 3).cuda()
-        expected_resv2 = torch.zeros(3, 3)
+        rese2 = conv_fn(torch.zeros(3))
+        resv2 = conv_fn(torch.randn(3, 3))
+        expected_resv2 = conv_fn(torch.zeros(3, 3))
         torch.symeig(cov.clone(), False, out=(rese2, resv2))
         self.assertEqual(rese, rese2)
         self.assertEqual(resv2, expected_resv2)
 
         # test non-contiguous
-        X = torch.rand(5, 5)
+        X = conv_fn(torch.rand(5, 5))
         X = X.t() * X
-        e = torch.zeros(4, 2).select(1, 1)
-        v = torch.zeros(4, 2, 4)[:, 1]
+        e = conv_fn(torch.zeros(4, 2)).select(1, 1)
+        v = conv_fn(torch.zeros(4, 2, 4))[:, 1]
         self.assertFalse(v.is_contiguous(), 'V is contiguous')
         self.assertFalse(e.is_contiguous(), 'E is contiguous')
         torch.symeig(X, True, out=(e, v))
         Xhat = torch.mm(torch.mm(v, torch.diag(e)), v.t())
         self.assertEqual(X, Xhat, 1e-8, 'VeV\' wrong')
+
+    @skipIfNoLapack
+    @skipIfRocm
+    def test_symeig(self):
+        self._test_symeig(self, lambda x: x)
 
     @skipIfNoLapack
     def test_svd(self):
