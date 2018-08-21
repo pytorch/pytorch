@@ -170,16 +170,20 @@ protected:
 // is the function under that custom op namespace we want to call, and a
 // `BuiltinFunction` value is returned for it.
 struct VISIBILITY_HIDDEN CustomOpNamespaceValue : public PythonValue {
-  explicit CustomOpNamespaceValue(py::object obj) : PythonValue(std::move(obj)) {}
+  explicit CustomOpNamespaceValue(py::object obj)
+      : PythonValue(std::move(obj)) {}
 
   std::shared_ptr<SugaredValue> attr(
       SourceRange loc,
       Method& m,
       const std::string& field) override {
     py::object member = getattr(loc, field);
-    AT_ASSERT(py::isinstance<py::function>(member));
-    const auto namespace_ = py::cast<std::string>(self.attr("name"));
-    return std::make_shared<BuiltinFunction>(namespace_, field, at::nullopt);
+    const auto op_namespace = py::cast<std::string>(self.attr("name"));
+    // The symbol name is the op namespace + the op (function) name, which is
+    // being accessed as the `field` here.
+    auto symbol = Symbol::fromQualString(op_namespace + "::" + field);
+    return std::make_shared<BuiltinFunction>(
+        std::move(symbol), at::nullopt);
   }
 };
 
@@ -216,7 +220,8 @@ struct VISIBILITY_HIDDEN BuiltinPythonModuleValue : public PythonModuleValue {
     // on the torch builtin modules
     py::object member = getattr(loc, field);
     if (py::isinstance<py::function>(member)) {
-      return std::make_shared<BuiltinFunction>(field, at::nullopt);
+      return std::make_shared<BuiltinFunction>(
+          Symbol::aten(field), at::nullopt);
     } else if (field == "ops") {
       return std::make_shared<CustomOpsValue>(member);
     }

@@ -609,10 +609,9 @@ static Value* identity(const SourceRange& range, Value* v) {
   return v;
 }
 
-
 std::shared_ptr<SugaredValue> BuiltinFunction::call(
     SourceRange loc,
-    Method & m,
+    Method& m,
     at::ArrayRef<NamedValue> inputs_,
     at::ArrayRef<NamedValue> attributes,
     size_t n_binders) {
@@ -620,8 +619,6 @@ std::shared_ptr<SugaredValue> BuiltinFunction::call(
   if (value)
     inputs.push_back(*value);
   inputs.insert(inputs.end(), inputs_.begin(), inputs_.end());
-  const auto symbol =
-      Symbol::fromQualString(namespace_.value_or("aten") + "::" + name);
   return std::make_shared<SimpleValue>(
       emitBuiltinCall(loc, *m.graph(), symbol, inputs, attributes, true));
 }
@@ -1514,9 +1511,12 @@ static const std::unordered_map<std::string, std::string> &builtin_cast_methods(
 std::shared_ptr<SugaredValue> SimpleValue::attr(SourceRange loc, Method & m, const std::string& field) {
   // Allow method-style casts on Tensor types. e.g. x.int()
   if (value->type()->isSubtypeOf(DynamicType::get()) && builtin_cast_methods().count(field)) {
-    return std::make_shared<BuiltinFunction>(builtin_cast_methods().at(field), NamedValue(loc, "self", value));
+    return std::make_shared<BuiltinFunction>(
+        Symbol::aten(builtin_cast_methods().at(field)),
+        NamedValue(loc, "self", value));
   }
-  return std::make_shared<BuiltinFunction>(field, NamedValue(loc, "self", value));
+  return std::make_shared<BuiltinFunction>(
+      Symbol::aten(field), NamedValue(loc, "self", value));
 }
 
 std::vector<Value*> inlineCallTo(Graph& g, Graph& callee, ArrayRef<Value*> inputs) {

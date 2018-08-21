@@ -102,17 +102,11 @@ private:
 };
 
 struct TORCH_API BuiltinFunction : public SugaredValue {
-  BuiltinFunction(const std::string& name, at::optional<NamedValue> value)
-    : name(name), value(std::move(value)) {}
-  BuiltinFunction(
-      const std::string& namespace_,
-      const std::string& name,
-      at::optional<NamedValue> value)
-      : name(name),
-        namespace_(std::move(namespace_)),
-        value(std::move(value)) {}
-  std::string name;
-  at::optional<std::string> namespace_;
+  BuiltinFunction(Symbol symbol, at::optional<NamedValue> value)
+      : symbol(std::move(symbol)), value(std::move(value)) {}
+
+  // The symbol of the function (e.g. `aten::relu`).
+  Symbol symbol;
 
   // if this is method, then this is the self argument.
   at::optional<NamedValue> value;

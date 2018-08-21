@@ -60,13 +60,12 @@ struct Method {
     get_executor().run(stack);
   }
 
-  IValue operator()(std::vector<IValue> inputs) {
-    run(inputs);
-    AT_CHECK(
-        inputs.size() == 1,
-        "Expected 1 return value, but found ",
-        inputs.size());
-    return inputs.front();
+  IValue operator()(std::vector<IValue> stack) {
+    run(stack);
+    if (stack.size() != 1) {
+      return Tuple::create(std::move(stack));
+    }
+    return stack.front();
   }
 
   std::shared_ptr<Graph> graph_for(const Stack& inputs) {
