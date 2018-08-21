@@ -2330,7 +2330,7 @@ a")
             if True:
                 x = [1, 2, 3]
             return
-        with self.assertRaisesRegex(RuntimeError, "Empty list literals not allowed"):
+        with self.assertRaisesRegex(RuntimeError, "previously has type Tensor\[\]"):
             self.checkScript(reassign_from_empty_literal, (), optimize=False)
 
         def reassign_from_empty_builtin():
