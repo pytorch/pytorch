@@ -1,3 +1,4 @@
+import os
 import unittest
 import sys
 
@@ -15,7 +16,10 @@ import common
 
 from torch.utils.cpp_extension import CUDA_HOME
 TEST_CUDA = torch.cuda.is_available() and CUDA_HOME is not None
-TEST_CUDNN = TEST_CUDA and torch.backends.cudnn.is_available()
+TEST_CUDNN = False
+if TEST_CUDA:
+    CUDNN_HEADER_EXISTS = os.path.isfile(os.path.join(CUDA_HOME, 'include/cudnn.h'))
+    TEST_CUDNN = TEST_CUDA and CUDNN_HEADER_EXISTS and torch.backends.cudnn.is_available()
 
 
 class TestCppExtension(common.TestCase):
