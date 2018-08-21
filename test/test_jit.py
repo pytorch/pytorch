@@ -3041,6 +3041,14 @@ def func4():
             self.assertEqual(cu.func3(), scope['func3']())
             self.assertEqual(cu.func4(), scope['func4']())
 
+    def test_number_augassign(self):
+        def func():
+            z = 1
+            z += 2
+            return z
+
+        self.checkScript(func, (), optimize=True)
+
     def test_number_neg(self):
         # int -> int
         def func1():
