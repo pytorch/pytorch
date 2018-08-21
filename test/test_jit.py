@@ -3895,15 +3895,34 @@ def func(t):
                 return c0
 
     def test_if_different_type(self):
-        with self.assertRaisesRegex(RuntimeError, "Type mismatch: c0 is set to type Tensor "
-                                    "in the true branch and type int in the false branch:"):
+        with self.assertRaisesRegex(RuntimeError, "Type mismatch: c0 is set to type int "
+                                    "in the true branch and type float in the false branch:"):
             @torch.jit.script
-            def diff_type(x):
+            def diff_type_used():
                 if False:
-                    c0 = x
-                else:
                     c0 = 1
+                else:
+                    c0 = 1.0
                 return c0
+
+        with self.assertRaisesRegex(RuntimeError, "variable 'c0' previously has type float"):
+            @torch.jit.script
+            def diff_existing_type(x):
+                c0 = 1.0
+                if False:
+                    c0 = 1
+                    print(x)
+                return x
+
+        @torch.jit.script
+        def diff_type_unused():
+            if True:
+                c0 = 1
+                print(c0)
+            else:
+                c0 = 1.0
+                print(c0)
+            return 1
 
     def test_if_list(self):
         # testing that different length lists don't throw error
@@ -3930,13 +3949,6 @@ def func(t):
             else:
                 x, y, z = x, x, y
 
-            #  set to scalar
-            if True:
-                c = 1.0
-            else:
-                c = 1
-
-            x = x.clamp(c, c)
             return x, y, z
 
         a = torch.zeros(2, 2, dtype=torch.float)

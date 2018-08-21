@@ -152,9 +152,34 @@ struct Environment {
   Method & method;
   const Resolver& resolver;
   std::vector<std::string> captured_inputs;
+  std::unordered_map<std::string, std::string> error_messages;
   Block* b;
 
   std::shared_ptr<Environment> next;
+
+  // set type error in the lowest environment. if the variable is used after an
+  // error has been set, then it will be thrown.
+  void setVariableTypeError(const std::string& name, const std::string &msg) {
+    auto runner = this;
+    while (runner->next) {
+      runner = runner->next.get();
+    }
+    runner->error_messages[name] = msg;
+  }
+
+  // see if type error has been set for a variable
+  at::optional<std::string> findVariableTypeError(const std::string& name) {
+    auto runner = this;
+    while (runner->next) {
+      runner = runner->next.get();
+    }
+    auto msg = runner->error_messages.find(name);
+    if (msg != runner->error_messages.end()) {
+      return msg->second;
+    } else {
+      return at::nullopt;
+    }
+  }
 
   SugaredValuePtr findInThisFrame(const std::string& name) {
     auto it = value_table.find(name);
@@ -307,6 +332,11 @@ struct Environment {
     }
 
     if (!retval && required) {
+      // check if this value was not emitted in an if statement because of a
+      // type mismatch. if it was, then we print a more informative error msg
+      if (auto msg = findVariableTypeError(ident)) {
+        throw ErrorReport(range) << *msg << "and was used here";
+      }
       throw ErrorReport(range) << "undefined value " << ident;
     }
     return retval;
@@ -472,11 +502,17 @@ at::optional<std::vector<Value*>> tryMatchSchema(
 
       // Allow homogeneous tuples to be casted implicitly to lists of appropriate types
       if (arg.type->kind() == TypeKind::ListType &&
-          value->type()->kind() == TypeKind::TupleType &&
-          value->type()->isSubtypeOf(arg.type)) {
-        auto unpacked = createTupleUnpack(value);
-        auto elem_type = arg.type->expect<ListType>()->getElementType();
-        value = graph.insertNode(graph.createList(elem_type, unpacked))->output();
+          value->type()->kind() == TypeKind::TupleType) {
+          auto list_type = arg.type->cast<ListType>()->getElementType();
+          auto tuple = value->type()->cast<TupleType>();
+          auto castable = std::all_of(tuple->elements().begin(), tuple->elements().end(), [&](const TypePtr& t) {
+            return unifyTypes(list_type, t) != at::nullopt;
+          });
+          if (castable) {
+            auto unpacked = createTupleUnpack(value);
+            auto elem_type = arg.type->expect<ListType>()->getElementType();
+            value = graph.insertNode(graph.createList(elem_type, unpacked))->output();
+          }
       }
 
       if (value->node()->kind() == prim::None){
@@ -910,10 +946,23 @@ private:
       auto tv = save_true->getVar(x, stmt.range());
       auto fv = save_false->getVar(x, stmt.range());
       auto unified = unifyTypes(tv->type(), fv->type());
+
+      // attempt to unify the types. we allow variables to be set to different types
+      // in each branch as long as that variable is not already in scope,
+      // or if that variable does not get used later. here, we save the error
+      // so that the error message will be more informative in the case that is
+      // used later
+
       if (!unified) {
-        throw ErrorReport(stmt)
-          << "Type mismatch: " << x << " is set to type " << tv->type()->str() << " in the true branch"
-          << " and type " << fv->type()->str() << " in the false branch";
+        ErrorReport error(stmt);
+        error << "Type mismatch: " << x << " is set to type " << tv->type()->str() << " in the true branch"
+        << " and type " << fv->type()->str() << " in the false branch";
+        if (save_true->findInParentFrame(x) || save_false->findInParentFrame(x)) {
+          throw error;
+        } else {
+          save_true->setVariableTypeError(x, error.what());
+          continue;
+        }
       }
       true_block->registerOutput(tv);
       false_block->registerOutput(fv);

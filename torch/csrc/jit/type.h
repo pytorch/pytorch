@@ -267,14 +267,6 @@ struct TORCH_API TupleType : public Type {
     });
   }
   bool isSubtypeOf(const TypePtr rhs) const override {
-    // e.g. (Tensor, Tensor, Tensor) <: List[Tensor]
-    if(auto lt = rhs->cast<ListType>()) {
-      for(auto e : elements()) {
-        if(!e->isSubtypeOf(lt->getElementType()))
-          return false;
-      }
-      return true;
-    }
     // co-variant rules for tuples
     return compare(*rhs, [](const TypePtr a, const TypePtr b) {
       return a->isSubtypeOf(b);
@@ -459,10 +451,12 @@ inline TypePtr TensorType::fromNumberType(TypePtr typ) {
   AT_ERROR("unknown number type", typ->str());
 }
 
-// attempt to find the correct supertype of t1 and t2. If none is found then
+// Attempt to find the correct supertype of t1 and t2. If none is found then
 // nullopt will be returned. If t1 == t2, or t1 is a type refinement of t2,
 // then t2 will be returned (and vice versa).
-// A float and int will return scalar, and two different tensortypes will return dynamic.
+// Two different tensortypes will return dynamic.
+// Currently we chose not to support returning a NumberType for a float & int
+// input because of a lack of operator support for NumberType
 TORCH_API at::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2);
 
 template <typename T>

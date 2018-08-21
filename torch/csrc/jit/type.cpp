@@ -114,10 +114,10 @@ at::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2) {
     return t1;
   }
 
-  // cases in which two types share a supertype
-  if (t1->isSubtypeOf(NumberType::get()) && t2->isSubtypeOf(NumberType::get())) {
-    return static_cast<TypePtr>(NumberType::get());
-  } else if (t1->isSubtypeOf(DynamicType::get()) && t2->isSubtypeOf(DynamicType::get())) {
+  // NB: we do not return NumberType because there is not currently enough
+  // operator support for it
+
+  if (t1->isSubtypeOf(DynamicType::get()) && t2->isSubtypeOf(DynamicType::get())) {
     return static_cast<TypePtr>(DynamicType::get());;
   }
 
