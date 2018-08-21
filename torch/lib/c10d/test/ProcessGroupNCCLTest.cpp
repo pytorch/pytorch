@@ -96,7 +96,7 @@ class NCCLTest : public NCCLTestBase {
     // Copy inputs to outputs
     for (auto i = 0; i < numDevices_; i++) {
       cudaStreamSynchronize(streams_[i].getStream());
-      outputs[i] = inputs_[i].toBackend(at::kCPU);
+      outputs[i] = inputs_[i].cpu();
     }
 
     return outputs;
@@ -115,7 +115,7 @@ class NCCLTest : public NCCLTestBase {
     for (auto i = 0; i < numDevices_; ++i) {
       cudaStreamSynchronize(streams_[i].getStream());
       for (auto j = 0; j < worldSize_; ++j) {
-        outputs[i][j] = outputs_[i][j].toBackend(at::kCPU);
+        outputs[i][j] = outputs_[i][j].cpu();
       }
     }
     return outputs;
