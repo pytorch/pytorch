@@ -115,7 +115,9 @@ CAFFE2_API int extractShardId(const std::string& name);
 // line flag)
 CAFFE2_API bool isTraceableNetName(const std::string& net_name);
 
-CAFFE2_API std::shared_ptr<Tracer> create(const NetBase* net, const std::string& net_name);
+CAFFE2_API std::shared_ptr<Tracer> create(
+    const NetBase* net,
+    const std::string& net_name);
 CAFFE2_API bool startIter(const std::shared_ptr<Tracer>& tracer);
 
 } // namespace tracing

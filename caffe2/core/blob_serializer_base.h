@@ -69,7 +69,6 @@ inline unique_ptr<BlobSerializerBase> CreateSerializer(TypeIdentifier id) {
   return BlobSerializerRegistry()->Create(id);
 }
 
-
 /**
  * @brief BlobDeserializerBase is an abstract class that deserializes a blob
  * from a BlobProto or a TensorProto.
@@ -89,6 +88,5 @@ CAFFE_DECLARE_REGISTRY(BlobDeserializerRegistry, BlobDeserializerBase);
 inline unique_ptr<BlobDeserializerBase> CreateDeserializer(const string& type) {
   return BlobDeserializerRegistry()->Create(type);
 }
-
 
 } // namespace caffe2
