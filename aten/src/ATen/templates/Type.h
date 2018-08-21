@@ -14,7 +14,7 @@
 #include "ATen/core/ArrayRef.h"
 #include "ATen/core/Half.h"
 #include "ATen/core/TensorTypeIdRegistration.h"
-#include "THNN/Reduction.h"
+#include "ATen/core/Reduction.h"
 
 #include <array>
 #include <cstddef>
