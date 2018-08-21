@@ -2,7 +2,7 @@
 #define TH_GENERIC_FILE "generic/THNN.h"
 #else
 
-#include "Reduction.h"
+#include <ATen/core/Reduction.h>
 
 TH_API void THNN_(Abs_updateOutput)(
           THNNState *state,            // library's state
@@ -90,7 +90,8 @@ TH_API void THNN_(ELU_updateOutput)(
           THTensor *input,             // input tensor
           THTensor *output,            // [OUT] ELU output
           accreal alpha,               // an ELU parameter (as in paper)
-          accreal scale,               // scaling factor
+          accreal scale,               // scaling factor for output
+          accreal input_scale,         // scaling factor for input
           bool inplace);               // if true, modifies gradOutput and sets gradInput onto it (no additional memory is allocated)
 TH_API void THNN_(ELU_updateGradInput)(
           THNNState *state,            // library's state
@@ -98,7 +99,8 @@ TH_API void THNN_(ELU_updateGradInput)(
           THTensor *gradInput,         // [OUT] gradient w.r.t. input
           THTensor *output,            // output from a forward pass
           accreal alpha,               // an ELU parameter (as in paper)
-          accreal scale);
+          accreal scale,
+          accreal input_scale);
 
 TH_API void THNN_(DistKLDivCriterion_updateOutput)(
           THNNState *state,            // library's state
@@ -204,42 +206,6 @@ TH_API void THNN_(LeakyReLU_updateGradInput)(
           THTensor *gradInput,         // [OUT] gradient w.r.t. the input
           accreal negval,              // negative part slope
           bool inplace);               // if true, modifies gradOutput and sets gradInput onto it (no additional memory is allocated)
-
-TH_API void THNN_(GRUFused_updateOutput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *hidden,
-          THTensor *bias1, // [OPTIONAL]
-          THTensor *bias2, // [OPTIONAL]
-          THTensor *hx,
-          THTensor *output,
-          THTensor *storage);
-TH_API void THNN_(GRUFused_updateGradInput)(
-          THNNState *state,
-          THTensor *gradInInput,
-          THTensor *gradInHidden,
-          THTensor *gradOutput,
-          THTensor *gradInputHx,
-          THTensor *storage);
-
-TH_API void THNN_(LSTMFused_updateOutput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *hidden,
-          THTensor *bias1, // [OPTIONAL]
-          THTensor *bias2, // [OPTIONAL]
-          THTensor *cell,
-          THTensor *output,
-          THTensor *outputCell);
-TH_API void THNN_(LSTMFused_updateGradInput)(
-          THNNState *state,
-          THTensor *storage,
-          THTensor *gradInGates,
-          THTensor *cx,
-          THTensor *cy,
-          THTensor *gradOutput,
-          THTensor *gradOutputCell,
-          THTensor *gradInputCx);
 
 TH_API void THNN_(LogSigmoid_updateOutput)(
           THNNState *state,            // library's state
@@ -1226,34 +1192,6 @@ TH_API void THNN_(SpatialUpSamplingBilinear_updateGradInput)(
           int osizeH,
           int osizeW,
           bool align_corners);
-
-TH_API void THNN_(SpatialGridSamplerBilinear_updateOutput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *grid,
-          THTensor *output,
-          int padding_mode);
-
-TH_API void THNN_(SpatialGridSamplerBilinear_updateGradInput)(
-          THNNState *state,
-          THTensor *input, THTensor *gradInput,
-          THTensor *grid, THTensor *gradGrid,
-          THTensor *gradOutput,
-          int padding_mode);
-
-TH_API void THNN_(VolumetricGridSamplerBilinear_updateOutput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *grid,
-          THTensor *output,
-          int padding_mode);
-
-TH_API void THNN_(VolumetricGridSamplerBilinear_updateGradInput)(
-          THNNState *state,
-          THTensor *input, THTensor *gradInput,
-          THTensor *grid, THTensor *gradGrid,
-          THTensor *gradOutput,
-          int padding_mode);
 
 TH_API void THNN_(unfolded_acc)(
           THTensor *finput,

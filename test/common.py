@@ -92,9 +92,20 @@ TEST_LIBROSA = _check_module_exists('librosa') and PY3
 NO_MULTIPROCESSING_SPAWN = os.environ.get('NO_MULTIPROCESSING_SPAWN', '0') == '1'
 TEST_WITH_ASAN = os.getenv('PYTORCH_TEST_WITH_ASAN', '0') == '1'
 TEST_WITH_UBSAN = os.getenv('PYTORCH_TEST_WITH_UBSAN', '0') == '1'
+TEST_WITH_ROCM = os.getenv('PYTORCH_TEST_WITH_ROCM', '0') == '1'
 
 if TEST_NUMPY:
     import numpy
+
+
+def skipIfRocm(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if TEST_WITH_ROCM:
+            raise unittest.SkipTest("test doesn't currently work on the ROCm stack")
+        else:
+            fn(*args, **kwargs)
+    return wrapper
 
 
 def skipIfNoLapack(fn):
@@ -103,7 +114,7 @@ def skipIfNoLapack(fn):
         try:
             fn(*args, **kwargs)
         except Exception as e:
-            if 'Lapack library not found' in e.args[0]:
+            if 'Lapack library not found' in repr(e):
                 raise unittest.SkipTest('Compiled without Lapack')
             raise
     return wrapper
@@ -115,16 +126,6 @@ def skipCUDAMemoryLeakCheckIf(condition):
             fn._do_cuda_memory_leak_check = not condition
         return fn
     return dec
-
-
-def skipIfNoZeroSize(fn):
-    @wraps(fn)
-    def wrapper(*args, **kwargs):
-        if torch._C._use_zero_size_dim():
-            fn(*args, **kwargs)
-        else:
-            raise unittest.SkipTest('Compiled without arbitrary zero size dimension support')
-    return wrapper
 
 
 def get_cuda_memory_usage():

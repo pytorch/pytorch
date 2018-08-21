@@ -75,13 +75,13 @@ template<class T>
 static inline std::unique_ptr<Storage> pin_memory(int64_t size, Tensor dummy) {
   int64_t adjusted_size = size * sizeof(T);
   auto* allocator = cuda::getPinnedMemoryAllocator();
-  auto& backend = dummy.type().toBackend(kCPU).toScalarType(kByte);
+  auto& backend = dummy.type().toBackend(Backend::CPU).toScalarType(kByte);
   return backend.storageWithAllocator(adjusted_size, allocator);
 }
 
 #define ALLOCATE_ARRAY(name, type, size, dummy_tensor) \
   auto storage_##name = pin_memory<type>(size, dummy_tensor); \
-  name = reinterpret_cast<type*>(storage_##name->data());
+  name = reinterpret_cast<type*>(storage_##name->pImpl()->data());
 
 template <typename scalar_t>
 static void applyGesv(Tensor& b, Tensor& A, std::vector<int64_t> infos) {

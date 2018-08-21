@@ -29,6 +29,11 @@
 - func: _cast_Half(Tensor self, bool non_blocking=false) -> Tensor
   variants: function, method
 
+- func: _cudnn_ctc_loss(Tensor log_probs, Tensor targets, IntList input_lengths, IntList target_lengths, int64_t blank, bool deterministic) -> (Tensor, Tensor)
+  variants: function
+  dispatch:
+    CUDA: _cudnn_ctc_loss
+
 - func: _cudnn_rnn_flatten_weight(TensorList weight_arr, int64_t weight_stride0, int64_t input_size, int64_t mode, int64_t hidden_size, int64_t num_layers, bool batch_first, bool bidirectional) -> Tensor
   variants: function
   dispatch:
@@ -48,6 +53,38 @@
   variants: function
   dispatch:
     CUDA: _cudnn_init_dropout_state
+
+- func: _fused_dropout(Tensor self, double p, Generator* generator=nullptr) -> (Tensor, Tensor)
+  dispatch:
+     CUDA: fused_dropout_cuda
+
+- func: _masked_scale(Tensor self, Tensor mask, double scale) -> Tensor
+  dispatch:
+     CUDA: masked_scale_cuda
+
+- func: dropout(Tensor input, double p, bool train) -> Tensor
+  variants: function
+
+- func: dropout_(Tensor self, double p, bool train) -> Tensor
+  variants: function
+
+- func: feature_dropout(Tensor input, double p, bool train) -> Tensor
+  variants: function
+
+- func: feature_dropout_(Tensor self, double p, bool train) -> Tensor
+  variants: function
+
+- func: alpha_dropout(Tensor input, double p, bool train) -> Tensor
+  variants: function
+
+- func: alpha_dropout_(Tensor self, double p, bool train) -> Tensor
+  variants: function
+
+- func: feature_alpha_dropout(Tensor input, double p, bool train) -> Tensor
+  variants: function
+
+- func: feature_alpha_dropout_(Tensor self, double p, bool train) -> Tensor
+  variants: function
 
 - func: abs(Tensor self) -> Tensor
 
@@ -84,8 +121,18 @@
 - func: adaptive_max_pool1d(Tensor self, IntList[1] output_size) -> (Tensor, Tensor)
   variants: function
 
-- func: allclose(Tensor self, Tensor other, double rtol=1e-5, double atol=1e-8, bool equal_nan=False) -> bool
-  device_guard: false
+- func: add(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
+
+- func: add_(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
+  variants: method
+
+- func: add_out(Tensor result, Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
+  variants: function
+
+# For C++ only, until we have conversion from C++ numbers to Tensor
+- func: add(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
+- func: add_(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
+  variants: method
 
 - func: addmv(Tensor self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1) -> Tensor
 
@@ -106,6 +153,8 @@
 
 - func: all_out(Tensor result, Tensor self, int64_t dim, bool keepdim=false) -> Tensor
   variants: function
+
+- func: allclose(Tensor self, Tensor other, double rtol=1e-5, double atol=1e-8, bool equal_nan=False) -> bool
 
 - func: any(Tensor self, int64_t dim, bool keepdim=false) -> Tensor
 
@@ -232,6 +281,9 @@
 - func: blackman_window(int64_t window_length, bool periodic, TensorOptions options={}) -> Tensor
   variants: function
 
+- func: broadcast_tensors(TensorList tensors) -> TensorList
+  variants: function
+
 - func: cat(TensorList tensors, int64_t dim=0) -> Tensor
   variants: function
 
@@ -254,17 +306,26 @@
 - func: chunk(Tensor self, int64_t chunks, int64_t dim=0) -> TensorList
 
 - func: clamp(Tensor self, Scalar min, Scalar max) -> Tensor
+  python_default_init:
+    min: NAN
+    max: NAN
 
 - func: clamp_(Tensor self, Scalar min, Scalar max) -> Tensor
   dispatch:
     CPU: _clamp__cpu
     CUDA: _clamp__cuda
+  python_default_init:
+    min: NAN
+    max: NAN
 
 - func: clamp_out(Tensor result, Tensor self, Scalar min, Scalar max) -> Tensor
   variants: function
   dispatch:
     CPU: _clamp_out_cpu
     CUDA: _clamp_out_cuda
+  python_default_init:
+    min: NAN
+    max: NAN
 
 - func: clamp_max(Tensor self, Scalar max) -> Tensor
 
@@ -320,8 +381,10 @@
   variants: function
 
 - func: conv_tbc(Tensor self, Tensor weight, Tensor bias, int64_t pad) -> Tensor
+  variants: function
 
 - func: conv_tbc_backward(Tensor self, Tensor input, Tensor weight, Tensor bias, int64_t pad) -> (Tensor, Tensor, Tensor)
+  variants: function
 
 # NB: we inherit the goofy argument order from PyTorch torch.nn.functional
 - func: conv_transpose1d(Tensor input, Tensor weight, Tensor bias={}, IntList[1] stride=1, IntList[1] padding=0, IntList[1] output_padding=0, int64_t groups=1, IntList[1] dilation=1) -> Tensor
@@ -483,12 +546,44 @@
 - func: cumprod_out(Tensor result, Tensor self, int64_t dim) -> Tensor
   variants: function
 
+- func: ctc_loss(Tensor log_probs, Tensor targets, IntList input_lengths, IntList target_lengths, int64_t blank=0, int64_t reduction=Reduction::ElementwiseMean) -> Tensor
+  variants: function
+
+# convenience function that converts to intlists for you
+- func: ctc_loss(Tensor log_probs, Tensor targets, Tensor input_lengths, Tensor target_lengths, int64_t blank=0, int64_t reduction=Reduction::ElementwiseMean) -> Tensor
+  variants: function
+
+- func: _ctc_loss(Tensor log_probs, Tensor targets, IntList input_lengths, IntList target_lengths, int64_t blank=0) -> (Tensor, Tensor)
+  variants: function
+  dispatch:
+    CPU:  ctc_loss_cpu
+    CUDA: ctc_loss_gpu
+
+- func: _ctc_loss_backward(Tensor grad, Tensor log_probs, Tensor targets, IntList input_lengths, IntList target_lengths, Tensor neg_log_likelihood, Tensor log_alpha, int64_t blank) -> Tensor
+  variants: function
+  dispatch:
+    CPU: ctc_loss_backward_cpu
+    CUDA: ctc_loss_backward_gpu
+
 - func: det(Tensor self) -> Tensor
 
 - func: diagflat(Tensor self, int64_t offset=0) -> Tensor
-  variants: function
 
 - func: diagonal(Tensor self, int64_t offset=0, int64_t dim1=0, int64_t dim2=1) -> Tensor
+
+- func: div(Tensor self, Tensor other) -> Tensor
+  variants: method, function
+
+- func: div_(Tensor self, Tensor other) -> Tensor
+  variants: method
+
+- func: div_out(Tensor result, Tensor self, Tensor other) -> Tensor
+  variants: function
+
+# For C++ only, until we have conversion from C++ numbers to Tensor
+- func: div(Tensor self, Scalar other) -> Tensor
+- func: div_(Tensor self, Scalar other) -> Tensor
+  variants: method
 
 - func: dot(Tensor self, Tensor tensor) -> Tensor
 
@@ -680,8 +775,41 @@
   variants: function
   deprecated: true
 
-- func: grid_sampler(Tensor input, Tensor grid, int64_t padding_mode) -> Tensor
+# NOTE [ grid_sampler Native Functions ]
+# `grid_sampler` does all the shape checking and then dispatches to one of
+# `cudnn_grid_sampler`, `grid_sampler_2d`, or `grid_sampler_3d`, each of which
+# has the corresponding backward defined as native functions as well. Therefore,
+# in these functions and their backwards, no more shape checking is done.
+#
+# Additionally, arguments `padding_mode` and `interpolation_mode` are cast to
+# enums defined in `native/GridSampler.h`. `cudnn_grid_sampler` doesn't take in
+# `interpolation_mode` because it only supports Bilinear interpolation mode.
+- func: grid_sampler(Tensor input, Tensor grid, int64_t interpolation_mode, int64_t padding_mode) -> Tensor
   variants: function
+
+- func: grid_sampler_2d(Tensor input, Tensor grid, int64_t interpolation_mode, int64_t padding_mode) -> Tensor
+  variants: function
+  dispatch:
+    CPU: grid_sampler_2d_cpu
+    CUDA: grid_sampler_2d_cuda
+
+- func: grid_sampler_2d_backward(Tensor grad_output, Tensor input, Tensor grid, int64_t interpolation_mode, int64_t padding_mode) -> (Tensor, Tensor)
+  variants: function
+  dispatch:
+    CPU: grid_sampler_2d_backward_cpu
+    CUDA: grid_sampler_2d_backward_cuda
+
+- func: grid_sampler_3d(Tensor input, Tensor grid, int64_t interpolation_mode, int64_t padding_mode) -> Tensor
+  variants: function
+  dispatch:
+    CPU: grid_sampler_3d_cpu
+    CUDA: grid_sampler_3d_cuda
+
+- func: grid_sampler_3d_backward(Tensor grad_output, Tensor input, Tensor grid, int64_t interpolation_mode, int64_t padding_mode) -> (Tensor, Tensor)
+  variants: function
+  dispatch:
+    CPU: grid_sampler_3d_backward_cpu
+    CUDA: grid_sampler_3d_backward_cuda
 
 - func: hann_window(int64_t window_length, TensorOptions options={}) -> Tensor
   variants: function
@@ -896,6 +1024,7 @@
     CUDA: log_softmax_cuda
 
 - func: log_softmax_backward_data(Tensor grad_output, Tensor output, int64_t dim, Tensor self) -> Tensor
+  variants: function
   dispatch:
     CPU: log_softmax_backward_cpu
     CUDA: log_softmax_backward_cuda
@@ -904,6 +1033,7 @@
 
 - func: logsumexp_out(Tensor result, Tensor self, int64_t dim, bool keepdim=False) -> Tensor
   variants: function
+
 
 - func: margin_ranking_loss(Tensor input1, Tensor input2, Tensor target, double margin=0.0, int64_t reduction=Reduction::ElementwiseMean) -> Tensor
   variants: function
@@ -986,10 +1116,29 @@
 - func: mode_out(Tensor values, Tensor indices, Tensor self, int64_t dim=-1, bool keepdim=false) -> (Tensor, Tensor)
   variants: function
 
+- func: mul(Tensor self, Tensor other) -> Tensor
+  variants: method, function
+
+- func: mul_(Tensor self, Tensor other) -> Tensor
+  variants: method
+
+- func: mul_out(Tensor result, Tensor self, Tensor other) -> Tensor
+  variants: function
+
+  # For C++ only, until we have conversion from C++ numbers to Tensor
+- func: mul(Tensor self, Scalar other) -> Tensor
+- func: mul_(Tensor self, Scalar other) -> Tensor
+  variants: method
+
 - func: mv(Tensor self, Tensor vec) -> Tensor
 
 - func: mv_out(Tensor result, Tensor self, Tensor vec) -> Tensor
   variants: function
+
+- func: mvlgamma(Tensor self, int64_t p) -> Tensor
+
+- func: mvlgamma_(Tensor self, int64_t p) -> Tensor
+  variants: method
 
 - func: narrow(Tensor self, int64_t dim, int64_t start, int64_t length) -> Tensor
 
@@ -1216,6 +1365,12 @@
 - func: selu_(Tensor self) -> Tensor
   variants: function
 
+- func: celu(Tensor self, Scalar alpha=1.0) -> Tensor
+  variants: function
+
+- func: celu_(Tensor self, Scalar alpha=1.0) -> Tensor
+  variants: function
+
 - func: sigmoid(Tensor self) -> Tensor
 
 - func: sigmoid_(Tensor self) -> Tensor
@@ -1270,9 +1425,40 @@
     CUDA: softmax_cuda
 
 - func: softmax_backward_data(Tensor grad_output, Tensor output, int64_t dim, Tensor self) -> Tensor
+  variants: function
   dispatch:
     CPU: softmax_backward_cpu
     CUDA: softmax_backward_cuda
+
+- func: _sparse_add_out(Tensor result, Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
+  variants: function
+  dispatch:
+    SparseCPU: add_out_sparse_cpu
+    SparseCUDA: add_out_sparse_cuda
+
+- func: _sparse_dense_add_out(Tensor result, Tensor self, SparseTensorRef other, *, Scalar alpha=1) -> Tensor
+  variants: function
+  dispatch:
+    CPU: add_out_dense_sparse_cpu
+    CUDA: add_out_dense_sparse_cuda
+
+- func: _sparse_div_out(Tensor result, Tensor self, Scalar other) -> Tensor
+  variants: function
+  dispatch:
+    SparseCPU: div_out_sparse_scalar
+    SparseCUDA: div_out_sparse_scalar
+
+- func: _sparse_mul_out(Tensor result, Tensor self, Tensor other) -> Tensor
+  variants: function
+  dispatch:
+    SparseCPU: mul_out_sparse_cpu
+    SparseCUDA: mul_out_sparse_cuda
+
+- func: _sparse_mul_scalar_out(Tensor result, Tensor self, Scalar other) -> Tensor
+  variants: function
+  dispatch:
+    SparseCPU: mul_out_sparse_scalar
+    SparseCUDA: mul_out_sparse_scalar
 
 - func: split(Tensor self, int64_t split_size, int64_t dim=0) -> TensorList
 
@@ -1445,6 +1631,9 @@
     CPU: flip_cpu
     CUDA: flip_cuda
 
+# default IntList value {0,1} should not add space after comma, since native_parse.py uses ', ' to split args
+- func: rot90(Tensor self, int64_t k=1, IntList dims={0,1}) -> Tensor
+
 - func: _trilinear(Tensor i1, Tensor i2, Tensor i3, IntList expand1, IntList expand2, IntList expand3, IntList sumdim, int64_t unroll_dim=1) -> Tensor
   variants: function
 
@@ -1594,71 +1783,6 @@
 
 - func: zero_(Tensor self) -> Tensor
 
-- func: s_native_add_out(Tensor result, Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
-  variants: function
-  dispatch:
-    SparseCPU: s_add_out_sparse_cpu
-    SparseCUDA: s_add_out_sparse_cuda
-
-- func: native_add_out(Tensor result, Tensor self, SparseTensorRef other, *, Scalar alpha=1) -> Tensor
-  variants: function
-  dispatch:
-    CPU: add_out_dense_sparse_cpu
-    CUDA: add_out_dense_sparse_cuda
-
-- func: s_native_add(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
-  variants: function
-  dispatch:
-    SparseCPU: s_add_sparse_cpu
-    SparseCUDA: s_add_sparse_cuda
-
-- func: native_add(Tensor self, SparseTensorRef other, *, Scalar alpha=1) -> Tensor
-  variants: function
-  dispatch:
-    CPU: add_dense_sparse_cpu
-    CUDA: add_dense_sparse_cuda
-
-- func: s_native_add_(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
-  variants: function
-  dispatch:
-    SparseCPU: s_add_sparse_cpu_
-    SparseCUDA: s_add_sparse_cuda_
-
-- func: native_add_(Tensor self, SparseTensorRef other, *, Scalar alpha=1) -> Tensor
-  variants: function
-  dispatch:
-    CPU: add_dense_sparse_cpu_
-    CUDA: add_dense_sparse_cuda_
-
-- func: add_out(Tensor result, Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
-  variants: function
-
-- func: add(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
-  variants: method, function
-
-- func: add_(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
-  variants: method
-
-
-
-- func: s_native_sub_out(Tensor result, Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
-  variants: function
-  dispatch:
-    SparseCPU: s_sub_out_sparse_cpu
-    SparseCUDA: s_sub_out_sparse_cuda
-
-- func: s_native_sub(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
-  variants: function
-  dispatch:
-    SparseCPU: s_sub_sparse_cpu
-    SparseCUDA: s_sub_sparse_cuda
-
-- func: s_native_sub_(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
-  variants: function
-  dispatch:
-    SparseCPU: s_sub_sparse_cpu_
-    SparseCUDA: s_sub_sparse_cuda_
-
 - func: sub_out(Tensor result, Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
   variants: function
 
@@ -1668,91 +1792,10 @@
 - func: sub_(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
   variants: method
 
-
-
-- func: s_native_mul_out(Tensor result, Tensor self, Tensor other) -> Tensor
-  variants: function
-  dispatch:
-    SparseCPU: s_mul_out_sparse_cpu
-    SparseCUDA: s_mul_out_sparse_cuda
-
-- func: s_native_mul(Tensor self, Tensor other) -> Tensor
-  variants: function
-  dispatch:
-    SparseCPU: s_mul_sparse_cpu
-    SparseCUDA: s_mul_sparse_cuda
-
-- func: s_native_mul_(Tensor self, Tensor other) -> Tensor
-  variants: function
-  dispatch:
-    SparseCPU: s_mul_sparse_cpu_
-    SparseCUDA: s_mul_sparse_cuda_
-
-- func: native_mul_out(Tensor result, Tensor self, Scalar other) -> Tensor
-  variants: function
-  dispatch:
-    SparseCPU: mul_out_sparse_scalar
-    SparseCUDA: mul_out_sparse_scalar
-
-- func: native_mul(Tensor self, Scalar other) -> Tensor
-  variants: function
-  dispatch:
-    SparseCPU: mul_sparse_scalar
-    SparseCUDA: mul_sparse_scalar
-
-- func: native_mul_(Tensor self, Scalar other) -> Tensor
-  variants: function
-  dispatch:
-    SparseCPU: mul_sparse_scalar_
-    SparseCUDA: mul_sparse_scalar_
-
-- func: mul_out(Tensor result, Tensor self, Tensor other) -> Tensor
-  variants: function
-
-- func: mul_out(Tensor result, Tensor self, Scalar other) -> Tensor
-  variants: function
-
-- func: mul(Tensor self, Tensor other) -> Tensor
-  variants: method, function
-
-- func: mul(Tensor self, Scalar other) -> Tensor
-  variants: method, function
-
-- func: mul_(Tensor self, Tensor other) -> Tensor
+# For C++ only, until we have conversion from C++ numbers to Tensor
+- func: sub(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
+- func: sub_(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
   variants: method
-
-- func: mul_(Tensor self, Scalar other) -> Tensor
-  variants: method
-
-
-
-- func: native_div_out(Tensor result, Tensor self, Scalar other) -> Tensor
-  variants: function
-  dispatch:
-    SparseCPU: div_out_sparse_scalar
-    SparseCUDA: div_out_sparse_scalar
-
-- func: native_div(Tensor self, Scalar other) -> Tensor
-  variants: function
-  dispatch:
-    SparseCPU: div_sparse_scalar
-    SparseCUDA: div_sparse_scalar
-
-- func: native_div_(Tensor self, Scalar other) -> Tensor
-  variants: function
-  dispatch:
-    SparseCPU: div_sparse_scalar_
-    SparseCUDA: div_sparse_scalar_
-
-- func: div_out(Tensor result, Tensor self, Scalar other) -> Tensor
-  variants: function
-
-- func: div(Tensor self, Scalar other) -> Tensor
-  variants: method, function
-
-- func: div_(Tensor self, Scalar other) -> Tensor
-  variants: method
-
 
 - func: s_native_addmm_out(Tensor result, Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   variants: function
@@ -1969,4 +2012,79 @@
   device_guard: False
 
 - func: meshgrid(TensorList tensors) -> TensorList
+  variants: function
+
+# This has a method dispatch to work around circular include problems
+- func: _local_scalar(Tensor self) -> Scalar
+  variants:
+    - function
+    - method
+
+# NB: Does NOT check precondition that numel == 1
+# WARNING: Use of cpu_half here is generally not supported; please
+# don't use it.
+- func: _local_scalar_dense(Tensor self) -> Scalar
+  cpu_half: True
+  dispatch:
+    CPU: _local_scalar_dense_cpu
+    CUDA: _local_scalar_dense_cuda
+  variants:
+    - function
+
+# Fused RNN kernels
+- func: _thnn_fused_lstm_cell(Tensor input_gates, Tensor hidden_gates, Tensor cx, Tensor? input_bias={}, Tensor? hidden_bias={}) -> (Tensor, Tensor, Tensor)
+  dispatch:
+    CUDA: _thnn_fused_lstm_cell_cuda
+  variants: function
+
+- func: _thnn_fused_lstm_cell_backward(Tensor? grad_hy, Tensor? grad_cy, Tensor cx, Tensor cy, Tensor workspace, bool has_bias) -> (Tensor, Tensor, Tensor, Tensor, Tensor)
+  dispatch:
+    CUDA: _thnn_fused_lstm_cell_backward_cuda
+  variants: function
+
+- func: _thnn_fused_gru_cell(Tensor input_gates, Tensor hidden_gates, Tensor hx, Tensor? input_bias={}, Tensor? hidden_bias={}) -> (Tensor, Tensor)
+  dispatch:
+    CUDA: _thnn_fused_gru_cell_cuda
+  variants: function
+
+- func: _thnn_fused_gru_cell_backward(Tensor grad_hy, Tensor workspace, bool has_bias) -> (Tensor, Tensor, Tensor, Tensor, Tensor)
+  dispatch:
+    CUDA: _thnn_fused_gru_cell_backward_cuda
+  variants: function
+
+# RNN cells and layers
+- func: lstm(Tensor input, TensorList hx, TensorList params, bool has_biases, int64_t num_layers, double dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor, Tensor)
+  variants: function
+
+- func: lstm(Tensor data, Tensor batch_sizes, TensorList hx, TensorList params, bool has_biases, int64_t num_layers, double dropout, bool train, bool bidirectional) -> (Tensor, Tensor, Tensor)
+  variants: function
+
+- func: gru(Tensor input, Tensor hx, TensorList params, bool has_biases, int64_t num_layers, double dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor)
+  variants: function
+
+- func: gru(Tensor data, Tensor batch_sizes, Tensor hx, TensorList params, bool has_biases, int64_t num_layers, double dropout, bool train, bool bidirectional) -> (Tensor, Tensor)
+  variants: function
+
+- func: rnn_tanh(Tensor input, Tensor hx, TensorList params, bool has_biases, int64_t num_layers, double dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor)
+  variants: function
+
+- func: rnn_tanh(Tensor data, Tensor batch_sizes, Tensor hx, TensorList params, bool has_biases, int64_t num_layers, double dropout, bool train, bool bidirectional) -> (Tensor, Tensor)
+  variants: function
+
+- func: rnn_relu(Tensor input, Tensor hx, TensorList params, bool has_biases, int64_t num_layers, double dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor)
+  variants: function
+
+- func: rnn_relu(Tensor data, Tensor batch_sizes, Tensor hx, TensorList params, bool has_biases, int64_t num_layers, double dropout, bool train, bool bidirectional) -> (Tensor, Tensor)
+  variants: function
+
+- func: lstm_cell(Tensor input, TensorList hx, Tensor w_ih, Tensor w_hh, Tensor? b_ih={}, Tensor? b_hh={}) -> (Tensor, Tensor)
+  variants: function
+
+- func: gru_cell(Tensor input, Tensor hx, Tensor w_ih, Tensor w_hh, Tensor? b_ih={}, Tensor? b_hh={}) -> Tensor
+  variants: function
+
+- func: rnn_tanh_cell(Tensor input, Tensor hx, Tensor w_ih, Tensor w_hh, Tensor? b_ih={}, Tensor? b_hh={}) -> Tensor
+  variants: function
+
+- func: rnn_relu_cell(Tensor input, Tensor hx, Tensor w_ih, Tensor w_hh, Tensor? b_ih={}, Tensor? b_hh={}) -> Tensor
   variants: function

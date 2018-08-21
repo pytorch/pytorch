@@ -92,9 +92,6 @@ class CPUSparseLengthsReductionOp : public Operator<CPUContext> {
     return true;
   }
 
-  USE_VALUE_KEY_LENGTH_INPUT_FILLERS(CPUContext, DATA, INDICES, LENGTHS)
-
- private:
   enum {
     DATA = 0, // Data input.
     WEIGHT = 1, // Weight input used in SparseLengthsWeightedSum

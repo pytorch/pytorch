@@ -129,7 +129,7 @@ bool SparseAdamOp<float, CUDAContext>::DoRunWithType() {
   auto N = Input(GRAD).size();
   auto grad_slice_sz = Input(GRAD).size_from_dim(Input(INDICES).ndim());
   const auto iter =
-      OperatorBase::Input<TensorCPU>(ITER).template data<int64_t>()[0];
+      OperatorBase::Input<Tensor>(ITER, CPU).template data<int64_t>()[0];
   const float correction = sqrtf(1.0f - std::pow(beta2_, iter + 1)) /
       (1.0f - std::pow(beta1_, iter + 1));
 

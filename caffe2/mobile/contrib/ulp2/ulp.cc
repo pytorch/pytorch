@@ -261,14 +261,14 @@ std::unique_ptr<QConvState> create2b1bConvState(Workspace* ws,
   state->XQs.resize(k2b1bXBits);
   state->YQs.resize(k2b1bXBits);
   for (auto i = 0; i < k2b1bXBits; ++i) {
-    state->XQs[i] = caffe2::make_unique<TensorCPU>();
-    state->YQs[i] = caffe2::make_unique<TensorCPU>();
+    state->XQs[i] = caffe2::make_unique<Tensor>(CPU);
+    state->YQs[i] = caffe2::make_unique<Tensor>(CPU);
   }
-  state->WQ = caffe2::make_unique<TensorCPU>();
-  state->WQN = caffe2::make_unique<TensorCPU>();
-  state->WQL1Norm = caffe2::make_unique<TensorCPU>();
-  state->scratch = caffe2::make_unique<TensorCPU>();
-  state->scratchColBuffer = caffe2::make_unique<TensorCPU>();
+  state->WQ = caffe2::make_unique<Tensor>(CPU);
+  state->WQN = caffe2::make_unique<Tensor>(CPU);
+  state->WQL1Norm = caffe2::make_unique<Tensor>(CPU);
+  state->scratch = caffe2::make_unique<Tensor>(CPU);
+  state->scratchColBuffer = caffe2::make_unique<Tensor>(CPU);
 
   signQuantize(W, state->WQ.get());
   filterNormalization11(*(state->WQ), state->WQN.get());
@@ -290,7 +290,7 @@ std::unique_ptr<QConvState> create2b1bConvState(Workspace* ws,
   };
   if (b) {
     CPUContext context;
-    state->bias = caffe2::make_unique<TensorCPU>(*b, &context);
+    state->bias = caffe2::make_unique<Tensor>(*b, &context, CPU);
   }
   return state;
 }

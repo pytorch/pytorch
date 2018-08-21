@@ -1,6 +1,9 @@
 #pragma once
+
 #include <torch/csrc/jit/ir.h>
 #include "torch/csrc/utils/disallow_copy.h"
+#include <torch/csrc/jit/assertions.h>
+
 #include "ATen/ATen.h"
 #include <string>
 #include <algorithm>
@@ -25,7 +28,7 @@ struct TensorDesc {
   : TensorDesc(type, TensorDesc::findContiguous(sizes, strides)) {}
   TensorDesc(const at::Tensor& t)
     : TensorDesc(t.type().scalarType(), t.sizes(), t.strides()) {}
-  TensorDesc(TensorType *type)
+  TensorDesc(TensorTypePtr type)
     : TensorDesc(type->scalarType(), type->sizes(), type->strides()) {}
 
   // number of dimensions after contiguity compression
@@ -57,13 +60,18 @@ struct AnnotatedGraph {
   std::vector<TensorDesc> output_desc;
 };
 
-struct ConcatDesc {
-  size_t nSubtensors; // == 1 for outputs that are not concats, otherwise it is the number tensors concatenated
-  size_t dim; // dimension along which the concat occurs
+// Descriptor for chunk-ing an input tensor into subtensors
+// OR concat-ing an output tensor from subtensors
+struct PartitionDesc {
+  size_t nSubtensors; // == 1 for tensors that should not be operated on via chunk/cat
+  size_t dim; // dimension along which the chunk/concat occurs
   std::unique_ptr<TensorDesc> subtensorDesc; // descriptor for the subtensor, if it exists
-  ConcatDesc()
+  PartitionDesc()
   : nSubtensors(1), dim(0) {}
-  ConcatDesc(const TensorDesc & desc, size_t nSubtensors, size_t dim)
+
+  // Constructor for cat descriptors
+  // desc: TensorDesc for output tensor
+  PartitionDesc(const TensorDesc & desc, size_t nSubtensors, size_t dim)
   : nSubtensors(nSubtensors), dim(dim) {
     JIT_ASSERT(nSubtensors > 1);
     std::vector<bool> cont = desc.contiguity;
@@ -76,13 +84,32 @@ struct ConcatDesc {
     }
     subtensorDesc.reset(new TensorDesc(desc.scalar_type, cont));
   }
+
+  // Constructor for chunk descriptors
+  // tensor_type: the type of the input to the chunk node
+  // ignored: XXX: Compiler gets confused without this arg
+  PartitionDesc(TensorTypePtr tensor_type, size_t chunks, size_t dim, bool ignored)
+  : nSubtensors(chunks), dim(dim) {
+    (void)ignored;
+    JIT_ASSERT(chunks > 1);
+
+    std::vector<int64_t> sizes(tensor_type->sizes().begin(), tensor_type->sizes().end());
+    JIT_ASSERT(sizes[dim] % chunks == 0); // Should have been checked in graph fuser
+    sizes[dim] /= chunks;
+    // Computes contiguity, which is what we really care about
+    subtensorDesc.reset(new TensorDesc(tensor_type->scalarType(), sizes, tensor_type->strides()));
+  }
+
+  bool isNoop() const {
+    return nSubtensors == 1;
+  }
 };
 
 struct CompiledFusionFunction {
   TH_DISALLOW_COPY_AND_ASSIGN(CompiledFusionFunction);
 
   CompiledFusionFunction(const std::string & name, AnnotatedGraph & agraph);
-  virtual ~CompiledFusionFunction() {}
+  virtual ~CompiledFusionFunction() = default;
 
   // expects outputs to be pre-allocated
   void launch_with_tensors(at::ArrayRef<at::Tensor> inputs, at::ArrayRef<at::Tensor> outputs);
@@ -105,6 +132,9 @@ protected:
   // launch_with_tensors handles packing at::Tensors into this arguments array.
   // CPU code uses the same convension so that launch_with_tensors can be shared.
   virtual void launch_raw(uint32_t numel, void ** arguments) = 0;
+
+  virtual uint64_t get_rand_offset(uint32_t numel) = 0;
+  bool has_random;
   std::string name;
   // We keep these around for debugging
   std::string compilation_unit;
@@ -114,7 +144,12 @@ protected:
   // same size as output_desc, describes whether
   // an output is actually a concatenation of
   // many subtensors that the fusion group produces
-  std::vector<ConcatDesc> concat_desc;
+  std::vector<PartitionDesc> concat_desc;
+
+  // same size as input_desc, describes whether an
+  // input should be broken into subtensors (chunks)
+  // to be consumed by the fusion group
+  std::vector<PartitionDesc> chunk_desc;
 };
 
 struct FusionCompilerConfig {

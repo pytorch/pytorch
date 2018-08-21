@@ -31,25 +31,11 @@ ELSE()
   SET(HSA_PATH $ENV{HSA_PATH})
 ENDIF()
 
-# HIPBLAS_PATH
-IF(NOT DEFINED ENV{HIPBLAS_PATH})
-  SET(HIPBLAS_PATH ${ROCM_PATH}/hipblas)
-ELSE()
-  SET(HIPBLAS_PATH $ENV{HIPBLAS_PATH})
-ENDIF()
-
 # ROCBLAS_PATH
 IF(NOT DEFINED ENV{ROCBLAS_PATH})
   SET(ROCBLAS_PATH ${ROCM_PATH}/rocblas)
 ELSE()
   SET(ROCBLAS_PATH $ENV{ROCBLAS_PATH})
-ENDIF()
-
-# HIPRNG_PATH
-IF(NOT DEFINED ENV{HIPRNG_PATH})
-  SET(HIPRNG_PATH ${ROCM_PATH}/hcrng)
-ELSE()
-  SET(HIPRNG_PATH $ENV{HIPRNG_PATH})
 ENDIF()
 
 # HIPSPARSE_PATH
@@ -102,6 +88,8 @@ FIND_PACKAGE(HIP 1.0)
 IF(HIP_FOUND)
   set(PYTORCH_FOUND_HIP TRUE)
 
+  ### Remove setting of Flags when FindHIP.CMake PR #558 is accepted.###
+  # https://github.com/ROCm-Developer-Tools/HIP/pull/558 #
   set(CMAKE_SHARED_LIBRARY_SONAME_HIP_FLAG ${CMAKE_SHARED_LIBRARY_SONAME_CXX_FLAG})
   set(CMAKE_HIP_LINK_EXECUTABLE "${HIP_HIPCC_CMAKE_LINKER_HELPER} ${HCC_PATH} <FLAGS> <CMAKE_CXX_LINK_FLAGS> <LINK_FLAGS> <OBJECTS> -o <TARGET> <LINK_LIBRARIES>" )
   set(CMAKE_HIP_CREATE_SHARED_LIBRARY "${HIP_HIPCC_CMAKE_LINKER_HELPER} ${HCC_PATH} <CMAKE_CXX_LINK_FLAGS> <LINK_FLAGS> <OBJECTS> <SONAME_FLAG><TARGET_SONAME> -o <TARGET> <LINK_LIBRARIES> -shared" )
@@ -109,19 +97,21 @@ IF(HIP_FOUND)
   set(CMAKE_HIP_ARCHIVE_CREATE ${CMAKE_CXX_ARCHIVE_CREATE})
   set(CMAKE_HIP_ARCHIVE_APPEND ${CMAKE_CXX_ARCHIVE_APPEND})
   set(CMAKE_HIP_ARCHIVE_FINISH ${CMAKE_CXX_ARCHIVE_FINISH})
+  SET(CMAKE_HCC_FLAGS_DEBUG ${CMAKE_CXX_FLAGS_DEBUG})
+  SET(CMAKE_HCC_FLAGS_RELEASE ${CMAKE_CXX_FLAGS_RELEASE})
+  ### Remove setting of Flags when FindHIP.CMake PR #558 is accepted.###
 
   set(rocrand_DIR ${ROCRAND_PATH}/lib/cmake/rocrand)
   set(hiprand_DIR ${HIPRAND_PATH}/lib/cmake/hiprand)
   set(rocblas_DIR ${ROCBLAS_PATH}/lib/cmake/rocblas)
   set(miopen_DIR ${MIOPEN_PATH}/lib/cmake/miopen)
-  set(hipblas_DIR ${HIPBLAS_PATH}/lib/cmake/hipblas)
+  set(rocblas_DIR ${ROCBLAS_PATH}/lib/cmake/rocblas)
   set(hipsparse_DIR ${HIPSPARSE_PATH}/lib/cmake/hipsparse)
 
   find_package(rocrand REQUIRED)
   find_package(hiprand REQUIRED)
   find_package(rocblas REQUIRED)
   find_package(miopen REQUIRED)
-  #find_package(hipblas REQUIRED) There's a bug with the CMake file in the Hipblas package.
   #find_package(hipsparse REQUIRED)
 
   # TODO: hip_hcc has an interface include flag "-hc" which is only
@@ -133,8 +123,6 @@ IF(HIP_FOUND)
   # however currently it's just the lib name
   FIND_LIBRARY(PYTORCH_MIOPEN_LIBRARIES ${miopen_LIBRARIES} HINTS ${MIOPEN_PATH}/lib)
   FIND_LIBRARY(hiprand_LIBRARIES hiprand HINTS ${HIPRAND_PATH}/lib)
-  FIND_LIBRARY(hiprng_LIBRARIES hcrng HINTS ${HIPRNG_PATH}/lib)
-  FIND_LIBRARY(hipblas_LIBRARIES hipblas HINTS ${HIPBLAS_PATH}/lib)
   FIND_LIBRARY(hipsparse_LIBRARIES hipsparse HINTS ${HIPSPARSE_PATH}/lib)
 
 

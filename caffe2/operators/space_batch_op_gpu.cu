@@ -48,13 +48,13 @@ __global__ void SpaceToBatch(
   }
 }
 
-template<>
+template <>
 void spaceToBatch<CUDAContext>(
-    const Tensor<CUDAContext>& input,
+    const Tensor& input,
     int pad_t,
     int pad_l,
     int block_size,
-    Tensor<CUDAContext>* output,
+    Tensor* output,
     CUDAContext* context) {
   const int output_batch = output->dim32(0);
   const int output_depth = output->dim32(1);
@@ -84,7 +84,7 @@ void spaceToBatch<CUDAContext>(
       pad_t,
       block_size,
       input.data<float>(),
-      output->mutable_data<float>());
+      output->template mutable_data<float>());
 }
 
 
@@ -133,11 +133,11 @@ __global__ void BatchToSpace(
 
 template <>
 void batchToSpace(
-    const Tensor<CUDAContext>& input,
+    const Tensor& input,
     int pad_t,
     int pad_l,
     int block_size,
-    Tensor<CUDAContext>* output,
+    Tensor* output,
     CUDAContext* context) {
   CAFFE_ENFORCE(input.ndim() == 4);
   CAFFE_ENFORCE(output->ndim() == 4);
@@ -170,7 +170,7 @@ void batchToSpace(
       pad_t,
       block_size,
       input.data<float>(),
-      output->mutable_data<float>());
+      output->template mutable_data<float>());
 }
 
 REGISTER_CUDA_OPERATOR(SpaceToBatch, SpaceToBatchOp<CUDAContext>);

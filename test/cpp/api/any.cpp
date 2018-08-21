@@ -1,8 +1,8 @@
 #include <catch.hpp>
 
+#include <torch/nn/modules/any.h>
 #include <torch/torch.h>
 #include <torch/utils.h>
-#include <torch/nn/modules/any.h>
 
 #include <algorithm>
 #include <string>
@@ -219,40 +219,25 @@ TEST_CASE("any-module") {
     REQUIRE(any.get<MImpl>().value == 5);
     REQUIRE(any.get<M>()->value == 5);
   }
-  SECTION("converts at::Tensor to torch::Tensor correctly") {
+  SECTION("converts autograd::Variable to torch::Tensor correctly") {
     struct M : torch::nn::Module {
       torch::Tensor forward(torch::Tensor input) {
         return input;
       }
     };
-    struct N : torch::nn::Module {
-      at::Tensor forward(at::Tensor input) {
-        return input;
-      }
-    };
     {
-      // When you get an at::Tensor by performing an operation on a
-      // torch::Tensor, the tensor should be converted back to torch::Tensor
-      // before being passed to the function (to avoid a type mismatch).
+      // When you have an autograd::Variable, it should be converted to a
+      // torch::Tensor before being passed to the function (to avoid a type
+      // mismatch).
       AnyModule any(M{});
-      at::Tensor tensor_that_is_actually_a_variable = torch::ones(5) * 2;
       REQUIRE(
-          any.forward(tensor_that_is_actually_a_variable)
+          any.forward(torch::autograd::Variable(torch::ones(5)))
               .get<torch::Tensor>()
               .sum()
-              .toCFloat() == 10);
-      // But tensors that are really tensors should just error.
-      REQUIRE_THROWS_WITH(
-          any.forward(at::ones(5)),
-          StartsWith(
-              "Expected argument #0 to be of type torch::autograd::Variable, "
-              "but received value of type at::Tensor"));
-    }
-    {
-      // If the function does really accept an `at::Tensor`, this should still
-      // work.
-      AnyModule any(N{});
-      REQUIRE(any.forward(at::ones(5)).get<at::Tensor>().sum().toCFloat() == 5);
+              .toCFloat() == 5);
+      // at::Tensors that are not variables work too.
+      REQUIRE(
+          any.forward(at::ones(5)).get<torch::Tensor>().sum().toCFloat() == 5);
     }
   }
 }

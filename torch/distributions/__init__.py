@@ -96,6 +96,7 @@ from .logistic_normal import LogisticNormal
 from .lowrank_multivariate_normal import LowRankMultivariateNormal
 from .multinomial import Multinomial
 from .multivariate_normal import MultivariateNormal
+from .negative_binomial import NegativeBinomial
 from .normal import Normal
 from .one_hot_categorical import OneHotCategorical
 from .pareto import Pareto
@@ -106,6 +107,7 @@ from .studentT import StudentT
 from .transformed_distribution import TransformedDistribution
 from .transforms import *
 from .uniform import Uniform
+from .weibull import Weibull
 
 __all__ = [
     'Bernoulli',
@@ -128,6 +130,7 @@ __all__ = [
     'LogisticNormal',
     'Multinomial',
     'MultivariateNormal',
+    'NegativeBinomial',
     'Normal',
     'OneHotCategorical',
     'Pareto',
@@ -136,6 +139,7 @@ __all__ = [
     'StudentT',
     'Poisson',
     'Uniform',
+    'Weibull',
     'TransformedDistribution',
     'biject_to',
     'kl_divergence',

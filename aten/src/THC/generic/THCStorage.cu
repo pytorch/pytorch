@@ -10,7 +10,7 @@ void THCStorage_(fill)(THCState *state, THCStorage *self, real value)
 #if CUDA_VERSION >= 7000
     thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
-    self_data, self_data+self->size, value);
+    self_data, self_data+self->size(), value);
 }
 
 void THCStorage_(resize)(THCState *state, THCStorage *self, ptrdiff_t size)

@@ -26,7 +26,7 @@ static bool THNN_(checkSize2D)(THTensor* t, int64_t size0, int64_t size1)
 
 static bool THNN_(checkSize1D)(THTensor* t, int64_t size0)
 {
-  return !t->is_empty() && t->dim() == 1 && t->size(0) == size0;
+  return !t->is_empty() && THTensor_nDimensionLegacyNoScalars(t) == 1 && THTensor_sizeLegacyNoScalars(t, 0) == size0;
 }
 
 static void THNN_(set1d)(THTensor *t, int64_t x0, real value) {

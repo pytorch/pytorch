@@ -34,6 +34,7 @@ backend_test.exclude(r'(test_hardsigmoid'  # Does not support Hardsigmoid.
                      '|test_prelu.*'  # PRelu is not compliant with ONNX yet
                      '|test_operator_repeat.*'  # Tile is not compliant with ONNX yet
                      '|test_.*pool_.*same.*'  # Does not support pool same.
+                     '|test_maxpool_with_argmax.*'  # MaxPool outputs indices in different format.
                      '|test_convtranspose.*'  # ConvTranspose needs some more complicated translation
                      ')')
 

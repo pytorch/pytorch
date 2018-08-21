@@ -1,3 +1,9 @@
+// define constants like M_PI and C keywords for MSVC
+#ifdef _MSC_VER
+#define _USE_MATH_DEFINES
+#include <math.h>
+#endif
+
 #include "ATen/ATen.h"
 #include "ATen/Dispatch.h"
 #include "ATen/ExpandUtils.h"
@@ -40,7 +46,15 @@ Tensor clamp_min(const Tensor& self, Scalar min) {
 }
 
 Tensor& _clamp__cpu(Tensor& self, Scalar min, Scalar max) {
-  return _th_clamp_(self, min, max);
+  if (!std::isnan(min.toDouble()) && !std::isnan(max.toDouble())) {
+    return _th_clamp_out(self, self, min, max);
+  } else if (std::isnan(min.toDouble())) {
+    return _th_clamp_max_out(self, self, max);
+  } else if (std::isnan(max.toDouble())) {
+    return _th_clamp_min_out(self, self, min);
+  } else {
+    return self;
+  }
 }
 
 Tensor& _clamp_out_cpu(
@@ -48,29 +62,30 @@ Tensor& _clamp_out_cpu(
     const Tensor& self,
     Scalar min,
     Scalar max) {
-  result.resize_(self.sizes());
-  result.copy_(self);
-  return _th_clamp_(result, min, max);
+  if (!std::isnan(min.toDouble()) && !std::isnan(max.toDouble())) {
+    _th_clamp_out(result, self, min, max);
+  } else if (std::isnan(min.toDouble())) {
+    _th_clamp_max_out(result, self, max);
+  } else if (std::isnan(max.toDouble())) {
+    _th_clamp_min_out(result, self, min);
+  }
+  return result;
 }
 
 Tensor& _clamp_max__cpu(Tensor& self, Scalar max) {
-  return _th_clamp_max_(self, max);
+  return _th_clamp_max_out(self, self, max);
 }
 
 Tensor& _clamp_max_out_cpu(Tensor& result, const Tensor& self, Scalar max) {
-  result.resize_(self.sizes());
-  result.copy_(self);
-  return _th_clamp_max_(result, max);
+  return _th_clamp_max_out(result, self, max);
 }
 
 Tensor& _clamp_min__cpu(Tensor& self, Scalar min) {
-  return _th_clamp_min_(self, min);
+  return _th_clamp_min_out(self, self, min);
 }
 
 Tensor& _clamp_min_out_cpu(Tensor& result, const Tensor& self, Scalar min) {
-  result.resize_(self.sizes());
-  result.copy_(self);
-  return _th_clamp_min_(result, min);
+  return _th_clamp_min_out(result, self, min);
 }
 
 Tensor& fill_(Tensor& self, Scalar value) {
@@ -79,6 +94,28 @@ Tensor& fill_(Tensor& self, Scalar value) {
 
 Tensor& fill_(Tensor& self, const Tensor& value) {
   return self._fill_(value);
+}
+
+Tensor mvlgamma(const Tensor& self, int64_t p) {
+  AT_CHECK(at::isFloatingType(self.type().scalarType()),
+           "mvlgamma is not implemented for ", self.type());
+  AT_CHECK((self > 0.5 * (p - 1.)).all().toCByte(),
+           "Condition for computing multivariate log-gamma not met");
+  AT_CHECK(p >= 1, "p has to be greater than or equal to 1");
+  Tensor args = native::arange(-p / 2. + 0.5, 0.5, 0.5, self.options());
+  args = args.add(self.unsqueeze(-1));
+  return args.lgamma_().sum(-1).add_(p * (p - 1) * std::log(M_PI) / 4.);
+}
+
+Tensor& mvlgamma_(Tensor& self, int64_t p) {
+  AT_CHECK(at::isFloatingType(self.type().scalarType()),
+           "mvlgamma is not implemented for ", self.type());
+  AT_CHECK((self > 0.5 * (p - 1.)).all().toCByte(),
+           "Condition for computing multivariate log-gamma not met");
+  AT_CHECK(p >= 1, "p has to be greater than or equal to 1");
+  Tensor args = native::arange(-p / 2. + 0.5, 0.5, 0.5, self.options());
+  args = args.add(self.unsqueeze(-1));
+  return self.copy_(args.lgamma_().sum(-1).add_(p * (p - 1) * std::log(M_PI) / 4.));
 }
 
 // NB: If you use this macro, you may also need to add a CUDA forwarding

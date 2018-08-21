@@ -51,7 +51,7 @@ class LevelDBTransaction : public Transaction {
   leveldb::DB* db_;
   std::unique_ptr<leveldb::WriteBatch> batch_;
 
-  DISABLE_COPY_AND_ASSIGN(LevelDBTransaction);
+  AT_DISABLE_COPY_AND_ASSIGN(LevelDBTransaction);
 };
 
 class LevelDB : public DB {

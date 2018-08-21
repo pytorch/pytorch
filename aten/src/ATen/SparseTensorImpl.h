@@ -2,7 +2,7 @@
 
 #include "ATen/Tensor.h"
 #include "ATen/TensorImpl.h"
-#include "ATen/Error.h"
+#include "ATen/core/Error.h"
 
 namespace at {
 struct AT_API SparseTensorImpl : public TensorImpl {
@@ -48,7 +48,7 @@ struct AT_API SparseTensorImpl : public TensorImpl {
 
 public:
   // Public for now...
-  explicit SparseTensorImpl(Type * type);
+  explicit SparseTensorImpl(at::TensorTypeId, at::ScalarType);
 
   int64_t nnz() const { return nnz_; }
   int64_t sparseDims() const { return sparseDims_; }
@@ -57,13 +57,16 @@ public:
   Tensor indices() const { return indices_; }
   Tensor values() const { return values_; }
 
-  const char * toString() const override;
   IntList sizes() const override;
   IntList strides() const override;
+  int64_t size(int64_t d) const override;
+  int64_t stride(int64_t d) const override;
+
   int64_t dim() const override;
-  Scalar localScalar() override;
-  void * unsafeGetTH(bool retain) override;
+  TensorImpl* maybe_zero_dim(bool condition_when_zero_dim) override;
   std::unique_ptr<Storage> storage() override;
+  at::StorageImpl* storageImpl() const override;
+  int64_t storage_offset() const override;
 
   // Some ops do some manual size fiddling.
   // TODO: Figure out a more safe way to provide this functionality
@@ -76,7 +79,7 @@ public:
     if (size.size() == 0) {
       size_ = {0};
     } else {
-      size_ = size;
+      size_ = size.vec();
     }
     sparseDims_ = sparseDims;
     denseDims_ = denseDims;

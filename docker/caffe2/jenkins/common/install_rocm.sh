@@ -2,25 +2,6 @@
 
 set -ex
 
-# TODO: This script should install a SPECIFIC ROCM_VERSION, but actually
-# it ignores all values of ROCM_VERSION which are not nightly.  Ugh!
-[ -n "$ROCM_VERSION" ]
-
-install_hip_nightly() {
-    git clone https://github.com/ROCm-Developer-Tools/HIP.git
-    pushd HIP
-    export HIP_PLATFORM=hcc
-    yes | ./install.sh --install
-    popd
-    rm -rf HIP
-
-    git clone https://github.com/ROCmSoftwarePlatform/hipBLAS.git
-    pushd hipBLAS
-    yes | ./install.sh --install
-    popd
-    rm -rf hipBLAS
-}
-
 install_ubuntu() {
     apt-get update
     apt-get install -y wget
@@ -39,37 +20,48 @@ install_ubuntu() {
                    miopen-hip \
                    miopengemm \
                    rocblas \
-                   hipblas \
-                   rocrand \
                    rocm-profiler \
                    cxlactivitylogger
+
+    # hotfix a bug in hip's cmake files, this has been fixed in
+    # https://github.com/ROCm-Developer-Tools/HIP/pull/516 but for
+    # some reason it has not included in the latest rocm release
+    if [[ -f /opt/rocm/hip/cmake/FindHIP.cmake ]]; then
+        sudo sed -i 's/\ -I${dir}/\ $<$<BOOL:${dir}>:-I${dir}>/' /opt/rocm/hip/cmake/FindHIP.cmake
+    fi
+    
+    # HIP has a bug that drops DEBUG symbols in generated MakeFiles.
+    # https://github.com/ROCm-Developer-Tools/HIP/pull/588
+    if [[ -f /opt/rocm/hip/cmake/FindHIP.cmake ]]; then
+        sudo sed -i 's/set(_hip_build_configuration "${CMAKE_BUILD_TYPE}")/string(TOUPPER _hip_build_configuration "${CMAKE_BUILD_TYPE}")/' /opt/rocm/hip/cmake/FindHIP.cmake
+    fi
 }
 
 install_centos() {
     echo "Not implemented yet"
     exit 1
 }
-
+ 
 install_hip_thrust() {
     # Needed for now, will be replaced soon
     git clone --recursive https://github.com/ROCmSoftwarePlatform/Thrust.git /data/Thrust
     rm -rf /data/Thrust/thrust/system/cuda/detail/cub-hip
     git clone --recursive https://github.com/ROCmSoftwarePlatform/cub-hip.git /data/Thrust/thrust/system/cuda/detail/cub-hip
-    cd /data/Thrust/thrust/system/cuda/detail/cub-hip && git checkout hip_port_1.7.4_caffe2 && cd -
 }
 
-install_hcrng() {
-    mkdir -p /opt/rocm/debians
-    curl https://s3.amazonaws.com/ossci-linux/hcrng-master-a8c6a0b-Linux.deb -o /opt/rocm/debians/hcrng.deb 
-    dpkg -i /opt/rocm/debians/hcrng.deb
-}
-
+# This will be removed after merging an upcoming PR.
 install_hcsparse() {
     mkdir -p /opt/rocm/debians
-    curl https://s3.amazonaws.com/ossci-linux/hcsparse-master-907a505-Linux.deb -o /opt/rocm/debians/hcsparse.deb
+    curl https://s3.amazonaws.com/ossci-linux/hcsparse-master-907a505-Linux.deb -o /opt/rocm/debians/hcsparse.deb 
     dpkg -i /opt/rocm/debians/hcsparse.deb
 }
 
+# Install an updated version of rocRand that's PyTorch compatible.
+install_rocrand() {
+    mkdir -p /opt/rocm/debians
+    curl https://s3.amazonaws.com/ossci-linux/rocrand-1.8.0-Linux.deb -o /opt/rocm/debians/rocrand.deb 
+    dpkg -i /opt/rocm/debians/rocrand.deb
+}
 
 # Install Python packages depending on the base OS
 if [ -f /etc/lsb-release ]; then
@@ -81,12 +73,6 @@ else
   exit 1
 fi
 
-# NB: We first install the "wrong" version, but then use those dev tools
-# to install the newer version of HIP.
-if [ "$ROCM_VERSION" = "nightly" ]; then
-  install_hip_nightly
-fi
-
 install_hip_thrust
-install_hcrng
+install_rocrand
 install_hcsparse

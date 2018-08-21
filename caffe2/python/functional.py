@@ -4,6 +4,8 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from caffe2.python import core, workspace
+from caffe2.proto import caffe2_pb2
+from caffe2.python.onnx.workspace import Workspace
 from collections import namedtuple
 from six import string_types
 
@@ -28,7 +30,7 @@ def namedtupledict(typename, field_names, *args, **kwargs):
 class _Functional(object):
     def __getattribute__(self, op_type):
         def op_func(*inputs, **args):
-            ws = workspace.C.Workspace()
+            ws = Workspace()
             schema = OpSchema.get(op_type)
             input_prefix = 'input_'
             output_prefix = 'output_'
@@ -86,16 +88,18 @@ class _Functional(object):
                 output_names = get_name_list(
                     output_prefix, max_output, max_output
                 )
-            for i, input_blob in enumerate(inputs):
-                ws.create_blob(input_names[i]).feed(input_blob)
 
             op = core.CreateOperator(
                 op_type, input_names, output_names, **args
             )
-            ws._run_operator(op.SerializeToString())
-            # RunOperator
-            output_values = [ws.fetch_blob(x) for x in output_names]
-            return namedtupledict('output', output_names)(*output_values)
+            device_option = args.get('device_option', core.DeviceOption(caffe2_pb2.CPU))
+            with core.DeviceScope(device_option):
+                for i, input_blob in enumerate(inputs):
+                    ws.FeedBlob(input_names[i], input_blob)
+                # RunOperator
+                ws.RunOperatorOnce(op)
+                output_values = [ws.FetchBlob(x) for x in output_names]
+                return namedtupledict('output', output_names)(*output_values)
 
         return op_func
 

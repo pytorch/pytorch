@@ -1,18 +1,17 @@
 #pragma once
 
-#include "torch/csrc/assertions.h"
-#include "torch/csrc/WindowsTorchApiMacro.h"
 #include "torch/csrc/autograd/edge.h"
 #include "torch/csrc/autograd/grad_mode.h"
 #include "torch/csrc/autograd/anomaly_mode.h"
 #include "torch/csrc/autograd/profiler.h"
 #include "torch/csrc/autograd/saved_variable.h"
-#include "torch/csrc/autograd/type_and_shape.h"
+#include "torch/csrc/autograd/input_metadata.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/utils/python_stub.h"
 #include "torch/csrc/utils/variadic.h"
 
 #include <ATen/ATen.h>
+#include <ATen/core/Error.h>
 
 #include <algorithm>
 #include <cstdint>
@@ -129,9 +128,18 @@ struct TORCH_API Function : std::enable_shared_from_this<Function> {
 
   /// Adds the type and shape metadata for a new input. Returns the index of
   /// of the new input.
-  uint32_t add_input_metadata(const at::Type& type, at::IntList shape) noexcept {
+  uint32_t add_input_metadata(
+    const at::Type& type
+  , at::IntList shape
+  , const int64_t device) noexcept {
     uint32_t input_nr = input_metadata_.size();
-    input_metadata_.emplace_back(type, shape);
+    input_metadata_.emplace_back(type, shape, device);
+    return input_nr;
+  }
+
+  uint32_t add_input_metadata(const at::Tensor& t) noexcept {
+    uint32_t input_nr = input_metadata_.size();
+    input_metadata_.emplace_back(t);
     return input_nr;
   }
 
@@ -146,7 +154,7 @@ struct TORCH_API Function : std::enable_shared_from_this<Function> {
     return input_metadata_.size();
   }
 
-  const TypeAndShape& input_metadata(size_t index) const {
+  const InputMetadata& input_metadata(size_t index) const {
     return input_metadata_[index];
   }
 
@@ -205,7 +213,7 @@ struct TORCH_API Function : std::enable_shared_from_this<Function> {
   /// Returns true if the particular output edge is active, and that particular
   /// output of this function should be computed.
   bool should_compute_output(size_t output_edge_index) const {
-    TORCH_ASSERTM(output_edge_index < num_outputs(), "Index out of range");
+    AT_CHECK(output_edge_index < num_outputs(), "Index out of range");
     return next_edges_[output_edge_index].is_valid();
   }
 
@@ -323,13 +331,13 @@ struct TORCH_API Function : std::enable_shared_from_this<Function> {
   std::unique_ptr<AnomalyMetadata> anomaly_metadata_ = nullptr;
   std::vector<std::unique_ptr<FunctionPreHook>> pre_hooks_;
   std::vector<std::unique_ptr<FunctionPostHook>> post_hooks_;
-  at::SmallVector<TypeAndShape, 2> input_metadata_;
+  at::SmallVector<InputMetadata, 2> input_metadata_;
 };
 
 /// See Function::is_traceable() for definition.
 struct TraceableFunction : public Function {
   using Function::Function;
-  bool is_traceable() final override {
+  bool is_traceable() final {
     return true;
   }
 };
@@ -368,7 +376,7 @@ inline void create_gradient_edge(
     Variable& variable,
     std::shared_ptr<Function> function) {
   // Copy before move.
-  const auto input_nr = function->add_input_metadata(variable.type(), variable.sizes());
+  const auto input_nr = function->add_input_metadata(variable);
   variable.set_gradient_edge({std::move(function), input_nr});
 }
 

@@ -54,11 +54,11 @@ private:
     #undef DEFINE_CASE
   }
 
-  at::Type & typeFor(const Tensor<Context> & ten) {
+  at::Type& typeFor(const Tensor& ten) {
     return at::getType(backend(), atScalarTypeFor(ten.meta()));
   }
-  at::Tensor tensorWrapping(const Tensor<Context>& ten_) {
-    auto& ten = const_cast<Tensor<Context>&>(ten_);
+  at::Tensor tensorWrapping(const Tensor& ten_) {
+    auto& ten = const_cast<Tensor&>(ten_);
     return typeFor(ten).tensorFromBlob(ten.raw_mutable_data(), ten.dims());
   }
 
@@ -88,7 +88,7 @@ private:
     }
     CAFFE_THROW("Unknown type meta"); // TODO: improve error message...
   }
-  void assignTo(Tensor<Context> * dst, const at::Tensor & src_) {
+  void assignTo(Tensor* dst, const at::Tensor& src_) {
     at::Tensor src = src_.contiguous();
     auto at_sizes = src.sizes();
     std::vector<int64_t> dims(at_sizes.begin(),at_sizes.end());
@@ -121,7 +121,7 @@ private:
     return s.toLong();
   }
 
-  void assignTo(Tensor<Context> * dst, at::Type & inferred_type, at::Scalar scalar) {
+  void assignTo(Tensor* dst, at::Type& inferred_type, at::Scalar scalar) {
     switch(inferred_type.scalarType()) {
       #define DEFINE_CASE(ctype,aten_name,native) \
         case at::k##aten_name: { \
@@ -134,8 +134,8 @@ private:
         CAFFE_THROW("Unknown ATen Type");
     }
   }
-  template<typename T>
-  void assignToValue(Tensor<Context> * dst, T v) {
+  template <typename T>
+  void assignToValue(Tensor* dst, T v) {
     dst->Resize(std::vector<TIndex>());
     math::Set(1, v, dst->template mutable_data<T>(), &context_);
   }

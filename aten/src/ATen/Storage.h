@@ -1,53 +1,47 @@
 #pragma once
 
-#include "ATen/Scalar.h"
-#include <TH/THStorageFunctions.hpp>
+#include <ATen/StorageImpl.h>
 
 namespace at {
 
-struct Type;
-
-struct Storage {
-  static const char RESIZABLE = 2;
-
-  Storage() {}
-  Storage(THStorage* storage)
-      : storage(storage) {}
-  Storage(const Storage& other) = delete;
-  virtual ~Storage() {
-    THStorage_free(storage);
+struct AT_API Storage {
+public:
+  Storage() = delete;
+  Storage(StorageImpl* storage_impl) : storage_impl_(storage_impl) {}
+  Storage(
+      at::ScalarType,
+      size_t size,
+      Allocator* allocator,
+      bool resizable = false);
+  Storage(
+      at::ScalarType,
+      at::DataPtr,
+      size_t size,
+      const std::function<void(void*)>& deleter,
+      bool resizable = false);
+  ~Storage();
+  // There are reasonable interpretations of these constructors, but they're to
+  // be implemented on demand.
+  Storage(Storage&) = delete;
+  Storage(const Storage&) = delete;
+  Storage(Storage&&) = delete;
+  Storage(const Storage&&) = delete;
+  void set_pImpl(StorageImpl* storage_impl) {
+    storage_impl_ = storage_impl;
   }
-  void operator=(const Storage&) = delete;
-
-  virtual size_t elementSize() const = 0;
-  size_t size() const {
-    return storage->size;
-  };
-  void* data() {
-    return storage->data_ptr.get();
-  };
-  const void* data() const {
-    return storage->data_ptr.get();
-  };
-  void* unsafeGetTH(bool retain_) const {
-    if (retain_) {
-      THStorage_retain(storage);
-    }
-    return storage;
+  StorageImpl* pImpl() {
+    return storage_impl_;
   }
-  void retain() {
-    THStorage_retain(storage);
+  StorageImpl* pImpl() const {
+    return storage_impl_;
   }
-  virtual Type & type() const = 0;
-  int getDevice() const {
-    return storage->data_ptr.device().index();
-  }
-  void clear_flag(char flag) {
-    THStorage_clearFlag(storage, flag);
+  StorageImpl* retained_pImpl() const {
+    storage_impl_->retain();
+    return storage_impl_;
   }
 
  protected:
-  THStorage *storage;
+  StorageImpl* storage_impl_;
 };
 
 } // namespace at

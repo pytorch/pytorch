@@ -8,8 +8,11 @@ import math
 __all__ = [
     'argmax',
     'argmin',
+    'argsort',
     'btrifact',
     'btriunpack',
+    'einsum',
+    'broadcast_tensors',
     'isfinite',
     'isinf',
     'isnan',
@@ -17,6 +20,28 @@ __all__ = [
     'stft',
     'unique',
 ]
+
+
+def broadcast_tensors(*tensors):
+    r"""broadcast_tensors(*tensors) -> List of Tensors
+
+    Broadcasts the given tensors according to :ref:`_broadcasting-semantics`.
+
+    Args:
+        *tensors: any number of tensors of the same type
+
+    Example::
+
+        >>> x = torch.arange(3).view(1, 3)
+        >>> y = torch.arange(2).view(2, 1)
+        >>> a, b = torch.broadcast_tensors(x, y)
+        >>> a.size()
+        torch.Size([2, 3])
+        >>> a
+        tensor([[0, 1, 2],
+                [0, 1, 2]])
+    """
+    return torch._C._VariableFunctions.broadcast_tensors(tensors)
 
 
 def split(tensor, split_size_or_sections, dim=0):
@@ -140,6 +165,80 @@ def btriunpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
     return P, L, U
 
 
+def einsum(equation, *operands):
+    r"""einsum(equation, *operands) -> Tensor
+
+This function provides a way of computing multilinear expressions (i.e. sums of products) using the
+Einstein summation convention.
+
+Args:
+    equation (string): The equation is given in terms of lower case letters (indices) to be associated
+           with each dimension of the operands and result. The left hand side lists the operands
+           dimensions, separated by commas. There should be one index letter per tensor dimension.
+           The right hand side follows after `->` and gives the indices for the output.
+           If the `->` and right hand side are omitted, it implicitly defined as the alphabetically
+           sorted list of all indices appearing exactly once in the left hand side.
+           The indices not apprearing in the output are summed over after multiplying the operands
+           entries.
+           If an index appears several times for the same operand, a diagonal is taken.
+           Ellipses `...` represent a fixed number of dimensions. If the right hand side is inferred,
+           the ellipsis dimensions are at the beginning of the output.
+    operands (list of Tensors): The operands to compute the Einstein sum of.
+           Note that the operands are passed as a list, not as individual arguments.
+
+Examples::
+
+    >>> x = torch.randn(5)
+    >>> y = torch.randn(4)
+    >>> torch.einsum('i,j->ij', x, y)  # outer product
+    tensor([[-0.0570, -0.0286, -0.0231,  0.0197],
+            [ 1.2616,  0.6335,  0.5113, -0.4351],
+            [ 1.4452,  0.7257,  0.5857, -0.4984],
+            [-0.4647, -0.2333, -0.1883,  0.1603],
+            [-1.1130, -0.5588, -0.4510,  0.3838]])
+
+
+    >>> A = torch.randn(3,5,4)
+    >>> l = torch.randn(2,5)
+    >>> r = torch.randn(2,4)
+    >>> torch.einsum('bn,anm,bm->ba', l, A, r) # compare torch.nn.functional.bilinear
+    tensor([[-0.3430, -5.2405,  0.4494],
+            [ 0.3311,  5.5201, -3.0356]])
+
+
+    >>> As = torch.randn(3,2,5)
+    >>> Bs = torch.randn(3,5,4)
+    >>> torch.einsum('bij,bjk->bik', As, Bs) # batch matrix multiplication
+    tensor([[[-1.0564, -1.5904,  3.2023,  3.1271],
+             [-1.6706, -0.8097, -0.8025, -2.1183]],
+
+            [[ 4.2239,  0.3107, -0.5756, -0.2354],
+             [-1.4558, -0.3460,  1.5087, -0.8530]],
+
+            [[ 2.8153,  1.8787, -4.3839, -1.2112],
+             [ 0.3728, -2.1131,  0.0921,  0.8305]]])
+
+    >>> A = torch.randn(3, 3)
+    >>> torch.einsum('ii->i', A) # diagonal
+    tensor([-0.7825,  0.8291, -0.1936])
+
+    >>> A = torch.randn(4, 3, 3)
+    >>> torch.einsum('...ii->...i', A) # batch diagonal
+    tensor([[-1.0864,  0.7292,  0.0569],
+            [-0.9725, -1.0270,  0.6493],
+            [ 0.5832, -1.1716, -1.5084],
+            [ 0.4041, -1.1690,  0.8570]])
+
+    >>> A = torch.randn(2, 3, 4, 5)
+    >>> torch.einsum('...ij->...ji', A).shape # batch permute
+    torch.Size([2, 3, 5, 4])
+"""
+    if len(operands) == 1 and isinstance(operands[0], (list, tuple)):
+        # the old interface of passing the operands as one list argument
+        operands = operands[0]
+    return torch._C._VariableFunctions.einsum(equation, operands)
+
+
 def isfinite(tensor):
     r"""Returns a new tensor with boolean elements representing if each element is `Finite` or not.
 
@@ -186,12 +285,12 @@ def stft(input, n_fft, hop_length=None, win_length=None, window=None,
     expression:
 
     .. math::
-        X[m, \omega] = \sum_{k = 0}^{\text{win_length}}%
+        X[m, \omega] = \sum_{k = 0}^{\text{win\_length}}%
                             window[k]\ input[m \times hop_length + k]\ %
-                            e^{- j \frac{2 \pi \cdot \omega k}{\text{win_length}}},
+                            e^{- j \frac{2 \pi \cdot \omega k}{\text{win\_length}}},
 
     where :math:`m` is the index of the sliding window, and :math:`\omega` is
-    the frequency that :math:`0 \leq \omega < \text{n_fft}`. When
+    the frequency that :math:`0 \leq \omega < \text{n\_fft}`. When
     :attr:`onesided` is the default value ``True``,
 
     * :attr:`input` must be either a 1-D time sequenceor 2-D a batch of time
@@ -206,25 +305,25 @@ def stft(input, n_fft, hop_length=None, win_length=None, window=None,
     * :attr:`window` can be a 1-D tensor of size :attr:`win_length`, e.g., from
       :meth:`torch.hann_window`. If :attr:`window` is ``None`` (default), it is
       treated as if having :math:`1` everywhere in the window. If
-      :math:`\text{win_length} < \text{n_fft}`, :attr:`window` will be padded on
+      :math:`\text{win\_length} < \text{n\_fft}`, :attr:`window` will be padded on
       both sides to length :attr:`n_fft` before being applied.
 
     * If :attr:`center` is ``True`` (default), :attr:`input` will be padded on
       both sides so that the :math:`t`-th frame is centered at time
-      :math:`t \times \text{hop_length}`. Otherwise, the :math:`t`-th frame
-      begins at time  :math:`t \times \text{hop_length}`.
+      :math:`t \times \text{hop\_length}`. Otherwise, the :math:`t`-th frame
+      begins at time  :math:`t \times \text{hop\_length}`.
 
     * :attr:`pad_mode` determines the padding method used on :attr:`input` when
       :attr:`center` is ``True``. See :meth:`torch.nn.functional.pad` for
       all available options. Default is ``"reflect"``.
 
     * If :attr:`onesided` is ``True`` (default), only values for :math:`\omega`
-      in :math:`\left[0, 1, 2, \dots, \left\lfloor \frac{\text{n_fft}}{2} \right\rfloor + 1\right]`
+      in :math:`\left[0, 1, 2, \dots, \left\lfloor \frac{\text{n\_fft}}{2} \right\rfloor + 1\right]`
       are returned because the real-to-complex Fourier transform satisfies the
-      conjugate symmetry, i.e., :math:`X[m, \omega] = X[m, \text{n_fft} - \omega]^*`.
+      conjugate symmetry, i.e., :math:`X[m, \omega] = X[m, \text{n\_fft} - \omega]^*`.
 
     * If :attr:`normalized` is ``True`` (default is ``False``), the function
-      returns the normalized STFT results, i.e., multiplied by :math:`(\text{frame_length})^{-0.5}`.
+      returns the normalized STFT results, i.e., multiplied by :math:`(\text{frame\_length})^{-0.5}`.
 
     Returns the real and the imaginary parts together as one tensor of size
     :math:`(* \times N \times T \times 2)`, where :math:`*` is the optional
@@ -247,7 +346,7 @@ def stft(input, n_fft, hop_length=None, win_length=None, window=None,
         window (Tensor, optional): the optional window function.
             Default: ``None`` (treated as window of all :math:`1`s)
         center (bool, optional): whether to pad :attr:`input` on both sides so
-            that the :math:`t`-th frame is centered at time :math:`t \times \text{hop_length}`.
+            that the :math:`t`-th frame is centered at time :math:`t \times \text{hop\_length}`.
             Default: ``True``
         pad_mode (string, optional): controls the padding method used when
             :attr:`center` is ``True``. Default: ``"reflect"``
@@ -403,3 +502,36 @@ def argmin(input, dim=None, keepdim=False):
     if dim is None:
         return torch._argmin(input.contiguous().view(-1), dim=0, keepdim=False)
     return torch._argmin(input, dim, keepdim)
+
+
+def argsort(input, dim=None, descending=False):
+    """Returns the indices that sort a tensor along a given dimension in ascending
+    order by value.
+
+    This is the second value returned by :meth:`torch.sort`.  See its documentation
+    for the exact semantics of this method.
+
+    Args:
+        input (Tensor): the input tensor
+        dim (int, optional): the dimension to sort along
+        descending (bool, optional): controls the sorting order (ascending or descending)
+
+    Example::
+
+        >>> a = torch.randn(4, 4)
+        >>> a
+        tensor([[ 0.0785,  1.5267, -0.8521,  0.4065],
+                [ 0.1598,  0.0788, -0.0745, -1.2700],
+                [ 1.2208,  1.0722, -0.7064,  1.2564],
+                [ 0.0669, -0.2318, -0.8229, -0.9280]])
+
+
+        >>> torch.argsort(a, dim=1)
+        tensor([[2, 0, 3, 1],
+                [3, 2, 1, 0],
+                [2, 1, 0, 3],
+                [3, 2, 1, 0]])
+    """
+    if dim is None:
+        return torch.sort(input, -1, descending)[1]
+    return torch.sort(input, dim, descending)[1]

@@ -19,9 +19,9 @@ If you are not familiar with creating a Pull Request, here are some guides:
 - https://help.github.com/articles/creating-a-pull-request/
 
 
-## Developing locally with PyTorch
+## Developing PyTorch
 
-To locally develop with PyTorch, here are some tips:
+To develop PyTorch on your machine, here are some tips:
 
 1. Uninstall all existing pytorch installs
 ```
@@ -30,7 +30,7 @@ pip uninstall torch
 pip uninstall torch # run this command twice
 ```
 
-2. Locally clone a copy of PyTorch from source:
+2. Clone a copy of PyTorch from source:
 
 ```
 git clone https://github.com/pytorch/pytorch
@@ -139,17 +139,20 @@ not very optimized for incremental rebuilds, this will actually be very slow.
 Far better is to only request rebuilds of the parts of the project you are
 working on:
 
-- Working on `torch/csrc`?  Run `python setup.py develop` to rebuild
+- Working on the Python bindings?  Run `python setup.py develop` to rebuild
   (NB: no `build` here!)
 
-- Working on `torch/lib/TH`, did not make any cmake changes, and just want to
-  see if it compiles?  Run `(cd torch/lib/build/TH && make install -j$(getconf _NPROCESSORS_ONLN))`.  This
-  applies for any other subdirectory of `torch/lib`.  **Warning: Changes you
-  make here will not be visible from Python.**  See below.
+- Working on `torch/csrc` or `aten`?  Run `python setup.py rebuild_libtorch` to
+  rebuild and avoid having to rebuild other dependent libraries we
+  depend on.
 
-- Working on `torch/lib` and want to run your changes / rerun cmake?  Run
-  `python setup.py build_deps`.  Note that this will rerun cmake for
-  every subdirectory in TH.
+- Working on one of the other dependent libraries? The other valid
+  targets are listed in `dep_libs` in `setup.py`. prepend `build_` to
+  get a target, and run as e.g. `python setup.py build_gloo`.
+
+- Working on a test binary?  Run `(cd build && ninja bin/test_binary_name)` to
+  rebuild only that test binary (without rerunning cmake).  (Replace `ninja` with
+  `make` if you don't have ninja installed).
 
 On the initial build, you can also speed things up with the environment
 variables `DEBUG` and `NO_CUDA`.

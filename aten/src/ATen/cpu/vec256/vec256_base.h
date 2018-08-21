@@ -208,4 +208,9 @@ template <class T> Vec256<T> max(const Vec256<T> &a, const Vec256<T> &b) {
   return c;
 }
 
+template <typename T>
+T fmadd(const T& a, const T& b, const T& c) {
+  return a * b + c;
+}
+
 }}}

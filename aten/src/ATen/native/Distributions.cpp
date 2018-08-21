@@ -1,9 +1,9 @@
 #include "ATen/ATen.h"
 #include "ATen/CPUApplyUtils.h"
 #include "ATen/Dispatch.h"
-#include "ATen/Error.h"
 #include "ATen/ExpandUtils.h"
 #include "ATen/NativeFunctions.h"
+#include "ATen/core/Error.h"
 
 #include "ATen/CPUGenerator.h"
 #include "ATen/CheckGenerator.h"
@@ -49,7 +49,7 @@ namespace {
  */
 
 THGenerator* get_generator(at::Generator* gen) {
-  auto default_gen = &at::globalContext().defaultGenerator(at::Backend::CPU);
+  auto default_gen = &at::globalContext().defaultGenerator(at::kCPU);
   auto gen_ = at::check_generator<at::CPUGenerator>(gen, default_gen);
   return gen_->generator;
 }

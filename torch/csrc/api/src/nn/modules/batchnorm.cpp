@@ -3,7 +3,7 @@
 #include <torch/cuda.h>
 #include <torch/tensor.h>
 
-#include <ATen/Error.h>
+#include <ATen/core/Error.h>
 
 #include <cstddef>
 #include <utility>

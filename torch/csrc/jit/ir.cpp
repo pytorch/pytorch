@@ -4,6 +4,8 @@
 #include "torch/csrc/jit/operator.h"
 #include "torch/csrc/autograd/function.h"
 #include "torch/csrc/jit/constants.h"
+#include "torch/csrc/jit/assertions.h"
+#include "torch/csrc/jit/script/compiler.h"
 
 #include <iostream>
 #include <unordered_map>
@@ -43,9 +45,9 @@ std::ostream& operator<<(std::ostream & out, const at::ArrayRef<T> & nodes) {
 }
 
 struct const_value_list_with_types {
-  const std::vector<const Value*>& values;
+  const ArrayRef<const Value*> values;
   bool use_newlines;
-  const_value_list_with_types(const std::vector<const Value*>& values, bool use_newlines = false)
+  const_value_list_with_types(ArrayRef<const Value*> values, bool use_newlines = false)
     : values(values), use_newlines(use_newlines) {}
 };
 std::ostream& operator<<(std::ostream & out, const_value_list_with_types l) {
@@ -81,6 +83,20 @@ void printPrimList(std::ostream & out, const std::vector<T> & items) {
   }
   out << "]";
 }
+
+std::string escapeString(std::string s) {
+  std::vector<char> search = {'\n', '\t', '\v'};
+  std::vector<std::string> replace = {"\\n", "\\t", "\\v"};
+  for (size_t i = 0; i < search.size(); i++) {
+    size_t pos = s.find(search[i]);
+    while(pos != std::string::npos) {
+      s.replace(pos, 1, replace[i]);
+      pos = s.find(search[i], pos + 1);
+    }
+  }
+  return s;
+}
+
 void printAttributes(std::ostream & out, const Node * n, bool ignore_subgraph=false) {
   out << "[";
   auto names = n->attributeNames();
@@ -109,7 +125,7 @@ void printAttributes(std::ostream & out, const Node * n, bool ignore_subgraph=fa
         printPrimList(out,n->is(name));
         break;
       case AttributeKind::s:
-        out << n->s(name);
+        out << escapeString(n->s(name));
         break;
       case AttributeKind::ss:
         printPrimList(out,n->ss(name));
@@ -239,7 +255,7 @@ static void checkSameDevice(const Node* node) {
   bool has_device = false;
   int device;
   auto checkValue = [&](const Value* v) {
-    if(TensorType* type = v->type()->cast<TensorType>()) {
+    if(TensorTypePtr type = v->type()->cast<TensorType>()) {
       if(!has_device) {
         has_device = true;
         device = type->device();
@@ -354,7 +370,7 @@ void Graph::lint() const {
   // - every use will occur later in the topsort
 
   struct LintScope {
-    LintScope() {}
+    LintScope() = default;
     LintScope(std::unique_ptr<LintScope> parent)
     : parent(std::move(parent)) {}
     bool contains(const Value * v) {
@@ -405,7 +421,7 @@ void Graph::lint() const {
     void check_node(const Node* n) {
       for (auto input : n->inputs_) {
         if (!scope->contains(input)) {
-          JIT_ASSERTM(0, "%%%d not in scope", input->unique());
+          JIT_ASSERTM(0, input->unique(), " not in scope");
         }
       }
       JIT_ASSERT(anticipated_uses[n] == static_cast<int64_t>(n->inputs_.size()));
@@ -486,13 +502,13 @@ void LintGraph(std::shared_ptr<Graph>& graph) {
   graph->lint();
 }
 
-void Block::cloneFrom(Block * src, std::function<Value*(Value*)> outer_map) {
+void Block::cloneFrom(Block * src, std::function<Value*(Value*)> value_map) {
   std::unordered_map<Value*, Value*> local_map;
   auto env = [&](Value * v) {
     auto it = local_map.find(v);
     if(it != local_map.end())
       return it->second;
-    return outer_map(v);
+    return value_map(v);
   };
 
   auto graph = owningGraph();
@@ -520,7 +536,7 @@ void Block::cloneFrom(Block * src, std::function<Value*(Value*)> outer_map) {
 std::shared_ptr<Graph> Graph::copy() {
   auto new_g = std::make_shared<Graph>();
   auto env = [](Value *) -> Value* {
-    barf("Graph::copy() encountered a use of a value not in scope. Run lint!");
+    AT_ERROR("Graph::copy() encountered a use of a value not in scope. Run lint!");
   };
   new_g->block()->cloneFrom(this->block(), env);
   return new_g;
@@ -569,56 +585,23 @@ Value* Value::setUniqueName(const std::string & name) {
   return this;
 }
 
-std::pair<size_t, const Argument*> findArgument(const FunctionSchema& the_schema, Symbol name) {
+size_t findArgument(const FunctionSchema& the_schema, Symbol name) {
   auto name_str = name.toUnqualString();
   for (size_t i = 0; i < the_schema.arguments.size(); ++i) {
     const Argument* arg = &the_schema.arguments[i];
     if (arg->name == name_str) {
-      return std::make_pair(i, arg);
+      return i;
     }
   }
   throw std::runtime_error(std::string("Couldn't find an argument called ") + name.toQualString());
 }
 
 at::optional<IValue> Node::get(Symbol name) const {
-  // TODO (apaszke): remove. this is in here for now just so that we can ensure
-  // we always use this in places where the node has a valid schema already
-  // (will make next commits easier).
-  if (hasAttribute(name)) {
-    switch (kindOf(name)) {
-      case AttributeKind::i:
-        return IValue(i(name));
-      case AttributeKind::f:
-        return IValue(f(name));
-      case AttributeKind::t: {
-        // attributes are ambiguous, this might be a at::Scalar
-        // disambiguate via schema
-        at::Tensor ten = t(name);
-        const Argument* arg = findArgument(schema(), name).second;
-        if(arg->type->isSubtypeOf(*NumberType::get())) {
-          return IValue(at::Scalar(ten));
-        }
-        return IValue(ten);
-      }
-      case AttributeKind::is:
-        return IValue(is(name));
-      default:
-        throw std::runtime_error("get() NYI");
-    }
-  }
   return toIValue(namedInput(name));
 }
 
 Value* Node::namedInput(Symbol name) const {
-  if(hasAttribute(name)) {
-    // XXX - const cast because this really should not be modifying graph
-    // and once we remove attributes it no longer will
-    Value* v = insertConstant(const_cast<Graph&>(*owningGraph()), get(name).value());
-    // XXX - insert point can be anywhere since modifying the graph is unexpected,
-    // so this is completely unsafe and needs to be gone as soon as possible.
-    return v;
-  }
-  return input(findArgument(schema(), name).first);
+  return input(findArgument(schema(), name));
 }
 
 bool Node::matches(const char *signature_literal, at::ArrayRef<Symbol> const_inputs) {
@@ -629,8 +612,21 @@ bool Node::matches(const char *signature_literal, at::ArrayRef<Symbol> const_inp
   return true;
 }
 
+void Node::dump() const {
+  std::cout << *this << "\n";
+}
+
 void Node::findSchema() const {
-  schema_ = &getOperatorFor(this).schema;
+  schema_ = &getOperatorFor(this).schema();
+}
+
+inline const SourceRange& fakeRange() {
+  static SourceRange range(std::make_shared<std::string>("<internally-created-node>"), 0, 1);
+  return range;
+}
+
+Value* Graph::insert(Symbol opname, at::ArrayRef<NamedValue> args, at::ArrayRef<NamedValue> kwargs) {
+  return script::emitBuiltinCall(fakeRange(), *this, opname, args, kwargs, /*required=*/true);
 }
 
 PythonOp* defaultAllocPythonOp(Graph*g) {

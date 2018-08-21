@@ -3,10 +3,9 @@
 #include <memory>
 #include <stddef.h>
 
-#include <ATen/Error.h>
-#include <ATen/Retainable.h>
 #include <ATen/Device.h>
-#include <ATen/detail/UniqueVoidPtr.h>
+#include <ATen/core/Error.h>
+#include <ATen/core/UniqueVoidPtr.h>
 
 namespace at {
 
@@ -24,7 +23,7 @@ private:
 public:
   // Choice of CPU here is arbitrary; if there's an "undefined" device
   // we could use that too
-  DataPtr() : ptr_(), device_(kCPU) {}
+  DataPtr() : ptr_(), device_(DeviceType::CPU) {}
   DataPtr(void* data, Device device)
     : ptr_(data), device_(device) {}
   DataPtr(void* data, void* ctx, DeleterFnPtr ctx_deleter, Device device)

@@ -7,7 +7,7 @@ include(../cmake/Codegen.cmake)
 add_subdirectory(utils)
 
 # ---[ ATen build
-if(BUILD_ATEN)
+if (NOT BUILD_ATEN_MOBILE)
   set(__caffe2_CMAKE_POSITION_INDEPENDENT_CODE ${CMAKE_POSITION_INDEPENDENT_CODE})
   set(CMAKE_POSITION_INDEPENDENT_CODE ON)
   set(AT_LINK_STYLE INTERFACE)
@@ -40,6 +40,7 @@ if(BUILD_ATEN)
   # ATen tests use catch instead of gtest so keep separate for now
   # list(APPEND Caffe2_CPU_TEST_SRCS ${ATen_CPU_TEST_SRCS})
   # list(APPEND Caffe2_GPU_TEST_SRCS ${ATen_CUDA_TEST_SRCS})
+  list(APPEND Caffe2_CPU_TEST_SRCS ${ATen_CORE_TEST_SRCS})
   list(APPEND Caffe2_CPU_INCLUDE ${ATen_CPU_INCLUDE})
   list(APPEND Caffe2_GPU_INCLUDE ${ATen_CUDA_INCLUDE})
   list(APPEND Caffe2_DEPENDENCY_LIBS ${ATen_CPU_DEPENDENCY_LIBS})
@@ -48,9 +49,17 @@ if(BUILD_ATEN)
 
   IF(USE_ROCM)
     # Set the HIP Variables
-    set(Caffe2_HIP_SRCS ${ATen_CUDA_SRCS})
+    set(Caffe2_HIP_SRCS ${Caffe2_HIP_SRCS} ${ATen_CUDA_SRCS})
     set(Caffe2_HIP_INCLUDES ${Caffe2_HIP_INCLUDES} ${Caffe2_GPU_INCLUDE})
   ENDIF(USE_ROCM)
+else()
+  # Only add "ATen Core", a minimal, easy-to-compile fragment of ATen.
+  # This codepath should only be exercised by the Android build.
+  add_subdirectory(../aten/src/ATen/core ATen_core)
+  list(APPEND Caffe2_CPU_SRCS ${ATen_CORE_SRCS})
+  list(APPEND Caffe2_CPU_INCLUDE ${ATen_CORE_INCLUDE})
+  list(APPEND Caffe2_CPU_TEST_SRCS ${ATen_CORE_TEST_SRCS})
+  # See cmake/Codegen.cmake for header installation
 endif()
 
 # ---[ Torch build
@@ -65,6 +74,7 @@ if(BUILD_CAFFE2)
   add_subdirectory(proto)
   add_subdirectory(contrib)
   add_subdirectory(core)
+  add_subdirectory(predictor)
   add_subdirectory(core/nomnigraph)
   add_subdirectory(core/dispatch)
   if (USE_NVRTC)
@@ -157,8 +167,8 @@ endif()
 
 # ---[ List of libraries to link with
 if (BUILD_CAFFE2)
-  add_library(caffe2_protos STATIC $<TARGET_OBJECTS:Caffe_PROTO> $<TARGET_OBJECTS:Caffe2_PROTO>)
-  add_dependencies(caffe2_protos Caffe_PROTO Caffe2_PROTO)
+  add_library(caffe2_protos STATIC $<TARGET_OBJECTS:Caffe2_PROTO>)
+  add_dependencies(caffe2_protos Caffe2_PROTO)
 else()
   # Do not include caffe2 or caffe protos, but rather have it only be
   # a library to attach local protobuf.
@@ -212,8 +222,90 @@ target_include_directories(caffe2 PRIVATE ${Caffe2_CPU_INCLUDE})
 target_include_directories(caffe2 SYSTEM PRIVATE "${Caffe2_DEPENDENCY_INCLUDE}")
 # Set standard properties on the target
 aten_set_target_props(caffe2)
+
+if (MSVC)
 target_compile_options(caffe2 INTERFACE "-std=c++11")
+else()
+target_compile_options(caffe2 INTERFACE "$<$<COMPILE_LANGUAGE:CXX>:-std=c++11>")
+endif()
+
+# Note(jiayq): This is not complete yet, but in the end we will need to deal with
+# explicit hidden visibility.
+# This line is here so that when testing build, we can enable it to properly test
+# annotation of public symbols. When finally doing proper build with all symbols
+# annotated, we will enable this line and have it wrapped with gcc/clang checks.
+# target_compile_options(caffe2 PRIVATE "-fvisibility=hidden")
+
 target_compile_options(caffe2 PRIVATE "-DCAFFE2_BUILD_MAIN_LIB")
+if (MSVC AND NOT BUILD_SHARED_LIBS)
+  # Note [Supporting both static and dynamic libraries on Window]
+  # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  # A Windows library may be distributed as either a static or dynamic
+  # library.  The chosen distribution mechanism affects how you setup
+  # the headers for the library: if you statically link a function,
+  # all you need is an ordinary signature:
+  #
+  #     void f();
+  #
+  # But if you *dynamically* link it, then you must provide a __declspec
+  # specifying that it should be imported from a DLL:
+  #
+  #     __declspec(dllimport) void f();
+  #
+  # Mixing the two situations will not work: if you specify dllimport
+  # while statically linking, the linker will complain it cannot find
+  # the __imp_f symbol (which serve as the DLL entrypoint); if you
+  # fail to specify dllimport for a symbol that's coming from a DLL,
+  # the linker will complain that it can't find f.  Joy!
+  #
+  # Most places on the Internet, you will find people have written
+  # their headers under the assumption that the application will
+  # only ever be dynamically linked, as they define a macro which
+  # tags a function as __declspec(dllexport) if you are actually
+  # building the library, and __declspec(dllimport) otherwise.  But
+  # if you want these headers to also work if you are linking against
+  # a static library, you need a way to avoid adding these __declspec's
+  # at all.  And that "mechanism" needs to apply to any downstream
+  # libraries/executables which are going to link against your library.
+  #
+  #   As an aside, why do we need to support both modes?
+  #   For historical reasons, PyTorch ATen on Windows is built dynamically,
+  #   while Caffe2 on Windows is built statically (mostly because if
+  #   we build it dynamically, we are over the DLL exported symbol limit--and
+  #   that is because Caffe2 hasn't comprehensively annotated all symbols
+  #   which cross the DLL boundary with CAFFE_API).  So any code
+  #   which is used by both PyTorch and Caffe2 needs to support both
+  #   modes of linking.
+  #
+  # So, you have a macro (call it AT_CORE_STATIC_WINDOWS) which you need to have
+  # set for any downstream library/executable that transitively includes your
+  # headers.  How are you going to do this?  You have two options:
+  #
+  #   1. Write out a config.h header which stores whether or not
+  #      you are linking statically or dynamically.
+  #
+  #   2. Force all of users to set the the macro themselves.  If they
+  #      use cmake, you can set -DAT_CORE_STATIC_WINDOWS=1 as a PUBLIC
+  #      compile option, in which case cmake will automatically
+  #      add the macro for you.
+  #
+  # Which one is better? Well, it depends: they trade off implementor
+  # ease versus user ease: (1) is more work for the library author
+  # but the user doesn't have to worry about it; (2) requires the user
+  # to set the macro themselves... but only if they don't use cmake.
+  #
+  # So, which is appropriate in our situation?  In my mind, here is
+  # the distinguishing factor: it is more common to distribute
+  # DLLs, since they don't require you to line up the CRT version
+  # (/MD, /MDd, /MT, /MTd) and MSVC version at the use site.  So,
+  # if a user is already in the business of static linkage, they're
+  # already in "expert user" realm.  So, I've decided that at this
+  # point in time, the simplicity of implementation of (2) wins out.
+  #
+  # NB: This must be target_compile_definitions, not target_compile_options,
+  # as the latter is not respected by nvcc
+  target_compile_definitions(caffe2 PUBLIC "AT_CORE_STATIC_WINDOWS=1")
+endif()
 # Use -O2 for release builds (-O3 doesn't improve perf, and -Os results in perf regression)
 target_compile_options(caffe2 PRIVATE "$<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-O2>")
 install(TARGETS caffe2 EXPORT Caffe2Targets DESTINATION lib)
@@ -222,19 +314,9 @@ list(APPEND Caffe2_MAIN_LIBS caffe2_library)
 
 # ---[ CUDA library.
 if(USE_CUDA)
-  # A hack to deal with cuda library dependencies and modern CMake: the
-  # CUDA_ADD_LIBRARY includes a target_link_libraries, and as a result,
-  # one cannot use PUBLIC/PRIVATE/INTERFACE for the target anymore. This
-  # hack adds the PRIVATE keywords to CUDA_LIBRARIES so we can deal with
-  # it. We will then manually add the cudart library as interface libs.
-  set(__tmp ${CUDA_LIBRARIES})
-  set(CUDA_LIBRARIES PRIVATE ${CUDA_LIBRARIES})
-  if(CAFFE2_STATIC_LINK_CUDA)
-    torch_cuda_based_add_library(caffe2_gpu STATIC ${Caffe2_GPU_SRCS})
-  else()
-    torch_cuda_based_add_library(caffe2_gpu ${Caffe2_GPU_SRCS})
-  endif()
-  set(CUDA_LIBRARIES ${__tmp})
+  set(CUDA_LINK_LIBRARIES_KEYWORD PRIVATE)
+  torch_cuda_based_add_library(caffe2_gpu ${Caffe2_GPU_SRCS})
+  set(CUDA_LINK_LIBRARIES_KEYWORD)
   target_link_libraries(caffe2_gpu INTERFACE caffe2::cudart)
 
   target_include_directories(
@@ -250,6 +332,20 @@ if(USE_CUDA)
   target_link_libraries(
       caffe2_gpu PUBLIC caffe2 ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
 
+  # See Note [Supporting both static and dynamic libraries on Window]
+  # TODO: I'm actually not sure why this is necessary, because caffe2_gpu
+  # should depend on caffe2 (which itself would give us the necessary
+  # macro definition).
+  if (MSVC AND NOT BUILD_SHARED_LIBS)
+      target_compile_options(caffe2_gpu PUBLIC "-DAT_CORE_STATIC_WINDOWS=1")
+  endif()
+
+  # NB: This must be target_compile_definitions, not target_compile_options,
+  # as the latter is not respected by nvcc
+  if (MSVC)
+      target_compile_definitions(caffe2_gpu PRIVATE "-DCAFFE2_BUILD_MAIN_LIB")
+  endif()
+
   # Set standard properties on the target
   aten_set_target_props(caffe2_gpu)
 
@@ -261,12 +357,21 @@ endif()
 # ---[ Caffe2 HIP sources.
 if(USE_ROCM)
   # Call again since Caffe2_HIP_INCLUDES is extended with ATen include dirs.
-  IF(BUILD_ATEN)
-     HIP_INCLUDE_DIRECTORIES(${Caffe2_HIP_INCLUDES})
-  ENDIF()
-  IF(BUILD_CAFFE2)
-     set_source_files_properties(${Caffe2_HIP_SRCS} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
-  ENDIF()
+  # Get Compile Definitions from the directory (FindHIP.CMake bug)
+  get_directory_property(MY_DEFINITIONS COMPILE_DEFINITIONS)
+  if(MY_DEFINITIONS)
+    foreach(_item ${MY_DEFINITIONS})
+      LIST(APPEND HIP_HCC_FLAGS "-D${_item}")
+    endforeach()
+  endif()
+
+  # Call again since Caffe2_HIP_INCLUDES is extended with ATen include dirs.
+  hip_include_directories(${Caffe2_HIP_INCLUDES})
+
+  filter_list(__caffe2_hip_srcs_cpp Caffe2_HIP_SRCS "\\.(cc|cpp|cu)$")
+  set_source_files_properties(${__caffe2_hip_srcs_cpp} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+
+  # FindHIP.CMake checks if the SHARED flag is set and adds extra logic accordingly.
   hip_add_library(caffe2_hip ${Caffe2_HIP_SRCS})
 
   # Since PyTorch files contain HIP headers, these flags are required for the necessary definitions to be added.
@@ -278,9 +383,8 @@ if(USE_ROCM)
   target_include_directories(caffe2_hip PRIVATE ${Caffe2_HIP_INCLUDES})
   target_include_directories(caffe2_hip INTERFACE $<INSTALL_INTERFACE:include>)
 
-  IF(BUILD_ATEN)
-    aten_set_target_props(caffe2_hip)
-  ENDIF()
+  # Set standard properties on the target
+  aten_set_target_props(caffe2_hip)
 
   # When a library has object files that contain device code, it needs to use hipcc/hcc to link.
   set_target_properties(caffe2_hip PROPERTIES LINKER_LANGUAGE HIP)
@@ -344,7 +448,7 @@ if(BUILD_CAFFE2)
   set(__aten_test_dir "test/aten")
 endif()
 # Todo - Set up ATen tests for ROCm in an upcoming PR
-if(BUILD_ATEN AND NOT USE_ROCM)
+if(NOT USE_ROCM)
   foreach(test_src ${ATen_CPU_TEST_SRCS})
     get_filename_component(test_name ${test_src} NAME_WE)
     add_executable(${test_name} "${test_src}")

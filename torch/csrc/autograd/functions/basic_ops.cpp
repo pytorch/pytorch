@@ -11,7 +11,7 @@
 
 namespace torch { namespace autograd {
 
-auto Error::apply(variable_list&& grad_outputs) -> variable_list {
+auto Error::apply(variable_list&& inputs) -> variable_list {
   throw std::runtime_error(msg);
 }
 

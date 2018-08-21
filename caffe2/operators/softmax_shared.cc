@@ -16,7 +16,7 @@ void SoftmaxCPU(
     float* rowmax) {
   math::RowwiseMax<float, CPUContext>(N, D, Xdata, rowmax, &context);
   // Put the intermediate result X - max(X) into Y
-  context.template Copy<float, CPUContext, CPUContext>(N * D, Xdata, Ydata);
+  context.template CopyFromCPU<float>(N * D, Xdata, Ydata);
   // Subtract the max (for numerical reasons)
   math::Gemm<float, CPUContext>(
       CblasNoTrans,

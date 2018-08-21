@@ -4,7 +4,6 @@
 #include <pybind11/pybind11.h>
 
 #include "torch/csrc/torch.h"
-#include "torch/csrc/assertions.h"
 #include "torch/csrc/Dtype.h"
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/Exceptions.h"
@@ -172,10 +171,10 @@ static void py_initialize_tensor_type(PyTypeObject& type, const char* name, PyOb
 
 static const char* get_module(Backend backend) {
   switch (backend) {
-    case kCPU: return "torch";
-    case kCUDA: return "torch.cuda";
-    case kSparseCPU: return "torch.sparse";
-    case kSparseCUDA: return "torch.cuda.sparse";
+    case Backend::CPU: return "torch";
+    case Backend::CUDA: return "torch.cuda";
+    case Backend::SparseCPU: return "torch.sparse";
+    case Backend::SparseCUDA: return "torch.cuda.sparse";
     default: AT_ERROR("invalid backend: ", toString(backend));
   }
 }
@@ -223,7 +222,7 @@ static THPObjectPtr get_tensor_dict() {
   if (!tensor_class) throw python_error();
 
   auto tensor_type = (PyTypeObject*)tensor_class.get();
-  TORCH_ASSERTM(tensor_type->tp_base, "missing base type for Tensor");
+  AT_CHECK(tensor_type->tp_base, "missing base type for Tensor");
 
   auto res = THPObjectPtr(PyDict_New());
   if (!res) throw python_error();
@@ -384,14 +383,14 @@ void set_default_tensor_type(const at::Type& type) {
 }
 
 at::Type& get_default_tensor_type() {
-  TORCH_ASSERT(default_tensor_type);
+  AT_ASSERT(default_tensor_type);
   return *default_tensor_type;
 }
 
 Device getDevice(const at::Tensor& tensor) {
   if (tensor.type().is_cuda()) {
-    return at::Device(at::kCUDA, tensor.get_device());
+    return at::Device(at::DeviceType::CUDA, tensor.get_device());
   }
-  return at::Device(at::kCPU);
+  return at::Device(at::DeviceType::CPU);
 }
 }} // namespace torch::tensors

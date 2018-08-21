@@ -17,7 +17,7 @@ bool PoolOp<float, CPUContext, LpPool>::RunOnDeviceWithOrderNCHW() {
   const auto inv_p = 1.0 / p;
 
   const float* Xdata = X.data<float>();
-  float* Ydata = Y->mutable_data<float>();
+  float* Ydata = Y->template mutable_data<float>();
   math::Set<float, CPUContext>(Y->size(), 0, Ydata, &context_);
   // The main loop
   int channels = X.dim32(1);
@@ -67,7 +67,7 @@ bool PoolOp<float, CPUContext, LpPool>::RunOnDeviceWithOrderNHWC() {
   const auto inv_p = 1.0 / p;
 
   const float* Xdata = X.data<float>();
-  float* Ydata = Y->mutable_data<float>();
+  float* Ydata = Y->template mutable_data<float>();
   math::Set<float, CPUContext>(Y->size(), 0, Ydata, &context_);
   // The main loop
   int pooled_height = Y->dim32(1);
@@ -115,11 +115,11 @@ bool PoolGradientOp<float, CPUContext, LpPool>::RunOnDeviceWithOrderNCHW() {
   // TODO(Yangqing): Add shape checks.
   dX->ResizeLike(X);
   math::Set<float, CPUContext>(
-      X.size(), 0, dX->mutable_data<float>(), &context_);
+      X.size(), 0, dX->template mutable_data<float>(), &context_);
   const float* dYdata = dY.data<float>();
   const float* Xdata = X.data<float>();
   const float* Ydata = Y.data<float>();
-  float* dXdata = dX->mutable_data<float>();
+  float* dXdata = dX->template mutable_data<float>();
 
   int channels = X.dim32(1);
   CAFFE_ENFORCE_EQ(channels, dY.dim32(1));
@@ -171,9 +171,9 @@ bool PoolGradientOp<float, CPUContext, LpPool>::RunOnDeviceWithOrderNHWC() {
   // TODO(Yangqing): Add shape checks.
   dX->ResizeLike(X);
   math::Set<float, CPUContext>(
-      X.size(), 0, dX->mutable_data<float>(), &context_);
+      X.size(), 0, dX->template mutable_data<float>(), &context_);
   const float* dYdata = dY.data<float>();
-  float* dXdata = dX->mutable_data<float>();
+  float* dXdata = dX->template mutable_data<float>();
   const float* Xdata = X.data<float>();
   const float* Ydata = Y.data<float>();
   // The main loop

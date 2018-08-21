@@ -31,7 +31,7 @@ class MKLConvOp final : public ConvPoolOpBase<MKLContext> {
 
     const int M = filter.dim32(0);
     if (InputSize() == 2 && !zero_bias_) {
-      TensorCPU cpu_zero_bias;
+      Tensor cpu_zero_bias{CPU};
       cpu_zero_bias.Resize(M);
       CPUContext ctx;
       math::Set<T, CPUContext>(
@@ -72,8 +72,8 @@ class MKLConvOp final : public ConvPoolOpBase<MKLContext> {
       size_t bdata_sizes[4] = {W, H, C, N};
       // We will utilize the SetOutputSize() function int he base class
       // with dummy TensorCPU input and output to calculate the sizes.
-      TensorCPU dummy_input(X.dims());
-      TensorCPU dummy_output;
+      Tensor dummy_input(X.dims(), CPU);
+      Tensor dummy_output(CPU);
       ConvPoolOpBase<MKLContext>::SetOutputSize(
           dummy_input, &dummy_output, M);
       size_t tdata_sizes[4] = {

@@ -109,7 +109,7 @@ THC_API void THCTensor_(cauchy)(THCState* state, THCTensor *self_, double median
 
 void THCTensor_(renormRows)(struct THCState* state,
                              THCTensor* t) {
-  THAssert(THCTensor_(_nDimension)(state, t) == 2);
+  THAssert(THCTensor_(nDimensionLegacyAll)(state, t) == 2);
   int64_t rows = THCTensor_(size)(state, t, 0);
   int64_t cols = THCTensor_(size)(state, t, 1);
 
@@ -137,16 +137,16 @@ THC_API void THCTensor_(multinomial)(struct THCState *state,
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self, prob_dist));
   THCGenerator* gen = THCRandom_getGenerator(state);
 
-  int inputSize = THCTensor_(_nDimension)(state, prob_dist);
+  int inputSize = THCTensor_(nDimensionLegacyAll)(state, prob_dist);
   THArgCheck(inputSize > 0 && inputSize <= 2, 2,
              "prob_dist must be 1 or 2 dim");
 
   // Categories are in the innermost dimension
   int64_t numDist =
-    inputSize == 1 ? 1 : THCTensor_(size)(state, prob_dist, 0);
+    inputSize == 1 ? 1 : THCTensor_(sizeLegacyNoScalars)(state, prob_dist, 0);
   int64_t numCategoriesLong =
-    inputSize == 1 ? THCTensor_(size)(state, prob_dist, 0) :
-    THCTensor_(size)(state, prob_dist, 1);
+    inputSize == 1 ? THCTensor_(sizeLegacyNoScalars)(state, prob_dist, 0) :
+    THCTensor_(sizeLegacyNoScalars)(state, prob_dist, 1);
 
   // Since the index tensor is float, numCategories cannot exceed max
   // float integer precision
@@ -181,7 +181,7 @@ THC_API void THCTensor_(multinomial)(struct THCState *state,
   int maxThreads = props->maxThreadsPerBlock;
   int maxShared = props->sharedMemPerBlock;
   int requiredShared = (numCategories < maxThreads ? numCategories : maxThreads)
-                                * (sizeof(real) * sizeof(accreal));
+                                * (sizeof(real) + sizeof(accreal));
 
   if (n_sample == 1 && maxShared >= requiredShared) {
     // Optimized allocation-free implementation

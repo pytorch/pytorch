@@ -118,7 +118,7 @@ static void onEachDevice(std::function<void(int)> op) {
 #endif
 
 void enableProfiler(ProfilerState new_state) {
-  TORCH_ASSERT(new_state != ProfilerState::Disabled);
+  AT_ASSERT(new_state != ProfilerState::Disabled);
 #ifndef USE_CUDA
   if (new_state == ProfilerState::NVTX)
     throw std::runtime_error("Can't use NVTX profiler - PyTorch was compiled without CUDA");

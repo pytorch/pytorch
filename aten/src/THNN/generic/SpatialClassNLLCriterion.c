@@ -3,13 +3,13 @@
 #else
 
 #define INITIAL_CHECK                                                            \
-  THArgCheck(THIndexTensor_(_nDimension)(target) == 3, 3,                         \
+  THArgCheck(THIndexTensor_(nDimensionLegacyAll)(target) == 3, 3,                         \
     "only batches of spatial targets supported (3D tensors)"		         \
 	     " but got targets of dimension: %d",			         \
-	     THIndexTensor_(_nDimension)(target));			         \
-  THArgCheck(THTensor_(_nDimension)(input) == 4, 2,			         \
+	     THIndexTensor_(nDimensionLegacyAll)(target));			         \
+  THArgCheck(THTensor_(nDimensionLegacyAll)(input) == 4, 2,			         \
 	     "only batches of spatial inputs supported (4D tensors), "	         \
-	     "but got input of dimension: %d", THTensor_(_nDimension)(input));    \
+	     "but got input of dimension: %d", THTensor_(nDimensionLegacyAll)(input));    \
   if (weights && THTensor_(nElement)(weights) != THTensor_(size)(input, 1)) {    \
     THError("weight tensor should be defined either for all or no classes");     \
   }                                                                              \
@@ -28,10 +28,10 @@
   }
 
 #define GRADOUTPUT_SHAPE_CHECK                                                \
-  THArgCheck(THTensor_(_nDimension)(gradOutput) == 3, 3,                       \
+  THArgCheck(THTensor_(nDimensionLegacyAll)(gradOutput) == 3, 3,                       \
     "gradOutput must have same dimension as target (3)"                       \
 	     " but got dimension: %d",			                                        \
-	     THTensor_(_nDimension)(gradOutput));			                              \
+	     THTensor_(nDimensionLegacyAll)(gradOutput));			                              \
   {                                                                           \
     int64_t gradOutput0 = THTensor_(size)(gradOutput, 0);                     \
     int64_t gradOutput1 = THTensor_(size)(gradOutput, 1);                     \
@@ -78,7 +78,7 @@ void THNN_(SpatialClassNLLCriterion_updateOutput)(
             continue;
           }
           real value = THTensor_(fastGet4d)(input, b, cur_target, h, w);
-          real weight = weights ? THTensor_(fastGet1d)(weights, cur_target) : 1.0f;
+          real weight = weights ? THTensor_(fastGetLegacy1dNoScalars)(weights, cur_target) : 1.0f;
           THTensor_(fastSet3d)(output, b, h, w, -value * weight);
         }
       }
@@ -161,7 +161,7 @@ void THNN_(SpatialClassNLLCriterion_updateGradInput)(
           if (cur_target == ignore_index) {
             continue;
           }
-          real value = -(weights ? THTensor_(fastGet1d)(weights, cur_target) : 1.0f);
+          real value = -(weights ? THTensor_(fastGetLegacy1dNoScalars)(weights, cur_target) : 1.0f);
           real gradOutput_value = THTensor_(fastGet3d)(gradOutput, b, h, w);
           THTensor_(fastSet4d)(gradInput, b, cur_target, h, w, value * gradOutput_value);
         }
@@ -201,7 +201,7 @@ void THNN_(SpatialClassNLLCriterion_updateGradInput)(
 
       int index = b * sample_size + cur_target * map_size + elem;
       gradInput_data[index] =
-        -(weights ? weights_data[cur_target] : 1.0f) / normalize * THTensor_(fastGet1d)(gradOutput, 0);
+        -(weights ? weights_data[cur_target] : 1.0f) / normalize * THTensor_(fastGetLegacy1dNoScalars)(gradOutput, 0);
     }
   }
 

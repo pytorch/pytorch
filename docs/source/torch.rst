@@ -57,6 +57,7 @@ Indexing, Slicing, Joining, Mutating Ops
 .. autofunction:: gather
 .. autofunction:: index_select
 .. autofunction:: masked_select
+.. autofunction:: narrow
 .. autofunction:: nonzero
 .. autofunction:: reshape
 .. autofunction:: split
@@ -182,6 +183,7 @@ Pointwise Ops
 .. autofunction:: log1p
 .. autofunction:: log2
 .. autofunction:: mul
+.. autofunction:: mvlgamma
 .. autofunction:: neg
 .. autofunction:: pow
 .. autofunction:: reciprocal
@@ -257,6 +259,7 @@ Other Operations
 .. autofunction:: diagflat
 .. autofunction:: diagonal
 .. autofunction:: einsum
+.. autofunction:: flatten
 .. autofunction:: flip
 .. autofunction:: histc
 .. autofunction:: meshgrid
@@ -303,3 +306,7 @@ BLAS and LAPACK Operations
 .. autofunction:: svd
 .. autofunction:: symeig
 .. autofunction:: trtrs
+
+Utilities
+----------------------------------
+.. autofunction:: compiled_with_cxx11_abi

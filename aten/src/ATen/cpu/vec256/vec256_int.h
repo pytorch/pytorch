@@ -291,6 +291,34 @@ template <>
 Vec256<int16_t> inline operator*(const Vec256<int16_t>& a, const Vec256<int16_t>& b) {
   return _mm256_mullo_epi16(a, b);
 }
+
+template <typename T>
+Vec256<T> intdiv_256(const Vec256<T>& a, const Vec256<T>& b) {
+  T values_a[Vec256<T>::size];
+  T values_b[Vec256<T>::size];
+  a.store(values_a);
+  b.store(values_b);
+  for (int i = 0; i != Vec256<T>::size; i++) {
+    values_a[i] /= values_b[i];
+  }
+  return Vec256<T>::loadu(values_a);
+}
+
+template <>
+Vec256<int64_t> inline operator/(const Vec256<int64_t>& a, const Vec256<int64_t>& b) {
+  return intdiv_256(a, b);
+}
+
+template <>
+Vec256<int32_t> inline operator/(const Vec256<int32_t>& a, const Vec256<int32_t>& b) {
+  return intdiv_256(a, b);
+}
+
+template <>
+Vec256<int16_t> inline operator/(const Vec256<int16_t>& a, const Vec256<int16_t>& b) {
+  return intdiv_256(a, b);
+}
+
 #endif
 
 }}}

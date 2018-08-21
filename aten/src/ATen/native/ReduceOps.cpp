@@ -348,17 +348,17 @@ Tensor _prod(const Tensor &self, int64_t dim_, bool keepdim) {
 
 Tensor& logsumexp_out(Tensor& result, const Tensor &self, int64_t dim_, bool keepdim) {
   int64_t dim = maybe_wrap_dim(dim_, self.dim());
-  // can't take max of empty tensor.
+  // can't take max of empty tensor
   if (self.numel() != 0) {
     auto maxes = at::max_values(self, dim, true);
-    result = at::where((maxes == INFINITY).__or__(maxes == -INFINITY),
-                       maxes,
-                       maxes + at::log(at::sum(at::exp(self - maxes), dim, true)));
+    auto maxes_squeezed = (keepdim ? maxes : maxes.squeeze(dim));
+    maxes_squeezed.masked_fill_(maxes_squeezed.abs() == INFINITY, 0);
+    at::sum_out(result, at::exp(self - maxes), dim, keepdim);
+    result.log_().add_(maxes_squeezed);
   } else {
-    result = at::log(at::sum(at::exp(self), dim, true));
+    at::sum_out(result, at::exp(self), dim, keepdim);
+    result.log_();
   }
-  if (! keepdim)
-    result.squeeze_(dim);
   return result;
 }
 

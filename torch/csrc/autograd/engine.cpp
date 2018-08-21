@@ -7,6 +7,7 @@
 #include "torch/csrc/autograd/variable.h"
 
 #include <ATen/DeviceGuard.h>
+#include <ATen/ExpandUtils.h>
 
 #include <atomic>
 #include <condition_variable>
@@ -158,7 +159,7 @@ struct GraphTask {
   std::unordered_map<Function*, ExecInfo> exec_info;
   std::vector<Variable> captured_vars;
 
-  void init_to_execute(Function& graph_root, const edge_list& captures);
+  void init_to_execute(Function& graph_root, const edge_list& outputs);
 
   // The value of worker_device in the thread that created this task.
   // See Note [Reentrant backwards]
@@ -301,7 +302,7 @@ static bool is_compatible_type(const at::Type& expected, const at::Type& actual)
 }
 
 template<typename F>
-static void validate_outputs(const edge_list& edges, const variable_list& grads, const F& format_error) {
+static void validate_outputs(const edge_list& edges, variable_list& grads, const F& format_error) {
   if (grads.size() != edges.size()) {
     std::stringstream ss;
     ss << "invalid number of gradients - expected ";
@@ -322,15 +323,26 @@ static void validate_outputs(const edge_list& edges, const variable_list& grads,
       continue;
     }
     if (!grads[i].sizes().equals(metadata.shape())) {
-      std::stringstream ss;
-      ss << "invalid gradient at index " << i << " - expected shape ";
-      ss << metadata.shape() << " but got " << grads[i].sizes();
-      throw std::runtime_error(format_error(ss.str()));
+      if (!at::is_expandable_to(metadata.shape(), grads[i].sizes())) {
+        std::stringstream ss;
+        ss << "invalid gradient at index " << i << " - got ";
+        ss << grads[i].sizes() << " but expected shape compatible with ";
+        ss << metadata.shape();
+        throw std::runtime_error(format_error(ss.str()));
+      }
+      grads[i] = at::sum_to(grads[i], metadata.shape());
     }
     if (!is_compatible_type(metadata.type(), grads[i].type())) {
       std::stringstream ss;
       ss << "invalid gradient at index " << i << " - expected type ";
       ss << metadata.type() << " but got " << grads[i].type();
+      throw std::runtime_error(format_error(ss.str()));
+    }
+    const auto output_device = output.is_cuda() ? output.get_device() : -1;
+    if (output_device != metadata.device()) {
+      std::stringstream ss;
+      ss << "invalid gradient at index " << i << " - expected device ";
+      ss << metadata.device() << " but got " << output_device;
       throw std::runtime_error(format_error(ss.str()));
     }
   }
@@ -494,14 +506,14 @@ struct ClearCallbacks {
   std::mutex& callbacks_lock;
 };
 
-auto Engine::execute(const edge_list& input_roots,
+auto Engine::execute(const edge_list& roots,
                      const variable_list& inputs,
                      bool keep_graph,
                      bool create_graph,
                      const edge_list& outputs) -> variable_list {
   std::call_once(start_threads_flag, &Engine::start_threads, this);
 
-  validate_outputs(input_roots, inputs, [](const std::string& msg) {
+  validate_outputs(roots, const_cast<variable_list&>(inputs), [](const std::string& msg) {
     return msg;
   });
 
@@ -512,7 +524,7 @@ auto Engine::execute(const edge_list& input_roots,
   std::unique_lock<std::mutex> lock(graph_task.mutex);
 
   // Now compute the dependencies for all executable functions and queue the root
-  auto graph_root = std::make_shared<GraphRoot>(input_roots, inputs);
+  auto graph_root = std::make_shared<GraphRoot>(roots, inputs);
   compute_dependencies(graph_root.get(), graph_task);
   if (!outputs.empty()) {
     graph_task.init_to_execute(*graph_root, outputs);

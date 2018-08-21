@@ -1,0 +1,17 @@
+graph(%0 : Float(2, 2)
+      %1 : Float(2, 2)
+      %2 : Float(4, 2)) {
+  %3 : int = prim::Constant[value=1]()
+  %4 : Float(4, 2) = prim::FusionGroup_0[device=0](%0, %1)
+  %5 : Float(4, 2) = aten::add(%4, %2, %3)
+  return (%5);
+}
+with prim::FusionGroup_0 = graph(%3 : Float(2, 2)
+      %4 : Float(2, 2)) {
+  %7 : int = prim::Constant[value=1]()
+  %8 : Float(2, 2) = aten::add(%3, %4, %7)
+  %5 : int = prim::Constant[value=1]()
+  %6 : Float(2, 2) = aten::sub(%3, %4, %5)
+  %2 : Float(4, 2) = prim::FusedConcat[dim=0](%8, %6)
+  return (%2);
+}
