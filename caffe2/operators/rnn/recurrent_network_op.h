@@ -46,7 +46,7 @@ struct Link {
   int32_t window{1};
 };
 
-struct ScratchWorkspaces {
+struct CAFFE2_API ScratchWorkspaces {
   std::vector<std::shared_ptr<Workspace>> stepWorkspaces;
   std::shared_ptr<Workspace> sharedBlobsWs = nullptr;
 };

@@ -7,7 +7,8 @@ namespace caffe2 {
 namespace script {
 
 struct CompilationUnitImpl;
-struct CompilationUnit {
+
+struct CAFFE2_API CompilationUnit {
   CompilationUnit();
   void define(const std::string& str);
   void defineExtern(const std::string& str, std::unique_ptr<NetDef> netdef);
