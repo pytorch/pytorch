@@ -64,8 +64,7 @@ public:
 
   int64_t dim() const override;
   TensorImpl* maybe_zero_dim(bool condition_when_zero_dim) override;
-  std::unique_ptr<Storage> storage() override;
-  at::StorageImpl* storageImpl() const override;
+  const Storage& storage() override;
   int64_t storage_offset() const override;
 
   // Some ops do some manual size fiddling.
