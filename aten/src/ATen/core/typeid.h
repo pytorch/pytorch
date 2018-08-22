@@ -40,7 +40,7 @@ class TypeMeta;
  * use TypeIdentifier with custom types. This is for example used to store the
  * dtype of tensors.
  */
-class AT_CORE_API TypeIdentifier final : public at::IdWrapper<TypeIdentifier, uint16_t> {
+class TypeIdentifier final : public at::IdWrapper<TypeIdentifier, uint16_t> {
  public:
   static TypeIdentifier createTypeId();
 
@@ -135,7 +135,7 @@ struct TypeNameRegisterer {
  * stores some additional data such as the item size and the name of the type
  * for run-time inspection.
  */
-class AT_CORE_API TypeMeta {
+class TypeMeta {
  public:
   using PlacementNew = void(void*, size_t);
   using TypedCopy = void(const void*, void*, size_t);
@@ -177,7 +177,7 @@ class AT_CORE_API TypeMeta {
   // due to type erasure. E.g. somebody calling TypeMeta::copy() for
   // non-copiable type. Right now just throws exception but is implemented
   // in .cpp to manage dependencies
-  static void _ThrowRuntimeTypeLogicError(const std::string& msg);
+  AT_CORE_API static void _ThrowRuntimeTypeLogicError(const std::string& msg);
 
  public:
   /**
@@ -402,23 +402,13 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
 // definition in third party dependent libraries. The proper way is to use
 // CAFFE2_EXPORT (which explicitly requires dllexport). Marking this as a
 // todo item when the unified build is finished.
-#ifdef _MSC_VER
 #define CAFFE_KNOWN_TYPE(T)                                               \
   template <>                                                             \
-  AT_CORE_EXPORT TypeIdentifier TypeMeta::Id<T>() {                       \
+   TypeIdentifier TypeMeta::Id<T>() {                                     \
     static const TypeIdentifier type_id = TypeIdentifier::createTypeId(); \
     static TypeNameRegisterer<T> registerer(type_id, #T);                 \
     return type_id;                                                       \
   }
-#else // _MSC_VER
-#define CAFFE_KNOWN_TYPE(T)                                               \
-  template <>                                                             \
-  TypeIdentifier TypeMeta::Id<T>() {                                      \
-    static const TypeIdentifier type_id = TypeIdentifier::createTypeId(); \
-    static TypeNameRegisterer<T> registerer(type_id, #T);                 \
-    return type_id;                                                       \
-  }
-#endif
 
 /**
  * CAFFE_DECLARE_KNOWN_TYPE and CAFFE_DEFINE_KNOWN_TYPE are used
@@ -426,19 +416,11 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
  * can be resolved at compile time. Please use CAFFE_KNOWN_TYPE() instead
  * for your own types to allocate dynamic ids for them.
  */
-#ifdef _MSC_VER
-#define CAFFE_DECLARE_KNOWN_TYPE(PreallocatedId, T)       \
-  template <>                                             \
-  inline AT_CORE_API TypeIdentifier TypeMeta::Id<T>() {   \
-    return TypeIdentifier(PreallocatedId);                \
-  }
-#else // _MSC_VER
 #define CAFFE_DECLARE_KNOWN_TYPE(PreallocatedId, T) \
   template <>                                       \
   inline TypeIdentifier TypeMeta::Id<T>() {         \
     return TypeIdentifier(PreallocatedId);          \
   }
-#endif
 
 #define CONCAT_IMPL(x, y) x##y
 #define MACRO_CONCAT(x, y) CONCAT_IMPL(x, y)

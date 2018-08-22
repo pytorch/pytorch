@@ -22,7 +22,7 @@ namespace at {
  * for you, given the underlying type supports it.
  */
 template <class ConcreteType, class UnderlyingType>
-class AT_CORE_API IdWrapper {
+class AT_CORE_EXPORT IdWrapper {
  public:
   using underlying_type = UnderlyingType;
   using concrete_type = ConcreteType;
