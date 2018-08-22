@@ -69,12 +69,15 @@ OpSchema::Cost CostInferenceForFC(
   const uint64_t N = pretransposed_weight
       ? size_from_dim_(canonical_axis_w, GetDimsVector(in[1]))
       : size_to_dim_(canonical_axis_w, GetDimsVector(in[1]));
+  const bool is_2d_bias = (in[2].dims().size() == 2);
 
   const auto& X = in[0];
   c.flops = M * N * (2 * K + 1);
   c.bytes_read = (K * (M + N) + N) * sizeof(X.data_type());
   c.bytes_written = M * N * sizeof(X.data_type());
-  c.params_bytes = (K * N + N) * sizeof(X.data_type());
+  c.params_bytes = (!is_2d_bias) ? ((K * N + N) * sizeof(X.data_type()))
+                                 : ((K * N + M * N) * sizeof(X.data_type()));
+
   return c;
 }
 
@@ -166,7 +169,7 @@ The FC operator computes an output $(Y)$ as a linear combination of the input da
 
 $$Y = XW^T+b$$
 
-Here, $X$ is a matrix of shape $(M,K)$, $W$ is a matrix of shape $(N,K)$, $b$ is a vector of length $N$, and $Y$ is a matrix of shape $(M,N)$. $N$ can be thought of as the number of nodes in the layer, $M$ is the batch size, and $K$ is the number of features in an input observation.
+Here, $X$ is a matrix of shape $(M,K)$, $W$ is a matrix of shape $(N,K)$, $b$ is a vector of length $N$ or a matrix of shape $(M,N)$, and $Y$ is a matrix of shape $(M,N)$. $N$ can be thought of as the number of nodes in the layer, $M$ is the batch size, and $K$ is the number of features in an input observation.
 
 *NOTE: $X$ does not need to explicitly be a 2-dimensional matrix, however, if it is not it will be coerced into one. For an arbitrary $n$-dimensional tensor $X$, e.g. $[a_0, a_1, \ldots ,a_{k-1}, a_k, \ldots , a_{n-1}]$, where $a_i$ in $N$, and $k$ is the $axis$ arg provided, then $X$ will be coerced into a 2-dimensional tensor with dimensions $[a_0 * \ldots * a_{k-1}, a_k * \ldots * a_{n-1}]$. For the default case where axis=1, this means the $X$ tensor will be coerced into a 2D tensor of dimensions $[a_0, a_1 * \ldots * a_{n-1}]$, where $a_0$ is often the batch size. In this situation, we must have $a_0 = M$ and $a_1 * \ldots * a_{n-1} = K$. Lastly, even though $b$ is a vector of length $N$, it is copied and resized to shape $(M x N)$ implicitly, then added to each vector in the batch.*
 
@@ -247,7 +250,7 @@ Y:
     .Input(
         2,
         "b",
-        "Input blob containing vector of length $N$ which describes one bias for each node in the layer.")
+        "Input blob containing a vector of length $N$ or a 2D matrix of shape $(M,N)$ which describes one bias for each node in the layer.")
     .Output(
         0,
         "Y",

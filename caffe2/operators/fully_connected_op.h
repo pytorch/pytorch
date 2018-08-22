@@ -35,7 +35,7 @@ class FullyConnectedOp final : public Operator<Context> {
     const auto& W = Input(1);
     const auto& b = Input(2);
     auto* Y = Output(0);
-    CAFFE_ENFORCE(b.ndim() == 1, b.ndim());
+    CAFFE_ENFORCE(b.ndim() == 1 || b.ndim() ==2 , b.ndim());
     // batch size
     const auto canonical_axis = X.canonical_axis_index(axis_);
     const auto M = X.size_to_dim(canonical_axis);
@@ -66,8 +66,14 @@ class FullyConnectedOp final : public Operator<Context> {
     // Error checking
     CAFFE_ENFORCE(M == X.size() / K, dimErrorString());
     CAFFE_ENFORCE(K == W.size() / N, dimErrorString());
-    CAFFE_ENFORCE(N == b.dim32(0), dimErrorString());
-    CAFFE_ENFORCE(N == b.size(), dimErrorString());
+    if (b.ndim() == 1) {
+      CAFFE_ENFORCE(N == b.dim32(0), dimErrorString());
+      CAFFE_ENFORCE(N == b.size(), dimErrorString());
+    } else {
+      CAFFE_ENFORCE(M == b.dim32(0), dimErrorString());
+      CAFFE_ENFORCE(N == b.dim32(1), dimErrorString());
+      CAFFE_ENFORCE(M * N == b.size(), dimErrorString());
+    }
 
     Y_shape_cache_ = X.dims();
     // This is an invariant of canonical_axis, so we can DCHECK.
@@ -89,7 +95,22 @@ class FullyConnectedOp final : public Operator<Context> {
       math_type = TensorProto_DataType_FLOAT16;
     }
 
-    // W * x
+    // copy bias to output y
+    if (b.ndim() == 2) {
+      const T_B* b_data = b.template data<T_B>();
+      T_Y *y_data = Y->template mutable_data<T_Y>();
+          math::CopyVector<T_B, Context>(M * N, b_data, y_data, &context_);
+    } else {
+      const T_B* b_data = b.template data<T_B>();
+      T_Y* y_data = Y->template mutable_data<T_Y>();
+      for (int i = 0; i < M; ++i) {
+        math::CopyVector<T_B, Context>(N, b_data, y_data, &context_);
+        y_data += N;
+      }
+    }
+
+    // y = bias
+    // y = W * x + y
     math::Gemm<T_X, Context, Engine>(
         CblasNoTrans,
         TransposeWeight ? CblasTrans : CblasNoTrans,
@@ -99,33 +120,11 @@ class FullyConnectedOp final : public Operator<Context> {
         1,
         X.template data<T_X>(),
         W.template data<T_W>(),
-        0,
-        Y->template mutable_data<T_Y>(),
-        &context_,
-        math_type);
-    // Add bias term
-    if (bias_multiplier_.size() != M) {
-      // If the helper bias multiplier is not M, reshape and fill it with one.
-      bias_multiplier_.Resize(M);
-      math::Set<T_B, Context>(
-          M,
-          convert::To<float, T_B>(1),
-          bias_multiplier_.template mutable_data<T_B>(),
-          &context_);
-    }
-    math::Gemm<T_B, Context, Engine>(
-        CblasNoTrans,
-        CblasNoTrans,
-        M,
-        N,
-        1,
-        1,
-        bias_multiplier_.template data<T_B>(),
-        b.template data<T_B>(),
         1,
         Y->template mutable_data<T_Y>(),
         &context_,
         math_type);
+
     return true;
   }
 
@@ -145,7 +144,6 @@ class FullyConnectedOp final : public Operator<Context> {
   // a vector object every time we run Run().
   vector<TIndex> Y_shape_cache_;
   Tensor bias_multiplier_{Context::GetDeviceType()};
-  ;
 
   bool float16_compute_;
 };

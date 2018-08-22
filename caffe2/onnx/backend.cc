@@ -691,8 +691,8 @@ Caffe2Ops Caffe2Backend::CreateGemm(
     const auto input_c_shape =
         input_c_vi_iter->second.type().tensor_type().shape();
 
-    if (input_c_shape.dim_size() != 1) {
-      return false;
+    if (input_c_shape.dim_size() == 2) {
+      return true;
     }
 
     // c is a scalar.
