@@ -9,61 +9,61 @@ namespace at { namespace native {
 
 // See Note [ATen preprocessor philosophy]
 
-at::Tensor miopen_convolution(
+inline at::Tensor miopen_convolution(
     const at::Tensor& input, const at::Tensor& weight, const at::Tensor& bias /* optional */,
     IntList padding, IntList stride, IntList dilation,
     int64_t groups, bool benchmark, bool deterministic) {
   throw std::runtime_error("miopen_convolution: ATen not compiled with MIOpen support");
 }
 
-at::Tensor miopen_convolution_backward_input(
+inline at::Tensor miopen_convolution_backward_input(
     IntList input_size, const at::Tensor& grad_output, const at::Tensor& weight,
     IntList padding, IntList stride, IntList dilation, int64_t groups,
     bool benchmark, bool deterministic) {
   throw std::runtime_error("miopen_convolution_backward_input: ATen not compiled with MIOpen support");
 }
 
-at::Tensor miopen_convolution_backward_weight(
+inline at::Tensor miopen_convolution_backward_weight(
     IntList weight_size, const at::Tensor& grad_output, const at::Tensor& input,
     IntList padding, IntList stride, IntList dilation, int64_t groups,
     bool benchmark, bool deterministic) {
   throw std::runtime_error("miopen_convolution_backward_weight: ATen not compiled with MIOpen support");
 }
 
-at::Tensor miopen_convolution_backward_bias(
+inline at::Tensor miopen_convolution_backward_bias(
     const at::Tensor& grad_output) {
   throw std::runtime_error("miopen_convolution_backward_bias: ATen not compiled with MIOpen support");
 }
 
-std::tuple<at::Tensor,at::Tensor,at::Tensor> miopen_convolution_backward(
+inline std::tuple<at::Tensor,at::Tensor,at::Tensor> miopen_convolution_backward(
     const at::Tensor& input, const at::Tensor& grad_output, const at::Tensor& weight,
     IntList padding, IntList stride, IntList dilation, int64_t groups,
     bool benchmark, bool deterministic, std::array<bool,3> output_mask) {
   throw std::runtime_error("miopen_convolution_backward: ATen not compiled with MIOpen support");
 }
 
-at::Tensor miopen_convolution_transpose(
+inline at::Tensor miopen_convolution_transpose(
     const at::Tensor& input, const at::Tensor& weight, const at::Tensor& bias /* optional */,
     IntList padding, IntList output_padding, IntList stride, IntList dilation,
     int64_t groups, bool benchmark, bool deterministic) {
   throw std::runtime_error("miopen_convolution_transpose: ATen not compiled with MIOpen support");
 }
 
-at::Tensor miopen_convolution_transpose_backward_input(
+inline at::Tensor miopen_convolution_transpose_backward_input(
     const at::Tensor& grad_output, const at::Tensor& weight,
     IntList padding, IntList stride, IntList dilation,
     int64_t groups, bool benchmark, bool deterministic) {
   throw std::runtime_error("miopen_convolution_transpose_backward: ATen not compiled with MIOpen support");
 }
 
-at::Tensor miopen_convolution_transpose_backward_weight(
+inline at::Tensor miopen_convolution_transpose_backward_weight(
     IntList weight_size, const at::Tensor& grad_output, const at::Tensor& input,
     IntList padding, IntList stride, IntList dilation, int64_t groups,
     bool benchmark, bool deterministic) {
   throw std::runtime_error("miopen_convolution_transpose_backward_weight: ATen not compiled with MIOpen support");
 }
 
-std::tuple<at::Tensor,at::Tensor,at::Tensor> miopen_convolution_transpose_backward(
+inline std::tuple<at::Tensor,at::Tensor,at::Tensor> miopen_convolution_transpose_backward(
     const at::Tensor& input, const at::Tensor& grad_output, const at::Tensor& weight,
     IntList padding, IntList output_padding, IntList stride, IntList dilation, int64_t groups,
     bool benchmark, bool deterministic, std::array<bool,3> output_mask) {
