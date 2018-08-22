@@ -107,10 +107,6 @@ elif [[ "${BUILD_ENVIRONMENT}" == conda* ]]; then
   PROTOBUF_INCDIR=/opt/conda/include pip install -b /tmp/pip_install_onnx "file://${ROOT_DIR}/third_party/onnx#egg=onnx"
   report_compile_cache_stats
   exit 0
-elif [[ $BUILD_ENVIRONMENT == *setup* ]]; then
-  rm -rf $INSTALL_PREFIX && mkdir $INSTALL_PREFIX
-  PYTHONPATH=$INSTALL_PREFIX $PYTHON setup_caffe2.py develop --install-dir $INSTALL_PREFIX
-  exit 0
 fi
 
 
