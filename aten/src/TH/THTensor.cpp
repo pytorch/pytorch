@@ -39,11 +39,10 @@ void THTensor_setStorageNd(THTensor *self, THStorage *storage, ptrdiff_t storage
       THError("Tensor: invalid null storage");
     }
     auto scalar_type = THTensor_getStoragePtr(self)->scalar_type();
-    THStorage_free(THTensor_getStoragePtr(self));
     if(storage)
     {
+      storage->_raw_incref();
       THTensor_stealAndSetStoragePtr(self, storage);
-      THStorage_retain(THTensor_getStoragePtr(self));
     }
     else {
       THTensor_stealAndSetStoragePtr(self, THStorage_new(scalar_type));
@@ -195,4 +194,12 @@ THTensor_compute_stride(at::IntList oldshape, at::IntList oldstride, at::IntList
     return at::nullopt;
   }
   return newstride;
+}
+
+// NB: Steals ownership of storage
+void THTensor_stealAndSetStoragePtr(THTensor* tensor, THStorage* storage) {
+  // Caffe2 might have tensors whose storages are null, but we
+  // don't allow it in PyTorch.
+  AT_ASSERT(storage);
+  tensor->storage_ = at::Storage(storage);
 }

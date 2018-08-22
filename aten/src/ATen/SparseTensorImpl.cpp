@@ -62,10 +62,7 @@ TensorImpl* SparseTensorImpl::maybe_zero_dim(bool condition_when_zero_dim) {
            " changing dimensionality via maybe_zero_dim");
   return this;
 }
-std::unique_ptr<Storage> SparseTensorImpl::storage() {
-  AT_ERROR("sparse tensors do not have storage");
-}
-at::StorageImpl* SparseTensorImpl::storageImpl() const {
+const Storage& SparseTensorImpl::storage() {
   AT_ERROR("sparse tensors do not have storage");
 }
 int64_t SparseTensorImpl::storage_offset() const {
