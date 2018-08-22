@@ -22,14 +22,21 @@ public:
   Vec256(double val) {
     values = _mm256_set1_pd(val);
   }
+  Vec256(double val1, double val2, double val3, double val4) {
+    values = _mm256_setr_pd(val1, val2, val3, val4);
+  }
   operator __m256d() const {
     return values;
   }
   template <int64_t mask>
-  static Vec256<double> blend(Vec256<double> a, Vec256<double> b) {
+  static Vec256<double> blend(const Vec256<double>& a, const Vec256<double>& b) {
     return _mm256_blend_pd(a.values, b.values, mask);
   }
-  static Vec256<double> set(Vec256<double> a, Vec256<double> b, int64_t count = size) {
+  static Vec256<double> arange(double base = 0., double step = 1.) {
+    return Vec256<double>(base, base + step, base + 2 * step, base + 3 * step);
+  }
+  static Vec256<double> set(const Vec256<double>& a, const Vec256<double>& b,
+                            int64_t count = size) {
     switch (count) {
       case 0:
         return a;
@@ -151,6 +158,32 @@ public:
   Vec256<double> rsqrt() const {
     return _mm256_div_pd(_mm256_set1_pd(1), _mm256_sqrt_pd(values));
   }
+  // Comparison using the _CMP_**_OQ predicate.
+  //   `O`: get false if an operand is NaN
+  //   `Q`: do not raise if an operand is NaN
+  Vec256<double> eq(const Vec256<double>& other) const {
+    return _mm256_cmp_pd(values, other.values, _CMP_EQ_OQ);
+  }
+
+  Vec256<double> ne(const Vec256<double>& other) const {
+    return _mm256_cmp_pd(values, other.values, _CMP_NEQ_OQ);
+  }
+
+  Vec256<double> lt(const Vec256<double>& other) const {
+    return _mm256_cmp_pd(values, other.values, _CMP_LT_OQ);
+  }
+
+  Vec256<double> le(const Vec256<double>& other) const {
+    return _mm256_cmp_pd(values, other.values, _CMP_LE_OQ);
+  }
+
+  Vec256<double> gt(const Vec256<double>& other) const {
+    return _mm256_cmp_pd(values, other.values, _CMP_GT_OQ);
+  }
+
+  Vec256<double> ge(const Vec256<double>& other) const {
+    return _mm256_cmp_pd(values, other.values, _CMP_GE_OQ);
+  }
 };
 
 template <>
@@ -178,9 +211,29 @@ Vec256<double> inline max(const Vec256<double>& a, const Vec256<double>& b) {
   return _mm256_max_pd(a, b);
 }
 
+template <>
+Vec256<double> inline min(const Vec256<double>& a, const Vec256<double>& b) {
+  return _mm256_min_pd(a, b);
+}
+
+template <>
+Vec256<double> inline operator&(const Vec256<double>& a, const Vec256<double>& b) {
+  return _mm256_and_pd(a, b);
+}
+
+template <>
+Vec256<double> inline operator|(const Vec256<double>& a, const Vec256<double>& b) {
+  return _mm256_or_pd(a, b);
+}
+
+template <>
+Vec256<double> inline operator^(const Vec256<double>& a, const Vec256<double>& b) {
+  return _mm256_xor_pd(a, b);
+}
+
 #ifdef __AVX2__
 template <>
-Vec256<double> fmadd(const Vec256<double>& a, const Vec256<double>& b, const Vec256<double>& c) {
+Vec256<double> inline fmadd(const Vec256<double>& a, const Vec256<double>& b, const Vec256<double>& c) {
   return _mm256_fmadd_pd(a, b, c);
 }
 #endif

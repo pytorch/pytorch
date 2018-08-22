@@ -1,3 +1,5 @@
+#pragma once
+
 #include "ATen/ATen.h"
 #include "ATen/NativeFunctions.h"
 

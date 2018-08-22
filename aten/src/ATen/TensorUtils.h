@@ -78,4 +78,7 @@ AT_API void checkBackend(CheckedFrom c, at::ArrayRef<Tensor> t, at::Backend back
 AT_API void * maybe_data_ptr(const Tensor& tensor);
 AT_API void * maybe_data_ptr(const TensorArg& tensor);
 
+// Return if the tensor geometry represented by `sizes` and `strides` is contiguous
+AT_API bool geometry_is_contiguous(IntList sizes, IntList strides);
+
 }
