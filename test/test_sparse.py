@@ -987,6 +987,7 @@ class TestSparse(TestCase):
                             self.assertEqual(device, sparse_tensor._values().device)
                         self.assertEqual(True, sparse_tensor.requires_grad)
 
+    @skipIfRocm
     def test_factory_size_check(self):
         indices = self.IndexTensor([[1, 2], [0, 2]])
         values = self.ValueTensor([.5, .5])
