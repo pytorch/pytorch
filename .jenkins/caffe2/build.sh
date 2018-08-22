@@ -156,6 +156,11 @@ if [[ $BUILD_ENVIRONMENT == *rocm* ]]; then
   export LC_ALL=C.UTF-8
   export HCC_AMDGPU_TARGET=gfx900
 
+  # The link time of libcaffe2_hip.so takes 40 minutes, according to
+  # https://github.com/RadeonOpenCompute/hcc#thinlto-phase-1---implemented
+  # using using ThinLTO could significantly improve link-time performance.
+  export KMTHINLTO=1
+
   ########## HIPIFY Caffe2 operators
   ${PYTHON} "${ROOT_DIR}/tools/amd_build/build_pytorch_amd.py"
   ${PYTHON} "${ROOT_DIR}/tools/amd_build/build_caffe2_amd.py"
