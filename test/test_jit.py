@@ -331,8 +331,9 @@ class JitTestCase(TestCase):
 
 class TestJit(JitTestCase):
     def assertExportImport(self, trace, inputs):
+        graph = trace if isinstance(trace, torch._C.Graph) else trace.graph()
         m = torch.jit.ScriptModule()
-        m._create_method_from_graph("forward", trace.graph())
+        m._create_method_from_graph("forward", graph)
         m_import = self.getExportImportCopy(m)
 
         self.assertEqual(m.forward(*inputs), m_import.forward(*inputs))
@@ -931,6 +932,16 @@ class TestJit(JitTestCase):
     # gradients are required and sizes are involved
     def test_trace_size_with_grad(self):
         self.do_trace_size(True)
+
+    def test_trace_tuple(self):
+        def fn(x, y):
+            return x, (x * y[1], x * y[0])
+
+        x, y = torch.randn(2, 2), (torch.ones(2, 2), torch.randn(2, 2))
+        traced_fn = torch.jit.trace(x, y)(fn)
+        self.assertEqual(traced_fn(x, y), fn(x, y))
+        self.assertExpectedGraph(traced_fn.graph)
+        self.assertExportImport(traced_fn.graph, (x, y))
 
     # TODO: implement
     @unittest.expectedFailure
@@ -6560,19 +6571,11 @@ class TestCustomOperators(JitTestCase):
         # Replace with actual test once we support lists.
         with self.assertRaisesRegex(
             RuntimeError,
-            "Lists and tuples are not supported yet"
+            "Lists and strings are not supported yet"
         ):
             a, b = torch.ones(5), torch.zeros(5)
             output = torch.ops.aten.stack([a, b])
             self.assertEqual(output, torch.ones(10))
-
-    def test_passing_and_returning_tuples(self):
-        # Replace with actual test once we support tuples.
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "Lists and tuples are not supported yet"
-        ):
-            torch.ops.aten.max_pool2d(torch.ones(5, 5), [2, 2])
 
     def test_script_graph_contains_custom_op(self):
         @torch.jit.script
