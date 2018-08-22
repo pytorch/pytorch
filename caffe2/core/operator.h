@@ -338,7 +338,7 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
     return !event_;
   }
 
-  virtual void SyncDevice() {
+  virtual void FinishDeviceComputation() {
     CAFFE_NOT_IMPLEMENTED;
   }
 
@@ -598,11 +598,13 @@ class CAFFE2_API Operator : public OperatorBase {
     return HasAsyncPart() && context_.SupportsAsyncScheduling();
   }
 
+  void FinishDeviceComputation() override {
+    context_.FinishDeviceComputation();
+  }
+
   const Context* getContext() const {
     return &context_;
   }
-
-  void SyncDevice() final {}
 
  protected:
   void RecordEvent(const char* err_msg = nullptr) final {
