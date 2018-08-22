@@ -95,7 +95,7 @@ class WeightedRandomSampler(Sampler):
         self.replacement = replacement
 
     def __iter__(self):
-        return iter(torch.multinomial(self.weights, self.num_samples, self.replacement))
+        return iter(torch.multinomial(self.weights, self.num_samples, self.replacement).tolist())
 
     def __len__(self):
         return self.num_samples
