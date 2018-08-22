@@ -13,6 +13,9 @@ pytorch_linux_cpu_build_test_defaults: &pytorch_linux_cpu_build_test_defaults
       name: Build
       command: |
         export SCCACHE_BUCKET=ossci-compiler-cache
+        export SCCACHE_MAX_JOBS=`expr $(nproc) - 1`
+        export MEMORY_LIMIT_MAX_JOBS=8  # the "large" resource class on CircleCI has 32 CPU cores, if we use all of them we'll OOM
+        export MAX_JOBS=$(( ${SCCACHE_MAX_JOBS} > ${MEMORY_LIMIT_MAX_JOBS} ? ${MEMORY_LIMIT_MAX_JOBS} : ${SCCACHE_MAX_JOBS} ))
         git submodule update --init
         .jenkins/pytorch/build.sh
         .jenkins/pytorch/test.sh
@@ -26,6 +29,9 @@ pytorch_linux_cpu_build_defaults: &pytorch_linux_cpu_build_defaults
       name: Build
       command: |
         export SCCACHE_BUCKET=ossci-compiler-cache
+        export SCCACHE_MAX_JOBS=`expr $(nproc) - 1`
+        export MEMORY_LIMIT_MAX_JOBS=8  # the "large" resource class on CircleCI has 32 CPU cores, if we use all of them we'll OOM
+        export MAX_JOBS=$(( ${SCCACHE_MAX_JOBS} > ${MEMORY_LIMIT_MAX_JOBS} ? ${MEMORY_LIMIT_MAX_JOBS} : ${SCCACHE_MAX_JOBS} ))
         git submodule update --init
         .jenkins/pytorch/build.sh
         mkdir -p pytorch-ci-env/
@@ -89,6 +95,9 @@ pytorch_linux_cuda_build_defaults: &pytorch_linux_cuda_build_defaults
       command: |
         export SCCACHE_BUCKET=ossci-compiler-cache
         export TORCH_CUDA_ARCH_LIST=5.2
+        export SCCACHE_MAX_JOBS=`expr $(nproc) - 1`
+        export MEMORY_LIMIT_MAX_JOBS=8  # the "large" resource class on CircleCI has 32 CPU cores, if we use all of them we'll OOM
+        export MAX_JOBS=$(( ${SCCACHE_MAX_JOBS} > ${MEMORY_LIMIT_MAX_JOBS} ? ${MEMORY_LIMIT_MAX_JOBS} : ${SCCACHE_MAX_JOBS} ))
         git submodule update --init
         .jenkins/pytorch/build.sh
         mkdir -p pytorch-ci-env/
@@ -340,6 +349,7 @@ jobs:
             git submodule update --init
             chmod a+x .jenkins/pytorch/macos-build.sh
             .jenkins/pytorch/macos-build.sh
+
 
 workflows:
   version: 2
