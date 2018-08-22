@@ -7108,7 +7108,7 @@ nn_functional_tests = [
 
 # Test names in this set are only checked for a single derivative
 nn_functional_single_grad = frozenset('test_nn_' + name for name in [
-  'pdist',
+    'pdist',
 ])
 
 

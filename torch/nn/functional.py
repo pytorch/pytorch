@@ -2299,11 +2299,22 @@ def pairwise_distance(x1, x2, p=2, eps=1e-6, keepdim=False):
     return torch.pairwise_distance(x1, x2, p, eps, keepdim)
 
 
-def pdist(x, p=2):
-    r"""
-    See :func:`torch.pdist` for details
-    """
-    return torch.pdist(x, p)
+pdist = _add_docstr(torch.pdist, r"""
+pdist(input, p=2) -> Tensor
+
+Computes the p-norm distance between every pair of row vectors in the input.
+This is identical to the upper triangular portion, excluding the diagonal, of
+`torch.norm(input[:, None] - input, dim=2)`. This function will be faster if
+the rows are contiguous.
+
+If input has shape :math:`N \times M` then the output will have shape
+:math:`\frac{1}{2} N (N - 1)`.
+
+Args:
+    input: input tensor of shape :math:`N \times M`.
+    p: p value for the p-norm distance to calculate between each vector pair
+        :math:`\in [0, \infty]`.
+""")
 
 
 def cosine_similarity(x1, x2, dim=1, eps=1e-8):

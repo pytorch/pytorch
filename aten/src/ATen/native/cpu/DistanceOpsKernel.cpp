@@ -72,7 +72,7 @@ struct PDist {
     parallel_for(0, combs, 1, [=](int64_t k, int64_t end) {
       float n2 = n - .5;
       // The -1 accounts for floating point truncation issues
-      int64_t i = (int64_t) ((n2 - std::sqrt(n2 * n2 - 2 * k - 1)));
+      int64_t i = static_cast<int64_t>((n2 - std::sqrt(n2 * n2 - 2 * k - 1)));
       int64_t j = k - n * i + i * (i + 1) / 2 + i + 1;
       for (; k < end; ++k) {
         res_[k] = F(self_ + i * ns, self_ + j * ns, m, ms, p);
