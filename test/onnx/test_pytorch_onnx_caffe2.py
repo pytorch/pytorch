@@ -828,6 +828,28 @@ class TestCaffe2Backend(unittest.TestCase):
         y = Variable(torch.randn(1, 5, 1))
         self.run_model_test(MyModel(), train=False, input=(x, y), batch_size=BATCH_SIZE, use_gpu=False)
 
+    def test_int8_export(self):
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super(MyModel, self).__init__()
+                self.param = torch.ByteTensor(3, 4).random_()
+
+            def forward(self, x):
+                return x * self.param.float()
+
+        import io
+        f = io.BytesIO()
+        from torch.onnx import ExportTypes
+        torch.onnx._export(MyModel(), (torch.rand(3, 4),), f, verbose=True, export_type=ExportTypes.ZIP_ARCHIVE)
+
+        X = np.random.rand(3, 4).astype(np.float32)
+
+        f.seek(0)
+        import caffe2.python.onnx.backend as c2
+        model = c2.prepare_zip_archive(f)
+        model.run(X)
+
+
 # a bit of metaprogramming to set up all the rnn tests
 
 
