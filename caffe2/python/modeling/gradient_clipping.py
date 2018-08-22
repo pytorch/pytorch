@@ -26,7 +26,7 @@ class GradientClipping(NetModifier):
 
     def __init__(self, grad_clip_method, clip_norm_type='l2_norm',
                 clip_threshold=0.1, use_parameter_norm=False,
-                compute_norm_ratio=False, clip_max=1, clip_min=-1):
+                compute_norm_ratio=False, clip_max=1, clip_min=-1, blob_names=None):
         """
         Clips gradient to avoid gradient magnitude explosion or vanishing gradient.
 
@@ -42,6 +42,7 @@ class GradientClipping(NetModifier):
             clip_max will be clipped to clip_max
         clip_min: when clipping by_value, any value that is smaller than
             clip_min will be clipped to clip_min
+        blob_names: names of blobs whose gradient is to be clipped
         """
 
         assert grad_clip_method in self.GRAD_CLIP_METHODS, (
@@ -59,6 +60,7 @@ class GradientClipping(NetModifier):
         self.compute_norm_ratio = compute_norm_ratio
         self.clip_max = float(clip_max)
         self.clip_min = float(clip_min)
+        self.blob_names = blob_names
 
     def modify_net(self, net, init_net=None, grad_map=None, blob_to_device=None,
                    modify_output_record=False):
@@ -67,8 +69,17 @@ class GradientClipping(NetModifier):
 
         CPU = core.DeviceOption(caffe2_pb2.CPU)
 
-        for param, grad in grad_map.items():
-
+        param_grad_map = {}
+        if self.blob_names is None:
+            param_grad_map = grad_map
+        else:
+            for blob_name in self.blob_names:
+                param = core.BlobReference(blob_name)
+                if not net.BlobIsDefined(param):
+                    raise Exception('param {0} is not defined in net {1}'.format(
+                        param, net.Name()))
+                param_grad_map[param] = grad_map[param]
+        for param, grad in param_grad_map.items():
             # currently sparse gradients won't be clipped
             # futher implementation is needed to enable it
             if isinstance(grad, core.GradientSlice):
