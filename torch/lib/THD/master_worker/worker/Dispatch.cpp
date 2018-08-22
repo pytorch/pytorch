@@ -31,8 +31,8 @@ at::Tensor& unpackRetrieveTensor(rpc::RPCMessage& message) {
   return workerTensors.at(unpackTensor(message));
 }
 
-at::Storage* unpackRetrieveStorage(rpc::RPCMessage& message) {
-  return workerStorages.at(unpackStorage(message)).get();
+at::Storage& unpackRetrieveStorage(rpc::RPCMessage& message) {
+  return workerStorages.at(unpackStorage(message));
 }
 
 at::Generator* unpackRetrieveGenerator(rpc::RPCMessage& message) {
