@@ -911,6 +911,7 @@ class TestSparse(TestCase):
 
     @cuda_only
     @unittest.skipIf(torch.cuda.device_count() < 2, "only one GPU detected")
+    @skipIfRocm
     def test_same_gpu(self):
         i = self.IndexTensor([[2]]).cuda(1)
         v = self.ValueTensor([5]).cuda(1)
