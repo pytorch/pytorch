@@ -9,10 +9,6 @@
 
 #include "THCTensorInfo.cuh"
 
-int THCTensor_nDimension(THCState *state, const THCTensor *self) {
-  return THTensor_nDimension(self);
-}
-
 int THCTensor_nDimensionLegacyNoScalars(THCState *state, const THCTensor *self) {
   return THTensor_nDimensionLegacyNoScalars(self);
 }
@@ -289,7 +285,7 @@ ptrdiff_t THCTensor_nElement(THCState *state, const THCTensor *self) {
   {
     ptrdiff_t nElement = 1;
     int d;
-    for(d = 0; d < THTensor_nDimension(self); d++)
+    for(d = 0; d < self->dim(); d++)
       nElement *= self->size(d);
     return nElement;
   }

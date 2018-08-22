@@ -19,8 +19,7 @@
 THC_API THCStorage* THCTensor_(storage)(THCState *state, const THCTensor *self);
 THC_API ptrdiff_t THCTensor_(storageOffset)(THCState *state, const THCTensor *self);
 
-// See [NOTE: nDimension vs nDimensionLegacyNoScalars vs nDimensionLegacyAll]
-THC_API int THCTensor_(nDimension)(THCState *state, const THCTensor *self);
+// See [NOTE: dim() vs nDimensionLegacyNoScalars vs nDimensionLegacyAll]
 THC_API int THCTensor_(nDimensionLegacyNoScalars)(THCState *state, const THCTensor *self);
 THC_API int THCTensor_(nDimensionLegacyAll)(THCState *state, const THCTensor *self);
 

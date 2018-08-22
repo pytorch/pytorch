@@ -11,8 +11,7 @@
 #include <atomic>
 #include <ATen/ATen.h>
 
-// See [NOTE: nDimension vs nDimensionLegacyNoScalars vs nDimensionLegacyAll]
-THC_API int THCTensor_nDimension(THCState *state, const THCTensor *self);
+// See [NOTE: dim() vs nDimensionLegacyNoScalars vs nDimensionLegacyAll]
 THC_API int THCTensor_nDimensionLegacyNoScalars(THCState *state, const THCTensor *self);
 THC_API int THCTensor_nDimensionLegacyAll(THCState *state, const THCTensor *self);
 
