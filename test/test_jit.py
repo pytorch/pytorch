@@ -2140,6 +2140,56 @@ a")
         x = torch.rand(10, dtype=torch.float, requires_grad=True)
         self.checkScript(func, [x], optimize=True)
 
+    def test_index(self):
+        def consec(size, start=0):
+            numel = torch.tensor(size).prod().item()
+            return torch.arange(numel).view(size)
+
+        def check_indexing(indexing, tensor):
+            template = dedent("""
+            def func(x):
+                return x{}
+            """)
+
+            code = template.format(indexing)
+            scope = {}
+            exec(code, globals(), scope)
+            cu = torch.jit.CompilationUnit(code)
+            self.assertEqual(cu.func(tensor), scope['func'](tensor))
+
+        # basic slices
+        check_indexing('[0]', consec((3, 3)))
+        check_indexing('[1]', consec((3, 3), 10))
+        check_indexing('[2]', consec((3, 3), 19))
+        check_indexing('[2]', consec((3,)))
+        check_indexing('[-1]', consec((3, 3), 19))
+        check_indexing('[0:2]', consec((3, 3, 3)))
+        check_indexing('[1:-1]', consec((3, 3, 3)))
+        check_indexing('[-3:-1]', consec((6, 3)))
+        check_indexing('[1:]', consec((3, 3)))
+        check_indexing('[:1]', consec((3, 3)))
+        check_indexing('[:]', consec((3, 2)))
+
+        # multi-dim: indexes
+        check_indexing('[0, 1]', consec((3, 3)))
+        check_indexing('[0, 1]', consec((3, 3, 2)))
+        check_indexing('[1, 0, 2]', consec((3, 3, 3)))
+        check_indexing('[2, -1]', consec((3, 3)))
+
+        # multi-dim: mixed slicing and indexing
+        check_indexing('[0, 1:2]', consec((3, 3)))
+        check_indexing('[0, :1]', consec((3, 3, 2)))
+        check_indexing('[1, 2:]', consec((3, 3, 3)))
+        check_indexing('[-1, 1:, 0]', consec((3, 3, 3, 3)))
+        check_indexing('[1:, -1, 0]', consec((3, 3, 3, 3)))
+        check_indexing('[-1, 2:, 1:2]', consec((3, 3, 3, 3)))
+        check_indexing('[-1, 1:, 0]', consec((3, 3, 3, 3)))
+        check_indexing('[-1, :, 0, 2]', consec((3, 3, 3, 3)))
+
+        # zero-sized slices
+        check_indexing('[0:0]', consec((2, 2)))
+        check_indexing('[0:0, 1]', consec((3, 3)))
+
     def test_keyword(self):
         @torch.jit.script
         def func(x):
