@@ -22,24 +22,15 @@ void LinearImpl::reset() {
   }
 
   const auto stdv = 1.0 / std::sqrt(weight.size(1));
-  NoGradGuard no_grad;;
+  NoGradGuard no_grad;
   for (auto& p : parameters()) {
     p->uniform_(-stdv, stdv);
   }
 }
 
 Tensor LinearImpl::forward(Tensor input) {
-  if (input.ndimension() == 2 && options.with_bias_) {
-    // Fused op is marginally faster
-    AT_ASSERT(input.size(1) == weight.size(1));
-    return {torch::addmm(bias, input, weight.t())};
-  }
-
-  auto output = input.matmul(weight.t());
-  if (options.with_bias_) {
-    output += bias;
-  }
-  return output;
+  AT_ASSERT(!options.with_bias_ || bias.defined());
+  return torch::linear(input, weight, bias);
 }
 } // namespace nn
 } // namespace torch
