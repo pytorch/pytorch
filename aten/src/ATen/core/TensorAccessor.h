@@ -52,6 +52,8 @@ public:
   }
   AT_HOSTDEVICE int64_t stride(int64_t i) { return strides_[i]; }
   AT_HOSTDEVICE int64_t size(int64_t i) { return sizes_[i]; }
+  AT_HOSTDEVICE T *data() { return data_; }
+  AT_HOSTDEVICE const T *data() const { return data_; }
 protected:
   PtrType data_;
   const int64_t* sizes_;
@@ -73,6 +75,10 @@ public:
   AT_HOSTDEVICE TensorAccessor<T,N-1> operator[](int64_t i) {
     return TensorAccessor<T,N-1>(this->data_ + this->strides_[0]*i,this->sizes_+1,this->strides_+1);
   }
+
+  const TensorAccessor<T,N-1> operator[](int64_t i) const {
+    return TensorAccessor<T,N-1>(this->data_ + this->strides_[0]*i,this->sizes_+1,this->strides_+1);
+  }
 };
 
 template<typename T, template <typename U> class PtrTraits>
@@ -89,7 +95,7 @@ public:
 
 
 // PackedTensorAccessorBase and PackedTensorAccessor are used on for CUDA `Tensor`s on the host
-// and as 
+// and as
 // In contrast to `TensorAccessor`s, they copy the strides and sizes on instantiation (on the host)
 // in order to transfer them on the device when calling kernels.
 // On the device, indexing of multidimensional tensors gives to `TensorAccessor`s.
@@ -137,6 +143,9 @@ public:
   : PackedTensorAccessorBase<T,1,PtrTraits>(data_, sizes_, strides_) {};
 
   AT_DEVICE T & operator[](int64_t i) {
+    return this->data_[this->strides_[0]*i];
+  }
+  const T& operator[](int64_t i) const {
     return this->data_[this->strides_[0]*i];
   }
 };
