@@ -928,6 +928,9 @@
 - func: layer_norm(Tensor input, IntList normalized_shape, Tensor? weight={}, Tensor? bias={}, double eps=1e-5, bool cudnn_enable=True) -> Tensor
   variants: function
 
+- func: linear(Tensor input, Tensor weight, Tensor bias={}) -> Tensor
+  variants: function
+
 - func: linspace(Scalar start, Scalar end, TensorOptions options={}) -> Tensor
   variants: function
 
@@ -1041,6 +1044,12 @@
 - func: matmul(Tensor self, Tensor other) -> Tensor
 
 - func: matmul_out(Tensor result, Tensor self, Tensor other) -> Tensor
+  variants: function
+
+- func: matrix_rank(Tensor self, double tol, bool symmetric=false) -> Tensor
+  variants: function
+
+- func: matrix_rank(Tensor self, bool symmetric=false) -> Tensor
   variants: function
 
 - func: max(Tensor self, int64_t dim, bool keepdim=false) -> (Tensor, Tensor)

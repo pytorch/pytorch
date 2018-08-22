@@ -1,6 +1,7 @@
 #include "ATen/ATen.h"
 #include "ATen/ExpandUtils.h"
 #include "ATen/NativeFunctions.h"
+#include "ATen/native/LinearAlgebraUtils.h"
 #include <functional>
 #include <numeric>
 #include <vector>
@@ -105,16 +106,47 @@ Tensor pinverse(const Tensor& self, double rcond) {
   AT_CHECK(at::isFloatingType(self.type().scalarType()) && self.dim() == 2,
            "pinverse(", self.type(), "{", self.sizes(), "}): expected a 2D tensor "
            "of floating types");
-  AT_CHECK(self.dim() == 2, "tensor should be 2 dimensional");
   if (self.numel() == 0) {
     // Match NumPy
     return self.type().tensor({self.size(1), self.size(0)});
   }
   Tensor U, S, V;
   std::tie(U, S, V) = self.svd();
-  double max_val = S[0].toCDouble();
+  Tensor max_val = S[0];
   Tensor S_pseudoinv = at::where(S > rcond * max_val, S.reciprocal(), at::zeros({}, self.options()));
   return V.mm(S_pseudoinv.diag().mm(U.t()));
+}
+
+static inline Tensor _matrix_rank_helper(const Tensor& self, bool symmetric) {
+  Tensor S;
+  if (!symmetric) {
+    Tensor U, V;
+    std::tie(U, S, V) = self.svd();
+  } else {
+    Tensor eigvecs;
+    std::tie(S, eigvecs) = self.symeig();
+    S = S.abs();
+  }
+  return S;
+}
+
+Tensor matrix_rank(const Tensor& self, double tol, bool symmetric) {
+  AT_CHECK(at::isFloatingType(self.type().scalarType()) && self.dim() == 2,
+           "matrix_rank(", self.type(), "{", self.sizes(), "}): expected a 2D tensor "
+           "of floating types");
+
+  Tensor S = _matrix_rank_helper(self, symmetric);
+  return (S > tol).sum();
+}
+
+Tensor matrix_rank(const Tensor& self, bool symmetric) {
+  AT_CHECK(at::isFloatingType(self.type().scalarType()) && self.dim() == 2,
+           "matrix_rank(", self.type(), "{", self.sizes(), "}): expected a 2D tensor "
+           "of floating types");
+
+  Tensor S = _matrix_rank_helper(self, symmetric);
+  double tol = _get_epsilon(self.type().scalarType()) * std::max(self.size(0), self.size(1));
+  return (S > S.max().mul_(tol)).sum();
 }
 
 static void check_1d(const Tensor& t, const char* arg, const char* fn) {

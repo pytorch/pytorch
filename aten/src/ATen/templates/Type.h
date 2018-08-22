@@ -14,7 +14,7 @@
 #include "ATen/core/ArrayRef.h"
 #include "ATen/core/Half.h"
 #include "ATen/core/TensorTypeIdRegistration.h"
-#include "THNN/Reduction.h"
+#include "ATen/core/Reduction.h"
 
 #include <array>
 #include <cstddef>
@@ -57,13 +57,13 @@ struct AT_API Type {
   bool is_variable() const noexcept { return is_variable_; }
   bool is_undefined() const noexcept { return is_undefined_; }
   static void registerCPU(Context * context);
-  virtual std::unique_ptr<Storage> storage(bool resizable = false) const = 0;
-  virtual std::unique_ptr<Storage> storage(size_t size, bool resizable = false) const = 0;
-  virtual std::unique_ptr<Storage> storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter=noop_deleter) const = 0;
-  virtual std::unique_ptr<Storage> storageWithAllocator(int64_t size, Allocator* allocator) const = 0;
+  virtual Storage storage(bool resizable = false) const = 0;
+  virtual Storage storage(size_t size, bool resizable = false) const = 0;
+  virtual Storage storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter=noop_deleter) const = 0;
+  virtual Storage storageWithAllocator(int64_t size, Allocator* allocator) const = 0;
   virtual std::unique_ptr<Generator> generator() const = 0;
   virtual Tensor unsafeTensorFromTH(void * th_pointer, bool retain) const = 0;
-  virtual std::unique_ptr<Storage> unsafeStorageFromTH(void * th_pointer, bool retain) const = 0;
+  virtual Storage unsafeStorageFromTH(void * th_pointer, bool retain) const = 0;
   virtual const char * toString() const = 0;
   virtual size_t elementSizeInBytes() const = 0;
   virtual Type & toBackend(Backend b) const;
