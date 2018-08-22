@@ -1,10 +1,27 @@
 #include "ATen/ATen.h"
 #include "ATen/NativeFunctions.h"
 #include "ATen/WrapDimUtilsMulti.h"
+
+#include <array>
 #include <cctype>
+#include <cstddef>
+#include <sstream>
+#include <string>
+#include <vector>
 
 namespace at { namespace native {
 
+Tensor linear(const Tensor& input, const Tensor& weight, const Tensor& bias) {
+  if (input.dim() == 2 && bias.defined()) {
+    // Fused op is marginally faster.
+    return at::addmm(bias, input, weight.t());
+  }
+  auto output = at::matmul(input, weight.t());
+  if (bias.defined()) {
+    output.add_(bias);
+  }
+  return output;
+}
 
 // sumproduct_pair computes `(left*right).sum(sumdims)` by means of permutation and
 // batch matrix multiplication
@@ -299,7 +316,7 @@ Tensor einsum(std::string eqn, TensorList tensors) {
       }
     }
     preprocessed_op = preprocessed_op.permute(permutation);
-    // finally, we insert dimensions for idxes not in the operand 
+    // finally, we insert dimensions for idxes not in the operand
     for (size_t dim = 0; dim < idx_to_dim.size(); dim++) {
       if (idx_to_dim[dim] == -1) {
         preprocessed_op = preprocessed_op.unsqueeze(dim);
