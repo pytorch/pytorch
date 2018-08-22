@@ -19,7 +19,7 @@ from torch._utils_internal import get_file_path, get_file_path_2
 from torch.utils.dlpack import from_dlpack, to_dlpack
 from torch._utils import _rebuild_tensor
 from torch._six import inf, nan, string_classes
-from itertools import product, combinations
+from itertools import product, combinations, combinations_with_replacement
 from functools import reduce
 from torch import multiprocessing as mp
 from common import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MKL, \
@@ -8528,29 +8528,23 @@ class TestTorch(TestCase):
         a = torch.tensor(1)
         b = torch.tensor([1, 2, 3])
         c = torch.tensor([1, 2])
-        a_, b_, c_ = torch.cartesian_prod([a, b, c])
-        expected_b = torch.tensor([1, 1, 2, 2, 3, 3])
-        expected_c = torch.tensor([1, 2, 1, 2, 1, 2])
-        self.assertEqual((a - a_).abs().max().item(), 0)
-        self.assertEqual(b_, expected_b)
-        self.assertEqual(c_, expected_c)
+        prod = torch.cartesian_prod([a, b, c])
+        expected = torch.tensor(list(product([a], b, c)))
+        self.assertEqual(expected, prod)
 
     def test_combinations(self):
         a = torch.tensor([1, 2, 3])
-        a1, a2 = torch.combinations(a)
-        expected_a1 = torch.tensor([1, 1, 2])
-        expected_a2 = torch.tensor([2, 3, 3])
-        self.assertEqual(a1, expected_a1)
-        self.assertEqual(a2, expected_a2)
-        a1, a2 = torch.combinations(a, with_replacement=True)
-        expected_a1 = torch.tensor([1, 1, 1, 2, 2, 3])
-        expected_a2 = torch.tensor([1, 2, 3, 2, 3, 3])
-        self.assertEqual(a1, expected_a1)
-        self.assertEqual(a2, expected_a2)
-        a1, a2, a3 = torch.combinations(a, r=3)
-        self.assertEqual(a1.item(), 1)
-        self.assertEqual(a2.item(), 2)
-        self.assertEqual(a3.item(), 3)
+        c = torch.combinations(a)
+        expected = torch.tensor(list(combinations(a, r=2)))
+        self.assertEqual(c, expected)
+
+        c = torch.combinations(a, with_replacement=True)
+        expected = torch.tensor(list(combinations_with_replacement(a, r=2)))
+        self.assertEqual(c, expected)
+
+        c = torch.combinations(a, r=3)
+        expected = torch.tensor(list(combinations(a, r=3)))
+        self.assertEqual(c, expected)
 
 
 # Functions to test negative dimension wrapping

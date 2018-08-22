@@ -31,15 +31,15 @@ Tensor _triu_mask(int64_t n, int64_t dims, bool diagonal, const TensorOptions &o
 namespace at {
 namespace native{
 
-std::vector<Tensor> cartesian_prod(TensorList tensors) {
+Tensor cartesian_prod(TensorList tensors) {
   std::vector<Tensor> grids = at::meshgrid(tensors);
   for(Tensor &t : grids) {
     t = t.flatten();
   }
-  return grids;
+  return at::stack(grids, 1);
 }
 
-std::vector<Tensor> combinations(const Tensor& self, int64_t r, bool with_replacement) {
+Tensor combinations(const Tensor& self, int64_t r, bool with_replacement) {
   AT_CHECK(self.dim() == 1, "Expect a 1D vector, but got", self);
   AT_CHECK(r > 0, "Expect a positive number, but got", r);
   int64_t num_elements = self.numel();
@@ -48,7 +48,7 @@ std::vector<Tensor> combinations(const Tensor& self, int64_t r, bool with_replac
   for(Tensor &t : grids) {
     t = t.masked_select(mask);
   }
-  return grids;
+  return at::stack(grids, 1);
 }
 
 }  // namespace native

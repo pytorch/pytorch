@@ -5873,7 +5873,7 @@ add_docstr(torch.cartesian_prod,
 cartesian_prod(tensors) -> seq
 
 Do cartesian product of the given sequence of tensors. The behavior is similar to
-python's `itertools.prod`. The difference is, if the arguments is a sequence of
+python's `itertools.product`. The difference is, if the arguments is a sequence of
 size :math:`k`, `itertools.prod` generate :math:`k`-tuples, while `torch.cartesian_prod`
 create :math:`k` output tensors.
 
@@ -5882,16 +5882,25 @@ Arguments:
         Scalars will be treated as tensors of size :math:`(1,)` automatically.
 
 Returns:
-    seq (sequence of Tensors): If the input has :math:`k` tensors of size
-        :math:`(N_1,), (N_2,), \ldots , (N_k,)`, then the output would also has :math:`k` tensors,
-        where all tensors are of size :math:`N_1 \times N_2 \times \ldots \times N_k`.
+    Tensor: A tensor equivalent to converting all the input tensors into lists,
+        do `itertools.product` on these lists, and finally convert the resulting list
+        into tensor.
 
 Example::
 
-    >>> a = torch.tensor([1, 2, 3])
-    >>> b = torch.tensor([4, 5])
-    >>> torch.cartesian_prod([a, b])
-    (tensor([1, 1, 2, 2, 3, 3]), tensor([4, 5, 4, 5, 4, 5]))
+    >>> a = [1, 2, 3]
+    >>> b = [4, 5]
+    >>> list(itertools.product(a, b))
+    [(1, 4), (1, 5), (2, 4), (2, 5), (3, 4), (3, 5)]
+    >>> tensor_a = torch.tensor(a)
+    >>> tensor_b = torch.tensor(b)
+    >>> torch.cartesian_prod([tensor_a, tensor_b])
+    tensor([[1, 4],
+            [1, 5],
+            [2, 4],
+            [2, 5],
+            [3, 4],
+            [3, 5]])
 """)
 
 
@@ -5909,15 +5918,31 @@ Arguments:
     with_replacement (boolean, optional): whether to allow duplication in combination
 
 Returns:
-    seq (sequence of Tensors): :math:`r` tensors.
+    Tensor: A tensor equivalent to converting all the input tensors into lists, do
+    `itertools.combinations` or `itertools.combinations_with_replacement` on these
+    lists, and finally convert the resulting list into tensor.
 
 Example::
 
-    >>> a = torch.tensor([1, 2, 3])
-    >>> torch.combinations(a)
-    (tensor([1, 1, 2]), tensor([2, 3, 3]))
-    >>> torch.combinations(a, r=3)
-    (tensor([1]), tensor([2]), tensor([3]))
-    >>> torch.combinations(a, with_replacement=True)
-    (tensor([1, 1, 1, 2, 2, 3]), tensor([1, 2, 3, 2, 3, 3]))
+    >>> a = [1, 2, 3]
+    >>> list(itertools.combinations(a, r=2))
+    [(1, 2), (1, 3), (2, 3)]
+    >>> list(itertools.combinations(a, r=3))
+    [(1, 2, 3)]
+    >>> list(itertools.combinations_with_replacement(a, r=2))
+    [(1, 1), (1, 2), (1, 3), (2, 2), (2, 3), (3, 3)]
+    >>> tensor_a = torch.tensor(a)
+    >>> torch.combinations(tensor_a)
+    tensor([[1, 2],
+            [1, 3],
+            [2, 3]])
+    >>> torch.combinations(tensor_a, r=3)
+    tensor([[1, 2, 3]])
+    >>> torch.combinations(tensor_a, with_replacement=True)
+    tensor([[1, 1],
+            [1, 2],
+            [1, 3],
+            [2, 2],
+            [2, 3],
+            [3, 3]])
 """)

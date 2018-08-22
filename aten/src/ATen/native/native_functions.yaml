@@ -2014,10 +2014,10 @@
 - func: meshgrid(TensorList tensors) -> TensorList
   variants: function
 
-- func: cartesian_prod(TensorList tensors) -> TensorList
+- func: cartesian_prod(TensorList tensors) -> Tensor
   variants: function
 
-- func: combinations(Tensor self, int64_t r=2, bool with_replacement=false) -> TensorList
+- func: combinations(Tensor self, int64_t r=2, bool with_replacement=false) -> Tensor
   variants: function
 
 # This has a method dispatch to work around circular include problems
