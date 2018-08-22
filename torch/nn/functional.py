@@ -2299,6 +2299,13 @@ def pairwise_distance(x1, x2, p=2, eps=1e-6, keepdim=False):
     return torch.pairwise_distance(x1, x2, p, eps, keepdim)
 
 
+def pdist(x, p=2):
+    r"""
+    See :func:`torch.pdist` for details
+    """
+    return torch.pdist(x, p)
+
+
 def cosine_similarity(x1, x2, dim=1, eps=1e-8):
     r"""Returns cosine similarity between x1 and x2, computed along dim.
 

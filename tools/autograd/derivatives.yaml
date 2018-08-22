@@ -499,6 +499,9 @@
 - name: norm(Tensor self, Scalar p, int64_t dim, bool keepdim)
   self: norm_backward(grad, self, p, result, dim, keepdim)
 
+- name: pdist(Tensor self, double p)
+  self: _pdist_backward(grad, self, p, result)
+
 - name: normal_(Tensor self, double mean, double std, Generator generator)
   self: zeros_like(grad)
 

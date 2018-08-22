@@ -1043,6 +1043,56 @@ class TestTorch(TestCase):
             self.assertEqual(torch.zeros(0, device=device), torch.pairwise_distance(x, y))
             self.assertEqual(torch.zeros((0, 1), device=device), torch.pairwise_distance(x, y, keepdim=True))
 
+    @skipIfRocm
+    def test_pdist_empty(self):
+        devices = ['cpu']
+        for device in devices:
+            shape = (0, 2)
+            x = torch.randn(shape, device=device)
+            self.assertEqual(torch.empty(0, device=device), torch.pdist(x))
+
+            shape = (1, 2)
+            x = torch.randn(shape, device=device)
+            self.assertEqual(torch.empty(0, device=device), torch.pdist(x))
+
+            shape = (3, 0)
+            x = torch.randn(shape, device=device)
+            self.assertEqual(torch.zeros(3, device=device), torch.pdist(x))
+
+    @skipIfRocm
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_pdist_special(self):
+        devices = ['cpu']
+        for device in devices:
+            for shape in [(4, 5), (3, 2), (2, 1)]:
+                x = torch.randn(shape, device=device)
+                actual = torch.pdist(x, p=np.inf)
+                expected = torch.max(torch.abs(x[:, None] - x[None]), 2)[0][np.triu_indices(shape[0], k=1)]
+                self.assertEqual(expected.shape, actual.shape)
+                self.assertTrue(torch.allclose(expected, actual))
+
+                x = (torch.rand(shape, device=device) < .5).type(torch.float)
+                actual = torch.pdist(x, p=0)
+                expected = torch.sum(x[:, None] != x[None], 2)[np.triu_indices(shape[0], k=1)]
+                self.assertEqual(expected, actual)
+
+    @skipIfRocm
+    @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
+    def test_pdist_scipy(self):
+        from scipy.spatial.distance import pdist
+        devices = ['cpu']
+        for device in devices:
+            for shape in [(4, 5), (3, 2), (2, 1)]:
+                for p in [1, 2, 3, 1.5, 2.5]:
+                    for trans in [False, True]:
+                        x = torch.randn(shape, device=device)
+                        if trans:
+                            x.transpose_(0, 1)
+                        actual = torch.pdist(x, p=p)
+                        expected = pdist(x, 'minkowski', p=p)
+                        self.assertEqual(expected.shape, actual.shape)
+                        self.assertTrue(np.allclose(expected, actual.numpy()))
+
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
     def test_logsumexp(self):
         from scipy.special import logsumexp

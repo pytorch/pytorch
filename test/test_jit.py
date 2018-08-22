@@ -6843,6 +6843,8 @@ def check_against_reference(self, func, reference_func, args, kwargs=None, allow
     self.assertEqual(grads, grads_test)
 
     # test the grad grad case
+    if self._testMethodName in nn_functional_single_grad:
+        return
 
     outputs = reference_func(*recording_inputs, **kwargs)
     l1 = allSum(outputs)
@@ -7083,6 +7085,7 @@ nn_functional_tests = [
     ('affine_grid', (S, 2, 3), (torch.Size([S, 1, 7, 7]),),),
     ('pad', (3, 3, 4, 2), ([1, 1],),),
     ('pairwise_distance', (S, S), ((S, S),),),
+    ('pdist', (S, S), (),),
     ('cosine_similarity', (S, S), ((S, S),),),
     ('triplet_margin_loss', (S, S), ((S, S), (S, S)),),
     ('normalize', (S, S, S), (),),
@@ -7101,6 +7104,12 @@ nn_functional_tests = [
     # ('ctc_loss', torch.randn(S, S, S).log_softmax(2).detach().requires_grad_(), (torch.randint(1, S + 1, (S, S),
     # dtype=torch.long), torch.full((S,), S, dtype=torch.long), torch.randint(1,S,(S,), dtype=torch.long))),
 ]
+
+
+# Test names in this set are only checked for a single derivative
+nn_functional_single_grad = frozenset('test_nn_' + name for name in [
+  'pdist',
+])
 
 
 def add_test(
