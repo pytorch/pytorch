@@ -2302,6 +2302,38 @@ Example::
     tensor([ 1.2252,  0.5002,  0.6248,  2.0139])
 """)
 
+add_docstr(torch.matrix_rank,
+           r"""
+matrix_rank(input, tol=None, bool symmetric=False) -> Tensor
+
+Returns the numerical rank of a 2-D tensor. The method to compute the
+matrix rank is done using SVD by default. If :attr:`symmetric` is ``True``,
+then :attr:`input` is assumed to be symmetric, and the computation of the
+rank is done by obtaining the eigenvalues.
+
+:attr:`tol` is the threshold below which the singular values (or the eigenvalues
+when :attr:`symmetric` is ``True``) are considered to be 0. If :attr:`tol` is not
+specified, :attr:`tol` is set to ``S.max() * max(S.size()) * eps`` where `S` is the
+singular values (or the eigenvalues when :attr:`symmetric` is ``True``), and ``eps``
+is the epsilon value for the datatype of :attr:`input`.
+
+Args:
+    input (Tensor): the input 2-D tensor
+    tol (float, optional): the tolerance value. Default: ``None``
+    symmetric(bool, optional): indicates whether :attr:`input` is symmetric.
+                               Default: ``False``
+
+Example::
+
+    >>> a = torch.eye(10)
+    >>> torch.matrix_rank(a)
+    tensor(10)
+    >>> b = torch.eye(10)
+    >>> b[0, 0] = 0
+    >>> torch.matrix_rank(b)
+    tensor(9)
+""")
+
 add_docstr(torch.max,
            r"""
 .. function:: max(input) -> Tensor
