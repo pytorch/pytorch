@@ -1970,7 +1970,6 @@ def generate_tests():
 
             if t not in type_subset:
                 continue
-            pointer = 0
             if TEST_WITH_ROCM and decorator is not None:
                 if (isinstance(decorator, basestring)):
                     tensor_name = str(t.__name__)
@@ -1986,6 +1985,9 @@ def generate_tests():
                         decorator = skipIfRocm
                     else:
                         decorator = None
+            elif ((not TEST_WITH_ROCM) and (decorator is not None)):
+                if (isinstance(decorator, basestring)):
+                    decorator = None
 
             precision = custom_precision.get(name, TestCuda.precision)
             if is_half(t):
