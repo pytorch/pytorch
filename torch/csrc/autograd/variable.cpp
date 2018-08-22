@@ -64,12 +64,8 @@ const char* Variable::Impl::typeString() {
   return "VariableType";
 }
 
-std::unique_ptr<at::Storage> Variable::Impl::storage() {
+const at::Storage& Variable::Impl::storage() {
   return data_.storage();
-}
-
-at::StorageImpl* Variable::Impl::storageImpl() const {
-  return data_.unsafeGetTensorImpl()->storageImpl();
 }
 
 int64_t Variable::Impl::storage_offset() const {

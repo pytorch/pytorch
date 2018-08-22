@@ -1,4 +1,4 @@
-static std::unique_ptr<at::Storage> createStorage(RPCType type) {
+static at::Storage createStorage(RPCType type) {
   if (type == RPCType::UCHAR)
     return at::getType(at::Backend::CPU, at::ScalarType::Byte).storage();
   else if (type == RPCType::CHAR)
@@ -16,14 +16,14 @@ static std::unique_ptr<at::Storage> createStorage(RPCType type) {
   throw std::invalid_argument("passed character doesn't represent a storage type");
 }
 
-static std::unique_ptr<at::Storage> createStorage(RPCType type, size_t size) {
-  std::unique_ptr<at::Storage> storage = createStorage(type);
+static at::Storage createStorage(RPCType type, size_t size) {
+  at::Storage storage = createStorage(type);
   storage->resize(size);
   return storage;
 }
 
 static void storageSet(rpc::RPCMessage& raw_message) {
-  at::Storage *storage = unpackRetrieveStorage(raw_message);
+  at::Storage& storage = unpackRetrieveStorage(raw_message);
   ptrdiff_t offset = unpackInteger(raw_message);
   RPCType type = peekType(raw_message);
   if (isInteger(type)) {
@@ -40,7 +40,7 @@ static void storageSet(rpc::RPCMessage& raw_message) {
 }
 
 static void storageGet(rpc::RPCMessage& raw_message) {
-  at::Storage *storage = unpackRetrieveStorage(raw_message);
+  at::Storage& storage = unpackRetrieveStorage(raw_message);
   ptrdiff_t offset = unpackInteger(raw_message);
   RPCType type = unpackType(raw_message);
   finalize(raw_message);
@@ -79,7 +79,7 @@ static void storageNewWithSize(rpc::RPCMessage& raw_message) {
 static void storageNewWithSizeN(rpc::RPCMessage& raw_message, size_t size) {
   RPCType storage_type = unpackType(raw_message);
   object_id_type storage_id = unpackStorage(raw_message);
-  std::unique_ptr<at::Storage> storage = createStorage(storage_type, size);
+  at::Storage storage = createStorage(storage_type, size);
   RPCType value_type = peekType(raw_message);
   if (isInteger(value_type)) {
     int64_t values[size];
@@ -128,7 +128,7 @@ static void storageFree(rpc::RPCMessage& raw_message) {
 }
 
 static void storageResize(rpc::RPCMessage& raw_message) {
-  at::Storage *storage = unpackRetrieveStorage(raw_message);
+  at::Storage& storage = unpackRetrieveStorage(raw_message);
   int64_t new_size = unpackInteger(raw_message);
   finalize(raw_message);
   storage->resize(new_size);

@@ -15,6 +15,23 @@ namespace c10 {
  * used in an intrusive_ptr<T>.
  */
 
+// Note [Stack allocated intrusive_ptr_target safety]
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// A well known problem with std::enable_shared_from_this is that it
+// allows you to create a std::shared_ptr from a stack allocated object,
+// which is totally bogus because the object will die once you return
+// from the stack.  In intrusive_ptr, we can detect that this has occurred,
+// because we set the refcount/weakcount of objects which inherit from
+// intrusive_ptr_target to zero, *unless* we can prove that the object
+// was dynamically allocated (e.g., via make_intrusive).
+//
+// Thus, whenever you transmute a T* into a intrusive_ptr<T>, we check
+// and make sure that the refcount isn't zero (or, a more subtle
+// test for weak_intrusive_ptr<T>, for which the refcount may validly
+// be zero, but the weak refcount better not be zero), because that
+// tells us if the object was allocated by us.  If it wasn't, no
+// intrusive_ptr for you!
+
 class intrusive_ptr_target {
   // Note [Weak references for intrusive refcounting]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -70,6 +87,11 @@ class intrusive_ptr_target {
   }
 
   constexpr intrusive_ptr_target() noexcept : refcount_(0), weakcount_(0) {}
+
+  // intrusive_ptr_target supports move: but refcount and weakcount don't
+  // participate (since they are intrinsic properties of the memory location)
+  intrusive_ptr_target(intrusive_ptr_target&& other) noexcept : intrusive_ptr_target() {}
+  intrusive_ptr_target& operator=(intrusive_ptr_target&& other) noexcept { return *this; }
 
  private:
   /**
@@ -252,6 +274,10 @@ class intrusive_ptr final {
     return target_;
   }
 
+  operator bool() const noexcept {
+    return target_ != NullType::singleton();
+  }
+
   void reset() noexcept {
     reset_();
   }
@@ -298,6 +324,7 @@ class intrusive_ptr final {
    * passed in *must* have been created using intrusive_ptr::release().
    */
   static intrusive_ptr reclaim(TTarget* owning_ptr) {
+    // See Note [Stack allocated intrusive_ptr_target safety]
     AT_ASSERTM(
         owning_ptr->refcount_.load() > 0,
         "intrusive_ptr: Can only intrusive_ptr::reclaim() owning pointers that were created using intrusive_ptr::release().");
@@ -488,6 +515,31 @@ class weak_intrusive_ptr final {
     rhs.target_ = tmp;
   }
 
+  // NB: This should ONLY be used by the std::hash implementation
+  // for weak_intrusive_ptr.  Another way you could do this is
+  // friend std::hash<weak_intrusive_ptr>, but this triggers two
+  // bugs:
+  //
+  //  (1) It triggers an nvcc bug, where std::hash in a friend class
+  //      declaration gets preprocessed into hash, which then cannot
+  //      actually be found.  The error in this case looks like:
+  //
+  //        error: no template named 'hash'; did you mean 'std::hash'?
+  //
+  //  (2) On OS X, std::hash is declared as a struct, not a class.
+  //      This twings:
+  //
+  //        error: class 'hash' was previously declared as a struct
+  //        [-Werror,-Wmismatched-tags]
+  //
+  // Both of these are work-aroundable, but on the whole, I decided
+  // it would be simpler and easier to make work if we just expose
+  // an unsafe getter for target_
+  //
+  TTarget* _unsafe_get_target() const noexcept {
+    return target_;
+  }
+
   size_t use_count() const noexcept {
     if (target_ == NullType::singleton()) {
       return 0;
@@ -533,6 +585,7 @@ class weak_intrusive_ptr final {
    * passed in *must* have been created using weak_intrusive_ptr::release().
    */
   static weak_intrusive_ptr reclaim(TTarget* owning_weak_ptr) {
+    // See Note [Stack allocated intrusive_ptr_target safety]
     // if refcount > 0, weakcount must be >1 for weak references to exist.
     // see weak counting explanation at top of this file.
     // if refcount == 0, weakcount only must be >0.
@@ -552,7 +605,6 @@ class weak_intrusive_ptr final {
   friend bool operator==(
       const weak_intrusive_ptr<TTarget1, NullType1>& lhs,
       const weak_intrusive_ptr<TTarget2, NullType2>& rhs) noexcept;
-  friend class std::hash<weak_intrusive_ptr>;
 };
 
 template <class TTarget, class NullType>
@@ -598,7 +650,7 @@ struct hash<c10::intrusive_ptr<TTarget, NullType>> {
 template <class TTarget, class NullType>
 struct hash<c10::weak_intrusive_ptr<TTarget, NullType>> {
   size_t operator()(const c10::weak_intrusive_ptr<TTarget, NullType>& x) const {
-    return std::hash<TTarget*>()(x.target_);
+    return std::hash<TTarget*>()(x._unsafe_get_target());
   }
 };
 } // namespace std
