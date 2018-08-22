@@ -7,6 +7,8 @@
 #include <THC/THCDeviceUtils.cuh>
 #include <THC/THCTensorMathReduce.cuh>
 
+#include <iostream>
+
 namespace at { 
 namespace native {
 namespace {
@@ -317,6 +319,8 @@ std::tuple<Tensor,Tensor> weight_norm_fused
    const Tensor & g,
    int64_t dim) 
 {
+  std::cout << "Calling weight_norm_fused" << std::endl;
+
   auto w = at::empty_like(v);
   auto norms = at::empty_like(g);
 
@@ -388,7 +392,7 @@ std::tuple<Tensor,Tensor> weight_norm_fused
   // synchronizing here, this is the best we can do.
   THCudaCheck(cudaGetLastError());
 
-  return std::tuple<Tensor, Tensor>{v*g, v*g};
+  return std::tuple<Tensor, Tensor>{w, norms};
 }
 
 std::tuple<Tensor, Tensor> weight_norm_fused_backward
@@ -398,6 +402,8 @@ std::tuple<Tensor, Tensor> weight_norm_fused_backward
    const Tensor & saved_norms,
    int64_t dim)
 {
+  std::cout << "Calling weight_norm_fused_backward" << std::endl;
+
   // These checks should always succeed, because weight_norm_fused_backward should only
   // ever be recorded in the autograd graph via weight_norm, which passes contiguous v and g.
   AT_CHECK(saved_v.is_contiguous(), "saved_v must be contiguous");
@@ -498,6 +504,8 @@ std::tuple<Tensor, Tensor> weight_norm_differentiable_backward
    const Tensor & saved_norms,
    int64_t dim)
 {
+  std::cout << "Calling weight_norm_differentiable_backward" << std::endl;
+  
   // In Functions.cpp, the HardshrinkBackward object supplies "grad.contiguous()"
   // as the first argument, so grad_w should be contiguous here.
   // All these checks should succeed:
