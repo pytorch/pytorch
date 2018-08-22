@@ -158,7 +158,7 @@ struct Environment {
   std::shared_ptr<Environment> next;
 
   // set type error in the lowest environment. if the variable is used after an
-  // error has been set, then it will be thrown.
+  // error has been set, then we will use the more informative error message
   void setVariableTypeError(const std::string& name, const std::string &msg) {
     auto runner = this;
     while (runner->next) {
@@ -506,7 +506,7 @@ at::optional<std::vector<Value*>> tryMatchSchema(
           auto list_type = arg.type->cast<ListType>()->getElementType();
           auto tuple = value->type()->cast<TupleType>();
           auto castable = std::all_of(tuple->elements().begin(), tuple->elements().end(), [&](const TypePtr& t) {
-            return unifyTypes(list_type, t) != at::nullopt;
+            return t->isSubtypeOf(list_type);
           });
           if (castable) {
             auto unpacked = createTupleUnpack(value);
@@ -951,8 +951,13 @@ private:
       // in each branch as long as that variable is not already in scope,
       // or if that variable does not get used later. here, we save the error
       // so that the error message will be more informative in the case that is
-      // used later
-
+      // used later. When a is accessed in (a + 1), the error will get printed
+      // if cond:
+      //    a = 1
+      // else:
+      //    a = tensor
+      // b = a + 1
+      //
       if (!unified) {
         ErrorReport error(stmt);
         error << "Type mismatch: " << x << " is set to type " << tv->type()->str() << " in the true branch"
@@ -960,6 +965,9 @@ private:
         if (save_true->findInParentFrame(x) || save_false->findInParentFrame(x)) {
           throw error;
         } else {
+          // error gets saved in the lowest environment because all
+          // variables are scoped to the function. doesn't matter if this accessed
+          // through save_true or save_false
           save_true->setVariableTypeError(x, error.what());
           continue;
         }
