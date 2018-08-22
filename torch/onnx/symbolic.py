@@ -254,6 +254,11 @@ def addmm(g, self, mat1, mat2, beta, alpha):
     return g.op("Gemm", mat1, mat2, self, beta_f=_scalar(beta), alpha_f=_scalar(alpha))
 
 
+def linear(g, input, weight, bias):
+    # TODO: How does defined() behave under tracing?
+    return g.op("Gemm", input, weight, bias, beta_f=1.0, alpha_f=1.0)
+
+
 def neg(g, self):
     return g.op("Neg", self)
 
