@@ -2145,17 +2145,32 @@ a")
             numel = torch.tensor(size).prod().item()
             return torch.arange(numel).view(size)
 
+        def check_code(code_str, fn_name, inputs):
+            scope = {}
+            exec(code_str, globals(), scope)
+            cu = torch.jit.CompilationUnit(code_str)
+            self.assertEqual(cu.func(*inputs), scope['func'](*inputs))
+
         def check_indexing(indexing, tensor):
             template = dedent("""
             def func(x):
                 return x{}
             """)
 
-            code = template.format(indexing)
-            scope = {}
-            exec(code, globals(), scope)
-            cu = torch.jit.CompilationUnit(code)
-            self.assertEqual(cu.func(tensor), scope['func'](tensor))
+            check_code(template.format(indexing), "func", [tensor])
+
+        def check_dynamic_indexing(indexing, tensor, value1, value2):
+            value1 = torch.tensor(value1)
+            value2 = torch.tensor(value2)
+
+            template = dedent("""
+            def func(x, value1, value2):
+                i = int(value1)
+                j = int(value2)
+                return x{}
+            """)
+
+            check_code(template.format(indexing), "func", [tensor, value1, value2])
 
         # basic slices
         check_indexing('[0]', consec((3, 3)))
@@ -2189,6 +2204,14 @@ a")
         # zero-sized slices
         check_indexing('[0:0]', consec((2, 2)))
         check_indexing('[0:0, 1]', consec((3, 3)))
+
+        # trivial expression usage
+        check_indexing('[1+1]', consec((3, 3)))
+        check_indexing('[1:(0 + 2)]', consec((3, 3, 3)))
+
+        # dynamic expression usage
+        check_dynamic_indexing("[i + j]", consec((3, 3)), 0, 1)
+        check_dynamic_indexing("[i:j, i]", consec((3, 3, 2)), 0, 2)
 
     def test_keyword(self):
         @torch.jit.script
