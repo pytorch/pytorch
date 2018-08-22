@@ -319,8 +319,10 @@ def pad_sequence(sequences, batch_first=False, padding_value=0, padding_type='po
         out_dims = (len(sequences), max_len) + trailing_dims
     else:
         out_dims = (max_len, len(sequences)) + trailing_dims
-
     out_tensor = sequences[0].data.new(*out_dims).fill_(padding_value)
+
+    if not isinstance(padding_type, str):
+        raise TypeError("Expected padding_type to be str type but {} found".format(type(padding_type)))
     if padding_type == 'post':
         for i, tensor in enumerate(sequences):
             length = tensor.size(0)
@@ -336,7 +338,7 @@ def pad_sequence(sequences, batch_first=False, padding_value=0, padding_type='po
             else:
                 out_tensor[-length:, i, ...] = tensor
     else:
-        raise ValueError("Padding_type must be 'post' or 'pre'")
+        raise ValueError("Padding_type must be 'post' or 'pre' but '{}' found".format(padding_type))
 
     return out_tensor
 
