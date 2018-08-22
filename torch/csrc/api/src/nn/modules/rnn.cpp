@@ -20,6 +20,22 @@
 
 namespace torch {
 namespace nn {
+namespace {
+Tensor linear(Tensor x, Tensor w, Tensor b) {
+  if (x.ndimension() == 2 && b.defined()) {
+    // Fused op is marginally faster
+    assert(x.size(1) == w.size(1));
+    return torch::addmm(b, x, w.t());
+  }
+
+  auto output = x.matmul(w.t());
+  if (b.defined()) {
+    output += b;
+  }
+  return output;
+}
+} // namespace
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~ RNNOptionsBase ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 namespace detail {
@@ -74,7 +90,7 @@ void RNNImplBase<Derived>::reset() {
   }
 
   const auto stdv = 1.0 / std::sqrt(options.hidden_size_);
-  NoGradGuard no_grad;
+  NoGradGuard no_grad;;
   for (auto& p : this->parameters()) {
     p->uniform_(-stdv, stdv);
   }
@@ -182,7 +198,7 @@ void RNNImplBase<Derived>::flatten_parameters_for_cudnn() {
   }
 
   {
-    NoGradGuard no_grad;
+    NoGradGuard no_grad;;
     flat_weights_ = torch::_cudnn_rnn_flatten_weight(
         flat_weights(),
         /*weight_stride=*/options.with_bias_ ? 4 : 2,
@@ -321,8 +337,8 @@ Tensor RNNImpl::cell_forward(Tensor input, Tensor state, int64_t layer) {
       ? state
       : torch::zeros({input.size(0), options.hidden_size_}, input.options());
 
-  auto h = torch::linear(input, w_ih[layer], b_ih[layer]) +
-      torch::linear(hx, w_hh[layer], b_hh[layer]);
+  auto h = linear(input, w_ih[layer], b_ih[layer]) +
+      linear(hx, w_hh[layer], b_hh[layer]);
 
   return torch::stack(activation_function_(h));
 }
@@ -343,8 +359,8 @@ Tensor LSTMImpl::cell_forward(Tensor input, Tensor state, int64_t layer) {
   auto hx = hid[0];
   auto cx = hid[1];
 
-  auto gates = torch::linear(input, w_ih[layer], b_ih[layer]) +
-      torch::linear(hx, w_hh[layer], b_hh[layer]);
+  auto gates = linear(input, w_ih[layer], b_ih[layer]) +
+      linear(hx, w_hh[layer], b_hh[layer]);
 
   auto chunked = gates.chunk(4, 1);
   auto in_gate = chunked[0].sigmoid();
@@ -371,8 +387,8 @@ Tensor GRUImpl::cell_forward(Tensor input, Tensor state, int64_t layer) {
       ? state
       : torch::zeros({input.size(0), options.hidden_size_}, input.options());
 
-  auto gi = torch::linear(input, w_ih[layer], b_ih[layer]);
-  auto gh = torch::linear(input, w_hh[layer], b_hh[layer]);
+  auto gi = linear(input, w_ih[layer], b_ih[layer]);
+  auto gh = linear(input, w_hh[layer], b_hh[layer]);
   auto gic = gi.chunk(3, 1);
   auto ghc = gh.chunk(3, 1);
 
