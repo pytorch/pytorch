@@ -466,6 +466,15 @@ static void speculateOps(Block* block) {
   }
 }
 
+static void replaceInputWithList(Node *node, size_t i, ArrayRef<Value*> to) {
+  node->invalidateSchema();
+  node->removeInput(i);
+  for (auto* to_val : to) {
+    JIT_ASSERT(to_val->owningGraph() == node->owningGraph());
+    node->insertInput(i++, to_val);
+  }
+}
+
 static void eraseListConstruct(Block* block) {
   for (auto it = block->nodes().begin(), end = block->nodes().end();
        it != end;) {
@@ -492,7 +501,7 @@ static void eraseListConstruct(Block* block) {
 
     for (auto ritr = replacements.rbegin(); ritr != replacements.rend();
          ++ritr) {
-      n->replaceInputWithList(std::get<0>(*ritr), std::get<1>(*ritr));
+      replaceInputWithList(n, std::get<0>(*ritr), std::get<1>(*ritr));
     }
   }
 }
