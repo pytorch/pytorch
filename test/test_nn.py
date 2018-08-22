@@ -5409,6 +5409,8 @@ class TestNN(NNTestCase):
                 padding_mode='border'
             ).to('cpu').numpy()
 
+            affine_tensor = affine_tensor.to('cpu')
+
             for r in range(affine_tensor.size(1)):
                 for c in range(affine_tensor.size(2)):
                     grid_out = np.dot(grid_ary, [r, c, 1])
@@ -5457,6 +5459,8 @@ class TestNN(NNTestCase):
                 affine_tensor,
                 padding_mode='border'
             ).to('cpu').numpy()
+
+            affine_tensor = affine_tensor.to('cpu')
 
             for i in range(affine_tensor.size(1)):
                 for r in range(affine_tensor.size(2)):
