@@ -1117,7 +1117,7 @@ private:
       Ident lhs = Var(stmt.lhs()[0]).name();
       Expr expr = BinOp::create(stmt.range(), stmt.reduction(),
                                 Var::create(lhs.range(), lhs), stmt.rhs());
-      environment_stack->setVar(lhs.range(), lhs.name(), emitExpr(expr));
+      environment_stack->setVar(lhs.range(), lhs.name(), emitExpr(expr, identity));
       return;
     }
 
