@@ -60,18 +60,14 @@ class RNNImplBase : public torch::nn::Cloneable<Derived> {
   /// Modifies the internal storage of weights for optimization purposes.
   ///
   /// On CPU, this method should be called if any of the weight or bias vectors
-  /// are changed. On GPU, it should be called __any time the storage of any
-  /// parameter is modified__, e.g. any time a parameter is assigned a new
-  /// value. This allows using the fast path in cuDNN implementations of
-  /// respective RNN `forward()` methods. It is called once upon construction,
-  /// inside `reset()`.
+  /// are changed (i.e. weights are added or removed). On GPU, it should be
+  /// called __any time the storage of any parameter is modified__, e.g. any
+  /// time a parameter is assigned a new value. This allows using the fast path
+  /// in cuDNN implementations of respective RNN `forward()` methods. It is
+  /// called once upon construction, inside `reset()`.
   void flatten_parameters();
 
-  /// Returns the cuDNN mode of the RNN subclass if it has one. See
-  /// https://docs.nvidia.com/deeplearning/sdk/cudnn-developer-guide/index.html#cudnnRNNMode_t
-  /// for a list of all cuDNN modes.
-  at::optional<CuDNNMode> cudnn_mode() const noexcept;
-
+  /// The RNN's options.
   RNNOptionsBase options;
 
   /// The weights for `input x hidden` gates.
@@ -83,11 +79,8 @@ class RNNImplBase : public torch::nn::Cloneable<Derived> {
   /// The biases for `hidden x hidden` gates.
   std::vector<Tensor> b_hh;
 
-  /// The dropout module, if dropout is used.
-  Dropout dropout{nullptr};
-
  protected:
-  /// The function signature of `at::lstm`, `at::rnn_relu`, `at::gru` etc.
+  /// The function signature of `at::rnn_relu`, `at::rnn_tanh` and `at::gru`.
   using RNNFunctionSignature = std::tuple<Tensor, Tensor>(
       /*input=*/const Tensor&,
       /*state=*/const Tensor&,
@@ -99,6 +92,8 @@ class RNNImplBase : public torch::nn::Cloneable<Derived> {
       /*bidirectional=*/bool,
       /*batch_first=*/bool);
 
+  /// A generic `forward()` used for RNN and GRU (but not LSTM!). Takes the ATen
+  /// RNN function as first argument.
   RNNOutput generic_forward(
       std::function<RNNFunctionSignature> function,
       Tensor input,
@@ -108,7 +103,7 @@ class RNNImplBase : public torch::nn::Cloneable<Derived> {
   /// other sequentially in (w_ih, w_hh, b_ih, b_hh) order.
   std::vector<Tensor> flat_weights() const;
 
-  /// Returns true if any of the parameters (weights, biases) alias each other.
+  /// Very simple check if any of the parameters (weights, biases) are the same.
   bool any_parameters_alias() const;
 
   /// The number of gate weights/biases required by the RNN subclass.
@@ -123,8 +118,6 @@ class RNNImplBase : public torch::nn::Cloneable<Derived> {
 } // namespace detail
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ RNN ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-// TODO: Replace this with passing an activation module.
 
 enum class RNNActivation { ReLU, Tanh };
 

@@ -57,8 +57,6 @@ RNNImplBase<Derived>::RNNImplBase(
 
 template <typename Derived>
 void RNNImplBase<Derived>::reset() {
-  dropout = Dropout(options.dropout_);
-
   w_ih.resize(options.layers_);
   w_hh.resize(options.layers_);
   b_ih.resize(options.layers_);
@@ -121,8 +119,7 @@ void RNNImplBase<Derived>::flatten_parameters() {
   // Cache the flattened weight and bias vector.
   flat_weights_ = flat_weights();
 
-  if (!cudnn_mode_ || !torch::cudnn_is_acceptable(/*sample=*/w_ih.at(0)) ||
-      any_parameters_alias()) {
+  if (!cudnn_mode_ || !torch::cudnn_is_acceptable(/*sample=*/w_ih.at(0))) {
     return;
   }
 
@@ -136,12 +133,6 @@ void RNNImplBase<Derived>::flatten_parameters() {
       options.layers_,
       /*batch_first=*/options.batch_first_,
       /*bidirectional=*/options.bidirectional_);
-}
-
-template <typename Derived>
-at::optional<typename RNNImplBase<Derived>::CuDNNMode> RNNImplBase<
-    Derived>::cudnn_mode() const noexcept {
-  return cudnn_mode_;
 }
 
 template <typename Derived>
@@ -187,6 +178,10 @@ std::vector<Tensor> RNNImplBase<Derived>::flat_weights() const {
 
 template <typename Derived>
 bool RNNImplBase<Derived>::any_parameters_alias() const {
+  // If any parameters alias, we fall back to the slower, copying code path.
+  // This is a sufficient check, because overlapping parameter buffers that
+  // don't completely alias would break the assumptions of the uniqueness check
+  // in Module.named_parameters().
   std::unordered_set<void*> unique_data_ptrs;
   const auto params = this->parameters();
   params.map(
