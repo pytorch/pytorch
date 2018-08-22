@@ -1177,9 +1177,11 @@ class TestCuda(TestCase):
         z = torch.cat([x, y])
         self.assertEqual(z.size(), (21, SIZE, SIZE))
 
+    @skipIfRocm
     def test_cat_empty_legacy(self):
         TestTorch._test_cat_empty_legacy(self, use_cuda=True)
 
+    @skipIfRocm
     def test_cat_empty(self):
         TestTorch._test_cat_empty(self, use_cuda=True)
 
@@ -1971,7 +1973,7 @@ def generate_tests():
             if t not in type_subset:
                 continue
             if TEST_WITH_ROCM and decorator is not None:
-                if (isinstance(decorator, basestring)):
+                if (isinstance(decorator, str)):
                     tensor_name = str(t.__name__)
                     skip_type_list = decorator.split(";")
                     if (("skipIfByteTensor" in skip_type_list) and tensor_name == "ByteTensor") \
@@ -1986,7 +1988,7 @@ def generate_tests():
                     else:
                         decorator = None
             elif ((not TEST_WITH_ROCM) and (decorator is not None)):
-                if (isinstance(decorator, basestring)):
+                if (isinstance(decorator, str)):
                     decorator = None
 
             precision = custom_precision.get(name, TestCuda.precision)
