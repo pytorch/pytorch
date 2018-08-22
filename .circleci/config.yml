@@ -4,7 +4,7 @@ docker_config_defaults: &docker_config_defaults
     aws_access_key_id: AKIAIUHRTFRLXI6HBUCQ
     aws_secret_access_key: $CIRCLECI_AWS_SECRET_KEY
 
-linux_cpu_build_test_defaults: &linux_cpu_build_test_defaults
+pytorch_linux_cpu_build_test_defaults: &pytorch_linux_cpu_build_test_defaults
   resource_class: large
   working_directory: /var/lib/jenkins/workspace
   steps:
@@ -17,7 +17,7 @@ linux_cpu_build_test_defaults: &linux_cpu_build_test_defaults
         .jenkins/pytorch/build.sh
         .jenkins/pytorch/test.sh
 
-linux_cpu_build_defaults: &linux_cpu_build_defaults
+pytorch_linux_cpu_build_defaults: &pytorch_linux_cpu_build_defaults
   resource_class: large
   working_directory: /var/lib/jenkins/workspace
   steps:
@@ -39,7 +39,7 @@ linux_cpu_build_defaults: &linux_cpu_build_defaults
       paths:
         - "*"
 
-linux_cpu_test_defaults: &linux_cpu_test_defaults
+pytorch_linux_cpu_test_defaults: &pytorch_linux_cpu_test_defaults
   machine:
     image: default
   resource_class: large
@@ -79,7 +79,7 @@ linux_cpu_test_defaults: &linux_cpu_test_defaults
         fi
         (echo "source ./workspace/env" && echo 'sudo chown -R jenkins workspace /opt/conda/lib/python${PYTHON_VERSION}/site-packages/torch && cd workspace && git submodule update --init && .jenkins/pytorch/test.sh') | docker exec -u jenkins -i "$id" bash
 
-linux_cuda_build_defaults: &linux_cuda_build_defaults
+pytorch_linux_cuda_build_defaults: &pytorch_linux_cuda_build_defaults
   resource_class: large
   working_directory: /var/lib/jenkins/workspace
   steps:
@@ -102,7 +102,7 @@ linux_cuda_build_defaults: &linux_cuda_build_defaults
       paths:
         - "*"
 
-linux_cuda_test_defaults: &linux_cuda_test_defaults
+pytorch_linux_cuda_test_defaults: &pytorch_linux_cuda_test_defaults
   machine:
     image: default
   resource_class: gpu.small
@@ -153,119 +153,119 @@ linux_cuda_test_defaults: &linux_cuda_test_defaults
 
 version: 2
 jobs:
-  linux_trusty_py2_7_9_build_test:
+  pytorch_linux_trusty_py2_7_9_build_test:
     docker:
       - image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py2.7.9:226
         <<: *docker_config_defaults
-    <<: *linux_cpu_build_test_defaults
+    <<: *pytorch_linux_cpu_build_test_defaults
 
-  linux_trusty_py2_7_build_test:
+  pytorch_linux_trusty_py2_7_build_test:
     docker:
       - image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py2.7:226
         <<: *docker_config_defaults
-    <<: *linux_cpu_build_test_defaults
+    <<: *pytorch_linux_cpu_build_test_defaults
 
-  linux_trusty_py3_5_build_test:
+  pytorch_linux_trusty_py3_5_build_test:
     docker:
       - image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.5:226
         <<: *docker_config_defaults
-    <<: *linux_cpu_build_test_defaults
+    <<: *pytorch_linux_cpu_build_test_defaults
 
-  linux_trusty_py3_6_gcc4_8_build_test:
+  pytorch_linux_trusty_py3_6_gcc4_8_build_test:
     docker:
       - image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.6-gcc4.8:226
         <<: *docker_config_defaults
-    <<: *linux_cpu_build_test_defaults
+    <<: *pytorch_linux_cpu_build_test_defaults
 
-  linux_trusty_py3_6_gcc5_4_build_test:
+  pytorch_linux_trusty_py3_6_gcc5_4_build_test:
     docker:
       - image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.6-gcc5.4:226
         <<: *docker_config_defaults
-    <<: *linux_cpu_build_test_defaults
+    <<: *pytorch_linux_cpu_build_test_defaults
 
-  linux_trusty_py3_6_gcc7_build_test:
+  pytorch_linux_trusty_py3_6_gcc7_build_test:
     docker:
       - image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.6-gcc7:226
         <<: *docker_config_defaults
-    <<: *linux_cpu_build_test_defaults
+    <<: *pytorch_linux_cpu_build_test_defaults
 
-  linux_trusty_pynightly_build_test:
+  pytorch_linux_trusty_pynightly_build_test:
     docker:
       - image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-pynightly:226
         <<: *docker_config_defaults
-    <<: *linux_cpu_build_test_defaults
+    <<: *pytorch_linux_cpu_build_test_defaults
 
-  linux_xenial_py3_clang5_asan_build:
+  pytorch_linux_xenial_py3_clang5_asan_build:
     docker:
       - image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-asan:226
         <<: *docker_config_defaults
     environment:
       PYTHON_VERSION: "3.6"
-    <<: *linux_cpu_build_defaults
+    <<: *pytorch_linux_cpu_build_defaults
 
-  linux_xenial_py3_clang5_asan_test:
+  pytorch_linux_xenial_py3_clang5_asan_test:
     environment:
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-asan:226"
       PYTHON_VERSION: "3.6"
-    <<: *linux_cpu_test_defaults
+    <<: *pytorch_linux_cpu_test_defaults
 
-  linux_xenial_cuda8_cudnn6_py3_build:
+  pytorch_linux_xenial_cuda8_cudnn6_py3_build:
     docker:
       - image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn6-py3:226
         <<: *docker_config_defaults
     environment:
       PYTHON_VERSION: "3.6"
-    <<: *linux_cuda_build_defaults
+    <<: *pytorch_linux_cuda_build_defaults
 
-  linux_xenial_cuda8_cudnn6_py3_test:
+  pytorch_linux_xenial_cuda8_cudnn6_py3_test:
     environment:
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn6-py3:226"
       PYTHON_VERSION: "3.6"
-    <<: *linux_cuda_test_defaults
+    <<: *pytorch_linux_cuda_test_defaults
 
-  linux_xenial_cuda9_cudnn7_py2_build:
+  pytorch_linux_xenial_cuda9_cudnn7_py2_build:
     docker:
       - image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py2:226
         <<: *docker_config_defaults
     environment:
       PYTHON_VERSION: "2.7"
-    <<: *linux_cuda_build_defaults
+    <<: *pytorch_linux_cuda_build_defaults
 
-  linux_xenial_cuda9_cudnn7_py2_test:
+  pytorch_linux_xenial_cuda9_cudnn7_py2_test:
     environment:
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py2:226"
       PYTHON_VERSION: "2.7"
-    <<: *linux_cuda_test_defaults
+    <<: *pytorch_linux_cuda_test_defaults
 
-  linux_xenial_cuda9_cudnn7_py3_build:
+  pytorch_linux_xenial_cuda9_cudnn7_py3_build:
     docker:
       - image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:226
         <<: *docker_config_defaults
     environment:
       PYTHON_VERSION: "3.6"
-    <<: *linux_cuda_build_defaults
+    <<: *pytorch_linux_cuda_build_defaults
 
-  linux_xenial_cuda9_cudnn7_py3_test:
+  pytorch_linux_xenial_cuda9_cudnn7_py3_test:
     environment:
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:226"
       PYTHON_VERSION: "3.6"
-    <<: *linux_cuda_test_defaults
+    <<: *pytorch_linux_cuda_test_defaults
 
-  linux_xenial_cuda9_2_cudnn7_py3_gcc7_build:
+  pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_build:
     docker:
       - image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7:226
         <<: *docker_config_defaults
     environment:
       PYTHON_VERSION: "3.6"
-    <<: *linux_cuda_build_defaults
+    <<: *pytorch_linux_cuda_build_defaults
 
-  linux_xenial_cuda9_2_cudnn7_py3_gcc7_test:
+  pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_test:
     environment:
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7:226"
       PYTHON_VERSION: "3.6"
-    <<: *linux_cuda_test_defaults
+    <<: *pytorch_linux_cuda_test_defaults
 
-  macos_10_13_py3_build:
+  pytorch_macos_10_13_py3_build:
     macos:
       xcode: "9.0"
     steps:
@@ -285,7 +285,7 @@ jobs:
           paths:
             - "*"
 
-  macos_10_13_py3_test:
+  pytorch_macos_10_13_py3_test:
     macos:
       xcode: "9.0"
     steps:
@@ -307,7 +307,7 @@ jobs:
             chmod a+x .jenkins/pytorch/macos-test.sh
             .jenkins/pytorch/macos-test.sh
 
-  macos_10_13_cuda9_2_cudnn7_py3_build:
+  pytorch_macos_10_13_cuda9_2_cudnn7_py3_build:
     macos:
       xcode: "9.0"
     steps:
@@ -345,35 +345,35 @@ workflows:
   version: 2
   build:
     jobs:
-      - linux_trusty_py2_7_9_build_test
-      - linux_trusty_py2_7_build_test
-      - linux_trusty_py3_5_build_test
-      - linux_trusty_py3_6_gcc4_8_build_test
-      - linux_trusty_py3_6_gcc5_4_build_test
-      - linux_trusty_py3_6_gcc7_build_test
-      - linux_trusty_pynightly_build_test
-      - linux_xenial_py3_clang5_asan_build
-      - linux_xenial_py3_clang5_asan_test:
+      - pytorch_linux_trusty_py2_7_9_build_test
+      - pytorch_linux_trusty_py2_7_build_test
+      - pytorch_linux_trusty_py3_5_build_test
+      - pytorch_linux_trusty_py3_6_gcc4_8_build_test
+      - pytorch_linux_trusty_py3_6_gcc5_4_build_test
+      - pytorch_linux_trusty_py3_6_gcc7_build_test
+      - pytorch_linux_trusty_pynightly_build_test
+      - pytorch_linux_xenial_py3_clang5_asan_build
+      - pytorch_linux_xenial_py3_clang5_asan_test:
           requires:
-            - linux_xenial_py3_clang5_asan_build
-      - linux_xenial_cuda8_cudnn6_py3_build
-      - linux_xenial_cuda8_cudnn6_py3_test:
+            - pytorch_linux_xenial_py3_clang5_asan_build
+      - pytorch_linux_xenial_cuda8_cudnn6_py3_build
+      - pytorch_linux_xenial_cuda8_cudnn6_py3_test:
           requires:
-            - linux_xenial_cuda8_cudnn6_py3_build
-      - linux_xenial_cuda9_cudnn7_py2_build
-      - linux_xenial_cuda9_cudnn7_py2_test:
+            - pytorch_linux_xenial_cuda8_cudnn6_py3_build
+      - pytorch_linux_xenial_cuda9_cudnn7_py2_build
+      - pytorch_linux_xenial_cuda9_cudnn7_py2_test:
           requires:
-            - linux_xenial_cuda9_cudnn7_py2_build
-      - linux_xenial_cuda9_cudnn7_py3_build
-      - linux_xenial_cuda9_cudnn7_py3_test:
+            - pytorch_linux_xenial_cuda9_cudnn7_py2_build
+      - pytorch_linux_xenial_cuda9_cudnn7_py3_build
+      - pytorch_linux_xenial_cuda9_cudnn7_py3_test:
           requires:
-            - linux_xenial_cuda9_cudnn7_py3_build
-      - linux_xenial_cuda9_2_cudnn7_py3_gcc7_build
-      - linux_xenial_cuda9_2_cudnn7_py3_gcc7_test:
+            - pytorch_linux_xenial_cuda9_cudnn7_py3_build
+      - pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_build
+      - pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_test:
           requires:
-            - linux_xenial_cuda9_2_cudnn7_py3_gcc7_build
-      - macos_10_13_py3_build
-      - macos_10_13_py3_test:
+            - pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_build
+      - pytorch_macos_10_13_py3_build
+      - pytorch_macos_10_13_py3_test:
           requires:
-            - macos_10_13_py3_build
-      - macos_10_13_cuda9_2_cudnn7_py3_build
+            - pytorch_macos_10_13_py3_build
+      - pytorch_macos_10_13_cuda9_2_cudnn7_py3_build
