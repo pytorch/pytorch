@@ -104,8 +104,6 @@ IF(NOT THD_INSTALL_BIN_DIR OR NOT THD_INSTALL_LIB_DIR OR NOT THD_INSTALL_INCLUDE
   SET(THD_INSTALL_INCLUDE_DIR "include" CACHE PATH "THD install include subdirectory")
 ENDIF()
 
-FILE(GLOB_RECURSE master_worker_h RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "master_worker/*.h")
-FILE(GLOB_RECURSE master_worker_cpp "master_worker/*.cpp")
 FILE(GLOB_RECURSE process_group_h RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "process_group/*.h")
 FILE(GLOB_RECURSE process_group_cpp "process_group/*.cpp")
 FILE(GLOB_RECURSE base_h RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "base/*.h")
@@ -128,16 +126,8 @@ IF(NOT DISTRIBUTED_NCCL_FOUND)
   LIST(REMOVE_ITEM base_cpp "${CMAKE_CURRENT_SOURCE_DIR}/base/data_channels/DataChannelNccl.cpp")
 ENDIF()
 
-EXCLUDE_DIR(master_worker_cpp ".*/dispatch/.*\\.cpp$")
-
 SET(all_cpp ${base_cpp} ${process_group_cpp})
 SET(all_h THD.h ${base_h} ${process_group_h})
-
-IF(USE_DISTRIBUTED_MW)
-  ADD_DEFINITIONS(-DUSE_DISTRIBUTED_MW=1)
-  SET(all_cpp ${all_cpp} ${master_worker_cpp})
-  SET(all_h THD.h ${all_h} ${master_worker_h})
-ENDIF()
 
 EXCLUDE_DIR(all_cpp ".*/generic/.*\\.cpp$")
 
