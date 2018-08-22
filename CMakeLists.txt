@@ -140,7 +140,6 @@ cmake_dependent_option(
   USE_MKLML "Use MKLML interface in MKL BLAS" ON
     "BUILD_CAFFE2" OFF)
 option(USE_DISTRIBUTED "Use THD (distributed)" OFF)
-option(USE_DISTRIBUTED_MW "Use THD (distributed) master worker" OFF)
 
 # Used when building Caffe2 through setup.py
 option(BUILDING_WITH_TORCH_LIBS "Tell cmake if Caffe2 is being built alongside torch libs" OFF)
