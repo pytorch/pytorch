@@ -1,5 +1,7 @@
 #!/bin/bash
 
+exit 1
+
 COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}-build"
 export PATH="/usr/local/bin:$PATH"
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
