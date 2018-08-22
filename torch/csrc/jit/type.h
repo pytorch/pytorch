@@ -1,5 +1,6 @@
 #pragma once
 
+#include "torch/csrc/jit/ivalue.h"
 #include "torch/csrc/jit/assertions.h"
 #include "torch/csrc/jit/interned_strings.h"
 #include "torch/csrc/WindowsTorchApiMacro.h"
@@ -478,5 +479,7 @@ template<> inline TypePtr getTypePtr<at::Scalar>() { return NumberType::get(); }
 template<> inline TypePtr getTypePtr<std::vector<at::Tensor>>() { return ListType::ofTensors(); }
 template<> inline TypePtr getTypePtr<std::vector<double>>() { return ListType::ofFloats(); }
 template<> inline TypePtr getTypePtr<std::vector<int64_t>>() { return ListType::ofInts(); }
+
+TORCH_API TypePtr inferTypeFrom(const IValue& value);
 
 }} // namespace torch::jit
