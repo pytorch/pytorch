@@ -98,12 +98,12 @@ class LegacyTracedModule(Module):
         # NOTE: use full state, because we need it for BatchNorm export
         # This differs from the compiler path, which doesn't support it at the moment.
         module_state = list(_unique_state_dict(self, keep_vars=True).values())
-        trace, all_trace_inputs = torch._C._tracer_enter(in_vars + module_state)
+        trace, all_trace_inputs = torch._C._tracer_enter(*(in_vars + module_state))
         try:
             trace_inputs = _unflatten(all_trace_inputs[:len(in_vars)], in_desc)
             out = self.inner(*trace_inputs)
             out_vars, _ = _flatten(out)
-            torch._C._tracer_exit(out_vars)
+            torch._C._tracer_exit(tuple(out_vars))
         except Exception:
             torch._C._tracer_abandon()
             raise
@@ -287,7 +287,7 @@ def trace(*args, **kwargs):
             raise TypeError("got unexpected keyword arguments: {}".format(", ".join(kwargs.keys())))
 
         module = TopLevelTracedModule(func, **executor_options)
-        module._create_method_from_trace('forward', func, args)
+        module._create_method_from_trace('forward', func, tuple(args))
         return module
 
     return wrapper

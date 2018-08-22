@@ -212,6 +212,34 @@ RegisterOperators reg({
           };
         }),
     Operator(
+        prim::TupleUnpack,
+        [](Node* node) {
+          size_t num_elems = node->outputs().size();
+          return [=](Stack& stack) {
+            auto t = pop(stack).toTuple();
+            const auto & elems = t->elements();
+            if (elems.size() != num_elems) {
+              AT_ERROR("Expected a tuple of ", num_elems, " elements, but got ", elems.size());
+            }
+            stack.insert(stack.end(), elems.begin(), elems.end());
+            return 0;
+          };
+        }),
+    Operator(
+        prim::TupleConstruct,
+        [](Node* node) {
+          size_t num_inputs = node->inputs().size();
+          return [=](Stack& stack) {
+            std::vector<IValue> elems {
+              std::make_move_iterator(stack.end() - num_inputs),
+              std::make_move_iterator(stack.end())
+            };
+            drop(stack, num_inputs);
+            push(stack, Tuple::create(std::move(elems)));
+            return 0;
+          };
+        }),
+    Operator(
         prim::ListConstruct,
         [](Node* node) -> Operation {
           size_t num_inputs = node->inputs().size();
