@@ -7,7 +7,7 @@
 
 #include "ATen/CPUGenerator.h"
 #include "ATen/CheckGenerator.h"
-#include "ATen/Generator.h"
+#include "ATen/core/Generator.h"
 #include "ATen/native/Distributions.h"
 
 #include <functional>

@@ -1,7 +1,7 @@
 #pragma once
 
 #include <ATen/Device.h>
-#include <ATen/Layout.h>
+#include <ATen/core/Layout.h>
 #include <ATen/ScalarType.h>
 #include <ATen/TensorOptions.h>
 #include <ATen/core/optional.h>

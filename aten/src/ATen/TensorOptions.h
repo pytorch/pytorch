@@ -1,10 +1,10 @@
 #pragma once
 
-#include <ATen/Backend.h>
+#include <ATen/core/Backend.h>
 #include <ATen/Context.h>
 #include <ATen/Device.h>
 #include <ATen/DeviceGuard.h>
-#include <ATen/Layout.h>
+#include <ATen/core/Layout.h>
 #include <ATen/ScalarType.h>
 #include <ATen/Tensor.h>
 #include <ATen/Type.h>
