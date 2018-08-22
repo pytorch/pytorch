@@ -350,6 +350,84 @@ jobs:
             chmod a+x .jenkins/pytorch/macos-build.sh
             .jenkins/pytorch/macos-build.sh
 
+  caffe2_py2_cuda8_0_cudnn6_ubuntu16_04_build:
+    docker:
+      - image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda8.0-cudnn6-ubuntu16.04:189
+        <<: *docker_config_defaults
+    environment:
+      PYTHON_VERSION: "2.7"
+    resource_class: large
+    working_directory: /var/lib/jenkins/workspace
+    steps:
+    - checkout
+    - run:
+        name: Build
+        command: |
+          export SCCACHE_BUCKET=ossci-compiler-cache
+          export SCCACHE_MAX_JOBS=`expr $(nproc) - 1`
+          export MEMORY_LIMIT_MAX_JOBS=8  # the "large" resource class on CircleCI has 32 CPU cores, if we use all of them we'll OOM
+          export MAX_JOBS=$(( ${SCCACHE_MAX_JOBS} > ${MEMORY_LIMIT_MAX_JOBS} ? ${MEMORY_LIMIT_MAX_JOBS} : ${SCCACHE_MAX_JOBS} ))
+
+          set -ex
+
+          # Need to checkout fetch PRs for onnxbot tracking PRs
+          git submodule update --init third_party/onnx || true
+          cd third_party/onnx && git fetch --tags --progress origin +refs/pull/*:refs/remotes/origin/pr/* && cd -
+
+          # Reinitialize submodules
+          git submodule update --init --recursive
+
+          # Ensure jenkins can write to the ccache root dir.
+          sudo chown jenkins:jenkins "${HOME}/.ccache"
+
+          # Make ccache log to the workspace, so we can archive it after the build
+          mkdir -p build
+          ccache -o log_file=$PWD/build/ccache.log
+
+          # Configure additional cmake arguments
+          cmake_args=()
+          cmake_args+=("$CMAKE_ARGS")
+
+          if [[ $BUILD_ENVIRONMENT == *aten* ]]; then
+            cmake_args+=("-DBUILD_ATEN=ON")
+          fi
+
+          # conda must be added to the path for Anaconda builds (this location must be
+          # the same as that in install_anaconda.sh used to build the docker image)
+          if [[ "${BUILD_ENVIRONMENT}" == conda* ]]; then
+            export PATH=/opt/conda/bin:$PATH
+            sudo chown -R jenkins:jenkins '/opt/conda'
+          fi
+
+          # Build
+          if test -x ".jenkins/caffe2/build.sh"; then
+            ./.jenkins/caffe2/build.sh ${cmake_args[@]}
+          else
+            ./.jenkins/build.sh ${cmake_args[@]}
+          fi
+
+          # Show sccache stats if it is running
+          if pgrep sccache > /dev/null; then
+            sccache --show-stats
+          fi
+
+          mkdir -p pytorch-ci-env/
+          # cp -r /opt/conda/lib/python${PYTHON_VERSION}/site-packages/torch pytorch-ci-env/torch
+          # cp -r build/bin pytorch-ci-env/cpp_test_bin
+          # if [ -d "../cpp-build" ]; then
+          #   cp -r ../cpp-build pytorch-ci-env/cpp-build
+          # fi
+    - persist_to_workspace:
+        root: /var/lib/jenkins/workspace/pytorch-ci-env
+        paths:
+          - "*"
+
+  # caffe2_py2_cuda8_0_cudnn6_ubuntu16_04_test:
+  #   environment:
+  #     DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn6-py3:226"
+  #     PYTHON_VERSION: "3.6"
+  #   <<: *pytorch_linux_cuda_test_defaults
+
 
 workflows:
   version: 2
@@ -387,3 +465,7 @@ workflows:
           requires:
             - pytorch_macos_10_13_py3_build
       - pytorch_macos_10_13_cuda9_2_cudnn7_py3_build
+      - caffe2_py2_cuda8_0_cudnn6_ubuntu16_04_build
+      # - caffe2_py2_cuda8_0_cudnn6_ubuntu16_04_test:
+      #     requires:
+      #       - caffe2_py2_cuda8_0_cudnn6_ubuntu16_04_build
