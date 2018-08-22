@@ -304,7 +304,7 @@ tests = [
     ('dist', small_2d, lambda t: [small_2d(t)],'', types, False, "skipIfHalfTensor"),
     ('dist', small_2d, lambda t: [small_2d(t), 3], '3_norm', types, False, "skipIfHalfTensor"),
     ('dist', small_2d, lambda t: [small_2d(t), 2.5], '2_5_norm', types, False, "skipIfHalfTensor"),
-    ('dot', medium_1d, lambda t: [medium_1d(t)],),
+    ('dot', medium_1d, lambda t: [medium_1d(t)],'', types, False, "skipIfHalfTensor"),
     ('element_size', medium_1d, lambda t: [],),
     ('eq', small_3d_ones, lambda t: [small_3d(t)],),
     ('eq', small_3d_ones, lambda t: [small_3d_ones(t)], 'equal'),
@@ -445,7 +445,7 @@ tests = [
         unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
     ('qr', large_2d_lapack, lambda t: [], 'big', float_types, False,
         unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
-    ('inverse', new_t(20, 20), lambda t: [], None, float_types, False),
+    ('inverse', new_t(20, 20), lambda t: [], None, float_types, False, "skipIfDoubleTensor;skipIfFloatTensor"),
     ('geqrf', new_t(20, 20), lambda t: [], None, float_types, False,
         unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
     ('svd', new_t(10, 10), lambda t: [], 'square', float_types_no_half, False,
@@ -1269,6 +1269,7 @@ class TestCuda(TestCase):
     def test_cuda_synchronize(self):
         torch.cuda.synchronize()
 
+    @skipIfRocm
     def test_streams(self):
         default_stream = torch.cuda.current_stream()
         user_stream = torch.cuda.Stream()
@@ -1305,6 +1306,7 @@ class TestCuda(TestCase):
             self.assertEqual(torch.cuda.FloatTensor(1, device=0).get_device(), 0)
             self.assertEqual(torch.cuda.FloatTensor(1, device=None).get_device(), 1)
 
+    @skipIfRocm
     def test_events(self):
         stream = torch.cuda.current_stream()
         event = torch.cuda.Event(enable_timing=True)
@@ -1318,6 +1320,7 @@ class TestCuda(TestCase):
         self.assertTrue(event.query())
         self.assertGreater(start_event.elapsed_time(event), 0)
 
+    @skipIfRocm
     def test_record_stream(self):
         cycles_per_ms = get_cycles_per_ms()
 
@@ -1355,6 +1358,7 @@ class TestCuda(TestCase):
         x = torch.arange(0, 10).view((2, 5))
         self.assertEqual(x.t(), x.t().pin_memory())
 
+    @skipIfRocm
     def test_caching_pinned_memory(self):
         cycles_per_ms = get_cycles_per_ms()
 
@@ -1603,9 +1607,11 @@ class TestCuda(TestCase):
     def test_advancedindex_big(self):
         TestTorch._test_advancedindex_big(self, lambda t: t.cuda())
 
+    @skipIfRocm
     def test_btrifact(self):
         TestTorch._test_btrifact(self, lambda t: t.cuda())
 
+    @skipIfRocm
     def test_btrisolve(self):
         TestTorch._test_btrisolve(self, lambda t: t.cuda())
 
@@ -1791,6 +1797,7 @@ class TestCuda(TestCase):
         self.assertEqual(before0, after0, 0)
         self.assertEqual(before1, after1, 0)
 
+    @skipIfRocm
     def test_nvtx(self):
         # Just making sure we can see the symbols
         torch.cuda.nvtx.range_push("foo")
@@ -1836,6 +1843,7 @@ class TestCuda(TestCase):
     def test_random_neg_values(self):
         TestTorch._test_random_neg_values(self, use_cuda=True)
 
+    @skipIfRocm
     def test_bincount_cuda(self):
         TestTorch._test_bincount(self, device='cuda')
         # ensure CUDA code coverage
