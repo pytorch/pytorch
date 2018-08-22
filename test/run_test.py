@@ -47,7 +47,6 @@ ROCM_BLACKLIST = [
     'distributions',
     'multiprocessing',
     'nccl',
-    'nn',
     'utils',
 ]
 

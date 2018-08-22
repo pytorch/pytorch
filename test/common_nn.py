@@ -40,7 +40,8 @@ module_tests = [
         module_name='Linear',
         constructor_args=(10, 8),
         input_size=(4, 10),
-        reference_fn=lambda i, p: torch.mm(i, p[0].t()) + p[1].view(1, -1).expand(4, 8)
+        reference_fn=lambda i, p: torch.mm(i, p[0].t()) + p[1].view(1, -1).expand(4, 8),
+        test_cuda = (not TEST_WITH_ROCM)
     ),
     dict(
         module_name='Linear',
@@ -115,6 +116,7 @@ module_tests = [
         constructor_args=(1,),
         input_size=(10, 20),
         reference_fn=lambda i, _: torch.exp(i).div_(torch.exp(i).sum(1, True).expand(10, 20)).log_(),
+        test_cuda = (not TEST_WITH_ROCM)
     ),
     dict(
         module_name='LogSoftmax',
@@ -128,7 +130,8 @@ module_tests = [
         module_name='ELU',
         constructor_args=(2.,),
         input_size=(3, 2, 5),
-        reference_fn=lambda x, _: torch.where(x >= 0, x, 2 * (x.exp() - 1))
+        reference_fn=lambda x, _: torch.where(x >= 0, x, 2 * (x.exp() - 1)),
+        test_cuda=(not TEST_WITH_ROCM),
     ),
     # TODO: reference function
     dict(
@@ -254,7 +257,8 @@ module_tests = [
     ),
     dict(
         module_name='Tanhshrink',
-        input_size=(2, 3, 4, 5)
+        input_size=(2, 3, 4, 5),
+        test_cuda = (not TEST_WITH_ROCM)
     ),
 ]
 
