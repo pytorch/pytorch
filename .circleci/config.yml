@@ -1,8 +1,9 @@
 docker_config_defaults: &docker_config_defaults
   user: jenkins
   aws_auth:
-    aws_access_key_id: AKIAIUHRTFRLXI6HBUCQ
-    aws_secret_access_key: $CIRCLECI_AWS_SECRET_KEY
+    # This IAM user only allows read-only access to ECR
+    aws_access_key_id: AKIAJHXPX5VDV5UZWXFQ
+    aws_secret_access_key: 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
 
 pytorch_linux_cpu_build_test_defaults: &pytorch_linux_cpu_build_test_defaults
   resource_class: large
@@ -16,6 +17,9 @@ pytorch_linux_cpu_build_test_defaults: &pytorch_linux_cpu_build_test_defaults
         export SCCACHE_MAX_JOBS=`expr $(nproc) - 1`
         export MEMORY_LIMIT_MAX_JOBS=8  # the "large" resource class on CircleCI has 32 CPU cores, if we use all of them we'll OOM
         export MAX_JOBS=$(( ${SCCACHE_MAX_JOBS} > ${MEMORY_LIMIT_MAX_JOBS} ? ${MEMORY_LIMIT_MAX_JOBS} : ${SCCACHE_MAX_JOBS} ))
+        # This IAM user allows write access to S3 bucket for sccache
+        export AWS_ACCESS_KEY_ID=AKIAJJZUW4G2ASX5W7KA
+        export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET}
         git submodule update --init
         .jenkins/pytorch/build.sh
         .jenkins/pytorch/test.sh
@@ -32,6 +36,9 @@ pytorch_linux_cpu_build_defaults: &pytorch_linux_cpu_build_defaults
         export SCCACHE_MAX_JOBS=`expr $(nproc) - 1`
         export MEMORY_LIMIT_MAX_JOBS=8  # the "large" resource class on CircleCI has 32 CPU cores, if we use all of them we'll OOM
         export MAX_JOBS=$(( ${SCCACHE_MAX_JOBS} > ${MEMORY_LIMIT_MAX_JOBS} ? ${MEMORY_LIMIT_MAX_JOBS} : ${SCCACHE_MAX_JOBS} ))
+        # This IAM user allows write access to S3 bucket for sccache
+        export AWS_ACCESS_KEY_ID=AKIAJJZUW4G2ASX5W7KA
+        export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET}
         git submodule update --init
         .jenkins/pytorch/build.sh
         mkdir -p pytorch-ci-env/
@@ -67,14 +74,18 @@ pytorch_linux_cpu_test_defaults: &pytorch_linux_cpu_test_defaults
         sudo apt-get install linux-headers-$(uname -r)
         sudo apt-get install linux-image-generic
         sudo pkill -SIGHUP dockerd
-        export AWS_ACCESS_KEY_ID=AKIAIUHRTFRLXI6HBUCQ
-        export AWS_SECRET_ACCESS_KEY=$CIRCLECI_AWS_SECRET_KEY
+        # This IAM user only allows read-only access to ECR
+        export AWS_ACCESS_KEY_ID=AKIAJHXPX5VDV5UZWXFQ
+        export AWS_SECRET_ACCESS_KEY=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
         eval $(aws ecr get-login --region us-east-1 --no-include-email)
         docker pull ${DOCKER_IMAGE}
         id=$(docker run -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
         pwd
         echo "declare -x PYTHON_VERSION=${PYTHON_VERSION}" > /home/circleci/project/env
         echo "declare -x SCCACHE_BUCKET=${SCCACHE_BUCKET}" >> /home/circleci/project/env
+        # This IAM user allows write access to S3 bucket for sccache
+        echo "declare -x AWS_ACCESS_KEY_ID=AKIAJJZUW4G2ASX5W7KA" >> /home/circleci/project/env
+        echo "declare -x AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET}" >> /home/circleci/project/env
         mkdir -p /home/circleci/project/build
         cp -r /opt/workspace/cpp_test_bin /home/circleci/project/build/bin
         docker cp /home/circleci/project/. "$id:/var/lib/jenkins/workspace"
@@ -98,6 +109,9 @@ pytorch_linux_cuda_build_defaults: &pytorch_linux_cuda_build_defaults
         export SCCACHE_MAX_JOBS=`expr $(nproc) - 1`
         export MEMORY_LIMIT_MAX_JOBS=8  # the "large" resource class on CircleCI has 32 CPU cores, if we use all of them we'll OOM
         export MAX_JOBS=$(( ${SCCACHE_MAX_JOBS} > ${MEMORY_LIMIT_MAX_JOBS} ? ${MEMORY_LIMIT_MAX_JOBS} : ${SCCACHE_MAX_JOBS} ))
+        # This IAM user allows write access to S3 bucket for sccache
+        export AWS_ACCESS_KEY_ID=AKIAJJZUW4G2ASX5W7KA
+        export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET}
         git submodule update --init
         .jenkins/pytorch/build.sh
         mkdir -p pytorch-ci-env/
@@ -141,14 +155,18 @@ pytorch_linux_cuda_test_defaults: &pytorch_linux_cuda_test_defaults
         sudo apt-get install -y nvidia-docker2
         sudo pkill -SIGHUP dockerd
         nvidia-smi
+        # This IAM user only allows read-only access to ECR
         export AWS_ACCESS_KEY_ID=AKIAIUHRTFRLXI6HBUCQ
-        export AWS_SECRET_ACCESS_KEY=$CIRCLECI_AWS_SECRET_KEY
+        export AWS_SECRET_ACCESS_KEY=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
         eval $(aws ecr get-login --region us-east-1 --no-include-email)
         docker pull ${DOCKER_IMAGE}
         id=$(docker run --runtime=nvidia -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
         pwd
         echo "declare -x PYTHON_VERSION=${PYTHON_VERSION}" > /home/circleci/project/env
         echo "declare -x SCCACHE_BUCKET=${SCCACHE_BUCKET}" >> /home/circleci/project/env
+        # This IAM user allows write access to S3 bucket for sccache
+        echo "declare -x AWS_ACCESS_KEY_ID=AKIAJJZUW4G2ASX5W7KA" >> /home/circleci/project/env
+        echo "declare -x AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET}" >> /home/circleci/project/env
         mkdir -p /home/circleci/project/build
         cp -r /opt/workspace/cpp_test_bin /home/circleci/project/build/bin
         docker cp /home/circleci/project/. "$id:/var/lib/jenkins/workspace"
@@ -286,6 +304,9 @@ jobs:
           command: |
             set -ex
             export SCCACHE_BUCKET=ossci-compiler-cache
+            # This IAM user allows write access to S3 bucket for sccache
+            export AWS_ACCESS_KEY_ID=AKIAJJZUW4G2ASX5W7KA
+            export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET}
             git submodule update --init
             chmod a+x .jenkins/pytorch/macos-build.sh
             .jenkins/pytorch/macos-build.sh
@@ -346,6 +367,9 @@ jobs:
             sudo chmod a+r /Developer/NVIDIA/CUDA-9.2/include/cudnn.h /Developer/NVIDIA/CUDA-9.2/lib/libcudnn*
 
             export SCCACHE_BUCKET=ossci-compiler-cache
+            # This IAM user allows write access to S3 bucket for sccache
+            export AWS_ACCESS_KEY_ID=AKIAJJZUW4G2ASX5W7KA
+            export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET}
             git submodule update --init
             chmod a+x .jenkins/pytorch/macos-build.sh
             .jenkins/pytorch/macos-build.sh
@@ -364,6 +388,9 @@ jobs:
         name: Build
         command: |
           export SCCACHE_BUCKET=ossci-compiler-cache
+          # This IAM user allows write access to S3 bucket for sccache
+          export AWS_ACCESS_KEY_ID=AKIAJJZUW4G2ASX5W7KA
+          export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET}
           export SCCACHE_MAX_JOBS=`expr $(nproc) - 1`
           export MEMORY_LIMIT_MAX_JOBS=8  # the "large" resource class on CircleCI has 32 CPU cores, if we use all of them we'll OOM
           export MAX_JOBS=$(( ${SCCACHE_MAX_JOBS} > ${MEMORY_LIMIT_MAX_JOBS} ? ${MEMORY_LIMIT_MAX_JOBS} : ${SCCACHE_MAX_JOBS} ))
