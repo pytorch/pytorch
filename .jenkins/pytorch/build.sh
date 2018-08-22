@@ -59,6 +59,11 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   sudo apt-get install libc++1
   sudo apt-get install libc++abi1
 
+  # Use the ld gold linker 
+  update-alternatives --install "/usr/bin/ld" "ld" "/usr/bin/ld.gold" 20
+  update-alternatives --config ld
+  
+  # Transpile source & start building
   python tools/amd_build/build_pytorch_amd.py
   python tools/amd_build/build_caffe2_amd.py
   USE_ROCM=1 python setup.py install --user
