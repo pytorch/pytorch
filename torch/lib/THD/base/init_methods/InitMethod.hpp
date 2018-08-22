@@ -1,16 +1,19 @@
 #pragma once
 
 #include "../ChannelUtils.hpp"
+#include "../Registry.h"
 
 #include <string>
 #include <stdexcept>
 #include <tuple>
 #include <unordered_map>
 
-
 namespace thd {
 
-struct InitMethod {
+// InitMethod is an abstract base class for THD initialization methods.
+// See InitMethod* files for implementations.
+class InitMethod {
+ public:
   struct Config {
     struct MasterConfig {
       int listen_socket;
@@ -63,16 +66,19 @@ struct InitMethod {
       }
     }
   };
+
+  explicit InitMethod();
+
+  virtual ~InitMethod();
+
+  virtual Config init(
+      std::string argument,
+      int world_size_r,
+      std::string group_name,
+      int assigned_rank) = 0;
 };
 
-namespace init {
-
-using InitMethodFuncMap =
-  std::unordered_map<std::string,
-  std::function<::thd::InitMethod::Config(std::string, int, std::string, int)>>;
-
-} // namespace init
-
+AT_DECLARE_REGISTRY(InitMethodRegistry, InitMethod);
 
 InitMethod::Config getInitConfig(std::string argument, int world_size = -1,
                                  std::string group_name = "", int rank = -1);

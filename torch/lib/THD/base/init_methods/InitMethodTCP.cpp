@@ -23,7 +23,6 @@ constexpr size_t num_rand_bytes = 32;
 constexpr size_t max_msg_length = 4000;
 
 namespace thd {
-namespace init {
 namespace {
 
 std::string getRandomString()
@@ -294,9 +293,6 @@ InitMethod::Config initTCPMulticast(std::string group_name, rank_type world_size
   return config;
 }
 
-
-} // anonymous namespace
-
 InitMethod::Config initTCP(std::string argument, int world_size_r,
                            std::string group_name, int rank) {
 
@@ -341,5 +337,24 @@ InitMethod::Config initTCP(std::string argument, int world_size_r,
   throw std::runtime_error("failed to initialize THD using given address");
 }
 
-} // namespace init
+class InitMethodTCP : public InitMethod {
+ public:
+  explicit InitMethodTCP() : InitMethod() {
+  }
+
+  virtual ~InitMethodTCP() {
+  }
+
+  InitMethod::Config init(std::string argument,
+                          int world_size_r,
+                          std::string group_name,
+                          int assigned_rank) {
+    return initTCP(argument, world_size_r, group_name, assigned_rank);
+  }
+};
+
+} // anonymous namespace
+
+AT_REGISTER_TYPED_CLASS(InitMethodRegistry, "tcp://", InitMethodTCP);
+
 } // namespace thd

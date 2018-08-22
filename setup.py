@@ -840,7 +840,7 @@ if USE_DISTRIBUTED:
         "torch/csrc/distributed/Module.cpp",
     ]
     include_dirs += [tmp_install_path + "/include/THD"]
-    main_link_args += [THD_LIB]
+    main_link_args += ['-Wl,--whole-archive', THD_LIB, '-Wl,--no-whole-archive']
 
 if USE_C10D:
     extra_compile_args += ['-DUSE_C10D']
