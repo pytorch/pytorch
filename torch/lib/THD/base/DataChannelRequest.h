@@ -7,4 +7,4 @@ struct _THDRequest;
 typedef struct _THDRequest THDRequest;
 #endif
 
-THD_API void THDRequest_free(THDRequest* req);
+THD_API void THDRequest_free(void* req);

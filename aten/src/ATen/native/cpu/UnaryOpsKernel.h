@@ -1,38 +1,38 @@
 #pragma once
 
 #include <ATen/ATen.h>
+#include <ATen/native/DispatchStub.h>
 #include <stdexcept>
-#include "CapabilityDispatch.h"
 
 namespace at { namespace native {
 
 using unary_fn = void(*)(Tensor&, const Tensor&);
 
-extern DispatchStub<unary_fn> absImpl;
-extern DispatchStub<unary_fn> acosImpl;
-extern DispatchStub<unary_fn> asinImpl;
-extern DispatchStub<unary_fn> atanImpl;
-extern DispatchStub<unary_fn> ceilImpl;
-extern DispatchStub<unary_fn> cosImpl;
-// extern DispatchStub<unary_fn> coshImpl;
-extern DispatchStub<unary_fn> erfImpl;
-extern DispatchStub<unary_fn> erfcImpl;
-extern DispatchStub<unary_fn> expImpl;
-extern DispatchStub<unary_fn> expm1Impl;
-extern DispatchStub<unary_fn> floorImpl;
-extern DispatchStub<unary_fn> logImpl;
-extern DispatchStub<unary_fn> log10Impl;
-extern DispatchStub<unary_fn> log1pImpl;
-extern DispatchStub<unary_fn> log2Impl;
-extern DispatchStub<unary_fn> roundImpl;
-extern DispatchStub<unary_fn> rsqrtImpl;
-extern DispatchStub<unary_fn> sigmoidImpl;
-extern DispatchStub<unary_fn> sinImpl;
-// extern DispatchStub<unary_fn> sinhImpl;
-extern DispatchStub<unary_fn> sqrtImpl;
-extern DispatchStub<unary_fn> tanImpl;
-extern DispatchStub<unary_fn> tanhImpl;
-extern DispatchStub<unary_fn> truncImpl;
+DECLARE_DISPATCH(unary_fn, absImpl);
+DECLARE_DISPATCH(unary_fn, acosImpl);
+DECLARE_DISPATCH(unary_fn, asinImpl);
+DECLARE_DISPATCH(unary_fn, atanImpl);
+DECLARE_DISPATCH(unary_fn, ceilImpl);
+DECLARE_DISPATCH(unary_fn, cosImpl);
+// DECLARE_DISPATCH(unary_fn, coshImpl);
+DECLARE_DISPATCH(unary_fn, erfImpl);
+DECLARE_DISPATCH(unary_fn, erfcImpl);
+DECLARE_DISPATCH(unary_fn, expImpl);
+DECLARE_DISPATCH(unary_fn, expm1Impl);
+DECLARE_DISPATCH(unary_fn, floorImpl);
+DECLARE_DISPATCH(unary_fn, logImpl);
+DECLARE_DISPATCH(unary_fn, log10Impl);
+DECLARE_DISPATCH(unary_fn, log1pImpl);
+DECLARE_DISPATCH(unary_fn, log2Impl);
+DECLARE_DISPATCH(unary_fn, roundImpl);
+DECLARE_DISPATCH(unary_fn, rsqrtImpl);
+DECLARE_DISPATCH(unary_fn, sigmoidImpl);
+DECLARE_DISPATCH(unary_fn, sinImpl);
+// DECLARE_DISPATCH(unary_fn, sinhImpl);
+DECLARE_DISPATCH(unary_fn, sqrtImpl);
+DECLARE_DISPATCH(unary_fn, tanImpl);
+DECLARE_DISPATCH(unary_fn, tanhImpl);
+DECLARE_DISPATCH(unary_fn, truncImpl);
 
 
 // Missing unary functions

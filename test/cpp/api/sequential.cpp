@@ -9,7 +9,10 @@
 #include <memory>
 #include <vector>
 
+#include <test/cpp/api/util.h>
+
 using namespace torch::nn;
+using namespace torch::test;
 
 using Catch::StartsWith;
 
@@ -271,5 +274,48 @@ TEST_CASE("sequential") {
         [](const AnyModule& first, const AnyModule& second) {
           return &first == &second;
         }));
+  }
+  SECTION("Is cloneable") {
+    Sequential sequential(Linear(3, 4), Functional(torch::relu), BatchNorm(3));
+    Sequential clone =
+        std::dynamic_pointer_cast<SequentialImpl>(sequential->clone());
+    REQUIRE(sequential->size() == clone->size());
+
+    for (size_t i = 0; i < sequential->size(); ++i) {
+      // The modules should be the same kind (type).
+      REQUIRE(sequential[i]->name() == clone[i]->name());
+      // But not pointer-equal (distinct objects).
+      REQUIRE(sequential[i] != clone[i]);
+    }
+
+    // Verify that the clone is deep, i.e. parameters of modules are cloned too.
+
+    torch::NoGradGuard no_grad;
+
+    auto params1 = sequential->parameters();
+    auto params2 = clone->parameters();
+    REQUIRE(params1.size() == params2.size());
+    for (auto& param : params1) {
+      REQUIRE(!pointer_equal(param.value, params2[param.key]));
+      REQUIRE(param->device() == params2[param.key].device());
+      REQUIRE(param->allclose(params2[param.key]));
+      param->add_(2);
+    }
+    for (auto& param : params1) {
+      REQUIRE(!param->allclose(params2[param.key]));
+    }
+  }
+}
+
+TEST_CASE("sequential/clone-to-device", "[cuda]") {
+  Sequential sequential(Linear(3, 4), Functional(torch::relu), BatchNorm(3));
+  torch::Device device(torch::kCUDA, 0);
+  Sequential clone =
+      std::dynamic_pointer_cast<SequentialImpl>(sequential->clone(device));
+  for (const auto& p : clone->parameters()) {
+    REQUIRE(p->device() == device);
+  }
+  for (const auto& b : clone->buffers()) {
+    REQUIRE(b->device() == device);
   }
 }

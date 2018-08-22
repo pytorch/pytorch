@@ -9,11 +9,11 @@ import time
 import traceback
 import unittest
 import subprocess
-from torch import multiprocessing
+from torch import multiprocessing as mp
 from torch.utils.data import Dataset, TensorDataset, DataLoader, ConcatDataset
 from torch.utils.data.dataset import random_split
 from torch.utils.data.dataloader import default_collate, ExceptionWrapper, MANAGER_STATUS_CHECK_INTERVAL
-from common import TestCase, run_tests, TEST_NUMPY, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN
+from common import TestCase, run_tests, TEST_NUMPY, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, skipIfRocm
 
 # We cannot import TEST_CUDA from common_nn here, because if we do that,
 # the TEST_CUDNN line from common_nn will be executed multiple times
@@ -24,12 +24,9 @@ TEST_CUDA = torch.cuda.is_available()
 # We need spawn start method for test_manager_unclean_exit, but
 # Python 2.7 doesn't allow it.
 if sys.version_info[0] == 3:
-    # Without the try-catch block, some tests will complain that
-    # context has already been set.
-    try:
-        multiprocessing.set_start_method('spawn')
-    except RuntimeError:
-        pass
+    # Get a multiprocessing context because some test / third party library will
+    # set start_method when imported, and setting again triggers RuntimeError.
+    mp = mp.get_context(method='spawn')
 
 
 JOIN_TIMEOUT = 17.0 if IS_WINDOWS else 6.5
@@ -144,11 +141,11 @@ class TestConcatDataset(TestCase):
 
 # Stores the first encountered exception in .exception.
 # Inspired by https://stackoverflow.com/a/33599967
-class ErrorTrackingProcess(multiprocessing.Process):
+class ErrorTrackingProcess(mp.Process):
 
     def __init__(self, *args, **kwargs):
         super(ErrorTrackingProcess, self).__init__(*args, **kwargs)
-        self._pconn, self._cconn = multiprocessing.Pipe()
+        self._pconn, self._cconn = mp.Pipe()
         self._exception = None
 
     def run(self):
@@ -208,9 +205,12 @@ class SleepDataset(Dataset):
     def __init__(self, size, sleep_sec):
         self.size = size
         self.sleep_sec = sleep_sec
+        self.sleeped = False
 
     def __getitem__(self, idx):
-        time.sleep(self.sleep_sec)
+        if not self.sleeped:
+            time.sleep(self.sleep_sec)
+            self.sleeped = True
         return idx
 
     def __len__(self):
@@ -235,8 +235,8 @@ class SynchronizedSeedDataset(Dataset):
 
     def __init__(self, size, num_workers):
         assert size >= num_workers
-        self.count = multiprocessing.Value('i', 0, lock=True)
-        self.barrier = multiprocessing.Semaphore(0)
+        self.count = mp.Value('i', 0, lock=True)
+        self.barrier = mp.Semaphore(0)
         self.num_workers = num_workers
         self.size = size
 
@@ -254,7 +254,7 @@ class SynchronizedSeedDataset(Dataset):
 
 
 def _test_timeout():
-    dataset = SleepDataset(10, 10)
+    dataset = SleepDataset(10, 3)
     dataloader = DataLoader(dataset, batch_size=2, num_workers=2, timeout=1)
     _ = next(iter(dataloader))
 
@@ -338,12 +338,14 @@ class TestDataLoader(TestCase):
         self.assertEqual(len(dataloader_shuffle), 5)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @skipIfRocm
     def test_sequential_pin_memory(self):
         loader = DataLoader(self.dataset, batch_size=2, pin_memory=True)
         for input, target in loader:
             self.assertTrue(input.is_pinned())
             self.assertTrue(target.is_pinned())
 
+    @skipIfRocm
     def test_multiple_dataloaders(self):
         loader1_it = iter(DataLoader(self.dataset, num_workers=1))
         loader2_it = iter(DataLoader(self.dataset, num_workers=2))
@@ -444,6 +446,7 @@ class TestDataLoader(TestCase):
         self._test_batch_sampler(num_workers=4)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @skipIfRocm
     def test_shuffle_pin_memory(self):
         loader = DataLoader(self.dataset, batch_size=2, shuffle=True, num_workers=4, pin_memory=True)
         for input, target in loader:
@@ -476,37 +479,42 @@ class TestDataLoader(TestCase):
 
     @unittest.skipIf(IS_WINDOWS, "FIXME: stuck test")
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @skipIfRocm
     def test_partial_workers(self):
-        "check that workers exit even if the iterator is not exhausted"
-        loader = iter(DataLoader(self.dataset, batch_size=2, num_workers=4, pin_memory=True))
-        workers = loader.workers
-        worker_manager_thread = loader.worker_manager_thread
-        for i, sample in enumerate(loader):
-            if i == 3:
-                break
-        del loader
-        for w in workers:
-            w.join(JOIN_TIMEOUT)
-            self.assertFalse(w.is_alive(), 'subprocess not terminated')
-            self.assertEqual(w.exitcode, 0)
-        worker_manager_thread.join(JOIN_TIMEOUT)
-        self.assertFalse(worker_manager_thread.is_alive())
+        r"""Check that workers exit even if the iterator is not exhausted."""
+        for pin_memory in (True, False):
+            loader = iter(DataLoader(self.dataset, batch_size=2, num_workers=4, pin_memory=pin_memory))
+            workers = loader.workers
+            if pin_memory:
+                pin_memory_thread = loader.pin_memory_thread
+            for i, sample in enumerate(loader):
+                if i == 10:
+                    break
+            del loader
+            for w in workers:
+                w.join(JOIN_TIMEOUT)
+                self.assertFalse(w.is_alive(), 'subprocess not terminated')
+            if pin_memory:
+                pin_memory_thread.join(JOIN_TIMEOUT)
+                self.assertFalse(pin_memory_thread.is_alive())
 
     @staticmethod
-    def _manager_process(dataset, worker_pids, manager_exit_event):
+    def _main_process(dataset, worker_pids, main_exit_event, raise_error):
         loader = iter(DataLoader(dataset, batch_size=2, num_workers=4, pin_memory=True))
         workers = loader.workers
         for i in range(len(workers)):
             worker_pids[i] = int(workers[i].pid)
         for i, sample in enumerate(loader):
             if i == 3:
-                break
-        # Simulate a dirty exit of the manager process
-        manager_exit_event.set()
-        if IS_WINDOWS:
-            os.system('taskkill /PID ' + str(os.getpid()) + ' /F')
-        else:
-            os.kill(os.getpid(), signal.SIGKILL)
+                # Simulate an exit of the manager process
+                main_exit_event.set()
+                if raise_error:
+                    raise RuntimeError('Error')
+                else:
+                    if IS_WINDOWS:
+                        os.system('taskkill /PID ' + str(os.getpid()) + ' /F')
+                    else:
+                        os.kill(os.getpid(), signal.SIGKILL)
 
     @staticmethod
     def _is_process_alive(pid, pname):
@@ -529,33 +537,45 @@ class TestDataLoader(TestCase):
                      "spawn start method is not supported in Python 2, \
                      but we need it for creating another process with CUDA")
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    def test_manager_unclean_exit(self):
-        '''there might be ConnectionResetError or leaked semaphore warning (due to dirty process exit), \
+    @skipIfRocm
+    def test_main_process_unclean_exit(self):
+        r'''There might be ConnectionResetError or leaked semaphore warning (due to dirty process exit), \
 but they are all safe to ignore'''
-        worker_pids = multiprocessing.Array('i', [0] * 4)
 
-        manager_exit_event = multiprocessing.Event()
-        mp = multiprocessing.Process(target=TestDataLoader._manager_process,
-                                     args=(self.dataset, worker_pids, manager_exit_event))
-        mp.start()
+        # `raise_error` controls if the main process is KILL-ed by OS or just
+        # simply raises an error. Both cases are interesting because
+        # 1. In case of it is KILL-ed by OS, the workers need to automatically
+        #    discover that their parent is dead and exit gracefully.
+        # 2. In case of it raises an error itself, the parent process needs to
+        #    take care of exiting the worker and then exits itself gracefully.
+        for raise_error in (True, False):
+            worker_pids = mp.Array('i', [0] * 4)
 
-        manager_exit_event.wait()
+            main_exit_event = mp.Event()
+            p = mp.Process(target=TestDataLoader._main_process,
+                           args=(self.dataset, worker_pids, main_exit_event, raise_error))
+            p.start()
+            worker_pids[-1] = p.pid
 
-        exit_status = [False] * len(worker_pids)
-        start_time = time.time()
-        pname = 'python'
-        while True:
-            for i in range(len(worker_pids)):
-                pid = worker_pids[i]
-                if not exit_status[i]:
-                    if not TestDataLoader._is_process_alive(pid, pname):
-                        exit_status[i] = True
-            if all(exit_status):
-                break
-            else:
-                time.sleep(1)
-                self.assertFalse(time.time() - start_time > MANAGER_STATUS_CHECK_INTERVAL + JOIN_TIMEOUT,
-                                 'subprocess not terminated')
+            main_exit_event.wait()
+
+            exit_status = [False] * len(worker_pids)
+            start_time = time.time()
+            pname = 'python'
+            while True:
+                for i in range(len(worker_pids)):
+                    pid = worker_pids[i]
+                    if not exit_status[i]:
+                        if not TestDataLoader._is_process_alive(pid, pname):
+                            exit_status[i] = True
+                if all(exit_status):
+                    break
+                else:
+                    if time.time() - start_time > MANAGER_STATUS_CHECK_INTERVAL + JOIN_TIMEOUT:
+                        self.fail('subprocess not terminated')
+                    time.sleep(1)
+            p.join(MANAGER_STATUS_CHECK_INTERVAL + JOIN_TIMEOUT - (time.time() - start_time))
+            self.assertFalse(p.is_alive(), 'main process not terminated')
 
     def test_len(self):
         def check_len(dl, expected):
@@ -599,7 +619,7 @@ but they are all safe to ignore'''
             self.assertIsInstance(batch, tt)
 
     @unittest.skipIf(not TEST_NUMPY, "numpy unavailable")
-    def test_default_colate_bad_numpy_types(self):
+    def test_default_collate_bad_numpy_types(self):
         import numpy as np
 
         # Should be a no-op
@@ -632,6 +652,7 @@ class TestStringDataLoader(TestCase):
         self.dataset = StringDataset()
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @skipIfRocm
     def test_shuffle_pin_memory(self):
         loader = DataLoader(self.dataset, batch_size=2, shuffle=True, num_workers=4, pin_memory=True)
         for batch_ndx, (s, n) in enumerate(loader):
@@ -675,6 +696,7 @@ class TestDictDataLoader(TestCase):
             self.assertEqual(n[1], idx + 1)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @skipIfRocm
     def test_pin_memory(self):
         loader = DataLoader(self.dataset, batch_size=2, pin_memory=True)
         for batch_ndx, sample in enumerate(loader):
@@ -714,6 +736,7 @@ class TestIndividualWorkerQueue(TestCase):
             if current_worker_idx == num_workers:
                 current_worker_idx = 0
 
+    @skipIfRocm
     def test_ind_worker_queue(self):
         for batch_size in (8, 16, 32, 64):
             for num_workers in range(1, 6):

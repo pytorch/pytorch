@@ -68,7 +68,6 @@ class SparseLengthsFused8BitRowwiseOp : public Operator<Context> {
     return true;
   }
 
- private:
   enum {
     DATA = 0,
     WEIGHTS = 1,

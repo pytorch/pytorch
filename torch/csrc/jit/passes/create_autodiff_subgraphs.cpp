@@ -1,6 +1,7 @@
 #include <cstddef>
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/autodiff.h"
+#include "torch/csrc/jit/assertions.h"
 
 namespace torch { namespace jit {
 
@@ -34,10 +35,7 @@ void mergeNodes(Block * block, Symbol group_node_kind, ArrayRef<Node*> nodes) {
     value_map[v] = nv;
     return nv;
   };
-  std::unordered_set<Node*> group_set;
-  for(auto n : nodes) {
-    group_set.insert(n);
-  }
+  std::unordered_set<Node*> group_set(nodes.begin(), nodes.end());
   for(auto n : nodes) {
     auto nn = new_graph->appendNode(new_graph->createClone(n, getOrCreateInput));
     for(size_t i = 0; i < nn->outputs().size(); ++i) {

@@ -1,7 +1,7 @@
 #ifndef TH_SIZE_INC
 #define TH_SIZE_INC
 
-#include "THGeneral.h"
+#include <TH/THGeneral.h>
 #include <stddef.h>
 
 // THTensor functions that would work on a THSize if we had such a class in C++,

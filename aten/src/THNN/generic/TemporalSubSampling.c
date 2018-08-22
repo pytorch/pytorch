@@ -19,15 +19,15 @@ static inline void THNN_(TemporalSubSampling_shapeCheck)(
   THNN_ARGCHECK(!input->is_empty() && input->dim() == 2, 2, input,
                   "non-empty 2D or 3D (batch mode) tensor expected for input, but got: %s");
   if (inputFrameSize != NULL) {
-    THArgCheck( input->size[1] == *inputFrameSize, 2,
+    THArgCheck( input->size(1) == *inputFrameSize, 2,
                 "invalid input frame size.  Got: %d, Expected: %d",
-                input->size[1], *inputFrameSize);
+                input->size(1), *inputFrameSize);
   }
-  THArgCheck( input->size[0] >= kW, 2,
+  THArgCheck( input->size(0) >= kW, 2,
               "input sequence smaller than kernel size.  Got %d, Expected: %d",
-              input->size[0], kW);
+              input->size(0), kW);
 
-  nInputFrame = input->size[0];
+  nInputFrame = input->size(0);
   nOutputFrame = (nInputFrame - kW) / dW + 1;
 
   if (gradOutput != NULL) {
@@ -59,7 +59,7 @@ void THNN_(TemporalSubSampling_updateOutput)(
   outputFrame = THTensor_(new)();
   inputWindow = THTensor_(new)();
 
-  nInputFrame = input->size[0];
+  nInputFrame = input->size(0);
   nOutputFrame = (nInputFrame - kW) / dW + 1;
 
   THTensor_(resize2d)(output,
@@ -105,7 +105,7 @@ void THNN_(TemporalSubSampling_updateGradInput)(
   THTensor_(resizeAs)(gradInput, input);
   THTensor_(zero)(gradInput);
 
-  for(k = 0; k < gradOutput->size[0]; k++)
+  for(k = 0; k < gradOutput->size(0); k++)
   {
     THTensor_(narrow)(gradInputWindow, gradInput, 0, k*dW, kW);
     THTensor_(select)(gradOutputFrame, gradOutput, 0, k);
@@ -139,7 +139,7 @@ void THNN_(TemporalSubSampling_accGradParameters)(
   inputWindow = THTensor_(new)();
   buffer = THTensor_(new)();
 
-  for(k = 0; k < gradOutput->size[0]; k++)
+  for(k = 0; k < gradOutput->size(0); k++)
   {
     THTensor_(narrow)(inputWindow, input, 0, k*dW, kW);
     THTensor_(select)(gradOutputFrame, gradOutput, 0, k);

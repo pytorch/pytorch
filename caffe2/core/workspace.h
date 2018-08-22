@@ -24,7 +24,7 @@ namespace caffe2 {
 
 class NetBase;
 
-struct StopOnSignal {
+struct CAFFE2_API StopOnSignal {
   StopOnSignal()
       : handler_(std::make_shared<SignalHandler>(
             SignalHandler::Action::STOP,
@@ -44,7 +44,7 @@ struct StopOnSignal {
  * runtime: (1) all blobs, and (2) all instantiated networks. It is the owner of
  * all these objects and deals with the scaffolding logistics.
  */
-class Workspace {
+class CAFFE2_API Workspace {
  public:
   typedef std::function<bool(int)> ShouldContinue;
   typedef CaffeMap<string, unique_ptr<Blob> > BlobMap;
@@ -136,14 +136,14 @@ class Workspace {
       auto* from_blob = parent_ws->GetBlob(ws_blob.second);
       CAFFE_ENFORCE(from_blob);
       CAFFE_ENFORCE(
-          from_blob->template IsType<Tensor<Context>>(),
+          from_blob->template IsType<Tensor>(),
           "Expected blob with tensor value",
           ws_blob.second);
       forwarded_blobs_.erase(blob);
       auto* to_blob = CreateBlob(blob);
       CAFFE_ENFORCE(to_blob);
-      const auto& from_tensor = from_blob->template Get<Tensor<Context>>();
-      auto* to_tensor = to_blob->template GetMutable<Tensor<Context>>();
+      const auto& from_tensor = from_blob->template Get<Tensor>();
+      auto* to_tensor = to_blob->GetMutableTensor(Context::GetDeviceType());
       to_tensor->CopyFrom(from_tensor);
     }
   }
@@ -297,7 +297,7 @@ class Workspace {
   std::unique_ptr<ThreadPool> thread_pool_;
   std::mutex thread_pool_creation_mutex_;
 
-  DISABLE_COPY_AND_ASSIGN(Workspace);
+  AT_DISABLE_COPY_AND_ASSIGN(Workspace);
 };
 
 }  // namespace caffe2

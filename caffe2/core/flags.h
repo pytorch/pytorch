@@ -26,12 +26,12 @@ namespace caffe2 {
 /**
  * Sets the usage message when a commandline tool is called with "--help".
  */
-void SetUsageMessage(const string& str);
+CAFFE2_API void SetUsageMessage(const string& str);
 
 /**
  * Returns the usage message for the commandline tool set by SetUsageMessage.
  */
-const char* UsageMessage();
+CAFFE2_API const char* UsageMessage();
 
 /**
  * Parses the commandline flags.
@@ -41,11 +41,11 @@ const char* UsageMessage();
  * commandline args that caffe2 does not deal with. Note that following
  * convention, argv[0] contains the binary name and is not parsed.
  */
-bool ParseCaffeCommandLineFlags(int* pargc, char*** pargv);
+CAFFE2_API bool ParseCaffeCommandLineFlags(int* pargc, char*** pargv);
 /**
  * Checks if the commandline flags has already been passed.
  */
-bool CommandLineFlagsHasBeenParsed();
+CAFFE2_API bool CommandLineFlagsHasBeenParsed();
 
 }  // namespace caffe2
 
@@ -56,6 +56,10 @@ bool CommandLineFlagsHasBeenParsed();
 
 #ifdef CAFFE2_USE_GFLAGS
 
+////////////////////////////////////////////////////////////////////////////////
+// Begin gflags section: most functions are basically rerouted to gflags.
+////////////////////////////////////////////////////////////////////////////////
+
 #include <gflags/gflags.h>
 
 // gflags before 2.0 uses namespace google and after 2.1 uses namespace gflags.
@@ -64,41 +68,70 @@ bool CommandLineFlagsHasBeenParsed();
 namespace gflags = google;
 #endif  // GFLAGS_GFLAGS_H_
 
-#define CAFFE2_GFLAGS_DEF_WRAPPER(type, name, default_value, help_str)         \
+// Motivation about the gflags wrapper:
+// (1) We would need to make sure that the gflags version and the non-gflags
+// version of Caffe2 are going to expose the same flags abstraction. One should
+// explicitly use caffe2::FLAGS_flag_name to access the flags.
+// (2) For flag names, it is recommended to start with caffe2_ to distinguish it
+// from regular gflags flags. For example, do
+//    CAFFE2_DEFINE_BOOL(caffe2_my_flag, true, "An example");
+// to allow one to use caffe2::FLAGS_caffe2_my_flag.
+// (3) Gflags has a design issue that does not properly expose the global flags,
+// if one builds the library with -fvisibility=hidden. The current gflags (as of
+// Aug 2018) only deals with the Windows case using dllexport, and not the Linux
+// counterparts. As a result, we will explciitly use CAFFE2_EXPORT to export the
+// flags defined in Caffe2. This is done via a global reference, so the flag
+// itself is not duplicated - under the hood it is the same global gflags flag.
+#define CAFFE2_GFLAGS_DEF_WRAPPER(                                             \
+    type, real_type, name, default_value, help_str)                            \
   DEFINE_##type(name, default_value, help_str);                                \
   namespace caffe2 {                                                           \
-    using ::FLAGS_##name;                                                      \
+    CAFFE2_EXPORT real_type& FLAGS_##name = ::FLAGS_##name;                    \
   }
 
 #define CAFFE2_DEFINE_int(name, default_value, help_str)                       \
-  CAFFE2_GFLAGS_DEF_WRAPPER(int32, name, default_value, help_str)
+  CAFFE2_GFLAGS_DEF_WRAPPER(int32, gflags::int32, name, default_value, help_str)
 #define CAFFE2_DEFINE_int64(name, default_value, help_str)                     \
-  CAFFE2_GFLAGS_DEF_WRAPPER(int64, name, default_value, help_str)              
+  CAFFE2_GFLAGS_DEF_WRAPPER(int64, gflags::int64, name, default_value, help_str)              
 #define CAFFE2_DEFINE_double(name, default_value, help_str)                    \
-  CAFFE2_GFLAGS_DEF_WRAPPER(double, name, default_value, help_str)
+  CAFFE2_GFLAGS_DEF_WRAPPER(double, double, name, default_value, help_str)
 #define CAFFE2_DEFINE_bool(name, default_value, help_str)                      \
-  CAFFE2_GFLAGS_DEF_WRAPPER(bool, name, default_value, help_str)
-#define CAFFE2_DEFINE_string(name, default_value, help_str) \
-  CAFFE2_GFLAGS_DEF_WRAPPER(string, name, default_value, help_str)
+  CAFFE2_GFLAGS_DEF_WRAPPER(bool, bool, name, default_value, help_str)
+#define CAFFE2_DEFINE_string(name, default_value, help_str)                    \
+  CAFFE2_GFLAGS_DEF_WRAPPER(                                                   \
+      string, ::fLS::clstring, name, default_value, help_str)
 
 // DECLARE_typed_var should be used in header files and in the global namespace.
-#define CAFFE2_GFLAGS_DECLARE_WRAPPER(type, name)                             \
-  DECLARE_##type(name);                                                       \
-  namespace caffe2 {                                                          \
-    using ::FLAGS_##name;                                                     \
+#define CAFFE2_GFLAGS_DECLARE_WRAPPER(type, real_type, name)                   \
+  DECLARE_##type(name);                                                        \
+  namespace caffe2 {                                                           \
+    CAFFE2_IMPORT extern real_type& FLAGS_##name;                              \
   }  // namespace caffe2
 
-#define CAFFE2_DECLARE_int(name) CAFFE2_GFLAGS_DECLARE_WRAPPER(int32, name)
-#define CAFFE2_DECLARE_int64(name) CAFFE2_GFLAGS_DECLARE_WRAPPER(int64, name)
-#define CAFFE2_DECLARE_double(name) CAFFE2_GFLAGS_DECLARE_WRAPPER(double, name)
-#define CAFFE2_DECLARE_bool(name) CAFFE2_GFLAGS_DECLARE_WRAPPER(bool, name)
-#define CAFFE2_DECLARE_string(name) CAFFE2_GFLAGS_DECLARE_WRAPPER(string, name)
+#define CAFFE2_DECLARE_int(name)                                               \
+  CAFFE2_GFLAGS_DECLARE_WRAPPER(int32, gflags::int32, name)
+#define CAFFE2_DECLARE_int64(name)                                             \
+  CAFFE2_GFLAGS_DECLARE_WRAPPER(int64, gflags::int64, name)
+#define CAFFE2_DECLARE_double(name)                                            \
+  CAFFE2_GFLAGS_DECLARE_WRAPPER(double, double, name)
+#define CAFFE2_DECLARE_bool(name)                                              \
+  CAFFE2_GFLAGS_DECLARE_WRAPPER(bool, bool, name)
+#define CAFFE2_DECLARE_string(name)                                            \
+  CAFFE2_GFLAGS_DECLARE_WRAPPER(string, ::fLS::clstring, name)
+
+////////////////////////////////////////////////////////////////////////////////
+// End gflags section.
+////////////////////////////////////////////////////////////////////////////////
 
 #else   // CAFFE2_USE_GFLAGS
 
+////////////////////////////////////////////////////////////////////////////////
+// Begin non-gflags section: providing equivalent functionality.
+////////////////////////////////////////////////////////////////////////////////
+
 namespace caffe2 {
 
-class Caffe2FlagParser {
+class CAFFE2_API Caffe2FlagParser {
  public:
   Caffe2FlagParser() {}
   bool success() { return success_; }
@@ -117,29 +150,29 @@ CAFFE_DECLARE_REGISTRY(Caffe2FlagsRegistry, Caffe2FlagParser, const string&);
 // write the CAFFE2_DEFINE_* and CAFFE2_DECLARE_* macros outside any namespace
 // as well.
 
-#define CAFFE2_DEFINE_typed_var(type, name, default_value, help_str)          \
-  namespace caffe2 {                                                          \
-  CAFFE2_EXPORT type FLAGS_##name = default_value;                            \
-  namespace {                                                                 \
-  class Caffe2FlagParser_##name : public Caffe2FlagParser {                   \
-   public:                                                                    \
-    explicit Caffe2FlagParser_##name(const string& content) {                 \
-      success_ = Caffe2FlagParser::Parse<type>(content, &FLAGS_##name);       \
-    }                                                                         \
-  };                                                                          \
-  }                                                                           \
-  RegistererCaffe2FlagsRegistry g_Caffe2FlagsRegistry_##name(                 \
-      #name,                                                                  \
-      Caffe2FlagsRegistry(),                                                  \
-      RegistererCaffe2FlagsRegistry::DefaultCreator<Caffe2FlagParser_##name>, \
-      "(" #type ", default " #default_value ") " help_str);                   \
+#define CAFFE2_DEFINE_typed_var(type, name, default_value, help_str)           \
+  namespace caffe2 {                                                           \
+  CAFFE2_EXPORT type FLAGS_##name = default_value;                             \
+  namespace {                                                                  \
+  class Caffe2FlagParser_##name : public Caffe2FlagParser {                    \
+   public:                                                                     \
+    explicit Caffe2FlagParser_##name(const string& content) {                  \
+      success_ = Caffe2FlagParser::Parse<type>(content, &FLAGS_##name);        \
+    }                                                                          \
+  };                                                                           \
+  }                                                                            \
+  RegistererCaffe2FlagsRegistry g_Caffe2FlagsRegistry_##name(                  \
+      #name,                                                                   \
+      Caffe2FlagsRegistry(),                                                   \
+      RegistererCaffe2FlagsRegistry::DefaultCreator<Caffe2FlagParser_##name>,  \
+      "(" #type ", default " #default_value ") " help_str);                    \
   }
 
 #define CAFFE2_DEFINE_int(name, default_value, help_str)                       \
   CAFFE2_DEFINE_typed_var(int, name, default_value, help_str)
-#define CAFFE2_DEFINE_int64(name, default_value, help_str) \
+#define CAFFE2_DEFINE_int64(name, default_value, help_str)                     \
   CAFFE2_DEFINE_typed_var(int64_t, name, default_value, help_str)
-#define CAFFE2_DEFINE_double(name, default_value, help_str) \
+#define CAFFE2_DEFINE_double(name, default_value, help_str)                    \
   CAFFE2_DEFINE_typed_var(double, name, default_value, help_str)
 #define CAFFE2_DEFINE_bool(name, default_value, help_str)                      \
   CAFFE2_DEFINE_typed_var(bool, name, default_value, help_str)
@@ -147,9 +180,9 @@ CAFFE_DECLARE_REGISTRY(Caffe2FlagsRegistry, Caffe2FlagParser, const string&);
   CAFFE2_DEFINE_typed_var(string, name, default_value, help_str)
 
 // DECLARE_typed_var should be used in header files and in the global namespace.
-#define CAFFE2_DECLARE_typed_var(type, name) \
-  namespace caffe2 {                         \
-  CAFFE2_IMPORT extern type FLAGS_##name;    \
+#define CAFFE2_DECLARE_typed_var(type, name)                                   \
+  namespace caffe2 {                                                           \
+    CAFFE2_IMPORT extern type FLAGS_##name;                                    \
   } // namespace caffe2
 
 #define CAFFE2_DECLARE_int(name) CAFFE2_DECLARE_typed_var(int, name)
@@ -157,6 +190,10 @@ CAFFE_DECLARE_REGISTRY(Caffe2FlagsRegistry, Caffe2FlagParser, const string&);
 #define CAFFE2_DECLARE_double(name) CAFFE2_DECLARE_typed_var(double, name)
 #define CAFFE2_DECLARE_bool(name) CAFFE2_DECLARE_typed_var(bool, name)
 #define CAFFE2_DECLARE_string(name) CAFFE2_DECLARE_typed_var(string, name)
+
+////////////////////////////////////////////////////////////////////////////////
+// End non-gflags section.
+////////////////////////////////////////////////////////////////////////////////
 
 #endif  // CAFFE2_USE_GFLAGS
 

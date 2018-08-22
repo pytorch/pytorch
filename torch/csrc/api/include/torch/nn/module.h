@@ -6,7 +6,7 @@
 #include <torch/tensor.h>
 
 #include <ATen/ATen.h>
-#include <ATen/optional.h>
+#include <ATen/core/optional.h>
 
 #include <map>
 #include <memory>
@@ -40,8 +40,11 @@ class Module {
   const std::string& name() const noexcept;
 
   /// Performs a recursive deep copy of the module and all its registered
-  /// parameters, buffers and submodules.
-  virtual std::shared_ptr<Module> clone() const;
+  /// parameters, buffers and submodules, optionally setting the current device
+  /// to the one supplied before cloning. If no device is given, each
+  /// parameter and buffer will be moved to the device of its source.
+  virtual std::shared_ptr<Module> clone(
+      at::optional<Device> device = at::nullopt) const;
 
   /// Provides a means to traverse the `Module` tree.
   ModuleCursor modules();
@@ -144,7 +147,7 @@ class Module {
   template <typename T>
   friend class detail::CursorBase;
 
-  virtual void clone_(Module& other);
+  virtual void clone_(Module& other, at::optional<Device> device);
 
   /// The implementation of the various `to()` methods.
   template <typename... Ts>
@@ -202,7 +205,7 @@ std::shared_ptr<ModuleType> Module::register_module(
     std::string name,
     std::shared_ptr<ModuleType> module) {
   auto& base_module = children_.insert(std::move(name), std::move(module));
-  return std::static_pointer_cast<ModuleType>(base_module);
+  return std::dynamic_pointer_cast<ModuleType>(base_module);
 }
 
 template <typename ModuleType>
@@ -220,11 +223,12 @@ void Module::to_impl(Ts&&... ts) {
   }
   // Then move every parameter to the new dtype/device.
   for (auto& parameter : parameters_) {
-    at::detail::set_data(*parameter, parameter->data().to(ts...));
+    at::detail::set_data(
+        *parameter, autograd::Variable(*parameter).data().to(ts...));
   }
   // Then move every buffer to the new dtype/device.
   for (auto& buffer : buffers_) {
-    at::detail::set_data(*buffer, buffer->data().to(ts...));
+    at::detail::set_data(*buffer, autograd::Variable(*buffer).data().to(ts...));
   }
 }
 

@@ -3,6 +3,7 @@ import math
 import torch
 from torch.nn.parameter import Parameter
 from .. import functional as F
+from .. import init
 from .module import Module
 
 
@@ -23,8 +24,13 @@ class Linear(Module):
 
     Attributes:
         weight: the learnable weights of the module of shape
-            `(out_features x in_features)`
-        bias:   the learnable bias of the module of shape `(out_features)`
+            `(out_features x in_features)`. The values are initialized from
+            :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
+            :math:`k = \frac{1}{\text{in\_features}}`
+        bias:   the learnable bias of the module of shape :math:`(out_features)`.
+                If :attr:`bias` is ``True``, the values are initialized from
+                :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
+                :math:`k = \frac{1}{\text{in\_features}}`
 
     Examples::
 
@@ -46,10 +52,11 @@ class Linear(Module):
         self.reset_parameters()
 
     def reset_parameters(self):
-        stdv = 1. / math.sqrt(self.weight.size(1))
-        self.weight.data.uniform_(-stdv, stdv)
+        init.kaiming_uniform_(self.weight, a=math.sqrt(5))
         if self.bias is not None:
-            self.bias.data.uniform_(-stdv, stdv)
+            fan_in, _ = init._calculate_fan_in_and_fan_out(self.weight)
+            bound = 1 / math.sqrt(fan_in)
+            init.uniform_(self.bias, -bound, bound)
 
     def forward(self, input):
         return F.linear(input, self.weight, self.bias)
@@ -72,16 +79,21 @@ class Bilinear(Module):
             Default: ``True``
 
     Shape:
-        - Input: :math:`(N, *, \text{in1_features})`, :math:`(N, *, \text{in2_features})`
+        - Input: :math:`(N, *, \text{in1\_features})`, :math:`(N, *, \text{in2\_features})`
           where :math:`*` means any number of additional dimensions. All but the last
           dimension of the inputs should be the same.
-        - Output: :math:`(N, *, \text{out_features})` where all but the last dimension
+        - Output: :math:`(N, *, \text{out\_features})` where all but the last dimension
           are the same shape as the input.
 
     Attributes:
         weight: the learnable weights of the module of shape
-            `(out_features x in1_features x in2_features)`
+            `(out_features x in1_features x in2_features)`. The values are initialized from
+            :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
+            :math:`k = \frac{1}{\text{in1\_features}}`
         bias:   the learnable bias of the module of shape `(out_features)`
+                If :attr:`bias` is ``True``, the values are initialized from
+                :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
+                :math:`k = \frac{1}{\text{in1\_features}}`
 
     Examples::
 
@@ -106,10 +118,10 @@ class Bilinear(Module):
         self.reset_parameters()
 
     def reset_parameters(self):
-        stdv = 1. / math.sqrt(self.weight.size(1))
-        self.weight.data.uniform_(-stdv, stdv)
+        bound = 1 / math.sqrt(self.weight.size(1))
+        init.uniform_(self.weight, -bound, bound)
         if self.bias is not None:
-            self.bias.data.uniform_(-stdv, stdv)
+            init.uniform_(self.bias, -bound, bound)
 
     def forward(self, input1, input2):
         return F.bilinear(input1, input2, self.weight, self.bias)

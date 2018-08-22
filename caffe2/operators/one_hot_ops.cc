@@ -92,8 +92,8 @@ template <>
 void OneHotOp<CPUContext>::DoOneHotOp(
     TIndex batch_size,
     TIndex index_size,
-    const Tensor<CPUContext>& indices,
-    Tensor<CPUContext>* one_hots) {
+    const Tensor& indices,
+    Tensor* one_hots) {
   const TIndex* indices_ptr = indices.template data<TIndex>();
   float* one_hots_ptr = one_hots->template mutable_data<float>();
   memset(one_hots_ptr, 0, one_hots->nbytes());
@@ -187,7 +187,7 @@ class SegmentOneHotOp : public Operator<CPUContext> {
     auto* indices_ptr = indices.data<int64_t>();
     auto* one_hots = Output(0);
     one_hots->Resize(batch_size, index_size);
-    auto* one_hots_ptr = one_hots->mutable_data<float>();
+    auto* one_hots_ptr = one_hots->template mutable_data<float>();
     if (one_hots->size() == 0) {
       return true;
     }
@@ -213,6 +213,7 @@ REGISTER_CPU_OPERATOR(SegmentOneHot, SegmentOneHotOp);
 OPERATOR_SCHEMA(BatchBucketOneHot)
     .NumInputs(3)
     .NumOutputs(1)
+    .DisallowInputFillers() // TODO: enable the filler
     .SetDoc(R"DOC(
 Input is a matrix tensor. Its first dimension is the batch
 size. For each column, bucketize it based on the boundary values and then do
@@ -244,6 +245,10 @@ For example
 OPERATOR_SCHEMA(BatchOneHot)
     .NumInputs(3)
     .NumOutputs(1)
+    .ValueKeyLengthInputFillers(
+        BatchOneHotOp<CPUContext>::X,
+        BatchOneHotOp<CPUContext>::VALS,
+        BatchOneHotOp<CPUContext>::LENS)
     .SetDoc(R"DOC(
 Input is a matrix tensor. Its first dimension is the batch
 size. Expand each column of it using one hot encoding. The `lengths` specifies
@@ -269,6 +274,7 @@ of one-hot encoding for each column. For example
 OPERATOR_SCHEMA(OneHot)
     .NumInputs(2)
     .NumOutputs(1)
+    .DisallowInputFillers() // TODO: enable the filler
     .SetDoc(R"DOC(
 The *OneHot* op accepts two inputs *indices* and *index_size_tensor*, and produces a single output *one_hots*.  For each index in *indices* the op creates a one-hot row in *one_hots* of length *index_size_tensor* where all entries are zero except the entry at the index is 1. The size of *one_hots* is *len(indices)* x *index_size_tensor*.
 
@@ -335,6 +341,7 @@ one_hots:
 OPERATOR_SCHEMA(SegmentOneHot)
     .NumInputs(3)
     .NumOutputs(1)
+    .DisallowInputFillers() // TODO: enable the filler
     .SetDoc(R"DOC(
 Given a sequence of indices, segmented by the lengths tensor, returns a matrix
 that has the elements in each sequence set to 1.0, and 0.0 everywhere else.

@@ -1,8 +1,13 @@
 #pragma once
 
+#include "torch/csrc/WindowsTorchApiMacro.h"
+
 namespace torch { namespace jit {
+
 struct Graph;
 struct ArgumentSpec;
-void PropagateInputShapes(Graph & graph, const ArgumentSpec & spec);
+
+void EraseShapeInformation(Graph & graph);
+TORCH_API void PropagateInputShapes(Graph & graph, const ArgumentSpec & spec);
 
 }}

@@ -3,8 +3,8 @@
 
 #include "THCGeneral.h"
 
-THC_API THAllocator* getTHCudaHostAllocator();
-THC_API THAllocator* getTHCUVAAllocator();
+THC_API THAllocator* getTHCudaHostAllocator(void);
+THC_API THAllocator* getTHCUVAAllocator(void);
 // IPC doesn't support (re)allocation
 
 #ifdef __cplusplus

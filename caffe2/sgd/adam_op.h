@@ -83,12 +83,12 @@ class AdamOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   AdamOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        beta1_(OperatorBase::GetSingleArgument<float>("beta1", 0.9f)),
-        beta2_(OperatorBase::GetSingleArgument<float>("beta2", 0.999f)),
-        epsilon_(OperatorBase::GetSingleArgument<float>("epsilon", 1e-5f)) {}
+        beta1_(this->template GetSingleArgument<float>("beta1", 0.9f)),
+        beta2_(this->template GetSingleArgument<float>("beta2", 0.999f)),
+        epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5f)) {}
   bool RunOnDevice() override {
     // Iter live on the CPU
-    CAFFE_ENFORCE(OperatorBase::InputIsType<TensorCPU>(ITER));
+    CAFFE_ENFORCE(OperatorBase::InputIsType<Tensor>(ITER, CPU));
     CAFFE_ENFORCE(Input(LR).size() == 1);
     CAFFE_ENFORCE(Input(GRAD).size() == Input(PARAM).size());
     CAFFE_ENFORCE(Input(GRAD).size() == Input(MOMENT_1).size());
@@ -98,7 +98,7 @@ class AdamOp final : public Operator<Context> {
     Output(OUTPUT_MOMENT_2)->ResizeLike(Input(MOMENT_2));
 
     const auto iter =
-        OperatorBase::Input<TensorCPU>(ITER).template data<int64_t>()[0];
+        OperatorBase::Input<Tensor>(ITER, CPU).template data<int64_t>()[0];
 
     const auto t = iter + 1;
     const auto correction =
@@ -156,9 +156,9 @@ class SparseAdamOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   SparseAdamOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        beta1_(OperatorBase::GetSingleArgument<float>("beta1", 0.9f)),
-        beta2_(OperatorBase::GetSingleArgument<float>("beta2", 0.999f)),
-        epsilon_(OperatorBase::GetSingleArgument<float>("epsilon", 1e-5f)) {}
+        beta1_(this->template GetSingleArgument<float>("beta1", 0.9f)),
+        beta2_(this->template GetSingleArgument<float>("beta2", 0.999f)),
+        epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5f)) {}
 
   bool RunOnDevice() override {
     // Enforce shapes
@@ -177,7 +177,7 @@ class SparseAdamOp final : public Operator<Context> {
   bool DoRunWithType() {
     const auto* lr = Input(LR).template data<T>();
     const auto iter =
-        OperatorBase::Input<TensorCPU>(ITER).template data<int64_t>()[0];
+        OperatorBase::Input<Tensor>(ITER, CPU).template data<int64_t>()[0];
 
     const auto t = iter + 1;
     const auto correction =
@@ -266,9 +266,9 @@ class RowWiseSparseAdamOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   RowWiseSparseAdamOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        beta1_(OperatorBase::GetSingleArgument<float>("beta1", 0.9f)),
-        beta2_(OperatorBase::GetSingleArgument<float>("beta2", 0.999f)),
-        epsilon_(OperatorBase::GetSingleArgument<float>("epsilon", 1e-5f)) {}
+        beta1_(this->template GetSingleArgument<float>("beta1", 0.9f)),
+        beta2_(this->template GetSingleArgument<float>("beta2", 0.999f)),
+        epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5f)) {}
 
   bool RunOnDevice() override {
     // Enforce shapes
@@ -287,7 +287,7 @@ class RowWiseSparseAdamOp final : public Operator<Context> {
   bool DoRunWithType() {
     const auto* lr = Input(LR).template data<T>();
     const auto iter =
-        OperatorBase::Input<TensorCPU>(ITER).template data<int64_t>()[0];
+        OperatorBase::Input<Tensor>(ITER, CPU).template data<int64_t>()[0];
 
     const auto t = iter + 1;
     const auto correction =

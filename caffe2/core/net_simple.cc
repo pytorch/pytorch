@@ -162,6 +162,11 @@ vector<float> SimpleNet::TEST_Benchmark(
             memory_bytes_read_per_op_type[op_type] += cost.bytes_read;
             memory_bytes_written_per_op_type[op_type] += cost.bytes_written;
             param_bytes_per_op_type[op_type] += cost.params_bytes;
+          } else {
+            flops_per_op.emplace_back(0);
+            memory_bytes_read_per_op.emplace_back(0);
+            memory_bytes_written_per_op.emplace_back(0);
+            param_bytes_per_op.emplace_back(0);
           }
         }
         timer.Start();
@@ -189,7 +194,9 @@ vector<float> SimpleNet::TEST_Benchmark(
       std::stringstream flops_str;
       if (idx < flops_per_op.size() && flops_per_op[idx]) {
         flops_str << " (" << to_string(1.0e-9 * flops_per_op[idx]) << " GFLOP, "
-                  << to_string(1.0e-6 * flops_per_op[idx] / time_per_op[idx])
+                  << to_string(
+                         1.0e-6 * flops_per_op[idx] / time_per_op[idx] *
+                         main_runs)
                   << " GFLOPS)";
       }
       std::stringstream memory_bytes_read_str;

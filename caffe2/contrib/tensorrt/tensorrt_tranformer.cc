@@ -95,10 +95,10 @@ void BlobToTensorProto(
   }
 
   // Set values
-  if (blob->template IsType<TensorCPU>()) {
+  if (blob->template IsType<Tensor>(CPU)) {
     const auto& cpu_tensor = blob->template Get<TensorCPU>();
     CPUTensorToTensorProto(cpu_tensor, t);
-  } else if (blob->template IsType<TensorCUDA>()) {
+  } else if (blob->template IsType<Tensor>(CUDA)) {
     const auto& cuda_tensor = blob->template Get<TensorCUDA>();
     const auto cpu_tensor = TensorCPU(cuda_tensor, context);
     context->FinishDeviceComputation();
@@ -479,7 +479,7 @@ void TensorRTTransformer::Transform(
   auto trt_builder = tensorrt::TrtObject(nvinfer1::createInferBuilder(logger));
   auto trt_network = tensorrt::TrtObject(trt_builder->createNetwork());
   auto importer =
-      tensorrt::TrtObject(nvonnxparser::createParser(*trt_network, logger));
+      tensorrt::TrtObject(nvonnxparser::createParser(trt_network.get(), logger));
 
   // function to tell whether TensorRT supports a given C2 op or not
   auto supports =

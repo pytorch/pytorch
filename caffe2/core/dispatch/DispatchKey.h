@@ -12,29 +12,31 @@
 namespace c10 {
 
 namespace details {
+
 struct TensorParameterDispatchKey final {
   // note: This dispatch key structure is not final yet and will change. Don't rely on it.
   DeviceTypeId deviceTypeId;
   LayoutId layoutId;
-  // TODO Move this CaffeTypeId to c10 namespace
-  caffe2::CaffeTypeId dataType;
+  // TODO Move this TypeIdentifier to c10 namespace
+  caffe2::TypeIdentifier dataType;
 };
 inline constexpr bool operator==(const TensorParameterDispatchKey& lhs, const TensorParameterDispatchKey& rhs) {
   return lhs.deviceTypeId == rhs.deviceTypeId && lhs.layoutId == rhs.layoutId && lhs.dataType == rhs.dataType;
 }
-}  // namespace details
-}  // namespace c10
 
-inline std::ostream& operator<<(std::ostream& stream, const c10::details::TensorParameterDispatchKey& key) {
+inline std::ostream& operator<<(std::ostream& stream, const TensorParameterDispatchKey& key) {
   return stream << "TensorKey(" << key.deviceTypeId << ", " << key.layoutId.value() << ", " << key.dataType << ")";
 }
+
+}  // namespace details
+}  // namespace c10
 
 namespace std {
   template<>
   struct hash<c10::details::TensorParameterDispatchKey> {
     // TODO constexpr hashing
     size_t operator()(const c10::details::TensorParameterDispatchKey& obj) const {
-      return std::hash<c10::DeviceTypeId>()(obj.deviceTypeId) ^ std::hash<c10::LayoutId>()(obj.layoutId) ^ std::hash<caffe2::CaffeTypeId>()(obj.dataType);
+      return std::hash<c10::DeviceTypeId>()(obj.deviceTypeId) ^ std::hash<c10::LayoutId>()(obj.layoutId) ^ std::hash<caffe2::TypeIdentifier>()(obj.dataType);
     }
   };
 }  // namespace std
@@ -64,10 +66,8 @@ inline constexpr bool operator==(const DispatchKey<num_dispatch_args> &lhs, cons
   return lhs.argTypes == rhs.argTypes;
 }
 
-}  // namespace c10
-
 template<size_t num_dispatch_args>
-inline std::ostream& operator<<(std::ostream& stream, const c10::DispatchKey<num_dispatch_args>& key) {
+inline std::ostream& operator<<(std::ostream& stream, const DispatchKey<num_dispatch_args>& key) {
   stream << "DispatchKey(";
   if (num_dispatch_args > 0) {
       stream << "DispatchKey(" << key.argTypes[0];
@@ -78,6 +78,8 @@ inline std::ostream& operator<<(std::ostream& stream, const c10::DispatchKey<num
   }
   return stream << ")";
 }
+
+}  // namespace c10
 
 namespace std {
   template<size_t num_dispatch_args>

@@ -32,13 +32,11 @@ void THCTensor_(copy##TYPEC)(THCState *state, THCTensor *self, struct TH##TYPEC#
   if(THCTypeIdx_(Real) == THCTypeIdx_(TYPEC)) {               \
     THCTensor_(copyCPU)(state, self, (THTensor*) src);  /* cast just removes warnings */                     \
   } else {                                                              \
-    THLongStorage *size = TH##TYPEC##Tensor_newSizeOf(src);             \
-    THTensor *srcf = THTensor_(newWithSize)(size, NULL);                \
+    THTensor *srcf = THTensor_(newWithSize)(src->sizes(), {});          \
                                                                         \
     THTensor_(copy##TYPEC)(srcf, src);                                  \
     THCTensor_(copyCPU)(state, self, srcf);                             \
                                                                         \
-    THLongStorage_free(size);                                           \
     THTensor_(free)(srcf);                                              \
   }                                                                     \
 }
@@ -82,13 +80,11 @@ void THTensor_(copyCuda)(THCState *state, THTensor *self, struct THCTensor *src)
     if(THCTypeIdx_(Real) == THCTypeIdx_(TYPEC)) {   \
       THTensor_(copyCuda)(state, (THTensor*) self, src);  /* cast just removes compiler warning */                   \
     } else {                                                              \
-      THLongStorage *size = THCTensor_(newSizeOf)(state, src);            \
-      THTensor *srcf = THTensor_(newWithSize)(size, NULL);                \
+      THTensor *srcf = THTensor_(newWithSize)(src->sizes(), {});          \
                                                                           \
       THTensor_(copyCuda)(state, srcf, src);                              \
       TH_CONCAT_4(TH,TYPEC,Tensor_copy,Real)(self, srcf);                 \
                                                                           \
-      THLongStorage_free(size);                                           \
       THTensor_(free)(srcf);                                              \
     }                                                                     \
   }
@@ -131,7 +127,7 @@ void THCTensor_(copyAsyncCPU)(THCState *state, THCTensor *self, struct THTensor 
                               cudaMemcpyHostToDevice,
                               THCStream_stream(stream)));
 
-  THCudaCheck(THCCachingHostAllocator_recordEvent(THStorage_(data)(src->storage), stream));
+  THCudaCheck(THCCachingHostAllocator_recordEvent(THStorage_(data)(THTensor_getStoragePtr(src)), stream));
 
   if (currentDevice != tensorDevice) {
     THCudaCheck(cudaSetDevice(currentDevice));
@@ -162,7 +158,7 @@ void THTensor_(copyAsyncCuda)(THCState *state, THTensor *self, struct THCTensor 
                               cudaMemcpyDeviceToHost,
                               THCStream_stream(stream)));
 
-  THCudaCheck(THCCachingHostAllocator_recordEvent(THCStorage_(data)(state, src->storage), stream));
+  THCudaCheck(THCCachingHostAllocator_recordEvent(THCStorage_(data)(state, THTensor_getStoragePtr(src)), stream));
 
   if (currentDevice != tensorDevice) {
     THCudaCheck(cudaSetDevice(currentDevice));

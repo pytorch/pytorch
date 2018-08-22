@@ -5,14 +5,14 @@
 #include <functional>
 
 #include "ATen/ATenGeneral.h"
-#include "ATen/ArrayRef.h"
-#include "ATen/Generator.h"
-#include "ATen/Half.h"
-#include "ATen/SparseTensorRef.h"
-#include "ATen/ScalarType.h"
-#include "ATen/Scalar.h"
-#include "ATen/Tensor.h"
 #include "ATen/Allocator.h"
+#include "ATen/Generator.h"
+#include "ATen/Scalar.h"
+#include "ATen/ScalarType.h"
+#include "ATen/SparseTensorRef.h"
+#include "ATen/Tensor.h"
+#include "ATen/core/ArrayRef.h"
+#include "ATen/core/Half.h"
 
 // To solve the conflict of s_addr in inaddr.h
 #ifdef _MSC_VER

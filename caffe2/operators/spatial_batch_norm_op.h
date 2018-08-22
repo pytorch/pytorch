@@ -13,12 +13,12 @@ class SpatialBNOp : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   SpatialBNOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        is_test_(OperatorBase::GetSingleArgument<int>(OpSchema::Arg_IsTest, 0)),
-        epsilon_(OperatorBase::GetSingleArgument<float>("epsilon", 1e-5f)),
-        momentum_(OperatorBase::GetSingleArgument<float>("momentum", 0.9f)),
+        is_test_(this->template GetSingleArgument<int>(OpSchema::Arg_IsTest, 0)),
+        epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5f)),
+        momentum_(this->template GetSingleArgument<float>("momentum", 0.9f)),
         order_(StringToStorageOrder(
-            OperatorBase::GetSingleArgument<string>("order", "NCHW"))),
-        num_batches_(OperatorBase::GetSingleArgument<int>("num_batches", 1)) {
+            this->template GetSingleArgument<string>("order", "NCHW"))),
+        num_batches_(this->template GetSingleArgument<int>("num_batches", 1)) {
     // TODO(jiayq): update the input and output size checks.
     CAFFE_ENFORCE(
         (is_test_ && OutputSize() == 1) || (!is_test_ && OutputSize() == 5));
@@ -48,11 +48,11 @@ class SpatialBNGradientOp : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   SpatialBNGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        is_test_(OperatorBase::GetSingleArgument<int>(OpSchema::Arg_IsTest, 0)),
-        epsilon_(OperatorBase::GetSingleArgument<float>("epsilon", 1e-5f)),
+        is_test_(this->template GetSingleArgument<int>(OpSchema::Arg_IsTest, 0)),
+        epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5f)),
         order_(StringToStorageOrder(
-            OperatorBase::GetSingleArgument<string>("order", "NCHW"))),
-        num_batches_(OperatorBase::GetSingleArgument<int>("num_batches", 1)) {
+            this->template GetSingleArgument<string>("order", "NCHW"))),
+        num_batches_(this->template GetSingleArgument<int>("num_batches", 1)) {
     CAFFE_ENFORCE(InputSize() == 5 || InputSize() == 7);
     CAFFE_ENFORCE(OutputSize() == 3);
   }

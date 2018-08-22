@@ -19,7 +19,7 @@ TEST(BinaryMatch, AllMatch) {
   auto matches = nom::algorithm::binaryMatch(
       &graph, [](decltype(graph)::NodeRef n) { return true; });
   EXPECT_EQ(matches.size(), 1);
-  EXPECT_EQ(matches.front().Nodes.size(), graph.getMutableNodes().size());
+  EXPECT_EQ(matches.front().getNodesCount(), graph.getMutableNodes().size());
 }
 
 TEST(BinaryMatch, EmptyGraph) {
@@ -58,9 +58,9 @@ TEST(BinaryMatch, Basic) {
 
   EXPECT_EQ(matches.size(), 1);
   auto match = matches.front();
-  EXPECT_EQ(match.Nodes.size(), 4);
+  EXPECT_EQ(match.getNodesCount(), 4);
   std::set<std::string> exp{"2", "3", "4", "6"};
-  for (auto n : match.Nodes) {
+  for (auto n : match.getNodes()) {
     EXPECT_EQ(exp.count(n->data()), 1);
     exp.erase(n->data());
   }
@@ -104,16 +104,16 @@ TEST(BinaryMatch, RemovedMiddleNode) {
   auto match1 = matches.front();
   auto match2 = matches.back();
 
-  EXPECT_EQ(match1.Nodes.size(), 2);
-  EXPECT_EQ(match2.Nodes.size(), 1);
+  EXPECT_EQ(match1.getNodesCount(), 2);
+  EXPECT_EQ(match2.getNodesCount(), 1);
 
   std::set<std::string> exp1{"2", "4"};
   std::set<std::string> exp2{"6"};
-  for (auto n : match1.Nodes) {
+  for (auto n : match1.getNodes()) {
     EXPECT_EQ(exp1.count(n->data()), 1);
     exp1.erase(n->data());
   }
-  for (auto n : match2.Nodes) {
+  for (auto n : match2.getNodes()) {
     EXPECT_EQ(exp2.count(n->data()), 1);
     exp2.erase(n->data());
   }

@@ -1,6 +1,6 @@
 ir_version: 3
 producer_name: "pytorch"
-producer_version: "0.3"
+producer_version: "0.4"
 graph {
   node {
     input: "0"
@@ -11,22 +11,17 @@ graph {
     output: "6"
     output: "7"
     output: "8"
-    output: "batch_norm_dead_output-9"
-    output: "batch_norm_dead_output-10"
+    output: "batch_norm_dead_output-13"
+    output: "batch_norm_dead_output-14"
     op_type: "BatchNormalization"
     attribute {
       name: "epsilon"
-      f: 9.99999974737875e-06
+      f: 1e-05
       type: FLOAT
     }
     attribute {
-      name: "is_test"
-      i: 0
-      type: INT
-    }
-    attribute {
       name: "momentum"
-      f: 0.899999976158142
+      f: 0.9
       type: FLOAT
     }
   }
@@ -168,5 +163,5 @@ graph {
   }
 }
 opset_import {
-  version: 6
+  version: 7
 }

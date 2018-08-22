@@ -38,10 +38,10 @@
 
 #pragma once
 
-#include <utility>
+#include <ATen/core/C++17.h>
 #include <stdexcept>
 #include <string>
-#include "caffe2/utils/C++17.h"
+#include <utility>
 
 namespace c10 { namespace guts {
 
@@ -101,32 +101,32 @@ public:
   // No explicit construct/copy/destroy for aggregate type.
 
   // DR 776.
-  C10_CPP14_CONSTEXPR void fill(const value_type& __u)
+  AT_CPP14_CONSTEXPR void fill(const value_type& __u)
   { std::fill_n(begin(), size(), __u); }
 
-  C10_CPP14_CONSTEXPR void swap(array& __other)
+  AT_CPP14_CONSTEXPR void swap(array& __other)
   { std::swap_ranges(begin(), end(), __other.begin()); }
 
   // Iterators.
-  C10_CPP14_CONSTEXPR iterator begin() noexcept
+  AT_CPP14_CONSTEXPR iterator begin() noexcept
   { return iterator(data()); }
 
   constexpr const_iterator begin() const noexcept
   { return const_iterator(data()); }
 
-  C10_CPP14_CONSTEXPR iterator end() noexcept
+  AT_CPP14_CONSTEXPR iterator end() noexcept
   { return iterator(data() + _Nm); }
 
   constexpr const_iterator end() const noexcept
   { return const_iterator(data() + _Nm); }
 
-  C10_CPP14_CONSTEXPR reverse_iterator rbegin() noexcept
+  AT_CPP14_CONSTEXPR reverse_iterator rbegin() noexcept
   { return reverse_iterator(end()); }
 
   constexpr const_reverse_iterator rbegin() const noexcept
   { return const_reverse_iterator(end()); }
 
-  C10_CPP14_CONSTEXPR reverse_iterator rend() noexcept
+  AT_CPP14_CONSTEXPR reverse_iterator rend() noexcept
   { return reverse_iterator(begin()); }
 
   constexpr const_reverse_iterator rend() const noexcept
@@ -152,13 +152,13 @@ public:
   constexpr bool empty() const noexcept { return size() == 0; }
 
   // Element access.
-  C10_CPP14_CONSTEXPR reference operator[](size_type __n) noexcept
+  AT_CPP14_CONSTEXPR reference operator[](size_type __n) noexcept
   { return _AT_Type::_S_ref(_M_elems, __n); }
 
   constexpr const_reference operator[](size_type __n) const noexcept
   { return _AT_Type::_S_ref(_M_elems, __n); }
 
-  C10_CPP14_CONSTEXPR reference at(size_type __n) {
+  AT_CPP14_CONSTEXPR reference at(size_type __n) {
     if (__n >= _Nm) {
       detail::__throw_out_of_range(std::string() +
           "array::at: __n (which is " + to_string(__n) + ") " +
@@ -177,13 +177,13 @@ public:
          _AT_Type::_S_ref(_M_elems, 0));
      }
 
-  C10_CPP14_CONSTEXPR reference front() noexcept
+  AT_CPP14_CONSTEXPR reference front() noexcept
   { return *begin(); }
 
   constexpr const_reference front() const noexcept
   { return _AT_Type::_S_ref(_M_elems, 0); }
 
-  C10_CPP14_CONSTEXPR reference back() noexcept
+  AT_CPP14_CONSTEXPR reference back() noexcept
   { return _Nm ? *(end() - 1) : *end(); }
 
   constexpr const_reference back() const noexcept
@@ -192,7 +192,7 @@ public:
             : _AT_Type::_S_ref(_M_elems, 0);
   }
 
-  C10_CPP14_CONSTEXPR pointer data() noexcept
+  AT_CPP14_CONSTEXPR pointer data() noexcept
   { return _AT_Type::_S_ptr(_M_elems); }
 
   constexpr const_pointer data() const noexcept

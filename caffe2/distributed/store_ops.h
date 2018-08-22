@@ -6,7 +6,7 @@
 
 namespace caffe2 {
 
-class StoreSetOp final : public Operator<CPUContext> {
+class CAFFE2_API StoreSetOp final : public Operator<CPUContext> {
  public:
   StoreSetOp(const OperatorDef& operator_def, Workspace* ws);
   bool RunOnDevice() override;
@@ -17,7 +17,7 @@ class StoreSetOp final : public Operator<CPUContext> {
   INPUT_TAGS(HANDLER, DATA);
 };
 
-class StoreGetOp final : public Operator<CPUContext> {
+class CAFFE2_API StoreGetOp final : public Operator<CPUContext> {
  public:
   StoreGetOp(const OperatorDef& operator_def, Workspace* ws);
   bool RunOnDevice() override;
@@ -29,7 +29,7 @@ class StoreGetOp final : public Operator<CPUContext> {
   OUTPUT_TAGS(DATA);
 };
 
-class StoreAddOp final : public Operator<CPUContext> {
+class CAFFE2_API StoreAddOp final : public Operator<CPUContext> {
  public:
   StoreAddOp(const OperatorDef& operator_def, Workspace* ws);
   bool RunOnDevice() override;
@@ -42,7 +42,7 @@ class StoreAddOp final : public Operator<CPUContext> {
   OUTPUT_TAGS(VALUE);
 };
 
-class StoreWaitOp final : public Operator<CPUContext> {
+class CAFFE2_API StoreWaitOp final : public Operator<CPUContext> {
  public:
   StoreWaitOp(const OperatorDef& operator_def, Workspace* ws);
   bool RunOnDevice() override;

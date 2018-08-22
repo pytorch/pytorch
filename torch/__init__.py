@@ -53,9 +53,13 @@ if platform.system() == 'Windows':
         else:
             return ''
 
+    py_dll_path = _dl_flags.path.join(_dl_flags.path.dirname(sys.executable), 'Library\\bin')
+    th_dll_path = _dl_flags.path.dirname(__file__) + '\\lib\\'
+
+    dll_paths = [th_dll_path, py_dll_path, get_nvToolsExt_path(), _dl_flags.environ['PATH']]
+
     # then add the path to env
-    _dl_flags.environ['PATH'] = _dl_flags.path.dirname(
-        __file__) + '\\lib\\;' + get_nvToolsExt_path() + ';' + _dl_flags.environ['PATH']
+    _dl_flags.environ['PATH'] = ';'.join(dll_paths)
 
 else:
     # first check if the os package has the required flags
@@ -247,6 +251,8 @@ _C._initExtension(manager_path())
 del manager_path
 
 for name in dir(_C._VariableFunctions):
+    if name in ["__dir__", "__doc__"]:
+        continue
     globals()[name] = getattr(_C._VariableFunctions, name)
 
 ################################################################################
@@ -294,3 +300,12 @@ _C._init_names(list(torch._storage_classes))
 # attach docstrings to torch and tensor functions
 from . import _torch_docs, _tensor_docs, _storage_docs
 del _torch_docs, _tensor_docs, _storage_docs
+
+
+def compiled_with_cxx11_abi():
+    r"""Returns whether PyTorch was built with _GLIBCXX_USE_CXX11_ABI=1"""
+    return _C._GLIBCXX_USE_CXX11_ABI
+
+
+# Import the ops "namespace"
+from torch._ops import ops

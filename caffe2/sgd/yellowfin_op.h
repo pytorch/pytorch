@@ -20,12 +20,12 @@ class YellowFinOp final : public Operator<Context> {
   YellowFinOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         curv_win_width_(
-            OperatorBase::GetSingleArgument<int>("curv_win_width", 20)),
-        nesterov_(OperatorBase::GetSingleArgument<int>("nesterov", false)),
+            this->template GetSingleArgument<int>("curv_win_width", 20)),
+        nesterov_(this->template GetSingleArgument<int>("nesterov", false)),
         zero_debias_(
-            OperatorBase::GetSingleArgument<bool>("zero_debias", true)),
-        epsilon_(OperatorBase::GetSingleArgument<T>("epsilon", 1e-6f)),
-        beta_(OperatorBase::GetSingleArgument<T>("beta", 0.999f)) {}
+            this->template GetSingleArgument<bool>("zero_debias", true)),
+        epsilon_(this->template GetSingleArgument<T>("epsilon", 1e-6f)),
+        beta_(this->template GetSingleArgument<T>("beta", 0.999f)) {}
 
  protected:
   // GetLrMu and MomentumSgdUpdate have different implementations for GPU and
@@ -126,21 +126,21 @@ CAFFE2_YF_READ_INPUT(SCALARS_MEMORY, scalars_memory)
 CAFFE2_YF_READ_INPUT(GRAD, grad)
 #undef CAFFE2_YF_READ_OUTPUT
 
-    CAFFE_ENFORCE(OperatorBase::InputIsType<TensorCPU>(ITER));
-    CAFFE_ENFORCE_EQ(lr_avg_tensor.size(), 1);
-    CAFFE_ENFORCE_EQ(mu_avg_tensor.size(), 1);
-    CAFFE_ENFORCE_EQ(param_tensor.ndim(), moment_tensor.ndim());
-    CAFFE_ENFORCE_EQ(param_tensor.ndim(), g_avg_tensor.ndim());
-    CAFFE_ENFORCE_EQ(param_tensor.ndim(), g2_avg_tensor.ndim());
-    CAFFE_ENFORCE_EQ(param_tensor.ndim(), grad_tensor.ndim());
-    for (int i = 0; i < param_tensor.ndim(); ++i) {
-      CAFFE_ENFORCE_EQ(param_tensor.dim32(i), moment_tensor.dim32(i));
-      CAFFE_ENFORCE_EQ(param_tensor.dim32(i), g_avg_tensor.dim32(i));
-      CAFFE_ENFORCE_EQ(param_tensor.dim32(i), g2_avg_tensor.dim32(i));
-      CAFFE_ENFORCE_EQ(param_tensor.dim32(i), grad_tensor.dim32(i));
+CAFFE_ENFORCE(OperatorBase::InputIsType<Tensor>(ITER, CPU));
+CAFFE_ENFORCE_EQ(lr_avg_tensor.size(), 1);
+CAFFE_ENFORCE_EQ(mu_avg_tensor.size(), 1);
+CAFFE_ENFORCE_EQ(param_tensor.ndim(), moment_tensor.ndim());
+CAFFE_ENFORCE_EQ(param_tensor.ndim(), g_avg_tensor.ndim());
+CAFFE_ENFORCE_EQ(param_tensor.ndim(), g2_avg_tensor.ndim());
+CAFFE_ENFORCE_EQ(param_tensor.ndim(), grad_tensor.ndim());
+for (int i = 0; i < param_tensor.ndim(); ++i) {
+  CAFFE_ENFORCE_EQ(param_tensor.dim32(i), moment_tensor.dim32(i));
+  CAFFE_ENFORCE_EQ(param_tensor.dim32(i), g_avg_tensor.dim32(i));
+  CAFFE_ENFORCE_EQ(param_tensor.dim32(i), g2_avg_tensor.dim32(i));
+  CAFFE_ENFORCE_EQ(param_tensor.dim32(i), grad_tensor.dim32(i));
     }
 
-    iter_ = OperatorBase::Input<TensorCPU>(ITER).template data<int64_t>()[0];
+    iter_ = OperatorBase::Input<Tensor>(ITER, CPU).template data<int64_t>()[0];
 
     D_ = param_tensor.size();
 
@@ -229,8 +229,8 @@ CAFFE2_YF_READ_INPUT(GRAD, grad)
   int D_;
 
 // Temporary memory on device, listed all variables used in calculations
-#define CAFFE2_YF_DEFINE_TENSOR(NAME) \
-  Tensor<Context> NAME##_tensor_;     \
+#define CAFFE2_YF_DEFINE_TENSOR(NAME)              \
+  Tensor NAME##_tensor_{Context::GetDeviceType()}; \
   T* NAME##_;
 
   CAFFE2_YF_DEFINE_TENSOR(aux_vector)
@@ -255,7 +255,7 @@ CAFFE2_YF_READ_INPUT(GRAD, grad)
   CAFFE2_YF_DEFINE_TENSOR(mu_deb)
   CAFFE2_YF_DEFINE_TENSOR(variance)
 
-  Tensor<Context> scratch_tensor_;
+  Tensor scratch_tensor_{Context::GetDeviceType()};
 
 #undef CAFFE2_YF_DEFINE_TENSOR
 

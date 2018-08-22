@@ -180,8 +180,6 @@ void THDStorage_(free)(THDStorage *storage) {
       THDState::s_current_worker
     );
 
-    if (storage->flag & TH_STORAGE_VIEW)
-      THDStorage_(free)(storage->view);
     delete storage;
   }
 }

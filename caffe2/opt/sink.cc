@@ -9,11 +9,8 @@ namespace opt {
 using namespace nom;
 
 void sinkMaxPool(nom::repr::NNModule* nn) {
-  for (auto node_pair : repr::nn::dataIterator<repr::MaxPool>(nn->dataFlow)) {
-    repr::NNGraph::NodeRef max_pool_node;
-    repr::MaxPool* max_pool;
-    std::tie(max_pool, max_pool_node) = node_pair;
-
+  for (auto max_pool_node :
+       repr::nn::nodeIterator<repr::MaxPool>(nn->dataFlow)) {
     if (repr::nn::getInputs(max_pool_node).size() != 1) {
       continue;
     }

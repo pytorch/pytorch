@@ -72,15 +72,15 @@ void test_overflow() {
 
 TEST_CASE( "scalar test", "[]" ) {
 
-  manual_seed(123, at::Backend::CPU);
-  manual_seed(123, at::Backend::CUDA);
+  manual_seed(123, at::kCPU);
+  manual_seed(123, at::kCUDA);
 
   Scalar what = 257;
   Scalar bar = 3.0;
   Half h = bar.toHalf();
   Scalar h2 = h;
   cout << "H2: " << h2.toDouble() << " " << what.toFloat() << " " << bar.toDouble() << " " << what.isIntegral() <<  "\n";
-  Generator & gen = at::globalContext().defaultGenerator(Backend::CPU);
+  Generator & gen = at::globalContext().defaultGenerator(at::kCPU);
   REQUIRE_NOTHROW(gen.seed());
   auto && C = at::globalContext();
   if(at::hasCUDA()) {
@@ -88,10 +88,6 @@ TEST_CASE( "scalar test", "[]" ) {
     auto t2 = zeros({4,4}, CUDAFloat);
     cout << &t2 << "\n";
     cout << "AFTER GET TYPE " << &CUDAFloat << "\n";
-    auto s = CUDAFloat.storage(4);
-    REQUIRE( s->get(3).toFloat() == 0.0 );
-    s->fill(7);
-    REQUIRE( s->get(3).toFloat() == 7.0 );
   }
   auto t = ones({4,4});
 

@@ -106,14 +106,12 @@ __device__ inline T reverse_bounds(T value) {
 }
 
 
-#ifdef CUDA_HALF_TENSOR
 __device__ inline half half_uniform_scale_and_shift(float x, double a, double b) {
   half width = ScalarConvert<double, half>::to(b - a);
   half start = ScalarConvert<double, half>::to(a);
   half scaled = THCNumerics<half>::mul(reverse_bounds(ScalarConvert<float, half>::to(x)), width);
   return THCNumerics<half>::add(scaled, start);
 }
-#endif
 
 #define GENERATE_KERNEL1(NAME, T, ARG1, CURAND_T, CURAND_FUNC, TRANSFORM)      \
 __global__ void NAME(curandStateMtgp32 *state, int size, T *result, ARG1)      \
@@ -182,12 +180,10 @@ GENERATE_KERNEL1(generate_exponential, double, double lambda, double, curand_uni
 GENERATE_KERNEL2(generate_cauchy, float, double median, double sigma, float, curand_uniform, (float)(median + sigma * tan(M_PI*(x-0.5))))
 GENERATE_KERNEL2(generate_cauchy, double, double median, double sigma, double, curand_uniform_double, (double)(median + sigma * tan(M_PI*(x-0.5))))
 
-#ifdef CUDA_HALF_TENSOR
 GENERATE_KERNEL2(generate_uniform, half, double a, double b, float, curand_uniform, (half_uniform_scale_and_shift(x, a, b)))
 GENERATE_KERNEL2(generate_normal, half, double mean, double stdv, float, curand_normal, (ScalarConvert<float, half>::to((x * stdv) + mean)))
 GENERATE_KERNEL1(generate_exponential, half, double lambda, float, curand_uniform, (ScalarConvert<float, half>::to((float)(-1. / lambda * log(x)))))
 GENERATE_KERNEL2(generate_cauchy, half, double median, double sigma, float, curand_uniform, (ScalarConvert<float, half>::to((float)(median + sigma * tan(M_PI*(x-0.5))))))
-#endif // CUDA_HALF_TENSOR
 
 #include "generic/THCTensorRandom.cu"
 #include "THCGenerateAllTypes.h"

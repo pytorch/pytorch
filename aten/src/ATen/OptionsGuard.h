@@ -4,7 +4,7 @@
 #include <ATen/Layout.h>
 #include <ATen/ScalarType.h>
 #include <ATen/TensorOptions.h>
-#include <ATen/optional.h>
+#include <ATen/core/optional.h>
 
 namespace at {
 
@@ -13,7 +13,7 @@ struct DefaultTensorOptions {
   /// Returns the current thread local default options.
   /// Defined in OptionsGuard.cpp because we can't use optional in headers, due
   /// to Windows and other compilers.
-  static TensorOptions& get();
+  AT_API static TensorOptions& get();
 
  private:
   /// This is an optional because of compiler bugs that mis-initialize static

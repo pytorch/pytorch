@@ -19,7 +19,7 @@ from torch.utils.trainer.plugins import *
 from torch.utils.trainer.plugins.plugin import Plugin
 from torch.autograd._functions.utils import prepare_onnx_paddings
 from torch.autograd._functions.utils import check_onnx_broadcast
-from common import IS_WINDOWS, IS_PPC
+from common import IS_WINDOWS, IS_PPC, skipIfRocm
 
 HAS_CUDA = torch.cuda.is_available()
 
@@ -412,7 +412,9 @@ class TestFFI(TestCase):
 
     @unittest.skipIf(not HAS_CFFI or not HAS_CUDA, "ffi tests require cffi package")
     @unittest.skipIf(IS_WINDOWS, "ffi doesn't currently work on Windows")
+    @skipIfRocm
     def test_gpu(self):
+        from torch.utils.cpp_extension import CUDA_HOME
         create_extension(
             name='gpulib',
             headers=[test_dir + '/ffi/src/cuda/cudalib.h'],
@@ -421,6 +423,7 @@ class TestFFI(TestCase):
             ],
             with_cuda=True,
             verbose=False,
+            include_dirs=[os.path.join(CUDA_HOME, 'include')],
         ).build()
         import gpulib
         tensor = torch.ones(2, 2).float()
@@ -615,6 +618,7 @@ class TestBottleneck(TestCase):
         self._check_cuda(out)
 
     @unittest.skipIf(not HAS_CUDA, 'No CUDA')
+    @skipIfRocm
     def test_bottleneck_cuda(self):
         rc, out, err = self._run_bottleneck('bottleneck/test_cuda.py')
         self.assertEqual(rc, 0, 'Run failed with\n{}'.format(err))
@@ -630,63 +634,9 @@ from torch.utils.collect_env import get_pretty_env_info
 
 
 class TestCollectEnv(TestCase):
-
-    def _build_env_to_expect(self, build_env):
-        return 'expect/TestCollectEnv.test_{}.expect'.format(
-            build_env.replace('.', '').replace('-', '_'))
-
-    def _preprocess_info_for_test(self, info_output):
-        # Remove the version hash
-        version_hash_regex = re.compile(r'(a\d+)\+\w+')
-        result = re.sub(version_hash_regex, r'\1', info_output).strip()
-
-        # Substitutions to lower the specificity of the versions listed
-        substitutions = [
-            (r'(?<=CUDA used to build PyTorch: )(\d+)\.(\d+)\.(\d+)', r'\1.\2.X'),
-            (r'(?<=CUDA runtime version: )(\d+)\.(\d+)\.(\d+)', r'\1.\2.X'),
-            (r'(?<=Ubuntu )(\d+)\.(\d+)\.(\d+) ', r'\1.\2.X '),
-            (r'(?<=CMake version: version )(\d+)\.(\d+)\.(\d+)', r'\1.\2.X'),
-            (r'(?<=Nvidia driver version: )(\d+)\.(\d+)', r'\1.X'),
-            (r'(?<=Mac OSX )(\d+)\.(\d+).(\d+)', r'\1.\2.X'),
-            (r'(?<=numpy \()(\d+)\.(\d+).(\d+)', r'\1.\2.X'),
-        ]
-
-        for regex, substitute in substitutions:
-            result = re.sub(regex, substitute, result)
-        return result
-
-    def assertExpectedOutput(self, info_output, build_env):
-        processed_info = self._preprocess_info_for_test(info_output)
-        expect_filename = self._build_env_to_expect(build_env)
-
-        ci_warning = ('This test will error out if the CI config was recently '
-                      'updated. If this is the case, please update the expect '
-                      'files to match the CI machines\' system config.')
-
-        with open(expect_filename, 'r') as f:
-            expected_info = f.read().strip()
-            self.assertEqual(ci_warning + '\n' + processed_info,
-                             ci_warning + '\n' + expected_info, ci_warning)
-
     def test_smoke(self):
         info_output = get_pretty_env_info()
         self.assertTrue(info_output.count('\n') >= 17)
-
-    @unittest.skipIf('BUILD_ENVIRONMENT' not in os.environ.keys(), 'CI-only test')
-    def test_expect(self):
-        info_output = get_pretty_env_info()
-
-        ci_build_envs = [
-            'pytorch-linux-trusty-py2.7',
-            'pytorch-linux-xenial-cuda9-cudnn7-py3',
-            'pytorch-macos-10.13-py3',
-            'pytorch-win-ws2016-cuda9-cudnn7-py3'
-        ]
-        build_env = os.environ['BUILD_ENVIRONMENT']
-        if build_env not in ci_build_envs:
-            return
-
-        self.assertExpectedOutput(info_output, build_env)
 
 
 class TestONNXUtils(TestCase):

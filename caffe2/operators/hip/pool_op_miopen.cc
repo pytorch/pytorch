@@ -191,7 +191,7 @@ class MIOPENPoolGradientOp : public ConvPoolOpBase<HIPContext> {
     auto& dY = Input(2);
     auto* dX = Output(0);
 
-    // cuDNN pooling support only 2 and 3 spatial dimensions.
+    // MIOpen pooling support only 2 and 3 spatial dimensions.
     CAFFE_ENFORCE(X.ndim() >= 4 && X.ndim() <= 5);
 
     dX->ResizeLike(X);

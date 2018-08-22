@@ -16,7 +16,7 @@ bool PackSegmentsOp<CPUContext>::DoRunWithType2() {
   const auto& data = Input(DATA);
   const auto& lengths = Input(LENGTHS);
   auto* output = Output(0);
-  Tensor<CPUContext>* presence_mask = nullptr;
+  Tensor* presence_mask = nullptr;
   if (return_presence_mask_) {
     presence_mask = Output(1);
   }
@@ -88,7 +88,7 @@ bool PackSegmentsOp<CPUContext>::DoRunWithType2() {
   const auto* d = static_cast<const char*>(data.raw_data());
   TIndex start = 0;
   for (TIndex i = 0; i < lengths.dim(0); ++i) {
-    context_.template CopyItems<CPUContext, CPUContext>(
+    context_.CopyItemsSameDevice(
         data.meta(),
         l[i] * block_size,
         d + block_bytesize * start,
@@ -119,7 +119,12 @@ bool UnpackSegmentsOp<CPUContext>::DoRunWithType2() {
 
   CAFFE_ENFORCE_GE(data.ndim(), 2, "DATA should be at least 2-D");
   CAFFE_ENFORCE_EQ(lengths.ndim(), 1, "LENGTH should be 1-D");
-
+  if (max_length_ != -1) {
+    CAFFE_ENFORCE_EQ(
+        max_length_,
+        data.dim(1),
+        "max_length should be equal to the second dimension of the packed segments");
+  }
   const T* l = lengths.template data<T>();
 
   TIndex total_l = std::accumulate(l, l + lengths.dim(0), (TIndex)0);
@@ -140,7 +145,7 @@ bool UnpackSegmentsOp<CPUContext>::DoRunWithType2() {
   const auto* d = static_cast<const char*>(data.raw_data());
   TIndex start = 0;
   for (TIndex i = 0; i < lengths.dim(0); ++i) {
-    context_.template CopyItems<CPUContext, CPUContext>(
+    context_.CopyItemsSameDevice(
         data.meta(),
         l[i] * block_size,
         d + block_bytesize * data.dim(1) * i,
@@ -175,6 +180,7 @@ OPERATOR_SCHEMA(PackSegments)
         "presence_mask",
         "2 dim boolean tensor"
         ", false where packed_tensor is padded, true otherwise.")
+    .Arg("max_length", "The pre-defined max_length for the packed segments")
     .Arg(
         "pad_minf",
         "Padding number in the packed segments. Use true to pad \
@@ -191,7 +197,8 @@ OPERATOR_SCHEMA(UnpackSegments)
         "lengths",
         "1-d int/long tensor contains the length in each of the input.")
     .Input(1, "tensor", "N+1 dim Tensor.")
-    .Output(0, "packed_tensor", "N dim Tensor");
+    .Output(0, "packed_tensor", "N dim Tensor")
+    .Arg("max_length", "The pre-defined max_length for the packed segments");
 
 class GetPackSegmentsGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;

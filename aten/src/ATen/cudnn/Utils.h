@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/ATen.h>
+#include "ATen/cuda/Exceptions.h"
 #include "THC/THC.h"
 #include "cudnn-wrapper.h"
 #include "Handles.h"

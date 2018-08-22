@@ -197,8 +197,8 @@ void GenerateProposalsOp<CPUContext>::ProposalsForOneImage(
 
   // 2. clip proposals to image (may result in proposals with zero area
   // that will be removed in the next step)
-  // TODO (viswanath): Should we clip rotated boxes as well?
-  proposals = utils::clip_boxes(proposals, im_info[0], im_info[1]);
+  proposals =
+      utils::clip_boxes(proposals, im_info[0], im_info[1], clip_angle_thresh_);
 
   // 3. remove predicted boxes with either height or width < min_size
   auto keep = utils::filter_boxes(proposals, min_size, im_info);
@@ -290,8 +290,8 @@ bool GenerateProposalsOp<CPUContext>::RunOnDevice() {
   }
   out_rois->Extend(roi_counts, 50, &context_);
   out_rois_probs->Extend(roi_counts, 50, &context_);
-  float* out_rois_ptr = out_rois->mutable_data<float>();
-  float* out_rois_probs_ptr = out_rois_probs->mutable_data<float>();
+  float* out_rois_ptr = out_rois->template mutable_data<float>();
+  float* out_rois_probs_ptr = out_rois_probs->template mutable_data<float>();
   for (int i = 0; i < num_images; i++) {
     const ERArrXXf& im_i_boxes = im_boxes[i];
     const EArrXf& im_i_probs = im_probs[i];
@@ -342,6 +342,29 @@ non-maximum suppression is applied to generate the final bounding boxes.
     .Arg("post_nms_topN", "(int) RPN_POST_NMS_TOP_N")
     .Arg("nms_thresh", "(float) RPN_NMS_THRESH")
     .Arg("min_size", "(float) RPN_MIN_SIZE")
+    .Arg(
+        "correct_transform_coords",
+        "bool (default false), Correct bounding box transform coordates,"
+        " see bbox_transform() in boxes.py "
+        "Set to true to match the detectron code, set to false for backward"
+        " compatibility")
+    .Arg(
+        "angle_bound_on",
+        "bool (default true). If set, for rotated boxes, angle is "
+        "normalized to be within [angle_bound_lo, angle_bound_hi].")
+    .Arg(
+        "angle_bound_lo",
+        "int (default -90 degrees). If set, for rotated boxes, angle is "
+        "normalized to be within [angle_bound_lo, angle_bound_hi].")
+    .Arg(
+        "angle_bound_hi",
+        "int (default 90 degrees). If set, for rotated boxes, angle is "
+        "normalized to be within [angle_bound_lo, angle_bound_hi].")
+    .Arg(
+        "clip_angle_thresh",
+        "float (default 1.0 degrees). For RRPN, clip almost horizontal boxes "
+        "within this threshold of tolerance for backward compatibility. "
+        "Set to negative value for no clipping.")
     .Input(0, "scores", "Scores from conv layer, size (img_count, A, H, W)")
     .Input(
         1,

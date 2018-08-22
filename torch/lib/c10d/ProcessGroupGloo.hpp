@@ -243,6 +243,39 @@ class ProcessGroupGloo : public ProcessGroup {
       std::vector<at::Tensor>& tensors,
       const AllreduceOptions& opts = AllreduceOptions()) override;
 
+  // Unsupported Ops
+  std::shared_ptr<ProcessGroup::Work> reduce(
+      std::vector<at::Tensor>& tensors,
+      const ReduceOptions& opts = ReduceOptions()) override;
+
+  std::shared_ptr<ProcessGroup::Work> allgather(
+      std::vector<std::vector<at::Tensor>>& outputTensors,
+      std::vector<at::Tensor>& inputTensors) override;
+
+  std::shared_ptr<ProcessGroup::Work> gather(
+      std::vector<std::vector<at::Tensor>>& outputTensors,
+      std::vector<at::Tensor>& inputTensors,
+      const GatherOptions& opts = GatherOptions()) override;
+
+  std::shared_ptr<ProcessGroup::Work> scatter(
+      std::vector<at::Tensor>& outputTensors,
+      std::vector<std::vector<at::Tensor>>& inputTensors,
+      const ScatterOptions& opts = ScatterOptions()) override;
+
+  std::shared_ptr<ProcessGroup::Work> send(
+      std::vector<at::Tensor>& tensors,
+      int dstRank) override;
+
+  std::shared_ptr<ProcessGroup::Work> recv(
+      std::vector<at::Tensor>& tensors,
+      int srcRank) override;
+
+  std::shared_ptr<ProcessGroup::Work> recvAnysource(
+      std::vector<at::Tensor>& tensors,
+      int* srcRank) override;
+
+  std::shared_ptr<ProcessGroup::Work> barrier() override;
+
  protected:
   using KeyType = AlgorithmKey;
   using EntryType = std::unique_ptr<AlgorithmEntry>;

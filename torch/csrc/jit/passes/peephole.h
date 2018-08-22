@@ -4,6 +4,6 @@
 
 namespace torch { namespace jit {
 
-void PeepholeOptimize(std::shared_ptr<Graph>& graph);
+TORCH_API void PeepholeOptimize(std::shared_ptr<Graph>& graph);
 
 }}

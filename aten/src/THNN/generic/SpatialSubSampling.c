@@ -24,10 +24,10 @@ static inline void THNN_(SpatialSubSampling_shapeCheck)(
     dimh++;
   }
 
-  inputWidth = input->size[dimw];
-  inputHeight = input->size[dimh];
+  inputWidth = input->size(dimw);
+  inputHeight = input->size(dimh);
 
-  THArgCheck(input->size[dimh-1] == nInputPlane, 2, "invalid number of input planes");
+  THArgCheck(input->size(dimh-1) == nInputPlane, 2, "invalid number of input planes");
   THArgCheck(inputWidth >= kW && inputHeight >= kH, 2, "input image smaller than kernel size");
 }
 
@@ -63,20 +63,20 @@ void THNN_(SpatialSubSampling_updateOutput)(
   THNN_(SpatialSubSampling_shapeCheck)(input, NULL, weight, kW, kH);
 
   if (input->dim() == 4) {
-    nbatch = input->size[0];
+    nbatch = input->size(0);
     dimw++;
     dimh++;
   }
 
-  inputWidth = input->size[dimw];
-  inputHeight = input->size[dimh];
+  inputWidth = input->size(dimw);
+  inputHeight = input->size(dimh);
   outputWidth = (inputWidth - kW) / dW + 1;
   outputHeight = (inputHeight - kH) / dH + 1;
 
   if (input->dim() == 3)
     THTensor_(resize3d)(output, nInputPlane, outputHeight, outputWidth);
   else
-    THTensor_(resize4d)(output, input->size[0], nInputPlane, outputHeight, outputWidth);
+    THTensor_(resize4d)(output, input->size(0), nInputPlane, outputHeight, outputWidth);
 
   input = THTensor_(newContiguous)(input);
   input_data = THTensor_(data)(input);
@@ -152,13 +152,13 @@ void THNN_(SpatialSubSampling_updateGradInput)(
   int64_t k;
 
   if (input->dim() == 4) {
-    nbatch = input->size[0];
+    nbatch = input->size(0);
     dimw++;
     dimh++;
   }
 
-  inputWidth = input->size[dimw];
-  inputHeight = input->size[dimh];
+  inputWidth = input->size(dimw);
+  inputHeight = input->size(dimh);
   outputWidth = (inputWidth - kW) / dW + 1;
   outputHeight = (inputHeight - kH) / dH + 1;
 
@@ -239,11 +239,11 @@ void THNN_(SpatialSubSampling_accGradParameters)(
   if (input->dim() == 4) {
     dimw++;
     dimh++;
-    nbatch = input->size[0];
+    nbatch = input->size(0);
   }
 
-  inputWidth = input->size[dimw];
-  inputHeight = input->size[dimh];
+  inputWidth = input->size(dimw);
+  inputHeight = input->size(dimh);
   outputWidth = (inputWidth - kW) / dW + 1;
   outputHeight = (inputHeight - kH) / dH + 1;
 

@@ -24,7 +24,7 @@ Tensor embedding(const Tensor & weight, const Tensor & indices,
     return weight.index_select(0, indices);
   }
 
-  auto size = std::vector<int64_t>(indices.sizes());
+  auto size = indices.sizes().vec();
   for (auto d : weight.sizes().slice(1)) {
     size.push_back(d);
   }
@@ -67,7 +67,7 @@ Tensor embedding_sparse_backward(
   int64_t num_features = grad_.size(-1);
   auto weight_size = std::array<int64_t, 2>{{ num_weights, num_features }};
   auto& dense_type = grad.type();
-  auto& sparse_type = dense_type.toBackend(grad.is_cuda() ? kSparseCUDA : kSparseCPU);
+  auto& sparse_type = dense_type.toBackend(grad.is_cuda() ? Backend::SparseCUDA : Backend::SparseCPU);
 
   // check if all our grad come from padding_idx
   if (grad.numel() == 0) {

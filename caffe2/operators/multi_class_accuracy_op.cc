@@ -20,8 +20,8 @@ bool MultiClassAccuracyOp<float, CPUContext>::RunOnDevice() {
 
   const auto* Xdata = X.data<float>();
   const auto* labeldata = label.data<int>();
-  auto* accuracies = Y0->mutable_data<float>();
-  auto* amounts = Y1->mutable_data<int>();
+  auto* accuracies = Y0->template mutable_data<float>();
+  auto* amounts = Y1->template mutable_data<int>();
   std::fill(accuracies, accuracies + D, 0);
   std::fill(amounts, amounts + D, 0);
 

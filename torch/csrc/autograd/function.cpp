@@ -17,7 +17,13 @@
 
 namespace torch { namespace autograd {
 
-thread_local uint64_t Function::next_sequence_nr_ = 0;
+/// Monotonically incrementing (thread local!) counter to supply sequence
+/// numbers.
+thread_local uint64_t Function_next_sequence_nr_ = 0;
+
+uint64_t& Function::get_next_sequence_nr() {
+  return Function_next_sequence_nr_;
+}
 
 auto Function::name() const -> std::string {
   return at::demangle(typeid(*this).name());

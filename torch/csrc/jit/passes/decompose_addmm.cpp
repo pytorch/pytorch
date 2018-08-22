@@ -1,5 +1,7 @@
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
+#include "torch/csrc/jit/passes/decompose_addmm.h"
 #include "torch/csrc/jit/symbolic_variable.h"
+
 
 namespace torch { namespace jit {
 
@@ -14,12 +16,10 @@ static void DecomposeAddmm(Block* block) {
     // shape analysis and differentiation passes for those two individual ops.
     // Later, we will fuse together those two ops into a single addmm.
     if (it->kind() == aten::addmm && it->inputs().size() == 3) {
-      auto alpha = at::Scalar(it->t(attr::alpha));
-      auto beta = at::Scalar(it->t(attr::beta));
-
-      if (alpha.to<double>() != 1.0 || beta.to<double>() != 1.0) {
-        continue;
-      }
+      auto alpha = it->get<at::Scalar>(attr::alpha);
+      auto beta = it->get<at::Scalar>(attr::beta);
+      if (!alpha || !beta) continue;
+      if (alpha->toDouble() != 1.0 || beta->toDouble() != 1.0) continue;
 
       WithInsertPoint guard(*it);
 
