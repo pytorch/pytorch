@@ -1729,6 +1729,13 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(SourceRange loc, Method & m, con
       Symbol::aten(field), NamedValue(loc, "self", value));
 }
 
+std::shared_ptr<SugaredValue> nativeResolver(const std::string& name, Method& m, const SourceRange& loc) {
+  if (name == "torch") {
+    return std::make_shared<BuiltinModule>(name);
+  }
+  return nullptr;
+}
+
 std::vector<Value*> inlineCallTo(Graph& g, Graph& callee, ArrayRef<Value*> inputs) {
   std::unordered_map<Value*, Value*> value_map;
   auto value_map_func = [&](Value* v) { return value_map.at(v); };
@@ -1897,6 +1904,12 @@ std::shared_ptr<Graph> compileFunction(Def def, const Resolver& resolver) {
   Module m;
   defineMethodsInModule(m, {def}, {resolver}, nullptr);
   return m.get_method(def.name().name()).graph();
+}
+
+std::shared_ptr<Graph> compileFunction(const std::string& source) {
+  Parser p(source);
+  auto def = Def(p.parseFunction(true));
+  return compileFunction(def, nativeResolver);
 }
 
 std::vector<std::shared_ptr<SugaredValue>> SimpleValue::asTuple(SourceRange loc, Method& m, at::optional<size_t> size_hint) {

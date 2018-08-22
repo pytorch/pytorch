@@ -122,8 +122,23 @@ struct TORCH_API BuiltinFunction : public SugaredValue {
       size_t n_binders) override;
 };
 
+struct TORCH_API BuiltinModule : public SugaredValue {
+  BuiltinModule(const std::string& name)
+    : name(name) {}
+  std::string name;
+
+  virtual std::string kind() const override {
+    return "builtin module";
+  }
+
+  virtual std::shared_ptr<SugaredValue> attr(SourceRange loc, Method & m, const std::string& field) override {
+    return std::make_shared<BuiltinFunction>(Symbol::aten(field), at::nullopt);
+  }
+};
+
 using Resolver = std::function<std::shared_ptr<
     SugaredValue>(const std::string& name, Method& m, const SourceRange& loc)>;
+
 TORCH_API void defineMethodsInModule(
   Module & m,
   const std::vector<Def>& definitions,
@@ -134,6 +149,7 @@ TORCH_API void defineMethodsInModule(
 // same as above but parse the definitions from source
 TORCH_API void defineMethodsInModule(Module & m, const std::string& source, const Resolver& resolver, std::shared_ptr<SugaredValue> self);
 TORCH_API std::shared_ptr<Graph> compileFunction(Def def, const Resolver& resolver);
+TORCH_API std::shared_ptr<Graph> compileFunction(const std::string& source);
 
 // pack outputs of a function following python rules. If there is a single value return
 // a SimpleValue, otherwise pack all the values into a Tuple.
