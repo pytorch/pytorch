@@ -138,3 +138,12 @@ if [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-cuda* ]]; then
     fi
   fi
 fi
+
+# Use pinned NumPy and SciPy in one build that we know uses conda.
+if [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-cuda9-cudnn7-py3 ]]; then
+  if ! which conda; then
+    echo "Expected ${BUILD_ENVIRONMENT} to use conda, but 'which conda' returns empty"
+    exit 1
+  fi
+  conda install -q -y numpy=1.13.1 scipy=0.19.1
+fi
