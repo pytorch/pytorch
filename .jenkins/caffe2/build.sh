@@ -184,7 +184,7 @@ else
     CMAKE_BINARY=cmake
 fi
 # sccache will fail for CUDA builds if all cores are used for compiling
-if [[ "${BUILD_ENVIRONMENT}" == *-cuda* ]] && [ -n "${SCCACHE}" ]; then
+if [[ "${BUILD_ENVIRONMENT}" == *-cuda* ]] && [ -n "${SCCACHE}" ] && [ -z "$MAX_JOBS" ]; then
   MAX_JOBS=`expr $(nproc) - 1`
 else
   MAX_JOBS=$(nproc)
