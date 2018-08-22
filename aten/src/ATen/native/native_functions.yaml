@@ -1046,6 +1046,12 @@
 - func: matmul_out(Tensor result, Tensor self, Tensor other) -> Tensor
   variants: function
 
+- func: matrix_rank(Tensor self, double tol, bool symmetric=false) -> Tensor
+  variants: function
+
+- func: matrix_rank(Tensor self, bool symmetric=false) -> Tensor
+  variants: function
+
 - func: max(Tensor self, int64_t dim, bool keepdim=false) -> (Tensor, Tensor)
 
 - func: max_out(Tensor max, Tensor max_values, Tensor self, int64_t dim, bool keepdim=false) -> (Tensor, Tensor)
