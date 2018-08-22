@@ -4,7 +4,7 @@
 #include <ATen/Tensor.h>
 #include <ATen/core/optional.h>
 #include <ATen/Context.h>
-#include <ATen/Backend.h>
+#include <ATen/core/Backend.h>
 
 #include <ATen/detail/VariableHooksInterface.h>
 
