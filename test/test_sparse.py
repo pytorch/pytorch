@@ -1131,6 +1131,7 @@ class TestCudaUncoalescedSparse(TestCudaSparse):
 
 class TestSparseOneOff(TestCase):
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    @skipIfRocm
     def test_cuda_from_cpu(self):
         self.assertExpectedRaises(
             RuntimeError,
