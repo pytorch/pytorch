@@ -60,8 +60,8 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   sudo apt-get install libc++abi1
 
   # Use the ld gold linker 
-  update-alternatives --install "/usr/bin/ld" "ld" "/usr/bin/ld.gold" 20
-  update-alternatives --config ld
+  sudo update-alternatives --install "/usr/bin/ld" "ld" "/usr/bin/ld.gold" 20
+  sudo update-alternatives --config ld
   
   # Transpile source & start building
   python tools/amd_build/build_pytorch_amd.py
