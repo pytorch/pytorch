@@ -149,12 +149,12 @@ class BatchDistillLRLoss(ModelLayer):
             scaled_true_xent = net.Scale(
                 true_xent,
                 net.NextScopedBlob('scaled_cross_entropy'),
-                scale=1.0 - self._teacher_weight,
+                scale=float(1.0 - self._teacher_weight),
             )
             scaled_teacher_xent = net.Scale(
                 teacher_xent,
                 net.NextScopedBlob('scaled_teacher_cross_entropy'),
-                scale=self._teacher_weight,
+                scale=float(self._teacher_weight),
             )
         if 'weight' in self.input_record.fields:
             weight_blob = self.input_record.weight()

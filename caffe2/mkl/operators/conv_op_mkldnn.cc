@@ -28,7 +28,7 @@ class ConvMKLDNNOp final : public ConvPoolOpBase<CPUContext> {
     auto& X = Input(INPUT);
     auto& filter = Input(FILTER);
     auto& bias = Input(BIAS);
-    TensorCPU* Y = Output(0);
+    Tensor* Y = Output(0);
     CAFFE_ENFORCE(4 == X.ndim());
     const int N = X.dim32(0), C = X.dim32(1), H = X.dim32(2), W = X.dim32(3);
     CAFFE_ENFORCE(4 == filter.ndim());

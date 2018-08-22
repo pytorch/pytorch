@@ -1,9 +1,11 @@
 #include "torch/csrc/jit/passes/loop_unrolling.h"
 
 #include "torch/csrc/jit/interned_strings.h"
+#include "torch/csrc/jit/assertions.h"
 #include "torch/csrc/jit/symbolic_variable.h"
-#include "torch/csrc/jit/tensor_conversions.h"
+
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
+#include "torch/csrc/jit/constants.h"
 
 namespace torch { namespace jit {
 
@@ -136,16 +138,18 @@ void repeatBody(Block *body, int64_t times) {
 void replaceLoopCounter(Node *loop) {
   Graph *graph = loop->owningGraph();
   Block *body = loop->blocks().at(0);
-  Node *init_counter_node = graph->createConstant(at::CPU(at::kLong).scalarTensor(0))
-                                 ->insertBefore(loop);
-  loop->insertInput(2, init_counter_node->output());
+  WithInsertPoint guard(loop);
+  Value* init_counter = graph->insertConstant(0);
+
+  loop->insertInput(2, init_counter);
   loop->insertOutput(0);
 
-  Value * internal_counter = body->insertInput(1);
+  Value * internal_counter = body->insertInput(1)->setType(init_counter->type());
   body->inputs()[0]->replaceAllUsesWith(internal_counter);
 
   WithInsertPoint insertPointGuard{ body->return_node() };
-  body->insertOutput(1, SymbolicVariable(internal_counter) + at::Scalar(1));
+  Value* result = graph->insert(aten::add, {internal_counter, 1});
+  body->insertOutput(1, result);
 }
 
 void unroll(Node *loop) {
@@ -183,10 +187,10 @@ void unroll(Node *loop) {
   repeatBody(body, kUnrollFactor);
 
   // Change the iteration counts of both loops
-  SymbolicVariable iter_count = loop->inputs().at(0);
-  SymbolicVariable unrolled_iter_count = iter_count / kUnrollFactor;
+  Value* iter_count = loop->inputs().at(0);
+  Value* unrolled_iter_count = graph->insert(aten::div, {iter_count, kUnrollFactor});
   loop->replaceInput(0, unrolled_iter_count);
-  loop_epilogue->replaceInput(0, iter_count - (unrolled_iter_count * kUnrollFactor));
+  loop_epilogue->replaceInput(0, graph->insert(aten::sub, {iter_count, graph->insert(aten::mul,{unrolled_iter_count , kUnrollFactor})}));
 }
 
 void UnrollLoops(Block *block) {

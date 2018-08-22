@@ -15,7 +15,7 @@ namespace gloo {
 
 template <class Context>
 class AllreduceOp final : public Operator<Context> {
-  enum Mode { RING_FULL, RING_CHUNKED, HALVING_DOUBLING };
+  enum Mode { RING_FULL, RING_CHUNKED, HALVING_DOUBLING, BCUBE };
 
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
@@ -92,11 +92,15 @@ class AllreduceOp final : public Operator<Context> {
       case HALVING_DOUBLING:
         initializeHalvingDoubling();
         return;
+      case BCUBE:
+        initializeBcube();
+        return;
     }
 
     CAFFE_ENFORCE(false, "Unreachable code");
   }
 
+  void initializeBcube();
   void initializeHalvingDoubling();
   void initializeRingFull();
   void initializeRingChunked();

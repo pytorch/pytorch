@@ -93,6 +93,9 @@ public:
   Vec256<float> erf() const {
     return Vec256<float>(Sleef_erff8_u10(values));
   }
+  Vec256<float> erfc() const {
+    return Vec256<float>(Sleef_erfcf8_u15(values));
+  }
   Vec256<float> exp() const {
     return Vec256<float>(Sleef_expf8_u10(values));
   }
@@ -179,6 +182,13 @@ template <>
 Vec256<float> inline max(const Vec256<float>& a, const Vec256<float>& b) {
   return _mm256_max_ps(a, b);
 }
+
+#ifdef __AVX2__
+template <>
+Vec256<float> fmadd(const Vec256<float>& a, const Vec256<float>& b, const Vec256<float>& c) {
+  return _mm256_fmadd_ps(a, b, c);
+}
+#endif
 
 #endif
 

@@ -19,7 +19,7 @@ void THNN_(Tanh_updateGradInput)(
   THNN_CHECK_SHAPE(output, gradOutput);
   THTensor_(resizeAs)(gradInput, output);
 
-  if (output->_dim() == 1 ||
+  if (THTensor_nDimensionLegacyAll(output) == 1 ||
       !THTensor_(isContiguous)(output) ||
       !THTensor_(isContiguous)(gradOutput) ||
       !THTensor_(isContiguous)(gradInput))

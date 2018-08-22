@@ -166,21 +166,26 @@ static_assert(CAFFE2_LOG_THRESHOLD <= FATAL,
 // These are adapted from glog to support a limited set of logging capability
 // for STL objects.
 
-namespace caffe2 {
+namespace std {
 // Forward declare these two, and define them after all the container streams
 // operators so that we can recurse from pair -> container -> container -> pair
 // properly.
 template<class First, class Second>
 std::ostream& operator<<(
     std::ostream& out, const std::pair<First, Second>& p);
+} // namespace std
+
+namespace caffe2 {
 template <class Iter>
 void PrintSequence(std::ostream& ss, Iter begin, Iter end);
+} // namespace caffe2
 
+namespace std {
 #define INSTANTIATE_FOR_CONTAINER(container) \
 template <class... Types> \
 std::ostream& operator<<( \
     std::ostream& out, const container<Types...>& seq) { \
-  PrintSequence(out, seq.begin(), seq.end()); \
+  caffe2::PrintSequence(out, seq.begin(), seq.end()); \
   return out; \
 }
 
@@ -195,7 +200,9 @@ inline std::ostream& operator<<(
   out << '(' << p.first << ", " << p.second << ')';
   return out;
 }
+} // namespace std
 
+namespace caffe2 {
 template <class Iter>
 inline void PrintSequence(std::ostream& out, Iter begin, Iter end) {
   // Output at most 100 elements -- appropriate if used for logging.

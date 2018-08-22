@@ -17,6 +17,9 @@
 namespace at {
 namespace native {
 
+DEFINE_DISPATCH(sum_kernel);
+DEFINE_DISPATCH(prod_kernel);
+
 static inline Tensor integer_upcast(const Tensor& self, optional<ScalarType> dtype) {
   ScalarType scalarType = self.type().scalarType();
   ScalarType upcast_scalarType = dtype.value_or(at::isIntegralType(scalarType) ? ScalarType::Long : scalarType);
@@ -127,7 +130,7 @@ Tensor sum(const Tensor &self) {
 Tensor _sum_cpu(const Tensor& self) {
   if (self.is_contiguous()) {
     Tensor result = at::empty({}, self.type());
-    sum_kernel(result, self, at::nullopt);
+    sum_kernel(kCPU, result, self, at::nullopt);
     return result;
   }
   return self._sumall();
@@ -148,7 +151,7 @@ Tensor prod(const Tensor &self) {
 Tensor _prod_cpu(const Tensor &self) {
   if (self.is_contiguous()) {
     Tensor result = at::empty({}, self.type());
-    prod_kernel(result, self, at::nullopt);
+    prod_kernel(kCPU, result, self, at::nullopt);
     return result;
   }
   return self._prodall();
@@ -222,7 +225,7 @@ Tensor &_sum_out_cpu(Tensor &result, const Tensor &self, int64_t dim_,
     return result;
   if (self.is_contiguous() && result.is_contiguous()) {
     _dimreduce_setup(result, self, dim);
-    sum_kernel(result, self, dim);
+    sum_kernel(kCPU, result, self, dim);
     if (!keepdim) result.squeeze_(dim);
     return result;
   }
@@ -260,7 +263,7 @@ Tensor &_prod_out_cpu(Tensor &result, const Tensor &self, int64_t dim_,
     return result;
   if (self.is_contiguous() && result.is_contiguous()) {
     _dimreduce_setup(result, self, dim);
-    prod_kernel(result, self, dim);
+    prod_kernel(kCPU, result, self, dim);
     if (!keepdim) result.squeeze_(dim);
     return result;
   }
@@ -345,17 +348,17 @@ Tensor _prod(const Tensor &self, int64_t dim_, bool keepdim) {
 
 Tensor& logsumexp_out(Tensor& result, const Tensor &self, int64_t dim_, bool keepdim) {
   int64_t dim = maybe_wrap_dim(dim_, self.dim());
-  // can't take max of empty tensor.
+  // can't take max of empty tensor
   if (self.numel() != 0) {
     auto maxes = at::max_values(self, dim, true);
-    result = at::where((maxes == INFINITY).__or__(maxes == -INFINITY),
-                       maxes,
-                       maxes + at::log(at::sum(at::exp(self - maxes), dim, true)));
+    auto maxes_squeezed = (keepdim ? maxes : maxes.squeeze(dim));
+    maxes_squeezed.masked_fill_(maxes_squeezed.abs() == INFINITY, 0);
+    at::sum_out(result, at::exp(self - maxes), dim, keepdim);
+    result.log_().add_(maxes_squeezed);
   } else {
-    result = at::log(at::sum(at::exp(self), dim, true));
+    at::sum_out(result, at::exp(self), dim, keepdim);
+    result.log_();
   }
-  if (! keepdim)
-    result.squeeze_(dim);
   return result;
 }
 
@@ -632,6 +635,14 @@ Tensor &any_out(Tensor &result, const Tensor &self, int64_t dim, bool keepdim) {
   }
 }
 
+Tensor var(const Tensor& self, bool unbiased) {
+  AT_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
+           "var only supports CPU AND CUDA backend, got: ", at::toString(self.type().backend()));
+  AT_CHECK(at::isFloatingType(self.type().scalarType()), "var only supports floating-point dtypes");
+  auto trivial_return = _allreduce_return_trivial(self, std::numeric_limits<double>::quiet_NaN());
+  return trivial_return.has_value() ? trivial_return.value() : at::_th_var(self, unbiased);
+}
+
 Tensor var(const Tensor& self, int64_t dim, bool unbiased, bool keepdim) {
   Tensor result = self.type().tensor();
   return at::native::var_out(result, self, dim, unbiased, keepdim);
@@ -647,6 +658,14 @@ Tensor &var_out(Tensor &result, const Tensor &self, int64_t dim, bool unbiased, 
   } else {
     return at::_th_var_out(result, self, dim, unbiased, keepdim);
   }
+}
+
+Tensor std(const Tensor& self, bool unbiased) {
+  AT_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
+           "std only supports CPU AND CUDA backend, got: ", at::toString(self.type().backend()));
+  AT_CHECK(at::isFloatingType(self.type().scalarType()), "std only supports floating-point dtypes");
+  auto trivial_return = _allreduce_return_trivial(self, std::numeric_limits<double>::quiet_NaN());
+  return trivial_return.has_value() ? trivial_return.value() : at::_th_std(self, unbiased);
 }
 
 Tensor std(const Tensor& self, int64_t dim, bool unbiased, bool keepdim) {

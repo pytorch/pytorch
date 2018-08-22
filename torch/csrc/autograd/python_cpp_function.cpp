@@ -27,6 +27,11 @@ PyObject* THPCppFunction_call(PyObject* self, PyObject* args, PyObject *kwargs)
   }
 
   int num_inputs = PyTuple_GET_SIZE(args);
+  int num_inputs_required = ((THPCppFunction*)self)->cdata->num_inputs();
+  if (num_inputs != num_inputs_required) {
+    return PyErr_Format(PyExc_TypeError, "expected %d arguments, got %d instead",
+                        num_inputs_required, num_inputs);
+  }
   variable_list vars(num_inputs);
   for (int i = 0; i != num_inputs; ++i) {
     PyObject* arg = PyTuple_GET_ITEM(args, i);
@@ -43,7 +48,7 @@ PyObject* THPCppFunction_call(PyObject* self, PyObject* args, PyObject *kwargs)
 
   HANDLE_TH_ERRORS {
     AutoNoGIL nogil;
-    output = (*((THPCppFunction*)self)->cdata)(vars);
+    output = (*((THPCppFunction*)self)->cdata)(std::move(vars));
   }
   END_HANDLE_TH_ERRORS
 

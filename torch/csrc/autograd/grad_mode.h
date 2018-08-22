@@ -1,21 +1,17 @@
 #pragma once
 
+#include "torch/csrc/WindowsTorchApiMacro.h"
+
 namespace torch { namespace autograd {
 
-struct GradMode {
-  static bool is_enabled() {
-    return _enabled;
-  }
-  static void set_enabled(bool enabled) {
-    _enabled = enabled;
-  }
-private:
-  static thread_local bool _enabled;
+struct TORCH_API GradMode {
+  static bool is_enabled();
+  static void set_enabled(bool enabled);
 };
 
 // A RAII, thread local (!) guard that enables or disables grad mode upon
 // construction, and sets it back to the original value upon destruction.
-struct AutoGradMode {
+struct TORCH_API AutoGradMode {
   AutoGradMode(bool enabled) : prev_mode(GradMode::is_enabled()) {
     GradMode::set_enabled(enabled);
   }

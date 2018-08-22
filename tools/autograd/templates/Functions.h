@@ -5,6 +5,7 @@
 #include <ATen/ATen.h>
 #include <ATen/TensorGeometry.h>
 
+#include "torch/csrc/THP_export.h"
 #include "torch/csrc/autograd/function.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/autograd/saved_variable.h"
@@ -28,7 +29,7 @@ struct TypeAndSize {
   TypeAndSize() : type(nullptr) {}
   /* implicit */
   TypeAndSize(const Tensor & t)
-    : sizes(t.sizes())
+    : sizes(t.sizes().vec())
     , type(&t.type()) {}
 
   Tensor zeros() { return at::zeros(sizes, *type); }

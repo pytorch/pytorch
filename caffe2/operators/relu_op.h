@@ -1,34 +1,28 @@
 #ifndef CAFFE2_OPERATORS_RELU_OP_H_
 #define CAFFE2_OPERATORS_RELU_OP_H_
 
-#include "caffe2/core/common_omp.h"
-#include "caffe2/core/context.h"
-#include "caffe2/core/logging.h"
-#include "caffe2/core/operator.h"
+#include <vector>
+
+#include "caffe2/operators/elementwise_ops.h"
 
 namespace caffe2 {
 
-template <typename T, class Context>
-class ReluOp final : public Operator<Context> {
- public:
-  USE_SIMPLE_CTOR_DTOR(ReluOp);
-  USE_OPERATOR_CONTEXT_FUNCTIONS;
-
-  bool RunOnDevice() override;
-
- protected:
+template <class Context>
+struct ReluFunctor {
+  template <typename T>
+  bool operator()(const int N, const T* X, T* Y, Context* context) const;
 };
 
-template <typename T, class Context>
-class ReluGradientOp final : public Operator<Context> {
- public:
-  USE_SIMPLE_CTOR_DTOR(ReluGradientOp);
-  USE_OPERATOR_CONTEXT_FUNCTIONS;
-
-  bool RunOnDevice() override;
-
- protected:
-  // Input: Y, dY; Output: dX
+template <class Context>
+struct ReluGradientFunctor {
+  template <typename T>
+  bool Forward(
+      const std::vector<int>& Y_dims,
+      const std::vector<int>& dY_dims,
+      const T* Y,
+      const T* dY,
+      T* dX,
+      Context* context) const;
 };
 
 } // namespace caffe2

@@ -2,6 +2,11 @@
 
 #include <gtest/gtest.h>
 #include "caffe2/core/flags.h"
+#include "caffe2/core/macros.h"
+
+#ifdef CAFFE2_USE_OPENCV
+#include <opencv2/opencv.hpp>
+#endif // CAFFE2_USE_OPENCV
 
 namespace caffe2 {
 
@@ -13,10 +18,10 @@ static void AddConstInput(
   DeviceOption option;
   CPUContext context(option);
   Blob* blob = ws->CreateBlob(name);
-  auto* tensor = blob->GetMutable<TensorCPU>();
+  auto* tensor = blob->GetMutableTensor(CPU);
   tensor->Resize(shape);
   math::Set<float, CPUContext>(
-      tensor->size(), value, tensor->mutable_data<float>(), &context);
+      tensor->size(), value, tensor->template mutable_data<float>(), &context);
   return;
 }
 
@@ -29,10 +34,10 @@ static void AddLinSpacedInput(
   DeviceOption option;
   CPUContext context(option);
   Blob* blob = ws->CreateBlob(name);
-  auto* tensor = blob->GetMutable<TensorCPU>();
+  auto* tensor = blob->GetMutableTensor(CPU);
   tensor->Resize(shape);
   EigenVectorMap<float> tensor_vec(
-      tensor->mutable_data<float>(), tensor->size());
+      tensor->template mutable_data<float>(), tensor->size());
   tensor_vec.setLinSpaced(min_val, max_val);
 
   return;
@@ -46,10 +51,10 @@ static void AddInput(
   DeviceOption option;
   CPUContext context(option);
   Blob* blob = ws->CreateBlob(name);
-  auto* tensor = blob->GetMutable<TensorCPU>();
+  auto* tensor = blob->GetMutableTensor(CPU);
   tensor->Resize(shape);
   EigenVectorMap<float> tensor_vec(
-      tensor->mutable_data<float>(), tensor->size());
+      tensor->template mutable_data<float>(), tensor->size());
   tensor_vec.array() = utils::AsEArrXt(values);
 
   return;
@@ -74,7 +79,7 @@ TEST(GenerateProposalsTest, TestComputeAllAnchors) {
       79, -68, 8, 115, 103, -160, -40, 207, 151, -6, 32, 85, 79, -52, 8, 131,
       103, -144, -40, 223, 151;
 
-  TensorCPU anchors_tensor(vector<TIndex>{anchors.rows(), anchors.cols()});
+  Tensor anchors_tensor(vector<TIndex>{anchors.rows(), anchors.cols()}, CPU);
   Eigen::Map<ERMatXf>(
       anchors_tensor.mutable_data<float>(), anchors.rows(), anchors.cols()) =
       anchors;
@@ -138,7 +143,7 @@ TEST(GenerateProposalsTest, TestComputeAllAnchorsRotated) {
     all_anchors_gt(i, 4) = angles[i % angles.size()];
   }
 
-  TensorCPU anchors_tensor(vector<TIndex>{anchors.rows(), anchors.cols()});
+  Tensor anchors_tensor(vector<TIndex>{anchors.rows(), anchors.cols()}, CPU);
   Eigen::Map<ERMatXf>(
       anchors_tensor.mutable_data<float>(), anchors.rows(), anchors.cols()) =
       anchors;
@@ -320,6 +325,7 @@ TEST(GenerateProposalsTest, TestRealDownSampledRotatedAngle0) {
   // Similar to TestRealDownSampled but for rotated boxes with angle info.
   float angle = 0;
   float delta_angle = 0;
+  float clip_angle_thresh = 1.0;
 
   Workspace ws;
   OperatorDef def;
@@ -407,33 +413,37 @@ TEST(GenerateProposalsTest, TestRealDownSampledRotatedAngle0) {
 
   vector<float> im_info{60, 80, 0.166667f};
   // vector<float> anchors{-38, -16, 53, 31, -120, -120, 135, 135};
-  vector<float> anchors{8, 8, 92, 48, angle, 8, 8, 256, 256, angle};
+  // Anchors in [x_ctr, y_ctr, w, h, angle] format
+  vector<float> anchors{7.5, 7.5, 92, 48, angle, 7.5, 7.5, 256, 256, angle};
 
-  // Although angle == 0, the results aren't exactly the same as
-  // TestRealDownSampled because because clip_boxes() is not performed
-  // for RRPN style boxes.
-  ERMatXf rois_gt(13, 6);
-  rois_gt << 0, 6.55346, 25.3227, 253.447, 291.446, 0, 0, 55.3932, 33.3369,
-      253.731, 289.158, 0, 0, 6.48163, 24.3478, 92.3015, 38.6944, 0, 0, 70.3089,
-      26.7894, 92.3453, 38.5539, 0, 0, 22.3067, 26.7714, 92.3424, 38.5243, 0, 0,
-      054.084, 26.8413, 92.3938, 38.798, 0, 0, 5.33962, 42.2077, 92.5497,
-      38.2259, 0, 0, 6.36709, 58.24, 92.16, 37.4372, 0, 0, 69.65, 48.6713,
-      92.1521, 37.3668, 0, 0, 20.4147, 44.4783, 91.7111, 34.0295, 0, 0, 033.079,
-      41.5149, 92.3244, 36.4278, 0, 0, 41.8235, 037.291, 90.2815, 034.872, 0, 0,
-      13.8486, 48.662, 88.7818, 28.875, 0;
-  vector<float> rois_probs_gt{0.0266914,
-                              0.005621,
-                              0.00544219,
-                              0.00120544,
-                              0.00119208,
-                              0.00117182,
-                              0.000617993,
-                              0.000472735,
-                              6.09605e-05,
-                              1.05262e-05,
-                              8.91026e-06,
-                              9.29537e-09,
-                              1.13482e-10};
+  // Results should exactly be the same as TestRealDownSampled since
+  // angle = 0 for all boxes and clip_angle_thresh > 0 (which means
+  // all horizontal boxes will be clipped to maintain backward compatibility).
+  ERMatXf rois_gt_xyxy(9, 5);
+  rois_gt_xyxy << 0, 0, 0, 79, 59, 0, 0, 5.0005703f, 51.6324f, 42.6950f, 0,
+      24.13628387f, 7.51243401f, 79, 45.0663f, 0, 0, 7.50924301f, 67.4779f,
+      45.0336, 0, 0, 23.09477997f, 50.61448669f, 59, 0, 0, 39.52141571f,
+      51.44710541f, 59, 0, 23.57396317f, 29.98791885f, 79, 59, 0, 0,
+      41.90219116f, 79, 59, 0, 0, 23.30098343f, 78.2413f, 58.7287f;
+  ERMatXf rois_gt(9, 6);
+  // Batch ID
+  rois_gt.block(0, 0, rois_gt.rows(), 1) =
+      ERMatXf::Constant(rois_gt.rows(), 1, 0.0);
+  // rois_gt in [x_ctr, y_ctr, w, h] format
+  rois_gt.block(0, 1, rois_gt.rows(), 4) =
+      boxes_xyxy_to_xywh(rois_gt_xyxy.block(0, 1, rois_gt.rows(), 4));
+  // Angle
+  rois_gt.block(0, 5, rois_gt.rows(), 1) =
+      ERMatXf::Constant(rois_gt.rows(), 1, angle);
+  vector<float> rois_probs_gt{2.66913995e-02f,
+                              5.44218998e-03f,
+                              1.20544003e-03f,
+                              1.19207997e-03f,
+                              6.17993006e-04f,
+                              4.72735002e-04f,
+                              6.09605013e-05f,
+                              1.50015003e-05f,
+                              8.91025957e-06f};
 
   AddInput(vector<TIndex>{img_count, A, H, W}, scores, "scores", &ws);
   AddInput(
@@ -450,6 +460,7 @@ TEST(GenerateProposalsTest, TestRealDownSampledRotatedAngle0) {
   def.add_arg()->CopyFrom(MakeArgument("nms_thresh", 0.7f));
   def.add_arg()->CopyFrom(MakeArgument("min_size", 16.0f));
   def.add_arg()->CopyFrom(MakeArgument("correct_transform_coords", true));
+  def.add_arg()->CopyFrom(MakeArgument("clip_angle_thresh", clip_angle_thresh));
 
   unique_ptr<OperatorBase> op(CreateOperator(def, &ws));
   EXPECT_NE(nullptr, op.get());
@@ -484,6 +495,7 @@ TEST(GenerateProposalsTest, TestRealDownSampledRotated) {
   float angle = 45.0;
   float delta_angle = 0.174533; // 0.174533 radians -> 10 degrees
   float expected_angle = 55.0;
+  float clip_angle_thresh = 1.0;
 
   Workspace ws;
   OperatorDef def;
@@ -559,13 +571,15 @@ TEST(GenerateProposalsTest, TestRealDownSampledRotated) {
   vector<float> bbx_with_angle(num_boxes * 5);
   // bbx (deltas) is in shape (A * 4, H, W). Insert angle delta
   // at each spatial location for each anchor.
-  int i = 0, j = 0;
-  for (int a = 0; a < A; ++a) {
-    for (int k = 0; k < 4 * H * W; ++k) {
-      bbx_with_angle[i++] = bbx[j++];
-    }
-    for (int k = 0; k < H * W; ++k) {
-      bbx_with_angle[i++] = delta_angle;
+  {
+    int i = 0, j = 0;
+    for (int a = 0; a < A; ++a) {
+      for (int k = 0; k < 4 * H * W; ++k) {
+        bbx_with_angle[i++] = bbx[j++];
+      }
+      for (int k = 0; k < H * W; ++k) {
+        bbx_with_angle[i++] = delta_angle;
+      }
     }
   }
 
@@ -588,6 +602,7 @@ TEST(GenerateProposalsTest, TestRealDownSampledRotated) {
   def.add_arg()->CopyFrom(MakeArgument("nms_thresh", 0.7f));
   def.add_arg()->CopyFrom(MakeArgument("min_size", 16.0f));
   def.add_arg()->CopyFrom(MakeArgument("correct_transform_coords", true));
+  def.add_arg()->CopyFrom(MakeArgument("clip_angle_thresh", clip_angle_thresh));
 
   unique_ptr<OperatorBase> op(CreateOperator(def, &ws));
   EXPECT_NE(nullptr, op.get());

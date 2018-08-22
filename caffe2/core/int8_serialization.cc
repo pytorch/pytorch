@@ -56,7 +56,7 @@ class Int8TensorCPUSerializer : public BlobSerializerBase {
   CPUContext context_;
 };
 
-class Int8TensorCPUDeserializer : public TensorDeserializer<CPUContext> {
+class Int8TensorCPUDeserializer : public TensorDeserializer {
  public:
   void Deserialize(const BlobProto& blob_proto, Blob* blob) override {
     const QTensorProto& proto = blob_proto.qtensor();

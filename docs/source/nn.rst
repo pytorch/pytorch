@@ -34,10 +34,22 @@ Containers
 .. autoclass:: ModuleList
     :members:
 
+:hidden:`ModuleDict`
+~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: ModuleDict
+    :members:
+
 :hidden:`ParameterList`
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: ParameterList
+    :members:
+
+:hidden:`ParameterDict`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: ParameterDict
     :members:
 
 Convolution layers
@@ -326,6 +338,12 @@ Non-linear activations (weighted sum, nonlinearity)
 .. autoclass:: SELU
     :members:
 
+:hidden:`CELU`
+~~~~~~~~~~~~~~
+
+.. autoclass:: CELU
+    :members:
+
 :hidden:`Sigmoid`
 ~~~~~~~~~~~~~~~~~
 
@@ -590,6 +608,12 @@ Loss functions
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: CrossEntropyLoss
+    :members:
+
+:hidden:`CTCLoss`
+~~~~~~~~~~~~~~~~~
+
+.. autoclass:: CTCLoss
     :members:
 
 :hidden:`NLLLoss`
@@ -972,6 +996,11 @@ Non-linear activation functions
 
 .. autofunction:: selu
 
+:hidden:`celu`
+~~~~~~~~~~~~~~
+
+.. autofunction:: celu
+
 :hidden:`leaky_relu`
 ~~~~~~~~~~~~~~~~~~~~
 
@@ -1090,6 +1119,11 @@ Linear functions
 
 .. autofunction:: linear
 
+:hidden:`bilinear`
+~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: bilinear
+
 Dropout functions
 -----------------
 
@@ -1148,6 +1182,11 @@ Loss functions
 
 .. autofunction:: binary_cross_entropy
 
+:hidden:`binary_cross_entropy_with_logits`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: binary_cross_entropy_with_logits
+
 :hidden:`poisson_nll_loss`
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -1162,6 +1201,11 @@ Loss functions
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: cross_entropy
+
+:hidden:`ctc_loss`
+~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: ctc_loss
 
 :hidden:`hinge_embedding_loss`
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1207,11 +1251,6 @@ Loss functions
 ~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: nll_loss
-
-:hidden:`binary_cross_entropy_with_logits`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: binary_cross_entropy_with_logits
 
 :hidden:`smooth_l1_loss`
 ~~~~~~~~~~~~~~~~~~~~~~~~

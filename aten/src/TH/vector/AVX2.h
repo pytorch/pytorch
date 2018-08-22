@@ -1,7 +1,7 @@
 #ifndef TH_AVX2_H
 #define TH_AVX2_H
 
-#include "THGeneral.h"
+#include <TH/THGeneral.h>
 
 #include <stdint.h>
 #include <stddef.h>

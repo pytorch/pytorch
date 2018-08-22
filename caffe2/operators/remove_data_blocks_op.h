@@ -65,7 +65,7 @@ class RemoveDataBlocksOp final : public Operator<Context> {
       int64_t interval_end =
           (i == ind_vec_size - 1) ? outer_size : ind_vec[i + 1];
       auto num_items = interval_end - interval_start;
-      context_.template CopyItems<Context, Context>(
+      context_.CopyItemsSameDevice(
           data.meta(),
           num_items * block_size,
           data_ptr + block_size_bytes * interval_start,

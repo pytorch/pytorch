@@ -27,12 +27,12 @@ static inline void THNN_(TemporalMaxPooling_shapeCheck)(
 
   THCUNN_argCheck(state, !input->is_empty() && (input->dim() == 2 || input->dim() == 3), 2, input,
                   "non-empty 2D or 3D (batch mode) tensor expected for input, but got: %s");
-  THArgCheck(input->size[dimT] >= kW, 2,
+  THArgCheck(input->size(dimT) >= kW, 2,
              "input sequence smaller than kernel size. Got: %d, Expected: %d",
-             input->size[dimT], kW);
+             input->size(dimT), kW);
 
-  input_w = input->size[dimT];
-  input_n = input->size[dimF];
+  input_w = input->size(dimT);
+  input_n = input->size(dimF);
   output_w = (input_w - kW) / dW + 1;
 
   if (gradOutput != NULL) {
@@ -71,23 +71,23 @@ void THNN_(TemporalMaxPooling_updateOutput)(
   {
     dimT = 1;
     dimF = 2;
-    batch = input->size[0];
+    batch = input->size(0);
   }
   input = THCTensor_(newContiguous)(state, input);
 
-  input_w = input->size[dimT];
-  input_n = input->size[dimF];
+  input_w = input->size(dimT);
+  input_n = input->size(dimF);
   output_w = (input_w - kW) / dW + 1;
 
   if (input->dim() == 2)
   {
-    THCTensor_(resize2d)(state, output, output_w, input->size[dimF]);
-    THCIndexTensor_(resize2d)(state, indices, output_w, input->size[dimF]);
+    THCTensor_(resize2d)(state, output, output_w, input->size(dimF));
+    THCIndexTensor_(resize2d)(state, indices, output_w, input->size(dimF));
   }
   else
   {
-    THCTensor_(resize3d)(state, output, batch, output_w, input->size[dimF]);
-    THCIndexTensor_(resize3d)(state, indices, batch, output_w, input->size[dimF]);
+    THCTensor_(resize3d)(state, output, batch, output_w, input->size(dimF));
+    THCIndexTensor_(resize3d)(state, indices, batch, output_w, input->size(dimF));
   }
 
   input_data = THCTensor_(data)(state, input);
@@ -146,12 +146,12 @@ void THNN_(TemporalMaxPooling_updateGradInput)(
   {
     dimT = 1;
     dimF = 2;
-    batch = input->size[0];
+    batch = input->size(0);
   }
   gradOutput = THCTensor_(newContiguous)(state, gradOutput);
 
-  input_w = input->size[dimT];
-  input_n = input->size[dimF];
+  input_w = input->size(dimT);
+  input_n = input->size(dimF);
   output_w = (input_w - kW) / dW + 1;
 
   gradInput_data = THCTensor_(data)(state, gradInput);

@@ -1,4 +1,5 @@
 #include "ATen/ATen.h"
+#include "ATen/cuda/CUDAContext.h"
 #include "ATen/Config.h"
 #include "ATen/Dispatch.h"
 #include "ATen/Utils.h"
@@ -28,13 +29,16 @@ using namespace at::native::detail;
 // counting_iterator => index to fill
 struct cnt_to_dst_idx_functor : public thrust::unary_function<int64_t, int64_t>
 {
-  const int64_t last_dim_size;
-  const int64_t last_dim_start_slice;
-  const int64_t last_dim_to_fill_size;
+  int64_t last_dim_size;
+  int64_t last_dim_start_slice;
+  int64_t last_dim_to_fill_size;
 
   cnt_to_dst_idx_functor(int64_t last_dim_size, int64_t last_dim_start_slice) :
     last_dim_size(last_dim_size), last_dim_start_slice(last_dim_start_slice),
     last_dim_to_fill_size(last_dim_size - last_dim_start_slice) {}
+  
+  __host__ __device__
+  cnt_to_dst_idx_functor & operator=(const cnt_to_dst_idx_functor&) = default;
 
   __host__ __device__ __forceinline__
   int64_t operator()(const int64_t& i) const
@@ -104,7 +108,7 @@ static void _fft_fill_with_conjugate_symmetry_(Tensor& input,
   // copy
   int64_t n = input.numel() / size_last_dim * (size_last_dim - last_dim_start_slice);
 
-  cudaStream_t stream = globalContext().getCurrentCUDAStream();
+  cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
   auto policy = thrust::cuda::par(allocator).on(stream);
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "_fft_fill_with_conjugate_symmetry_", [&] {
@@ -180,7 +184,7 @@ static inline Tensor _run_cufft(
   auto output = input.type().tensor(output_sizes);
 
   // set to current stream
-  CUFFT_CHECK(cufftSetStream(plan, ctx.getCurrentCUDAStream()));
+  CUFFT_CHECK(cufftSetStream(plan, at::cuda::getCurrentCUDAStream()));
 
   auto ws = ctx.getType(at::Backend::CUDA, at::ScalarType::Byte).tensor({ config.workspace_size() });
   CUFFT_CHECK(cufftSetWorkArea(plan, ws.data_ptr()));

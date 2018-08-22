@@ -1,4 +1,5 @@
 import torch
+from torch._six import inf
 from torch.distributions.distribution import Distribution
 from torch.distributions import Categorical
 from numbers import Number
@@ -16,7 +17,7 @@ class Multinomial(Distribution):
     called (see example below)
 
     .. note:: :attr:`probs` must be non-negative, finite and have a non-zero sum,
-    and it will be normalized to sum to 1.
+              and it will be normalized to sum to 1.
 
     -   :meth:`sample` requires a single shared `total_count` for all
         parameters and samples.
@@ -93,6 +94,6 @@ class Multinomial(Distribution):
         logits, value = broadcast_all(self.logits.clone(), value)
         log_factorial_n = torch.lgamma(value.sum(-1) + 1)
         log_factorial_xs = torch.lgamma(value + 1).sum(-1)
-        logits[(value == 0) & (logits == -float('inf'))] = 0
+        logits[(value == 0) & (logits == -inf)] = 0
         log_powers = (logits * value).sum(-1)
         return log_factorial_n - log_factorial_xs + log_powers

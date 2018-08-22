@@ -1,5 +1,7 @@
 #include "caffe2/utils/proto_utils.h"
 
+#include <ATen/core/DeviceType.h>
+
 #include <fcntl.h>
 #include <cerrno>
 #include <fstream>
@@ -20,32 +22,7 @@ using ::google::protobuf::MessageLite;
 namespace caffe2 {
 
 std::string DeviceTypeName(const int32_t& d) {
-  switch (d) {
-    case CPU:
-      return "CPU";
-    case CUDA:
-      return "CUDA";
-    case OPENGL:
-      return "OPENGL";
-    case OPENCL:
-      return "OPENCL";
-    case MKLDNN:
-      return "MKLDNN";
-    case IDEEP:
-      return "IDEEP";
-    case HIP:
-      return "HIP";
-    default:
-      CAFFE_THROW(
-          "Unknown device: ",
-          d,
-          ". If you have recently updated the caffe2.proto file to add a new "
-          "device type, did you forget to update the DeviceTypeName() "
-          "function to reflect such recent changes?");
-      // The below code won't run but is needed to suppress some compiler
-      // warnings.
-      return "";
-  }
+  return at::DeviceTypeName(static_cast<at::DeviceType>(d));
 }
 
 int DeviceId(const DeviceOption& option) {

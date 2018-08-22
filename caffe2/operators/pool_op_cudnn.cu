@@ -196,7 +196,10 @@ class CuDNNPoolOp : public ConvPoolOpBase<CUDAContext> {
                  CAFFE_CUDA_NUM_THREADS,
                  0,
                  context_.cuda_stream()>>>(
-                  N * C, H * W * D, X.data<float>(), Y->mutable_data<float>());
+                  N * C,
+                  H * W * D,
+                  X.data<float>(),
+                  Y->template mutable_data<float>());
           return true;
         }
         if (mode_ == CUDNN_POOLING_MAX) {
@@ -205,7 +208,10 @@ class CuDNNPoolOp : public ConvPoolOpBase<CUDAContext> {
                  CAFFE_CUDA_NUM_THREADS,
                  0,
                  context_.cuda_stream()>>>(
-                  N * C, H * W * D, X.data<float>(), Y->mutable_data<float>());
+                  N * C,
+                  H * W * D,
+                  X.data<float>(),
+                  Y->template mutable_data<float>());
           return true;
         }
       }
@@ -379,7 +385,7 @@ class CuDNNPoolGradientOp : public ConvPoolOpBase<CUDAContext> {
                   N * C,
                   H * W * D,
                   dY.data<float>(),
-                  dX->mutable_data<float>());
+                  dX->template mutable_data<float>());
           return true;
         }
 #if CUDNN_VERSION_MIN(6, 0, 0)
@@ -396,7 +402,7 @@ class CuDNNPoolGradientOp : public ConvPoolOpBase<CUDAContext> {
                   N * C,
                   H * W * D,
                   dY.data<float>(),
-                  dX->mutable_data<float>(),
+                  dX->template mutable_data<float>(),
                   Y.data<float>(),
                   X.data<float>());
           return true;

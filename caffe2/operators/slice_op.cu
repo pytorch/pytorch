@@ -49,13 +49,13 @@ __global__ void SliceCopyKernel(
 
 template <class SIndex, class Context>
 bool SliceImplGpu(
-    Tensor<Context>* output,
-    const Tensor<Context>& data,
+    Tensor* output,
+    const Tensor& data,
     const TensorCPU& starts,
     const TensorCPU& ends,
     Context* context,
-    Tensor<Context>* gdata = nullptr,
-    const Tensor<Context>* go = nullptr) {
+    Tensor* gdata = nullptr,
+    const Tensor* go = nullptr) {
   bool backward = output == nullptr;
 
   auto* starts_data = starts.template data<SIndex>();
@@ -237,8 +237,8 @@ bool SliceOp<int, CUDAContext>::RunOnDevice() {
   auto& data = Input(0);
 
   if (InputSize() > 1) {
-    starts_host_.CopyFrom<CUDAContext>(Input(1));
-    ends_host_.CopyFrom<CUDAContext>(Input(2));
+    starts_host_.CopyFrom(Input(1));
+    ends_host_.CopyFrom(Input(2));
   } else {
     if (!statically_inited_) {
       CAFFE_ENFORCE(HasArgument("starts"));
@@ -272,8 +272,8 @@ bool SliceGradientOp<int, CUDAContext>::RunOnDevice() {
   auto& data = Input(0);
 
   if (InputSize() == 4) {
-    starts_host_.CopyFrom<CUDAContext>(Input(1));
-    ends_host_.CopyFrom<CUDAContext>(Input(2));
+    starts_host_.CopyFrom(Input(1));
+    ends_host_.CopyFrom(Input(2));
 
     auto& go = Input(3);
 

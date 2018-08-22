@@ -63,6 +63,9 @@ endfunction()
 if(DISTRIBUTED_NCCL_FOUND)
   option(USE_C10D_NCCL "USE C10D NCCL" ON)
 endif()
+if(MPI_FOUND)
+  option(USE_C10D_MPI "USE C10D MPI" ON)
+endif()
 configure_file(cmake/Def.hpp.in ${CMAKE_BINARY_DIR}/include/c10d/Def.hpp @ONLY)
 
 set(C10D_SRCS
@@ -106,8 +109,11 @@ target_compile_options(c10d PUBLIC
 # c10d links to Caffe2/ATen, but the targets don't add TH/THC to the include path
 target_include_directories(c10d PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../tmp_install/include/TH)
 target_include_directories(c10d PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../tmp_install/include/THC)
+# For <c10d/...>
+target_include_directories(c10d PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/..)
 # For torch/csrc/utils/hash.h and torch/csrc/utils/functional.h
 target_include_directories(c10d PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../../..)
+# For <gloo/...>
 target_include_directories(c10d PUBLIC ${GLOO_INCLUDE_DIR})
 
 copy_header(CUDAUtils.hpp)
@@ -135,7 +141,7 @@ target_include_directories(c10d PRIVATE ${CMAKE_BINARY_DIR}/include)
 
 install(TARGETS c10d ARCHIVE DESTINATION lib)
 
-option(BUILD_EXAMPLES "Build examples" OFF)
+option(BUILD_EXAMPLES "Build examples" ON)
 if(BUILD_EXAMPLES)
   add_subdirectory(example)
 endif()

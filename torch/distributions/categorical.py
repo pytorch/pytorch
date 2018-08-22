@@ -1,7 +1,8 @@
 import torch
+from torch._six import nan
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
-from torch.distributions.utils import probs_to_logits, logits_to_probs, _log_sum_exp, lazy_property, broadcast_all
+from torch.distributions.utils import probs_to_logits, logits_to_probs, lazy_property, broadcast_all
 
 
 class Categorical(Distribution):
@@ -22,7 +23,7 @@ class Categorical(Distribution):
     vectors.
 
     .. note:: :attr:`probs` must be non-negative, finite and have a non-zero sum,
-    and it will be normalized to sum to 1.
+              and it will be normalized to sum to 1.
 
     See also: :func:`torch.multinomial`
 
@@ -45,7 +46,7 @@ class Categorical(Distribution):
         if probs is not None:
             self.probs = probs / probs.sum(-1, keepdim=True)
         else:
-            self.logits = logits - _log_sum_exp(logits)
+            self.logits = logits - logits.logsumexp(dim=-1, keepdim=True)
         self._param = self.probs if probs is not None else self.logits
         self._num_events = self._param.size()[-1]
         batch_shape = self._param.size()[:-1] if self._param.ndimension() > 1 else torch.Size()
@@ -72,11 +73,11 @@ class Categorical(Distribution):
 
     @property
     def mean(self):
-        return self.probs.new_tensor(float('nan')).expand(self._extended_shape())
+        return self.probs.new_tensor(nan).expand(self._extended_shape())
 
     @property
     def variance(self):
-        return self.probs.new_tensor(float('nan')).expand(self._extended_shape())
+        return self.probs.new_tensor(nan).expand(self._extended_shape())
 
     def sample(self, sample_shape=torch.Size()):
         sample_shape = self._extended_shape(sample_shape)

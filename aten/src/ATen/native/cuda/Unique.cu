@@ -1,5 +1,5 @@
 #include "ATen/ATen.h"
-
+#include "ATen/cuda/CUDAContext.h"
 #include <THC/THCGeneral.h>
 #include <THC/THCThrustAllocator.cuh>
 #include <thrust/execution_policy.h>
@@ -37,7 +37,7 @@ template <typename scalar_t>
     const Tensor& self,
     const bool return_inverse) {
 
-    cudaStream_t stream = globalContext().getCurrentCUDAStream();
+    cudaStream_t stream = at::cuda::getCurrentCUDAStream();
     auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
     auto policy = thrust::cuda::par(allocator).on(stream);
 

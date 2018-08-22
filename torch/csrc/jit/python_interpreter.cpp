@@ -7,9 +7,10 @@
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/jit/fusion_compiler.h"
 #include "torch/csrc/jit/operator.h"
+#include "torch/csrc/jit/custom_operator.h"
 #include "torch/csrc/jit/graph_executor.h"
 #include "torch/csrc/jit/ir.h"
-#include "torch/csrc/jit/tensor_conversions.h"
+
 #include "torch/csrc/variable_tensor_functions.h"
 
 #include <typeinfo>
@@ -44,7 +45,7 @@ Operation createPythonOperation(Node* op_) {
         py_inputs[i] = py::reinterpret_borrow<py::object>(
             op->scalar_args[next_scalar++].get());
       } else if (arg_type == 't') {
-        auto var = peek(stack, next_tensor, num_inputs);
+        auto var = std::move(peek(stack, next_tensor, num_inputs)).toTensor();
         py_inputs[i] =
             py::reinterpret_steal<py::object>(THPVariable_Wrap(var));
         next_tensor++;

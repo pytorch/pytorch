@@ -1,92 +1,77 @@
-#include <vector>
+#include "torch/csrc/jit/interned_strings.h"
 #include <stdint.h>
-#include <string>
-#include <unordered_map>
+#include <iostream>
 #include <mutex>
 #include <sstream>
-#include "ATen/optional.h"
-#include "torch/csrc/assertions.h"
-#include "torch/csrc/jit/interned_strings.h"
+#include <string>
+#include <unordered_map>
+#include <vector>
+#include "ATen/core/Error.h"
+#include "ATen/core/optional.h"
 #include "string.h"
-#include <iostream>
+#include "torch/csrc/jit/interned_strings_class.h"
 
 namespace torch { namespace jit {
 
-struct InternedStrings {
-  InternedStrings()
-  : sym_to_info_(static_cast<size_t>(_keys::num_symbols)) {
-    #define REGISTER_SYMBOL(n, s) \
-      string_to_sym_[#n "::" #s] = n::s; \
-      sym_to_info_[n::s] = {namespaces::n, #n "::" #s, #s};
+Symbol InternedStrings::symbol(const std::string& s) {
+  std::lock_guard<std::mutex> guard(mutex_);
+  return _symbol(s);
+}
 
-    FORALL_NS_SYMBOLS(REGISTER_SYMBOL)
-    #undef REGISTER_SYMBOL
+std::pair<const char*, const char*> InternedStrings::string(Symbol sym) {
+  // Builtin Symbols are also in the maps, but
+  // we can bypass the need to acquire a lock
+  // to read the map for Builtins because we already
+  // know their string value
+  switch (sym) {
+#define DEFINE_CASE(ns, s) \
+  case ns::s:              \
+    return {#ns "::" #s, #s};
+    FORALL_NS_SYMBOLS(DEFINE_CASE)
+#undef DEFINE_CASE
+    default:
+      return customString(sym);
   }
-  Symbol symbol(const std::string & s) {
-    std::lock_guard<std::mutex> guard(mutex_);
-    return _symbol(s);
-  }
-  std::pair<const char *, const char *> string(Symbol sym) {
-    // Builtin Symbols are also in the maps, but
-    // we can bypass the need to acquire a lock
-    // to read the map for Builtins because we already
-    // know their string value
-    switch(sym) {
-      #define DEFINE_CASE(ns, s) \
-        case ns::s: return {#ns "::" #s, #s};
-      FORALL_NS_SYMBOLS(DEFINE_CASE)
-      #undef DEFINE_CASE
-        default:
-          return customString(sym);
+}
+
+Symbol InternedStrings::ns(Symbol sym) {
+  switch (sym) {
+#define DEFINE_CASE(ns, s) \
+  case ns::s:              \
+    return namespaces::ns;
+    FORALL_NS_SYMBOLS(DEFINE_CASE)
+#undef DEFINE_CASE
+    default: {
+      std::lock_guard<std::mutex> guard(mutex_);
+      return sym_to_info_.at(sym).ns;
     }
   }
-  Symbol ns(Symbol sym) {
-    switch(sym) {
-      #define DEFINE_CASE(ns, s) \
-        case ns::s: return namespaces::ns;
-      FORALL_NS_SYMBOLS(DEFINE_CASE)
-      #undef DEFINE_CASE
-        default: {
-          std::lock_guard<std::mutex> guard(mutex_);
-          return sym_to_info_.at(sym).ns;
-        }
-    }
+}
+
+Symbol InternedStrings::_symbol(const std::string& s) {
+  auto it = string_to_sym_.find(s);
+  if (it != string_to_sym_.end())
+    return it->second;
+
+  auto pos = s.find("::");
+  if (pos == std::string::npos) {
+    std::stringstream ss;
+    ss << "all symbols must have a namespace, <namespace>::<string>, but found: " << s;
+    throw std::runtime_error(ss.str());
   }
-private:
-  // prereq - holding mutex_
-  Symbol _symbol(const std::string & s) {
-    auto it = string_to_sym_.find(s);
-    if(it != string_to_sym_.end())
-      return it->second;
+  Symbol ns = _symbol("namespaces::" + s.substr(0, pos));
 
-    auto pos = s.find("::");
-    if(pos == std::string::npos) {
-      throw std::runtime_error("all symbols must have a namespace, <namespace>::<string>");
-    }
-    Symbol ns = _symbol("namespaces::" + s.substr(0, pos));
+  Symbol sym(sym_to_info_.size());
+  string_to_sym_[s] = sym;
+  sym_to_info_.push_back({ns, s, s.substr(pos + strlen("::"))});
+  return sym;
+}
 
-    Symbol sym(sym_to_info_.size());
-    string_to_sym_[s] = sym;
-    sym_to_info_.push_back({ns, s, s.substr(pos + strlen("::"))});
-    return sym;
-  }
-
-  std::pair<const char *, const char *> customString(Symbol sym) {
-    std::lock_guard<std::mutex> guard(mutex_);
-    SymbolInfo& s = sym_to_info_.at(sym);
-    return {s.qual_name.c_str(), s.unqual_name.c_str()};
-  }
-  std::unordered_map<std::string, Symbol> string_to_sym_;
-
-  struct SymbolInfo {
-    Symbol ns;
-    std::string qual_name;
-    std::string unqual_name;
-  };
-  std::vector<SymbolInfo> sym_to_info_;
-
-  std::mutex mutex_;
-};
+std::pair<const char*, const char*> InternedStrings::customString(Symbol sym) {
+  std::lock_guard<std::mutex> guard(mutex_);
+  SymbolInfo& s = sym_to_info_.at(sym);
+  return {s.qual_name.c_str(), s.unqual_name.c_str()};
+}
 
 static InternedStrings & globalStrings() {
   static InternedStrings s;

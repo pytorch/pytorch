@@ -1,20 +1,94 @@
-#include <math.h>
-#include <cfloat>
-// TODO(jamesreed): I would use <cmath> here but std::isnan
-// and std::isinf are declared constexpr there and the nvidia
-// compiler throws an error because of it
+#include "caffe2/core/context_gpu.h"
+#include "caffe2/operators/flatten_op.h"
+#include "caffe2/operators/minmax_ops.h"
+#include "caffe2/operators/utility_ops.h"
+#include "caffe2/utils/math.h"
 
 #include <thrust/device_vector.h>
 #include <thrust/sequence.h>
 #include <thrust/sort.h>
 #include <thrust/system/cuda/execution_policy.h>
 #include <thrust/unique.h>
-#include "caffe2/core/context_gpu.h"
-#include "flatten_op.h"
-#include "minmax_ops.h"
-#include "utility_ops.h"
 
 namespace caffe2 {
+
+template <>
+bool WeightedSumOp<CUDAContext>::RunOnDevice() {
+  if (Input(0).IsType<float>()) {
+    return DoRunWithType<float>();
+  } else if (Input(0).IsType<float16>()) {
+    return DoRunWithType<float16>();
+  } else {
+    CAFFE_THROW("Unsupported inputs");
+  }
+  return false;
+}
+
+template <>
+bool SumOp<CUDAContext>::RunOnDevice() {
+  if (Input(0).IsType<float>()) {
+    return DoRunWithType<float, float>();
+  } else if (Input(0).IsType<float16>()) {
+    return DoRunWithType<float16, float16>();
+  } else {
+    CAFFE_THROW("Unsupported inputs");
+  }
+  return false;
+}
+
+template <>
+class CopyOnDeviceLikeOp<CUDAContext, CUDAContext, CUDAContext>
+    : public Operator<CUDAContext> {
+ public:
+  CopyOnDeviceLikeOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<CUDAContext>(operator_def, ws) {}
+  USE_OPERATOR_FUNCTIONS(CUDAContext);
+
+  bool RunOnDevice() override {
+    auto& input = Input(0);
+    auto* output = OperatorBase::Output<Tensor>(0, CUDA);
+    CUDAContext context(GetGPUIDForPointer(Input(1).raw_data()));
+    output->ResizeLike(input);
+    context.template CopyItems<CUDAContext, CUDAContext>(
+        input.meta(),
+        input.size(),
+        input.raw_data(),
+        output->raw_mutable_data(input.meta()));
+    return true;
+  }
+};
+
+REGISTER_CUDA_OPERATOR(Print, PrintOp<CUDAContext>);
+REGISTER_CUDA_OPERATOR(Flatten, FlattenOp<CUDAContext>);
+REGISTER_CUDA_OPERATOR(FlattenToVec, FlattenToVecOp<CUDAContext>);
+REGISTER_CUDA_OPERATOR(Alias, AliasOp<CUDAContext>);
+REGISTER_CUDA_OPERATOR(ResizeLike, ResizeLikeOp<CUDAContext>);
+REGISTER_CUDA_OPERATOR(Sum, SumOp<CUDAContext>);
+REGISTER_CUDA_OPERATOR(WeightedSum, WeightedSumOp<CUDAContext>);
+
+// From CPU, copy it to whatever the current context
+REGISTER_CUDA_OPERATOR(
+    CopyFromCPUInput,
+    CopyOp<CUDAContext, CUDAContext, CPUContext>);
+
+// CopyGPUToCPU and CopyCPUToGPU should both be carried out in a cuda context,
+// since gpu code will be involved.
+REGISTER_CUDA_OPERATOR(
+    CopyGPUToCPU,
+    CopyOp<CUDAContext, CPUContext, CUDAContext>);
+REGISTER_CUDA_OPERATOR(
+    CopyCPUToGPU,
+    CopyOp<CUDAContext, CUDAContext, CPUContext>);
+// If we only specify Copy, we assume that it is a gpu to gpu copy - maybe
+// involving different GPUs.
+REGISTER_CUDA_OPERATOR(Copy, CopyOp<CUDAContext, CUDAContext, CUDAContext>);
+
+REGISTER_CUDA_OPERATOR(
+    CopyOnDeviceLike,
+    CopyOnDeviceLikeOp<CUDAContext, CUDAContext, CUDAContext>);
+
+REGISTER_CUDA_OPERATOR(UnsafeCoalesce, UnsafeCoalesceOp<CUDAContext>);
+
 CAFFE_KNOWN_TYPE(const float*);
 
 REGISTER_CUDA_OPERATOR(EnsureDense, EnsureDenseOp<CUDAContext>);
@@ -69,7 +143,7 @@ bool NanCheckOp<CUDAContext>::RunOnDevice() {
               << std::endl;
 
     for (int j = 0; j < InputSize(); j++) {
-      TensorCPU cpu_X;
+      Tensor cpu_X(CPU);
       cpu_X.ResizeLike(Input(j));
       // Hack to cause allocaiton happen here, so it won't happen
       // when we do CopyFrom. We need the mutex then because host->gpu
@@ -89,7 +163,7 @@ bool NanCheckOp<CUDAContext>::RunOnDevice() {
         std::cerr << "NaN idxs:" << std::endl;
         auto* cpu_X_data = cpu_X.data<float>();
         for (size_t i = 0; i < cpu_X.size(); ++i) {
-          if (isnan(cpu_X_data[i]) || isinf(cpu_X_data[i])) {
+          if (std::isnan(cpu_X_data[i]) || std::isinf(cpu_X_data[i])) {
             std::cerr << i << " ";
           }
         }
@@ -112,13 +186,13 @@ REGISTER_CUDA_OPERATOR(NanCheck, NanCheckOp<CUDAContext>);
 __global__ void
 ElwiseMaxKernel(const float* X, const float* Y, float* maxout, const int N) {
   CUDA_1D_KERNEL_LOOP(i, N) {
-    maxout[i] = max(X[i], Y[i]);
+    maxout[i] = fmaxf(X[i], Y[i]);
   }
 }
 
 template <>
 bool MaxOp<float, CUDAContext>::Compute() {
-  float* output_data = Output(0)->mutable_data<float>();
+  float* output_data = Output(0)->template mutable_data<float>();
   const int N = Input(0).size();
 
   // Run pairwise-maxes
@@ -143,13 +217,13 @@ REGISTER_CUDA_OPERATOR(MaxGradient, MaxGradientOp<float, CUDAContext>);
 __global__ void
 ElwiseMinKernel(const float* X, const float* Y, float* minout, const int N) {
   CUDA_1D_KERNEL_LOOP(i, N) {
-    minout[i] = min(X[i], Y[i]);
+    minout[i] = fminf(X[i], Y[i]);
   }
 }
 
 template <>
 bool MinOp<float, CUDAContext>::Compute() {
-  float* output_data = Output(0)->mutable_data<float>();
+  float* output_data = Output(0)->template mutable_data<float>();
   const int N = Input(0).size();
 
   // Run pairwise-mines
@@ -200,72 +274,10 @@ bool SelectGradientOpBase<float, CUDAContext>::RunOnDevice() {
         output.data<float>(),
         input.data<float>(),
         grad_output.data<float>(),
-        grad_input->mutable_data<float>());
+        grad_input->template mutable_data<float>());
   }
   return true;
 }
-
-template <typename T_INDEX>
-__global__ void GatherKernel(
-    const float* X,
-    float* Y,
-    const T_INDEX* indices,
-    const int N,
-    const int block_size) {
-  for (int i = blockIdx.x; i < N; i += gridDim.x) {
-    T_INDEX idx = indices[i];
-    const float* src_offset = X + idx * block_size;
-    float* dst_offset = Y + i * block_size;
-    for (int j = threadIdx.x; j < block_size; j += blockDim.x) {
-      dst_offset[j] = src_offset[j];
-    }
-  }
-}
-
-template <>
-bool GatherOp<CUDAContext>::RunOnDevice() {
-  return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
-      this, OperatorBase::Input<TensorCUDA>(INDICES));
-}
-
-template <>
-template <typename Index>
-bool GatherOp<CUDAContext>::DoRunWithType() {
-  auto& data = Input(DATA);
-  auto& indices = Input(INDICES);
-  auto* output = Output(0);
-
-  CAFFE_ENFORCE_GE(data.ndim(), 1, "DATA should be at least 1-D");
-  auto shape = indices.dims();
-  shape.insert(shape.end(), data.dims().begin() + 1, data.dims().end());
-  output->Resize(shape);
-
-  int block_size = data.size() / data.dim(0);
-  auto block_bytesize = data.size_from_dim(1) * data.meta().itemsize();
-  CAFFE_ENFORCE(
-      block_bytesize == data.nbytes() / data.dim(0),
-      "block_bytesize should be consistent with data dim");
-  int N = indices.size();
-
-  auto src_base = static_cast<const float*>(data.raw_data());
-  const Index* idxs = indices.template data<Index>();
-  auto out = static_cast<float*>(output->raw_mutable_data(data.meta()));
-
-  // return early when the input is empty, since CUDA kernel will fail for
-  // empty input.
-  if (N <= 0) {
-    return true;
-  }
-
-  GatherKernel<<<
-      std::min(N, CAFFE_MAXIMUM_NUM_BLOCKS),
-      CAFFE_CUDA_NUM_THREADS,
-      0,
-      context_.cuda_stream()>>>(src_base, out, idxs, N, block_size);
-  return true;
-}
-
-REGISTER_CUDA_OPERATOR(Gather, GatherOp<CUDAContext>);
 
 /**
  * @brief Update slices of Y in-place with a batch of weighted X's.
@@ -324,7 +336,7 @@ bool ScatterWeightedSumOp<float, CUDAContext>::DoRunWithType() {
   TIndex K = indices.size();
   TIndex block_size = M / N;
 
-  T* data = output->template mutable_data<T>();
+  float* data = output->template mutable_data<float>();
 
   // In order to have all device pointers of x_i (and weight_i similarly)
   // consecutively in device memory, copy pointers to a host vector and then
@@ -427,13 +439,14 @@ template <typename T>
 bool RangeOp<CUDAContext>::DoRunOnDevice(
     const T& start,
     const T& step,
-    Tensor<CUDAContext>* output) {
+    Tensor* output) {
   int N = output->size();
   RangeKernel<<<
       CAFFE_GET_BLOCKS(N),
       CAFFE_CUDA_NUM_THREADS,
       0,
-      context_.cuda_stream()>>>(N, output->mutable_data<T>(), start, step);
+      context_.cuda_stream()>>>(
+      N, output->template mutable_data<T>(), start, step);
   return true;
 }
 

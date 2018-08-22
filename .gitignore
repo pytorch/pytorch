@@ -25,6 +25,9 @@ aten/src/ATen/cuda/CUDAConfig.h
 build/
 dist/
 docs/src/**/*
+docs/cpp/xml/
+docs/cpp/html/
+docs/cpp/api/
 test/.coverage
 test/cpp/api/mnist
 test/data/gpu_tensors.pt
@@ -49,6 +52,7 @@ torch/csrc/nn/THNN.cpp
 torch/csrc/nn/THNN.cwrap
 torch/lib/*.a*
 torch/lib/*.dll*
+torch/lib/*.exe*
 torch/lib/*.dylib*
 torch/lib/*.h
 torch/lib/*.lib
@@ -140,10 +144,6 @@ docs/source/scripts/activation_images/
 # PyCharm files
 .idea
 
-# Visual Studio Code files
-.vscode
-.vs
-
 # OSX dir files
 .DS_Store
 
@@ -194,3 +194,11 @@ caffe2.egg-info
 
 # Atom/Watchman required file
 .watchmanconfig
+
+# BEGIN NOT-CLEAN-FILES (setup.py handles this marker. Do not change.)
+#
+# Below files are not deleted by "setup.py clean".
+
+# Visual Studio Code files
+.vscode
+.vs

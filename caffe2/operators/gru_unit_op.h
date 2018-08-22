@@ -114,10 +114,10 @@ class GRUUnitOp : public Operator<Context> {
  public:
   GRUUnitOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        drop_states_(OperatorBase::template GetSingleArgument<bool>(
+        drop_states_(this->template GetSingleArgument<bool>(
             "drop_states",
             false)),
-        sequence_lengths_(OperatorBase::template GetSingleArgument<bool>(
+        sequence_lengths_(this->template GetSingleArgument<bool>(
             "sequence_lengths",
             true)) {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;
@@ -143,8 +143,9 @@ class GRUUnitOp : public Operator<Context> {
       seqLengths = Input(SEQ_LENGTHS).template data<int32_t>();
     }
 
-    const auto t = static_cast<OperatorBase*>(this)->
-      Input<Tensor<CPUContext>>(TIMESTEP).template data<int32_t>()[0];
+    const auto t = static_cast<OperatorBase*>(this)
+                       ->Input<Tensor>(TIMESTEP, CPU)
+                       .template data<int32_t>()[0];
     Output(HIDDEN_T)->ResizeLike(Input(HIDDEN_T_M_1));
     auto* H = Output(HIDDEN_T)->template mutable_data<T>();
 
@@ -169,10 +170,10 @@ class GRUUnitGradientOp : public Operator<Context> {
  public:
   GRUUnitGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        drop_states_(OperatorBase::template GetSingleArgument<bool>(
+        drop_states_(this->template GetSingleArgument<bool>(
             "drop_states",
             false)),
-        sequence_lengths_(OperatorBase::template GetSingleArgument<bool>(
+        sequence_lengths_(this->template GetSingleArgument<bool>(
             "sequence_lengths",
             true)) {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;
@@ -194,8 +195,9 @@ class GRUUnitGradientOp : public Operator<Context> {
     CAFFE_ENFORCE_EQ(3 * D, G);
     const auto* H_prev = Input(HIDDEN_T_M_1).template data<T>();
     const auto* X = Input(GATES).template data<T>();
-    const auto t = static_cast<OperatorBase*>(this)->
-      Input<Tensor<CPUContext>>(TIMESTEP).template data<int32_t>()[0];
+    const auto t = static_cast<OperatorBase*>(this)
+                       ->Input<Tensor>(TIMESTEP, CPU)
+                       .template data<int32_t>()[0];
     const auto* H = Input(HIDDEN_T).template data<T>();
     const auto* H_diff = Input(HIDDEN_T_GRAD).template data<T>();
 

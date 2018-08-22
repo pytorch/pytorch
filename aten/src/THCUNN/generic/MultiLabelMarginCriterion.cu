@@ -18,8 +18,8 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
 
   if(input->dim() == 1)
   {
-    int dim = input->size[0];
-    THArgCheck(!target->is_empty() && (target->dim() == 1) && (target->size[0] == dim), 3,
+    int dim = input->size(0);
+    THArgCheck(!target->is_empty() && (target->dim() == 1) && (target->size(0) == dim), 3,
         "inconsistent target size");
     THCTensor_(resize1d)(state, output, 1);
 
@@ -39,17 +39,17 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
   }
   else if(input->dim() == 2)
   {
-    int nframe = input->size[0];
-    int dim = input->size[1];
-    THArgCheck(!target->is_empty() && (target->dim() == 2) && (target->size[0] == nframe)
-               && (target->size[1] == dim), 3, "inconsistent target size");
+    int nframe = input->size(0);
+    int dim = input->size(1);
+    THArgCheck(!target->is_empty() && (target->dim() == 2) && (target->size(0) == nframe)
+               && (target->size(1) == dim), 3, "inconsistent target size");
 
-    dim3 blocks(input->size[0]);
+    dim3 blocks(input->size(0));
     dim3 threads(MULTILABELMARGIN_THREADS);
 
     if (reduction != Reduction::None)
     {
-      THCTensor *output_tmp = THCTensor_(newWithSize1d)(state, input->size[0]);
+      THCTensor *output_tmp = THCTensor_(newWithSize1d)(state, input->size(0));
       THCTensor_(resize1d)(state, output, 1);
 
       cunn_MultiLabelMarginCriterion_updateOutput_kernel<real, accreal>
@@ -67,7 +67,7 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
     }
     else
     {
-    THCTensor_(resize1d)(state, output, input->size[0]);
+    THCTensor_(resize1d)(state, output, input->size(0));
 
     cunn_MultiLabelMarginCriterion_updateOutput_kernel<real, accreal>
       <<<blocks, threads, 0, THCState_getCurrentStream(state)>>>(
@@ -106,10 +106,10 @@ void THNN_(MultiLabelMarginCriterion_updateGradInput)(
 
   if(gradInput->dim() == 1)
   {
-    int dim = gradInput->size[0];
-    THArgCheck(!target->is_empty() && (target->dim() == 1) && (target->size[0] == dim), 3,
+    int dim = gradInput->size(0);
+    THArgCheck(!target->is_empty() && (target->dim() == 1) && (target->size(0) == dim), 3,
                "inconsistent target size");
-    THArgCheck(!istarget->is_empty() && (istarget->dim() == 1) && (istarget->size[0] == dim), 3,
+    THArgCheck(!istarget->is_empty() && (istarget->dim() == 1) && (istarget->size(0) == dim), 3,
                "inconsistent isTarget size");
     dim3 blocks(1);
     dim3 threads(MULTILABELMARGIN_THREADS);
@@ -121,20 +121,20 @@ void THNN_(MultiLabelMarginCriterion_updateGradInput)(
         THCTensor_(data)(state, input),
         THCIndexTensor_(data)(state, target),
         THCTensor_(data)(state, istarget),
-        1, gradInput->size[0],
+        1, gradInput->size(0),
         reduction == Reduction::ElementwiseMean,
         reduction != Reduction::None);
 
   }
   else if(gradInput->dim() == 2)
   {
-    int nframe = gradInput->size[0];
-    int dim = gradInput->size[1];
-    THArgCheck(!target->is_empty() && (target->dim() == 2) && (target->size[0] == nframe)
-               && (target->size[1] == dim), 3, "inconsistent target size");
-    THArgCheck(!istarget->is_empty() && (istarget->dim() == 2) && (istarget->size[0] == nframe)
-               && (istarget->size[1] == dim), 3, "inconsistent isTarget size");
-    dim3 blocks(gradInput->size[0]);
+    int nframe = gradInput->size(0);
+    int dim = gradInput->size(1);
+    THArgCheck(!target->is_empty() && (target->dim() == 2) && (target->size(0) == nframe)
+               && (target->size(1) == dim), 3, "inconsistent target size");
+    THArgCheck(!istarget->is_empty() && (istarget->dim() == 2) && (istarget->size(0) == nframe)
+               && (istarget->size(1) == dim), 3, "inconsistent isTarget size");
+    dim3 blocks(gradInput->size(0));
     dim3 threads(MULTILABELMARGIN_THREADS);
 
     cunn_MultiLabelMarginCriterion_updateGradInput_kernel<real, accreal>
@@ -144,7 +144,7 @@ void THNN_(MultiLabelMarginCriterion_updateGradInput)(
         THCTensor_(data)(state, input),
         THCIndexTensor_(data)(state, target),
         THCTensor_(data)(state, istarget),
-        gradInput->size[0], gradInput->size[1],
+        gradInput->size(0), gradInput->size(1),
         reduction == Reduction::ElementwiseMean,
         reduction != Reduction::None);
   }

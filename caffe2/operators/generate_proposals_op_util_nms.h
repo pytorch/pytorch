@@ -4,12 +4,13 @@
 #include <vector>
 
 #include "caffe2/core/logging.h"
+#include "caffe2/core/macros.h"
 #include "caffe2/utils/eigen_utils.h"
 #include "caffe2/utils/math.h"
 
-#if defined(CV_MAJOR_VERSION) && (CV_MAJOR_VERSION >= 3)
+#ifdef CAFFE2_USE_OPENCV
 #include <opencv2/opencv.hpp>
-#endif // CV_MAJOR_VERSION >= 3
+#endif // CAFFE2_USE_OPENCV
 
 namespace caffe2 {
 namespace utils {
@@ -18,7 +19,7 @@ namespace utils {
 // Reject a bounding box if its region has an intersection-overunion (IoU)
 //    overlap with a higher scoring selected bounding box larger than a
 //    threshold.
-// Reference: detectron/lib/utils/cython_nms.pyx
+// Reference: facebookresearch/Detectron/detectron/utils/cython_nms.pyx
 // proposals: pixel coordinates of proposed bounding boxes,
 //    size: (M, 4), format: [x1; y1; x2; y2]
 // scores: scores for each bounding box, size: (M, 1)
@@ -77,7 +78,7 @@ std::vector<int> nms_cpu_upright(
 
 /**
  * Soft-NMS implementation as outlined in https://arxiv.org/abs/1704.04503.
- * Reference: detectron/lib/utils/cython_nms.pyx
+ * Reference: facebookresearch/Detectron/detectron/utils/cython_nms.pyx
  * out_scores: Output updated scores after applying Soft-NMS
  * proposals: pixel coordinates of proposed bounding boxes,
  *    size: (M, 4), format: [x1; y1; x2; y2]
@@ -425,7 +426,7 @@ std::vector<int> nms_cpu(
 // Reject a bounding box if its region has an intersection-overunion (IoU)
 //    overlap with a higher scoring selected bounding box larger than a
 //    threshold.
-// Reference: detectron/lib/utils/cython_nms.pyx
+// Reference: facebookresearch/Detectron/detectron/lib/utils/cython_nms.pyx
 // proposals: pixel coordinates of proposed bounding boxes,
 //    size: (M, 4), format: [x1; y1; x2; y2]
 //    size: (M, 5), format: [ctr_x; ctr_y; w; h; angle (degrees)] for RRPN

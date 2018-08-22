@@ -1,11 +1,5 @@
 #pragma once
 
-#include "ProcessGroup.hpp"
-#include "Types.hpp"
-#include "Utils.hpp"
-
-#include <mpi.h>
-
 #include <condition_variable>
 #include <deque>
 #include <exception>
@@ -13,6 +7,10 @@
 #include <mutex>
 #include <thread>
 #include <vector>
+
+#include <c10d/ProcessGroup.hpp>
+#include <c10d/Types.hpp>
+#include <c10d/Utils.hpp>
 
 namespace c10d {
 
@@ -34,6 +32,8 @@ struct WorkEntry {
   // For input and output tensors (in-place), we will always use src
   std::vector<at::Tensor>* src;
   std::vector<at::Tensor>* dst;
+  // src rank returned, for recv only
+  int* srcRank;
   std::function<void(std::unique_ptr<WorkEntry>&)> run;
 };
 
@@ -113,6 +113,38 @@ class ProcessGroupMPI : public ProcessGroup {
   std::shared_ptr<ProcessGroup::Work> allreduce(
       std::vector<at::Tensor>& tensors,
       const AllreduceOptions& opts = AllreduceOptions()) override;
+
+  std::shared_ptr<ProcessGroup::Work> reduce(
+      std::vector<at::Tensor>& tensors,
+      const ReduceOptions& opts = ReduceOptions()) override;
+
+  std::shared_ptr<ProcessGroup::Work> allgather(
+      std::vector<std::vector<at::Tensor>>& outputTensors,
+      std::vector<at::Tensor>& inputTensors) override;
+
+  std::shared_ptr<ProcessGroup::Work> gather(
+      std::vector<std::vector<at::Tensor>>& outputTensors,
+      std::vector<at::Tensor>& inputTensors,
+      const GatherOptions& opts = GatherOptions()) override;
+
+  std::shared_ptr<ProcessGroup::Work> scatter(
+      std::vector<at::Tensor>& outputTensors,
+      std::vector<std::vector<at::Tensor>>& inputTensors,
+      const ScatterOptions& opts = ScatterOptions()) override;
+
+  std::shared_ptr<ProcessGroup::Work> send(
+      std::vector<at::Tensor>& tensors,
+      int dstRank);
+
+  std::shared_ptr<ProcessGroup::Work> recv(
+      std::vector<at::Tensor>& tensors,
+      int srcRank);
+
+  std::shared_ptr<ProcessGroup::Work> recvAnysource(
+      std::vector<at::Tensor>& tensor,
+      int* srcRank);
+
+  std::shared_ptr<ProcessGroup::Work> barrier();
 
   // Creating a new ProcessGroupMPI, will initiialize MPI if not initialized
   static std::shared_ptr<ProcessGroupMPI> createProcessGroupMPI();

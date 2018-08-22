@@ -1,6 +1,9 @@
 #pragma once
 
-#include <ATen/ScalarType.h>
+#include <ATen/Backend.h>
+#include <ATen/core/Error.h>
+
+#include <iostream>
 
 namespace at {
 enum class Layout { Strided, Sparse };
@@ -17,4 +20,16 @@ inline Layout layout_from_backend(Backend backend) {
       return Layout::Strided;
   }
 }
+
+inline std::ostream& operator<<(std::ostream& stream, at::Layout layout) {
+  switch (layout) {
+    case at::kStrided:
+      return stream << "Strided";
+    case at::kSparse:
+      return stream << "Sparse";
+    default:
+      AT_ERROR("Unknown layout");
+  }
+}
+
 } // namespace at

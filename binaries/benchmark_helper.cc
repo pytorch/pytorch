@@ -15,6 +15,8 @@
  */
 
 #include <string>
+#include <chrono>
+#include <thread>
 
 #include "binaries/benchmark_helper.h"
 #include "caffe2/core/blob_serialization.h"
@@ -160,7 +162,7 @@ void loadInput(
           CAFFE_THROW("Not support GPU on mobile.");
 #endif
         } else {
-          caffe2::TensorCPU* tensor = blob->GetMutable<caffe2::TensorCPU>();
+          caffe2::TensorCPU* tensor = blob->GetMutableTensor(caffe2::CPU);
           CHECK_NOTNULL(tensor);
           tensor->Resize(input_dims);
           if (input_type_list[i] == "uint8_t") {
@@ -197,12 +199,17 @@ void fillInputBlob(
     int protos_size = tensor_kv.second.protos_size();
     caffe2::TensorProto* tensor_proto =
         tensor_kv.second.mutable_protos(iteration % protos_size);
-    caffe2::TensorCPU* tensor = blob->GetMutable<caffe2::TensorCPU>();
-    tensor->Resize(std::vector<caffe2::TIndex>());
+    caffe2::TensorCPU* tensor = blob->GetMutableTensor(caffe2::CPU);
     if (tensor_proto->data_type() == caffe2::TensorProto::STRING) {
-      (tensor->mutable_data<std::string>())[0] = tensor_proto->string_data(0);
+      int total_size = tensor_proto->string_data_size();
+      for (size_t i = 0; i < total_size; i++) {
+        (tensor->mutable_data<string>())[i] = tensor_proto->string_data(i);
+      }
     } else if (tensor_proto->data_type() == caffe2::TensorProto::FLOAT) {
-      (tensor->mutable_data<float>())[0] = tensor_proto->float_data(0);
+      int total_size = tensor_proto->float_data_size();
+      for (size_t i = 0; i < total_size; i++) {
+        (tensor->mutable_data<float>())[i] = tensor_proto->float_data(i);
+      }
     }
     // todo: for other types
   }
@@ -215,7 +222,8 @@ void runNetwork(
     const bool wipe_cache,
     const bool run_individual,
     const int warmup,
-    const int iter) {
+    const int iter,
+    const int sleep_before_run) {
   if (!net_def.has_name()) {
     net_def.set_name("benchmark");
   }
@@ -233,6 +241,9 @@ void runNetwork(
 
   if (wipe_cache) {
     caffe2::wipe_cache();
+  }
+  if (sleep_before_run > 0) {
+    std::this_thread::sleep_for(std::chrono::seconds(sleep_before_run));
   }
   LOG(INFO) << "Main runs.";
   CAFFE_ENFORCE(
@@ -286,7 +297,7 @@ void writeOutput(
 #endif
         } else {
           writeTextOutput<caffe2::CPUContext, caffe2::TensorCPU>(
-              workspace->GetBlob(name)->GetMutable<caffe2::TensorCPU>(),
+              workspace->GetBlob(name)->GetMutableTensor(caffe2::CPU),
               output_prefix,
               name);
         }

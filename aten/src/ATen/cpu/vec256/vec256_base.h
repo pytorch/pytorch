@@ -103,6 +103,9 @@ public:
   Vec256<T> erf() const {
     return map(std::erf);
   }
+  Vec256<T> erfc() const {
+    return map(std::erfc);
+  }
   Vec256<T> exp() const {
     return map(std::exp);
   }
@@ -203,6 +206,11 @@ template <class T> Vec256<T> max(const Vec256<T> &a, const Vec256<T> &b) {
     c[i] = std::max(a[i], b[i]);
   }
   return c;
+}
+
+template <typename T>
+T fmadd(const T& a, const T& b, const T& c) {
+  return a * b + c;
 }
 
 }}}

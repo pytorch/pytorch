@@ -1,14 +1,17 @@
 #include "pybind_state.h"
 
+#include <chrono>
+#include <future>
+
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
 #include "caffe2/contrib/script/compiler.h"
 #include "caffe2/core/asan.h"
+#include "caffe2/core/blob_stats.h"
 #include "caffe2/core/db.h"
 #include "caffe2/core/numa.h"
 #include "caffe2/core/operator.h"
-#include "caffe2/core/predictor.h"
 #include "caffe2/core/stats.h"
 #include "caffe2/core/transform.h"
 #include "caffe2/mkl/mkl_utils.h"
@@ -20,9 +23,11 @@
 #include "caffe2/opt/converter.h"
 #include "caffe2/opt/fusion.h"
 #include "caffe2/opt/mobile.h"
+#include "caffe2/opt/onnxifi_transformer.h"
 #include "caffe2/opt/optimize_ideep.h"
 #include "caffe2/opt/passes.h"
 #include "caffe2/opt/sink.h"
+#include "caffe2/predictor/predictor.h"
 #include "caffe2/utils/cpuid.h"
 #include "caffe2/utils/string_utils.h"
 
@@ -48,7 +53,7 @@ BlobFeederBase::~BlobFeederBase() {}
 
 CAFFE_DEFINE_TYPED_REGISTRY(
     BlobFetcherRegistry,
-    CaffeTypeId,
+    TypeIdentifier,
     BlobFetcherBase,
     std::unique_ptr);
 CAFFE_DEFINE_TYPED_REGISTRY(
@@ -57,7 +62,7 @@ CAFFE_DEFINE_TYPED_REGISTRY(
     BlobFeederBase,
     std::unique_ptr);
 
-REGISTER_BLOB_FETCHER((TypeMeta::Id<TensorCPU>()), TensorFetcher<CPUContext>);
+REGISTER_BLOB_FETCHER((TypeMeta::Id<Tensor>()), TensorFetcher);
 REGISTER_BLOB_FEEDER(CPU, TensorFeeder<CPUContext>);
 
 Workspace* GetCurrentWorkspace() {
@@ -77,7 +82,7 @@ static_assert(
     "We make an assumption that int is always int32 for numpy "
     "type mapping.");
 int CaffeToNumpyType(const TypeMeta& meta) {
-  static std::map<CaffeTypeId, int> numpy_type_map{
+  static std::map<TypeIdentifier, int> numpy_type_map{
       {TypeMeta::Id<bool>(), NPY_BOOL},
       {TypeMeta::Id<double>(), NPY_DOUBLE},
       {TypeMeta::Id<float>(), NPY_FLOAT},
@@ -244,6 +249,33 @@ OPERATOR_SCHEMA(PythonDLPackGradient).AllowInplace([](int, int) {
 });
 REGISTER_GRADIENT(PythonDLPack, GetPythonGradient);
 
+class BackgroundPlan {
+ public:
+  BackgroundPlan(Workspace* ws, PlanDef def) : ws_(ws), def_(def) {}
+
+  void run() {
+    fut_ =
+        std::async(std::launch::async, [this]() { return ws_->RunPlan(def_); });
+  }
+
+  bool isDone() {
+    CAFFE_ENFORCE(fut_.valid());
+    auto status = fut_.wait_for(std::chrono::milliseconds(0));
+    return status == std::future_status::ready;
+  }
+
+  bool isSucceeded() {
+    CAFFE_ENFORCE(isDone());
+    return fut_.get();
+  }
+
+ private:
+  Workspace* ws_;
+  PlanDef def_;
+
+  std::future<bool> fut_;
+};
+
 void addObjectMethods(py::module& m) {
   py::class_<NetBase>(m, "Net").def("run", [](NetBase* net) {
     py::gil_scoped_release g;
@@ -294,7 +326,7 @@ void addObjectMethods(py::module& m) {
           })
       .def(
           "tensor",
-          [](Blob* blob) { return py::cast(blob->GetMutable<TensorCPU>()); },
+          [](Blob* blob) { return py::cast(blob->GetMutableTensor(CPU)); },
           py::return_value_policy::reference_internal)
       .def(
           "_feed",
@@ -371,7 +403,7 @@ void addObjectMethods(py::module& m) {
               // keep this behavior for backward compatibility
               t->mutable_data<float>();
             }
-            auto res = TensorFetcher<CPUContext>().FetchTensor(*t, false);
+            auto res = TensorFetcher().FetchTensor(*t, false);
             return res.obj;
           },
           "Return numpy array pointing to this tensor's data if possible. "
@@ -390,17 +422,17 @@ void addObjectMethods(py::module& m) {
       .def(
           "fetch",
           [](TensorCPU* t) {
-            auto res = TensorFetcher<CPUContext>().FetchTensor(*t, true);
+            auto res = TensorFetcher().FetchTensor(*t, true);
             return res.obj;
           },
           "Copy data from this tensor into a new numpy array.")
       .def(
           "init",
-          [](TensorCPU* t, std::vector<TIndex> dims, int caffe_type) {
+          [](Tensor* t, std::vector<TIndex> dims, int caffe_type) {
             const auto& meta =
                 DataTypeToTypeMeta((TensorProto::DataType)caffe_type);
             CAFFE_ENFORCE(
-                !TensorFetcher<CPUContext>().NeedsCopy(meta),
+                !TensorFetcher().NeedsCopy(t, meta),
                 "Cannot init tensor of this type. Use `feed` instead.");
             t->Resize(dims);
             t->raw_mutable_data(meta);
@@ -503,6 +535,11 @@ void addObjectMethods(py::module& m) {
         CAFFE_ENFORCE(ws->second.get());
         return py::cast(ws->second.get(), py::return_value_policy::reference);
       });
+
+  py::class_<BackgroundPlan, std::shared_ptr<BackgroundPlan>>(
+      m, "BackgroundPlan")
+      .def("is_done", &BackgroundPlan::isDone)
+      .def("is_succeeded", &BackgroundPlan::isSucceeded);
 
   // Gradients
   py::class_<GradientWrapper>(m, "GradientWrapper")
@@ -688,14 +725,15 @@ void addObjectMethods(py::module& m) {
             for (const auto pair : inputs) {
               const auto& name = pair.first;
               const auto& input = pair.second;
+              tensors_data.emplace(name, Tensor(CPU));
               CAFFE_ENFORCE(
                   PyArray_Check(input.ptr()),
                   "Input must be of type numpy array.");
               PyArrayObject* array =
                   reinterpret_cast<PyArrayObject*>(input.ptr());
               TensorFeeder<CPUContext>().FeedTensor(
-                  DeviceOption(), array, &tensors_data[name]);
-              tensors.insert(std::make_pair(name, &tensors_data[name]));
+                  DeviceOption(), array, &tensors_data.at(name));
+              tensors.insert(std::make_pair(name, &tensors_data.at(name)));
             }
 
 
@@ -703,8 +741,7 @@ void addObjectMethods(py::module& m) {
             instance.RunMap(tensors, &out);
             std::vector<py::object> pyout;
             for (auto t : out) {
-              pyout.push_back(
-                  TensorFetcher<CPUContext>().FetchTensor(*t, true).obj);
+              pyout.push_back(TensorFetcher().FetchTensor(*t, true).obj);
             }
             return pyout;
           })
@@ -713,7 +750,10 @@ void addObjectMethods(py::module& m) {
           [](caffe2::onnx::Caffe2BackendRep& instance,
              std::vector<py::object> inputs) -> std::vector<py::object> {
             Predictor::TensorVector tensors;
-            std::vector<TensorCPU> tensors_data(inputs.size());
+            std::vector<TensorCPU> tensors_data;
+            for (auto i = 0; i < inputs.size(); ++i) {
+              tensors_data.emplace_back(caffe2::CPU);
+            }
             for (auto i = 0; i < inputs.size(); ++i) {
               auto input = inputs[i];
               CAFFE_ENFORCE(
@@ -729,8 +769,7 @@ void addObjectMethods(py::module& m) {
             instance.Run(tensors, &out);
             std::vector<py::object> pyout;
             for (auto t : out) {
-              pyout.push_back(
-                  TensorFetcher<CPUContext>().FetchTensor(*t, true).obj);
+              pyout.push_back(TensorFetcher().FetchTensor(*t, true).obj);
             }
             return pyout;
           });
@@ -756,13 +795,21 @@ void addObjectMethods(py::module& m) {
           "convert_node",
           [](caffe2::onnx::Caffe2Backend& instance,
              const py::bytes& node_str,
+             const std::vector<py::bytes>& value_infos_bytes,
              int opset_version) -> std::vector<std::vector<py::bytes>> {
             // Note that we return two lists of serialized ops. The first set is
             // init_ops and the second set is ops for pred net. When converting
             // RNN related op, it is possible that we will create ops in the
             // init_net. Hence the return structure here
+            caffe2::onnx::ValueInfoMap value_infos{};
+            for (const auto& vi_bytes : value_infos_bytes) {
+              ::ONNX_NAMESPACE::ValueInfoProto vi{};
+              vi.ParseFromString(vi_bytes);
+              auto name = vi.name();
+              value_infos.emplace(std::move(name), std::move(vi));
+            }
             auto c2ops = instance.ConvertNode(
-                node_str.cast<std::string>(), opset_version);
+                node_str.cast<std::string>(), {value_infos, opset_version});
             std::vector<std::vector<py::bytes>> vals;
             vals.emplace_back();
             auto& init_vals = vals.back();
@@ -779,12 +826,15 @@ void addObjectMethods(py::module& m) {
               normal_vals.emplace_back(py::bytes(out));
             }
             return vals;
-          })
+          },
+          py::arg("node_str"),
+          py::arg("value_infos_bytes") = std::vector<py::bytes>{},
+          py::arg("opset_version") = kKnownOpsetVersion)
       .def(
-        "_build_tensor_filling_op",
-        [](caffe2::onnx::Caffe2Backend& instance,
-           const py::bytes& tensor_proto_str,
-           const std::string& name="") -> py::bytes {
+          "_build_tensor_filling_op",
+          [](caffe2::onnx::Caffe2Backend& instance,
+             const py::bytes& tensor_proto_str,
+             const std::string& name = "") -> py::bytes {
             caffe2::OperatorDef op;
             ::ONNX_NAMESPACE::TensorProto tp;
             ParseProtoFromLargeString(tensor_proto_str, &tp);
@@ -792,7 +842,7 @@ void addObjectMethods(py::module& m) {
             std::string out;
             op.SerializeToString(&out);
             return py::bytes(out);
-        });
+          });
 
   py::class_<Predictor>(m, "Predictor")
       .def(
@@ -810,7 +860,10 @@ void addObjectMethods(py::module& m) {
           [](Predictor& instance,
              std::vector<py::object> inputs) -> std::vector<py::object> {
             Predictor::TensorVector tensors;
-            std::vector<TensorCPU> tensors_data(inputs.size());
+            std::vector<Tensor> tensors_data;
+            for (auto i = 0; i < inputs.size(); ++i) {
+              tensors_data.emplace_back(CPU);
+            }
             for (auto i = 0; i < inputs.size(); ++i) {
               auto input = inputs[i];
               CAFFE_ENFORCE(
@@ -826,8 +879,7 @@ void addObjectMethods(py::module& m) {
             instance.run(tensors, &out);
             std::vector<py::object> pyout;
             for (auto t : out) {
-              pyout.push_back(
-                  TensorFetcher<CPUContext>().FetchTensor(*t, true).obj);
+              pyout.push_back(TensorFetcher().FetchTensor(*t, true).obj);
             }
             return pyout;
           })
@@ -840,21 +892,21 @@ void addObjectMethods(py::module& m) {
             for (const auto pair : inputs) {
               const auto& name = pair.first;
               const auto& input = pair.second;
+              tensors_data.emplace(name, Tensor(CPU));
               CAFFE_ENFORCE(
                   PyArray_Check(input.ptr()),
                   "Input must be of type numpy array.");
               PyArrayObject* array =
                   reinterpret_cast<PyArrayObject*>(input.ptr());
               TensorFeeder<CPUContext>().FeedTensor(
-                  DeviceOption(), array, &tensors_data[name]);
-              tensors.insert(std::make_pair(name, &tensors_data[name]));
+                  DeviceOption(), array, &tensors_data.at(name));
+              tensors.insert(std::make_pair(name, &tensors_data.at(name)));
             }
             std::vector<TensorCPU*> out;
             instance.run_map(tensors, &out);
             std::vector<py::object> pyout;
             for (auto t : out) {
-              pyout.push_back(
-                  TensorFetcher<CPUContext>().FetchTensor(*t, true).obj);
+              pyout.push_back(TensorFetcher().FetchTensor(*t, true).obj);
             }
             return pyout;
           });
@@ -1182,6 +1234,17 @@ void addGlobalMethods(py::module& m) {
     CAFFE_ENFORCE(gWorkspace->RunPlan(def));
     return true;
   });
+  m.def("run_plan_in_background", [](const py::bytes& plan_def) {
+    CAFFE_ENFORCE(gWorkspace);
+    PlanDef def;
+    CAFFE_ENFORCE(
+        ParseProtoFromLargeString(plan_def.cast<std::string>(), &def));
+    py::gil_scoped_release g;
+
+    auto background_plan = std::make_shared<BackgroundPlan>(gWorkspace, def);
+    background_plan->run();
+    return background_plan;
+  });
   m.def(
       "apply_transform",
       [](const string& transform_key, const py::bytes& net_def) {
@@ -1310,6 +1373,33 @@ void addGlobalMethods(py::module& m) {
         CAFFE_ENFORCE(blob_info.SerializeToString(&protob));
         return py::bytes(protob);
       });
+  m.def(
+      "infer_shapes_and_types_from_map",
+      [](const std::vector<py::bytes>& net_protos,
+         const std::map<std::string, std::vector<TIndex>> blob_dimensions,
+         const std::map<std::string, int> int_blob_types) {
+        // Parse protobuffers to NetDefs
+        std::vector<std::unique_ptr<caffe2::NetDef>> nets;
+        std::vector<caffe2::NetDef*> nets_ptr;
+        for (auto proto : net_protos) {
+          std::unique_ptr<NetDef> def(new NetDef());
+          CAFFE_ENFORCE(def->ParseFromString(proto));
+          nets_ptr.push_back(def.get());
+          nets.push_back(std::move(def));
+        }
+        std::map<std::string, TensorProto_DataType> blob_types;
+        for (auto blob_type : int_blob_types) {
+          blob_types[blob_type.first] =
+              static_cast<TensorProto_DataType>(blob_type.second);
+        }
+
+        auto blob_info = InferBlobShapesAndTypesFromMap(
+            blob_dimensions, blob_types, nets_ptr);
+
+        std::string protob;
+        CAFFE_ENFORCE(blob_info.SerializeToString(&protob));
+        return py::bytes(protob);
+      });
   m.def("create_blob", [](const std::string& name) {
     CAFFE_ENFORCE(gWorkspace);
     CAFFE_ENFORCE(gWorkspace->CreateBlob(name));
@@ -1433,6 +1523,12 @@ void addGlobalMethods(py::module& m) {
     CAFFE_ENFORCE(raw_data);
     return GetNUMANode(raw_data);
   });
+  m.def("get_blob_size_bytes", [](const std::string& blob_name) {
+    CAFFE_ENFORCE(gWorkspace);
+    auto* blob = gWorkspace->GetBlob(blob_name);
+    CAFFE_ENFORCE(blob);
+    return BlobStat::sizeBytes(*blob);
+  });
   m.def("support_onnx_export", [](const std::string& op) -> bool {
     const OpSchema* schema = caffe2::OpSchemaRegistry::Schema(op);
     if (!schema) {
@@ -1503,6 +1599,27 @@ void addGlobalMethods(py::module& m) {
     return py::bytes(out);
   });
   m.def(
+      "onnxifi",
+      [](const py::bytes& pred_net_str,
+         const std::unordered_map<std::string, std::vector<int>>& shapes,
+         bool debug_builder) -> py::bytes {
+        caffe2::NetDef pred_net;
+        CAFFE_ENFORCE(
+            ParseProtoFromLargeString(
+                pred_net_str.cast<std::string>(), &pred_net),
+            "broken pred_net protobuf");
+        std::unordered_map<std::string, TensorShape> tensor_shapes;
+        for (const auto& it : shapes) {
+          tensor_shapes.emplace(
+              it.first, CreateTensorShape(it.second, TensorProto::FLOAT));
+        }
+        OnnxifiTransformer ts(debug_builder);
+        ts.Transform(GetCurrentWorkspace(), &pred_net, tensor_shapes);
+        std::string pred_net_str2;
+        pred_net.SerializeToString(&pred_net_str2);
+        return py::bytes(pred_net_str2);
+      });
+  m.def(
       "run_workspace_transform",
       [](const std::string& transform_name, py::bytes def) {
         CAFFE_ENFORCE(gWorkspace);
@@ -1526,12 +1643,12 @@ void addGlobalMethods(py::module& m) {
   // into a python interface in transformations.py
   // Prefix the transformation with transform_ to avoid clobbering the
   // function namespace.
-  m.def("transform_optimizeForIDEEP", [](py::bytes def) {
+  m.def("transform_optimizeForIDEEP", [](py::bytes def, bool training_mode) {
     caffe2::NetDef proto;
     CAFFE_ENFORCE(ParseProtoFromLargeString(def.cast<std::string>(), &proto));
 
     auto nn = caffe2::convertToNNModule(proto);
-    opt::OptimizeForIdeep(&nn);
+    opt::OptimizeForIdeep(&nn, gWorkspace, training_mode);
     auto new_proto = caffe2::convertToCaffe2Proto(nn, proto);
 
     std::string out;

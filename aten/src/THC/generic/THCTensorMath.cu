@@ -96,7 +96,6 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
   // to be "skipped".  We maintain this behavior for backwards compatibility, but only for this specific
   // size (i.e. other empty sizes are not skipped).
   // FIXME: warn if this is the case
-  THLongStorage *size;
   int i, j, cohortMax;
   int64_t offset;
   bool hasSkippedInput = false;
@@ -122,7 +121,7 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
   THArgCheck(numInputs > 0, 3, "invalid number of inputs %d", numInputs);
   THArgCheck(dimension >= 0, 4, "invalid dimension %d", dimension);
   
-  size = THLongStorage_newWithSize(nDims);
+  std::vector<int64_t> size(nDims);
   
   // Compute size of the result in the cat dimension
   int64_t cat_dim_size = 0;
@@ -141,10 +140,9 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
     if (dim == dimension) {
       result_dim_size = cat_dim_size;
     }
-    THLongStorage_data(size)[dim] = result_dim_size;
+    size[dim] = result_dim_size;
   }
-  THCTensor_(resize)(state, result, size, NULL);
-  THLongStorage_free(size);
+  THCTensor_(resize)(state, result, size, {});
 
   // We parallelize the copy if all 6 conditions pass:
   //
@@ -170,8 +168,7 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
 
     // Kernel Parameter
     size_t tensorMetadataSize = sizeof(CatArrInputTensor<real, unsigned int>) * CAT_ARRAY_BATCH_SIZE;
-    CatArrInputTensor<real, unsigned int> *d_inputs;
-    THCudaCheck(THCudaMalloc(state, (void**) &d_inputs, tensorMetadataSize));
+    auto d_inputs = static_cast<CatArrInputTensor<real, unsigned int> *>(THCudaMalloc(state, tensorMetadataSize));
 
     OutputTensorSizeStride<unsigned int, CAT_ARRAY_MAX_INPUT_DIMS> param;
 
@@ -191,28 +188,30 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
     offset = 0;
     for (i = 0; i < numInputs; i += CAT_ARRAY_BATCH_SIZE) {
       // Re-allocate stackInputs every iteration to avoid read-after-write hazard
-      CatArrInputTensor<real, unsigned int>* stackInputs = (CatArrInputTensor<real, unsigned int>*) THCudaHostAlloc(state, tensorMetadataSize);
-      cohortMax = 0;
-      for (j = 0; j < CAT_ARRAY_BATCH_SIZE && (i+j) < numInputs; ++j) {
-        int64_t dimSize = THCTensor_(size)(state, inputs[i+j], dimension);
+      {
+        auto stackInputs_owner = THCudaHostAlloc(state, tensorMetadataSize);
+        CatArrInputTensor<real, unsigned int>* stackInputs = static_cast<CatArrInputTensor<real, unsigned int>*>(stackInputs_owner.get());
+        cohortMax = 0;
+        for (j = 0; j < CAT_ARRAY_BATCH_SIZE && (i+j) < numInputs; ++j) {
+          int64_t dimSize = THCTensor_(size)(state, inputs[i+j], dimension);
 
-        stackInputs[j].input = THCTensor_(data)(state, inputs[i+j]);
-        stackInputs[j].offset = offset;
-        stackInputs[j].dimSize = dimSize;
-        stackInputs[j].nElements = THCTensor_(nElement)(state, inputs[i+j]);
-        cohortMax = cohortMax > (int) stackInputs[j].nElements ? cohortMax : (int) stackInputs[j].nElements;
+          stackInputs[j].input = THCTensor_(data)(state, inputs[i+j]);
+          stackInputs[j].offset = offset;
+          stackInputs[j].dimSize = dimSize;
+          stackInputs[j].nElements = THCTensor_(nElement)(state, inputs[i+j]);
+          cohortMax = cohortMax > (int) stackInputs[j].nElements ? cohortMax : (int) stackInputs[j].nElements;
 
-        // update offset
-        offset += dimSize;
+          // update offset
+          offset += dimSize;
+        }
+        THCudaCheck(cudaMemcpyAsync(
+            d_inputs,
+            stackInputs,
+            j * sizeof(CatArrInputTensor<real, unsigned int>),
+            cudaMemcpyHostToDevice,
+            THCStream_stream(stream)));
+        THCudaHostRecord(state, stackInputs);
       }
-      THCudaCheck(cudaMemcpyAsync(
-          d_inputs,
-          stackInputs,
-          j * sizeof(CatArrInputTensor<real, unsigned int>),
-          cudaMemcpyHostToDevice,
-          THCStream_stream(stream)));
-      THCudaHostRecord(state, stackInputs);
-      THCudaHostFree(state, stackInputs);
 
       // Next, let's consider how we set our kernel launch parameters.
       // We borrow from THCApply, which the kernel's internal indexing
@@ -242,7 +241,7 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
       }
       THCudaCheck(cudaGetLastError());
     }
-    THCudaCheck(THCudaFree(state, d_inputs));
+    THCudaFree(state, d_inputs);
 #undef HANDLE_CASE
   } else {
     offset = 0;
@@ -271,7 +270,7 @@ void THCTensor_(nonzero)(THCState* state, THCudaLongTensor *tensor,
   self = THCTensor_(newContiguous)(state, self);
   thrust::device_ptr<real> self_data(THCTensor_(data)(state, self));
 
-  int num_dim = THCTensor_(nDimension)(state, self);
+  int num_dim = THCTensor_(nDimensionLegacyNoScalars)(state, self);
   int64_t N = THCTensor_(nElement)(state, self);
 
   THCudaLongTensor_resize2d(state, tensor, N, num_dim);
@@ -313,9 +312,9 @@ void THCTensor_(nonzero)(THCState* state, THCudaLongTensor *tensor,
       strided_tensor.begin(),
       strided_tensor.end(),
       stride_dim.begin(),
-      idx_functor(div, self->size[dim])
+      idx_functor(div, THTensor_sizeLegacyNoScalars(self, dim))
     );
-    div *= self->size[dim];
+    div *= THTensor_sizeLegacyNoScalars(self, dim);
   }
 
   THCudaLongTensor_resize2d(state, tensor, num_nonzeros, num_dim);
@@ -328,7 +327,7 @@ void THCTensor_(nonzero)(THCState* state, THCudaLongTensor *tensor,
 
 void THCTensor_(diag)(THCState *state, THCTensor *self_, THCTensor *src_, int64_t k){
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src_));
-  int nDimension = THCTensor_(_nDimension)(state, src_);
+  int nDimension = THCTensor_(nDimensionLegacyNoScalars)(state, src_);
   THArgCheck((nDimension == 2) || (nDimension == 1), 1, "expected a matrix or a vector");
   if (nDimension == 2) {
     int64_t stride0 = THCTensor_(stride)(state, src_, 0);
@@ -337,25 +336,29 @@ void THCTensor_(diag)(THCState *state, THCTensor *self_, THCTensor *src_, int64_
     int64_t size1 = THCTensor_(size)(state, src_, 1);
     int64_t size = (k > 0) ? min((int64_t)size0, (int64_t)size1 - k) : min((int64_t)size0 + k, (int64_t)size1);
     THCTensor_(resize1d)(state, self_, size);
-    int64_t strideSelf = THCTensor_(stride)(state, self_, 0);
-    const dim3 threads(min((int64_t)THCState_getCurrentDeviceProperties(state)->maxThreadsPerBlock, (int64_t)size));
-    dim3 grid(min((int64_t)1024, (int64_t)THCCeilDiv(size, (int64_t)threads.x)));
-    int64_t start = (k >= 0 ? k * stride1 : -k * stride0);
-    THCTensor_copyFromDiagonal<real><<<grid, threads, 0, THCState_getCurrentStream(state)>>>
-    (THCTensor_(data)(state, self_), THCTensor_(data)(state, src_), start, size, stride0 + stride1, strideSelf);
+    if (size > 0) {
+      int64_t strideSelf = THCTensor_(stride)(state, self_, 0);
+      const dim3 threads(min((int64_t)THCState_getCurrentDeviceProperties(state)->maxThreadsPerBlock, (int64_t)size));
+      dim3 grid(min((int64_t)1024, (int64_t)THCCeilDiv(size, (int64_t)threads.x)));
+      int64_t start = (k >= 0 ? k * stride1 : -k * stride0);
+      THCTensor_copyFromDiagonal<real><<<grid, threads, 0, THCState_getCurrentStream(state)>>>
+      (THCTensor_(data)(state, self_), THCTensor_(data)(state, src_), start, size, stride0 + stride1, strideSelf);
+    }
   } else {
     ptrdiff_t totalElements = THCTensor_(nElement)(state, src_);
     ptrdiff_t size = (k > 0) ? totalElements + k : totalElements - k;
-    int64_t strideSrc = THCTensor_(stride)(state, src_, 0);
+    int64_t strideSrc = THTensor_strideLegacyNoScalars(src_, 0);
     THCTensor_(resize2d)(state, self_, size, size);
     THCTensor_(zero)(state, self_);
-    int64_t stride0 = THCTensor_(stride)(state, self_, 0);
-    int64_t stride1 = THCTensor_(stride)(state, self_, 1);
-    const dim3 threads(min((int64_t)THCState_getCurrentDeviceProperties(state)->maxThreadsPerBlock, (int64_t)size));
-    dim3 grid(min((int64_t)1024, (int64_t)THCCeilDiv(size, (ptrdiff_t)threads.x)));
-    ptrdiff_t start = (k >= 0 ? k * stride1 : -k * stride0);
-    THCTensor_copyToDiagonal<real><<<grid, threads, 0, THCState_getCurrentStream(state)>>>
-    (THCTensor_(data)(state, self_), THCTensor_(data)(state, src_), start, totalElements, stride0 + stride1, strideSrc);
+    if (size > 0) {
+      int64_t stride0 = THCTensor_(stride)(state, self_, 0);
+      int64_t stride1 = THCTensor_(stride)(state, self_, 1);
+      const dim3 threads(min((int64_t)THCState_getCurrentDeviceProperties(state)->maxThreadsPerBlock, (int64_t)size));
+      dim3 grid(min((int64_t)1024, (int64_t)THCCeilDiv(size, (ptrdiff_t)threads.x)));
+      ptrdiff_t start = (k >= 0 ? k * stride1 : -k * stride0);
+      THCTensor_copyToDiagonal<real><<<grid, threads, 0, THCState_getCurrentStream(state)>>>
+      (THCTensor_(data)(state, self_), THCTensor_(data)(state, src_), start, totalElements, stride0 + stride1, strideSrc);
+    }
   }
   THCudaCheck(cudaGetLastError());
 }
@@ -375,8 +378,8 @@ void THCTensor_(eye)(THCState *state, THCTensor *self_, int64_t n, int64_t m)
   int64_t stride = THCTensor_(stride)(state, self_, 0) +
                    THCTensor_(stride)(state, self_, 1);
 
-  THCTensor *diag = THCTensor_(newWithStorage1d)(state, self_->storage,
-      self_->storageOffset,  sz, stride);
+  THCTensor *diag = THCTensor_(newWithStorage1d)(state, THTensor_getStoragePtr(self_),
+      self_->storage_offset(),  sz, stride);
 
   THCTensor_(fill)(state, diag, ScalarConvert<int, real>::to(1));
   THCTensor_(free)(state, diag);
@@ -384,7 +387,7 @@ void THCTensor_(eye)(THCState *state, THCTensor *self_, int64_t n, int64_t m)
 
 accreal THCTensor_(trace)(THCState *state, THCTensor *src_) {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, src_));
-  THArgCheck((src_->_dim() == 2), 1, "expected a matrix");
+  THArgCheck((THTensor_nDimensionLegacyAll(src_) == 2), 1, "expected a matrix");
   THCTensor *diag = THCTensor_(new)(state);
   THCTensor_(diag)(state, diag, src_, 0);
   accreal trace = THCTensor_(sumall)(state, diag);

@@ -141,7 +141,6 @@ static THDTensor *THDTensor_(_alloc)() {
   new_tensor->storageOffset = 0;
 
   new_tensor->refcount = 1;
-  new_tensor->flag = TH_TENSOR_REFCOUNTED;
 
   new_tensor->tensor_id = THDState::s_nextId++;
   return new_tensor;

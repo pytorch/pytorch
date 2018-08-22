@@ -1,22 +1,12 @@
 ir_version: 3
 producer_name: "pytorch"
-producer_version: "0.3"
+producer_version: "0.4"
 graph {
   node {
     input: "0"
     input: "1"
     output: "2"
     op_type: "Add"
-    attribute {
-      name: "broadcast"
-      i: 1
-      type: INT
-    }
-    attribute {
-      name: "axis"
-      i: 1
-      type: INT
-    }
   }
   name: "torch-jit-export"
   input {
@@ -66,5 +56,5 @@ graph {
   }
 }
 opset_import {
-  version: 6
+  version: 7
 }

@@ -95,7 +95,9 @@ bound to ATen (in practice, C++ and Python.)
 **Argument names.** Argument names are meaningful; downstream binding code may make use of the specific
 argument name you provide, and a rename of an argument name is considered a BC-breaking
 change (e.g., you will probably need to update `tools/autograd/derivatives.yaml` at
-least).
+least). In `native_functions.yaml`, if your function (usually functions named with 'out' affix) args
+include the result Tensor, you need to call the argument `Tensor result`. And if there are more
+than one result Tensors, you need to name the args `Tensor result0, Tensor result1, ...`.
 
 TODO: Do argument names affect Python keyword arguments?
 

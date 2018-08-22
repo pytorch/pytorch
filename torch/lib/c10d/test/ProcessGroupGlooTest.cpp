@@ -11,14 +11,12 @@
 
 #include <gloo/transport/tcp/device.h>
 
-#include "CUDAUtils.hpp"
-#include "FileStore.hpp"
-#include "ProcessGroupGloo.hpp"
-#include "test/TestUtils.hpp"
+#include <c10d/CUDAUtils.hpp>
+#include <c10d/FileStore.hpp>
+#include <c10d/ProcessGroupGloo.hpp>
+#include <c10d/test/TestUtils.hpp>
 
 using namespace c10d::test;
-
-using c10d::CUDADevice;
 
 class SignalTest {
  public:
@@ -143,7 +141,7 @@ std::vector<std::vector<at::Tensor>> copyTensors(
     const auto& input = inputs[i];
     std::vector<at::Tensor> output(input.size());
     for (size_t j = 0; j < input.size(); j++) {
-      output[j] = input[j].toBackend(at::kCPU);
+      output[j] = input[j].cpu();
     }
     outputs[i] = std::move(output);
   }
@@ -202,8 +200,11 @@ void testBroadcast(const std::string& path, const at::Backend b) {
       // Initialize inputs
       for (auto k = 0; k < size; k++) {
         inputs[k].resize(stride);
+        at::DeviceGuard deviceGuard;
         for (auto l = 0; l < stride; l++) {
-          CUDADevice device(type.is_cuda() ? l : -1);
+          if (type.is_cuda()) {
+            deviceGuard.set_index(l);
+          }
           inputs[k][l] = at::ones(type, {16, 16}) * (k * stride + l);
         }
       }
@@ -260,22 +261,22 @@ int main(int argc, char** argv) {
 
   {
     TemporaryFile file;
-    testAllreduce(file.path, at::kCPU);
+    testAllreduce(file.path, at::Backend::CPU);
   }
 
   {
     TemporaryFile file;
-    testAllreduce(file.path, at::kCUDA);
+    testAllreduce(file.path, at::Backend::CUDA);
   }
 
   {
     TemporaryFile file;
-    testBroadcast(file.path, at::kCPU);
+    testBroadcast(file.path, at::Backend::CPU);
   }
 
   {
     TemporaryFile file;
-    testBroadcast(file.path, at::kCUDA);
+    testBroadcast(file.path, at::Backend::CUDA);
   }
 
   return 0;

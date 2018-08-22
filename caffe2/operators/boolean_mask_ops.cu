@@ -6,13 +6,12 @@
 namespace caffe2 {
 
 namespace {
-template <typename T>
 __global__ void BooleanMaskCopyKernel(
     const TIndex numOfOutput,
     const TIndex numBytes,
     const TIndex* indices,
-    const T* src,
-    T* dest) {
+    const uint8_t* src,
+    uint8_t* dest) {
   for (TIndex i = blockIdx.x; i < numOfOutput; i += gridDim.x) {
     const auto srcBase = indices[i] * numBytes;
     const auto destBase = i * numBytes;
@@ -74,19 +73,18 @@ class BooleanMaskOp<CUDAContext> final : public Operator<CUDAContext> {
 
     // Copy numOfOutput from gpu to cpu
     TIndex numOfOutput;
-    context_.Copy<TIndex, CUDAContext, CPUContext>(
-        1, numOfOutputData, &numOfOutput);
+    context_.CopyToCPU(1, numOfOutputData, &numOfOutput);
 
     indices_.Resize(numOfOutput);
     std::vector<TIndex> dims = src.dims();
     dims[0] = numOfOutput;
     dest->Resize(dims);
-    auto* destData = (char*)dest->raw_mutable_data(src.meta());
-    const auto* srcData = (char*)src.raw_data();
+    auto* destData = (uint8_t*)dest->raw_mutable_data(src.meta());
+    const auto* srcData = (uint8_t*)src.raw_data();
     if (OutputSize() == 2) {
       auto* indicesOut = Output(1);
       indicesOut->Resize(numOfOutput);
-      indicesOut->mutable_data<TIndex>();
+      indicesOut->template mutable_data<TIndex>();
     }
 
     if (numOfOutput > 0) {
@@ -110,8 +108,8 @@ class BooleanMaskOp<CUDAContext> final : public Operator<CUDAContext> {
   }
 
  private:
-  Tensor<CUDAContext> indices_;
-  Tensor<CUDAContext> scratch_;
+  Tensor indices_{CUDA};
+  Tensor scratch_{CUDA};
 };
 
 REGISTER_CUDA_OPERATOR(BooleanMask, BooleanMaskOp<CUDAContext>);
@@ -298,9 +296,9 @@ bool SequenceMaskOp<CUDAContext>::RunOnDevice() {
 template <>
 template <class T>
 bool SequenceMaskOp<CUDAContext>::DoRunWithType() {
-  const Tensor<CUDAContext>* input = &Input(0);
-  const Tensor<CUDAContext>* sequence_lengths = nullptr;
-  const Tensor<CUDAContext>* window_centers = nullptr;
+  const Tensor* input = &Input(0);
+  const Tensor* sequence_lengths = nullptr;
+  const Tensor* window_centers = nullptr;
 
   if (mode_ == "sequence") {
     sequence_lengths = &Input(1);
@@ -356,7 +354,7 @@ bool SequenceMaskOp<CUDAContext>::DoRunWithType() {
           input->data<T>(),
           sequence_lengths->data<int>(),
           fill_val,
-          output->mutable_data<T>());
+          output->template mutable_data<T>());
     } else {
       sequenceMaskKernel<<<
           CAFFE_GET_BLOCKS(left * right),
@@ -369,7 +367,7 @@ bool SequenceMaskOp<CUDAContext>::DoRunWithType() {
           input->data<T>(),
           sequence_lengths->data<int>(),
           fill_val,
-          output->mutable_data<T>());
+          output->template mutable_data<T>());
     }
   } else if (mode_ == "window") {
     windowMaskKernel<<<
@@ -384,7 +382,7 @@ bool SequenceMaskOp<CUDAContext>::DoRunWithType() {
         window_centers->data<int>(),
         radius_,
         fill_val,
-        output->mutable_data<T>());
+        output->template mutable_data<T>());
   } else if (mode_ == "upper") {
     upperMaskKernel<<<
         CAFFE_GET_BLOCKS(left * right),
@@ -396,7 +394,7 @@ bool SequenceMaskOp<CUDAContext>::DoRunWithType() {
         batch_dim,
         input->data<T>(),
         fill_val,
-        output->mutable_data<T>());
+        output->template mutable_data<T>());
   } else if (mode_ == "lower") {
     lowerMaskKernel<<<
         CAFFE_GET_BLOCKS(left * right),
@@ -408,7 +406,7 @@ bool SequenceMaskOp<CUDAContext>::DoRunWithType() {
         batch_dim,
         input->data<T>(),
         fill_val,
-        output->mutable_data<T>());
+        output->template mutable_data<T>());
   } else if (mode_ == "upperdiag") {
     upperDiagMaskKernel<<<
         CAFFE_GET_BLOCKS(left * right),
@@ -420,7 +418,7 @@ bool SequenceMaskOp<CUDAContext>::DoRunWithType() {
         batch_dim,
         input->data<T>(),
         fill_val,
-        output->mutable_data<T>());
+        output->template mutable_data<T>());
   } else if (mode_ == "lowerdiag") {
     lowerDiagMaskKernel<<<
         CAFFE_GET_BLOCKS(left * right),
@@ -432,7 +430,7 @@ bool SequenceMaskOp<CUDAContext>::DoRunWithType() {
         batch_dim,
         input->data<T>(),
         fill_val,
-        output->mutable_data<T>());
+        output->template mutable_data<T>());
   } else {
     CAFFE_ENFORCE(false, "Unsupported mode for SequenceMaskOp!");
   }

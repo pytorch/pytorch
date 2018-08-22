@@ -33,10 +33,10 @@ static inline void THNN_(VolumetricReplicationPadding_shapeCheck)(
   }
 
   /* sizes */
-  nslices = input->size[dimslices];
-  idepth = input->size[dimd];
-  iheight = input->size[dimh];
-  iwidth = input->size[dimw];
+  nslices = input->size(dimslices);
+  idepth = input->size(dimd);
+  iheight = input->size(dimh);
+  iwidth = input->size(dimw);
   odepth = idepth + pfront + pback;
   oheight = iheight + ptop + pbottom;
   owidth  = iwidth + pleft + pright;
@@ -151,7 +151,7 @@ THNN_(VolumetricReplicationPadding_shapeCheck)(
 
   if (input->dim() == 5)
   {
-    nbatch = input->size[0];
+    nbatch = input->size(0);
     dimw++;
     dimh++;
     dimd++;
@@ -159,10 +159,10 @@ THNN_(VolumetricReplicationPadding_shapeCheck)(
   }
 
   /* sizes */
-  nslices = input->size[dimslices];
-  idepth = input->size[dimd];
-  iheight = input->size[dimh];
-  iwidth = input->size[dimw];
+  nslices = input->size(dimslices);
+  idepth = input->size(dimd);
+  iheight = input->size(dimh);
+  iwidth = input->size(dimw);
   odepth = idepth + pfront + pback;
   oheight = iheight + ptop + pbottom;
   owidth  = iwidth + pleft + pright;
@@ -295,7 +295,7 @@ void THNN_(VolumetricReplicationPadding_updateGradInput)(THNNState *state,
 
   if (input->dim() == 5)
   {
-    nbatch = input->size[0];
+    nbatch = input->size(0);
     dimw++;
     dimh++;
     dimd++;
@@ -303,10 +303,10 @@ void THNN_(VolumetricReplicationPadding_updateGradInput)(THNNState *state,
   }
 
   /* sizes */
-  nslices = input->size[dimslices];
-  idepth = input->size[dimd];
-  iheight = input->size[dimh];
-  iwidth = input->size[dimw];
+  nslices = input->size(dimslices);
+  idepth = input->size(dimd);
+  iheight = input->size(dimh);
+  iwidth = input->size(dimw);
   odepth = idepth + pfront + pback;
   oheight = iheight + ptop + pbottom;
   owidth  = iwidth + pleft + pright;

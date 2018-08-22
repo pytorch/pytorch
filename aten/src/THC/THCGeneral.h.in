@@ -1,7 +1,7 @@
 #ifndef THC_GENERAL_INC
 #define THC_GENERAL_INC
 
-#include "THGeneral.h"
+#include <TH/THGeneral.h>
 #include "THAllocator.h"
 #include "THCThreadLocal.h"
 #undef log10
@@ -23,7 +23,7 @@
 #endif
 
 #ifdef _WIN32
-# if defined(ATen_cuda_EXPORTS) || defined(caffe2_gpu_EXPORTS)
+# if defined(ATen_cuda_EXPORTS) || defined(caffe2_gpu_EXPORTS) || defined(CAFFE2_BUILD_MAIN_LIB)
 #  define THC_API THC_EXTERNC __declspec(dllexport)
 #  define THC_CLASS __declspec(dllexport)
 # else
@@ -49,14 +49,7 @@ typedef struct CUDAStreamInternals THCStream;
 typedef struct THCState THCState;
 struct THCState;
 
-typedef struct _THCDeviceAllocator {
-   cudaError_t (*malloc)( void*, void**, size_t,         cudaStream_t);
-   cudaError_t (*realloc)(void*, void**, size_t, size_t, cudaStream_t);
-   cudaError_t (*free)(void*, void*);
-   cudaError_t (*emptyCache)(void*);
-   cudaError_t  (*cacheInfo)(void*, int, size_t*, size_t*);
-   void* state;
-} THCDeviceAllocator;
+typedef THAllocator THCDeviceAllocator;
 
 typedef struct _THCCudaResourcesPerDevice {
   /* Number of materialized cuBLAS handles */
@@ -147,10 +140,13 @@ THC_API void __THCudaCheckWarn(cudaError_t err, const char *file, const int line
 THC_API void __THCublasCheck(cublasStatus_t status, const char *file, const int line);
 THC_API void __THCusparseCheck(cusparseStatus_t status, const char *file, const int line);
 
-THC_API cudaError_t THCudaMalloc(THCState *state, void **ptr, size_t size);
-THC_API cudaError_t THCudaFree(THCState *state, void *ptr);
-THC_API void* THCudaHostAlloc(THCState *state, size_t size);
-THC_API void THCudaHostFree(THCState *state, void *ptr);
+THC_API void* THCudaMalloc(THCState *state, size_t size);
+THC_API void THCudaFree(THCState *state, void* ptr);
+
+#ifdef __cplusplus
+at::DataPtr THCudaHostAlloc(THCState *state, size_t size);
+#endif
+
 THC_API void THCudaHostRecord(THCState *state, void *ptr);
 
 THC_API cudaError_t THCudaMemGetInfo(THCState *state, size_t* freeBytes, size_t* totalBytes);

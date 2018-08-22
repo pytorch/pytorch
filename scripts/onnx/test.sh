@@ -23,7 +23,7 @@ do
 done
 set -- "${UNKNOWN[@]}" # leave UNKNOWN
 
-pip install pytest torchvision
+pip install pytest scipy torchvision
 if [[ $PARALLEL == 1 ]]; then
     pip install pytest-xdist
 fi
@@ -35,14 +35,8 @@ test_paths=(
     "$top_dir/test/onnx"
 )
 
-if hash catchsegv 2>/dev/null; then
-    PYTEST="catchsegv pytest"
-else
-    PYTEST="pytest"
-fi
-
 if [[ $PARALLEL == 1 ]]; then
-    $PYTEST -n 3 "${test_paths[@]}"
+    pytest -n 3 "${test_paths[@]}"
 else
-    $PYTEST "${test_paths[@]}"
+    pytest "${test_paths[@]}"
 fi

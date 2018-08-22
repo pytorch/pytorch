@@ -230,6 +230,7 @@ bool maybeThrowBackCompatKeepdimWarn(char *func) {
 
 template<>
 void THPPointer<THTensor>::free() {
-  if (ptr)
+  if (ptr) {
     THTensor_free(LIBRARY_STATE ptr);
+  }
 }

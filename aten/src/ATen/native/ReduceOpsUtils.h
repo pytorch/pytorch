@@ -44,4 +44,12 @@ static bool _dimreduce_return_trivial_no_ident(Tensor &result, const Tensor &sel
   return false;
 }
 
+static at::optional<Tensor> _allreduce_return_trivial(const Tensor &self, Scalar ident) {
+  // Return identity
+  if (self.numel() == 0) {
+    return self.type().scalarTensor(ident);
+  }
+  return at::nullopt;
+}
+
 }}  // at::native

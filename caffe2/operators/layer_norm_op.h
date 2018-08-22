@@ -13,8 +13,8 @@ class LayerNormOp : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   LayerNormOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        axis_(OperatorBase::GetSingleArgument<int>("axis", 1)),
-        epsilon_(OperatorBase::GetSingleArgument<float>("epsilon", 1e-5f)) {}
+        axis_(this->template GetSingleArgument<int>("axis", 1)),
+        epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5f)) {}
   ~LayerNormOp() {}
 
   template <typename T>
@@ -28,8 +28,8 @@ class LayerNormOp : public Operator<Context> {
   int axis_;
   float epsilon_;
 
-  Tensor<Context> scratch_;
-  Tensor<Context> seg_indices_;
+  Tensor scratch_{Context::GetDeviceType()};
+  Tensor seg_indices_{Context::GetDeviceType()};
 };
 
 template <class Context>
@@ -38,8 +38,8 @@ class LayerNormGradientOp : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   LayerNormGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        axis_(OperatorBase::GetSingleArgument<int>("axis", 1)),
-        epsilon_(OperatorBase::GetSingleArgument<float>("epsilon", 0.001f)) {}
+        axis_(this->template GetSingleArgument<int>("axis", 1)),
+        epsilon_(this->template GetSingleArgument<float>("epsilon", 0.001f)) {}
   ~LayerNormGradientOp() {}
 
   template <typename T>
@@ -53,11 +53,11 @@ class LayerNormGradientOp : public Operator<Context> {
   int axis_;
   float epsilon_;
 
-  Tensor<Context> scratch_;
-  Tensor<Context> gscratch_;
-  Tensor<Context> seg_indices_;
-  Tensor<Context> dstdev_;
-  Tensor<Context> dmean_;
+  Tensor scratch_{Context::GetDeviceType()};
+  Tensor gscratch_{Context::GetDeviceType()};
+  Tensor seg_indices_{Context::GetDeviceType()};
+  Tensor dstdev_{Context::GetDeviceType()};
+  Tensor dmean_{Context::GetDeviceType()};
 };
 
 } // namespace caffe2

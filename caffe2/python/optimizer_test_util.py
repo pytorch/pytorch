@@ -51,7 +51,6 @@ class OptimizerTestBase(object):
     def testDense(self):
         model, perfect_model, data, label = self._createDense()
         optimizer = self.build_optimizer(model)
-
         workspace.FeedBlob('data', data[0])
         workspace.FeedBlob('label', label[0])
         workspace.RunNetOnce(model.param_init_net)

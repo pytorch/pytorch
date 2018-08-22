@@ -5,12 +5,14 @@
 #include "torch/csrc/jit/passes/shape_analysis.h"
 #include "torch/csrc/jit/argument_spec.h"
 #include "torch/csrc/jit/function_schema.h"
+#include "torch/csrc/jit/assertions.h"
 #include "torch/csrc/jit/named_value.h"
+#include "torch/csrc/jit/source_range.h"
 
 #include <torch/csrc/api/include/torch/detail/ordered_dict.h>
 
-#include <ATen/optional.h>
-#include <ATen/ArrayRef.h>
+#include <ATen/core/ArrayRef.h>
+#include <ATen/core/optional.h>
 
 #include <functional>
 #include <memory>
@@ -34,8 +36,6 @@ namespace torch { namespace jit { namespace script {
 // Note: because Method/Module are exposed to python these
 // classes use python method naming conventions
 
-struct SourceRange;
-
 struct Method {
   Method(std::string name, bool optimize,
          std::shared_ptr<Graph> graph,
@@ -53,13 +53,13 @@ struct Method {
     }
   }
 
-  variable_tensor_list run(variable_tensor_list && inputs) {
-    for(auto tp : member_inputs) {
-      inputs.push_back(*tp);
+  void run(Stack & stack) {
+    for(at::Tensor* tp : member_inputs) {
+      stack.push_back(*tp);
     }
-    return get_executor().run(std::move(inputs));
+    get_executor().run(stack);
   }
-  std::shared_ptr<Graph> graph_for(const variable_tensor_list& inputs) {
+  std::shared_ptr<Graph> graph_for(const Stack& inputs) {
     return get_executor().graphFor(inputs);
   }
   std::shared_ptr<Graph> graph() const {
@@ -94,12 +94,15 @@ struct Method {
 
   std::shared_ptr<Graph> propagate_shapes(std::vector<at::Tensor> inputs, bool with_grad=false) {
     auto retval = graph_->copy();
-    for (auto inp : member_inputs) {
-      inputs.push_back(*inp);
+    Stack stack;
+    stack.reserve(inputs.size() + member_inputs.size());
+    for (at::Tensor & i : inputs) {
+      stack.emplace_back(std::move(i));
     }
-    PropagateInputShapes(
-      *retval,
-      ArgumentSpec(with_grad, variable_tensor_list(std::move(inputs))));
+    for (at::Tensor* inp : member_inputs) {
+      stack.push_back(*inp);
+    }
+    PropagateInputShapes(*retval, ArgumentSpec(with_grad, std::move(stack)));
     return retval;
   }
 
@@ -109,21 +112,20 @@ struct Method {
       inputs.push_back(*inp);
     }
     if (propagate) {
-      auto inputs_copy = inputs;
-      PropagateInputShapes(*retval, ArgumentSpec(with_grad, variable_tensor_list(std::move(inputs_copy))));
+      PropagateInputShapes(*retval, ArgumentSpec(with_grad, fmap<IValue>(inputs)));
     }
     JIT_ASSERT(retval->inputs().size() == inputs.size());
     for (size_t i=0; i < retval->inputs().size(); ++i) {
       auto scalar_type = inputs[i].type().scalarType();
       auto sizes = inputs[i].sizes();
-      auto type = std::make_shared<torch::jit::TensorType>(scalar_type, -1, sizes);
+      auto type = torch::jit::TensorType::create(scalar_type, -1, sizes);
       retval->inputs()[i]->setType(type);
     }
     JIT_ASSERT(retval->outputs().size() == outputs.size());
     for (size_t i=0; i < retval->outputs().size(); ++i) {
       auto scalar_type = outputs[i].type().scalarType();
       auto sizes = outputs[i].sizes();
-      auto type = std::make_shared<torch::jit::TensorType>(scalar_type, -1, sizes);
+      auto type = torch::jit::TensorType::create(scalar_type, -1, sizes);
       retval->outputs()[i]->setType(type);
     }
     return retval;
@@ -136,6 +138,22 @@ struct Method {
   Method& setSchema(FunctionSchema schema_) {
     schema.reset(new FunctionSchema(std::move(schema_)));
     return *this;
+  }
+
+  const FunctionSchema& getSchema() const {
+    AT_ASSERT(schema != nullptr);
+    return *schema;
+  }
+
+  std::string prettyPrintSchema() const {
+    JIT_ASSERT(schema);
+    std::stringstream ss;
+    ss << *schema;
+    return ss.str();
+  }
+
+  GraphExecutorState getDebugState() {
+    return get_executor().getDebugState();
   }
 
 private:
@@ -207,7 +225,7 @@ private:
   std::unique_ptr<at::Tensor> parameter;
 };
 
-struct Module : public std::enable_shared_from_this<Module> {
+struct Module {
   TH_DISALLOW_COPY_AND_ASSIGN(Module);
   Module()
   : modules("Module")
@@ -266,13 +284,13 @@ struct Module : public std::enable_shared_from_this<Module> {
     return modules.get(name).module;
   }
 
-  const detail::OrderedDict<std::string, NamedModule>& get_modules() const {
+  const torch::detail::OrderedDict<std::string, NamedModule>& get_modules() const {
     return modules;
   }
-  const detail::OrderedDict<std::string, NamedParameter>& get_parameters() const {
+  const torch::detail::OrderedDict<std::string, NamedParameter>& get_parameters() const {
     return parameters;
   }
-  const detail::OrderedDict<std::string, std::unique_ptr<Method>>& get_methods() const {
+  const torch::detail::OrderedDict<std::string, std::unique_ptr<Method>>& get_methods() const {
     return methods;
   }
 
@@ -289,15 +307,17 @@ struct Module : public std::enable_shared_from_this<Module> {
     return nullptr;
   }
 
+  void save(const std::string& filename);
+
  private:
 
   // invariant: to ensure member_inputs of Methods stay valid,
   // it is only legal to _add_ new modules and parameters.
   // removing them will allow member_inputs to point to invalid parameters
   // no such restriction exists for methods
-  detail::OrderedDict<std::string, NamedModule> modules;
-  detail::OrderedDict<std::string, NamedParameter> parameters;
-  detail::OrderedDict<std::string, std::unique_ptr<Method>> methods;
+  torch::detail::OrderedDict<std::string, NamedModule> modules;
+  torch::detail::OrderedDict<std::string, NamedParameter> parameters;
+  torch::detail::OrderedDict<std::string, std::unique_ptr<Method>> methods;
   bool optimize;
 };
 

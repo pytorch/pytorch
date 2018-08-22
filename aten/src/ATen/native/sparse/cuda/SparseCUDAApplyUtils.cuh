@@ -1,7 +1,6 @@
 #pragma once
 
 #include <ATen/cuda/detail/TensorInfo.cuh>
-#include <THC/THCNumerics.cuh>
 
 namespace at { namespace native {
 
@@ -262,12 +261,12 @@ __global__ void indexSparseIntersectionKernel(
 //       long seg = chunk / chunksPerSeg;
 //       auto begin = segment_offsets[seg];
 //       auto end = (seg < newNnz - 1) ? segment_offsets[seg + 1] : nnz;
-//       Acctype valSum = ScalarConvert<float, Acctype>::to(0);
+//       Acctype valSum = static_cast<Acctype>::to(0);
 //       for (long valIdx = begin; valIdx < end; valIdx++) {
 //         const long valRow = value_indices[valIdx] * stride;
-//         valSum += ScalarConvert<Dtype, Acctype>::to(valFeat[valRow]);
+//         valSum += static_cast<Acctype>::to(valFeat[valRow]);
 //       }
-//       newValues[seg * stride + featureDim] = ScalarConvert<Acctype, Dtype>::to(valSum);
+//       newValues[seg * stride + featureDim] = static_cast<Dtype>::to(valSum);
 //     }
 //   }
 // }
@@ -291,7 +290,7 @@ __global__ void coalesceValuesKernel(
     Acctype tmp[SZ];
     #pragma unroll
     for (int ii = 0; ii < SZ; ii++) {
-      tmp[ii] = ScalarConvert<float, Acctype>::to(0);
+      tmp[ii] = 0;
     }
     for (int row = begin; row < end; row++) {
       const int valueRow = ((int) value_indices[row]) * stride;
@@ -303,7 +302,7 @@ __global__ void coalesceValuesKernel(
         int featureDim = startFeature + ii * WARP_SIZE;
         if (featureDim < stride)
         {
-          tmp[ii] += ScalarConvert<Dtype, Acctype>::to(values[valueRow + featureDim]);
+          tmp[ii] += static_cast<Acctype>(values[valueRow + featureDim]);
         }
       }
     }
@@ -313,7 +312,7 @@ __global__ void coalesceValuesKernel(
       int featureDim = startFeature + ii * WARP_SIZE;
       if (featureDim < stride)
       {
-        newValues[newValueRow + featureDim] = ScalarConvert<Acctype, Dtype>::to(tmp[ii]);
+        newValues[newValueRow + featureDim] = static_cast<Dtype>(tmp[ii]);
       }
     }
   }

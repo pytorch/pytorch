@@ -16,10 +16,16 @@ int main(int argc, char* argv[]) {
     return return_code;
   }
 
+  // ~ disables tags.
   if (!torch::cuda::is_available()) {
-    std::cerr << "CUDA not available. Disabling CUDA tests" << std::endl;
-    // ~ disables the [cuda] tag.
+    std::cerr << "CUDA not available. Disabling [cuda] and [multi-cuda] tests"
+              << std::endl;
     session.configData().testsOrTags.emplace_back("~[cuda]");
+    session.configData().testsOrTags.emplace_back("~[multi-cuda]");
+  } else if (torch::cuda::device_count() < 2) {
+    std::cerr << "Only one CUDA device detected. Disabling [multi-cuda] tests"
+              << std::endl;
+    session.configData().testsOrTags.emplace_back("~[multi-cuda]");
   }
 
   return session.run();

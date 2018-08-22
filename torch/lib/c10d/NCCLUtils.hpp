@@ -1,7 +1,8 @@
 #pragma once
 
-#include <nccl.h>
 #include <memory>
+
+#include <nccl.h>
 
 #define C10D_NCCL_CHECK(cmd)                                              \
   do {                                                                    \

@@ -38,7 +38,7 @@ class DistributedSampler(Sampler):
         # deterministically shuffle based on epoch
         g = torch.Generator()
         g.manual_seed(self.epoch)
-        indices = list(torch.randperm(len(self.dataset), generator=g))
+        indices = torch.randperm(len(self.dataset), generator=g).tolist()
 
         # add extra samples to make it evenly divisible
         indices += indices[:(self.total_size - len(indices))]

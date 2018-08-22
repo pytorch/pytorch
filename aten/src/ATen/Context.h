@@ -1,25 +1,22 @@
 #pragma once
 
-#include "ATen/ATenGeneral.h"
 #include <ATen/CPUGeneral.h>
+#include "ATen/ATenGeneral.h"
+#include "ATen/CUDAStream.h"
 #include "ATen/Generator.h"
 #include "ATen/Type.h"
 #include "ATen/Utils.h"
-#include "ATen/Error.h"
+#include "ATen/core/Error.h"
 #include "ATen/detail/CUDAHooksInterface.h"
-#include "ATen/CUDAStream.h"
+
+// This is temporary
+#include "ATen/core/ATenCoreTest.h"
 
 #include <memory>
 #include <mutex>
 #include <cstdint>
 
 namespace at {
-
-enum class IsVariable {
-  NotVariable,
-  Variable,
-  NumOptions
-};
 
 class AT_API Context {
 public:
@@ -28,7 +25,7 @@ public:
     return type_registry[static_cast<int>(p)][static_cast<int>(s)].get();
   }
   Type * getTypeOpt(Backend p, ScalarType s) {
-    initCUDAIfNeeded(p);
+    if (p != Backend::Undefined) initCUDAIfNeeded(backendToDeviceType(p));
     auto type = getTypeRaw(p, s);
 
     if(!type) {
@@ -45,11 +42,11 @@ public:
     if (!type) AT_ERROR(toString(p), toString(s), "Type is not enabled.");
     return *type;
   }
-  Generator & defaultGenerator(Backend p) {
-    initCUDAIfNeeded(p);
-    auto & generator = generator_registry[static_cast<int>(p)];
+  Generator & defaultGenerator(DeviceType device_type) {
+    initCUDAIfNeeded(device_type);
+    auto & generator = generator_registry[static_cast<int>(device_type)];
     if(!generator)
-      AT_ERROR(toString(p), " backend type not enabled.");
+      AT_ERROR(DeviceTypeName(device_type), " backend type not enabled.");
     return *generator;
   }
   bool hasMKL() const;
@@ -67,7 +64,7 @@ public:
   THCState* lazyInitCUDA() {
     std::call_once(thc_init,[&] {
       thc_state = detail::getCUDAHooks().initCUDA();
-      generator_registry[static_cast<int>(Backend::CUDA)] =
+      generator_registry[static_cast<int>(DeviceType::CUDA)] =
         detail::getCUDAHooks().initCUDAGenerator(this);
       detail::getCUDAHooks().registerCUDATypes(this);
     });
@@ -79,52 +76,6 @@ public:
     return thc_state.get();
   }
 
-  CUDAStream createCUDAStream() const {
-    return detail::CUDAStream_createAndRetainWithOptions(
-      CUDAStream::DEFAULT_FLAGS
-    , CUDAStream::DEFAULT_PRIORITY
-    );
-  }
-
-  CUDAStream createCUDAStreamWithOptions(int32_t flags, int32_t priority) const {
-    return detail::CUDAStream_createAndRetainWithOptions(flags, priority);
-  }
-
-  CUDAStream getDefaultCUDAStream() const {
-    return detail::CUDAStream_getDefaultStream();
-  }
-
-  CUDAStream getDefaultCUDAStreamOnDevice(int64_t device) const {
-    return detail::CUDAStream_getDefaultStreamOnDevice(device);
-  }
-
-  CUDAStream getCurrentCUDAStream() const {
-    return detail::CUDAStream_getAndRetainCurrentStream();
-  }
-
-  CUDAStream getCurrentCUDAStreamOnDevice(int64_t device) const {
-    return detail::CUDAStream_getAndRetainCurrentStreamOnDevice(device);
-  }
-
-  void setCurrentCUDAStream(CUDAStream stream) const {
-    return detail::CUDAStream_setStream(stream.internals());
-  }
-
-  void setCurrentCUDAStreamOnDevice(int64_t device, CUDAStream stream) const {
-    return detail::CUDAStream_setStreamOnDevice(device, stream.internals());
-  }
-
-#ifndef __HIP_PLATFORM_HCC__
-  cusparseHandle_t getCurrentCUDASparseHandle() const {
-    return detail::getCUDAHooks().getCurrentCUDASparseHandle(thc_state.get());
-  }
-#endif
-  cudaDeviceProp* getCurrentDeviceProperties() const {
-    return detail::getCUDAHooks().getCurrentDeviceProperties(thc_state.get());
-  }
-  cudaDeviceProp* getDeviceProperties(int device) const {
-    return detail::getCUDAHooks().getDeviceProperties(thc_state.get(), device);
-  }
   int getNumGPUs() const {
     return detail::getCUDAHooks().getNumGPUs();
   }
@@ -144,16 +95,17 @@ public:
   bool deterministicCuDNN() const;
   void setDeterministicCuDNN(bool);
   std::unique_ptr<Generator>
-    generator_registry[static_cast<int>(Backend::NumOptions)];
+    generator_registry[static_cast<int>(DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES)];
 private:
   // NB: type_registry has nullptr for all CUDA backends until
   // CUDA initialization has occurred
   std::unique_ptr<Type> type_registry
     [static_cast<int>(Backend::NumOptions)]
     [static_cast<int>(ScalarType::NumOptions)];
-  void initCUDAIfNeeded(Backend p) {
-    if(p == Backend::CUDA)
+  void initCUDAIfNeeded(DeviceType p) {
+    if (p == DeviceType::CUDA) {
       lazyInitCUDA();
+    }
   }
   std::once_flag thc_init;
   bool enabled_cudnn = true;
@@ -179,6 +131,10 @@ static inline void init() {
 
 static inline Type& getType(Backend p, ScalarType s) {
   return globalContext().getType(p, s);
+}
+
+static inline Type& getType(DeviceType p, ScalarType s) {
+  return globalContext().getType(deviceTypeToBackend(p), s);
 }
 
 static inline Type& CPU(ScalarType s) {

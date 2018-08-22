@@ -13,13 +13,13 @@ class RoIPoolOp final : public Operator<Context> {
  public:
   RoIPoolOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        is_test_(OperatorBase::GetSingleArgument<int>(OpSchema::Arg_IsTest, 0)),
+        is_test_(this->template GetSingleArgument<int>(OpSchema::Arg_IsTest, 0)),
         order_(StringToStorageOrder(
-            OperatorBase::GetSingleArgument<string>("order", "NCHW"))),
-        pooled_height_(OperatorBase::GetSingleArgument<int>("pooled_h", 1)),
-        pooled_width_(OperatorBase::GetSingleArgument<int>("pooled_w", 1)),
+            this->template GetSingleArgument<string>("order", "NCHW"))),
+        pooled_height_(this->template GetSingleArgument<int>("pooled_h", 1)),
+        pooled_width_(this->template GetSingleArgument<int>("pooled_w", 1)),
         spatial_scale_(
-            OperatorBase::GetSingleArgument<float>("spatial_scale", 1.)) {
+            this->template GetSingleArgument<float>("spatial_scale", 1.)) {
     CAFFE_ENFORCE(
         (is_test_ && OutputSize() == 1) || (!is_test_ && OutputSize() == 2),
         "Output size mismatch.");
@@ -47,11 +47,11 @@ class RoIPoolGradientOp final : public Operator<Context> {
   RoIPoolGradientOp(const OperatorDef& def, Workspace* ws)
       : Operator<Context>(def, ws),
         spatial_scale_(
-            OperatorBase::GetSingleArgument<float>("spatial_scale", 1.)),
-        pooled_height_(OperatorBase::GetSingleArgument<int>("pooled_h", 1)),
-        pooled_width_(OperatorBase::GetSingleArgument<int>("pooled_w", 1)),
+            this->template GetSingleArgument<float>("spatial_scale", 1.)),
+        pooled_height_(this->template GetSingleArgument<int>("pooled_h", 1)),
+        pooled_width_(this->template GetSingleArgument<int>("pooled_w", 1)),
         order_(StringToStorageOrder(
-            OperatorBase::GetSingleArgument<string>("order", "NCHW"))) {
+            this->template GetSingleArgument<string>("order", "NCHW"))) {
     CAFFE_ENFORCE_GT(spatial_scale_, 0);
     CAFFE_ENFORCE_GT(pooled_height_, 0);
     CAFFE_ENFORCE_GT(pooled_width_, 0);

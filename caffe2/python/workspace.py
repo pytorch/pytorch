@@ -42,6 +42,7 @@ operator_tracebacks = defaultdict(dict)
 
 is_asan = C.is_asan
 has_gpu_support = C.has_gpu_support
+has_hip_support = C.has_hip_support
 if has_gpu_support:
     NumCudaDevices = C.num_cuda_devices
     GetCUDAVersion = C.get_cuda_version
@@ -61,6 +62,7 @@ else:
 IsNUMAEnabled = C.is_numa_enabled
 GetNumNUMANodes = C.get_num_numa_nodes
 GetBlobNUMANode = C.get_blob_numa_node
+GetBlobSizeBytes = C.get_blob_size_bytes
 
 def _GetFreeFlaskPort():
     """Get a free flask port."""
@@ -226,7 +228,16 @@ def RunPlan(plan_or_step):
     return C.run_plan(StringifyProto(plan_or_step))
 
 
-def InferShapesAndTypes(nets, blob_dimensions=None, nets_proto=False):
+def RunPlanInBackground(plan_or_step):
+    # TODO(jiayq): refactor core.py/workspace.py to avoid circular deps
+    import caffe2.python.core as core
+    if isinstance(plan_or_step, core.ExecutionStep):
+        plan_or_step = core.Plan(plan_or_step)
+    return C.run_plan_in_background(StringifyProto(plan_or_step))
+
+
+def InferShapesAndTypes(nets, blob_dimensions=None, nets_proto=False,
+                        blob_types=None):
     """Infers the shapes and types for the specified nets.
 
     Inputs:
@@ -243,10 +254,15 @@ def InferShapesAndTypes(nets, blob_dimensions=None, nets_proto=False):
     else:
         net_protos = [StringifyProto(n.Proto()) for n in nets]
     if blob_dimensions is None:
+        assert blob_types is None
         blobdesc_prototxt = C.infer_shapes_and_types_from_workspace(net_protos)
-    else:
+    elif blob_types is None:
         blobdesc_prototxt = C.infer_shapes_and_types_from_map(
             net_protos, blob_dimensions
+        )
+    else:
+        blobdesc_prototxt = C.infer_shapes_and_types_from_map(
+            net_protos, blob_dimensions, blob_types
         )
     blobdesc_proto = caffe2_pb2.TensorShapes()
     blobdesc_proto.ParseFromString(blobdesc_prototxt)

@@ -3,6 +3,7 @@ from torch.nn.parameter import Parameter
 
 from .module import Module
 from .. import functional as F
+from .. import init
 
 
 class Embedding(Module):
@@ -27,6 +28,7 @@ class Embedding(Module):
 
     Attributes:
         weight (Tensor): the learnable weights of the module of shape (num_embeddings, embedding_dim)
+                         initialized from :math:`\mathcal{N}(0, 1)`
 
     Shape:
 
@@ -100,9 +102,10 @@ class Embedding(Module):
         self.sparse = sparse
 
     def reset_parameters(self):
-        self.weight.data.normal_(0, 1)
+        init.normal_(self.weight)
         if self.padding_idx is not None:
-            self.weight.data[self.padding_idx].fill_(0)
+            with torch.no_grad():
+                self.weight[self.padding_idx].fill_(0)
 
     def forward(self, input):
         return F.embedding(
@@ -188,6 +191,7 @@ class EmbeddingBag(Module):
 
     Attributes:
         weight (Tensor): the learnable weights of the module of shape ``(num_embeddings x embedding_dim)``
+                         initialized from :math:`\mathcal{N}(0, 1)`.
 
     Inputs: :attr:`input` (LongTensor) and :attr:`offsets` (LongTensor, optional)
 
@@ -236,7 +240,7 @@ class EmbeddingBag(Module):
         self.reset_parameters()
 
     def reset_parameters(self):
-        self.weight.data.normal_(0, 1)
+        init.normal_(self.weight)
 
     def forward(self, input, offsets=None):
         return F.embedding_bag(input, self.weight, offsets,

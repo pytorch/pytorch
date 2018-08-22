@@ -73,10 +73,28 @@ SET(mklseq)
 # Paths
 SET(saved_CMAKE_LIBRARY_PATH ${CMAKE_LIBRARY_PATH})
 SET(saved_CMAKE_INCLUDE_PATH ${CMAKE_INCLUDE_PATH})
+IF(WIN32)
+  # Set default MKLRoot for Windows
+  IF($ENV{MKLProductDir})
+    SET(INTEL_COMPILER_DIR $ENV{MKLProductDir})
+  ELSE()
+    SET(INTEL_COMPILER_DIR
+     "C:/Program Files (x86)/IntelSWTools/compilers_and_libraries/windows")
+  ENDIF()
+  # Change mklvers and iccvers when we are using MSVC instead of ICC
+  IF(MSVC AND NOT CMAKE_CXX_COMPILER_ID STREQUAL "Intel")
+    SET(mklvers "${mklvers}_win")
+    SET(iccvers "${iccvers}_win")
+  ENDIF()
+ENDIF(WIN32)
 IF (EXISTS ${INTEL_COMPILER_DIR})
   # TODO: diagnostic if dir does not exist
   SET(CMAKE_LIBRARY_PATH ${CMAKE_LIBRARY_PATH}
     "${INTEL_COMPILER_DIR}/lib/${iccvers}")
+  IF(MSVC)
+    SET(CMAKE_LIBRARY_PATH ${CMAKE_LIBRARY_PATH}
+      "${INTEL_COMPILER_DIR}/compiler/lib/${iccvers}")
+  ENDIF()
   IF (NOT EXISTS ${INTEL_MKL_DIR})
     SET(INTEL_MKL_DIR "${INTEL_COMPILER_DIR}/mkl")
   ENDIF()
@@ -266,13 +284,13 @@ ENDIF (MKL_LIBRARIES)
 # Final
 SET(CMAKE_LIBRARY_PATH ${saved_CMAKE_LIBRARY_PATH})
 SET(CMAKE_INCLUDE_PATH ${saved_CMAKE_INCLUDE_PATH})
-IF (MKL_LIBRARIES)
+IF (MKL_LIBRARIES AND MKL_INCLUDE_DIR)
   SET(MKL_FOUND TRUE)
   set(MKL_cmake_included true)
-ELSE (MKL_LIBRARIES)
+ELSE (MKL_LIBRARIES AND MKL_INCLUDE_DIR)
   SET(MKL_FOUND FALSE)
   SET(MKL_VERSION)
-ENDIF (MKL_LIBRARIES)
+ENDIF (MKL_LIBRARIES AND MKL_INCLUDE_DIR)
 
 # Standard termination
 IF(NOT MKL_FOUND AND MKL_FIND_REQUIRED)

@@ -13,6 +13,7 @@
 #include <test/cpp/api/util.h>
 
 using namespace torch::nn;
+using namespace torch::test;
 
 class TestModel : public torch::nn::Module {
  public:
@@ -27,9 +28,9 @@ class TestModel : public torch::nn::Module {
 class NestedModel : public torch::nn::Module {
  public:
   NestedModel()
-      : l1(register_module("l1", Linear(5, 20))),
-        t(register_module("test", std::make_shared<TestModel>())),
-        param_(register_parameter("param", torch::empty({3, 2, 21}))) {}
+      : param_(register_parameter("param", torch::empty({3, 2, 21}))),
+        l1(register_module("l1", Linear(5, 20))),
+        t(register_module("test", std::make_shared<TestModel>())) {}
 
   torch::Tensor param_;
   Linear l1;
@@ -122,7 +123,7 @@ TEST_CASE("modules") {
   }
 
   SECTION("simple") {
-    auto model = std::make_shared<torch::SimpleContainer>();
+    auto model = std::make_shared<SimpleContainer>();
     auto l1 = model->add(Linear(10, 3), "l1");
     auto l2 = model->add(Linear(3, 5), "l2");
     auto l3 = model->add(Linear(5, 100), "l3");
@@ -136,13 +137,18 @@ TEST_CASE("modules") {
     REQUIRE(x.ndimension() == 2);
     REQUIRE(x.size(0) == 1000);
     REQUIRE(x.size(1) == 100);
-    REQUIRE(x.data().min().toCFloat() == 0);
+    REQUIRE(x.min().toCFloat() == 0);
   }
 
   SECTION("embedding") {
     SECTION("basic") {
-      int dict_size = 10;
+      const int64_t dict_size = 10;
       Embedding model(dict_size, 2);
+      REQUIRE(model->parameters().contains("weight"));
+      REQUIRE(model->weight.ndimension() == 2);
+      REQUIRE(model->weight.size(0) == dict_size);
+      REQUIRE(model->weight.size(1) == 2);
+
       // Cannot get gradients to change indices (input) - only for embedding
       // params
       auto x = torch::full({10}, dict_size - 1, torch::kInt64);
@@ -155,7 +161,7 @@ TEST_CASE("modules") {
       REQUIRE(y.size(0) == 10);
       REQUIRE(y.size(1) == 2);
 
-      REQUIRE(model->parameters()["table"].grad().numel() == 2 * dict_size);
+      REQUIRE(model->parameters()["weight"].grad().numel() == 2 * dict_size);
     }
 
     SECTION("list") {
@@ -185,7 +191,7 @@ TEST_CASE("modules") {
 
     dropout->eval();
     y = dropout->forward(x);
-    REQUIRE(y.data().sum().toCFloat() == 100);
+    REQUIRE(y.sum().toCFloat() == 100);
   }
 
   SECTION("param") {
@@ -226,12 +232,12 @@ TEST_CASE("modules") {
     }
     {
       auto functional = Functional(torch::relu);
-      REQUIRE(functional(torch::ones({})).data().toCFloat() == 1);
+      REQUIRE(functional(torch::ones({})).toCFloat() == 1);
       REQUIRE(functional(torch::ones({})).toCFloat() == 1);
       REQUIRE(functional(torch::ones({}) * -1).toCFloat() == 0);
     }
     {
-      auto functional = Functional(torch::elu, /*alpha=*/1, /*scale=*/0);
+      auto functional = Functional(torch::elu, /*alpha=*/1, /*scale=*/0, /*input_scale=*/1);
       REQUIRE(functional(torch::ones({})).toCFloat() == 0);
     }
   }

@@ -38,7 +38,6 @@ REGISTER_CPU_OPERATOR(Copy, CopyOp<CPUContext, CPUContext, CPUContext>);
 REGISTER_CPU_OPERATOR(LengthsToShape, LengthsToShapeOp<CPUContext>);
 REGISTER_CPU_OPERATOR(HasElements, HasElementsOp<CPUContext>);
 REGISTER_CPU_OPERATOR(IsEmpty, IsEmptyOp<CPUContext>);
-REGISTER_CPU_OPERATOR(Gather, GatherOp<CPUContext>);
 REGISTER_CPU_OPERATOR(GatherRanges, GatherRangesOp<CPUContext>);
 REGISTER_CPU_OPERATOR(LengthsGather, LengthsGatherOp<CPUContext>);
 REGISTER_CPU_OPERATOR(LengthsToSegmentIds, LengthsToSegmentIdsOp<CPUContext>);
@@ -613,91 +612,10 @@ is_empty:  True
     .Input(0, "tensor", "Input data tensor to check if empty.")
     .Output(0, "is_empty", "Output scalar boolean tensor. True if input has size == 0.");
 
-OPERATOR_SCHEMA(Gather)
-    .NumInputs(2)
-    .NumOutputs(1)
-    .SetDoc(R"DOC(
-
-The *Gather* op accepts a *DATA* tensor of rank $r >= 1$ and *INDICES* tensor of rank $q$ as inputs. It then gathers entries of the outer-most dimension of *DATA*, indexed by *INDICES*, and concatenate them in an output tensor of rank $q + (r - 1)$.
-
-Github Links:
-
-- https://github.com/caffe2/caffe2/blob/master/caffe2/operators/utility_ops.cc
-- https://github.com/caffe2/caffe2/blob/master/caffe2/operators/utility_ops.h
-
-
-<details>
-
-<summary> <b>Example</b> </summary>
-
-**Code**
-
-```
-
-workspace.ResetWorkspace()
-
-op = core.CreateOperator(
-    "Gather",
-    ["DATA", "INDICES"],
-    ["OUTPUT"]
-)
-data = np.array([[1., 1.2],[2.3, 3.4],[4.5, 5.7]])
-print("DATA:\n",data)
-
-inds = np.array([[0, 1],[1, 2]])
-print("INDICES:\n",inds)
-
-# Feed X into workspace
-workspace.FeedBlob("DATA", data.astype(np.float32))
-workspace.FeedBlob("INDICES", inds.astype(np.int32))
-
-workspace.RunOperatorOnce(op)
-print("OUTPUT:\n", workspace.FetchBlob("OUTPUT"))
-
-```
-
-**Result**
-
-```
-
-DATA:
- [[1.  1.2]
- [2.3 3.4]
- [4.5 5.7]]
-INDICES:
- [[0 1]
- [1 2]]
-OUTPUT:
- [[[1.  1.2]
-  [2.3 3.4]]
-
- [[2.3 3.4]
-  [4.5 5.7]]]
-
-```
-
-</details>
-
-)DOC")
-    .Input(0, "DATA", "Input data tensor of rank $r>=1$")
-    .Input(1, "INDICES", "Input indices tensor of rank $q$. This tensor must contain integers.")
-    .Output(0, "OUTPUT", "Output tensor of rank $q+(r-1)$")
-    .TensorInferenceFunction([](const OperatorDef& def,
-                                const vector<TensorShape>& in) {
-      vector<TensorShape> out(1);
-      for (auto d : in[1].dims()) {
-        out[0].add_dims(d);
-      }
-      for (int i = 1; i < in[0].dims_size(); ++i) {
-        out[0].add_dims(in[0].dims(i));
-      }
-      out[0].set_data_type(in[0].data_type());
-      return out;
-    });
-
 OPERATOR_SCHEMA(GatherRanges)
     .NumInputs(2)
     .NumOutputs(2)
+    .DisallowInputFillers()
     .SetDoc(R"DOC(
 Given DATA tensor of rank 1, and RANGES tensor of rank 3, gather
 corresponding ranges into a 1-D tensor OUTPUT.
@@ -777,6 +695,7 @@ Example:
 OPERATOR_SCHEMA(LengthsToSegmentIds)
     .NumInputs(1)
     .NumOutputs(1)
+    .DisallowInputFillers() // TODO: enable the filler
     .SetDoc(R"DOC(
 Given a vector of segment lengths (*lengths*) the *LengthsToSegmentIds* op returns a zero-based, consecutive vector of segment ids (*segment_ids*). For example, *lengths=[1, 3, 0, 2]* will produce *segment_ids=[0, 1, 1, 1, 3, 3]*. In general, the inverse operation is *SegmentIdsToLengths*. Notice though that trailing empty sequence lengths can't be properly recovered from segment ids.
 
@@ -853,6 +772,7 @@ For example, `[1, 3, 0, 2]` transforms into `[[0, 1], [1, 3], [4, 0], [4, 2]]`.
 OPERATOR_SCHEMA(SegmentIdsToLengths)
     .NumInputs(1, 2)
     .NumOutputs(1)
+    .DisallowInputFillers() // TODO: enable the filler
     .SetDoc(R"DOC(
 Transfers a vector of segment ids to a vector of segment lengths. This operation
 supports non-consecutive segment ids. Segments not appearing in the input vector
@@ -874,6 +794,7 @@ cannot represent empty segments at the end (if the second input is absent).
 OPERATOR_SCHEMA(SegmentIdsToRanges)
     .NumInputs(1, 2)
     .NumOutputs(1)
+    .DisallowInputFillers() // TODO: enable the filler
     .SetDoc(R"DOC(
 Transfers a vector of segment ids to a vector of segment ranges. This operation
 supports non-consecutive segment ids. Segments not appearing in the input vector
@@ -1046,34 +967,6 @@ class GetWeightedSumGradient : public GradientMakerBase {
   }
 };
 REGISTER_GRADIENT(WeightedSum, GetWeightedSumGradient);
-
-class GetGatherGradient : public GradientMakerBase {
-  using GradientMakerBase::GradientMakerBase;
-  vector<OperatorDef> GetGradientDefs() override {
-    ArgumentHelper argsHelper(def_);
-    const bool dense_gradient =
-        argsHelper.GetSingleArgument<bool>("dense_gradient", false);
-
-    using Op = GatherOp<CPUContext>;
-
-    if (dense_gradient) {
-      return vector<OperatorDef>{CreateOperatorDef(
-          "SparseToDense",
-          "",
-          vector<string>{I(Op::INDICES), GO(0), I(Op::DATA)},
-          vector<string>{GI(Op::DATA)})};
-    } else {
-      // For now we don't do any reshaping as the consumer of this op would
-      // probably be ScatterUpdate which is intenionally ignores shapes. We
-      // might need to revisit it in the future for correctness purposes. The
-      // right shape for the output woild be to flatten INDICES and collapse
-      // first X dims of GRAD
-      SetSparse(Op::DATA, I(Op::INDICES), GO(0));
-      return vector<OperatorDef>();
-    }
-  }
-};
-REGISTER_GRADIENT(Gather, GetGatherGradient);
 
 struct GetFlattenToVecGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
@@ -1276,7 +1169,7 @@ template <typename T>
 bool RangeOp<CPUContext>::DoRunOnDevice(
     const T& start,
     const T& step,
-    Tensor<CPUContext>* output) {
+    Tensor* output) {
   auto* output_data = output->template mutable_data<T>();
   for (int i = 0; i < output->size(); ++i) {
     output_data[i] = i * step + start;

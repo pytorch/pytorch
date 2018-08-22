@@ -8,6 +8,11 @@
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/utils/conversions.h"
 
+#ifdef __HIPCC__
+// rocblas doesn't fully support fp16 yet
+#define ROCBLAS_FP16 0
+#endif
+
 namespace caffe2 {
 
 REGISTER_CUDA_OPERATOR(
@@ -83,7 +88,7 @@ void device_reduce(
     const T* d_in,
     T* d_out,
     int N,
-    Tensor<CUDAContext>* buffer,
+    Tensor* buffer,
     CUDAContext* context) {
   // Determine temporary device storage requirements
   size_t temp_storage_bytes = 0;
@@ -109,8 +114,11 @@ void device_reduce<float16>(
     const float16* in,
     float16* out,
     int N,
-    Tensor<CUDAContext>* buffer,
+    Tensor* buffer,
     CUDAContext* context) {
+#if defined(__HIPCC__) && !ROCBLAS_FP16
+  CAFFE_THROW("HIP rocblas doesn't fully support fp16 device_reduce yet.");
+#else
   auto buffer_size = 1;
 
   if (buffer->size() != buffer_size) {
@@ -119,7 +127,7 @@ void device_reduce<float16>(
     math::Set<float16, CUDAContext>(
         N,
         convert::To<float, float16>(1.),
-        buffer->mutable_data<float16>(),
+        buffer->template mutable_data<float16>(),
         context);
   }
 
@@ -135,6 +143,7 @@ void device_reduce<float16>(
       out,
       CUDA_R_16F,
       CUDA_R_32F));
+#endif
 }
 
 template <typename T, int BLOCK_THREADS>

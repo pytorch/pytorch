@@ -61,7 +61,7 @@ if(BUILD_CAFFE2)
 endif()
 
 # ---[ BLAS
-if(BUILD_ATEN)
+if(NOT BUILD_ATEN_MOBILE)
   set(BLAS "MKL" CACHE STRING "Selected BLAS library")
 else()
   set(BLAS "Eigen" CACHE STRING "Selected BLAS library")
@@ -338,19 +338,57 @@ include_directories(SYSTEM ${EIGEN3_INCLUDE_DIR})
 
 # ---[ Python + Numpy
 if(BUILD_PYTHON)
-  # Put the currently-activated python version at the front of
-  # Python_ADDITIONAL_VERSIONS so that it is found first. Otherwise there may
-  # be mismatches between Python executables and libraries used at different
-  # stages of build time and at runtime
-  execute_process(
-    COMMAND "python" -c "import sys; sys.stdout.write('%s.%s' % (sys.version_info.major, sys.version_info.minor))"
-    RESULT_VARIABLE _exitcode
-    OUTPUT_VARIABLE _py_version)
-  set(Python_ADDITIONAL_VERSIONS)
-  if(${_exitcode} EQUAL 0)
-    list(APPEND Python_ADDITIONAL_VERSIONS "${_py_version}")
+  # If not given a Python installation, then use the current active Python
+  if(NOT DEFINED PYTHON_EXECUTABLE)
+    execute_process(
+      COMMAND "which" "python" RESULT_VARIABLE _exitcode OUTPUT_VARIABLE _py_exe)
+    if(${_exitcode} EQUAL 0)
+      string(STRIP ${_py_exe} PYTHON_EXECUTABLE)
+      message(STATUS "Setting Python to ${PYTHON_EXECUTABLE}")
+    endif()
   endif()
-  list(APPEND Python_ADDITIONAL_VERSIONS 3.6 3.5 2.8 2.7 2.6)
+
+  # Check that Python works
+  if(DEFINED PYTHON_EXECUTABLE)
+    execute_process(
+        COMMAND "${PYTHON_EXECUTABLE}" "--version"
+        RESULT_VARIABLE _exitcode)
+    if(NOT ${_exitcode} EQUAL 0)
+      message(FATAL_ERROR "The Python executable ${PYTHON_EXECUTABLE} cannot be run. Make sure that it is an absolute path.")
+    endif()
+  endif()
+
+  # Seed PYTHON_INCLUDE_DIR and PYTHON_LIBRARY to be consistent with the
+  # executable that we already found (if we didn't actually find an executable
+  # then these will just use "python", but at least they'll be consistent with
+  # each other).
+  if(NOT DEFINED PYTHON_INCLUDE_DIR)
+    # distutils.sysconfig, if it's installed, is more accurate than sysconfig,
+    # which sometimes outputs directories that do not exist
+    pycmd_no_exit(_py_inc _exitcode "from distutils import sysconfig; print(sysconfig.get_python_inc())")
+    if("${_exitcode}" EQUAL 0 AND IS_DIRECTORY "${_py_inc}")
+      SET(PYTHON_INCLUDE_DIR "${_py_inc}")
+      message(STATUS "Setting Python's include dir to ${_py_inc} from distutils.sysconfig")
+    else()
+      pycmd_no_exit(_py_inc _exitcode "from sysconfig import get_paths; print(get_paths()['include'])")
+      if("${_exitcode}" EQUAL 0 AND IS_DIRECTORY "${_py_inc}")
+        SET(PYTHON_INCLUDE_DIR "${_py_inc}")
+        message(STATUS "Setting Python's include dir to ${_py_inc} from sysconfig")
+      endif()
+    endif()
+  endif(NOT DEFINED PYTHON_INCLUDE_DIR)
+
+  if(NOT DEFINED PYTHON_LIBRARY)
+    pycmd_no_exit(_py_lib _exitcode "from sysconfig import get_paths; print(get_paths()['stdlib'])")
+    if("${_exitcode}" EQUAL 0 AND EXISTS "${_py_lib}" AND EXISTS "${_py_lib}")
+      SET(PYTHON_LIBRARY "${_py_lib}")
+      message(STATUS "Setting Python's library to ${_py_lib}")
+    endif()
+  endif(NOT DEFINED PYTHON_LIBRARY)
+
+  # These should fill in the rest of the variables, like versions, but resepct
+  # the variables we set above
+  set(Python_ADDITIONAL_VERSIONS 3.7 3.6 3.5 2.8 2.7 2.6)
   find_package(PythonInterp 2.7)
   find_package(PythonLibs 2.7)
   find_package(NumPy REQUIRED)
@@ -474,7 +512,7 @@ if(USE_CUDA)
 endif()
 
 # ---[ HIP
-if(BUILD_CAFFE2 OR BUILD_ATEN)
+if(BUILD_CAFFE2 OR NOT BUILD_ATEN_MOBILE)
   include(${CMAKE_CURRENT_LIST_DIR}/public/LoadHIP.cmake)
   if(PYTORCH_FOUND_HIP)
     message(INFO "Compiling with HIP for AMD.")
@@ -499,25 +537,34 @@ if(BUILD_CAFFE2 OR BUILD_ATEN)
     hip_include_directories(${Caffe2_HIP_INCLUDES})
 
     set(Caffe2_HIP_DEPENDENCY_LIBS
-      ${rocrand_LIBRARIES} ${hiprand_LIBRARIES} ${PYTORCH_HIP_HCC_LIBRARIES} ${PYTORCH_MIOPEN_LIBRARIES} ${hipblas_LIBRARIES})
+      ${rocrand_LIBRARIES} ${hiprand_LIBRARIES} ${PYTORCH_HIP_HCC_LIBRARIES} ${PYTORCH_MIOPEN_LIBRARIES})
     # Additional libraries required by PyTorch AMD that aren't used by Caffe2 (not in Caffe2's docker image)
-    if(BUILD_ATEN)
-      set(Caffe2_HIP_DEPENDENCY_LIBS ${Caffe2_HIP_DEPENDENCY_LIBS} ${hipsparse_LIBRARIES} ${hiprng_LIBRARIES})
+    if(NOT BUILD_ATEN_MOBILE)
+      set(Caffe2_HIP_DEPENDENCY_LIBS ${Caffe2_HIP_DEPENDENCY_LIBS} ${hipsparse_LIBRARIES})
     endif()
     # TODO: There is a bug in rocblas's cmake files that exports the wrong targets name in ${rocblas_LIBRARIES}
     list(APPEND Caffe2_HIP_DEPENDENCY_LIBS
       roc::rocblas)
+
+    # TODO: Currently pytorch hipify script uses a feature called
+    # "disabled_modules" that effectively ifdef out a file, but
+    # without doing extra processing in the callers, which results in
+    # some unresolved symbols in the shared lib
+    # (libcaffe2_hip.so). Remove this when all disabled_modules are
+    # eliminated.
+    set(CMAKE_EXE_LINKER_FLAGS "-Wl,--unresolved-symbols=ignore-in-shared-libs ${CMAKE_EXE_LINKER_FLAGS}")
   else()
     caffe2_update_option(USE_ROCM OFF)
   endif()
 endif()
 
 # ---[ ROCm
-if(USE_ROCM AND NOT BUILD_CAFFE2)
+if(USE_ROCM)
  include_directories(SYSTEM ${HIP_PATH}/include)
- include_directories(SYSTEM ${HIPBLAS_PATH}/include)
+ include_directories(SYSTEM ${ROCBLAS_PATH}/include)
  include_directories(SYSTEM ${HIPSPARSE_PATH}/include)
- include_directories(SYSTEM ${HIPRNG_PATH}/include)
+ include_directories(SYSTEM ${HIPRAND_PATH}/include)
+ include_directories(SYSTEM ${ROCRAND_PATH}/include)
  include_directories(SYSTEM ${THRUST_PATH})
 
  # load HIP cmake module and load platform id
@@ -706,7 +753,7 @@ if (USE_NNAPI AND NOT ANDROID)
   caffe2_update_option(USE_NNAPI OFF)
 endif()
 
-if (BUILD_ATEN)
+if (NOT BUILD_ATEN_MOBILE)
   if (BUILD_CAFFE2)
     list(APPEND Caffe2_DEPENDENCY_LIBS aten_op_header_gen)
     if (USE_CUDA)
@@ -770,7 +817,7 @@ if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
 endif()
 
 # --[ ATen checks
-if (BUILD_ATEN)
+if (NOT BUILD_ATEN_MOBILE)
   set(TORCH_CUDA_ARCH_LIST $ENV{TORCH_CUDA_ARCH_LIST})
   set(TORCH_NVCC_FLAGS $ENV{TORCH_NVCC_FLAGS})
 
@@ -807,28 +854,26 @@ if (BUILD_ATEN)
 
   #Check if certain std functions are supported. Sometimes
   #_GLIBCXX_USE_C99 macro is not defined and some functions are missing.
-  if (NOT ANDROID)
-    CHECK_CXX_SOURCE_COMPILES("
-    #include <cmath>
-    #include <string>
+  CHECK_CXX_SOURCE_COMPILES("
+  #include <cmath>
+  #include <string>
 
-    int main() {
-      int a = std::isinf(3.0);
-      int b = std::isnan(0.0);
-      std::string s = std::to_string(1);
+  int main() {
+    int a = std::isinf(3.0);
+    int b = std::isnan(0.0);
+    std::string s = std::to_string(1);
 
-      return 0;
-      }" SUPPORT_GLIBCXX_USE_C99)
+    return 0;
+    }" SUPPORT_GLIBCXX_USE_C99)
 
-    if (NOT SUPPORT_GLIBCXX_USE_C99)
-      message(FATAL_ERROR
-              "The C++ compiler does not support required functions. "
-              "This is very likely due to a known bug in GCC 5 "
-              "(and maybe other versions) on Ubuntu 17.10 and newer. "
-              "For more information, see: "
-              "https://github.com/pytorch/pytorch/issues/5229"
-             )
-    endif()
+  if (NOT SUPPORT_GLIBCXX_USE_C99)
+    message(FATAL_ERROR
+            "The C++ compiler does not support required functions. "
+            "This is very likely due to a known bug in GCC 5 "
+            "(and maybe other versions) on Ubuntu 17.10 and newer. "
+            "For more information, see: "
+            "https://github.com/pytorch/pytorch/issues/5229"
+           )
   endif()
 
   # Top-level build config
@@ -892,12 +937,12 @@ if (BUILD_ATEN)
   OPTION(NDEBUG "disable asserts (WARNING: this may result in silent UB e.g. with out-of-bound indices)")
   IF (NOT NDEBUG)
     MESSAGE(STATUS "Removing -DNDEBUG from compile flags")
-    STRING(REPLACE "-DNDEBUG" "" CMAKE_C_FLAGS "" ${CMAKE_C_FLAGS})
-    STRING(REPLACE "-DNDEBUG" "" CMAKE_C_FLAGS_DEBUG "" ${CMAKE_C_FLAGS_DEBUG})
-    STRING(REPLACE "-DNDEBUG" "" CMAKE_C_FLAGS_RELEASE "" ${CMAKE_C_FLAGS_RELEASE})
-    STRING(REPLACE "-DNDEBUG" "" CMAKE_CXX_FLAGS "" ${CMAKE_CXX_FLAGS})
-    STRING(REPLACE "-DNDEBUG" "" CMAKE_CXX_FLAGS_DEBUG "" ${CMAKE_CXX_FLAGS_DEBUG})
-    STRING(REPLACE "-DNDEBUG" "" CMAKE_CXX_FLAGS_RELEASE "" ${CMAKE_CXX_FLAGS_RELEASE})
+    STRING(REGEX REPLACE "[-/]DNDEBUG" "" CMAKE_C_FLAGS "" ${CMAKE_C_FLAGS})
+    STRING(REGEX REPLACE "[-/]DNDEBUG" "" CMAKE_C_FLAGS_DEBUG "" ${CMAKE_C_FLAGS_DEBUG})
+    STRING(REGEX REPLACE "[-/]DNDEBUG" "" CMAKE_C_FLAGS_RELEASE "" ${CMAKE_C_FLAGS_RELEASE})
+    STRING(REGEX REPLACE "[-/]DNDEBUG" "" CMAKE_CXX_FLAGS "" ${CMAKE_CXX_FLAGS})
+    STRING(REGEX REPLACE "[-/]DNDEBUG" "" CMAKE_CXX_FLAGS_DEBUG "" ${CMAKE_CXX_FLAGS_DEBUG})
+    STRING(REGEX REPLACE "[-/]DNDEBUG" "" CMAKE_CXX_FLAGS_RELEASE "" ${CMAKE_CXX_FLAGS_RELEASE})
   ENDIF()
 
   # OpenMP support?

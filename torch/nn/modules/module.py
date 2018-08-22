@@ -450,16 +450,16 @@ class Module(object):
 
     def _slow_forward(self, *input, **kwargs):
         input_vars = tuple(torch.autograd.function._iter_tensors(input))
-        tracing_state = torch.jit.get_tracing_state(input_vars)
+        tracing_state = torch._C._get_tracing_state()
         if not tracing_state:
             return self.forward(*input, **kwargs)
         if not hasattr(tracing_state, '_traced_module_stack'):
             tracing_state._traced_module_stack = []
         name = self._tracing_name(tracing_state)
         if name:
-            tracing_state.push_scope('%s[%s]' % (self.__class__.__name__, name))
+            tracing_state.push_scope('%s[%s]' % (self._get_name(), name))
         else:
-            tracing_state.push_scope(self.__class__.__name__)
+            tracing_state.push_scope(self._get_name())
         tracing_state._traced_module_stack.append(self)
         try:
             result = self.forward(*input, **kwargs)
@@ -471,7 +471,7 @@ class Module(object):
     def __call__(self, *input, **kwargs):
         for hook in self._forward_pre_hooks.values():
             hook(self, input)
-        if torch.jit._tracing:
+        if torch._C._get_tracing_state():
             result = self._slow_forward(*input, **kwargs)
         else:
             result = self.forward(*input, **kwargs)
@@ -642,6 +642,10 @@ class Module(object):
             if key in state_dict:
                 input_param = state_dict[key]
 
+                # Backward compatibility: loading 1-dim tensor from 0.3.* to version 0.4+
+                if len(param.shape) == 0 and len(input_param.shape) == 1:
+                    input_param = input_param[0]
+
                 if input_param.shape != param.shape:
                     # local shape should match the one in checkpoint
                     error_msgs.append('size mismatch for {}: copying a param of {} from checkpoint, '
@@ -718,10 +722,28 @@ class Module(object):
             raise RuntimeError('Error(s) in loading state_dict for {}:\n\t{}'.format(
                                self.__class__.__name__, "\n\t".join(error_msgs)))
 
-    def parameters(self):
+    def _named_members(self, get_members_fn, prefix='', recurse=True):
+        r"""Helper method for yielding various names + members of modules."""
+        memo = set()
+        modules = self.named_modules(prefix=prefix) if recurse else [(prefix, self)]
+        for module_prefix, module in modules:
+            members = get_members_fn(module)
+            for k, v in members:
+                if v is None or v in memo:
+                    continue
+                memo.add(v)
+                name = module_prefix + ('.' if module_prefix else '') + k
+                yield name, v
+
+    def parameters(self, recurse=True):
         r"""Returns an iterator over module parameters.
 
         This is typically passed to an optimizer.
+
+        Args:
+            recurse (bool): if True, then yields parameters of this module
+                and all submodules. Otherwise, yields only parameters that
+                are direct members of this module.
 
         Yields:
             Parameter: module parameter
@@ -734,12 +756,18 @@ class Module(object):
             <class 'torch.FloatTensor'> (20L, 1L, 5L, 5L)
 
         """
-        for name, param in self.named_parameters():
+        for name, param in self.named_parameters(recurse=recurse):
             yield param
 
-    def named_parameters(self, memo=None, prefix=''):
+    def named_parameters(self, prefix='', recurse=True):
         r"""Returns an iterator over module parameters, yielding both the
-        name of the parameter as well as the parameter itself
+        name of the parameter as well as the parameter itself.
+
+        Args:
+            prefix (str): prefix to prepend to all parameter names.
+            recurse (bool): if True, then yields parameters of this module
+                and all submodules. Otherwise, yields only parameters that
+                are direct members of this module.
 
         Yields:
             (string, Parameter): Tuple containing the name and parameter
@@ -751,27 +779,59 @@ class Module(object):
             >>>        print(param.size())
 
         """
-        if memo is None:
-            memo = set()
-        for name, p in self._parameters.items():
-            if p is not None and p not in memo:
-                memo.add(p)
-                yield prefix + ('.' if prefix else '') + name, p
-        for mname, module in self.named_children():
-            submodule_prefix = prefix + ('.' if prefix else '') + mname
-            for name, p in module.named_parameters(memo, submodule_prefix):
-                yield name, p
+        gen = self._named_members(
+            lambda module: module._parameters.items(),
+            prefix=prefix, recurse=recurse)
+        for elem in gen:
+            yield elem
 
-    def _all_buffers(self, memo=None):
-        if memo is None:
-            memo = set()
-        for name, b in self._buffers.items():
-            if b is not None and b not in memo:
-                memo.add(b)
-                yield b
-        for module in self.children():
-            for b in module._all_buffers(memo):
-                yield b
+    def buffers(self, recurse=True):
+        r"""Returns an iterator over module buffers.
+
+        Args:
+            recurse (bool): if True, then yields buffers of this module
+                and all submodules. Otherwise, yields only buffers that
+                are direct members of this module.
+
+        Yields:
+            torch.Tensor: module buffer
+
+        Example::
+
+            >>> for buf in model.buffers():
+            >>>     print(type(buf.data), buf.size())
+            <class 'torch.FloatTensor'> (20L,)
+            <class 'torch.FloatTensor'> (20L, 1L, 5L, 5L)
+
+        """
+        for name, buf in self.named_buffers(recurse=recurse):
+            yield buf
+
+    def named_buffers(self, prefix='', recurse=True):
+        r"""Returns an iterator over module buffers, yielding both the
+        name of the buffer as well as the buffer itself.
+
+        Args:
+            prefix (str): prefix to prepend to all buffer names.
+            recurse (bool): if True, then yields buffers of this module
+                and all submodules. Otherwise, yields only buffers that
+                are direct members of this module.
+
+        Yields:
+            (string, torch.Tensor): Tuple containing the name and buffer
+
+        Example::
+
+            >>> for name, buf in self.named_buffers():
+            >>>    if name in ['running_var']:
+            >>>        print(buf.size())
+
+        """
+        gen = self._named_members(
+            lambda module: module._buffers.items(),
+            prefix=prefix, recurse=recurse)
+        for elem in gen:
+            yield elem
 
     def children(self):
         r"""Returns an iterator over immediate children modules.

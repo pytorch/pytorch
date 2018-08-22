@@ -1,7 +1,7 @@
 #pragma once
 #include "../master/THDTensor.h"
 #include "ByteArray.hpp"
-#include "TH/THStorage.h"
+#include "TH/THStorageFunctions.h"
 #include "RPCType.hpp"
 
 #include <cstdint>

@@ -6,8 +6,9 @@
 #include "THCTensorRandom.h"
 #include "THCGeneral.hpp"
 
-#include "ATen/CUDAStream.h"
+#include "ATen/cuda/CUDAStream.h"
 
+#include "THCCachingAllocator.h"
 #include <stdlib.h>
 #include <stdint.h>
 
@@ -23,6 +24,11 @@
  * enabled in groups of 8). */
 #define THC_CUDA_MAX_PEER_SIZE 8
 
+void THCState_free(THCState* state)
+{
+  free(state);
+}
+
 THCCudaResourcesPerDevice* THCState_getDeviceResourcePtr(
   THCState *state, int device);
 
@@ -33,29 +39,24 @@ THCState* THCState_alloc(void)
   return state;
 }
 
-void THCState_free(THCState* state)
-{
-  free(state);
+static void THDefaultDeviceDeleter(void* ptr) {
+  THCudaCheck(cudaFree(ptr));
 }
 
-static cudaError_t cudaMallocWrapper(void* ctx, void** devPtr, size_t size, cudaStream_t stream)
-{
-  return cudaMalloc(devPtr, size);
-}
-
-static cudaError_t cudaFreeWrapper(void* ctx, void* devPtr)
-{
-  return cudaFree(devPtr);
-}
-
-static THCDeviceAllocator defaultDeviceAllocator = {
-  &cudaMallocWrapper,
-  NULL,
-  &cudaFreeWrapper,
-  NULL,
-  NULL,
-  NULL
+struct THDefaultDeviceAllocator final : public at::Allocator {
+  at::DataPtr allocate(size_t size) const override {
+    void* p = nullptr;
+    if (size != 0) THCudaCheck(cudaMalloc(&p, size));
+    int device;
+    THCudaCheck(cudaGetDevice(&device));
+    return {p, p, &THDefaultDeviceDeleter, at::Device(at::DeviceType::CUDA, device)};
+  }
+  at::DeleterFnPtr raw_deleter() const override {
+    return &THDefaultDeviceDeleter;
+  }
 };
+
+static THDefaultDeviceAllocator defaultDeviceAllocator;
 
 void THCudaInit(THCState* state)
 {
@@ -63,10 +64,10 @@ void THCudaInit(THCState* state)
     state->cudaDeviceAllocator = &defaultDeviceAllocator;
   }
   if (!state->cudaHostAllocator) {
-    state->cudaHostAllocator = &THCudaHostAllocator;
+    state->cudaHostAllocator = getTHCudaHostAllocator();
   }
   if (!state->cudaUVAAllocator) {
-    state->cudaUVAAllocator = &THCUVAAllocator;
+    state->cudaUVAAllocator = getTHCUVAAllocator();
   }
 
   int numDevices = 0;
@@ -178,10 +179,10 @@ void THCudaShutdown(THCState* state)
     free(res->sparseHandles);
   }
   free(state->resourcesPerDevice);
-  if (state->cudaDeviceAllocator->emptyCache) {
-    state->cudaDeviceAllocator->emptyCache(state->cudaDeviceAllocator->state);
+  if (state->cudaDeviceAllocator == THCCachingAllocator_get()) {
+    THCCachingAllocator_emptyCache();
   }
-  if (state->cudaHostAllocator == &THCCachingHostAllocator) {
+  if (state->cudaHostAllocator == getTHCCachingHostAllocator()) {
     THCCachingHostAllocator_emptyCache();
   }
   THCThreadLocal_free(state->currentPerDeviceBlasHandle);
@@ -306,7 +307,7 @@ void THCState_setDeviceAllocator(THCState* state, THCDeviceAllocator* allocator)
 }
 
 int THCState_isCachingAllocatorEnabled(THCState* state) {
-  return state->cudaHostAllocator == &THCCachingHostAllocator;
+  return state->cudaHostAllocator == getTHCCachingHostAllocator();
 }
 
 int THCState_getNumDevices(THCState *state)
@@ -425,29 +426,29 @@ cusparseHandle_t THCState_getDeviceSparseHandle(THCState *state, int device, int
 }
 
 THCStream* THCState_getStreamOnDevice(THCState* state, int device) {
-  return at::detail::CUDAStream_getCurrentStreamOnDeviceUnsafe(device);
+  return at::cuda::detail::CUDAStream_getCurrentStreamOnDeviceUnsafe(device);
 }
 
 void THCState_setStreamOnDevice(THCState *state, int device, THCStream *stream) {
-  at::detail::CUDAStream_setStreamOnDevice(device, stream);
+  at::cuda::detail::CUDAStream_setStreamOnDevice(device, stream);
 }
 
 cudaStream_t THCState_getCurrentStreamOnDevice(THCState *state, int device) {
-  return at::detail::CUDAStream_stream(
-    at::detail::CUDAStream_getCurrentStreamOnDeviceUnsafe(device));
+  return at::cuda::detail::CUDAStream_stream(
+    at::cuda::detail::CUDAStream_getCurrentStreamOnDeviceUnsafe(device));
 }
 
 cudaStream_t THCState_getCurrentStream(THCState *state) {
-  return at::detail::CUDAStream_stream(
-    at::detail::CUDAStream_getCurrentStreamUnsafe());
+  return at::cuda::detail::CUDAStream_stream(
+    at::cuda::detail::CUDAStream_getCurrentStreamUnsafe());
 }
 
 THCStream* THCState_getStream(THCState *state) {
-  return at::detail::CUDAStream_getCurrentStreamUnsafe();
+  return at::cuda::detail::CUDAStream_getCurrentStreamUnsafe();
 }
 
 void THCState_setStream(THCState *state, THCStream *stream) {
-  at::detail::CUDAStream_setStream(stream);
+  at::cuda::detail::CUDAStream_setStream(stream);
 }
 
 cublasHandle_t THCState_getCurrentBlasHandle(THCState *state)
@@ -581,6 +582,7 @@ void __THCublasCheck(cublasStatus_t status, const char *file, const int line)
         errmsg = "an absent device architectural feature is required";
         break;
 
+#ifndef __HIP_PLATFORM_HCC__
       case CUBLAS_STATUS_MAPPING_ERROR:
         errmsg = "an access to GPU memory space failed";
         break;
@@ -588,6 +590,7 @@ void __THCublasCheck(cublasStatus_t status, const char *file, const int line)
       case CUBLAS_STATUS_EXECUTION_FAILED:
         errmsg = "the GPU program failed to execute";
         break;
+#endif
 
       case CUBLAS_STATUS_INTERNAL_ERROR:
         errmsg = "an internal operation failed";
@@ -657,41 +660,36 @@ void THCSetGCHandler(THCState *state, void (*cutorchGCFunction_)(void *data), vo
   state->cutorchGCData = data;
 }
 
-cudaError_t THCudaMalloc(THCState *state, void** ptr, size_t size)
+void* THCudaMalloc(THCState *state, size_t size)
 {
   THCudaCheck(cudaGetLastError());
-  cudaStream_t stream = THCState_getCurrentStream(state);
   THCDeviceAllocator* allocator = state->cudaDeviceAllocator;
-  cudaError_t err = allocator->malloc(allocator->state, ptr, size, stream);
-  if (state->cutorchGCFunction != NULL && err != cudaSuccess) {
-    cudaGetLastError(); // reset OOM error
-    (state->cutorchGCFunction)(state->cutorchGCData);
-    err = allocator->malloc(allocator->state, ptr, size, stream);
+  if (state->cutorchGCFunction != nullptr) {
+    try {
+      return allocator->raw_allocate(size);
+    } catch (...) {
+      cudaGetLastError(); // reset OOM error
+      (state->cutorchGCFunction)(state->cutorchGCData);
+      return allocator->raw_allocate(size);
+    }
+  } else {
+    return allocator->raw_allocate(size);
   }
-  return err;
 }
 
-cudaError_t THCudaFree(THCState *state, void *ptr)
-{
-  THCDeviceAllocator* allocator = state->cudaDeviceAllocator;
-  return allocator->free(allocator->state, ptr);
+void THCudaFree(THCState *state, void* ptr) {
+  state->cudaDeviceAllocator->raw_deallocate(ptr);
 }
 
-void* THCudaHostAlloc(THCState *state, size_t size)
+at::DataPtr THCudaHostAlloc(THCState *state, size_t size)
 {
   THCudaCheck(cudaGetLastError());
   THAllocator* allocator = state->cudaHostAllocator;
-  return allocator->malloc(NULL, size);
-}
-
-void THCudaHostFree(THCState *state, void *ptr)
-{
-  THAllocator* allocator = state->cudaHostAllocator;
-  return allocator->free(NULL, ptr);
+  return allocator->allocate(size);
 }
 
 void THCudaHostRecord(THCState *state, void *ptr) {
-  if (state->cudaHostAllocator == &THCCachingHostAllocator) {
+  if (state->cudaHostAllocator == getTHCCachingHostAllocator()) {
     THCStream* stream = THCState_getStream(state);
     THCCachingHostAllocator_recordEvent(ptr, stream);
   }
@@ -722,8 +720,9 @@ cudaError_t THCudaMemGetInfoCached(THCState *state,  size_t* freeBytes, size_t* 
   /* not always true - our optimistic guess here */
   *largestBlock = *freeBytes;
 
-  if (allocator->cacheInfo != NULL)
-    allocator->cacheInfo(allocator->state, device, &cachedBytes, largestBlock);
+  if (allocator == THCCachingAllocator_get()) {
+    THCCachingAllocator_cacheInfo(device, &cachedBytes, largestBlock);
+  }
 
   /* Adjust resulting free bytes number. largesBlock unused for now */
   *freeBytes += cachedBytes;
