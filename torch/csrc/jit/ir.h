@@ -972,6 +972,9 @@ public:
     new_node_stage_ = s;
     return ResourceGuard([prev_stage, this]() { this->new_node_stage_ = prev_stage; });
   }
+  const std::unordered_map<std::string, Value*>& uniqueNames() {
+    return unique_names_;
+  }
 
   size_t registerOutput(Value * n) {
     return block_->registerOutput(n);
