@@ -446,27 +446,30 @@ SparseTensor& mul_out_sparse_cpu(SparseTensor& r, const SparseTensor& t_, const 
 
 template <typename scalar_t>
 void mul_out_sparse_dense_cpu_worker(
-  const Tensor& r_indices,
+  Tensor& r_indices,
+  const Tensor& t_indices,
   Tensor& r_values,
+  const Tensor& t_values,
   const Tensor& dense,
-  int64_t t_nnz,
-  int64_t sparseDims) {
+  int64_t t_nnz) {
 
   int64_t i;
-
   auto r_indices_accessor = r_indices.accessor<int64_t, 2>();
+  auto t_indices_accessor = t_indices.accessor<int64_t, 2>();
   auto r_accessor = r_values.accessor<scalar_t, 1>();
+  auto t_accessor = t_values.accessor<scalar_t, 1>();
   auto dense_ptr = dense.data<scalar_t>();
   auto strides = dense.strides();
+  int64_t sparseDims = r_indices.size(0);
 
   parallel_for(0, t_nnz, 10000, [&] (int64_t begin, int64_t end) {
     for (int64_t i = begin; i < end; i++) {
       int64_t dense_i = 0;
       for (int64_t j = 0; j < sparseDims; j++) {
-        dense_i += r_indices_accessor[j][i] * strides[j];
+        dense_i += t_indices_accessor[j][i] * strides[j];
+        r_indices_accessor[j][i] = t_indices_accessor[j][i];
       }
-      scalar_t dense_val = dense_ptr[dense_i];
-      r_accessor[i] = r_accessor[i] * dense_val; // results may contain zero values
+      r_accessor[i] = t_accessor[i] * dense_ptr[dense_i]; // results may contain zero values
     }
   });
 }
@@ -488,16 +491,21 @@ SparseTensor& mul_out_sparse_dense_cpu(SparseTensor& r, const SparseTensor& t_, 
 
   SparseTensor t = t_.coalesce();
 
-  int64_t sparseDims = t._sparseDims();
   int64_t t_nnz = t._nnz();
-  // LongTensor t_indices = t._indices();
-  // Tensor t_values = t._values();
-  LongTensor r_indices = t._indices().clone();
-  Tensor r_values = t._values().clone();
+  Tensor t_indices = t._indices();
+  Tensor t_values = t._values();
+  LongTensor r_indices = at::empty_like(t_indices);
+  Tensor r_values = at::empty_like(t_values);
 
   AT_DISPATCH_ALL_TYPES(
-    r_values.type(), "mul_out_sparse", [&] {
-      mul_out_sparse_dense_cpu_worker<scalar_t>(r_indices, r_values, dense, t_nnz, sparseDims);
+    r_values.type(), "mul_out_sparse_dense_cpu", [&] {
+      mul_out_sparse_dense_cpu_worker<scalar_t>(
+        r_indices,
+        t_indices,
+        r_values,
+        t_values,
+        dense,
+        t_nnz);
     }
   );
 
@@ -508,6 +516,18 @@ SparseTensor& mul_out_sparse_dense_cpu(SparseTensor& r, const SparseTensor& t_, 
 
   return r;
 }
+
+// --------------------------------------------------------------------
+// sparse_mul(SparseTensor, DenseTensor) -> SparseTensor
+// --------------------------------------------------------------------
+// SparseTensor& sparse_mul(const SparseTensor& self, const Tensor& dense) {
+//   SparseTensor r;
+//   return at::mul_out(r, self, dense);
+// }
+//
+// SparseTensor& sparse_mul_(SparseTensor& self, const Tensor& dense) {
+//   return at::native::mul_out(self, self, dense);
+// }
 
 // --------------------------------------------------------------------
 // addmm(Tensor, SparseTensorRef, Tensor, Scalar, Scalar)  [broadcasts]

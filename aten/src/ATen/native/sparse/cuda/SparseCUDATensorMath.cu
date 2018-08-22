@@ -485,10 +485,12 @@ SparseTensor& mul_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t_, cons
 
 SparseTensor& mul_out_sparse_dense_cuda(SparseTensor& r, const SparseTensor& t_, const Tensor& dense) {
 #ifndef __HIP_PLATFORM_HCC__
+  if (dense.dim() == 0) {
+    return mul_out_sparse_scalar(r, t_, Scalar(dense));
+  }
   AT_ASSERT(t_.is_cuda()); // dispatch argument
   AT_CHECK(dense.is_cuda(), "mul: expected 'other' to be CUDA, but got CPU");
   AT_CHECK(r.is_cuda(), "mul: expected 'out' to be CUDA, but got CPU");
-
   AT_CHECK(_check_device({r, t_, dense})); // check if all tensors are in the same device
   AT_CHECK(t_.sizes().equals(dense.sizes()), "mul: expected 'self' and 'other' to have same size, but ", t_.sizes(), " != ", dense.sizes());
   AT_CHECK(t_._values().dim() == 1, "only support mul(result, sparse, dense) with sparse._values() dim = 1, but found ", t_._values().dim());
@@ -499,48 +501,36 @@ SparseTensor& mul_out_sparse_dense_cuda(SparseTensor& r, const SparseTensor& t_,
     return r.zero_();
   }
 
-  // saving those because they can be overwritten when doing in-place operations
   int64_t t_nnz = t._nnz();
-  int64_t sparseDims = t._sparseDims();
-  LongTensor r_indices = t._indices().clone();
-  Tensor r_values = t._values().clone();
-  r.resize_as_(t);
-  _get_sparse_impl(r)->set_indices_and_values(r_indices, r_values);
+  Tensor t_indices = t._indices();
+  Tensor t_values = t._values();
+  LongTensor r_indices = at::empty_like(t_indices);
+  Tensor r_values = at::empty_like(t_values);
 
-  int64_t valueSize = t_values_.stride(0);
-  const dim3 block = dim3(std::min(static_cast<int64_t>(cuda::getApplyBlock().x), valueSize));
+  const dim3 block = dim3(std::min(static_cast<int64_t>(cuda::getApplyBlock().x), t_nnz));
   dim3 grid;
   int curDevice = -1;
   cudaGetDevice(&curDevice);
   cudaStream_t stream = at::cuda::getCurrentCUDAStreamOnDevice(curDevice);
-  AT_CHECK(cuda::getApplyGrid(valueSize, grid, curDevice), "mul: Argument #0: tensor too large or too many dimensions");
+  AT_CHECK(cuda::getApplyGrid(t_nnz, grid, curDevice), "mul: Argument #0: tensor too large or too many dimensions");
 
   AT_DISPATCH_ALL_TYPES_AND_HALF(
-    values.type(), "add_out_dense_sparse_cuda", [&] {
-      apply::sparseDenseElementwiseKernel<TensorMulOp<scalar_t>, uint64_t, scalar_t>
+    r_values.type(), "mul_out_sparse_dense_cuda", [&] {
+      apply::sparseAndDenseElementwiseKernelSparseOut<TensorMulOp<scalar_t>, uint64_t, scalar_t>
         <<<grid, block, 0, stream>>>(
           TensorMulOp<scalar_t>(),
           I_INFO(r_indices),
+          I_INFO(t_indices),
           V_INFO(r_values),
+          V_INFO(t_values),
           V_INFO(dense),
           static_cast<uint64_t>(t_nnz)
         );
     }
   );
 
-  // AT_DISPATCH_ALL_TYPES_AND_HALF(
-  //   t_values_.type(), "mul_out_sparse_cuda", [&] {
-  //     apply::sparseAndDenseIntersectionKernel<TensorMulOp<scalar_t>, uint64_t, scalar_t>
-  //       <<<grid, block, 0, stream>>>(
-  //         TensorMulOp<scalar_t>(),
-  //         I_INFO(t_indices_),
-  //         V_INFO(t_values_),
-  //         V_INFO(r_values_),
-  //         V_INFO(dense),
-  //         static_cast<uint64_t>(t_nnz));
-  //   }
-  // );
-
+  r.resize_as_(t);
+  _get_sparse_impl(r)->set_indices_and_values(r_indices, r_values);
   _get_sparse_impl(r)->set_nnz(t_nnz);
   _get_sparse_impl(r)->set_coalesced(true);
 

@@ -1352,6 +1352,26 @@ mul_(value)
 In-place version of :meth:`~Tensor.mul`
 """)
 
+add_docstr_all('sparse_mul',
+               r"""
+sparse_mul(input, value) -> SparseTensor
+
+Pointwise multiplication between a sparse tensor :attr:`input` and :attr:`value`,
+and return a sparse tensor. Shape of :attr:`input` and :attr:`value` must match.
+This op supports autograd with sparse gradient, as opposed to :meth`~Tensor.mul`.
+
+Args:
+    input (SparseTensor): a sparse Tensor
+    value (Number...): a real or integer, a dense tesnor, or a sparse tensor
+""")
+
+add_docstr_all('sparse_mul_',
+               r"""
+sparse_mul_(input, value)
+
+In-place version of :meth:`~Tensor.sparse_mul`
+""")
+
 add_docstr_all('multinomial',
                r"""
 multinomial(num_samples, replacement=False, *, generator=None) -> Tensor

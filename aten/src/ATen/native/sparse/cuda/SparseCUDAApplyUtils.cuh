@@ -38,21 +38,6 @@ __device__ void applyOp3(
   }
 }
 
-template <typename IndexType, typename Real, typename Op>
-__device__ void sparseAndDenseApplyOp3(
-    Op op, IndexType blockSize,
-    TensorInfo<Real, IndexType> values1, IndexType idx1,
-    TensorInfo<Real, IndexType> values2, IndexType idx2,
-    TensorInfo<Real, IndexType> dense_values, IndexType dense_idx) {
-  for (IndexType k = blockIdx.x * blockDim.x + threadIdx.x;
-       k < blockSize;
-       k += gridDim.x * blockDim.x) {
-    op(values1.data + idx1 * blockSize + k,
-       values2.data + idx2 * blockSize + k,
-       dense_values.data + dense_idx + k);
-  }
-}
-
 template <typename Op, typename IndexType, typename Real>
 __global__ void sparseElementwiseKernel(
     Op op,
@@ -78,27 +63,31 @@ __global__ void sparseElementwiseKernel(
 }
 
 template <typename Op, typename IndexType, typename Real>
-__global__ void sparseDenseElementwiseKernel(
+__global__ void sparseAndDenseElementwiseKernelSparseOut(
     Op op,
-    TensorInfo<indexT, IndexType> indices,
-    TensorInfo<Real, IndexType> values,
+    TensorInfo<indexT, IndexType> r_indices,
+    TensorInfo<indexT, IndexType> t_indices,
+    TensorInfo<Real, IndexType> r_values,
+    TensorInfo<Real, IndexType> t_values,
     TensorInfo<Real, IndexType> dense,
     const IndexType nnz) {
-  IndexType indskip = indices.strides[0];
-  IndexType valueSize = values.strides[0];
-  for (IndexType linearId = blockIdx.x;
-       linearId < nnz;
-       linearId += gridDim.x) {
-    IndexType index = 0;
-    for (IndexType d = 0; d < indices.sizes[0]; d++) {
-      index = dense.sizes[d] * index + indices.data[d * indskip + linearId];
-    }
-    Real *src = dense.data + index * valueSize;
-    Real *dst = values.data + linearId * valueSize;
-    for (IndexType linearId2 = threadIdx.x; linearId2 < valueSize; linearId2 += blockDim.x) {
-      op(dst + linearId2, src + linearId2);
-    }
+
+  IndexType linearId = blockIdx.x * blockDim.x + threadIdx.x;
+  if (linearId >= nnz) return;
+
+  IndexType indskip = t_indices.strides[0];
+  IndexType sparseDim = t_indices.sizes[0];
+
+  // get dense index
+  IndexType index = 0;
+  for (IndexType d = 0; d < sparseDim; d++) {
+    index += dense.strides[d] * t_indices.data[d * indskip + linearId];
+    r_indices.data[d * indskip + linearId] = t_indices.data[d * indskip + linearId];
   }
+  Real *src1 = dense.data + index;
+  Real *src2 = t_values.data + linearId;
+  Real *dst = r_values.data + linearId;
+  op(dst, src1, src2);
 }
 
 template <typename Op, typename IndexType, typename Real>
@@ -243,37 +232,6 @@ __global__ void valueSparseIntersectionKernel(
     }
     if (!match) continue;
     applyOp3(op, valueSize, r_values, r_i++, t_values, t_i++, s_values, s_i++);
-  }
-}
-
-// TODO find a way to parallelize this...
-template <typename Op, typename IndexType, typename Real>
-__global__ void sparseAndDenseIntersectionKernel(
-  Op op,
-  TensorInfo<indexT, IndexType> t_indices,
-  TensorInfo<Real, IndexType> t_values,
-  TensorInfo<Real, IndexType> r_values,
-  TensorInfo<Real, IndexType> dense,
-  const IndexType t_nnz) {
-
-  int64_t linear_index = blockIdx.x * blockDim.x + threadIdx.x;
-
-  for (IndexType linearId = blockIdx.x;
-       linearId < nnz;
-       linearId += gridDim.x) {
-
-  IndexType t_indskip = t_indices.strides[0];
-  IndexType r_indskip = r_indices.strides[0];
-  int64_t sparseDims = r_indices.sizes[0];
-  IndexType valueSize = r_values.strides[0];
-
-  for (IndexType t_i = 0; t_i < t_nnz; t_i++) {
-    IndexType s_i = 0;
-    for (int64_t d = 0; d < sparseDims; d++) {
-      s_i += t_indices.data[d * t_indskip + t_i] * dense.strides[d];
-    }
-
-    sparseAndDenseApplyOp3(op, valueSize, r_values, r_i, t_values, t_i, dense, s_i);
   }
 }
 

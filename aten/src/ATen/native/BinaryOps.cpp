@@ -92,6 +92,15 @@ Tensor& mul_(Tensor& self, const Tensor& other) {
   return native::mul_out(self, self, other);
 }
 
+Tensor sparse_mul(const Tensor& self, const Tensor& dense) {
+  Tensor result;
+  return native::mul_out(result, self, dense);
+}
+
+Tensor& sparse_mul_(Tensor& self, const Tensor& dense) {
+  return native::mul_out(self, self, dense);
+}
+
 Tensor& sub_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar alpha) {
   if (other.is_sparse()) {
     if (!result.defined()) {
