@@ -459,7 +459,7 @@ namespace {
               mat_numel * num_linear_layers / 2, 1};
             // Generate a new parameter tensor which is a view into the
             // weight_buf.
-            Tensor param = weight_buf.type().tensor().set_(*weight_buf.storage(), offset, size);
+            Tensor param = weight_buf.type().tensor().set_(weight_buf.storage(), offset, size);
             params.emplace_back(std::move(param));
             layer_params_count++;
           } else {
@@ -1148,7 +1148,7 @@ Tensor try_get_weight_buf(
   // Try to get parameter storage
   auto & any_param = parameters.at(0);
   auto param_storage = any_param.storage();
-  auto weight_buf = any_param.type().tensor().set_(*param_storage);
+  auto weight_buf = any_param.type().tensor().set_(param_storage);
   if (weight_buf.size(0) < num_params) {
     return {};
   } else if (weight_buf.size(0) > num_params) {

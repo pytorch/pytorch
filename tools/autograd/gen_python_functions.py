@@ -321,8 +321,6 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 body.append('auto {} = {};'.format(name, expr))
                 expr = name
 
-            if typename == 'Storage &':
-                expr = '*' + expr
             if typename == 'SparseTensorRef':
                 expr = 'SparseTensorRef({})'.format(expr)
 

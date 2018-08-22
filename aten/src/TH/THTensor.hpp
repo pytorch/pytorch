@@ -30,7 +30,7 @@ inline THStorage* THTensor_getStoragePtr(const THTensor* tensor) {
   AT_CHECK(tensor->storage_, "Cannot use PyTorch operations on a half-constructed "
            "tensor.  If this tensor came from Caffe2, please call GetMutableData on "
            "it first; otherwise, this is a bug, please report it.");
-  return tensor->storage_;
+  return tensor->storage_.unsafeGetStorageImpl();
 }
 
 inline void THTensor_resizeDim(THTensor* tensor, int64_t ndim) {
@@ -127,12 +127,7 @@ inline void THTensor_setStorageOffset(THTensor* tensor, ptrdiff_t storage_offset
 }
 
 // NB: Steals ownership of storage
-inline void THTensor_stealAndSetStoragePtr(THTensor* tensor, THStorage* storage) {
-  // Caffe2 might have tensors whose storages are null, but we
-  // don't allow it in PyTorch.
-  AT_ASSERT(storage);
-  tensor->storage_ = storage;
-}
+TH_API void THTensor_stealAndSetStoragePtr(THTensor* tensor, THStorage* storage);
 
 TH_API void THTensor_free(THTensor *self);
 TH_API void THTensor_setStorageNd(THTensor *self, THStorage *storage, ptrdiff_t storageOffset, int nDimension, const int64_t *size, const int64_t *stride);

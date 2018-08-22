@@ -71,7 +71,7 @@ Tensor new_with_sizes(const Type& type, int32_t device_index, IntList sizes) {
   return torch::empty(sizes, TensorOptions(type, device_index));
 }
 
-Tensor new_with_storage(const Type& type, Storage& storage) {
+Tensor new_with_storage(const Type& type, Storage storage) {
   auto tensor = at::empty({}, type);
   tensor.set_(storage);
   return tensor;
@@ -344,7 +344,7 @@ Tensor legacy_tensor_ctor(const Type& type, PyObject* args, PyObject* kwargs) {
     at::DeviceGuard device_guard(r.device(0));
     return type.tensor();
   } else if (r.idx == 1) {
-    return new_with_storage(type, *r.storage(0));
+    return new_with_storage(type, r.storage(0));
   } else if (r.idx == 2) {
     auto cdata = reinterpret_cast<void*>(r.toInt64(0));
     return type.unsafeTensorFromTH(cdata, true);
@@ -384,7 +384,7 @@ Tensor legacy_tensor_new(const Type& type, PyObject* args, PyObject* kwargs) {
     at::DeviceGuard device_guard(r.device(0));
     return type.tensor();
   } else if (r.idx == 1) {
-    return new_with_storage(type, *r.storage(0));
+    return new_with_storage(type, r.storage(0));
   } else if (r.idx == 2) {
     auto cdata = reinterpret_cast<void*>(r.toInt64(0));
     return type.unsafeTensorFromTH(cdata, true);

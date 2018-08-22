@@ -617,26 +617,26 @@ void ModuleEncoder::EncodeTensor(
     onnx::TensorProto *tensor_proto,
     const at::Tensor &tensor,
     const at::optional<std::string> external_ref = {}) {
-  auto storage_ptr = tensor.storage()->pImpl();
+  auto storage_ptr = tensor.storage().unsafeGetStorageImpl();
   auto dedup_it = storage_dedup_map_.find(storage_ptr);
   if (dedup_it != storage_dedup_map_.end()) {
     tensor_proto->add_int64_data(dedup_it->second);
   } else {
     at::Tensor t = tensor;
-    if (at::detail::get_backend(tensor.storage()->pImpl()) == at::Backend::CUDA) {
+    if (tensor.storage().device_type() == at::DeviceType::CUDA) {
       // NB: This new tensor is created to support cuda tensors.
       // Storages can be mutated when converting tensors from cuda to cpu,
       // and we need a cpu tensor to copy data from.
       t = tensor.type().tensor(
-          *tensor.storage(),
+          tensor.storage(),
           /* storageOffset = */ 0,
-          /* size = */ { static_cast<int64_t>(tensor.type().elementSizeInBytes() * tensor.storage()->pImpl()->size()) },
+          /* size = */ { static_cast<int64_t>(tensor.type().elementSizeInBytes() * tensor.storage().size()) },
           /* strides = */ { 1 })
         .cpu();
     }
 
     auto record_number = file_writer_.writeRecord(
-      static_cast<char*>(t.storage()->pImpl()->data()), t.type().elementSizeInBytes() * t.numel());
+      static_cast<char*>(t.storage().data()), t.type().elementSizeInBytes() * t.numel());
     tensor_proto->add_int64_data(record_number);
     storage_dedup_map_[storage_ptr] = record_number;
   }

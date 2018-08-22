@@ -6,8 +6,8 @@ namespace at {
 
 struct AT_API Storage {
 public:
-  Storage() = delete;
-  Storage(StorageImpl* storage_impl) : storage_impl_(storage_impl) {}
+  Storage() {}
+  Storage(StorageImpl* storage_impl) : storage_impl_(c10::intrusive_ptr<StorageImpl>::reclaim(storage_impl)) {}
   Storage(
       at::ScalarType,
       size_t size,
@@ -19,29 +19,36 @@ public:
       size_t size,
       const std::function<void(void*)>& deleter,
       bool resizable = false);
-  ~Storage();
-  // There are reasonable interpretations of these constructors, but they're to
-  // be implemented on demand.
-  Storage(Storage&) = delete;
-  Storage(const Storage&) = delete;
-  Storage(Storage&&) = delete;
-  Storage(const Storage&&) = delete;
-  void set_pImpl(StorageImpl* storage_impl) {
-    storage_impl_ = storage_impl;
+
+  template <typename T>
+  T* data() const { return storage_impl_->data<T>(); }
+
+  template <typename T>
+  T* unsafe_data() const { return storage_impl_->unsafe_data<T>(); }
+
+  size_t elementSize() const { return storage_impl_->elementSize(); }
+  ptrdiff_t size() const { return storage_impl_->size(); }
+  bool resizable() const { return storage_impl_->resizable(); }
+  // get() use here is to get const-correctness
+  void* data() const { return storage_impl_.get()->data(); }
+  const at::DataPtr& data_ptr() const { return storage_impl_->data_ptr(); }
+  DeviceType device_type() const { return storage_impl_->device_type(); }
+  at::Allocator* allocator() const { return storage_impl_.get()->allocator(); }
+  at::ScalarType scalar_type() const { return storage_impl_->scalar_type(); }
+  at::Device device() const { return storage_impl_->device(); }
+
+  StorageImpl* unsafeReleaseStorageImpl() {
+    return storage_impl_.release();
   }
-  StorageImpl* pImpl() {
-    return storage_impl_;
+  StorageImpl* unsafeGetStorageImpl() const noexcept {
+    return storage_impl_.get();
   }
-  StorageImpl* pImpl() const {
-    return storage_impl_;
-  }
-  StorageImpl* retained_pImpl() const {
-    storage_impl_->retain();
+  operator bool() const {
     return storage_impl_;
   }
 
  protected:
-  StorageImpl* storage_impl_;
+  c10::intrusive_ptr<StorageImpl> storage_impl_;
 };
 
 } // namespace at

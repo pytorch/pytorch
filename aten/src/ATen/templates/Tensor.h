@@ -79,7 +79,7 @@ struct AT_API Tensor : public detail::TensorBase {
   Type & type() const {
     return pImpl->type();
   }
-  std::unique_ptr<Storage> storage() const {
+  const Storage& storage() const {
     return pImpl->storage();
   }
   inline Tensor toType(const Type & t, bool non_blocking=false) const;

@@ -139,11 +139,11 @@ Tensor expand_as(const Tensor& self, const Tensor& other) {
 }
 
 Tensor as_strided(const Tensor& self, IntList size, IntList stride, int64_t storage_offset) {
-  return self.type().tensor().set_(*self.storage(), storage_offset, size, stride);
+  return self.type().tensor().set_(self.storage(), storage_offset, size, stride);
 }
 
 Tensor &as_strided_(Tensor& self, IntList size, IntList stride, int64_t storage_offset) {
-  return self.set_(*self.storage(), storage_offset, size, stride);
+  return self.set_(self.storage(), storage_offset, size, stride);
 }
 
 Tensor as_strided(const Tensor& self, IntList size, IntList stride) {

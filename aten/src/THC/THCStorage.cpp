@@ -8,6 +8,8 @@
 #include "generic/THCStorage.cpp"
 #include "THCGenerateAllTypes.h"
 
+#include <ATen/core/intrusive_ptr.h>
+
 void THCStorage_resize(THCState *state, THCStorage *self, ptrdiff_t size)
 {
   THArgCheck(size >= 0, 2, "invalid size");
@@ -48,16 +50,16 @@ void THCStorage_resize(THCState *state, THCStorage *self, ptrdiff_t size)
 }
 
 int THCStorage_getDevice(THCState* state, const THCStorage* storage) {
-  return storage->getDevice();
+  return storage->device().index();
 }
 
 THC_API THCStorage* THCStorage_new(
     THCState* state,
     at::ScalarType scalar_type) {
-  THStorage* storage = new THStorage(
+  THStorage* storage = c10::make_intrusive<at::StorageImpl>(
       scalar_type,
       0,
       state->cudaDeviceAllocator,
-      true);
+      true).release();
   return storage;
 }
