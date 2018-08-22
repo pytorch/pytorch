@@ -23,7 +23,7 @@
 #endif
 
 #ifdef _WIN32
-# if defined(ATen_cuda_EXPORTS) || defined(caffe2_gpu_EXPORTS)
+# if defined(ATen_cuda_EXPORTS) || defined(caffe2_gpu_EXPORTS) || defined(CAFFE2_BUILD_MAIN_LIB)
 #  define THC_API THC_EXTERNC __declspec(dllexport)
 #  define THC_CLASS __declspec(dllexport)
 # else

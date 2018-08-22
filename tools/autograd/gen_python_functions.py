@@ -28,7 +28,7 @@ SKIP_PYTHON_BINDINGS = [
     '_cumsum.*', '_cumprod.*', '_sum.*', '_prod.*', '_th_.*',
     'arange.*', 'range.*', '_gesv.*', '_getri.*', 'slice',
     '_local_scalar', '_local_scalar_dense',
-    'max_pool1d', 'max_pool2d', 'max_pool3d'
+    'max_pool1d', 'max_pool2d', 'max_pool3d', 'linear'
 ]
 
 # These function signatures are not exposed to Python. Note that this signature
@@ -321,8 +321,6 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 body.append('auto {} = {};'.format(name, expr))
                 expr = name
 
-            if typename == 'Storage &':
-                expr = '*' + expr
             if typename == 'SparseTensorRef':
                 expr = 'SparseTensorRef({})'.format(expr)
 

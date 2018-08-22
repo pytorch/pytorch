@@ -1,10 +1,12 @@
 #pragma once
 
+#include <ATen/ATenGeneral.h>
+
 #include <stdint.h>
 
 namespace at {
 
-struct Generator {
+struct AT_API Generator {
   Generator() {};
   Generator(const Generator& other) = delete;
   Generator(Generator&& other) = delete;

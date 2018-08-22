@@ -255,7 +255,7 @@ static PyObject * THPVariable_cuda(PyObject* self, PyObject* args, PyObject* kwa
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   ParsedArgs<2> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
-  auto backend = self_.is_sparse() ? at::kSparseCUDA : at::kCUDA;
+  auto backend = self_.is_sparse() ? at::Backend::SparseCUDA : at::Backend::CUDA;
   auto& type = self_.type().toBackend(backend);
   auto device_obj = r.device(0);
   if (!r.isNone(0) && device_obj.is_cpu()) {
@@ -476,7 +476,7 @@ static PyObject * THPVariable_storage(PyObject* self, PyObject* arg)
 {
   HANDLE_TH_ERRORS
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  return createPyObject(*self_.storage());
+  return createPyObject(self_.storage());
   END_HANDLE_TH_ERRORS
 }
 
@@ -484,7 +484,7 @@ static PyObject * THPVariable_storage_type(PyObject* self, PyObject* arg)
 {
   HANDLE_TH_ERRORS
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  auto storage = THPObjectPtr(createPyObject(*self_.storage()));
+  auto storage = THPObjectPtr(createPyObject(self_.storage()));
   auto storage_type = (PyObject*)Py_TYPE(storage);
   Py_INCREF(storage_type);
   return storage_type;

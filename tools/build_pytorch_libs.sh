@@ -16,7 +16,6 @@ USE_ROCM=0
 USE_NNPACK=0
 USE_MKLDNN=0
 USE_GLOO_IBVERBS=0
-USE_DISTRIBUTED_MW=0
 FULL_CAFFE2=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -34,9 +33,6 @@ while [[ $# -gt 0 ]]; do
           ;;
       --use-gloo-ibverbs)
           USE_GLOO_IBVERBS=1
-          ;;
-      --use-distributed-mw)
-          USE_DISTRIBUTED_MW=1
           ;;
       --full-caffe2)
           FULL_CAFFE2=1
@@ -118,9 +114,6 @@ if [[ $USE_GLOO_IBVERBS -eq 1 ]]; then
     GLOO_FLAGS+=" -DUSE_IBVERBS=1 -DBUILD_SHARED_LIBS=1"
     THD_FLAGS="-DUSE_GLOO_IBVERBS=1"
 fi
-if [[ $USE_DISTRIBUTED_MW -eq 1 ]]; then
-    THD_FLAGS+="-DUSE_DISTRIBUTED_MW=1"
-fi
 CWRAP_FILES="\
 $BASE_DIR/torch/lib/ATen/Declarations.cwrap;\
 $BASE_DIR/torch/lib/THNN/generic/THNN.h;\
@@ -145,6 +138,9 @@ echo "Building in $BUILD_TYPE mode"
 
 # Used to build an individual library
 function build() {
+  if [[ -z "$CMAKE_ARGS" ]]; then
+    CMAKE_ARGS=()
+  fi
   # We create a build directory for the library, which will
   # contain the cmake output
   mkdir -p build/$1
@@ -192,7 +188,7 @@ function build() {
               -DCMAKE_DEBUG_POSTFIX="" \
               -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
               ${@:2} \
-              -DCMAKE_EXPORT_COMPILE_COMMANDS=1
+              -DCMAKE_EXPORT_COMPILE_COMMANDS=1 ${CMAKE_ARGS[@]}
   ${CMAKE_INSTALL} -j"$MAX_JOBS"
   popd
 
@@ -262,7 +258,6 @@ function build_caffe2() {
       -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
       -DBUILD_CAFFE2=$FULL_CAFFE2 \
       -DBUILD_TORCH=$BUILD_TORCH \
-      -DBUILD_ATEN=ON \
       -DBUILD_PYTHON=$FULL_CAFFE2 \
       -DBUILD_BINARY=OFF \
       -DBUILD_SHARED_LIBS=$BUILD_SHARED_LIBS \

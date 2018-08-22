@@ -27,7 +27,7 @@ const int INFO    = 0;
 const char CAFFE2_SEVERITY_PREFIX[] = "FEWIV";
 
 namespace caffe2 {
-class MessageLogger {
+class CAFFE2_API MessageLogger {
  public:
   MessageLogger(const char *file, int line, int severity);
   ~MessageLogger();
@@ -46,7 +46,7 @@ class MessageLogger {
 // This class is used to explicitly ignore values in the conditional
 // logging macros.  This avoids compiler warnings like "value computed
 // is not used" and "statement has no effect".
-class LoggerVoidify {
+class CAFFE2_API LoggerVoidify {
  public:
   LoggerVoidify() { }
   // This has to be an operator with a precedence lower than << but

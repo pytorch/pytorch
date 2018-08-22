@@ -2,7 +2,7 @@
 #include "catch.hpp"
 
 #include "ATen/ATen.h"
-#include "THNN/Reduction.h"
+#include "ATen/core/Reduction.h"
 
 // for TH compat test only...
 struct THFloatTensor;
@@ -57,7 +57,7 @@ static void test(Type & type) {
     REQUIRE(Scalar(z_sorted[0][0]).toFloat() < Scalar(z_sorted[0][1]).toFloat());
   }
 
-  if(type.backend() != kCUDA)
+  if(type.backend() != Backend::CUDA)
   SECTION( "randperm" ) {
     Tensor b = randperm(15, type);
     Tensor rv, ri;
@@ -277,13 +277,13 @@ static void test(Type & type) {
 }
 
 TEST_CASE( "basic tests CPU", "[cpu]" ) {
-  manual_seed(123, at::Backend::CPU);
+  manual_seed(123, at::kCPU);
 
   test(CPU(kFloat));
 }
 
 TEST_CASE( "basic tests GPU", "[cuda]" ) {
-  manual_seed(123, at::Backend::CUDA);
+  manual_seed(123, at::kCUDA);
 
   if(at::hasCUDA()) {
     test(CUDA(kFloat));

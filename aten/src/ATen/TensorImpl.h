@@ -3,7 +3,9 @@
 #include <atomic>
 #include <memory>
 
+#include "ATen/Retainable.h"
 #include "ATen/StorageImpl.h"
+#include "ATen/Storage.h"
 #include "ATen/core/optional.h"
 #include "ATen/core/TensorTypeId.h"
 #include "ATen/core/TensorTypeIdRegistration.h"
@@ -20,9 +22,7 @@ struct Tensor;
 namespace at {
 struct AT_API TensorImpl : public Retainable {
   TensorImpl(TensorTypeId type_id, ScalarType scalar_type, bool is_variable);
-  TensorImpl(StorageImpl* storage, TensorTypeId type_id, bool is_variable);
-
-  virtual ~TensorImpl();
+  TensorImpl(Storage&& storage, TensorTypeId type_id, bool is_variable);
 
   virtual void release_resources() override;
 
@@ -35,7 +35,7 @@ struct AT_API TensorImpl : public Retainable {
   virtual IntList sizes() const;
   virtual IntList strides() const;
   virtual int64_t dim() const;
-  virtual std::unique_ptr<Storage> storage();
+  virtual const Storage& storage();
   friend struct Type;
 
   int64_t numel() {
@@ -95,7 +95,7 @@ struct AT_API TensorImpl : public Retainable {
   // TODO: make these protected
   // Note: storage->size() may be greater than the recorded size
   // of a tensor
-  at::StorageImpl* storage_;
+  at::Storage storage_;
   int64_t storage_offset_;
 
   std::vector<int64_t> sizes_;
@@ -103,12 +103,12 @@ struct AT_API TensorImpl : public Retainable {
 
   template <typename T>
   inline T * data() const {
-    return storageImpl()->data<T>() + storage_offset_;
+    return storage_.data<T>() + storage_offset_;
   }
 
   template <typename T>
   inline T * unsafe_data() const {
-    return storageImpl()->unsafe_data<T>() + storage_offset_;
+    return storage_.unsafe_data<T>() + storage_offset_;
   }
 
   inline at::ScalarType scalar_type() const {
@@ -132,9 +132,6 @@ struct AT_API TensorImpl : public Retainable {
   virtual int64_t size(int64_t d) const;
   virtual int64_t stride(int64_t d) const;
 
-  // TODO: get rid of this.
-  virtual at::StorageImpl* storageImpl() const { return storage_; }
-
 protected:
   TensorTypeId type_id_;
   // INVARIANT: When storage is non-null, this scalar type must
@@ -144,6 +141,6 @@ protected:
   bool is_wrapped_number_ = false;
 
 private:
-  TensorImpl(StorageImpl* storage, TensorTypeId type_id, ScalarType scalar_type, bool is_variable);
+  TensorImpl(Storage&& storage, TensorTypeId type_id, ScalarType scalar_type, bool is_variable);
 };
 } // namespace at
