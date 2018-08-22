@@ -4266,9 +4266,11 @@ class TestTorch(TestCase):
             aaT = torch.mm(a, a.t())
             self.assertEqual(torch.matrix_rank(aaT).item(), matrix_rank(aaT.cpu().numpy()))
             self.assertEqual(torch.matrix_rank(aaT, 0.01).item(), matrix_rank(aaT.cpu().numpy(), 0.01))
-            self.assertEqual(torch.matrix_rank(aaT, True).item(), matrix_rank(aaT.cpu().numpy(), True))
-            self.assertEqual(torch.matrix_rank(aaT, 0.01, True).item(),
-                             matrix_rank(aaT.cpu().numpy(), 0.01, True))
+
+            if np.lib.NumpyVersion(np.__version__) >= '1.14.0':
+                self.assertEqual(torch.matrix_rank(aaT, True).item(), matrix_rank(aaT.cpu().numpy(), True))
+                self.assertEqual(torch.matrix_rank(aaT, 0.01, True).item(),
+                                 matrix_rank(aaT.cpu().numpy(), 0.01, True))
 
     @skipIfNoLapack
     def test_matrix_rank(self):
