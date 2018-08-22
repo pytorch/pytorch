@@ -960,6 +960,7 @@ class TestSparse(TestCase):
         self.assertEqual(x.new(indices, values, x.size()), x)
 
     @cpu_only  # not really, but we only really want to run this once
+    @skipIfRocm
     def test_factory(self):
         default_size = torch.Size([1, 3])
         size = torch.Size([3, 3])
