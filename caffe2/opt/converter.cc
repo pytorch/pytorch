@@ -297,6 +297,11 @@ repr::NNModule convertToNNModule(caffe2::NetDef &net, std::unordered_map<std::st
     currentBasicBlock->pushInstructionNode(opNode);
   }
 
+  CAFFE_ENFORCE(
+      externalInputNames.size() == 0,
+      "Attempting to convert an ill-formed network: \
+      external_input contains unused blobs");
+
   for (const auto& outputName : net.external_output()) {
     CAFFE_ENFORCE(
         blobMap.count(outputName), "NetDef has ill-formed external_output");
