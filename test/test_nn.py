@@ -5223,11 +5223,11 @@ class TestNN(NNTestCase):
 
     def test_affine_grid(self):
         # test known input on CPU
-        input = Variable(torch.arange(1., 7).view(1, 2, 3))
+        input = torch.arange(1., 7).view(1, 2, 3)
         output = F.affine_grid(input, torch.Size([1, 1, 2, 2]))
         groundtruth = torch.Tensor(
             [[[0, -3], [2, 5]], [[4, 7], [6, 15]]]).view(1, 2, 2, 2)
-        self.assertEqual(output.data, groundtruth)
+        self.assertEqual(output, groundtruth)
 
         # do gradcheck
         N = random.randint(1, 8)
@@ -5244,14 +5244,17 @@ class TestNN(NNTestCase):
             out_cpu = F.affine_grid(input_cpu, sz)
             gradients = torch.randn(out_cpu.size())
             out_cpu.backward(gradients)
-            input_gpu = Variable(input_cpu.data.cuda(), requires_grad=True)
+            input_gpu = input_cpu.detach().cuda().requires_grad_()
             out_cuda = F.affine_grid(input_gpu, sz)
             out_cuda.backward(gradients.cuda())
             self.assertEqual(out_cpu, out_cuda)
             self.assertEqual(input_cpu.grad, input_gpu.grad)
 
-    @unittest.skipIf(not (TEST_SCIPY and TEST_NUMPY), "Scipy and/or numpy not found")
+    @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
+                     "Scipy v1.0 and/or numpy not found")
     def test_affine_2d_rotate0(self):
+        # scipy before 1.0.0 do not support homogeneous coordinate
+        # scipy.ndimage.affine_transform, so we need to skip.
         for device in device_():
             input_size = [1, 1, 3, 3]
             input_ary = np.array(np.random.random(input_size), dtype=np.float32)
@@ -5284,8 +5287,11 @@ class TestNN(NNTestCase):
             assert np.abs(scipy_ary.mean() - gridsample_ary.mean()) < 1e-6
             assert np.abs(scipy_ary - gridsample_ary).max() < 1e-6
 
-    @unittest.skipIf(not (TEST_SCIPY and TEST_NUMPY), "Scipy and/or numpy not found")
+    @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
+                     "Scipy v1.0 and/or numpy not found")
     def test_affine_2d_rotate90(self):
+        # scipy before 1.0.0 do not support homogeneous coordinate
+        # scipy.ndimage.affine_transform, so we need to skip.
         for device, input_size2dsq, output_size2dsq in \
                 itertools.product(device_(), input_size2dsq_(), output_size2dsq_()):
             input_size = input_size2dsq
@@ -5326,8 +5332,11 @@ class TestNN(NNTestCase):
             assert np.abs(scipy_ary.mean() - gridsample_ary.mean()) < 1e-6
             assert np.abs(scipy_ary - gridsample_ary).max() < 1e-6
 
-    @unittest.skipIf(not (TEST_SCIPY and TEST_NUMPY), "Scipy and/or numpy not found")
+    @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
+                     "Scipy v1.0 and/or numpy not found")
     def test_affine_2d_rotate45(self):
+        # scipy before 1.0.0 do not support homogeneous coordinate
+        # scipy.ndimage.affine_transform, so we need to skip.
         for device in device_():
             input_size = [1, 1, 3, 3]
             input_ary = np.array(np.zeros(input_size), dtype=np.float32)
@@ -5361,8 +5370,11 @@ class TestNN(NNTestCase):
 
             assert np.abs(scipy_ary - gridsample_ary).max() < 1e-6
 
-    @unittest.skipIf(not (TEST_SCIPY and TEST_NUMPY), "Scipy and/or numpy not found")
+    @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
+                     "Scipy v1.0 and/or numpy not found")
     def test_affine_2d_rotateRandom(self):
+        # scipy before 1.0.0 do not support homogeneous coordinate
+        # scipy.ndimage.affine_transform, so we need to skip.
         for device, angle_rad, input_size2d, output_size2d in \
                 itertools.product(device_(), angle_rad_(), input_size2d_(), output_size2d_()):
 
@@ -5404,8 +5416,11 @@ class TestNN(NNTestCase):
 
             assert np.abs(scipy_ary - gridsample_ary).max() < 1e-5
 
-    @unittest.skipIf(not (TEST_SCIPY and TEST_NUMPY), "Scipy and/or numpy not found")
+    @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
+                     "Scipy v1.0 and/or numpy not found")
     def test_affine_3d_rotateRandom(self):
+        # scipy before 1.0.0 do not support homogeneous coordinate
+        # scipy.ndimage.affine_transform, so we need to skip.
         for device, angle_rad, axis_vector, input_size3d, output_size3d in \
                 itertools.product(device_(), angle_rad_(), axis_vector_(), input_size3d_(), output_size3d_()):
             input_size = input_size3d
