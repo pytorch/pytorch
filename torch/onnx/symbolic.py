@@ -320,9 +320,10 @@ def t(g, self):
     return g.op("Transpose", self, perm_i=(1, 0))
 
 
-# There is no translation for it, but we don't want to raise an error yet
+# Shall only be used in ONNX_ATEN_FALLBACK
+@parse_args('v', 'is', 'i')
 def expand(g, self, size, implicit):
-    return None
+    return g.op("ATen", self, size_i=size, implicit_i=implicit, operator_s="expand")
 
 
 def embedding(g, weight, indices, padding_idx, scale_grad_by_freq, sparse):
