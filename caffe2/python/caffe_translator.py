@@ -505,8 +505,13 @@ def TranslateCrop(layer, pretrained_blobs, is_test, **kwargs):
 
 @TranslatorRegistry.Register("ReLU")
 def TranslateRelu(layer, pretrained_blobs, is_test, **kwargs):
-    return BaseTranslate(layer, "Relu"), []
-
+    param = layer.relu_param
+    if param.negative_slope > 0:
+        caffe_op = BaseTranslate(layer, "LeakyRelu")
+        AddArgument(caffe_op, "alpha", param.negative_slope)
+    else:
+        caffe_op = BaseTranslate(layer, "Relu")
+    return caffe_op, []
 
 @TranslatorRegistry.Register("Pooling")
 def TranslatePool(layer, pretrained_blobs, is_test, **kwargs):
