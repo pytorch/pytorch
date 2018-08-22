@@ -10,7 +10,7 @@ struct SymbolicVariable {
   /* implicit */ SymbolicVariable(Value * v) : v(v) {}
   // we allow implicit conversions to/from Value since
   // this type truly just provides more methods for value
-  operator Value*() {
+  operator Value*() const {
     return v;
   }
   static SymbolicVariable asNewInput(Graph & g, std::string name = "") {
@@ -19,10 +19,10 @@ struct SymbolicVariable {
   static SymbolicVariable asNewInput(Graph & g, TypePtr type) {
     return g.addInput()->setType(std::move(type));
   }
-  const std::vector<int64_t>& sizes() {
+  const std::vector<int64_t>& sizes() const {
     return v->type()->expect<TensorType>()->sizes();
   }
-  void addAsOutput() {
+  void addAsOutput() const {
     v->owningGraph()->registerOutput(v);
   }
   static std::vector<SymbolicVariable> create(Symbol kind, ArrayRef<SymbolicVariable> inputs,
@@ -178,19 +178,19 @@ private:
   Value * insertConstant(IValue value) const {
     return v->owningGraph()->insertConstant(value);
   }
-  SymbolicVariable typeLike(SymbolicVariable other) {
+  SymbolicVariable typeLike(SymbolicVariable other) const {
     if (auto other_type = other.v->type()->cast<TensorType>())
       v->setType(other_type->contiguous());
     return *this;
   }
-  SymbolicVariable typeLikeWithScalarType(SymbolicVariable other, at::ScalarType type) {
+  SymbolicVariable typeLikeWithScalarType(SymbolicVariable other, at::ScalarType type) const {
     if (auto other_type = other.v->type()->cast<TensorType>()){
       auto new_type = other_type->toScalarType(type)->contiguous();
       v->setType(new_type);
     }
     return *this;
   }
-  SymbolicVariable typeLikeWithRhsScalarType(SymbolicVariable other, SymbolicVariable rhs) {
+  SymbolicVariable typeLikeWithRhsScalarType(SymbolicVariable other, SymbolicVariable rhs) const {
     auto other_type = other.v->type()->cast<TensorType>();
     auto rhs_type = rhs.v->type()->cast<TensorType>();
     if (other_type && rhs_type){
