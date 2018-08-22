@@ -1064,7 +1064,6 @@ cmdclass = {
 cmdclass.update(build_dep_cmds)
 
 install_requires = [
-    'protobuf',
     'pyyaml',
     'numpy',
     'future',
