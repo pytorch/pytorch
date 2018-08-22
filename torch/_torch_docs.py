@@ -5300,7 +5300,7 @@ Ignoring the batch dimensions, it computes the following expression:
 
 .. math::
     X[\omega_1, \dots, \omega_d] =
-        \frac{1}{\prod_{i=1}^d N_i} \sum_{n_1=0}^{N_1} \dots \sum_{n_d=0}^{N_d} x[n_1, \dots, n_d]
+        \sum_{n_1=0}^{N_1} \dots \sum_{n_d=0}^{N_d} x[n_1, \dots, n_d]
          e^{-j\ 2 \pi \sum_{i=0}^d \frac{\omega_i n_i}{N_i}},
 
 where :math:`d` = :attr:`signal_ndim` is number of dimensions for the
@@ -5490,7 +5490,7 @@ This method supports 1D, 2D and 3D real-to-complex transforms, indicated
 by :attr:`signal_ndim`. :attr:`input` must be a tensor with at least
 ``signal_ndim`` dimensions with optionally arbitrary number of leading batch
 dimensions. If :attr:`normalized` is set to ``True``, this normalizes the result
-by multiplying it with :math:`\sqrt{\prod_{i=1}^K N_i}` so that the operator is
+by dividing it with :math:`\sqrt{\prod_{i=1}^K N_i}` so that the operator is
 unitary, where :math:`N_i` is the size of signal dimension :math:`i`.
 
 The real-to-complex Fourier transform results follow conjugate symmetry:
