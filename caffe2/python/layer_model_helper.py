@@ -529,7 +529,7 @@ class LayerModelHelper(model_helper.ModelHelper):
                 return self.add_layer(new_layer)
             return wrapper
         else:
-            raise ValueError(
+            raise AttributeError(
                 "Trying to create non-registered layer: {}".format(layer))
 
     @property
@@ -651,5 +651,5 @@ class LayerModelHelper(model_helper.ModelHelper):
         # and change the assertion accordingly
         assert isinstance(breakdown_map, dict)
         assert all(isinstance(k, six.string_types) for k in breakdown_map)
-        assert sorted(list(breakdown_map.values())) == range(len(breakdown_map))
+        assert sorted(breakdown_map.values()) == list(range(len(breakdown_map)))
         self._breakdown_map = breakdown_map
