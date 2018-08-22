@@ -5764,6 +5764,18 @@ def func(t):
             reference = getattr(x, cast_type)()
             self.assertEqual(cu_result, reference)
 
+    def test_listconstruct_erasure(self):
+        class FooMod(torch.nn.Module):
+            def forward(self, x):
+                mask = x < 0.0
+                return x[mask]
+
+        import io
+        f = io.BytesIO()
+        self.assertExpected(torch.onnx.export_to_pretty_string(
+            FooMod(), (torch.rand(3, 4),), f,
+            operator_export_type=OperatorExportTypes.ONNX_ATEN_FALLBACK))
+
 
 class TestEndToEndHybridFrontendModels(JitTestCase):
 
