@@ -162,7 +162,7 @@ __global__ void weight_norm_fwd_last_dim_kernel
 
   reduce_block_into_lanes(s, thread_sum, blockDim.x, ReduceAdd<accscalar_t>()); 
 
-  // Better to pass an EpilogueOp to reduce_block_into_lanes, implement later
+  // Better to pass an EpilogueOp to reduce_block_into_lanes?
   if(threadIdx.y == 0)
   {
     accscalar_t result = s[threadIdx.x];
@@ -527,6 +527,7 @@ std::tuple<Tensor, Tensor> weight_norm_differentiable_backward
   // saved_g and saved_norms are already shaped to broadcast over the correct dimensions
 
   // ...but saved_norms might be Float when saved_g and saved_v are half.
+  // To consider:  saved_norms.to(..., True /*non_blocking*/);
   auto norms = saved_norms.to(saved_g.type().scalarType());
 
   std::vector<int64_t> bcast_size(saved_v.dim(), 1);
