@@ -16,7 +16,6 @@ USE_ROCM=0
 USE_NNPACK=0
 USE_MKLDNN=0
 USE_GLOO_IBVERBS=0
-USE_DISTRIBUTED_MW=0
 FULL_CAFFE2=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -34,9 +33,6 @@ while [[ $# -gt 0 ]]; do
           ;;
       --use-gloo-ibverbs)
           USE_GLOO_IBVERBS=1
-          ;;
-      --use-distributed-mw)
-          USE_DISTRIBUTED_MW=1
           ;;
       --full-caffe2)
           FULL_CAFFE2=1
@@ -117,9 +113,6 @@ fi
 if [[ $USE_GLOO_IBVERBS -eq 1 ]]; then
     GLOO_FLAGS+=" -DUSE_IBVERBS=1 -DBUILD_SHARED_LIBS=1"
     THD_FLAGS="-DUSE_GLOO_IBVERBS=1"
-fi
-if [[ $USE_DISTRIBUTED_MW -eq 1 ]]; then
-    THD_FLAGS+="-DUSE_DISTRIBUTED_MW=1"
 fi
 CWRAP_FILES="\
 $BASE_DIR/torch/lib/ATen/Declarations.cwrap;\
@@ -265,7 +258,6 @@ function build_caffe2() {
       -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
       -DBUILD_CAFFE2=$FULL_CAFFE2 \
       -DBUILD_TORCH=$BUILD_TORCH \
-      -DBUILD_ATEN=ON \
       -DBUILD_PYTHON=$FULL_CAFFE2 \
       -DBUILD_BINARY=OFF \
       -DBUILD_SHARED_LIBS=$BUILD_SHARED_LIBS \

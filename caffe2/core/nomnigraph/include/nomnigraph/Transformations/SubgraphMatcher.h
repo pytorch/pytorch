@@ -5,6 +5,7 @@
 
 #include <functional>
 #include <sstream>
+#include <unordered_map>
 #include <vector>
 
 namespace nom {
@@ -56,7 +57,7 @@ template <typename NodeMatchCriteria>
 using MatchNodeRef = typename MatchGraph<NodeMatchCriteria>::NodeRef;
 
 template <typename NodeMatchCriteria>
-MatchNodeRef<NodeMatchCriteria> tree(
+MatchNodeRef<NodeMatchCriteria> subgraph(
     MatchGraph<NodeMatchCriteria>& graph,
     const NodeMatchCriteria& root,
     const std::vector<MatchNodeRef<NodeMatchCriteria>>& children,
@@ -96,19 +97,20 @@ std::string debugString(MatchNodeRef<NodeMatchCriteria> rootCriteriaRef) {
 }
 
 template <typename GraphType>
-class SubtreeMatchResult {
+class SubgraphMatchResult {
  public:
-  static SubtreeMatchResult<GraphType> notMatched(
+  static SubgraphMatchResult<GraphType> notMatched(
       const std::string& debugMessage) {
-    return SubtreeMatchResult<GraphType>(false, debugMessage);
+    return SubgraphMatchResult<GraphType>(false, debugMessage);
   }
 
-  static SubtreeMatchResult<GraphType> notMatched() {
-    return SubtreeMatchResult<GraphType>(false, "Debug message is not enabled");
+  static SubgraphMatchResult<GraphType> notMatched() {
+    return SubgraphMatchResult<GraphType>(
+        false, "Debug message is not enabled");
   }
 
-  static SubtreeMatchResult<GraphType> matched() {
-    return SubtreeMatchResult<GraphType>(true, "");
+  static SubgraphMatchResult<GraphType> matched() {
+    return SubgraphMatchResult<GraphType>(true, "Matched");
   }
 
   bool isMatch() const {
@@ -120,7 +122,7 @@ class SubtreeMatchResult {
   }
 
  private:
-  SubtreeMatchResult(bool isMatch, const std::string& debugMessage)
+  SubgraphMatchResult(bool isMatch, const std::string& debugMessage)
       : isMatch_(isMatch), debugMessage_(debugMessage) {}
 
   const bool isMatch_;
@@ -141,32 +143,103 @@ struct SubgraphMatcher {
     return NodeMatcherClass::isMatch(node, criteria);
   }
 
-  // Check if there can be a sub-tree that matches the given criteria that
+  // Check if there can be a subgraph that matches the given criteria that
   // is rooted at the given rootNode.
   // The flag invertGraphTraversal specify if we should follow out edges or
   // in edges. The default is true which is useful for a functional
   // intepretation of a dataflow graph.
-  static SubtreeMatchResult<GraphType> isSubtreeMatch(
+  static SubgraphMatchResult<GraphType> isSubgraphMatch(
+      typename GraphType::NodeRef root,
+      const MatchNodeRef<NodeMatchCriteria>& rootCriteriaRef,
+      bool invertGraphTraversal = true,
+      bool debug = false) {
+    std::unordered_map<
+        MatchNodeRef<NodeMatchCriteria>,
+        typename GraphType::NodeRef>
+        matchedNodes;
+    return isSubgraphMatchInternal(
+        matchedNodes, root, rootCriteriaRef, invertGraphTraversal, debug);
+  }
+
+  // Utility to transform a graph by looking for subgraphs that match
+  // a given pattern and then allow callers to mutate the graph based on
+  // subgraphs that are found.
+  // The current implementation doesn't handle any graph transformation
+  // itself. Callers should be responsible for all intended mutation, including
+  // deleting nodes in the subgraphs found by this algorithm.
+  // Note: if the replaceFunction lambda returns false, the entire procedure
+  // is aborted. This maybe useful in certain cases when we want to terminate
+  // the subgraph search early.
+  // invertGraphTraversal flag: see documentation in isSubgraphMatch
+  static void replaceSubgraph(
+      GraphType& graph,
+      const MatchNodeRef<NodeMatchCriteria>& criteria,
+      const std::function<bool(GraphType&, typename GraphType::NodeRef)>&
+          replaceFunction,
+      bool invertGraphTraversal = true) {
+    for (auto nodeRef : graph.getMutableNodes()) {
+      // Make sure the node is still in the graph.
+      if (!graph.hasNode(nodeRef)) {
+        continue;
+      }
+      if (isSubgraphMatch(nodeRef, criteria, invertGraphTraversal).isMatch()) {
+        if (!replaceFunction(graph, nodeRef)) {
+          // If replaceFunction returns false, it means that we should abort
+          // the entire procedure.
+          break;
+        }
+      }
+    }
+  }
+
+ private:
+  static SubgraphMatchResult<GraphType> isSubgraphMatchInternal(
+      std::unordered_map<
+          MatchNodeRef<NodeMatchCriteria>,
+          typename GraphType::NodeRef>& matchedNodes,
       typename GraphType::NodeRef root,
       const MatchNodeRef<NodeMatchCriteria>& rootCriteriaRef,
       bool invertGraphTraversal = true,
       bool debug = false) {
     auto rootCriteriaNode = rootCriteriaRef->data();
+
+    if (rootCriteriaNode.getCount() == 1) {
+      auto matchedNodeEntry = matchedNodes.find(rootCriteriaRef);
+      if (matchedNodeEntry != matchedNodes.end()) {
+        // If rootCriteriaRef has been matched before (without multiplicity),
+        // we should look up the corresponding matched node in the graph
+        // and verify if it is the same.
+        auto matchedNode = matchedNodeEntry->second;
+        if (matchedNode == root) {
+          return SubgraphMatchResult<GraphType>::matched();
+        } else if (debug) {
+          std::ostringstream debugMessage;
+          debugMessage << "Subgraph root at " << root << " is not the same as "
+                       << matchedNode << " which previously matched criteria "
+                       << debugString<NodeMatchCriteria>(rootCriteriaRef);
+          return SubgraphMatchResult<GraphType>::notMatched(debugMessage.str());
+        } else {
+          return SubgraphMatchResult<GraphType>::notMatched();
+        }
+      }
+    }
+
     if (!isNodeMatch(root, rootCriteriaNode.getCriteria())) {
       if (debug) {
         std::ostringstream debugMessage;
-        debugMessage << "Subtree root at " << root
+        debugMessage << "Subgraph root at " << root
                      << " does not match criteria "
                      << debugString<NodeMatchCriteria>(rootCriteriaRef);
-        return SubtreeMatchResult<GraphType>::notMatched(debugMessage.str());
+        return SubgraphMatchResult<GraphType>::notMatched(debugMessage.str());
       } else {
-        return SubtreeMatchResult<GraphType>::notMatched();
+        return SubgraphMatchResult<GraphType>::notMatched();
       }
     }
     if (rootCriteriaNode.isNonTerminal()) {
       // This is sufficient to be a match if this criteria specifies a non
       // terminal node.
-      return SubtreeMatchResult<GraphType>::matched();
+      matchedNodes[rootCriteriaRef] = root;
+      return SubgraphMatchResult<GraphType>::matched();
     }
     auto& edges =
         invertGraphTraversal ? root->getInEdges() : root->getOutEdges();
@@ -176,7 +249,7 @@ struct SubgraphMatcher {
     int numChildrenCriteria = outEdges.size();
 
     // The current algorithm implies that the ordering of the children is
-    // important. The children nodes will be matched with the children subtree
+    // important. The children nodes will be matched with the children subgraph
     // criteria in the given order.
 
     int currentEdgeIdx = 0;
@@ -200,7 +273,8 @@ struct SubgraphMatcher {
         auto edge = edges[currentEdgeIdx];
         auto child = invertGraphTraversal ? edge->tail() : edge->head();
 
-        if (!isSubtreeMatch(child, childrenCriteriaRef, invertGraphTraversal)
+        if (!isSubgraphMatchInternal(
+                 matchedNodes, child, childrenCriteriaRef, invertGraphTraversal)
                  .isMatch()) {
           if (!isStarCount) {
             // If the current criteria isn't a * pattern, this indicates a
@@ -213,10 +287,10 @@ struct SubgraphMatcher {
                                   childrenCriteriaRef)
                            << ". We expected " << expectedCount
                            << " matches but only found " << countMatch << ".";
-              return SubtreeMatchResult<GraphType>::notMatched(
+              return SubgraphMatchResult<GraphType>::notMatched(
                   debugMessage.str());
             } else {
-              return SubtreeMatchResult<GraphType>::notMatched();
+              return SubgraphMatchResult<GraphType>::notMatched();
             }
           } else {
             // Otherwise, we should move on to the next children criteria.
@@ -236,9 +310,9 @@ struct SubgraphMatcher {
                        << " matches for child criteria "
                        << debugString<NodeMatchCriteria>(childrenCriteriaRef)
                        << " but only found " << countMatch;
-          return SubtreeMatchResult<GraphType>::notMatched(debugMessage.str());
+          return SubgraphMatchResult<GraphType>::notMatched(debugMessage.str());
         } else {
-          return SubtreeMatchResult<GraphType>::notMatched();
+          return SubgraphMatchResult<GraphType>::notMatched();
         }
       }
     }
@@ -247,48 +321,17 @@ struct SubgraphMatcher {
       // Fails because there are unmatched edges.
       if (debug) {
         std::ostringstream debugMessage;
-        debugMessage << "Unmatched children for subtree root at " << root
+        debugMessage << "Unmatched children for subgraph root at " << root
                      << ". There are " << numEdges
                      << " children, but only found " << currentEdgeIdx
                      << " matches for the children criteria.";
-        return SubtreeMatchResult<GraphType>::notMatched(debugMessage.str());
+        return SubgraphMatchResult<GraphType>::notMatched(debugMessage.str());
       } else {
-        return SubtreeMatchResult<GraphType>::notMatched();
+        return SubgraphMatchResult<GraphType>::notMatched();
       }
     }
-    return SubtreeMatchResult<GraphType>::matched();
-  }
-
-  // Utility to transform a graph by looking for subtrees that match
-  // a given pattern and then allow callers to mutate the graph based on
-  // subtrees that are found.
-  // The current implementation doesn't handle any graph transformation
-  // itself. Callers should be responsible for all intended mutation, including
-  // deleting nodes in the subtrees found by this algorithm.
-  // Note: if the replaceFunction lambda returns false, the entire procedure
-  // is aborted. This maybe useful in certain cases when we want to terminate
-  // the subtree search early.
-  // invertGraphTraversal flag: see documentation in isSubtreeMatch
-  static void replaceSubtree(
-      GraphType& graph,
-      const MatchNodeRef<NodeMatchCriteria>& criteria,
-      const std::function<
-          bool(GraphType& g, typename GraphType::NodeRef subtreeRoot)>&
-          replaceFunction,
-      bool invertGraphTraversal = true) {
-    for (auto nodeRef : graph.getMutableNodes()) {
-      // Make sure the node is still in the graph.
-      if (!graph.hasNode(nodeRef)) {
-        continue;
-      }
-      if (isSubtreeMatch(nodeRef, criteria, invertGraphTraversal).isMatch()) {
-        if (!replaceFunction(graph, nodeRef)) {
-          // If replaceFunction returns false, it means that we should abort
-          // the entire procedure.
-          break;
-        }
-      }
-    }
+    matchedNodes[rootCriteriaRef] = root;
+    return SubgraphMatchResult<GraphType>::matched();
   }
 };
 

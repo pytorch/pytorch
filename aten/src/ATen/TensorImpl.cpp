@@ -4,7 +4,7 @@
 #include <ATen/Tensor.h>
 #include <ATen/core/optional.h>
 #include <ATen/Context.h>
-#include <ATen/Backend.h>
+#include <ATen/core/Backend.h>
 
 #include <ATen/detail/VariableHooksInterface.h>
 
@@ -60,35 +60,26 @@ void Tensor::backward(
 }
 
 TensorImpl::TensorImpl(TensorTypeId type_id, ScalarType scalar_type, bool is_variable)
-    : TensorImpl(nullptr, type_id, scalar_type, is_variable) {
+    : TensorImpl({}, type_id, scalar_type, is_variable) {
   // UndefinedTensors and SparseTensors don't have storages.
   if (type_id != UndefinedTensorId() && scalar_type != ScalarType::Undefined
       && type_id != SparseCPUTensorId() && type_id != SparseCUDATensorId()) {
     auto type = &globalContext().getType(tensorTypeIdToBackend(type_id), scalar_type);
-    auto storage = type->storage(true);
-    storage_ = storage->pImpl();
-    storage_->retain();
+    storage_ = type->storage(true);
   }
 }
 
-TensorImpl::TensorImpl(StorageImpl* storage, TensorTypeId type_id, bool is_variable)
-    : TensorImpl(storage, type_id, storage->scalar_type(), is_variable) {}
+TensorImpl::TensorImpl(Storage&& storage, TensorTypeId type_id, bool is_variable)
+    : TensorImpl(std::move(storage), type_id, storage.scalar_type(), is_variable) {}
 
-TensorImpl::TensorImpl(StorageImpl* storage, TensorTypeId type_id, ScalarType scalar_type, bool is_variable)
-    : storage_(storage),
+TensorImpl::TensorImpl(Storage&& storage, TensorTypeId type_id, ScalarType scalar_type, bool is_variable)
+    : storage_(std::move(storage)),
       storage_offset_(0),
       sizes_{0},
       strides_{1},
       type_id_(type_id),
       scalar_type_(scalar_type),
       is_variable_(is_variable) {}
-
-TensorImpl::~TensorImpl() {
-  if (storage_) {
-    storage_->release();
-    storage_ = nullptr;
-  }
-}
 
 IntList TensorImpl::sizes() const {
   return sizes_;
@@ -100,8 +91,7 @@ IntList TensorImpl::strides() const {
 
 void TensorImpl::release_resources() {
   if (storage_) {
-    storage_->release();
-    storage_ = nullptr;
+    storage_ = {};
   }
 }
 
@@ -127,9 +117,8 @@ TensorImpl* TensorImpl::maybe_zero_dim(bool condition_when_zero_dim) {
   return this;
 }
 
-std::unique_ptr<Storage> TensorImpl::storage() {
-  storage_->retain();
-  return std::unique_ptr<Storage>(new Storage(storage_));
+const Storage& TensorImpl::storage() {
+  return storage_;
 }
 
 } // namespace at

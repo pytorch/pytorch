@@ -266,6 +266,30 @@ def tanh(g, self):
     return g.op("Tanh", self)
 
 
+def sin(g, self):
+    return g.op("Sin", self)
+
+
+def cos(g, self):
+    return g.op("Cos", self)
+
+
+def tan(g, self):
+    return g.op("Tan", self)
+
+
+def asin(g, self):
+    return g.op("Asin", self)
+
+
+def acos(g, self):
+    return g.op("Acos", self)
+
+
+def atan(g, self):
+    return g.op("Atan", self)
+
+
 def sigmoid(g, self):
     return g.op("Sigmoid", self)
 
@@ -723,6 +747,10 @@ def clone(g, input):
 
 def abs(g, self):
     return g.op("Abs", self)
+
+
+def log(g, self):
+    return g.op("Log", self)
 
 
 def pow(g, self, exponent):

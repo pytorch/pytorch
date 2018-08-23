@@ -152,9 +152,34 @@ struct Environment {
   Method & method;
   const Resolver& resolver;
   std::vector<std::string> captured_inputs;
+  std::unordered_map<std::string, std::string> error_messages;
   Block* b;
 
   std::shared_ptr<Environment> next;
+
+  // set type error in the lowest environment. if the variable is used after an
+  // error has been set, then we will use the more informative error message
+  void setVariableTypeError(const std::string& name, const std::string &msg) {
+    auto runner = this;
+    while (runner->next) {
+      runner = runner->next.get();
+    }
+    runner->error_messages[name] = msg;
+  }
+
+  // see if type error has been set for a variable
+  at::optional<std::string> findVariableTypeError(const std::string& name) {
+    auto runner = this;
+    while (runner->next) {
+      runner = runner->next.get();
+    }
+    auto msg = runner->error_messages.find(name);
+    if (msg != runner->error_messages.end()) {
+      return msg->second;
+    } else {
+      return at::nullopt;
+    }
+  }
 
   SugaredValuePtr findInThisFrame(const std::string& name) {
     auto it = value_table.find(name);
@@ -254,9 +279,22 @@ struct Environment {
         throw ErrorReport(loc) << "Cannot re-assign '" << name << "' because it has type " << value->kind() <<
 	" and " << name << " is not a first-class value.  Only reassignments to first-class values are allowed";
       }
-      if(!as_simple_value->type()->isSubtypeOf(unshapedType(simple_parent->type()))) {
-        throw ErrorReport(loc) << "variable '" << name << "' previously has type " << simple_parent->type()->str()
-        << " but is now being assigned to a value of type " << as_simple_value->type()->str();
+      if (!as_simple_value->type()->isSubtypeOf(
+              unshapedType(simple_parent->type()))) {
+        std::stringstream errMsg;
+        errMsg << "variable '" << name << "' previously has type "
+               << simple_parent->type()->str()
+               << " but is now being assigned to a value of type "
+               << as_simple_value->type()->str();
+        // Special-cased error msg if we're trying to assign to a tensor list.
+        if (simple_parent->type()->kind() == TypeKind::ListType &&
+            as_simple_value->type()->kind() == TypeKind::ListType) {
+          errMsg << "\n. (Note: empty lists are constructed as Tensor[]; "
+                 << "if you want an empty list of a different type, "
+                 << "use `_construct_empty_foo_list`, "
+                 << "where `foo` is `int` or `float`)";
+        }
+        throw ErrorReport(loc) << errMsg.str();
       }
     }
     if (as_simple_value)
@@ -294,6 +332,11 @@ struct Environment {
     }
 
     if (!retval && required) {
+      // check if this value was not emitted in an if statement because of a
+      // type mismatch. if it was, then we print a more informative error msg
+      if (auto msg = findVariableTypeError(ident)) {
+        throw ErrorReport(range) << *msg << "and was used here";
+      }
       throw ErrorReport(range) << "undefined value " << ident;
     }
     return retval;
@@ -459,11 +502,17 @@ at::optional<std::vector<Value*>> tryMatchSchema(
 
       // Allow homogeneous tuples to be casted implicitly to lists of appropriate types
       if (arg.type->kind() == TypeKind::ListType &&
-          value->type()->kind() == TypeKind::TupleType &&
-          value->type()->isSubtypeOf(arg.type)) {
-        auto unpacked = createTupleUnpack(value);
-        auto elem_type = arg.type->expect<ListType>()->getElementType();
-        value = graph.insertNode(graph.createList(elem_type, unpacked))->output();
+          value->type()->kind() == TypeKind::TupleType) {
+          auto list_type = arg.type->cast<ListType>()->getElementType();
+          auto tuple = value->type()->cast<TupleType>();
+          auto castable = std::all_of(tuple->elements().begin(), tuple->elements().end(), [&](const TypePtr& t) {
+            return t->isSubtypeOf(list_type);
+          });
+          if (castable) {
+            auto unpacked = createTupleUnpack(value);
+            auto elem_type = arg.type->expect<ListType>()->getElementType();
+            value = graph.insertNode(graph.createList(elem_type, unpacked))->output();
+          }
       }
 
       if (value->node()->kind() == prim::None){
@@ -596,10 +645,9 @@ static Value* identity(const SourceRange& range, Value* v) {
   return v;
 }
 
-
 std::shared_ptr<SugaredValue> BuiltinFunction::call(
     SourceRange loc,
-    Method & m,
+    Method& m,
     at::ArrayRef<NamedValue> inputs_,
     at::ArrayRef<NamedValue> attributes,
     size_t n_binders) {
@@ -607,7 +655,8 @@ std::shared_ptr<SugaredValue> BuiltinFunction::call(
   if (value)
     inputs.push_back(*value);
   inputs.insert(inputs.end(), inputs_.begin(), inputs_.end());
-  return std::make_shared<SimpleValue>(emitBuiltinCall(loc, *m.graph(), Symbol::aten(name), inputs, attributes, true));
+  return std::make_shared<SimpleValue>(
+      emitBuiltinCall(loc, *m.graph(), symbol, inputs, attributes, true));
 }
 
 struct to_ir {
@@ -895,12 +944,38 @@ private:
     // Register outputs in each block
     for (const auto& x : mutated_variables) {
       auto tv = save_true->getVar(x, stmt.range());
-      true_block->registerOutput(tv);
       auto fv = save_false->getVar(x, stmt.range());
-      false_block->registerOutput(fv);
-      environment_stack->setVar(stmt.range(), x, n->addOutput()->setType(tv->type()));
-    }
+      auto unified = unifyTypes(tv->type(), fv->type());
 
+      // attempt to unify the types. we allow variables to be set to different types
+      // in each branch as long as that variable is not already in scope,
+      // or if that variable does not get used later. here, we save the error
+      // so that the error message will be more informative in the case that is
+      // used later. When a is accessed in (a + 1), the error will get printed
+      // if cond:
+      //    a = 1
+      // else:
+      //    a = tensor
+      // b = a + 1
+      //
+      if (!unified) {
+        ErrorReport error(stmt);
+        error << "Type mismatch: " << x << " is set to type " << tv->type()->str() << " in the true branch"
+        << " and type " << fv->type()->str() << " in the false branch";
+        if (save_true->findInParentFrame(x) || save_false->findInParentFrame(x)) {
+          throw error;
+        } else {
+          // error gets saved in the lowest environment because all
+          // variables are scoped to the function. doesn't matter if this accessed
+          // through save_true or save_false
+          save_true->setVariableTypeError(x, error.what());
+          continue;
+        }
+      }
+      true_block->registerOutput(tv);
+      false_block->registerOutput(fv);
+      environment_stack->setVar(stmt.range(), x, n->addOutput()->setType(*unified));
+    }
   }
 
   // *********************** Loop Operators ************************************
@@ -1104,7 +1179,7 @@ private:
       Ident lhs = Var(stmt.lhs()[0]).name();
       Expr expr = BinOp::create(stmt.range(), stmt.reduction(),
                                 Var::create(lhs.range(), lhs), stmt.rhs());
-      environment_stack->setVar(lhs.range(), lhs.name(), emitExpr(expr));
+      environment_stack->setVar(lhs.range(), lhs.name(), emitExpr(expr, identity));
       return;
     }
 
@@ -1374,12 +1449,10 @@ private:
       case TK_LIST_LITERAL: {
         auto ll = ListLiteral(tree);
         auto values = getValues(ll.inputs(), /*maybe_unpack=*/true, identity);
-        if (values.size() == 0) {
-          throw ErrorReport(tree) << "Empty list literals not allowed. "
-                                  << "Use _construct_empty_foo_list() instead. "
-                                  << "`foo` can be `int`, `float` or `tensor`";
-        }
-        const auto elem_type = values.at(0)->type();
+
+        // If this is an empty list literal `[]`, construct an empty Tensor[]
+        const auto elem_type =
+            values.empty() ? DynamicType::get() : values.at(0)->type();
         for (auto v : values) {
           if (v->type() != elem_type) {
             throw ErrorReport(tree)
@@ -1481,10 +1554,31 @@ private:
   }
 };
 
+static const std::unordered_map<std::string, std::string> &builtin_cast_methods() {
+  static std::unordered_map<std::string, std::string> builtin_cast_methods = {
+    {"byte", "_cast_Byte"},
+    {"char", "_cast_Char"},
+    {"double", "_cast_Double"},
+    {"float", "_cast_Float"},
+    {"int", "_cast_Int"},
+    {"long", "_cast_Long"},
+    {"short", "_cast_Short"},
+    {"half", "_cast_Half"}
+  };
+  return builtin_cast_methods;
+}
+
 // support syntax sugar for x.foo(y, z) by allowing x.foo to return a
 // callable value that will resolve to foo(x, y, z) when called.
 std::shared_ptr<SugaredValue> SimpleValue::attr(SourceRange loc, Method & m, const std::string& field) {
-  return std::make_shared<BuiltinFunction>(field, NamedValue(loc, "self", value));
+  // Allow method-style casts on Tensor types. e.g. x.int()
+  if (value->type()->isSubtypeOf(DynamicType::get()) && builtin_cast_methods().count(field)) {
+    return std::make_shared<BuiltinFunction>(
+        Symbol::aten(builtin_cast_methods().at(field)),
+        NamedValue(loc, "self", value));
+  }
+  return std::make_shared<BuiltinFunction>(
+      Symbol::aten(field), NamedValue(loc, "self", value));
 }
 
 std::vector<Value*> inlineCallTo(Graph& g, Graph& callee, ArrayRef<Value*> inputs) {
@@ -1583,7 +1677,6 @@ TypePtr parseTypeFromExpr(Expr expr) {
         && select.selector().name() == "Tensor") {
       return ident_to_type_lut().at("Tensor");
     }
-    std::cout << select << std::endl;
   }
   throw ErrorReport(expr.range()) << "Expression of type " << kindToString(expr.kind())
                                   << " cannot be used in a type expression";

@@ -107,11 +107,9 @@ bool mergeTypes(ArrayRef<Value*> lhs, ArrayRef<Value*> rhs, ArrayRef<Value*> out
   bool changed = false;
   for(size_t i = 0; i < lhs.size(); ++i) {
     auto old_output_type = outputs[i]->type();
-    if(*lhs[i]->type() == *rhs[i]->type()) {
-      outputs[i]->setType(lhs[i]->type());
-    } else {
-      outputs[i]->setType(DynamicType::get());
-    }
+    auto new_type = unifyTypes(lhs[i]->type(), rhs[i]->type());
+    JIT_ASSERT(new_type);
+    outputs[i]->setType(*new_type);
     if(*old_output_type != *outputs[i]->type())
       changed = true;
   }

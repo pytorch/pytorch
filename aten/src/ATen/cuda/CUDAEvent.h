@@ -5,7 +5,7 @@
 
 #include "cuda_runtime_api.h"
 
-#include <ATen/ATenGeneral.h>
+#include <ATen/core/ATenGeneral.h>
 #include <ATen/Error.h>
 
 /*
@@ -55,10 +55,6 @@ struct CUDAEvent {
   CUDAEvent& operator=(CUDAEvent other) noexcept {
     std::swap(internals_, other.internals_);
     return *this;
-  }
-
-  explicit operator bool() const noexcept {
-    return internals_ != nullptr;
   }
 
   operator cudaEvent_t() const { return detail::CUDAEvent_event(internals_); }

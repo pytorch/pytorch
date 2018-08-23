@@ -2,7 +2,7 @@
 #define THC_GENERIC_FILE "generic/THCUNN.h"
 #else
 
-#include "Reduction.h"
+#include <ATen/core/Reduction.h>
 
 THC_API void THNN_(Abs_updateOutput)(
                   THCState *state,

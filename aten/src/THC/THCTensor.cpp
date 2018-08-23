@@ -190,11 +190,10 @@ void THCTensor_setStorageNd(THCState *state, THCTensor *self, THCStorage *storag
       THError("Tensor: invalid null storage");
     }
     auto scalar_type = THTensor_getStoragePtr(self)->scalar_type();
-    THStorage_free(THTensor_getStoragePtr(self));
 
     if (storage) {
+      storage->_raw_incref();
       THTensor_stealAndSetStoragePtr(self, storage);
-      THStorage_retain(THTensor_getStoragePtr(self));
     } else {
       THTensor_stealAndSetStoragePtr(self, THCStorage_new(state, scalar_type));
     }

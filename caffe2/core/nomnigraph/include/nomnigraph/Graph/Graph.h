@@ -412,6 +412,10 @@ class Graph {
     return result;
   }
 
+  size_t getEdgesCount() const {
+    return (size_t)edges_.size();
+  }
+
  private:
   std::list<Node<T, U...>> nodes_;
   std::list<Edge<T, U...>> edges_;

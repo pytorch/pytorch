@@ -55,14 +55,6 @@ IF "%~1"=="--use-gloo-ibverbs" (
   set /a USE_GLOO_IBVERBS=0
 )
 
-IF "%~1"=="--use-distributed-mw" (
-  set /a USE_DISTRIBUTED_MW=1
-  echo Warning: distributed mw is enabled but build is not yet implemented 1>&2
-  shift
-) ELSE (
-  set /a USE_DISTRIBUTED_MW=0
-)
-
 set BUILD_TYPE=Release
 IF "%DEBUG%"=="1" (
   set BUILD_TYPE=Debug
@@ -183,7 +175,6 @@ goto:eof
                   -DNVTOOLEXT_HOME="%NVTOOLEXT_HOME%" ^
                   -DNO_API=ON ^
                   -DBUILD_SHARED_LIBS="%BUILD_SHARED_LIBS%" ^
-                  -DBUILD_ATEN=ON ^
                   -DBUILD_PYTHON=OFF ^
                   -DBUILD_BINARY=OFF ^
                   -DONNX_NAMESPACE=%ONNX_NAMESPACE% ^
