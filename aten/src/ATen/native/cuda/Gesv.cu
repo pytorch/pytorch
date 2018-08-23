@@ -174,8 +174,8 @@ AT_ERROR("gesv: MAGMA library not found in "
   prepareTensorsForLapack(A, lu, temp_lu);
 
   AT_DISPATCH_FLOATING_TYPES(self.type(), "gesv", [&]{
-      const int64_t bx = sol.size(1);
-      const int64_t by = sol.size(0);
+      const int64_t bx = sol.size(0);
+      const int64_t by = sol.size(1);
       auto A_ptr = temp_lu.defined() ? temp_lu.data<scalar_t>()
                                      : lu.data<scalar_t>();
       auto b_ptr = temp_sol.defined() ? temp_sol.data<scalar_t>()
