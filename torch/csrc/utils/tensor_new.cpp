@@ -256,7 +256,7 @@ Tensor legacy_sparse_tensor_ctor(const Type& type, PyObject* args, PyObject* kwa
   ParsedArgs<4> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
-    return at::empty({}, TensorOptions(type, r.device(0).index()));
+    return at::empty({0}, TensorOptions(type, r.device(0).index()));
   } else if (r.idx == 1) {
     auto cdata = reinterpret_cast<void*>(r.toInt64(0));
     return type.unsafeTensorFromTH(cdata, true);
@@ -415,6 +415,7 @@ Tensor sparse_coo_tensor_ctor(const Type& type, PyObject* args, PyObject* kwargs
   static PythonArgParser parser({
     "sparse_coo_tensor(PyObject* indices, PyObject* values, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)",
     "sparse_coo_tensor(PyObject* indices, PyObject* values, IntList size, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)",
+    "sparse_coo_tensor(IntList size, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)",
   });
 
   ParsedArgs<6> parsed_args;
@@ -440,6 +441,10 @@ Tensor sparse_coo_tensor_ctor(const Type& type, PyObject* args, PyObject* kwargs
     Tensor indices = internal_new_from_data(index_type, r.deviceOptional(4), r.pyobject(0), false, true, false);
     const auto& sparse_type_to_use = values.type().toBackend(values.type().is_cuda() ? Backend::SparseCUDA : Backend::SparseCPU);
     return sparse_type_to_use.sparse_coo_tensor(indices, values, r.intlist(2)).set_requires_grad(r.toBool(5));
+  } else if (r.idx == 2) {
+    const auto& sparse_type_to_use = typeWithDefault(r, 1, 2, default_sparse_type);
+    at::DeviceGuard device_guard(r.device(2));
+    return sparse_type_to_use.sparse_coo_tensor(r.intlist(0)).set_requires_grad(r.toBool(3));
   }
   throw std::runtime_error("sparse_coo_tensor(): invalid arguments");
 }
