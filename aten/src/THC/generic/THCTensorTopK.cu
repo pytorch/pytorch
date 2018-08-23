@@ -33,17 +33,17 @@ THC_API void THCTensor_(topk)(THCState* state,
   gatherTopK<real, INDEX_T, DIM, DIR>                                   \
     <<<grid, block, 0, THCState_getCurrentStream(state)>>>(             \
       inputInfo,                                                        \
-      sliceSize,                                                        \
-      k,                                                                \
-      inputSlices,                                                      \
+      static_cast<INDEX_T>(sliceSize),                                  \
+      static_cast<INDEX_T>(k),                                          \
+      static_cast<INDEX_T>(inputSlices),                                \
       /* The actual dimension that the k-selection is running in */     \
       /* may have changed from collapseDims() */                        \
-      inputInfo.strides[collapseInputDim],                              \
+      static_cast<INDEX_T>(inputInfo.strides[collapseInputDim]),        \
       topKInfo,                                                         \
-      topKSlices,                                                       \
-      topKInfo.strides[collapseTopKDim],                                \
+      static_cast<INDEX_T>(topKSlices),                                 \
+      static_cast<INDEX_T>(topKInfo.strides[collapseTopKDim]),          \
       indicesInfo,                                                      \
-      indicesInfo.strides[collapseIndicesDim])
+      static_cast<INDEX_T>(indicesInfo.strides[collapseIndicesDim]))
 
 #define RUN_DIR(INDEX_T, DIM)                   \
   if (dir) {                                    \
