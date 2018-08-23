@@ -62,6 +62,22 @@ Tensor batch_norm(
                         training, momentum, eps));
   }
 
+  bool use_miopen = (input.type().is_cuda()
+               && (input.type().scalarType() != at::kHalf
+                 || weight.type().scalarType() == at::kFloat)
+               && weight.defined() && bias.defined()
+               && ((running_mean.defined() && running_var.defined())
+                 || (!running_mean.defined() && !running_var.defined() && training))
+               && detail::getCUDAHooks().compiledWithMIOpen()
+               );
+
+  if (use_miopen) {
+    return std::get<0>(at::miopen_batch_norm(
+                        input, weight, bias,
+                        running_mean, running_var,
+                        training, momentum, eps));
+  }
+
   return at::thnn_batch_norm(
             input.contiguous(), weight, bias,
             running_mean, running_var, training, momentum, eps);

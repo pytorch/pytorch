@@ -663,7 +663,7 @@ struct THCNumerics<double> {
   static inline __host__ __device__  double tanh (double a) { return  ::tanh(a); }
   static inline __host__ __device__  double erf  (double a) { return   ::erf(a); }
   static inline __host__ __device__  double erfc (double a) { return  ::erfc(a); }
-  static inline __host__ __device__  double abs  (double a) { return   ::abs(a); }
+  static inline __host__ __device__  double abs  (double a) { return   fabs(a); }
   static inline __host__ __device__  double round(double a) { return ::round(a); }
   static inline __host__ __device__  double frac (double a) { return a - ::trunc(a); }
   static inline __host__ __device__  double cinv (double a) { return 1.0 / a; }

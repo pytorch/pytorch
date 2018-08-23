@@ -3,7 +3,7 @@
 
 #include "ATen/ATen.h"
 #include "ATen/cudnn/Descriptors.h"
-#include "ATen/cudnn/Handles.h"
+#include "ATen/cudnn/Handle.h"
 #include "test_seed.h"
 
 using namespace at;
