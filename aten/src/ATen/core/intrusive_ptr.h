@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/core/ATenGeneral.h>
 #include <ATen/core/Error.h>
 #include <atomic>
 #include <stdexcept>
@@ -32,7 +33,7 @@ namespace c10 {
 // tells us if the object was allocated by us.  If it wasn't, no
 // intrusive_ptr for you!
 
-class intrusive_ptr_target {
+class AT_CORE_API intrusive_ptr_target {
   // Note [Weak references for intrusive refcounting]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
   // Here's the scheme:
@@ -113,7 +114,7 @@ class intrusive_ptr_target {
 
 namespace detail {
 template <class TTarget>
-struct intrusive_target_default_null_type final {
+struct AT_CORE_API intrusive_target_default_null_type final {
   static constexpr TTarget* singleton() noexcept {
     return nullptr;
   }
@@ -126,7 +127,7 @@ class weak_intrusive_ptr;
 template <
     class TTarget,
     class NullType = detail::intrusive_target_default_null_type<TTarget>>
-class intrusive_ptr final {
+class AT_CORE_API intrusive_ptr final {
  private:
   static_assert(
       std::is_base_of<intrusive_ptr_target, TTarget>::value,
@@ -415,7 +416,7 @@ inline bool operator!=(
 template <
     typename TTarget,
     class NullType = detail::intrusive_target_default_null_type<TTarget>>
-class weak_intrusive_ptr final {
+class AT_CORE_API weak_intrusive_ptr final {
  private:
   static_assert(
       std::is_base_of<intrusive_ptr_target, TTarget>::value,
@@ -797,13 +798,13 @@ namespace std {
 // To allow intrusive_ptr and weak_intrusive_ptr inside std::unordered_map or
 // std::unordered_set, we need std::hash
 template <class TTarget, class NullType>
-struct hash<c10::intrusive_ptr<TTarget, NullType>> {
+struct AT_CORE_API hash<c10::intrusive_ptr<TTarget, NullType>> {
   size_t operator()(const c10::intrusive_ptr<TTarget, NullType>& x) const {
     return std::hash<TTarget*>()(x.get());
   }
 };
 template <class TTarget, class NullType>
-struct hash<c10::weak_intrusive_ptr<TTarget, NullType>> {
+struct AT_CORE_API hash<c10::weak_intrusive_ptr<TTarget, NullType>> {
   size_t operator()(const c10::weak_intrusive_ptr<TTarget, NullType>& x) const {
     return std::hash<TTarget*>()(x._unsafe_get_target());
   }
