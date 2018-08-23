@@ -2,7 +2,7 @@ import torch
 
 
 def _get_device_index(device, optional=False):
-    if isinstane(device, torch.device):
+    if isinstance(device, torch.device):
         dev_type = device.type
         if device.type != 'cuda':
             raise ValueError('Execpted a cuda device, but got: {}'.format(device))
