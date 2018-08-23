@@ -1599,6 +1599,16 @@ private:
   }
 
   // Desugars multidim slicing into aten::slice / aten::select calls.
+  //
+  // XXX: Errors in user code are not elegantly reported.
+  // Let's say someone were to do the following:
+  //   @torch.jit.script
+  //   def fn(x):
+  //       return x[0, 1]
+  //   fn(torch.randn(5))
+  // Because we desugar this into two aten::select ops, the error message
+  // complains about aten::select failing rather than there "not being
+  // enough dimensions to index".
   Value * emitMultidimSlicing(const Subscript& subscript) {
     const auto& loc = subscript.range();
     auto * sliceable = emitExpr(subscript.value());
