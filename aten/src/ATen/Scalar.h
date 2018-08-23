@@ -19,12 +19,6 @@ class AT_API Scalar {
 public:
   Scalar() : Scalar(int64_t(0)) {}
 
-  explicit Scalar(const detail::TensorBase & t)
-  : tag(Tag::HAS_t), t(t) {
-    AT_CHECK(t.defined(), "Attempting to create a Scalar from an undefined tensor");
-    AT_CHECK(t.dim() == 0, "Attempting to create a Scalar from a ", t.dim(), " dim tensor");
-  }
-
 #define DEFINE_IMPLICIT_CTOR(type,name,member) \
   Scalar(type vv) \
   : tag(Tag::HAS_##member) { \

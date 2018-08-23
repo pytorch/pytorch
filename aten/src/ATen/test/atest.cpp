@@ -19,7 +19,7 @@ void trace() {
     trace += foo_a[i][i];
   }
 
-  REQUIRE(Scalar(foo.trace()).toFloat() == Approx(trace));
+  REQUIRE(foo.trace().toCFloat() == Approx(trace));
 }
 
 TEST_CASE( "atest", "[]" ) {
