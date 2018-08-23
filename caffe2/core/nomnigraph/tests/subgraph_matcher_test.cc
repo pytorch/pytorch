@@ -41,11 +41,11 @@ TestMatchGraph::NodeRef Tree(
     const Criteria& root,
     const std::vector<TestMatchGraph::NodeRef>& children = {},
     int count = 1) {
-  return subgraph(graph, root, children, count, false);
+  return subgraph(graph, root, children, count);
 }
 
 TestMatchGraph::NodeRef NonTerminal(const Criteria& root, int count = 1) {
-  return subgraph(graph, root, {}, count, true);
+  return nonTerminalSubgraph(graph, root, count);
 }
 
 Criteria any() {
@@ -180,23 +180,27 @@ struct DataFlowTestGraph {
   }
 };
 
-TestMatchGraph::NodeRef DataFlowTestGraphCriteria() {
-  // clang-format off
-  return Tree(
-    Criteria("opG"),{
-      operatorTree("opF", {
-          // Note: we currently don't enforce that these 2 opC nodes
-          // have to be the same.
-          operatorTree("opB", {
-            operatorTree("opC", {
-              Tree(Criteria("input"), {}, TestMatchNode::kStarCount)
-            }, 2),
-          })
-      }),
-      Tree(any()) // matches dataI
+struct DataFlowTestGraphCriteria {
+  TestMatchGraph::NodeRef matchOpCOutput;
+  TestMatchGraph::NodeRef matchOpG;
+
+  DataFlowTestGraphCriteria() {
+    // clang-format off
+    matchOpCOutput = operatorTree("opC", {
+      NonTerminal(Criteria("input"), TestMatchNode::kStarCount)
     });
-  // clang-format on
-}
+    matchOpG = Tree(
+      Criteria("opG"),{
+        operatorTree("opF", {
+            operatorTree("opB", {
+              matchOpCOutput, matchOpCOutput,
+            })
+        }),
+        NonTerminal(any()) // matches dataI
+      });
+    // clang-format on
+  }
+};
 
 TestGraph::NodeRef getInNode(TestGraph::NodeRef node, int index) {
   return node->getInEdges()[index]->tail();
@@ -543,7 +547,7 @@ TEST(SubgraphMatcher, DagMatchingRandomLargeGraph) {
 TEST(SubgraphMatcher, IsSubtreeMatchRealistic) {
   reset();
   auto graph = DataFlowTestGraph();
-  auto subtree = DataFlowTestGraphCriteria();
+  auto subtree = DataFlowTestGraphCriteria().matchOpG;
 
   EXPECT_FALSE(isSubgraphMatch(graph.opF, subtree));
   EXPECT_FALSE(isSubgraphMatch(graph.opC, subtree));
@@ -553,36 +557,25 @@ TEST(SubgraphMatcher, IsSubtreeMatchRealistic) {
   EXPECT_TRUE(isSubgraphMatch(graph.opG, subtree));
 }
 
-TEST(SubgraphMatcher, ReplaceSubtreeRealistic) {
+TEST(SubgraphMatcher, ReplaceGraphRealistic) {
   reset();
   auto graph = DataFlowTestGraph();
   auto subtree = DataFlowTestGraphCriteria();
 
   TestMatcher::replaceSubgraph(
-      graph.graph, subtree, [](TestGraph& g, TestGraph::NodeRef opG) {
-        auto opFused = g.createNode("opFused");
-
-        auto dataF = getInNode(opG, 0);
-        auto opF = getInNode(dataF, 0);
-        auto dataB = getInNode(opF, 0);
-        auto opB = getInNode(dataB, 0);
-        auto dataC = getInNode(opB, 0);
-        auto opC = getInNode(dataC, 0);
-
-        g.deleteNode(dataF);
-        g.replaceNode(opG, opFused);
-
-        auto outEdgesC = opC->getOutEdges();
-        g.deleteNode(outEdgesC[0]->head());
-        g.deleteNode(outEdgesC[1]->head());
-        g.replaceNode(opC, opFused);
-
-        g.deleteNode(opC);
-        g.deleteNode(opB);
-        g.deleteNode(dataB);
-        g.deleteNode(opF);
-        g.deleteNode(opG);
-
+      graph.graph,
+      subtree.matchOpG,
+      [subtree](
+          TestGraph& g,
+          TestGraph::NodeRef opG,
+          const TestMatcher::SubgraphMatchResultType& matchResult) {
+        auto fusedNode = g.createNode("opFused");
+        auto opC = getInNode(
+            matchResult.getMatchNodeMap()->at(subtree.matchOpCOutput), 0);
+        g.replaceOutEdges(opG, fusedNode);
+        g.replaceInEdges(opG, fusedNode);
+        g.replaceInEdges(opC, fusedNode);
+        g.deleteNodes(matchResult.getMatchedSubgraph()->getNodes());
         return true;
       });
 
@@ -591,10 +584,11 @@ TEST(SubgraphMatcher, ReplaceSubtreeRealistic) {
   // - dataI node
   // - fused node
   // - output node
+  // - dataC2 node
   auto nodes = graph.graph.getMutableNodes();
 
   // Test that the graph is transformed as expected.
-  EXPECT_EQ(nodes.size(), graph.numInputs + 3);
+  EXPECT_EQ(nodes.size(), graph.numInputs + 4);
   TestGraph::NodeRef opFused;
   TestGraph::NodeRef dataI;
   TestGraph::NodeRef dataOut;
@@ -609,6 +603,8 @@ TEST(SubgraphMatcher, ReplaceSubtreeRealistic) {
   }
 
   EXPECT_EQ(getInNode(dataOut, 0), opFused);
+
+  EXPECT_EQ(opFused->getInEdges().size(), graph.numInputs + 1);
   EXPECT_EQ(getInNode(opFused, 0), dataI);
   for (int i = 1; i <= graph.numInputs; i++) {
     EXPECT_EQ(getInNode(opFused, i)->data(), "input");
