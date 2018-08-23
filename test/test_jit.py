@@ -3884,6 +3884,80 @@ def func(t):
                 if True:
                     a = 4
 
+    def test_if_tuple_sizes(self):
+        with self.assertRaisesRegex(RuntimeError, "Type mismatch"):
+            @torch.jit.script
+            def diff_tuple_sizes(x):
+                if False:
+                    c0 = ((x, x), (x, x, x))
+                else:
+                    c0 = ((x, x, x), (x, x))
+                return c0
+
+    def test_if_different_type(self):
+        with self.assertRaisesRegex(RuntimeError, "Type mismatch: c0 is set to type int "
+                                    "in the true branch and type float in the false branch:"):
+            @torch.jit.script
+            def diff_type_used():
+                if False:
+                    c0 = 1
+                else:
+                    c0 = 1.0
+                return c0
+
+        with self.assertRaisesRegex(RuntimeError, "variable 'c0' previously has type float"):
+            @torch.jit.script
+            def diff_existing_type(x):
+                c0 = 1.0
+                if False:
+                    c0 = 1
+                    print(x)
+                return x
+
+        @torch.jit.script
+        def diff_type_unused():
+            if True:
+                c0 = 1
+                print(c0)
+            else:
+                c0 = 1.0
+                print(c0)
+            return 1
+
+    def test_if_list(self):
+        # testing that different length lists don't throw error
+        @torch.jit.script
+        def test_list(x):
+            if True:
+                c = [x, x]
+            else:
+                c = [x, x, x]
+            return torch.cat(c)
+
+        b = torch.zeros(2, 4)
+        # unrelated bug
+        with self.assertRaisesRegex(RuntimeError, ".*"):
+            test_list.graph.propagate_shapes((b,), False)
+
+    def test_if_supertype(self):
+        @torch.jit.script
+        def tensor_unifying(x, y, z):
+
+            # testing dynamic is appropriately set for y and z
+            if True:
+                x, y, z = x, y, z
+            else:
+                x, y, z = x, x, y
+
+            return x, y, z
+
+        a = torch.zeros(2, 2, dtype=torch.float)
+        b = torch.zeros(2, 4, dtype=torch.long)
+        c = torch.zeros(2, 4, dtype=torch.float)
+
+        tensor_unifying.graph.propagate_shapes((a, b, c), False)
+        self.assertExpected(canonical(tensor_unifying.graph))
+
     def test_type_annotations(self):
         def fn(x, y):
             # type: (Tensor, Tensor) -> Tuple[Tensor, Tensor, Tensor]
