@@ -14,21 +14,14 @@ class CAFFE2_API Predictor {
   using TensorVector = std::vector<TensorCPU*>;
   using TensorMap = std::unordered_map<std::string, TensorCPU*>;
 
-  // MetaNetDef contains 'init_net', 'run_net', and meta-info
-  // The meta-info is used to verify inputs are correctly passed
-  Predictor(
-      const MetaNetDef& net,
-      Workspace* parent = nullptr,
-      bool run_init = true);
-
-  // Runs the `init_net` once, then saves the `run_net` to be executed
-  // in `::run`
   Predictor(
       const NetDef& init_net,
       const NetDef& run_net,
       Workspace* parent = nullptr,
       bool run_init = true,
       int optimization = 1);
+
+  Predictor(PredictorConfig config);
 
   ~Predictor() {}
 
@@ -57,7 +50,7 @@ class CAFFE2_API Predictor {
   };
 
   Workspace* ws() {
-    return &ws_;
+    return config_.ws.get();
   };
 
   const std::vector<std::string>& input_names() const {
@@ -71,6 +64,5 @@ class CAFFE2_API Predictor {
  private:
   bool run_map_workspace(const TensorMap& inputs);
   PredictorConfig config_;
-  Workspace ws_;
 };
 }

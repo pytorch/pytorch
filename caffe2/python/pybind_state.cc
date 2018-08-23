@@ -853,7 +853,8 @@ void addObjectMethods(py::module& m) {
                 init_net.cast<std::string>(), &init_net_));
             CAFFE_ENFORCE(ParseProtoFromLargeString(
                 predict_net.cast<std::string>(), &predict_net_));
-            return new Predictor(init_net_, predict_net_, gWorkspace);
+            return new Predictor(
+                makePredictorConfig(init_net_, predict_net_, gWorkspace));
           }))
       .def(
           "run",
