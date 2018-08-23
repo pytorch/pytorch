@@ -1140,6 +1140,7 @@ class TestSparseOneOff(TestCase):
                                              [3, 4, 4]))
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    @skipIfRocm
     def test_cuda_sparse_cpu_dense_add(self):
         x = torch.zeros(3, 4, 4)
         sparse_y = torch.cuda.sparse.FloatTensor(torch.zeros(1, 4).long().cuda(),
