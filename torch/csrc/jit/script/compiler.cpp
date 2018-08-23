@@ -437,102 +437,168 @@ static inline bool isIntUsedAsIntList(
          *arg.type == *ListType::ofInts() && arg.N;
 }
 
+inline bool convertibleToList(TypePtr type, TypePtr list_type_) {
+  auto list_type = list_type_->cast<ListType>();
+  if(!list_type) {
+    return false;
+  }
+  if(type->isSubtypeOf(list_type_)) {
+    return true;
+  }
+  if(auto tuple = type->cast<TupleType>()) {
+    return std::all_of(
+        tuple->elements().begin(),
+        tuple->elements().end(),
+        [&](const TypePtr& t) {
+          return t->isSubtypeOf(list_type->getElementType());
+        });
+  }
+  return false;
+}
+
+Value* tryMatchArgument(
+    const Argument& arg,
+    Graph& graph,
+    const SourceRange& loc,
+    const NamedValue& named_value,
+    std::function<std::ostream&()> err) {
+  Value* value = named_value.value(graph);
+
+  // some functions that take lists of integers for fixed size arrays
+  // also allow single ints to be passed in their place.
+  // the single int is then repeated to the length of the list
+  if (isIntUsedAsIntList(value, arg)) {
+    std::vector<Value*> repeated(*arg.N, value);
+    value = graph.insertNode(graph.createList(IntType::get(), repeated))->output();
+  }
+
+  // Allow homogeneous tuples to be casted implicitly to lists of appropriate types
+  if (convertibleToList(value->type(), arg.type) &&
+      value->type()->kind() == TypeKind::TupleType) {
+    auto unpacked = createTupleUnpack(value);
+    auto elem_type = arg.type->expect<ListType>()->getElementType();
+    value = graph.insertNode(graph.createList(elem_type, unpacked))->output();
+  }
+
+  if (value->node()->kind() == prim::None){
+    if (arg.type->isSubtypeOf(NumberType::get()))
+      value = graph.insertConstant(at::Scalar(NAN), loc);
+    else
+      value = graph.insertNode(graph.createUndefined())->output();
+  }
+
+  if(!value->type()->isSubtypeOf(arg.type)) {
+    err() << "expected a value of type " << arg.type->str() << " for argument '" << arg.name << "' but found "
+          << value->type()->str() << "\n"
+          << named_value.locOr(loc);
+    return nullptr;
+  }
+  return value;
+}
+
+at::optional<size_t> findInputWithName(const std::string& name, at::ArrayRef<NamedValue> kwargs) {
+  for(size_t i = 0; i < kwargs.size(); ++i) {
+    if(kwargs[i].name() == name)
+      return i;
+  }
+  return at::nullopt;
+}
+
+Value* tryCreateList(
+    TypePtr elem_type,
+    Graph& graph,
+    const SourceRange& loc,
+    at::ArrayRef<NamedValue> varargs,
+    std::function<std::ostream&()> err) {
+  Argument elem_arg("", elem_type);
+  std::vector<Value*> list_ctor;
+  for(const auto& a : varargs) {
+    Value* av = tryMatchArgument(elem_arg, graph, loc, a, err);
+    if(!av)
+      return nullptr;
+    list_ctor.push_back(av);
+  }
+  return graph.insertNode(graph.createList(elem_type, list_ctor))->output();
+}
+
 at::optional<std::vector<Value*>> tryMatchSchema(
   const FunctionSchema& schema,
   const SourceRange& loc,
   Graph& graph,
-  at::ArrayRef<NamedValue> inputs,
-  at::ArrayRef<NamedValue> attributes,
+  at::ArrayRef<NamedValue> args,
+  at::ArrayRef<NamedValue> kwargs,
   std::ostream& failure_messages) {
     auto err = [&]() -> std::ostream& {
       failure_messages << "\nfor operator " << schema << ":\n";
       return failure_messages;
     };
 
-    std::vector<at::optional<NamedValue>> positional_inputs(schema.arguments.size(), at::nullopt);
+    std::vector<Value*> positional_inputs;
+    std::vector<bool> used_kwarg(kwargs.size(), false);
 
-    size_t total_inputs = attributes.size() + inputs.size();
-    if(total_inputs > schema.arguments.size()) {
-      err() << "expected at most " << schema.arguments.size() << " arguments "
-      << "but found " << total_inputs << "\n" << loc << "\n";
+    // if we finish the loop will we have consumed all arguments?
+    size_t used_args = 0;
+
+    for(size_t schema_i = 0; schema_i < schema.arguments.size(); ++schema_i) {
+      const auto& arg = schema.arguments[schema_i];
+      at::optional<NamedValue> v;
+      if(!arg.kwarg_only && schema_i < args.size()) {
+
+        // allow zeros(IntList sizes) to work with zeros(1, 2) or zeros(1)
+        if (arg.type->kind() == TypeKind::ListType && // the formal must be a list
+            !arg.N && // it must not be a broadcasting list like int[3], otherwise a single int is a valid input
+            (schema_i + 1 == schema.arguments.size() || schema.arguments[schema_i + 1].kwarg_only) &&  // must be the last position argument
+            !convertibleToList(args[schema_i].value(graph)->type(), arg.type)) { // and the actual should not be a list already
+          auto elem_type = arg.type->expect<ListType>()->getElementType();
+          Value* list = tryCreateList(elem_type, graph, loc, args.slice(schema_i), err);
+          if(!list)
+            return at::nullopt;
+          used_args = args.size();
+          positional_inputs.push_back(list);
+          continue;
+        }
+
+        v = args[schema_i];
+        used_args++;
+      } else if(auto idx = findInputWithName(arg.name, kwargs))  {
+        const NamedValue& nv = kwargs[*idx];
+        if(used_kwarg[*idx]) {
+          err() << "argument " << nv.name() << " specified twice \n" << nv.locOr(loc);
+          return at::nullopt;
+        }
+        used_kwarg[*idx] = true;
+        v = nv;
+      } else if(arg.default_value) {
+        v = NamedValue(*arg.default_value);
+      } else {
+        err() << "argument " << schema.arguments[schema_i].name << " not provided.\n" << loc;
+        return at::nullopt;
+      }
+      Value * positional = tryMatchArgument(arg, graph, loc, *v, err);
+      if(!positional)
+        return at::nullopt;
+      positional_inputs.push_back(positional);
+    }
+
+    // check for unused positional arguments
+    if(used_args < args.size()) {
+      err() << "expected at most " << used_args << " arguments "
+      << "but found " << args.size() << " positional arguments.\n" << loc << "\n";
       return at::nullopt;
     }
-    // fill in positional arguments
-    for(size_t i = 0; i < inputs.size(); ++i) {
-      positional_inputs[i] = inputs[i];
-    }
-    // fill in named arguments
-    for(const NamedValue& nv : attributes) {
-      auto idx = schema.argumentIndexWithName(nv.name());
-      if(!idx) {
-        err() << "unknown keyword argument '" << nv.name() << "'\n" << nv.locOr(loc);
+    // check for unused kwargs
+    for(size_t i = 0; i < kwargs.size(); ++i) {
+      const auto& nv = kwargs[i];
+      if (!used_kwarg[i]) {
+        if(!schema.argumentIndexWithName(nv.name())) {
+          err() << "keyword argument " << nv.name() << " unknown\n";
+        } else {
+          err() << "keyword argument " << nv.name() << " specified twice\n";
+        }
         return at::nullopt;
       }
-      if(positional_inputs[*idx]) {
-        err() << "argument " <<  nv.name() << " specified twice \n" << nv.locOr(loc);
-        return at::nullopt;
-      }
-      positional_inputs[*idx] = nv;
     }
-    // fill in default values
-    for(size_t i = 0; i < positional_inputs.size(); ++i) {
-      if(positional_inputs[i])
-        continue;
-      auto default_value = schema.arguments[i].default_value;
-      if(!default_value) {
-        err() << "argument " << schema.arguments[i].name << " not provided.\n" << loc;
-        return at::nullopt;
-      }
-      positional_inputs[i] = NamedValue(*default_value);
-    }
-
-    // check input types
-    std::vector<Value*> matched_inputs;
-    for(size_t i = 0; i < schema.arguments.size(); ++i) {
-      Value* value = positional_inputs[i]->value(graph);
-      const auto& arg = schema.arguments[i];
-
-      // some functions that take lists of integers for fixed size arrays
-      // also allow single ints to be passed in their place.
-      // the single int is then repeated to the length of the list
-      if (isIntUsedAsIntList(value, arg)) {
-        std::vector<Value*> repeated(*arg.N, value);
-        value = graph.insertNode(graph.createList(IntType::get(), repeated))->output();
-      }
-
-      // Allow homogeneous tuples to be casted implicitly to lists of appropriate types
-      if (arg.type->kind() == TypeKind::ListType &&
-          value->type()->kind() == TypeKind::TupleType) {
-          auto list_type = arg.type->cast<ListType>()->getElementType();
-          auto tuple = value->type()->cast<TupleType>();
-          auto castable = std::all_of(tuple->elements().begin(), tuple->elements().end(), [&](const TypePtr& t) {
-            return t->isSubtypeOf(list_type);
-          });
-          if (castable) {
-            auto unpacked = createTupleUnpack(value);
-            auto elem_type = arg.type->expect<ListType>()->getElementType();
-            value = graph.insertNode(graph.createList(elem_type, unpacked))->output();
-          }
-      }
-
-      if (value->node()->kind() == prim::None){
-        if (arg.type->isSubtypeOf(NumberType::get()))
-          value = graph.insertConstant(at::Scalar(NAN), loc);
-        else
-          value = graph.insertNode(graph.createUndefined())->output();
-      }
-
-      if(!value->type()->isSubtypeOf(arg.type)) {
-        err() << "expected a value of type " << arg.type->str() << " for argument '" << arg.name << "' but found "
-              << value->type()->str() << "\n"
-              << positional_inputs[i]->locOr(loc);
-        return at::nullopt;
-      }
-
-      matched_inputs.push_back(value);
-    }
-
-    return matched_inputs;
+    return positional_inputs;
 }
 
 
