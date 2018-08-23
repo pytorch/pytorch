@@ -717,6 +717,7 @@ StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
                 if grad_op.HasField('device_option'):
                     for op in sum_ops:
                         op.device_option.CopyFrom(grad_op.device_option)
+                        del op.device_option.extra_info[:]
                 break
 
     def _DisambiguateGradOpOutput(self, grad_op, idx, cnt):

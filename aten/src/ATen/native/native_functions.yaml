@@ -928,9 +928,6 @@
 - func: layer_norm(Tensor input, IntList normalized_shape, Tensor? weight={}, Tensor? bias={}, double eps=1e-5, bool cudnn_enable=True) -> Tensor
   variants: function
 
-- func: linear(Tensor input, Tensor weight, Tensor bias={}) -> Tensor
-  variants: function
-
 - func: linspace(Scalar start, Scalar end, TensorOptions options={}) -> Tensor
   variants: function
 

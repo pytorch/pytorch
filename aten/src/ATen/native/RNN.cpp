@@ -134,6 +134,19 @@ tpair_of<Tensor> hidden_slice(const tpair_of<Tensor>& t, int64_t start, int64_t 
 // It's a struct only because functional programming in C++ is a pain, and it's easier
 // to pass around "vtable pointers" than actual function pointers.
 
+Tensor linear(const Tensor& input, const Tensor& weight, /* optional */ const Tensor& bias={}) {
+  if (input.dim() == 2 && bias.defined()) {
+    // fused op is marginally faster
+    return at::addmm(bias, input, weight.t());
+  }
+
+  auto output = at::matmul(input, weight.t());
+  if (bias.defined()) {
+    output.add_(bias);
+  }
+  return output;
+}
+
 template<typename hidden_type_tmpl>
 struct Cell {
   using hidden_type = hidden_type_tmpl;
@@ -144,7 +157,7 @@ struct Cell {
 template<typename nonlinearity>
 struct SimpleCell : Cell<Tensor> {
   hidden_type operator()(const Tensor& input, const hidden_type& hidden, const CellParams& params) const override {
-    return nonlinearity{}(at::linear(input, params.w_ih, params.b_ih) + at::linear(hidden, params.w_hh, params.b_hh));
+    return nonlinearity{}(linear(input, params.w_ih, params.b_ih) + linear(hidden, params.w_hh, params.b_hh));
   }
 };
 
@@ -162,7 +175,7 @@ struct LSTMCell : Cell<std::tuple<Tensor, Tensor>> {
       return std::make_tuple(std::get<0>(result), std::get<1>(result));
     }
 
-    auto gates = at::linear(input, params.w_ih, params.b_ih) + at::linear(hx, params.w_hh, params.b_hh);
+    auto gates = linear(input, params.w_ih, params.b_ih) + linear(hx, params.w_hh, params.b_hh);
     auto chunked_gates = gates.chunk(4, 1);
 
     auto ingate = chunked_gates[0].sigmoid();
@@ -187,8 +200,8 @@ struct GRUCell : Cell<Tensor> {
       return std::get<0>(result);
     }
 
-    auto igates = at::linear(input, params.w_ih, params.b_ih);
-    auto hgates = at::linear(hidden, params.w_hh, params.b_hh);
+    auto igates = linear(input, params.w_ih, params.b_ih);
+    auto hgates = linear(hidden, params.w_hh, params.b_hh);
     auto chunked_igates = igates.chunk(3, 1);
     auto chunked_hgates = hgates.chunk(3, 1);
 
