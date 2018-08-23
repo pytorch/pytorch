@@ -182,6 +182,8 @@ information for the code in `torch/csrc`. More information at:
 Python `setuptools` is pretty dumb, and always rebuilds every C file in a
 project.  If you install the ninja build system with `pip install ninja`,
 then PyTorch will use it to track dependencies correctly.
+If pytorch was already built, you will need to run `python setup.py clean` once
+after installing ninja for builds to succeed.
 
 #### Use CCache
 
