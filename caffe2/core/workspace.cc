@@ -308,4 +308,9 @@ ThreadPool* Workspace::GetThreadPool() {
   return thread_pool_.get();
 }
 
+std::shared_ptr<Workspace::Bookkeeper> Workspace::bookkeeper() {
+  static auto shared = std::make_shared<Workspace::Bookkeeper>();
+  return shared;
+}
+
 } // namespace caffe2
