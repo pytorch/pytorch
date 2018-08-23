@@ -2304,7 +2304,7 @@ a")
         x = torch.rand(10, dtype=torch.float, requires_grad=True)
         self.assertEqual(func(x), torch.cat((x, x), dim=0))
 
-        with self.assertRaisesRegex(RuntimeError, "expected at most"):
+        with self.assertRaisesRegex(RuntimeError, "expected a value of type int"):
             @torch.jit.script
             def func(x):
                 return torch.cat((x, x), x, dim=0)
@@ -4612,7 +4612,7 @@ def func(t):
             def f0(a):
                 torch.sum(a, a, a, a)
 
-        with self.assertRaisesRegex(RuntimeError, 'unknown keyword argument'):
+        with self.assertRaisesRegex(RuntimeError, 'argument self not provided'):
             @torch.jit.script
             def f1(a):
                 torch.sum(foo=4)
@@ -4794,6 +4794,12 @@ def func(t):
         r = M().create()
         self.assertEqual(r.dtype, torch.float)
         self.assertEqual(torch.zeros([1, 1, 2], dtype=torch.float), r)
+
+    def test_vararg_zeros(self):
+        def foo():
+            return torch.zeros(3, 4, 5, dtype=torch.int)
+
+        self.checkScript(foo, ())
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     def test_rand(self):
