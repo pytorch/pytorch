@@ -9,7 +9,7 @@ Here is a simple script which exports a pretrained AlexNet as defined in
 torchvision into ONNX.  It runs a single round of inference and then
 saves the resulting traced model to ``alexnet.onnx``::
 
-    import torch.onnx
+    import torch
     import torchvision
 
     dummy_input = torch.randn(10, 3, 224, 224, device='cuda')
