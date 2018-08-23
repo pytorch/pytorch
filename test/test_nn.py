@@ -4847,10 +4847,17 @@ class TestNN(NNTestCase):
                 self.assertTrue(gradcheck(lambda x: F.pdist(x, p), (inp,)))
 
     def test_pdist_zeros(self):
+        """Test that grad is still valid when dist is 0"""
         for trans in [False, True]:
             inp = torch.randn(1, 3, requires_grad=True).repeat([2, 1])
             for p in [0, 1, 2, 0.5, 1.5, 2.5, float('inf')]:
                 self.assertTrue(gradcheck(lambda x: F.pdist(x, p), (inp,)))
+
+    @unittest.expectedFailure
+    def test_pdist_gradgrad_failure(self):
+        """If gradgrad is implemented this will begin to fail"""
+        inp = torch.randn(4, 5, requires_grad=True)
+        self.assertTrue(gradgradcheck(lambda x: F.pdist(x), (inp,)))
 
     def test_cosine_embedding_loss_no_reduce(self):
         input1 = torch.randn(15, 10, requires_grad=True)

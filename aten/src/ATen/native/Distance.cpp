@@ -16,6 +16,7 @@ Tensor& _pdist_out_cpu(Tensor& result, const Tensor& self, const double p) {
   AT_CHECK(self.dim() == 2,
       "pdist only supports 2D tensors, got: ", self.dim(), "D");
   AT_CHECK(at::isFloatingType(self.type().scalarType()), "pdist only supports floating-point dtypes");
+  AT_CHECK(p >= 0, "pdist only supports non-negative p values");
   if (self.size(0) <= 1) {
     result.resize_({0});
   } else {
