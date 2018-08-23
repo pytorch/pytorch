@@ -7,11 +7,12 @@
 #include "torch/csrc/jit/function_schema.h"
 #include "torch/csrc/jit/assertions.h"
 #include "torch/csrc/jit/named_value.h"
+#include "torch/csrc/jit/source_range.h"
 
 #include <torch/csrc/api/include/torch/detail/ordered_dict.h>
 
-#include <ATen/optional.h>
-#include <ATen/ArrayRef.h>
+#include <ATen/core/ArrayRef.h>
+#include <ATen/core/optional.h>
 
 #include <functional>
 #include <memory>
@@ -34,8 +35,6 @@ namespace torch { namespace jit { namespace script {
 //     ...
 // Note: because Method/Module are exposed to python these
 // classes use python method naming conventions
-
-struct SourceRange;
 
 struct Method {
   Method(std::string name, bool optimize,
@@ -60,6 +59,15 @@ struct Method {
     }
     get_executor().run(stack);
   }
+
+  IValue operator()(std::vector<IValue> stack) {
+    run(stack);
+    if (stack.size() != 1) {
+      return Tuple::create(std::move(stack));
+    }
+    return stack.front();
+  }
+
   std::shared_ptr<Graph> graph_for(const Stack& inputs) {
     return get_executor().graphFor(inputs);
   }
@@ -141,11 +149,20 @@ struct Method {
     return *this;
   }
 
+  const FunctionSchema& getSchema() const {
+    AT_ASSERT(schema != nullptr);
+    return *schema;
+  }
+
   std::string prettyPrintSchema() const {
     JIT_ASSERT(schema);
     std::stringstream ss;
     ss << *schema;
     return ss.str();
+  }
+
+  GraphExecutorState getDebugState() {
+    return get_executor().getDebugState();
   }
 
 private:
@@ -231,6 +248,10 @@ struct Module {
     optimize = o;
   }
 
+  IValue forward(std::vector<IValue> inputs) {
+    return get_method("forward")(inputs);
+  }
+
   void register_parameter(const std::string & name, autograd::Variable v, bool is_buffer) {
     if(auto p = parameters.find(name)){
       *p->slot() = v;
@@ -276,13 +297,13 @@ struct Module {
     return modules.get(name).module;
   }
 
-  const detail::OrderedDict<std::string, NamedModule>& get_modules() const {
+  const torch::detail::OrderedDict<std::string, NamedModule>& get_modules() const {
     return modules;
   }
-  const detail::OrderedDict<std::string, NamedParameter>& get_parameters() const {
+  const torch::detail::OrderedDict<std::string, NamedParameter>& get_parameters() const {
     return parameters;
   }
-  const detail::OrderedDict<std::string, std::unique_ptr<Method>>& get_methods() const {
+  const torch::detail::OrderedDict<std::string, std::unique_ptr<Method>>& get_methods() const {
     return methods;
   }
 
@@ -299,15 +320,17 @@ struct Module {
     return nullptr;
   }
 
+  void save(const std::string& filename);
+
  private:
 
   // invariant: to ensure member_inputs of Methods stay valid,
   // it is only legal to _add_ new modules and parameters.
   // removing them will allow member_inputs to point to invalid parameters
   // no such restriction exists for methods
-  detail::OrderedDict<std::string, NamedModule> modules;
-  detail::OrderedDict<std::string, NamedParameter> parameters;
-  detail::OrderedDict<std::string, std::unique_ptr<Method>> methods;
+  torch::detail::OrderedDict<std::string, NamedModule> modules;
+  torch::detail::OrderedDict<std::string, NamedParameter> parameters;
+  torch::detail::OrderedDict<std::string, std::unique_ptr<Method>> methods;
   bool optimize;
 };
 

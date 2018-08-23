@@ -16,7 +16,6 @@ static void init_cusparse() {
   }
 }
 
-#ifdef CUDA_HALF_TENSOR
 void THNN_CudaHalfSparseLinear_updateOutput(
           THCState *state,
           THCudaHalfTensor *input,
@@ -79,7 +78,6 @@ void THNN_CudaHalfSparseLinear_updateParameters(
           float learningRate) {
   THError("THCudaHalfTensor not supported with SparseLinear");
 }
-#endif
 
 #include "generic/SparseLinear.cu"
 #include "THCGenerateFloatType.h"

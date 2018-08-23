@@ -38,7 +38,13 @@ def scope(scope_name):
             tracing_state.pop_scope()
 
 
-def get_trace_graph(f, args=tuple(), kwargs=None):
+def load(filename):
+    m = ScriptModule()
+    m._load(filename)
+    return m
+
+
+def get_trace_graph(f, args=(), kwargs=None):
     """
     Trace a function or model, returning a tuple consisting of the both the
     *trace* of an execution, as well as the original return value.
@@ -92,12 +98,12 @@ class LegacyTracedModule(Module):
         # NOTE: use full state, because we need it for BatchNorm export
         # This differs from the compiler path, which doesn't support it at the moment.
         module_state = list(_unique_state_dict(self, keep_vars=True).values())
-        trace, all_trace_inputs = torch._C._tracer_enter(in_vars + module_state)
+        trace, all_trace_inputs = torch._C._tracer_enter(*(in_vars + module_state))
         try:
             trace_inputs = _unflatten(all_trace_inputs[:len(in_vars)], in_desc)
             out = self.inner(*trace_inputs)
             out_vars, _ = _flatten(out)
-            torch._C._tracer_exit(out_vars)
+            torch._C._tracer_exit(tuple(out_vars))
         except Exception:
             torch._C._tracer_abandon()
             raise
@@ -281,7 +287,7 @@ def trace(*args, **kwargs):
             raise TypeError("got unexpected keyword arguments: {}".format(", ".join(kwargs.keys())))
 
         module = TopLevelTracedModule(func, **executor_options)
-        module._create_method_from_trace('forward', func, args)
+        module._create_method_from_trace('forward', func, tuple(args))
         return module
 
     return wrapper
@@ -339,33 +345,23 @@ class CompilationUnit(object):
         return self.module._get_method(attr)
 
 
-def _fn_to_typed_def(fn, method=False):
-    schema = annotations.get_signature(fn)
-    ast = get_jit_ast(fn)
-    if schema:
-        typed_def = torch._C._pack_typed_def(ast, schema[0], schema[1], method)
-    else:
-        typed_def = torch._C.TypedDef(ast)
-    return typed_def
-
-
 def script(fn, optimize=True, _frames_up=0):
     rcb = createResolutionCallback(_frames_up + 1)
-    typed_def = _fn_to_typed_def(fn)
-    graph = _jit_script_compile(typed_def, rcb)
+    ast = get_jit_ast(fn, is_method=False)
+    graph = _jit_script_compile(ast, rcb)
     mod = ScriptModule()
     mod._create_method_from_graph('forward', graph)
     # TODO: refactor everything so we're not 1) creating a ScriptModule
     # 2) Throwing everything away except for the graph 3) Creating a new
     # ScriptModule and dumping that graph in 4) Re-populating the schema
     # because it was lost doing the previous
-    mod.__getattr__('forward').set_arg_and_return_types(typed_def, False)
+    mod.__getattr__('forward').forward_schema(ast, False)
     # Forward docstrings
     mod.__doc__ = fn.__doc__
     return mod
 
 
-ScriptMethodStub = namedtuple('ScriptMethodStub', ('resolution_callback', 'typed_def', 'original_method'))
+ScriptMethodStub = namedtuple('ScriptMethodStub', ('resolution_callback', 'def_', 'original_method'))
 
 
 def script_method(fn):
@@ -381,8 +377,9 @@ def script_method(fn):
     #
     # createResolutionCallback internally adds 1 to get us to the scope of this
     # function (the calling function). Adding 2 gets us to the proper surrounding scope.
-    typed_def = _fn_to_typed_def(fn, method=True)
-    return ScriptMethodStub(createResolutionCallback(frames_up=2), typed_def, fn)
+    rcb = createResolutionCallback(frames_up=2)
+    ast = get_jit_ast(fn, is_method=True)
+    return ScriptMethodStub(rcb, ast, fn)
 
 
 def batch(batch_size=1, optimize=True, _frames_up=0):
@@ -589,9 +586,9 @@ class ScriptMeta(type(torch._C.ScriptModule)):
             if cls is type(self):
                 torch._C.ScriptModule.__init__(self)
             original_init(self, *args, **kwargs)
-            typed_defs = [m.typed_def for m in methods]
+            defs = [m.def_ for m in methods]
             rcbs = [m.resolution_callback for m in methods]
-            self._create_methods(typed_defs, rcbs)
+            self._create_methods(defs, rcbs)
 
         cls.__init__ = init_then_register
         return super(ScriptMeta, cls).__init__(name, bases, attrs)
@@ -659,8 +656,9 @@ def _get_methods(cls):
 _compiled_methods_whitelist = {
     'forward', 'register_buffer', 'register_parameter', 'add_module',
     '_apply', 'apply', 'cuda', 'cpu', 'type', 'float', 'double', 'half',
-    'state_dict', 'load_state_dict', '_load_from_state_dict', 'parameters',
-    'named_parameters', '_all_buffers', 'children', 'named_children', 'modules',
+    'state_dict', 'load_state_dict', '_load_from_state_dict',
+    '_named_members', 'parameters', 'named_parameters',
+    'buffers', 'named_buffers', 'children', 'named_children', 'modules',
     'named_modules', 'zero_grad', 'share_memory', '_get_name', 'extra_repr',
     '_slow_forward', '_tracing_name'
 }

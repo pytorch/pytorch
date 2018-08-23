@@ -11,9 +11,11 @@ public:
   }
   IntList sizes() const override;
   IntList strides() const override;
+  int64_t size(int64_t d) const override;
+  int64_t stride(int64_t d) const override;
   int64_t dim() const override;
-  void * unsafeGetTH(bool retain) override;
-  std::unique_ptr<Storage> storage() override;
+  const Storage& storage() override;
+  int64_t storage_offset() const override;
 private:
   UndefinedTensor();
   static UndefinedTensor _singleton;

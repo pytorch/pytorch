@@ -1,5 +1,6 @@
 #pragma once
 
+#include "torch/csrc/jit/ivalue.h"
 #include "torch/csrc/jit/assertions.h"
 #include "torch/csrc/jit/interned_strings.h"
 #include "torch/csrc/WindowsTorchApiMacro.h"
@@ -240,6 +241,7 @@ struct TORCH_API ListType : public Type {
   // common cast List[Tensor]
   static ListTypePtr ofTensors();
   static ListTypePtr ofInts();
+  static ListTypePtr ofFloats();
 private:
   ListType(TypePtr elem)
   : Type(TypeKind::ListType), elem(elem) {}
@@ -265,14 +267,6 @@ struct TORCH_API TupleType : public Type {
     });
   }
   bool isSubtypeOf(const TypePtr rhs) const override {
-    // e.g. (Tensor, Tensor, Tensor) <: List[Tensor]
-    if(auto lt = rhs->cast<ListType>()) {
-      for(auto e : elements()) {
-        if(!e->isSubtypeOf(lt->getElementType()))
-          return false;
-      }
-      return true;
-    }
     // co-variant rules for tuples
     return compare(*rhs, [](const TypePtr a, const TypePtr b) {
       return a->isSubtypeOf(b);
@@ -422,9 +416,6 @@ struct NoneType : public Type {
   virtual std::string str() const override {
     return "None";
   }
-  virtual bool isSubtypeOf(const TypePtr rhs) const override {
-    return *this == *rhs;
-  }
   static const TypeKind Kind = TypeKind::NoneType;
   // global singleton
   static NoneTypePtr get();
@@ -459,5 +450,36 @@ inline TypePtr TensorType::fromNumberType(TypePtr typ) {
   }
   AT_ERROR("unknown number type", typ->str());
 }
+
+// Attempt to find the correct supertype of t1 and t2. If none is found then
+// nullopt will be returned. If t1 == t2, or t1 is a type refinement of t2,
+// then t2 will be returned (and vice versa).
+// Two different tensortypes will return dynamic.
+// Currently we chose not to support returning a NumberType for a float & int
+// input because of a lack of operator support for NumberType
+TORCH_API at::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2);
+
+template <typename T>
+TypePtr getTypePtr() {
+#define TYPE_STR(Type) #Type, " ",
+  AT_ERROR(
+      "Type ",
+      at::demangle_type<T>(),
+      " could not be converted to any of the known types { ",
+      TH_FORALL_TYPES(TYPE_STR) "}");
+#undef TYPE_STR
+  return nullptr;
+}
+
+template<> inline TypePtr getTypePtr<at::Tensor>() { return DynamicType::get(); }
+template<> inline TypePtr getTypePtr<double>() { return FloatType::get(); }
+template<> inline TypePtr getTypePtr<int64_t>() { return IntType::get(); }
+template<> inline TypePtr getTypePtr<bool>() { return IntType::get(); }
+template<> inline TypePtr getTypePtr<at::Scalar>() { return NumberType::get(); }
+template<> inline TypePtr getTypePtr<std::vector<at::Tensor>>() { return ListType::ofTensors(); }
+template<> inline TypePtr getTypePtr<std::vector<double>>() { return ListType::ofFloats(); }
+template<> inline TypePtr getTypePtr<std::vector<int64_t>>() { return ListType::ofInts(); }
+
+TORCH_API TypePtr inferTypeFrom(const IValue& value);
 
 }} // namespace torch::jit

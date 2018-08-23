@@ -48,7 +48,7 @@ std::tuple<Tensor, Tensor> ctc_loss_cpu_template(const Tensor& log_probs, const 
 
   int64_t batch_size = log_probs.size(1);
   int64_t num_labels = log_probs.size(2);
-  AT_CHECK(BLANK < num_labels, "blank must be in label range");
+  AT_CHECK((0 <= BLANK) && (BLANK < num_labels), "blank must be in label range");
   AT_CHECK((int64_t) input_lengths.size() == batch_size, "input_lengths must be of size batch_size");
   AT_CHECK((int64_t) target_lengths.size() == batch_size, "target_lengths must be of size batch_size");
 
@@ -360,6 +360,15 @@ Tensor ctc_loss(const Tensor& log_probs, const Tensor& targets, IntList input_le
     return res.sum();
   }
   return res;
+}
+
+// Convenience function accepting Tensors
+Tensor ctc_loss(const Tensor& log_probs, const Tensor& targets, const Tensor& input_lengths, const Tensor& target_lengths, int64_t BLANK, int64_t reduction) {
+  Tensor ilc = input_lengths.toType(kLong).toBackend(Backend::CPU).contiguous();
+  Tensor tlc = target_lengths.toType(kLong).toBackend(Backend::CPU).contiguous();
+  IntList il(ilc.data<int64_t>(), ilc.numel());
+  IntList tl(tlc.data<int64_t>(), tlc.numel());
+  return at::native::ctc_loss(log_probs, targets, il, tl, BLANK, reduction);
 }
 
 } } // at::native

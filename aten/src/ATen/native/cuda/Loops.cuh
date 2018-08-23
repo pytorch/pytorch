@@ -23,16 +23,9 @@
 
 namespace at { namespace native {
 
-// NOTE: CUDA requires func_t to be passed by value, while ROCm fails to compile
-// unless it's passed as a const reference.
-
 template<int nt, int vt, typename func_t>
 __launch_bounds__(nt, 4)
-#ifdef __HIP_PLATFORM_HCC__
-__global__ void elementwise_kernel(int N, const func_t& f) {
-#else
 __global__ void elementwise_kernel(int N, func_t f) {
-#endif
   int tid = threadIdx.x;
   int nv = nt * vt;
   int idx = nv * blockIdx.x + tid;

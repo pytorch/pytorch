@@ -1,6 +1,7 @@
 #include <torch/optim/rmsprop.h>
 
 #include <torch/csrc/autograd/variable.h>
+#include <torch/utils.h>
 
 #include <ATen/ATen.h>
 
@@ -12,46 +13,41 @@ namespace optim {
 RMSpropOptions::RMSpropOptions(double learning_rate)
     : learning_rate_(learning_rate) {}
 
-const RMSpropOptions& RMSprop::options() const noexcept {
-  return options_;
-}
-
 /// Adapted from
 /// https://github.com/pytorch/pytorch/blob/master/torch/optim/rmsprop.py
 void RMSprop::step() {
   for (size_t i = 0; i < parameters_.size(); ++i) {
-    auto& grad = parameters_.at(i).grad();
-    auto& p = parameters_.at(i).data();
-    if (!grad.defined()) {
+    Tensor p = parameters_.at(i);
+    if (!p.grad().defined()) {
       continue;
     }
 
-    auto d_p = torch::autograd::as_variable_ref(grad).data();
-    if (options_.weight_decay_ > 0) {
-      d_p.add_(p, options_.weight_decay_);
+    if (options.weight_decay_ > 0) {
+      p.grad() = p.grad() + options.weight_decay_ * p;
     }
 
-    auto square_average = buffer_at(square_average_buffers_, i).data();
-    square_average.mul_(options_.alpha_)
-        .addcmul_(d_p, d_p, 1.0 - options_.alpha_);
+    auto square_average = buffer_at(square_average_buffers_, i);
+    square_average.mul_(options.alpha_)
+        .addcmul_(p.grad(), p.grad(), 1.0 - options.alpha_);
 
-    at::Tensor average;
-    if (options_.centered_ > 0) {
-      auto grad_average = buffer_at(grad_average_buffers_, i).data();
-      grad_average.mul_(options_.alpha_).add_(d_p, 1.0 - options_.alpha_);
+    Tensor average;
+    if (options.centered_ > 0) {
+      auto& grad_average = buffer_at(grad_average_buffers_, i);
+      grad_average.mul_(options.alpha_).add_(p.grad(), 1.0 - options.alpha_);
       average = square_average.addcmul(grad_average, grad_average, -1.0)
                     .sqrt()
-                    .add_(options_.eps_);
+                    .add_(options.eps_);
     } else {
-      average = square_average.sqrt().add_(options_.eps_);
+      average = square_average.sqrt().add_(options.eps_);
     }
 
-    if (options_.momentum_ > 0) {
-      auto momentum = buffer_at(momentum_buffers_, i).data();
-      momentum.mul_(options_.momentum_).addcdiv_(d_p, average);
-      p.add_(momentum, -options_.learning_rate_);
+    NoGradGuard guard;
+    if (options.momentum_ > 0) {
+      auto& momentum = buffer_at(momentum_buffers_, i);
+      momentum.mul_(options.momentum_).addcdiv_(p.grad(), average);
+      p.add_(momentum, -options.learning_rate_);
     } else {
-      p.addcdiv_(d_p, average, -options_.learning_rate_);
+      p.addcdiv_(p.grad(), average, -options.learning_rate_);
     }
   }
 }

@@ -14,6 +14,8 @@
 #include "caffe2/utils/proto_utils.h"
 #include "caffe2/utils/string_utils.h"
 
+#include "caffe2/core/operator_c10wrapper.h"
+
 CAFFE2_DEFINE_int(
     caffe2_operator_max_engine_name_length,
     10,
@@ -75,8 +77,10 @@ GlobalEnginePrefType& g_global_engine_pref() {
   return *g_global_engine_pref_;
 }
 
-unique_ptr<OperatorBase> TryCreateOperator(
-    const string& key, const OperatorDef& operator_def, Workspace* ws) {
+unique_ptr<OperatorBase> TryCreateC2Operator(
+    const string& key,
+    const OperatorDef& operator_def,
+    Workspace* ws) {
   const auto& type = operator_def.device_option().device_type();
   CAFFE_ENFORCE(
       gDeviceTypeRegistry()->count(type),
@@ -93,6 +97,24 @@ unique_ptr<OperatorBase> TryCreateOperator(
                  << err.what()
                  << ". Proto is: " << ProtoDebugString(operator_def);
     return nullptr;
+  }
+}
+
+unique_ptr<OperatorBase> TryCreateC10Operator(
+    const string& key,
+    const OperatorDef& operator_def,
+    Workspace* ws) {
+  return C10OperatorRegistry()->Create(key, operator_def, ws);
+}
+
+unique_ptr<OperatorBase> TryCreateOperator(
+    const string& key,
+    const OperatorDef& operator_def,
+    Workspace* ws) {
+  if (auto op = TryCreateC10Operator(key, operator_def, ws)) {
+    return op;
+  } else {
+    return TryCreateC2Operator(key, operator_def, ws);
   }
 }
 
@@ -527,11 +549,9 @@ TensorShape GetTensorShapeOfBlob(const Blob* b) {
     tp.set_data_type(TypeMetaToDataType(type_fun(b->GetRaw())));
   }
   if (tensor_info_fun) {
-    bool _shares_data;
     size_t _capacity;
     DeviceOption _device;
-    auto shape =
-        tensor_info_fun(b->GetRaw(), &_shares_data, &_capacity, &_device);
+    auto shape = tensor_info_fun(b->GetRaw(), &_capacity, &_device);
     for (auto d : shape) {
       tp.add_dims(d);
     }
@@ -615,12 +635,10 @@ std::map<string, std::pair<DeviceOption, DeviceOption>> ValidateTensorDevices(
   auto Check = [&](const Blob& blob, std::string blob_name) {
     TensorInfoCall tensor_info_fun = GetTensorInfoFunction(blob.meta().id());
     if (tensor_info_fun) {
-      bool _shares_data;
       size_t _capacity;
       DeviceOption blob_device;
       tensor_info_fun(
           const_cast<Blob&>(blob).GetRaw(),
-          &_shares_data,
           &_capacity,
           &blob_device);
 
@@ -656,8 +674,14 @@ std::set<std::string> GetRegisteredOperators() {
   for (const auto& name : CUDAOperatorRegistry()->Keys()) {
     all_keys.emplace(name);
   }
+
   // HIP operators
   for (const auto& name : HIPOperatorRegistry()->Keys()) {
+    all_keys.emplace(name);
+  }
+
+  // C10 operators
+  for (const auto& name : C10OperatorRegistry()->Keys()) {
     all_keys.emplace(name);
   }
 

@@ -12,7 +12,7 @@ class AccuracyOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   AccuracyOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        top_k_(OperatorBase::GetSingleArgument<int>("top_k", 1)) {}
+        top_k_(this->template GetSingleArgument<int>("top_k", 1)) {}
         
   bool RunOnDevice() override;
 

@@ -1405,6 +1405,10 @@ class TestCuda(TestCase):
         TestTorch._test_pinverse(self, lambda t: t.cuda())
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    def test_matrix_rank(self):
+        TestTorch._test_matrix_rank(self, lambda x: x.cuda())
+
+    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_det_logdet_slogdet(self):
         TestTorch._test_det_logdet_slogdet(self, lambda t: t.cuda())
 
@@ -1462,7 +1466,7 @@ class TestCuda(TestCase):
     def test_multinomial(self):
         TestTorch._test_multinomial(self, torch.cuda.FloatTensor)
 
-        # Test a corner case from older PyTorch (Issue #4858)
+        # Test two corner cases from older PyTorch (Issue #4858)
         freqs = torch.cuda.FloatTensor([
             0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
             0.03178183361887932, 0.027680952101945877, 0.033176131546497345,
@@ -1482,6 +1486,12 @@ class TestCuda(TestCase):
         torch.cuda.manual_seed(11042)
         sample = torch.multinomial(freqs, 1000, True)
         self.assertNotEqual(freqs[sample].min(), 0)
+
+        p = torch.zeros(3421, 2, device="cuda", dtype=torch.float)
+        p[:, 1] = 1
+        torch.cuda.manual_seed(5214)
+        r = torch.multinomial(p, 1)
+        self.assertNotEqual(r.min().item(), 0)
 
     @staticmethod
     def mute():

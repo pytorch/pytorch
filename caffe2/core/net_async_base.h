@@ -31,7 +31,7 @@ namespace tracing {
 class Tracer;
 }
 
-class AsyncNetBase : public NetBase {
+class CAFFE2_API AsyncNetBase : public NetBase {
  public:
   AsyncNetBase(const std::shared_ptr<const NetDef>& net_def, Workspace* ws);
   ~AsyncNetBase() override;
@@ -125,7 +125,7 @@ class AsyncNetBase : public NetBase {
   bool use_per_net_pools_;
   bool is_blocking_;
 
-  DISABLE_COPY_AND_ASSIGN(AsyncNetBase);
+  AT_DISABLE_COPY_AND_ASSIGN(AsyncNetBase);
 
  private:
   void storeExceptionPtr();

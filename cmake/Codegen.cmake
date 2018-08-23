@@ -4,6 +4,24 @@
 # - Creates an ATen target for its generated C++ files and adds it
 #   as a dependency
 
+################################################################################
+# Helper functions
+################################################################################
+
+function(filter_list output input)
+    unset(result)
+    foreach(filename ${${input}})
+        foreach(pattern ${ARGN})
+            if("${filename}" MATCHES "${pattern}")
+                list(APPEND result "${filename}")
+            endif()
+        endforeach()
+    endforeach()
+    set(${output} ${result} PARENT_SCOPE)
+endfunction()
+
+################################################################################
+
 if (DEFINED ENV{PYTORCH_PYTHON})
   message(STATUS "Using python found in $ENV{PYTORCH_PYTHON}")
   set(PYCMD "$ENV{PYTORCH_PYTHON}")
@@ -20,16 +38,16 @@ configure_file(
 install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/../caffe2
         DESTINATION include
         FILES_MATCHING PATTERN "*.h")
-if (NOT BUILD_ATEN)
+if (BUILD_ATEN_MOBILE)
   install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/core
-          DESTINATION include/ATen/core
+          DESTINATION include/ATen
           FILES_MATCHING PATTERN "*.h")
 endif()
 install(FILES ${CMAKE_BINARY_DIR}/caffe2/core/macros.h
         DESTINATION include/caffe2/core)
 
 # ---[ ATen specific
-if (BUILD_ATEN)
+if (NOT BUILD_ATEN_MOBILE)
   # SET_SOURCE_FILES_PROPERTIES must be in the same CMakeLists.txt file as the target that includes the file
   # so we need to set these commands here rather than in src/TH
   IF(C_SSE4_1_FOUND AND C_SSE4_2_FOUND)

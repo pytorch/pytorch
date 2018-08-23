@@ -403,7 +403,6 @@ void accUpdateWeight(
 }
 
 
-#ifdef CUDA_HALF_TENSOR
 void THNN_CudaHalfIndexLinear_updateOutput(
                   THCState *state,
                   THCudaLongTensor *keys,
@@ -465,7 +464,6 @@ void THNN_CudaHalfIndexLinear_updateParameters(
                   float learningRate) {
     THError("THCudaHalfTensor not supported with IndexLinear");
 }
-#endif
 
 #include "generic/IndexLinear.cu"
 #include "THCGenerateFloatType.h"

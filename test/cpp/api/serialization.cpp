@@ -59,7 +59,7 @@ TEST_CASE("serialization") {
       }
 
       auto x = torch::ones(
-          {5, 5}, torch::getType(torch::kCPU, static_cast<torch::Dtype>(i)));
+          {5, 5}, torch::getType(torch::Backend::CPU, static_cast<torch::Dtype>(i)));
       auto y = torch::empty({});
 
       std::stringstream ss;
@@ -203,7 +203,7 @@ TEST_CASE("serialization") {
       loss.backward();
       optimizer.step();
 
-      running_loss = running_loss * 0.99 + loss.data().sum().toCFloat() * 0.01;
+      running_loss = running_loss * 0.99 + loss.sum().toCFloat() * 0.01;
       REQUIRE(epoch < 3000);
       epoch++;
     }
@@ -228,6 +228,14 @@ TEST_CASE("serialization") {
     ss.seekg(0, std::ios::beg);
     torch::load(ss, model3.get());
 
+    auto param1 = model1->parameters();
+    auto param2 = model2->parameters();
+    auto param3 = model3->parameters();
+    for (const auto& p : param1) {
+      REQUIRE(param1[p.key].allclose(param2[p.key]));
+      REQUIRE(param2[p.key].allclose(param3[p.key]));
+    }
+
     // Make some optimizers with momentum (and thus state)
     auto optim1 = torch::optim::SGD(
         model1->parameters(), torch::optim::SGDOptions(1e-1).momentum(0.9));
@@ -240,9 +248,9 @@ TEST_CASE("serialization") {
     auto optim3_2 = torch::optim::SGD(
         model3->parameters(), torch::optim::SGDOptions(1e-1).momentum(0.9));
 
-    auto x = torch::ones({10, 5}, torch::requires_grad());
+    auto x = torch::ones({10, 5});
 
-    auto step = [&](torch::optim::Optimizer& optimizer, Linear model) {
+    auto step = [&x](torch::optim::Optimizer& optimizer, Linear model) {
       optimizer.zero_grad();
       auto y = model->forward(x).sum();
       y.backward();
@@ -264,11 +272,11 @@ TEST_CASE("serialization") {
     torch::load(ss, &optim3_2);
     step(optim3_2, model3);
 
-    auto param1 = model1->parameters();
-    auto param2 = model2->parameters();
-    auto param3 = model3->parameters();
-    for (auto& p : param1) {
-      auto& name = p.key;
+    param1 = model1->parameters();
+    param2 = model2->parameters();
+    param3 = model3->parameters();
+    for (const auto& p : param1) {
+      const auto& name = p.key;
       // Model 1 and 3 should be the same
       REQUIRE(param1[name].norm().toCFloat() == param3[name].norm().toCFloat());
       REQUIRE(param1[name].norm().toCFloat() != param2[name].norm().toCFloat());
@@ -306,7 +314,7 @@ TEST_CASE("serialization_cuda", "[cuda]") {
     loss.backward();
     optimizer.step();
 
-    running_loss = running_loss * 0.99 + loss.data().sum().toCFloat() * 0.01;
+    running_loss = running_loss * 0.99 + loss.sum().toCFloat() * 0.01;
     REQUIRE(epoch < 3000);
     epoch++;
   }

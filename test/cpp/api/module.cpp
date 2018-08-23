@@ -211,6 +211,8 @@ TEST_CASE("module/clone") {
 
     auto module = std::make_shared<TestModule>();
 
+    torch::NoGradGuard no_grad;
+
     auto module2 = module->clone();
     auto params1 = module->parameters();
     auto params2 = module2->parameters();
@@ -219,7 +221,7 @@ TEST_CASE("module/clone") {
     for (auto& param : params1) {
       REQUIRE(!pointer_equal(param.value, params2[param.key]));
       REQUIRE(param->allclose(params2[param.key]));
-      param->data().add_(2);
+      param->add_(2);
     }
     for (auto& param : params1) {
       REQUIRE(!param->allclose(params2[param.key]));
@@ -232,7 +234,7 @@ TEST_CASE("module/clone") {
     for (auto& buffer : buffers1) {
       REQUIRE(!pointer_equal(buffer.value, buffers2[buffer.key]));
       REQUIRE(buffer->allclose(buffers2[buffer.key]));
-      buffer->data().add_(2);
+      buffer->add_(2);
     }
     for (auto& buffer : buffers1) {
       REQUIRE(!buffer->allclose(buffers2[buffer.key]));
@@ -250,7 +252,10 @@ TEST_CASE("module/clone") {
       torch::Tensor weight;
     };
     auto module = std::make_shared<TestModule>();
-    module->weight.data() += 1;
+    {
+      torch::NoGradGuard no_grad;
+      module->weight += 1;
+    }
     REQUIRE(pointer_equal(module->weight, module->parameters()["weight"]));
     REQUIRE(module->weight.allclose(module->parameters()["weight"]));
 
@@ -286,10 +291,13 @@ TEST_CASE("module/clone") {
     };
 
     auto a = std::make_shared<NestedModule>();
-    a->module->weight.data() += 1;
-    a->module->value = 123;
+    {
+      torch::NoGradGuard no_grad;
+      a->module->weight += 1;
+      a->module->value = 123;
+    }
 
-    auto b = std::static_pointer_cast<NestedModule>(a->clone());
+    auto b = std::dynamic_pointer_cast<NestedModule>(a->clone());
 
     REQUIRE(!pointer_equal(b->module->weight, a->module->weight));
     REQUIRE(

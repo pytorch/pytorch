@@ -8,9 +8,12 @@
 #include "torch/csrc/jit/interned_strings.h"
 #include "torch/csrc/jit/resource_guard.h"
 #include "torch/csrc/jit/source_location.h"
+#include "torch/csrc/jit/source_range.h"
+#include "torch/csrc/jit/constants.h"
 #include "torch/csrc/jit/function_schema.h"
 #include "torch/csrc/jit/ivalue.h"
 #include "torch/csrc/jit/type.h"
+#include "torch/csrc/jit/named_value.h"
 
 #include "torch/csrc/utils/disallow_copy.h"
 #include "torch/csrc/utils/functional.h"
@@ -19,7 +22,7 @@
 #include "torch/csrc/WindowsTorchApiMacro.h"
 
 #include <ATen/ATen.h>
-#include "ATen/ArrayRef.h"
+#include "ATen/core/ArrayRef.h"
 
 #include <algorithm>
 #include <atomic>
@@ -683,6 +686,10 @@ public:
     return *schema_;
   }
 
+  void invalidateSchema() {
+    schema_ = nullptr;
+  }
+
   void dump() const;
 
   virtual ~Node() = default;
@@ -1027,6 +1034,18 @@ public:
     result->output()->setType(type);
     return result;
   }
+  Node* createIntToFloat(Value* value) {
+    JIT_ASSERT(*value->type() == *IntType::get());
+    auto* result = create(prim::IntToFloat, {value});
+    result->output()->setType(FloatType::get());
+    return result;
+  }
+  Node* createFloatToInt(Value* value) {
+    JIT_ASSERT(*value->type() == *FloatType::get());
+    auto* result = create(prim::FloatToInt, {value});
+    result->output()->setType(IntType::get());
+    return result;
+  }
   Node* createPythonOp(
       THPObjectPtr&& pyobj,
       const std::string& cconv,
@@ -1052,6 +1071,19 @@ public:
     }
     return r;
   }
+
+  Value* insertConstant(
+      IValue val,
+      at::optional<SourceRange> loc = at::nullopt) {
+    return jit::insertConstant(*this, std::move(val), loc);
+  }
+
+  // schema-driven insert
+  // this inserts a node into the graph with inputs determined from args and kwargs using Python
+  // argument matching rules, and checks that the op matches a known schema
+  // if this node successfully completes, it guarentees the node is a correctly-formed invocation
+  // of opname
+  Value* insert(Symbol opname, at::ArrayRef<NamedValue> args, at::ArrayRef<NamedValue> kwargs = {});
 
   Node * appendNode(Node * n) {
     return block_->appendNode(n);
@@ -1111,7 +1143,7 @@ public:
     return oss.str();
   }
 
-  friend std::ostream& operator<<(std::ostream & out, const Graph & g);
+  friend TORCH_API std::ostream& operator<<(std::ostream & out, const Graph & g);
   TORCH_API std::shared_ptr<Graph> copy();
 
 private:

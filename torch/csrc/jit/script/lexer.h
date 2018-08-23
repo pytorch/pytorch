@@ -7,7 +7,7 @@
 #include <unordered_map>
 #include <vector>
 #include "torch/csrc/jit/assertions.h"
-#include "torch/csrc/jit/source_location.h"
+#include "torch/csrc/jit/source_range.h"
 
 
 namespace torch {
@@ -40,7 +40,6 @@ namespace script {
   _(TK_OPTION, "option", "")                     \
   _(TK_APPLY, "apply", "")                       \
   _(TK_COMPREHENSION, "comprehension", "")       \
-  _(TK_TENSOR_TYPE, "tensor_type", "")           \
   _(TK_RANGE_CONSTRAINT, "range_constraint", "") \
   _(TK_PARAM, "param", "")                       \
   _(TK_INFERRED, "inferred", "")                 \
@@ -71,9 +70,8 @@ namespace script {
   _(TK_DIV_EQ, "/=", "/=")                       \
   _(TK_GLOBAL, "global", "global")               \
   _(TK_BUILT_IN, "built-in", "")                 \
-  _(TK_SLICE, "slice", "")                       \
+  _(TK_SUBSCRIPT, "subscript", "")               \
   _(TK_VAR, "variable", "")                      \
-  _(TK_GATHER, "gather", "")                     \
   _(TK_NOTHING, "nothing", "")                   \
   _(TK_LIST_LITERAL, "list-literal", "")         \
   _(TK_TUPLE_LITERAL, "tuple-literal", "")       \
@@ -83,6 +81,9 @@ namespace script {
   _(TK_UNARY_MINUS, "unary minus", "")           \
   _(TK_POW, "pow operator", "**")                \
   _(TK_ARROW, "arrow", "->")                     \
+  _(TK_DECL, "decl", "")                         \
+  _(TK_SLICE_EXPR, "slice expr", "")             \
+  _(TK_TYPE_COMMENT, "type comment", "# type:")
 
 static const char* valid_single_char_tokens = "+-*/@()[]:,={}><.?";
 
@@ -227,6 +228,15 @@ struct SharedParserData {
   bool isblank(int n) {
     return isspace(n) && n != '\n';
   }
+  // Make an exception ignoring comments for type annotation comments
+  bool isTypeComment(const std::string& str, size_t pos) {
+    const std::string type_string = "# type:";
+    if (str.size() < pos + type_string.length()) {
+      return false;
+    }
+    auto match_string = str.substr(pos, type_string.size());
+    return match_string == type_string;
+  }
   // find the longest match of str.substring(pos) against a token, return true
   // if successful
   // filling in kind, start,and len
@@ -246,7 +256,7 @@ struct SharedParserData {
 
     // special handling
     if (pos < str.size()) {
-      if (str[pos] == '#') {
+      if (str[pos] == '#' && !isTypeComment(str, pos)) {
         // skip comments
         while (pos < str.size() && str[pos] != '\n')
           pos++;
@@ -353,80 +363,6 @@ struct SharedParserData {
 };
 
 SharedParserData& sharedParserData();
-
-// a range of a shared string 'file_' with functions to help debug by highlight
-// that
-// range.
-struct SourceRange : public SourceLocation {
-  SourceRange(
-      const std::shared_ptr<std::string>& file_,
-      size_t start_,
-      size_t end_)
-      : file_(file_), start_(start_), end_(end_) {}
-  const std::string text() const {
-    return file().substr(start(), end() - start());
-  }
-  size_t size() const {
-    return end() - start();
-  }
-
-  static const size_t CONTEXT = 10;
-  virtual void highlight(std::ostream& out) const override {
-    const std::string& str = file();
-    size_t begin_line = start(); // beginning of line to highlight
-    size_t end_line = start(); // end of line to highlight
-    while (begin_line > 0 && str[begin_line - 1] != '\n')
-      --begin_line;
-    while (end_line < str.size() && str[end_line] != '\n')
-      ++end_line;
-    JIT_ASSERT(begin_line == 0 || str[begin_line - 1] == '\n');
-    JIT_ASSERT(end_line == str.size() || str[end_line] == '\n');
-
-    size_t begin_highlight = begin_line; // beginning of context, CONTEXT lines before the highlight line
-    for(size_t i = 0; begin_highlight > 0; --begin_highlight) {
-      if(str[begin_highlight - 1] == '\n')
-        ++i;
-      if(i >= CONTEXT)
-        break;
-    }
-    JIT_ASSERT(begin_highlight == 0 || str[begin_highlight - 1] == '\n');
-
-    size_t end_highlight = end_line; // end of context, CONTEXT lines after the highlight line
-    for(size_t i = 0; end_highlight < str.size(); ++end_highlight) {
-      if(str[end_highlight] == '\n')
-        ++i;
-      if(i >= CONTEXT)
-        break;
-    }
-    JIT_ASSERT(end_highlight == str.size() || str[end_highlight] == '\n');
-
-    out << str.substr(begin_highlight, end_line - begin_highlight) << "\n";
-    out << std::string(start() - begin_line, ' ');
-    size_t len = std::min(size(), end_line - start());
-    out << std::string(len, '~')
-        << (len < size() ? "...  <--- HERE" : " <--- HERE");
-    out << str.substr(end_line, end_highlight - end_line);
-    if (str.size() > 0 && str.back() != '\n')
-      out << "\n";
-  }
-  const std::string& file() const {
-    return *file_;
-  }
-  const std::shared_ptr<std::string>& file_ptr() const {
-    return file_;
-  }
-  size_t start() const {
-    return start_;
-  }
-  size_t end() const {
-    return end_;
-  }
-
- private:
-  std::shared_ptr<std::string> file_;
-  size_t start_;
-  size_t end_;
-};
 
 struct Token {
   int kind;
