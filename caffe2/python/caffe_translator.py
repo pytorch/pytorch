@@ -631,6 +631,7 @@ def TranslateDropout(layer, pretrained_blobs, is_test, **kwargs):
 @TranslatorRegistry.Register("Softmax")
 def TranslateSoftmax(layer, pretrained_blobs, is_test, **kwargs):
     caffe_op = BaseTranslate(layer, "Softmax")
+    AddArgument(caffe_op, "axis", layer.softmax_param.axis)
     return caffe_op, []
 
 
@@ -639,6 +640,7 @@ def TranslateSoftmaxWithLoss(layer, pretrained_blobs, is_test, **kwargs):
     softmax_op = core.CreateOperator(
         "Softmax", [layer.bottom[0]],
         layer.bottom[0] + "_translator_autogen_softmax")
+    AddArgument(softmax_op, "axis", layer.softmax_param.axis)
     xent_op = core.CreateOperator(
         "LabelCrossEntropy",
         [softmax_op.output[0], layer.bottom[1]],
