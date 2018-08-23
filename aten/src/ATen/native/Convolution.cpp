@@ -127,7 +127,7 @@ auto ConvParams::use_miopen(const at::Tensor& input) const -> bool {
 
 auto ConvParams::use_mkldnn(const at::Tensor& input) const -> bool {
 #if AT_MKLDNN_ENABLED()
-  return input.type().backend() == kCPU &&
+  return input.type().backend() == at::Backend::CPU &&
          input.type().scalarType() == kFloat && // only on CPU Float Tensors
          !is_dilated() && // doesn't support dilation
          !transposed && // or transposed tensors

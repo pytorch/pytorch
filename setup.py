@@ -117,7 +117,7 @@ from tools.setup_helpers.env import check_env_flag, check_negative_env_flag
 
 # Before we run the setup_helpers, let's look for NO_* and WITH_*
 # variables and hotpatch the environment with the USE_* equivalent
-config_env_vars = ['CUDA', 'CUDNN', 'MIOPEN', 'MKLDNN', 'NNPACK', 'DISTRIBUTED', 'DISTRIBUTED_MW',
+config_env_vars = ['CUDA', 'CUDNN', 'MIOPEN', 'MKLDNN', 'NNPACK', 'DISTRIBUTED',
                    'SYSTEM_NCCL', 'GLOO_IBVERBS']
 
 
@@ -148,7 +148,7 @@ from tools.setup_helpers.nvtoolext import NVTOOLEXT_HOME
 from tools.setup_helpers.generate_code import generate_code
 from tools.setup_helpers.ninja_builder import NinjaBuilder, ninja_build_ext
 from tools.setup_helpers.dist_check import USE_DISTRIBUTED, \
-    USE_DISTRIBUTED_MW, USE_GLOO_IBVERBS, USE_C10D
+    USE_GLOO_IBVERBS, USE_C10D
 
 ################################################################################
 # Parameters parsed from environment
@@ -313,7 +313,7 @@ def build_libs(libs):
     if IS_WINDOWS:
         build_libs_cmd = ['tools\\build_pytorch_libs.bat']
     else:
-        build_libs_cmd = ['bash', 'tools/build_pytorch_libs.sh']
+        build_libs_cmd = ['bash', os.path.join('..', 'tools', 'build_pytorch_libs.sh')]
     my_env = os.environ.copy()
     my_env["PYTORCH_PYTHON"] = sys.executable
     my_env["CMAKE_PREFIX_PATH"] = full_site_packages
@@ -354,14 +354,19 @@ def build_libs(libs):
         build_libs_cmd += ['--use-mkldnn']
     if USE_GLOO_IBVERBS:
         build_libs_cmd += ['--use-gloo-ibverbs']
-    if USE_DISTRIBUTED_MW:
-        build_libs_cmd += ['--use-distributed-mw']
     if FULL_CAFFE2:
         build_libs_cmd += ['--full-caffe2']
 
     my_env["BUILD_TORCH"] = "ON"
 
-    if subprocess.call(build_libs_cmd + libs, env=my_env) != 0:
+    try:
+        os.mkdir('build')
+    except OSError:
+        pass
+
+    kwargs = {'cwd': 'build'} if not IS_WINDOWS else {}
+
+    if subprocess.call(build_libs_cmd + libs, env=my_env, **kwargs) != 0:
         print("Failed to run '{}'".format(' '.join(build_libs_cmd + libs)))
         sys.exit(1)
 
@@ -422,6 +427,7 @@ class build_deps(PytorchCommand):
         self.copy_tree('third_party/pybind11/include/pybind11/',
                        'torch/lib/include/pybind11')
         self.copy_file('torch/csrc/torch.h', 'torch/lib/include/torch/torch.h')
+        self.copy_file('torch/op.h', 'torch/lib/include/torch/op.h')
 
 
 build_dep_cmds = {}
@@ -851,12 +857,6 @@ if USE_DISTRIBUTED:
     main_sources += [
         "torch/csrc/distributed/Module.cpp",
     ]
-    if USE_DISTRIBUTED_MW:
-        main_sources += [
-            "torch/csrc/distributed/Tensor.cpp",
-            "torch/csrc/distributed/Storage.cpp",
-        ]
-        extra_compile_args += ['-DUSE_DISTRIBUTED_MW']
     include_dirs += [tmp_install_path + "/include/THD"]
     main_link_args += [THD_LIB]
 

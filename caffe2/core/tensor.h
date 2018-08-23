@@ -77,7 +77,7 @@ inline int canonical_axis_index_(int axis_index, int ndims) {
  * the allocation and de-allocation of such memory. We make a simplified
  * assumption that the memory is always contiguous.
  */
-class Tensor {
+class CAFFE2_API Tensor {
  public:
   Tensor() = delete;
   explicit Tensor(DeviceType device_type)
@@ -364,6 +364,7 @@ class Tensor {
    */
   template <typename... Ts>
   void Resize(Ts... dim_source) {
+    bool is_init = size_ == -1;
     bool size_changed = SetDims(dim_source...);
     if (size_changed) {
       // If needed, we will free the data. the next mutable_data() call
@@ -380,7 +381,7 @@ class Tensor {
                 FLAGS_caffe2_max_keep_on_shrink_memory;
       }
 
-      if (reset_tensor) {
+      if (reset_tensor && !is_init) {
         FreeMemory();
       }
     }
@@ -903,7 +904,7 @@ void TensorVectorResize(
     int size,
     DeviceType type);
 
-class TensorPrinter {
+class CAFFE2_API TensorPrinter {
  public:
   explicit TensorPrinter(
       const std::string& tensor_name = "",

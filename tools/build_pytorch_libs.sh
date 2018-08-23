@@ -16,7 +16,6 @@ USE_ROCM=0
 USE_NNPACK=0
 USE_MKLDNN=0
 USE_GLOO_IBVERBS=0
-USE_DISTRIBUTED_MW=0
 FULL_CAFFE2=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -34,9 +33,6 @@ while [[ $# -gt 0 ]]; do
           ;;
       --use-gloo-ibverbs)
           USE_GLOO_IBVERBS=1
-          ;;
-      --use-distributed-mw)
-          USE_DISTRIBUTED_MW=1
           ;;
       --full-caffe2)
           FULL_CAFFE2=1
@@ -80,9 +76,7 @@ if [ "$(uname)" == 'Darwin' ]; then
   fi
 fi
 
-cd "$(dirname "$0")/.."
-PWD=`printf "%q\n" "$(pwd)"`
-BASE_DIR="$PWD"
+BASE_DIR=$(cd $(dirname "$0")/.. && printf "%q\n" "$(pwd)")
 TORCH_LIB_DIR="$BASE_DIR/torch/lib"
 INSTALL_DIR="$TORCH_LIB_DIR/tmp_install"
 THIRD_PARTY_DIR="$BASE_DIR/third_party"
@@ -120,9 +114,6 @@ if [[ $USE_GLOO_IBVERBS -eq 1 ]]; then
     GLOO_FLAGS+=" -DUSE_IBVERBS=1 -DBUILD_SHARED_LIBS=1"
     THD_FLAGS="-DUSE_GLOO_IBVERBS=1"
 fi
-if [[ $USE_DISTRIBUTED_MW -eq 1 ]]; then
-    THD_FLAGS+="-DUSE_DISTRIBUTED_MW=1"
-fi
 CWRAP_FILES="\
 $BASE_DIR/torch/lib/ATen/Declarations.cwrap;\
 $BASE_DIR/torch/lib/THNN/generic/THNN.h;\
@@ -132,8 +123,8 @@ CUDA_NVCC_FLAGS=$C_FLAGS
 if [[ -z "$CUDA_DEVICE_DEBUG" ]]; then
   CUDA_DEVICE_DEBUG=0
 fi
-if [ -z "$NUM_JOBS" ]; then
-  NUM_JOBS="$(getconf _NPROCESSORS_ONLN)"
+if [ -z "$MAX_JOBS" ]; then
+  MAX_JOBS="$(getconf _NPROCESSORS_ONLN)"
 fi
 
 BUILD_TYPE="Release"
@@ -147,6 +138,9 @@ echo "Building in $BUILD_TYPE mode"
 
 # Used to build an individual library
 function build() {
+  if [[ -z "$CMAKE_ARGS" ]]; then
+    CMAKE_ARGS=()
+  fi
   # We create a build directory for the library, which will
   # contain the cmake output
   mkdir -p build/$1
@@ -194,8 +188,8 @@ function build() {
               -DCMAKE_DEBUG_POSTFIX="" \
               -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
               ${@:2} \
-              -DCMAKE_EXPORT_COMPILE_COMMANDS=1
-  ${CMAKE_INSTALL} -j"$NUM_JOBS"
+              -DCMAKE_EXPORT_COMPILE_COMMANDS=1 ${CMAKE_ARGS[@]}
+  ${CMAKE_INSTALL} -j"$MAX_JOBS"
   popd
 
   # Fix rpaths of shared libraries
@@ -227,8 +221,8 @@ function build_nccl() {
               -DCMAKE_CXX_FLAGS="$C_FLAGS $CPP_FLAGS $USER_CFLAGS" \
               -DCMAKE_SHARED_LINKER_FLAGS="$USER_LDFLAGS" \
               -DCMAKE_UTILS_PATH="$BASE_DIR/cmake/public/utils.cmake" \
-              -DNUM_JOBS="$NUM_JOBS"
-  ${CMAKE_INSTALL} -j"$NUM_JOBS"
+              -DNUM_JOBS="$MAX_JOBS"
+  ${CMAKE_INSTALL} -j"$MAX_JOBS"
   mkdir -p ${INSTALL_DIR}/lib
   cp "lib/libnccl.so.1" "${INSTALL_DIR}/lib/libnccl.so.1"
   if [ ! -f "${INSTALL_DIR}/lib/libnccl.so" ]; then
@@ -257,15 +251,13 @@ function build_caffe2() {
     EXTRA_CAFFE2_CMAKE_FLAGS+=("-DCMAKE_PREFIX_PATH=$CMAKE_PREFIX_PATH")
   fi
 
-  mkdir -p build
-  pushd build
-  ${CMAKE_VERSION} .. \
+  ${CMAKE_VERSION} $BASE_DIR \
   ${CMAKE_GENERATOR} \
+      -DPYTHON_EXECUTABLE=$PYTORCH_PYTHON \
       -DBUILDING_WITH_TORCH_LIBS=ON \
       -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
       -DBUILD_CAFFE2=$FULL_CAFFE2 \
       -DBUILD_TORCH=$BUILD_TORCH \
-      -DBUILD_ATEN=ON \
       -DBUILD_PYTHON=$FULL_CAFFE2 \
       -DBUILD_BINARY=OFF \
       -DBUILD_SHARED_LIBS=$BUILD_SHARED_LIBS \
@@ -290,16 +282,15 @@ function build_caffe2() {
       # STOP!!! Are you trying to add a C or CXX flag?  Add it
       # to CMakeLists.txt and aten/CMakeLists.txt, not here.
       # We need the vanilla cmake build to work.
-  ${CMAKE_INSTALL} -j"$NUM_JOBS"
+  ${CMAKE_INSTALL} -j"$MAX_JOBS"
 
   # Install Python proto files
   if [[ $FULL_CAFFE2 -ne 0 ]]; then
     find . -name proto
     for proto_file in ./caffe2/proto/*.py; do
-      cp $proto_file "$BASE_DIR/caffe2/proto/"
+      cp $proto_file "../caffe2/proto/"
     done
   fi
-  popd
 
   # Fix rpaths of shared libraries
   if [[ $(uname) == 'Darwin' ]]; then
@@ -313,7 +304,7 @@ function build_caffe2() {
 }
 
 # In the torch/lib directory, create an installation directory
-mkdir -p torch/lib/tmp_install
+mkdir -p $INSTALL_DIR
 
 # Build
 for arg in "$@"; do
@@ -326,9 +317,7 @@ for arg in "$@"; do
         build gloo $GLOO_FLAGS
         popd
     elif [[ "$arg" == "caffe2" ]]; then
-        pushd $BASE_DIR
         build_caffe2
-        popd
     elif [[ "$arg" == "THD" ]]; then
         pushd "$TORCH_LIB_DIR"
         build THD $THD_FLAGS
@@ -348,7 +337,7 @@ for arg in "$@"; do
     fi
 done
 
-pushd torch/lib
+pushd $TORCH_LIB_DIR
 
 # If all the builds succeed we copy the libraries, headers,
 # binaries to torch/lib

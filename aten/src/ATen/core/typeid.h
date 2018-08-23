@@ -30,12 +30,6 @@
 // is not fixed at the moment.
 
 namespace caffe2 {
-class TypeIdentifier;
-}
-
-std::ostream& operator<<(std::ostream& stream, caffe2::TypeIdentifier typeId);
-
-namespace caffe2 {
 
 class TypeMeta;
 
@@ -49,7 +43,7 @@ class AT_CORE_API TypeIdentifier final : public at::IdWrapper<TypeIdentifier, ui
  public:
   static TypeIdentifier createTypeId();
 
-  friend std::ostream& ::operator<<(
+  friend std::ostream& operator<<(
       std::ostream& stream,
       TypeIdentifier typeId);
   friend bool operator<(TypeIdentifier lhs, TypeIdentifier rhs);
@@ -70,15 +64,19 @@ inline bool operator<(TypeIdentifier lhs, TypeIdentifier rhs) {
   return lhs.underlyingId() < rhs.underlyingId();
 }
 
-} // namespace caffe2
-
-AT_DEFINE_HASH_FOR_IDWRAPPER(caffe2::TypeIdentifier)
-
 inline std::ostream& operator<<(
     std::ostream& stream,
     caffe2::TypeIdentifier typeId) {
   return stream << typeId.underlyingId();
 }
+
+} // namespace caffe2
+
+namespace at {
+using DataType = caffe2::TypeIdentifier;
+}
+
+AT_DEFINE_HASH_FOR_IDWRAPPER(caffe2::TypeIdentifier)
 
 namespace caffe2 {
 

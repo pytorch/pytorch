@@ -24,7 +24,7 @@ namespace caffe2 {
 
 class NetBase;
 
-struct StopOnSignal {
+struct CAFFE2_API StopOnSignal {
   StopOnSignal()
       : handler_(std::make_shared<SignalHandler>(
             SignalHandler::Action::STOP,
