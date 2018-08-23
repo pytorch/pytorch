@@ -467,7 +467,6 @@ static void speculateOps(Block* block) {
 }
 
 static void replaceInputWithList(Node *node, size_t i, ArrayRef<Value*> to) {
-  node->invalidateSchema();
   node->removeInput(i);
   for (auto* to_val : to) {
     JIT_ASSERT(to_val->owningGraph() == node->owningGraph());
