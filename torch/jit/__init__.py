@@ -20,6 +20,8 @@ import numbers
 import collections
 import re
 
+import numpy as np
+
 _flatten = torch._C._jit_flatten
 _unflatten = torch._C._jit_unflatten
 _jit_script_compile = torch._C._jit_script_compile
@@ -252,6 +254,118 @@ def _verify_equal(xs, ys):
             raise RuntimeError("JIT and real computation mismatch")
 
 
+def indent(s):
+    return '\n'.join(['\t' + line for line in s.splitlines()])
+
+
+class TracingCheckError(Exception):
+    def __init__(self, graph_diff_error, tensor_compare_error, extra_msg=None):
+        self.message = 'Tracing failed sanity checks!\n'
+        if extra_msg is not None:
+            self.message += extra_msg + '\n'
+        if graph_diff_error is not None:
+            self.message += 'ERROR: Graphs differed across invocations!\n'
+            self.message += indent(graph_diff_error) + '\n'
+        if tensor_compare_error is not None:
+            self.message += 'ERROR: Tensor-valued Constant nodes differed in value ' \
+                            'across invocations. This often indicates that the tracer has' \
+                            ' encountered untraceable code.\n'
+            self.message += indent(tensor_compare_error) + '\n'
+        super(TracingCheckError, self).__init__(self.message)
+
+
+# Check the traced module against a set of user-provided validation inputs
+def check_trace(check_inputs, func, executor_options, module):
+    for inputs in check_inputs:
+        check_mod = TopLevelTracedModule(func, **executor_options)
+        check_mod._create_method_from_trace('forward', func, tuple(i.clone() for i in inputs))
+
+        def graph_diagnostic_info():
+            mod_canonicalized = torch._C._jit_pass_canonicalize(module.graph)
+            torch._C._jit_pass_decay_types(mod_canonicalized)
+            check_canonicalized = torch._C._jit_pass_canonicalize(check_mod.graph)
+            torch._C._jit_pass_decay_types(check_canonicalized)
+
+            graph_diff_errors = None
+            if (str(mod_canonicalized) != str(check_canonicalized)):
+                import difflib
+                graph_diff = difflib.ndiff(str(mod_canonicalized).splitlines(1),
+                                           str(check_canonicalized).splitlines(1))
+                graph_diff_errors = 'Graph diff:\n' + indent(''.join(graph_diff)) + '\n'
+
+                num_errors = 0
+                MAX_ERROR_PRINTOUT = 20  # arbitrary
+
+                for n_mod, n_check in zip(mod_canonicalized.nodes(), check_canonicalized.nodes()):
+                    if num_errors > MAX_ERROR_PRINTOUT:
+                        graph_diff_errors += '<reached max number of differing nodes to print>'
+                        break
+                    if str(n_mod) != str(n_check):
+                        node_diff = difflib.ndiff(str(n_mod).splitlines(1),
+                                                  str(n_check).splitlines(1))
+                        source_printout = 'Node diff:\n' + indent(''.join(node_diff)) + '\n'
+                        source_printout += 'Trace source location:\n' + indent(n_mod.sourceLocation()) + '\n'
+                        source_printout += 'Check source location:\n' + indent(n_check.sourceLocation()) + '\n'
+                        graph_diff_errors += source_printout
+                        num_errors += 1
+
+            tensor_compare_errors = None
+            # Check Tensor-valued constant nodes
+            for n_mod, n_check in zip(mod_canonicalized.nodes(), check_canonicalized.nodes()):
+                if n_mod.kind() == n_check.kind() and n_mod.kind() == 'prim::Constant':
+                    try:
+                        mod_tensor_val = n_mod.t('value')
+                        check_tensor_val = n_check.t('value')
+                    except RuntimeError:
+                        continue
+
+                    try:
+                        np.testing.assert_allclose(mod_tensor_val, check_tensor_val)
+                    except AssertionError as e:
+                        if not tensor_compare_errors:
+                            tensor_compare_errors = ''
+                        tensor_compare_errors += 'Node:\n' + indent(str(n_mod)) + '\n'
+                        tensor_compare_errors += 'Source Location:\n' + indent(n_mod.sourceLocation()) + '\n'
+                        tensor_compare_errors += 'Comparison exception: ' + indent(str(e))
+
+            return graph_diff_errors, tensor_compare_errors
+
+        def wrap_non_iterable(x):
+            try:
+                iter(x)
+            except TypeError:
+                x = [x]
+            return x
+
+        try:
+            traced_outs = wrap_non_iterable(module(*[i.clone() for i in inputs]))
+        except Exception as e:
+            raise TracingCheckError(*graph_diagnostic_info())
+
+        try:
+            fn_outs = wrap_non_iterable(func(*[i.clone() for i in inputs]))
+            for orig, check in zip(traced_outs, fn_outs):
+                np.testing.assert_allclose(orig.detach().numpy(), check.detach().numpy())
+        except AssertionError as e:
+            # TODO: interpose on tracing the function again and check for
+            # divergence? then we can point to where in the source code
+            # we start diverging in python v.s. the trace
+            raise TracingCheckError(*graph_diagnostic_info(),
+                                    extra_msg='ERROR: Traced function outputs do not '
+                                              'match the Python function outputs.')
+
+        try:
+            check_outs = wrap_non_iterable(check_mod(*[i.clone() for i in inputs]))
+        except Exception as e:
+            raise TracingCheckError(*graph_diagnostic_info())
+
+        try:
+            for orig, check in zip(traced_outs, check_outs):
+                np.testing.assert_allclose(orig.detach().numpy(), check.detach().numpy())
+        except AssertionError as e:
+            raise TracingCheckError(*graph_diagnostic_info())
+
+
 def trace(*args, **kwargs):
     """
     Trace a function and return an executable trace that will be optimized
@@ -283,11 +397,21 @@ def trace(*args, **kwargs):
         executor_options = {'optimize': True}
         for name in executor_options:
             executor_options[name] = kwargs.pop(name, executor_options[name])
-        if len(kwargs) != 0:
-            raise TypeError("got unexpected keyword arguments: {}".format(", ".join(kwargs.keys())))
 
         module = TopLevelTracedModule(func, **executor_options)
         module._create_method_from_trace('forward', func, tuple(args))
+
+        # Check the trace against new traces created from user-specified inputs
+        check_inputs = kwargs.pop('check_inputs', None)
+        disable_checks = kwargs.pop('disable_checks', False)
+        if check_inputs is not None:
+            check_trace(check_inputs, func, executor_options, module)
+        elif not disable_checks:
+            check_trace([args], func, executor_options, module)
+
+        if len(kwargs) != 0:
+            raise TypeError("got unexpected keyword arguments: {}".format(", ".join(kwargs.keys())))
+
         return module
 
     return wrapper
