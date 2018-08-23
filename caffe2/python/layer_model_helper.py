@@ -238,7 +238,7 @@ class LayerModelHelper(model_helper.ModelHelper):
             param_name = parameter_sharing_context.get_parameter_name(
                 param_name)
         else:
-            raise "Unsupported type for param_name"
+            raise ValueError("Unsupported type for param_name")
 
         param_blob = core.BlobReference(param_name)
 
@@ -529,6 +529,7 @@ class LayerModelHelper(model_helper.ModelHelper):
                 return self.add_layer(new_layer)
             return wrapper
         else:
+            # this needs to be an AttributeError to fit hasattr semantics
             raise AttributeError(
                 "Trying to create non-registered layer: {}".format(layer))
 
