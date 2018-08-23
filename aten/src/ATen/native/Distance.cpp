@@ -2,6 +2,7 @@
 #include "ATen/Dispatch.h"
 #include "ATen/NativeFunctions.h"
 #include "DistanceOpsKernel.h"
+#include "cuda/DistanceKernel.cuh"
 
 namespace at { namespace native {
 
@@ -31,8 +32,10 @@ Tensor _pdist_forward(const Tensor& self, const double p) {
       result.fill_(0);
     } else if (self.type().backend() == Backend::CPU) {
       pdist_kernel_cpu(result, self, p);
+    } else if (self.type().backend() == Backend::CUDA) {
+      pdist_kernel_cuda(result, self, p);
     } else {
-      AT_ERROR("pdist only supports CPU backend, got: ", at::toString(self.type().backend()));
+      AT_ERROR("pdist only supports CPU and CUDA backends, got: ", at::toString(self.type().backend()));
     }
   }
   return result;
@@ -44,6 +47,8 @@ Tensor _pdist_backward(const Tensor& grad, const Tensor& self, const double p, c
   Tensor result = at::empty_like(self);
   if (self.type().backend() == Backend::CPU) {
     pdist_backward_kernel_cpu(result, grad, self, p, pdist);
+  } else if (self.type().backend() == Backend::CUDA) {
+    pdist_backward_kernel_cuda(result, grad, self, p, pdist);
   } else {
     AT_ERROR("pdist_backward only supports CPU backend, got: ", at::toString(self.type().backend()));
   }
