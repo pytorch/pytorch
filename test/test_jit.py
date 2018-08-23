@@ -6466,8 +6466,6 @@ class TestPytorchExportModes(JitTestCase):
 EXCLUDE_TRACED = {
     'test_split_dim',
     'test_split_dim_neg0',
-    'test_gesv',
-    'test_inverse',
 
     # nn functional test
     # schema not found for onnx node

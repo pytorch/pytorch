@@ -226,9 +226,8 @@ inline Stack evilDeprecatedBadCreateStackDoNotUse(const py::tuple& tuple, at::Ar
 
 inline py::object invokeScriptMethodFromPython(
     script::Method& method,
-    py::args args) {
-  auto relevant_inputs = method.graph()->inputs().slice(0, method.num_inputs());
-  auto stack = evilDeprecatedBadCreateStackDoNotUse(args, relevant_inputs);
+    py::args args, py::kwargs kwargs) {
+  auto stack = createStackForSchema(method.getSchema(), std::move(args), std::move(kwargs));
   method.run(stack);
   return createPyObjectForStack(std::move(stack));
 }
