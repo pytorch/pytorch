@@ -1060,36 +1060,25 @@ class TestTorch(TestCase):
             self.assertEqual(torch.zeros(3, device=device), torch.pdist(x))
 
     @skipIfRocm
-    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
-    def test_pdist_special(self):
-        devices = ['cpu']
-        for device in devices:
-            for shape in [(4, 5), (3, 2), (2, 1)]:
-                x = torch.randn(shape, device=device)
-                actual = torch.pdist(x, p=np.inf)
-                expected = torch.max(torch.abs(x[:, None] - x[None]), 2)[0][np.triu_indices(shape[0], k=1)]
-                self.assertEqual(expected.shape, actual.shape)
-                self.assertTrue(torch.allclose(expected, actual))
-
-                x = (torch.rand(shape, device=device) < .5).type(torch.float)
-                actual = torch.pdist(x, p=0)
-                expected = torch.sum(x[:, None] != x[None], 2)[np.triu_indices(shape[0], k=1)]
-                self.assertEqual(expected, actual)
-
-    @skipIfRocm
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
     def test_pdist_scipy(self):
         from scipy.spatial.distance import pdist
         devices = ['cpu']
         for device in devices:
             for shape in [(4, 5), (3, 2), (2, 1)]:
-                for p in [1, 2, 3, 1.5, 2.5]:
+                for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
                     for trans in [False, True]:
                         x = torch.randn(shape, device=device)
                         if trans:
                             x.transpose_(0, 1)
                         actual = torch.pdist(x, p=p)
-                        expected = pdist(x, 'minkowski', p=p)
+                        # pdist doesn't handle 0 or inf norm properly
+                        if p == 0:
+                            expected = pdist(x, 'hamming') * x.shape[1]
+                        elif p == float('inf'):
+                            expected = pdist(x, lambda a, b: np.abs(a - b).max())
+                        else:
+                            expected = pdist(x, 'minkowski', p=p)
                         self.assertEqual(expected.shape, actual.shape)
                         self.assertTrue(np.allclose(expected, actual.numpy()))
 
