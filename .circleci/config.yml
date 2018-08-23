@@ -156,7 +156,7 @@ pytorch_linux_cuda_test_defaults: &pytorch_linux_cuda_test_defaults
         sudo pkill -SIGHUP dockerd
         nvidia-smi
         # This IAM user only allows read-only access to ECR
-        export AWS_ACCESS_KEY_ID=AKIAIUHRTFRLXI6HBUCQ
+        export AWS_ACCESS_KEY_ID=AKIAJHXPX5VDV5UZWXFQ
         export AWS_SECRET_ACCESS_KEY=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
         eval $(aws ecr get-login --region us-east-1 --no-include-email)
         docker pull ${DOCKER_IMAGE}
