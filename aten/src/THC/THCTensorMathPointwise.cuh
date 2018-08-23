@@ -84,34 +84,6 @@ struct TensorSignOp<half> {
 };
 
 template <typename T>
-struct TensorAddOp {
-  __device__ __forceinline__ void operator()(T* out, T* in) {
-    *out += *in;
-  }
-
-  __device__ __forceinline__ void operator()(T* out, T* in1, T* in2) {
-    *out = *in1 + *in2;
-  }
-};
-
-template <>
-struct TensorAddOp<half> {
-  __device__ __forceinline__ void operator()(half* out, half* in) {
-    float fout = __half2float(*out);
-    float fin = __half2float(*in);
-    fout += fin;
-    *out = __float2half(fout);
-  }
-
-  __device__ __forceinline__ void operator()(half* out, half* in1, half* in2) {
-    float fin1 = __half2float(*in1);
-    float fin2 = __half2float(*in2);
-    float fout = fin1 + fin2;
-    *out = __float2half(fout);
-  }
-};
-
-template <typename T>
 struct TensorCAddOp {
   TensorCAddOp(T v) : val(v) {}
 
@@ -149,34 +121,6 @@ struct TensorCAddOp<half> {
   }
 
   half val;
-};
-
-template <typename T>
-struct TensorSubOp {
-  __device__ __forceinline__ void operator()(T* out, T* in) {
-    *out -= *in;
-  }
-
-  __device__ __forceinline__ void operator()(T* out, T* in1, T* in2) {
-    *out = *in1 - *in2;
-  }
-};
-
-template <>
-struct TensorSubOp<half> {
-  __device__ __forceinline__ void operator()(half* out, half* in) {
-    float fout = __half2float(*out);
-    float fin = __half2float(*in);
-    fout -= fin;
-    *out = __float2half(fout);
-  }
-
-  __device__ __forceinline__ void operator()(half* out, half* in1, half* in2) {
-    float fin1 = __half2float(*in1);
-    float fin2 = __half2float(*in2);
-    float fout = fin1 - fin2;
-    *out = __float2half(fout);
-  }
 };
 
 template <typename T>
@@ -332,40 +276,6 @@ struct TensorCPowOp<half> {
     float fin1 = __half2float(*in1);
     float fin2 = __half2float(*in2);
     float fout = powf(fin1, fin2);
-    *out = __float2half(fout);
-  }
-};
-
-template <typename T>
-struct TensorDivOp {
-  __device__ __forceinline__ void
-  operator()(T* out, T* in) {
-    *out /= *in;
-  }
-
-  __device__ __forceinline__ void
-  operator()(T* out, T* in1, T* in2) {
-    *out = *in1 / *in2;
-  }
-};
-
-template <>
-struct TensorDivOp<half> {
-  __device__ __forceinline__ void
-  operator()(half* out, half* in) {
-    // No fp16 div instruction yet
-    float fout = __half2float(*out);
-    float fin = __half2float(*in);
-    fout /= fin;
-    *out = __float2half(fout);
-  }
-
-  __device__ __forceinline__ void
-  operator()(half* out, half* in1, half* in2) {
-    // No fp16 div instruction yet
-    float fin1 = __half2float(*in1);
-    float fin2 = __half2float(*in2);
-    float fout = fin1 / fin2;
     *out = __float2half(fout);
   }
 };
