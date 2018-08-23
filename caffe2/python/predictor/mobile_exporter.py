@@ -16,6 +16,7 @@ def add_tensor(net, name, blob):
         uint8 is stored as an array of string with one element.
     '''
     kTypeNameMapper = {
+        np.dtype('float64'): "GivenTensorDoubleFill",
         np.dtype('float32'): "GivenTensorFill",
         np.dtype('int32'): "GivenTensorIntFill",
         np.dtype('int64'): "GivenTensorInt64Fill",
