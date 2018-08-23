@@ -437,6 +437,25 @@ static inline bool isIntUsedAsIntList(
          *arg.type == *ListType::ofInts() && arg.N;
 }
 
+inline bool convertibleToList(TypePtr type, TypePtr list_type_) {
+  auto list_type = list_type_->cast<ListType>();
+  if(!list_type) {
+    return false;
+  }
+  if(type->isSubtypeOf(list_type_)) {
+    return true;
+  }
+  if(auto tuple = type->cast<TupleType>()) {
+    return std::all_of(
+        tuple->elements().begin(),
+        tuple->elements().end(),
+        [&](const TypePtr& t) {
+          return t->isSubtypeOf(list_type->getElementType());
+        });
+  }
+  return false;
+}
+
 Value* tryMatchArgument(
     const Argument& arg,
     Graph& graph,
@@ -454,18 +473,11 @@ Value* tryMatchArgument(
   }
 
   // Allow homogeneous tuples to be casted implicitly to lists of appropriate types
-  if (arg.type->kind() == TypeKind::ListType &&
+  if (convertibleToList(value->type(), arg.type) &&
       value->type()->kind() == TypeKind::TupleType) {
-      auto list_type = arg.type->cast<ListType>()->getElementType();
-      auto tuple = value->type()->cast<TupleType>();
-      auto castable = std::all_of(tuple->elements().begin(), tuple->elements().end(), [&](const TypePtr& t) {
-        return t->isSubtypeOf(list_type);
-      });
-      if (castable) {
-        auto unpacked = createTupleUnpack(value);
-        auto elem_type = arg.type->expect<ListType>()->getElementType();
-        value = graph.insertNode(graph.createList(elem_type, unpacked))->output();
-      }
+    auto unpacked = createTupleUnpack(value);
+    auto elem_type = arg.type->expect<ListType>()->getElementType();
+    value = graph.insertNode(graph.createList(elem_type, unpacked))->output();
   }
 
   if (value->node()->kind() == prim::None){
@@ -536,7 +548,7 @@ at::optional<std::vector<Value*>> tryMatchSchema(
         if (arg.type->kind() == TypeKind::ListType && // the formal must be a list
             !arg.N && // it must not be a broadcasting list like int[3], otherwise a single int is a valid input
             (schema_i + 1 == schema.arguments.size() || schema.arguments[schema_i + 1].kwarg_only) &&  // must be the last position argument
-            !args[schema_i].value(graph)->type()->isSubtypeOf(arg.type)) { // and the actual should not be a list already
+            !convertibleToList(args[schema_i].value(graph)->type(), arg.type)) { // and the actual should not be a list already
           auto elem_type = arg.type->expect<ListType>()->getElementType();
           Value* list = tryCreateList(elem_type, graph, loc, args.slice(schema_i), err);
           if(!list)
