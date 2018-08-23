@@ -59,9 +59,10 @@ static Tensor scalar_tensor(Scalar s) {
   return tensor;
 }
 
-SparseTensor& mul_out_sparse_scalar(SparseTensor& r, const SparseTensor& t, Scalar value) {
+SparseTensor& mul_out_sparse_zerodim(SparseTensor& r, const SparseTensor& t, const Tensor& value) {
   AT_ASSERT(r.is_sparse());
   AT_ASSERT(t.is_sparse());
+  AT_ASSERT(value.dim() == 0);
 
   if (isSameTensor(r, t)) {
     r._values().mul_(value);
@@ -70,11 +71,15 @@ SparseTensor& mul_out_sparse_scalar(SparseTensor& r, const SparseTensor& t, Scal
     r._indices().resize_as_(t._indices());
     r._indices().copy_(t._indices());
     Tensor r_values = r._values(); // Sigh... needed because mul_out takes Tensor&
-    at::mul_out(r_values, t._values(), scalar_tensor(value));
+    at::mul_out(r_values, t._values(), value);
     _get_sparse_impl(r)->set_nnz_and_narrow(t._nnz());
     _get_sparse_impl(r)->set_coalesced(t.is_coalesced());
   }
   return r;
+}
+
+SparseTensor& mul_out_sparse_scalar(SparseTensor& r, const SparseTensor& t, Scalar value) {
+  return mul_out_sparse_zerodim(r, t, scalar_tensor(value));
 }
 
 // --------------------------------------------------------------------
@@ -345,9 +350,9 @@ Tensor& add_out_dense_sparse_cpu(Tensor& r, const Tensor& dense, SparseTensorRef
 
 SparseTensor& mul_out_sparse_cpu(SparseTensor& r, const Tensor& t_, const Tensor& src_) {
   if (src_.dim() == 0) {
-    return mul_out_sparse_scalar(r, t_, Scalar(src_));
+    return mul_out_sparse_zerodim(r, t_, src_);
   } else if (t_.dim() == 0) {
-    return mul_out_sparse_scalar(r, src_, Scalar(t_));
+    return mul_out_sparse_zerodim(r, src_, t_);
   }
 
   AT_CHECK(t_.sizes().equals(src_.sizes()), "mul operands have incompatible sizes");

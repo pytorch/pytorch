@@ -1460,6 +1460,12 @@
     SparseCPU: mul_out_sparse_cpu
     SparseCUDA: mul_out_sparse_cuda
 
+- func: _sparse_mul_zerodim_out(Tensor result, Tensor self, Tensor other) -> Tensor
+  variants: function
+  dispatch:
+    SparseCPU: mul_out_sparse_zerodim
+    SparseCUDA: mul_out_sparse_zerodim
+
 - func: _sparse_mul_scalar_out(Tensor result, Tensor self, Scalar other) -> Tensor
   variants: function
   dispatch:
