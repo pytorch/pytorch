@@ -1,3 +1,5 @@
+import functools
+import inspect
 import sys
 import torch
 import torch._C as _C
@@ -105,12 +107,15 @@ class Tensor(torch._C._TensorBase):
         r"""Registers a backward hook.
 
         The hook will be called every time a gradient with respect to the
-        Tensor is computed. The hook should have the following signature::
+        Tensor is computed. The hook should have one of the following
+        signatures::
 
             hook(grad) -> Tensor or None
 
+            hook(tensor, grad) -> Tensor or None
 
-        The hook should not modify its argument, but it can optionally return
+
+        The hook should not modify its arguments, but it can optionally return
         a new gradient which will be used in place of :attr:`grad`.
 
         This function returns a handle with a method ``handle.remove()``
@@ -138,6 +143,16 @@ class Tensor(torch._C._TensorBase):
             if self.grad_fn is not None:
                 self.grad_fn._register_hook_dict(self)
         handle = hooks.RemovableHandle(self._backward_hooks)
+        # For Python 3.X inspect.getargspec has been deprecated and one
+        # should use the inspect.Signature class.
+        if sys.version_info > (3,):
+            num_hook_args = len(inspect.signature(hook).parameters)
+        else:
+            num_hook_args = len(inspect.getargspec(hook).args)
+        if num_hook_args == 2:
+            wrapper = functools.partial(hook, self)
+            functools.update_wrapper(wrapper, hook)
+            hook = wrapper
         self._backward_hooks[handle.id] = hook
         return handle
 

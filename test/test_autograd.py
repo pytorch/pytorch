@@ -413,7 +413,11 @@ class TestAutograd(TestCase):
         z.backward(torch.ones(5, 5), retain_graph=True)
         self.assertEqual(y.grad.data, (x.data + 1) * 2)
 
+        def bw_hook_tensor(tensor, grad):
+            self.assertIsInstance(tensor, torch.Tensor)
+
         y.register_hook(bw_hook_modify)
+        z.register_hook(bw_hook_tensor)
         y.grad.data.zero_()
         z.backward(torch.ones(5, 5))
         self.assertEqual(y.grad.data, (x.data + 1) * 4)
