@@ -305,10 +305,15 @@ jobs:
             BUILD_ENVIRONMENT: pytorch-macos-10.13-py3
           command: |
             set -ex
+
+            # Install sccache
+            sudo curl https://s3.amazonaws.com/ossci-macos/sccache --output /usr/local/bin/sccache
+            sudo chmod +x /usr/local/bin/sccache
             export SCCACHE_BUCKET=ossci-compiler-cache
             # This IAM user allows write access to S3 bucket for sccache
             export AWS_ACCESS_KEY_ID=AKIAJJZUW4G2ASX5W7KA
             export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET}
+
             git submodule update --init
             chmod a+x .jenkins/pytorch/macos-build.sh
             .jenkins/pytorch/macos-build.sh
@@ -368,10 +373,14 @@ jobs:
             sudo cp ~/cudnn-9.2-osx-x64-v7.1/cuda/lib/libcudnn* /Developer/NVIDIA/CUDA-9.2/lib/
             sudo chmod a+r /Developer/NVIDIA/CUDA-9.2/include/cudnn.h /Developer/NVIDIA/CUDA-9.2/lib/libcudnn*
 
+            # Install sccache
+            sudo curl https://s3.amazonaws.com/ossci-macos/sccache --output /usr/local/bin/sccache
+            sudo chmod +x /usr/local/bin/sccache
             export SCCACHE_BUCKET=ossci-compiler-cache
             # This IAM user allows write access to S3 bucket for sccache
             export AWS_ACCESS_KEY_ID=AKIAJJZUW4G2ASX5W7KA
             export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET}
+
             git submodule update --init
             chmod a+x .jenkins/pytorch/macos-build.sh
             .jenkins/pytorch/macos-build.sh
@@ -437,8 +446,13 @@ jobs:
           if pgrep sccache > /dev/null; then
             sccache --show-stats
           fi
+
+          # Copy all necessary binaries to shared workspace
+          mkdir -p caffe2-ci-env/
+          cp -r /usr/local/caffe2 caffe2-ci-env/caffe2
+          cp -r /usr/local/lib/python2.7/dist-packages caffe2-ci-env/dist-packages
     - persist_to_workspace:
-        root: /usr/local/caffe2
+        root: /Users/distiller/caffe2-ci-env
         paths:
           - "*"
 
@@ -524,7 +538,8 @@ jobs:
           chmod +x /home/circleci/project/ci_build_script.sh
           docker cp /home/circleci/project/. "$id:/var/lib/jenkins/workspace"
           echo "mkdir -p /usr/local/caffe2" | docker exec -u jenkins -i "$id" bash
-          docker cp /opt/workspace/. "$id:/usr/local/caffe2"
+          docker cp /opt/workspace/caffe2/. "$id:/usr/local/caffe2"
+          docker cp /opt/workspace/dist-packages/. "$id:/usr/local/lib/python2.7/dist-packages"
           (echo "source ./workspace/env" && echo 'sudo chown -R jenkins workspace && cd workspace && ./ci_build_script.sh') | docker exec -u jenkins -i "$id" bash
 
 workflows:
