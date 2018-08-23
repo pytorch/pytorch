@@ -540,7 +540,7 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
       } else {
         math::Im2ColNd<T, Context, StorageOrder::NCHW>(
             kernel_.size(),
-            C * input_image_size,
+            C * input_image_size / group_,
             col_buffer_size,
             img_shape.data(),
             col_buffer_shape.data(),
@@ -624,7 +624,7 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
         } else {
           math::Col2ImNd<T, Context, StorageOrder::NCHW>(
               kernel_.size(),
-              C * input_image_size,
+              C * input_image_size / group_,
               col_buffer_size,
               img_shape.data(),
               col_buffer_shape.data(),
