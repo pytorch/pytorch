@@ -23,13 +23,13 @@ struct WorkEntry {
       std::vector<at::Tensor>* dstPtr,
       std::function<void(std::unique_ptr<WorkEntry>&)> run)
       : run(run) {
-        if (srcPtr) {
-          src = *srcPtr;
-        }
-        if (dstPtr) {
-          dst = *dstPtr;
-        }
-      }
+    if (srcPtr) {
+      src = *srcPtr;
+    }
+    if (dstPtr) {
+      dst = *dstPtr;
+    }
+  }
 
   // Not copyable
   WorkEntry(const WorkEntry&) = delete;

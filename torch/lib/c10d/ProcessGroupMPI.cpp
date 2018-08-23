@@ -298,16 +298,16 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::allreduce(
   checkSingleTensor(tensors);
 
   std::function<void(std::unique_ptr<WorkEntry>&)> runFunc =
-    [opts](std::unique_ptr<WorkEntry>& entry) {
-      auto data = (entry->src)[0];
-      MPI_CHECK(MPI_Allreduce(
+      [opts](std::unique_ptr<WorkEntry>& entry) {
+        auto data = (entry->src)[0];
+        MPI_CHECK(MPI_Allreduce(
             MPI_IN_PLACE,
             data.data_ptr(),
             data.numel(),
             mpiDatatype.at(data.type().scalarType()),
             mpiOp.at(opts.reduceOp),
             MPI_COMM_WORLD));
-    };
+      };
   auto entry = std::unique_ptr<WorkEntry>(
       new WorkEntry(&tensors, nullptr, std::move(runFunc)));
   return enqueue(std::move(entry));
