@@ -112,7 +112,7 @@ class StorageImpl {
   // Allocator* allocator_;
   DeviceType device_type_ = CPU;
 
-  friend class Tensor;
+  friend class TensorImpl;
 };
 
 } // namespace caffe2
