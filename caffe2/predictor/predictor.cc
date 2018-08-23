@@ -40,7 +40,12 @@ Predictor::Predictor(
     Workspace* parent,
     bool run_init,
     int optimization)
-    : Predictor(makePredictorConfig(init_net, run_net, parent, run_init)) {}
+    : Predictor(makePredictorConfig(
+          init_net,
+          run_net,
+          parent,
+          run_init,
+          optimization)) {}
 
 Predictor::Predictor(PredictorConfig config) : config_(std::move(config)) {
   const auto& initialized_vec = config_.ws->Blobs();

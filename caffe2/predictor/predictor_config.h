@@ -52,6 +52,6 @@ PredictorConfig makePredictorConfig(
     const NetDef& run_net,
     Workspace* parent = nullptr,
     bool run_init = true,
-    int optimization = 0);
+    int optimization = 1);
 
 } // namespace caffe2
