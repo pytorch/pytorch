@@ -911,6 +911,7 @@ class TestSparse(TestCase):
 
     @cuda_only
     @unittest.skipIf(torch.cuda.device_count() < 2, "only one GPU detected")
+    @skipIfRocm
     def test_same_gpu(self):
         i = self.IndexTensor([[2]]).cuda(1)
         v = self.ValueTensor([5]).cuda(1)
@@ -959,6 +960,7 @@ class TestSparse(TestCase):
         self.assertEqual(x.new(indices, values, x.size()), x)
 
     @cpu_only  # not really, but we only really want to run this once
+    @skipIfRocm
     def test_factory(self):
         default_size = torch.Size([1, 3])
         size = torch.Size([3, 3])
@@ -987,6 +989,7 @@ class TestSparse(TestCase):
                             self.assertEqual(device, sparse_tensor._values().device)
                         self.assertEqual(True, sparse_tensor.requires_grad)
 
+    @skipIfRocm
     def test_factory_size_check(self):
         indices = self.IndexTensor([[1, 2], [0, 2]])
         values = self.ValueTensor([.5, .5])
@@ -1016,7 +1019,7 @@ class TestSparse(TestCase):
         self.assertEqual(torch.int64, t.dtype)
 
     @cuda_only
-    @skipfIfRocm
+    @skipIfRocm
     def test_factory_device_type_inference(self):
         # both indices/values are CUDA
         shape = (1, 3)
@@ -1128,6 +1131,7 @@ class TestCudaUncoalescedSparse(TestCudaSparse):
 
 class TestSparseOneOff(TestCase):
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    @skipIfRocm
     def test_cuda_from_cpu(self):
         self.assertExpectedRaises(
             RuntimeError,
@@ -1136,6 +1140,7 @@ class TestSparseOneOff(TestCase):
                                              [3, 4, 4]))
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    @skipIfRocm
     def test_cuda_sparse_cpu_dense_add(self):
         x = torch.zeros(3, 4, 4)
         sparse_y = torch.cuda.sparse.FloatTensor(torch.zeros(1, 4).long().cuda(),
