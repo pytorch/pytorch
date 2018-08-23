@@ -12,7 +12,7 @@ saves the resulting traced model to ``alexnet.onnx``::
     import torch.onnx
     import torchvision
 
-    dummy_input = torch.randn(10, 3, 224, 224).cuda()
+    dummy_input = torch.randn(10, 3, 224, 224, device='cuda')
     model = torchvision.models.alexnet(pretrained=True).cuda()
 
     # Providing input and output names sets the display names for values
