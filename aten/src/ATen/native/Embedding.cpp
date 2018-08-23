@@ -71,9 +71,9 @@ Tensor embedding_sparse_backward(
 
   // check if all our grad come from padding_idx
   if (grad.numel() == 0) {
-    // FIXME: USE_TH_SIZE_ZERO_DIM
-    return sparse_type._sparse_coo_tensor_unsafe(indices_.type().tensor(),
-                                         dense_type.tensor(), weight_size);
+    return sparse_type._sparse_coo_tensor_unsafe(indices_.type().tensor({1, 0}),
+                                                 dense_type.tensor({0, num_features}),
+                                                 weight_size);
   }
 
   auto index = indices.reshape({1, -1});

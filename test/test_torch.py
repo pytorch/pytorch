@@ -210,6 +210,8 @@ class TestTorch(TestCase):
                        'storage_type',
                        'tan',
                        'to_dense',
+                       'sparse_resize_',
+                       'sparse_resize_and_clear_',
                        )
         test_namespace(torch.nn)
         test_namespace(torch.nn.functional, 'assert_int_or_pair', 'bilinear',
