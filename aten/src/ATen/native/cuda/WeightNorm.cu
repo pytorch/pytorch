@@ -7,8 +7,6 @@
 #include <THC/THCDeviceUtils.cuh>
 #include <THC/THCTensorMathReduce.cuh>
 
-#include <iostream>
-
 namespace at { 
 namespace native {
 namespace {
@@ -319,10 +317,19 @@ std::tuple<Tensor,Tensor> weight_norm_fused
    const Tensor & g,
    int64_t dim) 
 {
-  std::cout << "Calling weight_norm_fused" << std::endl;
-
   auto w = at::empty_like(v);
-  auto norms = at::empty_like(g);
+
+  // weight_norm_fused does have a derivative defined in derivatives.yaml, therefore, VariableType.cpp
+  // sends the unpacked g.data() as the argument.  In other words, we expect "g" is a bare Tensor here.
+
+  // norms is only needed to stash for backward.
+  // g.type().scalarType() may be at::ScalarType::Double, Float, or Half.  
+  // If Half, stash norms as float.
+  at::ScalarType AccType = g.type().scalarType() == at::ScalarType::Half ?
+                           at::ScalarType::Float : g.type().scalarType();
+  // Will this create norms on the same device as g, regardless of what the thread's default 
+  // current device is?  I believe so, because Type::* functions are DeviceGuard()ed.
+  auto norms = g.type().toScalarType(AccType).tensor(g.sizes(), g.strides());
 
   const int ndims = v.dim();
 
@@ -402,8 +409,6 @@ std::tuple<Tensor, Tensor> weight_norm_fused_backward
    const Tensor & saved_norms,
    int64_t dim)
 {
-  std::cout << "Calling weight_norm_fused_backward" << std::endl;
-
   // These checks should always succeed, because weight_norm_fused_backward should only
   // ever be recorded in the autograd graph via weight_norm, which passes contiguous v and g.
   AT_CHECK(saved_v.is_contiguous(), "saved_v must be contiguous");
@@ -504,8 +509,6 @@ std::tuple<Tensor, Tensor> weight_norm_differentiable_backward
    const Tensor & saved_norms,
    int64_t dim)
 {
-  std::cout << "Calling weight_norm_differentiable_backward" << std::endl;
-  
   // In Functions.cpp, the HardshrinkBackward object supplies "grad.contiguous()"
   // as the first argument, so grad_w should be contiguous here.
   // All these checks should succeed:
@@ -523,6 +526,9 @@ std::tuple<Tensor, Tensor> weight_norm_differentiable_backward
 
   // saved_g and saved_norms are already shaped to broadcast over the correct dimensions
 
+  // ...but saved_norms might be Float when saved_g and saved_v are half.
+  auto norms = saved_norms.to(saved_g.type().scalarType());
+
   std::vector<int64_t> bcast_size(saved_v.dim(), 1);
 
   // Analytic backward path using differentiable primitive ops
@@ -530,16 +536,16 @@ std::tuple<Tensor, Tensor> weight_norm_differentiable_backward
   {
     bcast_size[0] = saved_v.size(0);
     auto per_dim_sums = (grad_w*saved_v).view({saved_v.size(0), -1}).sum(1).view(bcast_size);
-    auto grad_v = (saved_g/saved_norms)*(grad_w - saved_v*(per_dim_sums/(saved_norms*saved_norms)));
-    auto grad_g = per_dim_sums/saved_norms; 
+    auto grad_v = (saved_g/norms)*(grad_w - saved_v*(per_dim_sums/(norms*norms)));
+    auto grad_g = per_dim_sums/norms; 
     return std::tuple<Tensor, Tensor>{grad_v, grad_g};
   }
   else // dim == last_dim
   {
     bcast_size[last_dim] = last_size; 
     auto per_dim_sums = (grad_w*saved_v).view({-1, last_size}).sum(0).view(bcast_size);
-    auto grad_v = (saved_g/saved_norms)*(grad_w - saved_v*(per_dim_sums/(saved_norms*saved_norms)));
-    auto grad_g = per_dim_sums/saved_norms; 
+    auto grad_v = (saved_g/norms)*(grad_w - saved_v*(per_dim_sums/(norms*norms)));
+    auto grad_g = per_dim_sums/norms; 
     return std::tuple<Tensor, Tensor>{grad_v, grad_g};
   }
 }
