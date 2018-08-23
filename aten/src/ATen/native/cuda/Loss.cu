@@ -31,6 +31,9 @@ Tensor kl_div_loss_backward_cuda(const Tensor& grad, const Tensor& input, const 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "kl_div_loss_backward", [&]() {
     kl_div_loss_backward_kernel<scalar_t>(grad_input, target, grad_expand);
   });
+  if (reduction == Reduction::ElementwiseMean) {
+    return grad_input / input.numel();
+  }
   return grad_input;
 }
 }}  // namespace at::native

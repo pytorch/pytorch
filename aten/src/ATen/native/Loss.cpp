@@ -80,6 +80,9 @@ Tensor kl_div_loss_backward_cpu(const Tensor& grad, const Tensor& input, const T
           }
         });
   });
+  if (reduction == Reduction::ElementwiseMean) {
+    return grad_input / input.numel();
+  }
   return grad_input;
 }
 }}  // namespace at::native
