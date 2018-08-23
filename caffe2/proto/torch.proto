@@ -330,6 +330,10 @@ message TensorProto {
     COMPLEX64 = 14;     // complex with float32 real and imaginary components
     COMPLEX128 = 15;    // complex with float64 real and imaginary components
     // Future extensions go here.
+
+    // Special data type, real type information is stored in ValueInfoProto.
+    // If data_type is SPECIAL, raw_data should be used.
+    SPECIAL = 51;
   }
 
   // The shape of the tensor.
@@ -421,6 +425,11 @@ message TensorProto {
   // External data by file name
   optional string external_data = 13;
 
+  // If two tensors represent the same weights/content, use alias.
+  // Must exist a TensorProto named alias in the initializer list.
+  // To avoid the duplicate tensor in attribute, such as value in Constant node.
+  optional string alias = 16;
+
   // Device info
   optional DeviceOption device_detail = 51;
 }
@@ -441,6 +450,7 @@ message TensorShapeProto {
     // for pre-defined dimension denotations.
     optional string denotation = 3;
   };
+  // To represent a scalar, using one element dim, and dim[0].dim_value = 0
   repeated Dimension dim = 1;
 }
 
@@ -456,11 +466,36 @@ message TypeProto {
     optional TensorShapeProto shape = 2;
   }
 
+  // Sequence type: List, Tuple
+  message Sequence {
+    // Type for each element.
+    optional TypeProto elem_type = 1;
+    enum SequenceType {
+      UNDEFINED = 0;
+      LIST = 1;
+      TUPLE = 2;
+    }
+    optional SequenceType sequence_type = 2;
+  }
+
+  // Map<K, V>, (not necessary at this moment)
+  message Map {
+    optional TensorProto.DataType key_type = 1;
+    optional TypeProto value_type = 2;
+  }
+
+  // Special type of blobs, based on the type_name, we can choose the right
+  // serializer and deserialzier.
+  message SpecialBlob {
+    optional string type_name = 1;
+  }
 
   oneof value {
     // The type of a tensor.
     Tensor tensor_type = 1;
-
+    Squence sequence_type = 4;
+    Map map_type = 5;
+    SpecialBlob = 51;
   }
 
   // An optional denotation can be used to denote the whole 
