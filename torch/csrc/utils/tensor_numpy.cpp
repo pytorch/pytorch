@@ -79,7 +79,8 @@ PyObject* tensor_to_numpy(const at::Tensor& tensor) {
   if (PyArray_SetBaseObject((PyArrayObject*)array.get(), py_tensor) == -1) {
     return NULL;
   }
-  tensor.storage()->pImpl()->set_resizable(false);
+  // Use the private storage API
+  tensor.storage().unsafeGetStorageImpl()->set_resizable(false);
 
   return array.release();
 }

@@ -686,6 +686,10 @@ public:
     return *schema_;
   }
 
+  void invalidateSchema() {
+    schema_ = nullptr;
+  }
+
   void dump() const;
 
   virtual ~Node() = default;

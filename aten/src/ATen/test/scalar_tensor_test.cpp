@@ -190,7 +190,7 @@ void test(Type &T) {
             auto lhs = ones(*lhs_it, T);
             auto rhs = ones(*rhs_it, T);
             auto storage = T.storage(rhs.numel(), false);
-            lhs.set_(*storage);
+            lhs.set_(storage);
             // should not be dim 0 because an empty storage is dim 1; all other storages aren't scalars
             REQUIRE(lhs.dim() != 0);
           }
@@ -199,7 +199,7 @@ void test(Type &T) {
             auto lhs = ones(*lhs_it, T);
             auto rhs = ones(*rhs_it, T);
             auto storage = T.storage(rhs.numel(), false);
-            lhs.set_(*storage, rhs.storage_offset(), rhs.sizes(), rhs.strides());
+            lhs.set_(storage, rhs.storage_offset(), rhs.sizes(), rhs.strides());
             require_equal_size_dim(lhs, rhs);
           }
         }

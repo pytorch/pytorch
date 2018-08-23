@@ -2,7 +2,7 @@
 #define TH_GENERIC_FILE "generic/THNN.h"
 #else
 
-#include "Reduction.h"
+#include <ATen/core/Reduction.h>
 
 TH_API void THNN_(Abs_updateOutput)(
           THNNState *state,            // library's state

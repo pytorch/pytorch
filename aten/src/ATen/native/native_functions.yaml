@@ -1043,6 +1043,12 @@
 - func: matmul_out(Tensor result, Tensor self, Tensor other) -> Tensor
   variants: function
 
+- func: matrix_rank(Tensor self, double tol, bool symmetric=false) -> Tensor
+  variants: function
+
+- func: matrix_rank(Tensor self, bool symmetric=false) -> Tensor
+  variants: function
+
 - func: max(Tensor self, int64_t dim, bool keepdim=false) -> (Tensor, Tensor)
 
 - func: max_out(Tensor max, Tensor max_values, Tensor self, int64_t dim, bool keepdim=false) -> (Tensor, Tensor)
@@ -1105,6 +1111,63 @@
 
 - func: mkldnn_convolution_backward(Tensor self, Tensor grad_output, Tensor weight, IntList padding, IntList stride, IntList dilation, int64_t groups, std::array<bool,3> output_mask) -> (Tensor, Tensor, Tensor)
   variants: function
+
+- func: miopen_batch_norm(Tensor input, Tensor weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, double exponential_average_factor, double epsilon) -> (Tensor, Tensor, Tensor)
+  variants: function
+  dispatch:
+    CUDA: miopen_batch_norm
+
+- func: miopen_batch_norm_backward(Tensor input, Tensor grad_output, Tensor weight, Tensor? running_mean, Tensor? running_var, Tensor? save_mean, Tensor? save_var, double epsilon) -> (Tensor, Tensor, Tensor)
+  variants: function
+  dispatch:
+    CUDA: miopen_batch_norm_backward
+
+- func: miopen_convolution(Tensor self, Tensor weight, Tensor? bias, IntList padding, IntList stride, IntList dilation, int64_t groups, bool benchmark, bool deterministic) -> Tensor
+  variants: function
+  dispatch:
+    CUDA: miopen_convolution
+
+- func: miopen_convolution_backward_input(IntList self_size, Tensor grad_output, Tensor weight, IntList padding, IntList stride, IntList dilation, int64_t groups, bool benchmark, bool deterministic) -> Tensor
+  variants: function
+  dispatch:
+    CUDA: miopen_convolution_backward_input
+
+- func: miopen_convolution_backward(Tensor self, Tensor grad_output, Tensor weight, IntList padding, IntList stride, IntList dilation, int64_t groups, bool benchmark, bool deterministic, std::array<bool,3> output_mask) -> (Tensor, Tensor, Tensor)
+  variants: function
+  dispatch:
+    CUDA: miopen_convolution_backward
+
+- func: miopen_convolution_backward_bias(Tensor grad_output) -> Tensor
+  variants: function
+  dispatch:
+    CUDA: miopen_convolution_backward_bias
+
+- func: miopen_convolution_backward_weight(IntList weight_size, Tensor grad_output, Tensor self, IntList padding, IntList stride, IntList dilation, int64_t groups, bool benchmark, bool deterministic) -> Tensor
+  variants: function
+  dispatch:
+    CUDA: miopen_convolution_backward_weight
+
+- func: miopen_convolution_transpose(Tensor self, Tensor weight, Tensor? bias, IntList padding, IntList output_padding, IntList stride, IntList dilation, int64_t groups, bool benchmark, bool deterministic) -> Tensor
+  variants: function
+  dispatch:
+    CUDA: miopen_convolution_transpose
+
+# NB: output_padding not strictly needed here, but it's helpful for the double
+# backwards
+- func: miopen_convolution_transpose_backward(Tensor self, Tensor grad_output, Tensor weight, IntList padding, IntList output_padding, IntList stride, IntList dilation, int64_t groups, bool benchmark, bool deterministic, std::array<bool,3> output_mask) -> (Tensor, Tensor, Tensor)
+  variants: function
+  dispatch:
+    CUDA: miopen_convolution_transpose_backward
+
+- func: miopen_convolution_transpose_backward_input(Tensor grad_output, Tensor weight, IntList padding, IntList stride, IntList dilation, int64_t groups, bool benchmark, bool deterministic) -> Tensor
+  variants: function
+  dispatch:
+    CUDA: miopen_convolution_transpose_backward_input
+
+- func: miopen_convolution_transpose_backward_weight(IntList weight_size, Tensor grad_output, Tensor self, IntList padding, IntList stride, IntList dilation, int64_t groups, bool benchmark, bool deterministic) -> Tensor
+  variants: function
+  dispatch:
+    CUDA: miopen_convolution_transpose_backward_weight
 
 - func: mm(Tensor self, Tensor mat2) -> Tensor
 
@@ -1870,6 +1933,12 @@
 # just only ever dispatch to CPULongTensor or CUDALongTensor, but that
 # seems a bit too finely balanced.)
 
+- func: native_sparse_coo_tensor(Type self_ty, IntList size) -> Tensor
+  variants: []
+  dispatch:
+    SparseCPU: new_with_size_sparse
+    SparseCUDA: new_with_size_sparse
+
 - func: native_sparse_coo_tensor(IndexTensor indices, Tensor values) -> Tensor
   variants: []
   dispatch:
@@ -1881,6 +1950,9 @@
   dispatch:
     SparseCPU: new_with_tensor_and_size_sparse
     SparseCUDA: new_with_tensor_and_size_sparse
+
+- func: sparse_coo_tensor(Type dtype, IntList size) -> Tensor
+  variants: []
 
 - func: sparse_coo_tensor(IndexTensor indices, Tensor values) -> Tensor
   variants: []
@@ -1899,11 +1971,17 @@
   variants: function
 
 
-- func: sparse_raw_resize_(Tensor self, IntList size, int64_t sparseDims, int64_t denseDims) -> Tensor
+- func: sparse_resize_(Tensor self, IntList size, int64_t sparseDims, int64_t denseDims) -> Tensor
   variants: method
   dispatch:
-    SparseCPU: raw_resize_sparse_
-    SparseCUDA: raw_resize_sparse_
+    SparseCPU: sparse_resize_
+    SparseCUDA: sparse_resize_
+
+- func: sparse_resize_and_clear_(Tensor self, IntList size, int64_t sparseDims, int64_t denseDims) -> Tensor
+  variants: method  
+  dispatch: 
+    SparseCPU: sparse_resize_and_clear_ 
+    SparseCUDA: sparse_resize_and_clear_
 
 
 - func: _sparse_mask(Tensor self, SparseTensorRef mask) -> Tensor

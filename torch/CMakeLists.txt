@@ -10,6 +10,7 @@ else()
 endif()
 
 option(BUILD_TORCH_TEST "Build torch test binaries" ON)
+option(TORCH_STATIC "Build libtorch.a rather than libtorch.so" OFF)
 
 # TODO: Unify with version from setup.py
 set(TORCH_VERSION_MAJOR 0)
@@ -207,7 +208,12 @@ if (NOT NO_API AND NOT USE_ROCM)
 
 endif()
 
-add_library(torch ${TORCH_SRCS})
+
+if (TORCH_STATIC)
+  add_library(torch STATIC ${TORCH_SRCS})
+else()
+  add_library(torch SHARED ${TORCH_SRCS})
+endif()
 
 target_compile_definitions(torch PRIVATE _THP_CORE)
 
