@@ -131,9 +131,13 @@ class intrusive_ptr final {
   static_assert(
       std::is_base_of<intrusive_ptr_target, TTarget>::value,
       "intrusive_ptr can only be used for classes that inherit from intrusive_ptr_target.");
+#ifndef _WIN32
+  // This static_assert triggers on MSVC
+  //  error C2131: expression did not evaluate to a constant
   static_assert(
       NullType::singleton() == NullType::singleton(),
       "NullType must have a constexpr singleton() method");
+#endif
   static_assert(
       std::is_same<TTarget*, decltype(NullType::singleton())>::value,
       "NullType::singleton() must return a element_type* pointer");
@@ -190,9 +194,13 @@ class intrusive_ptr final {
     static_assert(
         std::is_convertible<From*, TTarget*>::value,
         "Type mismatch. intrusive_ptr move constructor got pointer of wrong type.");
+#ifndef _WIN32
+    // This static_assert triggers on MSVC
+    //  error C2131: expression did not evaluate to a constant
     static_assert(
         NullType::singleton() == FromNullType::singleton(),
         "NullType mismatch. intrusive_ptr move constructor got pointer with differing null value.");
+#endif
     rhs.target_ = FromNullType::singleton();
   }
 
@@ -207,9 +215,13 @@ class intrusive_ptr final {
     static_assert(
         std::is_convertible<From*, TTarget*>::value,
         "Type mismatch. intrusive_ptr copy constructor got pointer of wrong type.");
+#ifndef _WIN32
+    // This static_assert triggers on MSVC
+    //  error C2131: expression did not evaluate to a constant
     static_assert(
         NullType::singleton() == FromNullType::singleton(),
         "NullType mismatch. intrusive_ptr copy constructor got pointer with differing null value.");
+#endif
     retain_();
   }
 
@@ -227,9 +239,13 @@ class intrusive_ptr final {
     static_assert(
         std::is_convertible<From*, TTarget*>::value,
         "Type mismatch. intrusive_ptr move assignment got pointer of wrong type.");
+#ifndef _WIN32
+    // This static_assert triggers on MSVC
+    //  error C2131: expression did not evaluate to a constant
     static_assert(
         NullType::singleton() == FromNullType::singleton(),
         "NullType mismatch. intrusive_ptr move assignment got pointer with differing null value.");
+#endif
     reset_();
     target_ = rhs.target_;
     rhs.target_ = FromNullType::singleton();
@@ -245,9 +261,13 @@ class intrusive_ptr final {
     static_assert(
         std::is_convertible<From*, TTarget*>::value,
         "Type mismatch. intrusive_ptr copy assignment got pointer of wrong type.");
+#ifndef _WIN32
+    // This static_assert triggers on MSVC
+    //  error C2131: expression did not evaluate to a constant
     static_assert(
         NullType::singleton() == FromNullType::singleton(),
         "NullType mismatch. intrusive_ptr copy assignment got pointer with differing null value.");
+#endif
     reset_();
     target_ = rhs.target_;
     retain_();
@@ -389,9 +409,13 @@ class weak_intrusive_ptr final {
   static_assert(
       std::is_base_of<intrusive_ptr_target, TTarget>::value,
       "intrusive_ptr can only be used for classes that inherit from intrusive_ptr_target.");
+#ifndef _WIN32
+  // This static_assert triggers on MSVC
+  //  error C2131: expression did not evaluate to a constant
   static_assert(
       NullType::singleton() == NullType::singleton(),
       "NullType must have a constexpr singleton() method");
+#endif
   static_assert(
       std::is_same<TTarget*, decltype(NullType::singleton())>::value,
       "NullType::singleton() must return a element_type* pointer");
@@ -438,9 +462,13 @@ class weak_intrusive_ptr final {
     static_assert(
         std::is_convertible<From*, TTarget*>::value,
         "Type mismatch. weak_intrusive_ptr move constructor got pointer of wrong type.");
+#ifndef _WIN32
+    // This static_assert triggers on MSVC
+    //  error C2131: expression did not evaluate to a constant
     static_assert(
         NullType::singleton() == FromNullType::singleton(),
         "NullType mismatch. weak_intrusive_ptr move constructor got pointer with differing null value.");
+#endif
     rhs.target_ = FromNullType::singleton();
   }
 
@@ -456,9 +484,13 @@ class weak_intrusive_ptr final {
     static_assert(
         std::is_convertible<From*, TTarget*>::value,
         "Type mismatch. weak_intrusive_ptr copy constructor got pointer of wrong type.");
+#ifndef _WIN32
+    // This static_assert triggers on MSVC
+    //  error C2131: expression did not evaluate to a constant
     static_assert(
         NullType::singleton() == FromNullType::singleton(),
         "NullType mismatch. weak_intrusive_ptr copy constructor got pointer with differing null value.");
+#endif
     retain_();
   }
 
@@ -477,9 +509,13 @@ class weak_intrusive_ptr final {
     static_assert(
         std::is_convertible<From*, TTarget*>::value,
         "Type mismatch. weak_intrusive_ptr move assignment got pointer of wrong type.");
+#ifndef _WIN32
+    // This static_assert triggers on MSVC
+    //  error C2131: expression did not evaluate to a constant
     static_assert(
         NullType::singleton() == FromNullType::singleton(),
         "NullType mismatch. weak_intrusive_ptr move assignment got pointer with differing null value.");
+#endif
     reset_();
     target_ = rhs.target_;
     rhs.target_ = FromNullType::singleton();
@@ -496,9 +532,13 @@ class weak_intrusive_ptr final {
     static_assert(
         std::is_convertible<From*, TTarget*>::value,
         "Type mismatch. weak_intrusive_ptr copy assignment got pointer of wrong type.");
+#ifndef _WIN32
+    // This static_assert triggers on MSVC
+    //  error C2131: expression did not evaluate to a constant
     static_assert(
         NullType::singleton() == FromNullType::singleton(),
         "NullType mismatch. weak_intrusive_ptr copy assignment got pointer with differing null value.");
+#endif
     reset_();
     target_ = rhs.target_;
     retain_();
