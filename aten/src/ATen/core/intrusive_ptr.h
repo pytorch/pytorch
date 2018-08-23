@@ -636,6 +636,94 @@ inline bool operator!=(
   return !operator==(lhs, rhs);
 }
 
+// This target lets your provide some public methods for working with
+// raw pointers to subclasses intrusive_ptr_target.  They are not provided
+// by default, because ideally you would not need these methods at all
+// (use smart pointers), but if you are dealing with legacy code that
+// still needs to pass around raw pointers, you may find these quite useful.
+// Inherit from this publically.
+//
+// An important usage note: some functions are only valid if you have a
+// strong raw pointer to the object, while others are only valid if you
+// have a weak raw pointer to the object.  ONLY call _raw_weak_* methods
+// on weak pointers, and _raw_* methods on strong pointers.  If you mix
+// it up, you may get an assert failure.  We also use 'weakref' to refer
+// to weak references, and 'ref' to refer to strong references.
+template <typename T> // CRTP
+class raw_intrusive_ptr_target : public intrusive_ptr_target {
+
+public:
+
+  // ------------------------------------------------------------------
+  // STRONG pointer functions
+  // Call this only if you got T* from intrusive_ptr<T>::release()
+
+  void _raw_incref() {
+    auto ptr = c10::intrusive_ptr<T>::reclaim(static_cast<T*>(this));
+    auto ptr_copy = ptr;
+    ptr_copy.release();
+    ptr.release();
+  }
+
+  void _raw_decref() {
+    // Let it die
+    c10::intrusive_ptr<T>::reclaim(static_cast<T*>(this));
+    // NB: You still "have" a pointer, but it's now invalid.
+    // If you want more safety, used the actual c10::intrusive_ptr class
+  }
+
+  T* _raw_make_weak() {
+    // NB: 'this' is a strong pointer, but we return a weak pointer
+    auto ptr = c10::intrusive_ptr<T>::reclaim(static_cast<T*>(this));
+    c10::weak_intrusive_ptr<T> wptr(ptr);
+    ptr.release();
+    return wptr.release();
+  }
+
+  // This gives the STRONG refcount of a STRONG pointer
+  uint32_t _raw_use_count() {
+    auto ptr = c10::intrusive_ptr<T>::reclaim(static_cast<T*>(this));
+    auto r = ptr.use_count();
+    ptr.release();
+    return r;
+  }
+
+  // ------------------------------------------------------------------
+  // WEAK pointer functions
+  // Call this only if you got T* from weak_intrusive_ptr<T>::release()
+
+  void _raw_weak_incweakref() {
+    // NB: 'this' is a weak pointer
+    auto wptr = c10::weak_intrusive_ptr<T>::reclaim(static_cast<T*>(this));
+    auto wptr_copy = wptr;
+    wptr_copy.release();
+    wptr.release();
+  }
+
+  void _raw_weak_decweakref() {
+    // NB: 'this' is a weak pointer
+    // Let it die
+    c10::weak_intrusive_ptr<T>::reclaim(static_cast<T*>(this));
+    // NB: You still "have" a pointer, but it's now invalid.
+    // If you want more safety, used the actual c10::weak_intrusive_ptr class
+  }
+
+  T* _raw_weak_lock() {
+    auto wptr = c10::weak_intrusive_ptr<T>::reclaim(static_cast<T*>(this));
+    auto ptr = wptr.lock();
+    wptr.release();
+    return ptr.release();
+  }
+
+  // This gives the STRONG refcount of a WEAK pointer
+  uint32_t _raw_weak_use_count() {
+    auto wptr = c10::weak_intrusive_ptr<T>::reclaim(static_cast<T*>(this));
+    auto r = wptr.use_count();
+    wptr.release();
+    return r;
+  }
+};
+
 } // namespace c10
 
 namespace std {
