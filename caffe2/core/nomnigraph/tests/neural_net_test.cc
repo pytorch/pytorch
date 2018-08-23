@@ -44,12 +44,13 @@ TEST(NeuralNetGraph, ReplaceGraph) {
 
   auto mg = NNMatchGraph();
   // clang-format off
+  auto matchSumOutput = operatorSubgraph(mg,
+      matchOp<Sum>(), {
+        nonTerminalSubgraph(mg, matchTensor(), 2)
+      });;
   auto pattern = subgraph(mg,
-      matchNodeType<Relu>(), {
-          operatorSubgraph(mg,
-              matchNodeType<Sum>(), {
-                subgraph(mg, matchNodeType<Tensor>(), {}, 2, true)
-              }),
+      matchOp<Relu>(), {
+        matchSumOutput
       });
   // clang-format on
 
@@ -61,18 +62,18 @@ TEST(NeuralNetGraph, ReplaceGraph) {
   EXPECT_TRUE(NNSubgraphMatcher::isSubgraphMatch(relu, pattern).isMatch());
 
   NNSubgraphMatcher::replaceSubgraph(
-      graph, pattern, [](NNGraph& g, NNGraph::NodeRef relu) {
-        auto sumOutput = getInputs(relu)[0];
-        auto sum = getProducer(sumOutput);
-
+      graph,
+      pattern,
+      [&matchSumOutput](
+          NNGraph& g,
+          NNGraph::NodeRef relu,
+          const NNSubgraphMatcher::SubgraphMatchResultType& matchResult) {
         auto fusedNode = g.createNode(util::make_unique<SumRelu>());
-        g.deleteNode(sumOutput);
-        g.replaceNode(relu, fusedNode);
-        g.replaceNode(sum, fusedNode);
-
-        g.deleteNode(sum);
-        g.deleteNode(relu);
-
+        auto sumNode =
+            getProducer(matchResult.getMatchNodeMap()->at(matchSumOutput));
+        g.replaceOutEdges(relu, fusedNode);
+        g.replaceInEdges(sumNode, fusedNode);
+        g.deleteNodes(matchResult.getMatchedSubgraph()->getNodes());
         return true;
       });
 
