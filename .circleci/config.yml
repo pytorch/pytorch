@@ -71,6 +71,7 @@ pytorch_linux_cpu_test_defaults: &pytorch_linux_cpu_test_defaults
         set -x
         sudo pip install awscli
         sudo apt-get update
+        sudo apt-get remove linux-image-generic linux-headers-generic linux-generic
         sudo apt-get install linux-headers-$(uname -r)
         sudo apt-get install linux-image-generic
         sudo pkill -SIGHUP dockerd
@@ -148,6 +149,7 @@ pytorch_linux_cuda_test_defaults: &pytorch_linux_cuda_test_defaults
         echo "deb https://nvidia.github.io/nvidia-container-runtime/ubuntu14.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
         echo "deb https://nvidia.github.io/nvidia-docker/ubuntu14.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
         sudo apt-get update
+        sudo apt-get remove linux-image-generic linux-headers-generic linux-generic
         sudo apt-get install linux-headers-$(uname -r)
         sudo apt-get install linux-image-generic
         wget 'https://s3.amazonaws.com/ossci-linux/nvidia_driver/NVIDIA-Linux-x86_64-396.26.run'
@@ -465,6 +467,7 @@ jobs:
           echo "deb https://nvidia.github.io/nvidia-container-runtime/ubuntu14.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
           echo "deb https://nvidia.github.io/nvidia-docker/ubuntu14.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
           sudo apt-get update
+          sudo apt-get remove linux-image-generic linux-headers-generic linux-generic
           sudo apt-get install linux-headers-$(uname -r)
           sudo apt-get install linux-image-generic
           wget 'https://s3.amazonaws.com/ossci-linux/nvidia_driver/NVIDIA-Linux-x86_64-396.26.run'
