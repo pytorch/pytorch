@@ -33,6 +33,13 @@
 
 #include <pybind11/functional.h>
 
+#include <memory>
+#include <sstream>
+#include <stdexcept>
+#include <string>
+#include <tuple>
+#include <utility>
+
 namespace torch  { namespace jit {
 
 namespace {
@@ -170,10 +177,9 @@ void initJITBindings(PyObject *module) {
   py::class_<GraphExecutor>(m, "GraphExecutor", py::dynamic_attr())
       .def(
           py::init([](py::function func,
-                      variable_list inputs,
+                      py::tuple inputs,
                       bool optimize) {
-              size_t num_inputs = inputs.size();
-              auto graph = tracer::createGraphByTracing(func, std::move(inputs), num_inputs);
+              auto graph = tracer::createGraphByTracing(func, toStack(inputs));
               return GraphExecutor(graph, optimize);
           }),
           py::arg("func"),
@@ -232,10 +238,14 @@ void initJITBindings(PyObject *module) {
           "Found ", operations.size(), " overloads for operator ",
           qualified_name, "! Overloads are not supported from Python.");
       std::shared_ptr<Operator> op = operations[0];
+      AT_ASSERT(op != nullptr);
+      std::ostringstream docstring;
+      docstring << "Automatically bound operator '" << qualified_name
+                << "' with schema: " << op->schema();
       return py::cpp_function([op](py::args args, py::kwargs kwargs) {
         return invokeOperatorFromPython(
             *op, std::move(args), std::move(kwargs));
-      });
+      }, py::name(qualified_name.c_str()), py::doc(docstring.str().c_str()));
     } catch (const at::Error& error) {
       throw std::runtime_error(error.what_without_backtrace());
     }

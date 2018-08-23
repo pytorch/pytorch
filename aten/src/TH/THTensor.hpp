@@ -9,93 +9,6 @@
 #include <atomic>
 #include <ATen/ATen.h>
 
-struct THTensor
-{
-    THTensor(THStorage* storage)
-      : refcount_(1)
-      , storage_(storage)
-      , storage_offset_(0)
-      , sizes_{0}
-      , strides_{1}
-      {}
-
-    ~THTensor() {
-      if (storage_) {
-        THStorage_free(storage_);
-      }
-    }
-
-    std::atomic<int> refcount_;
-
-    // Note: storage->size() may be greater than the recorded size
-    // of a tensor
-    THStorage *storage_;
-    ptrdiff_t storage_offset_;
-
-    std::vector<int64_t> sizes_;
-    std::vector<int64_t> strides_;
-
-    template <typename T>
-    inline T * data() const {
-      return storage_->data<T>() + storage_offset_;
-    }
-
-    template <typename T>
-    inline T * unsafe_data() const {
-      return storage_->unsafe_data<T>() + storage_offset_;
-    }
-
-    inline int64_t dim() const {
-      return sizes_.size();
-    }
-
-    at::ScalarType scalar_type() const {
-      return storage_->scalar_type();
-    }
-
-    ptrdiff_t storage_offset() const {
-      return storage_offset_;
-    }
-
-    // represents that numel() == 0.
-    inline bool is_empty() const {
-      for (int64_t i = 0; i < dim(); ++i) {
-        if (sizes_[i] == 0) {
-          return true;
-        }
-      }
-      return false;
-    }
-
-    int64_t size(int64_t d) const {
-      d = at::maybe_wrap_dim(d, dim(), false);
-      return sizes_[d];
-    }
-
-    int64_t stride(int64_t d) const {
-      d = at::maybe_wrap_dim(d, dim(), false);
-      return strides_[d];
-    }
-
-    inline at::IntList sizes() const {
-      return at::IntList(sizes_.data(), dim());
-    }
-
-    inline at::IntList strides() const {
-      return at::IntList(strides_.data(), dim());
-    }
-
-    void retain() {
-      ++refcount_;
-    }
-
-    void release() {
-      if(--refcount_ == 0) {
-        delete this;
-      }
-    }
-};
-
 inline int64_t* THTensor_getSizePtr(THTensor* tensor) {
   return tensor->sizes_.data();
 }
@@ -117,7 +30,7 @@ inline THStorage* THTensor_getStoragePtr(const THTensor* tensor) {
   AT_CHECK(tensor->storage_, "Cannot use PyTorch operations on a half-constructed "
            "tensor.  If this tensor came from Caffe2, please call GetMutableData on "
            "it first; otherwise, this is a bug, please report it.");
-  return tensor->storage_;
+  return tensor->storage_.unsafeGetStorageImpl();
 }
 
 inline void THTensor_resizeDim(THTensor* tensor, int64_t ndim) {
@@ -214,12 +127,7 @@ inline void THTensor_setStorageOffset(THTensor* tensor, ptrdiff_t storage_offset
 }
 
 // NB: Steals ownership of storage
-inline void THTensor_stealAndSetStoragePtr(THTensor* tensor, THStorage* storage) {
-  // Caffe2 might have tensors whose storages are null, but we
-  // don't allow it in PyTorch.
-  AT_ASSERT(storage);
-  tensor->storage_ = storage;
-}
+TH_API void THTensor_stealAndSetStoragePtr(THTensor* tensor, THStorage* storage);
 
 TH_API void THTensor_free(THTensor *self);
 TH_API void THTensor_setStorageNd(THTensor *self, THStorage *storage, ptrdiff_t storageOffset, int nDimension, const int64_t *size, const int64_t *stride);

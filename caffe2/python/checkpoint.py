@@ -217,7 +217,9 @@ class CheckpointManager(object):
                     [], self._blob_names,
                     db=full_db_name,
                     db_type=db_type,
-                    absolute_path=True)
+                    absolute_path=True,
+                    keep_device=True,
+                )
         self._names_output = task.outputs()[0]
         return task
 
@@ -280,7 +282,9 @@ class CheckpointManager(object):
                 self.blob_list(),
                 db=self._current_db_name,
                 db_type=db_type,
-                absolute_path=True)
+                absolute_path=True,
+                keep_device=True,
+            )
 
         return self._timed_task('checkpoint_load', add_op)
 

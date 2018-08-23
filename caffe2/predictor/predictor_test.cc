@@ -169,7 +169,7 @@ class PredictorTest : public testing::Test {
     ctx_ = caffe2::make_unique<CPUContext>(op);
     NetDef init, run;
     p_ = caffe2::make_unique<Predictor>(
-        parseNetDef(initSpec), parseNetDef(predictSpec));
+        makePredictorConfig(parseNetDef(initSpec), parseNetDef(predictSpec)));
   }
 
   std::unique_ptr<CPUContext> ctx_;
@@ -206,7 +206,8 @@ class PredictorMetaNetDefTest : public testing::Test {
     DeviceOption op;
     op.set_random_seed(1701);
     ctx_ = caffe2::make_unique<CPUContext>(op);
-    p_ = caffe2::make_unique<Predictor>(parseMetaNetDef(metaSpec));
+    p_ = caffe2::make_unique<Predictor>(
+        makePredictorConfig(parseMetaNetDef(metaSpec)));
   }
 
   std::unique_ptr<CPUContext> ctx_;

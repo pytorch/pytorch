@@ -269,9 +269,13 @@ struct Variable::Impl : public at::TensorImpl {
 
   at::IntList sizes() const override;
   at::IntList strides() const override;
+  int64_t size(int64_t d) const override;
+  int64_t stride(int64_t d) const override;
+
   int64_t dim() const override;
-  void* unsafeGetTH(bool retain) override;
-  std::unique_ptr<at::Storage> storage() override;
+  const at::Storage& storage() override;
+  int64_t storage_offset() const override;
+
   static const char* typeString();
 
   std::shared_ptr<Function> get_grad_accumulator();

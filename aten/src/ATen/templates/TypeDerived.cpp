@@ -46,12 +46,12 @@ ScalarType ${Type}::scalarType() const {
 Backend ${Type}::backend() const {
   return Backend::${Backend};
 }
-bool ${Type}::is_cuda() const { return backend() == kCUDA || backend() == kSparseCUDA; }
-bool ${Type}::is_sparse() const { return backend() == kSparseCPU || backend() == kSparseCUDA; }
+bool ${Type}::is_cuda() const { return backend() == Backend::CUDA || backend() == Backend::SparseCUDA; }
+bool ${Type}::is_sparse() const { return backend() == Backend::SparseCPU || backend() == Backend::SparseCUDA; }
 bool ${Type}::is_distributed() const { return false; }
 
-std::unique_ptr<Storage> ${Type}::storage(bool resizable) const {
-  return std::unique_ptr<Storage>(new Storage(
+Storage ${Type}::storage(bool resizable) const {
+  return Storage(
       ScalarType::${ScalarName},
       0,
 #if ${isCUDA}
@@ -60,10 +60,10 @@ std::unique_ptr<Storage> ${Type}::storage(bool resizable) const {
       getTHDefaultAllocator(),
 #endif
       resizable
-  ));
+  );
 }
-std::unique_ptr<Storage> ${Type}::storage(size_t size, bool resizable) const {
-  return std::unique_ptr<Storage>(new Storage(
+Storage ${Type}::storage(size_t size, bool resizable) const {
+  return Storage(
       ScalarType::${ScalarName},
       size,
 #if ${isCUDA}
@@ -72,36 +72,35 @@ std::unique_ptr<Storage> ${Type}::storage(size_t size, bool resizable) const {
       getTHDefaultAllocator(),
 #endif
       resizable
-  ));
+  );
 }
-std::unique_ptr<Storage> ${Type}::storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const {
-    return std::unique_ptr<Storage>(
-      new Storage(
+Storage ${Type}::storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const {
+    return Storage(
       ScalarType::${ScalarName},
       InefficientStdFunctionContext::makeDataPtr(data, deleter,
 #if ${isCUDA}
-      Device(kCUDA, getPointerDevice(data))
+        Device(DeviceType::CUDA, getPointerDevice(data))
 #else
-      kCPU
+        DeviceType::CPU
 #endif
       ),
       size,
-      deleter));
+      deleter);
 }
-std::unique_ptr<Storage> ${Type}::storageWithAllocator(int64_t size, Allocator* allocator) const {
-    return std::unique_ptr<Storage>(
-        new Storage(ScalarType::${ScalarName}, size, allocator));
+Storage ${Type}::storageWithAllocator(int64_t size, Allocator* allocator) const {
+    return Storage(ScalarType::${ScalarName}, size, allocator);
 }
 Tensor ${Type}::unsafeTensorFromTH(void * th_pointer, bool retain) const {
-  if (retain)
-    ${THTensor}_retain(${state,} (${THTensor}*) th_pointer);
-  return Tensor(new TensorImpl(${Backend}TensorId(), ScalarType::${ScalarName},
-        (${THTensor}*)(th_pointer), false), false);
+  TensorImpl* pimpl = (TensorImpl*)(th_pointer);
+  if (retain) {
+    pimpl->retain();
+  }
+  return Tensor(pimpl, false);
 }
-std::unique_ptr<Storage> ${Type}::unsafeStorageFromTH(void * th_pointer, bool retain) const {
+Storage ${Type}::unsafeStorageFromTH(void * th_pointer, bool retain) const {
   if (retain)
     ${THStorage}_retain(${state,} (${THStorage}*) th_pointer);
-  return std::unique_ptr<Storage>(new Storage((${THStorage}*) th_pointer));
+  return Storage((${THStorage}*) th_pointer);
 }
 std::unique_ptr<Generator> ${Type}::generator() const {
   return std::unique_ptr<Generator>(new ${Generator}(context));

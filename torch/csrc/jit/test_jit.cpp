@@ -548,10 +548,11 @@ variable_list get_grad_outputs(const variable_list& vars) {
 
 std::shared_ptr<Graph> trace(const ADTestSpec& test, const variable_list& vars_in) {
   std::shared_ptr<tracer::TracingState> state;
-  variable_list trace_vars_in;
-  std::tie(state, trace_vars_in) = tracer::enter(vars_in);
+  Stack trace_stack_in;
+  std::tie(state, trace_stack_in) = tracer::enter(fmap<IValue>(vars_in));
+  variable_list trace_vars_in = fmap(trace_stack_in, [](const IValue& v) { return Variable(v.toTensor()); });
   auto trace_vars_out = test(trace_vars_in);
-  tracer::exit(trace_vars_out);
+  tracer::exit(fmap<IValue>(trace_vars_out));
   return state->graph;
 }
 
@@ -1059,6 +1060,34 @@ void testCustomOperators() {
     REQUIRE(output[1] == 2.0);
   }
   {
+    RegisterOperators reg(
+        "foo::lists2(Tensor[] tensors) -> Tensor[]",
+        [](std::vector<at::Tensor> tensors) { return tensors; });
+
+    auto& ops =
+        getAllOperatorsFor(Symbol::fromQualString("foo::lists2"));
+    REQUIRE(ops.size() == 1);
+
+    auto& op = ops.front();
+    REQUIRE(op->schema().name == "foo::lists2");
+
+    REQUIRE(op->schema().arguments.size() == 1);
+    REQUIRE(op->schema().arguments[0].name == "tensors");
+    REQUIRE(op->schema().arguments[0].type->isSubtypeOf(ListType::ofTensors()));
+
+    REQUIRE(op->schema().returns.size() == 1);
+    REQUIRE(op->schema().returns[0].type->isSubtypeOf(ListType::ofTensors()));
+
+    Stack stack;
+    push(stack, std::vector<at::Tensor>{autograd::make_variable(at::ones(5))});
+    op->getOperation()(stack);
+    std::vector<at::Tensor> output;
+    pop(stack, output);
+
+    REQUIRE(output.size() == 1);
+    REQUIRE(output[0].allclose(autograd::make_variable(at::ones(5))));
+  }
+  {
 #ifdef USE_CATCH
     REQUIRE_THROWS_WITH(
         createOperator(
@@ -1094,8 +1123,7 @@ void testCustomOperators() {
         [](double a, at::Tensor b) { return a + b; });
 
     std::shared_ptr<tracer::TracingState> state;
-    variable_list trace_vars_in;
-    std::tie(state, trace_vars_in) = tracer::enter({});
+    std::tie(state, std::ignore) = tracer::enter({});
 
     Stack stack;
     push(stack, 2.0f, autograd::make_variable(at::ones(5)));
@@ -1103,7 +1131,7 @@ void testCustomOperators() {
     at::Tensor output = autograd::make_variable(at::empty({}));
     pop(stack, output);
 
-    tracer::exit({output});
+    tracer::exit({IValue(output)});
 
     std::string op_name("traced::op");
     bool contains_traced_op = false;
@@ -1123,8 +1151,7 @@ void testCustomOperators() {
         [](const std::vector<double>& f) -> int64_t { return f.size(); });
 
     std::shared_ptr<tracer::TracingState> state;
-    variable_list trace_vars_in;
-    std::tie(state, trace_vars_in) = tracer::enter({});
+    std::tie(state, std::ignore) = tracer::enter({});
 
     Stack stack;
     push(stack, std::vector<double>{1.0});
