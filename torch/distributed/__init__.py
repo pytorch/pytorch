@@ -60,8 +60,14 @@ def init_process_group(backend, init_method='env://', **kwargs):
         group_name (str, optional): Group name. See description of init methods.
 
     To enable ``backend == mpi``, PyTorch needs to built from source on a system that
-    supports MPI. If you want to use Openmpi with CUDA-aware support, please use Openmpi
-    major version 2 and above.
+    supports MPI. If you want to use Open MPI with CUDA-aware support, please use
+    Open MPI major version 2 and above.
+
+    .. note::
+        This method initializes CUDA context. Therefore, if multiple processes
+        run on a single machine but use different GPUs, make sure to use
+        :func:`torch.cuda.set_device` before this method to avoid unnecessarily
+        creating context on the first visible device.
 
     """
     world_size = kwargs.pop('world_size', -1)
@@ -79,6 +85,7 @@ def init_process_group(backend, init_method='env://', **kwargs):
     # Checking and assigning the distributed backend
     global _backend
 
+    backend = backend.lower()
     if backend == "tcp":
         _backend = dist_backend.TCP
     elif backend == "mpi":
@@ -159,7 +166,7 @@ def get_rank():
 
     Rank is a unique identifier assigned to each process within a distributed
     group. They are always consecutive integers ranging from ``0`` to
-    ``world_size``.
+    ``world_size - 1``.
     """
     assert torch.distributed._initialized
     return torch._C._dist_get_rank()
