@@ -20,22 +20,6 @@
 
 namespace torch {
 namespace nn {
-namespace {
-Tensor linear(Tensor x, Tensor w, Tensor b) {
-  if (x.ndimension() == 2 && b.defined()) {
-    // Fused op is marginally faster
-    assert(x.size(1) == w.size(1));
-    return torch::addmm(b, x, w.t());
-  }
-
-  auto output = x.matmul(w.t());
-  if (b.defined()) {
-    output += b;
-  }
-  return output;
-}
-} // namespace
-
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~ RNNOptionsBase ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 namespace detail {
