@@ -1563,11 +1563,9 @@ private:
       Value* input,
       int64_t dim,
       Value* index) {
-    auto named_value = NamedValue(loc, input);
-    auto dimv = NamedValue(loc, "dim", graph->insertConstant(dim, loc));
-    auto idx = NamedValue(loc, index);
     return emitBuiltinCall(
-        loc, *graph, aten::select, {input, dimv, idx}, {}, true);
+        loc, *graph, aten::select,
+        {input, graph->insertConstant(dim, loc), index}, {}, true);
   }
 
   // Desugars slice indexing: tensor[begin:end] -> tensor.slice(dim, begin, end, 1)
