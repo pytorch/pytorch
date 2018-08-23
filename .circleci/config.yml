@@ -522,7 +522,7 @@ jobs:
           docker cp /home/circleci/project/. "$id:/var/lib/jenkins/workspace"
           echo "mkdir -p /usr/local/caffe2" | docker exec -u jenkins -i "$id" bash
           docker cp /opt/workspace/. "$id:/usr/local/caffe2"
-          (echo "source ./workspace/env" && echo 'cd workspace && ls && ./ci_build_script.sh') | docker exec -u jenkins -i "$id" bash
+          (echo "source ./workspace/env" && echo 'sudo chown -R jenkins workspace && cd workspace && ./ci_build_script.sh') | docker exec -u jenkins -i "$id" bash
 
 workflows:
   version: 2
