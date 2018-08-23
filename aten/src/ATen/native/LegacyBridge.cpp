@@ -158,6 +158,10 @@ Tensor tensor(const Type& dtype, ArrayRef<int64_t> size) {
   }
 }
 
+Tensor sparse_coo_tensor(const Type& dtype, ArrayRef<int64_t> size) {
+  return dtype.toSparse().native_sparse_coo_tensor(size);
+}
+
 Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values) {
   return values.type().toSparse().native_sparse_coo_tensor(indices, values);
 }
