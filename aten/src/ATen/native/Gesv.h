@@ -13,6 +13,9 @@ static inline bool isTransposeContiguous(Tensor& self) {
  * (i)  output tensors (sol, lu) may be same as input tensors (self, A)
  * (ii) for 2D matrices, .t_() represents their column-major format
  *
+ * Before passing pointers to Lapack, we need to ensure that these pointers
+ * represent Fortran-contiguous tensors in column-major format
+ *
  * Cases:
  * 1) `out` has correct shape but elements do not form a contiguous
  * chunk of memory. Since shape is correct, we don't resize_ it. Instead, we
@@ -27,11 +30,10 @@ static inline bool isTransposeContiguous(Tensor& self) {
  *    (i)  &in == &out: copy in.t().clone() to out (same tensor)
  *    (ii) &in != &out: copy in.t() to out
  */
-static inline void prepareIOTensors(
-    const Tensor& in, Tensor& out, Tensor& temp,
-    int64_t& x, int64_t& y) {
-  x = in.size(0);
-  y = (in.dim() == 1) ? 1 : in.size(1);
+static inline void prepareTensorsForLapack(
+    const Tensor& in, Tensor& out, Tensor& temp) {
+  int64_t x = in.size(0);
+  int64_t y = (in.dim() == 1) ? 1 : in.size(1);
   bool out_tc = isTransposeContiguous(out);
   bool out_correct_shape =
     out.dim() == 2 && out.size(0) == x && out.size(1) == y;

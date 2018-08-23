@@ -166,15 +166,16 @@ std::tuple<Tensor&,Tensor&> _gesv_single_out_cuda(Tensor& sol, Tensor& lu,
 AT_ERROR("gesv: MAGMA library not found in "
     "compilation. Please rebuild with MAGMA.");
 #else
-  int64_t ax, ay, bx, by;
   int info = 0;
   int* ipiv;
   Tensor temp_sol;
   Tensor temp_lu;
-  prepareIOTensors(self, sol, temp_sol, bx, by);
-  prepareIOTensors(A, lu, temp_lu, ax, ay);
+  prepareTensorsForLapack(self, sol, temp_sol);
+  prepareTensorsForLapack(A, lu, temp_lu);
 
   AT_DISPATCH_FLOATING_TYPES(self.type(), "gesv", [&]{
+      const int64_t bx = sol.size(1);
+      const int64_t by = sol.size(0);
       auto A_ptr = temp_lu.defined() ? temp_lu.data<scalar_t>()
                                      : lu.data<scalar_t>();
       auto b_ptr = temp_sol.defined() ? temp_sol.data<scalar_t>()
