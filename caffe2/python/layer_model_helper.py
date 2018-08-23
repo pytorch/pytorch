@@ -630,6 +630,10 @@ class LayerModelHelper(model_helper.ModelHelper):
                 param_to_device=blob_to_device,
                 default_device=CPU,
             )
+            if device is not None:
+                # extra info is not applicable for optimizers
+                del device.extra_info[:]
+
             with core.DeviceScope(device):
                 optimizer(
                     train_net, train_init_net, param, grad_map.get(str(param)))
