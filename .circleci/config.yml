@@ -378,8 +378,6 @@ jobs:
     docker:
       - image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda8.0-cudnn6-ubuntu16.04:189
         <<: *docker_config_defaults
-    environment:
-      PYTHON_VERSION: "2.7"
     resource_class: large
     working_directory: /var/lib/jenkins/workspace
     steps:
@@ -437,24 +435,94 @@ jobs:
           if pgrep sccache > /dev/null; then
             sccache --show-stats
           fi
-
-          mkdir -p pytorch-ci-env/
-          # cp -r /opt/conda/lib/python${PYTHON_VERSION}/site-packages/torch pytorch-ci-env/torch
-          # cp -r build/bin pytorch-ci-env/cpp_test_bin
-          # if [ -d "../cpp-build" ]; then
-          #   cp -r ../cpp-build pytorch-ci-env/cpp-build
-          # fi
     - persist_to_workspace:
-        root: /var/lib/jenkins/workspace/pytorch-ci-env
+        root: /usr/local/caffe2
         paths:
           - "*"
 
-  # caffe2_py2_cuda8_0_cudnn6_ubuntu16_04_test:
-  #   environment:
-  #     DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn6-py3:226"
-  #     PYTHON_VERSION: "3.6"
-  #   <<: *pytorch_linux_cuda_test_defaults
+  caffe2_py2_cuda8_0_cudnn6_ubuntu16_04_test:
+    environment:
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda8.0-cudnn6-ubuntu16.04:189"
+    machine:
+      image: default
+    resource_class: gpu.small
+    steps:
+    - checkout
+    - run:
+        name: Prepare workspace
+        command: |
+          sudo mkdir -p /opt/workspace
+          sudo chmod -R 777 /opt/workspace
+    - attach_workspace:
+        at: /opt/workspace
+    - run:
+        name: Build
+        command: |
+          set -x
+          sudo pip install awscli
+          curl -L https://nvidia.github.io/nvidia-docker/gpgkey | sudo apt-key add -
+          echo "deb https://nvidia.github.io/libnvidia-container/ubuntu14.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
+          echo "deb https://nvidia.github.io/nvidia-container-runtime/ubuntu14.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
+          echo "deb https://nvidia.github.io/nvidia-docker/ubuntu14.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
+          sudo apt-get update
+          sudo apt-get install linux-headers-$(uname -r)
+          sudo apt-get install linux-image-generic
+          wget 'https://s3.amazonaws.com/ossci-linux/nvidia_driver/NVIDIA-Linux-x86_64-396.26.run'
+          sudo /bin/bash ./NVIDIA-Linux-x86_64-396.26.run -s --no-drm
+          sudo apt-get install -y nvidia-docker2
+          sudo pkill -SIGHUP dockerd
+          nvidia-smi
+          # This IAM user only allows read-only access to ECR
+          export AWS_ACCESS_KEY_ID=AKIAJHXPX5VDV5UZWXFQ
+          export AWS_SECRET_ACCESS_KEY=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
+          eval $(aws ecr get-login --region us-east-1 --no-include-email)
+          docker pull ${DOCKER_IMAGE}
+          id=$(docker run --runtime=nvidia -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
+          pwd
+          echo "declare -x SCCACHE_BUCKET=${SCCACHE_BUCKET}" > /home/circleci/project/env
+          # This IAM user allows write access to S3 bucket for sccache
+          echo "declare -x AWS_ACCESS_KEY_ID=AKIAJJZUW4G2ASX5W7KA" >> /home/circleci/project/env
+          echo "declare -x AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET}" >> /home/circleci/project/env
 
+          # TODO: merge this into Caffe2 build.sh
+          cat >/home/circleci/project/ci_build_script.sh <<EOL
+
+          set -ex
+
+          # libdc1394 (dependency of OpenCV) expects /dev/raw1394 to exist...
+          sudo ln /dev/null /dev/raw1394
+
+          # Hotfix, use hypothesis 3.44.6 on Ubuntu 14.04
+          # See comments on https://github.com/HypothesisWorks/hypothesis-python/commit/eadd62e467d6cee6216e71b391951ec25b4f5830
+          if [[ "$BUILD_ENVIRONMENT" == *ubuntu14.04* ]]; then
+            sudo pip uninstall -y hypothesis
+            sudo pip install hypothesis==3.44.6
+          fi
+
+          # conda must be added to the path for Anaconda builds (this location must be
+          # the same as that in install_anaconda.sh used to build the docker image)
+          if [[ "${BUILD_ENVIRONMENT}" == conda* ]]; then
+            export PATH=/opt/conda/bin:$PATH
+          fi
+
+          # Build
+          if test -x ".jenkins/caffe2/test.sh"; then
+            ./.jenkins/caffe2/test.sh
+          else
+            ./.jenkins/test.sh
+          fi
+
+          # Remove benign core dumps.
+          # These are tests for signal handling (including SIGABRT).
+          rm -f ./crash/core.fatal_signal_as.*
+          rm -f ./crash/core.logging_test.*
+
+          EOL
+          chmod +x /home/circleci/project/ci_build_script.sh
+          docker cp /home/circleci/project/. "$id:/var/lib/jenkins/workspace"
+          echo "mkdir -p /usr/local/caffe2" | docker exec -u jenkins -i "$id" bash
+          docker cp /opt/workspace/. "$id:/usr/local/caffe2"
+          (echo "source ./workspace/env" && echo 'cd workspace && ci_build_script.sh') | docker exec -u jenkins -i "$id" bash
 
 workflows:
   version: 2
@@ -493,6 +561,6 @@ workflows:
             - pytorch_macos_10_13_py3_build
       - pytorch_macos_10_13_cuda9_2_cudnn7_py3_build
       - caffe2_py2_cuda8_0_cudnn6_ubuntu16_04_build
-      # - caffe2_py2_cuda8_0_cudnn6_ubuntu16_04_test:
-      #     requires:
-      #       - caffe2_py2_cuda8_0_cudnn6_ubuntu16_04_build
+      - caffe2_py2_cuda8_0_cudnn6_ubuntu16_04_test:
+          requires:
+            - caffe2_py2_cuda8_0_cudnn6_ubuntu16_04_build
