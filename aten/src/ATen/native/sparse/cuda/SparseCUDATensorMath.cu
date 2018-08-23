@@ -196,7 +196,7 @@ SparseTensor& hspmm_out_sparse_cuda(SparseTensor& r_, const SparseTensor& sparse
   AT_CHECK(dense.size(0) == k,
       "hspmm: Argument #3: Expected dim 0 size ", k, ", got ", dense.size(0));
 
-  _get_sparse_impl(r_)->raw_resize_(1, 1, {m, n});
+  _get_sparse_impl(r_)->resize_and_clear_(1, 1, {m, n});
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
@@ -222,9 +222,13 @@ SparseTensor& hspmm_out_sparse_cuda(SparseTensor& r_, const SparseTensor& sparse
   // tensor with sparse * dense multiplication
   thrust::device_ptr<int64_t> indicesIter(dstIndices.data<int64_t>());
   thrust::sequence(policy, indicesIter, indicesIter + nnz);
-  _get_sparse_impl(newSparse)->_sizes_mut()[0] = nnz; // TODO: use something safer)
+
+  std::vector<int64_t> new_size = _get_sparse_impl(newSparse)->sizes().vec();
+  new_size[0] = nnz;
+  _get_sparse_impl(newSparse)->raw_resize_(_get_sparse_impl(newSparse)->sparseDims(), _get_sparse_impl(newSparse)->denseDims(), new_size);
+
   s_addmm_out_sparse_dense_cuda(values, values, newSparse, dense, 0, /*alpha*/ 1);
-  _get_sparse_impl(r_)->set_indices_and_values(indices, values);
+  _get_sparse_impl(r_)->set_indices_and_values_unsafe(indices, values);
 
   return r_;
 #else
@@ -433,7 +437,7 @@ SparseTensor& mul_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t_, cons
   LongTensor r_indices_ = t_indices_.type().tensor({sparseDims, max_nnz});
   Tensor r_values_ = _new_values_with_size_of(t_values_, max_nnz).zero_();
   r_.resize_as_(src);
-  _get_sparse_impl(r_)->set_indices_and_values(r_indices_, r_values_);  // TODO: sigh
+  _get_sparse_impl(r_)->set_indices_and_values_unsafe(r_indices_, r_values_);
 
   int64_t valueSize = t_values_.stride(0);
   const dim3 block = dim3(std::min(static_cast<int64_t>(cuda::getApplyBlock().x), valueSize));
@@ -466,7 +470,7 @@ SparseTensor& mul_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t_, cons
   // sync!  (surely there is a more idiomatic way to do this...)
   LongTensor cpu_resultNnz = at::empty({1}, CPU(kLong));
   cpu_resultNnz.copy_(resultNnz);
-  _get_sparse_impl(r_)->set_nnz(cpu_resultNnz.accessor<int64_t, 1>()[0]);
+  _get_sparse_impl(r_)->set_nnz_and_narrow(cpu_resultNnz.accessor<int64_t, 1>()[0]);
   _get_sparse_impl(r_)->set_coalesced(true);
 
   return r_;
