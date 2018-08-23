@@ -43,7 +43,7 @@ void validateGraph(const std::shared_ptr<Graph>& graph, onnx_torch::OperatorExpo
           "\n\nDefined at:\n" + getNodeStackTraceString(node))
     IR_ELSE()
       // Special error messages for certain types of operators
-      if (node->kind() == aten::expand) {
+      if (node->kind() == aten::expand && operator_export_type == onnx_torch::OperatorExportTypes::ONNX) {
         FAIL_EXPORT(
             "Could not export a broadcasted operation; ONNX likely does not support this form of broadcasting.\n\nBroadcast occurred at:\n" +
             getNodeStackTraceString(node));
