@@ -576,7 +576,7 @@ at::optional<std::vector<Value*>> tryMatchSchema(
       } else if(auto idx = findInputWithName(arg.name, kwargs))  {
         const NamedValue& nv = kwargs[*idx];
         if(used_kwarg[*idx]) {
-          err() << "argument " << nv.name() << " specified twice \n" << nv.locOr(loc);
+          err() << "argument " << nv.name() << " specified twice in schema, submit a bug report!\n" << nv.locOr(loc);
           return at::nullopt;
         }
         used_kwarg[*idx] = true;

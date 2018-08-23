@@ -103,17 +103,19 @@ inline IValue toIValue(py::handle obj, const TypePtr& type) {
 }
 
 inline IValue argumentToIValue(
+    const FunctionSchema& schema,
     size_t argumentPosition,
-    const Argument& argument,
     py::handle object) {
+  const auto& argument = schema.arguments.at(argumentPosition);
   try {
     return toIValue(object, argument.type);
   } catch (const py::cast_error& error) {
     AT_ERROR(
-        "Expected value of type ", *argument.type,
+        schema.name, "() expected value of type ", argument.type->str(),
         " for argument '", argument.name,
         "' in position ", argumentPosition,
-        ", but instead got value of type ", object.get_type().str());
+        ", but instead got value of type ", object.get_type().attr("__name__").str(),
+        ". Declaration: ", schema);
   }
 }
 
@@ -151,9 +153,9 @@ inline Stack createStackForSchema(
     py::kwargs kwargs = py::kwargs()) {
   AT_CHECK(
       args.size() + kwargs.size() <= schema.arguments.size(),
-      "Expected at most ", schema.arguments.size(),
-      " argument(s) for operator '", schema.name, "', but received ",
-      args.size(), " argument(s). Schema: ", schema);
+      schema.name, "() expected at most ", schema.arguments.size(),
+      " argument(s) but received ",
+      args.size(), " argument(s). Declaration: ", schema);
 
   Stack stack;
   stack.reserve(schema.arguments.size());
@@ -161,7 +163,7 @@ inline Stack createStackForSchema(
   // First push all positional args.
   for (size_t i = 0; i < args.size(); ++i) {
     // Use the type information from the schema to convert the PyObject.
-    push(stack, argumentToIValue(i, schema.arguments[i], args[i]));
+    push(stack, argumentToIValue(schema, i, args[i]));
   }
 
   // Now for every remaining non-positional argument in the schema, look for it
@@ -171,15 +173,14 @@ inline Stack createStackForSchema(
   for (size_t i = args.size(); i < schema.arguments.size(); ++i) {
     const auto& arg = schema.arguments[i];
     if (kwargs.contains(arg.name.c_str())) {
-      push(stack, argumentToIValue(i, arg, kwargs[arg.name.c_str()]));
+      push(stack, argumentToIValue(schema, i, kwargs[arg.name.c_str()]));
       consumed_kwargs += 1;
     } else if (arg.default_value) {
       push(stack, *arg.default_value);
     } else {
       AT_ERROR(
-          "Missing value for argument '", arg.name,
-          "' to operator '", schema.name,
-          "'. Schema: ", schema);
+          schema.name, "() is missing value for argument '", arg.name,
+          "'. Declaration: ", schema);
     }
   }
 
