@@ -529,8 +529,8 @@ SparseTensor& mul_out_sparse_dense_cuda(SparseTensor& r, const SparseTensor& t, 
   );
 
   r.resize_as_(t);
-  _get_sparse_impl(r)->set_indices_and_values(r_indices, r_values);
-  _get_sparse_impl(r)->set_nnz(t_nnz);
+  _get_sparse_impl(r)->set_indices_and_values_unsafe(r_indices, r_values);
+  _get_sparse_impl(r)->set_nnz_and_narrow(t_nnz);
   _get_sparse_impl(r)->set_coalesced(true);
 
   return r;
