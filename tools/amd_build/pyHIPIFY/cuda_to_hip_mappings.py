@@ -2172,7 +2172,7 @@ CUDA_IDENTIFIER_MAP = {
 CUDA_SPARSE_MAP = {
     "cusparseStatus_t": ("hipsparseStatus_t", CONV_MATH_FUNC, API_SPARSE),
     "cusparseHandle_t": ("hipsparseHandle_t", CONV_MATH_FUNC, API_SPARSE),
-    "cusparseOperation_t": ("hcsparseOperation_t", CONV_TYPE, API_SPARSE),
+    "cusparseOperation_t": ("hipsparseOperation_t", CONV_TYPE, API_SPARSE),
     "cusparseCreate": ("hipsparseCreate", CONV_MATH_FUNC, API_SPARSE),
     "cusparseDestroy": ("hipsparseDestroy", CONV_MATH_FUNC, API_SPARSE),
     "CUSPARSE_STATUS_SUCCESS": ("HIPSPARSE_STATUS_SUCCESS", CONV_NUMERIC_LITERAL, API_SPARSE),
