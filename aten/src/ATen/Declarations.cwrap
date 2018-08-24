@@ -2567,7 +2567,7 @@
         - THTensor* mat2
 ]]
 [[
-  name: bmm
+  name: _th_bmm
   cname: baddbmm
   variants:
     - method

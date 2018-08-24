@@ -281,6 +281,14 @@
 - func: blackman_window(int64_t window_length, bool periodic, TensorOptions options={}) -> Tensor
   variants: function
 
+- func: bmm(Tensor self, Tensor mat2) -> Tensor
+
+- func: bmm_out(Tensor result, Tensor self, Tensor mat2) -> Tensor
+  variants: function
+
+- func: bmm_mkl(Tensor self, Tensor mat2) -> Tensor
+  variants: function
+
 - func: broadcast_tensors(TensorList tensors) -> TensorList
   variants: function
 

@@ -347,5 +347,19 @@ Tensor& matmul_out(Tensor &result, const Tensor & tensor1, const Tensor & tensor
   return result;
 }
 
+Tensor bmm(const Tensor & self, const Tensor & tensor) {
+  Tensor result = self.type().tensor();
+  return at::native::bmm_out(result, self, tensor);
+}
+
+Tensor& bmm_out(Tensor &result, const Tensor & self, const Tensor & tensor) {
+  if (!self.is_cuda() && at::hasMKL()) {
+    result = at::bmm_mkl(self, tensor);
+    return result;
+  }
+  at::_th_bmm_out(result, self, tensor);
+  return result;
+}
+
 }
 }
