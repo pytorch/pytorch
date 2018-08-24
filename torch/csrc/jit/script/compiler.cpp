@@ -1620,6 +1620,15 @@ private:
     return emitBuiltinCall(loc, *graph, aten::slice, args, {step}, true);
   }
 
+  Value* emitIndex(
+      const SourceRange& loc,
+      Value* input,
+      at::ArrayRef<Value*> indices) {
+    auto* index = graph->insertNode(
+        graph->createList(DynamicType::get(), indices))->output();
+    return emitBuiltinCall(loc, *graph, aten::index, {input, index}, {}, true);
+  }
+
   // Desugars multidim slicing into aten::slice / aten::select calls.
   //
   // XXX: Errors in user code are not elegantly reported.
@@ -1640,6 +1649,16 @@ private:
         << "indexing on a non-tensor type.";
     }
     size_t dim = 0;
+
+    // Accumulate tensor Values here; call aten::index on them later.
+    std::vector<Value*> tensor_indices;
+
+    auto handle_tensor = [&](Value* tensor) {
+      tensor_indices.resize(dim + 1);
+      tensor_indices[dim] = tensor;
+      dim++;
+    };
+
     for (const auto & subscript_expr : subscript.subscript_exprs()) {
       if (subscript_expr.kind() == TK_SLICE_EXPR) {
         sliceable = emitSlice(loc, sliceable, dim, SliceExpr(subscript_expr));
@@ -1651,13 +1670,30 @@ private:
         sliceable = emitSelect(loc, sliceable, dim, index);
         continue;
       } else if (index->type()->isSubtypeOf(DynamicType::get())) {
-        throw std::runtime_error("NYI: advanced indexing");
+        handle_tensor(index);
+        continue;
       }
       throw ErrorReport(loc)
         << "Unsupported operation: attempted to use multidimensional "
-        << "indexing with unsupported index type.";
+        << "indexing with unsupported index type " << index->type()->str()
+        << ". Only ints, slices, and tensors are supported.";
     }
-    return sliceable;
+
+    if (tensor_indices.empty()) {
+      // XXX: Might need to at::alias this when we support mutability
+      return sliceable;
+    }
+
+    // at::index takes in a TensorList where some tensors can be undefined.
+    // Add undefined tensors for NULL tensor_indices so at::index is happy.
+    for (auto& index : tensor_indices) {
+      if (index == nullptr) {
+        index = graph->insertNode(graph->createUndefined())->output();
+      }
+    }
+
+    // Handle tensors by calling aten::index
+    return emitIndex(loc, sliceable, tensor_indices);
   }
 
   // Desugars slice syntactic sugar tensor[begin:end] -> tensor.slice(begin,
@@ -1690,11 +1726,18 @@ private:
       // if it's a list, emit a regular index selection op
       return emitBuiltinCall(
                  loc, *graph, aten::select, {gatherable, idx}, {}, true);
-
     } else {
       JIT_ASSERT(gatherable.value(*graph)->type()->isSubtypeOf(DynamicType::get()));
-      return emitSelect(
-          loc, gatherable.value(*graph), /*dim=*/0, idx.value(*graph));
+      auto * index = idx.value(*graph);
+      const auto index_type = index->type();
+      if (index_type->isSubtypeOf(DynamicType::get())) {
+        return emitIndex(loc, gatherable.value(*graph), {index});
+      } else if (index_type == IntType::get()) {
+        return emitSelect(
+            loc, gatherable.value(*graph), /*dim=*/0, index);
+      }
+      throw ErrorReport(loc)
+        << "Cannot index tensor with value of type " << index_type->str();
     }
   }
 };
