@@ -330,19 +330,26 @@ tests = [
     ('kthvalue', small_3d_unique, lambda t: [3, -1], 'neg_dim'),
     ('lerp', small_3d, lambda t: [small_3d(t), 0.3],'', types, False, "skipIfHalfTensor"),
     ('max', small_3d_unique, lambda t: [],'', types, False, "skipIfHalfTensor"),
-    ('max', small_3d_unique, lambda t: [1], 'dim'),
-    ('max', small_3d_unique, lambda t: [-1], 'neg_dim'),
+    ('max', small_3d_unique, lambda t: [1], 'dim', types, False,
+            "skipIfByteTensor;skipIfCharTensor;skipIfDoubleTensor;skipIfFloatTensor;skipIfHalfTensor;skipIfIntTensor;skipIfLongTensor;skipIfShortTensor"),
+    ('max', small_3d_unique, lambda t: [-1], 'neg_dim', types, False, 
+            "skipIfByteTensor;skipIfCharTensor;skipIfDoubleTensor;skipIfFloatTensor;skipIfHalfTensor;skipIfIntTensor;skipIfLongTensor;skipIfShortTensor"),
     ('max', medium_2d, lambda t: [medium_2d(t)], 'elementwise'),
     ('min', small_3d_unique, lambda t: [],'', types, False, "skipIfHalfTensor"),
-    ('min', small_3d_unique, lambda t: [1], 'dim'),
-    ('min', small_3d_unique, lambda t: [-1], 'neg_dim'),
+    ('min', small_3d_unique, lambda t: [1], 'dim', types, False, 
+            "skipIfByteTensor;skipIfCharTensor;skipIfDoubleTensor;skipIfFloatTensor;skipIfHalfTensor;skipIfIntTensor;skipIfLongTensor;skipIfShortTensor"),
+    ('min', small_3d_unique, lambda t: [-1], 'neg_dim', types, False, 
+            "skipIfByteTensor;skipIfCharTensor;skipIfDoubleTensor;skipIfFloatTensor;skipIfHalfTensor;skipIfIntTensor;skipIfLongTensor;skipIfShortTensor"),
     ('min', medium_2d, lambda t: [medium_2d(t)], 'elementwise'),
     ('mean', small_3d, lambda t: [], '', types, False, "skipIfHalfTensor"),
     ('mean', small_3d, lambda t: [-1], 'neg_dim', types, False, "skipIfDoubleTensor;skipIfFloatTensor;skipIfHalfTensor"),
     ('mean', small_3d, lambda t: [1], 'dim', types, False, "skipIfDoubleTensor;skipIfFloatTensor;skipIfHalfTensor"),
-    ('mode', small_3d, lambda t: [],),
-    ('mode', small_3d, lambda t: [1], 'dim'),
-    ('mode', small_3d, lambda t: [-1], 'neg_dim'),
+    ('mode', small_3d, lambda t: [],'', types, False,
+            "skipIfByteTensor;skipIfCharTensor;skipIfDoubleTensor;skipIfFloatTensor;skipIfHalfTensor;skipIfIntTensor;skipIfLongTensor;skipIfShortTensor"),
+    ('mode', small_3d, lambda t: [1], 'dim', types, False, 
+            "skipIfByteTensor;skipIfCharTensor;skipIfDoubleTensor;skipIfFloatTensor;skipIfHalfTensor;skipIfIntTensor;skipIfLongTensor;skipIfShortTensor"),
+    ('mode', small_3d, lambda t: [-1], 'neg_dim', types, False, 
+            "skipIfByteTensor;skipIfCharTensor;skipIfDoubleTensor;skipIfFloatTensor;skipIfHalfTensor;skipIfIntTensor;skipIfLongTensor;skipIfShortTensor"),
     ('mvlgamma', lambda t: tensor_clamp(small_2d(t), 0.1, 10), lambda t: [1], '2d_p=1', float_types_no_half, False, "skipIfDoubleTensor;skipIfFloatTensor"),
     ('mvlgamma', lambda t: tensor_clamp(small_2d(t), 0.6, 10), lambda t: [2], '2d_p=2', float_types_no_half, False, "skipIfDoubleTensor;skipIfFloatTensor"),
     ('remainder', small_3d, lambda t: [3], 'value', types, False, "skipIfHalfTensor"),
@@ -924,6 +931,7 @@ class TestCuda(TestCase):
     def test_broadcast_gpu(self):
         self._test_broadcast(torch.randn(5, 5).cuda())
 
+    @skipIfRocm
     def test_min_max_nan(self):
         tests = [(lambda x: x.min(), 'min'),
                  (lambda x: x.max(), 'max'),
@@ -1660,6 +1668,7 @@ class TestCuda(TestCase):
     def test_dim_reduction(self):
         TestTorch._test_dim_reduction(self, lambda t: t.cuda())
 
+    @skipIfRocm
     def test_tensor_gather(self):
         TestTorch._test_gather(self, lambda t: t.cuda(), False)
 
@@ -1673,6 +1682,7 @@ class TestCuda(TestCase):
     def test_tensor_scatterFill(self):
         TestTorch._test_scatter_base(self, lambda t: t.cuda(), 'scatter_', True, test_bounds=False)
 
+    @skipIfRocm
     def test_min_max_inits(self):
         # Testing if THC_reduceAll received the correct index initialization.
         # This affects the result of THC_reduceAll operations at extreme values
