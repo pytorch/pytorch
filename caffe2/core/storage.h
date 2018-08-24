@@ -23,7 +23,7 @@ using DataType = TypeMeta;
 class StorageImpl;
 using Storage = std::shared_ptr<StorageImpl>;
 
-class StorageImpl {
+class CAFFE2_API StorageImpl {
  public:
   StorageImpl() = delete;
   StorageImpl(const StorageImpl&) = delete;
