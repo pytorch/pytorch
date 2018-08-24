@@ -194,7 +194,7 @@ void THTensor_(normal)(THTensor *self, THGenerator *_generator, double mean, dou
   std::lock_guard<std::mutex> lock(_generator->mutex);
   const int64_t size = THTensor_(numel)(self);
   if (size >= 16 && THTensor_(isContiguous)(self)) {
-    THVector_(normal_fill)(THStorage_(data)(THTensor_getStoragePtr(self)), size, _generator, mean, stddev);
+    THVector_(normal_fill)(THStorage_(data)(THTensor_getStoragePtr(self)) + self->storage_offset(), size, _generator, mean, stddev);
   } else {
     TH_TENSOR_APPLY(real, self, *self_data = (real)THRandom_normal(_generator, mean, stddev););
   }
