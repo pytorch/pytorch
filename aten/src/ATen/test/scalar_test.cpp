@@ -103,7 +103,7 @@ TEST_CASE( "scalar test", "[]" ) {
   // check Scalar.toTensor on Scalars backed by different data types
   REQUIRE(bar.toTensor().type().scalarType() == kDouble);
   REQUIRE(what.toTensor().type().scalarType() == kLong);
-  REQUIRE(ones({})._local_scalar().toTensor().type().scalarType() == kFloat);
+  REQUIRE(ones({})._local_scalar().toTensor().type().scalarType() == kDouble);
 
   if (x.type().scalarType() != ScalarType::Half) {
     AT_DISPATCH_ALL_TYPES(x.type(), "foo", [&] {
