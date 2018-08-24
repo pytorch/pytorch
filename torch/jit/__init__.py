@@ -76,6 +76,7 @@ def get_trace_graph(f, args):
 
     traced_args = list(args) + module_state
     output = [None]
+
     def traced_f(*all_trace_inputs):
         f_inputs = all_trace_inputs[:len(args)]
         out = output[0] = f(*f_inputs)

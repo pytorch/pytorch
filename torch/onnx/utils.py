@@ -153,11 +153,11 @@ def _trace(func, args, operator_export_type, return_outs=False):
     if isinstance(args, torch.Tensor):
         args = (args, )
 
-    trace, torch_out = torch.jit.get_trace_graph(func, args)
-    trace.set_graph(_optimize_graph(trace.graph(), operator_export_type))
+    graph, torch_out = torch.jit.get_trace_graph(func, args)
+    graph = _optimize_graph(graph, operator_export_type)
     if return_outs:
-        return trace, torch_out
-    return trace
+        return graph, torch_out
+    return graph
 
 
 def _trace_and_get_graph_from_model(model, args, training):
@@ -172,13 +172,13 @@ def _trace_and_get_graph_from_model(model, args, training):
     # can turn training=True (or None, to preserve whatever the original
     # training mode was.)
     with set_training(model, training):
-        trace, torch_out = torch.jit.get_trace_graph(model, args)
+        graph, torch_out = torch.jit.get_trace_graph(model, args)
 
     if orig_state_dict_keys != _unique_state_dict(model).keys():
         raise RuntimeError("state_dict changed after running the tracer; "
                            "something weird is happening in your model!")
 
-    return trace, torch_out
+    return graph, torch_out
 
 
 def _model_to_graph(model, args, f, verbose=False, training=False,
