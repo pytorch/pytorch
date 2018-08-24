@@ -1577,10 +1577,10 @@ private:
       JIT_ASSERT(!input->type()->isSubtypeOf(DynamicType::get()));
     }
 
-    args.emplace_back(loc, "begin", emitExpr(Expr(slice.startOr(0)), identity));
+    args.emplace_back(loc, "begin", emitExpr(Expr(slice.startOr(0))));
     const auto has_end = slice.end().present();
     if (has_end) {
-      args.emplace_back(loc, "end", emitExpr(Expr(slice.end().get()), identity));
+      args.emplace_back(loc, "end", emitExpr(Expr(slice.end().get())));
     }
     NamedValue step = NamedValue(loc, "step", graph->insertConstant(1, loc));
     return emitBuiltinCall(loc, *graph, aten::slice, args, {step}, true);
@@ -1612,7 +1612,7 @@ private:
         ++dim;
         continue;
       }
-      auto index = emitExpr(subscript_expr, identity);
+      auto index = emitExpr(subscript_expr);
       if (index->type() == IntType::get()) {
         sliceable = emitSelect(loc, sliceable, dim, index);
         continue;
@@ -1633,7 +1633,7 @@ private:
     JIT_ASSERT(subscript.subscript_exprs().size() == 1);
     JIT_ASSERT(subscript.subscript_exprs()[0].kind() == TK_SLICE_EXPR);
     auto slice_exp = SliceExpr(subscript.subscript_exprs()[0]);
-    auto * sliceable = emitExpr(subscript.value(), identity);
+    auto * sliceable = emitExpr(subscript.value());
     at::optional<int64_t> maybe_dim;
     if (sliceable->type()->kind() == TypeKind::DynamicType) {
       // If the sliceable object is a tensor, specify a default dimension

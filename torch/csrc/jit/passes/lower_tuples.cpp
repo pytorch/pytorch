@@ -119,12 +119,6 @@ static void EnsureNoTuples(Block* block) {
 }
 
 void LowerAllTuples(std::shared_ptr<Graph>& graph) {
-  // we can't lower all tuples if are tuples in the input or outputs
-  // we need to check because LowerTuples will try to flatten them,
-  // editing the inputs/outputs to the graph in a way that is not desired
-  EnsureNoTuples(graph->inputs());
-  EnsureNoTuples(graph->outputs());
-
   LowerAllTuples(graph->block());
   EliminateDeadCode(graph);
   EnsureNoTuples(graph->block());
