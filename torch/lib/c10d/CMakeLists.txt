@@ -73,6 +73,7 @@ set(C10D_SRCS
   FileStore.cpp
   ProcessGroup.cpp
   Store.cpp
+  PrefixStore.cpp
   TCPStore.cpp
   Utils.cpp
   ProcessGroupGloo.cpp
@@ -118,6 +119,7 @@ target_include_directories(c10d PUBLIC ${GLOO_INCLUDE_DIR})
 
 copy_header(CUDAUtils.hpp)
 copy_header(FileStore.hpp)
+copy_header(PrefixStore.hpp)
 copy_header(ProcessGroup.hpp)
 copy_header(Store.hpp)
 copy_header(TCPStore.hpp)
