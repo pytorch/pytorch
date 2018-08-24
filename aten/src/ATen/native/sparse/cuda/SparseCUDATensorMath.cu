@@ -408,9 +408,9 @@ SparseTensor& add_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t, const
 SparseTensor& mul_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t_, const SparseTensor& src_) {
 #ifndef __HIP_PLATFORM_HCC__
   if (src_.dim() == 0) {
-    return mul_out_sparse_scalar(r_, t_, Scalar(src_));
+    return mul_out_sparse_zerodim(r_, t_, src_);
   } else if (t_.dim() == 0) {
-    return mul_out_sparse_scalar(r_, src_, Scalar(t_));
+    return mul_out_sparse_zerodim(r_, src_, t_);
   }
 
   AT_ASSERT(t_.is_cuda()); // dispatch argument
