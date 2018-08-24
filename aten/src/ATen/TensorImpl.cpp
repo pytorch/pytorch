@@ -91,32 +91,22 @@ IntList TensorImpl::strides() const {
   return strides_;
 }
 
-int64_t TensorImpl::numel() const {
-#ifdef DEBUG
-  int64_t n = 1;
-  for (auto s : sizes()) {
-    n *= s;
-  }
-  AT_ASSERT(n == numel_);
-#endif
-  return numel_;
-}
-
-void TensorImpl::refresh_contiguous() {
-  is_contiguous_ = true;
+bool TensorImpl::compute_contiguous() const {
+  bool is_contiguous = true;
   if (is_empty())
-    return;
+    return is_contiguous;
   int64_t z = 1;
   for (int64_t d = dim() - 1; d >= 0; d--) {
     if (size(d) != 1) {
       if (stride(d) == z) {
         z *= size(d);
       } else {
-        is_contiguous_ = false;
+        is_contiguous = false;
         break;
       }
     }
   }
+  return is_contiguous;
 }
 
 void TensorImpl::release_resources() {

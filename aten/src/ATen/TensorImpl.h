@@ -39,9 +39,17 @@ struct AT_API TensorImpl : public Retainable {
   virtual const Storage& storage();
   friend struct Type;
 
-  virtual int64_t numel() const;
+  virtual int64_t numel() const {
+#ifdef DEBUG
+    AT_ASSERT(compute_numel() == numel_);
+#endif
+    return numel_;
+  }
 
   virtual bool is_contiguous() const {
+#ifdef DEBUG
+    AT_ASSERT(compute_contiguous() == is_contiguous_);
+#endif
     return is_contiguous_;
   }
 
@@ -147,7 +155,7 @@ struct AT_API TensorImpl : public Retainable {
   }
 
   // WARNING: This function does not check if the requested
-  // sizes/strides are in bounds for the storage is allocated;
+  // sizes/strides are in bounds bounds for the storage that is allocated;
   // this is the responsibility of the caller
   void set_sizes_and_strides(at::IntList new_size, at::IntList new_stride) {
     AT_CHECK(
@@ -174,15 +182,22 @@ struct AT_API TensorImpl : public Retainable {
   bool is_contiguous_;
   int64_t numel_;
 
- protected:
-  void refresh_numel() {
+  int64_t compute_numel() const {
     int64_t n = 1;
     for (auto s : sizes()) {
       n *= s;
     }
-    numel_ = n;
+    return n;
   }
-  void refresh_contiguous();
+  bool compute_contiguous() const;
+
+ protected:
+  void refresh_numel() {
+    numel_ = compute_numel();
+  }
+  void refresh_contiguous() {
+    is_contiguous_ = compute_contiguous();
+  }
   TensorTypeId type_id_;
   // INVARIANT: When storage is non-null, this scalar type must
   // agree with the scalar type in storage

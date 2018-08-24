@@ -60,8 +60,25 @@ int64_t Variable::Impl::dim() const {
 int64_t Variable::Impl::size(int64_t d) const {
   return data_.size(d);
 }
+
 int64_t Variable::Impl::stride(int64_t d) const {
   return data_.stride(d);
+}
+
+void Variable::Impl::resize_dim(int64_t ndim) {
+  AT_ERROR("variable impl does not have resize_dim");
+}
+
+void Variable::Impl::set_size(int64_t dim, int64_t new_size) {
+  AT_ERROR("variable impl does not have set_size");
+}
+
+void Variable::Impl::set_stride(int64_t dim, int64_t new_stride) {
+  AT_ERROR("variable impl does not have set_stride");
+}
+
+void Variable::Impl::set_storage_offset(int64_t storage_offset) {
+  AT_ERROR("variable impl does not have set_storage_offset");
 }
 
 const char* Variable::Impl::typeString() {
