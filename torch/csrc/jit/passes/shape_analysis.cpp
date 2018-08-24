@@ -63,7 +63,7 @@ IValue representativeValue(Value* v) {
 
 void PropagateShapeOnBlock(Block * block, bool insert_expands=true);
 
-// for each node in the schema with type Tensor, extract the CompleteTensorType
+// for each node in the schema with type Tensor, extract the T type
 // returns at::nullopt if any Tensor in the schema does not have a known shape
 // ignores non-tensor in the list of inputs
 template<typename T>

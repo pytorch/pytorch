@@ -67,6 +67,14 @@ private:
   size_t nDim_;
 };
 
+inline std::ostream& operator<<(std::ostream & out, const TensorDesc & d) {
+  out << d.scalar_type << "[";
+  for(auto b : d.contiguity)
+    out << b << ";";
+  out << "]";
+  return out;
+}
+
 struct FusedKernelArgSpec {
   FusedKernelArgSpec(at::TensorList inputs)
     : descs_(fmap<TensorDesc>(inputs))
@@ -101,6 +109,15 @@ struct AnnotatedGraph {
   std::vector<TensorDesc> output_desc;
 };
 
+// FusionCompiler has very limited shape information available at the time getOrCompile
+// is called, and this is why it can't really prepare the kernels at that time. Instead,
+// it returns this object, which will take care of matching the run-time shapes to whatever
+// kernels we have compiled already.
+//
+// Two configurations are considered eligible for the same fused kernel if:
+//   - the shapes satisfy graph invariants for our fused code (e.g. that all intermediate shapes
+//     are the same - see fusion_compiler.cpp for more details).
+//   - their FusedKernelArgSpecs compare equal
 struct FusedKernelCache {
   FusedKernelCache(FusionCompiler& compiler, std::shared_ptr<Graph> graph, int device);
 

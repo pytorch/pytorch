@@ -804,7 +804,6 @@ struct GraphFuser {
       auto original_inputs = producer_for_chunk_node->inputs();
       Node * chunked_op = block->owningGraph()->create(producer_for_chunk_node->kind());
       chunked_op->copyAttributes(*producer_for_chunk_node);
-      // Invariant: mappable operators always produce contiguous output
       chunked_op->output()->setType(chunk_sel->type());
       auto chunked_inputs_it = chunked_inputs.begin();
       for (size_t i = 0; i < original_inputs.size(); ++i) {

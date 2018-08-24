@@ -141,14 +141,6 @@ static int ceilDiv(int a, int b) {
 
 #endif
 
-std::ostream& operator<<(std::ostream & out, const TensorDesc & d) {
-  out << d.scalar_type << "[";
-  for(auto b : d.contiguity)
-    out << b << ";";
-  out << "]";
-  return out;
-}
-
 Node* usedInFusedChunk(Value * input) {
   auto uses = input->uses();
   if (uses.size() == 1) {
@@ -1206,7 +1198,7 @@ protected:
 // Proof.   A simple exercise for the reader :)
 //
 // Theorem. If all (pre-concat-)outputs have equal shapes, then we can push the expands to
-//          (pre-chunk-)inputs, and have all intermediates of the same shape
+//          (post-chunk-)inputs, and have all intermediates of the same shape
 //          (no broadcasting happening in the body).
 //
 // Proof.   Using the above lemmas we can easily show that a graph with a single output
@@ -1379,16 +1371,16 @@ void FusedKernelCache::run(Stack& stack) {
 }
 
 at::optional<std::vector<int64_t>> FusedKernelCache::getMapSize(at::TensorList args, at::IntList arg_subset) {
-  // NB: we leave this uninitialized, because an empty size is trivially
-  // broadcastable to any other size.
-  // TODO: this keeps reallocating map_size at every iteration, but we know
-  // exactly how much storage do we need, so this could be fixed in-place at
-  // every step. We're just missing a few functions for ATen, but the fix
-  // should be straightforward.
   int64_t dim_after_broadcast = 0;
   for (int64_t arg_idx : arg_subset) {
     dim_after_broadcast = std::max(dim_after_broadcast, args[arg_idx].dim());
   }
+  // TODO: this keeps reallocating map_size at every iteration, but we know
+  // exactly how much storage do we need, so this could be fixed in-place at
+  // every step. We're just missing a few functions for ATen, but the fix
+  // should be straightforward.
+  // NB: we leave this uninitialized, because an empty size is trivially
+  // broadcastable to any other size.
   std::vector<int64_t> map_size;
   for (size_t i = 0; i < arg_subset.size(); ++i) {
     auto & arg = args.at(arg_subset[i]);
@@ -1402,11 +1394,7 @@ at::optional<std::vector<int64_t>> FusedKernelCache::getMapSize(at::TensorList a
     } else {
       auto tensor_sizes = arg.sizes().vec();
       int64_t num_chunks = chunk_desc.nSubtensors;
-      int64_t dim = chunk_desc.dim;
-      if (dim < 0) {
-        dim += arg.dim();
-      }
-      JIT_ASSERT(dim >= 0 && dim <= static_cast<int64_t>(tensor_sizes.size()));
+      int64_t dim = at::maybe_wrap_dim(chunk_desc.dim, tensor_sizes.size());
       if (tensor_sizes[dim] % num_chunks != 0) {
         return at::nullopt;
       }
@@ -1449,6 +1437,8 @@ void FusedKernelCache::runFallback(Stack& stack) {
   InterpreterState(fallback_code).runOneStage(stack);
 }
 
+// NB: args are mutated in this call. map_size is mutated too, but is restored to its original
+// value before this function returns (it's an optimization).
 void FusedKernelCache::expandArgs(std::vector<at::Tensor>& args, std::vector<int64_t>& map_size) {
   for (size_t i = 0; i < args.size(); ++i) {
     auto & arg = args[i];
@@ -1599,13 +1589,22 @@ FusionCompiler & sharedFusionCompiler() {
 
 namespace torch { namespace jit {
 
-std::shared_ptr<FusedKernelCache> FusionCompiler::getOrCompile(Node* fusion_group) {
-  return nullptr;
-}
-
-void FusionCompiler::debugLaunchGraph(Graph & graph, int device, at::ArrayRef<at::Tensor> inputs, at::ArrayRef<at::Tensor> outputs) {}
+FusedKernelCache(FusionCompiler& compiler, std::shared_ptr<Graph> graph, int device)
+  : compiler(compiler) {};
+void FusedKernelCache::run(Stack& inputs) {}
+void FusedKernelCache::runFallback(Stack& stack) {}
+void FusedKernelCache::expandArgs(std::vector<at::Tensor>& args, std::vector<int64_t>& map_size) {}
+at::optional<std::vector<int64_t>> FusedKernelCache::canRunKernel(at::TensorList args) { return at::nullopt; }
+at::optional<std::vector<int64_t>> FusedKernelCache::getMapSize(at::TensorList args, at::IntList arg_subset) { return at::nullopt; }
+std::vector<std::vector<int64_t>> FusedKernelCache::getInputBroadcastGroups() { return {}; }
+std::vector<PartitionInfo> FusedKernelCache::getInputChunkDescriptors() { return {}; }
+std::unique_ptr<FusedKernel> FusedKernelCache::compileSpec(
+      const FusedKernelArgSpec& spec, const std::vector<int64_t>& map_size) { return nullptr; }
+std::atomic<size_t> FusedKernelCache::next_kernel_id {0};
 
 FusionCompiler::FusionCompiler() {}
+std::shared_ptr<FusedKernelCache> FusionCompiler::getOrCompile(Node* fusion_group) { return nullptr; }
+std::vector<at::Tensor> FusionCompiler::debugLaunchGraph(Graph & graph, int device, at::ArrayRef<at::Tensor> inputs) {}
 
 FusionCompiler & sharedFusionCompiler() {
   throw std::runtime_error("NYI: fuser is not supported on Windows.");
