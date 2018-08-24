@@ -28,6 +28,9 @@ fi
 if [[ -x ./stream_test ]]; then
   ./stream_test
 fi
+if [[ -x ./cuda_half_test ]]; then
+  ./cuda_half_test
+fi
 if [ "$VALGRIND" == "ON" ]
 then
   valgrind --suppressions="$VALGRIND_SUP" --error-exitcode=1 ./basic "[cpu]"
