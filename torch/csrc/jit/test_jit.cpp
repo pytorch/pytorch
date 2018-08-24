@@ -715,7 +715,7 @@ bool isEqual(at::IntList lhs, at::IntList rhs) {
   return lhs.size() == rhs.size() && std::equal(lhs.begin(), lhs.end(), rhs.begin());
 }
 
-bool isEqual(const ArgumentInfo & ti, const autograd::Variable & v) {
+bool isEqual(const CompleteArgumentInfo & ti, const autograd::Variable & v) {
   REQUIRE(ti.isTensor());
   if(!ti.defined())
     return ti.defined() == v.defined();
@@ -750,35 +750,35 @@ void argumentSpecTest() {
   list2[1].toTensor().transpose_(0, 1);
 
 
-  ArgumentSpec a(true, list);
-  ArgumentSpec b(true, list);
+  CompleteArgumentSpec a(true, list);
+  CompleteArgumentSpec b(true, list);
   REQUIRE(a.hashCode() == b.hashCode());
 
   REQUIRE(a == b);
-  ArgumentSpec d(true, list2);
+  CompleteArgumentSpec d(true, list2);
   REQUIRE(d == a);
   REQUIRE(d.hashCode() == a.hashCode());
 
   for(size_t i = 0; i < list.size(); ++i) {
     REQUIRE(isEqual(a.at(i), list[i].toTensor()));
   }
-  ArgumentSpec no_grad(/*with_grad=*/false, list);
+  CompleteArgumentSpec no_grad(/*with_grad=*/false, list);
   REQUIRE(no_grad != a);
 
-  std::unordered_set<ArgumentSpec> spec;
+  std::unordered_set<CompleteArgumentSpec> spec;
   spec.insert(std::move(a));
   REQUIRE(spec.count(b) > 0);
   REQUIRE(spec.count(no_grad) == 0);
   spec.insert(std::move(no_grad));
-  REQUIRE(spec.count(ArgumentSpec(true,list)) == 1);
+  REQUIRE(spec.count(CompleteArgumentSpec(true,list)) == 1);
 
   list2[1].toTensor().transpose_(0,1);
-  ArgumentSpec c(true, list2); // same as list, except for one stride
+  CompleteArgumentSpec c(true, list2); // same as list, except for one stride
   REQUIRE(!(c == a));
   REQUIRE(spec.count(c) == 0);
 
   Stack stack = { var(CF, {1,2}, true), 3, var(CF, {1,2}, true) };
-  ArgumentSpec with_const(true, stack);
+  CompleteArgumentSpec with_const(true, stack);
   REQUIRE(with_const.at(2).sizes().size() == 2);
 }
 
@@ -798,7 +798,7 @@ void shapeAnalysisTest() {
   auto w_hh  = t_def(at::randn({4 * hidden_size, hidden_size}, at::kCUDA));
 
   auto g = build_lstm();
-  ArgumentSpec spec(false, createStack({v(input), v(hx), v(cx), v(w_ih), v(w_hh) }));
+  CompleteArgumentSpec spec(false, createStack({v(input), v(hx), v(cx), v(w_ih), v(w_hh) }));
   PropagateInputShapes(*g, spec);
   at::Tensor r0, r1;
   std::tie(r0, r1) = lstm(input, hx, cx, w_ih, w_hh);

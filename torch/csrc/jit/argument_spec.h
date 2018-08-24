@@ -104,21 +104,21 @@ private:
   std::vector<CoarseArgumentInfo> args;
 };
 
-// ArgumentSpec represents one particular specialization.
+// CompleteArgumentSpec represents one particular specialization.
 // It is designed so that it can be created, hashed, and compared quickly
 // since it is used along the hot-path of the JIT to check if the code
 // we have created is valid for the given inputs.
 
-// ArgumentInfoPOD is only used internally in ArgumentSpec
+// COmpleteArgumentInfoPOD is only used internally in CompleteArgumentSpec
 // API users should use ArgumentInfo
-struct ArgumentInfoPOD {
+struct CompleteArgumentInfoPOD {
   // total size is 64-bit
   unsigned is_tensor : 8; // all other fields are invalid if this is false
   unsigned type : 8; // scalar type
   unsigned defined : 1;
   unsigned requires_grad : 1;
   signed device : 14;
-  uint32_t total_dims; // all TensorInfoPODs are in ArgumentSpec's tensor_info() array.
+  uint32_t total_dims; // all TensorInfoPODs are in CompleteArgumentSpec's tensor_info() array.
                        // total_dims is the total number of dimensions seen so far
                        // in all previous members of tensor_info(), including this tensor
                        // 2*total_dims becomes the offset into the sizes_strides list
@@ -126,13 +126,13 @@ struct ArgumentInfoPOD {
                        // for tensor 0, the offset is always 0
 };
 
-static_assert(sizeof(ArgumentInfoPOD) == sizeof(int64_t),
-  "ArgumentInfoPOD must be 64-bit struct for ArgumentSpec encoding to work");
+static_assert(sizeof(CompleteArgumentInfoPOD) == sizeof(int64_t),
+  "CompleteArgumentInfoPOD must be 64-bit struct for CompleteArgumentSpec encoding to work");
 
-struct ArgumentInfo;
+struct CompleteArgumentInfo;
 
-struct ArgumentSpec {
-  ArgumentSpec(bool with_grad, at::ArrayRef<IValue> inputs)
+struct CompleteArgumentSpec {
+  CompleteArgumentSpec(bool with_grad, at::ArrayRef<IValue> inputs)
   :  hash_code(0), ninputs(inputs.size()) {
     int32_t all_dims = 0;
     const int32_t num_inputs = inputs.size();
@@ -145,7 +145,7 @@ struct ArgumentSpec {
     data.resize(ninputs + all_dims*2);
 
     // and reinterpret our data array as these structs
-    ArgumentInfoPOD * pods = reinterpret_cast<ArgumentInfoPOD*>(data.data());
+    CompleteArgumentInfoPOD * pods = reinterpret_cast<CompleteArgumentInfoPOD*>(data.data());
     int64_t * next_dim = sizes_strides();
     int32_t total_dims = 0;
     for(int32_t i = 0; i < num_inputs; i++) {
@@ -180,14 +180,14 @@ struct ArgumentSpec {
 
   // equality is fast: check ninputs, and then check the raw array data,
   // there are no size/stride indirections
-  bool operator==(const ArgumentSpec & spec) const {
+  bool operator==(const CompleteArgumentSpec & spec) const {
     return ninputs == spec.ninputs && data == spec.data;
   }
-  bool operator!=(const ArgumentSpec & spec) const {
+  bool operator!=(const CompleteArgumentSpec & spec) const {
     return !(*this == spec);
   }
-  friend struct ArgumentInfo;
-  ArgumentInfo at(size_t i) const;
+  friend struct CompleteArgumentInfo;
+  CompleteArgumentInfo at(size_t i) const;
   size_t size() const {
     return ninputs;
   }
@@ -196,10 +196,11 @@ struct ArgumentSpec {
   }
 
 private:
-  ArrayRef<ArgumentInfoPOD> tensor_info() const {
-    return ArrayRef<ArgumentInfoPOD>(reinterpret_cast<const ArgumentInfoPOD*>(data.data()), ninputs);
+  ArrayRef<CompleteArgumentInfoPOD> tensor_info() const {
+    return ArrayRef<CompleteArgumentInfoPOD>(
+            reinterpret_cast<const CompleteArgumentInfoPOD*>(data.data()), ninputs);
   }
-  // the start of the sizes_strides information, which comes after the ArgumentInfoPOD list.
+  // the start of the sizes_strides information, which comes after the CompleteArgumentInfoPOD list.
   const int64_t* sizes_strides() const {
     return data.data() + ninputs;
   }
@@ -213,9 +214,9 @@ private:
   std::vector<int64_t> data;
 };
 
-// public view of compressed ArgumentInfo
-struct ArgumentInfo {
-  ArgumentInfo(const ArgumentSpec & spec, const int i)
+// public view of compressed CompleteArgumentInfo
+struct CompleteArgumentInfo {
+  CompleteArgumentInfo(const CompleteArgumentSpec & spec, const int i)
   : spec(spec), i(i) {}
   bool isTensor() const {
     return pod(i).is_tensor;
@@ -256,14 +257,14 @@ private:
     if(j == 0) return 0;
     return 2*pod(j - 1).total_dims;
   }
-  const ArgumentInfoPOD & pod(int j) const {
+  const CompleteArgumentInfoPOD & pod(int j) const {
     return spec.tensor_info().at(j);
   }
-  const ArgumentSpec & spec;
+  const CompleteArgumentSpec & spec;
   const int i;
 };
 
-inline std::ostream & operator<<(std::ostream & out, const ArgumentInfo & info) {
+inline std::ostream & operator<<(std::ostream & out, const CompleteArgumentInfo & info) {
   if(!info.defined()) {
     return out << "<undefined>";
   }
@@ -275,7 +276,7 @@ inline std::ostream & operator<<(std::ostream & out, const ArgumentInfo & info) 
   return out;
 }
 
-inline std::ostream& operator<<(std::ostream & out, const ArgumentSpec & spec) {
+inline std::ostream& operator<<(std::ostream & out, const CompleteArgumentSpec & spec) {
   out << "{";
   for(size_t i = 0; i < spec.size(); ++i) {
     if (i > 0)
@@ -286,8 +287,8 @@ inline std::ostream& operator<<(std::ostream & out, const ArgumentSpec & spec) {
   return out;
 }
 
-inline ArgumentInfo ArgumentSpec::at(size_t i) const {
-  return ArgumentInfo(*this, i);
+inline CompleteArgumentInfo CompleteArgumentSpec::at(size_t i) const {
+  return CompleteArgumentInfo(*this, i);
 }
 
 }}
@@ -300,8 +301,8 @@ namespace std {
     }
   };
   template<>
-  struct hash<torch::jit::ArgumentSpec> {
-    size_t operator()(const torch::jit::ArgumentSpec & spec) const {
+  struct hash<torch::jit::CompleteArgumentSpec> {
+    size_t operator()(const torch::jit::CompleteArgumentSpec & spec) const {
       return spec.hashCode();
     }
   };

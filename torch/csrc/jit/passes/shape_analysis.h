@@ -5,11 +5,11 @@
 namespace torch { namespace jit {
 
 struct Graph;
-struct ArgumentSpec;
+struct CompleteArgumentSpec;
 struct CoarseArgumentSpec;
 
 void EraseShapeInformation(Graph & graph);
-TORCH_API void PropagateInputShapes(Graph & graph, const ArgumentSpec & spec);
+TORCH_API void PropagateInputShapes(Graph & graph, const CompleteArgumentSpec & spec);
 TORCH_API void PropagateInputShapes(Graph & graph, const CoarseArgumentSpec & spec);
 
 }}
