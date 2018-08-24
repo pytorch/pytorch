@@ -93,7 +93,11 @@ void fuseBroadcast(Block *b) {
 
     JIT_ASSERT(!n->hasAttribute(attr::axis));
 
-    for (size_t input_index = n->inputs().size() - 2; input_index < n->inputs().size(); ++input_index) {
+    size_t index_begin = n->inputs().size() - 2;
+    if (n->kind() == onnx::Gemm) {
+      index_begin = n->inputs().size() - 1;
+    }
+    for (size_t input_index = index_begin; input_index < n->inputs().size(); ++input_index) {
       auto* rhs_expand = n->input(input_index)->node();
 
       // The rhs_expand input isn't actually an expand, so no fusion available
