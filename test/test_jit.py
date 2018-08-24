@@ -241,7 +241,7 @@ class JitTestCase(TestCase):
 
     def checkTrace(self, func, reference_tensors, input_tensors=None,
                    optimize=True, drop=None, allow_unused=False,
-                   verbose=False, inputs_require_grads=True):
+                   verbose=False, inputs_require_grads=True, check_tolerance=1e-7):
         # TODO: check gradients for parameters, not just inputs
         def allSum(vs):
             # drop allows us to remove some values from ever being used
@@ -263,7 +263,7 @@ class JitTestCase(TestCase):
         if isinstance(func, torch._C.Graph):
             ge = torch._C.GraphExecutor(func, optimize)
         else:
-            ge = torch.jit.trace(*input_tensors, optimize=optimize)(func)
+            ge = torch.jit.trace(*input_tensors, optimize=optimize, check_tolerance=check_tolerance)(func)
 
         if verbose:
             print(ge.graph)
@@ -482,7 +482,7 @@ class TestJit(JitTestCase):
             torch.randn(4, dtype=torch.float, device='cuda'),
             torch.randn(4, dtype=torch.float, device='cuda'),
         ]
-        ge = self.checkTrace(scaleshift, inputs)
+        ge = self.checkTrace(scaleshift, inputs, check_tolerance=1e-5)
         self.assertExpectedGraph(ge.graph_for(*inputs))
 
     # TODO: Fuser doesn't work at all when inputs require grad. Fix that
@@ -491,7 +491,7 @@ class TestJit(JitTestCase):
     @skipIfRocm
     def test_lstm_fusion_cuda(self):
         inputs = get_lstm_inputs('cuda')
-        ge = self.checkTrace(LSTMCellF, inputs)
+        ge = self.checkTrace(LSTMCellF, inputs, check_tolerance=1e-5)
         self.assertExpectedGraph(ge.graph_for(*inputs))
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
@@ -515,7 +515,7 @@ class TestJit(JitTestCase):
     @skipIfRocm
     def test_lstm_fusion_concat(self):
         inputs = get_lstm_inputs('cuda')
-        ge = self.checkTrace(LSTMCellC, inputs)
+        ge = self.checkTrace(LSTMCellC, inputs, check_tolerance=1e-5)
         self.assertExpectedGraph(ge.graph_for(*inputs))
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
