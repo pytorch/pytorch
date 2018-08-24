@@ -1381,10 +1381,13 @@ class TestJit(JitTestCase):
                 b = 1
             while False:
                 b = 2
+            while False:
+                b = 2
             return b
 
         self.run_pass('constant_propagation', constant_prop.graph)
-        self.assertExpected(canonical(constant_prop.graph))
+        # both while false loops removed, while true remains
+        self.assertEqual(str(constant_prop.graph).count("prim::Loop"), 1)
 
 
 class TestBatched(TestCase):
