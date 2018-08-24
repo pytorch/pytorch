@@ -27,10 +27,13 @@ cmake_args+=("-DCMAKE_PREFIX_PATH=$PREFIX")
 mkdir -p build
 cd build
 cmake "${cmake_args[@]}" $CAFFE2_CMAKE_ARGS ..
-if [ "$(uname)" == 'Darwin' ]; then
-  make "-j$(sysctl -n hw.ncpu)"
-else
-  make "-j$(nproc)"
+if [ -z "$MAX_JOBS" ]; then
+  if [ "$(uname)" == 'Darwin' ]; then
+    MAX_JOBS=$(sysctl -n hw.ncpu)
+  else
+    MAX_JOBS=$(nproc)
+  fi
 fi
+make "-j${MAX_JOBS}"
 
 make install/fast
