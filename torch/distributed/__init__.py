@@ -166,7 +166,7 @@ def get_rank():
 
     Rank is a unique identifier assigned to each process within a distributed
     group. They are always consecutive integers ranging from ``0`` to
-    ``world_size - 1``.
+    ``world_size - 1`` (inclusive).
     """
     assert torch.distributed._initialized
     return torch._C._dist_get_rank()

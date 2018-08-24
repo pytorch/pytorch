@@ -256,8 +256,8 @@ def set_device(device):
     cases it's better to use ``CUDA_VISIBLE_DEVICES`` environmental variable.
 
     Arguments:
-        device (int): selected device. This function is a no-op if this
-            argument is negative.
+        device (torch.device or int): selected device. This function is a no-op
+            if this argument is negative.
     """
     device = _get_device_index(device)
     if device >= 0:
