@@ -12,8 +12,8 @@ namespace torch { namespace jit {
 // GraphExecutor creates specializations of Graphs for different dimensionalitities
 // and types of inputs.
 
-struct CoarseArgumentInfo {
-  friend struct CoarseArgumentSpec;
+struct ArgumentInfo {
+  friend struct ArgumentSpec;
 
   bool isTensor() const {
     return is_tensor_;
@@ -48,13 +48,13 @@ private:
   unsigned type_ : 8;
 };
 
-static_assert(std::is_pod<CoarseArgumentInfo>::value,
-  "CoarseArgumentInfo is to be a POD struct");
-static_assert(sizeof(CoarseArgumentInfo) == sizeof(int32_t),
-  "CoarseArgumentInfo is expected to be a 32-bit struct");
+static_assert(std::is_pod<ArgumentInfo>::value,
+  "ArgumentInfo is to be a POD struct");
+static_assert(sizeof(ArgumentInfo) == sizeof(int32_t),
+  "ArgumentInfo is expected to be a 32-bit struct");
 
-struct CoarseArgumentSpec {
-  CoarseArgumentSpec(bool with_grad, at::ArrayRef<IValue> inputs) {
+struct ArgumentSpec {
+  ArgumentSpec(bool with_grad, at::ArrayRef<IValue> inputs) {
     args.resize(inputs.size());
     int32_t num_inputs = inputs.size();
     for (int32_t i = 0; i < num_inputs; ++i) {
@@ -82,14 +82,14 @@ struct CoarseArgumentSpec {
 
   // equality is fast: check ninputs, and then check the raw array data,
   // there are no size/stride indirections
-  bool operator==(const CoarseArgumentSpec & spec) const {
+  bool operator==(const ArgumentSpec & spec) const {
     if (args.size() != spec.args.size()) return false;
-    return std::memcmp(args.data(), spec.args.data(), args.size() * sizeof(CoarseArgumentInfo)) == 0;
+    return std::memcmp(args.data(), spec.args.data(), args.size() * sizeof(ArgumentInfo)) == 0;
   }
-  bool operator!=(const CoarseArgumentSpec & spec) const {
+  bool operator!=(const ArgumentSpec & spec) const {
     return !(*this == spec);
   }
-  const CoarseArgumentInfo& at(size_t i) const {
+  const ArgumentInfo& at(size_t i) const {
     return args[i];
   }
   size_t size() const {
@@ -101,7 +101,7 @@ struct CoarseArgumentSpec {
 
 private:
   size_t hash_code; // precomputed on construction
-  std::vector<CoarseArgumentInfo> args;
+  std::vector<ArgumentInfo> args;
 };
 
 // CompleteArgumentSpec represents one particular specialization.
@@ -295,8 +295,8 @@ inline CompleteArgumentInfo CompleteArgumentSpec::at(size_t i) const {
 
 namespace std {
   template<>
-  struct hash<torch::jit::CoarseArgumentSpec> {
-    size_t operator()(const torch::jit::CoarseArgumentSpec & spec) const {
+  struct hash<torch::jit::ArgumentSpec> {
+    size_t operator()(const torch::jit::ArgumentSpec & spec) const {
       return spec.hashCode();
     }
   };

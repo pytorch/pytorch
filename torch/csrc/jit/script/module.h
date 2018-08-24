@@ -111,7 +111,7 @@ struct Method {
     for (at::Tensor* inp : member_inputs) {
       stack.push_back(*inp);
     }
-    PropagateInputShapes(*retval, CoarseArgumentSpec(with_grad, std::move(stack)));
+    PropagateInputShapes(*retval, ArgumentSpec(with_grad, std::move(stack)));
     return retval;
   }
 
@@ -121,7 +121,7 @@ struct Method {
       inputs.push_back(*inp);
     }
     if (propagate) {
-      PropagateInputShapes(*retval, CoarseArgumentSpec(with_grad, fmap<IValue>(inputs)));
+      PropagateInputShapes(*retval, ArgumentSpec(with_grad, fmap<IValue>(inputs)));
     }
     JIT_ASSERT(retval->inputs().size() == inputs.size());
     for (size_t i=0; i < retval->inputs().size(); ++i) {

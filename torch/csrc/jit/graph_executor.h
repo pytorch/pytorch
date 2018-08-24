@@ -25,7 +25,7 @@ struct ExecutionPlanState {
 
 struct GraphExecutorState {
   Graph* graph;
-  std::unordered_map<CoarseArgumentSpec, ExecutionPlanState> execution_plans;
+  std::unordered_map<ArgumentSpec, ExecutionPlanState> execution_plans;
 
   // Those two fields are optional
   Code* autograd_fallback;
@@ -57,7 +57,7 @@ TORCH_API void runRequiredPasses(const std::shared_ptr<Graph>& g);
 // this prepares the graph for execution, including running runRequiredPasses,
 // but the execution only remains valid for tensors whose properties match spec
 // otherwise running the graph will have undefined results.
-TORCH_API void specializeToSpec(const std::shared_ptr<Graph>& graph, const CoarseArgumentSpec& spec);
+TORCH_API void specializeToSpec(const std::shared_ptr<Graph>& graph, const ArgumentSpec& spec);
 
 // apply standard optimizations. if graphMustSupportVariables=false then
 // then the passes are allowed to modify the graph in ways that make it no longer

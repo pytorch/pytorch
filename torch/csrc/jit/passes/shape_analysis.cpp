@@ -673,7 +673,7 @@ void PropagateInputShapes(Graph & graph, const CompleteArgumentSpec & spec) {
   PropagateShapeOnBlock(graph.block());
 }
 
-void PropagateInputShapes(Graph & graph, const CoarseArgumentSpec & spec) {
+void PropagateInputShapes(Graph & graph, const ArgumentSpec & spec) {
   JIT_ASSERT(graph.inputs().size() == spec.size());
   for(size_t i = 0; i < spec.size(); ++i) {
     const auto & argspec = spec.at(i);

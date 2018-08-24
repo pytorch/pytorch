@@ -81,7 +81,7 @@ void initJITBindings(PyObject *module) {
    })
    .def("_jit_pass_lint", LintGraph)
    .def("_jit_pass_shape_analysis", [](Graph& graph, py::tuple inputs, bool with_grad) {
-     PropagateInputShapes(graph, CoarseArgumentSpec(with_grad, evilDeprecatedBadCreateStackDoNotUse(inputs, graph.inputs())));
+     PropagateInputShapes(graph, ArgumentSpec(with_grad, evilDeprecatedBadCreateStackDoNotUse(inputs, graph.inputs())));
    })
    .def("_jit_pass_complete_shape_analysis", [](Graph& graph, py::tuple inputs, bool with_grad) {
      PropagateInputShapes(graph, CompleteArgumentSpec(with_grad, evilDeprecatedBadCreateStackDoNotUse(inputs, graph.inputs())));
@@ -124,7 +124,7 @@ void initJITBindings(PyObject *module) {
         s << self;
         return s.str();
       });
-  py::class_<CoarseArgumentSpec>(m, "CoarseArgumentSpec");
+  py::class_<ArgumentSpec>(m, "ArgumentSpec");
   py::class_<Code>(m, "Code")
       .def("executors", [](Code& c) {
         return py::make_iterator(c.executors().begin(), c.executors().end());
