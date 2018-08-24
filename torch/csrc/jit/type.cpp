@@ -96,7 +96,7 @@ ListTypePtr ListType::ofFloats() {
 
 TypePtr inferTypeFrom(const IValue& value) {
   if (value.isTensor()) {
-    return TensorType::create(value.toTensor());
+    return CompleteTensorType::create(value.toTensor());
   } else if (value.isDouble()) {
     return FloatType::get();
   } else if (value.isInt()) {

@@ -3949,9 +3949,8 @@ def func(t):
             return torch.cat(c)
 
         b = torch.zeros(2, 4)
-        # unrelated bug
-        with self.assertRaisesRegex(RuntimeError, ".*"):
-            test_list.graph.propagate_shapes((b,), False)
+        test_list.graph.propagate_shapes((b,), False)
+        self.assertExpected(canonical(test_list.graph))
 
     def test_if_supertype(self):
         @torch.jit.script
