@@ -42,12 +42,10 @@ WINDOWS_BLACKLIST = [
 ROCM_BLACKLIST = [
     'c10d',
     'cpp_extensions',
-    'cuda',
     'distributed',
     'distributions',
     'multiprocessing',
     'nccl',
-    'nn',
     'utils',
 ]
 
