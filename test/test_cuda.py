@@ -902,7 +902,6 @@ class TestCuda(TestCase):
     def test_broadcast_gpu(self):
         self._test_broadcast(torch.randn(5, 5).cuda())
 
-    @skipIfRocm
     def test_min_max_nan(self):
         tests = [(lambda x: x.min(), 'min'),
                  (lambda x: x.max(), 'max'),
@@ -1607,7 +1606,6 @@ class TestCuda(TestCase):
     def test_dim_reduction(self):
         TestTorch._test_dim_reduction(self, lambda t: t.cuda())
 
-    @skipIfRocm
     def test_tensor_gather(self):
         TestTorch._test_gather(self, lambda t: t.cuda(), False)
 
@@ -1620,7 +1618,6 @@ class TestCuda(TestCase):
     def test_tensor_scatterFill(self):
         TestTorch._test_scatter_base(self, lambda t: t.cuda(), 'scatter_', True, test_bounds=False)
 
-    @skipIfRocm
     def test_min_max_inits(self):
         # Testing if THC_reduceAll received the correct index initialization.
         # This affects the result of THC_reduceAll operations at extreme values
