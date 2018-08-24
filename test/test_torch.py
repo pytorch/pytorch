@@ -8528,8 +8528,14 @@ class TestTorch(TestCase):
         a = torch.tensor(1)
         b = torch.tensor([1, 2, 3])
         c = torch.tensor([1, 2])
-        prod = torch.cartesian_prod([a, b, c])
+        prod = torch.cartesian_prod(a, b, c)
         expected = torch.tensor(list(product([a], b, c)))
+        self.assertEqual(expected, prod)
+
+        # test 0 size input
+        d = torch.empty(0, dtype=b.dtype)
+        prod = torch.cartesian_prod(a, b, c, d)
+        expected = torch.empty(0, 4, dtype=b.dtype)
         self.assertEqual(expected, prod)
 
     def test_combinations(self):
@@ -8545,6 +8551,22 @@ class TestTorch(TestCase):
         c = torch.combinations(a, r=3)
         expected = torch.tensor(list(combinations(a, r=3)))
         self.assertEqual(c, expected)
+
+        c = torch.combinations(a, r=4)
+        expected = torch.empty(0, 4, dtype=a.dtype)
+        self.assertEqual(c, expected)
+
+        c = torch.combinations(a, r=5)
+        expected = torch.empty(0, 5, dtype=a.dtype)
+        self.assertEqual(c, expected)
+
+        # test empty imput
+        a = torch.empty(0)
+        c1 = torch.combinations(a)
+        c2 = torch.combinations(a, with_replacement=True)
+        expected = torch.empty(0, 2, dtype=a.dtype)
+        self.assertEqual(c1, expected)
+        self.assertEqual(c2, expected)
 
 
 # Functions to test negative dimension wrapping

@@ -31,7 +31,7 @@ Tensor _triu_mask(int64_t n, int64_t dims, bool diagonal, const TensorOptions &o
 namespace at {
 namespace native{
 
-Tensor cartesian_prod(TensorList tensors) {
+Tensor _cartesian_prod(TensorList tensors) {
   std::vector<Tensor> grids = at::meshgrid(tensors);
   for(Tensor &t : grids) {
     t = t.flatten();
