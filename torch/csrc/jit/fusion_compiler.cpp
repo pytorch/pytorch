@@ -1589,22 +1589,26 @@ FusionCompiler & sharedFusionCompiler() {
 
 namespace torch { namespace jit {
 
-FusedKernelCache(FusionCompiler& compiler, std::shared_ptr<Graph> graph, int device)
-  : compiler(compiler) {};
+struct FusedKernel {
+  char padding;
+};
+
+FusedKernelCache::FusedKernelCache(FusionCompiler& compiler, std::shared_ptr<Graph> graph, int device)
+  : compiler(compiler) {}
 void FusedKernelCache::run(Stack& inputs) {}
 void FusedKernelCache::runFallback(Stack& stack) {}
 void FusedKernelCache::expandArgs(std::vector<at::Tensor>& args, std::vector<int64_t>& map_size) {}
 at::optional<std::vector<int64_t>> FusedKernelCache::canRunKernel(at::TensorList args) { return at::nullopt; }
 at::optional<std::vector<int64_t>> FusedKernelCache::getMapSize(at::TensorList args, at::IntList arg_subset) { return at::nullopt; }
 std::vector<std::vector<int64_t>> FusedKernelCache::getInputBroadcastGroups() { return {}; }
-std::vector<PartitionInfo> FusedKernelCache::getInputChunkDescriptors() { return {}; }
+auto FusedKernelCache::getInputChunkDescriptors() -> std::vector<PartitionInfo> { return {}; }
 std::unique_ptr<FusedKernel> FusedKernelCache::compileSpec(
       const FusedKernelArgSpec& spec, const std::vector<int64_t>& map_size) { return nullptr; }
 std::atomic<size_t> FusedKernelCache::next_kernel_id {0};
 
 FusionCompiler::FusionCompiler() {}
 std::shared_ptr<FusedKernelCache> FusionCompiler::getOrCompile(Node* fusion_group) { return nullptr; }
-std::vector<at::Tensor> FusionCompiler::debugLaunchGraph(Graph & graph, int device, at::ArrayRef<at::Tensor> inputs) {}
+std::vector<at::Tensor> FusionCompiler::debugLaunchGraph(Graph & graph, int device, at::ArrayRef<at::Tensor> inputs) { return {}; }
 
 FusionCompiler & sharedFusionCompiler() {
   throw std::runtime_error("NYI: fuser is not supported on Windows.");
