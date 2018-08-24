@@ -9,7 +9,7 @@ namespace {
 using namespace at;
 
 template<typename scalar_t>
-void kl_div_loss_backward_kernel(const Tensor& grad_input, const Tensor& target, const Tensor& grad) {
+void kl_div_backward_kernel(const Tensor& grad_input, const Tensor& target, const Tensor& grad) {
   at::cuda::CUDA_tensor_apply3<scalar_t, scalar_t, scalar_t>(
       grad_input,
       target,
@@ -25,11 +25,11 @@ void kl_div_loss_backward_kernel(const Tensor& grad_input, const Tensor& target,
 
 namespace at { namespace native {
 
-Tensor kl_div_loss_backward_cuda(const Tensor& grad, const Tensor& input, const Tensor& target, int64_t reduction) {
+Tensor kl_div_backward_cuda(const Tensor& grad, const Tensor& input, const Tensor& target, int64_t reduction) {
   Tensor grad_input = grad.type().zeros_like(input);
   Tensor grad_expand = grad.expand_as(input);
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "kl_div_loss_backward", [&]() {
-    kl_div_loss_backward_kernel<scalar_t>(grad_input, target, grad_expand);
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "kl_div_backward", [&]() {
+    kl_div_backward_kernel<scalar_t>(grad_input, target, grad_expand);
   });
   if (reduction == Reduction::ElementwiseMean) {
     return grad_input / input.numel();

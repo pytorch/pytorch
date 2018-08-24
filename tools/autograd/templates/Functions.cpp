@@ -715,7 +715,7 @@ Tensor glu_double_backward_grad_output(const Tensor & grad, const Tensor & input
 }
 
 Tensor kl_div_double_backward_grad_output(const Tensor & grad, const Tensor & input, const Tensor & target, int64_t reduction) {
-  auto result = kl_div_loss_backward(grad, input, target, Reduction::None);
+  auto result = kl_div_backward(grad, input, target, Reduction::None);
   if (reduction == Reduction::ElementwiseMean) {
     return result.mean();
   } else if (reduction == Reduction::Sum) {

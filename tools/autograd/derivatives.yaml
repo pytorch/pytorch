@@ -783,8 +783,8 @@
 - name: embedding_renorm_(Tensor self, Tensor indices, double max_norm, double norm_type)
   self: not_implemented("embedding_renorm")
 
-- name: kl_div_loss(Tensor self, Tensor target, int64_t reduction)
-  self: kl_div_loss_backward(grad, self, target, reduction)
+- name: kl_div(Tensor self, Tensor target, int64_t reduction)
+  self: kl_div_backward(grad, self, target, reduction)
   target: kl_div_target_backward(grad, self, target, reduction)
 
 - name: l1_loss_forward(Tensor self, Tensor target, int64_t reduction)
@@ -1028,7 +1028,7 @@
   grad_output: hardtanh_backward(grad, self, min_val, max_val)
   self: zeros_like(grad)
 
-- name: kl_div_loss_backward(Tensor grad_output, Tensor self, Tensor target, int64_t reduction)
+- name: kl_div_backward(Tensor grad_output, Tensor self, Tensor target, int64_t reduction)
   grad_output: kl_div_double_backward_grad_output(grad, self, target, reduction)
   self: zeros_like(grad)
   target: zeros_like(grad)
