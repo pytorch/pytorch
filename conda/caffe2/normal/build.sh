@@ -34,6 +34,8 @@ if [ -z "$MAX_JOBS" ]; then
     MAX_JOBS=$(nproc)
   fi
 fi
+# Building with too many cores could cause OOM
+MAX_JOBS=$(( ${MAX_JOBS} > 8 ? 8 : ${MAX_JOBS} ))
 make "-j${MAX_JOBS}"
 
 make install/fast
