@@ -13,9 +13,7 @@
 namespace at {
 
 Tensor Scalar::toTensor() const {
-  if (Tag::HAS_t == tag) {
-    return Tensor(t);
-  } else if (Tag::HAS_d == tag) {
+  if (Tag::HAS_d == tag) {
     return CPU(kDouble).scalarTensor(*this);
   } else {
     assert(Tag::HAS_i == tag);
@@ -24,10 +22,7 @@ Tensor Scalar::toTensor() const {
 }
 
 Scalar Scalar::local() const {
-  if (Tag::HAS_t != tag) {
-    return *this;
-  }
-  return Tensor(t)._local_scalar();
+  return *this;
 }
 
 Scalar Scalar::operator-() const {
@@ -35,8 +30,6 @@ Scalar Scalar::operator-() const {
    return Scalar(-v.d);
  } else if (isIntegral()) {
    return Scalar(-v.i);
- } else {
-   return -Tensor(t)._local_scalar();
  }
 }
 
