@@ -1474,6 +1474,7 @@ class TestAutograd(TestCase):
         self.assertEqual(dvar.grad, torch.ones_like(dvar))
         self.assertEqual(type(dvar.grad.data), type(dvar.data))
 
+    @skipIfRocm
     def test_type_conversions(self):
         x = torch.randn(5, 5)
         self.assertIsInstance(x.float(), torch.FloatTensor)
