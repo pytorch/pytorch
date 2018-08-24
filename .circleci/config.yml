@@ -281,6 +281,47 @@ caffe2_linux_test_defaults: &caffe2_linux_test_defaults
         docker cp /opt/workspace/onnx/. "$id:/var/lib/jenkins/workspace/third_party/onnx"
         (echo "source ./workspace/env" && echo 'sudo chown -R jenkins workspace && cd workspace && ./ci_build_script.sh') | docker exec -u jenkins -i "$id" bash
 
+caffe2_macos_build_defaults: &caffe2_macos_build_defaults
+  macos:
+    xcode: "9.0"
+  steps:
+    - checkout
+    - run:
+        name: Build
+        command: |
+          set -ex
+
+          # Reinitialize submodules
+          git submodule update --init --recursive
+
+          # Reinitialize path (see man page for path_helper(8))
+          eval `/usr/libexec/path_helper -s`
+
+          # Use Homebrew Python if configured to do so
+          if [ "${PYTHON_INSTALLATION}" == "homebrew" ]; then
+            export PATH=/usr/local/opt/python/libexec/bin:/usr/local/bin:$PATH
+          fi
+
+          # Install Anaconda if we need to
+          if [ -n "${CAFFE2_USE_ANACONDA}" ]; then
+            rm -rf ${TMPDIR}/anaconda
+            curl -o ${TMPDIR}/anaconda.sh "https://repo.continuum.io/archive/Anaconda${ANACONDA_VERSION}-5.0.1-MacOSX-x86_64.sh"
+            /bin/bash ${TMPDIR}/anaconda.sh -b -p ${TMPDIR}/anaconda
+            rm -f ${TMPDIR}/anaconda.sh
+            export PATH="${TMPDIR}/anaconda/bin:${PATH}"
+            source ${TMPDIR}/anaconda/bin/activate
+          fi
+
+          # Build
+          if [ "${BUILD_IOS:-0}" -eq 1 ]; then
+            scripts/build_ios.sh
+          elif [ -n "${CAFFE2_USE_ANACONDA}" ]; then
+            # All conda build logic should be in scripts/build_anaconda.sh
+            scripts/build_anaconda.sh
+          else
+            scripts/build_local.sh
+          fi
+
 version: 2
 jobs:
   pytorch_linux_trusty_py2_7_9_build_test:
@@ -667,12 +708,26 @@ jobs:
         <<: *docker_config_defaults
     <<: *caffe2_linux_build_defaults
 
-  # py2-ios-macos10.13-build:
+  caffe2_py2_ios_macos10_13_build:
+    environment:
+      BUILD_IOS: "1"
+      PYTHON_INSTALLATION: "system"
+      PYTHON_VERSION: "2"
+    <<: *caffe2_macos_build_defaults
 
-  # py2-system-macos10.13-build:
+  caffe2_py2_system_macos10_13_build:
+    environment:
+      PYTHON_INSTALLATION: "system"
+      PYTHON_VERSION: "2"
+    <<: *caffe2_macos_build_defaults
 
-  # conda2-macos10.13-build:
-
+  caffe2_conda2_macos10_13_build:
+    environment:
+      CAFFE2_USE_ANACONDA: 1
+      SKIP_CONDA_TESTS: 1
+      PYTHON_INSTALLATION: "system"
+      ANACONDA_VERSION: "2"
+    <<: *caffe2_macos_build_defaults
 
 workflows:
   version: 2
