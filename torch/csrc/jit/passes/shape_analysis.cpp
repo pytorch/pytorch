@@ -243,6 +243,7 @@ void PropagateShapeOnNode(Node * node, bool insert_expands) {
       }
       return;
     }
+    case prim::ImplicitTensorToNum:
     case prim::TensorToNum:
     case prim::NumToTensor:
       return; // correct num type is already set
