@@ -1063,14 +1063,6 @@ cmdclass = {
 }
 cmdclass.update(build_dep_cmds)
 
-install_requires = [
-    'pyyaml',
-    'numpy',
-    'future',
-    'setuptools',
-    'six',
-] if FULL_CAFFE2 else []
-
 entry_points = {}
 if FULL_CAFFE2:
     entry_points = {
@@ -1123,5 +1115,4 @@ if __name__ == '__main__':
                 'lib/include/torch/torch.h',
             ]
         },
-        install_requires=install_requires,
     )
