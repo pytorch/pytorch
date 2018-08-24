@@ -80,6 +80,10 @@ _(onnx, Unsqueeze) \
 _(onnx, Loop) \
 _(onnx, If) \
 _(onnx, Reshape) \
+_(onnx, Equal) \
+_(onnx, Greater) \
+_(onnx, Less) \
+_(onnx, Not) \
 FORALL_ATTR_BASE_SYMBOLS(_) \
 _(attr, Subgraph) \
 _(attr, axes) \

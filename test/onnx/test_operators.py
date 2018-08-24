@@ -330,18 +330,18 @@ class TestOperators(TestCase):
         self.assertONNX(lambda x: torch.sqrt(x), x)
 
     def test_equal(self):
-        x = Variable(torch.randn(3, 4).int(), requires_grad=False)
-        y = Variable(torch.randn(3, 4).int(), requires_grad=False)
+        x = Variable(torch.randn(1, 2, 3, 1).int(), requires_grad=False)
+        y = Variable(torch.randn(1, 4).int(), requires_grad=False)
         self.assertONNX(lambda x, y: x == y, (x, y))
 
     def test_lt(self):
-        x = Variable(torch.randn(3, 4).int(), requires_grad=False)
-        y = Variable(torch.randn(3, 4).int(), requires_grad=False)
+        x = Variable(torch.randn(1, 2, 3, 1).int(), requires_grad=False)
+        y = Variable(torch.randn(1, 4).int(), requires_grad=False)
         self.assertONNX(lambda x, y: x < y, (x, y))
 
     def test_gt(self):
-        x = Variable(torch.randn(3, 4).int(), requires_grad=False)
-        y = Variable(torch.randn(3, 4).int(), requires_grad=False)
+        x = Variable(torch.randn(1, 2, 3, 1).int(), requires_grad=False)
+        y = Variable(torch.randn(1, 4).int(), requires_grad=False)
         self.assertONNX(lambda x, y: x > y, (x, y))
 
     def test_le(self):

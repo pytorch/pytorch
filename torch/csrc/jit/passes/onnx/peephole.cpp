@@ -55,6 +55,9 @@ bool isBroadcasting(Node* node) {
     onnx::Pow,
     onnx::Sub,
     onnx::Gemm,
+    onnx::Equal,
+    onnx::Greater,
+    onnx::Less,
   };
 
   return broadcasting.count(node->kind());
@@ -88,43 +91,39 @@ void fuseBroadcast(Block *b) {
     // Can't fuse into nodes that don't support broadcasting
     if (!isBroadcasting(n)) continue;
 
-    // If the node already broadcasts, can't "rebroadcast"
-    // TODO: Actually, maybe you can, if there is a broadcast for some
-    // dims, and then another broadcast for the rest.  But this will
-    // never happen in practice so I didn't implement it.
-    if (n->hasAttribute(attr::broadcast) && n->i(attr::broadcast)) continue;
     JIT_ASSERT(!n->hasAttribute(attr::axis));
 
-    auto input_index = n->inputs().size() - 1;
-    auto* rhs_expand = n->input(input_index)->node();
+    for (size_t input_index = n->inputs().size() - 2; input_index < n->inputs().size(); ++input_index) {
+      auto* rhs_expand = n->input(input_index)->node();
 
-    // The rhs_expand input isn't actually an expand, so no fusion available
-    // XXX: we can't use the ->matches(...) mechanism in here, because input nodes
-    //      have been
-    if (rhs_expand->kind() != aten::expand ||
-        rhs_expand->input(1)->node()->kind() != onnx::Constant ||
-        rhs_expand->input(2)->node()->kind() != onnx::Constant) {
-      continue;
-    }
+      // The rhs_expand input isn't actually an expand, so no fusion available
+      // XXX: we can't use the ->matches(...) mechanism in here, because input nodes
+      //      have been
+      if (rhs_expand->kind() != aten::expand ||
+          rhs_expand->input(1)->node()->kind() != onnx::Constant ||
+          rhs_expand->input(2)->node()->kind() != onnx::Constant) {
+        continue;
+      }
 
-    auto* unexpanded_rhs = rhs_expand->input(0);
+      auto* unexpanded_rhs = rhs_expand->input(0);
 
-    // We need to know what the type pre-expand is.  We should basically
-    // always have this information (because expands are only ever traced,
-    // not generated from symbolic), but if for some reason we don't
-    // have it, we need to skip.
-    if (!unexpanded_rhs->isTensor()) continue;
+      // We need to know what the type pre-expand is.  We should basically
+      // always have this information (because expands are only ever traced,
+      // not generated from symbolic), but if for some reason we don't
+      // have it, we need to skip.
+      if (!unexpanded_rhs->isTensor() || !n->output()->isTensor()) continue;
 
-    // Not all broadcasts are supported by ONNX broadcast.
-    at::optional<size_t> axis = fusibleExpandTo(
-        unexpanded_rhs->type()->expect<CompleteTensorType>()->sizes(), // from
-        rhs_expand->output()->type()->expect<CompleteTensorType>()->sizes()); // to
-    if (axis == at::nullopt)
-      continue;
+      // Not all broadcasts are supported by ONNX broadcast.
+      at::optional<size_t> axis = fusibleExpandTo(
+          unexpanded_rhs->type()->expect<CompleteTensorType>()->sizes(), // from
+          n->output()->type()->expect<CompleteTensorType>()->sizes()); // to
+      if (axis == at::nullopt)
+        continue;
 
-    n->replaceInput(input_index, unexpanded_rhs);
-    if (!rhs_expand->hasUses()) {
-      rhs_expand->destroy();
+      n->replaceInput(input_index, unexpanded_rhs);
+      if (!rhs_expand->hasUses()) {
+        rhs_expand->destroy();
+      }
     }
   }
 }
