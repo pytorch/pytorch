@@ -123,10 +123,10 @@ void rearrangeDims(detail::TensorInfo<T1, IndexType>* aInfo,
 
 // Threads per block for our apply kernel
 // FIXME: use occupancy calculator instead
-// Order for arguments to kernelPointwiseApply need to be changed due to bug in HCC compiler. See PR #10829
 #define AT_APPLY_THREADS_PER_BLOCK 32 * 16
 #define AT_APPLY_BLOCKS_PER_SM 4
 
+// Order for arguments to kernelPointwiseApply need to be changed due to bug in HCC compiler. See PR #10829
 template <typename Op,
           typename scalar1,
           typename scalar2,
