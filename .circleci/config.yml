@@ -178,8 +178,10 @@ caffe2_linux_build_defaults: &caffe2_linux_build_defaults
 
         # Copy all necessary binaries to shared workspace
         mkdir -p caffe2-ci-env
-        cp -r /usr/local/caffe2 caffe2-ci-env/caffe2
         cp -r third_party/onnx caffe2-ci-env/onnx
+        if [ -d "/usr/local/caffe2" ]; then
+          cp -r /usr/local/caffe2 caffe2-ci-env/caffe2
+        fi
   - persist_to_workspace:
       root: /var/lib/jenkins/workspace/caffe2-ci-env
       paths:
@@ -276,8 +278,10 @@ caffe2_linux_test_defaults: &caffe2_linux_test_defaults
         EOL
         chmod +x /home/circleci/project/ci_build_script.sh
         docker cp /home/circleci/project/. "$id:/var/lib/jenkins/workspace"
-        echo "mkdir -p /usr/local/caffe2" | docker exec -u jenkins -i "$id" bash
-        docker cp /opt/workspace/caffe2/. "$id:/usr/local/caffe2"
+        if [ -d "/opt/workspace/caffe2" ]; then
+          echo "mkdir -p /usr/local/caffe2" | docker exec -u jenkins -i "$id" bash
+          docker cp /opt/workspace/caffe2/. "$id:/usr/local/caffe2"
+        fi
         docker cp /opt/workspace/onnx/. "$id:/var/lib/jenkins/workspace/third_party/onnx"
         (echo "source ./workspace/env" && echo 'sudo chown -R jenkins workspace && cd workspace && ./ci_build_script.sh') | docker exec -u jenkins -i "$id" bash
 
@@ -762,11 +766,12 @@ workflows:
       - pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_test:
           requires:
             - pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_build
-      - pytorch_macos_10_13_py3_build
-      - pytorch_macos_10_13_py3_test:
-          requires:
-            - pytorch_macos_10_13_py3_build
-      - pytorch_macos_10_13_cuda9_2_cudnn7_py3_build
+      # We are not running macOS builds on CircleCI currently
+      # - pytorch_macos_10_13_py3_build
+      # - pytorch_macos_10_13_py3_test:
+      #     requires:
+      #       - pytorch_macos_10_13_py3_build
+      # - pytorch_macos_10_13_cuda9_2_cudnn7_py3_build
       - caffe2_py2_cuda8_0_cudnn6_ubuntu16_04_build
       - caffe2_py2_cuda8_0_cudnn6_ubuntu16_04_test:
           requires:
@@ -813,6 +818,7 @@ workflows:
       - caffe2_py2_android_ubuntu16_04_build
       - caffe2_conda3_cuda9_0_cudnn7_ubuntu16_04_build
       - caffe2_py2_cuda9_0_cudnn7_centos7_build
-      - caffe2_py2_ios_macos10_13_build
-      - caffe2_py2_system_macos10_13_build
-      - caffe2_conda2_macos10_13_build
+      # We are not running macOS builds on CircleCI currently
+      # - caffe2_py2_ios_macos10_13_build
+      # - caffe2_py2_system_macos10_13_build
+      # - caffe2_conda2_macos10_13_build
