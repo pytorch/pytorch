@@ -87,7 +87,9 @@ class CAFFE2_API Workspace {
     CAFFE_ENFORCE(shared, "Parent workspace must be specified");
     for (const auto& forwarded : forwarded_blobs) {
       CAFFE_ENFORCE(
-          shared->HasBlob(forwarded.second), "Invalid parent workspace blob");
+          shared->HasBlob(forwarded.second),
+          "Invalid parent workspace blob: ",
+          forwarded.second);
       forwarded_blobs_[forwarded.first] =
           std::make_pair(shared, forwarded.second);
     }
