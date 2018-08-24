@@ -255,7 +255,7 @@ static void test(Type & type) {
     REQUIRE_THROWS_WITH(
         tensor[ones({}) * 3.14].equal(one),
         StartsWith(
-            "Can only index tensors with integral scalars (got CPUFloatType)"));
+            "Can only index tensors with integral scalars (got CPUDoubleType)"));
     REQUIRE_THROWS_WITH(
         tensor[Tensor()].equal(one),
         StartsWith("Can only index with tensors that are defined"));
