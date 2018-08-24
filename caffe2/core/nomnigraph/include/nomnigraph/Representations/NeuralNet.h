@@ -166,7 +166,7 @@ class CAFFE2_API Tensor : public NeuralNetData {
       : NeuralNetData(NNDataKind::Tensor),
         name_(name),
         type_(DataType::Generic) {}
-  static bool classof(const NeuralNetData* D) {
+  CAFFE2_API static bool classof(const NeuralNetData* D) {
     return D->getKind() == NNDataKind::Tensor;
   }
 
@@ -193,10 +193,10 @@ class CAFFE2_API Tensor : public NeuralNetData {
 };
 
 #define NOMNIGRAPH_DEFINE_NN_RTTI(op)                                 \
-  static bool classof(const NeuralNetOperator* N) {                   \
+  CAFFE2_API static bool classof(const NeuralNetOperator* N) {        \
     return N->getKind() == NNKind::op;                                \
   }                                                                   \
-  static bool classof(const Value* N) {                               \
+  CAFFE2_API static bool classof(const Value* N) {                    \
     if (isa<NeuralNetOperator>(N)) {                                  \
       return dyn_cast<NeuralNetOperator>(N)->getKind() == NNKind::op; \
     }                                                                 \
@@ -483,7 +483,7 @@ CAFFE2_API NNNodeMatchCriteria matchOp(
 };
 
 struct CAFFE2_API NNNodeMatch {
-  static bool isMatch(
+  CAFFE2_API static bool isMatch(
       const NNGraph::NodeRef& node,
       const NNNodeMatchCriteria& criteria) {
     return criteria.predicate(node);
