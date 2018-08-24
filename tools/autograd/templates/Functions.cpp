@@ -1961,7 +1961,7 @@ Tensor log1p_backward(const Tensor& grad, const Tensor& self) {
   return grad / (self + 1);
 }
 
-std::tuple<Tensor, Tensor> mul_backward(const Tensor& grad, const Tensor self, const Tensor other) {
+std::tuple<Tensor, Tensor> mul_backward(const Tensor& grad, const Tensor& self, const Tensor& other) {
   AT_ASSERTM(!self.is_sparse(),
     "mul(Sparse, Dense) is made to be non-differentiable since ",
     "local gradient of non-nnz at the sparse tensor are all 1s ",
@@ -1971,7 +1971,17 @@ std::tuple<Tensor, Tensor> mul_backward(const Tensor& grad, const Tensor self, c
   return std::tuple<Tensor, Tensor>(grad * other, grad * self);
 }
 
-std::tuple<Tensor, Tensor> sparse_mul_backward(const Tensor& grad_, const Tensor self, const Tensor other) {
+Tensor mul_scalar_backward(const Tensor& grad, const Tensor& self, Scalar other) {
+  AT_ASSERTM(!self.is_sparse(),
+    "mul(Sparse, Scalar) is made to be non-differentiable since ",
+    "local gradient of non-nnz at the sparse tensor are all 1s ",
+    "and it makes the tensor dense. Use sparse_mul(), ",
+    "which preserves sparsity of gradients, or report a bug if you "
+    "think this is an error.");
+  return grad * other;
+}
+
+std::tuple<Tensor, Tensor> sparse_mul_backward(const Tensor& grad_, const Tensor& self, const Tensor& other) {
   AT_ASSERT(self.is_coalesced());
   auto grad = grad_.coalesce();
 
@@ -1991,6 +2001,18 @@ std::tuple<Tensor, Tensor> sparse_mul_backward(const Tensor& grad_, const Tensor
     other_grad = other_grad.mul_(grad_ones);
   }
   return std::tuple<Tensor, Tensor>(self_grad, other_grad);
+}
+
+Tensor sparse_mul_scalar_backward(const Tensor& grad_, const Tensor& self, Scalar other) {
+  AT_ASSERT(self.is_coalesced());
+  auto grad = grad_.coalesce();
+
+  auto self_ones = self.clone();
+  self_ones._values().fill_(1);
+  auto self_grad = (grad * other).mul_(self_ones);
+  // self_grad must be coalesced (grad * other) returns a coalesced sparse tensor
+  AT_ASSERT(self_grad.is_coalesced());
+  return self_grad;
 }
 
 } // anonymous namespace

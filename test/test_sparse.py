@@ -462,6 +462,13 @@ class TestSparse(TestCase):
         self.assertEqual(s.grad.to_dense(), input.mul(s_ones).to_dense())
         self.assertEqual(s2.grad.to_dense(), input.mul(s2_ones).to_dense())
 
+        # autograd for sparse_mul(Sparse, Scalar)
+        scalar = 5
+        y = s.sparse_mul(scalar)
+        y.backward(input)
+        self.assertTrue(s.grad.is_sparse)
+        self.assertEqual(s.grad.to_dense(), input.mul(s_ones).to_dense() * scalar)
+
     @cpu_only
     def test_mm(self):
         def test_shape(di, dj, dk):

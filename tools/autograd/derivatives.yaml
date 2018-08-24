@@ -473,11 +473,13 @@
   self, other: mul_backward(grad, self, other)
 
 - name: mul(Tensor self, Scalar other)
+  self: mul_scalar_backward(grad, self, other)
 
 - name: sparse_mul(Tensor self, Tensor other)
   self, other: sparse_mul_backward(grad, self, other)
 
 - name: sparse_mul(Tensor self, Scalar other)
+  self: sparse_mul_scalar_backward(grad, self, other)
 
 - name: mv(Tensor self, Tensor vec)
   self: grad.ger(vec)
