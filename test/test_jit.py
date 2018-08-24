@@ -2031,6 +2031,28 @@ class TestScript(JitTestCase):
 
         return ge
 
+    def test_tuple_io(self):
+        def stuff(x):
+            # type: (Tuple[Tensor, Tensor]) -> Tuple[Tensor, Tensor]
+            a, b = x
+            return b, a
+
+        a = (torch.ones(3), torch.ones(3))
+        self.checkScript(stuff, (a,))
+
+    def test_tuple_create_return(self):
+        def stuff2(x):
+            # type: (int) -> Tuple[Tensor, Tensor]
+            a = (torch.ones(x), torch.ones(x))
+            return a
+        self.checkScript(stuff2, (3,))
+
+    def test_list_io(self):
+        def stuff3(x):
+            # type: (List[int]) -> Tuple[Tensor, List[int]]
+            return torch.ones(x), x
+        self.checkScript(stuff3, ([3, 2],))
+
     def test_script_cu(self):
         cu = torch.jit.CompilationUnit('''
             def foo(a):
@@ -4820,7 +4842,7 @@ a")
             ''')
 
     def test_parser_type_annotations_subscript_tensor(self):
-        with self.assertRaisesRegex(RuntimeError, r'Type Tensor cannot be subscripted'):
+        with self.assertRaisesRegex(RuntimeError, r'Unknown type constructor Tensor'):
             cu = torch.jit.CompilationUnit('''
                 def foo(x : Tensor, y : Tensor[Tensor, Tensor]) -> Tuple[Tensor, Tensor]:
                     return x, x
@@ -6774,13 +6796,9 @@ class TestCustomOperators(JitTestCase):
 
     def test_passing_and_returning_lists(self):
         # Replace with actual test once we support lists.
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "Lists and strings are not supported yet"
-        ):
-            a, b = torch.ones(5), torch.zeros(5)
-            output = torch.ops.aten.stack([a, b])
-            self.assertEqual(output, torch.ones(10))
+        a, b = torch.ones(5), torch.ones(5)
+        output = torch.ops.aten.cat([a, b])
+        self.assertEqual(output, torch.ones(10))
 
     def test_script_graph_contains_custom_op(self):
         @torch.jit.script
