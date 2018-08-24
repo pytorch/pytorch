@@ -450,7 +450,7 @@ jobs:
           # Copy all necessary binaries to shared workspace
           mkdir -p caffe2-ci-env
           cp -r /usr/local/caffe2 caffe2-ci-env/caffe2
-          cp -r /usr/local/lib/python2.7/dist-packages caffe2-ci-env/dist-packages
+          cp -r third_party/onnx caffe2-ci-env/onnx
     - persist_to_workspace:
         root: /var/lib/jenkins/workspace/caffe2-ci-env
         paths:
@@ -509,6 +509,9 @@ jobs:
           # libdc1394 (dependency of OpenCV) expects /dev/raw1394 to exist...
           sudo ln /dev/null /dev/raw1394
 
+          pip install --user --no-cache-dir hypothesis==3.59.0
+          pip install --user -b /tmp/pip_install_onnx "file:///var/lib/jenkins/workspace/third_party/onnx#egg=onnx"
+
           # Hotfix, use hypothesis 3.44.6 on Ubuntu 14.04
           # See comments on https://github.com/HypothesisWorks/hypothesis-python/commit/eadd62e467d6cee6216e71b391951ec25b4f5830
           if [[ "$BUILD_ENVIRONMENT" == *ubuntu14.04* ]]; then
@@ -539,7 +542,7 @@ jobs:
           docker cp /home/circleci/project/. "$id:/var/lib/jenkins/workspace"
           echo "mkdir -p /usr/local/caffe2" | docker exec -u jenkins -i "$id" bash
           docker cp /opt/workspace/caffe2/. "$id:/usr/local/caffe2"
-          docker cp /opt/workspace/dist-packages/. "$id:/usr/local/lib/python2.7/dist-packages"
+          docker cp /opt/workspace/onnx/. "$id:/var/lib/jenkins/workspace/third_party/onnx"
           (echo "source ./workspace/env" && echo 'sudo chown -R jenkins workspace && cd workspace && ./ci_build_script.sh') | docker exec -u jenkins -i "$id" bash
 
 workflows:
