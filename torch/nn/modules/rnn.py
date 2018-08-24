@@ -10,6 +10,12 @@ from ..utils.rnn import PackedSequence
 from .. import init
 
 _VF = torch._C._VariableFunctions
+_rnn_impls = {
+    'LSTM': _VF.lstm,
+    'GRU': _VF.gru,
+    'RNN_TANH': _VF.rnn_tanh,
+    'RNN_RELU': _VF.rnn_relu,
+}
 
 
 class RNNBase(Module):
@@ -40,16 +46,12 @@ class RNNBase(Module):
                           "num_layers={}".format(dropout, num_layers))
 
         if mode == 'LSTM':
-            self._impl = torch._C._VariableFunctions.lstm
             gate_size = 4 * hidden_size
         elif mode == 'GRU':
-            self._impl = torch._C._VariableFunctions.gru
             gate_size = 3 * hidden_size
         elif mode == 'RNN_TANH':
-            self._impl = torch._C._VariableFunctions.rnn_tanh
             gate_size = hidden_size
         elif mode == 'RNN_RELU':
-            self._impl = torch._C._VariableFunctions.rnn_relu
             gate_size = hidden_size
         else:
             raise ValueError("Unrecognized RNN mode: " + mode)
@@ -171,12 +173,13 @@ class RNNBase(Module):
                 hx = (hx, hx)
 
         self.check_forward_args(input, hx, batch_sizes)
+        _impl = _rnn_impls[self.mode]
         if batch_sizes is None:
-            result = self._impl(input, hx, self._flat_weights, self.bias, self.num_layers,
-                                self.dropout, self.training, self.bidirectional, self.batch_first)
+            result = _impl(input, hx, self._flat_weights, self.bias, self.num_layers,
+                           self.dropout, self.training, self.bidirectional, self.batch_first)
         else:
-            result = self._impl(input, batch_sizes, hx, self._flat_weights, self.bias,
-                                self.num_layers, self.dropout, self.training, self.bidirectional)
+            result = _impl(input, batch_sizes, hx, self._flat_weights, self.bias,
+                           self.num_layers, self.dropout, self.training, self.bidirectional)
         output = result[0]
         hidden = result[1:] if self.mode == 'LSTM' else result[1]
 
