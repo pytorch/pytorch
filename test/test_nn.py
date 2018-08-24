@@ -6705,7 +6705,7 @@ def bceloss_no_reduce_test():
         input_fn=lambda: torch.rand(15, 10).clamp_(2.8e-2, 1 - 2.8e-2),
         reference_fn=lambda i, m: -(t * i.log() + (1 - t) * (1 - i).log()),
         check_gradgrad=False,
-        pickle=False)
+        pickle=False, test_cuda = (not TEST_WITH_ROCM))
 
 
 def bceloss_no_reduce_scalar_test():
@@ -6731,7 +6731,7 @@ def bceloss_weights_no_reduce_test():
         input_fn=lambda: torch.rand(15, 10).clamp_(2.8e-2, 1 - 2.8e-2),
         reference_fn=lambda i, m: -(t * i.log() + (1 - t) * (1 - i).log()) * weights,
         check_gradgrad=False,
-        pickle=False)
+        pickle=False, test_cuda = (not TEST_WITH_ROCM))
 
 
 def bceloss_weights_no_reduce_scalar_test():
@@ -6818,7 +6818,7 @@ def l1loss_no_reduce_test():
             lambda i: F.l1_loss(i, t.type_as(i), reduction='none')),
         input_fn=lambda: torch.randn(2, 3, 4),
         reference_fn=lambda i, m: (i - t.type_as(i)).abs(),
-        pickle=False)
+        pickle=False, test_cuda = (not TEST_WITH_ROCM))
 
 
 def l1loss_no_reduce_scalar_test():
@@ -7030,7 +7030,7 @@ def smoothl1loss_no_reduce_test():
         input_fn=lambda: torch.randn(2, 3, 4),
         reference_fn=lambda i, _:
             loss_reference_fns['SmoothL1Loss'](i, t.type_as(i), reduction='none'),
-        pickle=False)
+        pickle=False, test_cuda = (not TEST_WITH_ROCM))
 
 
 def smoothl1loss_no_reduce_scalar_test():
@@ -7122,7 +7122,7 @@ def softmarginloss_no_reduce_test():
         input_fn=lambda: torch.randn(5, 5),
         reference_fn=lambda i, _:
             loss_reference_fns['SoftMarginLoss'](i, t.type_as(i), reduction='none'),
-        pickle=False)
+        pickle=False, test_cuda = (not TEST_WITH_ROCM))
 
 
 def multilabelsoftmarginloss_no_reduce_test():
