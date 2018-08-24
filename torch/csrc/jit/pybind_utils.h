@@ -67,6 +67,16 @@ inline Stack toStack(const py::tuple& inputs) {
   return toIValue(inputs).toTuple()->elements();
 }
 
+inline IValue toIValue(py::handle obj, const TypePtr& type);
+
+inline IValue createGenericList(py::handle obj, const TypePtr& elem_type) {
+  std::vector<IValue> elems;
+  for(auto elem : obj) {
+    elems.push_back(toIValue(elem, elem_type));
+  }
+  return ConstantList<IValue>::create(std::move(elems));
+}
+
 inline IValue toIValue(py::handle obj, const TypePtr& type) {
     switch (type->kind()) {
       case TypeKind::DynamicType:
@@ -94,8 +104,21 @@ inline IValue toIValue(py::handle obj, const TypePtr& type) {
         return Tuple::create(std::move(values));
       }
       case TypeKind::StringType:
-      case TypeKind::ListType:
-        AT_ERROR("Lists and strings are not supported yet");
+        return ConstantString::create(py::cast<std::string>(obj));
+      case TypeKind::ListType: {
+        const auto& elem_type = type->expect<ListType>()->getElementType();
+        switch(elem_type->kind()) {
+          case TypeKind::IntType:
+            return py::cast<std::vector<int64_t>>(obj);
+          case TypeKind::FloatType:
+            return py::cast<std::vector<double>>(obj);
+          case TypeKind::TensorType:
+          case TypeKind::DynamicType:
+            return py::cast<std::vector<at::Tensor>>(obj);
+          default:
+            return createGenericList(obj, elem_type);
+        }
+      }
       case TypeKind::NumberType:
         AT_ERROR("Insufficient type information to convert input");
     }

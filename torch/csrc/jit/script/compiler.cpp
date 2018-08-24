@@ -1763,6 +1763,13 @@ const std::unordered_map<std::string, std::function<TypePtr(Subscript)>> &subscr
       }
       return TupleType::create(subscript_expr_types);
     }},
+    {"List", [](Subscript subscript) -> TypePtr {
+      if (subscript.subscript_exprs().size() != 1) {
+        throw ErrorReport(subscript) << " expected exactly one element type but found " << subscript.subscript_exprs().size();
+      }
+      auto elem_type = parseTypeFromExpr(*subscript.subscript_exprs().begin());
+      return ListType::create(elem_type);
+    }},
   };
   return map;
 }
@@ -1782,7 +1789,7 @@ TypePtr parseTypeFromExpr(Expr expr) {
     }
     auto value_name = Var(subscript.value()).name().name();
     if (!subscript_to_type_fns().count(value_name)) {
-      throw ErrorReport(subscript.range()) << "Type " << value_name << " cannot be subscripted";
+      throw ErrorReport(subscript.range()) << "Unknown type constructor " << value_name;
     }
     return subscript_to_type_fns().at(value_name)(subscript);
   } else if (expr.kind() == '.') {
