@@ -545,8 +545,8 @@ def cartesian_prod(*tensors):
     create :math:`k` output tensors.
 
     Arguments:
-        tensors (sequence of Tensors): sequence of scalars or 1 dimensional tensors.
-            Scalars will be treated as tensors of size :math:`(1,)` automatically.
+        *tensors: any number of scalars or 1 dimensional tensors. Scalars will be treated as
+        tensors of size :math:`(1,)` automatically.
 
     Returns:
         Tensor: A tensor equivalent to converting all the input tensors into lists,
