@@ -109,7 +109,6 @@ void rearrangeDims(TensorInfo<T1, IndexType>* aInfo,
 }
 
 // Threads per block for our apply kernel
-// Order for arguments to kernelPointwiseApply need to be changed due to bug in HCC compiler. See PR #10829
 // FIXME: use occupancy calculator instead
 #define THC_APPLY_THREADS_PER_BLOCK (32 * 16)
 #define THC_APPLY_BLOCKS_PER_SM 4
@@ -118,9 +117,9 @@ template <typename Op,
           typename IndexType,
           int ADims>
 __global__ void
-kernelPointwiseApply1(Op op,
-                      const OffsetInfo<Ta, IndexType, ADims> a,
-                      IndexType totalElements) {
+kernelPointwiseApply1(const OffsetInfo<Ta, IndexType, ADims> a,
+                      IndexType totalElements,
+                      Op op) {
   // NOTE: The two typecasts below are essential when IndexType is 64-bit;
   //       without them, results are silently truncated to 32 bits!
   for (IndexType linearIndex = (IndexType) blockIdx.x * blockDim.x + threadIdx.x;
@@ -130,16 +129,15 @@ kernelPointwiseApply1(Op op,
   }
 }
 
-// Order for arguments to kernelPointwiseApply need to be changed due to bug in HCC compiler. See PR #10829
 template <typename Op,
           typename Ta, typename Tb,
           typename IndexType,
           int ADims, int BDims>
 __global__ void
-kernelPointwiseApply2(Op op,
-                      const OffsetInfo<Ta, IndexType, ADims> a,
+kernelPointwiseApply2(const OffsetInfo<Ta, IndexType, ADims> a,
                       const OffsetInfo<Tb, IndexType, BDims> b,
-                      IndexType totalElements) {
+                      IndexType totalElements,
+                      Op op) {
   for (IndexType linearIndex = (IndexType) blockIdx.x * blockDim.x + threadIdx.x;
        linearIndex < totalElements;
        linearIndex += (IndexType) gridDim.x * blockDim.x) {
@@ -147,17 +145,16 @@ kernelPointwiseApply2(Op op,
   }
 }
 
-// Order for arguments to kernelPointwiseApply need to be changed due to bug in HCC compiler. See PR #10829
 template <typename Op,
           typename Ta, typename Tb, typename Tc,
           typename IndexType,
           int ADims, int BDims, int CDims>
 __global__ void
-kernelPointwiseApply3(Op op,
-                      const OffsetInfo<Ta, IndexType, ADims> a,
+kernelPointwiseApply3(const OffsetInfo<Ta, IndexType, ADims> a,
                       const OffsetInfo<Tb, IndexType, BDims> b,
                       const OffsetInfo<Tc, IndexType, CDims> c,
-                      IndexType totalElements) {
+                      IndexType totalElements,
+                      Op op) {
   for (IndexType linearIndex = (IndexType) blockIdx.x * blockDim.x + threadIdx.x;
        linearIndex < totalElements;
        linearIndex += (IndexType) gridDim.x * blockDim.x) {
@@ -206,7 +203,7 @@ bool THC_pointwiseApply1(THCState* state,
 
   dim3 grid;
   ptrdiff_t totalElements = THCTensor_nElement(state, a);
-
+  
   int curDevice = -1;
   cudaGetDevice(&curDevice);
   if (!getApplyGrid(state, totalElements, grid, curDevice)) {
@@ -215,7 +212,7 @@ bool THC_pointwiseApply1(THCState* state,
 
   /*
   Expands readable/writable tensors whose indices may be "overlapped."
-  This ensures that each element of the tensor is operated on once and only
+  This ensures that each element of the tensor is operated on once and only 
   once.
   */
   TensorTypeA* oldA = NULL;
@@ -240,10 +237,9 @@ bool THC_pointwiseApply1(THCState* state,
                         ScalarTypeA,                                    \
                         TYPE, A>                                        \
     <<<grid, block, 0, THCState_getCurrentStreamOnDevice(state, curDevice)>>>(             \
-      op, \
       OffsetInfo<ScalarTypeA, TYPE, A>  \
           (aInfo),                                                      \
-      (TYPE) totalElements);
+      (TYPE) totalElements, op);
 
 #define HANDLE_A_CASE(TYPE, A) {            \
   switch (A) {                              \
@@ -282,7 +278,7 @@ bool THC_pointwiseApply1(THCState* state,
 
     /*
     Only instantiates the all 1D special case and the fallback all nD case for
-    large (64-bit indexed) tensors to reduce compilation time.
+    large (64-bit indexed) tensors to reduce compilation time. 
     */
     if (aInfo.dims == 1) {
       OffsetInfo<ScalarTypeA, uint64_t, 1>
@@ -291,7 +287,7 @@ bool THC_pointwiseApply1(THCState* state,
                             ScalarTypeA,
                             uint64_t, 1>
         <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
-          op, aOffset, (uint64_t) totalElements);
+          aOffset, (uint64_t) totalElements, op);
     } else {
 
 #if CUDA_VERSION < 9000
@@ -303,7 +299,7 @@ bool THC_pointwiseApply1(THCState* state,
                             ScalarTypeA,
                             uint64_t, -1>
         <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
-          op, aOffset, (uint64_t) totalElements);
+          aOffset, (uint64_t) totalElements, op);
     }
   }
 #undef HANDLE_CASE
@@ -358,7 +354,7 @@ bool THC_pointwiseApply2(THCState* state,
 
   /*
   Expands readable/writable tensors whose indices may be "overlapped."
-  This ensures that each element of the tensor is operated on once and only
+  This ensures that each element of the tensor is operated on once and only 
   once.
   */
   TensorTypeA* oldA = NULL;
@@ -391,12 +387,11 @@ bool THC_pointwiseApply2(THCState* state,
                         ScalarTypeB,                                    \
                         TYPE, A, B>                                     \
     <<<grid, block, 0, THCState_getCurrentStreamOnDevice(state, curDevice)>>>(             \
-      op,                                                               \
-      OffsetInfo<ScalarTypeA, TYPE, A>                                  \
+      OffsetInfo<ScalarTypeA, TYPE, A>  \
           (aInfo),                                                      \
       OffsetInfo<ScalarTypeB, TYPE, B>                                  \
           (bInfo),                                                      \
-      (TYPE) totalElements);
+      (TYPE) totalElements, op);
 
 #define HANDLE_B_CASE(TYPE, A, B) {         \
   switch (B) {                              \
@@ -410,7 +405,7 @@ bool THC_pointwiseApply2(THCState* state,
       HANDLE_CASE(TYPE, A, -1);             \
       break;                                \
   }                                         \
-}
+}                                           
 
 #define HANDLE_A_CASE(TYPE, A, B) {         \
   switch (A) {                              \
@@ -456,7 +451,7 @@ bool THC_pointwiseApply2(THCState* state,
 
     /*
     Only instantiates the all 1D special case and the fallback all nD case for
-    large (64-bit indexed) tensors to reduce compilation time.
+    large (64-bit indexed) tensors to reduce compilation time. 
     */
     if (aInfo.dims == 1 && bInfo.dims == 1) {
       OffsetInfo<ScalarTypeA, uint64_t, 1>
@@ -468,7 +463,7 @@ bool THC_pointwiseApply2(THCState* state,
                             ScalarTypeB,
                             uint64_t, 1, 1>
         <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
-          op, aOffset, bOffset, (uint64_t) totalElements);
+          aOffset, bOffset, (uint64_t) totalElements, op);
     } else {
 #if CUDA_VERSION < 9000
       grid.x = min(THCState_getCurrentDeviceProperties(state)->multiProcessorCount * THC_APPLY_BLOCKS_PER_SM , grid.x);
@@ -482,7 +477,7 @@ bool THC_pointwiseApply2(THCState* state,
                             ScalarTypeB,
                             uint64_t, -1, -1>
         <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
-          op, aOffset, bOffset, (uint64_t) totalElements);
+          aOffset, bOffset, (uint64_t) totalElements, op);
     }
   }
 #undef HANDLE_CASE
@@ -554,7 +549,7 @@ bool THC_pointwiseApply3(THCState* state,
 
   /*
   Expands readable/writable tensors whose indices may be "overlapped."
-  This ensures that each element of the tensor is operated on once and only
+  This ensures that each element of the tensor is operated on once and only 
   once.
   */
   TensorTypeA* oldA = NULL;
@@ -587,14 +582,13 @@ bool THC_pointwiseApply3(THCState* state,
                         ScalarTypeC,                                    \
                         TYPE, A, B, C>                                  \
     <<<grid, block, 0, THCState_getCurrentStreamOnDevice(state, curDevice)>>>(             \
-      op,                                                               \
       OffsetInfo<ScalarTypeA, TYPE, A>                                  \
           (aInfo),                                                      \
       OffsetInfo<ScalarTypeB, TYPE, B>                                  \
           (bInfo),                                                      \
       OffsetInfo<ScalarTypeC, TYPE, C>                                  \
           (cInfo),                                                      \
-      (TYPE) totalElements);
+      (TYPE) totalElements, op);
 
 #define HANDLE_C_CASE(TYPE, A, B, C) {      \
   switch (C) {                              \
@@ -677,7 +671,7 @@ bool THC_pointwiseApply3(THCState* state,
 
     /*
     Only instantiates the all 1D special case and the fallback all nD case for
-    large (64-bit indexed) tensors to reduce compilation time.
+    large (64-bit indexed) tensors to reduce compilation time. 
     */
     if (aInfo.dims == 1 && bInfo.dims == 1 && cInfo.dims == 1) {
       OffsetInfo<ScalarTypeA, uint64_t, 1>
@@ -692,7 +686,7 @@ bool THC_pointwiseApply3(THCState* state,
                             ScalarTypeC,
                             uint64_t, 1, 1, 1>
         <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
-          op, aOffset, bOffset, cOffset, (uint64_t) totalElements);
+          aOffset, bOffset, cOffset, (uint64_t) totalElements, op);
     } else {
 #if CUDA_VERSION < 9000
       grid.x = min(THCState_getCurrentDeviceProperties(state)->multiProcessorCount * THC_APPLY_BLOCKS_PER_SM , grid.x);
@@ -710,7 +704,7 @@ bool THC_pointwiseApply3(THCState* state,
                             ScalarTypeC,
                             uint64_t, -1, -1, -1>
         <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
-          op, aOffset, bOffset, cOffset, (uint64_t) totalElements);
+          aOffset, bOffset, cOffset, (uint64_t) totalElements, op);
     }
   }
 #undef HANDLE_CASE
