@@ -1496,13 +1496,12 @@ private:
         const auto subscript = Subscript(tree);
         auto slice_exprs = subscript.subscript_exprs();
         if (slice_exprs.size() != 1) {
-          // TODO Implement multidimensional slice
-          throw ErrorReport(subscript.range()) << "Subscripting multiple dimensions is currently not supported\n";
+          return emitMultidimSlicing(subscript);
         }
         if (slice_exprs[0].kind() == TK_SLICE_EXPR) {
-          return emitSlice(subscript);
+          return emitBasicSlice(subscript);
         } else {
-          return emitGather(
+          return emitBasicGather(
               subscript.range(), TreeList{subscript.value(), slice_exprs[0]});
         }
       } break;
@@ -1558,45 +1557,104 @@ private:
     return insertConstant(*graph, c.text(), c.range());
   }
 
+  // Desugars select indexing: tensor[i] -> tensor.select(dim, i)
+  Value* emitSelect(
+      const SourceRange& loc,
+      Value* input,
+      int64_t dim,
+      Value* index) {
+    return emitBuiltinCall(
+        loc, *graph, aten::select,
+        {input, graph->insertConstant(dim, loc), index}, {}, true);
+  }
+
+  // Desugars slice indexing: tensor[begin:end] -> tensor.slice(dim, begin, end, 1)
+  Value* emitSlice(
+      const SourceRange& loc,
+      Value* input,
+      at::optional<int64_t> dim, // Only used for tensor slicing
+      const SliceExpr& slice) {
+    std::vector<NamedValue> args;
+    args.reserve(4);
+    args.emplace_back(loc, "self", input);
+
+    // XXX: If list slicing becomes more complicated or stops using
+    // aten::slice, we should separate it from this function.
+    if (dim) {
+      JIT_ASSERT(input->type()->isSubtypeOf(DynamicType::get()));
+      args.emplace_back(loc, "dim", graph->insertConstant(dim.value(), loc));
+    } else {
+      JIT_ASSERT(!input->type()->isSubtypeOf(DynamicType::get()));
+    }
+
+    args.emplace_back(loc, "begin", emitExpr(Expr(slice.startOr(0)), identity));
+    const auto has_end = slice.end().present();
+    if (has_end) {
+      args.emplace_back(loc, "end", emitExpr(Expr(slice.end().get()), identity));
+    }
+    NamedValue step = NamedValue(loc, "step", graph->insertConstant(1, loc));
+    return emitBuiltinCall(loc, *graph, aten::slice, args, {step}, true);
+  }
+
+  // Desugars multidim slicing into aten::slice / aten::select calls.
+  //
+  // XXX: Errors in user code are not elegantly reported.
+  // Let's say someone were to do the following:
+  //   @torch.jit.script
+  //   def fn(x):
+  //       return x[0, 1]
+  //   fn(torch.randn(5))
+  // Because we desugar this into two aten::select ops, the error message
+  // complains about aten::select failing rather than there "not being
+  // enough dimensions to index".
+  Value * emitMultidimSlicing(const Subscript& subscript) {
+    const auto& loc = subscript.range();
+    auto * sliceable = emitExpr(subscript.value());
+    if (!sliceable->type()->isSubtypeOf(DynamicType::get())) {
+      throw ErrorReport(loc)
+        << "Unsupported operation: attempted to use multidimensional "
+        << "indexing on a non-tensor type.";
+    }
+    size_t dim = 0;
+    for (const auto & subscript_expr : subscript.subscript_exprs()) {
+      if (subscript_expr.kind() == TK_SLICE_EXPR) {
+        sliceable = emitSlice(loc, sliceable, dim, SliceExpr(subscript_expr));
+        ++dim;
+        continue;
+      }
+      auto index = emitExpr(subscript_expr, identity);
+      if (index->type() == IntType::get()) {
+        sliceable = emitSelect(loc, sliceable, dim, index);
+        continue;
+      } else if (index->type()->isSubtypeOf(DynamicType::get())) {
+        throw std::runtime_error("NYI: advanced indexing");
+      }
+      throw ErrorReport(loc)
+        << "Unsupported operation: attempted to use multidimensional "
+        << "indexing with unsupported index type.";
+    }
+    return sliceable;
+  }
+
   // Desugars slice syntactic sugar tensor[begin:end] -> tensor.slice(begin,
   // end).
-  Value* emitSlice(const Subscript& subscript) {
+  Value* emitBasicSlice(const Subscript& subscript) {
     const auto& loc = subscript.range();
-    // TODO: implement multidimensional slice
     JIT_ASSERT(subscript.subscript_exprs().size() == 1);
     JIT_ASSERT(subscript.subscript_exprs()[0].kind() == TK_SLICE_EXPR);
     auto slice_exp = SliceExpr(subscript.subscript_exprs()[0]);
-    TreeList inputs = {subscript.value(), slice_exp.startOr(0)};
-    const auto applyInputs = Compound::create(TK_LIST, loc, std::move(inputs));
-    const auto input_values = getNamedValues(
-        applyInputs->trees(),
-        /*maybe_unpack*/ false,
-        identity);
 
-    NamedValue sliceable = input_values[0];
-    NamedValue begin = input_values[1];
-    NamedValue step = NamedValue(loc, "step", graph->insertConstant(1, loc));
-
-    // Build the input arguments
-    std::vector<NamedValue> args = {sliceable};
-    if (sliceable.value(*graph)->type()->kind() == TypeKind::DynamicType) {
+    auto * sliceable = emitExpr(subscript.value(), identity);
+    at::optional<int64_t> maybe_dim;
+    if (sliceable->type()->kind() == TypeKind::DynamicType) {
       // If the sliceable object is a tensor, specify a default dimension
-      args.emplace_back(loc, "dim", graph->insertConstant(0, loc));
+      maybe_dim = 0;
     }
-
-    args.push_back(begin);
-
-    const auto has_end = slice_exp.end().present();
-    if (has_end) {
-      // If the user specified an `end` index, pass it down
-      args.emplace_back(loc, "end", emitExpr(Expr(slice_exp.end().get()), identity));
-    }
-
-    return emitBuiltinCall(loc, *graph, aten::slice, args, {step}, true);
-}
+    return emitSlice(loc, sliceable, maybe_dim, slice_exp);
+  }
 
   // Desugars gather syntactic sugar foo[i]
-  Value* emitGather(
+  Value* emitBasicGather(
       const SourceRange& loc,
       TreeList&& inputs) {
     const auto applyInputs =
@@ -1612,10 +1670,9 @@ private:
                  loc, *graph, aten::select, {gatherable, idx}, {}, true);
 
     } else {
-      // if it's a single tensor, map tensor[idx] -> tensor.select(0, idx)
-      NamedValue dim = NamedValue(loc, "dim", graph->insertConstant(0, loc));
-      return emitBuiltinCall(
-                 loc, *graph, aten::select, {gatherable, dim, idx}, {}, true);
+      JIT_ASSERT(gatherable.value(*graph)->type()->isSubtypeOf(DynamicType::get()));
+      return emitSelect(
+          loc, gatherable.value(*graph), /*dim=*/0, idx.value(*graph));
     }
   }
 };
