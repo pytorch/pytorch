@@ -148,7 +148,6 @@ function build() {
   BUILD_C_FLAGS=''
   case $1 in
       THCS | THCUNN ) BUILD_C_FLAGS=$C_FLAGS;;
-      nanopb ) BUILD_C_FLAGS=$C_FLAGS" -fPIC -fexceptions";;
       *) BUILD_C_FLAGS=$C_FLAGS" -fexceptions";;
   esac
   # TODO: The *_LIBRARIES cmake variables should eventually be
@@ -184,7 +183,6 @@ function build() {
               -DUSE_CUDA=$USE_CUDA \
               -DNO_NNPACK=$((1-$USE_NNPACK)) \
               -DNCCL_EXTERNAL=1 \
-              -Dnanopb_BUILD_GENERATOR=0 \
               -DCMAKE_DEBUG_POSTFIX="" \
               -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
               ${@:2} \

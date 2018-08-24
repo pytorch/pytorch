@@ -21,8 +21,6 @@ set(TORCH_VERSION "${TORCH_VERSION_MAJOR}.${TORCH_VERSION_MINOR}.${TORCH_VERSION
 set(TORCH_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 set(TORCH_ROOT "${TORCH_SRC_DIR}/..")
 
-add_subdirectory(../third_party/nanopb protobuf-nanopb)
-
 if(NOT TORCH_INSTALL_BIN_DIR)
   set(TORCH_INSTALL_BIN_DIR bin)
 endif()
@@ -282,8 +280,7 @@ if (MSVC)
 endif()
 
 target_link_libraries(torch
-  caffe2_library
-  protobuf-nanopb)
+  caffe2_library)
 
 find_package(OpenMP)
 if(OPENMP_FOUND)
@@ -379,8 +376,7 @@ target_include_directories(torch PUBLIC
 
 # SYSTEM headers are included with -isystem and thus do not trigger warnings.
 target_include_directories(torch SYSTEM PUBLIC
-  "${TORCH_ROOT}/third_party/cereal/include" # For cereal/
-  "${TORCH_ROOT}/third_party/nanopb")
+  "${TORCH_ROOT}/third_party/cereal/include") # For cereal/
 
 set_target_properties(torch PROPERTIES VERSION 1 SOVERSION 1)
 

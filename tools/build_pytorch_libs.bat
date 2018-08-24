@@ -152,7 +152,6 @@ goto:eof
                   -DTHCUNN_SO_VERSION=1 ^
                   -DUSE_CUDA=%USE_CUDA% ^
                   -DNO_NNPACK=%NO_NNPACK% ^
-                  -Dnanopb_BUILD_GENERATOR=0 ^
                   -DCMAKE_BUILD_TYPE=%BUILD_TYPE%
 
   %MAKE_COMMAND%
