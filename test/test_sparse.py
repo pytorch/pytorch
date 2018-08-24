@@ -1054,7 +1054,7 @@ class TestSparse(TestCase):
         self._test_factory_tensor_shape([1, 0], [0, 2, 4, 0], [0, 2, 4, 0], [0, 2, 4, 0])
         self._test_factory_tensor_shape([3, 0], [0, 2, 4, 0], [0, 0, 0, 2, 4, 0], [0, 0, 0, 2, 4, 0])
         self._test_factory_tensor_shape([3, 0], [0, 2, 4, 0], [1, 2, 3, 2, 4, 0], [1, 2, 3, 2, 4, 0])
-    
+
     @skipIfRocm
     def test_factory_dense_dims(self):
         indices = self.IndexTensor([[0]])
@@ -1130,7 +1130,7 @@ class TestSparse(TestCase):
         if torch.cuda.device_count() > 0:
             TestTorch._test_empty_full(self, all_sparse_dtypes, torch.sparse_coo, None)
             TestTorch._test_empty_full(self, all_sparse_dtypes, torch.sparse_coo, torch.device('cuda:0'))
-    
+
     @skipIfRocm
     def test_is_sparse(self):
         x = torch.randn(3, 3)
@@ -1149,7 +1149,7 @@ class TestSparse(TestCase):
             self.assertEqual(t, t + y)
 
         do_test(self.SparseTensor())
-    
+
     @skipIfRocm
     def _test_resize_shape(self, x_i, x_v, x_size, y_i, y_v, y_size):
         x_v_numel = torch.zeros(x_v).numel()
@@ -1172,7 +1172,7 @@ class TestSparse(TestCase):
         # Here we make sure that the original data are preserved after resizing
         self.assertEqual(x.to_dense().view(-1)[0:x_v_numel].view(x_v),
                          x_dense.view(-1)[0:x_v_numel].view(x_v))
-    
+
     @skipIfRocm
     def test_resize(self):
         # 1. Increase the size of some dense dimensions [Supported]
