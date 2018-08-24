@@ -5,14 +5,13 @@ import multiprocessing
 import os
 import sys
 import time
-import tempfile
 import unittest
 from contextlib import contextmanager
 from functools import reduce, wraps
 
 import torch
 import torch.cuda
-import torch.distributed.c10d as dist
+import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
@@ -28,9 +27,6 @@ MASTER_PORT = "29500"
 
 DEFAULT_TIMEOUT = 300
 CUSTOMIZED_TIMEOUT = {"test_DistributedDataParallel": 500}
-
-if INIT_METHOD.startswith("file://"):
-    FOLDER = INIT_METHOD[7:]
 
 
 def get_timeout(test_id):
@@ -365,9 +361,8 @@ class _DistTestBase(object):
         rank_to_GPU = self._init_multigpu_helper()
         self._test_broadcast_helper(group, group_id, rank, True, rank_to_GPU)
 
+    @unittest.skipIf(BACKEND == "nccl", "Nccl does not support newGroup")
     @skip_if_small_worldsize
-    @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
-    @unittest.skipIf(BACKEND == "mpi", "MPI does not support group")
     def test_broadcast_group(self):
         group, group_id, rank = self._init_group_test()
         self._test_broadcast_helper(group, group_id, rank)
@@ -459,8 +454,7 @@ class _DistTestBase(object):
         self._test_reduce_helper(group, group_id, rank, dist.reduce_op.MAX, -1, 10, 10)
 
     @unittest.skipIf(BACKEND == "gloo", "Gloo does not support reduce")
-    @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
-    @unittest.skipIf(BACKEND == "mpi", "MPI does not support group")
+    @unittest.skipIf(BACKEND == "nccl", "Nccl does not support newGroup")
     @skip_if_small_worldsize
     def test_reduce_group_sum(self):
         group, group_id, rank = self._init_group_test()
@@ -475,8 +469,7 @@ class _DistTestBase(object):
         )
 
     @unittest.skipIf(BACKEND == "gloo", "Gloo does not support reduce")
-    @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
-    @unittest.skipIf(BACKEND == "mpi", "MPI does not support group")
+    @unittest.skipIf(BACKEND == "nccl", "Nccl does not support newGroup")
     @skip_if_small_worldsize
     def test_reduce_group_product(self):
         group, group_id, rank = self._init_group_test()
@@ -491,16 +484,14 @@ class _DistTestBase(object):
         )
 
     @unittest.skipIf(BACKEND == "gloo", "Gloo does not support reduce")
-    @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
-    @unittest.skipIf(BACKEND == "mpi", "MPI does not support group")
+    @unittest.skipIf(BACKEND == "nccl", "Nccl does not support newGroup")
     @skip_if_small_worldsize
     def test_reduce_group_min(self):
         group, group_id, rank = self._init_group_test()
         self._test_reduce_helper(group, group_id, rank, dist.reduce_op.MIN, 1010, 1, 1)
 
     @unittest.skipIf(BACKEND == "gloo", "Gloo does not support reduce")
-    @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
-    @unittest.skipIf(BACKEND == "mpi", "MPI does not support group")
+    @unittest.skipIf(BACKEND == "nccl", "Nccl does not support newGroup")
     @skip_if_small_worldsize
     def test_reduce_group_max(self):
         group, group_id, rank = self._init_group_test()
@@ -596,9 +587,8 @@ class _DistTestBase(object):
             group, group_id, rank, dist.reduce_op.MAX, -1, 10, 10
         )
 
+    @unittest.skipIf(BACKEND == "nccl", "Nccl does not support newGroup")
     @skip_if_small_worldsize
-    @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
-    @unittest.skipIf(BACKEND == "mpi", "MPI does not support group")
     def test_all_reduce_group_sum(self):
         group, group_id, rank = self._init_group_test()
         self._test_all_reduce_helper(
@@ -611,9 +601,8 @@ class _DistTestBase(object):
             2 + (10 * (len(group) - 1)),
         )
 
+    @unittest.skipIf(BACKEND == "nccl", "Nccl does not support newGroup")
     @skip_if_small_worldsize
-    @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
-    @unittest.skipIf(BACKEND == "mpi", "MPI does not support group")
     def test_all_reduce_group_product(self):
         group, group_id, rank = self._init_group_test()
         self._test_all_reduce_helper(
@@ -626,18 +615,16 @@ class _DistTestBase(object):
             reduce((lambda x, y: x * y), [10] * (len(group) - 1), 2),
         )
 
+    @unittest.skipIf(BACKEND == "nccl", "Nccl does not support newGroup")
     @skip_if_small_worldsize
-    @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
-    @unittest.skipIf(BACKEND == "mpi", "MPI does not support group")
     def test_all_reduce_group_min(self):
         group, group_id, rank = self._init_group_test()
         self._test_all_reduce_helper(
             group, group_id, rank, dist.reduce_op.MIN, 1010, 1, 1
         )
 
+    @unittest.skipIf(BACKEND == "nccl", "Nccl does not support newGroup")
     @skip_if_small_worldsize
-    @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
-    @unittest.skipIf(BACKEND == "mpi", "MPI does not support group")
     def test_all_reduce_group_max(self):
         group, group_id, rank = self._init_group_test()
         self._test_all_reduce_helper(
@@ -665,7 +652,6 @@ class _DistTestBase(object):
 
     @unittest.skipIf(BACKEND == "gloo", "Gloo does not support scatter")
     @unittest.skipIf(BACKEND == "nccl", "Nccl does not support scatter")
-    @unittest.skipIf(BACKEND == "mpi", "MPI does not support group")
     @skip_if_small_worldsize
     def test_scatter_group(self):
         group, group_id, rank = self._init_group_test()
@@ -693,8 +679,7 @@ class _DistTestBase(object):
         self._test_gather_helper(group, group_id, rank)
 
     @unittest.skipIf(BACKEND == "gloo", "Gloo does not support gather")
-    @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
-    @unittest.skipIf(BACKEND == "mpi", "MPI does not support group")
+    @unittest.skipIf(BACKEND == "nccl", "Nccl does not support newGroup")
     @skip_if_small_worldsize
     def test_gather_group(self):
         group, group_id, rank = self._init_group_test()
@@ -718,7 +703,7 @@ class _DistTestBase(object):
 
         self._barrier()
 
-    @unittest.skipIf(BACKEND != "mpi", "Only MPI supports CPU all gather")
+    @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
     def test_all_gather(self):
         group, group_id, rank = self._init_global_test()
         self._test_all_gather_helper(group, group_id, rank)
@@ -731,10 +716,8 @@ class _DistTestBase(object):
         rank_to_GPU = self._init_multigpu_helper()
         self._test_all_gather_helper(group, group_id, rank, True, rank_to_GPU)
 
+    @unittest.skipIf(BACKEND == "nccl", "Nccl does not support newGroup")
     @skip_if_small_worldsize
-    @unittest.skipIf(BACKEND == "gloo", "Gloo does not support gather")
-    @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
-    @unittest.skipIf(BACKEND == "mpi", "MPI does not support group")
     def test_all_gather_group(self):
         group, group_id, rank = self._init_group_test()
         self._test_all_gather_helper(group, group_id, rank)
@@ -757,14 +740,13 @@ class _DistTestBase(object):
 
         self._barrier()
 
-    @unittest.skipIf(BACKEND != "mpi", "Only MPI supports barrier")
+    @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
     def test_barrier(self):
         group, group_id, rank = self._init_global_test()
         self._test_barrier_helper(group, group_id, rank)
 
+    @unittest.skipIf(BACKEND == "nccl", "Nccl does not support newGroup")
     @skip_if_small_worldsize
-    @unittest.skipIf(BACKEND != "mpi", "Only MPI supports barrier")
-    @unittest.skipIf(BACKEND == "mpi", "MPI does not support group")
     def test_barrier_group(self):
         group, group_id, rank = self._init_group_test()
         self._test_barrier_helper(group, group_id, rank)
@@ -783,7 +765,7 @@ class _DistTestBase(object):
                 self.assertEqual(tensor, expected_tensor)
         self._barrier()
 
-    @unittest.skipIf(BACKEND == "mpi", "MPI doesn't support broadcast multigpu")
+    @unittest.skipIf(BACKEND != "nccl", "Only Nccl backend supports broadcast multigpu")
     @skip_if_no_gpu
     def test_broadcast_multigpu(self):
         group, group_id, rank = self._init_global_test()
@@ -820,7 +802,7 @@ class _DistTestBase(object):
 
         self._barrier()
 
-    @unittest.skipIf(BACKEND == "mpi", "MPI doesn't support broadcast multigpu")
+    @unittest.skipIf(BACKEND != "nccl", "Only Nccl backend supports allreduce multigpu")
     @skip_if_no_gpu
     def test_all_reduce_multigpu(self):
         group, group_id, rank = self._init_global_test()
@@ -1003,7 +985,7 @@ class _DistTestBase(object):
         # DDP training setup
         model_DDP = copy.deepcopy(model)
         model_DDP.cuda(gpu_subset[0])
-        model_DDP = nn.parallel._DistributedDataParallelC10d(
+        model_DDP = nn.parallel.DistributedDataParallel(
             model_DDP, device_ids=gpu_subset
         )
 
@@ -1024,8 +1006,33 @@ class _DistTestBase(object):
         )
         self._barrier()
 
+    @unittest.skipIf(
+        BACKEND == "nccl", "nccl does not support DistributedDataParallelCPU"
+    )
+    def test_DistributedDataParallelCPU(self):
+        # Run a simple end to end DDP-CPU model, use result of single node
+        # model as baseline
+        group, group_id, rank = self._init_global_test()
 
-if BACKEND == "gloo" or BACKEND == "nccl":
+        # cpu training setup
+        model_base = self._create_Net()
+
+        # DDP-CPU training setup
+        model_DDP = copy.deepcopy(model_base)
+        model_DDP = nn.parallel.DistributedDataParallelCPU(model_DDP)
+
+        # dummy data initialization
+        local_bs = 2
+        global_bs, input_cpu, target, loss = self._prepare_dummy_data(local_bs)
+
+        # check two model parameters over 2 iterations
+        self._test_DDP_2iter(
+            model_base, model_DDP, input_cpu, target, loss, local_bs, rank, global_bs
+        )
+        self._barrier()
+
+
+if BACKEND == "tcp" or BACKEND == "gloo" or BACKEND == "nccl":
     WORLD_SIZE = os.environ["WORLD_SIZE"]
 
     class TestDistBackend(TestCase, _DistTestBase):
@@ -1053,13 +1060,6 @@ if BACKEND == "gloo" or BACKEND == "nccl":
                     setattr(cls, attr, cls.manager_join(fn))
 
         def setUp(self):
-            # Adding this hack until we fix the FileStore to delete its
-            # content at the end
-            global INIT_METHOD
-            if INIT_METHOD.startswith("file://"):
-                _, filename = tempfile.mkstemp(prefix=FOLDER)
-                INIT_METHOD = "file://{}".format(filename)
-
             self.processes = []
             self.rank = self.MANAGER_PROCESS_RANK
             Barrier.init()
@@ -1081,10 +1081,7 @@ if BACKEND == "gloo" or BACKEND == "nccl":
             self.rank = rank
             try:
                 dist.init_process_group(
-                    init_method=INIT_METHOD,
-                    backend=BACKEND,
-                    world_size=int(WORLD_SIZE),
-                    rank=self.rank
+                    init_method=INIT_METHOD, backend=BACKEND, world_size=int(WORLD_SIZE)
                 )
             except RuntimeError as e:
                 if "recompile" in e.args[0]:
