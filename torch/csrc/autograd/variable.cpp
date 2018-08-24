@@ -53,6 +53,10 @@ IntList Variable::Impl::strides() const {
   return data_.strides();
 }
 
+bool Variable::Impl::is_contiguous() const {
+  AT_ERROR("variable impl does not have is_contiguous");
+}
+
 int64_t Variable::Impl::dim() const {
   return data_.dim();
 }

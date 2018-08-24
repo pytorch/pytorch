@@ -270,6 +270,7 @@ struct Variable::Impl : public at::TensorImpl {
   int64_t numel() const override;
   at::IntList sizes() const override;
   at::IntList strides() const override;
+  bool is_contiguous() const override;
   int64_t size(int64_t d) const override;
   int64_t stride(int64_t d) const override;
   void resize_dim(int64_t ndim) override;
