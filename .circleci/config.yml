@@ -291,6 +291,8 @@ caffe2_macos_build_defaults: &caffe2_macos_build_defaults
         command: |
           set -ex
 
+          brew install cmake
+
           # Reinitialize submodules
           git submodule update --init --recursive
 
