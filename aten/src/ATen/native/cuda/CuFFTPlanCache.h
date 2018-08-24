@@ -149,7 +149,11 @@ public:
     // TODO: Figure out why windows fails to compile
     //         at::optional<std::vector<long long int>> inembed_opt = at::nullopt;
     //       Then move the following to a helper function.
+#ifdef __HIP_PLATFORM_HCC__
+    std::vector<int> inembed(signal_ndim);
+#else
     std::vector<long long int> inembed(signal_ndim);
+#endif
     if (!clone_input) {
       auto istrides = input.strides();
       auto last_istride = istrides[signal_ndim];
@@ -192,6 +196,37 @@ public:
                 inembed.begin());                      // begin of output
     }
 
+#ifdef __HIP_PLATFORM_HCC__
+
+    hipfftType exec_type;
+    if (input.type().scalarType() == ScalarType::Float) {
+      if (complex_input && complex_output) {
+	exec_type = HIPFFT_C2C;
+      } else if (complex_input && !complex_output) {
+	exec_type = HIPFFT_C2R;
+      } else if (!complex_input && complex_output) {
+	exec_type = HIPFFT_R2C;
+      } else {
+        throw std::runtime_error("hipFFT doesn't support r2r (float)");
+      }
+    } else if (input.type().scalarType() == ScalarType::Double) {
+      if (complex_input && complex_output) {
+        exec_type = HIPFFT_Z2Z;
+      } else if (complex_input && !complex_output) {
+        exec_type = HIPFFT_Z2D;
+      } else if (!complex_input && complex_output) {
+        exec_type = HIPFFT_D2Z;
+      } else {
+        throw std::runtime_error("hipFFT doesn't support r2r (double)");
+      }
+    } else {
+      std::ostringstream ss;
+      ss << "hipFFT doesn't support tensor of type: "
+         << at::toString(input.type().scalarType());
+      throw std::runtime_error(ss.str());
+    }
+
+#else
     cudaDataType itype, otype, exec_type;
     if (input.type().scalarType() == ScalarType::Float) {
       itype = complex_input ? CUDA_C_32F : CUDA_R_32F;
@@ -211,6 +246,7 @@ public:
          << at::toString(input.type().scalarType());
       throw std::runtime_error(ss.str());
     }
+#endif
 
     // create plan
     auto raw_plan_ptr = new cufftHandle();
@@ -229,10 +265,18 @@ public:
       // by assuming base_istride = base_ostride = 1.
       //
       // See NOTE [ cuFFT Embedded Strides ] in native/cuda/SpectralOps.cu.
+#ifdef __HIP_PLATFORM_HCC__
+      int sizes = *signal_sizes.data();
+      CUFFT_CHECK(hipfftMakePlanMany(plan(), signal_ndim, &sizes,
+        /* inembed */ nullptr, /* base_istride */ 1, /* idist */ 1,
+        /* onembed */ nullptr, /* base_ostride */ 1, /* odist */ 1,
+	exec_type, batch, &ws_size_t));
+#else
       CUFFT_CHECK(cufftXtMakePlanMany(plan(), signal_ndim, signal_sizes.data(),
         /* inembed */ nullptr, /* base_istride */ 1, /* idist */ 1, itype,
         /* onembed */ nullptr, /* base_ostride */ 1, /* odist */ 1, otype,
         batch, &ws_size_t, exec_type));
+#endif
     } else {
       // set idist (stride at batch dim)
       // set base_istride (stride at innermost dim of signal)
@@ -254,6 +298,19 @@ public:
       }
 
       // set odist, onembed, base_ostride
+#ifdef __HIP_PLATFORM_HCC__
+      int odist = at::prod_intlist(output_sizes.slice(1, signal_ndim));
+      std::vector<int> onembed(output_sizes.data() + 1, output_sizes.data() + signal_ndim + 1);
+      int base_ostride = 1;
+
+      int sizes = *signal_sizes.data();
+      int istride = base_istride;
+      int iidist = idist;
+      CUFFT_CHECK(hipfftMakePlanMany(plan(), signal_ndim, &sizes,
+        inembed.data(), istride, iidist,
+        onembed.data(), base_ostride, odist,
+        exec_type, batch, &ws_size_t));
+#else
       long long int odist = at::prod_intlist(output_sizes.slice(1, signal_ndim));
       std::vector<long long int> onembed(output_sizes.data() + 1, output_sizes.data() + signal_ndim + 1);
       long long int base_ostride = 1;
@@ -262,11 +319,16 @@ public:
             inembed.data(), base_istride, idist, itype,
             onembed.data(), base_ostride, odist, otype,
             batch, &ws_size_t, exec_type));
-    }
+#endif
+      }
     ws_size = static_cast<int64_t>(ws_size_t);
   }
 
+#ifdef __HIP_PLATFORM_HCC__
+  cufftHandle &plan() const { return *plan_ptr.get(); }
+#else
   const cufftHandle &plan() const { return *plan_ptr.get(); }
+#endif
 
   bool should_clone_input() const { return clone_input; }
 
