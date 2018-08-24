@@ -126,7 +126,6 @@ void rearrangeDims(detail::TensorInfo<T1, IndexType>* aInfo,
 #define AT_APPLY_THREADS_PER_BLOCK 32 * 16
 #define AT_APPLY_BLOCKS_PER_SM 4
 
-// Order for arguments to kernelPointwiseApply need to be changed due to bug in HCC compiler. See PR #10829
 template <typename Op,
           typename scalar1,
           typename scalar2,
@@ -136,10 +135,10 @@ template <typename Op,
 __launch_bounds__(AT_APPLY_THREADS_PER_BLOCK, AT_APPLY_BLOCKS_PER_SM)
 #endif
 __global__ void
-kernelPointwiseApply2(Op op,
-                      detail::TensorInfo<scalar1, IndexType> a,
+kernelPointwiseApply2(detail::TensorInfo<scalar1, IndexType> a,
                       detail::TensorInfo<scalar2, IndexType> b,
-                      IndexType totalElements) {
+                      IndexType totalElements,
+                      Op op) {
   for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
        linearIndex < totalElements;
        linearIndex += gridDim.x * blockDim.x) {
@@ -155,7 +154,7 @@ kernelPointwiseApply2(Op op,
   }
 }
 
-// Order for arguments to kernelPointwiseApply need to be changed due to bug in HCC compiler. See PR #10829
+
 template <typename Op,
           typename scalar1,
           typename scalar2,
@@ -166,11 +165,11 @@ template <typename Op,
 __launch_bounds__(AT_APPLY_THREADS_PER_BLOCK, AT_APPLY_BLOCKS_PER_SM)
 #endif
 __global__ void
-kernelPointwiseApply3(Op op,
-                      detail::TensorInfo<scalar1, IndexType> a,
+kernelPointwiseApply3(detail::TensorInfo<scalar1, IndexType> a,
                       detail::TensorInfo<scalar2, IndexType> b,
                       detail::TensorInfo<scalar3, IndexType> c,
-                      IndexType totalElements) {
+                      IndexType totalElements,
+                      Op op) {
   for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
        linearIndex < totalElements;
        linearIndex += gridDim.x * blockDim.x) {
@@ -190,7 +189,6 @@ kernelPointwiseApply3(Op op,
   }
 }
 
-// Order for arguments to kernelPointwiseApply need to be changed due to bug in HCC compiler. See PR #10829
 template <typename Op,
           typename scalar1,
           typename scalar2,
@@ -202,12 +200,12 @@ template <typename Op,
 __launch_bounds__(AT_APPLY_THREADS_PER_BLOCK, AT_APPLY_BLOCKS_PER_SM)
 #endif
 __global__ void
-kernelPointwiseApply4(Op op,
-                      detail::TensorInfo<scalar1, IndexType> a,
+kernelPointwiseApply4(detail::TensorInfo<scalar1, IndexType> a,
                       detail::TensorInfo<scalar2, IndexType> b,
                       detail::TensorInfo<scalar3, IndexType> c,
                       detail::TensorInfo<scalar4, IndexType> d,
-                      IndexType totalElements) {
+                      IndexType totalElements,
+                      Op op) {
   for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
        linearIndex < totalElements;
        linearIndex += gridDim.x * blockDim.x) {
@@ -326,7 +324,7 @@ bool CUDA_tensor_apply2(at::Tensor a,
                         scalar2,                                        \
                         TYPE, A, B>                                     \
    <<<grid, block, 0, at::cuda::getCurrentCUDAStreamOnDevice(curDevice)>>>(    \
-       op, aInfo, bInfo, (TYPE) totalElements);
+       aInfo, bInfo, (TYPE) totalElements, op);
 
 #define HANDLE_B_CASE(TYPE, A, B) {         \
   switch (B) {                              \
@@ -340,7 +338,7 @@ bool CUDA_tensor_apply2(at::Tensor a,
       HANDLE_CASE(TYPE, A, -1);             \
       break;                                \
   }                                         \
-}
+}                                           
 
 #define HANDLE_A_CASE(TYPE, A, B) {         \
   switch (A) {                              \
@@ -384,7 +382,7 @@ bool CUDA_tensor_apply2(at::Tensor a,
 
     /*
     Only instantiates the all 1D special case and the fallback all nD case for
-    large (64-bit indexed) tensors to reduce compilation time.
+    large (64-bit indexed) tensors to reduce compilation time. 
     */
     if (aInfo.dims == 1 && bInfo.dims == 1) {
       kernelPointwiseApply2<Op,
@@ -392,7 +390,7 @@ bool CUDA_tensor_apply2(at::Tensor a,
                             scalar2,
                           uint64_t, 1, 1>
         <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
-           op, aInfo, bInfo, (uint64_t) totalElements);
+           aInfo, bInfo, (uint64_t) totalElements, op);
     } else {
 #if CUDA_VERSION < 9000
       grid.x = std::min((unsigned int)at::cuda::getCurrentDeviceProperties()->multiProcessorCount * AT_APPLY_BLOCKS_PER_SM , grid.x);
@@ -402,7 +400,7 @@ bool CUDA_tensor_apply2(at::Tensor a,
                             scalar2,
                             uint64_t, -1, -1>
         <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
-           op, aInfo, bInfo, (uint64_t) totalElements);
+           aInfo, bInfo, (uint64_t) totalElements, op);
     }
   }
 #undef HANDLE_CASE
@@ -506,7 +504,7 @@ bool CUDA_tensor_apply3(at::Tensor a,
                         scalar3,                                        \
                         TYPE, A, B, C>                                  \
     <<<grid, block, 0, at::cuda::getCurrentCUDAStreamOnDevice(curDevice)>>>(   \
-      op, aInfo, bInfo, cInfo, (TYPE) totalElements);
+      aInfo, bInfo, cInfo, (TYPE) totalElements, op);
 
 #define HANDLE_C_CASE(TYPE, A, B, C) {      \
   switch (C) {                              \
@@ -589,7 +587,7 @@ bool CUDA_tensor_apply3(at::Tensor a,
 
     /*
     Only instantiates the all 1D special case and the fallback all nD case for
-    large (64-bit indexed) tensors to reduce compilation time.
+    large (64-bit indexed) tensors to reduce compilation time. 
     */
     if (aInfo.dims == 1 && bInfo.dims == 1 && cInfo.dims == 1) {
       kernelPointwiseApply3<Op,
@@ -598,7 +596,7 @@ bool CUDA_tensor_apply3(at::Tensor a,
                             scalar3,
                             uint64_t, 1, 1, 1>
         <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
-          op, aInfo, bInfo, cInfo, (uint64_t) totalElements);
+          aInfo, bInfo, cInfo, (uint64_t) totalElements, op);
     } else {
 #if CUDA_VERSION < 9000
   grid.x = std::min((unsigned int)at::cuda::getCurrentDeviceProperties()->multiProcessorCount * AT_APPLY_BLOCKS_PER_SM , grid.x);
@@ -610,7 +608,7 @@ bool CUDA_tensor_apply3(at::Tensor a,
                         scalar3,
                         uint64_t, -1, -1, -1>
         <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
-          op, aInfo, bInfo, cInfo, (uint64_t) totalElements);
+          aInfo, bInfo, cInfo, (uint64_t) totalElements, op);
     }
   }
 #undef HANDLE_CASE
@@ -734,7 +732,7 @@ bool CUDA_tensor_apply4(at::Tensor a,
                         scalar4,                                        \
                         TYPE, A, B, C, D>                               \
     <<<grid, block, 0, at::cuda::getCurrentCUDAStreamOnDevice(curDevice)>>>(   \
-    op, aInfo, bInfo, cInfo, dInfo, (TYPE) totalElements);
+    aInfo, bInfo, cInfo, dInfo, (TYPE) totalElements, op);
 
 #define HANDLE_D_CASE(TYPE, A, B, C, D) {       \
   switch (D) {                                  \
@@ -840,7 +838,7 @@ bool CUDA_tensor_apply4(at::Tensor a,
 
     /*
     Only instantiates the all 1D special case and the fallback all nD case for
-    large (64-bit indexed) tensors to reduce compilation time.
+    large (64-bit indexed) tensors to reduce compilation time. 
     */
     if (aInfo.dims == 1 && bInfo.dims == 1 && cInfo.dims == 1 && dInfo.dims == 1) {
       kernelPointwiseApply4<Op,
@@ -850,7 +848,7 @@ bool CUDA_tensor_apply4(at::Tensor a,
                             scalar4,
                             uint64_t, 1, 1, 1, 1>
         <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
-          op, aInfo, bInfo, cInfo, dInfo, (uint64_t) totalElements);
+          aInfo, bInfo, cInfo, dInfo, (uint64_t) totalElements, op);
     } else {
 #if CUDA_VERSION < 9000
   grid.x = std::min((unsigned int)at::cuda::getCurrentDeviceProperties()->multiProcessorCount * AT_APPLY_BLOCKS_PER_SM , grid.x);
@@ -863,7 +861,7 @@ bool CUDA_tensor_apply4(at::Tensor a,
                         scalar4,
                         uint64_t, -1, -1, -1, -1>
         <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
-          op, aInfo, bInfo, cInfo, dInfo, (uint64_t) totalElements);
+          aInfo, bInfo, cInfo, dInfo, (uint64_t) totalElements, op);
     }
   }
 #undef HANDLE_CASE
