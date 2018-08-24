@@ -873,6 +873,9 @@
 - func: index_put_(Tensor self, TensorList indices, Tensor values) -> Tensor
   variants: function, method
 
+- func: instance_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool use_input_stats, double momentum, double eps, bool cudnn_enabled) -> Tensor
+  variants: function
+
 - func: inverse(Tensor self) -> Tensor
   variants: function, method
 
