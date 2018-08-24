@@ -278,7 +278,7 @@ class TracingCheckError(Exception):
 def check_trace(check_inputs, func, executor_options, module):
     for inputs in check_inputs:
         check_mod = TopLevelTracedModule(func, **executor_options)
-        check_mod._create_method_from_trace('forward', func, tuple(i.clone() for i in inputs))
+        check_mod._create_method_from_trace('forward', func, _clone_inputs(inputs))
 
         def graph_diagnostic_info():
             mod_canonicalized = torch._C._jit_pass_canonicalize(module.graph)
@@ -338,30 +338,34 @@ def check_trace(check_inputs, func, executor_options, module):
             return x
 
         try:
-            traced_outs = wrap_non_iterable(module(*[i.clone() for i in inputs]))
+            traced_outs = wrap_non_iterable(module(*_clone_inputs(inputs)))
+            # TODO: multi-level nested compare of results.
+            traced_outs = [out for out in traced_outs if isinstance(out, torch.Tensor)]
         except Exception as e:
             raise TracingCheckError(*graph_diagnostic_info())
 
         try:
-            fn_outs = wrap_non_iterable(func(*[i.clone() for i in inputs]))
+            fn_outs = wrap_non_iterable(func(*_clone_inputs(inputs)))
+            fn_outs = [out for out in fn_outs if isinstance(out, torch.Tensor)]
             for orig, check in zip(traced_outs, fn_outs):
-                np.testing.assert_allclose(orig.detach().numpy(), check.detach().numpy())
+                np.testing.assert_allclose(orig.detach().cpu().numpy(), check.detach().cpu().numpy())
         except AssertionError as e:
             # TODO: interpose on tracing the function again and check for
             # divergence? then we can point to where in the source code
             # we start diverging in python v.s. the trace
+            msg = 'ERROR: Traced function outputs do not match the Python function outputs.\nException: ' + str(e)
             raise TracingCheckError(*graph_diagnostic_info(),
-                                    extra_msg='ERROR: Traced function outputs do not '
-                                              'match the Python function outputs.')
+                                    extra_msg=msg)
 
         try:
-            check_outs = wrap_non_iterable(check_mod(*[i.clone() for i in inputs]))
+            check_outs = wrap_non_iterable(check_mod(*_clone_inputs(inputs)))
+            check_outs = [out for out in check_outs if isinstance(out, torch.Tensor)]
         except Exception as e:
             raise TracingCheckError(*graph_diagnostic_info())
 
         try:
             for orig, check in zip(traced_outs, check_outs):
-                np.testing.assert_allclose(orig.detach().numpy(), check.detach().numpy())
+                np.testing.assert_allclose(orig.detach().cpu().numpy(), check.detach().cpu().numpy())
         except AssertionError as e:
             raise TracingCheckError(*graph_diagnostic_info())
 

@@ -6006,7 +6006,8 @@ a")
                 return x + y.unsqueeze(1)
 
     def test_trace_checker_dot_data(self):
-        with self.assertRaisesRegex(torch.jit.TracingCheckError, r'Tensor-valued Constant nodes differed in value across invocations'):
+        with self.assertRaisesRegex(torch.jit.TracingCheckError, r'Tensor-valued Constant nodes differed in value '
+                                                                 r'across invocations'):
             @torch.jit.trace(torch.rand(3, 4), check_inputs=[(torch.rand(3, 4),)])
             def foo(x):
                 y = x.data
@@ -6030,7 +6031,8 @@ a")
             traced = torch.jit.trace(torch.rand(3, 4), check_inputs=[(torch.rand(3, 4),)])(foo)
 
     def test_trace_checker_slice_lhs(self):
-        with self.assertRaisesRegex(torch.jit.TracingCheckError, r'Traced function outputs do not match the Python function outputs'):
+        with self.assertRaisesRegex(torch.jit.TracingCheckError, r'Traced function outputs do not match the Python'
+                                                                 r' function outputs'):
             @torch.jit.trace(torch.rand(3, 4), check_inputs=[(torch.rand(3, 4),)])
             def foo(x):
                 for i in range(3):
@@ -6038,7 +6040,8 @@ a")
                 return x
 
     def test_trace_checker_inplace_on_view(self):
-        with self.assertRaisesRegex(torch.jit.TracingCheckError, r'Traced function outputs do not match the Python function outputs'):
+        with self.assertRaisesRegex(torch.jit.TracingCheckError, r'Traced function outputs do not match the Python'
+                                                                 r' function outputs'):
             @torch.jit.trace(torch.rand(3, 4), check_inputs=[(torch.rand(5, 6),)])
             def foo(x):
                 x.view(-1).add_(-x.view(-1))
