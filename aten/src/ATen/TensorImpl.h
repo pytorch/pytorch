@@ -155,7 +155,7 @@ struct AT_API TensorImpl : public Retainable {
   }
 
   // WARNING: This function does not check if the requested
-  // sizes/strides are in bounds bounds for the storage that is allocated;
+  // sizes/strides are in bounds for the storage that is allocated;
   // this is the responsibility of the caller
   void set_sizes_and_strides(at::IntList new_size, at::IntList new_stride) {
     AT_CHECK(
