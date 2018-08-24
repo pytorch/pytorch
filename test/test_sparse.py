@@ -107,7 +107,6 @@ class TestSparse(TestCase):
         # TODO: Put this in torch.cuda.randn
         return self.ValueTensor(*args, **kwargs).normal_()
 
-    @skipIfRocm
     def test_basic(self):
         x, i, v = self._gen_sparse(3, 10, 100)
 
@@ -156,7 +155,6 @@ class TestSparse(TestCase):
             RuntimeError,
             lambda: self.SparseTensor(indices, values, torch.Size([2, 4, 2, 1])))
 
-    @skipIfRocm
     def test_to_dense(self):
         i = self.IndexTensor([
             [0, 1, 2, 2],
@@ -186,7 +184,6 @@ class TestSparse(TestCase):
         self.assertEqual(res, x.to_dense())
         self.assertEqual(res, self.safeToDense(x))
 
-    @skipIfRocm
     def test_shared(self):
         i = self.IndexTensor([[2]])
         v = self.ValueTensor([5])
@@ -196,7 +193,6 @@ class TestSparse(TestCase):
         i[0][0] = 0
         self.assertEqual(self.ValueTensor([6, 0, 0]), self.safeToDense(x))
 
-    @skipIfRocm
     def test_to_dense_hybrid(self):
         i = self.IndexTensor([
             [0, 1, 2, 2],
@@ -225,7 +221,6 @@ class TestSparse(TestCase):
         self.assertEqual(res, x.to_dense())
         self.assertEqual(res, self.safeToDense(x))
 
-    @skipIfRocm
     def test_contig(self):
         i = self.IndexTensor([
             [1, 0, 35, 14, 39, 6, 71, 66, 40, 27],
@@ -279,7 +274,6 @@ class TestSparse(TestCase):
         self.assertEqual(exp_i, x._indices())
         self.assertEqual(exp_v, x._values())
 
-    @skipIfRocm
     def test_contig_hybrid(self):
         i = self.IndexTensor([
             [1, 0, 35, 14, 39, 6, 71, 66, 40, 27],
@@ -339,7 +333,6 @@ class TestSparse(TestCase):
         self.assertEqual(exp_i, x._indices())
         self.assertEqual(exp_v, x._values())
 
-    @skipIfRocm
     def test_clone(self):
         x, _, _ = self._gen_sparse(4, 20, 5)
         if self.is_uncoalesced:
@@ -361,7 +354,6 @@ class TestSparse(TestCase):
         self.assertEqual(y._sparseDims(), x._sparseDims())
         self.assertEqual(y._denseDims(), x._denseDims())
 
-    @skipIfRocm
     def test_transpose(self):
         x = self._gen_sparse(4, 20, 5)[0]
         y = self.safeToDense(x)
@@ -410,7 +402,6 @@ class TestSparse(TestCase):
         self.assertEqual(x._sparseDims(), 2)
         self.assertEqual(x._denseDims(), 0)
 
-    @skipIfRocm
     def test_add_zeros(self):
         def test_shape(sparse_dims, sizes):
             x, _, _ = self._gen_sparse(sparse_dims, 20, sizes)
@@ -474,7 +465,6 @@ class TestSparse(TestCase):
         test_shape(1000, 100, 100)
         test_shape(3000, 64, 300)
 
-    @skipIfRocm
     def test_dsmm(self):
         def test_shape(di, dj, dk):
             x = self._gen_sparse(2, 20, [di, dj])[0]
@@ -488,7 +478,6 @@ class TestSparse(TestCase):
         test_shape(1000, 100, 100)
         test_shape(3000, 64, 300)
 
-    @skipIfRocm
     def test_hsmm(self):
         def test_shape(di, dj, dk):
             x = self._gen_sparse(2, 20, [di, dj])[0]
