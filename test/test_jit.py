@@ -592,6 +592,8 @@ class TestJit(JitTestCase):
         self.assertTrue(torch.all(out2 >= 0))
         self.assertTrue(torch.all(out2 < 1))
 
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_fusion_arg_configurations(self):
         # A smoke test to make sure we won't use the same kernel for contiguous
         # and non-contiguous arguments.
