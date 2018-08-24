@@ -275,7 +275,7 @@ class TracingCheckError(Exception):
 
 
 # Check the traced module against a set of user-provided validation inputs
-def check_trace(check_inputs, func, executor_options, module, check_tolerance):
+def check_trace(check_inputs, func, executor_options, module):
     for inputs in check_inputs:
         check_mod = TopLevelTracedModule(func, **executor_options)
         check_mod._create_method_from_trace('forward', func, _clone_inputs(inputs))
@@ -342,14 +342,14 @@ def check_trace(check_inputs, func, executor_options, module, check_tolerance):
             # TODO: multi-level nested compare of results.
             traced_outs = [out for out in traced_outs if isinstance(out, torch.Tensor)]
         except Exception as e:
-            raise TracingCheckError(*graph_diagnostic_info())
+            msg = 'Encountered an exception while running trace with check inputs.\nException:\n' + indent(str(e))
+            raise TracingCheckError(*graph_diagnostic_info(), extra_msg=msg)
 
         try:
             fn_outs = wrap_non_iterable(func(*_clone_inputs(inputs)))
             fn_outs = [out for out in fn_outs if isinstance(out, torch.Tensor)]
             for orig, check in zip(traced_outs, fn_outs):
-                np.testing.assert_allclose(orig.detach().cpu().numpy(), check.detach().cpu().numpy(),
-                                           rtol=check_tolerance)
+                np.testing.assert_allclose(orig.detach().cpu().numpy(), check.detach().cpu().numpy())
         except AssertionError as e:
             # TODO: interpose on tracing the function again and check for
             # divergence? then we can point to where in the source code
@@ -362,12 +362,13 @@ def check_trace(check_inputs, func, executor_options, module, check_tolerance):
             check_outs = wrap_non_iterable(check_mod(*_clone_inputs(inputs)))
             check_outs = [out for out in check_outs if isinstance(out, torch.Tensor)]
         except Exception as e:
-            raise TracingCheckError(*graph_diagnostic_info())
+            msg = 'Encountered an exception while running checking trace with check inputs.\nException:\n' \
+                + indent(str(e))
+            raise TracingCheckError(*graph_diagnostic_info(), extra_msg=msg)
 
         try:
             for orig, check in zip(traced_outs, check_outs):
-                np.testing.assert_allclose(orig.detach().cpu().numpy(), check.detach().cpu().numpy(),
-                                           rtol=check_tolerance)
+                np.testing.assert_allclose(orig.detach().cpu().numpy(), check.detach().cpu().numpy())
         except AssertionError as e:
             raise TracingCheckError(*graph_diagnostic_info())
 
@@ -410,11 +411,10 @@ def trace(*args, **kwargs):
         # Check the trace against new traces created from user-specified inputs
         check_inputs = kwargs.pop('check_inputs', None)
         disable_checks = kwargs.pop('disable_checks', False)
-        check_tolerance = kwargs.pop('check_tolerance', 1e-7)
         if check_inputs is not None:
-            check_trace(check_inputs, func, executor_options, module, check_tolerance)
+            check_trace(check_inputs, func, executor_options, module)
         elif not disable_checks:
-            check_trace([args], func, executor_options, module, check_tolerance)
+            check_trace([args], func, executor_options, module)
 
         if len(kwargs) != 0:
             raise TypeError("got unexpected keyword arguments: {}".format(", ".join(kwargs.keys())))
