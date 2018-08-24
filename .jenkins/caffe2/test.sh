@@ -121,7 +121,12 @@ if [[ $BUILD_ENVIRONMENT == *-rocm* ]]; then
   export HIP_VISIBLE_DEVICES=$(($BUILD_NUMBER % 4))
 fi
 
+# yf225 TODO: remove this when we are running tests on 2-GPU machines on CircleCI
+two_gpu_ignore_test=()
+two_gpu_ignore_test+=("--ignore $CAFFE2_PYPATH/python/data_parallel_model_test.py")
+
 # Python tests
+# yf225 TODO: remove two_gpu_ignore_test when we are running tests on 2-GPU machines on CircleCI
 echo "Running Python tests.."
 "$PYTHON" \
   -m pytest \
@@ -134,6 +139,7 @@ echo "Running Python tests.."
   --ignore "$CAFFE2_PYPATH/python/mkl/mkl_sbn_speed_test.py" \
   ${conda_ignore_test[@]} \
   ${rocm_ignore_test[@]} \
+  ${two_gpu_ignore_test[@]} \
   "$CAFFE2_PYPATH/python" \
   "${EXTRA_TESTS[@]}"
 
