@@ -31,25 +31,6 @@ struct Foo<Half> {
   static void apply(Tensor a, Tensor b) {}
 };
 
-void test_ctors() {
-  // create scalars backed by tensors
-  auto s1 = Scalar(CPU(kFloat).scalarTensor(1));
-  auto s2 = Scalar(CPU(kFloat).scalarTensor(2));
-  Scalar{s1};
-  Scalar{std::move(s2)};
-  REQUIRE(s2.isBackedByTensor());
-  REQUIRE(!s2.toTensor().defined());
-  s2 = s1;
-  REQUIRE(s2.isBackedByTensor());
-  REQUIRE(s2.toFloat() == 1.0);
-  Scalar s3;
-  s3 = std::move(s2);
-  REQUIRE(s2.isBackedByTensor());
-  REQUIRE(!s2.toTensor().defined());
-  REQUIRE(s3.isBackedByTensor());
-  REQUIRE(s3.toFloat() == 1.0);
-}
-
 void test_overflow() {
   auto s1 = Scalar(M_PI);
   REQUIRE(s1.toFloat() == static_cast<float>(M_PI));
@@ -109,9 +90,8 @@ TEST_CASE( "scalar test", "[]" ) {
   Tensor next_h = i2h.add(h2h);
   next_h = next_h.tanh();
 
-  REQUIRE_THROWS(Scalar{Tensor{}});
+  REQUIRE_THROWS(Tensor{}._local_scalar());
 
-  test_ctors();
   test_overflow();
 
   if(at::hasCUDA()) {
@@ -123,7 +103,7 @@ TEST_CASE( "scalar test", "[]" ) {
   // check Scalar.toTensor on Scalars backed by different data types
   REQUIRE(bar.toTensor().type().scalarType() == kDouble);
   REQUIRE(what.toTensor().type().scalarType() == kLong);
-  REQUIRE(Scalar(ones({})).toTensor().type().scalarType() == kFloat);
+  REQUIRE(ones({})._local_scalar().toTensor().type().scalarType() == kDouble);
 
   if (x.type().scalarType() != ScalarType::Half) {
     AT_DISPATCH_ALL_TYPES(x.type(), "foo", [&] {
