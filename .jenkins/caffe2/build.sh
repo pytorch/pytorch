@@ -157,6 +157,7 @@ if [[ $BUILD_ENVIRONMENT == *rocm* ]]; then
   export HCC_AMDGPU_TARGET=gfx900
 
   ########## HIPIFY Caffe2 operators
+  ${PYTHON} "${ROOT_DIR}/tools/amd_build/build_pytorch_amd.py"
   ${PYTHON} "${ROOT_DIR}/tools/amd_build/build_caffe2_amd.py"
 fi
 
@@ -188,7 +189,6 @@ if [[ "${BUILD_ENVIRONMENT}" == *-cuda* ]] && [ -n "${SCCACHE}" ]; then
 else
   MAX_JOBS=$(nproc)
 fi
-
 
 
 ###############################################################################

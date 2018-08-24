@@ -487,9 +487,9 @@ using NNSubgraphMatcher =
     nom::matcher::SubgraphMatcher<NNGraph, NNNodeMatchCriteria, NNNodeMatch>;
 
 // This helper method makes it easy to create matching criteria in NNGraph.
-// For example, operatorTree(opMatch, ...) will refer to a tree like this:
+// For example, operatorSubgraph(opMatch, ...) will refer to a tree like this:
 // ... -> opMatch -> opMatch_Output
-NNMatchGraph::NodeRef operatorTree(
+NNMatchGraph::NodeRef operatorSubgraph(
     NNMatchGraph& g,
     const NNNodeMatchCriteria& root,
     const std::vector<NNMatchGraph::NodeRef>& childrenCriteria = {},
