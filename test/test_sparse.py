@@ -1028,6 +1028,7 @@ class TestSparse(TestCase):
         expected_indices = torch.empty((4, 0), dtype=torch.long, device=device)
         self.assertEqual(tensor._indices(), expected_indices)
 
+    @skipIfRocm
     def test_factory_nnz(self):
         indices = self.IndexTensor([[0]])  # (sparseDims, nnz): (1, 1)
         values = self.ValueTensor([[1, 1], [1, 1]])  # (nnz, ...): (2, 2)
