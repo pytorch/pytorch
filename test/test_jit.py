@@ -2037,13 +2037,13 @@ class TestScript(JitTestCase):
             a, b = x
             return b, a
 
-        a = (torch.ones(3), torch.ones(3))
+        a = (torch.rand(3), torch.rand(3))
         self.checkScript(stuff, (a,))
 
     def test_tuple_create_return(self):
         def stuff2(x):
             # type: (int) -> Tuple[Tensor, Tensor]
-            a = (torch.ones(x), torch.ones(x))
+            a = (torch.ones(x), torch.zeros(x))
             return a
         self.checkScript(stuff2, (3,))
 
@@ -6796,9 +6796,10 @@ class TestCustomOperators(JitTestCase):
 
     def test_passing_and_returning_lists(self):
         # Replace with actual test once we support lists.
-        a, b = torch.ones(5), torch.ones(5)
+        a, b = torch.rand(5), torch.rand(5)
         output = torch.ops.aten.cat([a, b])
-        self.assertEqual(output, torch.ones(10))
+        output_ref = torch.cat([a, b])
+        self.assertEqual(output, output_ref)
 
     def test_script_graph_contains_custom_op(self):
         @torch.jit.script

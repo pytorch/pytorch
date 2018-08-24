@@ -233,6 +233,7 @@ void PropagateCatShape(Node * cat_node) {
     }
     node->output()->setType(input_types[0]->withSizes(sizes));
     return true;
+<<<<<<< HEAD
   };
   static const auto propagate = [](Node * node, at::ArrayRef<Value*> tensors) -> bool {
     for (Value * v : tensors) {

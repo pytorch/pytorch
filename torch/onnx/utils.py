@@ -131,6 +131,8 @@ def _optimize_graph(graph, operator_export_type):
 
     # onnx only supports tensors, so we turn all out number types into tensors
     torch._C._jit_pass_erase_number_types(graph)
+    # onnx does not support tuples, so try to remove them
+    torch._C._jit_pass_lower_all_tuples(graph)
     torch._C._jit_pass_peephole(graph)
     torch._C._jit_pass_lint(graph)
 
