@@ -84,6 +84,9 @@ struct ArgumentSpec {
   // there are no size/stride indirections
   bool operator==(const ArgumentSpec & spec) const {
     if (args.size() != spec.args.size()) return false;
+    // NB: we need to break out early when there are no elements, because passing a
+    // nullptr to memcmp is UB.
+    if (args.size() == 0) return true;
     return std::memcmp(args.data(), spec.args.data(), args.size() * sizeof(ArgumentInfo)) == 0;
   }
   bool operator!=(const ArgumentSpec & spec) const {

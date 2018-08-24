@@ -1406,7 +1406,7 @@ at::optional<std::vector<int64_t>> FusedKernelCache::getMapSize(at::TensorList a
       if (dim < 0) {
         dim += arg.dim();
       }
-      JIT_ASSERT(dim >= 0 && dim <= tensor_sizes.size());
+      JIT_ASSERT(dim >= 0 && dim <= static_cast<int64_t>(tensor_sizes.size()));
       if (tensor_sizes[dim] % num_chunks != 0) {
         return at::nullopt;
       }
@@ -1533,10 +1533,10 @@ std::vector<at::Tensor> FusionCompiler::debugLaunchGraph(Graph & graph, int devi
   auto wrapper_graph = std::make_shared<Graph>();
   Node * fusion_group = wrapper_graph->insertNode(wrapper_graph->createFusionGroup(device));
   fusion_group->g_(attr::Subgraph, graph.copy());
-  for (Value * input : graph.inputs()) {
+  for (size_t i = 0; i < graph.inputs().size(); ++i) {
     fusion_group->addInput(wrapper_graph->addInput());
   }
-  for (Value * output : graph.outputs()) {
+  for (size_t i = 0; i < graph.outputs().size(); ++i) {
     wrapper_graph->registerOutput(fusion_group->addOutput());
   }
   auto cache = getOrCompile(fusion_group);
@@ -1598,12 +1598,6 @@ FusionCompiler & sharedFusionCompiler() {
 #include <iostream>
 
 namespace torch { namespace jit {
-
-FusedKernel::FusedKernel(const std::string & name, AnnotatedGraph & agraph) {}
-
-void FusedKernel::launch_with_tensors(at::ArrayRef<at::Tensor> inputs, at::ArrayRef<at::Tensor> outputs) {}
-
-void FusedKernel::launch(at::ArrayRef<at::Tensor> inputs, std::vector<at::Tensor> & outputs) {}
 
 std::shared_ptr<FusedKernelCache> FusionCompiler::getOrCompile(Node* fusion_group) {
   return nullptr;
