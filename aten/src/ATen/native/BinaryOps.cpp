@@ -74,8 +74,11 @@ Tensor& mul_out(Tensor& result, const Tensor& self, const Tensor& other) {
     if (self.is_sparse() && other.is_sparse()) {
       return at::_sparse_mul_out(result, self, other);
     }
-    else {
+    else if (self.is_sparse()) {
       return at::_sparse_dense_mul_out(result, self, other);
+    }
+    else {
+      AT_ERROR("mul_out: self has to be sparse");
     }
   }
   auto iter = TensorIterator::binary_op(result, self, other);
@@ -92,13 +95,17 @@ Tensor& mul_(Tensor& self, const Tensor& other) {
   return native::mul_out(self, self, other);
 }
 
-Tensor sparse_mul(const Tensor& self, const Tensor& dense) {
+Tensor sparse_mul(const Tensor& self, const Tensor& other) {
+  // sparse inputs need to be coalesced to make backward work correctly
+  // TODO: support autograd for coalesce() and remove these checks
+  AT_CHECK(self.is_coalesced(), "sparse_mul: self is uncoalesced");
+  if (other.is_sparse()) AT_CHECK(other.is_coalesced(), "sparse_mul: other is uncoalesced");
   Tensor result;
-  return native::mul_out(result, self, dense);
+  return native::mul_out(result, self, other);
 }
 
-Tensor& sparse_mul_(Tensor& self, const Tensor& dense) {
-  return native::mul_out(self, self, dense);
+Tensor& sparse_mul_(Tensor& self, const Tensor& other) {
+  return native::mul_out(self, self, other);
 }
 
 Tensor& sub_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar alpha) {
@@ -172,6 +179,15 @@ Tensor sub(const Tensor& self, Scalar other, Scalar alpha) {
 
 Tensor& sub_(Tensor& self, Scalar other, Scalar alpha) {
   return native::sub_(self, scalar_tensor(other), alpha);
+}
+
+Tensor sparse_mul(const Tensor& self, Scalar other) {
+  Tensor result;
+  return native::sparse_mul(self, scalar_tensor(other));
+}
+
+Tensor& sparse_mul_(Tensor& self, Scalar other) {
+  return native::sparse_mul_(self, scalar_tensor(other));
 }
 
 }

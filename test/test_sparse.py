@@ -425,16 +425,42 @@ class TestSparse(TestCase):
         test_shape(2, [3, 17, 19, 5])
 
     def test_mul_sparse_and_dense(self):
-        s, _, _ = self._gen_sparse(3, 10, 100)
-        d = s.to_dense()
-
         # raise error at backward of mul(Sparse, Dense)
-        s_var = s.requires_grad_()
-        d_var = d.requires_grad_()
+        s, _, _ = self._gen_sparse(3, 10, 100)
+        d = torch.ones_like(s.to_dense())
+        s.requires_grad_()
+        d.requires_grad_()
 
-        y = s_var.mul(d_var)
-        input = s.clone()
+        y = s.mul(d)
+        input, _, _ = self._gen_sparse(3, 10, 100)
         self.assertRaises(RuntimeError, lambda: y.backward(input))
+
+        # autograd for sparse_mul(Sparse, Dense)
+        s, _, _ = self._gen_sparse(3, 10, 100)
+        d = torch.ones_like(s.to_dense())
+        s = s.coalesce()
+        s_ones = s.clone()
+        s_ones._values().fill_(1)
+        s.requires_grad_()
+        d.requires_grad_()
+
+        y = s.sparse_mul(d)
+        y.backward(input)
+        self.assertTrue(s.grad.is_sparse)
+        self.assertEqual(s.grad.to_dense(), input.mul(s_ones).to_dense())
+        self.assertEqual(d.grad, s.to_dense().mul_(input.to_dense()))
+
+        # autograd for sparse_mul(Sparse, Sparse)
+        s2, _, _ = self._gen_sparse(3, 10, 100)
+        s2 = s2.coalesce()
+        s2_ones = s2.clone()
+        s2_ones._values().fill_(1)
+        s2.requires_grad_()
+        y = s.sparse_mul(s2)
+        y.backward(input)
+        self.assertTrue(s.grad.is_sparse)
+        self.assertEqual(s.grad.to_dense(), input.mul(s_ones).to_dense())
+        self.assertEqual(s2.grad.to_dense(), input.mul(s2_ones).to_dense())
 
     @cpu_only
     def test_mm(self):
@@ -827,6 +853,10 @@ class TestSparse(TestCase):
             '_denseDims': lambda x: x._denseDims(),
             'norm': lambda x: x.norm(),
             'log1p': lambda x: x.log1p(),
+            'mul': lambda x: x.mul(5),
+            'mul_': lambda x: x.mul_(5),
+            'sparse_mul': lambda x: x.coalesce().sparse_mul(5),
+            'sparse_mul_': lambda x: x.coalesce().sparse_mul_(5),
         }
 
         for test_name, test_fn in to_test_one_arg.items():
@@ -858,6 +888,8 @@ class TestSparse(TestCase):
             'sub_': lambda x, y: x.sub_(y),
             'mul': lambda x, y: x.mul(y),
             'mul_': lambda x, y: x.mul_(y),
+            'sparse_mul': lambda x, y: x.coalesce().sparse_mul(y.coalesce()),
+            'sparse_mul_': lambda x, y: x.coalesce().mul_(y.coalesce()),
         }
 
         for test_name, test_fn in to_test_two_arg.items():
@@ -880,8 +912,8 @@ class TestSparse(TestCase):
             ('mm_out', lambda sp, de: torch.mm(sp, de, out=de), True),
             ('mul', lambda sp, de: sp.mul(de), True),
             ('mul_', lambda sp, de: sp.mul_(de), True),
-            ('sparse_mul', lambda sp, de: sp.sparse_mul(de), True),
-            ('sparse_mul_', lambda sp, de: sp.sparse_mul_(de), True),
+            ('sparse_mul', lambda sp, de: sp.coalesce().sparse_mul(de), True),
+            ('sparse_mul_', lambda sp, de: sp.coalesce().sparse_mul_(de), True),
             ('mul_out', lambda sp, de: torch.mul(sp, de, out=sp), True),
         ]
 

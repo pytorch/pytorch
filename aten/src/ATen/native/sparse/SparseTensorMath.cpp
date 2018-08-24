@@ -355,6 +355,7 @@ SparseTensor& mul_out_sparse_cpu(SparseTensor& r, const SparseTensor& t_, const 
   AT_ASSERT(!t_.is_cuda()); // dispatch argument
   AT_CHECK(!r.is_cuda(), "mul: expected 'out' to be CPU tensor, but got CUDA tensor");
   AT_CHECK(!src_.is_cuda(), "mul: expected 'other' to be a CPU tensor, but got a CUDA tensor");
+  AT_CHECK(t_.sizes().equals(src_.sizes()), "mul: expected 'self' and 'other' to have same sizes, but ", t_.sizes(), " != ", src_.sizes());
 
   if (src_._nnz() == 0 || t_._nnz() == 0) {
     return r.zero_();
@@ -474,22 +475,21 @@ void mul_out_sparse_dense_cpu_worker(
   });
 }
 
-SparseTensor& mul_out_sparse_dense_cpu(SparseTensor& r, const SparseTensor& t_, const Tensor& dense) {
+// NB: t does not have to be coalesced
+SparseTensor& mul_out_sparse_dense_cpu(SparseTensor& r, const SparseTensor& t, const Tensor& dense) {
   if (dense.dim() == 0) {
-    return mul_out_sparse_scalar(r, t_, Scalar(dense));
+    return mul_out_sparse_scalar(r, t, Scalar(dense));
   }
 
-  AT_CHECK(t_.sizes().equals(dense.sizes()), "mul: expected 'self' and 'other' to have same sizes, but ", t_.sizes(), " != ", dense.sizes());
-  AT_ASSERT(!t_.is_cuda()); // dispatch argument
+  AT_CHECK(t.sizes().equals(dense.sizes()), "mul: expected 'self' and 'other' to have same sizes, but ", t.sizes(), " != ", dense.sizes());
+  AT_ASSERT(!t.is_cuda()); // dispatch argument
   AT_CHECK(!r.is_cuda(), "mul: expected 'out' to be CPU tensor, but got CUDA tensor");
   AT_CHECK(!dense.is_cuda(), "mul: expected 'other' to be a CPU tensor, but got a CUDA tensor");
-  AT_CHECK(t_._values().dim() == 1, "only support mul(result, sparse, dense) with sparse._values() dim = 1, but found ", t_._values().dim());  // hybrid sparse is not supported
+  AT_CHECK(t._values().dim() == 1, "only support denseDim = 1, but found ", t._values().dim());  // hybrid sparse is not supported
 
-  if (dense.numel() == 0 || t_._nnz() == 0) {
+  if (dense.numel() == 0 || t._nnz() == 0) {
     return r.zero_();
   }
-
-  SparseTensor t = t_.coalesce();
 
   int64_t t_nnz = t._nnz();
   Tensor t_indices = t._indices();
@@ -516,18 +516,6 @@ SparseTensor& mul_out_sparse_dense_cpu(SparseTensor& r, const SparseTensor& t_, 
 
   return r;
 }
-
-// --------------------------------------------------------------------
-// sparse_mul(SparseTensor, DenseTensor) -> SparseTensor
-// --------------------------------------------------------------------
-// SparseTensor& sparse_mul(const SparseTensor& self, const Tensor& dense) {
-//   SparseTensor r;
-//   return at::mul_out(r, self, dense);
-// }
-//
-// SparseTensor& sparse_mul_(SparseTensor& self, const Tensor& dense) {
-//   return at::native::mul_out(self, self, dense);
-// }
 
 // --------------------------------------------------------------------
 // addmm(Tensor, SparseTensorRef, Tensor, Scalar, Scalar)  [broadcasts]
@@ -740,7 +728,7 @@ SparseTensor hspmm_sparse_cpu(const SparseTensor& sparse, const Tensor& dense) {
 }
 
 // --------------------------------------------------------------------
-// sspaddmm(SparseTensor, SparseTensor, DenseTensor, Scalar, Scalar)
+// sspaddmm(SparseTensor, SparseTensor, DenseTensor, Scalar, Scalar) -> SparseTensor
 // --------------------------------------------------------------------
 
 SparseTensor& _sspaddmm_out_cpu(

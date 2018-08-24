@@ -1962,15 +1962,35 @@ Tensor log1p_backward(const Tensor& grad, const Tensor& self) {
 }
 
 std::tuple<Tensor, Tensor> mul_backward(const Tensor& grad, const Tensor self, const Tensor other) {
-  if (self.is_sparse()) {
-    AT_ERROR(
-      "mul(Sparse, Dense) is made to be non-differentiable since ",
-      "local gradient of non-nnz at the sparse tensor are all 1s ",
-      "and it makes the tensor dense. Use a sparse_mul() operation ",
-      "which preserves sparsity of gradients, or report a bug if you "
-      "think this is an error.");
-  }
+  AT_ASSERTM(!self.is_sparse(),
+    "mul(Sparse, Dense) is made to be non-differentiable since ",
+    "local gradient of non-nnz at the sparse tensor are all 1s ",
+    "and it makes the tensor dense. Use sparse_mul(), ",
+    "which preserves sparsity of gradients, or report a bug if you "
+    "think this is an error.");
   return std::tuple<Tensor, Tensor>(grad * other, grad * self);
+}
+
+std::tuple<Tensor, Tensor> sparse_mul_backward(const Tensor& grad_, const Tensor self, const Tensor other) {
+  AT_ASSERT(self.is_coalesced());
+  auto grad = grad_.coalesce();
+
+  auto self_ones = self.clone();
+  self_ones._values().fill_(1);
+  auto self_grad = (grad * other).mul_(self_ones);
+  // self_grad must be coalesced (grad * other) returns a coalesced sparse tensor
+  AT_ASSERT(self_grad.is_coalesced());
+
+  auto other_grad = grad * self;
+  if (!other.is_sparse()) {
+    other_grad = other_grad.to_dense();
+  }
+  else {
+    auto grad_ones = grad.clone();
+    grad_ones._values().fill_(1);
+    other_grad = other_grad.mul_(grad_ones);
+  }
+  return std::tuple<Tensor, Tensor>(self_grad, other_grad);
 }
 
 } // anonymous namespace

@@ -42,6 +42,7 @@ static bool should_allow_numbers_as_tensors(const std::string& name) {
     "add", "add_", "add_out",
     "div", "div_", "div_out",
     "mul", "mul_", "mul_out",
+    "sparse_mul", "sparse_mul_",
     "sub", "sub_", "sub_out",
   };
   return allowed.find(name) != allowed.end();

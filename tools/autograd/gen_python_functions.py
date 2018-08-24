@@ -36,6 +36,7 @@ SKIP_PYTHON_BINDINGS_SIGNATURES = [
     'add(Tensor, Scalar, Scalar)', 'add_(Tensor, Scalar, Scalar)',
     'sub(Tensor, Scalar, Scalar)', 'sub_(Tensor, Scalar, Scalar)',
     'mul(Tensor, Scalar)', 'mul_(Tensor, Scalar)',
+    'sparse_mul(Tensor, Scalar)', 'sparse_mul_(Tensor, Scalar)',
     'div(Tensor, Scalar)', 'div_(Tensor, Scalar)',
 ]
 

@@ -483,21 +483,20 @@ SparseTensor& mul_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t_, cons
 // mul(SparseTensor, DenseTensor) -> SparseTensor
 // --------------------------------------------------------------------
 
-SparseTensor& mul_out_sparse_dense_cuda(SparseTensor& r, const SparseTensor& t_, const Tensor& dense) {
+// NB: t does not have to be coalesced
+SparseTensor& mul_out_sparse_dense_cuda(SparseTensor& r, const SparseTensor& t, const Tensor& dense) {
 #ifndef __HIP_PLATFORM_HCC__
   if (dense.dim() == 0) {
-    return mul_out_sparse_scalar(r, t_, Scalar(dense));
+    return mul_out_sparse_scalar(r, t, Scalar(dense));
   }
-  AT_ASSERT(t_.is_cuda()); // dispatch argument
+  AT_ASSERT(t.is_cuda()); // dispatch argument
   AT_CHECK(dense.is_cuda(), "mul: expected 'other' to be CUDA, but got CPU");
   AT_CHECK(r.is_cuda(), "mul: expected 'out' to be CUDA, but got CPU");
-  AT_CHECK(_check_device({r, t_, dense})); // check if all tensors are in the same device
-  AT_CHECK(t_.sizes().equals(dense.sizes()), "mul: expected 'self' and 'other' to have same size, but ", t_.sizes(), " != ", dense.sizes());
-  AT_CHECK(t_._values().dim() == 1, "only support mul(result, sparse, dense) with sparse._values() dim = 1, but found ", t_._values().dim());
+  AT_CHECK(_check_device({r, t, dense})); // check if all tensors are in the same device
+  AT_CHECK(t.sizes().equals(dense.sizes()), "mul: expected 'self' and 'other' to have same size, but ", t.sizes(), " != ", dense.sizes());
+  AT_CHECK(t._values().dim() == 1, "only support mul(result, sparse, dense) with sparse._values() dim = 1, but found ", t._values().dim());
 
-  SparseTensor t = t_.coalesce();
-
-  if (dense.numel() == 0 || t_._nnz() == 0) {
+  if (dense.numel() == 0 || t._nnz() == 0) {
     return r.zero_();
   }
 

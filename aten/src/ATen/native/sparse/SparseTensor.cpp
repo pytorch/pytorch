@@ -317,6 +317,9 @@ SparseTensor coalesce_sparse_cpu(const SparseTensor& self) {
   return dst;
 }
 
+// --------------------------------------------------------------------
+// _sparse_mask(Tensor, SparseTensor) -> SparseTensor
+// --------------------------------------------------------------------
 SparseTensor& sparse_mask_out_cpu(SparseTensor& r, const Tensor& t, const SparseTensor& mask) {
   AT_CHECK(mask.is_coalesced(), "sparse_mask: mask is uncoalesced");
   AT_CHECK(mask.sizes().equals(t.sizes()), "sparse_mask: operands have incompatible sizes; self has size ",

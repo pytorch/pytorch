@@ -1198,6 +1198,11 @@
 - func: sparse_mul_(Tensor self, Tensor other) -> Tensor
   variants: method, function
 
+- func: sparse_mul(Tensor self, Scalar other) -> Tensor
+  variants: method, function
+- func: sparse_mul_(Tensor self, Scalar other) -> Tensor
+  variants: method, function
+
 - func: mv(Tensor self, Tensor vec) -> Tensor
 
 - func: mv_out(Tensor result, Tensor self, Tensor vec) -> Tensor
