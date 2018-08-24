@@ -274,7 +274,7 @@ struct GraphExecutorImpl {
 
   std::shared_ptr<Graph> graphFor(const Stack& stack) const {
     auto inputs = last(stack, num_inputs);
-    ArgumentSpec spec(autograd::GradMode::is_enabled(), inputs);
+    CoarseArgumentSpec spec(autograd::GradMode::is_enabled(), inputs);
 
     if (!optimize || (!symbolically_differentiable && needsGradient(inputs))) {
       JIT_ASSERTM(autograd_fallback_graph, "No graph found for given inputs");
@@ -312,7 +312,7 @@ private:
       return tracer::getValueTrace(v.toTensor());
     });
 
-    ArgumentSpec spec(autograd::GradMode::is_enabled(), inputs);
+    CoarseArgumentSpec spec(autograd::GradMode::is_enabled(), inputs);
     runFallback(stack);
 
     auto all_dynamic = [](const at::ArrayRef<Value*> xs) {
@@ -395,7 +395,7 @@ private:
   const ExecutionPlan & getOrCompile(at::ArrayRef<IValue> inputs) {
     // outside lock guard, to minimize the time holding the lock on the fast path
     // ArgumentSpec even computes its hashCode here.
-    ArgumentSpec spec(autograd::GradMode::is_enabled(), inputs);
+    CoarseArgumentSpec spec(autograd::GradMode::is_enabled(), inputs);
     {
       std::lock_guard<std::mutex> lock(compile_mutex);
       auto it = plan_cache.find(spec);
@@ -407,7 +407,7 @@ private:
     }
   }
 
-  bool argumentSpecRequiresGradient(const ArgumentSpec & spec) {
+  bool argumentSpecRequiresGradient(const CoarseArgumentSpec & spec) {
     for(size_t i = 0; i < spec.size(); ++i) {
       if(spec.at(i).requires_grad())
         return true;
@@ -415,7 +415,7 @@ private:
     return false;
   }
 
-  ExecutionPlan compileSpec(const ArgumentSpec & spec) {
+  ExecutionPlan compileSpec(const CoarseArgumentSpec & spec) {
     auto graph_ = graph->copy();
 
     specializeToSpec(graph_, spec);
@@ -468,7 +468,7 @@ private:
 
   // optimizable code paths, used when we can differentiate or when no derivative is needed
   // Spec describes input conditions, Plan describes how to execute them.
-  std::unordered_map<ArgumentSpec, ExecutionPlan> plan_cache;
+  std::unordered_map<CoarseArgumentSpec, ExecutionPlan> plan_cache;
 
   // GraphExecutor can be accessed from  multiple thread so
   // anytime we are checking or updating the autograd_fallback or
@@ -510,7 +510,7 @@ void runRequiredPasses(const std::shared_ptr<Graph>& g)  {
   RemoveExpands(g);
 }
 
-void specializeToSpec(const std::shared_ptr<Graph>& graph, const ArgumentSpec& spec) {
+void specializeToSpec(const std::shared_ptr<Graph>& graph, const CoarseArgumentSpec& spec) {
   // clean up GradOf and AutogradAdd nodes
   // this must be first because later passes do not know what GradOfs are
   std::vector<bool> defined;

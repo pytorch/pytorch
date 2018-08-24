@@ -16,6 +16,7 @@ namespace torch { namespace jit {
 #define TH_FORALL_TYPES(_) \
 _(DynamicType) \
 _(TensorType) \
+_(CompleteTensorType) \
 _(TupleType) \
 _(ListType) \
 _(NumberType) \
@@ -62,25 +63,23 @@ public:
   // template variable, returning nullptr if the cast is invalid..
   template<typename T>
   std::shared_ptr<T> cast() {
-    if (T::Kind == kind())
-      return std::static_pointer_cast<T>(shared_from_this());
-    return nullptr;
+    return std::dynamic_pointer_cast<T>(shared_from_this());
   }
   template<typename T>
   std::shared_ptr<const T> cast() const {
-    if (T::Kind == kind())
-      return std::static_pointer_cast<const T>(shared_from_this());
-    return nullptr;
+    return std::dynamic_pointer_cast<const T>(shared_from_this());
   }
   template<typename T>
   std::shared_ptr<T> expect() {
-    JIT_ASSERT(T::Kind == kind());
-    return std::static_pointer_cast<T>(shared_from_this());
+    auto r = std::dynamic_pointer_cast<T>(shared_from_this());
+    JIT_ASSERT(r);
+    return r;
   }
   template<typename T>
   std::shared_ptr<const T> expect() const {
-    JIT_ASSERT(T::Kind == kind());
-    return std::static_pointer_cast<const T>(shared_from_this());
+    auto r = std::dynamic_pointer_cast<const T>(shared_from_this());
+    JIT_ASSERT(r);
+    return r;
   }
   virtual ~Type() = default;
 };
@@ -117,42 +116,104 @@ using TensorTypePtr = std::shared_ptr<TensorType>;
 // This node represents a single Tensor value with a specific size
 struct TORCH_API TensorType : public Type {
   friend struct Type;
+  static const TypeKind Kind = TypeKind::TensorType;
+
   template<typename ... T>
   static TensorTypePtr create( T&& ... all ) {
     return TensorTypePtr(new TensorType( std::forward<T>(all)... ));
   }
 
-  // overloaded create variadic template argument as it could not distinguish initializer list
-  static TensorTypePtr create(at::ScalarType scalar_type, int device, at::IntList sizes) {
-    return TensorTypePtr(new TensorType(scalar_type, device, sizes));
-  }
-  static TensorTypePtr create(at::ScalarType scalar_type, int device, at::IntList sizes, at::IntList strides) {
-    return TensorTypePtr(new TensorType(scalar_type, device, sizes, strides));
-  }
-
-  static const TypeKind Kind = TypeKind::TensorType;
-
   at::ScalarType scalarType() const { return scalar_type_; }
   int device() const { return device_; }
+  int dim() const { return dim_; }
+
+  TensorTypePtr toScalarType(at::ScalarType type){
+    auto t = TensorType::create(*this);
+    t->scalar_type_ = type;
+    return t;
+  }
+  TensorTypePtr withDim(int new_dim) {
+    auto t = TensorType::create(*this);
+    t->dim_ = new_dim;
+    return t;
+  }
+
+  bool operator==(const Type& rhs) const override {
+    if (rhs.kind() != TypeKind::TensorType)
+      return false;
+    auto rt = rhs.expect<TensorType>();
+    return scalarType() == rt->scalarType() &&
+           device() == rt->device() &&
+           dim() == rt->dim();
+  }
+  bool isSubtypeOf(const TypePtr rhs) const override {
+    if (rhs->kind() == TypeKind::DynamicType)
+      return true;
+    return rhs->kind() == TypeKind::TensorType && *this == *rhs;
+  }
+  std::string str() const override {
+    // str is used for user-facing error messages, where we
+    // don't want to reveal underlying size information.
+    return "Tensor";
+  }
+
+  static TensorTypePtr sliceSubtypes(const TensorTypePtr& type) {
+    return TensorType::create(type->scalarType(), type->device(), type->dim());
+  }
+
+protected:
+  TensorType(const at::Tensor& tensor, TypeKind kind=TypeKind::TensorType)
+    : TensorType(tensor.type().scalarType(), tensor.type().is_cuda() ? tensor.get_device() : -1, tensor.dim(), kind) {}
+  TensorType(at::ScalarType scalar_type, int device, int dim, TypeKind kind=TypeKind::TensorType)
+    : Type(kind)
+    , scalar_type_(scalar_type)
+    , device_(device)
+    , dim_(dim) {}
+
+  at::ScalarType scalar_type_;
+  int device_;
+  int dim_;
+};
+
+struct CompleteTensorType;
+using CompleteTensorTypePtr = std::shared_ptr<CompleteTensorType>;
+// This node represents a single Tensor value with a specific size
+struct TORCH_API CompleteTensorType : public TensorType {
+  friend struct Type;
+  template<typename ... T>
+  static CompleteTensorTypePtr create( T&& ... all ) {
+    return CompleteTensorTypePtr(new CompleteTensorType( std::forward<T>(all)... ));
+  }
+
+  // overloaded create variadic template argument as it could not distinguish initializer list
+  static CompleteTensorTypePtr create(at::ScalarType scalar_type, int device, at::IntList sizes) {
+    return CompleteTensorTypePtr(new CompleteTensorType(scalar_type, device, sizes));
+  }
+  static CompleteTensorTypePtr create(at::ScalarType scalar_type, int device, at::IntList sizes, at::IntList strides) {
+    return CompleteTensorTypePtr(new CompleteTensorType(scalar_type, device, sizes, strides));
+  }
+
+  static const TypeKind Kind = TypeKind::CompleteTensorType;
+
   const std::vector<int64_t>& sizes() const { return sizes_; }
   const std::vector<int64_t>& strides() const { return strides_; }
 
   TypePtr withSizesStrides(at::IntList sizes, at::IntList strides) const {
-    return TensorType::create(scalar_type_, device_, sizes, strides);
+    return CompleteTensorType::create(scalar_type_, device_, sizes, strides);
   }
 
   TypePtr withSizes(at::IntList sizes) const {
-    return withSizesStrides(sizes, TensorType::contiguousStridesOf(sizes));
+    return withSizesStrides(sizes, CompleteTensorType::contiguousStridesOf(sizes));
   }
 
-  TensorTypePtr contiguous() const {
-    auto t = TensorType::create(*this);
-    t->strides_ = TensorType::contiguousStridesOf(sizes_);
+  CompleteTensorTypePtr contiguous() const {
+    auto t = CompleteTensorType::create(*this);
+    t->strides_ = CompleteTensorType::contiguousStridesOf(sizes_);
     return t;
   }
 
-  TensorTypePtr toScalarType(at::ScalarType type){
-    auto t = TensorType::create(*this);
+  CompleteTensorTypePtr toScalarType(at::ScalarType type){
+    auto t = CompleteTensorType::create(*this);
     t->scalar_type_ = type;
     return t;
   }
@@ -160,14 +221,18 @@ struct TORCH_API TensorType : public Type {
   bool operator==(const Type& rhs) const override {
     if(rhs.kind() != kind())
       return false;
-    auto rt = rhs.expect<TensorType>();
+    auto rt = rhs.expect<CompleteTensorType>();
     return scalarType() == rt->scalarType() &&
            sizes() == rt->sizes() &&
            strides() == rt->strides() &&
            device() == rt->device();
   }
   bool isSubtypeOf(const TypePtr rhs) const override {
-    return *this == *rhs || rhs->kind() == TypeKind::DynamicType;
+    if (rhs->kind() == TypeKind::DynamicType)
+      return true;
+    if (rhs->kind() == TypeKind::TensorType)
+      return *dynamic_cast<const TensorType*>(this) == *rhs;
+    return *this == *rhs;
   }
   std::string str() const override {
     // str is used for user-facing error messages, where we
@@ -183,22 +248,22 @@ struct TORCH_API TensorType : public Type {
   }
   static TypePtr fromNumberType(TypePtr typ);
 
+  static CompleteTensorTypePtr sliceSubtypes(const CompleteTensorTypePtr& type) {
+    return CompleteTensorType::create(type->scalarType(), type->device(), type->sizes(), type->strides());
+  }
+
 private:
-  TensorType(const at::Tensor& tensor)
-    : Type(TypeKind::TensorType)
-    , scalar_type_(tensor.type().scalarType())
-    , device_(tensor.type().is_cuda() ? tensor.get_device() : -1)
+  CompleteTensorType(const at::Tensor& tensor)
+    : TensorType(tensor, TypeKind::CompleteTensorType)
     , sizes_(tensor.sizes().vec())
     , strides_(tensor.strides().vec()) {}
-  TensorType(at::ScalarType scalar_type, int device, at::IntList sizes)
-    : TensorType(scalar_type, device, sizes, TensorType::contiguousStridesOf(sizes)) {}
-  TensorType(at::ScalarType scalar_type, int device, at::IntList sizes, at::IntList strides)
-    : Type(TypeKind::TensorType)
-    , scalar_type_(scalar_type)
-    , device_(device)
+  CompleteTensorType(at::ScalarType scalar_type, int device, at::IntList sizes)
+    : CompleteTensorType(scalar_type, device, sizes, CompleteTensorType::contiguousStridesOf(sizes)) {}
+  CompleteTensorType(at::ScalarType scalar_type, int device, at::IntList sizes, at::IntList strides)
+    : TensorType(scalar_type, device, sizes.size(), TypeKind::CompleteTensorType)
     , sizes_(sizes.vec())
-    , strides_(strides.vec())
-    {}
+    , strides_(strides.vec()) {}
+
   static std::vector<int64_t> contiguousStridesOf(at::IntList sizes) {
     std::vector<int64_t> strides(sizes.size());
     if(sizes.size() == 0) // zero-dim case
@@ -209,8 +274,7 @@ private:
     }
     return strides;
   }
-  at::ScalarType scalar_type_;
-  int device_;
+
   std::vector<int64_t> sizes_;
   std::vector<int64_t> strides_;
 };
@@ -430,23 +494,24 @@ TORCH_API std::ostream& operator<<(std::ostream & out, const Type & t);
 // e.g. Tensor(2x3) -> Dynamic, and Tuple(Tensor(2x3),...) -> Tuple(Dynamic,...)
 
 inline TypePtr unshapedType(const TypePtr& type) {
-  if(TupleTypePtr t = type->cast<TupleType>()) {
+  if (TupleTypePtr t = type->cast<TupleType>()) {
     return TupleType::create(fmap(t->elements(), unshapedType));
-  } else if(ListTypePtr t = type->cast<ListType>()) {
+  } else if (ListTypePtr t = type->cast<ListType>()) {
     return ListType::create(unshapedType(t->getElementType()));
-  } else if(type->kind() == TypeKind::TensorType) {
+  } else if (type->kind() == TypeKind::TensorType ||
+             type->kind() == TypeKind::CompleteTensorType) {
     return DynamicType::get();
   } else {
     return type;
   }
 }
 
-inline TypePtr TensorType::fromNumberType(TypePtr typ) {
+inline TypePtr CompleteTensorType::fromNumberType(TypePtr typ) {
   JIT_ASSERT(typ->isSubtypeOf(NumberType::get()));
-  if(typ->isSubtypeOf(IntType::get())) {
-    return TensorType::create(at::kLong, -1, {});
-  } else if(typ->isSubtypeOf(FloatType::get())) {
-    return TensorType::create(at::kFloat, -1, {});
+  if (typ->isSubtypeOf(IntType::get())) {
+    return CompleteTensorType::create(at::kLong, -1, {});
+  } else if (typ->isSubtypeOf(FloatType::get())) {
+    return CompleteTensorType::create(at::kFloat, -1, {});
   }
   AT_ERROR("unknown number type", typ->str());
 }

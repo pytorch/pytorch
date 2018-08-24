@@ -144,7 +144,7 @@ void initPythonIRBindings(PyObject * module_) {
       return ss.str();
     })
     .def("propagate_shapes", [](Graph& g, std::vector<at::Tensor> inputs, bool with_grad) {
-      PropagateInputShapes(g, ArgumentSpec(with_grad, fmap<IValue>(inputs)));
+      PropagateInputShapes(g, CoarseArgumentSpec(with_grad, fmap<IValue>(inputs)));
     })
     .def("export", [](const std::shared_ptr<Graph> g, const std::vector<at::Tensor>& initializers,
                       int64_t onnx_opset_version, bool defer_weight_export,
@@ -433,8 +433,8 @@ void initPythonIRBindings(PyObject * module_) {
       switch(t->kind()) {
         case TypeKind::DynamicType:
           return "DynamicType";
-        case TypeKind::TensorType:
-          return "TensorType";
+        case TypeKind::CompleteTensorType:
+          return "CompleteTensorType";
         case TypeKind::TupleType:
           return "TupleType";
         default:
@@ -443,13 +443,13 @@ void initPythonIRBindings(PyObject * module_) {
         }
     })
     .def("sizes",[](Type& t) {
-      return t.expect<TensorType>()->sizes();
+      return t.expect<CompleteTensorType>()->sizes();
     })
     .def("strides",[](Type& t) {
-      return t.expect<TensorType>()->strides();
+      return t.expect<CompleteTensorType>()->strides();
     })
     .def("contiguous",[](Type& t) {
-      return std::static_pointer_cast<Type>(t.expect<TensorType>()->contiguous());
+      return std::static_pointer_cast<Type>(t.expect<CompleteTensorType>()->contiguous());
     })
     .def("scalarType",[](Type& t) {
       return at::toString(t.expect<TensorType>()->scalarType());

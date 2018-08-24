@@ -810,7 +810,7 @@ struct to_ir {
       for (auto& r : results) {
         // TODO: support tuples and lists as returns
         auto return_kind = r->type()->kind();
-        if (return_kind != TypeKind::TensorType &&
+        if (return_kind != TypeKind::CompleteTensorType &&
             return_kind != TypeKind::DynamicType &&
             return_kind != TypeKind::IntType &&
             return_kind != TypeKind::FloatType) {

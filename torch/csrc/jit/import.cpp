@@ -222,7 +222,7 @@ TypePtr ModuleDecoder::buildType(const onnx::TypeProto& type_proto) {
   auto kind = type_proto.denotation();
   if (kind == "DynamicType") {
     return DynamicType::get();
-  } else if (kind == "TensorType") {
+  } else if (kind == "CompleteTensorType") {
     // TODO: Don't use DynamicType here
     return DynamicType::get();
   } else if (kind == "TupleType") {

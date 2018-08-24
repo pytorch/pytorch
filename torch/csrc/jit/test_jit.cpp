@@ -147,9 +147,10 @@ static void fusionTests() {
     auto a = at::rand({3,4}, at::kCUDA);
     auto b = at::rand({4,3}, at::kCUDA).transpose(0,1);
     auto o = at::zeros({3,4}, at::kCUDA);
-    comp.debugLaunchGraph(graph, 0, {a,b}, {o});
+    auto outputs = comp.debugLaunchGraph(graph, 0, {a,b});
+    REQUIRE(outputs.size() == 1);
     auto o2 = a*b;
-    float max_diff = (o2 - o).abs().max().toCDouble();
+    float max_diff = (o2 - outputs[0]).abs().max().toCDouble();
     //std::cout << "max diff: " << max_diff << "\n";
     REQUIRE(max_diff == 0);
   };
@@ -180,7 +181,6 @@ static void fusionTests() {
     graph.lint();
 
     std::vector<at::Tensor> inputs;
-    std::vector<at::Tensor> outputs;
     // We want to generate input/output tensors with dimension 128x128x32, but
     // with different internal strides.  To do this, we generate a tensor
     // with the "wrong" dimensions, and then use transpose to get an appropriately
@@ -189,11 +189,6 @@ static void fusionTests() {
       std::vector<int64_t> dims = {128, 128, 32};
       std::swap(dims[ti],dims[tj]);
       inputs.push_back(at::rand(dims, at::kCUDA).transpose(ti, tj));
-    }
-    for(size_t i = 0; i < graph.outputs().size(); i++) {
-      std::vector<int64_t> dims = {128, 128, 32};
-      std::swap(dims[toi],dims[toj]);
-      outputs.push_back(at::zeros(dims, at::kCUDA).transpose(toi,toj));
     }
 
     auto t22 = inputs[4].sigmoid();
@@ -206,9 +201,8 @@ static void fusionTests() {
     auto t5 = out1.tanh();
     auto out0 = t16*t5;
 
-
-    //auto out0 = inputs[0]*inputs[1];
-    comp.debugLaunchGraph(graph, 0, inputs, outputs);
+    auto outputs = comp.debugLaunchGraph(graph, 0, inputs);
+    REQUIRE(outputs.size() == graph.outputs().size());
     REQUIRE(out0.is_same_size(outputs.front()));
     float max_diff = (outputs.front() - out0).abs().max().toCDouble();
     REQUIRE(max_diff < 1e-6);
@@ -238,16 +232,15 @@ static void fusionTests() {
 
     auto a = at::rand({3,4,5}, at::kCUDA);
     auto b = at::rand({4,3,5}, at::kCUDA).transpose(0,1);
-    auto o = at::zeros({3,4,5}, at::kCUDA);
 
     auto o_r = a*b;
     auto o2_r = at::cat({a, o_r}, dim);
-    auto o2 = at::zeros(o2_r.sizes(), at::kCUDA);
-    comp.debugLaunchGraph(graph, 0, {a,b}, {o, o2});
+    auto outputs = comp.debugLaunchGraph(graph, 0, {a,b});
+    REQUIRE(outputs.size() == 2);
 
-    float max_diff = (o_r - o).abs().max().toCDouble();
+    float max_diff = (o_r - outputs[0]).abs().max().toCDouble();
     REQUIRE(max_diff == 0);
-    float max_diff2 = (o2_r - o2).abs().max().toCDouble();
+    float max_diff2 = (o2_r - outputs[1]).abs().max().toCDouble();
     REQUIRE(max_diff2 == 0);
   };
   testConcat(0);
@@ -649,7 +642,7 @@ std::string toString(std::shared_ptr<Graph>& graph) {
 void testDifferentiate(std::ostream & out) {
   auto graph = std::make_shared<Graph>();
   at::ScalarType s = at::ScalarType::Float;
-  auto type = TensorType::create(s, -1, {2, 3, 4}, {12, 4, 1});
+  auto type = CompleteTensorType::create(s, -1, {2, 3, 4}, {12, 4, 1});
 
   // Build up a fake graph
   auto a = SymbolicVariable::asNewInput(*graph, type);
@@ -676,7 +669,7 @@ void testDifferentiate(std::ostream & out) {
 void testDifferentiateWithRequiresGrad(std::ostream & out) {
   auto graph = std::make_shared<Graph>();
   at::ScalarType s = at::ScalarType::Float;
-  auto type = TensorType::create(s, -1, {2, 3, 4}, {12, 4, 1});
+  auto type = CompleteTensorType::create(s, -1, {2, 3, 4}, {12, 4, 1});
 
   // Build up a fake graph
   auto a = SymbolicVariable::asNewInput(*graph, type);
@@ -809,8 +802,8 @@ void shapeAnalysisTest() {
   PropagateInputShapes(*g, spec);
   at::Tensor r0, r1;
   std::tie(r0, r1) = lstm(input, hx, cx, w_ih, w_hh);
-  auto o0 = g->outputs()[0]->type()->expect<TensorType>();
-  auto o1 = g->outputs()[1]->type()->expect<TensorType>();
+  auto o0 = g->outputs()[0]->type()->expect<CompleteTensorType>();
+  auto o1 = g->outputs()[1]->type()->expect<CompleteTensorType>();
   REQUIRE(o0->sizes() == std::vector<int64_t>(r0.sizes().begin(), r0.sizes().end()));
   REQUIRE(o1->sizes() == std::vector<int64_t>(r1.sizes().begin(), r1.sizes().end()));
 
