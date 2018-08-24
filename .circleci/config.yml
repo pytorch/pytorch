@@ -448,11 +448,11 @@ jobs:
           fi
 
           # Copy all necessary binaries to shared workspace
-          mkdir -p caffe2-ci-env/
+          mkdir -p caffe2-ci-env
           cp -r /usr/local/caffe2 caffe2-ci-env/caffe2
           cp -r /usr/local/lib/python2.7/dist-packages caffe2-ci-env/dist-packages
     - persist_to_workspace:
-        root: /Users/distiller/caffe2-ci-env
+        root: /var/lib/jenkins/workspace/caffe2-ci-env
         paths:
           - "*"
 
