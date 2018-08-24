@@ -56,21 +56,21 @@ THC_API void THCTensor_(sortKeyValueInplace)(THCState* state,
       bitonicSortKVInPlace<real, int64_t, A, -1, GTComp<real>, TYPE, SIZE> \
         <<<grid, block, 0, THCState_getCurrentStream(state)>>>(         \
           keyInfo,                                                      \
-          keySlices,                                                    \
-          (TYPE) keySliceSize,                                          \
-          (TYPE) keyInfo.strides[collapseKeyDim],                       \
+          static_cast<TYPE>(keySlices),                                 \
+          static_cast<TYPE>(keySliceSize),                              \
+          static_cast<TYPE>(keyInfo.strides[collapseKeyDim]),           \
           valueInfo,                                                    \
-          (TYPE) valueInfo.strides[collapseValueDim],                   \
+          static_cast<TYPE>(valueInfo.strides[collapseValueDim]),       \
           GTComp<real>());                                              \
     } else {                                                            \
       bitonicSortKVInPlace<real, int64_t, A, -1, LTComp<real>, TYPE, SIZE> \
         <<<grid, block, 0, THCState_getCurrentStream(state)>>>(         \
           keyInfo,                                                      \
-          keySlices,                                                    \
-          (TYPE) keySliceSize,                                          \
-          (TYPE) keyInfo.strides[collapseKeyDim],                       \
+          static_cast<TYPE>(keySlices),                                 \
+          static_cast<TYPE>(keySliceSize),                              \
+          static_cast<TYPE>(keyInfo.strides[collapseKeyDim]),           \
           valueInfo,                                                    \
-          (TYPE) valueInfo.strides[collapseValueDim],                   \
+          static_cast<TYPE>(valueInfo.strides[collapseValueDim]),       \
           LTComp<real>());                                              \
     }                                                                   \
   } while (0)
