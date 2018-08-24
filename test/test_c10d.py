@@ -110,11 +110,35 @@ class FileStoreTest(TestCase, StoreTestBase):
         return c10d.FileStore(self.file.name)
 
 
+class PrefixFileStoreTest(TestCase, StoreTestBase):
+    def setUp(self):
+        self.file = tempfile.NamedTemporaryFile()
+        self.filestore = c10d.FileStore(self.file.name)
+        self.prefix = "test_prefix"
+
+    def tearDown(self):
+        self.file.close()
+
+    def _create_store(self):
+        return c10d.PrefixStore(self.prefix, self.filestore)
+
+
 class TCPStoreTest(TestCase, StoreTestBase):
     def _create_store(self):
         addr = 'localhost'
         port = find_free_port()
         return c10d.TCPStore(addr, port, True)
+
+
+class PrefixTCPStoreTest(TestCase, StoreTestBase):
+    def setUp(self):
+        addr = 'localhost'
+        port = find_free_port()
+        self.tcpstore = c10d.TCPStore(addr, port, True)
+        self.prefix = "test_prefix"
+
+    def _create_store(self):
+        return c10d.PrefixStore(self.prefix, self.tcpstore)
 
 
 class RendezvousTest(TestCase):
