@@ -612,6 +612,7 @@ void addObjectMethods(py::module& m) {
       // protobuf objects.
       .def("infer_tensor", &OpSchema::InferTensor)
       .def("CalculateOutput", &OpSchema::CalculateOutput)
+      .def("inplace_enforced", &OpSchema::inplace_enforced)
       .def("num_inputs_allowed", &OpSchema::num_inputs_allowed)
       .def("num_outputs_allowed", &OpSchema::num_outputs_allowed)
       .def("num_inputs_outputs_allowed", &OpSchema::num_inputs_outputs_allowed)

@@ -324,6 +324,10 @@ class CAFFE2_API OpSchema {
     return std::numeric_limits<int>::max();
   }
 
+  bool inplace_enforced(int x, int y) const {
+    return inplace_enforced_(x, y);
+  }
+
   friend std::ostream& operator<<(std::ostream& out, const OpSchema& schema);
 
   const std::vector<Argument>& args() const {
