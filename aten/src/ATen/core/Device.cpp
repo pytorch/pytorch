@@ -1,6 +1,6 @@
-#include <ATen/Device.h>
-
+#include <ATen/core/Device.h>
 #include <ATen/core/Error.h>
+#include <ATen/core/Macros.h>
 
 #include <exception>
 #include <ostream>
@@ -64,7 +64,7 @@ Device::Device(const std::string& device_string) : Device(Type::CPU) {
 
   const auto index_string = device_string.substr(position);
   try {
-    index_ = std::stoi(index_string);
+    index_ = at::stoi(index_string);
   } catch (const std::exception&) {
     AT_ERROR(
         "Could not parse device index '",
