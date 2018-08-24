@@ -603,7 +603,7 @@ def dropout(input, p=0.5, training=True, inplace=False):
 
     Args:
         p: probability of an element to be zeroed. Default: 0.5
-        training: apply dropout if is True. Defualt: True
+        training: apply dropout if is ``True``. Defualt: ``True``
         inplace: If set to ``True``, will do this operation in-place. Default: ``False``
     """
     if p < 0 or p > 1:
@@ -627,13 +627,15 @@ def alpha_dropout(input, p=0.5, training=False, inplace=False):
 
 def dropout2d(input, p=0.5, training=True, inplace=False):
     r"""
-    Randomly zeroes whole channels (a channel a 2D slice of dimensions H, W) of the input tensor.
+    Randomly zero-out entire channels (a channel is a 2D feature map)
+    of the input tensor. Each channel will be zero-out indipendently
+    with probability :attr:`p` using samples from a Bernoulli distribution.
 
     See :class:`~torch.nn.Dropout2d` for details.
 
     Args:
         p: probability of an element to be zeroed. Default: 0.5
-        training: apply dropout if is True. Defualt: True
+        training: apply dropout if is ``True``. Defualt: ``True``
         inplace: If set to ``True``, will do this operation in-place. Default: ``False``
     """
     if p < 0 or p > 1:
@@ -645,13 +647,15 @@ def dropout2d(input, p=0.5, training=True, inplace=False):
 
 def dropout3d(input, p=0.5, training=True, inplace=False):
     r"""
-    Randomly zeroes whole channels (a channel is a 3D slice of dimensions D, H, W) of the input tensor.
+    Randomly zero-out entire channels (a channel is a 3D feature map)
+    of the input tensor. Each channel will be zero-out indipendently
+    with probability :attr:`p` using samples from a Bernoulli distribution.
 
     See :class:`~torch.nn.Dropout3d` for details.
 
     Args:
         p: probability of an element to be zeroed. Default: 0.5
-        training: apply dropout if is True. Defualt: True
+        training: apply dropout if is ``True``. Defualt: ``True``
         inplace: If set to ``True``, will do this operation in-place. Default: ``False``
     """
     if p < 0 or p > 1:

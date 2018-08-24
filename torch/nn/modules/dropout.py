@@ -20,7 +20,8 @@ class _DropoutNd(Module):
 class Dropout(_DropoutNd):
     r"""During training, randomly zeroes some of the elements of the input
     tensor with probability :attr:`p` using samples from a Bernoulli
-    distribution. The elements to zero are randomized on every forward call.
+    distribution. ach channel will be zero-out indipendently on every forward
+    call.
 
     This has proven to be an effective technique for regularization and
     preventing the co-adaptation of neurons as described in the paper
@@ -54,8 +55,10 @@ class Dropout(_DropoutNd):
 
 
 class Dropout2d(_DropoutNd):
-    r"""Randomly zeroes whole channels (a channel a 2D slice of dimensions H, W) of the input tensor.
-    The channels to zero-out are randomized on every forward call.
+    r"""Randomly zero-out entire channels (a channel a 2D feature map of
+    dimensions H, W) of the input tensor. Each channel will be zero-out
+    indipendently on every forward call. with probability :attr:`p` using
+    samples from a Bernoulli distribution.
 
     Usually the input comes from :class:`nn.Conv2d` modules.
 
@@ -93,8 +96,10 @@ class Dropout2d(_DropoutNd):
 
 
 class Dropout3d(_DropoutNd):
-    r"""Randomly zeroes whole channels (a channel is a 3D slice of dimensions D, H, W) of the input tensor.
-    The channels to zero are randomized on every forward call.
+    r"""Randomly zero-out entire channels (a channel is a 3D feature map of
+    dimensions D, H, W) of the input tensor. Each channel will be zero-out
+    indipendently on every forward call. with probability :attr:`p` using
+    samples from a Bernoulli distribution.
 
     Usually the input comes from :class:`nn.Conv3d` modules.
 
