@@ -76,16 +76,6 @@ struct FunctionSchema {
   const bool is_varret;
   const bool is_mutable;
 
-  std::vector<Argument> getArgumentsMutable() const {
-    std::vector<Argument> actualArguments;
-    std::copy_if(
-        arguments.cbegin(),
-        arguments.cend(),
-        std::back_inserter(actualArguments),
-        [](const Argument& arg) { return arg.type != WorldType::get(); });
-    return actualArguments;
-  }
-
   at::optional<int> argumentIndexWithName(const std::string& name) const {
     for(size_t i = 0; i < arguments.size(); ++i) {
       if(name == arguments[i].name)
