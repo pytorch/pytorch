@@ -58,7 +58,7 @@
         - THStorage* source
         - long storage_offset
         - IntListSize size
-        - arg: IntListStride stride
+        - arg: IntList stride
           default: {}
 ]]
 [[
@@ -2394,7 +2394,7 @@
     if (self_->dim() == 0) {
       throw std::runtime_error("Input must be 1-d or 2-d");
     }
-    ${THTensor}_diag(${state,}result_->tensor, self_->tensor, diagonal);
+    ${THTensor}_diag(${state,}result_, self_, diagonal);
     result_->maybe_zero_dim(self_->dim() == 0);
 ]]
 [[
@@ -2986,7 +2986,7 @@
     - arg: real tol
       default: -1
   aten_custom_call: |
-    ${THTensor}_pstrf(res1_->tensor, res2_->tensor, self_->tensor, (upper) ? "U" : "L", tol_);
+    ${THTensor}_pstrf(res1_, res2_, self_, (upper) ? "U" : "L", tol_);
     res2 -= 1;  // LAPACK returns 1-indexed pivots
 ]]
 [[
@@ -3408,13 +3408,13 @@
     - cname: newWithSize
       arguments:
         - IntListSize size
-        - arg: IntListStride stride
+        - IntList stride
     - cname: newWithStorage
       arguments:
         - THStorage* storage
         - int64_t storageOffset
         - IntListSize size
-        - arg: IntListStride stride
+        - arg: IntList stride
           default: {}
 ]]
 

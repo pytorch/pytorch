@@ -89,7 +89,7 @@ class WngradOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   WngradOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        epsilon_(OperatorBase::GetSingleArgument<T>("epsilon", 1e-5f)) {}
+        epsilon_(this->template GetSingleArgument<T>("epsilon", 1e-5f)) {}
 
   bool RunOnDevice() override {
     CAFFE_ENFORCE_EQ(
@@ -162,7 +162,7 @@ class SparseWngradOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   SparseWngradOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        epsilon_(OperatorBase::GetSingleArgument<float>("epsilon", 1e-5f)) {}
+        epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5f)) {}
 
   bool RunOnDevice() override {
     // Enforce shapes

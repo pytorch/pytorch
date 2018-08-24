@@ -7,6 +7,7 @@
 #include "torch/csrc/jit/graph_executor.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/operator.h"
+#include "torch/csrc/jit/custom_operator.h"
 
 #include "torch/csrc/variable_tensor_functions.h"
 
@@ -299,7 +300,7 @@ RegisterOperators reg({
 // e.g. s - d == -d + s
 
 #define DEFINE_ST_OP(aten_op, reverse_exp)                             \
-  Operator("aten::" #aten_op "(Scalar a, Tensor b) -> Tensor", [](Node* node) { \
+  Operator("aten::" #aten_op "(Scalar other, Tensor self) -> Tensor", [](Node* node) { \
     return [=](Stack& stack) {                                         \
       at::Scalar a;                                                    \
       at::Tensor b;                                                    \

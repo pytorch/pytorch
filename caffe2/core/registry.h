@@ -43,7 +43,7 @@ inline void PrintOffendingKey(const string& key) {
  * objects.
  */
 template <class SrcType, class ObjectPtrType, class... Args>
-class Registry {
+class CAFFE2_API Registry {
  public:
   typedef std::function<ObjectPtrType(Args...)> Creator;
 
@@ -112,7 +112,7 @@ class Registry {
 };
 
 template <class SrcType, class ObjectPtrType, class... Args>
-class Registerer {
+class CAFFE2_API Registerer {
  public:
   Registerer(
       const SrcType& key,
@@ -158,7 +158,8 @@ class Registerer {
 
 #define CAFFE_DEFINE_TYPED_REGISTRY(                                         \
     RegistryName, SrcType, ObjectType, PtrType, ...)                         \
-  Registry<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>* RegistryName() {    \
+  CAFFE2_EXPORT Registry<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>*       \
+  RegistryName() {                                                           \
     static Registry<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>* registry = \
         new Registry<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>();         \
     return registry;                                                         \
@@ -178,7 +179,7 @@ class Registerer {
       key,                                                                    \
       RegistryName(),                                                         \
       Registerer##RegistryName::DefaultCreator<__VA_ARGS__>,                  \
-      DemangleType<__VA_ARGS__>());                                           \
+      at::demangle_type<__VA_ARGS__>());                                           \
   }
 
 // CAFFE_DECLARE_REGISTRY and CAFFE_DEFINE_REGISTRY are hard-wired to use string

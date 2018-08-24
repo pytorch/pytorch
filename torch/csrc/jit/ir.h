@@ -13,6 +13,7 @@
 #include "torch/csrc/jit/function_schema.h"
 #include "torch/csrc/jit/ivalue.h"
 #include "torch/csrc/jit/type.h"
+#include "torch/csrc/jit/named_value.h"
 
 #include "torch/csrc/utils/disallow_copy.h"
 #include "torch/csrc/utils/functional.h"
@@ -1072,6 +1073,13 @@ public:
       at::optional<SourceRange> loc = at::nullopt) {
     return jit::insertConstant(*this, std::move(val), loc);
   }
+
+  // schema-driven insert
+  // this inserts a node into the graph with inputs determined from args and kwargs using Python
+  // argument matching rules, and checks that the op matches a known schema
+  // if this node successfully completes, it guarentees the node is a correctly-formed invocation
+  // of opname
+  Value* insert(Symbol opname, at::ArrayRef<NamedValue> args, at::ArrayRef<NamedValue> kwargs = {});
 
   Node * appendNode(Node * n) {
     return block_->appendNode(n);

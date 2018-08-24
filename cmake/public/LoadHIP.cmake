@@ -43,6 +43,13 @@ IF(NOT DEFINED ENV{ROCSPARSE_PATH})
   SET(ROCSPARSE_PATH ${ROCM_PATH}/rocsparse)
 ELSE()
   SET(ROCSPARSE_PATH $ENV{ROCSPARSE_PATH})
+
+# ROCFFT_PATH
+IF(NOT DEFINED ENV{ROCFFT_PATH})
+  SET(ROCBLAS_PATH ${ROCM_PATH}/rocfft)
+ELSE()
+  SET(ROCFFT_PATH $ENV{ROCFFT_PATH})
+>>>>>>> master
 ENDIF()
 
 # HIPSPARSE_PATH
@@ -113,12 +120,14 @@ IF(HIP_FOUND)
   set(rocblas_DIR ${ROCBLAS_PATH}/lib/cmake/rocblas)
   set(miopen_DIR ${MIOPEN_PATH}/lib/cmake/miopen)
   set(rocblas_DIR ${ROCBLAS_PATH}/lib/cmake/rocblas)
+  set(rocfft_DIR ${ROCFFT_PATH}/lib/cmake/rocfft)
   set(hipsparse_DIR ${HIPSPARSE_PATH}/lib/cmake/hipsparse)
   set(rocsparse_DIR ${ROCSPARSE_PATH}/lib/cmake/rocsparse)
 
   find_package(rocrand REQUIRED)
   find_package(hiprand REQUIRED)
   find_package(rocblas REQUIRED)
+  find_package(rocfft REQUIRED)
   find_package(miopen REQUIRED)
   #find_package(rocsparse REQUIRED)
   #find_package(hipsparse REQUIRED)

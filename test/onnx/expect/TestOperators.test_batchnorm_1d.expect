@@ -1,6 +1,6 @@
 ir_version: 3
 producer_name: "pytorch"
-producer_version: "0.3"
+producer_version: "0.4"
 graph {
   node {
     input: "0"
@@ -22,7 +22,7 @@ graph {
     op_type: "BatchNormalization"
     attribute {
       name: "epsilon"
-      f: 9.99999974737875e-06
+      f: 1e-05
       type: FLOAT
     }
     attribute {

@@ -17,7 +17,7 @@
 #include "caffe2/core/db.h"
 #include "caffe2/core/init.h"
 #include "caffe2/proto/caffe2.pb.h"
-#include "caffe/proto/caffe.pb.h"
+#include "caffe2/proto/caffe2_legacy.pb.h"
 #include "caffe2/core/logging.h"
 
 CAFFE2_DEFINE_string(input_db, "", "The input db.");
@@ -29,6 +29,7 @@ CAFFE2_DEFINE_int(batch_size, 1000, "The write batch size.");
 using caffe2::db::Cursor;
 using caffe2::db::DB;
 using caffe2::db::Transaction;
+using caffe2::CaffeDatum;
 using caffe2::TensorProto;
 using caffe2::TensorProtos;
 
@@ -43,7 +44,7 @@ int main(int argc, char** argv) {
   std::unique_ptr<Transaction> transaction(out_db->NewTransaction());
   int count = 0;
   for (; cursor->Valid(); cursor->Next()) {
-    caffe::Datum datum;
+    CaffeDatum datum;
     CAFFE_ENFORCE(datum.ParseFromString(cursor->value()));
     TensorProtos protos;
     TensorProto* data = protos.add_protos();

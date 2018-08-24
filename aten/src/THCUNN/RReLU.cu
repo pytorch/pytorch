@@ -14,12 +14,10 @@
 template<typename T>
 inline T __device__ curand_uniform_type(curandStateMtgp32 *state);
 
-#ifdef CUDA_HALF_TENSOR
 template <>
 inline half __device__ curand_uniform_type<half>(curandStateMtgp32 *state) {
   return ScalarConvert<float, half>::to(curand_uniform(state));
 }
-#endif
 
 template <>
 inline float __device__ curand_uniform_type<float>(curandStateMtgp32 *state) {

@@ -399,7 +399,7 @@ class Graph {
     return result;
   }
 
-  const size_t getNodesCount() const {
+  size_t getNodesCount() const {
     return (size_t)nodes_.size();
   }
 
@@ -410,6 +410,10 @@ class Graph {
       result.emplace_back(&e);
     }
     return result;
+  }
+
+  size_t getEdgesCount() const {
+    return (size_t)edges_.size();
   }
 
  private:

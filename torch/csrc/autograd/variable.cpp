@@ -22,7 +22,7 @@
 namespace torch {
 namespace autograd {
 Variable::Impl::Impl(at::Tensor data, bool requires_grad, Edge gradient_edge)
-    : TensorImpl(data.type().backend(), data.type().scalarType(), nullptr, /* is variable */ true),
+    : TensorImpl(data.type().type_id(), data.type().scalarType(), /* is variable */ true),
       data_(std::move(data)),
       grad_fn_(std::move(gradient_edge.function)),
       requires_grad_(false),
@@ -53,16 +53,27 @@ int64_t Variable::Impl::dim() const {
   return data_.dim();
 }
 
+int64_t Variable::Impl::size(int64_t d) const {
+  return data_.size(d);
+}
+int64_t Variable::Impl::stride(int64_t d) const {
+  return data_.stride(d);
+}
+
 const char* Variable::Impl::typeString() {
   return "VariableType";
 }
 
-void* Variable::Impl::unsafeGetTH(bool retain) {
-  return data_.unsafeGetTH(retain);
-}
-
 std::unique_ptr<at::Storage> Variable::Impl::storage() {
   return data_.storage();
+}
+
+at::StorageImpl* Variable::Impl::storageImpl() const {
+  return data_.unsafeGetTensorImpl()->storageImpl();
+}
+
+int64_t Variable::Impl::storage_offset() const {
+  return data_.storage_offset();
 }
 
 std::shared_ptr<Function> Variable::Impl::get_grad_accumulator() {
@@ -93,8 +104,7 @@ Tensor Variable::Impl::detach() const {
 
 void Variable::Impl::detach_() {
   if (is_view_) {
-    throw std::runtime_error(
-        "Can't detach views in-place. Use detach() instead");
+    AT_ERROR("Can't detach views in-place. Use detach() instead");
   }
   set_requires_grad(false);
   grad_fn_.reset();
@@ -123,15 +133,15 @@ void Variable::Impl::set_data(Tensor new_data) {
   if (prior_accumulator) {
     const auto prior_device = prior_accumulator->input_metadata(0).device();
     const auto new_device = new_data.is_cuda() ? new_data.get_device() : -1;
-    
+
     if (new_data.type() != data_.type() || prior_device != new_device) {
       grad_accumulator_.reset();
     }
   }
-  
+
   // Updates metadata
   scalar_type_ = new_data.type().scalarType();
-  backend_ = new_data.type().backend();
+  type_id_ = new_data.type().type_id();
   is_variable_ = true;
   data_ = std::move(new_data);
 }

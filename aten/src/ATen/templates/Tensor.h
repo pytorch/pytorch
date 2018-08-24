@@ -113,10 +113,6 @@ struct Tensor : public detail::TensorBase {
   template<typename T>
   T * data() const;
 
-  void * unsafeGetTH(bool retain) const {
-    return pImpl->unsafeGetTH(retain);
-  }
-
   // non-retaining
   TensorImpl * unsafeGetTensorImpl() const {
     return pImpl;
@@ -137,11 +133,13 @@ struct Tensor : public detail::TensorBase {
   #undef TO_C_TYPE
 
   template<typename T, size_t N>
-  TensorAccessor<T,N> accessor() const {
+  TensorAccessor<T,N> accessor() const& {
     static_assert(N > 0, "accessor is used for indexing tensor, for scalars use *data<T>()");
     AT_CHECK(dim() == N, "expected ", N, " dims but tensor has ", dim());
     return TensorAccessor<T,N>(data<T>(),sizes().data(),strides().data());
   }
+  template<typename T, size_t N>
+  TensorAccessor<T,N> accessor() && = delete;
 
   Tensor operator-() const;
   Tensor& operator+=(const Tensor & other);
@@ -155,6 +153,9 @@ struct Tensor : public detail::TensorBase {
   Tensor operator[](Scalar index) const;
   Tensor operator[](Tensor index) const;
   Tensor operator[](int64_t index) const;
+
+  Tensor cpu() const;
+  Tensor cuda() const;
 
   // ~~~~~ Autograd API ~~~~~
 

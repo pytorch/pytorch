@@ -33,7 +33,7 @@ prepend(Caffe2_HIP_PYTHON_SRCS ${CMAKE_CURRENT_SOURCE_DIR} ${Caffe2_HIP_PYTHON_S
 if(USE_MKL AND USE_IDEEP AND CAFFE2_COMPILER_SUPPORTS_AVX2_EXTENSIONS)
   file(GLOB_RECURSE ideep_srcs *_ideep.cc)
   add_library(Caffe2_ideep_pybind OBJECT ${ideep_srcs})
-  add_dependencies(Caffe2_ideep_pybind Caffe_PROTO Caffe2_PROTO)
+  add_dependencies(Caffe2_ideep_pybind Caffe2_PROTO)
   set_target_properties(Caffe2_ideep_pybind PROPERTIES COMPILE_FLAGS "-mavx2")
   set(Caffe2_CPU_PYTHON_SRCS
       ${Caffe2_CPU_PYTHON_SRCS}

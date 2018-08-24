@@ -13,6 +13,7 @@
 #include "ATen/Tensor.h"
 #include "ATen/core/ArrayRef.h"
 #include "ATen/core/Half.h"
+#include "ATen/core/TensorTypeIdRegistration.h"
 #include "THNN/Reduction.h"
 
 #include <array>
@@ -44,8 +45,8 @@ enum class TypeID {
 };
 
 struct AT_API Type {
-  explicit Type(Context* context, bool is_variable, bool is_undefined)
-      : context(context), is_variable_(is_variable), is_undefined_(is_undefined) {}
+  explicit Type(Context* context, TensorTypeId type_id, bool is_variable, bool is_undefined)
+      : context(context), type_id_(type_id), is_variable_(is_variable), is_undefined_(is_undefined) {}
   virtual ~Type() {}
   virtual ScalarType scalarType() const = 0;
   virtual Backend backend() const = 0;
@@ -73,11 +74,25 @@ struct AT_API Type {
   Type & toDense() const {
     return this->toBackend(at::toDense(this->backend()));
   }
+  Type & cpu() const {
+    return this->toBackend(at::backendToCPU(this->backend()));
+  }
+  Type & cuda() const {
+    return this->toBackend(at::backendToCUDA(this->backend()));
+  }
   Context& get_context() const { return *context; }
 
-  // contingious IDs for all types in the system
+  // contiguous IDs for all types in the system
   // for external dispatch
   virtual TypeID ID() const = 0;
+
+  // New-style TensorTypeId that supports open registration.
+  TensorTypeId type_id() const { return type_id_; }
+
+  // NB: This will return DeviceType::CPU for Backend::SparseCPU
+  DeviceType device_type() const {
+    return backendToDeviceType(backend());
+  }
 
   Tensor copy(const Tensor & src, bool non_blocking=false) const;
   Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking=false) const;
@@ -98,6 +113,7 @@ struct AT_API Type {
   ${type_method_declarations}
 protected:
   Context* context;
+  TensorTypeId type_id_;
   bool is_variable_;
   bool is_undefined_;
 
@@ -116,7 +132,7 @@ inline Layout Tensor::layout() const noexcept {
 }
 
 inline Device Tensor::device() const {
-  return Device(type().backend(), type().is_cuda() ? get_device() : -1);
+  return Device(type().device_type(), type().is_cuda() ? get_device() : -1);
 }
 
 } // namespace at

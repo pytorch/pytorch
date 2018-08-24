@@ -55,7 +55,8 @@ endif()
 include(CMakeDependentOption)
 option(BUILD_TORCH "Build Torch" OFF)
 option(BUILD_CAFFE2 "Build Caffe2" ON)
-option(BUILD_ATEN "Build ATen" OFF)
+option(ATEN_NO_TEST "Do not build ATen test binaries" OFF)
+option(BUILD_ATEN_MOBILE "Build ATen for Android and iOS" OFF)
 option(BUILD_BINARY "Build C++ binaries" ON)
 option(BUILD_DOCS "Build Caffe2 documentation" OFF)
 option(BUILD_CUSTOM_PROTOBUF "Build and use Caffe2's own protobuf under third_party" ON)
@@ -75,7 +76,6 @@ cmake_dependent_option(
     "BUILD_TEST" OFF)
 option(USE_ACL "Use ARM Compute Library" OFF)
 option(USE_ASAN "Use Address Sanitizer" OFF)
-option(USE_ATEN "Use ATen" OFF)
 option(USE_CUDA "Use CUDA" ON)
 option(USE_ROCM "Use ROCm" OFF)
 option(CAFFE2_STATIC_LINK_CUDA "Statically link CUDA libraries" OFF)
@@ -145,8 +145,8 @@ option(USE_DISTRIBUTED_MW "Use THD (distributed) master worker" OFF)
 # Used when building Caffe2 through setup.py
 option(BUILDING_WITH_TORCH_LIBS "Tell cmake if Caffe2 is being built alongside torch libs" OFF)
 
-if (USE_ATEN)
-    set(BUILD_ATEN ${USE_ATEN})
+if (ANDROID OR IOS) 
+  set(BUILD_ATEN_MOBILE ON)
 endif()
 
 # ---[ CMake scripts + modules
@@ -230,7 +230,7 @@ if(NOT MSVC)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Qunused-arguments")
   endif()
   if ((APPLE AND (NOT ("${CLANG_VERSION_STRING}" VERSION_LESS "9.0")))
-    OR (CMAKE_COMPILER_IS_GNUCXX 
+    OR (CMAKE_COMPILER_IS_GNUCXX
     AND (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 7.0 AND NOT APPLE)))
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -faligned-new")
   endif()
@@ -287,11 +287,6 @@ include_directories(BEFORE ${PROJECT_SOURCE_DIR})
 include_directories(BEFORE ${PROJECT_BINARY_DIR})
 
 include_directories(BEFORE ${PROJECT_SOURCE_DIR}/aten/src/)
-
-# ---[ Old caffe protobuf
-if(BUILD_CAFFE2)
-  add_subdirectory(caffe/proto)
-endif()
 
 # ---[ Main build
 add_subdirectory(caffe2)

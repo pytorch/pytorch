@@ -40,7 +40,6 @@ namespace script {
   _(TK_OPTION, "option", "")                     \
   _(TK_APPLY, "apply", "")                       \
   _(TK_COMPREHENSION, "comprehension", "")       \
-  _(TK_TENSOR_TYPE, "tensor_type", "")           \
   _(TK_RANGE_CONSTRAINT, "range_constraint", "") \
   _(TK_PARAM, "param", "")                       \
   _(TK_INFERRED, "inferred", "")                 \
@@ -71,9 +70,8 @@ namespace script {
   _(TK_DIV_EQ, "/=", "/=")                       \
   _(TK_GLOBAL, "global", "global")               \
   _(TK_BUILT_IN, "built-in", "")                 \
-  _(TK_SLICE, "slice", "")                       \
+  _(TK_SUBSCRIPT, "subscript", "")               \
   _(TK_VAR, "variable", "")                      \
-  _(TK_GATHER, "gather", "")                     \
   _(TK_NOTHING, "nothing", "")                   \
   _(TK_LIST_LITERAL, "list-literal", "")         \
   _(TK_TUPLE_LITERAL, "tuple-literal", "")       \
@@ -83,6 +81,9 @@ namespace script {
   _(TK_UNARY_MINUS, "unary minus", "")           \
   _(TK_POW, "pow operator", "**")                \
   _(TK_ARROW, "arrow", "->")                     \
+  _(TK_DECL, "decl", "")                         \
+  _(TK_SLICE_EXPR, "slice expr", "")             \
+  _(TK_TYPE_COMMENT, "type comment", "# type:")
 
 static const char* valid_single_char_tokens = "+-*/@()[]:,={}><.?";
 
@@ -227,6 +228,15 @@ struct SharedParserData {
   bool isblank(int n) {
     return isspace(n) && n != '\n';
   }
+  // Make an exception ignoring comments for type annotation comments
+  bool isTypeComment(const std::string& str, size_t pos) {
+    const std::string type_string = "# type:";
+    if (str.size() < pos + type_string.length()) {
+      return false;
+    }
+    auto match_string = str.substr(pos, type_string.size());
+    return match_string == type_string;
+  }
   // find the longest match of str.substring(pos) against a token, return true
   // if successful
   // filling in kind, start,and len
@@ -246,7 +256,7 @@ struct SharedParserData {
 
     // special handling
     if (pos < str.size()) {
-      if (str[pos] == '#') {
+      if (str[pos] == '#' && !isTypeComment(str, pos)) {
         // skip comments
         while (pos < str.size() && str[pos] != '\n')
           pos++;

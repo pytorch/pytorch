@@ -14,27 +14,27 @@ class Im2ColOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   Im2ColOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        pad_(OperatorBase::GetSingleArgument<int>("pad", 0)),
-        kernel_h_(OperatorBase::GetSingleArgument<int>(
+        pad_(this->template GetSingleArgument<int>("pad", 0)),
+        kernel_h_(this->template GetSingleArgument<int>(
             "kernel_h",
-            OperatorBase::GetSingleArgument<int>("kernel", 0))),
-        kernel_w_(OperatorBase::GetSingleArgument<int>(
+            this->template GetSingleArgument<int>("kernel", 0))),
+        kernel_w_(this->template GetSingleArgument<int>(
             "kernel_w",
-            OperatorBase::GetSingleArgument<int>("kernel", 0))),
-        dilation_h_(OperatorBase::GetSingleArgument<int>(
+            this->template GetSingleArgument<int>("kernel", 0))),
+        dilation_h_(this->template GetSingleArgument<int>(
             "dilation_h",
-            OperatorBase::GetSingleArgument<int>("dilation", 1))),
-        dilation_w_(OperatorBase::GetSingleArgument<int>(
+            this->template GetSingleArgument<int>("dilation", 1))),
+        dilation_w_(this->template GetSingleArgument<int>(
             "dilation_w",
-            OperatorBase::GetSingleArgument<int>("dilation", 1))),
-        stride_h_(OperatorBase::GetSingleArgument<int>(
+            this->template GetSingleArgument<int>("dilation", 1))),
+        stride_h_(this->template GetSingleArgument<int>(
             "stride_h",
-            OperatorBase::GetSingleArgument<int>("stride", 1))),
-        stride_w_(OperatorBase::GetSingleArgument<int>(
+            this->template GetSingleArgument<int>("stride", 1))),
+        stride_w_(this->template GetSingleArgument<int>(
             "stride_w",
-            OperatorBase::GetSingleArgument<int>("stride", 1))),
+            this->template GetSingleArgument<int>("stride", 1))),
         order_(StringToStorageOrder(
-            OperatorBase::GetSingleArgument<string>("order", "NCHW"))) {
+            this->template GetSingleArgument<string>("order", "NCHW"))) {
     CAFFE_ENFORCE(kernel_h_ > 0);
     CAFFE_ENFORCE(kernel_w_ > 0);
     CAFFE_ENFORCE(dilation_h_ > 0);
@@ -155,27 +155,27 @@ class Col2ImOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   Col2ImOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        pad_(OperatorBase::GetSingleArgument<int>("pad", 0)),
-        kernel_h_(OperatorBase::GetSingleArgument<int>(
+        pad_(this->template GetSingleArgument<int>("pad", 0)),
+        kernel_h_(this->template GetSingleArgument<int>(
             "kernel_h",
-            OperatorBase::GetSingleArgument<int>("kernel", 0))),
-        kernel_w_(OperatorBase::GetSingleArgument<int>(
+            this->template GetSingleArgument<int>("kernel", 0))),
+        kernel_w_(this->template GetSingleArgument<int>(
             "kernel_w",
-            OperatorBase::GetSingleArgument<int>("kernel", 0))),
-        dilation_h_(OperatorBase::GetSingleArgument<int>(
+            this->template GetSingleArgument<int>("kernel", 0))),
+        dilation_h_(this->template GetSingleArgument<int>(
             "dilation_h",
-            OperatorBase::GetSingleArgument<int>("dilation", 1))),
-        dilation_w_(OperatorBase::GetSingleArgument<int>(
+            this->template GetSingleArgument<int>("dilation", 1))),
+        dilation_w_(this->template GetSingleArgument<int>(
             "dilation_w",
-            OperatorBase::GetSingleArgument<int>("dilation", 1))),
-        stride_h_(OperatorBase::GetSingleArgument<int>(
+            this->template GetSingleArgument<int>("dilation", 1))),
+        stride_h_(this->template GetSingleArgument<int>(
             "stride_h",
-            OperatorBase::GetSingleArgument<int>("stride", 1))),
-        stride_w_(OperatorBase::GetSingleArgument<int>(
+            this->template GetSingleArgument<int>("stride", 1))),
+        stride_w_(this->template GetSingleArgument<int>(
             "stride_w",
-            OperatorBase::GetSingleArgument<int>("stride", 1))),
+            this->template GetSingleArgument<int>("stride", 1))),
         order_(StringToStorageOrder(
-            OperatorBase::GetSingleArgument<string>("order", "NCHW"))) {
+            this->template GetSingleArgument<string>("order", "NCHW"))) {
     CAFFE_ENFORCE(kernel_h_ > 0);
     CAFFE_ENFORCE(kernel_w_ > 0);
     CAFFE_ENFORCE(dilation_h_ > 0);

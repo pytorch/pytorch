@@ -345,33 +345,23 @@ class CompilationUnit(object):
         return self.module._get_method(attr)
 
 
-def _fn_to_typed_def(fn, method=False):
-    schema = annotations.get_signature(fn)
-    ast = get_jit_ast(fn)
-    if schema:
-        typed_def = torch._C._pack_typed_def(ast, schema[0], schema[1], method)
-    else:
-        typed_def = torch._C.TypedDef(ast)
-    return typed_def
-
-
 def script(fn, optimize=True, _frames_up=0):
     rcb = createResolutionCallback(_frames_up + 1)
-    typed_def = _fn_to_typed_def(fn)
-    graph = _jit_script_compile(typed_def, rcb)
+    ast = get_jit_ast(fn, is_method=False)
+    graph = _jit_script_compile(ast, rcb)
     mod = ScriptModule()
     mod._create_method_from_graph('forward', graph)
     # TODO: refactor everything so we're not 1) creating a ScriptModule
     # 2) Throwing everything away except for the graph 3) Creating a new
     # ScriptModule and dumping that graph in 4) Re-populating the schema
     # because it was lost doing the previous
-    mod.__getattr__('forward').set_arg_and_return_types(typed_def, False)
+    mod.__getattr__('forward').forward_schema(ast, False)
     # Forward docstrings
     mod.__doc__ = fn.__doc__
     return mod
 
 
-ScriptMethodStub = namedtuple('ScriptMethodStub', ('resolution_callback', 'typed_def', 'original_method'))
+ScriptMethodStub = namedtuple('ScriptMethodStub', ('resolution_callback', 'def_', 'original_method'))
 
 
 def script_method(fn):
@@ -387,8 +377,9 @@ def script_method(fn):
     #
     # createResolutionCallback internally adds 1 to get us to the scope of this
     # function (the calling function). Adding 2 gets us to the proper surrounding scope.
-    typed_def = _fn_to_typed_def(fn, method=True)
-    return ScriptMethodStub(createResolutionCallback(frames_up=2), typed_def, fn)
+    rcb = createResolutionCallback(frames_up=2)
+    ast = get_jit_ast(fn, is_method=True)
+    return ScriptMethodStub(rcb, ast, fn)
 
 
 def batch(batch_size=1, optimize=True, _frames_up=0):
@@ -595,9 +586,9 @@ class ScriptMeta(type(torch._C.ScriptModule)):
             if cls is type(self):
                 torch._C.ScriptModule.__init__(self)
             original_init(self, *args, **kwargs)
-            typed_defs = [m.typed_def for m in methods]
+            defs = [m.def_ for m in methods]
             rcbs = [m.resolution_callback for m in methods]
-            self._create_methods(typed_defs, rcbs)
+            self._create_methods(defs, rcbs)
 
         cls.__init__ = init_then_register
         return super(ScriptMeta, cls).__init__(name, bases, attrs)
@@ -665,8 +656,9 @@ def _get_methods(cls):
 _compiled_methods_whitelist = {
     'forward', 'register_buffer', 'register_parameter', 'add_module',
     '_apply', 'apply', 'cuda', 'cpu', 'type', 'float', 'double', 'half',
-    'state_dict', 'load_state_dict', '_load_from_state_dict', 'parameters',
-    'named_parameters', '_all_buffers', 'children', 'named_children', 'modules',
+    'state_dict', 'load_state_dict', '_load_from_state_dict',
+    '_named_members', 'parameters', 'named_parameters',
+    'buffers', 'named_buffers', 'children', 'named_children', 'modules',
     'named_modules', 'zero_grad', 'share_memory', '_get_name', 'extra_repr',
     '_slow_forward', '_tracing_name'
 }

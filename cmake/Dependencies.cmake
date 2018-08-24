@@ -61,7 +61,7 @@ if(BUILD_CAFFE2)
 endif()
 
 # ---[ BLAS
-if(BUILD_ATEN)
+if(NOT BUILD_ATEN_MOBILE)
   set(BLAS "MKL" CACHE STRING "Selected BLAS library")
 else()
   set(BLAS "Eigen" CACHE STRING "Selected BLAS library")
@@ -512,7 +512,7 @@ if(USE_CUDA)
 endif()
 
 # ---[ HIP
-if(BUILD_CAFFE2 OR BUILD_ATEN)
+if(BUILD_CAFFE2 OR NOT BUILD_ATEN_MOBILE)
   include(${CMAKE_CURRENT_LIST_DIR}/public/LoadHIP.cmake)
   if(PYTORCH_FOUND_HIP)
     message(INFO "Compiling with HIP for AMD.")
@@ -539,21 +539,30 @@ if(BUILD_CAFFE2 OR BUILD_ATEN)
     set(Caffe2_HIP_DEPENDENCY_LIBS
       ${rocrand_LIBRARIES} ${hiprand_LIBRARIES} ${PYTORCH_HIP_HCC_LIBRARIES} ${PYTORCH_MIOPEN_LIBRARIES})
     # Additional libraries required by PyTorch AMD that aren't used by Caffe2 (not in Caffe2's docker image)
-    if(BUILD_ATEN)
+    if(NOT BUILD_ATEN_MOBILE)
       set(Caffe2_HIP_DEPENDENCY_LIBS ${Caffe2_HIP_DEPENDENCY_LIBS} ${hipsparse_LIBRARIES})
     endif()
     # TODO: There is a bug in rocblas's cmake files that exports the wrong targets name in ${rocblas_LIBRARIES}
     list(APPEND Caffe2_HIP_DEPENDENCY_LIBS
       roc::rocblas)
+
+    # TODO: Currently pytorch hipify script uses a feature called
+    # "disabled_modules" that effectively ifdef out a file, but
+    # without doing extra processing in the callers, which results in
+    # some unresolved symbols in the shared lib
+    # (libcaffe2_hip.so). Remove this when all disabled_modules are
+    # eliminated.
+    set(CMAKE_EXE_LINKER_FLAGS "-Wl,--unresolved-symbols=ignore-in-shared-libs ${CMAKE_EXE_LINKER_FLAGS}")
   else()
     caffe2_update_option(USE_ROCM OFF)
   endif()
 endif()
 
 # ---[ ROCm
-if(USE_ROCM AND NOT BUILD_CAFFE2)
+if(USE_ROCM)
  include_directories(SYSTEM ${HIP_PATH}/include)
  include_directories(SYSTEM ${ROCBLAS_PATH}/include)
+ include_directories(SYSTEM ${ROCFFT_PATH}/include)
  include_directories(SYSTEM ${HIPSPARSE_PATH}/include)
  include_directories(SYSTEM ${HIPRAND_PATH}/include)
  include_directories(SYSTEM ${ROCRAND_PATH}/include)
@@ -745,7 +754,7 @@ if (USE_NNAPI AND NOT ANDROID)
   caffe2_update_option(USE_NNAPI OFF)
 endif()
 
-if (BUILD_ATEN)
+if (NOT BUILD_ATEN_MOBILE)
   if (BUILD_CAFFE2)
     list(APPEND Caffe2_DEPENDENCY_LIBS aten_op_header_gen)
     if (USE_CUDA)
@@ -809,7 +818,7 @@ if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
 endif()
 
 # --[ ATen checks
-if (BUILD_ATEN)
+if (NOT BUILD_ATEN_MOBILE)
   set(TORCH_CUDA_ARCH_LIST $ENV{TORCH_CUDA_ARCH_LIST})
   set(TORCH_NVCC_FLAGS $ENV{TORCH_NVCC_FLAGS})
 
@@ -846,28 +855,26 @@ if (BUILD_ATEN)
 
   #Check if certain std functions are supported. Sometimes
   #_GLIBCXX_USE_C99 macro is not defined and some functions are missing.
-  if (NOT ANDROID)
-    CHECK_CXX_SOURCE_COMPILES("
-    #include <cmath>
-    #include <string>
+  CHECK_CXX_SOURCE_COMPILES("
+  #include <cmath>
+  #include <string>
 
-    int main() {
-      int a = std::isinf(3.0);
-      int b = std::isnan(0.0);
-      std::string s = std::to_string(1);
+  int main() {
+    int a = std::isinf(3.0);
+    int b = std::isnan(0.0);
+    std::string s = std::to_string(1);
 
-      return 0;
-      }" SUPPORT_GLIBCXX_USE_C99)
+    return 0;
+    }" SUPPORT_GLIBCXX_USE_C99)
 
-    if (NOT SUPPORT_GLIBCXX_USE_C99)
-      message(FATAL_ERROR
-              "The C++ compiler does not support required functions. "
-              "This is very likely due to a known bug in GCC 5 "
-              "(and maybe other versions) on Ubuntu 17.10 and newer. "
-              "For more information, see: "
-              "https://github.com/pytorch/pytorch/issues/5229"
-             )
-    endif()
+  if (NOT SUPPORT_GLIBCXX_USE_C99)
+    message(FATAL_ERROR
+            "The C++ compiler does not support required functions. "
+            "This is very likely due to a known bug in GCC 5 "
+            "(and maybe other versions) on Ubuntu 17.10 and newer. "
+            "For more information, see: "
+            "https://github.com/pytorch/pytorch/issues/5229"
+           )
   endif()
 
   # Top-level build config
@@ -1215,6 +1222,15 @@ if (BUILD_ATEN)
   ELSE()
     include_directories(SYSTEM ${CUDNN_INCLUDE_DIRS})
     set(AT_CUDNN_ENABLED 1)
+  ENDIF()
+
+  IF (NOT USE_ROCM)
+    message("disabling ROCM because NOT USE_ROCM is set")
+    MESSAGE(STATUS "MIOpen not found. Compiling without MIOpen support")
+    set(AT_ROCM_ENABLED 0)
+  ELSE()
+    INCLUDE_DIRECTORIES(BEFORE ${MIOPEN_INCLUDE_DIRS})
+    set(AT_ROCM_ENABLED 1)
   ENDIF()
 
   if (NO_MKLDNN)

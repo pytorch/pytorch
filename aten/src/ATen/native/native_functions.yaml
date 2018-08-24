@@ -62,6 +62,30 @@
   dispatch:
      CUDA: masked_scale_cuda
 
+- func: dropout(Tensor input, double p, bool train) -> Tensor
+  variants: function
+
+- func: dropout_(Tensor self, double p, bool train) -> Tensor
+  variants: function
+
+- func: feature_dropout(Tensor input, double p, bool train) -> Tensor
+  variants: function
+
+- func: feature_dropout_(Tensor self, double p, bool train) -> Tensor
+  variants: function
+
+- func: alpha_dropout(Tensor input, double p, bool train) -> Tensor
+  variants: function
+
+- func: alpha_dropout_(Tensor self, double p, bool train) -> Tensor
+  variants: function
+
+- func: feature_alpha_dropout(Tensor input, double p, bool train) -> Tensor
+  variants: function
+
+- func: feature_alpha_dropout_(Tensor self, double p, bool train) -> Tensor
+  variants: function
+
 - func: abs(Tensor self) -> Tensor
 
 - func: abs_(Tensor self) -> Tensor
@@ -357,8 +381,10 @@
   variants: function
 
 - func: conv_tbc(Tensor self, Tensor weight, Tensor bias, int64_t pad) -> Tensor
+  variants: function
 
 - func: conv_tbc_backward(Tensor self, Tensor input, Tensor weight, Tensor bias, int64_t pad) -> (Tensor, Tensor, Tensor)
+  variants: function
 
 # NB: we inherit the goofy argument order from PyTorch torch.nn.functional
 - func: conv_transpose1d(Tensor input, Tensor weight, Tensor bias={}, IntList[1] stride=1, IntList[1] padding=0, IntList[1] output_padding=0, int64_t groups=1, IntList[1] dilation=1) -> Tensor
@@ -542,7 +568,6 @@
 - func: det(Tensor self) -> Tensor
 
 - func: diagflat(Tensor self, int64_t offset=0) -> Tensor
-  variants: function
 
 - func: diagonal(Tensor self, int64_t offset=0, int64_t dim1=0, int64_t dim2=1) -> Tensor
 
@@ -759,10 +784,7 @@
 # Additionally, arguments `padding_mode` and `interpolation_mode` are cast to
 # enums defined in `native/GridSampler.h`. `cudnn_grid_sampler` doesn't take in
 # `interpolation_mode` because it only supports Bilinear interpolation mode.
-#
-# ssnl: Currently `interpolation_mode` is just a placeholder. It is not really
-#       used. Everywhere Bilinear is assumed. I will add Nearest soon.
-- func: grid_sampler(Tensor input, Tensor grid, int64_t padding_mode) -> Tensor
+- func: grid_sampler(Tensor input, Tensor grid, int64_t interpolation_mode, int64_t padding_mode) -> Tensor
   variants: function
 
 - func: grid_sampler_2d(Tensor input, Tensor grid, int64_t interpolation_mode, int64_t padding_mode) -> Tensor
@@ -1002,6 +1024,7 @@
     CUDA: log_softmax_cuda
 
 - func: log_softmax_backward_data(Tensor grad_output, Tensor output, int64_t dim, Tensor self) -> Tensor
+  variants: function
   dispatch:
     CPU: log_softmax_backward_cpu
     CUDA: log_softmax_backward_cuda
@@ -1082,6 +1105,63 @@
 
 - func: mkldnn_convolution_backward(Tensor self, Tensor grad_output, Tensor weight, IntList padding, IntList stride, IntList dilation, int64_t groups, std::array<bool,3> output_mask) -> (Tensor, Tensor, Tensor)
   variants: function
+
+- func: miopen_batch_norm(Tensor input, Tensor weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, double exponential_average_factor, double epsilon) -> (Tensor, Tensor, Tensor)
+  variants: function
+  dispatch:
+    CUDA: miopen_batch_norm
+
+- func: miopen_batch_norm_backward(Tensor input, Tensor grad_output, Tensor weight, Tensor? running_mean, Tensor? running_var, Tensor? save_mean, Tensor? save_var, double epsilon) -> (Tensor, Tensor, Tensor)
+  variants: function
+  dispatch:
+    CUDA: miopen_batch_norm_backward
+
+- func: miopen_convolution(Tensor self, Tensor weight, Tensor? bias, IntList padding, IntList stride, IntList dilation, int64_t groups, bool benchmark, bool deterministic) -> Tensor
+  variants: function
+  dispatch:
+    CUDA: miopen_convolution
+
+- func: miopen_convolution_backward_input(IntList self_size, Tensor grad_output, Tensor weight, IntList padding, IntList stride, IntList dilation, int64_t groups, bool benchmark, bool deterministic) -> Tensor
+  variants: function
+  dispatch:
+    CUDA: miopen_convolution_backward_input
+
+- func: miopen_convolution_backward(Tensor self, Tensor grad_output, Tensor weight, IntList padding, IntList stride, IntList dilation, int64_t groups, bool benchmark, bool deterministic, std::array<bool,3> output_mask) -> (Tensor, Tensor, Tensor)
+  variants: function
+  dispatch:
+    CUDA: miopen_convolution_backward
+
+- func: miopen_convolution_backward_bias(Tensor grad_output) -> Tensor
+  variants: function
+  dispatch:
+    CUDA: miopen_convolution_backward_bias
+
+- func: miopen_convolution_backward_weight(IntList weight_size, Tensor grad_output, Tensor self, IntList padding, IntList stride, IntList dilation, int64_t groups, bool benchmark, bool deterministic) -> Tensor
+  variants: function
+  dispatch:
+    CUDA: miopen_convolution_backward_weight
+
+- func: miopen_convolution_transpose(Tensor self, Tensor weight, Tensor? bias, IntList padding, IntList output_padding, IntList stride, IntList dilation, int64_t groups, bool benchmark, bool deterministic) -> Tensor
+  variants: function
+  dispatch:
+    CUDA: miopen_convolution_transpose
+
+# NB: output_padding not strictly needed here, but it's helpful for the double
+# backwards
+- func: miopen_convolution_transpose_backward(Tensor self, Tensor grad_output, Tensor weight, IntList padding, IntList output_padding, IntList stride, IntList dilation, int64_t groups, bool benchmark, bool deterministic, std::array<bool,3> output_mask) -> (Tensor, Tensor, Tensor)
+  variants: function
+  dispatch:
+    CUDA: miopen_convolution_transpose_backward
+
+- func: miopen_convolution_transpose_backward_input(Tensor grad_output, Tensor weight, IntList padding, IntList stride, IntList dilation, int64_t groups, bool benchmark, bool deterministic) -> Tensor
+  variants: function
+  dispatch:
+    CUDA: miopen_convolution_transpose_backward_input
+
+- func: miopen_convolution_transpose_backward_weight(IntList weight_size, Tensor grad_output, Tensor self, IntList padding, IntList stride, IntList dilation, int64_t groups, bool benchmark, bool deterministic) -> Tensor
+  variants: function
+  dispatch:
+    CUDA: miopen_convolution_transpose_backward_weight
 
 - func: mm(Tensor self, Tensor mat2) -> Tensor
 
@@ -1402,6 +1482,7 @@
     CUDA: softmax_cuda
 
 - func: softmax_backward_data(Tensor grad_output, Tensor output, int64_t dim, Tensor self) -> Tensor
+  variants: function
   dispatch:
     CPU: softmax_backward_cpu
     CUDA: softmax_backward_cuda
@@ -2006,3 +2087,61 @@
     CUDA: _local_scalar_dense_cuda
   variants:
     - function
+
+# Fused RNN kernels
+- func: _thnn_fused_lstm_cell(Tensor input_gates, Tensor hidden_gates, Tensor cx, Tensor? input_bias={}, Tensor? hidden_bias={}) -> (Tensor, Tensor, Tensor)
+  dispatch:
+    CUDA: _thnn_fused_lstm_cell_cuda
+  variants: function
+
+- func: _thnn_fused_lstm_cell_backward(Tensor? grad_hy, Tensor? grad_cy, Tensor cx, Tensor cy, Tensor workspace, bool has_bias) -> (Tensor, Tensor, Tensor, Tensor, Tensor)
+  dispatch:
+    CUDA: _thnn_fused_lstm_cell_backward_cuda
+  variants: function
+
+- func: _thnn_fused_gru_cell(Tensor input_gates, Tensor hidden_gates, Tensor hx, Tensor? input_bias={}, Tensor? hidden_bias={}) -> (Tensor, Tensor)
+  dispatch:
+    CUDA: _thnn_fused_gru_cell_cuda
+  variants: function
+
+- func: _thnn_fused_gru_cell_backward(Tensor grad_hy, Tensor workspace, bool has_bias) -> (Tensor, Tensor, Tensor, Tensor, Tensor)
+  dispatch:
+    CUDA: _thnn_fused_gru_cell_backward_cuda
+  variants: function
+
+# RNN cells and layers
+- func: lstm(Tensor input, TensorList hx, TensorList params, bool has_biases, int64_t num_layers, double dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor, Tensor)
+  variants: function
+
+- func: lstm(Tensor data, Tensor batch_sizes, TensorList hx, TensorList params, bool has_biases, int64_t num_layers, double dropout, bool train, bool bidirectional) -> (Tensor, Tensor, Tensor)
+  variants: function
+
+- func: gru(Tensor input, Tensor hx, TensorList params, bool has_biases, int64_t num_layers, double dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor)
+  variants: function
+
+- func: gru(Tensor data, Tensor batch_sizes, Tensor hx, TensorList params, bool has_biases, int64_t num_layers, double dropout, bool train, bool bidirectional) -> (Tensor, Tensor)
+  variants: function
+
+- func: rnn_tanh(Tensor input, Tensor hx, TensorList params, bool has_biases, int64_t num_layers, double dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor)
+  variants: function
+
+- func: rnn_tanh(Tensor data, Tensor batch_sizes, Tensor hx, TensorList params, bool has_biases, int64_t num_layers, double dropout, bool train, bool bidirectional) -> (Tensor, Tensor)
+  variants: function
+
+- func: rnn_relu(Tensor input, Tensor hx, TensorList params, bool has_biases, int64_t num_layers, double dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor)
+  variants: function
+
+- func: rnn_relu(Tensor data, Tensor batch_sizes, Tensor hx, TensorList params, bool has_biases, int64_t num_layers, double dropout, bool train, bool bidirectional) -> (Tensor, Tensor)
+  variants: function
+
+- func: lstm_cell(Tensor input, TensorList hx, Tensor w_ih, Tensor w_hh, Tensor? b_ih={}, Tensor? b_hh={}) -> (Tensor, Tensor)
+  variants: function
+
+- func: gru_cell(Tensor input, Tensor hx, Tensor w_ih, Tensor w_hh, Tensor? b_ih={}, Tensor? b_hh={}) -> Tensor
+  variants: function
+
+- func: rnn_tanh_cell(Tensor input, Tensor hx, Tensor w_ih, Tensor w_hh, Tensor? b_ih={}, Tensor? b_hh={}) -> Tensor
+  variants: function
+
+- func: rnn_relu_cell(Tensor input, Tensor hx, Tensor w_ih, Tensor w_hh, Tensor? b_ih={}, Tensor? b_hh={}) -> Tensor
+  variants: function

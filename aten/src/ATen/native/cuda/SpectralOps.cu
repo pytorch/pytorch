@@ -29,13 +29,16 @@ using namespace at::native::detail;
 // counting_iterator => index to fill
 struct cnt_to_dst_idx_functor : public thrust::unary_function<int64_t, int64_t>
 {
-  const int64_t last_dim_size;
-  const int64_t last_dim_start_slice;
-  const int64_t last_dim_to_fill_size;
+  int64_t last_dim_size;
+  int64_t last_dim_start_slice;
+  int64_t last_dim_to_fill_size;
 
   cnt_to_dst_idx_functor(int64_t last_dim_size, int64_t last_dim_start_slice) :
     last_dim_size(last_dim_size), last_dim_start_slice(last_dim_start_slice),
     last_dim_to_fill_size(last_dim_size - last_dim_start_slice) {}
+  
+  __host__ __device__
+  cnt_to_dst_idx_functor & operator=(const cnt_to_dst_idx_functor&) = default;
 
   __host__ __device__ __forceinline__
   int64_t operator()(const int64_t& i) const
@@ -187,8 +190,45 @@ static inline Tensor _run_cufft(
   CUFFT_CHECK(cufftSetWorkArea(plan, ws.data_ptr()));
 
   // run
+#ifdef __HIP_PLATFORM_HCC__
+  if (input.type().scalarType() == ScalarType::Float) {
+      if (complex_input && complex_output) {
+        CUFFT_CHECK(hipfftExecC2C(plan, static_cast<hipfftComplex*>(input.data_ptr()),
+          static_cast<hipfftComplex*>(output.data_ptr()),
+          inverse ? HIPFFT_BACKWARD : HIPFFT_FORWARD));
+      } else if (complex_input && !complex_output) {
+        CUFFT_CHECK(hipfftExecC2R(plan, static_cast<hipfftComplex*>(input.data_ptr()),
+          static_cast<hipfftReal*>(output.data_ptr())));
+      } else if (!complex_input && complex_output) {
+        CUFFT_CHECK(hipfftExecR2C(plan, static_cast<hipfftReal*>(input.data_ptr()),
+          static_cast<hipfftComplex*>(output.data_ptr())));
+      } else {
+        throw std::runtime_error("hipFFT doesn't support r2r (float)");
+      }
+    } else if (input.type().scalarType() == ScalarType::Double) {
+      if (complex_input && complex_output) {
+        CUFFT_CHECK(hipfftExecZ2Z(plan, static_cast<hipfftDoubleComplex*>(input.data_ptr()),
+          static_cast<hipfftDoubleComplex*>(output.data_ptr()),
+          inverse ? HIPFFT_BACKWARD : HIPFFT_FORWARD));
+      } else if (complex_input && !complex_output) {
+        CUFFT_CHECK(hipfftExecZ2D(plan, static_cast<hipfftDoubleComplex*>(input.data_ptr()),
+          static_cast<hipfftDoubleReal*>(output.data_ptr())));
+      } else if (!complex_input && complex_output) {
+        CUFFT_CHECK(hipfftExecD2Z(plan, static_cast<hipfftDoubleReal*>(input.data_ptr()),
+          static_cast<hipfftDoubleComplex*>(output.data_ptr())));
+      } else {
+        throw std::runtime_error("hipFFT doesn't support r2r (double)");
+      }
+    } else {
+      std::ostringstream ss;
+      ss << "hipFFT doesn't support tensor of type: "
+         << at::toString(input.type().scalarType());
+      throw std::runtime_error(ss.str());
+    }
+#else
   CUFFT_CHECK(cufftXtExec(plan, input.data_ptr(), output.data_ptr(),
     inverse ? CUFFT_INVERSE : CUFFT_FORWARD));
+#endif
 
   // rescale if needed by normalized flag or inverse transform
   auto size_last_signal_dim = checked_signal_sizes[signal_ndim - 1];

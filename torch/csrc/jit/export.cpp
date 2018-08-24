@@ -66,7 +66,7 @@ void validateGraph(const std::shared_ptr<Graph>& graph, onnx_torch::OperatorExpo
 
 class EncoderBase {
  public:
-  EncoderBase(onnx_torch::OperatorExportTypes operator_export_type);
+  EncoderBase(onnx_torch::OperatorExportTypes operator_export_type, bool strip_doc);
 
   onnx::ModelProto get_model_proto() {
     return model_proto_;
@@ -97,6 +97,7 @@ class EncoderBase {
   onnx::ModelProto model_proto_;
   size_t num_blocks_;
   onnx_torch::OperatorExportTypes operator_export_type_;
+  bool strip_doc_;
 };
 
 onnx::TensorProto_DataType ATenTypeToOnnxType(at::ScalarType at_type) {
@@ -122,12 +123,13 @@ onnx::TensorProto_DataType ATenTypeToOnnxType(at::ScalarType at_type) {
   }
 }
 
-EncoderBase::EncoderBase(onnx_torch::OperatorExportTypes operator_export_type)
+EncoderBase::EncoderBase(onnx_torch::OperatorExportTypes operator_export_type, bool strip_doc)
     : num_blocks_(0),
-      operator_export_type_(operator_export_type) {
+      operator_export_type_(operator_export_type),
+      strip_doc_(strip_doc) {
   model_proto_.set_producer_name("pytorch");
   model_proto_.set_ir_version(onnx::IR_VERSION);
-  model_proto_.set_producer_version("0.3");
+  model_proto_.set_producer_version("0.4");
 }
 
 void EncoderBase::EncodeValueInfo(
@@ -184,7 +186,7 @@ void EncoderBase::EncodeBlock(
       continue;
     }
     auto p_n = graph_proto->add_node();
-    if (node->getSourceLocation()) {
+    if (node->getSourceLocation() && !strip_doc_) {
       std::stringstream ss;
       node->getSourceLocation()->highlight(ss);
       p_n->set_doc_string(ss.str());
@@ -325,7 +327,8 @@ class GraphEncoder: public EncoderBase {
                int64_t onnx_opset_version,
                onnx_torch::OperatorExportTypes operator_export_type,
                const std::vector<at::Tensor> &initializers,
-               bool defer_weight_export);
+               bool defer_weight_export,
+               bool strip_doc);
 
   RawDataExportMap get_raw_data_export_map() {
     return raw_data_export_map_;
@@ -345,8 +348,9 @@ GraphEncoder::GraphEncoder(
     int64_t onnx_opset_version,
     onnx_torch::OperatorExportTypes operator_export_type,
     const std::vector<at::Tensor> &initializers,
-    bool defer_weight_export)
-    : EncoderBase(operator_export_type),
+    bool defer_weight_export,
+    bool strip_doc)
+    : EncoderBase(operator_export_type, strip_doc),
       defer_weight_export_(defer_weight_export) {
   if (operator_export_type != onnx_torch::OperatorExportTypes::RAW) {
     validateGraph(graph, operator_export_type);
@@ -368,7 +372,7 @@ void GraphEncoder::EncodeTensor(
   }
   tensor_proto->set_data_type(ATenTypeToOnnxType(tensor.type().scalarType()));
   // CPU's HalfTensor doesn't have contiguous(), so first calling contiguous()
-  auto t = tensor.contiguous().toBackend(at::kCPU);
+  auto t = tensor.contiguous().cpu();
   // Add a buffer to the raw_data_export_map for the caller to dump into an
   // external data store. If external_ref is not specified, we instead dump
   // the contiguous data into the protobuf itself
@@ -439,7 +443,7 @@ class ModuleEncoder: public EncoderBase {
 ModuleEncoder::ModuleEncoder(
     const script::Module &module,
     const std::string &filename)
-    : EncoderBase(onnx_torch::OperatorExportTypes::RAW),
+    : EncoderBase(onnx_torch::OperatorExportTypes::RAW, false),
       file_writer_(filename) {
   model_proto_.set_doc_string("THIS PROTO IS NOT STANDARD ONNX");
   EncodeModule(model_proto_.mutable_graph(), module);
@@ -619,7 +623,7 @@ void ModuleEncoder::EncodeTensor(
     tensor_proto->add_int64_data(dedup_it->second);
   } else {
     at::Tensor t = tensor;
-    if (at::detail::get_backend(tensor.storage()->pImpl()) == at::kCUDA) {
+    if (at::detail::get_backend(tensor.storage()->pImpl()) == at::Backend::CUDA) {
       // NB: This new tensor is created to support cuda tensors.
       // Storages can be mutated when converting tensors from cuda to cpu,
       // and we need a cpu tensor to copy data from.
@@ -628,7 +632,7 @@ void ModuleEncoder::EncodeTensor(
           /* storageOffset = */ 0,
           /* size = */ { static_cast<int64_t>(tensor.type().elementSizeInBytes() * tensor.storage()->pImpl()->size()) },
           /* strides = */ { 1 })
-        .toBackend(at::kCPU);
+        .cpu();
     }
 
     auto record_number = file_writer_.writeRecord(
@@ -830,9 +834,13 @@ std::string PrettyPrintExportedGraph(
                         const std::vector<at::Tensor> &initializers,
                         int64_t onnx_opset_version,
                         bool defer_weight_export,
-                        ::torch::onnx::OperatorExportTypes operator_export_type) {
+                        ::torch::onnx::OperatorExportTypes operator_export_type,
+                        bool google_printer) {
   auto graph_encoder = GraphEncoder(
-    graph, onnx_opset_version, operator_export_type, initializers, defer_weight_export);
+    graph, onnx_opset_version, operator_export_type, initializers, defer_weight_export, true);
+  if (google_printer) {
+    return graph_encoder.get_model_proto().DebugString();
+  }
   return prettyPrint(graph_encoder.get_model_proto());
 }
 
@@ -848,7 +856,7 @@ std::tuple<std::string, RawDataExportMap> ExportGraph(
                         bool defer_weight_export,
                         ::torch::onnx::OperatorExportTypes operator_export_type) {
   auto graph_encoder = GraphEncoder(
-    graph, onnx_opset_version, operator_export_type, initializers, defer_weight_export);
+    graph, onnx_opset_version, operator_export_type, initializers, defer_weight_export, false);
   return std::make_tuple(graph_encoder.get_model_proto().SerializeAsString(),
                          graph_encoder.get_raw_data_export_map());
 }

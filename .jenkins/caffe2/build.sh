@@ -157,6 +157,7 @@ if [[ $BUILD_ENVIRONMENT == *rocm* ]]; then
   export HCC_AMDGPU_TARGET=gfx900
 
   ########## HIPIFY Caffe2 operators
+  ${PYTHON} "${ROOT_DIR}/tools/amd_build/build_pytorch_amd.py"
   ${PYTHON} "${ROOT_DIR}/tools/amd_build/build_caffe2_amd.py"
 fi
 
@@ -190,7 +191,6 @@ else
 fi
 
 
-
 ###############################################################################
 # Configure and make
 ###############################################################################
@@ -217,7 +217,7 @@ if [[ -z "$INTEGRATED" ]]; then
 
 else
 
-  sudo FULL_CAFFE2=1 python setup.py install
+  FULL_CAFFE2=1 python setup.py install --user
   # TODO: I'm not sure why this is necessary
   cp -r torch/lib/tmp_install $INSTALL_PREFIX
 

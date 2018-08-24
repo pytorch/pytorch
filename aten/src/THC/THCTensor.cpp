@@ -52,10 +52,8 @@ THCTensor *THCTensor_new(THCState *state, at::ScalarType scalar_type) {
       return THCudaIntTensor_new(state);
     case at::ScalarType::Long:
       return THCudaLongTensor_new(state);
-#ifdef CUDA_HALF_TENSOR
     case at::ScalarType::Half:
       return THCudaHalfTensor_new(state);
-#endif
     case at::ScalarType::Float:
       return THCudaTensor_new(state);
     case at::ScalarType::Double:
@@ -66,9 +64,9 @@ THCTensor *THCTensor_new(THCState *state, at::ScalarType scalar_type) {
 }
 
 void THCTensor_resize(THCState *state, THCTensor *self, at::IntList size, at::IntList stride) {
-  THArgCheck(size.data() != NULL, 2, "invalid size");
-  if(stride.data())
+  if(stride.data()) {
     THArgCheck(stride.size() == size.size(), 3, "invalid stride");
+  }
 
 #ifdef DEBUG
   THAssert(size.size() <= INT_MAX);
@@ -98,15 +96,10 @@ void THCTensor_resizeAs(THCState *state, THCTensor *self, THCTensor *src) {
 
 void THCTensor_resizeNd(THCState *state, THCTensor *self, int nDimension, const int64_t *size, const int64_t *stride)
 {
+  AT_CHECK(nDimension >= 0, "resizeNd nDimension must be non-negative");
   int d;
   ptrdiff_t totalSize;
   bool hascorrectsize = true;
-
-#ifndef USE_TH_SCALAR
-  AT_CHECK(nDimension > 0, "resizeNd nDimension must be greater than 0");
-#else
-  AT_CHECK(nDimension >= 0, "resizeNd nDimension must be non-negative");
-#endif
 
   for(d = 0; d < nDimension; d++)
   {
@@ -175,10 +168,10 @@ void THCTensor_set(THCState *state, THCTensor *self, THCTensor *src)
 
 void THCTensor_setStorage(THCState *state, THCTensor *self, THCStorage *storage_, ptrdiff_t storageOffset_, at::IntList size_, at::IntList stride_)
 {
-  if(size_.data() && stride_.data())
+  if (stride_.data()) {
     THArgCheck(size_.size() == stride_.size(), 5, "inconsistent size/stride sizes");
+  }
 
-  AT_CHECK(size_.data(), "size must not be null");
   THCTensor_setStorageNd(state,
                          self,
                          storage_,
@@ -228,11 +221,7 @@ void THCTensor_squeeze1d(THCState *state, THCTensor *self, THCTensor *src, int d
 
   THCTensor_set(state, self, src);
 
-#ifdef TH_SCALAR
   if(src->size(dimension) == 1)
-#else
-  if(src->size(dimension) == 1 && src->dim() > 1)
-#endif
   {
     for(d = dimension; d < self->dim()-1; d++)
     {

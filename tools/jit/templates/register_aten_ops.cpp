@@ -1,4 +1,5 @@
 #include "torch/csrc/jit/operator.h"
+#include "torch/csrc/jit/custom_operator.h"
 
 #include "torch/csrc/autograd/profiler.h"
 #include "torch/csrc/jit/interned_strings.h"

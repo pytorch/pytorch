@@ -19,6 +19,7 @@
 #include "nomnigraph/Support/Pointer.h"
 #include "nomnigraph/Transformations/SubgraphMatcher.h"
 
+#include <sstream>
 #include <string>
 #include <type_traits>
 #include <vector>
@@ -242,6 +243,8 @@ using NNCFGraph = nom::repr::ControlFlowGraph<NNGraph>;
 struct NNModule {
   NNGraph dataFlow;
   NNCFGraph controlFlow;
+  std::unordered_set<NNGraph::NodeRef> inputs;
+  std::unordered_set<NNGraph::NodeRef> outputs;
   NNModule(const NNModule&) = delete;
   NNModule(NNModule&&) = default;
   NNModule() {}
@@ -421,16 +424,30 @@ void coalesceInsertedDataDependencies(repr::NNModule* m);
 template <NNGraph* G>
 struct NodeHelper {};
 
-using NNNodeMatchCriteria = std::function<bool(NNGraph::NodeRef)>;
-using NNSubtree = nom::matcher::SubtreeMatchCriteria<NNNodeMatchCriteria>;
+struct NNNodeMatchCriteria {
+  const std::function<bool(NNGraph::NodeRef)> predicate;
+  const std::string debugString;
+
+  NNNodeMatchCriteria(
+      const std::function<bool(NNGraph::NodeRef)>& predicate,
+      const std::string& debugString = "No debug string specified")
+      : predicate(predicate), debugString(debugString){};
+};
+
+std::ostream& operator<<(
+    std::ostream& oss,
+    const NNNodeMatchCriteria& criteria);
+
+using NNMatchGraph = nom::matcher::MatchGraph<NNNodeMatchCriteria>;
 
 bool hasSingleOutputAndConsumer(NNGraph::NodeRef nodeRef);
 
 template <typename NodeType>
 NNNodeMatchCriteria matchNodeTypeWithPredicate(
     const std::function<bool(NNGraph::NodeRef, const NodeType&)> predicate,
-    bool expectedSingleOutputAndConsumer = false) {
-  return
+    bool expectedSingleOutputAndConsumer = false,
+    const std::string& debugString = "matchNodeTypeWithPredicate") {
+  return NNNodeMatchCriteria(
       [&predicate, expectedSingleOutputAndConsumer](NNGraph::NodeRef nodeRef) {
         NOM_REQUIRE_OR_RET_FALSE(is<NodeType>(nodeRef));
         if (expectedSingleOutputAndConsumer) {
@@ -438,18 +455,22 @@ NNNodeMatchCriteria matchNodeTypeWithPredicate(
         }
         NodeType* node = get<NodeType>(nodeRef);
         return predicate(nodeRef, *node);
-      };
+      },
+      debugString);
 };
 
 template <typename NodeType>
 NNNodeMatchCriteria matchNodeType(
-    bool expectedSingleOutputAndConsumer = false) {
-  return [expectedSingleOutputAndConsumer](NNGraph::NodeRef nodeRef) {
-    if (expectedSingleOutputAndConsumer) {
-      NOM_REQUIRE_OR_RET_FALSE(hasSingleOutputAndConsumer(nodeRef));
-    }
-    return is<NodeType>(nodeRef);
-  };
+    bool expectedSingleOutputAndConsumer = false,
+    const std::string& debugString = "matchNodeType") {
+  return NNNodeMatchCriteria(
+      [expectedSingleOutputAndConsumer](NNGraph::NodeRef nodeRef) {
+        if (expectedSingleOutputAndConsumer) {
+          NOM_REQUIRE_OR_RET_FALSE(hasSingleOutputAndConsumer(nodeRef));
+        }
+        return is<NodeType>(nodeRef);
+      },
+      debugString);
 }
 
 NNNodeMatchCriteria matchAnyNode();
@@ -458,7 +479,7 @@ struct NNNodeMatch {
   static bool isMatch(
       const NNGraph::NodeRef& node,
       const NNNodeMatchCriteria& criteria) {
-    return criteria(node);
+    return criteria.predicate(node);
   }
 };
 
@@ -466,11 +487,12 @@ using NNSubgraphMatcher =
     nom::matcher::SubgraphMatcher<NNGraph, NNNodeMatchCriteria, NNNodeMatch>;
 
 // This helper method makes it easy to create matching criteria in NNGraph.
-// For example, operatorTree(opMatch, ...) will refer to a tree like this:
+// For example, operatorSubgraph(opMatch, ...) will refer to a tree like this:
 // ... -> opMatch -> opMatch_Output
-NNSubtree operatorTree(
+NNMatchGraph::NodeRef operatorSubgraph(
+    NNMatchGraph& g,
     const NNNodeMatchCriteria& root,
-    const std::vector<NNSubtree>& childrenCriteria = {},
+    const std::vector<NNMatchGraph::NodeRef>& childrenCriteria = {},
     int count = 1);
 
 } // namespace nn

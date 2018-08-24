@@ -168,7 +168,7 @@
 - name: ceil(Tensor self)
   self: zeros_like(grad)
 
-# For clamp, gradient is not defined at the boundaries. But empirically it's helpful 
+# For clamp, gradient is not defined at the boundaries. But empirically it's helpful
 # to be able to get gradient on min and max, so we return the subgradient 1 for these cases.
 - name: clamp(Tensor self, Scalar min, Scalar max)
   self: clamp_backward(grad, self, min, max)
@@ -227,6 +227,9 @@
 - name: dot(Tensor self, Tensor tensor)
   self: grad * tensor
   tensor: grad * self
+
+- name: _fused_dropout(Tensor self, double p, Generator generator)
+  self: _fused_dropout_backward(grad, result1, p)
 
 - name: eig(Tensor self, bool eigenvectors)
   self: not_implemented("eig")
@@ -1206,6 +1209,28 @@
 - name: _cudnn_rnn(Tensor input, TensorList weight, int64_t weight_stride0, Tensor weight_buf, Tensor hx, Tensor cx, int64_t mode, int64_t hidden_size, int64_t num_layers, bool batch_first, double dropout, bool train, bool bidirectional, IntList batch_sizes, Tensor dropout_state)
   input, hx, cx, weight: "_cudnn_rnn_backward(input, weight, weight_stride0, result4, hx, cx, result0, grads[0], grads[1], grads[2], mode, hidden_size, num_layers, batch_first, dropout, train, bidirectional, batch_sizes, dropout_state, retain_variables ? result3.clone() : result3, grad_input_mask)"
 
+# miopen
+
+- name: miopen_convolution_transpose(Tensor self, Tensor weight, Tensor bias, IntList padding, IntList output_padding, IntList stride, IntList dilation, int64_t groups, bool benchmark, bool deterministic)
+  self, weight, bias: miopen_convolution_transpose_backward(self, grad, weight, padding, output_padding, stride, dilation, groups, benchmark, deterministic, grad_input_mask)
+
+- name: miopen_convolution_transpose_backward(Tensor self, Tensor grad_output, Tensor weight, IntList padding, IntList output_padding, IntList stride, IntList dilation, int64_t groups, bool benchmark, bool deterministic, std::array<bool,3> output_mask)
+  grad_output, self, weight: _convolution_double_backward(grads[0], grads[1], grads[2], grad_output, weight, self, stride, padding, dilation, true, output_padding, groups, benchmark, deterministic, true, grad_input_mask)
+
+- name: miopen_convolution(Tensor self, Tensor weight, Tensor bias, IntList padding, IntList stride, IntList dilation, int64_t groups, bool benchmark, bool deterministic)
+  self, weight, bias: miopen_convolution_backward(self, grad, weight, padding, stride, dilation, groups, benchmark, deterministic, grad_input_mask)
+
+- name: miopen_convolution_backward(Tensor self, Tensor grad_output, Tensor weight, IntList padding, IntList stride, IntList dilation, int64_t groups, bool benchmark, bool deterministic, std::array<bool,3> output_mask)
+  grad_output, self, weight: _convolution_double_backward(grads[0], grads[1], grads[2], grad_output, weight, self, stride, padding, dilation, false, std::vector<int64_t>(padding.size(), 0), groups, benchmark, deterministic, true, grad_input_mask)
+
+- name: miopen_batch_norm(Tensor input, Tensor weight, Tensor bias, Tensor running_mean, Tensor running_var, bool training, double exponential_average_factor, double epsilon)
+  input, weight, bias: "training ? miopen_batch_norm_backward(input, grad.contiguous(), weight, running_mean, running_var, result1, result2, epsilon) : thnn_batch_norm_backward(grad.contiguous(), input, weight, running_mean, running_var, training, epsilon, result1, result2, grad_input_mask)"
+
+- name: miopen_batch_norm_backward(Tensor input, Tensor grad_output, Tensor weight, Tensor running_mean, Tensor running_var, Tensor save_mean, Tensor save_var, double epsilon)
+  save_mean: not_implemented("miopen_batch_norm_backward save_mean")
+  save_var: not_implemented("miopen_batch_norm_backward save_var")
+  input, weight, grad_output: batchnorm_double_backward(input, weight, grads[0], grads[1], grads[2], grad_output, running_mean, running_var, true, epsilon, save_mean, save_var, grad_input_mask)
+
 # mkldnn
 - name: mkldnn_convolution(Tensor self, Tensor weight, Tensor bias, IntList padding, IntList stride, IntList dilation, int64_t groups)
   self, weight, bias: mkldnn_convolution_backward(self, grad, weight, padding, stride, dilation, groups, grad_input_mask)
@@ -1219,3 +1244,10 @@
 
 - name: stack(TensorList tensors, int64_t dim)
   tensors: unbind(grad, dim)
+
+# fused RNN kernels
+- name: _thnn_fused_lstm_cell(Tensor input_gates, Tensor hidden_gates, Tensor cx, Tensor input_bias, Tensor hidden_bias)
+  input_gates, hidden_gates, cx, input_bias, hidden_bias: _thnn_fused_lstm_cell_backward(grads[0], grads[1], cx, result1, result2, input_bias.defined())
+
+- name: _thnn_fused_gru_cell(Tensor input_gates, Tensor hidden_gates, Tensor hx, Tensor input_bias, Tensor hidden_bias)
+  input_gates, hidden_gates, hx, input_bias, hidden_bias: _thnn_fused_gru_cell_backward(grad, result1, input_bias.defined())

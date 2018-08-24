@@ -3215,7 +3215,7 @@ method_tests = [
     ('topk', (S, M, S), (3, 1, True), 'dim_desc', [1]),
     ('topk', (S, M, S), (3, 1, True, True), 'dim_desc_sort', [1]),
     ('topk', (), (1,), 'scalar'),
-    ('topk', (), (1, 0), 'dim_sclar', [1]),
+    ('topk', (), (1, 0), 'dim_scalar', [1]),
     ('topk', (), (1, 0, True), 'dim_desc_scalar', [1]),
     ('topk', (), (1, 0, True, True), 'dim_desc_sort_scalar', [1]),
     ('take', (S, S, S), (torch.LongTensor([[-3, 2], [20, 2]]),)),

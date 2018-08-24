@@ -413,7 +413,7 @@ void randperm_cpu(Tensor& result, int64_t n, THGenerator* generator) {
 
 
 THGenerator* get_generator(at::Generator* gen) {
-  auto default_gen = &at::globalContext().defaultGenerator(at::Backend::CPU);
+  auto default_gen = &at::globalContext().defaultGenerator(at::kCPU);
   auto gen_ = at::check_generator<at::CPUGenerator>(gen, default_gen);
   return gen_->generator;
 }
@@ -616,7 +616,7 @@ Tensor tensor_cpu(ArrayRef<T> values, const TensorOptions& options) {
 
 template <typename T>
 Tensor tensor_cuda(ArrayRef<T> values, const TensorOptions& options) {
-  auto cpu_tensor = tensor_cpu(values, TensorOptions(options).device(at::kCPU));
+  auto cpu_tensor = tensor_cpu(values, TensorOptions(options).device(DeviceType::CPU));
   return cpu_tensor.to(options.device());
 }
 

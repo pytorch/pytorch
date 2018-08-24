@@ -181,6 +181,12 @@ void coalesceInsertedDataDependencies(repr::NNModule* m) {
   }
 }
 
+std::ostream& operator<<(
+    std::ostream& oss,
+    const NNNodeMatchCriteria& criteria) {
+  return oss << criteria.debugString;
+}
+
 bool hasSingleOutputAndConsumer(NNGraph::NodeRef nodeRef) {
   auto nodeOutputs = nn::getOutputs(nodeRef);
   NOM_REQUIRE_OR_RET_FALSE(nodeOutputs.size() == 1);
@@ -189,14 +195,17 @@ bool hasSingleOutputAndConsumer(NNGraph::NodeRef nodeRef) {
 }
 
 NNNodeMatchCriteria matchAnyNode() {
-  return [](NNGraph::NodeRef /* unused */) { return true; };
+  return NNNodeMatchCriteria(
+      [](NNGraph::NodeRef /* unused */) { return true; }, "matchAnyNode");
 }
 
-NNSubtree operatorTree(
+NNMatchGraph::NodeRef operatorSubgraph(
+    NNMatchGraph& g,
     const NNNodeMatchCriteria& root,
-    const std::vector<NNSubtree>& childrenCriteria,
+    const std::vector<NNMatchGraph::NodeRef>& childrenCriteria,
     int count) {
-  return NNSubtree(matchAnyNode(), {NNSubtree(root, childrenCriteria)}, count);
+  return subgraph(
+      g, matchAnyNode(), {subgraph(g, root, childrenCriteria)}, count);
 }
 
 } // namespace nn

@@ -13,10 +13,12 @@ import unittest
 import warnings
 import pickle
 import gzip
+import types
+import re
 from torch._utils_internal import get_file_path, get_file_path_2
 from torch.utils.dlpack import from_dlpack, to_dlpack
 from torch._utils import _rebuild_tensor
-from torch._six import inf, nan
+from torch._six import inf, nan, string_classes
 from itertools import product, combinations
 from functools import reduce
 from torch import multiprocessing as mp
@@ -145,6 +147,75 @@ class TestTorch(TestCase):
 
     def test_dir(self):
         dir(torch)
+
+    def test_doc(self):
+        checked_types = (types.MethodType, types.FunctionType,
+                         types.BuiltinFunctionType, types.BuiltinMethodType)
+
+        def test_namespace(ns, *skips):
+            if isinstance(ns, object):
+                ns_name = ns.__class__.__name__
+            else:
+                ns_name = ns.__name__
+            skip_regexes = []
+            for r in skips:
+                if isinstance(r, string_classes):
+                    skip_regexes.append(re.compile('^{}$'.format(re.escape(r))))
+                else:
+                    skip_regexes.append(r)
+            for name in dir(ns):
+                if name.startswith('_'):
+                    continue
+                if any(r.match(name) for r in skip_regexes):
+                    continue
+                var = getattr(ns, name)
+                if isinstance(var, checked_types):
+                    self.assertTrue(var.__doc__ is not None, ns_name + '.' + name)
+
+        # FIXME: fix all the skipped ones below!
+        test_namespace(torch.randn(1),
+                       'allclose',
+                       'as_strided',
+                       'as_strided_',
+                       re.compile('^clamp_(min|max)_?$'),
+                       'coalesce',
+                       'digamma',
+                       'digamma_',
+                       'index_put',
+                       'is_coalesced',
+                       'is_distributed',
+                       'is_floating_point',
+                       'is_nonzero',
+                       'is_same_size',
+                       'is_signed',
+                       'isclose',
+                       'lgamma',
+                       'lgamma_',
+                       'log_softmax',
+                       'map2_',
+                       'new',
+                       'pin_memory',
+                       'polygamma',
+                       'polygamma_',
+                       'record_stream',
+                       'reinforce',
+                       'relu',
+                       'relu_',
+                       'resize',
+                       'resize_as',
+                       'smm',
+                       'softmax',
+                       'split_with_sizes',
+                       'sspaddmm',
+                       'storage_type',
+                       'tan',
+                       'to_dense',
+                       )
+        test_namespace(torch.nn)
+        test_namespace(torch.nn.functional, 'assert_int_or_pair', 'bilinear',
+                       'dropout', 'dropout2d', 'dropout3d', 'feature_alpha_dropout')
+        # TODO: add torch.* tests when we have proper namespacing on ATen functions
+        # test_namespace(torch)
 
     def test_dot(self):
         types = {
@@ -322,7 +393,7 @@ class TestTorch(TestCase):
         self.assertRaises(RuntimeError, lambda: torch.addr(m, v, s))
         self.assertRaises(RuntimeError, lambda: torch.addr(m, s, v))
 
-    def _test_math(self, torchfn, mathfn, input=None):
+    def _test_math(self, torchfn, mathfn, input=None, test_expand=False):
         if input is None:
             input = []
             input.append(list(range(-5, 5)))
@@ -357,6 +428,22 @@ class TestTorch(TestCase):
         check_non_contiguous((1024,), torch.double)
         check_non_contiguous((5, 7), torch.float)
         check_non_contiguous((1024,), torch.float)
+
+        def check_non_contiguous_expand(shape, dtype):
+            contig = torch.randn(shape, dtype=dtype)
+            non_contig = contig.clone().expand(3, -1, -1)
+            self.assertFalse(non_contig.is_contiguous())
+            contig = torchfn(contig)
+            non_contig = torchfn(non_contig)
+            for i in range(3):
+                self.assertEqual(contig, non_contig[i], 'non-contiguous expand[' + str(i) + ']')
+
+        # Expand is not defined for in-place operations
+        if test_expand:
+            # The size 1 case is special as it leads to 0 stride and needs to persists
+            check_non_contiguous_expand((1, 3), torch.double)
+            check_non_contiguous_expand((1, 7), torch.double)
+            check_non_contiguous_expand((5, 7), torch.float)
 
         # If size(dim) == 1, stride(dim) is not defined.
         # The code needs to be able to handle this
@@ -402,7 +489,7 @@ class TestTorch(TestCase):
                 return getattr(x, function_name)()
         else:
             torchfn = getattr(torch, function_name)
-        self._test_math(torchfn, mathfn)
+        self._test_math(torchfn, mathfn, test_expand=(not selffn))
 
     def _test_math_by_name(self, function_name, test_self=True):
         if test_self:
@@ -1706,6 +1793,10 @@ class TestTorch(TestCase):
             expected = np.einsum(test[0], *[t.numpy() for t in test[1:]])
             self.assertEqual(expected.shape, actual.shape, test[0])
             self.assertTrue(np.allclose(expected, actual.numpy()), test[0])
+            # test vararg
+            actual2 = torch.einsum(test[0], *test[1:])
+            self.assertEqual(expected.shape, actual2.shape, test[0])
+            self.assertTrue(np.allclose(expected, actual2.numpy()), test[0])
 
             def do_einsum(*args):
                 return torch.einsum(test[0], args)
@@ -7647,6 +7738,13 @@ class TestTorch(TestCase):
         self.assertEqual(x.__repr__(), str(x))
         self.assertExpected(str(x), subname='requires_grad')
 
+        # test non-contiguous print
+        # sliced tensor should have > PRINT_OPTS.threshold elements
+        x = torch.ones(100, 2, 2, 10)
+        y = x.as_strided(size=(100, 2, 10), stride=(2 * 2 * 10, 2 * 10, 1))
+        self.assertEqual(str(y), y.__repr__())
+        self.assertExpected(str(y), subname='non_contiguous')
+
     def test_sizeof(self):
         sizeof_empty = torch.randn(0).storage().__sizeof__()
         sizeof_10 = torch.randn(10).storage().__sizeof__()
@@ -7902,7 +8000,7 @@ class TestTorch(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_ctor_with_numpy_array(self):
-        dtypes = [
+        correct_dtypes = [
             np.double,
             np.float,
             np.float16,
@@ -7911,7 +8009,11 @@ class TestTorch(TestCase):
             np.int16,
             np.uint8
         ]
-        for dtype in dtypes:
+
+        incorrect_byteorder = '>' if sys.byteorder == 'little' else '<'
+        incorrect_dtypes = map(lambda t: incorrect_byteorder + t, ['d', 'f'])
+
+        for dtype in correct_dtypes:
             array = np.array([1, 2, 3, 4], dtype=dtype)
 
             # Upcast
@@ -8348,6 +8450,12 @@ class TestTorch(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'same length'):
             torch.bincount(torch.tensor([1, 0], device=device),
                            torch.tensor([1., 0.3, 0.5], device=device))
+        # 1-d input with no elements and default minlength
+        self.assertEqual(torch.bincount(torch.tensor([], device=device, dtype=torch.long)),
+                         torch.zeros(0, dtype=torch.long, device=device))
+        # 1-d input with no elements and specified minlength
+        self.assertEqual(torch.bincount(torch.tensor([], device=device, dtype=torch.long), minlength=10),
+                         torch.zeros(10, dtype=torch.long, device=device))
 
         # test tensor method without weights
         long_counts = torch.tensor(
@@ -8470,53 +8578,57 @@ def make_neg_dim_test(name, tensor_arg, arg_constr, types, extra_dim=0):
 def idx_tensor(size, max_val):
     return torch.LongTensor(*size).random_(0, max_val - 1)
 
-neg_dim_tests = [
-    ('narrow', (10, 20, 30), lambda: [DIM_ARG, 0, 5], [METHOD]),
-    ('transpose', (10, 20, 30), lambda: [DIM_ARG, DIM_ARG], [METHOD, INPLACE_METHOD, FUNCTIONAL]),
-    ('size', (10, 20, 30), lambda: [DIM_ARG], [METHOD]),
-    ('cat', [(2, 3, 4), (2, 3, 4)], lambda: [DIM_ARG], [FUNCTIONAL]),
-    ('chunk', (10, 20, 30), lambda: [5, DIM_ARG], [METHOD, FUNCTIONAL]),
-    ('gather', (10, 20), lambda: [DIM_ARG, idx_tensor((10, 20), 10)], [METHOD, FUNCTIONAL]),
-    ('index_select', (10, 10), lambda: [DIM_ARG, idx_tensor((10,), 10)], [METHOD, FUNCTIONAL]),
-    ('split', (10, 20), lambda: [5, DIM_ARG], [METHOD, FUNCTIONAL]),
-    ('squeeze', (10, 1, 20, 1), lambda: [DIM_ARG], [METHOD, INPLACE_METHOD, FUNCTIONAL]),
-    ('unbind', (2, 3, 4), lambda: [DIM_ARG], [FUNCTIONAL]),
-    ('unsqueeze', (10, 20), lambda: [DIM_ARG], [METHOD, INPLACE_METHOD, FUNCTIONAL], 1),
-    ('cumprod', (10, 20), lambda: [DIM_ARG], [METHOD, FUNCTIONAL]),
-    ('cumsum', (10, 20), lambda: [DIM_ARG], [METHOD, FUNCTIONAL]),
-    ('mean', (10, 20), lambda: [DIM_ARG], [METHOD, FUNCTIONAL]),
-    ('median', (10, 20), lambda: [DIM_ARG], [METHOD, FUNCTIONAL]),
-    ('mode', (10, 20), lambda: [DIM_ARG], [METHOD, FUNCTIONAL]),
-    ('norm', (10, 20), lambda: [2, DIM_ARG], [METHOD, FUNCTIONAL]),
-    ('prod', (10, 20), lambda: [DIM_ARG], [METHOD, FUNCTIONAL]),
-    ('std', (10, 20), lambda: [DIM_ARG], [METHOD, FUNCTIONAL]),
-    ('sum', (10, 20), lambda: [DIM_ARG], [METHOD, FUNCTIONAL]),
-    ('var', (10, 20), lambda: [DIM_ARG], [METHOD, FUNCTIONAL]),
-    ('kthvalue', (10, 20), lambda: [3, DIM_ARG], [METHOD, FUNCTIONAL]),
-    ('max', (10, 20), lambda: [DIM_ARG], [METHOD, FUNCTIONAL]),
-    ('min', (10, 20), lambda: [DIM_ARG], [METHOD, FUNCTIONAL]),
-    ('sort', (10, 20), lambda: [DIM_ARG], [METHOD, FUNCTIONAL]),
-    ('topk', (10, 20), lambda: [5, DIM_ARG], [METHOD, FUNCTIONAL]),
-    ('renorm', (10, 20), lambda: [2, DIM_ARG, 1], [METHOD, INPLACE_METHOD, FUNCTIONAL]),
-    ('index_add', (10, 10), lambda: [DIM_ARG, idx_tensor((10,), 10), torch.randn(10, 10)], [INPLACE_METHOD]),
-    ('index_copy', (10, 10), lambda: [DIM_ARG, idx_tensor((10,), 10), torch.randn(10, 10)], [INPLACE_METHOD]),
-    ('index_fill', (10, 10), lambda: [DIM_ARG, idx_tensor((10,), 10), 12], [INPLACE_METHOD]),
-    ('scatter', (10, 10), lambda: [DIM_ARG, idx_tensor((10, 10), 10), torch.randn(10, 10)], [INPLACE_METHOD]),
-    ('select', (10, 20), lambda: [DIM_ARG, 3], [METHOD]),
-    ('unfold', (10, 20), lambda: [DIM_ARG, 5, 2], [METHOD]),
-]
 
-for decl in neg_dim_tests:
-    if len(decl) == 4:
-        name, tensor_arg, arg_constr, types = decl
-        extra_dim = 0
-    elif len(decl) == 5:
-        name, tensor_arg, arg_constr, types, extra_dim = decl
+def add_neg_dim_tests():
+    neg_dim_tests = [
+        ('narrow', (10, 20, 30), lambda: [DIM_ARG, 0, 5], [METHOD]),
+        ('transpose', (10, 20, 30), lambda: [DIM_ARG, DIM_ARG], [METHOD, INPLACE_METHOD, FUNCTIONAL]),
+        ('size', (10, 20, 30), lambda: [DIM_ARG], [METHOD]),
+        ('cat', [(2, 3, 4), (2, 3, 4)], lambda: [DIM_ARG], [FUNCTIONAL]),
+        ('chunk', (10, 20, 30), lambda: [5, DIM_ARG], [METHOD, FUNCTIONAL]),
+        ('gather', (10, 20), lambda: [DIM_ARG, idx_tensor((10, 20), 10)], [METHOD, FUNCTIONAL]),
+        ('index_select', (10, 10), lambda: [DIM_ARG, idx_tensor((10,), 10)], [METHOD, FUNCTIONAL]),
+        ('split', (10, 20), lambda: [5, DIM_ARG], [METHOD, FUNCTIONAL]),
+        ('squeeze', (10, 1, 20, 1), lambda: [DIM_ARG], [METHOD, INPLACE_METHOD, FUNCTIONAL]),
+        ('unbind', (2, 3, 4), lambda: [DIM_ARG], [FUNCTIONAL]),
+        ('unsqueeze', (10, 20), lambda: [DIM_ARG], [METHOD, INPLACE_METHOD, FUNCTIONAL], 1),
+        ('cumprod', (10, 20), lambda: [DIM_ARG], [METHOD, FUNCTIONAL]),
+        ('cumsum', (10, 20), lambda: [DIM_ARG], [METHOD, FUNCTIONAL]),
+        ('mean', (10, 20), lambda: [DIM_ARG], [METHOD, FUNCTIONAL]),
+        ('median', (10, 20), lambda: [DIM_ARG], [METHOD, FUNCTIONAL]),
+        ('mode', (10, 20), lambda: [DIM_ARG], [METHOD, FUNCTIONAL]),
+        ('norm', (10, 20), lambda: [2, DIM_ARG], [METHOD, FUNCTIONAL]),
+        ('prod', (10, 20), lambda: [DIM_ARG], [METHOD, FUNCTIONAL]),
+        ('std', (10, 20), lambda: [DIM_ARG], [METHOD, FUNCTIONAL]),
+        ('sum', (10, 20), lambda: [DIM_ARG], [METHOD, FUNCTIONAL]),
+        ('var', (10, 20), lambda: [DIM_ARG], [METHOD, FUNCTIONAL]),
+        ('kthvalue', (10, 20), lambda: [3, DIM_ARG], [METHOD, FUNCTIONAL]),
+        ('max', (10, 20), lambda: [DIM_ARG], [METHOD, FUNCTIONAL]),
+        ('min', (10, 20), lambda: [DIM_ARG], [METHOD, FUNCTIONAL]),
+        ('sort', (10, 20), lambda: [DIM_ARG], [METHOD, FUNCTIONAL]),
+        ('topk', (10, 20), lambda: [5, DIM_ARG], [METHOD, FUNCTIONAL]),
+        ('renorm', (10, 20), lambda: [2, DIM_ARG, 1], [METHOD, INPLACE_METHOD, FUNCTIONAL]),
+        ('index_add', (10, 10), lambda: [DIM_ARG, idx_tensor((10,), 10), torch.randn(10, 10)], [INPLACE_METHOD]),
+        ('index_copy', (10, 10), lambda: [DIM_ARG, idx_tensor((10,), 10), torch.randn(10, 10)], [INPLACE_METHOD]),
+        ('index_fill', (10, 10), lambda: [DIM_ARG, idx_tensor((10,), 10), 12], [INPLACE_METHOD]),
+        ('scatter', (10, 10), lambda: [DIM_ARG, idx_tensor((10, 10), 10), torch.randn(10, 10)], [INPLACE_METHOD]),
+        ('select', (10, 20), lambda: [DIM_ARG, 3], [METHOD]),
+        ('unfold', (10, 20), lambda: [DIM_ARG, 5, 2], [METHOD]),
+    ]
 
-    test_name = 'test_' + name + '_neg_dim'
+    for decl in neg_dim_tests:
+        if len(decl) == 4:
+            name, tensor_arg, arg_constr, types = decl
+            extra_dim = 0
+        elif len(decl) == 5:
+            name, tensor_arg, arg_constr, types, extra_dim = decl
 
-    assert not hasattr(TestTorch, test_name), "Duplicated test name: " + test_name
-    setattr(TestTorch, test_name, make_neg_dim_test(name, tensor_arg, arg_constr, types, extra_dim))
+        test_name = 'test_' + name + '_neg_dim'
+
+        assert not hasattr(TestTorch, test_name), "Duplicated test name: " + test_name
+        setattr(TestTorch, test_name, make_neg_dim_test(name, tensor_arg, arg_constr, types, extra_dim))
+
+add_neg_dim_tests()
 
 if __name__ == '__main__':
     run_tests()

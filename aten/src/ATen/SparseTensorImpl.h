@@ -48,7 +48,7 @@ struct AT_API SparseTensorImpl : public TensorImpl {
 
 public:
   // Public for now...
-  explicit SparseTensorImpl(at::Backend, at::ScalarType);
+  explicit SparseTensorImpl(at::TensorTypeId, at::ScalarType);
 
   int64_t nnz() const { return nnz_; }
   int64_t sparseDims() const { return sparseDims_; }
@@ -59,10 +59,14 @@ public:
 
   IntList sizes() const override;
   IntList strides() const override;
+  int64_t size(int64_t d) const override;
+  int64_t stride(int64_t d) const override;
+
   int64_t dim() const override;
   TensorImpl* maybe_zero_dim(bool condition_when_zero_dim) override;
-  void * unsafeGetTH(bool retain) override;
   std::unique_ptr<Storage> storage() override;
+  at::StorageImpl* storageImpl() const override;
+  int64_t storage_offset() const override;
 
   // Some ops do some manual size fiddling.
   // TODO: Figure out a more safe way to provide this functionality

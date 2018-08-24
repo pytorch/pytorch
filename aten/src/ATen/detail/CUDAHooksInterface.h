@@ -85,6 +85,10 @@ struct AT_API CUDAHooksInterface {
     return false;
   }
 
+  virtual bool compiledWithMIOpen() const {
+    return false;
+  }
+
   virtual bool supportsDilatedConvolutionWithCuDNN() const {
     return false;
   }

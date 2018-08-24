@@ -97,7 +97,7 @@ void TensorIterator::compute_common_type() {
       op.type = &type;
       if (op.tensor->defined() && type != op.tensor->type()) {
         if (op.tensor->dim() == 0) {
-          if (type.backend() != at::kCUDA) {
+          if (type.backend() != at::Backend::CUDA) {
             *op.tensor = op.tensor->toType(type);
           }
         } else {
@@ -110,7 +110,9 @@ void TensorIterator::compute_common_type() {
 
 DimVector TensorIterator::compatible_stride(int element_size) const {
   auto stride = DimVector();
-  stride.push_back(element_size);
+  if (ndim() > 0) {
+    stride.push_back(element_size);
+  }
   for (int i = 0; i < ndim() - 1; i++) {
     stride.push_back(shape_[i] * stride[i]);
   }
@@ -298,7 +300,7 @@ bool TensorIterator::is_scalar(int arg) const {
 }
 
 bool TensorIterator::is_cpu_scalar(int arg) const {
-  return is_scalar(arg) && operands_[arg].tensor->type().backend() == at::kCPU;
+  return is_scalar(arg) && operands_[arg].tensor->type().backend() == at::Backend::CPU;
 }
 
 void* TensorIterator::data_ptr(int arg) const {

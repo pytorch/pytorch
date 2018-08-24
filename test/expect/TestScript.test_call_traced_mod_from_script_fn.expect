@@ -2,7 +2,7 @@ graph(%x : Dynamic) {
   %1 : Double(4, 3) = prim::Constant[value=<Tensor>]()
   %2 : Double(3, 3) = aten::mm(%x, %1)
   %3 : int = prim::Constant[value=1]()
-  %5 : int = prim::Constant[value=1]()
-  %6 : Dynamic = aten::add(%2, %3, %5)
-  return (%6);
+  %4 : int = prim::Constant[value=1]()
+  %5 : Dynamic = aten::add(%2, %3, %4)
+  return (%5);
 }

@@ -1,11 +1,6 @@
 #pragma once
 
-#ifdef _WIN32
-# if defined(ATen_cpu_EXPORTS) || defined(caffe2_EXPORTS)
-#  define AT_API __declspec(dllexport)
-# else
-#  define AT_API __declspec(dllimport)
-# endif
-#else
-# define AT_API
-#endif
+#include "ATen/core/Macros.h"
+
+// TODO: Merge the *_API macros.
+#define AT_API AT_CORE_API

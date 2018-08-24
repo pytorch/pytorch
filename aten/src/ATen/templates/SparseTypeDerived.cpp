@@ -11,7 +11,6 @@
 #include "ATen/Allocator.h"
 #include "ATen/DeviceGuard.h"
 #include "ATen/NativeFunctions.h"
-#include "ATen/THSizeStrideCompat.h"
 #include "ATen/UndefinedTensor.h"
 #include "ATen/Utils.h"
 #include "ATen/WrapDimUtils.h"
@@ -29,15 +28,15 @@ $extra_cuda_headers
 namespace at {
 
 ${Type}::${Type}(Context* context)
-  : Type(context, /*is_variable=*/false, /*is_undefined=*/false) {}
+  : Type(context, ${Backend}TensorId(), /*is_variable=*/false, /*is_undefined=*/false) {}
 ScalarType ${Type}::scalarType() const {
   return ScalarType::${ScalarName};
 }
 Backend ${Type}::backend() const {
   return Backend::${Backend};
 }
-bool ${Type}::is_cuda() const { return backend() == kCUDA || backend() == kSparseCUDA; }
-bool ${Type}::is_sparse() const { return backend() == kSparseCPU || backend() == kSparseCUDA; }
+bool ${Type}::is_cuda() const { return backend() == Backend::CUDA || backend() == Backend::SparseCUDA; }
+bool ${Type}::is_sparse() const { return backend() == Backend::SparseCPU || backend() == Backend::SparseCUDA; }
 bool ${Type}::is_distributed() const { return false; }
 
 std::unique_ptr<Storage> ${Type}::storage(bool resizable) const {

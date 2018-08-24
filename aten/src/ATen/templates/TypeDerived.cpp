@@ -14,7 +14,6 @@ $storage_tensor_headers
 #include "ATen/Allocator.h"
 #include "ATen/DeviceGuard.h"
 #include "ATen/NativeFunctions.h"
-#include "ATen/THSizeStrideCompat.h"
 #include "ATen/UndefinedTensor.h"
 #include "ATen/Utils.h"
 #include "ATen/WrapDimUtils.h"
@@ -40,15 +39,15 @@ static int getPointerDevice(void* ptr) {
 #endif
 
 ${Type}::${Type}(Context* context)
-  : Type(context, /*is_variable=*/false, /*is_undefined=*/false) {}
+  : Type(context, ${Backend}TensorId(), /*is_variable=*/false, /*is_undefined=*/false) {}
 ScalarType ${Type}::scalarType() const {
   return ScalarType::${ScalarName};
 }
 Backend ${Type}::backend() const {
   return Backend::${Backend};
 }
-bool ${Type}::is_cuda() const { return backend() == kCUDA || backend() == kSparseCUDA; }
-bool ${Type}::is_sparse() const { return backend() == kSparseCPU || backend() == kSparseCUDA; }
+bool ${Type}::is_cuda() const { return backend() == Backend::CUDA || backend() == Backend::SparseCUDA; }
+bool ${Type}::is_sparse() const { return backend() == Backend::SparseCPU || backend() == Backend::SparseCUDA; }
 bool ${Type}::is_distributed() const { return false; }
 
 std::unique_ptr<Storage> ${Type}::storage(bool resizable) const {
@@ -81,9 +80,9 @@ std::unique_ptr<Storage> ${Type}::storageFromBlob(void * data, int64_t size, con
       ScalarType::${ScalarName},
       InefficientStdFunctionContext::makeDataPtr(data, deleter,
 #if ${isCUDA}
-      Device(kCUDA, getPointerDevice(data))
+      Device(DeviceType::CUDA, getPointerDevice(data))
 #else
-      kCPU
+      DeviceType::CPU
 #endif
       ),
       size,
@@ -94,10 +93,11 @@ std::unique_ptr<Storage> ${Type}::storageWithAllocator(int64_t size, Allocator* 
         new Storage(ScalarType::${ScalarName}, size, allocator));
 }
 Tensor ${Type}::unsafeTensorFromTH(void * th_pointer, bool retain) const {
-  if (retain)
-    ${THTensor}_retain(${state,} (${THTensor}*) th_pointer);
-  return Tensor(new TensorImpl(Backend::${Backend}, ScalarType::${ScalarName},
-        (${THTensor}*)(th_pointer), false), false);
+  TensorImpl* pimpl = (TensorImpl*)(th_pointer);
+  if (retain) {
+    pimpl->retain();
+  }
+  return Tensor(pimpl, false);
 }
 std::unique_ptr<Storage> ${Type}::unsafeStorageFromTH(void * th_pointer, bool retain) const {
   if (retain)
