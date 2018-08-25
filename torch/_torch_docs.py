@@ -488,17 +488,17 @@ Example::
 
 add_docstr(torch.atan2,
            r"""
-atan2(input1, input2, out=None) -> Tensor
+atan2(y_input, x_input, out=None) -> Tensor
 
-Returns a new tensor with the arctangent of the elements of :attr:`input1`
-and :attr:`input2`.
+Returns a new tensor with the arctangent of the elements of :attr:`y_input`
+and :attr:`x_input`.
 
-The shapes of :attr:`input1` and :attr:`input2` must be
+The shapes of :attr:`y_input` and :attr:`x_input` must be
 :ref:`broadcastable <broadcasting-semantics>`.
 
 Args:
-    input1 (Tensor): the first input tensor
-    input2 (Tensor): the second input tensor
+    y_input (Tensor): the vertical component input tensor
+    x_input (Tensor): the horizontal component input tensor
     out (Tensor, optional): the output tensor
 
 Example::
