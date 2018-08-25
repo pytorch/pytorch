@@ -13,6 +13,7 @@
 #include "caffe2/core/common_cudnn.h"
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/operator_fallback_gpu.h"
+#include "caffe2/python/pybind_state_registry.h"
 
 #ifdef CAFFE2_USE_TRT
 #include "caffe2/contrib/tensorrt/tensorrt_tranformer.h"
@@ -153,6 +154,9 @@ PYBIND11_MODULE(caffe2_pybind11_state_gpu, m) {
   addCUDAGlobalMethods(m);
   addObjectMethods(m);
   addCUDAObjectMethods(m);
+  for (const auto& addition : PybindAdditionRegistry()->Keys()) {
+    PybindAdditionRegistry()->Create(addition, m);
+  }
 }
 } // namespace python
 } // namespace caffe2

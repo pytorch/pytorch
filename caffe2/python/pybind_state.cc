@@ -28,6 +28,7 @@
 #include "caffe2/opt/passes.h"
 #include "caffe2/opt/sink.h"
 #include "caffe2/predictor/predictor.h"
+#include "caffe2/python/pybind_state_registry.h"
 #include "caffe2/utils/cpuid.h"
 #include "caffe2/utils/string_utils.h"
 
@@ -1736,6 +1737,9 @@ PYBIND11_MODULE(caffe2_pybind11_state, m) {
 
   addGlobalMethods(m);
   addObjectMethods(m);
+  for (const auto& addition : PybindAdditionRegistry()->Keys()) {
+    PybindAdditionRegistry()->Create(addition, m);
+  }
 }
 
 } // namespace python
