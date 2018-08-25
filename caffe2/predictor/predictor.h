@@ -11,8 +11,8 @@ namespace caffe2 {
 
 class CAFFE2_API Predictor {
  public:
-  using TensorVector = std::vector<TensorCPU*>;
-  using TensorMap = std::unordered_map<std::string, TensorCPU*>;
+  using TensorList = std::vector<TensorCPU>;
+  using TensorMap = std::unordered_map<std::string, TensorCPU>;
 
   Predictor(
       const NetDef& init_net,
@@ -36,14 +36,14 @@ class CAFFE2_API Predictor {
   //   outputs->size() == run_net.external_inputs.size()
 
   // Returns true on success
-  bool run(const TensorVector& inputs, TensorVector* outputs);
+  bool operator()(const TensorList& inputs, TensorList* outputs);
 
   // Similar to run, but consumes a map of name to tensor as input
-  bool run_map(const TensorMap& inputs, TensorVector* outputs);
+  bool operator()(const TensorMap& inputs, TensorList* outputs);
 
   // Similar to the other run fns, except inputs and outputs are both maps of
   // string name to tensor.
-  bool run_map_outputs(const TensorMap& inputs, TensorMap* outputs);
+  bool operator()(const TensorMap& inputs, TensorMap* outputs);
 
   const NetDef& def() const {
     return *config_.predict_net;
