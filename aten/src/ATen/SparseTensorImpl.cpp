@@ -42,12 +42,27 @@ IntList SparseTensorImpl::sizes() const {
 IntList SparseTensorImpl::strides() const {
   AT_ERROR("sparse tensors do not have strides");
 }
+bool SparseTensorImpl::is_contiguous() const {
+  AT_ERROR("sparse tensors do not have is_contiguous");
+}
 int64_t SparseTensorImpl::size(int64_t d) const {
   d = at::maybe_wrap_dim(d, dim(), false);
   return size_[d];
 }
 int64_t SparseTensorImpl::stride(int64_t d) const {
   AT_ERROR("sparse tensors do not have strides");
+}
+void SparseTensorImpl::resize_dim(int64_t ndim) {
+  AT_ERROR("sparse tensors do not have resize_dim");
+}
+void SparseTensorImpl::set_size(int64_t dim, int64_t new_size) {
+  AT_ERROR("sparse tensors do not have set_size");
+}
+void SparseTensorImpl::set_stride(int64_t dim, int64_t new_stride) {
+  AT_ERROR("sparse tensors do not have set_stride");
+}
+void SparseTensorImpl::set_storage_offset(int64_t storage_offset) {
+  AT_ERROR("sparse tensors do not have set_storage_offset");
 }
 
 int64_t SparseTensorImpl::dim() const {

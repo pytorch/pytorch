@@ -19,7 +19,7 @@ THCTensor *THCTensor_newClone<real>(THCState *state, THCTensor *self) {
 template <>
 THCTensor *THCTensor_newContiguous<real>(THCState *state, THCTensor *self)
 {
-  if(!THCTensor_isContiguous(state, self)) {
+  if(!self->is_contiguous()) {
     return THCTensor_newClone<real>(state, self);
   } else {
     THCTensor_retain(state, self);
