@@ -176,6 +176,8 @@ struct TORCH_API RecordFunction {
 
   explicit RecordFunction(const char* name);
 
+  explicit RecordFunction(const char* name, int64_t current_sequence_nr);
+
   ~RecordFunction();
 
   // Needed only because we don't have Function defined yet.

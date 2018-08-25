@@ -1,6 +1,8 @@
 #include "torch/csrc/autograd/profiler.h"
 #include "torch/csrc/autograd/function.h"
 
+#include <sstream>
+
 namespace torch { namespace autograd { namespace profiler {
 
 ProfilerState state = ProfilerState::Disabled;
@@ -95,6 +97,15 @@ RecordFunction::RecordFunction(const char* name) {
   pushRange(name);
 }
 
+RecordFunction::RecordFunction(const char* name, int64_t current_sequence_nr) 
+{
+  if (state == ProfilerState::Disabled)
+    return;
+  std::stringstream s;
+  s << name << ", current sequence nr " << current_sequence_nr;
+  pushRange(s.str());
+}
+
 RecordFunction::~RecordFunction() {
   if (state == ProfilerState::Disabled)
     return;
@@ -102,7 +113,9 @@ RecordFunction::~RecordFunction() {
 }
 
 void RecordFunction::pushFunctionRange(Function* fn) {
-  pushRange(fn->name());
+  std::stringstream s;
+  s << fn->name() << ", saved sequence nr " << fn->sequence_nr();
+  pushRange(s.str());
 }
 
 #ifdef USE_CUDA

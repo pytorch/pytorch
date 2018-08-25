@@ -313,6 +313,8 @@ struct TORCH_API Function : std::enable_shared_from_this<Function> {
     return nullptr;
   }
 
+  static uint64_t peek_at_next_sequence_nr();
+
  protected:
   static uint64_t& get_next_sequence_nr();
 
