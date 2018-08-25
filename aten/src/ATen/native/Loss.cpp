@@ -5,17 +5,18 @@
 
 #define EPSILON 1e-12
 
+namespace {
+  static inline at::Tensor apply_loss_reduction(const at::Tensor& unreduced, int64_t reduction) {
+    if (reduction == Reduction::ElementwiseMean) {
+      return unreduced.sum() / unreduced.numel();
+    } else if (reduction == Reduction::Sum) {
+      return unreduced.sum();
+    }
+    return unreduced;
+  }
+}
 
 namespace at { namespace native {
-
-Tensor apply_loss_reduction(const Tensor& unreduced, int64_t reduction) {
-  if (reduction == Reduction::ElementwiseMean) {
-    return unreduced.sum() / unreduced.numel();
-  } else if (reduction == Reduction::Sum) {
-    return unreduced.sum();
-  }
-  return unreduced;
-}
 
 Tensor cosine_embedding_loss(const Tensor& input1, const Tensor& input2, const Tensor& target, double margin, int64_t reduction) {
   auto prod_sum = (input1 * input2).sum(1);
@@ -67,7 +68,7 @@ Tensor kl_div(const Tensor& input, const Tensor& target, int64_t reduction) {
 }
 
 Tensor kl_div_backward_cpu(const Tensor& grad, const Tensor& input, const Tensor& target, int64_t reduction) {
-  auto grad_input = grad.type().zeros_like(input);
+  auto grad_input = at::zeros_like(input);
   auto grad_expand = grad.expand_as(input);
   AT_DISPATCH_FLOATING_TYPES(input.type(), "kl_div_backward", [&]() {
     at::CPU_tensor_apply3<scalar_t, scalar_t, scalar_t>(
