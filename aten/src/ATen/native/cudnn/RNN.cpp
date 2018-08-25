@@ -1089,6 +1089,12 @@ struct DropoutState {
   at::optional<cuda::CUDAEvent> event;
   std::mutex mutex;
 
+  // Every time we use a dropout state, we need to synchronize with its event,
+  // to make sure all previous uses finish running before this one starts. Once
+  // we're done, we record the event to allow others to synchronize with this kernel.
+  // Those events are really needed only for inter-stream sync on a single GPU.
+  // I doubt anyone will want to run cuDNN RNNs in parallel on a single GPU, so
+  // they should end up being complete no-ops.
   void lock() {
     // NB: We can't ignore the lock even when event is undefined, because someone
     // could then define it before we get to unlock().
