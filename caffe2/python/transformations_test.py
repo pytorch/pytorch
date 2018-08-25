@@ -334,3 +334,60 @@ class TestTransformations(test_util.TestCase):
             rtol=5e-02,
             atol=1e-03
         )
+
+    @given(
+        size=st.integers(7, 10),
+        input_channels=st.integers(1, 10),
+        kt=st.integers(3, 5),
+        kh=st.integers(3, 5),
+        kw=st.integers(3, 5),
+        seed=st.integers(0, 65535),
+        epsilon=st.floats(min_value=1e-5, max_value=1e-2),
+    )
+    def test_transformer_FuseConv3DBN(
+        self, size, input_channels, kt, kh, kw, seed, epsilon
+    ):
+        workspace.ResetWorkspace()
+        net = core.Net("net")
+        c = input_channels
+        t = size
+        h = size
+        w = size
+        net.Conv(
+            ["X", "w", "b"],
+            ["Y"],
+            kernels=[kt, kh, kw],
+        )
+        net.SpatialBN(
+            ["Y", "scale", "bias", "mean", "var"],
+            ["Y2"],
+            is_test=True,
+            epsilon=epsilon,
+        )
+
+        np.random.seed(seed)
+        workspace.FeedBlob("X", np.random.rand(1, c, t, h, w).astype(np.float32))
+        workspace.FeedBlob("w", np.random.rand(c, c, kt, kh, kw).astype(np.float32))
+        workspace.FeedBlob("b", np.random.rand(c).astype(np.float32))
+        workspace.FeedBlob("scale", np.random.rand(c).astype(np.float32))
+        workspace.FeedBlob("bias", np.random.rand(c).astype(np.float32))
+        workspace.FeedBlob("mean", np.random.rand(c).astype(np.float32))
+        # This is necessary because 1/sqrt(var) is used and if var is too small
+        # we get floating point artifacts that cause test failures
+        workspace.FeedBlob("var", np.random.rand(c).astype(np.float32) + 0.5)
+        workspace.RunNetOnce(net)
+        preTransformOutput = workspace.FetchBlob("Y2").flatten()
+        workspace.FeedBlob("Y2", np.zeros((1, 1)))
+        transformer.FuseConvBN(net)
+
+        # Ensure fusion
+        assert len(net.Proto().op) == 1
+        workspace.RunNetOnce(net)
+        postTransformOutput = workspace.FetchBlob("Y2").flatten()
+        # Check that there is no numerical difference
+        assert np.allclose(
+            preTransformOutput,
+            postTransformOutput,
+            rtol=1e-02,
+            atol=1e-04
+        )
