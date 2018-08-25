@@ -81,7 +81,7 @@ at::optional<std::vector<std::shared_ptr<T>>> gatherTensorTypes(Node *node) {
       return at::nullopt;
     } else if (args[i].type->isSubtypeOf(DynamicType::get())) {
       if (auto type = node->input(i)->type()->cast<T>()) {
-        tensor_types.push_back(T::sliceSubtypes(type));
+        tensor_types.push_back(type);
       } else {
         return at::nullopt;
       }
@@ -131,43 +131,6 @@ void broadcastBinary(Node *node, std::vector<CompleteTensorTypePtr>& types, size
   types[1] = node->inputs().at(idx2)->type()->expect<CompleteTensorType>();
 }
 
-void PropagateShapeOnNodeByRunningIt(Node* node) {
-  auto op = getOperation(node);
-  Stack stack;
-
-  for (auto input : node->inputs()) {
-    stack.push_back(representativeValue(input));
-  }
-
-  // XXX: we're not catching any exceptions from the op for now. This
-  // is to uncover any mistakes we could make when editing this code,
-  // and eventually it shouldn't matter, because this phase should be
-  // preceded by schema checking.
-  op(stack);
-
-  JIT_ASSERT(stack.size() == node->outputs().size());
-  for (size_t i = 0; i < stack.size(); ++i) {
-    // some ops may have mixed tensor/primitive outputs
-    // for primitives, we don't need to change the type because it is already
-    // its most constrained form.
-    if(stack[i].isTensor())
-      node->outputs()[i]->inferTypeFrom(stack[i].toTensor());
-  }
-}
-
-// is it ok to try to run the op
-// If an input is a constant, then we assume that the input is valid
-// and we can try to run it.
-// Otherwise:
-// Integral typed _inputs_ are often an indicator that we're indexing into
-// a tensor, so we should special-case these ops in the shape propagation.
-// Additionally, passing in a zero representative tensor into an integer
-// division op causes divide-by-zero errors
-// _Outputs_ must be tensors or primtives
-// We will call inferTypeFrom on the tensors, and ignore the primitives.
-// However, we allow primitive returns because we want to support mixed
-// primitive/tensor outputs.
-
 bool isValidArgumentForRunning(Value* v) {
   // allow constants
   if(toIValue(v))
@@ -195,6 +158,46 @@ bool canPropagateShapeByRunningIt(Node* node) {
 
   return true;
 }
+
+bool PropagateShapeOnNodeByRunningIt(Node* node) {
+  if (!canPropagateShapeByRunningIt(node))
+    return false;
+  auto op = getOperation(node);
+  Stack stack;
+
+  for (auto input : node->inputs()) {
+    stack.push_back(representativeValue(input));
+  }
+
+  // XXX: we're not catching any exceptions from the op for now. This
+  // is to uncover any mistakes we could make when editing this code,
+  // and eventually it shouldn't matter, because this phase should be
+  // preceded by schema checking.
+  op(stack);
+
+  JIT_ASSERT(stack.size() == node->outputs().size());
+  for (size_t i = 0; i < stack.size(); ++i) {
+    // some ops may have mixed tensor/primitive outputs
+    // for primitives, we don't need to change the type because it is already
+    // its most constrained form.
+    if(stack[i].isTensor())
+      node->outputs()[i]->inferTypeFrom(stack[i].toTensor());
+  }
+  return true;
+}
+
+// is it ok to try to run the op
+// If an input is a constant, then we assume that the input is valid
+// and we can try to run it.
+// Otherwise:
+// Integral typed _inputs_ are often an indicator that we're indexing into
+// a tensor, so we should special-case these ops in the shape propagation.
+// Additionally, passing in a zero representative tensor into an integer
+// division op causes divide-by-zero errors
+// _Outputs_ must be tensors or primtives
+// We will call inferTypeFrom on the tensors, and ignore the primitives.
+// However, we allow primitive returns because we want to support mixed
+// primitive/tensor outputs.
 
 bool PropagateTensorShapeOnNode(
     Node * node, bool insert_expands, std::vector<TensorTypePtr> types);
@@ -302,14 +305,6 @@ void PropagateShapeOnNode(Node * node, bool insert_expands) {
       }
       return;
     }
-    // NB: We assume that all shapes are known within fused kernels
-    case prim::FusedConcat: {
-      auto example_type = node->inputs().at(0)->type()->expect<CompleteTensorType>();
-      auto sizes = example_type->sizes();
-      sizes[node->i(attr::dim)] *= node->inputs().size();
-      node->output()->setType(example_type->withSizes(sizes));
-      return;
-    }
     case prim::PythonOp:
     case prim::Print:
     case prim::Undefined: {
@@ -335,8 +330,9 @@ void PropagateShapeOnNode(Node * node, bool insert_expands) {
     }
   }
 
-  if (canPropagateShapeByRunningIt(node))
-    return PropagateShapeOnNodeByRunningIt(node);
+  if (PropagateShapeOnNodeByRunningIt(node)) {
+    return;
+  }
   return setUnshapedType(node);
 }
 
@@ -451,8 +447,7 @@ bool PropagateCompleteShapeOnNode(Node * node, bool insert_expands,
     // so there's no need to insert explicit expand nodes. Note that "div" is
     // handled by the fallthrough because it's not always safe to run it due
     // to integer divide-by-zero.
-    PropagateShapeOnNodeByRunningIt(node);
-    return true;
+    return PropagateShapeOnNodeByRunningIt(node);
   } else if (node->matches("aten::add(Tensor self, Scalar other, Scalar alpha) -> Tensor") ||
              node->matches("aten::sub(Tensor self, Scalar other, Scalar alpha) -> Tensor") ||
              node->matches("aten::mul(Tensor self, Scalar other) -> Tensor") ||
@@ -477,8 +472,7 @@ bool PropagateCompleteShapeOnNode(Node * node, bool insert_expands,
     // because the type casting logic in scalar cases is non-trivial.
     // It's better to just run them.
     broadcastBinary(node, tensor_types, 0, 1);
-    PropagateShapeOnNodeByRunningIt(node);
-    return true;
+    return PropagateShapeOnNodeByRunningIt(node);
   } else if (node->matches("aten::neg(Tensor self) -> Tensor") ||
              node->matches("aten::sigmoid(Tensor self) -> Tensor") ||
              node->matches("aten::tanh(Tensor self) -> Tensor")) {
@@ -606,25 +600,17 @@ bool PropagateCompleteShapeOnNode(Node * node, bool insert_expands,
     sizes[dim] = index->sizes()[0];
     node->output()->setType(ten->withSizes(sizes));
     return true;
-  } else if (node->kind() == prim::FusedChunk ||
-             node->matches("aten::chunk(Tensor self, int chunks, int dim) -> Tensor[]",
+  } else if (node->matches("aten::chunk(Tensor self, int chunks, int dim) -> Tensor[]",
                            /*with_const=*/{attr::chunks, attr::dim})) {
     auto input_type = tensor_types.at(0);
     auto sizes = input_type->sizes();
     const auto & strides = input_type->strides();
-    int64_t dim, chunks;
-    if (node->kind() == prim::FusedChunk) {
-      dim = node->i(attr::dim);
-      chunks = node->i(attr::chunks);
-    } else {
-      dim = node->get<int64_t>(attr::dim).value();
-      chunks = node->get<int64_t>(attr::chunks).value();
-    }
+    int64_t dim = node->get<int64_t>(attr::dim).value();
+    int64_t chunks = node->get<int64_t>(attr::chunks).value();
     sizes[dim] /= chunks;
     for (Value * output : node->outputs()) {
       output->setType(input_type->withSizesStrides(sizes, strides));
     }
-
     if (input_type->sizes().at(dim) % chunks != 0) {
       sizes[dim] = input_type->sizes().at(dim) % chunks;
       node->outputs().back()->setType(input_type->withSizesStrides(sizes, strides));

@@ -1461,6 +1461,7 @@ std::unique_ptr<FusedKernel> FusedKernelCache::compileSpec(
   AnnotatedGraph agraph {*graph, device};
 
   agraph.input_desc = spec.descs();
+  // XXX: this assumes that fused kernels only operate on floating-point values inside
   at::optional<at::ScalarType> scalar_type;
   for (TensorDesc& desc : agraph.input_desc) {
     if (isFloatingType(desc.scalar_type)) {

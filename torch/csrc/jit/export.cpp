@@ -469,6 +469,15 @@ void ModuleEncoder::EncodeTypeInfo(
   auto kind = type->kind();
   if (kind == TypeKind::DynamicType) {
     type_proto->set_denotation("DynamicType");
+  } else if (kind == TypeKind::TensorType) {
+    type_proto->set_denotation("TensorType");
+    // encode the number of dimensions by pushing that number of ones into the shape proto
+    auto tensor_type = type->expect<TensorType>();
+    for (int i = 0; i < tensor_type->dim(); i++) {
+      shape_proto->add_dim();
+      shape_proto->mutable_dim(i)->set_dim_value(1);
+    }
+    tensortype_proto->set_elem_type(ATenTypeToOnnxType(tensor_type->scalarType()));
   } else if (kind == TypeKind::CompleteTensorType) {
     type_proto->set_denotation("CompleteTensorType");
     CompleteTensorTypePtr node_type = type->cast<CompleteTensorType>();
