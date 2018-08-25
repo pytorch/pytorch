@@ -7,10 +7,15 @@ import numbers
 from .module import Module
 from ..parameter import Parameter
 from ..utils.rnn import PackedSequence
-from .._functions.rnn import get_rnn_impl as _get_rnn_impl
 from .. import init
 
 _VF = torch._C._VariableFunctions
+_rnn_impls = {
+    'LSTM': _VF.lstm,
+    'GRU': _VF.gru,
+    'RNN_TANH': _VF.rnn_tanh,
+    'RNN_RELU': _VF.rnn_relu,
+}
 
 
 class RNNBase(Module):
@@ -26,7 +31,6 @@ class RNNBase(Module):
         self.bias = bias
         self.batch_first = batch_first
         self.dropout = dropout
-        self.dropout_state = {}
         self.bidirectional = bidirectional
         num_directions = 2 if bidirectional else 1
 
@@ -45,8 +49,12 @@ class RNNBase(Module):
             gate_size = 4 * hidden_size
         elif mode == 'GRU':
             gate_size = 3 * hidden_size
-        else:
+        elif mode == 'RNN_TANH':
             gate_size = hidden_size
+        elif mode == 'RNN_RELU':
+            gate_size = hidden_size
+        else:
+            raise ValueError("Unrecognized RNN mode: " + mode)
 
         self._all_weights = []
         for layer in range(num_layers):
@@ -86,23 +94,21 @@ class RNNBase(Module):
         # a sufficient check, because overlapping parameter buffers that don't completely
         # alias would break the assumptions of the uniqueness check in
         # Module.named_parameters().
-        unique_data_ptrs = set(p.data_ptr() for l in self.all_weights for p in l)
-        if len(unique_data_ptrs) != sum(len(l) for l in self.all_weights):
+        all_weights = self._flat_weights
+        unique_data_ptrs = set(p.data_ptr() for p in all_weights)
+        if len(unique_data_ptrs) != len(all_weights):
             return
 
         with torch.cuda.device_of(any_param):
             import torch.backends.cudnn.rnn as rnn
 
-            weight_arr = list(itertools.chain.from_iterable(self.all_weights))
-            weight_stride0 = len(self.all_weights[0])
-
             # NB: This is a temporary hack while we still don't have Tensor
             # bindings for ATen functions
             with torch.no_grad():
-                # NB: this is an INPLACE function on weight_arr, that's why the
+                # NB: this is an INPLACE function on all_weights, that's why the
                 # no_grad() is necessary.
                 torch._cudnn_rnn_flatten_weight(
-                    weight_arr, weight_stride0,
+                    all_weights, (4 if self.bias else 2),
                     self.input_size, rnn.get_cudnn_mode(self.mode), self.hidden_size, self.num_layers,
                     self.batch_first, bool(self.bidirectional))
 
@@ -167,18 +173,16 @@ class RNNBase(Module):
                 hx = (hx, hx)
 
         self.check_forward_args(input, hx, batch_sizes)
-        func = _get_rnn_impl(
-            self.mode,
-            self.input_size,
-            self.hidden_size,
-            num_layers=self.num_layers,
-            batch_first=self.batch_first,
-            dropout=self.dropout,
-            train=self.training,
-            bidirectional=self.bidirectional,
-            dropout_state=self.dropout_state,
-        )
-        output, hidden = func(input, self.all_weights, hx, batch_sizes)
+        _impl = _rnn_impls[self.mode]
+        if batch_sizes is None:
+            result = _impl(input, hx, self._flat_weights, self.bias, self.num_layers,
+                           self.dropout, self.training, self.bidirectional, self.batch_first)
+        else:
+            result = _impl(input, batch_sizes, hx, self._flat_weights, self.bias,
+                           self.num_layers, self.dropout, self.training, self.bidirectional)
+        output = result[0]
+        hidden = result[1:] if self.mode == 'LSTM' else result[1]
+
         if is_packed:
             output = PackedSequence(output, batch_sizes)
         return output, hidden
@@ -215,6 +219,10 @@ class RNNBase(Module):
                     self._all_weights += [weights]
                 else:
                     self._all_weights += [weights[:2]]
+
+    @property
+    def _flat_weights(self):
+        return list(self._parameters.values())
 
     @property
     def all_weights(self):
