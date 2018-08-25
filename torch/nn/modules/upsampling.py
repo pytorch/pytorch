@@ -33,14 +33,12 @@ class Upsample(Module):
         - Output: :math:`(N, C, W_{out})`, :math:`(N, C, H_{out}, W_{out})`
           or :math:`(N, C, D_{out}, H_{out}, W_{out})`, where
 
-    .. math::
-        D_{out} = \left\lfloor D_{in} \times \text{scale\_factor} \right\rfloor \text{ or size}[-3]
+          .. math::
+              D_{out} = \left\lfloor D_{in} \times \text{scale_factor} \right\rfloor \text{ or size}[-3]
 
-    .. math::
-        H_{out} = \left\lfloor H_{in} \times \text{scale\_factor} \right\rfloor \text{ or size}[-2]
+              H_{out} = \left\lfloor H_{in} \times \text{scale_factor} \right\rfloor \text{ or size}[-2]
 
-    .. math::
-        W_{out} = \left\lfloor W_{in} \times \text{scale\_factor} \right\rfloor \text{ or size}[-1]
+              W_{out} = \left\lfloor W_{in} \times \text{scale_factor} \right\rfloor \text{ or size}[-1]
 
     .. warning::
         With ``align_corners = True``, the linearly interpolating modes
@@ -50,12 +48,9 @@ class Upsample(Module):
         0.3.1. Since then, the default behavior is ``align_corners = False``.
         See below for concrete examples on how this affects the outputs.
 
-    .. warning::
-        This class is deprecated in favor of :func:`~nn.functional.interpolate`.
-
     Examples::
 
-        >>> input = torch.arange(1, 5).view(1, 1, 2, 2).float()
+        >>> input = torch.arange(1, 5).view(1, 1, 2, 2)
         >>> input
         tensor([[[[ 1.,  2.],
                   [ 3.,  4.]]]])
@@ -121,8 +116,7 @@ class Upsample(Module):
         self.align_corners = align_corners
 
     def forward(self, input):
-        warnings.warn("nn.Upsampling is deprecated. Use nn.functional.interpolate instead.")
-        return F.interpolate(input, self.size, self.scale_factor, self.mode, self.align_corners)
+        return F.upsample(input, self.size, self.scale_factor, self.mode, self.align_corners)
 
     def extra_repr(self):
         if self.scale_factor is not None:
@@ -147,17 +141,16 @@ class UpsamplingNearest2d(Upsample):
         scale_factor (int, optional): the multiplier for the image height or width
 
     .. warning::
-        This class is deprecated in favor of :func:`~nn.functional.interpolate`.
+        This class is deprecated in favor of :class:`~nn.Upsample`.
 
     Shape:
         - Input: :math:`(N, C, H_{in}, W_{in})`
         - Output: :math:`(N, C, H_{out}, W_{out})` where
 
-    .. math::
-          H_{out} = \left\lfloor H_{in} \times \text{scale\_factor} \right\rfloor
+          .. math::
+              H_{out} = \left\lfloor H_{in} \times \text{scale_factor} \right\rfloor
 
-    .. math::
-          W_{out} = \left\lfloor W_{in} \times \text{scale\_factor} \right\rfloor
+              W_{out} = \left\lfloor W_{in} \times \text{scale_factor} \right\rfloor
 
     Examples::
 
@@ -177,7 +170,7 @@ class UpsamplingNearest2d(Upsample):
         super(UpsamplingNearest2d, self).__init__(size, scale_factor, mode='nearest')
 
     def forward(self, input):
-        warnings.warn("nn.UpsamplingNearest2d is deprecated. Use nn.functional.interpolate instead.")
+        warnings.warn("nn.UpsamplingNearest2d is deprecated. Use nn.Upsample instead.")
         return super(UpsamplingNearest2d, self).forward(input)
 
 
@@ -195,18 +188,17 @@ class UpsamplingBilinear2d(Upsample):
         scale_factor (int, optional): the multiplier for the image height or width
 
     .. warning::
-        This class is deprecated in favor of :func:`~nn.functional.interpolate`. It is
-        equivalent to ``nn.functional.interpolate(..., mode='bilinear', align_corners=True)``.
+        This class is deprecated in favor of :class:`~nn.Upsample`. It is
+        equivalent to ``nn.Upsample(..., mode='bilinear', align_corners=True)``.
 
     Shape:
         - Input: :math:`(N, C, H_{in}, W_{in})`
         - Output: :math:`(N, C, H_{out}, W_{out})` where
 
-    .. math::
-        H_{out} = \left\lfloor H_{in} \times \text{scale\_factor} \right\rfloor
+          .. math::
+              H_{out} = \left\lfloor H_{in} \times \text{scale_factor} \right\rfloor
 
-    .. math::
-        W_{out} = \left\lfloor W_{in} \times \text{scale\_factor} \right\rfloor
+              W_{out} = \left\lfloor W_{in} \times \text{scale_factor} \right\rfloor
 
     Examples::
 
@@ -222,9 +214,9 @@ class UpsamplingBilinear2d(Upsample):
                   [ 2.3333,  2.6667,  3.0000,  3.3333],
                   [ 3.0000,  3.3333,  3.6667,  4.0000]]]])
     """
-    def __init__(self, size=None, scale_factor=None):
-        super(UpsamplingBilinear2d, self).__init__(size, scale_factor, mode='bilinear', align_corners=True)
+    def __init__(self, size=None, scale_factor=None, align_corners=False):
+        super(UpsamplingBilinear2d, self).__init__(size, scale_factor, mode='bilinear', align_corners=align_corners)
 
     def forward(self, input):
-        warnings.warn("nn.UpsamplingBilinear2d is deprecated. Use nn.functional.interpolate instead.")
+        warnings.warn("nn.UpsamplingBilinear2d is deprecated. Use nn.Upsample instead.")
         return super(UpsamplingBilinear2d, self).forward(input)
