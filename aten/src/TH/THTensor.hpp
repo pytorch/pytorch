@@ -9,12 +9,12 @@
 #include <atomic>
 #include <ATen/ATen.h>
 
-inline int64_t* THTensor_getSizePtr(THTensor* tensor) {
-  return tensor->sizes_.data();
+inline const int64_t* THTensor_getSizePtr(THTensor* tensor) {
+  return tensor->sizes().data();
 }
 
-inline int64_t* THTensor_getStridePtr(THTensor* tensor) {
-  return tensor->strides_.data();
+inline const int64_t* THTensor_getStridePtr(THTensor* tensor) {
+  return tensor->strides().data();
 }
 
 // NB: Non-retaining
@@ -33,17 +33,10 @@ inline THStorage* THTensor_getStoragePtr(const THTensor* tensor) {
   return tensor->storage_.unsafeGetStorageImpl();
 }
 
-inline void THTensor_resizeDim(THTensor* tensor, int64_t ndim) {
-  // NB: This is *truly* a resize; calling code (e.g., squeeze)
-  // assumes that old values are preserved
-  tensor->sizes_.resize(ndim);
-  tensor->strides_.resize(ndim);
-}
-
 inline void THTensor_maybe_zero_dim(THTensor *tensor, bool condition_when_zero_dim) {
   bool set_zero_dim = condition_when_zero_dim && tensor->sizes().size() == 1 && tensor->size(0) == 1;
   if (set_zero_dim) {
-    THTensor_resizeDim(tensor, 0);
+    tensor->resize_dim(0);
   }
 }
 
@@ -106,24 +99,6 @@ inline std::vector<int64_t> THTensor_stridesLegacyNoScalars(const THTensor *self
   } else {
     return self->strides().vec();
   }
-}
-inline void THTensor_setSizesAndStrides(THTensor* tensor, std::vector<int64_t>&& new_size, std::vector<int64_t>&& new_stride) {
-  AT_CHECK(new_size.size() == new_stride.size(), "dimensionality of sizes (",
-           new_size.size(), ") must match dimensionality of strides (", new_stride.size(), ")");
-  tensor->sizes_ = std::move(new_size);
-  tensor->strides_ = std::move(new_stride);
-}
-
-inline void THTensor_setSizeAtDim(THTensor* tensor, int dim, int64_t new_size) {
-  tensor->sizes_[dim] = new_size;
-}
-
-inline void THTensor_setStrideAtDim(THTensor* tensor, int dim, int64_t new_stride) {
-  tensor->strides_[dim] = new_stride;
-}
-
-inline void THTensor_setStorageOffset(THTensor* tensor, ptrdiff_t storage_offset) {
-  tensor->storage_offset_ = storage_offset;
 }
 
 // NB: Steals ownership of storage
