@@ -20,7 +20,7 @@ popd
 # if you're not careful.  Check this if you made some changes and the
 # ASAN test is not working
 if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
-    export ASAN_OPTIONS=detect_leaks=0:symbolize=1:strict_init_order=true
+    export ASAN_OPTIONS=detect_leaks=0:symbolize=1:detect_stack_use_after_return=1:strict_init_order=true
     # We suppress the vptr volation, since we have separate copies of
     # libprotobuf in both libtorch.so and libcaffe2.so, and it causes
     # the following problem:
