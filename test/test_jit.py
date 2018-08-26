@@ -23,7 +23,7 @@ import shutil
 import warnings
 from test_autograd import method_tests, create_input, unpack_variables, \
     exclude_tensor_method, non_differentiable, EXCLUDE_GRADCHECK, EXCLUDE_FUNCTIONAL
-from common_nn import TestBase
+from common_nn import TestBase, module_tests as nn_module_tests
 from copy import deepcopy
 import random
 
@@ -6613,10 +6613,17 @@ EXCLUDE_SCRIPT = {
     # not call aten op
     'test_nn_module_Softsign',
     'test_nn_module_Softmin',
+    'test_nn_module_Softmin_multidim',
     'test_nn_module_Tanhshrink',
 
     # random sampling in training mode (default)
-    'test_nn_module_RReLU'
+    'test_nn_module_RReLU',
+    'test_nn_module_RReLU_with_up_down',
+
+    # skipped nn modules (no script version yet)
+    'test_nn_module_CrossMapLRN2d',
+    'test_nn_module_Linear',
+    'test_nn_module_Linear_no_bias',
 
 }
 
@@ -6998,114 +7005,6 @@ nn_functional_tests = [
     # dtype=torch.long), torch.full((S,), S, dtype=torch.long), torch.randint(1,S,(S,), dtype=torch.long))),
 ]
 
-nn_module_tests = [
-    dict(
-        module_name='Threshold',
-        constructor_args=(2, 1),
-        input_size=(2, 3, 4, 5),
-    ),
-    dict(
-        module_name='ReLU',
-        input_size=(2, 3, 4, 5),
-    ),
-    dict(
-        module_name='ReLU6',
-        input_size=(2, 3, 4, 5),
-        check_inplace=True,
-    ),
-    dict(
-        module_name='RReLU',
-        input_size=(1, 2, 2),
-    ),
-    dict(
-        module_name='Hardtanh',
-        input_size=(3, 2, 5),
-    ),
-    dict(
-        module_name='Sigmoid',
-        input_size=(2, 3, 4, 5)
-    ),
-    dict(
-        module_name='Tanh',
-        input_size=(2, 3, 4, 5)
-    ),
-    dict(
-        module_name='ELU',
-        constructor_args=(2.,),
-        input_size=(3, 2, 5),
-    ),
-    dict(
-        module_name='SELU',
-        input_size=(3, 2, 5),
-    ),
-    dict(
-        module_name='GLU',
-        constructor_args=(1,),
-        input_size=(5, 6, 7),
-        desc='dim'
-    ),
-    dict(
-        module_name='Hardshrink',
-        constructor_args=(2.,),
-        input_size=(4, 3, 2, 4),
-    ),
-    dict(
-        module_name='LeakyReLU',
-        constructor_args=(0.5,),
-        input_size=(3, 2, 5),
-        desc='with_negval'
-    ),
-    dict(
-        module_name='LogSigmoid',
-        input_size=(2, 3, 4),
-    ),
-    dict(
-        module_name='Softplus',
-        constructor_args=(2, -100),
-        input_size=(10, 20),
-        desc='beta_threshold',
-    ),
-    dict(
-        module_name='Softshrink',
-        constructor_args=(1,),
-        input_size=(3, 2, 5),
-        desc='lambda',
-    ),
-    dict(
-        module_name='PReLU',
-        constructor_args=(3,),
-        input_size=(2, 3, 4),
-        desc='1d_multiparam',
-    ),
-    dict(
-        module_name='Softsign',
-        input_size=(3, 2, 5),
-    ),
-    dict(
-        module_name='Tanhshrink',
-        input_size=(2, 3, 4, 5)
-    ),
-    dict(
-        module_name='Softmin',
-        constructor_args=(1,),
-        input_size=(2, 3, 5, 10),
-    ),
-    dict(
-        module_name='Softmax',
-        constructor_args=(1,),
-        input_size=(10, 20),
-    ),
-    dict(
-        module_name='Softmax2d',
-        input_size=(1, 3, 10, 20),
-    ),
-    dict(
-        module_name='LogSoftmax',
-        constructor_args=(1,),
-        input_size=(10, 20),
-    ),
-]
-
 
 def add_test(
         name,
@@ -7225,21 +7124,20 @@ def add_nn_functional_test(
 
 
 def add_nn_module_test(test_params):
-    name = test_params.pop('module_name')
+    name = test_params.get('module_name')
     test_name = 'test_nn_module_' + name
-
-    def do_test(self, test=test):
-        if 'constructor' not in test_params:
-            import torch.nn.script as nnscript
-            test_params['constructor_script'] = getattr(nnscript, name)
-            test_params['constructor'] = getattr(nn, name)
-
-        test = ScriptModuleTest(**test_params)
-        if test_name not in EXCLUDE_SCRIPT:
-            test(self)
-
     if test_params.get('desc'):
         test_name += '_' + test_params['desc']
+
+    def do_test(self, test=test):
+        if test_name not in EXCLUDE_SCRIPT:
+            if 'constructor' not in test_params:
+                import torch.nn.script as nnscript
+                test_params['constructor_script'] = getattr(nnscript, name)
+                test_params['constructor'] = getattr(nn, name)
+
+            test = ScriptModuleTest(**test_params)
+            test(self)
 
     post_add_test(test_name, (), do_test)
 
