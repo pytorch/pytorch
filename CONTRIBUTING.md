@@ -296,6 +296,46 @@ cmake ..
 cmake --build .
 ```
 
+### Known MSVC (and MSVC with NVCC) bugs
+
+The PyTorch codebase sometimes likes to use exciting C++ features, and
+these exciting features lead to exciting bugs in Windows compilers.
+To add insult to injury, the error messages will often not tell you
+which line of code actually induced the erroring template instantiation.
+
+I've found the most effective way to debug these problems is to
+carefully read over diffs, keeping in mind known bugs in MSVC/NVCC.
+Here are a few well known pitfalls and workarounds:
+
+* (NVCC) `at::optional` does not work when used from device code.  Don't use
+  it from kernels.  Upstream issue: https://github.com/akrzemi1/Optional/issues/58
+  and our local issue #10329.
+
+* `constexpr` generally works less well on MSVC.
+
+  * The idiom `static_assert(f() == f())` to test if `f` is constexpr
+    does not work; you'll get "error C2131: expression did not evaluate
+    to a constant".  Don't use these asserts on Windows.
+    (Example: `aten/src/ATen/core/intrusive_ptr.h`)
+
+* (NVCC) Code you access inside a `static_assert` will eagerly be
+  evaluated as if it were device code, and so you might get an error
+  that the code is "not accessible".
+
+```
+class A {
+  static A singleton_;
+  static constexpr inline A* singleton() {
+    return &singleton_;
+  }
+};
+static_assert(std::is_same(A*, decltype(A::singelton()))::value, "hmm");
+```
+
+* The compiler will run out of heap if you attempt to compile files that
+  are too large.  Splitting such files into separate files helps.
+  (Example: `THTensorMath`, `THTensorMoreMath`, `THTensorEvenMoreMath`.)
+
 ## Caffe2 notes
 
 In 2018, we merged Caffe2 into the PyTorch source repository.  While the
