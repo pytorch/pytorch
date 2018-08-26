@@ -1888,6 +1888,42 @@ Example::
     tensor([ 0.,  2.,  1.,  0.])
 """)
 
+add_docstr(torch.i0,
+           r"""
+i0(input) -> Tensor
+
+Computes modified Bessel function of first kind with order 0.
+
+Args:
+    input (Tensor): the input tensor.
+
+Returns:
+    Tensor: modified Bessel function of first kind with order 0 evaluated at input.
+
+Example::
+
+    >>> torch.i0(torch.tensor([2.]))
+    tensor([ 2.2796])
+""")
+
+add_docstr(torch.i1,
+           r"""
+i1(input) -> Tensor
+
+Computes modified Bessel function of first kind with order 1.
+
+Args:
+    input (Tensor): the input tensor.
+
+Returns:
+    Tensor: modified Bessel function of first kind with order 1 evaluated at input.
+
+Example::
+
+    >>> torch.i1(torch.tensor([2.]))
+    tensor([ 1.5906])
+""")
+
 add_docstr(torch.index_select,
            r"""
 index_select(input, dim, index, out=None) -> Tensor
@@ -1955,6 +1991,25 @@ Example::
     >>> torch.max(torch.abs(z - torch.eye(4))) # Max nonzero
     tensor(1.00000e-07 *
            1.1921)
+""")
+
+add_docstr(torch.iv,
+           r"""
+i1(v, input) -> Tensor
+
+Computes modified Bessel function of first kind with order v.
+
+Args:
+    v (Tensor): order of the Bessel function.
+    input (Tensor): the input tensor.
+
+Returns:
+    Tensor: modified Bessel function of first kind with order v evaluated at input.
+
+Example::
+
+    >>> torch.iv(torch.tensor([2.]), torch.tensor([2.]))
+    tensor([ 0.6889])
 """)
 
 add_docstr(torch.kthvalue,
