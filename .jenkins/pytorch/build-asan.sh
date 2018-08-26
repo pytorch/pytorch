@@ -12,10 +12,10 @@ clang --version
 
 # detect_leaks=0: Python is very leaky, so we need suppress it
 # symbolize=1: Gives us much better errors when things go wrong
-export ASAN_OPTIONS=detect_leaks=0:symbolize=1
+export ASAN_OPTIONS=detect_leaks=0:detect_stack_use_after_return=1:symbolize=1
 
 # TODO: Make the ASAN flags a more unified env var
 CC="clang" CXX="clang++" LDSHARED="clang --shared" \
-  CFLAGS="-fsanitize=address -fsanitize=undefined -fno-sanitize-recover=all -shared-libasan" \
+  CFLAGS="-fsanitize=address -fsanitize=undefined -fno-sanitize-recover=all -fsanitize-address-use-after-scope -shared-libasan" \
   NO_CUDA=1 \
   python setup.py install
