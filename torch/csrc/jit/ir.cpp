@@ -255,7 +255,7 @@ static void checkSameDevice(const Node* node) {
   bool has_device = false;
   int device;
   auto checkValue = [&](const Value* v) {
-    if(TensorTypePtr type = v->type()->cast<TensorType>()) {
+    if(CompleteTensorTypePtr type = v->type()->cast<CompleteTensorType>()) {
       if(!has_device) {
         has_device = true;
         device = type->device();
