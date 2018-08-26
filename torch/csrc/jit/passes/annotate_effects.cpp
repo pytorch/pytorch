@@ -18,44 +18,119 @@ namespace {
  * mutable values. This models effects explicitly in the IR and forces all
  * annotated nodes to be linearized during optimization.
  *
- * The world token is threaded directly through any nodes that mutate values.
- * For purely functional operators, their node will be "fenced" by two
- * `prim::MemoryFence` nodes that take world tokens as their input.
+ * For mutating operators: the world token is threaded directly through the node
+ * For purely functional operators: their node will be "fenced" by two
+ *   `prim::MemoryFence` nodes that take world tokens as their input.
+ *
+ * Graphs have special EntryWorld and ExitWorld nodes that provide end-points
+ * for the world token. They are similar to graph inputs/outputs in that they
+ * are not in the node list and only accessible via special methods.
+ *
+ * When inlined, graphs will manifest the EntryWorld/ExitWorld nodes explicitly
+ * so that they can act as endpoints where the callee "world thread" can be
+ * joined to the caller world thread.
  */
 class AnnotateEffectsImpl {
  public:
   void annotateEffects(Graph* g) {
-    // TODO(suo): We need to change this so that the world token is an input
-    // and output of the graph. That would require changing a bunch of interop
-    // and batching code, so leaving it out for now.
-    //
-    // auto curToken = g->addInput("world")->setType(WorldType::get());
-    // curToken = visitBlock(g->block(), curToken);
-    // g->registerOutput(curToken);
-
     // Generate the first world token
-    const auto tokenGenerator = g->create(prim::Constant);
-    g->block()->prependNode(tokenGenerator);
-    auto curToken = tokenGenerator->output()->setType(WorldType::get());
+    auto curToken = g->entryWorld()->addOutput()->setType(WorldType::get());
+    auto lastToken = visitBlock(g->block(), curToken);
 
-    visitBlock(g->block(), curToken);
+    g->exitWorld()->addInput(lastToken);
+    g->exitWorld()->addOutput()->setType(WorldType::get());
   }
 
  private:
   Value* visitBlock(Block* block, Value* curToken) {
     for (auto* node : block->nodes()) {
+      // Handle inlined functions. Inlined functions expose their Entry and
+      // Exit tokens as regular nodes. These exposed nodes provide fixed points
+      // to thread the current world token through.
+      //
+      // We can ignore all nodes in between the entry and exit tokens, since
+      // tokens have already been threaded through then.
+      bool skip = false;
+      if (node->kind() == prim::EntryWorld) {
+        curToken = visitEntryWorld(node, curToken);
+        // Skip until we see the corresponding ExitWorld node.
+        skip = true;
+        continue;
+      }
+
+      if (node->kind() == prim::ExitWorld) {
+        curToken = visitExitWorld(node, curToken);
+        // Resume threading the token normally.
+        skip = false;
+        continue;
+      }
+
+      if (skip) {
+        continue;
+      }
+
       curToken = visitNode(node, curToken);
     }
     return curToken;
   }
 
-  // If a node uses a mutable variable (or mutates a previously constant
-  // variable), annotate it
+  // Special handling for inlined functions.
+  // Replace the inlined function's inital entry token with the outer function's
+  // current token.
+  Value* visitEntryWorld(Node* node, Value* curToken) {
+    JIT_ASSERT(node->kind() == prim::EntryWorld);
+    if (node->outputs().empty()) {
+      return curToken;
+    }
+    auto inlinedEntryToken = node->output();
+    inlinedEntryToken->replaceAllUsesWith(curToken);
+    return curToken;
+  }
+
+  // Returns the inlined function's last world token directly
+  Value* visitExitWorld(Node* node, Value* curToken) {
+    JIT_ASSERT(node->kind() == prim::ExitWorld);
+    if (node->outputs().empty()) {
+      return curToken;
+    }
+    auto lastReturnedToken = node->input();
+    auto inlinedExitToken = node->output();
+    // There shouldn't be any uses of the exit token, so DCE should correctly
+    // clean it up.
+    JIT_ASSERT(inlinedExitToken->uses().empty());
+    return lastReturnedToken;
+  }
+
+  // General node annotation. If a node uses a mutable variable (or mutates a
+  // previously constant variable), annotate it
   //
   // Returns the last world token emitted for subsequent annotations to use.
   Value* visitNode(Node* node, Value* curToken) {
+    // Avoid annotating memory fences. This avoids an infinite loop as we add
+    // fences and continue to iterate through nodes.
     if (node->kind() == prim::MemoryFence) {
+      // Return this memory fence's world token
+      return node->outputs().at(0);
+    }
+
+    // Handle inlined functions. Inlined functions will expose their Entry and
+    // Exit tokens as regular nodes. These exposed nodes provide fixed points
+    // to thread the current world token through.
+    if (node->kind() == prim::EntryWorld) {
+      // Replace the inlined function's inital entry token with the outer
+      // function's current token.
+      auto inlinedEntryToken = node->output();
+      inlinedEntryToken->replaceAllUsesWith(curToken);
       return curToken;
+    }
+
+    if (node->kind() == prim::ExitWorld) {
+      auto lastReturnedToken = node->input();
+      auto inlinedExitToken = node->output();
+      // There shouldn't be any uses of the exit token, so DCE should correctly
+      // clean it up.
+      JIT_ASSERT(inlinedExitToken->uses().empty());
+      return lastReturnedToken;
     }
 
     if (node->kind() == prim::If) {

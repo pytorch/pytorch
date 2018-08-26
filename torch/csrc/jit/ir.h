@@ -320,6 +320,9 @@ public:
   Block * owningBlock() {
     return owning_block_;
   }
+  const Block * owningBlock() const {
+    return owning_block_;
+  }
   size_t stage() const {
     return stage_;
   }
@@ -791,6 +794,18 @@ struct Block {
   const Node * param_node() const {
     return input_;
   }
+  const Node * entryWorld() const {
+    return entry_world_;
+  }
+  Node * entryWorld() {
+    return entry_world_;
+  }
+  const Node * exitWorld() const {
+    return exit_world_;
+  }
+  Node * exitWorld() {
+    return exit_world_;
+  }
   Value * addInput(std::string name="") {
     Value * v = input_->addOutput();
     v->setUniqueName(name);
@@ -858,6 +873,8 @@ private:
   // having corner cases where the list is empty.
   Node * const output_;
   Node * const input_;
+  Node * const entry_world_;
+  Node * const exit_world_;
   Node * const owning_node_; // either the node that has this block or nullptr for root
 };
 
@@ -945,6 +962,12 @@ public:
   }
   std::shared_ptr<Scope> scope_root() {
     return scope_root_;
+  }
+  Node * entryWorld() {
+    return block_->entryWorld();
+  }
+  Node * exitWorld() {
+    return block_->exitWorld();
   }
   Value * addInput(std::string name="") {
     return block_->addInput(std::move(name));
@@ -1323,14 +1346,18 @@ inline void Node::cloneFrom(Node * s) {
 	copyAttributes(*s);
 }
 
-inline Block::Block(Graph * graph_, Node * node_)
-: graph_(graph_)
-, output_(initOutput(graph_->create(prim::Return, 0)))
-, input_(graph_->create(prim::Param,0))
-, owning_node_(node_) {
+inline Block::Block(Graph* graph_, Node* node_)
+    : graph_(graph_),
+      output_(initOutput(graph_->create(prim::Return, 0))),
+      input_(graph_->create(prim::Param, 0)),
+      entry_world_(graph_->create(prim::EntryWorld, 0)),
+      exit_world_(graph_->create(prim::ExitWorld, 0)),
+      owning_node_(node_) {
   graph_->all_blocks.emplace(this);
   output_->owning_block_ = this;
   input_->owning_block_ = this;
+  entry_world_->owning_block_ = this;
+  exit_world_->owning_block_ = this;
 }
 
 inline void Block::destroy() {
@@ -1342,6 +1369,8 @@ inline void Block::destroy() {
       it != end; ++it) {
     it.destroyCurrent();
   }
+  entry_world_->destroy();
+  exit_world_->destroy();
   output_->destroy();
   input_->destroy();
   graph_->freeBlock(this);

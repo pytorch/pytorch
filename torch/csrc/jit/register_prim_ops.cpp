@@ -212,6 +212,18 @@ RegisterOperators reg({
           };
         }),
     Operator(
+        prim::EntryWorld,
+        [](Node* node) {
+          size_t numOutputs = node->outputs().size();
+          return [numOutputs](Stack& stack) {
+            JIT_ASSERT(numOutputs <= 1);
+            if (numOutputs == 1) {
+              push(stack, World());
+            }
+            return 0;
+          };
+        }),
+    Operator(
         onnx::Reshape,
         [](Node* node) {
           return [=](Stack& stack) {

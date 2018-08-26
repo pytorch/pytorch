@@ -248,18 +248,24 @@ void Node::lint() const {
   }
 
   // Node subclass invariants
-  // - Return uses is zero
-  // - Param inputs is zero
-  // - Select inputs is one
-  // - Python operator cconv is correct
-
   IR_IF(this,Constant)
     JIT_ASSERT(inputs_.size() == 0);
+  IR_ELSEIF(EntryWorld)
+    // EntryWorld has 0 or 1 inputs/outputs
+    JIT_ASSERT(inputs_.size() <= 1);
+    JIT_ASSERT(outputs_.size() <= 1);
+  IR_ELSEIF(ExitWorld)
+    // EntryWorld has 0 or 1 inputs/outputs
+    JIT_ASSERT(inputs_.size() <= 1);
+    JIT_ASSERT(outputs_.size() <= 1);
   IR_ELSEIF(Return)
+    // Return uses is zero
     JIT_ASSERT(outputs().size() == 0);
   IR_ELSEIF(Param)
+    // Param inputs is zero
     JIT_ASSERT(inputs_.size() == 0);
   IR_ELSEIFM_CONST(PythonOp)
+    // Python operator cconv is correct
     size_t n_scalars = 0, n_tensors = 0;
     for (auto c : value->cconv) {
       if (c == 'c') {
@@ -378,14 +384,21 @@ void Graph::lint() const {
         JIT_ASSERT(input->node()->kind_ == prim::Param);
       }
 
+      check_node(b->entry_world_);
+      JIT_ASSERT(b->entry_world_->kind() == prim::EntryWorld);
+
       for (auto n : b->nodes()) {
         JIT_ASSERT(n->kind_ != prim::Param);
         JIT_ASSERT(n->kind_ != prim::Return);
+        JIT_ASSERT(n->kind_ != prim::EntryWorld);
+        JIT_ASSERT(n->kind_ != prim::ExitWorld);
         check_node(n);
       }
 
       JIT_ASSERT(b->output_->kind() == prim::Return);
       check_node(b->output_);
+      check_node(b->exit_world_);
+      JIT_ASSERT(b->exit_world_->kind() == prim::ExitWorld);
 
       // all_nodes
       // - inputs_, output_ and nodes_ are all included in all_nodes
@@ -394,8 +407,8 @@ void Graph::lint() const {
       // - only one return node???
 
       node_set nodes_set(ALL_OF(b->nodes()));
-      node_set inputs_set {b->input_};
-      node_set output_set {b->output_};
+      node_set inputs_set {b->input_, b->entry_world_};
+      node_set output_set {b->output_, b->exit_world_};
       // TODO: Make a more type safe std::includes wrapper which disallows use on
       // non-ordered containers
       JIT_ASSERT(std::includes(ALL_OF(all_nodes_set), ALL_OF(nodes_set)));
@@ -447,6 +460,15 @@ void Block::cloneFrom(Block * src, std::function<Value*(Value*)> value_map) {
     local_map[input] = this->addInput()->copyMetadata(input)->setStage(input->stage());
     graph->setStage(std::max(graph->stage(), input->stage()));
   }
+  const auto entryWorld = src->entryWorld();
+  if (!entryWorld->outputs().empty()) {
+    JIT_ASSERT(entryWorld->outputs().size() == 1);
+    const auto worldToken = entryWorld->output();
+    local_map[worldToken] = this->entry_world_->addOutput()
+                           ->copyMetadata(worldToken)
+                           ->setStage(worldToken->stage());
+    graph->setStage(std::max(graph->stage(), worldToken->stage()));
+  }
   for(auto node : src->nodes()) {
     auto new_node = this->appendNode(graph->createClone(node, env));
     new_node->setStage(node->stage());
@@ -461,6 +483,12 @@ void Block::cloneFrom(Block * src, std::function<Value*(Value*)> value_map) {
   }
   for(auto output : src->outputs()) {
     this->registerOutput(env(output));
+  }
+  const auto exitWorld = src->exitWorld();
+  if (!exitWorld->outputs().empty()) {
+    JIT_ASSERT(exitWorld->outputs().size() == 1);
+    this->exit_world_->addInput(env(src->exitWorld()->input()));
+    this->exit_world_->addOutput()->copyMetadata(src->exitWorld()->output());
   }
 }
 

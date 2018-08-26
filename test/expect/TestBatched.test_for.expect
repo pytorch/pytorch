@@ -6,17 +6,17 @@ graph(%x.1_data : Dynamic
       %y_dims : Dynamic) {
   %6 : int = prim::Constant[value=10]()
   %7 : int = prim::Constant[value=1]()
-  %x : Dynamic, %21 : Dynamic, %22 : Dynamic = prim::Loop(%6, %7, %x.1_data, %x.1_mask, %x.1_dims)
+  %x : Dynamic, %9 : Dynamic, %10 : Dynamic = prim::Loop(%6, %7, %x.1_data, %x.1_mask, %x.1_dims)
     block0(%loop_num : int, %5_data : Dynamic, %5_mask : Dynamic, %5_dims : Dynamic) {
-      %13 : int = prim::Constant[value=1]()
-      %14 : Long() = prim::NumToTensor(%13)
-      %alpha : float = prim::TensorToNum(%14)
+      %15 : int = prim::Constant[value=1]()
+      %16 : Long() = prim::NumToTensor(%15)
+      %alpha : float = prim::TensorToNum(%16)
       %data.1 : Dynamic = aten::add(%5_data, %y_data, %alpha)
       %mask : Dynamic = aten::mul(%5_mask, %y_mask)
       %dims : Dynamic = aten::__or__(%5_dims, %y_dims)
-      %19 : int = prim::Constant[value=1]()
+      %21 : int = prim::Constant[value=1]()
       %data : Dynamic = aten::where(%mask, %data.1, %5_data)
-      -> (%19, %data, %mask, %dims)
+      -> (%21, %data, %mask, %dims)
     }
-  return (%x, %21, %22);
+  return (%x, %9, %10);
 }

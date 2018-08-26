@@ -16,9 +16,9 @@ graph(%a.1_data : Dynamic
   %15 : int = prim::TensorToNum(%14)
   %63 : Dynamic, %64 : Dynamic, %65 : Dynamic, %a : Dynamic, %61 : Dynamic, %62 : Dynamic = prim::Loop(%6, %15, %7, %8, %9, %a.1_data, %a.1_mask, %a.1_dims)
     block0(%loop_num : int, %cond_data.2 : Dynamic, %cond_mask.3 : Dynamic, %cond_dims : Dynamic, %6_data : Dynamic, %6_mask : Dynamic, %6_dims : Dynamic) {
-      %24 : int = prim::Constant[value=1]()
-      %25 : Long() = prim::NumToTensor(%24)
-      %alpha : float = prim::TensorToNum(%25)
+      %28 : int = prim::Constant[value=1]()
+      %29 : Long() = prim::NumToTensor(%28)
+      %alpha : float = prim::TensorToNum(%29)
       %data.1 : Dynamic = aten::sub(%6_data, %b_data, %alpha)
       %mask : Dynamic = aten::mul(%6_mask, %b_mask)
       %dims : Dynamic = aten::__or__(%6_dims, %b_dims)

@@ -32,8 +32,8 @@ namespace torch { namespace jit {
 // to what the instructions will look like.
 // In particular we:
 // * (TODO) desugar Loop trip counts into c = 0, c += 1 instructions in the loop
-// * flatten stages so that each stage starts with a load from the stack
-//   and ends with a store to the stack
+// * flatten stages so that each stage starts with a store to registers
+//   and ends with a load to the stack
 // *. computes move_flags (see Outputs), and inserts
 // *  Drop nodes are inserted for any node that is unused to create a dummy use
 //    that will cause the interpreter to free the node.
@@ -71,8 +71,6 @@ Value* createTripCountConjunctiveCondition(
           ->output()->setType(IntType::get());
   return new_cond;
 }
-
-} // namespace
 
 // this currently just _removes_ the trip count inputs and checks they are
 // unused. In the future they will be desugared into normal arithmetic to
@@ -308,6 +306,16 @@ std::unordered_map<Node*, std::vector<uint8_t>> findLastUses(Graph & g) {
   return FindLastUses(g).move_flags;
 }
 
+// Take the speecial EntryWorld node and manifest it directly in the graph so it
+// can be picked up by the interpreter. Analagous to converting graph
+// inputs/outputs to prim::Store/Load instructions.
+void insertEntryWorld(Graph& graph) {
+  auto entryWorld = graph.entryWorld();
+  WithInsertPoint guard(*graph.nodes().begin());
+  graph.insertNode(entryWorld);
+}
+} //namespace
+
 // pre-processing that happens once per graph
 struct PreprocessGraph {
   PreprocessGraph(Graph & g)
@@ -315,6 +323,8 @@ struct PreprocessGraph {
     desugarTripCounts(graph->block());
     stage_input_types = flattenStages(*graph);
     dropUnused(graph->block());
+    // Manifest the initial world token in the graph
+    insertEntryWorld(*graph);
     // fill in move_flags by scanning blocks;
     move_flags = findLastUses(*graph);
     //TODO: desugar Loop trip counts, for now we drop trip counts
@@ -694,7 +704,7 @@ struct InterpreterStateImpl {
           for(int i = inst.outputs.size - 1; i >= 0; i--) {
             int reg = get(inst.outputs,i);
             registers[reg] = pop(stack);
-            // std::cout << "pop reg[" << reg << "];\n" << registers[reg].pImpl << "\n";
+            // std::cout << "pop reg[" << reg << "];\n" << registers[reg] << "\n";
           }
           pc = new_pc;
         } catch(std::exception & e) {
