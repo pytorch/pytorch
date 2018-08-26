@@ -593,6 +593,22 @@ class TestJit(JitTestCase):
         self.assertTrue(torch.all(out2 >= 0))
         self.assertTrue(torch.all(out2 < 1))
 
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    def test_fusion_arg_configurations(self):
+        # A smoke test to make sure we won't use the same kernel for contiguous
+        # and non-contiguous arguments.
+        # TODO: add optionally enabled debug counters to the fuser to verify
+        #       that we really can tell the difference between configurations
+        def f(x, y):
+            z1, z2 = (x + y).chunk(2, dim=1)
+            return z1 * z2
+
+        x = torch.randn(4, 4, dtype=torch.float, device='cuda')
+        y = torch.randn(4, 4, dtype=torch.float, device='cuda')
+        traced_f = torch.jit.trace(x, y)(f)
+        self.assertEqual(traced_f(x.t().contiguous(), y), traced_f(x.t(), y))
+
     @staticmethod
     def fn_test_comparison_gt_lt(x, y):
         mask = (x > 0).type_as(x)
@@ -789,7 +805,7 @@ class TestJit(JitTestCase):
         y = torch.randn(4, 1, 8, 5, requires_grad=True)
 
         graph = torch.jit.script(broadcast).graph
-        torch._C._jit_pass_shape_analysis(graph, (x, y), False)
+        torch._C._jit_pass_complete_shape_analysis(graph, (x, y), False)
         self.assertExpectedGraph(graph)
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
@@ -2215,6 +2231,62 @@ a")
         check_dynamic_indexing("[i + j]", consec((3, 3)), 0, 1)
         check_dynamic_indexing("[i:j, i]", consec((3, 3, 2)), 0, 2)
 
+    def test_method_on_number(self):
+        def func():
+            c = 1
+            return c.add(1)
+        with self.assertRaisesRegex(RuntimeError, 'Cannot call methods on numbers'):
+                    torch.jit.script(func)
+
+    # testing implicit conversion of tensors to scalars to match function arguments
+    def test_scalar_to_num_conversions(self):
+        @torch.jit.script
+        def multiple_defs(x):
+            c = 1
+            x = x + c
+            return x
+
+        self.assertTrue("ImplicitTensorToNum" not in str(multiple_defs.graph))
+
+        @torch.jit.script
+        def tensor_to_int_script(x, tensor):
+            return x.unsqueeze(tensor)
+
+        def tensor_to_int(x, tensor):
+            return x.unsqueeze(tensor)
+
+        @torch.jit.script
+        def tensor_to_float_script(x, tensor):
+            return x.addcmul(tensor, tensor, value=tensor)
+
+        def tensor_to_float(x, tensor):
+            return x.addcmul(tensor, tensor, value=tensor)
+
+        x = torch.zeros(10)
+        # float tensor, float tensor with grad, int tensor (can't set grad on int tensor)
+        tensors = [torch.tensor(1.1),
+                   torch.tensor(1.1, requires_grad=True),
+                   torch.tensor(0),
+                   torch.tensor([2])]
+
+        script_funs = [tensor_to_int_script, tensor_to_float_script]
+        funs = [tensor_to_int, tensor_to_float]
+
+        # return the result, or whether exception was thrown
+        def test_func(func, x, tensor):
+            try:
+                result = func(x, tensor)
+            except RuntimeError as e:
+                result = True
+            except TypeError as e:
+                result = True
+            return result
+
+        # assert result or exception equal for each (function, inputs)
+        for tensor in tensors:
+            for i in range(len(script_funs)):
+                self.assertEqual(test_func(script_funs[i], x, tensor), test_func(funs[i], x, tensor))
+
     def test_keyword(self):
         @torch.jit.script
         def func(x):
@@ -2377,10 +2449,13 @@ a")
         x = torch.rand(10, dtype=torch.float, requires_grad=True)
         self.assertEqual(func(x), torch.cat((x, x), dim=0))
 
-        with self.assertRaisesRegex(RuntimeError, "expected a value of type int"):
-            @torch.jit.script
-            def func(x):
-                return torch.cat((x, x), x, dim=0)
+        @torch.jit.script
+        def func2(x, y):
+            return torch.cat((x, x), y)
+
+        x = torch.rand([2, 2])
+        y = torch.tensor(1)
+        self.assertEqual(func2(x, y), torch.cat((x, x), y))
 
     def test_cat_lifts(self):
         @torch.jit.script
@@ -3007,7 +3082,7 @@ a")
     def test_print(self):
         def func(x, y):
             q = (x + y).sigmoid()
-            print(q)
+            print(q, 1, 2, [1, 2], [1.0, 2.0])
             w = -q
             return w * w
 
@@ -4014,9 +4089,8 @@ def func(t):
             return torch.cat(c)
 
         b = torch.zeros(2, 4)
-        # unrelated bug
-        with self.assertRaisesRegex(RuntimeError, ".*"):
-            test_list.graph.propagate_shapes((b,), False)
+        test_list.graph.propagate_shapes((b,), False)
+        self.assertExpected(canonical(test_list.graph))
 
     def test_if_supertype(self):
         @torch.jit.script
@@ -4574,7 +4648,7 @@ def func(t):
 
         a = torch.zeros(2, 2)
         b = torch.zeros(4, dtype=torch.long)
-        foo.graph.propagate_shapes((a, b), False)
+        torch._C._jit_pass_complete_shape_analysis(foo.graph, (a, b), False)
         self.assertExpected(canonical(foo.graph))
 
     def test_onnx_export_speculate(self):

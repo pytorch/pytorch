@@ -225,6 +225,9 @@ TypePtr ModuleDecoder::buildType(const onnx::TypeProto& type_proto) {
   } else if (kind == "TensorType") {
     // TODO: Don't use DynamicType here
     return DynamicType::get();
+  } else if (kind == "CompleteTensorType") {
+    // TODO: Don't use DynamicType here
+    return DynamicType::get();
   } else if (kind == "TupleType") {
     std::vector<TypePtr> elems;
     for (auto &subkind : shape_proto.dim()) {
