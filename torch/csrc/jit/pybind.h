@@ -8,6 +8,8 @@
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/jit/interned_strings.h"
 #include "torch/csrc/jit/tracer.h"
+#include "torch/csrc/jit/ivalue.h"
+#include "torch/csrc/jit/pybind_utils.h"
 
 #include <pybind11/functional.h>
 #include <pybind11/pybind11.h>
@@ -16,6 +18,19 @@
 namespace py = pybind11;
 
 namespace pybind11 { namespace detail {
+
+template <> struct type_caster<torch::jit::IValue> {
+public:
+  PYBIND11_TYPE_CASTER(torch::jit::IValue, _("IValue"));
+
+  bool load(handle src, bool) {
+    return false;
+  }
+
+  static handle cast(torch::jit::IValue src, return_value_policy /* policy */, handle /* parent */) {
+    return toPyObject(std::move(src)).release();
+  }
+};
 
 template <> struct type_caster<torch::jit::Symbol> {
 public:

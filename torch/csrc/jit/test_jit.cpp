@@ -548,10 +548,11 @@ variable_list get_grad_outputs(const variable_list& vars) {
 
 std::shared_ptr<Graph> trace(const ADTestSpec& test, const variable_list& vars_in) {
   std::shared_ptr<tracer::TracingState> state;
-  variable_list trace_vars_in;
-  std::tie(state, trace_vars_in) = tracer::enter(vars_in);
+  Stack trace_stack_in;
+  std::tie(state, trace_stack_in) = tracer::enter(fmap<IValue>(vars_in));
+  variable_list trace_vars_in = fmap(trace_stack_in, [](const IValue& v) { return Variable(v.toTensor()); });
   auto trace_vars_out = test(trace_vars_in);
-  tracer::exit(trace_vars_out);
+  tracer::exit(fmap<IValue>(trace_vars_out));
   return state->graph;
 }
 
@@ -904,7 +905,7 @@ void testControlFlow() {
   };
 
   auto L = [](int64_t l) { return IValue(autograd::make_variable(at::Scalar(l).toTensor())); };
-  auto V = [](IValue t) { return at::Scalar(std::move(t).toTensor()).toLong(); };
+  auto V = [](IValue t) { return std::move(t).toTensor().toCLong(); };
   auto run_binary = [&](const std::string & name, int64_t a, int64_t b) {
     return V(run(name, {L(a), L(b)})[0]);
   };
@@ -1122,8 +1123,7 @@ void testCustomOperators() {
         [](double a, at::Tensor b) { return a + b; });
 
     std::shared_ptr<tracer::TracingState> state;
-    variable_list trace_vars_in;
-    std::tie(state, trace_vars_in) = tracer::enter({});
+    std::tie(state, std::ignore) = tracer::enter({});
 
     Stack stack;
     push(stack, 2.0f, autograd::make_variable(at::ones(5)));
@@ -1131,7 +1131,7 @@ void testCustomOperators() {
     at::Tensor output = autograd::make_variable(at::empty({}));
     pop(stack, output);
 
-    tracer::exit({output});
+    tracer::exit({IValue(output)});
 
     std::string op_name("traced::op");
     bool contains_traced_op = false;
@@ -1151,8 +1151,7 @@ void testCustomOperators() {
         [](const std::vector<double>& f) -> int64_t { return f.size(); });
 
     std::shared_ptr<tracer::TracingState> state;
-    variable_list trace_vars_in;
-    std::tie(state, trace_vars_in) = tracer::enter({});
+    std::tie(state, std::ignore) = tracer::enter({});
 
     Stack stack;
     push(stack, std::vector<double>{1.0});

@@ -450,9 +450,7 @@ struct GraphFuser {
       // XXX: This hardcodes the "map size" for this FusionGroup.
       // If we want to make the graph fuser more general in the future,
       // we could use aten::broadcast_tensors or add a primitive op that broadcasts.
-      auto * expand = graph->insert(
-          aten::expand,
-          {producer, graph->insertConstant(IValue(map_size)), graph->insertConstant(0)})->node();
+      auto * expand = graph->insert(aten::expand, {producer, map_size})->node();
       {
         std::vector<int64_t> sizes, strides;
         std::tie(sizes, strides) = at::inferExpandGeometry(

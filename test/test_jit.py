@@ -331,8 +331,9 @@ class JitTestCase(TestCase):
 
 class TestJit(JitTestCase):
     def assertExportImport(self, trace, inputs):
+        graph = trace if isinstance(trace, torch._C.Graph) else trace.graph()
         m = torch.jit.ScriptModule()
-        m._create_method_from_graph("forward", trace.graph())
+        m._create_method_from_graph("forward", graph)
         m_import = self.getExportImportCopy(m)
 
         self.assertEqual(m.forward(*inputs), m_import.forward(*inputs))
@@ -931,6 +932,16 @@ class TestJit(JitTestCase):
     # gradients are required and sizes are involved
     def test_trace_size_with_grad(self):
         self.do_trace_size(True)
+
+    def test_trace_tuple(self):
+        def fn(x, y):
+            return x, (x * y[1], x * y[0])
+
+        x, y = torch.randn(2, 2), (torch.ones(2, 2), torch.randn(2, 2))
+        traced_fn = torch.jit.trace(x, y)(fn)
+        self.assertEqual(traced_fn(x, y), fn(x, y))
+        self.assertExpectedGraph(traced_fn.graph)
+        self.assertExportImport(traced_fn.graph, (x, y))
 
     # TODO: implement
     @unittest.expectedFailure
@@ -2129,6 +2140,135 @@ a")
         x = torch.rand(10, dtype=torch.float, requires_grad=True)
         self.checkScript(func, [x], optimize=True)
 
+    def test_index(self):
+        def consec(size, start=0):
+            numel = torch.tensor(size).prod().item()
+            return torch.arange(numel).view(size)
+
+        def check_code(code_str, fn_name, inputs):
+            scope = {}
+            exec(code_str, globals(), scope)
+            cu = torch.jit.CompilationUnit(code_str)
+            self.assertEqual(cu.func(*inputs), scope['func'](*inputs))
+
+        def check_indexing(indexing, tensor):
+            template = dedent("""
+            def func(x):
+                return x{}
+            """)
+
+            check_code(template.format(indexing), "func", [tensor])
+
+        def check_dynamic_indexing(indexing, tensor, value1, value2):
+            value1 = torch.tensor(value1)
+            value2 = torch.tensor(value2)
+
+            template = dedent("""
+            def func(x, value1, value2):
+                i = int(value1)
+                j = int(value2)
+                return x{}
+            """)
+
+            check_code(template.format(indexing), "func", [tensor, value1, value2])
+
+        # basic slices
+        check_indexing('[0]', consec((3, 3)))
+        check_indexing('[1]', consec((3, 3), 10))
+        check_indexing('[2]', consec((3, 3), 19))
+        check_indexing('[2]', consec((3,)))
+        check_indexing('[-1]', consec((3, 3), 19))
+        check_indexing('[0:2]', consec((3, 3, 3)))
+        check_indexing('[1:-1]', consec((3, 3, 3)))
+        check_indexing('[-3:-1]', consec((6, 3)))
+        check_indexing('[1:]', consec((3, 3)))
+        check_indexing('[:1]', consec((3, 3)))
+        check_indexing('[:]', consec((3, 2)))
+
+        # multi-dim: indexes
+        check_indexing('[0, 1]', consec((3, 3)))
+        check_indexing('[0, 1]', consec((3, 3, 2)))
+        check_indexing('[1, 0, 2]', consec((3, 3, 3)))
+        check_indexing('[2, -1]', consec((3, 3)))
+
+        # multi-dim: mixed slicing and indexing
+        check_indexing('[0, 1:2]', consec((3, 3)))
+        check_indexing('[0, :1]', consec((3, 3, 2)))
+        check_indexing('[1, 2:]', consec((3, 3, 3)))
+        check_indexing('[-1, 1:, 0]', consec((3, 3, 3, 3)))
+        check_indexing('[1:, -1, 0]', consec((3, 3, 3, 3)))
+        check_indexing('[-1, 2:, 1:2]', consec((3, 3, 3, 3)))
+        check_indexing('[-1, 1:, 0]', consec((3, 3, 3, 3)))
+        check_indexing('[-1, :, 0, 2]', consec((3, 3, 3, 3)))
+
+        # zero-sized slices
+        check_indexing('[0:0]', consec((2, 2)))
+        check_indexing('[0:0, 1]', consec((3, 3)))
+
+        # trivial expression usage
+        check_indexing('[1+1]', consec((3, 3)))
+        check_indexing('[1:(0 + 2)]', consec((3, 3, 3)))
+
+        # dynamic expression usage
+        check_dynamic_indexing("[i + j]", consec((3, 3)), 0, 1)
+        check_dynamic_indexing("[i:j, i]", consec((3, 3, 2)), 0, 2)
+
+    def test_method_on_number(self):
+        def func():
+            c = 1
+            return c.add(1)
+        with self.assertRaisesRegex(RuntimeError, 'Cannot call methods on numbers'):
+                    torch.jit.script(func)
+
+    # testing implicit conversion of tensors to scalars to match function arguments
+    def test_scalar_to_num_conversions(self):
+        @torch.jit.script
+        def multiple_defs(x):
+            c = 1
+            x = x + c
+            return x
+
+        self.assertTrue("ImplicitTensorToNum" not in str(multiple_defs.graph))
+
+        @torch.jit.script
+        def tensor_to_int_script(x, tensor):
+            return x.unsqueeze(tensor)
+
+        def tensor_to_int(x, tensor):
+            return x.unsqueeze(tensor)
+
+        @torch.jit.script
+        def tensor_to_float_script(x, tensor):
+            return x.addcmul(tensor, tensor, value=tensor)
+
+        def tensor_to_float(x, tensor):
+            return x.addcmul(tensor, tensor, value=tensor)
+
+        x = torch.zeros(10)
+        # float tensor, float tensor with grad, int tensor (can't set grad on int tensor)
+        tensors = [torch.tensor(1.1),
+                   torch.tensor(1.1, requires_grad=True),
+                   torch.tensor(0),
+                   torch.tensor([2])]
+
+        script_funs = [tensor_to_int_script, tensor_to_float_script]
+        funs = [tensor_to_int, tensor_to_float]
+
+        # return the result, or whether exception was thrown
+        def test_func(func, x, tensor):
+            try:
+                result = func(x, tensor)
+            except RuntimeError as e:
+                result = True
+            except TypeError as e:
+                result = True
+            return result
+
+        # assert result or exception equal for each (function, inputs)
+        for tensor in tensors:
+            for i in range(len(script_funs)):
+                self.assertEqual(test_func(script_funs[i], x, tensor), test_func(funs[i], x, tensor))
+
     def test_keyword(self):
         @torch.jit.script
         def func(x):
@@ -2287,10 +2427,13 @@ a")
         x = torch.rand(10, dtype=torch.float, requires_grad=True)
         self.assertEqual(func(x), torch.cat((x, x), dim=0))
 
-        with self.assertRaisesRegex(RuntimeError, "expected at most"):
-            @torch.jit.script
-            def func(x):
-                return torch.cat((x, x), x, dim=0)
+        @torch.jit.script
+        def func2(x, y):
+            return torch.cat((x, x), y)
+
+        x = torch.rand([2, 2])
+        y = torch.tensor(1)
+        self.assertEqual(func2(x, y), torch.cat((x, x), y))
 
     def test_cat_lifts(self):
         @torch.jit.script
@@ -2917,7 +3060,7 @@ a")
     def test_print(self):
         def func(x, y):
             q = (x + y).sigmoid()
-            print(q)
+            print(q, 1, 2, [1, 2], [1.0, 2.0])
             w = -q
             return w * w
 
@@ -3040,6 +3183,14 @@ def func4():
             self.assertEqual(cu.func2(), scope['func2']())
             self.assertEqual(cu.func3(), scope['func3']())
             self.assertEqual(cu.func4(), scope['func4']())
+
+    def test_number_augassign(self):
+        def func():
+            z = 1
+            z += 2
+            return z
+
+        self.checkScript(func, (), optimize=True)
 
     def test_number_neg(self):
         # int -> int
@@ -3865,6 +4016,80 @@ def func(t):
                 if True:
                     a = 4
 
+    def test_if_tuple_sizes(self):
+        with self.assertRaisesRegex(RuntimeError, "Type mismatch"):
+            @torch.jit.script
+            def diff_tuple_sizes(x):
+                if False:
+                    c0 = ((x, x), (x, x, x))
+                else:
+                    c0 = ((x, x, x), (x, x))
+                return c0
+
+    def test_if_different_type(self):
+        with self.assertRaisesRegex(RuntimeError, "Type mismatch: c0 is set to type int "
+                                    "in the true branch and type float in the false branch:"):
+            @torch.jit.script
+            def diff_type_used():
+                if False:
+                    c0 = 1
+                else:
+                    c0 = 1.0
+                return c0
+
+        with self.assertRaisesRegex(RuntimeError, "variable 'c0' previously has type float"):
+            @torch.jit.script
+            def diff_existing_type(x):
+                c0 = 1.0
+                if False:
+                    c0 = 1
+                    print(x)
+                return x
+
+        @torch.jit.script
+        def diff_type_unused():
+            if True:
+                c0 = 1
+                print(c0)
+            else:
+                c0 = 1.0
+                print(c0)
+            return 1
+
+    def test_if_list(self):
+        # testing that different length lists don't throw error
+        @torch.jit.script
+        def test_list(x):
+            if True:
+                c = [x, x]
+            else:
+                c = [x, x, x]
+            return torch.cat(c)
+
+        b = torch.zeros(2, 4)
+        # unrelated bug
+        with self.assertRaisesRegex(RuntimeError, ".*"):
+            test_list.graph.propagate_shapes((b,), False)
+
+    def test_if_supertype(self):
+        @torch.jit.script
+        def tensor_unifying(x, y, z):
+
+            # testing dynamic is appropriately set for y and z
+            if True:
+                x, y, z = x, y, z
+            else:
+                x, y, z = x, x, y
+
+            return x, y, z
+
+        a = torch.zeros(2, 2, dtype=torch.float)
+        b = torch.zeros(2, 4, dtype=torch.long)
+        c = torch.zeros(2, 4, dtype=torch.float)
+
+        tensor_unifying.graph.propagate_shapes((a, b, c), False)
+        self.assertExpected(canonical(tensor_unifying.graph))
+
     def test_type_annotations(self):
         def fn(x, y):
             # type: (Tensor, Tensor) -> Tuple[Tensor, Tensor, Tensor]
@@ -4513,7 +4738,7 @@ def func(t):
             def f0(a):
                 torch.sum(a, a, a, a)
 
-        with self.assertRaisesRegex(RuntimeError, 'unknown keyword argument'):
+        with self.assertRaisesRegex(RuntimeError, 'argument self not provided'):
             @torch.jit.script
             def f1(a):
                 torch.sum(foo=4)
@@ -4695,6 +4920,12 @@ def func(t):
         r = M().create()
         self.assertEqual(r.dtype, torch.float)
         self.assertEqual(torch.zeros([1, 1, 2], dtype=torch.float), r)
+
+    def test_vararg_zeros(self):
+        def foo():
+            return torch.zeros(3, 4, 5, dtype=torch.int)
+
+        self.checkScript(foo, ())
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     def test_rand(self):
@@ -5764,6 +5995,18 @@ def func(t):
             reference = getattr(x, cast_type)()
             self.assertEqual(cu_result, reference)
 
+    def test_listconstruct_erasure(self):
+        class FooMod(torch.nn.Module):
+            def forward(self, x):
+                mask = x < 0.0
+                return x[mask]
+
+        import io
+        f = io.BytesIO()
+        self.assertExpected(torch.onnx.export_to_pretty_string(
+            FooMod(), (torch.rand(3, 4),), f,
+            operator_export_type=OperatorExportTypes.ONNX_ATEN_FALLBACK))
+
 
 class TestEndToEndHybridFrontendModels(JitTestCase):
 
@@ -6548,19 +6791,11 @@ class TestCustomOperators(JitTestCase):
         # Replace with actual test once we support lists.
         with self.assertRaisesRegex(
             RuntimeError,
-            "Lists and tuples are not supported yet"
+            "Lists and strings are not supported yet"
         ):
             a, b = torch.ones(5), torch.zeros(5)
             output = torch.ops.aten.stack([a, b])
             self.assertEqual(output, torch.ones(10))
-
-    def test_passing_and_returning_tuples(self):
-        # Replace with actual test once we support tuples.
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "Lists and tuples are not supported yet"
-        ):
-            torch.ops.aten.max_pool2d(torch.ones(5, 5), [2, 2])
 
     def test_script_graph_contains_custom_op(self):
         @torch.jit.script

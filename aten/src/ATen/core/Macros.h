@@ -1,5 +1,8 @@
 #pragma once
 
+#include <sstream>
+#include <string>
+
 // You can use the definition AT_CORE_STATIC_WINDOWS to control whether
 // or not we apply __declspec.  You will want to set this as
 // -DAT_CORE_STATIC_WINDOWS=1 when compiling code which links
@@ -29,3 +32,17 @@
 #define AT_DISABLE_COPY_AND_ASSIGN(classname) \
   classname(const classname&) = delete;       \
   classname& operator=(const classname&) = delete
+
+namespace at {
+inline int stoi(const std::string& str) {
+#if defined(__ANDROID__)
+  std::stringstream ss;
+  int n = 0;
+  ss << str;
+  ss >> n;
+  return n;
+#else
+  return std::stoi(str);
+#endif // defined(__ANDROID__)
+}
+} // namespace at

@@ -39,11 +39,10 @@ void THTensor_setStorageNd(THTensor *self, THStorage *storage, ptrdiff_t storage
       THError("Tensor: invalid null storage");
     }
     auto scalar_type = THTensor_getStoragePtr(self)->scalar_type();
-    THStorage_free(THTensor_getStoragePtr(self));
     if(storage)
     {
+      storage->_raw_incref();
       THTensor_stealAndSetStoragePtr(self, storage);
-      THStorage_retain(THTensor_getStoragePtr(self));
     }
     else {
       THTensor_stealAndSetStoragePtr(self, THStorage_new(scalar_type));
@@ -53,7 +52,7 @@ void THTensor_setStorageNd(THTensor *self, THStorage *storage, ptrdiff_t storage
   /* storageOffset */
   if(storageOffset < 0)
     THError("Tensor: invalid storage offset");
-  THTensor_setStorageOffset(self, storageOffset);
+    self->set_storage_offset(storageOffset);
 
   /* size and stride */
   THTensor_resizeNd(self, nDimension, size, stride);
@@ -100,21 +99,21 @@ void THTensor_resizeNd(THTensor *self, int nDimension, const int64_t *size, cons
 
   if(nDimension != self->dim())
   {
-    THTensor_resizeDim(self, nDimension);
+    self->resize_dim(nDimension);
   }
 
   totalSize = 1;
   for(d = nDimension-1; d >= 0; d--)
   {
-    THTensor_setSizeAtDim(self, d, size[d]);
+    self->set_size(d, size[d]);
     if(stride && (stride[d] >= 0) ) {
-      THTensor_setStrideAtDim(self, d, stride[d]);
+      self->set_stride(d, stride[d]);
     } else {
       if(d == nDimension-1) {
-        THTensor_setStrideAtDim(self, d, 1);
+        self->set_stride(d, 1);
       } else {
         // Keep stride monotonically increasing to match NumPy.
-        THTensor_setStrideAtDim(self, d, std::max<int64_t>(self->size(d+1), 1)*self->stride(d+1));
+        self->set_stride(d, std::max<int64_t>(self->size(d+1), 1)*self->stride(d+1));
       }
     }
     totalSize += (self->size(d)-1)*self->stride(d);
@@ -195,4 +194,12 @@ THTensor_compute_stride(at::IntList oldshape, at::IntList oldstride, at::IntList
     return at::nullopt;
   }
   return newstride;
+}
+
+// NB: Steals ownership of storage
+void THTensor_stealAndSetStoragePtr(THTensor* tensor, THStorage* storage) {
+  // Caffe2 might have tensors whose storages are null, but we
+  // don't allow it in PyTorch.
+  AT_ASSERT(storage);
+  tensor->storage_ = at::Storage(storage);
 }

@@ -114,7 +114,7 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
 
     std::stringstream failure_messages;
     at::optional<std::vector<Value*>> all_inputs =
-      tryMatchSchema(schema, loc, *m.graph(), inputs_, attributes, failure_messages);
+      tryMatchSchema(schema, loc, *m.graph(), inputs_, attributes, failure_messages, /*conv_tensor_to_num*/true);
     if (!all_inputs)
       throw ErrorReport(loc) << failure_messages.str();
 
@@ -540,16 +540,16 @@ void initJitScriptBindings(PyObject* module) {
         Module& self,
         const std::string& name,
         py::function func,
-        tracer::variable_list inputs) {
-          size_t num_inputs = inputs.size();
+        py::tuple input_tuple) {
           // prereq: Module's buffers and parameters are unique
           // this was ensured in python before calling this function
           std::vector<at::Tensor*> parameters;
           gatherParametersAndBuffers(parameters, self);
+          Stack inputs = toStack(input_tuple);
           for(at::Tensor* param : parameters) {
-            inputs.push_back(autograd::as_variable_ref(*param));
+            inputs.emplace_back(*param);
           }
-          auto graph = tracer::createGraphByTracing(func, std::move(inputs), num_inputs);
+          auto graph = tracer::createGraphByTracing(func, inputs, input_tuple.size());
           self.create_method(name, std::move(graph), std::move(parameters));
       })
       .def("graph_for", [](Module& self, py::args args) {

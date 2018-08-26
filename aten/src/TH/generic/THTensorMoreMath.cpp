@@ -128,13 +128,13 @@ void THTensor_(max)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
 
     THTensor *tempValues_ = THTensor_(newWithTensor)(values_);
     // tempValues_.expand_as(t)
-    THTensor_setSizeAtDim(tempValues_, dimension, THTensor_sizeLegacyNoScalars(t, dimension));
-    THTensor_setStrideAtDim(tempValues_, dimension, 0);
+    tempValues_->set_size(dimension,THTensor_sizeLegacyNoScalars(t, dimension));
+    tempValues_->set_stride(dimension, 0);
 
     THLongTensor *tempIndices_ = THLongTensor_newWithTensor(indices_);
     // tempIndices_.expand_as(t)
-    THTensor_setSizeAtDim(tempIndices_, dimension, THTensor_sizeLegacyNoScalars(t, dimension));
-    THTensor_setStrideAtDim(tempIndices_, dimension, 0);
+    tempIndices_->set_size(dimension,THTensor_sizeLegacyNoScalars(t, dimension));
+    tempIndices_->set_stride(dimension, 0);
 
     TH_TENSOR_APPLY3_D(real, t, real, tempValues_, int64_t, tempIndices_, dimension,
                           if(!(*t_data <= *tempValues__data) && !th_isnan(*tempValues__data)) {
@@ -209,13 +209,13 @@ void THTensor_(min)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
 
     THTensor *tempValues_ = THTensor_(newWithTensor)(values_);
     // tempValues_.expand_as(t)
-    THTensor_setSizeAtDim(tempValues_, dimension, THTensor_sizeLegacyNoScalars(t, dimension));
-    THTensor_setStrideAtDim(tempValues_, dimension, 0);
+    tempValues_->set_size(dimension,THTensor_sizeLegacyNoScalars(t, dimension));
+    tempValues_->set_stride(dimension, 0);
 
     THLongTensor *tempIndices_ = THLongTensor_newWithTensor(indices_);
     // tempIndices_.expand_as(t)
-    THTensor_setSizeAtDim(tempIndices_, dimension, THTensor_sizeLegacyNoScalars(t, dimension));
-    THTensor_setStrideAtDim(tempIndices_, dimension, 0);
+    tempIndices_->set_size(dimension,THTensor_sizeLegacyNoScalars(t, dimension));
+    tempIndices_->set_stride(dimension, 0);
 
     TH_TENSOR_APPLY3_D(real, t, real, tempValues_, int64_t, tempIndices_, dimension,
                           if(!(*t_data >= *tempValues__data) && !th_isnan(*tempValues__data)) {
@@ -297,8 +297,8 @@ void THTensor_(sum)(THTensor *r_, THTensor *t, int dimension, int keepdim)
       THTensor_(zero)(r_);
       THTensor *temp_ = THTensor_(newWithTensor)(r_);
       // r_.expand_as(t)
-      THTensor_setSizeAtDim(temp_, dimension, THTensor_sizeLegacyNoScalars(t, dimension));
-      THTensor_setStrideAtDim(temp_, dimension, 0);
+      temp_->set_size(dimension,THTensor_sizeLegacyNoScalars(t, dimension));
+      temp_->set_stride(dimension, 0);
 
       TH_TENSOR_APPLY2(real, temp_, real, t, *temp__data = *temp__data + *t_data;);
       THTensor_(free)(temp_);
@@ -375,8 +375,8 @@ void THTensor_(prod)(THTensor *r_, THTensor *t, int dimension, int keepdim)
       THTensor_(fill)(r_, 1);
       THTensor *temp_ = THTensor_(newWithTensor)(r_);
       // r_.expand_as(t)
-      THTensor_setSizeAtDim(temp_, dimension, THTensor_sizeLegacyNoScalars(t, dimension));
-      THTensor_setStrideAtDim(temp_, dimension, 0);
+      temp_->set_size(dimension,THTensor_sizeLegacyNoScalars(t, dimension));
+      temp_->set_stride(dimension, 0);
 
       TH_TENSOR_APPLY2(real, temp_, real, t, *temp__data = *temp__data * *t_data;);
       THTensor_(free)(temp_);
@@ -1688,8 +1688,8 @@ void THTensor_(logicalAnd)(THTensor *r_, THTensor *t, int dimension, int keepdim
       THTensor_(fill)(r_, 1);
       THTensor *temp_ = THTensor_(newWithTensor)(r_);
       // r_.expand_as(t)
-      THTensor_setSizeAtDim(temp_, dimension, THTensor_sizeLegacyNoScalars(t, dimension));
-      THTensor_setStrideAtDim(temp_, dimension, 0);
+      temp_->set_size(dimension,THTensor_sizeLegacyNoScalars(t, dimension));
+      temp_->set_stride(dimension, 0);
 
       TH_TENSOR_APPLY2(real, temp_, real, t, *temp__data = *temp__data && *t_data;);
       THTensor_(free)(temp_);
@@ -1764,8 +1764,8 @@ void THTensor_(logicalAny)(THTensor *r_, THTensor *t, int dimension, int keepdim
       THTensor_(zero)(r_);
       THTensor *temp_ = THTensor_(newWithTensor)(r_);
       // r_.expand_as(t)
-      THTensor_setSizeAtDim(temp_, dimension, THTensor_sizeLegacyNoScalars(t, dimension));
-      THTensor_setStrideAtDim(temp_, dimension, 0);
+      temp_->set_size(dimension,THTensor_sizeLegacyNoScalars(t, dimension));
+      temp_->set_stride(dimension, 0);
 
       TH_TENSOR_APPLY2(real, temp_, real, t, *temp__data = *temp__data || *t_data;);
       THTensor_(free)(temp_);

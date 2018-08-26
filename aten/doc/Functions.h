@@ -337,6 +337,7 @@ static inline Tensor & _standard_gamma_out(Tensor & output, const Tensor & self,
 static inline Tensor _standard_gamma(const Tensor & self, Generator * generator=nullptr);
 static inline Tensor & _dirichlet_grad_out(Tensor & output, const Tensor & x, const Tensor & alpha, const Tensor & total);
 static inline Tensor _dirichlet_grad(const Tensor & x, const Tensor & alpha, const Tensor & total);
+static inline Tensor sparse_coo_tensor(const Type& dtype, IntList size);
 static inline Tensor sparse_coo_tensor(const Tensor & indices, const Tensor & values, IntList size);
 static inline Tensor sparse_coo_tensor(const Tensor & indices, const Tensor & values);
 static inline Tensor alias(const Tensor & self);
@@ -1775,6 +1776,9 @@ static inline Tensor & _dirichlet_grad_out(Tensor & output, const Tensor & x, co
 }
 static inline Tensor _dirichlet_grad(const Tensor & x, const Tensor & alpha, const Tensor & total) {
     return infer_type(x)._dirichlet_grad(x, alpha, total);
+}
+static inline Tensor sparse_coo_tensor(const Type& dtype, IntList size) {
+    return dtype.sparse_coo_tensor(dtype, size);
 }
 static inline Tensor sparse_coo_tensor(const Tensor & indices, const Tensor & values, IntList size) {
     return infer_type(values).sparse_coo_tensor(indices, values, size);

@@ -32,8 +32,24 @@ Operation noop(Node* n) {
   return [](Stack& stack) { return 0; };
 }
 
-RegisterOperators reg({
+// using the rules from python_arg_parser FunctionParameter::check
+// tensor cannot have grad set, tensor must be 0 dim,
+// and if the dest is an int the source must be integral type
+void checkImplicitTensorToNum(at::Tensor t, bool toInt) {
+  if (autograd::as_variable_ref(t).requires_grad()) {
+    throw std::runtime_error("Cannot input a tensor that requires grad as a scalar argument");
+  }
+  if (t.sizes().size() != 0) {
+    throw std::runtime_error("Cannot input a tensor of dimension other than 0 as a scalar argument");
+  }
+  if (toInt && !isIntegralType(autograd::as_variable_ref(t).data().type().scalarType())) {
+    std::stringstream ss;
+    ss << "Cannot input a tensor of type " << t.type().scalarType() << " as an integral argument";
+    throw std::runtime_error(ss.str());
+  }
+}
 
+RegisterOperators reg({
     Operator(
         prim::FusionGroup,
         [](Node* node) {
@@ -67,6 +83,29 @@ RegisterOperators reg({
             return [](Stack& stack) {
               at::Tensor a;
               pop(stack, a);
+              at::DeviceGuard guard(a);
+              push(stack, a.toCDouble());
+              return 0;
+            };
+          }
+        }),
+    Operator(
+        prim::ImplicitTensorToNum,
+        [](Node* node) -> Operation {
+          if(node->output()->type() == IntType::get()) {
+            return [](Stack& stack) {
+              at::Tensor a;
+              pop(stack, a);
+              checkImplicitTensorToNum(a, /*to int*/true);
+              at::DeviceGuard guard(a);
+              push(stack, a.toCLong());
+              return 0;
+            };
+          } else {
+            return [](Stack& stack) {
+              at::Tensor a;
+              pop(stack, a);
+              checkImplicitTensorToNum(a, /*to int*/false);
               at::DeviceGuard guard(a);
               push(stack, a.toCDouble());
               return 0;
@@ -208,6 +247,34 @@ RegisterOperators reg({
               stack.push_back(a);
             else
               stack.push_back(a + b);
+            return 0;
+          };
+        }),
+    Operator(
+        prim::TupleUnpack,
+        [](Node* node) {
+          size_t num_elems = node->outputs().size();
+          return [=](Stack& stack) {
+            auto t = pop(stack).toTuple();
+            const auto & elems = t->elements();
+            if (elems.size() != num_elems) {
+              AT_ERROR("Expected a tuple of ", num_elems, " elements, but got ", elems.size());
+            }
+            stack.insert(stack.end(), elems.begin(), elems.end());
+            return 0;
+          };
+        }),
+    Operator(
+        prim::TupleConstruct,
+        [](Node* node) {
+          size_t num_inputs = node->inputs().size();
+          return [=](Stack& stack) {
+            std::vector<IValue> elems {
+              std::make_move_iterator(stack.end() - num_inputs),
+              std::make_move_iterator(stack.end())
+            };
+            drop(stack, num_inputs);
+            push(stack, Tuple::create(std::move(elems)));
             return 0;
           };
         }),

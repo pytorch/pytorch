@@ -74,6 +74,10 @@ struct Shared {
   operator bool() const {
     return pImpl != nullptr;
   }
+
+  template<typename P>
+  TORCH_API friend std::ostream& operator<<(std::ostream& out, const Shared<P> & v);
+
 private:
   PointerType * pImpl;
 };
@@ -95,10 +99,7 @@ struct ConstantString : at::Retainable {
   operator const std::string & () const {
     return string();
   }
-  TORCH_API std::ostream& operator<<(std::ostream & out) const {
-    out << string();
-    return out;
-  }
+  TORCH_API friend std::ostream& operator<<(std::ostream& out, const ConstantString & v);
 };
 
 template<typename T>
@@ -174,11 +175,6 @@ struct IValue {
     JIT_ASSERT(isTensor());
     return at::Tensor(as_tensor_impl, /*retain=*/true);
   }
-  TORCH_API std::ostream& formatTensor(std::ostream& out) const {
-    JIT_ASSERT(isTensor());
-    out << toTensor();
-    return out;
-  }
 
   // Tuple
   IValue(Shared<Tuple> v);
@@ -191,11 +187,6 @@ struct IValue {
     JIT_ASSERT(isTuple());
     return toRetainable<Tuple>();
   }
-  TORCH_API std::ostream& formatTuple(std::ostream& out) const {
-    JIT_ASSERT(isTuple());
-    out << "Tuple"; //TODO
-    return out;
-  }
 
   // Double
   IValue(double d)
@@ -206,11 +197,6 @@ struct IValue {
   double toDouble() const {
     JIT_ASSERT(isDouble());
     return as_double;
-  }
-  TORCH_API std::ostream& formatDouble(std::ostream& out) const {
-    JIT_ASSERT(isDouble());
-    out << as_double;
-    return out;
   }
 
   // Int
@@ -231,12 +217,6 @@ struct IValue {
     JIT_ASSERT(isInt());
     return as_int;
   }
-  TORCH_API std::ostream& formatInt(std::ostream& out) const {
-    JIT_ASSERT(isInt());
-    out << as_int;
-    return out;
-  }
-
 
   // IntList
   IValue(Shared<IntList> v);
@@ -251,11 +231,6 @@ struct IValue {
   Shared<IntList> toIntList() const & {
     JIT_ASSERT(isIntList());
     return toRetainable<IntList>();
-  }
-  TORCH_API std::ostream& formatIntList(std::ostream& out) const {
-    JIT_ASSERT(isIntList());
-    out << "Int List"; //FIXME @eellison toRetainable<IntList>();
-    return out;
   }
 
   const std::vector<int64_t>& toIntListRef() const;
@@ -274,11 +249,6 @@ struct IValue {
     JIT_ASSERT(isString());
     return toRetainable<ConstantString>();
   }
-  TORCH_API std::ostream& formatString(std::ostream& out) const {
-    JIT_ASSERT(isString());
-    out << toRetainable<ConstantString>()->string();
-    return out;
-  }
 
   // DoubleList
   IValue(Shared<DoubleList> v);
@@ -292,12 +262,6 @@ struct IValue {
     JIT_ASSERT(isDoubleList());
     return toRetainable<DoubleList>();
   }
-  TORCH_API std::ostream& formatDoubleList(std::ostream& out) const {
-    JIT_ASSERT(isDoubleList());
-    out << "Double List"; //FIXME @eellison toRetainable<IntList>();
-    return  out;
-  }
-
 
   //TensorList
   IValue(Shared<TensorList> v);
@@ -311,21 +275,14 @@ struct IValue {
     JIT_ASSERT(isTensorList());
     return toRetainable<TensorList>();
   }
-  TORCH_API std::ostream& formatTensorList(std::ostream& out) const {
-    JIT_ASSERT(isTensorList());
-    out << "Tensor List"; //FIXME @eellison toRetainable<TensorList>();
-    return out;
-  }
 
   // None
   bool isNone() {
     return Tag::None == tag;
   }
-  std::ostream& formatNone(std::ostream& out) const {
-    out << "None";
-    return out;
+  std::string toNone() const {
+    return "None";
   }
-
   // Scalar, which gets encoded as either an Int or a Double
   IValue(at::Scalar s)
   : IValue() {
@@ -440,7 +397,6 @@ DEFINE_TO(std::vector<int64_t>, toIntListRef)
 DEFINE_TO(std::vector<double>, toDoubleListRef)
 DEFINE_TO(std::vector<at::Tensor>, toTensorListRef)
 
-
 #undef DEFINE_TO
 
 // non-mutable list
@@ -461,6 +417,9 @@ struct ConstantList : at::Retainable {
   operator const std::vector<Elem>&() const {
     return elements();
   }
+
+  template<typename E>
+  TORCH_API friend std::ostream& operator<<(std::ostream& out, const ConstantList<E> & v);
 };
 
 

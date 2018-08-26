@@ -665,6 +665,7 @@ struct AT_API Type {
   virtual Tensor tensor(IntList size) const;
   virtual Tensor tensor(IntList size, IntList stride) const;
   virtual Tensor tensor() const;
+  virtual Tensor sparse_coo_tensor(IntList size) const;
   virtual Tensor sparse_coo_tensor(const Tensor & indices, const Tensor & values, IntList size) const;
   virtual Tensor sparse_coo_tensor(const Tensor & indices, const Tensor & values) const;
   virtual Tensor alias(const Tensor & self) const;
@@ -672,7 +673,8 @@ struct AT_API Type {
   virtual Tensor & as_strided_out(Tensor & result, const Tensor & self, IntList size, IntList stride, int64_t storage_offset=-1) const;
   virtual Tensor as_strided(const Tensor & self, IntList size, IntList stride, int64_t storage_offset=-1) const;
   virtual Tensor & as_strided_(Tensor & self, IntList size, IntList stride, int64_t storage_offset=-1) const;
-  virtual Tensor & sparse_raw_resize_(Tensor & self, IntList size, int64_t nDimI, int64_t nDimV) const;
+  virtual Tensor & sparse_resize_(Tensor & self, IntList size, int64_t nDimI, int64_t nDimV) const;
+  virtual Tensor & sparse_resize_and_clear_(Tensor & self, IntList size, int64_t nDimI, int64_t nDimV) const;
   virtual Tensor & _cat_out(Tensor & self, TensorList tensors, int64_t dim=0) const;
   virtual Tensor _cat(TensorList tensors, int64_t dim=0) const;
   virtual Tensor & reshape_(Tensor & self, IntList size, IntList stride) const;

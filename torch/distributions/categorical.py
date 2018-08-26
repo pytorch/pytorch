@@ -93,11 +93,10 @@ class Categorical(Distribution):
     def log_prob(self, value):
         if self._validate_args:
             self._validate_sample(value)
-        value_shape = torch._C._infer_size(value.size(), self.batch_shape) if self.batch_shape else value.size()
-        param_shape = value_shape + (self._num_events,)
-        value = value.expand(value_shape)
-        log_pmf = self.logits.expand(param_shape)
-        return log_pmf.gather(-1, value.unsqueeze(-1).long()).squeeze(-1)
+        value = value.long().unsqueeze(-1)
+        value, log_pmf = torch.broadcast_tensors(value, self.logits)
+        value = value[..., :1]
+        return log_pmf.gather(-1, value).squeeze(-1)
 
     def entropy(self):
         p_log_p = self.logits * self.probs

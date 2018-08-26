@@ -402,7 +402,8 @@ struct Tensor : public detail::TensorBase {
   Tensor & _copy_ignoring_overlaps_(const Tensor & src);
   Tensor as_strided(IntList size, IntList stride, int64_t storage_offset=-1) const;
   Tensor & as_strided_(IntList size, IntList stride, int64_t storage_offset=-1);
-  Tensor & sparse_raw_resize_(IntList size, int64_t nDimI, int64_t nDimV);
+  Tensor & sparse_resize_(IntList size, int64_t nDimI, int64_t nDimV);
+  Tensor & sparse_resize_and_clear_(IntList size, int64_t nDimI, int64_t nDimV);
   Tensor & reshape_(IntList size, IntList stride);
   Tensor _sparse_mask(SparseTensor mask) const;
   Tensor to_dense() const;
