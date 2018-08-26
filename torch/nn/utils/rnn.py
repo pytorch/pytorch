@@ -156,7 +156,7 @@ def _symbolic_pack_padded_sequence(g, input, lengths, batch_first=False, padding
     def _onnx_symbolic_pack_padded_sequence(g, input, lengths):
         if batch_first:
             input = g.op('Transpose', input, perm_i=[1, 0, 2])
-        if lengths.type().kind() != 'TensorType':
+        if not lengths.type().isSubtypeOf(torch._C.DynamicType.get()):
             raise RuntimeError("Lengths must be a Tensor for ONNX export")
         # We know it's a TensorType so this check is now safe.
         if lengths.type().scalarType() != 'Int':
