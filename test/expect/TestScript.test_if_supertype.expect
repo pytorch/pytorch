@@ -1,8 +1,8 @@
-graph(%y.1 : Float(2, 2)
-      %z.2 : Long(2, 4)
-      %z.1 : Float(2, 4)) {
+graph(%y.1 : Float(*, *)
+      %z.2 : Long(*, *)
+      %z.1 : Float(*, *)) {
   %3 : int = prim::Constant[value=1]()
-  %x : Float(2, 2), %y : Dynamic, %z : Dynamic = prim::If(%3)
+  %x : Float(*, *), %y : Dynamic, %z : Dynamic = prim::If(%3)
     block0() {
       -> (%y.1, %z.2, %z.1)
     }

@@ -71,6 +71,7 @@ inline IValue toIValue(py::handle obj, const TypePtr& type) {
     switch (type->kind()) {
       case TypeKind::DynamicType:
       case TypeKind::TensorType:
+      case TypeKind::CompleteTensorType:
         return py::cast<autograd::Variable>(obj);
       case TypeKind::FloatType:
         return py::cast<double>(obj);
