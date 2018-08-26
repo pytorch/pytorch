@@ -598,7 +598,7 @@ def adaptive_max_pool2d(g, input, output_size):
 
 
 @parse_args('v', 'is')
-def reflection_pad(g, input, padding):
+def constant_pad_nd(g, input, padding):
     from torch.autograd._functions.utils import prepare_onnx_paddings
     mode = "constant"
     paddings = prepare_onnx_paddings(len(input.type().sizes()), padding)
