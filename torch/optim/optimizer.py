@@ -46,6 +46,7 @@ class Optimizer(object):
         return {
             'state': self.state,
             'param_groups': self.param_groups,
+            'defaults': self.defaults,
         }
 
     def __setstate__(self, state):
