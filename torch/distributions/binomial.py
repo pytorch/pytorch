@@ -7,9 +7,9 @@ from torch.distributions.utils import broadcast_all, probs_to_logits, lazy_prope
 
 class Binomial(Distribution):
     r"""
-    Creates a Binomial distribution parameterized by `total_count` and
-    either `probs` or `logits` (but not both). `total_count` must be
-    broadcastable with `probs`/`logits`.
+    Creates a Binomial distribution parameterized by :attr:`total_count` and
+    either :attr:`probs` or :attr:`logits` (but not both). :attr:`total_count` must be
+    broadcastable with :attr:`probs`/:attr:`logits`.
 
     Example::
 
