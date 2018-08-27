@@ -64,7 +64,7 @@ FROM_IVALUE = {
     'ScalarType': '{}.to<at::ScalarType>()',
     'Tensor': '{}.toTensor()',
     'TensorList': '{}.toTensorList()->elements()',
-    'bool': 'bool({}.toInt())',
+    'bool': '{}.toBool()',
     'double': '{}.toDouble()',
     'int64_t': '{}.toInt()',
     'std::string': '{}.toString()->string()',

@@ -57,7 +57,7 @@ struct SchemaParser {
       {"str", StringType::get() },
       {"float", FloatType::get() },
       {"int", IntType::get() },
-      {"bool", IntType::get() }, // TODO: add separate bool type
+      {"bool", BoolType::get() },
     };
     auto tok = L.expect(TK_IDENT);
     auto text = tok.text();
@@ -155,6 +155,10 @@ struct SchemaParser {
           return fmap(vs, [](IValue v) {
             return v.toInt();
           });
+        case TypeKind::BoolType:
+          return fmap(vs, [](IValue v) {
+            return v.toBool();
+          });
         default:
           throw ErrorReport(range) << "lists are only supported for float or int types.";
       }
@@ -184,6 +188,7 @@ struct SchemaParser {
       }  break;
       case TypeKind::NumberType:
       case TypeKind::IntType:
+      case TypeKind::BoolType:
       case TypeKind::FloatType:
         arg.default_value = parseSingleConstant(arg.type->kind());
         break;
@@ -377,7 +382,7 @@ bool Operator::matches(const Node* node) const {
 std::shared_ptr<Operator> findOperatorFor(const Node* node) {
   const auto& candidates = getAllOperatorsFor(node->kind());
   for(const auto& candidate : candidates) {
-    if(candidate->matches(node)) {
+    if (candidate->matches(node)) {
       return candidate;
     }
   }

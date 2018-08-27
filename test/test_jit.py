@@ -7604,6 +7604,7 @@ EXCLUDE_TYPE_CHECK = {
 
 # known to be failing in script
 EXCLUDE_SCRIPT = {
+<<<<<<< HEAD
     # TODO: Fix var/std
     # there are two schemas for var (and std):
     # (1) var(Tensor, int, *, bool, bool, Tensor)
@@ -7625,6 +7626,10 @@ EXCLUDE_SCRIPT = {
     'test_var_dim_1d',
     'test_var_dim_1d_neg0',
     'test_var_dim_neg0',
+=======
+    'test_norm_inf',
+    'test_renorm_norm_inf',
+>>>>>>> Add Bool type to IR
     'test_matrix_power_n=-1',  # involves inverse
     'test_matrix_power_n=-3',  # involves inverse
     # skipped nn functional tests

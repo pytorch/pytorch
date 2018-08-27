@@ -106,6 +106,8 @@ inline IValue toIValue(py::handle obj, const TypePtr& type) {
         return py::cast<int64_t>(obj);
       case TypeKind::NoneType:
         return {};
+      case TypeKind::BoolType:
+        return py::cast<bool>(obj);
       case TypeKind::TupleType: {
         if(!PyTuple_Check(obj.ptr()))
           throw py::cast_error(); // note: the py::cast does not throw cast_error
