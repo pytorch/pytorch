@@ -2,6 +2,7 @@
 #include "THCHalf.h"
 #include "THCHalfAutoNumerics.cuh"
 #include <THC/THCApply.cuh>
+#include <ATen/core/optional.h>
 
 template <typename T>
 struct absupdateOutput_functor
