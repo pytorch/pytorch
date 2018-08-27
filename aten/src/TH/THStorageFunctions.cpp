@@ -29,7 +29,7 @@ void THStorage_free(THStorage* storage) {
   if (!storage) {
     return;
   }
-  storage->_raw_decref();
+  c10::raw::intrusive_ptr::decref(storage);
 }
 
 ptrdiff_t THStorage_size(const THStorage *self)
@@ -40,7 +40,7 @@ ptrdiff_t THStorage_size(const THStorage *self)
 void THStorage_retain(THStorage *storage)
 {
   if (storage) {
-    storage->_raw_incref();
+    c10::raw::intrusive_ptr::incref(storage);
   }
 }
 

@@ -48,5 +48,5 @@ TEST_CASE( "undefined tensor test", "[]" ) {
   Tensor to_move = ones({1}, CPU(kFloat));
   Tensor m(std::move(to_move));
   REQUIRE(!to_move.defined());
-  REQUIRE(to_move.get() == UndefinedTensor::singleton());
+  REQUIRE(to_move.unsafeGetTensorImpl() == UndefinedTensor::singleton());
 }

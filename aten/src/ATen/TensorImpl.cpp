@@ -56,7 +56,7 @@ void Tensor::backward(
     at::optional<Tensor> gradient,
     bool keep_graph,
     bool create_graph) {
-  pImpl->backward(std::move(gradient), keep_graph, create_graph);
+  tensor_impl_->backward(std::move(gradient), keep_graph, create_graph);
 }
 
 TensorImpl::TensorImpl(TensorTypeId type_id, ScalarType scalar_type, bool is_variable)
@@ -137,7 +137,7 @@ TensorImpl* TensorImpl::maybe_zero_dim(bool condition_when_zero_dim) {
   return this;
 }
 
-const Storage& TensorImpl::storage() {
+const Storage& TensorImpl::storage() const {
   return storage_;
 }
 
