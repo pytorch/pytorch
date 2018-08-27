@@ -30,10 +30,10 @@ Tensor constant_pad_nd(const Tensor& self, IntList pad, Scalar value) {
     for (int i = l_diff; i < l_inp; i++) {
         auto pad_idx = pad.size() - (i - l_diff + 1) * 2;
         if (pad[pad_idx] < 0) {
-            c_input = c_input.narrow(i, -pad[pad_idx], c_input.sizes()[i] + pad[pad_idx]);
+            c_input = c_input.narrow(i, -pad[pad_idx], c_input.size(i) + pad[pad_idx]);
         }
         if (pad[pad_idx + 1] < 0) {
-            c_input = c_input.narrow(i, 0, c_input.sizes()[i] + pad[pad_idx + 1]);
+            c_input = c_input.narrow(i, 0, c_input.size(i) + pad[pad_idx + 1]);
         }
     }
 
@@ -41,10 +41,10 @@ Tensor constant_pad_nd(const Tensor& self, IntList pad, Scalar value) {
     for (int i = l_diff; i < l_inp; i++) {
         auto pad_idx = pad.size() - (i - l_diff + 1) * 2;
         if (pad[pad_idx] > 0) {
-            c_output = c_output.narrow(i, pad[pad_idx], c_output.sizes()[i] - pad[pad_idx]);
+            c_output = c_output.narrow(i, pad[pad_idx], c_output.size(i) - pad[pad_idx]);
         }
         if (pad[pad_idx + 1] > 0) {
-            c_output = c_output.narrow(i, 0, c_output.sizes()[i] - pad[pad_idx + 1]);
+            c_output = c_output.narrow(i, 0, c_output.size(i) - pad[pad_idx + 1]);
         }
     }
     c_output.copy_(c_input);
