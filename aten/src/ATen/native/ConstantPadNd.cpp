@@ -2,9 +2,9 @@
 
 namespace at { namespace native {
 
-Tensor constant_pad_nd(const Tensor& input, IntList pad, Scalar value) {
-    auto input_sizes = input.sizes();
-    auto l_inp = input.dim();
+Tensor constant_pad_nd(const Tensor& self, IntList pad, Scalar value) {
+    auto input_sizes = self.sizes();
+    auto l_inp = self.dim();
 
     auto l_pad = pad.size() / 2;
     auto l_diff = l_inp - l_pad;
@@ -23,10 +23,10 @@ Tensor constant_pad_nd(const Tensor& input, IntList pad, Scalar value) {
         new_shape.push_back(new_dim);
     }
 
-    auto output = at::empty(new_shape, input.options());
+    auto output = at::empty(new_shape, self.options());
     output.fill_(value);
 
-    auto c_input = input;
+    auto c_input = self;
     for (int i = l_diff; i < l_inp; i++) {
         auto pad_idx = pad.size() - (i - l_diff + 1) * 2;
         if (pad[pad_idx] < 0) {
