@@ -18,7 +18,7 @@ namespace at {
 
 struct Type;
 
-struct AT_API StorageImpl : public c10::raw_intrusive_ptr_target<StorageImpl> {
+struct AT_API StorageImpl : public c10::intrusive_ptr_target {
  public:
   StorageImpl() = delete;
   virtual ~StorageImpl() {};

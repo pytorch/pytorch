@@ -57,7 +57,7 @@ public:
 
   int64_t dim() const override;
   TensorImpl* maybe_zero_dim(bool condition_when_zero_dim) override;
-  const Storage& storage() override;
+  const Storage& storage() const override;
   int64_t storage_offset() const override;
 
   // WARNING: This function does NOT preserve invariants of sparseDims/denseDims with

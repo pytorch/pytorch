@@ -40,7 +40,7 @@ struct TORCH_API TracingState : public std::enable_shared_from_this<TracingState
 
   struct WeakTensorEq {
     bool operator()(const WeakTensor& t1, const WeakTensor& t2) const {
-      return t1.unsafeGetTensorImpl() == t2.unsafeGetTensorImpl();
+      return t1.is_same(t2);
     }
   };
 
