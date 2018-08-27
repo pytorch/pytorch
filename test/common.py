@@ -77,9 +77,11 @@ def _check_module_exists(name, min_version=None):
         return True
     return parse_version(m.__version__) >= parse_version(min_version)
 
+# see librosa/librosa#729.
 TEST_NUMPY = _check_module_exists('numpy', '1.14.0')
 TEST_SCIPY = _check_module_exists('scipy', '1.0.0')
-TEST_LIBROSA = _check_module_exists('librosa', '0.6.2')
+# On Py2, importing librosa 0.6.1 triggers a TypeError (if using newest joblib)
+TEST_LIBROSA = PY3 and _check_module_exists('librosa')
 TEST_MKL = torch.backends.mkl.is_available()
 
 NO_MULTIPROCESSING_SPAWN = os.environ.get('NO_MULTIPROCESSING_SPAWN', '0') == '1'
