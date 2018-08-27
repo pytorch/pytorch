@@ -13,14 +13,14 @@ Tensor constant_pad_nd(const Tensor& self, IntList pad, Scalar value) {
     std::vector<int64_t> new_shape;
 
     for (int i = 0; i < l_diff; i ++) {
-        new_shape.push_back(input_sizes[i]);
+        new_shape.emplace_back(input_sizes[i]);
     }
 
     for (int i = 0; i < l_pad; i++) {
         auto pad_idx = pad.size() - ((i + 1) * 2);
         auto new_dim = input_sizes[l_diff + i] + pad[pad_idx] + pad[pad_idx + 1];
         AT_CHECK(new_dim > 0, "input is too small");
-        new_shape.push_back(new_dim);
+        new_shape.emplace_back(new_dim);
     }
 
     auto output = at::empty(new_shape, self.options());
