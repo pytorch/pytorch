@@ -56,12 +56,6 @@ PY35 = sys.version_info >= (3, 5)
 WINDOWS = sys.platform == 'win32'
 
 
-# TODO: Replace all uses of this function with the literal "0" when the jit
-# is able to support returning numbers (as opposed to only Tensors)
-def FIXME_zerol():
-    return torch.tensor([0])
-
-
 def LSTMCellF(input, hx, cx, *params):
     return LSTMCell(input, (hx, cx), *params)
 
@@ -592,6 +586,22 @@ class TestJit(JitTestCase):
         self.assertTrue(torch.all(out2 >= 0))
         self.assertTrue(torch.all(out2 < 1))
 
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    def test_fusion_arg_configurations(self):
+        # A smoke test to make sure we won't use the same kernel for contiguous
+        # and non-contiguous arguments.
+        # TODO: add optionally enabled debug counters to the fuser to verify
+        #       that we really can tell the difference between configurations
+        def f(x, y):
+            z1, z2 = (x + y).chunk(2, dim=1)
+            return z1 * z2
+
+        x = torch.randn(4, 4, dtype=torch.float, device='cuda')
+        y = torch.randn(4, 4, dtype=torch.float, device='cuda')
+        traced_f = torch.jit.trace(x, y)(f)
+        self.assertEqual(traced_f(x.t().contiguous(), y), traced_f(x.t(), y))
+
     @staticmethod
     def fn_test_comparison_gt_lt(x, y):
         mask = (x > 0).type_as(x)
@@ -788,7 +798,7 @@ class TestJit(JitTestCase):
         y = torch.randn(4, 1, 8, 5, requires_grad=True)
 
         graph = torch.jit.script(broadcast).graph
-        torch._C._jit_pass_shape_analysis(graph, (x, y), False)
+        torch._C._jit_pass_complete_shape_analysis(graph, (x, y), False)
         self.assertExpectedGraph(graph)
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
@@ -1329,7 +1339,7 @@ class TestJit(JitTestCase):
     def test_constant_prop_print(self):
         @torch.jit.script
         def constant_prop(input_tensor):
-            a = 2 * 3 + FIXME_zerol()
+            a = 2 * 3
             print(a)
             b = a + 2
             return b + input_tensor
@@ -2140,6 +2150,135 @@ a")
         x = torch.rand(10, dtype=torch.float, requires_grad=True)
         self.checkScript(func, [x], optimize=True)
 
+    def test_index(self):
+        def consec(size, start=0):
+            numel = torch.tensor(size).prod().item()
+            return torch.arange(numel).view(size)
+
+        def check_code(code_str, fn_name, inputs):
+            scope = {}
+            exec(code_str, globals(), scope)
+            cu = torch.jit.CompilationUnit(code_str)
+            self.assertEqual(cu.func(*inputs), scope['func'](*inputs))
+
+        def check_indexing(indexing, tensor):
+            template = dedent("""
+            def func(x):
+                return x{}
+            """)
+
+            check_code(template.format(indexing), "func", [tensor])
+
+        def check_dynamic_indexing(indexing, tensor, value1, value2):
+            value1 = torch.tensor(value1)
+            value2 = torch.tensor(value2)
+
+            template = dedent("""
+            def func(x, value1, value2):
+                i = int(value1)
+                j = int(value2)
+                return x{}
+            """)
+
+            check_code(template.format(indexing), "func", [tensor, value1, value2])
+
+        # basic slices
+        check_indexing('[0]', consec((3, 3)))
+        check_indexing('[1]', consec((3, 3), 10))
+        check_indexing('[2]', consec((3, 3), 19))
+        check_indexing('[2]', consec((3,)))
+        check_indexing('[-1]', consec((3, 3), 19))
+        check_indexing('[0:2]', consec((3, 3, 3)))
+        check_indexing('[1:-1]', consec((3, 3, 3)))
+        check_indexing('[-3:-1]', consec((6, 3)))
+        check_indexing('[1:]', consec((3, 3)))
+        check_indexing('[:1]', consec((3, 3)))
+        check_indexing('[:]', consec((3, 2)))
+
+        # multi-dim: indexes
+        check_indexing('[0, 1]', consec((3, 3)))
+        check_indexing('[0, 1]', consec((3, 3, 2)))
+        check_indexing('[1, 0, 2]', consec((3, 3, 3)))
+        check_indexing('[2, -1]', consec((3, 3)))
+
+        # multi-dim: mixed slicing and indexing
+        check_indexing('[0, 1:2]', consec((3, 3)))
+        check_indexing('[0, :1]', consec((3, 3, 2)))
+        check_indexing('[1, 2:]', consec((3, 3, 3)))
+        check_indexing('[-1, 1:, 0]', consec((3, 3, 3, 3)))
+        check_indexing('[1:, -1, 0]', consec((3, 3, 3, 3)))
+        check_indexing('[-1, 2:, 1:2]', consec((3, 3, 3, 3)))
+        check_indexing('[-1, 1:, 0]', consec((3, 3, 3, 3)))
+        check_indexing('[-1, :, 0, 2]', consec((3, 3, 3, 3)))
+
+        # zero-sized slices
+        check_indexing('[0:0]', consec((2, 2)))
+        check_indexing('[0:0, 1]', consec((3, 3)))
+
+        # trivial expression usage
+        check_indexing('[1+1]', consec((3, 3)))
+        check_indexing('[1:(0 + 2)]', consec((3, 3, 3)))
+
+        # dynamic expression usage
+        check_dynamic_indexing("[i + j]", consec((3, 3)), 0, 1)
+        check_dynamic_indexing("[i:j, i]", consec((3, 3, 2)), 0, 2)
+
+    def test_method_on_number(self):
+        def func():
+            c = 1
+            return c.add(1)
+        with self.assertRaisesRegex(RuntimeError, 'Cannot call methods on numbers'):
+                    torch.jit.script(func)
+
+    # testing implicit conversion of tensors to scalars to match function arguments
+    def test_scalar_to_num_conversions(self):
+        @torch.jit.script
+        def multiple_defs(x):
+            c = 1
+            x = x + c
+            return x
+
+        self.assertTrue("ImplicitTensorToNum" not in str(multiple_defs.graph))
+
+        @torch.jit.script
+        def tensor_to_int_script(x, tensor):
+            return x.unsqueeze(tensor)
+
+        def tensor_to_int(x, tensor):
+            return x.unsqueeze(tensor)
+
+        @torch.jit.script
+        def tensor_to_float_script(x, tensor):
+            return x.addcmul(tensor, tensor, value=tensor)
+
+        def tensor_to_float(x, tensor):
+            return x.addcmul(tensor, tensor, value=tensor)
+
+        x = torch.zeros(10)
+        # float tensor, float tensor with grad, int tensor (can't set grad on int tensor)
+        tensors = [torch.tensor(1.1),
+                   torch.tensor(1.1, requires_grad=True),
+                   torch.tensor(0),
+                   torch.tensor([2])]
+
+        script_funs = [tensor_to_int_script, tensor_to_float_script]
+        funs = [tensor_to_int, tensor_to_float]
+
+        # return the result, or whether exception was thrown
+        def test_func(func, x, tensor):
+            try:
+                result = func(x, tensor)
+            except RuntimeError as e:
+                result = True
+            except TypeError as e:
+                result = True
+            return result
+
+        # assert result or exception equal for each (function, inputs)
+        for tensor in tensors:
+            for i in range(len(script_funs)):
+                self.assertEqual(test_func(script_funs[i], x, tensor), test_func(funs[i], x, tensor))
+
     def test_keyword(self):
         @torch.jit.script
         def func(x):
@@ -2298,10 +2437,13 @@ a")
         x = torch.rand(10, dtype=torch.float, requires_grad=True)
         self.assertEqual(func(x), torch.cat((x, x), dim=0))
 
-        with self.assertRaisesRegex(RuntimeError, "expected a value of type int"):
-            @torch.jit.script
-            def func(x):
-                return torch.cat((x, x), x, dim=0)
+        @torch.jit.script
+        def func2(x, y):
+            return torch.cat((x, x), y)
+
+        x = torch.rand([2, 2])
+        y = torch.tensor(1)
+        self.assertEqual(func2(x, y), torch.cat((x, x), y))
 
     def test_cat_lifts(self):
         @torch.jit.script
@@ -2697,20 +2839,19 @@ a")
 
             st = second + third
             fs = first + second
-            zero = FIXME_zerol()
-            return third + zero, st + zero, fs + zero
+            return third, st, fs
 
         inputs = self._make_scalar_vars([10], torch.int64)
         self.checkScript(func, inputs, optimize=True)
 
     def test_if(self):
         def func(a, b):
-            zero = FIXME_zerol()
+            # type: (int, int) -> int
             d = 3
             if a > 10:
-                a = zero + 3 + d
+                a = 3 + d
             else:
-                b = zero + 3 + d
+                b = 3 + d
                 d = 4
             c = a + b
             return c
@@ -2720,13 +2861,14 @@ a")
 
     def test_if_for_in_range(self):
         def func(a, b):
-            d = FIXME_zerol() + 3
+            # type: (int, int) -> int
+            d = 3
             for _ in range(20):
                 if a > 10:
                     a = 3 + d
                 else:
                     b = 3 + d
-                    d = FIXME_zerol() + 4
+                    d = 4
                 c = a + b
             return d
         inputs = self._make_scalar_vars([1, -1], torch.int64)
@@ -2774,7 +2916,8 @@ a")
 
     def test_while_nest_if(self):
         def func(a, b):
-            c = FIXME_zerol()
+            # type: (int, int) -> int
+            c = 0
             while a < 10:
                 a = a + 1
                 b = b + 1
@@ -2809,14 +2952,10 @@ a")
         # Test that the numbers are casted to tensor,
         # added, and then casted back.
         def fn1(x):
-            c = 7 + 8
-            # FIXME: return number instead of tensor
-            return torch.full([1], c)
+            return 7 + 8
 
         def fn2(x):
-            c = 1.1 + 3.1
-            # FIXME: return number instead of tensor
-            return torch.full([1], c)
+            return 1.1 + 3.1
 
         graph1 = torch.jit.script(fn1).graph
         self.assertExpectedGraph(graph1, subname="int")
@@ -2825,7 +2964,8 @@ a")
 
     def test_if_nest_while(self):
         def func(a, b):
-            c = FIXME_zerol()
+            # type: (int, int) -> int
+            c = 0
             if a > b:
                 while a > b:
                     b = b + 1
@@ -2837,7 +2977,7 @@ a")
 
     def test_script_for_in_range(self):
         def fn():
-            c = FIXME_zerol()
+            c = 0
             for i in range(100):
                 c += i
             return c
@@ -2845,11 +2985,9 @@ a")
 
     def test_script_for_in_range_dynamic(self):
         def fn():
-            c = FIXME_zerol()
+            c = 0
             for i in range(100):
-                # FIXME: i should really be IntType and not DynamicType in the frontend
-                # In addition, i should be a scalar tensor (it has size (1,) atm)
-                acc = FIXME_zerol()
+                acc = 0
                 for j in range(i):
                     acc += j
                 c += acc
@@ -2859,9 +2997,9 @@ a")
     def test_script_for_in_range_ast(self):
         @torch.jit.script
         def test_script_for_in_range_ast():
-            c = FIXME_zerol()
+            c = 0
             for i in range(100):
-                acc = FIXME_zerol()
+                acc = 0
                 for j in range(i):
                     acc += j
                 c += acc
@@ -2872,7 +3010,7 @@ a")
     def test_script_for_in_range_if_ast(self):
         @torch.jit.script
         def test_script_for_in_range_if_ast(x):
-            output = FIXME_zerol()
+            output = x
             for i in range(20):
                 if i == 0:
                     output = x.unsqueeze(0)
@@ -2928,7 +3066,7 @@ a")
     def test_print(self):
         def func(x, y):
             q = (x + y).sigmoid()
-            print(q)
+            print(q, 1, 2, [1, 2], [1.0, 2.0])
             w = -q
             return w * w
 
@@ -3012,29 +3150,21 @@ a")
                 return x << y
 
     def test_number_math(self):
-        template = ('''
-# int, int -> int
-def func1():
-    c = 8 {op} 2
-    # FIXME: return number instead of tensor
-    return torch.full([1], c)
+        template = dedent('''
+        # int, int -> int
+        def func1():
+            return 8 {op} 2
 
-def func2():
-    c = 2 {op} 2
-    # FIXME: return number instead of tensor
-    return torch.full([1], c)
+        def func2():
+            return 2 {op} 2
 
-# float, float -> float
-def func3():
-    c = 3.14 {op} 0.125
-    # FIXME: return number instead of tensor
-    return torch.full([1], c)
+        # float, float -> float
+        def func3():
+            return 3.14 {op} 0.125
 
-def func4():
-    c = 3.14 {op} 3.14
-    # FIXME: return number instead of tensor
-    return torch.full([1], c)
-''')
+        def func4():
+            return 3.14 {op} 3.14
+        ''')
         ops = ['+', '-', '*', '<', '<=', '>', '>=', '==', '!=']
         # TODO: turn this on for py3 (and add PY3 division semantics)
         ops_py2_only = ['/']
@@ -3063,24 +3193,20 @@ def func4():
     def test_number_neg(self):
         # int -> int
         def func1():
-            c = -8
-            # FIXME: return number instead of tensor
-            return torch.full([1], c)
+            return -8
 
         # float -> float
         def func2():
-            c = -3.14
-            # FIXME: return number instead of tensor
-            return torch.full([1], c)
+            return -3.14
 
         self.checkScript(func1, (), optimize=True)
         self.checkScript(func2, (), optimize=True)
 
     def _test_tensor_number_math(self, device='cpu'):
-        template = ('''
-def func(t):
-    return {lhs} {op} {rhs}
-''')
+        template = dedent('''
+        def func(t):
+            return {lhs} {op} {rhs}
+        ''')
 
         def test(op, const, swap_args):
             args = ('t', const)
@@ -3422,7 +3548,7 @@ def func(t):
 
             @torch.jit.script_method
             def forward(self):
-                sum = FIXME_zerol()
+                sum = 0
                 for i in self.b:
                     sum += i
                 return sum
@@ -3790,8 +3916,7 @@ def func(t):
 
         @torch.jit.script
         def return3():
-            # FIXME: use number instead of tensor
-            return torch.full([1], 1), torch.full([1], 2), torch.full([1], 3)
+            return 1, 2, 3
 
         with self.assertRaisesRegex(RuntimeError, "too many values to unpack"):
             @torch.jit.script
@@ -3935,9 +4060,8 @@ def func(t):
             return torch.cat(c)
 
         b = torch.zeros(2, 4)
-        # unrelated bug
-        with self.assertRaisesRegex(RuntimeError, ".*"):
-            test_list.graph.propagate_shapes((b,), False)
+        test_list.graph.propagate_shapes((b,), False)
+        self.assertExpected(canonical(test_list.graph))
 
     def test_if_supertype(self):
         @torch.jit.script
@@ -4167,14 +4291,14 @@ def func(t):
                 b = 1
             else:
                 b = 0
-            return FIXME_zerol() + (b + 1)
+            return b + 1
 
         @torch.jit.script
         def foo2(a):
             b = 0
             if a == 0:
                 b = 1
-            return FIXME_zerol() + (b + 1)
+            return b + 1
 
         @torch.jit.script
         def foo3(a):
@@ -4183,7 +4307,7 @@ def func(t):
                 c = 4
             else:
                 b = 0
-            return FIXME_zerol() + (b + 1)
+            return b + 1
 
         a = torch.ones(1, dtype=torch.long)
         b = torch.zeros(1, dtype=torch.long)
@@ -4479,10 +4603,9 @@ def func(t):
 
         @torch.jit.script
         def bar(x):
-            y = foo(x)
+            y = int(foo(x))
             if True:
-                # FIXME: use number instead of tensor
-                y = torch.full([1], 7)
+                y = 7
             return y + 1
 
         self.assertEqual(8, bar(torch.ones(1, 1)))
@@ -4495,7 +4618,7 @@ def func(t):
 
         a = torch.zeros(2, 2)
         b = torch.zeros(4, dtype=torch.long)
-        foo.graph.propagate_shapes((a, b), False)
+        torch._C._jit_pass_complete_shape_analysis(foo.graph, (a, b), False)
         self.assertExpected(canonical(foo.graph))
 
     def test_onnx_export_speculate(self):
@@ -4817,7 +4940,7 @@ def func(t):
 
     def test_loop_unrolling(self):
         def fn(x):
-            y = FIXME_zerol()
+            y = 0
             for i in range(int(x)):
                 y += i
             return y
@@ -4829,13 +4952,13 @@ def func(t):
 
     def test_loop_unrolling_const(self):
         def fn():
-            y = FIXME_zerol()
+            y = 0
             for i in range(10):
                 y += 1
             return y
 
         def fn2():
-            y = FIXME_zerol()
+            y = 0
             for i in range(10):
                 y += i
             return y
@@ -4851,7 +4974,7 @@ def func(t):
 
     def test_loop_unrolling_nested(self):
         def fn(x):
-            y = FIXME_zerol()
+            y = 0
             for i in range(10):
                 for j in range(int(x)):
                     y += j
@@ -4864,7 +4987,7 @@ def func(t):
 
     def test_loop_unroll_unused_counter(self):
         def fn(x):
-            y = FIXME_zerol()
+            y = 0
             for i in range(int(x)):
                 y += 1
             return y
@@ -4875,7 +4998,7 @@ def func(t):
 
     def test_loop_unroll_negative(self):
         def fn(x):
-            y = FIXME_zerol()
+            y = 0
             for i in range(int(x)):
                 y += 1
             return y

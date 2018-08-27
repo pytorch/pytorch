@@ -461,7 +461,8 @@ Value* tryMatchArgument(
     Graph& graph,
     const SourceRange& loc,
     const NamedValue& named_value,
-    std::function<std::ostream&()> err) {
+    std::function<std::ostream&()> err,
+    bool convert_tensors_to_nums) {
   Value* value = named_value.value(graph);
 
   // some functions that take lists of integers for fixed size arrays
@@ -487,6 +488,15 @@ Value* tryMatchArgument(
       value = graph.insertNode(graph.createUndefined())->output();
   }
 
+  //implicit conversion of tensors to scalars
+  if(convert_tensors_to_nums && arg.type->isSubtypeOf(NumberType::get())
+      && value->type()->isSubtypeOf(DynamicType::get())) {
+      auto n = graph.createImplicitTensorToNum(arg.type, value);
+      value = graph.insertNode(n)
+        ->setSourceLocation(std::make_shared<SourceRange>(loc))
+        ->output();
+  }
+
   if(!value->type()->isSubtypeOf(arg.type)) {
     err() << "expected a value of type " << arg.type->str() << " for argument '" << arg.name << "' but found "
           << value->type()->str() << "\n"
@@ -509,11 +519,12 @@ Value* tryCreateList(
     Graph& graph,
     const SourceRange& loc,
     at::ArrayRef<NamedValue> varargs,
-    std::function<std::ostream&()> err) {
+    std::function<std::ostream&()> err,
+    bool convert_tensor_to_num) {
   Argument elem_arg("", elem_type);
   std::vector<Value*> list_ctor;
   for(const auto& a : varargs) {
-    Value* av = tryMatchArgument(elem_arg, graph, loc, a, err);
+    Value* av = tryMatchArgument(elem_arg, graph, loc, a, err, convert_tensor_to_num);
     if(!av)
       return nullptr;
     list_ctor.push_back(av);
@@ -527,7 +538,8 @@ at::optional<std::vector<Value*>> tryMatchSchema(
   Graph& graph,
   at::ArrayRef<NamedValue> args,
   at::ArrayRef<NamedValue> kwargs,
-  std::ostream& failure_messages) {
+  std::ostream& failure_messages,
+  bool convert_tensors_to_nums) {
     auto err = [&]() -> std::ostream& {
       failure_messages << "\nfor operator " << schema << ":\n";
       return failure_messages;
@@ -550,7 +562,8 @@ at::optional<std::vector<Value*>> tryMatchSchema(
             (schema_i + 1 == schema.arguments.size() || schema.arguments[schema_i + 1].kwarg_only) &&  // must be the last position argument
             !convertibleToList(args[schema_i].value(graph)->type(), arg.type)) { // and the actual should not be a list already
           auto elem_type = arg.type->expect<ListType>()->getElementType();
-          Value* list = tryCreateList(elem_type, graph, loc, args.slice(schema_i), err);
+          Value* list = tryCreateList(elem_type, graph, loc, args.slice(schema_i),
+            err, convert_tensors_to_nums);
           if(!list)
             return at::nullopt;
           used_args = args.size();
@@ -574,7 +587,7 @@ at::optional<std::vector<Value*>> tryMatchSchema(
         err() << "argument " << schema.arguments[schema_i].name << " not provided.\n" << loc;
         return at::nullopt;
       }
-      Value * positional = tryMatchArgument(arg, graph, loc, *v, err);
+      Value * positional = tryMatchArgument(arg, graph, loc, *v, err, convert_tensors_to_nums);
       if(!positional)
         return at::nullopt;
       positional_inputs.push_back(positional);
@@ -609,9 +622,11 @@ static Value* tryEmitBuiltin(
   Graph& graph,
   Symbol name,
   at::ArrayRef<NamedValue> inputs,
-  at::ArrayRef<NamedValue> attributes) {
+  at::ArrayRef<NamedValue> attributes,
+  bool convert_tensors_to_nums) {
 
-  auto matched_inputs = tryMatchSchema(op->schema(), loc, graph, inputs, attributes, failure_messages);
+  auto matched_inputs = tryMatchSchema(op->schema(), loc, graph, inputs, attributes,
+    failure_messages, convert_tensors_to_nums);
   if(!matched_inputs)
     return nullptr;
   // we successfully matched this schema, construct the node
@@ -666,12 +681,20 @@ Value* emitBuiltinCall(
 
   const auto& variants = getAllOperatorsFor(name);
   std::stringstream failure_messages;
-  for (const std::shared_ptr<Operator>& op : variants) {
-    if (auto result = tryEmitBuiltin(
-            op, failure_messages, loc, graph, name, inputs, attributes)) {
-      return result;
+  //first we try to match the schema without any conversion
+  //if no schema matches then insert ImplicitTensorToNum
+  for(bool convert_tensors_to_nums : {false, true}) {
+    //clear previous error messages
+    failure_messages.str("");
+    for (const std::shared_ptr<Operator>& op : variants) {
+      if (auto result = tryEmitBuiltin(
+              op, failure_messages, loc, graph, name, inputs, attributes,
+              convert_tensors_to_nums)) {
+        return result;
+      }
     }
   }
+
   // none of the options worked
   if(!required) {
     return nullptr;
@@ -810,7 +833,7 @@ struct to_ir {
       for (auto& r : results) {
         // TODO: support tuples and lists as returns
         auto return_kind = r->type()->kind();
-        if (return_kind != TypeKind::TensorType &&
+        if (return_kind != TypeKind::CompleteTensorType &&
             return_kind != TypeKind::DynamicType &&
             return_kind != TypeKind::IntType &&
             return_kind != TypeKind::FloatType) {
@@ -1496,13 +1519,12 @@ private:
         const auto subscript = Subscript(tree);
         auto slice_exprs = subscript.subscript_exprs();
         if (slice_exprs.size() != 1) {
-          // TODO Implement multidimensional slice
-          throw ErrorReport(subscript.range()) << "Subscripting multiple dimensions is currently not supported\n";
+          return emitMultidimSlicing(subscript);
         }
         if (slice_exprs[0].kind() == TK_SLICE_EXPR) {
-          return emitSlice(subscript);
+          return emitBasicSlice(subscript);
         } else {
-          return emitGather(
+          return emitBasicGather(
               subscript.range(), TreeList{subscript.value(), slice_exprs[0]});
         }
       } break;
@@ -1558,45 +1580,104 @@ private:
     return insertConstant(*graph, c.text(), c.range());
   }
 
+  // Desugars select indexing: tensor[i] -> tensor.select(dim, i)
+  Value* emitSelect(
+      const SourceRange& loc,
+      Value* input,
+      int64_t dim,
+      Value* index) {
+    return emitBuiltinCall(
+        loc, *graph, aten::select,
+        {input, graph->insertConstant(dim, loc), index}, {}, true);
+  }
+
+  // Desugars slice indexing: tensor[begin:end] -> tensor.slice(dim, begin, end, 1)
+  Value* emitSlice(
+      const SourceRange& loc,
+      Value* input,
+      at::optional<int64_t> dim, // Only used for tensor slicing
+      const SliceExpr& slice) {
+    std::vector<NamedValue> args;
+    args.reserve(4);
+    args.emplace_back(loc, "self", input);
+
+    // XXX: If list slicing becomes more complicated or stops using
+    // aten::slice, we should separate it from this function.
+    if (dim) {
+      JIT_ASSERT(input->type()->isSubtypeOf(DynamicType::get()));
+      args.emplace_back(loc, "dim", graph->insertConstant(dim.value(), loc));
+    } else {
+      JIT_ASSERT(!input->type()->isSubtypeOf(DynamicType::get()));
+    }
+
+    args.emplace_back(loc, "begin", emitExpr(Expr(slice.startOr(0)), identity));
+    const auto has_end = slice.end().present();
+    if (has_end) {
+      args.emplace_back(loc, "end", emitExpr(Expr(slice.end().get()), identity));
+    }
+    NamedValue step = NamedValue(loc, "step", graph->insertConstant(1, loc));
+    return emitBuiltinCall(loc, *graph, aten::slice, args, {step}, true);
+  }
+
+  // Desugars multidim slicing into aten::slice / aten::select calls.
+  //
+  // XXX: Errors in user code are not elegantly reported.
+  // Let's say someone were to do the following:
+  //   @torch.jit.script
+  //   def fn(x):
+  //       return x[0, 1]
+  //   fn(torch.randn(5))
+  // Because we desugar this into two aten::select ops, the error message
+  // complains about aten::select failing rather than there "not being
+  // enough dimensions to index".
+  Value * emitMultidimSlicing(const Subscript& subscript) {
+    const auto& loc = subscript.range();
+    auto * sliceable = emitExpr(subscript.value());
+    if (!sliceable->type()->isSubtypeOf(DynamicType::get())) {
+      throw ErrorReport(loc)
+        << "Unsupported operation: attempted to use multidimensional "
+        << "indexing on a non-tensor type.";
+    }
+    size_t dim = 0;
+    for (const auto & subscript_expr : subscript.subscript_exprs()) {
+      if (subscript_expr.kind() == TK_SLICE_EXPR) {
+        sliceable = emitSlice(loc, sliceable, dim, SliceExpr(subscript_expr));
+        ++dim;
+        continue;
+      }
+      auto index = emitExpr(subscript_expr, identity);
+      if (index->type() == IntType::get()) {
+        sliceable = emitSelect(loc, sliceable, dim, index);
+        continue;
+      } else if (index->type()->isSubtypeOf(DynamicType::get())) {
+        throw std::runtime_error("NYI: advanced indexing");
+      }
+      throw ErrorReport(loc)
+        << "Unsupported operation: attempted to use multidimensional "
+        << "indexing with unsupported index type.";
+    }
+    return sliceable;
+  }
+
   // Desugars slice syntactic sugar tensor[begin:end] -> tensor.slice(begin,
   // end).
-  Value* emitSlice(const Subscript& subscript) {
+  Value* emitBasicSlice(const Subscript& subscript) {
     const auto& loc = subscript.range();
-    // TODO: implement multidimensional slice
     JIT_ASSERT(subscript.subscript_exprs().size() == 1);
     JIT_ASSERT(subscript.subscript_exprs()[0].kind() == TK_SLICE_EXPR);
     auto slice_exp = SliceExpr(subscript.subscript_exprs()[0]);
-    TreeList inputs = {subscript.value(), slice_exp.startOr(0)};
-    const auto applyInputs = Compound::create(TK_LIST, loc, std::move(inputs));
-    const auto input_values = getNamedValues(
-        applyInputs->trees(),
-        /*maybe_unpack*/ false,
-        identity);
 
-    NamedValue sliceable = input_values[0];
-    NamedValue begin = input_values[1];
-    NamedValue step = NamedValue(loc, "step", graph->insertConstant(1, loc));
-
-    // Build the input arguments
-    std::vector<NamedValue> args = {sliceable};
-    if (sliceable.value(*graph)->type()->kind() == TypeKind::DynamicType) {
+    auto * sliceable = emitExpr(subscript.value(), identity);
+    at::optional<int64_t> maybe_dim;
+    if (sliceable->type()->kind() == TypeKind::DynamicType) {
       // If the sliceable object is a tensor, specify a default dimension
-      args.emplace_back(loc, "dim", graph->insertConstant(0, loc));
+      maybe_dim = 0;
     }
-
-    args.push_back(begin);
-
-    const auto has_end = slice_exp.end().present();
-    if (has_end) {
-      // If the user specified an `end` index, pass it down
-      args.emplace_back(loc, "end", emitExpr(Expr(slice_exp.end().get()), identity));
-    }
-
-    return emitBuiltinCall(loc, *graph, aten::slice, args, {step}, true);
-}
+    return emitSlice(loc, sliceable, maybe_dim, slice_exp);
+  }
 
   // Desugars gather syntactic sugar foo[i]
-  Value* emitGather(
+  Value* emitBasicGather(
       const SourceRange& loc,
       TreeList&& inputs) {
     const auto applyInputs =
@@ -1612,10 +1693,9 @@ private:
                  loc, *graph, aten::select, {gatherable, idx}, {}, true);
 
     } else {
-      // if it's a single tensor, map tensor[idx] -> tensor.select(0, idx)
-      NamedValue dim = NamedValue(loc, "dim", graph->insertConstant(0, loc));
-      return emitBuiltinCall(
-                 loc, *graph, aten::select, {gatherable, dim, idx}, {}, true);
+      JIT_ASSERT(gatherable.value(*graph)->type()->isSubtypeOf(DynamicType::get()));
+      return emitSelect(
+          loc, gatherable.value(*graph), /*dim=*/0, idx.value(*graph));
     }
   }
 };
@@ -1642,6 +1722,9 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(SourceRange loc, Method & m, con
     return std::make_shared<BuiltinFunction>(
         Symbol::aten(builtin_cast_methods().at(field)),
         NamedValue(loc, "self", value));
+  }
+  if (getValue()->type()->isSubtypeOf(NumberType::get())) {
+    throw ErrorReport(loc) << "Cannot call methods on numbers";
   }
   return std::make_shared<BuiltinFunction>(
       Symbol::aten(field), NamedValue(loc, "self", value));

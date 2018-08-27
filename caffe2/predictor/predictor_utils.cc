@@ -9,7 +9,9 @@
 namespace caffe2 {
 namespace predictor_utils {
 
-const NetDef& getNet(const MetaNetDef& def, const std::string& name) {
+CAFFE2_API const NetDef& getNet(
+    const MetaNetDef& def,
+    const std::string& name) {
   for (const auto& n : def.nets()) {
     if (n.key() == name) {
       return n.value();

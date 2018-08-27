@@ -432,6 +432,16 @@ struct NNNodeMatchCriteria {
       const std::function<bool(NNGraph::NodeRef)>& predicate,
       const std::string& debugString = "No debug string specified")
       : predicate(predicate), debugString(debugString){};
+
+  NNNodeMatchCriteria andCriteria(const NNNodeMatchCriteria& other) {
+    auto thisPredicate = predicate;
+    auto otherPredicate = other.predicate;
+    return NNNodeMatchCriteria(
+        [thisPredicate, otherPredicate](NNGraph::NodeRef node) {
+          return thisPredicate(node) && otherPredicate(node);
+        },
+        debugString + " and " + other.debugString);
+  }
 };
 
 std::ostream& operator<<(
@@ -439,41 +449,37 @@ std::ostream& operator<<(
     const NNNodeMatchCriteria& criteria);
 
 using NNMatchGraph = nom::matcher::MatchGraph<NNNodeMatchCriteria>;
+using NNMatchNode = nom::matcher::MatchNode<NNNodeMatchCriteria>;
 
-bool hasSingleOutputAndConsumer(NNGraph::NodeRef nodeRef);
+// Commonly used criteria.
 
-template <typename NodeType>
-NNNodeMatchCriteria matchNodeTypeWithPredicate(
-    const std::function<bool(NNGraph::NodeRef, const NodeType&)> predicate,
-    bool expectedSingleOutputAndConsumer = false,
-    const std::string& debugString = "matchNodeTypeWithPredicate") {
-  return NNNodeMatchCriteria(
-      [&predicate, expectedSingleOutputAndConsumer](NNGraph::NodeRef nodeRef) {
-        NOM_REQUIRE_OR_RET_FALSE(is<NodeType>(nodeRef));
-        if (expectedSingleOutputAndConsumer) {
-          NOM_REQUIRE_OR_RET_FALSE(hasSingleOutputAndConsumer(nodeRef));
-        }
-        NodeType* node = get<NodeType>(nodeRef);
-        return predicate(nodeRef, *node);
-      },
-      debugString);
-};
+// The node has a single output and the output has a single consumer.
+NNNodeMatchCriteria criteriaSingleOutputAndConsumer();
+// The node has a unique consumer (there may be multiple edges from output
+// to the single consumer).
+NNNodeMatchCriteria criteriaSingleConsumer();
 
 template <typename NodeType>
-NNNodeMatchCriteria matchNodeType(
-    bool expectedSingleOutputAndConsumer = false,
-    const std::string& debugString = "matchNodeType") {
+NNNodeMatchCriteria matchOp(const std::string& debugString = "matchOp") {
   return NNNodeMatchCriteria(
-      [expectedSingleOutputAndConsumer](NNGraph::NodeRef nodeRef) {
-        if (expectedSingleOutputAndConsumer) {
-          NOM_REQUIRE_OR_RET_FALSE(hasSingleOutputAndConsumer(nodeRef));
-        }
-        return is<NodeType>(nodeRef);
-      },
+      [](NNGraph::NodeRef nodeRef) { return is<NodeType>(nodeRef); },
       debugString);
 }
 
-NNNodeMatchCriteria matchAnyNode();
+NNNodeMatchCriteria matchTensor();
+
+template <typename NodeType>
+NNNodeMatchCriteria matchOp(
+    const std::function<bool(const NodeType&)> predicate,
+    const std::string& debugString = "matchOpWithPredicate") {
+  return NNNodeMatchCriteria(
+      [&predicate](NNGraph::NodeRef nodeRef) {
+        NOM_REQUIRE_OR_RET_FALSE(is<NodeType>(nodeRef));
+        NodeType* node = get<NodeType>(nodeRef);
+        return predicate(*node);
+      },
+      debugString);
+};
 
 struct NNNodeMatch {
   static bool isMatch(

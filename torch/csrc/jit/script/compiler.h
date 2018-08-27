@@ -145,13 +145,16 @@ TORCH_API void ensureTensors(const SourceRange& range, at::ArrayRef<Value*> valu
 // try to match a list if inputs and keyword 'attributes' to this schema,
 // if it works return the flat list of positional inputs to the call
 // if it returns nullopt, then failure_messages contains a good error report
+// set convert_tensor_to_num to true if ImplicitTensorToNums should be inserted to
+// match the schema
 TORCH_API at::optional<std::vector<Value*>> tryMatchSchema(
   const FunctionSchema& schema,
   const SourceRange& loc,
   Graph& graph,
   at::ArrayRef<NamedValue> inputs,
   at::ArrayRef<NamedValue> attributes,
-  std::ostream& failure_messages);
+  std::ostream& failure_messages,
+  bool convert_tensors_to_nums);
 
 TORCH_API FunctionSchema extractSchemaFromDef(const Def &def, bool is_method=false);
 

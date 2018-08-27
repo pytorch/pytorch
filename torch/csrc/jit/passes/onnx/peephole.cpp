@@ -117,8 +117,8 @@ void fuseBroadcast(Block *b) {
 
     // Not all broadcasts are supported by ONNX broadcast.
     at::optional<size_t> axis = fusibleExpandTo(
-        unexpanded_rhs->type()->expect<TensorType>()->sizes(), // from
-        rhs_expand->output()->type()->expect<TensorType>()->sizes()); // to
+        unexpanded_rhs->type()->expect<CompleteTensorType>()->sizes(), // from
+        rhs_expand->output()->type()->expect<CompleteTensorType>()->sizes()); // to
     if (axis == at::nullopt)
       continue;
 
@@ -269,13 +269,13 @@ void pushPackingPastRnn(Block *b) {
     // unhygenic way, Pytorch ends up propagating an incorrect type.
     // Until a long-term cleanup comes around, we can fix this by
     // resetting the size to the correct value.
-    TensorTypePtr oldType = rnn->inputs().at(0)->type()->cast<TensorType>();
+    CompleteTensorTypePtr oldType = rnn->inputs().at(0)->type()->cast<CompleteTensorType>();
     if (oldType) {
       std::vector<int64_t> new_sizes;
       new_sizes.push_back(oldType->sizes().at(0));
       new_sizes.push_back(oldType->sizes().at(1));
       new_sizes.push_back(rnn->i(attr::hidden_size));
-      TensorTypePtr newType = TensorType::create(
+      CompleteTensorTypePtr newType = CompleteTensorType::create(
           oldType->scalarType(), oldType->device(), new_sizes);
       next->outputs().at(0)->setType(newType);
     }
@@ -467,7 +467,6 @@ static void speculateOps(Block* block) {
 }
 
 static void replaceInputWithList(Node *node, size_t i, ArrayRef<Value*> to) {
-  node->invalidateSchema();
   node->removeInput(i);
   for (auto* to_val : to) {
     JIT_ASSERT(to_val->owningGraph() == node->owningGraph());
