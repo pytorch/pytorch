@@ -61,7 +61,8 @@ class Constraint(object):
         raise NotImplementedError
 
     def __repr__(self):
-        return self.__class__.__name__[1:]
+        return self.__class__.__name__[1:] + '()'
+
 
 class _Dependent(Constraint):
     """
