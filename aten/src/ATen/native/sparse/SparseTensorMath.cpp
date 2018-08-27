@@ -541,7 +541,7 @@ Tensor& s_addmm_out_sparse_dense_cpu(
   int64_t nnz        = sparse._nnz();
 
   if (nnz == 0) {
-    at::mul_out(r, t, r.type().scalarTensor(beta.local()));
+    at::mul_out(r, t, r.type().scalarTensor(beta));
     return r;
   }
 
