@@ -4250,10 +4250,11 @@ a")
 
             @torch.jit.script_method
             def call_foo(self, input):
-                return self.foo(input=input, bar=_to_tensor(1))
+                return self.foo(input=input, bar=1)
 
             @torch.jit.script_method
             def foo(self, bar, input):
+                # type: (int, Tensor) -> Tensor
                 return input + bar
         m = M()
         self.assertEqual(2, m.call_foo(torch.ones((), dtype=torch.int64)))
