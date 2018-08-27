@@ -67,7 +67,7 @@ using DoubleList = ConstantList<double>;
 #define TORCH_FORALL_TAGS(_) \
   _(None) _(Tensor) _(Double) _(Int) _(Tuple) _(IntList) _(DoubleList) _(String) _(TensorList)
 
-struct IValue {
+struct TORCH_API IValue {
   IValue()
   : payload(0)
   , tag(Tag::None)
