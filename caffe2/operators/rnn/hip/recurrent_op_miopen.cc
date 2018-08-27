@@ -239,7 +239,7 @@ bool RecurrentOp<T>::RunOnDevice() {
           rnnDesc_,
           seqLength,
           xDesc_->descs(),
-          InputData(INPUT), //.template data<T>(),./install.sh -icd
+          InputData(INPUT), //.template data<T>(),
           hxDesc_,
           InputData(HIDDEN_INPUT), //.template data<T>(),
           cxDesc_,
