@@ -7,7 +7,7 @@ include(../cmake/Codegen.cmake)
 add_subdirectory(utils)
 
 # ---[ ATen build
-if(BUILD_ATEN)
+if (NOT BUILD_ATEN_MOBILE)
   set(__caffe2_CMAKE_POSITION_INDEPENDENT_CODE ${CMAKE_POSITION_INDEPENDENT_CODE})
   set(CMAKE_POSITION_INDEPENDENT_CODE ON)
   set(AT_LINK_STYLE INTERFACE)
@@ -49,7 +49,7 @@ if(BUILD_ATEN)
 
   IF(USE_ROCM)
     # Set the HIP Variables
-    set(Caffe2_HIP_SRCS ${ATen_CUDA_SRCS})
+    set(Caffe2_HIP_SRCS ${Caffe2_HIP_SRCS} ${ATen_CUDA_SRCS})
     set(Caffe2_HIP_INCLUDES ${Caffe2_HIP_INCLUDES} ${Caffe2_GPU_INCLUDE})
   ENDIF(USE_ROCM)
 else()
@@ -340,6 +340,12 @@ if(USE_CUDA)
       target_compile_options(caffe2_gpu PUBLIC "-DAT_CORE_STATIC_WINDOWS=1")
   endif()
 
+  # NB: This must be target_compile_definitions, not target_compile_options,
+  # as the latter is not respected by nvcc
+  if (MSVC)
+      target_compile_definitions(caffe2_gpu PRIVATE "-DCAFFE2_BUILD_MAIN_LIB")
+  endif()
+
   # Set standard properties on the target
   aten_set_target_props(caffe2_gpu)
 
@@ -351,21 +357,19 @@ endif()
 # ---[ Caffe2 HIP sources.
 if(USE_ROCM)
   # Call again since Caffe2_HIP_INCLUDES is extended with ATen include dirs.
-  if(BUILD_ATEN)
-    # Get Compile Definitions from the directory (FindHIP.cmake bug)
-    get_directory_property(MY_DEFINITIONS COMPILE_DEFINITIONS)
-    if(MY_DEFINITIONS)
-      foreach(_item ${MY_DEFINITIONS})
-        LIST(APPEND HIP_HCC_FLAGS "-D${_item}")
-      endforeach()
-    endif()
-
-    # Call again since Caffe2_HIP_INCLUDES is extended with ATen include dirs.
-    hip_include_directories(${Caffe2_HIP_INCLUDES})
+  # Get Compile Definitions from the directory (FindHIP.CMake bug)
+  get_directory_property(MY_DEFINITIONS COMPILE_DEFINITIONS)
+  if(MY_DEFINITIONS)
+    foreach(_item ${MY_DEFINITIONS})
+      LIST(APPEND HIP_HCC_FLAGS "-D${_item}")
+    endforeach()
   endif()
-  IF(BUILD_CAFFE2)
-     set_source_files_properties(${Caffe2_HIP_SRCS} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
-  ENDIF()
+
+  # Call again since Caffe2_HIP_INCLUDES is extended with ATen include dirs.
+  hip_include_directories(${Caffe2_HIP_INCLUDES})
+
+  filter_list(__caffe2_hip_srcs_cpp Caffe2_HIP_SRCS "\\.(cc|cpp|cu)$")
+  set_source_files_properties(${__caffe2_hip_srcs_cpp} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
 
   # FindHIP.CMake checks if the SHARED flag is set and adds extra logic accordingly.
   hip_add_library(caffe2_hip ${Caffe2_HIP_SRCS})
@@ -444,7 +448,7 @@ if(BUILD_CAFFE2)
   set(__aten_test_dir "test/aten")
 endif()
 # Todo - Set up ATen tests for ROCm in an upcoming PR
-if(BUILD_ATEN AND NOT USE_ROCM)
+if(NOT USE_ROCM)
   foreach(test_src ${ATen_CPU_TEST_SRCS})
     get_filename_component(test_name ${test_src} NAME_WE)
     add_executable(${test_name} "${test_src}")

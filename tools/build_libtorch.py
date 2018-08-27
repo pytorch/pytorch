@@ -13,6 +13,7 @@ if __name__ == '__main__':
 
     os.environ['BUILD_TORCH'] = 'ON'
     os.environ['ONNX_NAMESPACE'] = 'onnx_torch'
+    os.environ['PYTORCH_PYTHON'] = sys.executable
 
     tools_path = os.path.dirname(os.path.abspath(__file__))
     build_pytorch_libs = os.path.join(tools_path, 'build_pytorch_libs.sh')

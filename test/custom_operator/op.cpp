@@ -15,4 +15,12 @@ std::vector<at::Tensor> custom_op(
   return output;
 }
 
-static torch::RegisterOperators registry("custom::op", &custom_op);
+static auto registry =
+    torch::RegisterOperators()
+        // We parse the schema for the user.
+        .op("custom::op", &custom_op)
+        // User provided schema. Among other things, allows defaulting values,
+        // because we cannot infer default values from the signature. It also
+        // gives arguments meaningful names.
+        .op("custom::op_with_defaults(Tensor tensor, float scalar = 1, int repeat = 1) -> Tensor[]",
+            &custom_op);

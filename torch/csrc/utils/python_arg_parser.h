@@ -120,7 +120,7 @@ struct PythonArgs {
   inline std::vector<int64_t> intlist(int i);
   inline std::vector<int64_t> intlistWithDefault(int i, std::vector<int64_t> default_intlist);
   inline at::Generator* generator(int i);
-  inline std::unique_ptr<at::Storage> storage(int i);
+  inline at::Storage storage(int i);
   inline at::ScalarType scalartype(int i);
   inline at::ScalarType scalartypeWithDefault(int i, at::ScalarType default_scalartype);
   inline at::optional<at::ScalarType> scalartypeOptional(int i);
@@ -226,7 +226,7 @@ inline at::Scalar PythonArgs::scalarWithDefault(int i, at::Scalar default_scalar
   // Zero-dim tensors are converted to Scalars as-is. Note this doesn't currently
   // handle most NumPy scalar types except np.float64.
   if (THPVariable_Check(args[i])) {
-    return at::Scalar(((THPVariable*)args[i])->cdata);
+    return ((THPVariable*)args[i])->cdata._local_scalar();
   }
   if (THPUtils_checkLong(args[i])) {
     return at::Scalar(static_cast<int64_t>(THPUtils_unpackLong(args[i])));
@@ -346,7 +346,7 @@ static std::string cpu_prefix = "cpu:";
 inline at::Device PythonArgs::device(int i) {
   if (!args[i]) {
     const auto& default_tensor_type = torch::tensors::get_default_tensor_type();
-    return at::Device(default_tensor_type.backend());
+    return at::Device(default_tensor_type.device_type());
   }
   if (THPDevice_Check(args[i])) {
     const auto device = reinterpret_cast<THPDevice*>(args[i]);
@@ -355,21 +355,21 @@ inline at::Device PythonArgs::device(int i) {
   if (THPUtils_checkLong(args[i])) {
     const auto device_index = THPUtils_unpackLong(args[i]);
     AT_CHECK(device_index >= 0, "Device index must not be negative");
-    return at::Device(at::kCUDA, device_index);
+    return at::Device(at::DeviceType::CUDA, device_index);
   }
   const std::string device_str = THPUtils_unpackString(args[i]);
   if (device_str == cpu_str) {
-    return at::Device(at::kCPU);
+    return at::Device(at::DeviceType::CPU);
   } else if (device_str == cuda_str) {
-    return at::Device(at::kCUDA);
+    return at::Device(at::DeviceType::CUDA);
   } else if (device_str.compare(0, cpu_prefix.length(), cpu_prefix) == 0) {
     const auto device_index = std::stoi(device_str.substr(cpu_prefix.length()));
     AT_CHECK(device_index >= 0, "Device index must not be negative");
-    return at::Device(at::kCPU, device_index);
+    return at::Device(at::DeviceType::CPU, device_index);
   } else if (device_str.compare(0, cuda_prefix.length(), cuda_prefix) == 0) {
     const auto device_index = std::stoi(device_str.substr(cuda_prefix.length()));
     AT_CHECK(device_index >= 0, "Device index must not be negative");
-    return at::Device(at::kCUDA, device_index);
+    return at::Device(at::DeviceType::CUDA, device_index);
   }
   throw torch::TypeError("only \"cuda\" and \"cpu\" are valid device types, got %s", device_str.c_str());
 }
@@ -428,7 +428,7 @@ inline at::Generator* PythonArgs::generator(int i) {
   return reinterpret_cast<THPGenerator*>(args[i])->cdata;
 }
 
-inline std::unique_ptr<at::Storage> PythonArgs::storage(int i) {
+inline at::Storage PythonArgs::storage(int i) {
   if (!args[i]) return nullptr;
   return createStorage(args[i]);
 }

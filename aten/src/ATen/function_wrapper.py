@@ -119,7 +119,7 @@ ${return_call} at::native::${native_type_method_dispatch}(/* native_actuals */ $
 
 # add non-virtual declaration to Tensor.h
 TENSOR_METHOD_DECLARATION = CodeTemplate("""\
-AT_API ${return_type} ${api_name}(${method_formals_with_defaults})${const_mark};
+${return_type} ${api_name}(${method_formals_with_defaults})${const_mark};
 """)
 # add non-virtual declaration to Tensor.cpp
 TENSOR_METHOD_DEFINITION = CodeTemplate("""\
@@ -208,7 +208,7 @@ TYPE_FORMAL_GENERIC = {
     'THIntegerTensor*': 'Tensor &',
     'THDenseTensor*': 'Tensor &',
     'THDenseIndexTensor*': 'Tensor &',
-    'THStorage*': 'Storage &',
+    'THStorage*': 'Storage',
     'THGenerator*': 'Generator *',
     'IntListSize': 'IntList',
     'accreal': 'Scalar',
@@ -288,12 +288,14 @@ CHECKED_CAST = {
             'Backend::${DenseBackend}, ScalarType::Long)'),
     'THStorage*':
         CodeTemplate(
-            'checked_cast_storage<Storage>('
-            '&${arg_name},"${arg_name}",${arg_pos}, '
-            'Backend::${Backend}, ScalarType::${ScalarName})'),
+            'checked_storage('
+            '${arg_name},"${arg_name}",${arg_pos}, '
+            # We're punning here (Backend and DeviceType constructors coincide)
+            # but DeviceType is the correct way to classify storages
+            'DeviceType::${Backend}, ScalarType::${ScalarName})'),
     'THGenerator*':
         CodeTemplate(
-            'check_generator<${Backend}Generator>(${arg_name}, &globalContext().defaultGenerator(backend()))'),
+            'check_generator<${Backend}Generator>(${arg_name}, &globalContext().defaultGenerator(device_type()))'),
     # This is a cast done via direct-construction
     'IntListStride': CodeTemplate('at::IntList ${result_name} = get_intlist_stride_th(${arg_name});'),
     'real': CodeTemplate('${arg_name}.to${ScalarName}()'),
@@ -313,7 +315,7 @@ CHECKED_USE = {
     'THIntegerTensor*': '{}_',
     'THDenseTensor*': '{}_',
     'THDenseIndexTensor*': '{}_',
-    'THStorage*': '{}_->pImpl()',
+    'THStorage*': '{}_.unsafeGetStorageImpl()',
     'THGenerator*': '{}_->generator',
     'TensorList': "{0}_.data(), {0}_.size()",
 }
@@ -1225,7 +1227,7 @@ def create_derived(backend_type_env, declarations):
         if broadcasts_arg:
             return []
         zero_dim_actuals = [arg['name']
-                            if arg['name'] != zero_dim_dispatch else "Scalar({})".format(arg['name'])
+                            if arg['name'] != zero_dim_dispatch else "{}._local_scalar()".format(arg['name'])
                             for arg in option['formals_list']]
         return [ZERO_DIM_CHECK.substitute(env, check_name=zero_dim_dispatch, zero_dim_actuals=zero_dim_actuals)]
 

@@ -571,13 +571,15 @@ TEST(GenerateProposalsTest, TestRealDownSampledRotated) {
   vector<float> bbx_with_angle(num_boxes * 5);
   // bbx (deltas) is in shape (A * 4, H, W). Insert angle delta
   // at each spatial location for each anchor.
-  int i = 0, j = 0;
-  for (int a = 0; a < A; ++a) {
-    for (int k = 0; k < 4 * H * W; ++k) {
-      bbx_with_angle[i++] = bbx[j++];
-    }
-    for (int k = 0; k < H * W; ++k) {
-      bbx_with_angle[i++] = delta_angle;
+  {
+    int i = 0, j = 0;
+    for (int a = 0; a < A; ++a) {
+      for (int k = 0; k < 4 * H * W; ++k) {
+        bbx_with_angle[i++] = bbx[j++];
+      }
+      for (int k = 0; k < H * W; ++k) {
+        bbx_with_angle[i++] = delta_angle;
+      }
     }
   }
 

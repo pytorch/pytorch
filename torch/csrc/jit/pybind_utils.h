@@ -47,21 +47,55 @@ inline void findErrorInKwargs(
 }
 } // namespace detail
 
-inline IValue toIValue(py::object&& obj, const TypePtr& type) {
+inline IValue toIValue(py::handle input) {
+  if (THPVariable_Check(input.ptr())) {
+    return py::cast<at::Tensor>(input);
+  } else if (py::isinstance<py::tuple>(input)) {
+    py::tuple input_tuple = py::cast<py::tuple>(input);
+    Stack s;
+    s.reserve(input_tuple.size());
+    for (py::handle elem : input_tuple) {
+      s.push_back(toIValue(elem));
+    }
+    return Tuple::create(s);
+  } else {
+    AT_ERROR("Only tensors and tuples of tensors are supported as inputs to traced functions");
+  }
+}
+
+inline Stack toStack(const py::tuple& inputs) {
+  return toIValue(inputs).toTuple()->elements();
+}
+
+inline IValue toIValue(py::handle obj, const TypePtr& type) {
     switch (type->kind()) {
       case TypeKind::DynamicType:
       case TypeKind::TensorType:
-        return py::cast<autograd::Variable>(std::move(obj));
+      case TypeKind::CompleteTensorType:
+        return py::cast<autograd::Variable>(obj);
       case TypeKind::FloatType:
-        return py::cast<double>(std::move(obj));
+        return py::cast<double>(obj);
       case TypeKind::IntType:
-        return py::cast<int64_t>(std::move(obj));
+        return py::cast<int64_t>(obj);
       case TypeKind::NoneType:
         return {};
+      case TypeKind::TupleType: {
+        py::tuple tuple = py::cast<py::tuple>(obj);
+        size_t tuple_size = tuple.size();
+        const auto & elem_types = type->cast<TupleType>()->elements();
+        if (elem_types.size() != tuple_size) {
+          AT_ERROR("Expected ", elem_types.size(), " tuple elements for argument, but got ", tuple_size);
+        }
+        std::vector<IValue> values;
+        values.reserve(tuple_size);
+        for (size_t i = 0; i < tuple_size; ++i) {
+          values.push_back(toIValue(tuple[i], elem_types[i]));
+        }
+        return Tuple::create(std::move(values));
+      }
       case TypeKind::StringType:
       case TypeKind::ListType:
-      case TypeKind::TupleType:
-        AT_ERROR("Lists and tuples are not supported yet");
+        AT_ERROR("Lists and strings are not supported yet");
       case TypeKind::NumberType:
         AT_ERROR("Insufficient type information to convert input");
     }
@@ -71,9 +105,9 @@ inline IValue toIValue(py::object&& obj, const TypePtr& type) {
 inline IValue argumentToIValue(
     size_t argumentPosition,
     const Argument& argument,
-    py::object&& object) {
+    py::handle object) {
   try {
-    return toIValue(std::move(object), argument.type);
+    return toIValue(object, argument.type);
   } catch (const py::cast_error& error) {
     AT_ERROR(
         "Expected value of type ", *argument.type,
@@ -99,7 +133,13 @@ inline py::object toPyObject(IValue&& ivalue) {
   } else if (ivalue.isTensorList()) {
     return py::cast(ivalue.toTensorListRef());
   } else if (ivalue.isTuple()) {
-    AT_ERROR("Tuples are not yet supported");
+    auto tuple = ivalue.toTuple();
+    const auto & elements = tuple->elements();
+    py::tuple t { elements.size() };
+    for (size_t i = 0; i < elements.size(); ++i) {
+      t[i] = toPyObject(IValue{elements[i]});
+    }
+    return t;
   } else {
     AT_ERROR("Missing cases in 'toPyObject'! File a bug report.");
   }
@@ -121,7 +161,7 @@ inline Stack createStackForSchema(
   // First push all positional args.
   for (size_t i = 0; i < args.size(); ++i) {
     // Use the type information from the schema to convert the PyObject.
-    push(stack, argumentToIValue(i, schema.arguments[i], std::move(args[i])));
+    push(stack, argumentToIValue(i, schema.arguments[i], args[i]));
   }
 
   // Now for every remaining non-positional argument in the schema, look for it
@@ -131,7 +171,7 @@ inline Stack createStackForSchema(
   for (size_t i = args.size(); i < schema.arguments.size(); ++i) {
     const auto& arg = schema.arguments[i];
     if (kwargs.contains(arg.name.c_str())) {
-      push(stack, argumentToIValue(i, arg, std::move(kwargs[arg.name.c_str()])));
+      push(stack, argumentToIValue(i, arg, kwargs[arg.name.c_str()]));
       consumed_kwargs += 1;
     } else if (arg.default_value) {
       push(stack, *arg.default_value);

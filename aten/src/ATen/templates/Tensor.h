@@ -3,7 +3,7 @@
 // ${generated_comment}
 
 #include "ATen/Device.h"
-#include "ATen/Layout.h"
+#include "ATen/core/Layout.h"
 #include "ATen/Scalar.h"
 #include "ATen/ScalarType.h"
 #include "ATen/SparseTensorRef.h"
@@ -41,7 +41,7 @@ namespace at {
 //
 // Note that Tensor can also be NULL, i.e. it is not associated with any underlying TensorImpl, and
 // special care must be taken to handle this.
-struct Tensor : public detail::TensorBase {
+struct AT_API Tensor : public detail::TensorBase {
   using TensorBase = detail::TensorBase;
   Tensor() : TensorBase() {}
   Tensor(TensorImpl * self, bool retain) : TensorBase(self, retain) {}
@@ -79,7 +79,7 @@ struct Tensor : public detail::TensorBase {
   Type & type() const {
     return pImpl->type();
   }
-  std::unique_ptr<Storage> storage() const {
+  const Storage& storage() const {
     return pImpl->storage();
   }
   inline Tensor toType(const Type & t, bool non_blocking=false) const;
@@ -154,6 +154,9 @@ struct Tensor : public detail::TensorBase {
   Tensor operator[](Tensor index) const;
   Tensor operator[](int64_t index) const;
 
+  Tensor cpu() const;
+  Tensor cuda() const;
+
   // ~~~~~ Autograd API ~~~~~
 
   Tensor& set_requires_grad(bool requires_grad) {
@@ -201,7 +204,7 @@ struct Tensor : public detail::TensorBase {
   friend struct WeakTensor;
 };
 
-struct WeakTensor : public detail::WeakTensorBase {
+struct AT_API WeakTensor : public detail::WeakTensorBase {
   using WeakTensorBase = detail::WeakTensorBase;
   WeakTensor() : WeakTensorBase() {}
   WeakTensor(TensorImpl * self, bool retain) : WeakTensorBase(self, retain) {}

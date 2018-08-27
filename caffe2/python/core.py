@@ -337,6 +337,7 @@ def CreateOperator(
     device_option=None,
     arg=None,
     engine=None,
+    debug_info=None,
     **kwargs
 ):
     """A function wrapper that allows one to create operators based on the
@@ -369,6 +370,8 @@ def CreateOperator(
         operator.device_option.CopyFrom(scope.CurrentDeviceScope())
     if engine is not None:
         operator.engine = engine
+    if debug_info is not None:
+        operator.debug_info = debug_info
     # random seed is defined in the device option, so we need to do special
     # care.
 
@@ -716,6 +719,7 @@ StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
                 if grad_op.HasField('device_option'):
                     for op in sum_ops:
                         op.device_option.CopyFrom(grad_op.device_option)
+                        del op.device_option.extra_info[:]
                 break
 
     def _DisambiguateGradOpOutput(self, grad_op, idx, cnt):
@@ -1779,6 +1783,17 @@ class Net(object):
         self._InvalidateLookupTables()
         return self._net
 
+    def insert_op_at_idx(self, op, op_idx):
+        r""" inserting operator at index. Will update external blob list.
+        """
+        assert op_idx >= 0
+        temp_ops = self.Proto().op[op_idx:]
+        del self.Proto().op[op_idx:]
+        self.Proto().op.extend([op])
+        self.Proto().op.extend(temp_ops)
+        self.external_outputs.extend(op.output)
+        self.external_inputs.extend(op.input)
+
     def reroute_tensor(self, tensor, new_producer, can_modify=None):
         r""" reroute tensor to new_producer. And feed new tensor to consumers
         and interseciton with can_modify if provided.
@@ -1793,31 +1808,30 @@ class Net(object):
 
         Note: assume no inplace blob in net
         """
-        if tensor in self.external_inputs:
-            op_idx = -1
-        else:
-            assert tensor in new_producer.input, \
-                "new producer {} is not taking in {}".format(new_producer.type, tensor)
-            # assuming that the net has no inplace blob
-            # TODO: add ssa info in tensor
-            op_idx = -2
-            for index, op in enumerate(self.Proto().op):
-                if_found = False
-                for o in op.output:
-                    if o == tensor:
-                        # tensor should not be modified yet.
-                        if_found = True
-                        op_idx = index
+        def _find_tensor_input_op(tensor):
+            if tensor in self.external_inputs:
+                op_idx = -1
+            else:
+                assert tensor in new_producer.input, \
+                    "new producer {} is not taking in {}".format(
+                        new_producer.type, tensor)
+                # assuming that the net has no inplace blob
+                op_idx = -2
+                for index, op in enumerate(self.Proto().op):
+                    if_found = False
+                    for o in op.output:
+                        if o == tensor:
+                            # tensor should not be modified yet.
+                            if_found = True
+                            op_idx = index
+                            break
+                    if if_found:
                         break
-                if if_found:
-                    break
+            return op_idx
 
-        assert op_idx >= -1
-        temp_ops = self.Proto().op[op_idx + 1:]
-        del self.Proto().op[op_idx + 1:]
-        self.Proto().op.extend([new_producer])
-        self.Proto().op.extend(temp_ops)
-
+        # the place to inject new_producer is not just determined by tensor
+        op_idx = max(_find_tensor_input_op(t) for t in new_producer.input)
+        self.insert_op_at_idx(new_producer, op_idx + 1)
         new_tensor = new_producer.output[0]
         # modify external outputs
         if tensor in self.external_outputs:
@@ -1827,10 +1841,11 @@ class Net(object):
 
         # modify consumers
         reroute_cnt = 0
-        for op in self.Proto().op:
-            if op in can_modify:  # this is not necessarily true
-                remap_input(op, {tensor: new_tensor})
-                reroute_cnt = reroute_cnt + 1
+        if can_modify:
+            for op in self.Proto().op:
+                if op in can_modify:  # this is not necessarily true
+                    remap_input(op, {tensor: new_tensor})
+                    reroute_cnt = reroute_cnt + 1
         return reroute_cnt
 
     def PopulateProtoWithFileName(self):

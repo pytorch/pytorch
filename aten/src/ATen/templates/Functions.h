@@ -6,12 +6,12 @@
 #include "ATen/Type.h"
 #include "ATen/Tensor.h"
 #include "ATen/Storage.h"
-#include "ATen/Generator.h"
-#include "ATen/Deprecated.h"
+#include "ATen/core/Generator.h"
+#include "ATen/core/Deprecated.h"
 #include "ATen/NativeFunctions.h"
 #include "ATen/DeviceGuard.h"
 #include "ATen/TensorOptions.h"
-#include "THNN/Reduction.h"
+#include "ATen/core/Reduction.h"
 
 namespace at {
 

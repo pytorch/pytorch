@@ -59,6 +59,15 @@ struct Method {
     }
     get_executor().run(stack);
   }
+
+  IValue operator()(std::vector<IValue> stack) {
+    run(stack);
+    if (stack.size() != 1) {
+      return Tuple::create(std::move(stack));
+    }
+    return stack.front();
+  }
+
   std::shared_ptr<Graph> graph_for(const Stack& inputs) {
     return get_executor().graphFor(inputs);
   }
@@ -118,14 +127,14 @@ struct Method {
     for (size_t i=0; i < retval->inputs().size(); ++i) {
       auto scalar_type = inputs[i].type().scalarType();
       auto sizes = inputs[i].sizes();
-      auto type = torch::jit::TensorType::create(scalar_type, -1, sizes);
+      auto type = torch::jit::CompleteTensorType::create(scalar_type, -1, sizes);
       retval->inputs()[i]->setType(type);
     }
     JIT_ASSERT(retval->outputs().size() == outputs.size());
     for (size_t i=0; i < retval->outputs().size(); ++i) {
       auto scalar_type = outputs[i].type().scalarType();
       auto sizes = outputs[i].sizes();
-      auto type = torch::jit::TensorType::create(scalar_type, -1, sizes);
+      auto type = torch::jit::CompleteTensorType::create(scalar_type, -1, sizes);
       retval->outputs()[i]->setType(type);
     }
     return retval;
@@ -237,6 +246,10 @@ struct Module {
   // added afterward.
   void set_optimized(bool o) {
     optimize = o;
+  }
+
+  IValue forward(std::vector<IValue> inputs) {
+    return get_method("forward")(inputs);
   }
 
   void register_parameter(const std::string & name, autograd::Variable v, bool is_buffer) {
