@@ -2,6 +2,23 @@
 #include "THCHalf.h"
 #include "THCHalfAutoNumerics.cuh"
 #include <THC/THCApply.cuh>
+#include <ATen/core/optional.h>
+#include <vector>
+
+int f() {
+  // test trivially and non-trivially copyable.
+  at::optional<int> x;
+  at::optional<std::vector<int>> y;
+  // reference these
+  if (x.has_value()) {
+    return 0;
+  } else {
+    if (y.has_value()) {
+      return 1;
+    }
+  }
+  return -1;
+}
 
 template <typename T>
 struct absupdateOutput_functor
