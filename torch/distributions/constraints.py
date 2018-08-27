@@ -283,7 +283,7 @@ class _PositiveDefinite(Constraint):
         batch_shape = value.unsqueeze(0).shape[:-2]
         # TODO: replace with batched linear algebra routine when one becomes available
         # note that `symeig()` returns eigenvalues in ascending order
-        flattened_value = value.reshape((-1, + matrix_shape))
+        flattened_value = value.reshape((-1,) + matrix_shape)
         return torch.stack([v.symeig(eigenvectors=False)[0][:1] > 0.0
                             for v in flattened_value]).view(batch_shape)
 
