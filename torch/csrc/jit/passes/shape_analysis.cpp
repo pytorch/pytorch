@@ -1092,9 +1092,16 @@ bool PropagateTensorShapeOnNode(Node * node, bool insert_expands) {
       }
     } else if (node->matches("aten::unfold(Tensor self, int dimension, int size, int step) -> Tensor")) {
       auto & t = tensor_types.at(0);
+<<<<<<< HEAD
       return t->dim() == 0 ? t : t->withDim(t->dim() + 1);
     } else if (node->matches("aten::polygamma(int n, Tensor self) -> Tensor")) {
       return tensor_types.at(0);
+=======
+      return t->withDim(t->dim() + 1);
+    } else if (node->matches("aten::view(Tensor self, int[] size) -> Tensor", /*with_const=*/attr::size) ||
+               node->matches("aten::expand(Tensor self, int[] size, *, bool implicit) -> Tensor", /*with_const=*/attr::size)) {
+      return tensor_types.at(0)->withDim(node->get<std::vector<int64_t>>(attr::size)->size());
+>>>>>>> Rebase
     }
     return nullptr;
   };
@@ -1190,7 +1197,7 @@ bool PropagateCompleteShapeOnNode(Node * node, bool insert_expands,
     auto & tp = tensor_types.at(0);
     auto sizes = tp->sizes();
     auto dims = node->get<std::vector<int64_t>>(attr::dim).value();
-    bool keepdim = node->get<int64_t>(attr::keepdim).value();
+    bool keepdim = node->get<bool>(attr::keepdim).value();
     std::reverse(dims.begin(), dims.end());
     for (int64_t dim : dims) {
       SHAPE_ASSERT(dim >= 0 && static_cast<size_t>(dim) < sizes.size());

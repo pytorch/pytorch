@@ -71,45 +71,6 @@ std::ostream& operator<<(std::ostream & out, const_value_list_with_types l) {
   }
   return out;
 }
-<<<<<<< HEAD
-=======
-
-template<typename T>
-void printPrimList(std::ostream & out, const std::vector<T> & items) {
-  out << "[";
-  int i = 0;
-  for(auto & item : items) {
-    if(i++ > 0)
-      out << ", ";
-      out << item;
-  }
-  out << "]";
-}
-
-void printBoolList(std::ostream & out, const std::vector<bool> & items) {
-  out << "[";
-  int i = 0;
-  for(auto item : items) {
-    if(i++ > 0)
-      out << ", ";
-      out << (item ? "true" : "false");
-  }
-  out << "]";
-}
-
-std::string escapeString(std::string s) {
-  std::vector<char> search = {'\n', '\t', '\v'};
-  std::vector<std::string> replace = {"\\n", "\\t", "\\v"};
-  for (size_t i = 0; i < search.size(); i++) {
-    size_t pos = s.find(search[i]);
-    while(pos != std::string::npos) {
-      s.replace(pos, 1, replace[i]);
-      pos = s.find(search[i], pos + 1);
-    }
-  }
-  return s;
-}
->>>>>>> Add Bool type to IR
 
 void printAttributes(std::ostream & out, const Node * n, bool ignore_subgraph=false) {
   out << "[";
