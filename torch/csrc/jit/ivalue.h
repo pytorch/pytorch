@@ -176,7 +176,7 @@ struct IValue {
 
   // Bool
   IValue(bool b)
-  : tag(Tag::Bool), retainable(false) {
+  : tag(Tag::Bool), is_intrusive_ptr(false) {
     as_bool = b;
   }
 
@@ -185,6 +185,12 @@ struct IValue {
   bool toBool() const {
     JIT_ASSERT(isBool());
     return as_bool;
+  }
+
+  TORCH_API std::ostream& formatBool(std::ostream& out) const {
+    JIT_ASSERT(isBool());
+    out << (as_bool ? "true" : "false");
+    return out;
   }
 
   // IntList
@@ -237,11 +243,11 @@ struct IValue {
   bool isBoolList() const { return Tag::BoolList == tag; }
   Shared<BoolList> toBoolList() && {
     JIT_ASSERT(isBoolList());
-    return moveToRetainable<BoolList>();
+    return moveToIntrusivePtr<BoolList>();
   }
   Shared<BoolList> toBoolList() const & {
     JIT_ASSERT(isBoolList());
-    return toRetainable<BoolList>();
+    return toIntrusivePtr<BoolList>();
   }
 
   //TensorList
@@ -372,12 +378,12 @@ DEFINE_TO(at::Tensor, toTensor)
 DEFINE_TO(c10::intrusive_ptr<Tuple>, toTuple)
 DEFINE_TO(double, toDouble)
 DEFINE_TO(int64_t, toInt)
+DEFINE_TO(bool, toBool)
 DEFINE_TO(c10::intrusive_ptr<DoubleList>, toDoubleList)
 DEFINE_TO(c10::intrusive_ptr<IntList>, toIntList)
 DEFINE_TO(c10::intrusive_ptr<TensorList>, toTensorList)
 DEFINE_TO(c10::intrusive_ptr<ConstantString>, toString)
 DEFINE_TO(at::Scalar, toScalar)
-DEFINE_TO(bool, toBool)
 DEFINE_TO(std::vector<int64_t>, toIntListRef)
 DEFINE_TO(std::vector<double>, toDoubleListRef)
 DEFINE_TO(std::vector<at::Tensor>, toTensorListRef)
@@ -413,17 +419,17 @@ inline IValue::IValue(std::vector<double> v)
 inline IValue::IValue(c10::intrusive_ptr<TensorList> v)
 : tag(Tag::TensorList), is_intrusive_ptr(true) {
   as_intrusive_ptr = v.release();
+}
+inline IValue::IValue(std::vector<at::Tensor> v)
+: IValue(TensorList::create(std::move(v))) {}
 
-inline IValue::IValue(Shared<BoolList> v)
-: tag(Tag::BoolList), retainable(true) {
-  as_retainable = v.detach();
+inline IValue::IValue(c10::intrusive_ptr<BoolList> v)
+: tag(Tag::BoolList), is_intrusive_ptr(true) {
+  as_intrusive_ptr = v.release();
 }
 inline IValue::IValue(std::vector<bool> v)
 : IValue(BoolList::create(std::move(v))) {}
 
-}
-inline IValue::IValue(std::vector<at::Tensor> v)
-: IValue(TensorList::create(std::move(v))) {}
 
 inline const std::vector<int64_t>& IValue::toIntListRef() const {
   return toIntList()->elements();

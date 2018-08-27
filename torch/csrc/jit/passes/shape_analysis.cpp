@@ -404,10 +404,10 @@ bool PropagateTensorShapeOnNode(Node * node, bool insert_expands,
       // TODO: integral types are upcast
       auto & t = tensor_types.at(0);
       return TensorType::create(t->scalarType(), t->device(), 0);
-    } else if (node->matches("aten::sum(Tensor self, int[] dim, int keepdim) -> Tensor",
+    } else if (node->matches("aten::sum(Tensor self, int[] dim, bool keepdim) -> Tensor",
               /*with_const=*/attr::keepdim)) {
       auto & t = tensor_types.at(0);
-      bool keepdim = node->get<int64_t>(attr::keepdim).value();
+      bool keepdim = node->get<bool>(attr::keepdim).value();
       if (!keepdim) {
         if (auto dims = node->get<std::vector<int64_t>>(attr::dim)) {
           // TODO: do we need to account for duplicates in dim here?
@@ -422,7 +422,7 @@ bool PropagateTensorShapeOnNode(Node * node, bool insert_expands,
       auto & t = tensor_types.at(0);
       return t->withDim(t->dim() + 1);
     } else if (node->matches("aten::view(Tensor self, int[] size) -> Tensor", /*with_const=*/attr::size) ||
-               node->matches("aten::expand(Tensor self, int[] size, *, int implicit) -> Tensor", /*with_const=*/attr::size)) {
+               node->matches("aten::expand(Tensor self, int[] size, *, bool implicit) -> Tensor", /*with_const=*/attr::size)) {
       return tensor_types.at(0)->withDim(node->get<std::vector<int64_t>>(attr::size)->size());
     }
     return nullptr;
@@ -522,7 +522,7 @@ bool PropagateCompleteShapeOnNode(Node * node, bool insert_expands,
     auto & tp = tensor_types.at(0);
     auto sizes = tp->sizes();
     auto dims = node->get<std::vector<int64_t>>(attr::dim).value();
-    bool keepdim = node->get<int64_t>(attr::keepdim).value();
+    bool keepdim = node->get<bool>(attr::keepdim).value();
     std::reverse(dims.begin(), dims.end());
     for (int64_t dim : dims) {
       SHAPE_ASSERT(dim >= 0 && static_cast<size_t>(dim) < sizes.size());

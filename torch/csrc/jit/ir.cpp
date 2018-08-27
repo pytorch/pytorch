@@ -72,7 +72,6 @@ std::ostream& operator<<(std::ostream & out, const_value_list_with_types l) {
   }
   return out;
 }
-
 template<typename T>
 void printPrimList(std::ostream & out, const std::vector<T> & items) {
   out << "[";
@@ -80,7 +79,7 @@ void printPrimList(std::ostream & out, const std::vector<T> & items) {
   for(auto & item : items) {
     if(i++ > 0)
       out << ", ";
-      out << item;
+    out << item;
   }
   out << "]";
 }
@@ -89,9 +88,10 @@ void printBoolList(std::ostream & out, const std::vector<bool> & items) {
   out << "[";
   int i = 0;
   for(auto item : items) {
-    if(i++ > 0)
+    if (i++ > 0) {
       out << ", ";
-      out << (item ? "true" : "false");
+    }
+    out << (item ? "true" : "false");
   }
   out << "]";
 }
