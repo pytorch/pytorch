@@ -476,7 +476,7 @@ static PyObject * THPVariable_storage(PyObject* self, PyObject* arg)
 {
   HANDLE_TH_ERRORS
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  return createPyObject(*self_.storage());
+  return createPyObject(self_.storage());
   END_HANDLE_TH_ERRORS
 }
 
@@ -484,7 +484,7 @@ static PyObject * THPVariable_storage_type(PyObject* self, PyObject* arg)
 {
   HANDLE_TH_ERRORS
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  auto storage = THPObjectPtr(createPyObject(*self_.storage()));
+  auto storage = THPObjectPtr(createPyObject(self_.storage()));
   auto storage_type = (PyObject*)Py_TYPE(storage);
   Py_INCREF(storage_type);
   return storage_type;

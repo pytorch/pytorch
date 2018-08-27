@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ATen/ATenGeneral.h"
+#include "ATen/core/ATenGeneral.h"
 #include "ATen/StorageImpl.h"
 #include "ATen/UndefinedTensor.h"
 
@@ -26,17 +26,16 @@ namespace at {
 
 AT_API int _crash_if_asan(int);
 
-template <typename T>
-static inline T* checked_cast_storage(Storage* expr, const char * name, int pos, Backend backend, ScalarType scalar_type) {
-  if (at::detail::get_backend(expr->pImpl()) != backend) {
-    AT_ERROR("Expected object of backend ", backend, " but got backend ", at::detail::get_backend(expr->pImpl()),
+static inline const Storage& checked_storage(const Storage& expr, const char * name, int pos, DeviceType device_type, ScalarType scalar_type) {
+  if (expr.device_type() != device_type) {
+    AT_ERROR("Expected object of device type ", device_type, " but got device type ", expr.data_ptr().device().type(),
              " for argument #", pos, " '", name, "'");
   }
-  if (expr->pImpl()->scalar_type() != scalar_type) {
-    AT_ERROR("Expected object of scalar type ", scalar_type, " but got scalar type ", expr->pImpl()->scalar_type(),
+  if (expr.scalar_type() != scalar_type) {
+    AT_ERROR("Expected object of scalar type ", scalar_type, " but got scalar type ", expr.scalar_type(),
              " for argument #", pos, " '", name, "'");
   }
-  return static_cast<T*>(expr);
+  return expr;
 }
 
 template <typename T, typename Base>

@@ -1,7 +1,6 @@
 from constants import *
 
 """ Mapping of CUDA functions, include files, constants, and types to ROCm/HIP equivalents
-
 This closely follows the implementation in hipify-clang
 https://github.com/ROCm-Developer-Tools/HIP/blob/master/hipify-clang/src/CUDA2HipMap.cpp
 and its structure.
@@ -2188,7 +2187,6 @@ CUDA_SPARSE_MAP = {
 
 PYTORCH_SPECIFIC_MAPPINGS = {
     "cudaHostAllocator": ("hipHostAllocator", API_PYTORCH),
-    "cudaUVAAllocator": ("hipUVAAllocator", API_PYTORCH),
     "cudaDeviceAllocator": ("hipDeviceAllocator", API_PYTORCH),
     "define MAX_NUM_BLOCKS 200": ("define MAX_NUM_BLOCKS 64", API_PYTORCH),
 }

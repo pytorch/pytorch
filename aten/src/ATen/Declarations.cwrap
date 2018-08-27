@@ -50,7 +50,7 @@
         - THTensor* self
         - THStorage* source
         - CONSTANT 0
-        - CONSTANT {static_cast<int64_t>(source.pImpl()->size())}
+        - CONSTANT {static_cast<int64_t>(source.size())}
         - CONSTANT {}
     - cname: setStorage
       arguments:

@@ -36,7 +36,7 @@ Scalar Scalar::operator-() const {
  } else if (isIntegral()) {
    return Scalar(-v.i);
  } else {
-   return Scalar(-Tensor(t));
+   return -Tensor(t)._local_scalar();
  }
 }
 

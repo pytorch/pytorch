@@ -117,8 +117,8 @@ void fuseBroadcast(Block *b) {
 
     // Not all broadcasts are supported by ONNX broadcast.
     at::optional<size_t> axis = fusibleExpandTo(
-        unexpanded_rhs->type()->expect<TensorType>()->sizes(), // from
-        rhs_expand->output()->type()->expect<TensorType>()->sizes()); // to
+        unexpanded_rhs->type()->expect<CompleteTensorType>()->sizes(), // from
+        rhs_expand->output()->type()->expect<CompleteTensorType>()->sizes()); // to
     if (axis == at::nullopt)
       continue;
 
@@ -269,13 +269,13 @@ void pushPackingPastRnn(Block *b) {
     // unhygenic way, Pytorch ends up propagating an incorrect type.
     // Until a long-term cleanup comes around, we can fix this by
     // resetting the size to the correct value.
-    TensorTypePtr oldType = rnn->inputs().at(0)->type()->cast<TensorType>();
+    CompleteTensorTypePtr oldType = rnn->inputs().at(0)->type()->cast<CompleteTensorType>();
     if (oldType) {
       std::vector<int64_t> new_sizes;
       new_sizes.push_back(oldType->sizes().at(0));
       new_sizes.push_back(oldType->sizes().at(1));
       new_sizes.push_back(rnn->i(attr::hidden_size));
-      TensorTypePtr newType = TensorType::create(
+      CompleteTensorTypePtr newType = CompleteTensorType::create(
           oldType->scalarType(), oldType->device(), new_sizes);
       next->outputs().at(0)->setType(newType);
     }
@@ -466,6 +466,45 @@ static void speculateOps(Block* block) {
   }
 }
 
+static void replaceInputWithList(Node *node, size_t i, ArrayRef<Value*> to) {
+  node->removeInput(i);
+  for (auto* to_val : to) {
+    JIT_ASSERT(to_val->owningGraph() == node->owningGraph());
+    node->insertInput(i++, to_val);
+  }
+}
+
+static void eraseListConstruct(Block* block) {
+  for (auto it = block->nodes().begin(), end = block->nodes().end();
+       it != end;) {
+    Node* n = *it;
+    ++it;
+
+    for (auto b : n->blocks()) {
+      eraseListConstruct(b);
+    }
+
+    std::vector<std::tuple<size_t, std::vector<Value*>>> replacements;
+
+    size_t i = 0;
+    for (auto* input : n->inputs()) {
+      if (input->node()->kind() == prim::ListConstruct) {
+        auto* lc_node = input->node();
+        replacements.push_back(std::make_tuple(
+            i,
+            std::vector<Value*>(
+                lc_node->inputs().begin(), lc_node->inputs().end())));
+      }
+      i++;
+    }
+
+    for (auto ritr = replacements.rbegin(); ritr != replacements.rend();
+         ++ritr) {
+      replaceInputWithList(n, std::get<0>(*ritr), std::get<1>(*ritr));
+    }
+  }
+}
+
 // This optimization does ONNX-specific peephole optimizations.
 //
 // At the moment, here are the optimizations it does:
@@ -497,6 +536,7 @@ void PeepholeOptimizeONNX(std::shared_ptr<Graph>& graph) {
   eliminateNopTranspose(graph->block());
   fuseTransposeIntoGemm(graph->block());
   speculateOps(graph->block());
+  eraseListConstruct(graph->block());
 }
 
 }}
