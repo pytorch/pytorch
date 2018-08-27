@@ -5,15 +5,17 @@
 #include <ATen/ATen.h>
 
 #include <cmath>
+#include <cstddef>
+#include <vector>
 
 template <typename T>
 bool exactly_equal(at::Tensor left, T right) {
-  return at::Scalar(left).to<T>() == right;
+  return left._local_scalar().to<T>() == right;
 }
 
 template <typename T>
 bool almost_equal(at::Tensor left, T right, T tolerance = 1e-4) {
-  return std::abs(at::Scalar(left).to<T>() - right) < tolerance;
+  return std::abs(left._local_scalar().to<T>() - right) < tolerance;
 }
 
 #define REQUIRE_TENSOR_OPTIONS(device_, index_, type_, layout_)                \
@@ -178,4 +180,14 @@ TEST_CASE("Tensor/UsesOptionsThatAreSupplied") {
   REQUIRE(exactly_equal(tensor[0], 1));
   REQUIRE(exactly_equal(tensor[1], 2));
   REQUIRE(exactly_equal(tensor[2], 3));
+}
+
+TEST_CASE("FromBlob") {
+  std::vector<int32_t> v = {1, 2, 3};
+  auto tensor = torch::from_blob(v.data(), v.size(), torch::kInt32);
+  REQUIRE(tensor.is_variable());
+  REQUIRE(tensor.numel() == 3);
+  REQUIRE(tensor[0].toCInt() == 1);
+  REQUIRE(tensor[1].toCInt() == 2);
+  REQUIRE(tensor[2].toCInt() == 3);
 }

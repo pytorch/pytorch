@@ -1,5 +1,6 @@
 #include "torch/csrc/jit/tracer.h"
 
+#include "torch/csrc/jit/assertions.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/autograd/function.h"
 #include "torch/csrc/autograd/engine.h"
@@ -13,60 +14,128 @@
 
 namespace torch { namespace jit { namespace tracer {
 
-PreTraceInfo preRecordTrace(Symbol op,
-                            at::ArrayRef<Variable> inputs) {
-  return makePreTraceInfo(inputs, [&op](const std::shared_ptr<TracingState>& state, Graph& graph) {
-    return graph.create(op, 0 /* initial outputs */);
-  });
+////////////////////////////////////////////////////////////////////////////////
+// Recording the traces
+////////////////////////////////////////////////////////////////////////////////
+namespace detail {
+
+template<typename T>
+void genericAddInput(Node *n, T value) {
+  n->addInput(n->owningGraph()->insertConstant(value));
 }
 
-void postRecordTrace(const PreTraceInfo& info,
-                     at::ArrayRef<Variable> outputs) {
-  // TODO: Technically, we could reduce the scope of the lock, but since we
-  // haven't actually specified what the locking contract is, be conservative.
-  auto state_lock = info.state->lock();
+void badArgType() {
+  AT_ERROR("Found an unsupported argument type in the JIT tracer. File a bug report.");
+}
 
-  auto assignOutput = [&info](const Variable & output, Value * value) {
+thread_local std::shared_ptr<TracingState> tracing_state;
+
+} // namespace detail
+
+void addInputs(Node *n, const char * name, int64_t value)            { detail::genericAddInput(n, value); }
+void addInputs(Node *n, const char * name, bool value)               { detail::genericAddInput(n, value); }
+void addInputs(Node *n, const char * name, double value)             { detail::genericAddInput(n, value); }
+void addInputs(Node *n, const char * name, const at::Scalar& value)  { detail::genericAddInput(n, value); }
+void addInputs(Node *n, const char * name, const at::Tensor& value)  { n->addInput(getValueTrace(value)); }
+void addInputs(Node *n, const char * name, const std::string& value)         { detail::badArgType(); }
+void addInputs(Node *n, const char * name, const at::SparseTensorRef& value) { detail::badArgType(); }
+
+void addInputs(Node *n, const char * name, at::TensorList value) {
+  Graph *g = n->owningGraph();
+  Node *list_node = g->appendNode(g->createList(DynamicType::get(), fmap(value, getValueTrace)));
+  n->addInput(list_node->output());
+}
+
+void addInputs(Node *n, const char * name, at::IntList value) {
+  using ArgumentStash = jit::tracer::ArgumentStash;
+  std::vector<Value*> info = ArgumentStash::hasIntList(name) ?
+    ArgumentStash::popIntList(name) :
+    ArgumentStash::IntListTrace(value.size());
+
+  auto& g = getTracingState()->graph;
+  for (size_t i = 0; i < info.size(); ++i) {
+    if (info[i] != nullptr) continue;
+    info[i] = g->insertConstant(value[i]);
+  }
+  for (jit::Value* v : info) {
+    if (*v->type() != *jit::IntType::get()) {
+      throw std::runtime_error(
+        "Type mismatch in setposattr for IntList. Check that your program "
+        "is valid without tracing, and please file a bug report if it is.");
+    }
+  }
+  n->addInput(g->insertNode(g->createList(jit::IntType::get(), info))->output());
+}
+
+void addInputs(Node *n, const char * name, const ArrayRef<double>& value) {
+  AT_ERROR("Tracing float lists currently not supported!");
+}
+
+const std::shared_ptr<TracingState>& getTracingState() {
+  return detail::tracing_state;
+}
+
+void setTracingState(std::shared_ptr<TracingState> state) {
+  detail::tracing_state = std::move(state);
+}
+
+TracingState::TracingState()
+    : graph(new Graph()) {}
+
+TracingState::~TracingState() = default;
+
+void postRecordTrace(Node* node,
+                     at::ArrayRef<Variable> outputs) {
+  for (size_t i = 0; i < outputs.size(); i++) {
+    auto & output = outputs[i];
+    Value * value = node->addOutput();
     if (output.defined()) {
       value->inferTypeFrom(output.data());
-      setValueTrace(info.state, output, value);
+      setValueTrace(output, value);
     }
-  };
-
-  for (size_t i = 0; i < outputs.size(); i++) {
-    assignOutput(outputs[i], info.n->addOutput());
   }
 }
 
+autograd::Variable getSizeOf(const autograd::Variable& var, int64_t dim) {
+  auto & tracing_state = getTracingState();
+  auto & graph = tracing_state->graph;
+
+  auto size_var = autograd::make_variable(at::Scalar(var.size(dim)).toTensor());
+  auto* value = getValueTrace(var);
+  WithInsertPoint ipoint { graph->block() };
+  auto* node = graph->insertNode(graph->create(aten::size, {value, graph->insertConstant(dim)}));
+  node->output()->setType(jit::IntType::get());
+
+  auto ten =
+      graph->appendNode(graph->createNumToTensor(node->output()))->output();
+  setValueTrace(size_var, ten);
+  return size_var;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// Argument stash
+////////////////////////////////////////////////////////////////////////////////
 thread_local ArgumentStash ArgumentStash::stash;
 
 void ArgumentStash::stashIntListElem(const std::string& arg_name, size_t size, size_t idx, const Variable& var) {
   // TODO: check type?
-  if (!isTracing(var)) return;
-  auto tracing_state = getTracingState({var});
+  if (!isTracing()) return;
   auto & list_trace = stash.intlists.emplace(arg_name, size).first->second;
   JIT_ASSERT(size == list_trace.size());
   JIT_ASSERT(idx < list_trace.size());
   JIT_ASSERT(list_trace[idx] == nullptr);
-  list_trace[idx] = getValueTrace(tracing_state, var);
+
+  Value* ten = getValueTrace(var);
+  auto& g = *ten->owningGraph();
+  auto prim = g.createTensorToNum(jit::IntType::get(), ten)
+                   ->insertAfter(ten->node())
+                   ->output();
+  list_trace[idx] = prim;
 }
 
-autograd::Variable getSizeOf(const autograd::Variable& var, int64_t dim) {
-  auto tracing_state = getTracingState({var});
-  auto & graph = tracing_state->graph;
-
-  auto size_var = autograd::make_variable(at::Scalar(var.size(dim)).toTensor());
-  auto* value = getValueTrace(tracing_state, var);
-  auto* node = graph->create(aten::size, {value})
-                    ->i_(attr::dim, dim);
-  node->output()->inferTypeFrom(size_var);
-  graph->appendNode(node);
-  setValueTrace(tracing_state, size_var, node->output());
-
-  return size_var;
-}
-
-
+////////////////////////////////////////////////////////////////////////////////
+// Stack trace recording
+////////////////////////////////////////////////////////////////////////////////
 // no python present so we just do not record source information
 void defaultRecordSourceLocation(Node* n) {}
 std::atomic<decltype(&defaultRecordSourceLocation)> record_source_location(defaultRecordSourceLocation);

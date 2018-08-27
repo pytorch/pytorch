@@ -61,8 +61,8 @@ bool MKLPoolOp<float>::RunOnDeviceWithOrderNCHW() {
   if (dims_changed || FLAGS_caffe2_mkl_memonger_in_use) {
     // We will utilize the SetOutputSize() function in the base class
     // with dummy TensorCPU input and output to calculate the sizes.
-    TensorCPU dummy_input(X.dims());
-    TensorCPU dummy_output;
+    Tensor dummy_input(X.dims(), CPU);
+    Tensor dummy_output(CPU);
 
     ConvPoolOpBase<MKLContext>::SetOutputSize(
         dummy_input, &dummy_output, X.dim32(1));

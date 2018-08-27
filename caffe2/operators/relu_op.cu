@@ -9,6 +9,10 @@ namespace caffe2 {
 
 namespace {
 
+#ifdef __HIPCC__
+typedef __half2 half2;
+#endif
+
 template <typename T>
 __global__ void ReluCUDAKernel(const int N, const T* X, T* Y) {
   CUDA_1D_KERNEL_LOOP(i, N) {

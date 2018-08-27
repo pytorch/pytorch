@@ -25,7 +25,7 @@ inline void parallel_for(
     const int64_t begin,
     const int64_t end,
     const int64_t grain_size,
-    const F f) {
+    const F& f) {
 #ifdef _OPENMP
 #pragma omp parallel if ((end - begin) >= grain_size)
   {
@@ -37,7 +37,9 @@ inline void parallel_for(
       f(begin_tid, std::min(end, chunk_size + begin_tid));
   }
 #else
-  f(begin, end);
+  if (begin < end) {
+    f(begin, end);
+  }
 #endif
 }
 

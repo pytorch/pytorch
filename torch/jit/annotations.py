@@ -3,7 +3,7 @@ import sys
 import ast
 import inspect
 import torch
-from torch._C import DynamicType, TupleType
+from torch._C import DynamicType, TupleType, FloatType, IntType
 from textwrap import dedent
 
 
@@ -59,7 +59,7 @@ _eval_env = {
 }
 
 
-def get_signature(fn, _n_arguments=None, _n_binders=None):
+def get_signature(fn):
     # Python 3.5 adds support for the nice annotation syntax, so try that first.
     if PY35:
         sig = try_real_annotations(fn)
@@ -75,9 +75,44 @@ def get_signature(fn, _n_arguments=None, _n_binders=None):
     # This might happen both because we failed to get the source of fn, or
     # because it didn't have any annotations.
     if type_line is None:
-        return default_signature(fn, source, _n_arguments, _n_binders)
+        return None
 
     return parse_type_line(type_line)
+
+
+# This is essentially a weaker form of get_signature(), where we don't care if
+# we have the types, we just care that we can figure out how many parameters
+# a function takes.
+def get_num_params(fn):
+    try:
+        source = dedent(inspect.getsource(fn))
+    except (TypeError, IOError):
+        return None
+    if source is None:
+        return None
+    py_ast = ast.parse(source)
+    if len(py_ast.body) != 1 or not isinstance(py_ast.body[0], ast.FunctionDef):
+        raise RuntimeError("expected a single top-level function")
+    py_def = py_ast.body[0]
+    if py_def.args.vararg is not None:
+        return None
+    elif hasattr(py_def.args, 'kwonlyargs') and len(py_def.args.kwonlyargs) > 0:
+        return None
+    else:
+        num_params = len(py_def.args.args)
+        if inspect.ismethod(fn):
+            num_params = num_params - 1
+        return num_params
+
+
+def flatten_return_type(type):
+    if isinstance(type, TupleType):
+        return_types = []
+        for elem_type in type.elements():
+            return_types.append(elem_type)
+        return return_types
+    else:
+        return [type]
 
 
 def parse_type_line(type_line):
@@ -102,62 +137,22 @@ def parse_type_line(type_line):
     except SyntaxError:
         raise RuntimeError("Failed to parse the return type of a type annotation")
 
-    return [ann_to_type(ann) for ann in arg_ann], ann_to_type(ret_ann)
+    arg_types = [ann_to_type(ann) for ann in arg_ann]
+    ret_types = flatten_return_type(ann_to_type(ret_ann))
 
-
-def default_signature(fn, source, _n_arguments, _n_binders):
-    """Returns the default signature for fn.
-
-    The current formula is to use the source (if available) to determine the
-    number of inputs and outputs, and set all their types as tensors.
-    If the source is missing, we fall back to the numbers provided by the compiler,
-    to make sure we don't cause an error there (although type mismatches can still happen).
-
-    This method also accounts for the self argument if fn is a method.
-    """
-    if _n_binders is None:
-        raise RuntimeError("default_signature needs to know the number of binders")
-    if source is None and _n_arguments is None:
-        raise RuntimeError("default_signature needs either the source or the number of arguments")
-
-    ret_type = TupleType([DynamicType() for _ in range(_n_binders)])
-    if source is not None:
-        py_ast = ast.parse(source)
-        if len(py_ast.body) != 1 or not isinstance(py_ast.body[0], ast.FunctionDef):
-            raise RuntimeError("expected a single top-level function")
-        py_def = py_ast.body[0]
-        # TODO: ideally we'd ignore the type of varargs entirely, but we currently don't
-        # allow passing in anything else than tensors anyway.
-        if py_def.args.vararg is not None:
-            arg_types = [DynamicType()] * _n_arguments
-        else:
-            arg_types = [DynamicType() for _ in py_def.args.args]
-            if inspect.ismethod(fn):
-                arg_types = arg_types[1:]
-    else:
-        arg_types = [DynamicType()] * _n_arguments
-
-    return arg_types, ret_type
-
-
-_def_end_regex = re.compile(r'.*\)\s*:.*')
+    return arg_types, ret_types
 
 
 def get_type_line(source):
     """Tries to find the line containing a comment with the type annotation."""
     lines = source.split('\n')
 
-    def strip_comment(line):
-        return line[:line.index('#') if '#' in line else None]
+    type_line = None
+    for line in lines:
+        if '# type:' in line:
+            type_line = line.strip()
+            break
 
-    i = 0
-    while not _def_end_regex.match(strip_comment(lines[i])):
-        i += 1
-    i += 1
-
-    type_line = lines[i].strip()
-    if not type_line.startswith('# type:'):
-        return None
     return type_line
 
 
@@ -194,17 +189,21 @@ def try_real_annotations(fn):
         # sig.empty is really annoying so convert it to None
         return ann if ann is not sig.empty else None
 
-    param_types = [ann_to_type(as_ann(p.annotation))
-                   for p in sig.parameters.values()]
-    return_type = ann_to_type(as_ann(sig.return_annotation))
-    return param_types, return_type
+    arg_types = [ann_to_type(as_ann(p.annotation))
+                 for p in sig.parameters.values()]
+    return_types = flatten_return_type(ann_to_type(as_ann(sig.return_annotation)))
+    return arg_types, return_types
 
 
 def ann_to_type(ann):
     if ann is None:
-        return DynamicType()
+        return DynamicType.get()
     elif ann is torch.Tensor:
-        return DynamicType()
+        return DynamicType.get()
     elif is_tuple(ann):
         return TupleType([ann_to_type(a) for a in ann.__args__])
+    elif ann is float:
+        return FloatType.get()
+    elif ann is int:
+        return IntType.get()
     raise ValueError("The only supported annotations kinds are Tensor and Tuple[...]")

@@ -9,6 +9,6 @@ namespace torch { namespace jit {
 //
 // In the future, if we need more passes like this, we should convert this
 // into a generic canonicalization pass.
-void DecomposeAddmm(const std::shared_ptr<Graph>& graph);
+TORCH_API void DecomposeAddmm(const std::shared_ptr<Graph>& graph);
 
 }}

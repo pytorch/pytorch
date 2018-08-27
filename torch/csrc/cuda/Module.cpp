@@ -7,6 +7,7 @@
 #include <sstream>
 #include <TH/TH.h>
 #include <ATen/ATen.h>
+#include "ATen/cuda/CUDAContext.h"
 #include <THC/THCCachingAllocator.h>
 #ifdef USE_NCCL
 #include <nccl.h>
@@ -117,9 +118,9 @@ PyObject * THCPModule_getRNGState(PyObject *_unused)
   using namespace at;
   using namespace torch::autograd;
   HANDLE_TH_ERRORS
-  auto tensor = VariableType::getType(CPU(kByte))->tensor();
-  THCRandom_getRNGState(state, (THByteTensor*)tensor.unsafeGetTH(false));
-  return THPVariable_Wrap(tensor);
+  Variable var = VariableType::getType(CPU(kByte))->tensor();
+  THCRandom_getRNGState(state, (THByteTensor*)(var.data().unsafeGetTensorImpl()));
+  return THPVariable_Wrap(var);
   END_HANDLE_TH_ERRORS
 }
 
@@ -131,7 +132,7 @@ PyObject * THCPModule_setRNGState(PyObject *_unused, PyObject *obj)
         Py_TYPE(obj)->tp_name);
   }
   auto& tensor = THPVariable_UnpackData(obj);
-  THCRandom_setRNGState(state, (THByteTensor*)tensor.unsafeGetTH(false));
+  THCRandom_setRNGState(state, (THByteTensor*)tensor.unsafeGetTensorImpl());
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -309,7 +310,7 @@ static void bindCudaDeviceProperties(PyObject* module) {
       return stream.str();
     });
   m.def("_get_device_properties", [](int device) -> cudaDeviceProp * {
-    return at::globalContext().getDeviceProperties(device);
+    return at::cuda::getDeviceProperties(device);
   }, py::return_value_policy::reference);
 }
 
@@ -339,11 +340,7 @@ static PyObject * THCPModule_initExtension(PyObject *self)
   bool has_magma = false;
 #endif
 
-#ifdef CUDA_HALF_TENSOR
   bool has_half = true;
-#else
-  bool has_half = false;
-#endif
 
   auto set_module_attr = [&](const char* name, PyObject* v) {
     if (PyObject_SetAttrString(m, name, v) < 0) {

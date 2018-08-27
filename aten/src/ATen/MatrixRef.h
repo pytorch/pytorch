@@ -1,6 +1,6 @@
 #pragma once
-#include <ATen/ArrayRef.h>
 #include <ATen/Utils.h>
+#include <ATen/core/ArrayRef.h>
 
 #include <vector>
 

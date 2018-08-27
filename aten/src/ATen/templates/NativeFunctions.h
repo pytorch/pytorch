@@ -35,12 +35,12 @@ inline Tensor from_blob(
     void* data,
     IntList sizes,
     const TensorOptions& options = {}) {
-  return native::from_blob(data, sizes, [](void*) {}, options);
+  return native::from_blob(data, sizes, /*deleter=*/[](void*) {}, options);
 }
 
 // These functions are defined in native/TensorFactories.cpp.
 #define TENSOR(T, S, _1)                                               \
-  Tensor tensor(ArrayRef<T> values, const TensorOptions& options);     \
+  AT_API Tensor tensor(ArrayRef<T> values, const TensorOptions& options);     \
   inline Tensor tensor(                                                \
       std::initializer_list<T> values, const TensorOptions& options) { \
     return native::tensor(ArrayRef<T>(values), options);               \

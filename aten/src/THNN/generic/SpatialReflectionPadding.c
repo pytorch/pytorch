@@ -72,26 +72,24 @@ void THNN_(SpatialReflectionPadding_updateOutput)(THNNState *state,
 
   if (input->dim() == 4)
   {
-    nbatch = input->size[0];
+    nbatch = input->size(0);
     dimw++;
     dimh++;
     dimslices++;
   }
 
   /* input sizes */
-  nslices = input->size[dimslices];
-  iheight = input->size[dimh];
-  iwidth = input->size[dimw];
+  nslices = input->size(dimslices);
+  iheight = input->size(dimh);
+  iwidth = input->size(dimw);
 
-  THArgCheck(pad_l < iwidth && pad_r < iwidth, 4,
-             "Padding size should be less than the corresponding input dimension, "
-             "but got: padding (%d, %d) at dimension %d of input %s",
-             pad_l, pad_r, dimw, _THSizeDesc(input->size, input->dim()).str);
+  AT_CHECK(pad_l < iwidth && pad_r < iwidth,
+           "Argument #4: Padding size should be less than the corresponding input dimension, "
+           "but got: padding (", pad_l, ", ", pad_r, ") at dimension ", dimw, " of input ", input->sizes());
 
-  THArgCheck(pad_t < iheight && pad_b < iheight, 6,
-             "Padding size should be less than the corresponding input dimension, "
-             "but got: padding (%d, %d) at dimension %d of input %s",
-             pad_t, pad_b, dimh, _THSizeDesc(input->size, input->dim()).str);
+  AT_CHECK(pad_t < iheight && pad_b < iheight,
+           "Argument #6: Padding size should be less than the corresponding input dimension, "
+           "but got: padding (", pad_t, ", ", pad_b, ") at dimension ", dimh, " of input ", input->sizes());
 
   /* output sizes */
   oheight = iheight + pad_t + pad_b;
@@ -213,16 +211,16 @@ void THNN_(SpatialReflectionPadding_updateGradInput)(THNNState *state,
 
   if (input->dim() == 4)
   {
-    nbatch = input->size[0];
+    nbatch = input->size(0);
     dimw++;
     dimh++;
     dimslices++;
   }
 
   /* sizes */
-  nslices = input->size[dimslices];
-  iheight = input->size[dimh];
-  iwidth = input->size[dimw];
+  nslices = input->size(dimslices);
+  iheight = input->size(dimh);
+  iwidth = input->size(dimw);
   oheight = iheight + pad_t + pad_b;
   owidth  = iwidth + pad_l + pad_r;
 

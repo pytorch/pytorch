@@ -92,7 +92,6 @@ class CPUSparseLengthsReductionOp : public Operator<CPUContext> {
     return true;
   }
 
- private:
   enum {
     DATA = 0, // Data input.
     WEIGHT = 1, // Weight input used in SparseLengthsWeightedSum

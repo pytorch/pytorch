@@ -1,14 +1,16 @@
 #pragma once
 
+#include <ATen/core/Backend.h>
 #include <ATen/Context.h>
 #include <ATen/Device.h>
 #include <ATen/DeviceGuard.h>
-#include <ATen/Layout.h>
+#include <ATen/core/Layout.h>
 #include <ATen/ScalarType.h>
 #include <ATen/Tensor.h>
 #include <ATen/Type.h>
 
 #include <cstddef>
+#include <iosfwd>
 #include <utility>
 
 namespace at {
@@ -19,7 +21,7 @@ namespace at {
 /// `torch::TensorOptions` subclass of this `TensorOptions`, which changes
 /// `type()` to return a variable type instead of a tensor type, such that
 /// variables are created inside factory methods, instead of tensors.
-struct TensorOptions {
+struct AT_API TensorOptions {
   TensorOptions() : TensorOptions(/*use_thread_local_default_options=*/true) {}
 
   /// Constructs the `TensorOptions` with defaults taken from the thread local
@@ -66,7 +68,7 @@ struct TensorOptions {
       type_ = &type;
     }
     this->dtype(type.scalarType());
-    this->device({type.backend(), device_index});
+    this->device({backendToDeviceType(type.backend()), device_index});
     this->layout(type.layout());
   }
 
@@ -83,7 +85,12 @@ struct TensorOptions {
   /// Constructs a `TensorOptions` object from a backend, forwarded to the
   /// `Device` constructor.
   /* implicit */ TensorOptions(Backend backend)
-      : TensorOptions(Device(backend)) {}
+      : TensorOptions(Device(backendToDeviceType(backend))) {}
+
+  /// Constructs a `TensorOptions` object from a device type, forwarded to the
+  /// `Device` constructor.
+  /* implicit */ TensorOptions(DeviceType device_type)
+      : TensorOptions(Device(device_type)) {}
 
   /// Constructs a `TensorOptions` object with the given dtype.
   /* implicit */ TensorOptions(ScalarType dtype) : TensorOptions() {
@@ -189,9 +196,9 @@ struct TensorOptions {
   Backend backend() const noexcept {
     Backend backend;
     if (device_.type() == Device::Type::CPU) {
-      backend = (layout_ == kStrided) ? kCPU : kSparseCPU;
+      backend = (layout_ == kStrided) ? Backend::CPU : Backend::SparseCPU;
     } else {
-      backend = (layout_ == kStrided) ? kCUDA : kSparseCUDA;
+      backend = (layout_ == kStrided) ? Backend::CUDA : Backend::SparseCUDA;
     }
     return backend;
   }
@@ -277,3 +284,7 @@ inline Tensor Tensor::to(Device device, bool non_blocking) const {
   return detail::to(*this, options().device(device), non_blocking);
 }
 } // namespace at
+
+std::ostream& operator<<(
+    std::ostream& stream,
+    const at::TensorOptions& options);

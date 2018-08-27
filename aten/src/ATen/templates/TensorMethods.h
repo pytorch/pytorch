@@ -19,6 +19,14 @@ inline Tensor Tensor::toType(const Type & t, bool non_blocking) const {
   return t.copy(*this, non_blocking);
 }
 
+inline Tensor Tensor::cpu() const {
+  return toType(type().cpu());
+}
+
+inline Tensor Tensor::cuda() const {
+  return toType(type().cuda());
+}
+
 inline Tensor & Tensor::copy_(const Tensor & src, bool non_blocking) {
   return type().copy_(*this, src, non_blocking);
 }
@@ -54,7 +62,7 @@ AT_FORALL_SCALAR_TYPES(DEFINE_CAST)
 #undef DEFINE_CAST
 
 #define DEFINE_TO_C_TYPE(T,name,_) \
-inline T Tensor::toC##name () const { return pImpl->localScalar().to##name (); }
+inline T Tensor::toC##name () const { return _local_scalar().to##name (); }
 
 AT_FORALL_SCALAR_TYPES(DEFINE_TO_C_TYPE)
 #undef DEFINE_TO_C_TYPE

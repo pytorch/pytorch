@@ -33,6 +33,20 @@ static std::unordered_map<std::string, ParameterType> type_map = {
   {"std::string", ParameterType::STRING},
 };
 
+// TODO: remove this. This is a temporary list of functions that allow Python
+// numbers to bind to Tensors. Some binary ops have separate Tensor and Scalar
+// overloads and binding to the Tensor overload with a number of a different
+// type will trigger a type error.
+static bool should_allow_numbers_as_tensors(const std::string& name) {
+  static std::unordered_set<std::string> allowed = {
+    "add", "add_", "add_out",
+    "div", "div_", "div_out",
+    "mul", "mul_", "mul_out",
+    "sub", "sub_", "sub_out",
+  };
+  return allowed.find(name) != allowed.end();
+}
+
 FunctionParameter::FunctionParameter(const std::string& fmt, bool keyword_only)
   : optional(false)
   , allow_none(false)
@@ -86,7 +100,7 @@ FunctionParameter::FunctionParameter(const std::string& fmt, bool keyword_only)
 bool FunctionParameter::check(PyObject* obj) {
   switch (type_) {
     case ParameterType::TENSOR: {
-      return THPVariable_Check(obj);
+      return THPVariable_Check(obj) || (allow_numbers_as_tensors && THPUtils_checkDouble(obj));
     }
     case ParameterType::SCALAR:
     case ParameterType::DOUBLE: {
@@ -158,6 +172,37 @@ static inline at::optional<int64_t> parse_as_integer(const std::string& s) {
   return (*str_end == 0) ? at::optional<int64_t>(ans) : at::nullopt;
 }
 
+/*
+Parse default value of IntList declared at native_functions.yaml
+
+There are two kinds of default values:
+1. IntList[2] x=1 (where size=2, value={1,1}
+2. IntList x={1,2,3} (where size=3, value={1,2,3}, note that there cannot be space after comma since native_parse.py uses ', ' to split args)
+*/
+static inline std::vector<int64_t> parse_intlist_args(const std::string& s, int64_t size) {
+  size_t n = s.size();
+
+  if (s.empty()) return std::vector<int64_t>();
+
+  // case 1. s is an int (e.g., s=2)
+  if (s[0] != '{') {
+    return std::vector<int64_t>(size, std::stol(s));
+  }
+
+  // case 2. s is a list of dims (e.g., s={1,2})
+
+  // since already checked left brace '{' above, here only checks right brace '}'
+  AT_CHECK(s[n - 1] == '}', "Default value of IntList is missing right brace '}', found ", s[n - 1]);
+
+  auto args = std::vector<int64_t>();
+  std::istringstream ss(s.substr(1, s.length() - 2)); // exclude '{' and '}'
+  std::string tok;
+
+  while(std::getline(ss, tok, ',')) {
+    args.emplace_back(std::stol(tok));
+  }
+  return args;
+}
 
 void FunctionParameter::set_default_str(const std::string& str) {
   if (str == "None") {
@@ -186,7 +231,7 @@ void FunctionParameter::set_default_str(const std::string& str) {
     }
   } else if (type_ == ParameterType::INT_LIST) {
     if (str != "None") {
-      default_intlist.assign(size, std::stoi(str));
+      default_intlist = parse_intlist_args(str, size);
     }
   } else if (type_ == ParameterType::SCALARTYPE) {
     if (str == "None") {
@@ -230,6 +275,8 @@ FunctionSignature::FunctionSignature(const std::string& fmt)
   }
   name = fmt.substr(0, open_paren);
 
+  bool allow_numbers_as_tensors = should_allow_numbers_as_tensors(name);
+
   auto last_offset = open_paren + 1;
   auto next_offset = last_offset;
   bool keyword_only = false;
@@ -256,6 +303,7 @@ FunctionSignature::FunctionSignature(const std::string& fmt)
       keyword_only = true;
     } else {
       params.emplace_back(param_str, keyword_only);
+      params.back().allow_numbers_as_tensors = allow_numbers_as_tensors;
     }
   }
 

@@ -16,7 +16,7 @@
 
 #include "caffe2/core/flags.h"
 #include "caffe2/core/init.h"
-#include "caffe2/core/predictor.h"
+#include "caffe2/predictor/predictor.h"
 #include "caffe2/utils/proto_utils.h"
 
 CAFFE2_DEFINE_string(init_net, "", "The given path to the init protobuffer.");
@@ -42,8 +42,8 @@ void run() {
   LOG(INFO) << "Predict net: " << ProtoDebugString(predict_net);
   auto predictor = caffe2::make_unique<Predictor>(init_net, predict_net);
   LOG(INFO) << "Checking that a null forward-pass works";
-  Predictor::TensorVector inputVec, outputVec;
-  predictor->run(inputVec, &outputVec);
+  Predictor::TensorList inputVec, outputVec;
+  (*predictor)(inputVec, &outputVec);
   CAFFE_ENFORCE_GT(outputVec.size(), 0);
 }
 }

@@ -2,7 +2,8 @@
 
 // ${generated_comment}
 
-#include "ATen/Generator.h"
+#include "ATen/Device.h"
+#include "ATen/core/Layout.h"
 #include "ATen/Scalar.h"
 #include "ATen/ScalarType.h"
 #include "ATen/SparseTensorRef.h"
@@ -10,12 +11,10 @@
 #include "ATen/TensorAccessor.h"
 #include "ATen/TensorBase.h"
 #include "ATen/TensorImpl.h"
-#include "ATen/Utils.h"
-#include "ATen/Device.h"
-#include "ATen/Layout.h"
-#include "ATen/optional.h"
+#include "ATen/core/optional.h"
 
 namespace at {
+struct Generator;
 struct Type;
 struct Tensor;
 struct TensorOptions;
@@ -42,7 +41,7 @@ namespace at {
 //
 // Note that Tensor can also be NULL, i.e. it is not associated with any underlying TensorImpl, and
 // special care must be taken to handle this.
-struct Tensor : public detail::TensorBase {
+struct AT_API Tensor : public detail::TensorBase {
   using TensorBase = detail::TensorBase;
   Tensor() : TensorBase() {}
   Tensor(TensorImpl * self, bool retain) : TensorBase(self, retain) {}
@@ -80,7 +79,7 @@ struct Tensor : public detail::TensorBase {
   Type & type() const {
     return pImpl->type();
   }
-  std::unique_ptr<Storage> storage() const {
+  const Storage& storage() const {
     return pImpl->storage();
   }
   inline Tensor toType(const Type & t, bool non_blocking=false) const;
@@ -114,10 +113,6 @@ struct Tensor : public detail::TensorBase {
   template<typename T>
   T * data() const;
 
-  void * unsafeGetTH(bool retain) const {
-    return pImpl->unsafeGetTH(retain);
-  }
-
   // non-retaining
   TensorImpl * unsafeGetTensorImpl() const {
     return pImpl;
@@ -138,11 +133,13 @@ struct Tensor : public detail::TensorBase {
   #undef TO_C_TYPE
 
   template<typename T, size_t N>
-  TensorAccessor<T,N> accessor() const {
+  TensorAccessor<T,N> accessor() const& {
     static_assert(N > 0, "accessor is used for indexing tensor, for scalars use *data<T>()");
     AT_CHECK(dim() == N, "expected ", N, " dims but tensor has ", dim());
     return TensorAccessor<T,N>(data<T>(),sizes().data(),strides().data());
   }
+  template<typename T, size_t N>
+  TensorAccessor<T,N> accessor() && = delete;
 
   Tensor operator-() const;
   Tensor& operator+=(const Tensor & other);
@@ -156,6 +153,9 @@ struct Tensor : public detail::TensorBase {
   Tensor operator[](Scalar index) const;
   Tensor operator[](Tensor index) const;
   Tensor operator[](int64_t index) const;
+
+  Tensor cpu() const;
+  Tensor cuda() const;
 
   // ~~~~~ Autograd API ~~~~~
 
@@ -204,7 +204,7 @@ struct Tensor : public detail::TensorBase {
   friend struct WeakTensor;
 };
 
-struct WeakTensor : public detail::WeakTensorBase {
+struct AT_API WeakTensor : public detail::WeakTensorBase {
   using WeakTensorBase = detail::WeakTensorBase;
   WeakTensor() : WeakTensorBase() {}
   WeakTensor(TensorImpl * self, bool retain) : WeakTensorBase(self, retain) {}

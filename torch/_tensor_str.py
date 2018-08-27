@@ -2,6 +2,7 @@ import math
 import torch
 from functools import reduce
 from sys import float_info
+from torch._six import inf, nan
 
 
 class __PrinterOptions(object):
@@ -50,7 +51,7 @@ def set_printoptions(
             PRINT_OPTS.linewidth = 80
         elif profile == "full":
             PRINT_OPTS.precision = 4
-            PRINT_OPTS.threshold = float('inf')
+            PRINT_OPTS.threshold = inf
             PRINT_OPTS.edgeitems = 3
             PRINT_OPTS.linewidth = 80
 
@@ -101,8 +102,8 @@ class _Formatter(object):
 
             else:
                 copy_abs = copy.abs()
-                pos_inf_mask = copy_abs.eq(float('inf'))
-                neg_inf_mask = copy_abs.eq(float('-inf'))
+                pos_inf_mask = copy_abs.eq(inf)
+                neg_inf_mask = copy_abs.eq(-inf)
                 nan_mask = copy_abs.ne(copy)
                 invalid_value_mask = pos_inf_mask + neg_inf_mask + nan_mask
                 if invalid_value_mask.all():
@@ -212,8 +213,8 @@ def get_summarized_data(self):
         else:
             return self
     if self.size(0) > 2 * PRINT_OPTS.edgeitems:
-        start = [get_summarized_data(self[i]).view(-1) for i in range(0, PRINT_OPTS.edgeitems)]
-        end = ([get_summarized_data(self[i]).view(-1)
+        start = [get_summarized_data(self[i]).reshape(-1) for i in range(0, PRINT_OPTS.edgeitems)]
+        end = ([get_summarized_data(self[i]).reshape(-1)
                for i in range(len(self) - PRINT_OPTS.edgeitems, len(self))])
         return torch.cat((start + end))
     else:

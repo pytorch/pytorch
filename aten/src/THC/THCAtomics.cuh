@@ -4,8 +4,7 @@
 #include "THC.h"
 #include "THCHalf.h"
 #include "THCNumerics.cuh"
-
-namespace at { struct Half; }
+#include "ATen/ATen.h"
 
 template <typename T, size_t n>
 struct AtomicAddIntegerImpl;
@@ -96,7 +95,6 @@ static inline __device__ void atomicAdd(int64_t *address, int64_t val) {
   AtomicAddIntegerImpl<int64_t, sizeof(int64_t)>()(address, val);
 }
 
-#ifdef CUDA_HALF_TENSOR
 static inline  __device__ void atomicAdd(half *address, half val) {
   unsigned int * address_as_ui =
     (unsigned int *) ((char *)address - ((size_t)address & 2));
@@ -119,10 +117,9 @@ static inline  __device__ void atomicAdd(half *address, half val) {
     old = atomicCAS(address_as_ui, assumed, old);
   } while (assumed != old);
 }
-static inline __device__ void atomicAdd(at::Half *address, half val) {
-  return atomicAdd(reinterpret_cast<half*>(address), val);
+static inline __device__ void atomicAdd(at::Half *address, at::Half val) {
+  atomicAdd(reinterpret_cast<half*>(address), val);
 }
-#endif
 
 #if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 600 || CUDA_VERSION < 8000)
 // from CUDA C Programmic Guide

@@ -9,7 +9,7 @@ from torch.nn.functional import binary_cross_entropy_with_logits
 
 class Bernoulli(ExponentialFamily):
     r"""
-    Creates a Bernoulli distribution parameterized by `probs` or `logits`.
+    Creates a Bernoulli distribution parameterized by :attr:`probs` or :attr:`logits` (but not both).
 
     Samples are binary (0 or 1). They take the value `1` with probability `p`
     and `0` with probability `1 - p`.

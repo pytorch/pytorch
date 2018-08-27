@@ -1,41 +1,54 @@
 #pragma once
 
-#include "ATen/Scalar.h"
+#include <ATen/StorageImpl.h>
 
 namespace at {
 
-struct Type;
-
-struct Storage {
-  static const char RESIZABLE = 2;
-
+struct AT_API Storage {
+public:
   Storage() {}
-  Storage(const Storage& other) = delete;
-  void operator=(const Storage&) = delete;
+  Storage(StorageImpl* storage_impl) : storage_impl_(c10::intrusive_ptr<StorageImpl>::reclaim(storage_impl)) {}
+  Storage(
+      at::ScalarType,
+      size_t size,
+      Allocator* allocator,
+      bool resizable = false);
+  Storage(
+      at::ScalarType,
+      at::DataPtr,
+      size_t size,
+      const std::function<void(void*)>& deleter,
+      bool resizable = false);
 
-  virtual ~Storage() {};
-  virtual size_t elementSize() const = 0;
-  virtual size_t size() const = 0;
-  virtual void* data() = 0;
-  virtual const void* data() const = 0;
-  virtual Storage& retain() = 0;
-  virtual Storage& free() = 0;
-  virtual void * unsafeGetTH(bool retain) const = 0;
+  template <typename T>
+  T* data() const { return storage_impl_->data<T>(); }
 
-  virtual Storage& resize(int64_t new_size) = 0;
+  template <typename T>
+  T* unsafe_data() const { return storage_impl_->unsafe_data<T>(); }
 
-  virtual Type & type() const = 0;
-  virtual int getDevice() const = 0;
-  virtual const char * toString() const = 0;
+  size_t elementSize() const { return storage_impl_->elementSize(); }
+  ptrdiff_t size() const { return storage_impl_->size(); }
+  bool resizable() const { return storage_impl_->resizable(); }
+  // get() use here is to get const-correctness
+  void* data() const { return storage_impl_.get()->data(); }
+  const at::DataPtr& data_ptr() const { return storage_impl_->data_ptr(); }
+  DeviceType device_type() const { return storage_impl_->device_type(); }
+  at::Allocator* allocator() const { return storage_impl_.get()->allocator(); }
+  at::ScalarType scalar_type() const { return storage_impl_->scalar_type(); }
+  at::Device device() const { return storage_impl_->device(); }
 
-  virtual Storage& fill(Scalar value) = 0;
-  virtual Storage& set(size_t ind, Scalar value) = 0;
-  virtual Storage& fast_set(size_t ind, Scalar value) = 0;
-  virtual Scalar get(size_t ind) = 0;
-  virtual Scalar fast_get(size_t ind) = 0;
+  StorageImpl* unsafeReleaseStorageImpl() {
+    return storage_impl_.release();
+  }
+  StorageImpl* unsafeGetStorageImpl() const noexcept {
+    return storage_impl_.get();
+  }
+  operator bool() const {
+    return storage_impl_;
+  }
 
-  virtual void set_flag(char flag) = 0;
-  virtual void clear_flag(char flag) = 0;
+ protected:
+  c10::intrusive_ptr<StorageImpl> storage_impl_;
 };
 
 } // namespace at

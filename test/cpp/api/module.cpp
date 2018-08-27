@@ -120,7 +120,7 @@ TEST_CASE("module/as") {
   REQUIRE(unit.as<AGIUnit>() == &unit);
 }
 
-TEST_CASE("module/conversions", "[cuda]") {
+TEST_CASE("module/conversions", "[multi-cuda]") {
   torch::manual_seed(0);
   Linear module(128, 64);
   SECTION("starts as float on CPU") {
@@ -184,7 +184,8 @@ TEST_CASE("module/clone") {
   SECTION(
       "a module that overrides clone() does not throw when clone() is called ") {
     struct Cloneable : Module {
-      std::shared_ptr<Module> clone() const override {
+      std::shared_ptr<Module> clone(
+          at::optional<torch::Device> device = at::nullopt) const override {
         return nullptr;
       }
     };
@@ -210,6 +211,8 @@ TEST_CASE("module/clone") {
 
     auto module = std::make_shared<TestModule>();
 
+    torch::NoGradGuard no_grad;
+
     auto module2 = module->clone();
     auto params1 = module->parameters();
     auto params2 = module2->parameters();
@@ -218,7 +221,7 @@ TEST_CASE("module/clone") {
     for (auto& param : params1) {
       REQUIRE(!pointer_equal(param.value, params2[param.key]));
       REQUIRE(param->allclose(params2[param.key]));
-      param->data().add_(2);
+      param->add_(2);
     }
     for (auto& param : params1) {
       REQUIRE(!param->allclose(params2[param.key]));
@@ -231,7 +234,7 @@ TEST_CASE("module/clone") {
     for (auto& buffer : buffers1) {
       REQUIRE(!pointer_equal(buffer.value, buffers2[buffer.key]));
       REQUIRE(buffer->allclose(buffers2[buffer.key]));
-      buffer->data().add_(2);
+      buffer->add_(2);
     }
     for (auto& buffer : buffers1) {
       REQUIRE(!buffer->allclose(buffers2[buffer.key]));
@@ -249,7 +252,10 @@ TEST_CASE("module/clone") {
       torch::Tensor weight;
     };
     auto module = std::make_shared<TestModule>();
-    module->weight.data() += 1;
+    {
+      torch::NoGradGuard no_grad;
+      module->weight += 1;
+    }
     REQUIRE(pointer_equal(module->weight, module->parameters()["weight"]));
     REQUIRE(module->weight.allclose(module->parameters()["weight"]));
 
@@ -285,10 +291,13 @@ TEST_CASE("module/clone") {
     };
 
     auto a = std::make_shared<NestedModule>();
-    a->module->weight.data() += 1;
-    a->module->value = 123;
+    {
+      torch::NoGradGuard no_grad;
+      a->module->weight += 1;
+      a->module->value = 123;
+    }
 
-    auto b = std::static_pointer_cast<NestedModule>(a->clone());
+    auto b = std::dynamic_pointer_cast<NestedModule>(a->clone());
 
     REQUIRE(!pointer_equal(b->module->weight, a->module->weight));
     REQUIRE(
@@ -296,6 +305,56 @@ TEST_CASE("module/clone") {
     REQUIRE(b->module->parameters()["weight"].allclose(a->module->weight));
     REQUIRE(b->module->weight.allclose(a->module->weight));
     REQUIRE(b->module->value == a->module->value);
+  }
+}
+
+TEST_CASE("module/clone-to-device", "[cuda]") {
+  struct TestModule : public Cloneable<TestModule> {
+    TestModule() {
+      reset();
+    }
+    void reset() override {
+      l1 = register_module("l1", Linear(10, 3));
+      l2 = register_module("l2", Linear(3, 5));
+      l3 = register_module("l3", Linear(5, 100));
+      buffer = register_buffer("buf", torch::ones({2, 2}));
+    }
+
+    Linear l1{nullptr}, l2{nullptr}, l3{nullptr};
+    torch::Tensor buffer;
+  };
+
+  SECTION("Cloning preserves the device of parameters/buffers") {
+    TestModule m;
+    torch::Device device(torch::kCUDA, 0);
+
+    m.to(device);
+
+    auto clone = m.clone();
+    for (const auto& parameter : clone->parameters()) {
+      REQUIRE(parameter->device().type() == device.type());
+      REQUIRE(parameter->device().index() == device.index());
+    }
+    for (const auto& buffer : clone->buffers()) {
+      REQUIRE(buffer->device().type() == device.type());
+      REQUIRE(buffer->device().index() == device.index());
+    }
+  }
+
+  SECTION(
+      "Cloning to a particular device places all parameters/buffers there") {
+    TestModule m;
+    torch::Device device(torch::kCUDA, 1);
+    // everything is on CPU here
+    auto clone = m.clone(device);
+    for (const auto& parameter : clone->parameters()) {
+      REQUIRE(parameter->device().type() == device.type());
+      REQUIRE(parameter->device().index() == device.index());
+    }
+    for (const auto& buffer : clone->buffers()) {
+      REQUIRE(buffer->device().type() == device.type());
+      REQUIRE(buffer->device().index() == device.index());
+    }
   }
 }
 
@@ -348,5 +407,33 @@ TEST_CASE("module/buffers") {
     REQUIRE(buffers.contains("a"));
     REQUIRE(buffers.contains("b"));
     REQUIRE(buffers.contains("c"));
+  }
+}
+
+TEST_CASE("module/default-constructor") {
+  struct AImpl : torch::nn::Module {
+    AImpl() : x_(123) {}
+    AImpl(int x) : x_(x) {}
+    int x_;
+  };
+  TORCH_MODULE(A);
+
+  {
+    A a;
+    REQUIRE(a);
+    REQUIRE(!a.is_empty());
+    REQUIRE(a->x_ == 123);
+  }
+  {
+    A a(5);
+    REQUIRE(a);
+    REQUIRE(!a.is_empty());
+    REQUIRE(a->x_ == 5);
+  }
+  {
+    A a = nullptr;
+    REQUIRE(!a);
+    REQUIRE(a.is_empty());
+    REQUIRE_THROWS_WITH(a->x_, StartsWith("Accessing empty ModuleHolder"));
   }
 }

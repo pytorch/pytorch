@@ -16,7 +16,7 @@ static inline void THNN_(SpatialUpSamplingNearest_shapeCheck)
              " but got input (H: %d, W: %d) output (H: %d, W: %d)",
              inputHeight, inputWidth, outputHeight, outputWidth);
   if (input != NULL) {
-     THCUNN_argCheck(state, input->_dim() == 4, 2, input,
+     THCUNN_argCheck(state, THTensor_nDimensionLegacyAll(input) == 4, 2, input,
                      "4D input tensor expected but got: %s");
   }
 

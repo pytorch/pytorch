@@ -14,7 +14,7 @@ namespace torch { namespace jit { namespace python {
 struct IODescriptor {
   struct VariableMetadata {
     VariableMetadata(const autograd::Variable& var)
-      : sizes(var.sizes())
+      : sizes(var.sizes().vec())
       , type(var.type().scalarType())
       , device(var.type().is_cuda() ? var.get_device() : -1)
       , requires_grad(var.requires_grad()) {}
@@ -62,7 +62,7 @@ struct IODescriptor {
 };
 
 static inline std::ostream& operator<<(std::ostream& out, const IODescriptor::VariableMetadata& meta) {
-  auto & t = at::getType(meta.device < 0 ? at::kCPU : at::kCUDA, meta.type);
+  auto & t = at::getType(meta.device < 0 ? at::Backend::CPU : at::Backend::CUDA, meta.type);
   out << t << "(requires_grad=" << meta.requires_grad;
   if (meta.device > 0) {
     out << ", device=" << meta.device;
@@ -104,7 +104,7 @@ struct ParsedArgs {
 
 
 ParsedArgs flatten(py::handle obj);
-PyObject* unflatten(at::ArrayRef<autograd::Variable> outputs,
+PyObject* unflatten(at::ArrayRef<autograd::Variable> vars,
                     const IODescriptor& structure);
 
 }}} // namespace torch::jit::python

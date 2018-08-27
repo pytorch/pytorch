@@ -99,7 +99,16 @@ void resetConvForFusion(repr::NNGraph::NodeRef convNode, int fusion_type) {
   arg->set_i(fusion_type);
 }
 
-bool fuseConvBNHelperForIdeep(repr::NNModule* nn, caffe2::Workspace* ws) {
+bool fuseConvBNAndAffChHelperForIdeep(repr::NNModule* nn, caffe2::Workspace* ws) {
+  auto isAffineChannelNode = [](const repr::NNGraph::NodeRef& node) {
+    if (!repr::nn::is<repr::NeuralNetOperator>(node)) {
+      return false;
+    }
+    auto maybeAffCh = repr::nn::get<repr::NeuralNetOperator>(node);
+    auto maybeAffChDef = getOpDef(*maybeAffCh);
+    return maybeAffChDef.type() == "AffineChannel";
+  };
+
   for (auto node_pair : repr::nn::dataIterator<repr::Conv>(nn->dataFlow)) {
     bool no_bias = false;
     repr::NNGraph::NodeRef convNode;
@@ -123,13 +132,18 @@ bool fuseConvBNHelperForIdeep(repr::NNModule* nn, caffe2::Workspace* ws) {
       continue;
     }
 
+    bool isBN;
     auto consumer = consumers.front();
-    if (!repr::nn::is<repr::BatchNormalization>(consumer)) {
+    if (repr::nn::is<repr::BatchNormalization>(consumer)) {
+      isBN = true;
+    } else if (isAffineChannelNode(consumer)) {
+      isBN = false;
+    } else {
       continue;
     }
-    auto bnNode = consumer;
-    auto bn = repr::nn::get<repr::BatchNormalization>(bnNode);
-    auto bnOutput = repr::nn::getOutputs(bnNode).front();
+    auto bnOrAffChNode = consumer;
+    auto bn = isBN ? repr::nn::get<repr::BatchNormalization>(bnOrAffChNode) : nullptr;
+    auto bnOrAffChOutput = repr::nn::getOutputs(bnOrAffChNode).front();
 
     auto convInputs = repr::nn::getInputs(convNode);
     if (convInputs.size() < 2) {
@@ -137,38 +151,46 @@ bool fuseConvBNHelperForIdeep(repr::NNModule* nn, caffe2::Workspace* ws) {
       continue;
     }
 
-    auto bnInputs = repr::nn::getInputs(bnNode);
-    if (bnInputs.size() < 5) {
-      LOG(WARNING) << "Invalid batch normalization input size";
+    auto bnOrAffChInputs = repr::nn::getInputs(bnOrAffChNode);
+    int numInputs = isBN ? 5 : 3;
+    if (bnOrAffChInputs.size() < numInputs) {
+      LOG(WARNING) << "Invalid input size: "
+                   << bnOrAffChInputs.size()
+                   << ", expect " << numInputs;
       continue;
     }
 
     // When no bias, borrow BN bias
     if (convInputs.size() < 3) {
       no_bias = true;
-      nn->dataFlow.createEdge(bnInputs[2], convNode);
+      nn->dataFlow.createEdge(bnOrAffChInputs[2], convNode);
       convInputs = repr::nn::getInputs(convNode);
     }
 
-#define EXPOSE_TENSOR_DATA(name, index, nodes)                           \
-  auto* name = getTensor<itensor>(getBlob(nodes[index], ws));            \
-  if (name == nullptr) {                                                 \
-    LOG(WARNING) << #name " not a IDEEP tensor";                         \
-    continue;                                                            \
-  }                                                                      \
-  itensor name##Tensor({name->get_dims(), name->get_data_type()});       \
-  name##Tensor.reorder_from(*name);                                      \
-  CAFFE_ENFORCE(                                                         \
+#define EXPOSE_TENSOR_DATA(name, index, nodes, need_init)                \
+  itensor* name = nullptr;                                               \
+  itensor name##Tensor;                                                  \
+  float* name##Data = nullptr;                                           \
+  if (need_init) {                                                       \
+    name = getTensor<itensor>(getBlob(nodes[index], ws));                \
+    if (name == nullptr) {                                               \
+      LOG(WARNING) << #name " not a IDEEP tensor";                       \
+      continue;                                                          \
+    }                                                                    \
+    name##Tensor.resize(name->get_dims(), name->get_data_type());        \
+    name##Tensor.reorder_from(*name);                                    \
+    CAFFE_ENFORCE(                                                       \
       name##Tensor.is_public_format(), #name " not with public format"); \
-  auto* name##Data = static_cast<float*>(name##Tensor.get_data_handle());
+    name##Data = static_cast<float*>(name##Tensor.get_data_handle());    \
+  }
 
-    EXPOSE_TENSOR_DATA(filter, 1, convInputs);
-    EXPOSE_TENSOR_DATA(biasConv, 2, convInputs);
+    EXPOSE_TENSOR_DATA(filter, 1, convInputs, true);
+    EXPOSE_TENSOR_DATA(biasConv, 2, convInputs, true);
 
-    EXPOSE_TENSOR_DATA(scale, 1, bnInputs);
-    EXPOSE_TENSOR_DATA(biasBN, 2, bnInputs);
-    EXPOSE_TENSOR_DATA(mean, 3, bnInputs);
-    EXPOSE_TENSOR_DATA(variance, 4, bnInputs);
+    EXPOSE_TENSOR_DATA(scale, 1, bnOrAffChInputs, true);
+    EXPOSE_TENSOR_DATA(biasBNOrAffCh, 2, bnOrAffChInputs, true);
+    EXPOSE_TENSOR_DATA(mean, 3, bnOrAffChInputs, isBN);
+    EXPOSE_TENSOR_DATA(variance, 4, bnOrAffChInputs, isBN);
 
 #undef EXPOSE_TENSOR_DATA
 
@@ -176,24 +198,30 @@ bool fuseConvBNHelperForIdeep(repr::NNModule* nn, caffe2::Workspace* ws) {
     auto chwDim = filterTensor.get_dim(1) * filterTensor.get_dim(2) *
         filterTensor.get_dim(3);
     for (auto c = 0; c < filterTensor.get_dim(0); ++c) {
-      float coeff =
-          scaleData[c] / std::sqrt(varianceData[c] + bn->getEpsilon());
+      float mean_val = 0;
+      float variance_val = 1;
+      if (isBN) {
+        mean_val = meanData[c];
+        variance_val = std::sqrt(varianceData[c] + bn->getEpsilon());
+      }
+      float coeff = scaleData[c] / variance_val;
       for (auto i = 0; i < chwDim; ++i) {
         filterData[c * chwDim + i] *= coeff;
       }
+
       if (no_bias) {
-        biasConvData[c] = biasBNData[c] - meanData[c] * coeff;
+        biasConvData[c] = biasBNOrAffChData[c] - mean_val * coeff;
       } else {
         biasConvData[c] =
-            biasBNData[c] + (biasConvData[c] - meanData[c]) * coeff;
+          biasBNOrAffChData[c] + (biasConvData[c] - mean_val) * coeff;
       }
     }
 
     filter->reorder_from(filterTensor);
     biasConv->reorder_from(biasConvTensor);
-    nn->dataFlow.replaceNode(convOutput, bnOutput);
+    nn->dataFlow.replaceNode(convOutput, bnOrAffChOutput);
 
-    nn->dataFlow.deleteNode(bnNode);
+    nn->dataFlow.deleteNode(bnOrAffChNode);
     nn->dataFlow.deleteNode(convOutput);
 
     return true;
@@ -202,8 +230,8 @@ bool fuseConvBNHelperForIdeep(repr::NNModule* nn, caffe2::Workspace* ws) {
   return false;
 }
 
-void fuseConvBNForIdeep(repr::NNModule* nn, caffe2::Workspace* ws) {
-  while (fuseConvBNHelperForIdeep(nn, ws)) {
+void fuseConvBNAndAffChForIdeep(repr::NNModule* nn, caffe2::Workspace* ws) {
+  while (fuseConvBNAndAffChHelperForIdeep(nn, ws)) {
   }
 }
 
@@ -363,6 +391,35 @@ void enforceFusionInplaceForIdeep(repr::NNModule* nn) {
   }
 }
 
+void setPoolingInferenceMode(repr::NNModule *nn) {
+  for (auto node_pair : repr::nn::dataIterator<repr::MaxPool>(nn->dataFlow)) {
+    repr::NNGraph::NodeRef maxPoolNode;
+    repr::MaxPool *maxPool;
+    std::tie(maxPool, maxPoolNode) = node_pair;
+
+    if (!isOnIdeepDevice(*maxPool)) {
+      LOG(WARNING) << "Not a IDEEP operator";
+      continue;
+    }
+
+    auto *op = getMutableOpDef(*maxPool);
+    bool found_training_mode = false;
+    for (auto &arg : *op->mutable_arg()) {
+      if (arg.name() == "training_mode") {
+        arg.set_i(0);
+        found_training_mode = true;
+        break;
+      }
+    }
+
+    if (!found_training_mode) {
+      auto *arg = op->add_arg();
+      arg->set_name("training_mode");
+      arg->set_i(0);
+    }
+  }
+}
+
 void OptimizeForIdeep(
     repr::NNModule* nn,
     caffe2::Workspace* ws,
@@ -372,13 +429,15 @@ void OptimizeForIdeep(
     return;
   }
 
-  fuseConvBNForIdeep(nn, ws);
+  fuseConvBNAndAffChForIdeep(nn, ws);
 
   fuseConvSumForIdeep(nn, ws);
 
   fuseActivationForIdeep(nn);
 
   enforceFusionInplaceForIdeep(nn);
+
+  setPoolingInferenceMode(nn);
 }
 
 #endif // CAFFE2_USE_IDEEP

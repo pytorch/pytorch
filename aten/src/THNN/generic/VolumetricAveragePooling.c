@@ -47,11 +47,11 @@ static inline void THNN_(VolumetricAveragePooling_shapeCheck)(
   THNN_ARGCHECK(!input->is_empty() && (input->dim() == 4 || input->dim() == 5), 2, input,
                 "non-empty 4D or 5D (batch mode) tensor expected for input, but got: %s");
 
-  THArgCheck(input->size[dimw] >= kW && input->size[dimh] >= kH
-             && input->size[dimt] >= kT, 2,
+  THArgCheck(input->size(dimw) >= kW && input->size(dimh) >= kH
+             && input->size(dimt) >= kT, 2,
              "input image (T: %d H: %d W: %d) smaller than "
              "kernel size (kT: %d kH: %d kW: %d)",
-             input->size[dimt], input->size[dimh], input->size[dimw],
+             input->size(dimt), input->size(dimh), input->size(dimw),
              kT, kH, kW);
 
   // The second argument is argNumber... here is the index of padH.
@@ -61,10 +61,10 @@ static inline void THNN_(VolumetricAveragePooling_shapeCheck)(
             padT, padW, padH, kT, kW, kH);
 
   /* sizes */
-  nslices = input->size[dimN];
-  itime   = input->size[dimt];
-  iheight = input->size[dimh];
-  iwidth  = input->size[dimw];
+  nslices = input->size(dimN);
+  itime   = input->size(dimt);
+  iheight = input->size(dimh);
+  iwidth  = input->size(dimw);
 
   if (ceil_mode) {
     otime   = (int64_t)(ceil((float)(itime   - kT + 2*padT) / dT)) + 1;
@@ -231,10 +231,10 @@ void THNN_(VolumetricAveragePooling_updateOutput)(
   }
 
   /* sizes */
-  nslices = input->size[dimN];
-  itime   = input->size[dimt];
-  iheight = input->size[dimh];
-  iwidth  = input->size[dimw];
+  nslices = input->size(dimN);
+  itime   = input->size(dimt);
+  iheight = input->size(dimh);
+  iwidth  = input->size(dimw);
   if (ceil_mode)
   {
     otime   = (int64_t)(ceil((float)(itime   - kT + 2*padT) / dT)) + 1;
@@ -283,7 +283,7 @@ void THNN_(VolumetricAveragePooling_updateOutput)(
   else  /* batch mode */
   {
     int64_t p;
-    int64_t nBatch = input->size[0];
+    int64_t nBatch = input->size(0);
 
     int64_t istride = nslices * itime * iwidth * iheight;
     int64_t ostride = nslices * otime * owidth * oheight;
@@ -445,13 +445,13 @@ void THNN_(VolumetricAveragePooling_updateGradInput)(
   }
 
   /* sizes */
-  nslices = input->size[dimN];
-  itime = input->size[dimt];
-  iheight = input->size[dimh];
-  iwidth = input->size[dimw];
-  otime = gradOutput->size[dimt];
-  oheight = gradOutput->size[dimh];
-  owidth = gradOutput->size[dimw];
+  nslices = input->size(dimN);
+  itime = input->size(dimt);
+  iheight = input->size(dimh);
+  iwidth = input->size(dimw);
+  otime = gradOutput->size(dimt);
+  oheight = gradOutput->size(dimh);
+  owidth = gradOutput->size(dimw);
 
   /* get raw pointers */
   gradInput_data = THTensor_(data)(gradInput);
@@ -473,7 +473,7 @@ void THNN_(VolumetricAveragePooling_updateGradInput)(
   else /* batch mode */
   {
     int64_t p;
-    int64_t nBatch = input->size[0];
+    int64_t nBatch = input->size(0);
 
     int64_t istride = nslices * itime * iwidth * iheight;
     int64_t ostride = nslices * otime * owidth * oheight;

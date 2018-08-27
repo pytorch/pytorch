@@ -2,6 +2,11 @@
 
 #include <gtest/gtest.h>
 #include "caffe2/core/flags.h"
+#include "caffe2/core/macros.h"
+
+#ifdef CAFFE2_USE_OPENCV
+#include <opencv2/opencv.hpp>
+#endif // CAFFE2_USE_OPENCV
 
 namespace caffe2 {
 
@@ -13,10 +18,10 @@ static void AddConstInput(
   DeviceOption option;
   CPUContext context(option);
   Blob* blob = ws->CreateBlob(name);
-  auto* tensor = blob->GetMutable<TensorCPU>();
+  auto* tensor = blob->GetMutableTensor(CPU);
   tensor->Resize(shape);
   math::Set<float, CPUContext>(
-      tensor->size(), value, tensor->mutable_data<float>(), &context);
+      tensor->size(), value, tensor->template mutable_data<float>(), &context);
   return;
 }
 
@@ -29,10 +34,10 @@ static void AddLinSpacedInput(
   DeviceOption option;
   CPUContext context(option);
   Blob* blob = ws->CreateBlob(name);
-  auto* tensor = blob->GetMutable<TensorCPU>();
+  auto* tensor = blob->GetMutableTensor(CPU);
   tensor->Resize(shape);
   EigenVectorMap<float> tensor_vec(
-      tensor->mutable_data<float>(), tensor->size());
+      tensor->template mutable_data<float>(), tensor->size());
   tensor_vec.setLinSpaced(min_val, max_val);
 
   return;
@@ -46,10 +51,10 @@ static void AddInput(
   DeviceOption option;
   CPUContext context(option);
   Blob* blob = ws->CreateBlob(name);
-  auto* tensor = blob->GetMutable<TensorCPU>();
+  auto* tensor = blob->GetMutableTensor(CPU);
   tensor->Resize(shape);
   EigenVectorMap<float> tensor_vec(
-      tensor->mutable_data<float>(), tensor->size());
+      tensor->template mutable_data<float>(), tensor->size());
   tensor_vec.array() = utils::AsEArrXt(values);
 
   return;
@@ -74,7 +79,7 @@ TEST(GenerateProposalsTest, TestComputeAllAnchors) {
       79, -68, 8, 115, 103, -160, -40, 207, 151, -6, 32, 85, 79, -52, 8, 131,
       103, -144, -40, 223, 151;
 
-  TensorCPU anchors_tensor(vector<TIndex>{anchors.rows(), anchors.cols()});
+  Tensor anchors_tensor(vector<TIndex>{anchors.rows(), anchors.cols()}, CPU);
   Eigen::Map<ERMatXf>(
       anchors_tensor.mutable_data<float>(), anchors.rows(), anchors.cols()) =
       anchors;
@@ -138,7 +143,7 @@ TEST(GenerateProposalsTest, TestComputeAllAnchorsRotated) {
     all_anchors_gt(i, 4) = angles[i % angles.size()];
   }
 
-  TensorCPU anchors_tensor(vector<TIndex>{anchors.rows(), anchors.cols()});
+  Tensor anchors_tensor(vector<TIndex>{anchors.rows(), anchors.cols()}, CPU);
   Eigen::Map<ERMatXf>(
       anchors_tensor.mutable_data<float>(), anchors.rows(), anchors.cols()) =
       anchors;
@@ -566,13 +571,15 @@ TEST(GenerateProposalsTest, TestRealDownSampledRotated) {
   vector<float> bbx_with_angle(num_boxes * 5);
   // bbx (deltas) is in shape (A * 4, H, W). Insert angle delta
   // at each spatial location for each anchor.
-  int i = 0, j = 0;
-  for (int a = 0; a < A; ++a) {
-    for (int k = 0; k < 4 * H * W; ++k) {
-      bbx_with_angle[i++] = bbx[j++];
-    }
-    for (int k = 0; k < H * W; ++k) {
-      bbx_with_angle[i++] = delta_angle;
+  {
+    int i = 0, j = 0;
+    for (int a = 0; a < A; ++a) {
+      for (int k = 0; k < 4 * H * W; ++k) {
+        bbx_with_angle[i++] = bbx[j++];
+      }
+      for (int k = 0; k < H * W; ++k) {
+        bbx_with_angle[i++] = delta_angle;
+      }
     }
   }
 

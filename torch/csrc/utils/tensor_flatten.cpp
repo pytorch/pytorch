@@ -40,7 +40,7 @@ std::vector<TensorGroup> take_tensors(TensorList tensors, size_t size_limit) {
 }
 
 void reorder_tensors_like(std::vector<Tensor>& tensors, TensorList order) {
-  TORCH_ASSERT(tensors.size() == order.size());
+  AT_ASSERT(tensors.size() == order.size());
   std::unordered_map<at::Type*, std::vector<size_t>> type_indices;
   for (size_t i = 0, num_tensors = tensors.size(); i < num_tensors; ++i)
     type_indices[&tensors[i].type()].push_back(i);

@@ -44,7 +44,7 @@ class IDEEPFallbackOp final : public IDEEPOperator {
   IDEEPFallbackOp(const OperatorDef& def, Workspace* ws)
       : IDEEPOperator(def, ws) {
     CAFFE_ENFORCE_EQ(def.device_option().device_type(), IDEEP);
-    OperatorDef base_def_(def);
+    base_def_.CopyFrom(def);
     // base_def_ runs on CPU, so we will set its device option to CPU.
     // Copy to allow random_seed to be correctly propagated.
     base_def_.mutable_device_option()->CopyFrom(def.device_option());
@@ -74,7 +74,7 @@ class IDEEPFallbackOp final : public IDEEPOperator {
     for (int i = 0; i < InputSize(); ++i) {
       if (InputIsType<itensor>(i) && Input(i).get_data_type() == itensor::data_type::f32) {
         auto& input = Input(i);
-        auto dtensor = local_input_blobs_[i]->template GetMutable<TensorCPU>();
+        auto dtensor = local_input_blobs_[i]->GetMutableTensor(CPU);
         dtensor->Resize(input.get_dims());
         if (input.is_public_format()) {
           dtensor->ShareExternalPointer(static_cast<float*>(input.get_data_handle()));
@@ -85,7 +85,7 @@ class IDEEPFallbackOp final : public IDEEPOperator {
           InputIsType<itensor>(i) &&
           Input(i).get_data_type() == itensor::data_type::s32) {
         auto& input = Input(i);
-        auto dtensor = local_input_blobs_[i]->template GetMutable<TensorCPU>();
+        auto dtensor = local_input_blobs_[i]->GetMutableTensor(CPU);
         dtensor->Resize(input.get_dims());
         if (input.is_public_format()) {
           dtensor->ShareExternalPointer(
@@ -116,10 +116,21 @@ class IDEEPFallbackOp final : public IDEEPOperator {
         continue;
       }
       CAFFE_ENFORCE(
-          local_output_blobs_[i]->template IsType<TensorCPU>(),
+          local_output_blobs_[i]->template IsType<Tensor>(CPU),
           "IDEEP fallback op currently does not support non-TensorCPU "
           "output type who needs copying.");
       const auto& src = local_output_blobs_[i]->template Get<TensorCPU>();
+
+      auto src_dims = src.dims();
+      if (src.ndim() == 0) {
+        VLOG(1) << "Copy output: index " << i << " skipped.";
+        Blob* dst = OperatorBase::OutputBlob(i);
+        dst->Reset(new Tensor(CPU));
+        auto dtensor = dst->GetMutableTensor(CPU);
+        dtensor->Resize(src_dims);
+        dtensor->ShareData(src);
+        continue;
+      }
 
       if (src.template IsType<float>()) {
         Blob* dst = OperatorBase::OutputBlob(i);
@@ -127,28 +138,19 @@ class IDEEPFallbackOp final : public IDEEPOperator {
           dst->Reset(new itensor());
         }
 
-        auto src_dims = src.dims();
         itensor::dims dst_dims (src_dims.begin(), src_dims.end());
         auto dtensor = dst->template GetMutable<itensor>();
         if (dtensor->get_dims() != dst_dims) {
           dtensor->resize(dst_dims, itensor::data_type::f32);
         }
         dtensor->set_data_handle(const_cast<void*>(src.raw_data()));
-      } else if (src.template IsType<long>()) {
-        Blob* dst = OperatorBase::OutputBlob(i);
-        if (!dst->template IsType<itensor>()) {
-          dst->Reset(new itensor());
-        }
-
-        auto src_dims = src.dims();
-        itensor::dims dst_dims(src_dims.begin(), src_dims.end());
-        auto dtensor = dst->template GetMutable<itensor>();
-        if (dtensor->get_dims() != dst_dims) {
-          dtensor->resize(dst_dims, itensor::data_type::s32);
-        }
-        dtensor->set_data_handle(const_cast<void*>(src.raw_data()));
       } else {
-        CAFFE_THROW("ideep memory only supports float data type.");
+        VLOG(2) << "Output " << base_def_.output(i) << " as CPUTensor";
+        Blob* dst = OperatorBase::OutputBlob(i);
+        dst->Reset(new Tensor(CPU));
+        auto dtensor = dst->GetMutableTensor(CPU);
+        dtensor->Resize(src_dims);
+        dtensor->ShareData(src);
       }
     }
     return true;
@@ -159,7 +161,7 @@ class IDEEPFallbackOp final : public IDEEPOperator {
   vector<Blob*> local_output_blobs_;
   std::unique_ptr<CPUOp> base_op_;
   std::unique_ptr<Workspace> local_ws_;
+  OperatorDef base_def_;
 };
 
 } // namespace caffe2
-

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "THGeneral.h"
+#include <TH/THGeneral.h>
 
 #ifdef __cplusplus
 #include <ATen/Allocator.h>
@@ -25,7 +25,7 @@ typedef struct at_THAllocator THAllocator;
 /* default malloc/free allocator. malloc and realloc raise an error (using
  * THError) on allocation failure.
  */
-TH_API THAllocator* getTHDefaultAllocator();
+TH_API THAllocator* getTHDefaultAllocator(void);
 
 #ifdef __cplusplus
 // Sentinel value/type to help distinguish the file descriptor constructor from

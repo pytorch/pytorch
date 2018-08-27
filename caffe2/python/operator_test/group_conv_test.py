@@ -6,6 +6,7 @@ import numpy as np
 from hypothesis import assume, given, settings
 import hypothesis.strategies as st
 
+from caffe2.proto import caffe2_pb2
 from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
 
@@ -22,8 +23,7 @@ class TestGroupConvolution(hu.HypothesisTestCase):
            input_channels_per_group=st.integers(1, 8),
            output_channels_per_group=st.integers(1, 8),
            batch_size=st.integers(1, 3),
-           # TODO(jiayq): if needed, add NHWC support.
-           order=st.sampled_from(["NCHW"]),
+           order=st.sampled_from(["NCHW", "NHWC"]),
            # Note: Eigen does not support group convolution, but it should
            # fall back to the default engine without failing.
            engine=st.sampled_from(["", "CUDNN", "EIGEN"]),
@@ -35,6 +35,8 @@ class TestGroupConvolution(hu.HypothesisTestCase):
             input_channels_per_group, output_channels_per_group, batch_size,
             order, engine, use_bias, gc, dc):
         assume(size >= kernel)
+        # TODO: Group conv in NHWC not implemented for GPU yet.
+        assume(group == 1 or order == "NCHW" or gc.device_type != caffe2_pb2.CUDA)
         input_channels = input_channels_per_group * group
         output_channels = output_channels_per_group * group
 

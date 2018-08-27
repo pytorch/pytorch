@@ -4,15 +4,15 @@ namespace caffe2 {
 
 REGISTER_CPU_OPERATOR(Scale, ScaleOp<CPUContext>);
 OPERATOR_SCHEMA(Scale)
-  .NumInputs(1)
-  .NumOutputs(1)
-  .AllowInplace({{0, 0}})
-  .IdenticalTypeAndShape()
-  .SetDoc(R"DOC(
-Scale takes one input data (Tensor<float>) and produces one output data
-(Tensor<float>) whose value is the input data tensor scaled element-wise.
+    .NumInputs(1)
+    .NumOutputs(1)
+    .AllowInplace({{0, 0}})
+    .IdenticalTypeAndShape()
+    .SetDoc(R"DOC(
+Scale takes one input data (Tensor) and produces one output data
+(Tensor) whose value is the input data tensor scaled element-wise.
 )DOC")
-  .Arg("scale", "(float, default 1.0) the scale to apply.");
+    .Arg("scale", "(float, default 1.0) the scale to apply.");
 
 class GetScaleGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;

@@ -12,20 +12,20 @@ void THNN_(SpatialFullConvolutionMap_updateOutput)(
   // What does this mean?
   THArgCheck(
     weight != NULL && !weight->is_empty() && weight->dim() == 3
-    && connTable != NULL && connTable->size[0] == weight->size[0], 4,
+    && connTable != NULL && connTable->size(0) == weight->size(0), 4,
     "non-empty 3D weight tensor expected (connTable:size(%d) x kH x kW)", TH_INDEX_BASE
   );
 
-  const int kH = (int)weight->size[1];
-  const int kW = (int)weight->size[2];
+  const int kH = (int)weight->size(1);
+  const int kW = (int)weight->size(2);
 
   THArgCheck(input != NULL && !input->is_empty() && input->dim() == 3, 2, "non-empty 3D tensor expected");
-  THArgCheck(input->size[0] >= nInputPlane, 2, "invalid number of input planes");
+  THArgCheck(input->size(0) >= nInputPlane, 2, "invalid number of input planes");
 
   THTensor_(resize3d)(
     output_, nOutputPlane,
-    (input->size[1] - 1) * dH + kH,
-    (input->size[2] - 1) * dW + kW
+    (input->size(1) - 1) * dH + kH,
+    (input->size(2) - 1) * dW + kW
   );
 
   /* contiguous */
@@ -40,12 +40,12 @@ void THNN_(SpatialFullConvolutionMap_updateOutput)(
   real *connTable_data = THTensor_(data)(connTable);
 
   /* and dims */
-  const int64_t input_h = input->size[1];
-  const int64_t input_w = input->size[2];
-  const int64_t output_h = output->size[1];
-  const int64_t output_w = output->size[2];
-  const int64_t weight_h = weight->size[1];
-  const int64_t weight_w = weight->size[2];
+  const int64_t input_h = input->size(1);
+  const int64_t input_w = input->size(2);
+  const int64_t output_h = output->size(1);
+  const int64_t output_w = output->size(2);
+  const int64_t weight_h = weight->size(1);
+  const int64_t weight_w = weight->size(2);
 
   int64_t p;
 #pragma omp parallel for private(p)
@@ -61,7 +61,7 @@ void THNN_(SpatialFullConvolutionMap_updateOutput)(
       ptr_output[j] = bias_data[p];
 
     /* convolve all maps */
-    nweight = connTable->size[0];
+    nweight = connTable->size(0);
     for (k = 0; k < nweight; k++)
     {
       /* get offsets for input/output */
@@ -93,7 +93,7 @@ void THNN_(SpatialFullConvolutionMap_updateGradInput)(
 {
   THArgCheck(
     weight != NULL && !weight->is_empty() && weight->dim() == 3
-    && connTable != NULL && connTable->size[0] == weight->size[0], 5,
+    && connTable != NULL && connTable->size(0) == weight->size(0), 5,
     "non-empty 3D weight tensor expected (connTable:size(%d) x kH x kW)", TH_INDEX_BASE
   );
 
@@ -112,12 +112,12 @@ void THNN_(SpatialFullConvolutionMap_updateGradInput)(
   real *connTable_data = THTensor_(data)(connTable);
 
   /* and dims */
-  const int64_t input_h = input->size[1];
-  const int64_t input_w = input->size[2];
-  const int64_t output_h = gradOutput->size[1];
-  const int64_t output_w = gradOutput->size[2];
-  const int64_t kH = weight->size[1];
-  const int64_t kW = weight->size[2];
+  const int64_t input_h = input->size(1);
+  const int64_t input_w = input->size(2);
+  const int64_t output_h = gradOutput->size(1);
+  const int64_t output_w = gradOutput->size(2);
+  const int64_t kH = weight->size(1);
+  const int64_t kW = weight->size(2);
 
   int64_t p;
 #pragma omp parallel for private(p)
@@ -125,7 +125,7 @@ void THNN_(SpatialFullConvolutionMap_updateGradInput)(
   {
     int64_t k;
     /* backward all */
-    int nkernel = connTable->size[0];
+    int nkernel = connTable->size(0);
     for (k = 0; k < nkernel; k++)
     {
       int o = (int)connTable_data[k*2+1] - TH_INDEX_BASE;
@@ -164,7 +164,7 @@ void THNN_(SpatialFullConvolutionMap_accGradParameters)(
   real scale = TH_CONVERT_ACCREAL_TO_REAL(scale_);
   THArgCheck(
     gradWeight != NULL && !gradWeight->is_empty() && gradWeight->dim() == 3
-    && connTable != NULL && connTable->size[0] == gradWeight->size[0], 5,
+    && connTable != NULL && connTable->size(0) == gradWeight->size(0), 5,
     "non-empty 3D gradWeight tensor expected (connTable:size(%d) x kH x kW)", TH_INDEX_BASE
   );
 
@@ -179,12 +179,12 @@ void THNN_(SpatialFullConvolutionMap_accGradParameters)(
   real *gradBias_data = THTensor_(data)(gradBias);
 
   /* and dims */
-  const int64_t input_h  = input->size[1];
-  const int64_t input_w  = input->size[2];
-  const int64_t output_h = gradOutput->size[1];
-  const int64_t output_w = gradOutput->size[2];
-  const int64_t weight_h = gradWeight->size[1];
-  const int64_t weight_w = gradWeight->size[2];
+  const int64_t input_h  = input->size(1);
+  const int64_t input_w  = input->size(2);
+  const int64_t output_h = gradOutput->size(1);
+  const int64_t output_w = gradOutput->size(2);
+  const int64_t weight_h = gradWeight->size(1);
+  const int64_t weight_w = gradWeight->size(2);
 
   /* gradients wrt bias */
   int64_t k;
@@ -198,7 +198,7 @@ void THNN_(SpatialFullConvolutionMap_accGradParameters)(
   }
 
   /* gradients wrt weight */
-  int nkernel = connTable->size[0];
+  int nkernel = connTable->size(0);
 #pragma omp parallel for private(k)
   for (k = 0; k < nkernel; k++)
   {

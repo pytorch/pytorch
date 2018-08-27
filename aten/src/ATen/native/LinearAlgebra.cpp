@@ -1,6 +1,7 @@
 #include "ATen/ATen.h"
 #include "ATen/ExpandUtils.h"
 #include "ATen/NativeFunctions.h"
+#include "ATen/native/LinearAlgebraUtils.h"
 #include <functional>
 #include <numeric>
 #include <vector>
@@ -83,15 +84,69 @@ std::tuple<Tensor, Tensor> slogdet(const Tensor& self) {
   return std::make_tuple(det.sign(), diag_U.abs_().log_().sum());
 }
 
+Tensor inverse(const Tensor& self) {
+  Tensor result = self.type().tensor();
+  return at::native::inverse_out(result, self);
+}
+
+Tensor& inverse_out(Tensor &result, const Tensor &self) {
+  AT_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
+           "tensor should have CPU or CUDA backend");
+  AT_CHECK(self.dim() == 2, "tensor should be 2 dimensional");
+  AT_CHECK(self.size(0) == self.size(1), "tensor should be square");
+  AT_CHECK(at::isFloatingType(self.type().scalarType()), "tensor should be of floating-point type");
+  if (self.size(0) == 0) {
+    return result.resize_({0, 0});
+  } else {
+    return at::_getri_out(result, self);
+  }
+}
+
 Tensor pinverse(const Tensor& self, double rcond) {
   AT_CHECK(at::isFloatingType(self.type().scalarType()) && self.dim() == 2,
            "pinverse(", self.type(), "{", self.sizes(), "}): expected a 2D tensor "
            "of floating types");
+  if (self.numel() == 0) {
+    // Match NumPy
+    return self.type().tensor({self.size(1), self.size(0)});
+  }
   Tensor U, S, V;
   std::tie(U, S, V) = self.svd();
-  double max_val = S[0].toCDouble();
+  Tensor max_val = S[0];
   Tensor S_pseudoinv = at::where(S > rcond * max_val, S.reciprocal(), at::zeros({}, self.options()));
   return V.mm(S_pseudoinv.diag().mm(U.t()));
+}
+
+static inline Tensor _matrix_rank_helper(const Tensor& self, bool symmetric) {
+  Tensor S;
+  if (!symmetric) {
+    Tensor U, V;
+    std::tie(U, S, V) = self.svd();
+  } else {
+    Tensor eigvecs;
+    std::tie(S, eigvecs) = self.symeig();
+    S = S.abs();
+  }
+  return S;
+}
+
+Tensor matrix_rank(const Tensor& self, double tol, bool symmetric) {
+  AT_CHECK(at::isFloatingType(self.type().scalarType()) && self.dim() == 2,
+           "matrix_rank(", self.type(), "{", self.sizes(), "}): expected a 2D tensor "
+           "of floating types");
+
+  Tensor S = _matrix_rank_helper(self, symmetric);
+  return (S > tol).sum();
+}
+
+Tensor matrix_rank(const Tensor& self, bool symmetric) {
+  AT_CHECK(at::isFloatingType(self.type().scalarType()) && self.dim() == 2,
+           "matrix_rank(", self.type(), "{", self.sizes(), "}): expected a 2D tensor "
+           "of floating types");
+
+  Tensor S = _matrix_rank_helper(self, symmetric);
+  double tol = _get_epsilon(self.type().scalarType()) * std::max(self.size(0), self.size(1));
+  return (S > S.max().mul_(tol)).sum();
 }
 
 static void check_1d(const Tensor& t, const char* arg, const char* fn) {

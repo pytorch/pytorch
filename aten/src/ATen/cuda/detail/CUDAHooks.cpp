@@ -2,12 +2,12 @@
 
 #include <ATen/CUDAGenerator.h>
 #include <ATen/Context.h>
-#include <ATen/Error.h>
 #include <ATen/RegisterCUDA.h>
+#include <ATen/core/Error.h>
 #include <ATen/cuda/CUDAConfig.h>
-#include <ATen/native/cuda/CuFFTPlanCache.h>
 #include <ATen/cuda/PinnedMemoryAllocator.h>
 #include <ATen/detail/CUDAHooksInterface.h>
+#include <ATen/native/cuda/CuFFTPlanCache.h>
 
 #include "THC/THC.h"
 #include <THC/THCGeneral.hpp>
@@ -49,30 +49,12 @@ void unchecked_set_device(int32_t device) {
   (void)return_code;
 }
 
-void cuda_stream_create_with_priority(
-  cudaStream_t* pStream
-, int32_t flags
-, int32_t priority) {
-#ifndef __HIP_PLATFORM_HCC__
-  check_status(cudaStreamCreateWithPriority(pStream, flags, priority));
-#else
-  check_status(cudaStreamCreateWithFlags(pStream, flags));
-#endif
-}
-
-void cuda_stream_destroy(cudaStream_t stream) {
-  check_status(cudaStreamDestroy(stream));
-}
-
 struct DynamicCUDAInterfaceSetter {
   DynamicCUDAInterfaceSetter() {
-    at::detail::DynamicCUDAInterface::set_device = set_device;
-    at::detail::DynamicCUDAInterface::get_device = get_device;
-    at::detail::DynamicCUDAInterface::unchecked_set_device =
-        unchecked_set_device;
-    at::detail::DynamicCUDAInterface::cuda_stream_create_with_priority = 
-      cuda_stream_create_with_priority;
-    at::detail::DynamicCUDAInterface::cuda_stream_destroy = cuda_stream_destroy;
+    using at::detail::DynamicCUDAInterface;
+    DynamicCUDAInterface::set_device = set_device;
+    DynamicCUDAInterface::get_device = get_device;
+    DynamicCUDAInterface::unchecked_set_device = unchecked_set_device;
   }
 };
 
@@ -87,9 +69,7 @@ DynamicCUDAInterfaceSetter _;
 // let's not if we don't need to!)
 std::unique_ptr<THCState, void (*)(THCState*)> CUDAHooks::initCUDA() const {
   THCState* thc_state = THCState_alloc();
-  // Caching allocator has no context
-  THCState_setDeviceAllocator(thc_state, THCCachingAllocator_get());
-  thc_state->cudaHostAllocator = getTHCCachingHostAllocator();
+  
   THCudaInit(thc_state);
   return std::unique_ptr<THCState, void (*)(THCState*)>(
       thc_state, [](THCState* p) {
@@ -116,21 +96,6 @@ bool CUDAHooks::hasCuDNN() const {
   return AT_CUDNN_ENABLED();
 }
 
-#ifndef __HIP_PLATFORM_HCC__
-cusparseHandle_t CUDAHooks::getCurrentCUDASparseHandle(THCState* thc_state) const {
-  return THCState_getCurrentSparseHandle(thc_state);
-}
-#endif
-struct cudaDeviceProp* CUDAHooks::getCurrentDeviceProperties(
-    THCState* thc_state) const {
-  return THCState_getCurrentDeviceProperties(thc_state);
-}
-struct cudaDeviceProp* CUDAHooks::getDeviceProperties(
-    THCState* thc_state,
-    int device) const {
-  return THCState_getDeviceProperties(thc_state, device);
-}
-
 int64_t CUDAHooks::current_device() const {
   int device;
   cudaError_t err = cudaGetDevice(&device);
@@ -152,10 +117,14 @@ bool CUDAHooks::compiledWithCuDNN() const {
   return AT_CUDNN_ENABLED();
 }
 
+bool CUDAHooks::compiledWithMIOpen() const {
+  return AT_ROCM_ENABLED();
+}
+
 bool CUDAHooks::supportsDilatedConvolutionWithCuDNN() const {
 #if AT_CUDNN_ENABLED()
   cudaDeviceProp* prop =
-      getCurrentDeviceProperties(globalContext().getTHCState());
+      THCState_getCurrentDeviceProperties(globalContext().getTHCState());
   // NOTE: extra parenthesis around numbers disable clang warnings about
   // dead code
   return (

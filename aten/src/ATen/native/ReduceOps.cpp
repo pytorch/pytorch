@@ -17,6 +17,9 @@
 namespace at {
 namespace native {
 
+DEFINE_DISPATCH(sum_kernel);
+DEFINE_DISPATCH(prod_kernel);
+
 static inline Tensor integer_upcast(const Tensor& self, optional<ScalarType> dtype) {
   ScalarType scalarType = self.type().scalarType();
   ScalarType upcast_scalarType = dtype.value_or(at::isIntegralType(scalarType) ? ScalarType::Long : scalarType);
@@ -127,7 +130,7 @@ Tensor sum(const Tensor &self) {
 Tensor _sum_cpu(const Tensor& self) {
   if (self.is_contiguous()) {
     Tensor result = at::empty({}, self.type());
-    sum_kernel(result, self, at::nullopt);
+    sum_kernel(kCPU, result, self, at::nullopt);
     return result;
   }
   return self._sumall();
@@ -148,7 +151,7 @@ Tensor prod(const Tensor &self) {
 Tensor _prod_cpu(const Tensor &self) {
   if (self.is_contiguous()) {
     Tensor result = at::empty({}, self.type());
-    prod_kernel(result, self, at::nullopt);
+    prod_kernel(kCPU, result, self, at::nullopt);
     return result;
   }
   return self._prodall();
@@ -222,7 +225,7 @@ Tensor &_sum_out_cpu(Tensor &result, const Tensor &self, int64_t dim_,
     return result;
   if (self.is_contiguous() && result.is_contiguous()) {
     _dimreduce_setup(result, self, dim);
-    sum_kernel(result, self, dim);
+    sum_kernel(kCPU, result, self, dim);
     if (!keepdim) result.squeeze_(dim);
     return result;
   }
@@ -260,7 +263,7 @@ Tensor &_prod_out_cpu(Tensor &result, const Tensor &self, int64_t dim_,
     return result;
   if (self.is_contiguous() && result.is_contiguous()) {
     _dimreduce_setup(result, self, dim);
-    prod_kernel(result, self, dim);
+    prod_kernel(kCPU, result, self, dim);
     if (!keepdim) result.squeeze_(dim);
     return result;
   }
@@ -345,17 +348,17 @@ Tensor _prod(const Tensor &self, int64_t dim_, bool keepdim) {
 
 Tensor& logsumexp_out(Tensor& result, const Tensor &self, int64_t dim_, bool keepdim) {
   int64_t dim = maybe_wrap_dim(dim_, self.dim());
-  // can't take max of empty tensor.
+  // can't take max of empty tensor
   if (self.numel() != 0) {
     auto maxes = at::max_values(self, dim, true);
-    result = at::where((maxes == INFINITY).__or__(maxes == -INFINITY),
-                       maxes,
-                       maxes + at::log(at::sum(at::exp(self - maxes), dim, true)));
+    auto maxes_squeezed = (keepdim ? maxes : maxes.squeeze(dim));
+    maxes_squeezed.masked_fill_(maxes_squeezed.abs() == INFINITY, 0);
+    at::sum_out(result, at::exp(self - maxes), dim, keepdim);
+    result.log_().add_(maxes_squeezed);
   } else {
-    result = at::log(at::sum(at::exp(self), dim, true));
+    at::sum_out(result, at::exp(self), dim, keepdim);
+    result.log_();
   }
-  if (! keepdim)
-    result.squeeze_(dim);
   return result;
 }
 

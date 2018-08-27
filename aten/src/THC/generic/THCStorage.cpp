@@ -2,6 +2,8 @@
 #define THC_GENERIC_FILE "generic/THCStorage.cpp"
 #else
 
+#include <ATen/core/intrusive_ptr.h>
+
 real* THCStorage_(data)(THCState *state, const THCStorage *self)
 {
   return self->data<real>();
@@ -19,7 +21,7 @@ int THCStorage_(elementSize)(THCState *state)
 
 void THCStorage_(set)(THCState *state, THCStorage *self, ptrdiff_t index, real value)
 {
-  THArgCheck((index >= 0) && (index < self->size), 2, "index out of bounds");
+  THArgCheck((index >= 0) && (index < self->size()), 2, "index out of bounds");
   cudaStream_t stream = THCState_getCurrentStream(state);
   THCudaCheck(cudaMemcpyAsync(THCStorage_(data)(state, self) + index, &value, sizeof(real),
                               cudaMemcpyHostToDevice,
@@ -29,7 +31,7 @@ void THCStorage_(set)(THCState *state, THCStorage *self, ptrdiff_t index, real v
 
 real THCStorage_(get)(THCState *state, const THCStorage *self, ptrdiff_t index)
 {
-  THArgCheck((index >= 0) && (index < self->size), 2, "index out of bounds");
+  THArgCheck((index >= 0) && (index < self->size()), 2, "index out of bounds");
   real value;
   cudaStream_t stream = THCState_getCurrentStream(state);
   THCudaCheck(cudaMemcpyAsync(&value, THCStorage_(data)(state, self) + index, sizeof(real),
@@ -40,19 +42,33 @@ real THCStorage_(get)(THCState *state, const THCStorage *self, ptrdiff_t index)
 
 THCStorage* THCStorage_(new)(THCState *state)
 {
-  return THCStorage_new(state, at::CTypeToScalarType<real>::to());
+  THStorage* storage = c10::make_intrusive<at::StorageImpl>(
+      at::CTypeToScalarType<real>::to(),
+      0,
+      state->cudaDeviceAllocator,
+      true).release();
+  return storage;
 }
 
 THCStorage* THCStorage_(newWithSize)(THCState *state, ptrdiff_t size)
 {
-  return THCStorage_newWithSize(state, at::CTypeToScalarType<real>::to(), size);
+  THStorage* storage = c10::make_intrusive<at::StorageImpl>(
+      at::CTypeToScalarType<real>::to(),
+      size,
+      state->cudaDeviceAllocator,
+      true).release();
+  return storage;
 }
 
 THCStorage* THCStorage_(newWithAllocator)(THCState *state, ptrdiff_t size,
                                           at::Allocator* allocator)
 {
-  return THCStorage_newWithAllocator(state, at::CTypeToScalarType<real>::to(),
-                                     size, allocator);
+  THStorage* storage = c10::make_intrusive<at::StorageImpl>(
+      at::CTypeToScalarType<real>::to(),
+      size,
+      allocator,
+      true).release();
+  return storage;
 }
 
 THCStorage* THCStorage_(newWithSize1)(THCState *state, real data0)
@@ -96,19 +112,17 @@ THCStorage* THCStorage_(newWithMapping)(THCState *state, const char *fileName, p
 }
 
 THCStorage* THCStorage_(newWithDataAndAllocator)(
-  THCState *state, at::DataPtr&& data, ptrdiff_t size,
-  at::Allocator *allocator) {
-  return THCStorage_newWithDataAndAllocator(state, at::CTypeToScalarType<real>::to(), std::move(data), size, allocator);
-}
-
-void THCStorage_(setFlag)(THCState *state, THCStorage *storage, const char flag)
-{
-  THStorage_setFlag(storage, flag);
-}
-
-void THCStorage_(clearFlag)(THCState *state, THCStorage *storage, const char flag)
-{
-  THStorage_clearFlag(storage, flag);
+    THCState* state,
+    at::DataPtr&& data,
+    ptrdiff_t size,
+    at::Allocator* allocator) {
+  THStorage* storage = c10::make_intrusive<at::StorageImpl>(
+      at::CTypeToScalarType<real>::to(),
+      size,
+      std::move(data),
+      allocator,
+      true).release();
+  return storage;
 }
 
 void THCStorage_(retain)(THCState *state, THCStorage *self)
@@ -118,6 +132,6 @@ void THCStorage_(retain)(THCState *state, THCStorage *self)
 
 void THCStorage_(free)(THCState *state, THCStorage *self)
 {
-  THCStorage_free(state, self);
+  THStorage_free(self);
 }
 #endif

@@ -18,10 +18,6 @@ foreach(THC_TYPE Byte Char Short Int Long Half Float Double)
    endforeach()
 endforeach()
 
-IF(CUDA_HAS_FP16 OR NOT ${CUDA_VERSION} LESS 7.5)
-  LIST(APPEND extra_src ${CMAKE_CURRENT_SOURCE_DIR}/THCHalf.cu)
-ENDIF()
-
 set(ATen_CUDA_SRCS ${ATen_CUDA_SRCS}
   ${CMAKE_CURRENT_SOURCE_DIR}/THCCachingAllocator.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THCCachingHostAllocator.cpp
@@ -31,7 +27,6 @@ set(ATen_CUDA_SRCS ${ATen_CUDA_SRCS}
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensor.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorCopy.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorRandom.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/THCThreadLocal.cpp
 
   ${CMAKE_CURRENT_SOURCE_DIR}/THCReduceApplyUtils.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCBlas.cu
@@ -65,7 +60,6 @@ INSTALL(FILES
           THCStorage.h
           THCStorageCopy.h
           THCStream.h
-          THCThreadLocal.h
           THCTensor.h
           THCTensorCopy.h
           THCTensorCopy.hpp
@@ -124,6 +118,7 @@ INSTALL(FILES
           generic/THCTensor.cpp
           generic/THCTensor.cu
           generic/THCTensor.h
+          generic/THCTensor.hpp
           generic/THCStorageCopy.cpp
           generic/THCStorageCopy.cu
           generic/THCStorageCopy.h

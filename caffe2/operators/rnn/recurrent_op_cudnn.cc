@@ -60,11 +60,11 @@ RecurrentBaseOp<T>::~RecurrentBaseOp() {
 
 template <typename T>
 void RecurrentBaseOp<T>::initialize(
-    const Tensor<CUDAContext>& input,
-    Tensor<CUDAContext>* dropoutStates,
-    Tensor<CUDAContext>* output,
-    Tensor<CUDAContext>* hiddenOutput,
-    Tensor<CUDAContext>* cellOutput) {
+    const Tensor& input,
+    Tensor* dropoutStates,
+    Tensor* output,
+    Tensor* hiddenOutput,
+    Tensor* cellOutput) {
   static_assert(sizeof(T) == 4, ""); // workaround clang bug
   CAFFE_ENFORCE_GE(input.ndim(), 3);
   const int seqLength = input.dim(0);
@@ -458,13 +458,13 @@ bool RecurrentParamAccessOp<T, mode>::RunOnDevice() {
     if (mode == SET_PARAM) {
       CAFFE_ENFORCE_EQ(
           biasDims[0] * biasDims[1] * biasDims[2], Input(2).size());
-      context_.template Copy<T, CUDAContext, CUDAContext>(
+      context_.template CopySameDevice<T>(
           biasDims[0] * biasDims[1] * biasDims[2],
           Input(2).template data<T>(),
           static_cast<T*>(bias));
     } else {
       Output(0)->Resize(biasDims);
-      context_.template Copy<T, CUDAContext, CUDAContext>(
+      context_.template CopySameDevice<T>(
           biasDims[0] * biasDims[1] * biasDims[2],
           static_cast<T*>(bias),
           Output(0)->template mutable_data<T>());
@@ -495,13 +495,13 @@ bool RecurrentParamAccessOp<T, mode>::RunOnDevice() {
     CAFFE_ENFORCE_EQ(numDims, 3);
     if (mode == SET_PARAM) {
       CAFFE_ENFORCE_EQ(matDims[0] * matDims[1] * matDims[2], Input(2).size());
-      context_.template Copy<T, CUDAContext, CUDAContext>(
+      context_.template CopySameDevice<T>(
           matDims[0] * matDims[1] * matDims[2],
           Input(2).template data<T>(),
           static_cast<T*>(pmatrix));
     } else {
       Output(0)->Resize(matDims);
-      context_.template Copy<T, CUDAContext, CUDAContext>(
+      context_.template CopySameDevice<T>(
           matDims[0] * matDims[1] * matDims[2],
           static_cast<T*>(pmatrix),
           Output(0)->template mutable_data<T>());

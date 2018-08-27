@@ -6,7 +6,7 @@
 #include <torch/nn/pimpl.h>
 #include <torch/tensor.h>
 
-#include <ATen/Error.h>
+#include <ATen/core/Error.h>
 
 #include <cstdint>
 #include <memory>
@@ -37,10 +37,11 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
 
   /// Special cloning function for `Sequential` because it does not use
   /// `reset()`.
-  std::shared_ptr<Module> clone() const override {
+  std::shared_ptr<Module> clone(
+      at::optional<Device> device = at::nullopt) const override {
     auto clone = std::make_shared<SequentialImpl>();
     for (const auto& module : modules_) {
-      clone->push_back(module.clone());
+      clone->push_back(module.clone(device));
     }
     return clone;
   }

@@ -245,7 +245,8 @@ OnnxExporter::get_special_operators() const {
           {"LRN", &OnnxExporter::CreateLrnNodes},
           {"Reshape", &OnnxExporter::CreateReshapeNodes},
           {"Slice", &OnnxExporter::CreateSliceNodes},
-          {"ChannelShuffle", &OnnxExporter::CreateChannelShuffleNodes}};
+          {"ChannelShuffle", &OnnxExporter::CreateChannelShuffleNodes},
+          {"ResizeNearest", &OnnxExporter::CreateUpsampleNodes}};
   return kSpecialOperators;
 }
 
@@ -681,6 +682,41 @@ ConvertedResult OnnxExporter::CreateChannelShuffleNodes(
   return result;
 }
 
+ConvertedResult OnnxExporter::CreateUpsampleNodes(
+    const caffe2::OperatorDef& def,
+    const std::unordered_map<std::string, caffe2::TensorShape>& shapes) {
+  float width_scale = 1.0;
+  float height_scale = 1.0;
+  for (const auto& a : def.arg()) {
+    if (a.name() == "width_scale") {
+      width_scale = a.f();
+    } else if (a.name() == "height_scale") {
+      height_scale = a.f();
+    }
+  }
+  CAFFE_ENFORCE_GT(width_scale, 0);
+  CAFFE_ENFORCE_GT(height_scale, 0);
+
+  auto x = def.input(0);
+  const auto& x_shape = shapes.at(x);
+  CAFFE_ENFORCE_GE(x_shape.dims().size(), 2);
+
+  std::vector<float> scales(x_shape.dims().size(), 1.0);
+  scales[scales.size() - 2] = height_scale;
+  scales[scales.size() - 1] = width_scale;
+
+  ConvertedResult result;
+  auto& nodes = result.first;
+  std::vector<std::string> inputs(def.input().begin(), def.input().end());
+  std::vector<std::string> outputs(def.output().begin(), def.output().end());
+  auto node = MakeNode("Upsample", inputs, outputs, def.name());
+  node.add_attribute()->CopyFrom(MakeAttribute("scales", scales));
+  node.add_attribute()->CopyFrom(MakeAttribute("mode", "nearest"));
+  nodes.emplace_back(node);
+
+  return result;
+}
+
 ConvertedResult OnnxExporter::CreateSliceNodes(
     const caffe2::OperatorDef& def,
     const std::unordered_map<std::string, caffe2::TensorShape>& shapes) {
@@ -789,8 +825,7 @@ ConvertedResult OnnxExporter::CreateGemmNodes(
   if (has_axis) {
     axis = it->second->i();
   }
-  if ((legacy_mode_ && has_axis) ||
-      (!legacy_mode_ && x_shape.dims().size() > 2)) {
+  if (x_shape.dims().size() > 2) {
     // we need to reshape only when dimension is higher than 2
     auto outer = DimProd(x_shape, 0, axis);
     auto inner = DimProd(x_shape, axis, x_shape.dims().size());
@@ -807,8 +842,7 @@ ConvertedResult OnnxExporter::CreateGemmNodes(
   if (it != args.end()) {
     axis_w = it->second->i();
   }
-  if ((legacy_mode_ && it != args.end()) ||
-      (!legacy_mode_ && w_shape.dims().size() > 2)) {
+  if (w_shape.dims().size() > 2) {
     // we need to reshape only when dimension is higher than 2
     auto outer = DimProd(w_shape, 0, axis_w);
     auto inner = DimProd(w_shape, axis_w, w_shape.dims().size());
@@ -822,9 +856,6 @@ ConvertedResult OnnxExporter::CreateGemmNodes(
 
   auto gemm_y_output = (has_axis) ? dummy_->NewDummyName() : y;
   std::vector<AttributeProto> attrs = {MakeAttribute("transB", 1L)};
-  if (legacy_mode_) {
-    attrs.emplace_back(MakeAttribute("broadcast", 1));
-  }
   nodes.emplace_back(MakeNode(
       "Gemm",
       {x, w, b},

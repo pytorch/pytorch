@@ -10,8 +10,11 @@ void LowerGradOf(Graph& g) {
       // else:
       //  outputs = undefineds
       WithInsertPoint guard(*it);
-      auto cond = g.insertNode(g.create(prim::AnyDefined, it->inputs()));
-      auto if_stat = g.insertNode(g.create(prim::If,{cond->output()}, it->outputs().size()));
+      auto cond = g.insertNode(g.create(prim::AnyDefined, it->inputs()))
+                      ->output()
+                      ->setType(IntType::get());
+      auto if_stat = g.insertNode(
+          g.create(prim::If, {cond}, it->outputs().size()));
       if_stat->addBlock()->cloneFrom(
           it->blocks().at(0), [](Value* v) { return v; });
       auto else_block = if_stat->addBlock();

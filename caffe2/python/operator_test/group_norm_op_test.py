@@ -40,7 +40,7 @@ class TestGroupNormOp(hu.HypothesisTestCase):
         Y = gamma * (X - mu) / std + beta
         return [Y.reshape(dims), mu.reshape(N, G), (1.0 / std).reshape(N, G)]
 
-    @given(N=st.integers(1, 5), G=st.integers(1, 5), D=st.integers(2, 2),
+    @given(N=st.integers(1, 5), G=st.integers(1, 5), D=st.integers(1, 5),
            H=st.integers(2, 5), W=st.integers(2, 5),
            epsilon=st.floats(min_value=1e-5, max_value=1e-4),
            order=st.sampled_from(["NCHW", "NHWC"]), **hu.gcs)

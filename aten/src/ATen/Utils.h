@@ -1,9 +1,13 @@
 #pragma once
 
-#include "ATen/ATenGeneral.h"
-#include "ATen/ArrayRef.h"
-#include "ATen/Error.h"
+#include "ATen/core/ATenGeneral.h"
+#include "ATen/StorageImpl.h"
 #include "ATen/UndefinedTensor.h"
+
+#include <ATen/core/ScalarType.h>
+#include "ATen/Formatting.h"
+#include "ATen/core/ArrayRef.h"
+#include "ATen/core/Error.h"
 
 #include <algorithm>
 #include <sstream>
@@ -22,36 +26,47 @@ namespace at {
 
 AT_API int _crash_if_asan(int);
 
-template <typename T, typename Base>
-static inline T* checked_cast_storage(Base* expr, const char * name, int pos) {
-  if (typeid(*expr) != typeid(T))
-    AT_ERROR("Expected object of type ", T::typeString(), " but found type ", expr->type().toString(),
+static inline const Storage& checked_storage(const Storage& expr, const char * name, int pos, DeviceType device_type, ScalarType scalar_type) {
+  if (expr.device_type() != device_type) {
+    AT_ERROR("Expected object of device type ", device_type, " but got device type ", expr.data_ptr().device().type(),
              " for argument #", pos, " '", name, "'");
-  return static_cast<T*>(expr);
+  }
+  if (expr.scalar_type() != scalar_type) {
+    AT_ERROR("Expected object of scalar type ", scalar_type, " but got scalar type ", expr.scalar_type(),
+             " for argument #", pos, " '", name, "'");
+  }
+  return expr;
 }
 
 template <typename T, typename Base>
-inline T* checked_cast_tensor(Base* expr, const char * name, int pos, bool allowNull) {
+inline T* checked_cast_tensor(Base* expr, const char * name, int pos, bool allowNull, Backend backend, ScalarType scalar_type) {
   if(allowNull && expr == UndefinedTensor::singleton()) {
     return nullptr;
   }
-  if (typeid(*expr) != typeid(T))
-    AT_ERROR("Expected object of type ", T::typeString(), " but found type ", expr->type().toString(),
+  if (expr->type().backend() != backend) {
+    AT_ERROR("Expected object of backend ", backend, " but got backend ", expr->type().backend(),
              " for argument #", pos, " '", name, "'");
+  }
+  if (expr->type().scalarType() != scalar_type) {
+    AT_ERROR("Expected object of scalar type ", scalar_type, " but got scalar type ", expr->type().scalarType(),
+             " for argument #", pos, " '", name, "'");
+  }
   return static_cast<T*>(expr);
 }
 
 // Converts a TensorList (i.e. ArrayRef<Tensor> to the underlying TH* Tensor Pointer)
 template <typename T, typename TBase, typename TH>
-static inline std::vector<TH*> tensor_list_checked_cast(ArrayRef<TBase> tensors, const char * name, int pos) {
+static inline std::vector<TH*> tensor_list_checked_cast(ArrayRef<TBase> tensors, const char * name, int pos, Backend backend, ScalarType scalar_type) {
   std::vector<TH*> casted(tensors.size());
   for (unsigned int i = 0; i < tensors.size(); ++i) {
     auto *expr = tensors[i].pImpl;
+    // TODO: Use the backend, scalar_type arguments to replace this
+    // dynamic cast for the test
     auto result = dynamic_cast<T*>(expr);
     if (result) {
-      casted[i] = result->tensor;
+      casted[i] = result;
     } else {
-      AT_ERROR("Expected a Tensor of type ", T::typeString(), " but found a type ", expr->type().toString(),
+      AT_ERROR("Expected a Tensor of RTTI type ", typeid(T).name(), " but found a type ", typeid(*expr).name(),
                " for sequence element ", i, " in sequence argument at position #", pos, " '", name, "'");
 
     }

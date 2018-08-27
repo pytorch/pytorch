@@ -31,13 +31,13 @@ class LBFGS : public LossClosureOptimizer {
   template <typename ParameterContainer>
   explicit LBFGS(ParameterContainer&& parameters, const LBFGSOptions& options)
       : LossClosureOptimizer(std::forward<ParameterContainer>(parameters)),
-        options_(options),
-        ro(options_.history_size_),
-        al(options_.history_size_) {}
+        options(options),
+        ro(options.history_size_),
+        al(options.history_size_) {}
 
   torch::Tensor step(LossClosure closure) override;
 
-  const LBFGSOptions& options() const noexcept;
+  LBFGSOptions options;
 
   template <class Archive>
   void serialize(Archive& ar) {
@@ -52,22 +52,20 @@ class LBFGS : public LossClosureOptimizer {
 
  private:
   friend class cereal::access;
-  LBFGS() : options_(0) {}
+  LBFGS() : options(0) {}
 
-  at::Tensor gather_flat_grad();
-  void add_grad(const torch::Scalar& step_size, const at::Tensor& update);
+  Tensor gather_flat_grad();
+  void add_grad(const torch::Scalar& step_size, const Tensor& update);
 
-  LBFGSOptions options_;
-
-  at::Tensor d{torch::empty({0})};
-  at::Tensor H_diag{torch::empty({0})};
-  at::Tensor prev_flat_grad{torch::empty({0})};
+  Tensor d{torch::empty({0})};
+  Tensor H_diag{torch::empty({0})};
+  Tensor prev_flat_grad{torch::empty({0})};
   torch::Scalar t{0};
   torch::Scalar prev_loss{0};
-  std::vector<at::Tensor> ro;
-  std::vector<at::Tensor> al;
-  std::deque<at::Tensor> old_dirs;
-  std::deque<at::Tensor> old_stps;
+  std::vector<Tensor> ro;
+  std::vector<Tensor> al;
+  std::deque<Tensor> old_dirs;
+  std::deque<Tensor> old_stps;
   int64_t func_evals{0};
   int64_t state_n_iter{0};
 };

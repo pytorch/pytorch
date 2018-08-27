@@ -104,7 +104,7 @@ Y:
 )DOC")
     .Input(0, "X", "Input tensor of data to be operated on.")
     .Output(0, "Y", "Output tensor, calculated as described above.");
-    
+
 OPERATOR_SCHEMA(LeakyReluGradient)
     .NumInputs(2)
     .NumOutputs(1)

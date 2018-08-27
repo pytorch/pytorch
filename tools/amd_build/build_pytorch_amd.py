@@ -1,4 +1,3 @@
-"""Requires the hipify-python.py script (https://github.com/ROCm-Developer-Tools/pyHIPIFY)."""
 import shutil
 import subprocess
 import os
@@ -8,15 +7,16 @@ from functools import reduce
 
 amd_build_dir = os.path.dirname(os.path.realpath(__file__))
 proj_dir = os.path.dirname(os.path.dirname(amd_build_dir))
-include_dirs = [
-    "aten",
-    "torch"
+
+includes = [
+    "aten/*",
+    "torch/*"
 ]
 
 # List of operators currently disabled
 yaml_file = os.path.join(amd_build_dir, "disabled_features.yaml")
 
-# Apply patch files.
+# Apply patch files in place.
 patch_folder = os.path.join(amd_build_dir, "patches")
 for filename in os.listdir(os.path.join(amd_build_dir, "patches")):
     subprocess.Popen(["git", "apply", os.path.join(patch_folder, filename)], cwd=proj_dir)
@@ -61,7 +61,14 @@ for root, _directories, files in os.walk(os.path.join(proj_dir, "torch")):
                 os.fsync(f)
 
 # Execute the Hipify Script.
-args = ["--project-directory", proj_dir,
-        "--output-directory", proj_dir,
-        "--include-dirs"] + include_dirs + ["--yaml-settings", yaml_file, "--add-static-casts", "True"]
-os.execv(os.path.join(amd_build_dir, "pyHIPIFY", "hipify-python.py"), ['python'] + args)
+args = (["--project-directory", proj_dir] +
+        ["--output-directory", proj_dir] +
+        ["--includes"] + includes +
+        ["--yaml-settings", yaml_file] +
+        ["--add-static-casts", "True"] +
+        ["--show-progress", "False"])
+
+subprocess.check_call([
+    sys.executable,
+    os.path.join(amd_build_dir, "pyHIPIFY", "hipify-python.py")
+] + args)

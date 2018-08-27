@@ -38,10 +38,22 @@ class ModuleHolder : torch::detail::ModuleHolderIndicator {
  public:
   using ContainedType = Contained;
 
+  /// Default constructs the contained module if if has a default constructor,
+  /// else produces a static error. NOTE: This uses the behavior of template
+  /// classes in C++ that constructors (or any methods) are only compiled when
+  /// actually used.
+  ModuleHolder() : impl_(default_construct()) {
+    static_assert(
+        std::is_default_constructible<Contained>::value,
+        "You are trying to default construct a module which has "
+        "no default constructor. Use = nullptr to give it the empty state "
+        "(e.g. `Linear linear = nullptr;` instead of `Linear linear;`).");
+  }
+
   /// Constructs the `ModuleHolder` with an empty contained value. Access to
   /// the underlying module is not permitted and will throw an exception, until
   /// a value is assigned.
-  explicit ModuleHolder(std::nullptr_t) : impl_(nullptr) {}
+  /* implicit */ ModuleHolder(std::nullptr_t) : impl_(nullptr) {}
 
   /// Constructs the `ModuleHolder` with a contained module, forwarding all
   /// arguments to its constructor.
@@ -114,6 +126,30 @@ class ModuleHolder : torch::detail::ModuleHolderIndicator {
   /// Returns true if the `ModuleHolder` does not contain a module.
   bool is_empty() const noexcept {
     return impl_ == nullptr;
+  }
+
+ private:
+  /// In C++17, the two methods below could be written as the following:
+  /// if constexpr (std::is_default_constructible_v<Contained>) {
+  ///   return std::make_shared<Contained>();
+  /// } else {
+  ///   return nullptr;
+  /// }
+  /// In C++11, we use SFINAE instead of `if constexpr`.
+
+  template <
+      typename T = Contained,
+      typename = torch::enable_if_t<std::is_default_constructible<T>::value>>
+  std::shared_ptr<Contained> default_construct() {
+    return std::make_shared<Contained>();
+  }
+
+  template <typename T = Contained>
+  torch::disable_if_t<
+      std::is_default_constructible<T>::value,
+      std::shared_ptr<Contained>>
+  default_construct() {
+    return nullptr;
   }
 };
 } // namespace nn

@@ -14,63 +14,60 @@ void NetObserverReporterPrint::report(
     NetBase* net,
     std::map<std::string, PerformanceInformation>& info) {
   // Not allowed to use json library
-  std::map<
-      std::string,
-      std::map<std::string, std::map<std::string, std::string>>>
-      caffe2_perf;
+  std::vector<std::map<std::string, std::string>> caffe2_perf;
 
   for (auto& p : info) {
     if ((p.first == "NET_DELAY") && (info.size() == 1)) {
       // for Net_delay perf
-      caffe2_perf["NET"] = {
-          {"latency",
-           {{"value", caffe2::to_string(p.second.latency * 1000)},
-            {"unit", "us"}}},
-          {"flops", {{"value", "-1"}, {"unit", "flops"}}}};
+      caffe2_perf.push_back(
+          {{"type", "NET"},
+           {"value", caffe2::to_string(p.second.latency * 1000)},
+           {"unit", "us"},
+           {"metric", "latency"}});
     } else if (p.first != "NET_DELAY") {
       // for operator perf
       std::string shape_str = get_tensor_shapes(p.second);
       std::string args_str = get_op_args(p.second);
 
-      caffe2_perf[p.first] = {
-          {"latency",
-           {{"value", caffe2::to_string(p.second.latency * 1000)},
-            {"unit", "us"}}},
-          {"flops",
-           {{
-                "value",
-                caffe2::to_string(p.second.flops),
-            },
-            {"unit", "flops"}}},
-          {"tensor_shapes", {{"info_string", shape_str}, {"unit", ""}}},
-          {"op_args", {{"info_string", args_str}, {"unit", ""}}}};
+      caffe2_perf.push_back(
+          {{"type", p.first},
+           {"value", caffe2::to_string(p.second.latency * 1000)},
+           {"unit", "us"},
+           {"metric", "latency"}});
+      if (p.second.flops > 0) {
+        caffe2_perf.push_back({{"type", p.first},
+                               {"value", caffe2::to_string(p.second.flops)},
+                               {"unit", "flop"},
+                               {"metric", "flops"}});
+      }
+      if (shape_str != "") {
+        caffe2_perf.push_back({{"type", p.first},
+                               {"info_string", shape_str},
+                               {"unit", ""},
+                               {"metric", "tensor_shapes"}});
+      }
+      if (args_str != "") {
+        caffe2_perf.push_back({{"type", p.first},
+                               {"info_string", args_str},
+                               {"unit", ""},
+                               {"metric", "op_args"}});
+      }
     }
   }
 
   for (auto it = caffe2_perf.begin(); it != caffe2_perf.end(); it++) {
     std::stringstream buffer;
+    auto entry = *it;
     buffer << IDENTIFIER << "{";
-    buffer << "\"" << it->first << "\""
-           << ": {";
-    for (auto jt = it->second.begin(); jt != it->second.end(); jt++) {
-      buffer << "\"" << jt->first << "\""
-             << ": {";
-      for (auto kt = jt->second.begin(); kt != jt->second.end(); kt++) {
-        buffer << "\"" << kt->first << "\""
-               << ": "
-               << "\"" << kt->second << "\"";
-        auto lt = kt;
-        if ((++lt) != jt->second.end()) {
-          buffer << ", ";
-        }
-      }
-      buffer << "}";
-      auto lt = jt;
-      if ((++lt) != it->second.end()) {
-        buffer << ", ";
-      }
+    buffer << "\"type\": \"" << entry["type"] << "\","
+           << "\"unit\": \"" << entry["unit"] << "\","
+           << "\"metric\": \"" << entry["metric"] << "\",";
+    if (entry.find("value") != entry.end()) {
+      buffer << "\"value\": \"" << entry["value"] << "\"";
+    } else if (entry.find("info_string") != entry.end()) {
+      buffer << "\"info_string\": \"" << entry["info_string"] << "\"";
     }
-    buffer << "}}";
+    buffer << "}";
     LOG(INFO) << buffer.str();
   }
 }
@@ -90,7 +87,7 @@ static std::string get_tensor_shapes(PerformanceInformation p) {
     shape_stream << "]";
     shape_str = shape_stream.str();
   } else {
-    shape_str = "[]";
+    shape_str = "";
   }
   return shape_str;
 }
@@ -118,7 +115,7 @@ static std::string get_op_args(PerformanceInformation p) {
     args << "]";
     args_str = args.str();
   } else {
-    args_str = "[]";
+    args_str = "";
   }
   return args_str;
 }

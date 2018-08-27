@@ -6,12 +6,9 @@
 #include <string>
 #include <utility>
 
-#include "ATen/ATenGeneral.h"
-#include "ATen/Half.h"
-#include "ATen/ScalarType.h"
-#include "ATen/TensorBase.h"
-#include "ATen/Utils.h"
-
+#include "ATen/core/ATenGeneral.h"
+#include "ATen/core/ScalarType.h"
+#include "ATen/core/Half.h"
 
 namespace at {
 
@@ -20,12 +17,6 @@ struct Tensor;
 class AT_API Scalar {
 public:
   Scalar() : Scalar(int64_t(0)) {}
-
-  explicit Scalar(const detail::TensorBase & t)
-  : tag(Tag::HAS_t), t(t) {
-    AT_CHECK(t.defined(), "Attempting to create a Scalar from an undefined tensor");
-    AT_CHECK(t.dim() == 0, "Attempting to create a Scalar from a ", t.dim(), " dim tensor");
-  }
 
 #define DEFINE_IMPLICIT_CTOR(type,name,member) \
   Scalar(type vv) \
@@ -38,18 +29,11 @@ public:
 #undef DEFINE_IMPLICIT_CTOR
 
   // return a new scalar that is guarenteed to be not backed by a tensor.
-  Scalar local() const {
-    if (Tag::HAS_t != tag) {
-      return *this;
-    }
-    return t.pImpl->localScalar();
-  }
+  Scalar local() const;
 
 #define DEFINE_ACCESSOR(type,name,member) \
   type to##name () const { \
-    if (Tag::HAS_t == tag) { \
-      return local().to##name(); \
-    } else if (Tag::HAS_d == tag) { \
+    if (Tag::HAS_d == tag) { \
       return checked_convert<type, double>(v.d, #type); \
     } else { \
       return checked_convert<type, int64_t>(v.i, #type); \
@@ -71,18 +55,16 @@ public:
   bool isIntegral() const {
     return Tag::HAS_i == tag;
   }
-  bool isBackedByTensor() const {
-    return Tag::HAS_t == tag;
-  }
+
+  Scalar operator-() const;
 
 private:
-  enum class Tag { HAS_d, HAS_i, HAS_t };
+  enum class Tag { HAS_d, HAS_i };
   Tag tag;
   union {
     double d;
-    int64_t i;
+    int64_t i = 0;
   } v;
-  detail::TensorBase t;
   friend struct Type;
 };
 
@@ -99,5 +81,4 @@ inline T Scalar::to<T>() { \
 }
 AT_FORALL_SCALAR_TYPES(DEFINE_TO)
 #undef DEFINE_TO
-
 }

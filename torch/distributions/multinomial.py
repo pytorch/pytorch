@@ -1,4 +1,5 @@
 import torch
+from torch._six import inf
 from torch.distributions.distribution import Distribution
 from torch.distributions import Categorical
 from numbers import Number
@@ -8,11 +9,11 @@ from torch.distributions.utils import broadcast_all
 
 class Multinomial(Distribution):
     r"""
-    Creates a Multinomial distribution parameterized by `total_count` and
-    either `probs` or `logits` (but not both). The innermost dimension of
-    `probs` indexes over categories. All other dimensions index over batches.
+    Creates a Multinomial distribution parameterized by :attr:`total_count` and
+    either :attr:`probs` or :attr:`logits` (but not both). The innermost dimension of
+    :attr:`probs` indexes over categories. All other dimensions index over batches.
 
-    Note that `total_count` need not be specified if only :meth:`log_prob` is
+    Note that :attr:`total_count` need not be specified if only :meth:`log_prob` is
     called (see example below)
 
     .. note:: :attr:`probs` must be non-negative, finite and have a non-zero sum,
@@ -93,6 +94,6 @@ class Multinomial(Distribution):
         logits, value = broadcast_all(self.logits.clone(), value)
         log_factorial_n = torch.lgamma(value.sum(-1) + 1)
         log_factorial_xs = torch.lgamma(value + 1).sum(-1)
-        logits[(value == 0) & (logits == -float('inf'))] = 0
+        logits[(value == 0) & (logits == -inf)] = 0
         log_powers = (logits * value).sum(-1)
         return log_factorial_n - log_factorial_xs + log_powers

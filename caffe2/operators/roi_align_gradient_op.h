@@ -15,11 +15,11 @@ class RoIAlignGradientOp final : public Operator<Context> {
   RoIAlignGradientOp(const OperatorDef& def, Workspace* ws)
       : Operator<Context>(def, ws),
         spatial_scale_(
-            OperatorBase::GetSingleArgument<float>("spatial_scale", 1.)),
-        pooled_height_(OperatorBase::GetSingleArgument<int>("pooled_h", 1)),
-        pooled_width_(OperatorBase::GetSingleArgument<int>("pooled_w", 1)),
+            this->template GetSingleArgument<float>("spatial_scale", 1.)),
+        pooled_height_(this->template GetSingleArgument<int>("pooled_h", 1)),
+        pooled_width_(this->template GetSingleArgument<int>("pooled_w", 1)),
         sampling_ratio_(
-            OperatorBase::GetSingleArgument<int>("sampling_ratio", -1)) {
+            this->template GetSingleArgument<int>("sampling_ratio", -1)) {
     DCHECK_GT(spatial_scale_, 0);
     DCHECK_GT(pooled_height_, 0);
     DCHECK_GT(pooled_width_, 0);

@@ -9,7 +9,7 @@
 using namespace at;
 
 TEST_CASE( "undefined tensor test", "[]" ) {
-  manual_seed(123, at::Backend::CPU);
+  manual_seed(123, at::kCPU);
 
   // mainly test ops on undefined tensors don't segfault and give a reasonable errror message.
   Tensor und;
@@ -18,33 +18,32 @@ TEST_CASE( "undefined tensor test", "[]" ) {
   std::stringstream ss;
   ss << und << std::endl;
   REQUIRE(!und.defined());
-  REQUIRE(std::string("UndefinedTensor") == und.toString());
+  REQUIRE(std::string("UndefinedType") == und.toString());
 
-  REQUIRE_THROWS_WITH(und.strides(), Catch::Contains("strides"));
-  REQUIRE_THROWS_WITH(und.dim(), Catch::Contains("dim"));
-  REQUIRE_THROWS_WITH([]() {return Tensor();}() = Scalar(5), Catch::Contains("UndefinedType"));
-  REQUIRE_THROWS_WITH(und.unsafeGetTH(true), Catch::Contains("unsafeGetTH"));
-  REQUIRE_THROWS_WITH(und.add(und), Catch::Contains("add"));
-  REQUIRE_THROWS_WITH(und.add(ft), Catch::Contains("add"));
-  REQUIRE_THROWS_WITH(ft.add(und), Catch::Contains("add"));
-  REQUIRE_THROWS_WITH(und.add(5), Catch::Contains("add"));
-  REQUIRE_THROWS_WITH(und.mm(und), Catch::Contains("mm"));
+  REQUIRE_THROWS(und.strides());
+  REQUIRE_THROWS(und.dim());
+  REQUIRE_THROWS([]() {return Tensor();}() = Scalar(5));
+  REQUIRE_THROWS(und.add(und));
+  REQUIRE_THROWS(und.add(ft));
+  REQUIRE_THROWS(ft.add(und));
+  REQUIRE_THROWS(und.add(5));
+  REQUIRE_THROWS(und.mm(und));
 
   und.toType(und.type());
-  REQUIRE_THROWS_WITH(und.toType(ft.type()), Catch::Contains("attempt to copy an undefined tensor"));
-  REQUIRE_THROWS_WITH(ft.toType(und.type()), Catch::Contains("UndefinedType"));
+  REQUIRE_THROWS(und.toType(ft.type()));
+  REQUIRE_THROWS(ft.toType(und.type()));
   und.toType(ScalarType::Undefined);
-  REQUIRE_THROWS_WITH(und.toType(ScalarType::Float), Catch::Contains("toScalarType"));
-  REQUIRE_THROWS_WITH(ft.toType(ScalarType::Undefined), Catch::Contains("UndefinedType"));
+  REQUIRE_THROWS(und.toType(ScalarType::Float));
+  REQUIRE_THROWS(ft.toType(ScalarType::Undefined));
 
   // copy_
-  REQUIRE_THROWS_WITH(und.copy_(und), Catch::Contains("copy"));
-  REQUIRE_THROWS_WITH(und.copy_(ft), Catch::Contains("copy"));
-  REQUIRE_THROWS_WITH(ft.copy_(und), Catch::Contains("copy"));
+  REQUIRE_THROWS(und.copy_(und));
+  REQUIRE_THROWS(und.copy_(ft));
+  REQUIRE_THROWS(ft.copy_(und));
 
   und.toBackend(Backend::Undefined);
-  REQUIRE_THROWS_WITH(und.toBackend(Backend::CPU), Catch::Contains("toBackend"));
-  REQUIRE_THROWS_WITH(ft.toBackend(Backend::Undefined), Catch::Contains("UndefinedType"));
+  REQUIRE_THROWS(und.toBackend(Backend::CPU));
+  REQUIRE_THROWS(ft.toBackend(Backend::Undefined));
 
   Tensor to_move = ones({1}, CPU(kFloat));
   Tensor m(std::move(to_move));

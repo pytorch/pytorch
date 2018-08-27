@@ -1,6 +1,8 @@
+#include "torch/csrc/jit/assertions.h"
 #include "torch/csrc/jit/script/module.h"
 #include "torch/csrc/jit/script/compiler.h"
 #include "torch/csrc/jit/script/error_report.h"
+#include "torch/csrc/jit/export.h"
 #include "torch/csrc/jit/operator.h"
 
 namespace torch { namespace jit { namespace script {
@@ -40,7 +42,7 @@ std::vector<Value*> Method::emit_call_to(SourceRange loc, Method & callee, Array
   std::stringstream failure_messages;
   auto all_inputs = tryMatchSchema(
     callee.schema ? *callee.schema : defaultSchemaFor(callee),
-    loc, *graph(), args, kwargs, failure_messages);
+    loc, *graph(), args, kwargs, failure_messages, /*conv_tensors_to_nums*/true);
   if(!all_inputs)
     throw ErrorReport(loc) << failure_messages.str();
 
@@ -59,6 +61,10 @@ void Method::ensure_defined() {
     creator(*this);
     method_creator = nullptr;
   }
+}
+
+void Module::save(const std::string& filename) {
+  ExportModule(*this, filename);
 }
 
 }}}

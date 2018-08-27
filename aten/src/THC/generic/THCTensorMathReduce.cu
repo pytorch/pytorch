@@ -61,22 +61,25 @@ THCTensor_(renorm)(THCState *state, THCTensor* self, THCTensor* src, real value,
   THCTensor *self_;
   THCTensor *src_ = THCTensor_(newTranspose)(state, src, dimension, 0);
   THCTensor *data = THCTensor_(newClone)(state, src_);
-  ptrdiff_t size = THCTensor_(nElement)(state, data)/data->size[0];
+  int64_t numel = THCTensor_(nElement)(state, data);
 
-  THArgCheck(dimension >= 0 && dimension < THCTensor_(_nDimension)(state, src), 3, "invalid dimension");
+  THArgCheck(dimension >= 0 && dimension < THCTensor_(nDimensionLegacyNoScalars)(state, src), 3, "invalid dimension");
   THArgCheck(THCNumerics<real>::gt(value, scalar_cast<real>(0)), 2, "non-positive-norm not supported");
-  THArgCheck(THCTensor_(_nDimension)(state, src) > 1, 1, "need at least 2 dimensions");
+  THArgCheck(THCTensor_(nDimensionLegacyNoScalars)(state, src) > 1, 1, "need at least 2 dimensions");
 
-  dim3 grid(data->size[0]);
-  dim3 threads(32);
+  if (numel > 0) {
+    ptrdiff_t size = numel / THTensor_sizeLegacyNoScalars(data, 0);
+    dim3 grid( THTensor_sizeLegacyNoScalars(data, 0));
+    dim3 threads(32);
 
-  THCTensor_kernel_renorm<real, accreal>
-    <<<grid, threads, 0, THCState_getCurrentStream(state)>>>
-    (THCTensor_(data)(state, data), scalar_cast<accreal>(value), size, scalar_cast<accreal>(maxnorm));
+    THCTensor_kernel_renorm<real, accreal>
+      <<<grid, threads, 0, THCState_getCurrentStream(state)>>>
+      (THCTensor_(data)(state, data), scalar_cast<accreal>(value), size, scalar_cast<accreal>(maxnorm));
 
-  cudaError errcode = cudaGetLastError();
-  if(errcode != cudaSuccess)
-    THError(cudaGetErrorString(errcode));
+    cudaError errcode = cudaGetLastError();
+    if(errcode != cudaSuccess)
+      THError(cudaGetErrorString(errcode));
+  }
 
   THCTensor_(free)(state, src_);
   self_ = THCTensor_(newTranspose)(state, data, dimension, 0);
@@ -91,16 +94,15 @@ THCTensor_(std)(THCState *state, THCTensor *self_, THCTensor *src, int dimension
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src));
 
   THCTensor_preserveReduceDimSemantics(
-      state, self_, THCTensor_(_nDimension)(state, src), dimension, keepdim);
-  THLongStorage *dim = THCTensor_(newSizeOf)(state, src);
-  THLongStorage_set(dim, dimension, 1);
-  THCTensor_(resize)(state, self_, dim, NULL);
-  THLongStorage_free(dim);
+      state, self_, THCTensor_(nDimensionLegacyAll)(state, src), dimension, keepdim);
+  std::vector<int64_t> dim = THTensor_sizesLegacyNoScalars(src);
+  dim[dimension] = 1;
+  THCTensor_(resize)(state, self_, dim, {});
 
   THCTensor *self = THCTensor_(newContiguous)(state, self_);
   src = THCTensor_(newContiguous)(state, src);
 
-  if (dimension == THCTensor_(_nDimension)(state, src) - 1) {
+  if (dimension == THCTensor_(nDimensionLegacyAll)(state, src) - 1) {
     THCTensor_varInnermostDim<THCTensor, real, accreal, true>(state, self, src, biased);
   } else {
     THCTensor_varOuterDim<THCTensor, real, accreal, true>(state, self, src, dimension, biased);
@@ -120,16 +122,15 @@ THCTensor_(var)(THCState *state, THCTensor *self_, THCTensor *src, int dimension
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src));
 
   THCTensor_preserveReduceDimSemantics(
-      state, self_, THCTensor_(_nDimension)(state, src), dimension, keepdim);
-  THLongStorage *dim = THCTensor_(newSizeOf)(state, src);
-  THLongStorage_set(dim, dimension, 1);
-  THCTensor_(resize)(state, self_, dim, NULL);
-  THLongStorage_free(dim);
+      state, self_, THCTensor_(nDimensionLegacyAll)(state, src), dimension, keepdim);
+  std::vector<int64_t> dim = THTensor_sizesLegacyNoScalars(src);
+  dim[dimension] = 1;
+  THCTensor_(resize)(state, self_, dim, {});
 
   THCTensor *self = THCTensor_(newContiguous)(state, self_);
   src = THCTensor_(newContiguous)(state, src);
 
-  if (dimension == THCTensor_(_nDimension)(state, src) - 1) {
+  if (dimension == THCTensor_(nDimensionLegacyAll)(state, src) - 1) {
     THCTensor_varInnermostDim<THCTensor, real, accreal, false>(state, self, src, biased);
   } else {
     THCTensor_varOuterDim<THCTensor, real, accreal, false>(state, self, src, dimension, biased);
@@ -372,10 +373,7 @@ THCTensor_(medianall)(THCState *state, THCTensor *self) {
   nelem = THCTensor_(nElement)(state, self);
   k = (nelem-1) >> 1;
 
-  THLongStorage *size = THLongStorage_newWithSize1(nelem);
-  THCTensor *view = THCTensor_(newView)(state, self, size);
-
-  THLongStorage_free(size);
+  THCTensor *view = THCTensor_(newView)(state, self, {nelem});
 
   THCTensor *sorted = THCTensor_(new)(state);
   THCudaLongTensor *indices = THCudaLongTensor_new(state);

@@ -30,14 +30,19 @@ class PackedSequence(PackedSequence_):
             information about the batch size at each sequence step
 
     """
-    def __new__(cls, *args):
+    def __new__(cls, data, batch_sizes=None):
+        # PackedSequence used to only have __init__(self, data, batch_sizes)
+        # without a __new__ like this. So to preserve BC for calling in keyword
+        # arg style (e.g., `PackedSequence(data=..., batch_sizes=...)`), we have
+        # to provide two arguments with exact names `data` and `batch_sizes`.
+        #
         # support being called as `PackedSequence(data, batch_sizes)`
-        if len(args) == 2:
-            return super(PackedSequence, cls).__new__(cls, *args)
+        if batch_sizes is not None:
+            return super(PackedSequence, cls).__new__(cls, data, batch_sizes)
         # support being called as `PackedSequence((data, batch_sizes))`
         else:
-            assert len(args) == 1
-            return super(PackedSequence, cls).__new__(cls, *args[0])
+            assert isinstance(data, (list, tuple)) and len(data) == 2
+            return super(PackedSequence, cls).__new__(cls, *data)
 
     def cuda(self, *args, **kwargs):
         """Returns a GPU copy if `self.data` not already on the GPU"""
@@ -148,10 +153,15 @@ def _symbolic_pack_padded_sequence(g, input, lengths, batch_first=False, padding
     # optimization pass to remove this later. It is an error if all
     # PackPadded operators cannot be optimized out.
 
+    if not isinstance(input, torch._C.Value):
+        raise RuntimeError("PackPadded requires `input` to be a Tensor")
+    if not isinstance(lengths, torch._C.Value):
+        raise RuntimeError("PackPadded requires `lengths` to be a Tensor")
+
     def _onnx_symbolic_pack_padded_sequence(g, input, lengths):
         if batch_first:
             input = g.op('Transpose', input, perm_i=[1, 0, 2])
-        if lengths.type().kind() != 'TensorType':
+        if not lengths.type().isSubtypeOf(torch._C.DynamicType.get()):
             raise RuntimeError("Lengths must be a Tensor for ONNX export")
         # We know it's a TensorType so this check is now safe.
         if lengths.type().scalarType() != 'Int':
@@ -168,8 +178,7 @@ def _symbolic_pack_padded_sequence(g, input, lengths, batch_first=False, padding
     return tuple(o for o in outputs)
 
 
-pack_padded_sequence = torch.onnx.symbolic_override_first_arg_based(
-    _symbolic_pack_padded_sequence)(pack_padded_sequence)
+pack_padded_sequence = torch.onnx.symbolic_override(_symbolic_pack_padded_sequence)(pack_padded_sequence)
 
 
 def pad_packed_sequence(sequence, batch_first=False, padding_value=0.0, total_length=None):
@@ -264,8 +273,7 @@ def _symbolic_pad_packed_sequence(g, input, batch_first=False, padding_value=0.0
     return data, lengths
 
 
-pad_packed_sequence = torch.onnx.symbolic_override_packed_sequence_based(
-    _symbolic_pad_packed_sequence)(pad_packed_sequence)
+pad_packed_sequence = torch.onnx.symbolic_override(_symbolic_pad_packed_sequence)(pad_packed_sequence)
 
 
 def pad_sequence(sequences, batch_first=False, padding_value=0):
