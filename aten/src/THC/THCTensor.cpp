@@ -192,7 +192,7 @@ void THCTensor_setStorageNd(THCState *state, THCTensor *self, THCStorage *storag
     auto scalar_type = THTensor_getStoragePtr(self)->scalar_type();
 
     if (storage) {
-      storage->_raw_incref();
+      c10::raw::intrusive_ptr::incref(storage);
       THTensor_stealAndSetStoragePtr(self, storage);
     } else {
       THTensor_stealAndSetStoragePtr(self, THCStorage_new(state, scalar_type));
@@ -273,8 +273,9 @@ ptrdiff_t THCTensor_nElement(THCState *state, const THCTensor *self) {
   }
 }
 
+// NB: It is INVALID to call this on an UndefinedTensor
 void THCTensor_retain(THCState *state, THCTensor *self) {
-  self->retain();
+  c10::raw::intrusive_ptr::incref(self);
 }
 
 void THCTensor_free(THCState *state, THCTensor *self) {

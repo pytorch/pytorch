@@ -91,11 +91,7 @@ Storage ${Type}::storageWithAllocator(int64_t size, Allocator* allocator) const 
     return Storage(ScalarType::${ScalarName}, size, allocator);
 }
 Tensor ${Type}::unsafeTensorFromTH(void * th_pointer, bool retain) const {
-  TensorImpl* pimpl = (TensorImpl*)(th_pointer);
-  if (retain) {
-    pimpl->retain();
-  }
-  return Tensor(pimpl, false);
+  return Tensor(static_cast<TensorImpl*>(th_pointer), retain);
 }
 Storage ${Type}::unsafeStorageFromTH(void * th_pointer, bool retain) const {
   if (retain)

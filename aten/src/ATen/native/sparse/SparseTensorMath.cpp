@@ -55,7 +55,7 @@ SparseTensor& zero_sparse_(SparseTensor& self) {
 
 static Tensor scalar_tensor(Scalar s) {
   auto tensor = s.toTensor();
-  tensor.get()->set_wrapped_number(true);
+  tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
   return tensor;
 }
 

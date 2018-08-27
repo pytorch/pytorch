@@ -59,7 +59,7 @@ static void check_out_type_matches(Tensor result,
   }
 }
 
-inline Tensor & dispatch_arange(Scalar end, Tensor result) {
+inline Tensor dispatch_arange(Scalar end, Tensor result) {
   AutoNoGIL no_gil;
   return at::arange_out(result, end);
 }
@@ -70,7 +70,7 @@ inline Tensor dispatch_arange(Scalar end, const TensorOptions& options) {
   return torch::arange(end, options);
 }
 
-inline Tensor & dispatch_arange(Scalar start, Scalar end, Scalar step, Tensor result) {
+inline Tensor dispatch_arange(Scalar start, Scalar end, Scalar step, Tensor result) {
   AutoNoGIL no_gil;
   return at::arange_out(result, start, end, step);
 }
@@ -140,7 +140,7 @@ static PyObject * THPVariable_arange(PyObject* self, PyObject* args, PyObject* k
   END_HANDLE_TH_ERRORS
 }
 
-inline Tensor & dispatch_range(Scalar start, Scalar end, Scalar step, Tensor result) {
+inline Tensor dispatch_range(Scalar start, Scalar end, Scalar step, Tensor result) {
   AutoNoGIL no_gil;
   DeviceGuard device_guard(result);
   return at::range_out(result, start, end, step);

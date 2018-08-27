@@ -593,7 +593,7 @@ Tensor view_as(const Tensor& self, const Tensor& other) {
 }
 
 int64_t numel(const Tensor& self) {
-  return self.pImpl->numel();
+  return self.unsafeGetTensorImpl()->numel();
 }
 
 std::vector<Tensor> unbind(const Tensor &self, int64_t dim) {

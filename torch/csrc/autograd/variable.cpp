@@ -89,7 +89,7 @@ const char* Variable::Impl::typeString() {
   return "VariableType";
 }
 
-const at::Storage& Variable::Impl::storage() {
+const at::Storage& Variable::Impl::storage() const {
   return data_.storage();
 }
 
