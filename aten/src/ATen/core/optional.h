@@ -300,7 +300,7 @@ using OptionalBase = typename std::conditional<
     optional_base<typename std::remove_const<T>::type>>::type;
 
 template <class T>
-class optional : private OptionalBase<T> {
+class optional : public OptionalBase<T> {
   static_assert(
       !std::is_same<typename std::decay<T>::type, nullopt_t>::value,
       "bad T");
