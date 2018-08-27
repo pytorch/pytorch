@@ -259,13 +259,16 @@ def indent(s):
 
 
 class TracingCheckError(Exception):
-    def __init__(self, graph_diff_error, tensor_compare_error, extra_msg=None):
+    def __init__(self, graph_diff_error, tensor_compare_error, nondeterm_warning, extra_msg=None):
         self.message = 'Tracing failed sanity checks!\n'
         if extra_msg is not None:
             self.message += extra_msg + '\n'
         if graph_diff_error is not None:
             self.message += 'ERROR: Graphs differed across invocations!\n'
             self.message += indent(graph_diff_error) + '\n'
+        if nondeterm_warning is not None:
+            self.message += 'WARNING: '
+            self.message += nondeterm_warning + '\n'
         if tensor_compare_error is not None:
             self.message += 'ERROR: Tensor-valued Constant nodes differed in value ' \
                             'across invocations. This often indicates that the tracer has' \
@@ -328,7 +331,16 @@ def check_trace(check_inputs, func, executor_options, module, check_tolerance):
                         tensor_compare_errors += 'Source Location:\n' + indent(n_mod.sourceLocation()) + '\n'
                         tensor_compare_errors += 'Comparison exception: ' + indent(str(e))
 
-            return graph_diff_errors, tensor_compare_errors
+            nondeterministic_ops_warning = None
+            nondeterm_ops = [op for op in module.graph.nodes() if op.isNondeterministic()]
+            if len(nondeterm_ops) > 0:
+                nondeterministic_ops_warning = "Trace had nondeterministic nodes. Nodes:\n"
+                for op in nondeterm_ops:
+                    nondeterministic_ops_warning += indent(str(op))
+                nondeterministic_ops_warning += "\nThis may cause errors in trace checking. To disable trace checking,"\
+                                                " pass disable_checks=True to torch.jit.trace()"
+
+            return graph_diff_errors, tensor_compare_errors, nondeterministic_ops_warning
 
         def wrap_non_iterable(x):
             try:
@@ -407,20 +419,21 @@ def trace(*args, **kwargs):
         for name in executor_options:
             executor_options[name] = kwargs.pop(name, executor_options[name])
 
+        check_inputs = kwargs.pop('check_inputs', None)
+        disable_checks = kwargs.pop('disable_checks', False)
+        check_tolerance = kwargs.pop('check_tolerance', 1e-7)
+
+        if len(kwargs) != 0:
+            raise TypeError("got unexpected keyword arguments: {}".format(", ".join(kwargs.keys())))
+
         module = TopLevelTracedModule(func, **executor_options)
         module._create_method_from_trace('forward', func, tuple(args))
 
         # Check the trace against new traces created from user-specified inputs
-        check_inputs = kwargs.pop('check_inputs', None)
-        disable_checks = kwargs.pop('disable_checks', False)
-        check_tolerance = kwargs.pop('check_tolerance', 1e-7)
         if check_inputs is not None:
             check_trace(check_inputs, func, executor_options, module, check_tolerance)
         elif not disable_checks:
             check_trace([args], func, executor_options, module, check_tolerance)
-
-        if len(kwargs) != 0:
-            raise TypeError("got unexpected keyword arguments: {}".format(", ".join(kwargs.keys())))
 
         return module
 

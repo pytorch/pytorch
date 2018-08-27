@@ -413,9 +413,11 @@ public:
 
 
   // Returns true if the value of input name is statically known
-  bool is_constant(Symbol name) {
+  bool is_constant(Symbol name) const {
     return static_cast<bool>(get(name));
   }
+
+  TORCH_API bool isNondeterministic() const;
 
   // Graphs
 

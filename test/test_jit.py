@@ -6047,6 +6047,21 @@ a")
                 x.view(-1).add_(-x.view(-1))
                 return x
 
+    def test_trace_checker_dropout_train(self):
+        with self.assertRaisesRegex(torch.jit.TracingCheckError, r'Trace had nondeterministic nodes'):
+            @torch.jit.trace(torch.rand(3, 4))
+            def foo(x):
+                return torch.dropout(x, p=0.5, train=True)
+
+    def test_trace_checker_dropout_notrain(self):
+        input = torch.rand(3, 4)
+
+        @torch.jit.trace(input)
+        def foo(x):
+            return torch.dropout(x, p=0.5, train=False)
+
+        np.testing.assert_allclose(foo(input), input)
+
 
 class TestEndToEndHybridFrontendModels(JitTestCase):
 

@@ -620,6 +620,42 @@ void Node::findSchema() const {
   schema_ = &getOperatorFor(this).schema();
 }
 
+namespace {
+
+const std::unordered_set<Symbol>& nondeterminstic_aten_ops() {
+  static std::unordered_set<Symbol> nondeterministic_ops = {
+    aten::dropout,
+    aten::batch_norm,
+    aten::_fused_dropout,
+    aten::_standard_gamma,
+    aten::_th_bernoulli,
+    aten::bernoulli,
+    aten::multinomial,
+    aten::normal,
+    aten::poisson,
+    aten::rrelu,
+    aten::rrelu_with_noise
+  };
+  return nondeterministic_ops;
+}
+
+}  // namespace
+
+bool Node::isNondeterministic() const {
+  if (nondeterminstic_aten_ops().count(kind()) == 0) {
+    return false;
+  }
+  // Dropout with train = False is deterministic
+  if (kind() == aten::dropout && is_constant(attr::train) && !get<bool>(attr::train).value()) {
+    return false;
+  }
+  // batch_norm with training = False is deterministic
+  if (kind() == aten::batch_norm && is_constant(attr::training) && !get<bool>(attr::training).value()) {
+    return false;
+  }
+  return true;
+}
+
 inline const SourceRange& fakeRange() {
   static SourceRange range(std::make_shared<std::string>("<internally-created-node>"), 0, 1);
   return range;
