@@ -48,9 +48,9 @@ struct AT_API StorageImpl : public c10::raw_intrusive_ptr_target<StorageImpl> {
     if (dtype() != data_type_T) {
       AT_ERROR(
           "Attempt to access StorageImpl having data type ",
-          at::toString(dataTypeToScalarType(dtype())),
+          dtype(),
           " as data type ",
-          at::toString(dataTypeToScalarType(data_type_T)));
+          data_type_T);
     }
     return unsafe_data<T>();
   }
