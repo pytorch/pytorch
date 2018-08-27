@@ -2697,9 +2697,8 @@ a")
         self.checkScript(func, inputs, optimize=True)
 
     def test_if(self):
-        def func(x, y):
-            a = int(x)
-            b = int(y)
+        def func(a, b):
+            # type: (int, int) -> int
             d = 3
             if a > 10:
                 a = 3 + d
@@ -2713,9 +2712,8 @@ a")
         self.checkScript(func, inputs, optimize=True)
 
     def test_if_for_in_range(self):
-        def func(x, y):
-            a = int(x)
-            b = int(y)
+        def func(a, b):
+            # type: (int, int) -> int
             d = 3
             for _ in range(20):
                 if a > 10:
@@ -2769,9 +2767,8 @@ a")
         self.checkScript(func, inputs, optimize=True)
 
     def test_while_nest_if(self):
-        def func(x, y):
-            a = int(x)
-            b = int(y)
+        def func(a, b):
+            # type: (int, int) -> int
             c = 0
             while a < 10:
                 a = a + 1
@@ -2819,11 +2816,12 @@ a")
 
     def test_if_nest_while(self):
         def func(a, b):
+            # type: (int, int) -> int
             c = 0
             if a > b:
                 while a > b:
                     b = b + 1
-                    c = -int(b)
+                    c = -b
             return c
 
         inputs = self._make_scalar_vars([4321, 1234], torch.int64)
