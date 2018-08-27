@@ -349,7 +349,7 @@ public:
   virtual int64_t dim() const override {
     throw std::runtime_error("dim() on ContainerTensor");
   }
-  virtual const at::Storage& storage() override {
+  virtual const at::Storage& storage() const override {
     throw std::runtime_error("storage() on ContainerTensor");
   }
 };
