@@ -23,7 +23,7 @@ from functools import wraps
 from itertools import product
 from copy import deepcopy
 from numbers import Number
-from packaging import version
+from pkg_resources import parse_version  # implements PEP 440 -- Version Identification
 
 import __main__
 import errno
@@ -83,8 +83,8 @@ def _check_module_exists(name, min_version=None):
             return False
     if min_version is None:
         return True
-    module_version = version.parse(eval("__import__({}).__version__").format(name))
-    return module_version >= version.parse(min_version)
+    module_version = parse_version(eval("__import__('{}').__version__").format(name))
+    return module_version >= vparse_version(min_version)
 
 TEST_NUMPY = _check_module_exists('numpy', '1.14.0')
 TEST_SCIPY = _check_module_exists('scipy', '1.0.0')
