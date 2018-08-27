@@ -1049,6 +1049,7 @@ class TestSparse(TestCase):
         self.assertEqual(t._values(), expected_values)
         self.assertEqual(t.size(), expected_size)
 
+    @skipIfRocm
     def test_factory_nnz_zero(self):
         self._test_factory_tensor_shape([1, 0], [0, 2, 4, 0], None, [0, 2, 4, 0])
         self._test_factory_tensor_shape([3, 0], [0, 2, 4, 0], None, [0, 0, 0, 2, 4, 0])
