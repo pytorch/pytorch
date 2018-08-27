@@ -15,6 +15,8 @@ class TensorDescriptors {
  public:
   TensorDescriptors(
       size_t n,
+      // dim and stride are not declared as const as opposed to cuDNN
+      // since miopenSetTensorDescriptor doesn't take const arguments
       std::vector<int>& dim,
       std::vector<int>& stride);
   ~TensorDescriptors();
