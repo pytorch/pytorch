@@ -56,12 +56,6 @@ PY35 = sys.version_info >= (3, 5)
 WINDOWS = sys.platform == 'win32'
 
 
-# TODO: Replace all uses of this function with the literal "0" when the jit
-# is able to support returning numbers (as opposed to only Tensors)
-def FIXME_zerol():
-    return torch.tensor([0])
-
-
 def LSTMCellF(input, hx, cx, *params):
     return LSTMCell(input, (hx, cx), *params)
 
@@ -1345,7 +1339,7 @@ class TestJit(JitTestCase):
     def test_constant_prop_print(self):
         @torch.jit.script
         def constant_prop(input_tensor):
-            a = 2 * 3 + FIXME_zerol()
+            a = 2 * 3
             print(a)
             b = a + 2
             return b + input_tensor
@@ -2845,20 +2839,19 @@ a")
 
             st = second + third
             fs = first + second
-            zero = FIXME_zerol()
-            return third + zero, st + zero, fs + zero
+            return third, st, fs
 
         inputs = self._make_scalar_vars([10], torch.int64)
         self.checkScript(func, inputs, optimize=True)
 
     def test_if(self):
         def func(a, b):
-            zero = FIXME_zerol()
+            # type: (int, int) -> int
             d = 3
             if a > 10:
-                a = zero + 3 + d
+                a = 3 + d
             else:
-                b = zero + 3 + d
+                b = 3 + d
                 d = 4
             c = a + b
             return c
@@ -2868,13 +2861,14 @@ a")
 
     def test_if_for_in_range(self):
         def func(a, b):
-            d = FIXME_zerol() + 3
+            # type: (int, int) -> int
+            d = 3
             for _ in range(20):
                 if a > 10:
                     a = 3 + d
                 else:
                     b = 3 + d
-                    d = FIXME_zerol() + 4
+                    d = 4
                 c = a + b
             return d
         inputs = self._make_scalar_vars([1, -1], torch.int64)
@@ -2922,7 +2916,8 @@ a")
 
     def test_while_nest_if(self):
         def func(a, b):
-            c = FIXME_zerol()
+            # type: (int, int) -> int
+            c = 0
             while a < 10:
                 a = a + 1
                 b = b + 1
@@ -2957,14 +2952,10 @@ a")
         # Test that the numbers are casted to tensor,
         # added, and then casted back.
         def fn1(x):
-            c = 7 + 8
-            # FIXME: return number instead of tensor
-            return torch.full([1], c)
+            return 7 + 8
 
         def fn2(x):
-            c = 1.1 + 3.1
-            # FIXME: return number instead of tensor
-            return torch.full([1], c)
+            return 1.1 + 3.1
 
         graph1 = torch.jit.script(fn1).graph
         self.assertExpectedGraph(graph1, subname="int")
@@ -2973,7 +2964,8 @@ a")
 
     def test_if_nest_while(self):
         def func(a, b):
-            c = FIXME_zerol()
+            # type: (int, int) -> int
+            c = 0
             if a > b:
                 while a > b:
                     b = b + 1
@@ -2985,7 +2977,7 @@ a")
 
     def test_script_for_in_range(self):
         def fn():
-            c = FIXME_zerol()
+            c = 0
             for i in range(100):
                 c += i
             return c
@@ -2993,11 +2985,9 @@ a")
 
     def test_script_for_in_range_dynamic(self):
         def fn():
-            c = FIXME_zerol()
+            c = 0
             for i in range(100):
-                # FIXME: i should really be IntType and not DynamicType in the frontend
-                # In addition, i should be a scalar tensor (it has size (1,) atm)
-                acc = FIXME_zerol()
+                acc = 0
                 for j in range(i):
                     acc += j
                 c += acc
@@ -3007,9 +2997,9 @@ a")
     def test_script_for_in_range_ast(self):
         @torch.jit.script
         def test_script_for_in_range_ast():
-            c = FIXME_zerol()
+            c = 0
             for i in range(100):
-                acc = FIXME_zerol()
+                acc = 0
                 for j in range(i):
                     acc += j
                 c += acc
@@ -3020,7 +3010,7 @@ a")
     def test_script_for_in_range_if_ast(self):
         @torch.jit.script
         def test_script_for_in_range_if_ast(x):
-            output = FIXME_zerol()
+            output = x
             for i in range(20):
                 if i == 0:
                     output = x.unsqueeze(0)
@@ -3160,29 +3150,21 @@ a")
                 return x << y
 
     def test_number_math(self):
-        template = ('''
-# int, int -> int
-def func1():
-    c = 8 {op} 2
-    # FIXME: return number instead of tensor
-    return torch.full([1], c)
+        template = dedent('''
+        # int, int -> int
+        def func1():
+            return 8 {op} 2
 
-def func2():
-    c = 2 {op} 2
-    # FIXME: return number instead of tensor
-    return torch.full([1], c)
+        def func2():
+            return 2 {op} 2
 
-# float, float -> float
-def func3():
-    c = 3.14 {op} 0.125
-    # FIXME: return number instead of tensor
-    return torch.full([1], c)
+        # float, float -> float
+        def func3():
+            return 3.14 {op} 0.125
 
-def func4():
-    c = 3.14 {op} 3.14
-    # FIXME: return number instead of tensor
-    return torch.full([1], c)
-''')
+        def func4():
+            return 3.14 {op} 3.14
+        ''')
         ops = ['+', '-', '*', '<', '<=', '>', '>=', '==', '!=']
         # TODO: turn this on for py3 (and add PY3 division semantics)
         ops_py2_only = ['/']
@@ -3211,24 +3193,20 @@ def func4():
     def test_number_neg(self):
         # int -> int
         def func1():
-            c = -8
-            # FIXME: return number instead of tensor
-            return torch.full([1], c)
+            return -8
 
         # float -> float
         def func2():
-            c = -3.14
-            # FIXME: return number instead of tensor
-            return torch.full([1], c)
+            return -3.14
 
         self.checkScript(func1, (), optimize=True)
         self.checkScript(func2, (), optimize=True)
 
     def _test_tensor_number_math(self, device='cpu'):
-        template = ('''
-def func(t):
-    return {lhs} {op} {rhs}
-''')
+        template = dedent('''
+        def func(t):
+            return {lhs} {op} {rhs}
+        ''')
 
         def test(op, const, swap_args):
             args = ('t', const)
@@ -3570,7 +3548,7 @@ def func(t):
 
             @torch.jit.script_method
             def forward(self):
-                sum = FIXME_zerol()
+                sum = 0
                 for i in self.b:
                     sum += i
                 return sum
@@ -3938,8 +3916,7 @@ def func(t):
 
         @torch.jit.script
         def return3():
-            # FIXME: use number instead of tensor
-            return torch.full([1], 1), torch.full([1], 2), torch.full([1], 3)
+            return 1, 2, 3
 
         with self.assertRaisesRegex(RuntimeError, "too many values to unpack"):
             @torch.jit.script
@@ -4314,14 +4291,14 @@ def func(t):
                 b = 1
             else:
                 b = 0
-            return FIXME_zerol() + (b + 1)
+            return b + 1
 
         @torch.jit.script
         def foo2(a):
             b = 0
             if a == 0:
                 b = 1
-            return FIXME_zerol() + (b + 1)
+            return b + 1
 
         @torch.jit.script
         def foo3(a):
@@ -4330,7 +4307,7 @@ def func(t):
                 c = 4
             else:
                 b = 0
-            return FIXME_zerol() + (b + 1)
+            return b + 1
 
         a = torch.ones(1, dtype=torch.long)
         b = torch.zeros(1, dtype=torch.long)
@@ -4626,10 +4603,9 @@ def func(t):
 
         @torch.jit.script
         def bar(x):
-            y = foo(x)
+            y = int(foo(x))
             if True:
-                # FIXME: use number instead of tensor
-                y = torch.full([1], 7)
+                y = 7
             return y + 1
 
         self.assertEqual(8, bar(torch.ones(1, 1)))
@@ -4964,7 +4940,7 @@ def func(t):
 
     def test_loop_unrolling(self):
         def fn(x):
-            y = FIXME_zerol()
+            y = 0
             for i in range(int(x)):
                 y += i
             return y
@@ -4976,13 +4952,13 @@ def func(t):
 
     def test_loop_unrolling_const(self):
         def fn():
-            y = FIXME_zerol()
+            y = 0
             for i in range(10):
                 y += 1
             return y
 
         def fn2():
-            y = FIXME_zerol()
+            y = 0
             for i in range(10):
                 y += i
             return y
@@ -4998,7 +4974,7 @@ def func(t):
 
     def test_loop_unrolling_nested(self):
         def fn(x):
-            y = FIXME_zerol()
+            y = 0
             for i in range(10):
                 for j in range(int(x)):
                     y += j
@@ -5011,7 +4987,7 @@ def func(t):
 
     def test_loop_unroll_unused_counter(self):
         def fn(x):
-            y = FIXME_zerol()
+            y = 0
             for i in range(int(x)):
                 y += 1
             return y
@@ -5022,7 +4998,7 @@ def func(t):
 
     def test_loop_unroll_negative(self):
         def fn(x):
-            y = FIXME_zerol()
+            y = 0
             for i in range(int(x)):
                 y += 1
             return y
