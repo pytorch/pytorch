@@ -23,6 +23,7 @@ from functools import wraps
 from itertools import product
 from copy import deepcopy
 from numbers import Number
+from packaging import version
 
 import __main__
 import errno
@@ -59,7 +60,7 @@ IS_WINDOWS = sys.platform == "win32"
 IS_PPC = platform.machine() == "ppc64le"
 
 
-def _check_module_exists(name):
+def _check_module_exists(name, min_version=None):
     r"""Returns if a top-level module with :attr:`name` exists *without**
     importing it. This is generally safer than try-catch block around a
     `import X`. It avoids third party libraries breaking assumptions of some of
@@ -70,26 +71,25 @@ def _check_module_exists(name):
         import imp
         try:
             imp.find_module(name)
-            return True
         except ImportError:
             return False
     elif PY34:  # Python [3, 3.4)
         import importlib
-        loader = importlib.find_loader(name)
-        return loader is not None
+        if importlib.find_loader(name) is None:
+            return False
     else:  # Python >= 3.4
         import importlib
-        spec = importlib.util.find_spec(name)
-        return spec is not None
+        if importlib.util.find_spec(name) is None:
+            return False
+    if min_version is None:
+        return True
+    module_version = version.parse(eval("__import__({}).__version__").format(name))
+    return module_version >= version.parse(min_version)
 
-TEST_NUMPY = _check_module_exists('numpy')
-TEST_SCIPY = _check_module_exists('scipy')
+TEST_NUMPY = _check_module_exists('numpy', '1.14.0')
+TEST_SCIPY = _check_module_exists('scipy', '1.0.0')
+TEST_LIBROSA = _check_module_exists('librosa', '0.6.2')
 TEST_MKL = torch.backends.mkl.is_available()
-
-# On Py2, importing librosa 0.6.1 triggers a TypeError (if using newest joblib)
-# see librosa/librosa#729.
-# TODO: allow Py2 when librosa 0.6.2 releases
-TEST_LIBROSA = _check_module_exists('librosa') and PY3
 
 NO_MULTIPROCESSING_SPAWN = os.environ.get('NO_MULTIPROCESSING_SPAWN', '0') == '1'
 TEST_WITH_ASAN = os.getenv('PYTORCH_TEST_WITH_ASAN', '0') == '1'

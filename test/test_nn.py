@@ -5351,8 +5351,7 @@ class TestNN(NNTestCase):
             self.assertEqual(out_cpu, out_cuda)
             self.assertEqual(input_cpu.grad, input_gpu.grad)
 
-    @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
-                     "Scipy v1.0 and/or numpy not found")
+    @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY), "Scipy and/or numpy not found")
     def test_affine_2d_rotate0(self):
         # scipy before 1.0.0 do not support homogeneous coordinate
         # scipy.ndimage.affine_transform, so we need to skip.
@@ -5388,8 +5387,7 @@ class TestNN(NNTestCase):
             assert np.abs(scipy_ary.mean() - gridsample_ary.mean()) < 1e-6
             assert np.abs(scipy_ary - gridsample_ary).max() < 1e-6
 
-    @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
-                     "Scipy v1.0 and/or numpy not found")
+    @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY), "Scipy and/or numpy not found")
     def test_affine_2d_rotate90(self):
         # scipy before 1.0.0 do not support homogeneous coordinate
         # scipy.ndimage.affine_transform, so we need to skip.
@@ -5433,8 +5431,7 @@ class TestNN(NNTestCase):
             assert np.abs(scipy_ary.mean() - gridsample_ary.mean()) < 1e-6
             assert np.abs(scipy_ary - gridsample_ary).max() < 1e-6
 
-    @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
-                     "Scipy v1.0 and/or numpy not found")
+    @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY), "Scipy and/or numpy not found")
     def test_affine_2d_rotate45(self):
         # scipy before 1.0.0 do not support homogeneous coordinate
         # scipy.ndimage.affine_transform, so we need to skip.
@@ -5471,8 +5468,7 @@ class TestNN(NNTestCase):
 
             assert np.abs(scipy_ary - gridsample_ary).max() < 1e-6
 
-    @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
-                     "Scipy v1.0 and/or numpy not found")
+    @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY), "Scipy and/or numpy not found")
     def test_affine_2d_rotateRandom(self):
         # scipy before 1.0.0 do not support homogeneous coordinate
         # scipy.ndimage.affine_transform, so we need to skip.
@@ -5519,8 +5515,7 @@ class TestNN(NNTestCase):
 
             assert np.abs(scipy_ary - gridsample_ary).max() < 1e-5
 
-    @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
-                     "Scipy v1.0 and/or numpy not found")
+    @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY), "Scipy and/or numpy not found")
     def test_affine_3d_rotateRandom(self):
         # scipy before 1.0.0 do not support homogeneous coordinate
         # scipy.ndimage.affine_transform, so we need to skip.
