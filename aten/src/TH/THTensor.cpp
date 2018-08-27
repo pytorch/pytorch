@@ -38,7 +38,7 @@ void THTensor_setStorageNd(THTensor *self, THStorage *storage, ptrdiff_t storage
     if (!THTensor_getStoragePtr(self)) {
       THError("Tensor: invalid null storage");
     }
-    auto scalar_type = THTensor_getStoragePtr(self)->scalar_type();
+    auto scalar_type = at::dataTypeToScalarType(THTensor_getStoragePtr(self)->dtype());
     if(storage)
     {
       storage->_raw_incref();
