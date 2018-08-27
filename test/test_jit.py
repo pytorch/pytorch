@@ -2031,6 +2031,28 @@ class TestScript(JitTestCase):
 
         return ge
 
+    def test_tuple_io(self):
+        def stuff(x):
+            # type: (Tuple[Tensor, Tensor]) -> Tuple[Tensor, Tensor]
+            a, b = x
+            return b, a
+
+        a = (torch.rand(3), torch.rand(3))
+        self.checkScript(stuff, (a,))
+
+    def test_tuple_create_return(self):
+        def stuff2(x):
+            # type: (int) -> Tuple[Tensor, Tensor]
+            a = (torch.ones(x), torch.zeros(x))
+            return a
+        self.checkScript(stuff2, (3,))
+
+    def test_list_io(self):
+        def stuff3(x):
+            # type: (List[int]) -> Tuple[Tensor, List[int]]
+            return torch.ones(x), x
+        self.checkScript(stuff3, ([3, 2],))
+
     def test_script_cu(self):
         cu = torch.jit.CompilationUnit('''
             def foo(a):
@@ -4816,7 +4838,7 @@ a")
             ''')
 
     def test_parser_type_annotations_subscript_tensor(self):
-        with self.assertRaisesRegex(RuntimeError, r'Type Tensor cannot be subscripted'):
+        with self.assertRaisesRegex(RuntimeError, r'Unknown type constructor Tensor'):
             cu = torch.jit.CompilationUnit('''
                 def foo(x : Tensor, y : Tensor[Tensor, Tensor]) -> Tuple[Tensor, Tensor]:
                     return x, x
@@ -5049,11 +5071,10 @@ a")
                 return x.splork(3)
 
     def test_return_tuple(self):
-        with self.assertRaisesRegex(RuntimeError, 'only supported return types'):
-            @torch.jit.script
-            def return_tuple(x):
-                a = (x, x)
-                return a, x
+        def return_tuple(x):
+            a = (x, x)
+            return a, x
+        self.checkScript(return_tuple, (torch.rand(4),))
 
     def test_method_no_self(self):
         with self.assertRaisesRegex(RuntimeError, 'methods must have a self argument'):
@@ -6462,8 +6483,6 @@ class TestPytorchExportModes(JitTestCase):
 EXCLUDE_TRACED = {
     'test_split_dim',
     'test_split_dim_neg0',
-    'test_gesv',
-    'test_inverse',
 
     # nn functional test
     # schema not found for onnx node
@@ -6739,24 +6758,21 @@ class TestCustomOperators(JitTestCase):
     def test_passing_too_many_args(self):
         with self.assertRaisesRegex(
             RuntimeError,
-            "Expected at most 1 argument\(s\) for operator 'aten::relu', " +
-            "but received 2 argument\(s\). " +
-            "Schema: aten::relu\(Tensor self\) -> Tensor",
+            "aten::relu\(\) expected at most 1 argument\(s\) but received 2 argument\(s\)"
         ):
             torch.ops.aten.relu(1, 2)
 
     def test_passing_too_few_args(self):
         with self.assertRaisesRegex(
             RuntimeError,
-            "Missing value for argument 'self' to operator 'aten::relu'. " +
-            "Schema: aten::relu\(Tensor self\) -> Tensor",
+            "aten::relu\(\) is missing value for argument 'self'."
         ):
             torch.ops.aten.relu()
 
     def test_passing_one_positional_but_not_the_second(self):
         with self.assertRaisesRegex(
             RuntimeError,
-            "Missing value for argument 'dim' to operator 'aten::log_softmax'"
+            "aten::log_softmax\(\) is missing value for argument 'dim'."
         ):
             torch.ops.aten.log_softmax(torch.ones(5))
 
@@ -6776,13 +6792,10 @@ class TestCustomOperators(JitTestCase):
 
     def test_passing_and_returning_lists(self):
         # Replace with actual test once we support lists.
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "Lists and strings are not supported yet"
-        ):
-            a, b = torch.ones(5), torch.zeros(5)
-            output = torch.ops.aten.stack([a, b])
-            self.assertEqual(output, torch.ones(10))
+        a, b = torch.rand(5), torch.rand(5)
+        output = torch.ops.aten.cat([a, b])
+        output_ref = torch.cat([a, b])
+        self.assertEqual(output, output_ref)
 
     def test_script_graph_contains_custom_op(self):
         @torch.jit.script

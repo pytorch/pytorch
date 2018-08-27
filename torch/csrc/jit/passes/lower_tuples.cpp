@@ -18,7 +18,7 @@ std::unordered_set<Symbol> white_list = {
 };
 
 
-static void LowerTuples(Block* block);
+static void LowerAllTuples(Block* block);
 
 static void VisitNode(Node* n, Node* insert_point) {
   auto & graph = *n->owningGraph();
@@ -58,7 +58,7 @@ static void VisitNode(Node* n, Node* insert_point) {
     }
   }
   for(auto b : n->blocks()) {
-    LowerTuples(b);
+    LowerAllTuples(b);
   }
 
   // flatten the outputs list
@@ -85,7 +85,7 @@ static void VisitNode(Node* n, Node* insert_point) {
   }
 }
 
-static void LowerTuples(Block* block) {
+static void LowerAllTuples(Block* block) {
   // tuples in parameter lists of a block behave exactly the same as
   // _outputs_ of normal instructions, since the param_node represents the
   // parameters as outputs, we can handle it by simply visiting the node
@@ -101,23 +101,49 @@ static void LowerTuples(Block* block) {
   VisitNode(block->return_node(), nullptr);
 }
 
+
+static void EnsureNoTuples(ArrayRef<Value*> values) {
+  for (Value * v : values) {
+    JIT_ASSERTM(v->type()->kind() != TypeKind::TupleType,
+                "Couldn't lower all tuples.");
+  }
+}
+
 static void EnsureNoTuples(Block* block) {
   for (Node* n : block->nodes()) {
     for (Block* b : n->blocks()) {
       EnsureNoTuples(b);
     }
-    for (Value * o : n->outputs()) {
-      JIT_ASSERTM(o->type()->kind() != TypeKind::TupleType,
-                  "Couldn't lower all tuples. This is an error because "
-                  "they're not implemented in the interpreter just yet.");
+    EnsureNoTuples(n->outputs());
+  }
+}
+
+void LowerAllTuples(std::shared_ptr<Graph>& graph) {
+  LowerAllTuples(graph->block());
+  EliminateDeadCode(graph);
+  EnsureNoTuples(graph->block());
+}
+
+static void LowerSimpleTuples(Block* block) {
+  for(auto n : block->nodes()) {
+    // make any TupleUnpack dead by undoing TupleUnpack(TupleConstruct())
+    if(n->kind() == prim::TupleUnpack) {
+      auto construct = n->input()->node();
+      if(construct->kind() == prim::TupleConstruct) {
+        for(size_t i = 0; i < n->outputs().size(); ++i) {
+          n->outputs()[i]->replaceAllUsesWith(construct->inputs()[i]);
+        }
+      }
+    }
+    for(auto b : n->blocks()) {
+      LowerSimpleTuples(b);
     }
   }
 }
 
-void LowerTuples(std::shared_ptr<Graph>& graph) {
-  LowerTuples(graph->block());
+void LowerSimpleTuples(std::shared_ptr<Graph>& graph) {
+  LowerSimpleTuples(graph->block());
   EliminateDeadCode(graph);
-  EnsureNoTuples(graph->block());
 }
 
 }}
