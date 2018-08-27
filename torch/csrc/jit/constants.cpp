@@ -24,6 +24,12 @@ Value* insertConstant(
   } else if(val.isDouble()) {
     n->f_(attr::value, val.toDouble());
     n->output()->setType(FloatType::get());
+  } else if (val.isBool()) {
+    n->b_(attr::value, val.toBool());
+    n->output()->setType(BoolType::get());
+  } else if (val.isBoolList()) {
+    n->bs_(attr::value, val.toBoolList()->elements());
+    n->output()->setType(ListType::ofBools());
   } else if(val.isIntList()) {
     n->is_(attr::value, val.toIntList()->elements());
     n->output()->setType(ListType::ofInts());
@@ -56,6 +62,14 @@ RegisterOperators reg({
             return 0;
           };
         } else if (
+            type->isSubtypeOf(BoolType::get()) &&
+            node->kindOf(attr::value) == AttributeKind::b) {
+          auto b = node->b(attr::value);
+          return [b](Stack& stack) {
+            push(stack, b);
+            return 0;
+          };
+        } else if (
             type->isSubtypeOf(NumberType::get()) &&
             node->kindOf(attr::value) == AttributeKind::i) {
           auto i = node->i(attr::value);
@@ -75,6 +89,12 @@ RegisterOperators reg({
           auto is = node->is(attr::value);
           return [is](Stack& stack) {
             push(stack, is);
+            return 0;
+          };
+        } else if(type->isSubtypeOf(ListType::ofBools())) {
+          auto bs = node->bs(attr::value);
+          return [bs](Stack& stack) {
+            push(stack, bs);
             return 0;
           };
         } else if(type->isSubtypeOf(ListType::ofTensors())) {

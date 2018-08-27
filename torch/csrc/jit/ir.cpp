@@ -72,6 +72,7 @@ std::ostream& operator<<(std::ostream & out, const_value_list_with_types l) {
   }
   return out;
 }
+
 template<typename T>
 void printPrimList(std::ostream & out, const std::vector<T> & items) {
   out << "[";
@@ -79,7 +80,18 @@ void printPrimList(std::ostream & out, const std::vector<T> & items) {
   for(auto & item : items) {
     if(i++ > 0)
       out << ", ";
-    out << item;
+      out << item;
+  }
+  out << "]";
+}
+
+void printBoolList(std::ostream & out, const std::vector<bool> & items) {
+  out << "[";
+  int i = 0;
+  for(auto item : items) {
+    if(i++ > 0)
+      out << ", ";
+      out << (item ? "true" : "false");
   }
   out << "]";
 }
@@ -121,6 +133,9 @@ void printAttributes(std::ostream & out, const Node * n, bool ignore_subgraph=fa
       case AttributeKind::i:
         out << n->i(name);
         break;
+      case AttributeKind::b:
+        out << (n->b(name) ? "true" : "false");
+        break;
       case AttributeKind::is:
         printPrimList(out,n->is(name));
         break;
@@ -129,6 +144,9 @@ void printAttributes(std::ostream & out, const Node * n, bool ignore_subgraph=fa
         break;
       case AttributeKind::ss:
         printPrimList(out,n->ss(name));
+        break;
+      case AttributeKind::bs:
+        printBoolList(out, n->bs(name));
         break;
       case AttributeKind::t:
         {

@@ -89,6 +89,8 @@ inline IValue toIValue(py::handle obj, const TypePtr& type) {
         return py::cast<int64_t>(obj);
       case TypeKind::NoneType:
         return {};
+      case TypeKind::BoolType:
+        return py::cast<bool>(obj);
       case TypeKind::TupleType: {
         py::tuple tuple = py::cast<py::tuple>(obj);
         size_t tuple_size = tuple.size();
