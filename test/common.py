@@ -61,30 +61,21 @@ IS_PPC = platform.machine() == "ppc64le"
 
 
 def _check_module_exists(name, min_version=None):
-    r"""Returns if a top-level module with :attr:`name` exists *without**
-    importing it. This is generally safer than try-catch block around a
-    `import X`. It avoids third party libraries breaking assumptions of some of
-    our tests, e.g., setting multiprocessing start method when imported
-    (see librosa/#747, torchvision/#544).
+    r"""Returns if a top-level module with :attr:`name` exists and satisfy a
+    minium version of :attr:`min_version` (if set). Ideally, this should not do
+    an actual import to avoid third party libraries breaking assumptions of some
+    of our tests, e.g., setting multiprocessing start method when imported
+    (see librosa/#747, torchvision/#544). However, we guard our multiprocessing
+    tests with `mp = mp.get_context(...)` so this shouldn't be too big a
+    problem.
     """
-    if not PY3:  # Python 2
-        import imp
-        try:
-            imp.find_module(name)
-        except ImportError:
-            return False
-    elif PY34:  # Python [3, 3.4)
-        import importlib
-        if importlib.find_loader(name) is None:
-            return False
-    else:  # Python >= 3.4
-        import importlib
-        if importlib.util.find_spec(name) is None:
-            return False
+    try:
+        m = __import__(name)
+    except ImportError:
+        return False
     if min_version is None:
         return True
-    module_version = parse_version(eval("__import__('{}').__version__").format(name))
-    return module_version >= vparse_version(min_version)
+    return parse_version(m.__version__) >= parse_version(min_version)
 
 TEST_NUMPY = _check_module_exists('numpy', '1.14.0')
 TEST_SCIPY = _check_module_exists('scipy', '1.0.0')
