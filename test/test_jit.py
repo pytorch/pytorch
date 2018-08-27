@@ -4628,6 +4628,42 @@ a")
 
         self.assertEqual(8, bar(torch.ones(1, 1)))
 
+    def test_tracing_slicing(self):
+        @torch.jit.trace(torch.zeros(10))
+        def foo_trace(x):
+            return x[-5:-3]
+
+        @torch.jit.script
+        def foo_script(x):
+            return x[-5:-3]
+
+        def foo(x):
+            return x[-5:-3]
+
+        a = torch.arange(0, 8)
+        b = torch.arange(0, 20)
+        self.assertEqual(foo_trace(a), foo_script(a))
+        self.assertEqual(foo_trace(a), foo(a))
+        self.assertNotEqual(foo_trace(a), foo_trace(b))
+
+    def test_tracing_indexing(self):
+        @torch.jit.trace(torch.zeros(10))
+        def foo_trace(x):
+            return x[-2]
+
+        @torch.jit.script
+        def foo_script(x):
+            return x[-2]
+
+        def foo(x):
+            return x[-2]
+
+        a = torch.arange(0, 8)
+        b = torch.arange(0, 20)
+        self.assertEqual(foo_script(a), foo_trace(a))
+        self.assertEqual(foo_trace(a), foo(a))
+        self.assertNotEqual(foo_trace(a), foo_trace(b))
+
     def test_index_select_shape_prop(self):
 
         @torch.jit.script
