@@ -178,7 +178,7 @@ inline Stack createStackForSchema(
       args.size() + kwargs.size() <= schema.arguments.size(),
       schema.name, "() expected at most ", schema.arguments.size(),
       " argument(s) but received ",
-      args.size(), " argument(s). Declaration: ", schema);
+      args.size() + kwargs.size(), " argument(s). Declaration: ", schema);
 
   Stack stack;
   stack.reserve(schema.arguments.size());

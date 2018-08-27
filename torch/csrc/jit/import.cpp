@@ -4,6 +4,7 @@
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/utils/functional.h"
 #include "torch/csrc/jit/assertions.h"
+#include "torch/csrc/jit/operator.h"
 
 #include <ATen/ATen.h>
 
@@ -371,6 +372,10 @@ ModuleDecoder::ModuleDecoder(
 
     auto graph = buildGraph(node_proto.attribute(0).g());
     parent_module->create_method(name, graph, member_inputs);
+    // We store the schema in the docstring so we can parse the schema and
+    // assign it to the method.
+    auto schema = parseSchema(node_proto.doc_string());
+    parent_module->get_method(name).setSchema(std::move(schema));
   }
 }
 
