@@ -254,7 +254,7 @@ struct TORCH_API Variable : public at::Tensor {
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 struct TORCH_API Variable::Impl : public at::TensorImpl {
-  TORCH_API explicit Impl(
+  explicit Impl(
       at::Tensor data,
       bool requires_grad = false,
       Edge gradient_edge = Edge());
