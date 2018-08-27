@@ -2,10 +2,10 @@
 
 #include <ATen/core/Backend.h>
 #include <ATen/Context.h>
-#include <ATen/Device.h>
+#include <ATen/core/Device.h>
 #include <ATen/DeviceGuard.h>
 #include <ATen/core/Layout.h>
-#include <ATen/ScalarType.h>
+#include <ATen/core/ScalarType.h>
 #include <ATen/Tensor.h>
 #include <ATen/Type.h>
 
