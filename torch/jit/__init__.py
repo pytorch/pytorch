@@ -44,7 +44,7 @@ def load(filename):
     return m
 
 
-def get_trace_graph(f, args=(), kwargs=None):
+def get_trace_graph(f, args):
     """
     Trace a function or model, returning a tuple consisting of the both the
     *trace* of an execution, as well as the original return value.
@@ -58,19 +58,33 @@ def get_trace_graph(f, args=(), kwargs=None):
         args (tuple or Tensor): the positional arguments to pass to the
             function/module to be traced.  A non-tuple is assumed to
             be a single positional argument to be passed to the model.
-        kwargs (dict): the keyword arguments to pass to the function/module
-            to be traced.
 
     Example: Trace a cell.
 
         >>> trace, out = jit.trace(nn.LSTMCell(), (input, hidden))
         >>> print(trace)
     """
-    if kwargs is None:
-        kwargs = {}
     if not isinstance(args, tuple):
         args = (args,)
-    return LegacyTracedModule(f)(*args, **kwargs)
+
+    if isinstance(f, torch.nn.Module):
+        # NOTE: use full state, because we need it for BatchNorm export
+        # This differs from the compiler path, which doesn't support it at the moment.
+        module_state = list(_unique_state_dict(f, keep_vars=True).values())
+    else:
+        module_state = []
+
+    traced_args = list(args) + module_state
+    output = [None]
+
+    def traced_f(*all_trace_inputs):
+        f_inputs = all_trace_inputs[:len(args)]
+        out = output[0] = f(*f_inputs)
+        return out
+
+    graph = trace(*traced_args)(traced_f).graph
+    torch._C._jit_pass_lower_tuples(graph)
+    return graph, output[0]
 
 
 def _unique_state_dict(module, keep_vars=False):
@@ -83,31 +97,6 @@ def _unique_state_dict(module, keep_vars=False):
         seen_ids.add(id(v))
         filtered_dict[k] = v
     return filtered_dict
-
-
-class LegacyTracedModule(Module):
-    def __init__(self, inner):
-        super(LegacyTracedModule, self).__init__()
-        # inner may be a Module, or it may be an arbitrary callable
-        # If it's a Module, we get its parameters automatically, which lets
-        # us avoid a special casing functions versus modules.
-        self.inner = inner
-
-    def forward(self, *args):
-        in_vars, in_desc = _flatten(args)
-        # NOTE: use full state, because we need it for BatchNorm export
-        # This differs from the compiler path, which doesn't support it at the moment.
-        module_state = list(_unique_state_dict(self, keep_vars=True).values())
-        trace, all_trace_inputs = torch._C._tracer_enter(*(in_vars + module_state))
-        try:
-            trace_inputs = _unflatten(all_trace_inputs[:len(in_vars)], in_desc)
-            out = self.inner(*trace_inputs)
-            out_vars, _ = _flatten(out)
-            torch._C._tracer_exit(tuple(out_vars))
-        except Exception:
-            torch._C._tracer_abandon()
-            raise
-        return trace, out
 
 
 def _clone_inputs(args):

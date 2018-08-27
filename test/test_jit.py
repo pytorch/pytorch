@@ -205,7 +205,7 @@ class JitTestCase(TestCase):
         return imported
 
     def assertExpectedONNXGraph(self, trace, *args, **kwargs):
-        torch.onnx._optimize_trace(trace, operator_export_type=OperatorExportTypes.ONNX)
+        trace = torch.onnx._optimize_trace(trace, operator_export_type=OperatorExportTypes.ONNX)
         self.assertExpectedGraph(trace, *args, **kwargs)
 
     def assertExpectedGraph(self, trace, *args, **kwargs):
@@ -890,9 +890,9 @@ class TestJit(JitTestCase):
             y = RegularFn.apply(y)
             return y
 
-        trace, _ = torch.jit.get_trace_graph(fn, (x,))
-        self.run_pass('dce', trace)
-        ops = [n for n in trace.graph().nodes()]
+        graph, _ = torch.jit.get_trace_graph(fn, (x,))
+        self.run_pass('dce', graph)
+        ops = [n for n in graph.nodes()]
         for op in ops:
             self.assertTrue(op.hasAttribute('inplace'))
         inplace_flags = [False, True, True, False]
@@ -932,8 +932,8 @@ class TestJit(JitTestCase):
         self.assertEqual(traced_fn(x), fn(x))
 
         # Check that the trace looks ok
-        trace, _ = torch.jit.get_trace_graph(fn, (x,))
-        self.assertExpectedGraph(trace)
+        graph, _ = torch.jit.get_trace_graph(fn, (x,))
+        self.assertExpectedGraph(graph)
 
     def test_trace_size(self):
         self.do_trace_size(False)
@@ -949,6 +949,7 @@ class TestJit(JitTestCase):
 
         x, y = torch.randn(2, 2), (torch.ones(2, 2), torch.randn(2, 2))
         traced_fn = torch.jit.trace(x, y)(fn)
+        print(torch.jit.get_trace_graph(fn, (x, y))[0])
         self.assertEqual(traced_fn(x, y), fn(x, y))
         self.assertExpectedGraph(traced_fn.graph)
         self.assertExportImport(traced_fn.graph, (x, y))
@@ -1008,10 +1009,10 @@ class TestJit(JitTestCase):
         def doit(x, y):
             return torch.sigmoid(torch.tanh(x * (x + y)))
 
-        trace, _ = torch.jit.get_trace_graph(doit, (x, y))
-        self.run_pass('dce', trace)
-        self.run_pass('canonicalize', trace)
-        g = trace.graph()
+        graph, _ = torch.jit.get_trace_graph(doit, (x, y))
+        self.run_pass('dce', graph)
+        self.run_pass('canonicalize', graph)
+        g = graph
         g2 = torch._C.Graph()
         g_to_g2 = {}
         for node in g.inputs():
@@ -1107,7 +1108,7 @@ class TestJit(JitTestCase):
 
         m = MyModule()
         trace, _ = torch.jit.get_trace_graph(m, (torch.randn(2, 2),))
-        self.assertEqual(len(list(trace.graph().inputs())), 2)
+        self.assertEqual(len(list(trace.inputs())), 2)
         self.assertExpectedGraph(trace)
 
     def test_nested_inplace(self):
