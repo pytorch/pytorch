@@ -2289,21 +2289,6 @@ a")
         y2 = torch.sum(x, dim=0)
         self.assertEqual(y, y2)
 
-    # TODO: renable when we support passing literals to script fns
-    @unittest.expectedFailure
-    def test_literal_xfail(self):
-        def func4(a, b):
-            c = 0, (0, 0)
-            x = True
-            while x:
-                x = False
-                c = a, (a, b)
-            d, e = c
-            f, g = e
-            return d + f + g
-
-        self.checkScript(func4, (a, b), optimize=True)
-
     def test_literal(self):
         def func1(a, b):
             c = a, b
@@ -2316,10 +2301,22 @@ a")
             f, g = e
             return d + f + g
 
+        def func3(a, b):
+            # type: (float, float) -> float
+            c = 0., (0., 0.)
+            x = True
+            while x:
+                x = False
+                c = a, (a, b)
+            d, e = c
+            f, g = e
+            return d + f + g
+
         a = torch.rand(1, requires_grad=True)
         b = torch.rand(1, requires_grad=True)
         self.checkScript(func1, (a, b), optimize=True)
         self.checkScript(func2, (a, b), optimize=True)
+        self.checkScript(func3, (a.item(), b.item()), optimize=True)
 
     def test_expand(self):
         @torch.jit.script
@@ -4246,8 +4243,6 @@ a")
         with self.assertRaisesRegex(RuntimeError, 'called recursively involving'):
             M()
 
-    # TODO: Use this when we support passing literals to script fns
-    @unittest.expectedFailure
     def test_script_kwargs_fn_call(self):
         class M(torch.jit.ScriptModule):
             def __init__(self):
@@ -4259,6 +4254,7 @@ a")
 
             @torch.jit.script_method
             def foo(self, bar, input):
+                # type: (int, Tensor) -> Tensor
                 return input + bar
         m = M()
         self.assertEqual(2, m.call_foo(torch.ones((), dtype=torch.int64)))
