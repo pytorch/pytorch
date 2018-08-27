@@ -63,6 +63,7 @@ for instructions on how to install GCC 4.9 or higher.
                               !! WARNING !!
 '''
 CUDA_HOME = _find_cuda_home()
+CUDNN_HOME = os.environ.get('CUDNN_HOME') or os.environ.get('CUDNN_PATH')
 # PyTorch releases have the version pattern major.minor.patch, whereas when
 # PyTorch is built from source, we append the git commit hash, which gives
 # it the below pattern.
@@ -407,6 +408,8 @@ def include_paths(cuda=False):
     ]
     if cuda:
         paths.append(_join_cuda_home('include'))
+        if CUDNN_HOME is not None:
+            paths.append(os.path.join(CUDNN_HOME, 'include'))
     return paths
 
 
@@ -432,6 +435,8 @@ def library_paths(cuda=False):
     if cuda:
         lib_dir = 'lib/x64' if sys.platform == 'win32' else 'lib64'
         paths.append(_join_cuda_home(lib_dir))
+        if CUDNN_HOME is not None:
+            paths.append(os.path.join(CUDNN_HOME, lib_dir))
     return paths
 
 
@@ -732,9 +737,13 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose):
             extra_ldflags.append('/LIBPATH:{}'.format(
                 _join_cuda_home('lib/x64')))
             extra_ldflags.append('cudart.lib')
+            if CUDNN_HOME is not None:
+                extra_ldflags.append(os.path.join(CUDNN_HOME, 'lib/x64'))
         else:
             extra_ldflags.append('-L{}'.format(_join_cuda_home('lib64')))
             extra_ldflags.append('-lcudart')
+            if CUDNN_HOME is not None:
+                extra_ldflags.append('-L{}'.format(os.path.join(CUDNN_HOME, 'lib64')))
 
     return extra_ldflags
 
