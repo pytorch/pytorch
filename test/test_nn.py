@@ -50,7 +50,7 @@ ALL_TENSORTYPES = [torch.float,
                    torch.double]
 
 if not TEST_WITH_ROCM:
-  ALL_TENSORTYPES.append(torch.half)
+    ALL_TENSORTYPES.append(torch.half)
 
 NO_HALF_TENSORTYPES = [torch.float,
                        torch.double]
@@ -361,22 +361,22 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
                         test_case.assertEqual(p.get_device(), 1)
 
                 if not self.skip_double:
-                  # test double()
-                  input = input.double().cuda()
-                  module.double().cuda()
-                  module(input)
-                  for p in module.parameters():
-                      test_case.assertIsInstance(p, torch.cuda.DoubleTensor)
-                      test_case.assertEqual(p.get_device(), 0)
+                    # test double()
+                    input = input.double().cuda()
+                    module.double().cuda()
+                    module(input)
+                    for p in module.parameters():
+                        test_case.assertIsInstance(p, torch.cuda.DoubleTensor)
+                        test_case.assertEqual(p.get_device(), 0)
 
                 if not TEST_WITH_ROCM:
-                  # test half()
-                  input = input.half().cuda()
-                  module.half().cuda()
-                  module(input)
-                  for p in module.parameters():
-                      test_case.assertIsInstance(p, torch.cuda.HalfTensor)
-                      test_case.assertEqual(p.get_device(), 0)
+                    # test half()
+                    input = input.half().cuda()
+                    module.half().cuda()
+                    module(input)
+                    for p in module.parameters():
+                        test_case.assertIsInstance(p, torch.cuda.HalfTensor)
+                        test_case.assertEqual(p.get_device(), 0)
 
     def _get_target(self):
         return self._get_arg('target', False)
@@ -5030,6 +5030,7 @@ class TestNN(NNTestCase):
         if TEST_CUDA:
             with self.assertRaisesRegex(RuntimeError, "expected input and grid to be on same device"):
                 F.grid_sample(input.cuda(), grid)
+
     @skipIfRocm
     def test_grid_sample(self):
         def test(N, C, H, W, mode, padding_mode):
@@ -5177,6 +5178,7 @@ class TestNN(NNTestCase):
                 if TEST_CUDNN:
                     with cudnn.flags(enabled=False):
                         test(N, C, H, W, mode, padding_mode)
+
     @skipIfRocm
     def test_grid_sample_3d(self):
         def test(N, C, D, H, W, mode, padding_mode):
@@ -5290,6 +5292,7 @@ class TestNN(NNTestCase):
                     (input, grid)))
 
                 test(N, C, D, H, W, mode, padding_mode)
+
     @skipIfRocm
     def test_affine_grid(self):
         # test known input on CPU
@@ -6525,9 +6528,10 @@ def add_test(test, decorator=None):
             test=test, kwargs=kwargs: test.test_cuda(self, dtype=torch.float, **kwargs))
         add(cuda_test_name + '_double', lambda self,
             test=test, kwargs=kwargs: test.test_cuda(self, dtype=torch.double, **kwargs))
+
         @skipIfRocm
         def test_half(self, test=test, kwargs=kwargs):
-          test.test_cuda(self, dtype=torch.half, **kwargs)
+            test.test_cuda(self, dtype=torch.half, **kwargs)
         if getattr(test, 'check_half', True):
             add(cuda_test_name + '_half', test_half)
     else:
@@ -6571,7 +6575,7 @@ new_criterion_tests = [
             loss_reference_fns['NLLLossNd'](i, t, reduction=get_reduction(m)),
         check_sum_reduction=True,
         desc='2d',
-        test_cuda = (not TEST_WITH_ROCM),
+        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         module_name='NLLLoss',
@@ -6581,7 +6585,7 @@ new_criterion_tests = [
         reference_fn=lambda i, t, m:
             loss_reference_fns['NLLLossNd'](i, t, weight=get_weight(m)),
         desc='2d_weights',
-        test_cuda = (not TEST_WITH_ROCM)
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='NLLLoss',
@@ -6591,7 +6595,7 @@ new_criterion_tests = [
         reference_fn=lambda i, t, m:
             loss_reference_fns['NLLLossNd'](i, t, ignore_index=1),
         desc='2d_ignore_index',
-        test_cuda = (not TEST_WITH_ROCM)
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='NLLLoss',
@@ -6601,7 +6605,7 @@ new_criterion_tests = [
             loss_reference_fns['NLLLossNd'](i, t, reduction=get_reduction(m)),
         check_sum_reduction=True,
         desc='higher_dim',
-        test_cuda = (not TEST_WITH_ROCM)
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='NLLLoss',
@@ -6611,14 +6615,14 @@ new_criterion_tests = [
             loss_reference_fns['NLLLossNd'](i, t, reduction=get_reduction(m)),
         check_sum_reduction=True,
         desc='dim_is_3',
-        test_cuda = (not TEST_WITH_ROCM)
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='PoissonNLLLoss',
         input_size=(2, 3, 4, 5),
         target_fn=lambda: torch.randn(2, 3, 4, 5).floor_().abs_(),
         desc='no_full_loss',  # without sterling approx
-        test_cuda = (not TEST_WITH_ROCM)
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='PoissonNLLLoss',
@@ -6626,7 +6630,7 @@ new_criterion_tests = [
         input_fn=lambda: torch.randn(2, 3, 4, 5).abs_().add_(0.001),
         target_fn=lambda: torch.randn(2, 3, 4, 5).floor_().abs_(),
         desc='full_loss',  # with sterling approx
-        test_cuda = (not TEST_WITH_ROCM)
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='L1Loss',
@@ -6699,7 +6703,7 @@ new_criterion_tests = [
         desc='weights',
         check_sum_reduction=True,
         check_gradgrad=False,
-        test_cuda = (not TEST_WITH_ROCM)
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='CTCLoss',
@@ -6768,7 +6772,7 @@ def poissonnllloss_no_reduce_test():
         constructor=wrap_functional(
             lambda i: F.poisson_nll_loss(i, t.type_as(i), reduction='none')),
         input_fn=lambda: torch.rand(10, 10),
-        pickle=False, test_cuda = (not TEST_WITH_ROCM))
+        pickle=False, test_cuda=(not TEST_WITH_ROCM))
 
 
 def bceloss_no_reduce_test():
@@ -6780,7 +6784,7 @@ def bceloss_no_reduce_test():
         input_fn=lambda: torch.rand(15, 10).clamp_(2.8e-2, 1 - 2.8e-2),
         reference_fn=lambda i, m: -(t * i.log() + (1 - t) * (1 - i).log()),
         check_gradgrad=False,
-        pickle=False, test_cuda = (not TEST_WITH_ROCM))
+        pickle=False, test_cuda=(not TEST_WITH_ROCM))
 
 
 def bceloss_no_reduce_scalar_test():
@@ -6806,7 +6810,7 @@ def bceloss_weights_no_reduce_test():
         input_fn=lambda: torch.rand(15, 10).clamp_(2.8e-2, 1 - 2.8e-2),
         reference_fn=lambda i, m: -(t * i.log() + (1 - t) * (1 - i).log()) * weights,
         check_gradgrad=False,
-        pickle=False, test_cuda = (not TEST_WITH_ROCM))
+        pickle=False, test_cuda=(not TEST_WITH_ROCM))
 
 
 def bceloss_weights_no_reduce_scalar_test():
@@ -6860,7 +6864,7 @@ def kldivloss_with_target_no_reduce_test():
         input_fn=lambda: torch.rand(10, 10),
         reference_fn=lambda t, _:
             loss_reference_fns['KLDivLoss'](i.type_as(t), t, reduction='none'),
-        pickle=False, test_cuda = (not TEST_WITH_ROCM))
+        pickle=False, test_cuda=(not TEST_WITH_ROCM))
 
 
 def kldivloss_no_reduce_test():
@@ -6895,7 +6899,7 @@ def l1loss_no_reduce_test():
             lambda i: F.l1_loss(i, t.type_as(i), reduction='none')),
         input_fn=lambda: torch.randn(2, 3, 4),
         reference_fn=lambda i, m: (i - t.type_as(i)).abs(),
-        pickle=False, test_cuda = (not TEST_WITH_ROCM))
+        pickle=False, test_cuda=(not TEST_WITH_ROCM))
 
 
 def l1loss_no_reduce_scalar_test():
@@ -7107,7 +7111,7 @@ def smoothl1loss_no_reduce_test():
         input_fn=lambda: torch.randn(2, 3, 4),
         reference_fn=lambda i, _:
             loss_reference_fns['SmoothL1Loss'](i, t.type_as(i), reduction='none'),
-        pickle=False, test_cuda = (not TEST_WITH_ROCM))
+        pickle=False, test_cuda=(not TEST_WITH_ROCM))
 
 
 def smoothl1loss_no_reduce_scalar_test():
@@ -7199,7 +7203,7 @@ def softmarginloss_no_reduce_test():
         input_fn=lambda: torch.randn(5, 5),
         reference_fn=lambda i, _:
             loss_reference_fns['SoftMarginLoss'](i, t.type_as(i), reduction='none'),
-        pickle=False, test_cuda = (not TEST_WITH_ROCM))
+        pickle=False, test_cuda=(not TEST_WITH_ROCM))
 
 
 def multilabelsoftmarginloss_no_reduce_test():
@@ -7212,7 +7216,7 @@ def multilabelsoftmarginloss_no_reduce_test():
         reference_fn=lambda i, m:
             (-(t * i.sigmoid().log() + (1 - t) * (-i).sigmoid().log())).sum(dim=1) / i.size(1),
         check_gradgrad=False,
-        pickle=False, decorator = skipIfRocm)
+        pickle=False, decorator=skipIfRocm)
 
 
 def multilabelsoftmarginloss_weights_no_reduce_test():
@@ -7228,7 +7232,7 @@ def multilabelsoftmarginloss_weights_no_reduce_test():
             (-(t * i.sigmoid().log() + (1 - t) * (-i).sigmoid().log()) * weights).sum(dim=1) / i.size(1),
         check_sum_reduction=True,
         check_gradgrad=False,
-        pickle=False, decorator = skipIfRocm)
+        pickle=False, decorator=skipIfRocm)
 
 
 def multimarginloss_no_reduce_test():
@@ -7505,7 +7509,7 @@ new_module_tests = [
         input_size=(4, 3, 15),
         cudnn=True,
         check_eval=True,
-        test_cuda = (not TEST_WITH_ROCM)
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='InstanceNorm1d',
@@ -7514,7 +7518,7 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='tracking_stats',
-        decorator = skipIfRocm
+        decorator=skipIfRocm
     ),
     dict(
         module_name='InstanceNorm2d',
@@ -7522,7 +7526,7 @@ new_module_tests = [
         input_size=(2, 3, 6, 6),
         cudnn=True,
         check_eval=True,
-        test_cuda = (not TEST_WITH_ROCM)
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='InstanceNorm2d',
@@ -7531,7 +7535,7 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='tracking_stats',
-        decorator = skipIfRocm 
+        decorator=skipIfRocm
     ),
     dict(
         module_name='InstanceNorm3d',
@@ -7539,7 +7543,7 @@ new_module_tests = [
         input_size=(2, 3, 4, 4, 4),
         cudnn=True,
         check_eval=True,
-        test_cuda = (not TEST_WITH_ROCM)
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='InstanceNorm3d',
@@ -7548,7 +7552,7 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='tracking_stats',
-        decorator = skipIfRocm
+        decorator=skipIfRocm
     ),
     dict(
         module_name='LayerNorm',
@@ -7557,7 +7561,7 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='1d_elementwise_affine',
-        test_cuda = (not TEST_WITH_ROCM)
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='LayerNorm',
@@ -7566,7 +7570,7 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='1d_no_elementwise_affine',
-        test_cuda = (not TEST_WITH_ROCM)
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='LayerNorm',
@@ -7575,7 +7579,7 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='3d_elementwise_affine',
-        test_cuda = (not TEST_WITH_ROCM)
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='LayerNorm',
@@ -7584,7 +7588,7 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='3d_no_elementwise_affine',
-        test_cuda = (not TEST_WITH_ROCM)
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='GroupNorm',
@@ -7593,7 +7597,7 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='1d_affine',
-        test_cuda = (not TEST_WITH_ROCM)
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='GroupNorm',
@@ -7602,7 +7606,7 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='1d_no_affine_IN',  # this setting is equivalent with InstanceNormi
-        test_cuda = (not TEST_WITH_ROCM)
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='GroupNorm',
@@ -7611,7 +7615,7 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='1d_no_affine_LN',  # this setting is equivalent with LayerNorm
-        test_cuda = (not TEST_WITH_ROCM)
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='GroupNorm',
@@ -7620,7 +7624,7 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='2d_affine',
-        test_cuda = (not TEST_WITH_ROCM)
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='GroupNorm',
@@ -7629,7 +7633,7 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='2d_no_affine_IN',  # this setting is equivalent with InstanceNorm
-        test_cuda = (not TEST_WITH_ROCM)
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='GroupNorm',
@@ -7638,7 +7642,7 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='2d_no_affine_LN',  # this setting is equivalent with LayerNorm
-        test_cuda = (not TEST_WITH_ROCM)
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='Conv1d',
@@ -7927,21 +7931,21 @@ new_module_tests = [
         constructor_args=(3, ),
         input_size=(1, 5, 7),
         desc='1d',
-        test_cuda = (not TEST_WITH_ROCM)
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='LocalResponseNorm',
         constructor_args=(2, ),
         input_size=(1, 5, 7, 7),
         desc='2d_uneven_pad',
-        test_cuda = (not TEST_WITH_ROCM)
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='LocalResponseNorm',
         constructor_args=(1, 1, 0.5, 2),
         input_size=(1, 5, 7, 7, 7),
         desc='3d_custom_params',
-        test_cuda = (not TEST_WITH_ROCM)
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='ReflectionPad1d',
@@ -8131,8 +8135,8 @@ new_module_tests = [
         jacobian_input=False,
         check_gradgrad=False,
         desc='mean',
-        test_cuda = (not TEST_WITH_ROCM),
-        decorator = skipIfRocm
+        test_cuda=(not TEST_WITH_ROCM),
+        decorator=skipIfRocm
     ),
     dict(
         module_name='EmbeddingBag',
@@ -8141,8 +8145,8 @@ new_module_tests = [
         jacobian_input=False,
         check_gradgrad=False,
         desc='sum',
-        test_cuda = (not TEST_WITH_ROCM),
-        decorator = skipIfRocm
+        test_cuda=(not TEST_WITH_ROCM),
+        decorator=skipIfRocm
     ),
     dict(
         module_name='EmbeddingBag',
@@ -8158,8 +8162,8 @@ new_module_tests = [
         input_fn=lambda: torch.randperm(2).repeat(1, 2),
         jacobian_input=False,
         check_gradgrad=False,
-        decorator = skipIfRocm,
-        test_cuda = (not TEST_WITH_ROCM)
+        decorator=skipIfRocm,
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         constructor=lambda: nn.Embedding(4, 3, sparse=True),
@@ -8167,7 +8171,7 @@ new_module_tests = [
         jacobian_input=False,
         fullname='Embedding_sparse',
         check_gradgrad=False,
-        test_cuda = (not TEST_WITH_ROCM)
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         constructor=lambda: nn.FractionalMaxPool2d(
@@ -8471,35 +8475,35 @@ new_module_tests = [
     dict(
         module_name='GLU',
         input_size=(5, 6),
-        test_cuda = (not TEST_WITH_ROCM)
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='GLU',
         constructor_args=(1,),
         input_size=(5, 6, 7),
         desc='dim',
-        test_cuda = (not TEST_WITH_ROCM)
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         constructor=wrap_functional(F.softmax, dim=-1),
         input_size=(2, 128),  # trigger the last-dim algo in CUDA
         fullname='softmax_lastdim',
         pickle=False,
-        test_cuda = (not TEST_WITH_ROCM)
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         constructor=wrap_functional(F.softmax, dim=1),
         input_size=(2, 128, 2, 2),  # trigger special case of spatial CUDA algo
         fullname='softmax_spatial_special',
         pickle=False,
-        test_cuda = (not TEST_WITH_ROCM)
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         constructor=wrap_functional(F.softmax, dim=1),
         input_size=(2, 2, 4, 4),  # regular spatial algorithm
         fullname='softmax_spatial',
         pickle=False,
-        test_cuda = (not TEST_WITH_ROCM)
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         constructor=wrap_functional(F.softmax, dim=0),
@@ -8527,35 +8531,35 @@ new_module_tests = [
         input_size=(2, 128),  # trigger the last-dim algo in CUDA
         fullname='log_softmax_lastdim',
         pickle=False,
-        test_cuda = (not TEST_WITH_ROCM)
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         constructor=wrap_functional(F.log_softmax, dim=1),
         input_size=(2, 128, 2, 2),  # trigger special case of spatial CUDA algo
         fullname='log_softmax_spatial_special',
         pickle=False,
-        test_cuda = (not TEST_WITH_ROCM)
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         constructor=wrap_functional(F.log_softmax, dim=1),
         input_size=(2, 2, 4, 4),  # regular spatial algorithm
         fullname='log_softmax_spatial',
         pickle=False,
-        test_cuda = (not TEST_WITH_ROCM)
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         constructor=wrap_functional(F.log_softmax, dim=0),
         input_size=(2, 3, 4, 5),
         fullname='log_softmax_dim0',
         pickle=False,
-        test_cuda = (not TEST_WITH_ROCM)
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         constructor=wrap_functional(F.log_softmax, dim=3),
         input_size=(2, 3, 4, 5),
         fullname='log_softmax_dim3',
         pickle=False,
-        test_cuda = (not TEST_WITH_ROCM)
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         constructor=wrap_functional(F.log_softmax, dim=0),
@@ -8647,7 +8651,7 @@ new_module_tests = [
         input_size=(),
         reference_fn=lambda i, _: torch.exp(i).div_(torch.exp(i).sum(0, False)).log_(),
         desc='multiparam_scalar',
-        test_cuda = (not TEST_WITH_ROCM)
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='ELU',
