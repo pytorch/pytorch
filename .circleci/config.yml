@@ -247,6 +247,12 @@ caffe2_linux_test_defaults: &caffe2_linux_test_defaults
         # libdc1394 (dependency of OpenCV) expects /dev/raw1394 to exist...
         sudo ln /dev/null /dev/raw1394
 
+        # conda must be added to the path for Anaconda builds (this location must be
+        # the same as that in install_anaconda.sh used to build the docker image)
+        if [[ "${BUILD_ENVIRONMENT}" == conda* ]]; then
+          export PATH=/opt/conda/bin:$PATH
+        fi
+
         pip install --user --no-cache-dir hypothesis==3.59.0
         pip install --user -b /tmp/pip_install_onnx "file:///var/lib/jenkins/workspace/third_party/onnx#egg=onnx"
 
@@ -255,12 +261,6 @@ caffe2_linux_test_defaults: &caffe2_linux_test_defaults
         if [[ "$BUILD_ENVIRONMENT" == *ubuntu14.04* ]]; then
           sudo pip uninstall -y hypothesis
           sudo pip install hypothesis==3.44.6
-        fi
-
-        # conda must be added to the path for Anaconda builds (this location must be
-        # the same as that in install_anaconda.sh used to build the docker image)
-        if [[ "${BUILD_ENVIRONMENT}" == conda* ]]; then
-          export PATH=/opt/conda/bin:$PATH
         fi
 
         # Build
