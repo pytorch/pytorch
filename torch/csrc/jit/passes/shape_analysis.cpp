@@ -120,7 +120,7 @@ void broadcastBinary(Node *node, std::vector<CompleteTensorTypePtr>& types, size
     Node *expand = graph->create(aten::expand,
                                  {node->inputs().at(input_idx),
                                   graph->insertConstant(expected_size),
-                                  graph->insertConstant(0)})
+                                  graph->insertConstant(false)})
                         ->insertBefore(node);
     PropagateShapeOnNode(expand);
     node->replaceInput(input_idx, expand->output());
@@ -517,7 +517,7 @@ bool PropagateCompleteShapeOnNode(Node * node, bool insert_expands,
   } else if (node->matches("aten::sum(Tensor self) -> Tensor")) {
     node->output()->setType(tensor_types.at(0)->withSizes({}));
     return true;
-  } else if (node->matches("aten::sum(Tensor self, int[] dim, int keepdim) -> Tensor",
+  } else if (node->matches("aten::sum(Tensor self, int[] dim, bool keepdim) -> Tensor",
              /*with_const=*/{attr::dim, attr::keepdim})) {
     auto & tp = tensor_types.at(0);
     auto sizes = tp->sizes();
@@ -590,7 +590,7 @@ bool PropagateCompleteShapeOnNode(Node * node, bool insert_expands,
       node->output()->setType(tensor_types.at(1)->withSizes(tensor_types.at(0)->sizes()));
     }
     return true;
-  } else if (node->matches("aten::expand(Tensor self, int[] size, *, int implicit) -> Tensor",
+  } else if (node->matches("aten::expand(Tensor self, int[] size, *, bool implicit) -> Tensor",
              /*with_const=*/attr::size)) {
     auto tp = tensor_types.at(0);
     std::vector<int64_t> sizes, strides;

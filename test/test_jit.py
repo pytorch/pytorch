@@ -6533,27 +6533,6 @@ EXCLUDE_TRACED = {
 
 # known to be failing in script
 EXCLUDE_SCRIPT = {
-    # TODO: Fix var/std
-    # there are two schemas for var (and std):
-    # (1) var(Tensor, int, *, bool, bool, Tensor)
-    # (2) var(Tensor, *, bool)
-    #
-    # Right now, the following is happening:
-    # - Shorter schemas come before longer schemas
-    # - bool, int are treated as IntType rather than DynamicType like before
-    # So the schemas look like the following in operator:
-    # (2) var(DynamicType, IntType)
-    # (1) var(DynamicType, IntType, IntType, DynamicType)
-    # Now, when one calls torch.var(tensor, dim=1), the compiler mistakingly
-    # matches it with (2) instead of (1), which is a problem.
-    'test_std_dim',
-    'test_std_dim_1d',
-    'test_std_dim_1d_neg0',
-    'test_std_dim_neg0',
-    'test_var_dim',
-    'test_var_dim_1d',
-    'test_var_dim_1d_neg0',
-    'test_var_dim_neg0',
     'test_norm_inf',
     'test_renorm_norm_inf',
     'test_split',

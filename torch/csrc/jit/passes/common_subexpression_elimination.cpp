@@ -53,6 +53,8 @@ bool attributesEqualCSE(const Node* lhs, const Node* rhs) {
       COMPARE_ATTRIBUTEVALUE(fs)
       COMPARE_ATTRIBUTEVALUE(i)
       COMPARE_ATTRIBUTEVALUE(is)
+      COMPARE_ATTRIBUTEVALUE(b)
+      COMPARE_ATTRIBUTEVALUE(bs)
       COMPARE_ATTRIBUTEVALUE(s)
       COMPARE_ATTRIBUTEVALUE(ss)
       case AttributeKind::t: {

@@ -24,6 +24,7 @@ _(FloatType) \
 _(IntType) \
 _(NoneType) \
 _(StringType) \
+_(BoolType) \
 
 enum class TypeKind {
 #define DEFINE_TYPE(T) T,
@@ -337,6 +338,7 @@ struct TORCH_API ListType : public Type {
   static ListTypePtr ofTensors();
   static ListTypePtr ofInts();
   static ListTypePtr ofFloats();
+  static ListTypePtr ofBools();
 private:
   ListType(TypePtr elem)
   : Type(TypeKind::ListType), elem(elem) {}
@@ -474,6 +476,31 @@ struct TORCH_API IntType : public Type {
 private:
   IntType()
   : Type(TypeKind::IntType) {}
+};
+
+struct BoolType;
+using BoolTypePtr = std::shared_ptr<BoolType>;
+// This node represents a Python int number value
+struct TORCH_API BoolType : public Type {
+  template<typename ... T>
+  static BoolTypePtr create( T&& ... all ) {
+    return BoolTypePtr(new BoolType(std::forward<T>(all)... ));
+  }
+  bool operator==(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
+  std::string str() const override {
+    return "bool";
+  }
+  bool isSubtypeOf(const TypePtr rhs) const override {
+    return *this == *rhs || rhs->kind() == TypeKind::BoolType;
+  }
+  static const TypeKind Kind = TypeKind::BoolType;
+  // global singleton
+  static BoolTypePtr get();
+private:
+  BoolType()
+  : Type(TypeKind::BoolType) {}
 };
 
 struct StringType;

@@ -61,7 +61,7 @@ bool isDifferentiable(Node * n) {
     }
     return true;
   }
-  if (n->matches("aten::expand(Tensor self, int[] size, *, int implicit) -> Tensor")) {
+  if (n->matches("aten::expand(Tensor self, int[] size, *, bool implicit) -> Tensor")) {
     return n->is_constant(attr::size) && n->is_constant(attr::implicit);
   }
   if (n->matches("aten::view(Tensor self, int[] size) -> Tensor") ||
@@ -179,7 +179,7 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
       }
       return {dmat1, dmat2};
 
-    } else if (node->matches("aten::expand(Tensor self, int[] size, *, int implicit) -> Tensor")) {
+    } else if (node->matches("aten::expand(Tensor self, int[] size, *, bool implicit) -> Tensor")) {
       const auto& input_sizes = inputs.at(0).sizes();
       if (input_sizes.size() == 0)
         return {grads.at(0).sum(), nullptr, nullptr};

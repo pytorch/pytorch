@@ -13,10 +13,10 @@
 namespace torch { namespace jit {
 
 enum class AttributeKind {
-  f,fs,i,is,s,ss,t,ts,g,gs
+  f,fs,i,is,s,ss,t,ts,g,gs,b,bs
 };
 static inline const char * toString(AttributeKind kind) {
-  static const char* names[] = {"f","fs","i","is","s","ss","t","ts","g","gs"};
+  static const char* names[] = {"f","fs","i","is","s","ss","t","ts","g","gs","b","bs"};
   JIT_ASSERT(size_t(kind) < sizeof(names)/sizeof(AttributeKind));
   return names[int(kind)];
 }
@@ -70,6 +70,8 @@ using FloatAttr = ScalarAttributeValue<double,AttributeKind::f>;
 using FloatsAttr = VectorAttributeValue<double,AttributeKind::fs>;
 using IntAttr = ScalarAttributeValue<int64_t,AttributeKind::i>;
 using IntsAttr = VectorAttributeValue<int64_t,AttributeKind::is>;
+using BoolAttr = ScalarAttributeValue<bool, AttributeKind::b>;
+using BoolsAttr = VectorAttributeValue<bool, AttributeKind::bs>;
 using StringAttr = ScalarAttributeValue<std::string,AttributeKind::s>;
 using StringsAttr = VectorAttributeValue<std::string,AttributeKind::ss>;
 using TensorAttr = ScalarAttributeValue<at::Tensor,AttributeKind::t>;
@@ -165,6 +167,9 @@ struct Attributes {
   const Kind##Attr::ValueType& method(Symbol name) const { \
     return get<Kind##Attr>(name); \
   }
+
+  CREATE_ACCESSOR(Bool,b)
+  CREATE_ACCESSOR(Bools,bs)
   CREATE_ACCESSOR(Float,f)
   CREATE_ACCESSOR(Floats,fs)
   CREATE_ACCESSOR(String,s)
