@@ -28,7 +28,7 @@ Scalar Scalar::local() const {
 Scalar Scalar::operator-() const {
  if (isFloatingPoint()) {
    return Scalar(-v.d);
- } else if (isIntegral()) {
+ } else {
    return Scalar(-v.i);
  }
 }
