@@ -10,7 +10,7 @@ from torch.distributions.utils import broadcast_all
 class Normal(ExponentialFamily):
     r"""
     Creates a normal (also called Gaussian) distribution parameterized by
-    `loc` and `scale`.
+    :attr:`loc` and :attr:`scale`.
 
     Example::
 

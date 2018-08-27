@@ -9,7 +9,7 @@ from torch.distributions.utils import broadcast_all
 
 class Beta(ExponentialFamily):
     r"""
-    Beta distribution parameterized by `concentration1` and `concentration0`.
+    Beta distribution parameterized by :attr:`concentration1` and :attr:`concentration0`.
 
     Example::
 
