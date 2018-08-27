@@ -392,7 +392,7 @@ class TestOperators(hu.HypothesisTestCase):
             if rnn_mode == "lstm" else [0, 1, 3]  # ignore C
         for input_idx in input_idxs:
             self.assertGradientChecks(
-                device_option, inputs, input_idx, [0],
+                device_option, op, inputs, input_idx, [0],
                 stepsize=0.01, threshold=0.01)
 
     @given(ndim=st.integers(1, 4),
