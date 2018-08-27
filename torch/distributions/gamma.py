@@ -13,7 +13,7 @@ def _standard_gamma(concentration):
 
 class Gamma(ExponentialFamily):
     r"""
-    Creates a Gamma distribution parameterized by shape `concentration` and `rate`.
+    Creates a Gamma distribution parameterized by shape :attr:`concentration` and :attr:`rate`.
 
     Example::
 

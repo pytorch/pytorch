@@ -14,7 +14,7 @@ class Categorical(Distribution):
         It is equivalent to the distribution that :func:`torch.multinomial`
         samples from.
 
-    Samples are integers from `0 ... K-1` where `K` is probs.size(-1).
+    Samples are integers from :math:`\{0, \ldots, K-1\}` where `K` is ``probs.size(-1)``.
 
     If :attr:`probs` is 1D with length-`K`, each element is the relative
     probability of sampling the class at that index.
