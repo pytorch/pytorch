@@ -2,7 +2,7 @@
 
 #include "caffe2/core/dispatch/OpSchema.h"
 #include "caffe2/core/dispatch/Dispatcher.h"
-#include "caffe2/utils/Optional.h"
+#include <ATen/core/optional.h>
 
 /**
  * To register your own kernel for an operator, do in one (!) cpp file:
@@ -57,7 +57,7 @@ private:
   const typename Schema::dispatch::dispatch_key_type dispatch_key_;
   bool owns_registration_;
 
-  DISABLE_COPY_AND_ASSIGN(KernelRegistrar);
+  AT_DISABLE_COPY_AND_ASSIGN(KernelRegistrar);
 };
 
 /**
@@ -89,13 +89,13 @@ private:
   static constexpr uint64_t KERNEL_PRESENT = 0x01 << 0;
   static constexpr uint64_t DISPATCH_KEY_PRESENT = 0x01 << 1;
 
-  optional<typename Schema::signature::func_type*> kernel_;
-  optional<typename Schema::dispatch::dispatch_key_type> dispatch_key_;
+  at::optional<typename Schema::signature::func_type*> kernel_;
+  at::optional<typename Schema::dispatch::dispatch_key_type> dispatch_key_;
 
 public:
-  constexpr KernelRegistrationBuilder(): KernelRegistrationBuilder(nullopt, nullopt) {}
+  constexpr KernelRegistrationBuilder(): KernelRegistrationBuilder(at::nullopt, at::nullopt) {}
 
-  constexpr KernelRegistrationBuilder(optional<typename Schema::signature::func_type*> kernel, optional<typename Schema::dispatch::dispatch_key_type> dispatch_key)
+  constexpr KernelRegistrationBuilder(at::optional<typename Schema::signature::func_type*> kernel, at::optional<typename Schema::dispatch::dispatch_key_type> dispatch_key)
   : kernel_(std::move(kernel)), dispatch_key_(std::move(dispatch_key)) {}
 
   /**

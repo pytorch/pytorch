@@ -425,18 +425,21 @@ Args:
 
 Example::
 
-    >>> torch.tensor([[0.1, 1.2], [2.2, 3.1], [4.9, 5.2]])
-    tensor([[ 0.1000,  1.2000],
-            [ 2.2000,  3.1000],
-            [ 4.9000,  5.2000]])
-
     >>> a = numpy.array([1, 2, 3])
-    >>> t = torch.from_numpy(a)
+    >>> t = torch.as_tensor(a)
     >>> t
     tensor([ 1,  2,  3])
     >>> t[0] = -1
     >>> a
     array([-1,  2,  3])
+
+    >>> a = numpy.array([1, 2, 3])
+    >>> t = torch.as_tensor(a, device=torch.device('cuda'))
+    >>> t
+    tensor([ 1,  2,  3])
+    >>> t[0] = -1
+    >>> a
+    array([1,  2,  3])
 """.format(**factory_data_common_args))
 
 add_docstr(torch.asin,
@@ -1274,7 +1277,8 @@ eig(a, eigenvectors=False, out=None) -> (Tensor, Tensor)
 Computes the eigenvalues and eigenvectors of a real square matrix.
 
 Args:
-    a (Tensor): the square matrix for which the eigenvalues and eigenvectors will be computed
+    a (Tensor): the square matrix of shape :math:`(n \times n)` for which the eigenvalues and eigenvectors
+        will be computed
     eigenvectors (bool): ``True`` to compute both eigenvalues and eigenvectors;
         otherwise, only eigenvalues will be computed
     out (tuple, optional): the output tensors
@@ -1282,8 +1286,17 @@ Args:
 Returns:
     (Tensor, Tensor): A tuple containing
 
-        - **e** (*Tensor*): the right eigenvalues of ``a``
-        - **v** (*Tensor*): the eigenvectors of ``a`` if ``eigenvectors`` is ``True``; otherwise an empty tensor
+        - **e** (*Tensor*): Shape :math:`(n \times 2)`. Each row is an eigenvalue of ``a``,
+            where the first element is the real part and the second element is the imaginary part.
+            The eigenvalues are not necessarily ordered.
+        - **v** (*Tensor*): If ``eigenvectors=False``, it's an empty tensor.
+            Otherwise, this tensor of shape :math:`(n \times n)` can be used to compute normalized (unit length)
+            eigenvectors of corresponding eigenvalues ``e`` as follows.
+            If the corresponding e[j] is a real number, column v[:, j] is the eigenvector corresponding to
+            eigenvalue e[j].
+            If the corresponding e[j] and e[j + 1] eigenvalues form a complex conjugate pair, then the true eigenvectors
+            can be computed as
+            :math:`eigenvector[j] = v[:, j] + i * v[:, j + 1], eigenvector[j + 1] = v[:, j] - i * v[:, j + 1]`.
 """)
 
 add_docstr(torch.einsum,
@@ -4136,8 +4149,10 @@ add_docstr(torch.sparse_coo_tensor,
            r"""
 sparse_coo_tensor(indices, values, size=None, dtype=None, device=None, requires_grad=False) -> Tensor
 
-Constructs a sparse_coo_tensor with non-zero elements at the given :attr:`indices` with the given
-:attr:`values`.
+Constructs a sparse tensors in COO(rdinate) format with non-zero elements at the given :attr:`indices`
+with the given :attr:`values`. A sparse tensor can be `uncoalesced`, in that case, there are duplicate
+coordinates in the indices, and the value at that index is the sum of all duplicate value entries:
+`torch.spaerse`_.
 
 Args:
     indices (array_like): Initial data for the tensor. Can be a list, tuple,
@@ -4192,6 +4207,8 @@ Example::
     tensor([], dtype=torch.int64)
     and values:
     tensor([])
+
+.. _torch.sparse: https://pytorch.org/docs/stable/sparse.html
 """)
 
 add_docstr(torch.sqrt,
@@ -5715,7 +5732,7 @@ returned window size. :attr:`periodic` flag determines whether the returned
 window trims off the last duplicate value from the symmetric window and is
 ready to be used as a periodic window with functions like
 :meth:`torch.stft`. Therefore, if :attr:`periodic` is true, the :math:`N` in
-above formula is in fact :math:`\text{window_length} + 1`. Also, we always have
+above formula is in fact :math:`\text{window\_length} + 1`. Also, we always have
 ``torch.hann_window(L, periodic=True)`` equal to
 ``torch.hann_window(L + 1, periodic=False)[:-1])``.
 
@@ -5733,7 +5750,7 @@ Arguments:
     {requires_grad}
 
 Returns:
-    Tensor: A 1-D tensor of size :math:`(\text{{window_length}},)` containing the window
+    Tensor: A 1-D tensor of size :math:`(\text{{window\_length}},)` containing the window
 
 """.format(**factory_common_args))
 
@@ -5755,7 +5772,7 @@ returned window size. :attr:`periodic` flag determines whether the returned
 window trims off the last duplicate value from the symmetric window and is
 ready to be used as a periodic window with functions like
 :meth:`torch.stft`. Therefore, if :attr:`periodic` is true, the :math:`N` in
-above formula is in fact :math:`\text{window_length} + 1`. Also, we always have
+above formula is in fact :math:`\text{window\_length} + 1`. Also, we always have
 ``torch.hamming_window(L, periodic=True)`` equal to
 ``torch.hamming_window(L + 1, periodic=False)[:-1])``.
 
@@ -5776,7 +5793,7 @@ Arguments:
     {requires_grad}
 
 Returns:
-    Tensor: A 1-D tensor of size :math:`(\text{{window_length}},)` containing the window
+    Tensor: A 1-D tensor of size :math:`(\text{{window\_length}},)` containing the window
 
 """.format(**factory_common_args))
 
@@ -5801,7 +5818,7 @@ returned window size. :attr:`periodic` flag determines whether the returned
 window trims off the last duplicate value from the symmetric window and is
 ready to be used as a periodic window with functions like
 :meth:`torch.stft`. Therefore, if :attr:`periodic` is true, the :math:`N` in
-above formula is in fact :math:`\text{window_length} + 1`. Also, we always have
+above formula is in fact :math:`\text{window\_length} + 1`. Also, we always have
 ``torch.bartlett_window(L, periodic=True)`` equal to
 ``torch.bartlett_window(L + 1, periodic=False)[:-1])``.
 
@@ -5819,7 +5836,7 @@ Arguments:
     {requires_grad}
 
 Returns:
-    Tensor: A 1-D tensor of size :math:`(\text{{window_length}},)` containing the window
+    Tensor: A 1-D tensor of size :math:`(\text{{window\_length}},)` containing the window
 
 """.format(**factory_common_args))
 
@@ -5841,7 +5858,7 @@ returned window size. :attr:`periodic` flag determines whether the returned
 window trims off the last duplicate value from the symmetric window and is
 ready to be used as a periodic window with functions like
 :meth:`torch.stft`. Therefore, if :attr:`periodic` is true, the :math:`N` in
-above formula is in fact :math:`\text{window_length} + 1`. Also, we always have
+above formula is in fact :math:`\text{window\_length} + 1`. Also, we always have
 ``torch.blackman_window(L, periodic=True)`` equal to
 ``torch.blackman_window(L + 1, periodic=False)[:-1])``.
 
@@ -5859,7 +5876,7 @@ Arguments:
     {requires_grad}
 
 Returns:
-    Tensor: A 1-D tensor of size :math:`(\text{{window_length}},)` containing the window
+    Tensor: A 1-D tensor of size :math:`(\text{{window\_length}},)` containing the window
 
 """.format(**factory_common_args))
 

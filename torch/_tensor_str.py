@@ -213,8 +213,8 @@ def get_summarized_data(self):
         else:
             return self
     if self.size(0) > 2 * PRINT_OPTS.edgeitems:
-        start = [get_summarized_data(self[i]).view(-1) for i in range(0, PRINT_OPTS.edgeitems)]
-        end = ([get_summarized_data(self[i]).view(-1)
+        start = [get_summarized_data(self[i]).reshape(-1) for i in range(0, PRINT_OPTS.edgeitems)]
+        end = ([get_summarized_data(self[i]).reshape(-1)
                for i in range(len(self) - PRINT_OPTS.edgeitems, len(self))])
         return torch.cat((start + end))
     else:

@@ -65,30 +65,13 @@ void test(Type &T) {
     require_equal_size_dim(t2, ones({0}, T));
 
     // unsqueeze
-#ifndef USE_TH_SIZE_ZERO_DIM
-    if (t.numel() != 0) {
-      REQUIRE(t.unsqueeze(0).dim() == t.dim() + 1);
-    } else {
-      REQUIRE_THROWS(t.unsqueeze(0));
-    }
-#else
     REQUIRE(t.unsqueeze(0).dim() == t.dim() + 1);
-#endif
 
     // unsqueeze_
     {
       auto t2 = ones(*s, T);
-#ifndef USE_TH_SIZE_ZERO_DIM
-      if (t2.numel() != 0) {
-        auto r = t2.unsqueeze_(0);
-        REQUIRE(r.dim() == t.dim() + 1);
-      } else {
-        REQUIRE_THROWS(t2.unsqueeze_(0));
-      }
-#else
       auto r = t2.unsqueeze_(0);
       REQUIRE(r.dim() == t.dim() + 1);
-#endif
     }
 
     // squeeze (with dimension argument)
@@ -206,7 +189,7 @@ void test(Type &T) {
             // with storage
             auto lhs = ones(*lhs_it, T);
             auto rhs = ones(*rhs_it, T);
-            auto storage = T.storage(rhs.numel());
+            auto storage = T.storage(rhs.numel(), false);
             lhs.set_(*storage);
             // should not be dim 0 because an empty storage is dim 1; all other storages aren't scalars
             REQUIRE(lhs.dim() != 0);
@@ -215,7 +198,7 @@ void test(Type &T) {
             // with storage, offset, sizes, strides
             auto lhs = ones(*lhs_it, T);
             auto rhs = ones(*rhs_it, T);
-            auto storage = T.storage(rhs.numel());
+            auto storage = T.storage(rhs.numel(), false);
             lhs.set_(*storage, rhs.storage_offset(), rhs.sizes(), rhs.strides());
             require_equal_size_dim(lhs, rhs);
           }

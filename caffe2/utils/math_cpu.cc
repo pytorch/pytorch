@@ -18,6 +18,7 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <functional>
 #include <limits>
@@ -241,24 +242,6 @@ void Gemv<float, CPUContext>(
   }
 }
 
-#define CAFFE2_SPECIALIZED_SCALE(T)                                            \
-  template <>                                                                  \
-  void Scale<T, CPUContext>(                                                   \
-      const int n, const float alpha, const T* x, T* y, CPUContext* context) { \
-    EigenVectorMap<T>(y, n) = ConstEigenVectorMap<T>(x, n) * alpha;            \
-  }                                                                            \
-  template <>                                                                  \
-  void Scale<T, CPUContext>(                                                   \
-      const int n,                                                             \
-      const float* alpha,                                                      \
-      const T* x,                                                              \
-      T* y,                                                                    \
-      CPUContext* context) {                                                   \
-    EigenVectorMap<T>(y, n) = ConstEigenVectorMap<T>(x, n) * (*alpha);         \
-  }
-CAFFE2_SPECIALIZED_SCALE(float)
-#undef CAFFE2_SPECIALIZED_SCALE
-
 #define CAFFE2_SPECIALIZED_DOT(T)                                        \
   template <>                                                            \
   void Dot<T, CPUContext>(                                               \
@@ -380,22 +363,38 @@ void Gemv<float, CPUContext>(
   cblas_sgemv(CblasRowMajor, trans_A, M, N, alpha, A, N, x, 1, beta, y, 1);
 }
 
-#define CAFFE2_SPECIALIZED_SCALE(T, prefix)                             \
-  template <>                                                           \
-  void Scale<T, CPUContext>(                                            \
-      const int n, const float alpha, const T* x, T* y, CPUContext*) {  \
-    if (y != x)                                                         \
-      cblas_##prefix##copy(n, x, 1, y, 1);                              \
-    cblas_##prefix##scal(n, static_cast<float>(alpha), y, 1);           \
-  }                                                                     \
-  template <>                                                           \
-  void Scale<T, CPUContext>(                                            \
-      const int n, const float* alpha, const T* x, T* y, CPUContext*) { \
-    if (y != x)                                                         \
-      cblas_##prefix##copy(n, x, 1, y, 1);                              \
-    cblas_##prefix##scal(n, static_cast<float>(*alpha), y, 1);          \
+#define CAFFE2_SPECIALIZED_SCALE(TAlpha, TData, prefix)          \
+  template <>                                                    \
+  void Scale<TAlpha, TData, CPUContext>(                         \
+      const int n,                                               \
+      const TAlpha alpha,                                        \
+      const TData* x,                                            \
+      TData* y,                                                  \
+      CPUContext*) {                                             \
+    if (y != x) {                                                \
+      cblas_##prefix##copy(n, x, 1, y, 1);                       \
+    }                                                            \
+    if (alpha != TAlpha(1)) {                                    \
+      cblas_##prefix##scal(n, static_cast<TData>(alpha), y, 1);  \
+    }                                                            \
+  }                                                              \
+  template <>                                                    \
+  void Scale<TAlpha, TData, CPUContext>(                         \
+      const int n,                                               \
+      const TAlpha* alpha,                                       \
+      const TData* x,                                            \
+      TData* y,                                                  \
+      CPUContext*) {                                             \
+    if (y != x) {                                                \
+      cblas_##prefix##copy(n, x, 1, y, 1);                       \
+    }                                                            \
+    if (*alpha != TAlpha(1)) {                                   \
+      cblas_##prefix##scal(n, static_cast<TData>(*alpha), y, 1); \
+    }                                                            \
   }
-CAFFE2_SPECIALIZED_SCALE(float, s)
+CAFFE2_SPECIALIZED_SCALE(float, float, s)
+CAFFE2_SPECIALIZED_SCALE(double, double, d)
+CAFFE2_SPECIALIZED_SCALE(float, double, d)
 #undef CAFFE2_SPECIALIZED_SCALE
 
 #define CAFFE2_SPECIALIZED_DOT(T, prefix)                       \
@@ -453,6 +452,36 @@ CAFFE2_SPECIALIZED_AXPBY(float, s)
 #undef CAFFE2_SPECIALIZED_AXPBY
 
 #endif // CAFFE2_USE_EIGEN_FOR_BLAS
+
+#define CAFFE2_SPECIALIZED_SCALE(TAlpha, TData)                        \
+  template <>                                                          \
+  void Scale<TAlpha, TData, CPUContext>(                               \
+      const int n,                                                     \
+      const TAlpha alpha,                                              \
+      const TData* x,                                                  \
+      TData* y,                                                        \
+      CPUContext* /* context */) {                                     \
+    EigenVectorMap<TData>(y, n) =                                      \
+        ConstEigenVectorMap<TData>(x, n) * static_cast<TData>(alpha);  \
+  }                                                                    \
+  template <>                                                          \
+  void Scale<TAlpha, TData, CPUContext>(                               \
+      const int n,                                                     \
+      const TAlpha* alpha,                                             \
+      const TData* x,                                                  \
+      TData* y,                                                        \
+      CPUContext* /* context */) {                                     \
+    EigenVectorMap<TData>(y, n) =                                      \
+        ConstEigenVectorMap<TData>(x, n) * static_cast<TData>(*alpha); \
+  }
+#ifdef CAFFE2_USE_EIGEN_FOR_BLAS
+CAFFE2_SPECIALIZED_SCALE(float, float)
+CAFFE2_SPECIALIZED_SCALE(double, double)
+CAFFE2_SPECIALIZED_SCALE(float, double)
+#endif // CAFFE2_USE_EIGEN_FOR_BLAS
+CAFFE2_SPECIALIZED_SCALE(std::int32_t, std::int32_t)
+CAFFE2_SPECIALIZED_SCALE(std::int64_t, std::int64_t)
+#undef CAFFE2_SPECIALIZED_SCALE
 
 template <>
 void GemmBatched<float, CPUContext>(
@@ -615,6 +644,8 @@ DELEGATE_SIMPLE_UNARY_FUNCTION(float, Rsqrt, vsInvSqrt)
 DELEGATE_SIMPLE_UNARY_FUNCTION(double, Rsqrt, vdInvSqrt)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Cbrt, vsCbrt)
 DELEGATE_SIMPLE_UNARY_FUNCTION(double, Cbrt, vdCbrt)
+DELEGATE_SIMPLE_UNARY_FUNCTION(float, Inv, vsInv)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Inv, vdInv)
 #undef DELEGATE_SIMPLE_UNARY_FUNCTION
 
 #define DELEGATE_SINCOS_FUNCTION(T, OriginalFunc)           \
@@ -660,17 +691,27 @@ DELEGATE_SIMPLE_BINARY_FUNCTION(double, Div, vdDiv)
     EigenVectorMap<T>(y, N) = ConstEigenVectorArrayMap<T>(x, N).expr();      \
   }
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Exp, exp)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Exp, exp)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Log, log)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Log, log)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Cos, cos)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Cos, cos)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Acos, acos)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Acos, acos)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Sin, sin)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Sin, sin)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Asin, asin)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Asin, asin)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Tan, tan)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Tan, tan)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Atan, atan)
-DELEGATE_SIMPLE_UNARY_FUNCTION(float, Abs, abs)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Atan, atan)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Sqr, square)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Sqr, square)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Sqrt, sqrt)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Sqrt, sqrt)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Rsqrt, rsqrt)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Rsqrt, rsqrt)
 
 #undef DELEGATE_SIMPLE_UNARY_FUNCTION
 
@@ -734,6 +775,15 @@ DELEGATE_COSH_FUNCTION(float)
 DELEGATE_COSH_FUNCTION(double)
 #undef DELEGATE_COSH_FUNCTION
 
+#define DELEGATE_INV_FUNCTION(T)                                           \
+  template <>                                                              \
+  void Inv<T, CPUContext>(const int N, const T* x, T* y, CPUContext*) {    \
+    EigenVectorMap<T>(y, N) = ConstEigenVectorArrayMap<T>(x, N).inverse(); \
+  }
+DELEGATE_INV_FUNCTION(float)
+DELEGATE_INV_FUNCTION(double)
+#undef DELEGATE_INV_FUNCTION
+
 #endif // CAFFE2_USE_MKL
 
 #define DELEGATE_NEG_FUNCTION(T)                                        \
@@ -757,6 +807,19 @@ DELEGATE_SIGN_FUNCTION(double)
 DELEGATE_SIGN_FUNCTION(std::int32_t)
 DELEGATE_SIGN_FUNCTION(std::int64_t)
 #undef DELEGATE_SIGN_FUNCTION
+
+#define DELEGATE_ABS_FUNCTION(T)                                        \
+  template <>                                                           \
+  void Abs<T, CPUContext>(const int N, const T* x, T* y, CPUContext*) { \
+    EigenVectorMap<T>(y, N) = ConstEigenVectorArrayMap<T>(x, N).abs();  \
+  }
+#ifndef CAFFE2_USE_MKL
+DELEGATE_ABS_FUNCTION(float)
+DELEGATE_ABS_FUNCTION(double)
+#endif // CAFFE2_USE_MKL
+DELEGATE_ABS_FUNCTION(std::int32_t)
+DELEGATE_ABS_FUNCTION(std::int64_t)
+#undef DELEGATE_ABS_FUNCTION
 
 #define DELEGATE_CUBE_FUNCTION(T)                                        \
   template <>                                                            \
@@ -807,28 +870,55 @@ DEFINE_SIMPLE_BINARY_FUNCTION(Div, /)
 // Eigen or via custom code.
 ////////////////////////////////////////////////////////////////////////////////
 
-#define CAFFE2_SPECIALIZED_REDUCEMIN(T) \
-  template <>                           \
-  void ReduceMin<T, CPUContext>(        \
-      const int N,                      \
-      const T* x,                       \
-      T* y,                             \
-      Tensor* /*scratch_ptr*/,          \
-      CPUContext* /*context*/) {        \
-    *y = *std::min_element(x, x + N);   \
+#define CAFFE2_SPECIALIZED_SET(T)                                             \
+  template <>                                                                 \
+  void Set<T, CPUContext>(const size_t N, const T alpha, T* Y, CPUContext*) { \
+    if (N == 0) {                                                             \
+      return;                                                                 \
+    }                                                                         \
+    if (alpha == (T)0) {                                                      \
+      if (Y != nullptr) {                                                     \
+        std::memset(Y, 0, N * sizeof(T));                                     \
+      }                                                                       \
+    } else {                                                                  \
+      EigenVectorMap<T>(Y, N).setConstant(alpha);                             \
+    }                                                                         \
+  }
+
+CAFFE2_SPECIALIZED_SET(float);
+CAFFE2_SPECIALIZED_SET(double);
+CAFFE2_SPECIALIZED_SET(int8_t);
+CAFFE2_SPECIALIZED_SET(int16_t);
+CAFFE2_SPECIALIZED_SET(int);
+CAFFE2_SPECIALIZED_SET(int64_t);
+CAFFE2_SPECIALIZED_SET(bool);
+CAFFE2_SPECIALIZED_SET(char);
+CAFFE2_SPECIALIZED_SET(uint8_t);
+CAFFE2_SPECIALIZED_SET(uint16_t);
+#undef CAFFE2_SPECIALIZED_SET
+
+#define CAFFE2_SPECIALIZED_REDUCEMIN(T)                \
+  template <>                                          \
+  void ReduceMin<T, CPUContext>(                       \
+      const int N,                                     \
+      const T* x,                                      \
+      T* y,                                            \
+      Tensor* /*scratch_ptr*/,                         \
+      CPUContext* /*context*/) {                       \
+    *y = ConstEigenVectorArrayMap<T>(x, N).minCoeff(); \
   }
 CAFFE2_SPECIALIZED_REDUCEMIN(float)
 #undef CAFFE2_SPECIALIZED_REDUCEMIN
 
-#define CAFFE2_SPECIALIZED_REDUCEMAX(T) \
-  template <>                           \
-  void ReduceMax<T, CPUContext>(        \
-      const int N,                      \
-      const T* x,                       \
-      T* y,                             \
-      Tensor* /*scratch_ptr*/,          \
-      CPUContext* /*context*/) {        \
-    *y = *std::max_element(x, x + N);   \
+#define CAFFE2_SPECIALIZED_REDUCEMAX(T)                \
+  template <>                                          \
+  void ReduceMax<T, CPUContext>(                       \
+      const int N,                                     \
+      const T* x,                                      \
+      T* y,                                            \
+      Tensor* /*scratch_ptr*/,                         \
+      CPUContext* /*context*/) {                       \
+    *y = ConstEigenVectorArrayMap<T>(x, N).maxCoeff(); \
   }
 CAFFE2_SPECIALIZED_REDUCEMAX(float)
 CAFFE2_SPECIALIZED_REDUCEMAX(int32_t)
@@ -838,203 +928,502 @@ CAFFE2_SPECIALIZED_REDUCEMAX(int64_t)
 
 namespace {
 
-template <typename T, class Reducer>
-void ReduceTensor(
-    const int num_dims,
-    const int* dims,
-    const int num_axes,
-    const int* axes,
-    const Reducer& reducer,
-    const T& init,
+template <typename T>
+struct MinFunctor {
+  inline T operator()(const T a, const T b) const {
+    return std::min(a, b);
+  }
+};
+
+template <typename T>
+struct MaxFunctor {
+  inline T operator()(const T a, const T b) const {
+    return std::max(a, b);
+  }
+};
+
+template <typename T>
+struct L1NormFunctor {
+  inline T operator()(const T a, const T b) const {
+    return a + std::abs(b);
+  }
+};
+
+template <typename T>
+struct SquaredL2NormFunctor {
+  inline T operator()(const T a, const T b) const {
+    return a + b * b;
+  }
+};
+
+#define DELEGATE_ROWWISE_REDUCE_FUNCTION(Func, EigenOp)                    \
+  template <typename T>                                                    \
+  void Rowwise##Func(                                                      \
+      const int rows, const int cols, const T alpha, const T* X, T* Y) {   \
+    EigenVectorMap<T>(Y, rows) =                                           \
+        ConstEigenMatrixMap<T>(X, cols, rows).colwise().EigenOp() * alpha; \
+  }
+DELEGATE_ROWWISE_REDUCE_FUNCTION(ReduceMin, minCoeff)
+DELEGATE_ROWWISE_REDUCE_FUNCTION(ReduceMax, maxCoeff)
+DELEGATE_ROWWISE_REDUCE_FUNCTION(ReduceSum, sum)
+DELEGATE_ROWWISE_REDUCE_FUNCTION(ReduceMean, mean)
+DELEGATE_ROWWISE_REDUCE_FUNCTION(ReduceL1, template lpNorm<1>);
+DELEGATE_ROWWISE_REDUCE_FUNCTION(ReduceL2, norm)
+#undef DELEGATE_ROWWISE_REDUCE_FUNCTION
+
+#define DELEGATE_COLWISE_REDUCE_FUNCTION(Func, EigenOp)                    \
+  template <typename T>                                                    \
+  void Colwise##Func(                                                      \
+      const int rows, const int cols, const T alpha, const T* X, T* Y) {   \
+    EigenVectorMap<T>(Y, cols) =                                           \
+        ConstEigenMatrixMap<T>(X, cols, rows).rowwise().EigenOp() * alpha; \
+  }
+DELEGATE_COLWISE_REDUCE_FUNCTION(ReduceMin, minCoeff)
+DELEGATE_COLWISE_REDUCE_FUNCTION(ReduceMax, maxCoeff)
+DELEGATE_COLWISE_REDUCE_FUNCTION(ReduceSum, sum)
+DELEGATE_COLWISE_REDUCE_FUNCTION(ReduceMean, mean)
+DELEGATE_COLWISE_REDUCE_FUNCTION(ReduceL1, template lpNorm<1>);
+DELEGATE_COLWISE_REDUCE_FUNCTION(ReduceL2, norm)
+#undef DELEGATE_COLWISE_REDUCE_FUNCTION
+
+template <typename T>
+void BothEndsReduceMin(
+    const int pre,
+    const int mid,
+    const int nxt,
+    const T alpha,
     const T* X,
-    T* Y,
-    CPUContext* context) {
-  CAFFE_ENFORCE_LE(num_axes, num_dims);
-  if (X == Y) {
-    return;
+    T* Y) {
+  EigenVectorArrayMap<T> Y_arr(Y, mid);
+  Y_arr = ConstEigenArrayMap<T>(X, nxt, mid).colwise().minCoeff();
+  const T* X_ptr = X + mid * nxt;
+  // It seems there is some bug in eigen array::min so it cannot be implemented
+  // as ReduceSum below.
+  for (int i = 1; i < pre; ++i) {
+    for (int j = 0; j < mid; ++j) {
+      Y[j] = std::min(Y[j], ConstEigenVectorArrayMap<T>(X_ptr, nxt).minCoeff());
+      X_ptr += nxt;
+    }
   }
-  std::vector<int> Y_dims(dims, dims + num_dims);
-  for (int i = 0; i < num_axes; ++i) {
-    Y_dims[axes[i]] = 1;
-  }
-  const int X_size =
-      std::accumulate(dims, dims + num_dims, 1, std::multiplies<int>());
-  const int Y_size = std::accumulate(
-      Y_dims.cbegin(), Y_dims.cend(), 1, std::multiplies<int>());
-  Set<T, CPUContext>(Y_size, init, Y, context);
-  std::vector<int> index(num_dims, 0);
-  for (int X_index = 0; X_index < X_size; ++X_index) {
-    const int Y_index =
-        utils::GetIndexFromDims(num_dims, Y_dims.data(), index.data());
-    Y[Y_index] = reducer(Y[Y_index], X[X_index]);
-    utils::IncreaseIndexInDims(num_dims, dims, index.data());
+  if (alpha != T(1)) {
+    Y_arr *= alpha;
   }
 }
 
 template <typename T>
-void ReduceMeanImpl(
-    const int num_dims,
-    const int* dims,
-    const int num_axes,
-    const int* axes,
+void BothEndsReduceMax(
+    const int pre,
+    const int mid,
+    const int nxt,
+    const T alpha,
+    const T* X,
+    T* Y) {
+  EigenVectorArrayMap<T> Y_arr(Y, mid);
+  Y_arr = ConstEigenArrayMap<T>(X, nxt, mid).colwise().maxCoeff();
+  const T* X_ptr = X + mid * nxt;
+  for (int i = 1; i < pre; ++i) {
+    for (int j = 0; j < mid; ++j) {
+      Y[j] = std::max(Y[j], ConstEigenVectorArrayMap<T>(X_ptr, nxt).maxCoeff());
+      X_ptr += nxt;
+    }
+  }
+  if (alpha != T(1)) {
+    Y_arr *= alpha;
+  }
+}
+
+template <typename T>
+void BothEndsReduceSum(
+    const int pre,
+    const int mid,
+    const int nxt,
+    const T alpha,
+    const T* X,
+    T* Y) {
+  EigenVectorArrayMap<T> Y_arr(Y, mid);
+  Y_arr = ConstEigenArrayMap<T>(X, nxt, mid).colwise().sum();
+  const int stride = mid * nxt;
+  const T* X_ptr = X + stride;
+  for (int i = 1; i < pre; ++i) {
+    Y_arr += ConstEigenArrayMap<T>(X_ptr, nxt, mid).colwise().sum();
+    X_ptr += stride;
+  }
+  if (alpha != T(1)) {
+    Y_arr *= alpha;
+  }
+}
+
+template <typename T>
+void BothEndsReduceMean(
+    const int pre,
+    const int mid,
+    const int nxt,
+    const T alpha,
+    const T* X,
+    T* Y) {
+  EigenVectorArrayMap<T> Y_arr(Y, mid);
+  Y_arr = ConstEigenArrayMap<T>(X, nxt, mid).colwise().mean();
+  const int stride = mid * nxt;
+  const T* X_ptr = X + stride;
+  for (int i = 1; i < pre; ++i) {
+    Y_arr += ConstEigenArrayMap<T>(X_ptr, nxt, mid).colwise().mean();
+    X_ptr += stride;
+  }
+  if (alpha / static_cast<T>(pre) != 1) {
+    Y_arr *= alpha / static_cast<T>(pre);
+  }
+}
+
+template <typename T>
+void BothEndsReduceL1(
+    const int pre,
+    const int mid,
+    const int nxt,
+    const T alpha,
+    const T* X,
+    T* Y) {
+  EigenVectorArrayMap<T> Y_arr(Y, mid);
+  Y_arr = ConstEigenMatrixMap<T>(X, nxt, mid)
+              .colwise()
+              .template lpNorm<1>()
+              .array();
+  const int stride = mid * nxt;
+  const T* X_ptr = X + stride;
+  for (int i = 1; i < pre; ++i) {
+    Y_arr += ConstEigenMatrixMap<T>(X_ptr, nxt, mid)
+                 .colwise()
+                 .template lpNorm<1>()
+                 .array();
+    X_ptr += stride;
+  }
+  if (alpha != T(1)) {
+    Y_arr *= alpha;
+  }
+}
+
+template <typename T>
+void BothEndsReduceL2(
+    const int pre,
+    const int mid,
+    const int nxt,
+    const T alpha,
+    const T* X,
+    T* Y) {
+  EigenVectorArrayMap<T> Y_arr(Y, mid);
+  Y_arr = ConstEigenMatrixMap<T>(X, nxt, mid).colwise().squaredNorm().array();
+  const int stride = mid * nxt;
+  const T* X_ptr = X + stride;
+  for (int i = 1; i < pre; ++i) {
+    Y_arr +=
+        ConstEigenMatrixMap<T>(X_ptr, nxt, mid).colwise().squaredNorm().array();
+    X_ptr += stride;
+  }
+  Y_arr = Y_arr.sqrt() * alpha;
+}
+
+template <typename T, class Reducer>
+void ReduceTensor(
+    const int ndim,
+    const int* X_dims,
+    const int* Y_dims,
+    const Reducer& reducer,
+    const T init,
+    const T alpha,
     const T* X,
     T* Y,
     CPUContext* context) {
-  ReduceTensor(
-      num_dims, dims, num_axes, axes, std::plus<T>(), T(0), X, Y, context);
   const int X_size =
-      std::accumulate(dims, dims + num_dims, 1, std::multiplies<int>());
-  int scale = 1;
-  for (int i = 0; i < num_axes; ++i) {
-    scale *= dims[axes[i]];
+      std::accumulate(X_dims, X_dims + ndim, 1, std::multiplies<int>());
+  const int Y_size =
+      std::accumulate(Y_dims, Y_dims + ndim, 1, std::multiplies<int>());
+  Set<T, CPUContext>(Y_size, init, Y, context);
+  std::vector<int> index(ndim, 0);
+  for (int X_index = 0; X_index < X_size; ++X_index) {
+    const int Y_index = utils::GetIndexFromDims(ndim, Y_dims, index.data());
+    Y[Y_index] = reducer(Y[Y_index], X[X_index]);
+    utils::IncreaseIndexInDims(ndim, X_dims, index.data());
   }
-  const int Y_size = X_size / scale;
-  Scale<T, CPUContext>(Y_size, 1.0f / static_cast<float>(scale), Y, Y, context);
+  Scale<T, T, CPUContext>(Y_size, alpha, Y, Y, context);
 }
 
 } // namespace
 
-#define CAFFE2_SPECIALIZED_REDUCE_MIN(T)                       \
-  template <>                                                  \
-  void ReduceMin<T, CPUContext>(                               \
-      const int num_dims,                                      \
-      const int* dims,                                         \
-      const int num_axes,                                      \
-      const int* axes,                                         \
-      const T* X,                                              \
-      T* Y,                                                    \
-      CPUContext* context) {                                   \
-    ReduceTensor(                                              \
-        num_dims,                                              \
-        dims,                                                  \
-        num_axes,                                              \
-        axes,                                                  \
-        [](const T& a, const T& b) { return std::min(a, b); }, \
-        std::numeric_limits<T>::max(),                         \
-        X,                                                     \
-        Y,                                                     \
-        context);                                              \
+#define DELEGATE_REDUCE_FUNCTION(T, Func, reducer, init, is_norm)              \
+  template <>                                                                  \
+  void Func<T, CPUContext>(                                                    \
+      const int num_dims,                                                      \
+      const int* dims,                                                         \
+      const int num_axes,                                                      \
+      const int* axes,                                                         \
+      const T alpha,                                                           \
+      const T* X,                                                              \
+      T* Y,                                                                    \
+      CPUContext* context) {                                                   \
+    CAFFE_ENFORCE_LE(num_axes, num_dims);                                      \
+    std::vector<int> Y_dims_vector(dims, dims + num_dims);                     \
+    for (int i = 0; i < num_axes; ++i) {                                       \
+      Y_dims_vector[axes[i]] = 1;                                              \
+    }                                                                          \
+    const int* X_dims = dims;                                                  \
+    const int* Y_dims = Y_dims_vector.data();                                  \
+    const int X_size =                                                         \
+        std::accumulate(X_dims, X_dims + num_dims, 1, std::multiplies<int>()); \
+    const int Y_size =                                                         \
+        std::accumulate(Y_dims, Y_dims + num_dims, 1, std::multiplies<int>()); \
+    if (X_size == 0) {                                                         \
+      Set<T, CPUContext>(Y_size, alpha * init, Y, context);                    \
+      return;                                                                  \
+    }                                                                          \
+    if (alpha == T(0)) {                                                       \
+      Set<T, CPUContext>(Y_size, 0, Y, context);                               \
+      return;                                                                  \
+    }                                                                          \
+    if (std::equal(X_dims, X_dims + num_dims, Y_dims)) {                       \
+      if (is_norm) {                                                           \
+        Abs<T, CPUContext>(X_size, X, Y, context);                             \
+        Scale<T, T, CPUContext>(Y_size, alpha, Y, Y, context);                 \
+      } else {                                                                 \
+        Scale<T, T, CPUContext>(Y_size, alpha, X, Y, context);                 \
+      }                                                                        \
+      return;                                                                  \
+    }                                                                          \
+    int rows;                                                                  \
+    int cols;                                                                  \
+    if (utils::IsRowwiseReduce(num_dims, X_dims, Y_dims, &rows, &cols)) {      \
+      Rowwise##Func<T>(rows, cols, alpha, X, Y);                               \
+      return;                                                                  \
+    }                                                                          \
+    if (utils::IsColwiseReduce(num_dims, X_dims, Y_dims, &rows, &cols)) {      \
+      Colwise##Func<T>(rows, cols, alpha, X, Y);                               \
+      return;                                                                  \
+    }                                                                          \
+    int pre;                                                                   \
+    int mid;                                                                   \
+    int nxt;                                                                   \
+    if (utils::IsBothEndsReduce(num_dims, X_dims, Y_dims, &pre, &mid, &nxt)) { \
+      BothEnds##Func<T>(pre, mid, nxt, alpha, X, Y);                           \
+      return;                                                                  \
+    }                                                                          \
+    ReduceTensor(                                                              \
+        num_dims, X_dims, Y_dims, reducer, init, alpha, X, Y, context);        \
   }
-CAFFE2_SPECIALIZED_REDUCE_MIN(std::int32_t)
-CAFFE2_SPECIALIZED_REDUCE_MIN(std::int64_t)
-CAFFE2_SPECIALIZED_REDUCE_MIN(float)
-CAFFE2_SPECIALIZED_REDUCE_MIN(double)
-#undef CAFFE2_SPECIALIZED_REDUCE_MIN
 
-#define CAFFE2_SPECIALIZED_REDUCE_MAX(T)                       \
-  template <>                                                  \
-  void ReduceMax<T, CPUContext>(                               \
-      const int num_dims,                                      \
-      const int* dims,                                         \
-      const int num_axes,                                      \
-      const int* axes,                                         \
-      const T* X,                                              \
-      T* Y,                                                    \
-      CPUContext* context) {                                   \
-    ReduceTensor(                                              \
-        num_dims,                                              \
-        dims,                                                  \
-        num_axes,                                              \
-        axes,                                                  \
-        [](const T& a, const T& b) { return std::max(a, b); }, \
-        std::numeric_limits<T>::lowest(),                      \
-        X,                                                     \
-        Y,                                                     \
-        context);                                              \
-  }
-CAFFE2_SPECIALIZED_REDUCE_MAX(std::int32_t)
-CAFFE2_SPECIALIZED_REDUCE_MAX(std::int64_t)
-CAFFE2_SPECIALIZED_REDUCE_MAX(float)
-CAFFE2_SPECIALIZED_REDUCE_MAX(double)
-#undef CAFFE2_SPECIALIZED_REDUCE_MAX
+DELEGATE_REDUCE_FUNCTION(
+    float,
+    ReduceMin,
+    MinFunctor<float>(),
+    std::numeric_limits<float>::max(),
+    false)
+DELEGATE_REDUCE_FUNCTION(
+    double,
+    ReduceMin,
+    MinFunctor<double>(),
+    std::numeric_limits<double>::max(),
+    false)
+DELEGATE_REDUCE_FUNCTION(
+    std::int32_t,
+    ReduceMin,
+    MinFunctor<std::int32_t>(),
+    std::numeric_limits<std::int32_t>::max(),
+    false)
+DELEGATE_REDUCE_FUNCTION(
+    std::int64_t,
+    ReduceMin,
+    MinFunctor<std::int64_t>(),
+    std::numeric_limits<std::int64_t>::max(),
+    false)
 
-#define CAFFE2_SPECIALIZED_REDUCE_SUM(T)                                      \
-  template <>                                                                 \
-  void ReduceSum<T, CPUContext>(                                              \
-      const int num_dims,                                                     \
-      const int* dims,                                                        \
-      const int num_axes,                                                     \
-      const int* axes,                                                        \
-      const T* X,                                                             \
-      T* Y,                                                                   \
-      CPUContext* context) {                                                  \
-    ReduceTensor(                                                             \
-        num_dims, dims, num_axes, axes, std::plus<T>(), T(0), X, Y, context); \
-  }
-CAFFE2_SPECIALIZED_REDUCE_SUM(std::int32_t)
-CAFFE2_SPECIALIZED_REDUCE_SUM(std::int64_t)
-CAFFE2_SPECIALIZED_REDUCE_SUM(float)
-CAFFE2_SPECIALIZED_REDUCE_SUM(double)
-#undef CAFFE2_SPECIALIZED_REDUCE_SUM
+DELEGATE_REDUCE_FUNCTION(
+    float,
+    ReduceMax,
+    MaxFunctor<float>(),
+    std::numeric_limits<float>::lowest(),
+    false)
+DELEGATE_REDUCE_FUNCTION(
+    double,
+    ReduceMax,
+    MaxFunctor<double>(),
+    std::numeric_limits<double>::lowest(),
+    false)
+DELEGATE_REDUCE_FUNCTION(
+    std::int32_t,
+    ReduceMax,
+    MaxFunctor<std::int32_t>(),
+    std::numeric_limits<std::int32_t>::lowest(),
+    false)
+DELEGATE_REDUCE_FUNCTION(
+    std::int64_t,
+    ReduceMax,
+    MaxFunctor<std::int64_t>(),
+    std::numeric_limits<std::int64_t>::lowest(),
+    false)
 
-#define CAFFE2_SPECIALIZED_REDUCE_MEAN(T)                             \
-  template <>                                                         \
-  void ReduceMean<T, CPUContext>(                                     \
-      const int num_dims,                                             \
-      const int* dims,                                                \
-      const int num_axes,                                             \
-      const int* axes,                                                \
-      const T* X,                                                     \
-      T* Y,                                                           \
-      CPUContext* context) {                                          \
-    ReduceMeanImpl<T>(num_dims, dims, num_axes, axes, X, Y, context); \
+DELEGATE_REDUCE_FUNCTION(float, ReduceSum, std::plus<float>(), 0.0f, false)
+DELEGATE_REDUCE_FUNCTION(double, ReduceSum, std::plus<double>(), 0.0, false)
+DELEGATE_REDUCE_FUNCTION(
+    std::int32_t,
+    ReduceSum,
+    std::plus<std::int32_t>(),
+    0,
+    false)
+DELEGATE_REDUCE_FUNCTION(
+    std::int64_t,
+    ReduceSum,
+    std::plus<std::int64_t>(),
+    std::int64_t(0),
+    false)
+
+DELEGATE_REDUCE_FUNCTION(float, ReduceL1, L1NormFunctor<float>(), 0.0f, true)
+DELEGATE_REDUCE_FUNCTION(double, ReduceL1, L1NormFunctor<double>(), 0.0, true)
+DELEGATE_REDUCE_FUNCTION(
+    std::int32_t,
+    ReduceL1,
+    L1NormFunctor<std::int32_t>(),
+    0,
+    true)
+DELEGATE_REDUCE_FUNCTION(
+    std::int64_t,
+    ReduceL1,
+    L1NormFunctor<std::int64_t>(),
+    std::int64_t(0),
+    true)
+
+#undef DELEGATE_REDUCE_FUNCTION
+
+#define CAFFE2_SPECIALIZED_REDUCE_MEAN(T)                                      \
+  template <>                                                                  \
+  void ReduceMean<T, CPUContext>(                                              \
+      const int num_dims,                                                      \
+      const int* dims,                                                         \
+      const int num_axes,                                                      \
+      const int* axes,                                                         \
+      const T alpha,                                                           \
+      const T* X,                                                              \
+      T* Y,                                                                    \
+      CPUContext* context) {                                                   \
+    CAFFE_ENFORCE_LE(num_axes, num_dims);                                      \
+    std::vector<int> Y_dims_vector(dims, dims + num_dims);                     \
+    for (int i = 0; i < num_axes; ++i) {                                       \
+      Y_dims_vector[axes[i]] = 1;                                              \
+    }                                                                          \
+    const int* X_dims = dims;                                                  \
+    const int* Y_dims = Y_dims_vector.data();                                  \
+    const int X_size =                                                         \
+        std::accumulate(X_dims, X_dims + num_dims, 1, std::multiplies<int>()); \
+    const int Y_size =                                                         \
+        std::accumulate(Y_dims, Y_dims + num_dims, 1, std::multiplies<int>()); \
+    if (X_size == 0) {                                                         \
+      Set<T, CPUContext>(Y_size, 0, Y, context);                               \
+      return;                                                                  \
+    }                                                                          \
+    if (alpha == T(0)) {                                                       \
+      Set<T, CPUContext>(Y_size, 0, Y, context);                               \
+      return;                                                                  \
+    }                                                                          \
+    if (std::equal(X_dims, X_dims + num_dims, Y_dims)) {                       \
+      Scale<T, T, CPUContext>(X_size, alpha, X, Y, context);                   \
+      return;                                                                  \
+    }                                                                          \
+    int rows;                                                                  \
+    int cols;                                                                  \
+    if (utils::IsRowwiseReduce(num_dims, X_dims, Y_dims, &rows, &cols)) {      \
+      RowwiseReduceMean<T>(rows, cols, alpha, X, Y);                           \
+      return;                                                                  \
+    }                                                                          \
+    if (utils::IsColwiseReduce(num_dims, X_dims, Y_dims, &rows, &cols)) {      \
+      ColwiseReduceMean<T>(rows, cols, alpha, X, Y);                           \
+      return;                                                                  \
+    }                                                                          \
+    int pre;                                                                   \
+    int mid;                                                                   \
+    int nxt;                                                                   \
+    if (utils::IsBothEndsReduce(num_dims, X_dims, Y_dims, &pre, &mid, &nxt)) { \
+      BothEndsReduceMean<T>(pre, mid, nxt, alpha, X, Y);                       \
+      return;                                                                  \
+    }                                                                          \
+    const int scale = X_size / Y_size;                                         \
+    ReduceTensor(                                                              \
+        num_dims,                                                              \
+        X_dims,                                                                \
+        Y_dims,                                                                \
+        std::plus<T>(),                                                        \
+        T(0),                                                                  \
+        alpha / static_cast<T>(scale),                                         \
+        X,                                                                     \
+        Y,                                                                     \
+        context);                                                              \
   }
 CAFFE2_SPECIALIZED_REDUCE_MEAN(float)
+CAFFE2_SPECIALIZED_REDUCE_MEAN(double)
 #undef CAFFE2_SPECIALIZED_REDUCE_MEAN
 
-#define CAFFE2_SPECIALIZED_REDUCE_L1(T)                         \
-  template <>                                                   \
-  void ReduceL1<T, CPUContext>(                                 \
-      const int num_dims,                                       \
-      const int* dims,                                          \
-      const int num_axes,                                       \
-      const int* axes,                                          \
-      const T* X,                                               \
-      T* Y,                                                     \
-      CPUContext* context) {                                    \
-    ReduceTensor(                                               \
-        num_dims,                                               \
-        dims,                                                   \
-        num_axes,                                               \
-        axes,                                                   \
-        [](const T& a, const T& b) { return a + std::abs(b); }, \
-        T(0),                                                   \
-        X,                                                      \
-        Y,                                                      \
-        context);                                               \
-  }
-CAFFE2_SPECIALIZED_REDUCE_L1(float)
-#undef CAFFE2_SPECIALIZED_REDUCE_L1
-
-#define CAFFE2_SPECIALIZED_REDUCE_L2(T)                             \
-  template <>                                                       \
-  void ReduceL2<T, CPUContext>(                                     \
-      const int num_dims,                                           \
-      const int* dims,                                              \
-      const int num_axes,                                           \
-      const int* axes,                                              \
-      const T* X,                                                   \
-      T* Y,                                                         \
-      CPUContext* context) {                                        \
-    ReduceTensor(                                                   \
-        num_dims,                                                   \
-        dims,                                                       \
-        num_axes,                                                   \
-        axes,                                                       \
-        [](const T& a, const T& b) { return a + b * b; },           \
-        T(0),                                                       \
-        X,                                                          \
-        Y,                                                          \
-        context);                                                   \
-    std::vector<int> Y_dims(dims, dims + num_dims);                 \
-    for (int i = 0; i < num_axes; ++i) {                            \
-      Y_dims[axes[i]] = 1;                                          \
-    }                                                               \
-    const int Y_size = std::accumulate(                             \
-        Y_dims.cbegin(), Y_dims.cend(), 1, std::multiplies<int>()); \
-    Sqrt<T, CPUContext>(Y_size, Y, Y, context);                     \
+#define CAFFE2_SPECIALIZED_REDUCE_L2(T)                                        \
+  template <>                                                                  \
+  void ReduceL2<T, CPUContext>(                                                \
+      const int num_dims,                                                      \
+      const int* dims,                                                         \
+      const int num_axes,                                                      \
+      const int* axes,                                                         \
+      const T alpha,                                                           \
+      const T* X,                                                              \
+      T* Y,                                                                    \
+      CPUContext* context) {                                                   \
+    CAFFE_ENFORCE_LE(num_axes, num_dims);                                      \
+    std::vector<int> Y_dims_vector(dims, dims + num_dims);                     \
+    for (int i = 0; i < num_axes; ++i) {                                       \
+      Y_dims_vector[axes[i]] = 1;                                              \
+    }                                                                          \
+    const int* X_dims = dims;                                                  \
+    const int* Y_dims = Y_dims_vector.data();                                  \
+    const int X_size =                                                         \
+        std::accumulate(X_dims, X_dims + num_dims, 1, std::multiplies<int>()); \
+    const int Y_size =                                                         \
+        std::accumulate(Y_dims, Y_dims + num_dims, 1, std::multiplies<int>()); \
+    if (X_size == 0) {                                                         \
+      Set<T, CPUContext>(Y_size, 0, Y, context);                               \
+      return;                                                                  \
+    }                                                                          \
+    if (alpha == T(0)) {                                                       \
+      Set<T, CPUContext>(Y_size, 0, Y, context);                               \
+      return;                                                                  \
+    }                                                                          \
+    if (std::equal(X_dims, X_dims + num_dims, Y_dims)) {                       \
+      Abs<T, CPUContext>(X_size, X, Y, context);                               \
+      Scale<T, T, CPUContext>(Y_size, alpha, Y, Y, context);                   \
+      return;                                                                  \
+    }                                                                          \
+    int rows;                                                                  \
+    int cols;                                                                  \
+    if (utils::IsRowwiseReduce(num_dims, X_dims, Y_dims, &rows, &cols)) {      \
+      RowwiseReduceL2<T>(rows, cols, alpha, X, Y);                             \
+      return;                                                                  \
+    }                                                                          \
+    if (utils::IsColwiseReduce(num_dims, X_dims, Y_dims, &rows, &cols)) {      \
+      ColwiseReduceL2<T>(rows, cols, alpha, X, Y);                             \
+      return;                                                                  \
+    }                                                                          \
+    int pre;                                                                   \
+    int mid;                                                                   \
+    int nxt;                                                                   \
+    if (utils::IsBothEndsReduce(num_dims, X_dims, Y_dims, &pre, &mid, &nxt)) { \
+      BothEndsReduceL2<T>(pre, mid, nxt, alpha, X, Y);                         \
+      return;                                                                  \
+    }                                                                          \
+    ReduceTensor(                                                              \
+        num_dims,                                                              \
+        X_dims,                                                                \
+        Y_dims,                                                                \
+        SquaredL2NormFunctor<T>(),                                             \
+        T(0),                                                                  \
+        T(1),                                                                  \
+        X,                                                                     \
+        Y,                                                                     \
+        context);                                                              \
+    Sqrt<T, CPUContext>(Y_size, Y, Y, context);                                \
+    Scale<T, T, CPUContext>(Y_size, alpha, Y, Y, context);                     \
   }
 CAFFE2_SPECIALIZED_REDUCE_L2(float)
+CAFFE2_SPECIALIZED_REDUCE_L2(double)
 #undef CAFFE2_SPECIALIZED_REDUCE_L2
 
 namespace {
@@ -1045,40 +1434,44 @@ void BroadcastImpl(
     const int* X_dims,
     const int Y_ndim,
     const int* Y_dims,
+    const T alpha,
     const T* X,
-    T* Y) {
+    T* Y,
+    CPUContext* context) {
   CAFFE_ENFORCE_LE(X_ndim, Y_ndim);
-  std::vector<int> X_dims_ex(Y_ndim);
+  std::vector<int> X_dims_vector(Y_ndim);
   const int d = Y_ndim - X_ndim;
-  std::fill(X_dims_ex.begin(), X_dims_ex.begin() + d, 1);
+  std::fill(X_dims_vector.begin(), X_dims_vector.begin() + d, 1);
   for (int i = d; i < Y_ndim; ++i) {
     CAFFE_ENFORCE(X_dims[i - d] == 1 || X_dims[i - d] == Y_dims[i]);
-    X_dims_ex[i] = X_dims[i - d];
+    X_dims_vector[i] = X_dims[i - d];
   }
+  X_dims = X_dims_vector.data();
   const int Y_size =
       std::accumulate(Y_dims, Y_dims + Y_ndim, 1, std::multiplies<int>());
   std::vector<int> index(Y_ndim, 0);
   for (int Y_index = 0; Y_index < Y_size; ++Y_index) {
-    const int X_index =
-        utils::GetIndexFromDims(Y_ndim, X_dims_ex.data(), index.data());
+    const int X_index = utils::GetIndexFromDims(Y_ndim, X_dims, index.data());
     Y[Y_index] = X[X_index];
     utils::IncreaseIndexInDims(Y_ndim, Y_dims, index.data());
   }
+  Scale<T, T, CPUContext>(Y_size, alpha, Y, Y, context);
 }
 
 } // namespace
 
-#define CAFFE2_SPECIALIZED_BROADCAST(T)                     \
-  template <>                                               \
-  void Broadcast<T, CPUContext>(                            \
-      const int X_ndim,                                     \
-      const int* X_dims,                                    \
-      const int Y_ndim,                                     \
-      const int* Y_dims,                                    \
-      const T* X,                                           \
-      T* Y,                                                 \
-      CPUContext* /* context */) {                          \
-    BroadcastImpl<T>(X_ndim, X_dims, Y_ndim, Y_dims, X, Y); \
+#define CAFFE2_SPECIALIZED_BROADCAST(T)                                     \
+  template <>                                                               \
+  void Broadcast<T, CPUContext>(                                            \
+      const int X_ndim,                                                     \
+      const int* X_dims,                                                    \
+      const int Y_ndim,                                                     \
+      const int* Y_dims,                                                    \
+      const T alpha,                                                        \
+      const T* X,                                                           \
+      T* Y,                                                                 \
+      CPUContext* context) {                                                \
+    BroadcastImpl<T>(X_ndim, X_dims, Y_ndim, Y_dims, alpha, X, Y, context); \
   }
 CAFFE2_SPECIALIZED_BROADCAST(std::int32_t)
 CAFFE2_SPECIALIZED_BROADCAST(std::int64_t)
@@ -1087,6 +1480,63 @@ CAFFE2_SPECIALIZED_BROADCAST(double)
 #undef CAFFE2_SPECIALIZED_BROADCAST
 
 namespace {
+
+template <typename T>
+void RowwiseMoments(
+    const int rows,
+    const int cols,
+    const T* X,
+    T* mean,
+    T* variance) {
+  ConstEigenArrayMap<T> X_mat(X, cols, rows);
+  EigenVectorArrayMap<T> mean_arr(mean, rows);
+  EigenVectorArrayMap<T> variance_arr(variance, rows);
+  mean_arr = X_mat.colwise().mean();
+  variance_arr = X_mat.array().square().colwise().mean();
+  variance_arr -= mean_arr.square();
+}
+
+template <typename T>
+void ColwiseMoments(
+    const int rows,
+    const int cols,
+    const T* X,
+    T* mean,
+    T* variance) {
+  ConstEigenArrayMap<T> X_mat(X, cols, rows);
+  EigenVectorArrayMap<T> mean_arr(mean, cols);
+  EigenVectorArrayMap<T> variance_arr(variance, cols);
+  mean_arr = X_mat.rowwise().mean();
+  variance_arr = X_mat.array().square().rowwise().mean();
+  variance_arr -= mean_arr.square();
+}
+
+template <typename T>
+void BothEndsMoments(
+    const int pre,
+    const int mid,
+    const int nxt,
+    const T* X,
+    T* mean,
+    T* variance) {
+  EigenVectorArrayMap<T> mean_arr(mean, mid);
+  EigenVectorArrayMap<T> variance_arr(variance, mid);
+  mean_arr = ConstEigenArrayMap<T>(X, nxt, mid).colwise().mean();
+  variance_arr = ConstEigenArrayMap<T>(X, nxt, mid).square().colwise().mean();
+  const int stride = mid * nxt;
+  const T* X_ptr = X + stride;
+  for (int i = 1; i < pre; ++i) {
+    mean_arr += ConstEigenArrayMap<T>(X_ptr, nxt, mid).colwise().mean();
+    variance_arr +=
+        ConstEigenArrayMap<T>(X_ptr, nxt, mid).square().colwise().mean();
+    X_ptr += stride;
+  }
+  if (pre > 1) {
+    mean_arr /= static_cast<T>(pre);
+    variance_arr /= static_cast<T>(pre);
+  }
+  variance_arr -= mean_arr.square();
+}
 
 template <typename T>
 void MomentsImpl(
@@ -1098,30 +1548,59 @@ void MomentsImpl(
     T* mean,
     T* variance,
     CPUContext* context) {
-  std::vector<int> Y_dims(dims, dims + num_dims);
+  std::vector<int> Y_dims_vector(dims, dims + num_dims);
   for (int i = 0; i < num_axes; ++i) {
-    Y_dims[axes[i]] = 1;
+    Y_dims_vector[axes[i]] = 1;
   }
+  const int* X_dims = dims;
+  const int* Y_dims = Y_dims_vector.data();
   const int X_size =
-      std::accumulate(dims, dims + num_dims, 1, std::multiplies<int>());
-  const int Y_size = std::accumulate(
-      Y_dims.cbegin(), Y_dims.cend(), 1, std::multiplies<int>());
-  const int scale = X_size / Y_size;
+      std::accumulate(X_dims, X_dims + num_dims, 1, std::multiplies<int>());
+  const int Y_size =
+      std::accumulate(Y_dims, Y_dims + num_dims, 1, std::multiplies<int>());
+  if (X_size == 0) {
+    if (Y_size > 0) {
+      memset(mean, 0, sizeof(T) * Y_size);
+      memset(variance, 0, sizeof(T) * Y_size);
+    }
+    return;
+  }
+  if (std::equal(X_dims, X_dims + num_dims, Y_dims)) {
+    memcpy(mean, X, sizeof(T) * Y_size);
+    memset(variance, 0, sizeof(T) * Y_size);
+    return;
+  }
+  int rows;
+  int cols;
+  if (utils::IsRowwiseReduce(num_dims, X_dims, Y_dims, &rows, &cols)) {
+    RowwiseMoments<T>(rows, cols, X, mean, variance);
+    return;
+  }
+  if (utils::IsColwiseReduce(num_dims, X_dims, Y_dims, &rows, &cols)) {
+    ColwiseMoments<T>(rows, cols, X, mean, variance);
+    return;
+  }
+  int pre;
+  int mid;
+  int nxt;
+  if (utils::IsBothEndsReduce(num_dims, X_dims, Y_dims, &pre, &mid, &nxt)) {
+    BothEndsMoments<T>(pre, mid, nxt, X, mean, variance);
+    return;
+  }
   Set<T, CPUContext>(Y_size, T(0), mean, context);
   Set<T, CPUContext>(Y_size, T(0), variance, context);
   std::vector<int> index(num_dims, 0);
   for (int X_index = 0; X_index < X_size; ++X_index) {
-    const int Y_index =
-        utils::GetIndexFromDims(num_dims, Y_dims.data(), index.data());
+    const int Y_index = utils::GetIndexFromDims(num_dims, Y_dims, index.data());
     mean[Y_index] += X[X_index];
     variance[Y_index] += X[X_index] * X[X_index];
     utils::IncreaseIndexInDims(num_dims, dims, index.data());
   }
-  for (int Y_index = 0; Y_index < Y_size; ++Y_index) {
-    mean[Y_index] /= static_cast<T>(scale);
-    variance[Y_index] = variance[Y_index] / static_cast<T>(scale) -
-        mean[Y_index] * mean[Y_index];
-  }
+  const T scale = static_cast<T>(Y_size) / static_cast<T>(X_size);
+  Scale<T, T, CPUContext>(Y_size, scale, mean, mean, context);
+  EigenVectorArrayMap<T> variance_arr(variance, Y_size);
+  variance_arr =
+      variance_arr * scale - ConstEigenVectorArrayMap<T>(mean, Y_size).square();
 }
 
 } // namespace
@@ -1347,30 +1826,6 @@ DELEGATE_EIGEN_2D_BROADCAST_2ND_BINARY_FUNCTION(std::int64_t, Div, /)
 
 #undef DELEGATE_EIGEN_2D_BROADCAST_1ST_BINARY_FUNCTION
 #undef DELEGATE_EIGEN_2D_BROADCAST_2ND_BINARY_FUNCTION
-
-#define CAFFE2_SPECIALIZED_SET(T)                                             \
-  template <>                                                                 \
-  void Set<T, CPUContext>(const size_t N, const T alpha, T* Y, CPUContext*) { \
-    if (alpha == (T)0) {                                                      \
-      if (Y != nullptr) {                                                     \
-        memset(Y, 0, N * sizeof(T));                                          \
-      }                                                                       \
-    } else {                                                                  \
-      EigenVectorMap<T>(Y, N).setConstant(alpha);                             \
-    }                                                                         \
-  }
-
-CAFFE2_SPECIALIZED_SET(float);
-CAFFE2_SPECIALIZED_SET(double);
-CAFFE2_SPECIALIZED_SET(int8_t);
-CAFFE2_SPECIALIZED_SET(int16_t);
-CAFFE2_SPECIALIZED_SET(int);
-CAFFE2_SPECIALIZED_SET(int64_t);
-CAFFE2_SPECIALIZED_SET(bool);
-CAFFE2_SPECIALIZED_SET(char);
-CAFFE2_SPECIALIZED_SET(uint8_t);
-CAFFE2_SPECIALIZED_SET(uint16_t);
-#undef CAFFE2_SPECIALIZED_SET
 
 template <>
 void Not<bool, CPUContext>(
@@ -1674,7 +2129,7 @@ DEFINE_2D_BROADCAST_1ST_DIV_FUNCTION(std::int64_t)
     int pre;                                                                 \
     int mid;                                                                 \
     int nxt;                                                                 \
-    if (utils::IsMiddleBroadcastBinaryOp(                                    \
+    if (utils::IsBothEndsBroadcastBinaryOp(                                  \
             ndim,                                                            \
             A_dims_array.data(),                                             \
             B_dims_array.data(),                                             \
@@ -2593,6 +3048,13 @@ bool TransposeWithHPTT(
   for (int i = 0; i < ndim; ++i) {
     axes_cm[i] = cm_fn(axes[cm_fn(i)]);
     dims_cm[i] = dims[cm_fn(i)];
+  }
+
+  // HPTT doesn't handle 0 sized inputs.
+  for (auto dim : dims_cm) {
+    if (dim <= 0) {
+      return false;
+    }
   }
   auto plan = hptt::create_plan(
       axes_cm.data(),

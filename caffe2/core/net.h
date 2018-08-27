@@ -124,7 +124,7 @@ class NetBase : public Observable<NetBase> {
   string name_;
   vector<const Event*> events_;
   std::shared_ptr<const NetDef> net_def_;
-  DISABLE_COPY_AND_ASSIGN(NetBase);
+  AT_DISABLE_COPY_AND_ASSIGN(NetBase);
 };
 
 class ExecutorHelper {

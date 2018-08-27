@@ -45,10 +45,10 @@ class TORCH_API SavedVariable {
   std::weak_ptr<Function> grad_accumulator_;
   VariableVersion version_counter_;
 
-  uint32_t saved_version_;
-  uint32_t output_nr_;
+  uint32_t saved_version_ = 0;
+  uint32_t output_nr_ = 0;
   bool was_default_constructed_ = true;
-  bool requires_grad_;
-  bool has_grad_fn_;
+  bool requires_grad_ = false;
+  bool has_grad_fn_ = false;
 };
 }} // namespace torch::autograd

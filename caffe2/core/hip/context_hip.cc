@@ -4,8 +4,10 @@
 #include <string>
 #include <unordered_map>
 
+#include "caffe2/core/hip/THCCachingAllocator_hip.h"
 #include "cub/util_allocator.cuh"
 #include "caffe2/core/asan.h"
+#include "caffe2/core/blob_stats.h"
 #include "caffe2/core/hip/common_miopen.h"
 #include "caffe2/core/hip/context_hip.h"
 #include "caffe2/core/init.h"
@@ -60,7 +62,9 @@ thread_local ThreadLocalHIPObjects HIPContext::hip_objects_;
 HipMemoryPoolType g_hip_memory_pool_type;
 
 // For cub allocator
-unique_ptr<cub::CachingDeviceAllocator> g_cub_allocator;
+std::unique_ptr<cub::CachingDeviceAllocator> g_cub_allocator;
+
+std::unique_ptr<THCCachingAllocator> g_thc_allocator;
 // an unordered map that holds the map from the cuda memory pointer to the
 // device id that it is allocated from. This is used in the cuda memory pool
 // cases, where we need the device id to carry out the deletion.
@@ -180,6 +184,11 @@ static void Caffe2SetHIPMemoryPool()
         g_hip_memory_pool_type = HipMemoryPoolType::CUB;
         SetUpCub();
     }
+    else if(FLAGS_caffe2_hip_memory_pool == "thc")
+    {
+        g_hip_memory_pool_type = HipMemoryPoolType::THC;
+        g_thc_allocator.reset(new THCCachingAllocator());
+    }
     else
     {
         CAFFE_THROW("Unrecognized HIP memory pool type: ", FLAGS_caffe2_hip_memory_pool);
@@ -229,6 +238,7 @@ struct Caffe2HipInitializerHelper
         }
     }
 };
+
 } // namespace
 
 /**
@@ -339,6 +349,14 @@ std::pair<void*, MemoryDeleter> HIPStaticContext::New(size_t nbytes) const {
             g_size_map[ptr] = nbytes;
         }
         return {ptr, Delete};
+    case HipMemoryPoolType::THC:
+        HIP_ENFORCE(g_thc_allocator->Alloc(&ptr, nbytes, 0 /* stream */));
+        if (FLAGS_caffe2_gpu_memory_tracking)
+        {
+          g_size_map[ptr]                = nbytes;
+          g_hip_device_affiliation[ptr] = CaffeHipGetDevice();
+        }
+        return {ptr, Delete};
     }
     return {nullptr, Delete};
 }
@@ -388,6 +406,14 @@ void HIPStaticContext::Delete(void* ptr) {
         VLOG(2) << "CUB freeing pointer " << ptr << " on device " << it->second;
         HIP_ENFORCE(g_cub_allocator->DeviceFree(it->second, ptr));
         g_hip_device_affiliation.erase(it);
+        break;
+    }
+    case HipMemoryPoolType::THC: 
+    {
+        HIP_ENFORCE(g_thc_allocator->Free(ptr));
+        if (FLAGS_caffe2_gpu_memory_tracking) {
+          g_hip_device_affiliation.erase(g_hip_device_affiliation.find(ptr));
+        }
         break;
     }
     }

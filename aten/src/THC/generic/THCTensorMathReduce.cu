@@ -68,8 +68,8 @@ THCTensor_(renorm)(THCState *state, THCTensor* self, THCTensor* src, real value,
   THArgCheck(THCTensor_(nDimensionLegacyNoScalars)(state, src) > 1, 1, "need at least 2 dimensions");
 
   if (numel > 0) {
-    ptrdiff_t size = numel / data->size(0);
-    dim3 grid(data->size(0));
+    ptrdiff_t size = numel / THTensor_sizeLegacyNoScalars(data, 0);
+    dim3 grid( THTensor_sizeLegacyNoScalars(data, 0));
     dim3 threads(32);
 
     THCTensor_kernel_renorm<real, accreal>
@@ -95,10 +95,9 @@ THCTensor_(std)(THCState *state, THCTensor *self_, THCTensor *src, int dimension
 
   THCTensor_preserveReduceDimSemantics(
       state, self_, THCTensor_(nDimensionLegacyAll)(state, src), dimension, keepdim);
-  THLongStorage *dim = THCTensor_(newSizeOf)(state, src);
-  THLongStorage_set(dim, dimension, 1);
-  THCTensor_(resize)(state, self_, dim, NULL);
-  THLongStorage_free(dim);
+  std::vector<int64_t> dim = THTensor_sizesLegacyNoScalars(src);
+  dim[dimension] = 1;
+  THCTensor_(resize)(state, self_, dim, {});
 
   THCTensor *self = THCTensor_(newContiguous)(state, self_);
   src = THCTensor_(newContiguous)(state, src);
@@ -124,10 +123,9 @@ THCTensor_(var)(THCState *state, THCTensor *self_, THCTensor *src, int dimension
 
   THCTensor_preserveReduceDimSemantics(
       state, self_, THCTensor_(nDimensionLegacyAll)(state, src), dimension, keepdim);
-  THLongStorage *dim = THCTensor_(newSizeOf)(state, src);
-  THLongStorage_set(dim, dimension, 1);
-  THCTensor_(resize)(state, self_, dim, NULL);
-  THLongStorage_free(dim);
+  std::vector<int64_t> dim = THTensor_sizesLegacyNoScalars(src);
+  dim[dimension] = 1;
+  THCTensor_(resize)(state, self_, dim, {});
 
   THCTensor *self = THCTensor_(newContiguous)(state, self_);
   src = THCTensor_(newContiguous)(state, src);
@@ -375,10 +373,7 @@ THCTensor_(medianall)(THCState *state, THCTensor *self) {
   nelem = THCTensor_(nElement)(state, self);
   k = (nelem-1) >> 1;
 
-  THLongStorage *size = THLongStorage_newWithSize1(nelem);
-  THCTensor *view = THCTensor_(newView)(state, self, size);
-
-  THLongStorage_free(size);
+  THCTensor *view = THCTensor_(newView)(state, self, {nelem});
 
   THCTensor *sorted = THCTensor_(new)(state);
   THCudaLongTensor *indices = THCudaLongTensor_new(state);

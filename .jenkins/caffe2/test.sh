@@ -64,7 +64,13 @@ for test in $(find "${INSTALL_PREFIX}/test" -executable -type f); do
       ;;
     */aten/*)
       # ATen uses test framework Catch2
-      "$test" -r=xml -o "${junit_reports_dir}/$(basename $test).xml"
+      # NB: We do NOT use the xml test reporter, because
+      # Catch doesn't support multiple reporters
+      # c.f. https://github.com/catchorg/Catch2/blob/master/docs/release-notes.md#223
+      # which means that enabling XML output means you lose useful stdout
+      # output for Jenkins.  It's more important to have useful console
+      # output than it is to have XML output for Jenkins.
+      "$test"
       ;;
     *)
       "$test" --gtest_output=xml:"$gtest_reports_dir/$(basename $test).xml"
@@ -109,6 +115,10 @@ if [[ $BUILD_ENVIRONMENT == *-rocm* ]]; then
   # Our cuda top_k op has some asm code, the hipified version doesn't
   # compile yet, so we don't have top_k operator for now
   rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/top_k_test.py")
+
+  # Our AMD CI boxes have 4 gpus on each
+  # Remove this once we have added multi-gpu support
+  export HIP_VISIBLE_DEVICES=$(($BUILD_NUMBER % 4))
 fi
 
 # Python tests

@@ -19,7 +19,7 @@ def softmax(w):
 
 
 class CTCOpsTest(test_util.TestCase):
-    def verify_cost(self, device_option, is_test):
+    def verify_cost(self, device_option, is_test, skip_input_lengths=False):
         alphabet_size = 5
         N = 1
         T = 2
@@ -36,9 +36,12 @@ class CTCOpsTest(test_util.TestCase):
         input_lengths = np.asarray([T]).astype(np.int32)
 
         net = core.Net("test-net")
+        input_blobs = ["inputs", "labels", "label_lengths"]
+        if not skip_input_lengths:
+            input_blobs.append("input_lengths")
         output_blobs = ["costs", "workspace"] if is_test \
                 else ["inputs_grad_to_be_copied", "costs", "workspace"]
-        net.CTC(["inputs", "labels", "label_lengths", "input_lengths"],
+        net.CTC(input_blobs,
                 output_blobs,
                 is_test=is_test,
                 device_option=device_option)
@@ -47,7 +50,8 @@ class CTCOpsTest(test_util.TestCase):
         self.ws.create_blob("inputs").feed(inputs, device_option=device_option)
         self.ws.create_blob("labels").feed(labels)
         self.ws.create_blob("label_lengths").feed(label_lengths)
-        self.ws.create_blob("input_lengths").feed(input_lengths)
+        if not skip_input_lengths:
+            self.ws.create_blob("input_lengths").feed(input_lengths)
         self.ws.run(net)
         probs = softmax(inputs)
         expected = probs[0, 0, 1] * probs[1, 0, 2]
@@ -68,20 +72,37 @@ class CTCOpsTest(test_util.TestCase):
         self.verify_cost(
             caffe2_pb2.DeviceOption(device_type=caffe2_pb2.CPU),
             is_test=False)
+        self.verify_cost(
+            caffe2_pb2.DeviceOption(device_type=caffe2_pb2.CPU),
+            is_test=False, skip_input_lengths=True)
 
     def test_ctc_cost_gpu(self):
         self.verify_cost(
             caffe2_pb2.DeviceOption(device_type=caffe2_pb2.CUDA,
                                     cuda_gpu_id=0),
             is_test=False)
+        self.verify_cost(
+            caffe2_pb2.DeviceOption(device_type=caffe2_pb2.CUDA,
+                                    cuda_gpu_id=0),
+            is_test=False,
+            skip_input_lengths=True)
 
     def test_ctc_forward_only_cpu(self):
         self.verify_cost(
             caffe2_pb2.DeviceOption(device_type=caffe2_pb2.CPU),
             is_test=True)
+        self.verify_cost(
+            caffe2_pb2.DeviceOption(device_type=caffe2_pb2.CPU),
+            is_test=True,
+            skip_input_lengths=True)
 
     def test_ctc_forward_only_gpu(self):
         self.verify_cost(
             caffe2_pb2.DeviceOption(device_type=caffe2_pb2.CUDA,
                                     cuda_gpu_id=0),
             is_test=True)
+        self.verify_cost(
+            caffe2_pb2.DeviceOption(device_type=caffe2_pb2.CUDA,
+                                    cuda_gpu_id=0),
+            is_test=True,
+            skip_input_lengths=True)

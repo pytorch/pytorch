@@ -48,65 +48,53 @@ TEST(Converter, UnknownType) {
   auto new_netdef = caffe2::convertToCaffe2Proto(nn);
 }
 
-/* Temporarily disabled While conversion tests
-TEST(Converter, While) {
-  caffe2::NetDef net;
-
-  caffe2::OperatorDef *def = net.add_op();
-  def->set_type("While");
-  def->add_input("X");
-
-  caffe2::NetDef body_net;
-  {
-    caffe2::OperatorDef *rdef = body_net.add_op();
-    rdef->set_type("Relu");
-    rdef->add_input("X");
-    rdef->add_output("X");
-  }
-  std::string body_net_serialized;
-  assert(body_net.SerializeToString(&body_net_serialized));
-  ADD_ARG(def, "body", s, body_net_serialized);
-
-  auto nn = caffe2::convertToNNModule(net);
-}
-
-TEST(Converter, ComplexWhile) {
+caffe2::NetDef fakeNet() {
   caffe2::NetDef net;
 
   {
-    caffe2::OperatorDef *rdef = net.add_op();
-    rdef->set_type("Relu");
-    rdef->add_input("X");
-    rdef->add_output("X");
+    caffe2::OperatorDef* def = net.add_op();
+    def->set_type("Fake");
+    def->add_input("X");
+    def->add_output("Y");
   }
+  {
+    caffe2::OperatorDef* def = net.add_op();
+    def->set_type("Fake");
+    def->add_input("Y");
+    def->add_output("Z");
+  }
+  {
+    caffe2::OperatorDef* def = net.add_op();
+    def->set_type("Fake");
+    def->add_input("Z");
+    def->add_input("X");
+    def->add_output("W");
+  }
+  net.add_external_input("X");
+  net.add_external_output("Y");
+  net.add_external_output("W");
 
-  caffe2::OperatorDef *def = net.add_op();
-  def->set_type("While");
-  def->add_input("X");
+  return net;
+}
 
-  caffe2::NetDef body_net;
-  {
-    caffe2::OperatorDef *rdef = body_net.add_op();
-    rdef->set_type("Instr1");
-    rdef->add_input("X");
-    rdef->add_output("X");
-  }
-  {
-    caffe2::OperatorDef *rdef = body_net.add_op();
-    rdef->set_type("Instr2");
-    rdef->add_input("X");
-    rdef->add_output("X");
-  }
-  {
-    caffe2::OperatorDef *rdef = body_net.add_op();
-    rdef->set_type("Instr3");
-    rdef->add_input("X");
-    rdef->add_output("X");
-  }
-  std::string body_net_serialized;
-  assert(body_net.SerializeToString(&body_net_serialized));
-  ADD_ARG(def, "body", s, body_net_serialized);
+TEST(Converter, ExternalInputs) {
+  auto net = fakeNet();
 
   auto nn = caffe2::convertToNNModule(net);
+  auto new_netdef = caffe2::convertToCaffe2Proto(nn);
+  EXPECT_EQ(new_netdef.external_input().size(), net.external_input().size());
+  for (auto i = 0; i < net.external_input().size(); ++i) {
+    EXPECT_EQ(new_netdef.external_input(i), net.external_input(i));
+  }
 }
-*/
+
+TEST(Converter, ExternalOutputs) {
+  auto net = fakeNet();
+
+  auto nn = caffe2::convertToNNModule(net);
+  auto new_netdef = caffe2::convertToCaffe2Proto(nn);
+  EXPECT_EQ(new_netdef.external_output().size(), net.external_output().size());
+  for (auto i = 0; i < net.external_output().size(); ++i) {
+    EXPECT_EQ(new_netdef.external_output(i), net.external_output(i));
+  }
+}

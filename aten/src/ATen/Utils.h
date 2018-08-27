@@ -1,9 +1,13 @@
 #pragma once
 
 #include "ATen/ATenGeneral.h"
-#include "ATen/ArrayRef.h"
-#include "ATen/Error.h"
+#include "ATen/StorageImpl.h"
 #include "ATen/UndefinedTensor.h"
+
+#include <ATen/core/ScalarType.h>
+#include "ATen/Formatting.h"
+#include "ATen/core/ArrayRef.h"
+#include "ATen/core/Error.h"
 
 #include <algorithm>
 #include <sstream>
@@ -22,11 +26,16 @@ namespace at {
 
 AT_API int _crash_if_asan(int);
 
-template <typename T, typename Base>
-static inline T* checked_cast_storage(Base* expr, const char * name, int pos) {
-  if (typeid(*expr) != typeid(T))
-    AT_ERROR("Expected object of type ", T::typeString(), " but found type ", expr->type().toString(),
+template <typename T>
+static inline T* checked_cast_storage(Storage* expr, const char * name, int pos, Backend backend, ScalarType scalar_type) {
+  if (at::detail::get_backend(expr->pImpl()) != backend) {
+    AT_ERROR("Expected object of backend ", backend, " but got backend ", at::detail::get_backend(expr->pImpl()),
              " for argument #", pos, " '", name, "'");
+  }
+  if (expr->pImpl()->scalar_type() != scalar_type) {
+    AT_ERROR("Expected object of scalar type ", scalar_type, " but got scalar type ", expr->pImpl()->scalar_type(),
+             " for argument #", pos, " '", name, "'");
+  }
   return static_cast<T*>(expr);
 }
 
@@ -41,12 +50,6 @@ inline T* checked_cast_tensor(Base* expr, const char * name, int pos, bool allow
   }
   if (expr->type().scalarType() != scalar_type) {
     AT_ERROR("Expected object of scalar type ", scalar_type, " but got scalar type ", expr->type().scalarType(),
-             " for argument #", pos, " '", name, "'");
-  }
-  // This is going away soon; delete this when we remove the subtypes of
-  // TensorImpl (so that we can eliminate the T template parameter)
-  if (typeid(*expr) != typeid(T)) {
-    AT_ERROR("Expected object of RTTI type ", typeid(T).name(), " but found type ", typeid(*expr).name(),
              " for argument #", pos, " '", name, "'");
   }
   return static_cast<T*>(expr);

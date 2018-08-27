@@ -27,7 +27,7 @@
 #include "torch/csrc/utils/tensor_types.h"
 
 #include <ATen/ATen.h>
-#include <ATen/optional.h>
+#include <ATen/core/optional.h>
 
 #include "python_variable_methods_dispatch.h"
 
@@ -52,80 +52,6 @@ static PyObject * THPVariable_apply_(PyObject* self, PyObject* arg)
         "var.detach().apply_() instead.");
   }
   return THPVariable_Wrap(torch::utils::apply_(self_, arg));
-  END_HANDLE_TH_ERRORS
-}
-
-static Tensor dispatch_clamp(const Tensor & self, Scalar min, Scalar max) {
-  AutoNoGIL no_gil;
-  DeviceGuard device_guard(self);
-  return self.clamp(min, max);
-}
-static Tensor dispatch_clamp_min(const Tensor & self, Scalar min) {
-  AutoNoGIL no_gil;
-  DeviceGuard device_guard(self);
-  return self.clamp_min(min);
-}
-static Tensor dispatch_clamp_max(const Tensor & self, Scalar max) {
-  AutoNoGIL no_gil;
-  DeviceGuard device_guard(self);
-  return self.clamp_max(max);
-}
-
-static PyObject * THPVariable_clamp(PyObject* self, PyObject* args, PyObject* kwargs)
-{
-  HANDLE_TH_ERRORS
-  static PythonArgParser parser({
-    "clamp(Scalar min=None, Scalar max=None)",
-  }, /*traceable=*/true);
-  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  ParsedArgs<2> parsed_args;
-  auto r = parser.parse(args, kwargs, parsed_args);
-  if (!r.isNone(0) && !r.isNone(1)) {
-    return THPVariable_Wrap(dispatch_clamp(self_, r.scalar(0), r.scalar(1)));
-  } else if (!r.isNone(0)) {
-    return THPVariable_Wrap(dispatch_clamp_min(self_, r.scalar(0)));
-  } else if (!r.isNone(1)) {
-    return THPVariable_Wrap(dispatch_clamp_max(self_, r.scalar(1)));
-  } else {
-    throw std::runtime_error("At least one of 'min' or 'max' must not be None");
-  }
-  END_HANDLE_TH_ERRORS
-}
-
-static Tensor & dispatch_clamp_(Tensor & self, Scalar min, Scalar max) {
-  AutoNoGIL no_gil;
-  DeviceGuard device_guard(self);
-  return self.clamp_(min, max);
-}
-static Tensor & dispatch_clamp_min_(Tensor & self, Scalar min) {
-  AutoNoGIL no_gil;
-  DeviceGuard device_guard(self);
-  return self.clamp_min_(min);
-}
-static Tensor & dispatch_clamp_max_(Tensor & self, Scalar max) {
-  AutoNoGIL no_gil;
-  DeviceGuard device_guard(self);
-  return self.clamp_max_(max);
-}
-
-static PyObject * THPVariable_clamp_(PyObject* self, PyObject* args, PyObject* kwargs)
-{
-  HANDLE_TH_ERRORS
-  static PythonArgParser parser({
-    "clamp_(Scalar min=None, Scalar max=None)",
-  }, /*traceable=*/true);
-  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  ParsedArgs<2> parsed_args;
-  auto r = parser.parse(args, kwargs, parsed_args);
-  if (!r.isNone(0) && !r.isNone(1)) {
-    return THPVariable_Wrap(dispatch_clamp_(self_, r.scalar(0), r.scalar(1)));
-  } else if (!r.isNone(0)) {
-    return THPVariable_Wrap(dispatch_clamp_min_(self_, r.scalar(0)));
-  } else if (!r.isNone(1)) {
-    return THPVariable_Wrap(dispatch_clamp_max_(self_, r.scalar(1)));
-  } else {
-    throw std::runtime_error("At least one of 'min' or 'max' must not be None");
-  }
   END_HANDLE_TH_ERRORS
 }
 
@@ -661,8 +587,6 @@ PyMethodDef variable_methods[] = {
   {"apply_", (PyCFunction)THPVariable_apply_, METH_O, NULL},
   {"byte", (PyCFunction)THPVariable_byte, METH_NOARGS, NULL},
   {"char", (PyCFunction)THPVariable_char, METH_NOARGS, NULL},
-  {"clamp", (PyCFunction)THPVariable_clamp, METH_VARARGS | METH_KEYWORDS, NULL},
-  {"clamp_", (PyCFunction)THPVariable_clamp_, METH_VARARGS | METH_KEYWORDS, NULL},
   {"contiguous", (PyCFunction)THPVariable_contiguous, METH_NOARGS, NULL},
   {"copy_", (PyCFunction)THPVariable_copy_, METH_VARARGS | METH_KEYWORDS, NULL},
   {"cpu", (PyCFunction)THPVariable_cpu, METH_NOARGS, NULL},

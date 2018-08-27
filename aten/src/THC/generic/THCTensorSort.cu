@@ -9,10 +9,8 @@ THC_API void THCTensor_(sortKeyValueInplace)(THCState* state,
                                            THCTensor* key,
                                            THCudaLongTensor* value,
                                            int dim, bool dir) {
-  THLongStorage *valueSize = THCudaLongTensor_newSizeOf(state, value);
-  THArgCheck(THCTensor_(isSize)(state, key, valueSize), 2,
+  THArgCheck(key->sizes().equals(value->sizes()), 2,
              "Key tensor must have same size as value tensor");
-  THLongStorage_free(valueSize);
   int dims = THCudaLongTensor_nDimensionLegacyNoScalars(state, value);
   THArgCheck(dims <= MAX_CUTORCH_DIMS, 3, CUTORCH_DIM_WARNING);
   dims = THCTensor_(nDimensionLegacyNoScalars)(state, key);
@@ -24,7 +22,7 @@ THC_API void THCTensor_(sortKeyValueInplace)(THCState* state,
     return;
   }
 
-  int64_t keySliceSize = THCTensor_(size)(state, key, dim);
+  int64_t keySliceSize = THCTensor_(sizeLegacyNoScalars)(state, key, dim);
   ptrdiff_t keySlices = inElements / keySliceSize;
 
   // The amount of shared memory and block size is based on
@@ -161,8 +159,8 @@ void THCTensor_(sortViaThrust)(THCState* state,
   int nDims = THCTensor_(nDimensionLegacyAll)(state, input);
 
   ptrdiff_t totalElements = THCTensor_(nElement)(state, input);
-  int64_t sliceSize = THCTensor_(size)(state, input, dim);
-  int64_t sliceStride = THCTensor_(stride)(state, input, dim);
+  int64_t sliceSize = THCTensor_(sizeLegacyNoScalars)(state, input, dim);
+  int64_t sliceStride = THTensor_strideLegacyNoScalars(input, dim);
 
   // We perform a vectorized segmented sort in Thrust.
   // Say we are sorting a (2, 3) tensor. We have in flattened form:
@@ -292,12 +290,10 @@ THC_API void THCTensor_(sort)(THCState* state,
 
   // Make sure sufficient output space is allocated
   THCTensor_(resizeAs)(state, sorted, input);
-  THLongStorage *inputSize = THCTensor_(newSizeOf)(state, input);
-  THCudaLongTensor_resize(state, indices, inputSize, NULL);
-  THLongStorage_free(inputSize);
+  THCudaLongTensor_resize(state, indices, input->sizes(), {});
 
   // How large are the slices that we are sorting?
-  int64_t sliceSize = THCTensor_(size)(state, input, dim);
+  int64_t sliceSize = THCTensor_(sizeLegacyNoScalars)(state, input, dim);
 
   // Workaround:
   // CUDA 8 uses more shared memory than 7.5 for bitonicSortKVInPlace,

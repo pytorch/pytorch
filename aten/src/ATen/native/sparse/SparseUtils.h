@@ -118,7 +118,7 @@ inline Tensor _new_values_with_size_of(const Tensor& values, int64_t nnz) {
     // That's the assumption this code makes.
     return values.type().tensor({nnz});
   } else {
-    std::vector<int64_t> size = values.sizes();
+    std::vector<int64_t> size = values.sizes().vec();
     size[0] = nnz;
     return values.type().tensor(size);
   }

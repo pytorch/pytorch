@@ -19,7 +19,7 @@ int THCStorage_(elementSize)(THCState *state)
 
 void THCStorage_(set)(THCState *state, THCStorage *self, ptrdiff_t index, real value)
 {
-  THArgCheck((index >= 0) && (index < self->size), 2, "index out of bounds");
+  THArgCheck((index >= 0) && (index < self->size()), 2, "index out of bounds");
   cudaStream_t stream = THCState_getCurrentStream(state);
   THCudaCheck(cudaMemcpyAsync(THCStorage_(data)(state, self) + index, &value, sizeof(real),
                               cudaMemcpyHostToDevice,
@@ -29,7 +29,7 @@ void THCStorage_(set)(THCState *state, THCStorage *self, ptrdiff_t index, real v
 
 real THCStorage_(get)(THCState *state, const THCStorage *self, ptrdiff_t index)
 {
-  THArgCheck((index >= 0) && (index < self->size), 2, "index out of bounds");
+  THArgCheck((index >= 0) && (index < self->size()), 2, "index out of bounds");
   real value;
   cudaStream_t stream = THCState_getCurrentStream(state);
   THCudaCheck(cudaMemcpyAsync(&value, THCStorage_(data)(state, self) + index, sizeof(real),
@@ -44,7 +44,7 @@ THCStorage* THCStorage_(new)(THCState *state)
       at::CTypeToScalarType<real>::to(),
       0,
       state->cudaDeviceAllocator,
-      TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE);
+      true);
   return storage;
 }
 
@@ -54,7 +54,7 @@ THCStorage* THCStorage_(newWithSize)(THCState *state, ptrdiff_t size)
       at::CTypeToScalarType<real>::to(),
       size,
       state->cudaDeviceAllocator,
-      TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE);
+      true);
   return storage;
 }
 
@@ -65,7 +65,7 @@ THCStorage* THCStorage_(newWithAllocator)(THCState *state, ptrdiff_t size,
       at::CTypeToScalarType<real>::to(),
       size,
       allocator,
-      TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE);
+      true);
   return storage;
 }
 
@@ -119,18 +119,8 @@ THCStorage* THCStorage_(newWithDataAndAllocator)(
       size,
       std::move(data),
       allocator,
-      TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE);
+      true);
   return storage;
-}
-
-void THCStorage_(setFlag)(THCState *state, THCStorage *storage, const char flag)
-{
-  THStorage_setFlag(storage, flag);
-}
-
-void THCStorage_(clearFlag)(THCState *state, THCStorage *storage, const char flag)
-{
-  THStorage_clearFlag(storage, flag);
 }
 
 void THCStorage_(retain)(THCState *state, THCStorage *self)

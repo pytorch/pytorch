@@ -204,6 +204,14 @@ class Optimizer(object):
         raise NotImplementedError(
             "Optimizer Need to Implement `scale_learning_rate` method.")
 
+    def create_lars_inputs(self, param_init_net, weight_decay, trust, lr_max):
+        wd = param_init_net.ConstantFill([], "weight_decay",
+            shape=[1], value=weight_decay)
+        trust = param_init_net.ConstantFill([], "trust", shape=[1], value=trust)
+        lr_max = param_init_net.ConstantFill([], "lr_max", shape=[1],
+            value=lr_max)
+        return wd, trust, lr_max
+
 
 class SgdOptimizer(Optimizer):
     def __init__(self, base_learning_rate=0.01, policy='fixed',
@@ -233,10 +241,13 @@ class SgdOptimizer(Optimizer):
         if self.lars is not None and not isinstance(grad, core.GradientSlice):
             assert self.lars >= 0, (
                 'Lars offset must be nonnegative, got {}'.format(self.lars))
+            wd, trust, lr_max = self.create_lars_inputs(
+                param_init_net, 0.0, 1.0, np.finfo(np.float32).max)
             lr_lars_multiplier = net.Lars(
-                [param, grad],
+                [param, grad, wd, trust, lr_max],
                 self.make_unique_blob_name(str(param) + "_lars"),
-                offset=self.lars)
+                offset=self.lars,
+                lr_min=0.0)
             current_scope = scope.CurrentDeviceScope()
             self._add_local_lr_multiplier(
                 lr_lars_multiplier,
@@ -520,10 +531,14 @@ class AdagradOptimizer(Optimizer):
         if self.lars is not None and not isinstance(grad, core.GradientSlice):
             assert self.lars >= 0, (
                 'Lars offset must be nonnegative, got {}'.format(self.lars))
+            wd, trust, lr_max = self.create_lars_inputs(
+                param_init_net, 0.0, 1.0, np.finfo(np.float32).max)
             lr_lars_multiplier = net.Lars(
-                [param, grad],
+                [param, grad, wd, trust, lr_max],
                 self.make_unique_blob_name(str(param) + "_lars"),
-                offset=self.lars)
+                offset=self.lars,
+                lr_min=0.0)
+
             current_scope = scope.CurrentDeviceScope()
             self._add_local_lr_multiplier(
                 lr_lars_multiplier,
@@ -641,10 +656,13 @@ class WngradOptimizer(Optimizer):
         if self.lars is not None and not isinstance(grad, core.GradientSlice):
             assert self.lars >= 0, (
                 'Lars offset must be nonnegative, got {}'.format(self.lars))
+            wd, trust, lr_max = self.create_lars_inputs(
+                param_init_net, 0.0, 1.0, np.finfo(np.float32).max)
             lr_lars_multiplier = net.Lars(
-                [param, grad],
+                [param, grad, wd, trust, lr_max],
                 self.make_unique_blob_name(str(param) + "_lars"),
-                offset=self.lars)
+                offset=self.lars,
+                lr_min=0.0)
             current_scope = scope.CurrentDeviceScope()
             self._add_local_lr_multiplier(
                 lr_lars_multiplier,
@@ -1421,7 +1439,8 @@ def build_ftrl(model, engine="SIMD", **kwargs):
 
 
 def build_gftrl(model, engine="", **kwargs):
-    # SIMD version of GFTRL is not supported
+    if engine == "SIMD":
+        assert core.IsOperator('GFtrl_ENGINE_SIMD')
     gftrl_optimizer = GFtrlOptimizer(engine=engine, **kwargs)
     return _build(model, gftrl_optimizer)
 

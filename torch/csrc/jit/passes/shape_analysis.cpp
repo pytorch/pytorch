@@ -6,6 +6,8 @@
 #include "torch/csrc/jit/operator.h"
 #include "torch/csrc/jit/assertions.h"
 
+#include "torch/csrc/autograd/variable.h"
+
 #include <ATen/DeviceGuard.h>
 #include <ATen/ExpandUtils.h>
 
@@ -46,7 +48,8 @@ IValue representativeValue(Value* v) {
     auto backend = type->device() == -1 ? at::kCPU : at::kCUDA;
     at::DeviceGuard device_guard(type->device());
     auto& attype = at::getType(backend, type->scalarType());
-    return attype.tensor(type->sizes(), type->strides()).zero_();
+    auto t = attype.tensor(type->sizes(), type->strides()).zero_();
+    return autograd::make_variable(t, /*requires_grad=*/false);
   } else if (type_->isSubtypeOf(FloatType::get())) {
     return 0.f;
   }
@@ -127,8 +130,8 @@ void broadcastBinary(Node *node, std::vector<TensorTypePtr>& types, size_t idx1,
     WithInsertPoint point_guard { node };
     Node *expand = graph->create(aten::expand,
                                  {node->inputs().at(input_idx),
-                                  insertConstant(*graph, expected_size),
-                                  insertConstant(*graph, 0)})
+                                  graph->insertConstant(expected_size),
+                                  graph->insertConstant(0)})
                         ->insertBefore(node);
     PropagateShapeOnNode(expand);
     node->replaceInput(input_idx, expand->output());
@@ -260,6 +263,39 @@ void PropagateShapeOnNode(Node * node, bool insert_expands) {
     default:
       break; // fall-through
   }
+  if (node->matches("aten::cat(Tensor[] tensors, int dim) -> Tensor", /*with_const=*/attr::dim)) {
+    auto list_node = node->namedInput(attr::tensors)->node();
+    JIT_ASSERT(list_node->kind() == prim::ListConstruct);
+    auto tensors = list_node->inputs();
+    if (tensors.size() > 0) {
+      auto input_types = fmap(tensors, [](Value *v) { return v->type()->cast<TensorType>(); });
+      if (std::all_of(input_types.begin(), input_types.end(),
+          [](const TensorTypePtr& tp) { return tp != nullptr; })) {
+        std::vector<int64_t> sizes = input_types[0]->sizes();
+        const int64_t dim = wrapDim(node->get<int64_t>(attr::dim).value(), sizes);
+        const int64_t ndim = sizes.size();
+
+        if (dim < 0 || dim >= ndim)
+          goto cat_fail;
+
+        sizes[dim] = 0;
+        for (auto & tp : input_types) {
+          auto & tp_sizes = tp->sizes();
+          if (sizes.size() != tp_sizes.size())
+            goto cat_fail;
+          for (int64_t i = 0; i < ndim; ++i) {
+            if (sizes[i] != tp_sizes[i] && i != dim) {
+              goto cat_fail;
+            }
+          }
+          sizes[dim] += tp_sizes[dim];
+        }
+        node->output()->setType(input_types[0]->withSizes(sizes));
+        return;
+      }
+    }
+  }
+cat_fail:
 
   bool can_propagate_by_running = canPropagateShapeByRunningIt(node);
   auto maybe_tensor_types = gatherTensorTypes(node);
@@ -273,11 +309,16 @@ void PropagateShapeOnNode(Node * node, bool insert_expands) {
   // For expensive ops we can directly encode their shape propagation
   // here, otherwise we fallback to running a fake version of the op
   // to get a quick and dirty propagation.
-  if (insert_expands && (
-      node->matches("aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor") ||
+  if (node->matches("aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor") ||
       node->matches("aten::sub(Tensor self, Tensor other, *, Scalar alpha) -> Tensor") ||
-      node->matches("aten::mul(Tensor self, Tensor other) -> Tensor") ||
-      node->matches("aten::div(Tensor self, Tensor other) -> Tensor") ||
+      node->matches("aten::mul(Tensor self, Tensor other) -> Tensor")) {
+    // These nodes and "div" handle tensors of different shapes internally,
+    // so there's no need to insert explicit expand nodes. Note that "div" is
+    // handled by the fallthrough because it's not always safe to run it due
+    // to integer divide-by-zero.
+    PropagateShapeOnNodeByRunningIt(node);
+    return;
+  } else if (insert_expands && (
       node->matches("aten::pow(Tensor self, Tensor exponent) -> Tensor") ||
       node->matches("aten::min(Tensor self, Tensor other) -> Tensor") ||
       node->matches("aten::max(Tensor self, Tensor other) -> Tensor") ||
