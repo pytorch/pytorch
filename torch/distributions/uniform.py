@@ -10,7 +10,7 @@ from torch.distributions.utils import broadcast_all
 class Uniform(Distribution):
     r"""
     Generates uniformly distributed random samples from the half-open interval
-    `[low, high)`.
+    ``[low, high)``.
 
     Example::
 
