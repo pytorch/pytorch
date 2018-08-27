@@ -338,7 +338,13 @@ class TestOperators(hu.HypothesisTestCase):
         # Random seed, this one happens to pass
         seed = 1234
         np.random.seed(seed)
-
+        # set device option
+        if workspace.has_hip_support:
+           device_option = hu.hip_do
+           engine = 'MIOPEN'
+        else:
+           device_option = hu.gpu_do
+           engine = 'CUDNN'
         input_weight_size = hidden_size * D
         upper_layer_input_weight_size = hidden_size * hidden_size
         if bidirectional:
@@ -356,8 +362,7 @@ class TestOperators(hu.HypothesisTestCase):
         total_sz *= num_directions
 
         W = np.random.rand(total_sz).astype(np.float32)
-        self.ws.create_blob("WEIGHT").feed(W, device_option=hu.hip_do if workspace.has_hip_support 
-                                                        else hu.gpu_do)
+        self.ws.create_blob("WEIGHT").feed(W, device_option=device_option)
 
         op = core.CreateOperator(
             "Recurrent",
@@ -371,10 +376,9 @@ class TestOperators(hu.HypothesisTestCase):
             input_mode=input_mode,
             num_layers=num_layers,
             seed=seed,
-            engine="MIOPEN" if workspace.has_hip_support else "CUDNN")
+            engine=engine)
         X = np.random.randn(T, N, D).astype(np.float32)
-        self.ws.create_blob("INPUT").feed(X, device_option=hu.hip_do if workspace.has_hip_support 
-                                                        else hu.gpu_do)
+        self.ws.create_blob("INPUT").feed(X, device_option=device_option)
         W = self.ws.blobs["WEIGHT"].fetch()
         H = np.random.randn(
             num_layers, N, hidden_size * num_directions).astype(
@@ -388,7 +392,7 @@ class TestOperators(hu.HypothesisTestCase):
             if rnn_mode == "lstm" else [0, 1, 3]  # ignore C
         for input_idx in input_idxs:
             self.assertGradientChecks(
-                hu.hip_do if workspace.has_hip_support else hu.gpu_do, op, inputs, input_idx, [0],
+                device_option, inputs, input_idx, [0],
                 stepsize=0.01, threshold=0.01)
 
     @given(ndim=st.integers(1, 4),
