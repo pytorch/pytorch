@@ -241,7 +241,7 @@ class JitTestCase(TestCase):
 
     def checkTrace(self, func, reference_tensors, input_tensors=None,
                    optimize=True, drop=None, allow_unused=False,
-                   verbose=False, inputs_require_grads=True, check_tolerance=1e-7):
+                   verbose=False, inputs_require_grads=True, check_tolerance=1e-5):
         # TODO: check gradients for parameters, not just inputs
         def allSum(vs):
             # drop allows us to remove some values from ever being used
@@ -482,7 +482,7 @@ class TestJit(JitTestCase):
             torch.randn(4, dtype=torch.float, device='cuda'),
             torch.randn(4, dtype=torch.float, device='cuda'),
         ]
-        ge = self.checkTrace(scaleshift, inputs, check_tolerance=1e-5)
+        ge = self.checkTrace(scaleshift, inputs)
         self.assertExpectedGraph(ge.graph_for(*inputs))
 
     # TODO: Fuser doesn't work at all when inputs require grad. Fix that
@@ -491,7 +491,7 @@ class TestJit(JitTestCase):
     @skipIfRocm
     def test_lstm_fusion_cuda(self):
         inputs = get_lstm_inputs('cuda')
-        ge = self.checkTrace(LSTMCellF, inputs, check_tolerance=1e-5)
+        ge = self.checkTrace(LSTMCellF, inputs)
         self.assertExpectedGraph(ge.graph_for(*inputs))
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
@@ -515,7 +515,7 @@ class TestJit(JitTestCase):
     @skipIfRocm
     def test_lstm_fusion_concat(self):
         inputs = get_lstm_inputs('cuda')
-        ge = self.checkTrace(LSTMCellC, inputs, check_tolerance=1e-5)
+        ge = self.checkTrace(LSTMCellC, inputs)
         self.assertExpectedGraph(ge.graph_for(*inputs))
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
@@ -6060,7 +6060,7 @@ a")
         def foo(x):
             return torch.dropout(x, p=0.5, train=False)
 
-        np.testing.assert_allclose(foo(input), input)
+        self.assertEqual(foo(input), input)
 
 
 class TestEndToEndHybridFrontendModels(JitTestCase):

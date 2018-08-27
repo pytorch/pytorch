@@ -22,7 +22,6 @@
 #include "torch/csrc/jit/passes/loop_unrolling.h"
 #include "torch/csrc/jit/passes/to_batch.h"
 #include "torch/csrc/jit/passes/specialize_undef.h"
-#include "torch/csrc/jit/passes/decay_types.h"
 #include "torch/csrc/jit/graph_executor.h"
 #include "torch/csrc/jit/script/init.h"
 #include "torch/csrc/jit/script/python_tree_views.h"
@@ -93,7 +92,7 @@ void initJITBindings(PyObject *module) {
    .def("_jit_pass_constant_propagation", [](std::shared_ptr<Graph>& g) {
      return ConstantPropagation(g);
    })
-   .def("_jit_pass_decay_types", DecayTypes)
+   .def("_jit_pass_erase_shape_information", EraseShapeInformation)
    .def("_jit_run_cpp_tests", [] {
      // We have to release the GIL inside this method, because if we happen to
      // initialize the autograd engine in these tests, the newly spawned worker threads will

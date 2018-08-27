@@ -604,7 +604,7 @@ Value* Node::namedInput(Symbol name) const {
   return input(findArgument(schema(), name));
 }
 
-bool Node::matches(const char *signature_literal, at::ArrayRef<Symbol> const_inputs) {
+bool Node::matches(const char *signature_literal, at::ArrayRef<Symbol> const_inputs) const {
   if (!sig(signature_literal).matches(this)) return false;
   for (Symbol s : const_inputs) {
     if (!is_constant(s)) return false;
@@ -622,19 +622,22 @@ void Node::findSchema() const {
 
 namespace {
 
-const std::unordered_set<Symbol>& nondeterminstic_aten_ops() {
-  static std::unordered_set<Symbol> nondeterministic_ops = {
-    aten::dropout,
-    aten::batch_norm,
-    aten::_fused_dropout,
-    aten::_standard_gamma,
-    aten::_th_bernoulli,
-    aten::bernoulli,
-    aten::multinomial,
-    aten::normal,
-    aten::poisson,
-    aten::rrelu,
-    aten::rrelu_with_noise
+const OperatorSet& nondeterminstic_aten_ops() {
+  static OperatorSet nondeterministic_ops = {
+    "aten::dropout(Tensor input, float p, int train) -> Tensor",
+    "aten::_fused_dropout(Tensor self, float p, Tensor generator) -> (Tensor, Tensor)",
+    "aten::_standard_gamma(Tensor self, Tensor generator) -> Tensor",
+    "aten::_th_bernoulli(Tensor self, *, Tensor generator) -> Tensor",
+    "aten::bernoulli(Tensor self) -> Tensor",
+    "aten::bernoulli(Tensor self, Tensor p, Tensor generator) -> Tensor",
+    "aten::bernoulli(Tensor self, float p, Tensor generator) -> Tensor",
+    "aten::multinomial(Tensor self, int num_samples, int replacement, *, Tensor generator) -> Tensor",
+    "aten::normal(Tensor mean, Tensor std, *, Tensor generator) -> Tensor",
+    "aten::normal(float mean, Tensor std, *, Tensor generator) -> Tensor",
+    "aten::normal(Tensor mean, float std, *, Tensor generator) -> Tensor",
+    "aten::poisson(Tensor self, Tensor generator) -> Tensor",
+    "aten::rrelu(Tensor self, Scalar lower, Scalar upper, int training, Tensor generator) -> Tensor",
+    "aten::rrelu_with_noise(Tensor self, Tensor noise, Scalar lower, Scalar upper, int training, Tensor generator) -> Tensor"
   };
   return nondeterministic_ops;
 }
@@ -642,15 +645,11 @@ const std::unordered_set<Symbol>& nondeterminstic_aten_ops() {
 }  // namespace
 
 bool Node::isNondeterministic() const {
-  if (nondeterminstic_aten_ops().count(kind()) == 0) {
+  if (nondeterminstic_aten_ops().find(this) == nullptr) {
     return false;
   }
   // Dropout with train = False is deterministic
-  if (kind() == aten::dropout && is_constant(attr::train) && !get<bool>(attr::train).value()) {
-    return false;
-  }
-  // batch_norm with training = False is deterministic
-  if (kind() == aten::batch_norm && is_constant(attr::training) && !get<bool>(attr::training).value()) {
+  if (matches("aten::dropout(Tensor input, float p, int train) -> Tensor") && is_constant(attr::train) && !get<bool>(attr::train).value()) {
     return false;
   }
   return true;

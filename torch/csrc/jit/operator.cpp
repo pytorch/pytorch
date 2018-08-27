@@ -405,7 +405,7 @@ OperatorSet::OperatorSet(std::initializer_list<const char *> sig_literals) {
   }
 }
 
-Operator* OperatorSet::find(Node *n) {
+Operator* OperatorSet::find(const Node *n) const  {
   auto it = ops.find(n->kind());
   if (it == ops.end()) {
     return nullptr;
