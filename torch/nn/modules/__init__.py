@@ -21,7 +21,7 @@ from .padding import ReflectionPad1d, ReflectionPad2d, ReplicationPad1d, Replica
     ReplicationPad3d, ZeroPad2d, ConstantPad1d, ConstantPad2d, ConstantPad3d
 from .sparse import Embedding, EmbeddingBag
 from .rnn import RNNBase, RNN, LSTM, GRU, \
-    RNNCell, LSTMCell, GRUCell
+    RNNCellBase, RNNCell, LSTMCell, GRUCell
 from .pixelshuffle import PixelShuffle
 from .upsampling import UpsamplingNearest2d, UpsamplingBilinear2d, Upsample
 from .distance import PairwiseDistance, CosineSimilarity
