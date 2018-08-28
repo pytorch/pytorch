@@ -19,10 +19,17 @@ namespace c10d {
 // The actual run function that will operate either on src or dst or both.
 struct WorkEntry {
   explicit WorkEntry(
-      std::vector<at::Tensor>* src,
-      std::vector<at::Tensor>* dst,
+      std::vector<at::Tensor>* srcPtr,
+      std::vector<at::Tensor>* dstPtr,
       std::function<void(std::unique_ptr<WorkEntry>&)> run)
-      : src(src), dst(dst), run(run) {}
+      : run(run) {
+    if (srcPtr) {
+      src = *srcPtr;
+    }
+    if (dstPtr) {
+      dst = *dstPtr;
+    }
+  }
 
   // Not copyable
   WorkEntry(const WorkEntry&) = delete;
@@ -30,10 +37,10 @@ struct WorkEntry {
   WorkEntry& operator=(const WorkEntry&) = delete;
 
   // For input and output tensors (in-place), we will always use src
-  std::vector<at::Tensor>* src;
-  std::vector<at::Tensor>* dst;
+  std::vector<at::Tensor> src;
+  std::vector<at::Tensor> dst;
   // src rank returned, for recv only
-  int* srcRank;
+  int* srcRank = nullptr;
   std::function<void(std::unique_ptr<WorkEntry>&)> run;
 };
 

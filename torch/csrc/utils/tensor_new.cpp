@@ -28,8 +28,6 @@ using at::IntList;
 using at::kCPU;
 using at::kCUDA;
 using at::kLong;
-using at::kSparseCPU;
-using at::kSparseCUDA;
 using at::optional;
 using at::Scalar;
 using at::ScalarType;
@@ -37,6 +35,7 @@ using at::Storage;
 using at::Tensor;
 using at::TensorOptions;
 using at::Type;
+using at::Backend;
 
 namespace torch { namespace utils {
 namespace {
@@ -72,7 +71,7 @@ Tensor new_with_sizes(const Type& type, int32_t device_index, IntList sizes) {
   return torch::empty(sizes, TensorOptions(type, device_index));
 }
 
-Tensor new_with_storage(const Type& type, Storage& storage) {
+Tensor new_with_storage(const Type& type, Storage storage) {
   auto tensor = at::empty({}, type);
   tensor.set_(storage);
   return tensor;
@@ -257,7 +256,7 @@ Tensor legacy_sparse_tensor_ctor(const Type& type, PyObject* args, PyObject* kwa
   ParsedArgs<4> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
-    return at::empty({}, TensorOptions(type, r.device(0).index()));
+    return at::empty({0}, TensorOptions(type, r.device(0).index()));
   } else if (r.idx == 1) {
     auto cdata = reinterpret_cast<void*>(r.toInt64(0));
     return type.unsafeTensorFromTH(cdata, true);
@@ -319,7 +318,7 @@ Tensor legacy_sparse_tensor_new(const Type& type, PyObject* args, PyObject* kwar
 
 const Type& typeWithDefault(PythonArgs& r, int64_t dtype_idx, int64_t device_idx, const Type& type) {
   const auto scalartype = r.scalartypeWithDefault(dtype_idx, type.scalarType());
-  const Device types_device_type(toDense(type.backend()));
+  const Device types_device_type(type.device_type());
   const auto device_type = r.isNone(device_idx) ? types_device_type : r.device(device_idx).type();
   return torch::getType(scalartype, *torch::getLayout(type.backend()), device_type);
 }
@@ -345,7 +344,7 @@ Tensor legacy_tensor_ctor(const Type& type, PyObject* args, PyObject* kwargs) {
     at::DeviceGuard device_guard(r.device(0));
     return type.tensor();
   } else if (r.idx == 1) {
-    return new_with_storage(type, *r.storage(0));
+    return new_with_storage(type, r.storage(0));
   } else if (r.idx == 2) {
     auto cdata = reinterpret_cast<void*>(r.toInt64(0));
     return type.unsafeTensorFromTH(cdata, true);
@@ -385,7 +384,7 @@ Tensor legacy_tensor_new(const Type& type, PyObject* args, PyObject* kwargs) {
     at::DeviceGuard device_guard(r.device(0));
     return type.tensor();
   } else if (r.idx == 1) {
-    return new_with_storage(type, *r.storage(0));
+    return new_with_storage(type, r.storage(0));
   } else if (r.idx == 2) {
     auto cdata = reinterpret_cast<void*>(r.toInt64(0));
     return type.unsafeTensorFromTH(cdata, true);
@@ -410,12 +409,13 @@ Tensor legacy_new_from_data(const Type & type, at::optional<Device> device, PyOb
 }
 
 Tensor sparse_coo_tensor_ctor(const Type& type, PyObject* args, PyObject* kwargs) {
-  const auto sparse_backend = type.is_cuda() ? kSparseCUDA : kSparseCPU;
+  const auto sparse_backend = type.is_cuda() ? Backend::SparseCUDA : Backend::SparseCPU;
   const auto& default_sparse_type = type.toBackend(sparse_backend);
 
   static PythonArgParser parser({
     "sparse_coo_tensor(PyObject* indices, PyObject* values, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)",
     "sparse_coo_tensor(PyObject* indices, PyObject* values, IntList size, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)",
+    "sparse_coo_tensor(IntList size, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)",
   });
 
   ParsedArgs<6> parsed_args;
@@ -423,24 +423,28 @@ Tensor sparse_coo_tensor_ctor(const Type& type, PyObject* args, PyObject* kwargs
   if (r.idx == 0) {
     bool type_inference = r.isNone(2);
     const auto& sparse_type = typeWithDefault(r, 2, 3, default_sparse_type);
-    const auto& dense_type = sparse_type.toBackend(sparse_type.is_cuda() ? kCUDA : kCPU);
+    const auto& dense_type = sparse_type.toBackend(sparse_type.is_cuda() ? Backend::CUDA : Backend::CPU);
     at::DeviceGuard device_guard(r.device(3));
     Tensor values = internal_new_from_data(dense_type, r.deviceOptional(3), r.pyobject(1), false, true, type_inference);
     // if no dtype provided, infer type based on value type.
     const auto& index_type = values.type().toScalarType(kLong);
     Tensor indices = internal_new_from_data(index_type, r.deviceOptional(3), r.pyobject(0), false, true, false);
-    const auto& sparse_type_to_use = values.type().toBackend(values.type().is_cuda() ? kSparseCUDA : kSparseCPU);
+    const auto& sparse_type_to_use = values.type().toBackend(values.type().is_cuda() ? Backend::SparseCUDA : Backend::SparseCPU);
     return sparse_type_to_use.sparse_coo_tensor(indices, values).set_requires_grad(r.toBool(4));
   } else if (r.idx == 1) {
     bool type_inference = r.isNone(3);
     const auto& sparse_type = typeWithDefault(r, 3, 4, default_sparse_type);
-    const auto& dense_type = sparse_type.toBackend(sparse_type.is_cuda() ? kCUDA : kCPU);
+    const auto& dense_type = sparse_type.toBackend(sparse_type.is_cuda() ? Backend::CUDA : Backend::CPU);
     at::DeviceGuard device_guard(r.device(4));
     Tensor values = internal_new_from_data(dense_type, r.deviceOptional(4), r.pyobject(1), false, true, type_inference);
     const auto& index_type = values.type().toScalarType(kLong);
     Tensor indices = internal_new_from_data(index_type, r.deviceOptional(4), r.pyobject(0), false, true, false);
-    const auto& sparse_type_to_use = values.type().toBackend(values.type().is_cuda() ? kSparseCUDA : kSparseCPU);
+    const auto& sparse_type_to_use = values.type().toBackend(values.type().is_cuda() ? Backend::SparseCUDA : Backend::SparseCPU);
     return sparse_type_to_use.sparse_coo_tensor(indices, values, r.intlist(2)).set_requires_grad(r.toBool(5));
+  } else if (r.idx == 2) {
+    const auto& sparse_type_to_use = typeWithDefault(r, 1, 2, default_sparse_type);
+    at::DeviceGuard device_guard(r.device(2));
+    return sparse_type_to_use.sparse_coo_tensor(r.intlist(0)).set_requires_grad(r.toBool(3));
   }
   throw std::runtime_error("sparse_coo_tensor(): invalid arguments");
 }

@@ -47,12 +47,14 @@ _(prim, TupleUnpack) \
 _(prim, ListConstruct) \
 _(prim, NumToTensor) \
 _(prim, TensorToNum) \
+_(prim, ImplicitTensorToNum) \
 _(prim, IntToFloat) \
 _(prim, FloatToInt) \
 _(prim, AutogradAdd) \
 _(prim, GradOf) \
 _(prim, AnyDefined) \
 _(prim, FusedConcat) \
+_(prim, FusedChunk) \
 _(aten, __not__) \
 FORALL_ATEN_BASE_SYMBOLS(_) \
 _(onnx, Add) \

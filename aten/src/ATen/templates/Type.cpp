@@ -81,18 +81,16 @@ Tensor Type::tensorFromBlob(void * data, IntList sizes, const std::function<void
 }
 Tensor Type::tensorFromBlob(void * data, IntList sizes, IntList strides, const std::function<void(void*)> & deleter) const {
   auto storage = storageFromBlob(data, computeStorageSize(sizes, strides), deleter);
-  return tensor(*storage, 0, sizes, strides);
+  return tensor(storage, 0, sizes, strides);
 }
 Tensor Type::tensorWithAllocator(IntList sizes, Allocator* allocator) const {
   return tensorWithAllocator(sizes, defaultStrides(sizes), std::move(allocator));
 }
 Tensor Type::tensorWithAllocator(IntList sizes, IntList strides, Allocator* allocator) const {
   auto storage = storageWithAllocator(computeStorageSize(sizes, strides), std::move(allocator));
-  return tensor(*storage, 0, sizes, strides);
+  return tensor(storage, 0, sizes, strides);
 }
 Tensor Type::scalarTensor(Scalar s) const {
-  if(s.isBackedByTensor())
-    return Tensor(s.t).toType(*this);
   return tensor({}).fill_(s);
 }
 

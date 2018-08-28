@@ -25,12 +25,8 @@ int64_t UndefinedTensor::dim() const {
   AT_ERROR("dim() called on undefined Tensor");
 }
 
-std::unique_ptr<Storage> UndefinedTensor::storage() {
+const Storage& UndefinedTensor::storage() const {
   AT_ERROR("storage() called on undefined Tensor");
-}
-
-at::StorageImpl* UndefinedTensor::storageImpl() const {
-  AT_ERROR("storageImpl() called on an undefined Tensor");
 }
 
 int64_t UndefinedTensor::storage_offset() const {

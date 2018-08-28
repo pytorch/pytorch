@@ -7,7 +7,7 @@ from torch.distributions.transformed_distribution import TransformedDistribution
 class LogNormal(TransformedDistribution):
     r"""
     Creates a log-normal distribution parameterized by
-    `loc` and `scale` where::
+    :attr:`loc` and :attr:`scale` where::
 
         X ~ Normal(loc, scale)
         Y = exp(X) ~ LogNormal(loc, scale)

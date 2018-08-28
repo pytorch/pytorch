@@ -23,7 +23,7 @@ class Tensor;
 
 // An empty class as a placeholder for a math function that has no specific
 // engine specified.
-class DefaultEngine {};
+class CAFFE2_API DefaultEngine {};
 
 namespace math {
 
@@ -499,6 +499,11 @@ CAFFE2_API void Axpby(
     T* y,
     Context* context);
 
+// groups must be 1 for GPU
+// For NHWC order with groups > 1, the result will be layout in
+// NHW G RS C/G order to make data within the same group to be contiguous.
+// For NCHW order, groups doesn't make any difference because we're doing Im2Col
+// for each N and C is the slowest moving dimension among CHW.
 template <typename T, class Context, StorageOrder kOrder>
 CAFFE2_API void Im2Col(
     const int channels,
@@ -516,7 +521,8 @@ CAFFE2_API void Im2Col(
     const int stride_w,
     const T* img_data,
     T* col_data,
-    Context* context);
+    Context* context,
+    const int groups = 1);
 
 template <typename T, class Context, StorageOrder kOrder>
 CAFFE2_API void Im2ColNd(
@@ -533,6 +539,11 @@ CAFFE2_API void Im2ColNd(
     T* col_data,
     Context* context);
 
+// groups must be 1 for GPU
+// For NHWC order with groups > 1, the result will be layout in
+// NHW G RS C/G order to make data within the same group to be contiguous.
+// For NCHW order, groups doesn't make any difference because we're doing Im2Col
+// for each N and C is the slowest moving dimension among CHW.
 template <typename T, class Context, StorageOrder kOrder>
 CAFFE2_API void Col2Im(
     const int channels,
@@ -550,7 +561,8 @@ CAFFE2_API void Col2Im(
     const int stride_w,
     const T* col_data,
     T* img_data,
-    Context* context);
+    Context* context,
+    const int groups = 1);
 
 template <typename T, class Context, StorageOrder kOrder>
 CAFFE2_API void Col2ImNd(

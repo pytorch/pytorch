@@ -2,7 +2,6 @@
 #include "TH.h"
 #include "THCAllocator.h"
 #include "THCCachingHostAllocator.h"
-#include "THCThreadLocal.h"
 #include "THCTensorRandom.h"
 #include "THCGeneral.hpp"
 
@@ -39,35 +38,13 @@ THCState* THCState_alloc(void)
   return state;
 }
 
-static void THDefaultDeviceDeleter(void* ptr) {
-  THCudaCheck(cudaFree(ptr));
-}
-
-struct THDefaultDeviceAllocator final : public at::Allocator {
-  at::DataPtr allocate(size_t size) const override {
-    void* p = nullptr;
-    if (size != 0) THCudaCheck(cudaMalloc(&p, size));
-    int device;
-    THCudaCheck(cudaGetDevice(&device));
-    return {p, p, &THDefaultDeviceDeleter, at::Device(at::kCUDA, device)};
-  }
-  at::DeleterFnPtr raw_deleter() const override {
-    return &THDefaultDeviceDeleter;
-  }
-};
-
-static THDefaultDeviceAllocator defaultDeviceAllocator;
-
 void THCudaInit(THCState* state)
 {
   if (!state->cudaDeviceAllocator) {
-    state->cudaDeviceAllocator = &defaultDeviceAllocator;
+    state->cudaDeviceAllocator = THCCachingAllocator_get();
   }
   if (!state->cudaHostAllocator) {
-    state->cudaHostAllocator = getTHCudaHostAllocator();
-  }
-  if (!state->cudaUVAAllocator) {
-    state->cudaUVAAllocator = getTHCUVAAllocator();
+    state->cudaHostAllocator = getTHCCachingHostAllocator();
   }
 
   int numDevices = 0;
@@ -76,9 +53,6 @@ void THCudaInit(THCState* state)
 
   int device = 0;
   THCudaCheck(cudaGetDevice(&device));
-
-  state->currentPerDeviceBlasHandle = THCThreadLocal_alloc();
-  state->currentPerDeviceSparseHandle = THCThreadLocal_alloc();
 
   state->resourcesPerDevice = (THCCudaResourcesPerDevice*)
     malloc(numDevices * sizeof(THCCudaResourcesPerDevice));
@@ -89,12 +63,6 @@ void THCudaInit(THCState* state)
 
   state->rngState = (THCRNGState*)malloc(sizeof(THCRNGState));
   THCRandom_init(state, numDevices, device);
-
-  // By default, all direct p2p kernel access (besides copy) is disallowed,
-  // since direct access without knowing whether or not a certain operation
-  // should be cross-GPU leads to synchronization errors. The user can choose
-  // to disable this functionality, however.
-  state->p2pKernelAccessEnabled = 0;
 
   // p2pAccessEnabled records if p2p copies are allowed between pairs of
   // devices. Values include "1" (copy allowed), "0" (copy not allowed), and
@@ -133,15 +101,6 @@ void THCudaInit(THCState* state)
 
   /* Restore to previous device */
   THCudaCheck(cudaSetDevice(device));
-
-  // Unlike CUDA streams, there is no NULL cuBLAS handle. The default THC
-  // cuBLAS handle is the first user BLAS handle. Note that the actual BLAS
-  // handles are created lazily.
-  state->numUserBlasHandles = 1;
-  state->numUserSparseHandles = 1;
-
-  state->heapSoftmax = 3e8; // 300MB, adjusted upward dynamically
-  state->heapDelta = 0;
 }
 
 void THCudaShutdown(THCState* state)
@@ -166,18 +125,18 @@ void THCudaShutdown(THCState* state)
   for (int dev = 0; dev < deviceCount; ++dev) {
     THCudaCheck(cudaSetDevice(dev));
     THCCudaResourcesPerDevice* res = &(state->resourcesPerDevice[dev]);
-    /* Free user defined BLAS handles */
-    for (int i = 0; i < res->numBlasHandles; ++i) {
-      THCublasCheck(cublasDestroy(res->blasHandles[i]));
-    }
-    /* Free user defined sparse handles */
-    for (int i = 0; i < res->numSparseHandles; ++i) {
-      THCusparseCheck(cusparseDestroy(res->sparseHandles[i]));
+    
+    // Frees BLAS handle
+    if (res->blasHandle) {
+      THCublasCheck(cublasDestroy(res->blasHandle));
     }
 
-    free(res->blasHandles);
-    free(res->sparseHandles);
+    // Frees sparse handle
+    if (res->sparseHandle) {
+      THCusparseCheck(cusparseDestroy(res->sparseHandle));
+    }
   }
+
   free(state->resourcesPerDevice);
   if (state->cudaDeviceAllocator == THCCachingAllocator_get()) {
     THCCachingAllocator_emptyCache();
@@ -185,7 +144,6 @@ void THCudaShutdown(THCState* state)
   if (state->cudaHostAllocator == getTHCCachingHostAllocator()) {
     THCCachingHostAllocator_emptyCache();
   }
-  THCThreadLocal_free(state->currentPerDeviceBlasHandle);
 
   THCudaCheck(cudaSetDevice(prevDev));
 }
@@ -223,50 +181,6 @@ int THCState_getPeerToPeerAccess(THCState* state, int dev, int devToAccess)
   return state->p2pAccessEnabled[dev][devToAccess];
 }
 
-void THCState_setPeerToPeerAccess(THCState* state, int dev, int devToAccess,
-                                  int enable)
-{
-  /* This will perform device bounds checking for us */
-  int prevEnabled = THCState_getPeerToPeerAccess(state, dev, devToAccess);
-
-  if (enable != prevEnabled) {
-    /* If we're attempting to enable p2p access but p2p access isn't */
-    /* supported, throw an error */
-    if (enable) {
-      int access = 0;
-      THCudaCheck(cudaDeviceCanAccessPeer(&access, dev, devToAccess));
-
-      if (!access) {
-        THError("p2p access not supported for %d accessing %d",
-                dev, devToAccess);
-      }
-    }
-
-    state->p2pAccessEnabled[dev][devToAccess] = enable;
-
-    int prevDev = 0;
-    THCudaCheck(cudaGetDevice(&prevDev));
-    THCudaCheck(cudaSetDevice(dev));
-
-    /* This should be in sync with the current access state */
-    if (enable) {
-      THCudaCheck(cudaDeviceEnablePeerAccess(devToAccess, 0));
-    } else {
-      THCudaCheck(cudaDeviceDisablePeerAccess(devToAccess));
-    }
-
-    THCudaCheck(cudaSetDevice(prevDev));
-  }
-}
-
-int THCState_getKernelPeerToPeerAccessEnabled(THCState* state) {
-  return state->p2pKernelAccessEnabled;
-}
-
-void THCState_setKernelPeerToPeerAccessEnabled(THCState* state, int val) {
-  state->p2pKernelAccessEnabled = val;
-}
-
 struct cudaDeviceProp* THCState_getCurrentDeviceProperties(THCState* state)
 {
   int curDev = -1;
@@ -291,104 +205,9 @@ THAllocator* THCState_getCudaHostAllocator(THCState* state)
   return state->cudaHostAllocator;
 }
 
-THAllocator* THCState_getCudaUVAAllocator(THCState* state)
-{
-  return state->cudaUVAAllocator;
-}
-
-THC_API THCDeviceAllocator* THCState_getDeviceAllocator(THCState* state)
-{
-  return state->cudaDeviceAllocator;
-}
-
-void THCState_setDeviceAllocator(THCState* state, THCDeviceAllocator* allocator)
-{
-  state->cudaDeviceAllocator = allocator;
-}
-
-int THCState_isCachingAllocatorEnabled(THCState* state) {
-  return state->cudaHostAllocator == getTHCCachingHostAllocator();
-}
-
 int THCState_getNumDevices(THCState *state)
 {
   return state->numDevices;
-}
-
-void THCState_reserveDeviceBlasHandles(THCState* state, int device, int numBlasHandles)
-{
-  int prevDev = -1;
-  THCCudaResourcesPerDevice* res = THCState_getDeviceResourcePtr(state, device);
-  if (numBlasHandles <= res->numBlasHandles) {
-    return;
-  }
-
-  THCudaCheck(cudaGetDevice(&prevDev));
-  THCudaCheck(cudaSetDevice(device));
-
-  size_t size = numBlasHandles * sizeof(cublasHandle_t);
-  cublasHandle_t* handles = (cublasHandle_t*) realloc(res->blasHandles, size);
-  for (int i = res->numBlasHandles; i < numBlasHandles; ++i) {
-    handles[i] = NULL;
-    THCublasCheck(cublasCreate(&handles[i]));
-  }
-  res->blasHandles = handles;
-  res->numBlasHandles = numBlasHandles;
-
-  THCudaCheck(cudaSetDevice(prevDev));
-}
-
-void THCState_reserveDeviceSparseHandles(THCState* state, int device, int numSparseHandles)
-{
-  int prevDev = -1;
-  THCCudaResourcesPerDevice* res = THCState_getDeviceResourcePtr(state, device);
-  if (numSparseHandles <= res->numSparseHandles) {
-    return;
-  }
-
-  THCudaCheck(cudaGetDevice(&prevDev));
-  THCudaCheck(cudaSetDevice(device));
-
-  size_t size = numSparseHandles * sizeof(cusparseHandle_t);
-  cusparseHandle_t* handles = (cusparseHandle_t*) realloc(res->sparseHandles, size);
-  for (int i = res->numSparseHandles; i < numSparseHandles; ++i) {
-    handles[i] = NULL;
-    THCusparseCheck(cusparseCreate(&handles[i]));
-  }
-  res->sparseHandles = handles;
-  res->numSparseHandles = numSparseHandles;
-
-  THCudaCheck(cudaSetDevice(prevDev));
-}
-
-void THCState_reserveBlasHandles(THCState* state, int numBlasHandles)
-{
-  // cuBLAS handles are created lazily from THCState_getDeviceBlasHandle
-  // to avoid initializing unused devices
-  if (numBlasHandles > state->numUserBlasHandles)
-  {
-    state->numUserBlasHandles = numBlasHandles;
-  }
-}
-
-void THCState_reserveSparseHandles(THCState* state, int numSparseHandles)
-{
-  // cuBLAS handles are created lazily from THCState_getDeviceSparseHandle
-  // to avoid initializing unused devices
-  if (numSparseHandles > state->numUserSparseHandles)
-  {
-    state->numUserSparseHandles = numSparseHandles;
-  }
-}
-
-int THCState_getNumBlasHandles(THCState* state)
-{
-  return state->numUserBlasHandles;
-}
-
-int THCState_getNumSparseHandles(THCState* state)
-{
-  return state->numUserSparseHandles;
 }
 
 THCCudaResourcesPerDevice* THCState_getDeviceResourcePtr(
@@ -401,28 +220,6 @@ THCCudaResourcesPerDevice* THCState_getDeviceResourcePtr(
   }
 
   return &(state->resourcesPerDevice[device]);
-}
-
-cublasHandle_t THCState_getDeviceBlasHandle(THCState *state, int device, int handle)
-{
-  if (handle <= 0 || handle > state->numUserBlasHandles) {
-    THError("%d is not a valid handle, valid range is: (1, %d)",
-            handle, state->numUserBlasHandles);
-  }
-  THCCudaResourcesPerDevice* res = THCState_getDeviceResourcePtr(state, device);
-  THCState_reserveDeviceBlasHandles(state, device, handle);
-  return res->blasHandles[handle - 1];
-}
-
-cusparseHandle_t THCState_getDeviceSparseHandle(THCState *state, int device, int handle)
-{
-  if (handle <= 0 || handle > state->numUserSparseHandles) {
-    THError("%d is not a valid handle, valid range is: (1, %d)",
-            handle, state->numUserSparseHandles);
-  }
-  THCCudaResourcesPerDevice* res = THCState_getDeviceResourcePtr(state, device);
-  THCState_reserveDeviceSparseHandles(state, device, handle);
-  return res->sparseHandles[handle - 1];
 }
 
 THCStream* THCState_getStreamOnDevice(THCState* state, int device) {
@@ -453,86 +250,51 @@ void THCState_setStream(THCState *state, THCStream *stream) {
 
 cublasHandle_t THCState_getCurrentBlasHandle(THCState *state)
 {
-  /* This is called at the point of kernel execution.
-     For some debugging code or improperly instrumented kernels,
-     `state` is null */
-  if (state) {
-    int device;
-    THCudaCheck(cudaGetDevice(&device));
-
-    int handle = THCState_getCurrentBlasHandleIndex(state);
-    return THCState_getDeviceBlasHandle(state, device, handle);
+  // Short-circuits if state is NULL
+  // Note: possible in debugging code or improperly instrumented kernels
+  if (!state) {
+    THError("THCState and sparseHandles must be set as there is no default sparseHandle");
+    return NULL;
   }
-  THError("THCState and blasHandles must be set as there is no default blasHandle");
-  return NULL;
+    
+  int device;
+  THCudaCheck(cudaGetDevice(&device));
+
+  // Creates the BLAS handle if not created yet
+  THCCudaResourcesPerDevice* res = THCState_getDeviceResourcePtr(state, device);
+  if (!res->blasHandle) {
+    THCublasCheck(cublasCreate(&res->blasHandle));
+  }
+
+  return res->blasHandle;
 }
 
 cusparseHandle_t THCState_getCurrentSparseHandle(THCState *state)
 {
-  /* This is called at the point of kernel execution.
-     For some debugging code or improperly instrumented kernels,
-     `state` is null */
-  if (state) {
-    int device;
-    THCudaCheck(cudaGetDevice(&device));
-
-    int handle = THCState_getCurrentSparseHandleIndex(state);
-    return THCState_getDeviceSparseHandle(state, device, handle);
+  // Short-circuits if state is NULL
+  // Note: possible in debugging code or improperly instrumented kernels
+  if (!state) {
+    THError("THCState and sparseHandles must be set as there is no default sparseHandle");
+    return NULL;
   }
-  THError("THCState and sparseHandles must be set as there is no default sparseHandle");
-  return NULL;
-}
 
-int THCState_getCurrentBlasHandleIndex(THCState *state)
-{
-  void* value = THCThreadLocal_get(state->currentPerDeviceBlasHandle);
-  if (value == NULL) {
-    return 1;
+  int device;
+  THCudaCheck(cudaGetDevice(&device));
+  
+  // Creates the sparse handle if not created yet
+  THCCudaResourcesPerDevice* res = THCState_getDeviceResourcePtr(state, device);
+  if (!res->sparseHandle) {
+    THCusparseCheck(cusparseCreate(&res->sparseHandle));
   }
-  return (int) (intptr_t) value;
-}
 
-int THCState_getCurrentSparseHandleIndex(THCState *state)
-{
-  void* value = THCThreadLocal_get(state->currentPerDeviceSparseHandle);
-  if (value == NULL) {
-    return 1;
-  }
-  return (int) (intptr_t) value;
-}
-
-void THCState_setCurrentBlasHandleIndex(THCState *state, int handle)
-{
-  if (handle > state->numUserBlasHandles || handle <= 0)
-  {
-    THError("%d is not a valid handle, valid range is: (1, %d)",
-            handle, state->numUserBlasHandles);
-  }
-  THCThreadLocal_set(state->currentPerDeviceBlasHandle, (void*)(intptr_t)handle);
-}
-
-void THCState_setCurrentSparseHandleIndex(THCState *state, int handle)
-{
-  if (handle > state->numUserSparseHandles || handle <= 0)
-  {
-    THError("%d is not a valid handle, valid range is: (1, %d)",
-            handle, state->numUserSparseHandles);
-  }
-  THCThreadLocal_set(state->currentPerDeviceSparseHandle, (void*)(intptr_t)handle);
+  return res->sparseHandle;
 }
 
 size_t THCState_getCurrentDeviceScratchSpaceSize(THCState* state)
 {
   int device = -1;
   THCudaCheck(cudaGetDevice(&device));
-  return THCState_getDeviceScratchSpaceSize(state, device);
-}
-
-size_t THCState_getDeviceScratchSpaceSize(THCState* state, int device)
-{
-  THCCudaResourcesPerDevice* res =
-    THCState_getDeviceResourcePtr(state, device);
-
+  THCCudaResourcesPerDevice* res = THCState_getDeviceResourcePtr(state, device);
   return res->scratchSpacePerStream;
 }
 
@@ -654,27 +416,11 @@ void __THCusparseCheck(cusparseStatus_t status, const char *file, const int line
   }
 }
 
-void THCSetGCHandler(THCState *state, void (*cutorchGCFunction_)(void *data), void *data )
-{
-  state->cutorchGCFunction = cutorchGCFunction_;
-  state->cutorchGCData = data;
-}
-
 void* THCudaMalloc(THCState *state, size_t size)
 {
   THCudaCheck(cudaGetLastError());
   THCDeviceAllocator* allocator = state->cudaDeviceAllocator;
-  if (state->cutorchGCFunction != nullptr) {
-    try {
-      return allocator->raw_allocate(size);
-    } catch (...) {
-      cudaGetLastError(); // reset OOM error
-      (state->cutorchGCFunction)(state->cutorchGCData);
-      return allocator->raw_allocate(size);
-    }
-  } else {
-    return allocator->raw_allocate(size);
-  }
+  return allocator->raw_allocate(size);
 }
 
 void THCudaFree(THCState *state, void* ptr) {
@@ -695,13 +441,7 @@ void THCudaHostRecord(THCState *state, void *ptr) {
   }
 }
 
-cudaError_t THCudaMemGetInfo(THCState *state,  size_t* freeBytes, size_t* totalBytes)
-{
-  size_t largestBlock = 0;
-  return THCudaMemGetInfoCached(state, freeBytes, totalBytes, &largestBlock);
-}
-
-cudaError_t THCudaMemGetInfoCached(THCState *state,  size_t* freeBytes, size_t* totalBytes, size_t* largestBlock)
+cudaError_t THCudaMemGetInfo(THCState *state,  size_t* freeBytes, size_t* totalBytes, size_t* largestBlock)
 {
   size_t cachedBytes = 0;
   THCDeviceAllocator* allocator = state->cudaDeviceAllocator;
