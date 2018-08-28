@@ -420,6 +420,10 @@ class TestOperators(TestCase):
         x = Variable(torch.randn(1, 2, 3, 4), requires_grad=True)
         self.assertONNX(lambda x: nn.functional.interpolate(x, scale_factor=2., mode='bilinear'), x)
 
+    def test_unsqueeze(self):
+        x = Variable(torch.randn(3, 4), requires_grad=True)
+        self.assertONNX(lambda x: x.unsqueeze(len(x.shape)), x)
+
     def test_symbolic_override(self):
         """Lifted from fast-neural-style: custom implementation of instance norm
         to be mapped to ONNX operator"""
