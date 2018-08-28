@@ -9,21 +9,9 @@
 #include "ATen/Storage.h"
 #include "ATen/Tensor.h"
 #include "ATen/TensorOptions.h"
-#include "ATen/UndefinedType.h"
 #include "ATen/DeviceGuard.h"
 
-#include <ATen/detail/VariableHooksInterface.h>
-
-#include <iostream>
-${cpu_type_headers}
-
 namespace at {
-
-void Type::registerCPU(Context * context) {
-  ${cpu_type_registrations}
-  context->type_registry[static_cast<int>(Backend::Undefined)]
-                        [static_cast<int>(ScalarType::Undefined)].reset(new UndefinedType(context));
-}
 
 Tensor & Type::copy_(Tensor & self, const Tensor & src, bool non_blocking) const {
   Tensor b_src;
