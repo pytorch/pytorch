@@ -247,7 +247,7 @@ IF(USE_CUDA AND NOT USE_ROCM)
 ENDIF()
 
 IF(USE_ROCM)
- ### Link in the ROCm libraries BLAS / RNG .
+ ### Link in the ROCm libraries BLAS / RNG.
  FIND_LIBRARY(ROCBLAS_LIBRARY rocblas HINTS ${ROCBLAS_PATH}/lib)
  FIND_LIBRARY(HIPRAND_LIBRARY hiprand HINTS ${HIPRAND_PATH}/lib)
 
