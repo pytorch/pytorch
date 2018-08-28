@@ -734,7 +734,9 @@ void compressContiguous(
     c_strides[compressed_dims] = strides[cur-1];
     compressed_dims++;
   }
-  JIT_ASSERT(!cont.back() || strides.back() == 1);
+  if (ndim > 0) {
+    JIT_ASSERT(!cont.back() || strides.back() == 1);
+  }
 }
 
 } // anonymous namespace

@@ -2919,14 +2919,12 @@ a")
         self.assertEqual(cu.test_fuser_multiple_blocks(*inputs), outputs)
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
-    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
-    @skipIfRocm
-    def test_scalar_fusion_cuda(self):
+    def test_scalar_fusion(self):
         def fn(x, y):
             return x + y.type_as(x)
 
-        x = torch.tensor(0.1, dtype=torch.float, device='cuda')
-        y = torch.tensor(1, dtype=torch.float, device='cuda')
+        x = torch.tensor(0.1, dtype=torch.float, device='cpu')
+        y = torch.tensor(1, dtype=torch.float, device='cpu')
         self.checkScript(fn, (x, y))
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
