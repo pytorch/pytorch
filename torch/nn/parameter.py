@@ -18,6 +18,14 @@ class Parameter(torch.Tensor):
         requires_grad (bool, optional): if the parameter requires gradient. See
             :ref:`excluding-subgraphs` for more details. Default: `True`
     """
+
+    @classmethod
+    def _rebuild(cls, data, requires_grad, backward_hooks):
+            obj = cls(data, requires_grad)
+            obj._backward_hooks = backward_hooks
+
+            return obj
+
     def __new__(cls, data=None, requires_grad=True):
         if data is None:
             data = torch.Tensor()
@@ -27,4 +35,4 @@ class Parameter(torch.Tensor):
         return 'Parameter containing:\n' + super(Parameter, self).__repr__()
 
     def __reduce_ex__(self, proto):
-        return Parameter, (self.data, self.requires_grad)
+        return Parameter._rebuild, (self.data, self.requires_grad, self._backward_hooks)
