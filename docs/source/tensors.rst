@@ -246,6 +246,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: gt_
    .. automethod:: half
    .. automethod:: histc
+   .. automethod:: i0
+   .. automethod:: i1
    .. automethod:: index_add_
    .. automethod:: index_copy_
    .. automethod:: index_fill_
@@ -260,6 +262,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: is_set_to
    .. automethod:: is_signed
    .. automethod:: item
+   .. automethod:: iv
    .. automethod:: kthvalue
    .. automethod:: le
    .. automethod:: le_
