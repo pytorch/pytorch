@@ -2,7 +2,7 @@
 #define CAFFE2_OPT_OPTIMIZER_H
 
 #include "caffe2/core/common.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/core/workspace.h"
 
 namespace caffe2 {
