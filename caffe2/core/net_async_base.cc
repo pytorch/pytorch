@@ -154,7 +154,7 @@ TaskThreadPool* AsyncNetBase::pool(const DeviceOption& device_option) {
         numa_node_id);
     return pool_getter(cpu_pools_, CPU, numa_node_id, num_workers_);
   } else if (device_option.device_type() == CUDA) {
-    auto gpu_id = device_option.cuda_gpu_id();
+    auto gpu_id = device_option.device_id();
     CAFFE_ENFORCE(
         gpu_id >= 0 && gpu_id < FLAGS_caffe2_net_async_max_gpus,
         "Invalid GPU id: " + caffe2::to_string(gpu_id));
@@ -170,7 +170,7 @@ int AsyncNetBase::stream(int task_id) {
   const auto& device_option = event(task_id).GetDeviceOption();
   int stream_id = 0;
   if (device_option.device_type() == CUDA) {
-    int gpu_id = device_option.cuda_gpu_id();
+    int gpu_id = device_option.device_id();
     CAFFE_ENFORCE_GE(gpu_id, 0, "Invalid gpu id: " + caffe2::to_string(gpu_id));
     if ((unsigned)gpu_id >= stream_counters_.size()) {
       stream_counters_.resize(gpu_id + 1, 0);

@@ -21,7 +21,7 @@ dyndep.InitOpsLibrary('@/caffe2/caffe2/contrib/nccl:nccl_ops')
 def gpu_device(i):
     device_option = caffe2_pb2.DeviceOption()
     device_option.device_type = caffe2_pb2.CUDA
-    device_option.cuda_gpu_id = i
+    device_option.device_id = i
     return device_option
 
 

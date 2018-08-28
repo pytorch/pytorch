@@ -194,7 +194,7 @@ TEST(TensorTest, TensorSerializationMultiDevices) {
     }
     EXPECT_TRUE(tensor_proto.has_device_detail());
     EXPECT_EQ(tensor_proto.device_detail().device_type(), CUDA);
-    EXPECT_EQ(tensor_proto.device_detail().cuda_gpu_id(), gpu_id);
+    EXPECT_EQ(tensor_proto.device_detail().device_id(), gpu_id);
     // Test if the restored blob is still of the same device.
     blob.Reset();
     EXPECT_NO_THROW(blob.Deserialize(serialized));
@@ -204,7 +204,7 @@ TEST(TensorTest, TensorSerializationMultiDevices) {
     // Test if we force the restored blob on a different device, we
     // can still get so.
     blob.Reset();
-    proto.mutable_tensor()->mutable_device_detail()->set_cuda_gpu_id(0);
+    proto.mutable_tensor()->mutable_device_detail()->set_device_id(0);
     EXPECT_NO_THROW(blob.Deserialize(proto.SerializeAsString()));
     EXPECT_TRUE(blob.IsType<Tensor>(CUDA));
     EXPECT_EQ(GetGPUIDForPointer(blob.Get<TensorCUDA>().data<float>()), 0);

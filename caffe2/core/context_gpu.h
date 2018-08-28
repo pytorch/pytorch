@@ -182,7 +182,7 @@ class CAFFE2_API CUDAContext final : public BaseContext {
     }
   }
 
-  inline int cuda_gpu_id() const {
+  inline int device_id() const {
     return gpu_id_;
   }
 
@@ -281,7 +281,7 @@ class CAFFE2_API CUDAContext final : public BaseContext {
   }
 
   static bool IsStreamFree(const DeviceOption& option, int stream_id) {
-    auto stream = CUDAContext::cuda_stream(option.cuda_gpu_id(), stream_id);
+    auto stream = CUDAContext::cuda_stream(option.device_id(), stream_id);
     return cudaStreamQuery(stream) == cudaSuccess;
   }
 
@@ -404,7 +404,7 @@ class CAFFE2_API CUDAStaticContext final : public BaseStaticContext {
 
   void ExtractDeviceOption(DeviceOption* device, const void* data) override {
     device->set_device_type(GetDeviceType());
-    device->set_cuda_gpu_id(GetGPUIDForPointer(data));
+    device->set_device_id(GetGPUIDForPointer(data));
   }
 
  protected:

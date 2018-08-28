@@ -643,7 +643,7 @@ std::map<string, std::pair<DeviceOption, DeviceOption>> ValidateTensorDevices(
           &blob_device);
 
       if (blob_device.device_type() == CUDA &&
-          blob_device.cuda_gpu_id() != op_device.cuda_gpu_id()) {
+          blob_device.device_id() != op_device.device_id()) {
         mismatches[blob_name] = std::make_pair(op_device, blob_device);
       }
       else if (blob_device.device_type() == HIP &&

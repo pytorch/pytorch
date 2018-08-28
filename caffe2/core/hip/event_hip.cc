@@ -137,7 +137,7 @@ void EventWaitHIPHIP(const Event* event, void* context)
         {
             // CAFFE_ENFORCE_EQ(
             //    CaffeCudaGetDevice(),
-            //    static_cast<const CUDAContext*>(context)->cuda_gpu_id());
+            //    static_cast<const CUDAContext*>(context)->device_id());
             HIP_CHECK(hipStreamWaitEvent(context_stream, wrapper->hip_event_, 0));
         }
     }
