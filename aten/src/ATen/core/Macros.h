@@ -12,20 +12,32 @@
 
 #ifdef _WIN32
 #if !defined(AT_CORE_STATIC_WINDOWS)
-// TODO: unfiy the controlling macros.
-#if defined(CAFFE2_BUILD_MAIN_LIBS) || defined(ATen_cpu_EXPORTS) || defined(caffe2_EXPORTS)
-#define AT_CORE_API __declspec(dllexport)
-#else // defined(CAFFE2_BUILD_MAIN_LIBS) || defined(ATen_cpu_EXPORTS) || defined(caffe2_EXPORTS)
-#define AT_CORE_API __declspec(dllimport)
-#endif // defined(CAFFE2_BUILD_MAIN_LIBS) || defined(ATen_cpu_EXPORTS) || defined(caffe2_EXPORTS)
+#define AT_CORE_EXPORT __declspec(dllexport)
+#define AT_CORE_IMPORT __declspec(dllimport)
 #else // !defined(AT_CORE_STATIC_WINDOWS)
-#define AT_CORE_API
+#define AT_CORE_EXPORT
+#define AT_CORE_IMPORT
 #endif // !defined(AT_CORE_STATIC_WINDOWS)
 #else  // _WIN32
 #if defined(__GNUC__)
-#define AT_CORE_API __attribute__((__visibility__("default")))
+#define AT_CORE_EXPORT __attribute__((__visibility__("default")))
+#else // defined(__GNUC__)
+#define AT_CORE_EXPORT
 #endif // defined(__GNUC__)
+#define AT_CORE_IMPORT AT_CORE_EXPORT
 #endif  // _WIN32
+
+// AT_CORE_API is a macro that, depends on whether you are building the
+// main library or not, resolves to either AT_CORE_EXPORT or
+// AT_CORE_IMPORT.
+//
+
+// TODO: unify the controlling macros.
+#if defined(CAFFE2_BUILD_MAIN_LIBS) || defined(ATen_cpu_EXPORTS) || defined(caffe2_EXPORTS)
+#define AT_CORE_API AT_CORE_EXPORT
+#else // defined(CAFFE2_BUILD_MAIN_LIBS) || defined(ATen_cpu_EXPORTS) || defined(caffe2_EXPORTS)
+#define AT_CORE_API AT_CORE_IMPORT
+#endif // defined(CAFFE2_BUILD_MAIN_LIBS) || defined(ATen_cpu_EXPORTS) || defined(caffe2_EXPORTS)
 
 // Disable the copy and assignment operator for a class. Note that this will
 // disable the usage of the class in std containers.

@@ -1,6 +1,7 @@
 #ifndef NOM_REPRESENTATIONS_CONTROLFLOW_H
 #define NOM_REPRESENTATIONS_CONTROLFLOW_H
 
+#include "caffe2/core/common.h"
 #include "nomnigraph/Graph/Graph.h"
 #include "nomnigraph/Representations/Compiler.h"
 
@@ -13,7 +14,7 @@ namespace repr {
 /// of the data flow graph as well as an ordering on instruction
 /// execution.  Basic blocks are used for control flow analysis.
 template <typename T, typename... U>
-class BasicBlock {
+class CAFFE2_API BasicBlock {
  public:
   using NodeRef = typename Subgraph<T, U...>::NodeRef;
   BasicBlock() {}
@@ -91,7 +92,7 @@ class BasicBlock {
 using Program = Graph<Value>;
 
 template <typename G>
-struct ControlFlowGraphImpl {
+struct CAFFE2_API ControlFlowGraphImpl {
   // Hack to help debugging in case this class is misused.
   static_assert(
       sizeof(ControlFlowGraphImpl),
@@ -101,7 +102,7 @@ struct ControlFlowGraphImpl {
 };
 
 template <typename T, typename... U>
-struct ControlFlowGraphImpl<Graph<T, U...>> {
+struct CAFFE2_API ControlFlowGraphImpl<Graph<T, U...>> {
   using type = Graph<std::unique_ptr<BasicBlock<T, U...>>, int>;
   using bbType = BasicBlock<T, U...>;
 };
@@ -111,7 +112,7 @@ struct ControlFlowGraphImpl<Graph<T, U...>> {
 ///
 /// \note G Must be of type Graph<T, U...>.
 template <typename G>
-class ControlFlowGraph : public ControlFlowGraphImpl<G>::type {
+class CAFFE2_API ControlFlowGraph : public ControlFlowGraphImpl<G>::type {
  public:
   // This is for C++11 compatibility, otherwise we could use "using"
   ControlFlowGraph() {}
@@ -130,7 +131,7 @@ using BasicBlockType = typename ControlFlowGraphImpl<G>::bbType;
 /// \brief Converts graph to SSA representation.  Modifies the graph
 /// by inserting versions and phi nodes.
 template <typename Phi, typename G>
-void addSSA(G* dfg, ControlFlowGraph<G>* cfg) {
+CAFFE2_API void addSSA(G* dfg, ControlFlowGraph<G>* cfg) {
   static_assert(
       std::is_base_of<Instruction, Phi>::value,
       "Phi type must be derived from Instruction.");

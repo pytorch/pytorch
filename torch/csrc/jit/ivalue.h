@@ -13,7 +13,7 @@ template <typename T>
 using Shared = c10::intrusive_ptr<T>;
 
 // string
-struct ConstantString : c10::intrusive_ptr_target {
+struct TORCH_API ConstantString : c10::intrusive_ptr_target {
  private:
   const std::string str_;
  public:
@@ -34,7 +34,7 @@ struct ConstantString : c10::intrusive_ptr_target {
 
 // non-mutable list
 template<typename Elem>
-struct ConstantList : c10::intrusive_ptr_target {
+struct TORCH_API ConstantList : c10::intrusive_ptr_target {
  private:
   std::vector<Elem> elements_;
  public:
@@ -67,7 +67,7 @@ using DoubleList = ConstantList<double>;
 #define TORCH_FORALL_TAGS(_) \
   _(None) _(Tensor) _(Double) _(Int) _(Tuple) _(IntList) _(DoubleList) _(String) _(TensorList)
 
-struct IValue {
+struct TORCH_API IValue {
   IValue()
   : payload(0)
   , tag(Tag::None)

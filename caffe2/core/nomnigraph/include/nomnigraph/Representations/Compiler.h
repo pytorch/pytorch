@@ -1,13 +1,14 @@
 #ifndef NOM_REPRESENTATIONS_COMPILER_H
 #define NOM_REPRESENTATIONS_COMPILER_H
 
+#include "caffe2/core/common.h"
 #include "nomnigraph/Graph/Graph.h"
 #include "nomnigraph/Support/Casting.h"
 
 namespace nom {
 namespace repr {
 
-class Value {
+class CAFFE2_API Value {
  public:
   enum class ValueKind { Value, Instruction, Data };
   Value(ValueKind K) : Kind(K) {}
@@ -21,10 +22,10 @@ class Value {
   const ValueKind Kind;
 };
 
-class Data : public Value {
+class CAFFE2_API Data : public Value {
  public:
   Data() : Value(ValueKind::Data) {}
-  static bool classof(const Value* V) {
+  CAFFE2_API static bool classof(const Value* V) {
     return V->getKind() == ValueKind::Data;
   }
   virtual ~Data() = default;
@@ -40,7 +41,7 @@ class Data : public Value {
   size_t Version = 0;
 };
 
-class Instruction : public Value {
+class CAFFE2_API Instruction : public Value {
  public:
   /// \brief All the different types of execution.
   enum class Opcode {
@@ -53,7 +54,7 @@ class Instruction : public Value {
   };
   Instruction() : Value(ValueKind::Instruction), Op(Opcode::Generic) {}
   Instruction(Opcode op) : Value(ValueKind::Instruction), Op(op) {}
-  static bool classof(const Value* V) {
+  CAFFE2_API static bool classof(const Value* V) {
     return V->getKind() == ValueKind::Instruction;
   }
   virtual ~Instruction() = default;
@@ -65,7 +66,7 @@ class Instruction : public Value {
   Opcode Op;
 };
 
-class Terminator : public Instruction {
+class CAFFE2_API Terminator : public Instruction {
  public:
   Terminator(Instruction::Opcode op) : Instruction(op) {}
 
@@ -79,17 +80,17 @@ class Terminator : public Instruction {
   }
 };
 
-class Branch : public Terminator {
+class CAFFE2_API Branch : public Terminator {
  public:
   Branch() : Terminator(Instruction::Opcode::Branch) {}
 };
 
-class Return : public Terminator {
+class CAFFE2_API Return : public Terminator {
  public:
   Return() : Terminator(Instruction::Opcode::Return) {}
 };
 
-class Phi : public Instruction {
+class CAFFE2_API Phi : public Instruction {
  public:
   Phi() : Instruction(Instruction::Opcode::Phi) {}
 };

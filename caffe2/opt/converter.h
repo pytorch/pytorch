@@ -46,7 +46,7 @@ public:
     return &OpDef;
   }
 
-  static bool classof(const Annotation *A) {
+  CAFFE2_API static bool classof(const Annotation *A) {
     return A->getKind() == AnnotationKind::Caffe2;
   }
 

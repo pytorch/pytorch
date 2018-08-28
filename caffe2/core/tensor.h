@@ -882,7 +882,7 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   }
 };
 
-class UndefinedTensorImpl final : public TensorImpl {
+class CAFFE2_API UndefinedTensorImpl final : public TensorImpl {
   UndefinedTensorImpl() : TensorImpl(CPU){};
 
  public:
