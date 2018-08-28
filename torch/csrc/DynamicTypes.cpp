@@ -70,7 +70,8 @@ at::Type* get_type(const std::string& name, bool is_cuda, bool is_sparse) {
 PyTypeObject* getPyTypeObject(const at::Storage& storage)
 {
   auto attype = at::globalContext().getTypeOpt(
-      at::detail::get_backend(storage.pImpl()), storage.pImpl()->scalar_type());
+      deviceTypeToBackend(storage.device_type()),
+      at::dataTypeToScalarType(storage.dtype()));
   auto it = attype_to_py_storage_type.find(attype);
   if (it != attype_to_py_storage_type.end()) {
     return it->second;
@@ -136,7 +137,7 @@ PyObject* createPyObject(const at::Storage& storage)
   auto type = getPyTypeObject(storage);
   auto obj = THPObjectPtr(type->tp_alloc(type, 0));
   if (!obj) throw python_error();
-  ((THPVoidStorage*)obj.get())->cdata = (THVoidStorage *)storage.retained_pImpl();
+  ((THPVoidStorage*)obj.get())->cdata = (THVoidStorage *)at::Storage(/* copy */ storage).unsafeReleaseStorageImpl();
   return obj.release();
 }
 
@@ -144,7 +145,7 @@ bool isStorage(PyObject* obj)
 {
   return py_storage_type_to_attype.count(Py_TYPE(obj));
 }
-std::unique_ptr<at::Storage> createStorage(PyObject* obj)
+at::Storage createStorage(PyObject* obj)
 {
   auto it = py_storage_type_to_attype.find(Py_TYPE(obj));
   if (it == py_storage_type_to_attype.end()) {

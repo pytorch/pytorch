@@ -2310,6 +2310,38 @@ Example::
     tensor([ 1.2252,  0.5002,  0.6248,  2.0139])
 """)
 
+add_docstr(torch.matrix_rank,
+           r"""
+matrix_rank(input, tol=None, bool symmetric=False) -> Tensor
+
+Returns the numerical rank of a 2-D tensor. The method to compute the
+matrix rank is done using SVD by default. If :attr:`symmetric` is ``True``,
+then :attr:`input` is assumed to be symmetric, and the computation of the
+rank is done by obtaining the eigenvalues.
+
+:attr:`tol` is the threshold below which the singular values (or the eigenvalues
+when :attr:`symmetric` is ``True``) are considered to be 0. If :attr:`tol` is not
+specified, :attr:`tol` is set to ``S.max() * max(S.size()) * eps`` where `S` is the
+singular values (or the eigenvalues when :attr:`symmetric` is ``True``), and ``eps``
+is the epsilon value for the datatype of :attr:`input`.
+
+Args:
+    input (Tensor): the input 2-D tensor
+    tol (float, optional): the tolerance value. Default: ``None``
+    symmetric(bool, optional): indicates whether :attr:`input` is symmetric.
+                               Default: ``False``
+
+Example::
+
+    >>> a = torch.eye(10)
+    >>> torch.matrix_rank(a)
+    tensor(10)
+    >>> b = torch.eye(10)
+    >>> b[0, 0] = 0
+    >>> torch.matrix_rank(b)
+    tensor(9)
+""")
+
 add_docstr(torch.max,
            r"""
 .. function:: max(input) -> Tensor
@@ -5308,7 +5340,7 @@ Ignoring the batch dimensions, it computes the following expression:
 
 .. math::
     X[\omega_1, \dots, \omega_d] =
-        \frac{1}{\prod_{i=1}^d N_i} \sum_{n_1=0}^{N_1} \dots \sum_{n_d=0}^{N_d} x[n_1, \dots, n_d]
+        \sum_{n_1=0}^{N_1} \dots \sum_{n_d=0}^{N_d} x[n_1, \dots, n_d]
          e^{-j\ 2 \pi \sum_{i=0}^d \frac{\omega_i n_i}{N_i}},
 
 where :math:`d` = :attr:`signal_ndim` is number of dimensions for the
@@ -5498,7 +5530,7 @@ This method supports 1D, 2D and 3D real-to-complex transforms, indicated
 by :attr:`signal_ndim`. :attr:`input` must be a tensor with at least
 ``signal_ndim`` dimensions with optionally arbitrary number of leading batch
 dimensions. If :attr:`normalized` is set to ``True``, this normalizes the result
-by multiplying it with :math:`\sqrt{\prod_{i=1}^K N_i}` so that the operator is
+by dividing it with :math:`\sqrt{\prod_{i=1}^K N_i}` so that the operator is
 unitary, where :math:`N_i` is the size of signal dimension :math:`i`.
 
 The real-to-complex Fourier transform results follow conjugate symmetry:

@@ -10,6 +10,7 @@ else()
 endif()
 
 option(BUILD_TORCH_TEST "Build torch test binaries" ON)
+option(TORCH_STATIC "Build libtorch.a rather than libtorch.so" OFF)
 
 # TODO: Unify with version from setup.py
 set(TORCH_VERSION_MAJOR 0)
@@ -19,8 +20,6 @@ set(TORCH_VERSION "${TORCH_VERSION_MAJOR}.${TORCH_VERSION_MINOR}.${TORCH_VERSION
 
 set(TORCH_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 set(TORCH_ROOT "${TORCH_SRC_DIR}/..")
-
-add_subdirectory(../third_party/nanopb protobuf-nanopb)
 
 if(NOT TORCH_INSTALL_BIN_DIR)
   set(TORCH_INSTALL_BIN_DIR bin)
@@ -207,7 +206,12 @@ if (NOT NO_API AND NOT USE_ROCM)
 
 endif()
 
-add_library(torch ${TORCH_SRCS})
+
+if (TORCH_STATIC)
+  add_library(torch STATIC ${TORCH_SRCS})
+else()
+  add_library(torch SHARED ${TORCH_SRCS})
+endif()
 
 target_compile_definitions(torch PRIVATE _THP_CORE)
 
@@ -276,8 +280,7 @@ if (MSVC)
 endif()
 
 target_link_libraries(torch
-  caffe2_library
-  protobuf-nanopb)
+  caffe2_library)
 
 find_package(OpenMP)
 if(OPENMP_FOUND)
@@ -373,8 +376,7 @@ target_include_directories(torch PUBLIC
 
 # SYSTEM headers are included with -isystem and thus do not trigger warnings.
 target_include_directories(torch SYSTEM PUBLIC
-  "${TORCH_ROOT}/third_party/cereal/include" # For cereal/
-  "${TORCH_ROOT}/third_party/nanopb")
+  "${TORCH_ROOT}/third_party/cereal/include") # For cereal/
 
 set_target_properties(torch PROPERTIES VERSION 1 SOVERSION 1)
 
