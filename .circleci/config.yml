@@ -182,6 +182,9 @@ caffe2_linux_build_defaults: &caffe2_linux_build_defaults
         if [ -d "/usr/local/caffe2" ]; then
           cp -r /usr/local/caffe2 caffe2-ci-env/caffe2
         fi
+        if [ -d "/opt/conda/lib/python2.7/site-packages/caffe2" ]; then
+          cp -r /opt/conda/lib/python2.7/site-packages/caffe2 caffe2-ci-env/conda_caffe2
+        fi
   - persist_to_workspace:
       root: /var/lib/jenkins/workspace/caffe2-ci-env
       paths:
@@ -282,6 +285,10 @@ caffe2_linux_test_defaults: &caffe2_linux_test_defaults
         if [ -d "/opt/workspace/caffe2" ]; then
           echo "mkdir -p /usr/local/caffe2" | docker exec -u jenkins -i "$id" bash
           docker cp /opt/workspace/caffe2/. "$id:/usr/local/caffe2"
+        fi
+        if [ -d "/opt/workspace/conda_caffe2" ]; then
+          echo "mkdir -p /opt/conda/lib/python2.7/site-packages/caffe2" | docker exec -u jenkins -i "$id" bash
+          docker cp /opt/workspace/conda_caffe2/. "$id:/opt/conda/lib/python2.7/site-packages/caffe2"
         fi
         docker cp /opt/workspace/onnx/. "$id:/var/lib/jenkins/workspace/third_party/onnx"
         (echo "source ./workspace/env" && echo 'sudo chown -R jenkins workspace && cd workspace && ./ci_build_script.sh') | docker exec -u jenkins -i "$id" bash
