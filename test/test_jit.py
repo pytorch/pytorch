@@ -4710,7 +4710,10 @@ a")
             @torch.jit.script_method
             def forward(self, x):
                 x += x
-                c = sum(x) > 4  # can't be True, onnx export constant props
+                # because we are testing if we emit `if` statement correctly
+                # we cannot use `True` as the condition. Constant prop
+                # would remove the `if` statements.
+                c = sum(x) > 4
                 if c:
                     if c:
                         y = self.m(x)
