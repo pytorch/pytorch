@@ -1,5 +1,5 @@
-#ifndef GATHER_OP_H
-#define GATHER_OP_H
+#ifndef GATHER_OP_H_
+#define GATHER_OP_H_
 
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
@@ -56,4 +56,4 @@ class GatherOp : public Operator<Context> {
   INPUT_TAGS(DATA, INDICES);
 };
 } // namespace caffe2
-#endif
+#endif // GATHER_OP_H_

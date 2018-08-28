@@ -942,21 +942,6 @@ class HasElementsOp : public Operator<Context> {
   }
 };
 
-template <class Context>
-class IsEmptyOp : public Operator<Context> {
- public:
-  USE_OPERATOR_CONTEXT_FUNCTIONS;
-  USE_SIMPLE_CTOR_DTOR(IsEmptyOp);
-
-  bool RunOnDevice() override {
-    auto& input = Input(0);
-    auto* output = Output(0);
-    output->Resize(std::vector<TIndex>{});
-    *output->template mutable_data<bool>() = (input.size() == 0);
-    return true;
-  }
-};
-
 // Return the size of a tensor
 template <class Context>
 class SizeOp : public Operator<Context> {
