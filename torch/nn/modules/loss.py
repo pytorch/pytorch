@@ -160,9 +160,15 @@ class NLLLoss(_WeightedLoss):
         - Input: :math:`(N, C)` where `C = number of classes`, or
             :math:`(N, C, d_1, d_2, ..., d_K)` with :math:`K \geq 2`
             in the case of `K`-dimensional loss.
+            Eg:  [0,0,1]
+
         - Target: :math:`(N)` where each value is :math:`0 \leq \text{targets}[i] \leq C-1`, or
             :math:`(N, d_1, d_2, ..., d_K)` with :math:`K \geq 2` in the case of
             K-dimensional loss.
+            Eg:[2]
+            i.e the TARGET has just one entry which shows which class it belongs to. Note that
+            this is different from the Input format of a one hot vector like [0,0,1].
+
         - Output: scalar. If reduce is ``False``, then the same size
             as the target: :math:`(N)`, or
             :math:`(N, d_1, d_2, ..., d_K)` with :math:`K \geq 2` in the case
