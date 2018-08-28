@@ -279,7 +279,7 @@ class TracingCheckError(Exception):
 # Check the traced module against a set of user-provided validation inputs
 def _check_trace(check_inputs, func, executor_options, module, check_tolerance):
     for inputs in check_inputs:
-        check_mod = torch.jit.trace(*_clone_inputs(inputs), disable_checks=True)(func)
+        check_mod = torch.jit.trace(*_clone_inputs(inputs), disable_checks=True, **executor_options)(func)
 
         def graph_diagnostic_info():
             mod_canonicalized = torch._C._jit_pass_canonicalize(module.graph)
