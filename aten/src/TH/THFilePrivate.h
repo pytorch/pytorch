@@ -1,6 +1,6 @@
 #include <TH/THGeneral.h>
 
-#include "THHalf.h"
+#include <ATen/core/Half.h>
 
 
 struct THFile__
@@ -28,7 +28,7 @@ struct THFileVTable
     ssize_t (*readLong)(THFile *self, int64_t *data, ssize_t n);
     ssize_t (*readFloat)(THFile *self, float *data, ssize_t n);
     ssize_t (*readDouble)(THFile *self, double *data, ssize_t n);
-    ssize_t (*readHalf)(THFile *self, THHalf *data, ssize_t n);
+    ssize_t (*readHalf)(THFile *self, at::Half *data, ssize_t n);
     ssize_t (*readString)(THFile *self, const char *format, char **str_);
 
     ssize_t (*writeByte)(THFile *self, uint8_t *data, ssize_t n);
@@ -38,7 +38,7 @@ struct THFileVTable
     ssize_t (*writeLong)(THFile *self, int64_t *data, ssize_t n);
     ssize_t (*writeFloat)(THFile *self, float *data, ssize_t n);
     ssize_t (*writeDouble)(THFile *self, double *data, ssize_t n);
-    ssize_t (*writeHalf)(THFile *self, THHalf *data, ssize_t n);
+    ssize_t (*writeHalf)(THFile *self, at::Half *data, ssize_t n);
     ssize_t (*writeString)(THFile *self, const char *str, ssize_t size);
 
     void (*synchronize)(THFile *self);

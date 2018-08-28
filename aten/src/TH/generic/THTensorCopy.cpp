@@ -232,10 +232,10 @@ IMPLEMENT_THTensor_COPY(Int, int32_t)
 IMPLEMENT_THTensor_COPY(Long, int64_t)
 IMPLEMENT_THTensor_COPY(Float, float)
 IMPLEMENT_THTensor_COPY(Double, double)
-IMPLEMENT_THTensor_COPY_FROM_HALF(Half, THHalf)
+IMPLEMENT_THTensor_COPY_FROM_HALF(Half, at::Half)
 #else
 /* only allow pass-through for Half */
-IMPLEMENT_THTensor_COPY_TO_FROM_HALF(Half, THHalf)
+IMPLEMENT_THTensor_COPY_TO_FROM_HALF(Half, at::Half)
 IMPLEMENT_THTensor_COPY_TO_HALF(Byte, uint8_t)
 IMPLEMENT_THTensor_COPY_TO_HALF(Char, int8_t)
 IMPLEMENT_THTensor_COPY_TO_HALF(Short, int16_t)

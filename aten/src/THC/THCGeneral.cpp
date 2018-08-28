@@ -125,7 +125,7 @@ void THCudaShutdown(THCState* state)
   for (int dev = 0; dev < deviceCount; ++dev) {
     THCudaCheck(cudaSetDevice(dev));
     THCCudaResourcesPerDevice* res = &(state->resourcesPerDevice[dev]);
-    
+
     // Frees BLAS handle
     if (res->blasHandle) {
       THCublasCheck(cublasDestroy(res->blasHandle));
@@ -256,7 +256,7 @@ cublasHandle_t THCState_getCurrentBlasHandle(THCState *state)
     THError("THCState and sparseHandles must be set as there is no default sparseHandle");
     return NULL;
   }
-    
+
   int device;
   THCudaCheck(cudaGetDevice(&device));
 
@@ -280,7 +280,7 @@ cusparseHandle_t THCState_getCurrentSparseHandle(THCState *state)
 
   int device;
   THCudaCheck(cudaGetDevice(&device));
-  
+
   // Creates the sparse handle if not created yet
   THCCudaResourcesPerDevice* res = THCState_getDeviceResourcePtr(state, device);
   if (!res->sparseHandle) {

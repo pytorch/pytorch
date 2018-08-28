@@ -1,16 +1,15 @@
 #include "THHalf.h"
-#include <ATen/core/Half.h>
 
 /* Copyright 1993-2014 NVIDIA Corporation.  All rights reserved. */
 
-THHalf TH_float2half(float f)
+at::Half TH_float2half(float f)
 {
-  THHalf h;
+  at::Half h;
   TH_float2halfbits(&f, &h.x);
   return h;
 }
 
-TH_API float TH_half2float(THHalf h)
+TH_API float TH_half2float(at::Half h)
 {
   float f;
   TH_halfbits2float(&h.x, &f);
