@@ -21,10 +21,6 @@ Tensor Scalar::toTensor() const {
   }
 }
 
-Scalar Scalar::local() const {
-  return *this;
-}
-
 Scalar Scalar::operator-() const {
  if (isFloatingPoint()) {
    return Scalar(-v.d);
