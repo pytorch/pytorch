@@ -35,6 +35,7 @@ bool isDifferentiable(Node * n) {
     "aten::neg(Tensor self) -> Tensor",
     "aten::type_as(Tensor self, Tensor other) -> Tensor",
     "aten::unsqueeze(Tensor self, int dim) -> Tensor",
+    "aten::addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta, Scalar alpha) -> Tensor",
     "aten::mm(Tensor self, Tensor mat2) -> Tensor",
     "aten::lt(Tensor self, Tensor other) -> Tensor",
     "aten::le(Tensor self, Tensor other) -> Tensor",
@@ -97,6 +98,9 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
     if (node->matches("aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor")) {
       return {grads.at(0), grads.at(0) * node->namedInput(attr::alpha), nullptr};
 
+    } else if (node->kind() == prim::AutogradAdd) {
+      return {grads.at(0), grads.at(0)};
+
     } else if (node->matches("aten::sub(Tensor self, Tensor other, *, Scalar alpha) -> Tensor")) {
       return {grads.at(0), -grads.at(0) * node->namedInput(attr::alpha), nullptr};
 
@@ -136,29 +140,14 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
     } else if (node->matches("aten::unsqueeze(Tensor self, int dim) -> Tensor")) {
       return {grads.at(0).squeeze(node->namedInput(attr::dim)), nullptr};
 
+    } else if (node->matches("aten::addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta, Scalar alpha) -> Tensor")) {
+      return {grads.at(0) * node->namedInput(attr::beta),
+              grads.at(0).mm(inputs.at(2).t()) * node->namedInput(attr::alpha),
+              inputs.at(1).t().mm(grads.at(0)) * node->namedInput(attr::alpha),
+              nullptr, nullptr};
+
     } else if (node->matches("aten::mm(Tensor self, Tensor mat2) -> Tensor")) {
-      SymbolicVariable dmat1, dmat2;
-      if (auto type = inputs.at(0).value()->type()->cast<CompleteTensorType>()) {
-        auto sizes = type->sizes(), strides = type->strides();
-        if (strides.at(0) == 1 && strides.at(1) == sizes.at(0)) {
-          dmat1 = inputs.at(1).mm(grads.at(0).t()).t();
-        } else {
-          dmat1 = grads.at(0).mm(inputs.at(1).t());
-        }
-      } else {
-        dmat1 = grads.at(0).mm(inputs.at(1).t());
-      }
-      if (auto type = inputs.at(1).value()->type()->cast<CompleteTensorType>()) {
-        auto sizes = type->sizes(), strides = type->strides();
-        if (strides.at(0) == 1 && strides.at(1) == sizes.at(0)) {
-          dmat2 = grads.at(0).t().mm(inputs.at(0)).t();
-        } else {
-          dmat2 = inputs.at(0).t().mm(grads.at(0));
-        }
-      } else {
-        dmat2 = inputs.at(0).t().mm(grads.at(0));
-      }
-      return {dmat1, dmat2};
+      return {grads.at(0).mm(inputs.at(1).t()), inputs.at(0).t().mm(grads.at(0))};
 
     } else if (node->matches("aten::expand(Tensor self, int[] size, *, int implicit) -> Tensor")) {
       const auto& input_sizes = inputs.at(0).sizes();
@@ -364,7 +353,9 @@ static ReverseDetails addReverseInline(Gradient& grad_desc,
     JIT_ASSERT(grad_inputs.size() == node->inputs().size());
     for (size_t i = 0, num_inputs = grad_inputs.size(); i < num_inputs; ++i) {
       if (!requires_grad(inputs[i])) continue;
-      JIT_ASSERT(grad_inputs[i]);
+      if (!grad_inputs[i]) {
+        grad_inputs[i] = graph.insertNode(graph.createUndefined())->output();
+      }
       set_grad(inputs[i], grad_inputs[i]);
     }
   }
