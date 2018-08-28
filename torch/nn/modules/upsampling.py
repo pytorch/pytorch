@@ -222,7 +222,7 @@ class UpsamplingBilinear2d(Upsample):
                   [ 2.3333,  2.6667,  3.0000,  3.3333],
                   [ 3.0000,  3.3333,  3.6667,  4.0000]]]])
     """
-    def __init__(self, size=None, scale_factor=None, align_corners=False):
+    def __init__(self, size=None, scale_factor=None, align_corners=True):
         super(UpsamplingBilinear2d, self).__init__(size, scale_factor, mode='bilinear', align_corners=align_corners)
 
     def forward(self, input):
