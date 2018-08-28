@@ -816,12 +816,11 @@ workflows:
       #     requires:
       #       - pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_build
 
-      # We are not running macOS builds on CircleCI currently
-      # - pytorch_macos_10_13_py3_build
-      # - pytorch_macos_10_13_py3_test:
-      #     requires:
-      #       - pytorch_macos_10_13_py3_build
-      # - pytorch_macos_10_13_cuda9_2_cudnn7_py3_build
+      - pytorch_macos_10_13_py3_build
+      - pytorch_macos_10_13_py3_test:
+          requires:
+            - pytorch_macos_10_13_py3_build
+      - pytorch_macos_10_13_cuda9_2_cudnn7_py3_build
 
       # yf225 TODO: enable all Caffe2 Linux builds
       # - caffe2_py2_cuda8_0_cudnn6_ubuntu16_04_build
@@ -852,10 +851,10 @@ workflows:
       # - caffe2_onnx_py2_gcc5_ubuntu16_04_test:
       #     requires:
       #       - caffe2_onnx_py2_gcc5_ubuntu16_04_build
-      - caffe2_conda2_ubuntu16_04_build
-      - caffe2_conda2_ubuntu16_04_test:
-          requires:
-            - caffe2_conda2_ubuntu16_04_build
+      # - caffe2_conda2_ubuntu16_04_build
+      # - caffe2_conda2_ubuntu16_04_test:
+      #     requires:
+      #       - caffe2_conda2_ubuntu16_04_build
       # - caffe2_py2_cuda8_0_cudnn7_ubuntu16_04_build
       # - caffe2_py2_gcc4_9_ubuntu14_04_build
       # - caffe2_py2_clang3_8_ubuntu16_04_build
@@ -867,7 +866,6 @@ workflows:
       # - caffe2_conda3_cuda9_0_cudnn7_ubuntu16_04_build
       # - caffe2_py2_cuda9_0_cudnn7_centos7_build
 
-      # We are not running macOS builds on CircleCI currently
-      # - caffe2_py2_ios_macos10_13_build
-      # - caffe2_py2_system_macos10_13_build
-      # - caffe2_conda2_macos10_13_build
+      - caffe2_py2_ios_macos10_13_build
+      - caffe2_py2_system_macos10_13_build
+      - caffe2_conda2_macos10_13_build
