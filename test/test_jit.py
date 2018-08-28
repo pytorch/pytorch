@@ -3513,6 +3513,20 @@ a")
             return a == [0, 1, 1, 2]
         self.checkScript(test_append_loop_if, ())
 
+    def test_mutable_list_function_inline(self):
+        @torch.jit.script
+        def bar(y):
+            # type: (List[int]) -> List[int]
+            y.append(4)
+
+        @torch.jit.script
+        def foo():
+            x = [1, 2, 3]
+            bar(x)
+            return x
+
+        self.assertEqual(foo(), [1, 2, 3, 4])
+
     def test_func_call(self):
         script = '''
         def add(a, b):
