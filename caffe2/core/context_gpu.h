@@ -12,7 +12,7 @@
 #include "caffe2/core/numa.h"
 #include "caffe2/core/tensor.h"
 #include "caffe2/core/types.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 
 // Since we are using the macro CAFFE2_USE_CUDNN, we will need to include this
 // file after common.h is included.
