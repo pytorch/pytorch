@@ -462,6 +462,8 @@ void initPythonIRBindings(PyObject * module_) {
         case TypeKind::StringType:
           return "StringType";
         }
+        // not reachable, but some compilers complain
+        AT_ERROR("Unknown Type Kind");
     })
     .def("sizes",[](Type& t) {
       return t.expect<CompleteTensorType>()->sizes();
