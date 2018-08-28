@@ -21,7 +21,7 @@
 
 CAFFE2_DEFINE_string(
     caffe2_net_async_tracing_filepath,
-    "/tmp",
+    "/tmp/",
     "Path to save tracing information");
 
 CAFFE2_DEFINE_string(
@@ -38,6 +38,11 @@ CAFFE2_DEFINE_int(
     10000,
     "Dump profiling result file every Nth batch");
 
+CAFFE2_DEFINE_int(
+    caffe2_net_async_tracing_dumping_times,
+    10,
+    "The number of times we dump profiling results (per net name)");
+
 namespace caffe2 {
 namespace tracing {
 
@@ -53,11 +58,31 @@ int getCounterForNetName(const std::string& net_name) {
   return counter;
 }
 
+std::string getNetTracingFilePath(const NetBase* net) {
+  const std::string filepath_arg_name = "tracing_filepath_override";
+
+  if (!net->has_debug_def() ||
+      !ArgumentHelper::HasArgument(net->debug_def(), filepath_arg_name)) {
+    return FLAGS_caffe2_net_async_tracing_filepath;
+  }
+
+  const Argument& filepath_arg =
+      GetArgument(net->debug_def(), filepath_arg_name);
+  if (!filepath_arg.has_s()) {
+    return FLAGS_caffe2_net_async_tracing_filepath;
+  }
+
+  return filepath_arg.s();
+}
+
 Tracer::Tracer(const NetBase* net, const std::string& net_name)
     : net_(net), filename_(net_name), iter_(0) {
   std::replace(filename_.begin(), filename_.end(), '/', '_');
-  filename_ = FLAGS_caffe2_net_async_tracing_filepath + "/" + filename_ +
-      +"_id_" + caffe2::to_string(getCounterForNetName(net_name));
+  std::replace(filename_.begin(), filename_.end(), ':', '-');
+  // Do not append "/" after the filepath, since sometimes it could also include
+  // a prefix for all profiling result filenames, eg. a namespace prefix.
+  filename_ = getNetTracingFilePath(net) + filename_ + "_id_" +
+      caffe2::to_string(getCounterForNetName(net_name));
   timer_.Start();
 }
 
@@ -268,13 +293,17 @@ void Tracer::dumpTracingResultAndClearEvents(const std::string& file_suffix) {
   serialized << "\n]\n";
 
   auto output_file_name = filename_ + "_iter_" + file_suffix + ".json";
-  LOG(INFO) << "Dumping profiling result file to " << output_file_name;
-  WriteStringToFile(serialized.str(), output_file_name.c_str());
+
+  if (WriteStringToFile(serialized.str(), output_file_name.c_str())) {
+    LOG(INFO) << "Profiling result is written to file " << output_file_name;
+  } else {
+    LOG(INFO) << "Unable to write profiling result to file "
+              << output_file_name;
+  }
   events_.clear();
 }
 
 Tracer::~Tracer() {
-  dumpTracingResultAndClearEvents("final_batch");
 }
 
 void TracerGuard::init(Tracer* tracer) {
@@ -403,12 +432,23 @@ bool startIter(const std::shared_ptr<Tracer>& tracer) {
     return false;
   }
   auto iter = tracer->bumpIter();
+
+  bool done_profiling = (iter / FLAGS_caffe2_net_async_tracing_dumping_nth) >
+      FLAGS_caffe2_net_async_tracing_dumping_times;
+  if (done_profiling) {
+    // We have enough profiling results, so we no longer need to collect them.
+    tracer->setEnabled(false);
+    return false;
+  }
+
   auto is_enabled = iter % FLAGS_caffe2_net_async_tracing_nth == 0;
   tracer->setEnabled(is_enabled);
+
   if (iter % FLAGS_caffe2_net_async_tracing_dumping_nth == 0) {
     int dumping_iter = iter / FLAGS_caffe2_net_async_tracing_dumping_nth;
     tracer->dumpTracingResultAndClearEvents(caffe2::to_string(dumping_iter));
   }
+
   return is_enabled;
 }
 
