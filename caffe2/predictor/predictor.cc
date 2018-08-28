@@ -13,23 +13,29 @@ void enforceIsTensor(Workspace* ws, const std::string& name) {
       blob->template IsType<Tensor>(CPU), "Blob is not a CPU Tensor: ", name);
 }
 
-void shareInputTensor(
-    Workspace* ws,
-    const std::string& name,
-    TensorCPU* input) {
-  enforceIsTensor(ws, name);
-  auto* blob = ws->GetBlob(name);
-  CAFFE_ENFORCE(blob, "Blob: ", name, " does not exist");
-  auto* tensor = blob->GetMutableTensor(CPU);
-  tensor->ResizeLike(*input);
-  tensor->ShareData(*input);
-}
-
-TensorCPU* extractOutputTensor(Workspace* ws, const std::string& name) {
+TensorCPU* getTensor(Workspace* ws, const std::string& name) {
   enforceIsTensor(ws, name);
   auto* blob = ws->GetBlob(name);
   CAFFE_ENFORCE(blob, "Blob: ", name, " does not exist");
   return blob->GetMutableTensor(CPU);
+}
+
+void shareInputTensor(
+    Workspace* ws,
+    const std::string& name,
+    const TensorCPU& input) {
+  auto tensor = getTensor(ws, name);
+  tensor->ResizeLike(input);
+  tensor->ShareData(input);
+}
+
+void exportOutputTensor(
+    Workspace* ws,
+    const std::string& name,
+    TensorCPU& output) {
+  auto tensor = getTensor(ws, name);
+  output.Resize(tensor->dims());
+  output.ShareData(*tensor);
 }
 
 } // namespace
@@ -40,7 +46,12 @@ Predictor::Predictor(
     Workspace* parent,
     bool run_init,
     int optimization)
-    : Predictor(makePredictorConfig(init_net, run_net, parent, run_init)) {}
+    : Predictor(makePredictorConfig(
+          init_net,
+          run_net,
+          parent,
+          run_init,
+          optimization)) {}
 
 Predictor::Predictor(PredictorConfig config) : config_(std::move(config)) {
   const auto& initialized_vec = config_.ws->Blobs();
@@ -55,7 +66,7 @@ Predictor::Predictor(PredictorConfig config) : config_(std::move(config)) {
   CAFFE_ENFORCE(config_.ws->CreateNet(config_.predict_net));
 }
 
-bool Predictor::run(const TensorVector& inputs, TensorVector* outputs) {
+bool Predictor::operator()(const TensorList& inputs, TensorList* outputs) {
   CAFFE_ENFORCE(
       inputs.size() <=
       static_cast<unsigned>(config_.predict_net->external_input_size()));
@@ -67,11 +78,13 @@ bool Predictor::run(const TensorVector& inputs, TensorVector* outputs) {
   if (!config_.ws->RunNet(config_.predict_net->name())) {
     return false;
   }
-
-  outputs->resize(config_.predict_net->external_output_size());
-  for (size_t i = 0; i < outputs->size(); ++i) {
-    (*outputs)[i] = extractOutputTensor(
-        config_.ws.get(), config_.predict_net->external_output(i));
+  outputs->clear();
+  for (size_t i = 0; i < config_.predict_net->external_output_size(); ++i) {
+    outputs->emplace_back(CPU);
+    exportOutputTensor(
+        config_.ws.get(),
+        config_.predict_net->external_output(i),
+        outputs->back());
   }
   return true;
 }
@@ -80,7 +93,7 @@ bool Predictor::run_map_workspace(const TensorMap& inputs) {
   if (!config_.input_names.empty()) {
     CAFFE_ENFORCE_EQ(inputs.size(), input_names().size());
   }
-  for (auto input : inputs) {
+  for (auto& input : inputs) {
     if (!input_names().empty()) {
       CAFFE_ENFORCE(
           std::find(input_names().begin(), input_names().end(), input.first) !=
@@ -94,27 +107,29 @@ bool Predictor::run_map_workspace(const TensorMap& inputs) {
   return config_.ws->RunNet(config_.predict_net->name());
 }
 
-bool Predictor::run_map(const TensorMap& inputs, TensorVector* outputs) {
+bool Predictor::operator()(const TensorMap& inputs, TensorList* outputs) {
   if (!run_map_workspace(inputs)) {
     return false;
   }
-
-  outputs->resize(config_.predict_net->external_output_size());
-  for (size_t i = 0; i < outputs->size(); ++i) {
-    (*outputs)[i] = extractOutputTensor(
-        config_.ws.get(), config_.predict_net->external_output(i));
+  outputs->clear();
+  for (size_t i = 0; i < config_.predict_net->external_output_size(); ++i) {
+    outputs->emplace_back(CPU);
+    exportOutputTensor(
+        config_.ws.get(),
+        config_.predict_net->external_output(i),
+        outputs->back());
   }
   return true;
 }
 
-bool Predictor::run_map_outputs(const TensorMap& inputs, TensorMap* outputs) {
+bool Predictor::operator()(const TensorMap& inputs, TensorMap* outputs) {
   if (!run_map_workspace(inputs)) {
     return false;
   }
 
-  outputs->reserve(output_names().size());
   for (const std::string& outputName : output_names()) {
-    (*outputs)[outputName] = extractOutputTensor(config_.ws.get(), outputName);
+    auto iter = outputs->emplace(outputName, TensorCPU(CPU));
+    exportOutputTensor(config_.ws.get(), outputName, iter.first->second);
   }
   return true;
 }

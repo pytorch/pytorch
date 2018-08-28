@@ -127,14 +127,14 @@ struct Method {
     for (size_t i=0; i < retval->inputs().size(); ++i) {
       auto scalar_type = inputs[i].type().scalarType();
       auto sizes = inputs[i].sizes();
-      auto type = torch::jit::TensorType::create(scalar_type, -1, sizes);
+      auto type = torch::jit::CompleteTensorType::create(scalar_type, -1, sizes);
       retval->inputs()[i]->setType(type);
     }
     JIT_ASSERT(retval->outputs().size() == outputs.size());
     for (size_t i=0; i < retval->outputs().size(); ++i) {
       auto scalar_type = outputs[i].type().scalarType();
       auto sizes = outputs[i].sizes();
-      auto type = torch::jit::TensorType::create(scalar_type, -1, sizes);
+      auto type = torch::jit::CompleteTensorType::create(scalar_type, -1, sizes);
       retval->outputs()[i]->setType(type);
     }
     return retval;
@@ -149,12 +149,9 @@ struct Method {
     return *this;
   }
 
-  const FunctionSchema& getSchema() const {
-    AT_ASSERT(schema != nullptr);
-    return *schema;
-  }
+  const FunctionSchema& getSchema() const;
 
-  std::string prettyPrintSchema() const {
+  std::string pretty_print_schema() const {
     JIT_ASSERT(schema);
     std::stringstream ss;
     ss << *schema;
@@ -205,7 +202,9 @@ private:
   std::function<void(Method&)> method_creator;
 
   // if absent, then we generate a default schema based on the graph
-  std::unique_ptr<FunctionSchema> schema;
+  // mutable because getSchema caches the default schema if one is requested
+  // before a call to setSchema
+  mutable std::unique_ptr<FunctionSchema> schema;
 };
 
 struct Module;

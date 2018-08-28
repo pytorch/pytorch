@@ -114,7 +114,7 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
 
     std::stringstream failure_messages;
     at::optional<std::vector<Value*>> all_inputs =
-      tryMatchSchema(schema, loc, *m.graph(), inputs_, attributes, failure_messages);
+      tryMatchSchema(schema, loc, *m.graph(), inputs_, attributes, failure_messages, /*conv_tensor_to_num*/true);
     if (!all_inputs)
       throw ErrorReport(loc) << failure_messages.str();
 
@@ -552,11 +552,11 @@ void initJitScriptBindings(PyObject* module) {
           auto graph = tracer::createGraphByTracing(func, inputs, input_tuple.size());
           self.create_method(name, std::move(graph), std::move(parameters));
       })
-      .def("graph_for", [](Module& self, py::args args) {
+      .def("graph_for", [](Module& self, py::args args, py::kwargs kwargs) {
         if (self.find_method("forward")) {
           Method & m = self.get_method("forward");
           return m.graph_for(
-              evilDeprecatedBadCreateStackDoNotUse(args, m.graph()->inputs()));
+              createStackForSchema(m.getSchema(), std::move(args), std::move(kwargs)));
         }
         throw std::runtime_error("Attempted to call graph_for on a Module without a compiled forward()");
       })
@@ -567,14 +567,14 @@ void initJitScriptBindings(PyObject* module) {
         }
         throw std::runtime_error("Attempted to call get_debug_state on a Module without a compiled forward()");
       })
-      .def("forward", [](Module& self, py::args args) {
+      .def("forward", [](Module& self, py::args args, py::kwargs kwargs) {
         // We implement this in C++ to avoid incurring the pybind11 dispatch
         // overhead twice: once to call into the method lookup for "forward"
         // and once to actually invoke the method.
         //
         // There is a thin wrapper on top of this method in the C++ version of
         // ScriptModule.
-        return invokeScriptMethodFromPython(self.get_method("forward"), args);
+        return invokeScriptMethodFromPython(self.get_method("forward"), std::move(args), std::move(kwargs));
       });
 
   py::class_<Method>(m, "ScriptMethod", py::dynamic_attr())
@@ -588,14 +588,14 @@ void initJitScriptBindings(PyObject* module) {
     .def("propagate_shapes", &Method::propagate_shapes)
     .def("propagate_and_assign_input_and_output_shapes", &Method::propagate_and_assign_input_and_output_shapes)
     .def("params", &Method::params)
-    .def("graph_for", [](Method& self, py::args args) {
-      return self.graph_for(evilDeprecatedBadCreateStackDoNotUse(args, self.graph()->inputs()));
+    .def("graph_for", [](Method& self, py::args args, py::kwargs kwargs) {
+      return self.graph_for(createStackForSchema(self.getSchema(), std::move(args), std::move(kwargs)));
     })
     .def("forward_schema", [](Method &self, Def &def, bool is_method) {
       auto schema = extractSchemaFromDef(def, is_method);
       self.setSchema(schema);
     })
-    .def("pretty_print_schema", &Method::prettyPrintSchema);
+    .def("pretty_print_schema", &Method::pretty_print_schema);
 
   m.def("_jit_script_compile", [](const Def &def, ResolutionCallback rcb) {
     return compileFunction(def, pythonResolver(rcb));

@@ -5,11 +5,18 @@
 #include <limits.h>
 #include <assert.h>
 #include "THCHalf.h"
+#include "ATen/ATen.h"
+#include "ATen/cuda/NumericLimits.cuh"
 
-/// Class for numeric limits of the particular data type, which
-/// includes support for `half`.
-/// Unfortunately since `half` does not have a constructor, these have
-/// to be expressed as functions (either that or non-const statics).
+// WARNING: THCNumerics is being deprecated. Please follow the comments
+// in this file to learn about new usages.
+// Comments on usage:
+//      - lt,le,gt,ge,eq,neg,add,mul,sub,div and other binary ops can
+//        be implemented using CUDA_apply_utils or binary cuda kernel
+//      - Check NumericLimits.cuh for specialized math functions.
+//      - Note how __half and at::Half can be casted. for instance:
+//        static_cast<at::Half>(std::sin(static_cast<at::Half>(a)));
+
 template <typename T>
 struct THCNumerics {
 };
@@ -28,10 +35,12 @@ static inline __host__ __device__ scalar_t powi(scalar_t a, scalar_t b) {
   return result;
 }
 
+// DEPRECATED: For integral types, use math functions from std and NumericLimits.cuh. 
+//             Use binary_kernel or CUDA_apply_utils for arithmetic
 template <>
 struct THCNumerics<uint8_t> {
-  static inline __host__ __device__ uint8_t min() { return 0; }
-  static inline __host__ __device__ uint8_t max() { return UCHAR_MAX; }
+  static inline __host__ __device__ uint8_t min() { return at::numeric_limits<uint8_t>::lowest(); }
+  static inline __host__ __device__ uint8_t max() { return at::numeric_limits<uint8_t>::max(); }
 
   static inline __host__ __device__ bool lt(uint8_t a, uint8_t b) { return a < b; }
   static inline __host__ __device__ bool le(uint8_t a, uint8_t b) { return a <= b; }
@@ -53,8 +62,8 @@ struct THCNumerics<uint8_t> {
 
 template <>
 struct THCNumerics<int8_t> {
-  static inline __host__ __device__ int8_t min() { return SCHAR_MIN; }
-  static inline __host__ __device__ int8_t max() { return SCHAR_MAX; }
+  static inline __host__ __device__ int8_t min() { return at::numeric_limits<int8_t>::lowest(); }
+  static inline __host__ __device__ int8_t max() { return at::numeric_limits<int8_t>::max(); }
 
   static inline __host__ __device__ bool lt(int8_t a, int8_t b) { return a < b; }
   static inline __host__ __device__ bool le(int8_t a, int8_t b) { return a <= b; }
@@ -76,8 +85,8 @@ struct THCNumerics<int8_t> {
 
 template <>
 struct THCNumerics<int16_t> {
-  static inline __host__ __device__ int16_t min() { return SHRT_MIN; }
-  static inline __host__ __device__ int16_t max() { return SHRT_MAX; }
+  static inline __host__ __device__ int16_t min() { return at::numeric_limits<int16_t>::lowest(); }
+  static inline __host__ __device__ int16_t max() { return at::numeric_limits<int16_t>::max(); }
 
   static inline __host__ __device__ bool lt(int16_t a, int16_t b) { return a < b; }
   static inline __host__ __device__ bool le(int16_t a, int16_t b) { return a <= b; }
@@ -99,8 +108,8 @@ struct THCNumerics<int16_t> {
 
 template <>
 struct THCNumerics<int32_t> {
-  static inline __host__ __device__ int32_t min() { return INT_MIN; }
-  static inline __host__ __device__ int32_t max() { return INT_MAX; }
+  static inline __host__ __device__ int32_t min() { return at::numeric_limits<int32_t>::lowest(); }
+  static inline __host__ __device__ int32_t max() { return at::numeric_limits<int32_t>::max(); }
 
   static inline __host__ __device__ bool lt(int32_t a, int32_t b) { return a < b; }
   static inline __host__ __device__ bool le(int32_t a, int32_t b) { return a <= b; }
@@ -122,13 +131,8 @@ struct THCNumerics<int32_t> {
 
 template <>
 struct THCNumerics<int64_t> {
-#ifdef _MSC_VER
-  static inline __host__ __device__ int64_t min() { return _I64_MIN; }
-  static inline __host__ __device__ int64_t max() { return _I64_MAX; }
-#else
-  static inline __host__ __device__ int64_t min() { return LONG_MIN; }
-  static inline __host__ __device__ int64_t max() { return LONG_MAX; }
-#endif
+  static inline __host__ __device__ int64_t min() { return at::numeric_limits<int64_t>::lowest(); }
+  static inline __host__ __device__ int64_t max() { return at::numeric_limits<int64_t>::max(); }
 
   static inline __host__ __device__ bool lt(int64_t a, int64_t b) { return a < b; }
   static inline __host__ __device__ bool le(int64_t a, int64_t b) { return a <= b; }
@@ -149,430 +153,222 @@ struct THCNumerics<int64_t> {
   static inline __host__ __device__  bool isinf(int64_t a) { return false; }
 };
 
+// DEPRECATED: use math functions from std and NumericLimits.cuh
 template <>
 struct THCNumerics<half> {
-#if CUDA_VERSION < 9000
-  static inline __host__ __device__ half min() { half h; h.x = 0xfbff; return h; }
-  static inline __host__ __device__ half max() { half h; h.x = 0x7bff; return h; }
-#else
-  static inline __host__ __device__ half min() { __half_raw h; h.x = 0xfbff; return h; }
-  static inline __host__ __device__ half max() { __half_raw h; h.x = 0x7bff; return h; }
-#endif
+  static inline __host__ __device__ half min() { return at::numeric_limits<at::Half>::lowest(); }
+  static inline __host__ __device__ half max() { return at::numeric_limits<at::Half>::max(); }
 
   static inline __host__ __device__ bool lt(half a, half b) {
-#ifdef __CUDA_ARCH__
-    float fa = __half2float(a);
-    float fb = __half2float(b);
-    return fa < fb;
-#else // __CUDA_ARCH__
-    return THC_half2float(a) < THC_half2float(b);
-#endif
+    return static_cast<at::Half>(a) < static_cast<at::Half>(b);
   }
 
   static inline __host__ __device__ bool le(half a, half b) {
-#ifdef __CUDA_ARCH__
-    float fa = __half2float(a);
-    float fb = __half2float(b);
-    return fa <= fb;
-#else // __CUDA_ARCH__
-    return THC_half2float(a) <= THC_half2float(b);
-#endif
+    return static_cast<at::Half>(a) <= static_cast<at::Half>(b);
   }
 
   static inline __host__ __device__ bool gt(half a, half b) {
-#ifdef __CUDA_ARCH__
-    float fa = __half2float(a);
-    float fb = __half2float(b);
-    return fa > fb;
-#else // __CUDA_ARCH__
-    return THC_half2float(a) > THC_half2float(b);
-#endif
+    return static_cast<at::Half>(a) > static_cast<at::Half>(b);
   }
 
   static inline __host__ __device__ bool ge(half a, half b) {
-#ifdef __CUDA_ARCH__
-    float fa = __half2float(a);
-    float fb = __half2float(b);
-    return fa >= fb;
-#else // __CUDA_ARCH__
-    return THC_half2float(a) >= THC_half2float(b);
-#endif
+    return static_cast<at::Half>(a) >= static_cast<at::Half>(b);
   }
 
   static inline __host__ __device__ bool eq(half a, half b) {
-#ifdef __CUDA_ARCH__
-    float fa = __half2float(a);
-    float fb = __half2float(b);
-    return fa == fb;
-#else // __CUDA_ARCH__
-    return THC_half2float(a) == THC_half2float(b);
-#endif
+    // has to be explicitly casted to float for now, otherwise get error: more than one operator "==" matches these operands
+    // Note: find the overloading for == and != (probably THCTensorTypeUtils.cuh) and resolve
+    return static_cast<float>(static_cast<at::Half>(a)) == static_cast<float>(static_cast<at::Half>(b));
   }
 
   static inline __host__ __device__ bool ne(half a, half b) {
-#ifdef __CUDA_ARCH__
-    float fa = __half2float(a);
-    float fb = __half2float(b);
-    return fa != fb;
-#else // __CUDA_ARCH__
-    return THC_half2float(a) != THC_half2float(b);
-#endif
+    // has to be explicitly casted to float for now, otherwise get error: more than one operator "==" matches these operands
+    // Note: find the overloading for == and != (probably THCTensorTypeUtils.cuh) and resolve
+    return static_cast<float>(static_cast<at::Half>(a)) != static_cast<float>(static_cast<at::Half>(b));
   }
 
   static inline __host__ __device__ half exp(half a) {
-#ifdef __CUDA_ARCH__
-    float fa = __half2float(a);
-    return __float2half(expf(fa));
-#else // __CUDA_ARCH__
-    return THC_float2half(expf(THC_half2float(a)));
-#endif
+    return static_cast<at::Half>(std::exp(static_cast<at::Half>(a)));
   }
-
+  
+  // note that exp10 is not in the std namespace. 
   static inline __host__ __device__ half exp10(half a) {
-#ifdef __CUDA_ARCH__
-    float fa = __half2float(a);
-    return __float2half(exp10f(fa));
-#else // __CUDA_ARCH__
-    return THC_float2half(exp10f(THC_half2float(a)));
-#endif
+    return static_cast<at::Half>(::exp10(static_cast<at::Half>(a)));
   }
 
   static inline __host__ __device__ half log(half a) {
-#ifdef __CUDA_ARCH__
-    float fa = __half2float(a);
-    return __float2half(logf(fa));
-#else // __CUDA_ARCH__
-    return THC_float2half(logf(THC_half2float(a)));
-#endif
+    return static_cast<at::Half>(::log(static_cast<at::Half>(a)));
   }
 
   static inline __host__ __device__ half log10(half a) {
-#ifdef __CUDA_ARCH__
-    float fa = __half2float(a);
-    return __float2half(log10f(fa));
-#else // __CUDA_ARCH__
-    return THC_float2half(log10f(THC_half2float(a)));
-#endif
+    return static_cast<at::Half>(::log10(static_cast<at::Half>(a)));
   }
 
   static inline __host__ __device__ half log1p(half a) {
-#ifdef __CUDA_ARCH__
-    float fa = __half2float(a);
-    return __float2half(log1pf(fa));
-#else // __CUDA_ARCH__
-    return THC_float2half(log1pf(THC_half2float(a)));
-#endif
+    return static_cast<at::Half>(::log1p(static_cast<at::Half>(a)));
   }
 
   static inline __host__ __device__ half log2(half a) {
-#ifdef __CUDA_ARCH__
-    float fa = __half2float(a);
-    return __float2half(log2f(fa));
-#else // __CUDA_ARCH__
-    return THC_float2half(log2f(THC_half2float(a)));
-#endif
+    return static_cast<at::Half>(::log2(static_cast<at::Half>(a)));
   }
 
-static inline __host__ __device__ half lgamma(half a) {
-#ifdef __CUDA_ARCH__
-    float fa = __half2float(a);
-    return __float2half(lgammaf(fa));
-#else // __CUDA_ARCH__
-    return THC_float2half(lgammaf(THC_half2float(a)));
-#endif
+  static inline __host__ __device__ half lgamma(half a) {
+    return static_cast<at::Half>(::lgamma(static_cast<at::Half>(a)));
   }
 
   static inline __host__ __device__ half expm1(half a) {
-#ifdef __CUDA_ARCH__
-    float fa = __half2float(a);
-    return __float2half(expm1f(fa));
-#else // __CUDA_ARCH__
-    return THC_float2half(expm1f(THC_half2float(a)));
-#endif
+    return static_cast<at::Half>(::expm1(static_cast<at::Half>(a)));
   }
 
   static inline __host__ __device__ half cos(half a) {
-#ifdef __CUDA_ARCH__
-    float fa = __half2float(a);
-    return __float2half(cosf(fa));
-#else // __CUDA_ARCH__
-    return THC_float2half(cosf(THC_half2float(a)));
-#endif
+    return static_cast<at::Half>(::cos(static_cast<at::Half>(a)));
   }
 
   static inline __host__ __device__ half sin(half a) {
-#ifdef __CUDA_ARCH__
-    float fa = __half2float(a);
-    return __float2half(sinf(fa));
-#else // __CUDA_ARCH__
-    return THC_float2half(sinf(THC_half2float(a)));
-#endif
+    return static_cast<at::Half>(::sin(static_cast<at::Half>(a)));
   }
 
   static inline __host__ __device__ half sqrt(half a) {
-#ifdef __CUDA_ARCH__
-    float fa = __half2float(a);
-    return __float2half(sqrtf(fa));
-#else // __CUDA_ARCH__
-    return THC_float2half(sqrtf(THC_half2float(a)));
-#endif
+    return static_cast<at::Half>(::sqrt(static_cast<at::Half>(a)));
   }
 
+  // note that rsqrt is not in the std namespace. 
   static inline __host__ __device__ half rsqrt(half a) {
-#ifdef __CUDA_ARCH__
-    float fa = __half2float(a);
-    return __float2half(rsqrtf(fa));
-#else // __CUDA_ARCH__
-    return THC_float2half(rsqrtf(THC_half2float(a)));
-#endif
+    return static_cast<at::Half>(::rsqrt(static_cast<at::Half>(a)));
   }
 
   static inline __host__ __device__ half ceil(half a) {
-#ifdef __CUDA_ARCH__
-    float fa = __half2float(a);
-    return __float2half(ceilf(fa));
-#else // __CUDA_ARCH__
-    return THC_float2half(ceilf(THC_half2float(a)));
-#endif
+    return static_cast<at::Half>(::ceil(static_cast<at::Half>(a)));
   }
 
   static inline __host__ __device__ half floor(half a) {
-#ifdef __CUDA_ARCH__
-    float fa = __half2float(a);
-    return __float2half(floorf(fa));
-#else // __CUDA_ARCH__
-    return THC_float2half(floorf(THC_half2float(a)));
-#endif
+    return static_cast<at::Half>(::floor(static_cast<at::Half>(a)));
   }
 
   static inline __host__ __device__ half trunc(half a) {
-#ifdef __CUDA_ARCH__
-    float fa = __half2float(a);
-    return __float2half(truncf(fa));
-#else // __CUDA_ARCH__
-    return THC_float2half(truncf(THC_half2float(a)));
-#endif
+    return static_cast<at::Half>(::trunc(static_cast<at::Half>(a)));
   }
 
   static inline __host__ __device__ half neg(half a) {
-#ifdef __CUDA_ARCH__
-    float fa = __half2float(a);
-    return __float2half(-fa);
-#else // __CUDA_ARCH__
-    return THC_float2half(-(THC_half2float(a)));
-#endif
+    return static_cast<at::Half>(-(static_cast<at::Half>(a)));
   }
 
   static inline __host__ __device__ half acos(half a) {
-#ifdef __CUDA_ARCH__
-    float fa = __half2float(a);
-    return __float2half(acosf(fa));
-#else // __CUDA_ARCH__
-    return THC_float2half(acosf(THC_half2float(a)));
-#endif
+    return static_cast<at::Half>(::acos(static_cast<at::Half>(a)));
   }
 
   static inline __host__ __device__ half cosh(half a) {
-#ifdef __CUDA_ARCH__
-    float fa = __half2float(a);
-    return __float2half(coshf(fa));
-#else // __CUDA_ARCH__
-    return THC_float2half(coshf(THC_half2float(a)));
-#endif
+    return static_cast<at::Half>(::cosh(static_cast<at::Half>(a)));
   }
 
   static inline __host__ __device__ half asin(half a) {
-#ifdef __CUDA_ARCH__
-    float fa = __half2float(a);
-    return __float2half(asinf(fa));
-#else // __CUDA_ARCH__
-    return THC_float2half(asinf(THC_half2float(a)));
-#endif
+    return static_cast<at::Half>(::asin(static_cast<at::Half>(a)));
   }
 
   static inline __host__ __device__ half sinh(half a) {
-#ifdef __CUDA_ARCH__
-    float fa = __half2float(a);
-    return __float2half(sinhf(fa));
-#else // __CUDA_ARCH__
-    return THC_float2half(sinhf(THC_half2float(a)));
-#endif
+    return static_cast<at::Half>(::sinh(static_cast<at::Half>(a)));
   }
 
   static inline __host__ __device__ half tan(half a) {
-#ifdef __CUDA_ARCH__
-    float fa = __half2float(a);
-    return __float2half(tanf(fa));
-#else // __CUDA_ARCH__
-    return THC_float2half(tanf(THC_half2float(a)));
-#endif
+    return static_cast<at::Half>(::tan(static_cast<at::Half>(a)));
   }
 
   static inline __host__ __device__ half atan(half a) {
-#ifdef __CUDA_ARCH__
-    float fa = __half2float(a);
-    return __float2half(atanf(fa));
-#else // __CUDA_ARCH__
-    return THC_float2half(atanf(THC_half2float(a)));
-#endif
+    return static_cast<at::Half>(::atan(static_cast<at::Half>(a)));
   }
 
   static inline __host__ __device__ half tanh(half a) {
-#ifdef __CUDA_ARCH__
-    float fa = __half2float(a);
-    return __float2half(tanhf(fa));
-#else // __CUDA_ARCH__
-    return THC_float2half(tanhf(THC_half2float(a)));
-#endif
+    return static_cast<at::Half>(::tanh(static_cast<at::Half>(a)));
   }
 
 
    static inline __host__ __device__ half erf(half a) {
-#ifdef __CUDA_ARCH__
-    float fa = __half2float(a);
-    return __float2half(erff(fa));
-#else // __CUDA_ARCH__
-    return THC_float2half(erff(THC_half2float(a)));
-#endif
+    return static_cast<at::Half>(::erf(static_cast<at::Half>(a)));
   }
 
 
    static inline __host__ __device__ half erfc(half a) {
-#ifdef __CUDA_ARCH__
-    float fa = __half2float(a);
-    return __float2half(erfcf(fa));
-#else // __CUDA_ARCH__
-    return THC_float2half(erfcf(THC_half2float(a)));
-#endif
+    return static_cast<at::Half>(::erfc(static_cast<at::Half>(a)));
   }
 
-
+  // note that erfinv is not in the std namespace.
   static inline __host__ __device__ half erfinv(half a) {
-#ifdef __CUDA_ARCH__
-    float fa = __half2float(a);
-    return __float2half(erfinvf(fa));
-#else // __CUDA_ARCH__
-    return THC_float2half(erfinvf(THC_half2float(a)));
-#endif
+    return static_cast<at::Half>(::erfinv(static_cast<at::Half>(a)));
   }
 
   static inline __host__ __device__ half abs(half a) {
-#ifdef __CUDA_ARCH__
-    float fa = __half2float(a);
-    return __float2half(fabs(fa));
-#else // __CUDA_ARCH__
-    return THC_float2half(fabs(THC_half2float(a)));
-#endif
+    return static_cast<at::Half>(::abs(static_cast<at::Half>(a)));
   }
 
   static inline __host__ __device__ half round(half a) {
-#ifdef __CUDA_ARCH__
-    float fa = __half2float(a);
-    return __float2half(roundf(fa));
-#else // __CUDA_ARCH__
-    return THC_float2half(roundf(THC_half2float(a)));
-#endif
+    return static_cast<at::Half>(::round(static_cast<at::Half>(a)));
   }
 
   static inline __host__ __device__ half frac(half a) {
-#ifdef __CUDA_ARCH__
-    float fa = __half2float(a);
-    return __float2half(fa - truncf(fa));
-#else // __CUDA_ARCH__
-    float fa = THC_half2float(a);
-    return THC_float2half(fa - floorf(fa));
-#endif
+    #ifdef __CUDA_ARCH__
+        return static_cast<at::Half>(a) - static_cast<at::Half>(::trunc(static_cast<at::Half>(a)));
+    #else // __CUDA_ARCH__
+        return static_cast<at::Half>(a) - static_cast<at::Half>(::floor(static_cast<at::Half>(a)));
+    #endif
   }
 
   static inline __host__ __device__ half cinv(half a) {
-#ifdef __CUDA_ARCH__
-    float fa = __half2float(a);
-    return __float2half(1.0f / fa);
-#else // __CUDA_ARCH__
-    return THC_float2half(1.0f / THC_half2float(a));
-#endif
+    return static_cast<at::Half>(1.0f / static_cast<at::Half>(a));
   }
 
   static inline __host__ __device__ half add(half a, half b) {
-#ifdef __CUDA_ARCH__
-    float fa = __half2float(a);
-    float fb = __half2float(b);
-    return __float2half( fa + fb );
-#else // __CUDA_ARCH__
-    return THC_float2half(THC_half2float(a) + THC_half2float(b));
-#endif
+    return static_cast<at::Half>(a) + static_cast<at::Half>(b);
   }
 
   static inline __host__ __device__ half div(half a, half b) {
-#ifdef __CUDA_ARCH__
-    float fa = __half2float(a);
-    float fb = __half2float(b);
-    return __float2half( fa / fb );
-#else // __CUDA_ARCH__
-    return THC_float2half(THC_half2float(a) / THC_half2float(b));
-#endif
+    return static_cast<at::Half>(a) / static_cast<at::Half>(b);
   }
 
   static inline __host__ __device__ half mul(half a, half b) {
-#ifdef __CUDA_ARCH__
-    float fa = __half2float(a);
-    float fb = __half2float(b);
-    return __float2half( fa * fb );
-#else // __CUDA_ARCH__
-    return THC_float2half(THC_half2float(a) * THC_half2float(b));
-#endif
+    return static_cast<at::Half>(a) * static_cast<at::Half>(b);
   }
 
   static inline __host__ __device__ half sub(half a, half b) {
-#ifdef __CUDA_ARCH__
-    float fa = __half2float(a);
-    float fb = __half2float(b);
-    return __float2half( fa - fb );
-#else // __CUDA_ARCH__
-    return THC_float2half(THC_half2float(a) - THC_half2float(b));
-#endif
+    return static_cast<at::Half>(a) - static_cast<at::Half>(b);
   }
 
   static inline __host__ __device__ half pow(half a, half b) {
-#ifdef __CUDA_ARCH__
-    float fa = __half2float(a);
-    float fb = __half2float(b);
-    return __float2half(powf(fa, fb));
-#else // __CUDA_ARCH__
-    return THC_float2half(powf(THC_half2float(a), THC_half2float(b)));
-#endif
+    return static_cast<at::Half>(::pow(static_cast<at::Half>(a), static_cast<at::Half>(b)));
   }
 
   static inline __host__ __device__ half atan2(half a, half b) {
-#ifdef __CUDA_ARCH__
-    float fa = __half2float(a);
-    float fb = __half2float(b);
-    return __float2half(atan2f(fa, fb));
-#else // __CUDA_ARCH__
-    return THC_float2half(atan2f(THC_half2float(a), THC_half2float(b)));
-#endif
+    return static_cast<at::Half>(::atan2(static_cast<at::Half>(a), static_cast<at::Half>(b)));
   }
 
   static inline __host__ __device__ bool isnan(half a) {
-    // implemented using that a!=a if and only if a is nan
-    return ne(a, a);
+    #ifdef _MSC_VER
+      // Windows requires this explicit conversion. The reason is unclear
+      // related issue with clang: https://reviews.llvm.org/D37906
+      return ::isnan((float)static_cast<at::Half>(a));
+    #else
+      return ::isnan(static_cast<at::Half>(a));
+    #endif
   }
 
   static inline __host__ __device__ bool isinf(half a) {
-#ifdef __CUDA_ARCH__
-    float fa = __half2float(a);
-    return ::isinf(fa);
-#else // __CUDA_ARCH__
-    return ::isinf(THC_half2float(a));
-#endif
+    #ifdef _MSC_VER
+      // Windows requires this explicit conversion. The reason is unclear
+      // related issue with clang: https://reviews.llvm.org/D37906
+      return ::isinf((float)static_cast<at::Half>(a));
+    #else
+      return ::isinf(static_cast<at::Half>(a));
+    #endif
   }
 
 };
 
+// DEPRECATED: use math functions from std and cuda math API (if needed)
+//             note that the functions exp10,rsqrt,erfinv,frac and cinv
+//             are not in the std namespace
 template <>
 struct THCNumerics<float> {
-  static inline __host__ __device__ float min() { return -FLT_MAX; }
-  static inline __host__ __device__ float max() { return FLT_MAX; }
+  static inline __host__ __device__ float min() { return at::numeric_limits<float>::lowest(); }
+  static inline __host__ __device__ float max() { return at::numeric_limits<float>::max(); }
 
   static inline __host__ __device__ bool lt(float a, float b) { return a < b; }
   static inline __host__ __device__ bool le(float a, float b) { return a <= b; }
@@ -623,10 +419,13 @@ struct THCNumerics<float> {
   static inline __host__ __device__  bool isinf(float a) { return ::isinf(a); }
 };
 
+// DEPRECATED: use math functions from std and cuda math API (if needed)
+//             note that the functions exp10,rsqrt,erfinv,frac and cinv
+//             are not in the std namespace
 template <>
 struct THCNumerics<double> {
-  static inline __host__ __device__ double min() { return -DBL_MAX; }
-  static inline __host__ __device__ double max() { return DBL_MAX; }
+  static inline __host__ __device__ double min() { return at::numeric_limits<double>::lowest(); }
+  static inline __host__ __device__ double max() { return at::numeric_limits<double>::max(); }
 
   static inline __host__ __device__ bool lt(double a, double b) { return a < b; }
   static inline __host__ __device__ bool le(double a, double b) { return a <= b; }
@@ -663,7 +462,7 @@ struct THCNumerics<double> {
   static inline __host__ __device__  double tanh (double a) { return  ::tanh(a); }
   static inline __host__ __device__  double erf  (double a) { return   ::erf(a); }
   static inline __host__ __device__  double erfc (double a) { return  ::erfc(a); }
-  static inline __host__ __device__  double abs  (double a) { return   ::abs(a); }
+  static inline __host__ __device__  double abs  (double a) { return   fabs(a); }
   static inline __host__ __device__  double round(double a) { return ::round(a); }
   static inline __host__ __device__  double frac (double a) { return a - ::trunc(a); }
   static inline __host__ __device__  double cinv (double a) { return 1.0 / a; }
@@ -677,10 +476,15 @@ struct THCNumerics<double> {
   static inline __host__ __device__  bool isinf(double a) { return ::isinf(a); }
 };
 
-/// `half` has some type conversion issues associated with it, since it
-/// is a struct without a constructor/implicit conversion constructor.
-/// We use this to convert scalar values to the given type that the
-/// tensor expects.
+// WARNING: The following note is deprecated
+///       `half` has some type conversion issues associated with it, since it
+///        is a struct without a constructor/implicit conversion constructor.
+///        We use this to convert scalar values to the given type that the
+///        tensor expects.
+///
+/// at::Half has implicit conversions for float and __half types. Moreover
+/// it has constructors for __half and float types.
+
 template <typename In, typename Out>
 struct ScalarConvert {
   static __host__ __device__ Out to(const In v) { return (Out) v; }
@@ -715,6 +519,7 @@ struct ScalarConvert<half, half> {
   }
 };
 
+// DEPRECATED: use static_cast in kernels instead of scalar_cast
 template <typename T, typename U>
 __host__ __device__ T scalar_cast(U u) {
   return ScalarConvert<U, T>::to(u);

@@ -60,6 +60,9 @@ class Constraint(object):
         """
         raise NotImplementedError
 
+    def __repr__(self):
+        return self.__class__.__name__[1:] + '()'
+
 
 class _Dependent(Constraint):
     """
@@ -111,6 +114,11 @@ class _IntegerInterval(Constraint):
     def check(self, value):
         return (value % 1 == 0) & (self.lower_bound <= value) & (value <= self.upper_bound)
 
+    def __repr__(self):
+        fmt_string = self.__class__.__name__[1:]
+        fmt_string += '(lower_bound={}, upper_bound={})'.format(self.lower_bound, self.upper_bound)
+        return fmt_string
+
 
 class _IntegerLessThan(Constraint):
     """
@@ -122,6 +130,11 @@ class _IntegerLessThan(Constraint):
     def check(self, value):
         return (value % 1 == 0) & (value <= self.upper_bound)
 
+    def __repr__(self):
+        fmt_string = self.__class__.__name__[1:]
+        fmt_string += '(upper_bound={})'.format(self.upper_bound)
+        return fmt_string
+
 
 class _IntegerGreaterThan(Constraint):
     """
@@ -132,6 +145,11 @@ class _IntegerGreaterThan(Constraint):
 
     def check(self, value):
         return (value % 1 == 0) & (value >= self.lower_bound)
+
+    def __repr__(self):
+        fmt_string = self.__class__.__name__[1:]
+        fmt_string += '(lower_bound={})'.format(self.lower_bound)
+        return fmt_string
 
 
 class _Real(Constraint):
@@ -152,6 +170,11 @@ class _GreaterThan(Constraint):
     def check(self, value):
         return self.lower_bound < value
 
+    def __repr__(self):
+        fmt_string = self.__class__.__name__[1:]
+        fmt_string += '(lower_bound={})'.format(self.lower_bound)
+        return fmt_string
+
 
 class _GreaterThanEq(Constraint):
     """
@@ -163,6 +186,11 @@ class _GreaterThanEq(Constraint):
     def check(self, value):
         return self.lower_bound <= value
 
+    def __repr__(self):
+        fmt_string = self.__class__.__name__[1:]
+        fmt_string += '(lower_bound={})'.format(self.lower_bound)
+        return fmt_string
+
 
 class _LessThan(Constraint):
     """
@@ -173,6 +201,11 @@ class _LessThan(Constraint):
 
     def check(self, value):
         return value < self.upper_bound
+
+    def __repr__(self):
+        fmt_string = self.__class__.__name__[1:]
+        fmt_string += '(upper_bound={})'.format(self.upper_bound)
+        return fmt_string
 
 
 class _Interval(Constraint):
@@ -186,6 +219,11 @@ class _Interval(Constraint):
     def check(self, value):
         return (self.lower_bound <= value) & (value <= self.upper_bound)
 
+    def __repr__(self):
+        fmt_string = self.__class__.__name__[1:]
+        fmt_string += '(lower_bound={}, upper_bound={})'.format(self.lower_bound, self.upper_bound)
+        return fmt_string
+
 
 class _HalfOpenInterval(Constraint):
     """
@@ -197,6 +235,11 @@ class _HalfOpenInterval(Constraint):
 
     def check(self, value):
         return (self.lower_bound <= value) & (value < self.upper_bound)
+
+    def __repr__(self):
+        fmt_string = self.__class__.__name__[1:]
+        fmt_string += '(lower_bound={}, upper_bound={})'.format(self.lower_bound, self.upper_bound)
+        return fmt_string
 
 
 class _Simplex(Constraint):
@@ -240,7 +283,7 @@ class _PositiveDefinite(Constraint):
         batch_shape = value.unsqueeze(0).shape[:-2]
         # TODO: replace with batched linear algebra routine when one becomes available
         # note that `symeig()` returns eigenvalues in ascending order
-        flattened_value = value.contiguous().view((-1,) + matrix_shape)
+        flattened_value = value.reshape((-1,) + matrix_shape)
         return torch.stack([v.symeig(eigenvectors=False)[0][:1] > 0.0
                             for v in flattened_value]).view(batch_shape)
 

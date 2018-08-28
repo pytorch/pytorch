@@ -7209,6 +7209,13 @@ class TestTorch(TestCase):
         self.assertEqual(q.mean(), 2, 0.3)
         self.assertEqual(q.std(), 3, 0.3)
 
+        q = torch.Tensor(100, 100)
+        q_row1 = q[0:1].clone()
+        q[99:100].normal_()
+        self.assertEqual(q[99:100].mean(), 0, 0.2)
+        self.assertEqual(q[99:100].std(), 1, 0.2)
+        self.assertEqual(q[0:1].clone(), q_row1)
+
         mean = torch.Tensor(100, 100)
         std = torch.Tensor(100, 100)
         mean[:50] = 0

@@ -128,65 +128,6 @@ struct AT_API StorageImpl : public c10::intrusive_ptr_target {
     resizable_ = resizable;
   }
 
-  // You should only call these functions if you have a raw StorageImpl*
-  // pointer; if you have intrusive_ptr<StorageImpl> this will be
-  // handled automatically.
-  //
-  // TODO: Eliminate as many uses of these functions as humanly possible
-  void _raw_incref() {
-    auto ptr = c10::intrusive_ptr<StorageImpl>::reclaim(this);
-    auto ptr_copy = ptr;
-    ptr_copy.release();
-    ptr.release();
-  }
-  void _raw_decref() {
-    // Let it die
-    c10::intrusive_ptr<StorageImpl>::reclaim(this);
-    // NB: You still "have" a pointer, but it's now invalid.
-    // If you want more safety, used the actual c10::intrusive_ptr class
-  }
-  StorageImpl* _raw_make_weak() {
-    // NB: this is a strong reference
-    auto ptr = c10::intrusive_ptr<StorageImpl>::reclaim(this);
-    c10::weak_intrusive_ptr<StorageImpl> wptr(ptr);
-    ptr.release();
-    return wptr.release();
-  }
-  void _raw_weak_incweakref() {
-    // NB: this is a weak reference
-    auto wptr = c10::weak_intrusive_ptr<StorageImpl>::reclaim(this);
-    auto wptr_copy = wptr;
-    wptr_copy.release();
-    wptr.release();
-  }
-  void _raw_weak_decweakref() {
-    // NB: this is a weak reference
-    // Let it die
-    c10::weak_intrusive_ptr<StorageImpl>::reclaim(this);
-    // NB: You still "have" a pointer, but it's now invalid.
-    // If you want more safety, used the actual c10::weak_intrusive_ptr class
-  }
-  StorageImpl* _raw_weak_lock() {
-    auto wptr = c10::weak_intrusive_ptr<StorageImpl>::reclaim(this);
-    auto ptr = wptr.lock();
-    wptr.release();
-    return ptr.release();
-  }
-  // This gives the STRONG refcount of a STRONG pointer
-  uint32_t _raw_use_count() {
-    auto ptr = c10::intrusive_ptr<StorageImpl>::reclaim(this);
-    auto r = ptr.use_count();
-    ptr.release();
-    return r;
-  }
-  // This gives the STRONG refcount of a WEAK pointer
-  uint32_t _raw_weak_use_count() {
-    auto wptr = c10::weak_intrusive_ptr<StorageImpl>::reclaim(this);
-    auto r = wptr.use_count();
-    wptr.release();
-    return r;
-  }
-
  private:
   at::ScalarType scalar_type_;
   at::DataPtr data_ptr_;

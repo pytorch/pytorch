@@ -42,8 +42,8 @@ void run() {
   LOG(INFO) << "Predict net: " << ProtoDebugString(predict_net);
   auto predictor = caffe2::make_unique<Predictor>(init_net, predict_net);
   LOG(INFO) << "Checking that a null forward-pass works";
-  Predictor::TensorVector inputVec, outputVec;
-  predictor->run(inputVec, &outputVec);
+  Predictor::TensorList inputVec, outputVec;
+  (*predictor)(inputVec, &outputVec);
   CAFFE_ENFORCE_GT(outputVec.size(), 0);
 }
 }
