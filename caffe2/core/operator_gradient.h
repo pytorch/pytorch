@@ -3,7 +3,7 @@
 
 #include "caffe2/core/operator_schema.h"
 #include "caffe2/core/registry.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/utils/proto_utils.h"
 
 namespace caffe2 {
