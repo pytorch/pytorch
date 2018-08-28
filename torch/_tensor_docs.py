@@ -976,6 +976,34 @@ histc(bins=100, min=0, max=0) -> Tensor
 See :func:`torch.histc`
 """)
 
+add_docstr_all('i0',
+               r"""
+i0() -> Tensor
+
+See :func:`torch.i0`
+""")
+
+add_docstr_all('i0_',
+               r"""
+i0_() -> Tensor
+
+In-place version of :meth:`~Tensor.i0`
+""")
+
+add_docstr_all('i1',
+               r"""
+i1() -> Tensor
+
+See :func:`torch.i1`
+""")
+
+add_docstr_all('i1_',
+               r"""
+i1_() -> Tensor
+
+In-place version of :meth:`~Tensor.i1`
+""")
+
 add_docstr_all('index_add_',
                r"""
 index_add_(dim, index, tensor) -> Tensor
@@ -1116,6 +1144,20 @@ Example::
     >>> x.item()
     1.0
 
+""")
+
+add_docstr_all('iv',
+               r"""
+iv(v) -> Tensor
+
+See :func:`torch.iv`
+""")
+
+add_docstr_all('iv_',
+               r"""
+iv_(v) -> Tensor
+
+In-place version of :meth:`~Tensor.iv`
 """)
 
 add_docstr_all('kthvalue',

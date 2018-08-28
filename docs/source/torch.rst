@@ -177,6 +177,9 @@ Pointwise Ops
 .. autofunction:: floor
 .. autofunction:: fmod
 .. autofunction:: frac
+.. autofunction:: i0
+.. autofunction:: i1
+.. autofunction:: iv
 .. autofunction:: lerp
 .. autofunction:: log
 .. autofunction:: log10
