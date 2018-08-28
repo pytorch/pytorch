@@ -87,6 +87,9 @@ class Node : public StorageType<T>, public Notifier<Node<T, U...>> {
   }
   /// \brief Create an empty node.
   explicit Node() : StorageType<T>() {}
+  Node(Node&&) = default;
+  Node(const Node&) = delete;
+  Node& operator=(const Node&) = delete;
 
   /// \brief Adds an edge by reference to known in-edges.
   /// \p e A reference to an edge that will be added as an in-edge.
