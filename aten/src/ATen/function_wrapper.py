@@ -556,6 +556,28 @@ def get_broadcast_argument(option):
     return None
 
 
+def get_broadcast_actuals(broadcast_arg, broadcast_inplace, broadcast_dims):
+    # type: (THFormal, bool, bool) -> List[str]
+    # Note: broadcast_dims can change type...
+    # return the actuals that will be passed to the broadcast function.
+    # 1) in the common case, this is the broadcasted argument (e.g. "self") followed by the tensors
+    #    that it is broadcasted against (comma-separated) (e.g. "self, tensor1, tensor2").
+    # 2) in the broadcast_dims case, this is the broadcasted argument (e.g. "self") followed by the sizes
+    #    it is broadcasted to (as an initializer list), so e.g. the specification
+    #    "mat1.dim0,mat2.dim1" gets transformed to "self, {mat1.size(0),mat2.size(1)}"
+    if not broadcast_dims:
+        broadcast_actuals = [broadcast_arg['name']] + broadcast_arg['broadcast'].split()[0].split(",")
+    else:
+        broadcast_dims_spec = broadcast_arg['broadcast'].split()[1].split(':')[1].split(',')
+        # generate size call for each dimension
+        broadcast_dims = ([x.split('.')[0] + '.size(' + x.split('.')[1].replace('dim', '') + ')'  # type: ignore
+                          for x in broadcast_dims_spec])
+        broadcast_dims_init_list = '{' + ','.join(broadcast_dims) + '}'  # type: ignore
+        broadcast_actuals = [broadcast_arg['name'], broadcast_dims_init_list]
+
+    return broadcast_actuals
+
+
 def create_generic(top_env, declarations):
     # type: (TopEnvironment, List[FunctionOption]) -> List[OutputDeclaration]
     # translates defaults from cwrap types to C++ values
@@ -746,6 +768,21 @@ def create_generic(top_env, declarations):
         # "s_" for "same size".
         option['method_prefix_derived'] = '' if broadcast_arg is None else 's_'
         option['device_guard_declaration'] = device_guard(option, formals)
+
+        if broadcast_arg is not None:
+            broadcast_inplace = 'inplace' in broadcast_arg['broadcast']
+            broadcast_dims = 'dims:' in broadcast_arg['broadcast']
+            option['broadcast_actuals'] = get_broadcast_actuals(broadcast_arg, broadcast_inplace, broadcast_dims)
+            if not broadcast_dims:
+                option['broadcast_returns'] = (["b_" + x for x in option['broadcast_actuals']
+                                               if x != broadcast_arg['name'] or not broadcast_inplace])
+            else:
+                option['broadcast_returns'] = ["b_" + broadcast_arg['name']]
+
+            option['broadcast_function'] = 'expand_' + ('inplace' if broadcast_inplace
+                                                        else 'size' if broadcast_dims else 'outplace')
+            option['broadcast_modified_actuals'] = ['b_' + y if 'b_' + y in option['broadcast_returns'] else y
+                                                    for y in option['actuals']]
 
         env = nested_dict(option, top_env)
 
@@ -1418,42 +1455,11 @@ def create_derived(backend_type_env, declarations):
         if broadcast_arg is None:
             return
 
-        def get_broadcast_actuals(broadcast_arg, broadcast_inplace, broadcast_dims):
-            # type: (THFormal, bool, bool) -> List[str]
-            # Note: broadcast_dims can change type...
-            # return the actuals that will be passed to the broadcast function.
-            # 1) in the common case, this is the broadcasted argument (e.g. "self") followed by the tensors
-            #    that it is broadcasted against (comma-separated) (e.g. "self, tensor1, tensor2").
-            # 2) in the broadcast_dims case, this is the broadcasted argument (e.g. "self") followed by the sizes
-            #    it is broadcasted to (as an initializer list), so e.g. the specification
-            #    "mat1.dim0,mat2.dim1" gets transformed to "self, {mat1.size(0),mat2.size(1)}"
-            if not broadcast_dims:
-                broadcast_actuals = [broadcast_arg['name']] + broadcast_arg['broadcast'].split()[0].split(",")
-            else:
-                broadcast_dims_spec = broadcast_arg['broadcast'].split()[1].split(':')[1].split(',')
-                # generate size call for each dimension
-                broadcast_dims = ([x.split('.')[0] + '.size(' + x.split('.')[1].replace('dim', '') + ')'  # type: ignore
-                                  for x in broadcast_dims_spec])
-                broadcast_dims_init_list = '{' + ','.join(broadcast_dims) + '}'  # type: ignore
-                broadcast_actuals = [broadcast_arg['name'], broadcast_dims_init_list]
-
-            return broadcast_actuals
-
-        broadcast_inplace = 'inplace' in broadcast_arg['broadcast']
-        broadcast_dims = 'dims:' in broadcast_arg['broadcast']
-        option['broadcast_actuals'] = get_broadcast_actuals(broadcast_arg, broadcast_inplace, broadcast_dims)
-        if not broadcast_dims:
-            option['broadcast_returns'] = (["b_" + x for x in option['broadcast_actuals']
-                                           if x != broadcast_arg['name'] or not broadcast_inplace])
-        else:
-            option['broadcast_returns'] = ["b_" + broadcast_arg['name']]
-
-        option['broadcast_function'] = 'expand_' + ('inplace' if broadcast_inplace
-                                                    else 'size' if broadcast_dims else 'outplace')
-        option['broadcast_modified_actuals'] = ['b_' + y if 'b_' + y in option['broadcast_returns'] else y
-                                                for y in option['actuals']]
-        env = nested_dict(option, backend_type_env)
-        option['type_definition_body'] = BROADCASTING_METHOD_DEFINITION.substitute(env)
+        pre_env = nested_dict(option, backend_type_env)
+        sub_option = {}
+        sub_option['method_prefix_derived'] = ''
+        env = nested_dict(sub_option, pre_env)
+        sub_option['type_definition_body'] = BROADCASTING_METHOD_DEFINITION.substitute(env)
         type_object_declarations.append(
             TYPE_DERIVED_DECLARATION.substitute(env))
         type_object_definitions.append(
