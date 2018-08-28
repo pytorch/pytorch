@@ -60,14 +60,23 @@ inline void assertSameSizeAndType(const std::vector<at::Tensor>& tensors) {
   }
 }
 
-inline at::Tensor newLikeFlat(std::vector<std::vector<at::Tensor>>& tensors) {
+inline at::Tensor newLikeFlat(std::vector<std::vector<at::Tensor>>& tensors,
+                              size_t deviceIdx) {
   if (tensors.size() == 0 || tensors[0].size() == 0) {
     throw std::runtime_error("Received an empty list");
   }
-  auto& t = tensors[0][0];
-  at::DeviceGuard gpuGuard(t.is_cuda() ? t.get_device() : -1);
-  std::vector<int64_t> sizes{static_cast<int64_t>(tensors[0].size()),
-                             static_cast<int64_t>(tensors.size())};
+  if (deviceIdx >= tensors.size()) {
+    throw std::runtime_error("Invalid device index");
+  }
+  auto& t = tensors[deviceIdx][0];
+  auto device = t.is_cuda() ? t.get_device() : -1;
+  for (size_t i = 1; i < tensors[deviceIdx].size(); ++i) {
+    if (tensors[deviceIdx][i].get_device() != device) {
+      throw std::runtime_error("Expecting all tensors on the same device");
+    }
+  }
+  at::DeviceGuard gpuGuard(device);
+  std::vector<int64_t> sizes{static_cast<int64_t>(tensors[deviceIdx].size())};
   sizes.insert(sizes.end(), t.sizes().begin(), t.sizes().end());
   return t.type().tensor(sizes);
 }
