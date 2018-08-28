@@ -4,12 +4,12 @@
 namespace at {
 
 StorageImpl::StorageImpl(
-    at::ScalarType scalar_type,
+    at::DataType data_type,
     ptrdiff_t size,
     at::DataPtr data_ptr,
     at::Allocator* allocator,
     bool resizable)
-    : scalar_type_(scalar_type),
+    : data_type_(data_type),
       data_ptr_(std::move(data_ptr)),
       size_(size),
       resizable_(resizable),
@@ -17,14 +17,15 @@ StorageImpl::StorageImpl(
       finalizer_(nullptr) {}
 
 StorageImpl::StorageImpl(
-    at::ScalarType scalar_type,
+    at::DataType data_type,
     ptrdiff_t size,
     at::Allocator* allocator,
     bool resizable)
     : StorageImpl(
-          scalar_type,
+          data_type,
           size,
-          allocator->allocate(at::elementSize(scalar_type) * size),
+          allocator->allocate(
+              at::elementSize(dataTypeToScalarType(data_type)) * size),
           allocator,
           resizable) {}
 
