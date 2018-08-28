@@ -60,8 +60,9 @@ inline void assertSameSizeAndType(const std::vector<at::Tensor>& tensors) {
   }
 }
 
-inline at::Tensor newLikeFlat(std::vector<std::vector<at::Tensor>>& tensors,
-                              size_t deviceIdx) {
+inline at::Tensor newLikeFlat(
+    std::vector<std::vector<at::Tensor>>& tensors,
+    size_t deviceIdx) {
   if (tensors.size() == 0 || tensors[0].size() == 0) {
     throw std::runtime_error("Received an empty list");
   }

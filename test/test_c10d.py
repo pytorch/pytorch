@@ -498,7 +498,7 @@ class ProcessGroupNCCLTest(TestCase):
         allgather(output_ts, tensors)
 
         # Verification
-        for idx, device_ts in enumerate(output_ts):
+        for device_ts in output_ts:
             for s_idx, t in enumerate(device_ts):
                 self.assertEqual(torch.Tensor([s_idx]), t)
 
