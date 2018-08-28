@@ -6,8 +6,8 @@ fi
 
 # TODO: move this to Docker
 # TODO: add both NCCL and MPI in CI test by fixing these test first
-# sudo apt-get update
-# sudo apt-get install libnccl-dev libnccl2
+sudo apt-get update
+sudo apt-get install libnccl-dev libnccl2
 # sudo apt-get install openmpi-bin libopenmpi-dev
 
 # Required environment variable: $BUILD_ENVIRONMENT

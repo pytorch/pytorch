@@ -442,7 +442,7 @@ AlgorithmEntry* ProcessGroupGloo::checkout(const AlgorithmKey& key) {
   const auto i = cacheCurrentEntry_[key];
 
   // Ensure the cache vector is appropriately sized
-  if (vec.size() != cacheNumAlgorithmEntries_) {
+  if (vec.size() != static_cast<size_t>(cacheNumAlgorithmEntries_)) {
     vec.resize(cacheNumAlgorithmEntries_);
   }
 
