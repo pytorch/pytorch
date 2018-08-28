@@ -72,7 +72,7 @@ virtual ${return_type} ${method_prefix_derived}${api_name}(${type_method_formals
 # 4. We have a few flavors of declaration, but the default template looks pretty
 # similar.
 TYPE_DERIVED_DEFINITION = CodeTemplate("""\
-${return_type} Type::${method_prefix_derived}${api_name}(${type_method_formals}) const {
+${return_type} ${Type}::${method_prefix_derived}${api_name}(${type_method_formals}) const {
     ${device_guard_declaration}
     ${type_definition_body}
 }
