@@ -2031,6 +2031,15 @@ class TestScript(JitTestCase):
 
         return ge
 
+    def test_robust_op_resolution(self):
+        neg = torch.add  # misleading name to make sure we resolve by function
+
+        def stuff(x):
+            return neg(x, x)
+
+        a = (torch.rand(3),)
+        self.checkScript(stuff, a)
+
     def test_tuple_io(self):
         def stuff(x):
             # type: (Tuple[Tensor, Tensor]) -> Tuple[Tensor, Tensor]
@@ -5246,12 +5255,12 @@ a")
 
     def test_python_val_doesnt_have_attr(self):
         with self.assertRaisesRegex(RuntimeError, 'object has no attribute abcd'):
-            def test_fn():
-                return 3
 
             @torch.jit.script
             def python_val_doesnt_have_attr():
-                return test_fn.abcd
+                # this has to be a module otherwise attr lookup would not be
+                # allowed in the first place
+                return shutil.abcd
 
     def test_wrong_module_attr_lookup(self):
         with self.assertRaisesRegex(RuntimeError, 'python value of type \'type\' cannot be used as a value:'):
