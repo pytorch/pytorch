@@ -992,6 +992,9 @@ public:
   Node * createUndefined() {
     return create(prim::Undefined);
   }
+  Node * createNoneGenerator() {
+    return create(prim::NoneGenerator);
+  }
   Node * createFusionGroup(int device) {
     auto n = create(prim::FusionGroup, 0);
     n->g_(attr::Subgraph,std::make_shared<Graph>(scope_root_));

@@ -484,7 +484,10 @@ Value* tryMatchArgument(
   if (value->node()->kind() == prim::None){
     if (arg.type->isSubtypeOf(NumberType::get()))
       value = graph.insertConstant(at::Scalar(NAN), loc);
-    else
+    else if (arg.type->isSubtypeOf(GeneratorType::get())) {
+      value = graph.insertNode(graph.createNoneGenerator())
+        ->output()->setType(GeneratorType::get());
+    } else
       value = graph.insertNode(graph.createUndefined())->output();
   }
 
@@ -678,6 +681,7 @@ Value* emitBuiltinCall(
   // if true, emitBuiltinCall will throw an exception if this builtin does not exist,
   // otherwise it will return nullptr if the builtin is not found.
   bool required) {
+
 
   const auto& variants = getAllOperatorsFor(name);
   std::stringstream failure_messages;

@@ -98,6 +98,8 @@ inline IValue toIValue(py::handle obj, const TypePtr& type) {
         AT_ERROR("Lists and strings are not supported yet");
       case TypeKind::NumberType:
         AT_ERROR("Insufficient type information to convert input");
+      case TypeKind::GeneratorType:
+        AT_ERROR("Generators are not supported yet.");
     }
   AT_ERROR("Missing cases in toIValue! File a bug report.");
 }

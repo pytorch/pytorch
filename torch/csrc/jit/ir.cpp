@@ -625,19 +625,19 @@ namespace {
 const OperatorSet& nondeterminstic_aten_ops() {
   static OperatorSet nondeterministic_ops = {
     "aten::dropout(Tensor input, float p, int train) -> Tensor",
-    "aten::_fused_dropout(Tensor self, float p, Tensor generator) -> (Tensor, Tensor)",
-    "aten::_standard_gamma(Tensor self, Tensor generator) -> Tensor",
-    "aten::_th_bernoulli(Tensor self, *, Tensor generator) -> Tensor",
+    "aten::_fused_dropout(Tensor self, float p, Generator generator) -> (Tensor, Tensor)",
+    "aten::_standard_gamma(Tensor self, Generator generator) -> Tensor",
+    "aten::_th_bernoulli(Tensor self, *, Generator generator) -> Tensor",
     "aten::bernoulli(Tensor self) -> Tensor",
-    "aten::bernoulli(Tensor self, Tensor p, Tensor generator) -> Tensor",
-    "aten::bernoulli(Tensor self, float p, Tensor generator) -> Tensor",
-    "aten::multinomial(Tensor self, int num_samples, int replacement, *, Tensor generator) -> Tensor",
-    "aten::normal(Tensor mean, Tensor std, *, Tensor generator) -> Tensor",
-    "aten::normal(float mean, Tensor std, *, Tensor generator) -> Tensor",
-    "aten::normal(Tensor mean, float std, *, Tensor generator) -> Tensor",
-    "aten::poisson(Tensor self, Tensor generator) -> Tensor",
-    "aten::rrelu(Tensor self, Scalar lower, Scalar upper, int training, Tensor generator) -> Tensor",
-    "aten::rrelu_with_noise(Tensor self, Tensor noise, Scalar lower, Scalar upper, int training, Tensor generator) -> Tensor"
+    "aten::bernoulli(Tensor self, Tensor p, Generator generator) -> Tensor",
+    "aten::bernoulli(Tensor self, float p, Generator generator) -> Tensor",
+    "aten::multinomial(Tensor self, int num_samples, int replacement, *, Generator generator) -> Tensor",
+    "aten::normal(Tensor mean, Tensor std, *, Generator generator) -> Tensor",
+    "aten::normal(float mean, Tensor std, *, Generator generator) -> Tensor",
+    "aten::normal(Tensor mean, float std, *, Generator generator) -> Tensor",
+    "aten::poisson(Tensor self, Generator generator) -> Tensor",
+    "aten::rrelu(Tensor self, Scalar lower, Scalar upper, int training, Generator generator) -> Tensor",
+    "aten::rrelu_with_noise(Tensor self, Tensor noise, Scalar lower, Scalar upper, int training, Generator generator) -> Tensor"
   };
   return nondeterministic_ops;
 }
