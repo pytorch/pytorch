@@ -218,8 +218,8 @@ public:
     }
     return ret;
   }
-#define DEFINE_COMP(name, binary_pred)                                        \
-  Vec256<T> name(const Vec256<T> &other) const {                              \
+#define DEFINE_COMP(binary_pred)                                              \
+  Vec256<T> operator binary_pred(const Vec256<T> &other) const {              \
     Vec256<T> vec;                                                            \
     for (int64_t i = 0; i != size; i++) {                                     \
       if (values[i] binary_pred other.values[i]) {                            \
@@ -230,12 +230,12 @@ public:
     }                                                                         \
     return vec;                                                               \
   }
-  DEFINE_COMP(eq, ==)
-  DEFINE_COMP(ne, !=)
-  DEFINE_COMP(ge, >=)
-  DEFINE_COMP(le, <=)
-  DEFINE_COMP(gt, >)
-  DEFINE_COMP(lt, <)
+  DEFINE_COMP(==)
+  DEFINE_COMP(!=)
+  DEFINE_COMP(>=)
+  DEFINE_COMP(<=)
+  DEFINE_COMP(>)
+  DEFINE_COMP(<)
 #undef DEFINE_COMP
 };
 

@@ -80,8 +80,8 @@ struct ComputeLocation<scalar_t, GridSamplerPadding::Border>
   }
   inline std::pair<Vec, Vec> apply_get_grad(const Vec &in) const {
     auto indices = unnormalize(in);
-    auto in_bound_hi = indices.le(max_val);
-    auto in_bound_lo = indices.ge(zeros);
+    auto in_bound_hi = indices <= max_val;
+    auto in_bound_lo = indices >= zeros;
     auto res = Vec::blendv(zeros,
                            Vec::blendv(max_val, indices, in_bound_hi),
                            in_bound_lo);
@@ -126,14 +126,14 @@ struct ComputeLocation<scalar_t, GridSamplerPadding::Reflection>
       return std::make_pair(zeros, zeros);
     }
     auto unnorm_in = unnormalize(in);
-    auto neg_in = unnorm_in.lt(zeros);
+    auto neg_in = unnorm_in < zeros;
     auto abs_in = unnorm_in.abs();
     auto fdouble_flips = abs_in / double_max_val;
     auto double_flips = fdouble_flips.trunc();
 
     auto extra = abs_in - double_flips * double_max_val;
     auto reflected_extra = double_max_val - extra;
-    auto one_more_flip = extra.gt(reflected_extra);
+    auto one_more_flip = extra > reflected_extra;
 
     return std::make_pair(
       Vec::blendv(extra, reflected_extra, one_more_flip),
@@ -225,13 +225,13 @@ struct ApplyGridSample<scalar_t, 2, padding, GridSamplerInterpolation::Bilinear>
     // Avoid using the le and ge because those are not implemented in AVX2 and
     // are actually simulated using multiple instructions.
     auto w_mask = must_in_bound ? i_neg1s  // true = all ones
-                                : i_x_w.gt(i_neg1s) & i_x_w.lt(i_inp_W);
+                                : (i_x_w > i_neg1s) & (i_x_w < i_inp_W);
     auto n_mask = must_in_bound ? i_neg1s  // true = all ones
-                                : i_y_n.gt(i_neg1s) & i_y_n.lt(i_inp_H);
-    auto e_mask = must_in_bound ? i_x_e.lt(i_inp_W)
-                                : i_x_e.gt(i_neg1s) & i_x_e.lt(i_inp_W);
-    auto s_mask = must_in_bound ? i_y_s.lt(i_inp_H)
-                                : i_y_s.gt(i_neg1s) & i_y_s.lt(i_inp_H);
+                                : (i_y_n > i_neg1s) & (i_y_n < i_inp_H);
+    auto e_mask = must_in_bound ? (i_x_e < i_inp_W)
+                                : (i_x_e > i_neg1s) & (i_x_e < i_inp_W);
+    auto s_mask = must_in_bound ? (i_y_s < i_inp_H)
+                                : (i_y_s > i_neg1s) & (i_y_s < i_inp_H);
     auto nw_mask = cast<scalar_t>(must_in_bound ? i_neg1s : (w_mask & n_mask));
     auto ne_mask = cast<scalar_t>(e_mask & n_mask);
     auto sw_mask = cast<scalar_t>(w_mask & s_mask);
@@ -413,8 +413,8 @@ struct ApplyGridSample<scalar_t, 2, padding, GridSamplerInterpolation::Nearest> 
     auto i_y_nearest = convert_to_int_of_same_size(y_nearest);
 
     auto i_mask = must_in_bound ? i_neg1s
-                                : (i_x_nearest.gt(i_neg1s) & i_x_nearest.lt(i_inp_W) &
-                                   i_y_nearest.gt(i_neg1s) & i_y_nearest.lt(i_inp_H));
+                                : (i_x_nearest > i_neg1s) & (i_x_nearest < i_inp_W) &
+                                  (i_y_nearest > i_neg1s) & (i_y_nearest < i_inp_H);
     auto mask = cast<scalar_t>(i_mask);
 
     auto i_offset = i_y_nearest * i_inp_sH + i_x_nearest * i_inp_sW;
@@ -442,8 +442,8 @@ struct ApplyGridSample<scalar_t, 2, padding, GridSamplerInterpolation::Nearest> 
     auto i_y_nearest = convert_to_int_of_same_size(y_nearest);
 
     auto i_mask = must_in_bound ? i_neg1s
-                                : (i_x_nearest.gt(i_neg1s) & i_x_nearest.lt(i_inp_W) &
-                                   i_y_nearest.gt(i_neg1s) & i_y_nearest.lt(i_inp_H));
+                                : (i_x_nearest > i_neg1s) & (i_x_nearest < i_inp_W) &
+                                  (i_y_nearest > i_neg1s) & (i_y_nearest < i_inp_H);
 
     auto i_gInp_offset = i_y_nearest * i_inp_W + i_x_nearest;  // gInp is contiguous
 

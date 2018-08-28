@@ -168,27 +168,27 @@ public:
   // Comparison using the _CMP_**_OQ predicate.
   //   `O`: get false if an operand is NaN
   //   `Q`: do not raise if an operand is NaN
-  Vec256<double> eq(const Vec256<double>& other) const {
+  Vec256<double> operator==(const Vec256<double>& other) const {
     return _mm256_cmp_pd(values, other.values, _CMP_EQ_OQ);
   }
 
-  Vec256<double> ne(const Vec256<double>& other) const {
+  Vec256<double> operator!=(const Vec256<double>& other) const {
     return _mm256_cmp_pd(values, other.values, _CMP_NEQ_OQ);
   }
 
-  Vec256<double> lt(const Vec256<double>& other) const {
+  Vec256<double> operator<(const Vec256<double>& other) const {
     return _mm256_cmp_pd(values, other.values, _CMP_LT_OQ);
   }
 
-  Vec256<double> le(const Vec256<double>& other) const {
+  Vec256<double> operator<=(const Vec256<double>& other) const {
     return _mm256_cmp_pd(values, other.values, _CMP_LE_OQ);
   }
 
-  Vec256<double> gt(const Vec256<double>& other) const {
+  Vec256<double> operator>(const Vec256<double>& other) const {
     return _mm256_cmp_pd(values, other.values, _CMP_GT_OQ);
   }
 
-  Vec256<double> ge(const Vec256<double>& other) const {
+  Vec256<double> operator>=(const Vec256<double>& other) const {
     return _mm256_cmp_pd(values, other.values, _CMP_GE_OQ);
   }
 };

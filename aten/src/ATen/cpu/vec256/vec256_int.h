@@ -89,26 +89,26 @@ struct Vec256<int64_t> : public Vec256i {
     auto inverse = _mm256_xor_si256(values, is_larger);
     return _mm256_sub_epi64(inverse, is_larger);
   }
-  Vec256<int64_t> eq(const Vec256<int64_t>& other) const {
+  Vec256<int64_t> operator==(const Vec256<int64_t>& other) const {
     return _mm256_cmpeq_epi64(values, other.values);
   }
-  Vec256<int64_t> ne(const Vec256<int64_t>& other) const {
+  Vec256<int64_t> operator!=(const Vec256<int64_t>& other) const {
     auto zero = _mm256_set1_epi64x(0);
     auto eq = _mm256_cmpeq_epi64(values, other.values);
     return _mm256_xor_si256(zero, eq);  // invert
   }
-  Vec256<int64_t> lt(const Vec256<int64_t>& other) const {
+  Vec256<int64_t> operator<(const Vec256<int64_t>& other) const {
     return _mm256_cmpgt_epi64(other.values, values);
   }
-  Vec256<int64_t> le(const Vec256<int64_t>& other) const {
+  Vec256<int64_t> operator<=(const Vec256<int64_t>& other) const {
     auto zero = _mm256_set1_epi64x(0);
     auto gt = _mm256_cmpgt_epi64(values, other.values);
     return _mm256_xor_si256(zero, gt);  // invert
   }
-  Vec256<int64_t> gt(const Vec256<int64_t>& other) const {
+  Vec256<int64_t> operator>(const Vec256<int64_t>& other) const {
     return _mm256_cmpgt_epi64(values, other.values);
   }
-  Vec256<int64_t> ge(const Vec256<int64_t>& other) const {
+  Vec256<int64_t> operator>=(const Vec256<int64_t>& other) const {
     auto zero = _mm256_set1_epi64x(0);
     auto lt = _mm256_cmpgt_epi64(other.values, values);
     return _mm256_xor_si256(zero, lt);  // invert
@@ -182,26 +182,26 @@ struct Vec256<int32_t> : public Vec256i {
   Vec256<int32_t> abs() const {
     return _mm256_abs_epi32(values);
   }
-  Vec256<int32_t> eq(const Vec256<int32_t>& other) const {
+  Vec256<int32_t> operator==(const Vec256<int32_t>& other) const {
     return _mm256_cmpeq_epi32(values, other.values);
   }
-  Vec256<int32_t> ne(const Vec256<int32_t>& other) const {
+  Vec256<int32_t> operator!=(const Vec256<int32_t>& other) const {
     auto zero = _mm256_set1_epi64x(0);
     auto eq = _mm256_cmpeq_epi32(values, other.values);
     return _mm256_xor_si256(zero, eq);  // invert
   }
-  Vec256<int32_t> lt(const Vec256<int32_t>& other) const {
+  Vec256<int32_t> operator<(const Vec256<int32_t>& other) const {
     return _mm256_cmpgt_epi32(other.values, values);
   }
-  Vec256<int32_t> le(const Vec256<int32_t>& other) const {
+  Vec256<int32_t> operator<=(const Vec256<int32_t>& other) const {
     auto zero = _mm256_set1_epi64x(0);
     auto gt = _mm256_cmpgt_epi32(values, other.values);
     return _mm256_xor_si256(zero, gt);  // invert
   }
-  Vec256<int32_t> gt(const Vec256<int32_t>& other) const {
+  Vec256<int32_t> operator>(const Vec256<int32_t>& other) const {
     return _mm256_cmpgt_epi32(values, other.values);
   }
-  Vec256<int32_t> ge(const Vec256<int32_t>& other) const {
+  Vec256<int32_t> operator>=(const Vec256<int32_t>& other) const {
     auto zero = _mm256_set1_epi64x(0);
     auto lt = _mm256_cmpgt_epi32(other.values, values);
     return _mm256_xor_si256(zero, lt);  // invert
@@ -330,26 +330,26 @@ struct Vec256<int16_t> : public Vec256i {
   Vec256<int16_t> abs() const {
     return _mm256_abs_epi16(values);
   }
-  Vec256<int16_t> eq(const Vec256<int16_t>& other) const {
+  Vec256<int16_t> operator==(const Vec256<int16_t>& other) const {
     return _mm256_cmpeq_epi16(values, other.values);
   }
-  Vec256<int16_t> ne(const Vec256<int16_t>& other) const {
+  Vec256<int16_t> operator!=(const Vec256<int16_t>& other) const {
     auto zero = _mm256_set1_epi64x(0);
     auto eq = _mm256_cmpeq_epi16(values, other.values);
     return _mm256_xor_si256(zero, eq);  // invert
   }
-  Vec256<int16_t> lt(const Vec256<int16_t>& other) const {
+  Vec256<int16_t> operator<(const Vec256<int16_t>& other) const {
     return _mm256_cmpgt_epi16(other.values, values);
   }
-  Vec256<int16_t> le(const Vec256<int16_t>& other) const {
+  Vec256<int16_t> operator<=(const Vec256<int16_t>& other) const {
     auto zero = _mm256_set1_epi64x(0);
     auto gt = _mm256_cmpgt_epi16(values, other.values);
     return _mm256_xor_si256(zero, gt);  // invert
   }
-  Vec256<int16_t> gt(const Vec256<int16_t>& other) const {
+  Vec256<int16_t> operator>(const Vec256<int16_t>& other) const {
     return _mm256_cmpgt_epi16(values, other.values);
   }
-  Vec256<int16_t> ge(const Vec256<int16_t>& other) const {
+  Vec256<int16_t> operator>=(const Vec256<int16_t>& other) const {
     auto zero = _mm256_set1_epi64x(0);
     auto lt = _mm256_cmpgt_epi16(other.values, values);
     return _mm256_xor_si256(zero, lt);  // invert
