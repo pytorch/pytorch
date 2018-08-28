@@ -634,7 +634,7 @@ def dropout2d(input, p=0.5, training=True, inplace=False):
     See :class:`~torch.nn.Dropout2d` for details.
 
     Args:
-        p: probability of an element to be zeroed. Default: 0.5
+        p: probability of a channel to be zeroed. Default: 0.5
         training: apply dropout if is ``True``. Defualt: ``True``
         inplace: If set to ``True``, will do this operation in-place. Default: ``False``
     """
@@ -654,7 +654,7 @@ def dropout3d(input, p=0.5, training=True, inplace=False):
     See :class:`~torch.nn.Dropout3d` for details.
 
     Args:
-        p: probability of an element to be zeroed. Default: 0.5
+        p: probability of a channel to be zeroed. Default: 0.5
         training: apply dropout if is ``True``. Defualt: ``True``
         inplace: If set to ``True``, will do this operation in-place. Default: ``False``
     """
