@@ -35,10 +35,11 @@ package torch;
 // by sharing our working version of ONNX.
 //
 // Protobuf compatibility
-// 
-// To simplify framework compatibility, ONNX is defined using the subset of protobuf 
-// that is compatible with both protobuf v2 and v3. This means that we do not use any
-// protobuf features that are only available in one of the two versions.
+//
+// To simplify framework compatibility, ONNX is defined using the subset of
+// protobuf that is compatible with both protobuf v2 and v3. This means that we
+// do not use any protobuf features that are only available in one of the two
+// versions.
 //
 // Here are the most notable contortions we have to carry out to work around
 // these limitations:
@@ -46,7 +47,6 @@ package torch;
 //   - No 'map' (added protobuf 3.0). We instead represent mappings as lists
 //     of key-value pairs, where order does not matter and duplicates
 //     are not allowed.
-
 
 // Versioning
 //
@@ -60,8 +60,8 @@ enum Version {
   _START_VERSION = 0;
   // The version field is always serialized and we will use it to store the
   // version that the  graph is generated from. This helps us set up version
-  // control. 
-  // For the IR, we are using simple numbers starting with with 0x00000001, 
+  // control.
+  // For the IR, we are using simple numbers starting with with 0x00000001,
   // which was the version we published on Oct 10, 2017.
   IR_VERSION_2017_10_10 = 0x0000000000000001;
 
@@ -180,6 +180,9 @@ message NodeProto {
 
   // Additional annotations, attributes are defined in Schema
   repeated AttributeProto annotation = 8;
+
+  // Node type, like PythonOp, etc, purely for PyTorch
+  optional string node_type = 51;
 }
 
 // Models
@@ -428,10 +431,18 @@ message TensorProto {
   // If two tensors represent the same weights/content, use alias.
   // Must exist a TensorProto named alias in the initializer list.
   // To avoid the duplicate tensor in attribute, such as value in Constant node.
+  // This is useful, if everything is stored just in the proto.
   optional string alias = 16;
+
+  // Additional annotations.
+  repeated AttributeProto annotation = 17;
 
   // Device info
   optional DeviceOption device_detail = 51;
+
+  // For PyTorch serialized tensor.
+  optional int64 require_gradient = 52;
+  optional int64 is_bool = 53;
 }
 
 // Defines a tensor shape. A dimension can be either an integer value
@@ -452,6 +463,8 @@ message TensorShapeProto {
   };
   // To represent a scalar, using one element dim, and dim[0].dim_value = 0
   repeated Dimension dim = 1;
+
+  repeated Dimension stride = 51;
 }
 
 // Types
@@ -468,14 +481,17 @@ message TypeProto {
 
   // Sequence type: List, Tuple
   message Sequence {
-    // Type for each element.
+    // elem_type and elem_type_list cannot appear together.
+    // If all the element types are the same, we use elem_type,
+    // otherwise, we specify the type of each element in elem_type_list.
     optional TypeProto elem_type = 1;
+    repeated TypeProto elem_type_list = 51;
     enum SequenceType {
       UNDEFINED = 0;
       LIST = 1;
       TUPLE = 2;
     }
-    optional SequenceType sequence_type = 2;
+    optional SequenceType sequence_type = 52;
   }
 
   // Map<K, V>, (not necessary at this moment)
@@ -493,7 +509,7 @@ message TypeProto {
   oneof value {
     // The type of a tensor.
     Tensor tensor_type = 1;
-    Squence sequence_type = 4;
+    Sequence sequence_type = 4;
     Map map_type = 5;
     SpecialBlob = 51;
   }
