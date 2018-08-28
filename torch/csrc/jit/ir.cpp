@@ -580,6 +580,11 @@ std::ostream& Graph::prettyPrint(std::ostream & out) {
   return out;
 }
 
+void Graph::dumpPretty() {
+  PrettyPrintPass pass(*this);
+  pass.run(std::cout);
+}
+
 static void checkSameDevice(const Node* node) {
   bool has_device = false;
   int device;
