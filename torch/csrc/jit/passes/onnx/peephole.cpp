@@ -43,24 +43,28 @@ std::vector<int64_t> composeTransposes(const std::vector<int64_t> & t1,
   return ret;
 }
 
-bool isBroadcasting(Node* node) {
-  // Broadcasting operators have the following property:
-  // They support a 'broadcast' flag, which enables broadcasting
-  // on the last argument.  ATM this is not full-Numpy broadcasting,
-  // only left-size extension (no size 1 to size n broadcast)
-  static std::unordered_set<NodeKind> broadcasting = {
-    onnx::Add,
-    onnx::Div,
-    onnx::Mul,
-    onnx::Pow,
-    onnx::Sub,
-    onnx::Gemm,
-    onnx::Equal,
-    onnx::Greater,
-    onnx::Less,
+const std::vector<size_t>& getBroadcastPositions(Node* node) {
+  // Most of the element-wise ops in ONNX supports numpy broadcasting.
+  // Only GEMM supports one-directional broadcasting, which broadcasts the bias
+  // to the product.
+  static std::unordered_map<NodeKind, std::vector<size_t>> broadcast_positions = {
+    {onnx::Add, {0, 1}},
+    {onnx::Div, {0, 1}},
+    {onnx::Mul, {0, 1}},
+    {onnx::Pow, {0, 1}},
+    {onnx::Sub, {0, 1}},
+    {onnx::Gemm, {2}},
+    {onnx::Equal, {0, 1}},
+    {onnx::Greater, {0, 1}},
+    {onnx::Less, {0, 1}},
   };
+  static std::vector<size_t> no_positions;
 
-  return broadcasting.count(node->kind());
+  auto iter = broadcast_positions.find(node->kind());
+  if (iter != broadcast_positions.end()) {
+    return iter->second;
+  }
+  return no_positions;
 }
 
 // Determine whether `from` can broadcast to `to`, and if so at which
@@ -88,45 +92,39 @@ void fuseBroadcast(Block *b) {
       fuseBroadcast(child_block);
     }
 
-    // Can't fuse into nodes that don't support broadcasting
-    if (!isBroadcasting(n)) continue;
-
-    JIT_ASSERT(!n->hasAttribute(attr::axis));
-
-    size_t index_begin = n->inputs().size() - 2;
-    if (n->kind() == onnx::Gemm) {
-      index_begin = n->inputs().size() - 1;
+    auto & broadcast_positions = getBroadcastPositions(n);
+    if (!broadcast_positions.empty()) {
+      JIT_ASSERT(!n->hasAttribute(attr::axis));
     }
-    for (size_t input_index = index_begin; input_index < n->inputs().size(); ++input_index) {
-      auto* rhs_expand = n->input(input_index)->node();
 
-      // The rhs_expand input isn't actually an expand, so no fusion available
-      // XXX: we can't use the ->matches(...) mechanism in here, because input nodes
-      //      have been
-      if (rhs_expand->kind() != aten::expand ||
-          rhs_expand->input(1)->node()->kind() != onnx::Constant ||
-          rhs_expand->input(2)->node()->kind() != onnx::Constant) {
+    for (size_t position : broadcast_positions) {
+      auto* expand_node = n->input(position)->node();
+
+      // Confirm it is expand node.
+      if (expand_node->kind() != aten::expand ||
+          expand_node->input(1)->node()->kind() != onnx::Constant ||
+          expand_node->input(2)->node()->kind() != onnx::Constant) {
         continue;
       }
 
-      auto* unexpanded_rhs = rhs_expand->input(0);
+      auto* unexpanded_input = expand_node->input(0);
 
       // We need to know what the type pre-expand is.  We should basically
       // always have this information (because expands are only ever traced,
       // not generated from symbolic), but if for some reason we don't
       // have it, we need to skip.
-      if (!unexpanded_rhs->isTensor() || !n->output()->isTensor()) continue;
+      if (!unexpanded_input->isTensor() || !n->output()->isTensor()) continue;
 
       // Not all broadcasts are supported by ONNX broadcast.
       at::optional<size_t> axis = fusibleExpandTo(
-          unexpanded_rhs->type()->expect<CompleteTensorType>()->sizes(), // from
+          unexpanded_input->type()->expect<CompleteTensorType>()->sizes(), // from
           n->output()->type()->expect<CompleteTensorType>()->sizes()); // to
       if (axis == at::nullopt)
         continue;
 
-      n->replaceInput(input_index, unexpanded_rhs);
-      if (!rhs_expand->hasUses()) {
-        rhs_expand->destroy();
+      n->replaceInput(position, unexpanded_input);
+      if (!expand_node->hasUses()) {
+        expand_node->destroy();
       }
     }
   }
