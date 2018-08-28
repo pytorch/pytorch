@@ -2573,7 +2573,7 @@ def random_fullrank_matrix_distinct_singular_value(l, batches=None):
         s = torch.arange(1., l + 1).mul_(1.0 / (l + 1))
         return u.mm(torch.diag(s)).mm(v.t())
     else:
-        all_matrices = []        
+        all_matrices = []
         for i in range(0, torch.prod(torch.as_tensor(batches)).item()):
             A = torch.randn(l, l)
             u, _, v = A.svd()
