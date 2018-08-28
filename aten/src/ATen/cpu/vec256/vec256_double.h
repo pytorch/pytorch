@@ -32,6 +32,10 @@ public:
   static Vec256<double> blend(const Vec256<double>& a, const Vec256<double>& b) {
     return _mm256_blend_pd(a.values, b.values, mask);
   }
+  static Vec256<double> blendv(const Vec256<double>& a, const Vec256<double>& b,
+                               const Vec256<double>& mask) {
+    return _mm256_blendv_pd(a.values, b.values, mask.values);
+  }
   static Vec256<double> arange(double base = 0., double step = 1.) {
     return Vec256<double>(base, base + step, base + 2 * step, base + 3 * step);
   }
@@ -63,7 +67,7 @@ public:
   void store(void* ptr, int count = size) const {
     if (count == size) {
       _mm256_storeu_pd(reinterpret_cast<double*>(ptr), values);
-    } else {
+    } else if (count > 0) {
       double tmp_values[size];
       _mm256_storeu_pd(reinterpret_cast<double*>(tmp_values), values);
       std::memcpy(ptr, tmp_values, count * sizeof(double));

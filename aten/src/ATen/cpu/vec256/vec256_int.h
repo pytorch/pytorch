@@ -43,6 +43,10 @@ struct Vec256<int64_t> : public Vec256i {
       tmp_values[3] = _mm256_extract_epi64(b.values, 3);
     return loadu(tmp_values);
   }
+  static Vec256<int64_t> blendv(const Vec256<int64_t>& a, const Vec256<int64_t>& b,
+                                const Vec256<int64_t>& mask) {
+    return _mm256_blendv_epi8(a.values, b.values, mask.values);
+  }
   static Vec256<int64_t> arange(int64_t base = 0, int64_t step = 1) {
     return Vec256<int64_t>(base, base + step, base + 2 * step, base + 3 * step);
   }
@@ -71,7 +75,7 @@ struct Vec256<int64_t> : public Vec256i {
   void store(void* ptr, int count = size) const {
     if (count == size) {
       _mm256_storeu_si256(reinterpret_cast<__m256i*>(ptr), values);
-    } else {
+    } else if (count > 0) {
       __at_align32__ int64_t tmp_values[size];
       _mm256_storeu_si256(reinterpret_cast<__m256i*>(tmp_values), values);
       std::memcpy(ptr, tmp_values, count * sizeof(int64_t));
@@ -125,6 +129,10 @@ struct Vec256<int32_t> : public Vec256i {
   static Vec256<int32_t> blend(Vec256<int32_t> a, Vec256<int32_t> b) {
     return _mm256_blend_epi32(a, b, mask);
   }
+  static Vec256<int32_t> blendv(const Vec256<int32_t>& a, const Vec256<int32_t>& b,
+                                const Vec256<int32_t>& mask) {
+    return _mm256_blendv_epi8(a.values, b.values, mask.values);
+  }
   static Vec256<int32_t> arange(int32_t base = 0, int32_t step = 1) {
     return Vec256<int32_t>(
       base,            base +     step, base + 2 * step, base + 3 * step,
@@ -163,7 +171,7 @@ struct Vec256<int32_t> : public Vec256i {
   void store(void* ptr, int count = size) const {
     if (count == size) {
       _mm256_storeu_si256(reinterpret_cast<__m256i*>(ptr), values);
-    } else {
+    } else if (count > 0) {
       __at_align32__ int32_t tmp_values[size];
       _mm256_storeu_si256(reinterpret_cast<__m256i*>(tmp_values), values);
       std::memcpy(ptr, tmp_values, count * sizeof(int32_t));
@@ -251,6 +259,10 @@ struct Vec256<int16_t> : public Vec256i {
       tmp_values[15] = _mm256_extract_epi16(b.values, 15);
     return loadu(tmp_values);
   }
+  static Vec256<int16_t> blendv(const Vec256<int16_t>& a, const Vec256<int16_t>& b,
+                                const Vec256<int16_t>& mask) {
+    return _mm256_blendv_epi8(a.values, b.values, mask.values);
+  }
   static Vec256<int16_t> arange(int16_t base = 0, int16_t step = 1) {
     return Vec256<int16_t>(
       base,             base +      step, base +  2 * step, base +  3 * step,
@@ -307,7 +319,7 @@ struct Vec256<int16_t> : public Vec256i {
   void store(void* ptr, int count = size) const {
     if (count == size) {
       _mm256_storeu_si256(reinterpret_cast<__m256i*>(ptr), values);
-    } else {
+    } else if (count > 0) {
       __at_align32__ int16_t tmp_values[size];
       _mm256_storeu_si256(reinterpret_cast<__m256i*>(tmp_values), values);
       std::memcpy(ptr, tmp_values, count * sizeof(int16_t));

@@ -109,8 +109,17 @@ struct RegisterDispatch {
 };
 } // anonymous namespace
 
+namespace {
+  // These are used to resolve template arguement in `fn` of DECLARE_DISPATCH.
+  // e.g., function with return/argument type of std::tuple<Tensor, Tensor>.
+  // From https://stackoverflow.com/a/13842784
+
+  template<typename T> struct argument_type;
+  template<typename T, typename U> struct argument_type<T(U)> { typedef U type; };
+}
+
 #define DECLARE_DISPATCH(fn, name) \
-  struct name : DispatchStub<fn, name> {}; \
+  struct name : DispatchStub<argument_type<void(fn)>::type, name> {}; \
   extern AT_API struct name name
 
 #define DEFINE_DISPATCH(name) struct name name
