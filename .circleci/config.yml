@@ -316,6 +316,8 @@ caffe2_macos_build_defaults: &caffe2_macos_build_defaults
             export PATH=/usr/local/opt/python/libexec/bin:/usr/local/bin:$PATH
           fi
 
+          pip install numpy
+
           # Install Anaconda if we need to
           if [ -n "${CAFFE2_USE_ANACONDA}" ]; then
             rm -rf ${TMPDIR}/anaconda
