@@ -67,9 +67,9 @@ static void invalid_index(PyObject* obj) {
 }
 
 static Variable applySlice(const Variable& self, int64_t dim, PyObject* slice, bool ensure_view=false) {
-  Py_ssize_t start, stop, step;
+  Py_ssize_t start, stop, step, slicelength;
   auto length = self.size(dim);
-  if (!THPUtils_unpackSlice(slice, &start, &stop, &step)) {
+  if (!THPUtils_parseSlice(slice, length, &start, &stop, &step, &slicelength)) {
     throw python_error();
   }
   if (step == 0) {
@@ -98,9 +98,9 @@ static Variable applySelect(const Variable& self, int64_t dim, int64_t index) {
     throw IndexError("index %lld is out of bounds for dimension %lld with size %lld",
       index, dim, size);
   }
-  // if the index is negative, do not normalize it because that would fix the index
-  // on the current tensor size in the tracer.
-  // aten::select also works on negative indices
+  if (index < 0) {
+    index += size;
+  }
   return self.select(dim, index);
 }
 
