@@ -42,7 +42,7 @@ pytorch_linux_build_defaults: &pytorch_linux_build_defaults
         # This IAM user allows write access to S3 bucket for sccache
         export AWS_ACCESS_KEY_ID=AKIAJJZUW4G2ASX5W7KA
         export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET}
-        git submodule update --init
+        git submodule update --init || git submodule update --init || git submodule update --init
         .jenkins/pytorch/build.sh
         mkdir -p pytorch-ci-env/
         cp -r /opt/conda/lib/python${PYTHON_VERSION}/site-packages/torch pytorch-ci-env/torch
@@ -115,7 +115,7 @@ pytorch_linux_test_defaults: &pytorch_linux_test_defaults
         if [ -d "/opt/workspace/cpp-build" ]; then
           docker cp "/opt/workspace/cpp-build" "$id:/var/lib/jenkins/cpp-build"
         fi
-        (echo "source ./workspace/env" && echo 'sudo chown -R jenkins workspace /opt/conda/lib/python${PYTHON_VERSION}/site-packages/torch && cd workspace && git submodule update --init && .jenkins/pytorch/test.sh') | docker exec -u jenkins -i "$id" bash
+        (echo "source ./workspace/env" && echo 'sudo chown -R jenkins workspace /opt/conda/lib/python${PYTHON_VERSION}/site-packages/torch && cd workspace && (git submodule update --init || git submodule update --init || git submodule update --init) && .jenkins/pytorch/test.sh') | docker exec -u jenkins -i "$id" bash
 
 caffe2_linux_build_defaults: &caffe2_linux_build_defaults
   resource_class: large
@@ -257,7 +257,7 @@ caffe2_linux_test_defaults: &caffe2_linux_test_defaults
           export PATH=/opt/conda/bin:$PATH
         fi
 
-        pip install --user --no-cache-dir hypothesis==3.59.0
+        pip install --user --no-cache-dir hypothesis==3.59.0 || pip install --user --no-cache-dir hypothesis==3.59.0 || pip install --user --no-cache-dir hypothesis==3.59.0
         pip install --user -b /tmp/pip_install_onnx "file:///var/lib/jenkins/workspace/third_party/onnx#egg=onnx"
 
         # Hotfix, use hypothesis 3.44.6 on Ubuntu 14.04
