@@ -443,13 +443,24 @@ void initPythonIRBindings(PyObject * module_) {
       switch(t->kind()) {
         case TypeKind::DynamicType:
           return "DynamicType";
+        case TypeKind::TensorType:
+          return "TensorType";
+        case TypeKind::NumberType:
+          return "NumberType";
+        case TypeKind::NoneType:
+          return "NoneType";
         case TypeKind::CompleteTensorType:
           return "CompleteTensorType";
         case TypeKind::TupleType:
           return "TupleType";
-        default:
-          AT_ERROR("unknown type kind");
-          return "";
+        case TypeKind::ListType:
+          return "ListType";
+        case TypeKind::IntType:
+          return "IntType";
+        case TypeKind::FloatType:
+          return "FloatType";
+        case TypeKind::StringType:
+          return "StringType";
         }
     })
     .def("sizes",[](Type& t) {

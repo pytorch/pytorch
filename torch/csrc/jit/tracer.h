@@ -239,6 +239,7 @@ void addInputs(Node *n, const char * name, at::TensorList value);
 void addInputs(Node *n, const char * name, const ArrayRef<double>& value);
 void addInputs(Node *n, const char * name, const std::string& value);
 void addInputs(Node *n, const char * name, const at::SparseTensorRef& value);
+void addInputs(Node *n, const char * name, const at::TensorOptions& value);
 
 template<size_t N>
 void addInputs(Node *n, const char * name, std::array<bool, N> value) {

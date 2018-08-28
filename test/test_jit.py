@@ -953,6 +953,24 @@ class TestJit(JitTestCase):
         self.assertExpectedGraph(traced_fn.graph)
         self.assertExportImport(traced_fn.graph, (x, y))
 
+    def test_trace_tensor_factory(self):
+        def run(**kwargs):
+            inputs_require_grads = kwargs.pop('inputs_require_grads', True)
+
+            def fn(x):
+                return x + torch.ones(2, 3, **kwargs)
+            input = torch.ones(2, 3, **kwargs)
+            self.checkTrace(fn, (input,), inputs_require_grads=inputs_require_grads)
+            # check we recorded 'ones' and did not just record a constant
+            tfn = torch.jit.trace(input)(fn)
+            self.assertTrue("ones" in str(tfn.graph))
+        run()
+        run(dtype=torch.int, inputs_require_grads=False)
+        if RUN_CUDA:
+            run(device="cuda:0")
+        if RUN_CUDA_MULTI_GPU:
+            run(device="cuda:1")
+
     # TODO: implement
     @unittest.expectedFailure
     def test_output_unflatten(self):
@@ -1381,8 +1399,6 @@ class TestJit(JitTestCase):
         self.run_pass('constant_propagation', constant_prop.graph)
         self.assertExpected(canonical(constant_prop.graph))
 
-    # TODO: implement
-    @unittest.expectedFailure
     def test_constant_prop_loop_constant(self):
         @torch.jit.script
         def constant_prop():
@@ -4694,8 +4710,9 @@ a")
             @torch.jit.script_method
             def forward(self, x):
                 x += x
-                if True:
-                    if True:
+                c = sum(x) > 4  # can't be True, onnx export constant props
+                if c:
+                    if c:
                         y = self.m(x)
                     else:
                         y = self.m(x)
