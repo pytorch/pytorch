@@ -83,10 +83,12 @@ void initJITBindings(PyObject *module) {
    })
    .def("_jit_pass_lint", LintGraph)
    .def("_jit_pass_shape_analysis", [](Graph& graph, py::tuple inputs, bool with_grad) {
-     PropagateInputShapes(graph, ArgumentSpec(with_grad, evilDeprecatedBadCreateStackDoNotUse(inputs, graph.inputs())));
+     auto stack = createStackForGraph(graph, inputs);
+     PropagateInputShapes(graph, ArgumentSpec(with_grad, stack));
    })
    .def("_jit_pass_complete_shape_analysis", [](Graph& graph, py::tuple inputs, bool with_grad) {
-     PropagateInputShapes(graph, CompleteArgumentSpec(with_grad, evilDeprecatedBadCreateStackDoNotUse(inputs, graph.inputs())));
+     auto stack = createStackForGraph(graph, inputs);
+     PropagateInputShapes(graph, CompleteArgumentSpec(with_grad, stack));
    })
    .def("_jit_pass_remove_expands", RemoveExpands)
    .def("_jit_pass_erase_number_types", EraseNumberTypes)
@@ -198,7 +200,9 @@ void initJITBindings(PyObject *module) {
           py::arg("graph"),
           py::arg("optimize") = true)
       .def("graph_for", [](GraphExecutor& ge, py::args args) {
-        return ge.graphFor(evilDeprecatedBadCreateStackDoNotUse(args, ge.graph()->inputs()));
+        const auto & graph = ge.graph();
+        auto stack = createStackForGraph(*graph, args);
+        return ge.graphFor(stack);
       })
       .def_property_readonly("graph", [](GraphExecutor& ge) {
         return ge.graph();
