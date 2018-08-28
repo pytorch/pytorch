@@ -328,6 +328,15 @@ caffe2_macos_build_defaults: &caffe2_macos_build_defaults
             source ${TMPDIR}/anaconda/bin/activate
           fi
 
+          # Install sccache
+          sudo curl https://s3.amazonaws.com/ossci-macos/sccache --output /usr/local/bin/sccache
+          sudo chmod +x /usr/local/bin/sccache
+          export SCCACHE_BUCKET=ossci-compiler-cache
+
+          # This IAM user allows write access to S3 bucket for sccache
+          export AWS_ACCESS_KEY_ID=AKIAI62M6LXUOP4I4UZA
+          export AWS_SECRET_ACCESS_KEY=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
+
           # Build
           if [ "${BUILD_IOS:-0}" -eq 1 ]; then
             scripts/build_ios.sh
@@ -789,7 +798,7 @@ workflows:
   version: 2
   build:
     jobs:
-      # yf225 TODO: enable all PyTorch Linux builds
+      # yf225 TODO: enable all PyTorch builds
       # - pytorch_linux_trusty_py2_7_9_build_test
       # - pytorch_linux_trusty_py2_7_build_test
       # - pytorch_linux_trusty_py3_5_build_test
@@ -818,13 +827,13 @@ workflows:
       #     requires:
       #       - pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_build
 
-      - pytorch_macos_10_13_py3_build
-      - pytorch_macos_10_13_py3_test:
-          requires:
-            - pytorch_macos_10_13_py3_build
-      - pytorch_macos_10_13_cuda9_2_cudnn7_py3_build
+      # - pytorch_macos_10_13_py3_build
+      # - pytorch_macos_10_13_py3_test:
+      #     requires:
+      #       - pytorch_macos_10_13_py3_build
+      # - pytorch_macos_10_13_cuda9_2_cudnn7_py3_build
 
-      # yf225 TODO: enable all Caffe2 Linux builds
+      # yf225 TODO: enable all Caffe2 builds
       # - caffe2_py2_cuda8_0_cudnn6_ubuntu16_04_build
       # - caffe2_py2_cuda8_0_cudnn6_ubuntu16_04_test:
       #     requires:
