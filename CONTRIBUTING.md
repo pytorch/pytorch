@@ -23,7 +23,7 @@ If you are not familiar with creating a Pull Request, here are some guides:
 
 To develop PyTorch on your machine, here are some tips:
 
-1. Uninstall all existing pytorch installs
+1. Uninstall all existing PyTorch installs:
 ```
 conda uninstall pytorch
 pip uninstall torch

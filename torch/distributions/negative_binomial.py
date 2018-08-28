@@ -9,8 +9,8 @@ class NegativeBinomial(Distribution):
     r"""
     Creates a Negative Binomial distribution, i.e. distribution
     of the number of independent identical Bernoulli trials
-    needed before `total_count` failures are achieved. The probability
-    of success of each Bernoulli trial is `probs`.
+    needed before :attr:`total_count` failures are achieved. The probability
+    of success of each Bernoulli trial is :attr:`probs`.
 
     Args:
         total_count (float or Tensor): non-negative number of negative Bernoulli

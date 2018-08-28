@@ -21,6 +21,7 @@
 #include "torch/csrc/jit/passes/constant_propagation.h"
 #include "torch/csrc/jit/passes/loop_unrolling.h"
 #include "torch/csrc/jit/passes/to_batch.h"
+#include "torch/csrc/jit/passes/lower_tuples.h"
 #include "torch/csrc/jit/passes/specialize_undef.h"
 #include "torch/csrc/jit/graph_executor.h"
 #include "torch/csrc/jit/script/init.h"
@@ -67,6 +68,7 @@ void initJITBindings(PyObject *module) {
 
   m.def("_jit_init", loadPythonClasses)
    .def("_jit_pass_onnx", ToONNX)
+   .def("_jit_pass_lower_all_tuples", LowerAllTuples)
    .def("_jit_pass_onnx_peephole", PeepholeOptimizeONNX)
    .def("_jit_pass_fuse", FuseGraph)
    .def("_jit_pass_dce", [](std::shared_ptr<Graph>& g) {
@@ -220,13 +222,13 @@ void initJITBindings(PyObject *module) {
     py::class_<PyTorchFileReader>(m, "PyTorchFileReader")
       .def(py::init<std::string>())
       .def("get_record_with_key", [](PyTorchFileReader &self, uint64_t key) {
-        std::shared_ptr<void> data;
+        at::DataPtr data;
         size_t size;
         std::tie(data, size) = self.getRecordWithKey(key);
         return py::bytes(reinterpret_cast<const char*>(data.get()), size);
       })
       .def("get_last_record", [](PyTorchFileReader &self){
-        std::shared_ptr<void> data;
+        at::DataPtr data;
         size_t size;
         std::tie(data, size) = self.getLastRecord();
         return py::bytes(reinterpret_cast<const char*>(data.get()), size);
