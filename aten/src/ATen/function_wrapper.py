@@ -80,13 +80,7 @@ ${return_type} Type::${method_prefix_derived}${api_name}(${type_method_formals})
 
 # 5. Here are the various bodies which we might put in type_definition_body
 
-# 5a. Legacy methods on Type which forward to native functions
-DEPRECATED_TYPE_METHOD_DEFINITION = CodeTemplate("""\
-TensorOptions options(*this);
-return at::native::${api_name}(${type_method_actuals}, options);
-""")
-
-# 5b. Methods which broadcast, and then call the actual implementation with
+# 5a. Methods which broadcast, and then call the actual implementation with
 # the broadcasted inputs
 BROADCASTING_METHOD_DEFINITION = CodeTemplate("""\
 Tensor ${broadcast_returns};
@@ -94,7 +88,7 @@ std::tie(${broadcast_returns}) = ${broadcast_function}(${broadcast_actuals}, "${
 return ${method_prefix_derived}${api_name}(${broadcast_modified_actuals});
 """)
 
-# 5c. Methods which call to a native method
+# 5b. Methods which call to a native method
 # TODO: native_actuals???
 NATIVE_METHOD_DEFINITION = CodeTemplate("""\
 const auto& self_ty = *this;
@@ -989,6 +983,7 @@ def create_generic(top_env, declarations):
         dispatch = option['type_method_definition_dispatch']
         option['native_type_method_dispatch'] = dispatch
 
+        top_env['type_method_declarations'].append(TYPE_METHOD_DECLARATION.substitute(env))
         top_env['type_method_definitions'].append(TYPE_METHOD_DEFINITION.substitute(env))
 
         # generate the at::native function declarations (i.e. what the user will implement)
