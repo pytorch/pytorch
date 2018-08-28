@@ -46,7 +46,8 @@ struct TensorDesc {
 
   // do we have inner stride == 1?
   bool lastIsContiguous() const {
-    return contiguity.size() == 0 || contiguity.back();
+    // NB: A scalar tensor does not have a "last dimension" because it has 0 dims.
+    return contiguity.size() != 0 && contiguity.back();
   }
 
   static std::vector<bool> findContiguous(

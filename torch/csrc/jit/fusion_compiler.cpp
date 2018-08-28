@@ -170,13 +170,15 @@ typedef long long int int64_t;
 ${HalfHeader}
 ${RandHeader}
 #endif
+#define MIN_ONE(N) (N == 0 ? 1 : N)
 typedef ${IndexType} IndexType;
 template<typename T, size_t N>
 struct TensorInfo {
   T * data;
-  IndexType sizes[N];
-  IndexType strides[N];
+  IndexType sizes[MIN_ONE(N)];
+  IndexType strides[MIN_ONE(N)];
 };
+#undef MIN_ONE
 )");
 
 // We rewrite the code for philox RNG from curand as nvrtc couldn't resolve the
@@ -789,7 +791,9 @@ void FusedKernel::launch_with_tensors(at::ArrayRef<at::Tensor> inputs, at::Array
 
   // Compute the storage needed to store TensorInfo structs for inputs and outputs.
   size_t uncompressedDim = input_desc.at(0).contiguity.size();
-  size_t maxPossibleTensorInfoSize = sizeof(TensorInfo) + 2 * sizeof(uint32_t) * uncompressedDim;
+  // Avoid allocating no memory for TensorInfo when we have a 0-dim tensor
+  size_t maxPossibleDims = uncompressedDim == 0 ? 1 : uncompressedDim;
+  size_t maxPossibleTensorInfoSize = sizeof(TensorInfo) + 2 * sizeof(uint32_t) * maxPossibleDims;
   size_t maxPossibleBufferSize = maxPossibleTensorInfoSize * (flat_inputs_size + flat_outputs_size);
   std::vector<char> buffer(maxPossibleBufferSize);
   char * buffer_next = buffer.data();
@@ -798,7 +802,7 @@ void FusedKernel::launch_with_tensors(at::ArrayRef<at::Tensor> inputs, at::Array
   arguments.reserve(3 + flat_inputs_size + flat_outputs_size);
   auto addTensorInfoRaw = [&](TensorDesc & desc, void* data_ptr, at::IntList sizes, at::IntList strides) {
     size_t nDim = desc.nDim(); // NOTE: this is the compressed dim
-    JIT_ASSERT(nDim <= uncompressedDim); // We'd overflow the space otherwise
+    JIT_ASSERT(nDim <= maxPossibleDims); // We'd overflow the space otherwise
     auto ti = reinterpret_cast<TensorInfo*>(buffer_next);
     ti->data = data_ptr;
     compressContiguous(sizes, strides, desc.contiguity, ti->sizes(nDim), ti->strides(nDim));
