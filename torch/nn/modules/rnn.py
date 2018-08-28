@@ -270,7 +270,8 @@ class RNN(RNNBase):
           for details.
         - **h_0** of shape `(num_layers * num_directions, batch, hidden_size)`: tensor
           containing the initial hidden state for each element in the batch.
-          Defaults to zero if not provided.
+          Defaults to zero if not provided. If the RNN is bidirectional,
+          num_directions should be 2, else it should be 1.
 
     Outputs: output, h_n
         - **output** of shape `(seq_len, batch, num_directions * hidden_size)`: tensor
@@ -376,6 +377,7 @@ class LSTM(RNNBase):
           :func:`torch.nn.utils.rnn.pack_sequence` for details.
         - **h_0** of shape `(num_layers * num_directions, batch, hidden_size)`: tensor
           containing the initial hidden state for each element in the batch.
+          If the RNN is bidirectional, num_directions should be 2, else it should be 1.
         - **c_0** of shape `(num_layers * num_directions, batch, hidden_size)`: tensor
           containing the initial cell state for each element in the batch.
 
@@ -471,7 +473,8 @@ class GRU(RNNBase):
           for details.
         - **h_0** of shape `(num_layers * num_directions, batch, hidden_size)`: tensor
           containing the initial hidden state for each element in the batch.
-          Defaults to zero if not provided.
+          Defaults to zero if not provided. If the RNN is bidirectional,
+          num_directions should be 2, else it should be 1.
 
     Outputs: output, h_n
         - **output** of shape `(seq_len, batch, num_directions * hidden_size)`: tensor
