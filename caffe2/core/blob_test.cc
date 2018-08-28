@@ -15,7 +15,7 @@
 #include "caffe2/core/tensor.h"
 #include "caffe2/core/types.h"
 #include "caffe2/core/workspace.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/utils/proto_utils.h"
 
 CAFFE2_DEFINE_int64(caffe2_test_big_tensor_size, 100000000, "");
@@ -196,6 +196,9 @@ TEST(TensorNonTypedTest, TensorChangeType) {
   EXPECT_TRUE(tensor.meta().Match<int>());
 
   // int and float are same size, so should retain the pointer
+  // NB: this is only true when the use_count of the underlying Storage is 1, if
+  // the underlying Storage is shared between multiple Tensors We'll create a
+  // new Storage when the data type changes
   EXPECT_TRUE(tensor.mutable_data<float>() == (float*)ptr);
   EXPECT_TRUE(tensor.data<float>() == (const float*)ptr);
   EXPECT_TRUE(tensor.meta().Match<float>());

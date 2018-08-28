@@ -142,11 +142,16 @@ TaskThreadPool* AsyncNetBase::pool(const DeviceOption& device_option) {
       ONLY_FOR_TEST,
   };
   if (cpu_types.find(device_option.device_type()) != cpu_types.end()) {
-    auto numa_node_id = device_option.numa_node_id();
-    CAFFE_ENFORCE(
-        numa_node_id >= -1 &&
-            numa_node_id < FLAGS_caffe2_net_async_max_numa_nodes,
-        "Invalid NUMA node id: " + caffe2::to_string(numa_node_id));
+    auto numa_node_id = -1;
+    if (device_option.has_numa_node_id()) {
+      numa_node_id = device_option.numa_node_id();
+      CAFFE_ENFORCE_GE(numa_node_id, 0, "Invalid NUMA node id: ", numa_node_id);
+    }
+    CAFFE_ENFORCE_LT(
+        numa_node_id,
+        FLAGS_caffe2_net_async_max_numa_nodes,
+        "Invalid NUMA node id: ",
+        numa_node_id);
     return pool_getter(cpu_pools_, CPU, numa_node_id, num_workers_);
   } else if (device_option.device_type() == CUDA) {
     auto gpu_id = device_option.cuda_gpu_id();
@@ -412,8 +417,7 @@ CAFFE_REGISTER_CREATOR(ThreadPoolRegistry, CPU, GetAsyncNetCPUThreadPool);
 /* static */
 std::shared_ptr<TaskThreadPool>
 GetAsyncNetCPUThreadPool(int numa_node_id, int pool_size, bool create_new) {
-  // Note: numa_node_id = -1 (DeviceOption's default value) corresponds to
-  // no NUMA used
+  // Note: numa_node_id = -1 corresponds to no NUMA used
   static std::
       unordered_map<int, std::unordered_map<int, std::weak_ptr<TaskThreadPool>>>
           pools;

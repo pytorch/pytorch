@@ -56,12 +56,6 @@ PY35 = sys.version_info >= (3, 5)
 WINDOWS = sys.platform == 'win32'
 
 
-# TODO: Replace all uses of this function with the literal "0" when the jit
-# is able to support returning numbers (as opposed to only Tensors)
-def FIXME_zerol():
-    return torch.tensor([0])
-
-
 def LSTMCellF(input, hx, cx, *params):
     return LSTMCell(input, (hx, cx), *params)
 
@@ -592,6 +586,22 @@ class TestJit(JitTestCase):
         self.assertTrue(torch.all(out2 >= 0))
         self.assertTrue(torch.all(out2 < 1))
 
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    def test_fusion_arg_configurations(self):
+        # A smoke test to make sure we won't use the same kernel for contiguous
+        # and non-contiguous arguments.
+        # TODO: add optionally enabled debug counters to the fuser to verify
+        #       that we really can tell the difference between configurations
+        def f(x, y):
+            z1, z2 = (x + y).chunk(2, dim=1)
+            return z1 * z2
+
+        x = torch.randn(4, 4, dtype=torch.float, device='cuda')
+        y = torch.randn(4, 4, dtype=torch.float, device='cuda')
+        traced_f = torch.jit.trace(x, y)(f)
+        self.assertEqual(traced_f(x.t().contiguous(), y), traced_f(x.t(), y))
+
     @staticmethod
     def fn_test_comparison_gt_lt(x, y):
         mask = (x > 0).type_as(x)
@@ -788,7 +798,7 @@ class TestJit(JitTestCase):
         y = torch.randn(4, 1, 8, 5, requires_grad=True)
 
         graph = torch.jit.script(broadcast).graph
-        torch._C._jit_pass_shape_analysis(graph, (x, y), False)
+        torch._C._jit_pass_complete_shape_analysis(graph, (x, y), False)
         self.assertExpectedGraph(graph)
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
@@ -1329,7 +1339,7 @@ class TestJit(JitTestCase):
     def test_constant_prop_print(self):
         @torch.jit.script
         def constant_prop(input_tensor):
-            a = 2 * 3 + FIXME_zerol()
+            a = 2 * 3
             print(a)
             b = a + 2
             return b + input_tensor
@@ -2021,6 +2031,37 @@ class TestScript(JitTestCase):
 
         return ge
 
+    def test_robust_op_resolution(self):
+        neg = torch.add  # misleading name to make sure we resolve by function
+
+        def stuff(x):
+            return neg(x, x)
+
+        a = (torch.rand(3),)
+        self.checkScript(stuff, a)
+
+    def test_tuple_io(self):
+        def stuff(x):
+            # type: (Tuple[Tensor, Tensor]) -> Tuple[Tensor, Tensor]
+            a, b = x
+            return b, a
+
+        a = (torch.rand(3), torch.rand(3))
+        self.checkScript(stuff, (a,))
+
+    def test_tuple_create_return(self):
+        def stuff2(x):
+            # type: (int) -> Tuple[Tensor, Tensor]
+            a = (torch.ones(x), torch.zeros(x))
+            return a
+        self.checkScript(stuff2, (3,))
+
+    def test_list_io(self):
+        def stuff3(x):
+            # type: (List[int]) -> Tuple[Tensor, List[int]]
+            return torch.ones(x), x
+        self.checkScript(stuff3, ([3, 2],))
+
     def test_script_cu(self):
         cu = torch.jit.CompilationUnit('''
             def foo(a):
@@ -2279,21 +2320,6 @@ a")
         y2 = torch.sum(x, dim=0)
         self.assertEqual(y, y2)
 
-    # TODO: renable when we support passing literals to script fns
-    @unittest.expectedFailure
-    def test_literal_xfail(self):
-        def func4(a, b):
-            c = 0, (0, 0)
-            x = True
-            while x:
-                x = False
-                c = a, (a, b)
-            d, e = c
-            f, g = e
-            return d + f + g
-
-        self.checkScript(func4, (a, b), optimize=True)
-
     def test_literal(self):
         def func1(a, b):
             c = a, b
@@ -2306,10 +2332,22 @@ a")
             f, g = e
             return d + f + g
 
+        def func3(a, b):
+            # type: (float, float) -> float
+            c = 0., (0., 0.)
+            x = True
+            while x:
+                x = False
+                c = a, (a, b)
+            d, e = c
+            f, g = e
+            return d + f + g
+
         a = torch.rand(1, requires_grad=True)
         b = torch.rand(1, requires_grad=True)
         self.checkScript(func1, (a, b), optimize=True)
         self.checkScript(func2, (a, b), optimize=True)
+        self.checkScript(func3, (a.item(), b.item()), optimize=True)
 
     def test_expand(self):
         @torch.jit.script
@@ -2829,20 +2867,19 @@ a")
 
             st = second + third
             fs = first + second
-            zero = FIXME_zerol()
-            return third + zero, st + zero, fs + zero
+            return third, st, fs
 
         inputs = self._make_scalar_vars([10], torch.int64)
         self.checkScript(func, inputs, optimize=True)
 
     def test_if(self):
         def func(a, b):
-            zero = FIXME_zerol()
+            # type: (int, int) -> int
             d = 3
             if a > 10:
-                a = zero + 3 + d
+                a = 3 + d
             else:
-                b = zero + 3 + d
+                b = 3 + d
                 d = 4
             c = a + b
             return c
@@ -2852,13 +2889,14 @@ a")
 
     def test_if_for_in_range(self):
         def func(a, b):
-            d = FIXME_zerol() + 3
+            # type: (int, int) -> int
+            d = 3
             for _ in range(20):
                 if a > 10:
                     a = 3 + d
                 else:
                     b = 3 + d
-                    d = FIXME_zerol() + 4
+                    d = 4
                 c = a + b
             return d
         inputs = self._make_scalar_vars([1, -1], torch.int64)
@@ -2906,7 +2944,8 @@ a")
 
     def test_while_nest_if(self):
         def func(a, b):
-            c = FIXME_zerol()
+            # type: (int, int) -> int
+            c = 0
             while a < 10:
                 a = a + 1
                 b = b + 1
@@ -2941,14 +2980,10 @@ a")
         # Test that the numbers are casted to tensor,
         # added, and then casted back.
         def fn1(x):
-            c = 7 + 8
-            # FIXME: return number instead of tensor
-            return torch.full([1], c)
+            return 7 + 8
 
         def fn2(x):
-            c = 1.1 + 3.1
-            # FIXME: return number instead of tensor
-            return torch.full([1], c)
+            return 1.1 + 3.1
 
         graph1 = torch.jit.script(fn1).graph
         self.assertExpectedGraph(graph1, subname="int")
@@ -2957,7 +2992,8 @@ a")
 
     def test_if_nest_while(self):
         def func(a, b):
-            c = FIXME_zerol()
+            # type: (int, int) -> int
+            c = 0
             if a > b:
                 while a > b:
                     b = b + 1
@@ -2969,7 +3005,7 @@ a")
 
     def test_script_for_in_range(self):
         def fn():
-            c = FIXME_zerol()
+            c = 0
             for i in range(100):
                 c += i
             return c
@@ -2977,11 +3013,9 @@ a")
 
     def test_script_for_in_range_dynamic(self):
         def fn():
-            c = FIXME_zerol()
+            c = 0
             for i in range(100):
-                # FIXME: i should really be IntType and not DynamicType in the frontend
-                # In addition, i should be a scalar tensor (it has size (1,) atm)
-                acc = FIXME_zerol()
+                acc = 0
                 for j in range(i):
                     acc += j
                 c += acc
@@ -2991,9 +3025,9 @@ a")
     def test_script_for_in_range_ast(self):
         @torch.jit.script
         def test_script_for_in_range_ast():
-            c = FIXME_zerol()
+            c = 0
             for i in range(100):
-                acc = FIXME_zerol()
+                acc = 0
                 for j in range(i):
                     acc += j
                 c += acc
@@ -3004,7 +3038,7 @@ a")
     def test_script_for_in_range_if_ast(self):
         @torch.jit.script
         def test_script_for_in_range_if_ast(x):
-            output = FIXME_zerol()
+            output = x
             for i in range(20):
                 if i == 0:
                     output = x.unsqueeze(0)
@@ -3144,29 +3178,21 @@ a")
                 return x << y
 
     def test_number_math(self):
-        template = ('''
-# int, int -> int
-def func1():
-    c = 8 {op} 2
-    # FIXME: return number instead of tensor
-    return torch.full([1], c)
+        template = dedent('''
+        # int, int -> int
+        def func1():
+            return 8 {op} 2
 
-def func2():
-    c = 2 {op} 2
-    # FIXME: return number instead of tensor
-    return torch.full([1], c)
+        def func2():
+            return 2 {op} 2
 
-# float, float -> float
-def func3():
-    c = 3.14 {op} 0.125
-    # FIXME: return number instead of tensor
-    return torch.full([1], c)
+        # float, float -> float
+        def func3():
+            return 3.14 {op} 0.125
 
-def func4():
-    c = 3.14 {op} 3.14
-    # FIXME: return number instead of tensor
-    return torch.full([1], c)
-''')
+        def func4():
+            return 3.14 {op} 3.14
+        ''')
         ops = ['+', '-', '*', '<', '<=', '>', '>=', '==', '!=']
         # TODO: turn this on for py3 (and add PY3 division semantics)
         ops_py2_only = ['/']
@@ -3195,24 +3221,20 @@ def func4():
     def test_number_neg(self):
         # int -> int
         def func1():
-            c = -8
-            # FIXME: return number instead of tensor
-            return torch.full([1], c)
+            return -8
 
         # float -> float
         def func2():
-            c = -3.14
-            # FIXME: return number instead of tensor
-            return torch.full([1], c)
+            return -3.14
 
         self.checkScript(func1, (), optimize=True)
         self.checkScript(func2, (), optimize=True)
 
     def _test_tensor_number_math(self, device='cpu'):
-        template = ('''
-def func(t):
-    return {lhs} {op} {rhs}
-''')
+        template = dedent('''
+        def func(t):
+            return {lhs} {op} {rhs}
+        ''')
 
         def test(op, const, swap_args):
             args = ('t', const)
@@ -3554,7 +3576,7 @@ def func(t):
 
             @torch.jit.script_method
             def forward(self):
-                sum = FIXME_zerol()
+                sum = 0
                 for i in self.b:
                     sum += i
                 return sum
@@ -3922,8 +3944,7 @@ def func(t):
 
         @torch.jit.script
         def return3():
-            # FIXME: use number instead of tensor
-            return torch.full([1], 1), torch.full([1], 2), torch.full([1], 3)
+            return 1, 2, 3
 
         with self.assertRaisesRegex(RuntimeError, "too many values to unpack"):
             @torch.jit.script
@@ -4067,9 +4088,8 @@ def func(t):
             return torch.cat(c)
 
         b = torch.zeros(2, 4)
-        # unrelated bug
-        with self.assertRaisesRegex(RuntimeError, ".*"):
-            test_list.graph.propagate_shapes((b,), False)
+        test_list.graph.propagate_shapes((b,), False)
+        self.assertExpected(canonical(test_list.graph))
 
     def test_if_supertype(self):
         @torch.jit.script
@@ -4254,8 +4274,6 @@ def func(t):
         with self.assertRaisesRegex(RuntimeError, 'called recursively involving'):
             M()
 
-    # TODO: Use this when we support passing literals to script fns
-    @unittest.expectedFailure
     def test_script_kwargs_fn_call(self):
         class M(torch.jit.ScriptModule):
             def __init__(self):
@@ -4267,6 +4285,7 @@ def func(t):
 
             @torch.jit.script_method
             def foo(self, bar, input):
+                # type: (int, Tensor) -> Tensor
                 return input + bar
         m = M()
         self.assertEqual(2, m.call_foo(torch.ones((), dtype=torch.int64)))
@@ -4299,14 +4318,14 @@ def func(t):
                 b = 1
             else:
                 b = 0
-            return FIXME_zerol() + (b + 1)
+            return b + 1
 
         @torch.jit.script
         def foo2(a):
             b = 0
             if a == 0:
                 b = 1
-            return FIXME_zerol() + (b + 1)
+            return b + 1
 
         @torch.jit.script
         def foo3(a):
@@ -4315,7 +4334,7 @@ def func(t):
                 c = 4
             else:
                 b = 0
-            return FIXME_zerol() + (b + 1)
+            return b + 1
 
         a = torch.ones(1, dtype=torch.long)
         b = torch.zeros(1, dtype=torch.long)
@@ -4611,13 +4630,48 @@ def func(t):
 
         @torch.jit.script
         def bar(x):
-            y = foo(x)
+            y = int(foo(x))
             if True:
-                # FIXME: use number instead of tensor
-                y = torch.full([1], 7)
+                y = 7
             return y + 1
 
         self.assertEqual(8, bar(torch.ones(1, 1)))
+
+    def test_tracing_slicing(self):
+        @torch.jit.trace(torch.zeros(10))
+        def foo_trace(x):
+            return x[-5:-3]
+
+        @torch.jit.script
+        def foo_script(x):
+            return x[-5:-3]
+
+        def foo(x):
+            return x[-5:-3]
+
+        a = torch.arange(0, 8)
+        b = torch.arange(0, 20)
+        self.assertEqual(foo_trace(a), foo_script(a))
+        self.assertEqual(foo_trace(a), foo(a))
+        self.assertNotEqual(foo_trace(a), foo_trace(b))
+
+    def test_tracing_indexing(self):
+        @torch.jit.trace(torch.zeros(10))
+        def foo_trace(x):
+            return x[-2]
+
+        @torch.jit.script
+        def foo_script(x):
+            return x[-2]
+
+        def foo(x):
+            return x[-2]
+
+        a = torch.arange(0, 8)
+        b = torch.arange(0, 20)
+        self.assertEqual(foo_script(a), foo_trace(a))
+        self.assertEqual(foo_trace(a), foo(a))
+        self.assertNotEqual(foo_trace(a), foo_trace(b))
 
     def test_index_select_shape_prop(self):
 
@@ -4627,7 +4681,7 @@ def func(t):
 
         a = torch.zeros(2, 2)
         b = torch.zeros(4, dtype=torch.long)
-        foo.graph.propagate_shapes((a, b), False)
+        torch._C._jit_pass_complete_shape_analysis(foo.graph, (a, b), False)
         self.assertExpected(canonical(foo.graph))
 
     def test_onnx_export_speculate(self):
@@ -4829,7 +4883,7 @@ def func(t):
             ''')
 
     def test_parser_type_annotations_subscript_tensor(self):
-        with self.assertRaisesRegex(RuntimeError, r'Type Tensor cannot be subscripted'):
+        with self.assertRaisesRegex(RuntimeError, r'Unknown type constructor Tensor'):
             cu = torch.jit.CompilationUnit('''
                 def foo(x : Tensor, y : Tensor[Tensor, Tensor]) -> Tuple[Tensor, Tensor]:
                     return x, x
@@ -4949,7 +5003,7 @@ def func(t):
 
     def test_loop_unrolling(self):
         def fn(x):
-            y = FIXME_zerol()
+            y = 0
             for i in range(int(x)):
                 y += i
             return y
@@ -4961,13 +5015,13 @@ def func(t):
 
     def test_loop_unrolling_const(self):
         def fn():
-            y = FIXME_zerol()
+            y = 0
             for i in range(10):
                 y += 1
             return y
 
         def fn2():
-            y = FIXME_zerol()
+            y = 0
             for i in range(10):
                 y += i
             return y
@@ -4983,7 +5037,7 @@ def func(t):
 
     def test_loop_unrolling_nested(self):
         def fn(x):
-            y = FIXME_zerol()
+            y = 0
             for i in range(10):
                 for j in range(int(x)):
                     y += j
@@ -4996,7 +5050,7 @@ def func(t):
 
     def test_loop_unroll_unused_counter(self):
         def fn(x):
-            y = FIXME_zerol()
+            y = 0
             for i in range(int(x)):
                 y += 1
             return y
@@ -5007,7 +5061,7 @@ def func(t):
 
     def test_loop_unroll_negative(self):
         def fn(x):
-            y = FIXME_zerol()
+            y = 0
             for i in range(int(x)):
                 y += 1
             return y
@@ -5062,11 +5116,10 @@ def func(t):
                 return x.splork(3)
 
     def test_return_tuple(self):
-        with self.assertRaisesRegex(RuntimeError, 'only supported return types'):
-            @torch.jit.script
-            def return_tuple(x):
-                a = (x, x)
-                return a, x
+        def return_tuple(x):
+            a = (x, x)
+            return a, x
+        self.checkScript(return_tuple, (torch.rand(4),))
 
     def test_method_no_self(self):
         with self.assertRaisesRegex(RuntimeError, 'methods must have a self argument'):
@@ -5202,12 +5255,12 @@ def func(t):
 
     def test_python_val_doesnt_have_attr(self):
         with self.assertRaisesRegex(RuntimeError, 'object has no attribute abcd'):
-            def test_fn():
-                return 3
 
             @torch.jit.script
             def python_val_doesnt_have_attr():
-                return test_fn.abcd
+                # this has to be a module otherwise attr lookup would not be
+                # allowed in the first place
+                return shutil.abcd
 
     def test_wrong_module_attr_lookup(self):
         with self.assertRaisesRegex(RuntimeError, 'python value of type \'type\' cannot be used as a value:'):
@@ -6475,8 +6528,6 @@ class TestPytorchExportModes(JitTestCase):
 EXCLUDE_TRACED = {
     'test_split_dim',
     'test_split_dim_neg0',
-    'test_gesv',
-    'test_inverse',
 
     # nn functional test
     # schema not found for onnx node
@@ -6752,24 +6803,21 @@ class TestCustomOperators(JitTestCase):
     def test_passing_too_many_args(self):
         with self.assertRaisesRegex(
             RuntimeError,
-            "Expected at most 1 argument\(s\) for operator 'aten::relu', " +
-            "but received 2 argument\(s\). " +
-            "Schema: aten::relu\(Tensor self\) -> Tensor",
+            "aten::relu\(\) expected at most 1 argument\(s\) but received 2 argument\(s\)"
         ):
             torch.ops.aten.relu(1, 2)
 
     def test_passing_too_few_args(self):
         with self.assertRaisesRegex(
             RuntimeError,
-            "Missing value for argument 'self' to operator 'aten::relu'. " +
-            "Schema: aten::relu\(Tensor self\) -> Tensor",
+            "aten::relu\(\) is missing value for argument 'self'."
         ):
             torch.ops.aten.relu()
 
     def test_passing_one_positional_but_not_the_second(self):
         with self.assertRaisesRegex(
             RuntimeError,
-            "Missing value for argument 'dim' to operator 'aten::log_softmax'"
+            "aten::log_softmax\(\) is missing value for argument 'dim'."
         ):
             torch.ops.aten.log_softmax(torch.ones(5))
 
@@ -6789,13 +6837,10 @@ class TestCustomOperators(JitTestCase):
 
     def test_passing_and_returning_lists(self):
         # Replace with actual test once we support lists.
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "Lists and strings are not supported yet"
-        ):
-            a, b = torch.ones(5), torch.zeros(5)
-            output = torch.ops.aten.stack([a, b])
-            self.assertEqual(output, torch.ones(10))
+        a, b = torch.rand(5), torch.rand(5)
+        output = torch.ops.aten.cat([a, b])
+        output_ref = torch.cat([a, b])
+        self.assertEqual(output, output_ref)
 
     def test_script_graph_contains_custom_op(self):
         @torch.jit.script

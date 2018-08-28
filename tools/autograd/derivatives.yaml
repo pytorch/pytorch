@@ -793,7 +793,7 @@
 - name: embedding_renorm_(Tensor self, Tensor indices, double max_norm, double norm_type)
   self: not_implemented("embedding_renorm")
 
-- name: kl_div_forward(Tensor self, Tensor target, int64_t reduction)
+- name: kl_div(Tensor self, Tensor target, int64_t reduction)
   self: kl_div_backward(grad, self, target, reduction)
   target: kl_div_target_backward(grad, self, target, reduction)
 
