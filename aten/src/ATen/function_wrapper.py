@@ -983,9 +983,6 @@ def create_generic(top_env, declarations):
         dispatch = option['type_method_definition_dispatch']
         option['native_type_method_dispatch'] = dispatch
 
-        top_env['type_method_declarations'].append(TYPE_METHOD_DECLARATION.substitute(env))
-        top_env['type_method_definitions'].append(TYPE_METHOD_DEFINITION.substitute(env))
-
         # generate the at::native function declarations (i.e. what the user will implement)
         if needs_native_definition:
             if isinstance(dispatch, dict):
