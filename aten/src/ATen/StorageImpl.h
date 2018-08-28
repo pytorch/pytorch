@@ -109,7 +109,7 @@ struct AT_API StorageImpl : public c10::raw_intrusive_ptr_target<StorageImpl> {
   at::Allocator* allocator() {
     return allocator_;
   };
-  const DataType& dtype() const {
+  const DataType dtype() const {
     return data_type_;
   }
   const at::Allocator* allocator() const {
