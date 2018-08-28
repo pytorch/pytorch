@@ -45,6 +45,7 @@ namespace torch { namespace jit {
   _(prim, TupleConstruct)          \
   _(prim, TupleUnpack)             \
   _(prim, ListConstruct)           \
+  _(prim, ListUnpack)              \
   _(prim, NumToTensor)             \
   _(prim, TensorToNum)             \
   _(prim, ImplicitTensorToNum)     \
@@ -55,6 +56,7 @@ namespace torch { namespace jit {
   _(prim, AnyDefined)              \
   _(prim, FusedConcat)             \
   _(prim, FusedChunk)              \
+  _(prim, ConstantChunk)           \
   _(prim, NoneGenerator)           \
   _(aten, __not__)                 \
   FORALL_ATEN_BASE_SYMBOLS(_)      \
@@ -100,7 +102,9 @@ namespace torch { namespace jit {
   _(attr, transA)                  \
   _(attr, transB)                  \
   _(attr, name)                    \
-  _(attr, string)
+  _(attr, string)                  \
+  _(attr, a)                       \
+  _(attr, b)
 
 // 'prim' symbols are synthetic operators that occur only in the IR
 // and don't have corresponding implementations in ATen.

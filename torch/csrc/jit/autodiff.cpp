@@ -33,8 +33,6 @@ bool isDifferentiable(Node * n) {
     "aten::exp(Tensor self) -> Tensor",
     "aten::t(Tensor self) -> Tensor",
     "aten::neg(Tensor self) -> Tensor",
-    "aten::chunk(Tensor self, int chunks, int dim) -> Tensor[]",
-    "aten::split(Tensor self, int split_size, int dim) -> Tensor[]",
     "aten::type_as(Tensor self, Tensor other) -> Tensor",
     "aten::unsqueeze(Tensor self, int dim) -> Tensor",
     "aten::mm(Tensor self, Tensor mat2) -> Tensor",
@@ -46,28 +44,12 @@ bool isDifferentiable(Node * n) {
     "aten::ne(Tensor self, Tensor other) -> Tensor"
   };
 
-  if (n->kind() == prim::Constant || n->kind() == prim::AutogradAdd)
+  if (n->kind() == prim::Constant ||
+      n->kind() == prim::AutogradAdd ||
+      n->kind() == prim::ConstantChunk)
     return true;
   if (differentiable_ops.find(n))
     return true;
-
-  if (n->matches("aten::type_as(Tensor self, Tensor other) -> Tensor")) {
-    return static_cast<bool>(n->input(1)->type()->cast<CompleteTensorType>());
-  }
-  if (n->matches("aten::cat(Tensor[] tensors, int dim) -> Tensor")) {
-    if (!n->is_constant(attr::dim)) return false;
-    for (Value * input : n->inputs().slice(0, n->inputs().size() - 1)) {
-      if (!input->type()->cast<CompleteTensorType>()) return false;
-    }
-    return true;
-  }
-  if (n->matches("aten::expand(Tensor self, int[] size, *, int implicit) -> Tensor")) {
-    return n->is_constant(attr::size) && n->is_constant(attr::implicit);
-  }
-  if (n->matches("aten::view(Tensor self, int[] size) -> Tensor") ||
-      n->matches("aten::reshape(Tensor self, int[] shape) -> Tensor")) {
-    return static_cast<bool>(n->namedInput(attr::self)->type()->cast<CompleteTensorType>());
-  }
 
   // linear blocks may appear as inputs to graph executors, but they are removed
   // before differentiation occurs
@@ -111,6 +93,7 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
   const auto build_sym_grad = [node](const std::vector<SymbolicVariable>& grads) -> std::vector<SymbolicVariable> {
     auto inputs = fmap<SymbolicVariable>(node->inputs());
     auto outputs = fmap<SymbolicVariable>(node->outputs());
+    auto graph = node->owningGraph();
 
     if (node->matches("aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor")) {
       return {grads.at(0), grads.at(0) * node->namedInput(attr::alpha), nullptr};
@@ -139,9 +122,8 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
     } else if (node->matches("aten::neg(Tensor self) -> Tensor")) {
       return {-grads.at(0)};
 
-    } else if (node->matches("aten::chunk(Tensor self, int chunks, int dim) -> Tensor[]") ||
-               node->matches("aten::split(Tensor self, int split_size, int dim) -> Tensor[]")) {
-      return {SymbolicVariable::cat(grads, node->namedInput(attr::dim)), nullptr, nullptr};
+    } else if (node->kind() == prim::ConstantChunk) {
+      return {SymbolicVariable::cat(grads, node->i(attr::dim))};
 
     } else if (node->matches("aten::view(Tensor self, int[] size) -> Tensor") ||
                node->matches("aten::reshape(Tensor self, int[] shape) -> Tensor")) {

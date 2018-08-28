@@ -30,6 +30,23 @@ void badArgType() {
   AT_ERROR("Found an unsupported argument type in the JIT tracer. File a bug report.");
 }
 
+void recordOutput(Node* node, const at::Tensor& output) {
+  Value * value = node->addOutput();
+  if (output.defined()) {
+    value->inferTypeFrom(output);
+    setValueTrace(autograd::as_variable_ref(output), value);
+  }
+}
+
+void recordOutput(Node* node, const std::vector<at::Tensor>& outputs) {
+  Value * value = node->addOutput()->setType(ListType::ofTensors());
+  Graph * graph = node->owningGraph();
+  Node * unpack_node = graph->appendNode(graph->create(prim::ListUnpack, {value}, outputs.size()));
+  for (size_t i = 0; i < outputs.size(); ++i) {
+    setValueTrace(outputs[i], unpack_node->outputs()[i]);
+  }
+}
+
 thread_local std::shared_ptr<TracingState> tracing_state;
 
 } // namespace detail
@@ -96,18 +113,6 @@ TracingState::TracingState()
     : graph(new Graph()) {}
 
 TracingState::~TracingState() = default;
-
-void postRecordTrace(Node* node,
-                     at::ArrayRef<Variable> outputs) {
-  for (size_t i = 0; i < outputs.size(); i++) {
-    auto & output = outputs[i];
-    Value * value = node->addOutput();
-    if (output.defined()) {
-      value->inferTypeFrom(output.data());
-      setValueTrace(output, value);
-    }
-  }
-}
 
 autograd::Variable getSizeOf(const autograd::Variable& var, int64_t dim) {
   auto & tracing_state = getTracingState();

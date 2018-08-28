@@ -141,7 +141,7 @@ ADD_TRACE_INPUT = CodeTemplate("""jit::tracer::addInputs(node, "${input}", ${inp
 
 POST_RECORD_TRACE = CodeTemplate("""\
 if (jit::tracer::isTracing()) {
-  jit::tracer::postRecordTrace(node, at::ArrayRef<autograd::Variable>(${trace_outputs}) );
+  jit::tracer::postRecordTrace(node, ${trace_outputs});
 }
 """)
 
@@ -395,6 +395,12 @@ def emit_body(declaration):
             else:
                 res.append(arg['name'])
         return res
+
+    def get_trace_outputs(declaration):
+        if name.endswith('_out'):
+            return ', '.join(arg['name'] for arg in arguments if arg.get('output', False))
+        else:
+            return ', '.join(r['name'] for r in declaration['returns'])
 
     def emit_record_trace(env):
         if not should_trace(declaration):

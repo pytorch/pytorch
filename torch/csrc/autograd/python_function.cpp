@@ -610,7 +610,7 @@ static void _trace_post_record(
     output_vars[i] = var->cdata;
   }
 
-  jit::tracer::postRecordTrace(node, output_vars);
+  jit::tracer::postRecordTraceFlat(node, output_vars);
 
   node->i_(attr::inplace, is_inplace);
 

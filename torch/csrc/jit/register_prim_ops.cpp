@@ -279,6 +279,57 @@ RegisterOperators reg({
           };
         }),
     Operator(
+        prim::ConstantChunk,
+        [](Node* node) {
+          int64_t chunks = node->i(attr::chunks);
+          int64_t dim = node->i(attr::dim);
+          return [=](Stack& stack) {
+            autograd::profiler::RecordFunction record("chunk");
+            at::Tensor t;
+            pop(stack, t);
+            auto result = at::chunk(t, chunks, dim);
+            stack.insert(stack.end(), std::make_move_iterator(result.begin()),
+                                      std::make_move_iterator(result.end()));
+            return 0;
+          };
+        }),
+    Operator(
+        prim::ListUnpack,
+        [](Node* node) -> Operation {
+          size_t num_outputs = node->outputs().size();
+          ListTypePtr lt = node->input()->type()->expect<ListType>();
+          if (lt->getElementType() == IntType::get()) {
+            return [=](Stack& stack) {
+              auto ilist = pop(stack);
+              const auto & list = ilist.toIntList()->elements();
+              AT_CHECK(list.size() == num_outputs,
+                       "Expected ", num_outputs, " elements in a list but found ", list.size());
+              stack.insert(stack.end(), list.begin(), list.end());
+              return 0;
+            };
+          } else if (lt->getElementType() == FloatType::get()) {
+            return [=](Stack& stack) {
+              auto ilist = pop(stack);
+              const auto & list = ilist.toDoubleList()->elements();
+              AT_CHECK(list.size() == num_outputs,
+                       "Expected ", num_outputs, " elements in a list but found ", list.size());
+              stack.insert(stack.end(), list.begin(), list.end());
+              return 0;
+            };
+          } else if (lt->getElementType() == DynamicType::get()) {
+            return [=](Stack& stack) {
+              auto ilist = pop(stack);
+              const auto & list = ilist.toTensorList()->elements();
+              AT_CHECK(list.size() == num_outputs,
+                       "Expected ", num_outputs, " elements in a list but found ", list.size());
+              stack.insert(stack.end(), list.begin(), list.end());
+              return 0;
+            };
+          } else {
+            AT_ERROR("Unsupported list type: ", lt->getElementType()->str());
+          }
+        }),
+    Operator(
         prim::ListConstruct,
         [](Node* node) -> Operation {
           size_t num_inputs = node->inputs().size();

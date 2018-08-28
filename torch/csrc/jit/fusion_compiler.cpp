@@ -1262,7 +1262,8 @@ RegisterOperators reg_fused_operators({
       return [dim, chunks](Stack& stack) {
         auto result = at::chunk(std::move(peek(stack, 0, 1)).toTensor(), chunks, dim);
         drop(stack, 1);
-        pack(stack, std::move(result));
+        stack.insert(stack.end(), std::make_move_iterator(result.begin()),
+                                  std::make_move_iterator(result.end()));
         return 0;
       };
     }),
@@ -1367,7 +1368,8 @@ void FusedKernelCache::run(Stack& stack) {
   std::vector<at::Tensor> outputs;
   fn->launch(args, outputs);
   drop(stack, num_inputs);
-  pack(stack, std::move(outputs));
+  stack.insert(stack.end(), std::make_move_iterator(outputs.begin()),
+                            std::make_move_iterator(outputs.end()));
 }
 
 at::optional<std::vector<int64_t>> FusedKernelCache::getMapSize(at::TensorList args, at::IntList arg_subset) {

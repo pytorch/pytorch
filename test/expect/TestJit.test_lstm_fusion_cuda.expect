@@ -11,9 +11,10 @@ graph(%0 : Float(*, *)
   %10 : Float(*, *) = aten::t(%4)
   %11 : Float(*, *) = aten::addmm(%6, %1, %10, %8, %8)
   %12 : Dynamic[] = prim::ListConstruct(%9, %11)
-  %13 : Dynamic, %14 : Dynamic = aten::broadcast_tensors(%12)
-  %15 : Float(*, *), %16 : Float(*, *) = prim::FusionGroup_0[device=0](%2, %13, %14)
-  return (%15, %16);
+  %13 : Dynamic[] = aten::broadcast_tensors(%12)
+  %14 : Dynamic, %15 : Dynamic = prim::ListUnpack(%13)
+  %16 : Float(*, *), %17 : Float(*, *) = prim::FusionGroup_0[device=0](%2, %14, %15)
+  return (%16, %17);
 }
 with prim::FusionGroup_0 = graph(%13 : Float(*, *)
       %39 : Dynamic

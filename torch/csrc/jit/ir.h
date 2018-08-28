@@ -1016,12 +1016,24 @@ public:
     }
     return n;
   }
+  Node* createList(at::ArrayRef<Value*> values) {
+    return createList(values.at(0)->type(), values);
+  }
   Node* createList(const TypePtr& elem_type, at::ArrayRef<Value*> values) {
     auto n = create(prim::ListConstruct, values);
     for(const auto & v : values) {
       JIT_ASSERT(v->type()->isSubtypeOf(elem_type));
     }
     n->output()->setType(ListType::create(elem_type));
+    return n;
+  }
+  Node * createListUnpack(Value *v, size_t size) {
+    ListTypePtr list_type = v->type()->expect<ListType>();
+    TypePtr elem_type = list_type->getElementType();
+    auto n = create(prim::ListUnpack, {v}, 0);
+    for (size_t i = 0; i < size; ++i) {
+      n->addOutput()->setType(elem_type);
+    }
     return n;
   }
   Node* createNumToTensor(Value* value) {
