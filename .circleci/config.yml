@@ -287,7 +287,7 @@ caffe2_linux_test_defaults: &caffe2_linux_test_defaults
           docker cp /opt/workspace/caffe2/. "$id:/usr/local/caffe2"
         fi
         if [ -d "/opt/workspace/conda_caffe2" ]; then
-          echo "mkdir -p /opt/conda/lib/python2.7/site-packages/caffe2" | docker exec -u jenkins -i "$id" bash
+          echo "sudo mkdir -p /opt/conda/lib/python2.7/site-packages/caffe2" | docker exec -u jenkins -i "$id" bash
           docker cp /opt/workspace/conda_caffe2/. "$id:/opt/conda/lib/python2.7/site-packages/caffe2"
         fi
         docker cp /opt/workspace/onnx/. "$id:/var/lib/jenkins/workspace/third_party/onnx"

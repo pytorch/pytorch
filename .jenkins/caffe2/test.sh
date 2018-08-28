@@ -124,6 +124,7 @@ fi
 # yf225 TODO: remove this when we are running tests on 2-GPU machines on CircleCI
 two_gpu_ignore_test=()
 two_gpu_ignore_test+=("--ignore $CAFFE2_PYPATH/python/data_parallel_model_test.py")
+two_gpu_ignore_test+=("--ignore $CAFFE2_PYPATH/python/parallelize_bmuf_distributed_test.py")
 two_gpu_ignore_test+=("--ignore $CAFFE2_PYPATH/contrib/nccl/nccl_ops_test.py")
 
 # Python tests
