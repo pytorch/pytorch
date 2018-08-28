@@ -222,13 +222,13 @@ void initJITBindings(PyObject *module) {
     py::class_<PyTorchFileReader>(m, "PyTorchFileReader")
       .def(py::init<std::string>())
       .def("get_record_with_key", [](PyTorchFileReader &self, uint64_t key) {
-        std::shared_ptr<void> data;
+        at::DataPtr data;
         size_t size;
         std::tie(data, size) = self.getRecordWithKey(key);
         return py::bytes(reinterpret_cast<const char*>(data.get()), size);
       })
       .def("get_last_record", [](PyTorchFileReader &self){
-        std::shared_ptr<void> data;
+        at::DataPtr data;
         size_t size;
         std::tie(data, size) = self.getLastRecord();
         return py::bytes(reinterpret_cast<const char*>(data.get()), size);
