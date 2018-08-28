@@ -30,7 +30,7 @@ static inline bool isTransposeContiguous(Tensor& self) {
  *    (i)  &in == &out: copy in.t().clone() to out (same tensor)
  *    (ii) &in != &out: copy in.t() to out
  */
-static inline void prepareTensorsForLapack(
+static inline Tensor& prepareTensorsForLapack(
     const Tensor& in, Tensor& out, Tensor& temp) {
   int64_t x = in.size(0);
   int64_t y = (in.dim() == 1) ? 1 : in.size(1);
@@ -53,6 +53,8 @@ static inline void prepareTensorsForLapack(
       out.copy_(in_t).t_();
     }
   }
+  // return ref to usable tensor for Lapack
+  return temp.defined() ? temp : out;
 }
 
 static inline void checkInputs(const Tensor& self, const Tensor& A, bool batched) {

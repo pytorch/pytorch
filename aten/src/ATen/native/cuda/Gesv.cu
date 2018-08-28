@@ -170,18 +170,16 @@ AT_ERROR("gesv: MAGMA library not found in "
   int* ipiv;
   Tensor temp_sol;
   Tensor temp_lu;
-  prepareTensorsForLapack(self, sol, temp_sol);
-  prepareTensorsForLapack(A, lu, temp_lu);
+  auto& A_tensor = prepareTensorsForLapack(A, lu, temp_lu);
+  auto& b_tensor = prepareTensorsForLapack(self, sol, temp_sol);
 
   AT_DISPATCH_FLOATING_TYPES(self.type(), "gesv", [&]{
-      const int64_t bx = sol.size(0);
-      const int64_t by = sol.size(1);
-      auto A_ptr = temp_lu.defined() ? temp_lu.data<scalar_t>()
-                                     : lu.data<scalar_t>();
-      auto b_ptr = temp_sol.defined() ? temp_sol.data<scalar_t>()
-                                      : sol.data<scalar_t>();
-      ALLOCATE_ARRAY(ipiv, int, bx, sol);
-      magmaGesv<scalar_t>(bx, by, A_ptr, bx, ipiv, b_ptr, bx, &info);
+      const int64_t n = sol.size(0);
+      const int64_t nrhs = sol.size(1);
+      auto A_ptr = A_tensor.data<scalar_t>();
+      auto b_ptr = b_tensor.data<scalar_t>();
+      ALLOCATE_ARRAY(ipiv, int, n, sol);
+      magmaGesv<scalar_t>(n, nrhs, A_ptr, n, ipiv, b_ptr, n, &info);
   });
   checkErrors({info});
 
@@ -191,7 +189,6 @@ AT_ERROR("gesv: MAGMA library not found in "
   if (temp_lu.defined()) {
     lu.copy_(temp_lu);
   }
-
   return std::tuple<Tensor&,Tensor&>(sol, lu);
 #endif
 }
