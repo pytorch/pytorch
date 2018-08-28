@@ -782,5 +782,34 @@ class _ConstSequential(_ConstModuleList):
             return input
         """)
 
+
+_builtin_table = None
+
+
+# lazily built to ensure the correct initialization order
+def _get_builtin_table():
+    global _builtin_table
+    if _builtin_table is not None:
+        return _builtin_table
+    _builtin_table = {}
+
+    def register_all(mod):
+        for name in dir(mod):
+            v = getattr(mod, name)
+            if callable(v):
+                _builtin_table[id(v)] = "aten::" + name
+    register_all(torch)
+    register_all(torch.nn.functional)
+    return _builtin_table
+
+
+def _register_builtin(callable, op):
+    _get_builtin_table()[id(callable)] = op
+
+
+def _find_builtin(callable):
+    return _get_builtin_table().get(id(callable))
+
+
 if not torch._C._jit_init():
     raise RuntimeError("JIT initialization failed")
