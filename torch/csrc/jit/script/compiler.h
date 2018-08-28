@@ -139,6 +139,8 @@ struct TORCH_API BuiltinModule : public SugaredValue {
 using Resolver = std::function<std::shared_ptr<
     SugaredValue>(const std::string& name, Method& m, const SourceRange& loc)>;
 
+std::shared_ptr<SugaredValue> nativeResolver(const std::string& name, Method& m, const SourceRange& loc);
+
 TORCH_API void defineMethodsInModule(
   Module & m,
   const std::vector<Def>& definitions,
@@ -149,7 +151,6 @@ TORCH_API void defineMethodsInModule(
 // same as above but parse the definitions from source
 TORCH_API void defineMethodsInModule(Module & m, const std::string& source, const Resolver& resolver, std::shared_ptr<SugaredValue> self);
 TORCH_API std::shared_ptr<Graph> compileFunction(Def def, const Resolver& resolver);
-TORCH_API std::shared_ptr<Graph> compileFunction(const std::string& source);
 
 // pack outputs of a function following python rules. If there is a single value return
 // a SimpleValue, otherwise pack all the values into a Tuple.

@@ -1906,12 +1906,6 @@ std::shared_ptr<Graph> compileFunction(Def def, const Resolver& resolver) {
   return m.get_method(def.name().name()).graph();
 }
 
-std::shared_ptr<Graph> compileFunction(const std::string& source) {
-  Parser p(source);
-  auto def = Def(p.parseFunction(true));
-  return compileFunction(def, nativeResolver);
-}
-
 std::vector<std::shared_ptr<SugaredValue>> SimpleValue::asTuple(SourceRange loc, Method& m, at::optional<size_t> size_hint) {
   static const auto make_simple_value = [](Value* v) -> std::shared_ptr<SugaredValue> {
     return std::make_shared<SimpleValue>(v);

@@ -838,23 +838,6 @@ void testBlocks(std::ostream & out) {
   out << *g2 << "\n";
 }
 
-static std::vector<IValue> run(std::shared_ptr<Graph> graph, std::vector<IValue> stack) {
-  Code code(graph);
-  InterpreterState interp(code);
-  interp.runOneStage(stack);
-  return stack;
-};
-
-static IValue L(int64_t l) { return IValue(autograd::make_variable(at::Scalar(l).toTensor())); };
-static long V(IValue t) { return std::move(t).toTensor().toCLong(); };
-
-static long run_graph(std::shared_ptr<Graph> graph, int64_t a, int64_t b) {
-  return V(run(graph, {L(a), L(b)})[0]);
-};
-
-static long run_method(script::Module& cu, const std::string & name, int64_t a, int64_t b) {
-  return run_graph(cu.get_method(name).graph(), a, b);
-};
 
 const static auto cf_examples = R"JIT(
   def if_test(a, b):
@@ -880,15 +863,20 @@ const static auto cf_examples = R"JIT(
 void testControlFlow() {
   script::Module cu;
   script::defineMethodsInModule(cu, cf_examples, torch::jit::script::Resolver(), nullptr);
-  REQUIRE(2 == run_method(cu, "if_test", 1, 2));
-  REQUIRE(3 == run_method(cu, "if_test", 3, 2));
-  REQUIRE(2 == run_method(cu, "if_one", 2, 3));
-  REQUIRE(2 == run_method(cu, "if_one", 3, 2));
-  REQUIRE(256 == run_method(cu, "while_test",2,0));
-}
+  auto run = [&](const std::string & name, std::vector<IValue> stack) {
+    auto graph = cu.get_method(name).graph();
+    Code code(graph);
+    InterpreterState interp(code);
+    interp.runOneStage(stack);
+    return stack;
+  };
 
 <<<<<<< HEAD
+<<<<<<< HEAD
   auto L = [](int64_t l) { return IValue(autograd::make_variable(scalar_to_tensor(at::Scalar(l)))); };
+=======
+  auto L = [](int64_t l) { return IValue(autograd::make_variable(at::Scalar(l).toTensor())); };
+>>>>>>> Add JIT to C++ API
   auto V = [](IValue t) { return std::move(t).toTensor().toCLong(); };
   auto run_binary = [&](const std::string & name, int64_t a, int64_t b) {
     return V(run(name, {L(a), L(b)})[0]);
@@ -898,6 +886,7 @@ void testControlFlow() {
   REQUIRE(2 == run_binary("if_one", 2, 3));
   REQUIRE(2 == run_binary("if_one", 3, 2));
   REQUIRE(256 == run_binary("while_test",2,0));
+<<<<<<< HEAD
 =======
 const static auto script_example = R"JIT(
   def relu_test(a, b):
@@ -912,6 +901,8 @@ void testModuleResolver() {
   auto graph = script::compileFunction(script_example);
   REQUIRE(2 == run_graph(graph, 1, 2));
 >>>>>>> [jit] Add resolver for 'torch' module
+=======
+>>>>>>> Add JIT to C++ API
 }
 
 void testIValue() {
@@ -1209,8 +1200,6 @@ TEST_CASE( "jit test CPU", "[cpu]" ) {
     internedStringsTests();
   SECTION( "custom operators" )
     testCustomOperators();
-  SECTION( "torch module" )
-    testModuleResolver();
 }
 
 TEST_CASE( "jit test CUDA", "[cuda]" ) {
