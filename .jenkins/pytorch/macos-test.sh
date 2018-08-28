@@ -56,8 +56,12 @@ test_cpp_api() {
   #
   CPP_BUILD="$PWD/../cpp-build"
   rm -rf $CPP_BUILD
-  mkdir -p $CPP_BUILD
-  WERROR=1 VERBOSE=1 tools/cpp_build/build_caffe2.sh "$CPP_BUILD"
+  mkdir -p $CPP_BUILD/caffe2
+
+  BUILD_LIBTORCH_PY=$PWD/tools/build_libtorch.py
+  pushd $CPP_BUILD/caffe2
+  WERROR=1 VERBOSE=1 DEBUG=1 python $BUILD_LIBTORCH_PY
+  popd
 
   python tools/download_mnist.py --quiet -d test/cpp/api/mnist
 

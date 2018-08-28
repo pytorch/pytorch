@@ -150,7 +150,7 @@ class TestCaffe2Basic(TestCase):
             'Gemm',
             ['A', 'B', 'C'],
             ["Y"],
-            transA=True)
+            transA=1)
         output = c2.run_node(node_def, [A, B, C])
         np.testing.assert_almost_equal(
             output["Y"],
@@ -164,12 +164,12 @@ class TestCaffe2Basic(TestCase):
             'Gemm',
             ['A', 'B', 'C'],
             ["Y"],
-            transB=True)
+            transB=1)
         output = c2.run_node(node_def, [A, B, C])
         np.testing.assert_almost_equal(
             output["Y"],
             np.dot(A, np.transpose(B)) + C)
-        # revert A
+        # revert B
         B = np.transpose(B)
 
         # scale
@@ -186,15 +186,87 @@ class TestCaffe2Basic(TestCase):
             output["Y"],
             alpha * np.dot(A, B) + beta * C)
 
-        # broadcast
+        # setup broadcastable C
         C = np.random.randn(4).astype(np.float32)
+
+        # broadcast for opset7
         node_def = make_node(
             'Gemm',
             ['A', 'B', 'C'],
             ["Y"],
             alpha=alpha,
             beta=beta)
-        output = c2.run_node(node_def, [A, B, C])
+        output = c2.run_node(node_def, [A, B, C], opset_version=7)
+        np.testing.assert_almost_equal(
+            output["Y"],
+            alpha * np.dot(A, B) + beta * C)
+        # broadcast for opset3 and 6
+        node_def = make_node(
+            'Gemm',
+            ['A', 'B', 'C'],
+            ["Y"],
+            alpha=alpha,
+            beta=beta,
+            broadcast=1)
+        output = c2.run_node(node_def, [A, B, C], opset_version=6)
+        np.testing.assert_almost_equal(
+            output["Y"],
+            alpha * np.dot(A, B) + beta * C)
+
+        # transB
+        B = np.transpose(B)
+
+        # transB and broadcast for opset7
+        node_def = make_node(
+            'Gemm',
+            ['A', 'B', 'C'],
+            ["Y"],
+            alpha=alpha,
+            beta=beta,
+            transB=1)
+        output = c2.run_node(node_def, [A, B, C], opset_version=7)
+        np.testing.assert_almost_equal(
+            output["Y"],
+            alpha * np.dot(A, np.transpose(B)) + beta * C)
+        # transB and broadcast for opset3 and 6
+        node_def = make_node(
+            'Gemm',
+            ['A', 'B', 'C'],
+            ["Y"],
+            alpha=alpha,
+            beta=beta,
+            broadcast=1,
+            transB=1)
+        output = c2.run_node(node_def, [A, B, C], opset_version=6)
+        np.testing.assert_almost_equal(
+            output["Y"],
+            alpha * np.dot(A, np.transpose(B)) + beta * C)
+
+        # revert B
+        B = np.transpose(B)
+        # set a scalar to C
+        C = np.random.randn(1).astype(np.float32)
+
+        # scalar broadcast for opset7
+        node_def = make_node(
+            'Gemm',
+            ['A', 'B', 'C'],
+            ["Y"],
+            alpha=alpha,
+            beta=beta)
+        output = c2.run_node(node_def, [A, B, C], opset_version=7)
+        np.testing.assert_almost_equal(
+            output["Y"],
+            alpha * np.dot(A, B) + beta * C)
+        # scalar broadcast for opset3 and 6
+        node_def = make_node(
+            'Gemm',
+            ['A', 'B', 'C'],
+            ["Y"],
+            alpha=alpha,
+            beta=beta,
+            broadcast=1)
+        output = c2.run_node(node_def, [A, B, C], opset_version=6)
         np.testing.assert_almost_equal(
             output["Y"],
             alpha * np.dot(A, B) + beta * C)
@@ -205,8 +277,30 @@ class TestCaffe2Basic(TestCase):
             ['A', 'B', 'C'],
             ["Y"],
             alpha=2.,
+            beta=3.)
+        node_def_broadcast = make_node(
+            'Gemm',
+            ['A', 'B', 'C'],
+            ["Y"],
+            alpha=2.,
             beta=3.,
-            transB=True)
+            broadcast=1)
+        node_def_transpose_b = make_node(
+            'Gemm',
+            ['A', 'B', 'C'],
+            ["Y"],
+            alpha=2.,
+            beta=3.,
+            transB=1)
+
+        node_def_transpose_b_broadcast = make_node(
+            'Gemm',
+            ['A', 'B', 'C'],
+            ["Y"],
+            alpha=2.,
+            beta=3.,
+            transB=1,
+            broadcast=1)
 
         backend = C.Caffe2Backend()
 
@@ -220,10 +314,11 @@ class TestCaffe2Basic(TestCase):
             op_names.append(op.type)
         self.assertEqual(op_names, ['Scale', 'Scale', 'MatMul', 'Add'])
 
-        # with shape info (that indicates C is 1D), gemm will be
-        # converted to FC
-        _, op_strs = backend.convert_node(node_def.SerializeToString(
-        ), [make_tensor_value_info("C", onnx.TensorProto.FLOAT, (1,)).SerializeToString()])
+        # opset7
+        # If C is a 1d tensor, gemm will be converted to FC/FCTransposed
+        _, op_strs = backend.convert_node(node_def_transpose_b.SerializeToString(
+        ), [make_tensor_value_info("C", onnx.TensorProto.FLOAT, (3,)).SerializeToString()],
+        7)
         op_names = []
         for s in op_strs:
             op = caffe2_pb2.OperatorDef()
@@ -231,21 +326,99 @@ class TestCaffe2Basic(TestCase):
             op_names.append(op.type)
         self.assertEqual(op_names, ['Scale', 'Scale', 'FC'])
 
-        # or with broadcast, gemm will be converted to fc
-        node_def = make_node(
-            'Gemm',
-            ['A', 'B', 'C'],
-            ["Y"],
-            transB=True,
-            broadcast=1)
-
-        _, op_strs = backend.convert_node(node_def.SerializeToString())
+        _, op_strs = backend.convert_node(node_def.SerializeToString(
+        ), [make_tensor_value_info("C", onnx.TensorProto.FLOAT, (3,)).SerializeToString()],
+        7)
         op_names = []
         for s in op_strs:
             op = caffe2_pb2.OperatorDef()
             op.ParseFromString(s)
             op_names.append(op.type)
-        self.assertEqual(op_names, ['FC'])
+        self.assertEqual(op_names, ['Scale', 'Scale', 'FCTransposed'])
+
+        # opset6 without broadcast(C should match A*B's dim)
+        # The gemm will be converted to matmul + add, since the FC requires c
+        # to be 1d tensor.
+        _, op_strs = backend.convert_node(node_def.SerializeToString(
+        ), [make_tensor_value_info("A", onnx.TensorProto.FLOAT, (3,2)).SerializeToString(),
+            make_tensor_value_info("B", onnx.TensorProto.FLOAT, (2,3)).SerializeToString(),
+            make_tensor_value_info("C", onnx.TensorProto.FLOAT, (3,3)).SerializeToString()],
+        6)
+        op_names = []
+        for s in op_strs:
+            op = caffe2_pb2.OperatorDef()
+            op.ParseFromString(s)
+            op_names.append(op.type)
+        self.assertEqual(op_names, ['Scale', 'Scale', 'MatMul', 'Add'])
+
+        # opset6 with broadcast
+        # If C is a 1d tensor, gemm will be converted to FC/FCTransposed
+        _, op_strs = backend.convert_node(node_def_transpose_b_broadcast.SerializeToString(
+        ), [make_tensor_value_info("C", onnx.TensorProto.FLOAT, (3,)).SerializeToString()],
+        6)
+        op_names = []
+        for s in op_strs:
+            op = caffe2_pb2.OperatorDef()
+            op.ParseFromString(s)
+            op_names.append(op.type)
+        self.assertEqual(op_names, ['Scale', 'Scale', 'FC'])
+
+        _, op_strs = backend.convert_node(node_def_broadcast.SerializeToString(
+        ), [make_tensor_value_info("C", onnx.TensorProto.FLOAT, (3,)).SerializeToString()],
+        6)
+        op_names = []
+        for s in op_strs:
+            op = caffe2_pb2.OperatorDef()
+            op.ParseFromString(s)
+            op_names.append(op.type)
+        self.assertEqual(op_names, ['Scale', 'Scale', 'FCTransposed'])
+
+        # opset7
+        # If C is a scalar and B's last dim is 1, gemm will be converted to FC/FCTransposed
+        _, op_strs = backend.convert_node(node_def_transpose_b.SerializeToString(
+        ), [make_tensor_value_info("B", onnx.TensorProto.FLOAT, (1,2)).SerializeToString(),
+            make_tensor_value_info("C", onnx.TensorProto.FLOAT, (1,)).SerializeToString()],
+        7)
+        op_names = []
+        for s in op_strs:
+            op = caffe2_pb2.OperatorDef()
+            op.ParseFromString(s)
+            op_names.append(op.type)
+        self.assertEqual(op_names, ['Scale', 'Scale', 'FC'])
+
+        _, op_strs = backend.convert_node(node_def.SerializeToString(
+        ), [make_tensor_value_info("B", onnx.TensorProto.FLOAT, (2,1)).SerializeToString(),
+            make_tensor_value_info("C", onnx.TensorProto.FLOAT, (1,)).SerializeToString()],
+        7)
+        op_names = []
+        for s in op_strs:
+            op = caffe2_pb2.OperatorDef()
+            op.ParseFromString(s)
+            op_names.append(op.type)
+        self.assertEqual(op_names, ['Scale', 'Scale', 'FCTransposed'])
+        # If C is a scalar and B's last dim is not 1, gemm will be converted
+        # to matmul + add.
+        _, op_strs = backend.convert_node(node_def_transpose_b.SerializeToString(
+        ), [make_tensor_value_info("B", onnx.TensorProto.FLOAT, (2,2)).SerializeToString(),
+            make_tensor_value_info("C", onnx.TensorProto.FLOAT, (1,)).SerializeToString()],
+        7)
+        op_names = []
+        for s in op_strs:
+            op = caffe2_pb2.OperatorDef()
+            op.ParseFromString(s)
+            op_names.append(op.type)
+        self.assertEqual(op_names, ['Scale', 'Scale', 'MatMul', 'Add'])
+        # If C is a scalar and B's shape info is not available,
+        # gemm will be converted to matmul + add.
+        _, op_strs = backend.convert_node(node_def_transpose_b.SerializeToString(
+        ), [make_tensor_value_info("C", onnx.TensorProto.FLOAT, (1,)).SerializeToString()],
+        7)
+        op_names = []
+        for s in op_strs:
+            op = caffe2_pb2.OperatorDef()
+            op.ParseFromString(s)
+            op_names.append(op.type)
+        self.assertEqual(op_names, ['Scale', 'Scale', 'MatMul', 'Add'])
 
     def test_tensor_filling_ops(self):
         for dtype in [

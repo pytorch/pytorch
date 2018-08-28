@@ -110,11 +110,35 @@ class FileStoreTest(TestCase, StoreTestBase):
         return c10d.FileStore(self.file.name)
 
 
+class PrefixFileStoreTest(TestCase, StoreTestBase):
+    def setUp(self):
+        self.file = tempfile.NamedTemporaryFile()
+        self.filestore = c10d.FileStore(self.file.name)
+        self.prefix = "test_prefix"
+
+    def tearDown(self):
+        self.file.close()
+
+    def _create_store(self):
+        return c10d.PrefixStore(self.prefix, self.filestore)
+
+
 class TCPStoreTest(TestCase, StoreTestBase):
     def _create_store(self):
         addr = 'localhost'
         port = find_free_port()
         return c10d.TCPStore(addr, port, True)
+
+
+class PrefixTCPStoreTest(TestCase, StoreTestBase):
+    def setUp(self):
+        addr = 'localhost'
+        port = find_free_port()
+        self.tcpstore = c10d.TCPStore(addr, port, True)
+        self.prefix = "test_prefix"
+
+    def _create_store(self):
+        return c10d.PrefixStore(self.prefix, self.tcpstore)
 
 
 class RendezvousTest(TestCase):
@@ -432,7 +456,7 @@ class ProcessGroupNCCLTest(TestCase):
 
     def test_reduce_ops(self):
         store = c10d.FileStore(self.file.name)
-        pg = c10d.ProcessGroupNCCL(store, self.rank, self.size)
+        pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
         def reduce(xs, rootRank, rootTensor):
             opts = c10d.ReduceOptions()
@@ -455,7 +479,7 @@ class ProcessGroupNCCLTest(TestCase):
 
     def test_allgather_ops(self):
         store = c10d.FileStore(self.file.name)
-        pg = c10d.ProcessGroupNCCL(store, self.rank, self.size)
+        pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
         def allgather(output_ts, input_ts):
             work = pg.allgather(output_ts, input_ts)
@@ -465,7 +489,7 @@ class ProcessGroupNCCLTest(TestCase):
         output_ts = [[] for _ in range(self.num_gpus)]
 
         for idx, ls in enumerate(output_ts):
-            for _ in range(self.size):
+            for _ in range(self.world_size):
                 ls.append(torch.Tensor([0]).cuda(idx))
 
         for i in range(self.num_gpus):

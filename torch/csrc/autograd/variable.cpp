@@ -22,7 +22,7 @@
 namespace torch {
 namespace autograd {
 Variable::Impl::Impl(at::Tensor data, bool requires_grad, Edge gradient_edge)
-    : TensorImpl(data.type().type_id(), data.type().scalarType(), nullptr, /* is variable */ true),
+    : TensorImpl(data.type().type_id(), data.type().scalarType(), /* is variable */ true),
       data_(std::move(data)),
       grad_fn_(std::move(gradient_edge.function)),
       requires_grad_(false),
@@ -41,6 +41,10 @@ Variable::Impl::Impl(at::Tensor data, bool requires_grad, Edge gradient_edge)
 
 Variable::Impl::~Impl() = default;
 
+int64_t Variable::Impl::numel() const {
+  return data_.numel();
+}
+
 IntList Variable::Impl::sizes() const {
   return data_.sizes();
 }
@@ -49,20 +53,48 @@ IntList Variable::Impl::strides() const {
   return data_.strides();
 }
 
+bool Variable::Impl::is_contiguous() const {
+  AT_ERROR("variable impl does not have is_contiguous");
+}
+
 int64_t Variable::Impl::dim() const {
   return data_.dim();
+}
+
+int64_t Variable::Impl::size(int64_t d) const {
+  return data_.size(d);
+}
+
+int64_t Variable::Impl::stride(int64_t d) const {
+  return data_.stride(d);
+}
+
+void Variable::Impl::resize_dim(int64_t ndim) {
+  AT_ERROR("variable impl does not have resize_dim");
+}
+
+void Variable::Impl::set_size(int64_t dim, int64_t new_size) {
+  AT_ERROR("variable impl does not have set_size");
+}
+
+void Variable::Impl::set_stride(int64_t dim, int64_t new_stride) {
+  AT_ERROR("variable impl does not have set_stride");
+}
+
+void Variable::Impl::set_storage_offset(int64_t storage_offset) {
+  AT_ERROR("variable impl does not have set_storage_offset");
 }
 
 const char* Variable::Impl::typeString() {
   return "VariableType";
 }
 
-void* Variable::Impl::unsafeGetTH(bool retain) {
-  return data_.unsafeGetTH(retain);
+const at::Storage& Variable::Impl::storage() const {
+  return data_.storage();
 }
 
-std::unique_ptr<at::Storage> Variable::Impl::storage() {
-  return data_.storage();
+int64_t Variable::Impl::storage_offset() const {
+  return data_.storage_offset();
 }
 
 std::shared_ptr<Function> Variable::Impl::get_grad_accumulator() {
@@ -122,12 +154,12 @@ void Variable::Impl::set_data(Tensor new_data) {
   if (prior_accumulator) {
     const auto prior_device = prior_accumulator->input_metadata(0).device();
     const auto new_device = new_data.is_cuda() ? new_data.get_device() : -1;
-    
+
     if (new_data.type() != data_.type() || prior_device != new_device) {
       grad_accumulator_.reset();
     }
   }
-  
+
   // Updates metadata
   scalar_type_ = new_data.type().scalarType();
   type_id_ = new_data.type().type_id();

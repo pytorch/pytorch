@@ -13,7 +13,7 @@ using namespace at;
 
 TEST_CASE( "parallel", "[cpu]" ) {
 
-  manual_seed(123, at::Backend::CPU);
+  manual_seed(123, at::kCPU);
   set_num_threads(1);
 
   Tensor a = rand({1,3});

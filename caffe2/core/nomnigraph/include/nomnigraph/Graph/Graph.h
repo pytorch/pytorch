@@ -321,6 +321,28 @@ class Graph {
     }
   }
 
+  // All out-edges oldNode -> V will be replaced with newNode -> V
+  void replaceOutEdges(const NodeRef& oldNode, const NodeRef& newNode) {
+    const auto edges = oldNode->getOutEdges();
+
+    for (const auto& edge : edges) {
+      edge->setTail(newNode);
+      oldNode->removeOutEdge(edge);
+      newNode->addOutEdge(edge);
+    }
+  }
+
+  // All in-edges V -> oldNode  will be replaced with V -> newNode
+  void replaceInEdges(const NodeRef& oldNode, const NodeRef& newNode) {
+    const auto edges = oldNode->getInEdges();
+
+    for (const auto& edge : edges) {
+      edge->setHead(newNode);
+      oldNode->removeInEdge(edge);
+      newNode->addInEdge(edge);
+    }
+  }
+
   /// \brief Creates a directed edge and retains ownership of it.
   /// \p tail The node that will have this edge as an out-edge.
   /// \p head The node that will have this edge as an in-edge.
@@ -352,6 +374,9 @@ class Graph {
   /// \param deleteEdges (optional) Whether or not to delete the edges
   /// related to the node.
   void deleteNode(NodeRef n, bool deleteEdges = true) {
+    if (!hasNode(n)) {
+      return;
+    }
     if (deleteEdges) {
       auto inEdges = n->inEdges_;
       for (auto& edge : inEdges) {
@@ -368,6 +393,15 @@ class Graph {
         nodes_.erase(i);
         break;
       }
+    }
+  }
+
+  // Delete all nodes in the set.
+  void deleteNodes(
+      const std::unordered_set<NodeRef>& nodes,
+      bool deleteEdges = true) {
+    for (auto node : nodes) {
+      deleteNode(node, deleteEdges);
     }
   }
 
@@ -410,6 +444,10 @@ class Graph {
       result.emplace_back(&e);
     }
     return result;
+  }
+
+  size_t getEdgesCount() const {
+    return (size_t)edges_.size();
   }
 
  private:

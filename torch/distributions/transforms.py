@@ -157,6 +157,9 @@ class Transform(object):
         """
         raise NotImplementedError
 
+    def __repr__(self):
+        return self.__class__.__name__ + '()'
+
 
 class _InverseTransform(Transform):
     """
@@ -273,6 +276,12 @@ class ComposeTransform(Transform):
                                              self.event_dim - part.event_dim)
             x = y
         return result
+
+    def __repr__(self):
+        fmt_string = self.__class__.__name__ + '(\n    '
+        fmt_string += ',\n    '.join([p.__repr__() for p in self.parts])
+        fmt_string += '\n)'
+        return fmt_string
 
 
 identity_transform = ComposeTransform([])

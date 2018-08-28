@@ -78,7 +78,7 @@ void TensorIterator::compute_common_type() {
   });
   if (result_type == ScalarType::Undefined) {
     std::tie(result_type, backend) = compute_result_type(operands_, [](const Tensor& t) {
-      return !t.get()->is_wrapped_number();
+      return !t.unsafeGetTensorImpl()->is_wrapped_number();
     });
   }
   if (result_type == ScalarType::Undefined) {
@@ -97,7 +97,7 @@ void TensorIterator::compute_common_type() {
       op.type = &type;
       if (op.tensor->defined() && type != op.tensor->type()) {
         if (op.tensor->dim() == 0) {
-          if (type.backend() != at::kCUDA) {
+          if (type.backend() != at::Backend::CUDA) {
             *op.tensor = op.tensor->toType(type);
           }
         } else {
@@ -300,7 +300,7 @@ bool TensorIterator::is_scalar(int arg) const {
 }
 
 bool TensorIterator::is_cpu_scalar(int arg) const {
-  return is_scalar(arg) && operands_[arg].tensor->type().backend() == at::kCPU;
+  return is_scalar(arg) && operands_[arg].tensor->type().backend() == at::Backend::CPU;
 }
 
 void* TensorIterator::data_ptr(int arg) const {
@@ -339,7 +339,7 @@ void TensorIterator::mark_outputs() {
     // check if output is also an input
     for (int arg = num_outputs_; arg < ntensors(); arg++) {
       auto input = *operands_[arg].tensor;
-      if (output.get() == input.get()) {
+      if (output.is_same(input)) {
         operands_[i].is_read_write = true;
       }
     }

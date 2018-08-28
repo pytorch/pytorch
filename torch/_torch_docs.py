@@ -607,8 +607,10 @@ bincount(self, weights=None, minlength=0) -> Tensor
 Count the frequency of each value in an array of non-negative ints.
 
 The number of bins (size 1) is one larger than the largest value in
-:attr:`input`. If :attr:`minlength` is specified, the number of bins is at least
-:attr:`minlength`. If ``n`` is the value at position ``i``,
+:attr:`input` unless :attr:`input` is empty, in which case the result is a
+tensor of size 0. If :attr:`minlength` is specified, the number of bins is at least
+:attr:`minlength` and if :attr:`input` is empty, then the result is tensor of size
+:attr:`minlength` filled with zeros. If ``n`` is the value at position ``i``,
 :math:`out[n] += weights[i]` if :attr:`weights` is specified else
 :math:`out[n] += 1`.
 
@@ -616,10 +618,11 @@ Arguments:
     input (Tensor): 1-d int tensor
     weights (Tensor): optional, weight for each value in the input tensor.
         Should be of same size as input tensor.
-    minlength (int): optional, min number of bins. Should be non-negative.
+    minlength (int): optional, minimum number of bins. Should be non-negative.
 
 Shape:
-    output (Tensor): ``Size([max(input) + 1])``
+    output (Tensor): ``Size([max(input) + 1])`` if :attr:`input` is non-empty, else
+                     ``Size(0)``
 
 Example::
 
@@ -1297,76 +1300,6 @@ Returns:
             If the corresponding e[j] and e[j + 1] eigenvalues form a complex conjugate pair, then the true eigenvectors
             can be computed as
             :math:`eigenvector[j] = v[:, j] + i * v[:, j + 1], eigenvector[j + 1] = v[:, j] - i * v[:, j + 1]`.
-""")
-
-add_docstr(torch.einsum,
-           r"""
-einsum(equation, operands) -> Tensor
-
-This function provides a way of computing multilinear expressions (i.e. sums of products) using the
-Einstein summation convention.
-
-Args:
-    equation (string): The equation is given in terms of lower case letters (indices) to be associated
-           with each dimension of the operands and result. The left hand side lists the operands
-           dimensions, separated by commas. There should be one index letter per tensor dimension.
-           The right hand side follows after `->` and gives the indices for the output.
-           If the `->` and right hand side are omitted, it implicitly defined as the alphabetically
-           sorted list of all indices appearing exactly once in the left hand side.
-           The indices not apprearing in the output are summed over after multiplying the operands
-           entries.
-           If an index appears several times for the same operand, a diagonal is taken.
-           Ellipses `...` represent a fixed number of dimensions. If the right hand side is inferred,
-           the ellipsis dimensions are at the beginning of the output.
-    operands (list of Tensors): The operands to compute the Einstein sum of.
-           Note that the operands are passed as a list, not as individual arguments.
-
-Examples::
-
-    >>> x = torch.randn(5)
-    >>> y = torch.randn(4)
-    >>> torch.einsum('i,j->ij', (x,y))  # outer product
-    tensor([[-0.0570, -0.0286, -0.0231,  0.0197],
-            [ 1.2616,  0.6335,  0.5113, -0.4351],
-            [ 1.4452,  0.7257,  0.5857, -0.4984],
-            [-0.4647, -0.2333, -0.1883,  0.1603],
-            [-1.1130, -0.5588, -0.4510,  0.3838]])
-
-
-    >>> A = torch.randn(3,5,4)
-    >>> l = torch.randn(2,5)
-    >>> r = torch.randn(2,4)
-    >>> torch.einsum('bn,anm,bm->ba', (l,A,r)) # compare torch.nn.functional.bilinear
-    tensor([[-0.3430, -5.2405,  0.4494],
-            [ 0.3311,  5.5201, -3.0356]])
-
-
-    >>> As = torch.randn(3,2,5)
-    >>> Bs = torch.randn(3,5,4)
-    >>> torch.einsum('bij,bjk->bik', (As, Bs)) # batch matrix multiplication
-    tensor([[[-1.0564, -1.5904,  3.2023,  3.1271],
-             [-1.6706, -0.8097, -0.8025, -2.1183]],
-
-            [[ 4.2239,  0.3107, -0.5756, -0.2354],
-             [-1.4558, -0.3460,  1.5087, -0.8530]],
-
-            [[ 2.8153,  1.8787, -4.3839, -1.2112],
-             [ 0.3728, -2.1131,  0.0921,  0.8305]]])
-
-    >>> A = torch.randn(3, 3)
-    >>> torch.einsum('ii->i', (A,)) # diagonal
-    tensor([-0.7825,  0.8291, -0.1936])
-
-    >>> A = torch.randn(4, 3, 3)
-    >>> torch.einsum('...ii->...i', (A,)) # batch diagonal
-    tensor([[-1.0864,  0.7292,  0.0569],
-            [-0.9725, -1.0270,  0.6493],
-            [ 0.5832, -1.1716, -1.5084],
-            [ 0.4041, -1.1690,  0.8570]])
-
-    >>> A = torch.randn(2, 3, 4, 5)
-    >>> torch.einsum('...ij->...ji', (A,)).shape # batch permute
-    torch.Size([2, 3, 5, 4])
 """)
 
 add_docstr(torch.eq,
@@ -2367,6 +2300,38 @@ Example::
             [ 0,  0,  0,  1]], dtype=torch.uint8)
     >>> torch.masked_select(x, mask)
     tensor([ 1.2252,  0.5002,  0.6248,  2.0139])
+""")
+
+add_docstr(torch.matrix_rank,
+           r"""
+matrix_rank(input, tol=None, bool symmetric=False) -> Tensor
+
+Returns the numerical rank of a 2-D tensor. The method to compute the
+matrix rank is done using SVD by default. If :attr:`symmetric` is ``True``,
+then :attr:`input` is assumed to be symmetric, and the computation of the
+rank is done by obtaining the eigenvalues.
+
+:attr:`tol` is the threshold below which the singular values (or the eigenvalues
+when :attr:`symmetric` is ``True``) are considered to be 0. If :attr:`tol` is not
+specified, :attr:`tol` is set to ``S.max() * max(S.size()) * eps`` where `S` is the
+singular values (or the eigenvalues when :attr:`symmetric` is ``True``), and ``eps``
+is the epsilon value for the datatype of :attr:`input`.
+
+Args:
+    input (Tensor): the input 2-D tensor
+    tol (float, optional): the tolerance value. Default: ``None``
+    symmetric(bool, optional): indicates whether :attr:`input` is symmetric.
+                               Default: ``False``
+
+Example::
+
+    >>> a = torch.eye(10)
+    >>> torch.matrix_rank(a)
+    tensor(10)
+    >>> b = torch.eye(10)
+    >>> b[0, 0] = 0
+    >>> torch.matrix_rank(b)
+    tensor(9)
 """)
 
 add_docstr(torch.max,
@@ -5367,7 +5332,7 @@ Ignoring the batch dimensions, it computes the following expression:
 
 .. math::
     X[\omega_1, \dots, \omega_d] =
-        \frac{1}{\prod_{i=1}^d N_i} \sum_{n_1=0}^{N_1} \dots \sum_{n_d=0}^{N_d} x[n_1, \dots, n_d]
+        \sum_{n_1=0}^{N_1} \dots \sum_{n_d=0}^{N_d} x[n_1, \dots, n_d]
          e^{-j\ 2 \pi \sum_{i=0}^d \frac{\omega_i n_i}{N_i}},
 
 where :math:`d` = :attr:`signal_ndim` is number of dimensions for the
@@ -5557,7 +5522,7 @@ This method supports 1D, 2D and 3D real-to-complex transforms, indicated
 by :attr:`signal_ndim`. :attr:`input` must be a tensor with at least
 ``signal_ndim`` dimensions with optionally arbitrary number of leading batch
 dimensions. If :attr:`normalized` is set to ``True``, this normalizes the result
-by multiplying it with :math:`\sqrt{\prod_{i=1}^K N_i}` so that the operator is
+by dividing it with :math:`\sqrt{\prod_{i=1}^K N_i}` so that the operator is
 unitary, where :math:`N_i` is the size of signal dimension :math:`i`.
 
 The real-to-complex Fourier transform results follow conjugate symmetry:

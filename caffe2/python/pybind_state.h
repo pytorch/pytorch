@@ -105,7 +105,7 @@ class TensorFetcher : public BlobFetcherBase {
 
   FetchedBlob FetchTensor(const Tensor& tensor, bool force_copy) {
     FetchedBlob result;
-    CAFFE_ENFORCE_GE(tensor.size(), 0, "Trying to fetch unitilized tensor");
+    CAFFE_ENFORCE_GE(tensor.size(), 0, "Trying to fetch uninitialized tensor");
     const int numpy_type = CaffeToNumpyType(tensor.meta());
     CAFFE_ENFORCE(
         numpy_type != -1,

@@ -31,7 +31,7 @@ class ConvTransposeGradientOp final : public ConvTransposeUnpoolBase<Context> {
   USE_CONV_TRANSPOSE_UNPOOL_BASE_FUNCTIONS(Context);
   ConvTransposeGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : ConvTransposeUnpoolBase<Context>(operator_def, ws),
-        no_bias_(OperatorBase::GetSingleArgument<bool>("no_bias", false)) {
+        no_bias_(this->template GetSingleArgument<bool>("no_bias", false)) {
     CAFFE_ENFORCE(
         !(no_bias_ && OutputSize() == 3),
         "If bias is not present, you should not have 3 grad output.");

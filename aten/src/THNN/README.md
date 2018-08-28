@@ -5,7 +5,7 @@ THNN is a library that gathers nn's C implementations of neural network modules.
 There is also a CUDA counterpart of THNN, THCUNN.
 
 Looking to add an implementation?  Consider writing an ATen native function
-instead!  See [../ATen/native](ATen/native).
+instead!  See [../ATen/native](../ATen/native).
 
 ## Links
 

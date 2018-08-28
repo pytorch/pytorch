@@ -13,10 +13,10 @@ class ModOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   ModOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws) {
-    divisor_ = OperatorBase::GetSingleArgument<int64_t>("divisor", 0);
+    divisor_ = this->template GetSingleArgument<int64_t>("divisor", 0);
     CAFFE_ENFORCE_NE(divisor_, 0, "divisor must not be 0");
     sign_follow_divisor_ =
-        OperatorBase::GetSingleArgument<bool>("sign_follow_divisor", false);
+        this->template GetSingleArgument<bool>("sign_follow_divisor", false);
   }
 
   bool RunOnDevice() override {
