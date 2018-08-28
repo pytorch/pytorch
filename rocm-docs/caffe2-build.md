@@ -27,7 +27,7 @@ To run benchmarks, skip directly to benchmarks section of the document.
 ## Build Caffe2 from source
 ### Pull the docker image
 ```
-docker pull rocm/caffe2:unbuilt-rocm1.8.2-v2
+docker pull rocm/caffe2:unbuilt-rocm1.8.2-v3
 ```
 This docker image has all the dependencies for caffe2 pre-installed.
 
@@ -49,7 +49,7 @@ cd pytorch
 
 ### Launch the docker container
 ```	
-docker run -it --network=host --device=/dev/kfd --device=/dev/dri --group-add video -v $PWD:/pytorch rocm/caffe2:unbuilt-rocm1.8.2-v2
+docker run -it --network=host --device=/dev/kfd --device=/dev/dri --group-add video -v $PWD:/pytorch rocm/caffe2:unbuilt-rocm1.8.2-v3
 ``` 
 Navigate to pytorch directory `cd /pytorch` inside the container.
 
