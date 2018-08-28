@@ -9,7 +9,7 @@
 #include "caffe2/core/stats.h"
 #include "caffe2/core/timer.h"
 #include "caffe2/core/workspace.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/utils/proto_utils.h"
 #include "caffe2/utils/thread_pool.h"
 
