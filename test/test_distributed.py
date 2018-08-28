@@ -19,12 +19,12 @@ import torch.optim as optim
 from common import TestCase
 from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
 from torch.autograd import Variable
-
+import test
+import common
 
 BACKEND = os.environ["BACKEND"]
 TEMP_DIR = os.environ["TEMP_DIR"]
 INIT_METHOD = os.getenv("INIT_METHOD", "env://")
-MASTER_PORT = "29500"
 
 DEFAULT_TIMEOUT = 300
 CUSTOMIZED_TIMEOUT = {"test_DistributedDataParallel": 500}
@@ -1045,7 +1045,6 @@ if BACKEND == "gloo" or BACKEND == "nccl":
         @classmethod
         def setUpClass(cls):
             os.environ["MASTER_ADDR"] = MASTER_ADDR
-            os.environ["MASTER_PORT"] = MASTER_PORT
             os.environ["WORLD_SIZE"] = WORLD_SIZE
             for attr in dir(cls):
                 if attr.startswith("test"):
@@ -1059,6 +1058,10 @@ if BACKEND == "gloo" or BACKEND == "nccl":
             if INIT_METHOD.startswith("file://"):
                 _, filename = tempfile.mkstemp(prefix=FOLDER)
                 INIT_METHOD = "file://{}".format(filename)
+
+            if INIT_METHOD.startswith("env://"):
+                port = common.find_free_port()
+                os.environ["MASTER_PORT"] = str(port)
 
             self.processes = []
             self.rank = self.MANAGER_PROCESS_RANK

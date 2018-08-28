@@ -21,7 +21,6 @@ TESTS = [
     'c10d',
     'cuda',
     'dataloader',
-    'distributed_thd',
     'distributed',
     'distributions',
     'indexing',
@@ -32,13 +31,14 @@ TESTS = [
     'nn',
     'optim',
     'sparse',
+    'thd_distributed',
     'torch',
     'utils',
 ]
 
 WINDOWS_BLACKLIST = [
     'distributed',
-    'distributed_thd',
+    'thd_distributed',
 ]
 
 ROCM_BLACKLIST = [
@@ -46,13 +46,13 @@ ROCM_BLACKLIST = [
     'cpp_extensions',
     'cuda',
     'distributed',
-    'distributed_thd',
     'distributions',
     'jit',
     'legacy_nn',
     'multiprocessing',
     'nccl',
     'nn',
+    'thd_distributed',
     'utils',
 ]
 
@@ -140,7 +140,7 @@ def test_distributed(python, test_module, test_directory, options):
         print_to_stderr(
             'MPI not available -- MPI backend tests will be skipped')
     config = DISTRIBUTED_TESTS_CONFIG
-    if test_module == "test_distributed_thd":
+    if test_module == "test_thd_distributed":
         config = THD_DISTRIBUTED_TESTS_CONFIG
     for backend, env_vars in config.items():
         if backend == 'mpi' and not mpi_available:
@@ -189,7 +189,7 @@ def test_distributed(python, test_module, test_directory, options):
 CUSTOM_HANDLERS = {
     'cpp_extensions': test_cpp_extensions,
     'distributed': test_distributed,
-    'distributed_thd': test_distributed,
+    'thd_distributed': test_distributed,
 }
 
 

@@ -1,7 +1,6 @@
 import copy
 import math
 import multiprocessing
-import socket
 import sys
 import tempfile
 import unittest
@@ -10,6 +9,7 @@ from functools import wraps
 from collections import namedtuple
 
 import torch
+import common
 from torch import nn
 import torch.nn.functional as F
 from torch.distributed import c10d
@@ -58,15 +58,6 @@ def skip_if_not_nccl(func):
 
 def get_timeout(test_id):
     return TIMEOUT_OVERRIDE.get(test_id.split('.')[-1], TIMEOUT_DEFAULT)
-
-
-def find_free_port():
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    sock.bind(('localhost', 0))
-    sockname = sock.getsockname()
-    sock.close()
-    return sockname[1]
 
 
 def gpus_for_rank(world_size):
@@ -126,14 +117,14 @@ class PrefixFileStoreTest(TestCase, StoreTestBase):
 class TCPStoreTest(TestCase, StoreTestBase):
     def _create_store(self):
         addr = 'localhost'
-        port = find_free_port()
+        port = common.find_free_port()
         return c10d.TCPStore(addr, port, True)
 
 
 class PrefixTCPStoreTest(TestCase, StoreTestBase):
     def setUp(self):
         addr = 'localhost'
-        port = find_free_port()
+        port = common.find_free_port()
         self.tcpstore = c10d.TCPStore(addr, port, True)
         self.prefix = "test_prefix"
 
@@ -194,7 +185,7 @@ class RendezvousTCPTest(TestCase):
 
     def test_nominal(self):
         addr = 'localhost'
-        port = find_free_port()
+        port = common.find_free_port()
         url = 'tcp://%s:%d?world_size=%d' % (addr, port, 2)
         gen0 = c10d.rendezvous(url + "&rank=0")
         store0, rank0, size0 = next(gen0)
@@ -245,7 +236,7 @@ class MultiProcessTestCase(TestCase):
     def setUp(self):
         self.rank = self.MAIN_PROCESS_RANK
         self.file = tempfile.NamedTemporaryFile()
-        self.port = find_free_port()
+        self.port = common.find_free_port()
         self.processes = [self._spawn_process(rank) for rank in range(int(self.world_size))]
 
     def tearDown(self):
