@@ -57,7 +57,7 @@ THC_API THCStorage* THCStorage_new(
     THCState* state,
     at::ScalarType scalar_type) {
   THStorage* storage = c10::make_intrusive<at::StorageImpl>(
-      scalar_type,
+      at::scalarTypeToDataType(scalar_type),
       0,
       state->cudaDeviceAllocator,
       true).release();
