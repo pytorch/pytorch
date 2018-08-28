@@ -26,6 +26,9 @@ struct Vec256<int64_t> : public Vec256i {
   using Vec256i::Vec256i;
   Vec256() {}
   Vec256(int64_t v) { values = _mm256_set1_epi64x(v); }
+  Vec256(int64_t val1, int64_t val2, int64_t val3, int64_t val4) {
+    values = _mm256_setr_epi64x(val1, val2, val3, val4);
+  }
   template <int64_t mask>
   static Vec256<int64_t> blend(Vec256<int64_t> a, Vec256<int64_t> b) {
     __at_align32__ int64_t tmp_values[size];
@@ -39,6 +42,9 @@ struct Vec256<int64_t> : public Vec256i {
     if (mask & 0x08)
       tmp_values[3] = _mm256_extract_epi64(b.values, 3);
     return loadu(tmp_values);
+  }
+  static Vec256<int64_t> arange(int64_t base = 0, int64_t step = 1) {
+    return Vec256<int64_t>(base, base + step, base + 2 * step, base + 3 * step);
   }
   static Vec256<int64_t>
   set(Vec256<int64_t> a, Vec256<int64_t> b, int64_t count = size) {
@@ -79,6 +85,30 @@ struct Vec256<int64_t> : public Vec256i {
     auto inverse = _mm256_xor_si256(values, is_larger);
     return _mm256_sub_epi64(inverse, is_larger);
   }
+  Vec256<int64_t> eq(const Vec256<int64_t>& other) const {
+    return _mm256_cmpeq_epi64(values, other.values);
+  }
+  Vec256<int64_t> ne(const Vec256<int64_t>& other) const {
+    auto zero = _mm256_set1_epi64x(0);
+    auto eq = _mm256_cmpeq_epi64(values, other.values);
+    return _mm256_xor_si256(zero, eq);  // invert
+  }
+  Vec256<int64_t> lt(const Vec256<int64_t>& other) const {
+    return _mm256_cmpgt_epi64(other.values, values);
+  }
+  Vec256<int64_t> le(const Vec256<int64_t>& other) const {
+    auto zero = _mm256_set1_epi64x(0);
+    auto gt = _mm256_cmpgt_epi64(values, other.values);
+    return _mm256_xor_si256(zero, gt);  // invert
+  }
+  Vec256<int64_t> gt(const Vec256<int64_t>& other) const {
+    return _mm256_cmpgt_epi64(values, other.values);
+  }
+  Vec256<int64_t> ge(const Vec256<int64_t>& other) const {
+    auto zero = _mm256_set1_epi64x(0);
+    auto lt = _mm256_cmpgt_epi64(other.values, values);
+    return _mm256_xor_si256(zero, lt);  // invert
+  }
 };
 
 template <>
@@ -87,9 +117,18 @@ struct Vec256<int32_t> : public Vec256i {
   using Vec256i::Vec256i;
   Vec256() {}
   Vec256(int32_t v) { values = _mm256_set1_epi32(v); }
+  Vec256(int32_t val1, int32_t val2, int32_t val3, int32_t val4,
+         int32_t val5, int32_t val6, int32_t val7, int32_t val8) {
+    values = _mm256_setr_epi32(val1, val2, val3, val4, val5, val6, val7, val8);
+  }
   template <int64_t mask>
   static Vec256<int32_t> blend(Vec256<int32_t> a, Vec256<int32_t> b) {
     return _mm256_blend_epi32(a, b, mask);
+  }
+  static Vec256<int32_t> arange(int32_t base = 0, int32_t step = 1) {
+    return Vec256<int32_t>(
+      base,            base +     step, base + 2 * step, base + 3 * step,
+      base + 4 * step, base + 5 * step, base + 6 * step, base + 7 * step);
   }
   static Vec256<int32_t>
   set(Vec256<int32_t> a, Vec256<int32_t> b, int32_t count = size) {
@@ -135,6 +174,30 @@ struct Vec256<int32_t> : public Vec256i {
   Vec256<int32_t> abs() const {
     return _mm256_abs_epi32(values);
   }
+  Vec256<int32_t> eq(const Vec256<int32_t>& other) const {
+    return _mm256_cmpeq_epi32(values, other.values);
+  }
+  Vec256<int32_t> ne(const Vec256<int32_t>& other) const {
+    auto zero = _mm256_set1_epi64x(0);
+    auto eq = _mm256_cmpeq_epi32(values, other.values);
+    return _mm256_xor_si256(zero, eq);  // invert
+  }
+  Vec256<int32_t> lt(const Vec256<int32_t>& other) const {
+    return _mm256_cmpgt_epi32(other.values, values);
+  }
+  Vec256<int32_t> le(const Vec256<int32_t>& other) const {
+    auto zero = _mm256_set1_epi64x(0);
+    auto gt = _mm256_cmpgt_epi32(values, other.values);
+    return _mm256_xor_si256(zero, gt);  // invert
+  }
+  Vec256<int32_t> gt(const Vec256<int32_t>& other) const {
+    return _mm256_cmpgt_epi32(values, other.values);
+  }
+  Vec256<int32_t> ge(const Vec256<int32_t>& other) const {
+    auto zero = _mm256_set1_epi64x(0);
+    auto lt = _mm256_cmpgt_epi32(other.values, values);
+    return _mm256_xor_si256(zero, lt);  // invert
+  }
 };
 
 template <>
@@ -143,6 +206,13 @@ struct Vec256<int16_t> : public Vec256i {
   using Vec256i::Vec256i;
   Vec256() {}
   Vec256(int16_t v) { values = _mm256_set1_epi16(v); }
+  Vec256(int16_t val1, int16_t val2, int16_t val3, int16_t val4,
+         int16_t val5, int16_t val6, int16_t val7, int16_t val8,
+         int16_t val9, int16_t val10, int16_t val11, int16_t val12,
+         int16_t val13, int16_t val14, int16_t val15, int16_t val16) {
+    values = _mm256_setr_epi16(val1, val2, val3, val4, val5, val6, val7, val8,
+                               val9, val10, val11, val12, val13, val14, val15, val16);
+  }
   template <int64_t mask>
   static Vec256<int16_t> blend(Vec256<int16_t> a, Vec256<int16_t> b) {
     __at_align32__ int16_t tmp_values[size];
@@ -180,6 +250,13 @@ struct Vec256<int16_t> : public Vec256i {
     if (mask & 0x8000)
       tmp_values[15] = _mm256_extract_epi16(b.values, 15);
     return loadu(tmp_values);
+  }
+  static Vec256<int16_t> arange(int16_t base = 0, int16_t step = 1) {
+    return Vec256<int16_t>(
+      base,             base +      step, base +  2 * step, base +  3 * step,
+      base +  4 * step, base +  5 * step, base +  6 * step, base +  7 * step,
+      base +  8 * step, base +  9 * step, base + 10 * step, base + 11 * step,
+      base + 12 * step, base + 13 * step, base + 14 * step, base + 15 * step);
   }
   static Vec256<int16_t>
   set(Vec256<int16_t> a, Vec256<int16_t> b, int16_t count = size) {
@@ -241,6 +318,30 @@ struct Vec256<int16_t> : public Vec256i {
   Vec256<int16_t> abs() const {
     return _mm256_abs_epi16(values);
   }
+  Vec256<int16_t> eq(const Vec256<int16_t>& other) const {
+    return _mm256_cmpeq_epi16(values, other.values);
+  }
+  Vec256<int16_t> ne(const Vec256<int16_t>& other) const {
+    auto zero = _mm256_set1_epi64x(0);
+    auto eq = _mm256_cmpeq_epi16(values, other.values);
+    return _mm256_xor_si256(zero, eq);  // invert
+  }
+  Vec256<int16_t> lt(const Vec256<int16_t>& other) const {
+    return _mm256_cmpgt_epi16(other.values, values);
+  }
+  Vec256<int16_t> le(const Vec256<int16_t>& other) const {
+    auto zero = _mm256_set1_epi64x(0);
+    auto gt = _mm256_cmpgt_epi16(values, other.values);
+    return _mm256_xor_si256(zero, gt);  // invert
+  }
+  Vec256<int16_t> gt(const Vec256<int16_t>& other) const {
+    return _mm256_cmpgt_epi16(values, other.values);
+  }
+  Vec256<int16_t> ge(const Vec256<int16_t>& other) const {
+    auto zero = _mm256_set1_epi64x(0);
+    auto lt = _mm256_cmpgt_epi16(other.values, values);
+    return _mm256_xor_si256(zero, lt);  // invert
+  }
 };
 
 template <>
@@ -256,6 +357,21 @@ Vec256<int32_t> inline operator+(const Vec256<int32_t>& a, const Vec256<int32_t>
 template <>
 Vec256<int16_t> inline operator+(const Vec256<int16_t>& a, const Vec256<int16_t>& b) {
   return _mm256_add_epi16(a, b);
+}
+
+template <>
+Vec256<int64_t> inline operator-(const Vec256<int64_t>& a, const Vec256<int64_t>& b) {
+  return _mm256_sub_epi64(a, b);
+}
+
+template <>
+Vec256<int32_t> inline operator-(const Vec256<int32_t>& a, const Vec256<int32_t>& b) {
+  return _mm256_sub_epi32(a, b);
+}
+
+template <>
+Vec256<int16_t> inline operator-(const Vec256<int16_t>& a, const Vec256<int16_t>& b) {
+  return _mm256_sub_epi16(a, b);
 }
 
 // AVX2 has no intrinsic for int64_t multiply so it needs to be emulated
@@ -292,8 +408,28 @@ Vec256<int16_t> inline operator*(const Vec256<int16_t>& a, const Vec256<int16_t>
   return _mm256_mullo_epi16(a, b);
 }
 
+/* TODO:
+ * From Agner Fog's vectorclass:
+ *
+ * Mathematical formula, used for signed division with fixed or variable divisor:
+ * (From T. Granlund and P. L. Montgomery: Division by Invariant Integers Using Multiplication,
+ * Proceedings of the SIGPLAN 1994 Conference on Programming Language Design and Implementation.
+ * http://citeseerx.ist.psu.edu/viewdoc/summary?doi=10.1.1.1.2556 )
+ * x = dividend
+ * d = abs(divisor)
+ * w = integer word size, bits
+ * L = ceil(log2(d)) = bit_scan_reverse(d-1)+1
+ * L = max(L,1)
+ * m = 1 + 2^(w+L-1)/d - 2^w                      [division should overflow to 0 if d = 1]
+ * sh1 = L-1
+ * q = x + (m*x >> w)                             [high part of signed multiplication with 2w bits]
+ * q = (q >> sh1) - (x<0 ? -1 : 0)
+ * if (divisor < 0) q = -q
+ * result trunc(x/d) = q
+ */
+
 template <typename T>
-Vec256<T> intdiv_256(const Vec256<T>& a, const Vec256<T>& b) {
+Vec256<T> inline intdiv_256(const Vec256<T>& a, const Vec256<T>& b) {
   T values_a[Vec256<T>::size];
   T values_b[Vec256<T>::size];
   a.store(values_a);
@@ -304,20 +440,26 @@ Vec256<T> intdiv_256(const Vec256<T>& a, const Vec256<T>& b) {
   return Vec256<T>::loadu(values_a);
 }
 
-template <>
-Vec256<int64_t> inline operator/(const Vec256<int64_t>& a, const Vec256<int64_t>& b) {
-  return intdiv_256(a, b);
+#define DEFINE_WIDTH_IGNOSTIC_BINARY_OP(op, func)                                         \
+template <>                                                                               \
+Vec256<int64_t> inline operator op(const Vec256<int64_t>& a, const Vec256<int64_t>& b) {  \
+  return func(a, b);                                                                      \
+}                                                                                         \
+template <>                                                                               \
+Vec256<int32_t> inline operator op(const Vec256<int32_t>& a, const Vec256<int32_t>& b) {  \
+  return func(a, b);                                                                      \
+}                                                                                         \
+template <>                                                                               \
+Vec256<int16_t> inline operator op(const Vec256<int16_t>& a, const Vec256<int16_t>& b) {  \
+  return func(a, b);                                                                      \
 }
 
-template <>
-Vec256<int32_t> inline operator/(const Vec256<int32_t>& a, const Vec256<int32_t>& b) {
-  return intdiv_256(a, b);
-}
+DEFINE_WIDTH_IGNOSTIC_BINARY_OP(/, intdiv_256)
+DEFINE_WIDTH_IGNOSTIC_BINARY_OP(&, _mm256_and_si256)
+DEFINE_WIDTH_IGNOSTIC_BINARY_OP(|, _mm256_or_si256)
+DEFINE_WIDTH_IGNOSTIC_BINARY_OP(^, _mm256_xor_si256)
 
-template <>
-Vec256<int16_t> inline operator/(const Vec256<int16_t>& a, const Vec256<int16_t>& b) {
-  return intdiv_256(a, b);
-}
+#undef DEFINE_WITDTH_IGNOSTIC_BINARY_OP
 
 #endif
 

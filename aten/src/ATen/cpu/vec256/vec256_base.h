@@ -3,8 +3,11 @@
 #include <cstring>
 #include <functional>
 #include <cmath>
+#include <type_traits>
+#include <bitset>
 
 #include "ATen/Utils.h"
+#include "ATen/core/C++17.h"
 
 #if defined(__GNUC__)
 #define __at_align32__ __attribute__((aligned(32)))
@@ -17,6 +20,21 @@
 namespace at {
 namespace vec256 {
 namespace {
+
+template<size_t n> struct int_of_size;
+
+#define DEFINE_INT_OF_SIZE(int_t) \
+template<> struct int_of_size<sizeof(int_t)> { using type = int_t; }
+
+DEFINE_INT_OF_SIZE(int64_t);
+DEFINE_INT_OF_SIZE(int32_t);
+DEFINE_INT_OF_SIZE(int16_t);
+DEFINE_INT_OF_SIZE(int8_t);
+
+#undef DEFINE_INT_OF_SIZE
+
+template <typename T>
+using int_same_size_t = typename int_of_size<sizeof(T)>::type;
 
 // NOTE: If you specialize on a type, you must define all operations!
 
@@ -33,8 +51,13 @@ public:
       values[i] = val;
     }
   }
+  template<typename... Args,
+           typename = c10::guts::enable_if_t<(sizeof...(Args) == size)>>
+  Vec256(Args... vals) {
+    values = { vals... };
+  }
   template <int64_t mask_>
-  static Vec256<T> blend(Vec256<T> a, Vec256<T> b) {
+  static Vec256<T> blend(const Vec256<T>& a, const Vec256<T>& b) {
     int64_t mask = mask_;
     Vec256 vec;
     for (int64_t i = 0; i < size; i++) {
@@ -47,7 +70,14 @@ public:
     }
     return vec;
   }
-  static Vec256<T> set(Vec256<T> a, Vec256<T> b, int64_t count = size) {
+  static Vec256<T> arange(T base = static_cast<T>(0), T step = static_cast<T>(1)) {
+    Vec256 vec;
+    for (int64_t i = 0; i < size; i++) {
+      vec.values[i] = base + i * step;
+    }
+    return vec;
+  }
+  static Vec256<T> set(const Vec256<T>& a, const Vec256<T>& b, int64_t count = size) {
     Vec256 vec;
     for (int64_t i = 0; i < size; i++) {
       if (i < count) {
@@ -166,9 +196,28 @@ public:
   Vec256<T> rsqrt() const {
     return map([](T x) { return 1 / std::sqrt(x); });
   }
+#define DEFINE_COMP(name, binary_pred)                                        \
+  Vec256<T> name(const Vec256<T> &other) const {                              \
+    Vec256<T> vec;                                                            \
+    for (int64_t i = 0; i != size; i++) {                                     \
+      if (values[i] binary_pred other.values[i]) {                            \
+        std::memset(static_cast<void*>(vec.values + i), 0xFF, sizeof(T));     \
+      } else {                                                                \
+        std::memset(static_cast<void*>(vec.values + i), 0, sizeof(T));        \
+      }                                                                       \
+    }                                                                         \
+    return vec;                                                               \
+  }
+  DEFINE_COMP(eq, ==)
+  DEFINE_COMP(ne, !=)
+  DEFINE_COMP(ge, >=)
+  DEFINE_COMP(le, <=)
+  DEFINE_COMP(gt, >)
+  DEFINE_COMP(lt, <)
+#undef DEFINE_COMP
 };
 
-template <class T> Vec256<T> operator+(const Vec256<T> &a, const Vec256<T> &b) {
+template <class T> Vec256<T> inline operator+(const Vec256<T> &a, const Vec256<T> &b) {
   Vec256<T> c = Vec256<T>();
   for (int i = 0; i != Vec256<T>::size; i++) {
     c[i] = a[i] + b[i];
@@ -176,7 +225,7 @@ template <class T> Vec256<T> operator+(const Vec256<T> &a, const Vec256<T> &b) {
   return c;
 }
 
-template <class T> Vec256<T> operator-(const Vec256<T> &a, const Vec256<T> &b) {
+template <class T> Vec256<T> inline operator-(const Vec256<T> &a, const Vec256<T> &b) {
   Vec256<T> c = Vec256<T>();
   for (int i = 0; i != Vec256<T>::size; i++) {
     c[i] = a[i] - b[i];
@@ -184,7 +233,7 @@ template <class T> Vec256<T> operator-(const Vec256<T> &a, const Vec256<T> &b) {
   return c;
 }
 
-template <class T> Vec256<T> operator*(const Vec256<T> &a, const Vec256<T> &b) {
+template <class T> Vec256<T> inline operator*(const Vec256<T> &a, const Vec256<T> &b) {
   Vec256<T> c = Vec256<T>();
   for (int i = 0; i != Vec256<T>::size; i++) {
     c[i] = a[i] * b[i];
@@ -192,7 +241,7 @@ template <class T> Vec256<T> operator*(const Vec256<T> &a, const Vec256<T> &b) {
   return c;
 }
 
-template <class T> Vec256<T> operator/(const Vec256<T> &a, const Vec256<T> &b) __ubsan_ignore_float_divide_by_zero__ {
+template <class T> Vec256<T> inline operator/(const Vec256<T> &a, const Vec256<T> &b) __ubsan_ignore_float_divide_by_zero__ {
   Vec256<T> c = Vec256<T>();
   for (int i = 0; i != Vec256<T>::size; i++) {
     c[i] = a[i] / b[i];
@@ -200,7 +249,7 @@ template <class T> Vec256<T> operator/(const Vec256<T> &a, const Vec256<T> &b) _
   return c;
 }
 
-template <class T> Vec256<T> max(const Vec256<T> &a, const Vec256<T> &b) {
+template <class T> Vec256<T> inline max(const Vec256<T> &a, const Vec256<T> &b) {
   Vec256<T> c = Vec256<T>();
   for (int i = 0; i != Vec256<T>::size; i++) {
     c[i] = std::max(a[i], b[i]);
@@ -208,9 +257,115 @@ template <class T> Vec256<T> max(const Vec256<T> &a, const Vec256<T> &b) {
   return c;
 }
 
+template <class T> Vec256<T> inline min(const Vec256<T> &a, const Vec256<T> &b) {
+  Vec256<T> c = Vec256<T>();
+  for (int i = 0; i != Vec256<T>::size; i++) {
+    c[i] = std::min(a[i], b[i]);
+  }
+  return c;
+}
+
+#define DEFINE_LOGICAL_OP(op)                                               \
+template <class T>                                                          \
+Vec256<T> inline operator op(const Vec256<T> &a, const Vec256<T> &b) {      \
+  Vec256<T> vec = Vec256<T>();                                              \
+  for (int64_t i = 0; i != Vec256<T>::size; i++) {                          \
+    vec[i] = a[i] op b[i];                                                  \
+  }                                                                         \
+  return vec;                                                               \
+}
+DEFINE_LOGICAL_OP(&)
+DEFINE_LOGICAL_OP(|)
+DEFINE_LOGICAL_OP(^)
+#undef DEFINE_LOGICAL_OP
+
 template <typename T>
-T fmadd(const T& a, const T& b, const T& c) {
+inline T fmadd(const T& a, const T& b, const T& c) {
   return a * b + c;
+}
+
+template <int64_t scale = 1, typename T = void>
+c10::guts::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vec256<T>>
+inline gather(T const* base_addr, const Vec256<int_same_size_t<T>>& vindex) {
+  static constexpr int size = Vec256<T>::size;
+  int_same_size_t<T> index_arr[size];
+  vindex.store(static_cast<void*>(index_arr));
+  T buffer[size];
+  for (int64_t i = 0; i < size; i++) {
+    buffer[i] = base_addr[index_arr[i] * scale / sizeof(T)];
+  }
+  return Vec256<T>::loadu(static_cast<void*>(buffer));
+}
+
+template <int64_t scale = 1, typename T = void>
+c10::guts::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vec256<T>>
+inline mask_gather(const Vec256<T>& src, T const* base_addr,
+            const Vec256<int_same_size_t<T>>& vindex, Vec256<T>& mask) {
+  static constexpr int size = Vec256<T>::size;
+  T src_arr[size];
+  int_same_size_t<T> mask_arr[size];  // use int type so we can logical and
+  int_same_size_t<T> index_arr[size];
+  src.store(static_cast<void*>(src_arr));
+  mask.store(static_cast<void*>(mask_arr));
+  vindex.store(static_cast<void*>(index_arr));
+  T buffer[size];
+  for (int64_t i = 0; i < size; i++) {
+    if (mask_arr[i] & 0x01) {  // check highest bit
+      buffer[i] = base_addr[index_arr[i] * scale / sizeof(T)];
+    } else {
+      buffer[i] = src_arr[i];
+    }
+  }
+  mask = Vec256<T>();  // "zero out" mask
+  return Vec256<T>::loadu(static_cast<void*>(buffer));
+}
+
+
+// Cast a given vector to another type without changing the bits representation.
+// So a Vec<double> of 256 bits containing all ones can be cast to a
+// Vec<int64_t> of 256 bits containing all ones (i.e., four negative 1s).
+template<typename dst_t, typename src_t>
+Vec256<dst_t> cast(const Vec256<src_t>& src) {
+  src_t src_arr[Vec256<src_t>::size];
+  src.store(static_cast<void*>(src_arr));
+  return Vec256<dst_t>::loadu(static_cast<const void*>(src_arr));
+}
+
+template <typename T>
+inline Vec256<int_same_size_t<T>> convert_to_int_of_same_size(const Vec256<T>& src) {
+  static constexpr int size = Vec256<T>::size;
+  T src_arr[size];
+  src.store(static_cast<void*>(src_arr));
+  int_same_size_t<T> buffer[size];
+  for (int64_t i = 0; i < size; i++) {
+    buffer[i] = static_cast<int_same_size_t<T>>(src_arr[i]);
+  }
+  return Vec256<int_same_size_t<T>>::loadu(static_cast<void*>(buffer));
+}
+
+// E.g., inputs: a           Vec256<float>   = {a0, b0, a1, b1, a2, b2, a3, b3}
+//               b           Vec256<float>   = {a4, b4, a5, b5, a6, b6, a7, b7}
+//       returns:            Vec256<float>   = {a0, a1, a2, a3, a4, a5, a6, a7}
+//                           Vec256<float>   = {b0, b1, b2, b3, b4, b5, b6, b7}
+template <typename T>
+inline c10::guts::enable_if_t<Vec256<T>::size % 2 == 0, std::pair<Vec256<T>, Vec256<T>>>
+deinterleave2(const Vec256<T>& a, const Vec256<T>& b) {
+  static constexpr int size = Vec256<T>::size;
+  static constexpr int half_size = size / 2;
+  T a_arr[size];
+  T b_arr[size];
+  T buffer1[size];
+  T buffer2[size];
+  a.store(static_cast<void*>(a_arr));
+  b.store(static_cast<void*>(b_arr));
+  for (int64_t i = 0; i < half_size; i++) {
+    buffer1[i] = a_arr[i * 2];
+    buffer1[half_size + i] = b_arr[i * 2];
+    buffer2[i] = a_arr[i * 2 + 1];
+    buffer2[half_size + i] = b_arr[i * 2 + 1];
+  }
+  return std::make_pair(Vec256<T>::loadu(static_cast<void*>(buffer1)),
+                        Vec256<T>::loadu(static_cast<void*>(buffer2)));
 }
 
 }}}
