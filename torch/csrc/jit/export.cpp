@@ -613,6 +613,10 @@ void ModuleEncoder::EncodeMethod(
     script::Method &method,
     const std::string prefix) {
   node_proto->set_name(prefix + method.name());
+  if (method.is_optimized()) {
+    // mark that this method was optimized
+    node_proto->set_domain("optimized");
+  }
 
   // We store the schema string in the docstring.
   node_proto->set_doc_string(getExportableSchemaStringForMethod(method));
