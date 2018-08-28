@@ -7632,6 +7632,7 @@ EXCLUDE_SCRIPT = {
 >>>>>>> Add Bool type to IR
     'test_matrix_power_n=-1',  # involves inverse
     'test_matrix_power_n=-3',  # involves inverse
+
     # skipped nn functional tests
     # ops involves sampling which could not test
     'test_nn_dropout',
