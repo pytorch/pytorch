@@ -258,7 +258,6 @@ caffe2_linux_test_defaults: &caffe2_linux_test_defaults
         fi
 
         pip install --user --no-cache-dir hypothesis==3.59.0 || pip install --user --no-cache-dir hypothesis==3.59.0 || pip install --user --no-cache-dir hypothesis==3.59.0
-        pip install --user -b /tmp/pip_install_onnx "file:///var/lib/jenkins/workspace/third_party/onnx#egg=onnx"
 
         # Hotfix, use hypothesis 3.44.6 on Ubuntu 14.04
         # See comments on https://github.com/HypothesisWorks/hypothesis-python/commit/eadd62e467d6cee6216e71b391951ec25b4f5830
@@ -266,6 +265,9 @@ caffe2_linux_test_defaults: &caffe2_linux_test_defaults
           sudo pip uninstall -y hypothesis
           sudo pip install hypothesis==3.44.6
         fi
+
+        pip install --user -b /tmp/pip_install_onnx "file:///var/lib/jenkins/workspace/third_party/onnx#egg=onnx"
+        pip install --user future
 
         # Build
         if test -x ".jenkins/caffe2/test.sh"; then
