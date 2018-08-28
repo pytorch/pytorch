@@ -789,14 +789,6 @@ Value* emitBuiltinCallMutable(
       loc, graph, name, inputs, attributes, tryMatchMutableSchema, required);
 }
 
-static Value* ensureTensor(const SourceRange& range, Value* v) {
-  if(!v->type()->isSubtypeOf(DynamicType::get())) {
-    throw ErrorReport(range) << "expected a tensor value but found a "
-                             << v->type()->str();
-  }
-  return v;
-}
-
 static Value* ensureInt(const SourceRange& range, Value* v) {
   if(!v->type()->isSubtypeOf(IntType::get())) {
     throw ErrorReport(range) << "expected a int but found a "
