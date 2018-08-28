@@ -205,7 +205,7 @@ class ModuleDecoder : DecoderBase {
       const std::string fullname);
 
   PyTorchFileReader file_reader_;
-  std::unordered_map<uint64_t, std::shared_ptr<at::Tensor>> storage_map_;
+  std::unordered_map<uint64_t, std::shared_ptr<at::Storage>> storage_map_;
   std::unordered_map<std::string, const onnx::TypeProto*> value_type_map_;
 };
 
@@ -298,21 +298,22 @@ at::Tensor ModuleDecoder::buildTensorCommon(
   std::move(tensor_proto.dims().begin(), tensor_proto.dims().end(), std::back_inserter(dims));
 
   // Find or create the storage
-  at::Tensor *storage_tensor;
   auto storage_it = storage_map_.find(record_number);
   if (storage_it == storage_map_.end()) {
-    auto storage = std::make_shared<at::Tensor>(at::CPU(type).tensor());
-    auto record = file_reader_.getRecordWithKey(record_number);
-    storage->resize_({ static_cast<int64_t>(std::get<1>(record)) });
-    std::memcpy(storage->storage().data(), std::get<0>(record).get(), std::get<1>(record));
+    at::DataPtr storage_ptr;
+    int64_t size;
+    std::tie(storage_ptr, size) = file_reader_.getRecordWithKey(record_number);
+    auto storage = std::make_shared<at::Storage>(
+      at::CPU(type).scalarType(),
+      std::move(storage_ptr),
+      size,
+      nullptr);
     storage_map_.insert(std::make_pair(record_number, storage));
-    storage_tensor = storage.get();
-  } else {
-    storage_tensor = storage_it->second.get();
+    return at::CPU(type).tensor(*storage, storage_offset, dims, strides);
   }
 
-  return at::CPU(onnxTypeToATenType(tensor_proto.data_type())).tensor(
-      storage_tensor->storage(), storage_offset, dims, strides);
+  auto storage = storage_it->second.get();
+  return at::CPU(type).tensor(*storage, storage_offset, dims, strides);
 }
 
 // Given a full name of a parameter or method,
