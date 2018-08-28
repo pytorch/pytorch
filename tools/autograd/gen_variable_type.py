@@ -561,8 +561,8 @@ def dispatch_strategy(declaration):
           get dispatched back to VariableType (which will ensure that they
           are differentiable.)
     """
-    if (declaration['abstract'] or declaration['derivative'] is not None or
-            any(arg.get('is_type_dispatched') for arg in declaration['arguments'])):
+    if declaration['derivative'] is not None or
+            any(arg.get('is_type_dispatched') for arg in declaration['arguments']):
         # If the function is abstract (not implemented on at::Type), we must
         # call the implementation on the derived type with unpacked tensors.
 

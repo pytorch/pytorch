@@ -17,6 +17,7 @@ $storage_tensor_headers
 #include "ATen/UndefinedTensor.h"
 #include "ATen/Utils.h"
 #include "ATen/WrapDimUtils.h"
+#include "ATen/ExpandUtils.h"
 #include "ATen/core/Half.h"
 #include "ATen/core/optional.h"
 
