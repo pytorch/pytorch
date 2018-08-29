@@ -14,6 +14,7 @@ import tempfile
 import torch
 from torch.utils import cpp_extension
 from common import TEST_WITH_ROCM
+import torch.distributed.c10d as c10d
 
 TESTS = [
     'autograd',
@@ -60,11 +61,19 @@ DISTRIBUTED_TESTS_CONFIG = {
     'gloo': {
         'WORLD_SIZE': '2' if torch.cuda.device_count() == 2 else '3'
     },
-    'nccl': {
-        'WORLD_SIZE': '2' if torch.cuda.device_count() == 2 else '3'
-    },
-    # TODO: make MPI work in CI docker container
 }
+
+
+if c10d.is_available():
+    if c10d.is_mpi_available():
+        DISTRIBUTED_TESTS_CONFIG['mpi'] = {
+            'WORLD_SIZE': '3'
+        }
+    if c10d.is_nccl_available():
+        DISTRIBUTED_TESTS_CONFIG['nccl'] = {
+            'WORLD_SIZE': '2' if torch.cuda.device_count() == 2 else '3'
+        }
+
 
 THD_DISTRIBUTED_TESTS_CONFIG = {
     'tcp': {

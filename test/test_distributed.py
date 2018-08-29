@@ -549,8 +549,8 @@ class _DistTestBase(object):
         )
 
     @unittest.skipIf(
-        BACKEND != "gloo" and BACKEND != "nccl",
-        "Only Gloo & Nccl backend support CUDA allReduce",
+        BACKEND != "gloo",
+        "Only Gloo backend will have CUDA allReduce tested",
     )
     @skip_if_no_cuda_distributed
     @skip_if_no_gpu
@@ -724,6 +724,7 @@ class _DistTestBase(object):
         self._test_all_gather_helper(group, group_id, rank)
 
     @unittest.skipIf(BACKEND != "nccl", "Only Nccl supports CUDA all gather")
+    @unittest.skipIf(BACKEND == "nccl", "CUDA all gather skipped for NCCL")
     @skip_if_no_cuda_distributed
     @skip_if_no_gpu
     def test_all_gather_cuda(self):
@@ -784,6 +785,7 @@ class _DistTestBase(object):
         self._barrier()
 
     @unittest.skipIf(BACKEND == "mpi", "MPI doesn't support broadcast multigpu")
+    @unittest.skipIf(BACKEND == "nccl", "NCCL broadcast multigpu skipped")
     @skip_if_no_gpu
     def test_broadcast_multigpu(self):
         group, group_id, rank = self._init_global_test()
@@ -821,6 +823,7 @@ class _DistTestBase(object):
         self._barrier()
 
     @unittest.skipIf(BACKEND == "mpi", "MPI doesn't support broadcast multigpu")
+    @unittest.skipIf(BACKEND == "nccl", "CUDA all_reduce multigpu skipped for NCCL")
     @skip_if_no_gpu
     def test_all_reduce_multigpu(self):
         group, group_id, rank = self._init_global_test()
