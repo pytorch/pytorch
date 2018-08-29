@@ -6,20 +6,15 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 export PATH="/usr/local/bin:$PATH"
 
 # Set up conda environment
-export PYTORCH_ENV_DIR="${HOME}/pytorch-ci-env"
-# If a local installation of conda doesn't exist, we download and install conda
-if [ ! -d "${PYTORCH_ENV_DIR}/miniconda3" ]; then
-  mkdir -p ${PYTORCH_ENV_DIR}
-  curl https://repo.continuum.io/miniconda/Miniconda3-latest-MacOSX-x86_64.sh -o ${PYTORCH_ENV_DIR}/miniconda3.sh
-  bash ${PYTORCH_ENV_DIR}/miniconda3.sh -b -p ${PYTORCH_ENV_DIR}/miniconda3
-fi
-export PATH="${PYTORCH_ENV_DIR}/miniconda3/bin:$PATH"
-source ${PYTORCH_ENV_DIR}/miniconda3/bin/activate
+curl https://repo.continuum.io/miniconda/Miniconda3-latest-MacOSX-x86_64.sh -o $PWD/miniconda3.sh
+rm -rf $PWD/miniconda3
+bash $PWD/miniconda3.sh -b -p $PWD/miniconda3
+export PATH="$PWD/miniconda3/bin:$PATH"
+source $PWD/miniconda3/bin/activate
 conda install -y mkl mkl-include numpy pyyaml setuptools cmake cffi ninja
-rm -rf ${PYTORCH_ENV_DIR}/miniconda3/lib/python3.6/site-packages/torch*
 
 git submodule update --init --recursive
-export CMAKE_PREFIX_PATH=${PYTORCH_ENV_DIR}/miniconda3/
+export CMAKE_PREFIX_PATH=$PWD/miniconda3/
 
 # Test PyTorch
 if [[ "${JOB_BASE_NAME}" == *cuda9.2* ]]; then
@@ -38,9 +33,9 @@ export MAX_JOBS=2
 export IMAGE_COMMIT_TAG=${BUILD_ENVIRONMENT}-${IMAGE_COMMIT_ID}
 
 # Download torch binaries in the test jobs
-rm -rf ${PYTORCH_ENV_DIR}/miniconda3/lib/python3.6/site-packages/torch*
+rm -rf $PWD/miniconda3/lib/python3.6/site-packages/torch*
 aws s3 cp s3://ossci-macos-build/pytorch/${IMAGE_COMMIT_TAG}.7z ${IMAGE_COMMIT_TAG}.7z
-7z x ${IMAGE_COMMIT_TAG}.7z -o"${PYTORCH_ENV_DIR}/miniconda3/lib/python3.6/site-packages"
+7z x ${IMAGE_COMMIT_TAG}.7z -o"$PWD/miniconda3/lib/python3.6/site-packages"
 
 test_python_all() {
   echo "Ninja version: $(ninja --version)"
