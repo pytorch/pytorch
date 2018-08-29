@@ -62,7 +62,10 @@ def process_types_and_backends(option):
             pairs.discard(('CUDA', 'Half'))
 
     # special case remove Half for cpu unless it is explicitly enabled,
-    if not option.get('cpu_half', False):
+    # or we have a non-dispatching native function
+    if not (option.get('cpu_half', False) or
+            (option['mode'] == 'native' and
+             not isinstance(option['type_method_definition_dispatch'], dict))):
         pairs.discard(('CPU', 'Half'))
 
     # sort the result for easy reading
