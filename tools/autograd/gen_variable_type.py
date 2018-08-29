@@ -188,7 +188,7 @@ def record_trace_outputs(declaration):
         output_names = [arg['name'] for arg in arguments if arg.get('output', False)]
     else:
         output_names = [r['name'] for r in declaration['returns']]
-    return ['jit::tracer::addOutput(node, {});'.format(name) for name in output_names]
+    return ['jit::tracer::addOutput(node, {});'.format(n) for n in output_names]
 
 
 def format_trace(declaration):
