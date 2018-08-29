@@ -650,6 +650,20 @@ diagonal(offset=0, dim1=0, dim2=1) -> Tensor
 See :func:`torch.diagonal`
 """)
 
+add_docstr_all('digamma',
+               r"""
+digamma() -> Tensor
+
+See :func:`torch.digamma`
+""")
+
+add_docstr_all('digamma_',
+               r"""
+digamma_() -> Tensor
+
+In-place version of :meth:`~Tensor.digamma`
+""")
+
 add_docstr_all('dim',
                r"""
 dim() -> int
