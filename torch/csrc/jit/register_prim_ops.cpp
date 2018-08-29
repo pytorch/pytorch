@@ -283,16 +283,27 @@ RegisterOperators reg({
         [](Node* node) {
           int64_t chunks = node->i(attr::chunks);
           int64_t dim = node->i(attr::dim);
+          auto outputs_used = fmap(node->outputs(), [](Value *v) { return v->uses().size() > 0; });
           return [=](Stack& stack) {
             autograd::profiler::RecordFunction record("chunk");
             at::Tensor t;
             pop(stack, t);
             auto result = at::chunk(t, chunks, dim);
-            // NB: Chunk can sometimes return a smaller number of outputs.
-            AT_CHECK(result.size() == chunks,
-                     "Expected chunk to return ", chunks, " outputs, but got ", result.size());
             stack.insert(stack.end(), std::make_move_iterator(result.begin()),
                                       std::make_move_iterator(result.end()));
+            // NB: Chunk can sometimes return a smaller number of outputs.
+            if (result.size() != chunks) {
+              if (result.size() > chunks) {
+                JIT_ASSERTM(result.size() == chunks,
+                            "Expected chunk to return ", chunks, " outputs, but got ", result.size());
+              }
+              for (size_t i = result.size(); i < chunks; ++i) {
+                AT_CHECK(!outputs_used[i],
+                         "Expected chunk to return at least ", chunks, " outputs, but got only ", result.size());
+                // We know that the output is unused, so it's ok to push anything on the stack.
+                stack.emplace_back();
+              }
+            }
             return 0;
           };
         }),

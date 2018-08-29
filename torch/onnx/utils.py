@@ -225,9 +225,10 @@ def _model_to_graph(model, args, f, verbose=False, training=False,
 
     # NB: ONNX requires complete information about output types, which might be
     # erased by some optimizations, so we need to set it explicitly again.
-    output_tensors, _ = torch._C._jit_flatten(torch_out)
-    for output, tensor in zip(graph.outputs(), output_tensors):
-        output.inferTypeFrom(tensor)
+    if torch_out is not None:
+        output_tensors, _ = torch._C._jit_flatten(torch_out)
+        for output, tensor in zip(graph.outputs(), output_tensors):
+            output.inferTypeFrom(tensor)
 
     _set_input_and_output_names(graph, input_names, output_names)
     if verbose:
