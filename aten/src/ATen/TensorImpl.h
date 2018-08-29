@@ -175,6 +175,8 @@ struct AT_API TensorImpl : public c10::intrusive_ptr_target {
   virtual int64_t size(int64_t d) const;
   virtual int64_t stride(int64_t d) const;
 
+  bool is_variable() const { return is_variable_; };
+
  private:
   int64_t storage_offset_;
   std::vector<int64_t> sizes_;

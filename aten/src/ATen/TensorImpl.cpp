@@ -13,10 +13,7 @@
 namespace at {
 
 Type& TensorImpl::type() const {
-  // Select backend from the hard-coded ones that the legacy ATen dispatcher
-  // knows about
-  Backend backend = tensorTypeIdToBackend(type_id_);
-  return globalContext().getType(backend, scalar_type_, is_variable_);
+  return getType(this);
 }
 
 Tensor& TensorImpl::grad() {

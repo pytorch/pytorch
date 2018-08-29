@@ -144,6 +144,7 @@ static inline Type& getType(DeviceType p, ScalarType s, bool is_variable = false
 }
 
 Type& getType(TensorOptions options);
+Type& getType(const TensorImpl*);
 
 static inline Type& CPU(ScalarType s) {
   return getType(Backend::CPU, s);
