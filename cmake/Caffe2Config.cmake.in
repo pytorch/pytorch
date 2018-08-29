@@ -97,6 +97,8 @@ if (@USE_CUDA@)
   endif()
 endif()
 
+FIND_PACKAGE(ONNX REQUIRED)
+
 # import targets
 include ("${CMAKE_CURRENT_LIST_DIR}/Caffe2Targets.cmake")
 
