@@ -28,7 +28,7 @@ inline Tensor from_blob(
     IntList sizes,
     const std::function<void(void*)>& deleter,
     const TensorOptions& options = {}) {
-  return options.type().tensorFromBlob(data, sizes, deleter);
+  return at::getType(options).tensorFromBlob(data, sizes, deleter);
 }
 
 inline Tensor from_blob(

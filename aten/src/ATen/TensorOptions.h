@@ -157,11 +157,6 @@ struct AT_API TensorOptions {
     return is_variable_;
   }
 
-  /// Constructs an `at::Type` from the members of the `TensorOptions`.
-  const Type& type() const {
-    return getType(backend(), dtype_, is_variable_);
-  }
-
  private:
   // Resolves the ATen backend specified by the current construction axes.
   Backend backend() const noexcept {
@@ -227,7 +222,7 @@ inline Tensor to(
     return tensor;
   }
   DeviceGuard guard(options.device());
-  return options.type().copy(tensor, non_blocking);
+  return at::getType(options).copy(tensor, non_blocking);
 }
 } // namespace detail
 

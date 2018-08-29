@@ -143,6 +143,10 @@ static inline Type& getType(DeviceType p, ScalarType s, bool is_variable = false
   return globalContext().getType(deviceTypeToBackend(p), s, is_variable);
 }
 
+static inline Type& getType(TensorOptions options) {
+  return globalContext().getType(options.backend(), options.dtype(), options.is_variable());
+}
+
 static inline Type& CPU(ScalarType s) {
   return getType(Backend::CPU, s);
 }

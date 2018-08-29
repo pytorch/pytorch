@@ -30,12 +30,12 @@ void window_function_checks(
       options.layout() != kSparse,
       function_name,
       " is not implemented for sparse types, got: ",
-      options.type().toString());
+      at::getType(options).toString());
   AT_CHECK(
       at::isFloatingType(options.dtype()),
       function_name,
       " expects floating point dtypes, got: ",
-      options.type().toString());
+      at::getType(options).toString());
   AT_CHECK(
       window_length >= 0,
       function_name,
@@ -55,7 +55,7 @@ Tensor arange(
     Scalar end,
     Scalar step,
     const TensorOptions& options) {
-  return options.type()._arange(start, end, step);
+  return at::getType(options)._arange(start, end, step);
 }
 
 Tensor& arange_out(Tensor& result, Scalar start, Scalar end) {
@@ -67,7 +67,7 @@ Tensor& arange_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
 }
 
 Tensor arange(Scalar end, const TensorOptions& options) {
-  return options.type()._arange(end);
+  return at::getType(options)._arange(end);
 }
 
 Tensor& arange_out(Tensor& result, Scalar end) {
@@ -81,7 +81,7 @@ Tensor _dim_arange(const Tensor& like, int64_t dim) {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ empty ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor empty(IntList size, const TensorOptions& options) {
-  return options.type().tensor(size);
+  return at::getType(options).tensor(size);
 }
 
 Tensor& empty_out(Tensor& result, IntList size) {
@@ -116,7 +116,7 @@ Tensor empty_like(const Tensor& self) {
 
 Tensor empty_like(const Tensor& self, const TensorOptions& options) {
   if (options.layout() == kSparse && self.type().is_sparse()) {
-    auto res = options.type().tensor();
+    auto res = at::getType(options).tensor();
     res.sparse_resize_and_clear_(self.sizes(), self._sparseDims(), self._denseDims());
 
     return res;
@@ -131,7 +131,7 @@ Tensor eye(int64_t n, const TensorOptions& options) {
 }
 
 Tensor eye(int64_t n, int64_t m, const TensorOptions& options) {
-  auto tensor = options.type().tensor({});
+  auto tensor = at::getType(options).tensor({});
   return at::eye_out(tensor, n, m);
 }
 
@@ -166,7 +166,7 @@ Tensor full(IntList size, Scalar fill_value, const TensorOptions& options) {
   if (options.layout() == kSparse) {
     AT_ERROR("full(...) is not implemented for sparse layout");
   }
-  auto result = options.type().tensor(size);
+  auto result = at::getType(options).tensor(size);
   return result.fill_(fill_value);
 }
 
@@ -197,7 +197,7 @@ Tensor linspace(
     Scalar end,
     int64_t steps,
     const TensorOptions& options) {
-  return options.type()._linspace(start, end, steps);
+  return at::getType(options)._linspace(start, end, steps);
 }
 
 Tensor& linspace_out(Tensor& result, Scalar start, Scalar end) {
@@ -219,7 +219,7 @@ Tensor logspace(
     Scalar end,
     int64_t steps,
     const TensorOptions& options) {
-  return options.type()._logspace(start, end, steps);
+  return at::getType(options)._logspace(start, end, steps);
 }
 
 Tensor& logspace_out(Tensor& result, Scalar start, Scalar end) {
@@ -255,7 +255,7 @@ Tensor rand(IntList size, const TensorOptions& options) {
 }
 
 Tensor rand(IntList size, Generator* generator, const TensorOptions& options) {
-  auto result = options.type().tensor(size);
+  auto result = at::getType(options).tensor(size);
   return result.uniform_(0, 1, generator);
 }
 
@@ -304,7 +304,7 @@ Tensor randint(
     IntList size,
     Generator* generator,
     const TensorOptions& options) {
-  auto result = options.type().tensor(size);
+  auto result = at::getType(options).tensor(size);
   return result.random_(low, high, generator);
 }
 
@@ -365,7 +365,7 @@ Tensor randn(IntList size, const TensorOptions& options) {
 }
 
 Tensor randn(IntList size, Generator* generator, const TensorOptions& options) {
-  auto result = options.type().tensor(size);
+  auto result = at::getType(options).tensor(size);
   return result.normal_(0, 1, generator);
 }
 
@@ -422,7 +422,7 @@ Tensor randperm(int64_t n, const TensorOptions& options) {
 }
 
 Tensor randperm(int64_t n, Generator* generator, const TensorOptions& options) {
-  auto tensor = options.type().tensor(n);
+  auto tensor = at::getType(options).tensor(n);
   return at::randperm_out(tensor, n, generator);
 }
 
@@ -452,7 +452,7 @@ Tensor range(
     Scalar end,
     Scalar step,
     const TensorOptions& options) {
-  return options.type()._range(start, end, step);
+  return at::getType(options)._range(start, end, step);
 }
 
 Tensor& range_out(Tensor& result, Scalar start, Scalar end) {
@@ -466,7 +466,7 @@ Tensor& range_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ zeros ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor zeros(IntList size, const TensorOptions& options) {
-  auto result = options.type().tensor(size);
+  auto result = at::getType(options).tensor(size);
   return result.zero_();
 }
 
@@ -486,7 +486,7 @@ Tensor zeros_like(const Tensor& self) {
 
 Tensor zeros_like(const Tensor& self, const TensorOptions& options) {
   if (options.layout() == kSparse && self.type().is_sparse()) {
-    auto res = options.type().tensor();
+    auto res = at::getType(options).tensor();
     res.sparse_resize_and_clear_(self.sizes(), self._sparseDims(), self._denseDims());
     return res;
   }
