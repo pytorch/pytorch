@@ -107,7 +107,8 @@ TYPE_DERIVED_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeDerived.cpp")
 SPARSE_TYPE_DERIVED_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/SparseTypeDerived.cpp")
 TYPE_DERIVED_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeDerived.h")
 TYPE_H = CodeTemplate.from_file(TEMPLATE_PATH + "/Type.h")
-TYPE_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/Type.cpp")
+TYPE_BASE_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeBase.h")
+TYPE_BASE_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeBase.cpp")
 
 REGISTER_CPU_H = CodeTemplate.from_file(TEMPLATE_PATH + "/RegisterCPU.h")
 REGISTER_CPU_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/RegisterCPU.cpp")
@@ -166,6 +167,7 @@ top_env = {
     'cpu_type_headers': [],
     'cuda_type_registrations': [],
     'cuda_type_headers': [],
+    'pure_virtual_type_method_declarations': [],
     'type_method_declarations': [],
     'type_method_definitions': [],
     'type_method_inline_definitions': [],
@@ -341,7 +343,7 @@ def iterate_types():
 # so that the script runs quickly when we are just querying the
 # outputs
 def declare_outputs():
-    files = ['Declarations.yaml', 'Type.h', 'Type.cpp', 'Tensor.h',
+    files = ['Declarations.yaml', 'Type.h', 'TypeBase.cpp', 'TypeBase.h', 'Tensor.h',
              'TensorMethods.h', 'Functions.h',
              'CPUCopy.cpp', 'NativeFunctions.h',
              'RegisterCPU.cpp', 'RegisterCPU.h']
@@ -411,7 +413,8 @@ def generate_outputs():
             backend, density, scalar_type, declarations))
 
     file_manager.write('Type.h', TYPE_H, top_env)
-    file_manager.write('Type.cpp', TYPE_CPP, top_env)
+    file_manager.write('TypeBase.h', TYPE_BASE_H, top_env)
+    file_manager.write('TypeBase.cpp', TYPE_BASE_CPP, top_env)
 
     file_manager.write('RegisterCPU.h', REGISTER_CPU_H, top_env)
     file_manager.write('RegisterCPU.cpp', REGISTER_CPU_CPP, top_env)

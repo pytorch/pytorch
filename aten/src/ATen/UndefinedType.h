@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ATen/Type.h"
+#include "ATen/TypeBase.h"
 #include "ATen/CheckGenerator.h"
 
 #ifdef _MSC_VER
@@ -11,7 +11,7 @@
 
 namespace at {
 
-struct UndefinedType final : public Type {
+struct UndefinedType final : public TypeBase {
   explicit UndefinedType();
   virtual ScalarType scalarType() const override;
   virtual Backend backend() const override;

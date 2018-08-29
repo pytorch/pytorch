@@ -4,7 +4,7 @@
 namespace at {
 
 UndefinedType::UndefinedType()
-    : Type(UndefinedTensorId(), /*is_variable=*/false, /*is_undefined=*/true) {}
+    : TypeBase(UndefinedTensorId(), /*is_variable=*/false, /*is_undefined=*/true) {}
 ScalarType UndefinedType::scalarType() const {
   return ScalarType::Undefined;
 }

@@ -2,7 +2,7 @@
 
 // ${generated_comment}
 
-#include "ATen/Type.h"
+#include "ATen/TypeBase.h"
 #include "ATen/Context.h"
 #include "ATen/TensorMethods.h"
 #include "ATen/CheckGenerator.h"
@@ -15,7 +15,7 @@
 
 namespace at {
 
-struct ${Type} final : public Type {
+struct ${Type} final : public TypeBase {
   explicit ${Type}();
   virtual ScalarType scalarType() const override;
   virtual Backend backend() const override;

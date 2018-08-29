@@ -28,7 +28,7 @@ $extra_cuda_headers
 namespace at {
 
 ${Type}::${Type}()
-  : Type(${Backend}TensorId(), /*is_variable=*/false, /*is_undefined=*/false) {}
+  : TypeBase(${Backend}TensorId(), /*is_variable=*/false, /*is_undefined=*/false) {}
 ScalarType ${Type}::scalarType() const {
   return ScalarType::${ScalarName};
 }

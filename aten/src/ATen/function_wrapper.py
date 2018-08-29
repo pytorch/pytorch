@@ -39,11 +39,11 @@ else:
 #    declaration under Type.h  (right now, we call this template
 #    BROADCAST but it also handles default arguments)
 TYPE_METHOD_DECLARATION_BROADCAST = CodeTemplate("""\
-${return_type} ${api_name}(${type_method_formals_with_defaults}) const;
+${return_type} ${api_name}(${type_method_formals_with_defaults}) const override;
 """)
 # 2. broadcasting functions are implemented in Type.cpp
 TYPE_METHOD_DEFINITION_BROADCAST = CodeTemplate("""\
-${return_type} Type::${api_name}(${type_method_formals}) const {
+${return_type} TypeBase::${api_name}(${type_method_formals}) const {
     ${device_guard_declaration}
     Tensor ${broadcast_returns};
     std::tie(${broadcast_returns}) = ${broadcast_function}(${broadcast_actuals}, "${api_name}");
@@ -59,28 +59,35 @@ ${return_type} Type::${api_name}(${type_method_formals}) const {
 #    actual implementation.  At the moment, this situation *only* occurs
 #    for 'native' declarations (so the native dispatch is hardcoded into
 #    the template here.)
+PURE_VIRTUAL_TYPE_METHOD_DECLARATION = CodeTemplate("""\
+virtual ${return_type} ${method_prefix_derived}${api_name}(${type_method_formals_with_defaults}) const = 0;
+""")
+DEPRECATED_PURE_VIRTUAL_TYPE_METHOD_DECLARATION = CodeTemplate("""\
+AT_DEPRECATED(virtual ${return_type} ${method_prefix_derived}${api_name}(${type_method_formals_with_defaults}) const = 0);
+""")
+PURE_VIRTUAL_TYPE_METHOD_DECLARATION_BROADCAST = CodeTemplate("""\
+virtual ${return_type} ${api_name}(${type_method_formals_with_defaults}) const = 0;
+""")
+
 TYPE_METHOD_DECLARATION_ABSTRACT = CodeTemplate("""\
-virtual ${return_type} ${method_prefix_derived}${api_name}(${type_method_formals_with_defaults}) const;
+${return_type} ${method_prefix_derived}${api_name}(${type_method_formals_with_defaults}) const override;
 """)
 TYPE_METHOD_DEFINITION_ABSTRACT = CodeTemplate("""\
-${return_type} Type::${method_prefix_derived}${api_name}(${type_method_formals}) const {
+${return_type} TypeBase::${method_prefix_derived}${api_name}(${type_method_formals}) const {
     AT_ERROR("${method_prefix_derived}${api_name} is not implemented for type ", toString());
 }
 """)
 TYPE_METHOD_DECLARATION_CONCRETE = CodeTemplate("""\
-virtual ${return_type} ${api_name}(${type_method_formals_with_defaults}) const;
-""")
-DEPRECATED_TYPE_METHOD_DECLARATION_CONCRETE = CodeTemplate("""\
-AT_DEPRECATED(virtual ${return_type} ${api_name}(${type_method_formals_with_defaults}) const);
+${return_type} ${api_name}(${type_method_formals_with_defaults}) const override;
 """)
 TYPE_METHOD_DEFINITION_CONCRETE = CodeTemplate("""\
-${return_type} Type::${api_name}(${type_method_formals}) const {
+${return_type} TypeBase::${api_name}(${type_method_formals}) const {
     ${device_guard_declaration}
     ${type_definition_body}
 }
 """)
 DEPRECATED_TYPE_METHOD_DEFINITION_CONCRETE = CodeTemplate("""\
-${return_type} Type::${api_name}(${type_method_formals}) const {
+${return_type} TypeBase::${api_name}(${type_method_formals}) const {
     TensorOptions options(*this);
     ${device_guard_declaration}
     return at::native::${api_name}(${type_method_actuals}, options);
@@ -88,7 +95,7 @@ ${return_type} Type::${api_name}(${type_method_formals}) const {
 """)
 # 4. add virtual override to TypeDerived.h
 TYPE_DERIVED_DECLARATION = CodeTemplate("""\
-virtual ${return_type} ${method_prefix_derived}${api_name}(${type_method_formals}) const override;
+${return_type} ${method_prefix_derived}${api_name}(${type_method_formals}) const override;
 """)
 # 5. add override definition to TypeDerived.cpp
 TYPE_DERIVED_DEFINITION = CodeTemplate("""\
@@ -815,6 +822,8 @@ def create_generic(top_env, declarations):
             # NN function with no _forward/_backward suffix don't have cimpls.
             # They call the _forward function and discard any buffer returns
             abstract = False
+            top_env['pure_virtual_type_method_declarations'].append(
+                PURE_VIRTUAL_TYPE_METHOD_DECLARATION.substitute(env))
             top_env['type_method_declarations'].append(
                 TYPE_METHOD_DECLARATION_CONCRETE.substitute(env))
             body = emit_nn_body(option)
@@ -822,11 +831,17 @@ def create_generic(top_env, declarations):
                 TYPE_METHOD_DEFINITION_CONCRETE.substitute(
                     env, type_definition_body=body))
         elif broadcast_arg is None:
+            top_env['pure_virtual_type_method_declarations'].append(
+                PURE_VIRTUAL_TYPE_METHOD_DECLARATION.substitute(env))
             top_env['type_method_declarations'].append(
                 TYPE_METHOD_DECLARATION_ABSTRACT.substitute(env))
             top_env['type_method_definitions'].append(
                 TYPE_METHOD_DEFINITION_ABSTRACT.substitute(env))
         else:
+            top_env['pure_virtual_type_method_declarations'].append(
+                PURE_VIRTUAL_TYPE_METHOD_DECLARATION_BROADCAST.substitute(env))
+            top_env['pure_virtual_type_method_declarations'].append(
+                PURE_VIRTUAL_TYPE_METHOD_DECLARATION.substitute(env))
             top_env['type_method_declarations'].append(
                 TYPE_METHOD_DECLARATION_BROADCAST.substitute(env))
             top_env['type_method_declarations'].append(
@@ -1031,9 +1046,12 @@ def create_generic(top_env, declarations):
         # Factory methods are not dispatched over `Type`.
         if not is_factory_method:
             if option['deprecated']:
-                top_env['type_method_declarations'].append(DEPRECATED_TYPE_METHOD_DECLARATION_CONCRETE.substitute(env))
+                top_env['pure_virtual_type_method_declarations'].append(
+                    DEPRECATED_PURE_VIRTUAL_TYPE_METHOD_DECLARATION.substitute(env))
             else:
-                top_env['type_method_declarations'].append(TYPE_METHOD_DECLARATION_CONCRETE.substitute(env))
+                top_env['pure_virtual_type_method_declarations'].append(
+                    PURE_VIRTUAL_TYPE_METHOD_DECLARATION.substitute(env))
+            top_env['type_method_declarations'].append(TYPE_METHOD_DECLARATION_CONCRETE.substitute(env))
         dispatch = option['type_method_definition_dispatch']
         option['native_type_method_dispatch'] = dispatch
 
