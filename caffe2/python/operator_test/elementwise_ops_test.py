@@ -338,7 +338,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
            alpha=st.floats(min_value=-100.0, max_value=100.0),
            beta=st.floats(min_value=-100.0, max_value=100.0),
            engine=st.sampled_from([""]),
-           **hu.gcs_cpu_only)
+           **hu.gcs)
     def test_hard_sigmoid(self, X, inplace, alpha, beta, engine, gc, dc):
         # Prevent alpha and beta from mutually being 0 to avoid a division
         # error when adjusting our inputs
