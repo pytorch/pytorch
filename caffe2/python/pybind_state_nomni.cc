@@ -60,7 +60,6 @@ std::map<std::string, std::string> NNPrinter(
 } // namespace
 
 void addNomnigraphMethods(pybind11::module& m) {
-  LOG(ERROR) << "I'm here";
   py::class_<NNModule> nnmodule(m, "NNModule");
 
   m.def("NNModuleFromProtobuf", [](py::bytes def) {
