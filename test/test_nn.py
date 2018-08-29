@@ -4843,19 +4843,19 @@ class TestNN(NNTestCase):
             inp = torch.randn(4, 5, requires_grad=True)
             if trans:
                 inp = inp.transpose(0, 1)
+            print(inp)
             for p in [0, 1, 2, 0.5, 1.5, 2.5, float('inf')]:
-                self.assertTrue(
-                    gradcheck(lambda x: F.pdist(x, p), (inp,)),
-                    "calling {:g} dist on {}".format(p, inp))
+                print(p)
+                self.assertTrue(gradcheck(lambda x: F.pdist(x, p), (inp,)))
 
     def test_pdist_zeros(self):
         """Test that grad is still valid when dist is 0"""
         for trans in [False, True]:
             inp = torch.randn(1, 3, requires_grad=True).repeat([2, 1])
+            print(inp)
             for p in [0, 1, 2, 0.5, 1.5, 2.5, float('inf')]:
-                self.assertTrue(
-                    gradcheck(lambda x: F.pdist(x, p), (inp,)),
-                    "calling {:g} dist on {}".format(p, inp))
+                self.assertTrue(gradcheck(lambda x: F.pdist(x, p), (inp,)))
+                print(p)
 
     def test_pdist_empty_row(self):
         inp = torch.randn(1, 3, requires_grad=True)
