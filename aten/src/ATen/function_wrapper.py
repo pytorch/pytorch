@@ -88,19 +88,21 @@ std::tie(${broadcast_returns}) = ${broadcast_function}(${broadcast_actuals}, "${
 return ${method_prefix_derived}${api_name}(${broadcast_modified_actuals});
 """)
 
-# 5b. Methods which call to a native method
+# 5b. Methods which call to a native method with a different type
+# depending on the backend
 NATIVE_CONCRETE_METHOD_DEFINITION = CodeTemplate("""\
 const auto& self_ty = *this;
 (void)self_ty;
 ${return_call} at::native::${native_type_method_dispatch}(/* actuals */ ${actuals});
 """)
 
-# 5c. Methods which call to a native method
+# 5c. Methods which call to a native method unconditionally, no matter the
+# backend (TODO: figure out how to unify this with case 5b)
 NATIVE_GENERIC_METHOD_DEFINITION = CodeTemplate("""\
 ${return_call} at::native::${native_type_method_dispatch}(/* native_actuals */ ${native_actuals});
 """)
 
-# 5d. Deprecated type method
+# 5d. Deprecated type method, which calls a factory function
 DEPRECATED_CONCRETE_METHOD_DEFINITION = CodeTemplate("""\
 TensorOptions options(*this);
 return at::native::${api_name}(${type_method_actuals}, options);
@@ -553,43 +555,6 @@ def to_return_type(arg, option):
     }
 
 
-def find_formal(formal_name, formals):
-    for formal in formals:
-        if formal_name == formal['dynamic_type']:
-            return formal
-    return None
-
-
-def get_broadcast_argument(option):
-    # type: (FunctionOption) -> Optional[THFormal]
-    for argument in option['arguments']:
-        if argument.get('broadcast'):
-            return argument
-    return None
-
-
-def get_broadcast_actuals(broadcast_arg, broadcast_inplace, broadcast_dims):
-    # type: (THFormal, bool, bool) -> List[str]
-    # Note: broadcast_dims can change type...
-    # return the actuals that will be passed to the broadcast function.
-    # 1) in the common case, this is the broadcasted argument (e.g. "self") followed by the tensors
-    #    that it is broadcasted against (comma-separated) (e.g. "self, tensor1, tensor2").
-    # 2) in the broadcast_dims case, this is the broadcasted argument (e.g. "self") followed by the sizes
-    #    it is broadcasted to (as an initializer list), so e.g. the specification
-    #    "mat1.dim0,mat2.dim1" gets transformed to "self, {mat1.size(0),mat2.size(1)}"
-    if not broadcast_dims:
-        broadcast_actuals = [broadcast_arg['name']] + broadcast_arg['broadcast'].split()[0].split(",")
-    else:
-        broadcast_dims_spec = broadcast_arg['broadcast'].split()[1].split(':')[1].split(',')
-        # generate size call for each dimension
-        broadcast_dims = ([x.split('.')[0] + '.size(' + x.split('.')[1].replace('dim', '') + ')'  # type: ignore
-                          for x in broadcast_dims_spec])
-        broadcast_dims_init_list = '{' + ','.join(broadcast_dims) + '}'  # type: ignore
-        broadcast_actuals = [broadcast_arg['name'], broadcast_dims_init_list]
-
-    return broadcast_actuals
-
-
 def create_generic(top_env, declarations):
     # type: (TopEnvironment, List[FunctionOption]) -> List[OutputDeclaration]
     # translates defaults from cwrap types to C++ values
@@ -742,6 +707,34 @@ def create_generic(top_env, declarations):
             v = str(v).lower()
         return '{}={}'.format(s, v)
 
+    def get_broadcast_argument(option):
+        # type: (FunctionOption) -> Optional[THFormal]
+        for argument in option['arguments']:
+            if argument.get('broadcast'):
+                return argument
+        return None
+
+    def get_broadcast_actuals(broadcast_arg, broadcast_inplace, broadcast_dims):
+        # type: (THFormal, bool, bool) -> List[str]
+        # Note: broadcast_dims can change type...
+        # return the actuals that will be passed to the broadcast function.
+        # 1) in the common case, this is the broadcasted argument (e.g. "self") followed by the tensors
+        #    that it is broadcasted against (comma-separated) (e.g. "self, tensor1, tensor2").
+        # 2) in the broadcast_dims case, this is the broadcasted argument (e.g. "self") followed by the sizes
+        #    it is broadcasted to (as an initializer list), so e.g. the specification
+        #    "mat1.dim0,mat2.dim1" gets transformed to "self, {mat1.size(0),mat2.size(1)}"
+        if not broadcast_dims:
+            broadcast_actuals = [broadcast_arg['name']] + broadcast_arg['broadcast'].split()[0].split(",")
+        else:
+            broadcast_dims_spec = broadcast_arg['broadcast'].split()[1].split(':')[1].split(',')
+            # generate size call for each dimension
+            broadcast_dims = ([x.split('.')[0] + '.size(' + x.split('.')[1].replace('dim', '') + ')'  # type: ignore
+                              for x in broadcast_dims_spec])
+            broadcast_dims_init_list = '{' + ','.join(broadcast_dims) + '}'  # type: ignore
+            broadcast_actuals = [broadcast_arg['name'], broadcast_dims_init_list]
+
+        return broadcast_actuals
+
     def process_option(option, output_options):
         # type: (FunctionOption, List[OutputDeclaration]) -> None
         option['inplace'] = re.search(
@@ -777,6 +770,7 @@ def create_generic(top_env, declarations):
         is_namespace_function = is_function and dispatch_tensor is not None
 
         broadcast_arg = get_broadcast_argument(option)
+        option["broadcast_arg"] = broadcast_arg
         # "s_" for "same size".
         option['method_prefix_derived'] = '' if broadcast_arg is None else 's_'
         option['device_guard_declaration'] = device_guard(option, formals)
@@ -976,6 +970,12 @@ def create_generic(top_env, declarations):
         option['method_actuals'] = [
             f['name'] if f['name'] != 'self' else '*this' for f in formals]
 
+        def find_formal(formal_name, formals):
+            for formal in formals:
+                if formal_name == formal['dynamic_type']:
+                    return formal
+            return None
+
         dispatch_tensor = find_dispatch_tensor(formals)
         dispatch_type = None if dispatch_tensor else find_formal('Type', formals)
         if dispatch_type:
@@ -1006,6 +1006,7 @@ def create_generic(top_env, declarations):
         env = nested_dict(option, top_env)
 
         broadcast_arg = get_broadcast_argument(option)
+        option["broadcast_arg"] = broadcast_arg
         if broadcast_arg is not None:
             raise Exception("broadcasting is not yet supported for native functions, "
                             "but specified for function {}", option['name'])
@@ -1498,10 +1499,6 @@ def create_derived(backend_type_env, declarations):
 
     def process_broadcast(option):
         # type: (FunctionOption) -> None
-        broadcast_arg = get_broadcast_argument(option)
-        if broadcast_arg is None:
-            return
-
         pre_env = nested_dict(option, backend_type_env)
         sub_option = {}
         env = nested_dict(sub_option, pre_env)
@@ -1570,7 +1567,8 @@ def create_derived(backend_type_env, declarations):
         for option in declaration['options']:
             if not option.get('skip', False):
                 try:
-                    process_broadcast(option)
+                    if option["broadcast_arg"] is not None:
+                        process_broadcast(option)
 
                     if option['mode'] == 'NN' and option.get('cimpls') is None:
                         process_nn(option)
