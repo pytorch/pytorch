@@ -152,6 +152,11 @@ struct AT_API TensorOptions {
     return requires_grad_;
   }
 
+  /// Returns the `is_variable` property of the `TensorOptions`.
+  bool is_variable() const noexcept {
+    return is_variable_;
+  }
+
   /// Constructs an `at::Type` from the members of the `TensorOptions`.
   const Type& type() const {
     return getType(backend(), dtype_, is_variable_);
