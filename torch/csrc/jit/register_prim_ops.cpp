@@ -3,7 +3,7 @@
 #include "torch/csrc/autograd/generated/variable_factories.h"
 #include "torch/csrc/autograd/profiler.h"
 #include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/jit/fusion_compiler.h"
+#include "torch/csrc/jit/fusers/fusion_interface.h"
 #include "torch/csrc/jit/graph_executor.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/operator.h"
@@ -53,10 +53,10 @@ RegisterOperators reg({
     Operator(
         prim::FusionGroup,
         [](Node* node) {
-          auto kernel_cache = sharedFusionCompiler().getOrCompile(node);
-          return [kernel_cache](Stack& stack) {
+          auto handle = getFusionHandle(node);
+          return [handle](Stack& stack) {
             autograd::profiler::RecordFunction record("FusionGroup");
-            kernel_cache->run(stack);
+            handle->run(stack);
             return 0;
           };
         }),
