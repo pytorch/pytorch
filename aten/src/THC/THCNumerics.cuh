@@ -35,7 +35,7 @@ static inline __host__ __device__ scalar_t powi(scalar_t a, scalar_t b) {
   return result;
 }
 
-// DEPRECATED: For integral types, use math functions from std and NumericLimits.cuh. 
+// DEPRECATED: For integral types, use math functions from std and NumericLimits.cuh.
 //             Use binary_kernel or CUDA_apply_utils for arithmetic
 template <>
 struct THCNumerics<uint8_t> {
@@ -190,8 +190,8 @@ struct THCNumerics<half> {
   static inline __host__ __device__ half exp(half a) {
     return static_cast<at::Half>(std::exp(static_cast<at::Half>(a)));
   }
-  
-  // note that exp10 is not in the std namespace. 
+
+  // note that exp10 is not in the std namespace.
   static inline __host__ __device__ half exp10(half a) {
     return static_cast<at::Half>(::exp10(static_cast<at::Half>(a)));
   }
@@ -232,7 +232,7 @@ struct THCNumerics<half> {
     return static_cast<at::Half>(::sqrt(static_cast<at::Half>(a)));
   }
 
-  // note that rsqrt is not in the std namespace. 
+  // note that rsqrt is not in the std namespace.
   static inline __host__ __device__ half rsqrt(half a) {
     return static_cast<at::Half>(::rsqrt(static_cast<at::Half>(a)));
   }
