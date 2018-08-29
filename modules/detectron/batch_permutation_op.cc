@@ -15,8 +15,18 @@
  */
 
 #include "batch_permutation_op.h"
+#ifdef CAFFE2_USE_IDEEP
+#include <caffe2/ideep/operators/operator_fallback_ideep.h>
+#include <caffe2/ideep/utils/ideep_operator.h>
+#endif
 
 namespace caffe2 {
+
+#ifdef CAFFE2_USE_IDEEP
+REGISTER_IDEEP_OPERATOR(
+    BatchPermutation,
+    IDEEPFallbackOp<BatchPermutationOp<float, CPUContext>>);
+#endif
 
 REGISTER_CPU_OPERATOR(BatchPermutation, BatchPermutationOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(
