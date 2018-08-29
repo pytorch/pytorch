@@ -306,7 +306,7 @@ if(BUILD_DOCS)
 
     if(EXISTS ${CMAKE_CURRENT_BINARY_DIR}/docs)
       file(REMOVE_RECURSE ${CMAKE_CURRENT_BINARY_DIR}/docs)
-    endif (EXISTS ${CMAKE_CURRENT_BINARY_DIR}/docs)
+    endif()
 
     file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/docs)
     configure_file(${DOXYGEN_C_IN} ${DOXYGEN_C_OUT} @ONLY)
@@ -323,10 +323,10 @@ if(BUILD_DOCS)
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
         COMMENT "Generating Python API documentation with Doxygen"
         VERBATIM)
-  else (DOXYGEN_FOUND)
+  else()
     message(FATAL_ERROR "Doxygen needs to be installed to generate the documentation")
-  endif (DOXYGEN_FOUND)
-endif (BUILD_DOCS)
+  endif()
+endif()
 
 # ---[ CMake related files
 # Uninistall option.
