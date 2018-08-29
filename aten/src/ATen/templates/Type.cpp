@@ -50,10 +50,10 @@ Tensor Type::copy(const Tensor & src, bool non_blocking) const {
 }
 
 Type & Type::toBackend(Backend b) const {
-  return context->getType(b,scalarType());
+  return at::globalContext().getType(b,scalarType());
 }
 Type & Type::toScalarType(ScalarType s) const {
-  return context->getType(backend(),s);
+  return at::globalContext().getType(backend(),s);
 }
 static std::vector<int64_t> defaultStrides(IntList sizes) {
   std::vector<int64_t> strides(sizes.size());

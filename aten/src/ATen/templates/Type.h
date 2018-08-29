@@ -80,8 +80,6 @@ struct AT_API Type {
   Type & cuda() const {
     return this->toBackend(at::backendToCUDA(this->backend()));
   }
-  Context& get_context() const { return *context; }
-
   // contiguous IDs for all types in the system
   // for external dispatch
   virtual TypeID ID() const = 0;
@@ -112,7 +110,6 @@ struct AT_API Type {
   // virtual Tensor * add(Tensor & a, Tensor & b) = 0;
   ${type_method_declarations}
 protected:
-  Context* context;
   TensorTypeId type_id_;
   bool is_variable_;
   bool is_undefined_;
