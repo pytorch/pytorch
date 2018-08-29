@@ -86,4 +86,42 @@ Tensor kl_div_backward_cpu(const Tensor& grad, const Tensor& input, const Tensor
   }
   return grad_input;
 }
+
+Tensor binary_cross_entropy_with_logits(const Tensor& input, const Tensor& target, const Tensor& weight, const Tensor& pos_weight, int64_t reduction) {
+    auto loss = at::zeros_like(input);
+    auto max_val = at::clamp_min(-input, 0);
+    if (pos_weight.defined()) {
+        auto log_weight = 1 + (pos_weight - 1) * target;
+        loss = input - input * target
+               + log_weight * (max_val + at::log(at::exp(-max_val) + at::exp(-input - max_val)));
+    } else {
+        loss = input - input * target + max_val
+               + at::log(at::exp(-max_val) + at::exp(-input - max_val));
+    }
+
+    if (weight.defined()) {
+        loss = loss * weight;
+    }
+
+    return apply_loss_reduction(loss, reduction);
+}
+
+Tensor binary_cross_entropy_with_logits_backward(const Tensor& grad, const Tensor& input, const Tensor& target, const Tensor& weight, const Tensor& pos_weight, int64_t reduction) {
+    auto grad_input = at::zeros_like(input);
+    if (pos_weight.defined()) {
+        grad_input = (-pos_weight * target + (pos_weight * target + 1 - target) * at::sigmoid(input)) * grad;
+    } else {
+        grad_input = (-target + at::sigmoid(input)) * grad;
+    }
+
+    if (weight.defined()) {
+        grad_input = weight * grad_input;
+    }
+
+    if (reduction == Reduction::ElementwiseMean) {
+        return grad_input / input.numel();
+    }
+
+    return grad_input;
+}
 }}  // namespace at::native

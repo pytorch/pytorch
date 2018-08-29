@@ -1718,26 +1718,13 @@ def binary_cross_entropy_with_logits(input, target, weight=None, size_average=No
     """
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
+    else:
+        reduction = _Reduction.get_enum(reduction)
+
     if not (target.size() == input.size()):
         raise ValueError("Target size ({}) must be the same as input size ({})".format(target.size(), input.size()))
 
-    max_val = (-input).clamp(min=0)
-
-    if pos_weight is None:
-        loss = input - input * target + max_val + ((-max_val).exp() + (-input - max_val).exp()).log()
-    else:
-        log_weight = 1 + (pos_weight - 1) * target
-        loss = input - input * target + log_weight * (max_val + ((-max_val).exp() + (-input - max_val).exp()).log())
-
-    if weight is not None:
-        loss = loss * weight
-
-    if reduction == 'none':
-        return loss
-    elif reduction == 'elementwise_mean':
-        return loss.mean()
-    else:
-        return loss.sum()
+    return torch.binary_cross_entropy_with_logits(input, target, weight, pos_weight, reduction)
 
 
 def _pointwise_loss(lambd, lambd_optimized, input, target, reduction='elementwise_mean'):

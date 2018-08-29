@@ -270,6 +270,12 @@
 - func: bilinear(Tensor input1, Tensor input2, Tensor weight, Tensor? bias) -> Tensor
   variants: function
 
+- func: binary_cross_entropy_with_logits(Tensor self, Tensor target, Tensor? weight, Tensor? pos_weight, int64_t reduction) -> Tensor
+  variants: function
+
+- func: binary_cross_entropy_with_logits_backward(Tensor grad_output, Tensor self, Tensor target, Tensor? weight, Tensor? pos_weight, int64_t reduction) -> Tensor
+  variants: function
+
 - func: bincount(Tensor self, Tensor? weights={}, int64_t minlength=0) -> Tensor
   dispatch:
     CPU: _bincount_cpu
@@ -1987,9 +1993,9 @@
     SparseCUDA: sparse_resize_
 
 - func: sparse_resize_and_clear_(Tensor self, IntList size, int64_t sparseDims, int64_t denseDims) -> Tensor
-  variants: method  
-  dispatch: 
-    SparseCPU: sparse_resize_and_clear_ 
+  variants: method
+  dispatch:
+    SparseCPU: sparse_resize_and_clear_
     SparseCUDA: sparse_resize_and_clear_
 
 
