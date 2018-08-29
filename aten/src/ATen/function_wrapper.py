@@ -63,7 +63,8 @@ PURE_VIRTUAL_TYPE_METHOD_DECLARATION = CodeTemplate("""\
 virtual ${return_type} ${method_prefix_derived}${api_name}(${type_method_formals_with_defaults}) const = 0;
 """)
 DEPRECATED_PURE_VIRTUAL_TYPE_METHOD_DECLARATION = CodeTemplate("""\
-AT_DEPRECATED(virtual ${return_type} ${method_prefix_derived}${api_name}(${type_method_formals_with_defaults}) const = 0);
+AT_DEPRECATED(virtual ${return_type} \
+${method_prefix_derived}${api_name}(${type_method_formals_with_defaults}) const = 0);
 """)
 PURE_VIRTUAL_TYPE_METHOD_DECLARATION_BROADCAST = CodeTemplate("""\
 virtual ${return_type} ${api_name}(${type_method_formals_with_defaults}) const = 0;
@@ -389,6 +390,7 @@ Environment = TypedDict('Environment', {
 TopEnvironment = TypedDict('TopEnvironment', {
     'type_registrations': List[str],
     'type_headers': List[str],
+    'pure_virtual_type_method_declarations': List[str],
     'type_method_declarations': List[str],
     'type_method_definitions': List[str],
     'type_method_inline_definitions': List[str],
