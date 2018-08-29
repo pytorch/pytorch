@@ -503,8 +503,10 @@ std::tuple<
     bool is_half = output.second.scalar_type == at::ScalarType::Half;
     if (is_half) {
       AT_ASSERT(use_cuda);
-      body << format("${access} = __float2half(${node});\n",env);
-      has_half_tensor = true;
+      #if USE_CUDA_FUSER
+        body << format("${access} = __float2half(${node});\n",env);
+        has_half_tensor = true;
+      #endif // USE_CUDA_FUSER
     } else {
       body << format("${access} = ${node};\n",env);
     }
