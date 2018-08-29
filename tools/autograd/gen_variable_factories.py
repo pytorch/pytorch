@@ -46,7 +46,7 @@ def process_function(decl, has_tensor_options):
         formals.append("{} {}{}".format(type, argument["name"], default))
         actual = argument["name"]
         if argument["simple_type"] == "TensorOptions":
-            # We want make `at::{name}` always return a
+            # We want to make `at::{name}` always return a
             # tensor and not a variable, since we create a variable right after.
             actual += ".is_variable(false)"
         actuals.append(actual)
