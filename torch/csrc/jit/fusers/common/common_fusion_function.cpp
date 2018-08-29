@@ -507,29 +507,35 @@ std::tuple<
   }
 
   // Includes half support if any half tensors are involved
-  if (has_half_tensor) {
-    env.s("HalfHeader", cudafuser::half_support_literal);
-  } else {
-    env.s("HalfHeader", "");
-  }
+  #if USE_CUDA_FUSER
+    if (has_half_tensor) {
+      env.s("HalfHeader", cudafuser::half_support_literal);
+    } else {
+      env.s("HalfHeader", "");
+    }
 
-  if (has_random) {
-    env.s("RandHeader", cudafuser::rand_support_literal);
-    env.s("RandParam", cudafuser::rand_param);
-    env.s("RandInit", cudafuser::rand_init);
-  } else {
-    env.s("RandHeader", "");
-    env.s("RandParam", "");
-    env.s("RandInit", "");
-  }
+    if (has_random) {
+      env.s("RandHeader", cudafuser::rand_support_literal);
+      env.s("RandParam", cudafuser::rand_param);
+      env.s("RandInit", cudafuser::rand_init);
+    } else {
+      env.s("RandHeader", "");
+      env.s("RandParam", "");
+      env.s("RandInit", "");
+    }
+  #endif USE_CUDA_FUSER
 
   env.s("tensorOffsets", tensorOffsets.str());
   env.s("kernelBody", body.str());
   env.v("formals", formals);
   env.v("argument_loads", argument_loads);
   if (use_cuda) {
-    env.s("type_declarations", cudafuser::type_declarations_template.format(env));
-    out << cudafuser::cuda_compilation_unit_template.format(env);
+    #if USE_CUDA_FUSER
+      env.s("type_declarations", cudafuser::type_declarations_template.format(env));
+      out << cudafuser::cuda_compilation_unit_template.format(env);
+    #else
+      throw std::runtime_error{"CUDA Fusion requested but not supported."};
+    #endif // USE_CUDA_FUSER
   } else {
     env.s("type_declarations", cpufuser::type_declarations_template.format(env));
     out << cpufuser::cpu_compilation_unit_template.format(env);
