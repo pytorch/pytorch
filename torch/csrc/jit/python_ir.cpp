@@ -461,6 +461,8 @@ void initPythonIRBindings(PyObject * module_) {
           return "FloatType";
         case TypeKind::StringType:
           return "StringType";
+        case TypeKind::GeneratorType:
+          return "GeneratorType";
         }
         // not reachable, but some compilers complain
         AT_ERROR("Unknown Type Kind");
