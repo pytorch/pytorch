@@ -114,6 +114,7 @@ private:
   std::atomic<size_t> next_id;
   std::unique_ptr<THCState, void(*)(THCState*)> thc_state;
   friend struct Type;
+  friend void register_cpu_types(Context * context);
   friend void register_cuda_types(Context * context);
 };
 
