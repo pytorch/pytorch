@@ -67,8 +67,8 @@ at::Tensor DecoderBase::buildTensor(const onnx::TensorProto& tensor_proto) {
   tensor.resize_(sizes);
 
   JIT_ASSERT(
-      tensor.storage()->pImpl()->size() *
-          tensor.storage()->pImpl()->elementSize() ==
+      tensor.storage().size() *
+          tensor.storage().elementSize() ==
       tensor_proto.raw_data().size());
 
   std::memcpy(tensor.data_ptr(), tensor_proto.raw_data().data(), tensor_proto.raw_data().size());
@@ -225,6 +225,9 @@ TypePtr ModuleDecoder::buildType(const onnx::TypeProto& type_proto) {
   } else if (kind == "TensorType") {
     // TODO: Don't use DynamicType here
     return DynamicType::get();
+  } else if (kind == "CompleteTensorType") {
+    // TODO: Don't use DynamicType here
+    return DynamicType::get();
   } else if (kind == "TupleType") {
     std::vector<TypePtr> elems;
     for (auto &subkind : shape_proto.dim()) {
@@ -301,7 +304,7 @@ at::Tensor ModuleDecoder::buildTensorCommon(
     auto storage = std::make_shared<at::Tensor>(at::CPU(type).tensor());
     auto record = file_reader_.getRecordWithKey(record_number);
     storage->resize_({ static_cast<int64_t>(std::get<1>(record)) });
-    std::memcpy(storage->storage()->pImpl()->data(), std::get<0>(record).get(), std::get<1>(record));
+    std::memcpy(storage->storage().data(), std::get<0>(record).get(), std::get<1>(record));
     storage_map_.insert(std::make_pair(record_number, storage));
     storage_tensor = storage.get();
   } else {
@@ -309,7 +312,7 @@ at::Tensor ModuleDecoder::buildTensorCommon(
   }
 
   return at::CPU(onnxTypeToATenType(tensor_proto.data_type())).tensor(
-      *storage_tensor->storage().get(), storage_offset, dims, strides);
+      storage_tensor->storage(), storage_offset, dims, strides);
 }
 
 // Given a full name of a parameter or method,

@@ -184,14 +184,14 @@ private:
 public:
   Value* setType(const TypePtr type);
   void inferTypeFrom(const at::Tensor& output) {
-    setType(TensorType::create(output));
+    setType(CompleteTensorType::create(output));
   }
   const TypePtr & type() const {
     JIT_ASSERT(type_ != nullptr);
     return type_;
   }
   bool isTensor() const {
-    return type()->kind() == TypeKind::TensorType;
+    return type()->kind() == TypeKind::CompleteTensorType;
   }
   size_t unique() const {
     return unique_;
@@ -1022,11 +1022,16 @@ public:
   Node* createNumToTensor(Value* value) {
     auto typ = value->type();
     Node * result = create(prim::NumToTensor, {value});
-    result->output()->setType(TensorType::fromNumberType(typ));
+    result->output()->setType(CompleteTensorType::fromNumberType(typ));
     return result;
   }
   Node* createTensorToNum(const TypePtr& type, Value* value) {
     auto* result = create(prim::TensorToNum, {value});
+    result->output()->setType(type);
+    return result;
+  }
+  Node* createImplicitTensorToNum(const TypePtr& type, Value* value) {
+    auto* result = create(prim::ImplicitTensorToNum, {value});
     result->output()->setType(type);
     return result;
   }

@@ -50,9 +50,9 @@ class RMSprop : public Optimizer {
   friend class cereal::access;
   RMSprop() : options(0) {}
 
-  std::vector<at::Tensor> square_average_buffers_;
-  std::vector<at::Tensor> momentum_buffers_;
-  std::vector<at::Tensor> grad_average_buffers_;
+  std::vector<Tensor> square_average_buffers_;
+  std::vector<Tensor> momentum_buffers_;
+  std::vector<Tensor> grad_average_buffers_;
 };
 
 } // namespace optim

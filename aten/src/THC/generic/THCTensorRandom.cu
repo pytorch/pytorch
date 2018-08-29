@@ -181,7 +181,7 @@ THC_API void THCTensor_(multinomial)(struct THCState *state,
   int maxThreads = props->maxThreadsPerBlock;
   int maxShared = props->sharedMemPerBlock;
   int requiredShared = (numCategories < maxThreads ? numCategories : maxThreads)
-                                * (sizeof(real) * sizeof(accreal));
+                                * (sizeof(real) + sizeof(accreal));
 
   if (n_sample == 1 && maxShared >= requiredShared) {
     // Optimized allocation-free implementation

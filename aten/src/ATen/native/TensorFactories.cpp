@@ -7,7 +7,7 @@
 #include "ATen/ATen.h"
 #include "ATen/CPUGenerator.h"
 #include "ATen/CheckGenerator.h"
-#include "ATen/Deprecated.h"
+#include "ATen/core/Deprecated.h"
 #include "ATen/Dispatch.h"
 #include "ATen/NativeFunctions.h"
 #include "ATen/ScalarType.h"
@@ -86,7 +86,7 @@ Tensor empty(IntList size, const TensorOptions& options) {
 
 Tensor& empty_out(Tensor& result, IntList size) {
   if (result.is_sparse()) {
-    result.sparse_raw_resize_(size, size.size(), 0);
+    result.sparse_resize_and_clear_(size, size.size(), 0);
   } else {
     result.resize_(size);
   }
@@ -116,9 +116,8 @@ Tensor empty_like(const Tensor& self) {
 
 Tensor empty_like(const Tensor& self, const TensorOptions& options) {
   if (options.layout() == kSparse && self.type().is_sparse()) {
-    auto res = options.type().tensor({});
-    // resize_as_ requires the same exact type.
-    res.sparse_raw_resize_(self.sizes(), self._sparseDims(), self._denseDims());
+    auto res = options.type().tensor();
+    res.sparse_resize_and_clear_(self.sizes(), self._sparseDims(), self._denseDims());
 
     return res;
   }
@@ -413,7 +412,7 @@ void randperm_cpu(Tensor& result, int64_t n, THGenerator* generator) {
 
 
 THGenerator* get_generator(at::Generator* gen) {
-  auto default_gen = &at::globalContext().defaultGenerator(at::Backend::CPU);
+  auto default_gen = &at::globalContext().defaultGenerator(at::kCPU);
   auto gen_ = at::check_generator<at::CPUGenerator>(gen, default_gen);
   return gen_->generator;
 }
@@ -473,7 +472,8 @@ Tensor zeros(IntList size, const TensorOptions& options) {
 
 Tensor& zeros_out(Tensor& result, IntList size) {
   if (result.is_sparse()) {
-    result.sparse_raw_resize_(size, size.size(), 0);
+    result.sparse_resize_and_clear_(size, size.size(), 0);
+    return result;
   } else {
     result.resize_(size);
   }
@@ -486,9 +486,8 @@ Tensor zeros_like(const Tensor& self) {
 
 Tensor zeros_like(const Tensor& self, const TensorOptions& options) {
   if (options.layout() == kSparse && self.type().is_sparse()) {
-    auto res = options.type().tensor({});
-    // resize_as_ requires the same exact type.
-    res.sparse_raw_resize_(self.sizes(), self._sparseDims(), self._denseDims());
+    auto res = options.type().tensor();
+    res.sparse_resize_and_clear_(self.sizes(), self._sparseDims(), self._denseDims());
     return res;
   }
   return native::zeros(self.sizes(), options);
@@ -616,7 +615,7 @@ Tensor tensor_cpu(ArrayRef<T> values, const TensorOptions& options) {
 
 template <typename T>
 Tensor tensor_cuda(ArrayRef<T> values, const TensorOptions& options) {
-  auto cpu_tensor = tensor_cpu(values, TensorOptions(options).device(at::kCPU));
+  auto cpu_tensor = tensor_cpu(values, TensorOptions(options).device(DeviceType::CPU));
   return cpu_tensor.to(options.device());
 }
 

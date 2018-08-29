@@ -18,7 +18,7 @@
 #include <string>
 #include <vector>
 
-#include <ATen/ATenGeneral.h>
+#include <ATen/core/ATenGeneral.h>
 #include <ATen/core/Backtrace.h>
 
 namespace at {
@@ -114,7 +114,7 @@ class AT_API Registry {
 };
 
 template <class SrcType, class ObjectPtrType, class... Args>
-class Registerer {
+class AT_API Registerer {
  public:
   Registerer(
       const SrcType& key,

@@ -33,10 +33,10 @@ inline StorageOrder StringToStorageOrder(const string& str) {
 inline constexpr char NameScopeSeparator() { return '/'; }
 
 // From TypeMeta to caffe2::DataType protobuffer enum.
-TensorProto::DataType TypeMetaToDataType(const TypeMeta& meta);
+CAFFE2_API TensorProto::DataType TypeMetaToDataType(const TypeMeta& meta);
 
 // From caffe2::DataType protobuffer enum to TypeMeta
-const TypeMeta& DataTypeToTypeMeta(const TensorProto::DataType& dt);
+CAFFE2_API const TypeMeta& DataTypeToTypeMeta(const TensorProto::DataType& dt);
 
 }  // namespace caffe2
 
@@ -50,7 +50,7 @@ const TypeMeta& DataTypeToTypeMeta(const TensorProto::DataType& dt);
 static_assert(sizeof(unsigned short) == 2,
               "Short on this platform is not 16 bit.");
 namespace caffe2 {
-typedef struct CAFFE2_ALIGNED(2) __f16 { uint16_t x; } float16;
+typedef struct CAFFE2_API CAFFE2_ALIGNED(2) __f16 { uint16_t x; } float16;
 
 // Helpers to avoid using typeinfo with -rtti
 template <typename T>

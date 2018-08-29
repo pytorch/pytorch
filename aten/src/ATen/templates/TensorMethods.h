@@ -9,14 +9,18 @@
 
 namespace at {
 
-inline Tensor & Tensor::operator=(Tensor const & rhs) && {
-  return copy_(rhs);
-}
-
 inline Tensor Tensor::toType(const Type & t, bool non_blocking) const {
   if(type() == t)
     return *this;
   return t.copy(*this, non_blocking);
+}
+
+inline Tensor Tensor::cpu() const {
+  return toType(type().cpu());
+}
+
+inline Tensor Tensor::cuda() const {
+  return toType(type().cuda());
 }
 
 inline Tensor & Tensor::copy_(const Tensor & src, bool non_blocking) {

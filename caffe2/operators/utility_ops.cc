@@ -615,6 +615,7 @@ is_empty:  True
 OPERATOR_SCHEMA(GatherRanges)
     .NumInputs(2)
     .NumOutputs(2)
+    .DisallowInputFillers()
     .SetDoc(R"DOC(
 Given DATA tensor of rank 1, and RANGES tensor of rank 3, gather
 corresponding ranges into a 1-D tensor OUTPUT.
@@ -694,6 +695,7 @@ Example:
 OPERATOR_SCHEMA(LengthsToSegmentIds)
     .NumInputs(1)
     .NumOutputs(1)
+    .DisallowInputFillers() // TODO: enable the filler
     .SetDoc(R"DOC(
 Given a vector of segment lengths (*lengths*) the *LengthsToSegmentIds* op returns a zero-based, consecutive vector of segment ids (*segment_ids*). For example, *lengths=[1, 3, 0, 2]* will produce *segment_ids=[0, 1, 1, 1, 3, 3]*. In general, the inverse operation is *SegmentIdsToLengths*. Notice though that trailing empty sequence lengths can't be properly recovered from segment ids.
 
@@ -770,6 +772,7 @@ For example, `[1, 3, 0, 2]` transforms into `[[0, 1], [1, 3], [4, 0], [4, 2]]`.
 OPERATOR_SCHEMA(SegmentIdsToLengths)
     .NumInputs(1, 2)
     .NumOutputs(1)
+    .DisallowInputFillers() // TODO: enable the filler
     .SetDoc(R"DOC(
 Transfers a vector of segment ids to a vector of segment lengths. This operation
 supports non-consecutive segment ids. Segments not appearing in the input vector
@@ -791,6 +794,7 @@ cannot represent empty segments at the end (if the second input is absent).
 OPERATOR_SCHEMA(SegmentIdsToRanges)
     .NumInputs(1, 2)
     .NumOutputs(1)
+    .DisallowInputFillers() // TODO: enable the filler
     .SetDoc(R"DOC(
 Transfers a vector of segment ids to a vector of segment ranges. This operation
 supports non-consecutive segment ids. Segments not appearing in the input vector

@@ -17,7 +17,7 @@ AdagradOptions::AdagradOptions(double learning_rate)
 /// https://github.com/pytorch/pytorch/blob/master/torch/optim/adagrad.py
 void Adagrad::step() {
   for (size_t i = 0; i < parameters_.size(); ++i) {
-    at::Tensor p = parameters_.at(i);
+    Tensor p = parameters_.at(i);
     if (!p.grad().defined()) {
       continue;
     }

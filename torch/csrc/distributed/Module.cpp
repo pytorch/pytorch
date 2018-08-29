@@ -21,64 +21,6 @@ static std::unordered_map<std::string, THDChannelType> name2channel_type = {
     {"nccl", THDChannelNccl},
 };
 
-static bool THDPModule_loadClasses(PyObject *self)
-{
-#ifdef USE_DISTRIBUTED_MW
-#define ASSERT_NOT_NULL(ptr) if (!(ptr)) { THPUtils_setError("couldn't load classes"); return false; }
-  PyObject *torch_module = PyImport_ImportModule("torch.distributed");
-  if (!torch_module) {
-    THPUtils_setError("class loader couldn't access torch.distributed module");
-    return false;
-  }
-
-  if (!THDPDoubleTensor_postInit(torch_module)) return false;
-  if (!THDPFloatTensor_postInit(torch_module)) return false;
-  if (!THDPHalfTensor_postInit(torch_module)) return false;
-  if (!THDPLongTensor_postInit(torch_module)) return false;
-  if (!THDPIntTensor_postInit(torch_module)) return false;
-  if (!THDPShortTensor_postInit(torch_module)) return false;
-  if (!THDPCharTensor_postInit(torch_module)) return false;
-  if (!THDPByteTensor_postInit(torch_module)) return false;
-
-  ASSERT_NOT_NULL(THDPDoubleStorageClass = PyObject_GetAttrString(torch_module,(char*)"DoubleStorage"));
-  ASSERT_NOT_NULL(THDPFloatStorageClass  = PyObject_GetAttrString(torch_module,(char*)"FloatStorage"));
-  ASSERT_NOT_NULL(THDPHalfStorageClass   = PyObject_GetAttrString(torch_module,(char*)"HalfStorage"));
-  ASSERT_NOT_NULL(THDPLongStorageClass   = PyObject_GetAttrString(torch_module,(char*)"LongStorage"));
-  ASSERT_NOT_NULL(THDPIntStorageClass    = PyObject_GetAttrString(torch_module,(char*)"IntStorage"));
-  ASSERT_NOT_NULL(THDPShortStorageClass  = PyObject_GetAttrString(torch_module,(char*)"ShortStorage"));
-  ASSERT_NOT_NULL(THDPCharStorageClass   = PyObject_GetAttrString(torch_module,(char*)"CharStorage"));
-  ASSERT_NOT_NULL(THDPByteStorageClass   = PyObject_GetAttrString(torch_module,(char*)"ByteStorage"));
-
-#undef ASSERT_NOT_NULL
-#endif
-  return true;
-}
-
-static bool THDPModule_assignStateless(PyObject *self)
-{
-#ifdef USE_DISTRIBUTED_MW
-#define INIT_STATELESS(type)                                                   \
-  stateless = PyObject_CallFunctionObjArgs((PyObject*)&TH_CONCAT_3(THDP, type, TensorStatelessType), NULL); \
-  if (!stateless) {                                                            \
-    return false;                                                              \
-  }                                                                            \
-  if (PyObject_SetAttrString(TH_CONCAT_3(THDP,type,TensorClass), THP_STATELESS_ATTRIBUTE_NAME, stateless) == -1) { \
-    return false;                                                              \
-  }
-  PyObject *stateless;
-  INIT_STATELESS(Double);
-  INIT_STATELESS(Float);
-  INIT_STATELESS(Half);
-  INIT_STATELESS(Long);
-  INIT_STATELESS(Int);
-  INIT_STATELESS(Short);
-  INIT_STATELESS(Char);
-  INIT_STATELESS(Byte);
-#undef INIT_STATELESS
-#endif
-  return true;
-}
-
 static std::unordered_map<PyObject*, THDReduceOp> obj2reduceop;
 static std::unordered_map<PyObject*, THDGroup> obj2group;
 
@@ -125,38 +67,6 @@ PyObject* THDPModule_destroyProcessGroup(PyObject *_unused) {
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
-
-#ifdef USE_DISTRIBUTED_MW
-PyObject* THDPModule_initMasterWorker(PyObject *_unused, PyObject *args)
-{
-  HANDLE_TH_ERRORS
-  if (PyTuple_GET_SIZE(args) != 5 || !THPUtils_checkString(PyTuple_GET_ITEM(args, 0)) ||
-        !THPUtils_checkString(PyTuple_GET_ITEM(args, 1)) ||
-        !THPUtils_checkLong(PyTuple_GET_ITEM(args, 2)) ||
-        !THPUtils_checkString(PyTuple_GET_ITEM(args, 3)) ||
-        !THPUtils_checkLong(PyTuple_GET_ITEM(args, 4))) {
-    THPUtils_invalidArguments(args, NULL, "init_master_worker", 1, "(string backend, string init_method, int world_size, string group_name, int rank)");
-    return NULL;
-  }
-
-  std::string backend_name = THPUtils_unpackString(PyTuple_GET_ITEM(args, 0));
-  std::string init_method = THPUtils_unpackString(PyTuple_GET_ITEM(args, 1));
-  int world_size = THPUtils_unpackLong(PyTuple_GET_ITEM(args, 2));
-  std::string group_name = THPUtils_unpackString(PyTuple_GET_ITEM(args, 3));
-  int rank = THPUtils_unpackLong(PyTuple_GET_ITEM(args, 4));
-
-  THDChannelType channel_type = name2channel_type.at(backend_name);
-  {
-    AutoNoGIL nogil;
-    THDMasterWorkerInit(channel_type, init_method, world_size, group_name, rank);
-  }
-#ifdef USE_CUDA
-  THDSetCudaStatePtr(&state);
-#endif
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-#endif
 
 #ifdef USE_CUDA
 PyObject* THDPModule_registerStream(PyObject *_unused, PyObject *_stream)
@@ -962,11 +872,7 @@ PyObject* THDPModule_initExtension(PyObject *_unused, PyObject *args) {
 #undef REGISTER_GROUP
 
   if (is_master_worker) {
-    PyObject *module = PyImport_ImportModule("torch.distributed");
-    THPUtils_assert(module, "class loader couldn't access torch.distributed module");
-    PyObject* module_dict = PyModule_GetDict(module);
-    if (!THDPModule_loadClasses(module_dict)) return NULL;
-    if (!THDPModule_assignStateless(module_dict)) return NULL;
+    throw std::runtime_error("THD master_worker no longer supported");
   }
   Py_RETURN_TRUE;
 }
@@ -976,9 +882,6 @@ static struct PyMethodDef _THDPModule_methods[] = {
   {"_dist_init_process_group", (PyCFunction)THDPModule_initProcessGroup, METH_VARARGS, NULL},
   {"_dist_destroy_process_group", (PyCFunction)THDPModule_destroyProcessGroup, METH_NOARGS, NULL},
   {"_dist_clear_group_cache", (PyCFunction)THDPModule_clearGroupCache, METH_VARARGS, NULL},
-#ifdef USE_DISTRIBUTED_MW
-  {"_dist_init_master_worker", (PyCFunction)THDPModule_initMasterWorker, METH_VARARGS, NULL},
-#endif
 #ifdef USE_CUDA
   {"_dist_register_stream", (PyCFunction)THDPModule_registerStream, METH_O, NULL},
 #endif

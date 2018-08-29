@@ -322,7 +322,7 @@ void ProcessGroupGloo::createAllreduce(AlgorithmEntry& entry) {
   auto& context = contexts_[0];
   at::DeviceGuard guard(entry.src[0]);
 
-  if (backend == at::kCPU) {
+  if (backend == at::Backend::CPU) {
     if (getSize() < 16) {
       entry.algorithm = std::unique_ptr<::gloo::Algorithm>(
           new ::gloo::AllreduceRingChunked<T>(
@@ -341,7 +341,7 @@ void ProcessGroupGloo::createAllreduce(AlgorithmEntry& entry) {
     return;
   }
 
-  if (backend == at::kCUDA) {
+  if (backend == at::Backend::CUDA) {
     if (getSize() < 16) {
       entry.algorithm = std::unique_ptr<::gloo::Algorithm>(
           new ::gloo::CudaAllreduceRingChunked<T>(
@@ -373,7 +373,7 @@ void ProcessGroupGloo::createBroadcast(AlgorithmEntry& entry) {
   auto& context = contexts_[0];
   at::DeviceGuard guard(entry.src[0]);
 
-  if (backend == at::kCPU) {
+  if (backend == at::Backend::CPU) {
     entry.algorithm =
         std::unique_ptr<::gloo::Algorithm>(new ::gloo::BroadcastOneToAll<T>(
             context,
@@ -384,7 +384,7 @@ void ProcessGroupGloo::createBroadcast(AlgorithmEntry& entry) {
     return;
   }
 
-  if (backend == at::kCUDA) {
+  if (backend == at::Backend::CUDA) {
     entry.algorithm =
         std::unique_ptr<::gloo::Algorithm>(new ::gloo::CudaBroadcastOneToAll<T>(
             context,
@@ -593,6 +593,28 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::scatter(
     std::vector<std::vector<at::Tensor>>& /* unused */,
     const ScatterOptions& /* unused */) {
   throw std::runtime_error("ProcessGroupGloo does not support scatter");
+}
+
+std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::send(
+    std::vector<at::Tensor>& /* unused */,
+    int /* unused */) {
+  throw std::runtime_error("ProcessGroupGloo does not support send");
+}
+
+std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::recv(
+    std::vector<at::Tensor>& /* unused */,
+    int /* unused */) {
+  throw std::runtime_error("ProcessGroupGloo does not support recv");
+}
+
+std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::recvAnysource(
+    std::vector<at::Tensor>& /* unused */,
+    int* /* unused */) {
+  throw std::runtime_error("ProcessGroupGloo does not support recv");
+}
+
+std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::barrier() {
+  throw std::runtime_error("ProcessGroupGloo does not support barrier");
 }
 
 } // namespace c10d

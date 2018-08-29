@@ -8,9 +8,7 @@
 // alias these to the single THCStorage type.
 #define THCudaStorage       THCStorage
 #define THCudaDoubleStorage THCStorage
-#ifdef CUDA_HALF_TENSOR
 #define THCudaHalfStorage   THCStorage
-#endif
 #define THCudaByteStorage   THCStorage
 #define THCudaCharStorage   THCStorage
 #define THCudaShortStorage  THCStorage
