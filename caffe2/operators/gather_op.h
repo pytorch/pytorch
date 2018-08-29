@@ -40,6 +40,9 @@ class GatherOp : public Operator<Context> {
 
     for (int i = 0; i < N; ++i) {
       auto idx = idxs[i];
+      if (idx < 0) {
+        idx = idx + data.dim(0);
+      }
       CAFFE_ENFORCE(
           0 <= idx && idx < data.dim(0),
           "INDICES element is out of DATA bounds, id=",
