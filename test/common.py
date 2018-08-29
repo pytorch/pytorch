@@ -62,7 +62,7 @@ IS_PPC = platform.machine() == "ppc64le"
 
 
 def _check_module_exists(name, min_version=None):
-    r"""Returns if a top-level module with :attr:`name` exists and satisfy a
+    r"""Returns if a top-level module with :attr:`name` exists and satisfies a
     minimum version of :attr:`min_version` (if set) *without** importing it.
     This is generally safer than try-catch block around an `import X`. It avoids
     third party libraries breaking assumptions of some of our tests, e.g.,
@@ -90,7 +90,7 @@ def _check_module_exists(name, min_version=None):
     dist = pkg_resources.get_distribution(name)
     # pkg_resources.parse_version implements PEP 440 -- Version Identification
     version = pkg_resources.parse_version(dist.version)
-    return version >= parse_version(min_version)
+    return version >= pkg_resources.parse_version(min_version)
 
 TEST_NUMPY = _check_module_exists('numpy', '1.14.0')
 TEST_SCIPY = _check_module_exists('scipy', '1.0.0')
