@@ -94,6 +94,7 @@ void initJITBindings(PyObject *module) {
    .def("_jit_pass_constant_propagation", [](std::shared_ptr<Graph>& g) {
      return ConstantPropagation(g);
    })
+   .def("_jit_pass_erase_shape_information", EraseShapeInformation)
    .def("_jit_run_cpp_tests", [] {
      // We have to release the GIL inside this method, because if we happen to
      // initialize the autograd engine in these tests, the newly spawned worker threads will
@@ -222,13 +223,13 @@ void initJITBindings(PyObject *module) {
     py::class_<PyTorchFileReader>(m, "PyTorchFileReader")
       .def(py::init<std::string>())
       .def("get_record_with_key", [](PyTorchFileReader &self, uint64_t key) {
-        std::shared_ptr<void> data;
+        at::DataPtr data;
         size_t size;
         std::tie(data, size) = self.getRecordWithKey(key);
         return py::bytes(reinterpret_cast<const char*>(data.get()), size);
       })
       .def("get_last_record", [](PyTorchFileReader &self){
-        std::shared_ptr<void> data;
+        at::DataPtr data;
         size_t size;
         std::tie(data, size) = self.getLastRecord();
         return py::bytes(reinterpret_cast<const char*>(data.get()), size);
