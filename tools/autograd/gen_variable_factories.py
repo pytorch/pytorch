@@ -48,7 +48,7 @@ def process_function(decl, has_tensor_options):
         if argument["simple_type"] == "TensorOptions":
             # We want to make `at::{name}` always return a
             # tensor and not a variable, since we create a variable right after.
-            actual += ".is_variable(false)"
+            actual = "at::TensorOptions({}).is_variable(false)".format(actual)
         actuals.append(actual)
     requires_grad = "options.requires_grad()" if has_tensor_options else "false"
     if decl['name'].endswith('_like') and not has_tensor_options:
