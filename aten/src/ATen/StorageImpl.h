@@ -61,10 +61,6 @@ struct AT_API StorageImpl : public c10::intrusive_ptr_target {
   }
 
   void release_resources() override {
-    if (finalizer_) {
-      (*finalizer_)();
-    }
-    finalizer_ = nullptr;
     data_ptr_.clear();
   }
 
@@ -135,6 +131,5 @@ struct AT_API StorageImpl : public c10::intrusive_ptr_target {
   ptrdiff_t size_;
   bool resizable_;
   at::Allocator* allocator_;
-  std::unique_ptr<THFinalizer> finalizer_;
 };
 } // namespace at
