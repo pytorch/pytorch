@@ -111,8 +111,8 @@ struct RegisterDispatch {
 
 // Compiler will complain if you put things like std::tuple<Tensor, Tensor> in
 // the `fn` argument of DECLARE_DISPATCH. Some possible workarounds, e.g.,
-// adding parentheses and using helper struct to get rid of the parentheses do
-// not work with MSVC. So use a `using`-declaration if you need to pass in such
+// adding parentheses and using helper struct to get rid of the parentheses, do
+// not work with MSVC. So do a `using`-declaration if you need to pass in such
 // `fn`, e.g., grid_sampler_2d_backward_cpu_kernel in GridSampleKernel.h.
 #define DECLARE_DISPATCH(fn, name) \
   struct name : DispatchStub<fn, name> {}; \
