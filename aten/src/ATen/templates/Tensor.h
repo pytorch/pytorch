@@ -2,11 +2,11 @@
 
 // ${generated_comment}
 
-#include "ATen/Device.h"
+#include "ATen/core/Device.h"
 #include "ATen/core/Layout.h"
 #include "ATen/Scalar.h"
-#include "ATen/ScalarType.h"
-#include "ATen/SparseTensorRef.h"
+#include "ATen/core/ScalarType.h"
+#include "ATen/core/SparseTensorRef.h"
 #include "ATen/Storage.h"
 #include "ATen/TensorAccessor.h"
 #include "ATen/TensorBase.h"
