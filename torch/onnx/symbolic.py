@@ -304,7 +304,6 @@ def sigmoid(g, self):
 
 def _reduce_op_symbolic(onnx_op_name):
     def symbolic(g, self, dim=None, keepdim=None):
-        params = {}
         if dim is None:
             # all-reduce path
             return g.op(onnx_op_name, self, keepdims_i=0)
@@ -622,11 +621,13 @@ def lt(g, input, other):
 
 
 def ge(g, input, other):
-    return g.op("Not", lt(g, other, input))
+    other = _maybe_get_scalar(other)
+    return g.op("Not", lt(g, _if_scalar_type_as(g, other, input), input))
 
 
 def le(g, input, other):
-    return g.op("Not", gt(g, other, input))
+    other = _maybe_get_scalar(other)
+    return g.op("Not", gt(g, _if_scalar_type_as(g, other, input), input))
 
 
 @parse_args('v', 'i')
