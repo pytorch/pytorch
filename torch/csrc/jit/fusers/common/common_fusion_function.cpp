@@ -523,7 +523,7 @@ std::tuple<
       env.s("RandParam", "");
       env.s("RandInit", "");
     }
-  #endif USE_CUDA_FUSER
+  #endif // USE_CUDA_FUSER
 
   env.s("tensorOffsets", tensorOffsets.str());
   env.s("kernelBody", body.str());
