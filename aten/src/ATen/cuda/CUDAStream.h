@@ -18,10 +18,11 @@
 /*
 * Stream pool note.
 * 
-* There is a cost to creating, retaining, and destroying CUDA streams.
-* 
-* To avoid the costs of creation, destruction, and refouncting, streams are
-* now taken three pools per device. These pools are lazily created as needed.
+* A CUDAStream is an abstraction of an actual cuStream on the GPU. CUDAStreams
+* are backed by cuStreams, but they use several pools to minimize the costs
+* associated with creating, retaining, and destroying cuStreams.
+*
+* There are three pools per device, and a device's pools are lazily created.
 *
 * The first pool contains only the default stream. When the default stream
 * is requested it's returned.
