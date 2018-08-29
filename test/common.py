@@ -18,12 +18,13 @@ import warnings
 import random
 import contextlib
 import socket
+import pkg_resources
 from collections import OrderedDict
 from functools import wraps
 from itertools import product
 from copy import deepcopy
 from numbers import Number
-from pkg_resources import parse_version  # implements PEP 440 -- Version Identification
+
 
 import __main__
 import errno
@@ -62,26 +63,38 @@ IS_PPC = platform.machine() == "ppc64le"
 
 def _check_module_exists(name, min_version=None):
     r"""Returns if a top-level module with :attr:`name` exists and satisfy a
-    minium version of :attr:`min_version` (if set). Ideally, this should not do
-    an actual import to avoid third party libraries breaking assumptions of some
-    of our tests, e.g., setting multiprocessing start method when imported
-    (see librosa/#747, torchvision/#544). However, we guard our multiprocessing
-    tests with `mp = mp.get_context(...)` so this shouldn't be too big a
-    problem.
+    minimum version of :attr:`min_version` (if set) *without** importing it.
+    This is generally safer than try-catch block around an `import X`. It avoids
+    third party libraries breaking assumptions of some of our tests, e.g.,
+    setting multiprocessing start method when imported
+    (see librosa/#747, torchvision/#544).
     """
-    try:
-        m = __import__(name)
-    except ImportError:
-        return False
+    if not PY3:  # Python 2
+        import imp
+        try:
+            imp.find_module(name)
+        except ImportError:
+            return False
+    elif PY34:  # Python [3, 3.4)
+        import importlib
+        loader = importlib.find_loader(name)
+        if loader is None:
+            return False
+    else:  # Python >= 3.4
+        import importlib
+        spec = importlib.util.find_spec(name)
+        if spec is None:
+            return False
     if min_version is None:
         return True
-    return parse_version(m.__version__) >= parse_version(min_version)
+    dist = pkg_resources.get_distribution(name)
+    # pkg_resources.parse_version implements PEP 440 -- Version Identification
+    version = pkg_resources.parse_version(dist.version)
+    return version >= parse_version(min_version)
 
-# see librosa/librosa#729.
 TEST_NUMPY = _check_module_exists('numpy', '1.14.0')
 TEST_SCIPY = _check_module_exists('scipy', '1.0.0')
-# On Py2, importing librosa 0.6.1 triggers a TypeError (if using newest joblib)
-TEST_LIBROSA = PY3 and _check_module_exists('librosa')
+TEST_LIBROSA = _check_module_exists('librosa', '0.6.2')
 TEST_MKL = torch.backends.mkl.is_available()
 
 NO_MULTIPROCESSING_SPAWN = os.environ.get('NO_MULTIPROCESSING_SPAWN', '0') == '1'
