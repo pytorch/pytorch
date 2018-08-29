@@ -107,7 +107,7 @@ struct AT_API Type {
     return this == &other;
   }
   bool operator!=(const Type& other) const {
-  return this == &other;
+    return this != &other;
   }
 
   // example
