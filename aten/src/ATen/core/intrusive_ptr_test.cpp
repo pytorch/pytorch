@@ -158,7 +158,9 @@ TEST(IntrusivePtrTest, givenValidPtr_whenMoveAssigning_thenOldInstanceInvalid) {
   EXPECT_FALSE(obj1.defined());
 }
 
-TEST(IntrusivePtrTest, givenValidPtr_whenMoveAssigningToSelf_thenPointsToSameObject) {
+TEST(
+    IntrusivePtrTest,
+    givenValidPtr_whenMoveAssigningToSelf_thenPointsToSameObject) {
   intrusive_ptr<SomeClass> obj1 = make_intrusive<SomeClass>();
   SomeClass* obj1ptr = obj1.get();
   obj1 = std::move(obj1);
@@ -171,7 +173,9 @@ TEST(IntrusivePtrTest, givenValidPtr_whenMoveAssigningToSelf_thenStaysValid) {
   EXPECT_TRUE(obj1.defined());
 }
 
-TEST(IntrusivePtrTest, givenInvalidPtr_whenMoveAssigningToSelf_thenStaysInvalid) {
+TEST(
+    IntrusivePtrTest,
+    givenInvalidPtr_whenMoveAssigningToSelf_thenStaysInvalid) {
   intrusive_ptr<SomeClass> obj1;
   obj1 = std::move(obj1);
   EXPECT_FALSE(obj1.defined());
@@ -273,7 +277,9 @@ TEST(IntrusivePtrTest, givenValidPtr_whenCopyAssigning_thenOldInstanceValid) {
   EXPECT_TRUE(obj1.defined());
 }
 
-TEST(IntrusivePtrTest, givenValidPtr_whenCopyAssigningToSelf_thenPointsToSameObject) {
+TEST(
+    IntrusivePtrTest,
+    givenValidPtr_whenCopyAssigningToSelf_thenPointsToSameObject) {
   intrusive_ptr<SomeClass> obj1 = make_intrusive<SomeClass>();
   SomeClass* obj1ptr = obj1.get();
   obj1 = obj1;
@@ -286,7 +292,9 @@ TEST(IntrusivePtrTest, givenValidPtr_whenCopyAssigningToSelf_thenStaysValid) {
   EXPECT_TRUE(obj1.defined());
 }
 
-TEST(IntrusivePtrTest, givenInvalidPtr_whenCopyAssigningToSelf_thenStaysInvalid) {
+TEST(
+    IntrusivePtrTest,
+    givenInvalidPtr_whenCopyAssigningToSelf_thenStaysInvalid) {
   intrusive_ptr<SomeClass> obj1;
   obj1 = obj1;
   EXPECT_FALSE(obj1.defined());
@@ -1801,8 +1809,7 @@ TEST(
 TEST(
     WeakIntrusivePtrTest,
     givenWeakOnlyPtr_whenCopyAssigning_thenNewInstanceIsValid) {
-  IntrusiveAndWeak<SomeClass> obj1 =
-      make_weak_intrusive<SomeClass>();
+  IntrusiveAndWeak<SomeClass> obj1 = make_weak_intrusive<SomeClass>();
   weak_intrusive_ptr<SomeClass> obj2 = make_weak_only<SomeClass>();
   SomeClass* obj1ptr = obj1.weak.lock().get();
   obj2 = obj1.weak;
@@ -1812,8 +1819,7 @@ TEST(
 TEST(
     WeakIntrusivePtrTest,
     givenWeakOnlyPtr_whenCopyAssigning_thenPointsToSameObject) {
-  IntrusiveAndWeak<SomeClass> obj1 =
-      make_weak_intrusive<SomeClass>();
+  IntrusiveAndWeak<SomeClass> obj1 = make_weak_intrusive<SomeClass>();
   weak_intrusive_ptr<SomeClass> obj2 = make_weak_only<SomeClass>();
   SomeClass* obj1ptr = obj1.weak.lock().get();
   obj2 = obj1.weak;
