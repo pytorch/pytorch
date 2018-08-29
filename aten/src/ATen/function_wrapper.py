@@ -89,11 +89,21 @@ return ${method_prefix_derived}${api_name}(${broadcast_modified_actuals});
 """)
 
 # 5b. Methods which call to a native method
-# TODO: native_actuals???
-NATIVE_METHOD_DEFINITION = CodeTemplate("""\
+NATIVE_CONCRETE_METHOD_DEFINITION = CodeTemplate("""\
 const auto& self_ty = *this;
 (void)self_ty;
 ${return_call} at::native::${native_type_method_dispatch}(/* actuals */ ${actuals});
+""")
+
+# 5c. Methods which call to a native method
+NATIVE_GENERIC_METHOD_DEFINITION = CodeTemplate("""\
+${return_call} at::native::${native_type_method_dispatch}(/* native_actuals */ ${native_actuals});
+""")
+
+# 5d. Deprecated type method
+DEPRECATED_CONCRETE_METHOD_DEFINITION = CodeTemplate("""\
+TensorOptions options(*this);
+return at::native::${api_name}(${type_method_actuals}, options);
 """)
 
 # add non-virtual declaration to Tensor.h
@@ -542,6 +552,13 @@ def to_return_type(arg, option):
     }
 
 
+def find_formal(formal_name, formals):
+    for formal in formals:
+        if formal_name == formal['dynamic_type']:
+            return formal
+    return None
+
+
 def get_broadcast_argument(option):
     # type: (FunctionOption) -> Optional[THFormal]
     for argument in option['arguments']:
@@ -935,12 +952,6 @@ def create_generic(top_env, declarations):
         option['method_actuals'] = [
             f['name'] if f['name'] != 'self' else '*this' for f in formals]
 
-        def find_formal(formal_name, formals):
-            for formal in formals:
-                if formal_name == formal['dynamic_type']:
-                    return formal
-            return None
-
         dispatch_tensor = find_dispatch_tensor(formals)
         dispatch_type = None if dispatch_tensor else find_formal('Type', formals)
         if dispatch_type:
@@ -959,6 +970,8 @@ def create_generic(top_env, declarations):
         is_deprecated_factory_method = len(formals) > 0 and \
             formals[0]['dynamic_type'] == 'Type' and \
             option['return_type'] == 'Tensor' and option['deprecated']
+        option['is_factory_method'] = is_factory_method
+        option['is_deprecated_factory_method'] = is_deprecated_factory_method
         needs_native_definition = not is_deprecated_factory_method
 
         has_dispatch = dispatch_tensor or dispatch_type
@@ -979,6 +992,7 @@ def create_generic(top_env, declarations):
                 top_env['type_method_declarations'].append(DEPRECATED_TYPE_METHOD_DECLARATION.substitute(env))
             else:
                 top_env['type_method_declarations'].append(TYPE_METHOD_DECLARATION.substitute(env))
+            top_env['type_method_definitions'].append(TYPE_METHOD_DEFINITION.substitute(env))
 
         dispatch = option['type_method_definition_dispatch']
         option['native_type_method_dispatch'] = dispatch
@@ -1485,18 +1499,30 @@ def create_derived(backend_type_env, declarations):
         dispatch = option['type_method_definition_dispatch']
         env = nested_dict(option, backend_type_env)
 
-        if isinstance(dispatch, dict):
-            pair = (backend_type_env['Backend'],
-                    backend_type_env['ScalarName'])
-            if pair in option['backend_type_pairs']:
+        pair = (backend_type_env['Backend'],
+                backend_type_env['ScalarName'])
+        if pair in option['backend_type_pairs']:
+            if isinstance(dispatch, dict):
                 native_dispatch = dispatch.get(pair[0])
                 if native_dispatch is not None:
                     option['native_type_method_dispatch'] = native_dispatch
-                    option['type_definition_body'] = NATIVE_METHOD_DEFINITION.substitute(env)
+                    option['type_definition_body'] = NATIVE_CONCRETE_METHOD_DEFINITION.substitute(env)
                     type_object_declarations.append(
                         TYPE_DERIVED_DECLARATION.substitute(env))
                     type_object_definitions.append(
                         TYPE_DERIVED_DEFINITION.substitute(env))
+            elif option['is_deprecated_factory_method']:
+                option['type_definition_body'] = DEPRECATED_CONCRETE_METHOD_DEFINITION.substitute(env)
+                type_object_declarations.append(
+                    TYPE_DERIVED_DECLARATION.substitute(env))
+                type_object_definitions.append(
+                    TYPE_DERIVED_DEFINITION.substitute(env))
+            elif not option['is_factory_method']:
+                option['type_definition_body'] = NATIVE_GENERIC_METHOD_DEFINITION.substitute(env)
+                type_object_declarations.append(
+                    TYPE_DERIVED_DECLARATION.substitute(env))
+                type_object_definitions.append(
+                    TYPE_DERIVED_DEFINITION.substitute(env))
 
     for declaration in declarations:
         for option in declaration['options']:
