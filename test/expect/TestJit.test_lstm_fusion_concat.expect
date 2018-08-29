@@ -19,8 +19,8 @@ graph(%0 : Float(*, *)
 with prim::FusionGroup_0 = graph(%15 : Float(*, *)
       %41 : Dynamic
       %46 : Dynamic) {
-  %47 : Dynamic, %48 : Dynamic, %49 : Dynamic, %50 : Dynamic = prim::FusedChunk[chunks=4, dim=1](%46)
-  %42 : Dynamic, %43 : Dynamic, %44 : Dynamic, %45 : Dynamic = prim::FusedChunk[chunks=4, dim=1](%41)
+  %47 : Float(*, *), %48 : Float(*, *), %49 : Float(*, *), %50 : Float(*, *) = prim::ConstantChunk[chunks=4, dim=1](%46)
+  %42 : Float(*, *), %43 : Float(*, *), %44 : Float(*, *), %45 : Float(*, *) = prim::ConstantChunk[chunks=4, dim=1](%41)
   %39 : int = prim::Constant[value=1]()
   %40 : Float(*, *) = aten::add(%42, %47, %39)
   %35 : int = prim::Constant[value=1]()

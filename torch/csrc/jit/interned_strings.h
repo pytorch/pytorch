@@ -55,7 +55,6 @@ namespace torch { namespace jit {
   _(prim, GradOf)                  \
   _(prim, AnyDefined)              \
   _(prim, FusedConcat)             \
-  _(prim, FusedChunk)              \
   _(prim, ConstantChunk)           \
   _(prim, NoneGenerator)           \
   _(aten, __not__)                 \

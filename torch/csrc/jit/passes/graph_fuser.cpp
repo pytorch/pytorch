@@ -581,9 +581,9 @@ struct GraphFuser {
     size_t input_index = it - group->inputs().begin();
     auto & subgraph = getSubgraph(group);
     auto * subgraph_input = subgraph.inputs().at(input_index);
-    // If subgraph_input is an input to prim::FusedChunk, it will have 1 use
+    // If subgraph_input is an input to prim::ConstantChunk, it will have 1 use
     auto * node = subgraph_input->uses().at(0).user;
-    if (node->kind() == prim::FusedChunk) {
+    if (node->kind() == prim::ConstantChunk) {
       JIT_ASSERT(subgraph_input->uses().size() == 1);
       return node;
     }
@@ -614,41 +614,24 @@ struct GraphFuser {
     chunk->destroy();
   }
 
-  // There are two invariants for prim::FusedChunk:
-  // (1) the tensor input to prim::FusedChunk must be an input to the fusion group
-  // (2) no two FusedChunk in the same FusionGroup can share a tensor input.
+  // There are two invariants for prim::ConstantChunk:
+  // (1) the tensor input to prim::ConstantChunk must be an input to the fusion group
+  // (2) no two ConstantChunks in the same FusionGroup can share a tensor input.
   graph_node_list::iterator fuseChunk(Node * consumer, Value * producer) {
     auto * chunk = producer->node();
     JIT_ASSERT(consumer->kind() == prim::FusionGroup);
     JIT_ASSERT(chunk->kind() == prim::ConstantChunk);
 
-    // if producer's input is already an input to a prim::FusedChunk node,
-    // we cannot add a new prim::FusedChunk node because of invariant (2).
+    // if producer's input is already an input to a prim::ConstantChunk node,
+    // we cannot add a new prim::ConstantChunk node because of invariant (2).
     auto * chunked_tensor = producer->node()->input();
     if (auto existingFusedChunk = findFusedChunk(consumer, chunked_tensor)) {
       fuseChunkByReusingExistingFusedChunk(consumer, chunk, *existingFusedChunk);
       return consumer->reverseIterator();
     }
 
-    WithInsertPoint guard(chunk);
-
-    // Create a prim::FusedChunk
-    auto * graph = chunk->owningGraph();
-    auto * fused_chunk = graph->create(
-        prim::FusedChunk, {chunk->input()}, /*num_outputs=*/chunk->outputs().size())
-      ->i_(attr::chunks, chunk->i(attr::chunks))
-      ->i_(attr::dim, chunk->i(attr::dim));
-    graph->insertNode(fused_chunk);
-
-    // Replace aten::chunk with prim::FusedChunk
-    for (auto it = chunk->outputs().begin(); it != chunk->outputs().end(); ++it) {
-      auto offset = it - chunk->outputs().begin();
-      (*it)->replaceAllUsesWith(fused_chunk->outputs().at(offset));
-    }
-
-    // Move prim::FusedChunk into the FusionGroup
-    mergeNodeIntoGroup(consumer, fused_chunk);
-    fused_chunk->destroy();
+    // Move prim::ConstantChunk into the FusionGroup
+    mergeNodeIntoGroup(consumer, chunk);
     chunk->destroy();
     return consumer->reverseIterator();
   }

@@ -8,8 +8,8 @@ graph(%0 : Float(*, *)
 }
 with prim::FusionGroup_0 = graph(%11 : Dynamic
       %14 : Dynamic) {
-  %15 : Dynamic, %16 : Dynamic = prim::FusedChunk[chunks=2, dim=1](%14)
-  %12 : Dynamic, %13 : Dynamic = prim::FusedChunk[chunks=2, dim=1](%11)
+  %15 : Float(*, *), %16 : Float(*, *) = prim::ConstantChunk[chunks=2, dim=1](%14)
+  %12 : Float(*, *), %13 : Float(*, *) = prim::ConstantChunk[chunks=2, dim=1](%11)
   %9 : int = prim::Constant[value=1]()
   %10 : Float(*, *) = aten::add(%13, %16, %9)
   %5 : int = prim::Constant[value=1]()

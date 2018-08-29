@@ -30,23 +30,6 @@ void badArgType() {
   AT_ERROR("Found an unsupported argument type in the JIT tracer. File a bug report.");
 }
 
-void recordOutput(Node* node, const at::Tensor& output) {
-  Value * value = node->addOutput();
-  if (output.defined()) {
-    value->inferTypeFrom(output);
-    setValueTrace(autograd::as_variable_ref(output), value);
-  }
-}
-
-void recordOutput(Node* node, const std::vector<at::Tensor>& outputs) {
-  Value * value = node->addOutput()->setType(ListType::ofTensors());
-  Graph * graph = node->owningGraph();
-  Node * unpack_node = graph->appendNode(graph->create(prim::ListUnpack, {value}, outputs.size()));
-  for (size_t i = 0; i < outputs.size(); ++i) {
-    setValueTrace(outputs[i], unpack_node->outputs()[i]);
-  }
-}
-
 thread_local std::shared_ptr<TracingState> tracing_state;
 
 } // namespace detail
@@ -99,6 +82,23 @@ void addInputs(Node *n, const char * name, at::IntList value) {
 
 void addInputs(Node *n, const char * name, const ArrayRef<double>& value) {
   AT_ERROR("Tracing float lists currently not supported!");
+}
+
+void addOutput(Node* node, const at::Tensor& output) {
+  Value * value = node->addOutput();
+  if (output.defined()) {
+    value->inferTypeFrom(output);
+    setValueTrace(autograd::as_variable_ref(output), value);
+  }
+}
+
+void addOutput(Node* node, const std::vector<at::Tensor>& outputs) {
+  Value * value = node->addOutput()->setType(ListType::ofTensors());
+  Graph * graph = node->owningGraph();
+  Node * unpack_node = graph->appendNode(graph->create(prim::ListUnpack, {value}, outputs.size()));
+  for (size_t i = 0; i < outputs.size(); ++i) {
+    setValueTrace(outputs[i], unpack_node->outputs()[i]);
+  }
 }
 
 const std::shared_ptr<TracingState>& getTracingState() {
