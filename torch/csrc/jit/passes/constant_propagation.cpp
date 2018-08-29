@@ -44,9 +44,14 @@ std::vector<IValue> runNode(Node* n) {
     stack.push_back(*(toIValue(input)));
   }
   op(stack);
-  auto var_outputs = fmap(stack, [&](IValue v) {
+  auto var_outputs = fmap(stack, [&](IValue v) -> IValue {
     if (v.isTensor()) {
-      return IValue(autograd::as_variable_ref(v.toTensor()).data());
+      auto t = std::move(v).toTensor();
+      if(t.defined()) {
+        return IValue(autograd::as_variable_ref(t).data());
+      } else {
+        return t;
+      }
     } else {
       return v;
     }
