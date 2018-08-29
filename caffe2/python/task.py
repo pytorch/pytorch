@@ -215,11 +215,10 @@ class TaskGroup(object):
         self._tasks.append(task)
 
     def tasks(self):
-        if not self._already_used:
-            for task in self._tasks_to_add:
-                self.add(task)
-            self._tasks_to_add = []
-            self._already_used = True
+        for task in self._tasks_to_add:
+            self.add(task)
+        self._tasks_to_add = []
+        self._already_used = True
         return self._tasks
 
     def num_registered_tasks(self):
@@ -228,7 +227,7 @@ class TaskGroup(object):
     def used_nodes(self):
         # use list to keep order
         used = []
-        for task in self.tasks():
+        for task in self._tasks + self._tasks_to_add:
             if task.node not in used:
                 used.append(task.node)
         return used
@@ -260,8 +259,9 @@ class TaskGroup(object):
         # tasks_by_node can't be called twice because the setup won't
         # work properly a second time.
         node_map = {}
-        for node in self.used_nodes():
-            node_map[node] = node_remap(node) if node_remap else node
+        for task in self.tasks():
+            node_map[task.node] =\
+                node_remap(task.node) if node_remap else task.node
         if self._tasks_by_node is not None:
             tasks_by_node, prev_node_map = self._tasks_by_node
             assert prev_node_map == node_map, (
@@ -286,6 +286,11 @@ class TaskGroup(object):
         for node, tasks in viewitems(tasks_by_node):
             report_steps = report_steps_by_node[node]
 
+            node_inits, node_exits = get_setup_nets(
+                TaskGroup.LOCAL_SETUP,
+                [t.get_step() for t in tasks] + report_steps,
+                self)
+            # shortcut for single task with no queue
             steps = report_steps
             outputs = []
             grouped_workspace_type = WorkspaceType.PRIVATE
@@ -307,15 +312,16 @@ class TaskGroup(object):
             else:
                 step = core.execution_step(
                     '%s:body' % node, steps, concurrent_substeps=True)
-
-            # Prepend and append setup nets.
-            node_inits, node_exits = get_setup_nets(
-                TaskGroup.LOCAL_SETUP,
-                [t.get_step() for t in tasks] + report_steps,
-                self,
-            )
-            step = add_setup_steps(step, node_inits, node_exits, node)
-
+            if len(node_inits) > 0 or len(node_exits) > 0:
+                steps = []
+                if len(node_inits) > 0:
+                    steps.append(
+                        core.execution_step('%s:init' % node, node_inits))
+                steps.append(step)
+                if len(node_exits) > 0:
+                    steps.append(
+                        core.execution_step('%s:exit' % node, node_exits))
+                step = core.execution_step(node, steps)
             Task(
                 node=node, step=step, outputs=outputs,
                 name='grouped_by_node',
