@@ -42,7 +42,7 @@ def export_to_pb(model, inputs, *args, **kwargs):
 
 
 class FuncModule(Module):
-    def __init__(self, f, params=None:
+    def __init__(self, f, params=None):
         if params is None:
             params = tuple()
         super(FuncModule, self).__init__()
