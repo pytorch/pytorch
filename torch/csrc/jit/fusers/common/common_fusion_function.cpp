@@ -450,7 +450,9 @@ std::tuple<
     }
   }
 
-  bool has_half_tensor = false;
+  #if USE_CUDA_FUSER
+    bool has_half_tensor = false;
+  #endif // USE_CUDA_FUSER
   size_t formal_count = 0;
   for(auto input : flat_inputs) {
     auto p = input.first;
@@ -461,10 +463,12 @@ std::tuple<
     bool is_half = input.second.scalar_type == at::ScalarType::Half;
     if (is_half) {
       AT_ASSERT(use_cuda);
-      env.s(
-        "access"
-      , format("__half2float(t${formal}.data[t${formal}_offset])", env));
-      has_half_tensor = true;
+      #if USE_CUDA_FUSER
+        env.s(
+          "access"
+        , format("__half2float(t${formal}.data[t${formal}_offset])", env));
+        has_half_tensor = true;
+      #endif // USE_CUDA_FUSER
     } else {
       env.s("access", format("t${formal}.data[t${formal}_offset]", env));
     }
