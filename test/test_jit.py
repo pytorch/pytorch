@@ -6329,7 +6329,6 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
         self.checkTrace(Policy(), (torch.rand(1, 4),))
 
     def test_snli(self):
-        # TODO: nn.LSTM is called as a Python function https://github.com/pytorch/pytorch/issues/8449
         class Bottle(nn.Module):
 
             def forward(self, input):
@@ -6416,9 +6415,7 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
         premise = torch.LongTensor(48, 128).random_(0, 100)
         hypothesis = torch.LongTensor(24, 128).random_(0, 100)
 
-        # TODO: toggle export_import once LSTM isn't a python op
-        self.checkTrace(SNLIClassifier(Config()), (premise, hypothesis), inputs_require_grads=False,
-                        export_import=False)
+        self.checkTrace(SNLIClassifier(Config()), (premise, hypothesis), inputs_require_grads=False)
 
     def test_super_resolution(self):
         import torch.nn.init as init
