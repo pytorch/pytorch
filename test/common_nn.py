@@ -573,6 +573,7 @@ criterion_tests = [
         reference_fn=lambda i, t, m:
             kldivloss_reference(i, t, get_reduction(m)),
         check_sum_reduction=True,
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='MSELoss',
