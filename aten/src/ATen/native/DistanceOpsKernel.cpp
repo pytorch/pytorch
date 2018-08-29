@@ -16,49 +16,48 @@ struct PDist {
     return (0 < val) - (val < 0);
   }
 
-  static scalar_t zdist_calc(const scalar_t * a, const scalar_t * b, const int64_t size, const double p) {
-    scalar_t result = 0.0;
-    for (int64_t i = 0; i != size; i += 1, a += 1, b += 1) {
-      result += *a != *b;
-    }
-    return result;
-  }
+  // Zero norm
+  struct zdist_calc {
+    static inline void inc(scalar_t& agg, const scalar_t diff, const scalar_t p) { agg += diff != 0.0; }
+    static inline scalar_t finish(const scalar_t agg, const scalar_t p) { return agg; }
+  };
 
-  static scalar_t odist_calc(const scalar_t * a, const scalar_t * b, const int64_t size, const double p) {
-    scalar_t result = 0.0;
-    for (int64_t i = 0; i != size; i += 1, a += 1, b += 1) {
-      result += std::abs(*a - *b);
-    }
-    return result;
-  }
+  // One norm
+  struct odist_calc {
+    static inline void inc(scalar_t& agg, const scalar_t diff, const scalar_t p) { agg += diff; }
+    static inline scalar_t finish(const scalar_t agg, const scalar_t p) { return agg; }
+    static inline scalar_t backward(const scalar_t diff, const scalar_t grad, const scalar_t dist, const scalar_t p) { return grad * sign(diff); }
+  };
 
-  static scalar_t tdist_calc(const scalar_t * a, const scalar_t * b, const int64_t size, const double p) {
-    scalar_t result = 0.0;
-    for (int64_t i = 0; i != size; i += 1, a += 1, b += 1) {
-      scalar_t diff = *a - *b;
-      result += diff * diff;
-    }
-    return std::sqrt(result);
-  }
+  // Special general pnorm derivative if p is less than two
+  struct lttdist_calc {
+    static inline scalar_t backward(const scalar_t diff, const scalar_t grad, const scalar_t dist, const scalar_t p) { return dist == 0.0 ? 0 : sign(diff) * std::pow(std::abs(diff), p - 1) * grad / std::pow(dist, p - 1); }
+  };
 
-  static scalar_t pdist_calc(const scalar_t * a, const scalar_t * b, const int64_t size, const double p) {
-    scalar_t result = 0.0;
-    for (int64_t i = 0; i != size; i += 1, a += 1, b += 1) {
-      result += std::pow(std::abs(*a - *b), p);
-    }
-    return std::pow(result, 1.0 / p);
-  }
+  // Two norm
+  struct tdist_calc {
+    static inline void inc(scalar_t& agg, const scalar_t diff, const scalar_t p) { agg += diff * diff; }
+    static inline scalar_t finish(const scalar_t agg, const scalar_t p) { return std::sqrt(agg); }
+    static inline scalar_t backward(const scalar_t diff, const scalar_t grad, const scalar_t dist, const scalar_t p) { return dist == 0.0 ? 0 : grad * diff / dist; }
 
-  static scalar_t idist_calc(const scalar_t * a, const scalar_t * b, const int64_t size, const double p) {
-    scalar_t result = 0.0;
-    for (int64_t i = 0; i != size; i += 1, a += 1, b += 1) {
-      result = std::max(result, std::abs(*a - *b));
-    }
-    return result;
-  }
+  };
 
-  template <scalar_t (*F)(const scalar_t *, const scalar_t *, const int64_t, const double)>
-  static void run_parallel(Tensor& result, const Tensor& self, const double p) {
+  // General p norm
+  struct pdist_calc {
+    static inline void inc(scalar_t& agg, const scalar_t diff, const scalar_t p) { agg += std::pow(diff, p); }
+    static inline scalar_t finish(const scalar_t agg, const scalar_t p) { return std::pow(agg, 1.0 / p); }
+    static inline scalar_t backward(const scalar_t diff, const scalar_t grad, const scalar_t dist, const scalar_t p) { return dist == 0.0 ? 0 : diff * std::pow(std::abs(diff), p - 2) * grad / std::pow(dist, p - 1); }
+  };
+
+  // Info norm
+  struct idist_calc {
+    static inline void inc(scalar_t& agg, const scalar_t diff, const scalar_t p) { agg = std::max(agg, diff); }
+    static inline scalar_t finish(const scalar_t agg, const scalar_t p) { return agg; }
+    static inline scalar_t backward(const scalar_t diff, const scalar_t grad, const scalar_t dist, const scalar_t p) { return grad * sign(diff) * (std::abs(diff) == dist); }
+  };
+
+  template <typename F>
+  static void run_parallel(Tensor& result, const Tensor& self, const scalar_t p) {
     auto res_ = result.data<scalar_t>();
     auto self_ = self.data<scalar_t>();
     int64_t n = self.size(0);
@@ -71,7 +70,15 @@ struct PDist {
       int64_t i = static_cast<int64_t>((n2 - std::sqrt(n2 * n2 - 2 * k - 1)));
       int64_t j = k - n * i + i * (i + 1) / 2 + i + 1;
       for (; k < end; ++k) {
-        res_[k] = F(self_ + i * m, self_ + j * m, m, p);
+        const scalar_t * a = self_ + i * m;
+        const scalar_t * b = self_ + j * m;
+        const scalar_t * const stop = a + m;
+        scalar_t agg = 0.0;
+        for (; a != stop; ++a, ++b) {
+          F::inc(agg, std::abs(*a - *b), p);
+        }
+        res_[k] = F::finish(agg, p);
+
         ++j;
         if (j == n) {
           ++i;
@@ -82,7 +89,7 @@ struct PDist {
   }
 
   // Assumes self is nonempty and 2D
-  static void apply(Tensor& result, const Tensor& self, const double p) {
+  static void apply(Tensor& result, const Tensor& self, const scalar_t p) {
     if (p == 0.0) {
       run_parallel<zdist_calc>(result, self, p);
     } else if (p == 1.0) {
@@ -96,28 +103,8 @@ struct PDist {
     }
   }
 
-  static scalar_t one_backward(const scalar_t diff, const scalar_t grad, const scalar_t dist, const double p) {
-    return grad * sign(diff);
-  }
-
-  static scalar_t lt_two_backward(const scalar_t diff, const scalar_t grad, const scalar_t dist, const double p) {
-    return dist == 0.0 ? 0 : sign(diff) * std::pow(std::abs(diff), p - 1) * grad / std::pow(dist, p - 1);
-  }
-
-  static scalar_t two_backward(const scalar_t diff, const scalar_t grad, const scalar_t dist, const double p) {
-    return dist == 0.0 ? 0 : grad * diff / dist;
-  }
-
-  static scalar_t gt_two_backward(const scalar_t diff, const scalar_t grad, const scalar_t dist, const double p) {
-    return dist == 0.0 ? 0 : diff * std::pow(std::abs(diff), p - 2) * grad / std::pow(dist, p - 1);
-  }
-
-  static scalar_t inf_backward(const scalar_t diff, const scalar_t grad, const scalar_t dist, const double p) {
-    return grad * sign(diff) * (std::abs(diff) == dist);
-  }
-
-  template <scalar_t (*F)(const scalar_t, const scalar_t, const scalar_t, const double)>
-  static void run_backward_parallel(Tensor& result, const Tensor & grad, const Tensor & self, const double p, const Tensor& dist) {
+  template <typename F>
+  static void run_backward_parallel(Tensor& result, const Tensor & grad, const Tensor & self, const scalar_t p, const Tensor& dist) {
     const int64_t n = self.size(0);
     const int64_t m = self.size(1);
     const int64_t gs = grad.stride(0);
@@ -139,7 +126,7 @@ struct PDist {
           const scalar_t * self_j = self_i + m;
           scalar_t * res_j = res_i + m;
           for (int64_t j = i + 1; j != n; j += 1, k += 1, self_j += m, res_j += m, grad_k += gs, dist_k += 1) {
-            const scalar_t res = F(*self_i - *self_j, *grad_k, *dist_k, p);
+            const scalar_t res = F::backward(*self_i - *self_j, *grad_k, *dist_k, p);
             *res_i += res;
             *res_j -= res;
           }
@@ -151,15 +138,15 @@ struct PDist {
   static void apply_backward(Tensor& result, const Tensor& grad, const Tensor& self, const double p, const Tensor& dist) {
     if (p == 0.0) {
     } else if (p == 1.0) {
-      run_backward_parallel<one_backward>(result, grad, self, p, dist);
+      run_backward_parallel<odist_calc>(result, grad, self, p, dist);
     } else if (p < 2.0) {
-      run_backward_parallel<lt_two_backward>(result, grad, self, p, dist);
+      run_backward_parallel<lttdist_calc>(result, grad, self, p, dist);
     } else if (p == 2.0) {
-      run_backward_parallel<two_backward>(result, grad, self, p, dist);
+      run_backward_parallel<tdist_calc>(result, grad, self, p, dist);
     } else if (std::isinf(p)) {
-      run_backward_parallel<inf_backward>(result, grad, self, p, dist);
+      run_backward_parallel<idist_calc>(result, grad, self, p, dist);
     } else {
-      run_backward_parallel<gt_two_backward>(result, grad, self, p, dist);
+      run_backward_parallel<pdist_calc>(result, grad, self, p, dist);
     }
   }
 

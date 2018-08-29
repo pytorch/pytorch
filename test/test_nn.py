@@ -4844,27 +4844,31 @@ class TestNN(NNTestCase):
             if trans:
                 inp = inp.transpose(0, 1)
             for p in [0, 1, 2, 0.5, 1.5, 2.5, float('inf')]:
-                self.assertTrue(gradcheck(lambda x: F.pdist(x, p), (inp,)))
+                self.assertTrue(
+                    gradcheck(lambda x: F.pdist(x, p), (inp,)),
+                    "calling {:g} dist on {}".format(p, inp))
 
     def test_pdist_zeros(self):
         """Test that grad is still valid when dist is 0"""
         for trans in [False, True]:
             inp = torch.randn(1, 3, requires_grad=True).repeat([2, 1])
             for p in [0, 1, 2, 0.5, 1.5, 2.5, float('inf')]:
-                self.assertTrue(gradcheck(lambda x: F.pdist(x, p), (inp,)))
+                self.assertTrue(
+                    gradcheck(lambda x: F.pdist(x, p), (inp,)),
+                    "calling {:g} dist on {}".format(p, inp))
 
     def test_pdist_empty_row(self):
-          inp = torch.randn(1, 3, requires_grad=True)
-          self.assertTrue(gradcheck(F.pdist, (inp,)))
+        inp = torch.randn(1, 3, requires_grad=True)
+        self.assertTrue(gradcheck(F.pdist, (inp,)))
 
     def test_pdist_empty_col(self):
-          inp = torch.randn(4, 0, requires_grad=True)
-          self.assertTrue(gradcheck(F.pdist, (inp,)))
+        inp = torch.randn(4, 0, requires_grad=True)
+        self.assertTrue(gradcheck(F.pdist, (inp,)))
 
     @unittest.expectedFailure
     def test_pdist_gradgrad_unimplemented(self):
-          inp = torch.randn(4, 5, requires_grad=True)
-          gradgradcheck(F.pdist, (inp,))
+        inp = torch.randn(4, 5, requires_grad=True)
+        gradgradcheck(F.pdist, (inp,))
 
     def test_cosine_embedding_loss_no_reduce(self):
         input1 = torch.randn(15, 10, requires_grad=True)
