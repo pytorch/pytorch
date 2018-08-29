@@ -6324,6 +6324,7 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
 
         self.checkTrace(SNLIClassifier(Config()), (premise, hypothesis), inputs_require_grads=False)
 
+    @skipIfRocm
     def test_super_resolution(self):
         import torch.nn.init as init
 
