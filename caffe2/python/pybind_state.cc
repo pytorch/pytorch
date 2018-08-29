@@ -491,6 +491,11 @@ void addObjectMethods(py::module& m) {
             return py::cast(self->CreateBlob(name));
           },
           py::return_value_policy::reference_internal)
+      .def(
+          "_remove_blob",
+          [](Workspace* self, const std::string& name) -> py::bool_ {
+            return self->RemoveBlob(name);
+          })
       .def("fetch_blob", &python_detail::fetchBlob)
       .def(
           "has_blob",
