@@ -3,13 +3,13 @@
 // ${generated_comment}
 
 #include "ATen/core/ATenGeneral.h"
-#include "ATen/Allocator.h"
+#include "ATen/core/Allocator.h"
 #include "ATen/core/Deprecated.h"
 #include "ATen/core/Generator.h"
 #include "ATen/core/Layout.h"
 #include "ATen/Scalar.h"
 #include "ATen/core/ScalarType.h"
-#include "ATen/SparseTensorRef.h"
+#include "ATen/core/SparseTensorRef.h"
 #include "ATen/Tensor.h"
 #include "ATen/core/ArrayRef.h"
 #include "ATen/core/Half.h"
@@ -56,7 +56,6 @@ struct AT_API Type {
   virtual bool is_distributed() const = 0;
   bool is_variable() const noexcept { return is_variable_; }
   bool is_undefined() const noexcept { return is_undefined_; }
-  static void registerCPU(Context * context);
   virtual Storage storage(bool resizable = false) const = 0;
   virtual Storage storage(size_t size, bool resizable = false) const = 0;
   virtual Storage storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter=noop_deleter) const = 0;
