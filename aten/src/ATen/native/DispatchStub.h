@@ -109,17 +109,13 @@ struct RegisterDispatch {
 };
 } // anonymous namespace
 
-namespace {
-  // These are used to resolve template arguement in `fn` of DECLARE_DISPATCH.
-  // e.g., function with return/argument type of std::tuple<Tensor, Tensor>.
-  // From https://stackoverflow.com/a/13842784
-
-  template<typename T> struct argument_type;
-  template<typename T, typename U> struct argument_type<T(U)> { typedef U type; };
-}
-
+// Compiler will complain if you put things like std::tuple<Tensor, Tensor> in
+// the `fn` argument of DECLARE_DISPATCH. Some possible workarounds, e.g.,
+// adding parentheses and using helper struct to get rid of the parentheses do
+// not work with MSVC. So use a `using`-declaration if you need to pass in such
+// `fn`, e.g., grid_sampler_2d_backward_cpu_kernel in GridSampleKernel.h.
 #define DECLARE_DISPATCH(fn, name) \
-  struct name : DispatchStub<argument_type<void(fn)>::type, name> {}; \
+  struct name : DispatchStub<fn, name> {}; \
   extern AT_API struct name name
 
 #define DEFINE_DISPATCH(name) struct name name
