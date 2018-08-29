@@ -871,12 +871,7 @@ void testControlFlow() {
     return stack;
   };
 
-<<<<<<< HEAD
-<<<<<<< HEAD
   auto L = [](int64_t l) { return IValue(autograd::make_variable(scalar_to_tensor(at::Scalar(l)))); };
-=======
-  auto L = [](int64_t l) { return IValue(autograd::make_variable(at::Scalar(l).toTensor())); };
->>>>>>> Add JIT to C++ API
   auto V = [](IValue t) { return std::move(t).toTensor().toCLong(); };
   auto run_binary = [&](const std::string & name, int64_t a, int64_t b) {
     return V(run(name, {L(a), L(b)})[0]);
@@ -886,23 +881,6 @@ void testControlFlow() {
   REQUIRE(2 == run_binary("if_one", 2, 3));
   REQUIRE(2 == run_binary("if_one", 3, 2));
   REQUIRE(256 == run_binary("while_test",2,0));
-<<<<<<< HEAD
-=======
-const static auto script_example = R"JIT(
-  def relu_test(a, b):
-    c = a
-    if a < b:
-      c = b
-    else:
-      c = a
-    return torch.relu(c)
-)JIT";
-void testModuleResolver() {
-  auto graph = script::compileFunction(script_example);
-  REQUIRE(2 == run_graph(graph, 1, 2));
->>>>>>> [jit] Add resolver for 'torch' module
-=======
->>>>>>> Add JIT to C++ API
 }
 
 void testIValue() {

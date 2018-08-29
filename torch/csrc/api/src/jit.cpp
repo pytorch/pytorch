@@ -3,6 +3,9 @@
 #include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/stack.h>
 
+#include <memory>
+#include <string>
+
 namespace torch {
 namespace jit {
 
