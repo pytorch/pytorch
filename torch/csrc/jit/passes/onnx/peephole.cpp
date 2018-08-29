@@ -47,17 +47,18 @@ const std::vector<size_t>& getBroadcastPositions(Node* node) {
   // Most of the element-wise ops in ONNX supports numpy broadcasting.
   // Only GEMM supports one-directional broadcasting, which broadcasts the bias
   // to the product.
-  static std::unordered_map<NodeKind, std::vector<size_t>> broadcast_positions = {
-    {onnx::Add, {0, 1}},
-    {onnx::Div, {0, 1}},
-    {onnx::Mul, {0, 1}},
-    {onnx::Pow, {0, 1}},
-    {onnx::Sub, {0, 1}},
-    {onnx::Gemm, {2}},
-    {onnx::Equal, {0, 1}},
-    {onnx::Greater, {0, 1}},
-    {onnx::Less, {0, 1}},
-  };
+  static std::unordered_map<NodeKind, std::vector<size_t>> broadcast_positions =
+      {
+          {onnx::Add, {0, 1}},
+          {onnx::Div, {0, 1}},
+          {onnx::Mul, {0, 1}},
+          {onnx::Pow, {0, 1}},
+          {onnx::Sub, {0, 1}},
+          {onnx::Gemm, {2}},
+          {onnx::Equal, {0, 1}},
+          {onnx::Greater, {0, 1}},
+          {onnx::Less, {0, 1}},
+      };
   static std::vector<size_t> no_positions;
 
   auto iter = broadcast_positions.find(node->kind());
@@ -92,7 +93,7 @@ void fuseBroadcast(Block *b) {
       fuseBroadcast(child_block);
     }
 
-    auto & broadcast_positions = getBroadcastPositions(n);
+    auto& broadcast_positions = getBroadcastPositions(n);
     if (!broadcast_positions.empty()) {
       JIT_ASSERT(!n->hasAttribute(attr::axis));
     }
@@ -113,11 +114,14 @@ void fuseBroadcast(Block *b) {
       // always have this information (because expands are only ever traced,
       // not generated from symbolic), but if for some reason we don't
       // have it, we need to skip.
-      if (!unexpanded_input->isTensor() || !n->output()->isTensor()) continue;
+      if (!unexpanded_input->isTensor() || !n->output()->isTensor())
+        continue;
 
       // Not all broadcasts are supported by ONNX broadcast.
       at::optional<size_t> axis = fusibleExpandTo(
-          unexpanded_input->type()->expect<CompleteTensorType>()->sizes(), // from
+          unexpanded_input->type()
+              ->expect<CompleteTensorType>()
+              ->sizes(), // from
           n->output()->type()->expect<CompleteTensorType>()->sizes()); // to
       if (axis == at::nullopt)
         continue;
