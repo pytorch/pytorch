@@ -9,6 +9,7 @@
 #include <stdexcept>
 
 #include "ATen/CPUGenerator.h"
+#include "ATen/RegisterCPU.h"
 
 #ifdef USE_SSE3
 #include <pmmintrin.h>
@@ -34,7 +35,7 @@ Context::Context()
 
   generator_registry[static_cast<int>(DeviceType::CPU)]
     .reset(new CPUGenerator(this));
-  Type::registerCPU(this);
+  register_cpu_types(this);
 }
 
 // TODO: This could be bad juju if someone calls globalContext() in the
