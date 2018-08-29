@@ -66,8 +66,6 @@ std::function<void(const OperatorDef&)> GetOperatorLogger() {
 }  // namespace caffe2
 
 
-#ifdef CAFFE2_USE_GOOGLE_GLOG
-
 #ifdef CAFFE2_USE_GFLAGS
 // When GLOG depends on GFLAGS, these variables are being defined in GLOG
 // directly via the GFLAGS definition, so we will use DECLARE_* to declare
@@ -78,7 +76,16 @@ DECLARE_int32(minloglevel);
 DECLARE_int32(v);
 // GLOG's logtostderr value
 DECLARE_bool(logtostderr);
+#else // CAFFE2_USE_GFLAGS
+// Declare our own versions of the above flags so we don't error out
+// when they are passed into Caffe2.
+CAFFE2_DEFINE_int(minloglevel, 0, "Equivalent to glog minloglevel");
+CAFFE2_DEFINE_int(v, 0, "Equivalent to glog verbose");
+CAFFE2_DEFINE_bool(logtostderr, false, "Equivalent to glog logtostderr");
 #endif // CAFFE2_USE_GFLAGS
+
+
+#ifdef CAFFE2_USE_GOOGLE_GLOG
 
 // Provide easy access to the above variables, regardless whether GLOG is
 // dependent on GFLAGS or not. Note that the namespace (fLI, fLB) is actually
