@@ -24,4 +24,14 @@ CAFFE2_API std::unique_ptr<MetaNetDef> runGlobalInitialization(
     Workspace* master);
 
 } // namespace predictor_utils
+
+PredictorConfig makePredictorConfig(
+    const string& db_type,
+    const string& db_path);
+
+void removeExternalBlobs(
+    const std::vector<std::string>& input_blobs,
+    const std::vector<std::string>& output_blobs,
+    Workspace* ws);
+
 } // namespace caffe2
