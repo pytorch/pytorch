@@ -21,7 +21,7 @@ struct Type;
 struct AT_API StorageImpl : public c10::intrusive_ptr_target {
  public:
   StorageImpl() = delete;
-  virtual ~StorageImpl() {};
+  ~StorageImpl() {};
   StorageImpl(
       at::DataType data_type,
       ptrdiff_t size,
