@@ -534,7 +534,7 @@ std::tuple<
       env.s("type_declarations", cudafuser::type_declarations_template.format(env));
       out << cudafuser::cuda_compilation_unit_template.format(env);
     #else
-      throw std::runtime_error{"CUDA Fusion requested but not supported."};
+      throw std::runtime_error("CUDA Fusion requested but not supported.");
     #endif // USE_CUDA_FUSER
   } else {
     env.s("type_declarations", cpufuser::type_declarations_template.format(env));

@@ -296,7 +296,7 @@ std::unique_ptr<CommonFusionFunction> CommonFusionHandle::compileSpec(
     #if USE_CUDA_FUSER
       raw_func = new cudafuser::CUDAFusionFunction(name, agraph);
     #else
-      throw std::runtime_exception{"CUDA Fusion is not supported on this build."};
+      throw std::runtime_error("CUDA Fusion is not supported on this build.");
     #endif // USE_CUDA_FUSER
   } else {
     raw_func = new cpufuser::CPUFusionFunction(
