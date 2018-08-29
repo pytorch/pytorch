@@ -108,7 +108,7 @@ grad_fn->set_next_edges(collect_next_edges( ${args_with_derivatives} ));
 """)
 
 CALL_VIA_TYPE = CodeTemplate("""\
-Type::${method_prefix_derived}${api_name}(${type_method_args})""")
+baseType->${method_prefix_derived}${api_name}(${type_method_args})""")
 
 CALL_VIA_DERIVED = CodeTemplate("""\
 baseType->${method_prefix_derived}${base_name}(${unpacked_args})""")
