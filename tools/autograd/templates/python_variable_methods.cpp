@@ -150,23 +150,6 @@ static PyObject * THPVariable_copy_(PyObject* self, PyObject* args, PyObject* kw
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPVariable_detach(PyObject* self, PyObject* args)
-{
-  HANDLE_TH_ERRORS
-  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  return THPVariable_Wrap(self_.detach());
-  END_HANDLE_TH_ERRORS
-}
-
-static PyObject * THPVariable_detach_(PyObject* self, PyObject* args)
-{
-  HANDLE_TH_ERRORS
-  reinterpret_cast<THPVariable*>(self)->cdata.detach_();
-  Py_INCREF(self);
-  return self;
-  END_HANDLE_TH_ERRORS
-}
-
 static double dispatch_to_CDouble(const Tensor & self) {
   AutoNoGIL no_gil;
   DeviceGuard device_guard(self);
@@ -592,8 +575,6 @@ PyMethodDef variable_methods[] = {
   {"cpu", (PyCFunction)THPVariable_cpu, METH_NOARGS, NULL},
   {"cuda", (PyCFunction)THPVariable_cuda, METH_VARARGS | METH_KEYWORDS, NULL},
   {"dim", (PyCFunction)THPVariable_dim, METH_NOARGS, NULL},
-  {"detach", (PyCFunction)THPVariable_detach, METH_NOARGS, NULL},
-  {"detach_", (PyCFunction)THPVariable_detach_, METH_NOARGS, NULL},
   {"double", (PyCFunction)THPVariable_double, METH_NOARGS, NULL},
   {"element_size", (PyCFunction)THPVariable_element_size, METH_NOARGS, NULL},
   {"float", (PyCFunction)THPVariable_float, METH_NOARGS, NULL},
