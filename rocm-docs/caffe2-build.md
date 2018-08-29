@@ -19,7 +19,7 @@ Once the machine is ready with ROCm stack, there are two ways to use caffe2
 
 ## Launch docker container with caffe2 pre-installed
 ```
-docker run -it --network=host --device=/dev/kfd --device=/dev/dri --group-add video rocm/caffe2:rocm1.8.2-v2
+docker run -it --network=host --device=/dev/kfd --device=/dev/dri --group-add video rocm/caffe2:rocm1.8.2-v3
 ```
 
 To run benchmarks, skip directly to benchmarks section of the document.
