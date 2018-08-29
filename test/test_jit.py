@@ -241,7 +241,7 @@ class JitTestCase(TestCase):
 
     def checkTrace(self, func, reference_tensors, input_tensors=None,
                    optimize=True, drop=None, allow_unused=False,
-                   verbose=False, inputs_require_grads=True):
+                   verbose=False, inputs_require_grads=True, check_tolerance=1e-5):
         # TODO: check gradients for parameters, not just inputs
         def allSum(vs):
             # drop allows us to remove some values from ever being used
@@ -263,7 +263,7 @@ class JitTestCase(TestCase):
         if isinstance(func, torch._C.Graph):
             ge = torch._C.GraphExecutor(func, optimize)
         else:
-            ge = torch.jit.trace(*input_tensors, optimize=optimize)(func)
+            ge = torch.jit.trace(*input_tensors, optimize=optimize, check_tolerance=check_tolerance)(func)
 
         if verbose:
             print(ge.graph)
@@ -2030,6 +2030,15 @@ class TestScript(JitTestCase):
         self.assertEqual(outputs, outputs_ge)
 
         return ge
+
+    def test_robust_op_resolution(self):
+        neg = torch.add  # misleading name to make sure we resolve by function
+
+        def stuff(x):
+            return neg(x, x)
+
+        a = (torch.rand(3),)
+        self.checkScript(stuff, a)
 
     def test_tuple_io(self):
         def stuff(x):
@@ -5246,12 +5255,12 @@ a")
 
     def test_python_val_doesnt_have_attr(self):
         with self.assertRaisesRegex(RuntimeError, 'object has no attribute abcd'):
-            def test_fn():
-                return 3
 
             @torch.jit.script
             def python_val_doesnt_have_attr():
-                return test_fn.abcd
+                # this has to be a module otherwise attr lookup would not be
+                # allowed in the first place
+                return shutil.abcd
 
     def test_wrong_module_attr_lookup(self):
         with self.assertRaisesRegex(RuntimeError, 'python value of type \'type\' cannot be used as a value:'):
@@ -5340,7 +5349,7 @@ a")
 
         @torch.jit.trace(torch.rand(3, 4))
         def traced_fn(x):
-            return pm(x) + 1
+            return pm(x) + 1.0
 
         # Note: the parameter self.param from the Python module is inlined
         # into the graph
@@ -5370,7 +5379,7 @@ a")
 
         @torch.jit.trace(torch.rand(3, 4))
         def traced_fn(x):
-            return tm(x) + 1
+            return tm(x) + 1.0
 
         # Note: the parameter self.param from the Python module is inlined
         # into the graph
@@ -5401,7 +5410,7 @@ a")
 
         @torch.jit.trace(torch.rand(3, 4))
         def traced_fn(x):
-            return sm(x) + 1
+            return sm(x) + 1.0
 
         self.assertExpected(canonical(traced_fn.graph))
 
@@ -5440,7 +5449,7 @@ a")
                 self.mod = PythonModule()
 
             def forward(self, x):
-                return self.mod(torch.mm(x, self.param)) + 1
+                return self.mod(torch.mm(x, self.param)) + 1.0
 
         tm = torch.jit.trace(torch.rand(3, 4))(TracedModule())
 
@@ -5481,7 +5490,7 @@ a")
                 self.mod = torch.jit.trace(torch.rand(3, 5))(TracedModule1())
 
             def forward(self, x):
-                return self.mod(torch.mm(x, self.param)) + 1
+                return self.mod(torch.mm(x, self.param)) + 1.0
 
         tm = torch.jit.trace(torch.rand(3, 4))(TracedModule())
 
@@ -5523,7 +5532,7 @@ a")
                 self.mod = ScriptMod()
 
             def forward(self, x):
-                return self.mod(torch.mm(x, self.param)) + 1
+                return self.mod(torch.mm(x, self.param)) + 1.0
 
         tm = torch.jit.trace(torch.rand(3, 4))(TracedModule())
 
@@ -6050,6 +6059,70 @@ a")
         self.assertExpected(torch.onnx.export_to_pretty_string(
             FooMod(), (torch.rand(3, 4),), f,
             operator_export_type=OperatorExportTypes.ONNX_ATEN_FALLBACK))
+
+    def test_trace_checker_arange_as_constant(self):
+        with self.assertRaisesRegex(torch.jit.TracingCheckError, r'Graphs differed across invocations!'):
+            @torch.jit.trace(torch.rand(3, 4), check_inputs=[(torch.rand(4, 5),)])
+            def foo(x):
+                y = torch.arange(0, x.shape[0]).double()
+                return x + y.unsqueeze(1)
+
+    def test_trace_checker_dot_data(self):
+        with self.assertRaisesRegex(torch.jit.TracingCheckError, r'Tensor-valued Constant nodes differed in value '
+                                                                 r'across invocations'):
+            @torch.jit.trace(torch.rand(3, 4), check_inputs=[(torch.rand(3, 4),)])
+            def foo(x):
+                y = x.data
+                return x + y
+
+    def test_trace_checker_control_flow(self):
+        with self.assertRaisesRegex(torch.jit.TracingCheckError, r'Graphs differed across invocations!'):
+            @torch.jit.trace(torch.rand(3, 4), check_inputs=[(torch.rand(4, 4),)])
+            def foo(x):
+                for _ in range(x.size(0)):
+                    x = torch.neg(x)
+                return x
+
+    def test_trace_checker_memoization(self):
+        with self.assertRaisesRegex(torch.jit.TracingCheckError, r'Graphs differed across invocations!'):
+            def foo(x):
+                if not hasattr(foo, 'cache'):
+                    foo.cache = torch.neg(x)
+                return x + foo.cache
+
+            traced = torch.jit.trace(torch.rand(3, 4), check_inputs=[(torch.rand(3, 4),)])(foo)
+
+    def test_trace_checker_slice_lhs(self):
+        with self.assertRaisesRegex(torch.jit.TracingCheckError, r'Traced function outputs do not match the Python'
+                                                                 r' function outputs'):
+            @torch.jit.trace(torch.rand(3, 4), check_inputs=[(torch.rand(3, 4),)])
+            def foo(x):
+                for i in range(3):
+                    x[i, :] = torch.zeros(4)
+                return x
+
+    def test_trace_checker_inplace_on_view(self):
+        with self.assertRaisesRegex(torch.jit.TracingCheckError, r'Traced function outputs do not match the Python'
+                                                                 r' function outputs'):
+            @torch.jit.trace(torch.rand(3, 4), check_inputs=[(torch.rand(5, 6),)])
+            def foo(x):
+                x.view(-1).add_(-x.view(-1))
+                return x
+
+    def test_trace_checker_dropout_train(self):
+        with self.assertRaisesRegex(torch.jit.TracingCheckError, r'Trace had nondeterministic nodes'):
+            @torch.jit.trace(torch.rand(3, 4))
+            def foo(x):
+                return torch.dropout(x, p=0.5, train=True)
+
+    def test_trace_checker_dropout_notrain(self):
+        input = torch.rand(3, 4)
+
+        @torch.jit.trace(input)
+        def foo(x):
+            return torch.dropout(x, p=0.5, train=False)
+
+        self.assertEqual(foo(input), input)
 
 
 class TestEndToEndHybridFrontendModels(JitTestCase):

@@ -26,14 +26,35 @@ namespace at {
 
 AT_API int _crash_if_asan(int);
 
-static inline const Storage& checked_storage(const Storage& expr, const char * name, int pos, DeviceType device_type, ScalarType scalar_type) {
+static inline const Storage& checked_storage(
+    const Storage& expr,
+    const char* name,
+    int pos,
+    DeviceType device_type,
+    DataType data_type) {
   if (expr.device_type() != device_type) {
-    AT_ERROR("Expected object of device type ", device_type, " but got device type ", expr.data_ptr().device().type(),
-             " for argument #", pos, " '", name, "'");
+    AT_ERROR(
+        "Expected object of device type ",
+        device_type,
+        " but got device type ",
+        expr.data_ptr().device().type(),
+        " for argument #",
+        pos,
+        " '",
+        name,
+        "'");
   }
-  if (expr.scalar_type() != scalar_type) {
-    AT_ERROR("Expected object of scalar type ", scalar_type, " but got scalar type ", expr.scalar_type(),
-             " for argument #", pos, " '", name, "'");
+  if (expr.dtype() != data_type) {
+    AT_ERROR(
+        "Expected object of data type ",
+        data_type,
+        " but got data type ",
+        expr.dtype(),
+        " for argument #",
+        pos,
+        " '",
+        name,
+        "'");
   }
   return expr;
 }

@@ -45,8 +45,8 @@ enum class TypeID {
 };
 
 struct AT_API Type {
-  explicit Type(Context* context, TensorTypeId type_id, bool is_variable, bool is_undefined)
-      : context(context), type_id_(type_id), is_variable_(is_variable), is_undefined_(is_undefined) {}
+  explicit Type(TensorTypeId type_id, bool is_variable, bool is_undefined)
+      : type_id_(type_id), is_variable_(is_variable), is_undefined_(is_undefined) {}
   virtual ~Type() {}
   virtual ScalarType scalarType() const = 0;
   virtual Backend backend() const = 0;
