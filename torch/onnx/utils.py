@@ -112,6 +112,11 @@ def _list_constant_prop(g, block):
             if all(inode.kind() == "prim::Constant" and inode.kindOf("value") == "i" for inode in input_nodes):
                 input_values = [inode['value'] for inode in input_nodes]
                 const_node = g.create("prim::Constant")
+                # Preserve the scope name. If there are no input nodes, set the
+                # scope name to be that of the original node itself.
+                new_scope_name = input_nodes[0].scopeName() \
+                    if len(input_nodes) > 0 else node.scopeName()
+                const_node.setScopeFromString(new_scope_name)
                 const_node.insertBefore(node)
                 const_node.is_("value", input_values)
                 const_node.output().setType(torch._C.ListType.ofInts())
@@ -120,7 +125,6 @@ def _list_constant_prop(g, block):
 
 def _optimize_graph(graph, operator_export_type):
     _list_constant_prop(graph, graph)
-
     # run dce to eliminate dead parts of the graph that might have been
     # left behind by things like symbolic_override
     torch._C._jit_pass_dce(graph)

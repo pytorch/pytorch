@@ -336,6 +336,7 @@ void initPythonIRBindings(PyObject * module_) {
     .NS(hasUses)
     .NS(eraseOutput)
     .NS(addOutput)
+    .NS(setScopeFromString)
     .NS(scopeName)
     .NS(isNondeterministic)
     .def("blocks", [](Node& n) {

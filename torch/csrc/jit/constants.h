@@ -24,6 +24,11 @@ TORCH_API Value* insertConstant(
     IValue val,
     at::optional<SourceRange> loc = at::nullopt);
 
+TORCH_API Value* insertConstantWithScope(
+    Graph& g,
+    IValue val,
+    std::string scopeName,
+    at::optional<SourceRange> loc = at::nullopt);
 
 //////////////////////////////////////////////////////////////////////////////////
 // Helper for retrieving constants

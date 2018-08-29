@@ -16,7 +16,8 @@ static void EraseNumberTypesOnBlock(Block* block) {
         if(it->output()->type()->isSubtypeOf(NumberType::get())) {
           auto s = *constant_as<at::Scalar>(it->output());
           WithInsertPoint guard(*it);
-          Value* r = block->owningGraph()->insertConstant(s.toTensor());
+          Value * r = block->owningGraph()->insertConstantWith(s.toTensor());
+          r->node()->setScope(it->scope());
           it->output()->replaceAllUsesWith(r);
         }
       } break;
