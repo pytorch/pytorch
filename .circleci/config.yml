@@ -763,7 +763,7 @@ jobs:
       - image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda8.0-cudnn7-ubuntu16.04:189
         <<: *docker_config_defaults
     environment:
-      BUILD_ENVIRONMENT: "py2-cuda8.0-cudnn7-ubuntu16.04"
+      BUILD_ENVIRONMENT: "py2-cuda8.0-cudnn7-aten-ubuntu16.04"
     <<: *caffe2_linux_build_defaults
 
   caffe2_py2_android_ubuntu16_04_build:
@@ -889,11 +889,11 @@ workflows:
       # - caffe2_py2_clang3_9_ubuntu16_04_build
       # - caffe2_py2_gcc6_ubuntu16_04_build
       # - caffe2_py2_gcc7_ubuntu16_04_build
-      # - caffe2_py2_cuda8_0_cudnn7_aten_ubuntu16_04_build
+      - caffe2_py2_cuda8_0_cudnn7_aten_ubuntu16_04_build
       # - caffe2_py2_android_ubuntu16_04_build
       # - caffe2_conda3_cuda9_0_cudnn7_ubuntu16_04_build
       # - caffe2_py2_cuda9_0_cudnn7_centos7_build
 
-      - caffe2_py2_ios_macos10_13_build
-      - caffe2_py2_system_macos10_13_build
-      - caffe2_conda2_macos10_13_build
+      # - caffe2_py2_ios_macos10_13_build
+      # - caffe2_py2_system_macos10_13_build
+      # - caffe2_conda2_macos10_13_build
