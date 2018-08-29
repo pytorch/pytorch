@@ -17,7 +17,7 @@ bool PerplexityOp<float, CPUContext>::RunOnDevice() {
   for (int i = 0; i < N; ++i) {
     perplexity *= pow(Xdata[i], -1.0/N);
   }
-  *(Y->mutable_data<float>()) = perplexity;
+  *(Y->template mutable_data<float>()) = perplexity;
   return true;
 }
 

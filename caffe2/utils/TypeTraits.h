@@ -1,6 +1,6 @@
 #pragma once
 
-#include "caffe2/utils/C++17.h"
+#include <ATen/core/C++17.h>
 #include <functional>
 
 namespace c10 {

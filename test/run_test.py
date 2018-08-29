@@ -13,6 +13,7 @@ import tempfile
 
 import torch
 from torch.utils import cpp_extension
+from common import TEST_WITH_ROCM
 
 TESTS = [
     'autograd',
@@ -38,6 +39,20 @@ WINDOWS_BLACKLIST = [
     'distributed',
 ]
 
+ROCM_BLACKLIST = [
+    'c10d',
+    'cpp_extensions',
+    'cuda',
+    'distributed',
+    'distributions',
+    'jit',
+    'legacy_nn',
+    'multiprocessing',
+    'nccl',
+    'nn',
+    'utils',
+]
+
 DISTRIBUTED_TESTS_CONFIG = {
     'tcp': {
         'WORLD_SIZE': '3'
@@ -45,12 +60,7 @@ DISTRIBUTED_TESTS_CONFIG = {
     'gloo': {
         'WORLD_SIZE': '2' if torch.cuda.device_count() == 2 else '3'
     },
-    'nccl': {
-        'WORLD_SIZE': '2'
-    },
-    'mpi': {
-        'WORLD_SIZE': '3'
-    },
+    # THD NCCL and MPI tests are known to be flaky in CI
 }
 
 # https://stackoverflow.com/questions/2549939/get-signal-names-from-numbers-in-python
@@ -302,6 +312,9 @@ def get_selected_tests(options):
             WINDOWS_BLACKLIST.append('cpp_extensions')
 
         selected_tests = exclude_tests(WINDOWS_BLACKLIST, selected_tests, 'on Windows')
+
+    elif TEST_WITH_ROCM:
+        selected_tests = exclude_tests(ROCM_BLACKLIST, selected_tests, 'on ROCm')
 
     return selected_tests
 

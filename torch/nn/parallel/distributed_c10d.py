@@ -162,7 +162,7 @@ class _DistributedDataParallelC10d(Module):
 
         for dev_idx, module in enumerate(self._module_copies):
             self.modules_params_data[dev_idx] = [p.data for p in module.parameters()]
-            self.modules_buffers_data[dev_idx] = [b.data for b in module._all_buffers()]
+            self.modules_buffers_data[dev_idx] = [b.data for b in module.buffers()]
 
         bucket_bytes_cap = bucket_cap_mb * MB
 
@@ -242,11 +242,7 @@ class _DistributedDataParallelC10d(Module):
             module.train(mode)
 
     def _dist_broadcast_coalesced(self, tensors, buffer_size):
-        for tensors in _take_tensors(tensors, buffer_size):
-            flat_tensors = _flatten_dense_tensors(tensors)
-            c10d.broadcast(flat_tensors, 0, self.process_group).wait()
-            for tensor, synced in zip(tensors, _unflatten_dense_tensors(flat_tensors, tensors)):
-                tensor.copy_(synced)
+        c10d._dist_broadcast_coalesced(tensors, buffer_size, self.process_group)
 
     def _sync_params(self):
         if len(self.device_ids) > 1:

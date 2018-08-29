@@ -24,6 +24,7 @@ struct ConvParams {
   bool is_padding_neg() const;
   void view1d_as_2d();
   bool use_cudnn(const at::Tensor& input) const;
+  bool use_miopen(const at::Tensor& input) const;
   bool use_mkldnn(const at::Tensor& input) const;
   bool is_depthwise(const at::Tensor& input, const at::Tensor& weight) const;
 };
@@ -118,9 +119,15 @@ auto ConvParams::use_cudnn(const at::Tensor& input) const -> bool {
   return !is_output_padding_big();
 }
 
+auto ConvParams::use_miopen(const at::Tensor& input) const -> bool {
+  if (!detail::getCUDAHooks().compiledWithMIOpen() || !input.type().is_cuda() || !cudnn_enabled)
+    return false;
+  return true;
+}
+
 auto ConvParams::use_mkldnn(const at::Tensor& input) const -> bool {
 #if AT_MKLDNN_ENABLED()
-  return input.type().backend() == kCPU &&
+  return input.type().backend() == at::Backend::CPU &&
          input.type().scalarType() == kFloat && // only on CPU Float Tensors
          !is_dilated() && // doesn't support dilation
          !transposed && // or transposed tensors
@@ -355,6 +362,27 @@ at::Tensor _convolution(
           input, weight, bias,
           params.padding, params.stride, params.dilation, params.groups, params.benchmark, params.deterministic);
     }
+  } else if (params.use_miopen(input)) {
+    if (input.type() != weight.type()){
+      std::stringstream ss;
+      ss << "Input type (" << input.type().toString() << ") and weight type (" << weight.type().toString() << ") should be the same";
+      throw std::runtime_error(ss.str());
+    }
+    if (bias.defined() && input.type() != bias.type()){
+      std::stringstream ss;
+      ss << "Input type (" << input.type().toString() << ") and bias type (" << bias.type().toString() << ") should be the same";
+      throw std::runtime_error(ss.str());
+    }
+
+    if (params.transposed) {
+      output = at::miopen_convolution_transpose(
+          input, weight, bias,
+          params.padding, params.output_padding, params.stride, params.dilation, params.groups, params.benchmark, params.deterministic);
+    } else {
+      output = at::miopen_convolution(
+          input, weight, bias,
+          params.padding, params.stride, params.dilation, params.groups, params.benchmark, params.deterministic);
+    }
   } else if (params.use_mkldnn(input)) {
 #if AT_MKLDNN_ENABLED()
     if (input.type() != weight.type()){
@@ -402,11 +430,11 @@ at::Tensor _convolution_nogroup(
     bool transposed, IntList output_padding) {
 
   ConvParams params;
-  params.stride = stride;
-  params.padding = padding;
-  params.dilation = dilation;
+  params.stride = stride.vec();
+  params.padding = padding.vec();
+  params.dilation = dilation.vec();
   params.transposed = transposed;
-  params.output_padding = output_padding;
+  params.output_padding = output_padding.vec();
   params.groups = 1;
   params.benchmark = false;
   params.deterministic = false;
@@ -474,11 +502,11 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward(
   auto weight = weight_r;
 
   ConvParams params;
-  params.stride = stride_;
-  params.padding = padding_;
-  params.dilation = dilation_;
+  params.stride = stride_.vec();
+  params.padding = padding_.vec();
+  params.dilation = dilation_.vec();
   params.transposed = transposed_;
-  params.output_padding = output_padding_;
+  params.output_padding = output_padding_.vec();
   params.groups = groups_;
   params.benchmark = benchmark;
   params.deterministic = deterministic;

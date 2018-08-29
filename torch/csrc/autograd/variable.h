@@ -8,7 +8,7 @@
 #include "torch/csrc/autograd/variable_version.h"
 
 #include <ATen/ATen.h>
-#include <ATen/Error.h>
+#include <ATen/core/Error.h>
 
 #include <list>
 #include <memory>
@@ -229,12 +229,6 @@ struct TORCH_API Variable : public at::Tensor {
   // Miscellaneous
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-  /// Compares this `Variable` to another `Variable` (or `Tensor`) via
-  /// pointer-equality.
-  bool is_same(const Variable& other) const noexcept {
-    return this->pImpl == other.pImpl;
-  }
-
   void set_name(const std::string& name);
   const std::string& name() const noexcept;
 
@@ -259,19 +253,29 @@ struct TORCH_API Variable : public at::Tensor {
 //                            Variable::Impl
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-struct Variable::Impl : public at::TensorImpl {
-  TORCH_API explicit Impl(
+struct TORCH_API Variable::Impl : public at::TensorImpl {
+  explicit Impl(
       at::Tensor data,
       bool requires_grad = false,
-      Edge edge = Edge());
+      Edge gradient_edge = Edge());
 
   ~Impl() override;
 
+  int64_t numel() const override;
   at::IntList sizes() const override;
   at::IntList strides() const override;
+  bool is_contiguous() const override;
+  int64_t size(int64_t d) const override;
+  int64_t stride(int64_t d) const override;
+  void resize_dim(int64_t ndim) override;
+  void set_size(int64_t dim, int64_t new_size) override;
+  void set_stride(int64_t dim, int64_t new_stride) override;
+  void set_storage_offset(int64_t storage_offset) override;
+
   int64_t dim() const override;
-  void* unsafeGetTH(bool retain) override;
-  std::unique_ptr<at::Storage> storage() override;
+  const at::Storage& storage() const override;
+  int64_t storage_offset() const override;
+
   static const char* typeString();
 
   std::shared_ptr<Function> get_grad_accumulator();
@@ -298,7 +302,7 @@ struct Variable::Impl : public at::TensorImpl {
   }
 
   /// Accesses the gradient `Variable` of this `Variable`.
-  Tensor& grad() override {
+  Variable& grad() override {
     return grad_;
   }
   const Variable& grad() const override {
@@ -326,9 +330,6 @@ struct Variable::Impl : public at::TensorImpl {
 
   /// Reset all expensive fields to free up resources
   void release_resources() override;
-
-  // Make this field public so we can access it from `Variable`.
-  using at::TensorImpl::type_;
 
   std::string name;
   at::Tensor data_;
@@ -366,7 +367,7 @@ struct Variable::Impl : public at::TensorImpl {
 /// same version_counter. The grad_fn field of the Variable may become stale
 /// due to in-place modifications of the shared data. Accesses should go
 /// through get_grad_fn(). All other fields are always valid.
-struct Variable::ViewImpl : public Variable::Impl {
+struct TORCH_API Variable::ViewImpl : public Variable::Impl {
   ViewImpl(Variable base, at::Tensor data, Edge gradient_edge);
 
   /// Gets the up-to-date grad_fn. If the shared data or base was modified, we
@@ -406,9 +407,8 @@ inline Variable make_variable_view(
     at::Tensor data,
     Edge gradient_edge = Edge()) {
   if (data.defined()) {
-    auto impl = new Variable::ViewImpl(
-        std::move(base), std::move(data), std::move(gradient_edge));
-    return Variable(impl, /*retain=*/false);
+    return Variable(c10::make_intrusive<Variable::ViewImpl>(
+            std::move(base), std::move(data), std::move(gradient_edge)).release(), false);
   }
   return Variable();
 }
@@ -418,8 +418,7 @@ inline Variable make_variable(at::Tensor data, bool requires_grad = false) {
       !data.is_variable(),
       "Must not create a new variable from a variable, use its .data()");
   if (data.defined()) {
-    auto impl = new Variable::Impl(data, requires_grad);
-    return Variable(impl, /*retain=*/false);
+    return Variable(c10::make_intrusive<Variable::Impl>(data, requires_grad).release(), false);
   }
   return Variable();
 }
@@ -429,8 +428,7 @@ inline Variable make_variable(at::Tensor data, Edge gradient_edge) {
       !data.is_variable(),
       "Must not create a new variable from a variable, use its .data()");
   if (data.defined()) {
-    auto impl = new Variable::Impl(data, false, std::move(gradient_edge));
-    return Variable(impl, /*retain=*/false);
+    return Variable(c10::make_intrusive<Variable::Impl>(data, false, std::move(gradient_edge)).release(), false);
   }
   return Variable();
 }
@@ -576,6 +574,6 @@ inline Variable::Variable(Variable::Impl* self, bool retain)
 
 inline Variable::Impl* Variable::get() const {
   AT_CHECK(defined(), "Called Variable::get() on an undefined Variable");
-  return static_cast<Variable::Impl*>(pImpl);
+  return static_cast<Variable::Impl*>(tensor_impl_.get());
 }
 }} // namespace torch::autograd

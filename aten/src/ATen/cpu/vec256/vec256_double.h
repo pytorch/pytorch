@@ -178,6 +178,13 @@ Vec256<double> inline max(const Vec256<double>& a, const Vec256<double>& b) {
   return _mm256_max_pd(a, b);
 }
 
+#ifdef __AVX2__
+template <>
+Vec256<double> fmadd(const Vec256<double>& a, const Vec256<double>& b, const Vec256<double>& c) {
+  return _mm256_fmadd_pd(a, b, c);
+}
+#endif
+
 #endif
 
 }}}

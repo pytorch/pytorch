@@ -31,22 +31,22 @@ class ConvPoolOpBase : public Operator<Context> {
   ConvPoolOpBase(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         legacy_pad_(
-            static_cast<LegacyPadding>(OperatorBase::GetSingleArgument<int>(
+            static_cast<LegacyPadding>(this->template GetSingleArgument<int>(
                 "legacy_pad",
                 LegacyPadding::NOTSET))),
         global_pooling_(
-            OperatorBase::GetSingleArgument<int>("global_pooling", 0)),
-        kernel_(OperatorBase::GetRepeatedArgument<int>("kernels")),
-        dilation_(OperatorBase::GetRepeatedArgument<int>("dilations")),
-        stride_(OperatorBase::GetRepeatedArgument<int>("strides")),
-        pads_(OperatorBase::GetRepeatedArgument<int>("pads")),
+            this->template GetSingleArgument<int>("global_pooling", 0)),
+        kernel_(this->template GetRepeatedArgument<int>("kernels")),
+        dilation_(this->template GetRepeatedArgument<int>("dilations")),
+        stride_(this->template GetRepeatedArgument<int>("strides")),
+        pads_(this->template GetRepeatedArgument<int>("pads")),
         float16_compute_(
-            OperatorBase::GetSingleArgument<bool>("float16_compute", false)),
-        group_(OperatorBase::GetSingleArgument<int>("group", 1)),
+            this->template GetSingleArgument<bool>("float16_compute", false)),
+        group_(this->template GetSingleArgument<int>("group", 1)),
         order_(StringToStorageOrder(
-            OperatorBase::GetSingleArgument<string>("order", "NCHW"))),
+            this->template GetSingleArgument<string>("order", "NCHW"))),
         shared_buffer_(
-            OperatorBase::GetSingleArgument<int>("shared_buffer", 0)),
+            this->template GetSingleArgument<int>("shared_buffer", 0)),
         ws_(ws) {
     // For the padding, they should either be the legacy padding strategy
     // (VALID or SAME), or an explicit, non-negative value.
@@ -60,32 +60,32 @@ class ConvPoolOpBase : public Operator<Context> {
 
     // Get old arguments values.
     if (OperatorBase::HasArgument("kernel")) {
-      kernel_.resize(2, OperatorBase::GetSingleArgument<int>("kernel", 0));
+      kernel_.resize(2, this->template GetSingleArgument<int>("kernel", 0));
     } else if (
         OperatorBase::HasArgument("kernel_h") &&
         OperatorBase::HasArgument("kernel_w")) {
-      kernel_.push_back(OperatorBase::GetSingleArgument<int>("kernel_h", 0));
-      kernel_.push_back(OperatorBase::GetSingleArgument<int>("kernel_w", 0));
+      kernel_.push_back(this->template GetSingleArgument<int>("kernel_h", 0));
+      kernel_.push_back(this->template GetSingleArgument<int>("kernel_w", 0));
     }
 
     if (OperatorBase::HasArgument("stride")) {
-      stride_.resize(2, OperatorBase::GetSingleArgument<int>("stride", 0));
+      stride_.resize(2, this->template GetSingleArgument<int>("stride", 0));
     } else if (
         OperatorBase::HasArgument("stride_h") &&
         OperatorBase::HasArgument("stride_w")) {
-      stride_.push_back(OperatorBase::GetSingleArgument<int>("stride_h", 0));
-      stride_.push_back(OperatorBase::GetSingleArgument<int>("stride_w", 0));
+      stride_.push_back(this->template GetSingleArgument<int>("stride_h", 0));
+      stride_.push_back(this->template GetSingleArgument<int>("stride_w", 0));
     }
 
     if (OperatorBase::HasArgument("dilation")) {
-      dilation_.resize(2, OperatorBase::GetSingleArgument<int>("dilation", 0));
+      dilation_.resize(2, this->template GetSingleArgument<int>("dilation", 0));
     } else if (
         OperatorBase::HasArgument("dilation_h") &&
         OperatorBase::HasArgument("dilation_w")) {
       dilation_.push_back(
-          OperatorBase::GetSingleArgument<int>("dilation_h", 0));
+          this->template GetSingleArgument<int>("dilation_h", 0));
       dilation_.push_back(
-          OperatorBase::GetSingleArgument<int>("dilation_w", 0));
+          this->template GetSingleArgument<int>("dilation_w", 0));
     }
 
     if (OperatorBase::HasArgument("pad")) {
@@ -94,7 +94,7 @@ class ConvPoolOpBase : public Operator<Context> {
               legacy_pad_ != LegacyPadding::SAME,
           "If you use legacy padding VALID or SAME, you should not specify "
           "any specific padding values.");
-      pads_.resize(4, OperatorBase::GetSingleArgument<int>("pad", 0));
+      pads_.resize(4, this->template GetSingleArgument<int>("pad", 0));
     } else if (
         OperatorBase::HasArgument("pad_t") &&
         OperatorBase::HasArgument("pad_l") &&
@@ -105,10 +105,10 @@ class ConvPoolOpBase : public Operator<Context> {
               legacy_pad_ != LegacyPadding::SAME,
           "If you use legacy padding VALID or SAME, you should not specify "
           "any specific padding values.");
-      pads_.push_back(OperatorBase::GetSingleArgument<int>("pad_t", 0));
-      pads_.push_back(OperatorBase::GetSingleArgument<int>("pad_l", 0));
-      pads_.push_back(OperatorBase::GetSingleArgument<int>("pad_b", 0));
-      pads_.push_back(OperatorBase::GetSingleArgument<int>("pad_r", 0));
+      pads_.push_back(this->template GetSingleArgument<int>("pad_t", 0));
+      pads_.push_back(this->template GetSingleArgument<int>("pad_l", 0));
+      pads_.push_back(this->template GetSingleArgument<int>("pad_b", 0));
+      pads_.push_back(this->template GetSingleArgument<int>("pad_r", 0));
     }
 
     // Fill default values.
@@ -168,7 +168,7 @@ class ConvPoolOpBase : public Operator<Context> {
   }
 
   // Returns the input image dimensions for the current storage order type.
-  vector<int> GetDims(const Tensor<Context>& input) {
+  vector<int> GetDims(const Tensor& input) {
     vector<int> dims;
     switch (order_) {
       case StorageOrder::NCHW:
@@ -184,7 +184,7 @@ class ConvPoolOpBase : public Operator<Context> {
   }
 
   // Returns the size of the input image for the current storage type.
-  int GetDimsSize(const Tensor<Context>& input) {
+  int GetDimsSize(const Tensor& input) {
     int size = 0;
     switch (order_) {
       case StorageOrder::NCHW:
@@ -214,12 +214,8 @@ class ConvPoolOpBase : public Operator<Context> {
   // Note(jiayq): the templatization of this function is mainly to help
   // implementations that do not use first-class Tensor objects, such as the
   // MKL operator. One can still call this function with dummy
-  // Tensor<CPUContext> objects in order to obtain the sizes.
-  template <typename AlternativeContext>
-  void SetOutputSize(
-      const Tensor<AlternativeContext>& input,
-      Tensor<AlternativeContext>* output,
-      int output_channel) {
+  // Tensor objects in order to obtain the sizes.
+  void SetOutputSize(const Tensor& input, Tensor* output, int output_channel) {
     CAFFE_ENFORCE(input.size() > 0);
     vector<int> output_dims;
     int N = input.dim32(0);
@@ -335,7 +331,7 @@ class ConvPoolOpBase : public Operator<Context> {
         stride_.cbegin(), stride_.cend(), [](const int x) { return x > 1; });
   }
 
-  void SetDeviceTensor(const std::vector<int>& data, Tensor<Context>* tensor) {
+  void SetDeviceTensor(const std::vector<int>& data, Tensor* tensor) {
     bool reset_tensor_device_ = false;
 
     if (tensor->size() != data.size()) {
@@ -358,7 +354,7 @@ class ConvPoolOpBase : public Operator<Context> {
   }
 
   template <typename T>
-  void SetBiasMultiplier(const int size, Tensor<Context>* bias_multiplier_) {
+  void SetBiasMultiplier(const int size, Tensor* bias_multiplier_) {
     if (bias_multiplier_->size() != size) {
       // If the helper bias multiplier is not image size, reshape and fill it
       // with one.
@@ -735,9 +731,9 @@ class ConvPoolOpBase : public Operator<Context> {
   }
 
  private:
-  inline void AllocateAndCopy(const vector<int>& vec, Tensor<Context>& tensor) {
+  inline void AllocateAndCopy(const vector<int>& vec, Tensor& tensor) {
     tensor.Resize(vec.size());
-    context_.template Copy<int, CPUContext, Context>(
+    context_.template CopyFromCPU<int>(
         vec.size(), vec.data(), tensor.template mutable_data<int>());
   }
 

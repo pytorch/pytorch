@@ -627,7 +627,7 @@ Caffe2Ops Caffe2Backend::CreateGather(
     BuildOperator(c2_op, "BatchGather", inputs, outputs);
   } else {
     CAFFE_THROW(
-        "Caffe2 only supports Gather with axis being 1 or 2, ",
+        "Caffe2 only supports Gather with axis being 0 or 1, ",
         "whereas axis is ",
         axis);
   }
@@ -674,25 +674,54 @@ Caffe2Ops Caffe2Backend::CreateGemm(
 
   auto trans_a = onnx_node->attributes.get<int64_t>("transA", 0L);
   auto trans_b = onnx_node->attributes.get<int64_t>("transB", 0L);
-  auto broadcast = onnx_node->attributes.get<int64_t>("broadcast", 0L);
+  // Support broadcast by default when opset_version > 6.
+  auto broadcast =
+    onnx_node->attributes.get<int64_t>("broadcast",
+                                       (ctx.opset_version() > 6) ? 1L : 0L);
 
-  bool use_fc = false;
-  if ((!trans_a) && trans_b) {
-    if (broadcast) {
-      use_fc = true;
-    } else {
-      const auto input_c_vi_iter = ctx.value_infos().find(node.input(2));
-      if (input_c_vi_iter != ctx.value_infos().end() &&
-          input_c_vi_iter->second.type().tensor_type().shape().dim_size() ==
-              1) {
-        use_fc = true;
+  // If the c's shape information is available and c is a 1d tensor(except
+  // c is a scalar), use FC aggressively.
+  auto check_fc = [&]() -> bool {
+    const auto input_c_vi_iter = ctx.value_infos().find(node.input(2));
+
+    if (input_c_vi_iter == ctx.value_infos().end()) {
+      return false;
+    }
+
+    const auto input_c_shape =
+        input_c_vi_iter->second.type().tensor_type().shape();
+
+    if (input_c_shape.dim_size() != 1) {
+      return false;
+    }
+
+    // c is a scalar.
+    if (input_c_shape.dim(0).dim_value() == 1) {
+      const auto input_b_vi_iter = ctx.value_infos().find(node.input(1));
+
+      // If the b's shape is not available, skip FC.
+      if (input_b_vi_iter == ctx.value_infos().end()) {
+        return false;
+      }
+      const auto input_b_shape =
+          input_b_vi_iter->second.type().tensor_type().shape();
+      int input_b_last_dim_index = (trans_b) ? 0 : 1;
+      // If b's last dim is not 1, skip FC.
+      if (input_b_shape.dim(input_b_last_dim_index).dim_value() != 1) {
+        return false;
       }
     }
-  }
 
-  if (use_fc) {
+    return true;
+  };
+
+  if (!trans_a && broadcast && check_fc()) {
     auto* c2_op = ret.ops.Add();
-    BuildOperator(c2_op, "FC", {input_a, input_b, input_c}, {output});
+    if (trans_b) {
+      BuildOperator(c2_op, "FC", {input_a, input_b, input_c}, {output});
+    } else {
+      BuildOperator(c2_op, "FCTransposed", {input_a, input_b, input_c}, {output});
+    }
   } else {
     auto ab = dummy_->NewDummyName();
     caffe2::Argument arg_trans_a;
@@ -814,7 +843,7 @@ Caffe2Ops Caffe2Backend::CreateSlice(
   auto pos = args.find("starts");
   if (pos != args.end()) {
     for (auto i : pos->second->ints()) {
-      starts_vals.add_ints(i);
+      starts_vals.add_ints(i < 0 ? i - 1 : i);
     }
     args.erase(pos);
   }
@@ -952,15 +981,19 @@ Caffe2Ops Caffe2Backend::CreateSlice(
 Caffe2Ops Caffe2Backend::CreateBatchNormalization(
     OnnxNode* onnx_node,
     const ConversionContext& ctx) {
+  auto& attributes = onnx_node->attributes;
+
   if (ctx.opset_version() < 6) {
-    auto& attributes = onnx_node->attributes;
     attributes.remove("consumed_inputs");
   }
 
   if (ctx.opset_version() >= 7) {
-    auto& attributes = onnx_node->attributes;
     auto* attr = attributes.AddRewrittenAttribute("is_test");
     attr->set_i(1);
+  }
+
+  if (attributes.HasAttribute("spatial") && attributes.get<int64_t>("spatial") == 1) {
+    attributes.remove("spatial");
   }
 
   return CommonOnnxNodeToCaffe2Ops(onnx_node, ctx);
@@ -1371,6 +1404,59 @@ Caffe2BackendRep* Caffe2Backend::Prepare(
   return rep;
 }
 
+template <typename T>
+void ConvertIntegralValueToCaffe2(caffe2::OperatorDef* c2_op,
+                                  caffe2::Argument* c2_values,
+                                  const TensorProto& onnx_tensor) {
+  c2_op->set_type(
+      onnx_tensor.data_type() == TensorProto::BOOL ? "GivenTensorBoolFill"
+                                                   : "GivenTensorIntFill");
+  ::google::protobuf::RepeatedField<T> tmp;
+  const ::google::protobuf::RepeatedField<T>* src =
+      &tmp;
+  bool converted = TryConvertingTensorRawValues<T>(onnx_tensor, &tmp);
+  if (converted) {
+    for (const auto i : *src) {
+      c2_values->add_ints(i);
+    }
+  } else {
+    const ::google::protobuf::RepeatedField<::google::protobuf::int32> *int32_src = \
+      &onnx_tensor.int32_data();
+    for (const auto i : *int32_src) {
+      c2_values->add_ints(i);
+    }
+  }
+}
+
+template <>
+void ConvertIntegralValueToCaffe2<::google::protobuf::int64>(caffe2::OperatorDef* c2_op,
+                                                             caffe2::Argument* c2_values,
+                                                            const TensorProto& onnx_tensor) {
+  c2_op->set_type("GivenTensorInt64Fill");
+  auto* ints = c2_values->mutable_ints();
+  if (!TryConvertingTensorRawValues<::google::protobuf::int64>(
+          onnx_tensor, ints)) {
+    ints->CopyFrom(onnx_tensor.int64_data());
+  }
+}
+
+template <>
+void ConvertIntegralValueToCaffe2<::google::protobuf::uint64>(caffe2::OperatorDef* c2_op,
+                                                              caffe2::Argument* c2_values,
+                                                              const TensorProto& onnx_tensor) {
+  c2_op->set_type("GivenTensorInt64Fill");
+  ::google::protobuf::RepeatedField<::google::protobuf::uint64> tmp;
+  const ::google::protobuf::RepeatedField<::google::protobuf::uint64>* src =
+      &tmp;
+  if (!TryConvertingTensorRawValues<::google::protobuf::uint64>(
+          onnx_tensor, &tmp)) {
+    src = &onnx_tensor.uint64_data();
+  }
+  for (const auto i : *src) {
+    c2_values->add_ints(i);
+  }
+}
+
 void Caffe2Backend::BuildTensorFillingOp(
     caffe2::OperatorDef* c2_op,
     const TensorProto& onnx_tensor,
@@ -1402,44 +1488,21 @@ void Caffe2Backend::BuildTensorFillingOp(
       c2_values->add_floats(i);
     }
   } else if (onnx_tensor.data_type() == TensorProto::INT64) {
-    c2_op->set_type("GivenTensorInt64Fill");
-    auto* ints = c2_values->mutable_ints();
-    if (!TryConvertingTensorRawValues<::google::protobuf::int64>(
-            onnx_tensor, ints)) {
-      ints->CopyFrom(onnx_tensor.int64_data());
-    }
+    ConvertIntegralValueToCaffe2<::google::protobuf::int64>(c2_op, c2_values, onnx_tensor);
   } else if (onnx_tensor.data_type() == TensorProto::UINT32) {
-    c2_op->set_type("GivenTensorInt64Fill");
-    ::google::protobuf::RepeatedField<::google::protobuf::uint64> tmp;
-    const ::google::protobuf::RepeatedField<::google::protobuf::uint64>* src =
-        &tmp;
-    if (!TryConvertingTensorRawValues<::google::protobuf::uint64>(
-            onnx_tensor, &tmp)) {
-      src = &onnx_tensor.uint64_data();
-    }
-    for (const auto i : *src) {
-      c2_values->add_ints(i);
-    }
-  } else if (
-      onnx_tensor.data_type() == TensorProto::BOOL ||
-      onnx_tensor.data_type() == TensorProto::UINT8 ||
-      onnx_tensor.data_type() == TensorProto::INT8 ||
-      onnx_tensor.data_type() == TensorProto::UINT16 ||
-      onnx_tensor.data_type() == TensorProto::INT16 ||
-      onnx_tensor.data_type() == TensorProto::INT32) {
-    c2_op->set_type(
-        onnx_tensor.data_type() == TensorProto::BOOL ? "GivenTensorBoolFill"
-                                                     : "GivenTensorIntFill");
-    ::google::protobuf::RepeatedField<::google::protobuf::int32> tmp;
-    const ::google::protobuf::RepeatedField<::google::protobuf::int32>* src =
-        &tmp;
-    if (!TryConvertingTensorRawValues<::google::protobuf::int32>(
-            onnx_tensor, &tmp)) {
-      src = &onnx_tensor.int32_data();
-    }
-    for (const auto i : *src) {
-      c2_values->add_ints(i);
-    }
+    ConvertIntegralValueToCaffe2<::google::protobuf::uint64>(c2_op, c2_values, onnx_tensor);
+  } else if (onnx_tensor.data_type() == TensorProto::BOOL) {
+    ConvertIntegralValueToCaffe2<::google::protobuf::int8>(c2_op, c2_values, onnx_tensor);
+  } else if (onnx_tensor.data_type() == TensorProto::UINT8) {
+    ConvertIntegralValueToCaffe2<::google::protobuf::uint8>(c2_op, c2_values, onnx_tensor);
+  } else if (onnx_tensor.data_type() == TensorProto::INT8) {
+    ConvertIntegralValueToCaffe2<::google::protobuf::int8>(c2_op, c2_values, onnx_tensor);
+  } else if (onnx_tensor.data_type() == TensorProto::UINT16) {
+    ConvertIntegralValueToCaffe2<::google::protobuf::uint16>(c2_op, c2_values, onnx_tensor);
+  } else if (onnx_tensor.data_type() == TensorProto::INT16) {
+    ConvertIntegralValueToCaffe2<::google::protobuf::int16>(c2_op, c2_values, onnx_tensor);
+  } else if (onnx_tensor.data_type() == TensorProto::INT32) {
+    ConvertIntegralValueToCaffe2<::google::protobuf::int32>(c2_op, c2_values, onnx_tensor);
   } else if (onnx_tensor.data_type() == TensorProto::STRING) {
     c2_op->set_type("GivenTensorStringFill");
     auto* strings = c2_values->mutable_strings();

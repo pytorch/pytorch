@@ -20,12 +20,12 @@ void THNN_(PReLU_updateOutput)(
   }
   else
   {
-    int ndim = THCTensor_(_nDimension)(state, input);
+    int ndim = THCTensor_(nDimensionLegacyAll)(state, input);
     input = THCTensor_(newContiguous)(state, input);
 
     int n = THCTensor_(nElement)(state, input);
-    if (input->size(ndim > 1) != nOutputPlane)
-      THError("Wrong number of input planes. Expected %d but got %d.", nOutputPlane, input->size(ndim > 1));
+    if (THTensor_sizeLegacyNoScalars(input, ndim > 1) != nOutputPlane)
+      THError("Wrong number of input planes. Expected %d but got %d.", nOutputPlane, THTensor_sizeLegacyNoScalars(input, ndim > 1));
 
     int mapSize = 1;
     for (int d = 2; d < ndim; d++) {
@@ -64,13 +64,13 @@ void THNN_(PReLU_updateGradInput)(
   }
   else
   {
-    int ndim = THCTensor_(_nDimension)(state, input);
+    int ndim = THCTensor_(nDimensionLegacyAll)(state, input);
     input = THCTensor_(newContiguous)(state, input);
     gradOutput = THCTensor_(newContiguous)(state, gradOutput);
 
     int n = THCTensor_(nElement)(state, input);
-    if (input->size(ndim > 1) != nOutputPlane)
-      THError("Wrong number of input planes. Expected %d but got %d.", nOutputPlane, input->size(ndim > 1));
+    if (THTensor_sizeLegacyNoScalars(input, ndim > 1) != nOutputPlane)
+      THError("Wrong number of input planes. Expected %d but got %d.", nOutputPlane, THTensor_sizeLegacyNoScalars(input, ndim > 1));
 
     int mapSize = 1;
     for (int d = 2; d < ndim; d++) {
@@ -119,7 +119,7 @@ void THNN_(PReLU_accGradParameters)(
   }
   else
   {
-    int ndim = THCTensor_(_nDimension)(state, input);
+    int ndim = THCTensor_(nDimensionLegacyAll)(state, input);
 
     if (ndim == 1)
     {
@@ -133,7 +133,7 @@ void THNN_(PReLU_accGradParameters)(
 
       if (ndim == 2)
       {
-        THCTensor_(sum)(state, gradWeightBuf, gradInput, 0, 1);
+        THCTensor_(sum)(state, gradWeightBuf, gradInput, 0, 0);
         THCTensor_(cadd)(state, gradWeight, gradWeight, scale, gradWeightBuf);
       }
       else
@@ -146,8 +146,8 @@ void THNN_(PReLU_accGradParameters)(
         }
         THCTensor_(resize3d)(state, buffer, input->size(0), nOutputPlane, size3);
         THCTensor_(resize2d)(state, sumbuf, input->size(0), nOutputPlane);
-        THCTensor_(sum)(state, sumbuf, buffer, 2, 1);
-        THCTensor_(sum)(state, gradWeightBuf, sumbuf, 0, 1);
+        THCTensor_(sum)(state, sumbuf, buffer, 2, 0);
+        THCTensor_(sum)(state, gradWeightBuf, sumbuf, 0, 0);
         THCTensor_(cadd)(state, gradWeight, gradWeight, scale, gradWeightBuf);
         THCTensor_(free)(state, buffer);
         THCTensor_(free)(state, sumbuf);

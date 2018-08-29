@@ -9,11 +9,11 @@
 #include <torch/csrc/cuda/comm.h>
 
 #include <ATen/Device.h>
-#include <ATen/Error.h>
 #include <ATen/OptionsGuard.h>
 #include <ATen/Parallel.h>
 #include <ATen/TensorOptions.h>
-#include <ATen/optional.h>
+#include <ATen/core/Error.h>
+#include <ATen/core/optional.h>
 
 #include <cstddef>
 #include <exception>

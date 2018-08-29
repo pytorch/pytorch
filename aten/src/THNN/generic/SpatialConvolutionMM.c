@@ -2,6 +2,8 @@
 #define TH_GENERIC_FILE "generic/SpatialConvolutionMM.c"
 #else
 
+#include <ATen/div_rtn.h>
+
 static inline void THNN_(SpatialConvolutionMM_shapeCheck)(
 	THTensor *input, THTensor *gradOutput,
 	THTensor *weight, THTensor *bias,
@@ -48,8 +50,8 @@ static inline void THNN_(SpatialConvolutionMM_shapeCheck)(
       exactInputHeight, exactInputWidth, kH, kW);
   }
 
-  int64_t outputHeight = (exactInputHeight - kH) / dH + 1;
-  int64_t outputWidth  = (exactInputWidth - kW) / dW + 1;
+  int64_t outputHeight = div_rtn<int64_t>(exactInputHeight - kH, dH) + 1;
+  int64_t outputWidth  = div_rtn<int64_t>(exactInputWidth - kW, dW) + 1;
 
   if (outputWidth < 1 || outputHeight < 1) {
     THError("Given input size per channel: (%ld x %ld). "
@@ -70,7 +72,7 @@ static inline void THNN_(SpatialConvolutionMM_shapeCheck)(
       int64_t nOutputPlane = weight->size(0);
       THNN_CHECK_DIM_SIZE(gradOutput, ndim, dimf, nOutputPlane);
     } else if (bias != NULL) {
-      int64_t nOutputPlane = bias->size(0);
+      int64_t nOutputPlane = THTensor_sizeLegacyNoScalars(bias, 0);
       THNN_CHECK_DIM_SIZE(gradOutput, ndim, dimf, nOutputPlane);
     }
     THNN_CHECK_DIM_SIZE(gradOutput, ndim, dimh, outputHeight);
@@ -330,7 +332,7 @@ static void THNN_(SpatialConvolutionMM_accGradParameters_frame)(
   }
 
   if (gradBias) {
-    for(i = 0; i < gradBias->size(0); i++)
+    for(i = 0; i < THTensor_sizeLegacyNoScalars(gradBias, 0); i++)
     {
       int64_t k;
       real sum = 0;

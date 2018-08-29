@@ -9,7 +9,7 @@
 
 #include "caffe2/core/timer.h"
 #include "caffe2/core/workspace.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 
 CAFFE2_DEFINE_bool(
     caffe2_handle_executor_threads_exceptions,
@@ -100,7 +100,7 @@ std::function<bool(int64_t)> getContinuationTest(
 
 // if the blob doesn't exist or is not initiaized, return false
 inline bool getShouldStop(const Blob* b) {
-  if (!b || b->meta().id() == CaffeTypeId::uninitialized()) { // not exist or uninitialized
+  if (!b || b->meta().id() == TypeIdentifier::uninitialized()) { // not exist or uninitialized
     return false;
   }
 
@@ -131,8 +131,7 @@ struct WorkspaceIdInjector {
           "Integer overflow while calculating GLOBAL_WORKSPACE_ID blob");
       int32_t global_ws_id = (seq_++) + (static_cast<int32_t>(node_id) << 16);
       Blob* global_ws_id_blob = workspace->CreateLocalBlob(GLOBAL_WORKSPACE_ID);
-      TensorCPU* global_ws_id_tensor =
-          global_ws_id_blob->template GetMutable<TensorCPU>();
+      TensorCPU* global_ws_id_tensor = global_ws_id_blob->GetMutableTensor(CPU);
       global_ws_id_tensor->Resize();
       global_ws_id_tensor->template mutable_data<int32_t>()[0] = global_ws_id;
       VLOG(1) << "Adding " << GLOBAL_WORKSPACE_ID << " = " << global_ws_id;

@@ -22,7 +22,7 @@
 #ifdef CAFFE2_OPTIMIZER
 #include "caffe2/opt/optimizer.h"
 #endif
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/utils/proto_utils.h"
 #include "caffe2/utils/string_utils.h"
 
@@ -136,7 +136,7 @@ int main(int argc, char** argv) {
         if (blob == nullptr) {
           blob = workspace->CreateBlob(input_names[i]);
         }
-        caffe2::TensorCPU* tensor = blob->GetMutable<caffe2::TensorCPU>();
+        caffe2::TensorCPU* tensor = blob->GetMutableTensor(caffe2::CPU);
         CHECK_NOTNULL(tensor);
         tensor->Resize(input_dims);
         if (input_type_list[i] == "uint8_t") {

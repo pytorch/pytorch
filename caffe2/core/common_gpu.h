@@ -251,11 +251,10 @@ const char* curandGetErrorString(curandStatus_t error);
 // For more info on CUDA compute capabilities, visit the NVidia website at:
 //    http://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#compute-capabilities
 
-// The number of cuda threads to use. 512 is used for backward compatibility,
-// and it is observed that setting it to 1024 usually does not bring much
-// performance gain (which makes sense, because warp size being 32 means that
-// blindly setting a huge block for a random kernel isn't optimal).
-constexpr int CAFFE_CUDA_NUM_THREADS = 512;
+// The number of cuda threads to use. Since work is assigned to SMs at the
+// granularity of a block, 128 is chosen to allow utilizing more SMs for
+// smaller input sizes.
+constexpr int CAFFE_CUDA_NUM_THREADS = 128;
 // The maximum number of blocks to use in the default kernel call. We set it to
 // 4096 which would work for compute capability 2.x (where 65536 is the limit).
 // This number is very carelessly chosen. Ideally, one would like to look at

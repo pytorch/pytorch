@@ -10,10 +10,16 @@ else()
 endif()
 
 option(BUILD_TORCH_TEST "Build torch test binaries" ON)
+option(TORCH_STATIC "Build libtorch.a rather than libtorch.so" OFF)
+
+# TODO: Unify with version from setup.py
+set(TORCH_VERSION_MAJOR 0)
+set(TORCH_VERSION_MINOR 4)
+set(TORCH_VERSION_PATCH 1)
+set(TORCH_VERSION "${TORCH_VERSION_MAJOR}.${TORCH_VERSION_MINOR}.${TORCH_VERSION_PATCH}")
 
 set(TORCH_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
-
-add_subdirectory(../third_party/nanopb protobuf-nanopb)
+set(TORCH_ROOT "${TORCH_SRC_DIR}/..")
 
 if(NOT TORCH_INSTALL_BIN_DIR)
   set(TORCH_INSTALL_BIN_DIR bin)
@@ -46,11 +52,18 @@ if("${isSystemDir}" STREQUAL "-1")
   list(APPEND CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib")
 endif()
 
+# Get the correct Python executable
+if (DEFINED ENV{PYTORCH_PYTHON})
+  message(STATUS "Using python found in $ENV{PYTORCH_PYTHON}")
+  set(PYCMD "$ENV{PYTORCH_PYTHON}")
+else()
+  SET(PYCMD "python")
+endif()
 
 # Generate files
-set(TOOLS_PATH "${TORCH_SRC_DIR}/../tools")
+set(TOOLS_PATH "${TORCH_ROOT}/tools")
 
-configure_file("${TORCH_SRC_DIR}/../aten/src/ATen/common_with_cwrap.py"
+configure_file("${TORCH_ROOT}/aten/src/ATen/common_with_cwrap.py"
                "${TOOLS_PATH}/shared/cwrap_common.py"
                COPYONLY)
 
@@ -79,7 +92,7 @@ add_custom_command(
   "${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops.cpp"
   "${TORCH_SRC_DIR}/csrc/jit/generated/aten_interned_strings.h"
   COMMAND
-  python tools/setup_helpers/generate_code.py
+  ${PYCMD} tools/setup_helpers/generate_code.py
     --declarations-path "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
     --nn-path "aten/src/"
   DEPENDS
@@ -102,13 +115,14 @@ add_custom_command(
   "${TOOLS_PATH}/autograd/gen_autograd.py"
   "${TOOLS_PATH}/autograd/gen_autograd_functions.py"
   "${TOOLS_PATH}/autograd/gen_variable_type.py"
+  "${TOOLS_PATH}/autograd/derivatives.yaml"
+  "${TOOLS_PATH}/jit/gen_jit_dispatch.py"
   "${TOOLS_PATH}/jit/templates/register_aten_ops.cpp"
   "${TOOLS_PATH}/jit/templates/aten_interned_strings.h"
-  WORKING_DIRECTORY "${TORCH_SRC_DIR}/..")
+  WORKING_DIRECTORY "${TORCH_ROOT}")
 
 set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/autograd/anomaly_mode.cpp
-  ${TORCH_SRC_DIR}/csrc/autograd/aten_variable_hooks.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/engine.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/function.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/functions/accumulate_grad.cpp
@@ -134,10 +148,12 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/interpreter.cpp
   ${TORCH_SRC_DIR}/csrc/jit/constants.cpp
   ${TORCH_SRC_DIR}/csrc/jit/ir.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/ivalue.cpp
   ${TORCH_SRC_DIR}/csrc/jit/operator.cpp
   ${TORCH_SRC_DIR}/csrc/jit/operator.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/batch_mm.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/canonicalize.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/passes/constant_propagation.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/common_subexpression_elimination.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/create_autodiff_subgraphs.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/dead_code_elimination.cpp
@@ -161,8 +177,6 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/test_jit.cpp
   ${TORCH_SRC_DIR}/csrc/jit/tracer.cpp
   ${TORCH_SRC_DIR}/csrc/jit/type.cpp
-  ${TORCH_SRC_DIR}/csrc/onnx/onnx.cpp
-  ${TORCH_SRC_DIR}/csrc/onnx/onnx.npb.cpp
   ${TORCH_SRC_DIR}/csrc/torch.cpp
   ${TORCH_SRC_DIR}/csrc/utils/tensor_flatten.cpp
   ${TORCH_SRC_DIR}/csrc/utils/variadic.cpp
@@ -192,14 +206,25 @@ if (NOT NO_API AND NOT USE_ROCM)
 
 endif()
 
-add_library(torch SHARED ${TORCH_SRCS})
+
+if (TORCH_STATIC)
+  add_library(torch STATIC ${TORCH_SRCS})
+else()
+  add_library(torch SHARED ${TORCH_SRCS})
+endif()
 
 target_compile_definitions(torch PRIVATE _THP_CORE)
 
 # until they can be unified, keep these lists synced with setup.py
 if(MSVC)
+  if (${CMAKE_BUILD_TYPE} MATCHES "Debug")
+    set (MSVC_RUNTIME_LIBRARY_FLAG "/MDd")
+  else()
+    set (MSVC_RUNTIME_LIBRARY_FLAG "/MD")
+  endif()
+
   target_compile_options(torch PRIVATE
-    /MD
+    ${MSVC_RUNTIME_LIBRARY_OPTION}
     /Z7
     /EHa
     /DNOMINMAX
@@ -255,8 +280,7 @@ if (MSVC)
 endif()
 
 target_link_libraries(torch
-  caffe2_library
-  protobuf-nanopb)
+  caffe2_library)
 
 find_package(OpenMP)
 if(OPENMP_FOUND)
@@ -265,6 +289,12 @@ if(OPENMP_FOUND)
   endif()
   target_compile_options(torch INTERFACE -fopenmp)
   target_link_libraries(torch -fopenmp)
+endif()
+
+if (NOT NO_API AND NOT USE_ROCM)
+  target_include_directories(torch PUBLIC
+    ${TORCH_SRC_DIR}/csrc/api
+    ${TORCH_SRC_DIR}/csrc/api/include)
 endif()
 
 if(USE_CUDA)
@@ -311,7 +341,7 @@ if(USE_ROCM)
   target_include_directories(torch PRIVATE
     /opt/rocm/include
     /opt/rocm/hcc/include
-    /opt/rocm/hipblas/include
+    /opt/rocm/rocblas/include
     /opt/rocm/hcsparse/include
     )
 endif()
@@ -319,9 +349,9 @@ endif()
 
 set(TH_CPU_INCLUDE
   # dense
-  ${TORCH_SRC_DIR}/../aten/src/TH
+  ${TORCH_ROOT}/aten/src/TH
   ${CMAKE_CURRENT_BINARY_DIR}/../aten/src/TH
-  ${TORCH_SRC_DIR}/../aten/src
+  ${TORCH_ROOT}/aten/src
   ${CMAKE_CURRENT_BINARY_DIR}/../aten/src
   ${CMAKE_BINARY_DIR}/aten/src)
 target_include_directories(torch PRIVATE ${TH_CPU_INCLUDE})
@@ -329,13 +359,13 @@ target_include_directories(torch PRIVATE ${TH_CPU_INCLUDE})
 if(USE_CUDA OR USE_ROCM)
   set(TH_CUDA_INCLUDE
     # dense
-    ${TORCH_SRC_DIR}/../aten/src/THC
+    ${TORCH_ROOT}/aten/src/THC
     ${CMAKE_CURRENT_BINARY_DIR}/../aten/src/THC)
   target_include_directories(torch PRIVATE ${TH_CUDA_INCLUDE})
 endif()
 
 set(ATen_CPU_INCLUDE
-  ${TORCH_SRC_DIR}/../aten/src
+  ${TORCH_ROOT}/aten/src
   ${CMAKE_CURRENT_BINARY_DIR}/../aten/src
   ${CMAKE_CURRENT_BINARY_DIR}/../aten/src/ATen
   ${CMAKE_BINARY_DIR}/aten/src)
@@ -346,8 +376,7 @@ target_include_directories(torch PUBLIC
 
 # SYSTEM headers are included with -isystem and thus do not trigger warnings.
 target_include_directories(torch SYSTEM PUBLIC
-  "${TORCH_SRC_DIR}/../third_party/cereal/include" # For cereal/
-  "${TORCH_SRC_DIR}/../third_party/nanopb")
+  "${TORCH_ROOT}/third_party/cereal/include") # For cereal/
 
 set_target_properties(torch PROPERTIES VERSION 1 SOVERSION 1)
 
@@ -365,12 +394,12 @@ install(TARGETS torch
   ARCHIVE DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 
 # JIT Tests. TODO: Put into test/cpp/jit folder
-if (NOT MSVC AND NOT APPLE AND NOT USE_ROCM)
+if (BUILD_TORCH_TEST AND NOT MSVC AND NOT APPLE AND NOT USE_ROCM)
   add_executable(test_jit ${TORCH_SRC_DIR}/csrc/jit/test_jit.cpp)
   target_link_libraries(test_jit torch ${TORCH_CUDA_LIBRARIES})
   target_compile_definitions(test_jit PUBLIC USE_CATCH _FORCE_INLINES)
   target_include_directories(test_jit PUBLIC
-    "${TORCH_SRC_DIR}/../third_party/catch/single_include"
+    "${TORCH_ROOT}/third_party/catch/single_include"
     ${ATen_CPU_INCLUDE})
 
   if (USE_CUDA)
@@ -379,11 +408,7 @@ if (NOT MSVC AND NOT APPLE AND NOT USE_ROCM)
 endif()
 
 if (BUILD_TORCH_TEST AND NOT NO_API AND NOT USE_ROCM)
-  target_include_directories(torch PUBLIC
-    ${TORCH_SRC_DIR}/csrc/api
-    ${TORCH_SRC_DIR}/csrc/api/include)
-
-  set(TORCH_API_TEST_DIR "${TORCH_SRC_DIR}/../test/cpp/api")
+  set(TORCH_API_TEST_DIR "${TORCH_ROOT}/test/cpp/api")
 
   add_executable(test_api
     ${TORCH_API_TEST_DIR}/any.cpp
@@ -408,7 +433,7 @@ if (BUILD_TORCH_TEST AND NOT NO_API AND NOT USE_ROCM)
 
   target_include_directories(test_api
     PUBLIC
-    "${TORCH_SRC_DIR}/../third_party/catch/single_include"
+    "${TORCH_ROOT}/third_party/catch/single_include"
     ${ATen_CPU_INCLUDE})
 
   target_link_libraries(test_api torch ${TORCH_CUDA_LIBRARIES})
@@ -429,3 +454,13 @@ if (BUILD_TORCH_TEST AND NOT NO_API AND NOT USE_ROCM)
     endif()
   endif()
 endif()
+
+# CMake config for external projects.
+configure_file(
+    ${PROJECT_SOURCE_DIR}/cmake/TorchConfigVersion.cmake.in
+    ${PROJECT_BINARY_DIR}/TorchConfigVersion.cmake
+    @ONLY)
+configure_file(
+    ${TORCH_ROOT}/cmake/TorchConfig.cmake.in
+    ${PROJECT_BINARY_DIR}/TorchConfig.cmake
+    @ONLY)

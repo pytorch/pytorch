@@ -16,7 +16,7 @@ std::string py_typename(PyObject *object) {
 
 struct Type {
   virtual bool is_matching(PyObject *object) = 0;
-  virtual ~Type() {};
+  virtual ~Type() = default;
 };
 
 struct SimpleType: public Type {

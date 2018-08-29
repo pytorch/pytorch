@@ -2,7 +2,7 @@
 #include "catch.hpp"
 
 #include "ATen/ATen.h"
-#include "THNN/Reduction.h"
+#include "ATen/core/Reduction.h"
 
 // for TH compat test only...
 struct THFloatTensor;
@@ -54,15 +54,15 @@ static void test(Type & type) {
     auto z = b.sort(1);
     auto z_sorted = std::get<0>(z);
 
-    REQUIRE(Scalar(z_sorted[0][0]).toFloat() < Scalar(z_sorted[0][1]).toFloat());
+    REQUIRE(z_sorted[0][0].toCFloat() < z_sorted[0][1].toCFloat());
   }
 
-  if(type.backend() != kCUDA)
+  if(type.backend() != Backend::CUDA)
   SECTION( "randperm" ) {
     Tensor b = randperm(15, type);
     Tensor rv, ri;
     std::tie(rv, ri) = sort(b, 0);
-    REQUIRE(Scalar(rv[0]).toFloat() <= Scalar(rv[1]).toFloat());
+    REQUIRE(rv[0].toCFloat() <= rv[1].toCFloat());
   }
 
   SECTION( "context" ) {
@@ -154,7 +154,7 @@ static void test(Type & type) {
 
   SECTION( "abs(value)" ) {
     Tensor r = at::abs(type.scalarTensor(-3));
-    REQUIRE(Scalar(r).toInt() == 3);
+    REQUIRE(r.toCInt() == 3);
   }
 
 //TODO(zach): operator overloads
@@ -184,7 +184,6 @@ static void test(Type & type) {
   SECTION( "zero-dim" ) {
     Tensor a =  type.scalarTensor(4); //rand(type, {1});
 
-    REQUIRE_NOTHROW(Scalar(a));
     Tensor b = rand({3,4}, type);
     REQUIRE((a + a).dim() == 0);
     REQUIRE((1 + a).dim() == 0);
@@ -196,7 +195,7 @@ static void test(Type & type) {
     auto f = rand({3,4}, type);
     f[2] = zeros({4}, type);
     f[1][0] = -1;
-    REQUIRE(Scalar(f[2][0]).toDouble() == 0);
+    REQUIRE(f[2][0].toCDouble() == 0);
   }
 
   SECTION( "tensor from TH" ) {
@@ -226,7 +225,7 @@ static void test(Type & type) {
   }
   SECTION("indexing by Scalar") {
     Tensor tensor = arange(0, 10, kInt);
-    Tensor one = ones({1}, kInt);
+    Tensor one = ones({}, kInt);
     for (int64_t i = 0; i < tensor.numel(); ++i) {
       REQUIRE(tensor[i].equal(one * i));
     }
@@ -256,7 +255,7 @@ static void test(Type & type) {
     REQUIRE_THROWS_WITH(
         tensor[ones({}) * 3.14].equal(one),
         StartsWith(
-            "Can only index tensors with integral scalars (got CPUFloatType)"));
+            "Can only index tensors with integral scalars (got CPUDoubleType)"));
     REQUIRE_THROWS_WITH(
         tensor[Tensor()].equal(one),
         StartsWith("Can only index with tensors that are defined"));
@@ -270,16 +269,20 @@ static void test(Type & type) {
     auto result = tensor.m(relu).m(mse_loss, other, Reduction::ElementwiseMean);
     REQUIRE(result.allclose(mse_loss(relu(tensor), other)));
   }
+  SECTION("core") {
+    int i = CoreTest();
+    REQUIRE(i + 1 == CoreTest());
+  }
 }
 
 TEST_CASE( "basic tests CPU", "[cpu]" ) {
-  manual_seed(123, at::Backend::CPU);
+  manual_seed(123, at::kCPU);
 
   test(CPU(kFloat));
 }
 
 TEST_CASE( "basic tests GPU", "[cuda]" ) {
-  manual_seed(123, at::Backend::CUDA);
+  manual_seed(123, at::kCUDA);
 
   if(at::hasCUDA()) {
     test(CUDA(kFloat));

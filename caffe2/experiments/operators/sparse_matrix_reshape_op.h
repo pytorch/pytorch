@@ -91,9 +91,6 @@ class SparseMatrixReshapeOp : public Operator<Context> {
     new_stride_ = new_shape[1];
   }
 
-  // TODO: enable the filler
-  DISABLE_INPUT_FILLERS(Context)
-
   bool RunOnDevice() override {
     auto& old_col = Input(0);
     CAFFE_ENFORCE(old_col.ndim() == 1, "Row index tensor must be 1-D.");
@@ -104,7 +101,6 @@ class SparseMatrixReshapeOp : public Operator<Context> {
     CAFFE_ENFORCE(
         old_row.size() == nnz,
         "Column and row tensors must have the same size.");
-
     auto* new_col = Output(0);
     auto* new_row = Output(1);
     new_col->Resize(nnz);

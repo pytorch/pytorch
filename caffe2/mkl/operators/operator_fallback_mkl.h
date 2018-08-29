@@ -5,7 +5,7 @@
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/mkl/mkl_utils.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 
 #ifdef CAFFE2_HAS_MKL_DNN
 namespace caffe2 {
@@ -66,10 +66,10 @@ class MKLFallbackOp final : public Operator<MKLContext> {
     for (int i = 0; i < InputSize(); ++i) {
       if (OperatorBase::InputIsType<MKLMemory<float>>(i)) {
         OperatorBase::Input<MKLMemory<float>>(i).CopyTo(
-            local_input_blobs_[i]->template GetMutable<TensorCPU>());
+            local_input_blobs_[i]->GetMutableTensor(CPU));
       } else if (OperatorBase::InputIsType<MKLMemory<double>>(i)) {
         OperatorBase::Input<MKLMemory<double>>(i).CopyTo(
-            local_input_blobs_[i]->template GetMutable<TensorCPU>());
+            local_input_blobs_[i]->GetMutableTensor(CPU));
       } else {
         VLOG(1) << "Input " << i << " is not MKLMemory. Skipping copy.";
         // Note(jiayq): This removes a const but conceptually
@@ -93,7 +93,7 @@ class MKLFallbackOp final : public Operator<MKLContext> {
         continue;
       }
       CAFFE_ENFORCE(
-          local_output_blobs_[i]->template IsType<TensorCPU>(),
+          local_output_blobs_[i]->template IsType<Tensor>(CPU),
           "MKL fallback op currently does not support non-TensorCPU "
           "output type who needs copying.");
       const auto& src = local_output_blobs_[i]->template Get<TensorCPU>();

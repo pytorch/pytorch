@@ -4,12 +4,14 @@
 #include "THCHalf.h"
 #include "THCNumerics.cuh"
 
+// WARNING: THCNumerics is being deprecated. Read the comments and function usage 
+//          in THCNumerics to learn about the deprecation
+//      
 // Half numerics functions defined as free functions, so cunn code can be
 //written generically, i.e. without excessive calling of THCNumerics<half> functions.
 
 // these functions should move to THCNumerics
 
-#ifdef CUDA_HALF_TENSOR
 inline __host__ __device__ half fmaxType(half x, half y) {
   return THCNumerics<half>::ge(x, y) ? x : y;
 }
@@ -17,7 +19,6 @@ inline __host__ __device__ half fmaxType(half x, half y) {
 inline __host__ __device__ float fmaxType(float x, half y) {
   return fmaxf(x, ScalarConvert<half, float>::to(y));
 }
-#endif
 
 inline __host__ __device__ float fmaxType(float x, float y) {
   return fmaxf(x, y);
@@ -27,7 +28,6 @@ inline __host__ __device__ double fmaxType(double x, double y) {
   return fmax(x, y);
 }
 
-#ifdef CUDA_HALF_TENSOR
 
 // arithmetic functions
 
@@ -244,5 +244,4 @@ inline __host__ __device__ bool operator>=(half a, int b) {
   return THCNumerics<half>::ge(a, ScalarConvert<int ,half>::to(b));
 }
 
-#endif
 #endif

@@ -19,12 +19,11 @@ extern "C" {
 
 namespace caffe2 {
 
-template <class Context>
 class Tensor;
 
 // An empty class as a placeholder for a math function that has no specific
 // engine specified.
-class DefaultEngine {};
+class CAFFE2_API DefaultEngine {};
 
 namespace math {
 
@@ -72,6 +71,8 @@ template <typename T, class Context>
 void Not(const int N, const T* x, T* y, Context* context);
 template <typename T, class Context>
 void Powx(const int N, const T* a, const T b, T* y, Context* context);
+template <typename T, class Context>
+void Inv(const int N, const T* x, T* y, Context* context);
 
 #define CAFFE2_DECLARE_COMPARE_OP(Comp)                                      \
   template <typename T, class Context>                                       \
@@ -164,95 +165,94 @@ CAFFE2_DECLARE_BINARY_OP(BitwiseXor)
 #undef CAFFE2_DECLARE_BINARY_OP
 
 template <typename T, class Context>
-void ReduceMin(
-    const int N,
-    const T* x,
-    T* y,
-    Tensor<Context>* scratch_ptr,
-    Context* context);
+CAFFE2_API void
+ReduceMin(const int N, const T* x, T* y, Tensor* scratch_ptr, Context* context);
 
 template <typename T, class Context>
-void ReduceMax(
-    const int N,
-    const T* x,
-    T* y,
-    Tensor<Context>* scratch_ptr,
-    Context* context);
+CAFFE2_API void
+ReduceMax(const int N, const T* x, T* y, Tensor* scratch_ptr, Context* context);
 
 template <typename T, class Context>
-void ReduceMin(
+CAFFE2_API void ReduceMin(
     const int num_dims,
     const int* dims,
     const int num_axes,
     const int* axes,
+    const T alpha,
     const T* X,
     T* Y,
     Context* context);
 
 template <typename T, class Context>
-void ReduceMax(
+CAFFE2_API void ReduceMax(
     const int num_dims,
     const int* dims,
     const int num_axes,
     const int* axes,
+    const T alpha,
     const T* X,
     T* Y,
     Context* context);
 
 template <typename T, class Context>
-void ReduceSum(
+CAFFE2_API void ReduceSum(
     const int num_dims,
     const int* dims,
     const int num_axes,
     const int* axes,
+    const T alpha,
     const T* X,
     T* Y,
     Context* context);
 
 template <typename T, class Context>
-void ReduceMean(
+CAFFE2_API void ReduceMean(
     const int num_dims,
     const int* dims,
     const int num_axes,
     const int* axes,
+    const T alpha,
     const T* X,
     T* Y,
     Context* context);
 
 template <typename T, class Context>
-void ReduceL1(
+CAFFE2_API void ReduceL1(
     const int num_dims,
     const int* dims,
     const int num_axes,
     const int* axes,
+    const T alpha,
     const T* X,
     T* Y,
     Context* context);
 
 template <typename T, class Context>
-void ReduceL2(
+CAFFE2_API void ReduceL2(
     const int num_dims,
     const int* dims,
     const int num_axes,
     const int* axes,
+    const T alpha,
     const T* X,
     T* Y,
     Context* context);
 
 // Broadcasts X with X_dims to Y with Y_dims.
 template <typename T, class Context>
-void Broadcast(
+CAFFE2_API void Broadcast(
     const int X_ndim,
     const int* X_dims,
     const int Y_ndim,
     const int* Y_dims,
+    const T alpha,
     const T* X,
     T* Y,
     Context* context);
 
 // Computes mean and variance over axes.
 template <typename T, class Context>
-void Moments(
+CAFFE2_API void Moments(
     const int num_dims,
     const int* dims,
     const int num_axes,
@@ -265,7 +265,7 @@ void Moments(
 // Adds batch sub-tensors elementwise to output. Stripe is the stripe length
 // and N is the number of elements to add (size of Y).
 template <typename T, class Context>
-void AddStripedBatch(
+CAFFE2_API void AddStripedBatch(
     const int N,
     const T* first,
     T* y,
@@ -276,29 +276,28 @@ void AddStripedBatch(
 // Compute the row-wise max of a N*D matrix X, and write it to a N
 // dimensional vector y.
 template <typename T, class Context>
-void RowwiseMax(const int N, const int D, const T* x, T* y, Context* context);
+CAFFE2_API void
+RowwiseMax(const int N, const int D, const T* x, T* y, Context* context);
 
 // Compute the column-wise max of a N*D matrix X, and write it to a D
 // dimensional vector y.
 template <typename T, class Context>
-void ColwiseMax(const int N, const int D, const T* x, T* y, Context* context);
+CAFFE2_API void
+ColwiseMax(const int N, const int D, const T* x, T* y, Context* context);
 
 // Elemwise maximum of vector x and vector y. z[i] = max(x[i], y[i])
 template <typename T, class Context>
-void ElemwiseMax(const int N, const T* x, const T* y, T* z, Context* context);
+CAFFE2_API void
+ElemwiseMax(const int N, const T* x, const T* y, T* z, Context* context);
 
 // Elemwise maximum of vector x and scalar alpha. y[i] = max(x[i], alpha)
 template <typename T, class Context>
-void Maximum(
-    const int N,
-    const float alpha,
-    const T* x,
-    T* y,
-    Context* context);
+CAFFE2_API void
+Maximum(const int N, const float alpha, const T* x, T* y, Context* context);
 
 // Transpose tensor X with dims by axes and write the result to tensor Y.
 template <typename T, class Context>
-void Transpose(
+CAFFE2_API void Transpose(
     const int ndim,
     const int* dims,
     const int* axes,
@@ -309,7 +308,7 @@ void Transpose(
 // Decaf gemm provides a simpler interface to the gemm functions, with the
 // limitation that the data has to be contiguous in memory.
 template <typename T, class Context, class Engine = DefaultEngine>
-void Gemm(
+CAFFE2_API void Gemm(
     const CBLAS_TRANSPOSE trans_A,
     const CBLAS_TRANSPOSE trans_B,
     const int M,
@@ -326,7 +325,7 @@ void Gemm(
 // We also provide a gemm that has explicit lda, ldb and ldc specified.
 // In most cases you probably want to use the function above, though.
 template <typename T, class Context, class Engine = DefaultEngine>
-void GemmEx(
+CAFFE2_API void GemmEx(
     const CBLAS_TRANSPOSE trans_A,
     const CBLAS_TRANSPOSE trans_B,
     const int M,
@@ -344,7 +343,7 @@ void GemmEx(
 
 // GemmBatched provides a simple abstraction into library routines
 template <typename T, class Context, class Engine = DefaultEngine>
-void GemmBatched(
+CAFFE2_API void GemmBatched(
     const CBLAS_TRANSPOSE trans_A,
     const CBLAS_TRANSPOSE trans_B,
     const int batch_size,
@@ -360,7 +359,7 @@ void GemmBatched(
     TensorProto::DataType math_type = TensorProto_DataType_FLOAT);
 
 template <typename T, class Context, class Engine = DefaultEngine>
-void GemmStridedBatched(
+CAFFE2_API void GemmStridedBatched(
     const CBLAS_TRANSPOSE trans_A,
     const CBLAS_TRANSPOSE trans_B,
     const int batch_size,
@@ -383,7 +382,7 @@ void GemmStridedBatched(
 // CblasNoTrans: x is an N dim vector and y is an M dim vector.
 // CblasTrans:   x is an M dim vector and y is an N dim vector.
 template <typename T, class Context, class Engine = DefaultEngine>
-void Gemv(
+CAFFE2_API void Gemv(
     const CBLAS_TRANSPOSE trans_A,
     const int M,
     const int N,
@@ -396,15 +395,16 @@ void Gemv(
     TensorProto::DataType math_type = TensorProto_DataType_FLOAT);
 
 template <typename T, class Context>
-void Set(const size_t N, const T alpha, T* X, Context* context);
+CAFFE2_API void Set(const size_t N, const T alpha, T* X, Context* context);
 
 template <typename T, class Context>
-void RandUniform(const size_t n, const T a, const T b, T* r, Context* context);
+CAFFE2_API void
+RandUniform(const size_t n, const T a, const T b, T* r, Context* context);
 
 // Generate n values that sum up to a fixed sum
 // and subject to a restriction a <= x <= b for each x generated
 template <typename T, class Context>
-void RandFixedSum(
+CAFFE2_API void RandFixedSum(
     const size_t n,
     const T a,
     const T b,
@@ -413,7 +413,7 @@ void RandFixedSum(
     Context* context);
 
 template <typename T, class Context>
-void RandUniformUnique(
+CAFFE2_API void RandUniformUnique(
     const size_t n,
     const T a,
     const T b,
@@ -423,39 +423,36 @@ void RandUniformUnique(
     Context* context);
 
 template <typename T, class Context>
-void RandGaussian(
-    const size_t n,
-    const T mean,
-    const T std,
-    T* r,
-    Context* context);
+CAFFE2_API void
+RandGaussian(const size_t n, const T mean, const T std, T* r, Context* context);
 
 // Dot matrix of vector a and b, and writes the result to a single value y.
 template <typename T, class Context>
-void Dot(const int N, const T* a, const T* b, T* y, Context* context);
+CAFFE2_API void
+Dot(const int N, const T* a, const T* b, T* y, Context* context);
 
 // Sum of vector x, and writes the result to a single value y.
 template <typename T, class Context>
-void Sum(
+CAFFE2_API void Sum(
     const int N,
     const T* x,
     T* y,
     Context* context,
-    Tensor<Context>* scratch_ptr = nullptr);
+    Tensor* scratch_ptr = nullptr);
 
 // Sum of squares of vector x, and writes the result to a single value y.
 template <typename T, class Context>
-void SumSqr(
+CAFFE2_API void SumSqr(
     const int N,
     const T* x,
     T* y,
     Context* context,
-    Tensor<Context>* scratch_ptr = nullptr);
+    Tensor* scratch_ptr = nullptr);
 
 // Select does index selection of the rows a N*D matrix x, and gives the N
 // dimensional vector y that contains the selected data.
 template <typename T, class Context>
-void Select(
+CAFFE2_API void Select(
     const int N,
     const int D,
     const T* x,
@@ -463,26 +460,38 @@ void Select(
     T* y,
     Context* context);
 
-template <typename T, class Context>
-void Scale(const int N, const float alpha, const T* x, T* y, Context* context);
+template <typename TAlpha, typename TData, class Context>
+CAFFE2_API void Scale(
+    const int N,
+    const TAlpha alpha,
+    const TData* x,
+    TData* y,
+    Context* context);
 
 // Different from the Scale function above, if alpha is passed in
 // as a pointer, we will assume that it lives on the Context device,
 // for example on GPU.
-template <typename T, class Context>
-void Scale(const int N, const float* alpha, const T* x, T* y, Context* context);
+template <typename TAlpha, typename TData, class Context>
+CAFFE2_API void Scale(
+    const int N,
+    const TAlpha* alpha,
+    const TData* x,
+    TData* y,
+    Context* context);
 
 template <typename T, class Context>
-void Axpy(const int N, const float alpha, const T* x, T* y, Context* context);
+CAFFE2_API void
+Axpy(const int N, const float alpha, const T* x, T* y, Context* context);
 
 // Different from the Axpy function above, if alpha is passed in
 // as a pointer, we will assume that it lives on the Context device,
 // for example on GPU.
 template <typename T, class Context>
-void Axpy(const int N, const float* alpha, const T* x, T* y, Context* context);
+CAFFE2_API void
+Axpy(const int N, const float* alpha, const T* x, T* y, Context* context);
 
 template <typename T, class Context>
-void Axpby(
+CAFFE2_API void Axpby(
     const int N,
     const float alpha,
     const T* x,
@@ -490,38 +499,13 @@ void Axpby(
     T* y,
     Context* context);
 
+// groups must be 1 for GPU
+// For NHWC order with groups > 1, the result will be layout in
+// NHW G RS C/G order to make data within the same group to be contiguous.
+// For NCHW order, groups doesn't make any difference because we're doing Im2Col
+// for each N and C is the slowest moving dimension among CHW.
 template <typename T, class Context, StorageOrder kOrder>
-void Im2ColNd(
-    const int N,
-    const int img_size,
-    const int col_size,
-    const int* img_shape,
-    const int* col_shape,
-    const int* kernel_shape,
-    const int* stride,
-    const int* dilation,
-    const int* pad,
-    const T* img_data,
-    T* col_data,
-    Context* context);
-
-template <typename T, class Context, StorageOrder kOrder>
-void Col2ImNd(
-    const int N,
-    const int img_size,
-    const int col_size,
-    const int* img_shape,
-    const int* col_shape,
-    const int* kernel_shape,
-    const int* stride,
-    const int* dilation,
-    const int* pad,
-    const T* col_data,
-    T* img_data,
-    Context* context);
-
-template <typename T, class Context, StorageOrder kOrder>
-void Im2Col(
+CAFFE2_API void Im2Col(
     const int channels,
     const int height,
     const int width,
@@ -537,10 +521,31 @@ void Im2Col(
     const int stride_w,
     const T* img_data,
     T* col_data,
+    Context* context,
+    const int groups = 1);
+
+template <typename T, class Context, StorageOrder kOrder>
+CAFFE2_API void Im2ColNd(
+    const int N,
+    const int img_size,
+    const int col_size,
+    const int* img_shape,
+    const int* col_shape,
+    const int* kernel_shape,
+    const int* stride,
+    const int* dilation,
+    const int* pad,
+    const T* img_data,
+    T* col_data,
     Context* context);
 
-template <typename T, class Context, int order>
-void Col2Im(
+// groups must be 1 for GPU
+// For NHWC order with groups > 1, the result will be layout in
+// NHW G RS C/G order to make data within the same group to be contiguous.
+// For NCHW order, groups doesn't make any difference because we're doing Im2Col
+// for each N and C is the slowest moving dimension among CHW.
+template <typename T, class Context, StorageOrder kOrder>
+CAFFE2_API void Col2Im(
     const int channels,
     const int height,
     const int width,
@@ -556,12 +561,28 @@ void Col2Im(
     const int stride_w,
     const T* col_data,
     T* img_data,
+    Context* context,
+    const int groups = 1);
+
+template <typename T, class Context, StorageOrder kOrder>
+CAFFE2_API void Col2ImNd(
+    const int N,
+    const int img_size,
+    const int col_size,
+    const int* img_shape,
+    const int* col_shape,
+    const int* kernel_shape,
+    const int* stride,
+    const int* dilation,
+    const int* pad,
+    const T* col_data,
+    T* img_data,
     Context* context);
 
 // Applies a per-channel bias value to each channel of the input
 // image. image_size is H * W
 template <typename T, class Context>
-void BiasCHW(
+CAFFE2_API void BiasCHW(
     const T* bias,
     const T* bias_multiplier,
     const int bias_channels,
@@ -570,7 +591,7 @@ void BiasCHW(
     Context* context);
 
 template <class Context>
-void CopyMatrix(
+CAFFE2_API void CopyMatrix(
     const size_t item_size,
     const int M,
     const int N,
@@ -582,7 +603,7 @@ void CopyMatrix(
     TypeMeta::TypedCopy copy = nullptr);
 
 template <typename T, class Context>
-void CopyMatrix(
+CAFFE2_API void CopyMatrix(
     const int M,
     const int N,
     const T* A,
@@ -592,19 +613,19 @@ void CopyMatrix(
     Context* context);
 
 template <typename T, class Context>
-void CopyVector(const int N, const T* A, T* B, Context* context);
+CAFFE2_API void CopyMatrix(
+    const int M,
+    const int N,
+    const T* A,
+    const int A_outer_stride,
+    const int A_inner_stride,
+    T* B,
+    const int B_outer_stride,
+    const int B_inner_stride,
+    Context* context);
 
-// Function uses casting from int to unsigned to compare if value of
-// parameter a is greater or equal to zero and lower than value of
-// parameter b. The b parameter is of type signed and is always
-// positive,
-// therefore its value is always lower than 0x800... where casting
-// negative value of a parameter converts it to value higher than
-// 0x800...
-// The casting allows to use one condition instead of two.
-inline bool is_a_ge_zero_and_a_lt_b(int a, int b) {
-  return static_cast<unsigned>(a) < static_cast<unsigned>(b);
-}
+template <typename T, class Context>
+CAFFE2_API void CopyVector(const int N, const T* A, T* B, Context* context);
 
 // Calculates ceil(a / b). User must be careful to ensure that there
 // is no overflow or underflow in the calculation.

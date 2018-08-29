@@ -296,17 +296,17 @@ __global__ void THCTensor_kernel_varOuterDim(T *tgt, T *src_, unsigned num_orows
 
 template<typename TensorTypeK, typename T, typename AccT, bool apply_sqrt>
 __host__ void THCTensor_varOuterDim(THCState *state, TensorTypeK *tgt, TensorTypeK *src, int64_t dimension, int flag) {
-  unsigned ndim = THCTensor__nDimension(state, src);
+  unsigned ndim = THCTensor_nDimensionLegacyAll(state, src);
   // Treat all outer dimensions (i.e. dim < dimension) as one.
   unsigned num_orows = 1;
   for (int64_t dim = 0; dim < dimension; dim++) {
-    num_orows *= THCTensor_size(state, src, dim);
+    num_orows *= THCTensor_sizeLegacyNoScalars(state, src, dim);
   }
-  unsigned row_size = THCTensor_size(state, src, dimension);
+  unsigned row_size = THCTensor_sizeLegacyNoScalars(state, src, dimension);
   // Treat all inner dimensions (i.e. dim > dimension) as one.
   unsigned num_irows = 1;
   for (unsigned dim = dimension + 1; dim < ndim; dim++) {
-    num_irows *= THCTensor_size(state, src, dim);
+    num_irows *= THCTensor_sizeLegacyNoScalars(state, src, dim);
   }
 
   dim3 threads(min(512, num_irows));
@@ -442,13 +442,13 @@ __global__ void THCTensor_kernel_varInnermostDim(T *tgt, T *src_, unsigned num_r
 
 template<typename TensorTypeK, typename T, typename AccT, bool apply_sqrt>
 __host__ void THCTensor_varInnermostDim(THCState *state, TensorTypeK *tgt, TensorTypeK *src, int flag) {
-  unsigned ndim = THCTensor__nDimension(state, src);
+  unsigned ndim = THCTensor_nDimensionLegacyAll(state, src);
   // Treat all outer dimensions as a single dimension.
   unsigned num_rows = 1;
   for (unsigned dim = 0; dim < ndim - 1; dim++) {
-    num_rows *= THCTensor_size(state, src, dim);
+    num_rows *= THCTensor_sizeLegacyNoScalars(state, src, dim);
   }
-  unsigned row_size = THCTensor_size(state, src, ndim - 1);
+  unsigned row_size = THCTensor_sizeLegacyNoScalars(state, src, ndim - 1);
 
   // From limited testing, 16x32 seemed a good compromise for handling both long and short dimensions.
   dim3 threads(16, 32);
@@ -515,15 +515,15 @@ THC_transformReduceOuterDimIndex(THCState *state,
                                  int64_t rdim,
                                  const thrust::pair<ScalarTypeK, ScalarTypeIndex>& init,
                                  BinaryFunction binary_op) {
-  unsigned ndim = THCTensor__nDimension(state, src);
+  unsigned ndim = THCTensor_nDimensionLegacyAll(state, src);
   unsigned num_orows = 1;
   for (int64_t dim = 0; dim < rdim; dim++) {
-    num_orows *= THCTensor_size(state, src, dim);
+    num_orows *= THCTensor_sizeLegacyNoScalars(state, src, dim);
   }
-  unsigned row_size = THCTensor_size(state, src, rdim);
+  unsigned row_size = THCTensor_sizeLegacyNoScalars(state, src, rdim);
   unsigned num_irows = 1;
   for (unsigned dim = rdim + 1; dim < ndim; dim++) {
-    num_irows *= THCTensor_size(state, src, dim);
+    num_irows *= THCTensor_sizeLegacyNoScalars(state, src, dim);
   }
 
   dim3 threads(min(512, num_irows));
@@ -618,12 +618,12 @@ THC_transformReduceInnermostDimIndex(THCState *state,
                                      TensorTypeK *src,
                                      const thrust::pair<ScalarTypeK, ScalarTypeIndex>& init,
                                      BinaryFunction binary_op) {
-  unsigned ndim = THCTensor__nDimension(state, src);
+  unsigned ndim = THCTensor_nDimensionLegacyAll(state, src);
   unsigned num_rows = 1;
   for (unsigned dim = 0; dim < ndim - 1; dim++) {
-    num_rows *= THCTensor_size(state, src, dim);
+    num_rows *= THCTensor_sizeLegacyNoScalars(state, src, dim);
   }
-  unsigned row_size = THCTensor_size(state, src, ndim - 1);
+  unsigned row_size = THCTensor_sizeLegacyNoScalars(state, src, ndim - 1);
 
   dim3 threads(16, 32);
   dim3 grid(min(1024, THCCeilDiv(num_rows, threads.y)));
@@ -654,29 +654,28 @@ THC_reduceDimIndex(THCState *state,
                    BinaryFunction binary_op)
 {
   THArgCheck(dimension >= 0 &&
-             dimension < THCTensor__nDimension(state, src),
+             dimension < THCTensor_nDimensionLegacyAll(state, src),
              3, "dimension out of range");
 
 
   // Unsqueeze tgt1_/tgt_2 if necessary so that their contiguity traits
   // are preserved if they are the same size as the correct reduction output.
-  int src_dims = THCTensor__nDimension(state, src);
+  int src_dims = THCTensor_nDimensionLegacyAll(state, src);
   THCTensor_preserveReduceDimSemantics(
       state, tgt1_, src_dims, dimension, keepdim);
   THCTensor_preserveReduceDimSemantics(
       state, tgt2_, src_dims, dimension, keepdim);
 
-  THLongStorage *dim = THCTensor_newSizeOf(state, src);
-  THLongStorage_set(dim, dimension, 1);
-  THCTensor_resize(state, tgt1_, dim, NULL);
-  THCTensor_resize(state, tgt2_, dim, NULL);
-  THLongStorage_free(dim);
+  std::vector<int64_t> dim = THTensor_sizesLegacyNoScalars(src);
+  dim[dimension] = 1;
+  THCTensor_resize(state, tgt1_, dim, {});
+  THCTensor_resize(state, tgt2_, dim, {});
 
   TensorTypeK *tgt1 = (TensorTypeK*)THCTensor_newContiguous<ScalarTypeK>(state, tgt1_);
   TensorTypeIndex *tgt2 = (TensorTypeIndex*)THCTensor_newContiguous<ScalarTypeIndex>(state, tgt2_);
   src = (TensorTypeK*)THCTensor_newContiguous<ScalarTypeK>(state, src);
 
-  if (dimension == THCTensor__nDimension(state, src) - 1) {
+  if (dimension == THCTensor_nDimensionLegacyAll(state, src) - 1) {
     THC_transformReduceInnermostDimIndex(state, tgt1, tgt2, src, init, binary_op);
   } else {
     THC_transformReduceOuterDimIndex(state, tgt1, tgt2, src, dimension, init, binary_op);

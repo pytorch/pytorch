@@ -20,8 +20,18 @@ popd
 # if you're not careful.  Check this if you made some changes and the
 # ASAN test is not working
 if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
-    export ASAN_OPTIONS=detect_leaks=0:symbolize=1
-    export UBSAN_OPTIONS=print_stacktrace=1
+    export ASAN_OPTIONS=detect_leaks=0:symbolize=1:strict_init_order=true
+    # We suppress the vptr volation, since we have separate copies of
+    # libprotobuf in both libtorch.so and libcaffe2.so, and it causes
+    # the following problem:
+    #    test_cse (__main__.TestJit) ... torch/csrc/jit/export.cpp:622:38:
+    #        runtime error: member call on address ... which does not point
+    #        to an object of type 'google::protobuf::MessageLite'
+    #        ...: note: object is of type 'onnx_torch::ModelProto'
+    #
+    # This problem should be solved when libtorch.so and libcaffe2.so are
+    # merged.
+    export UBSAN_OPTIONS=print_stacktrace=1:suppressions=$PWD/ubsan.supp
     export PYTORCH_TEST_WITH_ASAN=1
     export PYTORCH_TEST_WITH_UBSAN=1
     # TODO: Figure out how to avoid hard-coding these paths
@@ -44,6 +54,10 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_aten_asan(3)")
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+  export PYTORCH_TEST_WITH_ROCM=1
+fi
+
 if [[ "${JOB_BASE_NAME}" == *-NO_AVX-* ]]; then
   export ATEN_CPU_CAPABILITY=default
 elif [[ "${JOB_BASE_NAME}" == *-NO_AVX2-* ]]; then
@@ -60,14 +74,19 @@ test_python_all_except_nn() {
 
 test_aten() {
   # Test ATen
-  if [[ "$BUILD_ENVIRONMENT" != *asan* ]]; then
+  if ([[ "$BUILD_ENVIRONMENT" != *asan* ]] && [[ "$BUILD_ENVIRONMENT" != *rocm* ]]); then
     echo "Running ATen tests with pytorch lib"
     TORCH_LIB_PATH=$(python -c "import site; print(site.getsitepackages()[0])")/torch/lib
     # NB: the ATen test binaries don't have RPATH set, so it's necessary to
     # put the dynamic libraries somewhere were the dynamic linker can find them.
     # This is a bit of a hack.
-    ln -s "$TORCH_LIB_PATH"/libcaffe2* build/bin
-    ln -s "$TORCH_LIB_PATH"/libnccl* build/bin
+    if [[ "$BUILD_ENVIRONMENT" == *ppc64le* ]]; then
+      SUDO=sudo 
+    fi
+
+    ${SUDO} ln -s "$TORCH_LIB_PATH"/libcaffe2* build/bin
+    ${SUDO} ln -s "$TORCH_LIB_PATH"/libnccl* build/bin
+
     ls build/bin
     aten/tools/run_tests.sh build/bin
   fi
@@ -87,7 +106,7 @@ test_torchvision() {
   # this should be a transient requirement...)
   # See https://github.com/pytorch/pytorch/issues/7525
   #time python setup.py install
-  pip install .
+  pip install --user .
   popd
 }
 

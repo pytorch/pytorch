@@ -1,6 +1,6 @@
 #pragma once
 
-#include "detail/IndexUtils.cuh"
+#include "ATen/cuda/detail/IndexUtils.cuh"
 #include "ATen/TensorUtils.h"
 #include "THC/THCAtomics.cuh"
 #include "ATen/cuda/CUDAContext.h"

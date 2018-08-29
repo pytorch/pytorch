@@ -13,23 +13,6 @@ IF(NOT MSVC)
   SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-absolute-value")
 ENDIF(NOT MSVC)
 
-################################################################################
-# Helper functions
-################################################################################
-
-function(filter_list output input)
-    unset(result)
-    foreach(filename ${${input}})
-        foreach(pattern ${ARGN})
-            if("${filename}" MATCHES "${pattern}")
-                list(APPEND result "${filename}")
-            endif()
-        endforeach()
-    endforeach()
-    set(${output} ${result} PARENT_SCOPE)
-endfunction()
-
-
 # Can be compiled standalone
 IF(NOT AT_INSTALL_BIN_DIR OR NOT AT_INSTALL_LIB_DIR OR NOT AT_INSTALL_INCLUDE_DIR OR NOT AT_INSTALL_SHARE_DIR)
   SET(AT_INSTALL_BIN_DIR "bin" CACHE PATH "AT install binary subdirectory")
@@ -44,11 +27,14 @@ CONFIGURE_FILE(cuda/CUDAConfig.h.in "${CMAKE_CURRENT_SOURCE_DIR}/cuda/CUDAConfig
 # NB: If you edit these globs, you'll have to update setup.py package_data as well
 FILE(GLOB base_h "*.h" "detail/*.h")
 FILE(GLOB base_cpp "*.cpp" "detail/*.cpp")
+add_subdirectory(core)
 FILE(GLOB cuda_h "cuda/*.h" "cuda/detail/*.h" "cuda/*.cuh" "cuda/detail/*.cuh")
 FILE(GLOB cuda_cpp "cuda/*.cpp" "cuda/detail/*.cpp")
 FILE(GLOB cuda_cu "cuda/*.cu" "cuda/detail/*.cu")
 FILE(GLOB cudnn_h "cudnn/*.h" "cudnn/*.cuh")
 FILE(GLOB cudnn_cpp "cudnn/*.cpp")
+FILE(GLOB miopen_h "miopen/*.h")
+FILE(GLOB miopen_cpp "miopen/*.cpp")
 FILE(GLOB mkl_cpp "mkl/*.cpp")
 FILE(GLOB mkldnn_cpp "mkldnn/*.cpp")
 
@@ -57,12 +43,13 @@ FILE(GLOB native_sparse_cpp "native/sparse/*.cpp")
 FILE(GLOB native_sparse_cuda_cu "native/sparse/cuda/*.cu")
 FILE(GLOB native_sparse_cuda_cpp "native/sparse/cuda/*.cpp")
 FILE(GLOB native_cudnn_cpp "native/cudnn/*.cpp")
+FILE(GLOB native_miopen_cpp "native/miopen/*.cpp")
 FILE(GLOB native_cuda_cu "native/cuda/*.cu")
 FILE(GLOB native_cuda_cpp "native/cuda/*.cpp")
 FILE(GLOB native_mkl_cpp "native/mkl/*.cpp")
 FILE(GLOB native_mkldnn_cpp "native/mkldnn/*.cpp")
 
-set(all_cpu_cpp ${base_cpp} ${native_cpp} ${native_sparse_cpp} ${native_mkl_cpp} ${native_mkldnn_cpp} ${generated_cpp} ${ATen_CPU_SRCS} ${cpu_kernel_cpp})
+set(all_cpu_cpp ${base_cpp} ${ATen_CORE_SRCS} ${native_cpp} ${native_sparse_cpp} ${native_mkl_cpp} ${native_mkldnn_cpp} ${generated_cpp} ${ATen_CPU_SRCS} ${cpu_kernel_cpp})
 if(AT_MKL_ENABLED)
   set(all_cpu_cpp ${all_cpu_cpp} ${mkl_cpp})
 endif()
@@ -73,9 +60,14 @@ endif()
 IF(USE_CUDA OR USE_ROCM)
   list(APPEND ATen_CUDA_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/cuda)
   set(ATen_CUDA_SRCS ${ATen_CUDA_SRCS} ${cuda_cu} ${native_cuda_cu} ${native_sparse_cuda_cu})
-  set(all_cuda_cpp ${native_cudnn_cpp} ${native_sparse_cuda_cpp} ${cuda_cpp} ${native_cuda_cpp} ${cuda_generated_cpp} ${ATen_CUDA_SRCS})
-  IF(CUDNN_FOUND)
-    SET(all_cuda_cpp ${all_cuda_cpp} ${cudnn_cpp})
+  set(all_cuda_cpp ${native_sparse_cuda_cpp} ${cuda_cpp} ${native_cuda_cpp} ${cuda_generated_cpp} ${ATen_CUDA_SRCS})
+  IF(USE_CUDA)
+    SET(all_cuda_cpp ${native_cudnn_cpp} ${native_miopen_cpp} ${all_cuda_cpp})
+    IF(CUDNN_FOUND)
+      SET(all_cuda_cpp ${all_cuda_cpp} ${cudnn_cpp})
+    ENDIF()
+  ELSEIF(USE_ROCM)
+    SET(all_cuda_cpp ${native_cudnn_cpp} ${native_miopen_cpp} ${miopen_cpp} ${all_cuda_cpp})
   ENDIF()
 endif()
 
@@ -161,7 +153,7 @@ endif(MKLDNN_FOUND)
 
 list(APPEND ATen_CPU_DEPENDENCY_LIBS cpuinfo)
 
-if(NOT MSVC)
+if(NOT MSVC AND NOT EMSCRIPTEN)
   # Preserve values for the main build
   set(__aten_sleef_build_shared_libs ${BUILD_SHARED_LIBS})
   set(__aten_sleef_build_tests ${BUILD_TESTS})
@@ -250,15 +242,16 @@ IF(USE_CUDA AND NOT USE_ROCM)
   ENDIF(USE_MAGMA)
   IF ($ENV{ATEN_STATIC_CUDA})
     list(APPEND ATen_CUDA_DEPENDENCY_LIBS "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a")
+    list(APPEND ATen_CUDA_DEPENDENCY_LIBS "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcudart_static.a")
   ENDIF($ENV{ATEN_STATIC_CUDA})
 ENDIF()
 
 IF(USE_ROCM)
  ### Link in the ROCm libraries BLAS / RNG.
- FIND_LIBRARY(HIPBLAS_LIBRARY hipblas HINTS ${HIPBLAS_PATH}/lib)
- FIND_LIBRARY(HIPRNG_LIBRARY hcrng HINTS ${HIPRNG_PATH}/lib)
+ FIND_LIBRARY(ROCBLAS_LIBRARY rocblas HINTS ${ROCBLAS_PATH}/lib)
+ FIND_LIBRARY(HIPRAND_LIBRARY hiprand HINTS ${HIPRAND_PATH}/lib)
 
- list(APPEND ATen_CUDA_DEPENDENCY_LIBS ${HIPBLAS_LIBRARY} ${HIPRNG_LIBRARY})
+ list(APPEND ATen_CUDA_DEPENDENCY_LIBS ${ROCBLAS_LIBRARY} ${HIPRAND_LIBRARY})
 ENDIF()
 
 # Include CPU paths for CUDA as well
@@ -393,7 +386,7 @@ INSTALL(FILES "${CMAKE_CURRENT_BINARY_DIR}/cmake-exports/ATenConfig.cmake"
   DESTINATION "${AT_INSTALL_SHARE_DIR}/cmake/ATen")
 
 # https://stackoverflow.com/questions/11096471/how-can-i-install-a-hierarchy-of-files-using-cmake
-FOREACH(HEADER ${base_h} ${cuda_h} ${cudnn_h})
+FOREACH(HEADER ${base_h} ${ATen_CORE_HEADERS} ${cuda_h} ${cudnn_h})
   string(REPLACE "${CMAKE_CURRENT_SOURCE_DIR}/" "" HEADER_SUB ${HEADER})
   GET_FILENAME_COMPONENT(DIR ${HEADER_SUB} DIRECTORY)
   INSTALL(FILES ${HEADER} DESTINATION ${AT_INSTALL_INCLUDE_DIR}/ATen/${DIR})
@@ -444,6 +437,7 @@ if (NOT CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
 endif()
 
 # Pass source, includes, and libs to parent
+set(ATen_CORE_SRCS ${ATen_CORE_SRCS} PARENT_SCOPE)
 set(ATen_CPU_SRCS ${ATen_CPU_SRCS} PARENT_SCOPE)
 set(ATen_CUDA_SRCS ${ATen_CUDA_SRCS} PARENT_SCOPE)
 set(ATen_CPU_TEST_SRCS ${ATen_CPU_TEST_SRCS} PARENT_SCOPE)

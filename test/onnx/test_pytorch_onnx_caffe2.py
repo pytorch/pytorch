@@ -559,6 +559,34 @@ class TestCaffe2Backend(unittest.TestCase):
         input = Variable(torch.empty(BATCH_SIZE, 10, 10).uniform_(4, 9))
         self.run_model_test(MyModel(), train=False, input=input, batch_size=BATCH_SIZE)
 
+    def test_log(self):
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super(MyModel, self).__init__()
+
+            def forward(self, input):
+                return input.log()
+        input = Variable(torch.empty(BATCH_SIZE, 10, 10).uniform_(4, 9))
+        self.run_model_test(MyModel(), train=False, input=input, batch_size=BATCH_SIZE)
+
+    def test_trigonometry(self):
+        def test_func(name):
+            class MyModel(torch.nn.Module):
+                def __init__(self):
+                    super(MyModel, self).__init__()
+
+                def forward(self, input):
+                    return getattr(input, name)()
+            input = Variable(torch.empty(BATCH_SIZE, 10, 10).uniform_())
+            self.run_model_test(MyModel(), train=False, input=input, batch_size=BATCH_SIZE)
+
+        test_func('cos')
+        test_func('sin')
+        test_func('tan')
+        test_func('acos')
+        test_func('asin')
+        test_func('atan')
+
     def test_addconstant(self):
         class MyModel(torch.nn.Module):
             def __init__(self):
@@ -676,6 +704,66 @@ class TestCaffe2Backend(unittest.TestCase):
             x = Variable(torch.randn(*shape))
             self.run_model_test(MyModel(), train=False, input=(x), batch_size=BATCH_SIZE, use_gpu=False)
 
+    def test_cumsum(self):
+        shape = (3, 4, 5)
+        for params in [{'dim': i} for i in range(len(shape))]:
+            class MyModel(torch.nn.Module):
+                def __init__(self):
+                    super(MyModel, self).__init__()
+
+                def forward(self, x):
+                    return torch.cumsum(x, **params)
+            x = Variable(torch.randn(*shape))
+            self.run_model_test(MyModel(), train=False, input=(x), batch_size=BATCH_SIZE, use_gpu=False)
+
+    def test_layer_norm(self):
+        shape = (20, 5, 10, 10)
+
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super(MyModel, self).__init__()
+                self.ln = torch.nn.LayerNorm([5, 10, 10])
+
+            def forward(self, x):
+                return self.ln(x)
+
+        x = torch.randn(*shape)
+        self.run_model_test(MyModel(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
+
+    def test_repeat(self):
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super(MyModel, self).__init__()
+
+            def forward(self, x):
+                return x.repeat(1, 2, 3, 4)
+
+        x = Variable(torch.randn(4, 3, 2, 1), requires_grad=True)
+        self.run_model_test(MyModel(), train=False, input=(x), batch_size=BATCH_SIZE, use_gpu=False)
+
+    def test_repeat_dim_overflow(self):
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super(MyModel, self).__init__()
+
+            def forward(self, x):
+                return x.repeat(1, 2, 3, 4)
+
+        x = Variable(torch.randn(1, 2), requires_grad=True)
+        self.run_model_test(MyModel(), train=False, input=(x), batch_size=BATCH_SIZE, use_gpu=False)
+
+    def test_repeat_dynamic(self):
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super(MyModel, self).__init__()
+
+            def forward(self, x, y):
+                return x.repeat(y.size()[0] / 2, y.size()[1] * 2)
+
+        x = Variable(torch.randn(1, 2), requires_grad=True)
+        y = Variable(torch.randn(2, 4), requires_grad=True)
+        self.run_model_test(MyModel(), train=False, input=(x, y), batch_size=BATCH_SIZE, use_gpu=False)
+
     def test_mean(self):
         shape = (3, 4, 5)
         for params in [{}] + [{'dim': i} for i in range(len(shape))]:
@@ -739,6 +827,52 @@ class TestCaffe2Backend(unittest.TestCase):
         x = Variable(torch.randn(1, 5, 10))
         y = Variable(torch.randn(1, 5, 1))
         self.run_model_test(MyModel(), train=False, input=(x, y), batch_size=BATCH_SIZE, use_gpu=False)
+
+    def test_int8_export(self):
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super(MyModel, self).__init__()
+                self.param = torch.ByteTensor(3, 4).random_()
+
+            def forward(self, x):
+                return x * self.param.float()
+
+        import io
+        f = io.BytesIO()
+        from torch.onnx import ExportTypes
+        torch.onnx._export(MyModel(), (torch.rand(3, 4),), f, verbose=True, export_type=ExportTypes.ZIP_ARCHIVE)
+
+        X = np.random.rand(3, 4).astype(np.float32)
+
+        f.seek(0)
+        import caffe2.python.onnx.backend as c2
+        model = c2.prepare_zip_archive(f)
+        model.run(X)
+
+    def test_neg_slice(self):
+        class NegSlice(torch.nn.Module):
+            def forward(self, x):
+                return x[-1, :, :]
+
+        x = torch.randn(3, 4, 5)
+        self.run_model_test(NegSlice(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
+
+    def test_neg_slice_large(self):
+        class NegSlice(torch.nn.Module):
+            def forward(self, x):
+                return x[:, :, :, :, -3]
+
+        x = torch.randn(3, 4, 5, 6, 7)
+        self.run_model_test(NegSlice(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
+
+    @unittest.skip('https://github.com/pytorch/pytorch/issues/10984')
+    def test_neg_slice_large_negone(self):
+        class NegSlice(torch.nn.Module):
+            def forward(self, x):
+                return x[:, :, :, :, -1]
+
+        x = torch.randn(3, 4, 5, 6, 7)
+        self.run_model_test(NegSlice(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
 
 # a bit of metaprogramming to set up all the rnn tests
 

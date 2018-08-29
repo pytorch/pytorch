@@ -22,7 +22,7 @@ static void AddConstInput(const std::vector<int>& shape, const float value,
   option.set_device_type(CUDA);
   CUDAContext context(option);
   Blob* blob = ws->CreateBlob(name);
-  auto* tensor = blob->GetMutable<Tensor<CUDAContext>>();
+  auto* tensor = blob->GetMutableTensor(CUDA);
   tensor->Resize(shape);
   math::Set<float, CUDAContext>(tensor->size(), value,
                                 tensor->mutable_data<float>(),
@@ -54,8 +54,8 @@ TEST(NervanaFullyConnectedTest, Test) {
   EXPECT_TRUE(op->Run());
   Blob* Yblob = ws.GetBlob("Y");
   EXPECT_NE(nullptr, Yblob);
-  auto& Y = Yblob->Get<Tensor<CUDAContext>>();
-  TensorCPU Y_cpu(Y);
+  auto& Y = Yblob->Get<Tensor>();
+  Tensor Y_cpu(Y, CPU);
   EXPECT_EQ(Y.size(), 5 * 6);
   for (int i = 0; i < Y.size(); ++i) {
     CHECK_LT(Y_cpu.data<float>()[i], 10.11);

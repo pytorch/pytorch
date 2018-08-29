@@ -1,6 +1,6 @@
 ir_version: 3
 producer_name: "pytorch"
-producer_version: "0.3"
+producer_version: "0.4"
 graph {
   node {
     input: "0"
@@ -16,10 +16,16 @@ graph {
         elem_type: INT32
         shape {
           dim {
+            dim_value: 1
+          }
+          dim {
+            dim_value: 2
+          }
+          dim {
             dim_value: 3
           }
           dim {
-            dim_value: 4
+            dim_value: 1
           }
         }
       }
@@ -32,7 +38,7 @@ graph {
         elem_type: INT32
         shape {
           dim {
-            dim_value: 3
+            dim_value: 1
           }
           dim {
             dim_value: 4
@@ -45,8 +51,14 @@ graph {
     name: "2"
     type {
       tensor_type {
-        elem_type: INT8
+        elem_type: UINT8
         shape {
+          dim {
+            dim_value: 1
+          }
+          dim {
+            dim_value: 2
+          }
           dim {
             dim_value: 3
           }
@@ -59,5 +71,5 @@ graph {
   }
 }
 opset_import {
-  version: 6
+  version: 7
 }

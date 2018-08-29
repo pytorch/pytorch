@@ -10,9 +10,9 @@
 #endif
 
 #include <ATen/ATen.h>
-#include <ATen/cuda/CUDAGuard.h>
+#include <ATen/core/optional.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/optional.h>
+#include <ATen/cuda/CUDAGuard.h>
 
 #include <cstddef>
 #include <vector>
@@ -54,7 +54,7 @@ std::vector<Tensor> broadcast(const Tensor& tensor, IntList devices) {
 #else
   {
 #endif
-    auto & gpu_type = type.toBackend(type.is_sparse() ? at::kSparseCUDA : at::kCUDA);
+    auto & gpu_type = type.toBackend(type.is_sparse() ? at::Backend::SparseCUDA : at::Backend::CUDA);
     if (type.is_cuda()) {
       tensors.push_back(tensor);
     }
@@ -74,7 +74,7 @@ tensor_list2d broadcast_coalesced(TensorList tensors, IntList devices, size_t bu
   }
 
   tensor_list2d outputs(devices.size());
-  outputs[0] = tensors;
+  outputs[0] = tensors.vec();
   for (auto & o : outputs)
     o.reserve(tensors.size());
 
@@ -157,7 +157,7 @@ std::vector<at::Tensor> scatter(
       cuda_guard.set_stream(at::cuda::CUDAStream((*streams)[chunk]));
     }
     chunks[chunk] = chunks[chunk].contiguous().to(
-        {at::kCUDA, device_index}, /*non_blocking=*/true);
+        {at::DeviceType::CUDA, device_index}, /*non_blocking=*/true);
   }
   return chunks;
 }
@@ -186,9 +186,9 @@ at::Tensor gather(
     total_size += tensor.size(dim);
   }
   expected_size[dim] = total_size;
-  at::Device device(at::kCPU);
+  at::Device device(at::DeviceType::CPU);
   if (!destination_index || *destination_index != -1) {
-    device = at::Device(at::kCUDA, destination_index ? *destination_index : -1);
+    device = at::Device(at::DeviceType::CUDA, destination_index ? *destination_index : -1);
   }
   result = at::empty(expected_size, first.options().device(device));
 

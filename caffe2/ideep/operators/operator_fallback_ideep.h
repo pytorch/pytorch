@@ -4,7 +4,7 @@
 #include <caffe2/core/context.h>
 #include <caffe2/core/operator.h>
 #include <caffe2/ideep/ideep_utils.h>
-#include <caffe2/proto/caffe2.pb.h>
+#include <caffe2/proto/caffe2_pb.h>
 
 namespace caffe2 {
 
@@ -74,7 +74,7 @@ class IDEEPFallbackOp final : public IDEEPOperator {
     for (int i = 0; i < InputSize(); ++i) {
       if (InputIsType<itensor>(i) && Input(i).get_data_type() == itensor::data_type::f32) {
         auto& input = Input(i);
-        auto dtensor = local_input_blobs_[i]->template GetMutable<TensorCPU>();
+        auto dtensor = local_input_blobs_[i]->GetMutableTensor(CPU);
         dtensor->Resize(input.get_dims());
         if (input.is_public_format()) {
           dtensor->ShareExternalPointer(static_cast<float*>(input.get_data_handle()));
@@ -85,7 +85,7 @@ class IDEEPFallbackOp final : public IDEEPOperator {
           InputIsType<itensor>(i) &&
           Input(i).get_data_type() == itensor::data_type::s32) {
         auto& input = Input(i);
-        auto dtensor = local_input_blobs_[i]->template GetMutable<TensorCPU>();
+        auto dtensor = local_input_blobs_[i]->GetMutableTensor(CPU);
         dtensor->Resize(input.get_dims());
         if (input.is_public_format()) {
           dtensor->ShareExternalPointer(
@@ -116,10 +116,21 @@ class IDEEPFallbackOp final : public IDEEPOperator {
         continue;
       }
       CAFFE_ENFORCE(
-          local_output_blobs_[i]->template IsType<TensorCPU>(),
+          local_output_blobs_[i]->template IsType<Tensor>(CPU),
           "IDEEP fallback op currently does not support non-TensorCPU "
           "output type who needs copying.");
       const auto& src = local_output_blobs_[i]->template Get<TensorCPU>();
+
+      auto src_dims = src.dims();
+      if (src.ndim() == 0) {
+        VLOG(1) << "Copy output: index " << i << " skipped.";
+        Blob* dst = OperatorBase::OutputBlob(i);
+        dst->Reset(new Tensor(CPU));
+        auto dtensor = dst->GetMutableTensor(CPU);
+        dtensor->Resize(src_dims);
+        dtensor->ShareData(src);
+        continue;
+      }
 
       if (src.template IsType<float>()) {
         Blob* dst = OperatorBase::OutputBlob(i);
@@ -127,7 +138,6 @@ class IDEEPFallbackOp final : public IDEEPOperator {
           dst->Reset(new itensor());
         }
 
-        auto src_dims = src.dims();
         itensor::dims dst_dims (src_dims.begin(), src_dims.end());
         auto dtensor = dst->template GetMutable<itensor>();
         if (dtensor->get_dims() != dst_dims) {
@@ -136,10 +146,9 @@ class IDEEPFallbackOp final : public IDEEPOperator {
         dtensor->set_data_handle(const_cast<void*>(src.raw_data()));
       } else {
         VLOG(2) << "Output " << base_def_.output(i) << " as CPUTensor";
-        auto src_dims = src.dims();
         Blob* dst = OperatorBase::OutputBlob(i);
-        dst->Reset(new Tensor<CPUContext>());
-        auto dtensor = dst->template GetMutable<TensorCPU>();
+        dst->Reset(new Tensor(CPU));
+        auto dtensor = dst->GetMutableTensor(CPU);
         dtensor->Resize(src_dims);
         dtensor->ShareData(src);
       }
@@ -156,4 +165,3 @@ class IDEEPFallbackOp final : public IDEEPOperator {
 };
 
 } // namespace caffe2
-

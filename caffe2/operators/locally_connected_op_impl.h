@@ -189,9 +189,9 @@ void LocallyConnectedOp<T, Context>::RunOnDeviceWithOrderNCHWImpl(
     const T* filter_data,
     const T* bias_data,
     T* Y_data,
-    Tensor<Context>* column_buffer,
-    Tensor<Context>* column_transposed_buffer,
-    Tensor<Context>* Y_transposed_buffer) {
+    Tensor* column_buffer,
+    Tensor* column_transposed_buffer,
+    Tensor* Y_transposed_buffer) {
   const int input_stride = shape.C / group_ * shape.input_image_size;
   const int column_stride = shape.kernel_size * shape.output_image_size;
   column_buffer->Resize(shape.column_dims);
@@ -292,9 +292,9 @@ void LocallyConnectedOp<T, Context>::RunOnDeviceWithOrderNHWCImpl(
     const T* filter_data,
     const T* bias_data,
     T* Y_data,
-    Tensor<Context>* column_buffer,
-    Tensor<Context>* column_transposed_buffer,
-    Tensor<Context>* Y_transposed_buffer) {
+    Tensor* column_buffer,
+    Tensor* column_transposed_buffer,
+    Tensor* Y_transposed_buffer) {
   const int input_stride = shape.C * shape.input_image_size;
   const int column_stride = shape.kernel_size * shape.output_image_size;
   column_buffer->Resize(shape.column_dims);
@@ -550,9 +550,9 @@ void LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNCHWImpl(
     T* dfilter_data,
     T* dX_data,
     T* dbias_data,
-    Tensor<Context>* column_buffer,
-    Tensor<Context>* column_transposed_buffer,
-    Tensor<Context>* dY_transposed_buffer) {
+    Tensor* column_buffer,
+    Tensor* column_transposed_buffer,
+    Tensor* dY_transposed_buffer) {
   const int input_stride = shape.C * shape.input_image_size;
   const int column_stride = shape.kernel_size * shape.output_image_size;
   column_buffer->Resize(shape.column_dims);
@@ -726,9 +726,9 @@ void LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNHWCImpl(
     T* dfilter_data,
     T* dX_data,
     T* dbias_data,
-    Tensor<Context>* column_buffer,
-    Tensor<Context>* column_transposed_buffer,
-    Tensor<Context>* dY_transposed_buffer) {
+    Tensor* column_buffer,
+    Tensor* column_transposed_buffer,
+    Tensor* dY_transposed_buffer) {
   const int input_stride = shape.C * shape.input_image_size;
   const int column_stride = shape.kernel_size * shape.output_image_size;
   column_buffer->Resize(shape.column_dims);

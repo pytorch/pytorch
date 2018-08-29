@@ -24,7 +24,7 @@ class NCCLComm {
 
   NCCLComm() : NCCLComm(nullptr) {}
 
-  ~NCCLComm() {
+  ~NCCLComm() noexcept(false) {
     if (ncclComm_) {
       C10D_NCCL_CHECK(ncclCommDestroy(ncclComm_));
     }

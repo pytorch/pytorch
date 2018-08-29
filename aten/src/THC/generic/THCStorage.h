@@ -2,18 +2,13 @@
 #define THC_GENERIC_FILE "generic/THCStorage.h"
 #else
 
-#define TH_STORAGE_REFCOUNTED 1
-#define TH_STORAGE_RESIZABLE  2
-
 #define THCStorage THStorage
 
 // These used to be distinct types; for some measure of backwards compatibility and documentation
 // alias these to the single THCStorage type.
 #define THCudaStorage       THCStorage
 #define THCudaDoubleStorage THCStorage
-#ifdef CUDA_HALF_TENSOR
 #define THCudaHalfStorage   THCStorage
-#endif
 #define THCudaByteStorage   THCStorage
 #define THCudaCharStorage   THCStorage
 #define THCudaShortStorage  THCStorage

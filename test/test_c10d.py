@@ -110,11 +110,35 @@ class FileStoreTest(TestCase, StoreTestBase):
         return c10d.FileStore(self.file.name)
 
 
+class PrefixFileStoreTest(TestCase, StoreTestBase):
+    def setUp(self):
+        self.file = tempfile.NamedTemporaryFile()
+        self.filestore = c10d.FileStore(self.file.name)
+        self.prefix = "test_prefix"
+
+    def tearDown(self):
+        self.file.close()
+
+    def _create_store(self):
+        return c10d.PrefixStore(self.prefix, self.filestore)
+
+
 class TCPStoreTest(TestCase, StoreTestBase):
     def _create_store(self):
         addr = 'localhost'
         port = find_free_port()
         return c10d.TCPStore(addr, port, True)
+
+
+class PrefixTCPStoreTest(TestCase, StoreTestBase):
+    def setUp(self):
+        addr = 'localhost'
+        port = find_free_port()
+        self.tcpstore = c10d.TCPStore(addr, port, True)
+        self.prefix = "test_prefix"
+
+    def _create_store(self):
+        return c10d.PrefixStore(self.prefix, self.tcpstore)
 
 
 class RendezvousTest(TestCase):
@@ -348,11 +372,12 @@ class ProcessGroupNCCLTest(TestCase):
         self.world_size = 1
         self.file = tempfile.NamedTemporaryFile()
         self.num_gpus = torch.cuda.device_count()
+        if self.num_gpus < 2:
+            raise unittest.SkipTest("NCCL test requires 2+ GPUs")
 
     def tearDown(self):
         self.file.close()
 
-    @skip_if_not_nccl
     def test_broadcast_ops(self):
         store = c10d.FileStore(self.file.name)
         pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
@@ -375,7 +400,6 @@ class ProcessGroupNCCLTest(TestCase):
             for i in range(self.num_gpus):
                 self.assertEqual(tensors[i], tensors[rt])
 
-    @skip_if_not_nccl
     def test_allreduce_ops(self):
         store = c10d.FileStore(self.file.name)
         pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
@@ -429,6 +453,54 @@ class ProcessGroupNCCLTest(TestCase):
 
         for i in range(self.num_gpus):
             self.assertEqual(torch.Tensor([self.num_gpus]), tensors[i])
+
+    def test_reduce_ops(self):
+        store = c10d.FileStore(self.file.name)
+        pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+
+        def reduce(xs, rootRank, rootTensor):
+            opts = c10d.ReduceOptions()
+            opts.rootRank = rootRank
+            opts.rootTensor = rootTensor
+            work = pg.reduce(xs, opts)
+            work.wait()
+
+        # for every root tensor
+        for rt in range(self.num_gpus):
+            tensors = []
+            for i in range(self.num_gpus):
+                tensors.append(torch.Tensor([i + 1]).cuda(i))
+
+            reduce(tensors, self.rank, rt)
+
+            self.assertEqual(
+                torch.Tensor([float(self.num_gpus * (self.num_gpus + 1) / 2)]),
+                tensors[rt])
+
+    def test_allgather_ops(self):
+        store = c10d.FileStore(self.file.name)
+        pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+
+        def allgather(output_ts, input_ts):
+            work = pg.allgather(output_ts, input_ts)
+            work.wait()
+
+        tensors = []
+        output_ts = [[] for _ in range(self.num_gpus)]
+
+        for idx, ls in enumerate(output_ts):
+            for _ in range(self.world_size * self.num_gpus):
+                ls.append(torch.Tensor([0]).cuda(idx))
+
+        for i in range(self.num_gpus):
+            tensors.append(torch.Tensor([i]).cuda(i))
+
+        allgather(output_ts, tensors)
+
+        # Verification
+        for device_ts in output_ts:
+            for s_idx, t in enumerate(device_ts):
+                self.assertEqual(torch.Tensor([s_idx]), t)
 
 
 class Net(nn.Module):

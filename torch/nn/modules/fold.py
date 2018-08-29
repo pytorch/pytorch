@@ -8,19 +8,19 @@ class Fold(Module):
     tensor.
 
     Consider a batched :attr:`input` tensor containing sliding local blocks,
-    e.g., patches of images, of shape :math:`(N, C \times  \prod(\text{kernel_size}), L)`,
-    where :math:`N` is batch dimension, :math:`C \times \prod(\text{kernel_size})`
-    is the number of values with in a block (a block has :math:`\prod(\text{kernel_size})`
+    e.g., patches of images, of shape :math:`(N, C \times  \prod(\text{kernel\_size}), L)`,
+    where :math:`N` is batch dimension, :math:`C \times \prod(\text{kernel\_size})`
+    is the number of values with in a block (a block has :math:`\prod(\text{kernel\_size})`
     spatial locations each containing a :math:`C`-channeled vector), and
     :math:`L` is the total number of blocks. (This is exacly the
     same specification as the output shape of :class:`~torch.nn.Unfold`.) This
     operation combines these local blocks into the large :attr:`output` tensor
-    of shape :math:`(N, C, \text{output_size}[0], \text{output_size}[1], \dots)`.
+    of shape :math:`(N, C, \text{output\_size}[0], \text{output\_size}[1], \dots)`.
     Similar to :class:`~torch.nn.Unfold`, the arguments must satisfy
 
     .. math::
-        L = \prod_d \left\lfloor\frac{\text{output_size}[d] + 2 \times \text{padding}[d] \
-            - \text{dilation}[d] \times (\text{kernel_size}[d] - 1) - 1}{\text{stride}[d]} + 1\right\rfloor,
+        L = \prod_d \left\lfloor\frac{\text{output\_size}[d] + 2 \times \text{padding}[d] \
+            - \text{dilation}[d] \times (\text{kernel\_size}[d] - 1) - 1}{\text{stride}[d]} + 1\right\rfloor,
 
     where :math:`d` is over all spatial dimensions.
 
@@ -64,8 +64,8 @@ class Fold(Module):
         supported.
 
     Shape:
-        - Input: :math:`(N, C \times \prod(\text{kernel_size}), L)`
-        - Output: :math:`(N, C, \text{output_size}[0], \text{output_size}[1], \dots)` as described above
+        - Input: :math:`(N, C \times \prod(\text{kernel\_size}), L)`
+        - Output: :math:`(N, C, \text{output\_size}[0], \text{output\_size}[1], \dots)` as described above
 
     Examples::
 
@@ -106,17 +106,17 @@ class Unfold(Module):
     and :math:`*` represent arbitrary spatial dimensions. This operation flattens
     each sliding :attr:`kernel_size`-sized block within the spatial dimensions
     of :attr:`input` into a column (i.e., last dimension) of a 3-D :attr:`output`
-    tensor of shape :math:`(N, C \times \prod(\text{kernel_size}), L)`, where
-    :math:`C \times \prod(\text{kernel_size})` is the total number of values
-    with in each block (a block has :math:`\prod(\text{kernel_size})` spatial
+    tensor of shape :math:`(N, C \times \prod(\text{kernel\_size}), L)`, where
+    :math:`C \times \prod(\text{kernel\_size})` is the total number of values
+    with in each block (a block has :math:`\prod(\text{kernel\_size})` spatial
     locations each containing a :math:`C`-channeled vector), and :math:`L` is
     the total number of such blocks:
 
     .. math::
-        L = \prod_d \left\lfloor\frac{\text{input_spatial_size}[d] + 2 \times \text{padding}[d] \
-            - \text{dilation}[d] \times (\text{kernel_size}[d] - 1) - 1}{\text{stride}[d]} + 1\right\rfloor,
+        L = \prod_d \left\lfloor\frac{\text{input\_spatial\_size}[d] + 2 \times \text{padding}[d] \
+            - \text{dilation}[d] \times (\text{kernel\_size}[d] - 1) - 1}{\text{stride}[d]} + 1\right\rfloor,
 
-    where :math:`\text{input_spatial_size}` is formed by the spatial dimensions
+    where :math:`\text{input\_spatial\_size}` is formed by the spatial dimensions
     of :attr:`input` (:math:`*` above), and :math:`d` is over all spatial
     dimensions.
 
@@ -158,7 +158,7 @@ class Unfold(Module):
 
     Shape:
         - Input: :math:`(N, C, *)`
-        - Output: :math:`(N, C \times \prod(\text{kernel_size}), L)` as described above
+        - Output: :math:`(N, C \times \prod(\text{kernel\_size}), L)` as described above
 
     Examples::
 

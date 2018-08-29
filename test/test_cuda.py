@@ -773,7 +773,7 @@ class TestCuda(TestCase):
         # interlace
         torch.cuda.empty_cache()
         gen0 = self._test_memory_stats_generator(self, device=0, N=35)
-        gen1 = self._test_memory_stats_generator(self, device=1, N=35)
+        gen1 = self._test_memory_stats_generator(self, device=torch.device('cuda:1'), N=35)
         end0 = end1 = False
         while not (end0 and end1):
             end0 = advance(gen0, end0)
@@ -782,7 +782,7 @@ class TestCuda(TestCase):
         # semi-random order
         torch.cuda.empty_cache()
         gen0 = self._test_memory_stats_generator(self, device=0, N=35)
-        gen1 = self._test_memory_stats_generator(self, device=1, N=35)
+        gen1 = self._test_memory_stats_generator(self, device=torch.device('cuda:1'), N=35)
         end0 = end1 = False
 
         while not (end0 and end1):
@@ -1405,6 +1405,10 @@ class TestCuda(TestCase):
         TestTorch._test_pinverse(self, lambda t: t.cuda())
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    def test_matrix_rank(self):
+        TestTorch._test_matrix_rank(self, lambda x: x.cuda())
+
+    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_det_logdet_slogdet(self):
         TestTorch._test_det_logdet_slogdet(self, lambda t: t.cuda())
 
@@ -1462,7 +1466,7 @@ class TestCuda(TestCase):
     def test_multinomial(self):
         TestTorch._test_multinomial(self, torch.cuda.FloatTensor)
 
-        # Test a corner case from older PyTorch (Issue #4858)
+        # Test two corner cases from older PyTorch (Issue #4858)
         freqs = torch.cuda.FloatTensor([
             0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
             0.03178183361887932, 0.027680952101945877, 0.033176131546497345,
@@ -1482,6 +1486,12 @@ class TestCuda(TestCase):
         torch.cuda.manual_seed(11042)
         sample = torch.multinomial(freqs, 1000, True)
         self.assertNotEqual(freqs[sample].min(), 0)
+
+        p = torch.zeros(3421, 2, device="cuda", dtype=torch.float)
+        p[:, 1] = 1
+        torch.cuda.manual_seed(5214)
+        r = torch.multinomial(p, 1)
+        self.assertNotEqual(r.min().item(), 0)
 
     @staticmethod
     def mute():
@@ -1818,18 +1828,6 @@ class TestCuda(TestCase):
 
     def test_random_neg_values(self):
         TestTorch._test_random_neg_values(self, use_cuda=True)
-
-    def test_overlapped_indices(self):
-        a = torch.arange(0, 128).view(32, 4).cuda()
-        b = torch.arange(0, 128).view(32, 4).cuda()
-        b = b.set_(b.storage(), storage_offset=0, size=(65, 64), stride=(1, 1))
-        b += 5
-        b = b.set_(b.storage(),
-                   storage_offset=0,
-                   size=a.size(),
-                   stride=a.stride())
-        a += 5
-        self.assertEqual(a, b)
 
     def test_bincount_cuda(self):
         TestTorch._test_bincount(self, device='cuda')

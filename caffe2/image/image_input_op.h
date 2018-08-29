@@ -8,8 +8,8 @@
 #include <algorithm>
 
 #include "caffe2/core/common.h"
-#include "caffe/proto/caffe.pb.h"
 #include "caffe2/core/db.h"
+#include "caffe2/proto/caffe2_legacy.pb.h"
 #include "caffe2/utils/cast.h"
 #include "caffe2/utils/math.h"
 #include "caffe2/utils/thread_pool.h"
@@ -87,12 +87,12 @@ class ImageInputOp final
   unique_ptr<db::DBReader> owned_reader_;
   const db::DBReader* reader_;
   CPUContext cpu_context_;
-  TensorCPU prefetched_image_;
-  TensorCPU prefetched_label_;
+  Tensor prefetched_image_{CPU};
+  Tensor prefetched_label_{CPU};
   vector<TensorCPU> prefetched_additional_outputs_;
-  Tensor<Context> prefetched_image_on_device_;
-  Tensor<Context> prefetched_label_on_device_;
-  vector<Tensor<Context>> prefetched_additional_outputs_on_device_;
+  Tensor prefetched_image_on_device_{Context::GetDeviceType()};
+  Tensor prefetched_label_on_device_{Context::GetDeviceType()};
+  vector<Tensor> prefetched_additional_outputs_on_device_;
   // Default parameters for images
   PerImageArg default_arg_;
   int batch_size_;
@@ -118,8 +118,8 @@ class ImageInputOp final
   int crop_;
   std::vector<float> mean_;
   std::vector<float> std_;
-  Tensor<Context> mean_gpu_;
-  Tensor<Context> std_gpu_;
+  Tensor mean_gpu_{Context::GetDeviceType()};
+  Tensor std_gpu_{Context::GetDeviceType()};
   bool mirror_;
   bool is_test_;
   bool use_caffe_datum_;
@@ -154,8 +154,6 @@ ImageInputOp<Context>::ImageInputOp(
     Workspace* ws)
     : PrefetchOperator<Context>(operator_def, ws),
       reader_(nullptr),
-      prefetched_additional_outputs_(OutputSize() - 2),
-      prefetched_additional_outputs_on_device_(OutputSize() - 2),
       batch_size_(
           OperatorBase::template GetSingleArgument<int>("batch_size", 0)),
       label_type_(static_cast<LABEL_TYPE>(
@@ -385,6 +383,9 @@ ImageInputOp<Context>::ImageInputOp(
   }
 
   for (int i = 0; i < additional_output_sizes.size(); ++i) {
+    prefetched_additional_outputs_on_device_.emplace_back(
+        Context::GetDeviceType());
+    prefetched_additional_outputs_.emplace_back(CPU);
     prefetched_additional_outputs_[i].Resize(
         TIndex(batch_size_), TIndex(additional_output_sizes[i]));
   }
@@ -450,7 +451,7 @@ bool ImageInputOp<Context>::GetImageAndLabelAndInfoFromDBValue(
   info = default_arg_;
   if (use_caffe_datum_) {
     // The input is a caffe datum format.
-    caffe::Datum datum;
+    CaffeDatum datum;
     CAFFE_ENFORCE(datum.ParseFromString(value));
 
     prefetched_label_.mutable_data<int>()[item_id] = datum.label();
@@ -1207,12 +1208,12 @@ bool ImageInputOp<Context>::Prefetch() {
   // If the context is not CPUContext, we will need to do a copy in the
   // prefetch function as well.
   if (!std::is_same<Context, CPUContext>::value) {
-    prefetched_image_on_device_.CopyFrom(prefetched_image_, &context_);
-    prefetched_label_on_device_.CopyFrom(prefetched_label_, &context_);
+    prefetched_image_on_device_.CopyFrom(prefetched_image_, &cpu_context_);
+    prefetched_label_on_device_.CopyFrom(prefetched_label_, &cpu_context_);
 
     for (int i = 0; i < prefetched_additional_outputs_on_device_.size(); ++i) {
       prefetched_additional_outputs_on_device_[i].CopyFrom(
-          prefetched_additional_outputs_[i], &context_);
+          prefetched_additional_outputs_[i], &cpu_context_);
     }
   }
 
@@ -1223,13 +1224,13 @@ bool ImageInputOp<Context>::Prefetch() {
 
 template <class Context>
 bool ImageInputOp<Context>::CopyPrefetched() {
-  auto* image_output = OperatorBase::Output<Tensor<Context> >(0);
-  auto* label_output = OperatorBase::Output<Tensor<Context> >(1);
-  vector<Tensor<Context>*> additional_outputs_output;
+  auto type = Context::GetDeviceType();
+  auto* image_output = OperatorBase::Output<Tensor>(0, type);
+  auto* label_output = OperatorBase::Output<Tensor>(1, type);
+  vector<Tensor*> additional_outputs_output;
 
   for (int i = 2; i < OutputSize(); ++i) {
-    additional_outputs_output.push_back(
-        OperatorBase::Output<Tensor<Context>>(i));
+    additional_outputs_output.push_back(OperatorBase::Output<Tensor>(i, type));
   }
 
   // Note(jiayq): The if statement below should be optimized away by the
@@ -1249,10 +1250,12 @@ bool ImageInputOp<Context>::CopyPrefetched() {
         mean_gpu_.Resize(mean_.size());
         std_gpu_.Resize(std_.size());
 
-        context_.template Copy<float, CPUContext, Context>(
-          mean_.size(), mean_.data(), mean_gpu_.template mutable_data<float>());
-        context_.template Copy<float, CPUContext, Context>(
-          std_.size(), std_.data(), std_gpu_.template mutable_data<float>());
+        context_.template CopyFromCPU<float>(
+            mean_.size(),
+            mean_.data(),
+            mean_gpu_.template mutable_data<float>());
+        context_.template CopyFromCPU<float>(
+            std_.size(), std_.data(), std_gpu_.template mutable_data<float>());
         mean_std_copied_ = true;
       }
       // GPU transform kernel allows explicitly setting output type

@@ -45,7 +45,7 @@ namespace torch { namespace autograd {
 
 VariableInfo::VariableInfo(const Variable& var)
   : type(&var.type())
-  , size(var.sizes())
+  , size(var.sizes().vec())
   , requires_grad(var.requires_grad()) {
   if (var.type().is_cuda()) {
     device = var.get_device();
@@ -433,7 +433,7 @@ static void _wrap_outputs(THPFunction *self,
     // to set_history wins.
     auto var = as_variable(obj, i);
     if (cdata) {
-      auto output_nr = cdata->add_input_metadata(var.type(), var.sizes());
+      auto output_nr = cdata->add_input_metadata(var);
       AT_ASSERT(i == (int)output_nr);
     }
     set_history(var, i, is_input, is_modified, is_differentiable);
@@ -558,12 +558,12 @@ static void _assert_not_tracing(const char* name, const variable_list& input_var
   }
 }
 
-static jit::tracer::PreTraceInfo _trace_pre_record(
+static Node* _trace_pre_record(
     PyObject* op_obj,
     PyObject *input_objects,
     const variable_list& input_vars) {
   if (!jit::tracer::isTracing()) {
-    return jit::tracer::PreTraceInfo();
+    return nullptr;
   }
 
   // Save scalar args and the calling convention
@@ -593,7 +593,7 @@ static jit::tracer::PreTraceInfo _trace_pre_record(
 }
 
 static void _trace_post_record(
-    const jit::tracer::PreTraceInfo& trace_info,
+    Node* node,
     PyObject* op_obj,
     const variable_list& input_vars,
     PyObject *output_objects,
@@ -610,15 +610,15 @@ static void _trace_post_record(
     output_vars[i] = var->cdata;
   }
 
-  jit::tracer::postRecordTrace(trace_info, output_vars);
+  jit::tracer::postRecordTrace(node, output_vars);
 
-  trace_info.n->i_(attr::inplace, is_inplace);
+  node->i_(attr::inplace, is_inplace);
 
 }
 
 PyObject* process_outputs(PyObject *op_obj, THPFunction* grad_fn, const UnpackedInput& unpacked,
                           PyObject *inputs, THPObjectPtr&& raw_output, bool is_executable,
-                          const jit::tracer::PreTraceInfo& trace_info) {
+                          Node* node) {
   bool unpack_output = ensure_tuple(raw_output);
 
   auto num_outputs = PyTuple_GET_SIZE(raw_output.get());
@@ -639,7 +639,7 @@ PyObject* process_outputs(PyObject *op_obj, THPFunction* grad_fn, const Unpacked
 
   bool is_inplace = static_cast<bool>(grad_fn->dirty_tensors);
   _wrap_outputs(grad_fn, inputs, raw_output, outputs, is_executable);
-  _trace_post_record(trace_info, op_obj, unpacked.input_vars, outputs, is_inplace);
+  _trace_post_record(node, op_obj, unpacked.input_vars, outputs, is_inplace);
   if (is_executable) {
     _save_variables(grad_fn);
   } else {
@@ -687,7 +687,7 @@ PyObject *THPFunction_do_forward(THPFunction *self, PyObject *_inputs)
   }
 
   return process_outputs(nullptr, self, unpacked_input, _inputs, std::move(raw_output),
-                         is_executable, jit::tracer::PreTraceInfo());
+                         is_executable, nullptr);
   END_HANDLE_TH_ERRORS
 }
 
@@ -708,7 +708,7 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *inputs)
   InputFlags& input_info = info_pair.second;
 
   // Record input nodes if tracing
-  auto trace_info = _trace_pre_record(cls, inputs, unpacked_input.input_vars);
+  auto* node = _trace_pre_record(cls, inputs, unpacked_input.input_vars);
 
   // Initialize backward function (and ctx)
   bool is_executable = input_info.is_executable;
@@ -737,7 +737,7 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *inputs)
   }
 
   return process_outputs(cls, ctx, unpacked_input, inputs, std::move(tensor_outputs),
-                         is_executable, trace_info);
+                         is_executable, node);
   END_HANDLE_TH_ERRORS
 }
 

@@ -10,7 +10,7 @@
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/types.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 
 #ifndef CAFFE2_USE_CUDNN
 #error("This Caffe2 install is not built with cudnn, so you should not include this file.");
@@ -259,7 +259,7 @@ class cudnnTensorDescWrapper {
   cudnnTensorFormat_t format_;
   cudnnDataType_t type_;
   vector<int> dims_;
-  DISABLE_COPY_AND_ASSIGN(cudnnTensorDescWrapper);
+  AT_DISABLE_COPY_AND_ASSIGN(cudnnTensorDescWrapper);
 };
 
 class cudnnFilterDescWrapper {
@@ -313,7 +313,7 @@ class cudnnFilterDescWrapper {
   StorageOrder order_;
   cudnnDataType_t type_;
   vector<int> dims_;
-  DISABLE_COPY_AND_ASSIGN(cudnnFilterDescWrapper);
+  AT_DISABLE_COPY_AND_ASSIGN(cudnnFilterDescWrapper);
 };
 
 

@@ -133,10 +133,10 @@ bool RoIPoolOp<float, CUDAContext>::RunOnDevice() {
   if (R.size() == 0) {
     Y->Resize(0, X.dim32(1), pooled_height_, pooled_width_);
     // mutable_data calls are needed to allocate the tensors
-    Y->mutable_data<float>();
+    Y->template mutable_data<float>();
     if (!is_test_) {
       A->Resize(Y->dims());
-      A->mutable_data<int>();
+      A->template mutable_data<int>();
     }
     return true;
   }
@@ -146,23 +146,23 @@ bool RoIPoolOp<float, CUDAContext>::RunOnDevice() {
     A->Resize(Y->dims());
   }
   int output_size = Y->size();
-  int* argmax_data = is_test_ ? nullptr : A->mutable_data<int>();
-  ROIPoolForward<float><<<
-      CAFFE_GET_BLOCKS(output_size),
-      CAFFE_CUDA_NUM_THREADS,
-      0,
-      context_.cuda_stream()>>>(
-      output_size,
-      X.data<float>(),
-      spatial_scale_,
-      X.dim32(1),
-      X.dim32(2),
-      X.dim32(3),
-      pooled_height_,
-      pooled_width_,
-      R.data<float>(),
-      Y->mutable_data<float>(),
-      argmax_data);
+  int* argmax_data = is_test_ ? nullptr : A->template mutable_data<int>();
+  ROIPoolForward<float>
+      <<<CAFFE_GET_BLOCKS(output_size),
+         CAFFE_CUDA_NUM_THREADS,
+         0,
+         context_.cuda_stream()>>>(
+          output_size,
+          X.data<float>(),
+          spatial_scale_,
+          X.dim32(1),
+          X.dim32(2),
+          X.dim32(3),
+          pooled_height_,
+          pooled_width_,
+          R.data<float>(),
+          Y->template mutable_data<float>(),
+          argmax_data);
   return true;
 }
 
@@ -179,25 +179,25 @@ bool RoIPoolGradientOp<float, CUDAContext>::RunOnDevice() {
   dX->ResizeLike(X);
   // Must zero-out dX before accumulating gradients
   math::Set<float, CUDAContext>(
-      dX->size(), 0.f, dX->mutable_data<float>(), &context_);
+      dX->size(), 0.f, dX->template mutable_data<float>(), &context_);
   if (dY.size() > 0) { // Handle possibly empty gradient if there were no rois
-    ROIPoolBackward<float><<<
-        CAFFE_GET_BLOCKS(dY.size()),
-        CAFFE_CUDA_NUM_THREADS,
-        0,
-        context_.cuda_stream()>>>(
-        dY.size(),
-        dY.data<float>(),
-        A.data<int>(),
-        R.dim32(0),
-        spatial_scale_,
-        X.dim32(1),
-        X.dim32(2),
-        X.dim32(3),
-        pooled_height_,
-        pooled_width_,
-        dX->mutable_data<float>(),
-        R.data<float>());
+    ROIPoolBackward<float>
+        <<<CAFFE_GET_BLOCKS(dY.size()),
+           CAFFE_CUDA_NUM_THREADS,
+           0,
+           context_.cuda_stream()>>>(
+            dY.size(),
+            dY.data<float>(),
+            A.data<int>(),
+            R.dim32(0),
+            spatial_scale_,
+            X.dim32(1),
+            X.dim32(2),
+            X.dim32(3),
+            pooled_height_,
+            pooled_width_,
+            dX->template mutable_data<float>(),
+            R.data<float>());
   }
   return true;
 }

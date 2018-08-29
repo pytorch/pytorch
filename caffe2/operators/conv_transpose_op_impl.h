@@ -17,9 +17,9 @@ namespace caffe2 {
 
 template <typename T, class Context>
 bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNCHW() {
-  const Tensor<Context>& X = Input(INPUT);
+  const Tensor& X = Input(INPUT);
   auto& filter = Input(FILTER);
-  Tensor<Context>* Y = Output(0);
+  Tensor* Y = Output(0);
   const int N = X.dim32(0), M = X.dim32(1), H = X.dim32(2), W = X.dim32(3);
   CAFFE_ENFORCE(filter.ndim() == 4, "filter must be 4D tensor");
   CAFFE_ENFORCE(
@@ -59,7 +59,7 @@ bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   const T* filter_data = filter.template data<T>();
   T* Ydata = Y->template mutable_data<T>();
 
-  auto f = [&](Tensor<Context>* col_buffer) {
+  auto f = [&](Tensor* col_buffer) {
     col_buffer->Resize(
         vector<TIndex>{C, this->kernel_h(), this->kernel_w(), H, W});
     T* col_buffer_data = col_buffer->template mutable_data<T>();
@@ -139,9 +139,9 @@ bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNCHW() {
 
 template <typename T, class Context>
 bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNHWC() {
-  const Tensor<Context>& X = Input(INPUT);
+  const Tensor& X = Input(INPUT);
   auto& filter = Input(FILTER);
-  Tensor<Context>* Y = Output(0);
+  Tensor* Y = Output(0);
   const auto N = X.dim32(0), H = X.dim32(1), W = X.dim32(2), M = X.dim32(3);
   CAFFE_ENFORCE(filter.ndim() == 4, "filter must be 4D tensor");
   CAFFE_ENFORCE(
@@ -180,7 +180,7 @@ bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   const T* filter_data = filter.template data<T>();
   T* Ydata = Y->template mutable_data<T>();
 
-  auto f = [&](Tensor<Context>* /*col_buffer*/) {
+  auto f = [&](Tensor* /*col_buffer*/) {
     col_buffer_.Resize(
         vector<TIndex>{H, W, this->kernel_h(), this->kernel_w(), C});
     T* col_buffer_data = col_buffer_.template mutable_data<T>();

@@ -13,7 +13,8 @@ int main(int argc, char** argv) {
   const auto ntensors = 10;
   std::vector<at::Tensor> tensors;
   for (auto i = 0; i < ntensors; i++) {
-    auto x = at::ones(at::CPU(at::kFloat), {1000, 16 * (i + 1)});
+    auto x =
+        at::ones({1000, 16 * (i + 1)}, at::TensorOptions(at::CPU(at::kFloat)));
     tensors.push_back(x);
   }
 

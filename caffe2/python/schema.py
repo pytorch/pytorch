@@ -1183,6 +1183,13 @@ def data_type_for_dtype(dtype):
     raise TypeError('Unknown dtype: ' + str(dtype.base))
 
 
+def dtype_for_core_type(core_type):
+    for np_type, dt in _DATA_TYPE_FOR_DTYPE:
+        if dt == core_type:
+            return np_type
+    raise TypeError('Unknown core type: ' + str(core_type))
+
+
 def attach_metadata_to_scalars(field, metadata):
     for f in field.all_scalars():
         f.set_metadata(metadata)

@@ -92,23 +92,6 @@ class CPUSparseLengthsReductionOp : public Operator<CPUContext> {
     return true;
   }
 
-  std::vector<TensorFiller<CPUContext>> InputFillers(
-      const std::vector<std::vector<TIndex>>& shapes) override {
-    CAFFE_ENFORCE_EQ(shapes.size(), Operator<CPUContext>::Inputs().size());
-    auto fillers = Operator<CPUContext>::InputFillers(shapes);
-    if (USE_WEIGHT) {
-      // TODO: enable the fillers
-      throw UnsupportedOperatorFeature(
-          OperatorBase::type() + " does not have input fillers");
-    }
-    Operator<CPUContext>::SparseLengthsFillerHelper(
-        shapes, INDICES, LENGTHS, &fillers);
-    Operator<CPUContext>::SparseSegmentsFillerHelper(
-        shapes, DATA, INDICES, &fillers);
-    return fillers;
-  }
-
- private:
   enum {
     DATA = 0, // Data input.
     WEIGHT = 1, // Weight input used in SparseLengthsWeightedSum

@@ -21,32 +21,27 @@ size_t THStorage_(elementSize)()
 
 THStorage* THStorage_(new)(void)
 {
-  THStorage* storage = new THStorage(
-      at::CTypeToScalarType<th::from_type<real>>::to(),
-      0,
-      getTHDefaultAllocator(),
-      TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE);
-  return storage;
+  return THStorage_new(at::CTypeToScalarType<th::from_type<real>>::to());
 }
 
 THStorage* THStorage_(newWithSize)(ptrdiff_t size)
 {
-  THStorage* storage = new THStorage(
-      at::CTypeToScalarType<th::from_type<real>>::to(),
+  THStorage* storage = c10::make_intrusive<at::StorageImpl>(
+      at::scalarTypeToDataType(at::CTypeToScalarType<th::from_type<real>>::to()),
       size,
       getTHDefaultAllocator(),
-      TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE);
+      true).release();
   return storage;
 }
 
 THStorage* THStorage_(newWithAllocator)(ptrdiff_t size,
                                         at::Allocator *allocator)
 {
-  THStorage* storage = new THStorage(
-      at::CTypeToScalarType<th::from_type<real>>::to(),
+  THStorage* storage = c10::make_intrusive<at::StorageImpl>(
+      at::scalarTypeToDataType(at::CTypeToScalarType<th::from_type<real>>::to()),
       size,
       allocator,
-      TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE);
+      true).release();
   return storage;
 }
 
@@ -55,19 +50,17 @@ THStorage* THStorage_(newWithMapping)(const char *filename, ptrdiff_t size, int 
 {
   auto scalar_type = at::CTypeToScalarType<th::from_type<real>>::to();
   size_t actual_size = -1;
-  THStorage* storage = new THStorage(
-      scalar_type,
+  THStorage* storage = c10::make_intrusive<at::StorageImpl>(
+      at::scalarTypeToDataType(scalar_type),
       size,
       THMapAllocator::makeDataPtr(
           filename, flags, size * at::elementSize(scalar_type), &actual_size),
       /* allocator */ nullptr,
-      TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE);
+      false).release();
 
   if (size <= 0) {
-    storage->size = actual_size / at::elementSize(scalar_type);
+    storage->set_size(actual_size / at::elementSize(scalar_type));
   }
-
-  THStorage_clearFlag(storage, TH_STORAGE_RESIZABLE);
 
   return storage;
 }
@@ -110,16 +103,6 @@ THStorage* THStorage_(newWithSize4)(real data0, real data1, real data2, real dat
   return self;
 }
 
-void THStorage_(setFlag)(THStorage *storage, const char flag)
-{
-  THStorage_setFlag(storage, flag);
-}
-
-void THStorage_(clearFlag)(THStorage *storage, const char flag)
-{
-  THStorage_clearFlag(storage, flag);
-}
-
 void THStorage_(retain)(THStorage *storage)
 {
   THStorage_retain(storage);
@@ -132,12 +115,12 @@ void THStorage_(free)(THStorage *storage)
 
 THStorage* THStorage_(newWithDataAndAllocator)(at::DataPtr&& data, ptrdiff_t size,
                                                at::Allocator* allocator) {
-  THStorage* storage = new THStorage(
-      at::CTypeToScalarType<th::from_type<real>>::to(),
+  THStorage* storage = c10::make_intrusive<at::StorageImpl>(
+      at::scalarTypeToDataType(at::CTypeToScalarType<th::from_type<real>>::to()),
       size,
       std::move(data),
       allocator,
-      TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE);
+      true).release();
   return storage;
 }
 
@@ -149,25 +132,25 @@ void THStorage_(resize)(THStorage *storage, ptrdiff_t size)
 void THStorage_(fill)(THStorage *storage, real value)
 {
   ptrdiff_t i;
-  for(i = 0; i < storage->size; i++)
+  for(i = 0; i < storage->size(); i++)
     THStorage_(data)(storage)[i] = value;
 }
 
 void THStorage_(set)(THStorage *self, ptrdiff_t idx, real value)
 {
-  THArgCheck((idx >= 0) && (idx < self->size), 2, "out of bounds");
+  THArgCheck((idx >= 0) && (idx < self->size()), 2, "out of bounds");
   THStorage_(data)(self)[idx] = value;
 }
 
 real THStorage_(get)(const THStorage *self, ptrdiff_t idx)
 {
-  THArgCheck((idx >= 0) && (idx < self->size), 2, "out of bounds");
+  THArgCheck((idx >= 0) && (idx < self->size()), 2, "out of bounds");
   return THStorage_(data)(self)[idx];
 }
 
 void THStorage_(swap)(THStorage *storage1, THStorage *storage2)
 {
-  THStorage_swap(storage1, storage2);
+  std::swap(*storage1, *storage2);
 }
 
 #endif

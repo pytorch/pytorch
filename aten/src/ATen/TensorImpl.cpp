@@ -1,11 +1,29 @@
 #include <ATen/TensorImpl.h>
 
+#include "ATen/Context.h"
 #include <ATen/Tensor.h>
-#include <ATen/optional.h>
+#include <ATen/core/optional.h>
+#include <ATen/Context.h>
+#include <ATen/core/Backend.h>
+
+#include <ATen/detail/VariableHooksInterface.h>
 
 #include <TH/THTensor.hpp>
 
 namespace at {
+
+Type& TensorImpl::type() const {
+  // Select backend from the hard-coded ones that the legacy ATen dispatcher
+  // knows about
+  Backend backend = tensorTypeIdToBackend(type_id_);
+  Type* base_type = &globalContext().getType(backend, scalar_type_);
+  if (is_variable_) {
+    return detail::getVariableHooks().getVariableType(*base_type);
+  } else {
+    return *base_type;
+  }
+}
+
 Tensor& TensorImpl::grad() {
   AT_ERROR("grad is not implemented for Tensor");
 }
@@ -38,51 +56,89 @@ void Tensor::backward(
     at::optional<Tensor> gradient,
     bool keep_graph,
     bool create_graph) {
-  pImpl->backward(std::move(gradient), keep_graph, create_graph);
+  tensor_impl_->backward(std::move(gradient), keep_graph, create_graph);
 }
 
-TensorImpl::~TensorImpl() {
-  if (tensor) tensor->release();
+TensorImpl::TensorImpl(TensorTypeId type_id, ScalarType scalar_type, bool is_variable)
+    : TensorImpl({}, type_id, scalar_type, is_variable) {
+  // UndefinedTensors and SparseTensors don't have storages.
+  if (type_id != UndefinedTensorId() && scalar_type != ScalarType::Undefined
+      && type_id != SparseCPUTensorId() && type_id != SparseCUDATensorId()) {
+    auto type = &globalContext().getType(tensorTypeIdToBackend(type_id), scalar_type);
+    storage_ = type->storage(true);
+  }
 }
+
+TensorImpl::TensorImpl(Storage&& storage, TensorTypeId type_id, bool is_variable)
+    : TensorImpl(std::move(storage), type_id, dataTypeToScalarType(storage.dtype()), is_variable) {}
+
+TensorImpl::TensorImpl(Storage&& storage, TensorTypeId type_id, ScalarType scalar_type, bool is_variable)
+    : storage_(std::move(storage)),
+      storage_offset_(0),
+      sizes_{0},
+      strides_{1},
+      is_contiguous_(true),
+      numel_(0),
+      type_id_(type_id),
+      scalar_type_(scalar_type),
+      is_variable_(is_variable) {}
 
 IntList TensorImpl::sizes() const {
-  // NB: dim in tensor is not synchronized with THTensor, so it's
-  // important to apply dim here
-  return IntList(THTensor_getSizePtr(tensor), dim());
+  return sizes_;
 }
 
 IntList TensorImpl::strides() const {
-  // NB: dim in tensor is not synchronized with THTensor, so it's
-  // important to apply dim here
-  return IntList(THTensor_getStridePtr(tensor), dim());
+  return strides_;
+}
+
+bool TensorImpl::compute_contiguous() const {
+  bool is_contiguous = true;
+  if (is_empty())
+    return is_contiguous;
+  int64_t z = 1;
+  for (int64_t d = dim() - 1; d >= 0; d--) {
+    if (size(d) != 1) {
+      if (stride(d) == z) {
+        z *= size(d);
+      } else {
+        is_contiguous = false;
+        break;
+      }
+    }
+  }
+  return is_contiguous;
 }
 
 void TensorImpl::release_resources() {
-  if (tensor) {
-      tensor->release();
-      tensor = nullptr;
+  if (storage_) {
+    storage_ = {};
   }
 }
 
 int64_t TensorImpl::dim() const {
-  if(THTensor_isZeroDim(tensor)) {
-    return 0;
-  }
-  return tensor->dim();
+  return sizes_.size();
+}
+
+int64_t TensorImpl::size(int64_t d) const {
+  d = at::maybe_wrap_dim(d, dim(), false);
+  return sizes_[d];
+}
+
+int64_t TensorImpl::stride(int64_t d) const {
+  d = at::maybe_wrap_dim(d, dim(), false);
+  return strides_[d];
 }
 
 TensorImpl* TensorImpl::maybe_zero_dim(bool condition_when_zero_dim) {
-  AT_CHECK(tensor, "TensorImpl without THTensor in maybe_zero_dim");
-  bool is_zero_dim = condition_when_zero_dim && tensor->sizes().size() == 1 && tensor->size(0) == 1;
-  THTensor_setIsZeroDim(tensor, is_zero_dim);
+  bool set_zero_dim = condition_when_zero_dim && this->sizes().size() == 1 && this->size(0) == 1;
+  if (set_zero_dim) {
+    resize_dim(0);
+  }
   return this;
 }
 
-void * TensorImpl::unsafeGetTH(bool retain) {
-  if (retain) {
-    tensor->retain();
-  }
-  return tensor;
+const Storage& TensorImpl::storage() const {
+  return storage_;
 }
 
 } // namespace at

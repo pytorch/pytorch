@@ -8,6 +8,7 @@
 #include "caffe2/core/hip/common_miopen.h"
 #include "caffe2/core/hip/context_hip.h"
 #include "caffe2/operators/hip/operator_fallback_hip.h"
+#include "caffe2/python/pybind_state_registry.h"
 
 namespace caffe2 {
 namespace python {
@@ -20,7 +21,6 @@ REGISTER_HIP_OPERATOR(
 REGISTER_HIP_OPERATOR(PythonDLPack, PythonOp<HIPContext, true>);
 REGISTER_HIP_OPERATOR(PythonDLPackGradient, PythonGradientOp<HIPContext, true>);
 
-REGISTER_BLOB_FETCHER((TypeMeta::Id<TensorHIP>()), TensorFetcher<HIPContext>);
 REGISTER_BLOB_FEEDER(HIP, TensorFeeder<HIPContext>);
 
 namespace py = pybind11;
@@ -86,6 +86,9 @@ PYBIND11_MODULE(caffe2_pybind11_state_hip, m) {
   addHIPGlobalMethods(m);
   addObjectMethods(m);
   addHIPObjectMethods(m);
+  for (const auto& addition : PybindAdditionRegistry()->Keys()) {
+    PybindAdditionRegistry()->Create(addition, m);
+  }
 }
 } // namespace python
 } // namespace caffe2
