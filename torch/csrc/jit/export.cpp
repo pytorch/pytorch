@@ -13,13 +13,25 @@
 #include <memory>
 #include <vector>
 #include <string>
+#include <sstream>
 
 namespace torch { namespace jit {
 
 namespace {
-
 namespace onnx_torch = ::torch::onnx;
 namespace onnx = ::ONNX_NAMESPACE;
+
+std::string getExportableSchemaStringForMethod(const script::Method& method) {
+  const auto& schema = method.getSchema();
+  for (const auto& argument : schema.arguments) {
+    AT_CHECK(
+        !argument.default_value,
+        "Default arguments in script graphs may currently not be exported.");
+  }
+  std::ostringstream stream;
+  stream << schema;
+  return stream.str();
+}
 
 std::string getNodeStackTraceString(const Node* n) {
   std::stringstream ss;
@@ -600,6 +612,9 @@ void ModuleEncoder::EncodeMethod(
     script::Method &method,
     const std::string prefix) {
   node_proto->set_name(prefix + method.name());
+
+  // We store the schema string in the docstring.
+  node_proto->set_doc_string(getExportableSchemaStringForMethod(method));
 
   // Store member_inputs of Method in input
   for (auto &member_input : method.params()) {
