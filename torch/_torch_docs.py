@@ -4459,6 +4459,15 @@ Args:
     upper(boolean, optional): controls whether to consider upper-triangular or lower-triangular region
     out (tuple, optional): the output tuple of (Tensor, Tensor)
 
+Returns:
+    (Tensor, Tensor): A tuple containing
+
+        - **e** (*Tensor*): Shape :math:`(m)`. Each element is an eigenvalue of ``input``,
+            The eigenvalues are in ascending order.
+        - **V** (*Tensor*): Shape :math:`(m \times m)`.
+            If ``eigenvectors=False``, it's a tensor filled with zeros.
+            Otherwise, this tensor contains the orthonormal eigenvectors of the ``input``.
+
 Examples::
 
 
