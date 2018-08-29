@@ -214,6 +214,15 @@ inline Stack createStackForSchema(
   return stack;
 }
 
+
+inline Stack createStackForGraph(const Graph& graph, py::args args) {
+  auto arguments = fmap(graph.inputs(), [](const Value *v) { return Argument(v->uniqueName(), v->type()); });
+  auto returns = fmap(graph.outputs(), [](const Value *v) { return Argument(v->uniqueName(), v->type()); });
+  auto schema = FunctionSchema("", arguments, returns);
+  auto stack = createStackForSchema(schema, args);
+  return stack;
+}
+
 inline py::object createPyObjectForStack(Stack&& stack) {
   if (stack.empty()) {
     return py::none();
@@ -232,20 +241,6 @@ inline py::object createPyObjectForStack(Stack&& stack) {
   }
 
   return return_values;
-}
-
-// TODO: Remove once we clean up the GraphExecutor usage.
-inline Stack evilDeprecatedBadCreateStackDoNotUse(const py::tuple& tuple, at::ArrayRef<Value*> inputs, size_t reserve_extra_space = 0) {
-  if (tuple.size() != inputs.size()) {
-    AT_ERROR("expected " + std::to_string(inputs.size()) +
-                             " inputs, but got " + std::to_string(tuple.size()));
-  }
-  Stack result;
-  result.reserve(tuple.size() + reserve_extra_space);
-  for (size_t i = 0; i < inputs.size(); ++i) {
-    result.push_back(toIValue(std::move(tuple[i]), inputs[i]->type()));
-  }
-  return result;
 }
 
 inline py::object invokeScriptMethodFromPython(

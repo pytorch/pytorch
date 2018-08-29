@@ -260,10 +260,7 @@ class JitTestCase(TestCase):
         else:
             recording_inputs = reference_tensors
 
-        if isinstance(func, torch._C.Graph):
-            ge = torch._C.GraphExecutor(func, optimize)
-        else:
-            ge = torch.jit.trace(*input_tensors, optimize=optimize)(func)
+        ge = torch.jit.trace(*input_tensors, optimize=optimize)(func)
 
         if verbose:
             print(ge.graph)
@@ -330,7 +327,7 @@ class TestJit(JitTestCase):
         m._create_method_from_graph("forward", graph)
         m_import = self.getExportImportCopy(m)
 
-        self.assertEqual(m.forward(*inputs), m_import.forward(*inputs))
+        self.assertEqual(m(*inputs), m_import(*inputs))
 
     def test_simple(self):
         x = torch.tensor([0.4], requires_grad=True)
@@ -914,10 +911,9 @@ class TestJit(JitTestCase):
         def fn(x):
             return MyInplaceFn.apply(x)
 
-        x = torch.randn(5, 5)
-        ge = torch._C.GraphExecutor(fn, (x,))
-        with self.assertRaisesRegex(RuntimeError, 'inplace MyInplaceFn'):
-            ge(x)
+        x = torch.tensor([0.], requires_grad=True)
+        with self.assertRaisesRegex(RuntimeError, 'in-place operation'):
+            trace, _ = torch.jit.get_trace_graph(fn, (x,))
 
     def do_trace_size(self, requires_grad):
         def fn(x):
@@ -1163,10 +1159,12 @@ class TestJit(JitTestCase):
             return a * b / (a - b) + b
         V = Variable
         a, b = V(torch.rand(1)), V(torch.rand(1))
-        ge = torch._C.GraphExecutor(foo, (a, b))
+        ge, _ = torch.jit.get_trace_graph(foo, (a, b))
+        m = torch.jit.ScriptModule()
+        m._create_method_from_graph("forward", ge.graph())
         a, b = V(torch.rand(1), requires_grad=True), V(
             torch.rand(1), requires_grad=True)
-        r, = ge(a, b)
+        r, = m(a, b)
         da, db = torch.autograd.grad(r + 3, [a, b], create_graph=True)
 
         l2 = (da * db + db * db)
@@ -3447,12 +3445,12 @@ a")
         c = m2.weight.mm(input)
         d = m2.sub2.a.mm(input)
         ref = a + b + m2.bias + m2.sub.weight + a + c + d
-        self.assertEqual(ref, m2.forward(input))
+        self.assertEqual(ref, m2(input))
         m2.weight = nn.Parameter(torch.zeros_like(m2.weight))
         m2.bias = nn.Parameter(torch.zeros_like(m2.bias))
         m2.sub.weight = nn.Parameter(torch.zeros_like(m2.sub.weight))
         m2.sub2.a.data.zero_()
-        self.assertEqual(torch.zeros(2, 2), m2.forward(torch.randn(3, 2)))
+        self.assertEqual(torch.zeros(2, 2), m2(torch.randn(3, 2)))
 
     def test_script_module_call_noscript(self):
         class M(torch.jit.ScriptModule):
@@ -4393,7 +4391,7 @@ a")
         self.assertEqual(m_orig.doit(input), m_import.doit(input))
         self.assertEqual(m_orig.hi(input), m_import.hi(input))
         self.assertEqual(m_orig.doit3(input), m_import.doit3(input))
-        self.assertEqual(m_orig.forward(input), m_import.forward(input))
+        self.assertEqual(m_orig(input), m_import(input))
 
     @skipIfNoTorchVision
     def test_script_module_export_resnet18(self):
