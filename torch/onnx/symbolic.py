@@ -304,7 +304,6 @@ def sigmoid(g, self):
 
 def _reduce_op_symbolic(onnx_op_name):
     def symbolic(g, self, dim=None, keepdim=None):
-        params = {}
         if dim is None:
             # all-reduce path
             return g.op(onnx_op_name, self, keepdims_i=0)

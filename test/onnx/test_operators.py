@@ -42,7 +42,9 @@ def export_to_pb(model, inputs, *args, **kwargs):
 
 
 class FuncModule(Module):
-    def __init__(self, f, params=tuple()):
+    def __init__(self, f, params=None:
+        if params is None:
+            params = tuple()
         super(FuncModule, self).__init__()
         self.f = f
         self.params = nn.ParameterList(list(params))
@@ -53,7 +55,9 @@ class FuncModule(Module):
 
 class TestOperators(TestCase):
 
-    def assertONNX(self, f, args, params=tuple(), **kwargs):
+    def assertONNX(self, f, args, params=None, **kwargs):
+        if params is None:
+            params = tuple()
         if isinstance(f, nn.Module):
             m = f
         else:
@@ -97,14 +101,18 @@ class TestOperators(TestCase):
                     with open(os.path.join(data_dir, "output_{}.pb".format(index)), 'wb') as file:
                         file.write(tensor.SerializeToString())
 
-    def assertONNXRaises(self, err, f, args, params=tuple(), **kwargs):
+    def assertONNXRaises(self, err, f, args, params=None, **kwargs):
+        if params is None:
+            params = tuple()
         if isinstance(f, nn.Module):
             m = f
         else:
             m = FuncModule(f, params)
         self.assertExpectedRaises(err, lambda: export_to_pbtxt(m, args, **kwargs))
 
-    def assertONNXRaisesRegex(self, err, reg, f, args, params=tuple(), **kwargs):
+    def assertONNXRaisesRegex(self, err, reg, f, args, params=None, **kwargs):
+        if params is None:
+            params = tuple()
         if isinstance(f, nn.Module):
             m = f
         else:
