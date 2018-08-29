@@ -171,15 +171,15 @@ class ModuleHolder : torch::detail::ModuleHolderIndicator {
 
 /// Defines a class `Name` which inherits from `nn::ModuleHolder` to provide a
 /// wrapper over a `std::shared_ptr<Impl>`.
-#define TORCH_MODULE_IMPL(Name, Impl)                            \
-  class Name : public torch::nn::ModuleHolder<Impl> {            \
-   public:                                                       \
-    using torch::nn::ModuleHolder<Impl>::ModuleHolder;           \
-    Name(const Name&) = default;                                 \
-    Name(Name&&) = default;                                      \
-    Name(Name& other) : Name(static_cast<const Name&>(other)) {} \
-    Name& operator=(const Name&) = default;                      \
-    Name& operator=(Name&&) = default;                           \
+#define TORCH_MODULE_IMPL(Name, Impl)                                         \
+  class Name : public torch::nn::ModuleHolder<Impl> { /* NOLINT */            \
+   public:                                                                    \
+    using torch::nn::ModuleHolder<Impl>::ModuleHolder;                        \
+    Name(const Name&) = default; /* NOLINT */                                 \
+    Name(Name&&) = default; /* NOLINT */                                      \
+    Name(Name& other) : Name(static_cast<const Name&>(other)) {} /* NOLINT */ \
+    Name& operator=(const Name&) = default; /* NOLINT */                      \
+    Name& operator=(Name&&) = default; /* NOLINT */                           \
   }
 
 /// Like `TORCH_MODULE_IMPL`, but defaults the `Impl` name to `<Name>Impl`.
