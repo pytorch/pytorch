@@ -337,6 +337,18 @@ caffe2_macos_build_defaults: &caffe2_macos_build_defaults
           export AWS_ACCESS_KEY_ID=AKIAI62M6LXUOP4I4UZA
           export AWS_SECRET_ACCESS_KEY=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
 
+          export SCCACHE_BIN=${PWD}/sccache_bin
+          mkdir -p ${SCCACHE_BIN}
+          if which sccache > /dev/null; then
+            printf "#!/bin/sh\nexec sccache $(which clang++) \$*" > "${SCCACHE_BIN}/clang++"
+            chmod a+x "${SCCACHE_BIN}/clang++"
+
+            printf "#!/bin/sh\nexec sccache $(which clang) \$*" > "${SCCACHE_BIN}/clang"
+            chmod a+x "${SCCACHE_BIN}/clang"
+
+            export PATH="${SCCACHE_BIN}:$PATH"
+          fi
+
           # Build
           if [ "${BUILD_IOS:-0}" -eq 1 ]; then
             scripts/build_ios.sh
@@ -345,6 +357,11 @@ caffe2_macos_build_defaults: &caffe2_macos_build_defaults
             scripts/build_anaconda.sh
           else
             scripts/build_local.sh
+          fi
+
+          # Show sccache stats if it is running
+          if pgrep sccache > /dev/null; then
+            sccache --show-stats
           fi
 
 version: 2
