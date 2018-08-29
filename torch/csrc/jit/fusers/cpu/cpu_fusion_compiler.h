@@ -1,3 +1,4 @@
+#if USE_CPU_FUSER
 #pragma once
 
 #include "torch/csrc/jit/fusers/fusion_interface.h"
@@ -49,3 +50,5 @@ CPUFusionCompiler& getFusionCompiler();
 } // namespace cudafuser
 } // namespace jit 
 } // namespace torch
+
+#endif // USE_CPU_FUSER

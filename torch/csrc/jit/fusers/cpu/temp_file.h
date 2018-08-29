@@ -1,3 +1,4 @@
+#if USE_CPU_FUSER
 #pragma once
 
 #include "torch/csrc/jit/assertions.h"
@@ -64,3 +65,5 @@ private:
 } // namespace cpufuser
 } // namespace jit 
 } // namespace torch
+
+#endif // USE_CPU_FUSER

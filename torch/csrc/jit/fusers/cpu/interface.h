@@ -1,3 +1,4 @@
+#if USE_CPU_FUSER
 #pragma once
 
 #include "torch/csrc/jit/fusers/fusion_interface.h"
@@ -26,3 +27,5 @@ std::vector<at::Tensor> debugLaunchGraph(
 } // namespace cpufuser
 } // namespace jit 
 } // namespace torch
+
+#endif // USE_CPU_FUSER

@@ -1,3 +1,4 @@
+#if USE_CPU_FUSER || USE_CUDA_FUSER
 #pragma once
 
 #include "torch/csrc/jit/fusers/fusion_interface.h"
@@ -66,3 +67,5 @@ private:
 
 } // namespace jit 
 } // namespace torch
+
+#endif // USE_CPU_FUSER || USE_CUDA_FUSER

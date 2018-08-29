@@ -1,3 +1,4 @@
+#if USE_CUDA_FUSER
 #pragma once
 
 #include "torch/csrc/jit/fusers/common/common_fusion_function.h"
@@ -54,3 +55,4 @@ protected:
 } // namespace jit 
 } // namespace torch
 
+#endif // USE_CUDA_FUSER

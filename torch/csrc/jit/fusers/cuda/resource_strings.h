@@ -1,3 +1,4 @@
+#if USE_CUDA_FUSER
 #pragma once
 
 #include "torch/csrc/jit/code_template.h"
@@ -187,3 +188,5 @@ typedef __half half;
 } // namespace cudafuser
 } // namespace jit 
 } // namespace torch
+
+#endif // USE_CUDA_FUSER
