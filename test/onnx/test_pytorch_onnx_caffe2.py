@@ -849,6 +849,30 @@ class TestCaffe2Backend(unittest.TestCase):
         model = c2.prepare_zip_archive(f)
         model.run(X)
 
+    def test_neg_slice(self):
+        class NegSlice(torch.nn.Module):
+            def forward(self, x):
+                return x[-1, :, :]
+
+        x = torch.randn(3, 4, 5)
+        self.run_model_test(NegSlice(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
+
+    def test_neg_slice_large(self):
+        class NegSlice(torch.nn.Module):
+            def forward(self, x):
+                return x[:, :, :, :, -3]
+
+        x = torch.randn(3, 4, 5, 6, 7)
+        self.run_model_test(NegSlice(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
+
+    @unittest.skip('https://github.com/pytorch/pytorch/issues/10984')
+    def test_neg_slice_large_negone(self):
+        class NegSlice(torch.nn.Module):
+            def forward(self, x):
+                return x[:, :, :, :, -1]
+
+        x = torch.randn(3, 4, 5, 6, 7)
+        self.run_model_test(NegSlice(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
 
 # a bit of metaprogramming to set up all the rnn tests
 
