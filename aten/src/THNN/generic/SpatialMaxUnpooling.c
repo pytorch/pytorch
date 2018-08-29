@@ -87,8 +87,8 @@ void THNN_(SpatialMaxUnpooling_updateOutput)(
     THTensor_(resize3d)(output, nslices, oheight, owidth);
     THTensor_(zero)(output);
 
-    input_data = THTensor_(data)(input);
-    output_data = THTensor_(data)(output);
+    input_data = input->data<real>();
+    output_data = output->data<real>();
     indices_data = THIndexTensor_(data)(indices);
 
     THNN_(SpatialMaxUnpooling_updateOutput_frame)(input_data, output_data,
@@ -104,8 +104,8 @@ void THNN_(SpatialMaxUnpooling_updateOutput)(
     THTensor_(resize4d)(output, nbatch, nslices, oheight, owidth);
     THTensor_(zero)(output);
 
-    input_data = THTensor_(data)(input);
-    output_data = THTensor_(data)(output);
+    input_data = input->data<real>();
+    output_data = output->data<real>();
     indices_data = THIndexTensor_(data)(indices);
 
     for (p = 0; p < nbatch; p++)
@@ -200,8 +200,8 @@ void THNN_(SpatialMaxUnpooling_updateGradInput)(
   }
 
   /* get raw pointers */
-  gradInput_data = THTensor_(data)(gradInput);
-  gradOutput_data = THTensor_(data)(gradOutput);
+  gradInput_data = gradInput->data<real>();
+  gradOutput_data = gradOutput->data<real>();
   indices_data = THIndexTensor_(data)(indices);
 
   /* backprop */

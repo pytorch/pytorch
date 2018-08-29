@@ -133,8 +133,8 @@ void THNN_(VolumetricAdaptiveAveragePooling_updateOutput)(
   {
     THTensor_(resize4d)(output, sizeD, osizeT, osizeH, osizeW);
 
-    input_data = THTensor_(data)(input);
-    output_data = THTensor_(data)(output);
+    input_data = input->data<real>();
+    output_data = output->data<real>();
 
     THNN_(VolumetricAdaptiveAveragePooling_updateOutput_frame)(input_data, output_data,
                                                       sizeD,
@@ -149,8 +149,8 @@ void THNN_(VolumetricAdaptiveAveragePooling_updateOutput)(
 
     THTensor_(resize5d)(output, sizeB, sizeD, osizeT, osizeH, osizeW);
 
-    input_data = THTensor_(data)(input);
-    output_data = THTensor_(data)(output);
+    input_data = input->data<real>();
+    output_data = output->data<real>();
 
 #pragma omp parallel for private(b)
     for (b = 0; b < sizeB; b++)
@@ -270,8 +270,8 @@ void THNN_(VolumetricAdaptiveAveragePooling_updateGradInput)(
   osizeW = gradOutput->size(dimW);
 
   /* get raw pointers */
-  gradInput_data = THTensor_(data)(gradInput);
-  gradOutput_data = THTensor_(data)(gradOutput);
+  gradInput_data = gradInput->data<real>();
+  gradOutput_data = gradOutput->data<real>();
 
   /* backprop */
   if (input->dim() == 4)

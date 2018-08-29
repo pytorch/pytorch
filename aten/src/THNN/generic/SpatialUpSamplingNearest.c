@@ -56,8 +56,8 @@ void THNN_(SpatialUpSamplingNearest_updateOutput)(
 
   input = THTensor_(newContiguous)(input);
   THTensor_(zero)(output);
-  real *idata = THTensor_(data)(input);
-  real *odata = THTensor_(data)(output);
+  real *idata = input->data<real>();
+  real *odata = output->data<real>();
 
   // special case: just copy
   if (inputHeight == outputHeight && inputWidth == outputWidth) {
@@ -110,8 +110,8 @@ void THNN_(SpatialUpSamplingNearest_updateGradInput)(
   THTensor_(resize4d)(gradInput, nbatch, channels, inputHeight, inputWidth);
   THTensor_(zero)(gradInput);
   gradOutput = THTensor_(newContiguous)(gradOutput);
-  real *idata = THTensor_(data)(gradInput);
-  real *odata = THTensor_(data)(gradOutput);
+  real *idata = gradInput->data<real>();
+  real *odata = gradOutput->data<real>();
   channels = nbatch * channels;
   const float height_scale = (float) inputHeight / (float)outputHeight;
   const float width_scale = (float) inputWidth / (float)outputWidth;

@@ -124,8 +124,8 @@ void THNN_(SpatialAdaptiveMaxPooling_updateOutput)(
     /* indices will contain i,j locations for each output point */
     THIndexTensor_(resize3d)(indices, sizeD, osizeH, osizeW);
 
-    input_data = THTensor_(data)(input);
-    output_data = THTensor_(data)(output);
+    input_data = input->data<real>();
+    output_data = output->data<real>();
     indices_data = THIndexTensor_(data)(indices);
 
     THNN_(SpatialAdaptiveMaxPooling_updateOutput_frame)(input_data, output_data,
@@ -144,8 +144,8 @@ void THNN_(SpatialAdaptiveMaxPooling_updateOutput)(
     /* indices will contain i,j locations for each output point */
     THIndexTensor_(resize4d)(indices, sizeB, sizeD, osizeH, osizeW);
 
-    input_data = THTensor_(data)(input);
-    output_data = THTensor_(data)(output);
+    input_data = input->data<real>();
+    output_data = output->data<real>();
     indices_data = THIndexTensor_(data)(indices);
 
 #pragma omp parallel for private(b)
@@ -236,8 +236,8 @@ void THNN_(SpatialAdaptiveMaxPooling_updateGradInput)(
   osizeW = gradOutput->size(dimW);
 
   /* get raw pointers */
-  gradInput_data = THTensor_(data)(gradInput);
-  gradOutput_data = THTensor_(data)(gradOutput);
+  gradInput_data = gradInput->data<real>();
+  gradOutput_data = gradOutput->data<real>();
   indices_data = THIndexTensor_(data)(indices);
 
   /* backprop */

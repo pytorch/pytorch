@@ -58,8 +58,8 @@ void THNN_(VolumetricUpSamplingTrilinear_updateOutput)(
 		      THTensor_(size)(input, 1),
 		      outputDepth, outputHeight, outputWidth);
   THTensor_(zero)(output);
-  real *idata = THTensor_(data)(input);
-  real *odata = THTensor_(data)(output);
+  real *idata = input->data<real>();
+  real *odata = output->data<real>();
   channels = nbatch * channels;
   THAssert(inputDepth > 0 && inputHeight > 0 && inputWidth > 0 &&
            outputDepth > 0 && outputHeight > 0 && outputWidth > 0);
@@ -150,8 +150,8 @@ void THNN_(VolumetricUpSamplingTrilinear_updateGradInput)(
   THTensor_(resize5d)(gradInput, nbatch, channels, inputDepth, inputHeight, inputWidth);
   THTensor_(zero)(gradInput);
   gradOutput = THTensor_(newContiguous)(gradOutput);
-  real *data1 = THTensor_(data)(gradInput);
-  real *data2 = THTensor_(data)(gradOutput);
+  real *data1 = gradInput->data<real>();
+  real *data2 = gradOutput->data<real>();
   channels = nbatch * channels;
 
   // special case: same-size matching grids

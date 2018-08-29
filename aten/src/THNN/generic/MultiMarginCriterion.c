@@ -46,9 +46,9 @@ void THNN_(MultiMarginCriterion_updateOutput)(
   input = THTensor_(newContiguous)(input);
   target = THIndexTensor_(newContiguous)(target);
   weights = weights ? THTensor_(newContiguous)(weights) : NULL;
-  input_data = THTensor_(data)(input);
+  input_data = input->data<real>();
   target_data = THIndexTensor_(data)(target);
-  weights_data = weights ? THTensor_(data)(weights) : NULL;
+  weights_data = weights ? weights->data<real>() : NULL;
 
   if (reduction == Reduction::None)
   {
@@ -156,15 +156,15 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
 
   input = THTensor_(newContiguous)(input);
   target = THIndexTensor_(newContiguous)(target);
-  input_data = THTensor_(data)(input);
+  input_data = input->data<real>();
 
   THTensor_(resizeAs)(gradInput, input);
   THArgCheck(THTensor_(isContiguous)(gradInput), 5, "gradInput must be contiguous");
-  gradInput_data = THTensor_(data)(gradInput);
+  gradInput_data = gradInput->data<real>();
 
   target_data = THIndexTensor_(data)(target);
   weights = weights ? THTensor_(newContiguous)(weights) : NULL;
-  weights_data = weights ? THTensor_(data)(weights) : NULL;
+  weights_data = weights ? weights->data<real>() : NULL;
 
   for (t = 0; t < nframe; t++)
   {
@@ -193,7 +193,7 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
     input_data += dim;
     gradInput_data += dim;
   }
-  gradInput_data = THTensor_(data)(gradInput);
+  gradInput_data = gradInput->data<real>();
 
   if (reduction != Reduction::None)
   {

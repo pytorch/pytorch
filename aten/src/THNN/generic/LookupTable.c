@@ -67,8 +67,8 @@ void THNN_(LookupTable_accGradParameters)(
 
   gradOutput = THTensor_(newContiguous)(gradOutput);
 
-  real *gw = THTensor_(data)(gradWeight);
-  real *go = THTensor_(data)(gradOutput);
+  real *gw = gradWeight->data<real>();
+  real *go = gradOutput->data<real>();
   int64_t stride = THTensor_(stride)(gradWeight, 0);
 
   if (count_data)
@@ -184,7 +184,7 @@ void THNN_(LookupTable_renorm)(
 
   int64_t numw = THTensor_(size)(weight, 0);
   int64_t stride = THTensor_(stride)(weight, 0);
-  real *gw = THTensor_(data)(weight);
+  real *gw = weight->data<real>();
   for (i=0; i<numel; i++) {
     if (row_idx[i] < TH_INDEX_BASE || row_idx[i] >= numw + TH_INDEX_BASE) {
       THError("input need to be in the range %ld <= input < %ld, "

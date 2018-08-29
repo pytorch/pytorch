@@ -41,8 +41,8 @@ void THTensor_(bitor)(THTensor *r_, THTensor *t, real value)
   int tContig = THTensor_(isContiguous)(t);
   int serial_path = 0;
   if (r_Contig && tContig) {
-    real *tp = THTensor_(data)(t);
-    real *rp = THTensor_(data)(r_);
+    real *tp = t->data<real>();
+    real *rp = r_->data<real>();
     int64_t i;
     #pragma omp parallel for if(r_Size > TH_OMP_OVERHEAD_THRESHOLD * 100) private(i)
     for (i=0; i<r_Size; i++) {
@@ -80,8 +80,8 @@ void THTensor_(bitxor)(THTensor *r_, THTensor *t, real value)
   int tContig = THTensor_(isContiguous)(t);
   int serial_path = 0;
   if (r_Contig && tContig) {
-    real *tp = THTensor_(data)(t);
-    real *rp = THTensor_(data)(r_);
+    real *tp = t->data<real>();
+    real *rp = r_->data<real>();
     int64_t i;
     #pragma omp parallel for if(r_Size > TH_OMP_OVERHEAD_THRESHOLD * 100) private(i)
     for (i=0; i<r_Size; i++) {
@@ -113,8 +113,8 @@ void THTensor_(clamp)(THTensor *r_, THTensor *t, real min_value, real max_value)
   int tContig = THTensor_(isContiguous)(t);
   int serial_path = 0;
   if (r_Contig && tContig) {
-    real *tp = THTensor_(data)(t);
-    real *rp = THTensor_(data)(r_);
+    real *tp = t->data<real>();
+    real *rp = r_->data<real>();
     /* real t_val; */
     int64_t i;
     #pragma omp parallel for if(r_Size > TH_OMP_OVERHEAD_THRESHOLD) private(i)
@@ -149,7 +149,7 @@ void THTensor_(cadd)(THTensor *r_, THTensor *t, real value, THTensor *src)
   if (srcSize == r_Size){
     if (r_Contig && tContig && srcContig) {
       if(r_ == t) {
-        THBlas_(axpy)(THTensor_(nElement)(t), value, THTensor_(data)(src), 1, THTensor_(data)(r_), 1);
+        THBlas_(axpy)(THTensor_(nElement)(t), value, src->data<real>(), 1, r_->data<real>(), 1);
       } else {
         TH_TENSOR_APPLY3_CONTIG(real, r_, real, t, real, src, THVector_(cadd)(r__data, t_data, src_data, value, r__len););
       }
@@ -262,9 +262,9 @@ void THTensor_(cpow)(THTensor *r_, THTensor *t, THTensor *src)
   int serial_path = 0;
   if (srcSize == r_Size){
     if (r_Contig && tContig && srcContig) {
-      real *tp = THTensor_(data)(t);
-      real *sp = THTensor_(data)(src);
-      real *rp = THTensor_(data)(r_);
+      real *tp = t->data<real>();
+      real *sp = src->data<real>();
+      real *rp = r_->data<real>();
       int64_t i;
       #pragma omp parallel for if(r_Size > TH_OMP_OVERHEAD_THRESHOLD) private(i)
       for (i=0; i<r_Size; i++)
@@ -335,9 +335,9 @@ void THTensor_(clshift)(THTensor *r_, THTensor *t, THTensor *src)
   int serial_path = 0;
   if (srcSize == r_Size){
     if (r_Contig && tContig && srcContig) {
-      real *tp = THTensor_(data)(t);
-      real *sp = THTensor_(data)(src);
-      real *rp = THTensor_(data)(r_);
+      real *tp = t->data<real>();
+      real *sp = src->data<real>();
+      real *rp = r_->data<real>();
       int64_t i;
       #pragma omp parallel for if(r_Size > TH_OMP_OVERHEAD_THRESHOLD) private(i)
       for (i=0; i<r_Size; i++) {
@@ -401,9 +401,9 @@ void THTensor_(crshift)(THTensor *r_, THTensor *t, THTensor *src)
   int serial_path = 0;
   if (srcSize == r_Size){
     if (r_Contig && tContig && srcContig) {
-      real *tp = THTensor_(data)(t);
-      real *sp = THTensor_(data)(src);
-      real *rp = THTensor_(data)(r_);
+      real *tp = t->data<real>();
+      real *sp = src->data<real>();
+      real *rp = r_->data<real>();
       int64_t i;
       #pragma omp parallel for if(r_Size > TH_OMP_OVERHEAD_THRESHOLD) private(i)
       for (i=0; i<r_Size; i++) {
@@ -464,9 +464,9 @@ void THTensor_(cfmod)(THTensor *r_, THTensor *t, THTensor *src)
   int serial_path = 0;
   if (srcSize == r_Size){
     if (r_Contig && tContig && srcContig) {
-      real *tp = THTensor_(data)(t);
-      real *sp = THTensor_(data)(src);
-      real *rp = THTensor_(data)(r_);
+      real *tp = t->data<real>();
+      real *sp = src->data<real>();
+      real *rp = r_->data<real>();
       int64_t i;
       #pragma omp parallel for if(r_Size > TH_OMP_OVERHEAD_THRESHOLD) private(i)
       for (i=0; i<r_Size; i++) {
@@ -515,9 +515,9 @@ void THTensor_(cremainder)(THTensor *r_, THTensor *t, THTensor *src)
   int serial_path = 0;
   if (srcSize == r_Size){
     if (r_Contig && tContig && srcContig) {
-      real *tp = THTensor_(data)(t);
-      real *sp = THTensor_(data)(src);
-      real *rp = THTensor_(data)(r_);
+      real *tp = t->data<real>();
+      real *sp = src->data<real>();
+      real *rp = r_->data<real>();
       int64_t i;
       #pragma omp parallel for if(r_Size > TH_OMP_OVERHEAD_THRESHOLD) private(i)
       for (i=0; i<r_Size; i++) {
@@ -579,9 +579,9 @@ void THTensor_(cbitand)(THTensor *r_, THTensor *t, THTensor *src)
   int serial_path = 0;
   if (srcSize == r_Size){
     if (r_Contig && tContig && srcContig) {
-      real *tp = THTensor_(data)(t);
-      real *sp = THTensor_(data)(src);
-      real *rp = THTensor_(data)(r_);
+      real *tp = t->data<real>();
+      real *sp = src->data<real>();
+      real *rp = r_->data<real>();
       int64_t i;
       #pragma omp parallel for if(r_Size > TH_OMP_OVERHEAD_THRESHOLD) private(i)
       for (i=0; i<r_Size; i++) {
@@ -625,9 +625,9 @@ void THTensor_(cbitor)(THTensor *r_, THTensor *t, THTensor *src)
   int serial_path = 0;
   if (srcSize == r_Size){
     if (r_Contig && tContig && srcContig) {
-      real *tp = THTensor_(data)(t);
-      real *sp = THTensor_(data)(src);
-      real *rp = THTensor_(data)(r_);
+      real *tp = t->data<real>();
+      real *sp = src->data<real>();
+      real *rp = r_->data<real>();
       int64_t i;
       #pragma omp parallel for if(r_Size > TH_OMP_OVERHEAD_THRESHOLD) private(i)
       for (i=0; i<r_Size; i++) {
@@ -671,9 +671,9 @@ void THTensor_(cbitxor)(THTensor *r_, THTensor *t, THTensor *src)
   int serial_path = 0;
   if (srcSize == r_Size){
     if (r_Contig && tContig && srcContig) {
-      real *tp = THTensor_(data)(t);
-      real *sp = THTensor_(data)(src);
-      real *rp = THTensor_(data)(r_);
+      real *tp = t->data<real>();
+      real *sp = src->data<real>();
+      real *rp = r_->data<real>();
       int64_t i;
       #pragma omp parallel for if(r_Size > TH_OMP_OVERHEAD_THRESHOLD) private(i)
       for (i=0; i<r_Size; i++) {
@@ -708,8 +708,8 @@ void THTensor_(tpow)(THTensor *r_, real value, THTensor *t)
   int tContig = THTensor_(isContiguous)(t);
   int serial_path = 0;
   if (r_Contig && tContig) {
-    real *tp = THTensor_(data)(t);
-    real *rp = THTensor_(data)(r_);
+    real *tp = t->data<real>();
+    real *rp = r_->data<real>();
     int64_t i;
     #pragma omp parallel for if(r_Size > TH_OMP_OVERHEAD_THRESHOLD) private(i)
     for (i=0; i<r_Size; i++)
@@ -838,25 +838,25 @@ void THTensor_(addmv)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor
   if(mat->stride(0) == 1 && LDA_COND(mat->size(0), mat->size(1), mat->stride(1)))
   {
     THBlas_(gemv)('n', mat->size(0), mat->size(1),
-                  alpha, THTensor_(data)(mat), mat->stride(1),
-                  THTensor_(data)(vec), THTensor_strideLegacyNoScalars(vec, 0),
-                  beta, THTensor_(data)(r_), r_stride);
+                  alpha, mat->data<real>(), mat->stride(1),
+                  vec->data<real>(), THTensor_strideLegacyNoScalars(vec, 0),
+                  beta, r_->data<real>(), r_stride);
   }
   else if(mat->stride(1) == 1 && LDA_COND(mat->size(1), mat->size(0), mat->stride(0)))
   {
     THBlas_(gemv)('t',  mat->size(1), mat->size(0),
-                  alpha, THTensor_(data)(mat), mat->stride(0),
-                  THTensor_(data)(vec), THTensor_strideLegacyNoScalars(vec, 0),
-                  beta, THTensor_(data)(r_), r_stride);
+                  alpha, mat->data<real>(), mat->stride(0),
+                  vec->data<real>(), THTensor_strideLegacyNoScalars(vec, 0),
+                  beta, r_->data<real>(), r_stride);
   }
   else
   {
     THTensor *cmat = THTensor_(newContiguous)(mat);
 
     THBlas_(gemv)('t',  mat->size(1), mat->size(0),
-                  alpha, THTensor_(data)(cmat), cmat->stride(0),
-                  THTensor_(data)(vec), THTensor_strideLegacyNoScalars(vec, 0),
-                  beta, THTensor_(data)(r_), r_stride);
+                  alpha, cmat->data<real>(), cmat->stride(0),
+                  vec->data<real>(), THTensor_strideLegacyNoScalars(vec, 0),
+                  beta, r_->data<real>(), r_stride);
 
     THTensor_(free)(cmat);
   }
@@ -895,9 +895,9 @@ void THTensor_(match)(THTensor *r_, THTensor *m1, THTensor *m2, real gain)
   dim = m1->size(1);
   THArgCheck(m1->size(1) == m2->size(1), 3, "m1 and m2 must have the same inner vector dim");
 
-  m1_p = THTensor_(data)(m1);
-  m2_p = THTensor_(data)(m2);
-  r_p = THTensor_(data)(r_);
+  m1_p = m1->data<real>();
+  m2_p = m2->data<real>();
+  r_p = r_->data<real>();
 
 #pragma omp parallel for private(i)
   for (i=0; i<N1; i++) {
@@ -1039,12 +1039,12 @@ void THTensor_(addmm)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor
                 n,
                 k,
                 alpha,
-                THTensor_(data)(m1_),
+                m1_->data<real>(),
                 ldm1_,
-                THTensor_(data)(m2_),
+                m2_->data<real>(),
                 ldm2_,
                 beta,
-                THTensor_(data)(r__),
+                r__->data<real>(),
                 ldr__);
 
   /* free intermediate variables */
@@ -1097,25 +1097,25 @@ void THTensor_(addr)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor 
   if(r_->stride(0) == 1 && LDA_COND(vec1_size, vec2_size, r_->stride(1)))
   {
     THBlas_(ger)(vec1_size, vec2_size,
-                 alpha, THTensor_(data)(vec1), vec1_stride,
-                 THTensor_(data)(vec2), vec2_stride,
-                 THTensor_(data)(r_), r_->stride(1));
+                 alpha, vec1->data<real>(), vec1_stride,
+                 vec2->data<real>(), vec2_stride,
+                 r_->data<real>(), r_->stride(1));
   }
   else if(r_->stride(1) == 1 && LDA_COND(vec2_size, vec1_size, r_->stride(0)))
   {
     THBlas_(ger)(vec2_size, vec1_size,
-                 alpha, THTensor_(data)(vec2), vec2_stride,
-                 THTensor_(data)(vec1), vec1_stride,
-                 THTensor_(data)(r_), r_->stride(0));
+                 alpha, vec2->data<real>(), vec2_stride,
+                 vec1->data<real>(), vec1_stride,
+                 r_->data<real>(), r_->stride(0));
   }
   else
   {
     THTensor *cr = THTensor_(newClone)(r_);
 
     THBlas_(ger)(vec2_size, vec1_size,
-                 alpha, THTensor_(data)(vec2), vec2_stride,
-                 THTensor_(data)(vec1), vec1_stride,
-                 THTensor_(data)(cr), cr->stride(0));
+                 alpha, vec2->data<real>(), vec2_stride,
+                 vec1->data<real>(), vec1_stride,
+                 cr->data<real>(), cr->stride(0));
 
     THTensor_(freeCopyTo)(cr, r_);
   }

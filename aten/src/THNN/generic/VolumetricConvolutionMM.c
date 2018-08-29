@@ -150,8 +150,8 @@ static void THNN_(unfolded_acc_vol)(
           int64_t outputWidth,
           int64_t outputHeight)
 {
-  real *input_data = THTensor_(data)(input);
-  real *finput_data = THTensor_(data)(finput);
+  real *input_data = input->data<real>();
+  real *finput_data = finput->data<real>();
 #ifdef _OPENMP
   int inOmp = omp_in_parallel();
   #pragma omp parallel if (!inOmp) firstprivate(finput_data, input_data, outputWidth, outputHeight, outputDepth, kW, kH, kT, dW, dH, dT, pW, pH, pT, nInputPlane, inputHeight, inputWidth, inputDepth)
@@ -253,8 +253,8 @@ static void THNN_(unfolded_acc_vol)(
   The larger loop could lower the proportion of openmp overhead. And the inner part in loop is simpler.
   The naive code is below:
 
-  real *input_data = THTensor_(data)(input);
-  real *finput_data = THTensor_(data)(finput);
+  real *input_data = input->data<real>();
+  real *finput_data = finput->data<real>();
 
   int64_t n = nInputPlane*kT*kH*kW*outputDepth*outputWidth*outputHeight;
   #pragma omp parallel for firstprivate(finput_data, input_data, outputWidth, outputHeight, outputDepth, kW, kH, kT, dW, dH, dT, pW, pH, pT, inputHeight, inputWidth, inputDepth)
@@ -303,8 +303,8 @@ static void THNN_(unfolded_copy_vol)(
           int64_t outputWidth,
           int64_t outputHeight)
 {
-  real *input_data = THTensor_(data)(input);
-  real *finput_data = THTensor_(data)(finput);
+  real *input_data = input->data<real>();
+  real *finput_data = finput->data<real>();
 
 #ifdef _OPENMP
   int inOmp = omp_in_parallel();

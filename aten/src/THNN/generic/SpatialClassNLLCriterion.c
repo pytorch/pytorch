@@ -90,11 +90,11 @@ void THNN_(SpatialClassNLLCriterion_updateOutput)(
   target = THIndexTensor_(newContiguous)(target);
   weights = weights ? THTensor_(newContiguous)(weights) : NULL;
 
-  real *input_data = THTensor_(data)(input);
+  real *input_data = input->data<real>();
   THIndex_t *target_data = THIndexTensor_(data)(target);
-  real *weights_data = weights ? THTensor_(data)(weights) : NULL;
-  real *output_data = THTensor_(data)(output);
-  real *total_weight_data = THTensor_(data)(total_weight);
+  real *weights_data = weights ? weights->data<real>() : NULL;
+  real *output_data = output->data<real>();
+  real *total_weight_data = total_weight->data<real>();
 
   int64_t batch_size = THTensor_(size)(input, 0);
   int64_t n_classes = THTensor_(size)(input, 1);
@@ -172,7 +172,7 @@ void THNN_(SpatialClassNLLCriterion_updateGradInput)(
 
   THNN_CHECK_DIM_SIZE(gradOutput, 1, 0, 1);
 
-  real *total_weight_data = THTensor_(data)(total_weight);
+  real *total_weight_data = total_weight->data<real>();
   if (*total_weight_data <= 0)
     return;
 
@@ -180,8 +180,8 @@ void THNN_(SpatialClassNLLCriterion_updateGradInput)(
   weights = weights ? THTensor_(newContiguous)(weights) : NULL;
 
   THIndex_t *target_data = THIndexTensor_(data)(target);
-  real *weights_data = weights ? THTensor_(data)(weights) : NULL;
-  real *gradInput_data = THTensor_(data)(gradInput);
+  real *weights_data = weights ? weights->data<real>() : NULL;
+  real *gradInput_data = gradInput->data<real>();
 
   int64_t batch_size = THTensor_(size)(input, 0);
   int64_t n_classes = THTensor_(size)(input, 1);

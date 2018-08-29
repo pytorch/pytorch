@@ -6,8 +6,8 @@
 #include <omp.h>
 #endif
 
-#define ROW_PTR2(t, r) (THTensor_(data)(t) + (r) * (t)->stride(0))
-#define COL_PTR2(t, c) (THTensor_(data)(t) + (c) * (t)->stride(1))
+#define ROW_PTR2(t, r) (t->data<real>() + (r) * (t)->stride(0))
+#define COL_PTR2(t, c) (t->data<real>() + (c) * (t)->stride(1))
 
 static bool THNN_(checkLegacyInput)(THTensor* t)
 {
@@ -365,7 +365,7 @@ void THNN_(SparseLinear_updateParameters)(
   THTensor_(free)(offsets);
 
   cnt = 1;
-  real* uniqueOffsets_p = THTensor_(data)(uniqueOffsets);
+  real* uniqueOffsets_p = uniqueOffsets->data<real>();
   for (i = 1; i < THTensor_(size)(uniqueOffsets, 0); i++) {
     if (uniqueOffsets_p[i] != uniqueOffsets_p[i - 1]) {
       uniqueOffsets_p[cnt++] = uniqueOffsets_p[i];
@@ -441,7 +441,7 @@ void THNN_(SparseLinear_legacyUpdateParameters)(
   THTensor_(free)(offsets);
 
   cnt = 1;
-  real* uniqueOffsets_p = THTensor_(data)(uniqueOffsets);
+  real* uniqueOffsets_p = uniqueOffsets->data<real>();
   for (i = 1; i < THTensor_(size)(uniqueOffsets, 0); i++) {
     if (uniqueOffsets_p[i] != uniqueOffsets_p[i - 1]) {
       uniqueOffsets_p[cnt++] = uniqueOffsets_p[i];

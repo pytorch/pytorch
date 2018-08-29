@@ -162,8 +162,8 @@ void THNN_(VolumetricMaxUnpooling_updateOutput)(
     THTensor_(resize4d)(output, nslices, oT, oH, oW);
     THTensor_(zero)(output);
 
-    input_data = THTensor_(data)(input);
-    output_data = THTensor_(data)(output);
+    input_data = input->data<real>();
+    output_data = output->data<real>();
     indices_data = THIndexTensor_(data)(indices);
 
     THNN_(VolumetricMaxUnpooling_updateOutput_frame)(
@@ -181,8 +181,8 @@ void THNN_(VolumetricMaxUnpooling_updateOutput)(
     THTensor_(resize5d)(output, nbatch, nslices, oT, oH, oW);
     THTensor_(zero)(output);
 
-    input_data = THTensor_(data)(input);
-    output_data = THTensor_(data)(output);
+    input_data = input->data<real>();
+    output_data = output->data<real>();
     indices_data = THIndexTensor_(data)(indices);
 
     for (p = 0; p < nbatch; p++)
@@ -300,8 +300,8 @@ void THNN_(VolumetricMaxUnpooling_updateGradInput)(
   iW = input->size(dimw);
 
   /* get raw pointers */
-  gradInput_data = THTensor_(data)(gradInput);
-  gradOutput_data = THTensor_(data)(gradOutput);
+  gradInput_data = gradInput->data<real>();
+  gradOutput_data = gradOutput->data<real>();
   indices_data = THIndexTensor_(data)(indices);
 
   /* backprop */

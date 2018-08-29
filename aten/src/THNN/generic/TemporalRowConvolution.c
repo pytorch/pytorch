@@ -67,8 +67,8 @@ static void THNN_(unfolded_acc_row)(
 	int64_t nOutputFrame) {
 
 	int64_t c;
-	real *input_data = THTensor_(data)(input);
-	real *finput_data = THTensor_(data)(finput);
+	real *input_data = input->data<real>();
+	real *finput_data = finput->data<real>();
 
 // #pragma omp parallel for private(c)
 	for (c = 0; c < inputFrameSize; c++) {
@@ -107,8 +107,8 @@ static void THNN_(unfolded_copy_row)(
 	int64_t nOutputFrame) {
 
 	int64_t k;
-	real *input_data = THTensor_(data)(input);
-	real *finput_data = THTensor_(data)(finput);
+	real *input_data = input->data<real>();
+	real *finput_data = finput->data<real>();
 
 // #pragma omp parallel for private(k)
 	for (k = 0; k < inputFrameSize * kW; k++) {

@@ -36,9 +36,9 @@ void THTensor_(copyTranspose)(THTensor *tensor, THTensor *src) {
 #endif
 
   THTensor *buf = THTensor_(newWithSize2d)(BLOCK_SZ, BLOCK_SZ);
-  real *sp = THTensor_(data)(src);
-  real *rp = THTensor_(data)(tensor);
-  real *bp = THTensor_(data)(buf);
+  real *sp = src->data<real>();
+  real *rp = tensor->data<real>();
+  real *bp = buf->data<real>();
 
 
   int64_t NR = THTensor_(size)(src, 0);
@@ -93,8 +93,8 @@ void THTensor_(copy)(THTensor *tensor, THTensor *src)
 #endif
   if (tensorSize == srcSize) {
     if ( tensorContig && srcContig) {
-      real *sp = THTensor_(data)(src);
-      real *rp = THTensor_(data)(tensor);
+      real *sp = src->data<real>();
+      real *rp = tensor->data<real>();
 #ifndef TH_REAL_IS_HALF
 #ifdef _OPENMP
       #pragma omp parallel if ( (tensorSize > TH_OMP_OVERHEAD_THRESHOLD_COPY) && (!inOMP) )

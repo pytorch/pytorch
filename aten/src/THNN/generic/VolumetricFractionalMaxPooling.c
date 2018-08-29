@@ -152,10 +152,10 @@ void THNN_(VolumetricFractionalMaxPooling_updateOutput)(
     THIndexTensor_(resize4d)(indices, numPlanes, outputH, outputW, outputT);
 
     THNN_(VolumetricFractionalMaxPooling_updateOutput_frame)(
-      THTensor_(data)(input),
-      THTensor_(data)(output),
+      input->data<real>(),
+      output->data<real>(),
       THIndexTensor_(data)(indices),
-      THTensor_(data)(randomSamples),
+      randomSamples->data<real>(),
       numPlanes, inputT, inputW, inputH,
       outputT, outputW, outputH, poolSizeT, poolSizeW, poolSizeH);
   } else {
@@ -167,10 +167,10 @@ void THNN_(VolumetricFractionalMaxPooling_updateOutput)(
 #pragma omp parallel for private(batch)
     for (batch = 0; batch < numBatch; ++batch) {
       THNN_(VolumetricFractionalMaxPooling_updateOutput_frame)(
-        THTensor_(data)(input) + batch * numPlanes * inputH * inputW * inputT,
-        THTensor_(data)(output) + batch * numPlanes * outputH * outputW * outputT,
+        input->data<real>() + batch * numPlanes * inputH * inputW * inputT,
+        output->data<real>() + batch * numPlanes * outputH * outputW * outputT,
         THIndexTensor_(data)(indices) + batch * numPlanes * outputH * outputW * outputT,
-        THTensor_(data)(randomSamples) + batch * numPlanes * 3,
+        randomSamples->data<real>() + batch * numPlanes * 3,
         numPlanes, inputT, inputW, inputH,
         outputT, outputW, outputH, poolSizeT, poolSizeW, poolSizeH);
     }
@@ -256,8 +256,8 @@ void THNN_(VolumetricFractionalMaxPooling_updateGradInput)(
   /* backprop */
   if (numInputDims == 4) {
     THNN_(VolumetricFractionalMaxPooling_updateGradInput_frame)(
-      THTensor_(data)(gradInput),
-      THTensor_(data)(gradOutput),
+      gradInput->data<real>(),
+      gradOutput->data<real>(),
       THIndexTensor_(data)(indices),
       numPlanes, inputT, inputW, inputH, outputT, outputW, outputH);
   } else {
@@ -265,8 +265,8 @@ void THNN_(VolumetricFractionalMaxPooling_updateGradInput)(
 #pragma omp parallel for private(batch)
     for (batch = 0; batch < numBatch; ++batch) {
       THNN_(VolumetricFractionalMaxPooling_updateGradInput_frame)(
-        THTensor_(data)(gradInput) + batch * numPlanes * inputH * inputW * inputT,
-        THTensor_(data)(gradOutput) + batch * numPlanes * outputH * outputW * outputT,
+        gradInput->data<real>() + batch * numPlanes * inputH * inputW * inputT,
+        gradOutput->data<real>() + batch * numPlanes * outputH * outputW * outputT,
         THIndexTensor_(data)(indices) + batch * numPlanes * outputH * outputW * outputT,
         numPlanes, inputT, inputW, inputH, outputT, outputW, outputH);
     }

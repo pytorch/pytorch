@@ -98,8 +98,8 @@ void THNN_(SpatialReplicationPadding_updateOutput)(THNNState *state,
   {
     THTensor_(resize3d)(output, nslices, oheight, owidth);
 
-    input_data = THTensor_(data)(input);
-    output_data = THTensor_(data)(output);
+    input_data = input->data<real>();
+    output_data = output->data<real>();
 
     THNN_(SpatialReplicationPadding_updateOutput_frame)(input_data, output_data,
                                                     nslices,
@@ -114,8 +114,8 @@ void THNN_(SpatialReplicationPadding_updateOutput)(THNNState *state,
 
     THTensor_(resize4d)(output, nbatch, nslices, oheight, owidth);
 
-    input_data = THTensor_(data)(input);
-    output_data = THTensor_(data)(output);
+    input_data = input->data<real>();
+    output_data = output->data<real>();
 
 #pragma omp parallel for private(p)
     for (p = 0; p < nbatch; p++)
@@ -230,8 +230,8 @@ void THNN_(SpatialReplicationPadding_updateGradInput)(THNNState *state,
   /* backprop */
   if (input->dim() == 3) {
     THNN_(SpatialReplicationPadding_updateGradInput_frame)(
-      THTensor_(data)(gradInput),
-      THTensor_(data)(gradOutput),
+      gradInput->data<real>(),
+      gradOutput->data<real>(),
       nslices,
       iwidth, iheight,
       owidth, oheight,
@@ -242,8 +242,8 @@ void THNN_(SpatialReplicationPadding_updateGradInput)(THNNState *state,
 #pragma omp parallel for private(p)
     for (p = 0; p < nbatch; p++) {
       THNN_(SpatialReplicationPadding_updateGradInput_frame)(
-        THTensor_(data)(gradInput) + p * nslices * iheight * iwidth,
-        THTensor_(data)(gradOutput) + p * nslices * oheight * owidth,
+        gradInput->data<real>() + p * nslices * iheight * iwidth,
+        gradOutput->data<real>() + p * nslices * oheight * owidth,
         nslices,
         iwidth, iheight,
         owidth, oheight,

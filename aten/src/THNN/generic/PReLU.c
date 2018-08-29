@@ -14,7 +14,7 @@ void THNN_(PReLU_updateOutput)(
   if (nOutputPlane == 1)
   {
     // handle shared parameter case
-    real w = *THTensor_(data)(weight);
+    real w = *weight->data<real>();
     TH_TENSOR_APPLY2(real, output, real, input,
           const real r = (*input_data > 0) ? 1 : w;
           *output_data = *input_data * r;
@@ -37,9 +37,9 @@ void THNN_(PReLU_updateOutput)(
     }
   }
 
-  real *output_data = THTensor_(data)(output);
-  real *input_data = THTensor_(data)(input);
-  real *weight_data = THTensor_(data)(weight);
+  real *output_data = output->data<real>();
+  real *input_data = input->data<real>();
+  real *weight_data = weight->data<real>();
   THIndex_t i, j, k;
   #pragma omp parallel for private(j,k)
   for (i = 0; i < bs; ++i)
@@ -70,7 +70,7 @@ void THNN_(PReLU_updateGradInput)(
 
   if (nOutputPlane == 1)
   {
-    real w = THTensor_(data)(weight)[0];
+    real w = weight->data<real>()[0];
     TH_TENSOR_APPLY3(real, gradInput, real, gradOutput, real, input,
        if ((*input_data) > 0)
          *gradInput_data = *gradOutput_data;
@@ -83,10 +83,10 @@ void THNN_(PReLU_updateGradInput)(
   input = THTensor_(newContiguous)(input);
   gradOutput = THTensor_(newContiguous)(gradOutput);
   weight = THTensor_(newContiguous)(weight);
-  const real *input_data = THTensor_(data)(input);
-  const real *gradOutput_data = THTensor_(data)(gradOutput);
-  const real *weight_data = THTensor_(data)(weight);
-  real *gradInput_data = THTensor_(data)(gradInput);
+  const real *input_data = input->data<real>();
+  const real *gradOutput_data = gradOutput->data<real>();
+  const real *weight_data = weight->data<real>();
+  real *gradInput_data = gradInput->data<real>();
 
   int64_t bs = 1, ks = 1;
   {
@@ -145,7 +145,7 @@ void THNN_(PReLU_accGradParameters)(
 
   if (nOutputPlane == 1)
   {
-    real *gradWeight_data = THTensor_(data)(gradWeight);
+    real *gradWeight_data = gradWeight->data<real>();
     real sum = 0;
     TH_TENSOR_APPLY2(real, input, real, gradOutput,
       if ((*input_data) <= 0)
@@ -173,9 +173,9 @@ void THNN_(PReLU_accGradParameters)(
     }
   }
 
-  const real *input_data = THTensor_(data)(input);
-  const real *gradOutput_data = THTensor_(data)(gradOutput);
-  real *gradWeight_data = THTensor_(data)(gradWeight);
+  const real *input_data = input->data<real>();
+  const real *gradOutput_data = gradOutput->data<real>();
+  real *gradWeight_data = gradWeight->data<real>();
 
   THIndex_t i, j, k;
   for (i = 0; i < bs; ++i)

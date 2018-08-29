@@ -14,7 +14,7 @@ void THCTensor_(copyCPU)(THCState *state, THCTensor *self, struct THTensor *src)
 
     cudaStream_t stream = THCState_getCurrentStream(state);
     THCudaCheck(cudaMemcpyAsync(THCTensor_(data)(state,selfc),
-                                THTensor_(data)(src),
+                                src->data<real>(),
                                 THTensor_(nElement)(src) * sizeof(real),
                                 cudaMemcpyHostToDevice,
                                 stream));
@@ -61,7 +61,7 @@ void THTensor_(copyCuda)(THCState *state, THTensor *self, struct THCTensor *src)
     src = THCTensor_(newContiguous)(state, src);
 
     cudaStream_t stream = THCState_getCurrentStream(state);
-    THCudaCheck(cudaMemcpyAsync(THTensor_(data)(selfc),
+    THCudaCheck(cudaMemcpyAsync(selfc->data<real>(),
                                 THCTensor_(data)(state, src),
                                 THCTensor_(nElement)(state, src) * sizeof(real),
                                 cudaMemcpyDeviceToHost,
@@ -122,7 +122,7 @@ void THCTensor_(copyAsyncCPU)(THCState *state, THCTensor *self, struct THTensor 
 
   THCStream *stream  = THCState_getStream(state);
   THCudaCheck(cudaMemcpyAsync(THCTensor_(data)(state, self),
-                              THTensor_(data)(src),
+                              src->data<real>(),
                               THTensor_(nElement)(src) * sizeof(real),
                               cudaMemcpyHostToDevice,
                               THCStream_stream(stream)));
@@ -152,7 +152,7 @@ void THTensor_(copyAsyncCuda)(THCState *state, THTensor *self, struct THCTensor 
   }
 
   THCStream *stream = THCState_getStream(state);
-  THCudaCheck(cudaMemcpyAsync(THTensor_(data)(self),
+  THCudaCheck(cudaMemcpyAsync(self->data<real>(),
                               THCTensor_(data)(state, src),
                               THCTensor_(nElement)(state, src) * sizeof(real),
                               cudaMemcpyDeviceToHost,

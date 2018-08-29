@@ -211,7 +211,7 @@ void THNN_(VolumetricConvolution_accGradParameters)(
   {
     /* gradient to bias */
     if (gradBias) {
-      gradBias_data = THTensor_(data)(gradBias);
+      gradBias_data = gradBias->data<real>();
       gradOutSlice = THTensor_(new)();
       for (k = 0; k < nOutputPlane; k++)
       {
@@ -239,7 +239,7 @@ void THNN_(VolumetricConvolution_accGradParameters)(
 
       /* gradient to bias */
       if (gradBias) {
-        gradBias_data = THTensor_(data)(gradBias);
+        gradBias_data = gradBias->data<real>();
         gradOutSlice = THTensor_(new)();
         for (k = 0; k < nOutputPlane; k++)
         {

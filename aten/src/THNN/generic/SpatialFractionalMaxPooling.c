@@ -135,10 +135,10 @@ void THNN_(SpatialFractionalMaxPooling_updateOutput)(
     THIndexTensor_(resize3d)(indices, numPlanes, outputH, outputW);
 
     THNN_(SpatialFractionalMaxPooling_updateOutput_frame)(
-      THTensor_(data)(input),
-      THTensor_(data)(output),
+      input->data<real>(),
+      output->data<real>(),
       THIndexTensor_(data)(indices),
-      THTensor_(data)(randomSamples),
+      randomSamples->data<real>(),
       numPlanes, inputW, inputH, outputW, outputH, poolSizeW, poolSizeH);
   } else {
     THTensor_(resize4d)(output, numBatch, numPlanes, outputH, outputW);
@@ -149,10 +149,10 @@ void THNN_(SpatialFractionalMaxPooling_updateOutput)(
 #pragma omp parallel for private(batch)
     for (batch = 0; batch < numBatch; ++batch) {
       THNN_(SpatialFractionalMaxPooling_updateOutput_frame)(
-        THTensor_(data)(input) + batch * numPlanes * inputH * inputW,
-        THTensor_(data)(output) + batch * numPlanes * outputH * outputW,
+        input->data<real>() + batch * numPlanes * inputH * inputW,
+        output->data<real>() + batch * numPlanes * outputH * outputW,
         THIndexTensor_(data)(indices) + batch * numPlanes * outputH * outputW,
-        THTensor_(data)(randomSamples) + batch * numPlanes * 2,
+        randomSamples->data<real>() + batch * numPlanes * 2,
         numPlanes, inputW, inputH, outputW, outputH, poolSizeW, poolSizeH);
     }
   }
@@ -230,8 +230,8 @@ void THNN_(SpatialFractionalMaxPooling_updateGradInput)(
   /* backprop */
   if (numInputDims == 3) {
     THNN_(SpatialFractionalMaxPooling_updateGradInput_frame)(
-      THTensor_(data)(gradInput),
-      THTensor_(data)(gradOutput),
+      gradInput->data<real>(),
+      gradOutput->data<real>(),
       THIndexTensor_(data)(indices),
       numPlanes, inputW, inputH, outputW, outputH);
   } else {
@@ -239,8 +239,8 @@ void THNN_(SpatialFractionalMaxPooling_updateGradInput)(
 #pragma omp parallel for private(batch)
     for (batch = 0; batch < numBatch; ++batch) {
       THNN_(SpatialFractionalMaxPooling_updateGradInput_frame)(
-        THTensor_(data)(gradInput) + batch * numPlanes * inputH * inputW,
-        THTensor_(data)(gradOutput) + batch * numPlanes * outputH * outputW,
+        gradInput->data<real>() + batch * numPlanes * inputH * inputW,
+        gradOutput->data<real>() + batch * numPlanes * outputH * outputW,
         THIndexTensor_(data)(indices) + batch * numPlanes * outputH * outputW,
         numPlanes, inputW, inputH, outputW, outputH);
     }

@@ -175,8 +175,8 @@ THNN_(VolumetricReplicationPadding_shapeCheck)(
   {
     THTensor_(resize4d)(output, nslices, odepth, oheight, owidth);
 
-    input_data = THTensor_(data)(input);
-    output_data = THTensor_(data)(output);
+    input_data = input->data<real>();
+    output_data = output->data<real>();
 
     THNN_(VolumetricReplicationPadding_updateOutput_frame)(
          input_data, output_data, nslices, iwidth, iheight, idepth,
@@ -189,8 +189,8 @@ THNN_(VolumetricReplicationPadding_shapeCheck)(
 
     THTensor_(resize5d)(output, nbatch, nslices, odepth, oheight, owidth);
 
-    input_data = THTensor_(data)(input);
-    output_data = THTensor_(data)(output);
+    input_data = input->data<real>();
+    output_data = output->data<real>();
 
 #pragma omp parallel for private(p)
     for (p = 0; p < nbatch; p++)
@@ -326,8 +326,8 @@ THNN_(VolumetricReplicationPadding_shapeCheck)(
   /* backprop */
   if (input->dim() == 4) {
     THNN_(VolumetricReplicationPadding_updateGradInput_frame)(
-      THTensor_(data)(gradInput),
-      THTensor_(data)(gradOutput),
+      gradInput->data<real>(),
+      gradOutput->data<real>(),
       nslices,
       iwidth, iheight, idepth,
       owidth, oheight, odepth,
@@ -339,8 +339,8 @@ THNN_(VolumetricReplicationPadding_shapeCheck)(
 #pragma omp parallel for private(p)
     for (p = 0; p < nbatch; p++) {
       THNN_(VolumetricReplicationPadding_updateGradInput_frame)(
-        THTensor_(data)(gradInput) + p * nslices * idepth * iheight * iwidth,
-        THTensor_(data)(gradOutput) + p * nslices * odepth * oheight * owidth,
+        gradInput->data<real>() + p * nslices * idepth * iheight * iwidth,
+        gradOutput->data<real>() + p * nslices * odepth * oheight * owidth,
         nslices,
         iwidth, iheight, idepth,
         owidth, oheight, odepth,
