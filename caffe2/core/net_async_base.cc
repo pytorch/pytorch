@@ -55,7 +55,10 @@ CAFFE2_DEFINE_bool(
 
 namespace caffe2 {
 
-thread_local std::vector<int> AsyncNetBase::stream_counters_;
+std::vector<int>& AsyncNetBase::StreamCounters() {
+  static thread_local std::vector<int> stream_counters_;
+  return stream_counters_;
+}
 
 AsyncNetBase::AsyncNetBase(
     const std::shared_ptr<const NetDef>& net_def,
@@ -172,12 +175,12 @@ int AsyncNetBase::stream(int task_id) {
   if (device_option.device_type() == CUDA) {
     int gpu_id = device_option.cuda_gpu_id();
     CAFFE_ENFORCE_GE(gpu_id, 0, "Invalid gpu id: " + caffe2::to_string(gpu_id));
-    if ((unsigned)gpu_id >= stream_counters_.size()) {
-      stream_counters_.resize(gpu_id + 1, 0);
+    if ((unsigned)gpu_id >= StreamCounters().size()) {
+      StreamCounters().resize(gpu_id + 1, 0);
     }
     do {
-      stream_id = stream_counters_.at(gpu_id)++;
-      stream_counters_.at(gpu_id) %= streams_per_gpu_;
+      stream_id = StreamCounters().at(gpu_id)++;
+      StreamCounters().at(gpu_id) %= streams_per_gpu_;
     } while (check_stream_status_ && !isStreamFree(task_id, stream_id));
   }
   return stream_id;
