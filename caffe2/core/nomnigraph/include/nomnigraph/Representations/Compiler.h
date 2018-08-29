@@ -11,15 +11,15 @@ namespace repr {
 class CAFFE2_API Value {
  public:
   enum class ValueKind { Value, Instruction, Data };
-  Value(ValueKind K) : Kind(K) {}
-  Value() : Kind(ValueKind::Value) {}
+  Value(ValueKind K) : kind_(K) {}
+  Value() : kind_(ValueKind::Value) {}
   ValueKind getKind() const {
-    return Kind;
+    return kind_;
   }
   virtual ~Value() = default;
 
  private:
-  const ValueKind Kind;
+  const ValueKind kind_;
 };
 
 class CAFFE2_API Data : public Value {
@@ -30,15 +30,15 @@ class CAFFE2_API Data : public Value {
   }
   virtual ~Data() = default;
   size_t getVersion() const {
-    return Version;
+    return version_;
   }
 
   void setVersion(size_t version) {
-    Version = version;
+    version_ = version;
   }
 
  private:
-  size_t Version = 0;
+  size_t version_ = 0;
 };
 
 class CAFFE2_API Instruction : public Value {
@@ -52,18 +52,18 @@ class CAFFE2_API Instruction : public Value {
     TerminatorEnd,
     Phi
   };
-  Instruction() : Value(ValueKind::Instruction), Op(Opcode::Generic) {}
-  Instruction(Opcode op) : Value(ValueKind::Instruction), Op(op) {}
+  Instruction() : Value(ValueKind::Instruction), op_(Opcode::Generic) {}
+  Instruction(Opcode op) : Value(ValueKind::Instruction), op_(op) {}
   CAFFE2_API static bool classof(const Value* V) {
     return V->getKind() == ValueKind::Instruction;
   }
   virtual ~Instruction() = default;
   Opcode getOpcode() const {
-    return Op;
+    return op_;
   }
 
  private:
-  Opcode Op;
+  Opcode op_;
 };
 
 class CAFFE2_API Terminator : public Instruction {
