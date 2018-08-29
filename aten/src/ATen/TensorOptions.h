@@ -157,7 +157,6 @@ struct AT_API TensorOptions {
     return is_variable_;
   }
 
- private:
   // Resolves the ATen backend specified by the current construction axes.
   Backend backend() const noexcept {
     Backend backend;
