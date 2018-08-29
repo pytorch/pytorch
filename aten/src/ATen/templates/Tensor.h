@@ -276,7 +276,7 @@ struct AT_API Tensor {
 
   friend struct WeakTensor;
 
-private:
+protected:
   c10::intrusive_ptr<TensorImpl, UndefinedTensor> tensor_impl_;
 };
 
