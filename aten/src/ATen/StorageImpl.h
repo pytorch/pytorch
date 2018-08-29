@@ -24,13 +24,13 @@ struct AT_API StorageImpl : public c10::intrusive_ptr_target {
   virtual ~StorageImpl() {};
   StorageImpl(
       at::DataType data_type,
-      ptrdiff_t size,
+      int64_t numel,
       at::DataPtr data_ptr,
       at::Allocator* allocator,
       bool resizable);
   StorageImpl(
       at::DataType data_type,
-      ptrdiff_t size,
+      int64_t numel,
       at::Allocator* allocator,
       bool resizable);
   StorageImpl(StorageImpl&) = delete;
@@ -70,18 +70,17 @@ struct AT_API StorageImpl : public c10::intrusive_ptr_target {
 
   void operator=(const StorageImpl&) = delete;
 
-  size_t elementSize() const {
+  size_t itemsize() const {
     return at::elementSize(dataTypeToScalarType(data_type_));
   }
 
   Type& type();
 
-  // TODO: Rename to size() and size to size_
-  ptrdiff_t size() const {
-    return size_;
+  int64_t numel() const {
+    return numel_;
   };
-  void set_size(ptrdiff_t size) {
-    size_ = size;
+  void set_numel(int64_t numel) {
+    numel_ = numel;
   };
   bool resizable() const {
     return resizable_;
@@ -132,7 +131,7 @@ struct AT_API StorageImpl : public c10::intrusive_ptr_target {
  private:
   at::DataType data_type_;
   at::DataPtr data_ptr_;
-  ptrdiff_t size_;
+  int64_t numel_;
   bool resizable_;
   at::Allocator* allocator_;
   std::unique_ptr<THFinalizer> finalizer_;
