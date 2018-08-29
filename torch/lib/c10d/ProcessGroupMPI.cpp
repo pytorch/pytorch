@@ -386,16 +386,17 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::gather(
     const GatherOptions& opts) {
   checkSingleTensor(inputTensors);
 
+  if (outputTensors.size() != 1) {
+    throw std::runtime_error("Gather: multi-GPU collective is not supported");
+  }
+
   if (rank_ != opts.rootRank) {
-    if (outputTensors.size() > 0) {
+    if (outputTensors[0].size() > 0) {
       throw std::runtime_error(
           "Gather: number of output tensors should be 0 "
           "for non-root");
     }
   } else {
-    if (outputTensors.size() != 1) {
-      throw std::runtime_error("Gather: multi-GPU collective is not supported");
-    }
     if (static_cast<size_t>(size_) != outputTensors[0].size()) {
       throw std::runtime_error(
           "Gather: number of output tensors should equal "
@@ -449,17 +450,17 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::scatter(
     std::vector<std::vector<at::Tensor>>& inputTensors,
     const ScatterOptions& opts) {
   checkSingleTensor(outputTensors);
+  if (inputTensors.size() != 1) {
+    throw std::runtime_error("Scatter: multi-GPU collective is not supported");
+  }
 
   if (rank_ != opts.rootRank) {
-    if (inputTensors.size() > 0) {
+    if (inputTensors[0].size() > 0) {
       throw std::runtime_error(
           "Scatter: number of input tensors should be 0 "
           "for non-root");
     }
   } else {
-    if (inputTensors.size() != 1) {
-      throw std::runtime_error("Gather: multi-GPU collective is not supported");
-    }
     if (static_cast<size_t>(size_) != inputTensors[0].size()) {
       throw std::runtime_error(
           "Scatter: number of input tensors should equal "
