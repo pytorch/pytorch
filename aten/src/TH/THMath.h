@@ -5,6 +5,7 @@
 #define _USE_MATH_DEFINES
 #endif
 #include <math.h>
+#include <float.h>
 #ifndef M_PIf
 #define M_PIf 3.1415926535f
 #endif  // M_PIf
