@@ -34,87 +34,78 @@ else:
 # what has to be done to add a Operation ...
 #
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+# 1. Every method on Type is a virtual method, which will be dispatched to a
+# real implementation on the underlying class.
 #
-# 1. if broadcasting or without the full list of arguments, add a non-virtual
-#    declaration under Type.h  (right now, we call this template
-#    BROADCAST but it also handles default arguments)
-TYPE_METHOD_DECLARATION_BROADCAST = CodeTemplate("""\
-${return_type} ${api_name}(${type_method_formals_with_defaults}) const;
-""")
-# 2. broadcasting functions are implemented in Type.cpp
-TYPE_METHOD_DEFINITION_BROADCAST = CodeTemplate("""\
-${return_type} Type::${api_name}(${type_method_formals}) const {
-    ${device_guard_declaration}
-    Tensor ${broadcast_returns};
-    std::tie(${broadcast_returns}) = ${broadcast_function}(${broadcast_actuals}, "${api_name}");
-    return ${method_prefix_derived}${api_name}(${broadcast_modified_actuals});
-}
-""")
-# 3. add virtual dispatch declaration to Type.h and impl to Type.cpp; method_prefix_derived
-#    is present for providing a base-class definition for a derived-type method with a prefix.
-#
-#    If the declaration is abstract, then the actual implementation will
-#    be in a derived type; we put in a simple default "not implemented"
-#    stub.  However, if the declaration is concrete, we dispatch to the
-#    actual implementation.  At the moment, this situation *only* occurs
-#    for 'native' declarations (so the native dispatch is hardcoded into
-#    the template here.)
-TYPE_METHOD_DECLARATION_ABSTRACT = CodeTemplate("""\
+# In old days, we used to avoid a virtual method code in some cases, when
+# no dispatch was necessary.  However, this was a bit of complication for
+# not much gain (since we wouldn't manage to inline the non-virtual methods
+# anyway), so we axed it.
+
+TYPE_METHOD_DECLARATION = CodeTemplate("""\
 virtual ${return_type} ${method_prefix_derived}${api_name}(${type_method_formals_with_defaults}) const;
 """)
-TYPE_METHOD_DEFINITION_ABSTRACT = CodeTemplate("""\
+
+# As above, but wrapped with AT_DEPRECATED.  This is because some legacy code
+# directly interacts with methods on Type as part of the public API.
+DEPRECATED_TYPE_METHOD_DECLARATION = CodeTemplate("""\
+AT_DEPRECATED(virtual ${return_type} ${method_prefix_derived}${api_name}(${type_method_formals_with_defaults}) const);
+""")
+
+# 2. Every method gets a default declaration that just says that it is not
+# implemented.  Another option would have been to make the functions all
+# pure virtual (this is still an option, if you need to reduce the binary
+# size of the Type interface).
+
+TYPE_METHOD_DEFINITION = CodeTemplate("""\
 ${return_type} Type::${method_prefix_derived}${api_name}(${type_method_formals}) const {
     AT_ERROR("${method_prefix_derived}${api_name} is not implemented for type ", toString());
 }
 """)
-TYPE_METHOD_DECLARATION_CONCRETE = CodeTemplate("""\
-virtual ${return_type} ${api_name}(${type_method_formals_with_defaults}) const;
-""")
-DEPRECATED_TYPE_METHOD_DECLARATION_CONCRETE = CodeTemplate("""\
-AT_DEPRECATED(virtual ${return_type} ${api_name}(${type_method_formals_with_defaults}) const);
-""")
-TYPE_METHOD_DEFINITION_CONCRETE = CodeTemplate("""\
-${return_type} Type::${api_name}(${type_method_formals}) const {
-    ${device_guard_declaration}
-    ${type_definition_body}
-}
-""")
-DEPRECATED_TYPE_METHOD_DEFINITION_CONCRETE = CodeTemplate("""\
-${return_type} Type::${api_name}(${type_method_formals}) const {
-    TensorOptions options(*this);
-    ${device_guard_declaration}
-    return at::native::${api_name}(${type_method_actuals}, options);
-}
-""")
-# 4. add virtual override to TypeDerived.h
+
+# 3. In the derived class, declare an override.
 TYPE_DERIVED_DECLARATION = CodeTemplate("""\
 virtual ${return_type} ${method_prefix_derived}${api_name}(${type_method_formals}) const override;
 """)
-# 5. add override definition to TypeDerived.cpp
+
+# 4. We have a few flavors of declaration, but the default template looks pretty
+# similar.
 TYPE_DERIVED_DEFINITION = CodeTemplate("""\
 ${return_type} ${Type}::${method_prefix_derived}${api_name}(${type_method_formals}) const {
     ${device_guard_declaration}
     ${type_definition_body}
 }
 """)
-# NB: As far as ezyang can tell, we don't *have* to codegen this,
-# because we will inherit it from the TYPE_METHOD_DEFINITION_CONCRETE in
-# the superclass.  But it doesn't seem to be harmful.
-TYPE_DERIVED_DEFINITION_NATIVE = CodeTemplate("""\
-${return_type} ${Type}::${api_name}(${type_method_formals}) const {
-    ${device_guard_declaration}
-    const auto& self_ty = *this;
-    (void)self_ty;
-    ${return_call} at::native::${native_type_method_dispatch}(/* actuals */ ${actuals});
-}
+
+# 5. Here are the various bodies which we might put in type_definition_body
+
+# 5a. Methods which broadcast, and then call the actual implementation with
+# the broadcasted inputs
+BROADCASTING_METHOD_DEFINITION = CodeTemplate("""\
+Tensor ${broadcast_returns};
+std::tie(${broadcast_returns}) = ${broadcast_function}(${broadcast_actuals}, "${api_name}");
+return ${method_prefix_derived}${api_name}(${broadcast_modified_actuals});
 """)
-TYPE_DERIVED_DEFINITION_NATIVE_MISSING = CodeTemplate("""\
-${return_type} ${Type}::${api_name}(${type_method_formals}) const {
-    AT_ERROR("${api_name} not supported on ${Type}");
-}
+
+# 5b. Methods which call to a native method with a different type
+# depending on the backend
+NATIVE_CONCRETE_METHOD_DEFINITION = CodeTemplate("""\
+const auto& self_ty = *this;
+(void)self_ty;
+${return_call} at::native::${native_type_method_dispatch}(/* actuals */ ${actuals});
 """)
-TYPE_DEFINITION_BODY_NATIVE = CodeTemplate("""\
+
+# 5c. Methods which call to a native method unconditionally, no matter the
+# backend (TODO: figure out how to unify this with case 5b)
+NATIVE_GENERIC_METHOD_DEFINITION = CodeTemplate("""\
 ${return_call} at::native::${native_type_method_dispatch}(/* native_actuals */ ${native_actuals});
+""")
+
+# 5d. Deprecated type method, which calls a factory function
+DEPRECATED_CONCRETE_METHOD_DEFINITION = CodeTemplate("""\
+TensorOptions options(*this);
+return at::native::${api_name}(${type_method_actuals}, options);
 """)
 
 # add non-virtual declaration to Tensor.h
@@ -744,30 +735,6 @@ def create_generic(top_env, declarations):
 
         return broadcast_actuals
 
-    def emit_nn_body(option):
-        # type: (FunctionOption) -> Union[str, List[str]]
-        # Concrete definition on Type.cpp for NN functions. Delegates to the
-        # xxx_forward variant variant after creating any necessary buffers.
-        actuals = option['actuals']
-        base_name = option['name'][:-1] if option['inplace'] else option['name']
-        fwd_name = option['api_name'].replace(base_name, base_name + '_forward')
-
-        if len(option['buffers']) == 0:
-            return 'return {}({});'.format(fwd_name, ', '.join(actuals))
-
-        body = []  # type: List[str]
-        if option['api_name'].endswith('_out'):
-            # _out variants must create buffers and insert them in the
-            # arguments list between output and input arguments
-            for buffer in option['buffers']:
-                body.append('Tensor {} = tensor();'.format(buffer['name']))
-            actuals = [arg['name'] for arg in option['arguments'] if arg.get('output')]
-            actuals += [buffer['name'] for buffer in option['buffers']]
-            actuals += [arg['name'] for arg in option['arguments'] if not arg.get('output')]
-
-        body.append('return std::get<0>({}({}));'.format(fwd_name, ', '.join(actuals)))
-        return body
-
     def process_option(option, output_options):
         # type: (FunctionOption, List[OutputDeclaration]) -> None
         option['inplace'] = re.search(
@@ -803,37 +770,12 @@ def create_generic(top_env, declarations):
         is_namespace_function = is_function and dispatch_tensor is not None
 
         broadcast_arg = get_broadcast_argument(option)
+        option["broadcast_arg"] = broadcast_arg
         # "s_" for "same size".
         option['method_prefix_derived'] = '' if broadcast_arg is None else 's_'
         option['device_guard_declaration'] = device_guard(option, formals)
 
-        env = nested_dict(option, top_env)
-
-        mode = option['mode']
-        abstract = True
-        if mode == 'NN' and option.get('cimpls') is None:
-            # NN function with no _forward/_backward suffix don't have cimpls.
-            # They call the _forward function and discard any buffer returns
-            abstract = False
-            top_env['type_method_declarations'].append(
-                TYPE_METHOD_DECLARATION_CONCRETE.substitute(env))
-            body = emit_nn_body(option)
-            top_env['type_method_definitions'].append(
-                TYPE_METHOD_DEFINITION_CONCRETE.substitute(
-                    env, type_definition_body=body))
-        elif broadcast_arg is None:
-            top_env['type_method_declarations'].append(
-                TYPE_METHOD_DECLARATION_ABSTRACT.substitute(env))
-            top_env['type_method_definitions'].append(
-                TYPE_METHOD_DEFINITION_ABSTRACT.substitute(env))
-        else:
-            top_env['type_method_declarations'].append(
-                TYPE_METHOD_DECLARATION_BROADCAST.substitute(env))
-            top_env['type_method_declarations'].append(
-                TYPE_METHOD_DECLARATION_ABSTRACT.substitute(env))
-            top_env['type_method_definitions'].append(
-                TYPE_METHOD_DEFINITION_ABSTRACT.substitute(env))
-
+        if broadcast_arg is not None:
             broadcast_inplace = 'inplace' in broadcast_arg['broadcast']
             broadcast_dims = 'dims:' in broadcast_arg['broadcast']
             option['broadcast_actuals'] = get_broadcast_actuals(broadcast_arg, broadcast_inplace, broadcast_dims)
@@ -847,8 +789,29 @@ def create_generic(top_env, declarations):
                                                         else 'size' if broadcast_dims else 'outplace')
             option['broadcast_modified_actuals'] = ['b_' + y if 'b_' + y in option['broadcast_returns'] else y
                                                     for y in option['actuals']]
+
+        env = nested_dict(option, top_env)
+
+        mode = option['mode']
+
+        abstract = True
+        if mode == 'NN' and option.get('cimpls') is None:
+            abstract = False
+
+        if broadcast_arg is not None:
+            broadcast_env = nested_dict({'method_prefix_derived': ''}, env)
+
+            # If broadcasting, we need to add an extra declaration for the
+            # broadcasting version of this function; the add() for s_add()
+            top_env['type_method_declarations'].append(
+                TYPE_METHOD_DECLARATION.substitute(broadcast_env))
             top_env['type_method_definitions'].append(
-                TYPE_METHOD_DEFINITION_BROADCAST.substitute(env))
+                TYPE_METHOD_DEFINITION.substitute(broadcast_env))
+
+        top_env['type_method_declarations'].append(
+            TYPE_METHOD_DECLARATION.substitute(env))
+        top_env['type_method_definitions'].append(
+            TYPE_METHOD_DEFINITION.substitute(env))
 
         method_of = ['Type']
         if is_method:
@@ -867,6 +830,23 @@ def create_generic(top_env, declarations):
             method_of.append('namespace')
 
         buffer_names = [buffer['name'] for buffer in option.get('buffers', [])]
+
+        if broadcast_arg is not None:
+            output_options.append(OutputDeclaration(
+                name=option['api_name'],
+                method_prefix_derived='',  # generate a declaration for the non-s_ version
+                arguments=formals,
+                method_of=method_of,
+                mode=mode,
+                buffers=buffer_names,
+                returns=option['returns'],
+                inplace=option['inplace'],
+                # See Note [Abstract ATen methods]
+                abstract=abstract,
+                device_guard=option.get('device_guard', True),
+                with_gil=option.get('with_gil', False),
+                deprecated=option.get('deprecated', False)
+            ))
 
         output_options.append(OutputDeclaration(
             name=option['api_name'],
@@ -1014,6 +994,8 @@ def create_generic(top_env, declarations):
         is_deprecated_factory_method = len(formals) > 0 and \
             formals[0]['dynamic_type'] == 'Type' and \
             option['return_type'] == 'Tensor' and option['deprecated']
+        option['is_factory_method'] = is_factory_method
+        option['is_deprecated_factory_method'] = is_deprecated_factory_method
         needs_native_definition = not is_deprecated_factory_method
 
         has_dispatch = dispatch_tensor or dispatch_type
@@ -1024,6 +1006,7 @@ def create_generic(top_env, declarations):
         env = nested_dict(option, top_env)
 
         broadcast_arg = get_broadcast_argument(option)
+        option["broadcast_arg"] = broadcast_arg
         if broadcast_arg is not None:
             raise Exception("broadcasting is not yet supported for native functions, "
                             "but specified for function {}", option['name'])
@@ -1031,33 +1014,28 @@ def create_generic(top_env, declarations):
         # Factory methods are not dispatched over `Type`.
         if not is_factory_method:
             if option['deprecated']:
-                top_env['type_method_declarations'].append(DEPRECATED_TYPE_METHOD_DECLARATION_CONCRETE.substitute(env))
+                top_env['type_method_declarations'].append(DEPRECATED_TYPE_METHOD_DECLARATION.substitute(env))
             else:
-                top_env['type_method_declarations'].append(TYPE_METHOD_DECLARATION_CONCRETE.substitute(env))
+                top_env['type_method_declarations'].append(TYPE_METHOD_DECLARATION.substitute(env))
+            top_env['type_method_definitions'].append(TYPE_METHOD_DEFINITION.substitute(env))
+
         dispatch = option['type_method_definition_dispatch']
         option['native_type_method_dispatch'] = dispatch
 
         # Note [Abstract ATen methods]
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        # An abstract ATen method is one whose dispatch differs between
-        # types.  These are implemented in derived types (with a
-        # standard (throwing) definition in Type).  A concrete ATen
-        # method is one which has the same dispatch for all types;
-        # we just implement it in the base Type.  This is exposed
-        # in Declarations.yaml via a field named 'abstract'.
+        # An abstract ATen method is one for which we /definitively know/
+        # that we cannot transparently differentiate it by differentiating
+        # its constituent calls; e.g., maybe because it directly manipulates
+        # raw pointers.
+        #
+        # We heuristically determine if this is the case by assuming a native
+        # function is abstract when its dispatch differes between backends,
+        # because a backend-specific definition is ~never differentiable.
+        # This is exposed in Declarations.yaml via a field named 'abstract'.
         abstract = False
         if isinstance(dispatch, dict):
             abstract = True
-            top_env['type_method_definitions'].append(
-                TYPE_METHOD_DEFINITION_ABSTRACT.substitute(env))
-        elif is_deprecated_factory_method:
-            top_env['type_method_definitions'].append(
-                DEPRECATED_TYPE_METHOD_DEFINITION_CONCRETE.substitute(env))
-        elif not is_factory_method:
-            body = TYPE_DEFINITION_BODY_NATIVE.substitute(env)
-            top_env['type_method_definitions'].append(
-                TYPE_METHOD_DEFINITION_CONCRETE.substitute(
-                    env, type_definition_body=body))
 
         # generate the at::native function declarations (i.e. what the user will implement)
         if needs_native_definition:
@@ -1306,6 +1284,32 @@ def create_derived(backend_type_env, declarations):
             call = 'if ({}) {}'.format(cimpl['condition'], call)
         return call
 
+
+    def emit_nn_body(option):
+        # type: (FunctionOption) -> Union[str, List[str]]
+        # Concrete definition on Type.cpp for NN functions. Delegates to the
+        # xxx_forward variant variant after creating any necessary buffers.
+        actuals = option['actuals']
+        base_name = option['name'][:-1] if option['inplace'] else option['name']
+        fwd_name = option['api_name'].replace(base_name, base_name + '_forward')
+
+        if len(option['buffers']) == 0:
+            return 'return {}({});'.format(fwd_name, ', '.join(actuals))
+
+        body = []  # type: List[str]
+        if option['api_name'].endswith('_out'):
+            # _out variants must create buffers and insert them in the
+            # arguments list between output and input arguments
+            for buffer in option['buffers']:
+                body.append('Tensor {} = tensor();'.format(buffer['name']))
+            actuals = [arg['name'] for arg in option['arguments'] if arg.get('output')]
+            actuals += [buffer['name'] for buffer in option['buffers']]
+            actuals += [arg['name'] for arg in option['arguments'] if not arg.get('output')]
+
+        body.append('return std::get<0>({}({}));'.format(fwd_name, ', '.join(actuals)))
+        return body
+
+
     def emit_body(env, option):
         # type: (Environment, FunctionOption) -> List[str]
         body = []  # type: List[str]
@@ -1493,6 +1497,29 @@ def create_derived(backend_type_env, declarations):
             raise Exception("NYI - return handling")
         return body
 
+    def process_broadcast(option):
+        # type: (FunctionOption) -> None
+        pre_env = nested_dict(option, backend_type_env)
+        sub_option = {}
+        env = nested_dict(sub_option, pre_env)
+        # NB: use pre_env, not env
+        sub_option['type_definition_body'] = BROADCASTING_METHOD_DEFINITION.substitute(pre_env)
+        sub_option['method_prefix_derived'] = ''
+        type_object_declarations.append(
+            TYPE_DERIVED_DECLARATION.substitute(env))
+        type_object_definitions.append(
+            TYPE_DERIVED_DEFINITION.substitute(env))
+
+    def process_nn(option):
+        # type: (FunctionOption) -> None
+        env = nested_dict(option, backend_type_env)
+        body = emit_nn_body(option)  # type: ignore
+        option['type_definition_body'] = body
+        type_object_declarations.append(
+            TYPE_DERIVED_DECLARATION.substitute(env))
+        type_object_definitions.append(
+            TYPE_DERIVED_DEFINITION.substitute(env))
+
     def process_option(option):
         # type: (FunctionOption) -> None
         pair = (backend_type_env['Backend'],
@@ -1511,28 +1538,41 @@ def create_derived(backend_type_env, declarations):
         dispatch = option['type_method_definition_dispatch']
         env = nested_dict(option, backend_type_env)
 
-        if isinstance(dispatch, dict):
-            pair = (backend_type_env['Backend'],
-                    backend_type_env['ScalarName'])
-            if pair in option['backend_type_pairs']:
+        pair = (backend_type_env['Backend'],
+                backend_type_env['ScalarName'])
+        if pair in option['backend_type_pairs']:
+            if isinstance(dispatch, dict):
                 native_dispatch = dispatch.get(pair[0])
+                if native_dispatch is not None:
+                    option['native_type_method_dispatch'] = native_dispatch
+                    option['type_definition_body'] = NATIVE_CONCRETE_METHOD_DEFINITION.substitute(env)
+                    type_object_declarations.append(
+                        TYPE_DERIVED_DECLARATION.substitute(env))
+                    type_object_definitions.append(
+                        TYPE_DERIVED_DEFINITION.substitute(env))
+            elif option['is_deprecated_factory_method']:
+                option['type_definition_body'] = DEPRECATED_CONCRETE_METHOD_DEFINITION.substitute(env)
                 type_object_declarations.append(
                     TYPE_DERIVED_DECLARATION.substitute(env))
-                if native_dispatch is None:
-                    type_object_definitions.append(
-                        TYPE_DERIVED_DEFINITION_NATIVE_MISSING.substitute(env))
-                else:
-                    option['native_type_method_dispatch'] = native_dispatch
-                    type_object_definitions.append(
-                        TYPE_DERIVED_DEFINITION_NATIVE.substitute(env))
+                type_object_definitions.append(
+                    TYPE_DERIVED_DEFINITION.substitute(env))
+            elif not option['is_factory_method']:
+                option['type_definition_body'] = NATIVE_GENERIC_METHOD_DEFINITION.substitute(env)
+                type_object_declarations.append(
+                    TYPE_DERIVED_DECLARATION.substitute(env))
+                type_object_definitions.append(
+                    TYPE_DERIVED_DEFINITION.substitute(env))
 
     for declaration in declarations:
         for option in declaration['options']:
             if not option.get('skip', False):
                 try:
+                    if option["broadcast_arg"] is not None:
+                        process_broadcast(option)
+
                     if option['mode'] == 'NN' and option.get('cimpls') is None:
-                        continue
-                    if option['mode'] != 'native':
+                        process_nn(option)
+                    elif option['mode'] != 'native':
                         process_option(option)
                     else:
                         process_native(option)
