@@ -179,8 +179,6 @@ class TestTorch(TestCase):
                        'as_strided_',
                        re.compile('^clamp_(min|max)_?$'),
                        'coalesce',
-                       'digamma',
-                       'digamma_',
                        'index_put',
                        'is_coalesced',
                        'is_distributed',
