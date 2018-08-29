@@ -6872,7 +6872,8 @@ def kldivloss_no_reduce_test():
         input_fn=lambda: torch.rand(10, 10).log(),
         reference_fn=lambda i, _:
             loss_reference_fns['KLDivLoss'](i, t.type_as(i), reduction='none'),
-        pickle=False)
+        pickle=False,
+        decorator=skipIfRocm)
 
 
 def kldivloss_no_reduce_scalar_test():
