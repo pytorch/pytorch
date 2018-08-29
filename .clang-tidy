@@ -16,6 +16,7 @@ Checks: '
   ,-cppcoreguidelines-special-member-functions
   ,-fuchsia-*
   ,-google-build-using-namespace
+  ,-google-default-arguments
   ,-google-explicit-constructor
   ,-google-readability-braces-around-statements
   ,-google-readability-namespace-comments
