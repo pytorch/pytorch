@@ -99,7 +99,7 @@ Storage ${Type}::unsafeStorageFromTH(void * th_pointer, bool retain) const {
   return Storage((${THStorage}*) th_pointer);
 }
 std::unique_ptr<Generator> ${Type}::generator() const {
-  return std::unique_ptr<Generator>(new ${Generator}(context));
+  return std::unique_ptr<Generator>(new ${Generator}(&at::globalContext()));
 }
 
 const char * ${Type}::toString() const {

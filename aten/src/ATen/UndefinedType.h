@@ -13,7 +13,7 @@
 namespace at {
 
 struct UndefinedType final : public Type {
-  explicit UndefinedType(Context* context);
+  explicit UndefinedType();
   virtual ScalarType scalarType() const override;
   virtual Backend backend() const override;
   virtual bool is_cuda() const override;
