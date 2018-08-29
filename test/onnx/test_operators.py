@@ -44,7 +44,7 @@ def export_to_pb(model, inputs, *args, **kwargs):
 class FuncModule(Module):
     def __init__(self, f, params=None):
         if params is None:
-            params = tuple()
+            params = ()
         super(FuncModule, self).__init__()
         self.f = f
         self.params = nn.ParameterList(list(params))
@@ -57,7 +57,7 @@ class TestOperators(TestCase):
 
     def assertONNX(self, f, args, params=None, **kwargs):
         if params is None:
-            params = tuple()
+            params = ()
         if isinstance(f, nn.Module):
             m = f
         else:
@@ -103,7 +103,7 @@ class TestOperators(TestCase):
 
     def assertONNXRaises(self, err, f, args, params=None, **kwargs):
         if params is None:
-            params = tuple()
+            params = ()
         if isinstance(f, nn.Module):
             m = f
         else:
@@ -112,7 +112,7 @@ class TestOperators(TestCase):
 
     def assertONNXRaisesRegex(self, err, reg, f, args, params=None, **kwargs):
         if params is None:
-            params = tuple()
+            params = ()
         if isinstance(f, nn.Module):
             m = f
         else:
