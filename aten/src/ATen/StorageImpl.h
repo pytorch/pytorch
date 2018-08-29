@@ -3,7 +3,6 @@
 #include <ATen/Allocator.h>
 #include <ATen/ScalarType.h>
 #include <ATen/ScalarTypeUtils.h>
-#include <TH/THTypeConversion.hpp>
 
 #include <ATen/core/intrusive_ptr.h>
 
@@ -44,7 +43,7 @@ struct AT_API StorageImpl : public c10::intrusive_ptr_target {
   template <typename T>
   inline T* data() const {
     auto data_type_T =
-        at::scalarTypeToDataType(at::CTypeToScalarType<th::from_type<T>>::to());
+        at::scalarTypeToDataType(at::CTypeToScalarType<T>::to());
     if (dtype() != data_type_T) {
       AT_ERROR(
           "Attempt to access StorageImpl having data type ",
