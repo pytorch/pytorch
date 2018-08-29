@@ -135,6 +135,9 @@ def _optimize_graph(graph, operator_export_type):
     torch._C._jit_pass_dce(graph)
     torch._C._jit_pass_lint(graph)
 
+    torch._C._jit_pass_canonicalize_ops(graph)
+    torch._C._jit_pass_lint(graph)
+
     torch._C._jit_pass_peephole(graph)
     torch._C._jit_pass_lint(graph)
 
@@ -219,6 +222,12 @@ def _model_to_graph(model, args, f, verbose=False, training=False,
         params = list(_unique_state_dict(model).values())
 
     graph = _optimize_graph(graph, operator_export_type)
+
+    # NB: ONNX requires complete information about output types, which might be
+    # erased by some optimizations, so we need to set it explicitly again.
+    output_tensors, _ = torch._C._jit_flatten(torch_out)
+    for output, tensor in zip(graph.outputs(), output_tensors):
+        output.inferTypeFrom(tensor)
 
     _set_input_and_output_names(graph, input_names, output_names)
     if verbose:
@@ -521,8 +530,13 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
                     torch._C._jit_pass_onnx_block(b, new_block, operator_export_type, env)
                 return new_op_outputs
             else:
-                warnings.warn("ONNX export failed on primitive operator {}; please report a bug".format(op_name))
-                return None
+                symbolic_name = 'prim_' + op_name
+                symbolic_fn = getattr(torch.onnx.symbolic, symbolic_name, None)
+                if symbolic_fn is None:
+                    warnings.warn("ONNX export failed on primitive operator {}; please report a bug".format(op_name))
+                    return None
+                attrs = {k: n[k] for k in n.attributeNames()}
+                return symbolic_fn(g, *inputs, **attrs)
 
         else:
             warnings.warn("ONNX export failed on an operator with unrecognized namespace {}::{}; "

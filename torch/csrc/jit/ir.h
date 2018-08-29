@@ -1016,9 +1016,6 @@ public:
     }
     return n;
   }
-  Node* createList(at::ArrayRef<Value*> values) {
-    return createList(values.at(0)->type(), values);
-  }
   Node* createList(const TypePtr& elem_type, at::ArrayRef<Value*> values) {
     auto n = create(prim::ListConstruct, values);
     for(const auto & v : values) {

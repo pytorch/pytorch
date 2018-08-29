@@ -288,6 +288,9 @@ RegisterOperators reg({
             at::Tensor t;
             pop(stack, t);
             auto result = at::chunk(t, chunks, dim);
+            // NB: Chunk can sometimes return a smaller number of outputs.
+            AT_CHECK(result.size() == chunks,
+                     "Expected chunk to return ", chunks, " outputs, but got ", result.size());
             stack.insert(stack.end(), std::make_move_iterator(result.begin()),
                                       std::make_move_iterator(result.end()));
             return 0;

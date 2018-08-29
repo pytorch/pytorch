@@ -19,7 +19,10 @@ static at::optional<std::vector<ChunkOutput>> getChunkOutputs(Node *chunk) {
       outputs.emplace_back(list_use.user->output(),
                             list_use.user->get<int64_t>(attr::b).value());
     } else if (list_use.user->kind() == prim::ListUnpack) {
-      JIT_ASSERT(list_use.user->outputs().size() == chunk->get<int64_t>(attr::chunks).value());
+      // This sometimes happens if the sizes can't be evenly divided by the number of chunks
+      if (static_cast<int64_t>(list_use.user->outputs().size()) != chunk->get<int64_t>(attr::chunks).value()) {
+        return at::nullopt;
+      }
       auto unpack_outputs = list_use.user->outputs();
       for (size_t i = 0; i < unpack_outputs.size(); ++i) {
         outputs.emplace_back(unpack_outputs[i], i);
