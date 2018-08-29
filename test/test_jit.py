@@ -6912,6 +6912,7 @@ def partial_apply_nontensors(fn, args, **kwargs):
     return new_fn, [arg for arg in args if isinstance(arg, torch.Tensor)]
 
 
+# create a trace function from input fn
 def create_traced_fn(fn):
     def traced_fn(*inputs, **kwargs):
         fn_tensors, inputs_tensors = partial_apply_nontensors(fn, inputs, **kwargs)
@@ -6920,7 +6921,9 @@ def create_traced_fn(fn):
     return traced_fn
 
 
-def create_trace_graph_inputs(fn):
+# similar to create_traced_fn, but instead of running the trace returns
+# (trace graph, inputs to the graph)
+def create_trace_fn_graph_inputs(fn):
     def traced_fn(*inputs, **kwargs):
         fn_tensors, inputs_tensors = partial_apply_nontensors(fn, inputs, **kwargs)
         traced = torch.jit.trace(*inputs_tensors)(fn_tensors)
@@ -6934,6 +6937,9 @@ def the_method({}):
 '''
 
 
+# create a script function from (name, func_type), and returns a function
+# that takes in (*args, **kwargs), and returns
+# (compiled function, and the relevant inputs for the function)
 def create_script_fn_inputs(method_name, func_type):
     def script_fn(*args, **kwargs):
         formals = []
@@ -6964,6 +6970,9 @@ def create_script_fn_inputs(method_name, func_type):
     return script_fn
 
 
+# create a script function from (name, func_type, output_process_fn),
+# returns a function takes in (args, kwargs) and runs the compiled function and
+# then applies the post process fn to the outputs
 def create_script_fn(method_name, func_type, output_process_fn):
     def script_fn(*args, **kwargs):
         func = create_script_fn_inputs(method_name, func_type)
@@ -6972,7 +6981,10 @@ def create_script_fn(method_name, func_type, output_process_fn):
     return script_fn
 
 
-def create_script_graph_inputs(method_name, func_type):
+# create a script function from (name, func_type)
+# returns a function that take will take in (args, kwargs) and return
+# (the compiled function graph, graph inputs)
+def create_script_fn_graph_inputs(method_name, func_type):
     def script_fn(*args, **kwargs):
         func = create_script_fn_inputs(method_name, func_type)
         cu_method, tensors = func(*args, **kwargs)
@@ -7049,6 +7061,7 @@ def check_against_reference(self, func, func_graph_inputs, reference_func, args,
 
 class TestJitGenerated(JitTestCase):
     pass
+
 
 class TestCustomOperators(JitTestCase):
 
@@ -7330,13 +7343,13 @@ def add_test(
 
                 if not is_inplace and name not in EXCLUDE_GRADCHECK and not exclude_tensor_method(name, test_name):
                     if test_name not in EXCLUDE_TRACED:
-                        check_against_reference(self, create_traced_fn(fn), create_trace_graph_inputs(fn),
+                        check_against_reference(self, create_traced_fn(fn), create_trace_fn_graph_inputs(fn),
                                                 fn, (self_variable,) + args_variable, kwargs_variable)
 
                     if not is_magic_method and test_name not in EXCLUDE_SCRIPT:
                         check_against_reference(self,
                                                 create_script_fn(name, 'method', output_process_fn),
-                                                create_script_graph_inputs(name, 'method'),
+                                                create_script_fn_graph_inputs(name, 'method'),
                                                 fn, (self_variable,) + args_variable, kwargs_variable)
 
                 # functional interface tests
@@ -7350,12 +7363,12 @@ def add_test(
 
                     if not is_inplace and test_name not in EXCLUDE_TRACED:
                         check_against_reference(self, create_traced_fn(fn),
-                                                create_trace_graph_inputs(fn), fn, f_args_variable, kwargs_variable)
+                                                create_trace_fn_graph_inputs(fn), fn, f_args_variable, kwargs_variable)
 
                     if not is_inplace and test_name not in EXCLUDE_SCRIPT:
                         check_against_reference(self,
                                                 create_script_fn(name, 'functional', output_process_fn),
-                                                create_script_graph_inputs(name, 'functional'),
+                                                create_script_fn_graph_inputs(name, 'functional'),
                                                 fn, f_args_variable, kwargs_variable)
 
             check(name)
@@ -7394,7 +7407,7 @@ def add_nn_test(name, self_size, args, skipTestIf=(), output_process_fn=lambda x
         if test_name not in EXCLUDE_SCRIPT:
             check_against_reference(self,
                                     create_script_fn(name, 'nn_functional', output_process_fn),
-                                    create_script_graph_inputs(name, 'nn_functional'),
+                                    create_script_fn_graph_inputs(name, 'nn_functional'),
                                     fn, f_args_variable, kwargs_variable)
 
     post_add_test(test_name, skipTestIf, do_test)
