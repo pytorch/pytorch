@@ -135,12 +135,12 @@ static inline void init() {
   }
 }
 
-static inline Type& getType(Backend p, ScalarType s) {
-  return globalContext().getType(p, s);
+static inline Type& getType(Backend p, ScalarType s, bool is_variable = false) {
+  return globalContext().getType(p, s, is_variable);
 }
 
-static inline Type& getType(DeviceType p, ScalarType s) {
-  return globalContext().getType(deviceTypeToBackend(p), s);
+static inline Type& getType(DeviceType p, ScalarType s, bool is_variable = false) {
+  return globalContext().getType(deviceTypeToBackend(p), s, is_variable);
 }
 
 static inline Type& CPU(ScalarType s) {
