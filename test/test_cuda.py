@@ -818,7 +818,7 @@ class TestCuda(TestCase):
         # interlace
         torch.cuda.empty_cache()
         gen0 = self._test_memory_stats_generator(self, device=0, N=35)
-        gen1 = self._test_memory_stats_generator(self, device=1, N=35)
+        gen1 = self._test_memory_stats_generator(self, device=torch.device('cuda:1'), N=35)
         end0 = end1 = False
         while not (end0 and end1):
             end0 = advance(gen0, end0)
@@ -827,7 +827,7 @@ class TestCuda(TestCase):
         # semi-random order
         torch.cuda.empty_cache()
         gen0 = self._test_memory_stats_generator(self, device=0, N=35)
-        gen1 = self._test_memory_stats_generator(self, device=1, N=35)
+        gen1 = self._test_memory_stats_generator(self, device=torch.device('cuda:1'), N=35)
         end0 = end1 = False
 
         while not (end0 and end1):
@@ -1823,17 +1823,7 @@ class TestCuda(TestCase):
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_symeig(self):
-        # Small case
-        tensor = torch.randn(3, 3).cuda()
-        tensor = torch.mm(tensor, tensor.t())
-        eigval, eigvec = torch.symeig(tensor, eigenvectors=True)
-        self.assertEqual(tensor, torch.mm(torch.mm(eigvec, eigval.diag()), eigvec.t()))
-
-        # Large case
-        tensor = torch.randn(257, 257).cuda()
-        tensor = torch.mm(tensor, tensor.t())
-        eigval, eigvec = torch.symeig(tensor, eigenvectors=True)
-        self.assertEqual(tensor, torch.mm(torch.mm(eigvec, eigval.diag()), eigvec.t()))
+        TestTorch._test_symeig(self, lambda t: t.cuda())
 
     def test_arange(self):
         for t in ['IntTensor', 'LongTensor', 'FloatTensor', 'DoubleTensor']:

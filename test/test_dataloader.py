@@ -437,6 +437,36 @@ class TestDataLoader(TestCase):
                 self.assertEqual(len(input), 3)
                 self.assertEqual(input, self.data[offset:offset + 3])
 
+    def test_RandomSampler(self):
+
+        from collections import Counter
+        from torch.utils.data import RandomSampler
+
+        def sample_stat(sampler, num_samples):
+            counts = Counter(sampler)
+            count_repeated = sum(val > 1 for val in counts.values())
+            return (count_repeated, min(counts.keys()), max(counts.keys()))
+
+        # test sample with replacement
+        n = len(self.dataset) + 1  # ensure at least one sample is drawn more than once
+        sampler_with_replacement = RandomSampler(self.dataset, replacement=True, num_samples=n)
+        count_repeated, minval, maxval = sample_stat(sampler_with_replacement, n)
+        self.assertTrue(count_repeated > 0)
+        self.assertTrue(minval >= 0)
+        self.assertTrue(maxval < len(self.dataset))
+
+        # test sample without replacement
+        sampler_without_replacement = RandomSampler(self.dataset)
+        count_repeated, minval, maxval = sample_stat(sampler_without_replacement, len(self.dataset))
+        self.assertTrue(count_repeated == 0)
+        self.assertTrue(minval == 0)
+        self.assertTrue(maxval == len(self.dataset) - 1)
+
+        # raise error when replacement=False and num_samples is not None
+        self.assertRaises(ValueError, lambda: RandomSampler(self.dataset, num_samples=len(self.dataset)))
+
+        self.assertRaises(ValueError, lambda: RandomSampler(self.dataset, num_samples=0))
+
     @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
                      don't support multiprocessing with spawn start method")
     def test_batch_sampler(self):

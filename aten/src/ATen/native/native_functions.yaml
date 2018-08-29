@@ -920,6 +920,15 @@
 - func: is_sparse(Tensor self) -> bool
   device_guard: false
 
+- func: kl_div(Tensor self, Tensor target, int64_t reduction=Reduction::ElementwiseMean) -> Tensor
+  variants: function
+
+- func: kl_div_backward(Tensor grad_output, Tensor self, Tensor target, int64_t reduction=Reduction::ElementwiseMean) -> Tensor
+  variants: function
+  dispatch:
+    CPU: kl_div_backward_cpu
+    CUDA: kl_div_backward_cuda
+
 - func: kthvalue(Tensor self, int64_t k, int64_t dim=-1, bool keepdim=false) -> (Tensor, Tensor)
 
 - func: kthvalue_out(Tensor values, Tensor indices, Tensor self, int64_t k, int64_t dim=-1, bool keepdim=false) -> (Tensor, Tensor)
@@ -1738,6 +1747,11 @@
   dispatch:
     CPU: _unique_cpu
     CUDA: _unique_cuda
+
+- func: _unique_dim(Tensor self, int64_t dim, bool sorted=false, bool return_inverse=false) -> (Tensor, Tensor)
+  dispatch:
+    CPU: _unique_dim_cpu
+    CUDA: _unique_dim_cuda
 
 - func: _unsafe_view(Tensor self, IntList size) -> Tensor
   variants: function

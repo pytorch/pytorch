@@ -8,10 +8,11 @@
 
 #include <numeric>
 
+// NB: This is NOT valid on UndefinedTensor
 void THTensor_free(THTensor *self)
 {
   if (!self) return;
-  self->release();
+  c10::raw::intrusive_ptr::decref(self);
 }
 
 void THTensor_setStorage(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_, at::IntList size_, at::IntList stride_) {
@@ -38,10 +39,10 @@ void THTensor_setStorageNd(THTensor *self, THStorage *storage, ptrdiff_t storage
     if (!THTensor_getStoragePtr(self)) {
       THError("Tensor: invalid null storage");
     }
-    auto scalar_type = THTensor_getStoragePtr(self)->scalar_type();
+    auto scalar_type = at::dataTypeToScalarType(THTensor_getStoragePtr(self)->dtype());
     if(storage)
     {
-      storage->_raw_incref();
+      c10::raw::intrusive_ptr::incref(storage);
       THTensor_stealAndSetStoragePtr(self, storage);
     }
     else {

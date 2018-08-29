@@ -21,13 +21,13 @@ size_t THStorage_(elementSize)()
 
 THStorage* THStorage_(new)(void)
 {
-  return THStorage_new(at::CTypeToScalarType<th::from_type<real>>::to());
+  return THStorage_new(at::CTypeToScalarType<real>::to());
 }
 
 THStorage* THStorage_(newWithSize)(ptrdiff_t size)
 {
   THStorage* storage = c10::make_intrusive<at::StorageImpl>(
-      at::CTypeToScalarType<th::from_type<real>>::to(),
+      at::scalarTypeToDataType(at::CTypeToScalarType<real>::to()),
       size,
       getTHDefaultAllocator(),
       true).release();
@@ -38,7 +38,7 @@ THStorage* THStorage_(newWithAllocator)(ptrdiff_t size,
                                         at::Allocator *allocator)
 {
   THStorage* storage = c10::make_intrusive<at::StorageImpl>(
-      at::CTypeToScalarType<th::from_type<real>>::to(),
+      at::scalarTypeToDataType(at::CTypeToScalarType<real>::to()),
       size,
       allocator,
       true).release();
@@ -48,10 +48,10 @@ THStorage* THStorage_(newWithAllocator)(ptrdiff_t size,
 
 THStorage* THStorage_(newWithMapping)(const char *filename, ptrdiff_t size, int flags)
 {
-  auto scalar_type = at::CTypeToScalarType<th::from_type<real>>::to();
+  auto scalar_type = at::CTypeToScalarType<real>::to();
   size_t actual_size = -1;
   THStorage* storage = c10::make_intrusive<at::StorageImpl>(
-      scalar_type,
+      at::scalarTypeToDataType(scalar_type),
       size,
       THMapAllocator::makeDataPtr(
           filename, flags, size * at::elementSize(scalar_type), &actual_size),
@@ -116,7 +116,7 @@ void THStorage_(free)(THStorage *storage)
 THStorage* THStorage_(newWithDataAndAllocator)(at::DataPtr&& data, ptrdiff_t size,
                                                at::Allocator* allocator) {
   THStorage* storage = c10::make_intrusive<at::StorageImpl>(
-      at::CTypeToScalarType<th::from_type<real>>::to(),
+      at::scalarTypeToDataType(at::CTypeToScalarType<real>::to()),
       size,
       std::move(data),
       allocator,

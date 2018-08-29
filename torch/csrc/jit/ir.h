@@ -413,9 +413,11 @@ public:
 
 
   // Returns true if the value of input name is statically known
-  bool is_constant(Symbol name) {
+  bool is_constant(Symbol name) const {
     return static_cast<bool>(get(name));
   }
+
+  TORCH_API bool isNondeterministic() const;
 
   // Graphs
 
@@ -678,7 +680,7 @@ public:
   }
 
   // XXX: this function is meant to be used with string literals only!
-  bool matches(const char *signature_literal, at::ArrayRef<Symbol> const_inputs={});
+  bool matches(const char *signature_literal, at::ArrayRef<Symbol> const_inputs={}) const;
 
   const FunctionSchema& schema() const {
     if (!schema_)
@@ -989,6 +991,9 @@ public:
 
   Node * createUndefined() {
     return create(prim::Undefined);
+  }
+  Node * createNoneGenerator() {
+    return create(prim::NoneGenerator);
   }
   Node * createFusionGroup(int device) {
     auto n = create(prim::FusionGroup, 0);

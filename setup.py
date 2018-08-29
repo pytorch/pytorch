@@ -54,6 +54,8 @@
 #   TORCH_CUDA_ARCH_LIST
 #     specify which CUDA architectures to build for.
 #     ie `TORCH_CUDA_ARCH_LIST="6.0;7.0"`
+#     These are not CUDA versions, instead, they specify what
+#     classes of NVIDIA hardware we should generate PTX for.
 #
 #   ONNX_NAMESPACE
 #     specify a namespace for ONNX built here rather than the hard-coded

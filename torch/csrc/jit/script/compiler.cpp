@@ -484,7 +484,10 @@ Value* tryMatchArgument(
   if (value->node()->kind() == prim::None){
     if (arg.type->isSubtypeOf(NumberType::get()))
       value = graph.insertConstant(at::Scalar(NAN), loc);
-    else
+    else if (arg.type->isSubtypeOf(GeneratorType::get())) {
+      value = graph.insertNode(graph.createNoneGenerator())
+        ->output()->setType(GeneratorType::get());
+    } else
       value = graph.insertNode(graph.createUndefined())->output();
   }
 
@@ -576,7 +579,7 @@ at::optional<std::vector<Value*>> tryMatchSchema(
       } else if(auto idx = findInputWithName(arg.name, kwargs))  {
         const NamedValue& nv = kwargs[*idx];
         if(used_kwarg[*idx]) {
-          err() << "argument " << nv.name() << " specified twice \n" << nv.locOr(loc);
+          err() << "argument " << nv.name() << " specified twice in schema, submit a bug report!\n" << nv.locOr(loc);
           return at::nullopt;
         }
         used_kwarg[*idx] = true;
@@ -679,6 +682,7 @@ Value* emitBuiltinCall(
   // otherwise it will return nullptr if the builtin is not found.
   bool required) {
 
+
   const auto& variants = getAllOperatorsFor(name);
   std::stringstream failure_messages;
   //first we try to match the schema without any conversion
@@ -707,30 +711,11 @@ Value* emitBuiltinCall(
                          << "for call at";
 }
 
-static Value* ensureTensor(const SourceRange& range, Value* v) {
-  if(!v->type()->isSubtypeOf(DynamicType::get())) {
-    throw ErrorReport(range) << "expected a tensor value but found a "
-                             << v->type()->str();
-  }
-  return v;
-}
-
 static Value* ensureInt(const SourceRange& range, Value* v) {
   if(!v->type()->isSubtypeOf(IntType::get())) {
     throw ErrorReport(range) << "expected a int but found a "
                              << v->type()->str();
   }
-  return v;
-}
-
-
-void ensureTensors(const SourceRange& range, at::ArrayRef<Value*> values) {
-  for(auto value : values) {
-    ensureTensor(range, value);
-  }
-}
-
-static Value* identity(const SourceRange& range, Value* v) {
   return v;
 }
 
@@ -814,7 +799,7 @@ struct to_ir {
     // outputs
     if (has_return) {
       auto return_stmt = Return(*stmts_end);
-      auto results = getValues(return_stmt.values(), true, identity);
+      auto results = getValues(return_stmt.values(), true);
       // a single return value that is a tuple expands in place:
       // return a
       if (return_stmt.values().size() == 1 && results.size() == 1) {
@@ -831,15 +816,6 @@ struct to_ir {
       auto range = return_stmt.range();
       size_t return_type_idx = 0;
       for (auto& r : results) {
-        // TODO: support tuples and lists as returns
-        auto return_kind = r->type()->kind();
-        if (return_kind != TypeKind::CompleteTensorType &&
-            return_kind != TypeKind::DynamicType &&
-            return_kind != TypeKind::IntType &&
-            return_kind != TypeKind::FloatType) {
-          throw ErrorReport(return_stmt.range()) << "The only supported return types "
-            << "are tensors, ints and floats";
-        }
         graph->registerOutput(r);
         TypePtr type = DynamicType::get();
         if (!schema.is_varret) {
@@ -856,8 +832,8 @@ struct to_ir {
     }
 
     method.setSchema({def.name().name(), std::move(arguments), std::move(returns)});
-    // remove any uses of tuples that we inserted
-    LowerTuples(graph);
+    // remove any uses of tuples that we inserted that are not needed
+    LowerSimpleTuples(graph);
   }
 
 private:
@@ -970,7 +946,7 @@ private:
   }
 
   Value* emitCond(Expr cond) {
-    Value* v = emitExpr(cond, identity);
+    Value* v = emitExpr(cond);
     if(v->type()->isSubtypeOf(DynamicType::get())) {
       v = typeCast(cond.range(), v, IntType::get());
     }
@@ -1096,7 +1072,8 @@ private:
     {
       WithInsertPoint guard(n);
       if (max_trip_count) {
-        max_trip_count_val = emitExpr(max_trip_count.value(), ensureInt);
+        max_trip_count_val = ensureInt(
+            max_trip_count->range(), emitExpr(max_trip_count.value()));
       } else {
         max_trip_count_val =
             graph->insertConstant(INT_MAX,range);
@@ -1268,7 +1245,7 @@ private:
       Ident lhs = Var(stmt.lhs()[0]).name();
       Expr expr = BinOp::create(stmt.range(), stmt.reduction(),
                                 Var::create(lhs.range(), lhs), stmt.rhs());
-      environment_stack->setVar(lhs.range(), lhs.name(), emitExpr(expr, identity));
+      environment_stack->setVar(lhs.range(), lhs.name(), emitExpr(expr));
       return;
     }
 
@@ -1366,8 +1343,7 @@ private:
 
   std::vector<NamedValue> getNamedValues(
       TreeList trees,
-      bool maybe_unpack=false,
-      std::function<Value*(const SourceRange&, Value*)> post_process = ensureTensor) {
+      bool maybe_unpack) {
     std::vector<NamedValue> values;
     for (const auto& tree : trees) {
       if(maybe_unpack && tree->kind() == TK_STARRED) {
@@ -1375,35 +1351,30 @@ private:
         auto entries = emitSugaredExpr(starred.expr(), 1)->asTuple(starred.range(), method);
         for(auto entry : entries) {
           values.push_back(NamedValue(
-              tree->range(),
-              post_process(
-                  starred.range(), entry->asValue(starred.range(), method))));
+              tree->range(), entry->asValue(starred.range(), method)));
         }
       } else {
         values.push_back(NamedValue(
-            tree->range(), emitExpr(Expr(tree), post_process)));
+            tree->range(), emitExpr(Expr(tree))));
       }
     }
     return values;
   }
   std::vector<NamedValue> getNamedValues(
       List<Expr> trees,
-      bool maybe_unpack=false,
-      std::function<Value*(const SourceRange&, Value*)> post_process = ensureTensor) {
-    return getNamedValues(trees.tree()->trees(), maybe_unpack, post_process);
+      bool maybe_unpack) {
+    return getNamedValues(trees.tree()->trees(), maybe_unpack);
   }
 
   std::vector<Value*> getValues(
       TreeList trees,
-      bool maybe_unpack=false,
-      std::function<Value*(const SourceRange&, Value*)> post_process = ensureTensor) {
-    return toValues(*graph, getNamedValues(trees, maybe_unpack, post_process));
+      bool maybe_unpack) {
+    return toValues(*graph, getNamedValues(trees, maybe_unpack));
   }
   std::vector<Value*> getValues(
       List<Expr> trees,
-      bool maybe_unpack=false,
-      std::function<Value*(const SourceRange&, Value*)> post_process = ensureTensor) {
-    return getValues(trees.tree()->trees(), maybe_unpack, post_process);
+      bool maybe_unpack) {
+    return getValues(trees.tree()->trees(), maybe_unpack);
   }
 
   // special rules apply when we directly call foo(a,b) when foo is an ident
@@ -1425,8 +1396,8 @@ private:
     return sv->call(callee.range(), method, inputs, attributes, n_binders);
   }
 
-  Value* emitExpr(Expr tree, std::function<Value*(const SourceRange&, Value*)> post_process = ensureTensor) {
-    return post_process(tree.range(), emitSugaredExpr(tree, 1)->asValue(tree.range(), method));
+  Value* emitExpr(Expr tree) {
+    return emitSugaredExpr(tree, 1)->asValue(tree.range(), method);
   }
 
   NodeKind reverseComparision(NodeKind kind) {
@@ -1455,9 +1426,9 @@ private:
       }
       case TK_APPLY: {
         auto apply = Apply(tree);
-        auto inputs = getNamedValues(apply.inputs(), true, identity);
+        auto inputs = getNamedValues(apply.inputs(), true);
         auto attributes = fmap(apply.attributes(), [&](const Attribute& attr) {
-          return NamedValue(attr.range(), attr.name().name(), emitExpr(attr.value(), identity));
+          return NamedValue(attr.range(), attr.name().name(), emitExpr(attr.value()));
         });
         // the apply is directly an identifier 'foo'
         if(apply.callee().kind() == TK_VAR) {
@@ -1491,7 +1462,7 @@ private:
       case TK_UNARY_MINUS: {
         const auto& inputs = tree->trees();
         auto kind = getNodeKind(tree->kind(), inputs.size());
-        auto named_values = getNamedValues(inputs, /*maybe_unpack=*/false, identity);
+        auto named_values = getNamedValues(inputs, /*maybe_unpack=*/false);
         return emitBuiltinCall(
                    tree->range(),
                    *method.graph(),
@@ -1536,7 +1507,7 @@ private:
       } break;
       case TK_LIST_LITERAL: {
         auto ll = ListLiteral(tree);
-        auto values = getValues(ll.inputs(), /*maybe_unpack=*/true, identity);
+        auto values = getValues(ll.inputs(), /*maybe_unpack=*/true);
 
         // If this is an empty list literal `[]`, construct an empty Tensor[]
         const auto elem_type =
@@ -1553,7 +1524,7 @@ private:
       } break;
       case TK_TUPLE_LITERAL: {
         auto ll = TupleLiteral(tree);
-        auto values = getValues(ll.inputs(), /*maybe_unpack=*/true, identity);
+        auto values = getValues(ll.inputs(), /*maybe_unpack=*/true);
         return graph->insertNode(graph->createTuple(values))->output();
       } break;
       default:
@@ -1610,10 +1581,10 @@ private:
       JIT_ASSERT(!input->type()->isSubtypeOf(DynamicType::get()));
     }
 
-    args.emplace_back(loc, "begin", emitExpr(Expr(slice.startOr(0)), identity));
+    args.emplace_back(loc, "begin", emitExpr(Expr(slice.startOr(0))));
     const auto has_end = slice.end().present();
     if (has_end) {
-      args.emplace_back(loc, "end", emitExpr(Expr(slice.end().get()), identity));
+      args.emplace_back(loc, "end", emitExpr(Expr(slice.end().get())));
     }
     NamedValue step = NamedValue(loc, "step", graph->insertConstant(1, loc));
     return emitBuiltinCall(loc, *graph, aten::slice, args, {step}, true);
@@ -1645,7 +1616,7 @@ private:
         ++dim;
         continue;
       }
-      auto index = emitExpr(subscript_expr, identity);
+      auto index = emitExpr(subscript_expr);
       if (index->type() == IntType::get()) {
         sliceable = emitSelect(loc, sliceable, dim, index);
         continue;
@@ -1666,8 +1637,7 @@ private:
     JIT_ASSERT(subscript.subscript_exprs().size() == 1);
     JIT_ASSERT(subscript.subscript_exprs()[0].kind() == TK_SLICE_EXPR);
     auto slice_exp = SliceExpr(subscript.subscript_exprs()[0]);
-
-    auto * sliceable = emitExpr(subscript.value(), identity);
+    auto * sliceable = emitExpr(subscript.value());
     at::optional<int64_t> maybe_dim;
     if (sliceable->type()->kind() == TypeKind::DynamicType) {
       // If the sliceable object is a tensor, specify a default dimension
@@ -1683,8 +1653,7 @@ private:
     const auto applyInputs =
         Compound::create(TK_LIST, loc, std::move(inputs));
     auto input_values = getNamedValues(applyInputs->trees(),
-                                        /*maybe_unpack*/false,
-                                        identity);
+                                        /*maybe_unpack*/false);
     NamedValue gatherable = input_values[0];
     NamedValue idx = input_values[1];
     if (gatherable.value(*graph)->type()->kind() == TypeKind::ListType) {
@@ -1798,6 +1767,13 @@ const std::unordered_map<std::string, std::function<TypePtr(Subscript)>> &subscr
       }
       return TupleType::create(subscript_expr_types);
     }},
+    {"List", [](Subscript subscript) -> TypePtr {
+      if (subscript.subscript_exprs().size() != 1) {
+        throw ErrorReport(subscript) << " expected exactly one element type but found " << subscript.subscript_exprs().size();
+      }
+      auto elem_type = parseTypeFromExpr(*subscript.subscript_exprs().begin());
+      return ListType::create(elem_type);
+    }},
   };
   return map;
 }
@@ -1817,7 +1793,7 @@ TypePtr parseTypeFromExpr(Expr expr) {
     }
     auto value_name = Var(subscript.value()).name().name();
     if (!subscript_to_type_fns().count(value_name)) {
-      throw ErrorReport(subscript.range()) << "Type " << value_name << " cannot be subscripted";
+      throw ErrorReport(subscript.range()) << "Unknown type constructor " << value_name;
     }
     return subscript_to_type_fns().at(value_name)(subscript);
   } else if (expr.kind() == '.') {

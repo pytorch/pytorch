@@ -3,8 +3,6 @@
 #include <atomic>
 #include <memory>
 
-#include "ATen/Retainable.h"
-#include "ATen/StorageImpl.h"
 #include "ATen/Storage.h"
 #include "ATen/core/optional.h"
 #include "ATen/core/TensorTypeId.h"
@@ -20,7 +18,7 @@ struct Tensor;
 } // namespace at
 
 namespace at {
-struct AT_API TensorImpl : public Retainable {
+struct AT_API TensorImpl : public c10::intrusive_ptr_target {
   TensorImpl() = delete;
   TensorImpl(TensorTypeId type_id, ScalarType scalar_type, bool is_variable);
   TensorImpl(Storage&& storage, TensorTypeId type_id, bool is_variable);
@@ -32,11 +30,12 @@ struct AT_API TensorImpl : public Retainable {
   // TODO: This really really needs to be inlined.
   Type & type() const;
 
+  TensorTypeId type_id() const { return type_id_; }
   const char * toString() const;
   virtual IntList sizes() const;
   virtual IntList strides() const;
   virtual int64_t dim() const;
-  virtual const Storage& storage();
+  virtual const Storage& storage() const;
   friend struct Type;
 
   virtual int64_t numel() const {

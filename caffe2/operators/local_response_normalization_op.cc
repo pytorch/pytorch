@@ -342,7 +342,7 @@ op = core.CreateOperator("LRN",
      order="NHWC"
 )
 
-workspace.FeedBlob("X", np.random.randn(1, 6, 6, 1).astype(np.float32)) # NCHW
+workspace.FeedBlob("X", np.random.randn(1, 6, 6, 1).astype(np.float32)) // NCHW
 print("X:\n", workspace.FetchBlob("X"), "\n")
 workspace.RunOperatorOnce(op)
 print("Y:\n", workspace.FetchBlob("Y"))
