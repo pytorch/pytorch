@@ -51,6 +51,9 @@ BatchNormalization
 - Spatial : bool : true
 - IsTest : bool : false
 
+Clip
+- Min : float
+- Max : float
 
 FC
 GivenTensorFill
