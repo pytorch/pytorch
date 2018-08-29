@@ -63,7 +63,7 @@ void BlockToONNX(Block* old_block, Block* new_block, ::torch::onnx::OperatorExpo
         // Copy over source location information to all nodes created by
         // the symbolic
         outputs[i]->node()->setSourceLocation(node->getSourceLocation());
-        outputs[i]->node()->setScopeFromString(node->scopeName());
+        outputs[i]->node()->setScope(node->scope());
         env[old] = outputs[i];
       } else {
         // Null output means that the ONNX op doesn't have outputs corresponding
@@ -84,7 +84,7 @@ void BlockToONNX(Block* old_block, Block* new_block, ::torch::onnx::OperatorExpo
   // Clone the node and add it to the new graph
   auto cloneNode = [&](Node * node) {
     auto n_ = ctx.block->appendNode(ctx.block->owningGraph()->createClone(node, envFn));
-    n_->setScopeFromString(node->scopeName());
+    n_->setScope(node->scope());
     for(size_t i = 0; i < node->outputs().size(); i++) {
       // n_->outputs()[i]->setType(node->outputs()[i]->type());
       env[node->outputs()[i]] = n_->outputs()[i];

@@ -948,8 +948,8 @@ public:
   void set_current_scope(Scope* scope) {
     std::string name1 = scope->getRoot()->name().toDisplayString();
     std::string name2 = scope_root_.get()->name().toDisplayString();
-    if (name1.find(name2) < 0 &&
-        name2.find(name1) < 0 &&
+    if (!(name1.find(name2) == 0) &&
+        !(name2.find(name1) == 0) &&
         scope->getRoot() != scope_root_.get()) {
       throw std::runtime_error("trying to set a scope as current that does not belong to the Graph's scope trie");
     }
@@ -1089,13 +1089,6 @@ public:
       IValue val,
       at::optional<SourceRange> loc = at::nullopt) {
     return jit::insertConstant(*this, std::move(val), loc);
-  }
-
-  Value* insertConstantWithScope(
-      IValue val,
-      std::string scopeName = std::string(),
-      at::optional<SourceRange> loc = at::nullopt) {
-    return jit::insertConstantWithScope(*this, std::move(val), scopeName, loc);
   }
 
   // schema-driven insert
