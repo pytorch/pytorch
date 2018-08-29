@@ -46,14 +46,9 @@ using tensor_list = std::vector<at::Tensor>;
 using Variable = autograd::Variable;
 using autograd::variable_list;
 
-// this type is in ExecutionPlan to run its Gradient if it is
-// specified. It has a list of inputs captured by ExecutionPlan that
-// it concats with inputs to form the full set of inputs to graph.
-// see struct Gradient for a description of how the derivative graph
-// is constructed and what variables are captured.
-struct ExecutionPlanAutogradFunction : public autograd::Function {
-  ExecutionPlanAutogradFunction(GraphExecutor graph, size_t capture_size)
-  : graph(std::move(graph)) {
+struct DifferentiableGraphBackward : public autograd::Function {
+  DifferentiableGraphBackward(GraphExecutor executor, size_t capture_size)
+  : executor(std::move(executor)) {
     is_var_capture.reserve(capture_size);
     var_captures.reserve(capture_size);
     ivalue_captures.reserve(capture_size);
@@ -75,10 +70,28 @@ struct ExecutionPlanAutogradFunction : public autograd::Function {
         ++ivalue_capture_it;
       }
     }
-    graph.run(stack);
-    return fmap(stack, [](IValue & val) {
-      return autograd::Variable(std::move(val).toTensor());
-    });
+
+    executor.run(stack);
+    JIT_ASSERT(stack.size() == num_outputs());
+
+    variable_list outputs;
+    outputs.reserve(num_outputs());
+    for (size_t i = 0; i < num_outputs(); ++i) {
+      if (should_compute_output(i)) {
+        auto output = std::move(stack[i]).toTensor();
+        const auto & edge = next_edge(i);
+        if (output.defined()) {
+          outputs.push_back(std::move(output));
+        } else if (edge.is_valid()) {
+          outputs.push_back(edge.function->input_metadata(edge.input_nr).zeros_like());
+        } else {
+          outputs.emplace_back();
+        }
+      } else {
+        outputs.emplace_back();
+      }
+    }
+    return outputs;
   }
 
   void capture(const IValue & val, bool is_output) {
@@ -92,7 +105,7 @@ struct ExecutionPlanAutogradFunction : public autograd::Function {
   }
 private:
   friend struct ExecutionPlan;
-  GraphExecutor graph;
+  GraphExecutor executor;
 
   // INVARIANT: is_var_capture.size() == var_captures.size() + ivalue_captures.size()
   std::vector<bool> is_var_capture;
@@ -115,7 +128,7 @@ struct DifferentiableGraphOp {
 
   // XXX: keep in mind that stack can be larger than the inputs we need!
   int operator()(Stack & stack) const {
-    auto grad_fn = std::make_shared<ExecutionPlanAutogradFunction>(grad_executor,
+    auto grad_fn = std::make_shared<DifferentiableGraphBackward>(grad_executor,
       grad.df_input_captured_inputs.size() + grad.df_input_captured_outputs.size());
 
     {
@@ -180,12 +193,12 @@ private:
     }
   }
   // Capture (save) inputs that would be required to subsequently run backwards
-  void captureInputs(ExecutionPlanAutogradFunction & grad_fn, at::ArrayRef<IValue> inputs) const {
+  void captureInputs(DifferentiableGraphBackward & grad_fn, at::ArrayRef<IValue> inputs) const {
     for (size_t offset : grad.df_input_captured_inputs) {
       grad_fn.capture(inputs[offset], /*is_output*/false);
     }
   }
-  void captureOutputs(ExecutionPlanAutogradFunction & grad_fn, at::ArrayRef<IValue> outputs) const {
+  void captureOutputs(DifferentiableGraphBackward & grad_fn, at::ArrayRef<IValue> outputs) const {
     for (size_t offset : grad.df_input_captured_outputs) {
       grad_fn.capture(outputs[offset], /*is_output*/true);
     }
@@ -474,36 +487,27 @@ private:
       tracer::setValueTrace(outputs[i].toTensor(), output_values[i]);
     }
   }
-  // TODO TODO TODO TODO update comments here here
 
-  // the unoptimized starting graph
-  // this is never mutated
+  // The unoptimized starting graph. This field is effectively const, but we can't make it so
+  // because Graph::copy() is not const (and making it const is not that easy at this point).
   std::shared_ptr<Graph> graph;
 
-  // true - do everything we can to make this graph run fast
-  // false - do not modifiy the graph at all and just use the interpreter
-  // to run the graph. Useful for debugging correctness issues in the implementation
+  // If false, we'll run the graph as we get it, without any optimizations. Useful
+  // for debugging.
   const bool optimize;
   const size_t num_inputs;
   const size_t num_outputs;
 
-  // when this graph has some parts that are not symbolically_differentable,
-  // but some input does require a derivative, we create and use autograd_fallback,
-  // which wraps up the fully differentiable subgraphs, and then runs the outer
-  // graph through autograd.
-  // Since we can't optimize black box functions anyway, there is only one fallback path,
-  // and it must work on all sizes (so no optimizations that inspect sizes can run on it)
+  // Populated only when optimize is false (and in that case plan_cache will be unused).
+  // The compiled version of graph.
   ExecutionPlan fallback;
 
-  // optimizable code paths, used when we can differentiate or when no derivative is needed
-  // Spec describes input conditions, Plan describes how to execute them.
+  // Mapping from argument configurations to optimized versions of the graph that are
+  // specialized to the spec.
   std::unordered_map<ArgumentSpec, ExecutionPlan> plan_cache;
 
-  // GraphExecutor can be accessed from  multiple thread so
-  // anytime we are checking or updating the autograd_fallback or
-  // plan_cache, we must hold the compile mutex.
-  // along the fast path (no compilation) code should
-  // hold this for as little time as possible.
+  // GraphExecutors can be accessed from multiple threads, so this thread needs to be
+  // held every time we access the fallback or plan_cache.
   std::mutex compile_mutex;
 };
 

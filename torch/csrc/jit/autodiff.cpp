@@ -353,9 +353,9 @@ static ReverseDetails addReverseInline(Gradient& grad_desc,
     JIT_ASSERT(grad_inputs.size() == node->inputs().size());
     for (size_t i = 0, num_inputs = grad_inputs.size(); i < num_inputs; ++i) {
       if (!requires_grad(inputs[i])) continue;
-      if (!grad_inputs[i]) {
-        grad_inputs[i] = graph.insertNode(graph.createUndefined())->output();
-      }
+      // NB: Not returning a gradient w.r.t. a value that requires grad is normal if the
+      // input is non-differentiable. This happens e.g. in the aten::type_as case.
+      if (!grad_inputs[i]) continue;
       set_grad(inputs[i], grad_inputs[i]);
     }
   }
@@ -365,6 +365,11 @@ static ReverseDetails addReverseInline(Gradient& grad_desc,
     Value * input = inputs[i];
     if (!requires_grad(input))
       continue;
+    // NB: Not having a gradient defined w.r.t. an input to the graph which requires grad
+    // can happen and is not an error. It might have been used only in non-differentiable
+    // contexts (e.g. as second input to aten::type_as). In that case we simply ignore it
+    // as an output, because it won't ever produce any meaningful values.
+    if (grad_map.count(input) == 0) continue;
     reverse_block->registerOutput(get_grad(input));
     grad_desc.df_output_vjps.push_back(i);
   }
@@ -548,7 +553,7 @@ Gradient differentiate(std::shared_ptr<Graph>& graph, const std::vector<bool>& r
   // addReverseInline has to call gradientForNode if *any* of the outputs
   // require grad, but it will emit vjps for *all* outputs. Use DCE to remove
   // unnecessary nodes.
-  EliminateDeadCode(grad_desc.f);
+  EliminateDeadCode(rev_info.reverse_block);
   // Fills in f, df, f_real_outputs, df_input_captures,
   // modifies df_input_vjps (new vjps are added for temporaries)
   lambdaLiftReverse(grad_desc, rev_info);
