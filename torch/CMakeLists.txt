@@ -275,8 +275,12 @@ elseif ($ENV{WERROR})
   target_compile_options(torch PRIVATE -Werror -Wno-strict-overflow)
 endif()
 
+if (MSVC)
+  target_link_libraries(torch onnx onnx_library)
+endif()
+
 target_link_libraries(torch
-  caffe2_library onnx_library)
+  caffe2_library)
 
 find_package(OpenMP)
 if(OPENMP_FOUND)
