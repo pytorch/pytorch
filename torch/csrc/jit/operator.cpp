@@ -46,7 +46,7 @@ struct SchemaParser {
   TypePtr parseBaseType() {
     static std::unordered_map<std::string, TypePtr> type_map = {
       {"Tensor", DynamicType::get() },
-      {"Generator", DynamicType::get() },
+      {"Generator", GeneratorType::get() },
       {"ScalarType", IntType::get() },
       {"Layout", IntType::get() },
       {"Device", ListType::ofInts() },
@@ -192,7 +192,8 @@ struct SchemaParser {
   void parseDefaultValue(Argument& arg) {
     auto range = L.cur().range;
     switch(arg.type->kind()) {
-      case TypeKind::DynamicType: {
+      case TypeKind::DynamicType:
+      case TypeKind::GeneratorType: {
         arg.default_value = parseTensorDefault(range);
       }  break;
       case TypeKind::NumberType:
@@ -428,7 +429,7 @@ OperatorSet::OperatorSet(std::initializer_list<const char *> sig_literals) {
   }
 }
 
-Operator* OperatorSet::find(Node *n) {
+Operator* OperatorSet::find(const Node *n) const  {
   auto it = ops.find(n->kind());
   if (it == ops.end()) {
     return nullptr;

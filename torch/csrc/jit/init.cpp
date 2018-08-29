@@ -94,6 +94,7 @@ void initJITBindings(PyObject *module) {
    .def("_jit_pass_constant_propagation", [](std::shared_ptr<Graph>& g) {
      return ConstantPropagation(g);
    })
+   .def("_jit_pass_erase_shape_information", EraseShapeInformation)
    .def("_jit_run_cpp_tests", [] {
      // We have to release the GIL inside this method, because if we happen to
      // initialize the autograd engine in these tests, the newly spawned worker threads will

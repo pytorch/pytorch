@@ -26,6 +26,9 @@ namespace torch { namespace jit { namespace tracer {
 using torch::autograd::Variable;
 using variable_list = std::vector<Variable>;
 
+TORCH_API void recordSourceLocation(Node* n);
+TORCH_API void setRecordSourceLocation(void (*v)(Node*));
+
 struct TORCH_API TracingState : public std::enable_shared_from_this<TracingState> {
   TracingState();
   ~TracingState();
@@ -127,6 +130,7 @@ inline Value* getValueTrace(const Variable& var) {
   auto it = value_map.find(var);
   if (it == value_map.end()) {
     Value *constant = state->graph->insertConstant(var.data());
+    recordSourceLocation(constant->node());
     constant->inferTypeFrom(var.data());
     it = value_map.emplace_hint(it, var, constant);
   }
@@ -222,10 +226,6 @@ inline void exit(const Stack& outputs) {
 inline void abandon() {
   setTracingState(nullptr);
 }
-
-
-TORCH_API void recordSourceLocation(Node* n);
-TORCH_API void setRecordSourceLocation(void (*v)(Node*));
 
 // NB: those serve both as an intermediate steps in addInputs below,
 // as well as the overloads that terminate template recursion

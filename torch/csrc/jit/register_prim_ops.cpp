@@ -143,6 +143,14 @@ RegisterOperators reg({
           };
         }),
     Operator(
+        prim::NoneGenerator,
+        [](Node* node) {
+          return [](Stack& stack) {
+            stack.push_back(at::Tensor());
+            return 0;
+          };
+        }),
+    Operator(
         prim::Print,
         [](Node* node) {
           size_t num_inputs = node->inputs().size();

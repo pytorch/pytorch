@@ -55,6 +55,7 @@ _(prim, GradOf) \
 _(prim, AnyDefined) \
 _(prim, FusedConcat) \
 _(prim, FusedChunk) \
+_(prim, NoneGenerator) \
 _(aten, __not__) \
 FORALL_ATEN_BASE_SYMBOLS(_) \
 _(onnx, Add) \
