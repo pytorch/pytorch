@@ -172,7 +172,7 @@ Tensor _standard_gamma_grad_cuda(const Tensor& self, const Tensor& output) {
 }
 
 Tensor& bernoulli_tensor_cuda_(Tensor &self, const Tensor& p_, Generator* gen) {
-  auto p = std::get<0>(expand_inplace(self, p_.toBackend(kCUDA)));
+  auto p = std::get<0>(expand_inplace(self, p_.to(kCUDA)));
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.type(), "bernoulli_tensor_cuda_", [&] {
     const at::Type& t = p.type();
     auto seeds = next_philox_seed(gen, 10);
