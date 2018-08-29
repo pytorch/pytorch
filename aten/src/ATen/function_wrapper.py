@@ -509,6 +509,7 @@ OutputDeclaration = NamedTuple('OutputDeclaration', [
     ('buffers', Optional[List[str]]),
     ('returns', List[ReturnType]),
     ('inplace', bool),
+    ('abstract', bool),
     ('device_guard', bool),
     ('with_gil', bool),
     ('deprecated', bool),
@@ -799,6 +800,10 @@ def create_generic(top_env, declarations):
 
         mode = option['mode']
 
+        abstract = True
+        if mode == 'NN' and option.get('cimpls') is None:
+            abstract = False
+
         if broadcast_arg is not None:
             broadcast_env = nested_dict({'method_prefix_derived': ''}, env)
 
@@ -841,6 +846,8 @@ def create_generic(top_env, declarations):
             buffers=buffer_names,
             returns=option['returns'],
             inplace=option['inplace'],
+            # See Note [Abstract ATen methods]
+            abstract=abstract,
             device_guard=option.get('device_guard', True),
             with_gil=option.get('with_gil', False),
             deprecated=option.get('deprecated', False)
@@ -997,6 +1004,21 @@ def create_generic(top_env, declarations):
         dispatch = option['type_method_definition_dispatch']
         option['native_type_method_dispatch'] = dispatch
 
+        # Note [Abstract ATen methods]
+        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        # An abstract ATen method is one for which we /definitively know/
+        # that we cannot transparently differentiate it by differentiating
+        # its constituent calls; e.g., maybe because it directly manipulates
+        # raw pointers.
+        #
+        # We heuristically determine if this is the case by assuming a native
+        # function is abstract when its dispatch differes between backends,
+        # because a backend-specific definition is ~never differentiable.
+        # This is exposed in Declarations.yaml via a field named 'abstract'.
+        abstract = False
+        if isinstance(dispatch, dict):
+            abstract = True
+
         # generate the at::native function declarations (i.e. what the user will implement)
         if needs_native_definition:
             if isinstance(dispatch, dict):
@@ -1047,6 +1069,8 @@ def create_generic(top_env, declarations):
             buffers=None,
             returns=option['returns'],
             inplace=option['inplace'],
+            # See Note [Abstract ATen methods]
+            abstract=abstract,
             device_guard=option.get('device_guard', True),
             with_gil=option.get('with_gil', False),
             deprecated=option['deprecated'],

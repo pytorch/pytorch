@@ -545,23 +545,19 @@ def dispatch_strategy(declaration):
     """How are we going to call the underlying implementation of a
     declaration?  There are two strategies:
 
-        - use_derived: we want to call the implementation on CPUDoubleType
-          (or a similar, derived Type instance).  Because these derived
-          instances deal in Tensors, not Variables (it's a completely different
-          object, so it doesn't dispatch back to VariableType), code on
-          this dispatch path needs to wrap/unwrap tensors.  If the
-          derived implementation takes and returns tensors, the
-          implementation is usually differentiable (although we also use
-          the derived dispatch path for non-differentiable functions
-          that we still want to dispatch on the derived Type instance;
+        - use_derived: we want to call the implementation after
+          wrapping/unwrapping tensors.  If the derived implementation takes and
+          returns tensors, the implementation is usually differentiable
+          (although we also use the derived dispatch path for non-differentiable
+          functions that we still want to dispatch on the derived Type instance;
           e.g., size())
 
         - use_type: we want to call the implementation on Type, because
-          it is implemented concretely, and the functions it invokes will
-          get dispatched back to VariableType (which will ensure that they
-          are differentiable.)
+          the functions it invokes will get dispatched back to VariableType
+          (which will ensure that they are differentiable.)
     """
-    if declaration['derivative'] is not None or \
+    if declaration['abstract'] or \
+            declaration['derivative'] is not None or \
             any(arg.get('is_type_dispatched') for arg in declaration['arguments']):
         # If the function is abstract (not implemented on at::Type), we must
         # call the implementation on the derived type with unpacked tensors.
