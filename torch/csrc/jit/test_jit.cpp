@@ -12,7 +12,7 @@ using Catch::StartsWith;
 #endif
 
 #include "torch/csrc/jit/assertions.h"
-#include "torch/csrc/jit/fusion_compiler.h"
+#include "torch/csrc/jit/fusers/fusion_interface.h"
 #include "torch/csrc/jit/code_template.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/attributes.h"
@@ -136,8 +136,6 @@ Value * appendNewNode(NodeKind kind, Graph& graph, ArrayRef<Value*> inputs) {
 
 
 static void fusionTests() {
-  FusionCompiler comp;
-
   auto testSimple = [&] {
     Graph graph;
     Var i0 = Var::asNewInput(graph);
@@ -147,7 +145,7 @@ static void fusionTests() {
     auto a = at::rand({3,4}, at::kCUDA);
     auto b = at::rand({4,3}, at::kCUDA).transpose(0,1);
     auto o = at::zeros({3,4}, at::kCUDA);
-    auto outputs = comp.debugLaunchGraph(graph, 0, {a,b});
+    auto outputs = debugLaunchGraph(graph, 0, {a,b});
     REQUIRE(outputs.size() == 1);
     auto o2 = a*b;
     float max_diff = (o2 - outputs[0]).abs().max().toCDouble();
@@ -201,7 +199,7 @@ static void fusionTests() {
     auto t5 = out1.tanh();
     auto out0 = t16*t5;
 
-    auto outputs = comp.debugLaunchGraph(graph, 0, inputs);
+    auto outputs = debugLaunchGraph(graph, 0, inputs);
     REQUIRE(outputs.size() == graph.outputs().size());
     REQUIRE(out0.is_same_size(outputs.front()));
     float max_diff = (outputs.front() - out0).abs().max().toCDouble();
@@ -235,7 +233,7 @@ static void fusionTests() {
 
     auto o_r = a*b;
     auto o2_r = at::cat({a, o_r}, dim);
-    auto outputs = comp.debugLaunchGraph(graph, 0, {a,b});
+    auto outputs = debugLaunchGraph(graph, 0, {a,b});
     REQUIRE(outputs.size() == 2);
 
     float max_diff = (o_r - outputs[0]).abs().max().toCDouble();
