@@ -25,7 +25,7 @@ inline vector<TIndex> ToVectorTIndex(const std::vector<int>& src) {
 }
 
 /**
- * Return product of all dimensions starting from K
+ * Return product of all dimensions starting from k
  */
 inline TIndex size_from_dim_(int k, const vector<TIndex>& dims) {
   TIndex r = 1;
@@ -35,7 +35,7 @@ inline TIndex size_from_dim_(int k, const vector<TIndex>& dims) {
   return r;
 }
 
-// Product of all dims up to
+// Product of all dims up to k (not including dims[k])
 inline TIndex size_to_dim_(int k, const vector<TIndex>& dims) {
   CAFFE_ENFORCE((unsigned)k <= dims.size());
   TIndex r = 1;
@@ -61,6 +61,7 @@ inline TIndex size_between_dim_(int k, int l, const vector<TIndex>& dims) {
   return r;
 }
 
+// Wrap around axis_index if it is negative, s.t., -1 is the last dim
 inline int canonical_axis_index_(int axis_index, int ndims) {
   CAFFE_ENFORCE_GE(axis_index, -ndims);
   CAFFE_ENFORCE_LT(axis_index, ndims);
