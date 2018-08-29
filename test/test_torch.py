@@ -6095,7 +6095,7 @@ class TestTorch(TestCase):
         _test_abs(self._make_tensors((3, 5, 7), val_range=(0, max_val)))
         _test_abs(self._make_tensors((2, 2, 5, 8, 2, 3), val_range=(0, max_val)))
         _test_abs(self._make_tensors((1000, ), val_range=(0, max_val)))
-        _test_abs(self._make_tensors((30, 30, 30), val_range=(0, max_val)))
+        _test_abs(self._make_tensors((10, 10, 10), val_range=(0, max_val)))
 
         # Checking that the right abs function is called for LongTensor
         bignumber = 2 ^ 31 + 1
