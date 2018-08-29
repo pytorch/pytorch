@@ -3,8 +3,6 @@
 #include <atomic>
 #include <memory>
 
-#include "ATen/Retainable.h"
-#include "ATen/StorageImpl.h"
 #include "ATen/Storage.h"
 #include "ATen/core/optional.h"
 #include "ATen/core/TensorTypeId.h"
