@@ -208,12 +208,6 @@ struct CAFFE2_API IValue final {
     AT_ASSERT(isWorld());
     return as_world;
   }
-  TORCH_API std::ostream& formatWorld(std::ostream& out) const {
-    AT_ASSERT(isWorld());
-    out << "World";
-    return out;
-  }
-
 
   // Int
   IValue(int64_t i)
