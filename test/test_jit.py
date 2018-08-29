@@ -419,7 +419,7 @@ class TestJit(JitTestCase):
             # XXX: Unfortunately ScriptModule won't simply become Module now,
             # because that requires disabling the JIT at startup time, which
             # we can't do in here.
-            self.assertTrue(inspect.isfunction(MyModule.method))
+            self.assertTrue(inspect.ismethod(MyModule.method))
         finally:
             torch.jit._enabled = True
 
