@@ -19,7 +19,6 @@ import torch.optim as optim
 from common import TestCase
 from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
 from torch.autograd import Variable
-import test
 import common
 
 BACKEND = os.environ["BACKEND"]

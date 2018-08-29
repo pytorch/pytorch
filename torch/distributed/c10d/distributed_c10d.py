@@ -2,7 +2,7 @@ import torch
 
 from .rendezvous import rendezvous, register_rendezvous_handler
 from . import BroadcastOptions, AllreduceOptions, ReduceOptions, \
-    ScatterOptions, GatherOptions, ReduceOp
+    ScatterOptions, GatherOptions
 from . import ReduceOp as reduce_op
 from . import PrefixStore
 from . import ProcessGroupGloo
@@ -88,7 +88,7 @@ def _get_global_rank(group, group_rank):
         raise RuntimeError("group.WORLD does not have local rank to global "
                            "rank mapping")
     group_rank_map = _pg_group_ranks[group]
-    for rank, grp_rank in group_rank.items():
+    for rank, grp_rank in group_rank_map.items():
         if grp_rank == group_rank:
             return rank
     raise RuntimeError("The group rank is not part of the group")
@@ -244,8 +244,7 @@ def _new_process_group_helper(world_size, rank, group_name=""):
         _pg_map[pg] = (DistBackend.NCCL, store, group_name)
         _pg_names[_default_pg] = group_name
     else:
-        raise RuntimeError("Unsupported distributed backend by group: " +
-                           backend)
+        raise RuntimeError("Unsupported distributed backend by group")
     return pg
 
 
@@ -435,7 +434,7 @@ def recv(tensor,
         _check_default_pg()
         pg = _default_pg
     else:
-        pg = process_group
+        pg = group
 
     if src is None:
         rank_tensor = torch.IntTensor([-1])
