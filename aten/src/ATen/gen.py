@@ -109,6 +109,9 @@ TYPE_DERIVED_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeDerived.h")
 TYPE_H = CodeTemplate.from_file(TEMPLATE_PATH + "/Type.h")
 TYPE_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/Type.cpp")
 
+REGISTER_CPU_H = CodeTemplate.from_file(TEMPLATE_PATH + "/RegisterCPU.h")
+REGISTER_CPU_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/RegisterCPU.cpp")
+
 REGISTER_CUDA_H = CodeTemplate.from_file(TEMPLATE_PATH + "/RegisterCUDA.h")
 REGISTER_CUDA_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/RegisterCUDA.cpp")
 
@@ -340,7 +343,8 @@ def iterate_types():
 def declare_outputs():
     files = ['Declarations.yaml', 'Type.h', 'Type.cpp', 'Tensor.h',
              'TensorMethods.h', 'Functions.h',
-             'CPUCopy.cpp', 'NativeFunctions.h']
+             'CPUCopy.cpp', 'NativeFunctions.h',
+             'RegisterCPU.cpp', 'RegisterCPU.h']
     for f in files:
         file_manager.will_write(f)
     cuda_files = ['CUDACopy.cpp', 'RegisterCUDA.cpp', 'RegisterCUDA.h']
@@ -408,6 +412,9 @@ def generate_outputs():
 
     file_manager.write('Type.h', TYPE_H, top_env)
     file_manager.write('Type.cpp', TYPE_CPP, top_env)
+
+    file_manager.write('RegisterCPU.h', REGISTER_CPU_H, top_env)
+    file_manager.write('RegisterCPU.cpp', REGISTER_CPU_CPP, top_env)
 
     cuda_file_manager.write('RegisterCUDA.h', REGISTER_CUDA_H, top_env)
     cuda_file_manager.write('RegisterCUDA.cpp', REGISTER_CUDA_CPP, top_env)
