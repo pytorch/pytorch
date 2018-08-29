@@ -627,7 +627,7 @@ Caffe2Ops Caffe2Backend::CreateGather(
     BuildOperator(c2_op, "BatchGather", inputs, outputs);
   } else {
     CAFFE_THROW(
-        "Caffe2 only supports Gather with axis being 1 or 2, ",
+        "Caffe2 only supports Gather with axis being 0 or 1, ",
         "whereas axis is ",
         axis);
   }
@@ -843,7 +843,7 @@ Caffe2Ops Caffe2Backend::CreateSlice(
   auto pos = args.find("starts");
   if (pos != args.end()) {
     for (auto i : pos->second->ints()) {
-      starts_vals.add_ints(i);
+      starts_vals.add_ints(i < 0 ? i - 1 : i);
     }
     args.erase(pos);
   }
