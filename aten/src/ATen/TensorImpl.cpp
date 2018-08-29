@@ -28,11 +28,6 @@ Tensor TensorImpl::detach() const {
   AT_ERROR("detach is not implemented for Tensor");
 }
 
-const char* TensorImpl::toString() const {
-  // This matches behavior with VariableImpl
-  return type().toString();
-}
-
 void TensorImpl::backward(
     at::optional<Tensor> gradient,
     bool keep_graph,

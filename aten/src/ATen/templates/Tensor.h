@@ -101,9 +101,8 @@ struct AT_API Tensor : public detail::TensorBase {
     return tensor_impl_.weak_use_count();
   }
 
-  const char * toString() const {
-    return tensor_impl_->toString();
-  }
+  const char * toString() const;
+
   IntList sizes() const {
     return tensor_impl_->sizes();
   }
