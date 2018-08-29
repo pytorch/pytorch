@@ -169,6 +169,7 @@ Pointwise Ops
 .. autofunction:: cos
 .. autofunction:: cosh
 .. autofunction:: div
+.. autofunction:: digamma 
 .. autofunction:: erf
 .. autofunction:: erfc
 .. autofunction:: erfinv

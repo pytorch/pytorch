@@ -1168,6 +1168,26 @@ Examples::
              [ 1.0500,  0.7336, -0.3836, -1.1015]]])
 """)
 
+add_docstr(torch.digamma,
+           r"""
+digamma(input) -> Tensor
+
+Computes the logarithmic derivative of the gamma function on `input`.
+
+.. math::
+    \psi(x) = \frac{d}{dx} \ln\left(\Gamma\left(x\right)\right) = \frac{\Gamma'(x)}{\Gamma(x)}
+
+Args:
+    input (Tensor): the tensor to compute the digamma function on
+
+Example::
+
+    >>> a = torch.tensor([1, 0.5])
+    >>> torch.digamma(a)
+    tensor([-0.5772, -1.9635])
+""")
+
+
 add_docstr(torch.dist,
            r"""
 dist(input, other, p=2) -> Tensor
@@ -4438,6 +4458,15 @@ Args:
     eigenvectors(boolean, optional): controls whether eigenvectors have to be computed
     upper(boolean, optional): controls whether to consider upper-triangular or lower-triangular region
     out (tuple, optional): the output tuple of (Tensor, Tensor)
+
+Returns:
+    (Tensor, Tensor): A tuple containing
+
+        - **e** (*Tensor*): Shape :math:`(m)`. Each element is an eigenvalue of ``input``,
+            The eigenvalues are in ascending order.
+        - **V** (*Tensor*): Shape :math:`(m \times m)`.
+            If ``eigenvectors=False``, it's a tensor filled with zeros.
+            Otherwise, this tensor contains the orthonormal eigenvectors of the ``input``.
 
 Examples::
 

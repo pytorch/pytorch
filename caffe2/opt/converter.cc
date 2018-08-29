@@ -1,3 +1,5 @@
+#include <limits>
+
 #include "caffe2/opt/converter.h"
 #include "caffe2/core/logging.h"
 
@@ -145,6 +147,29 @@ REGISTER_CONVERTER(SpatialBN, BatchNormalizationConverter);
 
 TRIVIAL_CONVERTER(Flatten);
 REGISTER_CONVERTER(Flatten, FlattenConverter);
+
+class ClipConverter : public Converter {
+  std::unique_ptr<nom::repr::NeuralNetOperator> convertToNeuralNetOperator(
+      const OperatorDef& op) override {
+    auto argMap = getArgumentsFromOperator(op);
+    float min = std::numeric_limits<float>::lowest();
+    float max = std::numeric_limits<float>::max();
+
+    if (argMap.count("min")) {
+      min = static_cast<float>(argMap["min"].i());
+    }
+
+    if (argMap.count("max")) {
+      max = static_cast<float>(argMap["max"].i());
+    }
+
+    return util::make_unique<repr::Clip>(min, max);
+  }
+  // Does not override default converter to OperatorDef
+
+  virtual ~ClipConverter() {}
+};
+REGISTER_CONVERTER(Clip, ClipConverter);
 
 class AveragePoolConverter : public Converter {
   std::unique_ptr<nom::repr::NeuralNetOperator> convertToNeuralNetOperator(

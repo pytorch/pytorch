@@ -77,6 +77,10 @@ NoneTypePtr NoneType::get() {
   static auto value = NoneType::create();
   return value;
 }
+GeneratorTypePtr GeneratorType::get() {
+  static auto value = GeneratorType::create();
+  return value;
+}
 StringTypePtr StringType::get() {
   static auto value = StringType::create();
   return value;

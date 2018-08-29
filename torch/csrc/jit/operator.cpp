@@ -46,7 +46,7 @@ struct SchemaParser {
   TypePtr parseBaseType() {
     static std::unordered_map<std::string, TypePtr> type_map = {
       {"Tensor", DynamicType::get() },
-      {"Generator", DynamicType::get() },
+      {"Generator", GeneratorType::get() },
       {"ScalarType", IntType::get() },
       {"Layout", IntType::get() },
       {"Device", ListType::ofInts() },
@@ -62,17 +62,40 @@ struct SchemaParser {
       throw ErrorReport(tok.range) << "unknown type specifier";
     return it->second;
   }
-  void parseType(Argument& arg) {
-    arg.type = parseBaseType();
-    if(L.nextIf('[')) {
-      arg.type = ListType::create(arg.type);
-      if(L.cur().kind == TK_NUMBER) {
-        arg.N = std::stoll(L.next().text());
+  void parseType(std::vector<TypePtr>& types) {
+    TypePtr type;
+    if (L.cur().kind == '(') {
+      std::vector<TypePtr> nestedTypes;
+      parseList('(', ',', ')', nestedTypes, &SchemaParser::parseType);
+      type = TupleType::create(std::move(nestedTypes));
+    } else {
+      type = parseBaseType();
+      if(L.nextIf('[')) {
+        type = ListType::create(type);
+        if(L.cur().kind == TK_NUMBER) {
+          L.next(); // Discard
+        }
+        L.expect(']');
       }
-      L.expect(']');
+    }
+    types.push_back(std::move(type));
+  }
+  void parseArgumentType(Argument& arg) {
+    if (L.cur().kind == '(') {
+      std::vector<TypePtr> types;
+      parseList('(', ',', ')', types, &SchemaParser::parseType);
+      arg.type = TupleType::create(std::move(types));
+    } else {
+      arg.type = parseBaseType();
+      if(L.nextIf('[')) {
+        arg.type = ListType::create(arg.type);
+        if(L.cur().kind == TK_NUMBER) {
+          arg.N = std::stoll(L.next().text());
+        }
+        L.expect(']');
+      }
     }
   }
-
   void parseArgument(std::vector<Argument>& arguments) {
     // varargs
     if(L.nextIf('*')) {
@@ -80,7 +103,7 @@ struct SchemaParser {
       return;
     }
     Argument arg;
-    parseType(arg);
+    parseArgumentType(arg);
 
     // nullability is ignored for now, since the JIT never cares about it
     L.nextIf('?');
@@ -93,7 +116,7 @@ struct SchemaParser {
   }
   void parseReturn(std::vector<Argument>& args) {
     Argument arg("ret" + std::to_string(args.size()));
-    parseType(arg);
+    parseArgumentType(arg);
     args.push_back(std::move(arg));
   }
   IValue parseSingleConstant(TypeKind kind) {
@@ -169,7 +192,8 @@ struct SchemaParser {
   void parseDefaultValue(Argument& arg) {
     auto range = L.cur().range;
     switch(arg.type->kind()) {
-      case TypeKind::DynamicType: {
+      case TypeKind::DynamicType:
+      case TypeKind::GeneratorType: {
         arg.default_value = parseTensorDefault(range);
       }  break;
       case TypeKind::NumberType:
@@ -405,7 +429,7 @@ OperatorSet::OperatorSet(std::initializer_list<const char *> sig_literals) {
   }
 }
 
-Operator* OperatorSet::find(Node *n) {
+Operator* OperatorSet::find(const Node *n) const  {
   auto it = ops.find(n->kind());
   if (it == ops.end()) {
     return nullptr;

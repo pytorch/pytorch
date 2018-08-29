@@ -253,8 +253,8 @@ struct TORCH_API Variable : public at::Tensor {
 //                            Variable::Impl
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-struct Variable::Impl : public at::TensorImpl {
-  TORCH_API explicit Impl(
+struct TORCH_API Variable::Impl : public at::TensorImpl {
+  explicit Impl(
       at::Tensor data,
       bool requires_grad = false,
       Edge gradient_edge = Edge());
@@ -367,7 +367,7 @@ struct Variable::Impl : public at::TensorImpl {
 /// same version_counter. The grad_fn field of the Variable may become stale
 /// due to in-place modifications of the shared data. Accesses should go
 /// through get_grad_fn(). All other fields are always valid.
-struct Variable::ViewImpl : public Variable::Impl {
+struct TORCH_API Variable::ViewImpl : public Variable::Impl {
   ViewImpl(Variable base, at::Tensor data, Edge gradient_edge);
 
   /// Gets the up-to-date grad_fn. If the shared data or base was modified, we
