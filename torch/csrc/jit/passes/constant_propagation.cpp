@@ -31,6 +31,8 @@ std::unordered_set<Symbol> skip_list = {
   aten::randn_like,
   aten::randperm,
   aten::randperm_out,
+  prim::Constant,
+  prim::Undefined,
   // TODO (zach): we should consider skipping tensor factories in the cases
   // where the constant tensor would be large but cheap to create.
  };
@@ -121,10 +123,10 @@ bool removeExtraNodeOutputs(Node *n) {
 } // anonymous namespace
 
 void ConstantPropagation(Node* n, bool recurse) {
-  bool constant_inputs = (n->inputs().size() > 0) &&
-    std::all_of(n->inputs().begin(), n->inputs().end(), [&](Value* v) {
-      return v->node()->kind() == prim::Constant;
-    });
+  bool constant_inputs =
+      std::all_of(n->inputs().begin(), n->inputs().end(), [&](Value* v) {
+        return v->node()->kind() == prim::Constant;
+      });
   bool supported_node = skip_list.count(n->kind()) == 0;
   auto run_blocks = [&]() {
     if (recurse) {
@@ -152,7 +154,6 @@ void ConstantPropagation(Node* n, bool recurse) {
 }
 
 void ConstantPropagation(Block* block, bool recurse) {
-  ConstantPropagation(block->param_node(), recurse);
   for(auto it = block->nodes().begin(); it != block->nodes().end();) {
     Node *n = *it;
     it++; //advance iterator bc the current node may be destroyed
