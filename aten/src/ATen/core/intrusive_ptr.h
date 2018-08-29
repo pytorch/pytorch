@@ -247,11 +247,8 @@ class AT_CORE_EXPORT intrusive_ptr final {
         NullType::singleton() == FromNullType::singleton(),
         "NullType mismatch. intrusive_ptr move assignment got pointer with differing null value.");
 #endif
-    if (static_cast<const void*>(&this->target_) != static_cast<const void*>(&rhs.target_)) {
-      reset_();
-      target_ = rhs.target_;
-      rhs.target_ = FromNullType::singleton();
-    }
+    intrusive_ptr tmp = std::move(rhs);
+    swap(tmp);
     return *this;
   }
 
@@ -271,11 +268,8 @@ class AT_CORE_EXPORT intrusive_ptr final {
         NullType::singleton() == FromNullType::singleton(),
         "NullType mismatch. intrusive_ptr copy assignment got pointer with differing null value.");
 #endif
-    if (static_cast<const void*>(&this->target_) != static_cast<const void*>(&rhs.target_)) {
-      reset_();
-      target_ = rhs.target_;
-      retain_();
-    }
+    intrusive_ptr tmp = rhs;
+    swap(tmp);
     return *this;
   }
 
@@ -528,11 +522,8 @@ class AT_CORE_EXPORT weak_intrusive_ptr final {
         NullType::singleton() == FromNullType::singleton(),
         "NullType mismatch. weak_intrusive_ptr move assignment got pointer with differing null value.");
 #endif
-    if (static_cast<const void*>(&this->target_) != static_cast<const void*>(&rhs.target_)) {
-      reset_();
-      target_ = rhs.target_;
-      rhs.target_ = FromNullType::singleton();
-    }
+    weak_intrusive_ptr tmp = std::move(rhs);
+    swap(tmp);
     return *this;
   }
 
@@ -553,11 +544,8 @@ class AT_CORE_EXPORT weak_intrusive_ptr final {
         NullType::singleton() == FromNullType::singleton(),
         "NullType mismatch. weak_intrusive_ptr copy assignment got pointer with differing null value.");
 #endif
-    if (static_cast<const void*>(&this->target_) != static_cast<const void*>(&rhs.target_)) {
-      reset_();
-      target_ = rhs.target_;
-      retain_();
-    }
+    weak_intrusive_ptr tmp = rhs;
+    swap(tmp);
     return *this;
   }
 
