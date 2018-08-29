@@ -322,14 +322,26 @@ repr::NNModule convertToNNModule(caffe2::NetDef &net, std::unordered_map<std::st
     currentBasicBlock->pushInstructionNode(opNode);
   }
 
-  CAFFE_ENFORCE(
-      externalInputNames.size() == 0,
-      "Attempting to convert an ill-formed network: \
-      external_input contains unused blobs");
+  if (externalInputNames.size()) {
+    std::ostringstream os;
+    for (const auto& inputName : externalInputNames) {
+      os << "\"" << inputName << "\" ";
+    }
+
+    CAFFE_ENFORCE(
+        externalInputNames.size() == 0,
+        "Attempting to convert an ill-formed network: external_input contains ",
+        externalInputNames.size(),
+        " unused blobs: ",
+        os.str());
+  }
 
   for (const auto& outputName : net.external_output()) {
     CAFFE_ENFORCE(
-        blobMap.count(outputName), "NetDef has ill-formed external_output");
+        blobMap.count(outputName),
+        "NetDef has ill-formed external_output: \"",
+        outputName,
+        "\"");
     module.outputs.insert(blobMap[outputName]);
   }
 
