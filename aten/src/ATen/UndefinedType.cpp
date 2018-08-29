@@ -50,13 +50,13 @@ size_t UndefinedType::elementSizeInBytes() const {
 
 Type & UndefinedType::toBackend(Backend b) const {
   if (b == Backend::Undefined) {
-    return Type::toBackend(b);
+    return TypeBase::toBackend(b);
   }
   AT_ERROR("toBackend not implemented for UndefinedType to non-UndefinedType");
 }
 Type & UndefinedType::toScalarType(ScalarType s) const {
   if (s == ScalarType::Undefined) {
-    return Type::toScalarType(s);
+    return TypeBase::toScalarType(s);
   }
   AT_ERROR("toScalarType not implemented for UndefinedType to non-UndefinedType");
 }
