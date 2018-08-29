@@ -474,13 +474,16 @@ class TestCase(unittest.TestCase):
         expected_file = os.path.join(os.path.dirname(test_file),
                                      "expect",
                                      munged_id)
+
+        subname_output = ""
         if subname:
             expected_file += "-" + subname
+            subname_output = " ({})".format(subname)
         expected_file += ".expect"
         expected = None
 
         def accept_output(update_type):
-            print("Accepting {} for {}:\n\n{}".format(update_type, munged_id, s))
+            print("Accepting {} for {}{}:\n\n{}".format(update_type, munged_id, subname_output, s))
             with open(expected_file, 'w') as f:
                 f.write(s)
 
@@ -494,9 +497,9 @@ class TestCase(unittest.TestCase):
                 return accept_output("output")
             else:
                 raise RuntimeError(
-                    ("I got this output for {}:\n\n{}\n\n"
+                    ("I got this output for {}{}:\n\n{}\n\n"
                      "No expect file exists; to accept the current output, run:\n"
-                     "python {} {} --accept").format(munged_id, s, __main__.__file__, munged_id))
+                     "python {} {} --accept").format(munged_id, subname_output, s, __main__.__file__, munged_id))
 
         # a hack for JIT tests
         if IS_WINDOWS:

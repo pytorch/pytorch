@@ -121,6 +121,8 @@ inline IValue toIValue(py::handle obj, const TypePtr& type) {
       }
       case TypeKind::NumberType:
         AT_ERROR("Insufficient type information to convert input");
+      case TypeKind::GeneratorType:
+        AT_ERROR("Generators are not supported yet.");
     }
   AT_ERROR("Missing cases in toIValue! File a bug report.");
 }
@@ -178,7 +180,7 @@ inline Stack createStackForSchema(
       args.size() + kwargs.size() <= schema.arguments.size(),
       schema.name, "() expected at most ", schema.arguments.size(),
       " argument(s) but received ",
-      args.size(), " argument(s). Declaration: ", schema);
+      args.size() + kwargs.size(), " argument(s). Declaration: ", schema);
 
   Stack stack;
   stack.reserve(schema.arguments.size());
