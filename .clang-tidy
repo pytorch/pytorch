@@ -4,6 +4,7 @@ Checks: '
   *
   ,clang-analyzer-*
   ,modernize-*
+  ,-cert-dcl21-cpp
   ,-cert-err58-cpp
   ,-cert-err60-cpp
   ,-clang-diagnostic-*

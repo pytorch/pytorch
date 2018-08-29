@@ -1,6 +1,6 @@
 #pragma once
 #include <vector>
-#include <stdint.h>
+#include <cstdint>
 #include <string>
 #include <memory>
 #include <vector>
@@ -36,7 +36,7 @@ struct ScalarAttributeValue : public AttributeValue {
   using ConstructorType = T;
   using ValueType = T;
   ScalarAttributeValue(Symbol name, ConstructorType value_)
-  : AttributeValue(name), value_(value_) {}
+  : AttributeValue(std::move(name)), value_(std::move(value_)) {}
   ValueType & value() {
     return value_;
   }
@@ -53,7 +53,7 @@ struct VectorAttributeValue : public AttributeValue {
   using ConstructorType = std::vector<T>;
   using ValueType = std::vector<T>;
   VectorAttributeValue(Symbol name, ConstructorType value_)
-  : AttributeValue(name), value_(std::move(value_)) {}
+  : AttributeValue(std::move(name)), value_(std::move(value_)) {}
   ValueType & value() {
     return value_;
   }
@@ -222,7 +222,7 @@ private:
   typename T::ValueType & get(Symbol name) const {
     JIT_ASSERT(name.is_attr());
     auto it = find(name, true);
-    T* child = dynamic_cast<T*>(it->get());
+    auto* child = dynamic_cast<T*>(it->get());
     if(child == nullptr) {
       throw AttributeError(name, true);
     }
