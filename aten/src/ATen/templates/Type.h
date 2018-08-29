@@ -45,8 +45,8 @@ enum class TypeID {
 };
 
 struct AT_API Type {
-  explicit Type(Context* context, TensorTypeId type_id, bool is_variable, bool is_undefined)
-      : context(context), type_id_(type_id), is_variable_(is_variable), is_undefined_(is_undefined) {}
+  explicit Type(TensorTypeId type_id, bool is_variable, bool is_undefined)
+      : type_id_(type_id), is_variable_(is_variable), is_undefined_(is_undefined) {}
   virtual ~Type() {}
   virtual ScalarType scalarType() const = 0;
   virtual Backend backend() const = 0;
@@ -79,8 +79,6 @@ struct AT_API Type {
   Type & cuda() const {
     return this->toBackend(at::backendToCUDA(this->backend()));
   }
-  Context& get_context() const { return *context; }
-
   // contiguous IDs for all types in the system
   // for external dispatch
   virtual TypeID ID() const = 0;
@@ -111,7 +109,6 @@ struct AT_API Type {
   // virtual Tensor * add(Tensor & a, Tensor & b) = 0;
   ${type_method_declarations}
 protected:
-  Context* context;
   TensorTypeId type_id_;
   bool is_variable_;
   bool is_undefined_;
