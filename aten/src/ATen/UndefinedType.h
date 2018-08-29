@@ -1,7 +1,6 @@
 #pragma once
 
 #include "ATen/Type.h"
-#include "ATen/Context.h"
 #include "ATen/CheckGenerator.h"
 
 #ifdef _MSC_VER
