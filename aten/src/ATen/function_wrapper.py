@@ -837,6 +837,23 @@ def create_generic(top_env, declarations):
 
         buffer_names = [buffer['name'] for buffer in option.get('buffers', [])]
 
+        if broadcast_arg is not None:
+            output_options.append(OutputDeclaration(
+                name=option['api_name'],
+                method_prefix_derived='',  # generate a declaration for the non-s_ version
+                arguments=formals,
+                method_of=method_of,
+                mode=mode,
+                buffers=buffer_names,
+                returns=option['returns'],
+                inplace=option['inplace'],
+                # See Note [Abstract ATen methods]
+                abstract=abstract,
+                device_guard=option.get('device_guard', True),
+                with_gil=option.get('with_gil', False),
+                deprecated=option.get('deprecated', False)
+            ))
+
         output_options.append(OutputDeclaration(
             name=option['api_name'],
             method_prefix_derived=option['method_prefix_derived'],
@@ -1487,9 +1504,10 @@ def create_derived(backend_type_env, declarations):
 
         pre_env = nested_dict(option, backend_type_env)
         sub_option = {}
-        sub_option['method_prefix_derived'] = ''
         env = nested_dict(sub_option, pre_env)
-        sub_option['type_definition_body'] = BROADCASTING_METHOD_DEFINITION.substitute(env)
+        # NB: use pre_env, not env
+        sub_option['type_definition_body'] = BROADCASTING_METHOD_DEFINITION.substitute(pre_env)
+        sub_option['method_prefix_derived'] = ''
         type_object_declarations.append(
             TYPE_DERIVED_DECLARATION.substitute(env))
         type_object_definitions.append(
