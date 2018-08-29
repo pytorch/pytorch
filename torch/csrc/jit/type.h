@@ -351,8 +351,8 @@ struct TORCH_API TupleType : public Type {
   static constexpr bool is_singleton = false;
   friend struct Type;
   template<typename ... T>
-  static TupleTypePtr create( T&& ... all ) {
-    return TupleTypePtr(new TupleType( std::forward<T>(all)... ));
+  static TupleTypePtr create(std::vector<TypePtr> types) {
+    return TupleTypePtr(new TupleType( std::move(types) ));
   }
   at::ArrayRef<TypePtr> elements() const {
     return elements_;
