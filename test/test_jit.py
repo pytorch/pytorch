@@ -346,8 +346,6 @@ class JitTestCase(TestCase):
 
         return ge
 
-
-class TestJit(JitTestCase):
     def assertExportImport(self, trace, inputs):
         graph = trace if isinstance(trace, torch._C.Graph) else trace.graph()
         m = torch.jit.ScriptModule()
@@ -355,6 +353,9 @@ class TestJit(JitTestCase):
         m_import = self.getExportImportCopy(m)
 
         self.assertEqual(m.forward(*inputs), m_import.forward(*inputs))
+
+
+class TestJit(JitTestCase):
 
     def test_simple(self):
         x = torch.tensor([0.4], requires_grad=True)
@@ -6918,13 +6919,22 @@ def create_traced_fn(fn):
         return traced(*inputs_tensors)
     return traced_fn
 
+
+def create_trace_graph_inputs(fn):
+    def traced_fn(*inputs, **kwargs):
+        fn_tensors, inputs_tensors = partial_apply_nontensors(fn, inputs, **kwargs)
+        traced = torch.jit.trace(*inputs_tensors)(fn_tensors)
+        return traced.graph, inputs_tensors
+    return traced_fn
+
+
 script_template = '''
 def the_method({}):
     return {}
 '''
 
 
-def create_script_fn(method_name, func_type, output_process_fn):
+def create_script_fn_inputs(method_name, func_type):
     def script_fn(*args, **kwargs):
         formals = []
         tensors = []
@@ -6948,14 +6958,29 @@ def create_script_fn(method_name, func_type, output_process_fn):
             call = 'torch.nn.functional.{}({}{})'.format(method_name, ', '.join(actuals), kwargs_str)
         else:
             raise 'Unsupported function type'
-
         script = script_template.format(', '.join(formals), call)
         CU = torch.jit.CompilationUnit(script)
-        return output_process_fn(CU.the_method(*tensors))
+        return CU.the_method, tensors
     return script_fn
 
 
-def check_against_reference(self, func, reference_func, args, kwargs=None, allow_unused=True):
+def create_script_fn(method_name, func_type, output_process_fn):
+    def script_fn(*args, **kwargs):
+        func = create_script_fn_inputs(method_name, func_type)
+        cu_method, tensors = func(*args, **kwargs)
+        return output_process_fn(cu_method(*tensors))
+    return script_fn
+
+
+def create_script_graph_inputs(method_name, func_type):
+    def script_fn(*args, **kwargs):
+        func = create_script_fn_inputs(method_name, func_type)
+        cu_method, tensors = func(*args, **kwargs)
+        return cu_method.graph, tensors
+    return script_fn
+
+
+def check_against_reference(self, func, func_graph_inputs, reference_func, args, kwargs=None, allow_unused=True):
     kwargs = kwargs if kwargs else {}
 
     def allSum(vs):
@@ -6979,6 +7004,9 @@ def check_against_reference(self, func, reference_func, args, kwargs=None, allow
     outputs = reference_func(*nograd_inputs, **kwargs)
     outputs_test = func(*nograd_inputs, **kwargs)
     self.assertEqual(outputs, outputs_test)
+
+    graph, graph_inputs = func_graph_inputs(*nograd_inputs, **kwargs)
+    self.assertExportImport(graph, graph_inputs)
 
     # test single grad case
     outputs = reference_func(*recording_inputs, **kwargs)
@@ -7019,9 +7047,8 @@ def check_against_reference(self, func, reference_func, args, kwargs=None, allow
         self.assertTrue(torch.allclose(g2, g2_test, atol=5e-4, rtol=1e-4))
 
 
-class TestJitGenerated(TestCase):
+class TestJitGenerated(JitTestCase):
     pass
-
 
 class TestCustomOperators(JitTestCase):
 
@@ -7303,12 +7330,13 @@ def add_test(
 
                 if not is_inplace and name not in EXCLUDE_GRADCHECK and not exclude_tensor_method(name, test_name):
                     if test_name not in EXCLUDE_TRACED:
-                        check_against_reference(self, create_traced_fn(fn),
+                        check_against_reference(self, create_traced_fn(fn), create_trace_graph_inputs(fn),
                                                 fn, (self_variable,) + args_variable, kwargs_variable)
 
                     if not is_magic_method and test_name not in EXCLUDE_SCRIPT:
                         check_against_reference(self,
                                                 create_script_fn(name, 'method', output_process_fn),
+                                                create_script_graph_inputs(name, 'method'),
                                                 fn, (self_variable,) + args_variable, kwargs_variable)
 
                 # functional interface tests
@@ -7321,11 +7349,13 @@ def add_test(
                     f_args_tensor = (self_tensor,) + args_tensor
 
                     if not is_inplace and test_name not in EXCLUDE_TRACED:
-                        check_against_reference(self, create_traced_fn(fn), fn, f_args_variable, kwargs_variable)
+                        check_against_reference(self, create_traced_fn(fn),
+                                                create_trace_graph_inputs(fn), fn, f_args_variable, kwargs_variable)
 
                     if not is_inplace and test_name not in EXCLUDE_SCRIPT:
                         check_against_reference(self,
                                                 create_script_fn(name, 'functional', output_process_fn),
+                                                create_script_graph_inputs(name, 'functional'),
                                                 fn, f_args_variable, kwargs_variable)
 
             check(name)
@@ -7364,6 +7394,7 @@ def add_nn_test(name, self_size, args, skipTestIf=(), output_process_fn=lambda x
         if test_name not in EXCLUDE_SCRIPT:
             check_against_reference(self,
                                     create_script_fn(name, 'nn_functional', output_process_fn),
+                                    create_script_graph_inputs(name, 'nn_functional'),
                                     fn, f_args_variable, kwargs_variable)
 
     post_add_test(test_name, skipTestIf, do_test)
@@ -7377,7 +7408,6 @@ def post_add_test(test_name, skipTestIf, do_test):
 
     if not (TEST_WITH_UBSAN and test_name in UBSAN_BLACKLISTED_TESTS):
         setattr(TestJitGenerated, test_name, do_test)
-
 
 for test in method_tests:
     add_test(*test)
