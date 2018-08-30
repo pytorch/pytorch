@@ -10,6 +10,7 @@
 #include "torch/csrc/autograd/python_variable.h"
 #include "torch/csrc/autograd/generated/VariableType.h"
 #include "torch/csrc/utils/tensor_types.h"
+#include "torch/csrc/autograd/generated/variable_factories.h"
 
 using namespace at;
 using namespace torch;
@@ -68,7 +69,7 @@ static PyObject * THPGenerator_getState(THPGenerator *self)
   using namespace torch::autograd;
   HANDLE_TH_ERRORS
   THGenerator *generator = THPGenerator_TH_CData(self);
-  Variable var = VariableType::getType(CPU(kByte))->tensor();
+  Variable var = torch::empty({0}, at::TensorOptions(at::kCPU, at::kByte));
   THByteTensor_getRNGState(generator, (THByteTensor*)(var.data().unsafeGetTensorImpl()));
   return THPVariable_Wrap(std::move(var));
   END_HANDLE_TH_ERRORS

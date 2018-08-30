@@ -45,18 +45,16 @@ class NCCLTest : public NCCLTestBase {
         numDevices_(cudaNumDevices()),
         state_(::at::globalContext().lazyInitCUDA()),
         worldSize_(worldSize) {
-    const auto& type = at::getType(at::kCUDA, at::kFloat);
-
     // Each device has a single tensor to perf the NCCL op
     inputs_.resize(numDevices_);
     outputs_.resize(numDevices_);
     at::DeviceGuard deviceGuard;
     for (auto i = 0; i < numDevices_; ++i) {
       deviceGuard.set_index(i);
-      inputs_[i] = type.tensor({3, 3});
+      inputs_[i] = at::empty({3, 3}, at::TensorOptions(at::kCUDA, at::kFloat));
       outputs_[i].resize(worldSize_ * numDevices_);
       for (auto j = 0; j < worldSize_ * numDevices_; ++j) {
-        outputs_[i][j] = type.tensor({3, 3});
+        outputs_[i][j] = at::empty({3, 3}, at::TensorOptions(at::kCUDA, at::kFloat));
       }
     }
 

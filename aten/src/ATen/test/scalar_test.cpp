@@ -65,8 +65,7 @@ TEST_CASE( "scalar test", "[]" ) {
   REQUIRE_NOTHROW(gen.seed());
   auto && C = at::globalContext();
   if(at::hasCUDA()) {
-    auto & CUDAFloat = C.getType(Backend::CUDA,ScalarType::Float);
-    auto t2 = zeros({4,4}, CUDAFloat);
+    auto t2 = zeros({4,4}, at::TensorOptions(at::kCUDA, at::kFloat));
     cout << &t2 << "\n";
     cout << "AFTER GET TYPE " << &CUDAFloat << "\n";
   }
