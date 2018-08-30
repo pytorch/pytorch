@@ -48,7 +48,7 @@ class SignalTest {
 
     // Initialize tensor list
     std::vector<at::Tensor> tensors = {
-        at::ones({16, 16}, at::device(at::CPU).dtype(at::kFloat)),
+        at::ones({16, 16}, at::device(at::kCPU).dtype(at::kFloat)),
     };
 
     // Loop until an exception happens
@@ -156,7 +156,7 @@ void testAllreduce(const std::string& path, const at::Backend b) {
   std::vector<std::vector<at::Tensor>> inputs(size);
   for (auto i = 0; i < size; i++) {
     auto tensor =
-        at::ones({16, 16}, at::device(b).dtype(at::kFloat)) * i;
+        at::ones({16, 16}, at::TensorOptions(b).dtype(at::kFloat)) * i;
     inputs[i] = std::vector<at::Tensor>({tensor});
   }
 
@@ -206,7 +206,7 @@ void testBroadcast(const std::string& path, const at::Backend b) {
             deviceGuard.set_index(l);
           }
           inputs[k][l] =
-              at::ones({16, 16}, at::TensorOptions(b, at::kFloat)) * (k * stride + l);
+              at::ones({16, 16}, at::TensorOptions(b).dtype(at::kFloat)) * (k * stride + l);
         }
       }
 
