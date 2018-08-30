@@ -12,7 +12,7 @@
 // integral types, but are -inf and +inf for floating point types. They are
 // useful in implementing min, max, etc.
 
-namespace at{
+namespace at {
 
 template <typename T>
 struct numeric_limits {
@@ -24,6 +24,12 @@ struct numeric_limits {
 //          from @colesbury: "The functions on numeric_limits aren't marked with
 //          __device__ which is why they don't work with ROCm. CUDA allows them
 //          because they're constexpr."
+
+namespace {
+  // ROCm doesn't like INFINITY too.
+  constexpr double inf = INFINITY;
+}
+
 template <>
 struct numeric_limits<uint8_t> {
   static inline __host__ __device__ uint8_t lowest() { return 0; }
@@ -83,16 +89,16 @@ template <>
 struct numeric_limits<float> {
   static inline __host__ __device__ float lowest() { return -FLT_MAX; }
   static inline __host__ __device__ float max() { return FLT_MAX; }
-  static inline __host__ __device__ float lower_bound() { return -INFINITY; }
-  static inline __host__ __device__ float upper_bound() { return INFINITY; }
+  static inline __host__ __device__ float lower_bound() { return -static_cast<float>(inf); }
+  static inline __host__ __device__ float upper_bound() { return static_cast<float>(inf); }
 };
 
 template <>
 struct numeric_limits<double> {
   static inline __host__ __device__ double lowest() { return -DBL_MAX; }
   static inline __host__ __device__ double max() { return DBL_MAX; }
-  static inline __host__ __device__ double lower_bound() { return -INFINITY; }
-  static inline __host__ __device__ double upper_bound() { return INFINITY; }
+  static inline __host__ __device__ double lower_bound() { return -inf; }
+  static inline __host__ __device__ double upper_bound() { return inf; }
 };
 
 } // namespace at
