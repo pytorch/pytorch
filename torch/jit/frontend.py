@@ -422,6 +422,36 @@ class ExprBuilder(Builder):
 
     @staticmethod
     def build_Subscript(ctx, expr):
+        def build_SliceExpr(ctx, base, slice_expr):
+            lower = build_expr(ctx, slice_expr.lower) if slice_expr.lower is not None else None
+            upper = build_expr(ctx, slice_expr.upper) if slice_expr.upper is not None else None
+            if slice_expr.step is not None:
+                step = build_expr(ctx, slice_expr.step)
+                raise NotSupportedError(step.range(), "slices with ranges are not supported yet")
+            return SliceExpr(base.range(), lower, upper)
+
+        def build_Index(ctx, base, index_expr):
+            if isinstance(index_expr.value, ast.Tuple) or \
+                    isinstance(index_expr.value, ast.List):
+                raise NotSupportedError(base.range(),
+                                        "slicing multiple dimensions with "
+                                        "sequences not supported yet")
+            return build_expr(ctx, index_expr.value)
+
+        def build_ExtSlice(ctx, base, extslice):
+            sub_exprs = []
+            for expr in extslice.dims:
+                sub_type = type(expr)
+                if sub_type is ast.Index:
+                    sub_exprs.append(build_Index(ctx, base, expr))
+                elif sub_type is ast.Slice:
+                    sub_exprs.append(build_SliceExpr(ctx, base, expr))
+                else:
+                    raise NotSupportedError(base.range(),
+                                            "slicing multiple dimensions with "
+                                            "{} not supported".format(sub_type))
+            return sub_exprs
+
         base = build_expr(ctx, expr.value)
         sub_type = type(expr.slice)
         if sub_type is ast.Index:
@@ -433,14 +463,9 @@ class ExprBuilder(Builder):
             else:
                 return Subscript(base, [build_expr(ctx, expr.slice.value)])
         elif sub_type is ast.Slice:
-            lower = build_expr(ctx, expr.slice.lower) if expr.slice.lower is not None else None
-            upper = build_expr(ctx, expr.slice.upper) if expr.slice.upper is not None else None
-            if expr.slice.step is not None:
-                step = build_expr(ctx, expr.slice.step)
-                raise NotSupportedError(step.range(), "slices with ranges are not supported yet")
-            return Subscript(base, [SliceExpr(base.range(), lower, upper)])
+            return Subscript(base, [build_SliceExpr(ctx, base, expr.slice)])
         elif sub_type is ast.ExtSlice:
-            raise NotSupportedError(base.range(), "slicing multiple dimensions at the same time isn't supported yet")
+            return Subscript(base, build_ExtSlice(ctx, base, expr.slice))
         else:  # Ellipsis (can only happen in Python 2)
             raise NotSupportedError(base.range(), "ellipsis is not supported")
 

@@ -2,7 +2,7 @@
 
 #include "caffe2/core/common.h"
 #include "caffe2/onnx/helper.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 #include "onnx/onnx_pb.h"
 
 #include <string>
@@ -35,8 +35,7 @@ class CAFFE2_API OnnxExporter {
       const std::unordered_map<std::string, caffe2::TensorShape>&);
 
  public:
-  OnnxExporter(DummyName* dummy = nullptr, bool legacy_mode = false)
-      : legacy_mode_(legacy_mode) {
+  OnnxExporter(DummyName* dummy = nullptr) {
     if (dummy) {
       dummy_ = std::shared_ptr<DummyName>(dummy, [](DummyName*) {});
     } else {
@@ -115,9 +114,6 @@ class CAFFE2_API OnnxExporter {
       get_per_op_renamed_attrs() const;
   const std::unordered_map<std::string, OnnxExporter::SpecialOpConverter>&
   get_special_operators() const;
-
-  // To generate onnx models with opset < 6
-  bool legacy_mode_{false};
 
   // Dummy name generator
   std::shared_ptr<DummyName> dummy_;

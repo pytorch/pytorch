@@ -148,7 +148,6 @@ function build() {
   BUILD_C_FLAGS=''
   case $1 in
       THCS | THCUNN ) BUILD_C_FLAGS=$C_FLAGS;;
-      nanopb ) BUILD_C_FLAGS=$C_FLAGS" -fPIC -fexceptions";;
       *) BUILD_C_FLAGS=$C_FLAGS" -fexceptions";;
   esac
   # TODO: The *_LIBRARIES cmake variables should eventually be
@@ -184,7 +183,6 @@ function build() {
               -DUSE_CUDA=$USE_CUDA \
               -DNO_NNPACK=$((1-$USE_NNPACK)) \
               -DNCCL_EXTERNAL=1 \
-              -Dnanopb_BUILD_GENERATOR=0 \
               -DCMAKE_DEBUG_POSTFIX="" \
               -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
               ${@:2} \
@@ -266,6 +264,7 @@ function build_caffe2() {
       -DCAFFE2_STATIC_LINK_CUDA=$CAFFE2_STATIC_LINK_CUDA \
       -DUSE_ROCM=$USE_ROCM \
       -DUSE_NNPACK=$USE_NNPACK \
+      -DCUDA_DEVICE_DEBUG=$CUDA_DEVICE_DEBUG \
       -DCUDNN_INCLUDE_DIR=$CUDNN_INCLUDE_DIR \
       -DCUDNN_LIB_DIR=$CUDNN_LIB_DIR \
       -DCUDNN_LIBRARY=$CUDNN_LIBRARY \
@@ -282,6 +281,12 @@ function build_caffe2() {
       # STOP!!! Are you trying to add a C or CXX flag?  Add it
       # to CMakeLists.txt and aten/CMakeLists.txt, not here.
       # We need the vanilla cmake build to work.
+
+  # This is needed by the aten tests built with caffe2
+  if [ -f "${INSTALL_DIR}/lib/libnccl.so" ] && [ ! -f "lib/libnccl.so.1" ]; then
+    cp "${INSTALL_DIR}/lib/libnccl.so.1" "lib/libnccl.so.1"
+  fi
+
   ${CMAKE_INSTALL} -j"$MAX_JOBS"
 
   # Install Python proto files

@@ -19,7 +19,7 @@ except ImportError:
 SKIP_PYTHON_BINDINGS = [
     'alias', 'contiguous', 'is_cuda', 'is_sparse', 'size', 'stride',
     '.*_backward', '.*_backward_(out|input|weight|bias)', '.*_forward',
-    '.*_forward_out', 'sparse_raw_resize_', '_unsafe_view', 'tensor',
+    '.*_forward_out', '_unsafe_view', 'tensor',
     'sparse_coo_tensor', 'th_sparse_coo_tensor', 'native_sparse_coo_tensor',
     '_arange.*', '_range.*', '_linspace.*', '_logspace.*',
     '_sparse_add.*', '_sparse_div.*', '_sparse_mul.*', '_sparse_sub.*',
@@ -100,7 +100,7 @@ PY_VARIABLE_WRAP = CodeTemplate("""\
 return wrap(${call_dispatch});""")
 
 PY_VARIABLE_DISPATCH = CodeTemplate("""\
-inline ${return_type} ${dispatch_name}(${formal_args}) {
+inline ${simple_return_type} ${dispatch_name}(${formal_args}) {
   ${initialize_cuda}
   ${AutoNoGIL}
   return ${dispatch_call}(${dispatch_args});
@@ -446,6 +446,26 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             raise RuntimeError('could not dispatch, neither namespace function nor Tensor method')
 
         env['AutoNoGIL'] = 'AutoNoGIL no_gil;' if not declaration['with_gil'] else ''
+
+        # Use the simple_return_type (Tensor) rather than the fancy return type
+        # (Tensor &).  This is important because the dispatch functions take
+        # mutable arguments *by value*, not by reference.  If you then return
+        # a a reference to such an argument, you will now have a pointer to a
+        # dangling stack entry.  Not good.
+        #
+        # You want:
+        #
+        #   Tensor dispatch_selu_(Tensor self) { return at::selu_(self); }
+        #
+        # *not*
+        #
+        #   Tensor& dispatch_selu_(Tensor self) { return at::selu_(self); }
+        #
+        # (NB: We can't make dispatch_selu_ take Tensor&, because the enclosing
+        # codegen looks like dispatch_selu_(wrap(tensor)), and you can't take a
+        # mutable reference to temporary.  Maybe we could assign it to a
+        # variable itself.)
+        env['simple_return_type'] = simple_return_type
 
         env = nested_dict(env, nested_dict(base_env, declaration))
         call_dispatch = PY_VARIABLE_CALL_DISPATCH.substitute(env)

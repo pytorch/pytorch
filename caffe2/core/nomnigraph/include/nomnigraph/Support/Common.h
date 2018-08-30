@@ -71,13 +71,13 @@ class Notifier {
   Notifier() {}
 
   Callback* registerDestructorCallback(Callback fn) {
-    DtorCallbacks.emplace_back(fn);
-    return &DtorCallbacks.back();
+    dtorCallbacks_.emplace_back(fn);
+    return &dtorCallbacks_.back();
   }
 
   Callback* registerNotificationCallback(Callback fn) {
-    NotifCallbacks.emplace_back(fn);
-    return &NotifCallbacks.back();
+    notifCallbacks_.emplace_back(fn);
+    return &notifCallbacks_.back();
   }
 
   void deleteCallback(std::list<Callback>& callbackList, Callback* toDelete) {
@@ -90,11 +90,11 @@ class Notifier {
   }
 
   void deleteDestructorCallback(Callback* c) {
-    deleteCallback(DtorCallbacks, c);
+    deleteCallback(dtorCallbacks_, c);
   }
 
   void deleteNotificationCallback(Callback* c) {
-    deleteCallback(NotifCallbacks, c);
+    deleteCallback(notifCallbacks_, c);
   }
 
   /// \brief Notifies all listeners (`registerNotificationCallback`
@@ -102,20 +102,20 @@ class Notifier {
   /// is encoded in the state of the derived class, thus only passing
   /// a pointer of type T* to the callback.
   void notify() {
-    for (auto callback : NotifCallbacks) {
+    for (auto callback : notifCallbacks_) {
       callback(reinterpret_cast<T*>(this));
     }
   }
 
   virtual ~Notifier() {
-    for (auto callback : DtorCallbacks) {
+    for (auto callback : dtorCallbacks_) {
       callback(reinterpret_cast<T*>(this));
     }
   }
 
  private:
-  std::list<Callback> DtorCallbacks;
-  std::list<Callback> NotifCallbacks;
+  std::list<Callback> dtorCallbacks_;
+  std::list<Callback> notifCallbacks_;
 };
 
 #endif /* NOM_SUPPORT_COMMON_H */

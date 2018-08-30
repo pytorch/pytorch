@@ -26,7 +26,7 @@ Tensor cudnn_affine_grid_generator_backward(
 #else // AT_CUDNN_ENABLED()
 
 #include <ATen/cudnn/cudnn-wrapper.h>
-#include <ATen/cudnn/Handles.h>
+#include <ATen/cudnn/Handle.h>
 #include <ATen/cudnn/Descriptors.h>
 #include <ATen/cudnn/Types.h>
 #include <ATen/cudnn/Utils.h>

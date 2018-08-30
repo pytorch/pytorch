@@ -1,6 +1,7 @@
 import numbers
 
 import torch
+from torch._C import DynamicType, ListType
 from torch.nn.modules.utils import _single, _pair, _triple
 from torch.nn.utils.rnn import PackedSequence
 import warnings
@@ -30,6 +31,9 @@ import itertools
 # ---------------------------------------------------------------------
 # Helper functions
 # ---------------------------------------------------------------------
+
+# Save some builtins as locals, because we'll shadown them below
+_sum = sum
 
 
 def _parse_arg(value, desc):
@@ -73,7 +77,7 @@ def _get_const(value, desc, arg_name):
 def _unpack_list(list_value):
     list_node = list_value.node()
     assert list_node.kind() == "prim::ListConstruct"
-    return list_node.inputs()
+    return list(list_node.inputs())
 
 
 def parse_args(*arg_descriptors):
@@ -107,7 +111,7 @@ def _if_scalar_type_as(g, self, tensor):
     """
     if isinstance(self, torch._C.Value):
         return self
-    elif tensor.type().kind() == "TensorType":
+    elif tensor.type().kind() == "TensorType" or tensor.type().kind() == "CompleteTensorType":
         ty = tensor.type().scalarType().lower()
         return getattr(self, ty)()
     else:
@@ -116,6 +120,10 @@ def _if_scalar_type_as(g, self, tensor):
 
 def _is_value(x):
     return isinstance(x, torch._C.Value)
+
+
+def _is_tensor_list(x):
+    return x.type().isSubtypeOf(ListType.ofTensors())
 
 
 def _unimplemented(op, msg):
@@ -296,7 +304,6 @@ def sigmoid(g, self):
 
 def _reduce_op_symbolic(onnx_op_name):
     def symbolic(g, self, dim=None, keepdim=None):
-        params = {}
         if dim is None:
             # all-reduce path
             return g.op(onnx_op_name, self, keepdims_i=0)
@@ -404,10 +411,17 @@ def chunk(g, self, chunks, dim):
     return split(g, self, split_size, dim)
 
 
-@parse_args('v', 'i', 'i')
+@parse_args('v', 'i', 'v')
 def select(g, self, dim, index):
-    slice_node = g.op("Slice", self, axes_i=[dim], starts_i=[index], ends_i=[index + 1])
-    return g.op("Squeeze", slice_node, axes_i=[dim])
+    if dim > 1:
+        # TODO: this is a temporary hack because of the implementation details
+        # of Gather in caffe2. We need to change this as soon as possible.
+        # TODO: this breaks if index == -1
+        index_val = _parse_arg(index, 'i')
+        slice_node = g.op("Slice", self, axes_i=[dim], starts_i=[index_val], ends_i=[index_val + 1])
+        return g.op("Squeeze", slice_node, axes_i=[dim])
+    else:
+        return g.op("Gather", self, index, axis_i=dim)
 
 
 def squeeze(g, self, dim=None):
@@ -614,11 +628,13 @@ def lt(g, input, other):
 
 
 def ge(g, input, other):
-    return g.op("Not", lt(g, other, input))
+    other = _maybe_get_scalar(other)
+    return g.op("Not", lt(g, _if_scalar_type_as(g, other, input), input))
 
 
 def le(g, input, other):
-    return g.op("Not", gt(g, other, input))
+    other = _maybe_get_scalar(other)
+    return g.op("Not", gt(g, _if_scalar_type_as(g, other, input), input))
 
 
 @parse_args('v', 'i')
@@ -717,7 +733,7 @@ def index_select(g, self, dim, index):
 
 
 def index_put(g, self, indices_list_value, values):
-    indices_list = list(_unpack_list(indices_list_value))
+    indices_list = _unpack_list(indices_list_value)
     args = [self] + indices_list + [values]
     return g.op("ATen", *args, operator_s='index_put')
 
@@ -977,236 +993,168 @@ def instance_norm(g, input, **kwargs):
     return g.op("InstanceNormalization", input, weight, bias, epsilon_f=eps)
 
 
-def RNN_symbolic_builder(cell_type, *args, **kwargs):
-    if cell_type == 'LSTM':
-        return RNN_variant_symbolic_builder('LSTM', *args, **kwargs)
-    elif cell_type == 'GRU':
-        return RNN_variant_symbolic_builder('GRU', *args, **kwargs)
-    elif cell_type.startswith('RNN_'):
-        return RNN_variant_symbolic_builder('RNN', *args, nonlinearity=cell_type[4:], **kwargs)
+def _generic_rnn(g, variant, input, initial_states, all_weights, has_biases,
+                 num_layers, dropout, train, bidirectional, batch_first=None, batch_sizes=None):
+    weights_per_layer = 4 if has_biases else 2
+    assert len(all_weights) == num_layers * weights_per_layer * (1 + bidirectional)
+    layer_weights = [all_weights[i:i + weights_per_layer] for i in range(0, len(all_weights), weights_per_layer)]
+    if batch_first:
+        return _unimplemented("RNN/GRU/LSTM", "batch_first")
+    if dropout and train:
+        return _unimplemented("RNN/GRU/LSTM", "dropout in training mode")
+
+    if variant.startswith('RNN'):
+        nonlinearity = variant[4:].lower()
+        variant = 'RNN'
+
+    w_hh = all_weights[1]
+    hidden_size = w_hh.type().sizes()[1]
+
+    unidirectional = not bidirectional
+
+    prev_output = input
+
+    h_outs = []
+    if variant == 'RNN' or variant == 'GRU':
+        h0 = initial_states
+    elif variant == 'LSTM':
+        h0, c0 = initial_states
+        c_outs = []
+
+    sequence_lens = unused(g) if batch_sizes is None else batch_sizes
+
+    if variant == 'GRU':
+        # pytorch is reset, input, hidden
+        # onnx is    input, reset, hidden
+        reform_permutation = [(1, 2), (0, 1), (2, 3)]
+    elif variant == 'LSTM':
+        # pytorch is input, forget, cell, output.
+        # onnx is    input, output, forget, cell.
+        reform_permutation = [(0, 1), (3, 4), (1, 3)]
+
+    def reform_weights(g, w, n, intervals):
+        slices = [g.op('Slice', w, axes_i=[0], starts_i=[x * n], ends_i=[y * n]) for x, y in intervals]
+        return g.op('Concat', *slices, axis_i=0)
+
+    def transform_weights(layer_index):
+        if variant == 'RNN':
+            weight_ih, weight_hh, bias_ih, bias_hh = layer_weights[layer_index]
+        elif variant == 'GRU' or variant == 'LSTM':
+            weight_ih, weight_hh, bias_ih, bias_hh = \
+                [reform_weights(g, w, hidden_size, reform_permutation) for w in layer_weights[layer_index]]
+        bias_concat = g.op('Concat', bias_ih, bias_hh, axis_i=0)
+
+        return tuple(g.op('Unsqueeze', x, axes_i=[0]) for x in (weight_ih, weight_hh, bias_concat))
+
+    def retrieve_state(x, start, end):
+        return x if num_layers == 1 else g.op('Slice', x, axes_i=[0], starts_i=[start], ends_i=[end])
+
+    for i in range(num_layers):
+        if unidirectional:
+            weight_ih, weight_hh, bias_concat = transform_weights(i)
+            state_indices = i, i + 1
+        else:
+            weight_ih_f, weight_hh_f, bias_f = transform_weights(2 * i)
+            weight_ih_b, weight_hh_b, bias_b = transform_weights(2 * i + 1)
+
+            weight_ih = g.op('Concat', weight_ih_f, weight_ih_b, axis_i=0)
+            weight_hh = g.op('Concat', weight_hh_f, weight_hh_b, axis_i=0)
+            bias_concat = g.op('Concat', bias_f, bias_b, axis_i=0)
+
+            state_indices = 2 * i, 2 * i + 2
+
+        inputs = [prev_output, weight_ih, weight_hh, bias_concat, sequence_lens]
+
+        inputs.append(retrieve_state(h0, *state_indices))
+        if variant == 'LSTM':
+            inputs.append(retrieve_state(c0, *state_indices))
+
+        extra_kwargs = {} if unidirectional else {'direction_s': 'bidirectional'}
+        if variant == 'RNN':
+            prev_output, h_out = g.op('RNN', *inputs, outputs=2,
+                                      hidden_size_i=hidden_size,
+                                      activations_s=[nonlinearity],
+                                      **extra_kwargs)
+        elif variant == 'GRU':
+            prev_output, h_out = g.op('GRU', *inputs, outputs=2,
+                                      hidden_size_i=hidden_size,
+                                      linear_before_reset_i=1,
+                                      **extra_kwargs)
+        elif variant == 'LSTM':
+            prev_output, h_out, c_out = g.op('LSTM', *inputs, outputs=3,
+                                             hidden_size_i=hidden_size,
+                                             **extra_kwargs)
+
+        if bidirectional:
+            # The ONNX RNN/GRU/LSTM produce an output of dimensions
+            #   seq_len, num_directions, batch, hidden_size
+            # We have to convert to match pytorch's expected
+            #   seq_len, batch, hidden_size * num_directions
+            # by first moving num_directions to the end with
+            # Transpose, and then combining it with hidden_size
+            # with Reshape.
+            prev_output = g.op('Transpose', prev_output, perm_i=[0, 2, 3, 1])
+            prev_output = g.op('Reshape', prev_output, g.op('Constant', value_t=torch.LongTensor([0, 0, -1])))
+        else:
+            prev_output = g.op('Squeeze', prev_output, axes_i=[1])
+
+        h_outs.append(h_out)
+        if variant == 'LSTM':
+            c_outs.append(c_out)
+    h_outs = h_out if num_layers == 1 else g.op('Concat', *h_outs, axis_i=0)
+    if variant == 'RNN' or variant == 'GRU':
+        return prev_output, h_outs
+    elif variant == 'LSTM':
+        c_outs = c_out if num_layers == 1 else g.op('Concat', *c_outs, axis_i=0)
+        return prev_output, h_outs, c_outs
+
+
+@parse_args('v', 'v', 'v', 'i', 'i', 'f', 'i', 'i', 'i')
+def _lstm_full(g, input, hidden_v, weight_v, has_biases, num_layers, dropout, train, bidirectional, batch_first):
+    hidden, weight = _unpack_list(hidden_v), _unpack_list(weight_v)
+    return _generic_rnn(g, 'LSTM', input, hidden, weight, has_biases, num_layers,
+                        dropout, train, bidirectional, batch_first)
+
+
+@parse_args('v', 'v', 'v', 'v', 'i', 'i', 'f', 'i', 'i')
+def _lstm_packed(g, input, batch_sizes, hidden_v, weight_v, has_biases, num_layers, dropout, train, bidirectional):
+    hidden, weight = _unpack_list(hidden_v), _unpack_list(weight_v)
+    return _generic_rnn(g, 'LSTM', input, hidden, weight, has_biases, num_layers,
+                        dropout, train, bidirectional, batch_sizes=batch_sizes)
+
+
+def lstm(g, *args):
+    if _is_tensor_list(args[3]):
+        return _lstm_packed(g, *args)
     else:
-        return lambda *args, **kwargs: _unimplemented("RNN", "cell type " + cell_type)
+        return _lstm_full(g, *args)
 
 
-def reform_weights(g, w, n, intervals):
-    slices = [g.op('Slice', w, axes_i=[0], starts_i=[x * n], ends_i=[y * n]) for x, y in intervals]
-    return g.op('Concat', *slices, axis_i=0)
+def _one_hidden_rnn(kind):
+    @parse_args('v', 'v', 'v', 'i', 'i', 'f', 'i', 'i', 'i')
+    def _rnn_full(g, input, hidden, weight_v, has_biases, num_layers, dropout, train, bidirectional, batch_first):
+        weight = _unpack_list(weight_v)
+        return _generic_rnn(g, kind, input, hidden, weight, has_biases, num_layers,
+                            dropout, train, bidirectional, batch_first)
 
+    @parse_args('v', 'v', 'v', 'v', 'i', 'i', 'f', 'i', 'i')
+    def _rnn_packed(g, input, batch_sizes, hidden, weight_v, has_biases, num_layers, dropout, train, bidirectional):
+        weight = _unpack_list(weight_v)
+        return _generic_rnn(g, kind, input, hidden, weight, has_biases, num_layers,
+                            dropout, train, bidirectional, batch_sizes=batch_sizes)
 
-# WARNING: Here be dragons. i.e. this is a hack that should die in a fire
-#
-# Since we need RNN nodes to work both in the GraphExecutor as well as call the
-# correct symbolic function during ONNX export, we do the following:
-#
-# 1. During tracing we dispatch to this function
-# 2. This function emits a PythonOp wrapping the RNN function that would have
-#    run had we not been tracing. Thus, GraphExecutor will call the RNN operator
-#    via Python. In the future we will likely want to make the RNN modules into
-#    ScriptModules so we can optimize them.
-# 3. We store a wrapper around the ONNX symbolic function in the `symbolic`
-#    attribute of the Python function. The ONNX export pass accesses this
-#    attribute during tracing and calls it to lower the PythonOp into the right
-#    thing
-#
-# The first three parameters to this function are meant to be bound with:
-#   cell_type - The string description of the type of RNN cell. e.g. 'LSTM'
-#   func - The function that would have been called here if we had not been
-#          tracing, e.g. CudnnRNN or AutogradRNN.
-#   sym - The ONNX symbolic we should store in the PythonOp for later export.
-#
-# With those three parameters bound, we can pass the function into the
-# torch.onnx.symbolic_override* functions
-#
-# The remaining arguments are equivalent to the inputs seen when dispatching
-# a symbolic function for an operator. Concretely:
-#  * input - a single input tensor [seq_len, batch, input_size] or if bach_first=True,
-#            [batch, seq_len, input_size]
-#  * weights - list of list of tensors. len(weights) = number of layers
-#              weights[i] is a list of weights, same as the parameters to
-#              torch.nn.{RNN,LSTM,GRU}. See the symbolic builders above
-#  * hiddens - hidden state for the first layer, or {hidden state, cell state} if
-#              cell_type == LSTM
-#  * batch_sizes - 1-D tensor containing the sequence length for each example
-#                  in the batch.
-def rnn_trace_override_symbolic(cell_type, func, sym, g, input, weights, hiddens, batch_sizes):
-    num_layers = len(weights)
-    num_weights = 0
-    for x in weights:
-        num_weights += len(x)
-    weights_per_layer = num_weights // num_layers
-    has_batch_sizes = batch_sizes is not None
-
-    # Since we need flat argument lists in the IR, these two functions and the
-    # supporting code before the `wrapPyFuncWithSymbolic` call are simply
-    # helpers to reconstruct the input, weights, hiddens, and batch_sizes
-    # inputs from the flat argument list. To do this, the above code captures
-    # then lengths of each of these inputs so that we can rematerialize them
-    # later before calling either the RNN function or the ONNX symbolic function
-
-    def forward_flattened_wrapper(input, *args):
-        args_offset = 0
-        weights = []
-        for _ in range(num_layers):
-            weights.append(args[args_offset:args_offset + weights_per_layer])
-            args_offset += weights_per_layer
-        if has_batch_sizes:
-            hiddens = args[args_offset:-1]
-            batch_sizes = args[-1]
+    def symbolic(g, *args):
+        if _is_tensor_list(args[3]):
+            return _rnn_packed(g, *args)
         else:
-            hiddens = args[args_offset:]
-            batch_sizes = None
-        if cell_type != 'LSTM':
-            assert len(hiddens) == 1
-            hiddens = hiddens[0]
-        outputs = func(input, weights, hiddens, batch_sizes)
-        # We also need a flattened output list
-        outs_flattened = [outputs[0]]
-        if cell_type == 'LSTM':
-            for o in outputs[1]:
-                outs_flattened.append(o)
-        else:
-            outs_flattened.append(outputs[1])
-        return tuple(outs_flattened)
-
-    def symbolic_flattened_wrapper(g, input, *args):
-        args_offset = 0
-        weights = []
-        for _ in range(num_layers):
-            weights.append(args[args_offset:args_offset + weights_per_layer])
-            args_offset += weights_per_layer
-        if has_batch_sizes:
-            hiddens = args[args_offset:-1]
-            batch_sizes = args[-1]
-        else:
-            hiddens = args[args_offset:]
-            batch_sizes = None
-        if cell_type != 'LSTM':
-            assert len(hiddens) == 1
-            hiddens = hiddens[0]
-        return sym(g, input, weights, hiddens, batch_sizes)
-
-    flattened_weights = []
-    for x in weights:
-        for y in x:
-            flattened_weights.append(y)
-    if not isinstance(hiddens, Iterable):
-        hiddens = [hiddens]
-    inputs = list(itertools.chain.from_iterable(
-        [[input], flattened_weights, hiddens,
-            [batch_sizes] if batch_sizes else []]))
-
-    outputs = g.wrapPyFuncWithSymbolic(
-        forward_flattened_wrapper,
-        inputs,
-        3 if cell_type == 'LSTM' else 2,
-        symbolic_flattened_wrapper
-    )
-    return tuple(o for o in outputs)
-
-
-def RNN_variant_symbolic_builder(
-        variant, input_size, hidden_size, num_layers, batch_first, dropout, bidirectional, **kwargs):
-    def symbolic(g, input, all_weights, initial_states, batch_sizes):
-        if batch_first:
-            return _unimplemented("RNN/GRU/LSTM", "batch_first")
-        if dropout and kwargs['train']:
-            return _unimplemented("RNN/GRU/LSTM", "dropout in training mode")
-
-        unidirectional = not bidirectional
-
-        prev_output = input
-
-        h_outs = []
-        if variant == 'RNN' or variant == 'GRU':
-            h0 = initial_states
-        elif variant == 'LSTM':
-            h0, c0 = initial_states
-            c_outs = []
-
-        sequence_lens = unused(g) if batch_sizes is None else batch_sizes
-
-        if variant == 'GRU':
-            # pytorch is reset, input, hidden
-            # onnx is    input, reset, hidden
-            reform_permutation = [(1, 2), (0, 1), (2, 3)]
-        elif variant == 'LSTM':
-            # pytorch is input, forget, cell, output.
-            # onnx is    input, output, forget, cell.
-            reform_permutation = [(0, 1), (3, 4), (1, 3)]
-
-        def transform_weights(layer_index):
-            if variant == 'RNN':
-                weight_ih, weight_hh, bias_ih, bias_hh = all_weights[layer_index]
-            elif variant == 'GRU' or variant == 'LSTM':
-                weight_ih, weight_hh, bias_ih, bias_hh = \
-                    [reform_weights(g, w, hidden_size, reform_permutation) for w in all_weights[layer_index]]
-            bias_concat = g.op('Concat', bias_ih, bias_hh, axis_i=0)
-
-            return tuple(g.op('Unsqueeze', x, axes_i=[0]) for x in (weight_ih, weight_hh, bias_concat))
-
-        def retrieve_state(x, start, end):
-            return x if num_layers == 1 else g.op('Slice', x, axes_i=[0], starts_i=[start], ends_i=[end])
-
-        for i in range(num_layers):
-            if unidirectional:
-                weight_ih, weight_hh, bias_concat = transform_weights(i)
-                state_indices = i, i + 1
-            else:
-                weight_ih_f, weight_hh_f, bias_f = transform_weights(2 * i)
-                weight_ih_b, weight_hh_b, bias_b = transform_weights(2 * i + 1)
-
-                weight_ih = g.op('Concat', weight_ih_f, weight_ih_b, axis_i=0)
-                weight_hh = g.op('Concat', weight_hh_f, weight_hh_b, axis_i=0)
-                bias_concat = g.op('Concat', bias_f, bias_b, axis_i=0)
-
-                state_indices = 2 * i, 2 * i + 2
-
-            inputs = [prev_output, weight_ih, weight_hh, bias_concat, sequence_lens]
-
-            inputs.append(retrieve_state(h0, *state_indices))
-            if variant == 'LSTM':
-                inputs.append(retrieve_state(c0, *state_indices))
-
-            extra_kwargs = {} if unidirectional else {'direction_s': 'bidirectional'}
-            if variant == 'RNN':
-                prev_output, h_out = g.op('RNN', *inputs, outputs=2,
-                                          hidden_size_i=hidden_size,
-                                          activations_s=[kwargs['nonlinearity'].lower()],
-                                          **extra_kwargs)
-            elif variant == 'GRU':
-                prev_output, h_out = g.op('GRU', *inputs, outputs=2,
-                                          hidden_size_i=hidden_size,
-                                          linear_before_reset_i=1,
-                                          **extra_kwargs)
-            elif variant == 'LSTM':
-                prev_output, h_out, c_out = g.op('LSTM', *inputs, outputs=3,
-                                                 hidden_size_i=hidden_size,
-                                                 **extra_kwargs)
-
-            if bidirectional:
-                # The ONNX RNN/GRU/LSTM produce an output of dimensions
-                #   seq_len, num_directions, batch, hidden_size
-                # We have to convert to match pytorch's expected
-                #   seq_len, batch, hidden_size * num_directions
-                # by first moving num_directions to the end with
-                # Transpose, and then combining it with hidden_size
-                # with Reshape.
-                prev_output = g.op('Transpose', prev_output, perm_i=[0, 2, 3, 1])
-                prev_output = g.op('Reshape', prev_output, g.op('Constant', value_t=torch.LongTensor([0, 0, -1])))
-            else:
-                prev_output = g.op('Squeeze', prev_output, axes_i=[1])
-
-            h_outs.append(h_out)
-            if variant == 'LSTM':
-                c_outs.append(c_out)
-        h_outs = h_out if num_layers == 1 else g.op('Concat', *h_outs, axis_i=0)
-        if variant == 'RNN' or variant == 'GRU':
-            return prev_output, h_outs
-        elif variant == 'LSTM':
-            c_outs = c_out if num_layers == 1 else g.op('Concat', *c_outs, axis_i=0)
-            return prev_output, h_outs, c_outs
+            return _rnn_full(g, *args)
 
     return symbolic
+
+
+gru = _one_hidden_rnn('GRU')
+rnn_tanh = _one_hidden_rnn('RNN_TANH')
+rnn_relu = _one_hidden_rnn('RNN_RELU')
 
 
 @parse_args('v', 'i')
