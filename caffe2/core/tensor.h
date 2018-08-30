@@ -275,9 +275,6 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     CAFFE_ENFORCE_GE_WITH_CALLER(dims_.size(), 1);
     CAFFE_ENFORCE_GE_WITH_CALLER(
         num, 0, "`num` must be non-negative for Extend");
-    CAFFE_ENFORCE(
-        storage_.use_count() == 1,
-        "Can't call Extend on shared storage, please call Resize instead");
     auto newDims = dims_;
     newDims[0] += num;
     if (!storage_->data()) {
