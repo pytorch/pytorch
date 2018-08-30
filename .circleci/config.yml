@@ -255,7 +255,7 @@ caffe2_linux_test_defaults: &caffe2_linux_test_defaults
         # See comments on https://github.com/HypothesisWorks/hypothesis-python/commit/eadd62e467d6cee6216e71b391951ec25b4f5830
         if [[ "$BUILD_ENVIRONMENT" == *ubuntu14.04* ]]; then
           sudo pip uninstall -y hypothesis
-          # `pip install hypothesis==3.44.6` from official server is unreliable on CircleCI, so we host a copy on S3 instead
+          # "pip install hypothesis==3.44.6" from official server is unreliable on CircleCI, so we host a copy on S3 instead
           sudo pip install attrs -f https://s3.amazonaws.com/ossci-linux/wheels/attrs-18.1.0-py2.py3-none-any.whl
           sudo pip install coverage -f https://s3.amazonaws.com/ossci-linux/wheels/coverage-4.5.1-cp36-cp36m-macosx_10_12_x86_64.whl
           sudo pip install hypothesis -f https://s3.amazonaws.com/ossci-linux/wheels/hypothesis-3.44.6-py3-none-any.whl
