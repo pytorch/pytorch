@@ -2567,7 +2567,7 @@
         - THTensor* mat2
 ]]
 [[
-  name: bmm
+  name: _th_bmm
   cname: baddbmm
   variants:
     - method
@@ -2621,7 +2621,8 @@
     - THTensor* batch2
 ]]
 [[
-  name: baddbmm
+  name: _th_baddbmm
+  cname: baddbmm
   variants:
     - method
     - function
@@ -2641,7 +2642,7 @@
     - THTensor* batch2
 ]]
 [[
-  name: baddbmm_
+  name: _th_baddbmm_
   cname: baddbmm
   return: argument 0
   arguments:
