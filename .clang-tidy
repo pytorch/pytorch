@@ -13,6 +13,7 @@ Checks: '
   ,-cppcoreguidelines-pro-bounds-constant-array-index
   ,-cppcoreguidelines-pro-type-member-init
   ,-cppcoreguidelines-pro-type-static-cast-downcast
+  ,-cppcoreguidelines-pro-type-union-access
   ,-cppcoreguidelines-pro-type-vararg
   ,-cppcoreguidelines-special-member-functions
   ,-fuchsia-*
@@ -26,6 +27,7 @@ Checks: '
   ,-google-runtime-references
   ,-hicpp-braces-around-statements
   ,-hicpp-explicit-conversions
+  ,-hicpp-member-init
   ,-hicpp-no-array-decay
   ,-hicpp-signed-bitwise
   ,-hicpp-special-member-functions
