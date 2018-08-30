@@ -136,7 +136,7 @@ inline IValue argumentToIValue(
     return toIValue(object, argument.type);
   } catch (const py::cast_error& error) {
     AT_ERROR(
-        schema.name, "() expected value of type ", py::str(argument.type),
+        schema.name, "() expected value of type ", argument.type->str(),
         " for argument '", argument.name,
         "' in position ", argumentPosition,
         ", but instead got value of type ",
