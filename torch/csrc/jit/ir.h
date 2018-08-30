@@ -150,6 +150,7 @@ public:
     }
     Scope* parent = this->parent_;
     while (!parent->isRoot()) {
+      // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
       out = std::string(parent->name_.toUnqualString()) + separator + out;
       parent = parent->parent_;
     }
