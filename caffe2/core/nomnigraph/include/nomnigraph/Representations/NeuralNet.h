@@ -428,8 +428,8 @@ template <NNGraph* G>
 struct CAFFE2_API NodeHelper {};
 
 struct CAFFE2_API NNNodeMatchCriteria {
-  const std::function<bool(NNGraph::NodeRef)> predicate;
-  const std::string debugString;
+  std::function<bool(NNGraph::NodeRef)> predicate;
+  std::string debugString;
 
   NNNodeMatchCriteria(
       const std::function<bool(NNGraph::NodeRef)>& predicate,
