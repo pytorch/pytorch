@@ -1,3 +1,5 @@
+from __future__ import division
+
 import math
 import unittest
 import functools
@@ -10,7 +12,7 @@ import torch.nn.functional as F
 from torch.optim import SGD
 from torch.autograd import Variable
 from torch import sparse
-from torch.optim.lr_scheduler import LambdaLR, StepLR, MultiStepLR, ExponentialLR, CosineAnnealingLR, ReduceLROnPlateau
+from torch.optim.lr_scheduler import LambdaLR, StepLR, MultiStepLR, ExponentialLR, CosineAnnealingLR, CosineAnnealingRestartsLR, ReduceLROnPlateau
 from common import TestCase, run_tests, TEST_WITH_UBSAN, skipIfRocm
 
 
@@ -563,6 +565,50 @@ class TestLRScheduler(TestCase):
         targets = [single_targets, list(map(lambda x: x * epochs, single_targets))]
         scheduler = CosineAnnealingLR(self.opt, T_max=epochs, eta_min=eta_min)
         self._test(scheduler, targets, epochs)
+
+    def test_cos_anneal_restarts_lr_periodic(self):
+        epochs = 40
+        T_max = 20
+        eta_min = 1e-5
+        single_targets = [eta_min + 0.5 * (0.05 - eta_min) *
+                          (1 + math.cos(math.pi * (x % T_max) / (T_max - 1)))
+                          for x in range(epochs)]
+        scheduler = CosineAnnealingRestartsLR(self.opt, T_max=T_max, eta_min=eta_min,
+                                              T_mult=1.0)
+        self._test(scheduler, [single_targets], epochs)
+
+    def test_cos_anneal_restarts_lr_mult(self):
+        num_runs = 4
+        T_max = 10
+        eta_min = 1e-5
+        T_mult = 3
+        epochs = int(T_max * (1 - T_mult ** num_runs) / (1 - T_mult))
+        single_targets = []
+        for run in range(num_runs):
+            single_targets.extend([eta_min + 0.5 * (0.05 - eta_min) *
+                                   (1 + math.cos(math.pi * (x % (T_max * (T_mult ** run))) /
+                                                 (T_max * (T_mult ** run) - 1)))
+                                   for x in range(T_max * T_mult ** run)])
+        scheduler = CosineAnnealingRestartsLR(self.opt, T_max=T_max, eta_min=eta_min,
+                                              T_mult=T_mult)
+        self._test(scheduler, [single_targets], epochs)
+
+    def test_cos_anneal_restarts_lr_gamma(self):
+        num_runs = 3
+        T_max = 10
+        eta_min = 1e-3
+        T_mult = 2
+        gamma = 0.5
+        epochs = int(T_max * (1 - T_mult ** num_runs) / (1 - T_mult))
+        single_targets = []
+        for run in range(num_runs):
+            single_targets.extend([eta_min + 0.5 * (0.05 - eta_min) * (gamma ** run) *
+                                   (1 + math.cos(math.pi * (x % (T_max * (T_mult ** run))) /
+                                                 (T_max * (T_mult ** run) - 1)))
+                                   for x in range(T_max * T_mult ** run)])
+        scheduler = CosineAnnealingRestartsLR(self.opt, T_max=T_max, eta_min=eta_min,
+                                              gamma=gamma)
+        self._test(scheduler, [single_targets], epochs)
 
     def test_reduce_lr_on_plateau1(self):
         epochs = 10
