@@ -287,7 +287,7 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, SparseTensorR
     dim3 grid;
     int curDevice = -1;
     cudaGetDevice(&curDevice);
-    cudaStream_t stream = at::cuda::getCurrentCUDAStreamOnDevice(curDevice);
+    cudaStream_t stream = at::cuda::getCurrentCUDAStream(curDevice);
     if (sparse._denseDims() == 0) {
       AT_CHECK(cuda::getApplyGrid(nnz, grid, curDevice), "add: Argument #0: tensor too large or too many dimensions");
 
@@ -444,7 +444,7 @@ SparseTensor& mul_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t_, cons
   dim3 grid;
   int curDevice = -1;
   cudaGetDevice(&curDevice);
-  cudaStream_t stream = at::cuda::getCurrentCUDAStreamOnDevice(curDevice);
+  cudaStream_t stream = at::cuda::getCurrentCUDAStream(curDevice);
   AT_CHECK(cuda::getApplyGrid(valueSize, grid, curDevice), "mul: Argument #0: tensor too large or too many dimensions");
 
   LongTensor resultNnz = at::empty({1}, CUDA(kLong));
