@@ -4,26 +4,26 @@ namespace at {
 
 StorageImpl::StorageImpl(
     at::DataType data_type,
-    ptrdiff_t size,
+    int64_t numel,
     at::DataPtr data_ptr,
     at::Allocator* allocator,
     bool resizable)
     : data_type_(data_type),
       data_ptr_(std::move(data_ptr)),
-      size_(size),
+      numel_(numel),
       resizable_(resizable),
       allocator_(allocator) {}
 
 StorageImpl::StorageImpl(
     at::DataType data_type,
-    ptrdiff_t size,
+    int64_t numel,
     at::Allocator* allocator,
     bool resizable)
     : StorageImpl(
           data_type,
-          size,
+          numel,
           allocator->allocate(
-              at::elementSize(dataTypeToScalarType(data_type)) * size),
+              at::elementSize(dataTypeToScalarType(data_type)) * numel),
           allocator,
           resizable) {}
 

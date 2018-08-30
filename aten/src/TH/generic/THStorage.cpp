@@ -59,7 +59,7 @@ THStorage* THStorage_(newWithMapping)(const char *filename, ptrdiff_t size, int 
       false).release();
 
   if (size <= 0) {
-    storage->set_size(actual_size / at::elementSize(scalar_type));
+    storage->set_numel(actual_size / at::elementSize(scalar_type));
   }
 
   return storage;
@@ -132,19 +132,19 @@ void THStorage_(resize)(THStorage *storage, ptrdiff_t size)
 void THStorage_(fill)(THStorage *storage, real value)
 {
   ptrdiff_t i;
-  for(i = 0; i < storage->size(); i++)
+  for(i = 0; i < storage->numel(); i++)
     THStorage_(data)(storage)[i] = value;
 }
 
 void THStorage_(set)(THStorage *self, ptrdiff_t idx, real value)
 {
-  THArgCheck((idx >= 0) && (idx < self->size()), 2, "out of bounds");
+  THArgCheck((idx >= 0) && (idx < self->numel()), 2, "out of bounds");
   THStorage_(data)(self)[idx] = value;
 }
 
 real THStorage_(get)(const THStorage *self, ptrdiff_t idx)
 {
-  THArgCheck((idx >= 0) && (idx < self->size()), 2, "out of bounds");
+  THArgCheck((idx >= 0) && (idx < self->numel()), 2, "out of bounds");
   return THStorage_(data)(self)[idx];
 }
 

@@ -34,7 +34,7 @@ void THStorage_free(THStorage* storage) {
 
 ptrdiff_t THStorage_size(const THStorage *self)
 {
-  return self->size();
+  return self->numel();
 }
 
 void THStorage_retain(THStorage *storage)
@@ -49,21 +49,21 @@ void THStorage_resize(THStorage* storage, ptrdiff_t size) {
     /* case when the allocator does not have a realloc defined */
     at::DataPtr new_data;
     if (size != 0) {
-      new_data = storage->allocator()->allocate(storage->elementSize() * size);
+      new_data = storage->allocator()->allocate(storage->itemsize() * size);
     }
     at::DataPtr old_data = storage->set_data_ptr(std::move(new_data));
-    ptrdiff_t old_size = storage->size();
-    storage->set_size(size);
+    ptrdiff_t old_size = storage->numel();
+    storage->set_numel(size);
     if (old_data != nullptr) {
       ptrdiff_t copy_size = old_size;
-      if (storage->size() < copy_size) {
-        copy_size = storage->size();
+      if (storage->numel() < copy_size) {
+        copy_size = storage->numel();
       }
       if (copy_size > 0) {
         memcpy(
             storage->data(),
             old_data.get(),
-            storage->elementSize() * copy_size);
+            storage->itemsize() * copy_size);
       }
     }
   } else {

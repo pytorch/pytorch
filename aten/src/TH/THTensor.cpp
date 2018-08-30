@@ -125,7 +125,7 @@ void THTensor_resizeNd(THTensor *self, int nDimension, const int64_t *size, cons
     if(!THTensor_getStoragePtr(self)) {
       THTensor_stealAndSetStoragePtr(self, THStorage_new(self->scalar_type()));
     }
-    if(totalSize+self->storage_offset() > THTensor_getStoragePtr(self)->size()) {
+    if(totalSize+self->storage_offset() > THTensor_getStoragePtr(self)->numel()) {
       THStorage_resize(THTensor_getStoragePtr(self), totalSize+self->storage_offset());
     }
   }

@@ -148,7 +148,7 @@ void THCTensor_resizeNd(THCState *state, THCTensor *self, int nDimension, const 
     if(!THTensor_getStoragePtr(self)) {
       THError("Tensor: invalid null storage");
     }
-    if(totalSize+self->storage_offset() > THTensor_getStoragePtr(self)->size()) {
+    if(totalSize+self->storage_offset() > THTensor_getStoragePtr(self)->numel()) {
       THCStorage_resize(state, THTensor_getStoragePtr(self), totalSize+self->storage_offset());
     }
   }

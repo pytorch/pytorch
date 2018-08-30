@@ -79,7 +79,7 @@ static PyObject * THPStorage_(shareFilename)(THPStorage *self)
   } else {
     // TODO: retry on collision
     // TODO: free GIL - but remember to reacquire it when an exception is thrown
-    THWStoragePtr new_storage(THPStorage_(newFilenameStorage)(storage->size()));
+    THWStoragePtr new_storage(THPStorage_(newFilenameStorage)(storage->numel()));
     THWStorage_(copy)(new_storage, storage);
     THWStorage_(swap)(storage, new_storage);
     ctx = THManagedMapAllocator::fromDataPtr(storage->data_ptr());
@@ -90,7 +90,7 @@ static PyObject * THPStorage_(shareFilename)(THPStorage *self)
   if (!manager_handle) return NULL;
   THPObjectPtr storage_handle(PyBytes_FromString(ctx->filename()));
   if (!storage_handle) return NULL;
-  THPObjectPtr size(PyLong_FromLong(storage->size()));
+  THPObjectPtr size(PyLong_FromLong(storage->numel()));
   if (!size) return NULL;
 
   THPObjectPtr tuple(PyTuple_New(3));
@@ -158,7 +158,7 @@ static PyObject * THPStorage_(shareFd)(THPStorage *self)
   if ((ctx = THMapAllocator::fromDataPtr(storage->data_ptr()))) {
     // done
   } else {
-    THWStoragePtr new_storage(THPStorage_(newFdStorage)(storage->size()));
+    THWStoragePtr new_storage(THPStorage_(newFdStorage)(storage->numel()));
     THWStorage_(copy)(new_storage, storage);
     THWStorage_(swap)(storage, new_storage);
     ctx = THMapAllocator::fromDataPtr(storage->data_ptr());
@@ -167,7 +167,7 @@ static PyObject * THPStorage_(shareFd)(THPStorage *self)
 
   THPObjectPtr storage_handle(PyLong_FromLong(ctx->fd()));
   if (!storage_handle) return NULL;
-  THPObjectPtr size(PyLong_FromLong(storage->size()));
+  THPObjectPtr size(PyLong_FromLong(storage->numel()));
   if (!size) return NULL;
 
   THPObjectPtr tuple(PyTuple_New(2));
@@ -220,7 +220,7 @@ static PyObject * THPStorage_(shareCuda)(THPStorage *self)
   THPObjectPtr device(PyLong_FromLong(storage->device().index()));
   THPObjectPtr _handle(Py_None);
   Py_INCREF(Py_None);
-  THPObjectPtr size(PyLong_FromLong(storage->size()));
+  THPObjectPtr size(PyLong_FromLong(storage->numel()));
   THPObjectPtr _offset(PyLong_FromLong(0));
   if (THWStorage_(data)(LIBRARY_STATE storage)) {
     size_t base_size;

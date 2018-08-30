@@ -21,7 +21,7 @@ int THCStorage_(elementSize)(THCState *state)
 
 void THCStorage_(set)(THCState *state, THCStorage *self, ptrdiff_t index, real value)
 {
-  THArgCheck((index >= 0) && (index < self->size()), 2, "index out of bounds");
+  THArgCheck((index >= 0) && (index < self->numel()), 2, "index out of bounds");
   cudaStream_t stream = THCState_getCurrentStream(state);
   THCudaCheck(cudaMemcpyAsync(THCStorage_(data)(state, self) + index, &value, sizeof(real),
                               cudaMemcpyHostToDevice,
@@ -31,7 +31,7 @@ void THCStorage_(set)(THCState *state, THCStorage *self, ptrdiff_t index, real v
 
 real THCStorage_(get)(THCState *state, const THCStorage *self, ptrdiff_t index)
 {
-  THArgCheck((index >= 0) && (index < self->size()), 2, "index out of bounds");
+  THArgCheck((index >= 0) && (index < self->numel()), 2, "index out of bounds");
   real value;
   cudaStream_t stream = THCState_getCurrentStream(state);
   THCudaCheck(cudaMemcpyAsync(&value, THCStorage_(data)(state, self) + index, sizeof(real),
