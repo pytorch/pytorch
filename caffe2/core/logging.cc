@@ -236,6 +236,12 @@ MessageLogger::~MessageLogger() {
   if (severity_ >= FLAGS_caffe2_log_level) {
     // If not building on Android, log all output to std::cerr.
     std::cerr << stream_.str();
+    // Simulating the glog default behavior: if the severity is above INFO,
+    // we flush the stream so that the output appears immediately on std::cerr.
+    // This is expected in some of our tests.
+    if (severity_ > INFO) {
+      std::cerr << std::flush;
+    }
   }
 #endif  // ANDROID
   if (severity_ == FATAL) {

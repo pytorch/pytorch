@@ -346,8 +346,8 @@ PyObject* c10d_init(PyObject* _unused) {
 #endif
 
   shared_ptr_class_<::c10d::ProcessGroup::Work>(module, "Work")
-      .def("isCompleted", &::c10d::ProcessGroup::Work::isCompleted)
-      .def("isSuccess", &::c10d::ProcessGroup::Work::isSuccess)
+      .def("is_completed", &::c10d::ProcessGroup::Work::isCompleted)
+      .def("is_success", &::c10d::ProcessGroup::Work::isSuccess)
       .def("exception", &::c10d::ProcessGroup::Work::exception)
       .def("synchronize", &::c10d::ProcessGroup::Work::synchronize)
       .def(
