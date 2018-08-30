@@ -17,21 +17,28 @@ namespace at {
 
 /// A class to encapsulate construction axes of a `Tensor`.
 /// `TensorOptions` is a virtual class to enable overriding of certain methods
-/// by subclasses in other libraries, such as PyTorch. In PyTorch, there is a
-/// `torch::TensorOptions` subclass of this `TensorOptions`, which changes
-/// `type()` to return a variable type instead of a tensor type, such that
-/// variables are created inside factory methods, instead of tensors.
+/// by subclasses in other libraries, such as PyTorch.
 ///
-/// Here are a number of common ways to use specify a TensorOptions (some
-/// of which may not be obvious, because many types are implicitly convertible
-/// to TensorOptions).  We take at::zeros as an example; it takes a
-/// TensorOptions as its second argument.
+/// WARNING: In PyTorch, there is a `torch::TensorOptions` subclass of this
+/// `TensorOptions`, which changes `type()` to return a variable type instead of
+/// a tensor type, such that variables are created inside factory methods,
+/// instead of tensors.  If you mix the two up, you will be very sad!
+///
+/// Rather than use the constructor of this class directly, you should prefer to
+/// use the constructor functions, and then chain setter methods on top of them.
+///
+///     at::device(at::kCUDA).dtype(kInt)
+///     at::dtype(at::kInt)
+///
+/// Additionally, anywhere a TensorOptions is expected, you can directly
+/// pass at::kCUDA/at::kInt, and it will implicitly convert to a TensorOptions.
+///
+/// Here are some common idioms:
 ///
 ///     at::zeros({1}, at::kCUDA);
 ///     at::zeros({1}, at::kLong);
-///     at::zeros({1}, at::TensorOptions(other)); // same type and device as other
-///     at::zeros({1}, at::TensorOptions(at::kCUDA, at::kLong));
-///     at::zeros({1}, at::TensorOptions().device_index(1).dtype(at::kLong)); // same as above
+///     at::zeros({1}, at::device(at::kCUDA).dtype(at::kLong()));
+///     at::zeros({1}, at::device({at::kCUDA, 1})); // place on device 1
 //
 struct AT_API TensorOptions {
   TensorOptions() : TensorOptions(/*use_thread_local_default_options=*/true) {}
@@ -244,7 +251,7 @@ inline TensorOptions device(Device device) {
 }
 
 /// Convenience function that returns a `TensorOptions` object with the
-/// `device_index` set to the given one.
+/// `device` set to CUDA and the `device_index` set to the given one.
 inline TensorOptions device_index(int32_t device_index) {
   return TensorOptions().device_index(device_index);
 }
