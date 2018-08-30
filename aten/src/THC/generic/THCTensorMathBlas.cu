@@ -790,7 +790,7 @@ THC_API void THCTensor_(btrifact)(THCState *state, THCTensor *ra_, THCudaIntTens
     for (int64_t i=0; i<num_batches; i++) {
       ptrs[i] = t;
     }
-    THCudaIntTensor_catArray(state, rpivots_, ptrs, num_batches, 0);
+    THCudaIntTensor_catArray(state, rpivots_, ptrs, num_batches, 0, false, 0);
     THCudaIntTensor_free(state, t);
     THFree(ptrs);
   } else {

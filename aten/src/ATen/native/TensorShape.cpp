@@ -26,16 +26,16 @@ static void check_cat_no_zero_dim(TensorList tensors) {
   }
 }
 
-Tensor & cat_out(Tensor & result, TensorList tensors, int64_t dim) {
+Tensor & cat_out(Tensor & result, TensorList tensors, int64_t dim, bool pad, int64_t pad_value) {
   check_cat_no_zero_dim(tensors);
   dim = legacy_cat_wrap_dim(dim, tensors);
-  return at::_cat_out(result, tensors, dim);
+  return at::_cat_out(result, tensors, dim, pad, pad_value);
 }
 
-Tensor cat(TensorList tensors, int64_t dim) {
+Tensor cat(TensorList tensors, int64_t dim, bool pad, int64_t pad_value) {
   check_cat_no_zero_dim(tensors);
   dim = legacy_cat_wrap_dim(dim, tensors);
-  return at::_cat(tensors, dim);
+  return at::_cat(tensors, dim, pad, pad_value);
 }
 
 std::vector<Tensor> chunk(const Tensor& self, int64_t chunks, int64_t dim) {

@@ -3453,4 +3453,8 @@
     - TensorList tensors
     - arg: int64_t dim
       default: 0
+    - arg: bool pad
+      default: "false"
+    - arg: int64_t pad_value
+      default: 0
 ]]

@@ -284,10 +284,10 @@
 - func: broadcast_tensors(TensorList tensors) -> TensorList
   variants: function
 
-- func: cat(TensorList tensors, int64_t dim=0) -> Tensor
+- func: cat(TensorList tensors, int64_t dim=0, bool pad=false, int64_t pad_value=0) -> Tensor
   variants: function
 
-- func: cat_out(Tensor result, TensorList tensors, int64_t dim=0) -> Tensor
+- func: cat_out(Tensor result, TensorList tensors, int64_t dim=0, bool pad=false, int64_t pad_value=0) -> Tensor
   variants: function
 
 - func: ceil(Tensor self) -> Tensor
