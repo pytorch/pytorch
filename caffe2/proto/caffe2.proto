@@ -109,7 +109,8 @@ message Argument {
 
 // DeviceType that Caffe2 currently supports.
 // Note: if you add a device type, make sure you add the corresponding device
-// line in the DeviceTypeName() function in caffe2/utils/proto_utils.cc.
+// line in the DeviceTypeName() function in caffe2/utils/proto_utils.cc
+// and update ATen/core/DeviceType.h
 enum DeviceType {
   CPU = 0;                    // In default, we will use CPU.
   CUDA = 1;                   // CUDA.
@@ -141,7 +142,7 @@ message DeviceOption {
   // Used for net transformation purposes. Must be empty at execution time.
   optional string node_name = 4;
   // [CPU and Linux specific] NUMA node id
-  optional int32 numa_node_id = 5 [default = -1];
+  optional int32 numa_node_id = 5;
   // [general] Extra information passed, not used at execution time currently.
   repeated string extra_info = 6;
   // [HIP specific] the hip gpu id.

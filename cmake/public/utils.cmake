@@ -109,6 +109,27 @@ function(caffe2_binary_target target_name_or_src)
   install(TARGETS ${__target} DESTINATION bin)
 endfunction()
 
+function(caffe2_hip_binary_target target_name_or_src)
+  if (${ARGN})
+    set(__target ${target_name_or_src})
+    prepend(__srcs "${CMAKE_CURRENT_SOURCE_DIR}/" "${ARGN}")
+  else()
+    get_filename_component(__target ${target_name_or_src} NAME_WE)
+    prepend(__srcs "${CMAKE_CURRENT_SOURCE_DIR}/" "${target_name_or_src}")
+  endif()
+
+  # These two lines are the only differences between
+  # caffe2_hip_binary_target and caffe2_binary_target
+  set_source_files_properties(${__srcs} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+  hip_add_executable(${__target} ${__srcs})
+
+  target_link_libraries(${__target} ${Caffe2_MAIN_LIBS})
+  # If we have Caffe2_MODULES defined, we will also link with the modules.
+  if (DEFINED Caffe2_MODULES)
+    target_link_libraries(${__target} ${Caffe2_MODULES})
+  endif()
+  install(TARGETS ${__target} DESTINATION bin)
+endfunction()
 
 ##############################################################################
 # Multiplex between loading executables for CUDA versus HIP (AMD Software Stack).

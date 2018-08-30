@@ -77,57 +77,22 @@ CAFFE2_DEFINE_bool(
     "Whether to evict the cache before running network.");
 
 int main(int argc, char** argv) {
-  caffe2::GlobalInit(&argc, &argv);
-
-  observerConfig();
-  caffe2::ShowLogInfoToStderr();
-
-  auto workspace = make_shared<caffe2::Workspace>(new caffe2::Workspace());
-  bool run_on_gpu = backendCudaSet(caffe2::FLAGS_backend);
-
-  // support other device type in the future?
-  caffe2::DeviceType run_dev = run_on_gpu ? caffe2::CUDA : caffe2::CPU;
-
-  // Run initialization network.
-  caffe2::NetDef init_net_def;
-  CAFFE_ENFORCE(ReadProtoFromFile(caffe2::FLAGS_init_net, &init_net_def));
-  setDeviceType(&init_net_def, run_dev);
-  setOperatorEngine(&init_net_def, caffe2::FLAGS_backend);
-  CAFFE_ENFORCE(workspace->RunNetOnce(init_net_def));
-
-  // Run main network.
-  caffe2::NetDef net_def;
-  CAFFE_ENFORCE(ReadProtoFromFile(caffe2::FLAGS_net, &net_def));
-  setDeviceType(&net_def, run_dev);
-  setOperatorEngine(&net_def, caffe2::FLAGS_backend);
-
-  map<string, caffe2::TensorProtos> tensor_protos_map;
-
-  loadInput(
-      workspace,
-      run_on_gpu,
-      tensor_protos_map,
+  benchmark(
+      argc,
+      argv,
+      caffe2::FLAGS_backend,
+      caffe2::FLAGS_init_net,
       caffe2::FLAGS_input,
-      caffe2::FLAGS_input_file,
       caffe2::FLAGS_input_dims,
-      caffe2::FLAGS_input_type);
-
-  runNetwork(
-      workspace,
-      net_def,
-      tensor_protos_map,
-      caffe2::FLAGS_wipe_cache,
-      caffe2::FLAGS_run_individual,
-      caffe2::FLAGS_warmup,
+      caffe2::FLAGS_input_file,
+      caffe2::FLAGS_input_type,
       caffe2::FLAGS_iter,
-      caffe2::FLAGS_sleep_before_run);
-
-  writeOutput(
-      workspace,
-      run_on_gpu,
+      caffe2::FLAGS_net,
       caffe2::FLAGS_output,
       caffe2::FLAGS_output_folder,
-      caffe2::FLAGS_text_output);
-
-  return 0;
+      caffe2::FLAGS_run_individual,
+      caffe2::FLAGS_sleep_before_run,
+      caffe2::FLAGS_text_output,
+      caffe2::FLAGS_warmup,
+      caffe2::FLAGS_wipe_cache);
 }

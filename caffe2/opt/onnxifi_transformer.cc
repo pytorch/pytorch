@@ -80,7 +80,7 @@ void FillModelInfo(::ONNX_NAMESPACE::ModelProto* model) {
   model->set_producer_name("caffe2");
   auto* opset_id = model->add_opset_import();
   opset_id->set_domain("");
-  opset_id->set_version(3);
+  opset_id->set_version(7);
 }
 } // namespace
 
@@ -148,6 +148,7 @@ OperatorDef OnnxifiTransformer::BuildOnnxifiOp(
 
 NetDef OnnxifiTransformer::SubnetToOnnxifiOp(
     const caffe2::NetDef& net,
+    const Workspace& mapped_ws,
     Workspace* ws,
     onnx::OnnxExporter* exporter,
     std::unordered_map<std::string, TensorShape>* shape_hints) {
@@ -158,6 +159,7 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOp(
   DeviceOption option;
   CPUContext context(option);
   context.SwitchToDevice();
+  std::vector<std::string> extra_weights;
   for (const auto& op : net.op()) {
     const auto results = exporter->Caffe2OpToOnnxNodes(op, *shape_hints);
     for (const auto& n : results.first) {
@@ -165,10 +167,6 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOp(
     }
     for (const auto& t : results.second) {
       VLOG(2) << "Adding extra init tensor: " << t.name();
-      CAFFE_ENFORCE_EQ(
-          t.data_type(),
-          ::ONNX_NAMESPACE::TensorProto::FLOAT,
-          "Only supports conversion of float type for now");
       TensorShape shape;
       shape.mutable_dims()->CopyFrom(t.dims());
       shape_hints->emplace(t.name(), std::move(shape));
@@ -177,15 +175,28 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOp(
       auto* blob = ws->CreateBlob(t.name());
       auto* cpu_tensor = blob->GetMutableTensor(CPU);
       std::vector<TIndex> dims;
-      std::copy(t.dims().begin(), t.dims().end(), dims.begin());
+      for(const auto& d : t.dims()) {
+        dims.push_back(d);
+      }
       cpu_tensor->Resize(dims);
-      context.CopyBytesSameDevice(
-          cpu_tensor->size() * sizeof(float),
-          static_cast<const void*>(t.raw_data().data()),
-          cpu_tensor->raw_mutable_data(TypeMeta::Make<float>()));
+      if (t.data_type() == ::ONNX_NAMESPACE::TensorProto::FLOAT) {
+        context.CopyBytesSameDevice(
+            cpu_tensor->size() * sizeof(float),
+            static_cast<const void*>(t.raw_data().data()),
+            cpu_tensor->raw_mutable_data(TypeMeta::Make<float>()));
+      } else if (t.data_type() == ::ONNX_NAMESPACE::TensorProto::INT64) {
+        context.CopyBytesSameDevice(
+            cpu_tensor->size() * sizeof(int64_t),
+            static_cast<const void*>(t.raw_data().data()),
+            cpu_tensor->raw_mutable_data(TypeMeta::Make<int64_t>()));
+      } else {
+        CAFFE_THROW(
+            "Unsupported tensor data type for conversion: ", t.data_type());
+      }
       context.FinishDeviceComputation();
 
       // Add mappings
+      extra_weights.emplace_back(t.name());
       CAFFE_ENFORCE(
           input_mapping_.emplace(t.name(), t.name()).second,
           MakeString("Tensor ", t.name(), " already exists in the workspace"));
@@ -216,7 +227,7 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOp(
 
   // Convert inputs and figure out weights
   std::unordered_set<std::string> weights;
-  const std::vector<string>& ws_blobs = ws->Blobs();
+  const std::vector<string>& ws_blobs = mapped_ws.Blobs();
   for (const auto& s : ws_blobs) {
     VLOG(2) << "Add weights: " << s;
     weights.emplace(s);
@@ -227,10 +238,11 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOp(
   std::vector<std::string> total_inputs_vec;
 
   // Extra intermediate weights created during conversion
-  for (const auto& extra_weight : onnx_model.graph().initializer()) {
-    if (total_inputs.emplace(extra_weight.name()).second) {
-      total_inputs_vec.emplace_back(extra_weight.name());
+  for (const auto& extra_weight : extra_weights) {
+    if (total_inputs.emplace(extra_weight).second) {
+      total_inputs_vec.emplace_back(extra_weight);
     }
+    initialization_list.emplace(extra_weight);
   }
   // Boundary inputs, should not be weights
   std::unordered_set<std::string> boundary_inputs;
@@ -319,12 +331,14 @@ void OnnxifiTransformer::Transform(
   auto shape_hints = InferShapes(&mapped_ws, pred_net, &shape_hints_ordered);
 
   CAFFE_ENFORCE(pred_net, "Predict net cannot be nullptr");
-  onnx::OnnxExporter exporter(nullptr, true);
+  onnx::OnnxExporter exporter(nullptr);
 
   // function to tell whether the ONNXIFI backend supports a given C2 op or not
   // TODO: choose backend id
+  onnxifi_library* backend = lib_;
+  onnxBackendID backend_id = backend_ids_[0];
   auto supports =
-      [&exporter, &shape_hints, backend = lib_, backend_id = backend_ids_[0]](
+      [&exporter, &shape_hints, backend, backend_id](
           const caffe2::OperatorDef& op) {
         const OpSchema* schema = OpSchemaRegistry::Schema(op.type());
         // NB: this might not be a hard constraint as we can just export C2
@@ -354,15 +368,15 @@ void OnnxifiTransformer::Transform(
         }
       };
 
-  // function to convert runnbale subgraph into a trt op. Note that to keep the
+  // function to convert runnable subgraph into a trt op. Note that to keep the
   // interface clean, we do the double conversion from C2 op to Onnx ops here
   // but it should be OK as the cost is really small. We also need to keep the
   // same exporter throughout the process to avoid duplicated dummy name
   // generation
-  onnx::OnnxExporter exporter2(nullptr, true);
-  auto trt_converter = [this, &mapped_ws, &shape_hints, &exporter2](
+  onnx::OnnxExporter exporter2(nullptr);
+  auto trt_converter = [this, ws, &mapped_ws, &shape_hints, &exporter2](
                            const caffe2::NetDef& net) mutable {
-    return SubnetToOnnxifiOp(net, &mapped_ws, &exporter2, &shape_hints);
+    return SubnetToOnnxifiOp(net, mapped_ws, ws, &exporter2, &shape_hints);
   };
 
   NetDef net_opt = opt::OptimizeForBackend(*pred_net, supports, trt_converter);

@@ -1,5 +1,7 @@
 #include "caffe2/utils/proto_utils.h"
 
+#include <ATen/core/DeviceType.h>
+
 #include <fcntl.h>
 #include <cerrno>
 #include <fstream>
@@ -20,32 +22,7 @@ using ::google::protobuf::MessageLite;
 namespace caffe2 {
 
 std::string DeviceTypeName(const int32_t& d) {
-  switch (d) {
-    case CPU:
-      return "CPU";
-    case CUDA:
-      return "CUDA";
-    case OPENGL:
-      return "OPENGL";
-    case OPENCL:
-      return "OPENCL";
-    case MKLDNN:
-      return "MKLDNN";
-    case IDEEP:
-      return "IDEEP";
-    case HIP:
-      return "HIP";
-    default:
-      CAFFE_THROW(
-          "Unknown device: ",
-          d,
-          ". If you have recently updated the caffe2.proto file to add a new "
-          "device type, did you forget to update the DeviceTypeName() "
-          "function to reflect such recent changes?");
-      // The below code won't run but is needed to suppress some compiler
-      // warnings.
-      return "";
-  }
+  return at::DeviceTypeName(static_cast<at::DeviceType>(d));
 }
 
 int DeviceId(const DeviceOption& option) {
@@ -132,8 +109,8 @@ string ProtoDebugString(const MessageLite& proto) {
 bool ParseProtoFromLargeString(const string& str, MessageLite* proto) {
   ::google::protobuf::io::ArrayInputStream input_stream(str.data(), str.size());
   ::google::protobuf::io::CodedInputStream coded_stream(&input_stream);
-  // Set PlanDef message size limit to 1G.
-  coded_stream.SetTotalBytesLimit(1024LL << 20, 512LL << 20);
+  // Set PlanDef message size limit to 2G.
+  coded_stream.SetTotalBytesLimit(2147483647, 512LL << 20);
   return proto->ParseFromCodedStream(&coded_stream);
 }
 
@@ -141,10 +118,10 @@ bool ReadProtoFromBinaryFile(const char* filename, MessageLite* proto) {
   ::google::protobuf::io::CopyingInputStreamAdaptor stream(
       new IfstreamInputStream(filename));
   stream.SetOwnsCopyingStream(true);
-  // Total bytes hard limit / warning limit are set to 1GB and 512MB
+  // Total bytes hard limit / warning limit are set to 2GB and 512MB
   // respectively.
   ::google::protobuf::io::CodedInputStream coded_stream(&stream);
-  coded_stream.SetTotalBytesLimit(1024LL << 20, 512LL << 20);
+  coded_stream.SetTotalBytesLimit(2147483647, 512LL << 20);
   return proto->ParseFromCodedStream(&coded_stream);
 }
 
@@ -179,8 +156,8 @@ string ProtoDebugString(const Message& proto) {
 bool ParseProtoFromLargeString(const string& str, Message* proto) {
   ::google::protobuf::io::ArrayInputStream input_stream(str.data(), str.size());
   ::google::protobuf::io::CodedInputStream coded_stream(&input_stream);
-  // Set PlanDef message size limit to 1G.
-  coded_stream.SetTotalBytesLimit(1024LL << 20, 512LL << 20);
+  // Set PlanDef message size limit to 2G.
+  coded_stream.SetTotalBytesLimit(2147483647, 512LL << 20);
   return proto->ParseFromCodedStream(&coded_stream);
 }
 
@@ -213,7 +190,7 @@ bool ReadProtoFromBinaryFile(const char* filename, MessageLite* proto) {
   std::unique_ptr<CodedInputStream> coded_input(
       new CodedInputStream(raw_input.get()));
   // A hack to manually allow using very large protocol buffers.
-  coded_input->SetTotalBytesLimit(1073741824, 536870912);
+  coded_input->SetTotalBytesLimit(2147483647, 536870912);
   bool success = proto->ParseFromCodedStream(coded_input.get());
   coded_input.reset();
   raw_input.reset();

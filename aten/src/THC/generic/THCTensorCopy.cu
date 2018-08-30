@@ -10,7 +10,8 @@ THCTensor_(copy)(THCState* state, THCTensor* dst, THCTensor* src) {
 
 template <>
 THCTensor *THCTensor_newClone<real>(THCState *state, THCTensor *self) {
-  THCTensor *tensor = THCTensor_new(state, THTensor_getStoragePtr(self)->scalar_type);
+  THCTensor* tensor = THCTensor_new(
+      state, at::dataTypeToScalarType(THTensor_getStoragePtr(self)->dtype()));
   THCTensor_resizeAs(state, tensor, self);
   THC_copyTensor<real, real>(state, tensor, self);
   return tensor;
@@ -19,7 +20,7 @@ THCTensor *THCTensor_newClone<real>(THCState *state, THCTensor *self) {
 template <>
 THCTensor *THCTensor_newContiguous<real>(THCState *state, THCTensor *self)
 {
-  if(!THCTensor_isContiguous(state, self)) {
+  if(!self->is_contiguous()) {
     return THCTensor_newClone<real>(state, self);
   } else {
     THCTensor_retain(state, self);
@@ -71,9 +72,7 @@ IMPLEMENT_THC_CUDA_TENSOR_COPY(Long, Long, int64_t)
 // THCudaTensor aka the non-existent THCudaFloatTensor
 IMPLEMENT_THC_CUDA_TENSOR_COPY(Float, , float)
 IMPLEMENT_THC_CUDA_TENSOR_COPY(Double, Double, double)
-#ifdef CUDA_HALF_TENSOR
 IMPLEMENT_THC_CUDA_TENSOR_COPY(Half, Half, half)
-#endif
 
 #undef IMPLEMENT_THC_CUDA_TENSOR_COPY
 

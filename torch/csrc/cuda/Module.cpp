@@ -118,9 +118,9 @@ PyObject * THCPModule_getRNGState(PyObject *_unused)
   using namespace at;
   using namespace torch::autograd;
   HANDLE_TH_ERRORS
-  auto tensor = VariableType::getType(CPU(kByte))->tensor();
-  THCRandom_getRNGState(state, (THByteTensor*)tensor.unsafeGetTH(false));
-  return THPVariable_Wrap(tensor);
+  Variable var = VariableType::getType(CPU(kByte))->tensor();
+  THCRandom_getRNGState(state, (THByteTensor*)(var.data().unsafeGetTensorImpl()));
+  return THPVariable_Wrap(var);
   END_HANDLE_TH_ERRORS
 }
 
@@ -132,7 +132,7 @@ PyObject * THCPModule_setRNGState(PyObject *_unused, PyObject *obj)
         Py_TYPE(obj)->tp_name);
   }
   auto& tensor = THPVariable_UnpackData(obj);
-  THCRandom_setRNGState(state, (THByteTensor*)tensor.unsafeGetTH(false));
+  THCRandom_setRNGState(state, (THByteTensor*)tensor.unsafeGetTensorImpl());
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -333,20 +333,15 @@ static PyObject * THCPModule_initExtension(PyObject *self)
   THCPCharStorage_postInit(m);
   THCPByteStorage_postInit(m);
 
-#ifdef USE_MAGMA
-  THCMagma_init(state);
-  bool has_magma = true;
-#else
-  bool has_magma = false;
-#endif
+  bool has_magma = at::hasMAGMA();
+  if (has_magma) {
+    THCMagma_init(state);
+  }
 
-#ifdef CUDA_HALF_TENSOR
   bool has_half = true;
-#else
-  bool has_half = false;
-#endif
 
   auto set_module_attr = [&](const char* name, PyObject* v) {
+    // PyObject_SetAttrString doesn't steal reference. So no need to incref.
     if (PyObject_SetAttrString(m, name, v) < 0) {
       throw python_error();
     }

@@ -32,7 +32,7 @@ TEST_CASE("TensorOptions/DefaultsToTheRightValues") {
 
 TEST_CASE("TensorOptions/ReturnsTheCorrectType") {
   auto options = TensorOptions().device(kCPU).dtype(kInt).layout(kSparse);
-  REQUIRE(options.type() == getType(kSparseCPU, kInt));
+  REQUIRE(options.type() == getType(Backend::SparseCPU, kInt));
 }
 
 TEST_CASE("TensorOptions/UtilityFunctionsReturnTheRightTensorOptions") {
@@ -62,10 +62,10 @@ TEST_CASE("TensorOptions/ConstructsWellFromCPUTypes") {
   options = TensorOptions(kInt);
   REQUIRE_OPTIONS(kCPU, -1, kInt, kStrided);
 
-  options = TensorOptions(getType(kSparseCPU, kFloat));
+  options = TensorOptions(getType(Backend::SparseCPU, kFloat));
   REQUIRE_OPTIONS(kCPU, -1, kFloat, kSparse);
 
-  options = TensorOptions(getType(kSparseCPU, kByte));
+  options = TensorOptions(getType(Backend::SparseCPU, kByte));
   REQUIRE_OPTIONS(kCPU, -1, kByte, kSparse);
 }
 
@@ -73,7 +73,7 @@ TEST_CASE("TensorOptions/ConstructsWellFromCPUTensors") {
   auto options = TensorOptions(empty(5, kDouble));
   REQUIRE_OPTIONS(kCPU, -1, kDouble, kStrided);
 
-  options = TensorOptions(empty(5, getType(kSparseCPU, kByte)));
+  options = TensorOptions(empty(5, getType(Backend::SparseCPU, kByte)));
   REQUIRE_OPTIONS(kCPU, -1, kByte, kSparse);
 }
 

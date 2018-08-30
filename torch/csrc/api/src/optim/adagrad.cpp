@@ -1,6 +1,7 @@
 #include <torch/optim/adagrad.h>
 
 #include <torch/csrc/autograd/variable.h>
+#include <torch/utils.h>
 
 #include <ATen/ATen.h>
 
@@ -12,31 +13,29 @@ namespace optim {
 AdagradOptions::AdagradOptions(double learning_rate)
     : learning_rate_(learning_rate) {}
 
-const AdagradOptions& Adagrad::options() const noexcept {
-  return options_;
-}
-
 /// Adapted from
 /// https://github.com/pytorch/pytorch/blob/master/torch/optim/adagrad.py
 void Adagrad::step() {
   for (size_t i = 0; i < parameters_.size(); ++i) {
-    auto& grad = parameters_.at(i).grad();
-    auto& p = parameters_.at(i).data();
-    if (!grad.defined())
+    Tensor p = parameters_.at(i);
+    if (!p.grad().defined()) {
       continue;
-
-    auto d_p = Tensor(grad).data();
-    if (options_.weight_decay_ > 0) {
-      d_p.add_(p, options_.weight_decay_);
     }
-    step_.at(i) += 1.0;
-    auto clr = options_.learning_rate_ /
-        (1.0 + (step_.at(i) - 1.0) * options_.lr_decay_);
 
-    auto sum = buffer_at(sum_, i);
-    sum.data().addcmul_(d_p, d_p, 1.0);
-    auto std = sum_.at(i).data().sqrt().add_(1e-10);
-    p.addcdiv_(d_p, std, -clr);
+    if (options.weight_decay_ > 0) {
+      p.grad() = p.grad() + options.weight_decay_ * p;
+    }
+
+    buffer_at(step_, i) += 1.0;
+    const auto clr = options.learning_rate_ /
+        (1.0 + (buffer_at(step_, i) - 1.0) * options.lr_decay_);
+
+    auto& sum = buffer_at(sum_, i);
+    sum.addcmul_(p.grad(), p.grad(), 1.0);
+    const auto std = buffer_at(sum_, i).sqrt().add_(1e-10);
+
+    NoGradGuard guard;
+    p.addcdiv_(p.grad(), std, -clr);
   }
 }
 } // namespace optim

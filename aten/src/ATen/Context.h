@@ -1,13 +1,16 @@
 #pragma once
 
-#include "ATen/ATenGeneral.h"
 #include <ATen/CPUGeneral.h>
-#include "ATen/Generator.h"
+#include "ATen/core/ATenGeneral.h"
+#include "ATen/CUDAStream.h"
+#include "ATen/core/Generator.h"
 #include "ATen/Type.h"
 #include "ATen/Utils.h"
-#include "ATen/Error.h"
+#include "ATen/core/Error.h"
 #include "ATen/detail/CUDAHooksInterface.h"
-#include "ATen/CUDAStream.h"
+
+// This is temporary
+#include "ATen/core/ATenCoreTest.h"
 
 #include <memory>
 #include <mutex>
@@ -22,7 +25,7 @@ public:
     return type_registry[static_cast<int>(p)][static_cast<int>(s)].get();
   }
   Type * getTypeOpt(Backend p, ScalarType s) {
-    initCUDAIfNeeded(p);
+    if (p != Backend::Undefined) initCUDAIfNeeded(backendToDeviceType(p));
     auto type = getTypeRaw(p, s);
 
     if(!type) {
@@ -39,14 +42,18 @@ public:
     if (!type) AT_ERROR(toString(p), toString(s), "Type is not enabled.");
     return *type;
   }
-  Generator & defaultGenerator(Backend p) {
-    initCUDAIfNeeded(p);
-    auto & generator = generator_registry[static_cast<int>(p)];
+  Generator & defaultGenerator(DeviceType device_type) {
+    initCUDAIfNeeded(device_type);
+    auto & generator = generator_registry[static_cast<int>(device_type)];
     if(!generator)
-      AT_ERROR(toString(p), " backend type not enabled.");
+      AT_ERROR(DeviceTypeName(device_type), " backend type not enabled.");
     return *generator;
   }
   bool hasMKL() const;
+  bool hasLAPACK() const;
+  bool hasMAGMA() const {
+    return detail::getCUDAHooks().hasMAGMA();
+  }
   bool hasCUDA() const {
     return detail::getCUDAHooks().hasCUDA();
   }
@@ -61,7 +68,7 @@ public:
   THCState* lazyInitCUDA() {
     std::call_once(thc_init,[&] {
       thc_state = detail::getCUDAHooks().initCUDA();
-      generator_registry[static_cast<int>(Backend::CUDA)] =
+      generator_registry[static_cast<int>(DeviceType::CUDA)] =
         detail::getCUDAHooks().initCUDAGenerator(this);
       detail::getCUDAHooks().registerCUDATypes(this);
     });
@@ -92,16 +99,17 @@ public:
   bool deterministicCuDNN() const;
   void setDeterministicCuDNN(bool);
   std::unique_ptr<Generator>
-    generator_registry[static_cast<int>(Backend::NumOptions)];
+    generator_registry[static_cast<int>(DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES)];
 private:
   // NB: type_registry has nullptr for all CUDA backends until
   // CUDA initialization has occurred
   std::unique_ptr<Type> type_registry
     [static_cast<int>(Backend::NumOptions)]
     [static_cast<int>(ScalarType::NumOptions)];
-  void initCUDAIfNeeded(Backend p) {
-    if(p == Backend::CUDA)
+  void initCUDAIfNeeded(DeviceType p) {
+    if (p == DeviceType::CUDA) {
       lazyInitCUDA();
+    }
   }
   std::once_flag thc_init;
   bool enabled_cudnn = true;
@@ -110,6 +118,7 @@ private:
   std::atomic<size_t> next_id;
   std::unique_ptr<THCState, void(*)(THCState*)> thc_state;
   friend struct Type;
+  friend void register_cpu_types(Context * context);
   friend void register_cuda_types(Context * context);
 };
 
@@ -127,6 +136,10 @@ static inline void init() {
 
 static inline Type& getType(Backend p, ScalarType s) {
   return globalContext().getType(p, s);
+}
+
+static inline Type& getType(DeviceType p, ScalarType s) {
+  return globalContext().getType(deviceTypeToBackend(p), s);
 }
 
 static inline Type& CPU(ScalarType s) {
@@ -147,6 +160,14 @@ static inline bool hasCuDNN() {
 
 static inline bool hasMKL() {
   return globalContext().hasMKL();
+}
+
+static inline bool hasLAPACK() {
+  return globalContext().hasLAPACK();
+}
+
+static inline bool hasMAGMA() {
+  return globalContext().hasMAGMA();
 }
 
 static inline int64_t current_device() {

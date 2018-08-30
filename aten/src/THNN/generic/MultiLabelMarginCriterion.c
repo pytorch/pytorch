@@ -17,14 +17,14 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
   int64_t t, d, dt, ddt;
   real sum;
 
-  AT_CHECK(!input->is_empty() && (input->dim() == 1 || input->dim() == 2),
+  AT_CHECK(!input->is_empty() && input->dim() <= 2,
            "non-empty vector or matrix expected, got size: ", input->sizes());
 
-  if (input->dim() == 1)
+  if (input->dim() <= 1)
   {
     nframe = 1;
-    dim = input->size(0);
-    AT_CHECK(!target->is_empty() && (target->dim() == 1) && (target->size(0) == dim),
+    dim = THTensor_sizeLegacyNoScalars(input, 0);
+    AT_CHECK(!target->is_empty() && (target->dim() <= 1) && (THTensor_sizeLegacyNoScalars(target, 0) == dim),
              "inconsistent target size");
   }
   else
@@ -43,7 +43,9 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
   input_data = THTensor_(data)(input);
   target_data = THIndexTensor_(data)(target);
 
-  THNN_resizeAs_indices(isTarget, target);
+  if (!isTarget->sizes().equals(target->sizes())) {
+    THTensor_(resizeNd)(isTarget, target->dim(), THTensor_getSizePtr(target), nullptr);
+  }
   THTensor_(zero)(isTarget);
   isTarget_data = THTensor_(data)(isTarget);
 
@@ -155,16 +157,16 @@ void THNN_(MultiLabelMarginCriterion_updateGradInput)(
   int64_t t, d, dt;
   real g;
 
-  AT_CHECK(!input->is_empty() && (input->dim() == 1 || input->dim() == 2),
+  AT_CHECK(!input->is_empty() && input->dim() <= 2,
            "vector or matrix expected, got size: ", input->sizes());
 
-  if (input->dim() == 1)
+  if (input->dim() <= 1)
   {
     nframe = 1;
-    dim = input->size(0);
-    AT_CHECK((!target->is_empty() && target->dim() == 1) && (target->size(0) == dim),
+    dim = THTensor_sizeLegacyNoScalars(input, 0);
+    AT_CHECK((!target->is_empty() && target->dim() <= 1) && (THTensor_sizeLegacyNoScalars(target, 0) == dim),
              "inconsistent target size");
-    AT_CHECK((!isTarget->is_empty() && isTarget->dim() == 1) && (isTarget->size(0) == dim),
+    AT_CHECK((!isTarget->is_empty() && isTarget->dim() <= 1) && (THTensor_sizeLegacyNoScalars(isTarget, 0) == dim),
              "inconsistent isTarget size");
   }
   else
@@ -232,7 +234,7 @@ void THNN_(MultiLabelMarginCriterion_updateGradInput)(
     THNN_CHECK_DIM_SIZE(gradOutput, 1, 0, 1);
     for (t = 0; t < nframe*dim; t++)
     {
-      gradInput_data[t] *= THTensor_(fastGet1d)(gradOutput, 0);
+      gradInput_data[t] *= THTensor_(fastGetLegacy1dNoScalars)(gradOutput, 0);
     }
   }
   else
@@ -242,7 +244,7 @@ void THNN_(MultiLabelMarginCriterion_updateGradInput)(
     {
       for (d = 0; d < dim; d++)
       {
-        gradInput_data[t * dim + d] *= THTensor_(fastGet1d)(gradOutput, t);
+        gradInput_data[t * dim + d] *= THTensor_(fastGetLegacy1dNoScalars)(gradOutput, t);
       }
     }
   }

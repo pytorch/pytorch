@@ -16,11 +16,12 @@ static void EraseNumberTypesOnBlock(Block* block) {
         if(it->output()->type()->isSubtypeOf(NumberType::get())) {
           auto s = *constant_as<at::Scalar>(it->output());
           WithInsertPoint guard(*it);
-          Value* r = insertConstant(*block->owningGraph(), s.toTensor());
+          Value* r = block->owningGraph()->insertConstant(s.toTensor());
           it->output()->replaceAllUsesWith(r);
         }
       } break;
       case prim::TensorToNum:
+      case prim::ImplicitTensorToNum:
       case prim::NumToTensor: {
         it->output()->replaceAllUsesWith(it->inputs()[0]);
         // Let DCE cleanup
@@ -28,7 +29,7 @@ static void EraseNumberTypesOnBlock(Block* block) {
       default: {
         for(auto o : it->outputs()) {
           if (o->type()->isSubtypeOf(NumberType::get())) {
-            o->setType(TensorType::fromNumberType(o->type()));
+            o->setType(CompleteTensorType::fromNumberType(o->type()));
           }
         }
       } break;

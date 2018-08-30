@@ -109,15 +109,12 @@ TYPE_DERIVED_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeDerived.h")
 TYPE_H = CodeTemplate.from_file(TEMPLATE_PATH + "/Type.h")
 TYPE_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/Type.cpp")
 
-TENSOR_DERIVED_CPP = CodeTemplate.from_file(
-    TEMPLATE_PATH + "/TensorDerived.cpp")
-TENSOR_DENSE_CPP = CodeTemplate.from_file(
-    TEMPLATE_PATH + "/TensorDense.cpp")
+REGISTER_CPU_H = CodeTemplate.from_file(TEMPLATE_PATH + "/RegisterCPU.h")
+REGISTER_CPU_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/RegisterCPU.cpp")
 
 REGISTER_CUDA_H = CodeTemplate.from_file(TEMPLATE_PATH + "/RegisterCUDA.h")
 REGISTER_CUDA_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/RegisterCUDA.cpp")
 
-TENSOR_DERIVED_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TensorDerived.h")
 TENSOR_H = CodeTemplate.from_file(TEMPLATE_PATH + "/Tensor.h")
 TENSOR_METHODS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TensorMethods.h")
 
@@ -128,7 +125,7 @@ NATIVE_FUNCTIONS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/NativeFunctions.h"
 TYPE_REGISTER = CodeTemplate("""\
 context->type_registry[static_cast<int>(Backend::${backend})]
                       [static_cast<int>(ScalarType::${scalar_type})]
-                      .reset(new ${type_name}(context));
+                      .reset(new ${type_name}());
 detail::getVariableHooks().registerVariableTypeFor(context, Backend::${backend}, ScalarType::${scalar_type});
 """)
 
@@ -240,12 +237,7 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
     env['DenseBackend'] = backend
     env['storage_tensor_headers'] = []
     if density != 'Sparse':
-        env['storage_tensor_headers'] = [
-            '#include "ATen/{}.h"'.format(env['Tensor']),
-            '#include "ATen/{}ByteTensor.h"'.format(env['Backend']),
-            '#include "ATen/{}IntTensor.h"'.format(env['Backend']),
-            '#include "ATen/{}LongTensor.h"'.format(env['Backend']),
-        ]
+        env['storage_tensor_headers'] = ['#include "ATen/TensorImpl.h"']
 
     # used for generating switch logic for external functions
     tag = density_tag + backend + scalar_name
@@ -291,19 +283,7 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
     if scalar_name == "Half":
         env['SparseTensor'] = 'Tensor'
         if backend == "CUDA":
-            env['to_th_type'] = 'HalfFix<__half,Half>'
-            env['to_at_type'] = 'HalfFix<Half,__half>'
             env['AS_REAL'] = 'convert<half,double>'
-            env['THScalarType'] = 'half'
-        else:
-            env['to_th_type'] = 'HalfFix<THHalf,Half>'
-            env['to_at_type'] = 'HalfFix<Half,THHalf>'
-    elif scalar_name == 'Long':
-        env['to_th_type'] = 'long'
-        env['to_at_type'] = 'int64_t'
-    else:
-        env['to_th_type'] = ''
-        env['to_at_type'] = ''
 
     declarations, definitions = function_wrapper.create_derived(
         env, declarations)
@@ -313,12 +293,6 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
     fm = file_manager
     if env['DenseBackend'] == 'CUDA':
         fm = cuda_file_manager
-
-    if density != 'Sparse':
-        # there are no storage or tensor types for sparse; it's all uniform
-        env['TensorDenseOrSparse'] = TENSOR_DENSE_CPP.substitute(env)
-        fm.write(env['Tensor'] + ".cpp", TENSOR_DERIVED_CPP, env)
-        fm.write(env['Tensor'] + ".h", TENSOR_DERIVED_H, env)
 
     if density != 'Sparse':
         fm.write(env['Type'] + ".cpp", TYPE_DERIVED_CPP, env)
@@ -357,7 +331,8 @@ def iterate_types():
 def declare_outputs():
     files = ['Declarations.yaml', 'Type.h', 'Type.cpp', 'Tensor.h',
              'TensorMethods.h', 'Functions.h',
-             'CPUCopy.cpp', 'NativeFunctions.h']
+             'CPUCopy.cpp', 'NativeFunctions.h',
+             'RegisterCPU.cpp', 'RegisterCPU.h']
     for f in files:
         file_manager.will_write(f)
     cuda_files = ['CUDACopy.cpp', 'RegisterCUDA.cpp', 'RegisterCUDA.h']
@@ -371,7 +346,7 @@ def declare_outputs():
     for backend, density, scalar_types in iterate_types():
         scalar_name = scalar_types[0]
         full_backend = "Sparse" + backend if density == "Sparse" else backend
-        for kind in ["Type", "Tensor"]:
+        for kind in ["Type"]:
             if kind != 'Type' and density == "Sparse":
                 # No Storage or Tensor for sparse
                 continue
@@ -425,6 +400,9 @@ def generate_outputs():
 
     file_manager.write('Type.h', TYPE_H, top_env)
     file_manager.write('Type.cpp', TYPE_CPP, top_env)
+
+    file_manager.write('RegisterCPU.h', REGISTER_CPU_H, top_env)
+    file_manager.write('RegisterCPU.cpp', REGISTER_CPU_CPP, top_env)
 
     cuda_file_manager.write('RegisterCUDA.h', REGISTER_CUDA_H, top_env)
     cuda_file_manager.write('RegisterCUDA.cpp', REGISTER_CUDA_CPP, top_env)

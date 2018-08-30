@@ -56,8 +56,8 @@ If you use NumPy, then you have used Tensors (a.k.a ndarray).
 
 ![Tensor illustration](https://github.com/pytorch/pytorch/blob/master/docs/source/_static/img/tensor_illustration.png)
 
-PyTorch provides Tensors that can live either on the CPU or the GPU, and accelerate
-compute by a huge amount.
+PyTorch provides Tensors that can live either on the CPU or the GPU, and accelerates the
+computation by a huge amount.
 
 We provide a wide variety of tensor routines to accelerate and fit your scientific computation needs
 such as slicing, indexing, math operations, linear algebra, reductions.
@@ -105,8 +105,7 @@ We hope you never spend hours debugging your code because of bad stack traces or
 PyTorch has minimal framework overhead. We integrate acceleration libraries
 such as Intel MKL and NVIDIA (cuDNN, NCCL) to maximize speed.
 At the core, its CPU and GPU Tensor and neural network backends
-(TH, THC, THNN, THCUNN) are written as independent libraries with a C99 API.
-They are mature and have been tested for years.
+(TH, THC, THNN, THCUNN) are mature and have been tested for years.
 
 Hence, PyTorch is quite fast – whether you run small or large neural networks.
 
@@ -148,7 +147,9 @@ If you want to compile with CUDA support, install
 If you want to disable CUDA support, export environment variable `NO_CUDA=1`.
 Other potentially useful environment variables may be found in `setup.py`.
 
-If you want to build on Windows, Visual Studio 2017 and NVTX are also needed.
+If you want to build on Windows, Visual Studio 2017 14.11 toolset and NVTX are also needed.
+Especially, for CUDA 8 build on Windows, there will be an additional requirement for VS 2015 Update 3 and a patch for it.
+The details of the patch can be found out [here](https://support.microsoft.com/en-gb/help/4020481/fix-link-exe-crashes-with-a-fatal-lnk1000-error-when-you-use-wholearch).
 
 #### Install optional dependencies
 
@@ -196,9 +197,10 @@ On Windows
 set "VS150COMNTOOLS=C:\Program Files (x86)\Microsoft Visual Studio\2017\Enterprise\VC\Auxiliary\Build"
 set CMAKE_GENERATOR=Visual Studio 15 2017 Win64
 set DISTUTILS_USE_SDK=1
-REM The following line is needed for Python 2.7, but the support for it is very experimental.
+REM The following two lines are needed for Python 2.7, but the support for it is very experimental.
 set MSSdk=1
-REM As for CUDA 8, VS2015 Update 2 or up is required to build PyTorch. Use the following two lines.
+set FORCE_PY27_BUILD=1
+REM As for CUDA 8, VS2015 Update 3 is also required to build PyTorch. Use the following two lines.
 set "PREBUILD_COMMAND=%VS140COMNTOOLS%\..\..\VC\vcvarsall.bat"
 set PREBUILD_COMMAND_ARGS=x64
 
@@ -208,7 +210,7 @@ python setup.py install
 
 ### Docker image
 
-Dockerfile is supplied to build images with cuda support and cudnn v7. Build as usual
+Dockerfile is supplied to build images with cuda support and cudnn v7. You can pass -e PYTHON_VERSION=x.y flag to specificy which python to be used by Miniconda, or leave it unset to use the default. Build as usual
 ```
 docker build -t pytorch -f docker/pytorch/Dockerfile .
 ```

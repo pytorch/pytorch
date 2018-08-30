@@ -185,7 +185,7 @@ THC_API void THCTensor_(gels)(THCState *state, THCTensor *rb_, THCTensor *ra_, T
 THC_API void THCTensor_(syev)(THCState *state, THCTensor *re_, THCTensor *rv_, THCTensor *a, const char *jobzs, const char *uplos)
 {
 #ifdef USE_MAGMA
-  int64_t n = a->size(0);
+  int64_t n = THTensor_sizeLegacyNoScalars(a, 0);
   int64_t lda = n;
 
   magma_uplo_t uplo = uplos[0] == 'U' ?  MagmaUpper : MagmaLower;
@@ -235,7 +235,13 @@ THC_API void THCTensor_(syev)(THCState *state, THCTensor *re_, THCTensor *rv_, T
     else if (info < 0)
       THError("MAGMA syev : Argument %d : illegal value", -info);
   }
-  THCTensor_(freeCopyTo)(state, input, rv_);
+  if (jobzs[0] == 'N') {
+    // If eigenvector is not needed, fill the result with zeros.
+    THCTensor_(zero)(state, rv_);
+    THCTensor_(free)(state, input);
+  } else {
+    THCTensor_(freeCopyTo)(state, input, rv_);
+  }
 #else
   THError(NoMagma(syev));
 #endif

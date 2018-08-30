@@ -15,9 +15,9 @@ class EnsureCPUOutputOp : public Operator<Context> {
       : Operator<Context>(operator_def, ws) {}
 
   bool RunOnDevice() override {
-    if (OperatorBase::InputIsType<Tensor>(0, CPU)) {
+    if (this->template InputIsType<Tensor>(0, CPU)) {
       return CopyWithContext<CPUContext>();
-    } else if (OperatorBase::InputIsType<Tensor>(0, Context::GetDeviceType())) {
+    } else if (this->template InputIsType<Tensor>(0, Context::GetDeviceType())) {
       // CUDA Context will go this branch
       return CopyWithContext<Context>();
     } else {
@@ -32,15 +32,15 @@ class EnsureCPUOutputOp : public Operator<Context> {
   template <class InputContext>
   bool CopyWithContext() {
     // Output is always on CPU
-    auto* output = OperatorBase::Output<Tensor>(0, CPU);
-    auto& input = OperatorBase::Input<Tensor>(0, InputContext::GetDeviceType());
+    auto* output = this->template Output<Tensor>(0, CPU);
+    auto& input = this->template Input<Tensor>(0, InputContext::GetDeviceType());
     output->ResizeLike(input);
     context_.CopyItemsToCPU(
         input.meta(),
         input.size(),
         input.raw_data(),
         output->raw_mutable_data(input.meta()));
-
+    context_.FinishDeviceComputation();
     return true;
   }
 };

@@ -58,22 +58,22 @@ resetcounter_op = core.CreateOperator(
 )
 
 
-# Create counter
+// Create counter
 workspace.RunOperatorOnce(createcounter_op)
 print("'counter' pointer:", workspace.FetchBlob("counter"))
 
 
-# Retrieve initial counter value
+// Retrieve initial counter value
 workspace.RunOperatorOnce(retrievecount_op)
 print("Initial 'count':", workspace.FetchBlob("count"))
 
 
-# Check if counter is done
+// Check if counter is done
 workspace.RunOperatorOnce(checkcounterdone_op)
 print("Initial 'done' value:", workspace.FetchBlob("done"))
 
 
-# Test CountUp operator
+// Test CountUp operator
 print("\nTesting CountUp operator...")
 for i in range(5):
     workspace.RunOperatorOnce(countup_op)
@@ -83,7 +83,7 @@ workspace.RunOperatorOnce(retrievecount_op)
 print("'count' value after CountUp test:", workspace.FetchBlob("count"))
 
 
-# Test CountDown operator
+// Test CountDown operator
 print("\nTesting CountDown operator...")
 for i in range(11):
     workspace.RunOperatorOnce(countdown_op)

@@ -1,12 +1,6 @@
 graph(%x : Dynamic) {
   %1 : float = prim::Constant[value=1.1]()
   %2 : float = prim::Constant[value=3.1]()
-  %c : float = aten::add(%1, %2)
-  %4 : int = prim::Constant[value=1]()
-  %5 : int = prim::Constant[value=6]()
-  %6 : int = prim::Constant[value=0]()
-  %7 : int[] = prim::Constant[value=[0, -1]]()
-  %8 : int[] = prim::ListConstruct(%4)
-  %9 : Dynamic = aten::full(%8, %c, %5, %6, %7)
-  return (%9);
+  %3 : float = aten::add(%1, %2)
+  return (%3);
 }

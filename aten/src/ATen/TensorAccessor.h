@@ -3,8 +3,6 @@
 #include <cstddef>
 #include <stdint.h>
 
-#include "ATen/ScalarType.h"
-
 namespace at {
 
 

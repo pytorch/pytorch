@@ -67,9 +67,9 @@ static void invalid_index(PyObject* obj) {
 }
 
 static Variable applySlice(const Variable& self, int64_t dim, PyObject* slice, bool ensure_view=false) {
-  Py_ssize_t start, stop, step, slicelength;
+  Py_ssize_t start, stop, step;
   auto length = self.size(dim);
-  if (!THPUtils_parseSlice(slice, length, &start, &stop, &step, &slicelength)) {
+  if (!THPUtils_unpackSlice(slice, &start, &stop, &step)) {
     throw python_error();
   }
   if (step == 0) {
@@ -98,9 +98,9 @@ static Variable applySelect(const Variable& self, int64_t dim, int64_t index) {
     throw IndexError("index %lld is out of bounds for dimension %lld with size %lld",
       index, dim, size);
   }
-  if (index < 0) {
-    index += size;
-  }
+  // if the index is negative, do not normalize it because that would fix the index
+  // on the current tensor size in the tracer.
+  // aten::select also works on negative indices
   return self.select(dim, index);
 }
 
@@ -154,14 +154,6 @@ static Variable applySlicing(const Variable& self, PyObject* index, variable_lis
       result = applySelect(result, dim, THPUtils_unpackLong(obj));
     } else if (PySlice_Check(obj)) {
       result = applySlice(result, dim, obj);
-#ifndef USE_TH_SIZE_ZERO_DIM
-      if (result.numel() == 0) {
-        // TODO: currently we don't have support for 0-sized dims, so slicing a dim
-        // to size 0 will return a size 0 tensor. for now, just shortcircuit slicing
-        // and return that size 0 tensor.
-        return result;
-      }
-#endif
       dim++;
     } else if (obj == Py_Ellipsis) {
       dim += self.dim() - specified_dims;

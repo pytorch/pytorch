@@ -35,7 +35,8 @@ bool test_optimizer_xor(Options options) {
   const int64_t kBatchSize = 4;
   const int64_t kMaximumNumberOfEpochs = 3000;
 
-  auto optimizer = OptimizerClass(model->parameters(), options);
+  auto optimizer = OptimizerClass(std::vector<torch::Tensor>(), options);
+  optimizer.add_parameters(model->parameters());
 
   float running_loss = 1;
   int epoch = 0;
@@ -124,7 +125,7 @@ void check_exact_values(
         REQUIRE(parameters.at(p)->defined());
         auto computed = parameters.at(p)->flatten();
         auto expected = expected_parameters.at(i / kSampleEvery).at(p);
-        if (!computed.allclose(expected, /*rtol=*/1e-3, /*atol=*/1e-5)) {
+        if (!computed.allclose(expected, /*rtol=*/1e-3, /*atol=*/5e-4)) {
           std::cout << "Iteration " << i << ": " << computed
                     << " != " << expected << " (parameter " << p << ")"
                     << std::endl;
@@ -188,26 +189,82 @@ TEST_CASE("Optim/XORConvergence/AdamWithAmsgrad") {
 }
 
 TEST_CASE("Optim/ProducesPyTorchValues/Adam") {
+  check_exact_values<Adam>(AdamOptions(1.0), expected_parameters::Adam);
+}
+
+TEST_CASE("Optim/ProducesPyTorchValues/AdamWithWeightDecay") {
   check_exact_values<Adam>(
-      AdamOptions(1.0).weight_decay(1e-6), expected_parameters::Adam);
+      AdamOptions(1.0).weight_decay(1e-2),
+      expected_parameters::Adam_with_weight_decay);
+}
+
+TEST_CASE("Optim/ProducesPyTorchValues/AdamWithWeightDecayAndAMSGrad") {
+  check_exact_values<Adam>(
+      AdamOptions(1.0).weight_decay(1e-6).amsgrad(true),
+      expected_parameters::Adam_with_weight_decay_and_amsgrad);
 }
 
 TEST_CASE("Optim/ProducesPyTorchValues/Adagrad") {
   check_exact_values<Adagrad>(
+      AdagradOptions(1.0), expected_parameters::Adagrad);
+}
+
+TEST_CASE("Optim/ProducesPyTorchValues/AdagradWithWeightDecay") {
+  check_exact_values<Adagrad>(
+      AdagradOptions(1.0).weight_decay(1e-2),
+      expected_parameters::Adagrad_with_weight_decay);
+}
+
+TEST_CASE("Optim/ProducesPyTorchValues/AdagradWithWeightDecayAndLRDecay") {
+  check_exact_values<Adagrad>(
       AdagradOptions(1.0).weight_decay(1e-6).lr_decay(1e-3),
-      expected_parameters::Adagrad);
+      expected_parameters::Adagrad_with_weight_decay_and_lr_decay);
 }
 
 TEST_CASE("Optim/ProducesPyTorchValues/RMSprop") {
   check_exact_values<RMSprop>(
-      RMSpropOptions(0.1).momentum(0.9).weight_decay(1e-6),
-      expected_parameters::RMSprop);
+      RMSpropOptions(0.1), expected_parameters::RMSprop);
+}
+
+TEST_CASE("Optim/ProducesPyTorchValues/RMSpropWithWeightDecay") {
+  check_exact_values<RMSprop>(
+      RMSpropOptions(0.1).weight_decay(1e-2),
+      expected_parameters::RMSprop_with_weight_decay);
+}
+
+TEST_CASE("Optim/ProducesPyTorchValues/RMSpropWithWeightDecayAndCentered") {
+  check_exact_values<RMSprop>(
+      RMSpropOptions(0.1).weight_decay(1e-6).centered(true),
+      expected_parameters::RMSprop_with_weight_decay_and_centered);
+}
+
+TEST_CASE(
+    "Optim/ProducesPyTorchValues/RMSpropWithWeightDecayAndCenteredAndMomentum") {
+  check_exact_values<RMSprop>(
+      RMSpropOptions(0.1).weight_decay(1e-6).centered(true).momentum(0.9),
+      expected_parameters::RMSprop_with_weight_decay_and_centered_and_momentum);
 }
 
 TEST_CASE("Optim/ProducesPyTorchValues/SGD") {
+  check_exact_values<SGD>(SGDOptions(0.1), expected_parameters::SGD);
+}
+
+TEST_CASE("Optim/ProducesPyTorchValues/SGDWithWeightDecay") {
   check_exact_values<SGD>(
-      SGDOptions(0.1).momentum(0.9).weight_decay(1e-6),
-      expected_parameters::SGD);
+      SGDOptions(0.1).weight_decay(1e-2),
+      expected_parameters::SGD_with_weight_decay);
+}
+
+TEST_CASE("Optim/ProducesPyTorchValues/SGDWithWeightDecayAndMomentum") {
+  check_exact_values<SGD>(
+      SGDOptions(0.1).weight_decay(1e-2).momentum(0.9),
+      expected_parameters::SGD_with_weight_decay_and_momentum);
+}
+
+TEST_CASE("Optim/ProducesPyTorchValues/SGDWithWeightDecayAndNesterovMomentum") {
+  check_exact_values<SGD>(
+      SGDOptions(0.1).weight_decay(1e-6).momentum(0.9).nesterov(true),
+      expected_parameters::SGD_with_weight_decay_and_nesterov_momentum);
 }
 
 TEST_CASE("Optim/ZeroGrad") {
@@ -257,4 +314,23 @@ TEST_CASE("Optim/ExternalVectorOfParameters") {
   REQUIRE(parameters[0].allclose(original_parameters[0] - 1.0));
   REQUIRE(parameters[1].allclose(original_parameters[1] - 1.0));
   REQUIRE(parameters[2].allclose(original_parameters[2] - 1.0));
+}
+
+TEST_CASE("Optim/AddParameter/LBFGS") {
+  torch::manual_seed(0);
+
+  std::vector<torch::Tensor> parameters = {torch::randn({5, 5})};
+  std::vector<torch::Tensor> original_parameters = {parameters[0].clone()};
+
+  // Set all gradients to one
+  for (auto& parameter : parameters) {
+    parameter.grad() = torch::ones_like(parameter);
+  }
+
+  LBFGS optimizer(std::vector<torch::Tensor>{}, 1.0);
+  optimizer.add_parameters(parameters);
+
+  optimizer.step([]() { return torch::tensor(1); });
+
+  // REQUIRE this doesn't throw
 }

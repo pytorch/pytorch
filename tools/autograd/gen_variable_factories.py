@@ -5,11 +5,16 @@
 import re
 
 from .utils import CodeTemplate, write
+from .gen_variable_type import format_trace
+
 
 FUNCTION_TEMPLATE = CodeTemplate("""\
-inline autograd::Variable ${name}(${formals}) {
+inline at::Tensor ${name}(${formals}) {
+  ${pre_record_trace}
   at::Tensor tensor = at::${name}(${actuals});
-  return autograd::make_variable(tensor, /*requires_grad=*/${requires_grad});
+  auto result = autograd::make_variable(tensor, /*requires_grad=*/${requires_grad});
+  ${post_record_trace}
+  return result;
 }
 """)
 
@@ -53,6 +58,10 @@ def process_function(decl, has_tensor_options):
     requires_grad = "options.requires_grad()" if has_tensor_options else "false"
     if decl['name'].endswith('_like') and not has_tensor_options:
         actuals.append('at::TensorOptions({}, /*discard_runtime_type=*/true)'.format(actuals[0]))
+
+    pre_record_trace, post_record_trace = format_trace(decl)
+
     return FUNCTION_TEMPLATE.substitute(
-        name=decl["name"], formals=formals, actuals=actuals, requires_grad=requires_grad
+        name=decl["name"], formals=formals, actuals=actuals, requires_grad=requires_grad,
+        pre_record_trace=pre_record_trace, post_record_trace=post_record_trace
     )

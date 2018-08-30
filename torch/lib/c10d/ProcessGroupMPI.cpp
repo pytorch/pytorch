@@ -2,6 +2,7 @@
 
 #include <map>
 
+#include <mpi.h>
 #include <mpi-ext.h> // Needed for CUDA-aware check
 
 namespace c10d {
@@ -52,19 +53,37 @@ bool cudaAwareMpiCheck() {
 }
 
 // Checking the input tensor's validity
-void checkSingleTensor(const std::vector<at::Tensor>& tensors) {
-  if (tensors.size() != 1) {
-    throw std::runtime_error(
-        "MPI process group only supports a single "
-        "tensor op");
-  }
-  if (!tensors[0].is_contiguous()) {
+void checkSingleTensorHelper(const at::Tensor& tensor) {
+  if (!tensor.is_contiguous()) {
     throw std::runtime_error("input tensor has to be contiguous");
   }
-  if (tensors[0].is_cuda() && !cudaAwareMpiCheck()) {
+  if (tensor.is_sparse()) {
+    throw std::runtime_error("input tensor has to be dense");
+  }
+  if (tensor.is_cuda() && !cudaAwareMpiCheck()) {
     throw std::runtime_error(
         "CUDA tensor detected and the MPI used doesn't "
         "have CUDA-aware MPI support");
+  }
+}
+
+void checkSingleTensor(const std::vector<at::Tensor>& tensors) {
+  if (tensors.size() != 1) {
+    throw std::runtime_error(
+        "MPI process group does not support multi-GPU collectives");
+  }
+  checkSingleTensorHelper(tensors[0]);
+}
+
+void checkSameSizeAndType(
+    const at::Tensor& tensor,
+    const std::vector<at::Tensor>& tensors) {
+  for (size_t i = 0; i < tensors.size(); ++i) {
+    if ((tensors[i].numel() != tensor.numel()) ||
+        (tensors[i].type() != tensor.type())) {
+      throw std::runtime_error("Tensors are not equal in size or data type");
+    }
+    checkSingleTensorHelper(tensors[i]);
   }
 }
 
@@ -260,7 +279,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::broadcast(
   checkSingleTensor(tensors);
   std::function<void(std::unique_ptr<WorkEntry>&)> runFunc =
       [opts](std::unique_ptr<WorkEntry>& entry) {
-        auto data = (*entry->src)[0];
+        auto data = (entry->src)[0];
         MPI_CHECK(MPI_Bcast(
             data.data_ptr(),
             data.numel(),
@@ -277,9 +296,10 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::allreduce(
     std::vector<at::Tensor>& tensors,
     const AllreduceOptions& opts) {
   checkSingleTensor(tensors);
+
   std::function<void(std::unique_ptr<WorkEntry>&)> runFunc =
       [opts](std::unique_ptr<WorkEntry>& entry) {
-        auto data = (*entry->src)[0];
+        auto data = (entry->src)[0];
         MPI_CHECK(MPI_Allreduce(
             MPI_IN_PLACE,
             data.data_ptr(),
@@ -290,6 +310,276 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::allreduce(
       };
   auto entry = std::unique_ptr<WorkEntry>(
       new WorkEntry(&tensors, nullptr, std::move(runFunc)));
+  return enqueue(std::move(entry));
+}
+
+std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::reduce(
+    std::vector<at::Tensor>& tensors,
+    const ReduceOptions& opts) {
+  checkSingleTensor(tensors);
+
+  std::function<void(std::unique_ptr<WorkEntry>&)> runFunc =
+      [opts, this](std::unique_ptr<WorkEntry>& entry) {
+        auto data = (entry->src)[0];
+        auto dataPtr = (entry->src)[0].data_ptr();
+        void* sendbuf = (rank_ == opts.rootRank) ? MPI_IN_PLACE : dataPtr;
+        void* recvbuf = (rank_ == opts.rootRank) ? dataPtr : nullptr;
+
+        MPI_CHECK(MPI_Reduce(
+            sendbuf,
+            recvbuf,
+            data.numel(),
+            mpiDatatype.at(data.type().scalarType()),
+            mpiOp.at(opts.reduceOp),
+            opts.rootRank,
+            MPI_COMM_WORLD));
+      };
+  auto entry = std::unique_ptr<WorkEntry>(
+      new WorkEntry(&tensors, nullptr, std::move(runFunc)));
+  return enqueue(std::move(entry));
+}
+
+std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::allgather(
+    std::vector<std::vector<at::Tensor>>& outputTensors,
+    std::vector<at::Tensor>& inputTensors) {
+  checkSingleTensor(inputTensors);
+  if (outputTensors.size() != 1) {
+    throw std::runtime_error(
+        "MPI process group only supports a single "
+        "tensor op");
+  }
+  if (static_cast<size_t>(size_) != outputTensors[0].size()) {
+    throw std::runtime_error(
+        "All gather: number of output tensors should equal "
+        "to the world size");
+  }
+
+  checkSameSizeAndType(inputTensors[0], outputTensors[0]);
+
+  std::function<void(std::unique_ptr<WorkEntry>&)> runFunc =
+      [](std::unique_ptr<WorkEntry>& entry) {
+        auto data = (entry->src)[0];
+        std::vector<at::Tensor>& outputDataVec = entry->dst;
+        auto flatOutputTensor = newLikeFlat(outputDataVec);
+
+        MPI_CHECK(MPI_Allgather(
+            data.data_ptr(),
+            data.numel(),
+            mpiDatatype.at(data.type().scalarType()),
+            flatOutputTensor.data_ptr(),
+            data.numel(),
+            mpiDatatype.at(data.type().scalarType()),
+            MPI_COMM_WORLD));
+
+        for (size_t i = 0; i < outputDataVec.size(); ++i) {
+          outputDataVec[i].copy_(flatOutputTensor[i]);
+        }
+      };
+  auto entry = std::unique_ptr<WorkEntry>(
+      new WorkEntry(&inputTensors, &outputTensors[0], std::move(runFunc)));
+  return enqueue(std::move(entry));
+}
+
+std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::gather(
+    std::vector<std::vector<at::Tensor>>& outputTensors,
+    std::vector<at::Tensor>& inputTensors,
+    const GatherOptions& opts) {
+  checkSingleTensor(inputTensors);
+
+  if (outputTensors.size() != 1) {
+    throw std::runtime_error("Gather: multi-GPU collective is not supported");
+  }
+
+  if (rank_ != opts.rootRank) {
+    if (outputTensors[0].size() > 0) {
+      throw std::runtime_error(
+          "Gather: number of output tensors should be 0 "
+          "for non-root");
+    }
+  } else {
+    if (static_cast<size_t>(size_) != outputTensors[0].size()) {
+      throw std::runtime_error(
+          "Gather: number of output tensors should equal "
+          "to the world size");
+    }
+    checkSameSizeAndType(inputTensors[0], outputTensors[0]);
+  }
+
+  std::function<void(std::unique_ptr<WorkEntry>&)> runFunc =
+      [opts, this](std::unique_ptr<WorkEntry>& entry) {
+        auto data = (entry->src)[0];
+        void* recvbuf = nullptr;
+        at::Tensor flatOutputTensor;
+
+        if (rank_ == opts.rootRank) {
+          flatOutputTensor = newLikeFlat(entry->dst);
+          recvbuf = flatOutputTensor.data_ptr();
+        }
+        MPI_CHECK(MPI_Gather(
+            data.data_ptr(),
+            data.numel(),
+            mpiDatatype.at(data.type().scalarType()),
+            recvbuf,
+            data.numel(),
+            mpiDatatype.at(data.type().scalarType()),
+            opts.rootRank,
+            MPI_COMM_WORLD));
+
+        if (rank_ == opts.rootRank) {
+          std::vector<at::Tensor>& outputDataVec = entry->dst;
+          // copy the flattened output tensors to the outputs
+          for (size_t i = 0; i < outputDataVec.size(); ++i) {
+            outputDataVec.at(i).copy_(flatOutputTensor[i]);
+          }
+        }
+      };
+
+  if (rank_ == opts.rootRank) {
+    auto entry = std::unique_ptr<WorkEntry>(
+        new WorkEntry(&inputTensors, &outputTensors[0], std::move(runFunc)));
+    return enqueue(std::move(entry));
+  } else {
+    auto entry = std::unique_ptr<WorkEntry>(
+        new WorkEntry(&inputTensors, nullptr, std::move(runFunc)));
+    return enqueue(std::move(entry));
+  }
+}
+
+std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::scatter(
+    std::vector<at::Tensor>& outputTensors,
+    std::vector<std::vector<at::Tensor>>& inputTensors,
+    const ScatterOptions& opts) {
+  checkSingleTensor(outputTensors);
+  if (inputTensors.size() != 1) {
+    throw std::runtime_error("Scatter: multi-GPU collective is not supported");
+  }
+
+  if (rank_ != opts.rootRank) {
+    if (inputTensors[0].size() > 0) {
+      throw std::runtime_error(
+          "Scatter: number of input tensors should be 0 "
+          "for non-root");
+    }
+  } else {
+    if (static_cast<size_t>(size_) != inputTensors[0].size()) {
+      throw std::runtime_error(
+          "Scatter: number of input tensors should equal "
+          "to the world size");
+    }
+    checkSameSizeAndType(outputTensors[0], inputTensors[0]);
+  }
+
+  std::function<void(std::unique_ptr<WorkEntry>&)> runFunc =
+      [opts, this](std::unique_ptr<WorkEntry>& entry) {
+        auto data = (entry->dst)[0];
+        void* sendbuf = nullptr;
+        at::Tensor flatInputTensor;
+
+        if (rank_ == opts.rootRank) {
+          std::vector<at::Tensor>& inputDataVec = entry->src;
+          flatInputTensor = newLikeFlat(inputDataVec);
+          sendbuf = flatInputTensor.data_ptr();
+
+          // copy the input tensors to the flatten large send buffer
+          for (size_t i = 0; i < inputDataVec.size(); ++i) {
+            flatInputTensor[i].copy_(inputDataVec.at(i));
+          }
+        }
+
+        MPI_CHECK(MPI_Scatter(
+            sendbuf,
+            data.numel(),
+            mpiDatatype.at(data.type().scalarType()),
+            data.data_ptr(),
+            data.numel(),
+            mpiDatatype.at(data.type().scalarType()),
+            opts.rootRank,
+            MPI_COMM_WORLD));
+      };
+
+  if (rank_ == opts.rootRank) {
+    auto entry = std::unique_ptr<WorkEntry>(
+        new WorkEntry(&inputTensors[0], &outputTensors, std::move(runFunc)));
+    return enqueue(std::move(entry));
+  } else {
+    auto entry = std::unique_ptr<WorkEntry>(
+        new WorkEntry(nullptr, &outputTensors, std::move(runFunc)));
+    return enqueue(std::move(entry));
+  }
+}
+
+std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::send(
+    std::vector<at::Tensor>& tensors,
+    int dstRank) {
+  checkSingleTensor(tensors);
+  std::function<void(std::unique_ptr<WorkEntry>&)> runFunc =
+      [dstRank](std::unique_ptr<WorkEntry>& entry) {
+        auto data = (entry->src)[0];
+        MPI_CHECK(MPI_Send(
+            data.data_ptr(),
+            data.numel(),
+            mpiDatatype.at(data.type().scalarType()),
+            dstRank,
+            0,
+            MPI_COMM_WORLD));
+      };
+  auto entry = std::unique_ptr<WorkEntry>(
+      new WorkEntry(&tensors, nullptr, std::move(runFunc)));
+  return enqueue(std::move(entry));
+}
+
+std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::recv(
+    std::vector<at::Tensor>& tensors,
+    int srcRank) {
+  checkSingleTensor(tensors);
+  std::function<void(std::unique_ptr<WorkEntry>&)> runFunc =
+      [srcRank](std::unique_ptr<WorkEntry>& entry) {
+        auto data = (entry->src)[0];
+        MPI_CHECK(MPI_Recv(
+            data.data_ptr(),
+            data.numel(),
+            mpiDatatype.at(data.type().scalarType()),
+            srcRank,
+            0,
+            MPI_COMM_WORLD,
+            MPI_STATUS_IGNORE));
+      };
+  auto entry = std::unique_ptr<WorkEntry>(
+      new WorkEntry(&tensors, nullptr, std::move(runFunc)));
+  return enqueue(std::move(entry));
+}
+
+std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::recvAnysource(
+    std::vector<at::Tensor>& tensors,
+    int* srcRank) {
+  checkSingleTensor(tensors);
+  std::function<void(std::unique_ptr<WorkEntry>&)> runFunc =
+      [srcRank](std::unique_ptr<WorkEntry>& entry) {
+        auto data = (entry->src)[0];
+        MPI_Status status;
+        MPI_CHECK(MPI_Recv(
+            data.data_ptr(),
+            data.numel(),
+            mpiDatatype.at(data.type().scalarType()),
+            MPI_ANY_SOURCE,
+            0,
+            MPI_COMM_WORLD,
+            &status));
+        *(entry->srcRank) = status.MPI_SOURCE;
+      };
+  auto entry = std::unique_ptr<WorkEntry>(
+      new WorkEntry(&tensors, nullptr, std::move(runFunc)));
+  entry->srcRank = srcRank;
+  return enqueue(std::move(entry));
+}
+
+std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::barrier() {
+  std::function<void(std::unique_ptr<WorkEntry>&)> runFunc =
+      [](std::unique_ptr<WorkEntry>& entry) {
+        MPI_CHECK(MPI_Barrier(MPI_COMM_WORLD));
+      };
+  auto entry = std::unique_ptr<WorkEntry>(
+      new WorkEntry(nullptr, nullptr, std::move(runFunc)));
   return enqueue(std::move(entry));
 }
 

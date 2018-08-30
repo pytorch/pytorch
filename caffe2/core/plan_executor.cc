@@ -9,7 +9,7 @@
 
 #include "caffe2/core/timer.h"
 #include "caffe2/core/workspace.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 
 CAFFE2_DEFINE_bool(
     caffe2_handle_executor_threads_exceptions,
@@ -100,7 +100,7 @@ std::function<bool(int64_t)> getContinuationTest(
 
 // if the blob doesn't exist or is not initiaized, return false
 inline bool getShouldStop(const Blob* b) {
-  if (!b || b->meta().id() == CaffeTypeId::uninitialized()) { // not exist or uninitialized
+  if (!b || b->meta().id() == TypeIdentifier::uninitialized()) { // not exist or uninitialized
     return false;
   }
 

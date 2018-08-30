@@ -3,7 +3,7 @@
 #include "caffe2/core/context.h"
 #include "caffe2/core/tensor.h"
 #include "caffe2/core/types.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/python/dlpack.h"
 
 #include <pybind11/pybind11.h>
@@ -39,7 +39,7 @@ class DLPackWrapper {
     if (tensor->size() <= 0) {
       tensor->Resize(0);
     }
-    if (tensor->meta().id() == CaffeTypeId::uninitialized()) {
+    if (tensor->meta().id() == TypeIdentifier::uninitialized()) {
       // treat uninitialized tensor as float tensor
       tensor->template mutable_data<float>();
     }

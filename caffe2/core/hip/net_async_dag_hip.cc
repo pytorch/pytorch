@@ -24,7 +24,7 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/core/static_tracepoint.h"
 #include "caffe2/core/timer.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/utils/proto_utils.h"
 
 #include "caffe2/core/hip/context_hip.h"
@@ -58,7 +58,7 @@ class ProfiledRange
     ProfiledRange(const OperatorDef& def, Color color) {}
 
     private:
-    DISABLE_COPY_AND_ASSIGN(ProfiledRange);
+    AT_DISABLE_COPY_AND_ASSIGN(ProfiledRange);
 };
 
 } // namespace

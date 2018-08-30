@@ -2,12 +2,12 @@
 
 #include <ATen/CUDAGenerator.h>
 #include <ATen/Context.h>
-#include <ATen/Error.h>
 #include <ATen/RegisterCUDA.h>
+#include <ATen/core/Error.h>
 #include <ATen/cuda/CUDAConfig.h>
-#include <ATen/native/cuda/CuFFTPlanCache.h>
 #include <ATen/cuda/PinnedMemoryAllocator.h>
 #include <ATen/detail/CUDAHooksInterface.h>
+#include <ATen/native/cuda/CuFFTPlanCache.h>
 
 #include "THC/THC.h"
 #include <THC/THCGeneral.hpp>
@@ -69,9 +69,7 @@ DynamicCUDAInterfaceSetter _;
 // let's not if we don't need to!)
 std::unique_ptr<THCState, void (*)(THCState*)> CUDAHooks::initCUDA() const {
   THCState* thc_state = THCState_alloc();
-  // Caching allocator has no context
-  THCState_setDeviceAllocator(thc_state, THCCachingAllocator_get());
-  thc_state->cudaHostAllocator = getTHCCachingHostAllocator();
+
   THCudaInit(thc_state);
   return std::unique_ptr<THCState, void (*)(THCState*)>(
       thc_state, [](THCState* p) {
@@ -92,6 +90,14 @@ bool CUDAHooks::hasCUDA() const {
     return false;
   }
   return true;
+}
+
+bool CUDAHooks::hasMAGMA() const {
+#ifdef USE_MAGMA
+  return true;
+#else
+  return false;
+#endif
 }
 
 bool CUDAHooks::hasCuDNN() const {
@@ -117,6 +123,10 @@ void CUDAHooks::registerCUDATypes(Context* context) const {
 
 bool CUDAHooks::compiledWithCuDNN() const {
   return AT_CUDNN_ENABLED();
+}
+
+bool CUDAHooks::compiledWithMIOpen() const {
+  return AT_ROCM_ENABLED();
 }
 
 bool CUDAHooks::supportsDilatedConvolutionWithCuDNN() const {

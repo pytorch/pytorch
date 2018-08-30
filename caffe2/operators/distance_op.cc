@@ -1,5 +1,9 @@
 #include "caffe2/operators/distance_op.h"
 #include "caffe2/utils/eigen_utils.h"
+#ifdef CAFFE2_USE_IDEEP
+#include <caffe2/ideep/operators/operator_fallback_ideep.h>
+#include <caffe2/ideep/utils/ideep_operator.h>
+#endif
 
 namespace caffe2 {
 
@@ -177,7 +181,7 @@ bool CosineSimilarityGradientOp<float, CPUContext>::RunOnDevice() {
     math::Dot<float, CPUContext>(
         D, X_data + offset, Y_data + offset, &XY, &context_);
 
-    math::Scale<float, CPUContext>(
+    math::Scale<float, float, CPUContext>(
         D, dCos_data[i] / XYN, Y_data + offset, dX_data + offset, &context_);
     math::Axpy(
         D,
@@ -186,7 +190,7 @@ bool CosineSimilarityGradientOp<float, CPUContext>::RunOnDevice() {
         dX_data + offset,
         &context_);
 
-    math::Scale<float, CPUContext>(
+    math::Scale<float, float, CPUContext>(
         D, dCos_data[i] / XYN, X_data + offset, dY_data + offset, &context_);
     math::Axpy(
         D,
@@ -282,9 +286,9 @@ bool DotProductGradientOp<float, CPUContext>::RunOnDevice() {
   auto* dY_data = dY->template mutable_data<float>();
   for (int i = 0; i < N; ++i) { // TODO: multithreading
     auto offset = i * D;
-    math::Scale<float, CPUContext>(
+    math::Scale<float, float, CPUContext>(
         D, dDot_data[i], X_data + offset, dY_data + offset, &context_);
-    math::Scale<float, CPUContext>(
+    math::Scale<float, float, CPUContext>(
         D, dDot_data[i], Y_data + offset, dX_data + offset, &context_);
   }
   return true;
@@ -396,6 +400,11 @@ REGISTER_CPU_OPERATOR(L1Distance, L1DistanceOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(
     L1DistanceGradient,
     L1DistanceGradientOp<float, CPUContext>);
+#ifdef CAFFE2_USE_IDEEP
+REGISTER_IDEEP_OPERATOR(
+    L1DistanceGradient,
+    IDEEPFallbackOp<L1DistanceGradientOp<float, CPUContext>>);
+#endif
 
 OPERATOR_SCHEMA(L1Distance)
     .NumInputs(2)
@@ -428,22 +437,22 @@ op = core.CreateOperator(
     ["Z"]
 )
 
-# Create X
+// Create X
 X = 5*np.ones((1, 4))
 print("X:\n",X)
 
-# Create Y
+// Create Y
 Y = np.ones((1, 4))
 print("Y:\n",Y)
 
-# Feed X & Y into workspace
+// Feed X & Y into workspace
 workspace.FeedBlob("X", X.astype(np.float32))
 workspace.FeedBlob("Y", Y.astype(np.float32))
 
-# Run op
+// Run op
 workspace.RunOperatorOnce(op)
 
-# Collect Output
+// Collect Output
 print("Z:\n", workspace.FetchBlob("Z"))
 
 ```
@@ -636,22 +645,22 @@ op = core.CreateOperator(
     ["Z"]
 )
 
-# Create X
+// Create X
 X = np.random.randn(3, 3)
 print("X:\n",X)
 
-# Create Y
+// Create Y
 Y = np.random.randn(3, 3)
 print("Y:\n",Y)
 
-# Feed X & Y into workspace
+// Feed X & Y into workspace
 workspace.FeedBlob("X", X.astype(np.float32))
 workspace.FeedBlob("Y", Y.astype(np.float32))
 
-# Run op
+// Run op
 workspace.RunOperatorOnce(op)
 
-# Collect Output
+// Collect Output
 print("Z:\n", workspace.FetchBlob("Z"))
 
 ```

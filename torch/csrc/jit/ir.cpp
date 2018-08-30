@@ -5,6 +5,7 @@
 #include "torch/csrc/autograd/function.h"
 #include "torch/csrc/jit/constants.h"
 #include "torch/csrc/jit/assertions.h"
+#include "torch/csrc/jit/script/compiler.h"
 
 #include <iostream>
 #include <unordered_map>
@@ -44,9 +45,9 @@ std::ostream& operator<<(std::ostream & out, const at::ArrayRef<T> & nodes) {
 }
 
 struct const_value_list_with_types {
-  const std::vector<const Value*>& values;
+  const ArrayRef<const Value*> values;
   bool use_newlines;
-  const_value_list_with_types(const std::vector<const Value*>& values, bool use_newlines = false)
+  const_value_list_with_types(ArrayRef<const Value*> values, bool use_newlines = false)
     : values(values), use_newlines(use_newlines) {}
 };
 std::ostream& operator<<(std::ostream & out, const_value_list_with_types l) {
@@ -82,6 +83,20 @@ void printPrimList(std::ostream & out, const std::vector<T> & items) {
   }
   out << "]";
 }
+
+std::string escapeString(std::string s) {
+  std::vector<char> search = {'\n', '\t', '\v'};
+  std::vector<std::string> replace = {"\\n", "\\t", "\\v"};
+  for (size_t i = 0; i < search.size(); i++) {
+    size_t pos = s.find(search[i]);
+    while(pos != std::string::npos) {
+      s.replace(pos, 1, replace[i]);
+      pos = s.find(search[i], pos + 1);
+    }
+  }
+  return s;
+}
+
 void printAttributes(std::ostream & out, const Node * n, bool ignore_subgraph=false) {
   out << "[";
   auto names = n->attributeNames();
@@ -110,7 +125,7 @@ void printAttributes(std::ostream & out, const Node * n, bool ignore_subgraph=fa
         printPrimList(out,n->is(name));
         break;
       case AttributeKind::s:
-        out << n->s(name);
+        out << escapeString(n->s(name));
         break;
       case AttributeKind::ss:
         printPrimList(out,n->ss(name));
@@ -120,12 +135,12 @@ void printAttributes(std::ostream & out, const Node * n, bool ignore_subgraph=fa
           at::Tensor t = n->t(name);
           // 1-elem tensors are usually boxed scalars, so print them like it
           if (t.numel() == 1) {
-            auto scalar = at::Scalar(t.view({})).local();
+            auto scalar_tensor = t.view({})._local_scalar();
             out << "{";
-            if (scalar.isFloatingPoint()) {
-              out << scalar.toDouble();
+            if (scalar_tensor.isFloatingPoint()) {
+              out << scalar_tensor.toDouble();
             } else {
-              out << scalar.toLong();
+              out << scalar_tensor.toLong();
             }
             out << "}";
           } else if (t.numel() <= max_tensor_display_size) {
@@ -240,7 +255,7 @@ static void checkSameDevice(const Node* node) {
   bool has_device = false;
   int device;
   auto checkValue = [&](const Value* v) {
-    if(TensorTypePtr type = v->type()->cast<TensorType>()) {
+    if(CompleteTensorTypePtr type = v->type()->cast<CompleteTensorType>()) {
       if(!has_device) {
         has_device = true;
         device = type->device();
@@ -355,7 +370,7 @@ void Graph::lint() const {
   // - every use will occur later in the topsort
 
   struct LintScope {
-    LintScope() {}
+    LintScope() = default;
     LintScope(std::unique_ptr<LintScope> parent)
     : parent(std::move(parent)) {}
     bool contains(const Value * v) {
@@ -487,13 +502,13 @@ void LintGraph(std::shared_ptr<Graph>& graph) {
   graph->lint();
 }
 
-void Block::cloneFrom(Block * src, std::function<Value*(Value*)> outer_map) {
+void Block::cloneFrom(Block * src, std::function<Value*(Value*)> value_map) {
   std::unordered_map<Value*, Value*> local_map;
   auto env = [&](Value * v) {
     auto it = local_map.find(v);
     if(it != local_map.end())
       return it->second;
-    return outer_map(v);
+    return value_map(v);
   };
 
   auto graph = owningGraph();
@@ -570,75 +585,26 @@ Value* Value::setUniqueName(const std::string & name) {
   return this;
 }
 
-std::pair<size_t, const Argument*> findArgument(const FunctionSchema& the_schema, Symbol name) {
+size_t findArgument(const FunctionSchema& the_schema, Symbol name) {
   auto name_str = name.toUnqualString();
   for (size_t i = 0; i < the_schema.arguments.size(); ++i) {
     const Argument* arg = &the_schema.arguments[i];
     if (arg->name == name_str) {
-      return std::make_pair(i, arg);
+      return i;
     }
   }
   throw std::runtime_error(std::string("Couldn't find an argument called ") + name.toQualString());
 }
 
 at::optional<IValue> Node::get(Symbol name) const {
-  // TODO (apaszke): remove. this is in here for now just so that we can ensure
-  // we always use this in places where the node has a valid schema already
-  // (will make next commits easier).
-  if (hasAttribute(name)) {
-    switch (kindOf(name)) {
-      case AttributeKind::i:
-        return IValue(i(name));
-      case AttributeKind::f:
-        return IValue(f(name));
-      case AttributeKind::t: {
-        // attributes are ambiguous, this might be a at::Scalar
-        // disambiguate via schema
-        at::Tensor ten = t(name);
-        const Argument* arg = findArgument(schema(), name).second;
-        if(arg->type->isSubtypeOf(NumberType::get())) {
-          return IValue(at::Scalar(ten));
-        }
-        return IValue(ten);
-      }
-      case AttributeKind::is:
-        return IValue(is(name));
-      default:
-        throw std::runtime_error("get() NYI");
-    }
-  }
   return toIValue(namedInput(name));
 }
 
 Value* Node::namedInput(Symbol name) const {
-  if(hasAttribute(name)) {
-    // XXX - const cast because this really should not be modifying graph
-    // and once we remove attributes it no longer will
-    Value* v = insertConstant(const_cast<Graph&>(*owningGraph()), get(name).value());
-    // XXX - insert point can be anywhere since modifying the graph is unexpected,
-    // so this is completely unsafe and needs to be gone as soon as possible.
-    return v;
-  }
-  const auto & the_schema = schema();
-  int64_t tensor_list_pos = 0;
-  for (auto & arg : the_schema.arguments) {
-    if (*arg.type == *ListType::ofTensors())
-      break;
-    tensor_list_pos++;
-  }
-  int64_t arg_pos = findArgument(schema(), name).first;
-  // XXX: we don't have a single value we could give for a Tensor[],
-  // because we flatten lists into arguments
-  JIT_ASSERT(arg_pos != tensor_list_pos);
-  // NB: if there's no tensor list, then tensor_list_pos == arguments.size(), so this is always true
-  if (arg_pos < tensor_list_pos) {
-    return input(arg_pos);
-  } else {
-    return input(inputs().size() - (the_schema.arguments.size() - arg_pos));
-  }
+  return input(findArgument(schema(), name));
 }
 
-bool Node::matches(const char *signature_literal, at::ArrayRef<Symbol> const_inputs) {
+bool Node::matches(const char *signature_literal, at::ArrayRef<Symbol> const_inputs) const {
   if (!sig(signature_literal).matches(this)) return false;
   for (Symbol s : const_inputs) {
     if (!is_constant(s)) return false;
@@ -646,8 +612,69 @@ bool Node::matches(const char *signature_literal, at::ArrayRef<Symbol> const_inp
   return true;
 }
 
+void Node::dump() const {
+  std::cout << *this << "\n";
+}
+
 void Node::findSchema() const {
-  schema_ = &getOperatorFor(this).schema;
+  schema_ = &getOperatorFor(this).schema();
+}
+
+namespace {
+
+const OperatorSet& nondeterminstic_aten_ops() {
+  static OperatorSet nondeterministic_ops = {
+    "aten::dropout(Tensor input, float p, int train) -> Tensor",
+    "aten::_fused_dropout(Tensor self, float p, Generator generator) -> (Tensor, Tensor)",
+    "aten::_standard_gamma(Tensor self, Generator generator) -> Tensor",
+    "aten::_th_bernoulli(Tensor self, *, Generator generator) -> Tensor",
+    "aten::bernoulli(Tensor self) -> Tensor",
+    "aten::bernoulli(Tensor self, Tensor p, Generator generator) -> Tensor",
+    "aten::bernoulli(Tensor self, float p, Generator generator) -> Tensor",
+    "aten::multinomial(Tensor self, int num_samples, int replacement, *, Generator generator) -> Tensor",
+    "aten::normal(Tensor mean, Tensor std, *, Generator generator) -> Tensor",
+    "aten::normal(float mean, Tensor std, *, Generator generator) -> Tensor",
+    "aten::normal(Tensor mean, float std, *, Generator generator) -> Tensor",
+    "aten::poisson(Tensor self, Generator generator) -> Tensor",
+    "aten::rrelu(Tensor self, Scalar lower, Scalar upper, int training, Generator generator) -> Tensor",
+    "aten::rrelu_with_noise(Tensor self, Tensor noise, Scalar lower, Scalar upper, int training, Generator generator) -> Tensor",
+    "aten::rand(int[] size, *, int dtype, int layout, int[] device) -> Tensor",
+    "aten::rand_like(Tensor self) -> Tensor",
+    "aten::rand_like(Tensor self, *, int dtype, int layout, int[] device) -> Tensor",
+    "aten::randint(int high, int[] size, *, int dtype, int layout, int[] device) -> Tensor",
+    "aten::randint(int low, int high, int[] size, *, int dtype, int layout, int[] device) -> Tensor",
+    "aten::randint_like(Tensor self, int high) -> Tensor",
+    "aten::randint_like(Tensor self, int low, int high) -> Tensor",
+    "aten::randint_like(Tensor self, int high, *, int dtype, int layout, int[] device) -> Tensor",
+    "aten::randint_like(Tensor self, int low, int high, *, int dtype, int layout, int[] device) -> Tensor",
+    "aten::randn(int[] size, *, int dtype, int layout, int[] device) -> Tensor",
+    "aten::randn_like(Tensor self) -> Tensor",
+    "aten::randn_like(Tensor self, *, int dtype, int layout, int[] device) -> Tensor",
+    "aten::randperm(int n, *, int dtype, int layout, int[] device) -> Tensor"
+  };
+  return nondeterministic_ops;
+}
+
+}  // namespace
+
+bool Node::isNondeterministic() const {
+  if (nondeterminstic_aten_ops().find(this) == nullptr) {
+    return false;
+  }
+  // Dropout with train = False is deterministic
+  if (matches("aten::dropout(Tensor input, float p, int train) -> Tensor") && is_constant(attr::train) && !get<bool>(attr::train).value()) {
+    return false;
+  }
+  return true;
+}
+
+inline const SourceRange& fakeRange() {
+  static SourceRange range(std::make_shared<std::string>("<internally-created-node>"), 0, 1);
+  return range;
+}
+
+Value* Graph::insert(Symbol opname, at::ArrayRef<NamedValue> args, at::ArrayRef<NamedValue> kwargs) {
+  return script::emitBuiltinCall(fakeRange(), *this, opname, args, kwargs, /*required=*/true);
 }
 
 PythonOp* defaultAllocPythonOp(Graph*g) {

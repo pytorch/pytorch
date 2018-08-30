@@ -102,7 +102,6 @@ INSTALL(FILES
   THTensor.hpp
   THStorageFunctions.hpp
   THGenerator.hpp
-  THTypeConversion.hpp
   DESTINATION "${ATEN_INSTALL_INCLUDE_SUBDIR}/TH")
 
 INSTALL(FILES
@@ -122,6 +121,7 @@ INSTALL(FILES
   generic/THStorageCopy.h
   generic/THTensor.cpp
   generic/THTensor.h
+  generic/THTensor.hpp
   generic/THTensorConv.cpp
   generic/THTensorConv.h
   generic/THTensorCopy.cpp

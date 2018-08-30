@@ -181,6 +181,54 @@ void coalesceInsertedDataDependencies(repr::NNModule* m) {
   }
 }
 
+std::ostream& operator<<(
+    std::ostream& oss,
+    const NNNodeMatchCriteria& criteria) {
+  return oss << criteria.debugString;
+}
+
+NNNodeMatchCriteria criteriaSingleOutputAndConsumer() {
+  return NNNodeMatchCriteria(
+      [](NNGraph::NodeRef nodeRef) {
+        auto nodeOutputs = nn::getOutputs(nodeRef);
+        NOM_REQUIRE_OR_RET_FALSE(nodeOutputs.size() == 1);
+        auto nodeConsumers = nn::getConsumers(nodeOutputs.front());
+        return nodeConsumers.size() == 1;
+      },
+      "Single output and consumer");
+}
+
+NNNodeMatchCriteria criteriaSingleConsumer() {
+  return NNNodeMatchCriteria(
+      [](NNGraph::NodeRef nodeRef) {
+        auto nodeOutputs = nn::getOutputs(nodeRef);
+        NNGraph::NodeRef nodeConsumer = nullptr;
+        for (auto nodeOutput : nodeOutputs) {
+          for (auto consumer : nn::getConsumers(nodeOutput)) {
+            if (nodeConsumer && consumer && consumer != nodeConsumer) {
+              return false;
+            }
+            nodeConsumer = consumer;
+          }
+        }
+        return true;
+      },
+      "Single consumer");
+}
+
+NNNodeMatchCriteria matchTensor() {
+  return matchOp<nom::repr::Tensor>("matchTensor");
+}
+
+NNMatchGraph::NodeRef operatorSubgraph(
+    NNMatchGraph& g,
+    const NNNodeMatchCriteria& root,
+    const std::vector<NNMatchGraph::NodeRef>& childrenCriteria,
+    int count) {
+  return subgraph(
+      g, matchTensor(), {subgraph(g, root, childrenCriteria)}, count);
+}
+
 } // namespace nn
 
 } // namespace repr

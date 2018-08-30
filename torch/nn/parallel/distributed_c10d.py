@@ -91,13 +91,14 @@ class _DistributedDataParallelC10d(Module):
 
     Args:
         module: module to be parallelized
-        process_group: the c10d process group to be used for distributed data
-                       all-reduction
         device_ids: CUDA devices (default: all devices)
         output_device: device location of output (default: device_ids[0])
         broadcast_buffers: flag that enables syncing (broadcasting) buffers of
                            the module at beginning of the forward function.
                            (default: True)
+        process_group: the c10d process group to be used for distributed data
+                       all-reduction. If None, the default process group will
+                       be used
         bucket_cap_mb: DistributedDataParallelC10d will bucket parameters into
                        multiple buckets so that gradient reduction of each
                        bucket can potentially overlap with backward computation.
@@ -112,9 +113,9 @@ class _DistributedDataParallelC10d(Module):
         >>> pg = torch.distributed.c10d.ProcessGroupGloo(store, rank, world_size)
         >>> net = torch.nn._DistributedDataParallelC10d(model, pg)
     """
-    def __init__(self, module, process_group, device_ids=None,
+    def __init__(self, module, device_ids=None,
                  output_device=None, dim=0, broadcast_buffers=True,
-                 bucket_cap_mb=25):
+                 process_group=None, bucket_cap_mb=25):
 
         super(_DistributedDataParallelC10d, self).__init__()
 
@@ -125,12 +126,18 @@ class _DistributedDataParallelC10d(Module):
         if output_device is None:
             output_device = device_ids[0]
 
+        if process_group is None:
+            self.process_group = c10d.get_default_group()
+        else:
+            self.process_group = process_group
+
         self.dim = dim
         self.module = module
-        self.process_group = process_group
         self.device_ids = device_ids
         self.output_device = output_device
         self.broadcast_buffers = broadcast_buffers
+
+        self.allreduce_opts = c10d.AllreduceOptions()
 
         MB = 1024 * 1024
 
@@ -162,7 +169,7 @@ class _DistributedDataParallelC10d(Module):
 
         for dev_idx, module in enumerate(self._module_copies):
             self.modules_params_data[dev_idx] = [p.data for p in module.parameters()]
-            self.modules_buffers_data[dev_idx] = [b.data for b in module._all_buffers()]
+            self.modules_buffers_data[dev_idx] = [b.data for b in module.buffers()]
 
         bucket_bytes_cap = bucket_cap_mb * MB
 
@@ -242,11 +249,7 @@ class _DistributedDataParallelC10d(Module):
             module.train(mode)
 
     def _dist_broadcast_coalesced(self, tensors, buffer_size):
-        for tensors in _take_tensors(tensors, buffer_size):
-            flat_tensors = _flatten_dense_tensors(tensors)
-            c10d.broadcast(flat_tensors, 0, self.process_group).wait()
-            for tensor, synced in zip(tensors, _unflatten_dense_tensors(flat_tensors, tensors)):
-                tensor.copy_(synced)
+        c10d._dist_broadcast_coalesced(tensors, buffer_size, self.process_group)
 
     def _sync_params(self):
         if len(self.device_ids) > 1:
@@ -345,7 +348,8 @@ class _DistributedDataParallelC10d(Module):
             nccl.reduce(grads_batch_coalesced, root=0, streams=self.default_streams)
 
         # now work on the first gpu
-        reduction_work = c10d.all_reduce(grads_batch_coalesced[0], self.process_group)
+        reduction_work = self.process_group.allreduce([grads_batch_coalesced[0]],
+                                                      self.allreduce_opts)
         self.reduction_works[bucket_idx] = reduction_work
         self.buckets_coalesced[bucket_idx] = grads_batch_coalesced[0]
 

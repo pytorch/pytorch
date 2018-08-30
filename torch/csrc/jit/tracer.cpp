@@ -21,26 +21,41 @@ namespace detail {
 
 template<typename T>
 void genericAddInput(Node *n, T value) {
-  n->addInput(insertConstant(*n->owningGraph(), value));
+  Value *v = n->owningGraph()->insertConstant(value);
+  recordSourceLocation(v->node());
+  n->addInput(v);
 }
 
 void badArgType() {
-  throw std::runtime_error("Found an unsupported argument type in the JIT tracer. File a bug report.");
+  AT_ERROR("Found an unsupported argument type in the JIT tracer. File a bug report.");
 }
 
+thread_local std::shared_ptr<TracingState> tracing_state;
 
-void addInputs(Node *n, const char * name, int64_t value)            { genericAddInput(n, value); }
-void addInputs(Node *n, const char * name, bool value)               { genericAddInput(n, value); }
-void addInputs(Node *n, const char * name, double value)             { genericAddInput(n, value); }
-void addInputs(Node *n, const char * name, const at::Scalar& value)  { genericAddInput(n, value); }
+} // namespace detail
+
+void addInputs(Node *n, const char * name, int64_t value)            { detail::genericAddInput(n, value); }
+void addInputs(Node *n, const char * name, bool value)               { detail::genericAddInput(n, value); }
+void addInputs(Node *n, const char * name, double value)             { detail::genericAddInput(n, value); }
+void addInputs(Node *n, const char * name, const at::Scalar& value)  { detail::genericAddInput(n, value); }
 void addInputs(Node *n, const char * name, const at::Tensor& value)  { n->addInput(getValueTrace(value)); }
-void addInputs(Node *n, const char * name, const std::string& value)         { badArgType(); }
-void addInputs(Node *n, const char * name, const at::SparseTensorRef& value) { badArgType(); }
+void addInputs(Node *n, const char * name, const std::string& value)         { detail::badArgType(); }
+void addInputs(Node *n, const char * name, const at::SparseTensorRef& value) { detail::badArgType(); }
 
 void addInputs(Node *n, const char * name, at::TensorList value) {
-  for (auto & t : value) {
-    n->addInput(getValueTrace(t));
-  }
+  Graph *g = n->owningGraph();
+  Node *list_node = g->appendNode(g->createList(DynamicType::get(), fmap(value, getValueTrace)));
+  n->addInput(list_node->output());
+}
+
+void addInputs(Node* n, const char * name, const at::TensorOptions& options) {
+  // [TensorOptions in script] - update this when you change how we schematize TensorOptions
+  detail::genericAddInput(n, static_cast<int64_t>(options.dtype()));
+  detail::genericAddInput(n, static_cast<int64_t>(options.layout()));
+  std::vector<int64_t> device = {
+      static_cast<int64_t>(options.device().type()),
+      static_cast<int64_t>(options.device().index())};
+  detail::genericAddInput(n, std::move(device));
 }
 
 void addInputs(Node *n, const char * name, at::IntList value) {
@@ -52,7 +67,8 @@ void addInputs(Node *n, const char * name, at::IntList value) {
   auto& g = getTracingState()->graph;
   for (size_t i = 0; i < info.size(); ++i) {
     if (info[i] != nullptr) continue;
-    info[i] = insertConstant(*g, value[i]);
+    info[i] = g->insertConstant(value[i]);
+    recordSourceLocation(info[i]->node());
   }
   for (jit::Value* v : info) {
     if (*v->type() != *jit::IntType::get()) {
@@ -64,9 +80,9 @@ void addInputs(Node *n, const char * name, at::IntList value) {
   n->addInput(g->insertNode(g->createList(jit::IntType::get(), info))->output());
 }
 
-thread_local std::shared_ptr<TracingState> tracing_state;
-
-} // namespace detail
+void addInputs(Node *n, const char * name, const ArrayRef<double>& value) {
+  AT_ERROR("Tracing float lists currently not supported!");
+}
 
 const std::shared_ptr<TracingState>& getTracingState() {
   return detail::tracing_state;
@@ -81,11 +97,11 @@ TracingState::TracingState()
 
 TracingState::~TracingState() = default;
 
-void postRecordTrace(const PreTraceInfo& info,
+void postRecordTrace(Node* node,
                      at::ArrayRef<Variable> outputs) {
   for (size_t i = 0; i < outputs.size(); i++) {
     auto & output = outputs[i];
-    Value * value = info.n->addOutput();
+    Value * value = node->addOutput();
     if (output.defined()) {
       value->inferTypeFrom(output.data());
       setValueTrace(output, value);
@@ -100,7 +116,10 @@ autograd::Variable getSizeOf(const autograd::Variable& var, int64_t dim) {
   auto size_var = autograd::make_variable(at::Scalar(var.size(dim)).toTensor());
   auto* value = getValueTrace(var);
   WithInsertPoint ipoint { graph->block() };
-  auto* node = graph->insertNode(graph->create(aten::size, {value, insertConstant(*graph, dim)}));
+  auto dim_val = graph->insertConstant(dim);
+  recordSourceLocation(dim_val->node());
+  auto* node = graph->insertNode(graph->create(aten::size, {value, dim_val}));
+  recordSourceLocation(node);
   node->output()->setType(jit::IntType::get());
 
   auto ten =

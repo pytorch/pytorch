@@ -1,40 +1,30 @@
-#include <ATen/Context.h>
 #include <ATen/StorageImpl.h>
 
 namespace at {
 
 StorageImpl::StorageImpl(
-    at::ScalarType scalar_type,
-    ptrdiff_t size,
+    at::DataType data_type,
+    int64_t numel,
     at::DataPtr data_ptr,
     at::Allocator* allocator,
     bool resizable)
-    : scalar_type(scalar_type),
-      data_ptr(std::move(data_ptr)),
-      size(size),
-      refcount(1),
-      weakcount(1), // from the strong reference
-      resizable(resizable),
-      allocator(allocator),
-      finalizer(nullptr) {}
+    : data_type_(data_type),
+      data_ptr_(std::move(data_ptr)),
+      numel_(numel),
+      resizable_(resizable),
+      allocator_(allocator) {}
 
 StorageImpl::StorageImpl(
-    at::ScalarType scalar_type,
-    ptrdiff_t size,
+    at::DataType data_type,
+    int64_t numel,
     at::Allocator* allocator,
     bool resizable)
     : StorageImpl(
-          scalar_type,
-          size,
-          allocator->allocate(at::elementSize(scalar_type) * size),
+          data_type,
+          numel,
+          allocator->allocate(
+              at::elementSize(dataTypeToScalarType(data_type)) * numel),
           allocator,
           resizable) {}
-
-Type& StorageImpl::type() {
-  if (data_ptr.device().is_cuda()) {
-    return globalContext().getType(Backend::CUDA, scalar_type);
-  }
-  return globalContext().getType(Backend::CPU, scalar_type);
-}
 
 } // namespace at

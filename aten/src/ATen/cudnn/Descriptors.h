@@ -319,13 +319,27 @@ struct AT_CUDA_API RNNDescriptor
   }
 };
 
+#if CUDNN_VERSION >= 7000
+
+struct AT_CUDA_API CTCLossDescriptor
+  : public Descriptor<cudnnCTCLossStruct,
+                      &cudnnCreateCTCLossDescriptor,
+                      &cudnnDestroyCTCLossDescriptor>
+{
+  void set(cudnnDataType_t datatype) {
+    AT_CUDNN_CHECK(cudnnSetCTCLossDescriptor(mut_desc(), datatype));
+  }
+};
+
+#endif
+
 union Constant
 {
   float f;
   double d;
   Constant(cudnnDataType_t dataType, double value) {
     if (dataType == CUDNN_DATA_HALF || dataType == CUDNN_DATA_FLOAT) {
-      f = (float) value;
+      f = static_cast<float>(value);
     } else {
       d = value;
     }

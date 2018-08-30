@@ -4,6 +4,7 @@
 #include <torch/nn/cursor.h>
 #include <torch/tensor.h>
 
+#include <algorithm>
 #include <functional>
 #include <memory>
 #include <vector>
@@ -51,22 +52,29 @@ class OptimizerBase {
  protected:
   OptimizerBase() = default;
 
-  /// Helper function to construct a vector of zero-d out variables, each the
-  /// same shape as the variable at the corresponding index in the input
-  /// container.
-  template <typename ParameterContainer>
-  std::vector<Tensor> zero_buffers_like(const ParameterContainer& parameters) {
-    std::vector<Tensor> result;
-    result.reserve(parameters.size());
-    for (auto& parameter : parameters) {
-      result.push_back(torch::zeros_like(parameter));
+  /// Accesses a buffer at the given index.
+  /// Additionally, zeros out the buffers when this is called on the index
+  template <typename T>
+  T& buffer_at(std::vector<T>& buffers, size_t index) {
+    if (buffers.size() <= index) {
+      const auto old_size = buffers.size();
+      buffers.resize(index + 1);
+      std::fill(buffers.begin() + old_size, buffers.end(), T{0});
     }
-    return result;
+    return buffers[index];
   }
 
   /// Accesses a buffer at the given index, converts it to the type of the
   /// parameter at the corresponding index (a no-op if they match).
+  /// Additionally, zeros out the buffers when this is called on the index
   Tensor& buffer_at(std::vector<Tensor>& buffers, size_t index) {
+    if (buffers.size() <= index) {
+      buffers.reserve(index);
+      for (auto i = buffers.size(); i <= index; ++i) {
+        buffers.push_back(torch::zeros_like(parameters_.at(i)));
+      }
+    }
+    // Copy the buffer to the device and dtype of the parameter.
     const auto& parameter = parameters_.at(index);
     const auto& buffer = buffers.at(index);
     if (buffer.device() != parameter.device() ||

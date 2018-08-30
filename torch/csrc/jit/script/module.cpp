@@ -2,6 +2,7 @@
 #include "torch/csrc/jit/script/module.h"
 #include "torch/csrc/jit/script/compiler.h"
 #include "torch/csrc/jit/script/error_report.h"
+#include "torch/csrc/jit/export.h"
 #include "torch/csrc/jit/operator.h"
 
 namespace torch { namespace jit { namespace script {
@@ -12,7 +13,7 @@ void placeholderCreator(Method&) {
   throw RecursiveMethodCallError();
 }
 
-static FunctionSchema defaultSchemaFor(Method& method) {
+static FunctionSchema defaultSchemaFor(const Method& method) {
   std::vector<Argument> args;
   std::vector<Argument> returns;
   Graph& g = *method.graph();
@@ -20,12 +21,20 @@ static FunctionSchema defaultSchemaFor(Method& method) {
   for(size_t i = 0; i < num_inputs; ++i) {
     const Value* v = g.inputs().at(i);
     std::string name = v->hasUniqueName() ? v->uniqueName() : ("argument_"  + std::to_string(i));
-    args.push_back({std::move(name), DynamicType::get()});
+    args.push_back({std::move(name), unshapedType(g.inputs()[i]->type())});
   }
   for(size_t i = 0; i < g.outputs().size(); ++i) {
-    returns.push_back({"", DynamicType::get()});
+    returns.push_back({"", unshapedType(g.outputs()[i]->type())});
   }
   return { method.name(), std::move(args), std::move(returns) };
+}
+
+
+const FunctionSchema& Method::getSchema() const {
+  if(schema == nullptr) {
+    schema.reset(new FunctionSchema(defaultSchemaFor(*this)));
+  }
+  return *schema;
 }
 
 std::vector<Value*> Method::emit_call_to(SourceRange loc, Method & callee, ArrayRef<NamedValue> args, ArrayRef<NamedValue> kwargs) {
@@ -40,8 +49,8 @@ std::vector<Value*> Method::emit_call_to(SourceRange loc, Method & callee, Array
 
   std::stringstream failure_messages;
   auto all_inputs = tryMatchSchema(
-    callee.schema ? *callee.schema : defaultSchemaFor(callee),
-    loc, *graph(), args, kwargs, failure_messages);
+    callee.getSchema(),
+    loc, *graph(), args, kwargs, failure_messages, /*conv_tensors_to_nums*/true);
   if(!all_inputs)
     throw ErrorReport(loc) << failure_messages.str();
 
@@ -60,6 +69,10 @@ void Method::ensure_defined() {
     creator(*this);
     method_creator = nullptr;
   }
+}
+
+void Module::save(const std::string& filename) {
+  ExportModule(*this, filename);
 }
 
 }}}

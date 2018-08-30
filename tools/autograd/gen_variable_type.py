@@ -41,7 +41,8 @@ MANUAL_IMPLEMENTATIONS = {
 # NO EFFECT otherwise.
 DONT_RECORD_TRACE = {
     'convolution', 'conv1d', 'conv2d', 'conv3d', 'conv_transpose1d',
-    'conv_transpose2d', 'conv_transpose3d',
+    'conv_transpose2d', 'conv_transpose3d', 'lstm_cell', 'gru_cell',
+    'rnn_tanh_cell', 'rnn_relu_cell', 'linear'
 }
 
 # These functions have their names recorded under trace renamed,
@@ -126,15 +127,21 @@ RECORD_FUNCTION = CodeTemplate("""\
 profiler::RecordFunction profiler("${name}");""")
 
 PRE_RECORD_TRACE = CodeTemplate("""\
-jit::tracer::PreTraceInfo trace_info;
+torch::jit::Node* node = nullptr;
 if (jit::tracer::isTracing()) {
-  trace_info = jit::tracer::preRecordTrace(jit::aten::${trace_name}, ${trace_inputs});
+  auto& graph = jit::tracer::getTracingState()->graph;
+  node = graph->create(jit::aten::${trace_name}, /*outputs=*/0);
+  jit::tracer::recordSourceLocation(node);
+  ${add_trace_inputs}
+  graph->appendNode(node);
 }
 """)
 
+ADD_TRACE_INPUT = CodeTemplate("""jit::tracer::addInputs(node, "${input}", ${input});""")
+
 POST_RECORD_TRACE = CodeTemplate("""\
 if (jit::tracer::isTracing()) {
-  jit::tracer::postRecordTrace( trace_info,  ${trace_outputs} );
+  jit::tracer::postRecordTrace(node, at::ArrayRef<autograd::Variable>(${trace_outputs}) );
 }
 """)
 
@@ -174,6 +181,41 @@ def should_trace(declaration):
     if base_name == 'addmm' and overload == ['Tensor', 'Tensor', 'Tensor', 'Scalar', 'Scalar']:
         return False
     return True
+
+
+def get_trace_outputs(declaration):
+    if declaration['return_type'] == 'std::vector<Tensor>':
+        return 'flatten_tensor_args({})'.format(declaration['returns'][0]['name'])
+    elif declaration['name'].endswith('_out'):
+        output_args = [arg['name'] for arg in declaration['arguments']
+                       if arg.get('output', False)]
+        return '{' + ', '.join(output_args) + '}'
+    trace_outs = [r['name'] for r in declaration['returns']]
+    if any(ret['dynamic_type'] == 'TensorList' for ret in declaration['returns']):
+        return CodeTemplate("flatten_tensor_args( ${outs} )").substitute(outs=trace_outs)
+    else:
+        return CodeTemplate("{ ${outs} }").substitute(outs=trace_outs)
+
+
+def format_trace(declaration):
+    local = {}
+
+    add_trace_inputs = []
+    for argument in declaration['arguments']:
+        add_trace_inputs.append(ADD_TRACE_INPUT.substitute(input=argument['name']))
+    local['add_trace_inputs'] = '\n'.join(add_trace_inputs)
+
+    # Record inplace operations as out-of-place operations (e.g.,
+    # not add_ but add)
+    # TODO: Add a proper concept of side effects to the IR, and
+    # properly record inplace operations.
+    local['trace_name'] = uninplace_api_name(declaration['api_name'])
+    if local['trace_name'] in RENAME_TRACE:
+        local['trace_name'] = RENAME_TRACE[local['trace_name']]
+
+    local['trace_outputs'] = get_trace_outputs(declaration)
+
+    return (PRE_RECORD_TRACE.substitute(local), POST_RECORD_TRACE.substitute(local))
 
 
 def gen_variable_type(out, aten_declarations, template_path):
@@ -340,6 +382,8 @@ def emit_body(declaration):
             elif arg['type'] == 'TensorList':
                 name += '_'
                 expr = 'make_saved_variable_list({})'.format(arg['name'])
+            elif arg['type'] == 'IntList':
+                expr = expr + ".vec()"
             stmts.append('grad_fn->{} = {};'.format(name, expr))
         return stmts
 
@@ -352,38 +396,10 @@ def emit_body(declaration):
                 res.append(arg['name'])
         return res
 
-    def get_trace_outputs(declaration):
-        if declaration['return_type'] == 'std::vector<Tensor>':
-            return 'flatten_tensor_args({})'.format(declaration['returns'][0]['name'])
-        elif name.endswith('_out'):
-            output_args = [arg['name'] for arg in arguments
-                           if arg.get('output', False)]
-            return '{' + ', '.join(output_args) + '}'
-        trace_outs = [r['name'] for r in declaration['returns']]
-        if any(ret['dynamic_type'] == 'TensorList' for ret in declaration['returns']):
-            return CodeTemplate("flatten_tensor_args( ${outs} )").substitute(outs=trace_outs)
-        else:
-            return CodeTemplate("{ ${outs} }").substitute(outs=trace_outs)
-
     def emit_record_trace(env):
         if not should_trace(declaration):
             return ('', '')
-
-        local = {}
-        local['trace_inputs'] = sum([['"{}"'.format(arg['name']), arg['name']] for arg in declaration['arguments']], [])
-
-        # Record inplace operations as out-of-place operations (e.g.,
-        # not add_ but add)
-        # TODO: Add a proper concept of side effects to the IR, and
-        # properly record inplace operations.
-        local['trace_name'] = uninplace_api_name(declaration['api_name'])
-        if local['trace_name'] in RENAME_TRACE:
-            local['trace_name'] = RENAME_TRACE[local['trace_name']]
-
-        local['trace_outputs'] = get_trace_outputs(declaration)
-
-        combined = nested_dict(local, nested_dict(env, declaration))
-        return (PRE_RECORD_TRACE.substitute(combined), POST_RECORD_TRACE.substitute(combined))
+        return format_trace(declaration)
 
     def declare_returned_variables():
         if modifies_arguments:

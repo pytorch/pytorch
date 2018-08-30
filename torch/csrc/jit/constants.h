@@ -1,8 +1,6 @@
 #pragma once
-#include "ATen/ATen.h"
 #include "torch/csrc/jit/ivalue.h"
-#include "torch/csrc/jit/ir.h"
-#include "torch/csrc/jit/script/lexer.h"
+#include "torch/csrc/jit/source_range.h"
 #include "torch/csrc/WindowsTorchApiMacro.h"
 
 // helpers for handling constants in the IR
@@ -10,10 +8,21 @@
 // - implement primitive constant ops.
 namespace torch { namespace jit {
 
+struct Graph;
+struct Value;
+
+// thrown when insertConstant cannot encode the IValue into a graph
+struct TORCH_API constant_not_supported_error : public std::runtime_error {
+  using runtime_error::runtime_error;
+};
+
+// note: prefer g.insertConsant(val, loc) which does exactly the same thing
+// this function is only declared/defined here because its implementation is
+// closely related to the implementation of prim::Constant that is also in constants.cpp
 TORCH_API Value* insertConstant(
     Graph& g,
     IValue val,
-    at::optional<script::SourceRange> loc = at::nullopt);
+    at::optional<SourceRange> loc = at::nullopt);
 
 
 //////////////////////////////////////////////////////////////////////////////////

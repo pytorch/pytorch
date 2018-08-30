@@ -118,7 +118,7 @@ void checkSameGPU(CheckedFrom c, const TensorArg& t1, const TensorArg& t2) {
       oss << "Tensor for " << t2 << " is on CPU, ";
     }
     oss << "but expected " << ((!(t1->is_cuda() || t2->is_cuda())) ? "them" : "it")
-	      << " to be on GPU (while checking arguments for " << c << ")";
+        << " to be on GPU (while checking arguments for " << c << ")";
     AT_ERROR(oss.str());
   }
   AT_CHECK(

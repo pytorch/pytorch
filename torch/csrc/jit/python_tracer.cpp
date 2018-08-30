@@ -7,7 +7,7 @@
 #include "torch/csrc/utils/python_strings.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
 
-#include "ATen/Error.h"
+#include "ATen/core/Error.h"
 
 #include <sstream>
 
@@ -39,27 +39,23 @@ std::string getPythonInterpreterStackTrace() {
   return stack_trace.str();
 }
 
-// This is a temporary constructor so that we can write python tests of
-// the executor. It does not have most of the functionality of CompiledFunction
-// such as being able to hold parameters...
 std::shared_ptr<torch::jit::Graph> createGraphByTracing(
         py::function func,
-        tracer::variable_list trace_inputs,
-        size_t num_func_inputs) {
+        Stack trace_inputs,
+        at::optional<size_t> num_real_inputs) {
+  size_t num_func_inputs = num_real_inputs.value_or(trace_inputs.size());
   auto enter_info = tracer::enter(std::move(trace_inputs));
   try {
+
     py::tuple py_inputs(num_func_inputs);
     for(size_t i = 0; i < num_func_inputs; ++i) {
       py_inputs[i] = py::cast(enter_info.second[i]);
     }
     auto out = func(*py_inputs);
-    std::vector<autograd::Variable> outputs;
-    if(PyTuple_Check(out.ptr())) {
-      outputs = py::cast<std::vector<autograd::Variable>>(out);
-    } else {
-      outputs.push_back(py::cast<autograd::Variable>(out));
+    if(!PyTuple_Check(out.ptr())) {
+      out = py::make_tuple(out);
     }
-    tracer::exit(outputs);
+    tracer::exit(toStack(out));
     auto graph = enter_info.first->graph;
     EliminateDeadCode(graph);
     return graph;
@@ -69,7 +65,7 @@ std::shared_ptr<torch::jit::Graph> createGraphByTracing(
   }
 }
 
-PreTraceInfo preRecordPythonTrace(THPObjectPtr pyobj,
+Node* preRecordPythonTrace(THPObjectPtr pyobj,
                                   std::string arg_types,
                                   at::ArrayRef<Variable> inputs,
                                   pyobj_list scalar_args) {
@@ -78,14 +74,10 @@ PreTraceInfo preRecordPythonTrace(THPObjectPtr pyobj,
     throw python_error();
   }
 
-  PreTraceInfo info;
-  auto & state = getTracingState();
-  auto & graph = state->graph;
+  auto & graph = getTracingState()->graph;
 
-  Node *n = info.n = graph->createPythonOp(
-                        std::move(apply),
-                        arg_types,
-                        std::move(scalar_args));
+  Node* n = graph->createPythonOp(
+      std::move(apply), arg_types, std::move(scalar_args));
   recordSourceLocation(n);
 
   for (const Variable & input : inputs) {
@@ -95,7 +87,7 @@ PreTraceInfo preRecordPythonTrace(THPObjectPtr pyobj,
   // NB: Order matters. This must append after inputs but before outputs.
   graph->appendNode(n);
 
-  return info;
+  return n;
 }
 
 void pythonRecordSourceLocation(Node* n) {
@@ -103,10 +95,10 @@ void pythonRecordSourceLocation(Node* n) {
   n->setSourceLocation(sl);
 }
 
-void initPythonTracerBindings(PyObject* module_) {
+void initPythonTracerBindings(PyObject* module) {
   setRecordSourceLocation(pythonRecordSourceLocation);
 
-  auto m = py::handle(module_).cast<py::module>();
+  auto m = py::handle(module).cast<py::module>();
   py::class_<TracingState,std::shared_ptr<TracingState>>(m, "TracingState", py::dynamic_attr())
     // NB: no constructor; you have to get it from C++ code
     .def("__repr__", [](const TracingState& s) {
@@ -132,11 +124,11 @@ void initPythonTracerBindings(PyObject* module_) {
       return s.graph;
     });
 
-  m.def("_tracer_enter", [](variable_list trace_inputs) {
-    return tracer::enter(std::move(trace_inputs));
+  m.def("_tracer_enter", [](py::args trace_inputs) {
+    return tracer::enter(toStack(trace_inputs));
   });
-  m.def("_tracer_exit", [](variable_list var_outputs) {
-    tracer::exit(var_outputs);
+  m.def("_tracer_exit", [](py::tuple var_outputs) {
+    tracer::exit(toStack(var_outputs));
   });
   m.def("_tracer_abandon", []() {
     tracer::abandon();
