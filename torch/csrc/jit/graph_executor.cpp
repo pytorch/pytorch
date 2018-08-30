@@ -46,6 +46,31 @@ using tensor_list = std::vector<at::Tensor>;
 using Variable = autograd::Variable;
 using autograd::variable_list;
 
+struct ExecutionPlan {
+  ExecutionPlan() = default;
+  ExecutionPlan(std::shared_ptr<Graph> graph)
+    : code(graph)
+    , graph(std::move(graph)) {}
+
+  void run(Stack& stack) const {
+    return InterpreterState(code).runOneStage(stack);
+  }
+
+  operator bool() const {
+    return static_cast<bool>(graph);
+  }
+
+  ExecutionPlanState getDebugState() {
+    ExecutionPlanState state;
+    state.code = &code;
+    state.graph = graph.get();
+    return state;
+  }
+
+  Code code;
+  std::shared_ptr<Graph> graph;
+};
+
 struct DifferentiableGraphBackward : public autograd::Function {
   DifferentiableGraphBackward(GraphExecutor executor, size_t capture_size)
   : executor(std::move(executor)) {
@@ -256,31 +281,6 @@ GraphExecutor* getGradExecutor(Operation& op) {
 }
 
 } // namespace detail
-
-struct ExecutionPlan {
-  ExecutionPlan() = default;
-  ExecutionPlan(std::shared_ptr<Graph> graph)
-    : code(graph)
-    , graph(std::move(graph)) {}
-
-  void run(Stack& stack) const {
-    return InterpreterState(code).runOneStage(stack);
-  }
-
-  operator bool() const {
-    return static_cast<bool>(graph);
-  }
-
-  ExecutionPlanState getDebugState() {
-    ExecutionPlanState state;
-    state.code = &code;
-    state.graph = graph.get();
-    return state;
-  }
-
-  Code code;
-  std::shared_ptr<Graph> graph;
-};
 
 // a Graph can be created via tracing, or via a language-based frontend
 // GraphExecutor runs it. It can run the same graph on many different sizes
