@@ -71,7 +71,7 @@ static DeviceType getATenDeviceType(const DLContext& ctx) {
     default:
       throw std::logic_error("Unsupported device_type: " + std::to_string(ctx.device_type));
   }
-  __builtin_unreachable();
+  return DeviceType::CPU; // impossible
 }
 
 
