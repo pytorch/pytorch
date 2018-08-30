@@ -996,12 +996,12 @@ def _get_builtin_table():
     return _builtin_table
 
 
-def _register_builtin(callable, op):
-    _get_builtin_table()[id(callable)] = op
+def _register_builtin(fn, op):
+    _get_builtin_table()[id(fn)] = op
 
 
-def _find_builtin(callable):
-    return _get_builtin_table().get(id(callable))
+def _find_builtin(fn):
+    return _get_builtin_table().get(id(fn))
 
 
 if not torch._C._jit_init():
