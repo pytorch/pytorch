@@ -100,11 +100,6 @@ RegisterOperators reg({
             push(stack, s);
             return 0;
           };
-        } else if (type == WorldType::get()) {
-          return [](Stack& stack) {
-            push(stack, World());
-            return 0;
-          };
         } else {
           std::stringstream ss;
           ss << "constant literal not supported for: " << type->str();

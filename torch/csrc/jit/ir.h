@@ -1128,6 +1128,12 @@ public:
     return jit::insertConstant(*this, std::move(val), loc);
   }
 
+  Value* insertDummyWorld() {
+    auto node = create(prim::DummyWorld, 1);
+    node->output()->setType(WorldType::get());
+    return insertNode(node)->output();
+  }
+
   // schema-driven insert
   // this inserts a node into the graph with inputs determined from args and kwargs using Python
   // argument matching rules, and checks that the op matches a known schema

@@ -390,13 +390,14 @@ void Graph::lint() const {
         JIT_ASSERT(n->kind_ != prim::Return);
         JIT_ASSERT(n->kind_ != prim::EntryWorld);
         JIT_ASSERT(n->kind_ != prim::ExitWorld);
+        JIT_ASSERT(n->kind_ != prim::DummyWorld);
         check_node(n);
       }
 
       JIT_ASSERT(b->output_->kind() == prim::Return);
       check_node(b->output_);
-      check_node(b->exit_world_);
       JIT_ASSERT(b->exit_world_->kind() == prim::ExitWorld);
+      check_node(b->exit_world_);
 
       // all_nodes
       // - inputs_, output_ and nodes_ are all included in all_nodes
