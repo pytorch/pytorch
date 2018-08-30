@@ -772,9 +772,6 @@ endif()
 
 # ---[ Onnx
 if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
-  if (NOT DEFINED ONNX_NAMESPACE)
-    SET(ONNX_NAMESPACE "onnx_c2")
-  endif()
   if(EXISTS "${CAFFE2_CUSTOM_PROTOC_EXECUTABLE}")
     set(ONNX_CUSTOM_PROTOC_EXECUTABLE ${CAFFE2_CUSTOM_PROTOC_EXECUTABLE})
   endif()
@@ -791,6 +788,7 @@ if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   endif()
   add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/onnx)
   include_directories(${ONNX_INCLUDE_DIRS})
+  add_compile_definitions(ONNX_NAMESPACE=${ONNX_NAMESPACE})
   # In mobile build we care about code size, and so we need drop
   # everything (e.g. checker, optimizer) in onnx but the pb definition.
   if (ANDROID OR IOS)
@@ -798,8 +796,7 @@ if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   else()
     caffe2_interface_library(onnx onnx_library)
   endif()
-  list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS onnx_library)
-  install(TARGETS onnx_library EXPORT Caffe2Targets DESTINATION lib)
+  list(APPEND Caffe2_DEPENDENCY_WHOLE_LINK_LIBS onnx_library)
   list(APPEND Caffe2_DEPENDENCY_LIBS onnxifi_loader)
   # Recover the build shared libs option.
   set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS})
