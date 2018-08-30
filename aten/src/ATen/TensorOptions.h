@@ -97,14 +97,6 @@ struct AT_API TensorOptions {
     this->dtype(dtype);
   }
 
-  /// Constructs a `TensorOptions` object with a given `Device` and
-  /// `ScalarType` (we don't provide all of these multi-constructors,
-  /// but this particular one is used quite frequently.)
-  explicit TensorOptions(Device device, ScalarType dtype) : TensorOptions() {
-    this->device(device);
-    this->dtype(dtype);
-  }
-
   /// True if all elements of the `TensorOptions` match that of the other.
   bool operator==(const TensorOptions& other) const noexcept {
     return dtype_ == other.dtype_ && layout_ == other.layout_ &&

@@ -169,6 +169,6 @@ Tensor fromDLPack(const DLManagedTensor* src) {
       IntList(src->dl_tensor.shape, src->dl_tensor.ndim),
       IntList(src->dl_tensor.strides, src->dl_tensor.ndim),
       deleter,
-      TensorOptions(device_type, stype));
+      at::device(device_type).dtype(stype));
 }
 } //namespace at
