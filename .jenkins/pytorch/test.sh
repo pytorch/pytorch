@@ -81,7 +81,7 @@ test_aten() {
     # put the dynamic libraries somewhere were the dynamic linker can find them.
     # This is a bit of a hack.
     if [[ "$BUILD_ENVIRONMENT" == *ppc64le* ]]; then
-      SUDO=sudo 
+      SUDO=sudo
     fi
 
     ${SUDO} ln -s "$TORCH_LIB_PATH"/libcaffe2* build/bin
@@ -113,7 +113,7 @@ test_torchvision() {
 test_libtorch() {
   if [[ "$BUILD_TEST_LIBTORCH" == "1" ]]; then
      echo "Testing libtorch"
-     CPP_BUILD="$PWD/../cpp-build"
+     CPP_BUILD="$PWD/build_libtorch"
      if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
        "$CPP_BUILD"/caffe2/bin/test_jit
      else
