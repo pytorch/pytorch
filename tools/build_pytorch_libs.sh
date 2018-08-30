@@ -281,6 +281,12 @@ function build_caffe2() {
       # STOP!!! Are you trying to add a C or CXX flag?  Add it
       # to CMakeLists.txt and aten/CMakeLists.txt, not here.
       # We need the vanilla cmake build to work.
+
+  # This is needed by the aten tests built with caffe2
+  if [ -f "${INSTALL_DIR}/lib/libnccl.so" ] && [ ! -f "lib/libnccl.so.1" ]; then
+    cp "${INSTALL_DIR}/lib/libnccl.so.1" "lib/libnccl.so.1"
+  fi
+
   ${CMAKE_INSTALL} -j"$MAX_JOBS"
 
   # Install Python proto files
