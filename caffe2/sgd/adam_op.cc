@@ -34,7 +34,7 @@ and returns (param_o, m1_o, m2_o, grad_o), in which grad_o is an optional output
     .Output(0, "output_param", "Updated parameters")
     .Output(1, "output_moment_1", "Updated first moment")
     .Output(2, "output_moment_2", "Updated second moment")
-    .Output(3, "output_grad", "Effective grad")
+    .Output(3, "output_grad", "Optional Effective gradient")
     .Arg("beta1", "Default 0.9")
     .Arg("beta2", "Default 0.999")
     .Arg("epsilon", "Default 1e-5");
@@ -42,7 +42,7 @@ and returns (param_o, m1_o, m2_o, grad_o), in which grad_o is an optional output
 REGISTER_CPU_OPERATOR(SparseAdam, SparseAdamOp<float, CPUContext>);
 OPERATOR_SCHEMA(SparseAdam)
     .NumInputs(7)
-    .NumOutputs(3)
+    .NumOutputs(3, 4)
     .EnforceInplace({{0, 0}, {1, 1}, {2, 2}})
     .SetDoc(R"DOC(
 
@@ -62,6 +62,7 @@ OPERATOR_SCHEMA(SparseAdam)
     .Output(0, "output_param", "Updated parameters")
     .Output(1, "output_moment_1", "Updated first moment")
     .Output(2, "output_moment_2", "Updated second moment")
+    .Output(3, "output_grad", "Optional Effective gradient")
     .Arg("beta1", "Default 0.9")
     .Arg("beta2", "Default 0.999")
     .Arg("epsilon", "Default 1e-5");
@@ -71,7 +72,7 @@ REGISTER_CPU_OPERATOR(
     RowWiseSparseAdamOp<float, CPUContext>);
 OPERATOR_SCHEMA(RowWiseSparseAdam)
     .NumInputs(7)
-    .NumOutputs(3)
+    .NumOutputs(3, 4)
     .EnforceInplace({{0, 0}, {1, 1}, {2, 2}})
     .SetDoc(R"DOC(
 
@@ -95,6 +96,7 @@ OPERATOR_SCHEMA(RowWiseSparseAdam)
     .Output(0, "output_param", "Updated parameters")
     .Output(1, "output_moment_1", "Updated first moment")
     .Output(2, "output_moment_2", "Updated second moment")
+    .Output(3, "output_grad", "Optional Effective gradient")
     .Arg("beta1", "Default 0.9")
     .Arg("beta2", "Default 0.999")
     .Arg("epsilon", "Default 1e-5");
