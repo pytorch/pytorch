@@ -97,7 +97,7 @@ void registerLayoutObject(THPLayout *layout, at::Backend backend) {
   layout_registry[static_cast<int>(backend)] = layout;
 }
 
-at::Type& getType(at::ScalarType scalarType, const THPLayout& layout, const at::Device& device) {
+at::Type& getVariableType(at::ScalarType scalarType, const THPLayout& layout, const at::Device& device) {
   const at::Backend backend = get_backend(device.type() == at::Device::Type::CUDA, layout.layout == at::Layout::Sparse);
   auto baseType = at::globalContext().getNonVariableTypeOpt(backend, scalarType);
   if (!baseType) {
@@ -109,7 +109,7 @@ at::Type& getType(at::ScalarType scalarType, const THPLayout& layout, const at::
     }
     throw std::runtime_error(oss.str());
   }
-  return *torch::autograd::VariableType::getType(*baseType);
+  return *torch::autograd::VariableType::getVariableTypeFromBaseType(*baseType);
 }
 
 THPDtype* getDtype(at::ScalarType scalarType) {
