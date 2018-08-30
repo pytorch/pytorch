@@ -721,7 +721,7 @@ class TestJit(JitTestCase):
             local_fusion_inputs = [t.clone().requires_grad_() for t in fusion_inputs]
 
             # Verifies outputs
-            fusion = torch.jit.trace(fn, local_fusion_inputs, optimize=True)
+            fusion = torch.jit.trace(fn, local_fusion_inputs, check_trace=False, optimize=True)
             outputs = fn(*local_inputs)
             fusion_outputs = fusion(*local_fusion_inputs)
             outputs_half = [t.half() for t in outputs]
