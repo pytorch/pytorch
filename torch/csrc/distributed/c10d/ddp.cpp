@@ -11,14 +11,23 @@
 #include <memory>
 #include <vector>
 
+
+
+
+#include <iostream>
+
+
+
+
 namespace c10d {
 namespace {
+/// For every replica except the root, copy the data from `broadcastTensors`
+/// to `replicaData`.
 void copyBroadcastTensorsToReplicas(
     const std::vector<std::vector<at::Tensor>>& broadcastTensors,
     std::vector<std::vector<at::Tensor>>& replicaData) {
   AT_ASSERT(replicaData.size() == broadcastTensors.size());
-  // For every replica except the root, copy the data from `broadcastTensors` to
-  // `replicaData`.
+  // replica = 1 means we skip the root (replica 0).
   for (size_t replica = 1; replica < replicaData.size(); ++replica) {
     AT_ASSERT(replicaData[replica].size() == broadcastTensors[replica].size());
     for (size_t tensor = 0; tensor < replicaData[replica].size(); ++tensor) {
@@ -74,30 +83,42 @@ void syncParams(
     const std::vector<int64_t>& devices,
     int64_t broadcastBucketSize,
     bool broadcastBuffers) {
+  std::cout << 1 << std::endl;
   AT_ASSERT(!parameterData.empty());
   AT_ASSERT(!bufferData.empty());
   AT_ASSERT(!devices.empty());
+  std::cout << 2 << std::endl;
 
   // Do an intra-node sync if we have more than one device.
   if (devices.size() > 1) {
+    std::cout << 3 << std::endl;
     // Broadcast the parameters, get back a vector<vector<Tensor>>, one
     // vector<Tensor> per device. Each such vector then needs to be copied into
     // the `parameterData` of every step.
     auto result = torch::cuda::broadcast_coalesced(
         parameterData[0], devices, broadcastBucketSize);
+    std::cout << 4 << std::endl;
     copyBroadcastTensorsToReplicas(result, parameterData);
+    std::cout << 5 << std::endl;
   }
+  std::cout << 6 << std::endl;
 
   if (broadcastBuffers && !bufferData[0].empty()) {
+    std::cout << 7 << std::endl;
     // Do an inter-node sync first.
     distBroadcastCoalesced(bufferData[0], broadcastBucketSize, processGroup);
+    std::cout << 8 << std::endl;
     // Then an intra-node sync if we have more than one device.
     if (devices.size() > 1) {
+      std::cout << 9 << std::endl;
       auto result = torch::cuda::broadcast_coalesced(
           bufferData[0], devices, broadcastBucketSize);
+      std::cout << 10 << std::endl;
       copyBroadcastTensorsToReplicas(result, bufferData);
+      std::cout << 11 << std::endl;
     }
   }
+  std::cout << 12 << std::endl;
 }
 
 } // namespace c10d

@@ -663,6 +663,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         else:
             buffer_data = [torch.zeros(10, device=torch.device('cuda', d)).chunk(5) for d in devices]
 
+        print('Calling c10d._sync_params')
         c10d._sync_params(
             process_group,
             parameter_data=parameter_data,
