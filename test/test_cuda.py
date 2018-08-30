@@ -1632,10 +1632,10 @@ class TestCuda(TestCase):
         self.assertEqual(v, expected)
 
     def test_max_with_inf(self):
-        TestTorch._test_max_with_inf(self, 'cuda')
+        TestTorch._test_max_with_inf(self, (torch.half, torch.float, torch.double), 'cuda')
 
     def test_min_with_inf(self):
-        TestTorch._test_min_with_inf(self, 'cuda')
+        TestTorch._test_min_with_inf(self, (torch.half, torch.float, torch.double), 'cuda')
 
     def test_int_pow(self):
         TestTorch._test_int_pow(self, lambda x: x.cuda())
