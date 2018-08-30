@@ -2397,29 +2397,23 @@ class TestTorch(TestCase):
             self.assertEqual(5., res1[0].item())
 
     def test_tensor_factory_copy_var(self):
-        # default copy from var
-        source = torch.randn(5, 5, requires_grad=True)
-        copy = torch.tensor(source)
-        self.assertEqual(copy.data, source.data)
-        self.assertTrue(source.requires_grad)
-        self.assertTrue(copy.is_leaf)
-        self.assertFalse(copy.requires_grad)
 
-        # copy with requires_grad=False
-        source = torch.randn(5, 5, requires_grad=True)
-        copy = torch.tensor(source, requires_grad=False)
-        self.assertEqual(copy.data, source.data)
-        self.assertTrue(source.requires_grad)
-        self.assertTrue(copy.is_leaf)
-        self.assertFalse(copy.requires_grad)
+        def check_copy(copy, copy_is_leaf, copy_requires_grad):
+            self.assertEqual(copy.data, source.data)
+            self.assertTrue(copy.is_leaf == copy_is_leaf)
+            self.assertTrue(copy.requires_grad == copy_requires_grad)
 
-        # copy with requires_grad=True
         source = torch.randn(5, 5, requires_grad=True)
-        copy = torch.tensor(source, requires_grad=True)
-        self.assertEqual(copy.data, source.data)
-        self.assertTrue(source.requires_grad)
-        self.assertTrue(copy.is_leaf)
-        self.assertTrue(copy.requires_grad)
+        # == test torch.tensor() ==
+        check_copy(torch.tensor(source), True, False)
+        check_copy(torch.tensor(source, requires_grad=False), True, False)
+        check_copy(torch.tensor(source, requires_grad=True), True, True)
+
+        # == test tensor.new_tensor() ==
+        copy = torch.randn(1)
+        check_copy(copy.new_tensor(source), True, False)
+        check_copy(copy.new_tensor(source, requires_grad=False), True, False)
+        check_copy(copy.new_tensor(source, requires_grad=True), True, True)
 
     def test_tensor_factory_type_inference(self):
         def test_inference(default_dtype):

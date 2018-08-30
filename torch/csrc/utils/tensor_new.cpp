@@ -197,7 +197,7 @@ void recursive_store(char* data, IntList sizes, IntList strides, int64_t dim,
 
 Tensor internal_new_from_data(const Type & type, at::optional<Device> device_opt, PyObject* data,
                                      bool copy_variables, bool copy_numpy,
-                                     bool type_inference, bool args_requires_grad=false) {
+                                     bool type_inference) {
   int32_t device_index = -1;
   if (device_opt.has_value()) {
     device_index = device_opt->index();
@@ -207,10 +207,6 @@ Tensor internal_new_from_data(const Type & type, at::optional<Device> device_opt
   }
 
   if (THPVariable_Check(data)) {
-      PyErr_WarnEx(PyExc_UserWarning,
-        "To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() "
-        "or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).", 1);
-
       auto var = reinterpret_cast<THPVariable*>(data)->cdata;
       auto type_inference_device_type = device_opt.has_value() ? device_opt->type()
                                                                : torch::getDeviceType(var.type());
@@ -220,11 +216,8 @@ Tensor internal_new_from_data(const Type & type, at::optional<Device> device_opt
                                                        *torch::getLayout(type.backend()),
                                                        type_inference_device_type);
       const auto& type_to_use = type_inference ? type_inference_type : type;
-      auto new_tensor = copy_variables ? new_with_tensor_copy(type_to_use, var, device_index) :
+      return copy_variables ? new_with_tensor_copy(type_to_use, var, device_index) :
                               new_with_type_conversion(type_to_use, var, device_index);
-      new_tensor.detach_(); // making copy constructed tensor a leaf node
-      new_tensor.set_requires_grad(args_requires_grad);
-      return new_tensor;
   }
 
 #ifdef USE_NUMPY
@@ -506,18 +499,22 @@ Tensor tensor_ctor(const Type& type, PyObject* args, PyObject* kwargs) {
   ParsedArgs<4> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
+    PyErr_WarnEx(PyExc_UserWarning,
+      "To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() "
+      "or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).", 1);
+
     bool type_inference = r.isNone(1);
-    // args_requires_grad=True if requires_grad is set to True (requires_grad=True)
     bool args_requires_grad = r.toBool(3);
-    return internal_new_from_data(
+    auto new_tensor = internal_new_from_data(
                typeWithDefault(r, 1, 2, type),
                r.deviceOptional(2),
                r.pyobject(0),
                true,
                true,
-               type_inference,
-               args_requires_grad)
-        .set_requires_grad(r.toBool(3));
+               type_inference);
+    new_tensor.detach_(); // making new_tensor a leaf node
+    new_tensor.set_requires_grad(args_requires_grad);
+    return new_tensor;
   }
   throw std::runtime_error("tensor(): invalid arguments");
 }
@@ -546,11 +543,18 @@ Tensor new_tensor(const Type& type, PyObject* args, PyObject* kwargs) {
   ParsedArgs<4> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
-    return new_from_data_copy(
+    PyErr_WarnEx(PyExc_UserWarning,
+      "To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() "
+      "or sourceTensor.clone().detach().requires_grad_(True), rather than tensor.new_tensor(sourceTensor).", 1);
+
+    bool args_requires_grad = r.toBool(3);
+    auto new_tensor = new_from_data_copy(
                typeWithDefault(r, 1, 2, type),
                r.deviceOptional(2),
-               r.pyobject(0))
-        .set_requires_grad(r.toBool(3));
+               r.pyobject(0));
+    new_tensor.detach_(); // making new_tensor a leaf node
+    new_tensor.set_requires_grad(args_requires_grad);
+    return new_tensor;
   }
   throw std::runtime_error("new_tensor(): invalid arguments");
 }
