@@ -10,10 +10,10 @@ namespace jit {
 // range.
 struct SourceRange : public SourceLocation {
   SourceRange(
-      const std::shared_ptr<std::string>& file_,
+      std::shared_ptr<std::string> file_,
       size_t start_,
       size_t end_)
-      : file_(file_), start_(start_), end_(end_) {}
+      : file_(std::move(file_)), start_(start_), end_(end_) {}
   const std::string text() const {
     return file().substr(start(), end() - start());
   }

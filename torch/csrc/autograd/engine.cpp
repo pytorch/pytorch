@@ -371,6 +371,7 @@ static variable_list call_function(FunctionTask& task) {
   checkpoint_valid = prev_checkpoint_valid_state;
 
   if(has_post_hooks){
+    // NOLINTNEXTLINE(bugprone-use-after-move)
     return call_post_hooks(fn, std::move(outputs), std::move(inputs));
   }
   return outputs;
