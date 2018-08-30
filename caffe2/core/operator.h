@@ -96,6 +96,9 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
       // TODO(jerryzh): We'll need to check device type in Get<T>() later
       // Get<T>() -> Get<T>(type)
       const auto& tensor = inputs_.at(idx)->template Get<T>();
+      CAFFE_ENFORCE(
+          tensor.is_contiguous(),
+          "Tensor must be contiguous for caffe2 operators");
       return tensor;
     } catch (::caffe2::EnforceNotMet& enf) {
       if (has_debug_def()) {
@@ -122,7 +125,11 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
     static_assert(
         std::is_same<T, Tensor>::value,
         "Output(int, DeviceType) is only available for Tensor");
-    return outputs_.at(idx)->GetMutableTensor(type);
+    auto* tensor = outputs_.at(idx)->GetMutableTensor(type);
+    CAFFE_ENFORCE(
+        tensor->is_contiguous(),
+        "Tensor must be contiguous for caffe2 operators");
+    return tensor;
   }
 
   template <typename T>
