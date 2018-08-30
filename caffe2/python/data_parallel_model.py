@@ -133,7 +133,7 @@ def Parallelize(
         device scope was: {}".format(scope.CurrentDeviceScope())
 
     if devices is None:
-        devices = list(range(0, workspace.NumCudaDevices())),
+        devices = list(range(0, workspace.NumCudaDevices()))
 
     if not cpu_device:
         for gpu in devices:
