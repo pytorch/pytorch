@@ -1861,12 +1861,13 @@ std::shared_ptr<SugaredValue> nativeResolver(const std::string& name, Method& m,
   return nullptr;
 }
 
-std::vector<Value*> inlineCallTo(Graph& g, Graph& callee, ArrayRef<Value*> inputs) {
+std::vector<Value*> inlineCallTo(Graph& g, Graph& originalCallee, ArrayRef<Value*> inputs) {
+  auto callee = originalCallee.copy();
   std::unordered_map<Value*, Value*> value_map;
   auto value_map_func = [&](Value* v) { return value_map.at(v); };
-  JIT_ASSERT(callee.inputs().size() == inputs.size());
+  JIT_ASSERT(callee->inputs().size() == inputs.size());
   for (size_t i = 0; i < inputs.size(); ++i) {
-    value_map[callee.inputs()[i]] = inputs[i];
+    value_map[callee->inputs()[i]] = inputs[i];
   }
 
   // Inlined graphs need to expose their EntryWorld and ExitWorld nodes, so that
@@ -1880,9 +1881,9 @@ std::vector<Value*> inlineCallTo(Graph& g, Graph& callee, ArrayRef<Value*> input
   // metadata and don't need to expose EntryWorld and ExitWorld like this.
   auto* storeWorld = g.insertNode(g.create(prim::StoreWorld));
   storeWorld->output()->setType(WorldType::get());
-  value_map[callee.entryWorld()] = storeWorld->output();
+  value_map[callee->entryWorld()] = storeWorld->output();
 
-  for (auto* node : callee.nodes()) {
+  for (auto* node : callee->nodes()) {
     auto* new_node =
         g.insertNode(g.createClone(node, value_map_func));
     for (size_t i = 0; i < node->outputs().size(); ++i) {
@@ -1891,10 +1892,10 @@ std::vector<Value*> inlineCallTo(Graph& g, Graph& callee, ArrayRef<Value*> input
   }
 
   auto* loadWorld = g.insertNode(g.create(prim::LoadWorld, 0));
-  loadWorld->addInput(value_map[callee.exitWorld()]);
+  loadWorld->addInput(value_map[callee->exitWorld()]);
 
   std::vector<Value*> outputs;
-  for (auto* output : callee.outputs()) {
+  for (auto* output : callee->outputs()) {
     outputs.push_back(value_map_func(output));
   }
   return outputs;
