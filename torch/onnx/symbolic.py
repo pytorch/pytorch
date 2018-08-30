@@ -1160,3 +1160,8 @@ rnn_relu = _one_hidden_rnn('RNN_RELU')
 @parse_args('v', 'i')
 def _dim_arange(g, like, dim):
     return g.op('ATen', like, dim_i=dim, operator_s='_dim_arange')
+
+
+def detach(g, input):
+    # Erase aten::detach nodes because ONNX is inference only
+    return input

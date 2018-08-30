@@ -159,7 +159,6 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/passes/dead_code_elimination.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/decompose_addmm.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/erase_number_types.cpp
-  ${TORCH_SRC_DIR}/csrc/jit/passes/erase_detach.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/graph_fuser.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/inplace_check.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/loop_unrolling.cpp

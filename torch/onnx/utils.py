@@ -140,8 +140,6 @@ def _optimize_graph(graph, operator_export_type):
 
     # onnx only supports tensors, so we turn all out number types into tensors
     torch._C._jit_pass_erase_number_types(graph)
-    # remove detach nodes. ONNX is inference only so this is safe
-    torch._C._jit_pass_erase_detach(graph)
     # onnx does not support tuples, so try to remove them
     torch._C._jit_pass_lower_all_tuples(graph)
     torch._C._jit_pass_peephole(graph)
