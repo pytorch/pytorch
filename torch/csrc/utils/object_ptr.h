@@ -35,4 +35,4 @@ private:
  * out the GIL itself.  Easiest way to avoid this problem is to
  * not use THPPointer in this situation.
  */
-typedef THPPointer<PyObject> THPObjectPtr;
+using THPObjectPtr = THPPointer<PyObject>;
