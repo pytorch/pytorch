@@ -138,9 +138,9 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
       BaseContext* context)
       : storage_(context->GetDevicetype(), TypeMeta::Make<T>()) {
     Resize(dims);
-    CAFFE_ENFORCE_EQ_WITH_CALLER(values.size(), size_);
+    CAFFE_ENFORCE_EQ_WITH_CALLER(values.size(), numel_);
     context->CopyItemsFromCPU(
-        storage_.dtype(), size_, values.data(), mutable_data<T>());
+        storage_.dtype(), numel_, values.data(), mutable_data<T>());
   }
 
   /**
@@ -154,7 +154,7 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
       : storage_(context->GetDevicetype(), TypeMeta::Make<T>()) {
     Resize(vector<TIndex>{});
     context->CopyItemsFromCPU(
-        storage_.dtype(), size_, &value, mutable_data<T>());
+        storage_.dtype(), numel_, &value, mutable_data<T>());
   }
 
   /**
@@ -214,7 +214,7 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
       dims_.clear();
       strides_.clear();
       is_contiguous_ = true;
-      size_ = -1;
+      numel_ = -1;
       storage_.reset();
       return;
     }
@@ -286,21 +286,21 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
       Resize(newDims);
       return;
     }
-    auto newSize = std::accumulate(
+    auto newNumel = std::accumulate(
         newDims.begin(),
         newDims.end(),
         static_cast<TIndex>(1),
         std::multiplies<TIndex>());
-    if (newSize * storage_.itemsize() <= storage_.capacity()) {
+    if (newNumel * storage_.itemsize() <= storage_.capacity()) {
       dims_ = newDims;
-      size_ = newSize;
+      numel_ = newNumel;
       return;
     }
     auto newCapacity = dims_;
     newCapacity[0] = std::max<size_t>(
         newDims[0], std::ceil(dims_[0] * (growthPct + 100) / 100));
     auto oldData = std::move(storage_.data_ptr());
-    auto oldSize = size_;
+    auto oldSize = numel_;
     auto oldDims = dims_;
     Resize(newCapacity);
     auto* newData = raw_mutable_data(storage_.dtype());
@@ -310,7 +310,7 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
         storage_.dtype(), oldSize, oldData.get(), newData);
     reserved_ = true;
     dims_ = newDims;
-    size_ = newSize;
+    numel_ = newNumel;
   }
 
   /**
@@ -330,7 +330,7 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
         storage_.unique(),
         "Can't call ShrinkTo on shared storage, please call Resize instead.");
     dims_[0] = outer_dim;
-    size_ = std::accumulate(
+    numel_ = std::accumulate(
         dims_.begin(),
         dims_.end(),
         static_cast<TIndex>(1),
@@ -349,28 +349,28 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
         is_contiguous_,
         "Tensor must be contiguous in order to call ReserveSpace.");
     CAFFE_ENFORCE(
-        size_ != -1, "size should be initialized before calling ReserveSpace");
+        numel_ != -1, "size should be initialized before calling ReserveSpace");
     CAFFE_ENFORCE(
         storage_.unique(), "Can't call ReserveSpace on shared storage.");
     auto newCapacity = dims_;
     newCapacity[0] = outer_dim;
-    auto newSize = std::accumulate(
+    auto newNumel = std::accumulate(
         newCapacity.begin(),
         newCapacity.end(),
         static_cast<TIndex>(1),
         std::multiplies<TIndex>());
-    if (newSize * storage_.itemsize() <= storage_.capacity()) {
+    if (newNumel * storage_.itemsize() <= storage_.capacity()) {
       return;
     }
     // Old data is discarded
     storage_.data_ptr().reset();
-    auto oldSize = size_;
+    auto oldSize = numel_;
     auto oldDims = dims_;
     Resize(newCapacity);
     // Allocate new memory but don't copy over the data
     raw_mutable_data(storage_.dtype());
     dims_ = oldDims;
-    size_ = oldSize;
+    numel_ = oldSize;
     reserved_ = true;
   }
 
@@ -389,7 +389,7 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    */
   template <typename... Ts>
   void Resize(Ts... dim_source) {
-    bool is_init = size_ == -1;
+    bool is_init = numel_ == -1;
     bool size_changed = SetDims(dim_source...);
     if (size_changed) {
       // If needed, we will free the data. the next mutable_data() call
@@ -398,11 +398,11 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
       if (reserved_) {
         // If tensor is reserved then don't claim its memeory unless capacity()
         // is smaller than new size
-        reset_tensor = storage_.capacity() < size_ * storage_.itemsize();
+        reset_tensor = storage_.capacity() < numel_ * storage_.itemsize();
       } else {
-        reset_tensor = storage_.capacity() < size_ * storage_.itemsize() ||
+        reset_tensor = storage_.capacity() < numel_ * storage_.itemsize() ||
             !FLAGS_caffe2_keep_on_shrink ||
-            storage_.capacity() - size_ * storage_.itemsize() >
+            storage_.capacity() - numel_ * storage_.itemsize() >
                 FLAGS_caffe2_max_keep_on_shrink_memory;
       }
 
@@ -439,7 +439,7 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
       new_size *= d;
     }
     CAFFE_ENFORCE_WITH_CALLER(
-        new_size == size_,
+        new_size == numel_,
         "New size and old size are not equal. You cannot use Reshape, "
         "but should use Resize."
         // TODO(jiayq): remove the following warning after pending diffs
@@ -484,7 +484,7 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     std::swap(dims_, other.dims_);
     std::swap(strides_, other.strides_);
     std::swap(is_contiguous_, other.is_contiguous_);
-    std::swap(size_, other.size_);
+    std::swap(numel_, other.numel_);
     std::swap(storage_, other.storage_);
   }
 
@@ -505,14 +505,14 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     // inherently the same in the non-templatized code. We should probably add
     // an ENFORCE here which might affect perf a little bit.
     CAFFE_ENFORCE_EQ_WITH_CALLER(
-        src.size_,
-        size_,
+        src.numel_,
+        numel_,
         "Size mismatch - did you call reshape before sharing the data?");
     // It is possible that the source tensor hasn't called mutable_data() yet,
     // in which case ShareData() doesn't make much sense since we don't really
     // know what to share yet.
     CAFFE_ENFORCE_WITH_CALLER(
-        src.storage_.data() || src.size_ == 0,
+        src.storage_.data() || src.numel_ == 0,
         "Source tensor has no content and has size > 0");
     // Finally, do sharing.
     /* Since we create new Storage whenever we need to change data_type/capacity
@@ -549,11 +549,11 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
         "To share with a raw external pointer you need to pass in an "
         "initialized data_type(TypeMeta).");
     if (!capacity) {
-      capacity = size_ * data_type.itemsize();
+      capacity = numel_ * data_type.itemsize();
     }
     if (storage_.unique()) {
       CAFFE_ENFORCE_WITH_CALLER(
-          size_ >= 0,
+          numel_ >= 0,
           "To share data with a raw pointer, you need to set shape first.");
       storage_.UniqueStorageShareExternalPointer(src, data_type, capacity, d);
     } else {
@@ -570,7 +570,7 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     CAFFE_ENFORCE_WITH_CALLER(
         is_contiguous_,
         "Tensor must be contiguous in order to call raw_data()");
-    CAFFE_ENFORCE_WITH_CALLER(storage_.data() || size_ == 0);
+    CAFFE_ENFORCE_WITH_CALLER(storage_.data() || numel_ == 0);
     return storage_.data();
   }
 
@@ -585,7 +585,7 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     CAFFE_ENFORCE_WITH_CALLER(
         is_contiguous_, "Tensor must be contiguous in order to call data()");
     CAFFE_ENFORCE_WITH_CALLER(
-        storage_.data() || size_ == 0,
+        storage_.data() || numel_ == 0,
         "The tensor is of non-zero shape, but its data is not allocated yet. "
         "Caffe2 uses a lazy allocation, so you will need to call "
         "mutable_data() or raw_mutable_data() to actually allocate memory.");
@@ -614,7 +614,7 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
         is_contiguous_,
         "Tensor must be contiguous in order to call raw_mutable_data()");
     // For 0-size tensors it's fine to return any pointer (including nullptr)
-    if (storage_.dtype() == meta && (storage_.data() || size_ == 0)) {
+    if (storage_.dtype() == meta && (storage_.data() || numel_ == 0)) {
       return storage_.data();
     } else {
       bool had_special_dtor = storage_.dtype().dtor() != nullptr;
@@ -628,41 +628,41 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
         }
       }
       CAFFE_ENFORCE_WITH_CALLER(
-          size_ >= 0,
+          numel_ >= 0,
           "Tensor is not initialized. You probably need to call Resize() "
           "before calling mutable_data()");
 
       // We can reuse the existing buffer if the current data does not have
       // a special destructor and the new data doesn't have a special
       // constructor.
-      if (size_ == 0 ||
+      if (numel_ == 0 ||
           (meta.ctor() == nullptr && !had_special_dtor &&
-           storage_.capacity() >= size_ * storage_.itemsize())) {
+           storage_.capacity() >= numel_ * storage_.itemsize())) {
         return storage_.data();
       }
       if (meta.ctor()) {
         // For types that need placement new, we will call it, as well as
         // making sure that when the data is freed, it calls the right
         // destruction procedure.
-        auto size = size_;
+        auto size = numel_;
         auto dtor = storage_.dtype().dtor();
         auto ptr_and_deleter =
-            GetStaticContext()->New(size_ * storage_.itemsize());
+            GetStaticContext()->New(numel_ * storage_.itemsize());
         auto deleter = ptr_and_deleter.second;
         storage_.data_ptr().reset(
             ptr_and_deleter.first, [size, dtor, deleter](void* ptr) -> void {
               dtor(ptr, size);
               deleter(ptr);
             });
-        storage_.dtype().ctor()(storage_.data(), size_);
+        storage_.dtype().ctor()(storage_.data(), numel_);
       } else {
         // For fundamental type, new and delete is easier.
         auto ptr_and_deleter =
-            GetStaticContext()->New(size_ * storage_.itemsize());
+            GetStaticContext()->New(numel_ * storage_.itemsize());
         storage_.data_ptr().reset(
             ptr_and_deleter.first, ptr_and_deleter.second);
       }
-      storage_.set_numel(size_);
+      storage_.set_numel(numel_);
       return storage_.data();
     }
   }
@@ -698,7 +698,7 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     CAFFE_ENFORCE_WITH_CALLER(
         is_contiguous_,
         "Tensor must be contiguous in order to call mutable_data()");
-    if ((size_ == 0 || storage_.data()) && IsType<T>()) {
+    if ((numel_ == 0 || storage_.data()) && IsType<T>()) {
       return static_cast<T*>(storage_.data());
     }
     // Check it here statically - otherwise TypeMeta would throw the runtime
@@ -719,7 +719,7 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * Returns the size (i.e. the number of items) of the tensor.
    */
   inline TIndex size() const {
-    return size_;
+    return numel_;
   }
   /**
    * Return the number of bytes each item takes in the tensor.
@@ -733,7 +733,7 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * This is equivalent to calling size() * itemsize().
    */
   inline size_t nbytes() const {
-    return size_ * itemsize();
+    return numel_ * itemsize();
     ;
   }
 
@@ -851,7 +851,7 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
  protected:
   DimVector dims_; // sizes_
   DimVector strides_;
-  TIndex size_ = -1; // numel_
+  TIndex numel_ = -1; // numel_
   bool is_contiguous_ = true;
   // we decide to keep reserved_ and it will
   // live in Tensor after the split
@@ -866,70 +866,70 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
       typename T,
       typename = typename std::enable_if<std::is_integral<T>::value>::type>
   bool SetDims(const vector<T>& src) {
-    auto old_size = size_;
+    auto old_numel = numel_;
     dims_.resize(src.size());
-    TIndex new_size = 1;
+    TIndex new_numel = 1;
     for (size_t i = 0; i < src.size(); ++i) {
-      new_size *= src[i];
+      new_numel *= src[i];
       dims_[i] = src[i];
     }
     update_strides();
-    size_ = new_size;
-    return size_ != old_size;
+    numel_ = new_numel;
+    return numel_ != old_numel;
   }
 
   bool SetDims() {
-    auto old_size = size_;
+    auto old_numel = numel_;
     dims_.resize(0);
     update_strides();
-    size_ = 1;
-    return size_ != old_size;
+    numel_ = 1;
+    return numel_ != old_numel;
   }
 
   // TODO(jiayq): maybe rewrite the following functions with initializer list.
   // NVCC does not play well with initializer lists last time, but worth
   // another shot.
   bool SetDims(const TIndex d0) {
-    auto old_size = size_;
+    auto old_numel = numel_;
     dims_.resize(1);
     dims_[0] = d0;
     update_strides();
-    size_ = d0;
-    return size_ != old_size;
+    numel_ = d0;
+    return numel_ != old_numel;
   }
 
   bool SetDims(const TIndex d0, const TIndex d1) {
-    auto old_size = size_;
+    auto old_numel = numel_;
     dims_.resize(2);
     dims_[0] = d0;
     dims_[1] = d1;
     update_strides();
-    size_ = d0 * d1;
-    return size_ != old_size;
+    numel_ = d0 * d1;
+    return numel_ != old_numel;
   }
 
   bool SetDims(const TIndex d0, const TIndex d1, const TIndex d2) {
-    auto old_size = size_;
+    auto old_numel = numel_;
     dims_.resize(3);
     dims_[0] = d0;
     dims_[1] = d1;
     dims_[2] = d2;
     update_strides();
-    size_ = d0 * d1 * d2;
-    return size_ != old_size;
+    numel_ = d0 * d1 * d2;
+    return numel_ != old_numel;
   }
 
   bool
   SetDims(const TIndex d0, const TIndex d1, const TIndex d2, const TIndex d3) {
-    auto old_size = size_;
+    auto old_numel = numel_;
     dims_.resize(4);
     dims_[0] = d0;
     dims_[1] = d1;
     dims_[2] = d2;
     dims_[3] = d3;
     update_strides();
-    size_ = d0 * d1 * d2 * d3;
-    return size_ != old_size;
+    numel_ = d0 * d1 * d2 * d3;
+    return numel_ != old_numel;
   }
   inline void update_strides() {
     strides_.resize(dims_.size());
