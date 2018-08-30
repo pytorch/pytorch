@@ -952,6 +952,57 @@ private:
     return v;
   }
 
+
+  Value * emitShortCircuitIf(
+      const SourceRange& loc,
+      const TreeRef & first_expr,
+      const TreeRef & second_expr,
+      bool is_or) {
+    Value * first_value = emitCond(Expr(first_expr));
+
+    // If this is an AND, eval second expression if first expr is True
+    // if this is an OR, eval second expression if first expr is False.
+    Value * cond_value = first_value;
+    if (is_or) {
+      cond_value = emitBuiltinCall(
+        loc,
+        *method.graph(),
+        aten::__not__,
+        NamedValue(first_expr->range(), first_value),
+        {},
+        /*required=*/true);
+    }
+
+    Node* n = graph->insertNode(create(prim::If, loc, 0));
+    n->addInput(cond_value);
+    auto* true_block = n->addBlock();
+    auto* false_block = n->addBlock();
+
+    auto get_first_expr = [first_value] {
+      return first_value;
+    };
+    auto get_second_expr = [&] {
+      return emitCond(Expr(second_expr));
+    };
+
+    auto emit_if_expr = [this](Block* b, std::function<Value *(void)> value_lambda) {
+      pushFrame(b);
+      WithInsertPoint guard(b);
+      Value* out_val = value_lambda();
+      b->registerOutput(out_val);
+      popFrame();
+    };
+
+    // if the conditional is true, return the second expression,
+    // if it is false, return the first expression
+    emit_if_expr(true_block, get_second_expr);
+    emit_if_expr(false_block, get_first_expr);
+
+    auto expr_value = n->addOutput()->setType(IntType::get());
+    return expr_value;
+  }
+
+
   void emitIf(const If& stmt) {
     Value* cond_value = emitCond(stmt.cond());
 
@@ -1442,8 +1493,6 @@ private:
     switch (tree->kind()) {
       case '@':
       case TK_POW:
-      case TK_AND:
-      case TK_OR:
       case TK_NOT:
       case TK_NE:
       case TK_EQ:
@@ -1466,6 +1515,15 @@ private:
                    named_values,
                    {},
                    /*required=*/true);
+      }
+      case TK_AND:
+      case TK_OR: {
+        const auto& inputs = tree->trees();
+        return emitShortCircuitIf(
+          tree->range(),
+          inputs[0],
+          inputs[1],
+          tree->kind() == TK_OR);
       }
       case TK_STARRED: {
         throw ErrorReport(tree) << "Unexpected starred expansion. File a bug report.";
