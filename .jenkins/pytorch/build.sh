@@ -14,7 +14,7 @@ fi
 if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda8-* ]] || [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9-cudnn7-py2* ]]; then
   # TODO: move this to Docker
   sudo apt-get update
-  sudo apt-get install openmpi-bin libopenmpi-dev
+  sudo apt-get install -y --allow-downgrades --allow-change-held-packages openmpi-bin libopenmpi-dev
   sudo apt-get install -y --no-install-recommends openssh-client openssh-server
   sudo mkdir -p /var/run/sshd
 fi
