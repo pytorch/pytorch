@@ -84,6 +84,13 @@ public:
     }
     return ret;
   }
+  Vec256<T> map2(const Vec256<T> other, T (*f)(T, T)) const {
+    Vec256<T> ret;
+    for (int64_t i = 0; i != size; i++) {
+      ret[i] = f(values[i], other[i]);
+    }
+    return ret;
+  }
   Vec256<T> abs() const {
     Vec256<T> ret;
     for (int64_t i = 0; i < size; i++) {
@@ -166,46 +173,33 @@ public:
   Vec256<T> rsqrt() const {
     return map([](T x) { return 1 / std::sqrt(x); });
   }
+  Vec256<T> pow(const Vec256<T> &b) const {
+    return map2(b, [](T x, T y)->T{ return std::pow(x, y); });
+  }
 };
 
 template <class T> Vec256<T> operator+(const Vec256<T> &a, const Vec256<T> &b) {
-  Vec256<T> c = Vec256<T>();
-  for (int i = 0; i != Vec256<T>::size; i++) {
-    c[i] = a[i] + b[i];
-  }
-  return c;
+  return a.map2(b, [](T x, T y)->T{ return x + y; });
 }
 
 template <class T> Vec256<T> operator-(const Vec256<T> &a, const Vec256<T> &b) {
-  Vec256<T> c = Vec256<T>();
-  for (int i = 0; i != Vec256<T>::size; i++) {
-    c[i] = a[i] - b[i];
-  }
-  return c;
+  return a.map2(b, [](T x, T y)->T{ return x - y; });
 }
 
 template <class T> Vec256<T> operator*(const Vec256<T> &a, const Vec256<T> &b) {
-  Vec256<T> c = Vec256<T>();
-  for (int i = 0; i != Vec256<T>::size; i++) {
-    c[i] = a[i] * b[i];
-  }
-  return c;
+  return a.map2(b, [](T x, T y)->T{ return x * y; });
 }
 
 template <class T> Vec256<T> operator/(const Vec256<T> &a, const Vec256<T> &b) __ubsan_ignore_float_divide_by_zero__ {
-  Vec256<T> c = Vec256<T>();
-  for (int i = 0; i != Vec256<T>::size; i++) {
-    c[i] = a[i] / b[i];
-  }
-  return c;
+  return a.map2(b, [](T x, T y)->T{ return x / y; });
 }
 
 template <class T> Vec256<T> max(const Vec256<T> &a, const Vec256<T> &b) {
-  Vec256<T> c = Vec256<T>();
-  for (int i = 0; i != Vec256<T>::size; i++) {
-    c[i] = std::max(a[i], b[i]);
-  }
-  return c;
+  return a.map2(b, [](T x, T y)->T{ return std::max(x, y); });
+}
+
+template <class T> Vec256<T> min(const Vec256<T> &a, const Vec256<T> &b) {
+  return a.map2(b, [](T x, T y)->T{ return std::min(x, y); });
 }
 
 template <typename T>

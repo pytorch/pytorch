@@ -1,8 +1,8 @@
-#include "ATen/ATen.h"
-#include "ATen/Dispatch.h"
-#include "ATen/NativeFunctions.h"
+#include <ATen/ATen.h>
+#include <ATen/Dispatch.h>
+#include <ATen/NativeFunctions.h>
 
-#include "Distance.h"
+#include <ATen/native/Distance.h>
 
 namespace at { namespace native {
 
