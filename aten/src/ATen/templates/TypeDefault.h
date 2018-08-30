@@ -6,8 +6,8 @@
 
 namespace at {
 
-struct AT_API TypeBase : public Type {
-  explicit TypeBase(TensorTypeId type_id, bool is_variable, bool is_undefined)
+struct AT_API TypeDefault : public Type {
+  explicit TypeDefault(TensorTypeId type_id, bool is_variable, bool is_undefined)
       : Type(type_id, is_variable, is_undefined) {}
 
   // Make sure overload resolution considers the nullary virtual method.

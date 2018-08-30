@@ -26,8 +26,8 @@ public:
   template <typename T>
   T* unsafe_data() const { return storage_impl_->unsafe_data<T>(); }
 
-  size_t elementSize() const { return storage_impl_->elementSize(); }
-  ptrdiff_t size() const { return storage_impl_->size(); }
+  size_t elementSize() const { return storage_impl_->itemsize(); }
+  ptrdiff_t size() const { return storage_impl_->numel(); }
   bool resizable() const { return storage_impl_->resizable(); }
   // get() use here is to get const-correctness
   void* data() const { return storage_impl_.get()->data(); }

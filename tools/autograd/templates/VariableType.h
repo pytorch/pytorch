@@ -4,7 +4,7 @@
 
 #include <ATen/ATen.h>
 
-#include <ATen/TypeBase.h>
+#include <ATen/TypeDefault.h>
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
@@ -32,7 +32,7 @@ using at::optional;
 
 void register_variable_type_for(at::Type* baseType);
 
-struct TORCH_API VariableType final : public at::TypeBase {
+struct TORCH_API VariableType final : public at::TypeDefault {
   VariableType(Context* context, at::Type* baseType);
   virtual at::ScalarType scalarType() const override;
   virtual at::Backend backend() const override;

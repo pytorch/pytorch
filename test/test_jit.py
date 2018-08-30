@@ -396,6 +396,28 @@ class TestJit(JitTestCase):
 
         self.assertEqual(fn(x, y), fn_traced(x, y))
 
+    def test_disabled(self):
+        torch.jit._enabled = False
+        try:
+            def f(x, y):
+                return x + y
+
+            self.assertIs(torch.jit.trace(torch.randn(2, 2), torch.randn(2, 2))(f), f)
+            self.assertIs(torch.jit.script(f), f)
+
+            class MyModule(torch.jit.ScriptModule):
+                @torch.jit.script_method
+                def method(self, x):
+                    return x
+
+            # XXX: Unfortunately ScriptModule won't simply become Module now,
+            # because that requires disabling the JIT at startup time, which
+            # we can't do in here.
+            # We need to or those two conditions to make it work with all versions of Python
+            self.assertTrue(inspect.ismethod(MyModule.method) or inspect.isfunction(MyModule.method))
+        finally:
+            torch.jit._enabled = True
+
     # Backwards tracing was broken for indexing by a constant,
     # because it's internally implemented using as_strided,
     # and we attempted to trace its derivative (which is not
@@ -953,6 +975,24 @@ class TestJit(JitTestCase):
         self.assertExpectedGraph(traced_fn.graph)
         self.assertExportImport(traced_fn.graph, (x, y))
 
+    def test_trace_tensor_factory(self):
+        def run(**kwargs):
+            inputs_require_grads = kwargs.pop('inputs_require_grads', True)
+
+            def fn(x):
+                return x + torch.ones(2, 3, **kwargs)
+            input = torch.ones(2, 3, **kwargs)
+            self.checkTrace(fn, (input,), inputs_require_grads=inputs_require_grads)
+            # check we recorded 'ones' and did not just record a constant
+            tfn = torch.jit.trace(input)(fn)
+            self.assertTrue("ones" in str(tfn.graph))
+        run()
+        run(dtype=torch.int, inputs_require_grads=False)
+        if RUN_CUDA:
+            run(device="cuda:0")
+        if RUN_CUDA_MULTI_GPU:
+            run(device="cuda:1")
+
     # TODO: implement
     @unittest.expectedFailure
     def test_output_unflatten(self):
@@ -1381,8 +1421,6 @@ class TestJit(JitTestCase):
         self.run_pass('constant_propagation', constant_prop.graph)
         self.assertExpected(canonical(constant_prop.graph))
 
-    # TODO: implement
-    @unittest.expectedFailure
     def test_constant_prop_loop_constant(self):
         @torch.jit.script
         def constant_prop():
@@ -4694,8 +4732,12 @@ a")
             @torch.jit.script_method
             def forward(self, x):
                 x += x
-                if True:
-                    if True:
+                # because we are testing if we emit `if` statement correctly
+                # we cannot use `True` as the condition. Constant prop
+                # would remove the `if` statements.
+                c = sum(x) > 4
+                if c:
+                    if c:
                         y = self.m(x)
                     else:
                         y = self.m(x)

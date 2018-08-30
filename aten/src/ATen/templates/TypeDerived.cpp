@@ -39,7 +39,7 @@ static int getPointerDevice(void* ptr) {
 #endif
 
 ${Type}::${Type}()
-  : TypeBase(${Backend}TensorId(), /*is_variable=*/false, /*is_undefined=*/false) {}
+  : TypeDefault(${Backend}TensorId(), /*is_variable=*/false, /*is_undefined=*/false) {}
 ScalarType ${Type}::scalarType() const {
   return ScalarType::${ScalarName};
 }
