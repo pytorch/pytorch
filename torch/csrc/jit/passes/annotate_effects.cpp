@@ -48,22 +48,6 @@ class AnnotateEffectsImpl {
     return curToken;
   }
 
-  // Special handling for inlined functions.
-  // Replace the inlined function's inital entry token with the outer function's
-  // current token.
-  Value* visitEntryWorld(Node* node, Value* curToken) {
-    JIT_ASSERT(node->kind() == prim::StoreWorld);
-    auto inlinedEntryToken = node->output();
-    inlinedEntryToken->replaceAllUsesWith(curToken);
-    return curToken;
-  }
-
-  // Returns the inlined function's last world token directly
-  Value* visitExitWorld(Node* node, Value* curToken) {
-    JIT_ASSERT(node->kind() == prim::LoadWorld);
-    return node->input();
-  }
-
   // General node annotation. If a node uses a mutable variable (or mutates a
   // previously constant variable), annotate it
   //
@@ -80,7 +64,9 @@ class AnnotateEffectsImpl {
     // Exit tokens as regular nodes. These exposed nodes provide fixed points
     // to thread the current world token through.
     if (node->kind() == prim::StoreWorld) {
-      return visitEntryWorld(node, curToken);
+      auto inlinedEntryToken = node->output();
+      inlinedEntryToken->replaceAllUsesWith(curToken);
+      return curToken;
     }
 
     if (node->kind() == prim::LoadWorld) {
