@@ -409,7 +409,7 @@ class TestJit(JitTestCase):
             def f(x, y):
                 return x + y
 
-            self.assertIs(torch.jit.trace(torch.randn(2, 2), torch.randn(2, 2))(f), f)
+            self.assertIs(torch.jit.trace(f, (torch.randn(2, 2), torch.randn(2, 2))), f)
             self.assertIs(torch.jit.script(f), f)
 
             class MyModule(torch.jit.ScriptModule):
