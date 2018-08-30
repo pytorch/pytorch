@@ -22,31 +22,39 @@ namespace at {
 class AT_API Context {
 public:
   Context();
-  Type* getTypeRaw(Backend p, ScalarType s) {
+  Type* getNonVariableTypeRaw(Backend p, ScalarType s) {
     return type_registry[static_cast<int>(p)][static_cast<int>(s)].get();
   }
-  Type * getTypeOpt(Backend p, ScalarType s) {
+  Type * getNonVariableTypeOpt(Backend p, ScalarType s) {
     if (p != Backend::Undefined) initCUDAIfNeeded(backendToDeviceType(p));
-    auto type = getTypeRaw(p, s);
+    auto type = getNonVariableTypeRaw(p, s);
 
     if(!type) {
       // there is only a single Undefined Type.
       if (p == Backend::Undefined || s == ScalarType::Undefined) {
-        return getTypeRaw(Backend::Undefined, ScalarType::Undefined);
+        return getNonVariableTypeRaw(Backend::Undefined, ScalarType::Undefined);
       }
     }
 
     return type;
   }
-  Type & getType(Backend p, ScalarType s, bool is_variable = false) {
-    auto* type = getTypeOpt(p, s);
+  Type & getNonVariableType(Backend p, ScalarType s) {
+    auto* type = getNonVariableTypeOpt(p, s);
     if (!type) AT_ERROR(toString(p), toString(s), "Type is not enabled.");
+    return *type;
+  }
+  Type & getVariableType(Backend p, ScalarType s) {
+    auto& baseType = getNonVariableType(p, s);
+    return detail::getVariableHooks().getVariableTypeFromBaseType(baseType);
+  }
+  Type & getMaybeVariableType(Backend p, ScalarType s, bool is_variable) {
     if (is_variable) {
-      return detail::getVariableHooks().getVariableType(*type);
+      return getVariableType(p, s);
     } else {
-      return *type;
+      return getNonVariableType(p, s);
     }
   }
+
   Generator & defaultGenerator(DeviceType device_type) {
     initCUDAIfNeeded(device_type);
     auto & generator = generator_registry[static_cast<int>(device_type)];
@@ -64,8 +72,8 @@ public:
   int64_t current_device() const {
     return detail::getCUDAHooks().current_device();
   }
-  // defined in header so that getType has ability to inline
-  // call_once check. getType is called fairly frequently
+  // defined in header so that getNonVariableType has ability to inline
+  // call_once check. getNonVariableType is called fairly frequently
   THCState* lazyInitCUDA() {
     std::call_once(thc_init,[&] {
       thc_state = detail::getCUDAHooks().initCUDA();
@@ -135,20 +143,20 @@ static inline void init() {
   }
 }
 
-static inline Type& getType(Backend p, ScalarType s, bool is_variable = false) {
-  return globalContext().getType(p, s, is_variable);
+static inline Type& getNonVariableType(Backend p, ScalarType s) {
+  return globalContext().getNonVariableType(p, s);
 }
 
-static inline Type& getType(DeviceType p, ScalarType s, bool is_variable = false) {
-  return globalContext().getType(deviceTypeToBackend(p), s, is_variable);
+static inline Type& getNonVariableType(DeviceType p, ScalarType s) {
+  return globalContext().getNonVariableType(deviceTypeToBackend(p), s);
 }
 
 static inline Type& CPU(ScalarType s) {
-  return getType(Backend::CPU, s);
+  return getNonVariableType(Backend::CPU, s);
 }
 
 static inline Type& CUDA(ScalarType s) {
-  return getType(Backend::CUDA, s);
+  return getNonVariableType(Backend::CUDA, s);
 }
 
 static inline bool hasCUDA() {

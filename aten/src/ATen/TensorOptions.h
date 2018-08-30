@@ -159,7 +159,7 @@ struct AT_API TensorOptions {
 
   /// Constructs an `at::Type` from the members of the `TensorOptions`.
   const Type& type() const {
-    return getType(backend(), dtype_, is_variable_);
+    return at::globalContext().getMaybeVariableType(backend(), dtype_, is_variable_);
   }
 
  private:
