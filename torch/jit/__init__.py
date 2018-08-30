@@ -423,6 +423,9 @@ def trace(func, example_inputs, optimize=True, check_trace=True, check_inputs=No
         invocations of the model.
 
     Arg:
+        func - a python function or torch.nn.Module that will be run with example_inputs.
+               arguments and returns to func must be Tensors or (possibly nested) tuples that
+               contain tensors.
         example_inputs - a tuple of example inputs that will be passed to the function
                          while tracing. The resulting trace can be run with
                          inputs of different types and shapes assuming the traced operations
@@ -448,19 +451,26 @@ def trace(func, example_inputs, optimize=True, check_trace=True, check_inputs=No
                                            This can be used to relax the checker strictness in the event that
                                            results diverge numerically for a known reason, such as operator fusion.
 
-        >>> @jit.trace(torch.rand(1))
-        ... def f(x):
-        ...     return x * 2
+    Returns:
+        A torch.jit.ScriptModule object with a single forward() method containing the traced code.
+        When func in s a torch.nn.Module, the returned ScriptModule will have the same set of
+        sub-modules and parameters as func.
+
+    Example:
+       >>> def f(x):
+       ...     return x * 2
+       >>> traced_f = torch.jit.trace(f, torch.rand(1))
+
     """
     if not _enabled:
         return func
     executor_options = {'optimize': bool(optimize)}
-    # Special case for common case of passing a single Variable
+    # Special case for common case of passing a single Tensor
     if isinstance(example_inputs, torch.Tensor):
         example_inputs = (example_inputs,)
     # done primarily so that weird iterables fail here and not pybind11 code
-    if not isinstance(example_inputs, tuple):
-        example_inputs = tuple(e for e in example_inputs)
+    elif not isinstance(example_inputs, tuple):
+        example_inputs = tuple(example_inputs)
     module = TopLevelTracedModule(func, **executor_options)
     module._create_method_from_trace('forward', func, example_inputs)
 
