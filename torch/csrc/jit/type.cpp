@@ -51,6 +51,8 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
     out << "None";
   } else if(t.kind() == TypeKind::StringType) {
     out << "string";
+  } else if(t.kind() == TypeKind::GeneratorType) {
+    out << "Generator";
   } else {
     AT_ERROR("unknown type kind");
   }

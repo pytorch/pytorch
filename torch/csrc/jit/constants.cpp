@@ -13,7 +13,9 @@ Value* insertConstant(
   Node * n = g.create(prim::Constant);
   if(val.isTensor()) {
     at::Tensor ref = std::move(val).toTensor();
-    JIT_ASSERT(ref.defined());
+    if(!ref.defined()) {
+      throw constant_not_supported_error("undefined tensors cannot become constants");
+    }
     n->output()->inferTypeFrom(ref); // note: before t_ because of std::move(ref)
     n->t_(attr::value, std::move(ref));
   } else if(val.isInt()) {
