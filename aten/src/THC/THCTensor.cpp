@@ -227,7 +227,7 @@ void THCTensor_squeeze1d(THCState *state, THCTensor *self, THCTensor *src, int d
       self->set_size(d, self->size(d+1));
       self->set_stride(d, self->stride(d+1));
     }
-    self->resize_dim(self->dim() - 1);
+    self->resize_dim((unsigned int)(self->dim() - 1));
   }
 }
 
