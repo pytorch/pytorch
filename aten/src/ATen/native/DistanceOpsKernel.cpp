@@ -39,7 +39,6 @@ struct PDist {
     static inline void inc(scalar_t& agg, const scalar_t diff, const scalar_t p) { agg += diff * diff; }
     static inline scalar_t finish(const scalar_t agg, const scalar_t p) { return std::sqrt(agg); }
     static inline scalar_t backward(const scalar_t diff, const scalar_t grad, const scalar_t dist, const scalar_t p) { return dist == 0.0 ? 0 : grad * diff / dist; }
-
   };
 
   // General p norm
@@ -114,18 +113,19 @@ struct PDist {
     const scalar_t * const self_ = self.data<scalar_t>();
     scalar_t * const res_ = result.data<scalar_t>();
 
+    // The only way to parallelize and avoid locking requires parallelizing over the columns :(
     at::parallel_for(0, m, 1, [=](int64_t l, int64_t end) {
-      const scalar_t * grad_k = grad_;
-      const scalar_t * dist_k = dist_;
       const scalar_t * self_l = self_ + l;
       scalar_t * res_l = res_ + l;
       for (; l != end; l += 1, self_l += 1, res_l += 1) {
+        const scalar_t * grad_k = grad_;
+        const scalar_t * dist_k = dist_;
         const scalar_t * self_i = self_l;
         scalar_t * res_i = res_l;
-        for (int64_t i = 0, k = 0; i != n - 1; i += 1, self_i += m, res_i += m) {
+        for (const scalar_t * const end_i = self_l + m * (n - 1); self_i != end_i; self_i += m, res_i += m) {
           const scalar_t * self_j = self_i + m;
           scalar_t * res_j = res_i + m;
-          for (int64_t j = i + 1; j != n; j += 1, k += 1, self_j += m, res_j += m, grad_k += gs, dist_k += 1) {
+          for (const scalar_t * const end_j = self_l + m * n; self_j != end_j; self_j += m, res_j += m, grad_k += gs, dist_k += 1) {
             const scalar_t res = F::backward(*self_i - *self_j, *grad_k, *dist_k, p);
             *res_i += res;
             *res_j -= res;
@@ -136,6 +136,7 @@ struct PDist {
   }
 
   static void apply_backward(Tensor& result, const Tensor& grad, const Tensor& self, const double p, const Tensor& dist) {
+    result.fill_(0);
     if (p == 0.0) {
     } else if (p == 1.0) {
       run_backward_parallel<odist_calc>(result, grad, self, p, dist);
@@ -154,13 +155,13 @@ struct PDist {
 
 }  // anonymous namespace
 
-void pdist_kernel(Tensor& result, const Tensor& self, double p) {
+void pdist_kernel_cpu(Tensor& result, const Tensor& self, double p) {
   AT_DISPATCH_FLOATING_TYPES(self.type(), "pdist", [&] {
     PDist<scalar_t>::apply(result, self, p);
   });
 }
 
-void pdist_backward_kernel(Tensor& result, const Tensor& grad, const Tensor& self, const double p, const Tensor& dist) {
+void pdist_backward_kernel_cpu(Tensor& result, const Tensor& grad, const Tensor& self, const double p, const Tensor& dist) {
   AT_DISPATCH_FLOATING_TYPES(self.type(), "pdist_backward", [&] {
     PDist<scalar_t>::apply_backward(result, grad, self, p, dist);
   });

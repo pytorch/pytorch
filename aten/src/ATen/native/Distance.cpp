@@ -30,7 +30,7 @@ Tensor _pdist_forward(const Tensor& self, const double p) {
     if (self.size(1) == 0) {
       result.fill_(0);
     } else if (self.type().backend() == Backend::CPU) {
-      pdist_kernel(result, self, p);
+      pdist_kernel_cpu(result, self, p);
     } else {
       AT_ERROR("pdist only supports CPU backend, got: ", at::toString(self.type().backend()));
     }
@@ -41,9 +41,9 @@ Tensor _pdist_forward(const Tensor& self, const double p) {
 Tensor _pdist_backward(const Tensor& grad, const Tensor& self, const double p, const Tensor& pdist) {
   AT_CHECK(self.is_contiguous(), "_pdist_backward requires self to be contiguous");
   AT_CHECK(pdist.is_contiguous(), "_pdist_backward requires pdist to be contiguous");
-  Tensor result = at::zeros_like(self);
+  Tensor result = at::empty_like(self);
   if (self.type().backend() == Backend::CPU) {
-    pdist_backward_kernel(result, grad, self, p, pdist);
+    pdist_backward_kernel_cpu(result, grad, self, p, pdist);
   } else {
     AT_ERROR("pdist_backward only supports CPU backend, got: ", at::toString(self.type().backend()));
   }
