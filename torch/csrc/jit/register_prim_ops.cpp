@@ -298,7 +298,7 @@ RegisterOperators reg({
                 JIT_ASSERTM(num_results == chunks,
                             "Expected chunk to return ", chunks, " outputs, but got ", num_results);
               }
-              for (size_t i = num_results; i < chunks; ++i) {
+              for (int64_t i = num_results; i < chunks; ++i) {
                 AT_CHECK(!outputs_used[i],
                          "Expected chunk to return at least ", chunks, " outputs, but got only ", num_results);
                 // We know that the output is unused, so it's ok to push anything on the stack.
