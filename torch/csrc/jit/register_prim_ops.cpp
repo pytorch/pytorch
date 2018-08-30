@@ -292,14 +292,15 @@ RegisterOperators reg({
             stack.insert(stack.end(), std::make_move_iterator(result.begin()),
                                       std::make_move_iterator(result.end()));
             // NB: Chunk can sometimes return a smaller number of outputs.
-            if (result.size() != chunks) {
-              if (result.size() > chunks) {
-                JIT_ASSERTM(result.size() == chunks,
-                            "Expected chunk to return ", chunks, " outputs, but got ", result.size());
+            int64_t num_results = result.size();
+            if (num_results != chunks) {
+              if (num_results > chunks) {
+                JIT_ASSERTM(num_results == chunks,
+                            "Expected chunk to return ", chunks, " outputs, but got ", num_results);
               }
-              for (size_t i = result.size(); i < chunks; ++i) {
+              for (size_t i = num_results; i < chunks; ++i) {
                 AT_CHECK(!outputs_used[i],
-                         "Expected chunk to return at least ", chunks, " outputs, but got only ", result.size());
+                         "Expected chunk to return at least ", chunks, " outputs, but got only ", num_results);
                 // We know that the output is unused, so it's ok to push anything on the stack.
                 stack.emplace_back();
               }
