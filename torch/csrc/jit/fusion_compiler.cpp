@@ -903,7 +903,7 @@ struct CUDAFusedKernel : public FusedKernel {
     std::tie(chunk_desc, concat_desc, has_random) = codegen::emitCompilationUnit(cu, name, agraph, true);
     compilation_unit = cu.str();
     nvrtcProgram program;
-    TORCH_NVRTC_CHECK(nvrtcCreateProgram(&program, compilation_unit.c_str(), NULL, 0, nullptr, nullptr));
+    TORCH_NVRTC_CHECK(nvrtcCreateProgram(&program, compilation_unit.c_str(), nullptr, 0, nullptr, nullptr));
 
     std::string compute = "--gpu-architecture=compute_" + std::to_string(prop.major) + std::to_string(prop.minor);
     std::vector<const char *> args = {"--std=c++11", compute.c_str(), "-default-device"};
