@@ -48,7 +48,7 @@ class SignalTest {
 
     // Initialize tensor list
     std::vector<at::Tensor> tensors = {
-        at::ones({16, 16}, at::TensorOptions(at::CPU(at::kFloat))),
+        at::ones({16, 16}, at::device(at::CPU).dtype(at::kFloat)),
     };
 
     // Loop until an exception happens
@@ -156,7 +156,7 @@ void testAllreduce(const std::string& path, const at::Backend b) {
   std::vector<std::vector<at::Tensor>> inputs(size);
   for (auto i = 0; i < size; i++) {
     auto tensor =
-        at::ones({16, 16}, at::TensorOptions(at::getType(b, at::kFloat))) * i;
+        at::ones({16, 16}, at::device(b).dtype(at::kFloat)) * i;
     inputs[i] = std::vector<at::Tensor>({tensor});
   }
 
@@ -193,7 +193,6 @@ void testBroadcast(const std::string& path, const at::Backend b) {
   auto tests = CollectiveTest::initialize(path, size);
 
   std::vector<std::vector<at::Tensor>> inputs(size);
-  const auto& type = at::getType(b, at::kFloat);
 
   // Try every permutation of root rank and root tensoro
   for (auto i = 0; i < size; i++) {
@@ -203,11 +202,11 @@ void testBroadcast(const std::string& path, const at::Backend b) {
         inputs[k].resize(stride);
         at::DeviceGuard deviceGuard;
         for (auto l = 0; l < stride; l++) {
-          if (type.is_cuda()) {
+          if (b == at::Backend::CUDA) { // NB:wouldn't work with sparse
             deviceGuard.set_index(l);
           }
           inputs[k][l] =
-              at::ones({16, 16}, at::TensorOptions(type)) * (k * stride + l);
+              at::ones({16, 16}, at::TensorOptions(b, at::kFloat)) * (k * stride + l);
         }
       }
 
