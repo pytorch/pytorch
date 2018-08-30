@@ -97,7 +97,9 @@ void addOutput(Node* node, const std::vector<at::Tensor>& outputs) {
   Graph * graph = node->owningGraph();
   Node * unpack_node = graph->appendNode(graph->create(prim::ListUnpack, {value}, outputs.size()));
   for (size_t i = 0; i < outputs.size(); ++i) {
-    setValueTrace(outputs[i], unpack_node->outputs()[i]);
+    Value * output_val = unpack_node->outputs()[i];
+    output_val->inferTypeFrom(outputs[i]);
+    setValueTrace(outputs[i], output_val);
   }
 }
 

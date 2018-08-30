@@ -71,6 +71,7 @@ static void CanonicalizeOps(Block* block) {
                                   it->get<int64_t>(attr::dim).value());
         for (ChunkOutput orig_out : *orig_outputs) {
           orig_out.val->replaceAllUsesWith(outputs.at(orig_out.offset));
+          outputs[orig_out.offset].value()->setType(orig_out.val->type());
         }
       }
     }
@@ -79,6 +80,7 @@ static void CanonicalizeOps(Block* block) {
 
 void CanonicalizeOps(const std::shared_ptr<Graph>& graph) {
   CanonicalizeOps(graph->block());
+  EliminateDeadCode(graph);
 }
 
 
