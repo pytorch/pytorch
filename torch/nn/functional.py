@@ -351,7 +351,7 @@ def fractional_max_pool2d(input, kernel_size, output_size=None,
         output_ratio: If one wants to have an output size as a ratio of the input size, this option can be given.
                       This has to be a number or tuple in the range (0, 1)
         return_indices: if ``True``, will return the indices along with the outputs.
-                        Useful to pass to `max_unpool2d`.
+                        Useful to pass to :func:`~torch.nn.functional.max_unpool2d`.
 
     Examples::
         >>> input = torch.randn(20, 16, 50, 32)

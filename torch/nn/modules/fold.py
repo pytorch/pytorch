@@ -43,7 +43,8 @@ class Fold(Module):
       It is harder to describe, but this `link`_ has a nice visualization of what :attr:`dilation` does.
 
     Args:
-        output_size (int or tuple): the shape of the spatial dimensions [2:] of the output
+        output_size (int or tuple): the shape of the spatial dimensions of the
+                                    output (i.e., ``input.sizes()[2:]``)
         kernel_size (int or tuple): the size of the sliding blocks
         stride (int or tuple): the stride of the sliding blocks in the input
                                spatial dimensions. Default: 1
@@ -121,10 +122,10 @@ class Unfold(Module):
     the total number of such blocks:
 
     .. math::
-        L = \prod_d \left\lfloor\frac{\text{input\_spatial\_size}[d] + 2 \times \text{padding}[d] %
+        L = \prod_d \left\lfloor\frac{\text{spatial\_size}[d] + 2 \times \text{padding}[d] %
             - \text{dilation}[d] \times (\text{kernel\_size}[d] - 1) - 1}{\text{stride}[d]} + 1\right\rfloor,
 
-    where :math:`\text{input\_spatial\_size}` is formed by the spatial dimensions
+    where :math:`\text{spatial\_size}` is formed by the spatial dimensions
     of :attr:`input` (:math:`*` above), and :math:`d` is over all spatial
     dimensions.
 
