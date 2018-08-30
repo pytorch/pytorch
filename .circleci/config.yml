@@ -13,7 +13,7 @@ pytorch_linux_cpu_build_test_defaults: &pytorch_linux_cpu_build_test_defaults
   - run:
       name: Build
       command: |
-        export SCCACHE_BUCKET=ossci-compiler-cache-circleci
+        export SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2
         export SCCACHE_MAX_JOBS=`expr $(nproc) - 1`
         export MEMORY_LIMIT_MAX_JOBS=8  # the "large" resource class on CircleCI has 32 CPU cores, if we use all of them we'll OOM
         export MAX_JOBS=$(( ${SCCACHE_MAX_JOBS} > ${MEMORY_LIMIT_MAX_JOBS} ? ${MEMORY_LIMIT_MAX_JOBS} : ${SCCACHE_MAX_JOBS} ))
@@ -32,7 +32,7 @@ pytorch_linux_build_defaults: &pytorch_linux_build_defaults
   - run:
       name: Build
       command: |
-        export SCCACHE_BUCKET=ossci-compiler-cache-circleci
+        export SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2
         if [ -n "${CUDA_VERSION}" ]; then
           export TORCH_CUDA_ARCH_LIST=5.2
         fi
@@ -125,7 +125,7 @@ caffe2_linux_build_defaults: &caffe2_linux_build_defaults
   - run:
       name: Build
       command: |
-        export SCCACHE_BUCKET=ossci-compiler-cache-circleci
+        export SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2
         # This IAM user allows write access to S3 bucket for sccache
         export AWS_ACCESS_KEY_ID=AKIAJJZUW4G2ASX5W7KA
         export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET}
@@ -334,7 +334,7 @@ caffe2_macos_build_defaults: &caffe2_macos_build_defaults
           # Install sccache
           sudo curl https://s3.amazonaws.com/ossci-macos/sccache --output /usr/local/bin/sccache
           sudo chmod +x /usr/local/bin/sccache
-          export SCCACHE_BUCKET=ossci-compiler-cache-circleci
+          export SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2
 
           # This IAM user allows write access to S3 bucket for sccache
           export AWS_ACCESS_KEY_ID=AKIAI62M6LXUOP4I4UZA
@@ -509,7 +509,7 @@ jobs:
             # Install sccache
             sudo curl https://s3.amazonaws.com/ossci-macos/sccache --output /usr/local/bin/sccache
             sudo chmod +x /usr/local/bin/sccache
-            export SCCACHE_BUCKET=ossci-compiler-cache-circleci
+            export SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2
             # This IAM user allows write access to S3 bucket for sccache
             export AWS_ACCESS_KEY_ID=AKIAJJZUW4G2ASX5W7KA
             export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET}
@@ -576,7 +576,7 @@ jobs:
             # Install sccache
             sudo curl https://s3.amazonaws.com/ossci-macos/sccache --output /usr/local/bin/sccache
             sudo chmod +x /usr/local/bin/sccache
-            export SCCACHE_BUCKET=ossci-compiler-cache-circleci
+            export SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2
             # This IAM user allows write access to S3 bucket for sccache
             export AWS_ACCESS_KEY_ID=AKIAJJZUW4G2ASX5W7KA
             export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET}
