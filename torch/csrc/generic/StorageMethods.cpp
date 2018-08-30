@@ -89,11 +89,11 @@ static PyObject * THPStorage_(fill_)(THPStorage *self, PyObject *number_arg)
 static PyObject * THPStorage_(fromBuffer)(PyObject *_unused, PyObject *args, PyObject *keywds)
 {
   HANDLE_TH_ERRORS
-  PyObject *obj = NULL;
-  const char* byte_order_str = NULL;
+  PyObject *obj = nullptr;
+  const char* byte_order_str = nullptr;
   Py_ssize_t count = -1, offset = 0;
   Py_buffer buffer;
-  static char *kwlist[] = {"buffer", "byte_order", "count", "offset", NULL};
+  static char *kwlist[] = {"buffer", "byte_order", "count", "offset", nullptr};
   const char* argtypes;
 #if defined(TH_REAL_IS_BYTE) || defined(TH_REAL_IS_CHAR)
   argtypes = "O|snn";
@@ -103,7 +103,7 @@ static PyObject * THPStorage_(fromBuffer)(PyObject *_unused, PyObject *args, PyO
 
   if (!PyArg_ParseTupleAndKeywords(args, keywds, argtypes, kwlist,
         &obj, &byte_order_str, &count, &offset)) {
-    return NULL;
+    return nullptr;
   }
 
 #if !(defined(TH_REAL_IS_BYTE) || defined(TH_REAL_IS_CHAR))
@@ -118,19 +118,19 @@ static PyObject * THPStorage_(fromBuffer)(PyObject *_unused, PyObject *args, PyO
     PyErr_Format(PyExc_ValueError,
       "invalid byte_order '%s' (expected 'big', 'little', or 'native')",
       byte_order_str);
-    return NULL;
+    return nullptr;
   }
 #endif
 
   if (PyObject_GetBuffer(obj, &buffer, PyBUF_SIMPLE) < 0)
-    return NULL;
+    return nullptr;
 
   if (offset < 0 || offset > buffer.len) {
     PyErr_Format(PyExc_ValueError,
       "offset must be non-negative and no greater than buffer length (%" PRId64 "), "
       "but got %" PRId64, (int64_t)offset, (int64_t)buffer.len);
     PyBuffer_Release(&buffer);
-    return NULL;
+    return nullptr;
   }
 
   if (count < 0) {
@@ -138,7 +138,7 @@ static PyObject * THPStorage_(fromBuffer)(PyObject *_unused, PyObject *args, PyO
       PyErr_Format(PyExc_ValueError, "buffer size (%" PRId64 ") must be a multiple "
           "of element size (%" PRId64 ")", (int64_t)buffer.len, (int64_t)sizeof(real));
       PyBuffer_Release(&buffer);
-      return NULL;
+      return nullptr;
     }
     count = (buffer.len - offset) / sizeof(real);
   }
@@ -148,7 +148,7 @@ static PyObject * THPStorage_(fromBuffer)(PyObject *_unused, PyObject *args, PyO
         "%" PRId64 ", but specified a size of %" PRId64, (int64_t)(buffer.len - offset),
         (int64_t)offset, (int64_t)count);
     PyBuffer_Release(&buffer);
-    return NULL;
+    return nullptr;
   }
 
   uint8_t* src = (uint8_t*) buffer.buf;
@@ -185,10 +185,10 @@ static PyObject * THPStorage_(fromFile)(PyObject *_unused, PyObject *args, PyObj
   const char *filename;
   Py_ssize_t size = 0;
   int shared = 0;
-  static char *kwlist[] = {"filename", "shared", "size", NULL};
+  static char *kwlist[] = {"filename", "shared", "size", nullptr};
   if (!PyArg_ParseTupleAndKeywords(args, keywds, "s|in", kwlist,
               &filename, &shared, &size)) {
-    return NULL;
+    return nullptr;
   }
   if (shared)
     shared = TH_ALLOCATOR_MAPPED_SHARED;
@@ -293,28 +293,28 @@ PyObject * THPStorage_(_setCdata)(THPStorage *self, PyObject *new_cdata)
 }
 
 static PyMethodDef THPStorage_(methods)[] = {
-  {"copy_", (PyCFunction)THPStorage_(copy_), METH_VARARGS | METH_KEYWORDS, NULL},
-  {"element_size", (PyCFunction)THPStorage_(elementSize), METH_NOARGS, NULL},
-  {"fill_", (PyCFunction)THPStorage_(fill_), METH_O, NULL},
-  {"new", (PyCFunction)THPStorage_(new), METH_NOARGS, NULL},
-  {"resize_", (PyCFunction)THPStorage_(resize_), METH_O, NULL},
-  {"size", (PyCFunction)THPStorage_(size), METH_NOARGS, NULL},
+  {"copy_", (PyCFunction)THPStorage_(copy_), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"element_size", (PyCFunction)THPStorage_(elementSize), METH_NOARGS, nullptr},
+  {"fill_", (PyCFunction)THPStorage_(fill_), METH_O, nullptr},
+  {"new", (PyCFunction)THPStorage_(new), METH_NOARGS, nullptr},
+  {"resize_", (PyCFunction)THPStorage_(resize_), METH_O, nullptr},
+  {"size", (PyCFunction)THPStorage_(size), METH_NOARGS, nullptr},
 #ifndef THD_GENERIC_FILE
-  {"data_ptr", (PyCFunction)THPStorage_(dataPtr), METH_NOARGS, NULL},
-  {"is_pinned", (PyCFunction)THPStorage_(isPinned), METH_NOARGS, NULL},
-  {"_write_file", (PyCFunction)THPStorage_(writeFile), METH_VARARGS, NULL},
-  {"_new_with_file", (PyCFunction)THPStorage_(newWithFile), METH_O | METH_STATIC, NULL},
-  {"_set_from_file", (PyCFunction)THPStorage_(setFromFile), METH_VARARGS, NULL},
+  {"data_ptr", (PyCFunction)THPStorage_(dataPtr), METH_NOARGS, nullptr},
+  {"is_pinned", (PyCFunction)THPStorage_(isPinned), METH_NOARGS, nullptr},
+  {"_write_file", (PyCFunction)THPStorage_(writeFile), METH_VARARGS, nullptr},
+  {"_new_with_file", (PyCFunction)THPStorage_(newWithFile), METH_O | METH_STATIC, nullptr},
+  {"_set_from_file", (PyCFunction)THPStorage_(setFromFile), METH_VARARGS, nullptr},
 #endif // !defined(THD_GENERIC_FILE)
 #if !defined(THC_GENERIC_FILE) && !defined(THD_GENERIC_FILE)
-  {"from_buffer", (PyCFunction)THPStorage_(fromBuffer), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+  {"from_buffer", (PyCFunction)THPStorage_(fromBuffer), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
 #endif
-  {"from_file", (PyCFunction)THPStorage_(fromFile), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+  {"from_file", (PyCFunction)THPStorage_(fromFile), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
 #ifdef THC_GENERIC_FILE
-  {"get_device", (PyCFunction)THPStorage_(getDevice), METH_NOARGS, NULL},
+  {"get_device", (PyCFunction)THPStorage_(getDevice), METH_NOARGS, nullptr},
 #endif
-  {"_set_cdata", (PyCFunction)THPStorage_(_setCdata), METH_O, NULL},
+  {"_set_cdata", (PyCFunction)THPStorage_(_setCdata), METH_O, nullptr},
 #ifndef THD_GENERIC_FILE
 #endif
-  {NULL}
+  {nullptr}
 };

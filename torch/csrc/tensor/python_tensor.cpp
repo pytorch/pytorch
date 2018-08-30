@@ -119,8 +119,8 @@ PyObject *Tensor_is_sparse(PyTensorType *self) {
 }
 
 static struct PyMethodDef metaclass_methods[] = {
-  {"__instancecheck__", (PyCFunction)Tensor_instancecheck, METH_O, NULL},
-  {NULL}
+  {"__instancecheck__", (PyCFunction)Tensor_instancecheck, METH_O, nullptr},
+  {nullptr}
 };
 
 typedef PyObject *(*getter)(PyObject *, void *);
@@ -151,7 +151,7 @@ static void py_initialize_metaclass(PyTypeObject& metaclass) {
 static void py_initialize_tensor_type(PyTypeObject& type, const char* name, PyObject* tp_dict) {
   // NOTE: we don't use the typical static declaration of PyTypeObject because
   // we need to initialize as many types as there are VariableType instances.
-  // The typical PyVarObject_HEAD_INIT(NULL, 0) is described in the Python
+  // The typical PyVarObject_HEAD_INIT(nullptr, 0) is described in the Python
   // documentation: it initializes the refcnt to 1 and the other object header
   // fields to zero.
   memset(&type, 0, sizeof(PyTypeObject));

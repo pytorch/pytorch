@@ -139,7 +139,7 @@ namespace torch { namespace jit {
 //   we then declare constexpr Symbols to get everything the actual Symbol
 //   type we want.  Symbols must be constexpr to be valid to be "case"ed on.
 
-typedef uint32_t unique_t;
+using unique_t = uint32_t;
 
 static const std::string domain_prefix = "org.pytorch.";
 
