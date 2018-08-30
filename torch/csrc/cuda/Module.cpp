@@ -19,6 +19,7 @@
 #include "torch/csrc/autograd/generated/VariableType.h"
 #include "torch/csrc/utils/python_strings.h"
 #include "torch/csrc/cuda/python_comm.h"
+#include "torch/csrc/autograd/generated/variable_factories.h"
 
 using namespace torch;
 
@@ -118,7 +119,7 @@ PyObject * THCPModule_getRNGState(PyObject *_unused)
   using namespace at;
   using namespace torch::autograd;
   HANDLE_TH_ERRORS
-  Variable var = VariableType::getType(CPU(kByte))->tensor();
+  Variable var = torch::empty(0, at::device(at::kCPU).dtype(at::kByte));
   THCRandom_getRNGState(state, (THByteTensor*)(var.data().unsafeGetTensorImpl()));
   return THPVariable_Wrap(var);
   END_HANDLE_TH_ERRORS
