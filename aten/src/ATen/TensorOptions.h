@@ -21,6 +21,18 @@ namespace at {
 /// `torch::TensorOptions` subclass of this `TensorOptions`, which changes
 /// `type()` to return a variable type instead of a tensor type, such that
 /// variables are created inside factory methods, instead of tensors.
+///
+/// Here are a number of common ways to use specify a TensorOptions (some
+/// of which may not be obvious, because many types are implicitly convertible
+/// to TensorOptions).  We take at::zeros as an example; it takes a
+/// TensorOptions as its second argument.
+///
+///     at::zeros({1}, at::kCUDA);
+///     at::zeros({1}, at::kLong);
+///     at::zeros({1}, at::TensorOptions(other)); // same type and device as other
+///     at::zeros({1}, at::TensorOptions(at::kCUDA, at::kLong));
+///     at::zeros({1}, at::TensorOptions().device_index(1).dtype(at::kLong)); // same as above
+//
 struct AT_API TensorOptions {
   TensorOptions() : TensorOptions(/*use_thread_local_default_options=*/true) {}
 
