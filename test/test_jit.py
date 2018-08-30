@@ -1331,6 +1331,15 @@ class TestJit(JitTestCase):
         self.assertEqual(out_ref, out_test)
         self.assertExpected(canonical(addmm.graph))
 
+    def test_addmm_fusion_scalar_type(self):
+        @torch.jit.script
+        def addmm(a, b, c):
+            return a + b.mm(c)
+
+        a, b, c = [torch.tensor(e) for e in (1, [[2.]], [[3.]])]
+        addmm(a, b, c)
+        self.assertExpectedGraph(addmm.graph_for(a, b, c))
+
     def test_index_put(self):
         ten = torch.zeros(3, 3)
         mask = torch.Tensor([[True, True, True],
