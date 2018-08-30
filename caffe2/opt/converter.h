@@ -3,7 +3,7 @@
 
 #include "caffe2/core/common.h"
 #include "caffe2/core/logging.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 #include "nomnigraph/Graph/Graph.h"
 #include "nomnigraph/Representations/ControlFlow.h"
 #include "nomnigraph/Representations/NeuralNet.h"
@@ -46,7 +46,7 @@ public:
     return &OpDef;
   }
 
-  static bool classof(const Annotation *A) {
+  CAFFE2_API static bool classof(const Annotation *A) {
     return A->getKind() == AnnotationKind::Caffe2;
   }
 

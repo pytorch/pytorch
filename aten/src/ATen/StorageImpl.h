@@ -18,18 +18,18 @@ namespace at {
 
 struct Type;
 
-struct AT_API StorageImpl : public c10::raw_intrusive_ptr_target<StorageImpl> {
+struct AT_API StorageImpl : public c10::intrusive_ptr_target {
  public:
   StorageImpl() = delete;
   virtual ~StorageImpl() {};
   StorageImpl(
-      at::ScalarType scalar_type,
+      at::DataType data_type,
       ptrdiff_t size,
       at::DataPtr data_ptr,
       at::Allocator* allocator,
       bool resizable);
   StorageImpl(
-      at::ScalarType scalar_type,
+      at::DataType data_type,
       ptrdiff_t size,
       at::Allocator* allocator,
       bool resizable);
@@ -43,13 +43,14 @@ struct AT_API StorageImpl : public c10::raw_intrusive_ptr_target<StorageImpl> {
   // the real data shouldn't call th::from_type
   template <typename T>
   inline T* data() const {
-    auto scalar_type_T = at::CTypeToScalarType<th::from_type<T>>::to();
-    if (scalar_type_ != scalar_type_T) {
+    auto data_type_T =
+        at::scalarTypeToDataType(at::CTypeToScalarType<th::from_type<T>>::to());
+    if (dtype() != data_type_T) {
       AT_ERROR(
           "Attempt to access StorageImpl having data type ",
-          at::toString(scalar_type_),
+          dtype(),
           " as data type ",
-          at::toString(scalar_type_T));
+          data_type_T);
     }
     return unsafe_data<T>();
   }
@@ -70,7 +71,7 @@ struct AT_API StorageImpl : public c10::raw_intrusive_ptr_target<StorageImpl> {
   void operator=(const StorageImpl&) = delete;
 
   size_t elementSize() const {
-    return at::elementSize(scalar_type_);
+    return at::elementSize(dataTypeToScalarType(data_type_));
   }
 
   Type& type();
@@ -108,9 +109,9 @@ struct AT_API StorageImpl : public c10::raw_intrusive_ptr_target<StorageImpl> {
   at::Allocator* allocator() {
     return allocator_;
   };
-  at::ScalarType scalar_type() const {
-    return scalar_type_;
-  };
+  const DataType dtype() const {
+    return data_type_;
+  }
   const at::Allocator* allocator() const {
     return allocator_;
   };
@@ -129,7 +130,7 @@ struct AT_API StorageImpl : public c10::raw_intrusive_ptr_target<StorageImpl> {
   }
 
  private:
-  at::ScalarType scalar_type_;
+  at::DataType data_type_;
   at::DataPtr data_ptr_;
   ptrdiff_t size_;
   bool resizable_;

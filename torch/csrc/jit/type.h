@@ -24,6 +24,7 @@ _(FloatType) \
 _(IntType) \
 _(NoneType) \
 _(StringType) \
+_(GeneratorType) \
 
 enum class TypeKind {
 #define DEFINE_TYPE(T) T,
@@ -351,8 +352,8 @@ struct TORCH_API TupleType : public Type {
   static constexpr bool is_singleton = false;
   friend struct Type;
   template<typename ... T>
-  static TupleTypePtr create( T&& ... all ) {
-    return TupleTypePtr(new TupleType( std::forward<T>(all)... ));
+  static TupleTypePtr create(std::vector<TypePtr> types) {
+    return TupleTypePtr(new TupleType( std::move(types) ));
   }
   at::ArrayRef<TypePtr> elements() const {
     return elements_;
@@ -523,6 +524,28 @@ struct NoneType : public Type {
 private:
   NoneType()
   : Type(TypeKind::NoneType) {}
+};
+
+struct GeneratorType;
+using GeneratorTypePtr = std::shared_ptr<GeneratorType>;
+struct GeneratorType : public Type {
+  static constexpr bool is_singleton = true;
+  template<typename ... T>
+  static GeneratorTypePtr create( T&& ... all) {
+    return GeneratorTypePtr(new GeneratorType( std::forward<T>(all)... ));
+  }
+  virtual bool operator==(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
+  virtual std::string str() const override {
+    return "Generator";
+  }
+  static const TypeKind Kind = TypeKind::GeneratorType;
+  // global singleton
+  static GeneratorTypePtr get();
+private:
+  GeneratorType()
+  : Type(TypeKind::GeneratorType) {}
 };
 
 

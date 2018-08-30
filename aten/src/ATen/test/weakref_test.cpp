@@ -32,33 +32,31 @@ TEST_CASE( "Weak pointer tests", "" ) {
 
   SECTION("updates refcounts correctly") {
     Tensor a = at::ones({2, 2});
-    auto ai = a.unsafeGetTensorImpl();
-    REQUIRE(ai->use_count() == 1);
-    REQUIRE(ai->weak_use_count() == 1);
+    REQUIRE(a.use_count() == 1);
+    REQUIRE(a.weak_use_count() == 1);
     {
       WeakTensor b = a;
-      REQUIRE(ai->use_count() == 1);
-      REQUIRE(ai->weak_use_count() == 2);
+      REQUIRE(a.use_count() == 1);
+      REQUIRE(a.weak_use_count() == 2);
     }
-    REQUIRE(ai->use_count() == 1);
-    REQUIRE(ai->weak_use_count() == 1);
+    REQUIRE(a.use_count() == 1);
+    REQUIRE(a.weak_use_count() == 1);
     {
       WeakTensor b = a;
-      REQUIRE(ai->use_count() == 1);
+      REQUIRE(a.use_count() == 1);
       auto locked = b.lock();
       REQUIRE(locked.defined());
-      REQUIRE(ai->use_count() == 2);
+      REQUIRE(a.use_count() == 2);
     }
-    REQUIRE(ai->use_count() == 1);
-    REQUIRE(ai->weak_use_count() == 1);
+    REQUIRE(a.use_count() == 1);
+    REQUIRE(a.weak_use_count() == 1);
     {
       WeakTensor b = a;
-      REQUIRE(ai->use_count() == 1);
-      REQUIRE(ai->weak_use_count() == 2);
+      REQUIRE(a.use_count() == 1);
+      REQUIRE(a.weak_use_count() == 2);
       a.reset();
-      auto bi = b.unsafeGetTensorImpl();
-      REQUIRE(bi->use_count() == 0);
-      REQUIRE(bi->weak_use_count() == 1);
+      REQUIRE(b.use_count() == 0);
+      REQUIRE(b.weak_use_count() == 1);
     }
   }
 }

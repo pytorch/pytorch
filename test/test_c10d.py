@@ -372,11 +372,12 @@ class ProcessGroupNCCLTest(TestCase):
         self.world_size = 1
         self.file = tempfile.NamedTemporaryFile()
         self.num_gpus = torch.cuda.device_count()
+        if self.num_gpus < 2:
+            raise unittest.SkipTest("NCCL test requires 2+ GPUs")
 
     def tearDown(self):
         self.file.close()
 
-    @skip_if_not_nccl
     def test_broadcast_ops(self):
         store = c10d.FileStore(self.file.name)
         pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
@@ -399,7 +400,6 @@ class ProcessGroupNCCLTest(TestCase):
             for i in range(self.num_gpus):
                 self.assertEqual(tensors[i], tensors[rt])
 
-    @skip_if_not_nccl
     def test_allreduce_ops(self):
         store = c10d.FileStore(self.file.name)
         pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
@@ -489,7 +489,7 @@ class ProcessGroupNCCLTest(TestCase):
         output_ts = [[] for _ in range(self.num_gpus)]
 
         for idx, ls in enumerate(output_ts):
-            for _ in range(self.world_size):
+            for _ in range(self.world_size * self.num_gpus):
                 ls.append(torch.Tensor([0]).cuda(idx))
 
         for i in range(self.num_gpus):
@@ -498,9 +498,9 @@ class ProcessGroupNCCLTest(TestCase):
         allgather(output_ts, tensors)
 
         # Verification
-        for idx, device_ts in enumerate(output_ts):
-            for t in device_ts:
-                self.assertEqual(torch.Tensor([idx]), t)
+        for device_ts in output_ts:
+            for s_idx, t in enumerate(device_ts):
+                self.assertEqual(torch.Tensor([s_idx]), t)
 
 
 class Net(nn.Module):

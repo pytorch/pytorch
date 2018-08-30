@@ -304,7 +304,6 @@ def sigmoid(g, self):
 
 def _reduce_op_symbolic(onnx_op_name):
     def symbolic(g, self, dim=None, keepdim=None):
-        params = {}
         if dim is None:
             # all-reduce path
             return g.op(onnx_op_name, self, keepdims_i=0)
@@ -412,10 +411,17 @@ def chunk(g, self, chunks, dim):
     return split(g, self, split_size, dim)
 
 
-@parse_args('v', 'i', 'i')
+@parse_args('v', 'i', 'v')
 def select(g, self, dim, index):
-    slice_node = g.op("Slice", self, axes_i=[dim], starts_i=[index], ends_i=[index + 1])
-    return g.op("Squeeze", slice_node, axes_i=[dim])
+    if dim > 1:
+        # TODO: this is a temporary hack because of the implementation details
+        # of Gather in caffe2. We need to change this as soon as possible.
+        # TODO: this breaks if index == -1
+        index_val = _parse_arg(index, 'i')
+        slice_node = g.op("Slice", self, axes_i=[dim], starts_i=[index_val], ends_i=[index_val + 1])
+        return g.op("Squeeze", slice_node, axes_i=[dim])
+    else:
+        return g.op("Gather", self, index, axis_i=dim)
 
 
 def squeeze(g, self, dim=None):
@@ -622,11 +628,13 @@ def lt(g, input, other):
 
 
 def ge(g, input, other):
-    return g.op("Not", lt(g, other, input))
+    other = _maybe_get_scalar(other)
+    return g.op("Not", lt(g, _if_scalar_type_as(g, other, input), input))
 
 
 def le(g, input, other):
-    return g.op("Not", gt(g, other, input))
+    other = _maybe_get_scalar(other)
+    return g.op("Not", gt(g, _if_scalar_type_as(g, other, input), input))
 
 
 @parse_args('v', 'i')
