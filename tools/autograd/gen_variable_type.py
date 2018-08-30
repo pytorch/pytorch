@@ -184,8 +184,8 @@ def should_trace(declaration):
 
 
 def record_trace_outputs(declaration):
-    if name.endswith('_out'):
-        output_names = [arg['name'] for arg in arguments if arg.get('output', False)]
+    if declaration['name'].endswith('_out'):
+        output_names = [arg['name'] for arg in declaration['arguments'] if arg.get('output', False)]
     else:
         output_names = [r['name'] for r in declaration['returns']]
     return ['jit::tracer::addOutput(node, {});'.format(n) for n in output_names]
@@ -207,7 +207,7 @@ def format_trace(declaration):
     if local['trace_name'] in RENAME_TRACE:
         local['trace_name'] = RENAME_TRACE[local['trace_name']]
 
-    local['trace_outputs'] = record_trace_outputs(declaration)
+    local['record_trace_outputs'] = record_trace_outputs(declaration)
 
     return (PRE_RECORD_TRACE.substitute(local), POST_RECORD_TRACE.substitute(local))
 
