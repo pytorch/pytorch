@@ -257,7 +257,10 @@ def _str(self):
         tensor_str = _tensor_str(self, indent, formatter, summarize)
 
     if self.grad_fn is not None:
-        suffix += ', grad_fn=<{}>'.format(type(self.grad_fn).__name__)
+        name = type(self.grad_fn).__name__
+        if name == 'CppFunction':
+            name = self.grad_fn.name().rsplit('::', maxsplit=1)[-1]
+        suffix += ', grad_fn=<{}>'.format(name)
     elif self.requires_grad:
         suffix += ', requires_grad=True'
 
