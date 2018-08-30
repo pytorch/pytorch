@@ -230,7 +230,7 @@ class AnnotateEffectsImpl {
         node->inputs()[0]->type() == WorldType::get();
   }
 
-  // Create a memory fence around a node, using the world token
+  // Create a memory fence around a node, using the world token.
   //
   // Input:
   //  %size : Int = prim::len(%mut_list)
@@ -242,42 +242,46 @@ class AnnotateEffectsImpl {
   //
   // Returns the new world token (%t.2) for subsequent fences to use.
   Value* addFenceForNode(Node* node, Value* curToken) {
-    // Search for node's first mutable input.
-    size_t mutableInputIdx = 0;
-    for (const auto* input : node->inputs()) {
-      if (mutableValues_.count(input) != 0) {
-        break;
-      }
-      mutableInputIdx++;
-    }
-
-    auto mutableInput = node->inputs().at(mutableInputIdx);
-
     // Add a start fence
     auto startFence =
-        node->owningGraph()->create(prim::MemoryFence, /*outputs=*/2);
+        node->owningGraph()->create(prim::MemoryFence, /*outputs=*/0);
 
+    // Add world tokens as the first input and output
     startFence->addInput(curToken);
-    startFence->addInput(mutableInput);
+    curToken = startFence->addOutput()->setType(WorldType::get());
 
-    curToken = startFence->outputs()[0]->setType(WorldType::get());
-    mutableInput = startFence->outputs()[1]->setType(mutableInput->type());
+    // Fence off all node's inputs
+    for (const auto input : node->inputs()) {
+      startFence->addInput(input);
+      startFence->addOutput()->setType(input->type());
+    }
 
     startFence->insertBefore(node);
 
-    // modify the node to take in the start fence's output value
-    node->replaceInput(mutableInputIdx, mutableInput);
+    JIT_ASSERT(node->inputs().size() == startFence->outputs().size() - 1);
+
+    // modify the node to take in the start fence's output values
+    for (size_t i = 0; i < node->inputs().size(); i++) {
+      node->replaceInput(i, startFence->outputs()[i + 1]);
+    }
 
     // Add an end fence
     auto endFence =
-        node->owningGraph()->create(prim::MemoryFence, /*outputs=*/2);
+        node->owningGraph()->create(prim::MemoryFence, /*outputs=*/0);
 
+    // Add world tokens as the first input and output
     endFence->addInput(curToken);
-    endFence->addInput(node->outputs().at(0));
+    curToken = endFence->addOutput()->setType(WorldType::get());
 
-    curToken = endFence->outputs()[0]->setType(WorldType::get());
-    mutableInput =
-        endFence->outputs()[1]->setType(node->outputs().at(0)->type());
+    // Fence off all the node's outputs
+    for (auto output : node->outputs()) {
+      endFence->addInput(output);
+      auto fencedOutput = endFence->addOutput()->setType(output->type());
+      output->replaceAllUsesWith(fencedOutput);
+      // replaceAllUsesWith() replaces the fence's INPUT value with the new
+      // output as well, so we need to manually add the "real" input back
+      endFence->replaceInputWith(fencedOutput, output);
+    }
 
     endFence->insertAfter(node);
 

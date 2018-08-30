@@ -236,7 +236,7 @@ public:
 
   void replaceFirstUseWith(Value * newValue);
 
-  // Replaces all uses of this node with 'newValue'.
+  // Replaces all uses of this value with 'newValue'.
   //
   // Given:   %3 = f(%1, %2)
   //          %4 = g(%3)
