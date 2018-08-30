@@ -63,10 +63,10 @@ class CAFFE2_API MatchNode {
   }
 
  private:
-  const NodeMatchCriteria criteria_;
-  const bool includeInSubgraph_;
-  const int count_;
-  const bool nonTerminal_;
+  NodeMatchCriteria criteria_;
+  bool includeInSubgraph_;
+  int count_;
+  bool nonTerminal_;
 };
 
 template <typename NodeMatchCriteria>
