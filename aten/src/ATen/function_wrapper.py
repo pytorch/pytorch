@@ -43,7 +43,7 @@ ${return_type} ${api_name}(${type_method_formals_with_defaults}) const override;
 """)
 # 2. broadcasting functions are implemented in Type.cpp
 TYPE_METHOD_DEFINITION_BROADCAST = CodeTemplate("""\
-${return_type} TypeBase::${api_name}(${type_method_formals}) const {
+${return_type} TypeDefault::${api_name}(${type_method_formals}) const {
     ${device_guard_declaration}
     Tensor ${broadcast_returns};
     std::tie(${broadcast_returns}) = ${broadcast_function}(${broadcast_actuals}, "${api_name}");
@@ -74,7 +74,7 @@ TYPE_METHOD_DECLARATION_ABSTRACT = CodeTemplate("""\
 ${return_type} ${method_prefix_derived}${api_name}(${type_method_formals_with_defaults}) const override;
 """)
 TYPE_METHOD_DEFINITION_ABSTRACT = CodeTemplate("""\
-${return_type} TypeBase::${method_prefix_derived}${api_name}(${type_method_formals}) const {
+${return_type} TypeDefault::${method_prefix_derived}${api_name}(${type_method_formals}) const {
     AT_ERROR("${method_prefix_derived}${api_name} is not implemented for type ", toString());
 }
 """)
@@ -82,13 +82,13 @@ TYPE_METHOD_DECLARATION_CONCRETE = CodeTemplate("""\
 ${return_type} ${api_name}(${type_method_formals_with_defaults}) const override;
 """)
 TYPE_METHOD_DEFINITION_CONCRETE = CodeTemplate("""\
-${return_type} TypeBase::${api_name}(${type_method_formals}) const {
+${return_type} TypeDefault::${api_name}(${type_method_formals}) const {
     ${device_guard_declaration}
     ${type_definition_body}
 }
 """)
 DEPRECATED_TYPE_METHOD_DEFINITION_CONCRETE = CodeTemplate("""\
-${return_type} TypeBase::${api_name}(${type_method_formals}) const {
+${return_type} TypeDefault::${api_name}(${type_method_formals}) const {
     TensorOptions options(*this);
     ${device_guard_declaration}
     return at::native::${api_name}(${type_method_actuals}, options);
