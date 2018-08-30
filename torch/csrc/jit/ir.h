@@ -56,7 +56,6 @@ struct Node;
 struct Value;
 
 TORCH_API std::ostream& operator<<(std::ostream & out, const Graph & g);
-TORCH_API std::ostream& operator<<(std::ostream & out, const Type & t);
 TORCH_API std::ostream& operator<<(std::ostream & out, const Node & n);
 
 // A list of nodes, with inputs and outputs
@@ -114,7 +113,7 @@ private:
 public:
   Scope() {
     name_ = Symbol::scope("");
-    parent_ = NULL;
+    parent_ = nullptr;
   }
   Scope(Scope* parent, Symbol name) {
     name_ = name;
@@ -125,13 +124,13 @@ public:
     return children_.back().get();
   }
   Scope* parent() {
-    if (parent_ == NULL) {
+    if (parent_ == nullptr) {
       throw std::runtime_error("Cannot get parent from Scope with no parent");
     }
     return parent_;
   }
   bool isRoot() {
-    return parent_ == NULL;
+    return parent_ == nullptr;
   }
   Scope* getRoot() {
     Scope* current = this;
@@ -197,7 +196,7 @@ public:
     return unique_;
   }
   bool hasUniqueName() const {
-    return unique_name_ != "";
+    return !unique_name_.empty();
   }
   TORCH_API Value* setUniqueName(const std::string & name);
   std::string uniqueName() const {
@@ -331,7 +330,7 @@ public:
     scope_ = scope;
   }
   std::string scopeName() const {
-    if (scope_ == NULL) {
+    if (scope_ == nullptr) {
       return "";
     }
     return scope_->namesFromRoot();
@@ -771,10 +770,10 @@ struct Block {
     return static_cast<const Node*>(output_)->inputs();
   }
   graph_node_list nodes() {
-    return graph_node_list(output_, kNextDirection);
+    return {output_, kNextDirection};
   }
   const_graph_node_list nodes() const {
-    return const_graph_node_list(output_, kNextDirection);
+    return {output_, kNextDirection};
   }
   Node * return_node() {
     return output_;
