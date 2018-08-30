@@ -1,4 +1,5 @@
 #include "ATen/DLConvertor.h"
+#include "ATen/Functions.h"
 
 #include <iostream>
 #include <sstream>
@@ -57,19 +58,20 @@ static DLContext getDLContext(const Type& type, const int64_t& device_id) {
 }
 
 
-static Backend getATenBackend(const DLContext& ctx) {
-  Backend backend;
+static DeviceType getATenDeviceType(const DLContext& ctx) {
   switch (ctx.device_type) {
     case DLDeviceType::kDLCPU:
-      backend = Backend::CPU;
-      break;
+      return DeviceType::CPU;
     case DLDeviceType::kDLGPU:
-      backend = Backend::CUDA;
-      break;
+      return DeviceType::CUDA;
+    case DLDeviceType::kDLOpenCL:
+      return DeviceType::OPENCL;
+    case DLDeviceType::kDLROCM:
+      return DeviceType::HIP;
     default:
       throw std::logic_error("Unsupported device_type: " + std::to_string(ctx.device_type));
   }
-  return backend;
+  __builtin_unreachable();
 }
 
 
@@ -158,15 +160,15 @@ DLManagedTensor* toDLPack(const Tensor& src) {
 
 
 Tensor fromDLPack(const DLManagedTensor* src) {
-  Backend backend = getATenBackend(src->dl_tensor.ctx);
+  DeviceType device_type = getATenDeviceType(src->dl_tensor.ctx);
   ScalarType stype = toScalarType(src->dl_tensor.dtype);
   auto deleter = [src](void * self) {
     src->deleter(const_cast<DLManagedTensor*>(src));
   };
-  return getType(backend, stype).tensorFromBlob(
-      src->dl_tensor.data,
+  return at::from_blob(src->dl_tensor.data,
       IntList(src->dl_tensor.shape, src->dl_tensor.ndim),
       IntList(src->dl_tensor.strides, src->dl_tensor.ndim),
-      deleter);
+      deleter,
+      TensorOptions(device_type, stype));
 }
 } //namespace at

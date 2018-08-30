@@ -21,6 +21,10 @@ namespace at {
 /// `torch::TensorOptions` subclass of this `TensorOptions`, which changes
 /// `type()` to return a variable type instead of a tensor type, such that
 /// variables are created inside factory methods, instead of tensors.
+///
+/// Here are a number of common ways to use specify a TensorOptions (some
+/// of which may not be obvious, because many types are implicitly convertible
+/// to TensorOptions).
 struct AT_API TensorOptions {
   TensorOptions() : TensorOptions(/*use_thread_local_default_options=*/true) {}
 
@@ -94,6 +98,14 @@ struct AT_API TensorOptions {
 
   /// Constructs a `TensorOptions` object with the given dtype.
   /* implicit */ TensorOptions(ScalarType dtype) : TensorOptions() {
+    this->dtype(dtype);
+  }
+
+  /// Constructs a `TensorOptions` object with a given `Device` and
+  /// `ScalarType` (we don't provide all of these multi-constructors,
+  /// but this particular one is used quite frequently.)
+  explicit TensorOptions(Device device, ScalarType dtype) : TensorOptions() {
+    this->device(device);
     this->dtype(dtype);
   }
 
