@@ -15,11 +15,12 @@ class Fold(Module):
     :math:`L` is the total number of blocks. (This is exacly the
     same specification as the output shape of :class:`~torch.nn.Unfold`.) This
     operation combines these local blocks into the large :attr:`output` tensor
-    of shape :math:`(N, C, \text{output\_size}[0], \text{output\_size}[1], \dots)`.
-    Similar to :class:`~torch.nn.Unfold`, the arguments must satisfy
+    of shape :math:`(N, C, \text{output\_size}[0], \text{output\_size}[1], \dots)`
+    by summing the overlapping values. Similar to :class:`~torch.nn.Unfold`, the
+    arguments must satisfy
 
     .. math::
-        L = \prod_d \left\lfloor\frac{\text{output\_size}[d] + 2 \times \text{padding}[d] \
+        L = \prod_d \left\lfloor\frac{\text{output\_size}[d] + 2 \times \text{padding}[d] %
             - \text{dilation}[d] \times (\text{kernel\_size}[d] - 1) - 1}{\text{stride}[d]} + 1\right\rfloor,
 
     where :math:`d` is over all spatial dimensions.
@@ -58,6 +59,13 @@ class Fold(Module):
 
     * For the case of two output spatial dimensions this operation is sometimes
       called ``col2im``.
+
+    .. note::
+        :class:`~torch.nn.Fold` calculates each combined value in the resulting
+        large tensor by summing all values from all containing blocks.
+        :class:`~torch.nn.Unfold` extracts the values in the local blocks by
+        copying from the large tensor. So, if the blocks overlap, they are not
+        inverses of each other.
 
     .. warning::
         Currently, only 4-D output tensors (batched image-like tensors) are
@@ -113,7 +121,7 @@ class Unfold(Module):
     the total number of such blocks:
 
     .. math::
-        L = \prod_d \left\lfloor\frac{\text{input\_spatial\_size}[d] + 2 \times \text{padding}[d] \
+        L = \prod_d \left\lfloor\frac{\text{input\_spatial\_size}[d] + 2 \times \text{padding}[d] %
             - \text{dilation}[d] \times (\text{kernel\_size}[d] - 1) - 1}{\text{stride}[d]} + 1\right\rfloor,
 
     where :math:`\text{input\_spatial\_size}` is formed by the spatial dimensions
@@ -151,6 +159,13 @@ class Unfold(Module):
 
     * For the case of two input spatial dimensions this operation is sometimes
       called ``im2col``.
+
+    .. note::
+        :class:`~torch.nn.Fold` calculates each combined value in the resulting
+        large tensor by summing all values from all containing blocks.
+        :class:`~torch.nn.Unfold` extracts the values in the local blocks by
+        copying from the large tensor. So, if the blocks overlap, they are not
+        inverses of each other.
 
     .. warning::
         Currently, only 4-D input tensors (batched image-like tensors) are
