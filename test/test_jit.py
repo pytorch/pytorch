@@ -977,6 +977,33 @@ class TestJit(JitTestCase):
     def test_trace_size_with_grad(self):
         self.do_trace_size(True)
 
+    def test_trace_warn(self):
+        def fn(x):
+            int(x)  # Warning 1.
+            y = x * 1
+            if y:   # Warning 2.
+                pass
+            q = [x, x * 4]
+            z = q[y]  # Warning 3.
+            float(z)  # Warning 4.
+            z.tolist()  # Warning 5.
+            z.numpy()  # Warning 6.
+            for elem in torch.ones(4, 4):  # Warning 7. + 8. (iter uses indexing internally)
+                pass
+            return z + 4
+
+        with warnings.catch_warnings(record=True) as warns:
+            traced_fn = torch.jit.trace(fn, torch.tensor([1]))
+        warns = [str(w.message) for w in warns]
+        self.assertEqual(len(warns), 8)
+        self.assertIn('a Python integer', warns[0])
+        self.assertIn('a Python boolean', warns[1])
+        self.assertIn('a Python index', warns[2])
+        self.assertIn('a Python float', warns[3])
+        self.assertIn('a Python list', warns[4])
+        self.assertIn('a NumPy array', warns[5])
+        self.assertIn('Iterating over', warns[6])
+
     def test_trace_tuple(self):
         def fn(x, y):
             return x, (x * y[1], x * y[0])

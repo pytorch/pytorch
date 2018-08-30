@@ -260,5 +260,12 @@ TORCH_API void addOutput(Node* node, const at::Tensor& tensor);
 TORCH_API void addOutput(Node* node, const std::vector<at::Tensor>& list);
 
 TORCH_API autograd::Variable getSizeOf(const autograd::Variable& var, int64_t dim);
+inline void warn(const char * _reason) {
+  if (!isTracing()) return;
+  std::string reason { _reason };
+  AT_WARN(reason, " might cause the trace to be incorrect. We can't record the data flow of "
+          " Python values, which means the trace might not generalize to other inputs.");
+}
+
 
 }}} // namespace torch::jit::tracer
