@@ -163,7 +163,7 @@ Tensor fromDLPack(const DLManagedTensor* src) {
   auto deleter = [src](void * self) {
     src->deleter(const_cast<DLManagedTensor*>(src));
   };
-  return getType(backend, stype).tensorFromBlob(
+  return getNonVariableType(backend, stype).tensorFromBlob(
       src->dl_tensor.data,
       IntList(src->dl_tensor.shape, src->dl_tensor.ndim),
       IntList(src->dl_tensor.strides, src->dl_tensor.ndim),

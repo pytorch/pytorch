@@ -69,7 +69,7 @@ class AsyncInputIsOutputTest : public AsyncTest {
         numTensors_(numTensors),
         numDevices_(cudaNumDevices()),
         state_(::at::globalContext().lazyInitCUDA()) {
-    const auto& type = at::getType(at::Backend::CUDA, at::kFloat);
+    const auto& type = at::getNonVariableType(at::Backend::CUDA, at::kFloat);
 
     // Allocate inputs on available devices in a round robin fashion.
     inputs_.resize(numTensors_);

@@ -44,7 +44,7 @@ struct PyTensorType {
   at::Type* aten_type() {
     if (!aten_type_) {
       auto* baseType = globalContext().getNonVariableTypeOpt(static_cast<at::Backend>(backend), static_cast<at::ScalarType>(scalar_type));
-      aten_type_ = baseType ? torch::autograd::VariableType::getType(*baseType) : nullptr;
+      aten_type_ = baseType ? torch::autograd::VariableType::getNonVariableType(*baseType) : nullptr;
     }
     return aten_type_;
   }
