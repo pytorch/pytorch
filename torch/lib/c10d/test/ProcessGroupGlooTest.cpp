@@ -48,7 +48,7 @@ class SignalTest {
 
     // Initialize tensor list
     std::vector<at::Tensor> tensors = {
-        at::ones({16, 16}, at::device(at::CPU).dtype(at::kFloat)),
+        at::ones({16, 16}, at::device(at::kCPU).dtype(at::kFloat)),
     };
 
     // Loop until an exception happens
