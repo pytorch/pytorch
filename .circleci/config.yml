@@ -12,6 +12,7 @@ pytorch_linux_cpu_build_test_defaults: &pytorch_linux_cpu_build_test_defaults
   - checkout
   - run:
       name: Build
+      no_output_timeout: "10h"
       command: |
         export SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2
         export SCCACHE_MAX_JOBS=`expr $(nproc) - 1`
@@ -31,6 +32,7 @@ pytorch_linux_build_defaults: &pytorch_linux_build_defaults
   - checkout
   - run:
       name: Build
+      no_output_timeout: "10h"
       command: |
         export SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2
         if [ -n "${CUDA_VERSION}" ]; then
@@ -69,6 +71,7 @@ pytorch_linux_test_defaults: &pytorch_linux_test_defaults
       at: /opt/workspace
   - run:
       name: Build
+      no_output_timeout: "10h"
       command: |
         set -x
         sudo pip install awscli
@@ -124,6 +127,7 @@ caffe2_linux_build_defaults: &caffe2_linux_build_defaults
   - checkout
   - run:
       name: Build
+      no_output_timeout: "10h"
       command: |
         export SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2
         # This IAM user allows write access to S3 bucket for sccache
@@ -204,6 +208,7 @@ caffe2_linux_test_defaults: &caffe2_linux_test_defaults
       at: /opt/workspace
   - run:
       name: Build
+      no_output_timeout: "10h"
       command: |
         set -x
         sudo pip install awscli
@@ -303,6 +308,7 @@ caffe2_macos_build_defaults: &caffe2_macos_build_defaults
     - checkout
     - run:
         name: Build
+        no_output_timeout: "10h"
         command: |
           set -ex
 
@@ -503,6 +509,7 @@ jobs:
           name: Build
           environment:
             BUILD_ENVIRONMENT: pytorch-macos-10.13-py3
+          no_output_timeout: "10h"
           command: |
             set -ex
 
@@ -538,6 +545,7 @@ jobs:
           name: Build
           environment:
             BUILD_ENVIRONMENT: pytorch-macos-10.13-py3
+          no_output_timeout: "10h"
           command: |
             set -ex
             git submodule update --init
@@ -554,6 +562,7 @@ jobs:
           environment:
             JOB_BASE_NAME: pytorch-macos-10.13-cuda9.2-cudnn7-py3-build
             BUILD_ENVIRONMENT: pytorch-macos-10.13-cuda9.2-cudnn7-py3
+          no_output_timeout: "10h"
           command: |
             set -ex
 
