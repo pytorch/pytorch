@@ -48,6 +48,16 @@ void addInputs(Node *n, const char * name, at::TensorList value) {
   n->addInput(list_node->output());
 }
 
+void addInputs(Node* n, const char * name, const at::TensorOptions& options) {
+  // [TensorOptions in script] - update this when you change how we schematize TensorOptions
+  detail::genericAddInput(n, static_cast<int64_t>(options.dtype()));
+  detail::genericAddInput(n, static_cast<int64_t>(options.layout()));
+  std::vector<int64_t> device = {
+      static_cast<int64_t>(options.device().type()),
+      static_cast<int64_t>(options.device().index())};
+  detail::genericAddInput(n, std::move(device));
+}
+
 void addInputs(Node *n, const char * name, at::IntList value) {
   using ArgumentStash = jit::tracer::ArgumentStash;
   std::vector<Value*> info = ArgumentStash::hasIntList(name) ?

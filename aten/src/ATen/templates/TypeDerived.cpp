@@ -38,8 +38,8 @@ static int getPointerDevice(void* ptr) {
 }
 #endif
 
-${Type}::${Type}(Context* context)
-  : Type(context, ${Backend}TensorId(), /*is_variable=*/false, /*is_undefined=*/false) {}
+${Type}::${Type}()
+  : Type(${Backend}TensorId(), /*is_variable=*/false, /*is_undefined=*/false) {}
 ScalarType ${Type}::scalarType() const {
   return ScalarType::${ScalarName};
 }
@@ -99,7 +99,7 @@ Storage ${Type}::unsafeStorageFromTH(void * th_pointer, bool retain) const {
   return Storage((${THStorage}*) th_pointer);
 }
 std::unique_ptr<Generator> ${Type}::generator() const {
-  return std::unique_ptr<Generator>(new ${Generator}(context));
+  return std::unique_ptr<Generator>(new ${Generator}(&at::globalContext()));
 }
 
 const char * ${Type}::toString() const {
