@@ -224,7 +224,7 @@ else
     export MAX_JOBS=`expr $(nproc) - 1`
   fi
 
-  sudo FULL_CAFFE2=1 python setup.py install --user
+  FULL_CAFFE2=1 python setup.py install --user
 
   # This is to save test binaries for testing
   cp -r torch/lib/tmp_install $INSTALL_PREFIX
@@ -240,7 +240,7 @@ fi
 ###############################################################################
 
 # Install ONNX into a local directory
-sudo pip install --user -b /tmp/pip_install_onnx "file://${ROOT_DIR}/third_party/onnx#egg=onnx"
+pip install --user -b /tmp/pip_install_onnx "file://${ROOT_DIR}/third_party/onnx#egg=onnx"
 
 report_compile_cache_stats
 
