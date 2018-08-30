@@ -205,8 +205,7 @@ void testBroadcast(const std::string& path, const at::Backend b) {
           if (b == at::Backend::CUDA) { // NB:wouldn't work with sparse
             deviceGuard.set_index(l);
           }
-          inputs[k][l] =
-              at::ones({16, 16}, at::TensorOptions(b).dtype(at::kFloat)) * (k * stride + l);
+          inputs[k][l] = at::ones({16, 16}, b) * (k * stride + l);
         }
       }
 
