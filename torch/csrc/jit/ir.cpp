@@ -251,13 +251,11 @@ void Node::lint() const {
   IR_IF(this,Constant)
     JIT_ASSERT(inputs_.size() == 0);
   IR_ELSEIF(EntryWorld)
-    // EntryWorld has 0 or 1 inputs/outputs
-    JIT_ASSERT(inputs_.size() <= 1);
-    JIT_ASSERT(outputs_.size() <= 1);
+    JIT_ASSERT(inputs_.size() == 0);
+    JIT_ASSERT(outputs_.size() == 1);
   IR_ELSEIF(ExitWorld)
-    // EntryWorld has 0 or 1 inputs/outputs
-    JIT_ASSERT(inputs_.size() <= 1);
-    JIT_ASSERT(outputs_.size() <= 1);
+    JIT_ASSERT(inputs_.size() == 1);
+    JIT_ASSERT(outputs_.size() == 0);
   IR_ELSEIF(Return)
     // Return uses is zero
     JIT_ASSERT(outputs().size() == 0);
@@ -460,15 +458,13 @@ void Block::cloneFrom(Block * src, std::function<Value*(Value*)> value_map) {
     local_map[input] = this->addInput()->copyMetadata(input)->setStage(input->stage());
     graph->setStage(std::max(graph->stage(), input->stage()));
   }
-  const auto entryWorld = src->entryWorld();
-  if (!entryWorld->outputs().empty()) {
-    JIT_ASSERT(entryWorld->outputs().size() == 1);
-    const auto worldToken = entryWorld->output();
-    local_map[worldToken] = this->entry_world_->addOutput()
-                           ->copyMetadata(worldToken)
-                           ->setStage(worldToken->stage());
-    graph->setStage(std::max(graph->stage(), worldToken->stage()));
-  }
+
+  const auto worldToken = src->entry_world_->output();
+  local_map[worldToken] = this->entry_world_->output()
+                              ->copyMetadata(worldToken)
+                              ->setStage(worldToken->stage());
+  graph->setStage(std::max(graph->stage(), worldToken->stage()));
+
   for(auto node : src->nodes()) {
     auto new_node = this->appendNode(graph->createClone(node, env));
     new_node->setStage(node->stage());
@@ -484,18 +480,15 @@ void Block::cloneFrom(Block * src, std::function<Value*(Value*)> value_map) {
   for(auto output : src->outputs()) {
     this->registerOutput(env(output));
   }
-  const auto exitWorld = src->exitWorld();
-  if (!exitWorld->outputs().empty()) {
-    JIT_ASSERT(exitWorld->outputs().size() == 1);
-    this->exit_world_->addInput(env(src->exitWorld()->input()));
-    this->exit_world_->addOutput()->copyMetadata(src->exitWorld()->output());
-  }
+
+  this->exit_world_->replaceInput(0, env(src->exit_world_->input()));
 }
 
 std::shared_ptr<Graph> Graph::copy() {
   auto new_g = std::make_shared<Graph>();
-  auto env = [](Value *) -> Value* {
-    AT_ERROR("Graph::copy() encountered a use of a value not in scope. Run lint!");
+  auto env = [](Value* v) -> Value* {
+    AT_ERROR(
+        "Graph::copy() encountered a use of a value not in scope. Run lint!");
   };
   new_g->block()->cloneFrom(this->block(), env);
   return new_g;

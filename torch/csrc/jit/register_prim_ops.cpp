@@ -212,14 +212,10 @@ RegisterOperators reg({
           };
         }),
     Operator(
-        prim::EntryWorld,
+        prim::StoreWorld,
         [](Node* node) {
-          size_t numOutputs = node->outputs().size();
-          return [numOutputs](Stack& stack) {
-            JIT_ASSERT(numOutputs <= 1);
-            if (numOutputs == 1) {
-              push(stack, World());
-            }
+          return [](Stack& stack) {
+            push(stack, World());
             return 0;
           };
         }),

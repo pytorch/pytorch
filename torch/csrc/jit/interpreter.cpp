@@ -306,13 +306,13 @@ std::unordered_map<Node*, std::vector<uint8_t>> findLastUses(Graph & g) {
   return FindLastUses(g).move_flags;
 }
 
-// Take the speecial EntryWorld node and manifest it directly in the graph so it
-// can be picked up by the interpreter. Analagous to converting graph
-// inputs/outputs to prim::Store/Load instructions.
-void insertEntryWorld(Graph& graph) {
-  auto entryWorld = graph.entryWorld();
+// Add an instruction that spawns the initial world token on the stack.
+void insertStoreWorld(Graph& graph) {
   WithInsertPoint guard(*graph.nodes().begin());
-  graph.insertNode(entryWorld);
+  auto storeWorld = graph.create(prim::StoreWorld);
+  storeWorld->output()->setType(WorldType::get());
+  graph.insertNode(storeWorld);
+  graph.entryWorld()->replaceAllUsesWith(storeWorld->output());
 }
 } //namespace
 
@@ -324,7 +324,7 @@ struct PreprocessGraph {
     stage_input_types = flattenStages(*graph);
     dropUnused(graph->block());
     // Manifest the initial world token in the graph
-    insertEntryWorld(*graph);
+    insertStoreWorld(*graph);
     // fill in move_flags by scanning blocks;
     move_flags = findLastUses(*graph);
     //TODO: desugar Loop trip counts, for now we drop trip counts

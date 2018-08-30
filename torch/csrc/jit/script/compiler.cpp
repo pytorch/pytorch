@@ -1904,16 +1904,15 @@ std::vector<Value*> inlineCallTo(Graph& g, Graph& callee, ArrayRef<Value*> input
   // Inlined graphs need to expose their EntryWorld and ExitWorld nodes, so that
   // the caller graph's world token can be threaded through the callee graph.
   //
+  // The actual joining of the world token "threads" will be done in the
+  // AnnotateEffects pass.
+  //
   // TODO(suo): a cleaner way to handle this might be to have inlined graphs
   // be a special prim::Inlined node, so that we can clone the entire block's
   // metadata and don't need to expose EntryWorld and ExitWorld like this.
-  {
-    auto* entryWorld = callee.entryWorld();
-    auto* newWorld = g.insertNode(g.createClone(entryWorld, value_map_func));
-    for (size_t i = 0; i < entryWorld->outputs().size(); ++i) {
-      value_map[entryWorld->outputs()[i]] = newWorld->outputs()[i];
-    }
-  }
+  auto* storeWorld = g.insertNode(g.create(prim::StoreWorld));
+  storeWorld->output()->setType(WorldType::get());
+  value_map[callee.entryWorld()] = storeWorld->output();
 
   for (auto* node : callee.nodes()) {
     auto* new_node =
@@ -1923,13 +1922,8 @@ std::vector<Value*> inlineCallTo(Graph& g, Graph& callee, ArrayRef<Value*> input
     }
   }
 
-  {
-    auto* exitWorld = callee.exitWorld();
-    auto* newWorld = g.insertNode(g.createClone(exitWorld, value_map_func));
-    for (size_t i = 0; i < exitWorld->outputs().size(); ++i) {
-      value_map[exitWorld->outputs()[i]] = newWorld->outputs()[i];
-    }
-  }
+  auto* loadWorld = g.insertNode(g.create(prim::LoadWorld, 0));
+  loadWorld->addInput(value_map[callee.exitWorld()]);
 
   std::vector<Value*> outputs;
   for (auto* output : callee.outputs()) {

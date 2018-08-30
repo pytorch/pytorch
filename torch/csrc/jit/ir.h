@@ -794,18 +794,6 @@ struct Block {
   const Node * param_node() const {
     return input_;
   }
-  const Node * entryWorld() const {
-    return entry_world_;
-  }
-  Node * entryWorld() {
-    return entry_world_;
-  }
-  const Node * exitWorld() const {
-    return exit_world_;
-  }
-  Node * exitWorld() {
-    return exit_world_;
-  }
   Value * addInput(std::string name="") {
     Value * v = input_->addOutput();
     v->setUniqueName(name);
@@ -932,6 +920,22 @@ public:
     const auto & block = *block_;
     return block.outputs();
   }
+  const Value * entryWorld() const {
+    return block_->entry_world_->output();
+  }
+  Value * entryWorld() {
+    return block_->entry_world_->output();
+  }
+  const Value * exitWorld() const {
+    return block_->exit_world_->input();
+  }
+  Value * exitWorld() {
+    return block_->exit_world_->input();
+  }
+  void setExitWorld(Value* exitToken) {
+    JIT_ASSERT(exitToken->type() == WorldType::get());
+    block_->exit_world_->replaceInput(0, exitToken);
+  }
   graph_node_list nodes() {
     return block_->nodes();
   }
@@ -962,12 +966,6 @@ public:
   }
   std::shared_ptr<Scope> scope_root() {
     return scope_root_;
-  }
-  Node * entryWorld() {
-    return block_->entryWorld();
-  }
-  Node * exitWorld() {
-    return block_->exitWorld();
   }
   Value * addInput(std::string name="") {
     return block_->addInput(std::move(name));
@@ -1350,7 +1348,7 @@ inline Block::Block(Graph* graph_, Node* node_)
     : graph_(graph_),
       output_(initOutput(graph_->create(prim::Return, 0))),
       input_(graph_->create(prim::Param, 0)),
-      entry_world_(graph_->create(prim::EntryWorld, 0)),
+      entry_world_(graph_->create(prim::EntryWorld, 1)),
       exit_world_(graph_->create(prim::ExitWorld, 0)),
       owning_node_(node_) {
   graph_->all_blocks.emplace(this);
@@ -1358,6 +1356,8 @@ inline Block::Block(Graph* graph_, Node* node_)
   input_->owning_block_ = this;
   entry_world_->owning_block_ = this;
   exit_world_->owning_block_ = this;
+  entry_world_->output()->setType(WorldType::get());
+  exit_world_->addInput(entry_world_->output());
 }
 
 inline void Block::destroy() {
@@ -1369,8 +1369,8 @@ inline void Block::destroy() {
       it != end; ++it) {
     it.destroyCurrent();
   }
-  entry_world_->destroy();
   exit_world_->destroy();
+  entry_world_->destroy();
   output_->destroy();
   input_->destroy();
   graph_->freeBlock(this);

@@ -34,11 +34,10 @@ class AnnotateEffectsImpl {
  public:
   void annotateEffects(Graph* g) {
     // Generate the first world token
-    auto curToken = g->entryWorld()->addOutput()->setType(WorldType::get());
+    auto curToken = g->entryWorld();
     auto lastToken = visitBlock(g->block(), curToken);
 
-    g->exitWorld()->addInput(lastToken);
-    g->exitWorld()->addOutput()->setType(WorldType::get());
+    g->setExitWorld(lastToken);
   }
 
  private:
@@ -51,14 +50,14 @@ class AnnotateEffectsImpl {
       // We can ignore all nodes in between the entry and exit tokens, since
       // tokens have already been threaded through then.
       bool skip = false;
-      if (node->kind() == prim::EntryWorld) {
+      if (node->kind() == prim::StoreWorld) {
         curToken = visitEntryWorld(node, curToken);
         // Skip until we see the corresponding ExitWorld node.
         skip = true;
         continue;
       }
 
-      if (node->kind() == prim::ExitWorld) {
+      if (node->kind() == prim::LoadWorld) {
         curToken = visitExitWorld(node, curToken);
         // Resume threading the token normally.
         skip = false;
@@ -78,10 +77,7 @@ class AnnotateEffectsImpl {
   // Replace the inlined function's inital entry token with the outer function's
   // current token.
   Value* visitEntryWorld(Node* node, Value* curToken) {
-    JIT_ASSERT(node->kind() == prim::EntryWorld);
-    if (node->outputs().empty()) {
-      return curToken;
-    }
+    JIT_ASSERT(node->kind() == prim::StoreWorld);
     auto inlinedEntryToken = node->output();
     inlinedEntryToken->replaceAllUsesWith(curToken);
     return curToken;
@@ -89,16 +85,8 @@ class AnnotateEffectsImpl {
 
   // Returns the inlined function's last world token directly
   Value* visitExitWorld(Node* node, Value* curToken) {
-    JIT_ASSERT(node->kind() == prim::ExitWorld);
-    if (node->outputs().empty()) {
-      return curToken;
-    }
-    auto lastReturnedToken = node->input();
-    auto inlinedExitToken = node->output();
-    // There shouldn't be any uses of the exit token, so DCE should correctly
-    // clean it up.
-    JIT_ASSERT(inlinedExitToken->uses().empty());
-    return lastReturnedToken;
+    JIT_ASSERT(node->kind() == prim::LoadWorld);
+    return node->input();
   }
 
   // General node annotation. If a node uses a mutable variable (or mutates a
