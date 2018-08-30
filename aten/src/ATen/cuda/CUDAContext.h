@@ -44,23 +44,15 @@ AT_API cudaDeviceProp* getCurrentDeviceProperties();
 AT_API cudaDeviceProp* getDeviceProperties(int64_t device);
 
 /* Streams */
-AT_API CUDAStream createCUDAStream();
+AT_API CUDAStream createCUDAStream(
+  const bool isHighPriority = false
+, int64_t device = -1);
 
-AT_API CUDAStream createCUDAStreamWithOptions(int32_t flags, int32_t priority);
-
-AT_API CUDAStream getDefaultCUDAStream();
-
-AT_API CUDAStream getDefaultCUDAStreamOnDevice(int64_t device);
-
-AT_API CUDAStream getCurrentCUDAStream();
-
-AT_API CUDAStream getCurrentCUDAStreamOnDevice(int64_t device);
+AT_API CUDAStream getDefaultCUDAStream(int64_t device = -1);
+AT_API CUDAStream getCurrentCUDAStream(int64_t device = -1);
 
 AT_API void setCurrentCUDAStream(CUDAStream stream);
-
-AT_API void setCurrentCUDAStreamOnDevice(int64_t device, CUDAStream stream);
-
-AT_API void uncheckedSetCurrentCUDAStreamOnDevice(int64_t device, CUDAStream stream);
+AT_API void uncheckedSetCurrentCUDAStream(CUDAStream stream);
 
 /* Handles */
 #ifndef __HIP_PLATFORM_HCC__
