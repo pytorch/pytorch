@@ -26,15 +26,17 @@ public:
   template <typename T>
   T* unsafe_data() const { return storage_impl_->unsafe_data<T>(); }
 
-  size_t elementSize() const { return storage_impl_->elementSize(); }
-  ptrdiff_t size() const { return storage_impl_->size(); }
+  size_t elementSize() const { return storage_impl_->itemsize(); }
+  ptrdiff_t size() const { return storage_impl_->numel(); }
   bool resizable() const { return storage_impl_->resizable(); }
   // get() use here is to get const-correctness
   void* data() const { return storage_impl_.get()->data(); }
+  const at::DataType dtype() const {
+    return storage_impl_->dtype();
+  }
   const at::DataPtr& data_ptr() const { return storage_impl_->data_ptr(); }
   DeviceType device_type() const { return storage_impl_->device_type(); }
   at::Allocator* allocator() const { return storage_impl_.get()->allocator(); }
-  at::ScalarType scalar_type() const { return storage_impl_->scalar_type(); }
   at::Device device() const { return storage_impl_->device(); }
 
   StorageImpl* unsafeReleaseStorageImpl() {

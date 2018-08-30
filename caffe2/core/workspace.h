@@ -14,7 +14,7 @@
 #include "caffe2/core/blob.h"
 #include "caffe2/core/registry.h"
 #include "caffe2/core/net.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/utils/signal_handler.h"
 #include "caffe2/utils/threadpool/ThreadPool.h"
 
@@ -87,7 +87,9 @@ class CAFFE2_API Workspace {
     CAFFE_ENFORCE(shared, "Parent workspace must be specified");
     for (const auto& forwarded : forwarded_blobs) {
       CAFFE_ENFORCE(
-          shared->HasBlob(forwarded.second), "Invalid parent workspace blob");
+          shared->HasBlob(forwarded.second),
+          "Invalid parent workspace blob: ",
+          forwarded.second);
       forwarded_blobs_[forwarded.first] =
           std::make_pair(shared, forwarded.second);
     }

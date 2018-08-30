@@ -11,7 +11,7 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/core/workspace.h"
 #include "caffe2/onnx/onnxifi_init.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 
 namespace caffe2 {
 namespace onnx {
@@ -28,8 +28,12 @@ class CAFFE2_API OnnxifiTransformer {
       const std::unordered_map<std::string, TensorShape>& shape_hints);
 
  private:
+  // Note that we have two workspaces here as inputs. The first mapped_ws is
+  // used to mapped SSA names back to c2 original names. The second one is
+  // actually used to inject more weights into the original workspace
   caffe2::NetDef SubnetToOnnxifiOp(
       const caffe2::NetDef& net,
+      const Workspace& mapped_ws,
       Workspace* ws,
       onnx::OnnxExporter* exporter,
       std::unordered_map<std::string, TensorShape>* shape_hints);

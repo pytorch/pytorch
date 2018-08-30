@@ -57,7 +57,7 @@ def _batch_lowrank_mahalanobis(W, D, x, capacitance_tril):
 class LowRankMultivariateNormal(Distribution):
     r"""
     Creates a multivariate normal distribution with covariance matrix having a low-rank form
-    parameterized by `cov_factor` and `cov_diag`::
+    parameterized by :attr:`cov_factor` and :attr:`cov_diag`::
         covariance_matrix = cov_factor @ cov_factor.T + cov_diag
 
     Example:

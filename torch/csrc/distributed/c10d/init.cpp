@@ -14,6 +14,7 @@
 #endif
 
 #include <c10d/TCPStore.hpp>
+#include <c10d/PrefixStore.hpp>
 #include <gloo/transport/tcp/device.h>
 #include <pybind11/chrono.h>
 
@@ -105,6 +106,9 @@ PyObject* c10d_init(PyObject* _unused) {
 
   shared_ptr_class_<::c10d::TCPStore>(module, "TCPStore", store)
       .def(py::init<const std::string&, int, bool>());
+
+  shared_ptr_class_<::c10d::PrefixStore>(module, "PrefixStore", store)
+      .def(py::init<const std::string&, ::c10d::Store&>());
 
   auto processGroup =
       shared_ptr_class_<::c10d::ProcessGroup>(module, "ProcessGroup")
@@ -342,8 +346,8 @@ PyObject* c10d_init(PyObject* _unused) {
 #endif
 
   shared_ptr_class_<::c10d::ProcessGroup::Work>(module, "Work")
-      .def("isCompleted", &::c10d::ProcessGroup::Work::isCompleted)
-      .def("isSuccess", &::c10d::ProcessGroup::Work::isSuccess)
+      .def("is_completed", &::c10d::ProcessGroup::Work::isCompleted)
+      .def("is_success", &::c10d::ProcessGroup::Work::isSuccess)
       .def("exception", &::c10d::ProcessGroup::Work::exception)
       .def("synchronize", &::c10d::ProcessGroup::Work::synchronize)
       .def(

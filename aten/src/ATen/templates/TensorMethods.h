@@ -4,14 +4,10 @@
 
 #include "ATen/Tensor.h"
 #include "ATen/Scalar.h"
-#include "ATen/SparseTensorRef.h"
+#include "ATen/core/SparseTensorRef.h"
 #include "ATen/Type.h"
 
 namespace at {
-
-inline Tensor & Tensor::operator=(Tensor const & rhs) && {
-  return copy_(rhs);
-}
 
 inline Tensor Tensor::toType(const Type & t, bool non_blocking) const {
   if(type() == t)

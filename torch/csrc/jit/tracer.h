@@ -26,6 +26,9 @@ namespace torch { namespace jit { namespace tracer {
 using torch::autograd::Variable;
 using variable_list = std::vector<Variable>;
 
+TORCH_API void recordSourceLocation(Node* n);
+TORCH_API void setRecordSourceLocation(void (*v)(Node*));
+
 struct TORCH_API TracingState : public std::enable_shared_from_this<TracingState> {
   TracingState();
   ~TracingState();
@@ -40,7 +43,7 @@ struct TORCH_API TracingState : public std::enable_shared_from_this<TracingState
 
   struct WeakTensorEq {
     bool operator()(const WeakTensor& t1, const WeakTensor& t2) const {
-      return t1.unsafeGetTensorImpl() == t2.unsafeGetTensorImpl();
+      return t1.is_same(t2);
     }
   };
 
@@ -127,6 +130,7 @@ inline Value* getValueTrace(const Variable& var) {
   auto it = value_map.find(var);
   if (it == value_map.end()) {
     Value *constant = state->graph->insertConstant(var.data());
+    recordSourceLocation(constant->node());
     constant->inferTypeFrom(var.data());
     it = value_map.emplace_hint(it, var, constant);
   }
@@ -223,22 +227,19 @@ inline void abandon() {
   setTracingState(nullptr);
 }
 
-
-TORCH_API void recordSourceLocation(Node* n);
-TORCH_API void setRecordSourceLocation(void (*v)(Node*));
-
 // NB: those serve both as an intermediate steps in addInputs below,
 // as well as the overloads that terminate template recursion
-void addInputs(Node *n, const char * name, int64_t value);
-void addInputs(Node *n, const char * name, bool value);
-void addInputs(Node *n, const char * name, double value);
-void addInputs(Node *n, const char * name, const at::Scalar& value);
-void addInputs(Node *n, const char * name, const at::Tensor& value);
-void addInputs(Node *n, const char * name, at::IntList value);
-void addInputs(Node *n, const char * name, at::TensorList value);
-void addInputs(Node *n, const char * name, const ArrayRef<double>& value);
-void addInputs(Node *n, const char * name, const std::string& value);
-void addInputs(Node *n, const char * name, const at::SparseTensorRef& value);
+TORCH_API void addInputs(Node *n, const char * name, int64_t value);
+TORCH_API void addInputs(Node *n, const char * name, bool value);
+TORCH_API void addInputs(Node *n, const char * name, double value);
+TORCH_API void addInputs(Node *n, const char * name, const at::Scalar& value);
+TORCH_API void addInputs(Node *n, const char * name, const at::Tensor& value);
+TORCH_API void addInputs(Node *n, const char * name, at::IntList value);
+TORCH_API void addInputs(Node *n, const char * name, at::TensorList value);
+TORCH_API void addInputs(Node *n, const char * name, const ArrayRef<double>& value);
+TORCH_API void addInputs(Node *n, const char * name, const std::string& value);
+TORCH_API void addInputs(Node *n, const char * name, const at::SparseTensorRef& value);
+TORCH_API void addInputs(Node *n, const char * name, const at::TensorOptions& value);
 
 template<size_t N>
 void addInputs(Node *n, const char * name, std::array<bool, N> value) {

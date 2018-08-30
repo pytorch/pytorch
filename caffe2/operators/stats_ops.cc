@@ -290,7 +290,7 @@ timergetandend_op = core.CreateOperator(
     ["nanos"]
 )
 
-# Test TimerBegin/TimerGet/TimerEnd
+// Test TimerBegin/TimerGet/TimerEnd
 workspace.RunOperatorOnce(timerbegin_op)
 print("timer:", workspace.FetchBlob("timer"))
 workspace.RunOperatorOnce(timerget_op)
@@ -298,7 +298,7 @@ print("nanos:", workspace.FetchBlob("nanos"))
 workspace.RunOperatorOnce(timerend_op)
 
 
-# Test TimerBegin/TimerGetAndEnd
+// Test TimerBegin/TimerGetAndEnd
 workspace.RunOperatorOnce(timerbegin_op)
 print("timer:", workspace.FetchBlob("timer"))
 workspace.RunOperatorOnce(timergetandend_op)

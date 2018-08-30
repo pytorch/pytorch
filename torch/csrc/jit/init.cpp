@@ -21,6 +21,7 @@
 #include "torch/csrc/jit/passes/constant_propagation.h"
 #include "torch/csrc/jit/passes/loop_unrolling.h"
 #include "torch/csrc/jit/passes/to_batch.h"
+#include "torch/csrc/jit/passes/lower_tuples.h"
 #include "torch/csrc/jit/passes/specialize_undef.h"
 #include "torch/csrc/jit/graph_executor.h"
 #include "torch/csrc/jit/script/init.h"
@@ -67,6 +68,7 @@ void initJITBindings(PyObject *module) {
 
   m.def("_jit_init", loadPythonClasses)
    .def("_jit_pass_onnx", ToONNX)
+   .def("_jit_pass_lower_all_tuples", LowerAllTuples)
    .def("_jit_pass_onnx_peephole", PeepholeOptimizeONNX)
    .def("_jit_pass_fuse", FuseGraph)
    .def("_jit_pass_dce", [](std::shared_ptr<Graph>& g) {
@@ -83,12 +85,16 @@ void initJITBindings(PyObject *module) {
    .def("_jit_pass_shape_analysis", [](Graph& graph, py::tuple inputs, bool with_grad) {
      PropagateInputShapes(graph, ArgumentSpec(with_grad, evilDeprecatedBadCreateStackDoNotUse(inputs, graph.inputs())));
    })
+   .def("_jit_pass_complete_shape_analysis", [](Graph& graph, py::tuple inputs, bool with_grad) {
+     PropagateInputShapes(graph, CompleteArgumentSpec(with_grad, evilDeprecatedBadCreateStackDoNotUse(inputs, graph.inputs())));
+   })
    .def("_jit_pass_remove_expands", RemoveExpands)
    .def("_jit_pass_erase_number_types", EraseNumberTypes)
    .def("_jit_pass_loop_unrolling", UnrollLoops)
    .def("_jit_pass_constant_propagation", [](std::shared_ptr<Graph>& g) {
      return ConstantPropagation(g);
    })
+   .def("_jit_pass_erase_shape_information", EraseShapeInformation)
    .def("_jit_run_cpp_tests", [] {
      // We have to release the GIL inside this method, because if we happen to
      // initialize the autograd engine in these tests, the newly spawned worker threads will
@@ -115,12 +121,13 @@ void initJITBindings(PyObject *module) {
        return differentiate(g_clone, requires_grad);
    });
 
-  py::class_<ArgumentSpec>(m, "ArgumentSpec")
-      .def("__repr__", [](ArgumentSpec& self) {
+  py::class_<CompleteArgumentSpec>(m, "CompleteArgumentSpec")
+      .def("__repr__", [](CompleteArgumentSpec& self) {
         std::ostringstream s;
         s << self;
         return s.str();
       });
+  py::class_<ArgumentSpec>(m, "ArgumentSpec");
   py::class_<Code>(m, "Code")
       .def("executors", [](Code& c) {
         return py::make_iterator(c.executors().begin(), c.executors().end());
@@ -216,13 +223,13 @@ void initJITBindings(PyObject *module) {
     py::class_<PyTorchFileReader>(m, "PyTorchFileReader")
       .def(py::init<std::string>())
       .def("get_record_with_key", [](PyTorchFileReader &self, uint64_t key) {
-        std::shared_ptr<void> data;
+        at::DataPtr data;
         size_t size;
         std::tie(data, size) = self.getRecordWithKey(key);
         return py::bytes(reinterpret_cast<const char*>(data.get()), size);
       })
       .def("get_last_record", [](PyTorchFileReader &self){
-        std::shared_ptr<void> data;
+        at::DataPtr data;
         size_t size;
         std::tie(data, size) = self.getLastRecord();
         return py::bytes(reinterpret_cast<const char*>(data.get()), size);

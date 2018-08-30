@@ -184,14 +184,14 @@ private:
 public:
   Value* setType(const TypePtr type);
   void inferTypeFrom(const at::Tensor& output) {
-    setType(TensorType::create(output));
+    setType(CompleteTensorType::create(output));
   }
   const TypePtr & type() const {
     JIT_ASSERT(type_ != nullptr);
     return type_;
   }
   bool isTensor() const {
-    return type()->kind() == TypeKind::TensorType;
+    return type()->kind() == TypeKind::CompleteTensorType;
   }
   size_t unique() const {
     return unique_;
@@ -413,9 +413,11 @@ public:
 
 
   // Returns true if the value of input name is statically known
-  bool is_constant(Symbol name) {
+  bool is_constant(Symbol name) const {
     return static_cast<bool>(get(name));
   }
+
+  TORCH_API bool isNondeterministic() const;
 
   // Graphs
 
@@ -678,16 +680,12 @@ public:
   }
 
   // XXX: this function is meant to be used with string literals only!
-  bool matches(const char *signature_literal, at::ArrayRef<Symbol> const_inputs={});
+  bool matches(const char *signature_literal, at::ArrayRef<Symbol> const_inputs={}) const;
 
   const FunctionSchema& schema() const {
     if (!schema_)
       findSchema();
     return *schema_;
-  }
-
-  void invalidateSchema() {
-    schema_ = nullptr;
   }
 
   void dump() const;
@@ -994,6 +992,9 @@ public:
   Node * createUndefined() {
     return create(prim::Undefined);
   }
+  Node * createNoneGenerator() {
+    return create(prim::NoneGenerator);
+  }
   Node * createFusionGroup(int device) {
     auto n = create(prim::FusionGroup, 0);
     n->g_(attr::Subgraph,std::make_shared<Graph>(scope_root_));
@@ -1026,11 +1027,16 @@ public:
   Node* createNumToTensor(Value* value) {
     auto typ = value->type();
     Node * result = create(prim::NumToTensor, {value});
-    result->output()->setType(TensorType::fromNumberType(typ));
+    result->output()->setType(CompleteTensorType::fromNumberType(typ));
     return result;
   }
   Node* createTensorToNum(const TypePtr& type, Value* value) {
     auto* result = create(prim::TensorToNum, {value});
+    result->output()->setType(type);
+    return result;
+  }
+  Node* createImplicitTensorToNum(const TypePtr& type, Value* value) {
+    auto* result = create(prim::ImplicitTensorToNum, {value});
     result->output()->setType(type);
     return result;
   }

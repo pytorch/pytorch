@@ -1,5 +1,4 @@
 #include "ATen/UndefinedTensor.h"
-#include "ATen/Context.h"
 #include "ATen/core/Error.h"
 
 namespace at {
@@ -25,7 +24,7 @@ int64_t UndefinedTensor::dim() const {
   AT_ERROR("dim() called on undefined Tensor");
 }
 
-const Storage& UndefinedTensor::storage() {
+const Storage& UndefinedTensor::storage() const {
   AT_ERROR("storage() called on undefined Tensor");
 }
 

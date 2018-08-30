@@ -798,6 +798,18 @@ class TestCaffe2Backend(unittest.TestCase):
         model = nn.ConvTranspose2d(3, 3, 3, stride=3, bias=False, padding=1, output_padding=2)
         self.run_model_test(model, train=False, batch_size=BATCH_SIZE, atol=1e-7)
 
+    def test_unsqueeze(self):
+        shape = (3, 4, 5)
+        for dim in range(len(shape) + 1):
+            class MyModel(torch.nn.Module):
+                def __init__(self):
+                    super(MyModel, self).__init__()
+
+                def forward(self, x):
+                    return x.unsqueeze(dim)
+            x = Variable(torch.randn(*shape))
+            self.run_model_test(MyModel(), train=False, input=(x), batch_size=BATCH_SIZE, atol=1e-7)
+
     # NB: InstanceNorm model includes unused weights, so skip this in TestCaffe2BackendEmbed
     # TODO: We should have another pass to eliminate the unused initializers in ONNX models.
     @skipIfEmbed
@@ -849,6 +861,30 @@ class TestCaffe2Backend(unittest.TestCase):
         model = c2.prepare_zip_archive(f)
         model.run(X)
 
+    def test_neg_slice(self):
+        class NegSlice(torch.nn.Module):
+            def forward(self, x):
+                return x[-1, :, :]
+
+        x = torch.randn(3, 4, 5)
+        self.run_model_test(NegSlice(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
+
+    def test_neg_slice_large(self):
+        class NegSlice(torch.nn.Module):
+            def forward(self, x):
+                return x[:, :, :, :, -3]
+
+        x = torch.randn(3, 4, 5, 6, 7)
+        self.run_model_test(NegSlice(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
+
+    @unittest.skip('https://github.com/pytorch/pytorch/issues/10984')
+    def test_neg_slice_large_negone(self):
+        class NegSlice(torch.nn.Module):
+            def forward(self, x):
+                return x[:, :, :, :, -1]
+
+        x = torch.randn(3, 4, 5, 6, 7)
+        self.run_model_test(NegSlice(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
 
 # a bit of metaprogramming to set up all the rnn tests
 

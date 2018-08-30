@@ -211,7 +211,7 @@ inline at::Tensor PythonArgs::tensor(int i) {
           Py_TYPE(obj)->tp_name);
     }
     auto tensor = scalar.toTensor();
-    tensor.get()->set_wrapped_number(true);
+    tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
     return autograd::make_variable(tensor);
   }
   return reinterpret_cast<THPVariable*>(obj)->cdata;
@@ -226,7 +226,7 @@ inline at::Scalar PythonArgs::scalarWithDefault(int i, at::Scalar default_scalar
   // Zero-dim tensors are converted to Scalars as-is. Note this doesn't currently
   // handle most NumPy scalar types except np.float64.
   if (THPVariable_Check(args[i])) {
-    return at::Scalar(((THPVariable*)args[i])->cdata);
+    return ((THPVariable*)args[i])->cdata._local_scalar();
   }
   if (THPUtils_checkLong(args[i])) {
     return at::Scalar(static_cast<int64_t>(THPUtils_unpackLong(args[i])));

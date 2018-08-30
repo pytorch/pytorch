@@ -32,23 +32,31 @@ Operation noop(Node* n) {
   return [](Stack& stack) { return 0; };
 }
 
-RegisterOperators reg({
+// using the rules from python_arg_parser FunctionParameter::check
+// tensor cannot have grad set, tensor must be 0 dim,
+// and if the dest is an int the source must be integral type
+void checkImplicitTensorToNum(at::Tensor t, bool toInt) {
+  if (autograd::as_variable_ref(t).requires_grad()) {
+    throw std::runtime_error("Cannot input a tensor that requires grad as a scalar argument");
+  }
+  if (t.sizes().size() != 0) {
+    throw std::runtime_error("Cannot input a tensor of dimension other than 0 as a scalar argument");
+  }
+  if (toInt && !isIntegralType(autograd::as_variable_ref(t).data().type().scalarType())) {
+    std::stringstream ss;
+    ss << "Cannot input a tensor of type " << t.type().scalarType() << " as an integral argument";
+    throw std::runtime_error(ss.str());
+  }
+}
 
+RegisterOperators reg({
     Operator(
         prim::FusionGroup,
         [](Node* node) {
-          auto fusion_fn = sharedFusionCompiler().getOrCompile(node);
-          auto num_inputs = node->inputs().size();
-          return [fusion_fn, num_inputs](Stack& stack) {
+          auto kernel_cache = sharedFusionCompiler().getOrCompile(node);
+          return [kernel_cache](Stack& stack) {
             autograd::profiler::RecordFunction record("FusionGroup");
-            std::vector<at::Tensor> toutputs;
-            // TODO: have fusion_fn work off of a stack as well
-            auto tinputs = fmap(last(stack, num_inputs), [](const IValue& v) {
-              return v.toTensor();
-            });
-            fusion_fn->launch(tinputs, toutputs);
-            drop(stack, num_inputs);
-            stack.insert(stack.end(), toutputs.begin(), toutputs.end());
+            kernel_cache->run(stack);
             return 0;
           };
         }),
@@ -67,6 +75,29 @@ RegisterOperators reg({
             return [](Stack& stack) {
               at::Tensor a;
               pop(stack, a);
+              at::DeviceGuard guard(a);
+              push(stack, a.toCDouble());
+              return 0;
+            };
+          }
+        }),
+    Operator(
+        prim::ImplicitTensorToNum,
+        [](Node* node) -> Operation {
+          if(node->output()->type() == IntType::get()) {
+            return [](Stack& stack) {
+              at::Tensor a;
+              pop(stack, a);
+              checkImplicitTensorToNum(a, /*to int*/true);
+              at::DeviceGuard guard(a);
+              push(stack, a.toCLong());
+              return 0;
+            };
+          } else {
+            return [](Stack& stack) {
+              at::Tensor a;
+              pop(stack, a);
+              checkImplicitTensorToNum(a, /*to int*/false);
               at::DeviceGuard guard(a);
               push(stack, a.toCDouble());
               return 0;
@@ -105,6 +136,14 @@ RegisterOperators reg({
         }),
     Operator(
         prim::Undefined,
+        [](Node* node) {
+          return [](Stack& stack) {
+            stack.push_back(at::Tensor());
+            return 0;
+          };
+        }),
+    Operator(
+        prim::NoneGenerator,
         [](Node* node) {
           return [](Stack& stack) {
             stack.push_back(at::Tensor());

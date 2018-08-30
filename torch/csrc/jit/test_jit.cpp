@@ -147,9 +147,10 @@ static void fusionTests() {
     auto a = at::rand({3,4}, at::kCUDA);
     auto b = at::rand({4,3}, at::kCUDA).transpose(0,1);
     auto o = at::zeros({3,4}, at::kCUDA);
-    comp.debugLaunchGraph(graph, 0, {a,b}, {o});
+    auto outputs = comp.debugLaunchGraph(graph, 0, {a,b});
+    REQUIRE(outputs.size() == 1);
     auto o2 = a*b;
-    float max_diff = (o2 - o).abs().max().toCDouble();
+    float max_diff = (o2 - outputs[0]).abs().max().toCDouble();
     //std::cout << "max diff: " << max_diff << "\n";
     REQUIRE(max_diff == 0);
   };
@@ -180,7 +181,6 @@ static void fusionTests() {
     graph.lint();
 
     std::vector<at::Tensor> inputs;
-    std::vector<at::Tensor> outputs;
     // We want to generate input/output tensors with dimension 128x128x32, but
     // with different internal strides.  To do this, we generate a tensor
     // with the "wrong" dimensions, and then use transpose to get an appropriately
@@ -189,11 +189,6 @@ static void fusionTests() {
       std::vector<int64_t> dims = {128, 128, 32};
       std::swap(dims[ti],dims[tj]);
       inputs.push_back(at::rand(dims, at::kCUDA).transpose(ti, tj));
-    }
-    for(size_t i = 0; i < graph.outputs().size(); i++) {
-      std::vector<int64_t> dims = {128, 128, 32};
-      std::swap(dims[toi],dims[toj]);
-      outputs.push_back(at::zeros(dims, at::kCUDA).transpose(toi,toj));
     }
 
     auto t22 = inputs[4].sigmoid();
@@ -206,9 +201,8 @@ static void fusionTests() {
     auto t5 = out1.tanh();
     auto out0 = t16*t5;
 
-
-    //auto out0 = inputs[0]*inputs[1];
-    comp.debugLaunchGraph(graph, 0, inputs, outputs);
+    auto outputs = comp.debugLaunchGraph(graph, 0, inputs);
+    REQUIRE(outputs.size() == graph.outputs().size());
     REQUIRE(out0.is_same_size(outputs.front()));
     float max_diff = (outputs.front() - out0).abs().max().toCDouble();
     REQUIRE(max_diff < 1e-6);
@@ -238,16 +232,15 @@ static void fusionTests() {
 
     auto a = at::rand({3,4,5}, at::kCUDA);
     auto b = at::rand({4,3,5}, at::kCUDA).transpose(0,1);
-    auto o = at::zeros({3,4,5}, at::kCUDA);
 
     auto o_r = a*b;
     auto o2_r = at::cat({a, o_r}, dim);
-    auto o2 = at::zeros(o2_r.sizes(), at::kCUDA);
-    comp.debugLaunchGraph(graph, 0, {a,b}, {o, o2});
+    auto outputs = comp.debugLaunchGraph(graph, 0, {a,b});
+    REQUIRE(outputs.size() == 2);
 
-    float max_diff = (o_r - o).abs().max().toCDouble();
+    float max_diff = (o_r - outputs[0]).abs().max().toCDouble();
     REQUIRE(max_diff == 0);
-    float max_diff2 = (o2_r - o2).abs().max().toCDouble();
+    float max_diff2 = (o2_r - outputs[1]).abs().max().toCDouble();
     REQUIRE(max_diff2 == 0);
   };
   testConcat(0);
@@ -649,7 +642,7 @@ std::string toString(std::shared_ptr<Graph>& graph) {
 void testDifferentiate(std::ostream & out) {
   auto graph = std::make_shared<Graph>();
   at::ScalarType s = at::ScalarType::Float;
-  auto type = TensorType::create(s, -1, {2, 3, 4}, {12, 4, 1});
+  auto type = CompleteTensorType::create(s, -1, {2, 3, 4}, {12, 4, 1});
 
   // Build up a fake graph
   auto a = SymbolicVariable::asNewInput(*graph, type);
@@ -676,7 +669,7 @@ void testDifferentiate(std::ostream & out) {
 void testDifferentiateWithRequiresGrad(std::ostream & out) {
   auto graph = std::make_shared<Graph>();
   at::ScalarType s = at::ScalarType::Float;
-  auto type = TensorType::create(s, -1, {2, 3, 4}, {12, 4, 1});
+  auto type = CompleteTensorType::create(s, -1, {2, 3, 4}, {12, 4, 1});
 
   // Build up a fake graph
   auto a = SymbolicVariable::asNewInput(*graph, type);
@@ -722,7 +715,7 @@ bool isEqual(at::IntList lhs, at::IntList rhs) {
   return lhs.size() == rhs.size() && std::equal(lhs.begin(), lhs.end(), rhs.begin());
 }
 
-bool isEqual(const ArgumentInfo & ti, const autograd::Variable & v) {
+bool isEqual(const CompleteArgumentInfo & ti, const autograd::Variable & v) {
   REQUIRE(ti.isTensor());
   if(!ti.defined())
     return ti.defined() == v.defined();
@@ -757,35 +750,35 @@ void argumentSpecTest() {
   list2[1].toTensor().transpose_(0, 1);
 
 
-  ArgumentSpec a(true, list);
-  ArgumentSpec b(true, list);
+  CompleteArgumentSpec a(true, list);
+  CompleteArgumentSpec b(true, list);
   REQUIRE(a.hashCode() == b.hashCode());
 
   REQUIRE(a == b);
-  ArgumentSpec d(true, list2);
+  CompleteArgumentSpec d(true, list2);
   REQUIRE(d == a);
   REQUIRE(d.hashCode() == a.hashCode());
 
   for(size_t i = 0; i < list.size(); ++i) {
     REQUIRE(isEqual(a.at(i), list[i].toTensor()));
   }
-  ArgumentSpec no_grad(/*with_grad=*/false, list);
+  CompleteArgumentSpec no_grad(/*with_grad=*/false, list);
   REQUIRE(no_grad != a);
 
-  std::unordered_set<ArgumentSpec> spec;
+  std::unordered_set<CompleteArgumentSpec> spec;
   spec.insert(std::move(a));
   REQUIRE(spec.count(b) > 0);
   REQUIRE(spec.count(no_grad) == 0);
   spec.insert(std::move(no_grad));
-  REQUIRE(spec.count(ArgumentSpec(true,list)) == 1);
+  REQUIRE(spec.count(CompleteArgumentSpec(true,list)) == 1);
 
   list2[1].toTensor().transpose_(0,1);
-  ArgumentSpec c(true, list2); // same as list, except for one stride
+  CompleteArgumentSpec c(true, list2); // same as list, except for one stride
   REQUIRE(!(c == a));
   REQUIRE(spec.count(c) == 0);
 
   Stack stack = { var(CF, {1,2}, true), 3, var(CF, {1,2}, true) };
-  ArgumentSpec with_const(true, stack);
+  CompleteArgumentSpec with_const(true, stack);
   REQUIRE(with_const.at(2).sizes().size() == 2);
 }
 
@@ -805,12 +798,12 @@ void shapeAnalysisTest() {
   auto w_hh  = t_def(at::randn({4 * hidden_size, hidden_size}, at::kCUDA));
 
   auto g = build_lstm();
-  ArgumentSpec spec(false, createStack({v(input), v(hx), v(cx), v(w_ih), v(w_hh) }));
+  CompleteArgumentSpec spec(false, createStack({v(input), v(hx), v(cx), v(w_ih), v(w_hh) }));
   PropagateInputShapes(*g, spec);
   at::Tensor r0, r1;
   std::tie(r0, r1) = lstm(input, hx, cx, w_ih, w_hh);
-  auto o0 = g->outputs()[0]->type()->expect<TensorType>();
-  auto o1 = g->outputs()[1]->type()->expect<TensorType>();
+  auto o0 = g->outputs()[0]->type()->expect<CompleteTensorType>();
+  auto o1 = g->outputs()[1]->type()->expect<CompleteTensorType>();
   REQUIRE(o0->sizes() == std::vector<int64_t>(r0.sizes().begin(), r0.sizes().end()));
   REQUIRE(o1->sizes() == std::vector<int64_t>(r1.sizes().begin(), r1.sizes().end()));
 
@@ -905,7 +898,7 @@ void testControlFlow() {
   };
 
   auto L = [](int64_t l) { return IValue(autograd::make_variable(at::Scalar(l).toTensor())); };
-  auto V = [](IValue t) { return at::Scalar(std::move(t).toTensor()).toLong(); };
+  auto V = [](IValue t) { return std::move(t).toTensor().toCLong(); };
   auto run_binary = [&](const std::string & name, int64_t a, int64_t b) {
     return V(run(name, {L(a), L(b)})[0]);
   };
@@ -918,23 +911,23 @@ void testControlFlow() {
 
 void testIValue() {
   Shared<IntList> foo = IntList::create({3, 4, 5});
-  JIT_ASSERT(foo->use_count() == 1);
+  JIT_ASSERT(foo.use_count() == 1);
   IValue bar(foo);
-  JIT_ASSERT(foo->use_count() == 2);
+  JIT_ASSERT(foo.use_count() == 2);
   auto baz = bar;
-  JIT_ASSERT(foo->use_count() == 3);
+  JIT_ASSERT(foo.use_count() == 3);
   auto foo2 = std::move(bar);
-  JIT_ASSERT(foo->use_count() == 3);
+  JIT_ASSERT(foo.use_count() == 3);
   JIT_ASSERT(foo2.isIntList());
   JIT_ASSERT(bar.isNone());
   foo2 = IValue(4.0);
   JIT_ASSERT(foo2.isDouble());
   JIT_ASSERT(foo2.toDouble() == 4.0);
-  JIT_ASSERT(foo->use_count() == 2);
+  JIT_ASSERT(foo.use_count() == 2);
   JIT_ASSERT(ArrayRef<int64_t>(baz.toIntList()->elements()).equals({3,4,5}));
 
   auto move_it = std::move(baz).toIntList();
-  JIT_ASSERT(foo->use_count() == 2);
+  JIT_ASSERT(foo.use_count() == 2);
   JIT_ASSERT(baz.isNone());
   IValue i(4);
   JIT_ASSERT(i.isInt() && i.toInt() == 4);
@@ -947,18 +940,18 @@ void testIValue() {
   dlist = IValue(DoubleList::create({3.4}));
   JIT_ASSERT(ArrayRef<double>(dlist.toDoubleList()->elements()).equals({3.4}));
   IValue the_list(Tuple::create({IValue(3.4), IValue(4), IValue(foo)}));
-  JIT_ASSERT(foo->use_count() == 3);
+  JIT_ASSERT(foo.use_count() == 3);
   JIT_ASSERT(the_list.isTuple());
   auto first = std::move(the_list).toTuple()->elements().at(1);
   JIT_ASSERT(first.toInt() == 4);
   at::Tensor tv = at::rand({3,4});
   IValue ten(tv);
-  JIT_ASSERT(tv.get()->use_count() == 2);
+  JIT_ASSERT(tv.use_count() == 2);
   auto ten2 = ten;
-  JIT_ASSERT(tv.get()->use_count() == 3);
+  JIT_ASSERT(tv.use_count() == 3);
   JIT_ASSERT(ten2.toTensor().equal(ten.toTensor()));
   std::move(ten2).toTensor();
-  JIT_ASSERT(tv.get()->use_count() == 2);
+  JIT_ASSERT(tv.use_count() == 2);
 }
 
 void testProto() {

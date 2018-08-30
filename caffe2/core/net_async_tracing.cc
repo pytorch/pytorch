@@ -216,10 +216,11 @@ void Tracer::renameThreads() {
       continue;
     }
     auto* op = net_->GetOperators().at(event.op_id_);
-    int numa_node_id = DeviceId(op->device_option());
-    if (numa_node_id < 0) {
+    if (!op->device_option().has_numa_node_id()) {
       continue;
     }
+    int numa_node_id = op->device_option().numa_node_id();
+    CAFFE_ENFORCE_GE(numa_node_id, 0, "Invalid NUMA node id: ", numa_node_id);
     long tid = hasher(event.tid_);
 
     if (!tid_to_numa.count(tid)) {

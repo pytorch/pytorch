@@ -5,7 +5,8 @@ from torch.nn import Module, ModuleList, ParameterList, Parameter, Sequential
 from torch.jit.frontend import get_jit_ast
 import torch.jit.annotations
 from torch._six import raise_from, with_metaclass
-from collections import defaultdict, OrderedDict, namedtuple
+import torch.testing
+from collections import defaultdict, OrderedDict, namedtuple, Iterable
 import sys
 import warnings
 import itertools
@@ -20,6 +21,25 @@ import numbers
 import collections
 import re
 
+
+def _parse_env(name, default, true_message, false_message):
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    if value.lower() in {'1', 'true', 'yes'}:
+        return True
+    elif value.lower() in {'0', 'false', 'no'}:
+        return False
+    if value == '1v':
+        print(true_message)
+        return True
+    elif value == '0v':
+        print(false_message)
+        return False
+    raise ValueError('Unknown setting of {}. Try using 0 or 1.'.format(name))
+
+
+_enabled = _parse_env('PYTORCH_JIT', True, "> Using PyTorch JIT", "> PyTorch JIT DISABLED")
 _flatten = torch._C._jit_flatten
 _unflatten = torch._C._jit_unflatten
 _jit_script_compile = torch._C._jit_script_compile
@@ -252,6 +272,142 @@ def _verify_equal(xs, ys):
             raise RuntimeError("JIT and real computation mismatch")
 
 
+def indent(s):
+    return '\n'.join(['\t' + line for line in s.splitlines()])
+
+
+class TracingCheckError(Exception):
+    def __init__(self, graph_diff_error, tensor_compare_error, nondeterm_warning, extra_msg=None):
+        self.message = 'Tracing failed sanity checks!\n'
+        if extra_msg is not None:
+            self.message += extra_msg + '\n'
+        if graph_diff_error is not None:
+            self.message += 'ERROR: Graphs differed across invocations!\n'
+            self.message += indent(graph_diff_error) + '\n'
+        if nondeterm_warning is not None:
+            self.message += 'WARNING: '
+            self.message += nondeterm_warning + '\n'
+        if tensor_compare_error is not None:
+            self.message += 'ERROR: Tensor-valued Constant nodes differed in value ' \
+                            'across invocations. This often indicates that the tracer has' \
+                            ' encountered untraceable code.\n'
+            self.message += indent(tensor_compare_error) + '\n'
+        super(TracingCheckError, self).__init__(self.message)
+
+
+# Check the traced module against a set of user-provided validation inputs
+def _check_trace(check_inputs, func, executor_options, module, check_tolerance):
+    for inputs in check_inputs:
+        check_mod = torch.jit.trace(*_clone_inputs(inputs), disable_checks=True, **executor_options)(func)
+
+        def graph_diagnostic_info():
+            mod_canonicalized = torch._C._jit_pass_canonicalize(module.graph)
+            torch._C._jit_pass_erase_shape_information(mod_canonicalized)
+            check_canonicalized = torch._C._jit_pass_canonicalize(check_mod.graph)
+            torch._C._jit_pass_erase_shape_information(check_canonicalized)
+
+            graph_diff_errors = None
+            if str(mod_canonicalized) != str(check_canonicalized):
+                import difflib
+                graph_diff = difflib.ndiff(str(mod_canonicalized).splitlines(True),
+                                           str(check_canonicalized).splitlines(True))
+                graph_diff_errors = 'Graph diff:\n' + indent(''.join(graph_diff)) + '\n'
+
+                for n_mod, n_check in zip(mod_canonicalized.nodes(), check_canonicalized.nodes()):
+                    if str(n_mod) != str(n_check):
+                        graph_diff_errors += 'First diverging operator:\n'
+                        node_diff = difflib.ndiff(str(n_mod).splitlines(True),
+                                                  str(n_check).splitlines(True))
+                        source_printout = 'Node diff:\n' + indent(''.join(node_diff)) + '\n'
+                        mod_stack = n_mod.getSourceLocation()
+                        if mod_stack:
+                            source_printout += 'Trace source location:\n' + indent(mod_stack) + '\n'
+                        check_stack = n_check.getSourceLocation()
+                        if check_stack:
+                            source_printout += 'Check source location:\n' + indent(check_stack) + '\n'
+                        graph_diff_errors += source_printout
+
+                        break  # For now, only print out the first pair of nodes that diverges
+
+            tensor_compare_errors = None
+            # Check Tensor-valued constant nodes
+            for n_mod, n_check in zip(mod_canonicalized.nodes(), check_canonicalized.nodes()):
+                if n_mod.kind() != n_check.kind():
+                    break  # Graphs have already diverged
+
+                if n_mod.kind() == n_check.kind() and n_mod.kind() == 'prim::Constant':
+                    if n_mod.kindOf('value') != 't' or n_check.kindOf('value') != 't':
+                        continue
+
+                    mod_tensor_val = n_mod.t('value')
+                    check_tensor_val = n_check.t('value')
+
+                    try:
+                        torch.testing.assert_allclose(mod_tensor_val, check_tensor_val)
+                    except (RuntimeError, AssertionError) as e:
+                        if not tensor_compare_errors:
+                            tensor_compare_errors = ''
+                        tensor_compare_errors += 'Node:\n' + indent(str(n_mod)) + '\n'
+                        compare_stack = n_mod.getSourceLocation()
+                        if compare_stack:
+                            tensor_compare_errors += 'Source Location:\n' + indent(compare_stack) + '\n'
+                        tensor_compare_errors += 'Comparison exception: ' + indent(str(e))
+
+                        break  # For now, only print the first diverging pair
+
+            nondeterministic_ops_warning = None
+            nondeterm_ops = [op for op in module.graph.nodes() if op.isNondeterministic()]
+            if len(nondeterm_ops) > 0:
+                nondeterministic_ops_warning = "Trace had nondeterministic nodes. Nodes:\n"
+                for op in nondeterm_ops:
+                    nondeterministic_ops_warning += indent(str(op))
+                nondeterministic_ops_warning += "\nThis may cause errors in trace checking. To disable trace checking,"\
+                                                " pass disable_checks=True to torch.jit.trace()"
+
+            return graph_diff_errors, tensor_compare_errors, nondeterministic_ops_warning
+
+        def wrap_retval(x):
+            return x if isinstance(x, tuple) else (x,)
+
+        def run_mod_and_filter_tensor_outputs(mod, inputs):
+            outs = wrap_retval(mod(*_clone_inputs(inputs)))
+            outs = [out for out in outs if isinstance(out, torch.Tensor)]
+            return outs
+
+        try:
+            traced_outs = run_mod_and_filter_tensor_outputs(module, inputs)
+        except Exception as e:
+            msg = 'Encountered an exception while running trace with check inputs.\nException:\n' + indent(str(e))
+            raise TracingCheckError(*graph_diagnostic_info(), extra_msg=msg)
+
+        try:
+            fn_outs = run_mod_and_filter_tensor_outputs(func, inputs)
+            for orig, check in zip(traced_outs, fn_outs):
+                torch.testing.assert_allclose(orig.double(), check.double(), rtol=check_tolerance,
+                                              atol=torch.testing._get_default_tolerance(orig, check)[1])
+        except (RuntimeError, AssertionError) as e:
+            # TODO: interpose on tracing the function again and check for
+            # divergence? then we can point to where in the source code
+            # we start diverging in python v.s. the trace
+            msg = 'ERROR: Traced function outputs do not match the Python function outputs.\nException: ' + str(e)
+            raise TracingCheckError(*graph_diagnostic_info(),
+                                    extra_msg=msg)
+
+        try:
+            check_outs = run_mod_and_filter_tensor_outputs(check_mod, inputs)
+        except Exception as e:
+            msg = 'Encountered an exception while running checking trace with check inputs.\nException:\n' \
+                + indent(str(e))
+            raise TracingCheckError(*graph_diagnostic_info(), extra_msg=msg)
+
+        try:
+            for orig, check in zip(traced_outs, check_outs):
+                torch.testing.assert_allclose(orig.double(), check.double(), rtol=check_tolerance,
+                                              atol=torch.testing._get_default_tolerance(orig, check)[1])
+        except (RuntimeError, AssertionError) as e:
+            raise TracingCheckError(*graph_diagnostic_info())
+
+
 def trace(*args, **kwargs):
     """
     Trace a function and return an executable trace that will be optimized
@@ -274,20 +430,48 @@ def trace(*args, **kwargs):
 
     Keyword arguments:
         optimize (bool, optional): whether or not to apply optimizations.  Default: ``True``.
+        check_inputs (list of tuples. optional): A list of tuples of input arguments that should be used
+                                                 to check the trace against what is expected. Each tuple
+                                                 is equivalent to a seet of input arguments that would
+                                                 be specified in `args`. For best results, pass in a
+                                                 set of checking inputs representative of the space of
+                                                 shapes and types of inputs you expect the network to see.
+                                                 If not specified, the original `args` is used for checking
+        disable_checks (bool, optional): Pass bool True to disable the aforementioned checking. You might
+                                         want to do this if, for example, your network contains non-
+                                         deterministic ops or if you are sure that the network is
+                                         correct despite a checker failure.
+        check_tolerance (float, optional): Floating-point comparison tolerance to use in the checker procedure.
+                                           This can be used to relax the checker strictness in the event that
+                                           results diverge numerically for a known reason, such as operator fusion.
 
         >>> @jit.trace(torch.rand(1))
         ... def f(x):
         ...     return x * 2
     """
     def wrapper(func):
+        if not _enabled:
+            return func
         executor_options = {'optimize': True}
         for name in executor_options:
             executor_options[name] = kwargs.pop(name, executor_options[name])
+
+        check_inputs = kwargs.pop('check_inputs', None)
+        disable_checks = kwargs.pop('disable_checks', False)
+        check_tolerance = kwargs.pop('check_tolerance', 1e-5)
+
         if len(kwargs) != 0:
             raise TypeError("got unexpected keyword arguments: {}".format(", ".join(kwargs.keys())))
 
         module = TopLevelTracedModule(func, **executor_options)
         module._create_method_from_trace('forward', func, tuple(args))
+
+        # Check the trace against new traces created from user-specified inputs
+        if check_inputs is not None:
+            _check_trace(check_inputs, func, executor_options, module, check_tolerance)
+        elif not disable_checks:
+            _check_trace([args], func, executor_options, module, check_tolerance)
+
         return module
 
     return wrapper
@@ -346,6 +530,8 @@ class CompilationUnit(object):
 
 
 def script(fn, optimize=True, _frames_up=0):
+    if not _enabled:
+        return fn
     rcb = createResolutionCallback(_frames_up + 1)
     ast = get_jit_ast(fn, is_method=False)
     graph = _jit_script_compile(ast, rcb)
@@ -365,6 +551,8 @@ ScriptMethodStub = namedtuple('ScriptMethodStub', ('resolution_callback', 'def_'
 
 
 def script_method(fn):
+    if not _enabled:
+        return fn
     # NOTE: we need to traverse two frames here because the meta-class frame
     # for ScriptModule will be present, as opposed to invoking @script on a
     # a function or invoking define() on a CompilationUnit.
@@ -384,6 +572,8 @@ def script_method(fn):
 
 def batch(batch_size=1, optimize=True, _frames_up=0):
     def decorator(fn):
+        if not _enabled:
+            return fn
         import torch.jit.batchop
         mod = script(fn, optimize, _frames_up)
         res_graph = torch.to_batch_graph(mod.graph)
@@ -594,57 +784,60 @@ class ScriptMeta(type(torch._C.ScriptModule)):
         return super(ScriptMeta, cls).__init__(name, bases, attrs)
 
 
-class ScriptModule(with_metaclass(ScriptMeta, torch._C.ScriptModule, Module)):
-    def __init__(self, optimize=True):
-        # must be before Module.init since the field is used in __getattr__
-        Module.__init__(self)
-        self._set_optimized(optimize)
-        self._parameters = OrderedParameterDict(self)
-        self._buffers = OrderedBufferDict(self)
-        self._modules = OrderedModuleDict(self)
+if _enabled:
+    class ScriptModule(with_metaclass(ScriptMeta, torch._C.ScriptModule, Module)):
+        def __init__(self, optimize=True):
+            # must be before Module.init since the field is used in __getattr__
+            Module.__init__(self)
+            self._set_optimized(optimize)
+            self._parameters = OrderedParameterDict(self)
+            self._buffers = OrderedBufferDict(self)
+            self._modules = OrderedModuleDict(self)
 
-    def __getattr__(self, attr):
-        if self._has_method(attr):
-            if attr in self.__class__._original_methods:
-                original_method = self.__class__._original_methods[attr]
-                script_method = self._get_method(attr)
-                return functools.wraps(original_method)(script_method)
+        def __getattr__(self, attr):
+            if self._has_method(attr):
+                if attr in self.__class__._original_methods:
+                    original_method = self.__class__._original_methods[attr]
+                    script_method = self._get_method(attr)
+                    return functools.wraps(original_method)(script_method)
+                else:
+                    return self._get_method(attr)
+            if attr == 'graph' and self._has_method('forward'):
+                return self.__getattr__('forward').graph
+            return Module.__getattr__(self, attr)
+
+        def __setattr__(self, attr, value):
+            if attr not in self._constants_set:
+                return super(ScriptModule, self).__setattr__(attr, value)
+            if hasattr(self, attr):
+                raise RuntimeError("attempting to re-assign constant '{}'".format(attr))
+            if isinstance(value, ModuleList):
+                # special case for list of modules. Modules need to be registered with their
+                # parent module. To do this, we create a ConstModuleList, which is itself a module, that
+                # contains each of these modules as submodules. The ConstModuleList then
+                # is set as an attribute of the parent module.
+                super(ScriptModule, self).__setattr__(attr, _ConstModuleList(value))
+            elif isinstance(value, Sequential):
+                super(ScriptModule, self).__setattr__(attr, _ConstSequential(value))
             else:
-                return self._get_method(attr)
-        if attr == 'graph' and self._has_method('forward'):
-            return self.__getattr__('forward').graph
-        return Module.__getattr__(self, attr)
+                super(ScriptModule, self).__setattr__(attr, _get_valid_constant(value))
 
-    def __setattr__(self, attr, value):
-        if attr not in self._constants_set:
-            return super(ScriptModule, self).__setattr__(attr, value)
-        if hasattr(self, attr):
-            raise RuntimeError("attempting to re-assign constant '{}'".format(attr))
-        if isinstance(value, ModuleList):
-            # special case for list of modules. Modules need to be registered with their
-            # parent module. To do this, we create a ConstModuleList, which is itself a module, that
-            # contains each of these modules as submodules. The ConstModuleList then
-            # is set as an attribute of the parent module.
-            super(ScriptModule, self).__setattr__(attr, _ConstModuleList(value))
-        elif isinstance(value, Sequential):
-            super(ScriptModule, self).__setattr__(attr, _ConstSequential(value))
-        else:
-            super(ScriptModule, self).__setattr__(attr, _get_valid_constant(value))
+        def __dir__(self):
+            return sorted(Module.__dir__(self) + self._method_names())
 
-    def __dir__(self):
-        return sorted(Module.__dir__(self) + self._method_names())
-
-    def define(self, lang):
-        # We use frames_up=1 to get to the proper surrounding scope. The stack
-        # will look like:
-        # 0. createResolutionCallback
-        # 1. define()
-        # 2. surrounding scope.
-        #
-        # createResolutionCallback internally adds 1 to get us to our frame, then
-        # we add 1 to get to the proper surrounding scope.
-        rcb = createResolutionCallback(frames_up=1)
-        self._define(lang, rcb, True)
+        def define(self, lang):
+            # We use frames_up=1 to get to the proper surrounding scope. The stack
+            # will look like:
+            # 0. createResolutionCallback
+            # 1. define()
+            # 2. surrounding scope.
+            #
+            # createResolutionCallback internally adds 1 to get us to our frame, then
+            # we add 1 to get to the proper surrounding scope.
+            rcb = createResolutionCallback(frames_up=1)
+            self._define(lang, rcb, True)
+else:
+    ScriptModule = torch.nn.Module
 
 
 def _get_methods(cls):
@@ -781,6 +974,35 @@ class _ConstSequential(_ConstModuleList):
                 input = m(input)
             return input
         """)
+
+
+_builtin_table = None
+
+
+# lazily built to ensure the correct initialization order
+def _get_builtin_table():
+    global _builtin_table
+    if _builtin_table is not None:
+        return _builtin_table
+    _builtin_table = {}
+
+    def register_all(mod):
+        for name in dir(mod):
+            v = getattr(mod, name)
+            if callable(v):
+                _builtin_table[id(v)] = "aten::" + name
+    register_all(torch)
+    register_all(torch.nn.functional)
+    return _builtin_table
+
+
+def _register_builtin(fn, op):
+    _get_builtin_table()[id(fn)] = op
+
+
+def _find_builtin(fn):
+    return _get_builtin_table().get(id(fn))
+
 
 if not torch._C._jit_init():
     raise RuntimeError("JIT initialization failed")
