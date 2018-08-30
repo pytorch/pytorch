@@ -67,7 +67,7 @@ protected:
 };
 
 // allow python_engine to override the default engine when it loads
-typedef Engine& (*EngineStub)(void);
+using EngineStub = Engine& (*)(void);
 TORCH_API void set_default_engine_stub(EngineStub stub);
 
 }} // namespace torch::autograd

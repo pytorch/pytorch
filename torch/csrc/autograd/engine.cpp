@@ -170,15 +170,10 @@ struct GraphTask {
   }
 
   GraphTask(bool keep_graph, bool grad_mode)
-    : exception()
-    , has_error(false)
+    : has_error(false)
     , outstanding_tasks(0)
     , keep_graph(keep_graph)
     , grad_mode(grad_mode)
-    , mutex()
-    , not_done()
-    , not_ready()
-    , dependencies()
     , owner(NO_DEVICE) {}
 };
 
@@ -198,8 +193,7 @@ auto ReadyQueue::pop() -> FunctionTask {
   return task;
 }
 
-Engine::Engine() : ready_queues() {
-}
+Engine::Engine() = default;
 
 // This Engine's ReadyQueues and their corresponding threads are leaked here
 Engine::~Engine() = default;
@@ -559,9 +553,9 @@ auto Engine::execute(const edge_list& roots,
   // more callbacks (or they can be registered from other threads
   // while it's waiting.
   std::unique_lock<std::mutex> cb_lock(post_callbacks_lock);
-  for (size_t i = 0; i < final_callbacks.size(); ++i) {
+  for (auto& callback : final_callbacks) {
     cb_lock.unlock();
-    final_callbacks[i]();
+    callback();
     cb_lock.lock();
   }
 

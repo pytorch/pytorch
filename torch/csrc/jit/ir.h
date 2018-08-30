@@ -1286,9 +1286,9 @@ inline void Node::eraseBlock(size_t i) {
 }
 
 inline void Node::destroy() {
-  while(!outputs().size().empty())
+  while(!outputs().empty())
     eraseOutput(outputs().size() - 1);
-  while(!blocks().size().empty())
+  while(!blocks().empty())
     eraseBlock(blocks().size() - 1);
   removeAllInputs();
   if(inBlockList())
