@@ -436,6 +436,10 @@ struct CAFFE2_API NNNodeMatchCriteria {
       const std::string& debugString = "No debug string specified")
       : predicate(predicate), debugString(debugString){};
 
+  NNNodeMatchCriteria(const NNNodeMatchCriteria&) = default;
+  NNNodeMatchCriteria& operator=(const NNNodeMatchCriteria&) = default;
+  NNNodeMatchCriteria(NNNodeMatchCriteria&&) = default;
+
   NNNodeMatchCriteria andCriteria(const NNNodeMatchCriteria& other) {
     auto thisPredicate = predicate;
     auto otherPredicate = other.predicate;
