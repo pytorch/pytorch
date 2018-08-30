@@ -58,17 +58,17 @@ THCTensor_(numel)(THCState *state, THCTensor *t)
 }
 
 void THCTensor_(cat)(THCState *state, THCTensor *result,
-		     THCTensor *ta, THCTensor *tb, int dimension)
+		     THCTensor *ta, THCTensor *tb, int dimension, bool pad, int pad_value)
 {
   THCTensor* inputs[2];
   inputs[0] = ta;
   inputs[1] = tb;
-  THCTensor_(catArray)(state, result, inputs, 2, dimension);
+  THCTensor_(catArray)(state, result, inputs, 2, dimension, pad, pad_value);
 }
 
-void THCTensor_(check_shape_except_dim)(THCState *state, 
+void THCTensor_(check_shape_except_dim)(THCState *state,
     THCTensor *first, THCTensor *second, int dimension);
-inline void THCTensor_(check_shape_except_dim)(THCState *state, 
+inline void THCTensor_(check_shape_except_dim)(THCState *state,
     THCTensor *first, THCTensor *second, int dimension)
 {
   int first_dims = first->dim();
@@ -89,7 +89,7 @@ inline void THCTensor_(check_shape_except_dim)(THCState *state,
 }
 
 void THCTensor_(catArray)(THCState *state, THCTensor *result,
-			  THCTensor **inputs, int numInputs, int dimension)
+			  THCTensor **inputs, int numInputs, int dimension, bool pad, int pad_value)
 {
   // previously, size [0] tensors were the only possible empty tensors; thus, it wasn't possible
   // to cat empty tensors unless all the other tensors were 1-dimensional, so we allowed these tensors
@@ -120,9 +120,9 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
 
   THArgCheck(numInputs > 0, 3, "invalid number of inputs %d", numInputs);
   THArgCheck(dimension >= 0, 4, "invalid dimension %d", dimension);
-  
+
   std::vector<int64_t> size(nDims);
-  
+
   // Compute size of the result in the cat dimension
   int64_t cat_dim_size = 0;
   for (int i = 0; i < numInputs; i++) {
