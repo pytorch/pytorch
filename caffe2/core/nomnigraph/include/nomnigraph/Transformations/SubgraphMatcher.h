@@ -42,6 +42,7 @@ class CAFFE2_API MatchNode {
         count_(count),
         nonTerminal_(nonTerminal) {}
 
+  MatchNode() = default;
   MatchNode(const MatchNode&) = default;
   MatchNode& operator=(const MatchNode&) = default;
   MatchNode(MatchNode&&) = default;
