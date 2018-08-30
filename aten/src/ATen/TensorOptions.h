@@ -19,10 +19,10 @@ namespace at {
 /// `TensorOptions` is a virtual class to enable overriding of certain methods
 /// by subclasses in other libraries, such as PyTorch.
 ///
-/// WARNING: In PyTorch, there is a `torch::TensorOptions` subclass of this
-/// `TensorOptions`, which changes `type()` to return a variable type instead of
-/// a tensor type, such that variables are created inside factory methods,
-/// instead of tensors.  If you mix the two up, you will be very sad!
+/// WARNING: In PyTorch, there are torch:: variants of factory functions,
+/// e.g., torch::zeros for at::zeros.  These return Variables (while the
+/// stock ATen functions return plain Tensors).  If you mix these functions
+/// up, you WILL BE SAD.
 ///
 /// Rather than use the constructor of this class directly, you should prefer to
 /// use the constructor functions, and then chain setter methods on top of them.
