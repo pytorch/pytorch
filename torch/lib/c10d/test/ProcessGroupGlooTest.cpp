@@ -156,7 +156,7 @@ void testAllreduce(const std::string& path, const at::Backend b) {
   std::vector<std::vector<at::Tensor>> inputs(size);
   for (auto i = 0; i < size; i++) {
     auto tensor =
-        at::ones({16, 16}, at::TensorOptions(at::getType(b, at::kFloat))) * i;
+        at::ones({16, 16}, at::TensorOptions(at::getNonVariableType(b, at::kFloat))) * i;
     inputs[i] = std::vector<at::Tensor>({tensor});
   }
 
@@ -193,7 +193,7 @@ void testBroadcast(const std::string& path, const at::Backend b) {
   auto tests = CollectiveTest::initialize(path, size);
 
   std::vector<std::vector<at::Tensor>> inputs(size);
-  const auto& type = at::getType(b, at::kFloat);
+  const auto& type = at::getNonVariableType(b, at::kFloat);
 
   // Try every permutation of root rank and root tensoro
   for (auto i = 0; i < size; i++) {

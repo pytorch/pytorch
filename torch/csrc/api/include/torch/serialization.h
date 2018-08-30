@@ -246,7 +246,7 @@ void load(Archive& archive, torch::Tensor& tensor) {
 
   at::Backend backend = ::torch::detail::backendFromId(backendId);
   if (!tensor.defined() || tensor.dtype() != type) {
-    tensor = torch::empty({}, torch::getType(backend, type));
+    tensor = torch::empty({}, torch::getNonVariableType(backend, type));
   }
   const auto required_grad = tensor.requires_grad();
   tensor.set_requires_grad(false);

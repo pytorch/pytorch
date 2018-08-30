@@ -45,7 +45,7 @@ class NCCLTest : public NCCLTestBase {
         numDevices_(cudaNumDevices()),
         state_(::at::globalContext().lazyInitCUDA()),
         worldSize_(worldSize) {
-    const auto& type = at::getType(at::kCUDA, at::kFloat);
+    const auto& type = at::getNonVariableType(at::kCUDA, at::kFloat);
 
     // Each device has a single tensor to perf the NCCL op
     inputs_.resize(numDevices_);
