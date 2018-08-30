@@ -63,7 +63,7 @@ struct FunctionTask {
 
   FunctionTask(GraphTask* base, std::shared_ptr<Function> fn, InputBuffer inputs)
     : base(base)
-    , fn(fn)
+    , fn(std::move(fn))
     , inputs(std::move(inputs)) {}
 };
 
@@ -189,6 +189,7 @@ auto ReadyQueue::push(FunctionTask item) -> void {
 auto ReadyQueue::pop() -> FunctionTask {
   std::unique_lock<std::mutex> lock(mutex);
   not_empty.wait(lock, [this]{ return !heap.empty(); });
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   auto task = std::move(const_cast<FunctionTask&>(heap.top())); heap.pop();
   return task;
 }
@@ -472,7 +473,7 @@ auto Engine::compute_dependencies(Function* root, GraphTask& task) -> void {
   // Queue contains all nodes that will start propagating gradients.
   // We no longer have to expand functions that don't require grad.
   auto& dependencies = task.dependencies;
-  while (queue.size() > 0) {
+  while (!queue.empty()) {
     auto fn = queue.back(); queue.pop_back();
     for (const auto& edge : fn->next_edges()) {
       if (auto next_ptr = edge.function.get()) {
@@ -507,6 +508,7 @@ auto Engine::execute(const edge_list& roots,
                      const edge_list& outputs) -> variable_list {
   std::call_once(start_threads_flag, &Engine::start_threads, this);
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   validate_outputs(roots, const_cast<variable_list&>(inputs), [](const std::string& msg) {
     return msg;
   });

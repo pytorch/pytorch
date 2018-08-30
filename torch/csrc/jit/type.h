@@ -295,7 +295,7 @@ private:
 
   static std::vector<int64_t> contiguousStridesOf(at::IntList sizes) {
     std::vector<int64_t> strides(sizes.size());
-    if(sizes.size() == 0) // zero-dim case
+    if(sizes.empty()) // zero-dim case
       return strides;
     strides.back() = 1;
     for(size_t i = strides.size() - 1; i > 0; i--) {
@@ -340,7 +340,7 @@ struct TORCH_API ListType : public Type {
   static ListTypePtr ofFloats();
 private:
   ListType(TypePtr elem)
-  : Type(TypeKind::ListType), elem(elem) {}
+  : Type(TypeKind::ListType), elem(std::move(elem)) {}
   static const TypeKind Kind = TypeKind::ListType;
   TypePtr elem;
 };

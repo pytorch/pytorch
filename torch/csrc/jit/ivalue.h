@@ -88,7 +88,7 @@ struct TORCH_API IValue {
       c10::raw::intrusive_ptr::decref(as_intrusive_ptr);
     }
   }
-  IValue & operator=(IValue && rhs) & {
+  IValue & operator=(IValue && rhs) & noexcept {
     rhs.swap(*this);
     return *this;
   }
@@ -96,7 +96,7 @@ struct TORCH_API IValue {
       IValue(rhs).swap(*this);
       return *this;
   }
-  void swap(IValue & rhs) {
+  void swap(IValue & rhs) noexcept {
     std::swap(payload, rhs.payload);
     std::swap(is_intrusive_ptr, rhs.is_intrusive_ptr);
     std::swap(tag, rhs.tag);
