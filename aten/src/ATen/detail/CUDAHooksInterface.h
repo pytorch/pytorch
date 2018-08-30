@@ -65,6 +65,10 @@ struct AT_API CUDAHooksInterface {
     return false;
   }
 
+  virtual bool hasMAGMA() const {
+    return false;
+  }
+
   virtual bool hasCuDNN() const {
     return false;
   }

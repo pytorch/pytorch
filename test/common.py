@@ -112,12 +112,10 @@ def skipIfRocm(fn):
 def skipIfNoLapack(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
-        try:
+        if not torch._C.has_lapack:
+            raise unittest.SkipTest('PyTorch compiled without Lapack')
+        else:
             fn(*args, **kwargs)
-        except Exception as e:
-            if 'Lapack library not found' in repr(e):
-                raise unittest.SkipTest('Compiled without Lapack')
-            raise
     return wrapper
 
 

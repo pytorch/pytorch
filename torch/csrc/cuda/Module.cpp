@@ -333,16 +333,15 @@ static PyObject * THCPModule_initExtension(PyObject *self)
   THCPCharStorage_postInit(m);
   THCPByteStorage_postInit(m);
 
-#ifdef USE_MAGMA
-  THCMagma_init(state);
-  bool has_magma = true;
-#else
-  bool has_magma = false;
-#endif
+  bool has_magma = at::hasMAGMA();
+  if (has_magma) {
+    THCMagma_init(state);
+  }
 
   bool has_half = true;
 
   auto set_module_attr = [&](const char* name, PyObject* v) {
+    // PyObject_SetAttrString doesn't steal reference. So no need to incref.
     if (PyObject_SetAttrString(m, name, v) < 0) {
       throw python_error();
     }

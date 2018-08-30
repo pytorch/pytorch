@@ -584,13 +584,20 @@ static PyObject* initModule() {
   ASSERT_TRUE(THCPStream_init(module));
 #endif
 
+  auto set_module_attr = [&](const char* name, PyObject* v, bool incref = true) {
+    // PyModule_AddObject steals reference
+    if (incref) {
+      Py_INCREF(v);
+    }
+    return PyModule_AddObject(module, name, v) == 0;
+  };
+
 #ifdef USE_CUDNN
   PyObject *has_cudnn = Py_True;
 #else
   PyObject *has_cudnn = Py_False;
 #endif
-  Py_INCREF(has_cudnn);
-  ASSERT_TRUE(PyModule_AddObject(module, "has_cudnn", has_cudnn) == 0);
+ ASSERT_TRUE(set_module_attr("has_cudnn", has_cudnn));
 
 #ifdef USE_DISTRIBUTED_MW
   // See comment on CUDA objects
@@ -611,19 +618,20 @@ static PyObject* initModule() {
   // Set ATen warnings to issue Python warnings
   at::Warning::set_warning_handler(&warning_handler);
 
-  ASSERT_TRUE(PyModule_AddObject(module, "has_mkl", at::hasMKL() ? Py_True : Py_False) == 0);
+  ASSERT_TRUE(set_module_attr("has_mkl", at::hasMKL() ? Py_True : Py_False));
+  ASSERT_TRUE(set_module_attr("has_lapack", at::hasLAPACK() ? Py_True : Py_False));
 
 #ifdef _GLIBCXX_USE_CXX11_ABI
-  ASSERT_TRUE(PyModule_AddObject(module, "_GLIBCXX_USE_CXX11_ABI",
-        _GLIBCXX_USE_CXX11_ABI ? Py_True : Py_False) == 0);
+  ASSERT_TRUE(set_module_attr("_GLIBCXX_USE_CXX11_ABI", _GLIBCXX_USE_CXX11_ABI ? Py_True : Py_False));
 #else
-  ASSERT_TRUE(PyModule_AddObject(module, "_GLIBCXX_USE_CXX11_ABI", Py_False) == 0);
+  ASSERT_TRUE(set_module_attr("_GLIBCXX_USE_CXX11_ABI", Py_False));
 #endif
 
   auto& defaultGenerator = at::globalContext().defaultGenerator(at::kCPU);
   THPDefaultGenerator = (THPGenerator*)THPGenerator_NewWithGenerator(
     defaultGenerator);
-  ASSERT_TRUE(PyModule_AddObject(module, "default_generator", (PyObject*)THPDefaultGenerator) == 0);
+  // This reference is meant to be given away, so no need to incref here.
+  ASSERT_TRUE(set_module_attr("default_generator", (PyObject*)THPDefaultGenerator, /* incref= */ false));
 
 #ifdef USE_NUMPY
   if (_import_array() < 0) return NULL;
