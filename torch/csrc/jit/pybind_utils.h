@@ -136,10 +136,11 @@ inline IValue argumentToIValue(
     return toIValue(object, argument.type);
   } catch (const py::cast_error& error) {
     AT_ERROR(
-        schema.name, "() expected value of type ", argument.type->str(),
+        schema.name, "() expected value of type ", py::str(argument.type),
         " for argument '", argument.name,
         "' in position ", argumentPosition,
-        ", but instead got value of type ", object.get_type().attr("__name__").str(),
+        ", but instead got value of type ",
+        py::str(object.get_type().attr("__name__")),
         ". Declaration: ", schema);
   }
 }
