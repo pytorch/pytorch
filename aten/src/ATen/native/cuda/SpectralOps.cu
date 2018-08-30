@@ -186,7 +186,7 @@ static inline Tensor _run_cufft(
   // set to current stream
   CUFFT_CHECK(cufftSetStream(plan, at::cuda::getCurrentCUDAStream()));
 
-  auto ws = at::empty({ config.workspace_size() }, at::TensorOptions(at::kCUDA, at::kByte));
+  auto ws = at::empty({ config.workspace_size() }, at::device(at::kCUDA).dtype(at::kByte));
   CUFFT_CHECK(cufftSetWorkArea(plan, ws.data_ptr()));
 
   // run
