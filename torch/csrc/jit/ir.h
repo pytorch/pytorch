@@ -1362,7 +1362,9 @@ inline Block::Block(Graph* graph_, Node* node_)
   input_->owning_block_ = this;
   entry_world_->owning_block_ = this;
   exit_world_->owning_block_ = this;
-  entry_world_->output()->setType(WorldType::get());
+  entry_world_->output()
+      ->setType(WorldType::get())
+      ->setUniqueName("entry_world");
   exit_world_->addInput(entry_world_->output());
 }
 

@@ -27,8 +27,8 @@ namespace {
  * are not in the node list and only accessible via special methods.
  *
  * When inlined, graphs will manifest the EntryWorld/ExitWorld nodes explicitly
- * so that they can act as endpoints where the callee "world thread" can be
- * joined to the caller world thread.
+ * as StoreWorld/LoadWorld ops so that they can act as endpoints where the
+ * callee "world thread" can be joined to the caller world thread.
  */
 class AnnotateEffectsImpl {
  public:
@@ -43,31 +43,6 @@ class AnnotateEffectsImpl {
  private:
   Value* visitBlock(Block* block, Value* curToken) {
     for (auto* node : block->nodes()) {
-      // Handle inlined functions. Inlined functions expose their Entry and
-      // Exit tokens as regular nodes. These exposed nodes provide fixed points
-      // to thread the current world token through.
-      //
-      // We can ignore all nodes in between the entry and exit tokens, since
-      // tokens have already been threaded through then.
-      bool skip = false;
-      if (node->kind() == prim::StoreWorld) {
-        curToken = visitEntryWorld(node, curToken);
-        // Skip until we see the corresponding ExitWorld node.
-        skip = true;
-        continue;
-      }
-
-      if (node->kind() == prim::LoadWorld) {
-        curToken = visitExitWorld(node, curToken);
-        // Resume threading the token normally.
-        skip = false;
-        continue;
-      }
-
-      if (skip) {
-        continue;
-      }
-
       curToken = visitNode(node, curToken);
     }
     return curToken;
@@ -104,21 +79,12 @@ class AnnotateEffectsImpl {
     // Handle inlined functions. Inlined functions will expose their Entry and
     // Exit tokens as regular nodes. These exposed nodes provide fixed points
     // to thread the current world token through.
-    if (node->kind() == prim::EntryWorld) {
-      // Replace the inlined function's inital entry token with the outer
-      // function's current token.
-      auto inlinedEntryToken = node->output();
-      inlinedEntryToken->replaceAllUsesWith(curToken);
-      return curToken;
+    if (node->kind() == prim::StoreWorld) {
+      return visitEntryWorld(node, curToken);
     }
 
-    if (node->kind() == prim::ExitWorld) {
-      auto lastReturnedToken = node->input();
-      auto inlinedExitToken = node->output();
-      // There shouldn't be any uses of the exit token, so DCE should correctly
-      // clean it up.
-      JIT_ASSERT(inlinedExitToken->uses().empty());
-      return lastReturnedToken;
+    if (node->kind() == prim::LoadWorld) {
+      return node->input();
     }
 
     if (node->kind() == prim::If) {
@@ -171,6 +137,11 @@ class AnnotateEffectsImpl {
 
     // For pure ops that need to be annotated, fence them.
     if (shouldAnnotate(node)) {
+      if (isFenced(node)) {
+        // If the node has already been fenced, just return the value from the
+        // end fence. This can happen when another graph is inlined.
+        return getTokenForFencedNode(node);
+      }
       return addFenceForNode(node, curToken);
     }
 
@@ -228,6 +199,53 @@ class AnnotateEffectsImpl {
   bool isMutatingOp(const Node* node) {
     return !node->inputs().empty() &&
         node->inputs()[0]->type() == WorldType::get();
+  }
+
+  // Returns true iff this node has already been fenced. This can happen if
+  // another graph was inlined into the current one.
+  bool isFenced(const Node* node) {
+    // A node is fenced if all its inputs/outputs are used by memory fences.
+    const auto inputsFenced = std::all_of(
+        node->inputs().begin(), node->inputs().end(), [&](const Value* input) {
+          return std::any_of(
+              input->uses().cbegin(),
+              input->uses().cend(),
+              [&](const Use& use) {
+                return use.user->kind() == prim::MemoryFence;
+              });
+        });
+    if (!inputsFenced) {
+      return false;
+    }
+
+    const auto outputsFenced = std::all_of(
+        node->outputs().begin(),
+        node->outputs().end(),
+        [&](const Value* input) {
+          return std::any_of(
+              input->uses().cbegin(),
+              input->uses().cend(),
+              [&](const Use& use) {
+                return use.user->kind() == prim::MemoryFence;
+              });
+        });
+    if (!outputsFenced) {
+      return false;
+    }
+
+    return true;
+  }
+
+  // Given a fenced node, return the world token outputted from its end fence
+  Value* getTokenForFencedNode(const Node* node) {
+    // Take advantage of the fact that the end fence consumes the node's
+    // outputs, i.e. it will be the only user.
+    const auto output = node->outputs().at(0);
+    JIT_ASSERT(output->uses().size() == 1);
+    const auto endFence = output->uses()[0].user;
+    const auto token = endFence->outputs().at(0);
+    JIT_ASSERT(token->type() == WorldType::get());
+    return token;
   }
 
   // Create a memory fence around a node, using the world token.
