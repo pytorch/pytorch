@@ -1261,7 +1261,7 @@ inline Node::Node(Graph * graph_, NodeKind kind_) :
 
 inline void Node::eraseOutput(size_t i) {
   JIT_ASSERT(i < outputs_.size());
-  JIT_ASSERT(outputs_[i]->uses().size() == 0);
+  JIT_ASSERT(outputs_[i]->uses().empty());
   schema_ = nullptr;
   Value * n = outputs_[i];
   outputs_.erase(outputs_.begin() + i);
@@ -1286,9 +1286,9 @@ inline void Node::eraseBlock(size_t i) {
 }
 
 inline void Node::destroy() {
-  while(outputs().size() > 0)
+  while(!outputs().size().empty())
     eraseOutput(outputs().size() - 1);
-  while(blocks().size() > 0)
+  while(!blocks().size().empty())
     eraseBlock(blocks().size() - 1);
   removeAllInputs();
   if(inBlockList())
