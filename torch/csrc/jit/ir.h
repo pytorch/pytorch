@@ -368,7 +368,7 @@ public:
   }
   bool hasUses() const {
     for(auto o : outputs()) {
-      if(o->uses().size() > 0)
+      if(!o->uses().empty())
         return true;
     }
     return false;
@@ -890,7 +890,7 @@ public:
   Graph(std::shared_ptr<Scope> scope_root)
   : next_unique_(0)
   , new_node_stage_(0)
-  , scope_root_(scope_root)
+  , scope_root_(std::move(scope_root))
   , current_scope_(scope_root_.get())
   , block_(new Block(this, nullptr))
   , insert_before_(return_node()) {}
@@ -1422,13 +1422,13 @@ inline Node* Graph::createPythonOp(
 }
 
 inline graph_node_list_iterator Node::iterator() {
-  return graph_node_list_iterator(this, 0);
+  return {this, 0};
 }
 inline graph_node_list_iterator Node::reverseIterator() {
   return iterator().reverse();
 }
 inline const_graph_node_list_iterator Node::iterator() const {
-  return const_graph_node_list_iterator(this, 0);
+  return {this, 0};
 }
 inline const_graph_node_list_iterator Node::reverseIterator() const {
   return iterator().reverse();

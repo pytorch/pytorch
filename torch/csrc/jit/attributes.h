@@ -36,7 +36,7 @@ struct ScalarAttributeValue : public AttributeValue {
   using ConstructorType = T;
   using ValueType = T;
   ScalarAttributeValue(Symbol name, ConstructorType value_)
-  : AttributeValue(std::move(name)), value_(std::move(value_)) {}
+  : AttributeValue(name), value_(std::move(value_)) {}
   ValueType & value() {
     return value_;
   }
@@ -53,7 +53,7 @@ struct VectorAttributeValue : public AttributeValue {
   using ConstructorType = std::vector<T>;
   using ValueType = std::vector<T>;
   VectorAttributeValue(Symbol name, ConstructorType value_)
-  : AttributeValue(std::move(name)), value_(std::move(value_)) {}
+  : AttributeValue(name), value_(std::move(value_)) {}
   ValueType & value() {
     return value_;
   }
