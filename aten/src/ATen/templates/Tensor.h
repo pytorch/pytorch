@@ -9,9 +9,10 @@
 #include "ATen/core/SparseTensorRef.h"
 #include "ATen/Storage.h"
 #include "ATen/TensorAccessor.h"
-#include "ATen/TensorBase.h"
 #include "ATen/TensorImpl.h"
 #include "ATen/core/optional.h"
+#include "ATen/UndefinedTensor.h"
+#include "ATen/core/Error.h"
 
 namespace at {
 struct Generator;
@@ -38,15 +39,47 @@ namespace at {
 //
 // Note that Tensor can also be NULL, i.e. it is not associated with any underlying TensorImpl, and
 // special care must be taken to handle this.
-struct AT_API Tensor : public detail::TensorBase {
-  using TensorBase = detail::TensorBase;
-  Tensor() : TensorBase() {}
-  Tensor(TensorImpl * self, bool retain) : TensorBase(self, retain) {}
-  Tensor(const c10::intrusive_ptr<TensorImpl, UndefinedTensor>& ptr) : TensorBase(ptr) {}
-  Tensor(c10::intrusive_ptr<TensorImpl, UndefinedTensor>&& ptr) : TensorBase(std::move(ptr)) {}
+struct AT_API Tensor {
+  Tensor(){};
+  Tensor(TensorImpl* tensor_impl, bool retain)
+      : tensor_impl_(c10::intrusive_ptr<TensorImpl, UndefinedTensor>::reclaim(
+            tensor_impl)) {
+    if (tensor_impl == nullptr) {
+      throw std::runtime_error("TensorBaseImpl with nullptr not supported");
+    }
+    if (retain && tensor_impl != UndefinedTensor::singleton()) {
+      c10::raw::intrusive_ptr::incref(tensor_impl);
+    }
+  }
+  Tensor(const c10::intrusive_ptr<TensorImpl, UndefinedTensor>& ptr)
+      : tensor_impl_(std::move(ptr)) {}
+  Tensor(c10::intrusive_ptr<TensorImpl, UndefinedTensor>&& ptr)
+      : tensor_impl_(ptr) {}
 
   Tensor(const Tensor&) = default;
   Tensor(Tensor&&) = default;
+
+  int64_t dim() const {
+    return tensor_impl_->dim();
+  }
+
+  TensorImpl * unsafeGetTensorImpl() const {
+    return tensor_impl_.get();
+  }
+  TensorImpl * unsafeReleaseTensorImpl() {
+    return tensor_impl_.release();
+  }
+  const c10::intrusive_ptr<TensorImpl, UndefinedTensor>& getIntrusivePtr() const {
+    return tensor_impl_;
+  }
+
+  bool defined() const {
+    return tensor_impl_;
+  }
+
+  void reset() {
+    tensor_impl_.reset();
+  }
 
   // The following overloads are very intruiging.  Consider the following
   // program:
@@ -242,6 +275,9 @@ struct AT_API Tensor : public detail::TensorBase {
   }
 
   friend struct WeakTensor;
+
+protected:
+  c10::intrusive_ptr<TensorImpl, UndefinedTensor> tensor_impl_;
 };
 
 struct AT_API WeakTensor {
