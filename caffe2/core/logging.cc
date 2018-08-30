@@ -76,7 +76,7 @@ DECLARE_int32(minloglevel);
 DECLARE_int32(v);
 // GLOG's logtostderr value
 DECLARE_bool(logtostderr);
-#else // CAFFE2_USE_GFLAGS
+#elif !CAFFE2_MOBILE
 // Declare our own versions of the above flags so we don't error out
 // when they are passed into Caffe2.
 CAFFE2_DEFINE_int(minloglevel, 0, "Equivalent to glog minloglevel");
