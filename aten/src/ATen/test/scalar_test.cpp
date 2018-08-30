@@ -67,7 +67,6 @@ TEST_CASE( "scalar test", "[]" ) {
   if(at::hasCUDA()) {
     auto t2 = zeros({4,4}, at::device(at::kCUDA).dtype(at::kFloat));
     cout << &t2 << "\n";
-    cout << "AFTER GET TYPE " << &CUDAFloat << "\n";
   }
   auto t = ones({4,4});
 
