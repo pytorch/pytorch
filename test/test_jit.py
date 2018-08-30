@@ -1445,11 +1445,14 @@ class TestJit(JitTestCase):
         def foo(x, w):
             return torch.matmul(x, w).detach()
 
-        traced = torch.jit.trace(torch.rand(3, 4), torch.rand(4, 5))(foo)
+        traced = torch.jit.trace(foo, (torch.rand(3, 4), torch.rand(4, 5)))
 
-        self.assertExpected(str(traced.graph))
-        x, w = torch.rand(3, 4), torch.rand(4, 5)
-        self.assertEqual(foo(x, w), traced(x, w))
+        self.assertExpectedGraph(traced.graph)
+        x, w = torch.rand(3, 4), torch.rand(4, 5, requires_grad=True)
+        traced_result = traced(x, w)
+        self.assertEqual(foo(x, w), traced_result)
+        self.assertFalse(traced_result.requires_grad)
+        self.assertIsNone(traced_result.grad_fn)
 
     def test_trace_detach_inplace(self):
         def foo(x, w):
@@ -1457,11 +1460,14 @@ class TestJit(JitTestCase):
             y.detach_()
             return y
 
-        traced = torch.jit.trace(torch.rand(3, 4), torch.rand(4, 5))(foo)
+        traced = torch.jit.trace(foo, (torch.rand(3, 4), torch.rand(4, 5)))
 
-        self.assertExpected(str(traced.graph))
+        self.assertExpectedGraph(traced.graph)
         x, w = torch.rand(3, 4), torch.rand(4, 5)
-        self.assertEqual(foo(x, w), traced(x, w))
+        traced_result = traced(x, w)
+        self.assertEqual(foo(x, w), traced_result)
+        self.assertFalse(traced_result.requires_grad)
+        self.assertIsNone(traced_result.grad_fn)
 
     def test_trace_detach_onnx_erase(self):
         class Mod(torch.nn.Module):
