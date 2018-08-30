@@ -2983,14 +2983,14 @@ class TestNN(NNTestCase):
         def fn(input):
             return [
                 input, (input.sin(), input.cos(), [input.add(1)]), input,
-                {'a': input, 'b': [input.sin()]}
+                OrderedDict(a=input, b=[input.sin()])
             ]
 
         class Net(nn.Module):
             def forward(self, input):
                 return fn(input)
 
-        i = Variable(torch.randn(2, 2).float().cuda(1))
+        i = torch.randn(2, 2).float().cuda(1)
         gpus = range(torch.cuda.device_count())
         output = dp.data_parallel(Net(), i, gpus)
         self.assertEqual(output, fn(i))
