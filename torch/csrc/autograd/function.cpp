@@ -114,7 +114,7 @@ void deleteFunction(Function* function) {
 
   delete function;
 
-  if (deleteFunctionQueue.size() == 0) {
+  if (deleteFunctionQueue.empty()) {
     return;
   }
   if (recursion_depth.value() != kDeleteFunctionMaxRecursionDepth) {

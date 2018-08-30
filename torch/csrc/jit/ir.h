@@ -181,7 +181,7 @@ private:
   std::string unique_name_;
   TypePtr type_;
 public:
-  Value* setType(const TypePtr type);
+  Value* setType(TypePtr type);
   void inferTypeFrom(const at::Tensor& output) {
     setType(CompleteTensorType::create(output));
   }
