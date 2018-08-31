@@ -342,6 +342,15 @@ class Tensor(torch._C._TensorBase):
         else:
             return output
 
+    def _indices(self):
+        return self.indices()
+
+    def _values(self):
+        return self.values()
+
+    def _nnz(self):
+        return self.nnz()
+
     def __rsub__(self, other):
         return torch.sub(other, self)
 

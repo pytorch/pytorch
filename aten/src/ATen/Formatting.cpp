@@ -246,8 +246,8 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
     stream << "[ Tensor (undefined) ]";
   } else if (tensor_.is_sparse()) {
     stream << "[ " << tensor_.toString() << "{}\n";
-    stream << "indices:\n" << at::_indices(tensor_) << "\n";
-    stream << "values:\n" << at::_values(tensor_) << "\n";
+    stream << "indices:\n" << tensor_.indices() << "\n";
+    stream << "values:\n" << tensor_.values() << "\n";
     stream << "size:\n" << tensor_.sizes() << "\n";
     stream << "]";
   } else {

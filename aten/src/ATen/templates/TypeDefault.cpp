@@ -26,8 +26,8 @@ Tensor TypeDefault::copy(const Tensor & src, bool non_blocking) const {
   // TODO(psag): have a DeviceGuard here
   AT_CHECK(src.defined(), "attempt to copy an undefined tensor");
   if (is_sparse()) {
-    auto indices = at::_indices(src);
-    auto values = at::_values(src);
+    auto indices = src.indices();
+    auto values = src.values();
     auto & this_dense = toBackend(is_cuda() ? Backend::CUDA : Backend::CPU);
     auto & this_dense_idx = this_dense.toScalarType(ScalarType::Long);
     auto indices_copy = this_dense_idx.copy(indices, non_blocking);

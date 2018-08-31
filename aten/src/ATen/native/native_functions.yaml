@@ -2071,8 +2071,8 @@
   device_guard: False
 
 
-- func: _nnz(Tensor self) -> int64_t
-  variants: function
+- func: nnz(Tensor self) -> int64_t
+  variants: method
   dispatch:
     SparseCPU: _nnz_sparse
     SparseCUDA: _nnz_sparse
@@ -2094,16 +2094,16 @@
   device_guard: False
 
 
-- func: _indices(Tensor self) -> Tensor
-  variants: function
+- func: indices(Tensor self) -> Tensor
+  variants: method
   dispatch:
     SparseCPU: _indices_sparse
     SparseCUDA: _indices_sparse
   device_guard: False
 
 
-- func: _values(Tensor self) -> Tensor
-  variants: function
+- func: values(Tensor self) -> Tensor
+  variants: method
   dispatch:
     SparseCPU: _values_sparse
     SparseCUDA: _values_sparse
@@ -2154,7 +2154,7 @@
 
 # This has a method dispatch to work around circular include problems
 - func: _local_scalar(Tensor self) -> Scalar
-  variants: function
+  variants: function, method
 
 # NB: Does NOT check precondition that numel == 1
 # WARNING: Use of cpu_half here is generally not supported; please

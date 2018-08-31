@@ -26,7 +26,7 @@ namespace at { namespace native {
 
 SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
 #ifndef __HIP_PLATFORM_HCC__
-  int64_t nnz = at::_nnz(self);
+  int64_t nnz = self.nnz();
   if (nnz < 2) {
     _get_sparse_impl(self)->set_coalesced(true);
   }
@@ -43,7 +43,7 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
   // For values, we use a custom kernel for segmented reduction (can't use Thrust due to indirection).
 
   // TODO: I'm not sure if this could ever be non-contiguous
-  LongTensor values = at::_values(self).contiguous();
+  LongTensor values = self.values().contiguous();
 
   int64_t sparseDims = at::_sparseDims(self);
   int64_t stride = values.stride(0);
@@ -52,8 +52,8 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
   // here.
   LongTensor indices1D = _newFlattenedIndices(self, true);
 
-  LongTensor origIndices = at::empty({nnz}, at::_indices(self).options());
-  LongTensor uniqueOffsets = at::empty({nnz}, at::_indices(self).options());
+  LongTensor origIndices = at::empty({nnz}, self.indices().options());
+  LongTensor uniqueOffsets = at::empty({nnz}, self.indices().options());
 
   typedef thrust::device_ptr<int64_t> thrust_ptr;
   thrust_ptr indicesIter(indices1D.data<int64_t>());

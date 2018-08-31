@@ -558,6 +558,8 @@ def is_mutable_formal_argument(argument, option):
 
 
 def check_methods_do_not_start_with_underscore(name, is_method):
+    if name in {'_local_scalar'}:
+        return
     if is_method and name.startswith('_') and not name.startswith('__'):
         message = "Function '{}' starts with a single underscore and is ".format(name)
         message += "configured to have a method on Tensor. Functions that start with "
