@@ -19,6 +19,7 @@
 #include <sstream>
 #include <unordered_map>
 #include <unordered_set>
+#include <limits>
 
 namespace caffe2 {
 namespace onnx {
@@ -854,7 +855,11 @@ Caffe2Ops Caffe2Backend::CreateSlice(
   pos = args.find("ends");
   if (pos != args.end()) {
     for (auto i : pos->second->ints()) {
-      ends_vals.add_ints(i < 0 ? i - 1 : i);
+      if (i == std::numeric_limits<int64_t>::max()) {
+        ends_vals.add_ints(-1);
+      } else {
+        ends_vals.add_ints(i < 0 ? i - 1 : i);
+      }
     }
     args.erase(pos);
   }

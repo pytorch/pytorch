@@ -13,7 +13,7 @@ graph {
     }
     attribute {
       name: "ends"
-      ints: -1
+      ints: 9223372036854775807
       type: INTS
     }
     attribute {

@@ -14,7 +14,6 @@ import torch.onnx.utils
 from collections import Iterable
 from functools import partial, wraps
 import itertools
-import sys
 
 # EDITING THIS FILE? READ THIS FIRST!
 #
@@ -938,8 +937,6 @@ def full_like(g, input, fill_value):
 def slice(g, self, dim, start, end, step):
     if step != 1:
         _unimplemented("slice", "step!=1 is currently not supported")
-    if end == sys.maxsize:
-        end = -1
     return g.op("Slice", self, axes_i=[dim], starts_i=[start], ends_i=[end])
 
 
