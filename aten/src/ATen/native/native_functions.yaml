@@ -55,6 +55,7 @@
     CUDA: _cudnn_init_dropout_state
 
 - func: _fused_dropout(Tensor self, double p, Generator* generator=nullptr) -> (Tensor, Tensor)
+  variants: function
   dispatch:
      CUDA: fused_dropout_cuda
 
