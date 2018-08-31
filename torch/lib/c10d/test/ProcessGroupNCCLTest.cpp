@@ -51,10 +51,10 @@ class NCCLTest : public NCCLTestBase {
     at::DeviceGuard deviceGuard;
     for (auto i = 0; i < numDevices_; ++i) {
       deviceGuard.set_index(i);
-      inputs_[i] = at::empty({3, 3}, at::device(at::kCUDA).dtype(at::kFloat));
+      inputs_[i] = at::empty({3, 3}, at::kCUDA);
       outputs_[i].resize(worldSize_ * numDevices_);
       for (auto j = 0; j < worldSize_ * numDevices_; ++j) {
-        outputs_[i][j] = at::empty({3, 3}, at::device(at::kCUDA).dtype(at::kFloat));
+        outputs_[i][j] = at::empty({3, 3}, at::kCUDA);
       }
     }
 

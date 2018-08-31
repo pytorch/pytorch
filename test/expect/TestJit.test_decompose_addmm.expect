@@ -3,12 +3,12 @@ graph(%mat : Dynamic
       %mat2 : Dynamic
       %alpha : Dynamic
       %beta : Dynamic) {
-  %5 : int = prim::Constant[value=1]()
+  %5 : Dynamic = aten::mm(%mat1, %mat2)
   %6 : int = prim::Constant[value=1]()
-  %a : Dynamic = aten::addmm(%mat, %mat1, %mat2, %5, %6)
-  %8 : float = prim::Constant[value=1]()
-  %9 : float = prim::Constant[value=1]()
-  %b : Dynamic = aten::addmm(%mat, %mat1, %mat2, %9, %8)
+  %7 : Dynamic = aten::add(%mat, %5, %6)
+  %8 : Dynamic = aten::mm(%mat1, %mat2)
+  %9 : int = prim::Constant[value=1]()
+  %10 : Dynamic = aten::add(%mat, %8, %9)
   %11 : float = prim::Constant[value=4.2]()
   %12 : float = prim::Constant[value=2]()
   %c : Dynamic = aten::addmm(%mat, %mat1, %mat2, %12, %11)
@@ -16,7 +16,7 @@ graph(%mat : Dynamic
   %15 : int = prim::TensorToNum(%beta)
   %d : Dynamic = aten::addmm(%mat, %mat1, %mat2, %15, %14)
   %17 : int = prim::Constant[value=1]()
-  %18 : Dynamic = aten::add(%a, %b, %17)
+  %18 : Dynamic = aten::add(%7, %10, %17)
   %19 : int = prim::Constant[value=1]()
   %20 : Dynamic = aten::add(%18, %c, %19)
   %21 : int = prim::Constant[value=1]()

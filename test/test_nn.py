@@ -2983,14 +2983,14 @@ class TestNN(NNTestCase):
         def fn(input):
             return [
                 input, (input.sin(), input.cos(), [input.add(1)]), input,
-                {'a': input, 'b': [input.sin()]}
+                OrderedDict(a=input, b=[input.sin()])
             ]
 
         class Net(nn.Module):
             def forward(self, input):
                 return fn(input)
 
-        i = Variable(torch.randn(2, 2).float().cuda(1))
+        i = torch.randn(2, 2).float().cuda(1)
         gpus = range(torch.cuda.device_count())
         output = dp.data_parallel(Net(), i, gpus)
         self.assertEqual(output, fn(i))
@@ -4837,6 +4837,34 @@ class TestNN(NNTestCase):
         input1 = torch.randn(4, 4, requires_grad=True)
         input2 = torch.randn(4, 4, requires_grad=True)
         self.assertTrue(gradcheck(lambda x, y: F.pairwise_distance(x, y), (input1, input2)))
+
+    def test_pdist(self):
+        for trans in [False, True]:
+            inp = torch.randn(4, 5, requires_grad=True)
+            if trans:
+                inp = inp.transpose(0, 1)
+            for p in [0, 1, 2, 0.5, 1.5, 2.5, float('inf')]:
+                self.assertTrue(gradcheck(lambda x: F.pdist(x, p), (inp,)))
+
+    def test_pdist_zeros(self):
+        """Test that grad is still valid when dist is 0"""
+        for trans in [False, True]:
+            inp = torch.randn(1, 3, requires_grad=True).repeat([2, 1])
+            for p in [0, 1, 2, 0.5, 1.5, 2.5, float('inf')]:
+                self.assertTrue(gradcheck(lambda x: F.pdist(x, p), (inp,)))
+
+    def test_pdist_empty_row(self):
+        inp = torch.randn(1, 3, requires_grad=True)
+        self.assertTrue(gradcheck(F.pdist, (inp,)))
+
+    def test_pdist_empty_col(self):
+        inp = torch.randn(4, 0, requires_grad=True)
+        self.assertTrue(gradcheck(F.pdist, (inp,)))
+
+    @unittest.expectedFailure
+    def test_pdist_gradgrad_unimplemented(self):
+        inp = torch.randn(4, 5, requires_grad=True)
+        gradgradcheck(F.pdist, (inp,))
 
     def test_cosine_embedding_loss_no_reduce(self):
         input1 = torch.randn(15, 10, requires_grad=True)

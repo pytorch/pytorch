@@ -17,7 +17,7 @@
 #include "torch/csrc/jit/passes/peephole.h"
 #include "torch/csrc/jit/passes/shape_analysis.h"
 #include "torch/csrc/jit/passes/remove_expands.h"
-#include "torch/csrc/jit/passes/decompose_addmm.h"
+#include "torch/csrc/jit/passes/canonicalize_ops.h"
 #include "torch/csrc/jit/passes/specialize_undef.h"
 #include "torch/csrc/jit/passes/loop_unrolling.h"
 #include "torch/csrc/jit/passes/lower_grad_of.h"
@@ -382,11 +382,11 @@ private:
     auto graph_ = graph->copy();
     runRequiredPasses(graph_);
     if(optimize) {
-      if(!symbolically_differentiable) {
+      runOptimization(graph_, /*graphMustSupportVariables=*/true);
+      if(!isDifferentiable(*graph_)) {
         EraseShapeInformation(*graph_);
         CreateAutodiffSubgraphs(*graph_);
       }
-      runOptimization(graph_, /*graphMustSupportVariables=*/true);
     }
     autograd_fallback_graph = graph_;
     autograd_fallback = Code(graph_);
@@ -508,6 +508,7 @@ void runRequiredPasses(const std::shared_ptr<Graph>& g)  {
   // we remove the implicitly created ones, and have shape analysis
   // add valid expand nodes when the shapes are stable
   RemoveExpands(g);
+  CanonicalizeOps(g);
 }
 
 void specializeToSpec(const std::shared_ptr<Graph>& graph, const ArgumentSpec& spec) {
@@ -522,12 +523,6 @@ void specializeToSpec(const std::shared_ptr<Graph>& graph, const ArgumentSpec& s
   // required passes shared with autograd fallback
   runRequiredPasses(graph);
 
-  // Decompose addmm nodes to add + mm, so expands can be inserted and
-  // gradients accumulated on the backward pass
-  //
-  // In the future, if we need more passes like this, we should convert this
-  // into a generic canonicalization pass.
-  DecomposeAddmm(graph);
   // clean up dead constants from specialization
   EliminateDeadCode(graph);
   // calculate all input shapes

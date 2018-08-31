@@ -314,6 +314,17 @@ void PropagateShapeOnNode(Node * node, bool insert_expands) {
       }
       return;
     }
+    case prim::ConstantChunk: {
+      Value *tensor = node->input();
+      if (auto type = tensor->type()->cast<TensorType>()) {
+        for (Value * output : node->outputs()) {
+          output->setType(type);
+        }
+      } else {
+        setUnshapedType(node);
+      }
+      return;
+    }
     case prim::PythonOp:
     case prim::Print:
     case prim::Undefined: {
@@ -371,7 +382,8 @@ bool PropagateTensorShapeOnNode(Node * node, bool insert_expands,
                node->matches("aten::pow(Tensor self, Scalar exponent) -> Tensor") ||
                node->matches("aten::add(Scalar other, Tensor self) -> Tensor") ||
                node->matches("aten::sub(Scalar other, Tensor self) -> Tensor") ||
-               node->matches("aten::mul(Scalar other, Tensor self) -> Tensor")) {
+               node->matches("aten::mul(Scalar other, Tensor self) -> Tensor") ||
+               node->matches("aten::mm(Tensor self, Tensor mat2) -> Tensor")) {
       return tensor_types.at(0);
     } else if (node->matches("aten::lt(Tensor self, Tensor other) -> Tensor") ||
                node->matches("aten::le(Tensor self, Tensor other) -> Tensor") ||
@@ -432,13 +444,6 @@ bool PropagateTensorShapeOnNode(Node * node, bool insert_expands,
       node->output()->setType(type);
       return true;
     }
-  }
-  if (node->matches("aten::chunk(Tensor self, int chunks, int dim) -> Tensor[]")) {
-    JIT_ASSERT(!tensor_types.empty());
-    for (Value * output : node->outputs()) {
-      output->setType(tensor_types[0]);
-    }
-    return true;
   }
   setUnshapedType(node);
   return false;
