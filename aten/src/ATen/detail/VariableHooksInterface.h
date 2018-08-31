@@ -25,8 +25,8 @@ struct AT_API VariableHooksInterface {
   // squelch -Werror=non-virtual-dtor
   virtual ~VariableHooksInterface() {}
 
-  virtual Type& getVariableType(const at::Type& baseType) const {
-    AT_ERROR("cannot getVariableType without libtorch");
+  virtual Type& getVariableTypeFromBaseType(const at::Type& baseType) const {
+    AT_ERROR("cannot getVariableTypeFromBaseType without libtorch");
   }
 
   virtual void registerVariableTypeFor(Context*, Backend backend, ScalarType scalar_type) const {

@@ -507,7 +507,7 @@ static PyObject * THPVariable_to(PyObject* self, PyObject* args, PyObject* kwarg
     // device and maybe dtype are given
     auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
     auto& layout = *torch::getLayout(self_.type().backend());
-    auto& type = torch::getType(scalarType.value_or(self_.type().scalarType()), layout, device->type());
+    auto& type = torch::getVariableType(scalarType.value_or(self_.type().scalarType()), layout, device->type());
     const int32_t device_index = type.is_cuda() ? device->index() : -1;
     return THPVariable_Wrap(torch::utils::dispatch_type_conversion(self_, type, device_index, non_blocking));
   }
@@ -553,7 +553,7 @@ static PyObject * THPVariable_type(PyObject* self, PyObject* args, PyObject* kwa
     throw TypeError("dtype must be a type, str, or dtype object");
   }
   auto self_device_type = torch::getDeviceType(self_.type());
-  auto& type = is_dtype ? torch::getType(r.scalartype(0), *torch::getLayout(self_.type().backend()), self_device_type) :
+  auto& type = is_dtype ? torch::getVariableType(r.scalartype(0), *torch::getLayout(self_.type().backend()), self_device_type) :
                           torch::utils::type_from_string(type_name);
   return THPVariable_Wrap(torch::utils::dispatch_type_conversion(self_, type, at::nullopt, r.toBool(1)));
   END_HANDLE_TH_ERRORS
