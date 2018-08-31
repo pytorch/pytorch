@@ -6,7 +6,7 @@
 #include "ATen/Scalar.h"
 #include "ATen/core/SparseTensorRef.h"
 #include "ATen/Type.h"
-#include "ATen/TensorOptions.h"
+#include "ATen/core/TensorOptions.h"
 
 namespace at {
 

@@ -4,7 +4,7 @@
 #include <ATen/DeviceGuard.h>
 #include <ATen/Functions.h>
 #include <ATen/OptionsGuard.h>
-#include <ATen/TensorOptions.h>
+#include <ATen/core/TensorOptions.h>
 
 using namespace at;
 

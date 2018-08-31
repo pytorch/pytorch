@@ -5,7 +5,7 @@
 #include <ATen/Context.h>
 #include <ATen/Functions.h>
 #include <ATen/OptionsGuard.h>
-#include <ATen/TensorOptions.h>
+#include <ATen/core/TensorOptions.h>
 
 #include <vector>
 #include <string>

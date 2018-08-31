@@ -8,7 +8,7 @@
 #include "ATen/core/SparseTensorRef.h"
 #include "ATen/Storage.h"
 #include "ATen/Tensor.h"
-#include "ATen/TensorOptions.h"
+#include "ATen/core/TensorOptions.h"
 #include "ATen/DeviceGuard.h"
 
 namespace at {
