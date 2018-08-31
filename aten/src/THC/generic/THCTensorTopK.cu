@@ -29,6 +29,9 @@ THC_API void THCTensor_(topk)(THCState* state,
   THCTensor_(resize)(state, topK, topKSize, {});
   THCudaLongTensor_resize(state, indices, topKSize, {});
 
+  // static_cast is required to ensure that the correct type (INDEX_T)
+  // is provided to the kernel for the arguments.
+
 #define RUN_K(INDEX_T, DIM, DIR)                                        \
   gatherTopK<real, INDEX_T, DIM, DIR>                                   \
     <<<grid, block, 0, THCState_getCurrentStream(state)>>>(             \
