@@ -6926,7 +6926,7 @@ def create_traced_fn(fn):
 def create_trace_fn_graph_inputs(fn):
     def traced_fn(*inputs, **kwargs):
         fn_tensors, inputs_tensors = partial_apply_nontensors(fn, inputs, **kwargs)
-        traced = torch.jit.trace(*inputs_tensors)(fn_tensors)
+        traced = torch.jit.trace(fn_tensors, inputs_tensors)
         return traced.graph, inputs_tensors
     return traced_fn
 
