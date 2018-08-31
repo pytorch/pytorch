@@ -118,7 +118,7 @@ class TestSparse(TestCase):
         self.assertEqual(i, torch._indices(x))
         self.assertEqual(v, torch._values(x))
         self.assertEqual(x.ndimension(), 3)
-        self.assertEqual(self.safeCoalesce(x)._nnz(), 10)
+        self.assertEqual(torch._nnz(self.safeCoalesce(x)), 10)
         for i in range(3):
             self.assertEqual(x.size(i), 100)
 
@@ -126,7 +126,7 @@ class TestSparse(TestCase):
         i = self.IndexTensor([[9, 0, 0, 0, 8, 1, 1, 1, 2, 7, 2, 2, 3, 4, 6, 9]])
         v = self.ValueTensor([[idx**2, idx] for idx in range(i.size(1))])
         x = self.SparseTensor(i, v, torch.Size([10, 2]))
-        self.assertEqual(self.safeCoalesce(x)._nnz(), 9)
+        self.assertEqual(torch._nnz(self.safeCoalesce(x)), 9)
 
         # Make sure we can access empty indices / values
         x = self.SparseTensor()
@@ -681,7 +681,7 @@ class TestSparse(TestCase):
             [17, 18, 19, 20],
         ])
         exp_v = self.ValueTensor([7, 14, 3, 20])
-        res = dense._sparse_mask(x)
+        res = torch._sparse_mask(dense, x)
         expected = self.SparseTensor(i, exp_v, torch.Size([5, 4]))
         self.assertEqual(res, expected)
 

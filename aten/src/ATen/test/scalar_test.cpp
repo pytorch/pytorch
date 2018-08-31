@@ -88,7 +88,7 @@ TEST_CASE( "scalar test", "[]" ) {
   Tensor next_h = i2h.add(h2h);
   next_h = next_h.tanh();
 
-  REQUIRE_THROWS(Tensor{}._local_scalar());
+  REQUIRE_THROWS(at::_local_scalar(Tensor{}));
 
   test_overflow();
 

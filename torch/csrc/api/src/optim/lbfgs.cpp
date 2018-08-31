@@ -88,7 +88,7 @@ torch::Tensor LBFGS::step(LossClosure closure) {
       Tensor q = flat_grad.neg();
       for (int64_t i = num_old - 1; i >= 0; i--) {
         al.at(i) = old_stps.at(i).dot(q) * ro.at(i);
-        q.add_(old_dirs.at(i), -al.at(i)._local_scalar());
+        q.add_(old_dirs.at(i), -at::_local_scalar(al.at(i)));
       }
 
       // Multiply by initial Hessian
@@ -98,7 +98,7 @@ torch::Tensor LBFGS::step(LossClosure closure) {
 
       for (int64_t i = 0; i < num_old; i++) {
         Tensor be_i = old_dirs.at(i).dot(r) * ro.at(i);
-        r.add_(old_stps.at(i), (al.at(i) - be_i)._local_scalar());
+        r.add_(old_stps.at(i), at::_local_scalar(al.at(i) - be_i));
       }
       prev_flat_grad.copy_(flat_grad);
     }
@@ -109,7 +109,7 @@ torch::Tensor LBFGS::step(LossClosure closure) {
 
     // reset initial guess for step size
     if (n_iter == 1) {
-      t =  (at::min(ONE, ONE / abs_grad_sum) * options.learning_rate_)._local_scalar();
+      t = at::_local_scalar(at::min(ONE, ONE / abs_grad_sum) * options.learning_rate_);
     } else {
       t = options.learning_rate_;
     }

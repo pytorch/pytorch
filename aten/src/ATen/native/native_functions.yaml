@@ -2153,7 +2153,7 @@
 
 # This has a method dispatch to work around circular include problems
 - func: _local_scalar(Tensor self) -> Scalar
-  variants: function, method
+  variants: function
 
 # NB: Does NOT check precondition that numel == 1
 # WARNING: Use of cpu_half here is generally not supported; please
