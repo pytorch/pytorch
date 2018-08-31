@@ -637,20 +637,8 @@ static Value* tryEmitBuiltin(
   auto n = graph.insertNode(graph.create(name, *matched_inputs, 0))
                 ->setSourceLocation(std::make_shared<SourceRange>(loc));
 
-  // special case for chunk when the chunks=<const> is known
-  // DO NOT ADD MORE SPECIAL CASES HERE, REFACTOR INTO A FUNCTION IF
-  // NEEDED
-  if(n->kind() == aten::chunk) {
-    auto value = constant_as<int64_t>((*matched_inputs)[1]);
-    if(!value) {
-      throw ErrorReport(loc) << "argument 'chunks' must be a constant";
-    }
-    for(int64_t i = 0; i < *value; ++i)
-      n->addOutput();
-  } else {
-    for(auto & ret : op->schema().returns) {
-      n->addOutput()->setType(ret.type);
-    }
+  for(auto & ret : op->schema().returns) {
+    n->addOutput()->setType(ret.type);
   }
 
   // assert that we did indeed create an op that has implementation
@@ -1249,7 +1237,6 @@ private:
       return;
     }
 
-    // See [N_BINDERS]
     size_t n_binders = stmt.lhs().size();
     if(starred_unpack)
       n_binders--;
@@ -1263,7 +1250,8 @@ private:
       return;
     }
 
-    auto outputs = output->asTuple(stmt.rhs().range(), method);
+    auto outputs = output->asTuple(stmt.rhs().range(), method,
+                                   starred_unpack ? at::nullopt : at::optional<size_t>{n_binders});
     if(outputs.size() < n_binders) {
       throw ErrorReport(stmt)
         << "need " << (starred_unpack ? "at least " : "")
@@ -1272,7 +1260,7 @@ private:
     }
     if(outputs.size() > n_binders && !starred_unpack) {
       throw ErrorReport(stmt)
-      << "too many values to unpack, need " << n_binders << " but found "
+      << "too many values to unpack: need " << n_binders << " but found "
       << outputs.size();
     }
     int i = 0;
@@ -1869,12 +1857,20 @@ std::shared_ptr<Graph> compileFunction(Def def, const Resolver& resolver) {
   return m.get_method(def.name().name()).graph();
 }
 
-std::vector<std::shared_ptr<SugaredValue>> SimpleValue::asTuple(SourceRange loc, Method& m) {
+std::vector<std::shared_ptr<SugaredValue>> SimpleValue::asTuple(SourceRange loc, Method& m, at::optional<size_t> size_hint) {
+  static const auto make_simple_value = [](Value* v) -> std::shared_ptr<SugaredValue> {
+    return std::make_shared<SimpleValue>(v);
+  };
   if(value->type()->kind() == TypeKind::TupleType) {
     auto outputs = createTupleUnpack(value);
-    return fmap(outputs, [](Value* v) -> std::shared_ptr<SugaredValue> {
-      return std::make_shared<SimpleValue>(v);
-    });
+    return fmap(outputs, make_simple_value);
+  } else if (value->type()->kind() == TypeKind::ListType) {
+    if (!size_hint) {
+      throw ErrorReport(loc) << "cannot statically infer the expected size of a list in this context";
+    }
+    auto graph = value->owningGraph();
+    Node *unpack = graph->insertNode(graph->createListUnpack(value, *size_hint));
+    return fmap(unpack->outputs(), make_simple_value);
   }
   throw ErrorReport(loc) << value->type()->str() << " cannot be used as a tuple";
 }

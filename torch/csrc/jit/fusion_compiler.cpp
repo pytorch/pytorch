@@ -145,7 +145,7 @@ Node* usedInFusedChunk(Value * input) {
   auto uses = input->uses();
   if (uses.size() == 1) {
     Node *user = uses[0].user;
-    if (user->kind() == prim::FusedChunk) {
+    if (user->kind() == prim::ConstantChunk) {
       return user;
     }
   }
@@ -602,7 +602,7 @@ std::tuple<std::vector<PartitionDesc>,std::vector<PartitionDesc>,bool> emitCompi
     // FusedConcat nodes work by narrowing the output Tensors before the kernel runs
     if (n->kind() == prim::FusedConcat)
       continue;
-    if (n->kind() == prim::FusedChunk)
+    if (n->kind() == prim::ConstantChunk)
       continue;
     if(n->kind() == aten::rand_like) {
       has_random = true;
@@ -1255,18 +1255,6 @@ protected:
 // to generate fallback code.
 RegisterOperators reg_fused_operators({
   Operator(
-    prim::FusedChunk,
-    [](Node* node) {
-      int64_t dim = node->i(attr::dim);
-      int64_t chunks = node->outputs().size();
-      return [dim, chunks](Stack& stack) {
-        auto result = at::chunk(std::move(peek(stack, 0, 1)).toTensor(), chunks, dim);
-        drop(stack, 1);
-        pack(stack, std::move(result));
-        return 0;
-      };
-    }),
-  Operator(
     prim::FusedConcat,
     [](Node* node) {
       int64_t dim = node->i(attr::dim);
@@ -1367,7 +1355,8 @@ void FusedKernelCache::run(Stack& stack) {
   std::vector<at::Tensor> outputs;
   fn->launch(args, outputs);
   drop(stack, num_inputs);
-  pack(stack, std::move(outputs));
+  stack.insert(stack.end(), std::make_move_iterator(outputs.begin()),
+                            std::make_move_iterator(outputs.end()));
 }
 
 at::optional<std::vector<int64_t>> FusedKernelCache::getMapSize(at::TensorList args, at::IntList arg_subset) {
