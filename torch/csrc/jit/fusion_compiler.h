@@ -29,7 +29,11 @@ struct TensorDesc {
 
   TensorDesc(const at::ScalarType& type, const std::vector<bool>& contiguity)
   : scalar_type(type), contiguity(contiguity) {
-    nDim_ = std::count(contiguity.begin(), contiguity.end(), false) + (lastIsContiguous() ? 1 : 0);
+    if (contiguity.size() == 0) {
+      nDim_ = 0;
+    } else {
+      nDim_ = std::count(contiguity.begin(), contiguity.end(), false) + (lastIsContiguous() ? 1 : 0);
+    }
   }
 
   TensorDesc(const at::ScalarType& type, const at::IntList& sizes, const at::IntList& strides)
@@ -46,8 +50,7 @@ struct TensorDesc {
 
   // do we have inner stride == 1?
   bool lastIsContiguous() const {
-    // NB: A scalar tensor does not have a "last dimension" because it has 0 dims.
-    return contiguity.size() != 0 && contiguity.back();
+    return contiguity.size() == 0 || contiguity.back();
   }
 
   static std::vector<bool> findContiguous(
