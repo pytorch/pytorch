@@ -312,7 +312,7 @@ class CosineAnnealingRestartsLR(_LRScheduler):
             last_restart = self.T * (1 - self.T_mult ** i_restarts) / (1 - self.T_mult)
             T_i = self.T * self.T_mult ** i_restarts
 
-        t = (self.last_epoch - last_restart) / (T_i - 1)
+        t = (self.last_epoch - last_restart) / T_i
         decay = 0.5 * (self.gamma ** i_restarts) * (1 + math.cos(math.pi * t))
 
         return [decay * base_lr + (1 - decay) * self.eta_min for base_lr in self.base_lrs]

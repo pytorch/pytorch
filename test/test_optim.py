@@ -573,7 +573,7 @@ class TestLRScheduler(TestCase):
         for eta_max in (0.05, 0.5):
             targets.append([eta_min +
                             0.5 * (eta_max - eta_min) *
-                            (1 + math.cos(math.pi * (x % T) / (T - 1)))
+                            (1 + math.cos(math.pi * (x % T) / T))
                             for x in range(epochs)])
         scheduler = CosineAnnealingRestartsLR(self.opt, T, eta_min, T_mult)
         self._test(scheduler, targets, epochs)
@@ -590,7 +590,7 @@ class TestLRScheduler(TestCase):
             for T_i in run_lengths:
                 targets[-1].extend([eta_min +
                                     0.5 * (eta_max - eta_min) *
-                                    (1 + math.cos(math.pi * x / (T_i - 1)))
+                                    (1 + math.cos(math.pi * x / T_i))
                                     for x in range(int(T_i))])
         scheduler = CosineAnnealingRestartsLR(self.opt, T, eta_min, T_mult)
         self._test(scheduler, targets, epochs)
@@ -608,7 +608,7 @@ class TestLRScheduler(TestCase):
             for i, T_i in enumerate(run_lengths):
                 targets[-1].extend([eta_min +
                                     0.5 * (eta_max - eta_min) * (gamma ** i) *
-                                    (1 + math.cos(math.pi * x / (T_i - 1)))
+                                    (1 + math.cos(math.pi * x / T_i))
                                     for x in range(int(T_i))])
         scheduler = CosineAnnealingRestartsLR(self.opt, T, eta_min, T_mult, gamma)
         self._test(scheduler, targets, epochs)
