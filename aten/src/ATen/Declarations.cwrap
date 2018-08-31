@@ -3331,7 +3331,7 @@
         - THTensor* self
 ]]
 [[
-  name: _copy_ignoring_overlaps_
+  name: _copy_ignoring_overlaps_out
   cname: copyIgnoringOverlaps
   return: self
   variants: function
