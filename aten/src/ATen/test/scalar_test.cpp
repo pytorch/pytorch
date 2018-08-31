@@ -65,7 +65,7 @@ TEST_CASE( "scalar test", "[]" ) {
   REQUIRE_NOTHROW(gen.seed());
   auto && C = at::globalContext();
   if(at::hasCUDA()) {
-    auto t2 = zeros({4,4}, at::device(at::kCUDA).dtype(at::kFloat));
+    auto t2 = zeros({4,4}, at::kCUDA);
     cout << &t2 << "\n";
   }
   auto t = ones({4,4});

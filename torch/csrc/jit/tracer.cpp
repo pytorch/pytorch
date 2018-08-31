@@ -48,6 +48,16 @@ void addInputs(Node *n, const char * name, at::TensorList value) {
   n->addInput(list_node->output());
 }
 
+void addInputs(Node* n, const char * name, const at::TensorOptions& options) {
+  // [TensorOptions in script] - update this when you change how we schematize TensorOptions
+  detail::genericAddInput(n, static_cast<int64_t>(options.dtype()));
+  detail::genericAddInput(n, static_cast<int64_t>(options.layout()));
+  std::vector<int64_t> device = {
+      static_cast<int64_t>(options.device().type()),
+      static_cast<int64_t>(options.device().index())};
+  detail::genericAddInput(n, std::move(device));
+}
+
 void addInputs(Node *n, const char * name, at::IntList value) {
   using ArgumentStash = jit::tracer::ArgumentStash;
   std::vector<Value*> info = ArgumentStash::hasIntList(name) ?
@@ -74,6 +84,25 @@ void addInputs(Node *n, const char * name, const ArrayRef<double>& value) {
   AT_ERROR("Tracing float lists currently not supported!");
 }
 
+void addOutput(Node* node, const at::Tensor& output) {
+  Value * value = node->addOutput();
+  if (output.defined()) {
+    value->inferTypeFrom(output);
+    setValueTrace(autograd::as_variable_ref(output), value);
+  }
+}
+
+void addOutput(Node* node, const std::vector<at::Tensor>& outputs) {
+  Value * value = node->addOutput()->setType(ListType::ofTensors());
+  Graph * graph = node->owningGraph();
+  Node * unpack_node = graph->appendNode(graph->create(prim::ListUnpack, {value}, outputs.size()));
+  for (size_t i = 0; i < outputs.size(); ++i) {
+    Value * output_val = unpack_node->outputs()[i];
+    output_val->inferTypeFrom(outputs[i]);
+    setValueTrace(outputs[i], output_val);
+  }
+}
+
 const std::shared_ptr<TracingState>& getTracingState() {
   return detail::tracing_state;
 }
@@ -86,18 +115,6 @@ TracingState::TracingState()
     : graph(new Graph()) {}
 
 TracingState::~TracingState() = default;
-
-void postRecordTrace(Node* node,
-                     at::ArrayRef<Variable> outputs) {
-  for (size_t i = 0; i < outputs.size(); i++) {
-    auto & output = outputs[i];
-    Value * value = node->addOutput();
-    if (output.defined()) {
-      value->inferTypeFrom(output.data());
-      setValueTrace(output, value);
-    }
-  }
-}
 
 autograd::Variable getSizeOf(const autograd::Variable& var, int64_t dim) {
   auto & tracing_state = getTracingState();

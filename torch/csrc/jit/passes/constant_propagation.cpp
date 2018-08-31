@@ -31,6 +31,10 @@ std::unordered_set<Symbol> skip_list = {
   aten::randn_like,
   aten::randperm,
   aten::randperm_out,
+  prim::Constant,
+  prim::Undefined,
+  // TODO (zach): we should consider skipping tensor factories in the cases
+  // where the constant tensor would be large but cheap to create.
  };
 
 std::vector<IValue> runNode(Node* n) {
@@ -40,9 +44,14 @@ std::vector<IValue> runNode(Node* n) {
     stack.push_back(*(toIValue(input)));
   }
   op(stack);
-  auto var_outputs = fmap(stack, [&](IValue v) {
+  auto var_outputs = fmap(stack, [&](IValue v) -> IValue {
     if (v.isTensor()) {
-      return IValue(autograd::as_variable_ref(v.toTensor()).data());
+      auto t = std::move(v).toTensor();
+      if(t.defined()) {
+        return IValue(autograd::as_variable_ref(t).data());
+      } else {
+        return t;
+      }
     } else {
       return v;
     }
@@ -119,11 +128,11 @@ bool removeExtraNodeOutputs(Node *n) {
 } // anonymous namespace
 
 void ConstantPropagation(Node* n, bool recurse) {
-  bool constant_inputs = (n->inputs().size() > 0) &&
-    std::all_of(n->inputs().begin(), n->inputs().end(), [&](Value* v) {
-      return v->node()->kind() == prim::Constant;
-    });
-  bool supported_node = skip_list.count(n->kind()) == 0;
+  bool constant_inputs =
+      std::all_of(n->inputs().begin(), n->inputs().end(), [&](Value* v) {
+        return v->node()->kind() == prim::Constant;
+      });
+  bool supported_node = !n->kind().is_onnx() && skip_list.count(n->kind()) == 0;
   auto run_blocks = [&]() {
     if (recurse) {
       for (Block * block : n->blocks()) {
@@ -150,7 +159,6 @@ void ConstantPropagation(Node* n, bool recurse) {
 }
 
 void ConstantPropagation(Block* block, bool recurse) {
-  ConstantPropagation(block->param_node(), recurse);
   for(auto it = block->nodes().begin(); it != block->nodes().end();) {
     Node *n = *it;
     it++; //advance iterator bc the current node may be destroyed
