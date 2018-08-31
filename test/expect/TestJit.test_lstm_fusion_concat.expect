@@ -11,15 +11,16 @@ graph(%0 : Float(*, *)
   %10 : Float(*, *) = aten::t(%4)
   %11 : Float(*, *) = aten::addmm(%6, %1, %10, %8, %8)
   %12 : Dynamic[] = prim::ListConstruct(%9, %11)
-  %13 : Dynamic, %14 : Dynamic = aten::broadcast_tensors(%12)
-  %15 : Float(*, *) = prim::FusionGroup_0[device=0](%2, %13, %14)
-  return (%15);
+  %13 : Dynamic[] = aten::broadcast_tensors(%12)
+  %14 : Dynamic, %15 : Dynamic = prim::ListUnpack(%13)
+  %16 : Float(*, *) = prim::FusionGroup_0[device=0](%2, %14, %15)
+  return (%16);
 }
 with prim::FusionGroup_0 = graph(%15 : Float(*, *)
       %41 : Dynamic
       %46 : Dynamic) {
-  %47 : Dynamic, %48 : Dynamic, %49 : Dynamic, %50 : Dynamic = prim::FusedChunk[chunks=4, dim=1](%46)
-  %42 : Dynamic, %43 : Dynamic, %44 : Dynamic, %45 : Dynamic = prim::FusedChunk[chunks=4, dim=1](%41)
+  %47 : Float(*, *), %48 : Float(*, *), %49 : Float(*, *), %50 : Float(*, *) = prim::ConstantChunk[chunks=4, dim=1](%46)
+  %42 : Float(*, *), %43 : Float(*, *), %44 : Float(*, *), %45 : Float(*, *) = prim::ConstantChunk[chunks=4, dim=1](%41)
   %39 : int = prim::Constant[value=1]()
   %40 : Float(*, *) = aten::add(%42, %47, %39)
   %35 : int = prim::Constant[value=1]()

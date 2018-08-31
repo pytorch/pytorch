@@ -25,10 +25,10 @@ std::string getPythonInterpreterStackTrace() {
   std::stringstream stack_trace;
   AutoGIL gil;
   PyThreadState *tstate = PyThreadState_GET();
-  if (NULL != tstate && NULL != tstate->frame) {
+  if (nullptr != tstate && nullptr != tstate->frame) {
     PyFrameObject *frame = tstate->frame;
 
-    while (NULL != frame) {
+    while (nullptr != frame) {
       int line = PyCode_Addr2Line(frame->f_code, frame->f_lasti);
       std::string filename = THPUtils_unpackString(frame->f_code->co_filename);
       std::string funcname = THPUtils_unpackString(frame->f_code->co_name);
