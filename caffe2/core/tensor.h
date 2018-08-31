@@ -178,7 +178,7 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * context pointer in tensor, which indicates the type of the tensor.
    */
   BaseStaticContext* GetStaticContext() const {
-    return GET_STATIC_CONTEXT(GetDeviceType());
+    return get_static_context(GetDeviceType());
   }
 
   /* @brief
