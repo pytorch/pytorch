@@ -30,12 +30,12 @@ void window_function_checks(
       options.layout() != kSparse,
       function_name,
       " is not implemented for sparse types, got: ",
-      options.type().toString());
+      options);
   AT_CHECK(
       at::isFloatingType(options.dtype()),
       function_name,
       " expects floating point dtypes, got: ",
-      options.type().toString());
+      options);
   AT_CHECK(
       window_length >= 0,
       function_name,
