@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdlib>
 #include <ctime>
 #include <memory>
@@ -166,18 +167,18 @@ class CAFFE2_API BaseContext {
       CopyBytesToCPU(n * meta.itemsize(), src, dst);
     }
   }
-
-  static BaseStaticContext* static_context_[COMPILE_TIME_MAX_DEVICE_TYPES];
-
-  template <int d>
-  friend struct StaticContextFunctionRegisterer;
 };
+
+CAFFE2_API std::array<BaseStaticContext*, COMPILE_TIME_MAX_DEVICE_TYPES>&
+GetStaticContexts();
+CAFFE2_API void set_static_context(int d, BaseStaticContext* ptr);
+CAFFE2_API BaseStaticContext* get_static_context(int d);
 
 template <int d>
 struct StaticContextFunctionRegisterer {
   explicit StaticContextFunctionRegisterer(BaseStaticContext* ptr) {
     static_assert(d < COMPILE_TIME_MAX_DEVICE_TYPES, "");
-    BaseContext::static_context_[d] = ptr;
+    set_static_context(d, ptr);
   }
 };
 
@@ -186,5 +187,4 @@ struct StaticContextFunctionRegisterer {
   static StaticContextFunctionRegisterer<d> g_static_context_##d(f); \
   }
 
-#define GET_STATIC_CONTEXT(d) BaseContext::static_context_[d]
 } // namespace caffe2
