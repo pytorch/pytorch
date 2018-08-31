@@ -9,7 +9,7 @@ from torch.autograd import Variable, Function
 from torch.autograd.function import traceable
 from torch.testing import assert_allclose
 from torch.onnx import OperatorExportTypes
-from common import TestCase, run_tests, IS_WINDOWS, TEST_WITH_UBSAN, skipIfRocm
+from common import TestCase, run_tests, IS_WINDOWS, TEST_WITH_UBSAN, skipIfRocm, suppress_warnings
 from textwrap import dedent
 import os
 import io
@@ -202,6 +202,15 @@ def _construct_empty_tensor_list():
 
 class JitTestCase(TestCase):
     _do_cuda_memory_leak_check = True
+    _restored_warnings = False
+
+    def setUp(self):
+        # unittest overrides all warning filters and forces all of them to show up
+        # after we install our own to silence those coming from inside PyTorch.
+        # This will ensure that our filter still takes precedence.
+        if not JitTestCase._restored_warnings:
+            torch.jit.TracerWarning.ignore_lib_warnings()
+            JitTestCase._restored_warnings = True
 
     def getExportImportCopy(self, m):
         # Ideally we would like to not have to manually delete the file, but NamedTemporaryFile
@@ -976,6 +985,33 @@ class TestJit(JitTestCase):
     # gradients are required and sizes are involved
     def test_trace_size_with_grad(self):
         self.do_trace_size(True)
+
+    def test_trace_warn(self):
+        def fn(x):
+            int(x)  # Warning 1.
+            y = x * 1
+            if y:   # Warning 2.
+                pass
+            q = [x, x * 4]
+            z = q[y]  # Warning 3.
+            float(z)  # Warning 4.
+            z.tolist()  # Warning 5.
+            z.numpy()  # Warning 6.
+            for elem in torch.ones(4, 4):  # Warning 7.
+                pass
+            return z + 4
+
+        with warnings.catch_warnings(record=True) as warns:
+            traced_fn = torch.jit.trace(fn, torch.tensor([1]))
+        warns = [str(w.message) for w in warns]
+        self.assertEqual(len(warns), 7)
+        self.assertIn('a Python integer', warns[0])
+        self.assertIn('a Python boolean', warns[1])
+        self.assertIn('a Python index', warns[2])
+        self.assertIn('a Python float', warns[3])
+        self.assertIn('a Python list', warns[4])
+        self.assertIn('a NumPy array', warns[5])
+        self.assertIn('Iterating over', warns[6])
 
     def test_trace_tuple(self):
         def fn(x, y):
@@ -6124,6 +6160,7 @@ a")
                 y = x.data
                 return x + y
 
+    @suppress_warnings
     def test_trace_checker_control_flow(self):
         with self.assertRaisesRegex(torch.jit.TracingCheckError, r'Graphs differed across invocations!'):
             @_trace(torch.rand(3, 4), check_inputs=[(torch.rand(4, 4),)])
