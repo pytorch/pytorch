@@ -749,6 +749,9 @@ if (USE_NNAPI AND NOT ANDROID)
   caffe2_update_option(USE_NNAPI OFF)
 endif()
 
+# TODO(orionr): Enable all of this for Windows DLL when we
+# can figure out how to get it to build
+if (NOT (MSVC AND BUILD_SHARED_LIBS))
 if (NOT BUILD_ATEN_MOBILE)
   if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
     list(APPEND Caffe2_DEPENDENCY_LIBS aten_op_header_gen)
@@ -757,6 +760,7 @@ if (NOT BUILD_ATEN_MOBILE)
     endif()
     include_directories(${PROJECT_BINARY_DIR}/caffe2/contrib/aten)
   endif()
+endif()
 endif()
 
 if (USE_ZSTD)
