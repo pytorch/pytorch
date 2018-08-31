@@ -1023,6 +1023,15 @@ public:
     n->output()->setType(ListType::create(elem_type));
     return n;
   }
+  Node * createListUnpack(Value *v, size_t size) {
+    ListTypePtr list_type = v->type()->expect<ListType>();
+    TypePtr elem_type = list_type->getElementType();
+    auto n = create(prim::ListUnpack, {v}, 0);
+    for (size_t i = 0; i < size; ++i) {
+      n->addOutput()->setType(elem_type);
+    }
+    return n;
+  }
   Node* createNumToTensor(Value* value) {
     auto typ = value->type();
     Node * result = create(prim::NumToTensor, {value});
