@@ -96,6 +96,7 @@ void pythonRecordSourceLocation(Node* n) {
 }
 
 void pythonWarn(const std::string& reason) {
+  AutoGIL gil;
   auto warn_class = py::module::import("torch.jit").attr("TracerWarning");
   PyErr_WarnEx(warn_class.ptr(), reason.c_str(), 1);
 }

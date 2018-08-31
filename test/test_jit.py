@@ -6224,27 +6224,31 @@ a")
 
             traced = torch.jit.trace(foo, torch.rand(3, 4), check_inputs=[(torch.rand(3, 4),)])
 
+    def checkTracerWarning(self, *args, **kwargs):
+        with warnings.catch_warnings(record=True) as warns:
+            torch.jit.trace(*args, **kwargs)
+        self.assertGreater(len(warns), 0)
+        for warn in warns:
+            self.assertIn("cause the trace to be incorrect", str(warn.message))
+
     def test_trace_checker_slice_lhs(self):
-        with self.assertRaisesRegex(RuntimeError, r'Cannot trace in-place operator'):
-            @_trace(torch.rand(3, 4), check_inputs=[(torch.rand(3, 4),)])
-            def foo(x):
-                for i in range(3):
-                    x[i, :] = torch.zeros(4)
-                return x
+        def foo(x):
+            for i in range(3):
+                x[i, :] = torch.zeros(4)
+            return x
+        self.checkTracerWarning(foo, torch.rand(3, 4))
 
     def test_trace_checker_inplace_on_view(self):
-        with self.assertRaisesRegex(RuntimeError, "Cannot trace in-place operator 'add_' because there are"):
-            @_trace(torch.rand(3, 4), check_inputs=[(torch.rand(5, 6),)])
-            def foo(x):
-                x.view(-1).add_(-x.view(-1))
-                return x
+        def foo(x):
+            x.view(-1).add_(-x.view(-1))
+            return x
+        self.checkTracerWarning(foo, torch.rand(3, 4), check_trace=False)
 
     def test_lhs_index_fails(self):
-        with self.assertRaisesRegex(RuntimeError, "Cannot trace in-place operator"):
-            @_trace(torch.rand(3, 4))
-            def foo(x):
-                x[0, 1] = 4
-                return x
+        def foo(x):
+            x[0, 1] = 4
+            return x
+        self.checkTracerWarning(foo, torch.rand(3, 4))
 
     def test_lhs_index_trivial(self):
         def foo(y, x):
