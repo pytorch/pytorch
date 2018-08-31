@@ -35,6 +35,7 @@ bool isDifferentiable(Node * n) {
     "aten::neg(Tensor self) -> Tensor",
     "aten::type_as(Tensor self, Tensor other) -> Tensor",
     "aten::unsqueeze(Tensor self, int dim) -> Tensor",
+    "aten::addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta, Scalar alpha) -> Tensor",
     "aten::mm(Tensor self, Tensor mat2) -> Tensor",
     "aten::lt(Tensor self, Tensor other) -> Tensor",
     "aten::le(Tensor self, Tensor other) -> Tensor",
@@ -97,6 +98,9 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
     if (node->matches("aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor")) {
       return {grads.at(0), grads.at(0) * node->namedInput(attr::alpha), nullptr};
 
+    } else if (node->kind() == prim::AutogradAdd) {
+      return {grads.at(0), grads.at(0)};
+
     } else if (node->matches("aten::sub(Tensor self, Tensor other, *, Scalar alpha) -> Tensor")) {
       return {grads.at(0), -grads.at(0) * node->namedInput(attr::alpha), nullptr};
 
@@ -136,29 +140,14 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
     } else if (node->matches("aten::unsqueeze(Tensor self, int dim) -> Tensor")) {
       return {grads.at(0).squeeze(node->namedInput(attr::dim)), nullptr};
 
+    } else if (node->matches("aten::addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta, Scalar alpha) -> Tensor")) {
+      return {grads.at(0) * node->namedInput(attr::beta),
+              grads.at(0).mm(inputs.at(2).t()) * node->namedInput(attr::alpha),
+              inputs.at(1).t().mm(grads.at(0)) * node->namedInput(attr::alpha),
+              nullptr, nullptr};
+
     } else if (node->matches("aten::mm(Tensor self, Tensor mat2) -> Tensor")) {
-      SymbolicVariable dmat1, dmat2;
-      if (auto type = inputs.at(0).value()->type()->cast<CompleteTensorType>()) {
-        auto sizes = type->sizes(), strides = type->strides();
-        if (strides.at(0) == 1 && strides.at(1) == sizes.at(0)) {
-          dmat1 = inputs.at(1).mm(grads.at(0).t()).t();
-        } else {
-          dmat1 = grads.at(0).mm(inputs.at(1).t());
-        }
-      } else {
-        dmat1 = grads.at(0).mm(inputs.at(1).t());
-      }
-      if (auto type = inputs.at(1).value()->type()->cast<CompleteTensorType>()) {
-        auto sizes = type->sizes(), strides = type->strides();
-        if (strides.at(0) == 1 && strides.at(1) == sizes.at(0)) {
-          dmat2 = grads.at(0).t().mm(inputs.at(0)).t();
-        } else {
-          dmat2 = inputs.at(0).t().mm(grads.at(0));
-        }
-      } else {
-        dmat2 = inputs.at(0).t().mm(grads.at(0));
-      }
-      return {dmat1, dmat2};
+      return {grads.at(0).mm(inputs.at(1).t()), inputs.at(0).t().mm(grads.at(0))};
 
     } else if (node->matches("aten::expand(Tensor self, int[] size, *, int implicit) -> Tensor")) {
       const auto& input_sizes = inputs.at(0).sizes();
@@ -364,7 +353,9 @@ static ReverseDetails addReverseInline(Gradient& grad_desc,
     JIT_ASSERT(grad_inputs.size() == node->inputs().size());
     for (size_t i = 0, num_inputs = grad_inputs.size(); i < num_inputs; ++i) {
       if (!requires_grad(inputs[i])) continue;
-      JIT_ASSERT(grad_inputs[i]);
+      // NB: Not returning a gradient w.r.t. a value that requires grad is normal if the
+      // input is non-differentiable. This happens e.g. in the aten::type_as case.
+      if (!grad_inputs[i]) continue;
       set_grad(inputs[i], grad_inputs[i]);
     }
   }
@@ -374,6 +365,11 @@ static ReverseDetails addReverseInline(Gradient& grad_desc,
     Value * input = inputs[i];
     if (!requires_grad(input))
       continue;
+    // NB: Not having a gradient defined w.r.t. an input to the graph which requires grad
+    // can happen and is not an error. It might have been used only in non-differentiable
+    // contexts (e.g. as second input to aten::type_as). In that case we simply ignore it
+    // as an output, because it won't ever produce any meaningful values.
+    if (grad_map.count(input) == 0) continue;
     reverse_block->registerOutput(get_grad(input));
     grad_desc.df_output_vjps.push_back(i);
   }
@@ -557,7 +553,7 @@ Gradient differentiate(std::shared_ptr<Graph>& graph, const std::vector<bool>& r
   // addReverseInline has to call gradientForNode if *any* of the outputs
   // require grad, but it will emit vjps for *all* outputs. Use DCE to remove
   // unnecessary nodes.
-  EliminateDeadCode(grad_desc.f);
+  EliminateDeadCode(rev_info.reverse_block);
   // Fills in f, df, f_real_outputs, df_input_captures,
   // modifies df_input_vjps (new vjps are added for temporaries)
   lambdaLiftReverse(grad_desc, rev_info);
