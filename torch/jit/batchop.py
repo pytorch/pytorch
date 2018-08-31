@@ -240,7 +240,7 @@ def batch_type_as(data, mask, dims, data1, mask1, dims1):
 
 @torch.jit.script
 def batch_gt(data, mask, dims, data1, mask1, dims1):
-    return torch.gt(data, data1), mask * mask1, dims or dims1
+    return torch.gt(data, data1), mask * mask1, dims.__or__(dims1)
 
 
 @torch.jit.script
@@ -256,12 +256,12 @@ def batch_gt_one_scalar(data, mask, dims, other_):
 
 @torch.jit.script
 def batch_lt(data, mask, dims, data1, mask1, dims1):
-    return torch.lt(data, data1), mask * mask1, dims or dims1
+    return torch.lt(data, data1), mask * mask1, dims.__or__(dims1)
 
 
 @torch.jit.script
 def batch_eq(data, mask, dims, data1, mask1, dims1):
-    return torch.eq(data, data1), mask * mask1, dims or dims1
+    return torch.eq(data, data1), mask * mask1, dims.__or__(dims1)
 
 
 @torch.jit.script
