@@ -195,8 +195,8 @@ inline TensorOptions requires_grad(bool requires_grad = true) {
   return TensorOptions().requires_grad(requires_grad);
 }
 
-} // namespace at
-
 std::ostream& operator<<(
     std::ostream& stream,
-    const at::TensorOptions& options);
+    const TensorOptions& options);
+
+} // namespace at
