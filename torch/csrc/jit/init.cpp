@@ -11,7 +11,7 @@
 #include "torch/csrc/jit/passes/onnx.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
 #include "torch/csrc/jit/passes/erase_number_types.h"
-#include "torch/csrc/jit/passes/prepare_division_for_onnx.h"
+#include "torch/csrc/jit/passes/onnx/prepare_division_for_onnx.h"
 #include "torch/csrc/jit/passes/common_subexpression_elimination.h"
 #include "torch/csrc/jit/passes/peephole.h"
 #include "torch/csrc/jit/passes/canonicalize.h"

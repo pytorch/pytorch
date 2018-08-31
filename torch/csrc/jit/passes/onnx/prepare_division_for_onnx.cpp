@@ -1,4 +1,4 @@
-#include "torch/csrc/jit/passes/prepare_division_for_onnx.h"
+#include "torch/csrc/jit/passes/onnx/prepare_division_for_onnx.h"
 #include "torch/csrc/jit/constants.h"
 
 namespace torch { namespace jit {
