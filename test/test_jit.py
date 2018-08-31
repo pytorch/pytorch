@@ -3121,7 +3121,6 @@ a")
             print(c0)
 
         t = torch.randn(0)
-        print(testNoThrows.graph)
         self.assertEqual(0, testNoThrows(torch.randn(0)))
         self.assertExpectedGraph(testNoThrows.graph)
         with self.assertRaises(RuntimeError):
