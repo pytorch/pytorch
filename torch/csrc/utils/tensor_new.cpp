@@ -141,7 +141,7 @@ ScalarType infer_scalar_type(PyObject *obj) {
     return numpy_dtype_to_aten(PyArray_TYPE((PyArrayObject*)obj));
   }
   if (PyArray_CheckScalar(obj)) {
-    return numpy_dtype_to_aten(PyArray_TYPE((PyArrayObject*)(PyArray_FromScalar(obj, NULL))));
+    return numpy_dtype_to_aten(PyArray_TYPE((PyArrayObject*)(PyArray_FromScalar(obj, nullptr))));
   }
 #endif
   if (PySequence_Check(obj)) {
@@ -207,7 +207,7 @@ Tensor internal_new_from_data(const Type & type, at::optional<Device> device_opt
                                                                : torch::getDeviceType(var.type());
       // infer the scalar type and device type; it's not expected to infer the layout since these constructors
       // are defined per-layout-type (e.g. tensor vs sparse_coo_tensor).
-      const auto& type_inference_type = torch::getType(var.type().scalarType(),
+      const auto& type_inference_type = torch::getVariableType(var.type().scalarType(),
                                                        *torch::getLayout(type.backend()),
                                                        type_inference_device_type);
       const auto& type_to_use = type_inference ? type_inference_type : type;
@@ -320,7 +320,7 @@ const Type& typeWithDefault(PythonArgs& r, int64_t dtype_idx, int64_t device_idx
   const auto scalartype = r.scalartypeWithDefault(dtype_idx, type.scalarType());
   const Device types_device_type(type.device_type());
   const auto device_type = r.isNone(device_idx) ? types_device_type : r.device(device_idx).type();
-  return torch::getType(scalartype, *torch::getLayout(type.backend()), device_type);
+  return torch::getVariableType(scalartype, *torch::getLayout(type.backend()), device_type);
 }
 } // namespace
 

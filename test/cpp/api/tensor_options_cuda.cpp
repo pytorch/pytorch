@@ -28,24 +28,24 @@ TEST_CASE("TensorOptions/ConstructsWellFromCUDATypes", "[cuda]") {
   options = TensorOptions(CUDA(kInt));
   REQUIRE_OPTIONS(kCUDA, -1, kInt, kStrided);
 
-  options = TensorOptions(getType(Backend::SparseCUDA, kFloat));
+  options = TensorOptions(getNonVariableType(Backend::SparseCUDA, kFloat));
   REQUIRE_OPTIONS(kCUDA, -1, kFloat, kSparse);
 
-  options = TensorOptions(getType(Backend::SparseCUDA, kByte));
+  options = TensorOptions(getNonVariableType(Backend::SparseCUDA, kByte));
   REQUIRE_OPTIONS(kCUDA, -1, kByte, kSparse);
 
   options = TensorOptions(CUDA(kFloat), /*device=*/5);
   REQUIRE_OPTIONS(kCUDA, 5, kFloat, kStrided);
 
-  options = TensorOptions(getType(Backend::SparseCUDA, kFloat), /*device=*/5);
+  options = TensorOptions(getNonVariableType(Backend::SparseCUDA, kFloat), /*device=*/5);
   REQUIRE_OPTIONS(kCUDA, 5, kFloat, kSparse);
 }
 
 TEST_CASE("TensorOptions/ConstructsWellFromCUDATensors", "[multi-cuda]") {
-  auto options = TensorOptions(empty(5, device(kCUDA).dtype(kDouble)));
+  auto options = empty(5, device(kCUDA).dtype(kDouble)).options();
   REQUIRE_OPTIONS(kCUDA, 0, kDouble, kStrided);
 
-  options = TensorOptions(empty(5, getType(Backend::SparseCUDA, kByte)));
+  options = empty(5, getNonVariableType(Backend::SparseCUDA, kByte)).options();
   REQUIRE_OPTIONS(kCUDA, 0, kByte, kSparse);
 
   if (at::globalContext().getNumGPUs() > 1) {
@@ -54,14 +54,14 @@ TEST_CASE("TensorOptions/ConstructsWellFromCUDATensors", "[multi-cuda]") {
       DeviceGuard guard(1);
       tensor = empty(5, device(kCUDA));
     }
-    options = TensorOptions(tensor);
+    options = tensor.options();
     REQUIRE_OPTIONS(kCUDA, 1, kFloat, kStrided);
 
     {
       DeviceGuard guard(1);
       tensor = empty(5, device(kCUDA).layout(kSparse));
     }
-    options = TensorOptions(tensor);
+    options = tensor.options();
     REQUIRE_OPTIONS(kCUDA, 1, kFloat, kSparse);
   }
 }

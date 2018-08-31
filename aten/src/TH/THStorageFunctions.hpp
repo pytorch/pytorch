@@ -8,7 +8,6 @@
 
 #include <ATen/ScalarType.h>
 #include <ATen/ScalarTypeUtils.h>
-#include "THTypeConversion.hpp"
 #include <atomic>
 
 // Note [Weak references for intrusive refcounting]

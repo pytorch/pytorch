@@ -186,7 +186,7 @@ std::ostream& printNode(std::ostream & out, size_t level, const Node * n, std::v
   IR_ELSE()
     if(n->hasAttribute(attr::Subgraph) && groups) {
       out << n->kind().toQualString() << "_" << groups->size();
-      if (n->numAttributes() > 1) {
+      if (n->numAttributes() > 1 && n->kind() != prim::DifferentiableGraph) {
         printAttributes(out, n, /*ignore_subgraph=*/true);
       }
       groups->push_back(n);

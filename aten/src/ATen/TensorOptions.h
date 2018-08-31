@@ -15,12 +15,42 @@
 
 namespace at {
 
-/// A class to encapsulate construction axes of a `Tensor`.
-/// `TensorOptions` is a virtual class to enable overriding of certain methods
-/// by subclasses in other libraries, such as PyTorch. In PyTorch, there is a
-/// `torch::TensorOptions` subclass of this `TensorOptions`, which changes
-/// `type()` to return a variable type instead of a tensor type, such that
-/// variables are created inside factory methods, instead of tensors.
+/// A class to encapsulate construction axes of an Tensor.  TensorOptions was
+/// designed to support the Python style API for specifying construction options
+/// on factory functions, e.g.,
+///
+///     torch.zeros(2, 3, dtype=torch.int32)
+///
+/// Because C++ doesn't natively support keyword arguments, there must be
+/// another way of specifying keyword-like arguments.  TensorOptions is a
+/// builder class which can be used to construct this "dictionary" of keyword
+/// arguments: functions which support TensorOptions conventionally take this
+/// argument optionally as their last argument.
+///
+/// WARNING: In PyTorch, there are `torch::` variants of factory functions,
+/// e.g., torch::zeros for at::zeros.  These return Variables (while the
+/// stock ATen functions return plain Tensors).  If you mix these functions
+/// up, you WILL BE SAD.
+///
+/// Rather than use the constructor of this class directly, you should prefer to
+/// use the constructor functions, and then chain setter methods on top of them.
+///
+///     at::device(at::kCUDA).dtype(kInt)
+///     at::dtype(at::kInt)
+///
+/// Additionally, anywhere a TensorOptions is expected, you can directly
+/// pass at::kCUDA / at::kInt, and it will implicitly convert to a TensorOptions.
+///
+/// Here are some recommended ways to create a 2x2 tensor of zeros
+/// with certain properties.  These all *implicitly* make use of
+/// TensorOptions, even if they don't mention the class explicitly:
+///
+///     at::zeros({2,2}, at::kCUDA);
+///     at::zeros({2,2}, at::kLong);
+///     at::zeros({2,2}, at::device(at::kCUDA).dtype(at::kLong()));
+///     at::zeros({2,2}, at::device({at::kCUDA, 1})); // place on device 1
+///     at::zeros({2,2}, at::requires_grad());
+///
 struct AT_API TensorOptions {
   TensorOptions() : TensorOptions(/*use_thread_local_default_options=*/true) {}
 
@@ -33,43 +63,14 @@ struct AT_API TensorOptions {
   /// - requires_grad: false
   explicit TensorOptions(bool use_thread_local_default_options);
 
-  /// Constructs the `TensorOptions` from the type of the given `Tensor`.
-  /// If the `Tensor` has a CUDA type, the `device_index` will match that of the
-  /// tensor. The `requires_grad` property of the tensor is ignored and set to
-  /// false in the created `TensorOptions`.  See the constructor from `Type` for
-  /// the semantics w.r.t. the `type()` method.
-  explicit TensorOptions(Tensor tensor, bool discard_runtime_type = false) {
-    if (!discard_runtime_type) {
-      type_ = &tensor.type();
-    }
-    this->dtype(tensor.dtype());
-    this->device(tensor.device());
-    this->layout(tensor.layout());
-  }
-
   /// Constructs the `TensorOptions` from a type and a `device_index`.
-  ///
-  /// If `discard_runtime_type` is false (the default), the behavior of
-  /// `TensorOptions::type()` is changed in that it will always return this
-  /// `type`, irrespective of any `device` or `dtype` or `layout` specified at a
-  /// later time. This is to ensure that when a `TensorOptions` object is
-  /// constructed from a tensor's type, and that type has a dynamic type other
-  /// than `at::Type` (e.g. `torch::autograd::VariableType`), constructing a new
-  /// tensor from this `TensorOptions` will use this same derived type. If
-  /// instead the given `type` were destructured into its components (backend,
-  /// dtype and layout), information about the runtime type of the `Type` would
-  /// be lost. Set `discard_runtime_type` to `true` to always destructure the
-  /// type into its components and discard its runtime type.
   /* implicit */ TensorOptions(
       const Type& type,
-      int32_t device_index = -1,
-      bool discard_runtime_type = false) {
-    if (!discard_runtime_type) {
-      type_ = &type;
-    }
+      int32_t device_index = -1) {
     this->dtype(type.scalarType());
     this->device({backendToDeviceType(type.backend()), device_index});
     this->layout(type.layout());
+    this->is_variable(type.is_variable());
   }
 
   /// Constructs a `TensorOptions` object with the given layout.
@@ -109,19 +110,9 @@ struct AT_API TensorOptions {
     return !(*this == other);
   }
 
-  /// Discards the runtime type stored if the `TensorOptions` was constructed
-  /// from a `Tensor` or a `Type`. See the documentation of the constructor from
-  /// a `Type` for implications on the behavior of the `type()` method on
-  /// `TensorOptions`.
-  const TensorOptions& discard_runtime_type() const {
-    type_ = nullptr;
-    return *this;
-  }
-
   /// Sets the device of the `TensorOptions`.
   TensorOptions& device(Device device) {
     device_ = std::move(device);
-    update_underlying_type();
     return *this;
   }
 
@@ -134,20 +125,23 @@ struct AT_API TensorOptions {
   /// Sets the dtype of the `TensorOptions`.
   TensorOptions& dtype(ScalarType dtype) {
     dtype_ = dtype;
-    update_underlying_type();
     return *this;
   }
 
   /// Sets the layout of the `TensorOptions`.
   TensorOptions& layout(Layout layout) {
     layout_ = layout;
-    update_underlying_type();
     return *this;
   }
 
   /// Sets the `requires_grad` property of the `TensorOptions`.
   TensorOptions& requires_grad(bool requires_grad) {
     requires_grad_ = requires_grad;
+    return *this;
+  }
+
+  TensorOptions& is_variable(bool is_variable) {
+    is_variable_ = is_variable;
     return *this;
   }
 
@@ -176,22 +170,17 @@ struct AT_API TensorOptions {
     return requires_grad_;
   }
 
+  /// Returns the `is_variable` property of the `TensorOptions`.
+  bool is_variable() const noexcept {
+    return is_variable_;
+  }
+
   /// Constructs an `at::Type` from the members of the `TensorOptions`.
   const Type& type() const {
-    if (type_ != nullptr) {
-      return *type_;
-    }
-    return getType(backend(), dtype_);
+    return at::globalContext().getMaybeVariableType(backend(), dtype_, is_variable_);
   }
 
  private:
-  /// Updates any stored underlying type to the current construction axes.
-  void update_underlying_type() {
-    if (type_) {
-      type_ = &type_->toScalarType(dtype_).toBackend(backend());
-    }
-  }
-
   // Resolves the ATen backend specified by the current construction axes.
   Backend backend() const noexcept {
     Backend backend;
@@ -208,9 +197,7 @@ struct AT_API TensorOptions {
   Device device_{Device::Type::CPU};
   Layout layout_{Layout::Strided};
   bool requires_grad_{false};
-  // Not part of the observable API, so make `mutable` so we can set it to
-  // `null` in `discard_runtime_type`.
-  mutable const Type* type_{nullptr};
+  bool is_variable_{false};
 };
 
 /// Convenience function that returns a `TensorOptions` object with the `dtype`
@@ -232,7 +219,7 @@ inline TensorOptions device(Device device) {
 }
 
 /// Convenience function that returns a `TensorOptions` object with the
-/// `device_index` set to the given one.
+/// `device` set to CUDA and the `device_index` set to the given one.
 inline TensorOptions device_index(int32_t device_index) {
   return TensorOptions().device_index(device_index);
 }
@@ -245,7 +232,10 @@ inline TensorOptions requires_grad(bool requires_grad = true) {
 
 /// From Tensor.h
 inline TensorOptions Tensor::options() const {
-  return TensorOptions(*this);
+  return TensorOptions().dtype(dtype())
+                        .device(device())
+                        .layout(layout())
+                        .is_variable(is_variable());
 }
 
 namespace detail {
