@@ -4,20 +4,22 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from caffe2.python import core
-from hypothesis import given
 import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
 import hypothesis.strategies as st
 import numpy as np
 
 
-class TestWeightedSumOp(hu.HypothesisTestCase):
+class TestWeightedSumOp(serial.SerializedTestCase):
 
-    @given(n=st.integers(5, 8), m=st.integers(1, 1),
-           d=st.integers(2, 4), grad_on_w=st.booleans(),
-           **hu.gcs_cpu_only)
-    def test_weighted_sum(self, n, m, d, grad_on_w, gc, dc):
+    @serial.given_and_seeded(
+        n=st.integers(5, 8), m=st.integers(1, 1), d=st.integers(2, 4),
+        grad_on_w=st.booleans(), seed=st.integers(min_value=0, max_value=65535),
+        **hu.gcs_cpu_only)
+    def test_weighted_sum(self, n, m, d, grad_on_w, seed, gc, dc):
         input_names = []
         input_vars = []
+        np.random.seed(seed)
         for i in range(m):
             X_name = 'X' + str(i)
             w_name = 'w' + str(i)
@@ -59,3 +61,7 @@ class TestWeightedSumOp(hu.HypothesisTestCase):
                 outputs_to_check=i,
                 outputs_with_grads=[0],
             )
+
+
+if __name__ == "__main__":
+    serial.testWithArgs()

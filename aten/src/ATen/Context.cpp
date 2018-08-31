@@ -107,8 +107,9 @@ bool Context::setFlushDenormal(bool on) {
 #endif
 }
 
-Type& getType(TensorOptions options) {
-  return globalContext().getType(options.backend(), options.dtype(), options.is_variable());
+Type& getMaybeVariableType(TensorOptions options) {
+  return globalContext().getMaybeVariableType(
+            options.backend(), options.dtype(), options.is_variable());
 }
 
 }

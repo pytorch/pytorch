@@ -24,7 +24,7 @@ namespace torch { namespace jit {
   _(prim, Eval)                    \
   _(prim, Expand) /* onnx */       \
   _(prim, FusionGroup)             \
-  _(prim, GraphExecutor)           \
+  _(prim, DifferentiableGraph)     \
   _(prim, If)                      \
   _(prim, Jump) /* debug */        \
   _(prim, JumpNZ) /* debug */      \
@@ -87,6 +87,12 @@ namespace torch { namespace jit {
   _(onnx, Not)                     \
   FORALL_ATTR_BASE_SYMBOLS(_)      \
   _(attr, Subgraph)                \
+  _(attr, ReverseSubgraph)         \
+  _(attr, f_real_outputs)          \
+  _(attr, df_input_vjps)           \
+  _(attr, df_input_captured_inputs) \
+  _(attr, df_input_captured_outputs) \
+  _(attr, df_output_vjps)          \
   _(attr, axes)                    \
   _(attr, axis)                    \
   _(attr, broadcast)               \
