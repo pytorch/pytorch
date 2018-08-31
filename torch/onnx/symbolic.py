@@ -391,8 +391,7 @@ def view(g, self, size):
     return g.op("Reshape", self, shape)
 
 
-@parse_args('v', 'i', 'i')
-def split(g, self, split_size, dim):
+def prim_ConstantSplit(g, self, split_size, dim):
     size = self.type().sizes()[dim]
     splits = [split_size] * (size // split_size)
     leftover = size % split_size
@@ -405,10 +404,9 @@ def split(g, self, split_size, dim):
 # less sensitive to changes in input size.
 # TODO: Once we have proper scoping, stop reimplementing chunk, delete this
 # method, and use the desugared version
-@parse_args('v', 'i', 'i')
-def chunk(g, self, chunks, dim):
+def prim_ConstantChunk(g, self, chunks, dim):
     split_size = (self.type().sizes()[dim] + chunks - 1) // chunks
-    return split(g, self, split_size, dim)
+    return prim_ConstantSplit(g, self, split_size, dim)
 
 
 @parse_args('v', 'i', 'v')

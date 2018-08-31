@@ -607,10 +607,8 @@ static void _trace_post_record(
   variable_list output_vars(num_outputs);
   for (int i = 0; i < num_outputs; ++i) {
     auto var = (THPVariable*)PyTuple_GET_ITEM(output_objects, i);
-    output_vars[i] = var->cdata;
+    jit::tracer::addOutput(node, var->cdata);
   }
-
-  jit::tracer::postRecordTrace(node, output_vars);
 
   node->i_(attr::inplace, is_inplace);
 

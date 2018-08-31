@@ -17,7 +17,7 @@
 #include "torch/csrc/jit/passes/onnx/peephole.h"
 #include "torch/csrc/jit/passes/onnx/fixup_onnx_loop.h"
 #include "torch/csrc/jit/passes/shape_analysis.h"
-#include "torch/csrc/jit/passes/decompose_addmm.h"
+#include "torch/csrc/jit/passes/canonicalize_ops.h"
 #include "torch/csrc/jit/passes/constant_propagation.h"
 #include "torch/csrc/jit/passes/loop_unrolling.h"
 #include "torch/csrc/jit/passes/to_batch.h"
@@ -111,7 +111,7 @@ void initJITBindings(PyObject *module) {
    })
    .def("_jit_pass_onnx_block", BlockToONNX)
    .def("_jit_pass_fixup_onnx_loops", FixupONNXLoops)
-   .def("_jit_pass_decompose_addmm", DecomposeAddmm)
+   .def("_jit_pass_canonicalize_ops", CanonicalizeOps)
     .def("_jit_pass_specialize_undef", specializeUndef)
    .def("_jit_differentiate", [](Graph &g, const std::vector<bool>& requires_grad) {
        // the python binding slightly differs in semantics
