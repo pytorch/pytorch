@@ -31,14 +31,14 @@
     ptrdiff_t TH_TENSOR_end = tid == num_threads - 1 ? TH_TENSOR_size : \
       TH_TENSOR_offset + TH_TENSOR_size / num_threads; \
     ptrdiff_t TENSOR##_len = TH_TENSOR_end - TH_TENSOR_offset; \
-    TYPE *TENSOR##_data = THTensor_(data)(TENSOR) + TH_TENSOR_offset; \
+    TYPE *TENSOR##_data = TENSOR->data<real>() + TH_TENSOR_offset; \
     CODE \
   } \
 }
 #else
 #define TH_TENSOR_APPLY_CONTIG(TYPE, TENSOR, CODE) \
 { \
-  TYPE *TENSOR##_data = THTensor_(data)(TENSOR); \
+  TYPE *TENSOR##_data = TENSOR->data<real>(); \
   ptrdiff_t TENSOR##_len = THTensor_(nElement)(TENSOR); \
   CODE \
 }
@@ -57,16 +57,16 @@
     ptrdiff_t TH_TENSOR_end = tid == num_threads - 1 ? TH_TENSOR_size : \
       TH_TENSOR_offset + TH_TENSOR_size / num_threads; \
     ptrdiff_t TENSOR1##_len = TH_TENSOR_end - TH_TENSOR_offset; \
-    TYPE1 *TENSOR1##_data = THTensor_(data)(TENSOR1) + TH_TENSOR_offset; \
-    TYPE2 *TENSOR2##_data = THTensor_(data)(TENSOR2) + TH_TENSOR_offset; \
+    TYPE1 *TENSOR1##_data = TENSOR1->data<real>() + TH_TENSOR_offset; \
+    TYPE2 *TENSOR2##_data = TENSOR2->data<real>() + TH_TENSOR_offset; \
     CODE \
   } \
 }
 #else
 #define TH_TENSOR_APPLY2_CONTIG(TYPE1, TENSOR1, TYPE2, TENSOR2, CODE) \
 { \
-  TYPE1 *TENSOR1##_data = THTensor_(data)(TENSOR1); \
-  TYPE2 *TENSOR2##_data = THTensor_(data)(TENSOR2); \
+  TYPE1 *TENSOR1##_data = TENSOR1->data<real>(); \
+  TYPE2 *TENSOR2##_data = TENSOR2->data<real>(); \
   ptrdiff_t TENSOR1##_len = THTensor_(nElement)(TENSOR1); \
   CODE \
 }
@@ -85,18 +85,18 @@
     ptrdiff_t TH_TENSOR_end = tid == num_threads - 1 ? TH_TENSOR_size : \
       TH_TENSOR_offset + TH_TENSOR_size / num_threads; \
     ptrdiff_t TENSOR1##_len = TH_TENSOR_end - TH_TENSOR_offset; \
-    TYPE1 *TENSOR1##_data = THTensor_(data)(TENSOR1) + TH_TENSOR_offset; \
-    TYPE2 *TENSOR2##_data = THTensor_(data)(TENSOR2) + TH_TENSOR_offset; \
-    TYPE3 *TENSOR3##_data = THTensor_(data)(TENSOR3) + TH_TENSOR_offset; \
+    TYPE1 *TENSOR1##_data = TENSOR1->data<real>() + TH_TENSOR_offset; \
+    TYPE2 *TENSOR2##_data = TENSOR2->data<real>() + TH_TENSOR_offset; \
+    TYPE3 *TENSOR3##_data = TENSOR3->data<real>() + TH_TENSOR_offset; \
     CODE \
   } \
 }
 #else
 #define TH_TENSOR_APPLY3_CONTIG(TYPE1, TENSOR1, TYPE2, TENSOR2, TYPE3, TENSOR3, CODE) \
 { \
-  TYPE1 *TENSOR1##_data = THTensor_(data)(TENSOR1); \
-  TYPE2 *TENSOR2##_data = THTensor_(data)(TENSOR2); \
-  TYPE3 *TENSOR3##_data = THTensor_(data)(TENSOR3); \
+  TYPE1 *TENSOR1##_data = TENSOR1->data<real>(); \
+  TYPE2 *TENSOR2##_data = TENSOR2->data<real>(); \
+  TYPE3 *TENSOR3##_data = TENSOR3->data<real>(); \
   ptrdiff_t TENSOR1##_len = THTensor_(nElement)(TENSOR1); \
   CODE \
 }

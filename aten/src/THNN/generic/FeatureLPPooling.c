@@ -215,8 +215,8 @@ THNN_(FeatureLPPooling_updateOutput)(
   FeatureLPPoolingSizes outputDesc =
     THNN_(FeatureLPPooling_upcastCPU)(output, batchMode);
 
-  real* inputP = THTensor_(data)(input);
-  real* outputP = THTensor_(data)(output);
+  real* inputP = input->data<real>();
+  real* outputP = output->data<real>();
 
   FEATURE_LP_SIZE_TYPE batch, opt1, opt2, outputFeature, i;
 
@@ -309,10 +309,10 @@ THNN_(FeatureLPPooling_updateGradInput)(
   FeatureLPPoolingSizes gradInputDesc =
     THNN_(FeatureLPPooling_upcastCPU)(gradInput, batchMode);
 
-  real* gradOutputP = THTensor_(data)(gradOutput);
-  real* gradInputP = THTensor_(data)(gradInput);
-  real* outputP = THTensor_(data)(output);
-  real* inputP = THTensor_(data)(input);
+  real* gradOutputP = gradOutput->data<real>();
+  real* gradInputP = gradInput->data<real>();
+  real* outputP = output->data<real>();
+  real* inputP = input->data<real>();
 
   FEATURE_LP_SIZE_TYPE batch, opt1, opt2, outputFeature, i;
 
