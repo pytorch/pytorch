@@ -22,6 +22,7 @@
 #include "torch/csrc/jit/passes/loop_unrolling.h"
 #include "torch/csrc/jit/passes/lower_grad_of.h"
 #include "torch/csrc/jit/passes/constant_propagation.h"
+#include "torch/csrc/jit/passes/inline_autodiff_subgraphs.h"
 #include "torch/csrc/jit/symbolic_variable.h"
 #include "torch/csrc/jit/ivalue.h"
 #include "torch/csrc/jit/custom_operator.h"
@@ -406,9 +407,12 @@ private:
         runNondiffOptimization(gradient.f);
         packGradient(gradient, dnode);
       }
+      InlineAutodiffSubgraphs(opt_graph);
     } else {
       runNondiffOptimization(opt_graph);
     }
+    // Make sure there are no leftovers from any passes.
+    EliminateDeadCode(opt_graph);
     return ExecutionPlan(opt_graph);
   }
 
