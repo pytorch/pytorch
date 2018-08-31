@@ -397,23 +397,15 @@ else()
 endif()
 
 # ---[ Modules
-# TODO(orionr): Enable all of this for Windows DLL when we
-# can figure out how to get it to build
-if (NOT (MSVC AND BUILD_SHARED_LIBS))
 add_subdirectory(modules)
-endif()
 
 # ---[ Binaries
 # Binaries will be built after the Caffe2 main libraries and the modules
 # are built. For the binaries, they will be linked to the Caffe2 main
 # libraries, as well as all the modules that are built with Caffe2 (the ones
 # built in the previous Modules section above).
-# TODO(orionr): Enable all of this for Windows DLL when we
-# can figure out how to get it to build
-if (NOT (MSVC AND BUILD_SHARED_LIBS))
 if (BUILD_BINARY)
   add_subdirectory(binaries)
-endif()
 endif()
 
 include(cmake/Summary.cmake)
