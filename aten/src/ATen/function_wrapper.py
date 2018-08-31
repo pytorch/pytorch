@@ -557,6 +557,15 @@ def is_mutable_formal_argument(argument, option):
     return argument.get('output') or option['inplace'] and argument['name'] == 'self'
 
 
+def check_methods_do_not_start_with_underscore(name, is_method):
+    if is_method and name.startswith('_') and not name.startswith('__'):
+        message = "Function '{}' starts with a single underscore and is ".format(name)
+        message += "configured to have a method on Tensor. Functions that start with "
+        message += " a single underscore should only be functions in the at:: "
+        message += "namespace and not methods on Tensor!"
+        raise RuntimeError(message)
+
+
 def to_return_type(arg, option):
     # type: (THFormal, FunctionOption) -> ReturnType
     t = arg['type']
@@ -810,6 +819,8 @@ def create_generic(top_env, declarations):
         dispatch_tensor = find_dispatch_tensor(formals)
         is_namespace_function = is_function and dispatch_tensor is not None
 
+        check_methods_do_not_start_with_underscore(option['name'], is_method)
+
         broadcast_arg = get_broadcast_argument(option)
         # "s_" for "same size".
         option['method_prefix_derived'] = '' if broadcast_arg is None else 's_'
@@ -1032,7 +1043,7 @@ def create_generic(top_env, declarations):
             option['return_type'] == 'Tensor' and option['deprecated']
         needs_native_definition = not is_deprecated_factory_method
 
-        has_dispatch = dispatch_tensor or dispatch_type
+        check_methods_do_not_start_with_underscore(option['name'], is_method)
 
         option['method_prefix_derived'] = ''
         option['device_guard_declaration'] = device_guard(option, formals, is_factory_method)
