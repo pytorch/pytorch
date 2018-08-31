@@ -731,6 +731,18 @@ class TestLRScheduler(TestCase):
             lambda: CosineAnnealingLR(self.opt, T_max=epochs // 2, eta_min=eta_min / 2),
             epochs=epochs)
 
+    def test_cosine_restarts_lr_state_dict(self):
+        epochs = 10
+        eta_min = 1e-10
+        T_mult = 2.0
+        gamma = 1.0
+        self._check_scheduler_state_dict(
+            lambda: CosineAnnealingRestartsLR(self.opt, T_max=epochs, eta_min=eta_min,
+                                              T_mult=T_mult, gamma=gamma),
+            lambda: CosineAnnealingRestartsLR(self.opt, T_max=epochs // 2, eta_min=eta_min / 2,
+                                              T_mult=T_mult / 2, gamma=gamma / 2),
+            epochs=epochs)
+
     def test_reduce_lr_on_plateau_state_dict(self):
         scheduler = ReduceLROnPlateau(self.opt, mode='min', factor=0.1, patience=2)
         for score in [1.0, 2.0, 3.0, 4.0, 3.0, 4.0, 5.0, 3.0, 2.0, 1.0]:
