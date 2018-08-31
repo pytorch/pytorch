@@ -363,6 +363,9 @@ public:
     // raw pointers are.
     return {outputs_.data(), outputs_.size()};
   }
+  Value * output(size_t i) const {
+    return outputs_.at(i);
+  }
   bool hasUses() const {
     for(auto o : outputs()) {
       if(o->uses().size() > 0)
@@ -392,9 +395,6 @@ public:
     return inputs_.at(0);
   }
   // Access a particular input.  This is a checked index.
-  Value * input(size_t i) {
-    return inputs_.at(i);
-  }
   Value * input(size_t i) const {
     return inputs_.at(i);
   }
