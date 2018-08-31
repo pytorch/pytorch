@@ -8,7 +8,7 @@ from torch.distributions.utils import _finfo, broadcast_all, lazy_property
 
 
 def _standard_gamma(concentration):
-    return concentration._standard_gamma()
+    return torch._standard_gamma(concentration)
 
 
 class Gamma(ExponentialFamily):
