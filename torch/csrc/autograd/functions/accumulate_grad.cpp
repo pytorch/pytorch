@@ -40,7 +40,20 @@ auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
 
   at::Tensor& grad = variable.grad();
   if (!grad.defined()) {
-    variable.grad() = new_grad.clone();
+    // under following condition, we can avoid clone()
+    if (!GradMode::is_enabled()
+        && !new_grad.type().is_sparse()
+        && new_grad.is_contiguous()
+        && new_grad.use_count() == 2) {
+      // first check it is in first-order grad only mode
+      // then check not sparse before is_contiguous
+      // then check contiguous, otherwise later in place accumulation may fail
+      // and lastly, check it is the last reference before we grab it
+      // we created new_grad above so ref count should be 2
+      variable.grad() = new_grad.detach();
+    } else {
+      variable.grad() = new_grad.clone();
+    }
   } else if (!GradMode::is_enabled()) {
     Variable& grad_variable = as_variable_ref(grad);
     // This case is not strictly necessary, but it makes the first-order only case
