@@ -47,6 +47,13 @@ public:
     auto& baseType = getNonVariableType(p, s);
     return detail::getVariableHooks().getVariableTypeFromBaseType(baseType);
   }
+  Type & getMaybeVariableType(Backend p, ScalarType s, bool is_variable) {
+    if (is_variable) {
+      return getVariableType(p, s);
+    } else {
+      return getNonVariableType(p, s);
+    }
+  }
 
   Generator & defaultGenerator(DeviceType device_type) {
     initCUDAIfNeeded(device_type);
