@@ -498,6 +498,20 @@ def monkey_patch_THD_link_flags():
     C.extra_link_args += thd_deps
 
 
+def monkey_patch_C10D_inc_flags():
+    '''
+    C10D's include deps are not determined until after build c10d is run, so
+    we need to monkey-patch it.
+    '''
+    mpi_include_path_file = tmp_install_path + "/include/c10d/mpi_include_path"
+    if os.path.exists(mpi_include_path_file):
+        with open(mpi_include_path_file, 'r') as f:
+            mpi_include_paths = f.readlines()
+        mpi_include_paths = [p.strip() for p in mpi_include_paths]
+        C.include_dirs += mpi_include_paths
+        print("-- For c10d, will include MPI paths: {}".format(mpi_include_paths))
+
+
 build_ext_parent = ninja_build_ext if USE_NINJA \
     else setuptools.command.build_ext.build_ext
 
@@ -538,6 +552,11 @@ class build_ext(build_ext_parent):
             monkey_patch_THD_link_flags()
         else:
             print('-- Building without distributed package')
+        if USE_C10D:
+            print('-- Building with c10d distributed package ')
+            monkey_patch_C10D_inc_flags()
+        else:
+            print('-- Building without c10d distributed package')
 
         generate_code(ninja_global)
 

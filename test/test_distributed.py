@@ -366,7 +366,6 @@ class _DistTestBase(object):
 
     @skip_if_small_worldsize
     @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
-    @unittest.skipIf(BACKEND == "mpi", "MPI does not support group")
     def test_broadcast_group(self):
         group, group_id, rank = self._init_group_test()
         self._test_broadcast_helper(group, group_id, rank)
@@ -459,7 +458,6 @@ class _DistTestBase(object):
 
     @unittest.skipIf(BACKEND == "gloo", "Gloo does not support reduce")
     @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
-    @unittest.skipIf(BACKEND == "mpi", "MPI does not support group")
     @skip_if_small_worldsize
     def test_reduce_group_sum(self):
         group, group_id, rank = self._init_group_test()
@@ -475,7 +473,6 @@ class _DistTestBase(object):
 
     @unittest.skipIf(BACKEND == "gloo", "Gloo does not support reduce")
     @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
-    @unittest.skipIf(BACKEND == "mpi", "MPI does not support group")
     @skip_if_small_worldsize
     def test_reduce_group_product(self):
         group, group_id, rank = self._init_group_test()
@@ -491,7 +488,6 @@ class _DistTestBase(object):
 
     @unittest.skipIf(BACKEND == "gloo", "Gloo does not support reduce")
     @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
-    @unittest.skipIf(BACKEND == "mpi", "MPI does not support group")
     @skip_if_small_worldsize
     def test_reduce_group_min(self):
         group, group_id, rank = self._init_group_test()
@@ -499,7 +495,6 @@ class _DistTestBase(object):
 
     @unittest.skipIf(BACKEND == "gloo", "Gloo does not support reduce")
     @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
-    @unittest.skipIf(BACKEND == "mpi", "MPI does not support group")
     @skip_if_small_worldsize
     def test_reduce_group_max(self):
         group, group_id, rank = self._init_group_test()
@@ -597,7 +592,6 @@ class _DistTestBase(object):
 
     @skip_if_small_worldsize
     @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
-    @unittest.skipIf(BACKEND == "mpi", "MPI does not support group")
     def test_all_reduce_group_sum(self):
         group, group_id, rank = self._init_group_test()
         self._test_all_reduce_helper(
@@ -612,7 +606,6 @@ class _DistTestBase(object):
 
     @skip_if_small_worldsize
     @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
-    @unittest.skipIf(BACKEND == "mpi", "MPI does not support group")
     def test_all_reduce_group_product(self):
         group, group_id, rank = self._init_group_test()
         self._test_all_reduce_helper(
@@ -627,7 +620,6 @@ class _DistTestBase(object):
 
     @skip_if_small_worldsize
     @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
-    @unittest.skipIf(BACKEND == "mpi", "MPI does not support group")
     def test_all_reduce_group_min(self):
         group, group_id, rank = self._init_group_test()
         self._test_all_reduce_helper(
@@ -636,7 +628,6 @@ class _DistTestBase(object):
 
     @skip_if_small_worldsize
     @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
-    @unittest.skipIf(BACKEND == "mpi", "MPI does not support group")
     def test_all_reduce_group_max(self):
         group, group_id, rank = self._init_group_test()
         self._test_all_reduce_helper(
@@ -664,7 +655,6 @@ class _DistTestBase(object):
 
     @unittest.skipIf(BACKEND == "gloo", "Gloo does not support scatter")
     @unittest.skipIf(BACKEND == "nccl", "Nccl does not support scatter")
-    @unittest.skipIf(BACKEND == "mpi", "MPI does not support group")
     @skip_if_small_worldsize
     def test_scatter_group(self):
         group, group_id, rank = self._init_group_test()
@@ -693,7 +683,6 @@ class _DistTestBase(object):
 
     @unittest.skipIf(BACKEND == "gloo", "Gloo does not support gather")
     @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
-    @unittest.skipIf(BACKEND == "mpi", "MPI does not support group")
     @skip_if_small_worldsize
     def test_gather_group(self):
         group, group_id, rank = self._init_group_test()
@@ -734,7 +723,6 @@ class _DistTestBase(object):
     @skip_if_small_worldsize
     @unittest.skipIf(BACKEND == "gloo", "Gloo does not support gather")
     @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
-    @unittest.skipIf(BACKEND == "mpi", "MPI does not support group")
     def test_all_gather_group(self):
         group, group_id, rank = self._init_group_test()
         self._test_all_gather_helper(group, group_id, rank)
@@ -764,7 +752,6 @@ class _DistTestBase(object):
 
     @skip_if_small_worldsize
     @unittest.skipIf(BACKEND != "mpi", "Only MPI supports barrier")
-    @unittest.skipIf(BACKEND == "mpi", "MPI does not support group")
     def test_barrier_group(self):
         group, group_id, rank = self._init_group_test()
         self._test_barrier_helper(group, group_id, rank)

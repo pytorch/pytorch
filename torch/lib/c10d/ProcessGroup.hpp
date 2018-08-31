@@ -2,6 +2,7 @@
 
 #include <memory>
 #include <stdexcept>
+#include <unordered_map>
 #include <vector>
 
 #include <ATen/ATen.h>
@@ -125,6 +126,8 @@ class ProcessGroup {
       int* srcRank) = 0;
 
   virtual std::shared_ptr<ProcessGroup::Work> barrier() = 0;
+
+  virtual std::unordered_map<int, int> getGroupRank() = 0;
 
  protected:
   const int rank_;
