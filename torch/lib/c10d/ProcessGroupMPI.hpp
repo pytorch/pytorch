@@ -182,6 +182,7 @@ class ProcessGroupMPI : public ProcessGroup {
 
   // Global states
   static void initMPIOnce();
+  static void mpiExit();
   static std::once_flag onceFlagInitMPI;
 
   static std::mutex pgGlobalMutex_;

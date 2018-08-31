@@ -86,10 +86,6 @@ void checkSameSizeAndType(
   }
 }
 
-void mpiExit() {
-  MPI_CHECK(MPI_Finalize());
-}
-
 } // namespace
 
 // ProcessGroupMPI::WorkMPI
@@ -148,6 +144,11 @@ std::mutex ProcessGroupMPI::pgGlobalMutex_;
 // We only want to initialize once
 std::once_flag ProcessGroupMPI::onceFlagInitMPI;
 
+void ProcessGroupMPI::mpiExit() {
+  std::unique_lock<std::mutex> globalLock(pgGlobalMutex_);
+  MPI_CHECK(MPI_Finalize());
+}
+
 void ProcessGroupMPI::initMPIOnce() {
   // Initialize MPI environment
   std::call_once(onceFlagInitMPI, []() {
@@ -160,7 +161,7 @@ void ProcessGroupMPI::initMPIOnce() {
           "MPI_THREAD_SERIALIZED. This is required by "
           "c10d package");
     }
-    if (std::atexit(mpiExit)) {
+    if (std::atexit(ProcessGroupMPI::mpiExit)) {
       throw std::runtime_error("Fail to register the MPI exit handler");
     }
   });
@@ -189,18 +190,22 @@ std::shared_ptr<ProcessGroupMPI> ProcessGroupMPI::createProcessGroupMPI(
   if (ranks.empty()) {
     return std::make_shared<ProcessGroupMPI>(rank, size, MPI_COMM_WORLD);
   } else {
+    std::unique_lock<std::mutex> globalLock(pgGlobalMutex_);
+
     MPI_Group worldGroup;
-    MPI_Comm_group(MPI_COMM_WORLD, &worldGroup);
+    MPI_CHECK(MPI_Comm_group(MPI_COMM_WORLD, &worldGroup));
 
     MPI_Group ranksGroup;
-    MPI_Group_incl(worldGroup, ranks.size(), ranks.data(), &ranksGroup);
+    MPI_CHECK(
+        MPI_Group_incl(worldGroup, ranks.size(), ranks.data(), &ranksGroup));
 
     MPI_Comm groupComm;
-    MPI_Comm_create(MPI_COMM_WORLD, ranksGroup, &groupComm);
+    MPI_CHECK(MPI_Comm_create(MPI_COMM_WORLD, ranksGroup, &groupComm));
 
-    MPI_Group_free(&worldGroup);
-    MPI_Group_free(&ranksGroup);
+    MPI_CHECK(MPI_Group_free(&worldGroup));
+    MPI_CHECK(MPI_Group_free(&ranksGroup));
 
+    globalLock.unlock();
     return std::make_shared<ProcessGroupMPI>(rank, size, groupComm);
   }
 }
