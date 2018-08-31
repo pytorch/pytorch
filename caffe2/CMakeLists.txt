@@ -68,43 +68,39 @@ endif()
 # TODO(orionr): Enable all of this for Windows DLL when we
 # can figure out how to get it to build
 if (MSVC AND BUILD_SHARED_LIBS)
-  add_subdirectory(proto)
-  add_subdirectory(core)
-  add_subdirectory(utils)
-  add_subdirectory(core/nomnigraph)
-  add_subdirectory(core/dispatch)
+add_subdirectory(utils)
 else()
-  add_subdirectory(proto)
-  add_subdirectory(contrib)
-  add_subdirectory(core)
-  add_subdirectory(utils)
-  add_subdirectory(predictor)
-  add_subdirectory(core/nomnigraph)
-  add_subdirectory(core/dispatch)
-  if (USE_NVRTC)
-    add_subdirectory(cuda_rtc)
-  endif()
-  add_subdirectory(db)
-  add_subdirectory(distributed)
-  # add_subdirectory(experiments) # note, we may remove this folder at some point
-  add_subdirectory(ideep)
-  add_subdirectory(image)
-  add_subdirectory(video)
-  add_subdirectory(mkl)
-  add_subdirectory(mobile)
-  add_subdirectory(mpi)
-  add_subdirectory(observers)
-  add_subdirectory(onnx)
-  add_subdirectory(operators)
-  add_subdirectory(operators/rnn)
-  add_subdirectory(opt)
-  add_subdirectory(perfkernels)
-  add_subdirectory(python)
-  add_subdirectory(queue)
-  add_subdirectory(sgd)
-  add_subdirectory(share)
-  # add_subdirectory(test) # todo: use caffe2_gtest_main instead of gtest_main because we will need to call GlobalInit
-  add_subdirectory(transforms)
+add_subdirectory(proto)
+add_subdirectory(contrib)
+add_subdirectory(core)
+add_subdirectory(utils)
+add_subdirectory(predictor)
+add_subdirectory(core/nomnigraph)
+add_subdirectory(core/dispatch)
+if (USE_NVRTC)
+  add_subdirectory(cuda_rtc)
+endif()
+add_subdirectory(db)
+add_subdirectory(distributed)
+# add_subdirectory(experiments) # note, we may remove this folder at some point
+add_subdirectory(ideep)
+add_subdirectory(image)
+add_subdirectory(video)
+add_subdirectory(mkl)
+add_subdirectory(mobile)
+add_subdirectory(mpi)
+add_subdirectory(observers)
+add_subdirectory(onnx)
+add_subdirectory(operators)
+add_subdirectory(operators/rnn)
+add_subdirectory(opt)
+add_subdirectory(perfkernels)
+add_subdirectory(python)
+add_subdirectory(queue)
+add_subdirectory(sgd)
+add_subdirectory(share)
+# add_subdirectory(test) # todo: use caffe2_gtest_main instead of gtest_main because we will need to call GlobalInit
+add_subdirectory(transforms)
 endif()
 
 # Advanced: if we have white list specified, we will do intersections for all
@@ -170,8 +166,16 @@ if (FALSE)
 endif()
 
 # ---[ List of libraries to link with
+# TODO(orionr): Enable all of this for Windows DLL when we
+# can figure out how to get it to build
+if (NOT (MSVC AND BUILD_SHARED_LIBS))
 add_library(caffe2_protos STATIC $<TARGET_OBJECTS:Caffe2_PROTO>)
 add_dependencies(caffe2_protos Caffe2_PROTO)
+else()
+# Do not include caffe2 or caffe protos, but rather have it only be
+# a library to attach local protobuf.
+add_library(caffe2_protos STATIC utils/dummy.cpp)
+endif()
 # If we are going to link protobuf locally inside caffe2 libraries, what we will do is
 # to create a helper static library that always contains libprotobuf source files, and
 # link the caffe2 related dependent libraries to it.
@@ -397,6 +401,9 @@ if ($ENV{WERROR})
 endif()
 
 # ---[ Test binaries.
+# TODO(orionr): Enable all of this for Windows DLL when we
+# can figure out how to get it to build
+if (NOT (MSVC AND BUILD_SHARED_LIBS))
 if (BUILD_TEST)
   set(Caffe2_ALL_TEST_SRCS ${Caffe2_CPU_TEST_SRCS})
   if (USE_CUDA)
@@ -432,6 +439,7 @@ if (BUILD_TEST)
     endforeach()
   endif()
 endif()
+endif()
 
 set(__aten_test_dir "test/aten")
 if (NOT USE_ROCM)
@@ -458,6 +466,9 @@ if (NOT USE_ROCM)
   endif()
 endif()
 
+# TODO(orionr): Enable all of this for Windows DLL when we
+# can figure out how to get it to build
+if (NOT (MSVC AND BUILD_SHARED_LIBS))
 if (BUILD_PYTHON)
   # Python site-packages
   # Get canonical directory for python site packages (relative to install
@@ -645,6 +656,7 @@ if (BUILD_PYTHON)
   # Caffe2 proto files
   install(DIRECTORY ${CMAKE_BINARY_DIR}/caffe2 DESTINATION ${PYTHON_LIB_REL_PATH}
           FILES_MATCHING PATTERN "*.py")
+endif()
 endif()
 
 # Finally, set the Caffe2_MAIN_LIBS variable in the parent scope.
