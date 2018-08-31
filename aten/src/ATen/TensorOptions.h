@@ -38,38 +38,21 @@ struct AT_API TensorOptions {
   /// tensor. The `requires_grad` property of the tensor is ignored and set to
   /// false in the created `TensorOptions`.  See the constructor from `Type` for
   /// the semantics w.r.t. the `type()` method.
-  explicit TensorOptions(Tensor tensor, bool discard_runtime_type = false) {
-    if (!discard_runtime_type) {
-      type_ = &tensor.type();
-    }
+  explicit TensorOptions(Tensor tensor) {
     this->dtype(tensor.dtype());
     this->device(tensor.device());
     this->layout(tensor.layout());
+    this->is_variable(tensor.is_variable());
   }
 
   /// Constructs the `TensorOptions` from a type and a `device_index`.
-  ///
-  /// If `discard_runtime_type` is false (the default), the behavior of
-  /// `TensorOptions::type()` is changed in that it will always return this
-  /// `type`, irrespective of any `device` or `dtype` or `layout` specified at a
-  /// later time. This is to ensure that when a `TensorOptions` object is
-  /// constructed from a tensor's type, and that type has a dynamic type other
-  /// than `at::Type` (e.g. `torch::autograd::VariableType`), constructing a new
-  /// tensor from this `TensorOptions` will use this same derived type. If
-  /// instead the given `type` were destructured into its components (backend,
-  /// dtype and layout), information about the runtime type of the `Type` would
-  /// be lost. Set `discard_runtime_type` to `true` to always destructure the
-  /// type into its components and discard its runtime type.
   /* implicit */ TensorOptions(
       const Type& type,
-      int32_t device_index = -1,
-      bool discard_runtime_type = false) {
-    if (!discard_runtime_type) {
-      type_ = &type;
-    }
+      int32_t device_index = -1) {
     this->dtype(type.scalarType());
     this->device({backendToDeviceType(type.backend()), device_index});
     this->layout(type.layout());
+    this->is_variable(type.is_variable());
   }
 
   /// Constructs a `TensorOptions` object with the given layout.
@@ -109,19 +92,9 @@ struct AT_API TensorOptions {
     return !(*this == other);
   }
 
-  /// Discards the runtime type stored if the `TensorOptions` was constructed
-  /// from a `Tensor` or a `Type`. See the documentation of the constructor from
-  /// a `Type` for implications on the behavior of the `type()` method on
-  /// `TensorOptions`.
-  const TensorOptions& discard_runtime_type() const {
-    type_ = nullptr;
-    return *this;
-  }
-
   /// Sets the device of the `TensorOptions`.
   TensorOptions& device(Device device) {
     device_ = std::move(device);
-    update_underlying_type();
     return *this;
   }
 
@@ -134,20 +107,23 @@ struct AT_API TensorOptions {
   /// Sets the dtype of the `TensorOptions`.
   TensorOptions& dtype(ScalarType dtype) {
     dtype_ = dtype;
-    update_underlying_type();
     return *this;
   }
 
   /// Sets the layout of the `TensorOptions`.
   TensorOptions& layout(Layout layout) {
     layout_ = layout;
-    update_underlying_type();
     return *this;
   }
 
   /// Sets the `requires_grad` property of the `TensorOptions`.
   TensorOptions& requires_grad(bool requires_grad) {
     requires_grad_ = requires_grad;
+    return *this;
+  }
+
+  TensorOptions& is_variable(bool is_variable) {
+    is_variable_ = is_variable;
     return *this;
   }
 
@@ -176,22 +152,17 @@ struct AT_API TensorOptions {
     return requires_grad_;
   }
 
+  /// Returns the `is_variable` property of the `TensorOptions`.
+  bool is_variable() const noexcept {
+    return is_variable_;
+  }
+
   /// Constructs an `at::Type` from the members of the `TensorOptions`.
   const Type& type() const {
-    if (type_ != nullptr) {
-      return *type_;
-    }
-    return getNonVariableType(backend(), dtype_);
+    return at::globalContext().getMaybeVariableType(backend(), dtype_, is_variable_);
   }
 
  private:
-  /// Updates any stored underlying type to the current construction axes.
-  void update_underlying_type() {
-    if (type_) {
-      type_ = &type_->toScalarType(dtype_).toBackend(backend());
-    }
-  }
-
   // Resolves the ATen backend specified by the current construction axes.
   Backend backend() const noexcept {
     Backend backend;
@@ -208,9 +179,7 @@ struct AT_API TensorOptions {
   Device device_{Device::Type::CPU};
   Layout layout_{Layout::Strided};
   bool requires_grad_{false};
-  // Not part of the observable API, so make `mutable` so we can set it to
-  // `null` in `discard_runtime_type`.
-  mutable const Type* type_{nullptr};
+  bool is_variable_{false};
 };
 
 /// Convenience function that returns a `TensorOptions` object with the `dtype`
