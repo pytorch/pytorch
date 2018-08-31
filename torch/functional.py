@@ -287,8 +287,8 @@ def stft(input, n_fft, hop_length=None, win_length=None, window=None,
 
     .. math::
         X[m, \omega] = \sum_{k = 0}^{\text{win\_length}}%
-                            window[k]\ input[m \times \text{hop\_length} + k]\ %
-                            e^{- j \frac{2 \pi \cdot \omega k}{\text{win\_length}}},
+                            \text{window}[k]\ \text{input}[m \times \text{hop\_length} + k]\ %
+                            \exp\left(- j \frac{2 \pi \cdot \omega k}{\text{win\_length}}\right),
 
     where :math:`m` is the index of the sliding window, and :math:`\omega` is
     the frequency that :math:`0 \leq \omega < \text{n\_fft}`. When
