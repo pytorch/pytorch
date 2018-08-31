@@ -11,12 +11,12 @@ public:
   Storage(const c10::intrusive_ptr<StorageImpl>& ptr) : storage_impl_(ptr) {}
   Storage(c10::intrusive_ptr<StorageImpl>&& ptr) : storage_impl_(std::move(ptr)) {}
   Storage(
-      at::ScalarType,
+      caffe2::TypeMeta,
       size_t size,
       Allocator* allocator,
       bool resizable = false);
   Storage(
-      at::ScalarType,
+      caffe2::TypeMeta,
       at::DataPtr,
       size_t size,
       const std::function<void(void*)>& deleter,
@@ -35,6 +35,9 @@ public:
   void* data() const { return storage_impl_.get()->data(); }
   const at::DataType dtype() const {
     return storage_impl_->dtype();
+  }
+  const caffe2::TypeMeta dmeta() const {
+    return storage_impl_->dmeta();
   }
   const at::DataPtr& data_ptr() const { return storage_impl_->data_ptr(); }
   DeviceType device_type() const { return storage_impl_->device_type(); }

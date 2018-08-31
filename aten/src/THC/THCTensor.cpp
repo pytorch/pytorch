@@ -189,13 +189,13 @@ void THCTensor_setStorageNd(THCState *state, THCTensor *self, THCStorage *storag
     if (!THTensor_getStoragePtr(self)) {
       THError("Tensor: invalid null storage");
     }
-    auto scalar_type = at::dataTypeToScalarType(THTensor_getStoragePtr(self)->dtype());
+    auto data_type = THTensor_getStoragePtr(self)->dmeta();
 
     if (storage) {
       c10::raw::intrusive_ptr::incref(storage);
       THTensor_stealAndSetStoragePtr(self, storage);
     } else {
-      THTensor_stealAndSetStoragePtr(self, THCStorage_new(state, scalar_type));
+      THTensor_stealAndSetStoragePtr(self, THCStorage_new(state, data_type));
     }
   }
 

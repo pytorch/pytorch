@@ -15,13 +15,13 @@ struct AT_API StorageImpl : public c10::intrusive_ptr_target {
   StorageImpl() = delete;
   ~StorageImpl() {};
   StorageImpl(
-      at::DataType data_type,
+      caffe2::TypeMeta data_type,
       int64_t numel,
       at::DataPtr data_ptr,
       at::Allocator* allocator,
       bool resizable);
   StorageImpl(
-      at::DataType data_type,
+      caffe2::TypeMeta data_type,
       int64_t numel,
       at::Allocator* allocator,
       bool resizable);
@@ -56,7 +56,7 @@ struct AT_API StorageImpl : public c10::intrusive_ptr_target {
   void operator=(const StorageImpl&) = delete;
 
   size_t itemsize() const {
-    return at::elementSize(dataTypeToScalarType(data_type_));
+    return data_type_.itemsize();
   }
 
   Type& type();
@@ -94,6 +94,9 @@ struct AT_API StorageImpl : public c10::intrusive_ptr_target {
     return allocator_;
   };
   const DataType dtype() const {
+    return data_type_.id();
+  }
+  const caffe2::TypeMeta dmeta() const {
     return data_type_;
   }
   const at::Allocator* allocator() const {
@@ -114,7 +117,7 @@ struct AT_API StorageImpl : public c10::intrusive_ptr_target {
   }
 
  private:
-  at::DataType data_type_;
+  caffe2::TypeMeta data_type_;
   at::DataPtr data_ptr_;
   int64_t numel_;
   bool resizable_;
