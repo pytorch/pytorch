@@ -400,7 +400,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                         # The device actual is the corresponding AutoGPU index for the Device.
                         formal_args.append(parsed_type_args[1])
                         formal_args.append(device_type)
-                        actuals.append("torch::getType({}, {}, {})".format(parsed_type_args[0], layout, device))
+                        actuals.append("torch::getVariableType({}, {}, {})".format(parsed_type_args[0], layout, device))
                         actuals.append('{}.index()'.format(device))
 
                     has_device_bind = True

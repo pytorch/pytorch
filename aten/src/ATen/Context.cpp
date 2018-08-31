@@ -13,6 +13,8 @@
 #include "ATen/CPUGenerator.h"
 #include "ATen/RegisterCPU.h"
 
+#include "TH/TH.h"  // for USE_LAPACK
+
 #ifdef USE_SSE3
 #include <pmmintrin.h>
 #endif
@@ -76,6 +78,14 @@ void Context::setBenchmarkCuDNN(bool b) {
 
 bool Context::hasMKL() const {
 #if AT_MKL_ENABLED()
+  return true;
+#else
+  return false;
+#endif
+}
+
+bool Context::hasLAPACK() const {
+#ifdef USE_LAPACK
   return true;
 #else
   return false;

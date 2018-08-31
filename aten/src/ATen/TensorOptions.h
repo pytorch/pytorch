@@ -221,7 +221,7 @@ inline Tensor to(
     return tensor;
   }
   DeviceGuard guard(options.device());
-  return at::getType(options).copy(tensor, non_blocking);
+  return options.type().copy(tensor, non_blocking);
 }
 } // namespace detail
 

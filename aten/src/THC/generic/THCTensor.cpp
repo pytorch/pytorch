@@ -354,7 +354,7 @@ void THCTensor_(select)(THCState *state, THCTensor *self, THCTensor *src, int di
     self->set_size(d, self->size(d+1));
     self->set_stride(d, self->stride(d+1));
   }
-  self->resize_dim(self->dim() - 1);
+  self->resize_dim((unsigned int)(self->dim() - 1));
 }
 
 void THCTensor_(transpose)(THCState *state, THCTensor *self, THCTensor *src, int dimension1, int dimension2)
