@@ -1,18 +1,10 @@
 #include "caffe2/predictor/predictor_utils.h"
-#include "caffe2/predictor/predictor_config.h"
 
 #include "caffe2/core/blob.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/proto/predictor_consts.pb.h"
 #include "caffe2/utils/proto_utils.h"
-
-CAFFE2_DEFINE_bool(
-    caffe2_predictor_claim_tensor_memory,
-    true,
-    "If false, then predictor will not claim tensor memory"
-    "otherwise when tensor is shrinked to a size smaller than current size "
-    "by FLAGS_caffe2_max_keep_on_shrink_memory, the memory will be claimed.");
 
 namespace caffe2 {
 namespace predictor_utils {
@@ -87,47 +79,4 @@ std::unique_ptr<MetaNetDef> runGlobalInitialization(
 }
 
 } // namespace predictor_utils
-
-void removeExternalBlobs(
-    const std::vector<std::string>& input_blobs,
-    const std::vector<std::string>& output_blobs,
-    Workspace* ws) {
-  for (const auto& blob : input_blobs) {
-    ws->RemoveBlob(blob);
-  }
-  for (const auto& blob : output_blobs) {
-    ws->RemoveBlob(blob);
-  }
-}
-
-PredictorConfig makePredictorConfig(
-    const string& db_type,
-    const string& db_path) {
-  // TODO: Remove this flags once Predictor accept PredictorConfig as
-  // constructors. These comes are copied temporarly from the Predictor.
-  if (FLAGS_caffe2_predictor_claim_tensor_memory) {
-    if (FLAGS_caffe2_max_keep_on_shrink_memory == LLONG_MAX) {
-      FLAGS_caffe2_max_keep_on_shrink_memory = 8 * 1024 * 1024;
-    }
-  }
-  auto dbReader =
-      make_unique<db::DBReader>(db::CreateDB(db_type, db_path, db::READ));
-  auto ws = std::make_shared<Workspace>();
-  auto net_def =
-      predictor_utils::runGlobalInitialization(std::move(dbReader), ws.get());
-  auto config = makePredictorConfig(*net_def, ws.get());
-  config.ws = ws;
-  const auto& init_net = predictor_utils::getNet(
-      *net_def, PredictorConsts::default_instance().predict_init_net_type());
-  CAFFE_ENFORCE(config.ws->RunNetOnce(init_net));
-  config.ws->RemoveBlob(
-      PredictorConsts::default_instance().predictor_dbreader());
-  // Input and output blobs should never be allocated in the master workspace
-  // since we'll end up with race-conditions due to these being shared among
-  // predictor threads / TL workspaces. Safely handle against globalInitNet
-  // creating them in the master.
-  removeExternalBlobs(config.input_names, config.output_names, config.ws.get());
-  return config;
-}
-
 } // namespace caffe2
