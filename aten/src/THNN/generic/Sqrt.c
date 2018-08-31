@@ -33,9 +33,9 @@ void THNN_(Sqrt_updateGradInput)(
   }
   else
   {
-    real *gradOutput_data = THTensor_(data)(gradOutput);
-    real *gradInput_data  = THTensor_(data)(gradInput);
-    real *output_data     = THTensor_(data)(output);
+    real *gradOutput_data = gradOutput->data<real>();
+    real *gradInput_data  = gradInput->data<real>();
+    real *output_data     = output->data<real>();
     int64_t i;
 #pragma omp parallel for private(i)
     for(i = 0; i < THTensor_(nElement)(output); i++)

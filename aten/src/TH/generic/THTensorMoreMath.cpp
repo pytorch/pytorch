@@ -44,9 +44,9 @@ void THTensor_(baddbmm)(THTensor *result, real beta, THTensor *t, real alpha, TH
     THTensor_(addmm)(result_matrix, beta, result_matrix, alpha, matrix1, matrix2);
   }
 
-  THTensor_(free)(matrix1);
-  THTensor_(free)(matrix2);
-  THTensor_(free)(result_matrix);
+  c10::raw::intrusive_ptr::decref(matrix1);
+  c10::raw::intrusive_ptr::decref(matrix2);
+  c10::raw::intrusive_ptr::decref(result_matrix);
 }
 
 ptrdiff_t THTensor_(numel)(THTensor *t)
@@ -112,7 +112,7 @@ void THTensor_(max)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
     if (THTensor_(nDimensionLegacyAll)(t) > 1) {
       THTensor *t0 = THTensor_(newSelect)(t, dimension, 0);
       THTensor_(copy)(values_, t0);
-      THTensor_(free)(t0);
+      c10::raw::intrusive_ptr::decref(t0);
     } else {
       THTensor_(fill)(values_, THTensor_(get1d)(t, 0));
     }
@@ -142,7 +142,7 @@ void THTensor_(max)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
                             *tempIndices__data = *tempIndices__dimOffset;
                           });
 
-    THTensor_(free)(tempValues_);
+    c10::raw::intrusive_ptr::decref(tempValues_);
     THLongTensor_free(tempIndices_);
   }
 
@@ -193,7 +193,7 @@ void THTensor_(min)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
     if (THTensor_(nDimensionLegacyAll)(t) > 1) {
       THTensor *t0 = THTensor_(newSelect)(t, dimension, 0);
       THTensor_(copy)(values_, t0);
-      THTensor_(free)(t0);
+      c10::raw::intrusive_ptr::decref(t0);
     } else {
       THTensor_(fill)(values_, THTensor_(get1d)(t, 0));
     }
@@ -223,7 +223,7 @@ void THTensor_(min)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
                             *tempIndices__data = *tempIndices__dimOffset;
                           });
 
-    THTensor_(free)(tempValues_);
+    c10::raw::intrusive_ptr::decref(tempValues_);
     THLongTensor_free(tempIndices_);
   }
 
@@ -250,8 +250,8 @@ void THTensor_(sum)(THTensor *r_, THTensor *t, int dimension, int keepdim)
     serial_path = 1;
   } else {
     int r_Contig = THTensor_(isContiguous)(r_);
-    real *tp = THTensor_(data)(t);
-    real *rp = THTensor_(data)(r_);
+    real *tp = t->data<real>();
+    real *rp = r_->data<real>();
     if(r_Contig && (tp != rp)){
       ptrdiff_t iter = 0;
       ptrdiff_t r_Size = THTensor_(nElement)(r_);
@@ -301,7 +301,7 @@ void THTensor_(sum)(THTensor *r_, THTensor *t, int dimension, int keepdim)
       temp_->set_stride(dimension, 0);
 
       TH_TENSOR_APPLY2(real, temp_, real, t, *temp__data = *temp__data + *t_data;);
-      THTensor_(free)(temp_);
+      c10::raw::intrusive_ptr::decref(temp_);
     }
   }
 
@@ -327,8 +327,8 @@ void THTensor_(prod)(THTensor *r_, THTensor *t, int dimension, int keepdim)
     serial_path = 1;
   } else {
     int r_Contig = THTensor_(isContiguous)(r_);
-    real *tp = THTensor_(data)(t);
-    real *rp = THTensor_(data)(r_);
+    real *tp = t->data<real>();
+    real *rp = r_->data<real>();
     if(r_Contig && (tp != rp)){
       ptrdiff_t iter = 0;
       ptrdiff_t r_Size = THTensor_(nElement)(r_);
@@ -379,7 +379,7 @@ void THTensor_(prod)(THTensor *r_, THTensor *t, int dimension, int keepdim)
       temp_->set_stride(dimension, 0);
 
       TH_TENSOR_APPLY2(real, temp_, real, t, *temp__data = *temp__data * *t_data;);
-      THTensor_(free)(temp_);
+      c10::raw::intrusive_ptr::decref(temp_);
     }
   }
   if (!keepdim) {
@@ -441,7 +441,7 @@ void THTensor_(sign)(THTensor *r_, THTensor *t)
 
 accreal THTensor_(trace)(THTensor *t)
 {
-  real *t_data = THTensor_(data)(t);
+  real *t_data = t->data<real>();
   accreal sum = 0;
   int64_t i = 0;
   int64_t t_stride_0, t_stride_1, t_diag_size;
@@ -549,7 +549,7 @@ void THTensor_(diag)(THTensor *r_, THTensor *t, int k)
 
   if(THTensor_(nDimensionLegacyNoScalars)(t) == 1)
   {
-    real *t_data = THTensor_(data)(t);
+    real *t_data = t->data<real>();
     int64_t t_stride_0 = THTensor_strideLegacyNoScalars(t, 0);
     int64_t t_size = THTensor_sizeLegacyNoScalars(t, 0);
     int64_t sz = t_size + (k >= 0 ? k : -k);
@@ -560,7 +560,7 @@ void THTensor_(diag)(THTensor *r_, THTensor *t, int k)
 
     THTensor_(resize2d)(r_, sz, sz);
     THTensor_(zero)(r_);
-    r__data = THTensor_(data)(r_);
+    r__data = r_->data<real>();
     r__stride_0 = THTensor_(stride)(r_, 0);
     r__stride_1 = THTensor_(stride)(r_, 1);
     r__data += (k >= 0 ? k*r__stride_1 : -k*r__stride_0);
@@ -570,7 +570,7 @@ void THTensor_(diag)(THTensor *r_, THTensor *t, int k)
   }
   else
   {
-    real *t_data = THTensor_(data)(t);
+    real *t_data = t->data<real>();
     int64_t t_stride_0 = THTensor_(stride)(t, 0);
     int64_t t_stride_1 = THTensor_(stride)(t, 1);
     int64_t sz;
@@ -583,7 +583,7 @@ void THTensor_(diag)(THTensor *r_, THTensor *t, int k)
     else
       sz = THMin(THTensor_(size)(t, 0)+k, THTensor_(size)(t, 1));
     THTensor_(resize1d)(r_, sz);
-    r__data = THTensor_(data)(r_);
+    r__data = r_->data<real>();
     r__stride_0 = THTensor_(stride)(r_, 0);
 
     t_data += (k >= 0 ? k*t_stride_1 : -k*t_stride_0);
@@ -606,7 +606,7 @@ void THTensor_(eye)(THTensor *r_, int64_t n, int64_t m)
   THTensor_(zero)(r_);
 
   i = 0;
-  r__data = THTensor_(data)(r_);
+  r__data = r_->data<real>();
   sz = THMin(THTensor_(size)(r_, 0), THTensor_(size)(r_, 1));
   for(i = 0; i < sz; i++)
     r__data[i*(r_->stride(0)+r_->stride(1))] = 1;
@@ -657,7 +657,7 @@ void THTensor_(randperm)(THTensor *r_, THGenerator *_generator, int64_t n)
   THArgCheck(n > 0, 1, "must be strictly positive");
 
   THTensor_(resize1d)(r_, n);
-  r__data = THTensor_(data)(r_);
+  r__data = r_->data<real>();
   r__stride_0 = THTensor_(stride)(r_,0);
 
   for(i = 0; i < n; i++)
@@ -1023,13 +1023,13 @@ real THTensor_(medianall)(THTensor *tensor)
   k = (numel-1) >> 1;
 
   temp_ = THTensor_(newClone)(tensor);
-  temp__data = THTensor_(data)(temp_);
+  temp__data = temp_->data<real>();
 
   THTensor_(quickselectnoidx)(temp__data, k, numel, 1);
 
   theMedian = temp__data[k];
 
-  THTensor_(free)(temp_);
+  c10::raw::intrusive_ptr::decref(temp_);
 
   return theMedian;
 }
@@ -1056,7 +1056,7 @@ void THTensor_(mode)(THTensor *values_, THLongTensor *indices_, THTensor *t, int
 
   temp_ = THTensor_(new)();
   THTensor_(resize1d)(temp_, t_size_dim);
-  temp__data = THTensor_(data)(temp_);
+  temp__data = temp_->data<real>();
 
   tempi_ = THLongTensor_new();
   THLongTensor_resize1d(tempi_, t_size_dim);
@@ -1092,7 +1092,7 @@ void THTensor_(mode)(THTensor *values_, THLongTensor *indices_, THTensor *t, int
                        *values__data = mode;
                        *indices__data = modei;);
 
-  THTensor_(free)(temp_);
+  c10::raw::intrusive_ptr::decref(temp_);
   THLongTensor_free(tempi_);
   if (!keepdim) {
     THTensor_(squeeze1d)(values_, values_, dimension);
@@ -1123,7 +1123,7 @@ void THTensor_(kthvalue)(THTensor *values_, THLongTensor *indices_, THTensor *t,
 
   temp_ = THTensor_(new)();
   THTensor_(resize1d)(temp_, t_size_dim);
-  temp__data = THTensor_(data)(temp_);
+  temp__data = temp_->data<real>();
 
   tempi_ = THLongTensor_new();
   THLongTensor_resize1d(tempi_, t_size_dim);
@@ -1140,7 +1140,7 @@ void THTensor_(kthvalue)(THTensor *values_, THLongTensor *indices_, THTensor *t,
                        *values__data = temp__data[k-1];
                        *indices__data = tempi__data[k-1];);
 
-  THTensor_(free)(temp_);
+  c10::raw::intrusive_ptr::decref(temp_);
   THLongTensor_free(tempi_);
   if (!keepdim) {
     THTensor_(squeeze1d)(values_, values_, dimension);
@@ -1170,7 +1170,7 @@ void THTensor_(topk)(THTensor *rt_, THLongTensor *ri_, THTensor *t, int64_t k, i
 
   THTensor *tmpResults = THTensor_(new)();
   THTensor_(resize1d)(tmpResults, sliceSize);
-  real *tmp__data = THTensor_(data)(tmpResults);
+  real *tmp__data = tmpResults->data<real>();
 
   THLongTensor *tmpIndices = THLongTensor_new();
   THLongTensor_resize1d(tmpIndices, sliceSize);
@@ -1224,7 +1224,7 @@ void THTensor_(topk)(THTensor *rt_, THLongTensor *ri_, THTensor *t, int64_t k, i
                          })
   }
 
-  THTensor_(free)(tmpResults);
+  c10::raw::intrusive_ptr::decref(tmpResults);
   THLongTensor_free(tmpIndices);
 }
 
@@ -1246,8 +1246,8 @@ void THTensor_(tril)(THTensor *r_, THTensor *t, int64_t k)
   t_stride_1 = THTensor_(stride)(t, 1);
   r__stride_0 = THTensor_(stride)(r_, 0);
   r__stride_1 = THTensor_(stride)(r_, 1);
-  r__data = THTensor_(data)(r_);
-  t_data = THTensor_(data)(t);
+  r__data = r_->data<real>();
+  t_data = t->data<real>();
 
   for(r = 0; r < t_size_0; r++)
   {
@@ -1277,8 +1277,8 @@ void THTensor_(triu)(THTensor *r_, THTensor *t, int64_t k)
   t_stride_1 = THTensor_(stride)(t, 1);
   r__stride_0 = THTensor_(stride)(r_, 0);
   r__stride_1 = THTensor_(stride)(r_, 1);
-  r__data = THTensor_(data)(r_);
-  t_data = THTensor_(data)(t);
+  r__data = r_->data<real>();
+  t_data = t->data<real>();
 
   for(r = 0; r < t_size_0; r++)
   {
@@ -1404,7 +1404,7 @@ void THTensor_(catArray)(THTensor *result, THTensor **inputs, int numInputs, int
         THTensor *nt = THTensor_(newWithTensor)(result);
         THTensor_(narrow)(nt, NULL, dimension, offset, dimSize);
         THTensor_(copy)(nt, inputs[j]);
-        THTensor_(free)(nt);
+        c10::raw::intrusive_ptr::decref(nt);
         offset += dimSize;
       }
     }
@@ -1418,8 +1418,8 @@ int THTensor_(equal)(THTensor *ta, THTensor* tb)
     return 0;
 
   if (THTensor_(isContiguous)(ta) && THTensor_(isContiguous)(tb)) {
-    real *tap = THTensor_(data)(ta);
-    real *tbp = THTensor_(data)(tb);
+    real *tap = ta->data<real>();
+    real *tbp = tb->data<real>();
     ptrdiff_t sz = THTensor_(nElement)(ta);
     ptrdiff_t i;
     for (i=0; i<sz; ++i){
@@ -1640,8 +1640,8 @@ void THTensor_(logicalAnd)(THTensor *r_, THTensor *t, int dimension, int keepdim
     serial_path = 1;
   } else {
     int r_Contig = THTensor_(isContiguous)(r_);
-    real *tp = THTensor_(data)(t);
-    real *rp = THTensor_(data)(r_);
+    real *tp = t->data<real>();
+    real *rp = r_->data<real>();
     if(r_Contig && (tp != rp)){
       ptrdiff_t iter = 0;
       ptrdiff_t r_Size = THTensor_(nElement)(r_);
@@ -1692,7 +1692,7 @@ void THTensor_(logicalAnd)(THTensor *r_, THTensor *t, int dimension, int keepdim
       temp_->set_stride(dimension, 0);
 
       TH_TENSOR_APPLY2(real, temp_, real, t, *temp__data = *temp__data && *t_data;);
-      THTensor_(free)(temp_);
+      c10::raw::intrusive_ptr::decref(temp_);
     }
   }
   if (!keepdim) {
@@ -1717,8 +1717,8 @@ void THTensor_(logicalAny)(THTensor *r_, THTensor *t, int dimension, int keepdim
     serial_path = 1;
   } else {
     int r_Contig = THTensor_(isContiguous)(r_);
-    real *tp = THTensor_(data)(t);
-    real *rp = THTensor_(data)(r_);
+    real *tp = t->data<real>();
+    real *rp = r_->data<real>();
     if(r_Contig && (tp != rp)){
       ptrdiff_t iter = 0;
       ptrdiff_t r_Size = THTensor_(nElement)(r_);
@@ -1768,7 +1768,7 @@ void THTensor_(logicalAny)(THTensor *r_, THTensor *t, int dimension, int keepdim
       temp_->set_stride(dimension, 0);
 
       TH_TENSOR_APPLY2(real, temp_, real, t, *temp__data = *temp__data || *t_data;);
-      THTensor_(free)(temp_);
+      c10::raw::intrusive_ptr::decref(temp_);
     }
   }
 
@@ -2052,8 +2052,8 @@ void THTensor_(renorm)(THTensor *res, THTensor *src, real value, int dimension, 
       THTensor_(copy)(rowR, rowS);
   }
 
-  THTensor_(free)(rowR);
-  THTensor_(free)(rowS);
+  c10::raw::intrusive_ptr::decref(rowR);
+  c10::raw::intrusive_ptr::decref(rowS);
 }
 
 accreal THTensor_(dist)(THTensor *tensor, THTensor *src, real value)
@@ -2149,7 +2149,7 @@ void THTensor_(histc)(THTensor *hist, THTensor *tensor, int64_t nbins, real minv
     maxval = maxval + 1;
   }
 
-  h_data = THTensor_(data)(hist);
+  h_data = hist->data<real>();
 
   TH_TENSOR_APPLY(real, tensor,
     if (*tensor_data >= minval && *tensor_data <= maxval) {
@@ -2340,10 +2340,10 @@ void THTensor_(dirichlet_grad)(THTensor *self, THTensor *x, THTensor *alpha, THT
   THTensor_(resizeAs)(self, x);
   THTensor* grad = THTensor_(newContiguous)(self);
 
-  real*const grad_data = THTensor_(data)(grad);
-  real*const x_data = THTensor_(data)(x);
-  real*const alpha_data = THTensor_(data)(alpha);
-  real*const total_data = THTensor_(data)(total);
+  real*const grad_data = grad->data<real>();
+  real*const x_data = x->data<real>();
+  real*const alpha_data = alpha->data<real>();
+  real*const total_data = total->data<real>();
   const int64_t numel = THTensor_(nElement)(x);
   int64_t i;
   #pragma omp parallel for if(numel > TH_OMP_OVERHEAD_THRESHOLD) private(i)

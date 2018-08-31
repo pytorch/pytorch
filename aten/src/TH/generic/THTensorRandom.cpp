@@ -107,7 +107,7 @@ void THTensor_(iBernoulli_generate_copy)(THTensor *self, THGenerator *_generator
 
 #ifndef TH_REAL_IS_INT
       if (contig) {
-        real* self_seg = THTensor_(data)(self) + line_index_offset;
+        real* self_seg = self->data<real>() + line_index_offset;
         int* tmp_seg = tmp + line_index_offset;
         THVector_(cvtFromInt)(self_seg, tmp_seg, line_seg_len);
       }
@@ -253,7 +253,7 @@ void THTensor_(multinomialAliasSetup)(THTensor *probs, THLongTensor *J, THTensor
   int64_t large_c = 0;
   THLongTensor_resize1d(J, inputsize);
   THTensor_(resize1d)(q, inputsize);
-  real *q_data = THTensor_(data)(q);
+  real *q_data = q->data<real>();
   int64_t *J_data = THLongTensor_data(J);
 
   for (i = 0; i < inputsize; i++)
@@ -533,7 +533,7 @@ void THTensor_(getRNGState)(THGenerator *_generator, THTensor *self)
   THTensor_(resize1d)(self, size);
   THArgCheck(THTensor_(nElement)(self) == size, 1, "RNG state is wrong size");
   THArgCheck(THTensor_(isContiguous)(self), 1, "RNG state needs to be contiguous");
-  rng_state = (THGeneratorState *)THTensor_(data)(self);
+  rng_state = (THGeneratorState *)self->data<real>();
   THGeneratorState_copy(rng_state, &_generator->gen_state);
 }
 
@@ -544,7 +544,7 @@ void THTensor_(setRNGState)(THGenerator *_generator, THTensor *self)
   THGeneratorState *rng_state;
   THArgCheck(THTensor_(nElement)(self) == size, 1, "RNG state is wrong size");
   THArgCheck(THTensor_(isContiguous)(self), 1, "RNG state needs to be contiguous");
-  rng_state = (THGeneratorState *)THTensor_(data)(self);
+  rng_state = (THGeneratorState *)self->data<real>();
   THArgCheck(THGeneratorState_isValid(rng_state), 1, "Invalid RNG state");
   THGeneratorState_copy(&_generator->gen_state, rng_state);
 }

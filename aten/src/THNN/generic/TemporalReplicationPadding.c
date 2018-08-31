@@ -77,8 +77,8 @@ void THNN_(TemporalReplicationPadding_updateOutput)(THNNState *state,
   {
     THTensor_(resize2d)(output, nslices, owidth);
 
-    input_data = THTensor_(data)(input);
-    output_data = THTensor_(data)(output);
+    input_data = input->data<real>();
+    output_data = output->data<real>();
 
     THNN_(TemporalReplicationPadding_updateOutput_frame)(input_data, output_data,
                                                     nslices,
@@ -92,8 +92,8 @@ void THNN_(TemporalReplicationPadding_updateOutput)(THNNState *state,
 
     THTensor_(resize3d)(output, nbatch, nslices, owidth);
 
-    input_data = THTensor_(data)(input);
-    output_data = THTensor_(data)(output);
+    input_data = input->data<real>();
+    output_data = output->data<real>();
 
 #pragma omp parallel for private(p)
     for (p = 0; p < nbatch; p++)
@@ -109,7 +109,7 @@ void THNN_(TemporalReplicationPadding_updateOutput)(THNNState *state,
   }
 
   /* cleanup */
-  THTensor_(free)(input);
+  c10::raw::intrusive_ptr::decref(input);
 }
 
 static void THNN_(TemporalReplicationPadding_updateGradInput_frame)(
@@ -183,8 +183,8 @@ void THNN_(TemporalReplicationPadding_updateGradInput)(THNNState *state,
   /* backprop */
   if (input->dim() == 2) {
     THNN_(TemporalReplicationPadding_updateGradInput_frame)(
-      THTensor_(data)(gradInput),
-      THTensor_(data)(gradOutput),
+      gradInput->data<real>(),
+      gradOutput->data<real>(),
       nslices,
       iwidth,
       owidth,
@@ -194,8 +194,8 @@ void THNN_(TemporalReplicationPadding_updateGradInput)(THNNState *state,
 #pragma omp parallel for private(p)
     for (p = 0; p < nbatch; p++) {
       THNN_(TemporalReplicationPadding_updateGradInput_frame)(
-        THTensor_(data)(gradInput) + p * nslices * iwidth,
-        THTensor_(data)(gradOutput) + p * nslices * owidth,
+        gradInput->data<real>() + p * nslices * iwidth,
+        gradOutput->data<real>() + p * nslices * owidth,
         nslices,
         iwidth,
         owidth,
@@ -204,7 +204,7 @@ void THNN_(TemporalReplicationPadding_updateGradInput)(THNNState *state,
   }
 
   /* cleanup */
-  THTensor_(free)(gradOutput);
+  c10::raw::intrusive_ptr::decref(gradOutput);
 }
 
 

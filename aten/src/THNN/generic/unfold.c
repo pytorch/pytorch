@@ -24,8 +24,8 @@ void THNN_(unfolded_acc)(
 
   int nip;
 
-  real *input_data = THTensor_(data)(input);
-  real *finput_data = THTensor_(data)(finput);
+  real *input_data = input->data<real>();
+  real *finput_data = finput->data<real>();
 
 #pragma omp parallel for private(nip)
   for(nip = 0; nip < nInputPlane; nip++)
@@ -105,8 +105,8 @@ void THNN_(unfolded_copy)(
   // outputWidth*dW does not overflow a int64_t
 
   int64_t k;
-  real *input_data = THTensor_(data)(input);
-  real *finput_data = THTensor_(data)(finput);
+  real *input_data = input->data<real>();
+  real *finput_data = finput->data<real>();
 
 #pragma omp parallel for private(k)
   for(k = 0; k < (int64_t)nInputPlane*kH*kW; k++) {

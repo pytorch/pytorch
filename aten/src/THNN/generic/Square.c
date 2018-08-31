@@ -17,8 +17,8 @@ void THNN_(Square_updateOutput)(
   }
   else
   {
-    real *output_data = THTensor_(data)(output);
-    real *input_data  = THTensor_(data)(input);
+    real *output_data = output->data<real>();
+    real *input_data  = input->data<real>();
     int64_t i;
 #pragma omp parallel for private(i)
     for (i = 0; i < THTensor_(nElement)(input); i++)
@@ -46,9 +46,9 @@ void THNN_(Square_updateGradInput)(
   }
   else
   {
-    real *gradOutput_data = THTensor_(data)(gradOutput);
-    real *gradInput_data  = THTensor_(data)(gradInput);
-    real *input_data  = THTensor_(data)(input);
+    real *gradOutput_data = gradOutput->data<real>();
+    real *gradInput_data  = gradInput->data<real>();
+    real *input_data  = input->data<real>();
     int64_t i;
 #pragma omp parallel for private(i)
     for (i = 0; i < THTensor_(nElement)(gradInput); i++)

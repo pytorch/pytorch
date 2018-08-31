@@ -47,8 +47,8 @@ void THNN_(TemporalUpSamplingNearest_updateOutput)(
 
   input = THTensor_(newContiguous)(input);
   THTensor_(zero)(output);
-  real *idata = THTensor_(data)(input);
-  real *odata = THTensor_(data)(output);
+  real *idata = input->data<real>();
+  real *odata = output->data<real>();
 
   // special case: just copy
   if (inputWidth == outputWidth) {
@@ -62,7 +62,7 @@ void THNN_(TemporalUpSamplingNearest_updateOutput)(
         pos2 += outputWidth;
       }
     }
-    THTensor_(free)(input);
+    c10::raw::intrusive_ptr::decref(input);
     return;
   }
 
@@ -77,7 +77,7 @@ void THNN_(TemporalUpSamplingNearest_updateOutput)(
       pos2 += outputWidth;
     }
   }
-  THTensor_(free)(input);
+  c10::raw::intrusive_ptr::decref(input);
 }
 
 void THNN_(TemporalUpSamplingNearest_updateGradInput)(
@@ -93,8 +93,8 @@ void THNN_(TemporalUpSamplingNearest_updateGradInput)(
   THTensor_(resize3d)(gradInput, nbatch, channels, inputWidth);
   THTensor_(zero)(gradInput);
   gradOutput = THTensor_(newContiguous)(gradOutput);
-  real *data1 = THTensor_(data)(gradInput);
-  real *data2 = THTensor_(data)(gradOutput);
+  real *data1 = gradInput->data<real>();
+  real *data2 = gradOutput->data<real>();
   channels = nbatch * channels;
   const float scale = (float) inputWidth / (float)outputWidth;
 
@@ -110,7 +110,7 @@ void THNN_(TemporalUpSamplingNearest_updateGradInput)(
         pos2 += outputWidth;
       }
     }
-    THTensor_(free)(gradOutput);
+    c10::raw::intrusive_ptr::decref(gradOutput);
     return;
   }
 
@@ -124,7 +124,7 @@ void THNN_(TemporalUpSamplingNearest_updateGradInput)(
       pos2 += outputWidth;
     }
   }
-  THTensor_(free)(gradOutput);
+  c10::raw::intrusive_ptr::decref(gradOutput);
 }
 
 #endif

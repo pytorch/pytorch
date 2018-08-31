@@ -146,8 +146,8 @@ void THNN_(VolumetricAdaptiveMaxPooling_updateOutput)(
     /* indices will contain max input locations for each output point */
     THIndexTensor_(resize4d)(indices, sizeD, osizeT, osizeH, osizeW);
 
-    input_data = THTensor_(data)(input);
-    output_data = THTensor_(data)(output);
+    input_data = input->data<real>();
+    output_data = output->data<real>();
     indices_data = THIndexTensor_(data)(indices);
 
     THNN_(VolumetricAdaptiveMaxPooling_updateOutput_frame)(input_data, output_data,
@@ -166,8 +166,8 @@ void THNN_(VolumetricAdaptiveMaxPooling_updateOutput)(
     /* indices will contain max input locations for each output point */
     THIndexTensor_(resize5d)(indices, sizeB, sizeD, osizeT, osizeH, osizeW);
 
-    input_data = THTensor_(data)(input);
-    output_data = THTensor_(data)(output);
+    input_data = input->data<real>();
+    output_data = output->data<real>();
     indices_data = THIndexTensor_(data)(indices);
 
 #pragma omp parallel for private(b)
@@ -271,8 +271,8 @@ void THNN_(VolumetricAdaptiveMaxPooling_updateGradInput)(
   osizeW = gradOutput->size(dimW);
 
   /* get raw pointers */
-  gradInput_data = THTensor_(data)(gradInput);
-  gradOutput_data = THTensor_(data)(gradOutput);
+  gradInput_data = gradInput->data<real>();
+  gradOutput_data = gradOutput->data<real>();
   indices_data = THIndexTensor_(data)(indices);
 
   /* backprop */
@@ -299,7 +299,7 @@ void THNN_(VolumetricAdaptiveMaxPooling_updateGradInput)(
   }
 
   /* cleanup */
-  THTensor_(free)(gradOutput);
+  c10::raw::intrusive_ptr::decref(gradOutput);
 }
 
 #endif

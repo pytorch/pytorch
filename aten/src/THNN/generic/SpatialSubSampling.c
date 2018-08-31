@@ -42,8 +42,8 @@ void THNN_(SpatialSubSampling_updateOutput)(
 {
   THArgCheck(!bias || THTensor_(isContiguous)(bias), 5, "bias must be contiguous");
 
-  real *weight_data = THTensor_(data)(weight);
-  real *bias_data = THTensor_(data)(bias);
+  real *weight_data = weight->data<real>();
+  real *bias_data = bias->data<real>();
   real *output_data;
   real *input_data;
 
@@ -79,8 +79,8 @@ void THNN_(SpatialSubSampling_updateOutput)(
     THTensor_(resize4d)(output, input->size(0), nInputPlane, outputHeight, outputWidth);
 
   input = THTensor_(newContiguous)(input);
-  input_data = THTensor_(data)(input);
-  output_data = THTensor_(data)(output);
+  input_data = input->data<real>();
+  output_data = output->data<real>();
 
 #pragma omp parallel for private(k)
   for(k = 0; k < nInputPlane; k++)
@@ -120,7 +120,7 @@ void THNN_(SpatialSubSampling_updateOutput)(
       }
     }
   }
-  THTensor_(free)(input);
+  c10::raw::intrusive_ptr::decref(input);
 }
 
 void THNN_(SpatialSubSampling_updateGradInput)(
@@ -162,12 +162,12 @@ void THNN_(SpatialSubSampling_updateGradInput)(
   outputWidth = (inputWidth - kW) / dW + 1;
   outputHeight = (inputHeight - kH) / dH + 1;
 
-  weight_data = THTensor_(data)(weight);
+  weight_data = weight->data<real>();
   gradOutput = THTensor_(newContiguous)(gradOutput);
-  gradOutput_data = THTensor_(data)(gradOutput);
+  gradOutput_data = gradOutput->data<real>();
 
   THTensor_(resizeAs)(gradInput, input);
-  gradInput_data = THTensor_(data)(gradInput);
+  gradInput_data = gradInput->data<real>();
 
 #pragma omp parallel for private(k)
   for(k = 0; k < nInputPlane; k++)
@@ -202,7 +202,7 @@ void THNN_(SpatialSubSampling_updateGradInput)(
       }
     }
   }
-  THTensor_(free)(gradOutput);
+  c10::raw::intrusive_ptr::decref(gradOutput);
 }
 
 void THNN_(SpatialSubSampling_accGradParameters)(
@@ -247,13 +247,13 @@ void THNN_(SpatialSubSampling_accGradParameters)(
   outputWidth = (inputWidth - kW) / dW + 1;
   outputHeight = (inputHeight - kH) / dH + 1;
 
-  gradWeight_data = THTensor_(data)(gradWeight);
-  gradBias_data = THTensor_(data)(gradBias);
+  gradWeight_data = gradWeight->data<real>();
+  gradBias_data = gradBias->data<real>();
   gradOutput = THTensor_(newContiguous)(gradOutput);
-  gradOutput_data = THTensor_(data)(gradOutput);
+  gradOutput_data = gradOutput->data<real>();
 
   input = THTensor_(newContiguous)(input);
-  input_data = THTensor_(data)(input);
+  input_data = input->data<real>();
 
 #pragma omp parallel for private(k)
   for(k = 0; k < nInputPlane; k++)
@@ -292,8 +292,8 @@ void THNN_(SpatialSubSampling_accGradParameters)(
     }
   }
 
-  THTensor_(free)(input);
-  THTensor_(free)(gradOutput);
+  c10::raw::intrusive_ptr::decref(input);
+  c10::raw::intrusive_ptr::decref(gradOutput);
 }
 
 #endif
