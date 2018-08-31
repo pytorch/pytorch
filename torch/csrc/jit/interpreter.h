@@ -29,8 +29,7 @@ struct TORCH_API Code {
   Code(std::shared_ptr<Graph>& graph);
   ~Code();
 
-  // Returns pointers to GraphExecutors created to run GraphExecutor nodes in the given graph.
-  const std::vector<GraphExecutor*>& executors();
+  const std::vector<GraphExecutor*>& grad_executors();
 
   explicit operator bool() const {
     return pImpl != nullptr;

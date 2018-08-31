@@ -16,7 +16,7 @@
 namespace at {
 
 struct ${Type} final : public Type {
-  explicit ${Type}(Context* context);
+  explicit ${Type}();
   virtual ScalarType scalarType() const override;
   virtual Backend backend() const override;
   virtual bool is_cuda() const override;

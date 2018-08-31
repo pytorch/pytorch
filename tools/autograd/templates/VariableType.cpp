@@ -43,7 +43,7 @@ using namespace torch::autograd::generated;
 namespace torch { namespace autograd {
 
 VariableType::VariableType(Context* context, Type* baseType)
-  : Type(context, baseType->type_id(), /*is_variable=*/true, /*is_undefined=*/false)
+  : Type(baseType->type_id(), /*is_variable=*/true, /*is_undefined=*/false)
   , baseType(baseType)
   , id_(context->freshTypeID()) {
   str = std::string("Variable[") + baseType->toString() + "]";
@@ -88,10 +88,10 @@ size_t VariableType::elementSizeInBytes() const {
   return baseType->elementSizeInBytes();
 }
 Type & VariableType::toBackend(Backend b) const {
-  return *getType(baseType->toBackend(b));
+  return *getVariableTypeFromBaseType(baseType->toBackend(b));
 }
 Type & VariableType::toScalarType(ScalarType s) const {
-  return *getType(baseType->toScalarType(s));
+  return *getVariableTypeFromBaseType(baseType->toScalarType(s));
 }
 TypeID VariableType::ID() const {
   return static_cast<TypeID>(id_);
@@ -118,7 +118,7 @@ struct VariableTypeRegistry {
     auto& context = at::globalContext();
     for (int p = 0; p < static_cast<int>(Backend::NumOptions); ++p) {
       for (int s = 0; s < static_cast<int>(ScalarType::NumOptions); ++s) {
-        auto baseType = context.getTypeRaw(static_cast<Backend>(p), static_cast<ScalarType>(s));
+        auto baseType = context.getNonVariableTypeRaw(static_cast<Backend>(p), static_cast<ScalarType>(s));
         if (baseType && baseType->backend() != Backend::Undefined) {
           register_variable_type_for(baseType);
         }
@@ -130,7 +130,7 @@ struct VariableTypeRegistry {
 struct VariableHooks : public at::VariableHooksInterface {
   VariableHooks(at::VariableHooksArgs) {}
   void registerVariableTypeFor(at::Context*, at::Backend, at::ScalarType) const override;
-  at::Type& getVariableType(const at::Type&) const override;
+  at::Type& getVariableTypeFromBaseType(const at::Type&) const override;
 };
 
 // Sigh, the registry doesn't support namespaces :(
@@ -164,30 +164,23 @@ REGISTER_VARIABLE_HOOKS(VariableHooks)
 
 // Pre-condition: backend/scalar_type is a valid type in the type_registry
 void VariableHooks::registerVariableTypeFor(at::Context* context, at::Backend backend, at::ScalarType scalar_type) const {
-  auto* baseType = context->getTypeRaw(backend, scalar_type);
+  auto* baseType = context->getNonVariableTypeRaw(backend, scalar_type);
   register_variable_type_for(baseType);
 }
 
-at::Type& VariableHooks::getVariableType(const at::Type& baseType) const {
-  return *VariableType::getType(baseType);
+at::Type& VariableHooks::getVariableTypeFromBaseType(const at::Type& baseType) const {
+  return *VariableType::getVariableTypeFromBaseType(baseType);
 }
 
 bool VariableType::isVariableType(const at::Type& type) {
   return type.is_variable();
 }
 
-at::Type* VariableType::getType(const at::Type& baseType) {
+at::Type* VariableType::getVariableTypeFromBaseType(const at::Type& baseType) {
   auto id = static_cast<size_t>(baseType.ID());
   if(id >= type_to_variable_type.size())
     return nullptr;
   return type_to_variable_type[id].get();
-}
-
-at::Type* VariableType::getType(const at::Tensor& tensor) {
-  if (!tensor.defined()) {
-    throw std::runtime_error("tensor is undefined");
-  }
-  return getType(tensor.type());
 }
 
 namespace {
@@ -197,9 +190,9 @@ std::vector<at::Type*> allTypesForBackends(at::ArrayRef<at::Backend> backends) {
   res.reserve(backends.size() * static_cast<int>(ScalarType::NumOptions));
   for (auto p : backends) {
     for (int s = 0; s < static_cast<int>(ScalarType::NumOptions); s++) {
-      auto baseType = context.getTypeRaw(static_cast<Backend>(p), static_cast<ScalarType>(s));
+      auto baseType = context.getNonVariableTypeRaw(static_cast<Backend>(p), static_cast<ScalarType>(s));
       if (baseType) {
-        res.emplace_back(VariableType::getType(*baseType));
+        res.emplace_back(VariableType::getVariableTypeFromBaseType(*baseType));
       }
     }
   }

@@ -13,7 +13,7 @@
 namespace at {
 
 Type& TensorImpl::type() const {
-  return getType(this);
+  return at::getMaybeVariableType(this);
 }
 
 Tensor& TensorImpl::grad() {
@@ -51,7 +51,7 @@ TensorImpl::TensorImpl(TensorTypeId type_id, ScalarType scalar_type, bool is_var
   // UndefinedTensors and SparseTensors don't have storages.
   if (type_id != UndefinedTensorId() && scalar_type != ScalarType::Undefined
       && type_id != SparseCPUTensorId() && type_id != SparseCUDATensorId()) {
-    auto type = &globalContext().getType(tensorTypeIdToBackend(type_id), scalar_type);
+    auto type = &globalContext().getNonVariableType(tensorTypeIdToBackend(type_id), scalar_type);
     storage_ = type->storage(true);
   }
 }

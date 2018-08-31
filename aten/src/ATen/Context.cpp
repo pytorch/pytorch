@@ -13,6 +13,8 @@
 #include "ATen/CPUGenerator.h"
 #include "ATen/RegisterCPU.h"
 
+#include "TH/TH.h"  // for USE_LAPACK
+
 #ifdef USE_SSE3
 #include <pmmintrin.h>
 #endif
@@ -82,6 +84,14 @@ bool Context::hasMKL() const {
 #endif
 }
 
+bool Context::hasLAPACK() const {
+#ifdef USE_LAPACK
+  return true;
+#else
+  return false;
+#endif
+}
+
 bool Context::setFlushDenormal(bool on) {
 #ifdef USE_SSE3
   // Setting flush-to-zero (FTZ) flag
@@ -97,13 +107,15 @@ bool Context::setFlushDenormal(bool on) {
 #endif
 }
 
-Type& getType(TensorOptions options) {
-  return globalContext().getType(options.backend(), options.dtype(), options.is_variable());
+Type& getMaybeVariableType(TensorOptions options) {
+  return globalContext().getMaybeVariableType(
+            options.backend(), options.dtype(), options.is_variable());
 }
 
-Type& getType(const TensorImpl* impl) {
+Type& getMaybeVariableType(const TensorImpl* impl) {
   Backend backend = tensorTypeIdToBackend(impl->type_id());
-  return getType(backend, impl->scalar_type(), impl->is_variable());
+  return globalContext().getMaybeVariableType(
+            backend, impl->scalar_type(), impl->is_variable());
 }
 
 }

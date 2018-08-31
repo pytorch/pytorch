@@ -32,7 +32,7 @@ TEST_CASE("TensorOptions/DefaultsToTheRightValues") {
 
 TEST_CASE("TensorOptions/ReturnsTheCorrectType") {
   auto options = TensorOptions().device(kCPU).dtype(kInt).layout(kSparse);
-  REQUIRE(at::getType(options) == getType(Backend::SparseCPU, kInt));
+  REQUIRE(at::getMaybeVariableType(options) == getNonVariableType(Backend::SparseCPU, kInt));
 }
 
 TEST_CASE("TensorOptions/UtilityFunctionsReturnTheRightTensorOptions") {
@@ -62,27 +62,27 @@ TEST_CASE("TensorOptions/ConstructsWellFromCPUTypes") {
   options = TensorOptions(kInt);
   REQUIRE_OPTIONS(kCPU, -1, kInt, kStrided);
 
-  options = TensorOptions(getType(Backend::SparseCPU, kFloat));
+  options = TensorOptions(getNonVariableType(Backend::SparseCPU, kFloat));
   REQUIRE_OPTIONS(kCPU, -1, kFloat, kSparse);
 
-  options = TensorOptions(getType(Backend::SparseCPU, kByte));
+  options = TensorOptions(getNonVariableType(Backend::SparseCPU, kByte));
   REQUIRE_OPTIONS(kCPU, -1, kByte, kSparse);
 }
 
 TEST_CASE("TensorOptions/ConstructsWellFromCPUTensors") {
-  auto options = TensorOptions(empty(5, kDouble));
+  auto options = empty(5, kDouble).options();
   REQUIRE_OPTIONS(kCPU, -1, kDouble, kStrided);
 
-  options = TensorOptions(empty(5, getType(Backend::SparseCPU, kByte)));
+  options = empty(5, getNonVariableType(Backend::SparseCPU, kByte)).options();
   REQUIRE_OPTIONS(kCPU, -1, kByte, kSparse);
 }
 
 TEST_CASE("TensorOptions/ConstructsWellFromVariables") {
-  auto options = TensorOptions(torch::empty(5));
+  auto options = torch::empty(5).options();
   REQUIRE_OPTIONS(kCPU, -1, kFloat, kStrided);
   REQUIRE(!options.requires_grad());
 
-  options = TensorOptions(torch::empty(5, at::requires_grad()));
+  options = torch::empty(5, at::requires_grad()).options();
   REQUIRE_OPTIONS(kCPU, -1, kFloat, kStrided);
   REQUIRE(!options.requires_grad());
 }

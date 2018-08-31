@@ -229,39 +229,35 @@ inline void abandon() {
 
 // NB: those serve both as an intermediate steps in addInputs below,
 // as well as the overloads that terminate template recursion
-void addInputs(Node *n, const char * name, int64_t value);
-void addInputs(Node *n, const char * name, bool value);
-void addInputs(Node *n, const char * name, double value);
-void addInputs(Node *n, const char * name, const at::Scalar& value);
-void addInputs(Node *n, const char * name, const at::Tensor& value);
-void addInputs(Node *n, const char * name, at::IntList value);
-void addInputs(Node *n, const char * name, at::TensorList value);
-void addInputs(Node *n, const char * name, const ArrayRef<double>& value);
-void addInputs(Node *n, const char * name, const std::string& value);
-void addInputs(Node *n, const char * name, const at::SparseTensorRef& value);
+TORCH_API void addInputs(Node *n, const char * name, int64_t value);
+TORCH_API void addInputs(Node *n, const char * name, bool value);
+TORCH_API void addInputs(Node *n, const char * name, double value);
+TORCH_API void addInputs(Node *n, const char * name, const at::Scalar& value);
+TORCH_API void addInputs(Node *n, const char * name, const at::Tensor& value);
+TORCH_API void addInputs(Node *n, const char * name, at::IntList value);
+TORCH_API void addInputs(Node *n, const char * name, at::TensorList value);
+TORCH_API void addInputs(Node *n, const char * name, const ArrayRef<double>& value);
+TORCH_API void addInputs(Node *n, const char * name, const std::string& value);
+TORCH_API void addInputs(Node *n, const char * name, const at::SparseTensorRef& value);
+TORCH_API void addInputs(Node *n, const char * name, const at::TensorOptions& value);
 
 template<size_t N>
 void addInputs(Node *n, const char * name, std::array<bool, N> value) {
   throw std::runtime_error("Found an unsupported argument type in the JIT tracer. File a bug report.");
 }
 
-TORCH_API void postRecordTrace(Node* node, at::ArrayRef<Variable> outputs);
-
-inline void postRecordTrace(Node* node, at::ArrayRef<at::Tensor> tensors) {
-  postRecordTrace(node, fmap<Variable>(tensors));
-}
-
 template <
     typename T,
     typename = torch::enable_if_t<
-        (!std::is_convertible<torch::decay_t<T>, ArrayRef<Variable>>::value &&
-         !std::is_convertible<torch::decay_t<T>, ArrayRef<at::Tensor>>::value &&
-         !std::is_convertible<torch::decay_t<T>, Variable>::value)>>
-void postRecordTrace(Node* node, T&&) {
+        (!std::is_convertible<torch::decay_t<T>, at::TensorList>::value &&
+         !std::is_convertible<torch::decay_t<T>, at::Tensor>::value)>>
+void addOutput(Node* node, T&&) {
   AT_ERROR(
       "Found an unsupported argument type ", at::demangle_type<T>(),
       " in the JIT tracer. File a bug report.");
 }
+TORCH_API void addOutput(Node* node, const at::Tensor& tensor);
+TORCH_API void addOutput(Node* node, const std::vector<at::Tensor>& list);
 
 TORCH_API autograd::Variable getSizeOf(const autograd::Variable& var, int64_t dim);
 

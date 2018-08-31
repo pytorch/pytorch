@@ -179,8 +179,6 @@ class TestTorch(TestCase):
                        'as_strided_',
                        re.compile('^clamp_(min|max)_?$'),
                        'coalesce',
-                       'digamma',
-                       'digamma_',
                        'index_put',
                        'is_coalesced',
                        'is_distributed',
@@ -1044,6 +1042,45 @@ class TestTorch(TestCase):
             y = torch.randn(shape, device=device)
             self.assertEqual(torch.zeros(0, device=device), torch.pairwise_distance(x, y))
             self.assertEqual(torch.zeros((0, 1), device=device), torch.pairwise_distance(x, y, keepdim=True))
+
+    @skipIfRocm
+    def test_pdist_empty(self):
+        devices = ['cpu']
+        for device in devices:
+            shape = (0, 2)
+            x = torch.randn(shape, device=device)
+            self.assertEqual(torch.empty(0, device=device), torch.pdist(x))
+
+            shape = (1, 2)
+            x = torch.randn(shape, device=device)
+            self.assertEqual(torch.empty(0, device=device), torch.pdist(x))
+
+            shape = (3, 0)
+            x = torch.randn(shape, device=device)
+            self.assertEqual(torch.zeros(3, device=device), torch.pdist(x))
+
+    @skipIfRocm
+    @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
+    def test_pdist_scipy(self):
+        from scipy.spatial.distance import pdist
+        devices = ['cpu']
+        for device in devices:
+            for shape in [(4, 5), (3, 2), (2, 1)]:
+                for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
+                    for trans in [False, True]:
+                        x = torch.randn(shape, device=device)
+                        if trans:
+                            x.transpose_(0, 1)
+                        actual = torch.pdist(x, p=p)
+                        # pdist doesn't handle 0 or inf norm properly
+                        if p == 0:
+                            expected = pdist(x, 'hamming') * x.shape[1]
+                        elif p == float('inf'):
+                            expected = pdist(x, lambda a, b: np.abs(a - b).max())
+                        else:
+                            expected = pdist(x, 'minkowski', p=p)
+                        self.assertEqual(expected.shape, actual.shape)
+                        self.assertTrue(np.allclose(expected, actual.numpy()))
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
     def test_logsumexp(self):
@@ -6107,7 +6144,7 @@ class TestTorch(TestCase):
         _test_abs(self._make_tensors((3, 5, 7), val_range=(0, max_val)))
         _test_abs(self._make_tensors((2, 2, 5, 8, 2, 3), val_range=(0, max_val)))
         _test_abs(self._make_tensors((1000, ), val_range=(0, max_val)))
-        _test_abs(self._make_tensors((30, 30, 30), val_range=(0, max_val)))
+        _test_abs(self._make_tensors((10, 10, 10), val_range=(0, max_val)))
 
         # Checking that the right abs function is called for LongTensor
         bignumber = 2 ^ 31 + 1
@@ -8486,6 +8523,67 @@ class TestTorch(TestCase):
         )
         self.assertEqual(torch.ByteTensor([7, 42, 128, 133]), byte_unique)
         self.assertEqual(torch.LongTensor([3, 0, 0, 0, 1, 2]), byte_inverse)
+
+    def test_unique_dim(self):
+        def run_test(dtype=torch.float):
+            x = torch.tensor([[[1., 1.],
+                               [0., 1.],
+                               [2., 1.],
+                               [0., 1.]],
+                              [[1., 1.],
+                               [0., 1.],
+                               [2., 1.],
+                               [0., 1.]]], dtype=dtype)
+            expected_unique_dim0 = torch.tensor([[[1., 1.],
+                                                  [0., 1.],
+                                                  [2., 1.],
+                                                  [0., 1.]]], dtype=dtype)
+            expected_inverse_dim0 = torch.tensor([0, 0])
+            expected_unique_dim1 = torch.tensor([[[0., 1.],
+                                                  [1., 1.],
+                                                  [2., 1.]],
+                                                 [[0., 1.],
+                                                  [1., 1.],
+                                                  [2., 1.]]], dtype=dtype)
+            expected_inverse_dim1 = torch.tensor([1, 0, 2, 0])
+            expected_unique_dim2 = torch.tensor([[[1., 1.],
+                                                  [0., 1.],
+                                                  [2., 1.],
+                                                  [0., 1.]],
+                                                 [[1., 1.],
+                                                  [0., 1.],
+                                                  [2., 1.],
+                                                  [0., 1.]]], dtype=dtype)
+            expected_inverse_dim2 = torch.tensor([0, 1])
+
+            # dim0
+            x_unique = torch.unique(x, dim=0)
+            self.assertEqual(expected_unique_dim0, x_unique)
+
+            x_unique, x_inverse = torch.unique(x, return_inverse=True, dim=0)
+            self.assertEqual(expected_unique_dim0, x_unique)
+            self.assertEqual(expected_inverse_dim0, x_inverse)
+
+            # dim1
+            x_unique = torch.unique(x, dim=1)
+            self.assertEqual(expected_unique_dim1, x_unique)
+
+            x_unique, x_inverse = torch.unique(x, return_inverse=True, dim=1)
+            self.assertEqual(expected_unique_dim1, x_unique)
+            self.assertEqual(expected_inverse_dim1, x_inverse)
+
+            # dim2
+            x_unique = torch.unique(x, dim=2)
+            self.assertEqual(expected_unique_dim2, x_unique)
+
+            x_unique, x_inverse = torch.unique(x, return_inverse=True, dim=2)
+            self.assertEqual(expected_unique_dim2, x_unique)
+            self.assertEqual(expected_inverse_dim2, x_inverse)
+
+        run_test(torch.float)
+        run_test(torch.double)
+        run_test(torch.long)
+        run_test(torch.uint8)
 
     @staticmethod
     def _test_bincount(self, device):

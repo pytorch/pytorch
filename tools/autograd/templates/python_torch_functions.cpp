@@ -50,7 +50,7 @@ static void check_out_type_matches(Tensor result,
   auto scalarType_arg = scalarType_is_none ? result.type().scalarType() : scalarType;
   auto layout_arg = layout_is_none ? *torch::getLayout(result.type().backend()) : layout;
   auto device_type_arg = device_is_none ? torch::getDeviceType(result.type()) : device.type();
-  const auto& type = torch::getType(scalarType_arg, layout_arg, device_type_arg);
+  const auto& type = torch::getVariableType(scalarType_arg, layout_arg, device_type_arg);
   if (result.type() != type) {
     AT_ERROR(
         "type corresponding to %s does not match type of out parameter (%s)",
@@ -65,7 +65,7 @@ inline Tensor dispatch_arange(Scalar end, Tensor result) {
 }
 
 inline Tensor dispatch_arange(Scalar end, const TensorOptions& options) {
-  maybe_initialize_cuda(at::getType(options));
+  maybe_initialize_cuda(at::getMaybeVariableType(options));
   AutoNoGIL no_gil;
   return torch::arange(end, options);
 }
@@ -76,7 +76,7 @@ inline Tensor dispatch_arange(Scalar start, Scalar end, Scalar step, Tensor resu
 }
 
 inline Tensor dispatch_arange(Scalar start, Scalar end, Scalar step, const TensorOptions& options) {
-  maybe_initialize_cuda(at::getType(options));
+  maybe_initialize_cuda(at::getMaybeVariableType(options));
   AutoNoGIL no_gil;
   return torch::arange(start, end, step, options);
 }
@@ -147,7 +147,7 @@ inline Tensor dispatch_range(Scalar start, Scalar end, Scalar step, Tensor resul
 }
 
 inline Tensor dispatch_range(Scalar start, Scalar end, Scalar step, const TensorOptions& options) {
-  maybe_initialize_cuda(at::getType(options));
+  maybe_initialize_cuda(at::getMaybeVariableType(options));
   AutoNoGIL no_gil;
   DeviceGuard device_guard(options.device());
   return torch::range(start, end, step, options);

@@ -40,14 +40,14 @@ inline PyObject * THPStorageCopyMethod(const THPCopyList& v, PyObject *self, PyO
 {
   PyObject *src;
   int non_blocking = 0;
-  static char *kwlist[] = {"source", "non_blocking", NULL};
+  static char *kwlist[] = {"source", "non_blocking", nullptr};
   // use int as parse type because bool not available in python2.
   if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O|i:copy_", kwlist, &src, &non_blocking)) {
-    return NULL;
+    return nullptr;
   }
 
   if (!THPCopy(v, self, src, non_blocking, false)) {
-    return NULL;
+    return nullptr;
   }
 
   Py_INCREF(self);
@@ -65,7 +65,7 @@ void THPInsertStorageCopyFunction(
     auto dst = ((THPStorageDst*)dst_)->cdata;
     auto src = ((THPStorageSrc*)src_)->cdata;
 
-    PyThreadState *_save = NULL;
+    PyThreadState *_save = nullptr;
     try {
       Py_UNBLOCK_THREADS;
       copyFunc(LIBRARY_STATE dst, src);
