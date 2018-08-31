@@ -538,8 +538,9 @@ void ModuleEncoder::EncodeTypeInfo(
     type_proto->set_denotation("IntType");
   } else if (kind == TypeKind::NoneType) {
     type_proto->set_denotation("NoneType");
-  }
-  else {
+  } else if (kind == TypeKind::GeneratorType) {
+    type_proto->set_denotation("GeneratorType");
+  } else {
     throw std::runtime_error("unexpected type kind");
   }
 }
