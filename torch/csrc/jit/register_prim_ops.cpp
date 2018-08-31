@@ -619,8 +619,8 @@ RegisterOperators reg2({
     DEFINE_BINARY_OP(aten::pow, static_cast<decltype(a)>(pow(a, b)))
 
     // TODO: Support python floordiv (//)
-    // Right now prim::FloorDiv is only used by loop unrolling
-    DEFINE_INT_OP(prim::FloorDiv, a / b)
+    // Right now aten::floordiv is only used by loop unrolling
+    DEFINE_INT_OP(aten::floordiv, a / b)
 
     // NB: This is the python truediv operation
     Operator("aten::div(int a, int b) -> float",
