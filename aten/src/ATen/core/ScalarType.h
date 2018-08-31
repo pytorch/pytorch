@@ -35,7 +35,8 @@ enum class ScalarType {
   n,
   AT_FORALL_SCALAR_TYPES(DEFINE_ENUM)
 #undef DEFINE_ENUM
-  Undefined, // 8
+  Padding, // 8
+  Undefined, // 9
   NumOptions
 };
 
@@ -119,19 +120,21 @@ static inline ScalarType promoteTypes(ScalarType a, ScalarType b) {
   constexpr auto f4 = ScalarType::Float;
   constexpr auto f8 = ScalarType::Double;
   constexpr auto ud = ScalarType::Undefined;
+  if (a == ud || b == ud) {
+    return ud;
+  }
   static constexpr ScalarType _promoteTypesLookup
       [static_cast<int>(ScalarType::NumOptions)]
       [static_cast<int>(ScalarType::NumOptions)] = {
-            /* u1  i1  i2  i4  i8  f2  f4  f8, ud */
-    /* u1 */ { u1, i2, i2, i4, i8, f2, f4, f8, ud },
-    /* i1 */ { i2, i1, i2, i4, i8, f2, f4, f8, ud },
-    /* i2 */ { i2, i2, i2, i4, i8, f4, f4, f8, ud },
-    /* i4 */ { i4, i4, i4, i4, i8, f8, f4, f8, ud },
-    /* i8 */ { i8, i8, i8, i8, i8, f8, f4, f8, ud },
-    /* f2 */ { f2, f2, f4, f8, f8, f2, f4, f8, ud },
-    /* f4 */ { f4, f4, f4, f4, f4, f4, f4, f8, ud },
-    /* f8 */ { f8, f8, f8, f8, f8, f8, f8, f8, ud },
-    /* ud */ { ud, ud, ud, ud, ud, ud, ud, ud, ud },
+            /* u1  i1  i2  i4  i8  f2  f4  f8 */
+    /* u1 */ { u1, i2, i2, i4, i8, f2, f4, f8 },
+    /* i1 */ { i2, i1, i2, i4, i8, f2, f4, f8 },
+    /* i2 */ { i2, i2, i2, i4, i8, f4, f4, f8 },
+    /* i4 */ { i4, i4, i4, i4, i8, f8, f4, f8 },
+    /* i8 */ { i8, i8, i8, i8, i8, f8, f4, f8 },
+    /* f2 */ { f2, f2, f4, f8, f8, f2, f4, f8 },
+    /* f4 */ { f4, f4, f4, f4, f4, f4, f4, f8 },
+    /* f8 */ { f8, f8, f8, f8, f8, f8, f8, f8 },
   };
   return _promoteTypesLookup[static_cast<int>(a)][static_cast<int>(b)];
 }
