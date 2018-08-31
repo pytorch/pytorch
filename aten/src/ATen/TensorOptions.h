@@ -174,12 +174,6 @@ struct AT_API TensorOptions {
     return is_variable_;
   }
 
-  /// Constructs an `at::Type` from the members of the `TensorOptions`.
-  const Type& type() const {
-    return at::globalContext().getMaybeVariableType(backend(), dtype_, is_variable_);
-  }
-
- private:
   // Resolves the ATen backend specified by the current construction axes.
   Backend backend() const noexcept {
     Backend backend;

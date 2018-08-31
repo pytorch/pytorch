@@ -427,7 +427,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         env['actuals'] = actuals
 
         if has_tensor_options:
-            env['initialize_cuda'] = 'maybe_initialize_cuda(options.type());'
+            env['initialize_cuda'] = 'maybe_initialize_cuda(at::getMaybeVariableType(options));'
         else:
             env['initialize_cuda'] = 'maybe_initialize_cuda({});'.format(type_args[0]['name']) if type_args else ''
 

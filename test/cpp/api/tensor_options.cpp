@@ -32,7 +32,7 @@ TEST_CASE("TensorOptions/DefaultsToTheRightValues") {
 
 TEST_CASE("TensorOptions/ReturnsTheCorrectType") {
   auto options = TensorOptions().device(kCPU).dtype(kInt).layout(kSparse);
-  REQUIRE(options.type() == getNonVariableType(Backend::SparseCPU, kInt));
+  REQUIRE(at::getMaybeVariableType(options) == getNonVariableType(Backend::SparseCPU, kInt));
 }
 
 TEST_CASE("TensorOptions/UtilityFunctionsReturnTheRightTensorOptions") {

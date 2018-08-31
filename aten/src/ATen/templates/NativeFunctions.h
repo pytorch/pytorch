@@ -28,7 +28,7 @@ inline Tensor from_blob(
     IntList sizes,
     const std::function<void(void*)>& deleter,
     const TensorOptions& options = {}) {
-  return options.type().tensorFromBlob(data, sizes, deleter);
+  return at::getMaybeVariableType(options).tensorFromBlob(data, sizes, deleter);
 }
 
 inline Tensor from_blob(
@@ -37,7 +37,7 @@ inline Tensor from_blob(
     IntList strides,
     const std::function<void(void*)>& deleter,
     const TensorOptions& options = {}) {
-  return options.type().tensorFromBlob(data, sizes, strides, deleter);
+  return at::getMaybeVariableType(options).tensorFromBlob(data, sizes, strides, deleter);
 }
 
 inline Tensor from_blob(
