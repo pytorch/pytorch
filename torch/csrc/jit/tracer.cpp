@@ -113,7 +113,7 @@ autograd::Variable getSizeOf(const autograd::Variable& var, int64_t dim) {
   auto & tracing_state = getTracingState();
   auto & graph = tracing_state->graph;
 
-  auto size_var = autograd::make_variable(at::Scalar(var.size(dim)).toTensor());
+  auto size_var = autograd::make_variable(scalar_to_tensor(at::Scalar(var.size(dim))));
   auto* value = getValueTrace(var);
   WithInsertPoint ipoint { graph->block() };
   auto dim_val = graph->insertConstant(dim);

@@ -37,8 +37,6 @@ public:
     } \
   }
 
-  Tensor toTensor() const;
-
   AT_FORALL_SCALAR_TYPES(DEFINE_ACCESSOR)
 
   //also support scalar.to<int64_t>();

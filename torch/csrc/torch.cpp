@@ -16,7 +16,7 @@ at::Type& CUDA(at::ScalarType type) {
 }
 
 at::Tensor toTensor(const at::Scalar& scalar) {
-  return autograd::make_variable(scalar.toTensor());
+  return autograd::make_variable(scalar_to_tensor(scalar));
 }
 
 void set_requires_grad(at::Tensor& tensor, bool requires_grad) noexcept {

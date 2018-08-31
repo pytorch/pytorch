@@ -3,7 +3,7 @@
 // ${generated_comment}
 
 #include "ATen/Tensor.h"
-#include "ATen/Scalar.h"
+#include "ATen/core/Scalar.h"
 #include "ATen/core/SparseTensorRef.h"
 #include "ATen/Type.h"
 
