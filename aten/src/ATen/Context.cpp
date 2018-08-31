@@ -112,4 +112,10 @@ Type& getMaybeVariableType(TensorOptions options) {
             options.backend(), options.dtype(), options.is_variable());
 }
 
+Type& getMaybeVariableType(const TensorImpl* impl) {
+  Backend backend = tensorTypeIdToBackend(impl->type_id());
+  return globalContext().getMaybeVariableType(
+            backend, impl->scalar_type(), impl->is_variable());
+}
+
 }
