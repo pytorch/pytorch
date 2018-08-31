@@ -1023,7 +1023,7 @@ def _find_builtin(fn):
     return _get_builtin_table().get(id(fn))
 
 
-class _DisableTracing(object):
+class _disable_tracing(object):
     def __enter__(self):
         self.state = torch._C._get_tracing_state()
         torch._C._set_tracing_state(None)

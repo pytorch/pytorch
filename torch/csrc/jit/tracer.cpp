@@ -190,8 +190,8 @@ void ensureUnique(const char * name, const at::Tensor& tensor) {
   if (aliases > 1) {
     std::stringstream ss;
     ss << "There are " << aliases
-       << " live references to the tensor being modified when tracing in-place operator '"
-       << name << "' which ";
+       << " live references to the tensor being modified when tracing in-place operator "
+       << name << " which ";
     warn(ss.str().c_str());
   }
 }

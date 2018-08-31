@@ -99,7 +99,7 @@ def symbolic_override(symbolic_fn):
 
             # temporarily disable tracing so that we don't cause errors
             # for things inside of fn that may not be tracable
-            with torch.jit._DisableTracing():
+            with torch.jit._disable_tracing():
                 output_vars = fn(*args, **kwargs)
 
             symbolic_args = function._unflatten(arg_values, args)

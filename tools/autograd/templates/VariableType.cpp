@@ -390,7 +390,7 @@ Tensor & VariableType::s_copy_(Tensor & self, const Tensor & src, bool non_block
     jit::tracer::addInputs(node, "src", src);
     jit::tracer::addInputs(node, "self", self);
     graph->appendNode(node);
-    jit::tracer::ensureUnique("left-hand side assignment", self);
+    jit::tracer::ensureUnique("copy_ (possibly due to an assignment)", self);
   }
   // TODO: once copy is exposed in Declarations.yaml we may be able to bind
   // it automatically
