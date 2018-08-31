@@ -1,0 +1,23 @@
+Warning: ignoring unsupported tag `SHOW_GROUPED_MEMB_INC  =' at line 525, file Doxyfile
+Warning: ignoring unsupported tag `DIA_PATH               =' at line 1774, file Doxyfile
+Warning: ignoring unsupported tag `DIAFILE_DIRS           =' at line 1986, file Doxyfile
+Warning: tag INPUT: input source `../../build/aten/src/ATen/Tensor.h' does not exist
+Warning: tag INPUT: input source `../../build/aten/src/ATen/Functions.h' does not exist
+warning: source ../../build/aten/src/ATen/Tensor.h is not a readable file or directory... skipping.
+warning: source ../../build/aten/src/ATen/Functions.h is not a readable file or directory... skipping.
+/home/psag/pytorch/pytorch/aten/src/ATen/Scalar.h:70: warning: no uniquely matching class member found for 
+  template < T >
+  T at::Scalar::to()
+
+/home/psag/pytorch/pytorch/aten/src/ATen/TensorOptions.h:247: warning: no uniquely matching class member found for 
+  TensorOptions at::Tensor::options() const
+
+/home/psag/pytorch/pytorch/aten/src/ATen/TensorOptions.h:265: warning: no uniquely matching class member found for 
+  Tensor at::Tensor::to(Device device, ScalarType dtype, bool non_blocking) const
+
+/home/psag/pytorch/pytorch/aten/src/ATen/TensorOptions.h:273: warning: no uniquely matching class member found for 
+  Tensor at::Tensor::to(ScalarType dtype, bool non_blocking) const
+
+/home/psag/pytorch/pytorch/aten/src/ATen/TensorOptions.h:280: warning: no uniquely matching class member found for 
+  Tensor at::Tensor::to(Device device, bool non_blocking) const
+
