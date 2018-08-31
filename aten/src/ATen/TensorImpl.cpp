@@ -16,11 +16,7 @@ Type& TensorImpl::type() const {
   // Select backend from the hard-coded ones that the legacy ATen dispatcher
   // knows about
   Backend backend = tensorTypeIdToBackend(type_id_);
-  if (is_variable_) {
-    return globalContext().getVariableType(backend, scalar_type_);
-  } else {
-    return globalContext().getNonVariableType(backend, scalar_type_);
-  }
+  return globalContext().getMaybeVariableType(backend, scalar_type_, is_variable_);
 }
 
 Tensor& TensorImpl::grad() {
