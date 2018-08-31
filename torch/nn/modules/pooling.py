@@ -493,7 +493,7 @@ class AvgPool2d(_AvgPoolNd):
     .. math::
 
         out(N_i, C_j, h, w)  = \frac{1}{kH * kW} \sum_{m=0}^{kH-1} \sum_{n=0}^{kW-1}
-                               input(N_i, C_j, stride[0] * h + m, stride[1] * w + n)
+                               input(N_i, C_j, stride[0] \times h + m, stride[1] \times w + n)
 
     If :attr:`padding` is non-zero, then the input is implicitly zero-padded on both sides
     for :attr:`padding` number of points.
@@ -556,11 +556,12 @@ class AvgPool3d(_AvgPoolNd):
     can be precisely described as:
 
     .. math::
-
-        \text{out}(N_i, C_j, d, h, w)  = \sum_{k=0}^{kD-1} \sum_{m=0}^{kH-1} \sum_{n=0}^{kW-1}
-                \frac{\text{input}(N_i, C_j, \text{stride}[0] \times d + k, \text{stride}[1] \times h + m,
-                        \text{stride}[2] \times w + n)}
-                     {kD \times kH \times kW}
+        \begin{aligned}
+            \text{out}(N_i, C_j, d, h, w) ={} & \sum_{k=0}^{kD-1} \sum_{m=0}^{kH-1} \sum_{n=0}^{kW-1} \\
+                                              & \frac{\text{input}(N_i, C_j, \text{stride}[0] \times d + k,
+                                                      \text{stride}[1] \times h + m, \text{stride}[2] \times w + n)}
+                                                     {kD \times kH \times kW}
+        \end{aligned}
 
     If :attr:`padding` is non-zero, then the input is implicitly zero-padded on all three sides
     for :attr:`padding` number of points.
