@@ -11,7 +11,7 @@ def pytest_addoption(parser):
         '-G',
         '--generate-serialized',
         action='store_true',
-        dest='write',
+        dest='generate',
         help='generate output files (default=false, compares to current files)',
     )
     parser.addoption(
@@ -31,9 +31,9 @@ def pytest_addoption(parser):
 
 
 def pytest_configure(config):
-    write = config.getoption('write')
-    output = config.getoption('output')
-    disable = config.getoption('disable')
-    serial._output_context.__setattr__('should_write_output', write)
+    generate = config.getoption('generate', default=False)
+    output = config.getoption('output', default=serial.DATA_DIR)
+    disable = config.getoption('disable', default=False)
+    serial._output_context.__setattr__('should_generate_output', generate)
     serial._output_context.__setattr__('output_dir', output)
     serial._output_context.__setattr__('disable_serialized_check', disable)

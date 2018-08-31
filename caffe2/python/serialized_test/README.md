@@ -9,4 +9,8 @@ Major functionality lives in `serialized_test_util.py`
 4.  Run your test `python -m pytest caffe2/python/operator_test/my_test.py -G` to generate serialized outputs. They will live in `caffe2/python/serialized_test/data/operator_test`, one folder per test function. Use `-O` to change the output directory.
 5. Thereafter, runs of the test without the flag will load serialized outputs and gradient operators for comparison against the seeded run. The comparison is done as long as you have a call to assertReferenceChecks. If for any reason the seeded run's inputs are different (this can happen with different hypothesis versions or different setups), then we'll run the serialized inputs through the serialized operator to get a runtime output for comparison. 
 
+##Additional Notes
+
 If we'd like to extend the test framework beyond that for operator tests, we can create a new subfolder for them inside `caffe2/python/serialized_test/data`.
+
+Note, we currently don't support using other hypothesis decorators on top of `given_and_seeded`. Hypothis has some handling to explicitly check that `@given` is on the bottom of the decorator stack.

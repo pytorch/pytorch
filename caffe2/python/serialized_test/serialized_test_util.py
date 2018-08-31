@@ -157,7 +157,7 @@ class SerializedTestCase(hu.HypothesisTestCase):
             device_option,
     ):
         if self.should_serialize:
-            if getattr(_output_context, 'should_write_output', False):
+            if getattr(_output_context, 'should_generate_output', False):
                 self.serialize_test(
                     inputs, outputs, gradient_operator, op, device_option)
             else:
@@ -202,7 +202,7 @@ class SerializedTestCase(hu.HypothesisTestCase):
 def testWithArgs():
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        '-G', '--generate-serialized', action='store_true', dest='write',
+        '-G', '--generate-serialized', action='store_true', dest='generate',
         help='generate output files (default=false, compares to current files)')
     parser.add_argument(
         '-O', '--output', default=DATA_DIR,
@@ -213,7 +213,7 @@ def testWithArgs():
     parser.add_argument('unittest_args', nargs='*')
     args = parser.parse_args()
     sys.argv[1:] = args.unittest_args
-    _output_context.__setattr__('should_write_output', args.write)
+    _output_context.__setattr__('should_generate_output', args.generate)
     _output_context.__setattr__('output_dir', args.output)
     _output_context.__setattr__('disable_serialized_check', args.disable)
 
