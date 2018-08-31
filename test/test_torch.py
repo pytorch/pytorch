@@ -1071,7 +1071,7 @@ class TestTorch(TestCase):
 
     @skipIfRocm
     def test_pdist_empty(self):
-        devices = ['cpu', 'cuda']
+        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         for device in devices:
             shape = (0, 2)
             x = torch.randn(shape, device=device)
@@ -1089,7 +1089,7 @@ class TestTorch(TestCase):
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
     def test_pdist_scipy(self):
         from scipy.spatial.distance import pdist
-        devices = ['cpu', 'cuda']
+        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         for device in devices:
             for shape in [(4, 5), (3, 2), (2, 1)]:
                 for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
