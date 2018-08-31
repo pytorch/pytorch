@@ -11,12 +11,42 @@
 
 namespace at {
 
-/// A class to encapsulate construction axes of a `Tensor`.
-/// `TensorOptions` is a virtual class to enable overriding of certain methods
-/// by subclasses in other libraries, such as PyTorch. In PyTorch, there is a
-/// `torch::TensorOptions` subclass of this `TensorOptions`, which changes
-/// `type()` to return a variable type instead of a tensor type, such that
-/// variables are created inside factory methods, instead of tensors.
+/// A class to encapsulate construction axes of an Tensor.  TensorOptions was
+/// designed to support the Python style API for specifying construction options
+/// on factory functions, e.g.,
+///
+///     torch.zeros(2, 3, dtype=torch.int32)
+///
+/// Because C++ doesn't natively support keyword arguments, there must be
+/// another way of specifying keyword-like arguments.  TensorOptions is a
+/// builder class which can be used to construct this "dictionary" of keyword
+/// arguments: functions which support TensorOptions conventionally take this
+/// argument optionally as their last argument.
+///
+/// WARNING: In PyTorch, there are `torch::` variants of factory functions,
+/// e.g., torch::zeros for at::zeros.  These return Variables (while the
+/// stock ATen functions return plain Tensors).  If you mix these functions
+/// up, you WILL BE SAD.
+///
+/// Rather than use the constructor of this class directly, you should prefer to
+/// use the constructor functions, and then chain setter methods on top of them.
+///
+///     at::device(at::kCUDA).dtype(kInt)
+///     at::dtype(at::kInt)
+///
+/// Additionally, anywhere a TensorOptions is expected, you can directly
+/// pass at::kCUDA / at::kInt, and it will implicitly convert to a TensorOptions.
+///
+/// Here are some recommended ways to create a 2x2 tensor of zeros
+/// with certain properties.  These all *implicitly* make use of
+/// TensorOptions, even if they don't mention the class explicitly:
+///
+///     at::zeros({2,2}, at::kCUDA);
+///     at::zeros({2,2}, at::kLong);
+///     at::zeros({2,2}, at::device(at::kCUDA).dtype(at::kLong()));
+///     at::zeros({2,2}, at::device({at::kCUDA, 1})); // place on device 1
+///     at::zeros({2,2}, at::requires_grad());
+///
 struct AT_API TensorOptions {
   TensorOptions() : TensorOptions(/*use_thread_local_default_options=*/true) {}
 
@@ -181,7 +211,7 @@ inline TensorOptions device(Device device) {
 }
 
 /// Convenience function that returns a `TensorOptions` object with the
-/// `device_index` set to the given one.
+/// `device` set to CUDA and the `device_index` set to the given one.
 inline TensorOptions device_index(int32_t device_index) {
   return TensorOptions().device_index(device_index);
 }

@@ -913,6 +913,19 @@ class AdamOptimizer(Optimizer):
             **(self.init_kwargs)
         )
 
+        if self.use_lr_adaption:
+            effective_grad = param_init_net.ConstantFill(
+                [param],
+                param + "_effgrad",
+                value=0.0
+            )
+            self._aux_params.local.append(effective_grad)
+            net.LearningRateAdaption(
+                [lr, grad, effective_grad],
+                [lr],
+                lr_alpha=self.lr_alpha,
+                normalized_lr_adaption=self.normalized_lr_adaption)
+
         m1 = param_init_net.ConstantFill(
             [param],
             param + "_first_moment",
@@ -943,45 +956,35 @@ class AdamOptimizer(Optimizer):
                 'If SparseAdam with rowWise=True, gradient must be '\
                 'a gradientslice. PLease ensure that rowWise is not enabled '\
                 'for the dense Adam optimizer, as it is not supported.'
-
-        output_blobs = [param, m1, m2]
-        if self.use_lr_adaption:
-            effective_grad = str(param) + '_effective_grad'
-            output_blobs.append(effective_grad)
-
         if isinstance(grad, core.GradientSlice):
             grad = self.dedup(net, self.sparse_dedup_aggregator, grad)
             if self.rowWise:
                 op = 'RowWiseSparseAdam'
             else:
                 op = 'SparseAdam'
-
             net.__getattr__(op)(
                 [param, m1, m2, grad.indices, grad.values, lr, iteration],
-                output_blobs,
+                [param, m1, m2],
                 beta1=self.beta1,
                 beta2=self.beta2,
-                epsilon=self.epsilon)
-            if self.use_lr_adaption:
-                net.LearningRateAdaption(
-                    [lr, grad.values, effective_grad],
-                    [lr],
-                    lr_alpha=self.lr_alpha,
-                    normalized_lr_adaption=self.normalized_lr_adaption)
+                epsilon=self.epsilon
+            )
 
         else:
-            net.Adam(
-                [param, m1, m2, grad, lr, iteration],
-                output_blobs,
-                beta1=self.beta1,
-                beta2=self.beta2,
-                epsilon=self.epsilon)
             if self.use_lr_adaption:
-                net.LearningRateAdaption(
-                    [lr, grad, effective_grad],
-                    [lr],
-                    lr_alpha=self.lr_alpha,
-                    normalized_lr_adaption=self.normalized_lr_adaption)
+                net.Adam(
+                    [param, m1, m2, grad, lr, iteration],
+                    [param, m1, m2, effective_grad],
+                    beta1=self.beta1,
+                    beta2=self.beta2,
+                    epsilon=self.epsilon)
+            else:
+                net.Adam(
+                    [param, m1, m2, grad, lr, iteration],
+                    [param, m1, m2],
+                    beta1=self.beta1,
+                    beta2=self.beta2,
+                    epsilon=self.epsilon)
 
     def scale_learning_rate(self, scale):
         self.alpha *= scale
