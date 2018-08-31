@@ -272,7 +272,7 @@ inline void warn(const char * _reason) {
 }
 TORCH_API void setWarn(warn_fn_type fn);
 
-TORCH_API struct NoWarn {
+struct TORCH_API NoWarn {
   NoWarn(): state(getTracingState()) {
     if (state) {
       prev = state->warn;
