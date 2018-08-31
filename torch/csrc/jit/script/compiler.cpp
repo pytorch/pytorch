@@ -908,16 +908,16 @@ private:
 
   Value* emitTernaryIf(const TernaryIf& expr) {
     Value* cond_value = emitCond(expr.cond());
-    auto first_expr = [&] {
+    auto true_expr = [&] {
       return emitExpr(expr.true_expr());
     };
-    auto second_expr = [&] {
+    auto false_expr  = [&] {
       return emitExpr(expr.false_expr());
     };
-    return emitIfExpr(expr.range(), cond_value, first_expr, second_expr);
+    return emitIfExpr(expr.range(), cond_value, true_expr, false_expr);
   }
 
-  Value * emitShortCircuitIf(
+  Value* emitShortCircuitIf(
       const SourceRange& loc,
       const TreeRef & first_expr,
       const TreeRef & second_expr,
@@ -940,7 +940,7 @@ private:
     }
   }
 
-  Value * emitIfExpr(const SourceRange& range, Value * cond_value,
+  Value* emitIfExpr(const SourceRange& range, Value * cond_value,
       std::function<Value*()> true_expr,  std::function<Value*()> false_expr) {
     Node* n = graph->insertNode(create(prim::If, range, 0));
 
@@ -948,7 +948,7 @@ private:
     auto* true_block = n->addBlock();
     auto* false_block = n->addBlock();
 
-    auto emit_if_expr = [this](Block* b, std::function<Value *()> expr_value) {
+    auto emit_if_expr = [this](Block* b, std::function<Value*()> expr_value) {
       pushFrame(b);
       WithInsertPoint guard(b);
       Value* out_val = expr_value();

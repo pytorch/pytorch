@@ -3123,9 +3123,9 @@ a")
         t = torch.randn(0)
         self.assertEqual(0, testNoThrows(torch.randn(0)))
         self.assertExpectedGraph(testNoThrows.graph)
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(RuntimeError, "index 1 out of range for tensor of size"):
             throwsOr(t)
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(RuntimeError, "index 1 out of range for tensor of size"):
             throwsAnd(t)
 
     def test_type_cast(self):
