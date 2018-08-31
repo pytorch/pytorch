@@ -31,7 +31,8 @@ from random import shuffle
 
 import torch
 from torch._six import inf
-from common import TestCase, run_tests, set_rng_seed, TEST_WITH_UBSAN
+from common import TestCase, run_tests, set_rng_seed, TEST_WITH_UBSAN, \
+    TEST_SCIPY, skipIfNoSciPy
 from common_cuda import TEST_CUDA
 from torch.autograd import grad, gradcheck
 from torch.distributions import (Bernoulli, Beta, Binomial, Categorical,
@@ -60,13 +61,10 @@ from torch.distributions.transforms import (AbsTransform, AffineTransform,
 from torch.distributions.utils import _finfo, probs_to_logits, lazy_property
 from torch.nn.functional import softmax
 
-TEST_NUMPY = True
-try:
+if TEST_SCIPY:
     import numpy as np
     import scipy.stats
     import scipy.special
-except ImportError:
-    TEST_NUMPY = False
 
 
 def pairwise(Dist, *params):
@@ -691,7 +689,7 @@ class TestDistributions(TestCase):
             self.assertLess(-threshold, bias, message)
             self.assertLess(bias, threshold, message)
 
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @skipIfNoSciPy
     def _check_sampler_discrete(self, torch_dist, ref_dist, message,
                                 num_samples=10000, failure_rate=1e-3):
         """Runs a Chi2-test for the support, but ignores tail instead of combining"""
@@ -839,7 +837,7 @@ class TestDistributions(TestCase):
         self.assertRaises(ValueError, lambda: Geometric(0))
         self.assertRaises(NotImplementedError, Geometric(r).rsample)
 
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @skipIfNoSciPy
     def test_geometric_log_prob_and_entropy(self):
         p = torch.tensor([0.7, 0.2, 0.4], requires_grad=True)
         s = 0.3
@@ -855,7 +853,7 @@ class TestDistributions(TestCase):
         self.assertEqual(Geometric(p).entropy(), scipy.stats.geom(p.detach().numpy(), loc=-1).entropy(), prec=1e-3)
         self.assertEqual(float(Geometric(s).entropy()), scipy.stats.geom(s, loc=-1).entropy().item(), prec=1e-3)
 
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @skipIfNoSciPy
     def test_geometric_sample(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         for prob in [0.01, 0.18, 0.8]:
@@ -871,7 +869,7 @@ class TestDistributions(TestCase):
         self.assertRaises(NotImplementedError, Binomial(10, p).rsample)
         self.assertRaises(NotImplementedError, Binomial(10, p).entropy)
 
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @skipIfNoSciPy
     def test_binomial_log_prob(self):
         probs = torch.tensor(torch.arange(0.05, 1, 0.1))
         for total_count in [1, 2, 10]:
@@ -885,7 +883,7 @@ class TestDistributions(TestCase):
             logits = probs_to_logits(probs, is_binary=True)
             self._check_log_prob(Binomial(total_count, logits=logits), ref_log_prob)
 
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @skipIfNoSciPy
     def test_binomial_log_prob_vectorized_count(self):
         probs = torch.tensor([0.2, 0.7, 0.9])
         for total_count, sample in [(torch.tensor([10]), torch.tensor([7., 3., 9.])),
@@ -935,7 +933,7 @@ class TestDistributions(TestCase):
         self.assertRaises(NotImplementedError, NegativeBinomial(10, p).rsample)
         self.assertRaises(NotImplementedError, NegativeBinomial(10, p).entropy)
 
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @skipIfNoSciPy
     def test_negative_binomial_log_prob(self):
         probs = torch.tensor(torch.arange(0.05, 1, 0.1))
         for total_count in [1, 2, 10]:
@@ -949,7 +947,7 @@ class TestDistributions(TestCase):
             logits = probs_to_logits(probs, is_binary=True)
             self._check_log_prob(NegativeBinomial(total_count, logits=logits), ref_log_prob)
 
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @skipIfNoSciPy
     def test_negative_binomial_log_prob_vectorized_count(self):
         probs = torch.tensor([0.2, 0.7, 0.9])
         for total_count, sample in [(torch.tensor([10]), torch.tensor([7., 3., 9.])),
@@ -968,7 +966,7 @@ class TestDistributions(TestCase):
         self._gradcheck_log_prob(lambda p: Multinomial(total_count, None, p.log()), [p])
         self.assertRaises(NotImplementedError, Multinomial(10, p).rsample)
 
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @skipIfNoSciPy
     def test_multinomial_1d_log_prob(self):
         total_count = 10
         p = torch.tensor([0.1, 0.2, 0.3], requires_grad=True)
@@ -1091,7 +1089,7 @@ class TestDistributions(TestCase):
         self.assertEqual(Poisson(rate_1d).sample((1,)).size(), (1, 1))
         self.assertEqual(Poisson(2.0).sample((2,)).size(), (2,))
 
-    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @skipIfNoSciPy
     def test_poisson_log_prob(self):
         rate = torch.tensor(torch.randn(2, 3).abs(), requires_grad=True)
         rate_1d = torch.tensor(torch.randn(1).abs(), requires_grad=True)
@@ -1106,7 +1104,7 @@ class TestDistributions(TestCase):
         self._gradcheck_log_prob(Poisson, (rate,))
         self._gradcheck_log_prob(Poisson, (rate_1d,))
 
-    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @skipIfNoSciPy
     def test_poisson_sample(self):
         set_rng_seed(1)  # see Note [Randomized statistical tests]
         for rate in [0.1, 1.0, 5.0]:
@@ -1116,7 +1114,7 @@ class TestDistributions(TestCase):
                                          failure_rate=1e-3)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
-    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @skipIfNoSciPy
     def test_poisson_gpu_sample(self):
         set_rng_seed(1)
         for rate in [0.12, 0.9, 4.0]:
@@ -1143,7 +1141,7 @@ class TestDistributions(TestCase):
         s = RelaxedBernoulli(temp, p).rsample()
         s.backward(torch.ones_like(s))
 
-    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @skipIfNoSciPy
     def test_rounded_relaxed_bernoulli(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
 
@@ -1190,7 +1188,7 @@ class TestDistributions(TestCase):
         self._gradcheck_log_prob(RelaxedOneHotCategorical, (temp, p))
         self._gradcheck_log_prob(RelaxedOneHotCategorical, (temp_2, p))
 
-    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @skipIfNoSciPy
     def test_argmax_relaxed_categorical(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
 
@@ -1337,7 +1335,7 @@ class TestDistributions(TestCase):
         log_prob = dist.log_prob(torch.ones(3, 1))
         self.assertEqual(log_prob.shape, (2, 3, 4))
 
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @skipIfNoSciPy
     def test_halfnormal_logprob(self):
         std = torch.tensor(torch.randn(5, 1).abs(), requires_grad=True)
 
@@ -1348,7 +1346,7 @@ class TestDistributions(TestCase):
 
         self._check_log_prob(HalfNormal(std), ref_log_prob)
 
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @skipIfNoSciPy
     def test_halfnormal_sample(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         for std in [0.1, 1.0, 10.0]:
@@ -1385,7 +1383,7 @@ class TestDistributions(TestCase):
         log_prob = dist.log_prob(torch.ones(3, 1))
         self.assertEqual(log_prob.shape, (2, 3, 4))
 
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @skipIfNoSciPy
     def test_lognormal_logprob(self):
         mean = torch.randn(5, 1, requires_grad=True)
         std = torch.tensor(torch.randn(5, 1).abs(), requires_grad=True)
@@ -1398,7 +1396,7 @@ class TestDistributions(TestCase):
 
         self._check_log_prob(LogNormal(mean, std), ref_log_prob)
 
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @skipIfNoSciPy
     def test_lognormal_sample(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         for mean, std in product([-1.0, 0.0, 1.0], [0.1, 1.0, 10.0]):
@@ -1432,7 +1430,7 @@ class TestDistributions(TestCase):
         self._gradcheck_log_prob(LogisticNormal, (mean, 1.0))
         self._gradcheck_log_prob(LogisticNormal, (0.0, std))
 
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @skipIfNoSciPy
     def test_logisticnormal_logprob(self):
         mean = torch.randn(5, 7).requires_grad_()
         std = torch.randn(5, 7).abs().requires_grad_()
@@ -1456,7 +1454,7 @@ class TestDistributions(TestCase):
 
         return _sampler
 
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @skipIfNoSciPy
     def test_logisticnormal_sample(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         means = map(np.asarray, [(-1.0, -1.0), (0.0, 0.0), (1.0, 1.0)])
@@ -1516,7 +1514,7 @@ class TestDistributions(TestCase):
 
         self._check_log_prob(Normal(loc, scale), ref_log_prob)
 
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @skipIfNoSciPy
     def test_normal_sample(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         for loc, scale in product([-1.0, 0.0, 1.0], [0.1, 1.0, 10.0]):
@@ -1571,7 +1569,7 @@ class TestDistributions(TestCase):
         self._gradcheck_log_prob(LowRankMultivariateNormal,
                                  (mean_multi_batch, cov_factor_batched, cov_diag_batched))
 
-    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @skipIfNoSciPy
     def test_lowrank_multivariate_normal_log_prob(self):
         mean = torch.randn(3, requires_grad=True)
         cov_factor = torch.randn(3, 1, requires_grad=True)
@@ -1604,7 +1602,7 @@ class TestDistributions(TestCase):
         self.assertEqual(batched_prob.shape, unbatched_prob.shape)
         self.assertAlmostEqual(0.0, (batched_prob - unbatched_prob).abs().max(), places=3)
 
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @skipIfNoSciPy
     def test_lowrank_multivariate_normal_sample(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         mean = torch.randn(5, requires_grad=True)
@@ -1689,7 +1687,7 @@ class TestDistributions(TestCase):
         self._gradcheck_log_prob(MultivariateNormal, (mean, None, None, scale_tril))
         self._gradcheck_log_prob(MultivariateNormal, (mean_no_batch, None, None, scale_tril_batched))
 
-    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @skipIfNoSciPy
     def test_multivariate_normal_log_prob(self):
         mean = torch.randn(3, requires_grad=True)
         tmp = torch.randn(3, 10)
@@ -1726,7 +1724,7 @@ class TestDistributions(TestCase):
         self.assertEqual(batched_prob.shape, unbatched_prob.shape)
         self.assertAlmostEqual(0.0, (batched_prob - unbatched_prob).abs().max(), places=3)
 
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @skipIfNoSciPy
     def test_multivariate_normal_sample(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         mean = torch.randn(3, requires_grad=True)
@@ -1794,7 +1792,7 @@ class TestDistributions(TestCase):
 
         self._check_log_prob(Exponential(rate), ref_log_prob)
 
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @skipIfNoSciPy
     def test_exponential_sample(self):
         set_rng_seed(1)  # see Note [Randomized statistical tests]
         for rate in [1e-5, 1.0, 10.]:
@@ -1845,7 +1843,7 @@ class TestDistributions(TestCase):
 
         self._check_log_prob(Laplace(loc, scale), ref_log_prob)
 
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @skipIfNoSciPy
     def test_laplace_sample(self):
         set_rng_seed(1)  # see Note [Randomized statistical tests]
         for loc, scale in product([-1.0, 0.0, 1.0], [0.1, 1.0, 10.0]):
@@ -1853,7 +1851,7 @@ class TestDistributions(TestCase):
                                         scipy.stats.laplace(loc=loc, scale=scale),
                                         'Laplace(loc={}, scale={})'.format(loc, scale))
 
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @skipIfNoSciPy
     def test_gamma_shape(self):
         alpha = torch.tensor(torch.exp(torch.randn(2, 3)), requires_grad=True)
         beta = torch.tensor(torch.exp(torch.randn(2, 3)), requires_grad=True)
@@ -1875,7 +1873,7 @@ class TestDistributions(TestCase):
         self._check_log_prob(Gamma(alpha, beta), ref_log_prob)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @skipIfNoSciPy
     def test_gamma_gpu_shape(self):
         alpha = torch.tensor(torch.exp(torch.randn(2, 3).cuda()), requires_grad=True)
         beta = torch.tensor(torch.exp(torch.randn(2, 3).cuda()), requires_grad=True)
@@ -1896,7 +1894,7 @@ class TestDistributions(TestCase):
 
         self._check_log_prob(Gamma(alpha, beta), ref_log_prob)
 
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @skipIfNoSciPy
     def test_gamma_sample(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         for alpha, beta in product([0.1, 1.0, 5.0], [0.1, 1.0, 10.0]):
@@ -1905,7 +1903,7 @@ class TestDistributions(TestCase):
                                         'Gamma(concentration={}, rate={})'.format(alpha, beta))
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
-    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @skipIfNoSciPy
     def test_gamma_gpu_sample(self):
         set_rng_seed(0)
         for alpha, beta in product([0.1, 1.0, 5.0], [0.1, 1.0, 10.0]):
@@ -1915,7 +1913,7 @@ class TestDistributions(TestCase):
                                         'Gamma(alpha={}, beta={})'.format(alpha, beta),
                                         failure_rate=1e-4)
 
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @skipIfNoSciPy
     def test_pareto(self):
         scale = torch.tensor(torch.randn(2, 3).abs(), requires_grad=True)
         alpha = torch.tensor(torch.randn(2, 3).abs(), requires_grad=True)
@@ -1938,7 +1936,7 @@ class TestDistributions(TestCase):
 
         self._check_log_prob(Pareto(scale, alpha), ref_log_prob)
 
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @skipIfNoSciPy
     def test_pareto_sample(self):
         set_rng_seed(1)  # see Note [Randomized statistical tests]
         for scale, alpha in product([0.1, 1.0, 5.0], [0.1, 1.0, 10.0]):
@@ -1946,7 +1944,7 @@ class TestDistributions(TestCase):
                                         scipy.stats.pareto(alpha, scale=scale),
                                         'Pareto(scale={}, alpha={})'.format(scale, alpha))
 
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @skipIfNoSciPy
     def test_gumbel(self):
         loc = torch.randn(2, 3, requires_grad=True)
         scale = torch.tensor(torch.randn(2, 3).abs(), requires_grad=True)
@@ -1967,7 +1965,7 @@ class TestDistributions(TestCase):
 
         self._check_log_prob(Gumbel(loc, scale), ref_log_prob)
 
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @skipIfNoSciPy
     def test_gumbel_sample(self):
         set_rng_seed(1)  # see note [Randomized statistical tests]
         for loc, scale in product([-5.0, -1.0, -0.1, 0.1, 1.0, 5.0], [0.1, 1.0, 10.0]):
@@ -1975,7 +1973,7 @@ class TestDistributions(TestCase):
                                         scipy.stats.gumbel_r(loc=loc, scale=scale),
                                         'Gumbel(loc={}, scale={})'.format(loc, scale))
 
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @skipIfNoSciPy
     def test_fishersnedecor(self):
         df1 = torch.tensor(torch.randn(2, 3).abs(), requires_grad=True)
         df2 = torch.tensor(torch.randn(2, 3).abs(), requires_grad=True)
@@ -1998,7 +1996,7 @@ class TestDistributions(TestCase):
 
         self._check_log_prob(FisherSnedecor(df1, df2), ref_log_prob)
 
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @skipIfNoSciPy
     def test_fishersnedecor_sample(self):
         set_rng_seed(1)  # see note [Randomized statistical tests]
         for df1, df2 in product([0.1, 0.5, 1.0, 5.0, 10.0], [0.1, 0.5, 1.0, 5.0, 10.0]):
@@ -2006,7 +2004,7 @@ class TestDistributions(TestCase):
                                         scipy.stats.f(df1, df2),
                                         'FisherSnedecor(loc={}, scale={})'.format(df1, df2))
 
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @skipIfNoSciPy
     def test_chi2_shape(self):
         df = torch.tensor(torch.exp(torch.randn(2, 3)), requires_grad=True)
         df_1d = torch.tensor(torch.exp(torch.randn(1)), requires_grad=True)
@@ -2025,7 +2023,7 @@ class TestDistributions(TestCase):
 
         self._check_log_prob(Chi2(df), ref_log_prob)
 
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @skipIfNoSciPy
     def test_chi2_sample(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         for df in [0.1, 1.0, 5.0]:
@@ -2033,7 +2031,7 @@ class TestDistributions(TestCase):
                                         scipy.stats.chi2(df),
                                         'Chi2(df={})'.format(df))
 
-    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @skipIfNoSciPy
     def test_studentT(self):
         df = torch.tensor(torch.exp(torch.randn(2, 3)), requires_grad=True)
         df_1d = torch.tensor(torch.exp(torch.randn(1)), requires_grad=True)
@@ -2055,7 +2053,7 @@ class TestDistributions(TestCase):
 
         self._check_log_prob(StudentT(df), ref_log_prob)
 
-    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @skipIfNoSciPy
     def test_studentT_sample(self):
         set_rng_seed(11)  # see Note [Randomized statistical tests]
         for df, loc, scale in product([0.1, 1.0, 5.0, 10.0], [-1.0, 0.0, 1.0], [0.1, 1.0, 10.0]):
@@ -2063,7 +2061,7 @@ class TestDistributions(TestCase):
                                         scipy.stats.t(df=df, loc=loc, scale=scale),
                                         'StudentT(df={}, loc={}, scale={})'.format(df, loc, scale))
 
-    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @skipIfNoSciPy
     def test_studentT_log_prob(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         num_samples = 10
@@ -2083,7 +2081,7 @@ class TestDistributions(TestCase):
         self.assertEqual(Dirichlet(alpha_1d).sample().size(), (4,))
         self.assertEqual(Dirichlet(alpha_1d).sample((1,)).size(), (1, 4))
 
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @skipIfNoSciPy
     def test_dirichlet_log_prob(self):
         num_samples = 10
         alpha = torch.exp(torch.randn(5))
@@ -2094,7 +2092,7 @@ class TestDistributions(TestCase):
             expected_log_prob = scipy.stats.dirichlet.logpdf(x[i].numpy(), alpha.numpy())
             self.assertAlmostEqual(actual_log_prob[i], expected_log_prob, places=3)
 
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @skipIfNoSciPy
     def test_dirichlet_sample(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         alpha = torch.exp(torch.randn(3))
@@ -2115,7 +2113,7 @@ class TestDistributions(TestCase):
         self.assertEqual(Beta(0.1, 0.3).sample().size(), ())
         self.assertEqual(Beta(0.1, 0.3).sample((5,)).size(), (5,))
 
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @skipIfNoSciPy
     def test_beta_log_prob(self):
         for _ in range(100):
             con1 = np.exp(np.random.normal())
@@ -2126,7 +2124,7 @@ class TestDistributions(TestCase):
             expected_log_prob = scipy.stats.beta.logpdf(x, con1, con0)
             self.assertAlmostEqual(float(actual_log_prob), float(expected_log_prob), places=3, allow_inf=True)
 
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @skipIfNoSciPy
     def test_beta_sample(self):
         set_rng_seed(1)  # see Note [Randomized statistical tests]
         for con1, con0 in product([0.1, 1.0, 10.0], [0.1, 1.0, 10.0]):
@@ -2357,7 +2355,7 @@ class TestDistributions(TestCase):
 # reparameterized gradients. Most .rsample() implementations simply rely on
 # the reparameterization trick and do not need to be tested for accuracy.
 class TestRsample(TestCase):
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @skipIfNoSciPy
     def test_gamma(self):
         num_samples = 100
         for alpha in [1e-2, 1e-1, 1e0, 1e1, 1e2, 1e3, 1e4]:
@@ -2386,7 +2384,7 @@ class TestRsample(TestCase):
                 'at alpha={}, x={}'.format(alpha, x[rel_error.argmax()]),
             ]))
 
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @skipIfNoSciPy
     def test_chi2(self):
         num_samples = 100
         for df in [1e-2, 1e-1, 1e0, 1e1, 1e2, 1e3, 1e4]:
@@ -2413,7 +2411,7 @@ class TestRsample(TestCase):
                 'max error {}'.format(rel_error.max()),
             ]))
 
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @skipIfNoSciPy
     def test_dirichlet_on_diagonal(self):
         num_samples = 20
         grid = [1e-1, 1e0, 1e1]
@@ -2444,7 +2442,7 @@ class TestRsample(TestCase):
                 'at x={}'.format(x[rel_error.argmax()]),
             ]))
 
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @skipIfNoSciPy
     def test_beta_wrt_alpha(self):
         num_samples = 20
         grid = [1e-2, 1e-1, 1e0, 1e1, 1e2]
@@ -2474,7 +2472,7 @@ class TestRsample(TestCase):
                 'at x = {}'.format(x[rel_error.argmax()]),
             ]))
 
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @skipIfNoSciPy
     def test_beta_wrt_beta(self):
         num_samples = 20
         grid = [1e-2, 1e-1, 1e0, 1e1, 1e2]
@@ -3505,7 +3503,7 @@ class TestLazyLogitsInitialization(TestCase):
                 self.assertFalse('logits' in vars(dist), msg=message)
 
 
-@unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+@skipIfNoSciPy
 class TestAgainstScipy(TestCase):
     def setUp(self):
         positive_var = torch.randn(20).exp()

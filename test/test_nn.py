@@ -29,9 +29,10 @@ from torch.autograd import Variable, gradcheck
 from torch.autograd.gradcheck import gradgradcheck
 from torch.nn import Parameter
 from torch.nn.parallel._functions import Broadcast
-from common import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, skipIfRocm, TEST_WITH_ROCM, \
-    TEST_NUMPY, TEST_SCIPY, IS_WINDOWS, download_file, PY3, PY34, to_gpu, \
-    get_function_arglist, skipCUDAMemoryLeakCheckIf
+from common import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, \
+    skipIfRocm, TEST_WITH_ROCM, TEST_SCIPY, skipIfNoSciPy, IS_WINDOWS, \
+    download_file, PY3, PY34, to_gpu, get_function_arglist, \
+    skipCUDAMemoryLeakCheckIf
 from common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, \
     TEST_CUDNN_VERSION
 from common_nn import NNTestCase, ModuleTest, CriterionTest, TestBase, \
@@ -40,11 +41,9 @@ from common_nn import NNTestCase, ModuleTest, CriterionTest, TestBase, \
 
 
 if TEST_SCIPY:
+    import numpy as np
     from scipy import stats
     import scipy.ndimage
-
-if TEST_NUMPY:
-    import numpy as np
 
 ALL_TENSORTYPES = [torch.float,
                    torch.double]
@@ -5351,7 +5350,7 @@ class TestNN(NNTestCase):
             self.assertEqual(out_cpu, out_cuda)
             self.assertEqual(input_cpu.grad, input_gpu.grad)
 
-    @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY), "Scipy and/or numpy not found")
+    @skipIfNoSciPy
     def test_affine_2d_rotate0(self):
         # scipy before 1.0.0 do not support homogeneous coordinate
         # scipy.ndimage.affine_transform, so we need to skip.
@@ -5387,7 +5386,7 @@ class TestNN(NNTestCase):
             assert np.abs(scipy_ary.mean() - gridsample_ary.mean()) < 1e-6
             assert np.abs(scipy_ary - gridsample_ary).max() < 1e-6
 
-    @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY), "Scipy and/or numpy not found")
+    @skipIfNoSciPy
     def test_affine_2d_rotate90(self):
         # scipy before 1.0.0 do not support homogeneous coordinate
         # scipy.ndimage.affine_transform, so we need to skip.
@@ -5431,7 +5430,7 @@ class TestNN(NNTestCase):
             assert np.abs(scipy_ary.mean() - gridsample_ary.mean()) < 1e-6
             assert np.abs(scipy_ary - gridsample_ary).max() < 1e-6
 
-    @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY), "Scipy and/or numpy not found")
+    @skipIfNoSciPy
     def test_affine_2d_rotate45(self):
         # scipy before 1.0.0 do not support homogeneous coordinate
         # scipy.ndimage.affine_transform, so we need to skip.
@@ -5468,7 +5467,7 @@ class TestNN(NNTestCase):
 
             assert np.abs(scipy_ary - gridsample_ary).max() < 1e-6
 
-    @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY), "Scipy and/or numpy not found")
+    @skipIfNoSciPy
     def test_affine_2d_rotateRandom(self):
         # scipy before 1.0.0 do not support homogeneous coordinate
         # scipy.ndimage.affine_transform, so we need to skip.
@@ -5515,7 +5514,7 @@ class TestNN(NNTestCase):
 
             assert np.abs(scipy_ary - gridsample_ary).max() < 1e-5
 
-    @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY), "Scipy and/or numpy not found")
+    @skipIfNoSciPy
     def test_affine_3d_rotateRandom(self):
         # scipy before 1.0.0 do not support homogeneous coordinate
         # scipy.ndimage.affine_transform, so we need to skip.
@@ -6228,7 +6227,7 @@ class TestNNInit(TestCase):
             with self.assertRaises(ValueError):
                 init.calculate_gain(random_string)
 
-    @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
+    @skipIfNoSciPy
     def test_uniform(self):
         for dims in [1, 2, 4]:
             input_tensor = self._create_random_nd_tensor(dims, size_min=30, size_max=50)
@@ -6237,7 +6236,7 @@ class TestNNInit(TestCase):
             init.uniform_(input_tensor, a=a, b=b)
             assert self._is_uniform(input_tensor, a, b)
 
-    @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
+    @skipIfNoSciPy
     def test_normal(self):
         for dims in [1, 2, 4]:
             input_tensor = self._create_random_nd_tensor(dims, size_min=30, size_max=50)
@@ -6353,7 +6352,7 @@ class TestNNInit(TestCase):
             with self.assertRaises(ValueError):
                 init.xavier_normal_(tensor)
 
-    @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
+    @skipIfNoSciPy
     def test_xavier_uniform(self):
         for use_gain in [True, False]:
             for dims in [2, 4]:
@@ -6376,7 +6375,7 @@ class TestNNInit(TestCase):
                 bounds = expected_std * math.sqrt(3)
                 assert self._is_uniform(input_tensor, -bounds, bounds)
 
-    @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
+    @skipIfNoSciPy
     def test_xavier_normal(self):
         for use_gain in [True, False]:
             for dims in [2, 4]:
@@ -6410,7 +6409,7 @@ class TestNNInit(TestCase):
                 tensor = self._create_random_nd_tensor(dims, size_min=1, size_max=1)
                 init.kaiming_normal_(tensor)
 
-    @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
+    @skipIfNoSciPy
     def test_kaiming_uniform(self):
         for use_a in [True, False]:
             for dims in [2, 4]:
@@ -6438,7 +6437,7 @@ class TestNNInit(TestCase):
                     bounds = expected_std * math.sqrt(3.0)
                     assert self._is_uniform(input_tensor, -bounds, bounds)
 
-    @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
+    @skipIfNoSciPy
     def test_kaiming_normal(self):
         for use_a in [True, False]:
             for dims in [2, 4]:
@@ -6472,7 +6471,7 @@ class TestNNInit(TestCase):
                 tensor = self._create_random_nd_tensor(dims, size_min=1, size_max=3)
                 init.sparse_(tensor, sparsity)
 
-    @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
+    @skipIfNoSciPy
     def test_sparse_default_std(self):
         for use_random_std in [True, False]:
             input_tensor = self._create_random_nd_tensor(2, size_min=30, size_max=35)

@@ -61,41 +61,71 @@ IS_WINDOWS = sys.platform == "win32"
 IS_PPC = platform.machine() == "ppc64le"
 
 
-def _check_module_exists(name, min_version=None):
-    r"""Returns if a top-level module with :attr:`name` exists and satisfies a
-    minimum version of :attr:`min_version` (if set) *without** importing it.
-    This is generally safer than try-catch block around an `import X`. It avoids
-    third party libraries breaking assumptions of some of our tests, e.g.,
-    setting multiprocessing start method when imported
-    (see librosa/#747, torchvision/#544).
-    """
-    if not PY3:  # Python 2
-        import imp
-        try:
-            imp.find_module(name)
-        except ImportError:
-            return False
-    elif PY34:  # Python [3, 3.4)
-        import importlib
-        loader = importlib.find_loader(name)
-        if loader is None:
-            return False
-    else:  # Python >= 3.4
-        import importlib
-        spec = importlib.util.find_spec(name)
-        if spec is None:
-            return False
-    if min_version is None:
-        return True
-    dist = pkg_resources.get_distribution(name)
-    # pkg_resources.parse_version implements PEP 440 -- Version Identification
-    version = pkg_resources.parse_version(dist.version)
-    return version >= pkg_resources.parse_version(min_version)
+class TestCondition(object):
+    def __init__(self, satisfied, msg):
+        self.satisfied = satisfied
+        self.msg = msg
 
-TEST_NUMPY = _check_module_exists('numpy', '1.14.0')
-TEST_SCIPY = _check_module_exists('scipy', '1.0.0')
-TEST_LIBROSA = _check_module_exists('librosa', '0.6.2')
-TEST_MKL = torch.backends.mkl.is_available()
+    @staticmethod
+    def get_module_version(name):
+        r"""Returns the version of a top-level module with :attr:`name` if it
+        *without** importing it. This is generally safer than try-catch block
+        around an `import X`. It avoids third party libraries breaking
+        assumptions of some of our tests, e.g., setting multiprocessing start
+        method when imported (see librosa/#747, torchvision/#544).
+        """
+        if not PY3:  # Python 2
+            import imp
+            try:
+                imp.find_module(name)
+            except ImportError:
+                return None
+        elif not PY34:  # Python [3, 3.4)
+            import importlib
+            loader = importlib.find_loader(name)
+            if loader is None:
+                return None
+        else:  # Python >= 3.4
+            import importlib
+            spec = importlib.util.find_spec(name)
+            if spec is None:
+                return None
+        dist = pkg_resources.get_distribution(name)
+        return pkg_resources.parse_version(dist.version)
+
+    @classmethod
+    def hasExternalModule(cls, name, min_version=None):
+        installed_version = cls.get_module_version(name)
+        if installed_version is None:
+            return cls(False, '{} not found'.format(name))
+        elif min_version is not None:
+            min_version = pkg_resources.parse_version(min_version)
+            return cls(installed_version >= min_version,
+                       '{}={} is found, but a version >={} is '
+                       'required'.format(name, installed_version, min_version))
+        else:
+            return cls(True)
+
+    def skipIfMissing(self, fn):
+        if not self.satisfied:
+            return unittest.skip(self.msg)
+        return fn
+
+    def __bool__(self):
+        return self.satisfied
+
+    # python 2 compatibility
+    __nonzero__ = __bool__
+
+TEST_NUMPY = TestCondition.hasExternalModule('numpy', '1.14.0')
+TEST_SCIPY = TestCondition.hasExternalModule('scipy', '1.0.0')
+TEST_LIBROSA = TestCondition.hasExternalModule('librosa', '0.6.2')
+TEST_MKL = TestCondition(torch.backends.mkl.is_available(), 'PyTorch not compiled with MKL')
+TEST_LAPACK = TestCondition(torch._C.has_lapack, 'PyTorch compiled without Lapack')
+
+skipIfNoLapack = TEST_LAPACK.skipIfMissing
+skipIfNoSciPy = TEST_SCIPY.skipIfMissing
+skipIfNoNumPy = TEST_NUMPY.skipIfMissing
 
 NO_MULTIPROCESSING_SPAWN = os.environ.get('NO_MULTIPROCESSING_SPAWN', '0') == '1'
 TEST_WITH_ASAN = os.getenv('PYTORCH_TEST_WITH_ASAN', '0') == '1'
@@ -111,16 +141,6 @@ def skipIfRocm(fn):
     def wrapper(*args, **kwargs):
         if TEST_WITH_ROCM:
             raise unittest.SkipTest("test doesn't currently work on the ROCm stack")
-        else:
-            fn(*args, **kwargs)
-    return wrapper
-
-
-def skipIfNoLapack(fn):
-    @wraps(fn)
-    def wrapper(*args, **kwargs):
-        if not torch._C.has_lapack:
-            raise unittest.SkipTest('PyTorch compiled without Lapack')
         else:
             fn(*args, **kwargs)
     return wrapper

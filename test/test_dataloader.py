@@ -12,8 +12,10 @@ import subprocess
 from torch import multiprocessing as mp
 from torch.utils.data import Dataset, TensorDataset, DataLoader, ConcatDataset
 from torch.utils.data.dataset import random_split
-from torch.utils.data.dataloader import default_collate, ExceptionWrapper, MANAGER_STATUS_CHECK_INTERVAL
-from common import TestCase, run_tests, TEST_NUMPY, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, skipIfRocm
+from torch.utils.data.dataloader import default_collate, ExceptionWrapper, \
+    MANAGER_STATUS_CHECK_INTERVAL
+from common import TestCase, run_tests, skipIfNoNumPy, IS_WINDOWS, \
+    NO_MULTIPROCESSING_SPAWN, skipIfRocm
 
 # We cannot import TEST_CUDA from common_nn here, because if we do that,
 # the TEST_CUDNN line from common_nn will be executed multiple times
@@ -480,7 +482,7 @@ class TestDataLoader(TestCase):
             self.assertTrue(input.is_pinned())
             self.assertTrue(target.is_pinned())
 
-    @unittest.skipIf(not TEST_NUMPY, "numpy unavailable")
+    @skipIfNoNumPy
     def test_numpy(self):
         import numpy as np
 
@@ -614,7 +616,7 @@ but they are all safe to ignore'''
         check_len(DataLoader(self.dataset, batch_size=2), 50)
         check_len(DataLoader(self.dataset, batch_size=3), 34)
 
-    @unittest.skipIf(not TEST_NUMPY, "numpy unavailable")
+    @skipIfNoNumPy
     def test_numpy_scalars(self):
         import numpy as np
 
@@ -644,7 +646,7 @@ but they are all safe to ignore'''
             batch = next(iter(loader))
             self.assertIsInstance(batch, tt)
 
-    @unittest.skipIf(not TEST_NUMPY, "numpy unavailable")
+    @skipIfNoNumPy
     def test_default_collate_bad_numpy_types(self):
         import numpy as np
 

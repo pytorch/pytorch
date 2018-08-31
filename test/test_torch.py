@@ -22,9 +22,10 @@ from torch._six import inf, nan, string_classes
 from itertools import product, combinations
 from functools import reduce
 from torch import multiprocessing as mp
-from common import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MKL, \
-    TEST_LIBROSA, run_tests, download_file, skipIfNoLapack, suppress_warnings, \
-    IS_WINDOWS, PY3, NO_MULTIPROCESSING_SPAWN, skipIfRocm
+from common import TestCase, iter_indices, TEST_NUMPY, skipIfNoNumPy, \
+    TEST_SCIPY, skipIfNoSciPy, TEST_MKL, TEST_LIBROSA, run_tests, \
+    download_file, skipIfNoLapack, suppress_warnings, IS_WINDOWS, PY3, \
+    NO_MULTIPROCESSING_SPAWN, skipIfRocm
 from multiprocessing.reduction import ForkingPickler
 
 if TEST_NUMPY:
@@ -530,7 +531,7 @@ class TestTorch(TestCase):
             return math.lgamma(x)
         self._test_math(torch.lgamma, lgamma)
 
-    @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
+    @skipIfNoSciPy
     def test_mvlgamma(self):
         from scipy.special import multigammaln
         for d in range(1, 5):
@@ -563,7 +564,7 @@ class TestTorch(TestCase):
                           -0.000000111, 0, -2, -329])
         return input
 
-    @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
+    @skipIfNoSciPy
     def test_digamma(self):
         from scipy.special import digamma
 
@@ -582,7 +583,7 @@ class TestTorch(TestCase):
 
         self._test_math(torch_digamma_without_inf, scipy_digamma_without_inf, self._digamma_input())
 
-    @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
+    @skipIfNoSciPy
     def test_polygamma(self):
         from scipy.special import polygamma
         for n in [0, 1]:
@@ -745,7 +746,7 @@ class TestTorch(TestCase):
         self.assertIsNotNone(torch.Tensor([0, 0, 0]).nonzero().storage())
         self.assertIsNotNone(torch.Tensor().new().storage())
 
-    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @skipIfNoNumPy
     def test_has_storage_numpy(self):
         for dtype in [np.float32, np.float64, np.int64,
                       np.int32, np.int16, np.uint8]:
@@ -850,11 +851,11 @@ class TestTorch(TestCase):
             self.assertEqual(res.shape, expected.shape)
             self.assertTrue(np.allclose(res, expected), "dim reduction failed for {}-norm".format(p))
 
-    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @skipIfNoNumPy
     def test_norm(self):
         self._test_norm(self, device='cpu')
 
-    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @skipIfNoNumPy
     @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
     @skipIfRocm
     def test_norm_cuda(self):
@@ -1096,7 +1097,7 @@ class TestTorch(TestCase):
             self.assertEqual(torch.zeros(3, device=device), torch.pdist(x))
 
     @skipIfRocm
-    @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
+    @skipIfNoSciPy
     def test_pdist_scipy(self):
         from scipy.spatial.distance import pdist
         devices = ['cpu']
@@ -1118,7 +1119,7 @@ class TestTorch(TestCase):
                         self.assertEqual(expected.shape, actual.shape)
                         self.assertTrue(np.allclose(expected, actual.numpy()))
 
-    @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
+    @skipIfNoSciPy
     def test_logsumexp(self):
         from scipy.special import logsumexp
         a = torch.randn(5, 4)
@@ -1134,7 +1135,7 @@ class TestTorch(TestCase):
         torch.logsumexp(a, 1, out=c)
         self.assertTrue(np.allclose(expected, b[:, 0].numpy()))
 
-    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @skipIfNoSciPy
     def test_cpu_parallel(self):
         # To use parallel branches we'll need to compare on tensors
         # that are relatively large. Even if this is run on a single
@@ -1811,7 +1812,7 @@ class TestTorch(TestCase):
     def test_cpow(self):
         self._test_cop(torch.pow, lambda x, y: nan if x < 0 else math.pow(x, y))
 
-    @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
+    @skipIfNoNumPy
     def test_einsum(self):
         # test cases taken from https://gist.github.com/rockt/15ee013889d65342088e9260a377dc8f
         x = torch.randn(5)
@@ -1890,7 +1891,7 @@ class TestTorch(TestCase):
         check_sum_all(torch.randn(200000))
         check_sum_all(torch.randn(2000, 2)[:, 0])
 
-    @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
+    @skipIfNoNumPy
     def test_sum_dim(self):
         def check_sum_dim(tensors_dict, dim):
             for category, tensors in tensors_dict.items():
@@ -2566,7 +2567,7 @@ class TestTorch(TestCase):
     def test_diagonal(self):
         self._test_diagonal(self, dtype=torch.float32, device='cpu')
 
-    @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
+    @skipIfNoNumPy
     def test_diagonal_multidim(self):
         x = torch.randn(10, 11, 12, 13)
         xn = x.numpy()
@@ -5800,7 +5801,7 @@ class TestTorch(TestCase):
     def test_advancedindex_big(self):
         self._test_advancedindex_big(self, lambda x: x)
 
-    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @skipIfNoNumPy
     def test_newaxis_numpy_comparison(self):
         def run_test(tensor, *idx):
             npt = tensor.numpy()
@@ -6740,7 +6741,7 @@ class TestTorch(TestCase):
         self.assertEqual(result.size(), target, 'Error in repeat using result and LongStorage')
         self.assertEqual(result.mean(0).view(8, 4), tensor, 'Error in repeat (not equal)')
 
-    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @skipIfNoNumPy
     def test_repeat_tile(self):
 
         initial_shape = (8, 4)
@@ -7988,7 +7989,7 @@ class TestTorch(TestCase):
         self.assertEqual(pinned, x)
         self.assertNotEqual(pinned.data_ptr(), x.data_ptr())
 
-    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @skipIfNoNumPy
     def test_numpy_unresizable(self):
         x = np.zeros((2, 2))
         y = torch.from_numpy(x)
@@ -8002,7 +8003,7 @@ class TestTorch(TestCase):
         with self.assertRaises(ValueError):
             w.resize((10, 10))
 
-    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @skipIfNoNumPy
     def test_toNumpy(self):
         types = [
             'torch.ByteTensor',
@@ -8097,7 +8098,7 @@ class TestTorch(TestCase):
         z = from_dlpack(to_dlpack(x))
         self.assertEqual(z, x)
 
-    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @skipIfNoNumPy
     def test_from_numpy(self):
         dtypes = [
             np.double,
@@ -8146,7 +8147,7 @@ class TestTorch(TestCase):
         x.strides = (3,)
         self.assertRaises(ValueError, lambda: torch.from_numpy(x))
 
-    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @skipIfNoNumPy
     def test_ctor_with_numpy_array(self):
         correct_dtypes = [
             np.double,
@@ -8192,7 +8193,7 @@ class TestTorch(TestCase):
                 for i in range(len(array)):
                     self.assertEqual(tensor[i], array[i])
 
-    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @skipIfNoNumPy
     def test_ctor_with_numpy_scalar_ctor(self):
         dtypes = [
             np.double,
@@ -8206,7 +8207,7 @@ class TestTorch(TestCase):
         for dtype in dtypes:
             self.assertEqual(dtype(42), torch.tensor(dtype(42)).item())
 
-    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @skipIfNoNumPy
     def test_numpy_index(self):
         i = np.int32([0, 1, 2])
         x = torch.randn(5, 5)
@@ -8214,7 +8215,7 @@ class TestTorch(TestCase):
             self.assertFalse(isinstance(idx, int))
             self.assertEqual(x[idx], x[int(idx)])
 
-    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @skipIfNoNumPy
     def test_numpy_array_interface(self):
         types = [
             torch.DoubleTensor,
@@ -8293,7 +8294,7 @@ class TestTorch(TestCase):
             for i in range(len(x)):
                 self.assertEqual(geq2_x[i], geq2_array[i])
 
-    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @skipIfNoNumPy
     def test_multiplication_numpy_scalar(self):
         np_sc = np.float64(2.0)
         t = torch.ones(2, requires_grad=True)
@@ -8468,7 +8469,7 @@ class TestTorch(TestCase):
         self.assertRaises(RuntimeError, lambda: torch.randn(2, 3, 4).t_())
 
     # unit test for THTensor_(copyTranspose)
-    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @skipIfNoNumPy
     def test_big_transpose(self):
         t = torch.rand(456, 789)
         t1 = t.t().contiguous()
