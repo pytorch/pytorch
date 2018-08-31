@@ -118,7 +118,7 @@ struct VariableTypeRegistry {
     auto& context = at::globalContext();
     for (int p = 0; p < static_cast<int>(Backend::NumOptions); ++p) {
       for (int s = 0; s < static_cast<int>(ScalarType::NumOptions); ++s) {
-        auto baseType = context.getTypeRaw(static_cast<Backend>(p), static_cast<ScalarType>(s));
+        auto baseType = context.getNonVariableTypeRaw(static_cast<Backend>(p), static_cast<ScalarType>(s));
         if (baseType && baseType->backend() != Backend::Undefined) {
           register_variable_type_for(baseType);
         }
@@ -164,7 +164,7 @@ REGISTER_VARIABLE_HOOKS(VariableHooks)
 
 // Pre-condition: backend/scalar_type is a valid type in the type_registry
 void VariableHooks::registerVariableTypeFor(at::Context* context, at::Backend backend, at::ScalarType scalar_type) const {
-  auto* baseType = context->getTypeRaw(backend, scalar_type);
+  auto* baseType = context->getNonVariableTypeRaw(backend, scalar_type);
   register_variable_type_for(baseType);
 }
 
@@ -197,7 +197,7 @@ std::vector<at::Type*> allTypesForBackends(at::ArrayRef<at::Backend> backends) {
   res.reserve(backends.size() * static_cast<int>(ScalarType::NumOptions));
   for (auto p : backends) {
     for (int s = 0; s < static_cast<int>(ScalarType::NumOptions); s++) {
-      auto baseType = context.getTypeRaw(static_cast<Backend>(p), static_cast<ScalarType>(s));
+      auto baseType = context.getNonVariableTypeRaw(static_cast<Backend>(p), static_cast<ScalarType>(s));
       if (baseType) {
         res.emplace_back(VariableType::getType(*baseType));
       }
