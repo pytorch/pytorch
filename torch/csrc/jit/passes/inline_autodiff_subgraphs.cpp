@@ -32,7 +32,7 @@ void inlineNode(Node *node) {
 
   size_t num_outputs = node->outputs().size();
   JIT_ASSERT(num_outputs <= subgraph->outputs().size() &&
-             num_outputs == node->i(attr::f_real_outputs));
+             num_outputs == static_cast<size_t>(node->i(attr::f_real_outputs)));
   for (size_t i = 0; i < num_outputs; ++i) {
     node->output(i)->replaceAllUsesWith(input_map.at(subgraph->outputs()[i]));
   }
@@ -46,7 +46,7 @@ void InlineAutodiffSubgraphs(Block *block, size_t threshold) {
     if (node->kind() != prim::DifferentiableGraph) continue;
     auto subgraph = node->g(attr::Subgraph);
     int64_t subgraph_size = std::distance(subgraph->nodes().begin(), subgraph->nodes().end());
-    if (subgraph_size >= threshold) continue;
+    if (subgraph_size >= static_cast<int64_t>(threshold)) continue;
     if (!std::all_of(subgraph->nodes().begin(), subgraph->nodes().end(), canRunWithAutograd)) continue;
     inlineNode(node);
   }
