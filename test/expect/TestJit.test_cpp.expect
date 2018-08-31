@@ -64,10 +64,10 @@ graph(%0 : Dynamic
       %2 : Dynamic
       %3 : Dynamic
       %4 : Dynamic) {
-  %23 : Dynamic, %24 : Dynamic = prim::GraphExecutor_0(%0, %3, %1, %4, %2)
+  %23 : Dynamic, %24 : Dynamic = prim::DifferentiableGraph_0(%0, %3, %1, %4, %2)
   return (%24, %23);
 }
-with prim::GraphExecutor_0 = graph(%1 : Dynamic
+with prim::DifferentiableGraph_0 = graph(%1 : Dynamic
       %2 : Dynamic
       %4 : Dynamic
       %5 : Dynamic
