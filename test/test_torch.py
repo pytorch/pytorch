@@ -8192,7 +8192,7 @@ class TestTorch(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_multiplication_numpy_scalar(self):
-        for np_dtype in [np.float32, np.float64, np.int32, np.int64]:
+        for np_dtype in [np.float32, np.float64, np.int32, np.int64, np.int16, np.uint8]:
             for t_dtype in [torch.float, torch.double]:
                 np_sc = np_dtype(2.0)
                 t = torch.ones(2, requires_grad=True, dtype=t_dtype)

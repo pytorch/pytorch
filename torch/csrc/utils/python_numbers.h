@@ -85,10 +85,16 @@ inline int64_t THPUtils_unpackIndex(PyObject* obj) {
 }
 
 inline bool THPUtils_checkDouble(PyObject* obj) {
-#if PY_MAJOR_VERSION == 2
-  return PyFloat_Check(obj) || PyLong_Check(obj) || PyInt_Check(obj) || torch::utils::is_numpy_scalar(obj);
+  bool is_numpy_scalar;
+#ifdef USE_NUMPY
+  is_numpy_scalar = torch::utils::is_numpy_scalar(obj);
 #else
-  return PyFloat_Check(obj) || PyLong_Check(obj) || torch::utils::is_numpy_scalar(obj);
+  is_numpy_scalar = false;
+#endif
+#if PY_MAJOR_VERSION == 2
+  return PyFloat_Check(obj) || PyLong_Check(obj) || PyInt_Check(obj) || is_numpy_scalar;
+#else
+  return PyFloat_Check(obj) || PyLong_Check(obj) || is_numpy_scalar;
 #endif
 }
 
