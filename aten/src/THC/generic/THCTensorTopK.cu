@@ -67,9 +67,9 @@ THC_API void THCTensor_(topk)(THCState* state,
   }
 
 #ifdef __HIP_PLATFORM_HCC__
-#define WARP_SIZE 64
+#define TOPK_WARP_SIZE 64
 #else
-#define WARP_SIZE 32
+#define TOPK_WARP_SIZE 32
 #endif
 
 #define RUN_T(INDEX_T)                                                  \
@@ -105,7 +105,7 @@ THC_API void THCTensor_(topk)(THCState* state,
     THError("Slice to sort is too large");                              \
   }                                                                     \
                                                                         \
-  dim3 block(std::min(THCRoundUp(sliceSize, (int64_t) WARP_SIZE), (int64_t) 1024)); \
+  dim3 block(std::min(THCRoundUp(sliceSize, (int64_t) TOPK_WARP_SIZE), (int64_t) 1024)); \
                                                                         \
   /* This is used as a template parameter to calculate indices. */      \
   /* We only specialize it if all collapsed dim sizes are the */        \
@@ -133,7 +133,7 @@ THC_API void THCTensor_(topk)(THCState* state,
 #undef RUN_DIM
 #undef RUN_DIR
 #undef RUN_K
-#undef WARP_SIZE
+#undef TOPK_WARP_SIZE
 
   // Sort the results if the user wants them sorted, since our
   // selection routine does not ensure sorting
