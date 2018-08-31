@@ -125,7 +125,7 @@ NATIVE_FUNCTIONS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/NativeFunctions.h"
 TYPE_REGISTER = CodeTemplate("""\
 context->type_registry[static_cast<int>(Backend::${backend})]
                       [static_cast<int>(ScalarType::${scalar_type})]
-                      .reset(new ${type_name}(context));
+                      .reset(new ${type_name}());
 detail::getVariableHooks().registerVariableTypeFor(context, Backend::${backend}, ScalarType::${scalar_type});
 """)
 
@@ -283,19 +283,7 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
     if scalar_name == "Half":
         env['SparseTensor'] = 'Tensor'
         if backend == "CUDA":
-            env['to_th_type'] = 'HalfFix<__half,Half>'
-            env['to_at_type'] = 'HalfFix<Half,__half>'
             env['AS_REAL'] = 'convert<half,double>'
-            env['THScalarType'] = 'half'
-        else:
-            env['to_th_type'] = 'HalfFix<THHalf,Half>'
-            env['to_at_type'] = 'HalfFix<Half,THHalf>'
-    elif scalar_name == 'Long':
-        env['to_th_type'] = 'long'
-        env['to_at_type'] = 'int64_t'
-    else:
-        env['to_th_type'] = ''
-        env['to_at_type'] = ''
 
     declarations, definitions = function_wrapper.create_derived(
         env, declarations)

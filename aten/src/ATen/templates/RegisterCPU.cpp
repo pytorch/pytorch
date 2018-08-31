@@ -14,7 +14,7 @@ namespace at {
 void register_cpu_types(Context * context) {
   ${cpu_type_registrations}
   context->type_registry[static_cast<int>(Backend::Undefined)]
-                        [static_cast<int>(ScalarType::Undefined)].reset(new UndefinedType(context));
+                        [static_cast<int>(ScalarType::Undefined)].reset(new UndefinedType());
 }
 
 } // namespace at

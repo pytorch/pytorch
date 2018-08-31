@@ -148,7 +148,7 @@ void THCTensor_resizeNd(THCState *state, THCTensor *self, int nDimension, const 
     if(!THTensor_getStoragePtr(self)) {
       THError("Tensor: invalid null storage");
     }
-    if(totalSize+self->storage_offset() > THTensor_getStoragePtr(self)->size()) {
+    if(totalSize+self->storage_offset() > THTensor_getStoragePtr(self)->numel()) {
       THCStorage_resize(state, THTensor_getStoragePtr(self), totalSize+self->storage_offset());
     }
   }
@@ -227,7 +227,7 @@ void THCTensor_squeeze1d(THCState *state, THCTensor *self, THCTensor *src, int d
       self->set_size(d, self->size(d+1));
       self->set_stride(d, self->stride(d+1));
     }
-    self->resize_dim(self->dim() - 1);
+    self->resize_dim((unsigned int)(self->dim() - 1));
   }
 }
 

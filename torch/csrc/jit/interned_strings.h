@@ -45,6 +45,7 @@ namespace torch { namespace jit {
   _(prim, TupleConstruct)          \
   _(prim, TupleUnpack)             \
   _(prim, ListConstruct)           \
+  _(prim, ListUnpack)              \
   _(prim, NumToTensor)             \
   _(prim, TensorToNum)             \
   _(prim, ImplicitTensorToNum)     \
@@ -54,7 +55,7 @@ namespace torch { namespace jit {
   _(prim, GradOf)                  \
   _(prim, AnyDefined)              \
   _(prim, FusedConcat)             \
-  _(prim, FusedChunk)              \
+  _(prim, ConstantChunk)           \
   _(prim, NoneGenerator)           \
   _(aten, __not__)                 \
   FORALL_ATEN_BASE_SYMBOLS(_)      \
@@ -100,7 +101,9 @@ namespace torch { namespace jit {
   _(attr, transA)                  \
   _(attr, transB)                  \
   _(attr, name)                    \
-  _(attr, string)
+  _(attr, string)                  \
+  _(attr, a)                       \
+  _(attr, b)
 
 // 'prim' symbols are synthetic operators that occur only in the IR
 // and don't have corresponding implementations in ATen.
@@ -139,7 +142,7 @@ namespace torch { namespace jit {
 //   we then declare constexpr Symbols to get everything the actual Symbol
 //   type we want.  Symbols must be constexpr to be valid to be "case"ed on.
 
-typedef uint32_t unique_t;
+using unique_t = uint32_t;
 
 static const std::string domain_prefix = "org.pytorch.";
 
