@@ -90,7 +90,7 @@ void TensorIterator::compute_common_type() {
   AT_ASSERT(result_type != ScalarType::Undefined);
   AT_ASSERT(backend != Backend::Undefined);
 
-  auto& type = at::globalContext().getType(backend, result_type);
+  auto& type = at::globalContext().getNonVariableType(backend, result_type);
 
   for (auto& op : operands_) {
     if (!op.type) {

@@ -64,7 +64,7 @@ at::Type* get_type(const std::string& name, bool is_cuda, bool is_sparse) {
     return nullptr;
   }
   at::Backend backend = get_backend(is_cuda, is_sparse);
-  return &at::getType(backend, attype_names.at(name));
+  return &at::getNonVariableType(backend, attype_names.at(name));
 }
 
 PyTypeObject* getPyTypeObject(const at::Storage& storage)

@@ -55,7 +55,7 @@ private:
   }
 
   at::Type& typeFor(const Tensor& ten) {
-    return at::getType(backend(), atScalarTypeFor(ten.meta()));
+    return at::getNonVariableType(backend(), atScalarTypeFor(ten.meta()));
   }
   at::Tensor tensorWrapping(const Tensor& ten_) {
     auto& ten = const_cast<Tensor&>(ten_);
@@ -215,7 +215,7 @@ private:
     CAFFE_THROW("unsupported type annotation: ", name);
   }
   at::Type & stringToType(const std::string & name) {
-    return at::getType(backend(), stringToScalarType(name));
+    return at::getNonVariableType(backend(), stringToScalarType(name));
   }
   at::Type * readTypeAttribute(const std::string & name) {
     CAFFE_ENFORCE(OperatorBase::HasSingleArgumentOfType<std::string>(name));

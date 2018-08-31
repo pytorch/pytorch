@@ -4,7 +4,7 @@
 
 namespace torch {
 at::Type& getVariableType(at::Backend backend, at::ScalarType type) {
-  return *autograd::VariableType::getVariableTypeFromBaseType(at::getType(backend, type));
+  return *autograd::VariableType::getVariableTypeFromBaseType(at::getNonVariableType(backend, type));
 }
 
 at::Type& CPU(at::ScalarType type) {

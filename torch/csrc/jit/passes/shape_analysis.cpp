@@ -47,7 +47,7 @@ IValue representativeValue(Value* v) {
   if (CompleteTensorTypePtr type = type_->cast<CompleteTensorType>()) {
     auto backend = type->device() == -1 ? at::Backend::CPU : at::Backend::CUDA;
     at::DeviceGuard device_guard(type->device());
-    auto& attype = at::getType(backend, type->scalarType());
+    auto& attype = at::getNonVariableType(backend, type->scalarType());
     auto t = attype.tensor(type->sizes(), type->strides()).zero_();
     return autograd::make_variable(t, /*requires_grad=*/false);
   } else if (type_->isSubtypeOf(FloatType::get())) {

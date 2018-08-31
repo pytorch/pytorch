@@ -1089,7 +1089,7 @@ def create_generic(top_env, declarations):
                 option['inferred_type'] = 'infer_type({})'.format(dispatch_tensor)
             else:
                 # doesn't depend on a specific type, use undefined float
-                option['inferred_type'] = 'at::getType(at::Backend::Undefined, at::ScalarType::Float)'
+                option['inferred_type'] = 'at::getNonVariableType(at::Backend::Undefined, at::ScalarType::Float)'
             declaration = DEPRECATED_FUNCTION_DECLARATION if option['deprecated'] else FUNCTION_DECLARATION
             top_env['function_declarations'].append(declaration.substitute(env))
             if is_factory_method:
