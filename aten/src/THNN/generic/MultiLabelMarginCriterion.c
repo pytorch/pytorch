@@ -40,14 +40,14 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
 
   target = THIndexTensor_(newContiguous)(target);
   input = THTensor_(newContiguous)(input);
-  input_data = THTensor_(data)(input);
+  input_data = input->data<real>();
   target_data = THIndexTensor_(data)(target);
 
   if (!isTarget->sizes().equals(target->sizes())) {
     THTensor_(resizeNd)(isTarget, target->dim(), THTensor_getSizePtr(target), nullptr);
   }
   THTensor_(zero)(isTarget);
-  isTarget_data = THTensor_(data)(isTarget);
+  isTarget_data = isTarget->data<real>();
 
   if (reduction != Reduction::None)
   {
@@ -91,7 +91,7 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
       sum /= nframe;
     THTensor_(fastSet1d)(output, 0, sum);
 
-    THTensor_(free)(input);
+    c10::raw::intrusive_ptr::decref(input);
     THIndexTensor_(free)(target);
     return;
   }
@@ -136,7 +136,7 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
     isTarget_data += dim;
   }
 
-  THTensor_(free)(input);
+  c10::raw::intrusive_ptr::decref(input);
   THIndexTensor_(free)(target);
 }
 
@@ -188,14 +188,14 @@ void THNN_(MultiLabelMarginCriterion_updateGradInput)(
   target = THIndexTensor_(newContiguous)(target);
   input = THTensor_(newContiguous)(input);
   isTarget = THTensor_(newContiguous)(isTarget);
-  input_data = THTensor_(data)(input);
+  input_data = input->data<real>();
   target_data = THIndexTensor_(data)(target);
-  isTarget_data = THTensor_(data)(isTarget);
+  isTarget_data = isTarget->data<real>();
 
   THTensor_(resizeAs)(gradInput, input);
   gradInput = THTensor_(newContiguous)(gradInput);
   THTensor_(zero)(gradInput);
-  gradInput_data = THTensor_(data)(gradInput);
+  gradInput_data = gradInput->data<real>();
 
   g = reduction == Reduction::ElementwiseMean ? (1./((real)(nframe*dim))) : (1./((real)dim));
 
@@ -227,7 +227,7 @@ void THNN_(MultiLabelMarginCriterion_updateGradInput)(
     isTarget_data += dim;
     gradInput_data += dim;
   }
-  gradInput_data = THTensor_(data)(gradInput);
+  gradInput_data = gradInput->data<real>();
 
   if (reduction != Reduction::None)
   {
@@ -249,10 +249,10 @@ void THNN_(MultiLabelMarginCriterion_updateGradInput)(
     }
   }
 
-  THTensor_(free)(input);
+  c10::raw::intrusive_ptr::decref(input);
   THIndexTensor_(free)(target);
-  THTensor_(free)(isTarget);
-  THTensor_(free)(gradInput);
+  c10::raw::intrusive_ptr::decref(isTarget);
+  c10::raw::intrusive_ptr::decref(gradInput);
 }
 
 #endif
