@@ -442,7 +442,7 @@ message TensorProto {
 
   // For PyTorch serialized tensor.
   optional int64 require_gradient = 52;
-  optional int64 is_bool = 53;
+  optional int64 is_buffer = 53;
 }
 
 // Defines a tensor shape. A dimension can be either an integer value
@@ -461,7 +461,7 @@ message TensorShapeProto {
     // for pre-defined dimension denotations.
     optional string denotation = 3;
   };
-  // To represent a scalar, using one element dim, and dim[0].dim_value = 0
+  // To represent a scalar, using no dim to represent 0-d tensor.
   repeated Dimension dim = 1;
 
   repeated Dimension stride = 51;
