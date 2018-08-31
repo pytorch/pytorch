@@ -19,14 +19,15 @@ TensorOptions::TensorOptions(bool use_thread_local_default_options) {
     this->requires_grad(DefaultTensorOptions::get().requires_grad());
   }
 }
-} // namespace at
 
 std::ostream& operator<<(
     std::ostream& stream,
-    const at::TensorOptions& options) {
+    const TensorOptions& options) {
   return stream << "TensorOptions(dtype=" << options.dtype()
                 << ", device=" << options.device()
                 << ", layout=" << options.layout()
                 << ", requires_grad=" << std::boolalpha
                 << options.requires_grad() << ")";
 }
+
+} // namespace at
