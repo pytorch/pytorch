@@ -152,12 +152,19 @@ def get_fn(file_name, script_path):
 
 
 def get_execution_plan(graph_executor_state):
-    execution_plans = graph_executor_state.execution_plans.values()
+    execution_plans = list(graph_executor_state.execution_plans.values())
     num_plans = len(execution_plans)
     if num_plans != 1:
         raise RuntimeError('This test assumes this GraphExecutor should '
                            'only have one execution plan, got: {}'.format(num_plans))
-    return list(execution_plans)[0]
+    return execution_plans[0]
+
+
+def get_grad_executor(plan_state):
+    if len(list(plan_state.graph.nodes())) != 1:
+        raise RuntimeError("Can't get a grad_executor for a non-differentiable graph")
+    grad_executors = list(plan_state.code.grad_executors())
+    return grad_executors[0]
 
 
 def backward_graph(script_module):
@@ -165,10 +172,8 @@ def backward_graph(script_module):
         raise RuntimeError('Expected ScriptModule')
     ge_state = script_module.get_debug_state()
     fwd_plan = get_execution_plan(ge_state)
-    if fwd_plan.grad_executor is None:
-        raise RuntimeError('Error: tried to get grad_executor of function '
-                           'that hasn\'t run backward yet.')
-    bwd_plan = get_execution_plan(fwd_plan.grad_executor)
+    grad_executor = get_grad_executor(fwd_plan)
+    bwd_plan = get_execution_plan(grad_executor.get_debug_state())
     # Running JIT passes requires that we own the graph (with a shared_ptr).
     # The debug state struct does not own its graph so we make a copy of it.
     return bwd_plan.graph.copy()
@@ -1337,6 +1342,15 @@ class TestJit(JitTestCase):
         out_test = addmm(mat, mat1, mat2, alpha, beta)
         self.assertEqual(out_ref, out_test)
         self.assertExpected(canonical(addmm.graph))
+
+    def test_addmm_fusion_scalar_type(self):
+        @torch.jit.script
+        def addmm(a, b, c):
+            return a + b.mm(c)
+
+        a, b, c = [torch.tensor(e) for e in (1, [[2.]], [[3.]])]
+        addmm(a, b, c)
+        self.assertExpectedGraph(addmm.graph_for(a, b, c))
 
     def test_index_put(self):
         ten = torch.zeros(3, 3)
@@ -2807,7 +2821,6 @@ a")
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
-    @unittest.skip("Temporarily broken")
     def test_lstm_fusion_cuda(self):
         inputs = get_lstm_inputs('cuda', training=True)
         module = self.checkScript(LSTMCellS, inputs)
@@ -2820,7 +2833,6 @@ a")
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
-    @unittest.skip("Temporarily broken")
     def test_milstm_fusion_cuda(self):
         inputs = get_milstm_inputs('cuda', training=True)
         module = self.checkScript(MiLSTMCell, inputs)
