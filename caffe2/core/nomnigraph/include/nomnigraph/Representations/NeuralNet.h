@@ -168,7 +168,7 @@ class CAFFE2_API Tensor : public NeuralNetData {
       : NeuralNetData(NNDataKind::Tensor),
         name_(name),
         type_(DataType::Generic) {}
-  CAFFE2_API static bool classof(const NeuralNetData* D) {
+  static bool classof(const NeuralNetData* D) {
     return D->getKind() == NNDataKind::Tensor;
   }
 
@@ -195,10 +195,10 @@ class CAFFE2_API Tensor : public NeuralNetData {
 };
 
 #define NOMNIGRAPH_DEFINE_NN_RTTI(op)                                 \
-  CAFFE2_API static bool classof(const NeuralNetOperator* N) {        \
+  static bool classof(const NeuralNetOperator* N) {        \
     return N->getKind() == NNKind::op;                                \
   }                                                                   \
-  CAFFE2_API static bool classof(const Value* N) {                    \
+  static bool classof(const Value* N) {                    \
     if (isa<NeuralNetOperator>(N)) {                                  \
       return dyn_cast<NeuralNetOperator>(N)->getKind() == NNKind::op; \
     }                                                                 \
@@ -342,7 +342,7 @@ inline T* get(N n) {
 }
 
 template <typename T, typename G>
-CAFFE2_API std::vector<typename G::NodeRef> nodeIterator(G& g) {
+std::vector<typename G::NodeRef> nodeIterator(G& g) {
   std::vector<typename G::NodeRef> out;
   for (auto node : g.getMutableNodes()) {
     if (!is<T>(node)) {
@@ -354,7 +354,7 @@ CAFFE2_API std::vector<typename G::NodeRef> nodeIterator(G& g) {
 }
 
 template <typename T, typename G>
-CAFFE2_API std::vector<std::pair<T*, typename G::NodeRef>> dataIterator(G& g) {
+std::vector<std::pair<T*, typename G::NodeRef>> dataIterator(G& g) {
   std::vector<std::pair<T*, typename G::NodeRef>> out;
   for (auto node : g.getMutableNodes()) {
     if (!is<T>(node)) {
@@ -367,7 +367,7 @@ CAFFE2_API std::vector<std::pair<T*, typename G::NodeRef>> dataIterator(G& g) {
 }
 
 template <typename T, typename... Args>
-CAFFE2_API void insertOp(
+void insertOp(
     NNGraph& g,
     NNGraph::NodeRef a,
     NNGraph::NodeRef b,
@@ -397,7 +397,7 @@ CAFFE2_API void insertOp(
 }
 
 template <typename NewT, typename OldT>
-CAFFE2_API NNGraph::NodeRef convertNode(NNGraph& g, NNGraph::NodeRef node) {
+NNGraph::NodeRef convertNode(NNGraph& g, NNGraph::NodeRef node) {
   assert(is<OldT>(node) && "Cannot get type from node.");
 
   NeuralNetOperator* nnOpPtr =
@@ -428,13 +428,18 @@ template <NNGraph* G>
 struct CAFFE2_API NodeHelper {};
 
 struct CAFFE2_API NNNodeMatchCriteria {
-  const std::function<bool(NNGraph::NodeRef)> predicate;
-  const std::string debugString;
+  std::function<bool(NNGraph::NodeRef)> predicate;
+  std::string debugString;
 
   NNNodeMatchCriteria(
       const std::function<bool(NNGraph::NodeRef)>& predicate,
       const std::string& debugString = "No debug string specified")
       : predicate(predicate), debugString(debugString){};
+
+  NNNodeMatchCriteria() = default;
+  NNNodeMatchCriteria(const NNNodeMatchCriteria&) = default;
+  NNNodeMatchCriteria& operator=(const NNNodeMatchCriteria&) = default;
+  NNNodeMatchCriteria(NNNodeMatchCriteria&&) = default;
 
   NNNodeMatchCriteria andCriteria(const NNNodeMatchCriteria& other) {
     auto thisPredicate = predicate;
@@ -463,7 +468,7 @@ CAFFE2_API NNNodeMatchCriteria criteriaSingleOutputAndConsumer();
 CAFFE2_API NNNodeMatchCriteria criteriaSingleConsumer();
 
 template <typename NodeType>
-CAFFE2_API NNNodeMatchCriteria matchOp(const std::string& debugString = "matchOp") {
+NNNodeMatchCriteria matchOp(const std::string& debugString = "matchOp") {
   return NNNodeMatchCriteria(
       [](NNGraph::NodeRef nodeRef) { return is<NodeType>(nodeRef); },
       debugString);
@@ -472,7 +477,7 @@ CAFFE2_API NNNodeMatchCriteria matchOp(const std::string& debugString = "matchOp
 CAFFE2_API NNNodeMatchCriteria matchTensor();
 
 template <typename NodeType>
-CAFFE2_API NNNodeMatchCriteria matchOp(
+NNNodeMatchCriteria matchOp(
     const std::function<bool(const NodeType&)> predicate,
     const std::string& debugString = "matchOpWithPredicate") {
   return NNNodeMatchCriteria(
@@ -485,7 +490,7 @@ CAFFE2_API NNNodeMatchCriteria matchOp(
 };
 
 struct CAFFE2_API NNNodeMatch {
-  CAFFE2_API static bool isMatch(
+  static bool isMatch(
       const NNGraph::NodeRef& node,
       const NNNodeMatchCriteria& criteria) {
     return criteria.predicate(node);

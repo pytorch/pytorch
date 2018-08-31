@@ -131,7 +131,7 @@ using BasicBlockType = typename ControlFlowGraphImpl<G>::bbType;
 /// \brief Converts graph to SSA representation.  Modifies the graph
 /// by inserting versions and phi nodes.
 template <typename Phi, typename G>
-CAFFE2_API void addSSA(G* dfg, ControlFlowGraph<G>* cfg) {
+CAFFE2_EXPORT void addSSA(G* dfg, ControlFlowGraph<G>* cfg) {
   static_assert(
       std::is_base_of<Instruction, Phi>::value,
       "Phi type must be derived from Instruction.");

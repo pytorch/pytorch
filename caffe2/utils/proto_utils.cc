@@ -21,11 +21,11 @@ using ::google::protobuf::MessageLite;
 
 namespace caffe2 {
 
-std::string DeviceTypeName(const int32_t& d) {
+CAFFE2_EXPORT std::string DeviceTypeName(const int32_t& d) {
   return at::DeviceTypeName(static_cast<at::DeviceType>(d));
 }
 
-int DeviceId(const DeviceOption& option) {
+CAFFE2_EXPORT int DeviceId(const DeviceOption& option) {
   switch (option.device_type()) {
     case CPU:
       return option.numa_node_id();
@@ -40,7 +40,7 @@ int DeviceId(const DeviceOption& option) {
   }
 }
 
-bool IsSameDevice(const DeviceOption& lhs, const DeviceOption& rhs) {
+CAFFE2_EXPORT bool IsSameDevice(const DeviceOption& lhs, const DeviceOption& rhs) {
   return (
       lhs.device_type() == rhs.device_type() &&
       lhs.cuda_gpu_id() == rhs.cuda_gpu_id() &&
@@ -49,7 +49,7 @@ bool IsSameDevice(const DeviceOption& lhs, const DeviceOption& rhs) {
       lhs.numa_node_id() == rhs.numa_node_id());
 }
 
-bool ReadStringFromFile(const char* filename, string* str) {
+CAFFE2_EXPORT bool ReadStringFromFile(const char* filename, string* str) {
   std::ifstream ifs(filename, std::ios::in);
   if (!ifs) {
     VLOG(1) << "File cannot be opened: " << filename
@@ -64,7 +64,7 @@ bool ReadStringFromFile(const char* filename, string* str) {
   return true;
 }
 
-bool WriteStringToFile(const string& str, const char* filename) {
+CAFFE2_EXPORT bool WriteStringToFile(const string& str, const char* filename) {
   std::ofstream ofs(filename, std::ios::out | std::ios::trunc);
   if (!ofs.is_open()) {
     VLOG(1) << "File cannot be created: " << filename
@@ -102,11 +102,11 @@ class IfstreamInputStream : public ::google::protobuf::io::CopyingInputStream {
 };
 }  // namespace
 
-string ProtoDebugString(const MessageLite& proto) {
+CAFFE2_EXPORT string ProtoDebugString(const MessageLite& proto) {
   return proto.SerializeAsString();
 }
 
-bool ParseProtoFromLargeString(const string& str, MessageLite* proto) {
+CAFFE2_EXPORT bool ParseProtoFromLargeString(const string& str, MessageLite* proto) {
   ::google::protobuf::io::ArrayInputStream input_stream(str.data(), str.size());
   ::google::protobuf::io::CodedInputStream coded_stream(&input_stream);
   // Set PlanDef message size limit to 2G.
@@ -114,7 +114,7 @@ bool ParseProtoFromLargeString(const string& str, MessageLite* proto) {
   return proto->ParseFromCodedStream(&coded_stream);
 }
 
-bool ReadProtoFromBinaryFile(const char* filename, MessageLite* proto) {
+CAFFE2_EXPORT bool ReadProtoFromBinaryFile(const char* filename, MessageLite* proto) {
   ::google::protobuf::io::CopyingInputStreamAdaptor stream(
       new IfstreamInputStream(filename));
   stream.SetOwnsCopyingStream(true);
@@ -125,7 +125,7 @@ bool ReadProtoFromBinaryFile(const char* filename, MessageLite* proto) {
   return proto->ParseFromCodedStream(&coded_stream);
 }
 
-void WriteProtoToBinaryFile(
+CAFFE2_EXPORT void WriteProtoToBinaryFile(
     const MessageLite& /*proto*/,
     const char* /*filename*/) {
   LOG(FATAL) << "Not implemented yet.";
@@ -144,16 +144,16 @@ using ::google::protobuf::io::CodedOutputStream;
 using ::google::protobuf::Message;
 
 namespace TextFormat {
-bool ParseFromString(const string& spec, Message* proto) {
+CAFFE2_EXPORT bool ParseFromString(const string& spec, Message* proto) {
   return ::google::protobuf::TextFormat::ParseFromString(spec, proto);
 }
 } // namespace TextFormat
 
-string ProtoDebugString(const Message& proto) {
+CAFFE2_EXPORT string ProtoDebugString(const Message& proto) {
   return proto.ShortDebugString();
 }
 
-bool ParseProtoFromLargeString(const string& str, Message* proto) {
+CAFFE2_EXPORT bool ParseProtoFromLargeString(const string& str, Message* proto) {
   ::google::protobuf::io::ArrayInputStream input_stream(str.data(), str.size());
   ::google::protobuf::io::CodedInputStream coded_stream(&input_stream);
   // Set PlanDef message size limit to 2G.
@@ -161,7 +161,7 @@ bool ParseProtoFromLargeString(const string& str, Message* proto) {
   return proto->ParseFromCodedStream(&coded_stream);
 }
 
-bool ReadProtoFromTextFile(const char* filename, Message* proto) {
+CAFFE2_EXPORT bool ReadProtoFromTextFile(const char* filename, Message* proto) {
   int fd = open(filename, O_RDONLY);
   CAFFE_ENFORCE_NE(fd, -1, "File not found: ", filename);
   FileInputStream* input = new FileInputStream(fd);
@@ -171,7 +171,7 @@ bool ReadProtoFromTextFile(const char* filename, Message* proto) {
   return success;
 }
 
-void WriteProtoToTextFile(const Message& proto, const char* filename) {
+CAFFE2_EXPORT void WriteProtoToTextFile(const Message& proto, const char* filename) {
   int fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC, 0644);
   FileOutputStream* output = new FileOutputStream(fd);
   CAFFE_ENFORCE(google::protobuf::TextFormat::Print(proto, output));
@@ -179,7 +179,7 @@ void WriteProtoToTextFile(const Message& proto, const char* filename) {
   close(fd);
 }
 
-bool ReadProtoFromBinaryFile(const char* filename, MessageLite* proto) {
+CAFFE2_EXPORT bool ReadProtoFromBinaryFile(const char* filename, MessageLite* proto) {
 #if defined (_MSC_VER)  // for MSC compiler binary flag needs to be specified
   int fd = open(filename, O_RDONLY | O_BINARY);
 #else
@@ -198,7 +198,7 @@ bool ReadProtoFromBinaryFile(const char* filename, MessageLite* proto) {
   return success;
 }
 
-void WriteProtoToBinaryFile(const MessageLite& proto, const char* filename) {
+CAFFE2_EXPORT void WriteProtoToBinaryFile(const MessageLite& proto, const char* filename) {
   int fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC, 0644);
   CAFFE_ENFORCE_NE(
       fd, -1, "File cannot be created: ", filename, " error number: ", errno);
@@ -214,7 +214,7 @@ void WriteProtoToBinaryFile(const MessageLite& proto, const char* filename) {
 #endif  // CAFFE2_USE_LITE_PROTO
 
 
-ArgumentHelper::ArgumentHelper(const OperatorDef& def) {
+CAFFE2_EXPORT ArgumentHelper::ArgumentHelper(const OperatorDef& def) {
   for (auto& arg : def.arg()) {
     if (arg_map_.count(arg.name())) {
       if (arg.SerializeAsString() != arg_map_[arg.name()].SerializeAsString()) {
@@ -235,7 +235,7 @@ ArgumentHelper::ArgumentHelper(const OperatorDef& def) {
   }
 }
 
-ArgumentHelper::ArgumentHelper(const NetDef& netdef) {
+CAFFE2_EXPORT ArgumentHelper::ArgumentHelper(const NetDef& netdef) {
   for (auto& arg : netdef.arg()) {
     CAFFE_ENFORCE(
         arg_map_.count(arg.name()) == 0,
@@ -245,7 +245,7 @@ ArgumentHelper::ArgumentHelper(const NetDef& netdef) {
   }
 }
 
-bool ArgumentHelper::HasArgument(const string& name) const {
+CAFFE2_EXPORT bool ArgumentHelper::HasArgument(const string& name) const {
   return arg_map_.count(name);
 }
 
@@ -270,7 +270,7 @@ std::ostream& operator<<(std::ostream& output, const NetDef& n) {
 #define INSTANTIATE_GET_SINGLE_ARGUMENT(                                      \
     T, fieldname, enforce_lossless_conversion)                                \
   template <>                                                                 \
-  T ArgumentHelper::GetSingleArgument<T>(                                     \
+  CAFFE2_EXPORT T ArgumentHelper::GetSingleArgument<T>(                       \
       const string& name, const T& default_value) const {                     \
     if (arg_map_.count(name) == 0) {                                          \
       VLOG(1) << "Using default parameter value " << default_value            \
@@ -297,7 +297,7 @@ std::ostream& operator<<(std::ostream& output, const NetDef& n) {
     return static_cast<T>(value);                                             \
   }                                                                           \
   template <>                                                                 \
-  bool ArgumentHelper::HasSingleArgumentOfType<T>(const string& name) const { \
+  CAFFE2_EXPORT bool ArgumentHelper::HasSingleArgumentOfType<T>(const string& name) const { \
     if (arg_map_.count(name) == 0) {                                          \
       return false;                                                           \
     }                                                                         \
@@ -321,7 +321,7 @@ INSTANTIATE_GET_SINGLE_ARGUMENT(NetDef, n, false)
 #define INSTANTIATE_GET_REPEATED_ARGUMENT(                             \
     T, fieldname, enforce_lossless_conversion)                         \
   template <>                                                          \
-  vector<T> ArgumentHelper::GetRepeatedArgument<T>(                    \
+  CAFFE2_EXPORT vector<T> ArgumentHelper::GetRepeatedArgument<T>(      \
       const string& name, const std::vector<T>& default_value) const { \
     if (arg_map_.count(name) == 0) {                                   \
       return default_value;                                            \
@@ -360,7 +360,7 @@ INSTANTIATE_GET_REPEATED_ARGUMENT(NetDef, nets, false)
 
 #define CAFFE2_MAKE_SINGULAR_ARGUMENT(T, fieldname)                            \
 template <>                                                                    \
-Argument MakeArgument(const string& name, const T& value) {                    \
+CAFFE2_EXPORT Argument MakeArgument(const string& name, const T& value) {      \
   Argument arg;                                                                \
   arg.set_name(name);                                                          \
   arg.set_##fieldname(value);                                                  \
@@ -375,12 +375,12 @@ CAFFE2_MAKE_SINGULAR_ARGUMENT(string, s)
 #undef CAFFE2_MAKE_SINGULAR_ARGUMENT
 
 template <>
-bool ArgumentHelper::RemoveArgument(OperatorDef& def, int index);
+CAFFE2_EXPORT bool ArgumentHelper::RemoveArgument(OperatorDef& def, int index);
 template <>
 bool ArgumentHelper::RemoveArgument(NetDef& def, int index);
 
 template <>
-Argument MakeArgument(const string& name, const MessageLite& value) {
+CAFFE2_EXPORT Argument MakeArgument(const string& name, const MessageLite& value) {
   Argument arg;
   arg.set_name(name);
   arg.set_s(value.SerializeAsString());
@@ -389,7 +389,7 @@ Argument MakeArgument(const string& name, const MessageLite& value) {
 
 #define CAFFE2_MAKE_REPEATED_ARGUMENT(T, fieldname)                            \
 template <>                                                                    \
-Argument MakeArgument(const string& name, const vector<T>& value) {            \
+CAFFE2_EXPORT Argument MakeArgument(const string& name, const vector<T>& value) {\
   Argument arg;                                                                \
   arg.set_name(name);                                                          \
   for (const auto& v : value) {                                                \
@@ -404,7 +404,7 @@ CAFFE2_MAKE_REPEATED_ARGUMENT(int64_t, ints)
 CAFFE2_MAKE_REPEATED_ARGUMENT(string, strings)
 #undef CAFFE2_MAKE_REPEATED_ARGUMENT
 
-bool HasOutput(const OperatorDef& op, const std::string& output) {
+CAFFE2_EXPORT bool HasOutput(const OperatorDef& op, const std::string& output) {
   for (const auto& outp : op.output()) {
     if (outp == output) {
       return true;
@@ -413,7 +413,7 @@ bool HasOutput(const OperatorDef& op, const std::string& output) {
   return false;
 }
 
-bool HasInput(const OperatorDef& op, const std::string& input) {
+CAFFE2_EXPORT bool HasInput(const OperatorDef& op, const std::string& input) {
   for (const auto& inp : op.input()) {
     if (inp == input) {
       return true;
@@ -423,7 +423,7 @@ bool HasInput(const OperatorDef& op, const std::string& input) {
 }
 
 // Return the argument index or -1 if it does not exist.
-int GetArgumentIndex(
+CAFFE2_EXPORT int GetArgumentIndex(
     const google::protobuf::RepeatedPtrField<Argument>& args,
     const string& name) {
   int index = 0;
@@ -436,7 +436,7 @@ int GetArgumentIndex(
   return -1;
 }
 
-const Argument& GetArgument(const OperatorDef& def, const string& name) {
+CAFFE2_EXPORT const Argument& GetArgument(const OperatorDef& def, const string& name) {
   int index = GetArgumentIndex(def.arg(), name);
   if (index != -1) {
     return def.arg(index);
@@ -449,7 +449,7 @@ const Argument& GetArgument(const OperatorDef& def, const string& name) {
   }
 }
 
-const Argument& GetArgument(const NetDef& def, const string& name) {
+CAFFE2_EXPORT const Argument& GetArgument(const NetDef& def, const string& name) {
   int index = GetArgumentIndex(def.arg(), name);
   if (index != -1) {
     return def.arg(index);
@@ -462,7 +462,7 @@ const Argument& GetArgument(const NetDef& def, const string& name) {
   }
 }
 
-bool GetFlagArgument(
+CAFFE2_EXPORT bool GetFlagArgument(
     const google::protobuf::RepeatedPtrField<Argument>& args,
     const string& name,
     bool default_value) {
@@ -476,21 +476,21 @@ bool GetFlagArgument(
   return default_value;
 }
 
-bool GetFlagArgument(
+CAFFE2_EXPORT bool GetFlagArgument(
     const OperatorDef& def,
     const string& name,
     bool default_value) {
   return GetFlagArgument(def.arg(), name, default_value);
 }
 
-bool GetFlagArgument(
+CAFFE2_EXPORT bool GetFlagArgument(
     const NetDef& def,
     const string& name,
     bool default_value) {
   return GetFlagArgument(def.arg(), name, default_value);
 }
 
-Argument* GetMutableArgument(
+CAFFE2_EXPORT Argument* GetMutableArgument(
     const string& name,
     const bool create_if_missing,
     OperatorDef* def) {

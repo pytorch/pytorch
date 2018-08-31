@@ -175,7 +175,7 @@ class CAFFE2_API CUDAContext final : public BaseContext {
   }
 
   void FinishDeviceComputation() override {
-    cudaStreamSynchronize(cuda_objects_.GetStream(gpu_id_, stream_id_));
+    cudaStreamSynchronize(getCudaObjects().GetStream(gpu_id_, stream_id_));
     cudaError_t error = cudaGetLastError();
     if (error != cudaSuccess) {
       CAFFE_THROW("Encountered CUDA error: ", cudaGetErrorString(error));
@@ -195,16 +195,16 @@ class CAFFE2_API CUDAContext final : public BaseContext {
   }
 
   static cudaStream_t cuda_stream(int gpu_id, int stream_id) {
-    return cuda_objects_.GetStream(gpu_id, stream_id);
+    return getCudaObjects().GetStream(gpu_id, stream_id);
   }
 
   cublasHandle_t cublas_handle() {
-    return cuda_objects_.GetHandle(gpu_id_, stream_id_);
+    return getCudaObjects().GetHandle(gpu_id_, stream_id_);
   }
 
 #ifdef CAFFE2_USE_CUDNN
   cudnnHandle_t cudnn_handle() {
-    return cuda_objects_.GetCudnnHandle(gpu_id_, stream_id_);
+    return getCudaObjects().GetCudnnHandle(gpu_id_, stream_id_);
   }
 #endif // CAFFE2_USE_CUDNN
 
@@ -242,7 +242,7 @@ class CAFFE2_API CUDAContext final : public BaseContext {
         src,
         nbytes,
         cudaMemcpyDefault,
-        cuda_objects_.GetStream(gpu_id_, stream_id_)));
+        getCudaObjects().GetStream(gpu_id_, stream_id_)));
   }
 
   void CopyBytesSameDevice(size_t nbytes, const void* src, void* dst) override {
@@ -302,7 +302,7 @@ class CAFFE2_API CUDAContext final : public BaseContext {
   int stream_id_ = 0;
   int random_seed_;
   curandGenerator_t curand_generator_{nullptr};
-  static thread_local ThreadLocalCUDAObjects cuda_objects_;
+  static ThreadLocalCUDAObjects& getCudaObjects();
 };
 
 // For the CPU context, we also allow a (probably expensive) function
