@@ -63,18 +63,6 @@ struct AT_API TensorOptions {
   /// - requires_grad: false
   explicit TensorOptions(bool use_thread_local_default_options);
 
-  /// Constructs the `TensorOptions` from the type of the given `Tensor`.
-  /// If the `Tensor` has a CUDA type, the `device_index` will match that of the
-  /// tensor. The `requires_grad` property of the tensor is ignored and set to
-  /// false in the created `TensorOptions`.  See the constructor from `Type` for
-  /// the semantics w.r.t. the `type()` method.
-  explicit TensorOptions(Tensor tensor) {
-    this->dtype(tensor.dtype());
-    this->device(tensor.device());
-    this->layout(tensor.layout());
-    this->is_variable(tensor.is_variable());
-  }
-
   /// Constructs the `TensorOptions` from a type and a `device_index`.
   /* implicit */ TensorOptions(
       const Type& type,
@@ -244,7 +232,10 @@ inline TensorOptions requires_grad(bool requires_grad = true) {
 
 /// From Tensor.h
 inline TensorOptions Tensor::options() const {
-  return TensorOptions(*this);
+  return TensorOptions().dtype(dtype())
+                        .device(device())
+                        .layout(layout())
+                        .is_variable(is_variable());
 }
 
 namespace detail {
