@@ -351,7 +351,6 @@ using TupleTypePtr = std::shared_ptr<TupleType>;
 struct TORCH_API TupleType : public Type {
   static constexpr bool is_singleton = false;
   friend struct Type;
-  template<typename ... T>
   static TupleTypePtr create(std::vector<TypePtr> types) {
     return TupleTypePtr(new TupleType( std::move(types) ));
   }
