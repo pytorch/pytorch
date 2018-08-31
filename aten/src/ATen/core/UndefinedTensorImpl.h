@@ -4,10 +4,10 @@
 
 namespace at {
 
-struct AT_API UndefinedTensor final : public TensorImpl {
+struct AT_API UndefinedTensorImpl final : public TensorImpl {
 public:
   // Without this, we get:
-  //  error: identifier "at::UndefinedTensor::_singleton" is undefined in device code
+  //  error: identifier "at::UndefinedTensorImpl::_singleton" is undefined in device code
   // (ostensibly because the constexpr tricks MSVC into trying to compile this
   // function for device as well).
 #ifdef _WIN32
@@ -25,8 +25,8 @@ public:
   const Storage& storage() const override;
   int64_t storage_offset() const override;
 private:
-  UndefinedTensor();
-  static UndefinedTensor _singleton;
+  UndefinedTensorImpl();
+  static UndefinedTensorImpl _singleton;
 public:
   friend struct UndefinedType;
 };
