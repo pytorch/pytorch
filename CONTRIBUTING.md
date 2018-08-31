@@ -104,6 +104,18 @@ PyTorch uses [Google style](http://sphinxcontrib-napoleon.readthedocs.io/en/late
 for formatting docstrings. Length of line inside docstrings block must be limited to 80 characters to
 fit into Jupyter documentation popups.
 
+For C++ documentation (https://pytorch.org/cppdocs), we use
+[Doxygen](http://www.doxygen.nl/) and then convert it to
+[Sphinx](http://www.sphinx-doc.org/) via
+[Breathe](https://github.com/michaeljones/breathe) and
+[Exhale](https://github.com/svenevs/exhale). Check the [Doxygen
+reference](http://www.stack.nl/~dimitri/doxygen/manual/index.html) for more
+information on the documentation syntax. To build the documentation locally,
+`cd` into `docs/cpp` and then `make html`.
+
+We run Doxygen in CI (Travis) to verify that you do not use invalid Doxygen
+commands. To run this check locally, run `./check-doxygen.sh` from inside
+`docs/cpp`.
 
 ## Managing multiple build trees
 
