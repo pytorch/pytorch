@@ -220,6 +220,14 @@ RegisterOperators reg({
           };
         }),
     Operator(
+        prim::DummyWorld,
+        [](Node* node) {
+          return [](Stack& stack) {
+            AT_ERROR("Encountered a dummy world during graph execution.");
+            return 0;
+          };
+        }),
+    Operator(
         onnx::Reshape,
         [](Node* node) {
           return [=](Stack& stack) {
