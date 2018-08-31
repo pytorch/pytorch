@@ -346,6 +346,11 @@ struct SubgraphMatcher {
            (isStarCount || countMatch < expectedCount);
            currentEdgeIdx++) {
         auto edge = edges[currentEdgeIdx];
+        // edge could be null due to certain manipulation of the graph.
+        // just ignore and treat the edge as not exist.
+        if (edge == nullptr) {
+          continue;
+        }
         auto child = invertGraphTraversal ? edge->tail() : edge->head();
         bool shouldIncludeEdgeInSubgraph =
             childrenCriteriaRef->data().shouldIncludeInSubgraph() &&
