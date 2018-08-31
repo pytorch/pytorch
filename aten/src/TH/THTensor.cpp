@@ -8,7 +8,7 @@
 
 #include <numeric>
 
-// NB: This is NOT valid on UndefinedTensor
+// NB: This is NOT valid on UndefinedTensorImpl
 void THTensor_free(THTensor *self)
 {
   if (!self) return;

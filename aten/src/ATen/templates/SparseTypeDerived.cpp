@@ -11,7 +11,7 @@
 #include "ATen/Allocator.h"
 #include "ATen/DeviceGuard.h"
 #include "ATen/NativeFunctions.h"
-#include "ATen/UndefinedTensor.h"
+#include "ATen/core/UndefinedTensorImpl.h"
 #include "ATen/Utils.h"
 #include "ATen/WrapDimUtils.h"
 #include "ATen/core/Half.h"
