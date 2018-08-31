@@ -139,7 +139,8 @@ inline IValue argumentToIValue(
         schema.name, "() expected value of type ", argument.type->str(),
         " for argument '", argument.name,
         "' in position ", argumentPosition,
-        ", but instead got value of type ", object.get_type().attr("__name__").str(),
+        ", but instead got value of type ",
+        py::str(object.get_type().attr("__name__")),
         ". Declaration: ", schema);
   }
 }
