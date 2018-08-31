@@ -73,7 +73,7 @@ class AsyncInputIsOutputTest : public AsyncTest {
     // Allocate inputs on available devices in a round robin fashion.
     inputs_.resize(numTensors_);
     for (auto i = 0; i < numTensors_; i++) {
-      inputs_[i] = at::empty({16, 16}, at::device({at::kCUDA, i % numDevices_}).dtype(at::kFloat));
+      inputs_[i] = at::empty({16, 16}, at::device({at::kCUDA, i % numDevices_}));
     }
 
     // Allocate a stream per device.
