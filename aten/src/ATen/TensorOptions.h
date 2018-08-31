@@ -6,7 +6,6 @@
 #include <ATen/DeviceGuard.h>
 #include <ATen/core/Layout.h>
 #include <ATen/core/ScalarType.h>
-#include <ATen/Tensor.h>
 #include <ATen/Type.h>
 
 #include <cstddef>
@@ -32,18 +31,6 @@ struct AT_API TensorOptions {
   /// - layout: kStrided,
   /// - requires_grad: false
   explicit TensorOptions(bool use_thread_local_default_options);
-
-  /// Constructs the `TensorOptions` from the type of the given `Tensor`.
-  /// If the `Tensor` has a CUDA type, the `device_index` will match that of the
-  /// tensor. The `requires_grad` property of the tensor is ignored and set to
-  /// false in the created `TensorOptions`.  See the constructor from `Type` for
-  /// the semantics w.r.t. the `type()` method.
-  explicit TensorOptions(Tensor tensor) {
-    this->dtype(tensor.dtype());
-    this->device(tensor.device());
-    this->layout(tensor.layout());
-    this->is_variable(tensor.is_variable());
-  }
 
   /// Constructs the `TensorOptions` from a type and a `device_index`.
   /* implicit */ TensorOptions(
@@ -169,6 +156,8 @@ struct AT_API TensorOptions {
   }
 
  private:
+  // WARNING: If you edit TensorOptions to add more options, you
+  // must adjust the implementation of Tensor::options
   ScalarType dtype_{kFloat};
   Device device_{Device::Type::CPU};
   Layout layout_{Layout::Strided};
@@ -206,48 +195,8 @@ inline TensorOptions requires_grad(bool requires_grad = true) {
   return TensorOptions().requires_grad(requires_grad);
 }
 
-/// From Tensor.h
-inline TensorOptions Tensor::options() const {
-  return TensorOptions(*this);
-}
-
-namespace detail {
-inline Tensor to(
-    const Tensor& tensor,
-    const TensorOptions& options,
-    bool non_blocking) {
-  // Don't copy if the options match.
-  if (tensor.options() == options) {
-    return tensor;
-  }
-  DeviceGuard guard(options.device());
-  return at::getType(options).copy(tensor, non_blocking);
-}
-} // namespace detail
-
-inline Tensor Tensor::to(Device device, ScalarType dtype, bool non_blocking)
-    const {
-  if (this->device() == device && this->dtype() == dtype) {
-    return *this;
-  }
-  return detail::to(*this, options().device(device).dtype(dtype), non_blocking);
-}
-
-inline Tensor Tensor::to(ScalarType dtype, bool non_blocking) const {
-  if (this->dtype() == dtype) {
-    return *this;
-  }
-  return detail::to(*this, options().dtype(dtype), non_blocking);
-}
-
-inline Tensor Tensor::to(Device device, bool non_blocking) const {
-  if (this->device() == device) {
-    return *this;
-  }
-  return detail::to(*this, options().device(device), non_blocking);
-}
-} // namespace at
-
 std::ostream& operator<<(
     std::ostream& stream,
-    const at::TensorOptions& options);
+    const TensorOptions& options);
+
+} // namespace at

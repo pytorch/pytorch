@@ -45,19 +45,19 @@ class CAFFE2_API Annotation {
  public:
   enum class AnnotationKind { Generic, Caffe2 };
 
-  Annotation(AnnotationKind K) : Kind(K) {}
-  Annotation() : Kind(AnnotationKind::Generic) {}
+  Annotation(AnnotationKind kind) : kind_(kind) {}
+  Annotation() : kind_(AnnotationKind::Generic) {}
   virtual ~Annotation() {}
 
   AnnotationKind getKind() const {
-    return Kind;
+    return kind_;
   }
 
   Annotation(const Annotation&) = delete;
   Annotation& operator=(Annotation&) = delete;
 
  private:
-  const AnnotationKind Kind;
+  const AnnotationKind kind_;
 };
 
 class CAFFE2_API NeuralNetOperator : public Instruction {
@@ -75,36 +75,38 @@ class CAFFE2_API NeuralNetOperator : public Instruction {
   enum class NNLayout { Undefined, NCHW, NHWC };
 
   NeuralNetOperator(NNKind K, Opcode I, NNLayout L)
-      : Instruction(I), Kind(K), Layout(L) {}
+      : Instruction(I), kind_(K), layout_(L) {}
   NeuralNetOperator(NNKind K, Opcode I)
-      : Instruction(I), Kind(K), Layout(NNLayout::Undefined) {}
-  NeuralNetOperator(NNKind K, NNLayout L) : Instruction(), Kind(K), Layout(L) {}
+      : Instruction(I), kind_(K), layout_(NNLayout::Undefined) {}
+  NeuralNetOperator(NNKind K, NNLayout L)
+      : Instruction(), kind_(K), layout_(L) {}
   NeuralNetOperator(NNKind K)
-      : Instruction(), Kind(K), Layout(NNLayout::Undefined) {}
+      : Instruction(), kind_(K), layout_(NNLayout::Undefined) {}
   NeuralNetOperator()
-      : Instruction(), Kind(NNKind::Undefined), Layout(NNLayout::Undefined) {}
+      : Instruction(), kind_(NNKind::Undefined), layout_(NNLayout::Undefined) {}
 
   NNKind getKind() const {
-    return Kind;
+    return kind_;
   }
 
   void setLayout(NNLayout L) {
-    Layout = L;
+    layout_ = L;
   }
 
   NNLayout getLayout() const {
-    return Layout;
+    return layout_;
   }
 
   void setAnnotation(std::unique_ptr<Annotation> extraAnnotation) {
-    ExtraAnnotation = std::move(extraAnnotation);
+    extraAnnotation_ = std::move(extraAnnotation);
   }
 
   const Annotation* getAnnotation() const {
-    return ExtraAnnotation.get();
+    return extraAnnotation_.get();
   }
+
   Annotation* getMutableAnnotation() {
-    return ExtraAnnotation.get();
+    return extraAnnotation_.get();
   }
 
   const std::string getName() const;
@@ -128,9 +130,9 @@ class CAFFE2_API NeuralNetOperator : public Instruction {
   NeuralNetOperator& operator=(NeuralNetOperator&) = delete;
 
  private:
-  const NNKind Kind;
-  NNLayout Layout; // Mutable attribute, much like a type cast
-  std::unique_ptr<Annotation> ExtraAnnotation;
+  const NNKind kind_;
+  NNLayout layout_; // Mutable attribute, much like a type cast
+  std::unique_ptr<Annotation> extraAnnotation_;
 };
 
 class CAFFE2_API NeuralNetData : public Data {
@@ -138,12 +140,12 @@ class CAFFE2_API NeuralNetData : public Data {
   /// Discriminator for LLVM-style RTTI (isa<>)
   enum class NNDataKind { Generic, Tensor };
 
-  NeuralNetData(NNDataKind kind) : Kind(kind) {}
+  NeuralNetData(NNDataKind kind) : kind_(kind) {}
 
-  NeuralNetData() : Kind(NNDataKind::Generic) {}
+  NeuralNetData() : kind_(NNDataKind::Generic) {}
 
   NNDataKind getKind() const {
-    return Kind;
+    return kind_;
   }
 
   virtual NeuralNetData* clone() = 0;
@@ -153,8 +155,8 @@ class CAFFE2_API NeuralNetData : public Data {
   virtual ~NeuralNetData() = 0;
 
  private:
-  NNDataKind Kind;
-  size_t Version = 0;
+  NNDataKind kind_;
+  size_t version_ = 0;
 };
 
 class CAFFE2_API Tensor : public NeuralNetData {

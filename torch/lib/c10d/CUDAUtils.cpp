@@ -25,7 +25,7 @@ CUDAEvent::~CUDAEvent() {
 
 CUDAStream CUDAStream::create() {
   CUDAStream stream;
-  stream.stream_ = THCStream_new(cudaStreamNonBlocking);
+  stream.stream_ = THCStream_new();
   return stream;
 }
 
