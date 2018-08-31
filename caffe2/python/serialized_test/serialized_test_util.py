@@ -38,6 +38,14 @@ def given_and_seeded(*given_args, **given_kwargs):
     return wrapper
 
 
+def _getGradientOrNone(op_proto):
+    try:
+        grad_ops, _ = gradient_checker.getGradientForOp(op_proto)
+        return grad_ops
+    except:
+        return []
+
+
 class SerializedTestCase(hu.HypothesisTestCase):
 
     should_serialize = False
@@ -120,7 +128,7 @@ class SerializedTestCase(hu.HypothesisTestCase):
                 op_proto = parse_proto(loaded_op)
                 device_type = int(match.group(1))
                 device_option = caffe2_pb2.DeviceOption(device_type=device_type)
-                grad_ops, _ = gradient_checker.getGradientForOp(op_proto)
+                grad_ops = _getGradientOrNone(op_proto)
                 found_op = True
                 break
 
@@ -180,29 +188,34 @@ class SerializedTestCase(hu.HypothesisTestCase):
             atol,
             outputs_to_check,
         )
-        grad_ops, _ = gradient_checker.getGradientForOp(op)
-        self.assertSerializedOperatorChecks(
-            inputs,
-            outs,
-            grad_ops,
-            op,
-            device_option,
-        )
+        if not getattr(_output_context, 'disable_serialized_check', False):
+            grad_ops = _getGradientOrNone(op)
+            self.assertSerializedOperatorChecks(
+                inputs,
+                outs,
+                grad_ops,
+                op,
+                device_option,
+            )
 
 
 def testWithArgs():
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        '-g', '--generate-serialized', action='store_true', dest='write',
+        '-G', '--generate-serialized', action='store_true', dest='write',
         help='generate output files (default=false, compares to current files)')
     parser.add_argument(
-        '-o', '--output', default=DATA_DIR,
+        '-O', '--output', default=DATA_DIR,
         help='output directory (default: %(default)s)')
+    parser.add_argument(
+        '-D', '--disable-serialized_check', action='store_true', dest='disable',
+        help='disable checking serialized tests')
     parser.add_argument('unittest_args', nargs='*')
     args = parser.parse_args()
     sys.argv[1:] = args.unittest_args
     _output_context.__setattr__('should_write_output', args.write)
     _output_context.__setattr__('output_dir', args.output)
+    _output_context.__setattr__('disable_serialized_check', args.disable)
 
     import unittest
     unittest.main()

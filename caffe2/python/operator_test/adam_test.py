@@ -12,9 +12,10 @@ import numpy as np
 
 from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
 
 
-class TestAdam(hu.HypothesisTestCase):
+class TestAdam(serial.SerializedTestCase):
 
     @staticmethod
     def ref_adam(param, mom1, mom2, grad, LR, ITER,
@@ -44,7 +45,7 @@ class TestAdam(hu.HypothesisTestCase):
             (np.sqrt(mom2_out) + epsilon)
         return (param_out, mom1_out, mom2_out)
 
-    @given(inputs=hu.tensors(n=4),
+    @serial.given_and_seeded(inputs=hu.tensors(n=4),
            ITER=st.integers(min_value=0, max_value=10000),
            LR=st.floats(min_value=0.01, max_value=0.99,
                         allow_nan=False, allow_infinity=False),
@@ -110,7 +111,7 @@ class TestAdam(hu.HypothesisTestCase):
                 beta1=beta1, beta2=beta2, epsilon=epsilon, output_grad=True),
             input_device_options=input_device_options)
 
-    @given(inputs=hu.tensors(n=4),
+    @serial.given_and_seeded(inputs=hu.tensors(n=4),
            ITER=st.integers(min_value=0, max_value=10000),
            LR=st.floats(min_value=0.01, max_value=0.99,
                         allow_nan=False, allow_infinity=False),
@@ -176,7 +177,7 @@ class TestAdam(hu.HypothesisTestCase):
             ref_sparse,
             input_device_options=input_device_options)
 
-    @given(inputs=hu.tensors(n=3),
+    @serial.given_and_seeded(inputs=hu.tensors(n=3),
            ITER=st.integers(min_value=0, max_value=10000),
            LR=st.floats(min_value=0.01, max_value=0.99,
                         allow_nan=False, allow_infinity=False),
