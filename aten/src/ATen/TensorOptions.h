@@ -181,7 +181,7 @@ struct AT_API TensorOptions {
     if (type_ != nullptr) {
       return *type_;
     }
-    return getType(backend(), dtype_);
+    return getNonVariableType(backend(), dtype_);
   }
 
  private:
