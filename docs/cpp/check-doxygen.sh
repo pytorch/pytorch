@@ -12,6 +12,9 @@ ignore_warning() {
 doxygen 2> original-doxygen-log.txt
 cp original-doxygen-log.txt doxygen-log.txt
 
+echo "Original output"
+cat original-doxygen-log.txt
+
 # Filter out some warnings.
 ignore_warning "warning: no uniquely matching class member found for"
 ignore_warning "warning: source ../../build/aten/src/ATen/Tensor.h is not a readable file"

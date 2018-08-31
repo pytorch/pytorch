@@ -517,13 +517,6 @@ HIDE_SCOPE_NAMES       = NO
 
 SHOW_INCLUDE_FILES     = YES
 
-# If the SHOW_GROUPED_MEMB_INC tag is set to YES then Doxygen will add for each
-# grouped member an include statement to the documentation, telling the reader
-# which file to include in order to use the member.
-# The default value is: NO.
-
-SHOW_GROUPED_MEMB_INC  = NO
-
 # If the FORCE_LOCAL_INCLUDES tag is set to YES then doxygen will list include
 # files with double quotes in the documentation rather than with sharp brackets.
 # The default value is: NO.
@@ -1766,13 +1759,6 @@ CLASS_DIAGRAMS         = YES
 
 MSCGEN_PATH            =
 
-# You can include diagrams made with dia in doxygen documentation. Doxygen will
-# then run dia to produce the diagram and insert it in the documentation. The
-# DIA_PATH tag allows you to specify the directory where the dia binary resides.
-# If left empty dia is assumed to be found in the default search path.
-
-DIA_PATH               =
-
 # If set to YES the inheritance and collaboration graphs will hide inheritance
 # and usage relations if the target is undocumented or is not a class.
 # The default value is: YES.
@@ -1978,12 +1964,6 @@ DOTFILE_DIRS           =
 # command).
 
 MSCFILE_DIRS           =
-
-# The DIAFILE_DIRS tag can be used to specify one or more directories that
-# contain dia files that are included in the documentation (see the \diafile
-# command).
-
-DIAFILE_DIRS           =
 
 # The DOT_GRAPH_MAX_NODES tag can be used to set the maximum number of nodes
 # that will be shown in the graph. If the number of nodes in a graph becomes
