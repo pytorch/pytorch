@@ -21,24 +21,24 @@ namespace at {
 class AT_API Context {
 public:
   Context();
-  Type* getTypeRaw(Backend p, ScalarType s) {
+  Type* getNonVariableTypeRaw(Backend p, ScalarType s) {
     return type_registry[static_cast<int>(p)][static_cast<int>(s)].get();
   }
-  Type * getTypeOpt(Backend p, ScalarType s) {
+  Type * getNonVariableTypeOpt(Backend p, ScalarType s) {
     if (p != Backend::Undefined) initCUDAIfNeeded(backendToDeviceType(p));
-    auto type = getTypeRaw(p, s);
+    auto type = getNonVariableTypeRaw(p, s);
 
     if(!type) {
       // there is only a single Undefined Type.
       if (p == Backend::Undefined || s == ScalarType::Undefined) {
-        return getTypeRaw(Backend::Undefined, ScalarType::Undefined);
+        return getNonVariableTypeRaw(Backend::Undefined, ScalarType::Undefined);
       }
     }
 
     return type;
   }
   Type & getType(Backend p, ScalarType s) {
-    auto* type = getTypeOpt(p, s);
+    auto* type = getNonVariableTypeOpt(p, s);
     if (!type) AT_ERROR(toString(p), toString(s), "Type is not enabled.");
     return *type;
   }

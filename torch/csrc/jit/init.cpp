@@ -17,7 +17,7 @@
 #include "torch/csrc/jit/passes/onnx/peephole.h"
 #include "torch/csrc/jit/passes/onnx/fixup_onnx_loop.h"
 #include "torch/csrc/jit/passes/shape_analysis.h"
-#include "torch/csrc/jit/passes/decompose_addmm.h"
+#include "torch/csrc/jit/passes/canonicalize_ops.h"
 #include "torch/csrc/jit/passes/constant_propagation.h"
 #include "torch/csrc/jit/passes/loop_unrolling.h"
 #include "torch/csrc/jit/passes/to_batch.h"
@@ -111,7 +111,7 @@ void initJITBindings(PyObject *module) {
    })
    .def("_jit_pass_onnx_block", BlockToONNX)
    .def("_jit_pass_fixup_onnx_loops", FixupONNXLoops)
-   .def("_jit_pass_decompose_addmm", DecomposeAddmm)
+   .def("_jit_pass_canonicalize_ops", CanonicalizeOps)
     .def("_jit_pass_specialize_undef", specializeUndef)
    .def("_jit_differentiate", [](Graph &g, const std::vector<bool>& requires_grad) {
        // the python binding slightly differs in semantics
@@ -129,8 +129,8 @@ void initJITBindings(PyObject *module) {
       });
   py::class_<ArgumentSpec>(m, "ArgumentSpec");
   py::class_<Code>(m, "Code")
-      .def("executors", [](Code& c) {
-        return py::make_iterator(c.executors().begin(), c.executors().end());
+      .def("grad_executors", [](Code& c) {
+        return py::make_iterator(c.grad_executors().begin(), c.grad_executors().end());
       });
 
   py::class_<ExecutionPlanState>(m, "ExecutionPlanState")
@@ -138,10 +138,7 @@ void initJITBindings(PyObject *module) {
       return s.graph;
     })
     .def_property_readonly("code", [](ExecutionPlanState& s) {
-      return s.f;
-    })
-    .def_property_readonly("grad_executor", [](ExecutionPlanState& s) {
-      return s.grad_executor.get();
+      return s.code;
     });
 
   py::class_<Gradient>(m, "Gradient")
@@ -174,11 +171,8 @@ void initJITBindings(PyObject *module) {
     .def_property_readonly("execution_plans", [](GraphExecutorState& s) {
       return s.execution_plans;
     })
-    .def_property_readonly("autograd_fallback", [](GraphExecutorState& s) {
-      return s.autograd_fallback;
-    })
-    .def_property_readonly("autograd_fallback_graph", [](GraphExecutorState& s) {
-      return s.autograd_fallback_graph;
+    .def_property_readonly("fallback", [](GraphExecutorState& s) {
+      return s.fallback;
     });
 
   py::class_<GraphExecutor>(m, "GraphExecutor", py::dynamic_attr())
@@ -204,7 +198,7 @@ void initJITBindings(PyObject *module) {
       .def_property_readonly("graph", [](GraphExecutor& ge) {
         return ge.graph();
       })
-     .def("get_debug_state", [](GraphExecutor& ge) {
+      .def("get_debug_state", [](GraphExecutor& ge) {
         return ge.getDebugState();
       })
       .def("__call__", [](GraphExecutor& ge, py::args args) -> py::object {

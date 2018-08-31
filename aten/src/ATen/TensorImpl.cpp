@@ -18,7 +18,7 @@ Type& TensorImpl::type() const {
   Backend backend = tensorTypeIdToBackend(type_id_);
   Type* base_type = &globalContext().getType(backend, scalar_type_);
   if (is_variable_) {
-    return detail::getVariableHooks().getVariableType(*base_type);
+    return detail::getVariableHooks().getVariableTypeFromBaseType(*base_type);
   } else {
     return *base_type;
   }

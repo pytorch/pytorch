@@ -176,6 +176,12 @@ struct Attributes {
 
   #undef CREATE_ACCESSOR
 
+  // Our Graphs are not very const-correct, so we need to allow returning
+  // non-const references too
+  GraphAttr::ValueType& g(Symbol name) {
+    return get<GraphAttr>(name);
+  }
+
   // does not use CREATE_ACCESSOR because we need additional asserts
   Derived* t_(Symbol name, TensorAttr::ConstructorType v) {
     JIT_ASSERT(!v.defined() || !v.is_variable());

@@ -84,6 +84,25 @@ void addInputs(Node *n, const char * name, const ArrayRef<double>& value) {
   AT_ERROR("Tracing float lists currently not supported!");
 }
 
+void addOutput(Node* node, const at::Tensor& output) {
+  Value * value = node->addOutput();
+  if (output.defined()) {
+    value->inferTypeFrom(output);
+    setValueTrace(autograd::as_variable_ref(output), value);
+  }
+}
+
+void addOutput(Node* node, const std::vector<at::Tensor>& outputs) {
+  Value * value = node->addOutput()->setType(ListType::ofTensors());
+  Graph * graph = node->owningGraph();
+  Node * unpack_node = graph->appendNode(graph->create(prim::ListUnpack, {value}, outputs.size()));
+  for (size_t i = 0; i < outputs.size(); ++i) {
+    Value * output_val = unpack_node->outputs()[i];
+    output_val->inferTypeFrom(outputs[i]);
+    setValueTrace(outputs[i], output_val);
+  }
+}
+
 const std::shared_ptr<TracingState>& getTracingState() {
   return detail::tracing_state;
 }
@@ -96,18 +115,6 @@ TracingState::TracingState()
     : graph(new Graph()) {}
 
 TracingState::~TracingState() = default;
-
-void postRecordTrace(Node* node,
-                     at::ArrayRef<Variable> outputs) {
-  for (size_t i = 0; i < outputs.size(); i++) {
-    auto & output = outputs[i];
-    Value * value = node->addOutput();
-    if (output.defined()) {
-      value->inferTypeFrom(output.data());
-      setValueTrace(output, value);
-    }
-  }
-}
 
 autograd::Variable getSizeOf(const autograd::Variable& var, int64_t dim) {
   auto & tracing_state = getTracingState();

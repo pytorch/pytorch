@@ -18,6 +18,7 @@ import warnings
 import random
 import contextlib
 import socket
+from collections import OrderedDict
 from functools import wraps
 from itertools import product
 from copy import deepcopy
@@ -346,6 +347,13 @@ class TestCase(unittest.TestCase):
             super(TestCase, self).assertEqual(x, y, message)
         elif type(x) == set and type(y) == set:
             super(TestCase, self).assertEqual(x, y, message)
+        elif isinstance(x, dict) and isinstance(y, dict):
+            if isinstance(x, OrderedDict) and isinstance(y, OrderedDict):
+                self.assertEqual(x.items(), y.items())
+            else:
+                self.assertEqual(set(x.keys()), set(y.keys()))
+                key_list = list(x.keys())
+                self.assertEqual([x[k] for k in key_list], [y[k] for k in key_list])
         elif is_iterable(x) and is_iterable(y):
             super(TestCase, self).assertEqual(len(x), len(y), message)
             for x_, y_ in zip(x, y):

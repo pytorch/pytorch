@@ -29,7 +29,7 @@
     return retval;                                                             \
   }
 
-#define END_HANDLE_TH_ERRORS END_HANDLE_TH_ERRORS_RET(NULL)
+#define END_HANDLE_TH_ERRORS END_HANDLE_TH_ERRORS_RET(nullptr)
 
 extern PyObject *THPException_FatalError;
 
