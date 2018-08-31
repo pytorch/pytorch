@@ -95,6 +95,11 @@ void pythonRecordSourceLocation(Node* n) {
   n->setSourceLocation(sl);
 }
 
+void pythonWarn(const std::string& reason) {
+  auto warn_class = py::module::import("torch.jit").attr("TracerWarning");
+  PyErr_WarnEx(warn_class.ptr(), reason.c_str(), 1);
+}
+
 void initPythonTracerBindings(PyObject* module) {
   setRecordSourceLocation(pythonRecordSourceLocation);
 
@@ -124,6 +129,9 @@ void initPythonTracerBindings(PyObject* module) {
       return s.graph;
     });
 
+  m.def("_tracer_warn_use_python", []() {
+    tracer::setWarn(pythonWarn);
+  });
   m.def("_tracer_enter", [](py::args trace_inputs) {
     return tracer::enter(toStack(trace_inputs));
   });

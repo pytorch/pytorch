@@ -401,6 +401,11 @@ class Tensor(torch._C._TensorBase):
         # map will interleave them.)
         if self.dim() == 0:
             raise TypeError('iteration over a 0-d tensor')
+        if torch._C._get_tracing_state():
+            warnings.warn('Iterating over a tensor might cause the trace to be incorrect. '
+                          'Passing a tensor of different shape won\'t change the number of '
+                          'iterations executed (and might lead to errors or silently give '
+                          'incorrect results).', category=RuntimeWarning)
         return iter(imap(lambda i: self[i], range(self.size(0))))
 
     def __hash__(self):
