@@ -225,7 +225,7 @@ def _str(self):
     if self.is_sparse:
         size_str = str(tuple(self.shape)).replace(' ', '')
         return '{} of size {} with indices:\n{}\nand values:\n{}'.format(
-            self.type(), size_str, self._indices(), self._values())
+            self.type(), size_str, torch._indices(self), torch._values(self))
 
     prefix = 'tensor('
     indent = len(prefix)

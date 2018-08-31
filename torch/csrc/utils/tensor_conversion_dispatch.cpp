@@ -42,7 +42,7 @@ at::Tensor dispatch_type_conversion(
   switch (type.scalarType()) {
 #define DEFINE_CAST_DISPATCH(_1, n, _2)   \
   case at::ScalarType::n: {               \
-    return self._cast_##n(non_blocking); \
+    return at::_cast_##n(self, non_blocking); \
   } break;
     AT_FORALL_SCALAR_TYPES(DEFINE_CAST_DISPATCH)
 #undef DEFINE_CAST_DISPATCH

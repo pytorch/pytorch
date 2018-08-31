@@ -366,20 +366,20 @@ Tensor& stack_out(Tensor& result, TensorList tensors, int64_t dim) {
 }
 
 static inline Tensor & sparse_transpose_(Tensor & self, int64_t dim0, int64_t dim1) {
-  int64_t nsparseDims = self._sparseDims();
+  int64_t nsparseDims = at::_sparseDims(self);
   if (dim0 >= nsparseDims || dim1 >= nsparseDims) {
     AT_ERROR(
         "sparse transpose: transposed dimensions must be sparse ",
         "Got sparseDims: ", nsparseDims, ", d0: ", dim0, ", d1: ", dim1);
   }
 
-  if (self._indices().numel() == 0 && self._values().numel() == 0) {
+  if (at::_indices(self).numel() == 0 && at::_values(self).numel() == 0) {
     auto sizes = self.sizes().vec();
     std::swap(sizes[dim0], sizes[dim1]);
 
-    _get_sparse_impl(self)->raw_resize_(self._sparseDims(), self._denseDims(), sizes);
+    _get_sparse_impl(self)->raw_resize_(at::_sparseDims(self), at::_denseDims(self), sizes);
   } else {
-    auto indices = self._indices();
+    auto indices = at::_indices(self);
     auto row0 = indices.select(0, dim0);
     auto row1 = indices.select(0, dim1);
 
@@ -394,7 +394,7 @@ static inline Tensor & sparse_transpose_(Tensor & self, int64_t dim0, int64_t di
     auto sizes = self.sizes().vec();
     std::swap(sizes[dim0], sizes[dim1]);
 
-    _get_sparse_impl(self)->raw_resize_(self._indices().size(0), self._values().dim() - 1, sizes);
+    _get_sparse_impl(self)->raw_resize_(at::_indices(self).size(0), at::_values(self).dim() - 1, sizes);
   }
   return self;
 }
@@ -440,8 +440,8 @@ Tensor transpose(const Tensor & self, int64_t dim0, int64_t dim1) {
 
 static void check_t(const Tensor& self, const char *fn) {
   if (self.is_sparse()) {
-    int64_t sparseDims = self._sparseDims();
-    int64_t denseDims = self._denseDims();
+    int64_t sparseDims = at::_sparseDims(self);
+    int64_t denseDims = at::_denseDims(self);
     if (!(sparseDims == 2 && denseDims == 0)) {
       AT_ERROR(fn, " expects a tensor with 2 sparse and 0 dense dimensions, but got ",
                sparseDims, " sparse and ", denseDims, " dense dimensions");

@@ -754,7 +754,6 @@ INPUT                  =  ../../torch/csrc/api/include \
                           ../../torch/csrc/api/src \
                           ../../aten/src/ATen/ATen.h \
                           ../../aten/src/ATen/Backend.h \
-                          ../../aten/src/ATen/Context.h \
                           ../../aten/src/ATen/Device.h \
                           ../../aten/src/ATen/DeviceGuard.h \
                           ../../aten/src/ATen/Layout.h \

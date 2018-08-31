@@ -51,8 +51,8 @@ Tensor& s_addmm_out_sparse_dense_cuda(Tensor& r_, const Tensor& t, const SparseT
   AT_CHECK(_check_device({sparse_, r_, t, dense}));
 
   // TODO: This error message seems awfully opaque
-  AT_CHECK(sparse_._sparseDims() == 2, "addmm: 2D tensor expected, got ", sparse_._sparseDims(), "D tensor");
-  AT_CHECK(sparse_._denseDims() == 0, "addmm: scalar values expected, got ", sparse_._denseDims(), "D values");
+  AT_CHECK(at::_sparseDims(sparse_) == 2, "addmm: 2D tensor expected, got ", at::_sparseDims(sparse_), "D tensor");
+  AT_CHECK(at::_denseDims(sparse_) == 0, "addmm: scalar values expected, got ", at::_denseDims(sparse_), "D values");
   AT_CHECK(dense.dim() == 2, "addmm: 2D tensor expected, got ", dense.dim(), "D tensor");
 
   // mxk * kxn = mxn
@@ -71,9 +71,9 @@ Tensor& s_addmm_out_sparse_dense_cuda(Tensor& r_, const Tensor& t, const SparseT
 
   SparseTensor sparse = sparse_.coalesce();
 
-  int64_t nnz = sparse._nnz();
-  LongTensor indices = sparse._indices();
-  Tensor values = sparse._values();
+  int64_t nnz = at::_nnz(sparse);
+  LongTensor indices = at::_indices(sparse);
+  Tensor values = at::_values(sparse);
 
   LongTensor rowIndices = indices.select(0, 0);
   LongTensor colIndices = indices.select(0, 1);
@@ -182,10 +182,10 @@ SparseTensor& hspmm_out_sparse_cuda(SparseTensor& r_, const SparseTensor& sparse
 
   AT_CHECK(_check_device({r_, sparse_, dense}));
 
-  AT_CHECK(sparse_._sparseDims() == 2,
-      "hspmm: Argument #2: 2D tensor expected, got ", sparse_._sparseDims(), "D tensor");
-  AT_CHECK(sparse_._denseDims() == 0,
-      "hspmm: Argument #2: scalar values expected, got ", sparse_._denseDims(), "D values");
+  AT_CHECK(at::_sparseDims(sparse_) == 2,
+      "hspmm: Argument #2: 2D tensor expected, got ", at::_sparseDims(sparse_), "D tensor");
+  AT_CHECK(at::_denseDims(sparse_) == 0,
+      "hspmm: Argument #2: scalar values expected, got ", at::_denseDims(sparse_), "D values");
   AT_CHECK(dense.dim() == 2,
       "hspmm: Argument #3: 2D tensor expected, got ", dense.dim(), "D tensor");
 
@@ -204,7 +204,7 @@ SparseTensor& hspmm_out_sparse_cuda(SparseTensor& r_, const SparseTensor& sparse
 
   SparseTensor sparse = sparse_.coalesce();
 
-  int64_t nnz = sparse._nnz();
+  int64_t nnz = at::_nnz(sparse);
 
   LongTensor indices = at::empty({1, nnz}, CUDA(kLong));
   // create values in column-major format to avoid copying in spaddmm
@@ -214,7 +214,7 @@ SparseTensor& hspmm_out_sparse_cuda(SparseTensor& r_, const SparseTensor& sparse
   // why does sparse need to be cloned? If this is really necessary maybe we
   // need to fuse this with newCoalesce
   SparseTensor newSparse = sparse.clone();
-  LongTensor spIndices = newSparse._indices();
+  LongTensor spIndices = at::_indices(newSparse);
   LongTensor dstIndices = spIndices.select(0, 0);
   // Save destination indices to output hybrid tensor
   indices.copy_(dstIndices);
@@ -260,7 +260,7 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, SparseTensorR
   AT_CHECK(dense.sizes().equals(sparse.sizes()), "add: expected 'self' and 'other' to have same size, but self has size ",
     dense.sizes(), " while other has size ", sparse.sizes(), " (FYI: dense-sparse addition does not currently support broadcasting)");
 
-  const int64_t nnz = sparse._nnz();
+  const int64_t nnz = at::_nnz(sparse);
   if (nnz == 0) {
     r_.resize_as_(dense);
     r_.copy_(dense);
@@ -276,10 +276,10 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, SparseTensorR
     r = r_.contiguous();
   }
 
-  LongTensor indices = sparse._indices();
-  Tensor values = sparse._values();
+  LongTensor indices = at::_indices(sparse);
+  Tensor values = at::_values(sparse);
   int64_t nDim = dense.dim();
-  int64_t nDimI = sparse._sparseDims();
+  int64_t nDimI = at::_sparseDims(sparse);
 
   if (sparse.is_coalesced()) {
     // TODO benchmark to decide whether to remove this special case
@@ -288,7 +288,7 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, SparseTensorR
     int curDevice = -1;
     cudaGetDevice(&curDevice);
     cudaStream_t stream = at::cuda::getCurrentCUDAStream(curDevice);
-    if (sparse._denseDims() == 0) {
+    if (at::_denseDims(sparse) == 0) {
       AT_CHECK(cuda::getApplyGrid(nnz, grid, curDevice), "add: Argument #0: tensor too large or too many dimensions");
 
       AT_DISPATCH_ALL_TYPES_AND_HALF(
@@ -357,23 +357,23 @@ SparseTensor& add_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t, const
   AT_CHECK(_check_device({r_, t, src}));
   AT_CHECK(t.sizes().equals(src.sizes()), "add: expected 'self' and 'other' to have same size, but ", t.sizes(), " != ", src.sizes());
 
-  if (src._nnz() == 0) {
+  if (at::_nnz(src) == 0) {
     return raw_copy_sparse_(r_, t);
   }
-  if (t._nnz() == 0) {
+  if (at::_nnz(t) == 0) {
     return mul_out_sparse_scalar(r_, src, value);
   }
 
-  AT_CHECK(_is_same_density(t, src), "add: expected 'self' and 'other' to have same density, but 'self' has ", t._sparseDims(), " sparse dimensions while 'other' has ", src._sparseDims(), " sparse dimensions");
+  AT_CHECK(_is_same_density(t, src), "add: expected 'self' and 'other' to have same density, but 'self' has ", at::_sparseDims(t), " sparse dimensions while 'other' has ", at::_sparseDims(src), " sparse dimensions");
 
   // We deliberately choose to simply concat the indices and values tensors
   // rather than merging them. This removes the need to synchronously fetch nnz
   // at the end of the operation, at the cost of having a non-coalesced result.
   // This trade-off is preferable for the common use-case of gradient accumulation.
-  LongTensor t_indices_ = t._indices();
-  Tensor t_values_ = t._values();
-  LongTensor s_indices_ = src._indices();
-  Tensor s_values_ = src._values();
+  LongTensor t_indices_ = at::_indices(t);
+  Tensor t_values_ = at::_values(t);
+  LongTensor s_indices_ = at::_indices(src);
+  Tensor s_values_ = at::_values(src);
 
   AT_DISPATCH_ALL_TYPES_AND_HALF(
       s_values_.type(), "add_out_sparse_cuda", [&] {
@@ -422,12 +422,12 @@ SparseTensor& mul_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t_, cons
   SparseTensor t = t_.coalesce();
   SparseTensor src = src_.coalesce();
 
-  if (src_._nnz() == 0 || t_._nnz() == 0) {
+  if (at::_nnz(src_) == 0 || at::_nnz(t_) == 0) {
     return r_.zero_();
   }
 
   // saving those because they can be overwritten when doing in-place operations
-  int64_t t_nnz = t._nnz(), s_nnz = src._nnz();
+  int64_t t_nnz = at::_nnz(t), s_nnz = at::_nnz(src);
   int64_t max_nnz = std::min(t_nnz, s_nnz);  // multiply by zero is zero, and can be dropped
   int64_t sparseDims = src._sparseDims();
   LongTensor t_indices_ = t._indices();

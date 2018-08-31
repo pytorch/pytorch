@@ -6,28 +6,28 @@
 # specialized operators for each datatype.
 # TODO: remove when we have Type support in the IR
 - func: _cast_Byte(Tensor self, bool non_blocking=false) -> Tensor
-  variants: function, method
+  variants: function
 
 - func: _cast_Char(Tensor self, bool non_blocking=false) -> Tensor
-  variants: function, method
+  variants: function
 
 - func: _cast_Double(Tensor self, bool non_blocking=false) -> Tensor
-  variants: function, method
+  variants: function
 
 - func: _cast_Float(Tensor self, bool non_blocking=false) -> Tensor
-  variants: function, method
+  variants: function
 
 - func: _cast_Int(Tensor self, bool non_blocking=false) -> Tensor
-  variants: function, method
+  variants: function
 
 - func: _cast_Long(Tensor self, bool non_blocking=false) -> Tensor
-  variants: function, method
+  variants: function
 
 - func: _cast_Short(Tensor self, bool non_blocking=false) -> Tensor
-  variants: function, method
+  variants: function
 
 - func: _cast_Half(Tensor self, bool non_blocking=false) -> Tensor
-  variants: function, method
+  variants: function
 
 - func: _cudnn_ctc_loss(Tensor log_probs, Tensor targets, IntList input_lengths, IntList target_lengths, int64_t blank, bool deterministic) -> (Tensor, Tensor)
   variants: function
@@ -59,6 +59,7 @@
      CUDA: fused_dropout_cuda
 
 - func: _masked_scale(Tensor self, Tensor mask, double scale) -> Tensor
+  variants: function
   dispatch:
      CUDA: masked_scale_cuda
 
@@ -203,10 +204,12 @@
 - func: argmax(Tensor self, int64_t dim, bool keepdim=false) -> Tensor
 - func: argmax(Tensor self) -> Tensor
 - func: _argmax(Tensor self, int64_t dim, bool keepdim=false) -> Tensor
+  variants: function
 
 - func: argmin(Tensor self, int64_t dim, bool keepdim=false) -> Tensor
 - func: argmin(Tensor self) -> Tensor
 - func: _argmin(Tensor self, int64_t dim, bool keepdim=false) -> Tensor
+  variants: function
 
 - func: as_strided(Tensor self, IntList size, IntList stride) -> Tensor
 
@@ -844,6 +847,7 @@
 
 # gesv handles broadcasting of arbitrary batch dims while _gesv_helper does not.
 - func: _gesv_helper(Tensor self, Tensor A) -> (Tensor, Tensor)
+  variants: function
   dispatch:
     CPU: _gesv_helper_cpu
     CUDA: _gesv_helper_cuda
@@ -862,6 +866,7 @@
 - func: irfft(Tensor self, int64_t signal_ndim, bool normalized=false, bool onesided=true, IntList signal_sizes={}) -> Tensor
 
 - func: _fft_with_size(Tensor self, int64_t signal_ndim, bool complex_input, bool complex_output, bool inverse, IntList checked_signal_sizes, bool normalized, bool onesided, IntList output_sizes) -> Tensor
+  variants: function
   dispatch:
     CPU: _fft_mkl
     CUDA: _fft_cufft
@@ -1608,6 +1613,7 @@
 - func: sum(Tensor self) -> Tensor
 
 - func: _sum(Tensor self) -> Tensor
+  variants: function
   dispatch:
     CPU: _sum_cpu
     CUDA: _sum_cuda
@@ -1619,6 +1625,7 @@
 - func: sum(Tensor self, IntList[1] dim, *, ScalarType dtype) -> Tensor
 
 - func: _sum(Tensor self, IntList[1] dim, bool keepdim=False) -> Tensor
+  variants: function
 
 - func: sum_out(Tensor result, Tensor self, IntList[1] dim, bool keepdim, *, ScalarType dtype) -> Tensor
   variants: function
@@ -1663,6 +1670,7 @@
 - func: prod(Tensor self) -> Tensor
 
 - func: _prod(Tensor self) -> Tensor
+  variants: function
   dispatch:
     CPU: _prod_cpu
     CUDA: _prod_cuda
@@ -1674,6 +1682,7 @@
 - func: prod(Tensor self, int64_t dim, *, ScalarType dtype) -> Tensor
 
 - func: _prod(Tensor self, int64_t dim, bool keepdim=False) -> Tensor
+  variants: function
 
 - func: prod_out(Tensor result, Tensor self, int64_t dim, bool keepdim, *, ScalarType dtype) -> Tensor
   variants: function
@@ -1760,11 +1769,13 @@
   variants: method
 
 - func: _unique(Tensor self, bool sorted=false, bool return_inverse=false) -> (Tensor, Tensor)
+  variants: function
   dispatch:
     CPU: _unique_cpu
     CUDA: _unique_cuda
 
 - func: _unique_dim(Tensor self, int64_t dim, bool sorted=false, bool return_inverse=false) -> (Tensor, Tensor)
+  variants: function
   dispatch:
     CPU: _unique_dim_cpu
     CUDA: _unique_dim_cuda
@@ -1792,6 +1803,7 @@
 # _s_where derivative.
 - func: where(BoolTensor condition, Tensor self, Tensor other) -> Tensor
 - func: _s_where(BoolTensor condition, Tensor self, Tensor other) -> Tensor
+  variants: function
   dispatch:
     CPU: _s_where_cpu
     CUDA: _s_where_cuda
@@ -1813,11 +1825,13 @@
   deprecated: true
 
 - func: _standard_gamma_grad(Tensor self, Tensor output) -> Tensor
+  variants: function
   dispatch:
     CPU: _standard_gamma_grad_cpu
     CUDA: _standard_gamma_grad_cuda
 
 - func: _standard_gamma(Tensor self, Generator* generator=nullptr) -> Tensor
+  variants: function
   dispatch:
     CPU: _s_gamma_cpu
     CUDA: _s_gamma_cuda
@@ -2015,7 +2029,7 @@
 
 
 - func: _sparse_mask(Tensor self, SparseTensorRef mask) -> Tensor
-  variants: method
+  variants: function
   dispatch:
     CPU: sparse_mask_cpu
     CUDA: sparse_mask_cuda
@@ -2029,7 +2043,7 @@
 
 
 - func: _sparseDims(Tensor self) -> int64_t
-  variants: method
+  variants: function
   dispatch:
     SparseCPU: _sparseDims_sparse
     SparseCUDA: _sparseDims_sparse
@@ -2037,13 +2051,13 @@
 
 # legacy method
 - func: _dimI(Tensor self) -> int64_t
-  variants: method
+  variants: function
   dispatch: _sparseDims_sparse
   device_guard: False
 
 
 - func: _denseDims(Tensor self) -> int64_t
-  variants: method
+  variants: function
   dispatch:
     SparseCPU: _denseDims_sparse
     SparseCUDA: _denseDims_sparse
@@ -2051,13 +2065,13 @@
 
 # legacy method
 - func: _dimV(Tensor self) -> int64_t
-  variants: method
+  variants: function
   dispatch: _denseDims_sparse
   device_guard: False
 
 
 - func: _nnz(Tensor self) -> int64_t
-  variants: method
+  variants: function
   dispatch:
     SparseCPU: _nnz_sparse
     SparseCUDA: _nnz_sparse
@@ -2080,7 +2094,7 @@
 
 
 - func: _indices(Tensor self) -> Tensor
-  variants: method
+  variants: function
   dispatch:
     SparseCPU: _indices_sparse
     SparseCUDA: _indices_sparse
@@ -2088,7 +2102,7 @@
 
 
 - func: _values(Tensor self) -> Tensor
-  variants: method
+  variants: function
   dispatch:
     SparseCPU: _values_sparse
     SparseCUDA: _values_sparse
@@ -2139,9 +2153,7 @@
 
 # This has a method dispatch to work around circular include problems
 - func: _local_scalar(Tensor self) -> Scalar
-  variants:
-    - function
-    - method
+  variants: function, method
 
 # NB: Does NOT check precondition that numel == 1
 # WARNING: Use of cpu_half here is generally not supported; please
@@ -2151,8 +2163,7 @@
   dispatch:
     CPU: _local_scalar_dense_cpu
     CUDA: _local_scalar_dense_cuda
-  variants:
-    - function
+  variants: function
 
 # Fused RNN kernels
 - func: _thnn_fused_lstm_cell(Tensor input_gates, Tensor hidden_gates, Tensor cx, Tensor? input_bias={}, Tensor? hidden_bias={}) -> (Tensor, Tensor, Tensor)

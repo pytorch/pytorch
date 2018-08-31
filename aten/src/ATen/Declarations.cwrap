@@ -65,6 +65,7 @@
   name: _fill_
   return: self
   cname: fill
+  variants: function
   options:
     - arguments:
       - THTensor* self
@@ -204,6 +205,7 @@
 [[
   name: _indexCopy_
   cname: indexCopy
+  variants: function
   return: argument 0
   arguments:
     - THTensor* self
@@ -831,9 +833,7 @@
 ]]
 [[
   name: _th_min
-  variants:
-    - method
-    - function
+  variants: function
   options:
     - cname: min
       return: argument 0,1
@@ -870,9 +870,7 @@
 ]]
 [[
   name: _th_max
-  variants:
-    - method
-    - function
+  variants: function
   options:
     - cname: max
       return: argument 0,1
@@ -892,9 +890,7 @@
   name: _th_kthvalue
   backends:
     - CPU
-  variants:
-    - method
-    - function
+  variants: function
   cname: kthvalue
   return: argument 0,1
   scalar_check: self_->dim() == 0 || (keepdim == false && self_->dim() == 1)
@@ -913,9 +909,7 @@
 ]]
 [[
   name: _th_mode
-  variants:
-    - method
-    - function
+  variants: function
   cname: mode
   return: argument 0,1
   scalar_check: self_->dim() == 0|| (keepdim == false && self_->dim() == 1)
@@ -945,9 +939,7 @@
 ]]
 [[
   name: _th_median
-  variants:
-    - method
-    - function
+  variants: function
   cname: median
   return: argument 0,1
   options:
@@ -1023,9 +1015,7 @@
   name: _th_all
   types:
     - Byte
-  variants:
-    - method
-    - function
+  variants: function
   backends:
     - CPU
     - CUDA
@@ -1062,9 +1052,7 @@
   name: _th_any
   types:
     - Byte
-  variants:
-    - method
-    - function
+  variants: function
   backends:
     - CPU
     - CUDA
@@ -1104,9 +1092,7 @@
   backends:
     - CPU
     - CUDA
-  variants:
-    - method
-    - function
+  variants: function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -1120,9 +1106,7 @@
   backends:
     - CUDA
   cname: sigmoid
-  variants:
-    - method
-    - function
+  variants: function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -1136,9 +1120,7 @@
     - floating_point
   backends:
     - CUDA
-  variants:
-    - method
-    - function
+  variants: function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -1153,9 +1135,7 @@
   backends:
     - CPU
     - CUDA
-  variants:
-    - method
-    - function
+  variants: function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -1169,9 +1149,7 @@
     - floating_point
   backends:
     - CUDA
-  variants:
-    - method
-    - function
+  variants: function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -1186,9 +1164,7 @@
   backends:
     - CPU
     - CUDA
-  variants:
-    - method
-    - function
+  variants: function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -1291,9 +1267,7 @@
     - floating_point
   backends:
     - CUDA
-  variants:
-    - method
-    - function
+  variants: function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -1307,9 +1281,7 @@
     - floating_point
   backends:
     - CUDA
-  variants:
-    - method
-    - function
+  variants: function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -1323,9 +1295,7 @@
     - floating_point
   backends:
     - CUDA
-  variants:
-    - method
-    - function
+  variants: function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -1339,9 +1309,7 @@
     - floating_point
   backends:
     - CUDA
-  variants:
-    - method
-    - function
+  variants: function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -1356,9 +1324,7 @@
   backends:
     - CPU
     - CUDA
-  variants:
-    - method
-    - function
+  variants: function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -1372,9 +1338,7 @@
     - floating_point
   backends:
     - CUDA
-  variants:
-    - method
-    - function
+  variants: function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -1388,9 +1352,7 @@
     - floating_point
   backends:
     - CUDA
-  variants:
-    - method
-    - function
+  variants: function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -1405,9 +1367,7 @@
   backends:
     - CPU
     - CUDA
-  variants:
-    - method
-    - function
+  variants: function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -1421,9 +1381,7 @@
     - floating_point
   backends:
     - CUDA
-  variants:
-    - method
-    - function
+  variants: function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -1437,9 +1395,7 @@
     - floating_point
   backends:
     - CUDA
-  variants:
-    - method
-    - function
+  variants: function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -1453,9 +1409,7 @@
     - floating_point
   backends:
     - CUDA
-  variants:
-    - method
-    - function
+  variants: function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -1469,9 +1423,7 @@
     - floating_point
   backends:
     - CUDA
-  variants:
-    - method
-    - function
+  variants: function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -1485,9 +1437,7 @@
     - floating_point
   backends:
     - CUDA
-  variants:
-    - method
-    - function
+  variants: function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -1530,9 +1480,7 @@
     - floating_point
   backends:
     - CUDA
-  variants:
-    - method
-    - function
+  variants: function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -1546,9 +1494,7 @@
     - floating_point
   backends:
     - CUDA
-  variants:
-    - method
-    - function
+  variants: function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -1562,9 +1508,7 @@
     - floating_point
   backends:
     - CUDA
-  variants:
-    - method
-    - function
+  variants: function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -1578,9 +1522,7 @@
     - floating_point
   backends:
     - CUDA
-  variants:
-    - method
-    - function
+  variants: function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -1594,9 +1536,7 @@
     - floating_point
   backends:
     - CUDA
-  variants:
-    - method
-    - function
+  variants: function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -1610,9 +1550,7 @@
     - floating_point
   backends:
     - CUDA
-  variants:
-    - method
-    - function
+  variants: function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -1655,9 +1593,7 @@
   backends:
     - CPU
     - CUDA
-  variants:
-    - method
-    - function
+  variants: function
   options:
     - cname: varall
       return: accreal
@@ -1690,9 +1626,7 @@
   backends:
     - CPU
     - CUDA
-  variants:
-    - method
-    - function
+  variants: function
   options:
     - cname: stdall
       return: accreal
@@ -1743,9 +1677,7 @@
   backends:
     - CPU
     - CUDA
-  variants:
-    - method
-    - function
+  variants: function
   options:
     - cname: norm
       return: argument 0
@@ -2080,9 +2012,7 @@
 ]]
 [[
   name: _sumall
-  variants:
-    - method
-    - function
+  variants: function
   options:
     - cname: sumall
       return: accreal
@@ -2091,9 +2021,7 @@
 ]]
 [[
   name: _th_sum
-  variants:
-    - method
-    - function
+  variants: function
   options:
     - cname: sum
       return: argument 0
@@ -2109,9 +2037,7 @@
 ]]
 [[
   name: _prodall
-  variants:
-    - method
-    - function
+  variants: function
   options:
     - cname: prodall
       return: accreal
@@ -2120,9 +2046,7 @@
 ]]
 [[
   name: _th_prod
-  variants:
-    - method
-    - function
+  variants: function
   options:
     - cname: prod
       return: argument 0
@@ -2139,9 +2063,7 @@
 [[
   name: _cumsum
   cname: cumsum
-  variants:
-    - method
-    - function
+  variants: function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -2153,9 +2075,7 @@
 [[
   name: _cumprod
   cname: cumprod
-  variants:
-    - method
-    - function
+  variants: function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -2269,9 +2189,7 @@
 [[
   name: _th_clamp
   cname: clamp
-  variants:
-    - method
-    - function
+  variants: function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -2283,9 +2201,7 @@
 [[
   name: _th_clamp_min
   cname: cmaxValue
-  variants:
-    - method
-    - function
+  variants: function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -2296,9 +2212,7 @@
 [[
   name: _th_clamp_max
   cname: cminValue
-  variants:
-    - method
-    - function
+  variants: function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -2310,9 +2224,7 @@
   name: _dot
   backend_type_pairs: [[CUDA,floating_point], [CPU,all]]
   cname: dot
-  variants:
-    - method
-    - function
+  variants: function
   return: accreal
   arguments:
     - arg: THTensor* self
@@ -2439,9 +2351,7 @@
 [[
   name: _addmv
   cname: addmv
-  variants:
-    - method
-    - function
+  variants: function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -2460,6 +2370,7 @@
 [[
   name: _addmv_
   cname: addmv
+  variants: function
   return: self
   arguments:
     - THTensor* self
@@ -2476,9 +2387,7 @@
 [[
   name: _addr
   cname: addr
-  variants:
-    - method
-    - function
+  variants: function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -2498,6 +2407,7 @@
   name: _addr_
   cname: addr
   return: self
+  variants: function
   arguments:
     - THTensor* self
     - arg: real beta
@@ -2513,9 +2423,7 @@
 [[
   name: _ger
   cname: addr
-  variants:
-    - method
-    - function
+  variants: function
   return: argument 0
   scalar_check: False
   arguments:
@@ -2532,9 +2440,7 @@
 [[
   name: _mv
   cname: addmv
-  variants:
-    - method
-    - function
+  variants: function
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -2549,9 +2455,7 @@
 ]]
 [[
   name: _mm
-  variants:
-    - method
-    - function
+  variants: function
   return: argument 0
   options:
     - cname: addmm
@@ -2738,9 +2642,7 @@
   backends:
     - CPU
     - CUDA
-  variants:
-    - method
-    - function
+  variants: function
   return: argument 0,1
   arguments:
     - arg: THTensor* solution
@@ -2889,9 +2791,7 @@
   backends:
     - CPU
     - CUDA
-  variants:
-    - method
-    - function
+  variants: function
   return: argument 0
   arguments:
     - arg: THTensor* output
@@ -3342,6 +3242,7 @@
     - CUDA
   cname: bernoulli
   return: self
+  variants: function
   arguments:
     - THTensor* self
     - arg: THGenerator* generator
@@ -3355,9 +3256,7 @@
     - Float
     - Double
   return: argument 0
-  variants:
-    - method
-    - function
+  variants: function
   cname: bernoulli_Tensor
   arguments:
     - arg: THTensor* output
@@ -3435,6 +3334,7 @@
   name: _copy_ignoring_overlaps_
   cname: copyIgnoringOverlaps
   return: self
+  variants: function
   backends:
     - CUDA
   arguments:
