@@ -74,7 +74,7 @@ void THTensor_(copyTranspose)(THTensor *tensor, THTensor *src) {
       }
     }
   }
-  THTensor_(free)(buf);
+  c10::raw::intrusive_ptr::decref(buf);
   #undef MIN
   #undef MAX
 }

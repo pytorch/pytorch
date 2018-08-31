@@ -120,7 +120,7 @@ void THNN_(SpatialSubSampling_updateOutput)(
       }
     }
   }
-  THTensor_(free)(input);
+  c10::raw::intrusive_ptr::decref(input);
 }
 
 void THNN_(SpatialSubSampling_updateGradInput)(
@@ -202,7 +202,7 @@ void THNN_(SpatialSubSampling_updateGradInput)(
       }
     }
   }
-  THTensor_(free)(gradOutput);
+  c10::raw::intrusive_ptr::decref(gradOutput);
 }
 
 void THNN_(SpatialSubSampling_accGradParameters)(
@@ -292,8 +292,8 @@ void THNN_(SpatialSubSampling_accGradParameters)(
     }
   }
 
-  THTensor_(free)(input);
-  THTensor_(free)(gradOutput);
+  c10::raw::intrusive_ptr::decref(input);
+  c10::raw::intrusive_ptr::decref(gradOutput);
 }
 
 #endif

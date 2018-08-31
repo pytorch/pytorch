@@ -288,8 +288,8 @@ void THNN_(VolumetricFullDilatedConvolution_updateOutput)(
   }
 
   // Free
-  THTensor_(free)(input_n);
-  THTensor_(free)(output_n);
+  c10::raw::intrusive_ptr::decref(input_n);
+  c10::raw::intrusive_ptr::decref(output_n);
 
   // Resize output
   if (is_batch == 0)
@@ -298,9 +298,9 @@ void THNN_(VolumetricFullDilatedConvolution_updateOutput)(
     THTensor_(resize4d)(input, nInputPlane, inputDepth, inputHeight, inputWidth);
   }
 
-  THTensor_(free)(input);
-  THTensor_(free)(weight);
-  if (bias) THTensor_(free)(bias);
+  c10::raw::intrusive_ptr::decref(input);
+  c10::raw::intrusive_ptr::decref(weight);
+  if (bias) c10::raw::intrusive_ptr::decref(bias);
 }
 
 void THNN_(VolumetricFullDilatedConvolution_updateGradInput)(
@@ -400,8 +400,8 @@ void THNN_(VolumetricFullDilatedConvolution_updateGradInput)(
   }
 
   // Free
-  THTensor_(free)(gradInput_n);
-  THTensor_(free)(gradOutput_n);
+  c10::raw::intrusive_ptr::decref(gradInput_n);
+  c10::raw::intrusive_ptr::decref(gradOutput_n);
 
   // Resize output
   if (is_batch == 0)
@@ -411,9 +411,9 @@ void THNN_(VolumetricFullDilatedConvolution_updateGradInput)(
     THTensor_(resize4d)(gradInput, nInputPlane, inputDepth, inputHeight, inputWidth);
   }
 
-  THTensor_(free)(input);
-  THTensor_(free)(gradOutput);
-  THTensor_(free)(weight);
+  c10::raw::intrusive_ptr::decref(input);
+  c10::raw::intrusive_ptr::decref(gradOutput);
+  c10::raw::intrusive_ptr::decref(weight);
 }
 
 void THNN_(VolumetricFullDilatedConvolution_accGradParameters)(
@@ -556,8 +556,8 @@ void THNN_(VolumetricFullDilatedConvolution_accGradParameters)(
   }
 
   // Free
-  THTensor_(free)(input_n);
-  THTensor_(free)(gradOutput_n);
+  c10::raw::intrusive_ptr::decref(input_n);
+  c10::raw::intrusive_ptr::decref(gradOutput_n);
 
   // Resize
   if (is_batch == 0)
@@ -566,8 +566,8 @@ void THNN_(VolumetricFullDilatedConvolution_accGradParameters)(
     THTensor_(resize4d)(input, input->size(1), inputDepth, inputHeight, inputWidth);
   }
 
-  THTensor_(free)(input);
-  THTensor_(free)(gradOutput);
+  c10::raw::intrusive_ptr::decref(input);
+  c10::raw::intrusive_ptr::decref(gradOutput);
 }
 
 #endif

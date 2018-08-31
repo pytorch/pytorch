@@ -81,7 +81,7 @@ void THNN_(VolumetricUpSamplingNearest_updateOutput)(
         }
       }
     }
-    THTensor_(free)(input);
+    c10::raw::intrusive_ptr::decref(input);
     return;
   }
 
@@ -101,7 +101,7 @@ void THNN_(VolumetricUpSamplingNearest_updateOutput)(
       }
     }
   }
-  THTensor_(free)(input);
+  c10::raw::intrusive_ptr::decref(input);
 }
 
 void THNN_(VolumetricUpSamplingNearest_updateGradInput)(
@@ -146,7 +146,7 @@ void THNN_(VolumetricUpSamplingNearest_updateGradInput)(
         }
       }
     }
-    THTensor_(free)(gradOutput);
+    c10::raw::intrusive_ptr::decref(gradOutput);
     return;
   }
 
@@ -167,7 +167,7 @@ void THNN_(VolumetricUpSamplingNearest_updateGradInput)(
     }
   }
 
-  THTensor_(free)(gradOutput);
+  c10::raw::intrusive_ptr::decref(gradOutput);
 }
 
 #endif

@@ -96,11 +96,11 @@ void THNN_(SpatialConvolutionMap_updateOutput)(
   }
 
   /* clean up */
-  THTensor_(free)(input);
-  THTensor_(free)(output);
-  THTensor_(free)(weight);
-  if (bias) THTensor_(free)(bias);
-  THTensor_(free)(connTable);
+  c10::raw::intrusive_ptr::decref(input);
+  c10::raw::intrusive_ptr::decref(output);
+  c10::raw::intrusive_ptr::decref(weight);
+  if (bias) c10::raw::intrusive_ptr::decref(bias);
+  c10::raw::intrusive_ptr::decref(connTable);
 }
 
 void THNN_(SpatialConvolutionMap_updateGradInput)(
@@ -176,10 +176,10 @@ void THNN_(SpatialConvolutionMap_updateGradInput)(
   }
 
   /* clean up */
-  THTensor_(free)(gradInput);
-  THTensor_(free)(gradOutput);
-  THTensor_(free)(weight);
-  THTensor_(free)(connTable);
+  c10::raw::intrusive_ptr::decref(gradInput);
+  c10::raw::intrusive_ptr::decref(gradOutput);
+  c10::raw::intrusive_ptr::decref(weight);
+  c10::raw::intrusive_ptr::decref(connTable);
 }
 
 void THNN_(SpatialConvolutionMap_accGradParameters)(
@@ -270,8 +270,8 @@ void THNN_(SpatialConvolutionMap_accGradParameters)(
   }
 
   /* clean up */
-  THTensor_(free)(input);
-  THTensor_(free)(gradOutput);
+  c10::raw::intrusive_ptr::decref(input);
+  c10::raw::intrusive_ptr::decref(gradOutput);
 }
 
 #endif

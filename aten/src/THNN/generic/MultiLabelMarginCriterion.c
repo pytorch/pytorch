@@ -91,7 +91,7 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
       sum /= nframe;
     THTensor_(fastSet1d)(output, 0, sum);
 
-    THTensor_(free)(input);
+    c10::raw::intrusive_ptr::decref(input);
     THIndexTensor_(free)(target);
     return;
   }
@@ -136,7 +136,7 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
     isTarget_data += dim;
   }
 
-  THTensor_(free)(input);
+  c10::raw::intrusive_ptr::decref(input);
   THIndexTensor_(free)(target);
 }
 
@@ -249,10 +249,10 @@ void THNN_(MultiLabelMarginCriterion_updateGradInput)(
     }
   }
 
-  THTensor_(free)(input);
+  c10::raw::intrusive_ptr::decref(input);
   THIndexTensor_(free)(target);
-  THTensor_(free)(isTarget);
-  THTensor_(free)(gradInput);
+  c10::raw::intrusive_ptr::decref(isTarget);
+  c10::raw::intrusive_ptr::decref(gradInput);
 }
 
 #endif

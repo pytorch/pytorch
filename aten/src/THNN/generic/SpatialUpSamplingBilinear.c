@@ -74,7 +74,7 @@ void THNN_(SpatialUpSamplingBilinear_updateOutput)(
         }
       }
     }
-    THTensor_(free)(input);
+    c10::raw::intrusive_ptr::decref(input);
     return;
   }
   const accreal rheight = linear_upsampling_compute_scale<accreal>(inputHeight, outputHeight, align_corners);
@@ -102,7 +102,7 @@ void THNN_(SpatialUpSamplingBilinear_updateOutput)(
       }
     }
   }
-  THTensor_(free)(input);
+  c10::raw::intrusive_ptr::decref(input);
 }
 
 void THNN_(SpatialUpSamplingBilinear_updateGradInput)(
@@ -145,7 +145,7 @@ void THNN_(SpatialUpSamplingBilinear_updateGradInput)(
         }
       }
     }
-    THTensor_(free)(gradOutput);
+    c10::raw::intrusive_ptr::decref(gradOutput);
     return;
   }
   const accreal rheight = linear_upsampling_compute_scale<accreal>(inputHeight, outputHeight, align_corners);
@@ -174,7 +174,7 @@ void THNN_(SpatialUpSamplingBilinear_updateGradInput)(
       }
     }
   }
-  THTensor_(free)(gradOutput);
+  c10::raw::intrusive_ptr::decref(gradOutput);
 }
 
 #endif

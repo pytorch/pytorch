@@ -82,7 +82,7 @@ void THNN_(SpatialFullConvolutionMap_updateOutput)(
   }
 
   /* clean up */
-  THTensor_(free)(input);
+  c10::raw::intrusive_ptr::decref(input);
   THTensor_(freeCopyTo)(output, output_);
 }
 
@@ -146,7 +146,7 @@ void THNN_(SpatialFullConvolutionMap_updateGradInput)(
 
   /* clean up */
   THTensor_(freeCopyTo)(gradInput, gradInput_);
-  THTensor_(free)(gradOutput);
+  c10::raw::intrusive_ptr::decref(gradOutput);
 }
 
 void THNN_(SpatialFullConvolutionMap_accGradParameters)(
@@ -216,8 +216,8 @@ void THNN_(SpatialFullConvolutionMap_accGradParameters)(
   }
 
   /* clean up */
-  THTensor_(free)(input);
-  THTensor_(free)(gradOutput);
+  c10::raw::intrusive_ptr::decref(input);
+  c10::raw::intrusive_ptr::decref(gradOutput);
 }
 
 #endif

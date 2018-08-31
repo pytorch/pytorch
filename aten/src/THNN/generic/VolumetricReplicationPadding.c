@@ -208,7 +208,7 @@ THNN_(VolumetricReplicationPadding_shapeCheck)(
   }
 
   /* cleanup */
-  THTensor_(free)(input);
+  c10::raw::intrusive_ptr::decref(input);
 }
 
 static void THNN_(VolumetricReplicationPadding_updateGradInput_frame)(
@@ -351,7 +351,7 @@ THNN_(VolumetricReplicationPadding_shapeCheck)(
   }
 
   /* cleanup */
-  THTensor_(free)(gradOutput);
+  c10::raw::intrusive_ptr::decref(gradOutput);
 }
 
 #endif

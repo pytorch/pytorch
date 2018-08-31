@@ -168,7 +168,7 @@ static void THNN_(TemporalRowConvolution_updateOutput_frame)(
 
 	THTensor_(baddbmm)(output3d, 1, output3d, 1, weight, finput);
 
-	THTensor_(free)(output3d);
+	c10::raw::intrusive_ptr::decref(output3d);
 }
 
 void THNN_(TemporalRowConvolution_updateOutput)(
@@ -234,18 +234,18 @@ void THNN_(TemporalRowConvolution_updateOutput)(
 			        (input_t, output_t, weight, bias, finput_t,
 			        kW, dW, padW, inputFrameSize, nInputFrame, nOutputFrame);
 
-			THTensor_(free)(input_t);
-			THTensor_(free)(output_t);
-			THTensor_(free)(finput_t);
+			c10::raw::intrusive_ptr::decref(input_t);
+			c10::raw::intrusive_ptr::decref(output_t);
+			c10::raw::intrusive_ptr::decref(finput_t);
 		}
 	}
 
 	if (!featFirst) { // NOTE: output will NOT be contiguous in this case
 		THTensor_(transpose)(output, output, ndim - 1, ndim - 2);
-		THTensor_(free)(tinput);
+		c10::raw::intrusive_ptr::decref(tinput);
 	}
 
-	THTensor_(free)(input);
+	c10::raw::intrusive_ptr::decref(input);
 }
 
 static void THNN_(TemporalRowConvolution_updateGradInput_frame)(
@@ -270,7 +270,7 @@ static void THNN_(TemporalRowConvolution_updateGradInput_frame)(
 	// gradOutput3d:	inputFrameSize x 1 x nOutputFrame
 	THTensor_(baddbmm)(fgradInput, 0, fgradInput, 1, weight, gradOutput3d);
 	// fgradInput:		inputFrameSize x kW x nOutputFrame
-	THTensor_(free)(gradOutput3d);
+	c10::raw::intrusive_ptr::decref(gradOutput3d);
 
 	THTensor_(zero)(gradInput);
 
@@ -345,24 +345,24 @@ void THNN_(TemporalRowConvolution_updateGradInput)(
 			        kW, dW, padW,
 			        inputFrameSize, nInputFrame, nOutputFrame);
 
-			THTensor_(free)(gradInput_t);
-			THTensor_(free)(gradOutput_t);
-			THTensor_(free)(fgradInput_t);
+			c10::raw::intrusive_ptr::decref(gradInput_t);
+			c10::raw::intrusive_ptr::decref(gradOutput_t);
+			c10::raw::intrusive_ptr::decref(fgradInput_t);
 		}
 	}
 
-    THTensor_(free)(tweight);
+    c10::raw::intrusive_ptr::decref(tweight);
 
 	if (!featFirst) { // NOTE: gradInput will NOT be contiguous in this case
 
-		THTensor_(free)(tinput);
-		THTensor_(free)(tgradOutput);
+		c10::raw::intrusive_ptr::decref(tinput);
+		c10::raw::intrusive_ptr::decref(tgradOutput);
 
 		THTensor_(transpose)(gradInput, gradInput, ndim - 1, ndim - 2);
 	}
 
-	THTensor_(free)(input);
-	THTensor_(free)(gradOutput);
+	c10::raw::intrusive_ptr::decref(input);
+	c10::raw::intrusive_ptr::decref(gradOutput);
 
 }
 
@@ -383,7 +383,7 @@ static void THNN_(TemporalRowConvolution_accGradParameters_frame)(
 	// finput:			inputFrameSize x nOutputFrame x kW
 	THTensor_(baddbmm)(gradWeight, 1, gradWeight, scale, gradOutput3d, tfinput);
 	// gradWeight:		inputFrameSize x 1 x kW
-    THTensor_(free)(tfinput);
+    c10::raw::intrusive_ptr::decref(tfinput);
 
 	if (gradBias != NULL) {
 		for (i = 0; i < THTensor_sizeLegacyNoScalars(gradBias, 0); i++) {
@@ -400,7 +400,7 @@ static void THNN_(TemporalRowConvolution_accGradParameters_frame)(
 		}
 	}
 
-	THTensor_(free)(gradOutput3d);
+	c10::raw::intrusive_ptr::decref(gradOutput3d);
 
 }
 
@@ -451,18 +451,18 @@ void THNN_(TemporalRowConvolution_accGradParameters)(
 			THNN_(TemporalRowConvolution_accGradParameters_frame)(
 				gradOutput_t, gradWeight, gradBias, finput_t, scale);
 
-			THTensor_(free)(gradOutput_t);
-			THTensor_(free)(finput_t);
+			c10::raw::intrusive_ptr::decref(gradOutput_t);
+			c10::raw::intrusive_ptr::decref(finput_t);
 		}
 	}
 
 	if (!featFirst) {
-		THTensor_(free)(tinput);
-		THTensor_(free)(tgradOutput);
+		c10::raw::intrusive_ptr::decref(tinput);
+		c10::raw::intrusive_ptr::decref(tgradOutput);
 	}
 
-	THTensor_(free)(input);
-	THTensor_(free)(gradOutput);
+	c10::raw::intrusive_ptr::decref(input);
+	c10::raw::intrusive_ptr::decref(gradOutput);
 }
 
 #endif

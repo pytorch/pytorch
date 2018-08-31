@@ -50,13 +50,13 @@ void THTensor_(maskedCopy)(THTensor *tensor, THByteTensor *mask, THTensor* src )
   ptrdiff_t nelem = THTensor_(nElement)(srct);
   if (THTensor_(nElement)(tensor) != THByteTensor_nElement(mask))
   {
-    THTensor_(free)(srct);
+    c10::raw::intrusive_ptr::decref(srct);
     THError("Number of elements of destination tensor != Number of elements in mask");
   }
   TH_TENSOR_APPLY2(real, tensor, unsigned char, mask,
                    if (*mask_data > 1)
                    {
-                     THTensor_(free)(srct);
+                     c10::raw::intrusive_ptr::decref(srct);
                      THFree(mask_counter);
                      THFree(tensor_counter);
                      THError("Mask tensor can take 0 and 1 values only");
@@ -65,7 +65,7 @@ void THTensor_(maskedCopy)(THTensor *tensor, THByteTensor *mask, THTensor* src )
                    {
                      if (cntr == nelem)
                      {
-                       THTensor_(free)(srct);
+                       c10::raw::intrusive_ptr::decref(srct);
                        THFree(mask_counter);
                        THFree(tensor_counter);
                        THError("Number of elements of src < number of ones in mask");
@@ -74,7 +74,7 @@ void THTensor_(maskedCopy)(THTensor *tensor, THByteTensor *mask, THTensor* src )
                      src_data++;
                      cntr++;
                    });
-  THTensor_(free)(srct);
+  c10::raw::intrusive_ptr::decref(srct);
 }
 
 void THTensor_(maskedSelect)(THTensor *tensor, THTensor *src, THByteTensor *mask)
@@ -203,8 +203,8 @@ void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, int dim, THLongTens
       THTensor_(select)(tSlice, tensor, dim, i);
       THTensor_(select)(sSlice, src, dim, index_data[i] - TH_INDEX_BASE);
       THTensor_(copy)(tSlice, sSlice);
-      THTensor_(free)(tSlice);
-      THTensor_(free)(sSlice);
+      c10::raw::intrusive_ptr::decref(tSlice);
+      c10::raw::intrusive_ptr::decref(sSlice);
     }
   }
 
@@ -236,8 +236,8 @@ void THTensor_(indexCopy)(THTensor *tensor, int dim, THLongTensor *index, THTens
       THTensor_(copy)(tSlice, sSlice);
     }
 
-    THTensor_(free)(tSlice);
-    THTensor_(free)(sSlice);
+    c10::raw::intrusive_ptr::decref(tSlice);
+    c10::raw::intrusive_ptr::decref(sSlice);
   }
   else
   {
@@ -334,7 +334,7 @@ void THTensor_(put)(THTensor *tensor, THLongTensor *index, THTensor *src, int ac
     }
   );
 
-  THTensor_(free)(src);
+  c10::raw::intrusive_ptr::decref(src);
   THLongTensor_free(index);
 }
 
@@ -364,8 +364,8 @@ void THTensor_(indexAdd)(THTensor *tensor, int dim, THLongTensor *index, THTenso
       THTensor_(cadd)(tSlice, tSlice, 1.0, sSlice);
     }
 
-    THTensor_(free)(tSlice);
-    THTensor_(free)(sSlice);
+    c10::raw::intrusive_ptr::decref(tSlice);
+    c10::raw::intrusive_ptr::decref(sSlice);
   }
   else
   {
@@ -399,7 +399,7 @@ void THTensor_(indexFill)(THTensor *tensor, int dim, THLongTensor *index, real v
       tSlice = THTensor_(new)();
       THTensor_(select)(tSlice, tensor,dim,index_data[i] - TH_INDEX_BASE);
       THTensor_(fill)(tSlice, val);
-      THTensor_(free)(tSlice);
+      c10::raw::intrusive_ptr::decref(tSlice);
     }
     else
     {

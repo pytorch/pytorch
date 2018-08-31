@@ -120,10 +120,10 @@ void THNN_(SpatialClassNLLCriterion_updateOutput)(
   if (reduction == Reduction::ElementwiseMean && *total_weight_data)
     *output_data /= *total_weight_data;
 
-  THTensor_(free)(input);
+  c10::raw::intrusive_ptr::decref(input);
   THIndexTensor_(free)(target);
   if (weights)
-    THTensor_(free)(weights);
+    c10::raw::intrusive_ptr::decref(weights);
 }
 
 void THNN_(SpatialClassNLLCriterion_updateGradInput)(
@@ -207,7 +207,7 @@ void THNN_(SpatialClassNLLCriterion_updateGradInput)(
 
   THIndexTensor_(free)(target);
   if (weights)
-    THTensor_(free)(weights);
+    c10::raw::intrusive_ptr::decref(weights);
 }
 
 #undef INITIAL_CHECK

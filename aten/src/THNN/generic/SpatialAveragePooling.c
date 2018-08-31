@@ -193,7 +193,7 @@ void THNN_(SpatialAveragePooling_updateOutput)(
       }
     }
   }
-  THTensor_(free)(input);
+  c10::raw::intrusive_ptr::decref(input);
 }
 
 void THNN_(SpatialAveragePooling_updateGradInput)(
@@ -323,7 +323,7 @@ void THNN_(SpatialAveragePooling_updateGradInput)(
     }
   }
 
-  THTensor_(free)(gradOutput);
+  c10::raw::intrusive_ptr::decref(gradOutput);
 }
 
 #endif

@@ -104,9 +104,9 @@ void THNN_(ClassNLLCriterion_updateOutput)(
   }
 
   if (weights) {
-    THTensor_(free)(weights);
+    c10::raw::intrusive_ptr::decref(weights);
   }
-  THTensor_(free)(input);
+  c10::raw::intrusive_ptr::decref(input);
   THIndexTensor_(free)(target);
 }
 
@@ -212,7 +212,7 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
 
   THIndexTensor_(free)(target);
   if (weights) {
-    THTensor_(free)(weights);
+    c10::raw::intrusive_ptr::decref(weights);
   }
 }
 

@@ -269,7 +269,7 @@ void THNN_(SpatialDilatedMaxPooling_updateOutput)(
   }
 
   /* cleanup */
-  THTensor_(free)(input);
+  c10::raw::intrusive_ptr::decref(input);
 }
 
 static void THNN_(SpatialDilatedMaxPooling_updateGradInput_frame)(
@@ -395,7 +395,7 @@ void THNN_(SpatialDilatedMaxPooling_updateGradInput)(
   }
 
   /* cleanup */
-  THTensor_(free)(gradOutput);
+  c10::raw::intrusive_ptr::decref(gradOutput);
 }
 
 #endif

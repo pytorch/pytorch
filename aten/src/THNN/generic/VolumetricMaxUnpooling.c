@@ -199,7 +199,7 @@ void THNN_(VolumetricMaxUnpooling_updateOutput)(
   }
 
   /* cleanup */
-  THTensor_(free)(input);
+  c10::raw::intrusive_ptr::decref(input);
   THIndexTensor_(free)(indices);
 }
 
@@ -332,7 +332,7 @@ void THNN_(VolumetricMaxUnpooling_updateGradInput)(
   }
 
   /* cleanup */
-  THTensor_(free)(gradOutput);
+  c10::raw::intrusive_ptr::decref(gradOutput);
   THIndexTensor_(free)(indices);
 }
 

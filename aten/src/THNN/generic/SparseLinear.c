@@ -106,9 +106,9 @@ void THNN_(SparseLinear_updateOutput)(
     THTensor_(select)(output_row, output, 0, h);
     THTensor_(cadd)(output_row, bias, 1.0, output_row);
   }
-  THTensor_(free)(output_row);
+  c10::raw::intrusive_ptr::decref(output_row);
   THLongTensor_free(csr);
-  THTensor_(free)(weight);
+  c10::raw::intrusive_ptr::decref(weight);
 }
 
 void THNN_(SparseLinear_legacyUpdateOutput)(
@@ -161,8 +161,8 @@ void THNN_(SparseLinear_legacyUpdateOutput)(
     THTensor_(select)(output_row, output, 0, h);
     THTensor_(cadd)(output_row, bias, 1.0, output_row);
   }
-  THTensor_(free)(output_row);
-  THTensor_(free)(weight);
+  c10::raw::intrusive_ptr::decref(output_row);
+  c10::raw::intrusive_ptr::decref(weight);
 }
 
 void THNN_(SparseLinear_accGradParameters)(
@@ -236,13 +236,13 @@ void THNN_(SparseLinear_accGradParameters)(
   THTensor* buf = THTensor_(new)();
   THTensor_(sum)(buf, gradOutput, 0, 1);
   THTensor_(cadd)(gradBias, gradBias, scale, buf);
-  THTensor_(free)(buf);
+  c10::raw::intrusive_ptr::decref(buf);
   THLongTensor_free(csc);
 
   if (weightDecay != 0) {
     THTensor_(cadd)(gradWeight, gradWeight, weightDecay, weight);
   }
-  THTensor_(free)(weight);
+  c10::raw::intrusive_ptr::decref(weight);
 }
 
 void THNN_(SparseLinear_legacyAccGradParameters)(
@@ -306,7 +306,7 @@ void THNN_(SparseLinear_legacyAccGradParameters)(
     THTensor_(select)(gradOutput_row, gradOutput, 0, h);
     THTensor_(cadd)(gradBias, gradBias, scale, gradOutput_row);
   }
-  THTensor_(free)(gradOutput_row);
+  c10::raw::intrusive_ptr::decref(gradOutput_row);
 
   if (weightDecay != 0) {
     THTensor_(cadd)(gradWeight, gradWeight, weightDecay, weight);
@@ -362,7 +362,7 @@ void THNN_(SparseLinear_updateParameters)(
   THLongTensor* ri = THLongTensor_new();
   THTensor_(sort)(uniqueOffsets, ri, offsets, 0, 0);
   THLongTensor_free(ri);
-  THTensor_(free)(offsets);
+  c10::raw::intrusive_ptr::decref(offsets);
 
   cnt = 1;
   real* uniqueOffsets_p = uniqueOffsets->data<real>();
@@ -384,7 +384,7 @@ void THNN_(SparseLinear_updateParameters)(
                   COL_PTR2(weight, offset), weight->stride(0));
   }
 
-  THTensor_(free)(uniqueOffsets);
+  c10::raw::intrusive_ptr::decref(uniqueOffsets);
 }
 
 void THNN_(SparseLinear_legacyUpdateParameters)(
@@ -438,7 +438,7 @@ void THNN_(SparseLinear_legacyUpdateParameters)(
   THLongTensor* ri = THLongTensor_new();
   THTensor_(sort)(uniqueOffsets, ri, offsets, 0, 0);
   THLongTensor_free(ri);
-  THTensor_(free)(offsets);
+  c10::raw::intrusive_ptr::decref(offsets);
 
   cnt = 1;
   real* uniqueOffsets_p = uniqueOffsets->data<real>();
@@ -460,7 +460,7 @@ void THNN_(SparseLinear_legacyUpdateParameters)(
                   COL_PTR2(weight, offset), weight->stride(0));
   }
 
-  THTensor_(free)(uniqueOffsets);
+  c10::raw::intrusive_ptr::decref(uniqueOffsets);
 }
 
 void THNN_(SparseLinear_zeroGradParameters)(

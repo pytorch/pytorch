@@ -257,7 +257,7 @@ void THNN_(SpatialAdaptiveAveragePooling_updateGradInput)(
   }
 
   /* cleanup */
-  THTensor_(free)(gradOutput);
+  c10::raw::intrusive_ptr::decref(gradOutput);
 }
 
 #endif

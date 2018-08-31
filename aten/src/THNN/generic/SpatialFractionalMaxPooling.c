@@ -158,7 +158,7 @@ void THNN_(SpatialFractionalMaxPooling_updateOutput)(
   }
 
   /* cleanup */
-  THTensor_(free)(input);
+  c10::raw::intrusive_ptr::decref(input);
 }
 
 static void THNN_(SpatialFractionalMaxPooling_updateGradInput_frame)(
@@ -247,7 +247,7 @@ void THNN_(SpatialFractionalMaxPooling_updateGradInput)(
   }
 
   /* cleanup */
-  THTensor_(free)(gradOutput);
+  c10::raw::intrusive_ptr::decref(gradOutput);
 }
 
 #endif

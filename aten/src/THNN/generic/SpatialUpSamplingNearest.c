@@ -74,7 +74,7 @@ void THNN_(SpatialUpSamplingNearest_updateOutput)(
         }
       }
     }
-    THTensor_(free)(input);
+    c10::raw::intrusive_ptr::decref(input);
     return;
   }
 
@@ -91,7 +91,7 @@ void THNN_(SpatialUpSamplingNearest_updateOutput)(
       }
     }
   }
-  THTensor_(free)(input);
+  c10::raw::intrusive_ptr::decref(input);
 }
 
 void THNN_(SpatialUpSamplingNearest_updateGradInput)(
@@ -130,7 +130,7 @@ void THNN_(SpatialUpSamplingNearest_updateGradInput)(
         }
       }
     }
-    THTensor_(free)(gradOutput);
+    c10::raw::intrusive_ptr::decref(gradOutput);
     return;
   }
 
@@ -148,7 +148,7 @@ void THNN_(SpatialUpSamplingNearest_updateGradInput)(
     }
   }
 
-  THTensor_(free)(gradOutput);
+  c10::raw::intrusive_ptr::decref(gradOutput);
 }
 
 #endif

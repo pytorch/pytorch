@@ -310,7 +310,7 @@ void THNN_(VolumetricAveragePooling_updateOutput)(
   }
 
   /* cleanup */
-  THTensor_(free)(input);
+  c10::raw::intrusive_ptr::decref(input);
 }
 
 static void THNN_(VolumetricAveragePooling_updateGradInput_frame)(
@@ -494,7 +494,7 @@ void THNN_(VolumetricAveragePooling_updateGradInput)(
   }
 
   /* cleanup */
-  THTensor_(free)(gradOutput);
+  c10::raw::intrusive_ptr::decref(gradOutput);
 }
 
 #endif
