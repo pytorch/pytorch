@@ -28,7 +28,7 @@
 // can slide the stencil over to the right once and down once).  But that is all
 // out-of-bounds if you're computing backwards for a 1x1 input.
 //
-// "Now Edward," you might say, "the real problem is that you set output_padding
+// "Now Edward," you might say, "the scalar_t problem is that you set output_padding
 // >= stride, surely an error should have been raised in this case."  To
 // understand why it is useful to handle this case, we have to understand how we
 // compute the weight gradient of a convolution.  Suppose we have a convolution
@@ -56,14 +56,14 @@
 //
 // ALSO do vol2col
 
-static void THNN_(im2col)(const real* data_im, const int64_t channels,
+static void THNN_(im2col)(const scalar_t* data_im, const int64_t channels,
       const int64_t height, const int64_t width,
       const int64_t output_height, const int64_t output_width,
       const int64_t kernel_h, const int64_t kernel_w,
       const int64_t pad_h, const int64_t pad_w,
       const int64_t stride_h, const int64_t stride_w,
       const int64_t dilation_h, const int64_t dilation_w,
-      real* data_col) {
+      scalar_t* data_col) {
   const int64_t height_col = output_height;
   const int64_t width_col = output_width;
   const int64_t channels_col = channels * kernel_h * kernel_w;
@@ -83,15 +83,15 @@ static void THNN_(im2col)(const real* data_im, const int64_t channels,
   }
 }
 
-static void THNN_(col2im)(const real* data_col, const int64_t channels,
+static void THNN_(col2im)(const scalar_t* data_col, const int64_t channels,
       const int64_t height, const int64_t width,
       const int64_t output_height, const int64_t output_width,
       const int64_t kernel_h, const int64_t kernel_w,
       const int64_t pad_h, const int64_t pad_w,
       const int64_t stride_h, const int64_t stride_w,
       const int64_t dilation_h, const int64_t dilation_w,
-      real* data_im) {
-  memset(data_im, 0, sizeof(real) * height * width * channels);
+      scalar_t* data_im) {
+  memset(data_im, 0, sizeof(scalar_t) * height * width * channels);
   const int64_t height_col = output_height;
   const int64_t width_col = output_width;
   const int64_t channels_col = channels * kernel_h * kernel_w;
@@ -199,14 +199,14 @@ void THNN_(Col2Im_updateOutput)(
     THTensor_(select)(output_n, output, 0, elt);
 
     THNN_(col2im)(
-      input_n->data<real>(),
+      input_n->data<scalar_t>(),
       nOutputPlane,
       outputHeight, outputWidth,
       height_col, width_col,
       kH, kW,
       padH, padW,
       sH, sW,
-      dH, dW, output_n->data<real>());
+      dH, dW, output_n->data<scalar_t>());
   }
 
   c10::raw::intrusive_ptr::decref(input_n);

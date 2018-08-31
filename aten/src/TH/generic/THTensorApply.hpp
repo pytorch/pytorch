@@ -31,14 +31,14 @@
     ptrdiff_t TH_TENSOR_end = tid == num_threads - 1 ? TH_TENSOR_size : \
       TH_TENSOR_offset + TH_TENSOR_size / num_threads; \
     ptrdiff_t TENSOR##_len = TH_TENSOR_end - TH_TENSOR_offset; \
-    TYPE *TENSOR##_data = TENSOR->data<real>() + TH_TENSOR_offset; \
+    TYPE *TENSOR##_data = TENSOR->data<scalar_t>() + TH_TENSOR_offset; \
     CODE \
   } \
 }
 #else
 #define TH_TENSOR_APPLY_CONTIG(TYPE, TENSOR, CODE) \
 { \
-  TYPE *TENSOR##_data = TENSOR->data<real>(); \
+  TYPE *TENSOR##_data = TENSOR->data<scalar_t>(); \
   ptrdiff_t TENSOR##_len = THTensor_(nElement)(TENSOR); \
   CODE \
 }
@@ -57,16 +57,16 @@
     ptrdiff_t TH_TENSOR_end = tid == num_threads - 1 ? TH_TENSOR_size : \
       TH_TENSOR_offset + TH_TENSOR_size / num_threads; \
     ptrdiff_t TENSOR1##_len = TH_TENSOR_end - TH_TENSOR_offset; \
-    TYPE1 *TENSOR1##_data = TENSOR1->data<real>() + TH_TENSOR_offset; \
-    TYPE2 *TENSOR2##_data = TENSOR2->data<real>() + TH_TENSOR_offset; \
+    TYPE1 *TENSOR1##_data = TENSOR1->data<scalar_t>() + TH_TENSOR_offset; \
+    TYPE2 *TENSOR2##_data = TENSOR2->data<scalar_t>() + TH_TENSOR_offset; \
     CODE \
   } \
 }
 #else
 #define TH_TENSOR_APPLY2_CONTIG(TYPE1, TENSOR1, TYPE2, TENSOR2, CODE) \
 { \
-  TYPE1 *TENSOR1##_data = TENSOR1->data<real>(); \
-  TYPE2 *TENSOR2##_data = TENSOR2->data<real>(); \
+  TYPE1 *TENSOR1##_data = TENSOR1->data<scalar_t>(); \
+  TYPE2 *TENSOR2##_data = TENSOR2->data<scalar_t>(); \
   ptrdiff_t TENSOR1##_len = THTensor_(nElement)(TENSOR1); \
   CODE \
 }
@@ -85,18 +85,18 @@
     ptrdiff_t TH_TENSOR_end = tid == num_threads - 1 ? TH_TENSOR_size : \
       TH_TENSOR_offset + TH_TENSOR_size / num_threads; \
     ptrdiff_t TENSOR1##_len = TH_TENSOR_end - TH_TENSOR_offset; \
-    TYPE1 *TENSOR1##_data = TENSOR1->data<real>() + TH_TENSOR_offset; \
-    TYPE2 *TENSOR2##_data = TENSOR2->data<real>() + TH_TENSOR_offset; \
-    TYPE3 *TENSOR3##_data = TENSOR3->data<real>() + TH_TENSOR_offset; \
+    TYPE1 *TENSOR1##_data = TENSOR1->data<scalar_t>() + TH_TENSOR_offset; \
+    TYPE2 *TENSOR2##_data = TENSOR2->data<scalar_t>() + TH_TENSOR_offset; \
+    TYPE3 *TENSOR3##_data = TENSOR3->data<scalar_t>() + TH_TENSOR_offset; \
     CODE \
   } \
 }
 #else
 #define TH_TENSOR_APPLY3_CONTIG(TYPE1, TENSOR1, TYPE2, TENSOR2, TYPE3, TENSOR3, CODE) \
 { \
-  TYPE1 *TENSOR1##_data = TENSOR1->data<real>(); \
-  TYPE2 *TENSOR2##_data = TENSOR2->data<real>(); \
-  TYPE3 *TENSOR3##_data = TENSOR3->data<real>(); \
+  TYPE1 *TENSOR1##_data = TENSOR1->data<scalar_t>(); \
+  TYPE2 *TENSOR2##_data = TENSOR2->data<scalar_t>(); \
+  TYPE3 *TENSOR3##_data = TENSOR3->data<scalar_t>(); \
   ptrdiff_t TENSOR1##_len = THTensor_(nElement)(TENSOR1); \
   CODE \
 }
@@ -110,12 +110,12 @@
 }
 
 // Used for `scatter` and `scatterAdd`
-// Assumes TENSOR1 is real
+// Assumes TENSOR1 is scalar_t
 //         TENSOR2 is src
 //         TENSOR3 is index
 // Tests:
 //   1. index->size(d) <= src->size(d) for all d
-//   2. index->size(d) <= real->size(d) for all d != dim
+//   2. index->size(d) <= scalar_t->size(d) for all d != dim
 #define TH_TENSOR_DIM_APPLY3_SIZE_SCATTER(TENSOR1, TENSOR2, TENSOR3, DIMENSION) \
 { \
   int shape_check_flag = 0; \
@@ -154,7 +154,7 @@ if (std::isnan(val)) break;
 #define th_isnan_break(val)
 #endif
 
-static inline real THTensor_(powOne)(real x, real y) {
+static inline scalar_t THTensor_(powOne)(scalar_t x, scalar_t y) {
 #if defined(TH_REAL_IS_FLOAT)
   return powf(x, y);
 #elif defined(TH_REAL_IS_DOUBLE)
@@ -162,7 +162,7 @@ static inline real THTensor_(powOne)(real x, real y) {
 #else
   THArgCheck(y >= 0, 1,
       "Integers to negative integer powers are not allowed");
-  real result = 1;
+  scalar_t result = 1;
   while (y) {
     if (y & 1) {
        result *= x;
