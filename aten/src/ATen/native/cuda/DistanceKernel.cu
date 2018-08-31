@@ -1,7 +1,7 @@
 #include "ATen/ATen.h"
 #include <THC/THCTensorMathReduce.cuh>
 
-#include "DistanceKernel.cuh"
+#include "ATen/native/Distance.h"
 
 
 namespace at { namespace native {
@@ -138,9 +138,7 @@ __global__ static void pdist_backward_kernel_cuda_impl(scalar_t * buffer, const 
   }
 }
 
-} // anonymous namespace
-
-void pdist_kernel_cuda(Tensor& result, const Tensor& self, double p) {
+void pdist_forward_kernel_impl(Tensor& result, const Tensor& self, double p) {
   int64_t n = self.size(0);
   int64_t m = self.size(1);
 
@@ -159,7 +157,7 @@ void pdist_kernel_cuda(Tensor& result, const Tensor& self, double p) {
   });
 }
 
-void pdist_backward_kernel_cuda(Tensor& result, const Tensor& grad, const Tensor& self, const double p, const Tensor& dist) {
+void pdist_backward_kernel_impl(Tensor& result, const Tensor& grad, const Tensor& self, const double p, const Tensor& dist) {
   if (p == 0.0 || grad.numel() == 0 || self.numel() == 0) {
     result.fill_(0);
     return;
@@ -186,5 +184,10 @@ void pdist_backward_kernel_cuda(Tensor& result, const Tensor& grad, const Tensor
 
   at::sum_out(result, buffer, 0);
 }
+
+} // anonymous namespace
+
+REGISTER_DISPATCH(pdist_forward_stub, &pdist_forward_kernel_impl);
+REGISTER_DISPATCH(pdist_backward_stub, &pdist_backward_kernel_impl);
 
 }} // at::native
