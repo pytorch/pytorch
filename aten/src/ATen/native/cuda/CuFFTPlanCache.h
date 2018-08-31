@@ -201,11 +201,11 @@ public:
     hipfftType exec_type;
     if (input.type().scalarType() == ScalarType::Float) {
       if (complex_input && complex_output) {
-	exec_type = HIPFFT_C2C;
+        exec_type = HIPFFT_C2C;
       } else if (complex_input && !complex_output) {
-	exec_type = HIPFFT_C2R;
+        exec_type = HIPFFT_C2R;
       } else if (!complex_input && complex_output) {
-	exec_type = HIPFFT_R2C;
+        exec_type = HIPFFT_R2C;
       } else {
         throw std::runtime_error("hipFFT doesn't support r2r (float)");
       }
