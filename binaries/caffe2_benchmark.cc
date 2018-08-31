@@ -77,6 +77,7 @@ CAFFE2_DEFINE_bool(
     "Whether to evict the cache before running network.");
 
 int main(int argc, char** argv) {
+  caffe2::GlobalInit(&argc, &argv);
   benchmark(
       argc,
       argv,

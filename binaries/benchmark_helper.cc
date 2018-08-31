@@ -329,7 +329,6 @@ int benchmark(
     bool FLAGS_text_output,
     int FLAGS_warmup,
     bool FLAGS_wipe_cache) {
-  caffe2::GlobalInit(&argc, &argv);
   // Check arguments to be correct
   {
     // Need to check whether file exists, as the file reader does not assert if
