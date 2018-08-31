@@ -1,4 +1,3 @@
-#include <ATen/Context.h>
 #include <ATen/StorageImpl.h>
 
 namespace at {
@@ -13,8 +12,7 @@ StorageImpl::StorageImpl(
       data_ptr_(std::move(data_ptr)),
       size_(size),
       resizable_(resizable),
-      allocator_(allocator),
-      finalizer_(nullptr) {}
+      allocator_(allocator) {}
 
 StorageImpl::StorageImpl(
     at::DataType data_type,

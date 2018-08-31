@@ -1,7 +1,7 @@
 #pragma once
 
-#include <ATen/Device.h>
-#include <ATen/ScalarType.h>
+#include <ATen/core/Device.h>
+#include <ATen/core/ScalarType.h>
 #include <ATen/Tensor.h>
 #include <ATen/core/Error.h>
 #include <ATen/detail/CUDAHooksInterface.h>

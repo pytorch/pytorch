@@ -1748,6 +1748,11 @@
     CPU: _unique_cpu
     CUDA: _unique_cuda
 
+- func: _unique_dim(Tensor self, int64_t dim, bool sorted=false, bool return_inverse=false) -> (Tensor, Tensor)
+  dispatch:
+    CPU: _unique_dim_cpu
+    CUDA: _unique_dim_cuda
+
 - func: _unsafe_view(Tensor self, IntList size) -> Tensor
   variants: function
 

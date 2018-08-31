@@ -21,6 +21,25 @@ import numbers
 import collections
 import re
 
+
+def _parse_env(name, default, true_message, false_message):
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    if value.lower() in {'1', 'true', 'yes'}:
+        return True
+    elif value.lower() in {'0', 'false', 'no'}:
+        return False
+    if value == '1v':
+        print(true_message)
+        return True
+    elif value == '0v':
+        print(false_message)
+        return False
+    raise ValueError('Unknown setting of {}. Try using 0 or 1.'.format(name))
+
+
+_enabled = _parse_env('PYTORCH_JIT', True, "> Using PyTorch JIT", "> PyTorch JIT DISABLED")
 _flatten = torch._C._jit_flatten
 _unflatten = torch._C._jit_unflatten
 _jit_script_compile = torch._C._jit_script_compile
@@ -431,6 +450,8 @@ def trace(*args, **kwargs):
         ...     return x * 2
     """
     def wrapper(func):
+        if not _enabled:
+            return func
         executor_options = {'optimize': True}
         for name in executor_options:
             executor_options[name] = kwargs.pop(name, executor_options[name])
@@ -509,6 +530,8 @@ class CompilationUnit(object):
 
 
 def script(fn, optimize=True, _frames_up=0):
+    if not _enabled:
+        return fn
     rcb = createResolutionCallback(_frames_up + 1)
     ast = get_jit_ast(fn, is_method=False)
     graph = _jit_script_compile(ast, rcb)
@@ -528,6 +551,8 @@ ScriptMethodStub = namedtuple('ScriptMethodStub', ('resolution_callback', 'def_'
 
 
 def script_method(fn):
+    if not _enabled:
+        return fn
     # NOTE: we need to traverse two frames here because the meta-class frame
     # for ScriptModule will be present, as opposed to invoking @script on a
     # a function or invoking define() on a CompilationUnit.
@@ -547,6 +572,8 @@ def script_method(fn):
 
 def batch(batch_size=1, optimize=True, _frames_up=0):
     def decorator(fn):
+        if not _enabled:
+            return fn
         import torch.jit.batchop
         mod = script(fn, optimize, _frames_up)
         res_graph = torch.to_batch_graph(mod.graph)
@@ -757,57 +784,60 @@ class ScriptMeta(type(torch._C.ScriptModule)):
         return super(ScriptMeta, cls).__init__(name, bases, attrs)
 
 
-class ScriptModule(with_metaclass(ScriptMeta, torch._C.ScriptModule, Module)):
-    def __init__(self, optimize=True):
-        # must be before Module.init since the field is used in __getattr__
-        Module.__init__(self)
-        self._set_optimized(optimize)
-        self._parameters = OrderedParameterDict(self)
-        self._buffers = OrderedBufferDict(self)
-        self._modules = OrderedModuleDict(self)
+if _enabled:
+    class ScriptModule(with_metaclass(ScriptMeta, torch._C.ScriptModule, Module)):
+        def __init__(self, optimize=True):
+            # must be before Module.init since the field is used in __getattr__
+            Module.__init__(self)
+            self._set_optimized(optimize)
+            self._parameters = OrderedParameterDict(self)
+            self._buffers = OrderedBufferDict(self)
+            self._modules = OrderedModuleDict(self)
 
-    def __getattr__(self, attr):
-        if self._has_method(attr):
-            if attr in self.__class__._original_methods:
-                original_method = self.__class__._original_methods[attr]
-                script_method = self._get_method(attr)
-                return functools.wraps(original_method)(script_method)
+        def __getattr__(self, attr):
+            if self._has_method(attr):
+                if attr in self.__class__._original_methods:
+                    original_method = self.__class__._original_methods[attr]
+                    script_method = self._get_method(attr)
+                    return functools.wraps(original_method)(script_method)
+                else:
+                    return self._get_method(attr)
+            if attr == 'graph' and self._has_method('forward'):
+                return self.__getattr__('forward').graph
+            return Module.__getattr__(self, attr)
+
+        def __setattr__(self, attr, value):
+            if attr not in self._constants_set:
+                return super(ScriptModule, self).__setattr__(attr, value)
+            if hasattr(self, attr):
+                raise RuntimeError("attempting to re-assign constant '{}'".format(attr))
+            if isinstance(value, ModuleList):
+                # special case for list of modules. Modules need to be registered with their
+                # parent module. To do this, we create a ConstModuleList, which is itself a module, that
+                # contains each of these modules as submodules. The ConstModuleList then
+                # is set as an attribute of the parent module.
+                super(ScriptModule, self).__setattr__(attr, _ConstModuleList(value))
+            elif isinstance(value, Sequential):
+                super(ScriptModule, self).__setattr__(attr, _ConstSequential(value))
             else:
-                return self._get_method(attr)
-        if attr == 'graph' and self._has_method('forward'):
-            return self.__getattr__('forward').graph
-        return Module.__getattr__(self, attr)
+                super(ScriptModule, self).__setattr__(attr, _get_valid_constant(value))
 
-    def __setattr__(self, attr, value):
-        if attr not in self._constants_set:
-            return super(ScriptModule, self).__setattr__(attr, value)
-        if hasattr(self, attr):
-            raise RuntimeError("attempting to re-assign constant '{}'".format(attr))
-        if isinstance(value, ModuleList):
-            # special case for list of modules. Modules need to be registered with their
-            # parent module. To do this, we create a ConstModuleList, which is itself a module, that
-            # contains each of these modules as submodules. The ConstModuleList then
-            # is set as an attribute of the parent module.
-            super(ScriptModule, self).__setattr__(attr, _ConstModuleList(value))
-        elif isinstance(value, Sequential):
-            super(ScriptModule, self).__setattr__(attr, _ConstSequential(value))
-        else:
-            super(ScriptModule, self).__setattr__(attr, _get_valid_constant(value))
+        def __dir__(self):
+            return sorted(Module.__dir__(self) + self._method_names())
 
-    def __dir__(self):
-        return sorted(Module.__dir__(self) + self._method_names())
-
-    def define(self, lang):
-        # We use frames_up=1 to get to the proper surrounding scope. The stack
-        # will look like:
-        # 0. createResolutionCallback
-        # 1. define()
-        # 2. surrounding scope.
-        #
-        # createResolutionCallback internally adds 1 to get us to our frame, then
-        # we add 1 to get to the proper surrounding scope.
-        rcb = createResolutionCallback(frames_up=1)
-        self._define(lang, rcb, True)
+        def define(self, lang):
+            # We use frames_up=1 to get to the proper surrounding scope. The stack
+            # will look like:
+            # 0. createResolutionCallback
+            # 1. define()
+            # 2. surrounding scope.
+            #
+            # createResolutionCallback internally adds 1 to get us to our frame, then
+            # we add 1 to get to the proper surrounding scope.
+            rcb = createResolutionCallback(frames_up=1)
+            self._define(lang, rcb, True)
+else:
+    ScriptModule = torch.nn.Module
 
 
 def _get_methods(cls):

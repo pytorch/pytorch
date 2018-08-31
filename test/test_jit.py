@@ -396,6 +396,28 @@ class TestJit(JitTestCase):
 
         self.assertEqual(fn(x, y), fn_traced(x, y))
 
+    def test_disabled(self):
+        torch.jit._enabled = False
+        try:
+            def f(x, y):
+                return x + y
+
+            self.assertIs(torch.jit.trace(torch.randn(2, 2), torch.randn(2, 2))(f), f)
+            self.assertIs(torch.jit.script(f), f)
+
+            class MyModule(torch.jit.ScriptModule):
+                @torch.jit.script_method
+                def method(self, x):
+                    return x
+
+            # XXX: Unfortunately ScriptModule won't simply become Module now,
+            # because that requires disabling the JIT at startup time, which
+            # we can't do in here.
+            # We need to or those two conditions to make it work with all versions of Python
+            self.assertTrue(inspect.ismethod(MyModule.method) or inspect.isfunction(MyModule.method))
+        finally:
+            torch.jit._enabled = True
+
     # Backwards tracing was broken for indexing by a constant,
     # because it's internally implemented using as_strided,
     # and we attempted to trace its derivative (which is not

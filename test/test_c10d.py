@@ -1,7 +1,6 @@
 import copy
 import math
 import multiprocessing
-import socket
 import sys
 import tempfile
 import unittest
@@ -10,6 +9,7 @@ from functools import wraps
 from collections import namedtuple
 
 import torch
+import common
 from torch import nn
 import torch.nn.functional as F
 from torch.distributed import c10d
@@ -58,15 +58,6 @@ def skip_if_not_nccl(func):
 
 def get_timeout(test_id):
     return TIMEOUT_OVERRIDE.get(test_id.split('.')[-1], TIMEOUT_DEFAULT)
-
-
-def find_free_port():
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    sock.bind(('localhost', 0))
-    sockname = sock.getsockname()
-    sock.close()
-    return sockname[1]
 
 
 def gpus_for_rank(world_size):
@@ -126,14 +117,14 @@ class PrefixFileStoreTest(TestCase, StoreTestBase):
 class TCPStoreTest(TestCase, StoreTestBase):
     def _create_store(self):
         addr = 'localhost'
-        port = find_free_port()
+        port = common.find_free_port()
         return c10d.TCPStore(addr, port, True)
 
 
 class PrefixTCPStoreTest(TestCase, StoreTestBase):
     def setUp(self):
         addr = 'localhost'
-        port = find_free_port()
+        port = common.find_free_port()
         self.tcpstore = c10d.TCPStore(addr, port, True)
         self.prefix = "test_prefix"
 
@@ -150,10 +141,10 @@ class RendezvousTest(TestCase):
 class RendezvousFileTest(TestCase):
     def test_common_errors(self):
         with self.assertRaisesRegex(ValueError, 'path missing'):
-            gen = c10d.rendezvous('file://?rank=0&size=1')
+            gen = c10d.rendezvous('file://?rank=0&world_size=1')
             next(gen)
         with self.assertRaisesRegex(ValueError, 'rank parameter missing'):
-            gen = c10d.rendezvous('file:///tmp/foo?size=1')
+            gen = c10d.rendezvous('file:///tmp/foo?world_size=1')
             next(gen)
         with self.assertRaisesRegex(ValueError, 'size parameter missing'):
             gen = c10d.rendezvous('file:///tmp/foo?rank=0')
@@ -161,7 +152,7 @@ class RendezvousFileTest(TestCase):
 
     def test_nominal(self):
         with tempfile.NamedTemporaryFile() as file:
-            url = 'file://%s?size=%d' % (file.name, 2)
+            url = 'file://%s?world_size=%d' % (file.name, 2)
             gen0 = c10d.rendezvous(url + "&rank=0")
             store0, rank0, size0 = next(gen0)
             self.assertEqual(0, rank0)
@@ -183,10 +174,10 @@ class RendezvousFileTest(TestCase):
 class RendezvousTCPTest(TestCase):
     def test_common_errors(self):
         with self.assertRaisesRegex(ValueError, 'port number missing'):
-            gen = c10d.rendezvous('tcp://127.0.0.1?rank=0&size=1')
+            gen = c10d.rendezvous('tcp://127.0.0.1?rank=0&world_size=1')
             next(gen)
         with self.assertRaisesRegex(ValueError, 'rank parameter missing'):
-            gen = c10d.rendezvous('tcp://127.0.0.1:23456?size=1')
+            gen = c10d.rendezvous('tcp://127.0.0.1:23456?world_size=1')
             next(gen)
         with self.assertRaisesRegex(ValueError, 'size parameter missing'):
             gen = c10d.rendezvous('tcp://127.0.0.1:23456?rank=0')
@@ -194,8 +185,8 @@ class RendezvousTCPTest(TestCase):
 
     def test_nominal(self):
         addr = 'localhost'
-        port = find_free_port()
-        url = 'tcp://%s:%d?size=%d' % (addr, port, 2)
+        port = common.find_free_port()
+        url = 'tcp://%s:%d?world_size=%d' % (addr, port, 2)
         gen0 = c10d.rendezvous(url + "&rank=0")
         store0, rank0, size0 = next(gen0)
         self.assertEqual(0, rank0)
@@ -245,7 +236,7 @@ class MultiProcessTestCase(TestCase):
     def setUp(self):
         self.rank = self.MAIN_PROCESS_RANK
         self.file = tempfile.NamedTemporaryFile()
-        self.port = find_free_port()
+        self.port = common.find_free_port()
         self.processes = [self._spawn_process(rank) for rank in range(int(self.world_size))]
 
     def tearDown(self):
@@ -529,8 +520,9 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         model = Net()
         ddp_model = distributed_c10d._DistributedDataParallelC10d(
             copy.deepcopy(model).cuda(gpus[0]),
-            process_group,
-            device_ids=gpus)
+            device_ids=gpus,
+            process_group=process_group)
+
         model.cuda(gpus[0])
 
         local_batch_size = len(gpus)
