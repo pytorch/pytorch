@@ -566,23 +566,23 @@ class TestLRScheduler(TestCase):
 
     def test_cos_anneal_restarts_lr_periodic(self):
         epochs = 40
-        T_max = 20
+        T = 20
         eta_min = 1e-5
         T_mult = 1.0
         targets = []
         for eta_max in (0.05, 0.5):
             targets.append([eta_min +
                             0.5 * (eta_max - eta_min) *
-                            (1 + math.cos(math.pi * (x % T_max) / (T_max - 1)))
+                            (1 + math.cos(math.pi * (x % T) / (T - 1)))
                             for x in range(epochs)])
-        scheduler = CosineAnnealingRestartsLR(self.opt, T_max, eta_min, T_mult)
+        scheduler = CosineAnnealingRestartsLR(self.opt, T, eta_min, T_mult)
         self._test(scheduler, targets, epochs)
 
     def test_cos_anneal_restarts_lr_mult(self):
-        T_max = 10
+        T = 10
         eta_min = 1e-5
         T_mult = 3.0
-        run_lengths = [T_max, T_max * T_mult, T_max * T_mult ** 2, T_max * T_mult ** 3]
+        run_lengths = [T, T * T_mult, T * T_mult ** 2, T * T_mult ** 3]
         epochs = int(sum(run_lengths))
         targets = []
         for eta_max in (0.05, 0.5):
@@ -592,15 +592,15 @@ class TestLRScheduler(TestCase):
                                     0.5 * (eta_max - eta_min) *
                                     (1 + math.cos(math.pi * x / (T_i - 1)))
                                     for x in range(int(T_i))])
-        scheduler = CosineAnnealingRestartsLR(self.opt, T_max, eta_min, T_mult)
+        scheduler = CosineAnnealingRestartsLR(self.opt, T, eta_min, T_mult)
         self._test(scheduler, targets, epochs)
 
     def test_cos_anneal_restarts_lr_gamma(self):
-        T_max = 10
+        T = 10
         eta_min = 1e-3
         T_mult = 2.0
         gamma = 0.5
-        run_lengths = [T_max, T_max * T_mult, T_max * T_mult ** 2]
+        run_lengths = [T, T * T_mult, T * T_mult ** 2]
         epochs = int(sum(run_lengths))
         targets = []
         for eta_max in (0.05, 0.5):
@@ -610,7 +610,7 @@ class TestLRScheduler(TestCase):
                                     0.5 * (eta_max - eta_min) * (gamma ** i) *
                                     (1 + math.cos(math.pi * x / (T_i - 1)))
                                     for x in range(int(T_i))])
-        scheduler = CosineAnnealingRestartsLR(self.opt, T_max, eta_min, T_mult, gamma)
+        scheduler = CosineAnnealingRestartsLR(self.opt, T, eta_min, T_mult, gamma)
         self._test(scheduler, targets, epochs)
 
     def test_reduce_lr_on_plateau1(self):
@@ -731,9 +731,9 @@ class TestLRScheduler(TestCase):
         T_mult = 2.0
         gamma = 1.0
         self._check_scheduler_state_dict(
-            lambda: CosineAnnealingRestartsLR(self.opt, T_max=epochs, eta_min=eta_min,
+            lambda: CosineAnnealingRestartsLR(self.opt, T=epochs, eta_min=eta_min,
                                               T_mult=T_mult, gamma=gamma),
-            lambda: CosineAnnealingRestartsLR(self.opt, T_max=epochs // 2, eta_min=eta_min / 2,
+            lambda: CosineAnnealingRestartsLR(self.opt, T=epochs // 2, eta_min=eta_min / 2,
                                               T_mult=T_mult / 2, gamma=gamma / 2),
             epochs=epochs)
 
