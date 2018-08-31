@@ -263,16 +263,16 @@ TORCH_API void addOutput(Node* node, const std::vector<at::Tensor>& list);
 TORCH_API autograd::Variable getSizeOf(const autograd::Variable& var, int64_t dim);
 
 using warn_fn_type = void (*)(const std::string& msg);
-void _do_warn(const char * _reason);
+TORCH_API void _do_warn(const char * _reason);
 inline void warn(const char * _reason) {
   if (auto state = getTracingState()) {
     if (!state->warn) return;
     _do_warn(_reason);
   }
 }
-void setWarn(warn_fn_type fn);
+TORCH_API void setWarn(warn_fn_type fn);
 
-struct NoWarn {
+TORCH_API struct NoWarn {
   NoWarn(): state(getTracingState()) {
     if (state) {
       prev = state->warn;
