@@ -704,7 +704,7 @@ class TestJit(JitTestCase):
         y = torch.randn(4, 4, dtype=torch.float, device='cuda')
 
         ge = self.checkTrace(self.fn_test_comparison_gt_lt, (x, y))
-        self.assertExpectedGraph(ge.graph_for(x,y))
+        self.assertExpectedGraph(ge.graph_for(x, y))
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
@@ -721,7 +721,7 @@ class TestJit(JitTestCase):
         y = torch.randn(4, 4, dtype=torch.float, device='cuda')
 
         ge = self.checkTrace(f, (x, y))
-        self.assertExpectedGraph(ge.graph_for(x,y))
+        self.assertExpectedGraph(ge.graph_for(x, y))
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
@@ -738,7 +738,7 @@ class TestJit(JitTestCase):
         y = torch.randn(4, 4, dtype=torch.float, device='cuda')
 
         ge = self.checkTrace(f, (x, y))
-        self.assertExpectedGraph(ge.graph_for(x,y))
+        self.assertExpectedGraph(ge.graph_for(x, y))
 
     @staticmethod
     def fn_test_relu(x, y):
