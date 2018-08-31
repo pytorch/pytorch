@@ -90,8 +90,13 @@ public:
     IntList output_sizes) {
 
     // signal sizes
+#ifdef __HIP_PLATFORM_HCC__
+    std::vector<int> signal_sizes(checked_signal_sizes.begin(),
+                                  checked_signal_sizes.end());
+#else
     std::vector<long long int> signal_sizes(checked_signal_sizes.begin(),
                                             checked_signal_sizes.end());
+#endif
 
     // input batch size
     long long int batch = input.size(0);
@@ -266,8 +271,7 @@ public:
       //
       // See NOTE [ cuFFT Embedded Strides ] in native/cuda/SpectralOps.cu.
 #ifdef __HIP_PLATFORM_HCC__
-      int sizes = *signal_sizes.data();
-      CUFFT_CHECK(hipfftMakePlanMany(plan(), signal_ndim, &sizes,
+      CUFFT_CHECK(hipfftMakePlanMany(plan(), signal_ndim, signal_sizes.data(),
         /* inembed */ nullptr, /* base_istride */ 1, /* idist */ 1,
         /* onembed */ nullptr, /* base_ostride */ 1, /* odist */ 1,
 	exec_type, batch, &ws_size_t));
@@ -303,10 +307,9 @@ public:
       std::vector<int> onembed(output_sizes.data() + 1, output_sizes.data() + signal_ndim + 1);
       int base_ostride = 1;
 
-      int sizes = *signal_sizes.data();
       int istride = base_istride;
       int iidist = idist;
-      CUFFT_CHECK(hipfftMakePlanMany(plan(), signal_ndim, &sizes,
+      CUFFT_CHECK(hipfftMakePlanMany(plan(), signal_ndim, signal_sizes.data(),
         inembed.data(), istride, iidist,
         onembed.data(), base_ostride, odist,
         exec_type, batch, &ws_size_t));
