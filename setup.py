@@ -859,6 +859,11 @@ if USE_DISTRIBUTED:
 if USE_C10D:
     extra_compile_args += ['-DUSE_C10D']
     main_sources += ['torch/csrc/distributed/c10d/init.cpp']
+    mpi_include_path_file = tmp_install_path + "/include/c10d/mpi_include_path"
+    if os.path.exists(mpi_include_path_file):
+        with open(mpi_include_path_file, 'r') as f:
+            mpi_include_path = f.read()
+        include_dirs += [mpi_include_path]
     main_link_args += [C10D_LIB]
 
 if USE_CUDA:

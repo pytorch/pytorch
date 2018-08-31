@@ -12,6 +12,8 @@
 #include <c10d/Types.hpp>
 #include <c10d/Utils.hpp>
 
+#include <mpi.h>
+
 namespace c10d {
 
 // WorkEntry is the state associated with a single MPI run instance.
@@ -106,7 +108,7 @@ class ProcessGroupMPI : public ProcessGroup {
   };
 
   // Constructor will spawn up the worker thread loop
-  explicit ProcessGroupMPI(int rank, int size);
+  explicit ProcessGroupMPI(int rank, int size, MPI_Comm pgComm);
 
   virtual ~ProcessGroupMPI();
 
@@ -153,8 +155,11 @@ class ProcessGroupMPI : public ProcessGroup {
 
   std::shared_ptr<ProcessGroup::Work> barrier();
 
+  std::unordered_map<int, int> getGroupRank();
+
   // Creating a new ProcessGroupMPI, will initiialize MPI if not initialized
-  static std::shared_ptr<ProcessGroupMPI> createProcessGroupMPI();
+  static std::shared_ptr<ProcessGroupMPI> createProcessGroupMPI(
+      std::vector<int> ranks = {});
 
  protected:
   using WorkType =
@@ -182,6 +187,11 @@ class ProcessGroupMPI : public ProcessGroup {
   static std::mutex pgGlobalMutex_;
   static int numProcessGroups_;
   static int mpiThreadSupport_;
+
+  MPI_Comm pgComm_;
+  int groupRank_;
+  int groupSize_;
+  std::unordered_map<int, int> groupRankMap_;
 };
 
 } // namespace c10d

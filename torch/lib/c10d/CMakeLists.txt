@@ -136,6 +136,7 @@ endif()
 if(MPI_FOUND)
   target_include_directories(c10d PUBLIC ${MPI_INCLUDE_PATH})
   copy_header(ProcessGroupMPI.hpp)
+  file(WRITE ${CMAKE_BINARY_DIR}/include/c10d/mpi_include_path ${MPI_INCLUDE_PATH})
 endif()
 
 target_link_libraries(c10d PUBLIC ${C10D_LIBS})
