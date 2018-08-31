@@ -11,4 +11,9 @@ void Tensor::print() const {
     std::cerr << "[UndefinedTensor]" << std::endl;
   }
 }
+
+const char * Tensor::toString() const {
+  return type().toString();
+}
+
 } // namespace at
