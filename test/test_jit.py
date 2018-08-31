@@ -1604,6 +1604,57 @@ class TestJit(JitTestCase):
                                                example_outputs=example_outs,
                                                operator_export_type=OperatorExportTypes.ONNX_ATEN_FALLBACK))
 
+    def test_export_dropout(self):
+        class DropoutTest(torch.nn.Module):
+            def __init__(self):
+                super(DropoutTest, self).__init__()
+                self.dropout = torch.nn.Dropout()
+
+            def forward(self, x):
+                return self.dropout(x)
+
+        test = DropoutTest()
+        test.eval()
+
+        traced = torch.jit.trace(test, (torch.rand(3, 4),), check_trace=False)
+        imported = self.getExportImportCopy(traced)
+        x = torch.randn(3, 4)
+        self.assertEqual(traced(x), imported(x))
+
+    def test_export_batchnorm(self):
+        for mode in ['eval', 'train']:
+            class BatchnormTest(torch.nn.Module):
+                def __init__(self):
+                    super(BatchnormTest, self).__init__()
+                    self.batchnorm = torch.nn.BatchNorm1d(100)
+
+                def forward(self, x):
+                    return self.batchnorm(x)
+
+            test = BatchnormTest()
+            getattr(test, mode)()
+
+            traced = torch.jit.trace(test, (torch.randn(20, 100),))
+            imported = self.getExportImportCopy(traced)
+            x = torch.randn(20, 100)
+            self.assertEqual(traced(x), imported(x))
+
+    def test_export_rnn(self):
+        class RNNTest(torch.nn.Module):
+            def __init__(self):
+                super(RNNTest, self).__init__()
+                self.rnn = nn.RNN(10, 20, 2)
+
+            def forward(self, x, h0):
+                return self.rnn(x, h0)
+
+        test = RNNTest()
+
+        traced = torch.jit.trace(test, (torch.randn(5, 3, 10), torch.randn(2, 3, 20)))
+        imported = self.getExportImportCopy(traced)
+        x, h0 = torch.randn(5, 3, 10), torch.randn(2, 3, 20)
+        self.assertEqual(traced(x, h0), imported(x, h0))
+
 
 class TestBatched(TestCase):
     # generate random examples and create an batchtensor with them
