@@ -69,7 +69,7 @@ at::Type* get_type(const std::string& name, bool is_cuda, bool is_sparse) {
 
 PyTypeObject* getPyTypeObject(const at::Storage& storage)
 {
-  auto attype = at::globalContext().getTypeOpt(
+  auto attype = at::globalContext().getNonVariableTypeOpt(
       deviceTypeToBackend(storage.device_type()),
       at::dataTypeToScalarType(storage.dtype()));
   auto it = attype_to_py_storage_type.find(attype);
@@ -99,7 +99,7 @@ void registerLayoutObject(THPLayout *layout, at::Backend backend) {
 
 at::Type& getType(at::ScalarType scalarType, const THPLayout& layout, const at::Device& device) {
   const at::Backend backend = get_backend(device.type() == at::Device::Type::CUDA, layout.layout == at::Layout::Sparse);
-  auto baseType = at::globalContext().getTypeOpt(backend, scalarType);
+  auto baseType = at::globalContext().getNonVariableTypeOpt(backend, scalarType);
   if (!baseType) {
     std::ostringstream oss;
     oss << "Error attempting to use dtype " << getDtype(scalarType)->name << " with layout " << layout.name
