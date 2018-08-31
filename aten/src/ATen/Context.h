@@ -8,6 +8,7 @@
 #include "ATen/Utils.h"
 #include "ATen/core/Error.h"
 #include "ATen/detail/CUDAHooksInterface.h"
+#include "ATen/detail/VariableHooksInterface.h"
 
 // This is temporary
 #include "ATen/core/ATenCoreTest.h"
@@ -42,6 +43,11 @@ public:
     if (!type) AT_ERROR(toString(p), toString(s), "Type is not enabled.");
     return *type;
   }
+  Type & getVariableType(Backend p, ScalarType s) {
+    auto& baseType = getNonVariableType(p, s);
+    return detail::getVariableHooks().getVariableTypeFromBaseType(baseType);
+  }
+
   Generator & defaultGenerator(DeviceType device_type) {
     initCUDAIfNeeded(device_type);
     auto & generator = generator_registry[static_cast<int>(device_type)];
