@@ -1,3 +1,4 @@
+import __future__
 import torch
 import sys
 import ast
@@ -130,13 +131,7 @@ def _uses_true_division(fn):
     if inspect.ismethod(fn):
         return _uses_true_division(fn.__func__)
     elif inspect.isfunction(fn):
-        feature = fn.__globals__.get('division')
-        if feature is None:
-            return False
-
-        # Check if feature is a __future__ _Feature to make sure this isn't some
-        # other 'division' library. _Feature instances have the following attrs:
-        return hasattr(feature, 'getOptionalRelease') and hasattr(feature, 'getMandatoryRelease')
+        return fn.__globals__.get('division') is __future__.division
     else:
         raise RuntimeError(
             '_uses_true_division: expected function or method, got {}'.format(type(fn)))
