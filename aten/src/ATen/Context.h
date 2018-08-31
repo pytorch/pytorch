@@ -24,7 +24,7 @@ public:
   Type* getTypeRaw(Backend p, ScalarType s) {
     return type_registry[static_cast<int>(p)][static_cast<int>(s)].get();
   }
-  Type * getTypeOpt(Backend p, ScalarType s) {
+  Type * getNonVariableTypeOpt(Backend p, ScalarType s) {
     if (p != Backend::Undefined) initCUDAIfNeeded(backendToDeviceType(p));
     auto type = getTypeRaw(p, s);
 
@@ -38,7 +38,7 @@ public:
     return type;
   }
   Type & getType(Backend p, ScalarType s) {
-    auto* type = getTypeOpt(p, s);
+    auto* type = getNonVariableTypeOpt(p, s);
     if (!type) AT_ERROR(toString(p), toString(s), "Type is not enabled.");
     return *type;
   }
