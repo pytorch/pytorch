@@ -616,8 +616,31 @@ RegisterOperators reg2({
     DEFINE_BINARY_OP(aten::add, a + b)
     DEFINE_BINARY_OP(aten::sub, a - b)
     DEFINE_BINARY_OP(aten::mul, a * b)
-    DEFINE_BINARY_OP(aten::div, a / b)
     DEFINE_BINARY_OP(aten::pow, static_cast<decltype(a)>(pow(a, b)))
+
+    // TODO: Support python floordiv (//)
+    // Right now prim::FloorDiv is only used by loop unrolling
+    DEFINE_INT_OP(prim::FloorDiv, a / b)
+
+    // NB: This is the python truediv operation
+    Operator("aten::div(int a, int b) -> float",
+        [](Node* node) {
+          return [=](Stack& stack) {
+            int64_t a, b;
+            pop(stack, a, b);
+            push(stack, static_cast<double>(a) / static_cast<double>(b));
+            return 0;
+          };
+        }),
+    Operator("aten::div(float a, float b) -> float",
+        [](Node* node) {
+          return [=](Stack& stack) {
+            double a, b;
+            pop(stack, a, b);
+            push(stack, a / b);
+            return 0;
+          };
+        }),
 
     DEFINE_COMPARISON_OP(aten::ne, a != b)
     DEFINE_COMPARISON_OP(aten::eq, a == b)

@@ -188,7 +188,7 @@ void unroll(Node *loop) {
 
   // Change the iteration counts of both loops
   Value* iter_count = loop->inputs().at(0);
-  Value* unrolled_iter_count = graph->insert(aten::div, {iter_count, kUnrollFactor});
+  Value* unrolled_iter_count = graph->insert(prim::FloorDiv, {iter_count, kUnrollFactor});
   loop->replaceInput(0, unrolled_iter_count);
   loop_epilogue->replaceInput(0, graph->insert(aten::sub, {iter_count, graph->insert(aten::mul,{unrolled_iter_count , kUnrollFactor})}));
 }

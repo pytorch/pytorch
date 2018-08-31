@@ -57,6 +57,7 @@ namespace torch { namespace jit {
   _(prim, FusedConcat)             \
   _(prim, ConstantChunk)           \
   _(prim, NoneGenerator)           \
+  _(prim, FloorDiv)                \
   _(aten, __not__)                 \
   FORALL_ATEN_BASE_SYMBOLS(_)      \
   _(onnx, Add)                     \

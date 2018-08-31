@@ -124,13 +124,40 @@ def build_stmts(ctx, stmts):
     return list(filter(None, stmts))
 
 
+def _uses_true_division(fn):
+    if not PY2:
+        return True
+    if inspect.ismethod(fn):
+        return _uses_true_division(fn.__func__)
+    elif inspect.isfunction(fn):
+        feature = fn.__globals__.get('division')
+        if feature is None:
+            return False
+
+        # Check if feature is a __future__ _Feature to make sure this isn't some
+        # other 'division' library. _Feature instances have the following attrs:
+        return hasattr(feature, 'getOptionalRelease') and hasattr(feature, 'getMandatoryRelease')
+    else:
+        raise RuntimeError(
+            '_uses_true_division: expected function or method, got {}'.format(type(fn)))
+
+
 def get_jit_ast(fn, is_method):
     source = dedent(inspect.getsource(fn))
     py_ast = ast.parse(source)
     if len(py_ast.body) != 1 or not isinstance(py_ast.body[0], ast.FunctionDef):
         raise RuntimeError("expected a single top-level function")
     type_line = torch.jit.annotations.get_type_line(source)
-    return build_def(SourceRangeFactory(source), py_ast.body[0], type_line, is_method)
+    ctx = SourceContext(source, _uses_true_division(fn))
+    return build_def(ctx, py_ast.body[0], type_line, is_method)
+
+
+# Thin wrapper around SourceRangeFactory to store extra metadata
+# about the function-to-be-compiled.
+class SourceContext(SourceRangeFactory):
+    def __init__(self, source, uses_true_division=True):
+        super(SourceContext, self).__init__(source)
+        self.uses_true_division = uses_true_division
 
 
 class Builder(object):
@@ -365,6 +392,12 @@ class ExprBuilder(Builder):
         lhs = build_expr(ctx, expr.left)
         rhs = build_expr(ctx, expr.right)
         op = type(expr.op)
+
+        if op == ast.Div and not ctx.uses_true_division:
+            raise RuntimeError('Division of ints in JIT script uses Python 3 true '
+                               'division semantics. Please put `from __future__ '
+                               'import division` at the top of your file')
+
         op_token = ExprBuilder.binop_map.get(op)
         if op_token is None:
             err_range = ctx.make_raw_range(lhs.range().end, rhs.range().start)
