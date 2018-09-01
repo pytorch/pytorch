@@ -2308,29 +2308,107 @@ void Axpy<float16, CUDAContext>(
 }
 
 namespace {
-template <typename T>
-__global__ void
-AxpbyKernel(const int n, const T a, const T* x, const T b, T* y) {
-  CUDA_1D_KERNEL_LOOP(index, n) {
-    y[index] = x[index] * a + y[index] * b;
+
+template <typename TCoeff, typename TData>
+__global__ void AxpbyCUDAKernel(
+    const int N,
+    const TCoeff a,
+    const TData* x,
+    const TCoeff b,
+    TData* y) {
+  CUDA_1D_KERNEL_LOOP(i, N) {
+#if __CUDA_ARCH__ >= 350
+    y[i] = __ldg(x + i) * a + y[i] * b;
+#else
+    y[i] = x[i] * a + y[i] * b;
+#endif
   }
 }
-} // namespace
 
 template <>
-void Axpby<float, CUDAContext>(
-    const int n,
+__global__ void AxpbyCUDAKernel<float, float16>(
+    const int N,
     const float a,
-    const float* x,
+    const float16* x,
     const float b,
-    float* y,
-    CUDAContext* context) {
-  AxpbyKernel<float>
-      <<<CAFFE_GET_BLOCKS(n),
-         CAFFE_CUDA_NUM_THREADS,
-         0,
-         context->cuda_stream()>>>(n, a, x, b, y);
+    float16* y) {
+  CUDA_1D_KERNEL_LOOP(i, N) {
+    y[i] = convert::To<float, float16>(
+        convert::To<float16, float>(x[i]) * a +
+        convert::To<float16, float>(y[i]) * b);
+  }
 }
+
+template <typename TCoeff, typename TData>
+__global__ void AxpbyCUDAKernel(
+    const int N,
+    const TCoeff* a,
+    const TData* x,
+    const TCoeff* b,
+    TData* y) {
+  CUDA_1D_KERNEL_LOOP(i, N) {
+#if __CUDA_ARCH__ >= 350
+    y[i] = __ldg(x + i) * __ldg(a) + y[i] * __ldg(b);
+#else
+    y[i] = x[i] * *a + y[i] * *b;
+#endif
+  }
+}
+
+template <>
+__global__ void AxpbyCUDAKernel<float, float16>(
+    const int N,
+    const float* a,
+    const float16* x,
+    const float* b,
+    float16* y) {
+  CUDA_1D_KERNEL_LOOP(i, N) {
+#if __CUDA_ARCH__ >= 350
+    y[i] = convert::To<float, float16>(
+        convert::To<float16, float>(x[i]) * __ldg(a) +
+        convert::To<float16, float>(y[i]) * __ldg(b));
+#else
+    y[i] = convert::To<float, float16>(
+        convert::To<float16, float>(x[i]) * *a +
+        convert::To<float16, float>(y[i]) * *b);
+#endif
+  }
+}
+
+} // namespace
+
+#define CAFFE2_SPECIALIZED_CUDA_AXPBY(TCoeff, TData) \
+  template <>                                        \
+  void Axpby<TCoeff, TData, CUDAContext>(            \
+      const int n,                                   \
+      const TCoeff a,                                \
+      const TData* x,                                \
+      const TCoeff b,                                \
+      TData* y,                                      \
+      CUDAContext* context) {                        \
+    AxpbyCUDAKernel<TCoeff, TData>                   \
+        <<<CAFFE_GET_BLOCKS(n),                      \
+           CAFFE_CUDA_NUM_THREADS,                   \
+           0,                                        \
+           context->cuda_stream()>>>(n, a, x, b, y); \
+  }                                                  \
+  template <>                                        \
+  void Axpby<TCoeff, TData, CUDAContext>(            \
+      const int n,                                   \
+      const TCoeff* a,                               \
+      const TData* x,                                \
+      const TCoeff* b,                               \
+      TData* y,                                      \
+      CUDAContext* context) {                        \
+    AxpbyCUDAKernel<TCoeff, TData>                   \
+        <<<CAFFE_GET_BLOCKS(n),                      \
+           CAFFE_CUDA_NUM_THREADS,                   \
+           0,                                        \
+           context->cuda_stream()>>>(n, a, x, b, y); \
+  }
+CAFFE2_SPECIALIZED_CUDA_AXPBY(float, float)
+CAFFE2_SPECIALIZED_CUDA_AXPBY(float, float16)
+#undef CAFFE2_SPECIALIZED_CUDA_AXPBY
 
 namespace {
 
