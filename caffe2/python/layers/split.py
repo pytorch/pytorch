@@ -13,35 +13,49 @@ from caffe2.python.layers.layers import (
 
 class Split(ModelLayer):
 
-    def __init__(self, model, input_record, num_splits, axis=1,
+    def __init__(self, model, input_record, num_splits, axis=1, split_batch_dim=False,
                  name='split', **kwargs):
         super(Split, self).__init__(model, name, input_record, **kwargs)
-        self.axis = axis
-        # Assume that first dimension is batch, so actual axis in shape is
-        # axis - 1
-        axis -= 1
-        assert axis >= 0
 
         assert isinstance(input_record, schema.Scalar),\
             "Incorrect input type. Excpected Scalar, but received: {0}".\
             format(input_record)
 
         input_shape = input_record.field_type().shape
-        assert len(input_shape) >= axis
-        assert input_shape[axis] % num_splits == 0
 
-        output_shape = list(input_shape)
-        output_shape[axis] = int(output_shape[axis] / num_splits)
+        if not split_batch_dim:
+            self.axis = axis
+            # Assume that first dimension is batch, so actual axis in shape is
+            # axis - 1
+            axis -= 1
+            assert axis >= 0
+            assert len(input_shape) >= axis
+            assert input_shape[axis] % num_splits == 0
 
-        data_type = input_record.field_type().base
+            output_shape = list(input_shape)
+            output_shape[axis] = int(output_shape[axis] / num_splits)
 
-        output_scalars = [
-            schema.Scalar(
-                (data_type, output_shape),
-                self.get_next_blob_reference('output_{}'.format(i)),
-            )
-            for i in range(num_splits)
-        ]
+            data_type = input_record.field_type().base
+
+            output_scalars = [
+                schema.Scalar(
+                    (data_type, output_shape),
+                    self.get_next_blob_reference('output_{}'.format(i)),
+                )
+                for i in range(num_splits)
+            ]
+        else:
+            self.axis = 0
+            assert len(input_shape) == 1, "split_batch_dim only support 2D tenser."
+            data_type = input_record.field_type().base
+            output_scalars = [
+                schema.Scalar(
+                    (data_type, input_shape),
+                    self.get_next_blob_reference('output_{}'.format(i)),
+                )
+                for i in range(num_splits)
+            ]
+
         self.output_schema = schema.Tuple(*output_scalars)
 
     def add_ops(self, net):
