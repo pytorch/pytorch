@@ -266,6 +266,106 @@ class TestCppExtension(common.TestCase):
         z = module.tanh_add(x, y).cpu()
         self.assertEqual(z, x.tanh() + y.tanh())
 
+    def test_complex_registration(self):
+        cpp_source = '''
+        #include <ATen/detail/ComplexHooksInterface.h>
+        #include <ATen/detail/VariableHooksInterface.h>
+        #include <ATen/Type.h>
+        #include <ATen/CPUFloatType.h>
+
+        #include "ATen/TensorImpl.h"
+        #include "ATen/CPUGenerator.h"
+        #include "ATen/TensorImpl.h"
+        #include "ATen/Allocator.h"
+        #include "ATen/DeviceGuard.h"
+        #include "ATen/NativeFunctions.h"
+        #include "ATen/UndefinedTensor.h"
+        #include "ATen/Utils.h"
+        #include "ATen/WrapDimUtils.h"
+        #include "ATen/core/Half.h"
+        #include "ATen/core/optional.h"
+
+        #include <cstddef>
+        #include <functional>
+        #include <memory>
+        #include <utility>
+
+        #include "ATen/Config.h"
+
+        namespace at {
+
+        struct CPUComplexFloatType : public at::CPUTypeDefault {
+
+          CPUComplexFloatType()
+            : CPUTypeDefault(CPUTensorId(), /*is_variable=*/false, /*is_undefined=*/false) {}
+
+          ScalarType scalarType() const override;
+          Backend backend() const override;
+          const char * toString() const override;
+          size_t elementSizeInBytes() const override;
+          TypeID ID() const override;
+          Tensor & s_copy_(Tensor & self, const Tensor & src, bool non_blocking) const override;
+          Tensor & _s_copy_from(const Tensor & self, Tensor & dst, bool non_blocking) const override;
+
+          Tensor tensor(IntList size) const override {
+            // TODO: Upstream this
+            int64_t numel = 1;
+            for (auto s : size) {
+              numel *= s;
+            }
+            Storage s{c10::make_intrusive<StorageImpl>(scalarTypeToDataType(ScalarType::ComplexFloat), numel, getCPUAllocator(), /* resizable */ true)};
+            Tensor t{c10::make_intrusive<TensorImpl, UndefinedTensor>(std::move(s), at::CPUTensorId(), /* is_variable */ false)};
+            return t;
+          }
+        };
+
+        struct ComplexHooks : public at::ComplexHooksInterface {
+          ComplexHooks(ComplexHooksArgs) {}
+          void registerComplexTypes(Context* context) const override {
+            context->registerType(Backend::CPU, ScalarType::ComplexFloat, new CPUComplexFloatType());
+          }
+        };
+
+        ScalarType CPUComplexFloatType::scalarType() const {
+          return ScalarType::ComplexFloat;
+        }
+
+        Backend CPUComplexFloatType::backend() const {
+          return Backend::CPU;
+        }
+
+        const char * CPUComplexFloatType::toString() const {
+          return "CPUComplexFloatType";
+        }
+        TypeID CPUComplexFloatType::ID() const {
+          return TypeID::CPUComplexFloat;
+        }
+
+        size_t CPUComplexFloatType::elementSizeInBytes() const {
+          return sizeof(float);
+        }
+
+        Tensor & CPUComplexFloatType::s_copy_(Tensor & dst, const Tensor & src, bool non_blocking) const {
+          AT_ERROR("not yet supported");
+        }
+
+        Tensor & CPUComplexFloatType::_s_copy_from(const Tensor & src, Tensor & dst, bool non_blocking) const {
+          AT_ERROR("not yet supported");
+        }
+
+        REGISTER_COMPLEX_HOOKS(ComplexHooks);
+
+        } // namespace at
+        '''
+
+        module = torch.utils.cpp_extension.load_inline(
+            name='complex_registration_extension',
+            cpp_sources=cpp_source,
+            functions=[],
+            verbose=True)
+
+        torch.empty(2, 2, dtype=torch.complex64)
+
 
 if __name__ == '__main__':
     common.run_tests()
