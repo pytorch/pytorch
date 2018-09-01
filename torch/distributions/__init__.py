@@ -96,6 +96,7 @@ from .logistic_normal import LogisticNormal
 from .lowrank_multivariate_normal import LowRankMultivariateNormal
 from .multinomial import Multinomial
 from .multivariate_normal import MultivariateNormal
+from .multivariate_normal_diag import MultivariateNormalDiag
 from .negative_binomial import NegativeBinomial
 from .normal import Normal
 from .one_hot_categorical import OneHotCategorical
