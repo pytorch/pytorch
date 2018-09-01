@@ -161,7 +161,6 @@ IS_WINDOWS = (platform.system() == 'Windows')
 IS_DARWIN = (platform.system() == 'Darwin')
 IS_LINUX = (platform.system() == 'Linux')
 
-FULL_CAFFE2 = check_env_flag('FULL_CAFFE2')
 BUILD_PYTORCH = check_env_flag('BUILD_PYTORCH')
 USE_CUDA_STATIC_LINK = check_env_flag('USE_CUDA_STATIC_LINK')
 
@@ -359,10 +358,12 @@ def build_libs(libs):
         build_libs_cmd += ['--use-mkldnn']
     if USE_GLOO_IBVERBS:
         build_libs_cmd += ['--use-gloo-ibverbs']
-    if FULL_CAFFE2:
-        build_libs_cmd += ['--full-caffe2']
 
     my_env["BUILD_TORCH"] = "ON"
+    my_env["BUILD_PYTHON"] = "ON"
+    my_env["BUILD_BINARY"] = "ON"
+    my_env["BUILD_TEST"] = "ON"
+    my_env["INSTALL_TEST"] = "ON"
 
     try:
         os.mkdir('build')
@@ -1072,11 +1073,12 @@ extensions.append(
         name=str('caffe2.python.caffe2_pybind11_state'),
         sources=[]),
 )
-extensions.append(
-    setuptools.Extension(
-        name=str('caffe2.python.caffe2_pybind11_state_gpu'),
-        sources=[]),
-)
+if USE_CUDA:
+    extensions.append(
+        setuptools.Extension(
+            name=str('caffe2.python.caffe2_pybind11_state_gpu'),
+            sources=[]),
+    )
 
 cmdclass = {
     'create_version_file': create_version_file,

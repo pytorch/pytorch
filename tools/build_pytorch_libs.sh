@@ -16,7 +16,6 @@ USE_ROCM=0
 USE_NNPACK=0
 USE_MKLDNN=0
 USE_GLOO_IBVERBS=0
-FULL_CAFFE2=0
 CAFFE2_STATIC_LINK_CUDA=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -34,9 +33,6 @@ while [[ $# -gt 0 ]]; do
           ;;
       --use-gloo-ibverbs)
           USE_GLOO_IBVERBS=1
-          ;;
-      --full-caffe2)
-          FULL_CAFFE2=1
           ;;
       --cuda-static-link)
           CAFFE2_STATIC_LINK_CUDA=1
@@ -260,11 +256,11 @@ function build_caffe2() {
       -DBUILDING_WITH_TORCH_LIBS=ON \
       -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
       -DBUILD_TORCH=$BUILD_TORCH \
-      -DBUILD_PYTHON=ON \
+      -DBUILD_PYTHON=$BUILD_PYTHON \
       -DBUILD_SHARED_LIBS=$BUILD_SHARED_LIBS \
-      -DBUILD_BINARY=$FULL_CAFFE2 \
-      -DBUILD_TEST=$FULL_CAFFE2 \
-      -DINSTALL_TEST=$FULL_CAFFE2 \
+      -DBUILD_BINARY=$BUILD_BINARY \
+      -DBUILD_TEST=$BUILD_TEST \
+      -DINSTALL_TEST=$INSTALL_TEST \
       -DONNX_NAMESPACE=$ONNX_NAMESPACE \
       -DUSE_CUDA=$USE_CUDA \
       -DCAFFE2_STATIC_LINK_CUDA=$CAFFE2_STATIC_LINK_CUDA \
