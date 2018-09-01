@@ -138,8 +138,6 @@ class CAFFE2_API StorageImpl {
         data_type_.id() != TypeIdentifier::uninitialized(),
         "To share with a raw external pointer you need to have meta "
         "already set.");
-    CAFFE_ENFORCE_WITH_CALLER(
-        capacity >= 0, "capacity must be valid for ShareExternalPointer");
     // Check if the deleter is a MemoryDeleter and is a simple nullptr.
     if (std::is_same<MemoryDeleter, Deleter>::value &&
         reinterpret_cast<MemoryDeleter*>(&d)[0] == nullptr) {
