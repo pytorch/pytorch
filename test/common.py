@@ -106,10 +106,9 @@ class TestCondition(object):
         else:
             return cls(True)
 
-    def skipIfMissing(self, fn):
-        if not self.satisfied:
-            return unittest.skip(self.msg)
-        return fn
+    @property
+    def skipIfMissing(self):
+        return unittest.skipIf(not self.satisfied, self.msg)
 
     def __bool__(self):
         return self.satisfied
