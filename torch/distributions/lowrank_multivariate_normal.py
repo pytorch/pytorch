@@ -5,17 +5,7 @@ from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.multivariate_normal import (_batch_diag, _batch_mahalanobis, _batch_mv,
                                                      _batch_potrf_lower, _batch_trtrs_lower)
-from torch.distributions.utils import lazy_property
-
-
-def _batch_vector_diag(bvec):
-    """
-    Returns the diagonal matrices of a batch of vectors.
-    """
-    n = bvec.size(-1)
-    bmat = bvec.new_zeros(bvec.shape + (n,))
-    bmat.view(bvec.shape[:-1] + (-1,))[..., ::n + 1] = bvec
-    return bmat
+from torch.distributions.utils import lazy_property, _batch_vector_diag
 
 
 def _batch_capacitance_tril(W, D):

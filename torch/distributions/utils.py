@@ -121,6 +121,16 @@ def batch_tril(bmat, diagonal=0):
         return bmat * torch.tril(bmat.new(*bmat.shape[-2:]).fill_(1.0), diagonal=diagonal)
 
 
+def _batch_vector_diag(bvec):
+    """
+    Returns the diagonal matrices of a batch of vectors.
+    """
+    n = bvec.size(-1)
+    bmat = bvec.new_zeros(bvec.shape + (n,))
+    bmat.view(bvec.shape[:-1] + (-1,))[..., ::n + 1] = bvec
+    return bmat
+
+
 class lazy_property(object):
     r"""
     Used as a decorator for lazy loading of class attributes. This uses a

@@ -130,6 +130,7 @@ __all__ = [
     'LogisticNormal',
     'Multinomial',
     'MultivariateNormal',
+    'MultivariateNormalDiag',
     'NegativeBinomial',
     'Normal',
     'OneHotCategorical',
