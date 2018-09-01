@@ -88,7 +88,7 @@ class AdamOp final : public Operator<Context> {
         epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5f)) {}
   bool RunOnDevice() override {
     // Iter live on the CPU
-    CAFFE_ENFORCE(OperatorBase::InputIsType<Tensor>(ITER, CPU));
+    CAFFE_ENFORCE(OperatorBase::InputIsTensorType(ITER, CPU));
     CAFFE_ENFORCE(Input(LR).size() == 1);
     CAFFE_ENFORCE(Input(GRAD).size() == Input(PARAM).size());
     CAFFE_ENFORCE(Input(GRAD).size() == Input(MOMENT_1).size());

@@ -10,7 +10,7 @@ void enforceIsTensor(Workspace* ws, const std::string& name) {
   auto blob = ws->GetBlob(name);
   CAFFE_ENFORCE(blob, "Blob does not exist: ", name);
   CAFFE_ENFORCE(
-      blob->template IsType<Tensor>(CPU), "Blob is not a CPU Tensor: ", name);
+      blob->IsTensorType(CPU), "Blob is not a CPU Tensor: ", name);
 }
 
 TensorCPU* getTensor(Workspace* ws, const std::string& name) {

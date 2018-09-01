@@ -26,7 +26,7 @@ class StringJoinOpTest : public testing::Test {
   const std::string* checkAndGetOutput(int outputSize) {
     const auto* output = ws_.GetBlob("Y");
     EXPECT_NE(output, nullptr);
-    EXPECT_TRUE(output->IsType<Tensor>(CPU));
+    EXPECT_TRUE(output->IsTensorType(CPU));
     const auto& outputTensor = output->Get<TensorCPU>();
     EXPECT_EQ(outputTensor.ndim(), 1);
     EXPECT_EQ(outputTensor.dim(0), outputSize);

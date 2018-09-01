@@ -121,7 +121,7 @@ class IDEEPFallbackOp final : public IDEEPOperator {
         continue;
       }
       CAFFE_ENFORCE(
-          local_output_blobs_[i]->template IsType<Tensor>(CPU),
+          local_output_blobs_[i]->IsTensorType(CPU),
           "IDEEP fallback op currently does not support non-TensorCPU "
           "output type who needs copying.");
       const auto& src = local_output_blobs_[i]->template Get<TensorCPU>();

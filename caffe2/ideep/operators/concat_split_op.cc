@@ -33,7 +33,7 @@ class IDEEPConcatOp final : public IDEEPOperator {
       if (OperatorBase::InputBlob(i).template IsType<itensor>()) {
         inputs.emplace_back(Input(i));
       } else {
-        CAFFE_ENFORCE(OperatorBase::InputBlob(i).IsType<Tensor>(CPU),
+        CAFFE_ENFORCE(OperatorBase::InputBlob(i).IsTensorType(CPU),
                       "Expect cpu tensor if not itensor");
         auto& tensor_cpu = OperatorBase::Input<Tensor>(i, CPU);
         CAFFE_ENFORCE(tensor_cpu.dims().size() == 0 ||

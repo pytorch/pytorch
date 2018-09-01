@@ -86,15 +86,15 @@ TEST(BlobTest, Blob) {
   int* int_unused CAFFE2_UNUSED = blob.GetMutable<int>();
   EXPECT_TRUE(blob.IsType<int>());
   EXPECT_FALSE(blob.IsType<BlobTestFoo>());
-  EXPECT_FALSE(blob.IsType<Tensor>(CPU));
+  EXPECT_FALSE(blob.IsTensorType(CPU));
 
   BlobTestFoo* foo_unused CAFFE2_UNUSED = blob.GetMutable<BlobTestFoo>();
   EXPECT_TRUE(blob.IsType<BlobTestFoo>());
   EXPECT_FALSE(blob.IsType<int>());
-  EXPECT_FALSE(blob.IsType<Tensor>(CPU));
+  EXPECT_FALSE(blob.IsTensorType(CPU));
 
   Tensor* tensor_unused CAFFE2_UNUSED = blob.GetMutableTensor(CPU);
-  EXPECT_TRUE(blob.IsType<Tensor>(CPU));
+  EXPECT_TRUE(blob.IsTensorType(CPU));
   EXPECT_FALSE(blob.IsType<BlobTestFoo>());
   EXPECT_FALSE(blob.IsType<int>());
 }
@@ -621,7 +621,7 @@ TEST(TensorDeathTest, CannotCastDownLargeDims) {
     }                                                                     \
     Blob new_blob;                                                        \
     EXPECT_NO_THROW(new_blob.Deserialize(serialized));                    \
-    EXPECT_TRUE(new_blob.IsType<Tensor>(CPU));                            \
+    EXPECT_TRUE(new_blob.IsTensorType(CPU));                            \
     const TensorCPU& new_tensor = blob.Get<TensorCPU>();                  \
     EXPECT_EQ(new_tensor.ndim(), 2);                                      \
     EXPECT_EQ(new_tensor.dim(0), 2);                                      \
@@ -650,7 +650,7 @@ TEST(TensorDeathTest, CannotCastDownLargeDims) {
     EXPECT_EQ(tensor_proto.field_name##_size(), 0);                       \
     Blob new_blob;                                                        \
     EXPECT_NO_THROW(new_blob.Deserialize(serialized));                    \
-    EXPECT_TRUE(new_blob.IsType<Tensor>(CPU));                            \
+    EXPECT_TRUE(new_blob.IsTensorType(CPU));                            \
     const TensorCPU& new_tensor = blob.Get<TensorCPU>();                  \
     EXPECT_EQ(new_tensor.ndim(), 2);                                      \
     EXPECT_EQ(new_tensor.dim(0), 0);                                      \
@@ -681,7 +681,7 @@ TEST(TensorTest, TensorSerialization_CustomType) {
   EXPECT_EQ(proto.type(), "Tensor");
   Blob new_blob;
   EXPECT_NO_THROW(new_blob.Deserialize(serialized));
-  EXPECT_TRUE(new_blob.IsType<Tensor>(CPU));
+  EXPECT_TRUE(new_blob.IsTensorType(CPU));
   const TensorCPU& new_tensor = blob.Get<TensorCPU>();
   EXPECT_EQ(new_tensor.ndim(), 2);
   EXPECT_EQ(new_tensor.dim(0), 2);
@@ -724,7 +724,7 @@ TEST(TensorTest, float16) {
   }
   Blob new_blob;
   EXPECT_NO_THROW(new_blob.Deserialize(serialized));
-  EXPECT_TRUE(new_blob.IsType<Tensor>(CPU));
+  EXPECT_TRUE(new_blob.IsTensorType(CPU));
   const TensorCPU& new_tensor = blob.Get<TensorCPU>();
   EXPECT_EQ(new_tensor.ndim(), 1);
   EXPECT_EQ(new_tensor.dim(0), kSize);
@@ -903,7 +903,7 @@ TYPED_TEST(TypedTensorTest, BigTensorSerialization) {
     load_op->Run();
     VLOG(1) << "Reading blob from workspace";
     auto new_blob = ws.GetBlob("test");
-    EXPECT_TRUE(new_blob->IsType<Tensor>(CPU));
+    EXPECT_TRUE(new_blob->IsTensorType(CPU));
     const auto& new_tensor = new_blob->Get<TensorCPU>();
 
     EXPECT_EQ(new_tensor.ndim(), d1);

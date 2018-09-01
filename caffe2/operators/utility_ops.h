@@ -91,8 +91,8 @@ class PrintOp final : public Operator<Context> {
       return true;
     }
 
-    if (!this->template InputIsType<Tensor>(0, Context::GetDeviceType()) &&
-        !this->template InputIsType<Tensor>(0, CPU)) {
+    if (!this->InputIsTensorType(0, Context::GetDeviceType()) &&
+        !this->InputIsTensorType(0, CPU)) {
       LOG(INFO) << "Blob of type: "
                 << OperatorBase::Inputs().at(0)->meta().name();
       return true;
@@ -113,7 +113,7 @@ class PrintOp final : public Operator<Context> {
         unsigned char,
         std::string>;
 
-    if (this->template InputIsType<Tensor>(0, CPU)) {
+    if (this->InputIsTensorType(0, CPU)) {
       return DispatchHelper<Types>::call(
           this, this->template Input<Tensor>(0, CPU));
     } else {
@@ -129,7 +129,7 @@ class PrintOp final : public Operator<Context> {
     // will handle memory deallocation itself so no smart pointer is needed.
     const TensorCPU* tensor;
     Tensor tensor_copy_if_needed(CPU);
-    if (this->template InputIsType<Tensor>(0, CPU)) {
+    if (this->InputIsTensorType(0, CPU)) {
       tensor = &this->template Input<Tensor>(0, CPU);
     } else {
       tensor_copy_if_needed.CopyFrom(Input(0), &context_);
