@@ -68,13 +68,13 @@ class MultivariateNormalDiag(Distribution):
             self._validate_sample(value)
         diff = value - self.loc
         return (
-            -0.5 * self._event_shape[0] * math.log(2 * math.pi)
-            - self.scale_diag.log().sum(-1)
-            - 0.5 * (diff / self.scale_diag).pow(2).sum(-1)
+            -0.5 * self._event_shape[0] * math.log(2 * math.pi) -
+            self.scale_diag.log().sum(-1) -
+            0.5 * (diff / self.scale_diag).pow(2).sum(-1)
         )
 
     def entropy(self):
         return (
-            0.5 * self._event_shape[0] * (math.log(2 * math.pi) + 1)
-            + self.scale_diag.log().sum(-1)
+            0.5 * self._event_shape[0] * (math.log(2 * math.pi) + 1) +
+            self.scale_diag.log().sum(-1)
         )
