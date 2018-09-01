@@ -386,6 +386,10 @@ class TestOperators(TestCase):
         x = Variable(torch.rand(3, 4), requires_grad=True)
         self.assertONNX(lambda x: x.acos(), x)
 
+    def test_slice(self):
+        x = Variable(torch.rand(3, 4), requires_grad=True)
+        self.assertONNX(lambda x: x[:, 1:2], x)
+
     def test_atan(self):
         x = Variable(torch.randn(3, 4), requires_grad=True)
         self.assertONNX(lambda x: x.atan(), x)
