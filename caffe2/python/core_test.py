@@ -533,8 +533,8 @@ class TestCreatePlan(test_util.TestCase):
 
         self.assertEqual(len(plan.Steps()), 1)
         self.assertEqual(len(test_plan.Steps()), 1)
-        self.assertEqual(len(plan.Proto().network), 8)
-        self.assertEqual(len(test_plan.Proto().network), 8)
+        self.assertEqual(len(plan.Proto().network), 9)
+        self.assertEqual(len(test_plan.Proto().network), 9)
         self.assertEqual(len(plan.Proto().execution_step), 1)
         self.assertEqual(len(test_plan.Proto().execution_step), 1)
         self.assertEqual(plan.Steps()[0].Name(), test_plan.Steps()[0].Name())
