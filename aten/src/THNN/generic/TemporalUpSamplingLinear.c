@@ -49,8 +49,8 @@ void THNN_(TemporalUpSamplingLinear_updateOutput)(
 		      THTensor_(size)(input, 1),
 		      outputWidth);
   THTensor_(zero)(output);
-  real *idata = THTensor_(data)(input);
-  real *odata = THTensor_(data)(output);
+  real *idata = input->data<real>();
+  real *odata = output->data<real>();
   channels = nbatch * channels;
   THAssert(inputWidth > 0 && outputWidth > 0);
   // special case: just copy
@@ -65,7 +65,7 @@ void THNN_(TemporalUpSamplingLinear_updateOutput)(
         pos2 += outputWidth;
       }
     }
-    THTensor_(free)(input);
+    c10::raw::intrusive_ptr::decref(input);
     return;
   }
   const accreal rwidth = linear_upsampling_compute_scale<accreal>(inputWidth, outputWidth, align_corners);
@@ -84,7 +84,7 @@ void THNN_(TemporalUpSamplingLinear_updateOutput)(
       pos2 += outputWidth;
     }
   }
-  THTensor_(free)(input);
+  c10::raw::intrusive_ptr::decref(input);
 }
 
 void THNN_(TemporalUpSamplingLinear_updateGradInput)(
@@ -106,8 +106,8 @@ void THNN_(TemporalUpSamplingLinear_updateGradInput)(
   THTensor_(resize3d)(gradInput, nbatch, channels, inputWidth);
   THTensor_(zero)(gradInput);
   gradOutput = THTensor_(newContiguous)(gradOutput);
-  real *data1 = THTensor_(data)(gradInput);
-  real *data2 = THTensor_(data)(gradOutput);
+  real *data1 = gradInput->data<real>();
+  real *data2 = gradOutput->data<real>();
   channels = nbatch * channels;
 
   // special case: same-size matching grids
@@ -122,7 +122,7 @@ void THNN_(TemporalUpSamplingLinear_updateGradInput)(
         pos2 += outputWidth;
       }
     }
-    THTensor_(free)(gradOutput);
+    c10::raw::intrusive_ptr::decref(gradOutput);
     return;
   }
   const accreal rwidth = linear_upsampling_compute_scale<accreal>(inputWidth, outputWidth, align_corners);
@@ -141,7 +141,7 @@ void THNN_(TemporalUpSamplingLinear_updateGradInput)(
       pos2 += outputWidth;
     }
   }
-  THTensor_(free)(gradOutput);
+  c10::raw::intrusive_ptr::decref(gradOutput);
 }
 
 #endif
