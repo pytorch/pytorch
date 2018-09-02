@@ -901,6 +901,7 @@ def _write_ninja_file(path,
         object_files.append(target)
         if sys.platform == 'win32':
             source_file = source_file.replace(':', '$:')
+        source_file = source_file.replace(" ", "$ ")
         build.append('build {}: {} {}'.format(target, rule, source_file))
 
     ext = '.pyd' if sys.platform == 'win32' else '.so'
