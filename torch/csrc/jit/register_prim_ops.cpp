@@ -418,25 +418,25 @@ RegisterOperators reg({
 });
 
 // define implementations for primitive number ops
-#define DEFINE_GENERIC_OP(aten_op, int_op, float_op, float_result)          \
-  Operator(                                                                 \
-      #aten_op "(int a, int b) -> int",                                     \
-      [](Node* node) {                                                      \
-        return [=](Stack& stack) {                                          \
-          int64_t a, b;                                                     \
-          pop(stack, a, b);                                                 \
-          push(stack, int_op);                                                  \
-          return 0;                                                         \
-        };                                                                  \
-      }),                                                                   \
-  Operator(                                                                 \
-      #aten_op "(float a, float b) -> " #float_result, [](Node* node) {     \
-        return [=](Stack& stack) {                                          \
-          double a, b;                                                      \
-          pop(stack, a, b);                                                 \
-          push(stack, float_op);                                                  \
-          return 0;                                                         \
-        };                                                                  \
+#define DEFINE_GENERIC_OP(aten_op, int_op, float_op, int_result float_result) \
+  Operator(                                                                   \
+      #aten_op "(int a, int b) -> " #int_result,                              \
+      [](Node* node) {                                                        \
+        return [=](Stack& stack) {                                            \
+          int64_t a, b;                                                       \
+          pop(stack, a, b);                                                   \
+          push(stack, int_op);                                                \
+          return 0;                                                           \
+        };                                                                    \
+      }),                                                                     \
+  Operator(                                                                   \
+      #aten_op "(float a, float b) -> " #float_result, [](Node* node) {       \
+        return [=](Stack& stack) {                                            \
+          double a, b;                                                        \
+          pop(stack, a, b);                                                   \
+          push(stack, float_op);                                              \
+          return 0;                                                           \
+        };                                                                    \
       }),
 
 #define DEFINE_INT_OP(aten_op, op)                            \
@@ -449,8 +449,19 @@ RegisterOperators reg({
     };                                                        \
   }),
 
-#define DEFINE_BINARY_OP(aten_op, op) DEFINE_GENERIC_OP(aten_op, op, op, float)
-#define DEFINE_COMPARISON_OP(aten_op, op) DEFINE_GENERIC_OP(aten_op, op, op, int)
+#define DEFINE_BINARY_OP(aten_op, op) \
+  DEFINE_GENERIC_OP(aten_op, op, op, int, float)
+#define DEFINE_COMPARISON_OP(aten_op, op) \
+  DEFINE_GENERIC_OP(aten_op, op, op, bool, bool)
+#define DEFINE_BOOL_OP(aten_op, op)                              \
+  Operator(#aten_op "(bool a, bool b) -> bool", [](Node* node) { \
+    return [=](Stack& stack) {                                   \
+      bool a, b;                                                 \
+      pop(stack, a, b);                                          \
+      push(stack, op);                                           \
+      return 0;                                                  \
+    };                                                           \
+  }),
 
 // define helpers for where aten is missing scalar overloads
 // note: it would be better to define these in a standard library as
@@ -684,6 +695,9 @@ RegisterOperators reg2({
 
     DEFINE_INT_OP(aten::__and__, a&& b)
     DEFINE_INT_OP(aten::__or__, a || b)
+
+    DEFINE_BOOL_OP(aten::__and__, a && b)
+    DEFINE_BOOL_OP(aten::__or__, a || b)
 
     Operator("aten::_construct_empty_int_list() -> int[]",
         [](Node* node) -> Operation {
