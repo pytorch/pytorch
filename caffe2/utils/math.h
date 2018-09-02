@@ -490,13 +490,22 @@ template <typename T, class Context>
 CAFFE2_API void
 Axpy(const int N, const float* alpha, const T* x, T* y, Context* context);
 
-template <typename T, class Context>
+template <typename TCoeff, typename TData, class Context>
 CAFFE2_API void Axpby(
     const int N,
-    const float alpha,
-    const T* x,
-    const T b,
-    T* y,
+    const TCoeff alpha,
+    const TData* x,
+    const TCoeff b,
+    TData* y,
+    Context* context);
+
+template <typename TCoeff, typename TData, class Context>
+CAFFE2_API void Axpby(
+    const int N,
+    const TCoeff* alpha,
+    const TData* x,
+    const TCoeff* b,
+    TData* y,
     Context* context);
 
 // groups must be 1 for GPU

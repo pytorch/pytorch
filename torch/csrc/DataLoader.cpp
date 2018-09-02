@@ -39,7 +39,7 @@ static void HANDLER_NAME(int sig, siginfo_t *info, void *ctx)                 \
   struct sigaction sa;                                                        \
   sa.sa_handler = SIG_DFL;                                                    \
   sa.sa_flags = 0;                                                            \
-  if (sigemptyset(&sa.sa_mask) != 0 || sigaction(SIGNAL, &sa, NULL) != 0) {   \
+  if (sigemptyset(&sa.sa_mask) != 0 || sigaction(SIGNAL, &sa, nullptr) != 0) {   \
     _exit(EXIT_FAILURE);                                                      \
   } else {                                                                    \
     raise(SIGNAL);                                                            \
@@ -80,7 +80,7 @@ static void handler_SIGTERM(int sig, siginfo_t *info, void *ctx)
   struct sigaction sa;
   sa.sa_handler = SIG_DFL;
   sa.sa_flags = 0;
-  if (sigemptyset(&sa.sa_mask) != 0 || sigaction(SIGTERM, &sa, NULL) != 0) {
+  if (sigemptyset(&sa.sa_mask) != 0 || sigaction(SIGTERM, &sa, nullptr) != 0) {
     _exit(EXIT_FAILURE);
   } else {
     raise(SIGTERM);
@@ -89,9 +89,9 @@ static void handler_SIGTERM(int sig, siginfo_t *info, void *ctx)
 
 static PyObject *THPModule_setWorkerSignalHandlers(PyObject *module, PyObject *arg) {
   HANDLE_TH_ERRORS
-  setSignalHandler(SIGBUS, &handler_SIGBUS, NULL);
-  setSignalHandler(SIGSEGV, &handler_SIGSEGV, NULL);
-  setSignalHandler(SIGTERM, &handler_SIGTERM, NULL);
+  setSignalHandler(SIGBUS, &handler_SIGBUS, nullptr);
+  setSignalHandler(SIGSEGV, &handler_SIGSEGV, nullptr);
+  setSignalHandler(SIGTERM, &handler_SIGTERM, nullptr);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -212,9 +212,9 @@ static PyObject *THPModule_errorIfAnyWorkerFails(PyObject *module, PyObject *_ig
 #endif
 
 PyMethodDef DataLoaderMethods[] = {
-  {"_set_worker_signal_handlers",  (PyCFunction)THPModule_setWorkerSignalHandlers,  METH_NOARGS,   NULL},
-  {"_update_worker_pids",          (PyCFunction)THPModule_updateWorkerPIDs,         METH_VARARGS,  NULL},
-  {"_remove_worker_pids",          (PyCFunction)THPModule_removeWorkerPIDs,         METH_O,        NULL},
-  {"_error_if_any_worker_fails",   (PyCFunction)THPModule_errorIfAnyWorkerFails,    METH_NOARGS,   NULL},
-  {NULL, NULL, 0, NULL}
+  {"_set_worker_signal_handlers",  (PyCFunction)THPModule_setWorkerSignalHandlers,  METH_NOARGS,   nullptr},
+  {"_update_worker_pids",          (PyCFunction)THPModule_updateWorkerPIDs,         METH_VARARGS,  nullptr},
+  {"_remove_worker_pids",          (PyCFunction)THPModule_removeWorkerPIDs,         METH_O,        nullptr},
+  {"_error_if_any_worker_fails",   (PyCFunction)THPModule_errorIfAnyWorkerFails,    METH_NOARGS,   nullptr},
+  {nullptr, nullptr, 0, nullptr}
 };

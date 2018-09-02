@@ -64,32 +64,30 @@ graph(%0 : Dynamic
       %2 : Dynamic
       %3 : Dynamic
       %4 : Dynamic) {
-  %25 : Dynamic, %26 : Dynamic = prim::GraphExecutor_0(%0, %3, %1, %4, %2)
-  return (%26, %25);
+  %23 : Dynamic, %24 : Dynamic = prim::DifferentiableGraph_0(%0, %3, %1, %4, %2)
+  return (%24, %23);
 }
-with prim::GraphExecutor_0 = graph(%1 : Dynamic
+with prim::DifferentiableGraph_0 = graph(%1 : Dynamic
       %2 : Dynamic
       %4 : Dynamic
       %5 : Dynamic
-      %19 : Dynamic) {
+      %17 : Dynamic) {
   %0 : Dynamic = aten::mm(%1, %2)
   %3 : Dynamic = aten::mm(%4, %5)
   %6 : int = prim::Constant[value=1]()
   %7 : Dynamic = aten::add(%0, %3, %6)
-  %8 : int = prim::Constant[value=4]()
-  %9 : int = prim::Constant[value=1]()
-  %10 : Dynamic, %11 : Dynamic, %12 : Dynamic, %13 : Dynamic = aten::chunk(%7, %8, %9)
-  %14 : Dynamic = aten::sigmoid(%10)
-  %15 : Dynamic = aten::sigmoid(%13)
-  %16 : Dynamic = aten::tanh(%12)
-  %17 : Dynamic = aten::sigmoid(%11)
-  %18 : Dynamic = aten::mul(%17, %19)
-  %20 : Dynamic = aten::mul(%14, %16)
-  %21 : int = prim::Constant[value=1]()
-  %22 : Dynamic = aten::add(%18, %20, %21)
-  %23 : Dynamic = aten::tanh(%22)
-  %24 : Dynamic = aten::mul(%15, %23)
-  return (%22, %24);
+  %8 : Dynamic, %9 : Dynamic, %10 : Dynamic, %11 : Dynamic = prim::ConstantChunk[chunks=4, dim=1](%7)
+  %12 : Dynamic = aten::sigmoid(%8)
+  %13 : Dynamic = aten::sigmoid(%11)
+  %14 : Dynamic = aten::tanh(%10)
+  %15 : Dynamic = aten::sigmoid(%9)
+  %16 : Dynamic = aten::mul(%15, %17)
+  %18 : Dynamic = aten::mul(%12, %14)
+  %19 : int = prim::Constant[value=1]()
+  %20 : Dynamic = aten::add(%16, %18, %19)
+  %21 : Dynamic = aten::tanh(%20)
+  %22 : Dynamic = aten::mul(%13, %21)
+  return (%20, %22);
 }
 
 testDifferentiate

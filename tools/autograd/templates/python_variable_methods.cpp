@@ -150,23 +150,6 @@ static PyObject * THPVariable_copy_(PyObject* self, PyObject* args, PyObject* kw
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPVariable_detach(PyObject* self, PyObject* args)
-{
-  HANDLE_TH_ERRORS
-  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  return THPVariable_Wrap(self_.detach());
-  END_HANDLE_TH_ERRORS
-}
-
-static PyObject * THPVariable_detach_(PyObject* self, PyObject* args)
-{
-  HANDLE_TH_ERRORS
-  reinterpret_cast<THPVariable*>(self)->cdata.detach_();
-  Py_INCREF(self);
-  return self;
-  END_HANDLE_TH_ERRORS
-}
-
 static double dispatch_to_CDouble(const Tensor & self) {
   AutoNoGIL no_gil;
   DeviceGuard device_guard(self);
@@ -187,6 +170,7 @@ static int64_t dispatch_to_CLong(const Tensor & self) {
 
 static PyObject * THPVariable_float_scalar(PyObject* self, PyObject* args) {
   HANDLE_TH_ERRORS
+  jit::tracer::warn("Converting a tensor to a Python float");
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   return wrap(dispatch_to_CDouble(self_));
   END_HANDLE_TH_ERRORS
@@ -194,6 +178,7 @@ static PyObject * THPVariable_float_scalar(PyObject* self, PyObject* args) {
 
 static PyObject * THPVariable_integral_scalar(PyObject* self, PyObject* args) {
   HANDLE_TH_ERRORS
+  jit::tracer::warn("Converting a tensor to a Python integer");
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   if (isFloatingType(self_.type().scalarType())) {
     // we can't dispatch to toCLong here because we want to avoid ATen overflow checks;
@@ -209,6 +194,7 @@ static PyObject * THPVariable_integral_scalar(PyObject* self, PyObject* args) {
 // called when used as a slice.
 static PyObject * THPVariable_index_scalar(PyObject* self, PyObject* args) {
   HANDLE_TH_ERRORS
+  jit::tracer::warn("Converting a tensor to a Python index");
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   // TODO: change the condition to `self_.dim() != 0` once we expose scalars
   // in PyTorch.
@@ -320,6 +306,7 @@ static PyObject * THPVariable_element_size(PyObject* self, PyObject* args)
 static PyObject * THPVariable_numpy(PyObject* self, PyObject* arg)
 {
   HANDLE_TH_ERRORS
+  jit::tracer::warn("Converting a tensor to a NumPy array");
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   if (self_.requires_grad()) {
     throw std::runtime_error(
@@ -374,6 +361,7 @@ static PyObject * THPVariable_requires_grad_(PyObject* self, PyObject* args, PyO
 static PyObject * THPVariable_item(PyObject* self, PyObject* args)
 {
   HANDLE_TH_ERRORS
+  jit::tracer::warn("Converting a tensor to a Python number");
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   if (self_.is_floating_point()) {
     return wrap(dispatch_to_CDouble(self_));
@@ -507,7 +495,7 @@ static PyObject * THPVariable_to(PyObject* self, PyObject* args, PyObject* kwarg
     // device and maybe dtype are given
     auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
     auto& layout = *torch::getLayout(self_.type().backend());
-    auto& type = torch::getType(scalarType.value_or(self_.type().scalarType()), layout, device->type());
+    auto& type = torch::getVariableType(scalarType.value_or(self_.type().scalarType()), layout, device->type());
     const int32_t device_index = type.is_cuda() ? device->index() : -1;
     return THPVariable_Wrap(torch::utils::dispatch_type_conversion(self_, type, device_index, non_blocking));
   }
@@ -518,6 +506,7 @@ static PyObject * THPVariable_to(PyObject* self, PyObject* args, PyObject* kwarg
 static PyObject * THPVariable_tolist(PyObject* self, PyObject* args)
 {
   HANDLE_TH_ERRORS
+  jit::tracer::warn("Converting a tensor to a Python list");
   auto self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   return torch::utils::tensor_to_list(self_.data());
   END_HANDLE_TH_ERRORS
@@ -553,7 +542,7 @@ static PyObject * THPVariable_type(PyObject* self, PyObject* args, PyObject* kwa
     throw TypeError("dtype must be a type, str, or dtype object");
   }
   auto self_device_type = torch::getDeviceType(self_.type());
-  auto& type = is_dtype ? torch::getType(r.scalartype(0), *torch::getLayout(self_.type().backend()), self_device_type) :
+  auto& type = is_dtype ? torch::getVariableType(r.scalartype(0), *torch::getLayout(self_.type().backend()), self_device_type) :
                           torch::utils::type_from_string(type_name);
   return THPVariable_Wrap(torch::utils::dispatch_type_conversion(self_, type, at::nullopt, r.toBool(1)));
   END_HANDLE_TH_ERRORS
@@ -562,6 +551,11 @@ static PyObject * THPVariable_type(PyObject* self, PyObject* args, PyObject* kwa
 // generated methods start here
 
 ${py_methods}
+
+static PyObject * THPVariable_bool(PyObject* self, PyObject* args) {
+  jit::tracer::warn("Converting a tensor to a Python boolean");
+  return THPVariable_is_nonzero(self, args);
+}
 
 PyMethodDef variable_methods[] = {
   {"__add__", (PyCFunction)THPVariable_add, METH_VARARGS | METH_KEYWORDS, NULL},
@@ -576,13 +570,13 @@ PyMethodDef variable_methods[] = {
   {"__truediv__", (PyCFunction)THPVariable_div, METH_VARARGS | METH_KEYWORDS, NULL},
   {"__idiv__", (PyCFunction)THPVariable_div_, METH_VARARGS | METH_KEYWORDS, NULL},
   {"__mod__", (PyCFunction)THPVariable_remainder, METH_VARARGS | METH_KEYWORDS, NULL},
-  {"__bool__", (PyCFunction)THPVariable_is_nonzero, METH_NOARGS, NULL},
+  {"__bool__", (PyCFunction)THPVariable_bool, METH_NOARGS, NULL},
   {"__float__", (PyCFunction)THPVariable_float_scalar, METH_NOARGS, NULL},
   {"__int__", (PyCFunction)THPVariable_integral_scalar, METH_NOARGS, NULL},
   {"__long__", (PyCFunction)THPVariable_integral_scalar, METH_NOARGS, NULL},
   {"__index__", (PyCFunction)THPVariable_index_scalar, METH_NOARGS, NULL},
+  {"__nonzero__", (PyCFunction)THPVariable_bool, METH_NOARGS, NULL},
   {"__invert__", (PyCFunction)THPVariable_invert, METH_NOARGS, NULL},
-  {"__nonzero__", (PyCFunction)THPVariable_is_nonzero, METH_NOARGS, NULL},
   {"__matmul__", (PyCFunction)THPVariable_matmul, METH_VARARGS | METH_KEYWORDS, NULL},
   {"apply_", (PyCFunction)THPVariable_apply_, METH_O, NULL},
   {"byte", (PyCFunction)THPVariable_byte, METH_NOARGS, NULL},
@@ -592,8 +586,6 @@ PyMethodDef variable_methods[] = {
   {"cpu", (PyCFunction)THPVariable_cpu, METH_NOARGS, NULL},
   {"cuda", (PyCFunction)THPVariable_cuda, METH_VARARGS | METH_KEYWORDS, NULL},
   {"dim", (PyCFunction)THPVariable_dim, METH_NOARGS, NULL},
-  {"detach", (PyCFunction)THPVariable_detach, METH_NOARGS, NULL},
-  {"detach_", (PyCFunction)THPVariable_detach_, METH_NOARGS, NULL},
   {"double", (PyCFunction)THPVariable_double, METH_NOARGS, NULL},
   {"element_size", (PyCFunction)THPVariable_element_size, METH_NOARGS, NULL},
   {"float", (PyCFunction)THPVariable_float, METH_NOARGS, NULL},

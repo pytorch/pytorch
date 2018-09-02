@@ -25,7 +25,7 @@ class CAFFE2_API OptimizationPass {
  public:
   OptimizationPass(NNModule* nn) : nn_(nn) {}
   virtual void run() = 0;
-  virtual ~OptimizationPass(){}
+  virtual ~OptimizationPass() {}
 
  protected:
   NNModule* nn_;
@@ -34,7 +34,7 @@ class CAFFE2_API OptimizationPass {
 class CAFFE2_API WorkspaceOptimizationPass : public OptimizationPass {
  public:
   WorkspaceOptimizationPass(NNModule* nn, Workspace* ws) : OptimizationPass(nn), ws_(ws) {}
-  virtual ~WorkspaceOptimizationPass(){}
+  virtual ~WorkspaceOptimizationPass() {}
 
  protected:
   Workspace* ws_;
