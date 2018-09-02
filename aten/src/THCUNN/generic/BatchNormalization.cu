@@ -17,7 +17,7 @@ static THCDeviceTensor<real, Dim> THNN_(devicetensor)(THCState *state, THCTensor
   }
 
   // View in which the last dimensions are collapsed or expanded as needed
-  THAssert(THCTensor_isContiguous(state, t));
+  THAssert(t->is_contiguous());
   int size[Dim];
   for (int i = 0; i < Dim || i < inDim; ++i) {
     if (i < Dim && i < inDim) {

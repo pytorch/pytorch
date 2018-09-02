@@ -920,12 +920,24 @@
 - func: is_sparse(Tensor self) -> bool
   device_guard: false
 
+- func: kl_div(Tensor self, Tensor target, int64_t reduction=Reduction::ElementwiseMean) -> Tensor
+  variants: function
+
+- func: kl_div_backward(Tensor grad_output, Tensor self, Tensor target, int64_t reduction=Reduction::ElementwiseMean) -> Tensor
+  variants: function
+  dispatch:
+    CPU: kl_div_backward_cpu
+    CUDA: kl_div_backward_cuda
+
 - func: kthvalue(Tensor self, int64_t k, int64_t dim=-1, bool keepdim=false) -> (Tensor, Tensor)
 
 - func: kthvalue_out(Tensor values, Tensor indices, Tensor self, int64_t k, int64_t dim=-1, bool keepdim=false) -> (Tensor, Tensor)
   variants: function
 
 - func: layer_norm(Tensor input, IntList normalized_shape, Tensor? weight={}, Tensor? bias={}, double eps=1e-5, bool cudnn_enable=True) -> Tensor
+  variants: function
+
+- func: linear(Tensor input, Tensor weight, Tensor bias={}) -> Tensor
   variants: function
 
 - func: linspace(Scalar start, Scalar end, TensorOptions options={}) -> Tensor
@@ -1041,6 +1053,12 @@
 - func: matmul(Tensor self, Tensor other) -> Tensor
 
 - func: matmul_out(Tensor result, Tensor self, Tensor other) -> Tensor
+  variants: function
+
+- func: matrix_rank(Tensor self, double tol, bool symmetric=false) -> Tensor
+  variants: function
+
+- func: matrix_rank(Tensor self, bool symmetric=false) -> Tensor
   variants: function
 
 - func: max(Tensor self, int64_t dim, bool keepdim=false) -> (Tensor, Tensor)
@@ -1499,7 +1517,13 @@
     CPU: add_out_dense_sparse_cpu
     CUDA: add_out_dense_sparse_cuda
 
-- func: _sparse_div_out(Tensor result, Tensor self, Scalar other) -> Tensor
+- func: _sparse_div_zerodim_out(Tensor result, Tensor self, Tensor other) -> Tensor
+  variants: function
+  dispatch:
+    SparseCPU: div_out_sparse_zerodim
+    SparseCUDA: div_out_sparse_zerodim
+
+- func: _sparse_div_scalar_out(Tensor result, Tensor self, Scalar other) -> Tensor
   variants: function
   dispatch:
     SparseCPU: div_out_sparse_scalar
@@ -1510,6 +1534,12 @@
   dispatch:
     SparseCPU: mul_out_sparse_cpu
     SparseCUDA: mul_out_sparse_cuda
+
+- func: _sparse_mul_zerodim_out(Tensor result, Tensor self, Tensor other) -> Tensor
+  variants: function
+  dispatch:
+    SparseCPU: mul_out_sparse_zerodim
+    SparseCUDA: mul_out_sparse_zerodim
 
 - func: _sparse_mul_scalar_out(Tensor result, Tensor self, Scalar other) -> Tensor
   variants: function
@@ -1718,6 +1748,11 @@
     CPU: _unique_cpu
     CUDA: _unique_cuda
 
+- func: _unique_dim(Tensor self, int64_t dim, bool sorted=false, bool return_inverse=false) -> (Tensor, Tensor)
+  dispatch:
+    CPU: _unique_dim_cpu
+    CUDA: _unique_dim_cuda
+
 - func: _unsafe_view(Tensor self, IntList size) -> Tensor
   variants: function
 
@@ -1912,6 +1947,12 @@
 # just only ever dispatch to CPULongTensor or CUDALongTensor, but that
 # seems a bit too finely balanced.)
 
+- func: native_sparse_coo_tensor(Type self_ty, IntList size) -> Tensor
+  variants: []
+  dispatch:
+    SparseCPU: new_with_size_sparse
+    SparseCUDA: new_with_size_sparse
+
 - func: native_sparse_coo_tensor(IndexTensor indices, Tensor values) -> Tensor
   variants: []
   dispatch:
@@ -1923,6 +1964,9 @@
   dispatch:
     SparseCPU: new_with_tensor_and_size_sparse
     SparseCUDA: new_with_tensor_and_size_sparse
+
+- func: sparse_coo_tensor(Type dtype, IntList size) -> Tensor
+  variants: []
 
 - func: sparse_coo_tensor(IndexTensor indices, Tensor values) -> Tensor
   variants: []
@@ -1941,11 +1985,17 @@
   variants: function
 
 
-- func: sparse_raw_resize_(Tensor self, IntList size, int64_t sparseDims, int64_t denseDims) -> Tensor
+- func: sparse_resize_(Tensor self, IntList size, int64_t sparseDims, int64_t denseDims) -> Tensor
   variants: method
   dispatch:
-    SparseCPU: raw_resize_sparse_
-    SparseCUDA: raw_resize_sparse_
+    SparseCPU: sparse_resize_
+    SparseCUDA: sparse_resize_
+
+- func: sparse_resize_and_clear_(Tensor self, IntList size, int64_t sparseDims, int64_t denseDims) -> Tensor
+  variants: method  
+  dispatch: 
+    SparseCPU: sparse_resize_and_clear_ 
+    SparseCUDA: sparse_resize_and_clear_
 
 
 - func: _sparse_mask(Tensor self, SparseTensorRef mask) -> Tensor

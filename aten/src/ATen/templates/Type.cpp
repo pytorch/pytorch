@@ -5,25 +5,13 @@
 #include "ATen/ExpandUtils.h"
 #include "ATen/NativeFunctions.h"
 #include "ATen/Scalar.h"
-#include "ATen/SparseTensorRef.h"
+#include "ATen/core/SparseTensorRef.h"
 #include "ATen/Storage.h"
 #include "ATen/Tensor.h"
 #include "ATen/TensorOptions.h"
-#include "ATen/UndefinedType.h"
 #include "ATen/DeviceGuard.h"
 
-#include <ATen/detail/VariableHooksInterface.h>
-
-#include <iostream>
-${cpu_type_headers}
-
 namespace at {
-
-void Type::registerCPU(Context * context) {
-  ${cpu_type_registrations}
-  context->type_registry[static_cast<int>(Backend::Undefined)]
-                        [static_cast<int>(ScalarType::Undefined)].reset(new UndefinedType(context));
-}
 
 Tensor & Type::copy_(Tensor & self, const Tensor & src, bool non_blocking) const {
   Tensor b_src;
@@ -50,10 +38,10 @@ Tensor Type::copy(const Tensor & src, bool non_blocking) const {
 }
 
 Type & Type::toBackend(Backend b) const {
-  return context->getType(b,scalarType());
+  return at::globalContext().getType(b,scalarType());
 }
 Type & Type::toScalarType(ScalarType s) const {
-  return context->getType(backend(),s);
+  return at::globalContext().getType(backend(),s);
 }
 static std::vector<int64_t> defaultStrides(IntList sizes) {
   std::vector<int64_t> strides(sizes.size());
@@ -81,18 +69,16 @@ Tensor Type::tensorFromBlob(void * data, IntList sizes, const std::function<void
 }
 Tensor Type::tensorFromBlob(void * data, IntList sizes, IntList strides, const std::function<void(void*)> & deleter) const {
   auto storage = storageFromBlob(data, computeStorageSize(sizes, strides), deleter);
-  return tensor(*storage, 0, sizes, strides);
+  return tensor(storage, 0, sizes, strides);
 }
 Tensor Type::tensorWithAllocator(IntList sizes, Allocator* allocator) const {
   return tensorWithAllocator(sizes, defaultStrides(sizes), std::move(allocator));
 }
 Tensor Type::tensorWithAllocator(IntList sizes, IntList strides, Allocator* allocator) const {
   auto storage = storageWithAllocator(computeStorageSize(sizes, strides), std::move(allocator));
-  return tensor(*storage, 0, sizes, strides);
+  return tensor(storage, 0, sizes, strides);
 }
 Tensor Type::scalarTensor(Scalar s) const {
-  if(s.isBackedByTensor())
-    return Tensor(s.t).toType(*this);
   return tensor({}).fill_(s);
 }
 

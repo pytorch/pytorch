@@ -3,7 +3,7 @@
 #include "caffe2/onnx/backend_rep.h"
 #include "caffe2/onnx/device.h"
 #include "caffe2/onnx/helper.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 #include "onnx/onnx_pb.h"
 
 #include <functional>
@@ -25,7 +25,7 @@ using ::ONNX_NAMESPACE::ValueInfoProto;
 
 using ValueInfoMap = std::unordered_map<std::string, ValueInfoProto>;
 
-class ConversionContext {
+class CAFFE2_API ConversionContext {
  public:
   ConversionContext(const ValueInfoMap& value_infos, int opset_version)
       : value_infos_(value_infos), opset_version_(opset_version) {}
@@ -44,7 +44,7 @@ class ConversionContext {
 // \brief This struct holds the converted ops after the onnx->c2 conversion.
 // Notice that for RNN ops, it may create ops in init_net. Hence we have the
 // `init_ops` field.
-struct Caffe2Ops {
+struct CAFFE2_API Caffe2Ops {
   ::google::protobuf::RepeatedPtrField<caffe2::OperatorDef> init_ops;
   ::google::protobuf::RepeatedPtrField<caffe2::OperatorDef> ops;
   ::google::protobuf::RepeatedPtrField<std::string> interface_blobs;
@@ -52,7 +52,7 @@ struct Caffe2Ops {
 
 // A convenient class to query attributes of a NodeProto. Note that the
 // NodeProto can not be modified during the query of OnnxAttributes object
-class OnnxAttributes {
+class CAFFE2_API OnnxAttributes {
  public:
   OnnxAttributes(const NodeProto& node);
 
@@ -120,7 +120,7 @@ template <>
 const TensorProto* OnnxAttributes::get(const std::string& key) const;
 
 // convenient class for onnx node
-struct OnnxNode {
+struct CAFFE2_API OnnxNode {
   OnnxNode(const NodeProto& node_in) : node(node_in), attributes(node_in) {}
 
   const NodeProto& node;
@@ -128,7 +128,7 @@ struct OnnxNode {
   OnnxAttributes attributes;
 };
 
-class Caffe2Backend {
+class CAFFE2_API Caffe2Backend {
  public:
   // Since we still have this Python-C++ hybrid flow, we will need to take the
   // DummyName generator from Python as a pointer. In this case, Python env owns

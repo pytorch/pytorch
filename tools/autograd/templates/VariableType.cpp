@@ -43,7 +43,7 @@ using namespace torch::autograd::generated;
 namespace torch { namespace autograd {
 
 VariableType::VariableType(Context* context, Type* baseType)
-  : Type(context, baseType->type_id(), /*is_variable=*/true, /*is_undefined=*/false)
+  : Type(baseType->type_id(), /*is_variable=*/true, /*is_undefined=*/false)
   , baseType(baseType)
   , id_(context->freshTypeID()) {
   str = std::string("Variable[") + baseType->toString() + "]";
@@ -59,19 +59,19 @@ bool VariableType::is_cuda() const { return baseType->is_cuda(); }
 bool VariableType::is_sparse() const { return baseType->is_sparse(); }
 bool VariableType::is_distributed() const { return baseType->is_distributed(); }
 
-std::unique_ptr<Storage> VariableType::storage(bool resizable) const {
+Storage VariableType::storage(bool resizable) const {
   return baseType->storage();
 }
-std::unique_ptr<Storage> VariableType::storage(size_t size, bool resizable) const {
+Storage VariableType::storage(size_t size, bool resizable) const {
   return baseType->storage(size);
 }
-std::unique_ptr<Storage> VariableType::storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const {
+Storage VariableType::storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const {
   return baseType->storageFromBlob(data, size, deleter);
 }
-std::unique_ptr<Storage> VariableType::unsafeStorageFromTH(void * th_pointer, bool retain) const {
+Storage VariableType::unsafeStorageFromTH(void * th_pointer, bool retain) const {
   return baseType->unsafeStorageFromTH(th_pointer, retain);
 }
-std::unique_ptr<Storage> VariableType::storageWithAllocator(int64_t size, Allocator* allocator) const {
+Storage VariableType::storageWithAllocator(int64_t size, Allocator* allocator) const {
   return baseType->storageWithAllocator(size, allocator);
 }
 Tensor VariableType::unsafeTensorFromTH(void * th_pointer, bool retain) const {

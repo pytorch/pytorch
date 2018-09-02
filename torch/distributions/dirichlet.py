@@ -37,7 +37,7 @@ class _Dirichlet(Function):
 
 class Dirichlet(ExponentialFamily):
     r"""
-    Creates a Dirichlet distribution parameterized by concentration `concentration`.
+    Creates a Dirichlet distribution parameterized by concentration :attr:`concentration`.
 
     Example::
 

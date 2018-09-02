@@ -21,7 +21,9 @@ namespace detail {
 
 template<typename T>
 void genericAddInput(Node *n, T value) {
-  n->addInput(n->owningGraph()->insertConstant(value));
+  Value *v = n->owningGraph()->insertConstant(value);
+  recordSourceLocation(v->node());
+  n->addInput(v);
 }
 
 void badArgType() {
@@ -46,6 +48,16 @@ void addInputs(Node *n, const char * name, at::TensorList value) {
   n->addInput(list_node->output());
 }
 
+void addInputs(Node* n, const char * name, const at::TensorOptions& options) {
+  // [TensorOptions in script] - update this when you change how we schematize TensorOptions
+  detail::genericAddInput(n, static_cast<int64_t>(options.dtype()));
+  detail::genericAddInput(n, static_cast<int64_t>(options.layout()));
+  std::vector<int64_t> device = {
+      static_cast<int64_t>(options.device().type()),
+      static_cast<int64_t>(options.device().index())};
+  detail::genericAddInput(n, std::move(device));
+}
+
 void addInputs(Node *n, const char * name, at::IntList value) {
   using ArgumentStash = jit::tracer::ArgumentStash;
   std::vector<Value*> info = ArgumentStash::hasIntList(name) ?
@@ -56,6 +68,7 @@ void addInputs(Node *n, const char * name, at::IntList value) {
   for (size_t i = 0; i < info.size(); ++i) {
     if (info[i] != nullptr) continue;
     info[i] = g->insertConstant(value[i]);
+    recordSourceLocation(info[i]->node());
   }
   for (jit::Value* v : info) {
     if (*v->type() != *jit::IntType::get()) {
@@ -103,7 +116,10 @@ autograd::Variable getSizeOf(const autograd::Variable& var, int64_t dim) {
   auto size_var = autograd::make_variable(at::Scalar(var.size(dim)).toTensor());
   auto* value = getValueTrace(var);
   WithInsertPoint ipoint { graph->block() };
-  auto* node = graph->insertNode(graph->create(aten::size, {value, graph->insertConstant(dim)}));
+  auto dim_val = graph->insertConstant(dim);
+  recordSourceLocation(dim_val->node());
+  auto* node = graph->insertNode(graph->create(aten::size, {value, dim_val}));
+  recordSourceLocation(node);
   node->output()->setType(jit::IntType::get());
 
   auto ten =

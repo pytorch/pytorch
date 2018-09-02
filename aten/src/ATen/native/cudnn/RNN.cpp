@@ -459,7 +459,7 @@ namespace {
               mat_numel * num_linear_layers / 2, 1};
             // Generate a new parameter tensor which is a view into the
             // weight_buf.
-            Tensor param = weight_buf.type().tensor().set_(*weight_buf.storage(), offset, size);
+            Tensor param = weight_buf.type().tensor().set_(weight_buf.storage(), offset, size);
             params.emplace_back(std::move(param));
             layer_params_count++;
           } else {
@@ -1089,6 +1089,12 @@ struct DropoutState {
   at::optional<cuda::CUDAEvent> event;
   std::mutex mutex;
 
+  // Every time we use a dropout state, we need to synchronize with its event,
+  // to make sure all previous uses finish running before this one starts. Once
+  // we're done, we record the event to allow others to synchronize with this kernel.
+  // Those events are really needed only for inter-stream sync on a single GPU.
+  // I doubt anyone will want to run cuDNN RNNs in parallel on a single GPU, so
+  // they should end up being complete no-ops.
   void lock() {
     // NB: We can't ignore the lock even when event is undefined, because someone
     // could then define it before we get to unlock().
@@ -1148,7 +1154,7 @@ Tensor try_get_weight_buf(
   // Try to get parameter storage
   auto & any_param = parameters.at(0);
   auto param_storage = any_param.storage();
-  auto weight_buf = any_param.type().tensor().set_(*param_storage);
+  auto weight_buf = any_param.type().tensor().set_(param_storage);
   if (weight_buf.size(0) < num_params) {
     return {};
   } else if (weight_buf.size(0) > num_params) {

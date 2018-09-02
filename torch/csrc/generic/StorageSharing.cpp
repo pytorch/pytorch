@@ -79,7 +79,7 @@ static PyObject * THPStorage_(shareFilename)(THPStorage *self)
   } else {
     // TODO: retry on collision
     // TODO: free GIL - but remember to reacquire it when an exception is thrown
-    THWStoragePtr new_storage(THPStorage_(newFilenameStorage)(storage->size()));
+    THWStoragePtr new_storage(THPStorage_(newFilenameStorage)(storage->numel()));
     THWStorage_(copy)(new_storage, storage);
     THWStorage_(swap)(storage, new_storage);
     ctx = THManagedMapAllocator::fromDataPtr(storage->data_ptr());
@@ -90,7 +90,7 @@ static PyObject * THPStorage_(shareFilename)(THPStorage *self)
   if (!manager_handle) return NULL;
   THPObjectPtr storage_handle(PyBytes_FromString(ctx->filename()));
   if (!storage_handle) return NULL;
-  THPObjectPtr size(PyLong_FromLong(storage->size()));
+  THPObjectPtr size(PyLong_FromLong(storage->numel()));
   if (!size) return NULL;
 
   THPObjectPtr tuple(PyTuple_New(3));
@@ -158,7 +158,7 @@ static PyObject * THPStorage_(shareFd)(THPStorage *self)
   if ((ctx = THMapAllocator::fromDataPtr(storage->data_ptr()))) {
     // done
   } else {
-    THWStoragePtr new_storage(THPStorage_(newFdStorage)(storage->size()));
+    THWStoragePtr new_storage(THPStorage_(newFdStorage)(storage->numel()));
     THWStorage_(copy)(new_storage, storage);
     THWStorage_(swap)(storage, new_storage);
     ctx = THMapAllocator::fromDataPtr(storage->data_ptr());
@@ -167,7 +167,7 @@ static PyObject * THPStorage_(shareFd)(THPStorage *self)
 
   THPObjectPtr storage_handle(PyLong_FromLong(ctx->fd()));
   if (!storage_handle) return NULL;
-  THPObjectPtr size(PyLong_FromLong(storage->size()));
+  THPObjectPtr size(PyLong_FromLong(storage->numel()));
   if (!size) return NULL;
 
   THPObjectPtr tuple(PyTuple_New(2));
@@ -215,12 +215,12 @@ static PyObject * THPStorage_(shareCuda)(THPStorage *self)
 {
   HANDLE_TH_ERRORS
   THWStorage *storage = self->cdata;
-  at::DeviceGuard device_guard(storage->getDevice());
+  at::DeviceGuard device_guard(storage->device());
   THPObjectPtr tuple(PyTuple_New(4));
-  THPObjectPtr device(PyLong_FromLong(storage->getDevice()));
+  THPObjectPtr device(PyLong_FromLong(storage->device().index()));
   THPObjectPtr _handle(Py_None);
   Py_INCREF(Py_None);
-  THPObjectPtr size(PyLong_FromLong(storage->size()));
+  THPObjectPtr size(PyLong_FromLong(storage->numel()));
   THPObjectPtr _offset(PyLong_FromLong(0));
   if (THWStorage_(data)(LIBRARY_STATE storage)) {
     size_t base_size;
@@ -294,8 +294,7 @@ static PyObject * THPStorage_(newSharedCuda)(PyObject *_unused, PyObject *args)
 static PyObject * THPStorage_(weakRef)(THPStorage *self, PyObject *args) {
   HANDLE_TH_ERRORS
   THStorage* storage = self->cdata;
-  THStorage_weakRetain(storage);
-  return PyLong_FromVoidPtr(storage);
+  return PyLong_FromVoidPtr(c10::raw::intrusive_ptr::make_weak(storage));
   END_HANDLE_TH_ERRORS
 }
 
@@ -305,7 +304,7 @@ PyObject * THPStorage_(newWithWeakPtr)(PyObject *_unused, PyObject *arg)
   THPUtils_assert(THPUtils_checkLong(arg),
       "_new_with_weak_ptr(): arg must be an 'int'");
   THStorage *weak_storage = (THStorage*)PyLong_AsVoidPtr(arg);
-  if (auto* storage = THStorage_weakLock(weak_storage)) {
+  if (auto* storage = c10::raw::weak_intrusive_ptr::lock(weak_storage)) {
     return THPStorage_(New)(storage);
   }
   Py_RETURN_NONE;
@@ -321,7 +320,7 @@ PyObject * THPStorage_(freeWeakRef)(PyObject *_unused, PyObject *arg)
   THPUtils_assert(THPUtils_checkLong(arg),
       "_free_weak_ref(): arg must be an 'int'");
   THStorage *weak_storage = (THStorage*)PyLong_AsVoidPtr(arg);
-  THStorage_weakFree(weak_storage);
+  c10::raw::weak_intrusive_ptr::decref(weak_storage);
 
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -332,7 +331,7 @@ PyObject * THPStorage_(expired)(PyObject *_unused, PyObject *arg)
   HANDLE_TH_ERRORS
   THPUtils_assert(THPUtils_checkLong(arg), "_expired(): arg must be an 'int'");
   THStorage *weak_storage = (THStorage*)PyLong_AsVoidPtr(arg);
-  return PyBool_FromLong(weak_storage->use_count() == 0);
+  return PyBool_FromLong(c10::raw::weak_intrusive_ptr::use_count(weak_storage) == 0);
   END_HANDLE_TH_ERRORS
 }
 

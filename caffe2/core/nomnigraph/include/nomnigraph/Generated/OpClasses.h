@@ -531,6 +531,36 @@ class BatchNormalization : public NeuralNetOperator {
   bool IsTest;
 };
 
+class Clip : public NeuralNetOperator {
+ public:
+  Clip(float min, float max)
+      : NeuralNetOperator(NNKind::Clip), Min(min), Max(max) {}
+
+  ~Clip() {}
+
+  NOMNIGRAPH_DEFINE_NN_RTTI(Clip);
+
+  float getMin() const {
+    return Min;
+  }
+
+  float getMax() const {
+    return Max;
+  }
+
+  void setMin(float min) {
+    Min = min;
+  }
+
+  void setMax(float max) {
+    Max = max;
+  }
+
+ private:
+  float Min;
+  float Max;
+};
+
 class FC : public NeuralNetOperator {
  public:
   FC() : NeuralNetOperator(NNKind::FC) {}
@@ -634,6 +664,28 @@ class Flatten : public NeuralNetOperator {
   ~Flatten() {}
 
   NOMNIGRAPH_DEFINE_NN_RTTI(Flatten);
+
+ private:
+};
+
+class CopyToOpenCL : public NeuralNetOperator {
+ public:
+  CopyToOpenCL() : NeuralNetOperator(NNKind::CopyToOpenCL) {}
+
+  ~CopyToOpenCL() {}
+
+  NOMNIGRAPH_DEFINE_NN_RTTI(CopyToOpenCL);
+
+ private:
+};
+
+class CopyFromOpenCL : public NeuralNetOperator {
+ public:
+  CopyFromOpenCL() : NeuralNetOperator(NNKind::CopyFromOpenCL) {}
+
+  ~CopyFromOpenCL() {}
+
+  NOMNIGRAPH_DEFINE_NN_RTTI(CopyFromOpenCL);
 
  private:
 };
