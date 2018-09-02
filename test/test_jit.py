@@ -1528,6 +1528,14 @@ class TestJit(JitTestCase):
         self.assertExpected(torch.onnx.export_to_pretty_string(
             Mod(), (torch.rand(3, 4), torch.rand(4, 5)), f))
 
+    def test_trace_slice_full_dim(self):
+        def foo(x):
+            return x[0:5, 0] + 1.0
+
+        traced = torch.jit.trace(foo, (torch.rand(5, 4),))
+        test_x = torch.rand(6, 3)
+        self.assertEqual(foo(test_x), traced(test_x))
+
 
 class TestBatched(TestCase):
     # generate random examples and create an batchtensor with them
