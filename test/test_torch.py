@@ -166,8 +166,6 @@ class TestTorch(TestCase):
             for name in dir(ns):
                 if name.startswith('_'):
                     continue
-                if any(r.match(name) for r in skip_regexes):
-                    continue
                 var = getattr(ns, name)
                 if not isinstance(var, checked_types):
                     continue
