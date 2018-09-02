@@ -140,8 +140,8 @@ void THNN_(SpatialAveragePooling_updateOutput)(
 
   input = THTensor_(newContiguous)(input);
   THArgCheck(THTensor_(isContiguous)(output), 3, "output must be contiguous");
-  input_data = THTensor_(data)(input);
-  output_data = THTensor_(data)(output);
+  input_data = input->data<real>();
+  output_data = output->data<real>();
 
 #pragma omp parallel for private(k)
   for(k = 0; k < nInputPlane; k++)
@@ -193,7 +193,7 @@ void THNN_(SpatialAveragePooling_updateOutput)(
       }
     }
   }
-  THTensor_(free)(input);
+  c10::raw::intrusive_ptr::decref(input);
 }
 
 void THNN_(SpatialAveragePooling_updateGradInput)(
@@ -271,8 +271,8 @@ void THNN_(SpatialAveragePooling_updateGradInput)(
   gradOutput = THTensor_(newContiguous)(gradOutput);
   THArgCheck(THTensor_(isContiguous)(gradInput), 4, "gradInput must be contiguous");
 
-  gradInput_data = THTensor_(data)(gradInput);
-  gradOutput_data = THTensor_(data)(gradOutput);
+  gradInput_data = gradInput->data<real>();
+  gradOutput_data = gradOutput->data<real>();
 
 #pragma omp parallel for private(k)
   for(k = 0; k < nInputPlane; k++)
@@ -323,7 +323,7 @@ void THNN_(SpatialAveragePooling_updateGradInput)(
     }
   }
 
-  THTensor_(free)(gradOutput);
+  c10::raw::intrusive_ptr::decref(gradOutput);
 }
 
 #endif

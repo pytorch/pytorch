@@ -8,6 +8,7 @@
 #include "ATen/Utils.h"
 #include "ATen/core/Error.h"
 #include "ATen/detail/CUDAHooksInterface.h"
+#include "ATen/detail/VariableHooksInterface.h"
 
 // This is temporary
 #include "ATen/core/ATenCoreTest.h"
@@ -37,11 +38,23 @@ public:
 
     return type;
   }
-  Type & getType(Backend p, ScalarType s) {
+  Type & getNonVariableType(Backend p, ScalarType s) {
     auto* type = getNonVariableTypeOpt(p, s);
     if (!type) AT_ERROR(toString(p), toString(s), "Type is not enabled.");
     return *type;
   }
+  Type & getVariableType(Backend p, ScalarType s) {
+    auto& baseType = getNonVariableType(p, s);
+    return detail::getVariableHooks().getVariableTypeFromBaseType(baseType);
+  }
+  Type & getMaybeVariableType(Backend p, ScalarType s, bool is_variable) {
+    if (is_variable) {
+      return getVariableType(p, s);
+    } else {
+      return getNonVariableType(p, s);
+    }
+  }
+
   Generator & defaultGenerator(DeviceType device_type) {
     initCUDAIfNeeded(device_type);
     auto & generator = generator_registry[static_cast<int>(device_type)];
@@ -63,8 +76,8 @@ public:
   int64_t current_device() const {
     return detail::getCUDAHooks().current_device();
   }
-  // defined in header so that getType has ability to inline
-  // call_once check. getType is called fairly frequently
+  // defined in header so that getNonVariableType has ability to inline
+  // call_once check. getNonVariableType is called fairly frequently
   THCState* lazyInitCUDA() {
     std::call_once(thc_init,[&] {
       thc_state = detail::getCUDAHooks().initCUDA();
@@ -134,20 +147,23 @@ static inline void init() {
   }
 }
 
-static inline Type& getType(Backend p, ScalarType s) {
-  return globalContext().getType(p, s);
+static inline Type& getNonVariableType(Backend p, ScalarType s) {
+  return globalContext().getNonVariableType(p, s);
 }
 
-static inline Type& getType(DeviceType p, ScalarType s) {
-  return globalContext().getType(deviceTypeToBackend(p), s);
+static inline Type& getNonVariableType(DeviceType p, ScalarType s) {
+  return globalContext().getNonVariableType(deviceTypeToBackend(p), s);
 }
+
+AT_API Type& getMaybeVariableType(TensorOptions options);
+AT_API Type& getMaybeVariableType(const TensorImpl*);
 
 static inline Type& CPU(ScalarType s) {
-  return getType(Backend::CPU, s);
+  return getNonVariableType(Backend::CPU, s);
 }
 
 static inline Type& CUDA(ScalarType s) {
-  return getType(Backend::CUDA, s);
+  return getNonVariableType(Backend::CUDA, s);
 }
 
 static inline bool hasCUDA() {

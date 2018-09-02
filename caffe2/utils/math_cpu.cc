@@ -266,17 +266,28 @@ CAFFE2_SPECIALIZED_DOT(float)
 CAFFE2_SPECIALIZED_AXPY(float)
 #undef CAFFE2_SPECIALIZED_AXPY
 
-#define CAFFE2_SPECIALIZED_AXPBY(T)                              \
-  template <>                                                    \
-  void Axpby<T, CPUContext>(                                     \
-      const int N,                                               \
-      const T alpha,                                             \
-      const T* x,                                                \
-      const T beta,                                              \
-      T* y,                                                      \
-      CPUContext* context) {                                     \
-    EigenVectorMap<T> y_vec(y, N);                               \
-    y_vec = y_vec * beta + ConstEigenVectorMap<T>(x, N) * alpha; \
+#define CAFFE2_SPECIALIZED_AXPBY(T)                                     \
+  template <>                                                           \
+  void Axpby<T, T, CPUContext>(                                         \
+      const int N,                                                      \
+      const T alpha,                                                    \
+      const T* x,                                                       \
+      const T beta,                                                     \
+      T* y,                                                             \
+      CPUContext* context) {                                            \
+    EigenVectorArrayMap<T> y_arr(y, N);                                 \
+    y_arr = y_arr * beta + ConstEigenVectorArrayMap<T>(x, N) * alpha;   \
+  }                                                                     \
+  template <>                                                           \
+  void Axpby<T, T, CPUContext>(                                         \
+      const int N,                                                      \
+      const T* alpha,                                                   \
+      const T* x,                                                       \
+      const T* beta,                                                    \
+      T* y,                                                             \
+      CPUContext* context) {                                            \
+    EigenVectorArrayMap<T> y_arr(y, N);                                 \
+    y_arr = y_arr * *beta + ConstEigenVectorArrayMap<T>(x, N) * *alpha; \
   }
 CAFFE2_SPECIALIZED_AXPBY(float)
 #undef CAFFE2_SPECIALIZED_AXPBY
@@ -424,29 +435,50 @@ CAFFE2_SPECIALIZED_AXPY(float, s)
 // cblas_[sd]axpby is not a standard blas function, and if MKL is not present,
 // we will need to implement it.
 #ifdef CAFFE2_USE_MKL
-#define CAFFE2_SPECIALIZED_AXPBY(T, prefix)            \
-  template <>                                          \
-  void Axpby<T, CPUContext>(                           \
-      const int N,                                     \
-      const T alpha,                                   \
-      const T* x,                                      \
-      const T beta,                                    \
-      T* y,                                            \
-      CPUContext*) {                                   \
-    cblas_##prefix##axpby(N, alpha, x, 1, beta, y, 1); \
+#define CAFFE2_SPECIALIZED_AXPBY(T, prefix)              \
+  template <>                                            \
+  void Axpby<T, T, CPUContext>(                          \
+      const int N,                                       \
+      const T alpha,                                     \
+      const T* x,                                        \
+      const T beta,                                      \
+      T* y,                                              \
+      CPUContext*) {                                     \
+    cblas_##prefix##axpby(N, alpha, x, 1, beta, y, 1);   \
+  }                                                      \
+  template <>                                            \
+  void Axpby<T, T, CPUContext>(                          \
+      const int N,                                       \
+      const T* alpha,                                    \
+      const T* x,                                        \
+      const T* beta,                                     \
+      T* y,                                              \
+      CPUContext*) {                                     \
+    cblas_##prefix##axpby(N, *alpha, x, 1, *beta, y, 1); \
   }
 #else // CAFFE2_USE_MKL
-#define CAFFE2_SPECIALIZED_AXPBY(T, prefix)     \
-  template <>                                   \
-  void Axpby<T, CPUContext>(                    \
-      const int N,                              \
-      const T alpha,                            \
-      const T* x,                               \
-      const T beta,                             \
-      T* y,                                     \
-      CPUContext*) {                            \
-    cblas_##prefix##scal(N, beta, y, 1);        \
-    cblas_##prefix##axpy(N, alpha, x, 1, y, 1); \
+#define CAFFE2_SPECIALIZED_AXPBY(T, prefix)      \
+  template <>                                    \
+  void Axpby<T, T, CPUContext>(                  \
+      const int N,                               \
+      const T alpha,                             \
+      const T* x,                                \
+      const T beta,                              \
+      T* y,                                      \
+      CPUContext*) {                             \
+    cblas_##prefix##scal(N, beta, y, 1);         \
+    cblas_##prefix##axpy(N, alpha, x, 1, y, 1);  \
+  }                                              \
+  template <>                                    \
+  void Axpby<T, T, CPUContext>(                  \
+      const int N,                               \
+      const T* alpha,                            \
+      const T* x,                                \
+      const T* beta,                             \
+      T* y,                                      \
+      CPUContext*) {                             \
+    cblas_##prefix##scal(N, *beta, y, 1);        \
+    cblas_##prefix##axpy(N, *alpha, x, 1, y, 1); \
   }
 #endif // CAFFE2_USE_MKL
 CAFFE2_SPECIALIZED_AXPBY(float, s)

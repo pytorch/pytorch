@@ -321,7 +321,9 @@ void initPythonIRBindings(PyObject * module_) {
     .def("outputs",[](Node &n) {
       return py::make_iterator(n.outputs().begin(), n.outputs().end());
     })
-    .NS(output)
+    .def("output", [](Node &n) {
+      return n.output();
+    })
     .NS(addInput)
     .NS(replaceInput)
     .NS(replaceInputWith)

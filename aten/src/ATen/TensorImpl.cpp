@@ -13,15 +13,7 @@
 namespace at {
 
 Type& TensorImpl::type() const {
-  // Select backend from the hard-coded ones that the legacy ATen dispatcher
-  // knows about
-  Backend backend = tensorTypeIdToBackend(type_id_);
-  Type* base_type = &globalContext().getType(backend, scalar_type_);
-  if (is_variable_) {
-    return detail::getVariableHooks().getVariableTypeFromBaseType(*base_type);
-  } else {
-    return *base_type;
-  }
+  return at::getMaybeVariableType(this);
 }
 
 Tensor& TensorImpl::grad() {
@@ -34,11 +26,6 @@ const Tensor& TensorImpl::grad() const {
 
 Tensor TensorImpl::detach() const {
   AT_ERROR("detach is not implemented for Tensor");
-}
-
-const char* TensorImpl::toString() const {
-  // This matches behavior with VariableImpl
-  return type().toString();
 }
 
 void TensorImpl::backward(
@@ -64,7 +51,7 @@ TensorImpl::TensorImpl(TensorTypeId type_id, ScalarType scalar_type, bool is_var
   // UndefinedTensors and SparseTensors don't have storages.
   if (type_id != UndefinedTensorId() && scalar_type != ScalarType::Undefined
       && type_id != SparseCPUTensorId() && type_id != SparseCUDATensorId()) {
-    auto type = &globalContext().getType(tensorTypeIdToBackend(type_id), scalar_type);
+    auto type = &globalContext().getNonVariableType(tensorTypeIdToBackend(type_id), scalar_type);
     storage_ = type->storage(true);
   }
 }

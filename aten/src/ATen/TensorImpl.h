@@ -31,7 +31,6 @@ struct AT_API TensorImpl : public c10::intrusive_ptr_target {
   Type & type() const;
 
   TensorTypeId type_id() const { return type_id_; }
-  const char * toString() const;
   virtual IntList sizes() const;
   virtual IntList strides() const;
   virtual int64_t dim() const;
@@ -172,6 +171,8 @@ struct AT_API TensorImpl : public c10::intrusive_ptr_target {
 
   virtual int64_t size(int64_t d) const;
   virtual int64_t stride(int64_t d) const;
+
+  bool is_variable() const { return is_variable_; };
 
  private:
   int64_t storage_offset_;
