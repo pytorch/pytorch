@@ -173,7 +173,7 @@ class TestTorch(TestCase):
                 has_doc = doc is not None and len(doc.strip()) > 0
                 full_name = ns_name + '.' + name
                 if any(r.match(name) for r in skip_regexes):
-                    self.assertFalse(has_doc, 
+                    self.assertFalse(has_doc,
                                      'New docs have been added for {}, please remove '
                                      'it from the skipped list in TestTorch.test_doc'.format(full_name))
                 else:
