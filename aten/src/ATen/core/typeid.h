@@ -42,7 +42,7 @@ class TypeMeta;
  */
 class TypeIdentifier final : public at::IdWrapper<TypeIdentifier, uint16_t> {
  public:
-  static TypeIdentifier createTypeId();
+  AT_CORE_API static TypeIdentifier createTypeId();
 
   friend std::ostream& operator<<(
       std::ostream& stream,
