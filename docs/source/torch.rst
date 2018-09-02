@@ -222,6 +222,7 @@ Reduction Ops
 
 Comparison Ops
 ~~~~~~~~~~~~~~~~~~~~~~
+.. autofunction:: allclose
 .. autofunction:: eq
 .. autofunction:: equal
 .. autofunction:: ge
