@@ -401,9 +401,9 @@ RegisterOperators reg({
 });
 
 // define implementations for primitive number ops
-#define DEFINE_GENERIC_OP(aten_op, op, float_result)                        \
+#define DEFINE_GENERIC_OP(aten_op, op, int_result, float_result)            \
   Operator(                                                                 \
-      #aten_op "(int a, int b) -> int",                                     \
+      #aten_op "(int a, int b) -> " #int_result,                            \
       [](Node* node) {                                                      \
         return [=](Stack& stack) {                                          \
           int64_t a, b;                                                     \
@@ -432,8 +432,18 @@ RegisterOperators reg({
     };                                                        \
   }),
 
-#define DEFINE_BINARY_OP(aten_op, op) DEFINE_GENERIC_OP(aten_op, op, float)
-#define DEFINE_COMPARISON_OP(aten_op, op) DEFINE_GENERIC_OP(aten_op, op, int)
+#define DEFINE_BOOL_OP(aten_op, op)                                 \
+  Operator(#aten_op "(bool a, bool b) -> bool", [](Node* node) {    \
+    return [=](Stack& stack) {                                      \
+      bool a, b;                                                    \
+      pop(stack, a, b);                                             \
+      push(stack, op);                                              \
+      return 0;                                                     \
+    };                                                              \
+  }),
+
+#define DEFINE_BINARY_OP(aten_op, op) DEFINE_GENERIC_OP(aten_op, op, int, float)
+#define DEFINE_COMPARISON_OP(aten_op, op) DEFINE_GENERIC_OP(aten_op, op, bool, bool)
 
 // define helpers for where aten is missing scalar overloads
 // note: it would be better to define these in a standard library as
@@ -639,6 +649,9 @@ RegisterOperators reg2({
 
     DEFINE_INT_OP(aten::__and__, a&& b)
     DEFINE_INT_OP(aten::__or__, a || b)
+
+    DEFINE_BOOL_OP(aten::__and__, a && b)
+    DEFINE_BOOL_OP(aten::__or__, a || b)
 
     Operator("aten::_construct_empty_int_list() -> int[]",
         [](Node* node) -> Operation {

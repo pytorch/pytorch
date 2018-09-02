@@ -62,14 +62,14 @@ Value* createTripCountConjunctiveCondition(
   // Emit initial comparison -- initial_trip_count < max_trip_count
   Value* initial_comparison_value =
       g->insertNode(g->create(aten::lt, {cur_trip_count, max_trip_count}, 1))
-          ->output()->setType(IntType::get());
+          ->output()->setType(BoolType::get());
 
   // Replace initial condition with logical `and` of trip count and
   // initial condition
   Value* new_cond =
       g->insertNode(
            g->create(aten::__and__, {initial_comparison_value, cond}, 1))
-          ->output()->setType(IntType::get());
+          ->output()->setType(BoolType::get());
   return new_cond;
 }
 
@@ -394,20 +394,20 @@ struct CodeImpl {
     insertNodesFromBlock(graph->block());
   }
 
-  // jump when input is 0
-  void createJumpZ(int from_inst, int to_inst) {
+  // jump when input is false
+  void createJumpFalse(int from_inst, int to_inst) {
     auto & inst = instructions[from_inst];
     JIT_ASSERT(inst.debug_name == prim::Placeholder);
     auto offset = relativeJump(from_inst, to_inst);
     inst.callback = [offset](Stack & stack) {
       auto t = pop(stack).toBool();
-      return t ? offset : 0;
+      return !t ? offset : 0;
     };
     inst.debug_name = prim::JumpZ;
   }
 
-  // jump when input is not 0
-  void createJumpNZ(int from_inst, int to_inst) {
+  // jump when input is true
+  void createJumpTrue(int from_inst, int to_inst) {
     auto & inst = instructions[from_inst];
     JIT_ASSERT(inst.debug_name == prim::Placeholder);
     auto offset = relativeJump(from_inst, to_inst);
@@ -462,7 +462,7 @@ struct CodeImpl {
           insertNodesFromBlock(then_block);
           insertAssign(source_location, then_block->outputs(), moveFlags(then_block), node->outputs());
           createJump(jump, instructions.size());
-          createJumpNZ(cond_branch, then_block_start);
+          createJumpTrue(cond_branch, then_block_start);
         } break;
         case prim::Loop: {
           // o0 = while c i0
@@ -497,8 +497,8 @@ struct CodeImpl {
           // after branch: stack: ...
 
           aliasRegistersTo(node->outputs(), body_block->inputs());
-          createJumpZ(cond_branch, instructions.size());
-          createJumpNZ(cond_branch_end, entry);
+          createJumpFalse(cond_branch, instructions.size());
+          createJumpTrue(cond_branch_end, entry);
         } break;
         default: {
           insertInstruction(node);
