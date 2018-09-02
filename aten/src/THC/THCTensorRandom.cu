@@ -147,9 +147,9 @@ struct is_same { static const bool value = false; };
 template<typename T>
 struct is_same<T, T> { static const bool value = true; };
 
-template<typename scalar_t, typename prob_type>
+template<typename T, typename prob_type>
 __global__ void generate_bernoulli_tensor(curandStateMtgp32 *state, int size,
-        scalar_t *result, prob_type *probs)
+        T *result, prob_type *probs)
 {
   int idx = blockIdx.x * BLOCK_SIZE + threadIdx.x;
   int rounded_size = THCCeilDiv(size, BLOCK_SIZE) * BLOCK_SIZE;
@@ -157,11 +157,11 @@ __global__ void generate_bernoulli_tensor(curandStateMtgp32 *state, int size,
     if (is_same<prob_type, double>::value) {
       double x = curand_uniform_double(&state[blockIdx.x]);
       if (i < size)
-        result[i] = ScalarConvert<bool, scalar_t>::to(x <= probs[i]);
+        result[i] = ScalarConvert<bool, T>::to(x <= probs[i]);
     } else {
       float x = curand_uniform(&state[blockIdx.x]);
       if (i < size)
-        result[i] = ScalarConvert<bool, scalar_t>::to(x <= probs[i]);
+        result[i] = ScalarConvert<bool, T>::to(x <= probs[i]);
     }
   }
 }
