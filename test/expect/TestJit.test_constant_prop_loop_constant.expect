@@ -1,0 +1,20 @@
+graph() {
+  %b.1 : int = prim::Constant[value=0]()
+  %1 : int = prim::Constant[value=2147483647]()
+  %2 : int = prim::Constant[value=1]()
+  %b.3 : int = prim::Loop(%1, %2, %b.1)
+    block0(%4 : int, %5 : int) {
+      %b.2 : int = prim::Constant[value=1]()
+      %7 : int = prim::Constant[value=1]()
+      -> (%7, %b.2)
+    }
+  %8 : int = prim::Constant[value=2147483647]()
+  %9 : int = prim::Constant[value=0]()
+  %b : int = prim::Loop(%8, %9, %b.3)
+    block0(%11 : int, %12 : int) {
+      %b.4 : int = prim::Constant[value=2]()
+      %14 : int = prim::Constant[value=0]()
+      -> (%14, %b.4)
+    }
+  return (%b);
+}

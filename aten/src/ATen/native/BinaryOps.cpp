@@ -50,7 +50,7 @@ Tensor& div_out(Tensor& result, const Tensor& self, const Tensor& other) {
       AT_ERROR("div(): sparse division only supports division by a scalar ",
         "(got shape ", other.sizes(), " for argument 'other')");
     }
-    return at::_sparse_div_out(result, self, Scalar(other));
+    return at::_sparse_div_zerodim_out(result, self, other);
   }
   auto iter = TensorIterator::binary_op(result, self, other);
   div_stub(iter->device_type(), *iter);
@@ -124,7 +124,7 @@ Tensor& sub_(Tensor& self, const Tensor& other, Scalar alpha) {
 
 static Tensor scalar_tensor(Scalar scalar) {
   auto tensor = scalar.toTensor();
-  tensor.get()->set_wrapped_number(true);
+  tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
   return tensor;
 }
 

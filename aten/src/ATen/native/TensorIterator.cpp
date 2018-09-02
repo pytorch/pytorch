@@ -78,7 +78,7 @@ void TensorIterator::compute_common_type() {
   });
   if (result_type == ScalarType::Undefined) {
     std::tie(result_type, backend) = compute_result_type(operands_, [](const Tensor& t) {
-      return !t.get()->is_wrapped_number();
+      return !t.unsafeGetTensorImpl()->is_wrapped_number();
     });
   }
   if (result_type == ScalarType::Undefined) {
@@ -90,7 +90,7 @@ void TensorIterator::compute_common_type() {
   AT_ASSERT(result_type != ScalarType::Undefined);
   AT_ASSERT(backend != Backend::Undefined);
 
-  auto& type = at::globalContext().getType(backend, result_type);
+  auto& type = at::globalContext().getNonVariableType(backend, result_type);
 
   for (auto& op : operands_) {
     if (!op.type) {
@@ -339,7 +339,7 @@ void TensorIterator::mark_outputs() {
     // check if output is also an input
     for (int arg = num_outputs_; arg < ntensors(); arg++) {
       auto input = *operands_[arg].tensor;
-      if (output.get() == input.get()) {
+      if (output.is_same(input)) {
         operands_[i].is_read_write = true;
       }
     }

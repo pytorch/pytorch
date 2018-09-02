@@ -10,92 +10,106 @@
 
 namespace torch { namespace jit {
 
-#define FORALL_NS_SYMBOLS(_) \
-_(namespaces, prim) \
-_(namespaces, aten) \
-_(namespaces, onnx) \
-_(namespaces, attr) \
-_(namespaces, scope) \
-_(namespaces, namespaces) \
-_(prim, Assign) \
-_(prim, Constant) \
-_(prim, None) \
-_(prim, Drop) \
-_(prim, Eval) \
-_(prim, Expand) /* onnx */ \
-_(prim, FusionGroup) \
-_(prim, GraphExecutor) \
-_(prim, If) \
-_(prim, Jump) /* debug */ \
-_(prim, JumpNZ) /* debug */ \
-_(prim, JumpZ) /* debug */ \
-_(prim, Load) \
-_(prim, Loop) \
-_(prim, Param) \
-_(prim, PackPadded) /* onnx */ \
-_(prim, PadPacked) /* onnx */ \
-_(prim, Placeholder) /* debug */ \
-_(prim, Print) \
-_(prim, PythonOp) \
-_(prim, Reverse) \
-_(prim, Return) \
-_(prim, Store) \
-_(prim, Undefined) \
-_(prim, Starred) \
-_(prim, TupleConstruct) \
-_(prim, TupleUnpack) \
-_(prim, ListConstruct) \
-_(prim, NumToTensor) \
-_(prim, TensorToNum) \
-_(prim, IntToFloat) \
-_(prim, FloatToInt) \
-_(prim, AutogradAdd) \
-_(prim, GradOf) \
-_(prim, AnyDefined) \
-_(prim, FusedConcat) \
-_(prim, FusedChunk) \
-_(aten, __not__) \
-FORALL_ATEN_BASE_SYMBOLS(_) \
-_(onnx, Add) \
-_(onnx, Concat) \
-_(onnx, Constant) \
-_(onnx, ConstantFill) \
-_(onnx, Div) \
-_(onnx, GRU) \
-_(onnx, Gather) \
-_(onnx, Gemm) \
-_(onnx, LSTM) \
-_(onnx, Mul) \
-_(onnx, Pow) \
-_(onnx, RNN) \
-_(onnx, Shape) \
-_(onnx, Size) \
-_(onnx, Slice) \
-_(onnx, Squeeze) \
-_(onnx, Sub) \
-_(onnx, Transpose) \
-_(onnx, Unsqueeze) \
-_(onnx, Loop) \
-_(onnx, If) \
-_(onnx, Reshape) \
-FORALL_ATTR_BASE_SYMBOLS(_) \
-_(attr, Subgraph) \
-_(attr, axes) \
-_(attr, axis) \
-_(attr, broadcast) \
-_(attr, direction) \
-_(attr, ends) \
-_(attr, inplace) \
-_(attr, input_as_shape) \
-_(attr, is_zero) \
-_(attr, perm) \
-_(attr, sizes) \
-_(attr, starts) \
-_(attr, transA) \
-_(attr, transB) \
-_(attr, name) \
-_(attr, string)
-
+#define FORALL_NS_SYMBOLS(_)       \
+  _(namespaces, prim)              \
+  _(namespaces, aten)              \
+  _(namespaces, onnx)              \
+  _(namespaces, attr)              \
+  _(namespaces, scope)             \
+  _(namespaces, namespaces)        \
+  _(prim, Assign)                  \
+  _(prim, Constant)                \
+  _(prim, None)                    \
+  _(prim, Drop)                    \
+  _(prim, Eval)                    \
+  _(prim, Expand) /* onnx */       \
+  _(prim, FusionGroup)             \
+  _(prim, DifferentiableGraph)     \
+  _(prim, If)                      \
+  _(prim, Jump) /* debug */        \
+  _(prim, JumpNZ) /* debug */      \
+  _(prim, JumpZ) /* debug */       \
+  _(prim, Load)                    \
+  _(prim, Loop)                    \
+  _(prim, Param)                   \
+  _(prim, PackPadded) /* onnx */   \
+  _(prim, PadPacked) /* onnx */    \
+  _(prim, Placeholder) /* debug */ \
+  _(prim, Print)                   \
+  _(prim, PythonOp)                \
+  _(prim, Reverse)                 \
+  _(prim, Return)                  \
+  _(prim, Store)                   \
+  _(prim, Undefined)               \
+  _(prim, Starred)                 \
+  _(prim, TupleConstruct)          \
+  _(prim, TupleUnpack)             \
+  _(prim, ListConstruct)           \
+  _(prim, ListUnpack)              \
+  _(prim, NumToTensor)             \
+  _(prim, TensorToNum)             \
+  _(prim, ImplicitTensorToNum)     \
+  _(prim, IntToFloat)              \
+  _(prim, FloatToInt)              \
+  _(prim, AutogradAdd)             \
+  _(prim, GradOf)                  \
+  _(prim, AnyDefined)              \
+  _(prim, FusedConcat)             \
+  _(prim, ConstantChunk)           \
+  _(prim, NoneGenerator)           \
+  _(aten, __not__)                 \
+  FORALL_ATEN_BASE_SYMBOLS(_)      \
+  _(onnx, Add)                     \
+  _(onnx, Concat)                  \
+  _(onnx, Constant)                \
+  _(onnx, ConstantFill)            \
+  _(onnx, Div)                     \
+  _(onnx, GRU)                     \
+  _(onnx, Gather)                  \
+  _(onnx, Gemm)                    \
+  _(onnx, LSTM)                    \
+  _(onnx, Mul)                     \
+  _(onnx, Pow)                     \
+  _(onnx, RNN)                     \
+  _(onnx, Shape)                   \
+  _(onnx, Size)                    \
+  _(onnx, Slice)                   \
+  _(onnx, Squeeze)                 \
+  _(onnx, Sub)                     \
+  _(onnx, Transpose)               \
+  _(onnx, Unsqueeze)               \
+  _(onnx, Loop)                    \
+  _(onnx, If)                      \
+  _(onnx, Reshape)                 \
+  _(onnx, Equal)                   \
+  _(onnx, Greater)                 \
+  _(onnx, Less)                    \
+  _(onnx, Not)                     \
+  FORALL_ATTR_BASE_SYMBOLS(_)      \
+  _(attr, Subgraph)                \
+  _(attr, ReverseSubgraph)         \
+  _(attr, f_real_outputs)          \
+  _(attr, df_input_vjps)           \
+  _(attr, df_input_captured_inputs) \
+  _(attr, df_input_captured_outputs) \
+  _(attr, df_output_vjps)          \
+  _(attr, axes)                    \
+  _(attr, axis)                    \
+  _(attr, broadcast)               \
+  _(attr, direction)               \
+  _(attr, ends)                    \
+  _(attr, inplace)                 \
+  _(attr, input_as_shape)          \
+  _(attr, is_zero)                 \
+  _(attr, perm)                    \
+  _(attr, sizes)                   \
+  _(attr, starts)                  \
+  _(attr, transA)                  \
+  _(attr, transB)                  \
+  _(attr, name)                    \
+  _(attr, string)                  \
+  _(attr, a)                       \
+  _(attr, b)
 
 // 'prim' symbols are synthetic operators that occur only in the IR
 // and don't have corresponding implementations in ATen.
@@ -134,7 +148,7 @@ _(attr, string)
 //   we then declare constexpr Symbols to get everything the actual Symbol
 //   type we want.  Symbols must be constexpr to be valid to be "case"ed on.
 
-typedef uint32_t unique_t;
+using unique_t = uint32_t;
 
 static const std::string domain_prefix = "org.pytorch.";
 

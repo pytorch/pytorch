@@ -48,7 +48,7 @@ struct SugaredValue : public std::enable_shared_from_this<SugaredValue> {
 
   // use it as a vector of values, e.g. a tuple of values as return value from
   // a method invocation
-  virtual std::vector<std::shared_ptr<SugaredValue>> asTuple(SourceRange loc, Method& m) {
+  virtual std::vector<std::shared_ptr<SugaredValue>> asTuple(SourceRange loc, Method& m, at::optional<size_t> size_hint={}) {
     throw ErrorReport(loc) << kind() << " cannot be used as a tuple";
   }
 
@@ -92,7 +92,7 @@ struct TORCH_API SimpleValue : public SugaredValue {
   virtual Value * asValue(SourceRange range, Method & m) override {
     return value;
   }
-  virtual std::vector<std::shared_ptr<SugaredValue>> asTuple(SourceRange loc, Method& m) override;
+  virtual std::vector<std::shared_ptr<SugaredValue>> asTuple(SourceRange loc, Method& m, at::optional<size_t> size_hint={}) override;
   virtual std::shared_ptr<SugaredValue> attr(SourceRange loc, Method & m, const std::string& field) override;
   Value* getValue() const {
     return value;
@@ -145,13 +145,16 @@ TORCH_API void ensureTensors(const SourceRange& range, at::ArrayRef<Value*> valu
 // try to match a list if inputs and keyword 'attributes' to this schema,
 // if it works return the flat list of positional inputs to the call
 // if it returns nullopt, then failure_messages contains a good error report
+// set convert_tensor_to_num to true if ImplicitTensorToNums should be inserted to
+// match the schema
 TORCH_API at::optional<std::vector<Value*>> tryMatchSchema(
   const FunctionSchema& schema,
   const SourceRange& loc,
   Graph& graph,
   at::ArrayRef<NamedValue> inputs,
   at::ArrayRef<NamedValue> attributes,
-  std::ostream& failure_messages);
+  std::ostream& failure_messages,
+  bool convert_tensors_to_nums);
 
 TORCH_API FunctionSchema extractSchemaFromDef(const Def &def, bool is_method=false);
 

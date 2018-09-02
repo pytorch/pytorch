@@ -3,6 +3,8 @@
 
 #include "caffe2/core/storage.h"
 
+#include <ATen/core/intrusive_ptr.h>
+
 // A global boolean variable to control whether we free memory when a Tensor
 // is shrinked to a smaller size. As a result, a Tensor is always going to
 // keep the memory allocated for its maximum capacity reshaped to so far.
@@ -15,6 +17,8 @@ CAFFE2_DECLARE_int64(caffe2_max_keep_on_shrink_memory);
 
 namespace caffe2 {
 
+using DimVector = std::vector<TIndex>;
+
 /**
  * A utility function to convert vector<int> to vector<TIndex>.
  */
@@ -23,7 +27,7 @@ inline vector<TIndex> ToVectorTIndex(const std::vector<int>& src) {
 }
 
 /**
- * Return product of all dimensions starting from K
+ * Return product of all dimensions starting from k
  */
 inline TIndex size_from_dim_(int k, const vector<TIndex>& dims) {
   TIndex r = 1;
@@ -33,7 +37,7 @@ inline TIndex size_from_dim_(int k, const vector<TIndex>& dims) {
   return r;
 }
 
-// Product of all dims up to
+// Product of all dims up to k (not including dims[k])
 inline TIndex size_to_dim_(int k, const vector<TIndex>& dims) {
   CAFFE_ENFORCE((unsigned)k <= dims.size());
   TIndex r = 1;
@@ -59,6 +63,7 @@ inline TIndex size_between_dim_(int k, int l, const vector<TIndex>& dims) {
   return r;
 }
 
+// Wrap around axis_index if it is negative, s.t., -1 is the last dim
 inline int canonical_axis_index_(int axis_index, int ndims) {
   CAFFE_ENFORCE_GE(axis_index, -ndims);
   CAFFE_ENFORCE_LT(axis_index, ndims);
@@ -69,19 +74,18 @@ inline int canonical_axis_index_(int axis_index, int ndims) {
 }
 
 /**
- * @brief Tensor is the basic class in Caffe2 that stores a contiguous memory
- * with its shape information.
+ * @brief TensorImpl is the implementation of a tensor and the basic class
+ * in Caffe2 that stores a contiguous memory with its shape information.
  *
- * The Tensor class is essentially a wrapper around a device-specific memory
+ * The TensorImpl class is essentially a wrapper around a device-specific memory
  * (the device is specified by the Context template argument), and deals with
  * the allocation and de-allocation of such memory. We make a simplified
  * assumption that the memory is always contiguous.
  */
-class CAFFE2_API Tensor {
+class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
  public:
-  Tensor() = delete;
-  explicit Tensor(DeviceType device_type)
-      : storage_(std::make_shared<StorageImpl>(device_type)) {}
+  TensorImpl() = delete;
+  explicit TensorImpl(DeviceType device_type) : storage_(device_type) {}
 
   /**
    * @brief Creates a tensor of the given dimension.
@@ -93,23 +97,24 @@ class CAFFE2_API Tensor {
   // and immediately discard it in Resize() since
   // reset_tensor will be true and FreeMemory will be called,
   // we might want to avoid creating Storage twice?
-  explicit Tensor(const vector<TIndex>& dims, DeviceType device_type)
-      : storage_(std::make_shared<StorageImpl>(device_type)) {
+  explicit TensorImpl(const vector<TIndex>& dims, DeviceType device_type)
+      : storage_(device_type) {
     Resize(dims);
   }
-  explicit Tensor(const vector<int>& dims, DeviceType device_type)
-      : storage_(std::make_shared<StorageImpl>(device_type)) {
+
+  explicit TensorImpl(const vector<int>& dims, DeviceType device_type)
+      : storage_(device_type) {
     Resize(dims);
   }
 
   /* Now we require that context_for_copy has the same device type as src since
    * template is removed
    */
-  Tensor(
-      const Tensor& src,
+  TensorImpl(
+      const TensorImpl& src,
       BaseContext* context_for_copy,
       DeviceType device_type)
-      : storage_(std::make_shared<StorageImpl>(device_type)) {
+      : storage_(device_type) {
     CopyFrom(src, context_for_copy);
   }
 
@@ -117,8 +122,8 @@ class CAFFE2_API Tensor {
    * @brief: Create a Tensor of DeviceType `type` and initialize it with
    * src Tensor
    */
-  Tensor(const Tensor& src, DeviceType device_type)
-      : storage_(std::make_shared<StorageImpl>(device_type)) {
+  TensorImpl(const TensorImpl& src, DeviceType device_type)
+      : storage_(device_type) {
     CopyFrom(src);
   }
 
@@ -127,17 +132,15 @@ class CAFFE2_API Tensor {
    * The type of tensor will be decided by the context parameter
    */
   template <typename T>
-  Tensor(
+  TensorImpl(
       const vector<TIndex>& dims,
       const vector<T>& values,
       BaseContext* context)
-      : storage_(std::make_shared<StorageImpl>(
-            context->GetDevicetype(),
-            TypeMeta::Make<T>())) {
+      : storage_(context->GetDevicetype(), TypeMeta::Make<T>()) {
     Resize(dims);
-    CAFFE_ENFORCE_EQ_WITH_CALLER(values.size(), size_);
+    CAFFE_ENFORCE_EQ_WITH_CALLER(values.size(), numel_);
     context->CopyItemsFromCPU(
-        storage_->dtype(), size_, values.data(), mutable_data<T>());
+        storage_.dtype(), numel_, values.data(), mutable_data<T>());
   }
 
   /**
@@ -147,21 +150,35 @@ class CAFFE2_API Tensor {
   template <
       typename T,
       typename = typename std::enable_if<std::is_scalar<T>::value>::type>
-  Tensor(const T& value, BaseContext* context)
-      : storage_(std::make_shared<StorageImpl>(
-            context->GetDevicetype(),
-            TypeMeta::Make<T>())) {
+  TensorImpl(const T& value, BaseContext* context)
+      : storage_(context->GetDevicetype(), TypeMeta::Make<T>()) {
     Resize(vector<TIndex>{});
     context->CopyItemsFromCPU(
-        storage_->dtype(), size_, &value, mutable_data<T>());
+        storage_.dtype(), numel_, &value, mutable_data<T>());
   }
+
+  /**
+   * @brief Delete the copy constructor and use Clone explicitly
+   */
+  TensorImpl(const TensorImpl& src) = delete;
+
+  TensorImpl(TensorImpl&& src) noexcept {
+    swap(src);
+  }
+
+  TensorImpl& operator=(TensorImpl&&) = default;
+  // Note(jiayq): possibly a rule-of-three violation, but we explicitly
+  // discourage the use of = for Tensors.
+  TensorImpl& operator=(const TensorImpl& src) = delete;
+
+  virtual ~TensorImpl() noexcept {}
 
   /*
    * Since we removed template from tensor, we now store a static
    * context pointer in tensor, which indicates the type of the tensor.
    */
   BaseStaticContext* GetStaticContext() const {
-    return GET_STATIC_CONTEXT(GetDeviceType());
+    return get_static_context(GetDeviceType());
   }
 
   /* @brief
@@ -176,41 +193,48 @@ class CAFFE2_API Tensor {
   }
 
   DeviceType GetDeviceType() const {
-    return storage_->device_type();
+    return storage_.device_type();
   }
 
   /**
    * @brief Copies the data from a source tensor, with a contex provided to
    * carry out the underlying memcpy operation.
    */
-  void CopyFrom(const Tensor& src, BaseContext* context = nullptr) {
+  void CopyFrom(const TensorImpl& src, BaseContext* context = nullptr) {
     if ((void*)&src == (void*)this) {
       return;
     }
-    storage_->data_type_ = src.storage()->dtype();
+    CAFFE_ENFORCE_WITH_CALLER(
+        src.is_contiguous(),
+        "Source Tensor must be contiguous in order to be copied.");
+    if (storage_.dtype() != src.meta()) {
+      storage_ = Storage(GetDeviceType(), src.meta());
+    }
     if (src.size() == -1) {
       dims_.clear();
-      size_ = -1;
-      storage_->reset();
+      strides_.clear();
+      is_contiguous_ = true;
+      numel_ = -1;
+      storage_.reset();
       return;
     }
     Resize(src.dims());
     if (size() > 0) {
-      if (storage_->dtype().copy()) {
+      if (storage_.dtype().copy()) {
         CAFFE_ENFORCE(
             GetDeviceType() == CPU,
             "In CopyFrom source and dest tensors must both be CPU for meta copy");
         CAFFE_ENFORCE(
             src.GetDeviceType() == CPU,
             "In CopyFrom source and dest tensors must both be CPU for meta copy");
-        storage_->dtype().copy()(src.raw_data(), raw_mutable_data(), size());
+        storage_.dtype().copy()(src.raw_data(), raw_mutable_data(), size());
       } else {
         // We'll need to use a non-CPU context to perform the copy if
         // one of the context is not CPU since only non-CPU context
         // knows how to copy between CPU and that context
         if (src.GetDeviceType() != CPU || GetDeviceType() == CPU) {
           if (!context) {
-            src.CreateContext().get()->CopyBytesToDevice(
+            src.CreateContext()->CopyBytesToDevice(
                 nbytes(), src.raw_data(), raw_mutable_data(), GetDeviceType());
           } else {
             CAFFE_ENFORCE(
@@ -223,14 +247,12 @@ class CAFFE2_API Tensor {
           // In case source context is CPU, and target context is non-CPU
           // We'll have to create a Context from target and perform the
           // copy using that context
-          CreateContext().get()->CopyBytesFromCPU(
+          CreateContext()->CopyBytesFromCPU(
               nbytes(), src.raw_data(), raw_mutable_data());
         }
       }
     }
   }
-
-  virtual ~Tensor() noexcept {}
 
   /**
    * @brief Extend the outer-most dimension of this tensor
@@ -253,43 +275,42 @@ class CAFFE2_API Tensor {
    * complexity.
    */
   void Extend(TIndex num, float growthPct, BaseContext* context) {
+    CAFFE_ENFORCE_WITH_CALLER(
+        is_contiguous_, "Tensor must be contiguous in order to call Extend.");
     CAFFE_ENFORCE_GE_WITH_CALLER(dims_.size(), 1);
     CAFFE_ENFORCE_GE_WITH_CALLER(
         num, 0, "`num` must be non-negative for Extend");
-    CAFFE_ENFORCE(
-        storage_.use_count() == 1,
-        "Can't call Extend on shared storage, please call Resize instead");
     auto newDims = dims_;
     newDims[0] += num;
-    if (!storage_->data_ptr()) {
+    if (!storage_.data()) {
       Resize(newDims);
       return;
     }
-    auto newSize = std::accumulate(
+    auto newNumel = std::accumulate(
         newDims.begin(),
         newDims.end(),
         static_cast<TIndex>(1),
         std::multiplies<TIndex>());
-    if (newSize * storage_->itemsize() <= storage_->capacity()) {
+    if (newNumel * storage_.itemsize() <= storage_.capacity()) {
       dims_ = newDims;
-      size_ = newSize;
+      numel_ = newNumel;
       return;
     }
     auto newCapacity = dims_;
     newCapacity[0] = std::max<size_t>(
         newDims[0], std::ceil(dims_[0] * (growthPct + 100) / 100));
-    auto oldData = std::move(storage_->data_ptr_);
-    auto oldSize = size_;
+    auto oldData = std::move(storage_.data_ptr());
+    auto oldSize = numel_;
     auto oldDims = dims_;
     Resize(newCapacity);
-    auto* newData = raw_mutable_data(storage_->dtype());
+    auto* newData = raw_mutable_data(storage_.dtype());
     CAFFE_ENFORCE(
         context != nullptr, "Context must be provided to Extend the tensor");
     context->CopyItemsSameDevice(
-        storage_->dtype(), oldSize, oldData.get(), newData);
+        storage_.dtype(), oldSize, oldData.get(), newData);
     reserved_ = true;
     dims_ = newDims;
-    size_ = newSize;
+    numel_ = newNumel;
   }
 
   /**
@@ -299,15 +320,17 @@ class CAFFE2_API Tensor {
    * that the extra capacity after the end of the shurnk tensor is maintained.
    */
   void ShrinkTo(TIndex outer_dim) {
+    CAFFE_ENFORCE_WITH_CALLER(
+        is_contiguous_, "Tensor must be contiguous in order to call ShrinkTo.");
     CAFFE_ENFORCE_WITH_CALLER(dims_.size() >= 1, "Tensor must be at least 1D");
     CAFFE_ENFORCE_WITH_CALLER(
         outer_dim <= dims_[0],
         "New outer dimension must be smaller than current.");
     CAFFE_ENFORCE(
-        storage_.use_count() == 1,
+        storage_.unique(),
         "Can't call ShrinkTo on shared storage, please call Resize instead.");
     dims_[0] = outer_dim;
-    size_ = std::accumulate(
+    numel_ = std::accumulate(
         dims_.begin(),
         dims_.end(),
         static_cast<TIndex>(1),
@@ -322,30 +345,32 @@ class CAFFE2_API Tensor {
    */
   template <class T>
   void ReserveSpace(const T& outer_dim) {
+    CAFFE_ENFORCE_WITH_CALLER(
+        is_contiguous_,
+        "Tensor must be contiguous in order to call ReserveSpace.");
     CAFFE_ENFORCE(
-        size_ != -1, "size should be initialized before calling ReserveSpace");
+        numel_ != -1, "size should be initialized before calling ReserveSpace");
     CAFFE_ENFORCE(
-        storage_.use_count() == 1,
-        "Can't call ReserveSpace on shared storage.");
+        storage_.unique(), "Can't call ReserveSpace on shared storage.");
     auto newCapacity = dims_;
     newCapacity[0] = outer_dim;
-    auto newSize = std::accumulate(
+    auto newNumel = std::accumulate(
         newCapacity.begin(),
         newCapacity.end(),
         static_cast<TIndex>(1),
         std::multiplies<TIndex>());
-    if (newSize * storage_->itemsize() <= storage_->capacity()) {
+    if (newNumel * storage_.itemsize() <= storage_.capacity()) {
       return;
     }
     // Old data is discarded
-    storage_->data_ptr_.reset();
-    auto oldSize = size_;
+    storage_.data_ptr().reset();
+    auto oldSize = numel_;
     auto oldDims = dims_;
     Resize(newCapacity);
     // Allocate new memory but don't copy over the data
-    raw_mutable_data(storage_->dtype());
+    raw_mutable_data(storage_.dtype());
     dims_ = oldDims;
-    size_ = oldSize;
+    numel_ = oldSize;
     reserved_ = true;
   }
 
@@ -364,7 +389,7 @@ class CAFFE2_API Tensor {
    */
   template <typename... Ts>
   void Resize(Ts... dim_source) {
-    bool is_init = size_ == -1;
+    bool is_init = numel_ == -1;
     bool size_changed = SetDims(dim_source...);
     if (size_changed) {
       // If needed, we will free the data. the next mutable_data() call
@@ -373,11 +398,11 @@ class CAFFE2_API Tensor {
       if (reserved_) {
         // If tensor is reserved then don't claim its memeory unless capacity()
         // is smaller than new size
-        reset_tensor = storage_->capacity() < size_ * storage_->itemsize();
+        reset_tensor = storage_.capacity() < numel_ * storage_.itemsize();
       } else {
-        reset_tensor = storage_->capacity() < size_ * storage_->itemsize() ||
+        reset_tensor = storage_.capacity() < numel_ * storage_.itemsize() ||
             !FLAGS_caffe2_keep_on_shrink ||
-            storage_->capacity() - size_ * storage_->itemsize() >
+            storage_.capacity() - numel_ * storage_.itemsize() >
                 FLAGS_caffe2_max_keep_on_shrink_memory;
       }
 
@@ -391,7 +416,10 @@ class CAFFE2_API Tensor {
    * Resize the tensor like the source tensor. Note that this is just a
    * sugar wrapper that essentially calls Resize(src_tensor.dims()).
    */
-  inline void ResizeLike(const Tensor& src_tensor) {
+  inline void ResizeLike(const TensorImpl& src_tensor) {
+    CAFFE_ENFORCE_WITH_CALLER(
+        src_tensor.is_contiguous(),
+        "Tensor must be contiguous in order to call ResizeLike.");
     // Note: need casting for different context types.
     if (static_cast<void*>(this) != static_cast<const void*>(&src_tensor)) {
       Resize(src_tensor.dims());
@@ -403,13 +431,15 @@ class CAFFE2_API Tensor {
    * This requires the total size of the tensor to remains constant.
    */
   inline void Reshape(const vector<TIndex>& dims) {
+    CAFFE_ENFORCE_WITH_CALLER(
+        is_contiguous_, "Tensor must be contiguous in order to call Reshape.");
     TIndex new_size = 1;
     for (auto d : dims) {
       CAFFE_ENFORCE_GE_WITH_CALLER(d, 0);
       new_size *= d;
     }
     CAFFE_ENFORCE_WITH_CALLER(
-        new_size == size_,
+        new_size == numel_,
         "New size and old size are not equal. You cannot use Reshape, "
         "but should use Resize."
         // TODO(jiayq): remove the following warning after pending diffs
@@ -431,8 +461,7 @@ class CAFFE2_API Tensor {
    */
   inline void FreeMemory() {
     // We'll detach from the old Storage and create a new one
-    storage_ = std::make_shared<StorageImpl>(
-        storage_->device_type(), storage_->dtype());
+    storage_ = Storage(storage_.device_type(), storage_.dtype());
   }
 
   /**
@@ -442,8 +471,8 @@ class CAFFE2_API Tensor {
    */
   string DebugString() const {
     std::stringstream ss;
-    ss << "A Tensor of item size " << storage_->itemsize() << " and type "
-       << storage_->dtype().name() << " and dimension (";
+    ss << "A Tensor of item size " << storage_.itemsize() << " and type "
+       << storage_.dtype().name() << " and dimension (";
     for (int d : dims_) {
       ss << d << ",";
     }
@@ -451,9 +480,11 @@ class CAFFE2_API Tensor {
     return ss.str();
   }
 
-  void swap(Tensor& other) noexcept {
+  void swap(TensorImpl& other) noexcept {
     std::swap(dims_, other.dims_);
-    std::swap(size_, other.size_);
+    std::swap(strides_, other.strides_);
+    std::swap(is_contiguous_, other.is_contiguous_);
+    std::swap(numel_, other.numel_);
     std::swap(storage_, other.storage_);
   }
 
@@ -469,24 +500,25 @@ class CAFFE2_API Tensor {
    *
    * The source tensor should already have its data allocated.
    */
-  void ShareData(const Tensor& src) {
-    CAFFE_ENFORCE(
-        storage_.use_count() == 1,
-        "Can't share data if underlying storage used by more than one tensor");
-    storage_->data_type_ = src.storage()->data_type_;
+  void ShareData(const TensorImpl& src) {
+    // Right now, we are assuming the device_type are the same, since it is
+    // inherently the same in the non-templatized code. We should probably add
+    // an ENFORCE here which might affect perf a little bit.
     CAFFE_ENFORCE_EQ_WITH_CALLER(
-        src.size_,
-        size_,
+        src.numel_,
+        numel_,
         "Size mismatch - did you call reshape before sharing the data?");
     // It is possible that the source tensor hasn't called mutable_data() yet,
     // in which case ShareData() doesn't make much sense since we don't really
     // know what to share yet.
     CAFFE_ENFORCE_WITH_CALLER(
-        src.storage()->data_ptr() || src.size_ == 0,
+        src.storage_.data() || src.numel_ == 0,
         "Source tensor has no content and has size > 0");
     // Finally, do sharing.
-    storage_->data_ptr_ = src.storage()->data_ptr_;
-    storage_->capacity_ = src.storage()->capacity_;
+    /* Since we create new Storage whenever we need to change data_type/capacity
+     * this still keeps the original semantics
+     */
+    storage_ = src.storage();
   }
 
   /**
@@ -498,16 +530,9 @@ class CAFFE2_API Tensor {
    * using it. If a Deleter object is passed in, when this tensor is reallocated
    * or freed, the deleter function is going to be called.
    */
-  // TODO: Change to ShareExternalStorage
   template <typename T, typename Deleter = MemoryDeleter>
   void ShareExternalPointer(T* src, size_t capacity = 0, Deleter d = nullptr) {
     ShareExternalPointer(src, TypeMeta::Make<T>(), capacity, d);
-    // Sets capacity. If not specified, we will implicitly assume that
-    // the capacity is the current size.
-    if (!capacity) {
-      capacity = size_ * storage_->itemsize();
-    }
-    storage_->capacity_ = capacity;
   }
 
   template <typename Deleter = MemoryDeleter>
@@ -516,18 +541,25 @@ class CAFFE2_API Tensor {
       const TypeMeta& data_type,
       size_t capacity = 0,
       Deleter d = nullptr) {
-    CAFFE_ENFORCE(
-        storage_.use_count() == 1,
-        "Can't share external pointer if underlying storage used by more than one tensor");
-    storage_->data_type_ = data_type;
     CAFFE_ENFORCE_WITH_CALLER(
-        storage_->data_type_.id() != TypeIdentifier::uninitialized(),
-        "To share with a raw external pointer you need to have meta "
-        "already set.");
+        is_contiguous_,
+        "Tensor must be contiguous in order to call ShareExternalPointer.");
     CAFFE_ENFORCE_WITH_CALLER(
-        size_ >= 0,
-        "To share data with a raw pointer, you need to set shape first.");
-    storage_->ShareExternalPointer(src, data_type, capacity, d);
+        data_type.id() != TypeIdentifier::uninitialized(),
+        "To share with a raw external pointer you need to pass in an "
+        "initialized data_type(TypeMeta).");
+    if (!capacity) {
+      capacity = numel_ * data_type.itemsize();
+    }
+    if (storage_.unique()) {
+      CAFFE_ENFORCE_WITH_CALLER(
+          numel_ >= 0,
+          "To share data with a raw pointer, you need to set shape first.");
+      storage_.UniqueStorageShareExternalPointer(src, data_type, capacity, d);
+    } else {
+      // Create a new Storage
+      storage_ = Storage(src, GetDeviceType(), data_type, capacity, d);
+    }
   }
 
   /**
@@ -535,8 +567,11 @@ class CAFFE2_API Tensor {
    * or raw_mutable_data() must have been called prior to this function call.
    */
   inline const void* raw_data() const {
-    CAFFE_ENFORCE_WITH_CALLER(storage_->data_ptr() || size_ == 0);
-    return storage_->data_ptr();
+    CAFFE_ENFORCE_WITH_CALLER(
+        is_contiguous_,
+        "Tensor must be contiguous in order to call raw_data()");
+    CAFFE_ENFORCE_WITH_CALLER(storage_.data() || numel_ == 0);
+    return storage_.data();
   }
 
   /**
@@ -548,7 +583,9 @@ class CAFFE2_API Tensor {
   template <typename T>
   inline const T* data() const {
     CAFFE_ENFORCE_WITH_CALLER(
-        storage_->data_ptr() || size_ == 0,
+        is_contiguous_, "Tensor must be contiguous in order to call data()");
+    CAFFE_ENFORCE_WITH_CALLER(
+        storage_.data() || numel_ == 0,
         "The tensor is of non-zero shape, but its data is not allocated yet. "
         "Caffe2 uses a lazy allocation, so you will need to call "
         "mutable_data() or raw_mutable_data() to actually allocate memory.");
@@ -557,8 +594,8 @@ class CAFFE2_API Tensor {
         "Tensor type mismatch, caller expects elements to be ",
         TypeMeta::TypeName<T>(),
         " while tensor contains ",
-        storage_->dtype().name());
-    return static_cast<T*>(storage_->data_ptr());
+        storage_.dtype().name());
+    return static_cast<T*>(storage_.data());
   }
 
   /**
@@ -573,50 +610,60 @@ class CAFFE2_API Tensor {
    * and a new storage will be created.
    */
   inline void* raw_mutable_data(const TypeMeta& meta) {
+    CAFFE_ENFORCE_WITH_CALLER(
+        is_contiguous_,
+        "Tensor must be contiguous in order to call raw_mutable_data()");
     // For 0-size tensors it's fine to return any pointer (including nullptr)
-    if (storage_->dtype() == meta && (storage_->data_ptr() || size_ == 0)) {
-      return storage_->data_ptr();
+    if (storage_.dtype() == meta && (storage_.data() || numel_ == 0)) {
+      return storage_.data();
     } else {
-      bool had_special_dtor = storage_->dtype().dtor() != nullptr;
-      // TODO: we should create a new Storage here.
-      storage_->data_type_ = meta;
+      bool had_special_dtor = storage_.dtype().dtor() != nullptr;
+      if (storage_.unique()) {
+        storage_.set_dtype(meta);
+        // TODO: recalcuate numel when we store numel instead of capacity in
+        // Storage
+      } else {
+        if (storage_.dtype() != meta) {
+          storage_ = Storage(storage_.device_type(), meta);
+        }
+      }
       CAFFE_ENFORCE_WITH_CALLER(
-          size_ >= 0,
+          numel_ >= 0,
           "Tensor is not initialized. You probably need to call Resize() "
           "before calling mutable_data()");
 
       // We can reuse the existing buffer if the current data does not have
       // a special destructor and the new data doesn't have a special
       // constructor.
-      if (size_ == 0 ||
+      if (numel_ == 0 ||
           (meta.ctor() == nullptr && !had_special_dtor &&
-           storage_->capacity() >= size_ * storage_->itemsize())) {
-        return storage_->data_ptr();
+           storage_.capacity() >= numel_ * storage_.itemsize())) {
+        return storage_.data();
       }
       if (meta.ctor()) {
         // For types that need placement new, we will call it, as well as
         // making sure that when the data is freed, it calls the right
         // destruction procedure.
-        auto size = size_;
-        auto dtor = storage_->dtype().dtor();
+        auto size = numel_;
+        auto dtor = storage_.dtype().dtor();
         auto ptr_and_deleter =
-            GetStaticContext()->New(size_ * storage_->itemsize());
+            GetStaticContext()->New(numel_ * storage_.itemsize());
         auto deleter = ptr_and_deleter.second;
-        storage_->data_ptr_.reset(
+        storage_.data_ptr().reset(
             ptr_and_deleter.first, [size, dtor, deleter](void* ptr) -> void {
               dtor(ptr, size);
               deleter(ptr);
             });
-        storage_->dtype().ctor()(storage_->data_ptr(), size_);
+        storage_.dtype().ctor()(storage_.data(), numel_);
       } else {
         // For fundamental type, new and delete is easier.
         auto ptr_and_deleter =
-            GetStaticContext()->New(size_ * storage_->itemsize());
-        storage_->data_ptr_.reset(
+            GetStaticContext()->New(numel_ * storage_.itemsize());
+        storage_.data_ptr().reset(
             ptr_and_deleter.first, ptr_and_deleter.second);
       }
-      storage_->capacity_ = size_ * storage_->itemsize();
-      return storage_->data_ptr();
+      storage_.set_numel(numel_);
+      return storage_.data();
     }
   }
 
@@ -631,10 +678,13 @@ class CAFFE2_API Tensor {
    */
   inline void* raw_mutable_data() {
     CAFFE_ENFORCE_WITH_CALLER(
-        storage_->dtype().id() != TypeIdentifier::uninitialized(),
+        is_contiguous_,
+        "Tensor must be contiguous in order to call raw_mutable_data()");
+    CAFFE_ENFORCE_WITH_CALLER(
+        storage_.dtype().id() != TypeIdentifier::uninitialized(),
         "Calling raw_mutable_data() without meta, but the current meta is "
         "of unknown type.");
-    return raw_mutable_data(storage_->dtype());
+    return raw_mutable_data(storage_.dtype());
   }
 
   /**
@@ -645,8 +695,11 @@ class CAFFE2_API Tensor {
    */
   template <typename T>
   inline T* mutable_data() {
-    if ((size_ == 0 || storage_->data_ptr()) && IsType<T>()) {
-      return static_cast<T*>(storage_->data_ptr());
+    CAFFE_ENFORCE_WITH_CALLER(
+        is_contiguous_,
+        "Tensor must be contiguous in order to call mutable_data()");
+    if ((numel_ == 0 || storage_.data()) && IsType<T>()) {
+      return static_cast<T*>(storage_.data());
     }
     // Check it here statically - otherwise TypeMeta would throw the runtime
     // error in attempt to invoke TypeMeta::ctor()
@@ -654,17 +707,6 @@ class CAFFE2_API Tensor {
         std::is_default_constructible<T>::value,
         "Tensor can't hold non-default-constructible types");
     return static_cast<T*>(raw_mutable_data(TypeMeta::Make<T>()));
-  }
-
-  /**
-   * Returns the underlying Stoarge for the Tensor
-   */
-  inline Storage storage() {
-    return storage_;
-  }
-
-  inline Storage storage() const {
-    return storage_;
   }
 
   /**
@@ -677,13 +719,13 @@ class CAFFE2_API Tensor {
    * Returns the size (i.e. the number of items) of the tensor.
    */
   inline TIndex size() const {
-    return size_;
+    return numel_;
   }
   /**
    * Return the number of bytes each item takes in the tensor.
    */
   inline size_t itemsize() const {
-    return storage_->itemsize();
+    return storage_.itemsize();
   }
   /**
    * Returns the total number of bytes of the storage.
@@ -691,17 +733,19 @@ class CAFFE2_API Tensor {
    * This is equivalent to calling size() * itemsize().
    */
   inline size_t nbytes() const {
-    return size_ * itemsize();
+    return numel_ * itemsize();
     ;
   }
 
   inline size_t capacity_nbytes() const {
-    return storage_->capacity();
+    return storage_.capacity();
   }
   /**
    * Returns the dimensions of the tensor as a vector.
    */
-  inline const vector<TIndex>& dims() const { return dims_; }
+  inline const vector<TIndex>& dims() const {
+    return dims_;
+  }
 
   inline TIndex size_from_dim(int k) const {
     return size_from_dim_(k, dims_);
@@ -716,18 +760,37 @@ class CAFFE2_API Tensor {
   }
 
   /**
-  * Returns the 'canonical' version of a (usually)  user-specified axis,
-  * allowing for negative indexing (e.g., -1 for the last axis).
-  *
-  * @param axis_index the axis index.
-  *        If 0 <= index < ndim(), return index.
-  *        If -ndim <= index <= -1, return (ndim() - (-index)),
-  *        e.g., the last axis index (ndim() - 1) if index == -1,
-  *        the second to last if index == -2, etc.
-  *        Dies on out of range index.
-  */
+   * Returns the 'canonical' version of a (usually)  user-specified axis,
+   * allowing for negative indexing (e.g., -1 for the last axis).
+   *
+   * @param axis_index the axis index.
+   *        If 0 <= index < ndim(), return index.
+   *        If -ndim <= index <= -1, return (ndim() - (-index)),
+   *        e.g., the last axis index (ndim() - 1) if index == -1,
+   *        the second to last if index == -2, etc.
+   *        Dies on out of range index.
+   */
   inline int canonical_axis_index(int axis_index) const {
     return canonical_axis_index_(axis_index, ndim());
+  }
+
+  inline int64_t stride(int64_t dim) const {
+#ifndef NDEBUG
+    // TODO: dim wrapping?
+    CAFFE_ENFORCE_LT_WITH_CALLER(dim, strides_.size(), "Exceeding ndim limit");
+    CAFFE_ENFORCE_GE_WITH_CALLER(
+        dim, 0, "Cannot have negative dimension index");
+#endif
+    return strides_[dim];
+  }
+
+  // TODO: Change to ArrayRef later
+  inline DimVector strides() {
+    return strides_;
+  }
+
+  inline bool is_contiguous() const {
+    return is_contiguous_;
   }
 
   /**
@@ -735,13 +798,13 @@ class CAFFE2_API Tensor {
    */
   template <typename T>
   inline bool IsType() const {
-    return storage_->IsType<T>();
+    return storage_.IsType<T>();
   }
   /**
    * Returns the TypeMeta object associated with the current data type.
    */
   inline const TypeMeta& meta() const {
-    return storage_->dtype();
+    return storage_.dtype();
   }
 
   /**
@@ -752,10 +815,10 @@ class CAFFE2_API Tensor {
    * call dim() instead.
    */
   inline int dim32(const int i) const {
-    #ifndef NDEBUG
+#ifndef NDEBUG
     CAFFE_ENFORCE_LT_WITH_CALLER(i, dims_.size(), "Exceeding ndim limit");
     CAFFE_ENFORCE_GE_WITH_CALLER(i, 0, "Cannot have negative dimension index");
-    #endif
+#endif
     CAFFE_ENFORCE_LT_WITH_CALLER(dims_[i], std::numeric_limits<int>::max());
     return static_cast<int>(dims_[i]);
   }
@@ -766,40 +829,30 @@ class CAFFE2_API Tensor {
    * this function will produce a fatal message.
    */
   inline TIndex dim(const int i) const {
-    #ifndef NDEBUG
+#ifndef NDEBUG
     CAFFE_ENFORCE_LT_WITH_CALLER(i, dims_.size(), "Exceeding ndim limit");
     CAFFE_ENFORCE_GE_WITH_CALLER(i, 0, "Cannot have negative dimension index");
-    #endif
+#endif
     return dims_[i];
   }
-
-  // We don't allow change to the type of
-  // tensor after initialization
-  Tensor Clone() const {
-    Tensor x(GetDeviceType());
-    x.CopyFrom(*this);
-    return x;
-  }
-
-  Tensor(Tensor&& src) noexcept {
-    swap(src);
-  }
-
-  Tensor& operator=(Tensor&&) = default;
-
-  /**
-   * @brief Delete the copy constructor and use Clone explicitly
-   */
-  Tensor(const Tensor& src) = delete;
 
   void ExtractDeviceOption(DeviceOption* device) const {
     GetStaticContext()->ExtractDeviceOption(device, raw_data());
   }
 
+  const Storage& storage() {
+    return storage_;
+  }
+
+  const Storage& storage() const {
+    return storage_;
+  }
+
  protected:
-  using DimVector = std::vector<TIndex>;
   DimVector dims_; // sizes_
-  TIndex size_ = -1; // numel_
+  DimVector strides_;
+  TIndex numel_ = -1; // numel_
+  bool is_contiguous_ = true;
   // we decide to keep reserved_ and it will
   // live in Tensor after the split
   // The logic is that if Extend() or ReserveSpace() were ever called,
@@ -813,69 +866,350 @@ class CAFFE2_API Tensor {
       typename T,
       typename = typename std::enable_if<std::is_integral<T>::value>::type>
   bool SetDims(const vector<T>& src) {
-    auto old_size = size_;
+    auto old_numel = numel_;
     dims_.resize(src.size());
-    TIndex new_size = 1;
+    TIndex new_numel = 1;
     for (size_t i = 0; i < src.size(); ++i) {
-      new_size *= src[i];
+      new_numel *= src[i];
       dims_[i] = src[i];
     }
-    size_ = new_size;
-    return size_ != old_size;
+    update_strides();
+    numel_ = new_numel;
+    return numel_ != old_numel;
   }
 
   bool SetDims() {
-    auto old_size = size_;
+    auto old_numel = numel_;
     dims_.resize(0);
-    size_ = 1;
-    return size_ != old_size;
+    update_strides();
+    numel_ = 1;
+    return numel_ != old_numel;
   }
 
   // TODO(jiayq): maybe rewrite the following functions with initializer list.
   // NVCC does not play well with initializer lists last time, but worth
   // another shot.
   bool SetDims(const TIndex d0) {
-    auto old_size = size_;
+    auto old_numel = numel_;
     dims_.resize(1);
     dims_[0] = d0;
-    size_ = d0;
-    return size_ != old_size;
+    update_strides();
+    numel_ = d0;
+    return numel_ != old_numel;
   }
 
   bool SetDims(const TIndex d0, const TIndex d1) {
-    auto old_size = size_;
+    auto old_numel = numel_;
     dims_.resize(2);
     dims_[0] = d0;
     dims_[1] = d1;
-    size_ = d0 * d1;
-    return size_ != old_size;
+    update_strides();
+    numel_ = d0 * d1;
+    return numel_ != old_numel;
   }
 
   bool SetDims(const TIndex d0, const TIndex d1, const TIndex d2) {
-    auto old_size = size_;
+    auto old_numel = numel_;
     dims_.resize(3);
     dims_[0] = d0;
     dims_[1] = d1;
     dims_[2] = d2;
-    size_ = d0 * d1 * d2;
-    return size_ != old_size;
+    update_strides();
+    numel_ = d0 * d1 * d2;
+    return numel_ != old_numel;
   }
 
   bool
   SetDims(const TIndex d0, const TIndex d1, const TIndex d2, const TIndex d3) {
-    auto old_size = size_;
+    auto old_numel = numel_;
     dims_.resize(4);
     dims_[0] = d0;
     dims_[1] = d1;
     dims_[2] = d2;
     dims_[3] = d3;
-    size_ = d0 * d1 * d2 * d3;
-    return size_ != old_size;
+    update_strides();
+    numel_ = d0 * d1 * d2 * d3;
+    return numel_ != old_numel;
+  }
+  inline void update_strides() {
+    strides_.resize(dims_.size());
+    for (auto i = ndim() - 1; i >= 0; --i) {
+      if (i == ndim() - 1) {
+        strides_[i] = 1;
+      } else {
+        strides_[i] = strides_[i + 1] * std::max<int64_t>(dims_[i + 1], 1);
+      }
+    }
+    is_contiguous_ = true;
+  }
+};
+
+class CAFFE2_API UndefinedTensorImpl final : public TensorImpl {
+  UndefinedTensorImpl() : TensorImpl(CPU){};
+
+ public:
+ // Without this, we get:
+ //  error: identifier "at::UndefinedTensor::_singleton" is undefined in device code
+ // (ostensibly because the constexpr tricks MSVC into trying to compile this
+ // function for device as well).
+#ifdef _WIN32
+ static inline TensorImpl * singleton() {
+#else
+ static constexpr inline TensorImpl * singleton() {
+#endif
+    return &singleton_;
   }
 
-  // Note(jiayq): possibly a rule-of-three violation, but we explicitly
-  // discourage the use of = for Tensors.
-  Tensor& operator=(const Tensor& src) = delete;
+ private:
+  static UndefinedTensorImpl singleton_;
+};
+
+/**
+ * @brief Tensor class holds a shared pointer to the implementation TensorImpl,
+ * redirects API calls to TensorImpl;
+ * Copying of Tensor results in sharing the same underlying implementation
+ * object
+ */
+class CAFFE2_API Tensor final {
+ protected:
+  using TensorImplPtr = c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl>;
+  TensorImplPtr impl_;
+
+ public:
+  Tensor() : impl_() {}
+
+  operator bool() const {
+    return impl_.defined();
+  }
+
+  TensorImpl* unsafeGetTensorImpl() const {
+    return impl_.get();
+  }
+
+  explicit Tensor(DeviceType type)
+      : impl_(c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(type)) {}
+
+  explicit Tensor(const vector<TIndex>& dims, DeviceType type)
+      : impl_(
+            c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(dims, type)) {}
+
+  explicit Tensor(const vector<int>& dims, DeviceType type)
+      : impl_(
+            c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(dims, type)) {}
+
+  Tensor(const Tensor& src, BaseContext* context_for_copy, DeviceType type)
+      : impl_(c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(
+            *src.impl_,
+            context_for_copy,
+            type)) {}
+
+  Tensor(const Tensor& src, DeviceType type)
+      : impl_(c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(
+            *src.impl_,
+            type)) {}
+
+  template <typename T>
+  Tensor(
+      const vector<TIndex>& dims,
+      const vector<T>& values,
+      BaseContext* context)
+      : impl_(c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(
+            dims,
+            values,
+            context)) {}
+
+  template <
+      typename T,
+      typename = typename std::enable_if<std::is_scalar<T>::value>::type>
+  Tensor(const T& value, BaseContext* context)
+      : impl_(c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(
+            value,
+            context)) {}
+
+  Tensor Clone() const {
+    Tensor x(GetDeviceType());
+    x.CopyFrom(*this);
+    return x;
+  }
+
+  BaseStaticContext* GetStaticContext() const {
+    return impl_.get()->GetStaticContext();
+  }
+
+  std::unique_ptr<BaseContext> CreateContext() const {
+    return impl_.get()->CreateContext();
+  }
+
+  DeviceType GetDeviceType() const {
+    return impl_.get()->GetDeviceType();
+  }
+
+  void CopyFrom(const Tensor& src, BaseContext* context = nullptr) const {
+    impl_.get()->CopyFrom(*src.impl_.get(), context);
+  }
+
+  void ExtendTo(TIndex num, float growthPct, BaseContext* context) const {
+    impl_.get()->ExtendTo(num, growthPct, context);
+  }
+
+  void Extend(TIndex num, float growthPct, BaseContext* context) const {
+    impl_.get()->Extend(num, growthPct, context);
+  }
+
+  void ShrinkTo(TIndex outer_dim) const {
+    impl_.get()->ShrinkTo(outer_dim);
+  }
+
+  template <class T>
+  void ReserveSpace(const T& outer_dim) const {
+    impl_.get()->ReserveSpace(outer_dim);
+  }
+
+  template <typename... Ts>
+  void Resize(Ts... dim_source) const {
+    impl_.get()->Resize(dim_source...);
+  }
+
+  inline void ResizeLike(const Tensor& src_tensor) const {
+    impl_.get()->ResizeLike(*src_tensor.impl_.get());
+  }
+
+  inline void Reshape(const vector<TIndex>& dims) const {
+    impl_.get()->Reshape(dims);
+  }
+
+  inline void Reshape(const vector<int>& dims) const {
+    impl_.get()->Reshape(dims);
+  }
+
+  inline void FreeMemory() const {
+    impl_.get()->FreeMemory();
+  }
+
+  string DebugString() const {
+    return impl_.get()->DebugString();
+  }
+
+  // NB: a.swap(b) is not equivalent to std::swap(a, b);
+  // swap method swaps the CONTENTS of the tensors, while std::swap
+  // swaps the POINTERS.
+  void swap(const Tensor& other) const noexcept {
+    impl_.get()->swap(*other.impl_.get());
+  }
+
+  void ShareData(const Tensor& src) const {
+    impl_.get()->ShareData(*src.impl_.get());
+  }
+
+  template <typename T, typename Deleter = MemoryDeleter>
+  void ShareExternalPointer(T* src, size_t capacity = 0, Deleter d = nullptr)
+      const {
+    impl_.get()->ShareExternalPointer<T, Deleter>(src, capacity, d);
+  }
+
+  template <typename Deleter = MemoryDeleter>
+  void ShareExternalPointer(
+      void* src,
+      const TypeMeta& meta,
+      size_t capacity = 0,
+      Deleter d = nullptr) const {
+    impl_.get()->ShareExternalPointer<Deleter>(src, meta, capacity, d);
+  }
+
+  inline const void* raw_data() const {
+    return impl_.get()->raw_data();
+  }
+
+  template <typename T>
+  inline const T* data() const {
+    return impl_.get()->data<T>();
+  }
+
+  inline void* raw_mutable_data(const TypeMeta& meta) const {
+    return impl_.get()->raw_mutable_data(meta);
+  }
+
+  inline void* raw_mutable_data() const {
+    return impl_.get()->raw_mutable_data();
+  }
+
+  template <typename T>
+  inline T* mutable_data() const {
+    return impl_.get()->mutable_data<T>();
+  }
+
+  inline int ndim() const {
+    return impl_.get()->ndim();
+  }
+
+  inline TIndex size() const {
+    return impl_.get()->size();
+  }
+
+  inline size_t itemsize() const {
+    return impl_.get()->itemsize();
+  }
+
+  inline size_t nbytes() const {
+    return impl_.get()->nbytes();
+  }
+
+  inline size_t capacity_nbytes() const {
+    return impl_.get()->capacity_nbytes();
+  }
+
+  inline const vector<TIndex>& dims() const {
+    return impl_.get()->dims();
+  }
+
+  inline TIndex size_from_dim(int k) const {
+    return impl_.get()->size_from_dim(k);
+  }
+
+  inline TIndex size_to_dim(int k) const {
+    return impl_.get()->size_to_dim(k);
+  }
+
+  inline TIndex size_between_dim(int k, int l) const {
+    return impl_.get()->size_between_dim(k, l);
+  }
+
+  inline int canonical_axis_index(int axis_index) const {
+    return impl_.get()->canonical_axis_index(axis_index);
+  }
+
+  inline int64_t stride(int64_t dim) const {
+    return impl_.get()->stride(dim);
+  }
+
+  inline DimVector strides() {
+    return impl_.get()->strides();
+  }
+
+  inline bool is_contiguous() const {
+    return impl_.get()->is_contiguous();
+  }
+
+  template <typename T>
+  inline bool IsType() const {
+    return impl_.get()->IsType<T>();
+  }
+
+  inline const TypeMeta& meta() const {
+    return impl_.get()->meta();
+  }
+
+  inline int dim32(const int i) const {
+    return impl_.get()->dim32(i);
+  }
+
+  inline TIndex dim(const int i) const {
+    return impl_.get()->dim(i);
+  }
+
+  inline void ExtractDeviceOption(DeviceOption* device) const {
+    return impl_.get()->ExtractDeviceOption(device);
+  }
 };
 
 using TensorCPU = Tensor;
@@ -931,8 +1265,7 @@ void TensorPrinter::Print(const Tensor& tensor) {
   std::stringstream values_stream;
   // One most likely doesn't want to print int64-number of items for visual
   // inspection, so we cast down to int here.
-  int total_count = static_cast<int>(
-      std::min(tensor.size(), TIndex(limit_)));
+  int total_count = static_cast<int>(std::min(tensor.size(), TIndex(limit_)));
   const T* tensor_data = tensor.template data<T>();
   for (int i = 0; i < total_count - 1; ++i) {
     values_stream << tensor_data[i] << ",";
@@ -947,5 +1280,5 @@ void TensorPrinter::Print(const Tensor& tensor) {
   }
 }
 
-}  // namespace caffe2
-#endif  // CAFFE2_CORE_TENSOR_H_
+} // namespace caffe2
+#endif // CAFFE2_CORE_TENSOR_H_

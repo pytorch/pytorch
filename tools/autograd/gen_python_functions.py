@@ -28,7 +28,7 @@ SKIP_PYTHON_BINDINGS = [
     '_cumsum.*', '_cumprod.*', '_sum.*', '_prod.*', '_th_.*',
     'arange.*', 'range.*', '_gesv.*', '_getri.*', 'slice',
     '_local_scalar', '_local_scalar_dense',
-    'max_pool1d', 'max_pool2d', 'max_pool3d'
+    'max_pool1d', 'max_pool2d', 'max_pool3d', 'linear'
 ]
 
 # These function signatures are not exposed to Python. Note that this signature
@@ -100,7 +100,7 @@ PY_VARIABLE_WRAP = CodeTemplate("""\
 return wrap(${call_dispatch});""")
 
 PY_VARIABLE_DISPATCH = CodeTemplate("""\
-inline ${return_type} ${dispatch_name}(${formal_args}) {
+inline ${simple_return_type} ${dispatch_name}(${formal_args}) {
   ${initialize_cuda}
   ${AutoNoGIL}
   return ${dispatch_call}(${dispatch_args});
@@ -400,7 +400,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                         # The device actual is the corresponding AutoGPU index for the Device.
                         formal_args.append(parsed_type_args[1])
                         formal_args.append(device_type)
-                        actuals.append("torch::getType({}, {}, {})".format(parsed_type_args[0], layout, device))
+                        actuals.append("torch::getVariableType({}, {}, {})".format(parsed_type_args[0], layout, device))
                         actuals.append('{}.index()'.format(device))
 
                     has_device_bind = True
@@ -427,7 +427,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         env['actuals'] = actuals
 
         if has_tensor_options:
-            env['initialize_cuda'] = 'maybe_initialize_cuda(options.type());'
+            env['initialize_cuda'] = 'maybe_initialize_cuda(at::getMaybeVariableType(options));'
         else:
             env['initialize_cuda'] = 'maybe_initialize_cuda({});'.format(type_args[0]['name']) if type_args else ''
 
@@ -446,6 +446,26 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             raise RuntimeError('could not dispatch, neither namespace function nor Tensor method')
 
         env['AutoNoGIL'] = 'AutoNoGIL no_gil;' if not declaration['with_gil'] else ''
+
+        # Use the simple_return_type (Tensor) rather than the fancy return type
+        # (Tensor &).  This is important because the dispatch functions take
+        # mutable arguments *by value*, not by reference.  If you then return
+        # a a reference to such an argument, you will now have a pointer to a
+        # dangling stack entry.  Not good.
+        #
+        # You want:
+        #
+        #   Tensor dispatch_selu_(Tensor self) { return at::selu_(self); }
+        #
+        # *not*
+        #
+        #   Tensor& dispatch_selu_(Tensor self) { return at::selu_(self); }
+        #
+        # (NB: We can't make dispatch_selu_ take Tensor&, because the enclosing
+        # codegen looks like dispatch_selu_(wrap(tensor)), and you can't take a
+        # mutable reference to temporary.  Maybe we could assign it to a
+        # variable itself.)
+        env['simple_return_type'] = simple_return_type
 
         env = nested_dict(env, nested_dict(base_env, declaration))
         call_dispatch = PY_VARIABLE_CALL_DISPATCH.substitute(env)

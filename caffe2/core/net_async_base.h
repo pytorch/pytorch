@@ -9,7 +9,7 @@
 #include "caffe2/core/stats.h"
 #include "caffe2/core/timer.h"
 #include "caffe2/core/workspace.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/utils/proto_utils.h"
 #include "caffe2/utils/thread_pool.h"
 
@@ -100,7 +100,7 @@ class CAFFE2_API AsyncNetBase : public NetBase {
       PoolsMap;
   PoolsMap cpu_pools_;
   PoolsMap gpu_pools_;
-  static thread_local std::vector<int> stream_counters_;
+  static std::vector<int>& getStreamCounters();
   int num_workers_;
 
   // Exception/error handling

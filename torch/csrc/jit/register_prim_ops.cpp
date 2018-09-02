@@ -32,23 +32,31 @@ Operation noop(Node* n) {
   return [](Stack& stack) { return 0; };
 }
 
-RegisterOperators reg({
+// using the rules from python_arg_parser FunctionParameter::check
+// tensor cannot have grad set, tensor must be 0 dim,
+// and if the dest is an int the source must be integral type
+void checkImplicitTensorToNum(at::Tensor t, bool toInt) {
+  if (autograd::as_variable_ref(t).requires_grad()) {
+    throw std::runtime_error("Cannot input a tensor that requires grad as a scalar argument");
+  }
+  if (t.sizes().size() != 0) {
+    throw std::runtime_error("Cannot input a tensor of dimension other than 0 as a scalar argument");
+  }
+  if (toInt && !isIntegralType(autograd::as_variable_ref(t).data().type().scalarType())) {
+    std::stringstream ss;
+    ss << "Cannot input a tensor of type " << t.type().scalarType() << " as an integral argument";
+    throw std::runtime_error(ss.str());
+  }
+}
 
+RegisterOperators reg({
     Operator(
         prim::FusionGroup,
         [](Node* node) {
-          auto fusion_fn = sharedFusionCompiler().getOrCompile(node);
-          auto num_inputs = node->inputs().size();
-          return [fusion_fn, num_inputs](Stack& stack) {
+          auto kernel_cache = sharedFusionCompiler().getOrCompile(node);
+          return [kernel_cache](Stack& stack) {
             autograd::profiler::RecordFunction record("FusionGroup");
-            std::vector<at::Tensor> toutputs;
-            // TODO: have fusion_fn work off of a stack as well
-            auto tinputs = fmap(last(stack, num_inputs), [](const IValue& v) {
-              return v.toTensor();
-            });
-            fusion_fn->launch(tinputs, toutputs);
-            drop(stack, num_inputs);
-            stack.insert(stack.end(), toutputs.begin(), toutputs.end());
+            kernel_cache->run(stack);
             return 0;
           };
         }),
@@ -67,6 +75,29 @@ RegisterOperators reg({
             return [](Stack& stack) {
               at::Tensor a;
               pop(stack, a);
+              at::DeviceGuard guard(a);
+              push(stack, a.toCDouble());
+              return 0;
+            };
+          }
+        }),
+    Operator(
+        prim::ImplicitTensorToNum,
+        [](Node* node) -> Operation {
+          if(node->output()->type() == IntType::get()) {
+            return [](Stack& stack) {
+              at::Tensor a;
+              pop(stack, a);
+              checkImplicitTensorToNum(a, /*to int*/true);
+              at::DeviceGuard guard(a);
+              push(stack, a.toCLong());
+              return 0;
+            };
+          } else {
+            return [](Stack& stack) {
+              at::Tensor a;
+              pop(stack, a);
+              checkImplicitTensorToNum(a, /*to int*/false);
               at::DeviceGuard guard(a);
               push(stack, a.toCDouble());
               return 0;
@@ -105,6 +136,14 @@ RegisterOperators reg({
         }),
     Operator(
         prim::Undefined,
+        [](Node* node) {
+          return [](Stack& stack) {
+            stack.push_back(at::Tensor());
+            return 0;
+          };
+        }),
+    Operator(
+        prim::NoneGenerator,
         [](Node* node) {
           return [](Stack& stack) {
             stack.push_back(at::Tensor());
@@ -238,6 +277,72 @@ RegisterOperators reg({
             push(stack, Tuple::create(std::move(elems)));
             return 0;
           };
+        }),
+    Operator(
+        prim::ConstantChunk,
+        [](Node* node) {
+          int64_t chunks = node->i(attr::chunks);
+          int64_t dim = node->i(attr::dim);
+          auto outputs_used = fmap(node->outputs(), [](Value *v) { return v->uses().size() > 0; });
+          return [=](Stack& stack) {
+            autograd::profiler::RecordFunction record("chunk");
+            at::Tensor t;
+            pop(stack, t);
+            auto result = at::chunk(t, chunks, dim);
+            stack.insert(stack.end(), std::make_move_iterator(result.begin()),
+                                      std::make_move_iterator(result.end()));
+            // NB: Chunk can sometimes return a smaller number of outputs.
+            int64_t num_results = result.size();
+            if (num_results != chunks) {
+              if (num_results > chunks) {
+                JIT_ASSERTM(num_results == chunks,
+                            "Expected chunk to return ", chunks, " outputs, but got ", num_results);
+              }
+              for (int64_t i = num_results; i < chunks; ++i) {
+                AT_CHECK(!outputs_used[i],
+                         "Expected chunk to return at least ", chunks, " outputs, but got only ", num_results);
+                // We know that the output is unused, so it's ok to push anything on the stack.
+                stack.emplace_back();
+              }
+            }
+            return 0;
+          };
+        }),
+    Operator(
+        prim::ListUnpack,
+        [](Node* node) -> Operation {
+          size_t num_outputs = node->outputs().size();
+          ListTypePtr lt = node->input()->type()->expect<ListType>();
+          if (lt->getElementType() == IntType::get()) {
+            return [=](Stack& stack) {
+              auto ilist = pop(stack);
+              const auto & list = ilist.toIntList()->elements();
+              AT_CHECK(list.size() == num_outputs,
+                       "Expected ", num_outputs, " elements in a list but found ", list.size());
+              stack.insert(stack.end(), list.begin(), list.end());
+              return 0;
+            };
+          } else if (lt->getElementType() == FloatType::get()) {
+            return [=](Stack& stack) {
+              auto ilist = pop(stack);
+              const auto & list = ilist.toDoubleList()->elements();
+              AT_CHECK(list.size() == num_outputs,
+                       "Expected ", num_outputs, " elements in a list but found ", list.size());
+              stack.insert(stack.end(), list.begin(), list.end());
+              return 0;
+            };
+          } else if (lt->getElementType() == DynamicType::get()) {
+            return [=](Stack& stack) {
+              auto ilist = pop(stack);
+              const auto & list = ilist.toTensorList()->elements();
+              AT_CHECK(list.size() == num_outputs,
+                       "Expected ", num_outputs, " elements in a list but found ", list.size());
+              stack.insert(stack.end(), list.begin(), list.end());
+              return 0;
+            };
+          } else {
+            AT_ERROR("Unsupported list type: ", lt->getElementType()->str());
+          }
         }),
     Operator(
         prim::ListConstruct,

@@ -9,7 +9,7 @@
 
 #include "caffe2/core/logging.h"
 #include "caffe2/utils/proto_wrap.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 
 namespace caffe2 {
 
@@ -194,7 +194,7 @@ CAFFE2_API bool HasInput(const OperatorDef& op, const std::string& input);
  * does not copy the operator def, so one would need to make sure that the
  * lifetime of the OperatorDef object outlives that of the ArgumentHelper.
  */
-class CAFFE2_API ArgumentHelper {
+class CAFFE2_EXPORT ArgumentHelper {
  public:
   template <typename Def>
   static bool HasArgument(const Def& def, const string& name) {

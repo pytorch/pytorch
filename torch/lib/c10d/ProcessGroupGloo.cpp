@@ -442,7 +442,7 @@ AlgorithmEntry* ProcessGroupGloo::checkout(const AlgorithmKey& key) {
   const auto i = cacheCurrentEntry_[key];
 
   // Ensure the cache vector is appropriately sized
-  if (vec.size() != cacheNumAlgorithmEntries_) {
+  if (vec.size() != static_cast<size_t>(cacheNumAlgorithmEntries_)) {
     vec.resize(cacheNumAlgorithmEntries_);
   }
 
@@ -615,6 +615,10 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::recvAnysource(
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::barrier() {
   throw std::runtime_error("ProcessGroupGloo does not support barrier");
+}
+
+std::unordered_map<int, int> ProcessGroupGloo::getGroupRank() {
+  throw std::runtime_error("ProcessGroupGloo does not support getGroupRank");
 }
 
 } // namespace c10d

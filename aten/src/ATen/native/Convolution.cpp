@@ -24,6 +24,7 @@ struct ConvParams {
   bool is_padding_neg() const;
   void view1d_as_2d();
   bool use_cudnn(const at::Tensor& input) const;
+  bool use_miopen(const at::Tensor& input) const;
   bool use_mkldnn(const at::Tensor& input) const;
   bool is_depthwise(const at::Tensor& input, const at::Tensor& weight) const;
 };
@@ -116,6 +117,12 @@ auto ConvParams::use_cudnn(const at::Tensor& input) const -> bool {
     return detail::getCUDAHooks().supportsDilatedConvolutionWithCuDNN() && !is_output_padding_big();
   }
   return !is_output_padding_big();
+}
+
+auto ConvParams::use_miopen(const at::Tensor& input) const -> bool {
+  if (!detail::getCUDAHooks().compiledWithMIOpen() || !input.type().is_cuda() || !cudnn_enabled)
+    return false;
+  return true;
 }
 
 auto ConvParams::use_mkldnn(const at::Tensor& input) const -> bool {
@@ -352,6 +359,27 @@ at::Tensor _convolution(
           params.padding, params.output_padding, params.stride, params.dilation, params.groups, params.benchmark, params.deterministic);
     } else {
       output = at::cudnn_convolution(
+          input, weight, bias,
+          params.padding, params.stride, params.dilation, params.groups, params.benchmark, params.deterministic);
+    }
+  } else if (params.use_miopen(input)) {
+    if (input.type() != weight.type()){
+      std::stringstream ss;
+      ss << "Input type (" << input.type().toString() << ") and weight type (" << weight.type().toString() << ") should be the same";
+      throw std::runtime_error(ss.str());
+    }
+    if (bias.defined() && input.type() != bias.type()){
+      std::stringstream ss;
+      ss << "Input type (" << input.type().toString() << ") and bias type (" << bias.type().toString() << ") should be the same";
+      throw std::runtime_error(ss.str());
+    }
+
+    if (params.transposed) {
+      output = at::miopen_convolution_transpose(
+          input, weight, bias,
+          params.padding, params.output_padding, params.stride, params.dilation, params.groups, params.benchmark, params.deterministic);
+    } else {
+      output = at::miopen_convolution(
           input, weight, bias,
           params.padding, params.stride, params.dilation, params.groups, params.benchmark, params.deterministic);
     }

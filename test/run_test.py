@@ -14,6 +14,7 @@ import tempfile
 import torch
 from torch.utils import cpp_extension
 from common import TEST_WITH_ROCM
+import torch.distributed.c10d as c10d
 
 TESTS = [
     'autograd',
@@ -31,12 +32,14 @@ TESTS = [
     'nn',
     'optim',
     'sparse',
+    'thd_distributed',
     'torch',
     'utils',
 ]
 
 WINDOWS_BLACKLIST = [
     'distributed',
+    'thd_distributed',
 ]
 
 ROCM_BLACKLIST = [
@@ -50,23 +53,36 @@ ROCM_BLACKLIST = [
     'multiprocessing',
     'nccl',
     'nn',
-    'sparse',
+    'thd_distributed',
     'utils',
 ]
 
 DISTRIBUTED_TESTS_CONFIG = {
+    'gloo': {
+        'WORLD_SIZE': '2' if torch.cuda.device_count() == 2 else '3'
+    },
+}
+
+
+if c10d.is_available():
+    if c10d.is_mpi_available():
+        DISTRIBUTED_TESTS_CONFIG['mpi'] = {
+            'WORLD_SIZE': '3'
+        }
+    if c10d.is_nccl_available():
+        DISTRIBUTED_TESTS_CONFIG['nccl'] = {
+            'WORLD_SIZE': '2' if torch.cuda.device_count() == 2 else '3'
+        }
+
+
+THD_DISTRIBUTED_TESTS_CONFIG = {
     'tcp': {
         'WORLD_SIZE': '3'
     },
     'gloo': {
         'WORLD_SIZE': '2' if torch.cuda.device_count() == 2 else '3'
     },
-    'nccl': {
-        'WORLD_SIZE': '2'
-    },
-    'mpi': {
-        'WORLD_SIZE': '3'
-    },
+    # THD NCCL and MPI tests are known to be flaky in CI
 }
 
 # https://stackoverflow.com/questions/2549939/get-signal-names-from-numbers-in-python
@@ -132,7 +148,10 @@ def test_distributed(python, test_module, test_directory, options):
     if options.verbose and not mpi_available:
         print_to_stderr(
             'MPI not available -- MPI backend tests will be skipped')
-    for backend, env_vars in DISTRIBUTED_TESTS_CONFIG.items():
+    config = DISTRIBUTED_TESTS_CONFIG
+    if test_module == "test_thd_distributed":
+        config = THD_DISTRIBUTED_TESTS_CONFIG
+    for backend, env_vars in config.items():
         if backend == 'mpi' and not mpi_available:
             continue
         for with_init_file in {True, False}:
@@ -147,7 +166,10 @@ def test_distributed(python, test_module, test_directory, options):
             os.environ['INIT_METHOD'] = 'env://'
             os.environ.update(env_vars)
             if with_init_file:
-                init_method = 'file://{}/shared_init_file'.format(tmp_dir)
+                if test_module == "test_distributed":
+                    init_method = 'file://{}/'.format(tmp_dir)
+                else:
+                    init_method = 'file://{}/shared_init_file'.format(tmp_dir)
                 os.environ['INIT_METHOD'] = init_method
             try:
                 os.mkdir(os.path.join(tmp_dir, 'barrier'))
@@ -176,6 +198,7 @@ def test_distributed(python, test_module, test_directory, options):
 CUSTOM_HANDLERS = {
     'cpp_extensions': test_cpp_extensions,
     'distributed': test_distributed,
+    'thd_distributed': test_distributed,
 }
 
 

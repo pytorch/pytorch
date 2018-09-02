@@ -404,7 +404,7 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
 #ifdef _MSC_VER
 #define CAFFE_KNOWN_TYPE(T)                                               \
   template <>                                                             \
-  AT_CORE_API TypeIdentifier TypeMeta::Id<T>() {                          \
+  AT_CORE_EXPORT TypeIdentifier TypeMeta::Id<T>() {                       \
     static const TypeIdentifier type_id = TypeIdentifier::createTypeId(); \
     static TypeNameRegisterer<T> registerer(type_id, #T);                 \
     return type_id;                                                       \

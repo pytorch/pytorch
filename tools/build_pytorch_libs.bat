@@ -152,7 +152,6 @@ goto:eof
                   -DTHCUNN_SO_VERSION=1 ^
                   -DUSE_CUDA=%USE_CUDA% ^
                   -DNO_NNPACK=%NO_NNPACK% ^
-                  -Dnanopb_BUILD_GENERATOR=0 ^
                   -DCMAKE_BUILD_TYPE=%BUILD_TYPE%
 
   %MAKE_COMMAND%
@@ -170,7 +169,6 @@ goto:eof
   cd build
   cmake .. %CMAKE_GENERATOR_COMMAND% ^
                   -DCMAKE_BUILD_TYPE=%BUILD_TYPE% ^
-                  -DBUILD_CAFFE2=OFF ^
                   -DBUILD_TORCH="%BUILD_TORCH%" ^
                   -DNVTOOLEXT_HOME="%NVTOOLEXT_HOME%" ^
                   -DNO_API=ON ^
@@ -179,7 +177,10 @@ goto:eof
                   -DBUILD_BINARY=OFF ^
                   -DONNX_NAMESPACE=%ONNX_NAMESPACE% ^
                   -DUSE_CUDA=%USE_CUDA% ^
+                  -DUSE_CUDNN=OFF ^
                   -DUSE_NNPACK=%USE_NNPACK% ^
+                  -DUSE_GLOG=OFF ^
+                  -DUSE_GFLAGS=OFF ^
                   -DCUDNN_INCLUDE_DIR="%CUDNN_INCLUDE_DIR%" ^
                   -DCUDNN_LIB_DIR="%CUDNN_LIB_DIR%" ^
                   -DCUDNN_LIBRARY="%CUDNN_LIBRARY%" ^

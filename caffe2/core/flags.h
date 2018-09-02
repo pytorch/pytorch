@@ -92,7 +92,7 @@ namespace gflags = google;
 #define CAFFE2_DEFINE_int(name, default_value, help_str)                       \
   CAFFE2_GFLAGS_DEF_WRAPPER(int32, gflags::int32, name, default_value, help_str)
 #define CAFFE2_DEFINE_int64(name, default_value, help_str)                     \
-  CAFFE2_GFLAGS_DEF_WRAPPER(int64, gflags::int64, name, default_value, help_str)              
+  CAFFE2_GFLAGS_DEF_WRAPPER(int64, gflags::int64, name, default_value, help_str)
 #define CAFFE2_DEFINE_double(name, default_value, help_str)                    \
   CAFFE2_GFLAGS_DEF_WRAPPER(double, double, name, default_value, help_str)
 #define CAFFE2_DEFINE_bool(name, default_value, help_str)                      \

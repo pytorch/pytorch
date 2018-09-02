@@ -339,7 +339,7 @@ union Constant
   double d;
   Constant(cudnnDataType_t dataType, double value) {
     if (dataType == CUDNN_DATA_HALF || dataType == CUDNN_DATA_FLOAT) {
-      f = (float) value;
+      f = static_cast<float>(value);
     } else {
       d = value;
     }

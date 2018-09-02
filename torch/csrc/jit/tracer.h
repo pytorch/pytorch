@@ -26,6 +26,9 @@ namespace torch { namespace jit { namespace tracer {
 using torch::autograd::Variable;
 using variable_list = std::vector<Variable>;
 
+TORCH_API void recordSourceLocation(Node* n);
+TORCH_API void setRecordSourceLocation(void (*v)(Node*));
+
 struct TORCH_API TracingState : public std::enable_shared_from_this<TracingState> {
   TracingState();
   ~TracingState();
@@ -40,12 +43,13 @@ struct TORCH_API TracingState : public std::enable_shared_from_this<TracingState
 
   struct WeakTensorEq {
     bool operator()(const WeakTensor& t1, const WeakTensor& t2) const {
-      return t1.unsafeGetTensorImpl() == t2.unsafeGetTensorImpl();
+      return t1.is_same(t2);
     }
   };
 
   std::unordered_map<WeakTensor, Value*, WeakTensorHasher, WeakTensorEq> value_map;
   std::shared_ptr<Graph> graph;
+  bool warn = true;
 };
 
 
@@ -127,6 +131,7 @@ inline Value* getValueTrace(const Variable& var) {
   auto it = value_map.find(var);
   if (it == value_map.end()) {
     Value *constant = state->graph->insertConstant(var.data());
+    recordSourceLocation(constant->node());
     constant->inferTypeFrom(var.data());
     it = value_map.emplace_hint(it, var, constant);
   }
@@ -223,46 +228,65 @@ inline void abandon() {
   setTracingState(nullptr);
 }
 
-
-TORCH_API void recordSourceLocation(Node* n);
-TORCH_API void setRecordSourceLocation(void (*v)(Node*));
-
 // NB: those serve both as an intermediate steps in addInputs below,
 // as well as the overloads that terminate template recursion
-void addInputs(Node *n, const char * name, int64_t value);
-void addInputs(Node *n, const char * name, bool value);
-void addInputs(Node *n, const char * name, double value);
-void addInputs(Node *n, const char * name, const at::Scalar& value);
-void addInputs(Node *n, const char * name, const at::Tensor& value);
-void addInputs(Node *n, const char * name, at::IntList value);
-void addInputs(Node *n, const char * name, at::TensorList value);
-void addInputs(Node *n, const char * name, const ArrayRef<double>& value);
-void addInputs(Node *n, const char * name, const std::string& value);
-void addInputs(Node *n, const char * name, const at::SparseTensorRef& value);
+TORCH_API void addInputs(Node *n, const char * name, int64_t value);
+TORCH_API void addInputs(Node *n, const char * name, bool value);
+TORCH_API void addInputs(Node *n, const char * name, double value);
+TORCH_API void addInputs(Node *n, const char * name, const at::Scalar& value);
+TORCH_API void addInputs(Node *n, const char * name, const at::Tensor& value);
+TORCH_API void addInputs(Node *n, const char * name, at::IntList value);
+TORCH_API void addInputs(Node *n, const char * name, at::TensorList value);
+TORCH_API void addInputs(Node *n, const char * name, const ArrayRef<double>& value);
+TORCH_API void addInputs(Node *n, const char * name, const std::string& value);
+TORCH_API void addInputs(Node *n, const char * name, const at::SparseTensorRef& value);
+TORCH_API void addInputs(Node *n, const char * name, const at::TensorOptions& value);
 
 template<size_t N>
 void addInputs(Node *n, const char * name, std::array<bool, N> value) {
   throw std::runtime_error("Found an unsupported argument type in the JIT tracer. File a bug report.");
 }
 
-TORCH_API void postRecordTrace(Node* node, at::ArrayRef<Variable> outputs);
-
-inline void postRecordTrace(Node* node, at::ArrayRef<at::Tensor> tensors) {
-  postRecordTrace(node, fmap<Variable>(tensors));
-}
-
 template <
     typename T,
     typename = torch::enable_if_t<
-        (!std::is_convertible<torch::decay_t<T>, ArrayRef<Variable>>::value &&
-         !std::is_convertible<torch::decay_t<T>, ArrayRef<at::Tensor>>::value &&
-         !std::is_convertible<torch::decay_t<T>, Variable>::value)>>
-void postRecordTrace(Node* node, T&&) {
+        (!std::is_convertible<torch::decay_t<T>, at::TensorList>::value &&
+         !std::is_convertible<torch::decay_t<T>, at::Tensor>::value)>>
+void addOutput(Node* node, T&&) {
   AT_ERROR(
       "Found an unsupported argument type ", at::demangle_type<T>(),
       " in the JIT tracer. File a bug report.");
 }
+TORCH_API void addOutput(Node* node, const at::Tensor& tensor);
+TORCH_API void addOutput(Node* node, const std::vector<at::Tensor>& list);
 
 TORCH_API autograd::Variable getSizeOf(const autograd::Variable& var, int64_t dim);
+
+using warn_fn_type = void (*)(const std::string& msg);
+TORCH_API void _do_warn(const char * _reason);
+inline void warn(const char * _reason) {
+  if (auto state = getTracingState()) {
+    if (!state->warn) return;
+    _do_warn(_reason);
+  }
+}
+TORCH_API void setWarn(warn_fn_type fn);
+
+struct TORCH_API NoWarn {
+  NoWarn(): state(getTracingState()) {
+    if (state) {
+      prev = state->warn;
+      state->warn = false;
+    }
+  }
+  ~NoWarn() {
+    if (state) {
+      state->warn = prev;
+    }
+  }
+  std::shared_ptr<TracingState> state;
+  bool prev;
+};
+
 
 }}} // namespace torch::jit::tracer
