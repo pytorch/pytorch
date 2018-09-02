@@ -940,7 +940,7 @@ void THTensor_(ormqr)(THTensor *ra_, THTensor *a, THTensor *tau, THTensor *c, co
                    tau->data<scalar_t>(), ra__->data<scalar_t>(), ldc,
                    &wkopt, -1, &info);
 
-  /* Allocate the workspace and call LAPACK to do the scalar_t work. */
+  /* Allocate the workspace and call LAPACK to do the real work. */
   int lwork = (int)wkopt;
   THTensor *work = THTensor_(newWithSize1d)(lwork);
   THLapack_(ormqr)(side[0], trans[0], m, n, k, a->data<scalar_t>(), lda,

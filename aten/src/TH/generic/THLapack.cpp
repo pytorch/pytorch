@@ -37,7 +37,7 @@ TH_EXTERNC void spstrf_(char *uplo, int *n, float *a, int *lda, int *piv, int *r
 TH_EXTERNC void dpstrf_(char *uplo, int *n, double *a, int *lda, int *piv, int *rank, double *tol, double *work, int *info);
 
 
-/* Compute the solution to a scalar_t system of linear equations  A * X = B */
+/* Compute the solution to a real system of linear equations  A * X = B */
 void THLapack_(gesv)(int n, int nrhs, scalar_t *a, int lda, int *ipiv, scalar_t *b, int ldb, int* info)
 {
 #ifdef USE_LAPACK
@@ -67,7 +67,7 @@ void THLapack_(trtrs)(char uplo, char trans, char diag, int n, int nrhs, scalar_
   return;
 }
 
-/* Solve overdetermined or underdetermined scalar_t linear systems involving an
+/* Solve overdetermined or underdetermined real linear systems involving an
 M-by-N matrix A, or its transpose, using a QR or LQ factorization of A */
 void THLapack_(gels)(char trans, int m, int n, int nrhs, scalar_t *a, int lda, scalar_t *b, int ldb, scalar_t *work, int lwork, int *info)
 {
@@ -82,7 +82,7 @@ void THLapack_(gels)(char trans, int m, int n, int nrhs, scalar_t *a, int lda, s
 #endif
 }
 
-/* Compute all eigenvalues and, optionally, eigenvectors of a scalar_t symmetric
+/* Compute all eigenvalues and, optionally, eigenvectors of a real symmetric
 matrix A */
 void THLapack_(syev)(char jobz, char uplo, int n, scalar_t *a, int lda, scalar_t *w, scalar_t *work, int lwork, int *info)
 {
@@ -97,7 +97,7 @@ void THLapack_(syev)(char jobz, char uplo, int n, scalar_t *a, int lda, scalar_t
 #endif
 }
 
-/* Compute for an N-by-N scalar_t nonsymmetric matrix A, the eigenvalues and,
+/* Compute for an N-by-N real nonsymmetric matrix A, the eigenvalues and,
 optionally, the left and/or right eigenvectors */
 void THLapack_(geev)(char jobvl, char jobvr, int n, scalar_t *a, int lda, scalar_t *wr, scalar_t *wi, scalar_t* vl, int ldvl, scalar_t *vr, int ldvr, scalar_t *work, int lwork, int *info)
 {
@@ -112,7 +112,7 @@ void THLapack_(geev)(char jobvl, char jobvr, int n, scalar_t *a, int lda, scalar
 #endif
 }
 
-/* Compute the singular value decomposition (SVD) of a scalar_t M-by-N matrix A,
+/* Compute the singular value decomposition (SVD) of a real M-by-N matrix A,
 optionally computing the left and/or right singular vectors */
 void THLapack_(gesvd)(char jobu, char jobvt, int m, int n, scalar_t *a, int lda, scalar_t *s, scalar_t *u, int ldu, scalar_t *vt, int ldvt, scalar_t *work, int lwork, int *info)
 {
