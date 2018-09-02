@@ -50,6 +50,10 @@ public:
     return *generator;
   }
   bool hasMKL() const;
+  bool hasLAPACK() const;
+  bool hasMAGMA() const {
+    return detail::getCUDAHooks().hasMAGMA();
+  }
   bool hasCUDA() const {
     return detail::getCUDAHooks().hasCUDA();
   }
@@ -114,6 +118,7 @@ private:
   std::atomic<size_t> next_id;
   std::unique_ptr<THCState, void(*)(THCState*)> thc_state;
   friend struct Type;
+  friend void register_cpu_types(Context * context);
   friend void register_cuda_types(Context * context);
 };
 
@@ -155,6 +160,14 @@ static inline bool hasCuDNN() {
 
 static inline bool hasMKL() {
   return globalContext().hasMKL();
+}
+
+static inline bool hasLAPACK() {
+  return globalContext().hasLAPACK();
+}
+
+static inline bool hasMAGMA() {
+  return globalContext().hasMAGMA();
 }
 
 static inline int64_t current_device() {
