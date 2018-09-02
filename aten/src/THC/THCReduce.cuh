@@ -359,7 +359,7 @@ inline dim3 getContigReduceBlock(ptrdiff_t numSlices, int64_t reductionSize) {
   // If the number of slices is low but the reduction dimension size
   // is high, then we should increase block size for greater parallelism.
   // Aim for at least 32 warps per SM (assume 15 SMs; don't bother
-  // inquiring the scalar_t number for now).
+  // inquiring the real number for now).
   int maxWarps = 4; // better occupancy if many blocks are around
   // For numSlices > 15 * 8, there are > 32 warps active per SM.
   if (numSlices < 15 * 8) {

@@ -110,12 +110,12 @@
 }
 
 // Used for `scatter` and `scatterAdd`
-// Assumes TENSOR1 is scalar_t
+// Assumes TENSOR1 is real
 //         TENSOR2 is src
 //         TENSOR3 is index
 // Tests:
 //   1. index->size(d) <= src->size(d) for all d
-//   2. index->size(d) <= scalar_t->size(d) for all d != dim
+//   2. index->size(d) <= real->size(d) for all d != dim
 #define TH_TENSOR_DIM_APPLY3_SIZE_SCATTER(TENSOR1, TENSOR2, TENSOR3, DIMENSION) \
 { \
   int shape_check_flag = 0; \

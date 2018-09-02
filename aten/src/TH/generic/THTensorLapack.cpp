@@ -702,7 +702,7 @@ void THTensor_(potri)(THTensor *ra_, THTensor *a, const char *uplo)
 }
 
 /*
- Computes the Cholesky factorization with complete pivoting of a scalar_t symmetric
+ Computes the Cholesky factorization with complete pivoting of a real symmetric
  positive semidefinite matrix.
 
  Args:
@@ -825,7 +825,7 @@ void THTensor_(geqrf)(THTensor *ra_, THTensor *rtau_, THTensor *a)
                    rtau_->data<scalar_t>(),
                    &wkopt, -1, &info);
 
-  /* Allocate the workspace and call LAPACK to do the scalar_t work. */
+  /* Allocate the workspace and call LAPACK to do the real work. */
   int lwork = (int)wkopt;
   THTensor *work = THTensor_(newWithSize1d)(lwork);
   THLapack_(geqrf)(m, n, ra__->data<scalar_t>(), lda,
@@ -877,7 +877,7 @@ void THTensor_(orgqr)(THTensor *ra_, THTensor *a, THTensor *tau)
                    tau->data<scalar_t>(),
                    &wkopt, -1, &info);
 
-  /* Allocate the workspace and call LAPACK to do the scalar_t work. */
+  /* Allocate the workspace and call LAPACK to do the real work. */
   int lwork = (int)wkopt;
   THTensor *work = THTensor_(newWithSize1d)(lwork);
   THLapack_(orgqr)(m, k, k, ra__->data<scalar_t>(), lda,

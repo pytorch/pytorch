@@ -254,7 +254,7 @@ void THCTensor_(sortViaThrust)(THCState* state,
     indexIter, indexIter + totalElements, keyIter,
     SliceComp(sliceSize));
 
-  // Translate the global integer 0-based index to a per-slice scalar_t
+  // Translate the global integer 0-based index to a per-slice real
   // Lua index
   thrust::for_each(
 #if CUDA_VERSION >= 7000

@@ -28,7 +28,7 @@
 // can slide the stencil over to the right once and down once).  But that is all
 // out-of-bounds if you're computing backwards for a 1x1 input.
 //
-// "Now Edward," you might say, "the scalar_t problem is that you set output_padding
+// "Now Edward," you might say, "the real problem is that you set output_padding
 // >= stride, surely an error should have been raised in this case."  To
 // understand why it is useful to handle this case, we have to understand how we
 // compute the weight gradient of a convolution.  Suppose we have a convolution
