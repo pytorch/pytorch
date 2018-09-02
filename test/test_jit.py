@@ -608,6 +608,7 @@ class TestJit(JitTestCase):
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @skipIfRocm
     def test_fusion_rand(self):
         class M(torch.jit.ScriptModule):
             __constants__ = ['d']
@@ -631,6 +632,7 @@ class TestJit(JitTestCase):
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @skipIfRocm
     def test_fusion_arg_configurations(self):
         # A smoke test to make sure we won't use the same kernel for contiguous
         # and non-contiguous arguments.
@@ -846,6 +848,7 @@ class TestJit(JitTestCase):
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA_MULTI_GPU, "needs non-zero device")
+    @skipIfRocm
     def test_fuse_last_device(self):
         device = 'cuda:' + str(1)
         x = torch.tensor([0.4], dtype=torch.float, device=device)
@@ -2521,6 +2524,7 @@ a")
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "No CUDA")
+    @skipIfRocm
     def test_chunk_fusion_cuda(self):
         def fn(x):
             a, b, c = x.chunk(3, 1)
@@ -2536,6 +2540,7 @@ a")
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "No CUDA")
+    @skipIfRocm
     def test_chunk_multiple_fusion_cuda(self):
         # The arguments are intentionally used out of order as a test to see
         # if the fusion compiler adds extra args in the correct order
@@ -2589,11 +2594,13 @@ a")
                 self.checkScript(fn, [tensor])
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @skipIfRocm
     def test_chunk_fusion_correctness(self):
         return self._test_chunk_fusion_correctness(self, 'cpu')
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "No CUDA")
+    @skipIfRocm
     def test_chunk_fusion_correctness_cuda(self):
         return self._test_chunk_fusion_correctness(self, 'cuda')
 
@@ -6457,6 +6464,7 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
 
         self.checkTrace(Policy(), (torch.rand(1, 4),))
 
+    @skipIfRocm
     def test_snli(self):
         # TODO:
         #   1) nn.LSTM is called as a Python function https://github.com/pytorch/pytorch/issues/8449
@@ -6549,6 +6557,7 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
 
         self.checkTrace(SNLIClassifier(Config()), (premise, hypothesis), inputs_require_grads=False)
 
+    @skipIfRocm
     def test_super_resolution(self):
         import torch.nn.init as init
 
@@ -6704,6 +6713,7 @@ class TestPytorchExportModes(JitTestCase):
                            export_type=torch.onnx.ExportTypes.DIRECTORY)
         shutil.rmtree(d)
 
+    @skipIfRocm
     def test_aten_fallback(self):
         class ModelWithAtenNotONNXOp(nn.Module):
             def forward(self, x, y):
