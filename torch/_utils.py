@@ -101,6 +101,13 @@ def _rebuild_tensor_v2(storage, storage_offset, size, stride, requires_grad, bac
     return tensor
 
 
+def _rebuild_parameter(data, requires_grad, backward_hooks):
+    param = torch.nn.Parameter(data, requires_grad)
+    param._backward_hooks = backward_hooks
+
+    return param
+
+
 def _import_dotted_name(name):
     components = name.split('.')
     obj = __import__(components[0])
