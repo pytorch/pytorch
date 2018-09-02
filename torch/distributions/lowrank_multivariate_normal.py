@@ -62,7 +62,7 @@ class LowRankMultivariateNormal(Distribution):
 
     Example:
 
-        >>> m = MultivariateNormal(torch.zeros(2), torch.tensor([1, 0]), torch.tensor([1, 1]))
+        >>> m = LowRankMultivariateNormal(torch.zeros(2), torch.tensor([1, 0]), torch.tensor([1, 1]))
         >>> m.sample()  # normally distributed with mean=`[0,0]`, cov_factor=`[1,0]`, cov_diag=`[1,1]`
         tensor([-0.2102, -0.5429])
 
@@ -120,7 +120,7 @@ class LowRankMultivariateNormal(Distribution):
     def mean(self):
         return self.loc
 
-    @property
+    @lazy_property
     def variance(self):
         return self.cov_factor.pow(2).sum(-1) + self.cov_diag
 
