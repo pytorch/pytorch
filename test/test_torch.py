@@ -171,13 +171,13 @@ class TestTorch(TestCase):
                     continue
                 doc = var.__doc__
                 has_doc = doc is not None and len(doc.strip()) > 0
-                name = ns_name + '.' + name
+                full_name = ns_name + '.' + name
                 if any(r.match(name) for r in skip_regexes):
                     self.assertFalse(has_doc, 
                                      'New docs have been added for {}, please remove '
-                                     'it from the skipped list in TestTorch.test_doc'.format(name))
+                                     'it from the skipped list in TestTorch.test_doc'.format(full_name))
                 else:
-                    self.assertTrue(has_doc, '{} is missing documentation'.format(name))
+                    self.assertTrue(has_doc, '{} is missing documentation'.format(full_name))
 
         # FIXME: fix all the skipped ones below!
         test_namespace(torch.randn(1),
