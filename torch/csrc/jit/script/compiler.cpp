@@ -389,20 +389,6 @@ Value* packOutputs(Graph& g, at::ArrayRef<Value*> values) {
   return g.insertNode(g.createTuple(values))->output();
 }
 
-Value* createNumber(Graph& g, const SourceRange& loc, const at::Tensor& val) {
-  JIT_ASSERT(val.numel() == 1);
-  auto* output = g.insertConstant(val, loc);
-  if (val.type().scalarType() == at::kLong) {
-    output->setType(IntType::get());
-  } else if (val.type().scalarType() == at::kFloat) {
-    output->setType(FloatType::get());
-  } else {
-    throw ErrorReport(loc) << "createNumber with unknown scalar type ("
-							<< val.type().scalarType() << "). Please file a bug report.";
-  }
-  return output;
-}
-
 at::optional<std::vector<int64_t>> getIntListAttribute(at::optional<int32_t> N, Value* input) {
   auto list = constant_as<Shared<jit::IntList>>(input);
   if(list)
@@ -533,6 +519,21 @@ Value* tryCreateList(
     list_ctor.push_back(av);
   }
   return graph.insertNode(graph.createList(elem_type, list_ctor))->output();
+}
+
+template<class T>
+static Value* materializeConstant(T val, Graph& graph,
+    const SourceRange& r, std::unordered_map<T, Value*>& map) {
+  auto existing_constant = map.find(val);
+  if (existing_constant != map.end()) {
+    return existing_constant->second;
+  }
+
+  WithInsertPoint guard(graph.block()->nodes().front());
+  auto new_constant = graph.insertConstant(val, r);
+  map[val] = new_constant;
+
+  return new_constant;
 }
 
 at::optional<std::vector<Value*>> tryMatchSchema(
@@ -830,6 +831,8 @@ private:
   Def def;
   FunctionTable& function_table;
   const Resolver& resolver;
+  std::unordered_map<int64_t, Value*> integral_constants;
+  std::unordered_map<double, Value*> fp_constants;
 
   // Singly-linked list of environments. This top element contains a member
   // `next` that points to the most immediate enclosing scope's value.
@@ -1064,7 +1067,7 @@ private:
             max_trip_count->range(), emitExpr(max_trip_count.value()));
       } else {
         max_trip_count_val =
-            graph->insertConstant(INT_MAX,range);
+            materializeConstant((int64_t)INT_MAX, *graph, range, integral_constants);
       }
       if (cond) {
         cond_val = emitCond(cond.value());
@@ -1530,9 +1533,9 @@ private:
 
   Value* emitConst(const Const& c) {
     if (c.isFloatingPoint())
-      return graph->insertConstant(c.asFloatingPoint(), c.range());
+      return materializeConstant(c.asFloatingPoint(), *graph, c.range(), fp_constants);
     else
-      return graph->insertConstant(c.asIntegral(), c.range());
+     return materializeConstant(c.asIntegral(), *graph, c.range(), integral_constants);
   }
 
   Value* emitStringLiteral(const StringLiteral& c) {
