@@ -1048,6 +1048,11 @@ public:
     result->output()->setType(type);
     return result;
   }
+  Node* createTensorToBool(const TypePtr& type, Value* value) {
+    auto* result = create(prim::TensorToBool, {value});
+    result->output()->setType(type);
+    return result;
+  }
   Node* createIntToFloat(Value* value) {
     JIT_ASSERT(*value->type() == *IntType::get());
     auto* result = create(prim::IntToFloat, {value});

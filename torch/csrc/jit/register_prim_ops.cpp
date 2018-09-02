@@ -61,6 +61,17 @@ RegisterOperators reg({
           };
         }),
     Operator(
+        prim::TensorToBool,
+        [](Node* node) -> Operation {
+          return [](Stack& stack) {
+            at::Tensor a;
+            pop(stack, a);
+            at::DeviceGuard guard(a);
+            push(stack, a.toCLong() != 0);
+            return 0;
+          };
+        }),
+    Operator(
         prim::TensorToNum,
         [](Node* node) -> Operation {
           if(node->output()->type() == IntType::get()) {
