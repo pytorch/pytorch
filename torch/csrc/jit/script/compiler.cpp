@@ -72,6 +72,8 @@ static Value* typeCast(const SourceRange& loc, Value* value, TypePtr dst) {
     n = graph.createNumToTensor(value);
   } else if (dst->isSubtypeOf(NumberType::get()) && orig->isSubtypeOf(DynamicType::get())) {
     n = graph.createTensorToNum(dst, value);
+  } else if (dst->isSubtypeOf(BoolType::get()) && orig->isSubtypeOf(DynamicType::get())) {
+    n = graph.createTensorToBool(dst, value);
   } else if(dst->isSubtypeOf(IntType::get()) && orig->isSubtypeOf(FloatType::get())) {
     n = graph.createFloatToInt(value);
   } else if(dst->isSubtypeOf(FloatType::get()) && orig->isSubtypeOf(IntType::get())) {
@@ -990,9 +992,9 @@ private:
 
   Value* emitCond(Expr cond) {
     Value* v = emitExpr(cond);
-    if (!v->type()->isSubtypeOf(IntType::get())) {
+    if (!v->type()->isSubtypeOf(BoolType::get())) {
       ErrorReport error(cond);
-      error << "expected an integer expression for condition but found "
+      error << "expected an boolean expression for condition but found "
             << v->type()->str();
       if (v->type()->isSubtypeOf(DynamicType::get())) {
         error << ", to use a tensor in a boolean"
