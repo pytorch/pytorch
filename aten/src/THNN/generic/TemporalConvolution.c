@@ -277,7 +277,7 @@ void THNN_(TemporalConvolution_accGradParameters)(
           int dW,
           accreal scale_)
 {
-  real scale = TH_CONVERT_ACCREAL_TO_REAL(scale_);
+  scalar_t scale = TH_CONVERT_ACCREAL_TO_REAL(scale_);
   int64_t nInputFrame;
   int64_t nOutputFrame;
 

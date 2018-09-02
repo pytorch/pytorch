@@ -122,7 +122,7 @@ __global__ void cuda_VolumetricAveragePooling_updateOutput_fixedKW(
 }
 
 #define LAUNCH_UPDATE_OUTPUT_KERNEL_WIDTH(KW) case KW: \
-  cuda_VolumetricAveragePooling_updateOutput_fixedKW<KW, real, accreal> \
+  cuda_VolumetricAveragePooling_updateOutput_fixedKW<KW, scalar_t, accreal> \
     <<<grid, block, 0, THCState_getCurrentStream(state)>>>( \
       cudaInput, cudaOutput, kT, kH, dT, dH, dW, padT, padH, padW, count_include_pad, offsetZ); \
   break

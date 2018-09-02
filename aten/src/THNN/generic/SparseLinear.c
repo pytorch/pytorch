@@ -6,8 +6,8 @@
 #include <omp.h>
 #endif
 
-#define ROW_PTR2(t, r) (t->data<real>() + (r) * (t)->stride(0))
-#define COL_PTR2(t, c) (t->data<real>() + (c) * (t)->stride(1))
+#define ROW_PTR2(t, r) (t->data<scalar_t>() + (r) * (t)->stride(0))
+#define COL_PTR2(t, c) (t->data<scalar_t>() + (c) * (t)->stride(1))
 
 static bool THNN_(checkLegacyInput)(THTensor* t)
 {
@@ -29,14 +29,14 @@ static bool THNN_(checkSize1D)(THTensor* t, int64_t size0)
   return !t->is_empty() && THTensor_nDimensionLegacyNoScalars(t) == 1 && THTensor_sizeLegacyNoScalars(t, 0) == size0;
 }
 
-static void THNN_(set1d)(THTensor *t, int64_t x0, real value) {
+static void THNN_(set1d)(THTensor *t, int64_t x0, scalar_t value) {
   THStorage_(set)(THTensor_getStoragePtr(t), t->storage_offset() + x0*t->stride(0), value);
 }
-static real THNN_(get3d)(const THTensor *t, int64_t x0, int64_t x1, int64_t x2) {
+static scalar_t THNN_(get3d)(const THTensor *t, int64_t x0, int64_t x1, int64_t x2) {
   return THStorage_(get)(THTensor_getStoragePtr(t), t->storage_offset() +
                          x0*t->stride(0) + x1*t->stride(1) + x2*t->stride(2));
 }
-static real THNN_(get2d)(const THTensor *t, int64_t x0, int64_t x1) {
+static scalar_t THNN_(get2d)(const THTensor *t, int64_t x0, int64_t x1) {
   return THStorage_(get)(THTensor_getStoragePtr(t), t->storage_offset() +
                          x0*t->stride(0) + x1*t->stride(1));
 }
@@ -83,7 +83,7 @@ void THNN_(SparseLinear_updateOutput)(
     int64_t i_start = THLongTensor_get1d(csr, h);
     int64_t i_end = THLongTensor_get1d(csr, h+1);
     for (i = i_start; i < i_end; i++) {
-      real val = THNN_(get2d)(input, i, 2);
+      scalar_t val = THNN_(get2d)(input, i, 2);
       if (val == 0) {
         continue;
       }
@@ -138,7 +138,7 @@ void THNN_(SparseLinear_legacyUpdateOutput)(
   batchSize > 1 && batchSize * nnz * outDim > 10000)
   for (h = 0; h < batchSize; h++) {
     for (i = 0; i < nnz; i++) {
-      real val = THNN_(get3d)(input, h, i, 1);
+      scalar_t val = THNN_(get3d)(input, h, i, 1);
       if (val == 0) {
         continue;
       }
@@ -176,8 +176,8 @@ void THNN_(SparseLinear_accGradParameters)(
           accreal weightDecay_,
           accreal scale_)
 {
-  real weightDecay = TH_CONVERT_ACCREAL_TO_REAL(weightDecay_);
-  real scale = TH_CONVERT_ACCREAL_TO_REAL(scale_);
+  scalar_t weightDecay = TH_CONVERT_ACCREAL_TO_REAL(weightDecay_);
+  scalar_t scale = TH_CONVERT_ACCREAL_TO_REAL(scale_);
   int64_t h, i, col, hp0, hp1;
   int64_t outDim = THTensor_(size)(weight, 0);
   int64_t inDim = THTensor_(size)(weight, 1);
@@ -214,7 +214,7 @@ void THNN_(SparseLinear_accGradParameters)(
     int64_t i_start = THLongTensor_get1d(csc, col);
     int64_t i_end = THLongTensor_get1d(csc, col+1);
     for (i = i_start; i < i_end; i++) {
-      real val = scale * THNN_(get2d)(input, i, 2);
+      scalar_t val = scale * THNN_(get2d)(input, i, 2);
 
       h = (int64_t)(THNN_(get2d)(input, i, 0)) - 1;
       int64_t offset = (int64_t)(THNN_(get2d)(input, i, 1)) - 1;
@@ -256,8 +256,8 @@ void THNN_(SparseLinear_legacyAccGradParameters)(
           accreal weightDecay_,
           accreal scale_)
 {
-  real weightDecay = TH_CONVERT_ACCREAL_TO_REAL(weightDecay_);
-  real scale = TH_CONVERT_ACCREAL_TO_REAL(scale_);
+  scalar_t weightDecay = TH_CONVERT_ACCREAL_TO_REAL(weightDecay_);
+  scalar_t scale = TH_CONVERT_ACCREAL_TO_REAL(scale_);
   int64_t h, i;
   int64_t outDim = THTensor_(size)(weight, 0);
   int64_t inDim = THTensor_(size)(weight, 1);
@@ -280,7 +280,7 @@ void THNN_(SparseLinear_legacyAccGradParameters)(
   batchSize * nnz * outDim > 10000)
   for (i = 0; i < nnz; i++) {
     for (h = 0; h < batchSize; h++) {
-      real val = scale * THNN_(get3d)(input, h, i, 1);
+      scalar_t val = scale * THNN_(get3d)(input, h, i, 1);
       if (val == 0) {
         continue;
       }
@@ -322,7 +322,7 @@ void THNN_(SparseLinear_updateParameters)(
           THTensor *lastInput,
           accreal learningRate_)
 {
-  real learningRate = TH_CONVERT_ACCREAL_TO_REAL(learningRate_);
+  scalar_t learningRate = TH_CONVERT_ACCREAL_TO_REAL(learningRate_);
   int64_t i;
   int64_t outDim = weight->size(0);
   int64_t inDim = weight->size(1);
@@ -341,7 +341,7 @@ void THNN_(SparseLinear_updateParameters)(
   THTensor* offsets = THTensor_(newWithSize1d)(nnz);
   int64_t cnt = 0;
   for (i = 0; i < nnz; i++) {
-    real val = THNN_(get2d)(lastInput, i, 2);
+    scalar_t val = THNN_(get2d)(lastInput, i, 2);
     if (val == 0) {
       continue;
     }
@@ -365,7 +365,7 @@ void THNN_(SparseLinear_updateParameters)(
   c10::raw::intrusive_ptr::decref(offsets);
 
   cnt = 1;
-  real* uniqueOffsets_p = uniqueOffsets->data<real>();
+  scalar_t* uniqueOffsets_p = uniqueOffsets->data<scalar_t>();
   for (i = 1; i < THTensor_(size)(uniqueOffsets, 0); i++) {
     if (uniqueOffsets_p[i] != uniqueOffsets_p[i - 1]) {
       uniqueOffsets_p[cnt++] = uniqueOffsets_p[i];
@@ -396,7 +396,7 @@ void THNN_(SparseLinear_legacyUpdateParameters)(
           THTensor *lastInput,
           accreal learningRate_)
 {
-  real learningRate = TH_CONVERT_ACCREAL_TO_REAL(learningRate_);
+  scalar_t learningRate = TH_CONVERT_ACCREAL_TO_REAL(learningRate_);
   int64_t h, i;
   int64_t outDim = weight->size(0);
   int64_t inDim = weight->size(1);
@@ -417,7 +417,7 @@ void THNN_(SparseLinear_legacyUpdateParameters)(
   int64_t cnt = 0;
   for (h = 0; h < batchSize; h++) {
     for (i = 0; i < nnz; i++) {
-      real val = THNN_(get3d)(lastInput, h, i, 1);
+      scalar_t val = THNN_(get3d)(lastInput, h, i, 1);
       if (val == 0 ) {
         continue;
       }
@@ -441,7 +441,7 @@ void THNN_(SparseLinear_legacyUpdateParameters)(
   c10::raw::intrusive_ptr::decref(offsets);
 
   cnt = 1;
-  real* uniqueOffsets_p = uniqueOffsets->data<real>();
+  scalar_t* uniqueOffsets_p = uniqueOffsets->data<scalar_t>();
   for (i = 1; i < THTensor_(size)(uniqueOffsets, 0); i++) {
     if (uniqueOffsets_p[i] != uniqueOffsets_p[i - 1]) {
       uniqueOffsets_p[cnt++] = uniqueOffsets_p[i];
@@ -491,7 +491,7 @@ void THNN_(SparseLinear_zeroGradParameters)(
 
     int64_t offset = (int64_t)(THNN_(get2d)(lastInput, i, 1)) - 1;
     if (offset >= 0 && offset < inDim) {
-      real* pGradWeight = COL_PTR2(gradWeight, offset);
+      scalar_t* pGradWeight = COL_PTR2(gradWeight, offset);
       if (gradWeight->stride(0) == 1) {
         THVector_(fill)(pGradWeight, 0, outDim);
       } else {
@@ -539,7 +539,7 @@ void THNN_(SparseLinear_legacyZeroGradParameters)(
 
       int64_t offset = (int64_t)(THNN_(get3d)(lastInput, h, i, 0)) - 1;
       if (offset >= 0 && offset < inDim) {
-        real* pGradWeight = COL_PTR2(gradWeight, offset);
+        scalar_t* pGradWeight = COL_PTR2(gradWeight, offset);
         if (gradWeight->stride(0) == 1) {
           THVector_(fill)(pGradWeight, 0, outDim);
         } else {

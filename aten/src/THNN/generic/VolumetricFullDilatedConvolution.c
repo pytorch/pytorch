@@ -3,14 +3,14 @@
 #else
 
 static void THNN_(vol2col)(
-  const real *data_vol, const int64_t channels,
+  const scalar_t *data_vol, const int64_t channels,
   const int64_t depth, const int64_t height, const int64_t width,
   const int64_t depth_col, const int64_t height_col, const int64_t width_col,
   const int64_t kT, const int64_t kH, const int64_t kW,
   const int64_t pT, const int64_t pH, const int64_t pW,
   const int64_t dT, const int64_t dH, const int64_t dW,
   const int64_t dilationT, const int64_t dilationH, const int64_t dilationW,
-  real *data_col)
+  scalar_t *data_col)
 {
   int64_t c, t, h, w;
   int64_t channels_col = channels * kT * kH * kW;
@@ -43,17 +43,17 @@ static void THNN_(vol2col)(
 }
 
 static void THNN_(col2vol)(
-  const real* data_col, const int64_t channels,
+  const scalar_t* data_col, const int64_t channels,
   const int64_t depth, const int64_t height, const int64_t width,
   const int64_t out_depth, const int64_t out_height, const int64_t out_width,
   const int64_t kT, const int64_t kH, const int64_t kW,
   const int64_t pT, const int64_t pH, const int64_t pW,
   const int64_t dT, const int64_t dH, const int64_t dW,
   const int64_t dilationT, const int64_t dilationH, const int64_t dilationW,
-  real* data_vol)
+  scalar_t* data_vol)
 {
   int64_t c, t, h, w;
-  memset(data_vol, 0, sizeof(real) * depth * height * width * channels);
+  memset(data_vol, 0, sizeof(scalar_t) * depth * height * width * channels);
   int64_t depth_col  = out_depth;
   int64_t height_col = out_height;
   int64_t width_col  = out_width;
@@ -248,22 +248,22 @@ void THNN_(VolumetricFullDilatedConvolution_updateOutput)(
       'n', 't',
       n, m, k,
       1,
-      input_n->data<real>(), n,
-      weight->data<real>(), m,
+      input_n->data<scalar_t>(), n,
+      weight->data<scalar_t>(), m,
       0,
-      columns->data<real>(), n
+      columns->data<scalar_t>(), n
     );
 
     // Unpack columns back into input:
     THNN_(col2vol)(
-      columns->data<real>(),
+      columns->data<scalar_t>(),
       nOutputPlane, outputDepth, outputHeight, outputWidth,
       inputDepth, inputHeight, inputWidth,
       kT, kH, kW,
       pT, pH, pW,
       dT, dH, dW,
       dilationT,  dilationH,  dilationW,
-      output_n->data<real>()
+      output_n->data<scalar_t>()
     );
 
     // Do Bias after:
@@ -279,10 +279,10 @@ void THNN_(VolumetricFullDilatedConvolution_updateOutput)(
         't', 'n',
         n_, m_, k_,
         1,
-        ones->data<real>(), k_,
-        bias->data<real>(), k_,
+        ones->data<scalar_t>(), k_,
+        bias->data<scalar_t>(), k_,
         1,
-        output_n->data<real>(), n_
+        output_n->data<scalar_t>(), n_
       );
     }
   }
@@ -371,14 +371,14 @@ void THNN_(VolumetricFullDilatedConvolution_updateGradInput)(
 
     // Extract columns:
     THNN_(vol2col)(
-      gradOutput_n->data<real>(),
+      gradOutput_n->data<scalar_t>(),
       nOutputPlane, outputDepth, outputHeight, outputWidth,
       inputDepth, inputHeight, inputWidth,
       kT, kH, kW,
       pT, pH, pW,
       dT, dH, dW,
       dilationT,  dilationH,  dilationW,
-      gradColumns->data<real>()
+      gradColumns->data<scalar_t>()
     );
 
     // M,N,K are dims of matrix A and B
@@ -392,10 +392,10 @@ void THNN_(VolumetricFullDilatedConvolution_updateGradInput)(
       'n', 'n',
       n, m, k,
       1,
-      gradColumns->data<real>(), n,
-      weight->data<real>(), k,
+      gradColumns->data<scalar_t>(), n,
+      weight->data<scalar_t>(), k,
       0,
-      gradInput_n->data<real>(), n
+      gradInput_n->data<scalar_t>(), n
     );
   }
 
@@ -431,7 +431,7 @@ void THNN_(VolumetricFullDilatedConvolution_accGradParameters)(
   int aT, int aW, int aH,   // extra output adjustment
   accreal scale_)
 {
-  real scale = TH_CONVERT_ACCREAL_TO_REAL(scale_);
+  scalar_t scale = TH_CONVERT_ACCREAL_TO_REAL(scale_);
   // number of input & output planes and kernel size is indirectly defined by the gradWeight tensor
   THNN_(VolumetricFullDilatedConvolution_shapeCheck)(
         input, gradOutput, gradWeight, gradBias, kT, kW, kH,
@@ -507,14 +507,14 @@ void THNN_(VolumetricFullDilatedConvolution_accGradParameters)(
 
       // Extract columns:
       THNN_(vol2col)(
-        gradOutput_n->data<real>(), nOutputPlane,
+        gradOutput_n->data<scalar_t>(), nOutputPlane,
         outputDepth, outputHeight, outputWidth,
         inputDepth, inputHeight, inputWidth,
         kT, kH, kW,
         pT, pH, pW,
         dT, dH, dW,
         dilationT,  dilationH,  dilationW,
-        columns->data<real>()
+        columns->data<scalar_t>()
       );
 
       // M,N,K are dims of matrix A and B
@@ -528,10 +528,10 @@ void THNN_(VolumetricFullDilatedConvolution_accGradParameters)(
         't', 'n',
         n, m, k,
         scale,
-        columns->data<real>(), k,
-        input_n->data<real>(), k,
+        columns->data<scalar_t>(), k,
+        input_n->data<scalar_t>(), k,
         1,
-        gradWeight->data<real>(), n
+        gradWeight->data<scalar_t>(), n
       );
     }
 
@@ -547,10 +547,10 @@ void THNN_(VolumetricFullDilatedConvolution_accGradParameters)(
         't',
         k_, m_,
         scale,
-        gradOutput_n->data<real>(), k_,
-        ones->data<real>(), 1,
+        gradOutput_n->data<scalar_t>(), k_,
+        ones->data<scalar_t>(), 1,
         1,
-        gradBias->data<real>(), 1
+        gradBias->data<scalar_t>(), 1
       );
     }
   }

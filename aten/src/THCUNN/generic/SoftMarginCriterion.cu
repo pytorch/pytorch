@@ -14,8 +14,8 @@ void THNN_(SoftMarginCriterion_updateOutput)(
 
   if (reduction == Reduction::None) {
     THCTensor_(resizeAs)(state, output, input);
-    THC_pointwiseApply3<real, real, real>(state, input, target, output,
-        softmargin_no_reduce_functor<real, accreal>());
+    THC_pointwiseApply3<scalar_t, scalar_t, scalar_t>(state, input, target, output,
+        softmargin_no_reduce_functor<scalar_t, accreal>());
     return;
   }
 
@@ -26,9 +26,9 @@ void THNN_(SoftMarginCriterion_updateOutput)(
   target = THCTensor_(newContiguous)(state, target);
   THCTensor_(resize1d)(state, output, 1);
 
-  thrust::device_ptr<real> input_data(THCTensor_(data)(state, input));
-  thrust::device_ptr<real> target_data(THCTensor_(data)(state, target));
-  sum = thrust::inner_product(input_data, input_data+size, target_data, (accreal) 0, thrust::plus<accreal>(), softmargin_functor<real, accreal>());
+  thrust::device_ptr<scalar_t> input_data(THCTensor_(data)(state, input));
+  thrust::device_ptr<scalar_t> target_data(THCTensor_(data)(state, target));
+  sum = thrust::inner_product(input_data, input_data+size, target_data, (accreal) 0, thrust::plus<accreal>(), softmargin_functor<scalar_t, accreal>());
 
   if (reduction == Reduction::ElementwiseMean)
     sum /= size;
@@ -36,7 +36,7 @@ void THNN_(SoftMarginCriterion_updateOutput)(
   THCTensor_(free)(state, input);
   THCTensor_(free)(state, target);
 
-  THCTensor_(set1d)(state, output, 0, ScalarConvert<accreal, real>::to(sum));
+  THCTensor_(set1d)(state, output, 0, ScalarConvert<accreal, scalar_t>::to(sum));
 }
 
 void THNN_(SoftMarginCriterion_updateGradInput)(
@@ -54,8 +54,8 @@ void THNN_(SoftMarginCriterion_updateGradInput)(
 
   if (reduction == Reduction::None) {
     THCUNN_check_shape(state, gradOutput, input);
-    THC_pointwiseApply3<real, real, real>(state, input, target, gradInput,
-        softmargin_updateGradInput_no_reduce_functor<real, accreal>());
+    THC_pointwiseApply3<scalar_t, scalar_t, scalar_t>(state, input, target, gradInput,
+        softmargin_updateGradInput_no_reduce_functor<scalar_t, accreal>());
     THCTensor_(cmul)(state, gradInput, gradInput, gradOutput);
     return;
   }
@@ -67,12 +67,12 @@ void THNN_(SoftMarginCriterion_updateGradInput)(
   target = THCTensor_(newContiguous)(state, target);
 
 
-  thrust::device_ptr<real> input_data(THCTensor_(data)(state, input));
-  thrust::device_ptr<real> target_data(THCTensor_(data)(state, target));
-  thrust::device_ptr<real> gradInput_data(THCTensor_(data)(state, gradInput));
+  thrust::device_ptr<scalar_t> input_data(THCTensor_(data)(state, input));
+  thrust::device_ptr<scalar_t> target_data(THCTensor_(data)(state, target));
+  thrust::device_ptr<scalar_t> gradInput_data(THCTensor_(data)(state, gradInput));
 
   thrust::transform(input_data, input_data+size, target_data, gradInput_data,
-                    softmargin_updateGradInput_functor<real, accreal>(norm, THCTensor_(get1d)(state, gradOutput, 0)));
+                    softmargin_updateGradInput_functor<scalar_t, accreal>(norm, THCTensor_(get1d)(state, gradOutput, 0)));
 
   THCTensor_(free)(state, input);
   THCTensor_(free)(state, target);

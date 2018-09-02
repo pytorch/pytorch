@@ -36,7 +36,7 @@ TH_API int THTensor_(nDimensionLegacyNoScalars)(const THTensor *self);
 TH_API int THTensor_(nDimensionLegacyAll)(const THTensor *self);
 TH_API int64_t THTensor_(size)(const THTensor *self, int dim);
 TH_API int64_t THTensor_(stride)(const THTensor *self, int dim);
-TH_API real *THTensor_(data)(const THTensor *self);
+TH_API scalar_t *THTensor_(data)(const THTensor *self);
 
 
 /**** creation methods ****/
@@ -119,15 +119,15 @@ TH_API void THTensor_(free)(THTensor *self);
 TH_API void THTensor_(freeCopyTo)(THTensor *self, THTensor *dst);
 
 /* Slow access methods [check everything] */
-TH_API void THTensor_(set1d)(THTensor *tensor, int64_t x0, real value);
-TH_API void THTensor_(set2d)(THTensor *tensor, int64_t x0, int64_t x1, real value);
-TH_API void THTensor_(set3d)(THTensor *tensor, int64_t x0, int64_t x1, int64_t x2, real value);
-TH_API void THTensor_(set4d)(THTensor *tensor, int64_t x0, int64_t x1, int64_t x2, int64_t x3, real value);
+TH_API void THTensor_(set1d)(THTensor *tensor, int64_t x0, scalar_t value);
+TH_API void THTensor_(set2d)(THTensor *tensor, int64_t x0, int64_t x1, scalar_t value);
+TH_API void THTensor_(set3d)(THTensor *tensor, int64_t x0, int64_t x1, int64_t x2, scalar_t value);
+TH_API void THTensor_(set4d)(THTensor *tensor, int64_t x0, int64_t x1, int64_t x2, int64_t x3, scalar_t value);
 
-TH_API real THTensor_(get1d)(const THTensor *tensor, int64_t x0);
-TH_API real THTensor_(get2d)(const THTensor *tensor, int64_t x0, int64_t x1);
-TH_API real THTensor_(get3d)(const THTensor *tensor, int64_t x0, int64_t x1, int64_t x2);
-TH_API real THTensor_(get4d)(const THTensor *tensor, int64_t x0, int64_t x1, int64_t x2, int64_t x3);
+TH_API scalar_t THTensor_(get1d)(const THTensor *tensor, int64_t x0);
+TH_API scalar_t THTensor_(get2d)(const THTensor *tensor, int64_t x0, int64_t x1);
+TH_API scalar_t THTensor_(get3d)(const THTensor *tensor, int64_t x0, int64_t x1, int64_t x2);
+TH_API scalar_t THTensor_(get4d)(const THTensor *tensor, int64_t x0, int64_t x1, int64_t x2, int64_t x3);
 
 /* Debug methods */
 TH_API THDescBuff THTensor_(desc)(const THTensor *tensor);

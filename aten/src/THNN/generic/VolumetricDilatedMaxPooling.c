@@ -98,8 +98,8 @@ static inline void THNN_(VolumetricDilatedMaxPooling_shapeCheck)(
 }
 
 static void THNN_(VolumetricDilatedMaxPooling_updateOutput_frame)(
-          real *input_p,
-          real *output_p,
+          scalar_t *input_p,
+          scalar_t *output_p,
           THIndex_t *indz_p,
           int64_t nslices,
           int64_t itime,
@@ -127,7 +127,7 @@ static void THNN_(VolumetricDilatedMaxPooling_updateOutput_frame)(
   {
     /* loop over output */
     int64_t i, j, ti;
-    real *ip = input_p + k * itime * iwidth * iheight;
+    scalar_t *ip = input_p + k * itime * iwidth * iheight;
     for (ti = 0; ti < otime; ti++)
     {
       for (i = 0; i < oheight; i++)
@@ -151,14 +151,14 @@ static void THNN_(VolumetricDilatedMaxPooling_updateOutput_frame)(
           while(start_w < 0)
             start_w += dilationW;
 
-          real *op = output_p + k * otime * owidth * oheight
+          scalar_t *op = output_p + k * otime * owidth * oheight
             + ti * owidth * oheight + i * owidth + j;
           THIndex_t *indzp = indz_p + k * otime * owidth * oheight
             + ti * owidth * oheight + i * owidth + j;
 
           /* compute local max: */
           int64_t maxindex = -1;
-          real maxval = -THInf;
+          scalar_t maxval = -THInf;
           int64_t x,y,z;
           int64_t index = 0;
 
@@ -169,7 +169,7 @@ static void THNN_(VolumetricDilatedMaxPooling_updateOutput_frame)(
               for (x = start_w; x < end_w; x += dilationW)
               {
                 index = z * iwidth * iheight + y * iwidth + x;
-                real val = ip[index];
+                scalar_t val = ip[index];
                 if ((val > maxval) || std::isnan(val))
                 {
                   maxval = val;
@@ -216,8 +216,8 @@ void THNN_(VolumetricDilatedMaxPooling_updateOutput)(
   int64_t otime;
   int64_t oheight;
   int64_t owidth;
-  real *input_data;
-  real *output_data;
+  scalar_t *input_data;
+  scalar_t *output_data;
   THIndex_t *indices_data;
 
 
@@ -279,8 +279,8 @@ void THNN_(VolumetricDilatedMaxPooling_updateOutput)(
     /* indices will contain ti,i,j uchar locations packed into float/double */
     THIndexTensor_(resize4d)(indices, nslices, otime, oheight, owidth);
 
-    input_data = input->data<real>();
-    output_data = output->data<real>();
+    input_data = input->data<scalar_t>();
+    output_data = output->data<scalar_t>();
     indices_data = THIndexTensor_(data)(indices);
 
     THNN_(VolumetricDilatedMaxPooling_updateOutput_frame)(
@@ -308,8 +308,8 @@ void THNN_(VolumetricDilatedMaxPooling_updateOutput)(
     /* indices will contain ti,i,j locations for each output point */
     THIndexTensor_(resize5d)(indices, nBatch, nslices, otime, oheight, owidth);
 
-    input_data = input->data<real>();
-    output_data = output->data<real>();
+    input_data = input->data<scalar_t>();
+    output_data = output->data<scalar_t>();
     indices_data = THIndexTensor_(data)(indices);
 
 #pragma omp parallel for private(p)
@@ -335,8 +335,8 @@ void THNN_(VolumetricDilatedMaxPooling_updateOutput)(
 }
 
 static void THNN_(VolumetricDilatedMaxPooling_updateGradInput_frame)(
-          real *gradInput_p,
-          real *gradOutput_p,
+          scalar_t *gradInput_p,
+          scalar_t *gradOutput_p,
           THIndex_t *indz_p,
           int64_t nslices,
           int64_t itime,
@@ -359,8 +359,8 @@ static void THNN_(VolumetricDilatedMaxPooling_updateGradInput_frame)(
 #pragma omp parallel for private(k)
   for (k = 0; k < nslices; k++)
   {
-    real *gradInput_p_k  = gradInput_p  + k * itime * iwidth * iheight;
-    real *gradOutput_p_k = gradOutput_p + k * otime * owidth * oheight;
+    scalar_t *gradInput_p_k  = gradInput_p  + k * itime * iwidth * iheight;
+    scalar_t *gradOutput_p_k = gradOutput_p + k * otime * owidth * oheight;
     THIndex_t *indz_p_k = indz_p + k * otime * owidth * oheight;
 
     /* calculate max points */
@@ -412,8 +412,8 @@ void THNN_(VolumetricDilatedMaxPooling_updateGradInput)(
   int otime;
   int oheight;
   int owidth;
-  real *gradInput_data;
-  real *gradOutput_data;
+  scalar_t *gradInput_data;
+  scalar_t *gradOutput_data;
   THIndex_t *indices_data;
 
   int dimN = 0;
@@ -453,8 +453,8 @@ void THNN_(VolumetricDilatedMaxPooling_updateGradInput)(
   owidth = gradOutput->size(dimw);
 
   /* get raw pointers */
-  gradInput_data = gradInput->data<real>();
-  gradOutput_data = gradOutput->data<real>();
+  gradInput_data = gradInput->data<scalar_t>();
+  gradOutput_data = gradOutput->data<scalar_t>();
   indices_data = THIndexTensor_(data)(indices);
 
   /* backprop */

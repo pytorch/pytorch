@@ -10,7 +10,7 @@ void THNN_(L1Cost_updateOutput)(
   THNN_CHECK_DIM_SIZE(output, 1, 0, 1);
   accreal sum = 0;
 
-  TH_TENSOR_APPLY(real, input, 
+  TH_TENSOR_APPLY(scalar_t, input, 
     sum += fabs(*input_data);
   );
 
@@ -25,7 +25,7 @@ void THNN_(L1Cost_updateGradInput)(
 {
   THNN_CHECK_NELEMENT(input, gradOutput);
   THTensor_(resizeAs)(gradInput, input);
-  TH_TENSOR_APPLY2(real, gradInput, real, input,
+  TH_TENSOR_APPLY2(scalar_t, gradInput, scalar_t, input,
     if (*input_data > 0)
       *gradInput_data = 1;
     else if (*input_data < 0)

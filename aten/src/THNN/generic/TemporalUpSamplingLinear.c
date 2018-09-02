@@ -49,16 +49,16 @@ void THNN_(TemporalUpSamplingLinear_updateOutput)(
 		      THTensor_(size)(input, 1),
 		      outputWidth);
   THTensor_(zero)(output);
-  real *idata = input->data<real>();
-  real *odata = output->data<real>();
+  scalar_t *idata = input->data<scalar_t>();
+  scalar_t *odata = output->data<scalar_t>();
   channels = nbatch * channels;
   THAssert(inputWidth > 0 && outputWidth > 0);
   // special case: just copy
   if (inputWidth == outputWidth) {
     for (int w2 = 0; w2 < outputWidth; ++w2) {
       const int w1 = w2;
-      const real* pos1 = &idata[w1];
-      real* pos2 = &odata[w2];
+      const scalar_t* pos1 = &idata[w1];
+      scalar_t* pos2 = &odata[w2];
       for (int c = 0; c < channels; ++c) {
         pos2[0] = pos1[0];
         pos1 += inputWidth;
@@ -73,11 +73,11 @@ void THNN_(TemporalUpSamplingLinear_updateOutput)(
     const accreal w1r = linear_upsampling_compute_source_index<accreal>(rwidth, w2, align_corners);
     const int w1 = w1r;
     const int w1p = (w1 < inputWidth - 1) ? 1 : 0;
-    const real w1lambda = w1r - w1;
-    const real w0lambda = (real)1. - w1lambda;
-    const real* pos1 = &idata[w1];
+    const scalar_t w1lambda = w1r - w1;
+    const scalar_t w0lambda = (scalar_t)1. - w1lambda;
+    const scalar_t* pos1 = &idata[w1];
     // index w2 is interpolated by idata[w1] and (itself or idata[w1 + 1])
-    real* pos2 = &odata[w2];
+    scalar_t* pos2 = &odata[w2];
     for (int c = 0; c < channels; ++c) {
       pos2[0] = w0lambda * pos1[0] + w1lambda * pos1[w1p];
       pos1 += inputWidth;
@@ -106,16 +106,16 @@ void THNN_(TemporalUpSamplingLinear_updateGradInput)(
   THTensor_(resize3d)(gradInput, nbatch, channels, inputWidth);
   THTensor_(zero)(gradInput);
   gradOutput = THTensor_(newContiguous)(gradOutput);
-  real *data1 = gradInput->data<real>();
-  real *data2 = gradOutput->data<real>();
+  scalar_t *data1 = gradInput->data<scalar_t>();
+  scalar_t *data2 = gradOutput->data<scalar_t>();
   channels = nbatch * channels;
 
   // special case: same-size matching grids
   if (inputWidth == outputWidth) {
     for (int w2 = 0; w2 < outputWidth; ++w2) {
       const int w1 = w2;
-      real* pos1 = &data1[w1];
-      const real* pos2 = &data2[w2];
+      scalar_t* pos1 = &data1[w1];
+      const scalar_t* pos2 = &data2[w2];
       for (int c = 0; c < channels; ++c) {
         pos1[0] += pos2[0];
         pos1 += inputWidth;
@@ -130,10 +130,10 @@ void THNN_(TemporalUpSamplingLinear_updateGradInput)(
     const accreal w1r = linear_upsampling_compute_source_index<accreal>(rwidth, w2, align_corners);
     const int w1 = w1r;
     const int w1p = (w1 < inputWidth - 1) ? 1 : 0;
-    const real w1lambda = w1r - w1;
-    const real w0lambda = (real)1. - w1lambda;
-    real* pos1 = &data1[w1];
-    const real* pos2 = &data2[w2];
+    const scalar_t w1lambda = w1r - w1;
+    const scalar_t w0lambda = (scalar_t)1. - w1lambda;
+    scalar_t* pos1 = &data1[w1];
+    const scalar_t* pos2 = &data2[w2];
     for (int c = 0; c < channels; ++c) {
       pos1[0] += w0lambda * pos2[0];
       pos1[w1p] += w1lambda * pos2[0];

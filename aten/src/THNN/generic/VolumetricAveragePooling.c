@@ -104,8 +104,8 @@ static inline void THNN_(VolumetricAveragePooling_shapeCheck)(
 }
 
 static void THNN_(VolumetricAveragePooling_updateOutput_frame)(
-          real *input_p,
-          real *output_p,
+          scalar_t *input_p,
+          scalar_t *output_p,
           int64_t nslices,
           int64_t itime,
           int64_t iwidth,
@@ -131,8 +131,8 @@ static void THNN_(VolumetricAveragePooling_updateOutput_frame)(
     int64_t i, j, ti;
 
     /* local pointers. */
-    real *ip = input_p + k * itime * iwidth * iheight;
-    real *op = output_p + k * otime * owidth * oheight;
+    scalar_t *ip = input_p + k * itime * iwidth * iheight;
+    scalar_t *op = output_p + k * otime * owidth * oheight;
     for (i = 0; i < otime * oheight * owidth; ++i)
       *(op + i) = 0;
 
@@ -165,7 +165,7 @@ static void THNN_(VolumetricAveragePooling_updateOutput_frame)(
             divide_factor = (tend - tstart) * (hend - hstart) * (wend - wstart);
 
           /* compute local sum: */
-          real sum = 0.0;
+          scalar_t sum = 0.0;
           int64_t x, y, z;
 
           for (z = tstart; z < tend; z++)
@@ -210,8 +210,8 @@ void THNN_(VolumetricAveragePooling_updateOutput)(
   int64_t otime;
   int64_t oheight;
   int64_t owidth;
-  real *input_data;
-  real *output_data;
+  scalar_t *input_data;
+  scalar_t *output_data;
 
   THNN_(VolumetricAveragePooling_shapeCheck)(
         state, input, NULL, kT, kW, kH,
@@ -267,8 +267,8 @@ void THNN_(VolumetricAveragePooling_updateOutput)(
     /* resize output */
     THTensor_(resize4d)(output, nslices, otime, oheight, owidth);
 
-    input_data = input->data<real>();
-    output_data = output->data<real>();
+    input_data = input->data<scalar_t>();
+    output_data = output->data<scalar_t>();
 
     THNN_(VolumetricAveragePooling_updateOutput_frame)(
       input_data, output_data, nslices,
@@ -291,8 +291,8 @@ void THNN_(VolumetricAveragePooling_updateOutput)(
     /* resize output */
     THTensor_(resize5d)(output, nBatch, nslices, otime, oheight, owidth);
 
-    input_data = input->data<real>();
-    output_data = output->data<real>();
+    input_data = input->data<scalar_t>();
+    output_data = output->data<scalar_t>();
 
 #pragma omp parallel for private(p)
     for (p=0; p < nBatch; p++)
@@ -314,8 +314,8 @@ void THNN_(VolumetricAveragePooling_updateOutput)(
 }
 
 static void THNN_(VolumetricAveragePooling_updateGradInput_frame)(
-          real *gradInput_p,
-          real *gradOutput_p,
+          scalar_t *gradInput_p,
+          scalar_t *gradOutput_p,
           int64_t nslices,
           int64_t itime,
           int64_t iwidth,
@@ -341,8 +341,8 @@ static void THNN_(VolumetricAveragePooling_updateGradInput_frame)(
     int64_t i, j, ti;
 
     /* local pointers */
-    real *ip = gradInput_p + k * itime * iwidth * iheight;
-    real *op = gradOutput_p + k * otime * owidth * oheight;
+    scalar_t *ip = gradInput_p + k * itime * iwidth * iheight;
+    scalar_t *op = gradOutput_p + k * otime * owidth * oheight;
     for (i = 0; i < itime*iwidth*iheight; i++)
       *(ip + i) = 0;
 
@@ -374,7 +374,7 @@ static void THNN_(VolumetricAveragePooling_updateGradInput_frame)(
             divide_factor = (tend - tstart) * (hend - hstart) * (wend - wstart);
 
           /* scatter gradients out to footprint: */
-          real val  = *op++;
+          scalar_t val  = *op++;
 
           int64_t x,y,z;
           for (z = tstart; z < tend; z++)
@@ -417,8 +417,8 @@ void THNN_(VolumetricAveragePooling_updateGradInput)(
   int64_t otime;
   int64_t oheight;
   int64_t owidth;
-  real *gradInput_data;
-  real *gradOutput_data;
+  scalar_t *gradInput_data;
+  scalar_t *gradOutput_data;
 
   int dimN = 0;
   int dimt = 1;
@@ -454,8 +454,8 @@ void THNN_(VolumetricAveragePooling_updateGradInput)(
   owidth = gradOutput->size(dimw);
 
   /* get raw pointers */
-  gradInput_data = gradInput->data<real>();
-  gradOutput_data = gradOutput->data<real>();
+  gradInput_data = gradInput->data<scalar_t>();
+  gradOutput_data = gradOutput->data<scalar_t>();
 
   /* backprop */
   if (input->dim() == 4) /* non-batch mode*/

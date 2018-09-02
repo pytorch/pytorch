@@ -54,7 +54,7 @@ static THWStorage* THPStorage_(newFilenameStorage)(ptrdiff_t size)
   int flags = TH_ALLOCATOR_MAPPED_SHAREDMEM | TH_ALLOCATOR_MAPPED_EXCLUSIVE;
   std::string handle = THPStorage_(__newHandle)();
   return THWStorage_(newWithDataAndAllocator)(
-      THManagedMapAllocator::makeDataPtr("", handle.c_str(), flags, size * sizeof(real)), size, /* allocator */ nullptr);
+      THManagedMapAllocator::makeDataPtr("", handle.c_str(), flags, size * sizeof(scalar_t)), size, /* allocator */ nullptr);
 }
 
 static PyObject * THPStorage_(pyNewFilenameStorage)(PyObject *_unused, PyObject *args)
@@ -121,7 +121,7 @@ static PyObject * THPStorage_(newSharedFilename)(PyObject *_unused, PyObject *ar
               TH_ALLOCATOR_MAPPED_NOCREATE;
   return THPStorage_(New)(
           THWStorage_(newWithDataAndAllocator)(
-            THManagedMapAllocator::makeDataPtr(manager_handle, object_handle, flags, size * sizeof(real)),
+            THManagedMapAllocator::makeDataPtr(manager_handle, object_handle, flags, size * sizeof(scalar_t)),
             size,
             /* allocator */ nullptr));
   END_HANDLE_TH_ERRORS
@@ -134,7 +134,7 @@ static THWStorage* THPStorage_(newFdStorage)(ptrdiff_t size)
               TH_ALLOCATOR_MAPPED_KEEPFD |
               TH_ALLOCATOR_MAPPED_UNLINK;
   std::string handle = THPStorage_(__newHandle)();
-  auto sptr = THMapAllocator::makeDataPtr(handle.c_str(), flags, size * sizeof(real), nullptr);
+  auto sptr = THMapAllocator::makeDataPtr(handle.c_str(), flags, size * sizeof(scalar_t), nullptr);
   return THWStorage_(newWithDataAndAllocator)(std::move(sptr), size, /* allocator */ nullptr);
 }
 
@@ -203,8 +203,8 @@ static PyObject * THPStorage_(newSharedFd)(PyObject *_unused, PyObject *args)
               TH_ALLOCATOR_MAPPED_FROMFD;
   return THPStorage_(New)(
           THWStorage_(newWithDataAndAllocator)(
-            // TODO: Maybe we should read out the real size and use it for size
-            THMapAllocator::makeDataPtr(WITH_FD, nullptr, fd, flags, size * sizeof(real), nullptr),
+            // TODO: Maybe we should read out the scalar_t size and use it for size
+            THMapAllocator::makeDataPtr(WITH_FD, nullptr, fd, flags, size * sizeof(scalar_t), nullptr),
             size, /* allocator */ nullptr));
   END_HANDLE_TH_ERRORS
 }
@@ -225,14 +225,14 @@ static PyObject * THPStorage_(shareCuda)(THPStorage *self)
   if (THWStorage_(data)(LIBRARY_STATE storage)) {
     size_t base_size;
     void *base_ptr = THCCachingAllocator_getBaseAllocation(THWStorage_(data)(LIBRARY_STATE storage), &base_size);
-    ptrdiff_t offset = (char*)storage->data<real>() - (char*)base_ptr;
+    ptrdiff_t offset = (char*)storage->data<scalar_t>() - (char*)base_ptr;
 
     cudaIpcMemHandle_t handle;
     THCudaCheck(cudaIpcGetMemHandle(&handle, base_ptr));
 
     _handle = PyBytes_FromStringAndSize((char *)&handle, CUDA_IPC_HANDLE_SIZE);
-    _offset = PyLong_FromSsize_t((Py_ssize_t)offset / sizeof(real));
-    size = PyLong_FromSize_t(base_size / sizeof(real));
+    _offset = PyLong_FromSsize_t((Py_ssize_t)offset / sizeof(scalar_t));
+    size = PyLong_FromSize_t(base_size / sizeof(scalar_t));
   }
   if (!tuple || !device || !_handle || !size || !_offset) {
     return nullptr;

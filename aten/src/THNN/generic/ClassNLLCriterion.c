@@ -44,7 +44,7 @@ void THNN_(ClassNLLCriterion_updateOutput)(
             THTensor_(fastSet1d)(output, i, 0.0f);
             continue;
           }
-          real cur_weight = weights ? THTensor_(fastGetLegacy1dNoScalars)(weights, cur_target) : 1.0f;
+          scalar_t cur_weight = weights ? THTensor_(fastGetLegacy1dNoScalars)(weights, cur_target) : 1.0f;
           THTensor_(fastSet1d)(output, i, -THTensor_(fastGet2d)(input, i, cur_target) * cur_weight);
       } else {
         int tmp = -1;
@@ -65,11 +65,11 @@ void THNN_(ClassNLLCriterion_updateOutput)(
   target = THIndexTensor_(newContiguous)(target);
   weights = weights ? THTensor_(newContiguous)(weights) : NULL;
 
-  real *input_data = input->data<real>();
+  scalar_t *input_data = input->data<scalar_t>();
   THIndex_t *target_data = THIndexTensor_(data)(target);
-  real *weights_data = weights ? weights->data<real>() : NULL;
-  real *output_data = output->data<real>();
-  real *total_weight_data = total_weight->data<real>();
+  scalar_t *weights_data = weights ? weights->data<scalar_t>() : NULL;
+  scalar_t *output_data = output->data<scalar_t>();
+  scalar_t *total_weight_data = total_weight->data<scalar_t>();
 
   output_data[0] = total_weight_data[0] = 0.0;
 
@@ -92,7 +92,7 @@ void THNN_(ClassNLLCriterion_updateOutput)(
       if (cur_target != ignore_index) {
         THAssert(cur_target >= 0 && cur_target < n_classes);
 
-        real cur_weight = weights ? weights_data[cur_target] : 1.0f;
+        scalar_t cur_weight = weights ? weights_data[cur_target] : 1.0f;
         total_weight_data[0] += cur_weight;
         output_data[0] -= input_data[i * n_target + cur_target] * cur_weight;
       }
@@ -155,13 +155,13 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
       if (cur_target == ignore_index) {
         continue;
       }
-      real weight = weights ? THTensor_(fastGetLegacy1dNoScalars)(weights, cur_target) : 1.0f;
+      scalar_t weight = weights ? THTensor_(fastGetLegacy1dNoScalars)(weights, cur_target) : 1.0f;
       THTensor_(fastSet2d)(gradInput, i, cur_target, -weight * THTensor_(fastGetLegacy1dNoScalars)(gradOutput, i));
     }
     return;
   }
 
-  real *total_weight_data = total_weight->data<real>();
+  scalar_t *total_weight_data = total_weight->data<scalar_t>();
   if (*total_weight_data <= 0) {
     return;
   }
@@ -172,10 +172,10 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
   weights = weights ? THTensor_(newContiguous)(weights) : NULL;
 
   THIndex_t *target_data = THIndexTensor_(data)(target);
-  real *weights_data = weights ? weights->data<real>() : NULL;
-  real *gradInput_data = gradInput->data<real>();
+  scalar_t *weights_data = weights ? weights->data<scalar_t>() : NULL;
+  scalar_t *gradInput_data = gradInput->data<scalar_t>();
 
-  real gradOutput_value = THTensor_(get1d)(gradOutput, 0);
+  scalar_t gradOutput_value = THTensor_(get1d)(gradOutput, 0);
 
   if (THTensor_(nDimensionLegacyAll)(input) == 1) {
     int cur_target = target_data[0] - TH_INDEX_BASE;

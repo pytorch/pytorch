@@ -24,22 +24,22 @@ void THNN_(Tanh_updateGradInput)(
       !THTensor_(isContiguous)(gradOutput) ||
       !THTensor_(isContiguous)(gradInput))
   {
-    TH_TENSOR_APPLY3(real, gradInput, real, gradOutput, real, output,
-      real z = *output_data;            \
+    TH_TENSOR_APPLY3(scalar_t, gradInput, scalar_t, gradOutput, scalar_t, output,
+      scalar_t z = *output_data;            \
       *gradInput_data = *gradOutput_data * (1. - z*z);
     );
   }
   else
   {
-    real* ptr_gradOutput = gradOutput->data<real>();
-    real* ptr_gradInput  = gradInput->data<real>();
-    real* ptr_output     = output->data<real>();
+    scalar_t* ptr_gradOutput = gradOutput->data<scalar_t>();
+    scalar_t* ptr_gradInput  = gradInput->data<scalar_t>();
+    scalar_t* ptr_output     = output->data<scalar_t>();
     int64_t i;
 
 #pragma omp parallel for private(i)
     for (i = 0; i < THTensor_(nElement)(gradInput); i++)
     {
-      real z = ptr_output[i];
+      scalar_t z = ptr_output[i];
       ptr_gradInput[i] = ptr_gradOutput[i] * (1. - z*z);
     }
   }

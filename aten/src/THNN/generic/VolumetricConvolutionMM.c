@@ -150,8 +150,8 @@ static void THNN_(unfolded_acc_vol)(
           int64_t outputWidth,
           int64_t outputHeight)
 {
-  real *input_data = input->data<real>();
-  real *finput_data = finput->data<real>();
+  scalar_t *input_data = input->data<scalar_t>();
+  scalar_t *finput_data = finput->data<scalar_t>();
 #ifdef _OPENMP
   int inOmp = omp_in_parallel();
   #pragma omp parallel if (!inOmp) firstprivate(finput_data, input_data, outputWidth, outputHeight, outputDepth, kW, kH, kT, dW, dH, dT, pW, pH, pT, nInputPlane, inputHeight, inputWidth, inputDepth)
@@ -201,7 +201,7 @@ static void THNN_(unfolded_acc_vol)(
       int64_t d_col_tmp = d / dT + 1;
       int64_t d_col_end = d_col_tmp < outputDepth? d_col_tmp : outputDepth;
 
-      real val = 0;
+      scalar_t val = 0;
       int64_t offset = (c * kTkHkW + d * kHkW + h * kW + w) * outputDHW;
 
       int64_t offset_w_col_start = w_col_start * coeff_w_col;
@@ -253,8 +253,8 @@ static void THNN_(unfolded_acc_vol)(
   The larger loop could lower the proportion of openmp overhead. And the inner part in loop is simpler.
   The naive code is below:
 
-  real *input_data = input->data<real>();
-  real *finput_data = finput->data<real>();
+  scalar_t *input_data = input->data<scalar_t>();
+  scalar_t *finput_data = finput->data<scalar_t>();
 
   int64_t n = nInputPlane*kT*kH*kW*outputDepth*outputWidth*outputHeight;
   #pragma omp parallel for firstprivate(finput_data, input_data, outputWidth, outputHeight, outputDepth, kW, kH, kT, dW, dH, dT, pW, pH, pT, inputHeight, inputWidth, inputDepth)
@@ -303,8 +303,8 @@ static void THNN_(unfolded_copy_vol)(
           int64_t outputWidth,
           int64_t outputHeight)
 {
-  real *input_data = input->data<real>();
-  real *finput_data = finput->data<real>();
+  scalar_t *input_data = input->data<scalar_t>();
+  scalar_t *finput_data = finput->data<scalar_t>();
 
 #ifdef _OPENMP
   int inOmp = omp_in_parallel();
@@ -342,7 +342,7 @@ static void THNN_(unfolded_copy_vol)(
 #endif
 
     int64_t count = 0;
-    real* dst = finput_data + line_index_offset;
+    scalar_t* dst = finput_data + line_index_offset;
     int64_t inputHW = inputHeight*inputWidth;
     int64_t inputDHW = inputHW*inputDepth;
 
@@ -674,7 +674,7 @@ static void THNN_(VolumetricConvolutionMM_accGradParameters_frame)(
           THTensor *gradWeight,
           THTensor *gradBias,
           THTensor *finput,  // can be NULL if gradWeight = NULL
-          real scale)
+          scalar_t scale)
 {
   int64_t i;
   THTensor *gradOutput2d = THTensor_(newWithStorage2d)(
@@ -694,8 +694,8 @@ static void THNN_(VolumetricConvolutionMM_accGradParameters_frame)(
     for (i = 0; i < THTensor_sizeLegacyNoScalars(gradBias, 0); i++)
     {
       int64_t k;
-      real sum = 0;
-      real *data = THStorage_(data)(THTensor_getStoragePtr(gradOutput2d)) + gradOutput2d->storage_offset() + i*gradOutput2d->stride(0);
+      scalar_t sum = 0;
+      scalar_t *data = THStorage_(data)(THTensor_getStoragePtr(gradOutput2d)) + gradOutput2d->storage_offset() + i*gradOutput2d->stride(0);
       for (k = 0; k < gradOutput2d->size(1); k++)
         sum += data[k];
 
@@ -719,7 +719,7 @@ void THNN_(VolumetricConvolutionMM_accGradParameters)(
           int pT, int pW, int pH,
           accreal scale_)
 {
-  real scale = TH_CONVERT_ACCREAL_TO_REAL(scale_);
+  scalar_t scale = TH_CONVERT_ACCREAL_TO_REAL(scale_);
 
   THNN_(VolumetricConvolutionMM_shapeCheck)(
         state, input, gradOutput, gradWeight, gradBias,
