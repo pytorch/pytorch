@@ -410,6 +410,37 @@ Example::
             [ 3.,  6.]])
 """)
 
+add_docstr(torch.allclose,
+           r"""
+allclose(self, other, rtol=1e-05, atol=1e-08, equal_nan=False) -> bool
+
+This function checks if all :attr:`self` and :attr:`other` satisfy the condition:
+
+.. math::
+    \lvert \text{self} - \text{other} \rvert \leq \texttt{atol} + \texttt{rtol} \times \lvert \text{other} \rvert
+
+elementwise, for all elements of :attr:`self` and :attr:`other`. The behaviour of this function is analogous to
+`numpy.allclose <https://docs.scipy.org/doc/numpy/reference/generated/numpy.allclose.html>`_
+
+Args:
+    self (Tensor): first tensor to compare
+    other (Tensor): second tensor to compare
+    atol (float, optional): absolute tolerance. Default: 1e-08
+    rtol (float, optional): relative tolerance. Default: 1e-05
+    equal_nan (float, optional): if ``True``, then two ``NaN``s will be compared as ``True``. Default: ``False``
+
+Example::
+
+    >>> torch.allclose(torch.tensor([10000., 1e-07]), torch.tensor([10000.1, 1e-08]))
+    False
+    >>> torch.allclose(torch.tensor([10000., 1e-08]), torch.tensor([10000.1, 1e-09]))
+    True
+    >>> torch.allclose(torch.tensor([1.0, float('nan')]), torch.tensor([1.0, float('nan')]))
+    False
+    >>> torch.allclose(torch.tensor([1.0, float('nan')]), torch.tensor([1.0, float('nan')]), equal_nan=True)
+    True
+""")
+
 add_docstr(torch.as_tensor,
            r"""
 as_tensor(data, dtype=None, device=None) -> Tensor
