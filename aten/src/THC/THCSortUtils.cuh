@@ -142,7 +142,7 @@ bitonicSortKVInPlace(TensorInfo<K, IndexType> keys,
                      IndexType keySliceStride,
                      TensorInfo<V, IndexType> values,
                      IndexType valueSliceStride,
-                     const Comparator& comp) {
+                     const Comparator comp) {
   // Find the slice of the tensor that we are sorting
   const IndexType linearIndex = getLinearBlockId<IndexType>();
   // Tiling the slices could have us be out of bounds, if there are a
