@@ -22,9 +22,9 @@ struct THCNumerics {
 };
 
 template <typename T>
-static inline __host__ __device__ scalar_t powi(T a, T b) {
+static inline __host__ __device__ T powi(T a, T b) {
   assert(THCNumerics<T>::ge(b, 0));
-  scalar_t result = 1;
+  T result = 1;
   while (b) {
     if (b & 1) {
        result *= a;
