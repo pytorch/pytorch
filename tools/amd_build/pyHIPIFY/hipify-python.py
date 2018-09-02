@@ -42,7 +42,7 @@ from cuda_to_hip_mappings import MATH_TRANSPILATIONS
 # Hardcode the PyTorch template map
 """This dictionary provides the mapping from PyTorch kernel template types
 to their actual types."""
-PYTORCH_TEMPLATE_MAP = {"Dtype": "real", "T": "real"}
+PYTORCH_TEMPLATE_MAP = {"Dtype": "scalar_t", "T": "scalar_t"}
 CAFFE2_TEMPLATE_MAP = {}
 
 
@@ -1025,11 +1025,11 @@ def add_static_casts(filepath, KernelTemplateParams):
 
        Example:
            old_kernel_launch: ' createBatchGemmBuffer, grid, block, 0, THCState_getCurrentStream(state),
-              (const real**)d_result, THCTensor_(data)(state, ra__),
+              (const scalar_t**)d_result, THCTensor_(data)(state, ra__),
               ra__->stride[0], num_batches'
 
            new_kernel_launch: ' createBatchGemmBuffer, grid, block, 0, THCState_getCurrentStream(state),
-              (const real**)d_result, THCTensor_(data)(state, ra__),
+              (const scalar_t**)d_result, THCTensor_(data)(state, ra__),
               static_cast<int64_t>(ra__->stride[0]), static_cast<int64_t>(num_batches)'
     """
 
@@ -1083,9 +1083,9 @@ def add_static_casts(filepath, KernelTemplateParams):
                     old_kernel_launch_parameters, new_kernel_launch_parameters)
 
                 # PyTorch Specific: Add template type
-                # Here the template value will be resolved from <real> to <Dtype>.
+                # Here the template value will be resolved from <scalar_t> to <Dtype>.
                 if "THCUNN" in filepath.split("/") and "generic" not in filepath.split("/"):
-                    kernel_name_with_template = kernel_name_with_template.replace("<real>", "<Dtype>")
+                    kernel_name_with_template = kernel_name_with_template.replace("<scalar_t>", "<Dtype>")
 
                 full_new_kernel_launch = re.sub(r'\b{0}\b'.format(re.escape(original_kernel_name_with_template)),
                                                 lambda x: kernel_name_with_template, full_new_kernel_launch)

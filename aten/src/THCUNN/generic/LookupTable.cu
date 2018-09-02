@@ -14,7 +14,7 @@ void THNN_(LookupTable_accGradParameters)(
            int paddingValue,
            accreal scale_)
 {
-  real scale = ScalarConvert<accreal, real>::to(scale_);
+  scalar_t scale = ScalarConvert<accreal, scalar_t>::to(scale_);
   THCUNN_assertSameGPU(state, 5, input, gradOutput, gradWeight, sortedIndices, origIndices);
   gradOutput = THCTensor_(newContiguous)(state, gradOutput);
   if (!(THCIndexTensor_(isContiguous)(state, input) &&
@@ -39,7 +39,7 @@ void THNN_(LookupTable_accGradParameters)(
     dim3 grid(THCCeilDiv(stride, (int64_t)WARP_SIZE));
     dim3 block(WARP_SIZE, BLOCKDIMY);
 
-    cunn_LookupTable_accGradParametersKernelByFeature<real, accreal>
+    cunn_LookupTable_accGradParametersKernelByFeature<scalar_t, accreal>
     <<<grid, 
        block, 
        sizeof(accreal)*WARP_SIZE*BLOCKDIMY + sizeof(int)*WARP_SIZE*BLOCKDIMY,
@@ -133,7 +133,7 @@ void THNN_(LookupTable_accGradParameters)(
 
   dim3 grid(THCCeilDiv(numel, (ptrdiff_t) 4), THCCeilDiv(stride, (int64_t) 128));
   dim3 block(32, 4);
-  cunn_LookupTable_accGradParametersKernel<real, accreal><<<grid, block, 0, stream>>>(
+  cunn_LookupTable_accGradParametersKernel<scalar_t, accreal><<<grid, block, 0, stream>>>(
     sortedIndices_data,
     origIndices_data,
     THCTensor_(data)(state, gradOutput),
@@ -151,7 +151,7 @@ void THNN_(LookupTable_accGradParameters)(
 
 #define THREADS 256
 #define RUN(NORM, IDXTYPE) \
-  calculate_norms_and_renorm<real, accreal, IDXTYPE, NORM> \
+  calculate_norms_and_renorm<scalar_t, accreal, IDXTYPE, NORM> \
     <<<numel, THREADS/2, THREADS * sizeof(accreal), THCState_getCurrentStream(state)>>> \
     (weightsRaw, idxRaw, normType, maxNorm, THCTensor_(stride)(state, weight, 0))
 
@@ -178,7 +178,7 @@ void THNN_(LookupTable_renorm)(
 
   THCIndex_t numel = THCIndexTensor_(nElement)(state, idx);
 
-  real * weightsRaw = THCTensor_(data)(state, weight);
+  scalar_t * weightsRaw = THCTensor_(data)(state, weight);
   THCIndex_t * idxRaw = THCIndexTensor_(data)(state, idx);
 
   // get the unique indices
