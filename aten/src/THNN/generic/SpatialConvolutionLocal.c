@@ -273,7 +273,7 @@ void THNN_(SpatialConvolutionLocal_updateGradInput)(
 
 static void THNN_(SpatialConvolutionLocal_accGradParameters_frame)
      (THTensor *gradOutput, THTensor *gradWeight, THTensor *gradBias,
-      THTensor *finput, real scale,
+      THTensor *finput, scalar_t scale,
       int kW, int kH, int dW, int dH, int padW, int padH,
       int64_t nInputPlane, int64_t inputWidth, int64_t inputHeight,
       int64_t nOutputPlane, int64_t outputWidth, int64_t outputHeight)
@@ -316,7 +316,7 @@ void THNN_(SpatialConvolutionLocal_accGradParameters)(
 {
   THArgCheck(THTensor_(isContiguous)(gradWeight), 4, "gradWeight needs to be contiguous");
   THArgCheck(THTensor_(isContiguous)(gradBias), 5, "gradBias needs to be contiguous");
-  real scale = TH_CONVERT_ACCREAL_TO_REAL(scale_);
+  scalar_t scale = TH_CONVERT_ACCREAL_TO_REAL(scale_);
   gradWeight = THNN_(view_weight_local)(gradWeight);
 
   THNN_(SpatialConvolutionLocal_shapeCheck)
