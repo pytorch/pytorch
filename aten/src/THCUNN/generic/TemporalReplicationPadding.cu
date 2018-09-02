@@ -33,19 +33,19 @@ void THNN_(TemporalReplicationPadding_updateOutput)(
              " Calculated output W: %d",
              inputW, outputW);
 
-  THCDeviceTensor<real, 3> devInput;
-  THCDeviceTensor<real, 3> devOutput;
+  THCDeviceTensor<scalar_t, 3> devInput;
+  THCDeviceTensor<scalar_t, 3> devOutput;
 
   if (numInputDims == 2) {
     THCTensor_(resize2d)(state, output, numPlanes, outputW);
 
-    devInput = toDeviceTensor<real, 2>(state, input).upcastOuter<3>();
-    devOutput = toDeviceTensor<real, 2>(state, output).upcastOuter<3>();
+    devInput = toDeviceTensor<scalar_t, 2>(state, input).upcastOuter<3>();
+    devOutput = toDeviceTensor<scalar_t, 2>(state, output).upcastOuter<3>();
   } else {
     THCTensor_(resize3d)(state, output, numBatch, numPlanes, outputW);
 
-    devInput = toDeviceTensor<real, 3>(state, input);
-    devOutput = toDeviceTensor<real, 3>(state, output);
+    devInput = toDeviceTensor<scalar_t, 3>(state, input);
+    devOutput = toDeviceTensor<scalar_t, 3>(state, output);
   }
 
   int outputPlaneSize = devOutput.getSize(2);
@@ -89,15 +89,15 @@ void THNN_(TemporalReplicationPadding_updateGradInput)(
   THCTensor_(resizeAs)(state, gradInput, input);
   THCTensor_(zero)(state, gradInput);
 
-  THCDeviceTensor<real, 3> devGradInput;
-  THCDeviceTensor<real, 3> devGradOutput;
+  THCDeviceTensor<scalar_t, 3> devGradInput;
+  THCDeviceTensor<scalar_t, 3> devGradOutput;
 
   if (numInputDims == 2) {
-    devGradInput = toDeviceTensor<real, 2>(state, gradInput).upcastOuter<3>();
-    devGradOutput = toDeviceTensor<real, 2>(state, gradOutput).upcastOuter<3>();
+    devGradInput = toDeviceTensor<scalar_t, 2>(state, gradInput).upcastOuter<3>();
+    devGradOutput = toDeviceTensor<scalar_t, 2>(state, gradOutput).upcastOuter<3>();
   } else {
-    devGradInput = toDeviceTensor<real, 3>(state, gradInput);
-    devGradOutput = toDeviceTensor<real, 3>(state, gradOutput);
+    devGradInput = toDeviceTensor<scalar_t, 3>(state, gradInput);
+    devGradOutput = toDeviceTensor<scalar_t, 3>(state, gradOutput);
   }
 
   int outputPlaneSize = devGradOutput.getSize(2);

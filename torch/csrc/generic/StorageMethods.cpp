@@ -77,7 +77,7 @@ static PyObject * THPStorage_(fill_)(THPStorage *self, PyObject *number_arg)
 {
   HANDLE_TH_ERRORS
   THPUtils_assert(THPUtils_(checkReal)(number_arg), "fill_ expects %s, "
-      "but got %s", THPUtils_typeTraits<real>::python_type_str,
+      "but got %s", THPUtils_typeTraits<scalar_t>::python_type_str,
       THPUtils_typename(number_arg));
   THWStorage_(fill)(LIBRARY_STATE self->cdata, THPUtils_(unpackReal)(number_arg));
   Py_INCREF(self);
@@ -134,16 +134,16 @@ static PyObject * THPStorage_(fromBuffer)(PyObject *_unused, PyObject *args, PyO
   }
 
   if (count < 0) {
-    if ((buffer.len - offset) % sizeof(real) != 0) {
+    if ((buffer.len - offset) % sizeof(scalar_t) != 0) {
       PyErr_Format(PyExc_ValueError, "buffer size (%" PRId64 ") must be a multiple "
-          "of element size (%" PRId64 ")", (int64_t)buffer.len, (int64_t)sizeof(real));
+          "of element size (%" PRId64 ")", (int64_t)buffer.len, (int64_t)sizeof(scalar_t));
       PyBuffer_Release(&buffer);
       return nullptr;
     }
-    count = (buffer.len - offset) / sizeof(real);
+    count = (buffer.len - offset) / sizeof(scalar_t);
   }
 
-  if (offset + (count * (Py_ssize_t)sizeof(real)) > buffer.len) {
+  if (offset + (count * (Py_ssize_t)sizeof(scalar_t)) > buffer.len) {
     PyErr_Format(PyExc_ValueError, "buffer has only %" PRId64 " elements after offset "
         "%" PRId64 ", but specified a size of %" PRId64, (int64_t)(buffer.len - offset),
         (int64_t)offset, (int64_t)count);
