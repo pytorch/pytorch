@@ -70,12 +70,15 @@ install_hipsparse() {
 install_customhcc() {
     mkdir -p /opt/rocm/debians
     curl https://s3.amazonaws.com/ossci-linux/hcc-1.2.18272-Linux.deb -o /opt/rocm/debians/hcc-1.2.18272-Linux.deb
+    curl https://s3.amazonaws.com/ossci-linux/hip_base-1.5.18276.deb -o /opt/rocm/debians/hip_base-1.5.18276.deb
+    curl https://s3.amazonaws.com/ossci-linux/hip_doc-1.5.18276.deb -o /opt/rocm/debians/hip_doc-1.5.18276.deb
+    curl https://s3.amazonaws.com/ossci-linux/hip_samples-1.5.18276.deb -o /opt/rocm/debians/hip_samples-1.5.18276.deb
+    curl https://s3.amazonaws.com/ossci-linux/hip_hcc-1.5.18276.deb -o /opt/rocm/debians/hip_hcc-1.5.18276.deb
     dpkg -i /opt/rocm/debians/hcc-1.2.18272-Linux.deb
-}
-
-# Get a HIP header designed to avoid some of the static_casts we typically need for ROCm - in particular the ones we fail to autogenerate
-install_hipheader() {
-   curl https://s3.amazonaws.com/ossci-linux/functional_grid_launch.hpp -o /opt/rocm/hip/include/hip/hcc_detail/functional_grid_launch.hpp
+    dpkg -i /opt/rocm/debians/hip_base-1.5.18276.deb
+    dpkg -i /opt/rocm/debians/hip_doc-1.5.18276.deb
+    dpkg -i /opt/rocm/debians/hip_samples-1.5.18276.deb
+    dpkg -i /opt/rocm/debians/hip_hcc-1.5.18276.deb
 }
 
 # Install Python packages depending on the base OS
@@ -92,4 +95,3 @@ install_hip_thrust
 install_rocrand
 install_hipsparse
 install_customhcc
-install_hipheader
