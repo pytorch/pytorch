@@ -13,6 +13,7 @@
 #include <c10d/ProcessGroupMPI.hpp>
 #endif
 
+#include <c10d/PrefixStore.hpp>
 #include <c10d/TCPStore.hpp>
 #include <gloo/transport/tcp/device.h>
 #include <pybind11/chrono.h>
@@ -105,6 +106,9 @@ PyObject* c10d_init(PyObject* _unused) {
 
   shared_ptr_class_<::c10d::TCPStore>(module, "TCPStore", store)
       .def(py::init<const std::string&, int, bool>());
+
+  shared_ptr_class_<::c10d::PrefixStore>(module, "PrefixStore", store)
+      .def(py::init<const std::string&, ::c10d::Store&>());
 
   auto processGroup =
       shared_ptr_class_<::c10d::ProcessGroup>(module, "ProcessGroup")
@@ -238,12 +242,39 @@ PyObject* c10d_init(PyObject* _unused) {
 
           .def(
               "recv_anysource",
-              &::c10d::ProcessGroup::recvAnysource,
+              [](::c10d::ProcessGroup& pg,
+                 std::vector<at::Tensor>& input,
+                 at::Tensor& srcRankTensor) {
+                if (srcRankTensor.type().scalarType() != at::kInt) {
+                  throw std::runtime_error(
+                      "source rank tensor needs to be "
+                      "CPU int tensor");
+                }
+                if (srcRankTensor.numel() != 1) {
+                  throw std::runtime_error(
+                      "source rank tensor needs to "
+                      "contain only one element");
+                }
+                return pg.recvAnysource(
+                    input, static_cast<int*>(srcRankTensor.data_ptr()));
+              },
+              py::arg("tensors"),
+              py::arg("src_rank"),
+              py::call_guard<py::gil_scoped_release>())
+
+          .def(
+              "abort",
+              &::c10d::ProcessGroup::barrier,
               py::call_guard<py::gil_scoped_release>())
 
           .def(
               "barrier",
               &::c10d::ProcessGroup::barrier,
+              py::call_guard<py::gil_scoped_release>())
+
+          .def(
+              "group_ranks",
+              &::c10d::ProcessGroup::getGroupRank,
               py::call_guard<py::gil_scoped_release>());
 
   auto processGroupGloo = shared_ptr_class_<::c10d::ProcessGroupGloo>(
@@ -315,13 +346,14 @@ PyObject* c10d_init(PyObject* _unused) {
 #ifdef USE_C10D_MPI
   shared_ptr_class_<::c10d::ProcessGroupMPI>(
       module, "ProcessGroupMPI", processGroup)
-      .def(py::init(
-          []() { return ::c10d::ProcessGroupMPI::createProcessGroupMPI(); }));
+      .def(py::init([](std::vector<int> ranks) {
+        return ::c10d::ProcessGroupMPI::createProcessGroupMPI(ranks);
+      }));
 #endif
 
   shared_ptr_class_<::c10d::ProcessGroup::Work>(module, "Work")
-      .def("isCompleted", &::c10d::ProcessGroup::Work::isCompleted)
-      .def("isSuccess", &::c10d::ProcessGroup::Work::isSuccess)
+      .def("is_completed", &::c10d::ProcessGroup::Work::isCompleted)
+      .def("is_success", &::c10d::ProcessGroup::Work::isSuccess)
       .def("exception", &::c10d::ProcessGroup::Work::exception)
       .def("synchronize", &::c10d::ProcessGroup::Work::synchronize)
       .def(

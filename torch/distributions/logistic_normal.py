@@ -7,7 +7,7 @@ from torch.distributions.transforms import ComposeTransform, ExpTransform, Stick
 
 class LogisticNormal(TransformedDistribution):
     r"""
-    Creates a logistic-normal distribution parameterized by `loc` and `scale`
+    Creates a logistic-normal distribution parameterized by :attr:`loc` and :attr:`scale`
     that define the base `Normal` distribution transformed with the
     `StickBreakingTransform` such that::
 

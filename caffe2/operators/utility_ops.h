@@ -321,45 +321,70 @@ class WeightedSumOp : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   USE_SIMPLE_CTOR_DTOR(WeightedSumOp);
 
-  template <typename DstType>
+  bool RunOnDevice() override;
+
+  template <typename T>
   bool DoRunWithType() {
-    CAFFE_ENFORCE_EQ(InputSize() % 2, 0);
-    auto& X0 = Input(0);
-    auto& weight0 = Input(1);
+    const int input_size = InputSize();
+    CAFFE_ENFORCE_EQ(input_size % 2, 0);
+    const auto& X0 = Input(0);
+    const auto& weight0 = Input(1);
     CAFFE_ENFORCE_GT(X0.size(), 0);
     CAFFE_ENFORCE_EQ(weight0.size(), 1);
-    int size = X0.size();
-    auto* output = Output(0);
-    output->ResizeLike(X0);
-    math::Scale<float, DstType, Context>(
+    const int size = X0.size();
+    auto* Y = Output(0);
+    if (Y != &X0) {
+      Y->ResizeLike(X0);
+    }
+    T* Y_data = Y->template mutable_data<T>();
+    if (input_size == 2) {
+      math::Scale<float, T>(
+          size,
+          weight0.template data<float>(),
+          X0.template data<T>(),
+          Y_data,
+          &context_);
+      return true;
+    }
+    const auto& X1 = Input(2);
+    CAFFE_ENFORCE_NE(
+        &X1,
+        Y,
+        "Input #2 is the same as output. If you want to do in-place updates, "
+        "put the output as input #0.");
+    const auto& weight1 = Input(3);
+    CAFFE_ENFORCE_EQ(X1.size(), size);
+    CAFFE_ENFORCE_EQ(weight1.size(), 1);
+    if (Y != &X0) {
+      context_.template CopySameDevice<T>(size, X0.template data<T>(), Y_data);
+    }
+    math::Axpby<float, T, Context>(
         size,
+        weight1.template data<float>(),
+        X1.template data<T>(),
         weight0.template data<float>(),
-        X0.template data<DstType>(),
-        output->template mutable_data<DstType>(),
+        Y_data,
         &context_);
-    for (int i = 2; i < InputSize(); i += 2) {
-      auto& X = Input(i);
+    for (int i = 4; i < input_size; i += 2) {
+      const auto& Xi = Input(i);
       // Do a check: if the input is the same as output, we have a problem -
       // in-place update should always only happen with the zeroth input.
-      if (&X == output) {
-        LOG(ERROR) << "Input #" << i << " is the same as output. "
-                   << "If you want to do in-place updates, put the output as "
-                   << "input #0.";
-        return false;
-      }
-      auto& weight = Input(i + 1);
-      CAFFE_ENFORCE_EQ(X.size(), size);
-      CAFFE_ENFORCE_EQ(weight.size(), 1);
-      math::Axpy<DstType, Context>(
+      const std::string err_msg = "Input #" + to_string(i) +
+          " is the same as output. If you want to do in-place updates, "
+          "put the output as input #0.";
+      CAFFE_ENFORCE_NE(&Xi, Y, err_msg);
+      const auto& weighti = Input(i + 1);
+      CAFFE_ENFORCE_EQ(Xi.size(), size);
+      CAFFE_ENFORCE_EQ(weighti.size(), 1);
+      math::Axpy<T, Context>(
           size,
-          weight.template data<float>(),
-          X.template data<DstType>(),
-          output->template mutable_data<DstType>(),
+          weighti.template data<float>(),
+          Xi.template data<T>(),
+          Y_data,
           &context_);
     }
     return true;
   }
-  bool RunOnDevice() override;
 };
 
 template <class Context>
@@ -369,7 +394,8 @@ class WeightedSumGradientOp : public Operator<Context> {
 
   WeightedSumGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        grad_on_w_(this->template GetSingleArgument<bool>("grad_on_w", false)) {}
+        grad_on_w_(this->template GetSingleArgument<bool>("grad_on_w", false)) {
+  }
 
   template <typename DstType>
   bool DoRunWithType() {
@@ -680,7 +706,8 @@ class CopyOp : public Operator<Context> {
 
   bool RunOnDevice() override {
     auto& input = this->template Input<Tensor>(0, SrcContext::GetDeviceType());
-    auto* output = this->template Output<Tensor>(0, DstContext::GetDeviceType());
+    auto* output =
+        this->template Output<Tensor>(0, DstContext::GetDeviceType());
     output->ResizeLike(input);
     this->context_.template CopyItems<SrcContext, DstContext>(
         input.meta(),
@@ -938,21 +965,6 @@ class HasElementsOp : public Operator<Context> {
     auto* output = Output(0);
     output->Resize(std::vector<TIndex>{});
     *output->template mutable_data<bool>() = input.size() > 0;
-    return true;
-  }
-};
-
-template <class Context>
-class IsEmptyOp : public Operator<Context> {
- public:
-  USE_OPERATOR_CONTEXT_FUNCTIONS;
-  USE_SIMPLE_CTOR_DTOR(IsEmptyOp);
-
-  bool RunOnDevice() override {
-    auto& input = Input(0);
-    auto* output = Output(0);
-    output->Resize(std::vector<TIndex>{});
-    *output->template mutable_data<bool>() = (input.size() == 0);
     return true;
   }
 };

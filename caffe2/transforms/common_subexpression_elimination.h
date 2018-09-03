@@ -3,7 +3,7 @@
 
 #include "caffe2/core/common.h"
 #include "caffe2/core/transform.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/utils/proto_utils.h"
 
 namespace caffe2 {
@@ -25,7 +25,7 @@ namespace caffe2 {
  *
  * TODO(benz): Fix the error to not match nodes that write to external output.
  */
-class CommonSubexpressionEliminationTransform : public Transform {
+class CAFFE2_API CommonSubexpressionEliminationTransform : public Transform {
  public:
   CommonSubexpressionEliminationTransform() {
     SetPatternMatchType(SORTED_WRT_EXECUTION_ORDER);

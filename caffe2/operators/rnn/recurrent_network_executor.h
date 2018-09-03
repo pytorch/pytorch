@@ -466,7 +466,7 @@ std::unique_ptr<RecurrentNetworkExecutorBase> createRNNExecutor(
     std::string timestep_blob,
     ArgumentHelper rnn_args);
 
-class ThreadedRecurrentNetworkExecutor : public RecurrentNetworkExecutorBase {
+class CAFFE2_API ThreadedRecurrentNetworkExecutor : public RecurrentNetworkExecutorBase {
  public:
   ThreadedRecurrentNetworkExecutor(
       const NetDef& step_net_def,

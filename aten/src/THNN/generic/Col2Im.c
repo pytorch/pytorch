@@ -199,23 +199,23 @@ void THNN_(Col2Im_updateOutput)(
     THTensor_(select)(output_n, output, 0, elt);
 
     THNN_(col2im)(
-      THTensor_(data)(input_n),
+      input_n->data<real>(),
       nOutputPlane,
       outputHeight, outputWidth,
       height_col, width_col,
       kH, kW,
       padH, padW,
       sH, sW,
-      dH, dW, THTensor_(data)(output_n));
+      dH, dW, output_n->data<real>());
   }
 
-  THTensor_(free)(input_n);
-  THTensor_(free)(output_n);
+  c10::raw::intrusive_ptr::decref(input_n);
+  c10::raw::intrusive_ptr::decref(output_n);
 
   if (!batched_input) {
       THTensor_(resize3d)(output, nOutputPlane, outputHeight, outputWidth);
   }
-  THTensor_(free)(input);
+  c10::raw::intrusive_ptr::decref(input);
 }
 
 void THNN_(Col2Im_updateGradInput)(
