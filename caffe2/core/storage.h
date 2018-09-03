@@ -16,6 +16,8 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/core/typeid.h"
 
+#include <ATen/core/intrusive_ptr.h>
+
 namespace caffe2 {
 
 using DataType = TypeMeta;
@@ -23,10 +25,7 @@ using DataType = TypeMeta;
 // is ready
 using DataPtr = std::shared_ptr<void>;
 
-class StorageImpl;
-using Storage = std::shared_ptr<StorageImpl>;
-
-class CAFFE2_API StorageImpl {
+class CAFFE2_API StorageImpl : public c10::intrusive_ptr_target {
  public:
   StorageImpl() = delete;
   StorageImpl(const StorageImpl&) = delete;
@@ -69,7 +68,7 @@ class CAFFE2_API StorageImpl {
     return data_type_.Match<T>();
   }
 
-  const void* data() const {
+  void* data() const {
     return data_ptr_.get();
   }
 
@@ -123,23 +122,16 @@ class CAFFE2_API StorageImpl {
    * Can only be called when use_count is 1
    */
   template <typename Deleter = MemoryDeleter>
-  void SingleUseStorageShareExternalPointer(
+  void UniqueStorageShareExternalPointer(
       void* src,
       const DataType& data_type,
       size_t capacity,
       Deleter d = nullptr) {
-    // TODO: this will be added in the intrusive_ptr diff
-    // CAFFE_ENFORCE_WITH_CALLER(
-    //     use_count() == 1,
-    //     "SingleUseStorageShareExternalPointer can only be called when
-    //     use_count == 1");
     data_type_ = data_type;
     CAFFE_ENFORCE_WITH_CALLER(
         data_type_.id() != TypeIdentifier::uninitialized(),
         "To share with a raw external pointer you need to have meta "
         "already set.");
-    CAFFE_ENFORCE_WITH_CALLER(
-        capacity >= 0, "capacity must be valid for ShareExternalPointer");
     // Check if the deleter is a MemoryDeleter and is a simple nullptr.
     if (std::is_same<MemoryDeleter, Deleter>::value &&
         reinterpret_cast<MemoryDeleter*>(&d)[0] == nullptr) {
@@ -161,6 +153,121 @@ class CAFFE2_API StorageImpl {
 
 };
 
+class CAFFE2_API Storage {
+ public:
+  Storage() {}
+  Storage(DeviceType device_type)
+      : storage_impl_(c10::make_intrusive<StorageImpl>(device_type)) {}
+  Storage(DeviceType device_type, TypeMeta data_type)
+      : storage_impl_(
+            c10::make_intrusive<StorageImpl>(device_type, data_type)) {}
+
+  template <typename T, typename Deleter = MemoryDeleter>
+  Storage(
+      T* src,
+      DeviceType device_type,
+      size_t capacity = 0,
+      Deleter d = nullptr)
+      : storage_impl_(c10::make_intrusive<StorageImpl>(
+            src,
+            device_type,
+            TypeMeta::Make<T>(),
+            capacity,
+            d)) {}
+
+  template <typename Deleter = MemoryDeleter>
+  Storage(
+      void* src,
+      DeviceType device_type,
+      TypeMeta data_type,
+      size_t capacity,
+      Deleter d = nullptr)
+      : storage_impl_(c10::make_intrusive<StorageImpl>(
+            device_type,
+            data_type,
+            src,
+            capacity,
+            d)) {}
+
+  void reset() {
+    storage_impl_->reset();
+  }
+
+  template <typename T>
+  inline bool IsType() const {
+    return storage_impl_->IsType<T>();
+  }
+
+  void* data() const {
+    return storage_impl_->data();
+  }
+
+  void* data() {
+    return storage_impl_->data();
+  }
+
+  DataPtr& data_ptr() {
+    return storage_impl_->data_ptr();
+  }
+
+  const DataPtr& data_ptr() const {
+    return storage_impl_->data_ptr();
+  }
+
+  void set_dtype(const DataType& data_type) {
+    storage_impl_->set_dtype(data_type);
+  }
+
+  const DataType& dtype() const {
+    return storage_impl_->dtype();
+  }
+  size_t capacity() const {
+    return storage_impl_->capacity();
+  }
+
+  int64_t numel() const {
+    return storage_impl_->numel();
+  }
+
+  // TODO: remove later
+  void set_numel(int64_t numel) {
+    storage_impl_->set_numel(numel);
+  }
+
+  DeviceType device_type() const {
+    return storage_impl_->device_type();
+  }
+
+  inline size_t itemsize() const {
+    return storage_impl_->itemsize();
+  }
+
+  inline long use_count() const {
+    return storage_impl_.use_count();
+  }
+
+  inline bool unique() const {
+    return storage_impl_.unique();
+  }
+
+  template <typename Deleter = MemoryDeleter>
+  void UniqueStorageShareExternalPointer(
+      void* src,
+      const DataType& data_type,
+      size_t capacity,
+      Deleter d = nullptr) {
+    CAFFE_ENFORCE_WITH_CALLER(
+        storage_impl_.unique(),
+        "UniqueStorageShareExternalPointer can only be called when \
+        use_count == 1");
+    storage_impl_->UniqueStorageShareExternalPointer<Deleter>(
+        src, data_type, capacity, d);
+  }
+
+ protected:
+  c10::intrusive_ptr<StorageImpl> storage_impl_;
+};
+
 /**
  * Create a Storage given an external pointer `src`.
  * `device_type`: the device type of the storage
@@ -173,17 +280,6 @@ Storage CreateStorage(
     size_t capacity = 0,
     Deleter d = nullptr) {
   return CreateStorage(src, device_type, TypeMeta::Make<T>(), capacity, d);
-}
-
-template <typename Deleter = MemoryDeleter>
-Storage CreateStorage(
-    void* src,
-    DeviceType device_type,
-    const TypeMeta& meta,
-    size_t capacity, /* need to specify capacity of the storage */
-    Deleter d = nullptr) {
-  // We include capacity here because this will be a public function.
-  return std::make_shared<StorageImpl>(device_type, meta, src, capacity, d);
 }
 
 } // namespace caffe2

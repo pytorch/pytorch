@@ -15,14 +15,17 @@ namespace torch {
 
 /// Returns a `Type` object for the given backend (e.g. `at::kCPU`) and
 /// `ScalarType` (e.g. `at::kDouble`).
-THP_CLASS at::Type& getType(at::Backend backend, at::ScalarType type);
+/// TODO: Eliminate this function as much as possible
+THP_CLASS at::Type& getVariableType(at::Backend backend, at::ScalarType type);
 
 /// Returns a `Type` object for the CPU backend and the given `ScalarType`
-/// (e.g. `at::kDouble`). Equivalent to `getType(kCPU, type)`.
+/// (e.g. `at::kDouble`). Equivalent to `getVariableType(kCPU, type)`.
+/// TODO: Eliminate this function as much as possible
 THP_CLASS at::Type& CPU(at::ScalarType type);
 
 /// Returns a `Type` object for the CUDA backend and the given `ScalarType`
-/// (e.g. `at::kDouble`). Equivalent to `getType(kCUDA, type)`.
+/// (e.g. `at::kDouble`). Equivalent to `getVariableType(kCUDA, type)`.
+/// TODO: Eliminate this function as much as possible
 THP_CLASS at::Type& CUDA(at::ScalarType type);
 
 /// Sets the `requires_grad` property of the given `Tensor`.

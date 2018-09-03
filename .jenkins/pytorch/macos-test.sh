@@ -60,7 +60,7 @@ test_cpp_api() {
 
   BUILD_LIBTORCH_PY=$PWD/tools/build_libtorch.py
   pushd $CPP_BUILD/caffe2
-  WERROR=1 VERBOSE=1 DEBUG=1 python $BUILD_LIBTORCH_PY
+  VERBOSE=1 DEBUG=1 python $BUILD_LIBTORCH_PY
   popd
 
   python tools/download_mnist.py --quiet -d test/cpp/api/mnist

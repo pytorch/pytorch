@@ -42,8 +42,8 @@ void THNN_(HardTanh_updateOutput)(
   }
   else
   {
-    real* ptr_input  = THTensor_(data)(input);
-    real* ptr_output = THTensor_(data)(output);
+    real* ptr_input  = input->data<real>();
+    real* ptr_output = output->data<real>();
     ptrdiff_t i;
     ptrdiff_t n = THTensor_(nElement)(input);
 
@@ -110,9 +110,9 @@ void THNN_(HardTanh_updateGradInput)(
   }
   else
   {
-    real* ptr_gradOutput = THTensor_(data)(gradOutput);
-    real* ptr_gradInput  = THTensor_(data)(gradInput);
-    real* ptr_input      = THTensor_(data)(input);
+    real* ptr_gradOutput = gradOutput->data<real>();
+    real* ptr_gradInput  = gradInput->data<real>();
+    real* ptr_input      = input->data<real>();
     ptrdiff_t i;
     ptrdiff_t n = THTensor_(nElement)(input);
 

@@ -34,7 +34,6 @@ void initCommMethods(PyObject *module) {
        streams = fmap(
            THPUtils_PySequence_to_THCStreamList(handle.ptr()),
            [](THCStream* stream) {
-             at::cuda::detail::CUDAStream_retain(stream);
              return at::cuda::CUDAStream(stream);
            });
      }

@@ -91,10 +91,10 @@ void THNN_(VolumetricConvolution_updateOutput)(
       THTensor_(conv3Dmv)(outb, 1.0, 1.0, inb, weight, dT, dH, dW, "V", "X");
     }
 
-    THTensor_(free)(inb);
-    THTensor_(free)(outb);
+    c10::raw::intrusive_ptr::decref(inb);
+    c10::raw::intrusive_ptr::decref(outb);
   }
-  THTensor_(free)(outn);
+  c10::raw::intrusive_ptr::decref(outn);
 }
 
 void THNN_(VolumetricConvolution_updateGradInput)(
@@ -157,11 +157,11 @@ void THNN_(VolumetricConvolution_updateGradInput)(
       THTensor_(select)(goutb, gradOutput, 0, j);
       THTensor_(conv3Dmv)(ginpb, 0.0, 1.0, goutb, tweight, dT, dH, dW, "F", "C");
     }
-    THTensor_(free)(ginpb);
-    THTensor_(free)(goutb);
+    c10::raw::intrusive_ptr::decref(ginpb);
+    c10::raw::intrusive_ptr::decref(goutb);
   }
 
-  THTensor_(free)(tweight);
+  c10::raw::intrusive_ptr::decref(tweight);
 }
 
 void THNN_(VolumetricConvolution_accGradParameters)(
@@ -211,14 +211,14 @@ void THNN_(VolumetricConvolution_accGradParameters)(
   {
     /* gradient to bias */
     if (gradBias) {
-      gradBias_data = THTensor_(data)(gradBias);
+      gradBias_data = gradBias->data<real>();
       gradOutSlice = THTensor_(new)();
       for (k = 0; k < nOutputPlane; k++)
       {
         THTensor_(select)(gradOutSlice, gradOutput, 0, k);
         gradBias_data[k] += scale * THTensor_(sumall)(gradOutSlice);
       }
-      THTensor_(free)(gradOutSlice);
+      c10::raw::intrusive_ptr::decref(gradOutSlice);
     }
 
     /* gradient to kernels */
@@ -239,21 +239,21 @@ void THNN_(VolumetricConvolution_accGradParameters)(
 
       /* gradient to bias */
       if (gradBias) {
-        gradBias_data = THTensor_(data)(gradBias);
+        gradBias_data = gradBias->data<real>();
         gradOutSlice = THTensor_(new)();
         for (k = 0; k < nOutputPlane; k++)
         {
           THTensor_(select)(gradOutSlice, goutb, 0, k);
           gradBias_data[k] += scale * THTensor_(sumall)(gradOutSlice);
         }
-        THTensor_(free)(gradOutSlice);
+        c10::raw::intrusive_ptr::decref(gradOutSlice);
       }
 
       /* gradient to kernels */
       THTensor_(conv3DRevger)(gradWeight, 1.0, scale, inpb, goutb, dT, dH, dW);
     }
-    THTensor_(free)(inpb);
-    THTensor_(free)(goutb);
+    c10::raw::intrusive_ptr::decref(inpb);
+    c10::raw::intrusive_ptr::decref(goutb);
   }
 }
 

@@ -224,8 +224,8 @@ void THNN_(SpatialDilatedMaxPooling_updateOutput)(
     /* indices will contain the locations for each output point */
     THIndexTensor_(resize3d)(indices,  nInputPlane, outputHeight, outputWidth);
 
-    input_data = THTensor_(data)(input);
-    output_data = THTensor_(data)(output);
+    input_data = input->data<real>();
+    output_data = output->data<real>();
     indices_data = THIndexTensor_(data)(indices);
 
     THNN_(SpatialDilatedMaxPooling_updateOutput_frame)
@@ -247,8 +247,8 @@ void THNN_(SpatialDilatedMaxPooling_updateOutput)(
     /* indices will contain the locations for each output point */
     THIndexTensor_(resize4d)(indices, nbatch, nInputPlane, outputHeight, outputWidth);
 
-    input_data = THTensor_(data)(input);
-    output_data = THTensor_(data)(output);
+    input_data = input->data<real>();
+    output_data = output->data<real>();
     indices_data = THIndexTensor_(data)(indices);
 
 #pragma omp parallel for private(p)
@@ -269,7 +269,7 @@ void THNN_(SpatialDilatedMaxPooling_updateOutput)(
   }
 
   /* cleanup */
-  THTensor_(free)(input);
+  c10::raw::intrusive_ptr::decref(input);
 }
 
 static void THNN_(SpatialDilatedMaxPooling_updateGradInput_frame)(
@@ -362,8 +362,8 @@ void THNN_(SpatialDilatedMaxPooling_updateGradInput)(
   outputWidth = gradOutput->size(dimw);
 
   /* get raw pointers */
-  gradInput_data = THTensor_(data)(gradInput);
-  gradOutput_data = THTensor_(data)(gradOutput);
+  gradInput_data = gradInput->data<real>();
+  gradOutput_data = gradOutput->data<real>();
   indices_data = THIndexTensor_(data)(indices);
 
   /* backprop */
@@ -395,7 +395,7 @@ void THNN_(SpatialDilatedMaxPooling_updateGradInput)(
   }
 
   /* cleanup */
-  THTensor_(free)(gradOutput);
+  c10::raw::intrusive_ptr::decref(gradOutput);
 }
 
 #endif

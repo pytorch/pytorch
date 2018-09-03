@@ -72,8 +72,11 @@ def _get_group_rank(group, rank):
     if group is GroupMember.WORLD:
         raise RuntimeError("group.WORLD does not have local rank to global "
                            "rank mapping")
-    group_rank = _pg_group_ranks[group][rank]
-    if group_rank is None:
+    if group not in _pg_group_ranks:
+        raise RuntimeError("The given group does not exist")
+    try:
+        group_rank = _pg_group_ranks[group][rank]
+    except KeyError:
         raise RuntimeError("The global rank is not part of the group")
     return group_rank
 
@@ -180,7 +183,7 @@ def init_process_group(backend,
         if not is_mpi_available():
             raise RuntimeError("Distributed package doesn't have MPI built in")
 
-        _default_pg = ProcessGroupMPI()
+        _default_pg = ProcessGroupMPI([])
         _pg_map[_default_pg] = (DistBackend.MPI, None)
     else:
         # backward compatible API
@@ -209,7 +212,7 @@ def init_process_group(backend,
     _default_pg_init_method = init_method
 
 
-def _new_process_group_helper(world_size, rank, group_name=""):
+def _new_process_group_helper(world_size, rank, ranks, group_name=""):
     """
     Create a new distributed process group. And the new process group can be
     used to perform collective operations.
@@ -229,22 +232,29 @@ def _new_process_group_helper(world_size, rank, group_name=""):
 
     default_backend, default_store = _pg_map[_default_pg]
 
-    # Create the prefix store
-    store = PrefixStore(group_name, default_store)
-
-    if default_backend == DistBackend.GLOO:
-        pg = ProcessGroupGloo(store, rank, world_size)
-        _pg_map[pg] = (DistBackend.GLOO, store, group_name)
-        _pg_names[_default_pg] = group_name
-    elif default_backend == DistBackend.NCCL:
-        if not is_nccl_available():
-            raise RuntimeError("Distributed package doesn't have NCCL "
-                               "built in")
-        pg = ProcessGroupNCCL(store, rank, world_size)
-        _pg_map[pg] = (DistBackend.NCCL, store, group_name)
-        _pg_names[_default_pg] = group_name
+    if default_backend == DistBackend.MPI:
+        if not is_mpi_available():
+            raise RuntimeError("Distributed package doesn't have MPI built in")
+        pg = ProcessGroupMPI(ranks)
+        _pg_map[pg] = (DistBackend.MPI, None)
+        _pg_names[pg] = group_name
     else:
-        raise RuntimeError("Unsupported distributed backend by group")
+        # Create the prefix store
+        store = PrefixStore(group_name, default_store)
+
+        if default_backend == DistBackend.GLOO:
+            pg = ProcessGroupGloo(store, rank, world_size)
+            _pg_map[pg] = (DistBackend.GLOO, store)
+            _pg_names[pg] = group_name
+        elif default_backend == DistBackend.NCCL:
+            if not is_nccl_available():
+                raise RuntimeError("Distributed package doesn't have NCCL "
+                                   "built in")
+            pg = ProcessGroupNCCL(store, rank, world_size)
+            _pg_map[pg] = (DistBackend.NCCL, store)
+            _pg_names[pg] = group_name
+        else:
+            raise RuntimeError("Unsupported distributed backend by group")
     return pg
 
 
@@ -994,10 +1004,6 @@ def new_group(ranks=None):
     global _pg_group_ranks
 
     default_backend, _ = _pg_map[_default_pg]
-    if default_backend == DistBackend.MPI:
-        raise RuntimeError("Only NCCL and Gloo backend currently support "
-                           "new_group function")
-
     global_rank = _default_pg.rank()
     global_world_size = _default_pg.size()
 
@@ -1013,29 +1019,33 @@ def new_group(ranks=None):
             if rank < 0 or rank >= global_world_size:
                 raise RuntimeError("The new group's rank should be within the "
                                    "the world_size set by init_process_group")
-
         if global_rank in ranks:
             group_rank = ranks.index(global_rank)
         else:
             group_rank = None
     else:
+        ranks = []
         group_world_size = global_world_size
         group_rank = global_rank
+
+    if default_backend == DistBackend.MPI:
+        pg = _new_process_group_helper(group_world_size, group_rank, ranks)
 
     # Release ranks not in the group
     if global_rank not in ranks:
         return GroupMember.NON_GROUP_MEMBER
 
-    pg = _new_process_group_helper(group_world_size, group_rank)
+    if default_backend != DistBackend.MPI:
+        pg = _new_process_group_helper(group_world_size, group_rank, ranks)
 
     # Create the global rank to group rank mapping
     _pg_group_ranks[pg] = {}
-    for rank in range(global_world_size):
-        if rank in ranks:
-            _pg_group_ranks[pg][rank] = ranks.index(rank)
-        else:
-            _pg_group_ranks[pg][rank] = None
-
+    if default_backend == DistBackend.MPI:
+        _pg_group_ranks[pg] = pg.group_ranks()
+    else:
+        for rank in range(global_world_size):
+            if rank in ranks:
+                _pg_group_ranks[pg][rank] = ranks.index(rank)
     return pg
 
 

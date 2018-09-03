@@ -36,8 +36,7 @@ struct cnt_to_dst_idx_functor : public thrust::unary_function<int64_t, int64_t>
   cnt_to_dst_idx_functor(int64_t last_dim_size, int64_t last_dim_start_slice) :
     last_dim_size(last_dim_size), last_dim_start_slice(last_dim_start_slice),
     last_dim_to_fill_size(last_dim_size - last_dim_start_slice) {}
-  
-  __host__ __device__
+
   cnt_to_dst_idx_functor & operator=(const cnt_to_dst_idx_functor&) = default;
 
   __host__ __device__ __forceinline__
@@ -186,7 +185,7 @@ static inline Tensor _run_cufft(
   // set to current stream
   CUFFT_CHECK(cufftSetStream(plan, at::cuda::getCurrentCUDAStream()));
 
-  auto ws = ctx.getType(at::Backend::CUDA, at::ScalarType::Byte).tensor({ config.workspace_size() });
+  auto ws = at::empty({ config.workspace_size() }, at::device(at::kCUDA).dtype(at::kByte));
   CUFFT_CHECK(cufftSetWorkArea(plan, ws.data_ptr()));
 
   // run
