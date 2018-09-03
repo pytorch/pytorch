@@ -83,12 +83,12 @@ void THNN_(Im2Col_updateOutput)(
     THTensor_(select)(output_n, output, 0, elt);
 
     THNN_(im2col)(
-      input_n->data<real>(),
+      input_n->data<scalar_t>(),
       nInputPlane,
       inputHeight, inputWidth,
       outputHeight, outputWidth,
       kH, kW, padH, padW, sH, sW,
-      dH, dW, output_n->data<real>());
+      dH, dW, output_n->data<scalar_t>());
   }
 
   c10::raw::intrusive_ptr::decref(input_n);

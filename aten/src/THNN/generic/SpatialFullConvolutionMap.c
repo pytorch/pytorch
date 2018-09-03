@@ -33,11 +33,11 @@ void THNN_(SpatialFullConvolutionMap_updateOutput)(
   THTensor* output = THTensor_(newContiguous)(output_);
 
   /* get raw pointers */
-  real *input_data = input->data<real>();
-  real *output_data = output->data<real>();
-  real *weight_data = weight->data<real>();
-  real *bias_data = bias->data<real>();
-  real *connTable_data = connTable->data<real>();
+  scalar_t *input_data = input->data<scalar_t>();
+  scalar_t *output_data = output->data<scalar_t>();
+  scalar_t *weight_data = weight->data<scalar_t>();
+  scalar_t *bias_data = bias->data<scalar_t>();
+  scalar_t *connTable_data = connTable->data<scalar_t>();
 
   /* and dims */
   const int64_t input_h = input->size(1);
@@ -52,7 +52,7 @@ void THNN_(SpatialFullConvolutionMap_updateOutput)(
   for (p = 0; p < nOutputPlane; p++)
   {
     /* add bias */
-    real *ptr_output = output_data + p*output_w*output_h;
+    scalar_t *ptr_output = output_data + p*output_w*output_h;
     int64_t j;
     int nweight;
     int64_t k;
@@ -106,10 +106,10 @@ void THNN_(SpatialFullConvolutionMap_updateGradInput)(
   THTensor_(zero)(gradInput);
 
   /* get raw pointers */
-  real *gradInput_data = gradInput->data<real>();
-  real *gradOutput_data = gradOutput->data<real>();
-  real *weight_data = weight->data<real>();
-  real *connTable_data = connTable->data<real>();
+  scalar_t *gradInput_data = gradInput->data<scalar_t>();
+  scalar_t *gradOutput_data = gradOutput->data<scalar_t>();
+  scalar_t *weight_data = weight->data<scalar_t>();
+  scalar_t *connTable_data = connTable->data<scalar_t>();
 
   /* and dims */
   const int64_t input_h = input->size(1);
@@ -161,7 +161,7 @@ void THNN_(SpatialFullConvolutionMap_accGradParameters)(
   int dW, int dH,
   accreal scale_)
 {
-  real scale = TH_CONVERT_ACCREAL_TO_REAL(scale_);
+  scalar_t scale = TH_CONVERT_ACCREAL_TO_REAL(scale_);
   THArgCheck(
     gradWeight != NULL && !gradWeight->is_empty() && gradWeight->dim() == 3
     && connTable != NULL && connTable->size(0) == gradWeight->size(0), 5,
@@ -173,10 +173,10 @@ void THNN_(SpatialFullConvolutionMap_accGradParameters)(
   gradOutput = THTensor_(newContiguous)(gradOutput);
 
   /* get raw pointers */
-  real *input_data = input->data<real>();
-  real *gradOutput_data = gradOutput->data<real>();
-  real *gradWeight_data = gradWeight->data<real>();
-  real *gradBias_data = gradBias->data<real>();
+  scalar_t *input_data = input->data<scalar_t>();
+  scalar_t *gradOutput_data = gradOutput->data<scalar_t>();
+  scalar_t *gradWeight_data = gradWeight->data<scalar_t>();
+  scalar_t *gradBias_data = gradBias->data<scalar_t>();
 
   /* and dims */
   const int64_t input_h  = input->size(1);
@@ -191,7 +191,7 @@ void THNN_(SpatialFullConvolutionMap_accGradParameters)(
 #pragma omp parallel for private(k)
   for (k = 0; k < nOutputPlane; k++)
   {
-    real *ptr_gradOutput = gradOutput_data + k*output_w*output_h;
+    scalar_t *ptr_gradOutput = gradOutput_data + k*output_w*output_h;
     int64_t l;
     for (l = 0; l < output_h*output_w; l++)
       gradBias_data[k] += scale*ptr_gradOutput[l];
