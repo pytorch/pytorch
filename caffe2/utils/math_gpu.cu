@@ -2308,29 +2308,107 @@ void Axpy<float16, CUDAContext>(
 }
 
 namespace {
-template <typename T>
-__global__ void
-AxpbyKernel(const int n, const T a, const T* x, const T b, T* y) {
-  CUDA_1D_KERNEL_LOOP(index, n) {
-    y[index] = x[index] * a + y[index] * b;
+
+template <typename TCoeff, typename TData>
+__global__ void AxpbyCUDAKernel(
+    const int N,
+    const TCoeff a,
+    const TData* x,
+    const TCoeff b,
+    TData* y) {
+  CUDA_1D_KERNEL_LOOP(i, N) {
+#if __CUDA_ARCH__ >= 350
+    y[i] = __ldg(x + i) * a + y[i] * b;
+#else
+    y[i] = x[i] * a + y[i] * b;
+#endif
   }
 }
-} // namespace
 
 template <>
-void Axpby<float, CUDAContext>(
-    const int n,
+__global__ void AxpbyCUDAKernel<float, float16>(
+    const int N,
     const float a,
-    const float* x,
+    const float16* x,
     const float b,
-    float* y,
-    CUDAContext* context) {
-  AxpbyKernel<float>
-      <<<CAFFE_GET_BLOCKS(n),
-         CAFFE_CUDA_NUM_THREADS,
-         0,
-         context->cuda_stream()>>>(n, a, x, b, y);
+    float16* y) {
+  CUDA_1D_KERNEL_LOOP(i, N) {
+    y[i] = convert::To<float, float16>(
+        convert::To<float16, float>(x[i]) * a +
+        convert::To<float16, float>(y[i]) * b);
+  }
 }
+
+template <typename TCoeff, typename TData>
+__global__ void AxpbyCUDAKernel(
+    const int N,
+    const TCoeff* a,
+    const TData* x,
+    const TCoeff* b,
+    TData* y) {
+  CUDA_1D_KERNEL_LOOP(i, N) {
+#if __CUDA_ARCH__ >= 350
+    y[i] = __ldg(x + i) * __ldg(a) + y[i] * __ldg(b);
+#else
+    y[i] = x[i] * *a + y[i] * *b;
+#endif
+  }
+}
+
+template <>
+__global__ void AxpbyCUDAKernel<float, float16>(
+    const int N,
+    const float* a,
+    const float16* x,
+    const float* b,
+    float16* y) {
+  CUDA_1D_KERNEL_LOOP(i, N) {
+#if __CUDA_ARCH__ >= 350
+    y[i] = convert::To<float, float16>(
+        convert::To<float16, float>(x[i]) * __ldg(a) +
+        convert::To<float16, float>(y[i]) * __ldg(b));
+#else
+    y[i] = convert::To<float, float16>(
+        convert::To<float16, float>(x[i]) * *a +
+        convert::To<float16, float>(y[i]) * *b);
+#endif
+  }
+}
+
+} // namespace
+
+#define CAFFE2_SPECIALIZED_CUDA_AXPBY(TCoeff, TData) \
+  template <>                                        \
+  void Axpby<TCoeff, TData, CUDAContext>(            \
+      const int n,                                   \
+      const TCoeff a,                                \
+      const TData* x,                                \
+      const TCoeff b,                                \
+      TData* y,                                      \
+      CUDAContext* context) {                        \
+    AxpbyCUDAKernel<TCoeff, TData>                   \
+        <<<CAFFE_GET_BLOCKS(n),                      \
+           CAFFE_CUDA_NUM_THREADS,                   \
+           0,                                        \
+           context->cuda_stream()>>>(n, a, x, b, y); \
+  }                                                  \
+  template <>                                        \
+  void Axpby<TCoeff, TData, CUDAContext>(            \
+      const int n,                                   \
+      const TCoeff* a,                               \
+      const TData* x,                                \
+      const TCoeff* b,                               \
+      TData* y,                                      \
+      CUDAContext* context) {                        \
+    AxpbyCUDAKernel<TCoeff, TData>                   \
+        <<<CAFFE_GET_BLOCKS(n),                      \
+           CAFFE_CUDA_NUM_THREADS,                   \
+           0,                                        \
+           context->cuda_stream()>>>(n, a, x, b, y); \
+  }
+CAFFE2_SPECIALIZED_CUDA_AXPBY(float, float)
+CAFFE2_SPECIALIZED_CUDA_AXPBY(float, float16)
+#undef CAFFE2_SPECIALIZED_CUDA_AXPBY
 
 namespace {
 
@@ -2371,11 +2449,13 @@ __global__ void Im2ColNCHWCUDAKernel(
         const int h = h_in + dh;
         const int w = w_in + dw;
 #if __CUDA_ARCH__ >= 350
-        *col_data_ptr = (h >= 0 && w >= 0 && h < input_h && w < input_w)
+        *col_data_ptr = utils::IsAGeZeroAndALtB(h, input_h) &&
+                utils::IsAGeZeroAndALtB(w, input_w)
             ? __ldg(img_data_ptr + dh * input_w + dw)
             : 0;
 #else
-        *col_data_ptr = (h >= 0 && w >= 0 && h < input_h && w < input_w)
+        *col_data_ptr = utils::IsAGeZeroAndALtB(h, input_h) &&
+                utils::IsAGeZeroAndALtB(w, input_w)
             ? img_data_ptr[dh * input_w + dw]
             : 0;
 #endif
@@ -2420,11 +2500,13 @@ __global__ void Im2ColNHWCCUDAKernel(
         const int h = h_in + dh;
         const int w = w_in + dw;
 #if __CUDA_ARCH__ >= 350
-        *col_data_ptr = (h >= 0 && w >= 0 && h < input_h && w < input_w)
+        *col_data_ptr = utils::IsAGeZeroAndALtB(h, input_h) &&
+                utils::IsAGeZeroAndALtB(w, input_w)
             ? __ldg(img_data + (h * input_w + w) * channels + channel_in)
             : 0;
 #else
-        *col_data_ptr = (h >= 0 && w >= 0 && h < input_h && w < input_w)
+        *col_data_ptr = utils::IsAGeZeroAndALtB(h, input_h) &&
+                utils::IsAGeZeroAndALtB(w, input_w)
             ? img_data[(h * input_w + w) * channels + channel_in]
             : 0;
 #endif
@@ -2580,7 +2662,7 @@ __global__ void Im2ColNdNCHWCUDAKernel(
       for (int d_i = 0; d_i < N; ++d_i) {
         const int d_img = d_iter[d_i] * stride.data[d_i] - pad.data[d_i] +
             d_offset[d_i] * dilation.data[d_i];
-        is_padding |= d_img < 0 || d_img >= img_shape.data[d_i + 1];
+        is_padding |= !utils::IsAGeZeroAndALtB(d_img, img_shape.data[d_i + 1]);
         img_index = img_index * img_shape.data[d_i + 1] + d_img;
       }
 #if __CUDA_ARCH__ >= 350
@@ -2714,7 +2796,8 @@ void Im2Col<float, CUDAContext, StorageOrder::NCHW>(
     const int stride_w,
     const float* img_data,
     float* col_data,
-    CUDAContext* context) {
+    CUDAContext* context,
+    const int /* groups */) {
   const int dkernel_h = dilation_h * (kernel_h - 1) + 1;
   const int dkernel_w = dilation_w * (kernel_w - 1) + 1;
   const int output_h = (height + pad_t + pad_b - dkernel_h) / stride_h + 1;
@@ -2759,7 +2842,10 @@ void Im2Col<float, CUDAContext, StorageOrder::NHWC>(
     const int stride_w,
     const float* img_data,
     float* col_data,
-    CUDAContext* context) {
+    CUDAContext* context,
+    const int groups) {
+  CAFFE_ENFORCE_EQ(groups, 1, "groups must be 1 for GPU NHWC Im2Col");
+
   const int dkernel_h = dilation_h * (kernel_h - 1) + 1;
   const int dkernel_w = dilation_w * (kernel_w - 1) + 1;
   const int output_h = (height + pad_t + pad_b - dkernel_h) / stride_h + 1;
@@ -2804,7 +2890,8 @@ void Col2Im<float, CUDAContext, StorageOrder::NCHW>(
     const int stride_w,
     const float* col_data,
     float* img_data,
-    CUDAContext* context) {
+    CUDAContext* context,
+    const int /* groups */) {
   const int dkernel_h = dilation_h * (kernel_h - 1) + 1;
   const int dkernel_w = dilation_w * (kernel_w - 1) + 1;
   const int output_h = (height + pad_t + pad_b - dkernel_h) / stride_h + 1;
@@ -2849,7 +2936,10 @@ void Col2Im<float, CUDAContext, StorageOrder::NHWC>(
     const int stride_w,
     const float* col_data,
     float* img_data,
-    CUDAContext* context) {
+    CUDAContext* context,
+    const int groups) {
+  CAFFE_ENFORCE_EQ(groups, 1, "groups must be 1 for GPU NHWC Col2Im");
+
   const int dkernel_h = dilation_h * (kernel_h - 1) + 1;
   const int dkernel_w = dilation_w * (kernel_w - 1) + 1;
   const int output_h = (height + pad_t + pad_b - dkernel_h) / stride_h + 1;

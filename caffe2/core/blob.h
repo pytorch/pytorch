@@ -12,7 +12,7 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/core/tensor.h"
 #include "caffe2/core/typeid.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 
 namespace caffe2 {
 
@@ -23,7 +23,7 @@ namespace caffe2 {
  * properly when the blob is deallocated or re-allocated with a new type. A blob
  * could contain anything, although the most common case is to contain a Tensor.
  */
-class Blob {
+class CAFFE2_API Blob {
  public:
   typedef void (*DestroyCall)(void*);
 
@@ -288,7 +288,7 @@ class Blob {
   void* pointer_ = nullptr;
   DestroyCall destroy_ = nullptr;
 
-  DISABLE_COPY_AND_ASSIGN(Blob);
+  AT_DISABLE_COPY_AND_ASSIGN(Blob);
 };
 
 inline void swap(Blob& lhs, Blob& rhs) {

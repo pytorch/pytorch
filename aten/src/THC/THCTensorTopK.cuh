@@ -112,7 +112,6 @@ struct TopKTypeConfig<double> {
   }
 };
 
-#ifdef CUDA_HALF_TENSOR
 template <>
 struct TopKTypeConfig<half> {
   typedef uint32_t RadixType;
@@ -137,8 +136,7 @@ struct TopKTypeConfig<half> {
     return ScalarConvert<int, half>::to(0);
 #endif
   }
-};
-#endif // CUDA_HALF_TENSOR
+}; 
 
 // This function counts the distribution of all input values in a
 // slice we are selecting by radix digit at `radixDigitPos`, but only
@@ -215,7 +213,11 @@ __device__ DataType findPattern(DataType* smem,
                              IndexType withinSliceStride,
                              BitDataType desired,
                              BitDataType desiredMask) {
+#ifdef __HIP_PLATFORM_HCC__
+  if (threadIdx.x < 64) { 
+#else
   if (threadIdx.x < 32) {
+#endif
     smem[threadIdx.x] = ScalarConvert<int, DataType>::to(0);
   }
   __syncthreads();
@@ -368,7 +370,11 @@ __global__ void gatherTopK(TensorInfo<T, IndexType> input,
                            IndexType indicesWithinSliceStride) {
   // Indices are limited to integer fp precision, so counts can fit in
   // int32, regardless of IndexType
+#ifdef __HIP_PLATFORM_HCC__
+  __shared__ int smem[64];
+#else
   __shared__ int smem[32]; // one per each warp, up to warp limit
+#endif
 
   IndexType slice = getLinearBlockId<IndexType>();
   if (slice >= numInputSlices) {

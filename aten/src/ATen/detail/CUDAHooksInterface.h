@@ -1,7 +1,7 @@
 #pragma once
 
 #include <ATen/Allocator.h>
-#include <ATen/Generator.h>
+#include <ATen/core/Generator.h>
 #include <ATen/Registry.h>
 #include <ATen/core/Error.h>
 
@@ -65,6 +65,10 @@ struct AT_API CUDAHooksInterface {
     return false;
   }
 
+  virtual bool hasMAGMA() const {
+    return false;
+  }
+
   virtual bool hasCuDNN() const {
     return false;
   }
@@ -82,6 +86,10 @@ struct AT_API CUDAHooksInterface {
   }
 
   virtual bool compiledWithCuDNN() const {
+    return false;
+  }
+
+  virtual bool compiledWithMIOpen() const {
     return false;
   }
 

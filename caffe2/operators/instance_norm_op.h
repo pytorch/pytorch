@@ -13,9 +13,9 @@ class InstanceNormOp : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   InstanceNormOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        epsilon_(OperatorBase::GetSingleArgument<T>("epsilon", 1e-5f)),
+        epsilon_(this->template GetSingleArgument<T>("epsilon", 1e-5f)),
         order_(StringToStorageOrder(
-            OperatorBase::GetSingleArgument<string>("order", "NCHW"))) {
+            this->template GetSingleArgument<string>("order", "NCHW"))) {
     CAFFE_ENFORCE(epsilon_ >= 0, "Must pass a nonnegative epsilon.");
   }
   ~InstanceNormOp() {}
@@ -53,9 +53,9 @@ class InstanceNormGradientOp : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   InstanceNormGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        epsilon_(OperatorBase::GetSingleArgument<T>("epsilon", 1e-5f)),
+        epsilon_(this->template GetSingleArgument<T>("epsilon", 1e-5f)),
         order_(StringToStorageOrder(
-            OperatorBase::GetSingleArgument<string>("order", "NCHW"))) {
+            this->template GetSingleArgument<string>("order", "NCHW"))) {
     CAFFE_ENFORCE(epsilon_ >= 0, "Must pass a nonnegative epsilon.");
   }
   ~InstanceNormGradientOp() {}

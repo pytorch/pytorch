@@ -5,11 +5,6 @@
   scalar_check:
     output: reduction != Reduction::None || self_->dim() == 0
 
-- name: kl_div(Tensor self, Tensor target, int64_t reduction=Reduction::ElementwiseMean)
-  cname: DistKLDivCriterion
-  scalar_check:
-    output: reduction != Reduction::None || self_->dim() == 0
-
 - name: l1_loss(Tensor self, Tensor target, int64_t reduction=Reduction::ElementwiseMean)
   cname: AbsCriterion
   scalar_check:

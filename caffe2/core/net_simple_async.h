@@ -9,7 +9,7 @@
 #include "caffe2/core/registry.h"
 #include "caffe2/core/tensor.h"
 #include "caffe2/core/workspace.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 
 namespace caffe2 {
 
@@ -43,7 +43,7 @@ class AsyncSimpleNet : public NetBase {
 
   vector<unique_ptr<OperatorBase>> operators_;
 
-  DISABLE_COPY_AND_ASSIGN(AsyncSimpleNet);
+  AT_DISABLE_COPY_AND_ASSIGN(AsyncSimpleNet);
 };
 
 } // namespace caffe2

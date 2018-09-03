@@ -63,6 +63,9 @@ endfunction()
 if(DISTRIBUTED_NCCL_FOUND)
   option(USE_C10D_NCCL "USE C10D NCCL" ON)
 endif()
+if(MPI_FOUND)
+  option(USE_C10D_MPI "USE C10D MPI" ON)
+endif()
 configure_file(cmake/Def.hpp.in ${CMAKE_BINARY_DIR}/include/c10d/Def.hpp @ONLY)
 
 set(C10D_SRCS
@@ -70,6 +73,7 @@ set(C10D_SRCS
   FileStore.cpp
   ProcessGroup.cpp
   Store.cpp
+  PrefixStore.cpp
   TCPStore.cpp
   Utils.cpp
   ProcessGroupGloo.cpp
@@ -115,6 +119,7 @@ target_include_directories(c10d PUBLIC ${GLOO_INCLUDE_DIR})
 
 copy_header(CUDAUtils.hpp)
 copy_header(FileStore.hpp)
+copy_header(PrefixStore.hpp)
 copy_header(ProcessGroup.hpp)
 copy_header(Store.hpp)
 copy_header(TCPStore.hpp)
@@ -131,6 +136,10 @@ endif()
 if(MPI_FOUND)
   target_include_directories(c10d PUBLIC ${MPI_INCLUDE_PATH})
   copy_header(ProcessGroupMPI.hpp)
+  file(WRITE ${CMAKE_BINARY_DIR}/include/c10d/mpi_include_path "")
+  foreach(MPI_INC ${MPI_INCLUDE_PATH})
+    file(APPEND ${CMAKE_BINARY_DIR}/include/c10d/mpi_include_path ${MPI_INC}\n)
+  endforeach()
 endif()
 
 target_link_libraries(c10d PUBLIC ${C10D_LIBS})
@@ -138,7 +147,7 @@ target_include_directories(c10d PRIVATE ${CMAKE_BINARY_DIR}/include)
 
 install(TARGETS c10d ARCHIVE DESTINATION lib)
 
-option(BUILD_EXAMPLES "Build examples" OFF)
+option(BUILD_EXAMPLES "Build examples" ON)
 if(BUILD_EXAMPLES)
   add_subdirectory(example)
 endif()

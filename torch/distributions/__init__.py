@@ -128,6 +128,7 @@ __all__ = [
     'Laplace',
     'LogNormal',
     'LogisticNormal',
+    'LowRankMultivariateNormal',
     'Multinomial',
     'MultivariateNormal',
     'NegativeBinomial',

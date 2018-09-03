@@ -4,17 +4,14 @@
       {
         "path": "aten/src/THC/THCBlas.cu",
         "functions": {
-          "cublasSgemmEx": "HIPBLAS_STATUS_INTERNAL_ERROR",
-          "cublasSgetrfBatched": "HIPBLAS_STATUS_INTERNAL_ERROR",
-          "cublasDgetrfBatched": "HIPBLAS_STATUS_INTERNAL_ERROR",
-          "cublasSgetrsBatched": "HIPBLAS_STATUS_INTERNAL_ERROR",
-          "cublasDgetrsBatched": "HIPBLAS_STATUS_INTERNAL_ERROR",
-          "cublasSgetriBatched": "HIPBLAS_STATUS_INTERNAL_ERROR",
-          "cublasDgetriBatched": "HIPBLAS_STATUS_INTERNAL_ERROR"
+          "cublasSgemmEx": "rocblas_status_internal_error",
+          "cublasSgetrfBatched": "rocblas_status_internal_error",
+          "cublasDgetrfBatched": "rocblas_status_internal_error",
+          "cublasSgetrsBatched": "rocblas_status_internal_error",
+          "cublasDgetrsBatched": "rocblas_status_internal_error",
+          "cublasSgetriBatched": "rocblas_status_internal_error",
+          "cublasDgetriBatched": "rocblas_status_internal_error"
         },
-        "constants": {
-            "HIPBLAS_DATA_HALF": "0"
-        }
       },
       {
         "path": "aten/src/THC/THCStream.cpp",
@@ -54,12 +51,6 @@
         }
       },
       {
-        "path": "aten/src/ATen/native/cuda/Distributions.cu",
-        "s_constants": {
-          "#include <nvfunctional>": ""
-        }
-      },
-      {
         "path": "aten/src/THC/THCNumerics.cuh",
         "s_constants": {
           "#ifdef __CUDA_ARCH__": "#if defined(__CUDA_ARCH__) || defined(__HIP_PLATFORM_HCC__)",
@@ -79,24 +70,31 @@
         }
       },
       {
-        "path": "aten/src/ATen/native/cuda/CuFFTUtils.h",
+        "path": "aten/src/THC/THCTensorRandom.cu",
         "s_constants": {
-          "#include <cufft.h>": "",
-          "#include <cufftXt.h>": ""
+          "struct curandStateMtgp32*": "curandStateMtgp32*",
+          "__host__ void THCRandom_getRNGState": "extern \"C\" __host__ void THCRandom_getRNGState",
+          "__host__ void THCRandom_setRNGState": "extern \"C\" __host__ void THCRandom_setRNGState",
+          "state[threadIdx.x].k = kernel;" : "state[threadIdx.x].set_params(kernel);"
         }
       },
       {
-        "path": "aten/src/ATen/native/cuda/CuFFTPlanCache.h",
+        "path": "aten/src/THC/THCTensorRandom.h",
         "s_constants": {
-          "#include <cufft.h>": "",
-          "#include <cufftXt.h>": ""
+          "struct curandStateMtgp32*": "curandStateMtgp32*"
         }
       },
       {
-        "path": "aten/src/ATen/native/cuda/SpectralOps.cu",
+        "path": "aten/src/THCUNN/generic/RReLU.cu",
         "s_constants": {
-          "#include <cufft.h>": "",
-          "#include <cufftXt.h>": ""
+          "struct curandStateMtgp32*": "curandStateMtgp32*"
+        }
+      },
+      {
+        "path": "aten/src/THC/THCGenerator.hpp",
+        "s_constants": {
+          "struct curandStateMtgp32*": "curandStateMtgp32*",
+          "struct mtgp32_kernel_params": "mtgp32_kernel_params"
         }
       },
       {
@@ -123,10 +121,6 @@
       }
     ],
   "disabled_modules": [
-    "aten/src/ATen/native/cuda/CuFFTUtils.h",
-    "aten/src/ATen/native/cuda/CuFFTPlanCache.h",
-    "aten/src/ATen/native/cuda/SpectralOps.cu",
-    "aten/src/ATen/native/cuda/Distributions.cu"
   ],
   "disabled_functions": [
     {
@@ -152,7 +146,8 @@
       "functions": [
         "_s_poisson_cuda",
         "poisson_cuda_kernel",
-        "gamma_cuda_kernel"
+        "gamma_cuda_kernel",
+        "gamma_grad_cuda_kernel",
       ]
     },
     {

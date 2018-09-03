@@ -15,9 +15,9 @@ class SeluOp final : public Operator<Context> {
 
   SeluOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws) {
-    alpha_ = OperatorBase::GetSingleArgument<T>(
+    alpha_ = this->template GetSingleArgument<T>(
         "alpha", 1.6732632423543772848170429916717f);
-    lambda_ = OperatorBase::GetSingleArgument<T>(
+    lambda_ = this->template GetSingleArgument<T>(
         "scale", 1.0507009873554804934193349852946f);
     // In the paper "scale" is named "lambda", but "lambda" is a reserved
     // keyword in python
@@ -37,9 +37,9 @@ class SeluGradientOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   SeluGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws) {
-    alpha_ = OperatorBase::GetSingleArgument<T>(
+    alpha_ = this->template GetSingleArgument<T>(
         "alpha", 1.6732632423543772848170429916717f);
-    lambda_ = OperatorBase::GetSingleArgument<T>(
+    lambda_ = this->template GetSingleArgument<T>(
         "scale", 1.0507009873554804934193349852946f);
     CAFFE_ENFORCE_GT(lambda_, 1.0);
   }

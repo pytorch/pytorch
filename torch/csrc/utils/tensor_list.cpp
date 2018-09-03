@@ -30,9 +30,9 @@ static PyObject* recursive_to_list(
 
 PyObject* tensor_to_list(const Tensor& tensor) {
   Tensor data = tensor;
-  if (data.type().backend() != kCPU) {
+  if (data.type().backend() != Backend::CPU) {
     with_no_gil([&]() {
-      data = data.toBackend(kCPU);
+      data = data.toBackend(Backend::CPU);
     });
   }
   auto& type = data.type();

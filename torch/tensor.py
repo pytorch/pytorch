@@ -9,6 +9,9 @@ from torch._six import imap
 from torch._C import _add_docstr
 
 
+# NB: If you subclass Tensor, and want to share the subclassed class
+# across processes, you must also update torch/multiprocessing/reductions.py
+# to define a ForkingPickler serialization mode for the class.
 class Tensor(torch._C._TensorBase):
     def __deepcopy__(self, memo):
         if not self.is_leaf:
@@ -282,33 +285,56 @@ class Tensor(torch._C._TensorBase):
             return super(Tensor, self).split_with_sizes(split_size, dim)
 
     def index_add(self, dim, index, tensor):
+        r"""Out-of-place version of :meth:`torch.Tensor.index_add_`
+        """
         return self.clone().index_add_(dim, index, tensor)
 
     def index_copy(self, dim, index, tensor):
+        r"""Out-of-place version of :meth:`torch.Tensor.index_copy_`
+        """
         return self.clone().index_copy_(dim, index, tensor)
 
     def index_fill(self, dim, index, value):
+        r"""Out-of-place version of :meth:`torch.Tensor.index_fill_`
+        """
         return self.clone().index_fill_(dim, index, value)
 
     def scatter(self, dim, index, source):
+        r"""Out-of-place version of :meth:`torch.Tensor.scatter_`
+        """
         return self.clone().scatter_(dim, index, source)
 
     def scatter_add(self, dim, index, source):
+        r"""Out-of-place version of :meth:`torch.Tensor.scatter_add_`
+        """
         return self.clone().scatter_add_(dim, index, source)
 
     def masked_scatter(self, mask, tensor):
+        r"""Out-of-place version of :meth:`torch.Tensor.masked_scatter_`
+        """
         return self.clone().masked_scatter_(mask, tensor)
 
     def masked_fill(self, mask, value):
+        r"""Out-of-place version of :meth:`torch.Tensor.masked_fill_`
+        """
         return self.clone().masked_fill_(mask, value)
 
-    def unique(self, sorted=False, return_inverse=False):
+    def unique(self, sorted=False, return_inverse=False, dim=None):
         r"""Returns the unique scalar elements of the tensor as a 1-D tensor.
 
         See :func:`torch.unique`
         """
-        output, inverse_indices = self._unique(
-            sorted=sorted, return_inverse=return_inverse)
+        if dim is not None:
+            output, inverse_indices = self._unique_dim(
+                sorted=sorted,
+                return_inverse=return_inverse,
+                dim=dim
+            )
+        else:
+            output, inverse_indices = self._unique(
+                sorted=sorted,
+                return_inverse=return_inverse
+            )
         if return_inverse:
             return output, inverse_indices
         else:
@@ -375,6 +401,11 @@ class Tensor(torch._C._TensorBase):
         # map will interleave them.)
         if self.dim() == 0:
             raise TypeError('iteration over a 0-d tensor')
+        if torch._C._get_tracing_state():
+            warnings.warn('Iterating over a tensor might cause the trace to be incorrect. '
+                          'Passing a tensor of different shape won\'t change the number of '
+                          'iterations executed (and might lead to errors or silently give '
+                          'incorrect results).', category=RuntimeWarning)
         return iter(imap(lambda i: self[i], range(self.size(0))))
 
     def __hash__(self):
@@ -392,9 +423,9 @@ class Tensor(torch._C._TensorBase):
 
     def __array__(self, dtype=None):
         if dtype is None:
-            return self.cpu().numpy()
+            return self.numpy()
         else:
-            return self.cpu().numpy().astype(dtype, copy=False)
+            return self.numpy().astype(dtype, copy=False)
 
     # Wrap Numpy array again in a suitable tensor when done, to support e.g.
     # `numpy.sin(tensor) -> tensor` or `numpy.greater(tensor, 0) -> ByteTensor`

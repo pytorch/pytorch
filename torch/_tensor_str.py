@@ -213,8 +213,8 @@ def get_summarized_data(self):
         else:
             return self
     if self.size(0) > 2 * PRINT_OPTS.edgeitems:
-        start = [get_summarized_data(self[i]).view(-1) for i in range(0, PRINT_OPTS.edgeitems)]
-        end = ([get_summarized_data(self[i]).view(-1)
+        start = [get_summarized_data(self[i]).reshape(-1) for i in range(0, PRINT_OPTS.edgeitems)]
+        end = ([get_summarized_data(self[i]).reshape(-1)
                for i in range(len(self) - PRINT_OPTS.edgeitems, len(self))])
         return torch.cat((start + end))
     else:
@@ -257,7 +257,10 @@ def _str(self):
         tensor_str = _tensor_str(self, indent, formatter, summarize)
 
     if self.grad_fn is not None:
-        suffix += ', grad_fn=<{}>'.format(type(self.grad_fn).__name__)
+        name = type(self.grad_fn).__name__
+        if name == 'CppFunction':
+            name = self.grad_fn.name().rsplit('::', maxsplit=1)[-1]
+        suffix += ', grad_fn=<{}>'.format(name)
     elif self.requires_grad:
         suffix += ', requires_grad=True'
 

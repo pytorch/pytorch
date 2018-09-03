@@ -2,7 +2,7 @@
 #include "caffe2/core/context.h"
 #include "caffe2/core/tensor.h"
 #include "caffe2/mkl/mkl_utils.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/utils/math.h"
 
 #include <gtest/gtest.h>

@@ -29,10 +29,24 @@ bool cudnn_is_acceptable(const Tensor& self) {
   auto st = self.type().scalarType();
   if (!(st == kDouble || st == kFloat || st == kHalf)) return false;
   if (!detail::getCUDAHooks().compiledWithCuDNN()) return false;
+  // cuDNN functions like grid_sampler returns CUDNN_STATUS_BAD_PARAM on empty
+  // tensors. Maybe some cuDNN functions actually support empty tensors, but
+  // native/THNN kernels shouldn't be much slower because the output is also
+  // likely empty.
+  if (self.numel() == 0) return false;
   // NB: In the old Python code, there was also a test to see if the
   // cuDNN library was actually dynamically linked or not.  I'm not
   // sure if we can actually test this.
   return true;
+}
+
+Tensor detach(const Tensor& self) {
+  return self.unsafeGetTensorImpl()->detach();
+}
+
+Tensor & detach_(Tensor & self) {
+  self.unsafeGetTensorImpl()->detach_();
+  return self;
 }
 
 }

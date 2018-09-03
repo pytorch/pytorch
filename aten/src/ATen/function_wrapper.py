@@ -39,11 +39,11 @@ else:
 #    declaration under Type.h  (right now, we call this template
 #    BROADCAST but it also handles default arguments)
 TYPE_METHOD_DECLARATION_BROADCAST = CodeTemplate("""\
-${return_type} ${api_name}(${type_method_formals_with_defaults}) const;
+${return_type} ${api_name}(${type_method_formals_with_defaults}) const override;
 """)
 # 2. broadcasting functions are implemented in Type.cpp
 TYPE_METHOD_DEFINITION_BROADCAST = CodeTemplate("""\
-${return_type} Type::${api_name}(${type_method_formals}) const {
+${return_type} TypeDefault::${api_name}(${type_method_formals}) const {
     ${device_guard_declaration}
     Tensor ${broadcast_returns};
     std::tie(${broadcast_returns}) = ${broadcast_function}(${broadcast_actuals}, "${api_name}");
@@ -59,28 +59,36 @@ ${return_type} Type::${api_name}(${type_method_formals}) const {
 #    actual implementation.  At the moment, this situation *only* occurs
 #    for 'native' declarations (so the native dispatch is hardcoded into
 #    the template here.)
+PURE_VIRTUAL_TYPE_METHOD_DECLARATION = CodeTemplate("""\
+virtual ${return_type} ${method_prefix_derived}${api_name}(${type_method_formals_with_defaults}) const = 0;
+""")
+DEPRECATED_PURE_VIRTUAL_TYPE_METHOD_DECLARATION = CodeTemplate("""\
+AT_DEPRECATED(virtual ${return_type} \
+${method_prefix_derived}${api_name}(${type_method_formals_with_defaults}) const = 0);
+""")
+PURE_VIRTUAL_TYPE_METHOD_DECLARATION_BROADCAST = CodeTemplate("""\
+virtual ${return_type} ${api_name}(${type_method_formals_with_defaults}) const = 0;
+""")
+
 TYPE_METHOD_DECLARATION_ABSTRACT = CodeTemplate("""\
-virtual ${return_type} ${method_prefix_derived}${api_name}(${type_method_formals_with_defaults}) const;
+${return_type} ${method_prefix_derived}${api_name}(${type_method_formals_with_defaults}) const override;
 """)
 TYPE_METHOD_DEFINITION_ABSTRACT = CodeTemplate("""\
-${return_type} Type::${method_prefix_derived}${api_name}(${type_method_formals}) const {
+${return_type} TypeDefault::${method_prefix_derived}${api_name}(${type_method_formals}) const {
     AT_ERROR("${method_prefix_derived}${api_name} is not implemented for type ", toString());
 }
 """)
 TYPE_METHOD_DECLARATION_CONCRETE = CodeTemplate("""\
-virtual ${return_type} ${api_name}(${type_method_formals_with_defaults}) const;
-""")
-DEPRECATED_TYPE_METHOD_DECLARATION_CONCRETE = CodeTemplate("""\
-AT_DEPRECATED(virtual ${return_type} ${api_name}(${type_method_formals_with_defaults}) const);
+${return_type} ${api_name}(${type_method_formals_with_defaults}) const override;
 """)
 TYPE_METHOD_DEFINITION_CONCRETE = CodeTemplate("""\
-${return_type} Type::${api_name}(${type_method_formals}) const {
+${return_type} TypeDefault::${api_name}(${type_method_formals}) const {
     ${device_guard_declaration}
     ${type_definition_body}
 }
 """)
 DEPRECATED_TYPE_METHOD_DEFINITION_CONCRETE = CodeTemplate("""\
-${return_type} Type::${api_name}(${type_method_formals}) const {
+${return_type} TypeDefault::${api_name}(${type_method_formals}) const {
     TensorOptions options(*this);
     ${device_guard_declaration}
     return at::native::${api_name}(${type_method_actuals}, options);
@@ -88,7 +96,7 @@ ${return_type} Type::${api_name}(${type_method_formals}) const {
 """)
 # 4. add virtual override to TypeDerived.h
 TYPE_DERIVED_DECLARATION = CodeTemplate("""\
-virtual ${return_type} ${method_prefix_derived}${api_name}(${type_method_formals}) const override;
+${return_type} ${method_prefix_derived}${api_name}(${type_method_formals}) const override;
 """)
 # 5. add override definition to TypeDerived.cpp
 TYPE_DERIVED_DEFINITION = CodeTemplate("""\
@@ -180,7 +188,8 @@ if(${check_name}.type().is_sparse()) {
 }""")
 
 BUFFER_DEFINITION = CodeTemplate("""\
-auto ${name}_ = new ${Tensor}(${THTensor}_new());
+auto ${name}_ = c10::make_intrusive<TensorImpl, UndefinedTensor>(
+    ${Backend}TensorId(), ScalarType::${ScalarName}, ${THTensor}_new(), false).release();
 auto ${name} = Tensor(${name}_, false);""")
 
 CONDITIONAL_INITIALIZER = CodeTemplate("""\
@@ -208,10 +217,9 @@ TYPE_FORMAL_GENERIC = {
     'THIntegerTensor*': 'Tensor &',
     'THDenseTensor*': 'Tensor &',
     'THDenseIndexTensor*': 'Tensor &',
-    'THStorage*': 'Storage &',
+    'THStorage*': 'Storage',
     'THGenerator*': 'Generator *',
     'IntListSize': 'IntList',
-    'IntListStride': 'IntList',
     'accreal': 'Scalar',
     'real': 'Scalar',
     'long': 'int64_t',
@@ -228,7 +236,6 @@ DYNAMIC_TYPE = {
     'THStorage*': 'Storage',
     'THGenerator*': 'Generator*',
     'IntListSize': 'IntList',
-    'IntListStride': 'IntList',
     'accreal': 'accreal',
     'real': 'real',
     'long': 'int64_t',
@@ -255,70 +262,68 @@ TYPE_RETURN = {
 CHECKED_CAST = {
     'THTensor*':
         CodeTemplate(
-            'checked_cast_tensor<${Tensor}>('
-            '${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay}, '
+            'checked_tensor_unwrap('
+            '${arg_name},"${arg_name}",${arg_pos}, ${null_okay}, '
             'Backend::${Backend}, ScalarType::${ScalarName})'),
     'THSTensor*':
         CodeTemplate(
-            'checked_cast_tensor<Sparse${Tensor}>('
-            '${arg_name}.tref.pImpl,"${arg_name}",${arg_pos},false, '
+            'checked_tensor_unwrap('
+            '${arg_name}.tref,"${arg_name}",${arg_pos},false, '
             'Backend::${Backend}, ScalarType::${ScalarName})'),
     'THBoolTensor*':
         CodeTemplate(
-            'checked_cast_tensor<${Backend}ByteTensor>('
-            '${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay}, '
+            'checked_tensor_unwrap('
+            '${arg_name},"${arg_name}",${arg_pos}, ${null_okay}, '
             'Backend::${Backend}, ScalarType::Byte)'),
     'THIndexTensor*':
         CodeTemplate(
-            'checked_cast_tensor<${Backend}LongTensor>('
-            '${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay}, '
+            'checked_tensor_unwrap('
+            '${arg_name},"${arg_name}",${arg_pos}, ${null_okay}, '
             'Backend::${Backend}, ScalarType::Long)'),
     'THIntegerTensor*':
         CodeTemplate(
-            'checked_cast_tensor<${Backend}IntTensor>('
-            '${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay}, '
+            'checked_tensor_unwrap('
+            '${arg_name},"${arg_name}",${arg_pos}, ${null_okay}, '
             'Backend::${Backend}, ScalarType::Int)'),
     'THDenseTensor*':
         CodeTemplate(
-            'checked_cast_tensor<${DenseTensor}>('
-            '${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay}, '
+            'checked_tensor_unwrap('
+            '${arg_name},"${arg_name}",${arg_pos}, ${null_okay}, '
             'Backend::${DenseBackend}, ScalarType::${ScalarName})'),
     'THDenseIndexTensor*':
         CodeTemplate(
-            'checked_cast_tensor<${DenseBackend}LongTensor>('
-            '${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay}, '
+            'checked_tensor_unwrap('
+            '${arg_name},"${arg_name}",${arg_pos}, ${null_okay}, '
             'Backend::${DenseBackend}, ScalarType::Long)'),
     'THStorage*':
         CodeTemplate(
-            'checked_cast_storage<Storage>('
-            '&${arg_name},"${arg_name}",${arg_pos}, '
-            'Backend::${Backend}, ScalarType::${ScalarName})'),
+            'checked_storage('
+            '${arg_name},"${arg_name}",${arg_pos}, '
+            # We're punning here (Backend and DeviceType constructors coincide)
+            # but DeviceType is the correct way to classify storages
+            'DeviceType::${Backend}, at::scalarTypeToDataType(ScalarType::${ScalarName}))'),
     'THGenerator*':
         CodeTemplate(
-            'check_generator<${Backend}Generator>(${arg_name}, &globalContext().defaultGenerator(backend()))'),
+            'check_generator<${Backend}Generator>(${arg_name}, &globalContext().defaultGenerator(device_type()))'),
     # This is a cast done via direct-construction
-    'IntListSize': CodeTemplate('at::IntList ${result_name} = get_intlist_size_th(${arg_name});'),
     'IntListStride': CodeTemplate('at::IntList ${result_name} = get_intlist_stride_th(${arg_name});'),
     'real': CodeTemplate('${arg_name}.to${ScalarName}()'),
     'accreal': CodeTemplate('${arg_name}.to${AccScalarName}()'),
     'TensorList': CodeTemplate(
-            'tensor_list_checked_cast<${Tensor}, Tensor, '
-            '${THTensor}>(${arg_name},"${arg_name}",${arg_pos}, '
+            'checked_tensor_list_unwrap(${arg_name},"${arg_name}",${arg_pos}, '
             'Backend::${Backend}, ScalarType::${ScalarName})'),
     'IntList': CodeTemplate('check_intlist<${size}>(${arg_name}, "${arg_name}", ${arg_pos}${,default_init})')
 }
 
-DIRECT_CONSTRUCTION_CHECKED_CAST = {'IntListSize', 'IntListStride'}
-
 CHECKED_USE = {
-    'THTensor*': '{}_->tensor',
-    'THSTensor*': '{}_->tensor',
-    'THIndexTensor*': '{}_->tensor',
-    'THBoolTensor*': '{}_->tensor',
-    'THIntegerTensor*': '{}_->tensor',
-    'THDenseTensor*': '{}_->tensor',
-    'THDenseIndexTensor*': '{}_->tensor',
-    'THStorage*': '{}_->pImpl()',
+    'THTensor*': '{}_',
+    'THSTensor*': '{}_',
+    'THIndexTensor*': '{}_',
+    'THBoolTensor*': '{}_',
+    'THIntegerTensor*': '{}_',
+    'THDenseTensor*': '{}_',
+    'THDenseIndexTensor*': '{}_',
+    'THStorage*': '{}_.unsafeGetStorageImpl()',
     'THGenerator*': '{}_->generator',
     'TensorList': "{0}_.data(), {0}_.size()",
 }
@@ -326,23 +331,27 @@ CHECKED_USE = {
 CHECKED_USE_NULLABLE = CodeTemplate('${arg_name}_ ? ${usage} : NULL')
 
 ALLOC_NOARGS_WRAP = {
-    'THTensor*': 'detail::new_${Tensor}()',
-    'THBoolTensor*': 'detail::new_${Backend}ByteTensor()',
-    'THIndexTensor*': 'detail::new_${Backend}LongTensor()',
-    'THIntegerTensor*': 'detail::new_${Backend}IntTensor()',
-    'THSTensor*': 'detail::new_Sparse${Tensor}()',
-    'THDenseTensor*': 'detail::new_${DenseTensor}()',
-    'THDenseIndexTensor*': 'detail::new_${DenseBackend}LongTensor()',
+    'THTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensor>'
+                 '(${Backend}TensorId(), ScalarType::${ScalarName}, false).release()',
+    'THBoolTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensor>'
+                     '(${Backend}TensorId(), ScalarType::Byte, false).release()',
+    'THIndexTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensor>'
+                      '(${Backend}TensorId(), ScalarType::Long, false).release()',
+    'THIntegerTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensor>'
+                        '(${Backend}TensorId(), ScalarType::Int, false).release()',
+    'THDenseTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensor>'
+                      '(${Backend}TensorId(), ScalarType::${ScalarName}, false).release()',
+    'THDenseIndexTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensor>'
+                           '(${Backend}TensorId(), ScalarType::Long, false).release()'
 }
 
 ALLOC_WRAP = {
-    'THTensor*': 'new ${Tensor}(${arguments})',
-    'THBoolTensor*': 'new ${Backend}ByteTensor(${arguments})',
-    'THIndexTensor*': 'new ${Backend}LongTensor(${arguments})',
-    'THIntegerTensor*': 'new ${Backend}IntTensor(${arguments})',
-    'THSTensor*': 'new Sparse${Tensor}(${arguments})',
-    'THDenseTensor*': 'new ${DenseTensor}(${arguments})',
-    'THDenseIndexTensor*': 'new ${DenseBackend}LongTensor(${arguments})',
+    'THTensor*': '${arguments}',
+    'THBoolTensor*': '${arguments}',
+    'THIndexTensor*': '${arguments}',
+    'THIntegerTensor*': '${arguments}',
+    'THDenseTensor*': '${arguments}',
+    'THDenseIndexTensor*': '${arguments}',
 }
 
 # Replacements for constants when calling into TH
@@ -381,6 +390,7 @@ Environment = TypedDict('Environment', {
 TopEnvironment = TypedDict('TopEnvironment', {
     'type_registrations': List[str],
     'type_headers': List[str],
+    'pure_virtual_type_method_declarations': List[str],
     'type_method_declarations': List[str],
     'type_method_definitions': List[str],
     'type_method_inline_definitions': List[str],
@@ -814,6 +824,8 @@ def create_generic(top_env, declarations):
             # NN function with no _forward/_backward suffix don't have cimpls.
             # They call the _forward function and discard any buffer returns
             abstract = False
+            top_env['pure_virtual_type_method_declarations'].append(
+                PURE_VIRTUAL_TYPE_METHOD_DECLARATION.substitute(env))
             top_env['type_method_declarations'].append(
                 TYPE_METHOD_DECLARATION_CONCRETE.substitute(env))
             body = emit_nn_body(option)
@@ -821,11 +833,17 @@ def create_generic(top_env, declarations):
                 TYPE_METHOD_DEFINITION_CONCRETE.substitute(
                     env, type_definition_body=body))
         elif broadcast_arg is None:
+            top_env['pure_virtual_type_method_declarations'].append(
+                PURE_VIRTUAL_TYPE_METHOD_DECLARATION.substitute(env))
             top_env['type_method_declarations'].append(
                 TYPE_METHOD_DECLARATION_ABSTRACT.substitute(env))
             top_env['type_method_definitions'].append(
                 TYPE_METHOD_DEFINITION_ABSTRACT.substitute(env))
         else:
+            top_env['pure_virtual_type_method_declarations'].append(
+                PURE_VIRTUAL_TYPE_METHOD_DECLARATION_BROADCAST.substitute(env))
+            top_env['pure_virtual_type_method_declarations'].append(
+                PURE_VIRTUAL_TYPE_METHOD_DECLARATION.substitute(env))
             top_env['type_method_declarations'].append(
                 TYPE_METHOD_DECLARATION_BROADCAST.substitute(env))
             top_env['type_method_declarations'].append(
@@ -1030,9 +1048,12 @@ def create_generic(top_env, declarations):
         # Factory methods are not dispatched over `Type`.
         if not is_factory_method:
             if option['deprecated']:
-                top_env['type_method_declarations'].append(DEPRECATED_TYPE_METHOD_DECLARATION_CONCRETE.substitute(env))
+                top_env['pure_virtual_type_method_declarations'].append(
+                    DEPRECATED_PURE_VIRTUAL_TYPE_METHOD_DECLARATION.substitute(env))
             else:
-                top_env['type_method_declarations'].append(TYPE_METHOD_DECLARATION_CONCRETE.substitute(env))
+                top_env['pure_virtual_type_method_declarations'].append(
+                    PURE_VIRTUAL_TYPE_METHOD_DECLARATION.substitute(env))
+            top_env['type_method_declarations'].append(TYPE_METHOD_DECLARATION_CONCRETE.substitute(env))
         dispatch = option['type_method_definition_dispatch']
         option['native_type_method_dispatch'] = dispatch
 
@@ -1088,7 +1109,7 @@ def create_generic(top_env, declarations):
                 option['inferred_type'] = 'infer_type({})'.format(dispatch_tensor)
             else:
                 # doesn't depend on a specific type, use undefined float
-                option['inferred_type'] = 'at::getType(at::Backend::Undefined, at::ScalarType::Float)'
+                option['inferred_type'] = 'at::getNonVariableType(at::Backend::Undefined, at::ScalarType::Float)'
             declaration = DEPRECATED_FUNCTION_DECLARATION if option['deprecated'] else FUNCTION_DECLARATION
             top_env['function_declarations'].append(declaration.substitute(env))
             if is_factory_method:
@@ -1230,7 +1251,7 @@ def create_derived(backend_type_env, declarations):
         if broadcasts_arg:
             return []
         zero_dim_actuals = [arg['name']
-                            if arg['name'] != zero_dim_dispatch else "Scalar({})".format(arg['name'])
+                            if arg['name'] != zero_dim_dispatch else "{}._local_scalar()".format(arg['name'])
                             for arg in option['formals_list']]
         return [ZERO_DIM_CHECK.substitute(env, check_name=zero_dim_dispatch, zero_dim_actuals=zero_dim_actuals)]
 
@@ -1374,19 +1395,12 @@ def create_derived(backend_type_env, declarations):
                     if 'default_init' in arg:
                         default_init.append(arg['default_init'])
 
-                    if arg['type'] in DIRECT_CONSTRUCTION_CHECKED_CAST:
-                        body.append(CHECKED_CAST[arg['type']].substitute(
-                            env, arg_name=arg['name'], arg_pos=count,
-                            null_okay=null_okay, default_init=default_init,
-                            size=arg.get('size'),
-                            result_name=arg['name'] + '_'))
-                    else:
-                        check_cast = CHECKED_CAST[arg['type']].substitute(
-                            env, arg_name=arg['name'], arg_pos=count,
-                            null_okay=null_okay, default_init=default_init,
-                            size=arg.get('size'))
-                        body.append("auto {}_ = {};".format(
-                            arg['name'], check_cast))
+                    check_cast = CHECKED_CAST[arg['type']].substitute(
+                        env, arg_name=arg['name'], arg_pos=count,
+                        null_okay=null_okay, default_init=default_init,
+                        size=arg.get('size'))
+                    body.append("auto {}_ = {};".format(
+                        arg['name'], check_cast))
                 if drop_argument(arg, option) or replace_with_null(arg):
                     body.append(
                         "(void) {}_; //silence unused warning".format(arg['name']))

@@ -43,8 +43,8 @@ struct PyTensorType {
   // Precondition: Access to this struct is protected by the GIL
   at::Type* aten_type() {
     if (!aten_type_) {
-      auto* baseType = globalContext().getTypeOpt(static_cast<at::Backend>(backend), static_cast<at::ScalarType>(scalar_type));
-      aten_type_ = baseType ? torch::autograd::VariableType::getType(*baseType) : nullptr;
+      auto* baseType = globalContext().getNonVariableTypeOpt(static_cast<at::Backend>(backend), static_cast<at::ScalarType>(scalar_type));
+      aten_type_ = baseType ? torch::autograd::VariableType::getVariableTypeFromBaseType(*baseType) : nullptr;
     }
     return aten_type_;
   }
@@ -119,8 +119,8 @@ PyObject *Tensor_is_sparse(PyTensorType *self) {
 }
 
 static struct PyMethodDef metaclass_methods[] = {
-  {"__instancecheck__", (PyCFunction)Tensor_instancecheck, METH_O, NULL},
-  {NULL}
+  {"__instancecheck__", (PyCFunction)Tensor_instancecheck, METH_O, nullptr},
+  {nullptr}
 };
 
 typedef PyObject *(*getter)(PyObject *, void *);
@@ -151,7 +151,7 @@ static void py_initialize_metaclass(PyTypeObject& metaclass) {
 static void py_initialize_tensor_type(PyTypeObject& type, const char* name, PyObject* tp_dict) {
   // NOTE: we don't use the typical static declaration of PyTypeObject because
   // we need to initialize as many types as there are VariableType instances.
-  // The typical PyVarObject_HEAD_INIT(NULL, 0) is described in the Python
+  // The typical PyVarObject_HEAD_INIT(nullptr, 0) is described in the Python
   // documentation: it initializes the refcnt to 1 and the other object header
   // fields to zero.
   memset(&type, 0, sizeof(PyTypeObject));
@@ -171,10 +171,10 @@ static void py_initialize_tensor_type(PyTypeObject& type, const char* name, PyOb
 
 static const char* get_module(Backend backend) {
   switch (backend) {
-    case kCPU: return "torch";
-    case kCUDA: return "torch.cuda";
-    case kSparseCPU: return "torch.sparse";
-    case kSparseCUDA: return "torch.cuda.sparse";
+    case Backend::CPU: return "torch";
+    case Backend::CUDA: return "torch.cuda";
+    case Backend::SparseCPU: return "torch.sparse";
+    case Backend::SparseCUDA: return "torch.cuda.sparse";
     default: AT_ERROR("invalid backend: ", toString(backend));
   }
 }
@@ -389,8 +389,8 @@ at::Type& get_default_tensor_type() {
 
 Device getDevice(const at::Tensor& tensor) {
   if (tensor.type().is_cuda()) {
-    return at::Device(at::kCUDA, tensor.get_device());
+    return at::Device(at::DeviceType::CUDA, tensor.get_device());
   }
-  return at::Device(at::kCPU);
+  return at::Device(at::DeviceType::CPU);
 }
 }} // namespace torch::tensors

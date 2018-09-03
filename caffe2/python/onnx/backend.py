@@ -861,7 +861,6 @@ class Caffe2Backend(Backend):
                 c2ops = cls._onnx_node_to_caffe2_op(
                     None, None, node, opset_version)
             except Exception as e:
-                success = False
                 print('ONNX FATAL:', e)
                 continue
             net.op.extend(c2ops.init_ops)

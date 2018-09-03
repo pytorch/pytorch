@@ -337,7 +337,7 @@ struct PreprocessGraph {
 struct ContainerTensor : public at::TensorImpl {
 public:
   ContainerTensor()
-  : TensorImpl(at::Backend::Undefined,at::ScalarType::Undefined, nullptr, /* is_variable */ false) {}
+  : TensorImpl(at::UndefinedTensorId(), at::ScalarType::Undefined, /* is_variable */ false) {}
 
   virtual ~ContainerTensor() = default;
   virtual at::IntList sizes() const override {
@@ -349,10 +349,7 @@ public:
   virtual int64_t dim() const override {
     throw std::runtime_error("dim() on ContainerTensor");
   }
-  virtual void * unsafeGetTH(bool retain) override {
-    throw std::runtime_error("unsafeGetTH() on ContainerTensor");
-  }
-  virtual std::unique_ptr<at::Storage> storage() override {
+  virtual const at::Storage& storage() const override {
     throw std::runtime_error("storage() on ContainerTensor");
   }
 };
@@ -518,7 +515,7 @@ struct CodeImpl {
 
   size_t insertInstruction(Node * n) {
     auto inst = insertInstruction(n->kind(), n->getSourceLocation(), n->inputs(), moveFlags(n) , n->outputs());
-    instructions[inst].callback = getInterpreterOperation(n);
+    instructions[inst].callback = getOperation(n);
     return inst;
   }
   size_t insertInstruction(Symbol sym,
@@ -606,27 +603,16 @@ struct CodeImpl {
     return r;
   }
 
-  // Returns a function implementing functionality of a given node,
-  // or nullptr if it's a no-op for autograd.
-  Operation getInterpreterOperation(jit::Node* node) {
-    if(node->kind() != prim::GraphExecutor) {
-      return getOperation(node);
+  const std::vector<GraphExecutor*>& grad_executors() {
+    if (!grad_executors_) {
+      grad_executors_.emplace();
+      for (Instruction & instr : instructions) {
+        if (auto executor = detail::getGradExecutor(instr.callback)) {
+          grad_executors_->push_back(executor);
+        }
+      }
     }
-    // recursive graph executors cannot be Operators because they
-    // have to register themselves with the interpreter so that
-    // we can provide useful debugging information
-
-    auto executor = std::make_shared<GraphExecutor>(node->g(attr::Subgraph));
-    graph_executors.emplace_back(executor.get());
-    return [=](Stack& stack) mutable {
-      autograd::profiler::RecordFunction record("GraphExecutor");
-      executor->run(stack);
-      return 0;
-    };
-  }
-
-  const std::vector<GraphExecutor*>& executors() {
-    return graph_executors;
+    return *grad_executors_;
   }
 
   void dumpInstruction(std::ostream & out, size_t pc) const {
@@ -667,7 +653,7 @@ struct CodeImpl {
   // It is also very useful for debugging interpreter problems to
   // keep this around.
   std::shared_ptr<Graph> graph;
-  std::vector<GraphExecutor*> graph_executors; // for debugging
+  at::optional<std::vector<GraphExecutor*>> grad_executors_;
   PreprocessGraph preprocess;
 
   std::unordered_map<size_t, int> unique_to_reg; // map from unique of nodes to register in register table
@@ -722,9 +708,6 @@ struct InterpreterStateImpl {
     current_pc = pc;
     current_stage++;
   }
-  const TensorType & tensorTypeForInput(size_t i) const {
-    return *function->preprocess.stage_input_types.at(current_stage).at(i)->expect<TensorType>();
-  }
   int get(const ListHandle<int> & list, int i) {
     return int_data[list.start + i];
   };
@@ -777,8 +760,8 @@ Code::Code(std::shared_ptr<Graph>& graph)
     : pImpl(new CodeImpl(graph)) {}
 Code::~Code() = default;
 
-const std::vector<GraphExecutor*>& Code::executors() {
-  return pImpl->executors();
+const std::vector<GraphExecutor*>& Code::grad_executors() {
+  return pImpl->grad_executors();
 }
 
 InterpreterState::InterpreterState(const Code & code)
@@ -787,10 +770,6 @@ InterpreterState::~InterpreterState() = default;
 
 void InterpreterState::runOneStage(Stack & stack) {
   return pImpl->runOneStage(stack);
-}
-
-const TensorType & InterpreterState::tensorTypeForInput(size_t i) const {
-  return pImpl->tensorTypeForInput(i);
 }
 
 InterpreterState InterpreterState::clone() const {

@@ -74,12 +74,12 @@ class PrintOp final : public Operator<Context> {
       : Operator<Context>(operator_def, ws),
         tensor_printer_(
             operator_def.input(0),
-            OperatorBase::GetSingleArgument<int>("to_file", 0)
+            this->template GetSingleArgument<int>("to_file", 0)
                 ? ws->RootFolder() + "/" + operator_def.input(0) +
                     kPrintFileExtension
                 : "",
-            OperatorBase::GetSingleArgument<int>("limit", 0)),
-        every_n_(OperatorBase::GetSingleArgument<int>("every_n", 1)) {
+            this->template GetSingleArgument<int>("limit", 0)),
+        every_n_(this->template GetSingleArgument<int>("every_n", 1)) {
     CAFFE_ENFORCE_GE(every_n_, 1);
   }
 
@@ -91,8 +91,8 @@ class PrintOp final : public Operator<Context> {
       return true;
     }
 
-    if (!OperatorBase::InputIsType<Tensor>(0, Context::GetDeviceType()) &&
-        !OperatorBase::InputIsType<Tensor>(0, CPU)) {
+    if (!this->template InputIsType<Tensor>(0, Context::GetDeviceType()) &&
+        !this->template InputIsType<Tensor>(0, CPU)) {
       LOG(INFO) << "Blob of type: "
                 << OperatorBase::Inputs().at(0)->meta().name();
       return true;
@@ -113,9 +113,9 @@ class PrintOp final : public Operator<Context> {
         unsigned char,
         std::string>;
 
-    if (OperatorBase::InputIsType<Tensor>(0, CPU)) {
+    if (this->template InputIsType<Tensor>(0, CPU)) {
       return DispatchHelper<Types>::call(
-          this, OperatorBase::Input<Tensor>(0, CPU));
+          this, this->template Input<Tensor>(0, CPU));
     } else {
       return DispatchHelper<Types>::call(this, Input(0));
     }
@@ -129,8 +129,8 @@ class PrintOp final : public Operator<Context> {
     // will handle memory deallocation itself so no smart pointer is needed.
     const TensorCPU* tensor;
     Tensor tensor_copy_if_needed(CPU);
-    if (OperatorBase::InputIsType<Tensor>(0, CPU)) {
-      tensor = &OperatorBase::Input<Tensor>(0, CPU);
+    if (this->template InputIsType<Tensor>(0, CPU)) {
+      tensor = &this->template Input<Tensor>(0, CPU);
     } else {
       tensor_copy_if_needed.CopyFrom(Input(0), &context_);
       // Make sure that the copy is finished.
@@ -321,45 +321,70 @@ class WeightedSumOp : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   USE_SIMPLE_CTOR_DTOR(WeightedSumOp);
 
-  template <typename DstType>
+  bool RunOnDevice() override;
+
+  template <typename T>
   bool DoRunWithType() {
-    CAFFE_ENFORCE_EQ(InputSize() % 2, 0);
-    auto& X0 = Input(0);
-    auto& weight0 = Input(1);
+    const int input_size = InputSize();
+    CAFFE_ENFORCE_EQ(input_size % 2, 0);
+    const auto& X0 = Input(0);
+    const auto& weight0 = Input(1);
     CAFFE_ENFORCE_GT(X0.size(), 0);
     CAFFE_ENFORCE_EQ(weight0.size(), 1);
-    int size = X0.size();
-    auto* output = Output(0);
-    output->ResizeLike(X0);
-    math::Scale<float, DstType, Context>(
+    const int size = X0.size();
+    auto* Y = Output(0);
+    if (Y != &X0) {
+      Y->ResizeLike(X0);
+    }
+    T* Y_data = Y->template mutable_data<T>();
+    if (input_size == 2) {
+      math::Scale<float, T>(
+          size,
+          weight0.template data<float>(),
+          X0.template data<T>(),
+          Y_data,
+          &context_);
+      return true;
+    }
+    const auto& X1 = Input(2);
+    CAFFE_ENFORCE_NE(
+        &X1,
+        Y,
+        "Input #2 is the same as output. If you want to do in-place updates, "
+        "put the output as input #0.");
+    const auto& weight1 = Input(3);
+    CAFFE_ENFORCE_EQ(X1.size(), size);
+    CAFFE_ENFORCE_EQ(weight1.size(), 1);
+    if (Y != &X0) {
+      context_.template CopySameDevice<T>(size, X0.template data<T>(), Y_data);
+    }
+    math::Axpby<float, T, Context>(
         size,
+        weight1.template data<float>(),
+        X1.template data<T>(),
         weight0.template data<float>(),
-        X0.template data<DstType>(),
-        output->template mutable_data<DstType>(),
+        Y_data,
         &context_);
-    for (int i = 2; i < InputSize(); i += 2) {
-      auto& X = Input(i);
+    for (int i = 4; i < input_size; i += 2) {
+      const auto& Xi = Input(i);
       // Do a check: if the input is the same as output, we have a problem -
       // in-place update should always only happen with the zeroth input.
-      if (&X == output) {
-        LOG(ERROR) << "Input #" << i << " is the same as output. "
-                   << "If you want to do in-place updates, put the output as "
-                   << "input #0.";
-        return false;
-      }
-      auto& weight = Input(i + 1);
-      CAFFE_ENFORCE_EQ(X.size(), size);
-      CAFFE_ENFORCE_EQ(weight.size(), 1);
-      math::Axpy<DstType, Context>(
+      const std::string err_msg = "Input #" + to_string(i) +
+          " is the same as output. If you want to do in-place updates, "
+          "put the output as input #0.";
+      CAFFE_ENFORCE_NE(&Xi, Y, err_msg);
+      const auto& weighti = Input(i + 1);
+      CAFFE_ENFORCE_EQ(Xi.size(), size);
+      CAFFE_ENFORCE_EQ(weighti.size(), 1);
+      math::Axpy<T, Context>(
           size,
-          weight.template data<float>(),
-          X.template data<DstType>(),
-          output->template mutable_data<DstType>(),
+          weighti.template data<float>(),
+          Xi.template data<T>(),
+          Y_data,
           &context_);
     }
     return true;
   }
-  bool RunOnDevice() override;
 };
 
 template <class Context>
@@ -369,7 +394,8 @@ class WeightedSumGradientOp : public Operator<Context> {
 
   WeightedSumGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        grad_on_w_(OperatorBase::GetSingleArgument<bool>("grad_on_w", false)) {}
+        grad_on_w_(this->template GetSingleArgument<bool>("grad_on_w", false)) {
+  }
 
   template <typename DstType>
   bool DoRunWithType() {
@@ -679,8 +705,9 @@ class CopyOp : public Operator<Context> {
   USE_SIMPLE_CTOR_DTOR(CopyOp);
 
   bool RunOnDevice() override {
-    auto& input = OperatorBase::Input<Tensor>(0, SrcContext::GetDeviceType());
-    auto* output = OperatorBase::Output<Tensor>(0, DstContext::GetDeviceType());
+    auto& input = this->template Input<Tensor>(0, SrcContext::GetDeviceType());
+    auto* output =
+        this->template Output<Tensor>(0, DstContext::GetDeviceType());
     output->ResizeLike(input);
     this->context_.template CopyItems<SrcContext, DstContext>(
         input.meta(),
@@ -703,9 +730,6 @@ class LengthsToSegmentIdsOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   USE_SIMPLE_CTOR_DTOR(LengthsToSegmentIdsOp);
-
-  // TODO: enable the InputFillers
-  DISABLE_INPUT_FILLERS(Context)
 
   bool RunOnDevice() override {
     auto& input = Input(0);
@@ -761,9 +785,6 @@ class SegmentIdsToLengthsOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   USE_SIMPLE_CTOR_DTOR(SegmentIdsToLengthsOp);
-
-  // TODO: enable the InputFillers
-  DISABLE_INPUT_FILLERS(Context)
 
   bool RunOnDevice() override {
     return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(this, Input(0));
@@ -822,9 +843,6 @@ class SegmentIdsToRangesOp : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   USE_SIMPLE_CTOR_DTOR(SegmentIdsToRangesOp);
 
-  // TODO: enable the InputFillers
-  DISABLE_INPUT_FILLERS(Context)
-
   bool RunOnDevice() override {
     return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(this, Input(0));
   }
@@ -879,7 +897,7 @@ class LengthsToWeightsOp : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   LengthsToWeightsOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        power_(OperatorBase::GetSingleArgument<float>("power", 0.5)) {}
+        power_(this->template GetSingleArgument<float>("power", 0.5)) {}
 
   bool RunOnDevice() override {
     return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(this, Input(0));
@@ -951,21 +969,6 @@ class HasElementsOp : public Operator<Context> {
   }
 };
 
-template <class Context>
-class IsEmptyOp : public Operator<Context> {
- public:
-  USE_OPERATOR_CONTEXT_FUNCTIONS;
-  USE_SIMPLE_CTOR_DTOR(IsEmptyOp);
-
-  bool RunOnDevice() override {
-    auto& input = Input(0);
-    auto* output = Output(0);
-    output->Resize(std::vector<TIndex>{});
-    *output->template mutable_data<bool>() = (input.size() == 0);
-    return true;
-  }
-};
-
 // Return the size of a tensor
 template <class Context>
 class SizeOp : public Operator<Context> {
@@ -1027,7 +1030,7 @@ class GatherRangesOp : public Operator<Context> {
 
   bool RunOnDevice() override {
     return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
-        this, OperatorBase::Input<Tensor>(RANGES, CPU));
+        this, this->template Input<Tensor>(RANGES, CPU));
   }
 
   template <typename Index>
@@ -1106,7 +1109,7 @@ class LengthsGatherOp : public Operator<Context> {
 
   bool RunOnDevice() override {
     return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
-        this, OperatorBase::Input<Tensor>(INDICES, CPU));
+        this, this->template Input<Tensor>(INDICES, CPU));
   }
 
   template <typename Index>
@@ -1231,10 +1234,10 @@ class AccumulateHistogramOp : public Operator<Context> {
   AccumulateHistogramOp(const OperatorDef& def, Workspace* ws)
       : Operator<Context>(def, ws),
         lower_bound_(
-            OperatorBase::GetSingleArgument<float>("lower_bound", 0.0)),
+            this->template GetSingleArgument<float>("lower_bound", 0.0)),
         upper_bound_(
-            OperatorBase::GetSingleArgument<float>("upper_bound", 1.0)),
-        num_buckets_(OperatorBase::GetSingleArgument<int>("num_buckets", 1)) {
+            this->template GetSingleArgument<float>("upper_bound", 1.0)),
+        num_buckets_(this->template GetSingleArgument<int>("num_buckets", 1)) {
     CAFFE_ENFORCE_GT(num_buckets_, 0);
     // 2 more for histograms < lower_bound, >= upper_bound respectively
     num_output_buckets_ = num_buckets_ + 2;

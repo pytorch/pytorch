@@ -68,7 +68,7 @@ PyObject* tensor_to_numpy(const at::Tensor& tensor) {
       0,
       NPY_ARRAY_ALIGNED | NPY_ARRAY_WRITEABLE,
       nullptr));
-  if (!array) return NULL;
+  if (!array) return nullptr;
 
   // TODO: This attempts to keep the underlying memory alive by setting the base
   // object of the ndarray to the tensor and disabling resizes on the storage.
@@ -77,9 +77,10 @@ PyObject* tensor_to_numpy(const at::Tensor& tensor) {
   PyObject* py_tensor = THPVariable_Wrap(make_variable(tensor, false));
   if (!py_tensor) throw python_error();
   if (PyArray_SetBaseObject((PyArrayObject*)array.get(), py_tensor) == -1) {
-    return NULL;
+    return nullptr;
   }
-  tensor.storage()->pImpl()->set_resizable(false);
+  // Use the private storage API
+  tensor.storage().unsafeGetStorageImpl()->set_resizable(false);
 
   return array.release();
 }
@@ -117,6 +118,11 @@ at::Tensor tensor_from_numpy(PyObject* obj) {
 
   void* data_ptr = PyArray_DATA(array);
   auto& type = CPU(numpy_dtype_to_aten(PyArray_TYPE(array)));
+  if (!PyArray_EquivByteorders(PyArray_DESCR(array)->byteorder, NPY_NATIVE)) {
+    throw ValueError(
+        "given numpy array has byte order different from the native byte order. "
+        "Conversion between byte orders is currently not supported.");
+  }
   Py_INCREF(obj);
   return type.tensorFromBlob(data_ptr, sizes, strides, [obj](void* data) {
     AutoGIL gil;
@@ -135,7 +141,7 @@ static int aten_to_dtype(const at::Type& type) {
         "can't convert sparse tensor to numpy. Use Tensor.to_dense() to "
         "convert to a dense tensor first.");
   }
-  if (type.backend() == kCPU) {
+  if (type.backend() == Backend::CPU) {
     switch (type.scalarType()) {
       case kDouble: return NPY_DOUBLE;
       case kFloat: return NPY_FLOAT;

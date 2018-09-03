@@ -14,7 +14,10 @@
  * limitations under the License.
  */
 
+#include <chrono>
+#include <fstream>
 #include <string>
+#include <thread>
 
 #include "binaries/benchmark_helper.h"
 #include "caffe2/core/blob_serialization.h"
@@ -241,7 +244,7 @@ void runNetwork(
     caffe2::wipe_cache();
   }
   if (sleep_before_run > 0) {
-    sleep(sleep_before_run);
+    std::this_thread::sleep_for(std::chrono::seconds(sleep_before_run));
   }
   LOG(INFO) << "Main runs.";
   CAFFE_ENFORCE(
@@ -306,4 +309,88 @@ void writeOutput(
       }
     }
   }
+}
+
+int benchmark(
+    int argc,
+    char* argv[],
+    const string& FLAGS_backend,
+    const string& FLAGS_init_net,
+    const string& FLAGS_input,
+    const string& FLAGS_input_dims,
+    const string& FLAGS_input_file,
+    const string& FLAGS_input_type,
+    int FLAGS_iter,
+    const string& FLAGS_net,
+    const string& FLAGS_output,
+    const string& FLAGS_output_folder,
+    bool FLAGS_run_individual,
+    int FLAGS_sleep_before_run,
+    bool FLAGS_text_output,
+    int FLAGS_warmup,
+    bool FLAGS_wipe_cache) {
+  // Check arguments to be correct
+  {
+    // Need to check whether file exists, as the file reader does not assert if
+    // file does not exist
+    std::ifstream net_file(FLAGS_net);
+    CAFFE_ENFORCE(net_file.good());
+
+    std::ifstream init_net_file(FLAGS_init_net);
+    CAFFE_ENFORCE(init_net_file.good());
+
+    if (FLAGS_input_file.size() > 0) {
+      vector<string> input_files = caffe2::split(',', FLAGS_input_file);
+      for (auto input_file : input_files) {
+        std::ifstream ifile(input_file);
+        CAFFE_ENFORCE(ifile.good());
+      }
+    }
+  }
+
+  observerConfig();
+  caffe2::ShowLogInfoToStderr();
+
+  auto workspace = std::make_shared<caffe2::Workspace>(new caffe2::Workspace());
+  bool run_on_gpu = backendCudaSet(FLAGS_backend);
+  // Run initialization network.
+  caffe2::NetDef init_net_def;
+  CAFFE_ENFORCE(ReadProtoFromFile(FLAGS_init_net, &init_net_def));
+  setOperatorEngine(&init_net_def, FLAGS_backend);
+  CAFFE_ENFORCE(workspace->RunNetOnce(init_net_def));
+
+  // Run main network.
+  caffe2::NetDef net_def;
+  CAFFE_ENFORCE(ReadProtoFromFile(FLAGS_net, &net_def));
+  setOperatorEngine(&net_def, FLAGS_backend);
+
+  map<string, caffe2::TensorProtos> tensor_protos_map;
+
+  loadInput(
+      workspace,
+      run_on_gpu,
+      tensor_protos_map,
+      FLAGS_input,
+      FLAGS_input_file,
+      FLAGS_input_dims,
+      FLAGS_input_type);
+
+  runNetwork(
+      workspace,
+      net_def,
+      tensor_protos_map,
+      FLAGS_wipe_cache,
+      FLAGS_run_individual,
+      FLAGS_warmup,
+      FLAGS_iter,
+      FLAGS_sleep_before_run);
+
+  writeOutput(
+      workspace,
+      run_on_gpu,
+      FLAGS_output,
+      FLAGS_output_folder,
+      FLAGS_text_output);
+
+  return 0;
 }

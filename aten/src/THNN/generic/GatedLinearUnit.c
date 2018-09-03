@@ -15,7 +15,7 @@ void THNN_(GatedLinear_updateOutput)(
       dim + TH_INDEX_BASE, nIn);
 
   const int64_t inputSize = THTensor_(size)(input, dim) / 2;
-  std::vector<int64_t> newSizes = input->sizes().vec();
+  std::vector<int64_t> newSizes = THTensor_sizesLegacyNoScalars(input);
   newSizes[dim] = inputSize;
   THTensor_(resize)(output, newSizes, {});
 
@@ -27,8 +27,8 @@ void THNN_(GatedLinear_updateOutput)(
   THTensor_(sigmoid)(output, secondHalf);
   THTensor_(cmul)(output, output, firstHalf);
 
-  THTensor_(free)(firstHalf);
-  THTensor_(free)(secondHalf);
+  c10::raw::intrusive_ptr::decref(firstHalf);
+  c10::raw::intrusive_ptr::decref(secondHalf);
 }
 
 void THNN_(GatedLinear_updateGradInput)(
@@ -53,8 +53,8 @@ void THNN_(GatedLinear_updateGradInput)(
 
   THTensor_(sigmoid)(gradInputfirstHalf, secondHalf);
 
-  TH_TENSOR_APPLY2(real, gradInputsecondHalf, real, gradInputfirstHalf,
-    real z = *gradInputfirstHalf_data;
+  TH_TENSOR_APPLY2(scalar_t, gradInputsecondHalf, scalar_t, gradInputfirstHalf,
+    scalar_t z = *gradInputfirstHalf_data;
     *gradInputsecondHalf_data = (1. - z) * z;
   );
 
@@ -63,10 +63,10 @@ void THNN_(GatedLinear_updateGradInput)(
   THTensor_(cmul)(gradInputsecondHalf, gradInputsecondHalf, gradOutput);
   THTensor_(cmul)(gradInputsecondHalf, gradInputsecondHalf, firstHalf);
 
-  THTensor_(free)(firstHalf);
-  THTensor_(free)(secondHalf);
-  THTensor_(free)(gradInputfirstHalf);
-  THTensor_(free)(gradInputsecondHalf);
+  c10::raw::intrusive_ptr::decref(firstHalf);
+  c10::raw::intrusive_ptr::decref(secondHalf);
+  c10::raw::intrusive_ptr::decref(gradInputfirstHalf);
+  c10::raw::intrusive_ptr::decref(gradInputsecondHalf);
 }
 
 #endif

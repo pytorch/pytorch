@@ -83,9 +83,9 @@ class AdamOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   AdamOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        beta1_(OperatorBase::GetSingleArgument<float>("beta1", 0.9f)),
-        beta2_(OperatorBase::GetSingleArgument<float>("beta2", 0.999f)),
-        epsilon_(OperatorBase::GetSingleArgument<float>("epsilon", 1e-5f)) {}
+        beta1_(this->template GetSingleArgument<float>("beta1", 0.9f)),
+        beta2_(this->template GetSingleArgument<float>("beta2", 0.999f)),
+        epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5f)) {}
   bool RunOnDevice() override {
     // Iter live on the CPU
     CAFFE_ENFORCE(OperatorBase::InputIsType<Tensor>(ITER, CPU));
@@ -156,9 +156,9 @@ class SparseAdamOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   SparseAdamOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        beta1_(OperatorBase::GetSingleArgument<float>("beta1", 0.9f)),
-        beta2_(OperatorBase::GetSingleArgument<float>("beta2", 0.999f)),
-        epsilon_(OperatorBase::GetSingleArgument<float>("epsilon", 1e-5f)) {}
+        beta1_(this->template GetSingleArgument<float>("beta1", 0.9f)),
+        beta2_(this->template GetSingleArgument<float>("beta2", 0.999f)),
+        epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5f)) {}
 
   bool RunOnDevice() override {
     // Enforce shapes
@@ -266,9 +266,9 @@ class RowWiseSparseAdamOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   RowWiseSparseAdamOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        beta1_(OperatorBase::GetSingleArgument<float>("beta1", 0.9f)),
-        beta2_(OperatorBase::GetSingleArgument<float>("beta2", 0.999f)),
-        epsilon_(OperatorBase::GetSingleArgument<float>("epsilon", 1e-5f)) {}
+        beta1_(this->template GetSingleArgument<float>("beta1", 0.9f)),
+        beta2_(this->template GetSingleArgument<float>("beta2", 0.999f)),
+        epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5f)) {}
 
   bool RunOnDevice() override {
     // Enforce shapes

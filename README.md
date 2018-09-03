@@ -56,8 +56,8 @@ If you use NumPy, then you have used Tensors (a.k.a ndarray).
 
 ![Tensor illustration](https://github.com/pytorch/pytorch/blob/master/docs/source/_static/img/tensor_illustration.png)
 
-PyTorch provides Tensors that can live either on the CPU or the GPU, and accelerate
-compute by a huge amount.
+PyTorch provides Tensors that can live either on the CPU or the GPU, and accelerates the
+computation by a huge amount.
 
 We provide a wide variety of tensor routines to accelerate and fit your scientific computation needs
 such as slicing, indexing, math operations, linear algebra, reductions.
@@ -105,8 +105,7 @@ We hope you never spend hours debugging your code because of bad stack traces or
 PyTorch has minimal framework overhead. We integrate acceleration libraries
 such as Intel MKL and NVIDIA (cuDNN, NCCL) to maximize speed.
 At the core, its CPU and GPU Tensor and neural network backends
-(TH, THC, THNN, THCUNN) are written as independent libraries with a C99 API.
-They are mature and have been tested for years.
+(TH, THC, THNN, THCUNN) are mature and have been tested for years.
 
 Hence, PyTorch is quite fast – whether you run small or large neural networks.
 
@@ -211,7 +210,7 @@ python setup.py install
 
 ### Docker image
 
-Dockerfile is supplied to build images with cuda support and cudnn v7. Build as usual
+Dockerfile is supplied to build images with cuda support and cudnn v7. You can pass -e PYTHON_VERSION=x.y flag to specificy which python to be used by Miniconda, or leave it unset to use the default. Build as usual
 ```
 docker build -t pytorch -f docker/pytorch/Dockerfile .
 ```

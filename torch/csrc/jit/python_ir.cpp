@@ -1,7 +1,6 @@
 #include "torch/csrc/python_headers.h"
 
 #include "torch/csrc/jit/ir.h"
-#include "torch/csrc/jit/import.h"
 #include "torch/csrc/jit/pybind.h"
 #include "torch/csrc/jit/python_tracer.h"
 #include "torch/csrc/utils/pybind.h"
@@ -168,15 +167,19 @@ void initPythonIRBindings(PyObject * module_) {
        py::arg("onnx_opset_version")=0,
        py::arg("defer_weight_export")=false,
        py::arg("operator_export_type")=::torch::onnx::OperatorExportTypes::ONNX)
-    .def("prettyPrintExport", [](const std::shared_ptr<Graph> g, const std::vector<at::Tensor>& initializers,
-                      int64_t onnx_opset_version, bool defer_weight_export,
-                      ::torch::onnx::OperatorExportTypes operator_export_type) {
+    .def("prettyPrintExport", [](const std::shared_ptr<Graph> g,
+          const std::vector<at::Tensor>& initializers,
+          int64_t onnx_opset_version, bool defer_weight_export,
+          ::torch::onnx::OperatorExportTypes operator_export_type,
+          bool google_printer) {
       return PrettyPrintExportedGraph(
-        g, initializers, onnx_opset_version, defer_weight_export, operator_export_type);
+        g, initializers, onnx_opset_version, defer_weight_export, operator_export_type,
+        google_printer);
     }, py::arg("initializers"),
        py::arg("onnx_opset_version")=0,
        py::arg("defer_weight_export")=false,
-       py::arg("operator_export_type")=::torch::onnx::OperatorExportTypes::ONNX)
+       py::arg("operator_export_type")=::torch::onnx::OperatorExportTypes::ONNX,
+       py::arg("google_printer")=false)
     .def("wrapPyFuncWithSymbolic", [](Graph &g, py::function func, std::vector<Value*> inputs, size_t n_outputs, py::function symbolic) {
       // This function should be used for situations where we have a Python function
       // that should have different behavior when exporting for JIT interpreter
@@ -294,6 +297,15 @@ void initPythonIRBindings(PyObject * module_) {
       ss << n;
       return ss.str();
     })
+    .def("getSourceLocation", [](Node & n) -> py::object {
+      std::stringstream ss;
+      if (auto sl = n.getSourceLocation()) {
+        sl->highlight(ss);
+        return py::str(ss.str());
+      } else {
+        return py::none();
+      }
+    })
     .def("hasMultipleOutputs",[](Node&n) {
       return n.outputs().size() > 1;
     })
@@ -309,7 +321,9 @@ void initPythonIRBindings(PyObject * module_) {
     .def("outputs",[](Node &n) {
       return py::make_iterator(n.outputs().begin(), n.outputs().end());
     })
-    .NS(output)
+    .def("output", [](Node &n) {
+      return n.output();
+    })
     .NS(addInput)
     .NS(replaceInput)
     .NS(replaceInputWith)
@@ -325,6 +339,7 @@ void initPythonIRBindings(PyObject * module_) {
     .NS(eraseOutput)
     .NS(addOutput)
     .NS(scopeName)
+    .NS(isNondeterministic)
     .def("blocks", [](Node& n) {
       return py::make_iterator(n.blocks().begin(), n.blocks().end());
     })
@@ -432,21 +447,36 @@ void initPythonIRBindings(PyObject * module_) {
           return "DynamicType";
         case TypeKind::TensorType:
           return "TensorType";
+        case TypeKind::NumberType:
+          return "NumberType";
+        case TypeKind::NoneType:
+          return "NoneType";
+        case TypeKind::CompleteTensorType:
+          return "CompleteTensorType";
         case TypeKind::TupleType:
           return "TupleType";
-        default:
-          AT_ERROR("unknown type kind");
-          return "";
+        case TypeKind::ListType:
+          return "ListType";
+        case TypeKind::IntType:
+          return "IntType";
+        case TypeKind::FloatType:
+          return "FloatType";
+        case TypeKind::StringType:
+          return "StringType";
+        case TypeKind::GeneratorType:
+          return "GeneratorType";
         }
+        // not reachable, but some compilers complain
+        AT_ERROR("Unknown Type Kind");
     })
     .def("sizes",[](Type& t) {
-      return t.expect<TensorType>()->sizes();
+      return t.expect<CompleteTensorType>()->sizes();
     })
     .def("strides",[](Type& t) {
-      return t.expect<TensorType>()->strides();
+      return t.expect<CompleteTensorType>()->strides();
     })
     .def("contiguous",[](Type& t) {
-      return std::static_pointer_cast<Type>(t.expect<TensorType>()->contiguous());
+      return std::static_pointer_cast<Type>(t.expect<CompleteTensorType>()->contiguous());
     })
     .def("scalarType",[](Type& t) {
       return at::toString(t.expect<TensorType>()->scalarType());
@@ -484,22 +514,5 @@ void initPythonIRBindings(PyObject * module_) {
   py::class_<Use>(m,"Use")
   .def_readonly("user",&Use::user)
   .def_readonly("offset",&Use::offset);
-
-  m.def("_jit_import_graph", [](const std::string& serialized_graph) {
-    std::vector<at::Tensor> initializers;
-    auto graph = ImportIRGraph(serialized_graph, initializers);
-    std::vector<torch::autograd::Variable> variables;
-    variables.reserve(initializers.size());
-    for (auto& tensor : initializers) {
-      variables.push_back(torch::autograd::make_variable(
-          std::move(tensor), /*requires_grad=*/false));
-    }
-    return std::make_tuple(graph, variables);
-  });
-  m.def("_jit_import_module", [](const std::shared_ptr<script::Module> module,
-                                 const std::string& serialized_module,
-                                 const std::unordered_map<std::string, std::string>& storages) {
-    ImportIRModule(module, serialized_module, storages);
-  });
 }
 }}

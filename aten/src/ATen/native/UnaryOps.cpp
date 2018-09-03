@@ -47,11 +47,11 @@ Tensor clamp_min(const Tensor& self, Scalar min) {
 
 Tensor& _clamp__cpu(Tensor& self, Scalar min, Scalar max) {
   if (!std::isnan(min.toDouble()) && !std::isnan(max.toDouble())) {
-    return _th_clamp_(self, min, max);
+    return _th_clamp_out(self, self, min, max);
   } else if (std::isnan(min.toDouble())) {
-    return _th_clamp_max_(self, max);
+    return _th_clamp_max_out(self, self, max);
   } else if (std::isnan(max.toDouble())) {
-    return _th_clamp_min_(self, min);
+    return _th_clamp_min_out(self, self, min);
   } else {
     return self;
   }
@@ -62,36 +62,30 @@ Tensor& _clamp_out_cpu(
     const Tensor& self,
     Scalar min,
     Scalar max) {
-  result.resize_(self.sizes());
-  result.copy_(self);
   if (!std::isnan(min.toDouble()) && !std::isnan(max.toDouble())) {
-    _th_clamp_(result, min, max);
+    _th_clamp_out(result, self, min, max);
   } else if (std::isnan(min.toDouble())) {
-    _th_clamp_max_(result, max);
+    _th_clamp_max_out(result, self, max);
   } else if (std::isnan(max.toDouble())) {
-    _th_clamp_min_(result, min);
+    _th_clamp_min_out(result, self, min);
   }
   return result;
 }
 
 Tensor& _clamp_max__cpu(Tensor& self, Scalar max) {
-  return _th_clamp_max_(self, max);
+  return _th_clamp_max_out(self, self, max);
 }
 
 Tensor& _clamp_max_out_cpu(Tensor& result, const Tensor& self, Scalar max) {
-  result.resize_(self.sizes());
-  result.copy_(self);
-  return _th_clamp_max_(result, max);
+  return _th_clamp_max_out(result, self, max);
 }
 
 Tensor& _clamp_min__cpu(Tensor& self, Scalar min) {
-  return _th_clamp_min_(self, min);
+  return _th_clamp_min_out(self, self, min);
 }
 
 Tensor& _clamp_min_out_cpu(Tensor& result, const Tensor& self, Scalar min) {
-  result.resize_(self.sizes());
-  result.copy_(self);
-  return _th_clamp_min_(result, min);
+  return _th_clamp_min_out(result, self, min);
 }
 
 Tensor& fill_(Tensor& self, Scalar value) {

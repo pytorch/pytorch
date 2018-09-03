@@ -13,6 +13,7 @@
 #include "torch/csrc/jit/function_schema.h"
 #include "torch/csrc/jit/ivalue.h"
 #include "torch/csrc/jit/type.h"
+#include "torch/csrc/jit/named_value.h"
 
 #include "torch/csrc/utils/disallow_copy.h"
 #include "torch/csrc/utils/functional.h"
@@ -55,7 +56,6 @@ struct Node;
 struct Value;
 
 TORCH_API std::ostream& operator<<(std::ostream & out, const Graph & g);
-TORCH_API std::ostream& operator<<(std::ostream & out, const Type & t);
 TORCH_API std::ostream& operator<<(std::ostream & out, const Node & n);
 
 // A list of nodes, with inputs and outputs
@@ -113,7 +113,7 @@ private:
 public:
   Scope() {
     name_ = Symbol::scope("");
-    parent_ = NULL;
+    parent_ = nullptr;
   }
   Scope(Scope* parent, Symbol name) {
     name_ = name;
@@ -124,13 +124,13 @@ public:
     return children_.back().get();
   }
   Scope* parent() {
-    if (parent_ == NULL) {
+    if (parent_ == nullptr) {
       throw std::runtime_error("Cannot get parent from Scope with no parent");
     }
     return parent_;
   }
   bool isRoot() {
-    return parent_ == NULL;
+    return parent_ == nullptr;
   }
   Scope* getRoot() {
     Scope* current = this;
@@ -183,20 +183,20 @@ private:
 public:
   Value* setType(const TypePtr type);
   void inferTypeFrom(const at::Tensor& output) {
-    setType(TensorType::create(output));
+    setType(CompleteTensorType::create(output));
   }
   const TypePtr & type() const {
     JIT_ASSERT(type_ != nullptr);
     return type_;
   }
   bool isTensor() const {
-    return type()->kind() == TypeKind::TensorType;
+    return type()->kind() == TypeKind::CompleteTensorType;
   }
   size_t unique() const {
     return unique_;
   }
   bool hasUniqueName() const {
-    return unique_name_ != "";
+    return !unique_name_.empty();
   }
   TORCH_API Value* setUniqueName(const std::string & name);
   std::string uniqueName() const {
@@ -330,7 +330,7 @@ public:
     scope_ = scope;
   }
   std::string scopeName() const {
-    if (scope_ == NULL) {
+    if (scope_ == nullptr) {
       return "";
     }
     return scope_->namesFromRoot();
@@ -363,6 +363,9 @@ public:
     // raw pointers are.
     return {outputs_.data(), outputs_.size()};
   }
+  Value * output(size_t i) const {
+    return outputs_.at(i);
+  }
   bool hasUses() const {
     for(auto o : outputs()) {
       if(o->uses().size() > 0)
@@ -392,9 +395,6 @@ public:
     return inputs_.at(0);
   }
   // Access a particular input.  This is a checked index.
-  Value * input(size_t i) {
-    return inputs_.at(i);
-  }
   Value * input(size_t i) const {
     return inputs_.at(i);
   }
@@ -412,9 +412,11 @@ public:
 
 
   // Returns true if the value of input name is statically known
-  bool is_constant(Symbol name) {
+  bool is_constant(Symbol name) const {
     return static_cast<bool>(get(name));
   }
+
+  TORCH_API bool isNondeterministic() const;
 
   // Graphs
 
@@ -677,7 +679,7 @@ public:
   }
 
   // XXX: this function is meant to be used with string literals only!
-  bool matches(const char *signature_literal, at::ArrayRef<Symbol> const_inputs={});
+  bool matches(const char *signature_literal, at::ArrayRef<Symbol> const_inputs={}) const;
 
   const FunctionSchema& schema() const {
     if (!schema_)
@@ -768,10 +770,10 @@ struct Block {
     return static_cast<const Node*>(output_)->inputs();
   }
   graph_node_list nodes() {
-    return graph_node_list(output_, kNextDirection);
+    return {output_, kNextDirection};
   }
   const_graph_node_list nodes() const {
-    return const_graph_node_list(output_, kNextDirection);
+    return {output_, kNextDirection};
   }
   Node * return_node() {
     return output_;
@@ -989,6 +991,9 @@ public:
   Node * createUndefined() {
     return create(prim::Undefined);
   }
+  Node * createNoneGenerator() {
+    return create(prim::NoneGenerator);
+  }
   Node * createFusionGroup(int device) {
     auto n = create(prim::FusionGroup, 0);
     n->g_(attr::Subgraph,std::make_shared<Graph>(scope_root_));
@@ -1018,14 +1023,28 @@ public:
     n->output()->setType(ListType::create(elem_type));
     return n;
   }
+  Node * createListUnpack(Value *v, size_t size) {
+    ListTypePtr list_type = v->type()->expect<ListType>();
+    TypePtr elem_type = list_type->getElementType();
+    auto n = create(prim::ListUnpack, {v}, 0);
+    for (size_t i = 0; i < size; ++i) {
+      n->addOutput()->setType(elem_type);
+    }
+    return n;
+  }
   Node* createNumToTensor(Value* value) {
     auto typ = value->type();
     Node * result = create(prim::NumToTensor, {value});
-    result->output()->setType(TensorType::fromNumberType(typ));
+    result->output()->setType(CompleteTensorType::fromNumberType(typ));
     return result;
   }
   Node* createTensorToNum(const TypePtr& type, Value* value) {
     auto* result = create(prim::TensorToNum, {value});
+    result->output()->setType(type);
+    return result;
+  }
+  Node* createImplicitTensorToNum(const TypePtr& type, Value* value) {
+    auto* result = create(prim::ImplicitTensorToNum, {value});
     result->output()->setType(type);
     return result;
   }
@@ -1072,6 +1091,13 @@ public:
       at::optional<SourceRange> loc = at::nullopt) {
     return jit::insertConstant(*this, std::move(val), loc);
   }
+
+  // schema-driven insert
+  // this inserts a node into the graph with inputs determined from args and kwargs using Python
+  // argument matching rules, and checks that the op matches a known schema
+  // if this node successfully completes, it guarentees the node is a correctly-formed invocation
+  // of opname
+  Value* insert(Symbol opname, at::ArrayRef<NamedValue> args, at::ArrayRef<NamedValue> kwargs = {});
 
   Node * appendNode(Node * n) {
     return block_->appendNode(n);
@@ -1131,7 +1157,7 @@ public:
     return oss.str();
   }
 
-  friend std::ostream& operator<<(std::ostream & out, const Graph & g);
+  friend TORCH_API std::ostream& operator<<(std::ostream & out, const Graph & g);
   TORCH_API std::shared_ptr<Graph> copy();
 
 private:

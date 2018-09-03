@@ -14,7 +14,7 @@
 
 #include <ATen/cudnn/Descriptors.h> // for TensorDescriptor
 #include <ATen/cuda/Exceptions.h> // for CUDNN_CHECK
-#include <ATen/cudnn/Handles.h> // for getCudnnHandle
+#include <ATen/cudnn/Handle.h> // for getCudnnHandle
 
 // Name of function in python module and name used for error messages by
 // at::check* functions.
@@ -31,10 +31,10 @@ void cudnn_relu_check(const at::Tensor& inputs, const at::Tensor& outputs) {
   // TensorArgs.
   at::checkContiguous(cudnn_relu_name, arg_inputs);
   at::checkScalarType(cudnn_relu_name, arg_inputs, at::kFloat);
-  at::checkBackend(cudnn_relu_name, arg_inputs.tensor, at::kCUDA);
+  at::checkBackend(cudnn_relu_name, arg_inputs.tensor, at::Backend::CUDA);
   at::checkContiguous(cudnn_relu_name, arg_outputs);
   at::checkScalarType(cudnn_relu_name, arg_outputs, at::kFloat);
-  at::checkBackend(cudnn_relu_name, arg_outputs.tensor, at::kCUDA);
+  at::checkBackend(cudnn_relu_name, arg_outputs.tensor, at::Backend::CUDA);
   at::checkSameSize(cudnn_relu_name, arg_inputs, arg_outputs);
 }
 

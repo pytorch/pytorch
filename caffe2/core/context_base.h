@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdlib>
 #include <ctime>
 #include <memory>
@@ -9,7 +10,7 @@
 #include "caffe2/core/event.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/typeid.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 
 namespace caffe2 {
 
@@ -19,7 +20,7 @@ class BaseContext;
    functions that are invoked statically before in Tensor class, e.g. New,
    We will merge this with Allocator later.
  */
-class BaseStaticContext {
+class CAFFE2_API BaseStaticContext {
  public:
   virtual ~BaseStaticContext() noexcept {}
 
@@ -48,7 +49,7 @@ class BaseStaticContext {
  * functions in the BaseContext class.
  * TODO: add docs after this is finalized.
  */
-class BaseContext {
+class CAFFE2_API BaseContext {
  public:
   virtual ~BaseContext() noexcept {}
 
@@ -166,19 +167,18 @@ class BaseContext {
       CopyBytesToCPU(n * meta.itemsize(), src, dst);
     }
   }
-
-  CAFFE2_API static BaseStaticContext*
-      static_context_[COMPILE_TIME_MAX_DEVICE_TYPES];
-
-  template <int d>
-  friend struct StaticContextFunctionRegisterer;
 };
+
+CAFFE2_API std::array<BaseStaticContext*, COMPILE_TIME_MAX_DEVICE_TYPES>&
+GetStaticContexts();
+CAFFE2_API void set_static_context(int d, BaseStaticContext* ptr);
+CAFFE2_API BaseStaticContext* get_static_context(int d);
 
 template <int d>
 struct StaticContextFunctionRegisterer {
   explicit StaticContextFunctionRegisterer(BaseStaticContext* ptr) {
     static_assert(d < COMPILE_TIME_MAX_DEVICE_TYPES, "");
-    BaseContext::static_context_[d] = ptr;
+    set_static_context(d, ptr);
   }
 };
 
@@ -187,5 +187,4 @@ struct StaticContextFunctionRegisterer {
   static StaticContextFunctionRegisterer<d> g_static_context_##d(f); \
   }
 
-#define GET_STATIC_CONTEXT(d) BaseContext::static_context_[d]
 } // namespace caffe2

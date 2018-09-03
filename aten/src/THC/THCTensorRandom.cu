@@ -106,14 +106,12 @@ __device__ inline T reverse_bounds(T value) {
 }
 
 
-#ifdef CUDA_HALF_TENSOR
 __device__ inline half half_uniform_scale_and_shift(float x, double a, double b) {
   half width = ScalarConvert<double, half>::to(b - a);
   half start = ScalarConvert<double, half>::to(a);
   half scaled = THCNumerics<half>::mul(reverse_bounds(ScalarConvert<float, half>::to(x)), width);
   return THCNumerics<half>::add(scaled, start);
 }
-#endif
 
 #define GENERATE_KERNEL1(NAME, T, ARG1, CURAND_T, CURAND_FUNC, TRANSFORM)      \
 __global__ void NAME(curandStateMtgp32 *state, int size, T *result, ARG1)      \
@@ -149,9 +147,9 @@ struct is_same { static const bool value = false; };
 template<typename T>
 struct is_same<T, T> { static const bool value = true; };
 
-template<typename real, typename prob_type>
+template<typename T, typename prob_type>
 __global__ void generate_bernoulli_tensor(curandStateMtgp32 *state, int size,
-        real *result, prob_type *probs)
+        T *result, prob_type *probs)
 {
   int idx = blockIdx.x * BLOCK_SIZE + threadIdx.x;
   int rounded_size = THCCeilDiv(size, BLOCK_SIZE) * BLOCK_SIZE;
@@ -159,11 +157,11 @@ __global__ void generate_bernoulli_tensor(curandStateMtgp32 *state, int size,
     if (is_same<prob_type, double>::value) {
       double x = curand_uniform_double(&state[blockIdx.x]);
       if (i < size)
-        result[i] = ScalarConvert<bool, real>::to(x <= probs[i]);
+        result[i] = ScalarConvert<bool, T>::to(x <= probs[i]);
     } else {
       float x = curand_uniform(&state[blockIdx.x]);
       if (i < size)
-        result[i] = ScalarConvert<bool, real>::to(x <= probs[i]);
+        result[i] = ScalarConvert<bool, T>::to(x <= probs[i]);
     }
   }
 }
@@ -182,12 +180,10 @@ GENERATE_KERNEL1(generate_exponential, double, double lambda, double, curand_uni
 GENERATE_KERNEL2(generate_cauchy, float, double median, double sigma, float, curand_uniform, (float)(median + sigma * tan(M_PI*(x-0.5))))
 GENERATE_KERNEL2(generate_cauchy, double, double median, double sigma, double, curand_uniform_double, (double)(median + sigma * tan(M_PI*(x-0.5))))
 
-#ifdef CUDA_HALF_TENSOR
 GENERATE_KERNEL2(generate_uniform, half, double a, double b, float, curand_uniform, (half_uniform_scale_and_shift(x, a, b)))
 GENERATE_KERNEL2(generate_normal, half, double mean, double stdv, float, curand_normal, (ScalarConvert<float, half>::to((x * stdv) + mean)))
 GENERATE_KERNEL1(generate_exponential, half, double lambda, float, curand_uniform, (ScalarConvert<float, half>::to((float)(-1. / lambda * log(x)))))
 GENERATE_KERNEL2(generate_cauchy, half, double median, double sigma, float, curand_uniform, (ScalarConvert<float, half>::to((float)(median + sigma * tan(M_PI*(x-0.5))))))
-#endif // CUDA_HALF_TENSOR
 
 #include "generic/THCTensorRandom.cu"
 #include "THCGenerateAllTypes.h"

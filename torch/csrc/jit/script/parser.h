@@ -7,6 +7,34 @@ namespace torch {
 namespace jit {
 namespace script {
 
+
+Decl mergeTypesFromTypeComment(Decl decl, Decl type_annotation_decl, bool is_method) {
+  auto expected_num_annotations = decl.params().size();
+  if (is_method) {
+    // `self` argument
+    expected_num_annotations -= 1;
+  }
+  if (expected_num_annotations != type_annotation_decl.params().size()) {
+    throw ErrorReport(type_annotation_decl.range()) << "Number of type annotations ("
+      << type_annotation_decl.params().size() << ") did not match the number of "
+      << "function parameters (" << expected_num_annotations << ")";
+  }
+  auto old = decl.params();
+  auto _new = type_annotation_decl.params();
+  // Merge signature idents and ranges with annotation types
+
+  std::vector<Param> new_params;
+  size_t i = is_method ? 1 : 0;
+  size_t j = 0;
+  if (is_method) {
+    new_params.push_back(old[0]);
+  }
+  for (; i < decl.params().size(); ++i, ++j) {
+    new_params.push_back(Param::create(old[i].range(), old[i].ident(), _new[j].type()));
+  }
+  return Decl::create(decl.range(), List<Param>::create(decl.range(), new_params), type_annotation_decl.return_type());
+}
+
 struct Parser {
   explicit Parser(const std::string& str)
       : L(str), shared(sharedParserData()) {}
@@ -90,7 +118,7 @@ struct Parser {
       } else if (L.cur().kind == '(') {
         prefix = createApply(Expr(prefix));
       } else if (L.cur().kind == '[') {
-        prefix = parseSliceOrGather(prefix);
+        prefix = parseSubscript(prefix);
       } else {
         break;
       }
@@ -261,43 +289,63 @@ struct Parser {
     L.expect(')');
   }
 
-  // OK: [a] (gather), [a:], [:a], [a:b], [:] (slice)
-  // Not OK: []
-  TreeRef parseSliceOrGather(TreeRef value) {
-    const auto range = L.cur().range;
-    L.expect('[');
-
-    // `first` will either be the gather indices, or the start of the slice.
+  // Parse expr's of the form [a:], [:b], [a:b], [:]
+  Expr parseSubscriptExp() {
     TreeRef first, second;
-
-    // Here we can either have a colon (which starts a slice), or an expression.
-    // If an expression, we don't know yet if it will be a slice or a gather.
+    auto range = L.cur().range;
     if (L.cur().kind != ':') {
       first = parseExp();
-      if (L.nextIf(']')) {
-        return Gather::create(range, Expr(value), Expr(first));
-      } else {
-        first = c(TK_OPTION, range, {first});
+    }
+    if (L.nextIf(':')) {
+      if (L.cur().kind != ',' && L.cur().kind != ']') {
+        second = parseExp();
       }
+      auto maybe_first = first ? Maybe<Expr>::create(range, Expr(first)) : Maybe<Expr>::create(range);
+      auto maybe_second = second ? Maybe<Expr>::create(range, Expr(second)) : Maybe<Expr>::create(range);
+      return SliceExpr::create(range, maybe_first, maybe_second);
     } else {
-      first = c(TK_OPTION, range, {});
+      return Expr(first);
     }
-    L.expect(':');
-    // Now we *may* have an expression.
-    if (L.cur().kind != ']') {
-      second = c(TK_OPTION, range, {parseExp()});
-    } else {
-      second = c(TK_OPTION, range, {});
-    }
-    L.expect(']');
+  }
 
-    return Slice::create(range, Expr(value), Maybe<Expr>(first), Maybe<Expr>(second));
+  TreeRef parseSubscript(TreeRef value) {
+    const auto range = L.cur().range;
+
+    auto subscript_exprs = parseList('[', ',', ']', &Parser::parseSubscriptExp);
+    return Subscript::create(range, Expr(value), subscript_exprs);
   }
 
   TreeRef parseParam() {
-    auto typ = TensorType::create(L.cur().range);
     auto ident = parseIdent();
-    return Param::create(typ.range(), Ident(ident), Type(typ));
+    TreeRef type;
+    if (L.nextIf(':')) {
+      type = parseExp();
+    } else {
+      type = Var::create(L.cur().range, Ident::create(L.cur().range, "Tensor"));
+    }
+    return Param::create(type->range(), Ident(ident), Expr(type));
+  }
+
+  Param parseBareTypeAnnotation() {
+    auto type = parseExp();
+    return Param::create(type.range(), Ident::create(type.range(), ""), type);
+  }
+
+  TreeRef parseTypeComment(bool parse_full_line=false) {
+    auto range = L.cur().range;
+    if (parse_full_line) {
+      L.expect(TK_TYPE_COMMENT);
+    }
+    auto param_types = parseList('(', ',', ')', &Parser::parseBareTypeAnnotation);
+    TreeRef return_type;
+    if (L.nextIf(TK_ARROW)) {
+      return_type = Maybe<Expr>::create(L.cur().range, parseExp());
+    } else {
+      return_type = Maybe<Expr>::create(L.cur().range);
+    }
+    if (!parse_full_line)
+      L.expect(TK_NEWLINE);
+    return Decl::create(range, param_types, Maybe<Expr>(return_type));
   }
 
   // 'first' has already been parsed since expressions can exist
@@ -380,24 +428,50 @@ struct Parser {
     auto body = parseStatements();
     return For::create(r, targets, itrs, body);
   }
-  TreeRef parseStatements() {
+
+  TreeRef parseStatements(bool expect_indent=true) {
     auto r = L.cur().range;
-    L.expect(TK_INDENT);
+    if (expect_indent)
+      L.expect(TK_INDENT);
     TreeList stmts;
-    while (true) {
-      stmts.push_back(parseStmt());
+    for (size_t i=0; ; ++i) {
+      auto stmt = parseStmt();
+      stmts.push_back(stmt);
       if (L.nextIf(TK_DEDENT))
         break;
     }
     return c(TK_LIST, r, std::move(stmts));
   }
-  TreeRef parseFunction() {
+  Decl parseDecl() {
+    auto paramlist = parseList('(', ',', ')', &Parser::parseParam);
+    // Parse return type annotation
+    TreeRef return_type;
+    if (L.nextIf(TK_ARROW)) {
+      // Exactly one expression for return type annotation
+      return_type = Maybe<Expr>::create(L.cur().range, parseExp());
+    } else {
+      // Default to returning single tensor. TODO: better sentinel value?
+      return_type = Maybe<Expr>::create(L.cur().range);
+    }
+    L.expect(':');
+    return Decl::create(paramlist.range(), List<Param>(paramlist), Maybe<Expr>(return_type));
+  }
+
+  TreeRef parseFunction(bool is_method) {
     L.expect(TK_DEF);
     auto name = parseIdent();
-    auto paramlist = parseList('(', ',', ')', &Parser::parseParam);
-    L.expect(':');
-    auto stmts_list = parseStatements();
-    return Def::create(name.range(), Ident(name), List<Param>(paramlist),
+    auto decl = parseDecl();
+
+    // Handle type annotations specified in a type comment as the first line of
+    // the function.
+    L.expect(TK_INDENT);
+    if (L.nextIf(TK_TYPE_COMMENT)) {
+      auto type_annotation_decl = Decl(parseTypeComment());
+      decl = mergeTypesFromTypeComment(decl, type_annotation_decl, is_method);
+    }
+
+    auto stmts_list = parseStatements(false);
+    return Def::create(name.range(), Ident(name), Decl(decl),
                        List<Stmt>(stmts_list));
   }
   Lexer& lexer() {

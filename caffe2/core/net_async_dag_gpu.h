@@ -4,7 +4,7 @@
 #include "caffe2/core/common.h"
 #include "caffe2/core/net_dag.h"
 #include "caffe2/core/workspace.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 
 namespace caffe2 {
 
@@ -32,7 +32,7 @@ class AsyncDAGNet : public DAGNetBase {
   int stream(const DeviceOption& device_option);
   static thread_local std::vector<int> stream_counters_;
 
-  DISABLE_COPY_AND_ASSIGN(AsyncDAGNet);
+  AT_DISABLE_COPY_AND_ASSIGN(AsyncDAGNet);
 };
 
 } // namespace caffe2

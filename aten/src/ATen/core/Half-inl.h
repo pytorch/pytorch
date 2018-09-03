@@ -2,7 +2,7 @@
 
 #include <cstring>
 #include <limits>
-#include <ATen/core/CoreAPI.h>
+#include <ATen/core/Macros.h>
 
 #ifdef __CUDACC__
 #include <cuda_fp16.h>
@@ -46,23 +46,23 @@ inline AT_HOSTDEVICE Half::operator __half() const {
 /// Arithmetic
 
 inline AT_HOSTDEVICE Half operator+(const Half& a, const Half& b) {
-  return (float)a + (float)b;
+  return static_cast<float>(a) + static_cast<float>(b);
 }
 
 inline AT_HOSTDEVICE Half operator-(const Half& a, const Half& b) {
-  return (float)a - (float)b;
+  return static_cast<float>(a) - static_cast<float>(b);
 }
 
 inline AT_HOSTDEVICE Half operator*(const Half& a, const Half& b) {
-  return (float)a * (float)b;
+  return static_cast<float>(a) * static_cast<float>(b);
 }
 
 inline AT_HOSTDEVICE Half operator/(const Half& a, const Half& b) {
-  return (float)a / (float)b;
+  return static_cast<float>(a) / static_cast<float>(b);
 }
 
 inline AT_HOSTDEVICE Half operator-(const Half& a) {
-  return -(float)a;
+  return -static_cast<float>(a);
 }
 
 inline AT_HOSTDEVICE Half& operator+=(Half& a, const Half& b) {
@@ -88,98 +88,98 @@ inline AT_HOSTDEVICE Half& operator/=(Half& a, const Half& b) {
 /// Arithmetic with floats
 
 inline AT_HOSTDEVICE float operator+(Half a, float b) {
-  return (float)a + b;
+  return static_cast<float>(a) + b;
 }
 inline AT_HOSTDEVICE float operator-(Half a, float b) {
-  return (float)a - b;
+  return static_cast<float>(a) - b;
 }
 inline AT_HOSTDEVICE float operator*(Half a, float b) {
-  return (float)a * b;
+  return static_cast<float>(a) * b;
 }
 inline AT_HOSTDEVICE float operator/(Half a, float b) {
-  return (float)a / b;
+  return static_cast<float>(a) / b;
 }
 
 inline AT_HOSTDEVICE float operator+(float a, Half b) {
-  return a + (float)b;
+  return a + static_cast<float>(b);
 }
 inline AT_HOSTDEVICE float operator-(float a, Half b) {
-  return a - (float)b;
+  return a - static_cast<float>(b);
 }
 inline AT_HOSTDEVICE float operator*(float a, Half b) {
-  return a * (float)b;
+  return a * static_cast<float>(b);
 }
 inline AT_HOSTDEVICE float operator/(float a, Half b) {
-  return a / (float)b;
+  return a / static_cast<float>(b);
 }
 
 inline AT_HOSTDEVICE float& operator+=(float& a, const Half& b) {
-  return a += (float)b;
+  return a += static_cast<float>(b);
 }
 inline AT_HOSTDEVICE float& operator-=(float& a, const Half& b) {
-  return a -= (float)b;
+  return a -= static_cast<float>(b);
 }
 inline AT_HOSTDEVICE float& operator*=(float& a, const Half& b) {
-  return a *= (float)b;
+  return a *= static_cast<float>(b);
 }
 inline AT_HOSTDEVICE float& operator/=(float& a, const Half& b) {
-  return a /= (float)b;
+  return a /= static_cast<float>(b);
 }
 
 /// Arithmetic with doubles
 
 inline AT_HOSTDEVICE double operator+(Half a, double b) {
-  return (double)a + b;
+  return static_cast<double>(a) + b;
 }
 inline AT_HOSTDEVICE double operator-(Half a, double b) {
-  return (double)a - b;
+  return static_cast<double>(a) - b;
 }
 inline AT_HOSTDEVICE double operator*(Half a, double b) {
-  return (double)a * b;
+  return static_cast<double>(a) * b;
 }
 inline AT_HOSTDEVICE double operator/(Half a, double b) {
-  return (double)a / b;
+  return static_cast<double>(a) / b;
 }
 
 inline AT_HOSTDEVICE double operator+(double a, Half b) {
-  return a + (double)b;
+  return a + static_cast<double>(b);
 }
 inline AT_HOSTDEVICE double operator-(double a, Half b) {
-  return a - (double)b;
+  return a - static_cast<double>(b);
 }
 inline AT_HOSTDEVICE double operator*(double a, Half b) {
-  return a * (double)b;
+  return a * static_cast<double>(b);
 }
 inline AT_HOSTDEVICE double operator/(double a, Half b) {
-  return a / (double)b;
+  return a / static_cast<double>(b);
 }
 
 /// Arithmetic with ints
 
 inline AT_HOSTDEVICE Half operator+(Half a, int b) {
-  return a + (Half)b;
+  return a + static_cast<Half>(b);
 }
 inline AT_HOSTDEVICE Half operator-(Half a, int b) {
-  return a - (Half)b;
+  return a - static_cast<Half>(b);
 }
 inline AT_HOSTDEVICE Half operator*(Half a, int b) {
-  return a * (Half)b;
+  return a * static_cast<Half>(b);
 }
 inline AT_HOSTDEVICE Half operator/(Half a, int b) {
-  return a / (Half)b;
+  return a / static_cast<Half>(b);
 }
 
 inline AT_HOSTDEVICE Half operator+(int a, Half b) {
-  return (Half)a + b;
+  return static_cast<Half>(a) + b;
 }
 inline AT_HOSTDEVICE Half operator-(int a, Half b) {
-  return (Half)a - b;
+  return static_cast<Half>(a) - b;
 }
 inline AT_HOSTDEVICE Half operator*(int a, Half b) {
-  return (Half)a * b;
+  return static_cast<Half>(a) * b;
 }
 inline AT_HOSTDEVICE Half operator/(int a, Half b) {
-  return (Half)a / b;
+  return static_cast<Half>(a) / b;
 }
 
 /// NOTE: we do not define comparisons directly and instead rely on the implicit
