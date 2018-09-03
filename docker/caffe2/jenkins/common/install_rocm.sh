@@ -66,6 +66,18 @@ install_hipsparse() {
     dpkg -i /opt/rocm/debians/hipsparse.deb
 }
 
+# Install custom hcc containing two compiler fixes relevant to PyTorch
+install_customhcc() {
+    mkdir -p /opt/rocm/debians
+    curl https://s3.amazonaws.com/ossci-linux/hcc-1.2.18272-Linux.deb -o /opt/rocm/debians/hcc-1.2.18272-Linux.deb
+    dpkg -i /opt/rocm/debians/hcc-1.2.18272-Linux.deb
+}
+
+# Get a HIP header designed to avoid some of the static_casts we typically need for ROCm - in particular the ones we fail to autogenerate
+install_hipheader() {
+   curl https://s3.amazonaws.com/ossci-linux/functional_grid_launch.hpp -o /opt/rocm/hip/include/hip/hcc_detail/functional_grid_launch.hpp
+}
+
 # Install Python packages depending on the base OS
 if [ -f /etc/lsb-release ]; then
   install_ubuntu
@@ -79,3 +91,5 @@ fi
 install_hip_thrust
 install_rocrand
 install_hipsparse
+install_customhcc
+install_hipheader
