@@ -298,7 +298,7 @@ class TracingCheckError(Exception):
 # Check the traced module against a set of user-provided validation inputs
 def _check_trace(check_inputs, func, executor_options, module, check_tolerance):
     for inputs in check_inputs:
-        check_mod = torch.jit.trace(*_clone_inputs(inputs), disable_checks=True, **executor_options)(func)
+        check_mod = torch.jit.trace(func, _clone_inputs(inputs), check_trace=False, **executor_options)
 
         def graph_diagnostic_info():
             mod_canonicalized = torch._C._jit_pass_canonicalize(module.graph)
@@ -408,7 +408,19 @@ def _check_trace(check_inputs, func, executor_options, module, check_tolerance):
             raise TracingCheckError(*graph_diagnostic_info())
 
 
-def trace(*args, **kwargs):
+class TracerWarning(Warning):
+    @staticmethod
+    def ignore_lib_warnings():
+        warnings.filterwarnings('ignore', category=TracerWarning, module='torch.*')
+
+
+# We ignore the tracer warnings coming form inside the library, because all our shape
+# checks in nn will trigger them.
+TracerWarning.ignore_lib_warnings()
+torch._C._tracer_warn_use_python()
+
+
+def trace(func, example_inputs, optimize=True, check_trace=True, check_inputs=None, check_tolerance=1e-5):
     """
     Trace a function and return an executable trace that will be optimized
     using just-in-time compilation.
@@ -423,13 +435,23 @@ def trace(*args, **kwargs):
         invocations of the model.
 
     Arg:
-        *args - a list of example tensors that will be passed to the function
-                as inputs while tracing. The resulting trace can be run with
-                inputs of different types and shapes assuming the traced operations
-                support those types and shapes.
+        func - a python function or torch.nn.Module that will be run with example_inputs.
+               arguments and returns to func must be Tensors or (possibly nested) tuples that
+               contain tensors.
+        example_inputs - a tuple of example inputs that will be passed to the function
+                         while tracing. The resulting trace can be run with
+                         inputs of different types and shapes assuming the traced operations
+                         support those types and shapes. example_inputs may also be a single
+                         Tensor in which case it is automatically wrapped in a tuple
 
     Keyword arguments:
         optimize (bool, optional): whether or not to apply optimizations.  Default: ``True``.
+        check_trace (bool, optional): check if the same inputs run through
+                                      traced code produce the same outputs. Default: ``True``. You might want
+                                      to disable this if, for example, your network contains non-
+                                      deterministic ops or if you are sure that the network is correct despite
+                                      a checker failure.
+
         check_inputs (list of tuples. optional): A list of tuples of input arguments that should be used
                                                  to check the trace against what is expected. Each tuple
                                                  is equivalent to a seet of input arguments that would
@@ -437,44 +459,41 @@ def trace(*args, **kwargs):
                                                  set of checking inputs representative of the space of
                                                  shapes and types of inputs you expect the network to see.
                                                  If not specified, the original `args` is used for checking
-        disable_checks (bool, optional): Pass bool True to disable the aforementioned checking. You might
-                                         want to do this if, for example, your network contains non-
-                                         deterministic ops or if you are sure that the network is
-                                         correct despite a checker failure.
         check_tolerance (float, optional): Floating-point comparison tolerance to use in the checker procedure.
                                            This can be used to relax the checker strictness in the event that
                                            results diverge numerically for a known reason, such as operator fusion.
 
-        >>> @jit.trace(torch.rand(1))
-        ... def f(x):
-        ...     return x * 2
+    Returns:
+        A torch.jit.ScriptModule object with a single forward() method containing the traced code.
+        When func in s a torch.nn.Module, the returned ScriptModule will have the same set of
+        sub-modules and parameters as func.
+
+    Example:
+       >>> def f(x):
+       ...     return x * 2
+       >>> traced_f = torch.jit.trace(f, torch.rand(1))
+
     """
-    def wrapper(func):
-        if not _enabled:
-            return func
-        executor_options = {'optimize': True}
-        for name in executor_options:
-            executor_options[name] = kwargs.pop(name, executor_options[name])
+    if not _enabled:
+        return func
+    executor_options = {'optimize': bool(optimize)}
+    # Special case for common case of passing a single Tensor
+    if isinstance(example_inputs, torch.Tensor):
+        example_inputs = (example_inputs,)
+    # done primarily so that weird iterables fail here and not pybind11 code
+    elif not isinstance(example_inputs, tuple):
+        example_inputs = tuple(example_inputs)
+    module = TopLevelTracedModule(func, **executor_options)
+    module._create_method_from_trace('forward', func, example_inputs)
 
-        check_inputs = kwargs.pop('check_inputs', None)
-        disable_checks = kwargs.pop('disable_checks', False)
-        check_tolerance = kwargs.pop('check_tolerance', 1e-5)
-
-        if len(kwargs) != 0:
-            raise TypeError("got unexpected keyword arguments: {}".format(", ".join(kwargs.keys())))
-
-        module = TopLevelTracedModule(func, **executor_options)
-        module._create_method_from_trace('forward', func, tuple(args))
-
-        # Check the trace against new traces created from user-specified inputs
+    # Check the trace against new traces created from user-specified inputs
+    if check_trace:
         if check_inputs is not None:
             _check_trace(check_inputs, func, executor_options, module, check_tolerance)
-        elif not disable_checks:
-            _check_trace([args], func, executor_options, module, check_tolerance)
+        else:
+            _check_trace([example_inputs], func, executor_options, module, check_tolerance)
 
-        return module
-
-    return wrapper
+    return module
 
 
 def createResolutionCallback(frames_up=0):

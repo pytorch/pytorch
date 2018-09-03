@@ -36,6 +36,7 @@ backend_test.exclude(r'(test_hardsigmoid'  # Does not support Hardsigmoid.
                      '|test_.*pool_.*same.*'  # Does not support pool same.
                      '|test_maxpool_with_argmax.*'  # MaxPool outputs indices in different format.
                      '|test_convtranspose.*'  # ConvTranspose needs some more complicated translation
+                     '|test_mvn.*'  # MeanVarianceNormalization is experimental and not supported.
                      ')')
 
 # Quick patch to unbreak master CI, is working on the debugging.

@@ -315,6 +315,13 @@ Example::
 
 """)
 
+add_docstr_all('allclose',
+               r"""
+allclose(other, rtol=1e-05, atol=1e-08, equal_nan=False) -> Tensor
+
+See :func:`torch.allclose`
+""")
+
 add_docstr_all('any',
                r"""
 .. function:: any() -> bool

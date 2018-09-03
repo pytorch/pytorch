@@ -7,8 +7,6 @@
 #include "THStorageFunctions.h"
 
 #include <ATen/ScalarType.h>
-#include <ATen/ScalarTypeUtils.h>
-#include <atomic>
 
 // Note [Weak references for intrusive refcounting]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

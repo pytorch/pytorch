@@ -100,7 +100,7 @@ class CAFFE2_API AsyncNetBase : public NetBase {
       PoolsMap;
   PoolsMap cpu_pools_;
   PoolsMap gpu_pools_;
-  static thread_local std::vector<int> stream_counters_;
+  static std::vector<int>& getStreamCounters();
   int num_workers_;
 
   // Exception/error handling

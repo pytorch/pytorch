@@ -793,8 +793,28 @@ class TestTorch(TestCase):
     def test_max(self):
         self._testSelection(torch.max, max)
 
+    @staticmethod
+    def _test_max_with_inf(self, dtypes=(torch.float, torch.double), device='cpu'):
+        for dtype in dtypes:
+            a = torch.tensor([[-inf, -inf, inf, 3], [inf, inf, -inf, -1]], dtype=dtype, device=device)
+            self.assertTrue(torch.all(torch.max(a, dim=1)[0] == inf).item())
+            self.assertTrue(torch.max(a).item() == inf)
+
+    def test_max_with_inf(self):
+        self._test_max_with_inf(self)
+
     def test_min(self):
         self._testSelection(torch.min, min)
+
+    @staticmethod
+    def _test_min_with_inf(self, dtypes=(torch.float, torch.double), device='cpu'):
+        for dtype in dtypes:
+            a = torch.tensor([[-inf, -inf, inf, 3], [inf, inf, -inf, -1]], dtype=dtype, device=device)
+            self.assertTrue(torch.all(torch.min(a, dim=1)[0] == (-inf)).item())
+            self.assertTrue(torch.min(a).item() == -inf)
+
+    def test_min_with_inf(self):
+        self._test_min_with_inf(self)
 
     @staticmethod
     def _test_norm(self, device):
@@ -1042,6 +1062,45 @@ class TestTorch(TestCase):
             y = torch.randn(shape, device=device)
             self.assertEqual(torch.zeros(0, device=device), torch.pairwise_distance(x, y))
             self.assertEqual(torch.zeros((0, 1), device=device), torch.pairwise_distance(x, y, keepdim=True))
+
+    @skipIfRocm
+    def test_pdist_empty(self):
+        devices = ['cpu']
+        for device in devices:
+            shape = (0, 2)
+            x = torch.randn(shape, device=device)
+            self.assertEqual(torch.empty(0, device=device), torch.pdist(x))
+
+            shape = (1, 2)
+            x = torch.randn(shape, device=device)
+            self.assertEqual(torch.empty(0, device=device), torch.pdist(x))
+
+            shape = (3, 0)
+            x = torch.randn(shape, device=device)
+            self.assertEqual(torch.zeros(3, device=device), torch.pdist(x))
+
+    @skipIfRocm
+    @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
+    def test_pdist_scipy(self):
+        from scipy.spatial.distance import pdist
+        devices = ['cpu']
+        for device in devices:
+            for shape in [(4, 5), (3, 2), (2, 1)]:
+                for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
+                    for trans in [False, True]:
+                        x = torch.randn(shape, device=device)
+                        if trans:
+                            x.transpose_(0, 1)
+                        actual = torch.pdist(x, p=p)
+                        # pdist doesn't handle 0 or inf norm properly
+                        if p == 0:
+                            expected = pdist(x, 'hamming') * x.shape[1]
+                        elif p == float('inf'):
+                            expected = pdist(x, lambda a, b: np.abs(a - b).max())
+                        else:
+                            expected = pdist(x, 'minkowski', p=p)
+                        self.assertEqual(expected.shape, actual.shape)
+                        self.assertTrue(np.allclose(expected, actual.numpy()))
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
     def test_logsumexp(self):
