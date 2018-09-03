@@ -130,16 +130,7 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
     gradients w.r.t. tensors in :attr:`inputs` that are of floating point type
     and with ``requires_grad=True``.
 
-    The check between numerical and analytical gradients has the same behaviour as
-    `numpy.allclose <https://docs.scipy.org/doc/numpy/reference/generated/numpy.allclose.html>`_,
-    i.e., it checks that
-
-    .. math::
-
-        \lvert a - n \rvert \leq \texttt{atol} + \texttt{rtol} \times \lvert n \rvert
-
-    holds for all elements of analytical gradient :math:`a` and numerical
-    gradient :math:`n`.
+    The check between numerical and analytical gradients uses :func:`~torch.allclose`.
 
     .. note::
         The default values are designed for :attr:`input` of double precision.
@@ -209,7 +200,7 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
 
         for j, (a, n) in enumerate(zip(analytical, numerical)):
             if a.numel() != 0 or n.numel() != 0:
-                if not ((a - n).abs() <= (atol + rtol * n.abs())).all():
+                if not torch.allclose(a, n, rtol, atol):
                     return fail_test('Jacobian mismatch for output %d with respect to input %d,\n'
                                      'numerical:%s\nanalytical:%s\n' % (i, j, n, a))
 
@@ -249,16 +240,7 @@ def gradgradcheck(func, inputs, grad_outputs=None, eps=1e-6, atol=1e-5, rtol=1e-
     This function checks that backpropagating through the gradients computed
     to the given :attr:`grad_outputs` are correct.
 
-    The check between numerical and analytical gradients has the same behaviour as
-    `numpy.allclose <https://docs.scipy.org/doc/numpy/reference/generated/numpy.allclose.html>`_,
-    i.e., it checks that
-
-    .. math::
-
-        \lvert a - n \rvert \leq \texttt{atol} + \texttt{rtol} \times \lvert n \rvert
-
-    holds for all elements of analytical gradient :math:`a` and numerical
-    gradient :math:`n`.
+    The check between numerical and analytical gradients uses :func:`~torch.allclose`.
 
     .. note::
         The default values are designed for :attr:`input` and

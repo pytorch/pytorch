@@ -166,15 +166,21 @@ class TestTorch(TestCase):
             for name in dir(ns):
                 if name.startswith('_'):
                     continue
-                if any(r.match(name) for r in skip_regexes):
-                    continue
                 var = getattr(ns, name)
-                if isinstance(var, checked_types):
-                    self.assertTrue(var.__doc__ is not None, ns_name + '.' + name)
+                if not isinstance(var, checked_types):
+                    continue
+                doc = var.__doc__
+                has_doc = doc is not None and len(doc.strip()) > 0
+                full_name = ns_name + '.' + name
+                if any(r.match(name) for r in skip_regexes):
+                    self.assertFalse(has_doc,
+                                     'New docs have been added for {}, please remove '
+                                     'it from the skipped list in TestTorch.test_doc'.format(full_name))
+                else:
+                    self.assertTrue(has_doc, '{} is missing documentation'.format(full_name))
 
         # FIXME: fix all the skipped ones below!
         test_namespace(torch.randn(1),
-                       'allclose',
                        'as_strided',
                        'as_strided_',
                        re.compile('^clamp_(min|max)_?$'),
@@ -3444,7 +3450,6 @@ class TestTorch(TestCase):
         self.assertRaises(TypeError, lambda: q.topk(4, True))
 
     @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
-    @skipIfRocm
     def test_topk_noncontiguous_gpu(self):
         t = torch.randn(20, device="cuda")[::2]
         top1, idx1 = t.topk(5)

@@ -3,7 +3,7 @@
 #else
 
 static void THNN_(TemporalReplicationPadding_updateOutput_frame)(
-  real *input_p, real *output_p,
+  scalar_t *input_p, scalar_t *output_p,
   long nslices,
   long iwidth,
   long owidth,
@@ -27,8 +27,8 @@ static void THNN_(TemporalReplicationPadding_updateOutput_frame)(
       }
       ip_x = ip_x - oStartX + iStartX;
 
-      real *dest_p = output_p + k*owidth + j;
-      real *src_p = input_p + k*iwidth + ip_x;
+      scalar_t *dest_p = output_p + k*owidth + j;
+      scalar_t *src_p = input_p + k*iwidth + ip_x;
       *dest_p = *src_p;
     }
   }
@@ -45,8 +45,8 @@ void THNN_(TemporalReplicationPadding_updateOutput)(THNNState *state,
   long nslices;
   long iwidth;
   long owidth;
-  real *input_data;
-  real *output_data;
+  scalar_t *input_data;
+  scalar_t *output_data;
 
   THNN_ARGCHECK(!input->is_empty() && (input->dim() == 2 || input->dim() == 3), 2, input,
 		"non-empty 2D or 3D (batch mode) tensor expected for input, but got: %s");
@@ -77,8 +77,8 @@ void THNN_(TemporalReplicationPadding_updateOutput)(THNNState *state,
   {
     THTensor_(resize2d)(output, nslices, owidth);
 
-    input_data = input->data<real>();
-    output_data = output->data<real>();
+    input_data = input->data<scalar_t>();
+    output_data = output->data<scalar_t>();
 
     THNN_(TemporalReplicationPadding_updateOutput_frame)(input_data, output_data,
                                                     nslices,
@@ -92,8 +92,8 @@ void THNN_(TemporalReplicationPadding_updateOutput)(THNNState *state,
 
     THTensor_(resize3d)(output, nbatch, nslices, owidth);
 
-    input_data = input->data<real>();
-    output_data = output->data<real>();
+    input_data = input->data<scalar_t>();
+    output_data = output->data<scalar_t>();
 
 #pragma omp parallel for private(p)
     for (p = 0; p < nbatch; p++)
@@ -113,7 +113,7 @@ void THNN_(TemporalReplicationPadding_updateOutput)(THNNState *state,
 }
 
 static void THNN_(TemporalReplicationPadding_updateGradInput_frame)(
-  real *ginput_p, real *goutput_p,
+  scalar_t *ginput_p, scalar_t *goutput_p,
   long nslices,
   long iwidth,
   long owidth,
@@ -137,8 +137,8 @@ static void THNN_(TemporalReplicationPadding_updateGradInput_frame)(
       }
       ip_x = ip_x - oStartX + iStartX;
 
-      real *src_p = goutput_p + k*owidth + j;
-      real *dest_p = ginput_p + k*iwidth + ip_x;
+      scalar_t *src_p = goutput_p + k*owidth + j;
+      scalar_t *dest_p = ginput_p + k*iwidth + ip_x;
       *dest_p += *src_p;
     }
   }
@@ -183,8 +183,8 @@ void THNN_(TemporalReplicationPadding_updateGradInput)(THNNState *state,
   /* backprop */
   if (input->dim() == 2) {
     THNN_(TemporalReplicationPadding_updateGradInput_frame)(
-      gradInput->data<real>(),
-      gradOutput->data<real>(),
+      gradInput->data<scalar_t>(),
+      gradOutput->data<scalar_t>(),
       nslices,
       iwidth,
       owidth,
@@ -194,8 +194,8 @@ void THNN_(TemporalReplicationPadding_updateGradInput)(THNNState *state,
 #pragma omp parallel for private(p)
     for (p = 0; p < nbatch; p++) {
       THNN_(TemporalReplicationPadding_updateGradInput_frame)(
-        gradInput->data<real>() + p * nslices * iwidth,
-        gradOutput->data<real>() + p * nslices * owidth,
+        gradInput->data<scalar_t>() + p * nslices * iwidth,
+        gradOutput->data<scalar_t>() + p * nslices * owidth,
         nslices,
         iwidth,
         owidth,

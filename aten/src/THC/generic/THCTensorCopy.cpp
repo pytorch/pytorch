@@ -14,8 +14,8 @@ void THCTensor_(copyCPU)(THCState *state, THCTensor *self, struct THTensor *src)
 
     cudaStream_t stream = THCState_getCurrentStream(state);
     THCudaCheck(cudaMemcpyAsync(THCTensor_(data)(state,selfc),
-                                src->data<real>(),
-                                THTensor_(nElement)(src) * sizeof(real),
+                                src->data<scalar_t>(),
+                                THTensor_(nElement)(src) * sizeof(scalar_t),
                                 cudaMemcpyHostToDevice,
                                 stream));
     THCudaCheck(cudaStreamSynchronize(stream));
@@ -61,9 +61,9 @@ void THTensor_(copyCuda)(THCState *state, THTensor *self, struct THCTensor *src)
     src = THCTensor_(newContiguous)(state, src);
 
     cudaStream_t stream = THCState_getCurrentStream(state);
-    THCudaCheck(cudaMemcpyAsync(selfc->data<real>(),
+    THCudaCheck(cudaMemcpyAsync(selfc->data<scalar_t>(),
                                 THCTensor_(data)(state, src),
-                                THCTensor_(nElement)(state, src) * sizeof(real),
+                                THCTensor_(nElement)(state, src) * sizeof(scalar_t),
                                 cudaMemcpyDeviceToHost,
                                 stream));
     THCudaCheck(cudaStreamSynchronize(stream));
@@ -122,8 +122,8 @@ void THCTensor_(copyAsyncCPU)(THCState *state, THCTensor *self, struct THTensor 
 
   THCStream *stream  = THCState_getStream(state);
   THCudaCheck(cudaMemcpyAsync(THCTensor_(data)(state, self),
-                              src->data<real>(),
-                              THTensor_(nElement)(src) * sizeof(real),
+                              src->data<scalar_t>(),
+                              THTensor_(nElement)(src) * sizeof(scalar_t),
                               cudaMemcpyHostToDevice,
                               THCStream_stream(stream)));
 
@@ -152,9 +152,9 @@ void THTensor_(copyAsyncCuda)(THCState *state, THTensor *self, struct THCTensor 
   }
 
   THCStream *stream = THCState_getStream(state);
-  THCudaCheck(cudaMemcpyAsync(self->data<real>(),
+  THCudaCheck(cudaMemcpyAsync(self->data<scalar_t>(),
                               THCTensor_(data)(state, src),
-                              THCTensor_(nElement)(state, src) * sizeof(real),
+                              THCTensor_(nElement)(state, src) * sizeof(scalar_t),
                               cudaMemcpyDeviceToHost,
                               THCStream_stream(stream)));
 
