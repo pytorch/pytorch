@@ -1696,9 +1696,11 @@ class TestCuda(TestCase):
         _, v = y.min(dim=0)
         self.assertEqual(v, expected)
 
+    @skipIfRocm
     def test_max_with_inf(self):
         TestTorch._test_max_with_inf(self, (torch.half, torch.float, torch.double), 'cuda')
 
+    @skipIfRocm
     def test_min_with_inf(self):
         TestTorch._test_min_with_inf(self, (torch.half, torch.float, torch.double), 'cuda')
 
