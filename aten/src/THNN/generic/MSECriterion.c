@@ -16,7 +16,7 @@ void THNN_(MSECriterion_updateOutput)(
 
     accreal sum = 0;
 
-    TH_TENSOR_APPLY2(real, input, real, target,
+    TH_TENSOR_APPLY2(scalar_t, input, scalar_t, target,
       accreal z = (*input_data - *target_data);
       sum += z*z;
     );
@@ -24,13 +24,13 @@ void THNN_(MSECriterion_updateOutput)(
     if (reduction == Reduction::ElementwiseMean)
       sum /= THTensor_(nElement)(input);
 
-    THTensor_(set1d)(output, 0, (real)sum);
+    THTensor_(set1d)(output, 0, (scalar_t)sum);
     return;
   }
 
   THTensor_(resizeAs)(output, input);
-  TH_TENSOR_APPLY3(real, input, real, target, real, output,
-      real z = (*input_data - *target_data);
+  TH_TENSOR_APPLY3(scalar_t, input, scalar_t, target, scalar_t, output,
+      scalar_t z = (*input_data - *target_data);
       *output_data = z*z;
   );
 }
@@ -48,19 +48,19 @@ void THNN_(MSECriterion_updateGradInput)(
 
   if (reduction != Reduction::None) {
     THNN_CHECK_DIM_SIZE(gradOutput, 1, 0, 1);
-    real norm = reduction == Reduction::ElementwiseMean ? 2./((real)THTensor_(nElement)(input)) : 2.;
+    scalar_t norm = reduction == Reduction::ElementwiseMean ? 2./((scalar_t)THTensor_(nElement)(input)) : 2.;
     norm *= THTensor_(get1d)(gradOutput, 0);
-    TH_TENSOR_APPLY3(real, gradInput, real, input, real, target,
+    TH_TENSOR_APPLY3(scalar_t, gradInput, scalar_t, input, scalar_t, target,
       *gradInput_data = norm * (*input_data - *target_data);
     );
     return;
   }
 
   THNN_CHECK_SHAPE(input, gradOutput);
-  TH_TENSOR_APPLY3(real, gradInput, real, input, real, target,
+  TH_TENSOR_APPLY3(scalar_t, gradInput, scalar_t, input, scalar_t, target,
     *gradInput_data = 2. * (*input_data - *target_data);
   );
-  TH_TENSOR_APPLY2(real, gradInput, real, gradOutput,
+  TH_TENSOR_APPLY2(scalar_t, gradInput, scalar_t, gradOutput,
     *gradInput_data *= *gradOutput_data;
   );
 }
