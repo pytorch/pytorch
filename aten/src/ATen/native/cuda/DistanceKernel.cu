@@ -9,8 +9,7 @@ namespace at { namespace native {
 namespace {
 
 static const int warp_size = 32;
-static const int forward_threads = 8 * warp_size;
-static const int backward_threads = 8 * warp_size;
+static const int forward_warps = 8;
 
 template <typename scalar_t>
 struct dists {
@@ -90,7 +89,7 @@ __global__ static void pdist_kernel_cuda_impl(scalar_t * result, const scalar_t 
   }
 
   // Reduce block
-  static __shared__ scalar_t shared[forward_threads / warp_size];
+  __shared__ scalar_t shared[forward_warps];
   int lane = threadIdx.x % warp_size;
   int warp_id = threadIdx.x / warp_size;
   if (lane == 0) {
@@ -110,10 +109,14 @@ __global__ static void pdist_kernel_cuda_impl(scalar_t * result, const scalar_t 
 }
 
 template <typename scalar_t, typename F>
-__global__ static void pdist_backward_kernel_cuda_impl(scalar_t * buffer, const scalar_t * grad, const scalar_t * self, const scalar_t * dist, int64_t gs, const int64_t n, const int64_t m, const scalar_t p) {
-  const int k = blockIdx.y;
+__global__ static void pdist_backward_kernel_cuda_impl(scalar_t * buffer, const scalar_t * grad, const scalar_t * self, const scalar_t * dist, int64_t gs, const int64_t n, const int64_t m, const int64_t combs, const scalar_t p) {
+  const int k = blockIdx.y * blockDim.y + threadIdx.y;
   const int init = blockIdx.x * blockDim.x + threadIdx.x;
   const int stride = blockDim.x * gridDim.x;
+
+  if (k >= combs) {
+    return;
+  }
 
   float n2 = n - .5;
   // The -1 accounts for floating point truncation issues
@@ -139,20 +142,22 @@ __global__ static void pdist_backward_kernel_cuda_impl(scalar_t * buffer, const 
 }
 
 void pdist_forward_kernel_impl(Tensor& result, const Tensor& self, double p) {
+  const dim3 blocks(result.numel());
+  const dim3 threads(forward_warps * warp_size);
   int64_t n = self.size(0);
   int64_t m = self.size(1);
 
   AT_DISPATCH_FLOATING_TYPES(self.type(), "pdist_cuda", [&] {
     if (p == 0.0) {
-      pdist_kernel_cuda_impl<scalar_t, dists<scalar_t>::zero><<<result.numel(), forward_threads>>>(result.data<scalar_t>(), self.data<scalar_t>(), n, m, p);
+      pdist_kernel_cuda_impl<scalar_t, dists<scalar_t>::zero><<<blocks, threads>>>(result.data<scalar_t>(), self.data<scalar_t>(), n, m, p);
     } else if (p == 1.0) {
-      pdist_kernel_cuda_impl<scalar_t, dists<scalar_t>::one><<<result.numel(), forward_threads>>>(result.data<scalar_t>(), self.data<scalar_t>(), n, m, p);
+      pdist_kernel_cuda_impl<scalar_t, dists<scalar_t>::one><<<blocks, threads>>>(result.data<scalar_t>(), self.data<scalar_t>(), n, m, p);
     } else if (p == 2.0) {
-      pdist_kernel_cuda_impl<scalar_t, dists<scalar_t>::two><<<result.numel(), forward_threads>>>(result.data<scalar_t>(), self.data<scalar_t>(), n, m, p);
+      pdist_kernel_cuda_impl<scalar_t, dists<scalar_t>::two><<<blocks, threads>>>(result.data<scalar_t>(), self.data<scalar_t>(), n, m, p);
     } else if (std::isinf(p)) {
-      pdist_kernel_cuda_impl<scalar_t, dists<scalar_t>::inf><<<result.numel(), forward_threads>>>(result.data<scalar_t>(), self.data<scalar_t>(), n, m, p);
+      pdist_kernel_cuda_impl<scalar_t, dists<scalar_t>::inf><<<blocks, threads>>>(result.data<scalar_t>(), self.data<scalar_t>(), n, m, p);
     } else {
-      pdist_kernel_cuda_impl<scalar_t, dists<scalar_t>::p><<<result.numel(), forward_threads>>>(result.data<scalar_t>(), self.data<scalar_t>(), n, m, p);
+      pdist_kernel_cuda_impl<scalar_t, dists<scalar_t>::p><<<blocks, threads>>>(result.data<scalar_t>(), self.data<scalar_t>(), n, m, p);
     }
   });
 }
@@ -165,20 +170,25 @@ void pdist_backward_kernel_impl(Tensor& result, const Tensor& grad, const Tensor
 
   const int64_t n = result.size(0);
   int64_t m = self.size(1);
-  const int horiz_blocks = (m + backward_threads * 8 - 1) / (backward_threads * 8);
+  const int horiz_threads = 2 * warp_size;
+  const int vert_threads = 4;
+  const int horiz_blocks = (m + horiz_threads * 8 - 1) / (horiz_threads * 8);
+  const int vert_blocks = (dist.numel() + vert_threads - 1) / vert_threads;
+  const dim3 blocks(horiz_blocks, vert_blocks);
+  const dim3 threads(horiz_threads, vert_threads);
 
   Tensor buffer = result.type().tensor({n - 1, result.size(0), result.size(1)});
   AT_DISPATCH_FLOATING_TYPES(self.type(), "pdist_cuda_backward", [&] {
     if (p == 1.0) {
-      pdist_backward_kernel_cuda_impl<scalar_t, dists<scalar_t>::one><<<dim3(horiz_blocks, dist.numel()), backward_threads>>>(buffer.data<scalar_t>(), grad.data<scalar_t>(), self.data<scalar_t>(), dist.data<scalar_t>(), grad.stride(0), n, m, p);
+      pdist_backward_kernel_cuda_impl<scalar_t, dists<scalar_t>::one><<<blocks, threads>>>(buffer.data<scalar_t>(), grad.data<scalar_t>(), self.data<scalar_t>(), dist.data<scalar_t>(), grad.stride(0), n, m, dist.numel(), p);
     } else if (p < 2.0) {
-      pdist_backward_kernel_cuda_impl<scalar_t, dists<scalar_t>::lt_two><<<dim3(horiz_blocks, dist.numel()), backward_threads>>>(buffer.data<scalar_t>(), grad.data<scalar_t>(), self.data<scalar_t>(), dist.data<scalar_t>(), grad.stride(0), n, m, p);
+      pdist_backward_kernel_cuda_impl<scalar_t, dists<scalar_t>::lt_two><<<blocks, threads>>>(buffer.data<scalar_t>(), grad.data<scalar_t>(), self.data<scalar_t>(), dist.data<scalar_t>(), grad.stride(0), n, m, dist.numel(), p);
     } else if (p == 2.0) {
-      pdist_backward_kernel_cuda_impl<scalar_t, dists<scalar_t>::two><<<dim3(horiz_blocks, dist.numel()), backward_threads>>>(buffer.data<scalar_t>(), grad.data<scalar_t>(), self.data<scalar_t>(), dist.data<scalar_t>(), grad.stride(0), n, m, p);
+      pdist_backward_kernel_cuda_impl<scalar_t, dists<scalar_t>::two><<<blocks, threads>>>(buffer.data<scalar_t>(), grad.data<scalar_t>(), self.data<scalar_t>(), dist.data<scalar_t>(), grad.stride(0), n, m, dist.numel(), p);
     } else if (std::isinf(p)) {
-      pdist_backward_kernel_cuda_impl<scalar_t, dists<scalar_t>::inf><<<dim3(horiz_blocks, dist.numel()), backward_threads>>>(buffer.data<scalar_t>(), grad.data<scalar_t>(), self.data<scalar_t>(), dist.data<scalar_t>(), grad.stride(0), n, m, p);
+      pdist_backward_kernel_cuda_impl<scalar_t, dists<scalar_t>::inf><<<blocks, threads>>>(buffer.data<scalar_t>(), grad.data<scalar_t>(), self.data<scalar_t>(), dist.data<scalar_t>(), grad.stride(0), n, m, dist.numel(), p);
     } else {
-      pdist_backward_kernel_cuda_impl<scalar_t, dists<scalar_t>::p><<<dim3(horiz_blocks, dist.numel()), backward_threads>>>(buffer.data<scalar_t>(), grad.data<scalar_t>(), self.data<scalar_t>(), dist.data<scalar_t>(), grad.stride(0), n, m, p);
+      pdist_backward_kernel_cuda_impl<scalar_t, dists<scalar_t>::p><<<blocks, threads>>>(buffer.data<scalar_t>(), grad.data<scalar_t>(), self.data<scalar_t>(), dist.data<scalar_t>(), grad.stride(0), n, m, dist.numel(), p);
     }
   });
 
