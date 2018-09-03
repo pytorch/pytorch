@@ -2,10 +2,10 @@
 #define TH_GENERIC_FILE "generic/THStorageCopy.cpp"
 #else
 
-void THStorage_(rawCopy)(THStorage *storage, real *src)
+void THStorage_(rawCopy)(THStorage *storage, scalar_t *src)
 {
   ptrdiff_t i;
-  real *data = THStorage_(data)(storage);
+  scalar_t *data = THStorage_(data)(storage);
   for(i = 0; i < storage->numel(); i++)
     data[i] = src[i];
 }
@@ -26,7 +26,7 @@ void THStorage_(copy##TYPENAMESRC)(THStorage *storage, TH##TYPENAMESRC##Storage 
   auto data = THStorage_(data)(storage);                                \
   auto src_data = TH##TYPENAMESRC##Storage_data(src);                   \
   for(i = 0; i < storage->numel(); i++)                                    \
-    data[i] = static_cast<real>(src_data[i]);                           \
+    data[i] = static_cast<scalar_t>(src_data[i]);                           \
 }
 
 #define IMPLEMENT_THStorage_COPY_FROM_HALF(TYPENAMESRC)		\
@@ -37,7 +37,7 @@ void THStorage_(copy##TYPENAMESRC)(THStorage *storage, TH##TYPENAMESRC##Storage 
   auto data = THStorage_(data)(storage);      \
   auto src_data = TH##TYPENAMESRC##Storage_data(src); \
   for(i = 0; i < storage->numel(); i++)					\
-    data[i] = (real)TH_half2float(src_data[i]); \
+    data[i] = (scalar_t)TH_half2float(src_data[i]); \
 }
 
 #define IMPLEMENT_THStorage_COPY_TO_HALF(TYPENAMESRC)		\
@@ -59,7 +59,7 @@ void THStorage_(copy##TYPENAMESRC)(THStorage *storage, TH##TYPENAMESRC##Storage 
   auto data = THStorage_(data)(storage);      \
   auto src_data = TH##TYPENAMESRC##Storage_data(src); \
   for(i = 0; i < storage->numel(); i++)					\
-    data[i] = static_cast<real>(src_data[i]); \
+    data[i] = static_cast<scalar_t>(src_data[i]); \
 }
 
 #ifndef TH_REAL_IS_HALF

@@ -154,18 +154,18 @@ void THNN_(SpatialFullDilatedConvolution_updateOutput)(
         'n', 't',
         n, m, k,
         1,
-        input_n->data<real>(), n,
-        weight->data<real>(), m,
+        input_n->data<scalar_t>(), n,
+        weight->data<scalar_t>(), m,
         0,
-        columns->data<real>(), n
+        columns->data<scalar_t>(), n
     );
 
     // Unpack columns back into input:
     THNN_(col2im)(
-      columns->data<real>(),
+      columns->data<scalar_t>(),
       nOutputPlane, outputHeight, outputWidth, inputHeight, inputWidth, kH, kW, padH, padW, dH, dW,
       dilationH, dilationW,
-      output_n->data<real>()
+      output_n->data<scalar_t>()
     );
 
     // Do Bias after:
@@ -181,10 +181,10 @@ void THNN_(SpatialFullDilatedConvolution_updateOutput)(
           't', 'n',
           n_, m_, k_,
           1,
-          ones->data<real>(), k_,
-          bias->data<real>(), k_,
+          ones->data<scalar_t>(), k_,
+          bias->data<scalar_t>(), k_,
           1,
-          output_n->data<real>(), n_
+          output_n->data<scalar_t>(), n_
       );
     }
   }
@@ -265,12 +265,12 @@ void THNN_(SpatialFullDilatedConvolution_updateGradInput)(
 
     // Extract columns:
     THNN_(im2col)(
-      gradOutput_n->data<real>(),
+      gradOutput_n->data<scalar_t>(),
       nOutputPlane, outputHeight, outputWidth,
       inputHeight, inputWidth,
       kH, kW, padH, padW, dH, dW,
       dilationH, dilationW,
-      gradColumns->data<real>()
+      gradColumns->data<scalar_t>()
     );
 
     // M,N,K are dims of matrix A and B
@@ -284,10 +284,10 @@ void THNN_(SpatialFullDilatedConvolution_updateGradInput)(
         'n', 'n',
         n, m, k,
         1,
-        gradColumns->data<real>(), n,
-        weight->data<real>(), k,
+        gradColumns->data<scalar_t>(), n,
+        weight->data<scalar_t>(), k,
         0,
-        gradInput_n->data<real>(), n
+        gradInput_n->data<scalar_t>(), n
     );
   }
 
@@ -323,7 +323,7 @@ void THNN_(SpatialFullDilatedConvolution_accGradParameters)(
     int adjW, int adjH,
     accreal scale_)
 {
-  real scale = TH_CONVERT_ACCREAL_TO_REAL(scale_);
+  scalar_t scale = TH_CONVERT_ACCREAL_TO_REAL(scale_);
   THNN_(SpatialFullDilatedConvolution_shapeCheck)
     (input, gradOutput, gradWeight, gradBias, kH, kW, dH, dW, padH, padW,
      dilationH, dilationW, adjH, adjW, 1);
@@ -391,12 +391,12 @@ void THNN_(SpatialFullDilatedConvolution_accGradParameters)(
 
       // Extract columns:
       THNN_(im2col)(
-        gradOutput_n->data<real>(),
+        gradOutput_n->data<scalar_t>(),
         nOutputPlane, outputHeight, outputWidth,
         inputHeight, inputWidth,
         kH, kW, padH, padW, dH, dW,
         dilationH, dilationW,
-        columns->data<real>()
+        columns->data<scalar_t>()
       );
 
       // M,N,K are dims of matrix A and B
@@ -410,10 +410,10 @@ void THNN_(SpatialFullDilatedConvolution_accGradParameters)(
           't', 'n',
           n, m, k,
           scale,
-          columns->data<real>(), k,
-          input_n->data<real>(), k,
+          columns->data<scalar_t>(), k,
+          input_n->data<scalar_t>(), k,
           1,
-          gradWeight->data<real>(), n
+          gradWeight->data<scalar_t>(), n
       );
     }
 
@@ -429,10 +429,10 @@ void THNN_(SpatialFullDilatedConvolution_accGradParameters)(
           't',
           k_, m_,
           scale,
-          gradOutput_n->data<real>(), k_,
-          ones->data<real>(), 1,
+          gradOutput_n->data<scalar_t>(), k_,
+          ones->data<scalar_t>(), 1,
           1,
-          gradBias->data<real>(), 1
+          gradBias->data<scalar_t>(), 1
       );
     }
   }
