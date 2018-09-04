@@ -900,9 +900,9 @@ class TestDistributions(TestCase):
         examples = [
             ({"probs": [0.1], "total_count": 2}, [[0], [1], [2]]),
             ({"probs": [0.1, 0.9], "total_count": 2}, [[0], [1], [2]]),
-            ({"probs": [[0.1, 0.2], [0.3, 0.4]], "total_count": 2}, [[[0]], [[1]], [[2]]]),
+            ({"probs": [[0.1, 0.2], [0.3, 0.4]], "total_count": 3}, [[[0]], [[1]], [[2]], [[3]]]),
         ]
-        self._check_enumerate_support(Bernoulli, examples)
+        self._check_enumerate_support(Binomial, examples)
 
     def test_binomial_extreme_vals(self):
         total_count = 100
@@ -929,13 +929,6 @@ class TestDistributions(TestCase):
         self.assertTrue((samples <= total_count.type_as(samples)).all())
         self.assertEqual(samples.mean(dim=0), bin1.mean, prec=0.02)
         self.assertEqual(samples.var(dim=0), bin1.variance, prec=0.02)
-
-    def test_binomial_enumerate_support(self):
-        set_rng_seed(0)
-        bin0 = Binomial(0, torch.tensor(1.))
-        self.assertEqual(bin0.enumerate_support(), torch.tensor([0.]))
-        bin1 = Binomial(torch.tensor(5), torch.tensor(0.5))
-        self.assertEqual(bin1.enumerate_support(), torch.arange(6))
 
     def test_negative_binomial(self):
         p = torch.tensor(torch.arange(0.05, 1, 0.1), requires_grad=True)
