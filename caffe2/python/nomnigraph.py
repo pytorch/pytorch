@@ -29,28 +29,38 @@ class NNModule(object):
     def dataFlow(self):
         return self._NNModule.dataFlow()
 
-    def dumpDataFlow(self):
-        s = self._NNModule.dotString()
-        cmd_exists = lambda x: any(
-            os.access(os.path.join(path, x), os.X_OK)
-            for path in os.environ["PATH"].split(os.pathsep)
-        )
-        if cmd_exists("graph-easy"):
-            p = Popen("graph-easy", stdin=PIPE)
-            try:
-                p.stdin.write(s.encode("utf-8"))
-            except IOError as e:
-                if e.errno == errno.EPIPE or e.errno == errno.EINVAL:
-                    pass
-                else:
-                    # Raise any other error.
-                    raise
+    def match(self, pattern):
+        for n in self.dataFlow.getMutableNodes():
+            m = C.matchSubgraph(n, pattern)
+            if m:
+                yield m
 
-            p.stdin.close()
-            p.wait()
-        else:
-            print(s)
+
+def render(s):
+    s = str(s)
+    cmd_exists = lambda x: any(
+        os.access(os.path.join(path, x), os.X_OK)
+        for path in os.environ["PATH"].split(os.pathsep)
+    )
+    if cmd_exists("graph-easy"):
+        p = Popen("graph-easy", stdin=PIPE)
+        try:
+            p.stdin.write(s.encode("utf-8"))
+        except IOError as e:
+            if e.errno == errno.EPIPE or e.errno == errno.EINVAL:
+                pass
+            else:
+                # Raise any other error.
+                raise
+
+        p.stdin.close()
+        p.wait()
+    else:
+        print(s)
 
 
 NeuralNetOperator = C.NeuralNetOperator
 NeuralNetData = C.NeuralNetData
+NNSubgraph = C.NNSubgraph
+NNMatchGraph = C.NNMatchGraph
+Graph = C.Graph

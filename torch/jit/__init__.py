@@ -1023,5 +1023,15 @@ def _find_builtin(fn):
     return _get_builtin_table().get(id(fn))
 
 
+class _disable_tracing(object):
+    def __enter__(self):
+        self.state = torch._C._get_tracing_state()
+        torch._C._set_tracing_state(None)
+
+    def __exit__(self, *args):
+        torch._C._set_tracing_state(self.state)
+        self.state = None
+
+
 if not torch._C._jit_init():
     raise RuntimeError("JIT initialization failed")
