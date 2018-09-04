@@ -845,7 +845,7 @@ Tensor soft_margin_loss_double_backward_grad_output(const Tensor & grad, const T
 
 Tensor softplus_double_backward(const Tensor & grad, const Tensor & input, Scalar beta, Scalar threshold) {
   auto x = (input * beta);
-  return _sigmoid_backward(grad, x.sigmoid()) * (x < threshold).toType(grad.options()) * beta;
+  return _sigmoid_backward(grad, x.sigmoid()) * (x < threshold).toType(grad.type()) * beta;
 }
 
 
