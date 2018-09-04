@@ -68,6 +68,14 @@ struct alignas(2) Half {
 #endif
 };
 
+// This is just a placeholder for whatever complex representation we
+// end up deciding to use for half-precision complex numbers.
+struct alignas(4) ComplexHalf {
+  Half real_;
+  Half imag_;
+  ComplexHalf() = default;
+};
+
 template <typename To, typename From>
 To convert(From f) {
   return static_cast<To>(f);
