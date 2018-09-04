@@ -2,7 +2,7 @@
 #include "catch.hpp"
 
 #include "ATen/ATen.h"
-#include "ATen/UndefinedTensor.h"
+#include "ATen/core/UndefinedTensorImpl.h"
 #include <string>
 #include "test_seed.h"
 
@@ -48,5 +48,5 @@ TEST_CASE( "undefined tensor test", "[]" ) {
   Tensor to_move = ones({1}, CPU(kFloat));
   Tensor m(std::move(to_move));
   REQUIRE(!to_move.defined());
-  REQUIRE(to_move.unsafeGetTensorImpl() == UndefinedTensor::singleton());
+  REQUIRE(to_move.unsafeGetTensorImpl() == UndefinedTensorImpl::singleton());
 }

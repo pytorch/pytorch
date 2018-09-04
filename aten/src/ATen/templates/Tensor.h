@@ -11,7 +11,7 @@
 #include "ATen/core/TensorAccessor.h"
 #include "ATen/TensorImpl.h"
 #include "ATen/core/optional.h"
-#include "ATen/UndefinedTensor.h"
+#include "ATen/core/UndefinedTensorImpl.h"
 #include "ATen/core/Error.h"
 
 namespace at {
@@ -42,18 +42,18 @@ namespace at {
 struct AT_API Tensor {
   Tensor(){};
   Tensor(TensorImpl* tensor_impl, bool retain)
-      : tensor_impl_(c10::intrusive_ptr<TensorImpl, UndefinedTensor>::reclaim(
+      : tensor_impl_(c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl>::reclaim(
             tensor_impl)) {
     if (tensor_impl == nullptr) {
       throw std::runtime_error("TensorBaseImpl with nullptr not supported");
     }
-    if (retain && tensor_impl != UndefinedTensor::singleton()) {
+    if (retain && tensor_impl != UndefinedTensorImpl::singleton()) {
       c10::raw::intrusive_ptr::incref(tensor_impl);
     }
   }
-  Tensor(const c10::intrusive_ptr<TensorImpl, UndefinedTensor>& ptr)
+  Tensor(const c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl>& ptr)
       : tensor_impl_(std::move(ptr)) {}
-  Tensor(c10::intrusive_ptr<TensorImpl, UndefinedTensor>&& ptr)
+  Tensor(c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl>&& ptr)
       : tensor_impl_(ptr) {}
 
   Tensor(const Tensor&) = default;
@@ -69,7 +69,7 @@ struct AT_API Tensor {
   TensorImpl * unsafeReleaseTensorImpl() {
     return tensor_impl_.release();
   }
-  const c10::intrusive_ptr<TensorImpl, UndefinedTensor>& getIntrusivePtr() const {
+  const c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl>& getIntrusivePtr() const {
     return tensor_impl_;
   }
 
@@ -269,7 +269,7 @@ struct AT_API Tensor {
   friend struct WeakTensor;
 
 protected:
-  c10::intrusive_ptr<TensorImpl, UndefinedTensor> tensor_impl_;
+  c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl> tensor_impl_;
 };
 
 struct AT_API WeakTensor {
@@ -297,6 +297,6 @@ struct AT_API WeakTensor {
   }
 
 private:
-  c10::weak_intrusive_ptr<TensorImpl, UndefinedTensor> weak_tensor_impl_;
+  c10::weak_intrusive_ptr<TensorImpl, UndefinedTensorImpl> weak_tensor_impl_;
 };
 } // namespace at
