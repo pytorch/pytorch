@@ -1846,6 +1846,21 @@
   python_default_init:
     p: 2
 
+- func: frobenius_norm(Tensor self) -> Tensor
+  variants: function
+
+- func: frobenius_norm(Tensor self, IntList dim, bool keepdim=false) -> Tensor
+  variants: function
+
+- func: frobenius_norm_out(Tensor result, Tensor self, IntList dim, bool keepdim=false) -> Tensor
+  variants: function
+
+- func: nuclear_norm(Tensor self, bool keepdim=false) -> Tensor
+  variants: function
+
+- func: nuclear_norm_out(Tensor result, Tensor self, bool keepdim=false) -> Tensor
+  variants: function
+
 - func: native_clone(Tensor self) -> Tensor
   variants: function
   dispatch:

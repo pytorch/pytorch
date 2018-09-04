@@ -16,6 +16,7 @@ __all__ = [
     'isfinite',
     'isinf',
     'isnan',
+    'norm',
     'split',
     'stft',
     'unique',
@@ -543,3 +544,241 @@ def argsort(input, dim=None, descending=False):
     if dim is None:
         return torch.sort(input, -1, descending)[1]
     return torch.sort(input, dim, descending)[1]
+
+
+def norm(input, p="fro", dim=None, keepdim=False, out=None):
+    r"""Returns the matrix norm or vector norm of a given tensor.
+
+    Args:
+        input (Tensor): the input tensor
+        p ({int, float, inf, -inf, 'fro', 'nuc'}): the order of norm
+            The following norms can be calculated:
+            =====  ============================  ==========================
+            ord    matrix norm                   vector norm
+            =====  ============================  ==========================
+            None   Frobenius norm                2-norm
+            'fro'  Frobenius norm                --
+            'nuc'  nuclear norm                  --
+            inf    max(sum(abs(x), dim=1))       max(abs(x))
+            -inf   min(sum(abs(x), dim=1))       min(abs(x))
+            0      --                            sum(x != 0)
+            1      max(sum(abs(x), dim=0))       as below
+            -1     min(sum(abs(x), dim=0))       as below
+            2      largest singular value        as below
+            -2     smallest singular value       as below
+            other  as vec norm when dim is None  sum(abs(x)**ord)**(1./ord)
+            =====  ============================  ==========================
+        dim ({int, 2-tuple of ints, 2-list of ints}): If it is a int, vector norm
+        will be calculated, if it is 2-tuple of ints, matrix norm will be
+        calculated.
+        keepdim (bool): whether the output tensors have :attr:`dim`
+            retained or not. Ignored if ``dim=None``.
+        out (Tensor, optional) – the output tensor
+
+    Example::
+        >>> import torch
+        >>> a = torch.arange(9, dtype= torch.float) - 4
+        >>> b = a.reshape((3, 3))
+        >>> torch.norm(a)
+        tensor(7.7460)
+        >>> torch.norm(b)
+        tensor(7.7460)
+        >>> torch.norm(a, float('inf'))
+        tensor(4.)
+        >>> torch.norm(b, float('inf'))
+        tensor(9.)
+        >>> torch.norm(a, float('-inf'))
+        tensor(0.)
+        >>> torch.norm(b, float('-inf'))
+        tensor(2.)
+        >>> torch.norm(a, 1)
+        tensor(20.)
+        >>> torch.norm(b, 1)
+        tensor(20.)
+        >>> torch.norm(a, -1)
+        tensor(0.)
+        >>> torch.norm(b, -1)
+        tensor(0.)
+        >>> torch.norm(a, 2)
+        tensor(7.7460)
+        >>> torch.norm(b, 2)
+        tensor(7.7460)
+        >>> torch.norm(a, -2)
+        tensor(0.)
+        >>> torch.norm(b, -2)
+        tensor(0.)
+        >>> torch.norm(a, 3)
+        tensor(5.8480)
+        >>> torch.norm(a, -3)
+        tensor(0.)
+        >>> c = torch.tensor([[ 1, 2, 3],[-1, 1, 4]] , dtype= torch.float)
+        >>> torch.norm(c, dim=0)
+        tensor([1.4142, 2.2361, 5.0000])
+        >>> torch.norm(c, dim=1)
+        tensor([3.7417, 4.2426])
+        >>> torch.norm(c, p=1, dim=1)
+        tensor([6., 6.])
+        >>> d = torch.arange(8, dtype= torch.float).reshape(2,2,2)
+        >>> torch.norm(d, dim=(1,2))
+        tensor([ 3.7417, 11.2250])
+        >>> torch.norm(d[0, :, :]), torch.norm(d[1, :, :])
+        (tensor(3.7417), tensor(11.2250))
+    """
+    ndim = input.dim()
+
+    # catch default case
+    if dim is None and out is None:
+        if p == "fro":
+            return torch._C._VariableFunctions.norm(input, 2)
+        if isinstance(p, int):
+            return torch._C._VariableFunctions.norm(input, p)
+        if isinstance(p, float) and p != inf and p != -inf:
+            return torch._C._VariableFunctions.norm(input, p)
+
+    if dim is None:
+        dim = tuple(range(ndim))
+    elif isinstance(dim, list):
+        dim = tuple(dim)
+    elif not isinstance(dim, tuple):
+        try:
+            dim = int(dim)
+        except Exception:
+            raise TypeError(
+                "'dim' must be None, an integer or a tuple/list of integers"
+            )
+        dim = (dim,)
+
+    out_placeholder_longtensor = torch.tensor([], dtype=torch.long)
+    if len(dim) == 1:
+        if p == "nuc":
+            raise ValueError(
+                "Expected a tensor with at least 2 dimensions, but got a ",
+                input.dim(),
+                " dimensions tensor instead.",
+            )
+        elif p == inf:
+            if out is None:
+                return torch.max(torch.abs(input), dim[0], keepdim=keepdim)[0]
+            return torch.max(
+                torch.abs(input),
+                dim[0],
+                keepdim=keepdim,
+                out=(out, out_placeholder_longtensor),
+            )[0]
+        elif p == -inf:
+            if out is None:
+                return torch.min(torch.abs(input), dim[0], keepdim=keepdim)[0]
+            return torch.min(
+                torch.abs(input),
+                dim[0],
+                keepdim=keepdim,
+                out=(out, out_placeholder_longtensor) if out is not None else None,
+            )[0]
+        else:
+            if p == "fro":
+                p = 2
+            if out is None:
+                return torch._C._VariableFunctions.norm(input, p, dim[0], keepdim=keepdim)
+            return torch._C._VariableFunctions.norm(
+                input, p, dim[0], keepdim=keepdim, out=out
+            )
+
+    elif len(dim) == 2:
+        row_dim, col_dim = dim
+        if row_dim < 0:
+            row_dim += ndim
+        if col_dim < 0:
+            col_dim += ndim
+
+        if p == "fro":
+            if out is None:
+                return torch.frobenius_norm(input, dim, keepdim=keepdim)
+            return torch.frobenius_norm(input, dim, keepdim=keepdim, out=out)
+        elif p == "nuc":
+            if out is None:
+                torch.nuclear_norm(input, keepdim=keepdim)
+            return torch.nuclear_norm(input, keepdim=keepdim, out=out)
+        elif p == inf:
+            if row_dim > col_dim:
+                row_dim -= 1
+            if out is None:
+                return torch.max(
+                    torch.sum(torch.abs(input), dim=col_dim),
+                    dim=row_dim,
+                    keepdim=keepdim,
+                )[0]
+            return torch.max(
+                torch.sum(torch.abs(input), dim=col_dim),
+                dim=row_dim,
+                keepdim=keepdim,
+                out=(out, out_placeholder_longtensor),
+            )[0]
+        elif p == -inf:
+            if row_dim > col_dim:
+                row_dim -= 1
+            if out is None:
+                return torch.min(
+                    torch.sum(torch.abs(input), dim=col_dim),
+                    dim=row_dim,
+                    keepdim=keepdim
+                )[0]
+            return torch.min(
+                torch.sum(torch.abs(input), dim=col_dim),
+                dim=row_dim,
+                keepdim=keepdim,
+                out=(out, out_placeholder_longtensor)
+            )[0]
+        elif p == 1:
+            if col_dim > row_dim:
+                col_dim -= 1
+            if out is None:
+                return torch.max(
+                    torch.sum(torch.abs(input), dim=row_dim),
+                    dim=row_dim,
+                    keepdim=keepdim
+                )[0]
+            return torch.max(
+                torch.sum(torch.abs(input), dim=row_dim),
+                dim=col_dim,
+                keepdim=keepdim,
+                out=(out, out_placeholder_longtensor)
+            )[0]
+        elif p == -1:
+            if col_dim > row_dim:
+                col_dim -= 1
+            if out is None:
+                return torch.min(
+                    torch.sum(torch.abs(input), dim=row_dim),
+                    dim=row_dim,
+                    keepdim=keepdim
+                )[0]
+            return torch.min(
+                torch.sum(torch.abs(input), dim=row_dim),
+                dim=col_dim,
+                keepdim=keepdim,
+                out=(out, out_placeholder_longtensor)
+            )[0]
+        elif p == 2:
+            if out is None:
+                return torch.max(torch.svd(input)[1])
+            return torch.max(
+                torch.svd(input)[1],
+                dim=0,
+                keepdim=keepdim,
+                out=(out, out_placeholder_longtensor)
+            )[0]
+        elif p == -2:
+            if out is None:
+                return torch.min(torch.svd(input)[1])
+            return torch.min(
+                torch.svd(input)[1],
+                dim=0,
+                keepdim=keepdim,
+                out=(out, out_placeholder_longtensor)
+            )[0]
+        else:
+            raise ValueError("Invalid norm order for matrix.")
+    else:
+        raise ValueError(
+            "Expected at most 2 dimensions, but got ", len(dim), " dimensions instead."
+        )

@@ -347,5 +347,45 @@ Tensor& matmul_out(Tensor &result, const Tensor & tensor1, const Tensor & tensor
   return result;
 }
 
+Tensor frobenius_norm(const Tensor& self) {
+  IntList dim = {0, 1};
+  return at::native::frobenius_norm(self, dim);
 }
+
+Tensor frobenius_norm(const Tensor& self, IntList dim, bool keepdim) {
+  Tensor result = self.type().tensor();
+  return at::native::frobenius_norm_out(result, self, dim, keepdim);
 }
+
+Tensor &frobenius_norm_out(
+    Tensor& result,
+    const Tensor& self,
+    IntList dim,
+    bool keepdim) {
+  AT_CHECK(
+      dim.size() <= 2,
+      "Expected at most 2 dimensions, but got ",
+      dim.size(),
+      " dimensions instead.");
+  if (dim.size() == 1) {
+    return at::norm_out(result, self, 2, dim[0], keepdim);
+  }
+  return at::sqrt_out(result, at::sum(self * self, dim, keepdim));
+}
+
+Tensor nuclear_norm(const Tensor& self, bool keepdim) {
+  Tensor result = self.type().tensor();
+  return at::native::nuclear_norm_out(result, self, keepdim);
+}
+
+Tensor &nuclear_norm_out(Tensor& result, const Tensor& self, bool keepdim) {
+  AT_CHECK(
+      self.dim() == 2,
+      "Expected a tensor with 2 dimensions, but got a ",
+      self.dim(),
+      " dimensions tensor instead.");
+  return at::sum_out(result, std::get<1>(at::svd(self)), 0, keepdim);
+}
+
+} // namespace native
+} // namespace at

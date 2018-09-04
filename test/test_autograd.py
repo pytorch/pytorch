@@ -2073,6 +2073,13 @@ class TestAutograd(TestCase):
         run_test((10,), 1)
         run_test((10,), 1.5)
 
+    def test_nuclear_norm_subgradient(self):
+        def run_test(input_size, expect_result):
+            input = torch.zeros(*input_size, requires_grad=True)
+            input.nuclear_norm().backward()
+            self.assertEqual(input.grad.data.abs().sum(), expect_result)
+        run_test((10, 10), 10)
+
     def test_pow_zero_tensor_gradient(self):
         def run_test(input_size, exponent):
             input = torch.zeros(*input_size, requires_grad=True)
@@ -2963,16 +2970,26 @@ method_tests = [
     ('zero_', (), NO_ARGS, 'scalar'),
     ('logsumexp', (S, S), (1,)),
     ('logsumexp', (), (0,), 'scalar'),
-    ('norm', (S, S), (2,)),
+    ('norm', (S, S), (2,), '2'),
     ('norm', (S, S), (0,), '0'),
     ('norm', (S, S), (0.5,), '0_5'),
     ('norm', (S, S), (1,), '1'),
     ('norm', (S, S), (3,), '3'),
     ('norm', (S, S), (inf,), 'inf'),
+    ('norm', (S, S), (-inf,), 'neg_inf'),
     ('norm', (S, S), (-1,), 'neg_1'),
+    ('norm', (S, S), (-2,), 'neg_2'),
     ('norm', (S, S), (-0.5,), 'neg_0_5'),
     ('norm', (S, S), (-1.5,), 'neg_1_5'),
-    ('norm', torch.rand(S, S, S) + 5e-2, (1.5,), '1_5'),
+    ('norm', (S, S), (-2, 1,), 'neg_2_2_dim', [1]),
+    ('norm', (S, S), (-1, 1,), 'neg_1_2_dim', [1]),
+    ('norm', (S, S), (0, 1,), '0_2_dim', [1]),
+    ('norm', (S, S), (1, 1,), '1_2_dim', [1]),
+    ('norm', (S, S), (2, 1,), '2_2_dim', [1]),
+    ('norm', (S, S), (3, 1,), '3_2_dim', [1]),
+    ('norm', (S, S), (inf, 1,), 'inf_2_dim'),
+    ('norm', (S, S), (-inf, 1,), 'neg_inf_2_dim'),
+    ('norm', torch.rand(S, S, S) + 5e-2, (1.5,), '1_5_default'),
     ('norm', (S, S, S), (2, 1), '2_dim', [1]),
     ('norm', (S, S, S), (3, 1), '3_dim', [1]),
     ('norm', torch.rand(S, S, S) + 5e-2, (1.5, 1), '1_5_dim', [1]),
@@ -2983,6 +3000,10 @@ method_tests = [
     ('norm', (), (3, 0), '3_dim_scalar', [1]),
     ('norm', (), (2, 0, True), 'keepdim_2_dim_scalar', [1]),
     ('norm', (), (3, 0, True), 'keepdim_3_dim_scalar', [1]),
+    ('nuclear_norm',(S, S), (), 'nuclear_norm_2_dim'),
+    ('frobenius_norm', torch.rand(S, S) + 5e-4, (), 'frobenius_norm_2_dim'),
+    ('frobenius_norm', torch.rand(S, S, S) + 5e-4, ([1, 2],), 'frobenius_norm_high_dim'),
+    ('frobenius_norm', torch.rand(S, S, S) + 5e-4, ([1, 2], True,), 'frobenius_norm_keep_dim'),
     ('clone', (S, M, S), NO_ARGS),
     ('clone', (), NO_ARGS, 'scalar'),
     ('dist', (S, S, S), ((S, S, S),)),

@@ -827,16 +827,24 @@ class TestTorch(TestCase):
         # full reduction
         x = torch.randn(5, device=device)
         xn = x.cpu().numpy()
-        for p in [0, 1, 2, 3, 4, inf]:
+        for p in [-2, -1, 0, 1, 2, 3, 4, inf, -inf]:
             res = x.norm(p).item()
             expected = np.linalg.norm(xn, p)
             self.assertEqual(res, expected, "full reduction failed for {}-norm".format(p))
+
         # one dimension
         x = torch.randn(5, 5, device=device)
         xn = x.cpu().numpy()
-        for p in [0, 1, 2, 3, 4, inf]:
+        for p in [-2, -1, 0, 1, 2, 3, 4, inf, -inf]:
             res = x.norm(p, 1).cpu().numpy()
             expected = np.linalg.norm(xn, p, 1)
+            self.assertEqual(res.shape, expected.shape)
+            self.assertTrue(np.allclose(res, expected), "dim reduction failed for {}-norm".format(p))
+
+        # matrix norm
+        for p in [-2, -1, 1, 2, inf, -inf, 'fro', 'nuc']:
+            res = x.norm(p,(0,1)).cpu().numpy()
+            expected = np.linalg.norm(xn, p)
             self.assertEqual(res.shape, expected.shape)
             self.assertTrue(np.allclose(res, expected), "dim reduction failed for {}-norm".format(p))
 
@@ -849,6 +857,37 @@ class TestTorch(TestCase):
     @skipIfRocm
     def test_norm_cuda(self):
         self._test_norm(self, device='cuda')
+
+    @staticmethod
+    def _test_frobenius_norm(self):
+        x = torch.randn(4, 2)
+        xn = x.cpu().numpy()
+        res = x.frobenius_norm().item()
+        expected = np.linalg.norm(xn, 'fro')
+        self.assertEqual(res, expected, "full reduction failed for frobenius norm")
+
+        x = torch.randn(4, 2, 3)
+        xn = x.cpu().numpy()
+        res = x.frobenius_norm((1, 2)).cpu().numpy()
+        expected = np.linalg.norm(xn, 'fro', (1, 2))
+        self.assertEqual(res, expected, "full reduction failed for frobenius norm")
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_frobenius_norm(self):
+        self._test_frobenius_norm(self)
+
+    @staticmethod
+    def _test_nuclear_norm(self):
+        # full reduction
+        x = torch.randn(4, 2)
+        xn = x.cpu().numpy()
+        res = x.nuclear_norm().item()
+        expected = np.linalg.norm(xn, 'nuc')
+        self.assertEqual(res, expected, "full reduction failed for nuclear norm")
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_nuclear_norm(self):
+        self._test_nuclear_norm(self)
 
     def test_dim_reduction_uint8_overflow(self):
         example = [[-1, 2, 1], [5, 3, 6]]

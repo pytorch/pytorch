@@ -3000,60 +3000,6 @@ Example::
             [ 3,  3]])
 """)
 
-add_docstr(torch.norm,
-           r"""
-.. function:: norm(input, p=2) -> Tensor
-
-Returns the p-norm of the :attr:`input` tensor.
-
-.. math::
-    ||x||_{p} = \sqrt[p]{x_{1}^{p} + x_{2}^{p} + \ldots + x_{N}^{p}}
-
-Args:
-    input (Tensor): the input tensor
-    p (float, optional): the exponent value in the norm formulation
-Example::
-
-    >>> a = torch.randn(1, 3)
-    >>> a
-    tensor([[-0.5192, -1.0782, -1.0448]])
-    >>> torch.norm(a, 3)
-    tensor(1.3633)
-
-.. function:: norm(input, p, dim, keepdim=False, out=None) -> Tensor
-
-Returns the p-norm of each row of the :attr:`input` tensor in the given
-dimension :attr:`dim`.
-
-If :attr:`keepdim` is ``True``, the output tensor is of the same size as
-:attr:`input` except in the dimension :attr:`dim` where it is of size 1.
-Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting
-in the output tensor having 1 fewer dimension than :attr:`input`.
-
-Args:
-    input (Tensor): the input tensor
-    p (float):  the exponent value in the norm formulation
-    dim (int): the dimension to reduce
-    keepdim (bool): whether the output tensor has :attr:`dim` retained or not
-    out (Tensor, optional): the output tensor
-
-Example::
-
-    >>> a = torch.randn(4, 2)
-    >>> a
-    tensor([[ 2.1983,  0.4141],
-            [ 0.8734,  1.9710],
-            [-0.7778,  0.7938],
-            [-0.1342,  0.7347]])
-    >>> torch.norm(a, 2, 1)
-    tensor([ 2.2369,  2.1558,  1.1113,  0.7469])
-    >>> torch.norm(a, 0, 1, True)
-    tensor([[ 2.],
-            [ 2.],
-            [ 2.],
-            [ 2.]])
-""")
-
 add_docstr(torch.normal,
            r"""
 .. function:: normal(mean, std, out=None) -> Tensor
