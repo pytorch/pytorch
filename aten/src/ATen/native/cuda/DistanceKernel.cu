@@ -49,7 +49,7 @@ struct dists {
   // General p norm
   struct p {
     static __forceinline__ __device__ void inc(scalar_t& agg, const scalar_t diff, const scalar_t p) { agg += std::pow(diff, p); }
-    static __forceinline__ __device__ scalar_t finish(const scalar_t agg, const scalar_t p) { return std::pow(agg, 1.0 / p); }
+    static __forceinline__ __device__ scalar_t finish(const scalar_t agg, const scalar_t p) { return std::pow(agg, static_cast<scalar_t>(1) / p); }
     static __forceinline__ __device__ void agg(scalar_t& update, const scalar_t other) { update += other; }
     static __forceinline__ __device__ scalar_t backward(const scalar_t diff, const scalar_t grad, const scalar_t dist, const scalar_t p) { return dist == 0.0 ? 0 : diff * std::pow(std::abs(diff), p - 2) * grad / std::pow(dist, p - 1); }
   };
@@ -143,21 +143,21 @@ __global__ static void pdist_backward_kernel_cuda_impl(scalar_t * buffer, const 
 
 void pdist_forward_kernel_impl(Tensor& result, const Tensor& self, double p) {
   const dim3 blocks(result.numel());
-  const dim3 threads(forward_warps * warp_size);
+  const dim3 per_block(forward_warps * warp_size);
   int64_t n = self.size(0);
   int64_t m = self.size(1);
 
   AT_DISPATCH_FLOATING_TYPES(self.type(), "pdist_cuda", [&] {
     if (p == 0.0) {
-      pdist_kernel_cuda_impl<scalar_t, dists<scalar_t>::zero><<<blocks, threads>>>(result.data<scalar_t>(), self.data<scalar_t>(), n, m, p);
+      pdist_kernel_cuda_impl<scalar_t, dists<scalar_t>::zero><<<blocks, per_block>>>(result.data<scalar_t>(), self.data<scalar_t>(), n, m, p);
     } else if (p == 1.0) {
-      pdist_kernel_cuda_impl<scalar_t, dists<scalar_t>::one><<<blocks, threads>>>(result.data<scalar_t>(), self.data<scalar_t>(), n, m, p);
+      pdist_kernel_cuda_impl<scalar_t, dists<scalar_t>::one><<<blocks, per_block>>>(result.data<scalar_t>(), self.data<scalar_t>(), n, m, p);
     } else if (p == 2.0) {
-      pdist_kernel_cuda_impl<scalar_t, dists<scalar_t>::two><<<blocks, threads>>>(result.data<scalar_t>(), self.data<scalar_t>(), n, m, p);
+      pdist_kernel_cuda_impl<scalar_t, dists<scalar_t>::two><<<blocks, per_block>>>(result.data<scalar_t>(), self.data<scalar_t>(), n, m, p);
     } else if (std::isinf(p)) {
-      pdist_kernel_cuda_impl<scalar_t, dists<scalar_t>::inf><<<blocks, threads>>>(result.data<scalar_t>(), self.data<scalar_t>(), n, m, p);
+      pdist_kernel_cuda_impl<scalar_t, dists<scalar_t>::inf><<<blocks, per_block>>>(result.data<scalar_t>(), self.data<scalar_t>(), n, m, p);
     } else {
-      pdist_kernel_cuda_impl<scalar_t, dists<scalar_t>::p><<<blocks, threads>>>(result.data<scalar_t>(), self.data<scalar_t>(), n, m, p);
+      pdist_kernel_cuda_impl<scalar_t, dists<scalar_t>::p><<<blocks, per_block>>>(result.data<scalar_t>(), self.data<scalar_t>(), n, m, p);
     }
   });
 }
@@ -170,25 +170,25 @@ void pdist_backward_kernel_impl(Tensor& result, const Tensor& grad, const Tensor
 
   const int64_t n = result.size(0);
   int64_t m = self.size(1);
-  const int horiz_threads = 2 * warp_size;
-  const int vert_threads = 4;
-  const int horiz_blocks = (m + horiz_threads * 8 - 1) / (horiz_threads * 8);
-  const int vert_blocks = (dist.numel() + vert_threads - 1) / vert_threads;
+  const int horiz_per_block = 2 * warp_size;
+  const int vert_per_block = 4;
+  const int horiz_blocks = (m + horiz_per_block * 8 - 1) / (horiz_per_block * 8);
+  const int vert_blocks = (dist.numel() + vert_per_block - 1) / vert_per_block;
   const dim3 blocks(horiz_blocks, vert_blocks);
-  const dim3 threads(horiz_threads, vert_threads);
+  const dim3 per_block(horiz_per_block, vert_per_block);
 
   Tensor buffer = result.type().tensor({n - 1, result.size(0), result.size(1)});
   AT_DISPATCH_FLOATING_TYPES(self.type(), "pdist_cuda_backward", [&] {
     if (p == 1.0) {
-      pdist_backward_kernel_cuda_impl<scalar_t, dists<scalar_t>::one><<<blocks, threads>>>(buffer.data<scalar_t>(), grad.data<scalar_t>(), self.data<scalar_t>(), dist.data<scalar_t>(), grad.stride(0), n, m, dist.numel(), p);
+      pdist_backward_kernel_cuda_impl<scalar_t, dists<scalar_t>::one><<<blocks, per_block>>>(buffer.data<scalar_t>(), grad.data<scalar_t>(), self.data<scalar_t>(), dist.data<scalar_t>(), grad.stride(0), n, m, dist.numel(), p);
     } else if (p < 2.0) {
-      pdist_backward_kernel_cuda_impl<scalar_t, dists<scalar_t>::lt_two><<<blocks, threads>>>(buffer.data<scalar_t>(), grad.data<scalar_t>(), self.data<scalar_t>(), dist.data<scalar_t>(), grad.stride(0), n, m, dist.numel(), p);
+      pdist_backward_kernel_cuda_impl<scalar_t, dists<scalar_t>::lt_two><<<blocks, per_block>>>(buffer.data<scalar_t>(), grad.data<scalar_t>(), self.data<scalar_t>(), dist.data<scalar_t>(), grad.stride(0), n, m, dist.numel(), p);
     } else if (p == 2.0) {
-      pdist_backward_kernel_cuda_impl<scalar_t, dists<scalar_t>::two><<<blocks, threads>>>(buffer.data<scalar_t>(), grad.data<scalar_t>(), self.data<scalar_t>(), dist.data<scalar_t>(), grad.stride(0), n, m, dist.numel(), p);
+      pdist_backward_kernel_cuda_impl<scalar_t, dists<scalar_t>::two><<<blocks, per_block>>>(buffer.data<scalar_t>(), grad.data<scalar_t>(), self.data<scalar_t>(), dist.data<scalar_t>(), grad.stride(0), n, m, dist.numel(), p);
     } else if (std::isinf(p)) {
-      pdist_backward_kernel_cuda_impl<scalar_t, dists<scalar_t>::inf><<<blocks, threads>>>(buffer.data<scalar_t>(), grad.data<scalar_t>(), self.data<scalar_t>(), dist.data<scalar_t>(), grad.stride(0), n, m, dist.numel(), p);
+      pdist_backward_kernel_cuda_impl<scalar_t, dists<scalar_t>::inf><<<blocks, per_block>>>(buffer.data<scalar_t>(), grad.data<scalar_t>(), self.data<scalar_t>(), dist.data<scalar_t>(), grad.stride(0), n, m, dist.numel(), p);
     } else {
-      pdist_backward_kernel_cuda_impl<scalar_t, dists<scalar_t>::p><<<blocks, threads>>>(buffer.data<scalar_t>(), grad.data<scalar_t>(), self.data<scalar_t>(), dist.data<scalar_t>(), grad.stride(0), n, m, dist.numel(), p);
+      pdist_backward_kernel_cuda_impl<scalar_t, dists<scalar_t>::p><<<blocks, per_block>>>(buffer.data<scalar_t>(), grad.data<scalar_t>(), self.data<scalar_t>(), dist.data<scalar_t>(), grad.stride(0), n, m, dist.numel(), p);
     }
   });
 
