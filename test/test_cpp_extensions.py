@@ -313,8 +313,15 @@ class TestCppExtension(common.TestCase):
             for (auto s : size) {
               numel *= s;
             }
-            Storage s{c10::make_intrusive<StorageImpl>(scalarTypeToDataType(ScalarType::ComplexFloat), numel, getCPUAllocator(), /* resizable */ true)};
-            Tensor t{c10::make_intrusive<TensorImpl, UndefinedTensor>(std::move(s), at::CPUTensorId(), /* is_variable */ false)};
+            Storage s{c10::make_intrusive<StorageImpl>(
+                scalarTypeToDataType(ScalarType::ComplexFloat),
+                numel,
+                getCPUAllocator(),
+                /* resizable */ true)};
+            Tensor t{c10::make_intrusive<TensorImpl, UndefinedTensor>(
+                std::move(s),
+                at::CPUTensorId(),
+                /* is_variable */ false)};
             return t;
           }
         };
