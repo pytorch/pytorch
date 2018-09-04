@@ -556,9 +556,12 @@ auto Engine::execute(const edge_list& roots,
   // more callbacks (or they can be registered from other threads
   // while it's waiting.
   std::unique_lock<std::mutex> cb_lock(post_callbacks_lock);
-  for (auto& callback : final_callbacks) {
+  // WARNING: Don't use a range-for loop here because more callbacks may be
+  // added in between callback calls, so iterators may become invalidated.
+  // NOLINTNEXTLINE(modernize-loop-convert)
+  for (size_t i = 0; i < final_callbacks.size(); ++i) {
     cb_lock.unlock();
-    callback();
+    final_callbacks[i]();
     cb_lock.lock();
   }
 
