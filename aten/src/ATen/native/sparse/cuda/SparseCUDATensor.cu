@@ -24,14 +24,17 @@
 
 namespace at { namespace native {
 
+// NOTE: `coalesce` should never be an in-place operation.
 SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
 #ifndef __HIP_PLATFORM_HCC__
   int64_t nnz = self._nnz();
   if (nnz < 2) {
-    _get_sparse_impl(self)->set_coalesced(true);
+    SparseTensor dst = self.clone();
+    _get_sparse_impl(dst)->set_coalesced(true);
+    return dst;
   }
   if (self.is_coalesced()) {
-    return self;
+    return self.clone();
   }
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();

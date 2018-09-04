@@ -252,16 +252,19 @@ SparseTensor& copy_sparse_(SparseTensor& self, const SparseTensor& src) {
   return self;
 }
 
+// NOTE: `coalesce` should never be an in-place operation.
 SparseTensor coalesce_sparse_cpu(const SparseTensor& self) {
   AT_ASSERT(self.defined());
   AT_ASSERT(!self.is_variable());
   AT_ASSERT(self.is_sparse());
 
   if (self._nnz() < 2) {
-    _get_sparse_impl(self)->set_coalesced(true);
+    SparseTensor dst = self.clone();
+    _get_sparse_impl(dst)->set_coalesced(true);
+    return dst;
   }
   if (self.is_coalesced()) {
-    return self;
+    return self.clone();
   }
 
   LongTensor indices = self._indices();
@@ -306,13 +309,17 @@ SparseTensor coalesce_sparse_cpu(const SparseTensor& self) {
           int64_t pos = indicesPermutationAccessor[j];
           int64_t curr = indicesBufferAccessor[j];
           if (curr == prev) {
-            THBlas_axpy<scalar_t>(blockSize, 1, values_ptr + pos * blockSize, 1, newValues_ptr + i * blockSize, 1);
+            if (values.numel() > 0) {  // if values is an empty tensor, there are no elements to add up
+              THBlas_axpy<scalar_t>(blockSize, 1, values_ptr + pos * blockSize, 1, newValues_ptr + i * blockSize, 1);
+            }
           } else {
             ++i;
             for (int64_t d = 0; d < sparseDims; d++) {
               newIndicesAccessor[d][i] = indicesAccessor[d][pos];
             }
-            THBlas_copy<scalar_t>(blockSize, values_ptr + pos * blockSize, 1, newValues_ptr + i * blockSize, 1);
+            if (values.numel() > 0) {  // if values is an empty tensor, there are no elements to add up
+              THBlas_copy<scalar_t>(blockSize, values_ptr + pos * blockSize, 1, newValues_ptr + i * blockSize, 1);
+            }
           }
           prev = curr;
         }
@@ -345,6 +352,10 @@ SparseTensor& sparse_mask_out_cpu(SparseTensor& r, const Tensor& t, const Sparse
   _get_sparse_impl(r)->set_coalesced(mask.is_coalesced());
   int64_t r_nnz = mask._nnz();
   _get_sparse_impl(r)->set_nnz_and_narrow(r_nnz);
+  if (t.numel() == 0) {  // if t is an empty tensor, then there is no need to select its elements
+    return r;
+  }
+
   // NB: Relies on mask._nnz() == 0 test above
   auto mask_indices_accessor = mask_indices.accessor<int64_t, 2>();
 
