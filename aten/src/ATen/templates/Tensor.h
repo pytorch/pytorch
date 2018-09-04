@@ -7,7 +7,7 @@
 #include "ATen/Scalar.h"
 #include "ATen/core/ScalarType.h"
 #include "ATen/core/SparseTensorRef.h"
-#include "ATen/Storage.h"
+#include "ATen/core/Storage.h"
 #include "ATen/core/TensorAccessor.h"
 #include "ATen/TensorImpl.h"
 #include "ATen/core/optional.h"

@@ -15,7 +15,7 @@
 #include "ATen/core/Layout.h"
 #include "ATen/OptionsGuard.h"
 #include "ATen/Scalar.h"
-#include "ATen/Storage.h"
+#include "ATen/core/Storage.h"
 #include "ATen/Tensor.h"
 #include "ATen/TensorGeometry.h"
 #include "ATen/TensorMethods.h"
