@@ -422,6 +422,12 @@ CAFFE2_API void RandUniformUnique(
     const T* avoid,
     Context* context);
 
+// Generate n values from synthetic data distribution,
+// define by unique accesses and stack distances
+template <typename T, class Context>
+CAFFE2_API void
+RandSyntheticData(const size_t n, const T a, const T b, T* r, Context* context);
+
 template <typename T, class Context>
 CAFFE2_API void
 RandGaussian(const size_t n, const T mean, const T std, T* r, Context* context);
