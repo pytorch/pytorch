@@ -4410,8 +4410,8 @@ If :attr:`some` is ``True`` (default), the returned `U` and `V` matrices will
 contain only :math:`min(n, m)` orthonormal columns.
 
 .. note:: The implementation of SVD on CPU uses the LAPACK routine `?gesdd` (a divide-and-conquer
-          algorithm) instead of `?gesvd` for speed. However, the SVD on GPU uses the MAGMA routine
-          `gesvd` since it takes up lesser workspace area.
+          algorithm) instead of `?gesvd` for speed. Analogously, the SVD on GPU uses the MAGMA routine
+          `gesdd` as well.
 
 .. note:: Irrespective of the original strides, the returned matrix `U`
           will be transposed, i.e. with strides `(1, n)` instead of `(n, 1)`.
