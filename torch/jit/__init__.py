@@ -298,6 +298,8 @@ class TracingCheckError(Exception):
 # Check the traced module against a set of user-provided validation inputs
 def _check_trace(check_inputs, func, executor_options, module, check_tolerance):
     for inputs in check_inputs:
+        if isinstance(inputs, torch.Tensor):
+            inputs = (inputs,)
         check_mod = torch.jit.trace(func, _clone_inputs(inputs), check_trace=False, **executor_options)
 
         def graph_diagnostic_info():
@@ -345,7 +347,7 @@ def _check_trace(check_inputs, func, executor_options, module, check_tolerance):
                     try:
                         torch.testing.assert_allclose(mod_tensor_val, check_tensor_val)
                     except (RuntimeError, AssertionError) as e:
-                        if not tensor_compare_errors:
+                        if tensor_compare_errors is None:
                             tensor_compare_errors = ''
                         tensor_compare_errors += 'Node:\n' + indent(str(n_mod)) + '\n'
                         compare_stack = n_mod.getSourceLocation()
@@ -369,49 +371,46 @@ def _check_trace(check_inputs, func, executor_options, module, check_tolerance):
         def wrap_retval(x):
             return x if isinstance(x, tuple) else (x,)
 
-        def run_mod_and_filter_tensor_outputs(mod, inputs):
-            outs = wrap_retval(mod(*_clone_inputs(inputs)))
-            outs = [out for out in outs if isinstance(out, torch.Tensor)]
-            return outs
+        def run_mod_and_filter_tensor_outputs(mod, inputs, running_what):
+            try:
+                outs = wrap_retval(mod(*_clone_inputs(inputs)))
+                outs = [out for out in outs if isinstance(out, torch.Tensor)]
+                return outs
+            except Exception as e:
+                raise TracingCheckError(*graph_diagnostic_info(),
+                                        extra_msg='Encountered an exception while running the ' + running_what + \
+                                                  ' with test inputs.\nException:\n' + indent(str(e)))
 
-        try:
-            traced_outs = run_mod_and_filter_tensor_outputs(module, inputs)
-        except Exception as e:
-            msg = 'Encountered an exception while running trace with check inputs.\nException:\n' + indent(str(e))
-            raise TracingCheckError(*graph_diagnostic_info(), extra_msg=msg)
+        def compare_outputs(original, reference, match_what):
+            all_ok = True
+            for i, (orig, ref) in enumerate(zip(original, reference)):
+                try:
+                    torch.testing.assert_allclose(orig.double(), ref.double(), rtol=check_tolerance,
+                                                    atol=torch.testing._get_default_tolerance(orig, ref)[1])
+                except AssertionError as e:
+                    warnings.warn('Output nr ' + str(i + 1) + '. of the traced function does not match '
+                                  'the corresponding output of the ' + match_what + '. Detailed error:\n' + str(e),
+                                  category=TracerWarning, stacklevel=4)
+                    all_ok = False
 
-        try:
-            fn_outs = run_mod_and_filter_tensor_outputs(func, inputs)
-            for orig, check in zip(traced_outs, fn_outs):
-                torch.testing.assert_allclose(orig.double(), check.double(), rtol=check_tolerance,
-                                              atol=torch.testing._get_default_tolerance(orig, check)[1])
-        except (RuntimeError, AssertionError) as e:
-            # TODO: interpose on tracing the function again and check for
-            # divergence? then we can point to where in the source code
-            # we start diverging in python v.s. the trace
-            msg = 'ERROR: Traced function outputs do not match the Python function outputs.\nException: ' + str(e)
-            raise TracingCheckError(*graph_diagnostic_info(),
-                                    extra_msg=msg)
+            return all_ok
 
-        try:
-            check_outs = run_mod_and_filter_tensor_outputs(check_mod, inputs)
-        except Exception as e:
-            msg = 'Encountered an exception while running checking trace with check inputs.\nException:\n' \
-                + indent(str(e))
-            raise TracingCheckError(*graph_diagnostic_info(), extra_msg=msg)
+        traced_outs = run_mod_and_filter_tensor_outputs(module, inputs, 'trace')
+        fn_outs = run_mod_and_filter_tensor_outputs(func, inputs, 'Python function')
+        if compare_outputs(traced_outs, fn_outs, 'Python function'):
+            check_outs = run_mod_and_filter_tensor_outputs(check_mod, inputs, 'repeated trace')
+            compare_outputs(traced_outs, check_outs, 'repeated trace')
 
-        try:
-            for orig, check in zip(traced_outs, check_outs):
-                torch.testing.assert_allclose(orig.double(), check.double(), rtol=check_tolerance,
-                                              atol=torch.testing._get_default_tolerance(orig, check)[1])
-        except (RuntimeError, AssertionError) as e:
-            raise TracingCheckError(*graph_diagnostic_info())
+        diag_info = graph_diagnostic_info()
+        if any(info is not None for info in diag_info):
+            raise TracingCheckError(*diag_info)
 
 
 class TracerWarning(Warning):
     @staticmethod
     def ignore_lib_warnings():
-        warnings.filterwarnings('ignore', category=TracerWarning, module='torch.*')
+        # We ignore warnings from all submodules excluding the JIT, because we need them e.g. for _check_trace
+        warnings.filterwarnings('ignore', category=TracerWarning, module='torch.(?!jit)')
 
 
 # We ignore the tracer warnings coming form inside the library, because all our shape

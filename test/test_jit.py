@@ -83,12 +83,12 @@ def LSTMCellC(*args, **kwargs):
 def LSTMCellS(x, hx, cx, w_ih, w_hh, b_ih, b_hh):
     gates = x.mm(w_ih.t()) + hx.mm(w_hh.t()) + b_ih + b_hh
     ingate, forgetgate, cellgate, outgate = gates.chunk(4, 1)
-    ingate = F.sigmoid(ingate)
-    forgetgate = F.sigmoid(forgetgate)
-    cellgate = F.tanh(cellgate)
-    outgate = F.sigmoid(outgate)
+    ingate = torch.sigmoid(ingate)
+    forgetgate = torch.sigmoid(forgetgate)
+    cellgate = torch.tanh(cellgate)
+    outgate = torch.sigmoid(outgate)
     cy = (forgetgate * cx) + (ingate * cellgate)
-    hy = outgate * F.tanh(cy)
+    hy = outgate * torch.tanh(cy)
     return hy, cy
 
 
@@ -6239,6 +6239,7 @@ a")
                 y = torch.arange(0, x.shape[0]).double()
                 return x + y.unsqueeze(1)
 
+    @suppress_warnings
     def test_trace_checker_dot_data(self):
         with self.assertRaisesRegex(torch.jit.TracingCheckError, r'Tensor-valued Constant nodes differed in value '
                                                                  r'across invocations'):
@@ -6249,13 +6250,15 @@ a")
 
     @suppress_warnings
     def test_trace_checker_control_flow(self):
-        with self.assertRaisesRegex(torch.jit.TracingCheckError, r'Graphs differed across invocations!'):
-            @_trace(torch.rand(3, 4), check_inputs=[(torch.rand(4, 4),)])
-            def foo(x):
-                for _ in range(x.size(0)):
-                    x = torch.neg(x)
-                return x
+        def foo(x):
+            for _ in range(x.size(0)):
+                x = torch.neg(x)
+            return x
 
+        with self.assertRaisesRegex(torch.jit.TracingCheckError, r'Graphs differed across invocations!'):
+            torch.jit.trace(foo, torch.randn(3, 4), check_inputs=[torch.randn(4, 4)])
+
+    @suppress_warnings
     def test_trace_checker_memoization(self):
         with self.assertRaisesRegex(torch.jit.TracingCheckError, r'Graphs differed across invocations!'):
             def foo(x):
@@ -6273,17 +6276,33 @@ a")
             self.assertIn("cause the trace to be incorrect", str(warn.message))
 
     def test_trace_checker_slice_lhs(self):
+        # def foo(x):
+            # for i in range(3):
+                # x[i, :] = torch.zeros(4)
+            # return x
+        # self.checkTracerWarning(foo, torch.rand(3, 4))
         def foo(x):
             for i in range(3):
                 x[i, :] = torch.zeros(4)
             return x
-        self.checkTracerWarning(foo, torch.rand(3, 4))
+
+        self.assertWarnsRegex(lambda: torch.jit.trace(foo, torch.rand(3, 4), check_inputs=[torch.rand(3, 4)]),
+                              'Output nr 1. of the traced function does not match the '
+                              'corresponding output of the Python function')
 
     def test_trace_checker_inplace_on_view(self):
+        # def foo(x):
+            # x.view(-1).add_(-x.view(-1))
+            # return x
+        # self.checkTracerWarning(foo, torch.rand(3, 4), check_trace=False)
+
         def foo(x):
             x.view(-1).add_(-x.view(-1))
             return x
-        self.checkTracerWarning(foo, torch.rand(3, 4), check_trace=False)
+
+        self.assertWarnsRegex(lambda: torch.jit.trace(foo, torch.rand(3, 4), check_inputs=[torch.rand(5, 6)]),
+                              'Output nr 1. of the traced function does not match the '
+                              'corresponding output of the Python function')
 
     def test_lhs_index_fails(self):
         def foo(x):
@@ -6297,6 +6316,7 @@ a")
             return y
         self.checkTrace(foo, (torch.rand(3, 4), torch.rand(4)), inputs_require_grads=False)
 
+    @suppress_warnings
     def test_trace_checker_dropout_train(self):
         with self.assertRaisesRegex(torch.jit.TracingCheckError, r'Trace had nondeterministic nodes'):
             @_trace(torch.rand(3, 4))
