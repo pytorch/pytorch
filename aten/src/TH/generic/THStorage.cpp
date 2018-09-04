@@ -48,18 +48,18 @@ THStorage* THStorage_(newWithAllocator)(ptrdiff_t size,
 
 THStorage* THStorage_(newWithMapping)(const char *filename, ptrdiff_t size, int flags)
 {
-  auto scalar_type = at::CTypeToScalarType<scalar_t>::to();
+  auto type_meta = caffe2::TypeMeta::Make<scalar_t>();
   size_t actual_size = -1;
   THStorage* storage = c10::make_intrusive<at::StorageImpl>(
-      caffe2::TypeMeta::Make<scalar_t>(),
+      type_meta,
       size,
       THMapAllocator::makeDataPtr(
-          filename, flags, size * at::elementSize(scalar_type), &actual_size),
+          filename, flags, size * type_meta.itemsize(), &actual_size),
       /* allocator */ nullptr,
       false).release();
 
   if (size <= 0) {
-    storage->set_numel(actual_size / at::elementSize(scalar_type));
+    storage->set_numel(actual_size / type_meta.itemsize());
   }
 
   return storage;
