@@ -705,13 +705,15 @@ class TestDistributions(TestCase):
         self.assertGreater(p, failure_rate, message)
 
     def _check_enumerate_support(self, dist, examples):
-        for param, expected in examples:
-            param = torch.tensor(param)
+        for params, expected in examples:
+            params = {k: torch.tensor(v) for k, v in params.items()}
             expected = torch.tensor(expected)
-            actual = dist(param).enumerate_support()
+            d = dist(**params)
+            actual = d.enumerate_support(expand=False)
             self.assertEqual(actual, expected)
-            actual = dist(param).enumerate_support()
-            self.assertEqual(actual, expected)
+            actual = d.enumerate_support(expand=True)
+            expected_with_expand = expected.expand((-1,) + d.batch_shape + d.event_shape)
+            self.assertEqual(actual, expected_with_expand)
 
     def test_sample_detached(self):
         for Dist, params in EXAMPLES:
@@ -809,9 +811,9 @@ class TestDistributions(TestCase):
 
     def test_bernoulli_enumerate_support(self):
         examples = [
-            ([0.1], [[0], [1]]),
-            ([0.1, 0.9], [[0, 0], [1, 1]]),
-            ([[0.1, 0.2], [0.3, 0.4]], [[[0, 0], [0, 0]], [[1, 1], [1, 1]]]),
+            ({"probs": [0.1]}, [[0], [1]]),
+            ({"probs": [0.1, 0.9]}, [[0], [1]]),
+            ({"probs": [[0.1, 0.2], [0.3, 0.4]]}, [[[0]], [[1]]]),
         ]
         self._check_enumerate_support(Bernoulli, examples)
 
@@ -893,6 +895,14 @@ class TestDistributions(TestCase):
             log_prob = Binomial(total_count, probs).log_prob(sample)
             expected = scipy.stats.binom(total_count.cpu().numpy(), probs.cpu().numpy()).logpmf(sample)
             self.assertAlmostEqual(log_prob, expected, places=4)
+
+    def test_binomial_enumerate_support(self):
+        examples = [
+            ({"probs": [0.1], "total_count": 2}, [[0], [1], [2]]),
+            ({"probs": [0.1, 0.9], "total_count": 2}, [[0], [1], [2]]),
+            ({"probs": [[0.1, 0.2], [0.3, 0.4]], "total_count": 2}, [[[0]], [[1]], [[2]]]),
+        ]
+        self._check_enumerate_support(Bernoulli, examples)
 
     def test_binomial_extreme_vals(self):
         total_count = 100
@@ -1047,8 +1057,8 @@ class TestDistributions(TestCase):
 
     def test_categorical_enumerate_support(self):
         examples = [
-            ([0.1, 0.2, 0.7], [0, 1, 2]),
-            ([[0.1, 0.9], [0.3, 0.7]], [[0, 0], [1, 1]]),
+            ({"probs": [0.1, 0.2, 0.7]}, [0, 1, 2]),
+            ({"probs": [[0.1, 0.9], [0.3, 0.7]]}, [[0], [1]]),
         ]
         self._check_enumerate_support(Categorical, examples)
 
@@ -1077,8 +1087,8 @@ class TestDistributions(TestCase):
 
     def test_one_hot_categorical_enumerate_support(self):
         examples = [
-            ([0.1, 0.2, 0.7], [[1, 0, 0], [0, 1, 0], [0, 0, 1]]),
-            ([[0.1, 0.9], [0.3, 0.7]], [[[1, 0], [1, 0]], [[0, 1], [0, 1]]]),
+            ({"probs": [0.1, 0.2, 0.7]}, [[1, 0, 0], [0, 1, 0], [0, 0, 1]]),
+            ({"probs": [[0.1, 0.9], [0.3, 0.7]]}, [[[1, 0]], [[0, 1]]]),
         ]
         self._check_enumerate_support(OneHotCategorical, examples)
 

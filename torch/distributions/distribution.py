@@ -142,7 +142,7 @@ class Distribution(object):
         """
         raise NotImplementedError
 
-    def enumerate_support(self):
+    def enumerate_support(self, expand=True):
         """
         Returns tensor containing all values supported by a discrete
         distribution. The result will enumerate over dimension 0, so the shape
@@ -150,8 +150,15 @@ class Distribution(object):
         (where `event_shape = ()` for univariate distributions).
 
         Note that this enumerates over all batched tensors in lock-step
-        `[[0, 0], [1, 1], ...]`. To iterate over the full Cartesian product
-        use `itertools.product(m.enumerate_support())`.
+        `[[0, 0], [1, 1], ...]`. With `expand=False`, enumeration happens
+        only along the leftmost dimension, `[[0], [1], ..`.
+
+
+        To iterate over the full Cartesian product use
+        `itertools.product(m.enumerate_support())`.
+
+        Args:
+            expand (bool):
 
         Returns:
             Tensor iterating over dimension 0.

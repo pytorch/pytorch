@@ -102,11 +102,12 @@ class Categorical(Distribution):
         p_log_p = self.logits * self.probs
         return -p_log_p.sum(-1)
 
-    def enumerate_support(self):
+    def enumerate_support(self, expand=True):
         num_events = self._num_events
         values = torch.arange(num_events).long()
         values = values.view((-1,) + (1,) * len(self._batch_shape))
-        values = values.expand((-1,) + self._batch_shape)
+        if expand:
+            values = values.expand((-1,) + self._batch_shape)
         if self._param.is_cuda:
             values = values.cuda(self._param.get_device())
         return values
