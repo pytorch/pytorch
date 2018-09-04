@@ -2,10 +2,12 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
+
 from caffe2.python import core
+import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
 from collections import defaultdict, Counter
 from hypothesis import given
-import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
 import numpy as np
 
@@ -15,9 +17,9 @@ DEFAULT_BEAM_WIDTH = 10
 DEFAULT_PRUNE_THRESHOLD = 0.001
 
 
-class TestCTCBeamSearchDecoderOp(hu.HypothesisTestCase):
+class TestCTCBeamSearchDecoderOp(serial.SerializedTestCase):
 
-    @given(
+    @serial.given_and_seeded(
         batch=st.sampled_from([1, 2, 4]),
         max_time=st.sampled_from([1, 8, 64]),
         alphabet_size=st.sampled_from([1, 2, 32, 128, 512]),

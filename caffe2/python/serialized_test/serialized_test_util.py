@@ -9,7 +9,7 @@ from caffe2.python import gradient_checker
 import caffe2.python.hypothesis_test_util as hu
 from hypothesis import given, seed, settings
 import inspect
-import numpy
+import numpy as np
 import os
 import re
 import shutil
@@ -37,6 +37,20 @@ def given_and_seeded(*given_args, **given_kwargs):
         return func
     return wrapper
 
+
+def _getGradientOrNone(op_proto):
+    try:
+        grad_ops, _ = gradient_checker.getGradientForOp(op_proto)
+        return grad_ops
+    except:
+        return []
+
+# necessary to support converting jagged lists into numpy arrays
+def _transformList(l):
+    ret = np.empty(len(l), dtype=np.object)
+    for (i, arr) in enumerate(l):
+        ret[i] = l[i]
+    return ret
 
 class SerializedTestCase(hu.HypothesisTestCase):
 
@@ -85,9 +99,11 @@ class SerializedTestCase(hu.HypothesisTestCase):
         op_path = os.path.join(output_dir, 'operator_{}.pb'.format(device_type))
         with open(op_path, 'wb') as f:
             f.write(op.SerializeToString())
-        numpy.savez_compressed(
+        inputs = _transformList(inputs)
+        outputs = _transformList(outputs)
+        np.savez_compressed(
             os.path.join(output_dir, 'inputs'), inputs=inputs)
-        numpy.savez_compressed(
+        np.savez_compressed(
             os.path.join(output_dir, 'outputs'), outputs=outputs)
 
     def compare_test(self, inputs, outputs, grad_ops, atol=1e-7, rtol=1e-7):
@@ -100,14 +116,14 @@ class SerializedTestCase(hu.HypothesisTestCase):
         source_dir = self.get_output_dir()
 
         # load serialized input and output
-        loaded_inputs = numpy.load(
+        loaded_inputs = np.load(
             os.path.join(source_dir, 'inputs.npz'), encoding='bytes')['inputs']
         inputs_equal = True
         for (x, y) in zip(inputs, loaded_inputs):
-            if not numpy.array_equal(x, y):
+            if not np.array_equal(x, y):
                 inputs_equal = False
-        loaded_outputs = numpy.load(os.path.join(
-            source_dir, 'outputs.npz'), encoding='bytes')['outputs']
+        loaded_outputs = np.load(os.path.join(
+            source_dir, 'outputs.npz'), encoding='bytes')['outputs'].tolist()
 
         # load operator
         found_op = False
@@ -120,7 +136,7 @@ class SerializedTestCase(hu.HypothesisTestCase):
                 op_proto = parse_proto(loaded_op)
                 device_type = int(match.group(1))
                 device_option = caffe2_pb2.DeviceOption(device_type=device_type)
-                grad_ops, _ = gradient_checker.getGradientForOp(op_proto)
+                grad_ops = _getGradientOrNone(op_proto)
                 found_op = True
                 break
 
@@ -131,7 +147,7 @@ class SerializedTestCase(hu.HypothesisTestCase):
 
         # assert outputs are equal
         for (x, y) in zip(outputs, loaded_outputs):
-            numpy.testing.assert_allclose(x, y, atol=atol, rtol=rtol)
+            np.testing.assert_allclose(x, y, atol=atol, rtol=rtol)
 
         # assert gradient op is equal
         for i in range(len(grad_ops)):
@@ -149,7 +165,7 @@ class SerializedTestCase(hu.HypothesisTestCase):
             device_option,
     ):
         if self.should_serialize:
-            if getattr(_output_context, 'should_write_output', False):
+            if getattr(_output_context, 'should_generate_output', False):
                 self.serialize_test(
                     inputs, outputs, gradient_operator, op, device_option)
             else:
@@ -180,29 +196,34 @@ class SerializedTestCase(hu.HypothesisTestCase):
             atol,
             outputs_to_check,
         )
-        grad_ops, _ = gradient_checker.getGradientForOp(op)
-        self.assertSerializedOperatorChecks(
-            inputs,
-            outs,
-            grad_ops,
-            op,
-            device_option,
-        )
+        if not getattr(_output_context, 'disable_serialized_check', False):
+            grad_ops = _getGradientOrNone(op)
+            self.assertSerializedOperatorChecks(
+                inputs,
+                outs,
+                grad_ops,
+                op,
+                device_option,
+            )
 
 
 def testWithArgs():
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        '-g', '--generate-serialized', action='store_true', dest='write',
+        '-G', '--generate-serialized', action='store_true', dest='generate',
         help='generate output files (default=false, compares to current files)')
     parser.add_argument(
-        '-o', '--output', default=DATA_DIR,
+        '-O', '--output', default=DATA_DIR,
         help='output directory (default: %(default)s)')
+    parser.add_argument(
+        '-D', '--disable-serialized_check', action='store_true', dest='disable',
+        help='disable checking serialized tests')
     parser.add_argument('unittest_args', nargs='*')
     args = parser.parse_args()
     sys.argv[1:] = args.unittest_args
-    _output_context.__setattr__('should_write_output', args.write)
+    _output_context.__setattr__('should_generate_output', args.generate)
     _output_context.__setattr__('output_dir', args.output)
+    _output_context.__setattr__('disable_serialized_check', args.disable)
 
     import unittest
     unittest.main()
