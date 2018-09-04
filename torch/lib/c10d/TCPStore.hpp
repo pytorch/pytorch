@@ -60,9 +60,11 @@ class TCPStore : public Store {
 
   bool check(const std::vector<std::string>& keys) override;
 
+  void wait(const std::vector<std::string>& keys) override;
+
   void wait(
       const std::vector<std::string>& keys,
-      const std::chrono::milliseconds& timeout = kDefaultTimeout) override;
+      const std::chrono::milliseconds& timeout) override;
 
  protected:
   bool isServer_;
