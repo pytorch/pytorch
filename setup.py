@@ -150,7 +150,7 @@ from tools.setup_helpers.nvtoolext import NVTOOLEXT_HOME
 from tools.setup_helpers.generate_code import generate_code
 from tools.setup_helpers.ninja_builder import NinjaBuilder, ninja_build_ext
 from tools.setup_helpers.dist_check import USE_DISTRIBUTED, \
-    USE_GLOO_IBVERBS, USE_C10D
+    USE_GLOO_IBVERBS
 
 ################################################################################
 # Parameters parsed from environment
@@ -403,8 +403,9 @@ class build_deps(PytorchCommand):
             if sys.platform.startswith('linux'):
                 libs += ['gloo']
             libs += ['THD']
-        if USE_C10D:
-            libs += ['c10d']
+            # TODO: make c10d build without CUDA
+            if USE_CUDA:
+                libs += ['c10d']
         build_libs(libs)
 
         # Use copies instead of symbolic files.
@@ -550,11 +551,11 @@ class build_ext(build_ext_parent):
         if USE_DISTRIBUTED:
             print('-- Building with distributed package ')
             monkey_patch_THD_link_flags()
+            if USE_CUDA:
+                print('-- Building with c10d distributed package ')
+                monkey_patch_C10D_inc_flags()
         else:
             print('-- Building without distributed package')
-        if USE_C10D:
-            print('-- Building with c10d distributed package ')
-            monkey_patch_C10D_inc_flags()
         else:
             print('-- Building without c10d distributed package')
 
@@ -876,11 +877,9 @@ if USE_DISTRIBUTED:
     ]
     include_dirs += [tmp_install_path + "/include/THD"]
     main_link_args += [THD_LIB]
-
-if USE_C10D:
-    extra_compile_args += ['-DUSE_C10D']
-    main_sources += ['torch/csrc/distributed/c10d/init.cpp']
-    main_link_args += [C10D_LIB]
+    if USE_CUDA:
+        main_sources += ['torch/csrc/distributed/c10d/init.cpp']
+        main_link_args += [C10D_LIB]
 
 if USE_CUDA:
     nvtoolext_lib_name = None
