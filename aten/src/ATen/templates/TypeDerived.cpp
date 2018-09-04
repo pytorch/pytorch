@@ -10,7 +10,7 @@
 $th_headers
 $storage_tensor_headers
 #include "ATen/${Generator}.h"
-#include "ATen/core/TensorImpl.h"
+#include "ATen/TensorImpl.h"
 #include "ATen/Allocator.h"
 #include "ATen/DeviceGuard.h"
 #include "ATen/NativeFunctions.h"

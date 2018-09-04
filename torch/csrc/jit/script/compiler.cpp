@@ -903,29 +903,61 @@ private:
 
   Value* emitTernaryIf(const TernaryIf& expr) {
     Value* cond_value = emitCond(expr.cond());
+    auto true_expr = [&] {
+      return emitExpr(expr.true_expr());
+    };
+    auto false_expr  = [&] {
+      return emitExpr(expr.false_expr());
+    };
+    return emitIfExpr(expr.range(), cond_value, true_expr, false_expr);
+  }
 
-    Node* n = graph->insertNode(create(prim::If, expr.range(), 0));
+  Value* emitShortCircuitIf(
+      const SourceRange& loc,
+      const TreeRef & first_expr,
+      const TreeRef & second_expr,
+      bool is_or) {
+    Value * first_value = emitCond(Expr(first_expr));
+
+    auto get_first_expr = [first_value] {
+      return first_value;
+    };
+    auto get_second_expr = [&] {
+      return emitCond(Expr(second_expr));
+    };
+
+    // if this is an OR, eval second expression if first expr is False.
+    // If this is an AND, eval second expression if first expr is True
+    if (is_or) {
+      return emitIfExpr(loc, first_value, get_first_expr, get_second_expr);
+    } else {
+      return emitIfExpr(loc, first_value, get_second_expr, get_first_expr);
+    }
+  }
+
+  Value* emitIfExpr(const SourceRange& range, Value * cond_value,
+      std::function<Value*()> true_expr,  std::function<Value*()> false_expr) {
+    Node* n = graph->insertNode(create(prim::If, range, 0));
 
     n->addInput(cond_value);
     auto* true_block = n->addBlock();
     auto* false_block = n->addBlock();
 
-
-    auto emit_if_expr = [this](Block* b, const Expr& expr) {
+    auto emit_if_expr = [this](Block* b, std::function<Value*()> expr_value) {
       pushFrame(b);
       WithInsertPoint guard(b);
-      Value* out_val = emitExpr(expr);
+      Value* out_val = expr_value();
       b->registerOutput(out_val);
       popFrame();
     };
 
-    emit_if_expr(true_block, expr.true_expr());
-    emit_if_expr(false_block, expr.false_expr());
+    emit_if_expr(true_block, true_expr);
+    emit_if_expr(false_block, false_expr);
 
     auto true_type = unshapedType(true_block->outputs().at(0)->type());
     auto false_type = unshapedType(false_block->outputs().at(0)->type());
     if (*true_type != *false_type) {
-      throw ErrorReport(expr)
+      throw ErrorReport(range)
           << "if-expression's true branch has type " << true_type->str()
           << " but false branch has type " << false_type->str();
     }
@@ -1437,8 +1469,6 @@ private:
     switch (tree->kind()) {
       case '@':
       case TK_POW:
-      case TK_AND:
-      case TK_OR:
       case TK_NOT:
       case TK_NE:
       case TK_EQ:
@@ -1461,6 +1491,15 @@ private:
                    named_values,
                    {},
                    /*required=*/true);
+      }
+      case TK_AND:
+      case TK_OR: {
+        const auto& inputs = tree->trees();
+        return emitShortCircuitIf(
+          tree->range(),
+          inputs[0],
+          inputs[1],
+          tree->kind() == TK_OR);
       }
       case TK_STARRED: {
         throw ErrorReport(tree) << "Unexpected starred expansion. File a bug report.";
