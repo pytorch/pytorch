@@ -52,9 +52,9 @@ struct AT_API Tensor {
     }
   }
   Tensor(const c10::intrusive_ptr<TensorImpl, UndefinedTensor>& ptr)
-      : tensor_impl_(std::move(ptr)) {}
-  Tensor(c10::intrusive_ptr<TensorImpl, UndefinedTensor>&& ptr)
       : tensor_impl_(ptr) {}
+  Tensor(c10::intrusive_ptr<TensorImpl, UndefinedTensor>&& ptr)
+      : tensor_impl_(std::move(ptr)) {}
 
   Tensor(const Tensor&) = default;
   Tensor(Tensor&&) = default;
