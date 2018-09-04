@@ -13,7 +13,7 @@
 namespace at {
 
 Type& TensorImpl::type() const {
-  return at::getMaybeVariableType(this);
+  return at::getType(this);
 }
 
 Tensor& TensorImpl::grad() {

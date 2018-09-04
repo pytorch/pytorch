@@ -47,7 +47,7 @@ public:
     auto& baseType = getNonVariableType(p, s);
     return detail::getVariableHooks().getVariableTypeFromBaseType(baseType);
   }
-  Type & getMaybeVariableType(Backend p, ScalarType s, bool is_variable) {
+  Type & getType(Backend p, ScalarType s, bool is_variable) {
     if (is_variable) {
       return getVariableType(p, s);
     } else {
@@ -155,8 +155,8 @@ static inline Type& getNonVariableType(DeviceType p, ScalarType s) {
   return globalContext().getNonVariableType(deviceTypeToBackend(p), s);
 }
 
-AT_API Type& getMaybeVariableType(TensorOptions options);
-AT_API Type& getMaybeVariableType(const TensorImpl*);
+AT_API Type& getType(TensorOptions options);
+AT_API Type& getType(const TensorImpl*);
 
 AT_API Allocator* getCPUAllocator();
 

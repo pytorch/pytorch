@@ -55,7 +55,7 @@ inline Tensor to(
     return tensor;
   }
   DeviceGuard guard(options.device());
-  return at::getMaybeVariableType(options).copy(tensor, non_blocking);
+  return at::getType(options).copy(tensor, non_blocking);
 }
 } // namespace detail
 
