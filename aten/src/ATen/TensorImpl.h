@@ -121,8 +121,8 @@ struct AT_API TensorImpl : public c10::intrusive_ptr_target {
     return scalar_type_;
   }
 
-  inline caffe2::TypeMeta dmeta() const {
-    return storage_.dmeta();
+  inline caffe2::TypeMeta dtype() const {
+    return storage_.dtype();
   }
 
   virtual int64_t storage_offset() const {
