@@ -19,6 +19,7 @@ namespace at {
 struct ${Type} final : public ${DenseBackend}TypeDefault {
   explicit ${Type}();
   virtual ScalarType scalarType() const override;
+  virtual caffe2::TypeMeta typeMeta() const override;
   virtual Backend backend() const override;
   virtual const char * toString() const override;
   virtual size_t elementSizeInBytes() const override;
