@@ -599,18 +599,6 @@ static PyObject* initModule() {
 #endif
  ASSERT_TRUE(set_module_attr("has_cudnn", has_cudnn));
 
-#ifdef USE_DISTRIBUTED_MW
-  // See comment on CUDA objects
-  ASSERT_TRUE(THDPDoubleStorage_init(module));
-  ASSERT_TRUE(THDPFloatStorage_init(module));
-  //ASSERT_TRUE(THDPHalfStorage_init(module));
-  ASSERT_TRUE(THDPLongStorage_init(module));
-  ASSERT_TRUE(THDPIntStorage_init(module));
-  ASSERT_TRUE(THDPShortStorage_init(module));
-  ASSERT_TRUE(THDPCharStorage_init(module));
-  ASSERT_TRUE(THDPByteStorage_init(module));
-#endif
-
   // force ATen to initialize because it handles
   // setting up TH Errors so that they throw C++ exceptions
   at::init();
