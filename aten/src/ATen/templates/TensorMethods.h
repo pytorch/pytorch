@@ -7,7 +7,6 @@
 #include "ATen/core/SparseTensorRef.h"
 #include "ATen/Type.h"
 #include "ATen/core/TensorOptions.h"
-#include "ATen/DeviceGuard.h"
 
 namespace at {
 
@@ -56,8 +55,8 @@ inline Tensor to(
   AT_CHECK(tensor.is_variable() == options.is_variable(),
            "cannot change is_variable, from: ", tensor.is_variable(),
            " to: ", options.is_variable());
-  DeviceGuard guard(options.device());
-  return tensor.type().toBackend(options.backend()).toScalarType(options.dtype()).copy(tensor, non_blocking);
+  return tensor.type().toBackend(options.backend()).toScalarType(options.dtype())
+               .copy(tensor, non_blocking, options.device());
 }
 } // namespace detail
 

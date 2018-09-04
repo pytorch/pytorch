@@ -19,8 +19,11 @@ Tensor & TypeDefault::copy_(Tensor & self, const Tensor & src, bool non_blocking
   return s_copy_(self, b_src, non_blocking);
 }
 
-Tensor TypeDefault::copy(const Tensor & src, bool non_blocking) const {
-  // TODO(psag): have a DeviceGuard here
+Tensor TypeDefault::copy(const Tensor & src, bool non_blocking, optional<Device> to_device) const {
+  DeviceGuard device_guard;
+  if (to_device.has_value()) {
+    device_guard.set_index(to_device.value().index());
+  }
   AT_CHECK(src.defined(), "attempt to copy an undefined tensor");
   if (is_sparse()) {
     auto indices = src._indices();
