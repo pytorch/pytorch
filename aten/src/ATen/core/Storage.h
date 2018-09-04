@@ -33,11 +33,8 @@ public:
   bool resizable() const { return storage_impl_->resizable(); }
   // get() use here is to get const-correctness
   void* data() const { return storage_impl_.get()->data(); }
-  const at::DataType dtype() const {
+  const caffe2::TypeMeta dtype() const {
     return storage_impl_->dtype();
-  }
-  const caffe2::TypeMeta dmeta() const {
-    return storage_impl_->dmeta();
   }
   const at::DataPtr& data_ptr() const { return storage_impl_->data_ptr(); }
   DeviceType device_type() const { return storage_impl_->device_type(); }

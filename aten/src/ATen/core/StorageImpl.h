@@ -34,10 +34,10 @@ struct AT_API StorageImpl : public c10::intrusive_ptr_target {
   template <typename T>
   inline T* data() const {
     auto data_type_T = at::scalarTypeToDataType(at::CTypeToScalarType<T>::to());
-    if (dtype() != data_type_T) {
+    if (dtype().id() != data_type_T) {
       AT_ERROR(
           "Attempt to access StorageImpl having data type ",
-          dtype(),
+          dtype().id(),
           " as data type ",
           data_type_T);
     }
@@ -93,10 +93,7 @@ struct AT_API StorageImpl : public c10::intrusive_ptr_target {
   at::Allocator* allocator() {
     return allocator_;
   };
-  const DataType dtype() const {
-    return data_type_.id();
-  }
-  const caffe2::TypeMeta dmeta() const {
+  const caffe2::TypeMeta dtype() const {
     return data_type_;
   }
   const at::Allocator* allocator() const {
