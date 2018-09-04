@@ -133,12 +133,11 @@ list.  For example, given the declaration `where(BoolTensor cond, Tensor self, T
 this generates the function `at::where(cond, self, other)` and the method
 `self.where(cond, other)`.
 
-By default, ATen generates both function and method variants for a native function.
-Generally, the function variant is always useful; however, you may not wish
-to generate a method variant. Tensor operations as methods are appropriate for "core"
-Tensor operations (e.g., add, sub, etc.), but not for more complicated neural network
-layers (e.g., `conv2d`) and internal functions designed specifically for binding
-(e.g., `cudnn_convolution`).
+By default, ATen generates only the function variant for a native function.
+When should you also generate a method variant?  Tensor operations as methods
+are appropriate for "core" Tensor operations (e.g., add, sub, etc.), but not for
+more complicated neural network layers (e.g., `conv2d`) and internal functions
+designed specifically for binding (e.g., `cudnn_convolution`).
 
 ### `dispatch`
 

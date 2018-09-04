@@ -110,7 +110,7 @@ std::tuple<Tensor,Tensor> gesv(const Tensor& self, const Tensor& A) {
 
   Tensor self_broadcasted  = self.expand(self_expand_size);
   Tensor A_broadcasted = A.expand(A_expand_size);
-  return self.type()._gesv_helper(self_broadcasted, A_broadcasted);
+  return at::_gesv_helper(self_broadcasted, A_broadcasted);
 }
 
 std::tuple<Tensor&,Tensor&> gesv_out(

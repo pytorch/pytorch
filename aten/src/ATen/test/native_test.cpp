@@ -145,18 +145,18 @@ void test(Type & T, Type & AccT) {
   SECTION( "_standard_gamma_grad" ) {
     // check empty
     auto empty = ones({0}, T);
-    REQUIRE_EQUAL(empty, empty._standard_gamma_grad(empty));
+    REQUIRE_EQUAL(empty, _standard_gamma_grad(empty, empty));
 
     // check scalar equals one element
     auto one_scalar = ones({}, T).mul(5);
     auto one_with_dim = ones({1}, T).mul(5);
-    REQUIRE_ALLCLOSE(one_scalar._standard_gamma_grad(one_scalar),
-		     one_with_dim._standard_gamma_grad(one_with_dim).sum());
+    REQUIRE_ALLCLOSE(_standard_gamma_grad(one_scalar, one_scalar),
+		     _standard_gamma_grad(one_with_dim, one_with_dim).sum());
 
     // check mixing types
     auto t1 = randn({3, 4}, T);
     auto t2 = randn({3, 4}, T).toType(kDouble);
-    REQUIRE_THROWS_WITH(t1._standard_gamma_grad(t2), Catch::StartsWith("expected scalar type"));
+    REQUIRE_THROWS_WITH(_standard_gamma_grad(t1, t2), Catch::StartsWith("expected scalar type"));
   }
 
   SECTION( "where" ) {
