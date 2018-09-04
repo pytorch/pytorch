@@ -134,7 +134,12 @@ if (jit::tracer::isTracing()) {
   jit::tracer::recordSourceLocation(node);
   ${add_trace_inputs}
   graph->appendNode(node);
+  ${inplace_guard}
 }
+""")
+
+INPLACE_GUARD = CodeTemplate("""\
+jit::tracer::ensureUnique("${name}", ${mutable_input});
 """)
 
 ADD_TRACE_INPUT = CodeTemplate("""jit::tracer::addInputs(node, "${input}", ${input});""")
@@ -198,12 +203,15 @@ def format_trace(declaration):
     for argument in declaration['arguments']:
         add_trace_inputs.append(ADD_TRACE_INPUT.substitute(input=argument['name']))
     local['add_trace_inputs'] = '\n'.join(add_trace_inputs)
-
+    local['inplace_guard'] = ''
     # Record inplace operations as out-of-place operations (e.g.,
     # not add_ but add)
     # TODO: Add a proper concept of side effects to the IR, and
     # properly record inplace operations.
     local['trace_name'] = uninplace_api_name(declaration['api_name'])
+    if local['trace_name'] != declaration['api_name']:
+        local['inplace_guard'] = INPLACE_GUARD.substitute(name=declaration['api_name'],
+                                                          mutable_input=declaration['arguments'][0]['name'])
     if local['trace_name'] in RENAME_TRACE:
         local['trace_name'] = RENAME_TRACE[local['trace_name']]
 

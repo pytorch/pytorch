@@ -48,6 +48,9 @@ public:
   operator bool() const {
     return storage_impl_;
   }
+  size_t use_count() const {
+    return storage_impl_.use_count();
+  }
 
  protected:
   c10::intrusive_ptr<StorageImpl> storage_impl_;

@@ -185,4 +185,15 @@ void setWarn(warn_fn_type fn) {
   warn_callback.store(fn);
 }
 
+void ensureUnique(const char * name, const at::Tensor& tensor) {
+  auto aliases = tensor.storage().use_count();
+  if (aliases > 1) {
+    std::stringstream ss;
+    ss << "There are " << aliases
+       << " live references to the tensor being modified when tracing in-place operator "
+       << name << " which ";
+    warn(ss.str().c_str());
+  }
+}
+
 }}}

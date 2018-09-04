@@ -364,21 +364,30 @@ class TestJit(JitTestCase):
         self.assertExpectedGraph(trace)
         self.assertExportImport(trace, (x, y))
 
-    def test_peephole(self):
+    def test_typeas_trace_check(self):
         a = torch.tensor([0.4], requires_grad=True)
         b = torch.tensor([0.7], requires_grad=True)
+
+        def f(x, y):
+            return x.type_as(y)
+
+        trace = torch.jit.trace(f, (a, b))
+
+    def test_peephole(self):
+        a = torch.tensor([0.4])
+        b = torch.tensor([0.7])
         c = torch.tensor([0], dtype=torch.int32)
 
         def f(x, y):
             return x.type_as(y)
 
-        trace, z = torch.jit.get_trace_graph(f, (a, b))
-        self.run_pass('peephole', trace)
-        self.assertExpectedGraph(trace)
-        trace, z = torch.jit.get_trace_graph(f, (a, c))
-        s = str(trace)
-        self.run_pass('peephole', trace)
-        self.assertEqual(s, str(trace))
+        tf = torch.jit.trace(f, (a, b))
+        self.run_pass('peephole', tf.graph)
+        self.assertExpectedGraph(tf.graph)
+        tf2 = torch.jit.trace(f, (a, c))
+        s = str(tf2.graph)
+        self.run_pass('peephole', tf2.graph)
+        self.assertEqual(s, str(s))
 
     def test_peephole_dynamic(self):
         def f(x, y):
@@ -391,20 +400,20 @@ class TestJit(JitTestCase):
 
     @unittest.skipIf(not RUN_CUDA, "cpp tests require CUDA")
     def test_peephole_cuda(self):
-        a = torch.tensor([0.4], requires_grad=True, device='cpu')
-        b = torch.tensor([0.7], requires_grad=True, device='cuda')
-        c = torch.tensor([0.7], requires_grad=True, device='cuda')
+        a = torch.tensor([0.4], device='cpu')
+        b = torch.tensor([0.7], device='cuda')
+        c = torch.tensor([0.7], device='cuda')
 
         def f(x, y):
             return x.type_as(y)
 
-        trace, z = torch.jit.get_trace_graph(f, (a, c))
-        s = str(trace)
-        self.run_pass('peephole', trace)
-        self.assertEqual(s, str(trace))
-        trace, z = torch.jit.get_trace_graph(f, (b, c))
-        self.run_pass('peephole', trace)
-        self.assertExpectedGraph(trace, subname="same_device")
+        trace = torch.jit.trace(f, (a, c))
+        s = str(trace.graph)
+        self.run_pass('peephole', trace.graph)
+        self.assertEqual(s, str(trace.graph))
+        trace = torch.jit.trace(f, (b, c))
+        self.run_pass('peephole', trace.graph)
+        self.assertExpectedGraph(trace.graph, subname="same_device")
 
     def test_index(self):
         x = torch.tensor([0.4], requires_grad=True)
@@ -6256,22 +6265,37 @@ a")
 
             traced = torch.jit.trace(foo, torch.rand(3, 4), check_inputs=[(torch.rand(3, 4),)])
 
+    def checkTracerWarning(self, *args, **kwargs):
+        with warnings.catch_warnings(record=True) as warns:
+            torch.jit.trace(*args, **kwargs)
+        self.assertGreater(len(warns), 0)
+        for warn in warns:
+            self.assertIn("cause the trace to be incorrect", str(warn.message))
+
     def test_trace_checker_slice_lhs(self):
-        with self.assertRaisesRegex(torch.jit.TracingCheckError, r'Traced function outputs do not match the Python'
-                                                                 r' function outputs'):
-            @_trace(torch.rand(3, 4), check_inputs=[(torch.rand(3, 4),)])
-            def foo(x):
-                for i in range(3):
-                    x[i, :] = torch.zeros(4)
-                return x
+        def foo(x):
+            for i in range(3):
+                x[i, :] = torch.zeros(4)
+            return x
+        self.checkTracerWarning(foo, torch.rand(3, 4))
 
     def test_trace_checker_inplace_on_view(self):
-        with self.assertRaisesRegex(torch.jit.TracingCheckError, r'Traced function outputs do not match the Python'
-                                                                 r' function outputs'):
-            @_trace(torch.rand(3, 4), check_inputs=[(torch.rand(5, 6),)])
-            def foo(x):
-                x.view(-1).add_(-x.view(-1))
-                return x
+        def foo(x):
+            x.view(-1).add_(-x.view(-1))
+            return x
+        self.checkTracerWarning(foo, torch.rand(3, 4), check_trace=False)
+
+    def test_lhs_index_fails(self):
+        def foo(x):
+            x[0, 1] = 4
+            return x
+        self.checkTracerWarning(foo, torch.rand(3, 4))
+
+    def test_lhs_index_trivial(self):
+        def foo(y, x):
+            y[...] = x
+            return y
+        self.checkTrace(foo, (torch.rand(3, 4), torch.rand(4)), inputs_require_grads=False)
 
     def test_trace_checker_dropout_train(self):
         with self.assertRaisesRegex(torch.jit.TracingCheckError, r'Trace had nondeterministic nodes'):
