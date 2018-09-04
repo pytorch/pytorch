@@ -12,12 +12,11 @@ static void PrepareDivisionForONNXOnBlock(Block* block) {
     auto* subgraph = it->owningGraph();
 
     if (it->matches("aten::div(int a, int b) -> float")) {
-      // Use onnx::cast before dividing
+      // Cast to Float before dividing
       std::vector<Value*> floattensor_inputs = fmap(it->inputs(), [&](Value* input) {
-        Value* longtensor = subgraph->insertNode(subgraph->createNumToTensor(input))->output();
-        // FLOAT = 1
-        // https://github.com/onnx/onnx/blob/6bedd27b0307c9295039bd847895a27275160a98/onnx/onnx.in.proto#L282
-        Node* cast = subgraph->create(onnx::Cast, {longtensor})->i_(attr::to, 1);
+        auto* longtensor = subgraph->insertNode(subgraph->createNumToTensor(input))->output();
+        auto* nonblocking = subgraph->insertConstant(0);
+        auto* cast = subgraph->create(aten::_cast_Float, {longtensor, nonblocking});
         return subgraph->insertNode(cast)->output();
       });
 

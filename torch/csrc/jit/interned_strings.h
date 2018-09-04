@@ -61,7 +61,6 @@ namespace torch { namespace jit {
   _(aten, __not__)                 \
   FORALL_ATEN_BASE_SYMBOLS(_)      \
   _(onnx, Add)                     \
-  _(onnx, Cast)                    \
   _(onnx, Concat)                  \
   _(onnx, Constant)                \
   _(onnx, ConstantFill)            \
