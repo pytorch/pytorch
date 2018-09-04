@@ -151,7 +151,8 @@ class Distribution(object):
 
         Note that this enumerates over all batched tensors in lock-step
         `[[0, 0], [1, 1], ...]`. With `expand=False`, enumeration happens
-        only along the leftmost dimension, `[[0], [1], ..`.
+        along the leftmost dimension, `[[0], [1], ..`, with the remaining
+        batch dimensions being collapsed.
 
 
         To iterate over the full Cartesian product use
