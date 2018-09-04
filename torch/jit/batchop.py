@@ -431,7 +431,7 @@ def batch_view(data, mask, dims, sizes):
 
 
 @torch.jit.script
-def batch_cat2(data1, mask1, dims1, data2, mask2, dims2, dim_):
+def batch_cat2(data1, mask1, dims1, data2, mask2, dims2, dim_, pad_, pad_value_):
     dim = int(dim_)
     data = torch.cat([data1, data2], dim)
     if(dims1[dim - 1]):
@@ -442,7 +442,7 @@ def batch_cat2(data1, mask1, dims1, data2, mask2, dims2, dim_):
 
 
 @torch.jit.script
-def batch_cat3(data1, mask1, dims1, data2, mask2, dims2, data3, mask3, dims3, dim_):
+def batch_cat3(data1, mask1, dims1, data2, mask2, dims2, data3, mask3, dims3, dim_, pad_, pad_value_):
     dim = int(dim_)
     data = torch.cat([data1, data2, data3], dim)
     if(dims1[dim - 1]):

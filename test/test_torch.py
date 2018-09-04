@@ -3608,6 +3608,16 @@ class TestTorch(TestCase):
 
         self.assertRaises(RuntimeError, lambda: torch.cat([]))
 
+    def test_cat_padding(self):
+        x = torch.rand(13, 1)
+        y = torch.rand(17, 2)
+        z = torch.rand(19, 3)
+
+        res1 = torch.cat((x, y, z), 0, True, 0)
+        self.assertEqual(res1.narrow(0, 0, 13).narrow(1, 0, 1), x, 0)
+        self.assertEqual(res1.narrow(0, 13, 17).narrow(1, 0, 2), y, 0)
+        self.assertEqual(res1.narrow(0, 30, 19).narrow(1, 0, 3), z, 0)
+
     def test_cat_bad_input_sizes(self):
         x = torch.randn(2, 1)
         y = torch.randn(2, 1, 1)

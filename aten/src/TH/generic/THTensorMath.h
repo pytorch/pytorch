@@ -106,8 +106,8 @@ TH_API void THTensor_(sort)(THTensor *rt_, THLongTensor *ri_, THTensor *t, int d
 TH_API void THTensor_(topk)(THTensor *rt_, THLongTensor *ri_, THTensor *t, int64_t k, int dim, int dir, int sorted);
 TH_API void THTensor_(tril)(THTensor *r_, THTensor *t, int64_t k);
 TH_API void THTensor_(triu)(THTensor *r_, THTensor *t, int64_t k);
-TH_API void THTensor_(cat)(THTensor *r_, THTensor *ta, THTensor *tb, int dimension);
-TH_API void THTensor_(catArray)(THTensor *result, THTensor **inputs, int numInputs, int dimension, bool pad, int pad_value);
+TH_API void THTensor_(cat)(THTensor *r_, THTensor *ta, THTensor *tb, int dimension, bool pad, scalar_t pad_value);
+TH_API void THTensor_(catArray)(THTensor *result, THTensor **inputs, int numInputs, int dimension, bool pad, scalar_t pad_value);
 
 TH_API int THTensor_(equal)(THTensor *ta, THTensor *tb);
 

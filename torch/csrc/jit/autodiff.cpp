@@ -187,7 +187,7 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
       }
       return {sizes.at(dim) > 1 ? grads.at(0) : grads.at(0).unsqueeze(dim), nullptr};
 
-    } else if (node->matches("aten::cat(Tensor[] tensors, int dim) -> Tensor", /*const=*/attr::dim)) {
+    } else if (node->matches("aten::cat(Tensor[] tensors, int dim, int pad, Scalar pad_value) -> Tensor", /*const=*/attr::dim)) {
       int dim = *node->get<int64_t>(attr::dim);
       auto tensor_inputs = inputs; tensor_inputs.pop_back();
       const auto& first_sizes = tensor_inputs.at(0).sizes();
