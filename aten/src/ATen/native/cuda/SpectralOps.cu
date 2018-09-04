@@ -37,6 +37,10 @@ struct cnt_to_dst_idx_functor : public thrust::unary_function<int64_t, int64_t>
     last_dim_size(last_dim_size), last_dim_start_slice(last_dim_start_slice),
     last_dim_to_fill_size(last_dim_size - last_dim_start_slice) {}
 
+  // HIP wants __host__ __device__ tag, CUDA does not
+#ifdef __HIP_PLATFORM_HCC__
+  __host__ __device__
+#endif
   cnt_to_dst_idx_functor & operator=(const cnt_to_dst_idx_functor&) = default;
 
   __host__ __device__ __forceinline__
