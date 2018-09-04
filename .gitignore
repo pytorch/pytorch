@@ -30,6 +30,7 @@ docs/cpp/html/
 docs/cpp/api/
 test/.coverage
 test/cpp/api/mnist
+test/custom_operator/model.pt
 test/data/gpu_tensors.pt
 test/data/legacy_modules.t7
 test/data/legacy_serialized.pt
@@ -65,6 +66,7 @@ torch/lib/protoc
 torch/lib/tmp_install
 torch/lib/torch_shm_manager
 torch/lib/python*
+torch/share/
 torch/version.py
 
 # IPython notebook checkpoints
