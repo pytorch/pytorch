@@ -352,7 +352,7 @@ SparseTensor& sparse_mask_out_cpu(SparseTensor& r, const Tensor& t, const Sparse
   _get_sparse_impl(r)->set_coalesced(mask.is_coalesced());
   int64_t r_nnz = mask._nnz();
   _get_sparse_impl(r)->set_nnz_and_narrow(r_nnz);
-  if (t.numel() == 0) {  // if t is an empty tensor, then there is no need to select its elements
+  if (t.numel() == 0) {  // if t is an empty tensor, there is no need to mask its elements
     return r;
   }
 

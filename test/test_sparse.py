@@ -1381,7 +1381,7 @@ class TestSparse(TestCase):
         indices = torch.tensor(([0], [2]), dtype=torch.int64)
         values = torch.DoubleTensor(1, 0)
         test_tensor(indices, values, True, True)
-        
+
         # only indices correct
         indices = torch.tensor(([0], [2]), dtype=torch.int64)
         values = torch.tensor([1.], dtype=torch.float32)
@@ -1390,7 +1390,7 @@ class TestSparse(TestCase):
         indices = torch.tensor(([0], [2]), dtype=torch.int64)
         values = torch.FloatTensor(1, 0)
         test_tensor(indices, values, True, True)  # An empty tensor's data_ptr is always equal to 0
-        
+
         # only values correct
         indices = torch.tensor(([0], [2]), dtype=torch.int32)
         values = torch.tensor([1.], dtype=torch.float64)
@@ -1399,7 +1399,7 @@ class TestSparse(TestCase):
         indices = torch.tensor(([0], [2]), dtype=torch.int32)
         values = torch.DoubleTensor(1, 0)
         test_tensor(indices, values, False, True)
-        
+
         # neither correct
         indices = torch.tensor(([0], [2]), dtype=torch.int32)
         values = torch.tensor([1.], dtype=torch.float32)

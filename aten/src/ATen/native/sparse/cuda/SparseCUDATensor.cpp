@@ -25,7 +25,7 @@ SparseTensor& sparse_mask_out_cuda(SparseTensor& r, const Tensor& t, const Spars
   _alias_into_sparse(r, mask_indices.clone(), r_values);
   _get_sparse_impl(r)->set_coalesced(mask.is_coalesced());
   _get_sparse_impl(r)->set_nnz_and_narrow(mask._nnz());
-  if (t.numel() == 0) {  // if t is an empty tensor, then there is no need to select its elements
+  if (t.numel() == 0) {  // if t is an empty tensor, there is no need to mask its elements
     return r;
   }
 

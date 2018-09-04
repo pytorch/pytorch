@@ -250,7 +250,7 @@ SparseTensor& add_out_sparse_cpu(SparseTensor& r, const SparseTensor& t, const S
             for (d = 0; d < sparseDims; d++) {
               r_indices_accessor[d][r_i] = t_indices_accessor[d][t_i];
             }
-            if (t_values.numel() > 0) {  // We add all elements from t_values to r_values, only if t_values is not an empty tensor
+            if (t_values.numel() > 0) {  // We add all elements from t_values to r_values only if t_values is not an empty tensor
               THBlas_axpy<scalar_t>(blockSize, 1,
                 t_values_ptr + t_i * blockSize, 1,
                 r_values_ptr + r_i * blockSize, 1);
@@ -261,7 +261,7 @@ SparseTensor& add_out_sparse_cpu(SparseTensor& r, const SparseTensor& t, const S
             for (d = 0; d < sparseDims; d++) {
               r_indices_accessor[d][r_i] = src_indices_accessor[d][s_i];
             }
-            if (s_values.numel() > 0) {  // We add all elements from s_values to r_values, only if s_values is not an empty tensor
+            if (s_values.numel() > 0) {  // We add all elements from s_values to r_values only if s_values is not an empty tensor
               THBlas_axpy<scalar_t>(blockSize, cast_value,
                 s_values_ptr + s_i * blockSize, 1,
                 r_values_ptr + r_i * blockSize, 1);
