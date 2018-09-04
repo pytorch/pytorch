@@ -41,7 +41,8 @@ int64_t THCTensor_strideLegacyNoScalars(THCState *state, const THCTensor *self, 
 }
 
 THCTensor *THCTensor_new(THCState *state, caffe2::TypeMeta type_meta) {
-  switch(dataTypeToScalarType(type_type.id())) {
+  auto scalar_type = at::dataTypeToScalarType(type_meta.id());
+  switch (scalar_type) {
     case at::ScalarType::Byte:
       return THCudaByteTensor_new(state);
     case at::ScalarType::Char:
