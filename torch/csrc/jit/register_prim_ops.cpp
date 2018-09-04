@@ -110,7 +110,7 @@ RegisterOperators reg({
           return [](Stack& stack) {
             at::Scalar s;
             pop(stack, s);
-            push(stack, autograd::make_variable(s.toTensor()));
+            push(stack, autograd::make_variable(at::scalar_to_tensor(s)));
             return 0;
           };
         }),

@@ -244,7 +244,7 @@ static void test(Type & type) {
     REQUIRE_THROWS_WITH(
         tensor[Scalar(3.14)].equal(one),
         StartsWith(
-            "Can only index tensors with integral scalars (got CPUDoubleType)"));
+            "Can only index tensors with integral scalars"));
   }
   SECTION("indexing by zero-dim tensor") {
     Tensor tensor = arange(0, 10, kInt);
@@ -255,7 +255,7 @@ static void test(Type & type) {
     REQUIRE_THROWS_WITH(
         tensor[ones({}) * 3.14].equal(one),
         StartsWith(
-            "Can only index tensors with integral scalars (got CPUDoubleType)"));
+            "Can only index tensors with integral scalars"));
     REQUIRE_THROWS_WITH(
         tensor[Tensor()].equal(one),
         StartsWith("Can only index with tensors that are defined"));

@@ -94,7 +94,7 @@ Tensor& s_addmm_out_sparse_dense_cuda(Tensor& r_, const Tensor& t, const SparseT
             r_.copy_(t);
           }
         } else {
-          at::mul_out(r_, t, beta.toTensor());
+          at::mul_out(r_, t, scalar_to_tensor(beta));
         }
 
         /* r_ */

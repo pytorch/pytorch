@@ -4,7 +4,7 @@
 
 #include "ATen/core/Device.h"
 #include "ATen/core/Layout.h"
-#include "ATen/Scalar.h"
+#include "ATen/core/Scalar.h"
 #include "ATen/core/ScalarType.h"
 #include "ATen/core/SparseTensorRef.h"
 #include "ATen/Storage.h"
