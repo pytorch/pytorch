@@ -15,6 +15,7 @@
 #include "ATen/core/Half.h"
 #include "ATen/core/TensorTypeIdRegistration.h"
 #include "ATen/core/Reduction.h"
+#include "ATen/TensorOptions.h"
 
 #include <array>
 #include <cstddef>
@@ -108,6 +109,20 @@ struct AT_API Type {
   }
   bool operator!=(const Type& other) const {
     return this != &other;
+  }
+
+  /// Constructs the `TensorOptions` from a type and a `device_index`.
+  TensorOptions options(int32_t device_index = -1) const {
+    TensorOptions r;
+    r.dtype(scalarType());
+    r.device({backendToDeviceType(backend()), device_index});
+    r.layout(layout());
+    r.is_variable(is_variable());
+    return r;
+  }
+
+  operator TensorOptions() const {
+    return options();
   }
 
   // example
