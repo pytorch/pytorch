@@ -3249,6 +3249,32 @@ a")
         y = torch.arange(0., 8, 2, requires_grad=True)
         self.checkScript(func, [x, y], optimize=True, capture_output=True)
 
+    def test_logical_short_circuit(self):
+        @torch.jit.script
+        def testNoThrows(t):
+            c1 = 1
+            if (False and t[1]) or (True or t[1]):
+                c1 = 0
+            return c1
+
+        @torch.jit.script
+        def throwsOr(t):
+            c0 = False or t[1]
+            print(c0)
+
+        @torch.jit.script
+        def throwsAnd(t):
+            c0 = True and t[1]
+            print(c0)
+
+        t = torch.randn(0)
+        self.assertEqual(0, testNoThrows(torch.randn(0)))
+        self.assertExpectedGraph(testNoThrows.graph)
+        with self.assertRaisesRegex(RuntimeError, "index 1 out of range for tensor of size"):
+            throwsOr(t)
+        with self.assertRaisesRegex(RuntimeError, "index 1 out of range for tensor of size"):
+            throwsAnd(t)
+
     def test_type_cast(self):
         def test_int_to_float():
             b = float(2)
