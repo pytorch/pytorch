@@ -89,9 +89,8 @@ ${return_type} TypeDefault::${api_name}(${type_method_formals}) const {
 """)
 DEPRECATED_TYPE_METHOD_DEFINITION_CONCRETE = CodeTemplate("""\
 ${return_type} TypeDefault::${api_name}(${type_method_formals}) const {
-    TensorOptions options(*this);
     ${device_guard_declaration}
-    return at::native::${api_name}(${type_method_actuals}, options);
+    return at::native::${api_name}(${type_method_actuals}, options());
 }
 """)
 # 4. add virtual override to TypeDerived.h
@@ -165,7 +164,7 @@ static inline ${return_type} ${api_name}(${formals}) {
 # special method definition for *deprecated* factory functions in Functions.h
 DEPRECATED_FACTORY_DEFINITION = CodeTemplate("""\
 static inline ${return_type} ${api_name}(${formals}) {
-    return at::${api_name}(${type_method_actuals}, TensorOptions(${inferred_type}));
+    return at::${api_name}(${type_method_actuals}, ${inferred_type}.options());
 }
 """)
 

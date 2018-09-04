@@ -50,25 +50,25 @@ void maybe_initialize_cuda(const Type &type) {
 Tensor dispatch_zeros(const Type& type, int32_t device_index, IntList sizes) {
   maybe_initialize_cuda(type);
   AutoNoGIL no_gil;
-  return torch::zeros(sizes, TensorOptions(type, device_index));
+  return torch::zeros(sizes, type.options(device_index));
 }
 
 Tensor dispatch_ones(const Type& type, int32_t device_index, IntList sizes) {
   maybe_initialize_cuda(type);
   AutoNoGIL no_gil;
-  return torch::ones(sizes, TensorOptions(type, device_index));
+  return torch::ones(sizes, type.options(device_index));
 }
 
 Tensor dispatch_full(const Type& type, Scalar fill_value, int32_t device_index, IntList sizes) {
   maybe_initialize_cuda(type);
   AutoNoGIL no_gil;
-  return torch::full(sizes, fill_value, TensorOptions(type, device_index));
+  return torch::full(sizes, fill_value, type.options(device_index));
 }
 
 Tensor new_with_sizes(const Type& type, int32_t device_index, IntList sizes) {
   maybe_initialize_cuda(type);
   AutoNoGIL no_gil;
-  return torch::empty(sizes, TensorOptions(type, device_index));
+  return torch::empty(sizes, type.options(device_index));
 }
 
 Tensor new_with_storage(const Type& type, Storage storage) {
@@ -256,7 +256,7 @@ Tensor legacy_sparse_tensor_ctor(const Type& type, PyObject* args, PyObject* kwa
   ParsedArgs<4> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
-    return at::empty({0}, TensorOptions(type, r.device(0).index()));
+    return at::empty({0}, type.options(r.device(0).index()));
   } else if (r.idx == 1) {
     auto cdata = reinterpret_cast<void*>(r.toInt64(0));
     return type.unsafeTensorFromTH(cdata, true);

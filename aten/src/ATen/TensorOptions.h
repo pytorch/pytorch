@@ -1,12 +1,9 @@
 #pragma once
 
 #include <ATen/core/Backend.h>
-#include <ATen/Context.h>
 #include <ATen/core/Device.h>
-#include <ATen/DeviceGuard.h>
 #include <ATen/core/Layout.h>
 #include <ATen/core/ScalarType.h>
-#include <ATen/Type.h>
 
 #include <cstddef>
 #include <iosfwd>
@@ -61,16 +58,6 @@ struct AT_API TensorOptions {
   /// - layout: kStrided,
   /// - requires_grad: false
   explicit TensorOptions(bool use_thread_local_default_options);
-
-  /// Constructs the `TensorOptions` from a type and a `device_index`.
-  /* implicit */ TensorOptions(
-      const Type& type,
-      int32_t device_index = -1) {
-    this->dtype(type.scalarType());
-    this->device({backendToDeviceType(type.backend()), device_index});
-    this->layout(type.layout());
-    this->is_variable(type.is_variable());
-  }
 
   /// Constructs a `TensorOptions` object with the given layout.
   /* implicit */ TensorOptions(Layout layout) : TensorOptions() {
