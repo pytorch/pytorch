@@ -1828,7 +1828,7 @@ LAB_IMPLEMENT_VECTORIZED_FUNCTION(sigmoid,TH_MATH_NAME(TH_sigmoid),HYPER_TH_OMP_
 void THTensor_(iv)(THTensor *r_, THTensor *v, THTensor *t)
 {
   THTensor_(resizeAs)(r_, t);
-  TH_TENSOR_APPLY3(real, r_, real, v, real, t, *r__data = TH_MATH_NAME(TH_iv)(*v_data, *t_data););
+  TH_TENSOR_APPLY3(scalar_t, r_, scalar_t, v, scalar_t, t, *r__data = TH_MATH_NAME(TH_iv)(*v_data, *t_data););
 }
 
 void THTensor_(atan2)(THTensor *r_, THTensor *tx, THTensor *ty)
