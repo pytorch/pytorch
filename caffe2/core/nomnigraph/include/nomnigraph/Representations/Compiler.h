@@ -8,7 +8,7 @@
 namespace nom {
 namespace repr {
 
-class CAFFE2_API Value {
+class Value {
  public:
   enum class ValueKind { Value, Instruction, Data };
   Value(ValueKind K) : kind_(K) {}
@@ -22,10 +22,10 @@ class CAFFE2_API Value {
   const ValueKind kind_;
 };
 
-class CAFFE2_API Data : public Value {
+class Data : public Value {
  public:
   Data() : Value(ValueKind::Data) {}
-  CAFFE2_API static bool classof(const Value* V) {
+  static bool classof(const Value* V) {
     return V->getKind() == ValueKind::Data;
   }
   virtual ~Data() = default;
@@ -41,7 +41,7 @@ class CAFFE2_API Data : public Value {
   size_t version_ = 0;
 };
 
-class CAFFE2_API Instruction : public Value {
+class Instruction : public Value {
  public:
   /// \brief All the different types of execution.
   enum class Opcode {
@@ -54,7 +54,7 @@ class CAFFE2_API Instruction : public Value {
   };
   Instruction() : Value(ValueKind::Instruction), op_(Opcode::Generic) {}
   Instruction(Opcode op) : Value(ValueKind::Instruction), op_(op) {}
-  CAFFE2_API static bool classof(const Value* V) {
+  static bool classof(const Value* V) {
     return V->getKind() == ValueKind::Instruction;
   }
   virtual ~Instruction() = default;
@@ -66,7 +66,7 @@ class CAFFE2_API Instruction : public Value {
   Opcode op_;
 };
 
-class CAFFE2_API Terminator : public Instruction {
+class Terminator : public Instruction {
  public:
   Terminator(Instruction::Opcode op) : Instruction(op) {}
 
@@ -80,17 +80,17 @@ class CAFFE2_API Terminator : public Instruction {
   }
 };
 
-class CAFFE2_API Branch : public Terminator {
+class Branch : public Terminator {
  public:
   Branch() : Terminator(Instruction::Opcode::Branch) {}
 };
 
-class CAFFE2_API Return : public Terminator {
+class Return : public Terminator {
  public:
   Return() : Terminator(Instruction::Opcode::Return) {}
 };
 
-class CAFFE2_API Phi : public Instruction {
+class Phi : public Instruction {
  public:
   Phi() : Instruction(Instruction::Opcode::Phi) {}
 };

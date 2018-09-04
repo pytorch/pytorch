@@ -11,14 +11,14 @@ void THNN_(Square_updateOutput)(
   
   if (THTensor_nDimensionLegacyAll(input) == 1 || !THTensor_(isContiguous)(input) || !THTensor_(isContiguous)(output))
   {
-    TH_TENSOR_APPLY2(real, output, real, input,
+    TH_TENSOR_APPLY2(scalar_t, output, scalar_t, input,
       *output_data = (*input_data) * (*input_data);
     );
   }
   else
   {
-    real *output_data = THTensor_(data)(output);
-    real *input_data  = THTensor_(data)(input);
+    scalar_t *output_data = output->data<scalar_t>();
+    scalar_t *input_data  = input->data<scalar_t>();
     int64_t i;
 #pragma omp parallel for private(i)
     for (i = 0; i < THTensor_(nElement)(input); i++)
@@ -40,15 +40,15 @@ void THNN_(Square_updateGradInput)(
       !THTensor_(isContiguous)(gradOutput) ||
       !THTensor_(isContiguous)(gradInput))
   {
-    TH_TENSOR_APPLY3(real, gradInput, real, gradOutput, real, input,
+    TH_TENSOR_APPLY3(scalar_t, gradInput, scalar_t, gradOutput, scalar_t, input,
       *gradInput_data  = 2.0 * (*gradOutput_data) * (*input_data);
     );
   }
   else
   {
-    real *gradOutput_data = THTensor_(data)(gradOutput);
-    real *gradInput_data  = THTensor_(data)(gradInput);
-    real *input_data  = THTensor_(data)(input);
+    scalar_t *gradOutput_data = gradOutput->data<scalar_t>();
+    scalar_t *gradInput_data  = gradInput->data<scalar_t>();
+    scalar_t *input_data  = input->data<scalar_t>();
     int64_t i;
 #pragma omp parallel for private(i)
     for (i = 0; i < THTensor_(nElement)(gradInput); i++)

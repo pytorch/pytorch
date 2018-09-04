@@ -68,7 +68,7 @@ PyObject* tensor_to_numpy(const at::Tensor& tensor) {
       0,
       NPY_ARRAY_ALIGNED | NPY_ARRAY_WRITEABLE,
       nullptr));
-  if (!array) return NULL;
+  if (!array) return nullptr;
 
   // TODO: This attempts to keep the underlying memory alive by setting the base
   // object of the ndarray to the tensor and disabling resizes on the storage.
@@ -77,7 +77,7 @@ PyObject* tensor_to_numpy(const at::Tensor& tensor) {
   PyObject* py_tensor = THPVariable_Wrap(make_variable(tensor, false));
   if (!py_tensor) throw python_error();
   if (PyArray_SetBaseObject((PyArrayObject*)array.get(), py_tensor) == -1) {
-    return NULL;
+    return nullptr;
   }
   // Use the private storage API
   tensor.storage().unsafeGetStorageImpl()->set_resizable(false);

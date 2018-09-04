@@ -2,6 +2,8 @@
 
 #include "Context.h"
 
+#include <ATen/core/TensorOptions.h>
+
 #include <thread>
 #include <mutex>
 #include <sstream>
@@ -103,6 +105,17 @@ bool Context::setFlushDenormal(bool on) {
 #else
   return false;
 #endif
+}
+
+Type& getMaybeVariableType(TensorOptions options) {
+  return globalContext().getMaybeVariableType(
+            options.backend(), options.dtype(), options.is_variable());
+}
+
+Type& getMaybeVariableType(const TensorImpl* impl) {
+  Backend backend = tensorTypeIdToBackend(impl->type_id());
+  return globalContext().getMaybeVariableType(
+            backend, impl->scalar_type(), impl->is_variable());
 }
 
 }

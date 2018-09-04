@@ -1,4 +1,4 @@
-class CAFFE2_API OnnxAnnotation : public nom::repr::Annotation {
+class OnnxAnnotation : public nom::repr::Annotation {
 public:
   OnnxAnnotation() : Annotation(AnnotationKind::Onnx) {}
   OnnxAnnotation(std::string device)

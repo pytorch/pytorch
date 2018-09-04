@@ -25,10 +25,10 @@ std::string getPythonInterpreterStackTrace() {
   std::stringstream stack_trace;
   AutoGIL gil;
   PyThreadState *tstate = PyThreadState_GET();
-  if (NULL != tstate && NULL != tstate->frame) {
+  if (nullptr != tstate && nullptr != tstate->frame) {
     PyFrameObject *frame = tstate->frame;
 
-    while (NULL != frame) {
+    while (nullptr != frame) {
       int line = PyCode_Addr2Line(frame->f_code, frame->f_lasti);
       std::string filename = THPUtils_unpackString(frame->f_code->co_filename);
       std::string funcname = THPUtils_unpackString(frame->f_code->co_name);
@@ -95,6 +95,11 @@ void pythonRecordSourceLocation(Node* n) {
   n->setSourceLocation(sl);
 }
 
+void pythonWarn(const std::string& reason) {
+  auto warn_class = py::module::import("torch.jit").attr("TracerWarning");
+  PyErr_WarnEx(warn_class.ptr(), reason.c_str(), 1);
+}
+
 void initPythonTracerBindings(PyObject* module) {
   setRecordSourceLocation(pythonRecordSourceLocation);
 
@@ -124,6 +129,9 @@ void initPythonTracerBindings(PyObject* module) {
       return s.graph;
     });
 
+  m.def("_tracer_warn_use_python", []() {
+    tracer::setWarn(pythonWarn);
+  });
   m.def("_tracer_enter", [](py::args trace_inputs) {
     return tracer::enter(toStack(trace_inputs));
   });

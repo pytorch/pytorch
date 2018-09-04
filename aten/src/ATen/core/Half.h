@@ -68,6 +68,14 @@ struct alignas(2) Half {
 #endif
 };
 
+// This is just a placeholder for whatever complex representation we
+// end up deciding to use for half-precision complex numbers.
+struct alignas(4) ComplexHalf {
+  Half real_;
+  Half imag_;
+  ComplexHalf() = default;
+};
+
 template <typename To, typename From>
 To convert(From f) {
   return static_cast<To>(f);
@@ -82,7 +90,7 @@ typename std::enable_if<std::is_integral<From>::value, bool>::type overflows(
     // allow for negative numbers to wrap using two's complement arithmetic.
     // For example, with uint8, this allows for `a - b` to be treated as
     // `a + 255 * b`.
-    return f > limit::max() || (f < 0 && -(uint64_t)f > limit::max());
+    return f > limit::max() || (f < 0 && -static_cast<uint64_t>(f) > limit::max());
   } else {
     return f < limit::lowest() || f > limit::max();
   }
@@ -92,7 +100,7 @@ template <typename To, typename From>
 typename std::enable_if<!std::is_integral<From>::value, bool>::type overflows(
     From f) {
   using limit = std::numeric_limits<To>;
-  if (limit::has_infinity && std::isinf((double)f)) {
+  if (limit::has_infinity && std::isinf(static_cast<double>(f))) {
     return false;
   }
   if (!limit::has_quiet_NaN && (f != f)) {
