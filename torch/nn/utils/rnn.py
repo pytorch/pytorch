@@ -4,8 +4,6 @@ import torch
 import torch.onnx
 
 
-from .._functions.packing import PackPadded
-
 PackedSequence_ = namedtuple('PackedSequence', ['data', 'batch_sizes'])
 
 
@@ -140,12 +138,8 @@ def pack_padded_sequence(input, lengths, batch_first=False):
     Returns:
         a :class:`PackedSequence` object
     """
-    if isinstance(lengths, list):
-        lengths = torch.LongTensor(lengths)
-
-    data, batch_sizes = PackPadded.apply(input, lengths, batch_first)
-
-    return PackedSequence(data, batch_sizes)
+    lengths = torch.as_tensor(lengths)
+    return PackedSequence(torch._C._VariableFunctions._pack_padded_sequence(input, lengths, batch_first))
 
 
 def _symbolic_pack_padded_sequence(g, input, lengths, batch_first=False, padding_value=0.0):
@@ -214,9 +208,7 @@ def pad_packed_sequence(sequence, batch_first=False, padding_value=0.0, total_le
         containing the list of lengths of each sequence in the batch.
 
     """
-    var_data, batch_sizes = sequence
-    max_batch_size = int(batch_sizes[0])
-    max_seq_length = batch_sizes.size(0)
+    max_seq_length = sequence.batch_sizes.size(0)
     if total_length is not None:
         if total_length < max_seq_length:
             raise ValueError("Expected total_length to be at least the length "
@@ -224,33 +216,8 @@ def pad_packed_sequence(sequence, batch_first=False, padding_value=0.0, total_le
                              "total_length={} and max sequence length being {}"
                              .format(total_length, max_seq_length))
         max_seq_length = total_length
-    output = var_data.data.new(max_seq_length, max_batch_size, *var_data.size()[1:]).fill_(padding_value)
-
-    lengths = []
-    data_offset = 0
-    prev_batch_size = int(batch_sizes[0])
-    prev_i = 0
-    for i, batch_size in enumerate(batch_sizes.tolist() + [0]):
-        if batch_size != prev_batch_size:
-            l = prev_batch_size * (i - prev_i)
-            tmp = var_data[data_offset:data_offset + l]
-            output[prev_i:i, :prev_batch_size] = tmp.view(i - prev_i, prev_batch_size, *tmp.size()[1:])
-            data_offset += l
-            prev_i = i
-        dec = prev_batch_size - batch_size
-        if dec > 0:
-            lengths.extend((i,) * dec)
-        prev_batch_size = batch_size
-
-    lengths.reverse()
-
-    if batch_first:
-        output = output.transpose(0, 1)
-    # This Tensor doesn't actually have any history (well,
-    # technically it does; it's just untracked), it is purely here to
-    # make ONNX export easier. That is to say, from an autodiff
-    # standpoint this doesn't make any sense.
-    return output, torch.LongTensor(lengths)
+    return torch._C._VariableFunctions._pad_packed_sequence(
+        sequence.data, sequence.batch_sizes, batch_first, padding_value, max_seq_length)
 
 
 def _symbolic_pad_packed_sequence(g, input, batch_first=False, padding_value=0.0, total_length=None):
