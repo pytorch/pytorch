@@ -130,7 +130,7 @@ struct SymbolicVariable {
       auto value_inputs = fmap(inputs, [](const SymbolicVariable & v) { return v.value(); });
       input_list = g->insertNode(g->createList(DynamicType::get(), value_inputs))->output();
     }
-    return create(aten::cat, {input_list, dim})[0];
+    return create(aten::cat, {input_list, dim, inputs[0].insertConstant(0), inputs[0].insertConstant(0)})[0];
   }
   static SymbolicVariable cat(ArrayRef<SymbolicVariable> inputs, int dim) {
     JIT_ASSERT(inputs.size() > 0);
