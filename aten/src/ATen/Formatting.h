@@ -2,7 +2,7 @@
 
 #include <iostream>
 #include "ATen/Type.h"
-#include "ATen/Scalar.h"
+#include "ATen/core/Scalar.h"
 
 namespace at {
 
