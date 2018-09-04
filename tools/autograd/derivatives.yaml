@@ -159,8 +159,8 @@
 - name: btrisolve(Tensor self, Tensor LU_data, Tensor LU_pivots)
   self: not_implemented("btrisolve")
 
-- name: cat(TensorList tensors, int64_t dim, bool pad, int64_t pad_value)
-  tensors: cat_tensors_backward(grad, to_args_sizes(tensors), dim)
+- name: cat(TensorList tensors, int64_t dim, bool pad, Scalar pad_value)
+  tensors: cat_tensors_backward(grad, to_args_sizes(tensors), dim, pad)
 
 - name: cauchy_(Tensor self, double median, double sigma, Generator generator)
   self: zeros_like(grad)

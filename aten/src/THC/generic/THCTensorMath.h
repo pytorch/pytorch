@@ -8,8 +8,8 @@ THC_API void THCTensor_(zero)(THCState *state, THCTensor *self);
 THC_API void THCTensor_(zerosLike)(THCState *state, THCTensor *r_, THCTensor* input);
 THC_API void THCTensor_(onesLike)(THCState *state, THCTensor *r_, THCTensor* input);
 THC_API ptrdiff_t THCTensor_(numel)(THCState *state, THCTensor *t);
-THC_API void THCTensor_(cat)(THCState *state, THCTensor *result, THCTensor *ta, THCTensor *tb, int dimension);
-THC_API void THCTensor_(catArray)(THCState *state, THCTensor *result, THCTensor **inputs, int numInputs, int dimension, bool pad, int pad_value);
+THC_API void THCTensor_(cat)(THCState *state, THCTensor *result, THCTensor *ta, THCTensor *tb, int dimension, bool pad, scalar_t pad_value);
+THC_API void THCTensor_(catArray)(THCState *state, THCTensor *result, THCTensor **inputs, int numInputs, int dimension, bool pad, scalar_t pad_value);
 THC_API void THCTensor_(nonzero)(THCState* state, THCudaLongTensor *tensor, THCTensor *self);
 
 THC_API void THCTensor_(tril)(THCState *state, THCTensor *self, THCTensor *src, int64_t k);

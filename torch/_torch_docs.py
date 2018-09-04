@@ -736,11 +736,11 @@ Arguments:
 
 add_docstr(torch.cat,
            r"""
-cat(seq, dim=0, out=None) -> Tensor
+cat(seq, dim=0, pad=False, pad_value=0, out=None) -> Tensor
 
 Concatenates the given sequence of :attr:`seq` tensors in the given dimension.
 All tensors must either have the same shape (except in the concatenating
-dimension) or be empty.
+dimension) or be empty. Otherwise, :attr:`pad` must be set true to force cat.
 
 :func:`torch.cat` can be seen as an inverse operation for :func:`torch.split`
 and :func:`torch.chunk`.
@@ -752,6 +752,9 @@ Args:
         Non-empty tensors provided must have the same shape, except in the
         cat dimension.
     dim (int, optional): the dimension over which the tensors are concatenated
+    pad (bool, optional): add paddings to expand input tensors to same shape
+        except in the concatenating dimension
+    pad_value (bool, optional): the value used in padding
     out (Tensor, optional): the output tensor
 
 Example::
@@ -772,6 +775,18 @@ Example::
              -1.0969, -0.4614],
             [-0.1034, -0.5790,  0.1497, -0.1034, -0.5790,  0.1497, -0.1034,
              -0.5790,  0.1497]])
+    >>> x = torch.ones(2, 3, device='cpu')
+    >>> y = torch.zeros(1, 4, device='cpu')
+    >>> torch.cat([x, y], dim=0, pad=True, pad_value=0.5)
+    tensor([[1.0000, 1.0000, 1.0000, 0.5000],
+            [1.0000, 1.0000, 1.0000, 0.5000],
+            [0.0000, 0.0000, 0.0000, 0.0000]])
+    >>> x = torch.ones(2, 3, device='cuda')
+    >>> y = torch.zeros(1, 4, device='cuda')
+    >>> torch.cat([x, y], dim=0, pad=True, pad_value=0.5)
+    tensor([[1.0000, 1.0000, 1.0000, 0.5000],
+            [1.0000, 1.0000, 1.0000, 0.5000],
+            [0.0000, 0.0000, 0.0000, 0.0000]])
 """)
 
 add_docstr(torch.ceil,

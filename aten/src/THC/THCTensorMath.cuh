@@ -40,7 +40,7 @@ inline bool getCatGrid(THCState* state, ptrdiff_t nTensors, dim3& grid) {
   //X dim of grid for cat array cooperates on a single tensor in the cat.
   //Given half of the GPU, full utilization will always occur.
   grid = dim3( 2LL * numSM, (long long) nTensors );
-	     
+
   return true;
 }
 
@@ -50,14 +50,13 @@ struct CatArrIndexToOffset {
   static inline __device__ IndexType compute(
       const IndexType outputSize[Dims],
       const IndexType outputStride[Dims],
-      const IndexType dimSize,
-      const unsigned int concatDim,
+      const IndexType inputSize[Dims],
       IndexType linearIndex) {
     IndexType offset = 0;
 
 #pragma unroll
     for (int i = Dims - 1; i >= 1; --i) {
-      IndexType curDimSize = i == concatDim ? dimSize : outputSize[i];
+      IndexType curDimSize = inputSize[i];
       IndexType nextDimIndex = linearIndex / curDimSize;
       IndexType curDimIndex = linearIndex - curDimSize * nextDimIndex;
       IndexType curDimOffset = curDimIndex * outputStride[i];
@@ -69,18 +68,23 @@ struct CatArrIndexToOffset {
   }
 };
 
-template <typename T, typename IndexType>
-struct CatArrInputTensor {
-  T* input;
-  IndexType offset;
-  IndexType dimSize;
-  IndexType nElements;
-};
-
 template<typename IndexType, unsigned int MaxDims>
 struct OutputTensorSizeStride {
   IndexType outputSize[MaxDims];
   IndexType outputStride[MaxDims];
+};
+
+template<typename IndexType, unsigned int MaxDims>
+struct InputTensorSize {
+  IndexType inputSize[MaxDims];
+};
+
+template <typename T, typename IndexType, unsigned int MaxDims>
+struct CatArrInputTensor {
+  T* input;
+  IndexType offset;
+  InputTensorSize<IndexType, CAT_ARRAY_MAX_INPUT_DIMS> inputParam;
+  IndexType nElements;
 };
 
 /**
@@ -101,7 +105,7 @@ struct OutputTensorSizeStride {
 template <typename T, typename IndexType, int Dims>
 __global__ void CatArrayBatchedCopy(
     T* output,
-    CatArrInputTensor<T, IndexType>* inputs,
+    CatArrInputTensor<T, IndexType, CAT_ARRAY_MAX_INPUT_DIMS>* inputs,
     OutputTensorSizeStride<IndexType, CAT_ARRAY_MAX_INPUT_DIMS> os,
     const int concatDim,
     IndexType dimStride) {
@@ -110,17 +114,16 @@ __global__ void CatArrayBatchedCopy(
     IndexType nElements = inputs[blockIdx.y].nElements;
 
     if(tid >= nElements) return;
-    
+
     T* data = inputs[blockIdx.y].input;
     IndexType offset = inputs[blockIdx.y].offset;
-    IndexType dimSize = inputs[blockIdx.y].dimSize;
     IndexType dataOffset = offset * dimStride;
 
     IndexType stride = gridDim.x * blockDim.x;
 
     while( tid < nElements){
     IndexType elementOffset = CatArrIndexToOffset<IndexType, Dims>::compute(
-    	      os.outputSize, os.outputStride, dimSize, concatDim, tid);
+    	      os.outputSize, os.outputStride, inputs[blockIdx.y].inputParam.inputSize, tid);
     output[dataOffset + elementOffset] = data[tid];
 
     tid += stride;

@@ -334,7 +334,7 @@ void PropagateShapeOnNode(Node * node, bool insert_expands) {
     default:
       break; // fall-through
   }
-  if (node->matches("aten::cat(Tensor[] tensors, int dim) -> Tensor")) {
+  if (node->matches("aten::cat(Tensor[] tensors, int dim, int pad, Scalar pad_value) -> Tensor")) {
     return PropagateCatShape(node);
   }
 

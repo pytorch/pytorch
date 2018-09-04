@@ -10,6 +10,8 @@ graph(%x : Double(*, *)) {
       -> (%c.2)
     }
   %5 : int = prim::Constant[value=0]()
-  %6 : Dynamic = aten::cat(%c, %5)
-  return (%6);
+  %6 : int = prim::Constant[value=0]()
+  %7 : int = prim::Constant[value=0]()
+  %8 : Dynamic = aten::cat(%c, %5, %6, %7)
+  return (%8);
 }

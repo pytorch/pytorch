@@ -425,7 +425,11 @@ Tensor unsqueeze_to(const Tensor & self, int64_t dim, IntList sizes) {
   return self;
 }
 
-std::vector<Tensor> cat_tensors_backward(const Tensor & grad, const std::vector<std::vector<int64_t>> &sizes, int64_t dim) {
+std::vector<Tensor> cat_tensors_backward(
+    const Tensor& grad,
+    const std::vector<std::vector<int64_t>>& sizes,
+    int64_t dim,
+    bool pad) {
   dim = at::legacy_cat_wrap_dim(dim, sizes);
   std::vector<Tensor> grad_inputs(sizes.size());
   int64_t accumulate = 0;
@@ -439,6 +443,14 @@ std::vector<Tensor> cat_tensors_backward(const Tensor & grad, const std::vector<
     auto size = shape[dim];
     accumulate += size;
     grad_inputs[i] = grad.narrow(dim, accumulate - size, size);
+    if (pad) {
+      for (size_t j = 0; j < sizes.size(); ++j) {
+        auto cursize = sizes[i][j];
+        if (j != dim) {
+          grad_inputs[i] = grad_inputs[i].narrow(j, 0, cursize);
+        }
+      }
+    }
   }
   return grad_inputs;
 }
