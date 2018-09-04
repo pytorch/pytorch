@@ -24,7 +24,7 @@ namespace torch { namespace jit {
   _(prim, Eval)                    \
   _(prim, Expand) /* onnx */       \
   _(prim, FusionGroup)             \
-  _(prim, GraphExecutor)           \
+  _(prim, DifferentiableGraph)     \
   _(prim, If)                      \
   _(prim, Jump) /* debug */        \
   _(prim, JumpNZ) /* debug */      \
@@ -45,6 +45,7 @@ namespace torch { namespace jit {
   _(prim, TupleConstruct)          \
   _(prim, TupleUnpack)             \
   _(prim, ListConstruct)           \
+  _(prim, ListUnpack)              \
   _(prim, NumToTensor)             \
   _(prim, TensorToNum)             \
   _(prim, ImplicitTensorToNum)     \
@@ -54,7 +55,7 @@ namespace torch { namespace jit {
   _(prim, GradOf)                  \
   _(prim, AnyDefined)              \
   _(prim, FusedConcat)             \
-  _(prim, FusedChunk)              \
+  _(prim, ConstantChunk)           \
   _(prim, NoneGenerator)           \
   _(aten, __not__)                 \
   FORALL_ATEN_BASE_SYMBOLS(_)      \
@@ -86,6 +87,12 @@ namespace torch { namespace jit {
   _(onnx, Not)                     \
   FORALL_ATTR_BASE_SYMBOLS(_)      \
   _(attr, Subgraph)                \
+  _(attr, ReverseSubgraph)         \
+  _(attr, f_real_outputs)          \
+  _(attr, df_input_vjps)           \
+  _(attr, df_input_captured_inputs) \
+  _(attr, df_input_captured_outputs) \
+  _(attr, df_output_vjps)          \
   _(attr, axes)                    \
   _(attr, axis)                    \
   _(attr, broadcast)               \
@@ -100,7 +107,9 @@ namespace torch { namespace jit {
   _(attr, transA)                  \
   _(attr, transB)                  \
   _(attr, name)                    \
-  _(attr, string)
+  _(attr, string)                  \
+  _(attr, a)                       \
+  _(attr, b)
 
 // 'prim' symbols are synthetic operators that occur only in the IR
 // and don't have corresponding implementations in ATen.

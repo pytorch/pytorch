@@ -84,6 +84,25 @@ void addInputs(Node *n, const char * name, const ArrayRef<double>& value) {
   AT_ERROR("Tracing float lists currently not supported!");
 }
 
+void addOutput(Node* node, const at::Tensor& output) {
+  Value * value = node->addOutput();
+  if (output.defined()) {
+    value->inferTypeFrom(output);
+    setValueTrace(autograd::as_variable_ref(output), value);
+  }
+}
+
+void addOutput(Node* node, const std::vector<at::Tensor>& outputs) {
+  Value * value = node->addOutput()->setType(ListType::ofTensors());
+  Graph * graph = node->owningGraph();
+  Node * unpack_node = graph->appendNode(graph->create(prim::ListUnpack, {value}, outputs.size()));
+  for (size_t i = 0; i < outputs.size(); ++i) {
+    Value * output_val = unpack_node->outputs()[i];
+    output_val->inferTypeFrom(outputs[i]);
+    setValueTrace(outputs[i], output_val);
+  }
+}
+
 const std::shared_ptr<TracingState>& getTracingState() {
   return detail::tracing_state;
 }
@@ -96,18 +115,6 @@ TracingState::TracingState()
     : graph(new Graph()) {}
 
 TracingState::~TracingState() = default;
-
-void postRecordTrace(Node* node,
-                     at::ArrayRef<Variable> outputs) {
-  for (size_t i = 0; i < outputs.size(); i++) {
-    auto & output = outputs[i];
-    Value * value = node->addOutput();
-    if (output.defined()) {
-      value->inferTypeFrom(output.data());
-      setValueTrace(output, value);
-    }
-  }
-}
 
 autograd::Variable getSizeOf(const autograd::Variable& var, int64_t dim) {
   auto & tracing_state = getTracingState();
@@ -160,6 +167,22 @@ void recordSourceLocation(Node* n) {
 }
 void setRecordSourceLocation(void (*v)(Node*)) {
   record_source_location.store(v);
+}
+
+void defaultWarn(const std::string& str) { AT_WARN(str); }
+std::atomic<warn_fn_type> warn_callback { defaultWarn };
+
+void _do_warn(const char * _reason) {
+  std::string reason { _reason };
+  std::ostringstream s;
+  s << std::string(reason);
+  s << " might cause the trace to be incorrect. We can't record the data flow of "
+       " Python values, which means the trace might not generalize to other inputs.";
+  warn_callback.load()(s.str());
+}
+
+void setWarn(warn_fn_type fn) {
+  warn_callback.store(fn);
 }
 
 }}}

@@ -279,6 +279,72 @@ RegisterOperators reg({
           };
         }),
     Operator(
+        prim::ConstantChunk,
+        [](Node* node) {
+          int64_t chunks = node->i(attr::chunks);
+          int64_t dim = node->i(attr::dim);
+          auto outputs_used = fmap(node->outputs(), [](Value *v) { return v->uses().size() > 0; });
+          return [=](Stack& stack) {
+            autograd::profiler::RecordFunction record("chunk");
+            at::Tensor t;
+            pop(stack, t);
+            auto result = at::chunk(t, chunks, dim);
+            stack.insert(stack.end(), std::make_move_iterator(result.begin()),
+                                      std::make_move_iterator(result.end()));
+            // NB: Chunk can sometimes return a smaller number of outputs.
+            int64_t num_results = result.size();
+            if (num_results != chunks) {
+              if (num_results > chunks) {
+                JIT_ASSERTM(num_results == chunks,
+                            "Expected chunk to return ", chunks, " outputs, but got ", num_results);
+              }
+              for (int64_t i = num_results; i < chunks; ++i) {
+                AT_CHECK(!outputs_used[i],
+                         "Expected chunk to return at least ", chunks, " outputs, but got only ", num_results);
+                // We know that the output is unused, so it's ok to push anything on the stack.
+                stack.emplace_back();
+              }
+            }
+            return 0;
+          };
+        }),
+    Operator(
+        prim::ListUnpack,
+        [](Node* node) -> Operation {
+          size_t num_outputs = node->outputs().size();
+          ListTypePtr lt = node->input()->type()->expect<ListType>();
+          if (lt->getElementType() == IntType::get()) {
+            return [=](Stack& stack) {
+              auto ilist = pop(stack);
+              const auto & list = ilist.toIntList()->elements();
+              AT_CHECK(list.size() == num_outputs,
+                       "Expected ", num_outputs, " elements in a list but found ", list.size());
+              stack.insert(stack.end(), list.begin(), list.end());
+              return 0;
+            };
+          } else if (lt->getElementType() == FloatType::get()) {
+            return [=](Stack& stack) {
+              auto ilist = pop(stack);
+              const auto & list = ilist.toDoubleList()->elements();
+              AT_CHECK(list.size() == num_outputs,
+                       "Expected ", num_outputs, " elements in a list but found ", list.size());
+              stack.insert(stack.end(), list.begin(), list.end());
+              return 0;
+            };
+          } else if (lt->getElementType() == DynamicType::get()) {
+            return [=](Stack& stack) {
+              auto ilist = pop(stack);
+              const auto & list = ilist.toTensorList()->elements();
+              AT_CHECK(list.size() == num_outputs,
+                       "Expected ", num_outputs, " elements in a list but found ", list.size());
+              stack.insert(stack.end(), list.begin(), list.end());
+              return 0;
+            };
+          } else {
+            AT_ERROR("Unsupported list type: ", lt->getElementType()->str());
+          }
+        }),
+    Operator(
         prim::ListConstruct,
         [](Node* node) -> Operation {
           size_t num_inputs = node->inputs().size();

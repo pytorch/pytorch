@@ -363,6 +363,9 @@ public:
     // raw pointers are.
     return {outputs_.data(), outputs_.size()};
   }
+  Value * output(size_t i) const {
+    return outputs_.at(i);
+  }
   bool hasUses() const {
     for(auto o : outputs()) {
       if(o->uses().size() > 0)
@@ -392,9 +395,6 @@ public:
     return inputs_.at(0);
   }
   // Access a particular input.  This is a checked index.
-  Value * input(size_t i) {
-    return inputs_.at(i);
-  }
   Value * input(size_t i) const {
     return inputs_.at(i);
   }
@@ -1021,6 +1021,15 @@ public:
       JIT_ASSERT(v->type()->isSubtypeOf(elem_type));
     }
     n->output()->setType(ListType::create(elem_type));
+    return n;
+  }
+  Node * createListUnpack(Value *v, size_t size) {
+    ListTypePtr list_type = v->type()->expect<ListType>();
+    TypePtr elem_type = list_type->getElementType();
+    auto n = create(prim::ListUnpack, {v}, 0);
+    for (size_t i = 0; i < size; ++i) {
+      n->addOutput()->setType(elem_type);
+    }
     return n;
   }
   Node* createNumToTensor(Value* value) {

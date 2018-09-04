@@ -108,7 +108,7 @@ grad_fn->set_next_edges(collect_next_edges( ${args_with_derivatives} ));
 """)
 
 CALL_VIA_TYPE = CodeTemplate("""\
-Type::${method_prefix_derived}${api_name}(${type_method_args})""")
+TypeDefault::${method_prefix_derived}${api_name}(${type_method_args})""")
 
 CALL_VIA_DERIVED = CodeTemplate("""\
 baseType->${method_prefix_derived}${base_name}(${unpacked_args})""")
@@ -141,7 +141,7 @@ ADD_TRACE_INPUT = CodeTemplate("""jit::tracer::addInputs(node, "${input}", ${inp
 
 POST_RECORD_TRACE = CodeTemplate("""\
 if (jit::tracer::isTracing()) {
-  jit::tracer::postRecordTrace(node, at::ArrayRef<autograd::Variable>(${trace_outputs}) );
+  ${record_trace_outputs}
 }
 """)
 
@@ -183,18 +183,12 @@ def should_trace(declaration):
     return True
 
 
-def get_trace_outputs(declaration):
-    if declaration['return_type'] == 'std::vector<Tensor>':
-        return 'flatten_tensor_args({})'.format(declaration['returns'][0]['name'])
-    elif declaration['name'].endswith('_out'):
-        output_args = [arg['name'] for arg in declaration['arguments']
-                       if arg.get('output', False)]
-        return '{' + ', '.join(output_args) + '}'
-    trace_outs = [r['name'] for r in declaration['returns']]
-    if any(ret['dynamic_type'] == 'TensorList' for ret in declaration['returns']):
-        return CodeTemplate("flatten_tensor_args( ${outs} )").substitute(outs=trace_outs)
+def record_trace_outputs(declaration):
+    if declaration['name'].endswith('_out'):
+        output_names = [arg['name'] for arg in declaration['arguments'] if arg.get('output', False)]
     else:
-        return CodeTemplate("{ ${outs} }").substitute(outs=trace_outs)
+        output_names = [r['name'] for r in declaration['returns']]
+    return ['jit::tracer::addOutput(node, {});'.format(n) for n in output_names]
 
 
 def format_trace(declaration):
@@ -213,7 +207,7 @@ def format_trace(declaration):
     if local['trace_name'] in RENAME_TRACE:
         local['trace_name'] = RENAME_TRACE[local['trace_name']]
 
-    local['trace_outputs'] = get_trace_outputs(declaration)
+    local['record_trace_outputs'] = record_trace_outputs(declaration)
 
     return (PRE_RECORD_TRACE.substitute(local), POST_RECORD_TRACE.substitute(local))
 

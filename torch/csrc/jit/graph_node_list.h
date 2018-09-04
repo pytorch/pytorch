@@ -126,6 +126,10 @@ struct generic_graph_node_list {
   const generic_graph_node_list reverse() const {
     return generic_graph_node_list(head, d == kNextDirection ? kPrevDirection : kNextDirection);
   }
+  T* front() { return head->next_in_graph[d]; }
+  const T* front() const { return head->next_in_graph[d]; }
+  T* back() { return head->next_in_graph[!d]; }
+  const T* back() const { return head->next_in_graph[!d]; }
   generic_graph_node_list(T * head, int d)
     : head(head), d(d) {}
 private:

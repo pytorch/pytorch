@@ -1,4 +1,4 @@
-# UBSAN triggers when compiling protobuf, so we need to disable it.
+ # UBSAN triggers when compiling protobuf, so we need to disable it.
 set(UBSAN_FLAG "-fsanitize=undefined")
 
 macro(disable_ubsan)
@@ -24,14 +24,12 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
 endif()
 
 # ---[ Threads
-if(BUILD_CAFFE2)
-  include(${CMAKE_CURRENT_LIST_DIR}/public/threads.cmake)
-  if (TARGET Threads::Threads)
-    list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS Threads::Threads)
-  else()
-    message(FATAL_ERROR
-        "Cannot find threading library. Caffe2 requires Threads to compile.")
-  endif()
+include(${CMAKE_CURRENT_LIST_DIR}/public/threads.cmake)
+if (TARGET Threads::Threads)
+  list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS Threads::Threads)
+else()
+  message(FATAL_ERROR
+      "Cannot find threading library. Caffe2 requires Threads to compile.")
 endif()
 
 # ---[ protobuf
@@ -42,22 +40,20 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
 endif()
 
 # ---[ git: used to generate git build string.
-if(BUILD_CAFFE2)
-  find_package(Git)
-  if(GIT_FOUND)
-    execute_process(COMMAND ${GIT_EXECUTABLE} describe --tags --always --dirty
-                    ERROR_QUIET OUTPUT_STRIP_TRAILING_WHITESPACE
-                    WORKING_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}/.."
-                    OUTPUT_VARIABLE CAFFE2_GIT_VERSION
-                    RESULT_VARIABLE __git_result)
-    if(NOT ${__git_result} EQUAL 0)
-      set(CAFFE2_GIT_VERSION "unknown")
-    endif()
-  else()
-    message(
-        WARNING
-        "Cannot find git, so Caffe2 won't have any git build info available")
+find_package(Git)
+if(GIT_FOUND)
+  execute_process(COMMAND ${GIT_EXECUTABLE} describe --tags --always --dirty
+                  ERROR_QUIET OUTPUT_STRIP_TRAILING_WHITESPACE
+                  WORKING_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}/.."
+                  OUTPUT_VARIABLE CAFFE2_GIT_VERSION
+                  RESULT_VARIABLE __git_result)
+  if(NOT ${__git_result} EQUAL 0)
+    set(CAFFE2_GIT_VERSION "unknown")
   endif()
+else()
+  message(
+      WARNING
+      "Cannot find git, so Caffe2 won't have any git build info available")
 endif()
 
 # ---[ BLAS
@@ -512,7 +508,7 @@ if(USE_CUDA)
 endif()
 
 # ---[ HIP
-if(BUILD_CAFFE2 OR NOT BUILD_ATEN_MOBILE)
+if(NOT BUILD_ATEN_MOBILE)
   include(${CMAKE_CURRENT_LIST_DIR}/public/LoadHIP.cmake)
   if(PYTORCH_FOUND_HIP)
     message(INFO "Compiling with HIP for AMD.")
@@ -562,6 +558,7 @@ endif()
 if(USE_ROCM)
  include_directories(SYSTEM ${HIP_PATH}/include)
  include_directories(SYSTEM ${ROCBLAS_PATH}/include)
+ include_directories(SYSTEM ${ROCFFT_PATH}/include)
  include_directories(SYSTEM ${HIPSPARSE_PATH}/include)
  include_directories(SYSTEM ${HIPRAND_PATH}/include)
  include_directories(SYSTEM ${ROCRAND_PATH}/include)
@@ -753,14 +750,18 @@ if (USE_NNAPI AND NOT ANDROID)
   caffe2_update_option(USE_NNAPI OFF)
 endif()
 
+# TODO(orionr): Enable all of this for Windows DLL when we
+# can figure out how to get it to build
+if (NOT (MSVC AND BUILD_SHARED_LIBS))
 if (NOT BUILD_ATEN_MOBILE)
-  if (BUILD_CAFFE2)
+  if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
     list(APPEND Caffe2_DEPENDENCY_LIBS aten_op_header_gen)
     if (USE_CUDA)
       list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS aten_op_header_gen)
     endif()
     include_directories(${PROJECT_BINARY_DIR}/caffe2/contrib/aten)
   endif()
+endif()
 endif()
 
 if (USE_ZSTD)
@@ -878,7 +879,6 @@ if (NOT BUILD_ATEN_MOBILE)
   ############################################
   # Flags
   # When using MSVC
-
   # Detect CUDA architecture and get best NVCC flags
   # finding cuda must be first because other things depend on the result
   #
@@ -935,12 +935,12 @@ if (NOT BUILD_ATEN_MOBILE)
   OPTION(NDEBUG "disable asserts (WARNING: this may result in silent UB e.g. with out-of-bound indices)")
   IF (NOT NDEBUG)
     MESSAGE(STATUS "Removing -DNDEBUG from compile flags")
-    STRING(REGEX REPLACE "[-/]DNDEBUG" "" CMAKE_C_FLAGS "" ${CMAKE_C_FLAGS})
-    STRING(REGEX REPLACE "[-/]DNDEBUG" "" CMAKE_C_FLAGS_DEBUG "" ${CMAKE_C_FLAGS_DEBUG})
-    STRING(REGEX REPLACE "[-/]DNDEBUG" "" CMAKE_C_FLAGS_RELEASE "" ${CMAKE_C_FLAGS_RELEASE})
-    STRING(REGEX REPLACE "[-/]DNDEBUG" "" CMAKE_CXX_FLAGS "" ${CMAKE_CXX_FLAGS})
-    STRING(REGEX REPLACE "[-/]DNDEBUG" "" CMAKE_CXX_FLAGS_DEBUG "" ${CMAKE_CXX_FLAGS_DEBUG})
-    STRING(REGEX REPLACE "[-/]DNDEBUG" "" CMAKE_CXX_FLAGS_RELEASE "" ${CMAKE_CXX_FLAGS_RELEASE})
+    STRING(REPLACE "-DNDEBUG" "" CMAKE_C_FLAGS "" ${CMAKE_C_FLAGS})
+    STRING(REPLACE "-DNDEBUG" "" CMAKE_C_FLAGS_DEBUG "" ${CMAKE_C_FLAGS_DEBUG})
+    STRING(REPLACE "-DNDEBUG" "" CMAKE_C_FLAGS_RELEASE "" ${CMAKE_C_FLAGS_RELEASE})
+    STRING(REPLACE "-DNDEBUG" "" CMAKE_CXX_FLAGS "" ${CMAKE_CXX_FLAGS})
+    STRING(REPLACE "-DNDEBUG" "" CMAKE_CXX_FLAGS_DEBUG "" ${CMAKE_CXX_FLAGS_DEBUG})
+    STRING(REPLACE "-DNDEBUG" "" CMAKE_CXX_FLAGS_RELEASE "" ${CMAKE_CXX_FLAGS_RELEASE})
   ENDIF()
 
   # OpenMP support?

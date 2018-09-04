@@ -546,7 +546,7 @@ class TestCaffe2Backend(unittest.TestCase):
             def forward(self, input):
                 # TODO: Why index? This returns a tuple and test runner doesn't
                 # support tuple comparison.
-                return input.chunk(20, dim=2)[-1]
+                return input.chunk(8, dim=2)[-1]
         self.run_model_test(MyModel(), train=False, batch_size=BATCH_SIZE)
 
     def test_sqrt(self):
