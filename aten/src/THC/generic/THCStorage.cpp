@@ -3,6 +3,7 @@
 #else
 
 #include <ATen/core/intrusive_ptr.h>
+#include <ATen/core/typeid.h>
 
 scalar_t* THCStorage_(data)(THCState *state, const THCStorage *self)
 {
