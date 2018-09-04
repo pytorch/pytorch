@@ -14,9 +14,9 @@ void THNN_(PReLU_updateOutput)(
   if (nOutputPlane == 1)
   {
     // handle shared parameter case
-    real w = *THTensor_(data)(weight);
-    TH_TENSOR_APPLY2(real, output, real, input,
-          const real r = (*input_data > 0) ? 1 : w;
+    scalar_t w = *weight->data<scalar_t>();
+    TH_TENSOR_APPLY2(scalar_t, output, scalar_t, input,
+          const scalar_t r = (*input_data > 0) ? 1 : w;
           *output_data = *input_data * r;
     );
     return;
@@ -37,15 +37,15 @@ void THNN_(PReLU_updateOutput)(
     }
   }
 
-  real *output_data = THTensor_(data)(output);
-  real *input_data = THTensor_(data)(input);
-  real *weight_data = THTensor_(data)(weight);
+  scalar_t *output_data = output->data<scalar_t>();
+  scalar_t *input_data = input->data<scalar_t>();
+  scalar_t *weight_data = weight->data<scalar_t>();
   THIndex_t i, j, k;
   #pragma omp parallel for private(j,k)
   for (i = 0; i < bs; ++i)
   {
-    real* n_input_data = input_data + i*nOutputPlane*ks;
-    real* n_output_data = output_data + i*nOutputPlane*ks;
+    scalar_t* n_input_data = input_data + i*nOutputPlane*ks;
+    scalar_t* n_output_data = output_data + i*nOutputPlane*ks;
     for (j = 0; j < nOutputPlane; ++j)
     {
       for (k = 0; k < ks; ++k)
@@ -54,7 +54,7 @@ void THNN_(PReLU_updateOutput)(
       n_output_data += ks;
     }
   }
-  THTensor_(free)(input);
+  c10::raw::intrusive_ptr::decref(input);
 }
 
 void THNN_(PReLU_updateGradInput)(
@@ -70,8 +70,8 @@ void THNN_(PReLU_updateGradInput)(
 
   if (nOutputPlane == 1)
   {
-    real w = THTensor_(data)(weight)[0];
-    TH_TENSOR_APPLY3(real, gradInput, real, gradOutput, real, input,
+    scalar_t w = weight->data<scalar_t>()[0];
+    TH_TENSOR_APPLY3(scalar_t, gradInput, scalar_t, gradOutput, scalar_t, input,
        if ((*input_data) > 0)
          *gradInput_data = *gradOutput_data;
        else
@@ -83,10 +83,10 @@ void THNN_(PReLU_updateGradInput)(
   input = THTensor_(newContiguous)(input);
   gradOutput = THTensor_(newContiguous)(gradOutput);
   weight = THTensor_(newContiguous)(weight);
-  const real *input_data = THTensor_(data)(input);
-  const real *gradOutput_data = THTensor_(data)(gradOutput);
-  const real *weight_data = THTensor_(data)(weight);
-  real *gradInput_data = THTensor_(data)(gradInput);
+  const scalar_t *input_data = input->data<scalar_t>();
+  const scalar_t *gradOutput_data = gradOutput->data<scalar_t>();
+  const scalar_t *weight_data = weight->data<scalar_t>();
+  scalar_t *gradInput_data = gradInput->data<scalar_t>();
 
   int64_t bs = 1, ks = 1;
   {
@@ -106,13 +106,13 @@ void THNN_(PReLU_updateGradInput)(
   #pragma omp parallel for private(j,k)
   for (i = 0; i < bs; ++i)
   {
-    const real *n_input_data = input_data + i*nOutputPlane*ks;
-    const real *n_gradOutput_data = gradOutput_data + i*nOutputPlane*ks;
-    real *n_gradInput_data = gradInput_data + i*nOutputPlane*ks;
+    const scalar_t *n_input_data = input_data + i*nOutputPlane*ks;
+    const scalar_t *n_gradOutput_data = gradOutput_data + i*nOutputPlane*ks;
+    scalar_t *n_gradInput_data = gradInput_data + i*nOutputPlane*ks;
 
     for (j = 0; j < nOutputPlane; ++j)
     {
-      real w = weight_data[j];
+      scalar_t w = weight_data[j];
       for (k = 0; k < ks; ++k)
       {
         if (n_input_data[k] > 0)
@@ -125,9 +125,9 @@ void THNN_(PReLU_updateGradInput)(
       n_gradOutput_data += ks;
     }
   }
-  THTensor_(free)(input);
-  THTensor_(free)(gradOutput);
-  THTensor_(free)(weight);
+  c10::raw::intrusive_ptr::decref(input);
+  c10::raw::intrusive_ptr::decref(gradOutput);
+  c10::raw::intrusive_ptr::decref(weight);
 }
 
 void THNN_(PReLU_accGradParameters)(
@@ -139,15 +139,15 @@ void THNN_(PReLU_accGradParameters)(
           THTensor *gradWeight,
           accreal scale_)
 {
-  real scale = TH_CONVERT_ACCREAL_TO_REAL(scale_);
+  scalar_t scale = TH_CONVERT_ACCREAL_TO_REAL(scale_);
   THNN_CHECK_NELEMENT(input, gradOutput);
   int64_t nOutputPlane = THTensor_(numel)(weight);
 
   if (nOutputPlane == 1)
   {
-    real *gradWeight_data = THTensor_(data)(gradWeight);
-    real sum = 0;
-    TH_TENSOR_APPLY2(real, input, real, gradOutput,
+    scalar_t *gradWeight_data = gradWeight->data<scalar_t>();
+    scalar_t sum = 0;
+    TH_TENSOR_APPLY2(scalar_t, input, scalar_t, gradOutput,
       if ((*input_data) <= 0)
         sum += (*input_data) * (*gradOutput_data);
     );
@@ -173,19 +173,19 @@ void THNN_(PReLU_accGradParameters)(
     }
   }
 
-  const real *input_data = THTensor_(data)(input);
-  const real *gradOutput_data = THTensor_(data)(gradOutput);
-  real *gradWeight_data = THTensor_(data)(gradWeight);
+  const scalar_t *input_data = input->data<scalar_t>();
+  const scalar_t *gradOutput_data = gradOutput->data<scalar_t>();
+  scalar_t *gradWeight_data = gradWeight->data<scalar_t>();
 
   THIndex_t i, j, k;
   for (i = 0; i < bs; ++i)
   {
-    const real *n_input_data = input_data + i*nOutputPlane*ks;
-    const real *n_gradOutput_data = gradOutput_data + i*nOutputPlane*ks;
+    const scalar_t *n_input_data = input_data + i*nOutputPlane*ks;
+    const scalar_t *n_gradOutput_data = gradOutput_data + i*nOutputPlane*ks;
 
     for (j = 0; j < nOutputPlane; ++j)
     {
-      real sum = 0;
+      scalar_t sum = 0;
       for (k = 0; k < ks; ++k)
         if (n_input_data[k] <= 0)
           sum += n_gradOutput_data[k] * n_input_data[k];
@@ -194,9 +194,9 @@ void THNN_(PReLU_accGradParameters)(
       n_gradOutput_data += ks;
     }
   }
-  THTensor_(free)(input);
-  THTensor_(free)(gradOutput);
-  THTensor_(free)(weight);
+  c10::raw::intrusive_ptr::decref(input);
+  c10::raw::intrusive_ptr::decref(gradOutput);
+  c10::raw::intrusive_ptr::decref(weight);
 }
 
 #endif

@@ -169,4 +169,20 @@ void setRecordSourceLocation(void (*v)(Node*)) {
   record_source_location.store(v);
 }
 
+void defaultWarn(const std::string& str) { AT_WARN(str); }
+std::atomic<warn_fn_type> warn_callback { defaultWarn };
+
+void _do_warn(const char * _reason) {
+  std::string reason { _reason };
+  std::ostringstream s;
+  s << std::string(reason);
+  s << " might cause the trace to be incorrect. We can't record the data flow of "
+       " Python values, which means the trace might not generalize to other inputs.";
+  warn_callback.load()(s.str());
+}
+
+void setWarn(warn_fn_type fn) {
+  warn_callback.store(fn);
+}
+
 }}}

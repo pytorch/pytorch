@@ -328,7 +328,7 @@ class CAFFE2_API OpSchema {
     return inplace_enforced_(x, y);
   }
 
-  friend std::ostream& operator<<(std::ostream& out, const OpSchema& schema);
+  CAFFE2_API friend std::ostream& operator<<(std::ostream& out, const OpSchema& schema);
 
   const std::vector<Argument>& args() const {
     return args_;

@@ -5,7 +5,7 @@
 #include <ATen/Context.h>
 #include <ATen/Functions.h>
 #include <ATen/OptionsGuard.h>
-#include <ATen/TensorOptions.h>
+#include <ATen/core/TensorOptions.h>
 
 #include <vector>
 #include <string>
@@ -32,7 +32,7 @@ TEST_CASE("TensorOptions/DefaultsToTheRightValues") {
 
 TEST_CASE("TensorOptions/ReturnsTheCorrectType") {
   auto options = TensorOptions().device(kCPU).dtype(kInt).layout(kSparse);
-  REQUIRE(options.type() == getNonVariableType(Backend::SparseCPU, kInt));
+  REQUIRE(at::getMaybeVariableType(options) == getNonVariableType(Backend::SparseCPU, kInt));
 }
 
 TEST_CASE("TensorOptions/UtilityFunctionsReturnTheRightTensorOptions") {

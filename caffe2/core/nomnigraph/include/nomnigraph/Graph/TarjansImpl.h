@@ -13,6 +13,7 @@ struct GraphWrapper {
   struct NodeWrapper {
     using NodeRef = typename Graph<T, U...>::NodeRef;
     NodeWrapper(NodeRef n) : node(n) {}
+    NodeWrapper() = default;
     NodeRef node;
     int Index = -1;
     int LowLink = -1;
