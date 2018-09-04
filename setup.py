@@ -424,11 +424,10 @@ class build_deps(PytorchCommand):
         # we need to find a better way to do this.
         # More information can be found in conversation thread of PR #5772
 
-        self.copy_tree('torch/csrc', 'torch/lib/include/torch/csrc/')
+        self.copy_tree('torch/lib/tmp_install/share', 'torch/share')
         self.copy_tree('third_party/pybind11/include/pybind11/',
                        'torch/lib/include/pybind11')
         self.copy_file('torch/csrc/torch.h', 'torch/lib/include/torch/torch.h')
-        self.copy_file('torch/op.h', 'torch/lib/include/torch/op.h')
 
 
 build_dep_cmds = {}
@@ -1111,27 +1110,38 @@ if __name__ == '__main__':
                 'lib/*.h',
                 'lib/include/ATen/*.h',
                 'lib/include/ATen/core/*.h',
-                'lib/include/ATen/detail/*.h',
-                'lib/include/ATen/cuda/*.h',
                 'lib/include/ATen/cuda/*.cuh',
+                'lib/include/ATen/cuda/*.h',
+                'lib/include/ATen/cuda/detail/*.cuh',
                 'lib/include/ATen/cuda/detail/*.h',
                 'lib/include/ATen/cudnn/*.h',
-                'lib/include/ATen/cuda/detail/*.cuh',
+                'lib/include/ATen/detail/*.h',
+                'lib/include/caffe2/utils/*.h',
+                'lib/include/torch/*.h',
+                'lib/include/torch/csrc/*.h',
+                'lib/include/torch/csrc/api/include/torch/detail/ordered_dict.h',
+                'lib/include/torch/csrc/autograd/*.h',
+                'lib/include/torch/csrc/autograd/generated/*.h',
+                'lib/include/torch/csrc/cuda/*.h',
+                'lib/include/torch/csrc/jit/*.h',
+                'lib/include/torch/csrc/jit/generated/*.h',
+                'lib/include/torch/csrc/jit/passes/*.h',
+                'lib/include/torch/csrc/jit/script/*.h',
+                'lib/include/torch/csrc/utils/*.h',
                 'lib/include/pybind11/*.h',
                 'lib/include/pybind11/detail/*.h',
                 'lib/include/TH/*.h*',
                 'lib/include/TH/generic/*.h*',
-                'lib/include/THC/*.h*',
                 'lib/include/THC/*.cuh',
+                'lib/include/THC/*.h*',
                 'lib/include/THC/generic/*.h',
                 'lib/include/THCUNN/*.cuh',
                 'lib/include/THNN/*.h',
-                'lib/include/torch/csrc/*.h',
-                'lib/include/torch/csrc/autograd/*.h',
-                'lib/include/torch/csrc/jit/*.h',
-                'lib/include/torch/csrc/utils/*.h',
-                'lib/include/torch/csrc/cuda/*.h',
-                'lib/include/torch/torch.h',
+                'share/cmake/ATen/*.cmake',
+                'share/cmake/Caffe2/*.cmake',
+                'share/cmake/Caffe2/public/*.cmake',
+                'share/cmake/Gloo/*.cmake',
+                'share/cmake/Torch/*.cmake',
             ]
         },
     )

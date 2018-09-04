@@ -78,14 +78,37 @@ call ci_scripts/setup_pytorch_env.bat
 cd test/ && python run_test.py --exclude nn --verbose && cd ..
 EOL
 
+cat >ci_scripts/test_custom_script_ops.bat <<EOL
+call ci_scripts/setup_pytorch_env.bat
+
+cd test/custom_operator
+
+:: Build the custom operator library.
+mkdir build
+cd build
+:: Note: Caffe2 does not support MSVC + CUDA + Debug mode (has to be Release mode)
+cmake -DCMAKE_PREFIX_PATH="..\\torch" -DCMAKE_BUILD_TYPE=Release -DUSE_MKL=OFF -G"NMake Makefiles" ..
+dir
+nmake
+dir
+cd ..
+
+:: Run tests Python-side and export a script module.
+python test_custom_ops.py -v
+python model.py --export-script-module=model.pt
+:: Run tests C++-side and load the exported script module.
+build/test_custom_ops.exe ./model.pt
+
+EOL
+
 run_tests() {
     if [ -z "${JOB_BASE_NAME}" ] || [[ "${JOB_BASE_NAME}" == *-test ]]; then
-        ci_scripts/test_python_nn.bat && ci_scripts/test_python_all_except_nn.bat
+        ci_scripts/test_python_nn.bat && ci_scripts/test_python_all_except_nn.bat && ci_scripts/test_custom_script_ops.bat
     else
         if [[ "${JOB_BASE_NAME}" == *-test1 ]]; then
             ci_scripts/test_python_nn.bat
         elif [[ "${JOB_BASE_NAME}" == *-test2 ]]; then
-            ci_scripts/test_python_all_except_nn.bat
+            ci_scripts/test_python_all_except_nn.bat && ci_scripts/test_custom_script_ops.bat
         fi
     fi
 }
