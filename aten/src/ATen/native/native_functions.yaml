@@ -1792,14 +1792,20 @@
 - func: norm_except_dim(Tensor v, int64_t pow=2, int64_t dim=0) -> Tensor
   variants: function
 
+# VariableType::_weight_norm does not want to be given a gap in the autograd graph,
+# so we don't define "dispatch" variants for it.
 - func: _weight_norm(Tensor v, Tensor g, int64_t dim=0) -> Tensor
   variants: function
 
-- func: weight_norm_fused(Tensor v, Tensor g, int64_t dim=0) -> (Tensor,Tensor)
+- func: weight_norm_cuda_interface(Tensor v, Tensor g, int64_t dim=0) -> Tensor
   variants: function
+  dispatch:
+    CUDA: weight_norm_cuda
 
-- func: weight_norm_fused_backward(Tensor grad_w, Tensor saved_v, Tensor saved_g, Tensor saved_norms, int64_t dim) -> (Tensor, Tensor)
+- func: weight_norm_cuda_interface_backward(Tensor grad_w, Tensor saved_v, Tensor saved_g, Tensor saved_norms, int64_t dim) -> (Tensor, Tensor)
   variants: function
+  dispatch:
+    CUDA: weight_norm_cuda_backward
 
 - func: weight_norm_differentiable_backward(Tensor grad_w, Tensor saved_v, Tensor saved_g, Tensor saved_norms, int64_t dim) -> (Tensor, Tensor)
   variants: function
