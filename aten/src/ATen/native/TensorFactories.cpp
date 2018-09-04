@@ -11,7 +11,7 @@
 #include "ATen/Dispatch.h"
 #include "ATen/NativeFunctions.h"
 #include "ATen/ScalarType.h"
-#include "ATen/TensorOptions.h"
+#include "ATen/core/TensorOptions.h"
 #include "ATen/core/Error.h"
 #include "TH/THRandom.h"
 

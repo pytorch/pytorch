@@ -10,7 +10,7 @@
 #include "ATen/core/Deprecated.h"
 #include "ATen/NativeFunctions.h"
 #include "ATen/DeviceGuard.h"
-#include "ATen/TensorOptions.h"
+#include "ATen/core/TensorOptions.h"
 #include "ATen/core/Reduction.h"
 
 namespace at {

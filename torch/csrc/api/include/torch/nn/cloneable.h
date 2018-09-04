@@ -5,7 +5,7 @@
 #include <torch/utils.h>
 
 #include <ATen/OptionsGuard.h>
-#include <ATen/TensorOptions.h>
+#include <ATen/core/TensorOptions.h>
 #include <ATen/core/Error.h>
 #include <ATen/core/optional.h>
 

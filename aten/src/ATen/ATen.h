@@ -20,6 +20,6 @@
 #include "ATen/TensorGeometry.h"
 #include "ATen/TensorMethods.h"
 #include "ATen/TensorOperators.h"
-#include "ATen/TensorOptions.h"
+#include "ATen/core/TensorOptions.h"
 #include "ATen/Type.h"
 #include "ATen/core/Error.h"
