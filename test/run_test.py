@@ -102,10 +102,13 @@ def get_shell_output(command):
 
 
 def run_test(python, test_module, test_directory, options):
-    verbose = '--verbose' if options.verbose else ''
+    unittest_args = options.additional_unittest_args
+    if options.verbose:
+        unittest_args.append('--verbose')
+    unittest_args = ' '.join(unittest_args)
     # Can't call `python -m unittest test_*` here because it doesn't run code
     # in `if __name__ == '__main__': `. So call `python test_*.py` instead.
-    return shell('{} {}.py {}'.format(python, test_module, verbose),
+    return shell('{} {}.py {}'.format(python, test_module, unittest_args),
                  test_directory)
 
 
@@ -257,6 +260,11 @@ def parse_args():
         '--ignore-win-blacklist',
         action='store_true',
         help='always run blacklisted windows tests')
+    parser.add_argument(
+        'additional_unittest_args',
+        nargs='*',
+        help='additional arguments passed through to unittest, e.g., '
+             'python run_test.py -i sparse -- TestSparse.test_factory_size_check')
     return parser.parse_args()
 
 
@@ -283,8 +291,8 @@ def find_test_index(test, selected_tests, find_last_index=False):
                      'torch.TestTorch.test_tan', 'torch.TestTorch.test_add'**, 'utils']
     ```
 
-    If :attr:`test`='torch' and :attr:`find_last_index`=False result should be **2**.
-    If :attr:`test`='torch' and :attr:`find_last_index`=True result should be **4**.
+    If :attr:`test`='torch' and :attr:`find_last_index`=False, result should be **2**.
+    If :attr:`test`='torch' and :attr:`find_last_index`=True, result should be **4**.
 
     Arguments:
         test (str): Name of test to lookup
