@@ -336,6 +336,7 @@ static void SparseLengthsFillerHelper(
     size_t length_index,
     std::vector<TensorFiller>* fillers) {
   CAFFE_ENFORCE_EQ(shapes[length_index].size(), 1);
+  // filler.h: SparseLengths->FixedSum will select FD_FIXEDSUM distribution
   (*fillers)[length_index].SparseLengths(shapes[value_index].front());
 }
 
@@ -345,32 +346,46 @@ static void SparseSegmentsFillerHelper(
     size_t segment_index,
     std::vector<TensorFiller>* fillers) {
   CAFFE_ENFORCE_EQ(shapes[segment_index].size(), 1);
-  // TODO (mnaumov): distribution of value
-  (*fillers)[value_index].Min(0).Max(shapes[value_index].front() * 2);
+  // filler.h SparseSegments will select FD_UNIFORM or FD_SYNTHETIC distribution
+  (*fillers)[value_index]
+      .Min(0)
+      .Max(shapes[value_index].front() * 2)
+      .Dist(FD_UNIFORM);
   (*fillers)[segment_index].SparseSegments(shapes[value_index].front() - 1);
 }
 
+// The helper is build sparse input with values, keys, and lengths; e.g.:
+// values  = [1, 2, 3, 2, 4, 6, 7, 3, 6]
+// keys    = [0, 1, 4, 0, 1, 2, 5, 1, 2]
+//            \_____/  \________/  \__/
+// lengths =    [3,        4,       2]
 OpSchema& OpSchema::ValueKeyLengthInputFillers(
     size_t value_index,
     size_t key_index,
     size_t length_index) {
-  // TODO (mnaumov): distribution of value
   filler_supplier_ = [this, value_index, key_index, length_index](
                          const std::vector<std::vector<TIndex>>& shapes) {
     auto fillers = SupplyDenseFillers(shapes);
+    // fill in the length (value_index is used to get the correct shape)
     SparseLengthsFillerHelper(shapes, key_index, length_index, &fillers);
+    // fill in the keys (value_index is used to get the correct shape)
     SparseSegmentsFillerHelper(shapes, value_index, key_index, &fillers);
     return fillers;
   };
   return *this;
 }
 
+// The helper is build sparse input with values and lengths; e.g.:
+// values  = [1, 2, 3, 2, 4, 6, 7, 3, 6]
+//            \_____/  \________/  \__/
+// lengths =    [3,        4,       2]
 OpSchema& OpSchema::ValueLengthInputFillers(
     size_t value_index,
     size_t length_index) {
   filler_supplier_ = [this, value_index, length_index](
                          const std::vector<std::vector<TIndex>>& shapes) {
     auto fillers = SupplyDenseFillers(shapes);
+    // fill in the length (value_index is used to get the correct shape)
     SparseLengthsFillerHelper(shapes, value_index, length_index, &fillers);
     return fillers;
   };
