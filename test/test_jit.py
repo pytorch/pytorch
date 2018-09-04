@@ -1422,7 +1422,10 @@ class TestJit(JitTestCase):
 
         a, b, c = [torch.tensor(e) for e in (1, [[2.]], [[3.]])]
         addmm(a, b, c)
-        self.assertExpectedGraph(addmm.graph_for(a, b, c))
+        graph = addmm.graph_for(a, b, c)
+        # graph fusion skipped in windows, which runs cse
+        self.run_pass('cse', graph)
+        self.assertExpectedGraph(graph)
 
     def test_index_put(self):
         ten = torch.zeros(3, 3)
