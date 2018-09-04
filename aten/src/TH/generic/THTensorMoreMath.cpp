@@ -1426,7 +1426,7 @@ void THTensor_(catArray)(THTensor *result, THTensor **inputs, int numInputs, int
         THTensor *nt = THTensor_(newWithTensor)(result);
         if (pad) {
           for (int dim = 0; dim < nDims; dim++) {
-            if (dimension==dim) {
+            if (dimension == dim) {
               THTensor_(narrow)(nt, NULL, dimension, offset, dimSize);
             }else{
               THTensor_(narrow)(nt, NULL, dim, 0, inputs[j]->size(dim));

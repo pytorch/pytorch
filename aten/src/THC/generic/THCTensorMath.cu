@@ -271,7 +271,11 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
       if (should_skip(inputs[j])) continue;
       int64_t dimSize = THCTensor_(size)(state, inputs[j], dimension);
       THCTensor *nt = THCTensor_(newWithTensor)(state, result);
+<<<<<<< HEAD
       if (pad) {
+=======
+      if (pad){
+>>>>>>> d90fc4baafd8ce177bb75eed9c0171fbe76c7f2f
         for (int dim = 0; dim < nDims; dim++) {
           if (dimension==dim){
             THCTensor_(narrow)(state, nt, NULL, dimension, offset, dimSize);
