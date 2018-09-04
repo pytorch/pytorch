@@ -54,7 +54,6 @@ endif()
 # cmake/Summary.cmake so that the summary prints out the option values.
 include(CMakeDependentOption)
 option(BUILD_TORCH "Build Torch" OFF)
-option(BUILD_CAFFE2 "Build Caffe2" ON)
 option(ATEN_NO_TEST "Do not build ATen test binaries" OFF)
 option(BUILD_ATEN_MOBILE "Build ATen for Android and iOS" OFF)
 option(BUILD_BINARY "Build C++ binaries" ON)
@@ -68,9 +67,7 @@ cmake_dependent_option(
 cmake_dependent_option(
     CAFFE2_USE_MSVC_STATIC_RUNTIME "Using MSVC static runtime libraries" ON
     "NOT BUILD_SHARED_LIBS" OFF)
-cmake_dependent_option(
-    BUILD_TEST "Build Caffe2 C++ test binaries (need gtest and gbenchmark)" OFF
-    "BUILD_CAFFE2" OFF)
+option(BUILD_TEST "Build C++ test binaries (need gtest and gbenchmark)" OFF)
 cmake_dependent_option(
     INSTALL_TEST "Install test binaries if BUILD_TEST is on" OFF
     "BUILD_TEST" OFF)
@@ -83,32 +80,16 @@ cmake_dependent_option(
     USE_CUDNN "Use cuDNN" ON
     "USE_CUDA" OFF)
 option(USE_FFMPEG "Use ffmpeg" OFF)
-cmake_dependent_option(
-    USE_GFLAGS "Use GFLAGS" ON
-    "BUILD_CAFFE2" OFF)
-cmake_dependent_option(
-    USE_GLOG "Use GLOG" ON
-    "BUILD_CAFFE2" OFF)
-cmake_dependent_option(
-    USE_GLOO "Use Gloo" ON
-    "BUILD_CAFFE2" OFF)
+option(USE_GFLAGS "Use GFLAGS" ON)
+option(USE_GLOG "Use GLOG" ON)
+option(USE_GLOO "Use Gloo" ON)
 option(USE_GLOO_IBVERBS "Use Gloo IB verbs for distributed support" OFF)
-cmake_dependent_option(
-    USE_LEVELDB "Use LEVELDB" ON
-    "BUILD_CAFFE2" OFF)
+option(USE_LEVELDB "Use LEVELDB" ON)
 option(USE_LITE_PROTO "Use lite protobuf instead of full." OFF)
-cmake_dependent_option(
-    USE_LMDB "Use LMDB" ON
-    "BUILD_CAFFE2" OFF)
-cmake_dependent_option(
-    USE_METAL "Use Metal for iOS build" ON
-    "BUILD_CAFFE2" OFF)
-cmake_dependent_option(
-    USE_MOBILE_OPENGL "Use OpenGL for mobile code" ON
-    "BUILD_CAFFE2" OFF)
-cmake_dependent_option(
-    USE_MPI "Use MPI" ON
-    "BUILD_CAFFE2" OFF)
+option(USE_LMDB "Use LMDB" ON)
+option(USE_METAL "Use Metal for iOS build" ON)
+option(USE_MOBILE_OPENGL "Use OpenGL for mobile code" ON)
+option(USE_MPI "Use MPI" ON)
 option(USE_NATIVE_ARCH "Use -march=native" OFF)
 option(USE_NCCL "Use NCCL" ON)
 option(USE_SYSTEM_NCCL "Use system-wide NCCL" OFF)
@@ -121,28 +102,26 @@ cmake_dependent_option(
     "USE_CUDA" OFF)
 option(USE_OBSERVERS "Use observers module." OFF)
 option(USE_OPENCL "Use OpenCL" OFF)
-cmake_dependent_option(
-    USE_OPENCV "Use OpenCV" ON
-    "BUILD_CAFFE2" OFF)
+option(USE_OPENCV "Use OpenCV" ON)
 option(USE_OPENMP "Use OpenMP for parallel code" OFF)
 option(USE_PROF "Use profiling" OFF)
 option(USE_REDIS "Use Redis" OFF)
 option(USE_ROCKSDB "Use RocksDB" OFF)
 option(USE_SNPE "Use Qualcomm's SNPE library" OFF)
+option(USE_SYSTEM_EIGEN_INSTALL
+    "Use system Eigen instead of the one under third_party" OFF)
 option(USE_TENSORRT "Using Nvidia TensorRT library" OFF)
 option(USE_ZMQ "Use ZMQ" OFF)
 option(USE_ZSTD "Use ZSTD" OFF)
 option(USE_MKLDNN "Use MKLDNN" OFF)
-cmake_dependent_option(
-  USE_IDEEP "Use IDEEP interface in MKL BLAS" ON
-    "BUILD_CAFFE2" OFF)
-cmake_dependent_option(
-  USE_MKLML "Use MKLML interface in MKL BLAS" ON
-    "BUILD_CAFFE2" OFF)
+option(USE_IDEEP "Use IDEEP interface in MKL BLAS" ON)
+option(USE_MKLML "Use MKLML interface in MKL BLAS" ON)
 option(USE_DISTRIBUTED "Use THD (distributed)" OFF)
 
 # Used when building Caffe2 through setup.py
 option(BUILDING_WITH_TORCH_LIBS "Tell cmake if Caffe2 is being built alongside torch libs" OFF)
+
+SET(ONNX_NAMESPACE "onnx_c2" CACHE STRING "onnx namespace")
 
 if (ANDROID OR IOS)
   set(BUILD_ATEN_MOBILE ON)
@@ -216,6 +195,9 @@ if(NOT MSVC)
   if (CMAKE_COMPILER_IS_GNUCXX AND NOT (CMAKE_CXX_COMPILER_VERSION VERSION_LESS 7.0.0))
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-stringop-overflow")
   endif()
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-error=pedantic")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-error=redundant-decls")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-error=old-style-cast")
   # These flags are not available in GCC-4.8.5. Set only when using clang.
   # Compared against https://gcc.gnu.org/onlinedocs/gcc-4.8.5/gcc/Option-Summary.html
   if ("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
@@ -238,6 +220,10 @@ if(NOT MSVC)
   if ($ENV{WERROR})
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror")
   endif($ENV{WERROR})
+  if (NOT APPLE)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-but-set-variable")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-maybe-uninitialized")
+  endif()
 else()
   foreach(flag_var
       CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELEASE
@@ -262,6 +248,17 @@ set (CMAKE_LINKER_FLAGS_DEBUG "${CMAKE_STATIC_LINKER_FLAGS_DEBUG} -fno-omit-fram
 if (USE_ASAN)
     set (CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -fsanitize=address")
     set (CMAKE_LINKER_FLAGS_DEBUG "${CMAKE_STATIC_LINKER_FLAGS_DEBUG} -fsanitize=address")
+endif()
+
+if (APPLE)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-private-field")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-missing-braces")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-c++14-extensions")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-constexpr-not-const")
+endif()
+
+if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 7.0.0)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-stringop-overflow")
 endif()
 
 if(ANDROID)
@@ -306,7 +303,7 @@ if(BUILD_DOCS)
 
     if(EXISTS ${CMAKE_CURRENT_BINARY_DIR}/docs)
       file(REMOVE_RECURSE ${CMAKE_CURRENT_BINARY_DIR}/docs)
-    endif (EXISTS ${CMAKE_CURRENT_BINARY_DIR}/docs)
+    endif()
 
     file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/docs)
     configure_file(${DOXYGEN_C_IN} ${DOXYGEN_C_OUT} @ONLY)
@@ -323,10 +320,10 @@ if(BUILD_DOCS)
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
         COMMENT "Generating Python API documentation with Doxygen"
         VERBATIM)
-  else (DOXYGEN_FOUND)
+  else()
     message(FATAL_ERROR "Doxygen needs to be installed to generate the documentation")
-  endif (DOXYGEN_FOUND)
-endif (BUILD_DOCS)
+  endif()
+endif()
 
 # ---[ CMake related files
 # Uninistall option.
@@ -400,8 +397,10 @@ else()
 endif()
 
 # ---[ Modules
-if (BUILD_CAFFE2)
-  add_subdirectory(modules)
+# TODO(orionr): Enable all of this for Windows DLL when we
+# can figure out how to get it to build
+if (NOT (MSVC AND BUILD_SHARED_LIBS))
+add_subdirectory(modules)
 endif()
 
 # ---[ Binaries
@@ -409,10 +408,12 @@ endif()
 # are built. For the binaries, they will be linked to the Caffe2 main
 # libraries, as well as all the modules that are built with Caffe2 (the ones
 # built in the previous Modules section above).
-if (BUILD_CAFFE2)
-  if (BUILD_BINARY)
-    add_subdirectory(binaries)
-  endif()
+# TODO(orionr): Enable all of this for Windows DLL when we
+# can figure out how to get it to build
+if (NOT (MSVC AND BUILD_SHARED_LIBS))
+if (BUILD_BINARY)
+  add_subdirectory(binaries)
+endif()
 endif()
 
 include(cmake/Summary.cmake)

@@ -3,9 +3,12 @@
 // ${generated_comment}
 
 #include "ATen/Tensor.h"
-#include "ATen/Scalar.h"
-#include "ATen/SparseTensorRef.h"
+#include "ATen/core/Scalar.h"
+#include "ATen/core/SparseTensorRef.h"
 #include "ATen/Type.h"
+#include "ATen/core/TensorOptions.h"
+#include "ATen/DeviceGuard.h"
+#include "ATen/Context.h"
 
 namespace at {
 
@@ -35,6 +38,48 @@ inline Tensor Tensor::toBackend(Backend b) const {
   return toType(type().toBackend(b));
 }
 
+inline TensorOptions Tensor::options() const {
+  return TensorOptions().dtype(dtype())
+                        .device(device())
+                        .layout(layout())
+                        .is_variable(is_variable());
+}
+
+namespace detail {
+inline Tensor to(
+    const Tensor& tensor,
+    const TensorOptions& options,
+    bool non_blocking) {
+  // Don't copy if the options match.
+  if (tensor.options() == options) {
+    return tensor;
+  }
+  DeviceGuard guard(options.device());
+  return at::getMaybeVariableType(options).copy(tensor, non_blocking);
+}
+} // namespace detail
+
+inline Tensor Tensor::to(Device device, ScalarType dtype, bool non_blocking)
+    const {
+  if (this->device() == device && this->dtype() == dtype) {
+    return *this;
+  }
+  return detail::to(*this, options().device(device).dtype(dtype), non_blocking);
+}
+
+inline Tensor Tensor::to(ScalarType dtype, bool non_blocking) const {
+  if (this->dtype() == dtype) {
+    return *this;
+  }
+  return detail::to(*this, options().dtype(dtype), non_blocking);
+}
+
+inline Tensor Tensor::to(Device device, bool non_blocking) const {
+  if (this->device() == device) {
+    return *this;
+  }
+  return detail::to(*this, options().device(device), non_blocking);
+}
 
 // all static inline to allow for inlining of the non-dynamic part of dispatch
 ${tensor_method_definitions}

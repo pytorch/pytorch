@@ -14,6 +14,7 @@ import tempfile
 import torch
 from torch.utils import cpp_extension
 from common import TEST_WITH_ROCM
+import torch.distributed.c10d as c10d
 
 TESTS = [
     'autograd',
@@ -31,29 +32,46 @@ TESTS = [
     'nn',
     'optim',
     'sparse',
+    'thd_distributed',
     'torch',
     'utils',
 ]
 
 WINDOWS_BLACKLIST = [
     'distributed',
+    'thd_distributed',
 ]
 
 ROCM_BLACKLIST = [
     'c10d',
     'cpp_extensions',
-    'cuda',
     'distributed',
     'distributions',
-    'jit',
-    'legacy_nn',
     'multiprocessing',
     'nccl',
-    'nn',
+    'thd_distributed',
     'utils',
 ]
 
 DISTRIBUTED_TESTS_CONFIG = {
+    'gloo': {
+        'WORLD_SIZE': '2' if torch.cuda.device_count() == 2 else '3'
+    },
+}
+
+
+if c10d.is_available():
+    if c10d.is_mpi_available():
+        DISTRIBUTED_TESTS_CONFIG['mpi'] = {
+            'WORLD_SIZE': '3'
+        }
+    if c10d.is_nccl_available():
+        DISTRIBUTED_TESTS_CONFIG['nccl'] = {
+            'WORLD_SIZE': '2' if torch.cuda.device_count() == 2 else '3'
+        }
+
+
+THD_DISTRIBUTED_TESTS_CONFIG = {
     'tcp': {
         'WORLD_SIZE': '3'
     },
@@ -84,10 +102,13 @@ def get_shell_output(command):
 
 
 def run_test(python, test_module, test_directory, options):
-    verbose = '--verbose' if options.verbose else ''
+    unittest_args = options.additional_unittest_args
+    if options.verbose:
+        unittest_args.append('--verbose')
+    unittest_args = ' '.join(unittest_args)
     # Can't call `python -m unittest test_*` here because it doesn't run code
     # in `if __name__ == '__main__': `. So call `python test_*.py` instead.
-    return shell('{} {}.py {}'.format(python, test_module, verbose),
+    return shell('{} {}.py {}'.format(python, test_module, unittest_args),
                  test_directory)
 
 
@@ -126,7 +147,10 @@ def test_distributed(python, test_module, test_directory, options):
     if options.verbose and not mpi_available:
         print_to_stderr(
             'MPI not available -- MPI backend tests will be skipped')
-    for backend, env_vars in DISTRIBUTED_TESTS_CONFIG.items():
+    config = DISTRIBUTED_TESTS_CONFIG
+    if test_module == "test_thd_distributed":
+        config = THD_DISTRIBUTED_TESTS_CONFIG
+    for backend, env_vars in config.items():
         if backend == 'mpi' and not mpi_available:
             continue
         for with_init_file in {True, False}:
@@ -141,7 +165,10 @@ def test_distributed(python, test_module, test_directory, options):
             os.environ['INIT_METHOD'] = 'env://'
             os.environ.update(env_vars)
             if with_init_file:
-                init_method = 'file://{}/shared_init_file'.format(tmp_dir)
+                if test_module == "test_distributed":
+                    init_method = 'file://{}/'.format(tmp_dir)
+                else:
+                    init_method = 'file://{}/shared_init_file'.format(tmp_dir)
                 os.environ['INIT_METHOD'] = init_method
             try:
                 os.mkdir(os.path.join(tmp_dir, 'barrier'))
@@ -170,6 +197,7 @@ def test_distributed(python, test_module, test_directory, options):
 CUSTOM_HANDLERS = {
     'cpp_extensions': test_cpp_extensions,
     'distributed': test_distributed,
+    'thd_distributed': test_distributed,
 }
 
 
@@ -232,6 +260,11 @@ def parse_args():
         '--ignore-win-blacklist',
         action='store_true',
         help='always run blacklisted windows tests')
+    parser.add_argument(
+        'additional_unittest_args',
+        nargs='*',
+        help='additional arguments passed through to unittest, e.g., '
+             'python run_test.py -i sparse -- TestSparse.test_factory_size_check')
     return parser.parse_args()
 
 
@@ -258,8 +291,8 @@ def find_test_index(test, selected_tests, find_last_index=False):
                      'torch.TestTorch.test_tan', 'torch.TestTorch.test_add'**, 'utils']
     ```
 
-    If :attr:`test`='torch' and :attr:`find_last_index`=False result should be **2**.
-    If :attr:`test`='torch' and :attr:`find_last_index`=True result should be **4**.
+    If :attr:`test`='torch' and :attr:`find_last_index`=False, result should be **2**.
+    If :attr:`test`='torch' and :attr:`find_last_index`=True, result should be **4**.
 
     Arguments:
         test (str): Name of test to lookup

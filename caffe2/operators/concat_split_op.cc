@@ -311,8 +311,8 @@ op = core.CreateOperator(
     axis=3
 )
 
-workspace.FeedBlob("X1", np.random.randint(10, size=(1, 1, 5, 5))) # NCHW
-workspace.FeedBlob("X2", np.random.randint(10, size=(1, 1, 5, 5))) # NCHW
+workspace.FeedBlob("X1", np.random.randint(10, size=(1, 1, 5, 5))) // NCHW
+workspace.FeedBlob("X2", np.random.randint(10, size=(1, 1, 5, 5))) // NCHW
 print("X1:", workspace.FetchBlob("X1"))
 print("X2:", workspace.FetchBlob("X2"))
 workspace.RunOperatorOnce(op)

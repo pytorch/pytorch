@@ -551,22 +551,14 @@ struct GraphFuser {
     return group;
   }
 
-  // TODO: desugar chunks into splits and then remove this special case
-  bool isChunk(Node * node) {
-    return node->kind() == aten::split || node->kind() == aten::chunk;
-  }
-
   bool canFuseChunk(Node* consumer, Value* producer) {
     if (consumer->kind() != prim::FusionGroup) {
       return false;
     }
     // Does the chunk have constant chunks/dim?
     auto * chunk = producer->node();
-    if (!chunk->matches(
-        "aten::chunk(Tensor self, int chunks, int dim) -> Tensor[]",
-        /*const=*/{attr::chunks, attr::dim})) {
-      return false;
-    }
+    if (chunk->kind() != prim::ConstantChunk)
+        return false;
     // And all uses of the chunk are in this consumer
     for (auto s : chunk->outputs()) {
       for (auto u : s->uses()) {
@@ -577,8 +569,7 @@ struct GraphFuser {
     }
     // And isn't a no-op chunk (chunks == 1). Have CSE clean this up.
     // We could fuse this but it's better to just delete the node.
-    int64_t chunks = chunk->get<int64_t>(attr::chunks).value();
-    if (chunks == 1) {
+    if (chunk->i(attr::chunks) == 1) {
       return false;
     }
     return true;
@@ -593,9 +584,9 @@ struct GraphFuser {
     size_t input_index = it - group->inputs().begin();
     auto & subgraph = getSubgraph(group);
     auto * subgraph_input = subgraph.inputs().at(input_index);
-    // If subgraph_input is an input to prim::FusedChunk, it will have 1 use
+    // If subgraph_input is an input to prim::ConstantChunk, it will have 1 use
     auto * node = subgraph_input->uses().at(0).user;
-    if (node->kind() == prim::FusedChunk) {
+    if (node->kind() == prim::ConstantChunk) {
       JIT_ASSERT(subgraph_input->uses().size() == 1);
       return node;
     }
@@ -604,7 +595,9 @@ struct GraphFuser {
 
   void fuseChunkByReusingExistingFusedChunk(
       Node * group, Node * chunk, Node * existingFusedChunk) {
-    JIT_ASSERT(chunk->outputs().size() == existingFusedChunk->outputs().size());
+    if (chunk->outputs().size() != existingFusedChunk->outputs().size()) {
+      return;
+    }
     auto & subgraph = getSubgraph(group);
     for (size_t i = 0; i < chunk->outputs().size(); ++i) {
       // Find the input to the FusionGroup (group)
@@ -624,45 +617,24 @@ struct GraphFuser {
     chunk->destroy();
   }
 
-  // There are two invariants for prim::FusedChunk:
-  // (1) the tensor input to prim::FusedChunk must be an input to the fusion group
-  // (2) no two FusedChunk in the same FusionGroup can share a tensor input.
+  // There are two invariants for prim::ConstantChunk:
+  // (1) the tensor input to prim::ConstantChunk must be an input to the fusion group
+  // (2) no two ConstantChunks in the same FusionGroup can share a tensor input.
   graph_node_list::iterator fuseChunk(Node * consumer, Value * producer) {
-    JIT_ASSERT(consumer->kind() == prim::FusionGroup);
     auto * chunk = producer->node();
-    JIT_ASSERT(chunk->matches(
-        "aten::chunk(Tensor self, int chunks, int dim) -> Tensor[]",
-        /*const=*/{attr::chunks, attr::dim}));
+    JIT_ASSERT(consumer->kind() == prim::FusionGroup);
+    JIT_ASSERT(chunk->kind() == prim::ConstantChunk);
 
-    // if producer's input is already an input to a prim::FusedChunk node,
-    // we cannot add a new prim::FusedChunk node because of invariant (2).
-    auto * chunked_tensor = producer->node()->namedInput(attr::self);
+    // if producer's input is already an input to a prim::ConstantChunk node,
+    // we cannot add a new prim::ConstantChunk node because of invariant (2).
+    auto * chunked_tensor = producer->node()->input();
     if (auto existingFusedChunk = findFusedChunk(consumer, chunked_tensor)) {
       fuseChunkByReusingExistingFusedChunk(consumer, chunk, *existingFusedChunk);
       return consumer->reverseIterator();
     }
 
-    WithInsertPoint guard(chunk);
-
-    // Create a prim::FusedChunk
-    int64_t chunks = chunk->get<int64_t>(attr::chunks).value();
-    int64_t dim = chunk->get<int64_t>(attr::dim).value();
-    auto * graph = chunk->owningGraph();
-    auto * fused_chunk = graph->create(
-        prim::FusedChunk, {chunk->namedInput(attr::self)}, /*num_outputs=*/chunks)
-      ->i_(attr::chunks, chunks)
-      ->i_(attr::dim, dim);
-    graph->insertNode(fused_chunk);
-
-    // Replace aten::chunk with prim::FusedChunk
-    for (auto it = chunk->outputs().begin(); it != chunk->outputs().end(); ++it) {
-      auto offset = it - chunk->outputs().begin();
-      (*it)->replaceAllUsesWith(fused_chunk->outputs().at(offset));
-    }
-
-    // Move prim::FusedChunk into the FusionGroup
-    mergeNodeIntoGroup(consumer, fused_chunk);
-    fused_chunk->destroy();
+    // Move prim::ConstantChunk into the FusionGroup
+    mergeNodeIntoGroup(consumer, chunk);
     chunk->destroy();
     return consumer->reverseIterator();
   }
@@ -704,10 +676,15 @@ struct GraphFuser {
     auto new_tensors = SymbolicVariable::broadcast_tensors(fmap<SymbolicVariable>(tensors));
 
     // Fix up topological_index
-    Node * broadcast_node = new_tensors.at(0).value()->node();
-    Node * list_node = broadcast_node->namedInput(attr::tensors)->node();
+    Node * unpack_node = new_tensors.at(0).value()->node();
+    JIT_ASSERT(unpack_node->kind() == prim::ListUnpack);
+    Node * broadcast_node = unpack_node->input()->node();
+    JIT_ASSERT(broadcast_node->kind() == aten::broadcast_tensors);
+    Node * construct_node = broadcast_node->namedInput(attr::tensors)->node();
+    JIT_ASSERT(construct_node->kind() == prim::ListConstruct);
+    topological_index[unpack_node] = topological_index[node];
     topological_index[broadcast_node] = topological_index[node];
-    topological_index[list_node] = topological_index[node];
+    topological_index[construct_node] = topological_index[node];
 
     // Replace tensors inputs with broadcasted values
     auto new_tensors_it = new_tensors.begin();
@@ -740,10 +717,10 @@ struct GraphFuser {
   bool tryToMoveChunk(Node * consumer, Value * producer) {
     // is the output from a chunk node?
     auto * chunk = producer->node();
-    if (!isChunk(chunk))
+    if (chunk->kind() != prim::ConstantChunk)
       return false;
     // and the thing being chunked is fusable into the consumer
-    Value * producer_for_chunk = chunk->namedInput(attr::self);
+    Value * producer_for_chunk = chunk->input();
     if (!isFusable(producer_for_chunk->node()) ||
         !allUsersAreThisConsumer(chunk,producer_for_chunk))
       return false;
@@ -786,10 +763,10 @@ struct GraphFuser {
       // TODO: Perhaps we should use cloneFrom now, as it seems unlikely
       // to copy select nodes now that we have refactored to have a Value
       // distinct from Node.
-      Node * input_chunk = block->owningGraph()->create(aten::chunk, 0);
+      Node * input_chunk = block->owningGraph()->create(prim::ConstantChunk, 0);
       input_chunk->addInput(input);
-      input_chunk->addInput(chunk->namedInput(attr::chunks));
-      input_chunk->addInput(chunk->namedInput(attr::dim));
+      input_chunk->i_(attr::chunks, chunk->i(attr::chunks));
+      input_chunk->i_(attr::dim, chunk->i(attr::dim));
       insertAt(&insertion_point, input_chunk);
 
       chunked_inputs.emplace_back(); // alas, to not be C++17

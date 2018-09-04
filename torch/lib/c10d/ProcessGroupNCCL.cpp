@@ -619,4 +619,8 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::barrier() {
   throw std::runtime_error("ProcessGroupNCCL does not support barrier");
 }
 
+std::unordered_map<int, int> ProcessGroupNCCL::getGroupRank() {
+  throw std::runtime_error("ProcessGroupNCCL doest not support getGroupRank");
+}
+
 } // namespace c10d

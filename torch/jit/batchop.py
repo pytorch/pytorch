@@ -38,7 +38,7 @@ def batch_add(data1, mask1, dims1, data2, mask2, dims2, alpha_):
     alpha = float(alpha_)
     data = torch.add(data1, data2, alpha=alpha)
     mask = mask1 * mask2
-    dims = dims1 or dims2
+    dims = dims1.__or__(dims2)
     return data, mask, dims
 
 
@@ -54,7 +54,7 @@ def batch_sub(data1, mask1, dims1, data2, mask2, dims2, alpha_):
     alpha = float(alpha_)
     data = torch.sub(data1, data2, alpha=alpha)
     mask = mask1 * mask2
-    dims = dims1 or dims2
+    dims = dims1.__or__(dims2)
     return data, mask, dims
 
 
@@ -67,7 +67,7 @@ def batch_sub_scalar(data1, data2):
 def batch_mul(data1, mask1, dims1, data2, mask2, dims2):
     data = torch.mul(data1, data2)
     mask = mask1 * mask2
-    dims = dims1 or dims2
+    dims = dims1.__or__(dims2)
     return data, mask, dims
 
 
@@ -209,7 +209,7 @@ def batch_where(data, mask, dims, data1, mask1, dims1, data2, mask2, dims2):
         cond_mask = data.expand_as(mask1)
     res_data = torch.where(cond_data, data1, data2)
     res_mask = torch.where(cond_mask, mask1, mask2)
-    res_dims = dims1 or dims2
+    res_dims = dims1.__or__(dims2)
     return res_data, res_mask, res_dims
 
 
@@ -240,7 +240,7 @@ def batch_type_as(data, mask, dims, data1, mask1, dims1):
 
 @torch.jit.script
 def batch_gt(data, mask, dims, data1, mask1, dims1):
-    return torch.gt(data, data1), mask * mask1, dims or dims1
+    return torch.gt(data, data1), mask * mask1, dims.__or__(dims1)
 
 
 @torch.jit.script
@@ -256,12 +256,12 @@ def batch_gt_one_scalar(data, mask, dims, other_):
 
 @torch.jit.script
 def batch_lt(data, mask, dims, data1, mask1, dims1):
-    return torch.lt(data, data1), mask * mask1, dims or dims1
+    return torch.lt(data, data1), mask * mask1, dims.__or__(dims1)
 
 
 @torch.jit.script
 def batch_eq(data, mask, dims, data1, mask1, dims1):
-    return torch.eq(data, data1), mask * mask1, dims or dims1
+    return torch.eq(data, data1), mask * mask1, dims.__or__(dims1)
 
 
 @torch.jit.script

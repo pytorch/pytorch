@@ -254,17 +254,19 @@ function build_caffe2() {
       -DPYTHON_EXECUTABLE=$PYTORCH_PYTHON \
       -DBUILDING_WITH_TORCH_LIBS=ON \
       -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
-      -DBUILD_CAFFE2=$FULL_CAFFE2 \
       -DBUILD_TORCH=$BUILD_TORCH \
       -DBUILD_PYTHON=$FULL_CAFFE2 \
-      -DBUILD_BINARY=OFF \
       -DBUILD_SHARED_LIBS=$BUILD_SHARED_LIBS \
+      -DBUILD_BINARY=$FULL_CAFFE2 \
+      -DBUILD_TEST=$FULL_CAFFE2 \
+      -DINSTALL_TEST=$FULL_CAFFE2 \
       -DONNX_NAMESPACE=$ONNX_NAMESPACE \
       -DUSE_CUDA=$USE_CUDA \
       -DCAFFE2_STATIC_LINK_CUDA=$CAFFE2_STATIC_LINK_CUDA \
       -DUSE_ROCM=$USE_ROCM \
       -DUSE_NNPACK=$USE_NNPACK \
-      -DCUDA_DEVICE_DEBUG=$CUDA_DEVICE_DEBUG \
+      -DUSE_GLOG=OFF \
+      -DUSE_GFLAGS=OFF \
       -DCUDNN_INCLUDE_DIR=$CUDNN_INCLUDE_DIR \
       -DCUDNN_LIB_DIR=$CUDNN_LIB_DIR \
       -DCUDNN_LIBRARY=$CUDNN_LIBRARY \
@@ -281,6 +283,12 @@ function build_caffe2() {
       # STOP!!! Are you trying to add a C or CXX flag?  Add it
       # to CMakeLists.txt and aten/CMakeLists.txt, not here.
       # We need the vanilla cmake build to work.
+
+  # This is needed by the aten tests built with caffe2
+  if [ -f "${INSTALL_DIR}/lib/libnccl.so" ] && [ ! -f "lib/libnccl.so.1" ]; then
+    cp "${INSTALL_DIR}/lib/libnccl.so.1" "lib/libnccl.so.1"
+  fi
+
   ${CMAKE_INSTALL} -j"$MAX_JOBS"
 
   # Install Python proto files

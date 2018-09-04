@@ -12,7 +12,7 @@
 
 namespace caffe2 {
 
-class CAFFE2_API Caffe2Annotation : public nom::repr::Annotation {
+class Caffe2Annotation : public nom::repr::Annotation {
 public:
   Caffe2Annotation() : Annotation(AnnotationKind::Caffe2) {}
   Caffe2Annotation(std::string device)
@@ -46,7 +46,7 @@ public:
     return &OpDef;
   }
 
-  CAFFE2_API static bool classof(const Annotation *A) {
+  static bool classof(const Annotation *A) {
     return A->getKind() == AnnotationKind::Caffe2;
   }
 
@@ -75,7 +75,7 @@ CAFFE2_API caffe2::OperatorDef convertToOperatorDef(
 
 class CAFFE2_API Converter {
  public:
-  explicit Converter() {}
+  explicit Converter() = default;
   virtual std::unique_ptr<nom::repr::NeuralNetOperator>
   convertToNeuralNetOperator(const OperatorDef&) = 0;
   virtual OperatorDef convertToOperatorDef(const nom::repr::NeuralNetOperator*);

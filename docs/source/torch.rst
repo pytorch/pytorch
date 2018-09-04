@@ -169,6 +169,7 @@ Pointwise Ops
 .. autofunction:: cos
 .. autofunction:: cosh
 .. autofunction:: div
+.. autofunction:: digamma 
 .. autofunction:: erf
 .. autofunction:: erfc
 .. autofunction:: erfinv
@@ -224,6 +225,7 @@ Reduction Ops
 
 Comparison Ops
 ~~~~~~~~~~~~~~~~~~~~~~
+.. autofunction:: allclose
 .. autofunction:: eq
 .. autofunction:: equal
 .. autofunction:: ge

@@ -410,6 +410,37 @@ Example::
             [ 3.,  6.]])
 """)
 
+add_docstr(torch.allclose,
+           r"""
+allclose(self, other, rtol=1e-05, atol=1e-08, equal_nan=False) -> bool
+
+This function checks if all :attr:`self` and :attr:`other` satisfy the condition:
+
+.. math::
+    \lvert \text{self} - \text{other} \rvert \leq \texttt{atol} + \texttt{rtol} \times \lvert \text{other} \rvert
+
+elementwise, for all elements of :attr:`self` and :attr:`other`. The behaviour of this function is analogous to
+`numpy.allclose <https://docs.scipy.org/doc/numpy/reference/generated/numpy.allclose.html>`_
+
+Args:
+    self (Tensor): first tensor to compare
+    other (Tensor): second tensor to compare
+    atol (float, optional): absolute tolerance. Default: 1e-08
+    rtol (float, optional): relative tolerance. Default: 1e-05
+    equal_nan (float, optional): if ``True``, then two ``NaN``s will be compared as ``True``. Default: ``False``
+
+Example::
+
+    >>> torch.allclose(torch.tensor([10000., 1e-07]), torch.tensor([10000.1, 1e-08]))
+    False
+    >>> torch.allclose(torch.tensor([10000., 1e-08]), torch.tensor([10000.1, 1e-09]))
+    True
+    >>> torch.allclose(torch.tensor([1.0, float('nan')]), torch.tensor([1.0, float('nan')]))
+    False
+    >>> torch.allclose(torch.tensor([1.0, float('nan')]), torch.tensor([1.0, float('nan')]), equal_nan=True)
+    True
+""")
+
 add_docstr(torch.as_tensor,
            r"""
 as_tensor(data, dtype=None, device=None) -> Tensor
@@ -1167,6 +1198,26 @@ Examples::
             [[-1.7325, -0.3081,  0.6166,  0.2335],
              [ 1.0500,  0.7336, -0.3836, -1.1015]]])
 """)
+
+add_docstr(torch.digamma,
+           r"""
+digamma(input) -> Tensor
+
+Computes the logarithmic derivative of the gamma function on `input`.
+
+.. math::
+    \psi(x) = \frac{d}{dx} \ln\left(\Gamma\left(x\right)\right) = \frac{\Gamma'(x)}{\Gamma(x)}
+
+Args:
+    input (Tensor): the tensor to compute the digamma function on
+
+Example::
+
+    >>> a = torch.tensor([1, 0.5])
+    >>> torch.digamma(a)
+    tensor([-0.5772, -1.9635])
+""")
+
 
 add_docstr(torch.dist,
            r"""
@@ -4172,7 +4223,7 @@ sparse_coo_tensor(indices, values, size=None, dtype=None, device=None, requires_
 Constructs a sparse tensors in COO(rdinate) format with non-zero elements at the given :attr:`indices`
 with the given :attr:`values`. A sparse tensor can be `uncoalesced`, in that case, there are duplicate
 coordinates in the indices, and the value at that index is the sum of all duplicate value entries:
-`torch.spaerse`_.
+`torch.sparse`_.
 
 Args:
     indices (array_like): Initial data for the tensor. Can be a list, tuple,
@@ -4493,6 +4544,15 @@ Args:
     eigenvectors(boolean, optional): controls whether eigenvectors have to be computed
     upper(boolean, optional): controls whether to consider upper-triangular or lower-triangular region
     out (tuple, optional): the output tuple of (Tensor, Tensor)
+
+Returns:
+    (Tensor, Tensor): A tuple containing
+
+        - **e** (*Tensor*): Shape :math:`(m)`. Each element is an eigenvalue of ``input``,
+            The eigenvalues are in ascending order.
+        - **V** (*Tensor*): Shape :math:`(m \times m)`.
+            If ``eigenvectors=False``, it's a tensor filled with zeros.
+            Otherwise, this tensor contains the orthonormal eigenvectors of the ``input``.
 
 Examples::
 

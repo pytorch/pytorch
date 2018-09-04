@@ -389,20 +389,6 @@ Value* packOutputs(Graph& g, at::ArrayRef<Value*> values) {
   return g.insertNode(g.createTuple(values))->output();
 }
 
-Value* createNumber(Graph& g, const SourceRange& loc, const at::Tensor& val) {
-  JIT_ASSERT(val.numel() == 1);
-  auto* output = g.insertConstant(val, loc);
-  if (val.type().scalarType() == at::kLong) {
-    output->setType(IntType::get());
-  } else if (val.type().scalarType() == at::kFloat) {
-    output->setType(FloatType::get());
-  } else {
-    throw ErrorReport(loc) << "createNumber with unknown scalar type ("
-							<< val.type().scalarType() << "). Please file a bug report.";
-  }
-  return output;
-}
-
 at::optional<std::vector<int64_t>> getIntListAttribute(at::optional<int32_t> N, Value* input) {
   auto list = constant_as<Shared<jit::IntList>>(input);
   if(list)
@@ -484,7 +470,10 @@ Value* tryMatchArgument(
   if (value->node()->kind() == prim::None){
     if (arg.type->isSubtypeOf(NumberType::get()))
       value = graph.insertConstant(at::Scalar(NAN), loc);
-    else
+    else if (arg.type->isSubtypeOf(GeneratorType::get())) {
+      value = graph.insertNode(graph.createNoneGenerator())
+        ->output()->setType(GeneratorType::get());
+    } else
       value = graph.insertNode(graph.createUndefined())->output();
   }
 
@@ -530,6 +519,21 @@ Value* tryCreateList(
     list_ctor.push_back(av);
   }
   return graph.insertNode(graph.createList(elem_type, list_ctor))->output();
+}
+
+template<class T>
+static Value* materializeConstant(T val, Graph& graph,
+    const SourceRange& r, std::unordered_map<T, Value*>& map) {
+  auto existing_constant = map.find(val);
+  if (existing_constant != map.end()) {
+    return existing_constant->second;
+  }
+
+  WithInsertPoint guard(graph.block()->nodes().front());
+  auto new_constant = graph.insertConstant(val, r);
+  map[val] = new_constant;
+
+  return new_constant;
 }
 
 at::optional<std::vector<Value*>> tryMatchSchema(
@@ -634,20 +638,8 @@ static Value* tryEmitBuiltin(
   auto n = graph.insertNode(graph.create(name, *matched_inputs, 0))
                 ->setSourceLocation(std::make_shared<SourceRange>(loc));
 
-  // special case for chunk when the chunks=<const> is known
-  // DO NOT ADD MORE SPECIAL CASES HERE, REFACTOR INTO A FUNCTION IF
-  // NEEDED
-  if(n->kind() == aten::chunk) {
-    auto value = constant_as<int64_t>((*matched_inputs)[1]);
-    if(!value) {
-      throw ErrorReport(loc) << "argument 'chunks' must be a constant";
-    }
-    for(int64_t i = 0; i < *value; ++i)
-      n->addOutput();
-  } else {
-    for(auto & ret : op->schema().returns) {
-      n->addOutput()->setType(ret.type);
-    }
+  for(auto & ret : op->schema().returns) {
+    n->addOutput()->setType(ret.type);
   }
 
   // assert that we did indeed create an op that has implementation
@@ -678,6 +670,7 @@ Value* emitBuiltinCall(
   // if true, emitBuiltinCall will throw an exception if this builtin does not exist,
   // otherwise it will return nullptr if the builtin is not found.
   bool required) {
+
 
   const auto& variants = getAllOperatorsFor(name);
   std::stringstream failure_messages;
@@ -838,6 +831,8 @@ private:
   Def def;
   FunctionTable& function_table;
   const Resolver& resolver;
+  std::unordered_map<int64_t, Value*> integral_constants;
+  std::unordered_map<double, Value*> fp_constants;
 
   // Singly-linked list of environments. This top element contains a member
   // `next` that points to the most immediate enclosing scope's value.
@@ -908,29 +903,61 @@ private:
 
   Value* emitTernaryIf(const TernaryIf& expr) {
     Value* cond_value = emitCond(expr.cond());
+    auto true_expr = [&] {
+      return emitExpr(expr.true_expr());
+    };
+    auto false_expr  = [&] {
+      return emitExpr(expr.false_expr());
+    };
+    return emitIfExpr(expr.range(), cond_value, true_expr, false_expr);
+  }
 
-    Node* n = graph->insertNode(create(prim::If, expr.range(), 0));
+  Value* emitShortCircuitIf(
+      const SourceRange& loc,
+      const TreeRef & first_expr,
+      const TreeRef & second_expr,
+      bool is_or) {
+    Value * first_value = emitCond(Expr(first_expr));
+
+    auto get_first_expr = [first_value] {
+      return first_value;
+    };
+    auto get_second_expr = [&] {
+      return emitCond(Expr(second_expr));
+    };
+
+    // if this is an OR, eval second expression if first expr is False.
+    // If this is an AND, eval second expression if first expr is True
+    if (is_or) {
+      return emitIfExpr(loc, first_value, get_first_expr, get_second_expr);
+    } else {
+      return emitIfExpr(loc, first_value, get_second_expr, get_first_expr);
+    }
+  }
+
+  Value* emitIfExpr(const SourceRange& range, Value * cond_value,
+      std::function<Value*()> true_expr,  std::function<Value*()> false_expr) {
+    Node* n = graph->insertNode(create(prim::If, range, 0));
 
     n->addInput(cond_value);
     auto* true_block = n->addBlock();
     auto* false_block = n->addBlock();
 
-
-    auto emit_if_expr = [this](Block* b, const Expr& expr) {
+    auto emit_if_expr = [this](Block* b, std::function<Value*()> expr_value) {
       pushFrame(b);
       WithInsertPoint guard(b);
-      Value* out_val = emitExpr(expr);
+      Value* out_val = expr_value();
       b->registerOutput(out_val);
       popFrame();
     };
 
-    emit_if_expr(true_block, expr.true_expr());
-    emit_if_expr(false_block, expr.false_expr());
+    emit_if_expr(true_block, true_expr);
+    emit_if_expr(false_block, false_expr);
 
     auto true_type = unshapedType(true_block->outputs().at(0)->type());
     auto false_type = unshapedType(false_block->outputs().at(0)->type());
     if (*true_type != *false_type) {
-      throw ErrorReport(expr)
+      throw ErrorReport(range)
           << "if-expression's true branch has type " << true_type->str()
           << " but false branch has type " << false_type->str();
     }
@@ -1072,7 +1099,7 @@ private:
             max_trip_count->range(), emitExpr(max_trip_count.value()));
       } else {
         max_trip_count_val =
-            graph->insertConstant(INT_MAX,range);
+            materializeConstant((int64_t)INT_MAX, *graph, range, integral_constants);
       }
       if (cond) {
         cond_val = emitCond(cond.value());
@@ -1245,7 +1272,6 @@ private:
       return;
     }
 
-    // See [N_BINDERS]
     size_t n_binders = stmt.lhs().size();
     if(starred_unpack)
       n_binders--;
@@ -1259,7 +1285,8 @@ private:
       return;
     }
 
-    auto outputs = output->asTuple(stmt.rhs().range(), method);
+    auto outputs = output->asTuple(stmt.rhs().range(), method,
+                                   starred_unpack ? at::nullopt : at::optional<size_t>{n_binders});
     if(outputs.size() < n_binders) {
       throw ErrorReport(stmt)
         << "need " << (starred_unpack ? "at least " : "")
@@ -1268,7 +1295,7 @@ private:
     }
     if(outputs.size() > n_binders && !starred_unpack) {
       throw ErrorReport(stmt)
-      << "too many values to unpack, need " << n_binders << " but found "
+      << "too many values to unpack: need " << n_binders << " but found "
       << outputs.size();
     }
     int i = 0;
@@ -1442,8 +1469,6 @@ private:
     switch (tree->kind()) {
       case '@':
       case TK_POW:
-      case TK_AND:
-      case TK_OR:
       case TK_NOT:
       case TK_NE:
       case TK_EQ:
@@ -1466,6 +1491,15 @@ private:
                    named_values,
                    {},
                    /*required=*/true);
+      }
+      case TK_AND:
+      case TK_OR: {
+        const auto& inputs = tree->trees();
+        return emitShortCircuitIf(
+          tree->range(),
+          inputs[0],
+          inputs[1],
+          tree->kind() == TK_OR);
       }
       case TK_STARRED: {
         throw ErrorReport(tree) << "Unexpected starred expansion. File a bug report.";
@@ -1538,9 +1572,9 @@ private:
 
   Value* emitConst(const Const& c) {
     if (c.isFloatingPoint())
-      return graph->insertConstant(c.asFloatingPoint(), c.range());
+      return materializeConstant(c.asFloatingPoint(), *graph, c.range(), fp_constants);
     else
-      return graph->insertConstant(c.asIntegral(), c.range());
+     return materializeConstant(c.asIntegral(), *graph, c.range(), integral_constants);
   }
 
   Value* emitStringLiteral(const StringLiteral& c) {
@@ -1865,12 +1899,20 @@ std::shared_ptr<Graph> compileFunction(Def def, const Resolver& resolver) {
   return m.get_method(def.name().name()).graph();
 }
 
-std::vector<std::shared_ptr<SugaredValue>> SimpleValue::asTuple(SourceRange loc, Method& m) {
+std::vector<std::shared_ptr<SugaredValue>> SimpleValue::asTuple(SourceRange loc, Method& m, at::optional<size_t> size_hint) {
+  static const auto make_simple_value = [](Value* v) -> std::shared_ptr<SugaredValue> {
+    return std::make_shared<SimpleValue>(v);
+  };
   if(value->type()->kind() == TypeKind::TupleType) {
     auto outputs = createTupleUnpack(value);
-    return fmap(outputs, [](Value* v) -> std::shared_ptr<SugaredValue> {
-      return std::make_shared<SimpleValue>(v);
-    });
+    return fmap(outputs, make_simple_value);
+  } else if (value->type()->kind() == TypeKind::ListType) {
+    if (!size_hint) {
+      throw ErrorReport(loc) << "cannot statically infer the expected size of a list in this context";
+    }
+    auto graph = value->owningGraph();
+    Node *unpack = graph->insertNode(graph->createListUnpack(value, *size_hint));
+    return fmap(unpack->outputs(), make_simple_value);
   }
   throw ErrorReport(loc) << value->type()->str() << " cannot be used as a tuple";
 }

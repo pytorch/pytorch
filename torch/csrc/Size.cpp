@@ -95,9 +95,9 @@ template<typename FnType, FnType fn, typename ...Args>
 static PyObject* wrap_tuple_fn(Args ... args)
 {
   THPObjectPtr result((*fn)(std::forward<Args>(args)...));
-  if (!result) return NULL;
+  if (!result) return nullptr;
   if (PyTuple_Check(result.get())) {
-    return PyObject_CallFunctionObjArgs((PyObject*)&THPSizeType, result.get(), NULL);
+    return PyObject_CallFunctionObjArgs((PyObject*)&THPSizeType, result.get(), nullptr);
   }
   return result.release();
 }
@@ -137,7 +137,7 @@ static PyMappingMethods THPSize_as_mapping = {
 
 
 PyTypeObject THPSizeType = {
-  PyVarObject_HEAD_INIT(NULL, 0)
+  PyVarObject_HEAD_INIT(nullptr, 0)
   "torch.Size",                          /* tp_name */
   sizeof(THPSize),                       /* tp_basicsize */
   0,                                     /* tp_itemsize */
@@ -157,7 +157,7 @@ PyTypeObject THPSizeType = {
   0,                                     /* tp_setattro */
   0,                                     /* tp_as_buffer */
   Py_TPFLAGS_DEFAULT,                    /* tp_flags */
-  NULL,                                  /* tp_doc */
+  nullptr,                                  /* tp_doc */
   0,                                     /* tp_traverse */
   0,                                     /* tp_clear */
   0,                                     /* tp_richcompare */

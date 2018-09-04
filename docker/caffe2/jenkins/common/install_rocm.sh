@@ -5,6 +5,7 @@ set -ex
 install_ubuntu() {
     apt-get update
     apt-get install -y wget
+    apt-get install -y libopenblas-dev
 
     DEB_ROCM_REPO=http://repo.radeon.com/rocm/apt/debian
     # Add rocm repository
@@ -63,6 +64,15 @@ install_rocrand() {
     dpkg -i /opt/rocm/debians/rocrand.deb
 }
 
+# Install rocSPARSE/hipSPARSE that will be released soon - can co-exist w/ hcSPARSE which will be removed soon
+install_hipsparse() {
+    mkdir -p /opt/rocm/debians
+    curl https://s3.amazonaws.com/ossci-linux/rocsparse-0.1.1.0.deb -o /opt/rocm/debians/rocsparse.deb
+    curl https://s3.amazonaws.com/ossci-linux/hipsparse-0.1.1.0.deb -o /opt/rocm/debians/hipsparse.deb
+    dpkg -i /opt/rocm/debians/rocsparse.deb
+    dpkg -i /opt/rocm/debians/hipsparse.deb
+}
+
 # Install Python packages depending on the base OS
 if [ -f /etc/lsb-release ]; then
   install_ubuntu
@@ -76,3 +86,4 @@ fi
 install_hip_thrust
 install_rocrand
 install_hcsparse
+install_hipsparse

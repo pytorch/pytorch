@@ -11,10 +11,11 @@
 #include "torch/csrc/utils/python_numbers.h"
 #include "torch/csrc/utils/tensor_new.h"
 #include "torch/csrc/utils/tensor_conversion_dispatch.h"
+#include "torch/csrc/jit/tracer.h"
 
 #include <ATen/DeviceGuard.h>
 #include <ATen/ExpandUtils.h>
-#include <ATen/TensorOptions.h>
+#include <ATen/core/TensorOptions.h>
 
 #include <vector>
 #include <tuple>
@@ -79,7 +80,10 @@ static Variable applySlice(const Variable& self, int64_t dim, PyObject* slice, b
     // TODO: implement negative step
     throw ValueError("negative step not yet supported");
   }
-  if (!ensure_view && start == 0 && stop == length && step == 1) {
+  // Skip this optimization if we are tracing, as the trace may be polymorphic
+  // over the shape of the `self` tensor, and we still want to record
+  // the slice.
+  if (!ensure_view && start == 0 && stop == length && step == 1 && !jit::tracer::isTracing()) {
     return self;
   }
   return self.slice(dim, start, stop, step);

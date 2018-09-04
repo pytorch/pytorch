@@ -51,6 +51,8 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
     out << "None";
   } else if(t.kind() == TypeKind::StringType) {
     out << "string";
+  } else if(t.kind() == TypeKind::GeneratorType) {
+    out << "Generator";
   } else {
     AT_ERROR("unknown type kind");
   }
@@ -75,6 +77,10 @@ FloatTypePtr FloatType::get() {
 }
 NoneTypePtr NoneType::get() {
   static auto value = NoneType::create();
+  return value;
+}
+GeneratorTypePtr GeneratorType::get() {
+  static auto value = GeneratorType::create();
   return value;
 }
 StringTypePtr StringType::get() {

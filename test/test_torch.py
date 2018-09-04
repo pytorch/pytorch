@@ -166,21 +166,25 @@ class TestTorch(TestCase):
             for name in dir(ns):
                 if name.startswith('_'):
                     continue
-                if any(r.match(name) for r in skip_regexes):
-                    continue
                 var = getattr(ns, name)
-                if isinstance(var, checked_types):
-                    self.assertTrue(var.__doc__ is not None, ns_name + '.' + name)
+                if not isinstance(var, checked_types):
+                    continue
+                doc = var.__doc__
+                has_doc = doc is not None and len(doc.strip()) > 0
+                full_name = ns_name + '.' + name
+                if any(r.match(name) for r in skip_regexes):
+                    self.assertFalse(has_doc,
+                                     'New docs have been added for {}, please remove '
+                                     'it from the skipped list in TestTorch.test_doc'.format(full_name))
+                else:
+                    self.assertTrue(has_doc, '{} is missing documentation'.format(full_name))
 
         # FIXME: fix all the skipped ones below!
         test_namespace(torch.randn(1),
-                       'allclose',
                        'as_strided',
                        'as_strided_',
                        re.compile('^clamp_(min|max)_?$'),
                        'coalesce',
-                       'digamma',
-                       'digamma_',
                        'index_put',
                        'is_coalesced',
                        'is_distributed',
@@ -814,8 +818,28 @@ class TestTorch(TestCase):
     def test_max(self):
         self._testSelection(torch.max, max)
 
+    @staticmethod
+    def _test_max_with_inf(self, dtypes=(torch.float, torch.double), device='cpu'):
+        for dtype in dtypes:
+            a = torch.tensor([[-inf, -inf, inf, 3], [inf, inf, -inf, -1]], dtype=dtype, device=device)
+            self.assertTrue(torch.all(torch.max(a, dim=1)[0] == inf).item())
+            self.assertTrue(torch.max(a).item() == inf)
+
+    def test_max_with_inf(self):
+        self._test_max_with_inf(self)
+
     def test_min(self):
         self._testSelection(torch.min, min)
+
+    @staticmethod
+    def _test_min_with_inf(self, dtypes=(torch.float, torch.double), device='cpu'):
+        for dtype in dtypes:
+            a = torch.tensor([[-inf, -inf, inf, 3], [inf, inf, -inf, -1]], dtype=dtype, device=device)
+            self.assertTrue(torch.all(torch.min(a, dim=1)[0] == (-inf)).item())
+            self.assertTrue(torch.min(a).item() == -inf)
+
+    def test_min_with_inf(self):
+        self._test_min_with_inf(self)
 
     @staticmethod
     def _test_norm(self, device):
@@ -1063,6 +1087,45 @@ class TestTorch(TestCase):
             y = torch.randn(shape, device=device)
             self.assertEqual(torch.zeros(0, device=device), torch.pairwise_distance(x, y))
             self.assertEqual(torch.zeros((0, 1), device=device), torch.pairwise_distance(x, y, keepdim=True))
+
+    @skipIfRocm
+    def test_pdist_empty(self):
+        devices = ['cpu']
+        for device in devices:
+            shape = (0, 2)
+            x = torch.randn(shape, device=device)
+            self.assertEqual(torch.empty(0, device=device), torch.pdist(x))
+
+            shape = (1, 2)
+            x = torch.randn(shape, device=device)
+            self.assertEqual(torch.empty(0, device=device), torch.pdist(x))
+
+            shape = (3, 0)
+            x = torch.randn(shape, device=device)
+            self.assertEqual(torch.zeros(3, device=device), torch.pdist(x))
+
+    @skipIfRocm
+    @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
+    def test_pdist_scipy(self):
+        from scipy.spatial.distance import pdist
+        devices = ['cpu']
+        for device in devices:
+            for shape in [(4, 5), (3, 2), (2, 1)]:
+                for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
+                    for trans in [False, True]:
+                        x = torch.randn(shape, device=device)
+                        if trans:
+                            x.transpose_(0, 1)
+                        actual = torch.pdist(x, p=p)
+                        # pdist doesn't handle 0 or inf norm properly
+                        if p == 0:
+                            expected = pdist(x, 'hamming') * x.shape[1]
+                        elif p == float('inf'):
+                            expected = pdist(x, lambda a, b: np.abs(a - b).max())
+                        else:
+                            expected = pdist(x, 'minkowski', p=p)
+                        self.assertEqual(expected.shape, actual.shape)
+                        self.assertTrue(np.allclose(expected, actual.numpy()))
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
     def test_logsumexp(self):
@@ -3416,7 +3479,6 @@ class TestTorch(TestCase):
         self.assertRaises(TypeError, lambda: q.topk(4, True))
 
     @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
-    @skipIfRocm
     def test_topk_noncontiguous_gpu(self):
         t = torch.randn(20, device="cuda")[::2]
         top1, idx1 = t.topk(5)
@@ -4308,13 +4370,12 @@ class TestTorch(TestCase):
         Xhat = torch.mm(torch.mm(v, torch.diag(e.select(1, 0))), v.t())
         self.assertEqual(X, Xhat, 1e-8, 'VeV\' wrong')
 
-    @skipIfNoLapack
-    @skipIfRocm
-    def test_symeig(self):
-        xval = torch.rand(100, 3)
+    @staticmethod
+    def _test_symeig(self, conv_fn):
+        xval = conv_fn(torch.rand(100, 3))
         cov = torch.mm(xval.t(), xval)
-        rese = torch.zeros(3)
-        resv = torch.zeros(3, 3)
+        rese = conv_fn(torch.zeros(3))
+        resv = conv_fn(torch.zeros(3, 3))
 
         # First call to symeig
         self.assertTrue(resv.is_contiguous(), 'resv is not contiguous')
@@ -4328,16 +4389,29 @@ class TestTorch(TestCase):
         ahat = torch.mm(torch.mm(resv, torch.diag(rese)), resv.t())
         self.assertEqual(cov, ahat, 1e-8, 'VeV\' wrong')
 
+        # test eigenvectors=False
+        rese2 = conv_fn(torch.zeros(3))
+        resv2 = conv_fn(torch.randn(3, 3))
+        expected_resv2 = conv_fn(torch.zeros(3, 3))
+        torch.symeig(cov.clone(), False, out=(rese2, resv2))
+        self.assertEqual(rese, rese2)
+        self.assertEqual(resv2, expected_resv2)
+
         # test non-contiguous
-        X = torch.rand(5, 5)
+        X = conv_fn(torch.rand(5, 5))
         X = X.t() * X
-        e = torch.zeros(4, 2).select(1, 1)
-        v = torch.zeros(4, 2, 4)[:, 1]
+        e = conv_fn(torch.zeros(4, 2)).select(1, 1)
+        v = conv_fn(torch.zeros(4, 2, 4))[:, 1]
         self.assertFalse(v.is_contiguous(), 'V is contiguous')
         self.assertFalse(e.is_contiguous(), 'E is contiguous')
         torch.symeig(X, True, out=(e, v))
         Xhat = torch.mm(torch.mm(v, torch.diag(e)), v.t())
         self.assertEqual(X, Xhat, 1e-8, 'VeV\' wrong')
+
+    @skipIfNoLapack
+    @skipIfRocm
+    def test_symeig(self):
+        self._test_symeig(self, lambda x: x)
 
     @skipIfNoLapack
     def test_svd(self):
@@ -6124,7 +6198,7 @@ class TestTorch(TestCase):
         _test_abs(self._make_tensors((3, 5, 7), val_range=(0, max_val)))
         _test_abs(self._make_tensors((2, 2, 5, 8, 2, 3), val_range=(0, max_val)))
         _test_abs(self._make_tensors((1000, ), val_range=(0, max_val)))
-        _test_abs(self._make_tensors((30, 30, 30), val_range=(0, max_val)))
+        _test_abs(self._make_tensors((10, 10, 10), val_range=(0, max_val)))
 
         # Checking that the right abs function is called for LongTensor
         bignumber = 2 ^ 31 + 1
@@ -8503,6 +8577,67 @@ class TestTorch(TestCase):
         )
         self.assertEqual(torch.ByteTensor([7, 42, 128, 133]), byte_unique)
         self.assertEqual(torch.LongTensor([3, 0, 0, 0, 1, 2]), byte_inverse)
+
+    def test_unique_dim(self):
+        def run_test(dtype=torch.float):
+            x = torch.tensor([[[1., 1.],
+                               [0., 1.],
+                               [2., 1.],
+                               [0., 1.]],
+                              [[1., 1.],
+                               [0., 1.],
+                               [2., 1.],
+                               [0., 1.]]], dtype=dtype)
+            expected_unique_dim0 = torch.tensor([[[1., 1.],
+                                                  [0., 1.],
+                                                  [2., 1.],
+                                                  [0., 1.]]], dtype=dtype)
+            expected_inverse_dim0 = torch.tensor([0, 0])
+            expected_unique_dim1 = torch.tensor([[[0., 1.],
+                                                  [1., 1.],
+                                                  [2., 1.]],
+                                                 [[0., 1.],
+                                                  [1., 1.],
+                                                  [2., 1.]]], dtype=dtype)
+            expected_inverse_dim1 = torch.tensor([1, 0, 2, 0])
+            expected_unique_dim2 = torch.tensor([[[1., 1.],
+                                                  [0., 1.],
+                                                  [2., 1.],
+                                                  [0., 1.]],
+                                                 [[1., 1.],
+                                                  [0., 1.],
+                                                  [2., 1.],
+                                                  [0., 1.]]], dtype=dtype)
+            expected_inverse_dim2 = torch.tensor([0, 1])
+
+            # dim0
+            x_unique = torch.unique(x, dim=0)
+            self.assertEqual(expected_unique_dim0, x_unique)
+
+            x_unique, x_inverse = torch.unique(x, return_inverse=True, dim=0)
+            self.assertEqual(expected_unique_dim0, x_unique)
+            self.assertEqual(expected_inverse_dim0, x_inverse)
+
+            # dim1
+            x_unique = torch.unique(x, dim=1)
+            self.assertEqual(expected_unique_dim1, x_unique)
+
+            x_unique, x_inverse = torch.unique(x, return_inverse=True, dim=1)
+            self.assertEqual(expected_unique_dim1, x_unique)
+            self.assertEqual(expected_inverse_dim1, x_inverse)
+
+            # dim2
+            x_unique = torch.unique(x, dim=2)
+            self.assertEqual(expected_unique_dim2, x_unique)
+
+            x_unique, x_inverse = torch.unique(x, return_inverse=True, dim=2)
+            self.assertEqual(expected_unique_dim2, x_unique)
+            self.assertEqual(expected_inverse_dim2, x_inverse)
+
+        run_test(torch.float)
+        run_test(torch.double)
+        run_test(torch.long)
+        run_test(torch.uint8)
 
     @staticmethod
     def _test_bincount(self, device):
