@@ -689,6 +689,16 @@ def batch_norm(g, input, weight, bias, running_mean, running_var, training, mome
         # batchnorm1d accepts 2d and 3d array, but ONNX only accepts 3d
         input = g.op("Unsqueeze", input, axes_i=[2])
 
+    if weight is None or weight.node().kind() == "prim::Undefined":
+        assert len(input_sizes) > 1
+        weight_value = torch.tensor([1.] * input_sizes[1]).type(
+            'torch.' + input.type().scalarType() + 'Tensor')
+        weight = g.op("Constant", value_t=weight_value)
+    if bias is None or bias.node().kind() == "prim::Undefined":
+        assert len(input_sizes) > 1
+        bias_value = torch.tensor([0.] * input_sizes[1]).type(
+            'torch.' + input.type().scalarType() + 'Tensor')
+        bias = g.op("Constant", value_t=bias_value)
     out = g.op("BatchNormalization", input, weight, bias, running_mean, running_var,
                epsilon_f=eps,
                momentum_f=1 - momentum,
