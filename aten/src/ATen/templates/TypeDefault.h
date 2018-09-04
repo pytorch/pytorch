@@ -25,7 +25,7 @@ struct AT_API TypeDefault : public Type {
   Type & toBackend(Backend b) const override;
   Type & toScalarType(ScalarType s) const override;
 
-  Tensor copy(const Tensor & src, bool non_blocking=false) const override;
+  Tensor copy(const Tensor & src, bool non_blocking=false, optional<Device> to_device={}) const override;
   Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking=false) const override;
 
   void backward(Tensor & self, at::optional<Tensor> gradient, bool keep_graph, bool create_graph) const override;
