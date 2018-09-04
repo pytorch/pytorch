@@ -6276,11 +6276,6 @@ a")
             self.assertIn("cause the trace to be incorrect", str(warn.message))
 
     def test_trace_checker_slice_lhs(self):
-        # def foo(x):
-            # for i in range(3):
-                # x[i, :] = torch.zeros(4)
-            # return x
-        # self.checkTracerWarning(foo, torch.rand(3, 4))
         def foo(x):
             for i in range(3):
                 x[i, :] = torch.zeros(4)
@@ -6291,11 +6286,6 @@ a")
                               'corresponding output of the Python function')
 
     def test_trace_checker_inplace_on_view(self):
-        # def foo(x):
-            # x.view(-1).add_(-x.view(-1))
-            # return x
-        # self.checkTracerWarning(foo, torch.rand(3, 4), check_trace=False)
-
         def foo(x):
             x.view(-1).add_(-x.view(-1))
             return x
@@ -6315,6 +6305,12 @@ a")
             y[...] = x
             return y
         self.checkTrace(foo, (torch.rand(3, 4), torch.rand(4)), inputs_require_grads=False)
+
+    def test_inplace_warn(self):
+        def foo(x):
+            x.view(-1).add_(-x.view(-1))
+            return x
+        self.checkTracerWarning(foo, torch.rand(3, 4))
 
     @suppress_warnings
     def test_trace_checker_dropout_train(self):
@@ -6536,9 +6532,6 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
 
     @skipIfRocm
     def test_snli(self):
-        # TODO:
-        #   1) nn.LSTM is called as a Python function https://github.com/pytorch/pytorch/issues/8449
-        #   2) Dropout is called as a Python function https://github.com/pytorch/pytorch/issues/8450
         class Bottle(nn.Module):
 
             def forward(self, input):
