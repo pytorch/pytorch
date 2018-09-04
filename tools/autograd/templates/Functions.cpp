@@ -1,6 +1,6 @@
 #include "Functions.h"
 #include <ATen/Utils.h>
-#include <ATen/TensorOptions.h>
+#include <ATen/core/TensorOptions.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/ExpandUtils.h>
