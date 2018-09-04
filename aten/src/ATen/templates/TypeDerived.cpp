@@ -38,8 +38,8 @@ static int getPointerDevice(void* ptr) {
 }
 #endif
 
-${Type}::${Type}(Context* context)
-  : Type(context, ${Backend}TensorId(), /*is_variable=*/false, /*is_undefined=*/false) {}
+${Type}::${Type}()
+  : TypeDefault(${Backend}TensorId(), /*is_variable=*/false, /*is_undefined=*/false) {}
 ScalarType ${Type}::scalarType() const {
   return ScalarType::${ScalarName};
 }
@@ -91,11 +91,7 @@ Storage ${Type}::storageWithAllocator(int64_t size, Allocator* allocator) const 
     return Storage(ScalarType::${ScalarName}, size, allocator);
 }
 Tensor ${Type}::unsafeTensorFromTH(void * th_pointer, bool retain) const {
-  TensorImpl* pimpl = (TensorImpl*)(th_pointer);
-  if (retain) {
-    pimpl->retain();
-  }
-  return Tensor(pimpl, false);
+  return Tensor(static_cast<TensorImpl*>(th_pointer), retain);
 }
 Storage ${Type}::unsafeStorageFromTH(void * th_pointer, bool retain) const {
   if (retain)
@@ -103,7 +99,7 @@ Storage ${Type}::unsafeStorageFromTH(void * th_pointer, bool retain) const {
   return Storage((${THStorage}*) th_pointer);
 }
 std::unique_ptr<Generator> ${Type}::generator() const {
-  return std::unique_ptr<Generator>(new ${Generator}(context));
+  return std::unique_ptr<Generator>(new ${Generator}(&at::globalContext()));
 }
 
 const char * ${Type}::toString() const {

@@ -6,28 +6,28 @@
 
 #ifdef USE_MAGMA
 
-static void THCTensor_(copyArray1d)(THCState *state, THCTensor *self, real *src, int k)
+static void THCTensor_(copyArray1d)(THCState *state, THCTensor *self, scalar_t *src, int k)
 {
   int64_t size[1] = { k };
   int64_t stride[1] = { 1 };
   THCTensor_(resizeNd)(state, self, 1, size, stride);
-  size_t len = k * sizeof(real);
+  size_t len = k * sizeof(scalar_t);
   THCudaCheck(cudaMemcpy(THCStorage_(data)(state, THTensor_getStoragePtr(self)) + self->storage_offset(), src, len, cudaMemcpyHostToDevice));
 }
 
-static void THCTensor_(copyArray2d)(THCState *state, THCTensor *self, real *src, int m, int n)
+static void THCTensor_(copyArray2d)(THCState *state, THCTensor *self, scalar_t *src, int m, int n)
 {
   int64_t size[2] = { m, n };
   int64_t stride[2] = { 1, m };
   THCTensor_(resizeNd)(state, self, 2, size, stride);
-  size_t len = m * n * sizeof(real);
+  size_t len = m * n * sizeof(scalar_t);
   THCudaCheck(cudaMemcpy(THCStorage_(data)(state, THTensor_getStoragePtr(self)) + self->storage_offset(), src, len, cudaMemcpyHostToDevice));
 }
 
-static void THCTensor_(copyTensor2d)(THCState *state, real *dst, THCTensor *self)
+static void THCTensor_(copyTensor2d)(THCState *state, scalar_t *dst, THCTensor *self)
 {
   THAssert(self->dim() == 2);
-  size_t len = THCTensor_(nElement)(state, self)*sizeof(real);
+  size_t len = THCTensor_(nElement)(state, self)*sizeof(scalar_t);
   THCTensor *temp = THCTensor_(newTranspose)(state, self, 0, 1);
   THCTensor *selfc = THCTensor_(newContiguous)(state, temp);
   THCudaCheck(cudaMemcpy(dst, THCStorage_(data)(state, THTensor_getStoragePtr(selfc)) + selfc->storage_offset(), len, cudaMemcpyDeviceToHost));
@@ -73,8 +73,8 @@ THC_API void THCTensor_(gesv)(THCState *state, THCTensor *rb_, THCTensor *ra_, T
 
   THCTensor *a = THCTensor_(newColumnMajor)(state, ra_, a_);
   THCTensor *b = THCTensor_(newColumnMajor)(state, rb_, b_);
-  real *a_data = THCTensor_(data)(state, a);
-  real *b_data = THCTensor_(data)(state, b);
+  scalar_t *a_data = THCTensor_(data)(state, a);
+  scalar_t *b_data = THCTensor_(data)(state, b);
 
   int *ipiv = th_magma_malloc_pinned<int>(n);
 
@@ -112,15 +112,15 @@ THC_API void THCTensor_(trtrs)(THCState *state, THCTensor *rb_, THCTensor *ra_, 
   magma_trans_t ts = trans[0] == 'N' ? MagmaNoTrans : MagmaTrans;
   magma_diag_t dg = diag[0] == 'U' ? MagmaUnit : MagmaNonUnit;
 
-  real alpha = 1;
+  scalar_t alpha = 1;
 
   int64_t n = a_->size(0);
   int64_t nrhs = b_->size(1);
 
   THCTensor *a = THCTensor_(newColumnMajor)(state, ra_, a_);
   THCTensor *b = THCTensor_(newColumnMajor)(state, rb_, b_);
-  real *a_data = THCTensor_(data)(state, a);
-  real *b_data = THCTensor_(data)(state, b);
+  scalar_t *a_data = THCTensor_(data)(state, a);
+  scalar_t *b_data = THCTensor_(data)(state, b);
 
 #if defined(THC_REAL_IS_FLOAT)
   magma_strsm(sz, ul, ts, dg, n, nrhs, alpha, a_data, n, b_data, n);
@@ -147,13 +147,13 @@ THC_API void THCTensor_(gels)(THCState *state, THCTensor *rb_, THCTensor *ra_, T
 
   THCTensor *a = THCTensor_(newColumnMajor)(state, ra_, a_);
   THCTensor *b = THCTensor_(newColumnMajor)(state, rb_, b_);
-  real *a_data = THCTensor_(data)(state, a);
-  real *b_data = THCTensor_(data)(state, b);
+  scalar_t *a_data = THCTensor_(data)(state, a);
+  scalar_t *b_data = THCTensor_(data)(state, b);
 
   int64_t m = a->size(0);
   int64_t n = a->size(1);
   int64_t nrhs = b->size(1);
-  real wkopt;
+  scalar_t wkopt;
 
   int info;
 #if defined(THC_REAL_IS_FLOAT)
@@ -162,7 +162,7 @@ THC_API void THCTensor_(gels)(THCState *state, THCTensor *rb_, THCTensor *ra_, T
   magma_dgels_gpu(MagmaNoTrans, m, n, nrhs, a_data, m, b_data, m, &wkopt, -1, &info);
 #endif
 
-  real *hwork = th_magma_malloc_pinned<real>((size_t)wkopt);
+  scalar_t *hwork = th_magma_malloc_pinned<scalar_t>((size_t)wkopt);
 
 #if defined(THC_REAL_IS_FLOAT)
   magma_sgels_gpu(MagmaNoTrans, m, n, nrhs, a_data, m, b_data, m, hwork, (int)wkopt, &info);
@@ -192,16 +192,16 @@ THC_API void THCTensor_(syev)(THCState *state, THCTensor *re_, THCTensor *rv_, T
   magma_vec_t jobz = jobzs[0] == 'N' ? MagmaNoVec : MagmaVec;
 
   THCTensor *input = THCTensor_(newColumnMajor)(state, rv_, a);
-  real *input_data = THCTensor_(data)(state, input);
+  scalar_t *input_data = THCTensor_(data)(state, input);
 
   if (n > 0) {
     // eigen values and workspace
-    real *w = th_magma_malloc_pinned<real>(n);
-    real *wA = th_magma_malloc_pinned<real>(lda * n);
+    scalar_t *w = th_magma_malloc_pinned<scalar_t>(n);
+    scalar_t *wA = th_magma_malloc_pinned<scalar_t>(lda * n);
 
     // compute optimal size of work array
     int info;
-    real lwork;
+    scalar_t lwork;
     int liwork;
 
 #if defined(THC_REAL_IS_FLOAT)
@@ -210,7 +210,7 @@ THC_API void THCTensor_(syev)(THCState *state, THCTensor *re_, THCTensor *rv_, T
     magma_dsyevd_gpu(jobz, uplo, n, input_data, lda, w, wA, n, &lwork, -1, &liwork, -1, &info);
 #endif
 
-    real *work = th_magma_malloc_pinned<real>((size_t)lwork);
+    scalar_t *work = th_magma_malloc_pinned<scalar_t>((size_t)lwork);
     int *iwork = th_magma_malloc_pinned<int>(liwork);
 
   // compute eigenvalues and, optionally, eigenvectors
@@ -235,7 +235,13 @@ THC_API void THCTensor_(syev)(THCState *state, THCTensor *re_, THCTensor *rv_, T
     else if (info < 0)
       THError("MAGMA syev : Argument %d : illegal value", -info);
   }
-  THCTensor_(freeCopyTo)(state, input, rv_);
+  if (jobzs[0] == 'N') {
+    // If eigenvector is not needed, fill the result with zeros.
+    THCTensor_(zero)(state, rv_);
+    THCTensor_(free)(state, input);
+  } else {
+    THCTensor_(freeCopyTo)(state, input, rv_);
+  }
 #else
   THError(NoMagma(syev));
 #endif
@@ -250,25 +256,25 @@ THC_API void THCTensor_(geev)(THCState *state, THCTensor *re_, THCTensor *rv_, T
   magma_vec_t jobvr = jobvrs[0] == 'N' ? MagmaNoVec : MagmaVec;
   int64_t n = a_->size(0);
 
-  real *a_data = th_magma_malloc_pinned<real>(n * n);
+  scalar_t *a_data = th_magma_malloc_pinned<scalar_t>(n * n);
   THCTensor_(copyTensor2d)(state, a_data, a_);
 
-  real *wr = th_magma_malloc_pinned<real>(n);
-  real *wi = th_magma_malloc_pinned<real>(n);
+  scalar_t *wr = th_magma_malloc_pinned<scalar_t>(n);
+  scalar_t *wi = th_magma_malloc_pinned<scalar_t>(n);
 
-  real *vr_data = NULL;
+  scalar_t *vr_data = NULL;
   int64_t ldvr = 1;
   if (jobvr == MagmaVec)
   {
-    vr_data = th_magma_malloc_pinned<real>(n * n);
+    vr_data = th_magma_malloc_pinned<scalar_t>(n * n);
     ldvr = n;
   }
 
-  real *work_data = nullptr;
+  scalar_t *work_data = nullptr;
 
   if (n > 0) {
     int info;
-    real wkopt;
+    scalar_t wkopt;
 #if defined(THC_REAL_IS_FLOAT)
     magma_sgeev(MagmaNoVec, jobvr, n, a_data, n, wr, wi, NULL, 1, vr_data, ldvr, &wkopt, -1, &info);
 #else
@@ -276,7 +282,7 @@ THC_API void THCTensor_(geev)(THCState *state, THCTensor *re_, THCTensor *rv_, T
 #endif
 
     int lwork = (int) wkopt;
-    work_data = th_magma_malloc_pinned<real>(lwork);
+    work_data = th_magma_malloc_pinned<scalar_t>(lwork);
 
 #if defined(THC_REAL_IS_FLOAT)
     magma_sgeev(MagmaNoVec, jobvr, n, a_data, n, wr, wi, NULL, 1, vr_data, ldvr, work_data, lwork, &info);
@@ -294,8 +300,8 @@ THC_API void THCTensor_(geev)(THCState *state, THCTensor *re_, THCTensor *rv_, T
     THCTensor_(resize2d)(state, re_, 2, n);
     THCTensor *re = THCTensor_(newContiguous)(state, re_);
     if (n > 0) {
-      THCudaCheck(cudaMemcpy(THCStorage_(data)(state, THTensor_getStoragePtr(re)) + re->storage_offset(), wr, n*sizeof(real), cudaMemcpyHostToDevice));
-      THCudaCheck(cudaMemcpy(THCStorage_(data)(state, THTensor_getStoragePtr(re)) + re->storage_offset() + n, wi, n*sizeof(real), cudaMemcpyHostToDevice));
+      THCudaCheck(cudaMemcpy(THCStorage_(data)(state, THTensor_getStoragePtr(re)) + re->storage_offset(), wr, n*sizeof(scalar_t), cudaMemcpyHostToDevice));
+      THCudaCheck(cudaMemcpy(THCStorage_(data)(state, THTensor_getStoragePtr(re)) + re->storage_offset() + n, wi, n*sizeof(scalar_t), cudaMemcpyHostToDevice));
     }
     THCTensor_(freeCopyTo)(state, re, re_);
     THCTensor_(transpose)(state, re_, NULL, 0, 1);
@@ -340,14 +346,14 @@ THC_API void THCTensor_(gesvd2)(THCState *state, THCTensor *ru_, THCTensor *rs_,
   int64_t j = (jobz == MagmaAllVec) ? m : k;
   int64_t jv = (jobz == MagmaAllVec) ? n : k;
 
-  real *a_data = th_magma_malloc_pinned<real>(m * n);
+  scalar_t *a_data = th_magma_malloc_pinned<scalar_t>(m * n);
   THCTensor_(copyTensor2d)(state, a_data, a);
 
-  real *rs_data = th_magma_malloc_pinned<real>(k);
-  real *ru_data = th_magma_malloc_pinned<real>(m * j);
-  real *rv_data = th_magma_malloc_pinned<real>(n * n);
+  scalar_t *rs_data = th_magma_malloc_pinned<scalar_t>(k);
+  scalar_t *ru_data = th_magma_malloc_pinned<scalar_t>(m * j);
+  scalar_t *rv_data = th_magma_malloc_pinned<scalar_t>(n * n);
 
-  real wkopt;
+  scalar_t wkopt;
   int info;
 
 #if defined(THC_REAL_IS_FLOAT)
@@ -357,7 +363,7 @@ THC_API void THCTensor_(gesvd2)(THCState *state, THCTensor *ru_, THCTensor *rs_,
 #endif
 
   int lwork = (int) wkopt;
-  real *work_data = th_magma_malloc_pinned<real>(lwork);
+  scalar_t *work_data = th_magma_malloc_pinned<scalar_t>(lwork);
   int *iwork = th_magma_malloc_pinned<int>(8 * k);
 
 #if defined(THC_REAL_IS_FLOAT)
@@ -401,12 +407,12 @@ THC_API void THCTensor_(getri)(THCState *state, THCTensor *ra_, THCTensor *a)
   int lwork = n * magma_get_sgetri_nb(n);
 
   THCTensor *input = THCTensor_(newColumnMajor)(state, ra_, a);
-  real *input_data = THCTensor_(data)(state, input);
+  scalar_t *input_data = THCTensor_(data)(state, input);
 
   int *ipiv = th_magma_malloc_pinned<int>(n);
 
   THCTensor *work = THCTensor_(newWithSize1d)(state, lwork);
-  real *work_data = THCTensor_(data)(state, work);
+  scalar_t *work_data = THCTensor_(data)(state, work);
 
   // Run LU
 #if defined(THC_REAL_IS_FLOAT)
@@ -442,16 +448,16 @@ THC_API void THCTensor_(getri)(THCState *state, THCTensor *ra_, THCTensor *a)
   THCTensor *input = THCTensor_(newColumnMajor)(state, a, a);
   THCTensor_(resizeNd)(state, ra_, 2, THTensor_getSizePtr(input), THTensor_getStridePtr(input));
 
-  real *matrices1[1] = { THCTensor_(data)(state, input) };
-  real *matrices2[1] = { THCTensor_(data)(state, ra_) };
+  scalar_t *matrices1[1] = { THCTensor_(data)(state, input) };
+  scalar_t *matrices2[1] = { THCTensor_(data)(state, ra_) };
 
   // Copy pointers to device.
-  auto d_matrices1 = static_cast<real**>(THCudaMalloc(state, sizeof(real*)));
-  auto d_matrices2 = static_cast<real**>(THCudaMalloc(state, sizeof(real*)));
+  auto d_matrices1 = static_cast<scalar_t**>(THCudaMalloc(state, sizeof(scalar_t*)));
+  auto d_matrices2 = static_cast<scalar_t**>(THCudaMalloc(state, sizeof(scalar_t*)));
 
-  THCudaCheck(cudaMemcpyAsync(d_matrices1, matrices1, sizeof(real*),
+  THCudaCheck(cudaMemcpyAsync(d_matrices1, matrices1, sizeof(scalar_t*),
                               cudaMemcpyHostToDevice, THCState_getCurrentStream(state)));
-  THCudaCheck(cudaMemcpyAsync(d_matrices2, matrices2, sizeof(real*),
+  THCudaCheck(cudaMemcpyAsync(d_matrices2, matrices2, sizeof(scalar_t*),
                               cudaMemcpyHostToDevice, THCState_getCurrentStream(state)));
   int info;
   auto info_gpu = static_cast<int*>(THCudaMalloc(state, sizeof(int)));
@@ -474,9 +480,9 @@ THC_API void THCTensor_(getri)(THCState *state, THCTensor *ra_, THCTensor *a)
 
   // Inverse
 #if defined(THC_REAL_IS_FLOAT)
-  THCudaBlas_Sgetri(state, n, (const real**)d_matrices1, n, ipiv_gpu, d_matrices2, n, info_gpu, 1);
+  THCudaBlas_Sgetri(state, n, (const scalar_t**)d_matrices1, n, ipiv_gpu, d_matrices2, n, info_gpu, 1);
 #else
-  THCudaBlas_Dgetri(state, n, (const real**)d_matrices1, n, ipiv_gpu, d_matrices2, n, info_gpu, 1);
+  THCudaBlas_Dgetri(state, n, (const scalar_t**)d_matrices1, n, ipiv_gpu, d_matrices2, n, info_gpu, 1);
 #endif
 
   THCudaCheck(cudaMemcpy(&info, info_gpu, sizeof(int), cudaMemcpyDeviceToHost));
@@ -496,7 +502,7 @@ THC_API void THCTensor_(getri)(THCState *state, THCTensor *ra_, THCTensor *a)
 #endif
 }
 
-__global__ void THCTensor_(copyUpperSymmetric)(real *input, int n, int len)
+__global__ void THCTensor_(copyUpperSymmetric)(scalar_t *input, int n, int len)
 {
   for (int idx = threadIdx.x + blockIdx.x * blockDim.x; idx < len; idx += 65535) {
     const int r = idx % n;
@@ -507,7 +513,7 @@ __global__ void THCTensor_(copyUpperSymmetric)(real *input, int n, int len)
   }
 }
 
-__global__ void THCTensor_(copyLowerSymmetric)(real *input, int n, int len)
+__global__ void THCTensor_(copyLowerSymmetric)(scalar_t *input, int n, int len)
 {
   for (int idx = threadIdx.x + blockIdx.x * blockDim.x; idx < len; idx += 65535) {
     const int r = idx % n;
@@ -528,7 +534,7 @@ THC_API void THCTensor_(potri)(THCState *state, THCTensor *ra_, THCTensor *a, co
   magma_uplo_t ul = uplo[0] == 'U' ?  MagmaUpper : MagmaLower;
 
   THCTensor *input = THCTensor_(newColumnMajor)(state, ra_, a);
-  real *input_data = THCTensor_(data)(state, input);
+  scalar_t *input_data = THCTensor_(data)(state, input);
 
   int info;
 #if defined(THC_REAL_IS_FLOAT)
@@ -568,7 +574,7 @@ THC_API void THCTensor_(potrf)(THCState *state, THCTensor *ra_, THCTensor *a, co
   magma_uplo_t ul = uplo[0] == 'U' ?  MagmaUpper : MagmaLower;
 
   THCTensor *input = THCTensor_(newColumnMajor)(state, ra_, a);
-  real *input_data = THCTensor_(data)(state, input);
+  scalar_t *input_data = THCTensor_(data)(state, input);
 
   int info;
 #if defined(THC_REAL_IS_FLOAT)
@@ -604,9 +610,9 @@ THC_API void THCTensor_(potrs)(THCState *state, THCTensor *rb_, THCTensor *b, TH
   magma_uplo_t ul = uplo[0] == 'U' ?  MagmaUpper : MagmaLower;
 
   THCTensor *b_ = THCTensor_(newColumnMajor)(state, rb_, b);
-  real *b_data = THCTensor_(data)(state, b_);
+  scalar_t *b_data = THCTensor_(data)(state, b_);
   THCTensor *a_ = THCTensor_(newColumnMajor)(state, a, a);
-  real *a_data = THCTensor_(data)(state, a_);
+  scalar_t *a_data = THCTensor_(data)(state, a_);
 
   int info;
 #if defined(THC_REAL_IS_FLOAT)
@@ -642,8 +648,8 @@ THC_API void THCTensor_(geqrf)(THCState *state, THCTensor *ra_, THCTensor *rtau_
   int64_t nb = magma_get_dgeqrf_nb(m, n);
 #endif
 
-  real *rtau_data = th_magma_malloc_pinned<real>(k);
-  real *a_data = THCTensor_(data)(state, a);
+  scalar_t *rtau_data = th_magma_malloc_pinned<scalar_t>(k);
+  scalar_t *a_data = THCTensor_(data)(state, a);
 
   int info;
 #if defined(THC_REAL_IS_FLOAT)
@@ -679,10 +685,10 @@ THC_API void THCTensor_(qr)(THCState *state, THCTensor *rq_, THCTensor *rr_, THC
   int64_t nb = magma_get_dgeqrf_nb(m, n);
 #endif
 
-  real *a_data = THCTensor_(data)(state, a);
-  real *tau_data = th_magma_malloc_pinned<real>(k);
+  scalar_t *a_data = THCTensor_(data)(state, a);
+  scalar_t *tau_data = th_magma_malloc_pinned<scalar_t>(k);
   THCTensor *work = THCTensor_(newWithSize1d)(state, (2*k + magma_roundup(n, 32))*nb);
-  real *work_data = THCTensor_(data)(state, work);
+  scalar_t *work_data = THCTensor_(data)(state, work);
 
   int info;
   // We need to call two different versions of ?geqrf:
@@ -716,7 +722,7 @@ THC_API void THCTensor_(qr)(THCState *state, THCTensor *rq_, THCTensor *rr_, THC
     THError("MAGMA geqrf : Argument %d : illegal value.", -info);
 
   THCTensor *q = THCTensor_(newColumnMajor)(state, rq_, a);
-  real *q_data = THCTensor_(data)(state, q);
+  scalar_t *q_data = THCTensor_(data)(state, q);
 
 #if defined(THC_REAL_IS_FLOAT)
   magma_sorgqr_gpu(m, k, k, q_data, m, tau_data, work_data, nb, &info);

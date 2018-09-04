@@ -3,8 +3,8 @@
 
 namespace at {
 
-UndefinedType::UndefinedType(Context* context)
-    : Type(context, UndefinedTensorId(), /*is_variable=*/false, /*is_undefined=*/true) {}
+UndefinedType::UndefinedType()
+    : TypeDefault(UndefinedTensorId(), /*is_variable=*/false, /*is_undefined=*/true) {}
 ScalarType UndefinedType::scalarType() const {
   return ScalarType::Undefined;
 }
@@ -50,13 +50,13 @@ size_t UndefinedType::elementSizeInBytes() const {
 
 Type & UndefinedType::toBackend(Backend b) const {
   if (b == Backend::Undefined) {
-    return Type::toBackend(b);
+    return TypeDefault::toBackend(b);
   }
   AT_ERROR("toBackend not implemented for UndefinedType to non-UndefinedType");
 }
 Type & UndefinedType::toScalarType(ScalarType s) const {
   if (s == ScalarType::Undefined) {
-    return Type::toScalarType(s);
+    return TypeDefault::toScalarType(s);
   }
   AT_ERROR("toScalarType not implemented for UndefinedType to non-UndefinedType");
 }

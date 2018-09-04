@@ -297,6 +297,15 @@ void initPythonIRBindings(PyObject * module_) {
       ss << n;
       return ss.str();
     })
+    .def("getSourceLocation", [](Node & n) -> py::object {
+      std::stringstream ss;
+      if (auto sl = n.getSourceLocation()) {
+        sl->highlight(ss);
+        return py::str(ss.str());
+      } else {
+        return py::none();
+      }
+    })
     .def("hasMultipleOutputs",[](Node&n) {
       return n.outputs().size() > 1;
     })
@@ -312,7 +321,9 @@ void initPythonIRBindings(PyObject * module_) {
     .def("outputs",[](Node &n) {
       return py::make_iterator(n.outputs().begin(), n.outputs().end());
     })
-    .NS(output)
+    .def("output", [](Node &n) {
+      return n.output();
+    })
     .NS(addInput)
     .NS(replaceInput)
     .NS(replaceInputWith)
@@ -328,6 +339,7 @@ void initPythonIRBindings(PyObject * module_) {
     .NS(eraseOutput)
     .NS(addOutput)
     .NS(scopeName)
+    .NS(isNondeterministic)
     .def("blocks", [](Node& n) {
       return py::make_iterator(n.blocks().begin(), n.blocks().end());
     })
@@ -433,14 +445,29 @@ void initPythonIRBindings(PyObject * module_) {
       switch(t->kind()) {
         case TypeKind::DynamicType:
           return "DynamicType";
+        case TypeKind::TensorType:
+          return "TensorType";
+        case TypeKind::NumberType:
+          return "NumberType";
+        case TypeKind::NoneType:
+          return "NoneType";
         case TypeKind::CompleteTensorType:
           return "CompleteTensorType";
         case TypeKind::TupleType:
           return "TupleType";
-        default:
-          AT_ERROR("unknown type kind");
-          return "";
+        case TypeKind::ListType:
+          return "ListType";
+        case TypeKind::IntType:
+          return "IntType";
+        case TypeKind::FloatType:
+          return "FloatType";
+        case TypeKind::StringType:
+          return "StringType";
+        case TypeKind::GeneratorType:
+          return "GeneratorType";
         }
+        // not reachable, but some compilers complain
+        AT_ERROR("Unknown Type Kind");
     })
     .def("sizes",[](Type& t) {
       return t.expect<CompleteTensorType>()->sizes();

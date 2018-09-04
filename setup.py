@@ -54,6 +54,8 @@
 #   TORCH_CUDA_ARCH_LIST
 #     specify which CUDA architectures to build for.
 #     ie `TORCH_CUDA_ARCH_LIST="6.0;7.0"`
+#     These are not CUDA versions, instead, they specify what
+#     classes of NVIDIA hardware we should generate PTX for.
 #
 #   ONNX_NAMESPACE
 #     specify a namespace for ONNX built here rather than the hard-coded
@@ -496,6 +498,20 @@ def monkey_patch_THD_link_flags():
     C.extra_link_args += thd_deps
 
 
+def monkey_patch_C10D_inc_flags():
+    '''
+    C10D's include deps are not determined until after build c10d is run, so
+    we need to monkey-patch it.
+    '''
+    mpi_include_path_file = tmp_install_path + "/include/c10d/mpi_include_path"
+    if os.path.exists(mpi_include_path_file):
+        with open(mpi_include_path_file, 'r') as f:
+            mpi_include_paths = f.readlines()
+        mpi_include_paths = [p.strip() for p in mpi_include_paths]
+        C.include_dirs += mpi_include_paths
+        print("-- For c10d, will include MPI paths: {}".format(mpi_include_paths))
+
+
 build_ext_parent = ninja_build_ext if USE_NINJA \
     else setuptools.command.build_ext.build_ext
 
@@ -536,6 +552,11 @@ class build_ext(build_ext_parent):
             monkey_patch_THD_link_flags()
         else:
             print('-- Building without distributed package')
+        if USE_C10D:
+            print('-- Building with c10d distributed package ')
+            monkey_patch_C10D_inc_flags()
+        else:
+            print('-- Building without c10d distributed package')
 
         generate_code(ninja_global)
 
@@ -908,6 +929,7 @@ if USE_ROCM:
     rocm_include_path = '/opt/rocm/include'
     hcc_include_path = '/opt/rocm/hcc/include'
     rocblas_include_path = '/opt/rocm/rocblas/include'
+    rocfft_include_path = '/opt/rocm/rocfft/include'
     hipsparse_include_path = '/opt/rocm/hcsparse/include'
     hiprand_include_path = '/opt/rocm/hiprand/include'
     rocrand_include_path = '/opt/rocm/rocrand/include'
@@ -916,6 +938,7 @@ if USE_ROCM:
     include_dirs.append(rocm_include_path)
     include_dirs.append(hcc_include_path)
     include_dirs.append(rocblas_include_path)
+    include_dirs.append(rocfft_include_path)
     include_dirs.append(hipsparse_include_path)
     include_dirs.append(hiprand_include_path)
     include_dirs.append(rocrand_include_path)

@@ -601,10 +601,11 @@ void testADFormulas() {
     {"tanh",    unary_pointwise,  [](const VL& v) -> VL { return {v[0].tanh()}; }},
     {"t",       unary_pointwise_2d,  [](const VL& v) -> VL { return {v[0].t()}; }},
     {"mm",      {{10, 12}, {12, 15}}, [](const VL& v) -> VL { return {v[0].mm(v[1])}; }},
-    {"chunk",   {{10, 12, 15}}, [](const VL& v) -> VL { return fmap<Variable>(v[0].chunk(4, 1)); }},
-    {"chunk",   {{10, 12, 15}}, [](const VL& v) -> VL { return fmap<Variable>(v[0].chunk(3, 2)); }},
-    {"split",   {{10, 12, 15}}, [](const VL& v) -> VL { return fmap<Variable>(v[0].split(4, 1)); }},
-    {"split",   {{10, 12, 15}}, [](const VL& v) -> VL { return fmap<Variable>(v[0].split(3, 2)); }},
+    // TODO: enable once we'll be able to capture lists accross stages
+    //{"chunk",   {{10, 12, 15}}, [](const VL& v) -> VL { return fmap<Variable>(v[0].chunk(4, 1)); }},
+    //{"chunk",   {{10, 12, 15}}, [](const VL& v) -> VL { return fmap<Variable>(v[0].chunk(3, 2)); }},
+    //{"split",   {{10, 12, 15}}, [](const VL& v) -> VL { return fmap<Variable>(v[0].split(4, 1)); }},
+    //{"split",   {{10, 12, 15}}, [](const VL& v) -> VL { return fmap<Variable>(v[0].split(3, 2)); }},
   };
 
   for (const auto & test : ad_tests) {
@@ -782,33 +783,6 @@ void argumentSpecTest() {
   REQUIRE(with_const.at(2).sizes().size() == 2);
 }
 
-void shapeAnalysisTest() {
-
-  constexpr int batch_size = 4;
-  constexpr int input_size = 256;
-
-  int hidden_size = 2*input_size;
-
-  auto v = [](at::Tensor t) { return autograd::make_variable(t, false); };
-
-  auto input = at::randn({batch_size, input_size}, at::kCUDA);
-  auto hx    = at::randn({batch_size, hidden_size}, at::kCUDA);
-  auto cx    = at::randn({batch_size, hidden_size}, at::kCUDA);
-  auto w_ih  = t_def(at::randn({4 * hidden_size, input_size}, at::kCUDA));
-  auto w_hh  = t_def(at::randn({4 * hidden_size, hidden_size}, at::kCUDA));
-
-  auto g = build_lstm();
-  CompleteArgumentSpec spec(false, createStack({v(input), v(hx), v(cx), v(w_ih), v(w_hh) }));
-  PropagateInputShapes(*g, spec);
-  at::Tensor r0, r1;
-  std::tie(r0, r1) = lstm(input, hx, cx, w_ih, w_hh);
-  auto o0 = g->outputs()[0]->type()->expect<CompleteTensorType>();
-  auto o1 = g->outputs()[1]->type()->expect<CompleteTensorType>();
-  REQUIRE(o0->sizes() == std::vector<int64_t>(r0.sizes().begin(), r0.sizes().end()));
-  REQUIRE(o1->sizes() == std::vector<int64_t>(r1.sizes().begin(), r1.sizes().end()));
-
-}
-
 void testGraphExecutor() {
   constexpr int batch_size = 4;
   constexpr int input_size = 256;
@@ -911,23 +885,23 @@ void testControlFlow() {
 
 void testIValue() {
   Shared<IntList> foo = IntList::create({3, 4, 5});
-  JIT_ASSERT(foo->use_count() == 1);
+  JIT_ASSERT(foo.use_count() == 1);
   IValue bar(foo);
-  JIT_ASSERT(foo->use_count() == 2);
+  JIT_ASSERT(foo.use_count() == 2);
   auto baz = bar;
-  JIT_ASSERT(foo->use_count() == 3);
+  JIT_ASSERT(foo.use_count() == 3);
   auto foo2 = std::move(bar);
-  JIT_ASSERT(foo->use_count() == 3);
+  JIT_ASSERT(foo.use_count() == 3);
   JIT_ASSERT(foo2.isIntList());
   JIT_ASSERT(bar.isNone());
   foo2 = IValue(4.0);
   JIT_ASSERT(foo2.isDouble());
   JIT_ASSERT(foo2.toDouble() == 4.0);
-  JIT_ASSERT(foo->use_count() == 2);
+  JIT_ASSERT(foo.use_count() == 2);
   JIT_ASSERT(ArrayRef<int64_t>(baz.toIntList()->elements()).equals({3,4,5}));
 
   auto move_it = std::move(baz).toIntList();
-  JIT_ASSERT(foo->use_count() == 2);
+  JIT_ASSERT(foo.use_count() == 2);
   JIT_ASSERT(baz.isNone());
   IValue i(4);
   JIT_ASSERT(i.isInt() && i.toInt() == 4);
@@ -940,18 +914,18 @@ void testIValue() {
   dlist = IValue(DoubleList::create({3.4}));
   JIT_ASSERT(ArrayRef<double>(dlist.toDoubleList()->elements()).equals({3.4}));
   IValue the_list(Tuple::create({IValue(3.4), IValue(4), IValue(foo)}));
-  JIT_ASSERT(foo->use_count() == 3);
+  JIT_ASSERT(foo.use_count() == 3);
   JIT_ASSERT(the_list.isTuple());
   auto first = std::move(the_list).toTuple()->elements().at(1);
   JIT_ASSERT(first.toInt() == 4);
   at::Tensor tv = at::rand({3,4});
   IValue ten(tv);
-  JIT_ASSERT(tv.get()->use_count() == 2);
+  JIT_ASSERT(tv.use_count() == 2);
   auto ten2 = ten;
-  JIT_ASSERT(tv.get()->use_count() == 3);
+  JIT_ASSERT(tv.use_count() == 3);
   JIT_ASSERT(ten2.toTensor().equal(ten.toTensor()));
   std::move(ten2).toTensor();
-  JIT_ASSERT(tv.get()->use_count() == 2);
+  JIT_ASSERT(tv.use_count() == 2);
 }
 
 void testProto() {
@@ -1174,7 +1148,6 @@ TORCH_API std::string runJITCPPTests() {
   internedStringsTests();
   fromQualStringTests();
   argumentSpecTest();
-  shapeAnalysisTest();
   testProto();
   testCustomOperators();
   return out.str();
@@ -1219,8 +1192,6 @@ TEST_CASE( "jit test CUDA", "[cuda]" ) {
     interpStageTest();
   SECTION( "argument spec" )
     argumentSpecTest();
-  SECTION( "shape analysis" )
-    shapeAnalysisTest();
 }
 
 #endif

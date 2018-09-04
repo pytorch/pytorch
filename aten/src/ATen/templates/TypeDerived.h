@@ -2,7 +2,7 @@
 
 // ${generated_comment}
 
-#include "ATen/Type.h"
+#include "ATen/TypeDefault.h"
 #include "ATen/Context.h"
 #include "ATen/TensorMethods.h"
 #include "ATen/CheckGenerator.h"
@@ -15,8 +15,8 @@
 
 namespace at {
 
-struct ${Type} final : public Type {
-  explicit ${Type}(Context* context);
+struct ${Type} final : public TypeDefault {
+  explicit ${Type}();
   virtual ScalarType scalarType() const override;
   virtual Backend backend() const override;
   virtual bool is_cuda() const override;

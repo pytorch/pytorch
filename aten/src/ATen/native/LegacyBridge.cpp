@@ -1,6 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/SparseTensorRef.h>
+#include <ATen/core/SparseTensorRef.h>
 #include <ATen/ExpandUtils.h>
 
 namespace at { namespace native {

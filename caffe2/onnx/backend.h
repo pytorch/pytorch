@@ -3,7 +3,7 @@
 #include "caffe2/onnx/backend_rep.h"
 #include "caffe2/onnx/device.h"
 #include "caffe2/onnx/helper.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 #include "onnx/onnx_pb.h"
 
 #include <functional>

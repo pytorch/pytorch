@@ -3,10 +3,13 @@
 #include "THP.h"
 #include "Module.h"
 
+#include "THC/THCStream.h"
+#include "ATen/cuda/CUDAStream.h"
+
 #include <structmember.h>
 #include <cuda_runtime_api.h>
 
-PyObject *THCPStreamClass = NULL;
+PyObject *THCPStreamClass = nullptr;
 
 static PyObject * THCPStream_pynew(PyTypeObject *type, PyObject *args, PyObject *kwargs)
 {
@@ -15,34 +18,31 @@ static PyObject * THCPStream_pynew(PyTypeObject *type, PyObject *args, PyObject 
   int current_device;
   THCudaCheck(cudaGetDevice(&current_device));
 
-  int flags = cudaStreamNonBlocking;
   int priority = 0;
   unsigned long long cdata = 0;
 
-  static char *kwlist[] = {"priority", "_cdata", NULL};
+  static char *kwlist[] = {"priority", "_cdata", nullptr};
   if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|iK", kwlist, &priority, &cdata)) {
-    return NULL;
+    return nullptr;
   }
 
   THPObjectPtr ptr(type->tp_alloc(type, 0));
   if (!ptr) {
-    return NULL;
+    return nullptr;
   }
 
   THCStream* stream;
   if (cdata) {
     stream = (THCStream*) cdata;
-    if (stream) {
-      THCStream_retain(stream);
-    }
   } else {
-    stream = THCStream_newWithPriority(flags, priority);
+    const bool isHighPriority = priority < 0 ? true : false;
+    stream = at::cuda::detail::CUDAStream_createStream(isHighPriority);
   }
 
   THCPStream* self = (THCPStream *)ptr.get();
   self->cdata = stream;
   self->device = stream ? THCStream_device(stream) : current_device;
-  self->cuda_stream = stream ? THCStream_stream(stream) : NULL;
+  self->cuda_stream = stream ? THCStream_stream(stream) : nullptr;
   return (PyObject *)ptr.release();
   END_HANDLE_TH_ERRORS
 }
@@ -54,18 +54,18 @@ static void THCPStream_dealloc(THCPStream* self)
 }
 
 static struct PyMemberDef THCPStream_members[] = {
-  {(char*)"_cdata", T_ULONGLONG, offsetof(THCPStream, cdata), READONLY, NULL},
-  {(char*)"device", T_INT, offsetof(THCPStream, device), READONLY, NULL},
-  {(char*)"cuda_stream", T_ULONGLONG, offsetof(THCPStream, cuda_stream), READONLY, NULL},
-  {NULL}
+  {(char*)"_cdata", T_ULONGLONG, offsetof(THCPStream, cdata), READONLY, nullptr},
+  {(char*)"device", T_INT, offsetof(THCPStream, device), READONLY, nullptr},
+  {(char*)"cuda_stream", T_ULONGLONG, offsetof(THCPStream, cuda_stream), READONLY, nullptr},
+  {nullptr}
 };
 
 static PyMethodDef THCPStream_methods[] = {
-  {NULL}
+  {nullptr}
 };
 
 PyTypeObject THCPStreamType = {
-  PyVarObject_HEAD_INIT(NULL, 0)
+  PyVarObject_HEAD_INIT(nullptr, 0)
   "torch._C._CudaStreamBase",             /* tp_name */
   sizeof(THCPStream),                    /* tp_basicsize */
   0,                                     /* tp_itemsize */
@@ -85,7 +85,7 @@ PyTypeObject THCPStreamType = {
   0,                                     /* tp_setattro */
   0,                                     /* tp_as_buffer */
   Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE, /* tp_flags */
-  NULL,                                  /* tp_doc */
+  nullptr,                                  /* tp_doc */
   0,                                     /* tp_traverse */
   0,                                     /* tp_clear */
   0,                                     /* tp_richcompare */

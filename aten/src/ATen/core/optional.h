@@ -301,6 +301,14 @@ using OptionalBase = typename std::conditional<
 
 template <class T>
 class optional : private OptionalBase<T> {
+
+  template <class U>  // re-declaration for nvcc on Windows.
+  using OptionalBase = typename std::conditional<
+      std::is_trivially_destructible<U>::value, // if possible
+      constexpr_optional_base<typename std::remove_const<
+          U>::type>, // use base with trivial destructor
+      optional_base<typename std::remove_const<U>::type>>::type;
+
   static_assert(
       !std::is_same<typename std::decay<T>::type, nullopt_t>::value,
       "bad T");

@@ -76,13 +76,6 @@ inline void pack(Stack & stack, T&& v) {
   stack.push_back(IValue(std::move(v)));
 }
 
-template<>
-inline void pack(Stack & stack, std::vector<at::Tensor>&& v) {
-  for(auto& t : v) {
-    stack.push_back(IValue(std::move(t)));
-  }
-}
-
 template<std::size_t remaining, typename... Args>
 struct TuplePacker
 {

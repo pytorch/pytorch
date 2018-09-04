@@ -5,7 +5,7 @@
 #include <torch/utils.h>
 
 #include <ATen/OptionsGuard.h>
-#include <ATen/TensorOptions.h>
+#include <ATen/core/TensorOptions.h>
 #include <ATen/core/Error.h>
 #include <ATen/core/optional.h>
 
@@ -58,9 +58,7 @@ class Cloneable : public virtual Module {
         copy->parameters_[parameter.key].copy_(
             *parameter, /*non_blocking=*/true);
       } else {
-        at::detail::set_data(
-            copy->parameters_[parameter.key],
-            autograd::Variable(*parameter).data().clone());
+        copy->parameters_[parameter.key].set_data(autograd::Variable(*parameter).data().clone());
       }
     }
     AT_CHECK(
@@ -73,9 +71,7 @@ class Cloneable : public virtual Module {
       if (device) {
         copy->buffers_[buffer.key].copy_(*buffer, /*non_blocking=*/true);
       } else {
-        at::detail::set_data(
-            copy->buffers_[buffer.key],
-            autograd::Variable(*buffer).data().clone());
+        copy->buffers_[buffer.key].set_data(autograd::Variable(*buffer).data().clone());
       }
     }
     AT_CHECK(

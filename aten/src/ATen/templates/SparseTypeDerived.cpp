@@ -27,8 +27,8 @@ $extra_cuda_headers
 
 namespace at {
 
-${Type}::${Type}(Context* context)
-  : Type(context, ${Backend}TensorId(), /*is_variable=*/false, /*is_undefined=*/false) {}
+${Type}::${Type}()
+  : TypeDefault(${Backend}TensorId(), /*is_variable=*/false, /*is_undefined=*/false) {}
 ScalarType ${Type}::scalarType() const {
   return ScalarType::${ScalarName};
 }
@@ -58,7 +58,7 @@ Storage ${Type}::unsafeStorageFromTH(void * th_pointer, bool retain) const {
   AT_ERROR("unsafeTensorFromTH not supported on sparse");
 }
 std::unique_ptr<Generator> ${Type}::generator() const {
-  return std::unique_ptr<Generator>(new ${Generator}(context));
+  return std::unique_ptr<Generator>(new ${Generator}(&at::globalContext()));
 }
 
 const char * ${Type}::toString() const {

@@ -24,6 +24,7 @@ struct ArgumentInfo {
   int device() const {
     return device_;
   }
+  // XXX: It is guaranteed that this will return false when called on non-tensor arguments
   bool requires_grad() const {
     return requires_grad_;
   }
@@ -42,7 +43,8 @@ struct ArgumentInfo {
 private:
   unsigned is_tensor_ : 1;
   unsigned defined_ : 1;
-  unsigned requires_grad_ : 6;
+  unsigned requires_grad_ : 1;
+  unsigned : 5;
   unsigned dim_ : 8;
   int device_ : 8; // NOTE: this needs to be signed because we use -1 to represent CPU
   unsigned type_ : 8;
@@ -59,6 +61,9 @@ struct ArgumentSpec {
     int32_t num_inputs = inputs.size();
     for (int32_t i = 0; i < num_inputs; ++i) {
       auto & arg = args[i];
+      // Initialize all fields to 0. This is convenient, because e.g.
+      // requires_grad() can be checked even on tensors.
+      std::memset(&arg, 0, sizeof(ArgumentInfo));
       arg.is_tensor_ = static_cast<unsigned>(inputs[i].isTensor());
       if (arg.is_tensor_) {
         at::Tensor t = inputs[i].toTensor();
