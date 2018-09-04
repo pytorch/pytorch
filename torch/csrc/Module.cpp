@@ -43,7 +43,7 @@
 #endif
 
 #ifdef USE_DISTRIBUTED
-#ifdef USE_CUDA
+#ifdef USE_C10D
 #include "torch/csrc/distributed/c10d/c10d.h"
 #endif
 #endif
@@ -523,7 +523,7 @@ static PyObject* initModule() {
 #endif
 #ifdef USE_DISTRIBUTED
   THPUtils_addPyMethodDefs(methods, THDPModule_methods());
-#ifdef USE_CUDA
+#ifdef USE_C10D
   THPUtils_addPyMethodDefs(methods, torch::distributed::c10d::python_functions());
 #endif
 #endif
