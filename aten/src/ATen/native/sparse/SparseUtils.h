@@ -79,7 +79,7 @@ inline bool _is_same_density(const SparseTensor& self, const SparseTensor& src) 
 
 // if forceClone is true, the result will forced to be a clone of self.
 inline LongTensor _newFlattenedIndices(const SparseTensor& self, bool forceClone) {
-  LongTensor indices = self.indices();
+  LongTensor indices = self._indices();
   int64_t sparseDims = at::_sparseDims(self);
   if (sparseDims == 1) {
     if (forceClone) {
@@ -90,7 +90,7 @@ inline LongTensor _newFlattenedIndices(const SparseTensor& self, bool forceClone
   } else {
     // FIXME TH_INDEX_BASE
     int64_t factor = 1;
-    LongTensor indices1D = at::empty({1, self.nnz()}, indices.options());
+    LongTensor indices1D = at::empty({1, self._nnz()}, indices.options());
     indices1D.fill_(TH_INDEX_BASE);
     for (int64_t d = sparseDims - 1; d >= 0; d--) {
       indices1D.add_(indices.select(0, d), factor);

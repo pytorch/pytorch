@@ -276,13 +276,13 @@ class TestCase(unittest.TestCase):
 
         # Our code below doesn't work when nnz is 0, because
         # then it's a 0D tensor, not a 2D tensor.
-        if torch._nnz(t) == 0:
-            self.assertEqual(torch._indices(t), torch._indices(tc))
-            self.assertEqual(torch._values(t), torch._values(tc))
+        if t._nnz() == 0:
+            self.assertEqual(t._indices(), tc._indices())
+            self.assertEqual(t._values(), tc._values())
             return tc
 
         value_map = {}
-        for idx, val in zip(torch._indices(t).t(), torch._values(t)):
+        for idx, val in zip(t._indices().t(), t._values()):
             idx_tup = tuple(idx.tolist())
             if idx_tup in value_map:
                 value_map[idx_tup] += val
@@ -291,20 +291,20 @@ class TestCase(unittest.TestCase):
 
         new_indices = sorted(list(value_map.keys()))
         new_values = [value_map[idx] for idx in new_indices]
-        if torch._values(t).ndimension() < 2:
-            new_values = torch._values(t).new(new_values)
+        if t._values().ndimension() < 2:
+            new_values = t._values().new(new_values)
         else:
             new_values = torch.stack(new_values)
 
-        new_indices = torch._indices(t).new(new_indices).t()
+        new_indices = t._indices().new(new_indices).t()
         tg = t.new(new_indices, new_values, t.size())
 
-        self.assertEqual(torch._indices(tc), torch._indices(tg))
-        self.assertEqual(torch._values(tc), torch._values(tg))
+        self.assertEqual(tc._indices(), tg._indices())
+        self.assertEqual(tc._values(), tg._values())
 
         if t.is_coalesced():
-            self.assertEqual(torch._indices(tc), torch._indices(t))
-            self.assertEqual(torch._values(tc), torch._values(t))
+            self.assertEqual(tc._indices(), t._indices())
+            self.assertEqual(tc._values(), t._values())
 
         return tg
 
@@ -339,8 +339,8 @@ class TestCase(unittest.TestCase):
             if x.is_sparse:
                 x = self.safeCoalesce(x)
                 y = self.safeCoalesce(y)
-                assertTensorsEqual(torch._indices(x), torch._indices(y))
-                assertTensorsEqual(torch._values(x), torch._values(y))
+                assertTensorsEqual(x._indices(), y._indices())
+                assertTensorsEqual(x._values(), y._values())
             else:
                 assertTensorsEqual(x, y)
         elif isinstance(x, string_classes) and isinstance(y, string_classes):

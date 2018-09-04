@@ -75,8 +75,8 @@ class Adagrad(Optimizer):
 
                 if grad.is_sparse:
                     grad = grad.coalesce()  # the update is non-linear so indices must be unique
-                    grad_indices = torch._indices(grad)
-                    grad_values = torch._values(grad)
+                    grad_indices = grad._indices()
+                    grad_values = grad._values()
                     size = grad.size()
 
                     def make_sparse(values):
@@ -86,7 +86,7 @@ class Adagrad(Optimizer):
                         return constructor(grad_indices, values, size)
                     state['sum'].add_(make_sparse(grad_values.pow(2)))
                     std = state['sum']._sparse_mask(grad)
-                    std_values = torch._values(std).sqrt_().add_(1e-10)
+                    std_values = std._values().sqrt_().add_(1e-10)
                     p.data.add_(-clr, make_sparse(grad_values / std_values))
                 else:
                     state['sum'].addcmul_(1, grad, grad)

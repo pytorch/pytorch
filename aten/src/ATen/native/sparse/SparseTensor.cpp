@@ -34,7 +34,7 @@ int64_t _nnz_sparse(const SparseTensor& self) {
 // are "masked out" by nnz
 
 Tensor _indices_sparse(const SparseTensor& self) {
-  auto nnz = self.nnz();
+  auto nnz = self._nnz();
   if (nnz == 0) {
     // Narrows don't work on 0-length tensors
     // TODO: When we handle zero-size dims correctly, this will work and
@@ -46,7 +46,7 @@ Tensor _indices_sparse(const SparseTensor& self) {
 
 Tensor _values_sparse(const SparseTensor& self) {
   // See indices for some relevant notes
-  auto nnz = self.nnz();
+  auto nnz = self._nnz();
   if (nnz == 0) {
     return _get_sparse_impl(self)->values();
   }
@@ -250,18 +250,18 @@ SparseTensor coalesce_sparse_cpu(const SparseTensor& self) {
   AT_ASSERT(!self.is_variable());
   AT_ASSERT(self.is_sparse());
 
-  if (self.nnz() < 2) {
+  if (self._nnz() < 2) {
     _get_sparse_impl(self)->set_coalesced(true);
   }
   if (self.is_coalesced()) {
     return self;
   }
 
-  LongTensor indices = self.indices();
-  Tensor values = self.values().contiguous();
+  LongTensor indices = self._indices();
+  Tensor values = self._values().contiguous();
   int64_t sparseDims = at::_sparseDims(self);
   int64_t denseDims = at::_denseDims(self);
-  int64_t nnz = self.nnz();
+  int64_t nnz = self._nnz();
 
   LongTensor indices_scalar = at::zeros({nnz}, kLong);
 
@@ -282,7 +282,7 @@ SparseTensor coalesce_sparse_cpu(const SparseTensor& self) {
   LongTensor indicesBuffer;
   LongTensor indicesPermutation;
   std::tie(indicesBuffer, indicesPermutation) = indices_scalar.sort(0);
-  // NB: The accessor accesses here rely on self.nnz() > 0 (tested earlier in this function)
+  // NB: The accessor accesses here rely on self._nnz() > 0 (tested earlier in this function)
   auto newIndicesAccessor = newIndices.accessor<int64_t, 2>();
   auto indicesAccessor = indices.accessor<int64_t, 2>();
   auto indicesPermutationAccessor = indicesPermutation.accessor<int64_t, 1>();
@@ -325,20 +325,20 @@ SparseTensor& sparse_mask_out_cpu(SparseTensor& r, const Tensor& t, const Sparse
   AT_CHECK(!r.is_cuda(), "sparse_mask: expected 'out' to be CPU, but got CUDA");
   AT_CHECK(!mask.is_cuda(), "sparse_mask: expected 'mask' to be CPU, but got CUDA");
   resize_as_sparse_(r, mask);
-  if (mask.nnz() == 0) {
+  if (mask._nnz() == 0) {
     r.zero_();
     return r;
   }
   int64_t dim = t.dim();
   int64_t sparseDims = at::_sparseDims(mask);
-  LongTensor mask_indices = mask.indices();
-  Tensor mask_values = mask.values();
-  Tensor r_values = r.values().type().tensor(mask_values.sizes());
+  LongTensor mask_indices = mask._indices();
+  Tensor mask_values = mask._values();
+  Tensor r_values = r._values().type().tensor(mask_values.sizes());
   _alias_into_sparse(r, mask_indices.clone(), r_values);
   _get_sparse_impl(r)->set_coalesced(mask.is_coalesced());
-  int64_t r_nnz = mask.nnz();
+  int64_t r_nnz = mask._nnz();
   _get_sparse_impl(r)->set_nnz_and_narrow(r_nnz);
-  // NB: Relies on mask.nnz() == 0 test above
+  // NB: Relies on mask._nnz() == 0 test above
   auto mask_indices_accessor = mask_indices.accessor<int64_t, 2>();
 
   if (dim > sparseDims) {

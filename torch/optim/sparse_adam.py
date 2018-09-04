@@ -66,8 +66,8 @@ class SparseAdam(Optimizer):
                 state['step'] += 1
 
                 grad = grad.coalesce()  # the update is non-linear so indices must be unique
-                grad_indices = torch._indices(grad)
-                grad_values = torch._values(grad)
+                grad_indices = grad._indices()
+                grad_values = grad._values()
                 size = grad.size()
 
                 def make_sparse(values):

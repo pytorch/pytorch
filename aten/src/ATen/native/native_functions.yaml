@@ -2071,7 +2071,7 @@
   device_guard: False
 
 
-- func: nnz(Tensor self) -> int64_t
+- func: _nnz(Tensor self) -> int64_t
   variants: method
   dispatch:
     SparseCPU: _nnz_sparse
@@ -2094,7 +2094,7 @@
   device_guard: False
 
 
-- func: indices(Tensor self) -> Tensor
+- func: _indices(Tensor self) -> Tensor
   variants: method
   dispatch:
     SparseCPU: _indices_sparse
@@ -2102,7 +2102,7 @@
   device_guard: False
 
 
-- func: values(Tensor self) -> Tensor
+- func: _values(Tensor self) -> Tensor
   variants: method
   dispatch:
     SparseCPU: _values_sparse
