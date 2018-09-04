@@ -387,5 +387,5 @@ Tensor &nuclear_norm_out(Tensor& result, const Tensor& self, bool keepdim) {
   return at::sum_out(result, std::get<1>(at::svd(self)), 0, keepdim);
 }
 
-}
-}
+} // namespace native
+} // namespace at
