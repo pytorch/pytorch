@@ -9,7 +9,7 @@ from caffe2.python import gradient_checker
 import caffe2.python.hypothesis_test_util as hu
 from hypothesis import given, seed, settings
 import inspect
-import numpy
+import numpy as np
 import os
 import re
 import shutil
@@ -45,6 +45,12 @@ def _getGradientOrNone(op_proto):
     except:
         return []
 
+# necessary to support converting jagged lists into numpy arrays
+def _transformList(l):
+    ret = np.empty(len(l), dtype=np.object)
+    for (i, arr) in enumerate(l):
+        ret[i] = l[i]
+    return ret
 
 class SerializedTestCase(hu.HypothesisTestCase):
 
@@ -93,9 +99,11 @@ class SerializedTestCase(hu.HypothesisTestCase):
         op_path = os.path.join(output_dir, 'operator_{}.pb'.format(device_type))
         with open(op_path, 'wb') as f:
             f.write(op.SerializeToString())
-        numpy.savez_compressed(
+        inputs = _transformList(inputs)
+        outputs = _transformList(outputs)
+        np.savez_compressed(
             os.path.join(output_dir, 'inputs'), inputs=inputs)
-        numpy.savez_compressed(
+        np.savez_compressed(
             os.path.join(output_dir, 'outputs'), outputs=outputs)
 
     def compare_test(self, inputs, outputs, grad_ops, atol=1e-7, rtol=1e-7):
@@ -108,14 +116,14 @@ class SerializedTestCase(hu.HypothesisTestCase):
         source_dir = self.get_output_dir()
 
         # load serialized input and output
-        loaded_inputs = numpy.load(
+        loaded_inputs = np.load(
             os.path.join(source_dir, 'inputs.npz'), encoding='bytes')['inputs']
         inputs_equal = True
         for (x, y) in zip(inputs, loaded_inputs):
-            if not numpy.array_equal(x, y):
+            if not np.array_equal(x, y):
                 inputs_equal = False
-        loaded_outputs = numpy.load(os.path.join(
-            source_dir, 'outputs.npz'), encoding='bytes')['outputs']
+        loaded_outputs = np.load(os.path.join(
+            source_dir, 'outputs.npz'), encoding='bytes')['outputs'].tolist()
 
         # load operator
         found_op = False
@@ -139,7 +147,7 @@ class SerializedTestCase(hu.HypothesisTestCase):
 
         # assert outputs are equal
         for (x, y) in zip(outputs, loaded_outputs):
-            numpy.testing.assert_allclose(x, y, atol=atol, rtol=rtol)
+            np.testing.assert_allclose(x, y, atol=atol, rtol=rtol)
 
         # assert gradient op is equal
         for i in range(len(grad_ops)):

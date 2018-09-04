@@ -6,7 +6,6 @@ from __future__ import unicode_literals
 from caffe2.python import core
 from hypothesis import given
 import caffe2.python.hypothesis_test_util as hu
-import caffe2.python.serialized_test.serialized_test_util as serial
 import hypothesis.strategies as st
 import numpy as np
 
@@ -25,8 +24,8 @@ def calculate_ap(predictions, labels):
     return ap
 
 
-class TestAPMeterOps(serial.SerializedTestCase):
-    @serial.given_and_seeded(predictions=hu.arrays(dims=[10, 3],
+class TestAPMeterOps(hu.HypothesisTestCase):
+    @given(predictions=hu.arrays(dims=[10, 3],
            elements=st.floats(allow_nan=False,
                               allow_infinity=False,
                               min_value=0.1,
