@@ -107,6 +107,7 @@ class TestSparse(TestCase):
         # TODO: Put this in torch.cuda.randn
         return self.ValueTensor(*args, **kwargs).normal_()
 
+    @skipIfRocm  # ROCm stack doesn't like the x + x call
     def test_print(self):
         if self.is_uncoalesced:
             raise unittest.SkipTest("test_print is the same regardless of is_uncoalesced")
