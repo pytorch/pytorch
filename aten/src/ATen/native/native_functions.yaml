@@ -1797,7 +1797,7 @@
 - func: _weight_norm(Tensor v, Tensor g, int64_t dim=0) -> Tensor
   variants: function
 
-- func: weight_norm_cuda_interface(Tensor v, Tensor g, int64_t dim=0) -> Tensor
+- func: weight_norm_cuda_interface(Tensor v, Tensor g, int64_t dim=0) -> (Tensor, Tensor)
   variants: function
   dispatch:
     CUDA: weight_norm_cuda
