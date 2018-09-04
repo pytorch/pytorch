@@ -76,7 +76,7 @@ inline void THCTensor_(check_shape_except_dim)(THCState *state,
   THArgCheck(first_dims == second_dims, 0,
       "Tensors must have same number of dimensions: got %d and %d",
       first_dims, second_dims);
-  if (!pad){
+  if (!pad) {
     for (int dim = 0; dim < first_dims; dim++) {
       if (dim == dimension) {
         continue;
@@ -154,7 +154,7 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
   THCTensor_(resize)(state, result, size, {});
 
   // filled with pad values if required
-  if (pad){
+  if (pad) {
     THCTensor_(fill)(state, result, pad_value);
   }
 
@@ -271,7 +271,7 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
       if (should_skip(inputs[j])) continue;
       int64_t dimSize = THCTensor_(size)(state, inputs[j], dimension);
       THCTensor *nt = THCTensor_(newWithTensor)(state, result);
-      if (pad){
+      if (pad) {
         for (int dim = 0; dim < nDims; dim++) {
           if (dimension==dim){
             THCTensor_(narrow)(state, nt, NULL, dimension, offset, dimSize);
