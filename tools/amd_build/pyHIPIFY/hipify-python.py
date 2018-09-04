@@ -297,7 +297,7 @@ def add_dim3(kernel_string, cuda_kernel):
                 arg_locs[count]['start'] = ind + 1
 
     first_arg_raw = kernel_string[arg_locs[0]['start']:arg_locs[0]['end'] + 1]
-    second_arg_raw = kernel_string[arg_locs[1]['start']:arg_locs[1]['end'] + 1]
+    second_arg_raw = kernel_string[arg_locs[1]['start']:arg_locs[1]['end']]
 
     first_arg_clean = kernel_string[arg_locs[0]['start']:arg_locs[0]['end']].replace("\n", "").strip(" ")
     second_arg_clean = kernel_string[arg_locs[1]['start']:arg_locs[1]['end']].replace("\n", "").strip(" ")
