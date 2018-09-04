@@ -1967,35 +1967,105 @@ void Axpy<float16, HIPContext>(
 }
 
 namespace {
-template <typename T>
-__global__ void
-AxpbyKernel(const int n, const T a, const T* x, const T b, T* y) {
-  HIP_1D_KERNEL_LOOP(index, n) {
-    y[index] = x[index] * a + y[index] * b;
+
+template <typename TCoeff, typename TData>
+__global__ void AxpbyKernel(
+    const int n,
+    const TCoeff a,
+    const TData* x,
+    const TCoeff b,
+    TData* y) {
+  HIP_1D_KERNEL_LOOP(i, n) {
+    y[i] = x[i] * a + y[i] * b;
   }
 }
-} // namespace
 
 template <>
-void Axpby<float, HIPContext>(
+__global__ void AxpbyKernel<float, float16>(
     const int n,
     const float a,
-    const float* x,
+    const float16* x,
     const float b,
-    float* y,
-    HIPContext* context) {
-  hipLaunchKernelGGL(
-      (AxpbyKernel<float>),
-      dim3(CAFFE_GET_BLOCKS(n)),
-      dim3(CAFFE_HIP_NUM_THREADS),
-      0,
-      context->hip_stream(),
-      n,
-      a,
-      x,
-      b,
-      y);
+    float16* y) {
+  HIP_1D_KERNEL_LOOP(i, n) {
+    y[i] = convert::To<float, float16>(
+        convert::To<float16, float>(x[i]) * a +
+        convert::To<float16, float>(y[i]) * b);
+  }
 }
+
+template <typename TCoeff, typename TData>
+__global__ void AxpbyKernel(
+    const int n,
+    const TCoeff* a,
+    const TData* x,
+    const TCoeff* b,
+    TData* y) {
+  HIP_1D_KERNEL_LOOP(i, n) {
+    y[i] = x[i] * *a + y[i] * *b;
+  }
+}
+
+template <>
+__global__ void AxpbyKernel<float, float16>(
+    const int n,
+    const float* a,
+    const float16* x,
+    const float* b,
+    float16* y) {
+  HIP_1D_KERNEL_LOOP(i, n) {
+    y[i] = convert::To<float, float16>(
+        convert::To<float16, float>(x[i]) * *a +
+        convert::To<float16, float>(y[i]) * *b);
+  }
+}
+
+} // namespace
+
+#define CAFFE2_SPECIALIZED_HIP_AXPBY(TCoeff, TData) \
+  template <>                                       \
+  void Axpby<TCoeff, TData, HIPContext>(            \
+      const int n,                                  \
+      const TCoeff a,                               \
+      const TData* x,                               \
+      const TCoeff b,                               \
+      TData* y,                                     \
+      HIPContext* context) {                        \
+    hipLaunchKernelGGL(                             \
+        (AxpbyKernel<TCoeff, TData>),               \
+        dim3(CAFFE_GET_BLOCKS(n)),                  \
+        dim3(CAFFE_HIP_NUM_THREADS),                \
+        0,                                          \
+        context->hip_stream(),                      \
+        n,                                          \
+        a,                                          \
+        x,                                          \
+        b,                                          \
+        y);                                         \
+  }                                                 \
+  template <>                                       \
+  void Axpby<TCoeff, TData, HIPContext>(            \
+      const int n,                                  \
+      const TCoeff* a,                              \
+      const TData* x,                               \
+      const TCoeff* b,                              \
+      TData* y,                                     \
+      HIPContext* context) {                        \
+    hipLaunchKernelGGL(                             \
+        (AxpbyKernel<TCoeff, TData>),               \
+        dim3(CAFFE_GET_BLOCKS(n)),                  \
+        dim3(CAFFE_HIP_NUM_THREADS),                \
+        0,                                          \
+        context->hip_stream(),                      \
+        n,                                          \
+        a,                                          \
+        x,                                          \
+        b,                                          \
+        y);                                         \
+  }
+CAFFE2_SPECIALIZED_HIP_AXPBY(float, float)
+CAFFE2_SPECIALIZED_HIP_AXPBY(float, float16)
+#undef CAFFE2_SPECIALIZED_HIP_AXPBY
 
 namespace {
 

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ATen/ScalarType.h"
+#include "ATen/core/ScalarType.h"
 
 namespace at {
 
@@ -13,7 +13,7 @@ template <>                                                        \
 struct CTypeToScalarType<ct> {                                     \
   static inline at::ScalarType to() { return at::ScalarType::st; } \
 };
-AT_FORALL_SCALAR_TYPES(DEFINE_TO_SCALAR_TYPE)
+AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(DEFINE_TO_SCALAR_TYPE)
 #undef DEFINE_TO_SCALAR_TYPE
 
 } // namespace at

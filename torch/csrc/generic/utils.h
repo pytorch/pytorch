@@ -18,7 +18,7 @@ typedef class THPPointer<THPStorage>     THPStoragePtr;
 #if (!defined(THC_GENERIC_FILE) || defined(THC_REAL_IS_HALF)) && \
     (!defined(THD_GENERIC_FILE))
 template<>
-struct THPUtils_typeTraits<real> {
+struct THPUtils_typeTraits<scalar_t> {
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || \
     defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || \
     defined(THC_REAL_IS_HALF)

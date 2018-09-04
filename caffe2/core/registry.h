@@ -152,7 +152,8 @@ class CAFFE2_API Registerer {
  */
 #define CAFFE_DECLARE_TYPED_REGISTRY(                                    \
     RegistryName, SrcType, ObjectType, PtrType, ...)                     \
-  Registry<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>* RegistryName(); \
+  CAFFE2_EXPORT Registry<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>*   \
+  RegistryName();                                                        \
   typedef Registerer<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>        \
       Registerer##RegistryName;
 

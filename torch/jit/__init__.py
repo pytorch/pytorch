@@ -408,6 +408,18 @@ def _check_trace(check_inputs, func, executor_options, module, check_tolerance):
             raise TracingCheckError(*graph_diagnostic_info())
 
 
+class TracerWarning(Warning):
+    @staticmethod
+    def ignore_lib_warnings():
+        warnings.filterwarnings('ignore', category=TracerWarning, module='torch.*')
+
+
+# We ignore the tracer warnings coming form inside the library, because all our shape
+# checks in nn will trigger them.
+TracerWarning.ignore_lib_warnings()
+torch._C._tracer_warn_use_python()
+
+
 def trace(func, example_inputs, optimize=True, check_trace=True, check_inputs=None, check_tolerance=1e-5):
     """
     Trace a function and return an executable trace that will be optimized

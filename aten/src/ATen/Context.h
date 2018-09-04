@@ -155,6 +155,9 @@ static inline Type& getNonVariableType(DeviceType p, ScalarType s) {
   return globalContext().getNonVariableType(deviceTypeToBackend(p), s);
 }
 
+AT_API Type& getMaybeVariableType(TensorOptions options);
+AT_API Type& getMaybeVariableType(const TensorImpl*);
+
 static inline Type& CPU(ScalarType s) {
   return getNonVariableType(Backend::CPU, s);
 }

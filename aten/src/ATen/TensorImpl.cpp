@@ -13,10 +13,7 @@
 namespace at {
 
 Type& TensorImpl::type() const {
-  // Select backend from the hard-coded ones that the legacy ATen dispatcher
-  // knows about
-  Backend backend = tensorTypeIdToBackend(type_id_);
-  return globalContext().getMaybeVariableType(backend, scalar_type_, is_variable_);
+  return at::getMaybeVariableType(this);
 }
 
 Tensor& TensorImpl::grad() {
@@ -29,11 +26,6 @@ const Tensor& TensorImpl::grad() const {
 
 Tensor TensorImpl::detach() const {
   AT_ERROR("detach is not implemented for Tensor");
-}
-
-const char* TensorImpl::toString() const {
-  // This matches behavior with VariableImpl
-  return type().toString();
 }
 
 void TensorImpl::backward(

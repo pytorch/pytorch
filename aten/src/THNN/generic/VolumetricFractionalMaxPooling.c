@@ -3,11 +3,11 @@
 #else
 
 static int64_t* THNN_(VolumetricFractionalMaxPooling_generateIntervals)(
-  real sample,
+  scalar_t sample,
   int64_t inputSize,
   int64_t outputSize,
   int poolSize) {
-  real alpha = (real) (inputSize - poolSize) / (real) (outputSize - 1);
+  scalar_t alpha = (scalar_t) (inputSize - poolSize) / (scalar_t) (outputSize - 1);
   int64_t* sequence = (int64_t*) THAlloc(sizeof(int64_t) * outputSize);
 
   int64_t i;
@@ -21,10 +21,10 @@ static int64_t* THNN_(VolumetricFractionalMaxPooling_generateIntervals)(
 }
 
 static void THNN_(VolumetricFractionalMaxPooling_updateOutput_frame)(
-  real* input,
-  real* output,
+  scalar_t* input,
+  scalar_t* output,
   THIndex_t* indices,
-  real* randomSamples,
+  scalar_t* randomSamples,
   int64_t numPlanes,
   int64_t inputT, int64_t inputW, int64_t inputH,
   int64_t outputT, int64_t outputW, int64_t outputH,
@@ -33,7 +33,7 @@ static void THNN_(VolumetricFractionalMaxPooling_updateOutput_frame)(
 #pragma omp parallel for private(plane)
   for (plane = 0; plane < numPlanes; ++plane) {
     /* each plane contains 3 random samples, one for T, one for W, and one for H */
-    real* randomSamplesForPlane = randomSamples + plane * 3;
+    scalar_t* randomSamplesForPlane = randomSamples + plane * 3;
 
     /* Generate interval sequence */
     int64_t* sequenceT =
@@ -49,8 +49,8 @@ static void THNN_(VolumetricFractionalMaxPooling_updateOutput_frame)(
     /* loop over output */
     int64_t h, w, t;
 
-    real* inputForPlane = input + plane * inputT * inputW * inputH;
-    real* outputForPlane = output + plane * outputT * outputW * outputH;
+    scalar_t* inputForPlane = input + plane * inputT * inputW * inputH;
+    scalar_t* outputForPlane = output + plane * outputT * outputW * outputH;
     THIndex_t* indicesForPlane = indices + plane * outputT * outputW * outputH;
 
     for (h = 0; h < outputH; ++h) {
@@ -62,7 +62,7 @@ static void THNN_(VolumetricFractionalMaxPooling_updateOutput_frame)(
         for (t = 0; t < outputT; ++t) {
           int64_t inputTStart = sequenceT[t];
 
-          real maxVal = -THInf;
+          scalar_t maxVal = -THInf;
           int64_t maxIndex = -1;
 
           int64_t h2, w2, t2;
@@ -74,7 +74,7 @@ static void THNN_(VolumetricFractionalMaxPooling_updateOutput_frame)(
                 THAssert(t2 >= 0 && t2 < inputT);
 
                 int64_t planeIndex = h2 * inputW * inputT + w2 * inputT + t2;
-                real val = inputForPlane[planeIndex];
+                scalar_t val = inputForPlane[planeIndex];
                 if (val > maxVal) {
                   maxVal = val;
                   maxIndex = planeIndex;
@@ -152,10 +152,10 @@ void THNN_(VolumetricFractionalMaxPooling_updateOutput)(
     THIndexTensor_(resize4d)(indices, numPlanes, outputH, outputW, outputT);
 
     THNN_(VolumetricFractionalMaxPooling_updateOutput_frame)(
-      THTensor_(data)(input),
-      THTensor_(data)(output),
+      input->data<scalar_t>(),
+      output->data<scalar_t>(),
       THIndexTensor_(data)(indices),
-      THTensor_(data)(randomSamples),
+      randomSamples->data<scalar_t>(),
       numPlanes, inputT, inputW, inputH,
       outputT, outputW, outputH, poolSizeT, poolSizeW, poolSizeH);
   } else {
@@ -167,22 +167,22 @@ void THNN_(VolumetricFractionalMaxPooling_updateOutput)(
 #pragma omp parallel for private(batch)
     for (batch = 0; batch < numBatch; ++batch) {
       THNN_(VolumetricFractionalMaxPooling_updateOutput_frame)(
-        THTensor_(data)(input) + batch * numPlanes * inputH * inputW * inputT,
-        THTensor_(data)(output) + batch * numPlanes * outputH * outputW * outputT,
+        input->data<scalar_t>() + batch * numPlanes * inputH * inputW * inputT,
+        output->data<scalar_t>() + batch * numPlanes * outputH * outputW * outputT,
         THIndexTensor_(data)(indices) + batch * numPlanes * outputH * outputW * outputT,
-        THTensor_(data)(randomSamples) + batch * numPlanes * 3,
+        randomSamples->data<scalar_t>() + batch * numPlanes * 3,
         numPlanes, inputT, inputW, inputH,
         outputT, outputW, outputH, poolSizeT, poolSizeW, poolSizeH);
     }
   }
 
   /* cleanup */
-  THTensor_(free)(input);
+  c10::raw::intrusive_ptr::decref(input);
 }
 
 static void THNN_(VolumetricFractionalMaxPooling_updateGradInput_frame)(
-  real* gradInput,
-  real* gradOutput,
+  scalar_t* gradInput,
+  scalar_t* gradOutput,
   THIndex_t* indices,
   int64_t numPlanes,
   int64_t inputT, int64_t inputW, int64_t inputH,
@@ -190,8 +190,8 @@ static void THNN_(VolumetricFractionalMaxPooling_updateGradInput_frame)(
   int64_t plane;
 #pragma omp parallel for private(plane)
   for (plane = 0; plane < numPlanes; plane++) {
-    real* gradInputForPlane = gradInput + plane * inputT * inputW * inputH;
-    real* gradOutputForPlane = gradOutput + plane * outputT * outputW * outputH;
+    scalar_t* gradInputForPlane = gradInput + plane * inputT * inputW * inputH;
+    scalar_t* gradOutputForPlane = gradOutput + plane * outputT * outputW * outputH;
     THIndex_t* indicesForPlane = indices + plane * outputT * outputW * outputH;
 
     int64_t h, w, t;
@@ -256,8 +256,8 @@ void THNN_(VolumetricFractionalMaxPooling_updateGradInput)(
   /* backprop */
   if (numInputDims == 4) {
     THNN_(VolumetricFractionalMaxPooling_updateGradInput_frame)(
-      THTensor_(data)(gradInput),
-      THTensor_(data)(gradOutput),
+      gradInput->data<scalar_t>(),
+      gradOutput->data<scalar_t>(),
       THIndexTensor_(data)(indices),
       numPlanes, inputT, inputW, inputH, outputT, outputW, outputH);
   } else {
@@ -265,15 +265,15 @@ void THNN_(VolumetricFractionalMaxPooling_updateGradInput)(
 #pragma omp parallel for private(batch)
     for (batch = 0; batch < numBatch; ++batch) {
       THNN_(VolumetricFractionalMaxPooling_updateGradInput_frame)(
-        THTensor_(data)(gradInput) + batch * numPlanes * inputH * inputW * inputT,
-        THTensor_(data)(gradOutput) + batch * numPlanes * outputH * outputW * outputT,
+        gradInput->data<scalar_t>() + batch * numPlanes * inputH * inputW * inputT,
+        gradOutput->data<scalar_t>() + batch * numPlanes * outputH * outputW * outputT,
         THIndexTensor_(data)(indices) + batch * numPlanes * outputH * outputW * outputT,
         numPlanes, inputT, inputW, inputH, outputT, outputW, outputH);
     }
   }
 
   /* cleanup */
-  THTensor_(free)(gradOutput);
+  c10::raw::intrusive_ptr::decref(gradOutput);
 }
 
 #endif

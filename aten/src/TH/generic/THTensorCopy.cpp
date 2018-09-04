@@ -36,24 +36,24 @@ void THTensor_(copyTranspose)(THTensor *tensor, THTensor *src) {
 #endif
 
   THTensor *buf = THTensor_(newWithSize2d)(BLOCK_SZ, BLOCK_SZ);
-  real *sp = THTensor_(data)(src);
-  real *rp = THTensor_(data)(tensor);
-  real *bp = THTensor_(data)(buf);
+  scalar_t *sp = src->data<scalar_t>();
+  scalar_t *rp = tensor->data<scalar_t>();
+  scalar_t *bp = buf->data<scalar_t>();
 
 
   int64_t NR = THTensor_(size)(src, 0);
   int64_t NC = THTensor_(size)(src, 1);
   for (int64_t R = 0; R < NR; R += BLOCK_SZ) {
     for (int64_t C = 0; C < NC; C += BLOCK_SZ) {
-      real *spo = sp + R + C * NR;
-      real *rpo = rp + C + R * NC;
+      scalar_t *spo = sp + R + C * NR;
+      scalar_t *rpo = rp + C + R * NC;
 
       int nr = MIN(NR - R, BLOCK_SZ);
       int nc = MIN(NC - C, BLOCK_SZ);
 
       // 1. copy columns from src to buf
       for (int c = 0; c < nc; c++) {
-        memcpy(bp + c * BLOCK_SZ, spo + c * NR, nr * sizeof(real));
+        memcpy(bp + c * BLOCK_SZ, spo + c * NR, nr * sizeof(scalar_t));
       }
 
       // 2. transpose buf in place
@@ -62,7 +62,7 @@ void THTensor_(copyTranspose)(THTensor *tensor, THTensor *src) {
       for (int r = 0; r < rc_max; r++) {
         int end = MIN(r, rc_min);
         for (int c = 0; c < end; c++) {
-          real tmp = bp[r + BLOCK_SZ * c];
+          scalar_t tmp = bp[r + BLOCK_SZ * c];
           bp[r + BLOCK_SZ * c] = bp[r * BLOCK_SZ + c];
           bp[r * BLOCK_SZ + c] = tmp;
         }
@@ -70,11 +70,11 @@ void THTensor_(copyTranspose)(THTensor *tensor, THTensor *src) {
 
       // 3. copy rows from buf to dst
       for (int r = 0; r < nr; r++) {
-        memcpy(rpo + r * NC, bp + r * BLOCK_SZ, nc * sizeof(real));
+        memcpy(rpo + r * NC, bp + r * BLOCK_SZ, nc * sizeof(scalar_t));
       }
     }
   }
-  THTensor_(free)(buf);
+  c10::raw::intrusive_ptr::decref(buf);
   #undef MIN
   #undef MAX
 }
@@ -93,8 +93,8 @@ void THTensor_(copy)(THTensor *tensor, THTensor *src)
 #endif
   if (tensorSize == srcSize) {
     if ( tensorContig && srcContig) {
-      real *sp = THTensor_(data)(src);
-      real *rp = THTensor_(data)(tensor);
+      scalar_t *sp = src->data<scalar_t>();
+      scalar_t *rp = tensor->data<scalar_t>();
 #ifndef TH_REAL_IS_HALF
 #ifdef _OPENMP
       #pragma omp parallel if ( (tensorSize > TH_OMP_OVERHEAD_THRESHOLD_COPY) && (!inOMP) )
@@ -104,8 +104,8 @@ void THTensor_(copy)(THTensor *tensor, THTensor *src)
         ptrdiff_t offset = tid * (tensorSize / num_threads);
         ptrdiff_t end = (tid == num_threads - 1) ? tensorSize : offset + tensorSize / num_threads;
         ptrdiff_t len = end - offset;
-        real *tensorData = rp + offset;
-        real *srcData = sp + offset;
+        scalar_t *tensorData = rp + offset;
+        scalar_t *srcData = sp + offset;
         THVector_(copy)(tensorData, srcData, len);
       }
 #else
@@ -122,10 +122,10 @@ void THTensor_(copy)(THTensor *tensor, THTensor *src)
           rp[i] = sp[i];
         }
       } else {
-        memcpy(rp, sp, srcSize * sizeof(real));
+        memcpy(rp, sp, srcSize * sizeof(scalar_t));
       }
 #else
-      memcpy(rp, sp, srcSize * sizeof(real));
+      memcpy(rp, sp, srcSize * sizeof(scalar_t));
 #endif
 
 #endif
@@ -139,7 +139,7 @@ void THTensor_(copy)(THTensor *tensor, THTensor *src)
       if (inOMP) {
         serial_path = 1;
       } else {
-        TH_TENSOR_APPLY2_OMP(srcSize, tensorContig, srcContig, real, tensor, real, src, *tensor_data = *src_data;, TH_OMP_OVERHEAD_THRESHOLD_COPY)
+        TH_TENSOR_APPLY2_OMP(srcSize, tensorContig, srcContig, scalar_t, tensor, scalar_t, src, *tensor_data = *src_data;, TH_OMP_OVERHEAD_THRESHOLD_COPY)
       }
 #else
       serial_path = 1;
@@ -150,7 +150,7 @@ void THTensor_(copy)(THTensor *tensor, THTensor *src)
   }
 
   if (serial_path) {
-    TH_TENSOR_APPLY2(real, tensor, real, src, *tensor_data = *src_data;)
+    TH_TENSOR_APPLY2(scalar_t, tensor, scalar_t, src, *tensor_data = *src_data;)
   }
 }
 
@@ -198,30 +198,30 @@ using inter_copy_type_t = typename inter_copy_type<T>::type;
 #define IMPLEMENT_THTensor_COPY(TYPENAMESRC, TYPE_SRC) \
 void THTensor_(copy##TYPENAMESRC)(THTensor *tensor, TH##TYPENAMESRC##Tensor *src) \
 { \
-  TH_TENSOR_APPLY2(real, tensor, TYPE_SRC, src, \
-                   *tensor_data = static_cast<real>( \
-                       static_cast<inter_copy_type_t<real>>(*src_data));) \
+  TH_TENSOR_APPLY2(scalar_t, tensor, TYPE_SRC, src, \
+                   *tensor_data = static_cast<scalar_t>( \
+                       static_cast<inter_copy_type_t<scalar_t>>(*src_data));) \
 }
 
 #define IMPLEMENT_THTensor_COPY_TO_HALF(TYPENAMESRC, TYPE_SRC) \
 void THTensor_(copy##TYPENAMESRC)(THTensor *tensor, TH##TYPENAMESRC##Tensor *src) \
 { \
- TH_TENSOR_APPLY2(real, tensor, TYPE_SRC, src, *tensor_data = TH_float2half((float)*src_data);) \
+ TH_TENSOR_APPLY2(scalar_t, tensor, TYPE_SRC, src, *tensor_data = TH_float2half((float)*src_data);) \
 }
 
 #define IMPLEMENT_THTensor_COPY_FROM_HALF(TYPENAMESRC, TYPE_SRC) \
 void THTensor_(copy##TYPENAMESRC)(THTensor *tensor, TH##TYPENAMESRC##Tensor *src) \
 { \
- TH_TENSOR_APPLY2(real, tensor, TYPE_SRC, src, \
-                  *tensor_data = static_cast<real>( \
-                      static_cast<inter_copy_type_t<real>>( \
+ TH_TENSOR_APPLY2(scalar_t, tensor, TYPE_SRC, src, \
+                  *tensor_data = static_cast<scalar_t>( \
+                      static_cast<inter_copy_type_t<scalar_t>>( \
                           TH_half2float(*src_data)));) \
 }
 
 #define IMPLEMENT_THTensor_COPY_TO_FROM_HALF(TYPENAMESRC, TYPE_SRC) \
 void THTensor_(copy##TYPENAMESRC)(THTensor *tensor, TH##TYPENAMESRC##Tensor *src) \
 { \
- TH_TENSOR_APPLY2(real, tensor, TYPE_SRC, src, *tensor_data = *src_data;) \
+ TH_TENSOR_APPLY2(scalar_t, tensor, TYPE_SRC, src, *tensor_data = *src_data;) \
 }
 
 #ifndef TH_REAL_IS_HALF
