@@ -32,7 +32,7 @@ AT_CUDA_API bool CUDAEvent_happened(CUDAEventInternals* internals);
 
 } // namespace detail
 
-struct AT_CUDA_API CUDAEvent {
+struct CUDAEvent {
   // Constants
   static constexpr unsigned int DEFAULT_FLAGS = cudaEventDisableTiming;
 
