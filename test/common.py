@@ -19,6 +19,7 @@ import random
 import contextlib
 import socket
 import pkg_resources
+import subprocess
 from collections import OrderedDict
 from functools import wraps
 from itertools import product
@@ -90,8 +91,11 @@ class TestCondition(object):
             spec = importlib.util.find_spec(name)
             if spec is None:
                 return None
-        dist = pkg_resources.get_distribution(name)
-        return pkg_resources.parse_version(dist.version)
+        py_cmd_get_ver = 'from __future__ import print_function; import {name}; ' \
+                         'print({name}.__version__)'.format(name=name)
+        encoding = sys.getdefaultencoding()
+        ver = subprocess.check_output([sys.executable, '-c', py_cmd_get_ver], encoding=encoding).strip()
+        return pkg_resources.parse_version(ver)
 
     @classmethod
     def hasExternalModule(cls, name, min_version=None):
