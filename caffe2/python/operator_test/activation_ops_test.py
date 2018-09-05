@@ -17,7 +17,7 @@ import unittest
 
 class TestActivations(hu.HypothesisTestCase):
     @given(X=hu.tensor(), in_place=st.booleans(),
-           engine=st.sampled_from(["", "CUDNN"]), **mu.gcs)
+           engine=st.sampled_from(["", "MIOPEN" if workspace.has_hip_support else "CUDNN"]), **mu.gcs)
     def test_relu(self, X, in_place, engine, gc, dc):
         if gc == mu.mkl_do:
             in_place = False
