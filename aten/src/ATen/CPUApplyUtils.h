@@ -57,9 +57,9 @@ inline void _setup_arrays(Tensor& tensor, Arg* iter) {
   for (int64_t i = 0; i < max_dim; i++) {
     int64_t size = tensor.size(i);
     int64_t stride = tensor.stride(i);
-    while (tensor.stride(i) > 0 && i + 1 < max_dim &&
+    while (stride > 0 && i + 1 < max_dim &&
            (tensor.size(i + 1) == 1 ||
-            tensor.stride(i) == tensor.size(i + 1) * tensor.stride(i + 1))) {
+            stride == tensor.size(i + 1) * tensor.stride(i + 1))) {
       size = size * tensor.size(i + 1);
       if (tensor.size(i + 1) != 1)
         stride = tensor.stride(i + 1);
