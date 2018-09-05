@@ -6314,10 +6314,14 @@ a")
 
     @suppress_warnings
     def test_trace_checker_dropout_train(self):
-        with self.assertRaisesRegex(torch.jit.TracingCheckError, r'Trace had nondeterministic nodes'):
-            @_trace(torch.rand(3, 4))
-            def foo(x):
-                return torch.dropout(x, p=0.5, train=True)
+        def foo(x):
+            return torch.dropout(x, p=0.5, train=True)
+
+        self.assertWarnsRegex(lambda: torch.jit.trace(foo, torch.rand(3, 4), check_inputs=[torch.rand(5, 6)]),
+                              'Output nr 1. of the traced function does not match the '
+                              'corresponding output of the Python function')
+        self.assertWarnsRegex(lambda: torch.jit.trace(foo, torch.rand(3, 4), check_inputs=[torch.rand(5, 6)]),
+                              'Trace had nondeterministic nodes')
 
     def test_trace_checker_dropout_notrain(self):
         input = torch.rand(3, 4)

@@ -381,7 +381,7 @@ def _check_trace(check_inputs, func, executor_options, module, check_tolerance):
                 nondeterministic_ops_warning += "\n".join([indent(str(op)) for op in nondeterm_ops][:20])
                 nondeterministic_ops_warning += "\nThis may cause errors in trace checking. To disable trace checking,"\
                                                 " pass disable_checks=True to torch.jit.trace()"
-            warnings.warn(nondeterministic_ops_warning, category=TracerWarning, stacklevel=5)
+                warnings.warn(nondeterministic_ops_warning, category=TracerWarning, stacklevel=5)
 
         def compare_outputs(original, reference, match_what):
             all_ok = True
