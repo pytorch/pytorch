@@ -1825,6 +1825,7 @@ class TestOperators(hu.HypothesisTestCase):
         out, = self.assertReferenceChecks(gc, op, [a], ref)
         self.assertEqual(dst, out.dtype)
 
+    @unittest.skipIf("IN_CIRCLECI" in os.environ, "FIXME: flaky test in CircleCI")
     @given(a=hu.tensor(),
            eps=st.floats(min_value=1e-4, max_value=1e-2),
            a_grad=hu.tensor(elements=st.floats(min_value=0.01, max_value=0.99)),
