@@ -9,9 +9,7 @@
 #include <ATen/Error.h>
 
 /*
-* A CUDA event interface with no CUDA build dependency.
-*
-* Includes the CUDAEvent RAII class and a pointer-based event API.
+* The CUDAEvent RAII class and a pointer-based event API.
 */
 
 struct CUDAEventInternals;
@@ -30,6 +28,7 @@ AT_API void CUDAEvent_retain(CUDAEventInternals* internals);
 AT_API void CUDAEvent_uncheckedFree(CUDAEventInternals* internals);
 AT_API cudaEvent_t CUDAEvent_event(CUDAEventInternals* internals);
 AT_API int64_t CUDAEvent_device(CUDAEventInternals* internals);
+AT_API bool CUDAEvent_happened(CUDAEventInternals* internals);
 
 } // namespace detail
 
@@ -39,7 +38,7 @@ struct CUDAEvent {
 
   // Constructors
   CUDAEvent(unsigned int flags = DEFAULT_FLAGS)
-    : internals_(detail::CUDAEvent_create(flags)) {}
+  : internals_{detail::CUDAEvent_create(flags)} { }
 
   ~CUDAEvent() { detail::CUDAEvent_uncheckedFree(internals_); }
 
@@ -52,7 +51,7 @@ struct CUDAEvent {
     std::swap(internals_, other.internals_);
   }
 
-  CUDAEvent& operator=(CUDAEvent other) noexcept {
+  CUDAEvent& operator=(CUDAEvent other) {
     std::swap(internals_, other.internals_);
     return *this;
   }
@@ -68,8 +67,11 @@ struct CUDAEvent {
   cudaEvent_t event() const { return detail::CUDAEvent_event(internals_); }
   CUDAEventInternals* internals() const { return internals_; }
 
-  void record() const; // Record on the current stream
-  void record(const CUDAStream& stream) const;
+  bool happened() const { return detail::CUDAEvent_happened(internals_); }
+
+  void record(); // Record on the current stream
+  void record(const CUDAStream& stream);
+  void recordOnce(const CUDAStream& stream);
 
 private:
   CUDAEventInternals* internals_;
