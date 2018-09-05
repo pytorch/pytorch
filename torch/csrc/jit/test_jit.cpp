@@ -702,7 +702,7 @@ void testCreateAutodiffSubgraphs(std::ostream & out) {
 }
 
 autograd::Variable var(at::Type & t, at::IntList sizes, bool requires_grad) {
-  return autograd::make_variable(at::rand(sizes, t), requires_grad);
+  return autograd::make_variable(at::rand(sizes, t.options()), requires_grad);
 }
 autograd::Variable undef() {
   return autograd::Variable();

@@ -158,6 +158,8 @@ static inline Type& getNonVariableType(DeviceType p, ScalarType s) {
 AT_API Type& getMaybeVariableType(TensorOptions options);
 AT_API Type& getMaybeVariableType(const TensorImpl*);
 
+AT_API Allocator* getCPUAllocator();
+
 static inline Type& CPU(ScalarType s) {
   return getNonVariableType(Backend::CPU, s);
 }

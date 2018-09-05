@@ -3410,6 +3410,26 @@ class TestTorch(TestCase):
         # Test that we still have proper sorting with duplicate keys
         self.assertIsOrdered('descending', x, res2val, res2ind, 'random with duplicate keys')
 
+    @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
+    def test_tensordot(self):
+        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
+        for d in devices:
+            a = torch.arange(60., device=d).reshape(3, 4, 5)
+            b = torch.arange(24., device=d).reshape(4, 3, 2)
+            c = torch.tensordot(a, b, dims=([1, 0], [0, 1])).cpu()
+            cn = torch.from_numpy(np.tensordot(a.cpu().numpy(), b.cpu().numpy(),
+                                               axes=([1, 0], [0, 1])))
+            self.assertEqual(c, cn)
+            a = torch.randn(2, 3, 4, 5, device=d)
+            b = torch.randn(4, 5, 6, 7, device=d)
+            c = torch.tensordot(a, b, dims=2).cpu()
+            cn = torch.from_numpy(np.tensordot(a.cpu().numpy(), b.cpu().numpy(),
+                                               axes=2))
+            self.assertEqual(c, cn)
+            c = torch.tensordot(a, b).cpu()
+            cn = torch.from_numpy(np.tensordot(a.cpu().numpy(), b.cpu().numpy()))
+            self.assertEqual(c, cn)
+
     def test_topk(self):
         def topKViaSort(t, k, dim, dir):
             sorted, indices = t.sort(dim, dir)
