@@ -23,16 +23,16 @@ namespace detail {
 
 // Pointer-based API (for internal use)
 // Note: ATen/Context is preferred to work with streams safely
-AT_API CUDAEventInternals* CUDAEvent_create(unsigned int flags);
-AT_API void CUDAEvent_retain(CUDAEventInternals* internals);
-AT_API void CUDAEvent_uncheckedFree(CUDAEventInternals* internals);
-AT_API cudaEvent_t CUDAEvent_event(CUDAEventInternals* internals);
-AT_API int64_t CUDAEvent_device(CUDAEventInternals* internals);
-AT_API bool CUDAEvent_happened(CUDAEventInternals* internals);
+AT_CUDA_API CUDAEventInternals* CUDAEvent_create(unsigned int flags);
+AT_CUDA_API void CUDAEvent_retain(CUDAEventInternals* internals);
+AT_CUDA_API void CUDAEvent_uncheckedFree(CUDAEventInternals* internals);
+AT_CUDA_API cudaEvent_t CUDAEvent_event(CUDAEventInternals* internals);
+AT_CUDA_API int64_t CUDAEvent_device(CUDAEventInternals* internals);
+AT_CUDA_API bool CUDAEvent_happened(CUDAEventInternals* internals);
 
 } // namespace detail
 
-struct CUDAEvent {
+struct AT_CUDA_API CUDAEvent {
   // Constants
   static constexpr unsigned int DEFAULT_FLAGS = cudaEventDisableTiming;
 
