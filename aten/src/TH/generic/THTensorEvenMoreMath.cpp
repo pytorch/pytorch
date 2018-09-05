@@ -3,6 +3,7 @@
 #else
 
 #include <TH/generic/THTensorApply.hpp>
+#include <atomic>
 
 void THTensor_(fill)(THTensor *r_, scalar_t value)
 {

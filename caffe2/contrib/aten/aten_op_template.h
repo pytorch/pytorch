@@ -5,7 +5,6 @@
 #include <caffe2/core/context.h>
 #include <caffe2/core/operator.h>
 #include <caffe2/utils/math.h>
-#include <iostream>
 
 // a map from descriptor strings (see [DESCRIPTORS])
 // to the key in the switch statement that implements them

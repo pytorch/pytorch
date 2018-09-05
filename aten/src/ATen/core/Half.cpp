@@ -1,7 +1,5 @@
 #include <ATen/core/Half.h>
 
-#include <iostream>
-
 namespace at {
 
 static_assert(

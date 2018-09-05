@@ -3,7 +3,6 @@
 #include <atomic>
 #include <cassert>
 #include <cstdlib>
-#include <iostream>
 #include <memory>
 #include <mutex>
 #include <type_traits>

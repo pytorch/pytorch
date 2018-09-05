@@ -6,7 +6,6 @@
 #include "THTensor.h"
 #include "THStorageFunctions.hpp"
 
-#include <atomic>
 #include <ATen/ATen.h>
 
 inline const int64_t* THTensor_getSizePtr(THTensor* tensor) {

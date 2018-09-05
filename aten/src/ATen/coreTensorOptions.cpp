@@ -7,8 +7,6 @@
 #include <ATen/core/optional.h>
 #include <ATen/core/ScalarType.h>
 
-#include <iostream>
-
 namespace at {
 
 TensorOptions::TensorOptions(bool use_thread_local_default_options) {
