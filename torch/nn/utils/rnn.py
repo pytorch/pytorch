@@ -1,7 +1,7 @@
 from collections import namedtuple
+import warnings
 
 import torch
-import torch.onnx
 
 
 PackedSequence_ = namedtuple('PackedSequence', ['data', 'batch_sizes'])
@@ -138,6 +138,12 @@ def pack_padded_sequence(input, lengths, batch_first=False):
     Returns:
         a :class:`PackedSequence` object
     """
+    if torch._C._get_tracing_state() and not isinstance(lengths, torch.Tensor):
+        warnings.warn('pack_padded_sequence has been called with a Python list of '
+                      'sequence lengths. The tracer cannot track the data flow of Python '
+                      'values, and it will treat them as constants, likely rendering '
+                      'the trace incorrect for any other combination of lengths.',
+                      category=torch.jit.TracerWarning, stacklevel=2)
     lengths = torch.as_tensor(lengths, dtype=torch.int64)
     return PackedSequence(torch._C._VariableFunctions._pack_padded_sequence(input, lengths, batch_first))
 

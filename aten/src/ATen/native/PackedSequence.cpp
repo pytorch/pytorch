@@ -25,7 +25,7 @@ std::tuple<Tensor, Tensor> _pack_padded_sequence(const Tensor& _input, const Ten
 
   std::vector<at::Tensor> steps;
   steps.reserve(batch_size);
-  at::Tensor batch_sizes_t = _lengths.type().tensor(lengths[0]);
+  at::Tensor batch_sizes_t = at::empty(lengths[0], _lengths.options());
   int64_t * batch_sizes = batch_sizes_t.data<int64_t>();
 
   std::vector<int64_t> step_shape; // == [-1, *input.shape[2:]]
@@ -76,12 +76,12 @@ std::tuple<Tensor, Tensor> _pack_padded_sequence(const Tensor& _input, const Ten
 }
 
 Tensor _pack_padded_sequence_backward(const Tensor& grad, at::IntList input_size, const Tensor& _batch_sizes, bool batch_first) {
-  std::vector<int64_t> input_size_t = input_size.vec();
+  std::vector<int64_t> input_size_after_t = input_size.vec();
   if (batch_first) {
     AT_CHECK(input_size.size() >= 2);
-    std::swap(input_size_t[0], input_size_t[1]);
+    std::swap(input_size_after_t[0], input_size_after_t[1]);
   }
-  auto grad_input = grad.type().tensor(input_size_t).zero_();
+  auto grad_input = at::zeros(input_size_after_t, grad.options());
   auto batch_sizes_t = _batch_sizes.contiguous();
   checkLongTensor(batch_sizes_t);
 
@@ -129,7 +129,7 @@ std::tuple<Tensor, Tensor> _pad_packed_sequence(const Tensor& data, const Tensor
   // This will be modified at every iteration, but we reserve memory for it now.
   std::vector<int64_t> tmp_view_size = std::move(output_size); // == [-1, -1, *var_data.size()[1:]]
 
-  at::Tensor lengths_t = batch_sizes_t.type().tensor(max_batch_size);
+  at::Tensor lengths_t = at::empty(max_batch_size, batch_sizes_t.options());
   int64_t * lengths = lengths_t.data<int64_t>() + max_batch_size - 1;
   int64_t data_offset = 0;
   int64_t prev_batch_size = max_batch_size;
