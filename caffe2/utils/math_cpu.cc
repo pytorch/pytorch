@@ -3459,13 +3459,13 @@ bool TransposeWithHPTT(
 #endif // CAFFE2_USE_HPTT
 
 template <typename T>
-void Tranpose2D(const int rows, const int cols, const T* X, T* Y);
+void Transpose2D(const int rows, const int cols, const T* X, T* Y);
 
 #ifdef CAFFE2_USE_MKL
 
 #define DELEGATE_TRANSPOSE_2D_FUNCTION(T, Func)                          \
   template <>                                                            \
-  void Tranpose2D<T>(const int rows, const int cols, const T* X, T* Y) { \
+  void Transpose2D<T>(const int rows, const int cols, const T* X, T* Y) { \
     Func('R', 'T', rows, cols, T(1), X, cols, Y, rows);                  \
   }
 DELEGATE_TRANSPOSE_2D_FUNCTION(float, mkl_somatcopy);
@@ -3476,7 +3476,7 @@ DELEGATE_TRANSPOSE_2D_FUNCTION(double, mkl_domatcopy);
 
 #define CAFFE2_SPECIALIZED_TRANSPOSE_2D(T)                               \
   template <>                                                            \
-  void Tranpose2D<T>(const int rows, const int cols, const T* X, T* Y) { \
+  void Transpose2D<T>(const int rows, const int cols, const T* X, T* Y) { \
     EigenMatrixMap<T>(Y, rows, cols) =                                   \
         ConstEigenMatrixMap<T>(X, cols, rows).transpose();               \
   }
@@ -3484,7 +3484,7 @@ DELEGATE_TRANSPOSE_2D_FUNCTION(double, mkl_domatcopy);
 #ifndef CAFFE2_USE_MKL
 
 template <>
-void Tranpose2D<float>(
+void Transpose2D<float>(
     const int rows,
     const int cols,
     const float* X,
@@ -3581,7 +3581,7 @@ void TransposeCPUImpl(
     return;
   }
   if (ndim == 2) {
-    Tranpose2D<T>(dims[0], dims[1], X, Y);
+    Transpose2D<T>(dims[0], dims[1], X, Y);
   } else {
     TransposeND<T>(ndim, dims, axes, X, Y);
   }
@@ -3601,7 +3601,7 @@ void TransposeCPUImpl(
     return;
   }
   if (ndim == 2) {
-    Tranpose2D<float>(dims[0], dims[1], X, Y);
+    Transpose2D<float>(dims[0], dims[1], X, Y);
   } else {
 #ifdef CAFFE2_USE_HPTT
     if (TransposeWithHPTT(ndim, dims, axes, X, Y)) {
