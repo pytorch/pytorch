@@ -13,7 +13,7 @@ CUDAEvent CUDAEvent::create(unsigned int flags) {
   return event;
 }
 
-CUDAEvent::~CUDAEvent() {
+CUDAEvent::~CUDAEvent() noexcept (false) {
   if (event_ != nullptr) {
     // cudaEventDestroy must run on the same device of the event,
     // otherwise it creates a context on default device as well.

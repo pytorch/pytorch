@@ -13,8 +13,8 @@ std::vector <THCStream*> THPUtils_PySequence_to_THCStreamList(PyObject *obj) {
   if (!PySequence_Check(obj)) {
     throw std::runtime_error("Expected a sequence in THPUtils_PySequence_to_THCStreamList");
   }
-  THPObjectPtr seq = THPObjectPtr(PySequence_Fast(obj, NULL));
-  if (seq.get() == NULL) {
+  THPObjectPtr seq = THPObjectPtr(PySequence_Fast(obj, nullptr));
+  if (seq.get() == nullptr) {
     throw std::runtime_error("expected PySequence, but got " + std::string(THPUtils_typename(obj)));
   }
 
@@ -26,7 +26,7 @@ std::vector <THCStream*> THPUtils_PySequence_to_THCStreamList(PyObject *obj) {
     if (PyObject_IsInstance(stream, THCPStreamClass)) {
       streams.push_back( ((THCPStream *)stream)->cdata);
     } else if (stream == Py_None) {
-      streams.push_back(NULL);
+      streams.push_back(nullptr);
     } else {
       std::runtime_error("Unknown data type found in stream list. Need THCStream or None");
     }

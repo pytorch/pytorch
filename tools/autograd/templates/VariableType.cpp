@@ -43,7 +43,7 @@ using namespace torch::autograd::generated;
 namespace torch { namespace autograd {
 
 VariableType::VariableType(Context* context, Type* baseType)
-  : Type(baseType->type_id(), /*is_variable=*/true, /*is_undefined=*/false)
+  : TypeDefault(baseType->type_id(), /*is_variable=*/true, /*is_undefined=*/false)
   , baseType(baseType)
   , id_(context->freshTypeID()) {
   str = std::string("Variable[") + baseType->toString() + "]";
@@ -55,10 +55,12 @@ ScalarType VariableType::scalarType() const {
 Backend VariableType::backend() const {
   return baseType->backend();
 }
-bool VariableType::is_cuda() const { return baseType->is_cuda(); }
-bool VariableType::is_sparse() const { return baseType->is_sparse(); }
-bool VariableType::is_distributed() const { return baseType->is_distributed(); }
-
+Allocator* VariableType::allocator() const {
+  return baseType->allocator();
+}
+Device VariableType::getDeviceFromPtr(void * data) const {
+  return baseType->getDeviceFromPtr(data);
+}
 Storage VariableType::storage(bool resizable) const {
   return baseType->storage();
 }
@@ -88,17 +90,13 @@ size_t VariableType::elementSizeInBytes() const {
   return baseType->elementSizeInBytes();
 }
 Type & VariableType::toBackend(Backend b) const {
-  return *getType(baseType->toBackend(b));
+  return *getVariableTypeFromBaseType(baseType->toBackend(b));
 }
 Type & VariableType::toScalarType(ScalarType s) const {
-  return *getType(baseType->toScalarType(s));
+  return *getVariableTypeFromBaseType(baseType->toScalarType(s));
 }
 TypeID VariableType::ID() const {
   return static_cast<TypeID>(id_);
-}
-
-const char * VariableType::typeString() {
-  return "VariableType";
 }
 
 std::vector<std::unique_ptr<Type>> type_to_variable_type;
@@ -118,7 +116,7 @@ struct VariableTypeRegistry {
     auto& context = at::globalContext();
     for (int p = 0; p < static_cast<int>(Backend::NumOptions); ++p) {
       for (int s = 0; s < static_cast<int>(ScalarType::NumOptions); ++s) {
-        auto baseType = context.getTypeRaw(static_cast<Backend>(p), static_cast<ScalarType>(s));
+        auto baseType = context.getNonVariableTypeRaw(static_cast<Backend>(p), static_cast<ScalarType>(s));
         if (baseType && baseType->backend() != Backend::Undefined) {
           register_variable_type_for(baseType);
         }
@@ -130,7 +128,7 @@ struct VariableTypeRegistry {
 struct VariableHooks : public at::VariableHooksInterface {
   VariableHooks(at::VariableHooksArgs) {}
   void registerVariableTypeFor(at::Context*, at::Backend, at::ScalarType) const override;
-  at::Type& getVariableType(const at::Type&) const override;
+  at::Type& getVariableTypeFromBaseType(const at::Type&) const override;
 };
 
 // Sigh, the registry doesn't support namespaces :(
@@ -164,30 +162,23 @@ REGISTER_VARIABLE_HOOKS(VariableHooks)
 
 // Pre-condition: backend/scalar_type is a valid type in the type_registry
 void VariableHooks::registerVariableTypeFor(at::Context* context, at::Backend backend, at::ScalarType scalar_type) const {
-  auto* baseType = context->getTypeRaw(backend, scalar_type);
+  auto* baseType = context->getNonVariableTypeRaw(backend, scalar_type);
   register_variable_type_for(baseType);
 }
 
-at::Type& VariableHooks::getVariableType(const at::Type& baseType) const {
-  return *VariableType::getType(baseType);
+at::Type& VariableHooks::getVariableTypeFromBaseType(const at::Type& baseType) const {
+  return *VariableType::getVariableTypeFromBaseType(baseType);
 }
 
 bool VariableType::isVariableType(const at::Type& type) {
   return type.is_variable();
 }
 
-at::Type* VariableType::getType(const at::Type& baseType) {
+at::Type* VariableType::getVariableTypeFromBaseType(const at::Type& baseType) {
   auto id = static_cast<size_t>(baseType.ID());
   if(id >= type_to_variable_type.size())
     return nullptr;
   return type_to_variable_type[id].get();
-}
-
-at::Type* VariableType::getType(const at::Tensor& tensor) {
-  if (!tensor.defined()) {
-    throw std::runtime_error("tensor is undefined");
-  }
-  return getType(tensor.type());
 }
 
 namespace {
@@ -197,9 +188,9 @@ std::vector<at::Type*> allTypesForBackends(at::ArrayRef<at::Backend> backends) {
   res.reserve(backends.size() * static_cast<int>(ScalarType::NumOptions));
   for (auto p : backends) {
     for (int s = 0; s < static_cast<int>(ScalarType::NumOptions); s++) {
-      auto baseType = context.getTypeRaw(static_cast<Backend>(p), static_cast<ScalarType>(s));
+      auto baseType = context.getNonVariableTypeRaw(static_cast<Backend>(p), static_cast<ScalarType>(s));
       if (baseType) {
-        res.emplace_back(VariableType::getType(*baseType));
+        res.emplace_back(VariableType::getVariableTypeFromBaseType(*baseType));
       }
     }
   }
@@ -388,6 +379,17 @@ static bool isFloatingPoint(ScalarType s) {
 }
 
 Tensor & VariableType::s_copy_(Tensor & self, const Tensor & src, bool non_blocking) const {
+  jit::Node* node = nullptr;
+  if(torch::jit::tracer::isTracing()) {
+    auto& graph = jit::tracer::getTracingState()->graph;
+    // if you have no views of self, then an in place copy is equivalent to
+    // making sure we expand src to the same size as self
+    node = graph->create(jit::aten::expand_as, /*outputs=*/0);
+    jit::tracer::addInputs(node, "src", src);
+    jit::tracer::addInputs(node, "self", self);
+    graph->appendNode(node);
+    jit::tracer::ensureUnique("copy_ (possibly due to an assignment)", self);
+  }
   // TODO: once copy is exposed in Declarations.yaml we may be able to bind
   // it automatically
   auto& self_ = unpack(self, "self", 0);
@@ -407,6 +409,9 @@ Tensor & VariableType::s_copy_(Tensor & self, const Tensor & src, bool non_block
   baseType->s_copy_(self_, src_, non_blocking);
   increment_version(self);
   rebase_history(as_variable_ref( self ), std::move(grad_fn));
+  if(torch::jit::tracer::isTracing()) {
+    jit::tracer::addOutput(node, self);
+  }
   return self;
 }
 

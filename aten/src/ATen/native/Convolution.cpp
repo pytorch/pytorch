@@ -169,6 +169,13 @@ static void check_input_shape_forward(const at::Tensor& input,
        << " instead";
     throw std::runtime_error(ss.str());
   }
+  if (weight.size(0) % groups != 0) {
+    std::stringstream ss;
+    ss << "Given groups=" << groups << ", expected weight to be divisible by "
+       << groups << " at dimension 0, but got weight of size " << weight.sizes()
+       << " instead";
+    throw std::runtime_error(ss.str());
+  }
 
   if (!transposed) {
     if (input.size(1) != (weight.size(1) * groups)) {

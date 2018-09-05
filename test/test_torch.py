@@ -166,15 +166,21 @@ class TestTorch(TestCase):
             for name in dir(ns):
                 if name.startswith('_'):
                     continue
-                if any(r.match(name) for r in skip_regexes):
-                    continue
                 var = getattr(ns, name)
-                if isinstance(var, checked_types):
-                    self.assertTrue(var.__doc__ is not None, ns_name + '.' + name)
+                if not isinstance(var, checked_types):
+                    continue
+                doc = var.__doc__
+                has_doc = doc is not None and len(doc.strip()) > 0
+                full_name = ns_name + '.' + name
+                if any(r.match(name) for r in skip_regexes):
+                    self.assertFalse(has_doc,
+                                     'New docs have been added for {}, please remove '
+                                     'it from the skipped list in TestTorch.test_doc'.format(full_name))
+                else:
+                    self.assertTrue(has_doc, '{} is missing documentation'.format(full_name))
 
         # FIXME: fix all the skipped ones below!
         test_namespace(torch.randn(1),
-                       'allclose',
                        'as_strided',
                        'as_strided_',
                        re.compile('^clamp_(min|max)_?$'),
@@ -428,6 +434,16 @@ class TestTorch(TestCase):
         check_non_contiguous((1024,), torch.double)
         check_non_contiguous((5, 7), torch.float)
         check_non_contiguous((1024,), torch.float)
+
+        def check_non_contiguous_index(dtype):
+            contig = torch.randn((2, 2, 1, 2), dtype=dtype)
+            non_contig = contig[:, 1, ...]
+            contig = non_contig.clone()
+            self.assertFalse(non_contig.is_contiguous())
+            self.assertEqual(torchfn(contig), torchfn(non_contig), 'non-contiguous index')
+
+        check_non_contiguous_index(torch.float)
+        check_non_contiguous_index(torch.double)
 
         def check_non_contiguous_expand(shape, dtype):
             contig = torch.randn(shape, dtype=dtype)
@@ -793,8 +809,28 @@ class TestTorch(TestCase):
     def test_max(self):
         self._testSelection(torch.max, max)
 
+    @staticmethod
+    def _test_max_with_inf(self, dtypes=(torch.float, torch.double), device='cpu'):
+        for dtype in dtypes:
+            a = torch.tensor([[-inf, -inf, inf, 3], [inf, inf, -inf, -1]], dtype=dtype, device=device)
+            self.assertTrue(torch.all(torch.max(a, dim=1)[0] == inf).item())
+            self.assertTrue(torch.max(a).item() == inf)
+
+    def test_max_with_inf(self):
+        self._test_max_with_inf(self)
+
     def test_min(self):
         self._testSelection(torch.min, min)
+
+    @staticmethod
+    def _test_min_with_inf(self, dtypes=(torch.float, torch.double), device='cpu'):
+        for dtype in dtypes:
+            a = torch.tensor([[-inf, -inf, inf, 3], [inf, inf, -inf, -1]], dtype=dtype, device=device)
+            self.assertTrue(torch.all(torch.min(a, dim=1)[0] == (-inf)).item())
+            self.assertTrue(torch.min(a).item() == -inf)
+
+    def test_min_with_inf(self):
+        self._test_min_with_inf(self)
 
     @staticmethod
     def _test_norm(self, device):
@@ -3374,6 +3410,26 @@ class TestTorch(TestCase):
         # Test that we still have proper sorting with duplicate keys
         self.assertIsOrdered('descending', x, res2val, res2ind, 'random with duplicate keys')
 
+    @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
+    def test_tensordot(self):
+        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
+        for d in devices:
+            a = torch.arange(60., device=d).reshape(3, 4, 5)
+            b = torch.arange(24., device=d).reshape(4, 3, 2)
+            c = torch.tensordot(a, b, dims=([1, 0], [0, 1])).cpu()
+            cn = torch.from_numpy(np.tensordot(a.cpu().numpy(), b.cpu().numpy(),
+                                               axes=([1, 0], [0, 1])))
+            self.assertEqual(c, cn)
+            a = torch.randn(2, 3, 4, 5, device=d)
+            b = torch.randn(4, 5, 6, 7, device=d)
+            c = torch.tensordot(a, b, dims=2).cpu()
+            cn = torch.from_numpy(np.tensordot(a.cpu().numpy(), b.cpu().numpy(),
+                                               axes=2))
+            self.assertEqual(c, cn)
+            c = torch.tensordot(a, b).cpu()
+            cn = torch.from_numpy(np.tensordot(a.cpu().numpy(), b.cpu().numpy()))
+            self.assertEqual(c, cn)
+
     def test_topk(self):
         def topKViaSort(t, k, dim, dir):
             sorted, indices = t.sort(dim, dir)
@@ -3424,7 +3480,6 @@ class TestTorch(TestCase):
         self.assertRaises(TypeError, lambda: q.topk(4, True))
 
     @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
-    @skipIfRocm
     def test_topk_noncontiguous_gpu(self):
         t = torch.randn(20, device="cuda")[::2]
         top1, idx1 = t.topk(5)
@@ -8241,14 +8296,18 @@ class TestTorch(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_multiplication_numpy_scalar(self):
-        np_sc = np.float64(2.0)
-        t = torch.ones(2, requires_grad=True)
-        r1 = np_sc * t
-        self.assertIsInstance(r1, torch.Tensor)
-        self.assertTrue(r1.requires_grad)
-        r2 = t * np_sc
-        self.assertIsInstance(r2, torch.Tensor)
-        self.assertTrue(r2.requires_grad)
+        for np_dtype in [np.float32, np.float64, np.int32, np.int64, np.int16, np.uint8]:
+            for t_dtype in [torch.float, torch.double]:
+                np_sc = np_dtype(2.0)
+                t = torch.ones(2, requires_grad=True, dtype=t_dtype)
+                r1 = t * np_sc
+                self.assertIsInstance(r1, torch.Tensor)
+                self.assertTrue(r1.dtype == t_dtype)
+                self.assertTrue(r1.requires_grad)
+                r2 = np_sc * t
+                self.assertIsInstance(r2, torch.Tensor)
+                self.assertTrue(r2.dtype == t_dtype)
+                self.assertTrue(r2.requires_grad)
 
     def test_error_msg_type_translation(self):
         with self.assertRaisesRegex(

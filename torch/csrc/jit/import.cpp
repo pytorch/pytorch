@@ -224,11 +224,19 @@ TypePtr ModuleDecoder::buildType(const onnx::TypeProto& type_proto) {
   if (kind == "DynamicType") {
     return DynamicType::get();
   } else if (kind == "TensorType") {
-    // TODO: Don't use DynamicType here
-    return DynamicType::get();
+    auto dims = shape_proto.dim_size();
+    return TensorType::create(onnxTypeToATenType(tensortype_proto.elem_type()), -1, dims);
   } else if (kind == "CompleteTensorType") {
-    // TODO: Don't use DynamicType here
-    return DynamicType::get();
+    // first half of the dims are sizes and the second half are strides
+    auto total = shape_proto.dim_size();
+    std::vector<int64_t> sizes, strides;
+    for (int i = 0; i < total / 2; i++) {
+      sizes.push_back(shape_proto.dim(i).dim_value());
+    }
+    for (int i = total / 2; i < total; i++) {
+      strides.push_back(shape_proto.dim(i).dim_value());
+    }
+    return CompleteTensorType::create(onnxTypeToATenType(tensortype_proto.elem_type()), -1, sizes, strides);
   } else if (kind == "TupleType") {
     std::vector<TypePtr> elems;
     for (auto &subkind : shape_proto.dim()) {
@@ -371,6 +379,8 @@ ModuleDecoder::ModuleDecoder(
     }
 
     auto graph = buildGraph(node_proto.attribute(0).g());
+    // has_domain field has a string iff the method was optimized
+    parent_module->set_optimized(node_proto.has_domain());
     parent_module->create_method(name, graph, member_inputs);
     // We store the schema in the docstring so we can parse the schema and
     // assign it to the method.

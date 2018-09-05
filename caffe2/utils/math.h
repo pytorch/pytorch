@@ -422,6 +422,12 @@ CAFFE2_API void RandUniformUnique(
     const T* avoid,
     Context* context);
 
+// Generate n values from synthetic data distribution,
+// define by unique accesses and stack distances
+template <typename T, class Context>
+CAFFE2_API void
+RandSyntheticData(const size_t n, const T a, const T b, T* r, Context* context);
+
 template <typename T, class Context>
 CAFFE2_API void
 RandGaussian(const size_t n, const T mean, const T std, T* r, Context* context);
@@ -490,13 +496,22 @@ template <typename T, class Context>
 CAFFE2_API void
 Axpy(const int N, const float* alpha, const T* x, T* y, Context* context);
 
-template <typename T, class Context>
+template <typename TCoeff, typename TData, class Context>
 CAFFE2_API void Axpby(
     const int N,
-    const float alpha,
-    const T* x,
-    const T b,
-    T* y,
+    const TCoeff alpha,
+    const TData* x,
+    const TCoeff b,
+    TData* y,
+    Context* context);
+
+template <typename TCoeff, typename TData, class Context>
+CAFFE2_API void Axpby(
+    const int N,
+    const TCoeff* alpha,
+    const TData* x,
+    const TCoeff* b,
+    TData* y,
     Context* context);
 
 // groups must be 1 for GPU

@@ -142,6 +142,8 @@ class ProcessGroupNCCL : public ProcessGroup {
 
   std::shared_ptr<ProcessGroup::Work> barrier() override;
 
+  std::unordered_map<int, int> getGroupRank() override;
+
  protected:
   // Helper that broadcasts nccl unique ID to all ranks through the store
   void broadcastUniqueNCCLID(ncclUniqueId* ncclID);

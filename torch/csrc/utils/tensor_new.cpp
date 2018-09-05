@@ -50,29 +50,29 @@ void maybe_initialize_cuda(const Type &type) {
 Tensor dispatch_zeros(const Type& type, int32_t device_index, IntList sizes) {
   maybe_initialize_cuda(type);
   AutoNoGIL no_gil;
-  return torch::zeros(sizes, TensorOptions(type, device_index));
+  return torch::zeros(sizes, type.options(device_index));
 }
 
 Tensor dispatch_ones(const Type& type, int32_t device_index, IntList sizes) {
   maybe_initialize_cuda(type);
   AutoNoGIL no_gil;
-  return torch::ones(sizes, TensorOptions(type, device_index));
+  return torch::ones(sizes, type.options(device_index));
 }
 
 Tensor dispatch_full(const Type& type, Scalar fill_value, int32_t device_index, IntList sizes) {
   maybe_initialize_cuda(type);
   AutoNoGIL no_gil;
-  return torch::full(sizes, fill_value, TensorOptions(type, device_index));
+  return torch::full(sizes, fill_value, type.options(device_index));
 }
 
 Tensor new_with_sizes(const Type& type, int32_t device_index, IntList sizes) {
   maybe_initialize_cuda(type);
   AutoNoGIL no_gil;
-  return torch::empty(sizes, TensorOptions(type, device_index));
+  return torch::empty(sizes, type.options(device_index));
 }
 
 Tensor new_with_storage(const Type& type, Storage storage) {
-  auto tensor = at::empty({}, type);
+  auto tensor = at::empty({}, type.options());
   tensor.set_(storage);
   return tensor;
 }
@@ -141,7 +141,7 @@ ScalarType infer_scalar_type(PyObject *obj) {
     return numpy_dtype_to_aten(PyArray_TYPE((PyArrayObject*)obj));
   }
   if (PyArray_CheckScalar(obj)) {
-    return numpy_dtype_to_aten(PyArray_TYPE((PyArrayObject*)(PyArray_FromScalar(obj, NULL))));
+    return numpy_dtype_to_aten(PyArray_TYPE((PyArrayObject*)(PyArray_FromScalar(obj, nullptr))));
   }
 #endif
   if (PySequence_Check(obj)) {
@@ -207,7 +207,7 @@ Tensor internal_new_from_data(const Type & type, at::optional<Device> device_opt
                                                                : torch::getDeviceType(var.type());
       // infer the scalar type and device type; it's not expected to infer the layout since these constructors
       // are defined per-layout-type (e.g. tensor vs sparse_coo_tensor).
-      const auto& type_inference_type = torch::getType(var.type().scalarType(),
+      const auto& type_inference_type = torch::getVariableType(var.type().scalarType(),
                                                        *torch::getLayout(type.backend()),
                                                        type_inference_device_type);
       const auto& type_to_use = type_inference ? type_inference_type : type;
@@ -256,7 +256,7 @@ Tensor legacy_sparse_tensor_ctor(const Type& type, PyObject* args, PyObject* kwa
   ParsedArgs<4> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
-    return at::empty({0}, TensorOptions(type, r.device(0).index()));
+    return at::empty({0}, type.options(r.device(0).index()));
   } else if (r.idx == 1) {
     auto cdata = reinterpret_cast<void*>(r.toInt64(0));
     return type.unsafeTensorFromTH(cdata, true);
@@ -320,7 +320,7 @@ const Type& typeWithDefault(PythonArgs& r, int64_t dtype_idx, int64_t device_idx
   const auto scalartype = r.scalartypeWithDefault(dtype_idx, type.scalarType());
   const Device types_device_type(type.device_type());
   const auto device_type = r.isNone(device_idx) ? types_device_type : r.device(device_idx).type();
-  return torch::getType(scalartype, *torch::getLayout(type.backend()), device_type);
+  return torch::getVariableType(scalartype, *torch::getLayout(type.backend()), device_type);
 }
 } // namespace
 

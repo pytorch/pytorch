@@ -488,6 +488,11 @@ class TestCaffe2Backend(unittest.TestCase):
         model = nn.BatchNorm1d(224)
         self.run_model_test(model, train=True, input=c, batch_size=BATCH_SIZE)
 
+    def test_batchnorm2d_noaffine(self):
+        c = Variable(torch.randn(128, 128, 1, 1))
+        model = nn.BatchNorm2d(128, affine=False)
+        self.run_model_test(model, train=False, input=c, batch_size=BATCH_SIZE)
+
     def test_constant(self):
         c = Variable(torch.randn(BATCH_SIZE, 3, 224, 224))
 
@@ -546,7 +551,7 @@ class TestCaffe2Backend(unittest.TestCase):
             def forward(self, input):
                 # TODO: Why index? This returns a tuple and test runner doesn't
                 # support tuple comparison.
-                return input.chunk(20, dim=2)[-1]
+                return input.chunk(8, dim=2)[-1]
         self.run_model_test(MyModel(), train=False, batch_size=BATCH_SIZE)
 
     def test_sqrt(self):
