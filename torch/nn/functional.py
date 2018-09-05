@@ -627,8 +627,10 @@ def alpha_dropout(input, p=0.5, training=False, inplace=False):
 
 def dropout2d(input, p=0.5, training=True, inplace=False):
     r"""
-    Randomly zero-out entire channels (a channel is a 2D feature map)
-    of the input tensor. Each channel will be zero-out indipendently
+    Randomly zero out entire channels (a channel is a 2D feature map,
+    e.g., the :math:`j`-th channel of the :math:`i`-th sample in the
+    batched input is a 2D tensor :math:`input[i, j]`) of the input tensor).
+    Each channel will be zeroed out independently on every forward call.
     with probability :attr:`p` using samples from a Bernoulli distribution.
 
     See :class:`~torch.nn.Dropout2d` for details.
@@ -647,8 +649,10 @@ def dropout2d(input, p=0.5, training=True, inplace=False):
 
 def dropout3d(input, p=0.5, training=True, inplace=False):
     r"""
-    Randomly zero-out entire channels (a channel is a 3D feature map)
-    of the input tensor. Each channel will be zero-out indipendently
+    Randomly zero out entire channels (a channel is a 3D feature map,
+    e.g., the :math:`j`-th channel of the :math:`i`-th sample in the
+    batched input is a 3D tensor :math:`input[i, j]`) of the input tensor).
+    Each channel will be zeroed out independently on every forward call.
     with probability :attr:`p` using samples from a Bernoulli distribution.
 
     See :class:`~torch.nn.Dropout3d` for details.

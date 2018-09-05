@@ -20,7 +20,7 @@ class _DropoutNd(Module):
 class Dropout(_DropoutNd):
     r"""During training, randomly zeroes some of the elements of the input
     tensor with probability :attr:`p` using samples from a Bernoulli
-    distribution. Each channel will be zero-out indipendently on every forward
+    distribution. Each channel will be zeroed out independently on every forward
     call.
 
     This has proven to be an effective technique for regularization and
@@ -55,10 +55,11 @@ class Dropout(_DropoutNd):
 
 
 class Dropout2d(_DropoutNd):
-    r"""Randomly zero-out entire channels (a channel is a 2D feature map of
-    dimensions H, W) of the input tensor. Each channel will be zero-out
-    indipendently on every forward call. with probability :attr:`p` using
-    samples from a Bernoulli distribution.
+    r"""Randomly zero out entire channels (a channel is a 2D feature map,
+    e.g., the :math:`j`-th channel of the :math:`i`-th sample in the
+    batched input is a 2D tensor :math:`input[i, j]`) of the input tensor).
+    Each channel will be zeroed out independently on every forward call.
+    with probability :attr:`p` using samples from a Bernoulli distribution.
 
     Usually the input comes from :class:`nn.Conv2d` modules.
 
@@ -96,10 +97,11 @@ class Dropout2d(_DropoutNd):
 
 
 class Dropout3d(_DropoutNd):
-    r"""Randomly zero-out entire channels (a channel is a 3D feature map of
-    dimensions D, H, W) of the input tensor. Each channel will be zero-out
-    indipendently on every forward call. with probability :attr:`p` using
-    samples from a Bernoulli distribution.
+    r"""Randomly zero out entire channels (a channel is a 3D feature map,
+    e.g., the :math:`j`-th channel of the :math:`i`-th sample in the
+    batched input is a 3D tensor :math:`input[i, j]`) of the input tensor).
+    Each channel will be zeroed out independently on every forward call.
+    with probability :attr:`p` using samples from a Bernoulli distribution.
 
     Usually the input comes from :class:`nn.Conv3d` modules.
 
