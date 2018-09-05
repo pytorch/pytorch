@@ -109,7 +109,7 @@ pytorch_linux_test_defaults: &pytorch_linux_test_defaults
         pwd
         echo "declare -x IN_CIRCLECI=1" > /home/circleci/project/env
         echo "declare -x PYTHON_VERSION=${PYTHON_VERSION}" >> /home/circleci/project/env
-        echo "declare -x SCCACHE_BUCKET=${SCCACHE_BUCKET}" >> /home/circleci/project/env
+        echo "declare -x SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2" >> /home/circleci/project/env
         # This IAM user allows write access to S3 bucket for sccache
         echo "declare -x AWS_ACCESS_KEY_ID=AKIAJJZUW4G2ASX5W7KA" >> /home/circleci/project/env
         echo "declare -x AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET}" >> /home/circleci/project/env
@@ -247,7 +247,7 @@ caffe2_linux_test_defaults: &caffe2_linux_test_defaults
         fi
         pwd
         echo "declare -x IN_CIRCLECI=1" > /home/circleci/project/env
-        echo "declare -x SCCACHE_BUCKET=${SCCACHE_BUCKET}" >> /home/circleci/project/env
+        echo "declare -x SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2" >> /home/circleci/project/env
         # This IAM user allows write access to S3 bucket for sccache
         echo "declare -x AWS_ACCESS_KEY_ID=AKIAJJZUW4G2ASX5W7KA" >> /home/circleci/project/env
         echo "declare -x AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET}" >> /home/circleci/project/env
