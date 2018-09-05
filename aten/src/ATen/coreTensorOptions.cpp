@@ -1,4 +1,4 @@
-#include <ATen/TensorOptions.h>
+#include <ATen/core/TensorOptions.h>
 
 #include <ATen/Device.h>
 #include <ATen/core/Layout.h>

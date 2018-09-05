@@ -435,6 +435,16 @@ class TestTorch(TestCase):
         check_non_contiguous((5, 7), torch.float)
         check_non_contiguous((1024,), torch.float)
 
+        def check_non_contiguous_index(dtype):
+            contig = torch.randn((2, 2, 1, 2), dtype=dtype)
+            non_contig = contig[:, 1, ...]
+            contig = non_contig.clone()
+            self.assertFalse(non_contig.is_contiguous())
+            self.assertEqual(torchfn(contig), torchfn(non_contig), 'non-contiguous index')
+
+        check_non_contiguous_index(torch.float)
+        check_non_contiguous_index(torch.double)
+
         def check_non_contiguous_expand(shape, dtype):
             contig = torch.randn(shape, dtype=dtype)
             non_contig = contig.clone().expand(3, -1, -1)
