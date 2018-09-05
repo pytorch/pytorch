@@ -1738,11 +1738,11 @@ private:
   Value* emitBasicGather(const Subscript& subscript) {
     const auto& loc = subscript.range();
     JIT_ASSERT(subscript.subscript_exprs().size() == 1);
-    auto* gatherable = emitExpr(subscript.value(), identity);
+    auto* gatherable = emitExpr(subscript.value());
 
     if (gatherable->type()->kind() == TypeKind::ListType) {
       // if it's a list, emit a regular index selection op
-      auto* idx = emitExpr(subscript.subscript_exprs()[0], identity);
+      auto* idx = emitExpr(subscript.subscript_exprs()[0]);
       return emitBuiltinCall(
                  loc, *graph, aten::select, {gatherable, idx}, {}, true);
     } else {
