@@ -262,7 +262,7 @@ class CosineAnnealingRestartsLR(_LRScheduler):
 
     .. math::
 
-        \eta_t = \eta_{min} + \frac{1}{2} \gamma^i (\eta_{max} - \eta_{min})
+        \eta_t = \eta_{min} + \frac{1}{2} \eta_{mult}^i (\eta_{max}-\eta_{min})
         (1 + \cos(\frac{T_{cur}}{T_i - 1}\pi))
 
         T_i = T T_{mult}^i
@@ -274,7 +274,7 @@ class CosineAnnealingRestartsLR(_LRScheduler):
     paper the :math:`i`-th run takes :math:`T_i + 1` epochs, while in this
     implementation it takes :math:`T_i` epochs only. This implementation
     also enables updating the range of learning rates by multiplicative factor
-    :math:`\gamma` after each restart.
+    :math:`\eta_{mult}` after each restart.
 
     Args:
         optimizer (Optimizer): Wrapped optimizer.
@@ -282,19 +282,19 @@ class CosineAnnealingRestartsLR(_LRScheduler):
         eta_min (float): Minimum learning rate. Default: 0.
         T_mult (float): Multiplicative factor adjusting number of epochs in
             the next run that is applied after each restart. Default: 2.
-        gamma (float): Multiplicative factor of decay in the range of learning
-            rates that is applied after each restart. Default: 1.
+        eta_mult (float): Multiplicative factor of decay in the range of
+            learning rates that is applied after each restart. Default: 1.
         last_epoch (int): The index of last epoch. Default: -1.
 
     .. _SGDR\: Stochastic Gradient Descent with Warm Restarts:
         https://arxiv.org/abs/1608.03983
     """
 
-    def __init__(self, optimizer, T, eta_min=0, T_mult=2.0, gamma=1.0, last_epoch=-1):
+    def __init__(self, optimizer, T, eta_min=0, T_mult=2.0, eta_mult=1.0, last_epoch=-1):
         self.T = T
         self.eta_min = eta_min
         self.T_mult = T_mult
-        self.gamma = gamma
+        self.eta_mult = eta_mult
 
         super(CosineAnnealingRestartsLR, self).__init__(optimizer, last_epoch)
 
@@ -313,7 +313,7 @@ class CosineAnnealingRestartsLR(_LRScheduler):
             T_i = self.T * self.T_mult ** i_restarts
 
         t = (self.last_epoch - last_restart) / T_i
-        decay = 0.5 * (self.gamma ** i_restarts) * (1 + math.cos(math.pi * t))
+        decay = 0.5 * (self.eta_mult ** i_restarts) * (1 + math.cos(math.pi * t))
 
         return [decay * base_lr + (1 - decay) * self.eta_min for base_lr in self.base_lrs]
 
