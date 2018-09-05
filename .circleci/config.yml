@@ -122,11 +122,10 @@ pytorch_linux_test_defaults: &pytorch_linux_test_defaults
           docker cp "/opt/workspace/cpp-build" "$id:/var/lib/jenkins/cpp-build"
         fi
         if [ -n "${MULTI_GPU}" ]; then
-          export TEST_SCRIPT=.jenkins/pytorch/multigpu-test.sh
+          (echo "source ./workspace/env" && echo 'sudo chown -R jenkins workspace /opt/conda/lib/python${PYTHON_VERSION}/site-packages/torch && cd workspace && (git submodule update --init || git submodule update --init || git submodule update --init) && .jenkins/pytorch/multigpu-test.sh') | docker exec -u jenkins -i "$id" bash
         else
-          export TEST_SCRIPT=.jenkins/pytorch/test.sh
+          (echo "source ./workspace/env" && echo 'sudo chown -R jenkins workspace /opt/conda/lib/python${PYTHON_VERSION}/site-packages/torch && cd workspace && (git submodule update --init || git submodule update --init || git submodule update --init) && .jenkins/pytorch/test.sh') | docker exec -u jenkins -i "$id" bash
         fi
-        (echo "source ./workspace/env" && echo 'sudo chown -R jenkins workspace /opt/conda/lib/python${PYTHON_VERSION}/site-packages/torch && cd workspace && (git submodule update --init || git submodule update --init || git submodule update --init) && ${TEST_SCRIPT}') | docker exec -u jenkins -i "$id" bash
 
 caffe2_linux_build_defaults: &caffe2_linux_build_defaults
   resource_class: large
@@ -857,13 +856,13 @@ workflows:
       # - pytorch_linux_xenial_py3_clang5_asan_test:
       #     requires:
       #       - pytorch_linux_xenial_py3_clang5_asan_build
-      # - pytorch_linux_xenial_cuda8_cudnn6_py3_build
-      # - pytorch_linux_xenial_cuda8_cudnn6_py3_test:
-      #     requires:
-      #       - pytorch_linux_xenial_cuda8_cudnn6_py3_build
-      # - pytorch_linux_xenial_cuda8_cudnn6_py3_multigpu_test:
-      #     requires:
-      #       - pytorch_linux_xenial_cuda8_cudnn6_py3_build
+      - pytorch_linux_xenial_cuda8_cudnn6_py3_build
+      - pytorch_linux_xenial_cuda8_cudnn6_py3_test:
+          requires:
+            - pytorch_linux_xenial_cuda8_cudnn6_py3_build
+      - pytorch_linux_xenial_cuda8_cudnn6_py3_multigpu_test:
+          requires:
+            - pytorch_linux_xenial_cuda8_cudnn6_py3_build
       # - pytorch_linux_xenial_cuda9_cudnn7_py2_build
       # - pytorch_linux_xenial_cuda9_cudnn7_py2_test:
       #     requires:
