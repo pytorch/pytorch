@@ -360,7 +360,7 @@ void fixDefaultRNNState(Graph* graph, Node * n, int input_index) {
 
   Node * gather_indices = graph->create(onnx::Constant, 1);
   gather_indices->insertBefore(n);
-  gather_indices->t_(attr::value, at::Scalar(1).toTensor());
+  gather_indices->t_(attr::value, at::scalar_to_tensor(at::Scalar(1)));
 
   Node * batch_size = graph->create(onnx::Gather, 1);
   batch_size->insertBefore(n);
@@ -378,7 +378,7 @@ void fixDefaultRNNState(Graph* graph, Node * n, int input_index) {
 
   Node * num_directions = graph->create(onnx::Constant, 1);
   num_directions->insertBefore(n);
-  num_directions->t_(attr::value, at::Scalar(n->hasAttribute(attr::direction) && n->s(attr::direction) == "bidirectional" ? 2 : 1).toTensor());
+  num_directions->t_(attr::value, scalar_to_tensor(at::Scalar(n->hasAttribute(attr::direction) && n->s(attr::direction) == "bidirectional" ? 2 : 1)));
 
   Node * unsqueezed_num_directions = graph->create(onnx::Unsqueeze, 1);
   unsqueezed_num_directions->insertBefore(n);

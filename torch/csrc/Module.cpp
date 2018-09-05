@@ -42,8 +42,10 @@
 #include "cudnn.h"
 #endif
 
+#ifdef USE_DISTRIBUTED
 #ifdef USE_C10D
 #include "torch/csrc/distributed/c10d/c10d.h"
+#endif
 #endif
 
 #define WITH_NUMPY_IMPORT_ARRAY
@@ -521,9 +523,9 @@ static PyObject* initModule() {
 #endif
 #ifdef USE_DISTRIBUTED
   THPUtils_addPyMethodDefs(methods, THDPModule_methods());
-#endif
 #ifdef USE_C10D
   THPUtils_addPyMethodDefs(methods, torch::distributed::c10d::python_functions());
+#endif
 #endif
 
 #if PY_MAJOR_VERSION == 2
@@ -598,18 +600,6 @@ static PyObject* initModule() {
   PyObject *has_cudnn = Py_False;
 #endif
  ASSERT_TRUE(set_module_attr("has_cudnn", has_cudnn));
-
-#ifdef USE_DISTRIBUTED_MW
-  // See comment on CUDA objects
-  ASSERT_TRUE(THDPDoubleStorage_init(module));
-  ASSERT_TRUE(THDPFloatStorage_init(module));
-  //ASSERT_TRUE(THDPHalfStorage_init(module));
-  ASSERT_TRUE(THDPLongStorage_init(module));
-  ASSERT_TRUE(THDPIntStorage_init(module));
-  ASSERT_TRUE(THDPShortStorage_init(module));
-  ASSERT_TRUE(THDPCharStorage_init(module));
-  ASSERT_TRUE(THDPByteStorage_init(module));
-#endif
 
   // force ATen to initialize because it handles
   // setting up TH Errors so that they throw C++ exceptions

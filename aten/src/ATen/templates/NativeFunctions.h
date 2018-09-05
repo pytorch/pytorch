@@ -2,10 +2,11 @@
 
 // ${generated_comment}
 
+#include <ATen/Context.h>
 #include <ATen/ScalarType.h>
 #include <ATen/TensorOperators.h>
 #include <ATen/TensorMethods.h>
-#include <ATen/TensorOptions.h>
+#include <ATen/core/TensorOptions.h>
 
 #include <array>
 #include <functional>
