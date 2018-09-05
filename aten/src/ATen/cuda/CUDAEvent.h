@@ -5,7 +5,7 @@
 
 #include "cuda_runtime_api.h"
 
-#include <ATen/core/ATenGeneral.h>
+#include <ATen/cuda/ATenCUDAGeneral.h>
 #include <ATen/Error.h>
 
 /*
