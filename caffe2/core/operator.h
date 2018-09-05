@@ -835,7 +835,7 @@ CAFFE_DECLARE_REGISTRY(
 #define REGISTER_CPU_OPERATOR_CREATOR(key, ...) \
   CAFFE_REGISTER_CREATOR(CPUOperatorRegistry, key, __VA_ARGS__)
 #define REGISTER_CPU_OPERATOR(name, ...)                           \
-  extern void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();      \
+  CAFFE2_IMPORT void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();\
   static void CAFFE2_UNUSED CAFFE_ANONYMOUS_VARIABLE_CPU##name() { \
     CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();                \
   }                                                                \
@@ -854,7 +854,7 @@ CAFFE_DECLARE_REGISTRY(
 #define REGISTER_CUDA_OPERATOR_CREATOR(key, ...) \
   CAFFE_REGISTER_CREATOR(CUDAOperatorRegistry, key, __VA_ARGS__)
 #define REGISTER_CUDA_OPERATOR(name, ...)                           \
-  extern void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();       \
+  CAFFE2_IMPORT void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();       \
   static void CAFFE2_UNUSED CAFFE_ANONYMOUS_VARIABLE_CUDA##name() { \
     CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();                 \
   }                                                                 \
@@ -879,7 +879,7 @@ CAFFE_DECLARE_REGISTRY(
 #define REGISTER_HIP_OPERATOR_CREATOR(key, ...) \
   CAFFE_REGISTER_CREATOR(HIPOperatorRegistry, key, __VA_ARGS__)
 #define REGISTER_HIP_OPERATOR(name, ...)                           \
-  extern void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();       \
+  CAFFE2_IMPORT void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();       \
   static void CAFFE2_UNUSED CAFFE_ANONYMOUS_VARIABLE_HIP##name() { \
     CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();                 \
   }                                                                 \
