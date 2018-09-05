@@ -25,7 +25,7 @@ static vector<TIndex> GetMKLTensorInfo(
     DeviceOption* device) {
   const mkl::MKLMemory<T>* tc = static_cast<const mkl::MKLMemory<T>*>(c);
   *capacity = tc->size() * sizeof(T);
-  device->set_device_type(MKLDNN);
+  device->set_device_type(PROTO_MKLDNN);
   device->set_cuda_gpu_id(0);
   return tc->dims();
 }
