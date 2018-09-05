@@ -263,7 +263,7 @@ HIPContext::HIPContext(const DeviceOption& option)
           option.has_random_seed() ? option.random_seed()
                                    : RandomNumberSeed()) {
   static Caffe2HipInitializerHelper g_hip_initializer_;
-  DCHECK_EQ(option.device_type(), HIP);
+  DCHECK_EQ(option.device_type(), PROTO_HIP);
 }
 
 // shared mutex to lock out alloc / free during NCCL launches
