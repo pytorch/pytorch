@@ -46,7 +46,7 @@ void CUDAEvent_retain(CUDAEventInternals* internals) {
 void CUDAEvent_uncheckedFree(CUDAEventInternals* internals) {
   if (!internals) return;
   if (--internals->refcount == 0) {
-    at::DeviceGuard device_guard{internals->device};
+    at::DeviceGuard device_guard{(int)internals->device};
     cudaEventDestroy(internals->event);
   }
 }
