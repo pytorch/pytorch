@@ -88,7 +88,7 @@ AsyncDAGNet::AsyncDAGNet(const std::shared_ptr<const NetDef>& net_def, Workspace
 int AsyncDAGNet::stream(const DeviceOption& device_option)
 {
     int stream_id = 0;
-    if(device_option.device_type() == HIP)
+    if(device_option.device_type() == PROTO_HIP)
     {
         int gpu_id = device_option.hip_gpu_id();
         CAFFE_ENFORCE_GE(gpu_id, 0, "Invalid gpu id: " + caffe2::to_string(gpu_id));
