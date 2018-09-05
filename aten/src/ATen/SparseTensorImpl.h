@@ -59,7 +59,6 @@ public:
     sparseDims_ = sparseDims;
     denseDims_ = denseDims;
     set_sizes_and_strides(size.vec(), {1});
-    refresh_numel();
   }
 
   // NOTE: This function preserves invariants of sparseDims/denseDims with respect to
@@ -155,7 +154,6 @@ public:
     values_size.insert(values_size.end(), dense_size.begin(), dense_size.end());
     auto empty_values = values().type().tensor(values_size);
     set_indices_and_values_unsafe(empty_indices, empty_values);
-    refresh_numel();
   }
 
   void set_coalesced(bool coalesced) { coalesced_ = coalesced; }

@@ -190,14 +190,14 @@ struct AT_API TensorImpl : public c10::intrusive_ptr_target {
     return n;
   }
   bool compute_contiguous() const;
-
- protected:
   void refresh_numel() {
     numel_ = compute_numel();
   }
   void refresh_contiguous() {
     is_contiguous_ = compute_contiguous();
   }
+
+ protected:
   TensorTypeId type_id_;
   // INVARIANT: When storage is non-null, this scalar type must
   // agree with the scalar type in storage
