@@ -7,7 +7,7 @@
 #include "ATen/core/Deprecated.h"
 #include "ATen/core/Generator.h"
 #include "ATen/core/Layout.h"
-#include "ATen/Scalar.h"
+#include "ATen/core/Scalar.h"
 #include "ATen/core/ScalarType.h"
 #include "ATen/core/SparseTensorRef.h"
 #include "ATen/Tensor.h"
@@ -15,7 +15,7 @@
 #include "ATen/core/Half.h"
 #include "ATen/core/TensorTypeIdRegistration.h"
 #include "ATen/core/Reduction.h"
-#include "ATen/TensorOptions.h"
+#include "ATen/core/TensorOptions.h"
 
 #include <array>
 #include <cstddef>

@@ -83,12 +83,12 @@ def LSTMCellC(*args, **kwargs):
 def LSTMCellS(x, hx, cx, w_ih, w_hh, b_ih, b_hh):
     gates = x.mm(w_ih.t()) + hx.mm(w_hh.t()) + b_ih + b_hh
     ingate, forgetgate, cellgate, outgate = gates.chunk(4, 1)
-    ingate = F.sigmoid(ingate)
-    forgetgate = F.sigmoid(forgetgate)
-    cellgate = F.tanh(cellgate)
-    outgate = F.sigmoid(outgate)
+    ingate = torch.sigmoid(ingate)
+    forgetgate = torch.sigmoid(forgetgate)
+    cellgate = torch.tanh(cellgate)
+    outgate = torch.sigmoid(outgate)
     cy = (forgetgate * cx) + (ingate * cellgate)
-    hy = outgate * F.tanh(cy)
+    hy = outgate * torch.tanh(cy)
     return hy, cy
 
 
@@ -4095,26 +4095,6 @@ a")
         f = io.BytesIO()
         torch.onnx._export(m, (x, seq_lens), f, verbose=False)
 
-    def test_pack_padded_wrong_types(self):
-        from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
-
-        class PackPaddedWrapper(torch.nn.Module):
-            def __init__(self):
-                super(PackPaddedWrapper, self).__init__()
-                self.seq_lens = [3, 3, 3, 3]
-
-            __constants__ = ['seq_lens']
-
-            def forward(self, x):
-                return pack_padded_sequence(x, self.seq_lens)
-
-        m = PackPaddedWrapper()
-
-        x = torch.rand(3, 4, 5)
-        f = io.BytesIO()
-        with self.assertRaisesRegex(RuntimeError, 'PackPadded requires `lengths` to be a Tensor'):
-            torch.onnx._export(m, (x,), f)
-
     def test_script_outputs(self):
         with self.assertRaisesRegex(RuntimeError, "cannot be used as a tuple"):
             @torch.jit.script
@@ -6239,6 +6219,7 @@ a")
                 y = torch.arange(0, x.shape[0]).double()
                 return x + y.unsqueeze(1)
 
+    @suppress_warnings
     def test_trace_checker_dot_data(self):
         with self.assertRaisesRegex(torch.jit.TracingCheckError, r'Tensor-valued Constant nodes differed in value '
                                                                  r'across invocations'):
@@ -6249,13 +6230,15 @@ a")
 
     @suppress_warnings
     def test_trace_checker_control_flow(self):
-        with self.assertRaisesRegex(torch.jit.TracingCheckError, r'Graphs differed across invocations!'):
-            @_trace(torch.rand(3, 4), check_inputs=[(torch.rand(4, 4),)])
-            def foo(x):
-                for _ in range(x.size(0)):
-                    x = torch.neg(x)
-                return x
+        def foo(x):
+            for _ in range(x.size(0)):
+                x = torch.neg(x)
+            return x
 
+        with self.assertRaisesRegex(torch.jit.TracingCheckError, r'Graphs differed across invocations!'):
+            torch.jit.trace(foo, torch.randn(3, 4), check_inputs=[torch.randn(4, 4)])
+
+    @suppress_warnings
     def test_trace_checker_memoization(self):
         with self.assertRaisesRegex(torch.jit.TracingCheckError, r'Graphs differed across invocations!'):
             def foo(x):
@@ -6277,13 +6260,19 @@ a")
             for i in range(3):
                 x[i, :] = torch.zeros(4)
             return x
-        self.checkTracerWarning(foo, torch.rand(3, 4))
+
+        self.assertWarnsRegex(lambda: torch.jit.trace(foo, torch.rand(3, 4), check_inputs=[torch.rand(3, 4)]),
+                              'Output nr 1. of the traced function does not match the '
+                              'corresponding output of the Python function')
 
     def test_trace_checker_inplace_on_view(self):
         def foo(x):
             x.view(-1).add_(-x.view(-1))
             return x
-        self.checkTracerWarning(foo, torch.rand(3, 4), check_trace=False)
+
+        self.assertWarnsRegex(lambda: torch.jit.trace(foo, torch.rand(3, 4), check_inputs=[torch.rand(5, 6)]),
+                              'Output nr 1. of the traced function does not match the '
+                              'corresponding output of the Python function')
 
     def test_lhs_index_fails(self):
         def foo(x):
@@ -6297,11 +6286,22 @@ a")
             return y
         self.checkTrace(foo, (torch.rand(3, 4), torch.rand(4)), inputs_require_grads=False)
 
+    def test_inplace_warn(self):
+        def foo(x):
+            x.view(-1).add_(-x.view(-1))
+            return x
+        self.checkTracerWarning(foo, torch.rand(3, 4))
+
+    @suppress_warnings
     def test_trace_checker_dropout_train(self):
-        with self.assertRaisesRegex(torch.jit.TracingCheckError, r'Trace had nondeterministic nodes'):
-            @_trace(torch.rand(3, 4))
-            def foo(x):
-                return torch.dropout(x, p=0.5, train=True)
+        def foo(x):
+            return torch.dropout(x, p=0.5, train=True)
+
+        self.assertWarnsRegex(lambda: torch.jit.trace(foo, torch.rand(3, 4), check_inputs=[torch.rand(5, 6)]),
+                              'Output nr 1. of the traced function does not match the '
+                              'corresponding output of the Python function')
+        self.assertWarnsRegex(lambda: torch.jit.trace(foo, torch.rand(3, 4), check_inputs=[torch.rand(5, 6)]),
+                              'Trace had nondeterministic nodes')
 
     def test_trace_checker_dropout_notrain(self):
         input = torch.rand(3, 4)
@@ -6516,9 +6516,6 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
 
     @skipIfRocm
     def test_snli(self):
-        # TODO:
-        #   1) nn.LSTM is called as a Python function https://github.com/pytorch/pytorch/issues/8449
-        #   2) Dropout is called as a Python function https://github.com/pytorch/pytorch/issues/8450
         class Bottle(nn.Module):
 
             def forward(self, input):
