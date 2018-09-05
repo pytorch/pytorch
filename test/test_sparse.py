@@ -109,10 +109,7 @@ class TestSparse(TestCase):
 
     @skipIfRocm  # ROCm stack doesn't like the x + x call
     def test_print(self):
-        if self.is_uncoalesced:
-            raise unittest.SkipTest("test_print is the same regardless of is_uncoalesced")
-
-        shape_dimI_nnz = [
+        shape_sparseDim_nnz = [
             ((), 0, 2),
             ((0,), 0, 10),
             ((2,), 0, 3),
@@ -123,20 +120,20 @@ class TestSparse(TestCase):
         ]
 
         printed = []
-        for shape, dimI, nnz in shape_dimI_nnz:
-            indices_shape = torch.Size((dimI, nnz))
-            values_shape = torch.Size((nnz,) + shape[dimI:])
+        for shape, sparseDim, nnz in shape_sparseDim_nnz:
+            indices_shape = torch.Size((sparseDim, nnz))
+            values_shape = torch.Size((nnz,) + shape[sparseDim:])
             printed.append("# shape: {}".format(torch.Size(shape)))
             printed.append("# nnz: {}".format(nnz))
-            printed.append("# dimI: {}".format(dimI))
+            printed.append("# sparseDim: {}".format(sparseDim))
             printed.append("# indices shape: {}".format(indices_shape))
             printed.append("# values shape: {}".format(values_shape))
 
             indices = torch.arange(indices_shape.numel(), dtype=self.IndexTensor.dtype,
                                    device=self.device).view(indices_shape)
-            for d in range(dimI):
-                indices[d].clamp_(max=shape[d])  # make it valid index
-            if indices.numel() > 0:
+            for d in range(sparseDim):
+                indices[d].clamp_(max=(shape[d] - 1))  # make it valid index
+            if self.is_uncoalesced and indices.numel() > 0:
                 indices[:, -1] = indices[:, 0]  # make it uncoalesced
             values_numel = values_shape.numel()
             values = torch.arange(values_numel, dtype=self.ValueTensor.dtype,

@@ -142,7 +142,7 @@ static PyObject *THPSize_numel(THPSize *self)
   for (Py_ssize_t i = 0; i < PyTuple_Size((PyObject*)self); ++i) {
     numel *= PyLong_AsLong(PyTuple_GET_ITEM(self, i));
   }
-  return THPUtils_packUInt64(numel);
+  return THPUtils_packInt64(numel);
   END_HANDLE_TH_ERRORS
 }
 
