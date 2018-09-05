@@ -293,8 +293,11 @@ class CosineAnnealingRestartsLR(_LRScheduler):
     def __init__(self, optimizer, T, eta_min=0, T_mult=2.0, eta_mult=1.0, last_epoch=-1):
         self.T = T
         self.eta_min = eta_min
-        self.T_mult = T_mult
         self.eta_mult = eta_mult
+
+        if T_mult < 1:
+            raise ValueError('T_mult should be >= 1.0.')
+        self.T_mult = T_mult
 
         super(CosineAnnealingRestartsLR, self).__init__(optimizer, last_epoch)
 
