@@ -14,6 +14,32 @@ template<typename scalar_t>
 struct PDist {
   using Vec = vec256::Vec256<scalar_t>;
 
+  // Depending on the value of the pnorm, there are specific implementations
+  // that are much faster than std::pow(std::abs(a - b), p), but have the same
+  // standard loop code for how to process the input vector. To reuse the main
+  // outside loop while still guaranteeing that the compiler inlines every
+  // different function on p, we break the inner norm logic into structs with
+  // static functions that represent what's done differently, and template the
+  // outer loop on those structs.
+  //
+  // The four functions are:
+  //     map :      This tells how to modify (a - b) to form the component that
+  //                gets summed.
+  //     red :      This tells how to sum the result of map up. This is
+  //                separate because the inf norm actuall uses max instead of
+  //                sum.
+  //     finish :   This tells what to do with the aggregated value to compute
+  //                the norm. Generally this is the result of val ^ (1 / p).
+  //     backward : This is the gradient for that norm. Arguments are pretty
+  //                self explanitory.
+  //
+  // There are a few cases where these aren't used. The 0 norm has no backward,
+  // because it's always 0, so that's shortcircuited earlier. There's a special
+  // implementation of the general backward pass when p is less than two, so
+  // there's a struct with only a backward pass for this case.
+
+  // TODO This is an inefficient way to compite sign, and can be much faster
+  // using native SSE instructions that should be added to Vec256.
   static inline Vec sign(Vec val) {
     return vec256::min(vec256::max(Vec(0), val.ceil()), Vec(1)) +
       vec256::min(vec256::max(Vec(-1), val.floor()), Vec(0));
@@ -61,6 +87,8 @@ struct PDist {
     static inline Vec map(const Vec& diff, const Vec& p) { return diff; }
     static inline Vec red(const Vec& agg, const Vec& up) { return vec256::max(agg, up); }
     static inline scalar_t finish(const scalar_t agg, const scalar_t p) { return agg; }
+    // TODO This backward pass uses a very complext expression to compute (diff
+    // == dist) that could be much faster if using SSE instructions.
     static inline Vec backward(const Vec& diff, const scalar_t grad, const scalar_t dist, const Vec& p) { return Vec(grad) * sign(diff) * (Vec(1) - vec256::min(Vec(1), (diff.abs() - Vec(dist)).abs().ceil())); }
   };
 
@@ -75,6 +103,10 @@ struct PDist {
     int64_t combs = result.numel(); // n * (n - 1) / 2
     const Vec pvec(p);
 
+    // We conceptually iterate over tuples of (i, j, k) where i is the first
+    // vector from the input, j is the second, and k is the result index. This
+    // parallelizes over the range of k and infers what i and j are from the
+    // value of k.
     parallel_for(0, combs, internal::GRAIN_SIZE / (16 * m), [=, &pvec](int64_t k, int64_t end) {
       float n2 = n - .5;
       // The -1 accounts for floating point truncation issues
@@ -101,7 +133,7 @@ struct PDist {
     });
   }
 
-  // Assumes self is nonempty and 2D
+  // Assumes self is nonempty, contiguous, and 2D
   static void apply(Tensor& result, const Tensor& self, const scalar_t p) {
     if (p == 0.0) {
       run_parallel<zdist_calc>(result, self, p);
@@ -152,7 +184,9 @@ struct PDist {
     const scalar_t * const self_start = self.data<scalar_t>();
     scalar_t * const res_start = result.data<scalar_t>();
 
-    // The only way to parallelize and avoid locking requires parallelizing over the columns :(
+    // The only way to parallelize and avoid locking requires parallelizing
+    // over the columns of the input, i.e. we compute the gradient for the
+    // first section of each vector independentaly of the second section, etc.
     at::parallel_for(0, m / Vec::size, internal::GRAIN_SIZE / (8 * n * n), [=, &pvec](int64_t l, int64_t end) {
       const scalar_t * self_l = self_start + l * Vec::size;
       scalar_t * res_l = res_start + l * Vec::size;
@@ -167,6 +201,7 @@ struct PDist {
     }
   }
 
+  // Assumes self is nonempty, contiguous, and 2D and dist is also contiguous
   static void apply_backward(Tensor& result, const Tensor& grad, const Tensor& self, const double p, const Tensor& dist) {
     result.fill_(0);
     if (p == 0.0) {
