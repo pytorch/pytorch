@@ -49,8 +49,9 @@ class TestBooleanMaskOp(hu.HypothesisTestCase):
     def _dtype_conversion(x, dtype, gc, dc):
         """SequenceMask only supports fp16 with CUDA."""
         if dtype == np.float16:
-            assume(gc.device_type == caffe2_pb2.CUDA)
-            dc = [d for d in dc if d.device_type == caffe2_pb2.CUDA]
+            device_type = caffe2_pb2.HIP if workspace.has_hip_support else caffe2_pb2.CUDA
+            assume(gc.device_type == device_type)
+            dc = [d for d in dc if d.device_type == device_type]
             x = x.astype(dtype)
         return x, dc
 
