@@ -568,7 +568,8 @@ namespace {
       cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
       const int64_t bsize = tensors.mini_batch;
       if (prop->major == 7 && rnn.datatype == CUDNN_DATA_HALF && !tensors.is_input_packed()) {
-          if (rnn.num_layers == 1 && rnn.hidden_size <= 1024 && tensors.input_size <=1024 && rnn.num_directions() == 1){
+          if (rnn.num_layers == 1 && rnn.hidden_size <= 1024 && tensors.input_size <=1024 && rnn.num_directions() == 1 &&
+                  rnn.hidden_size % 128 == 0 && tensors.input_size % 128 == 0){
               //technically, batch size should be multiple of 8, but there are quite a few multiple-of-8 batchsizes that give bad perf, 
               //weed them out
               if ((bsize % 16 == 0 && bsize != 80 && bsize !=112) || bsize == 8){
@@ -577,11 +578,11 @@ namespace {
                      (tensors.seq_length >=10 && bsize <=32)) {
                      return CUDNN_RNN_ALGO_PERSIST_STATIC;
                   }
-              }    
-          } 
-      } 
+              }
+          }
+      }
       return CUDNN_RNN_ALGO_STANDARD;
-#endif          
+#endif
   }
 
 } // anonymous namespace
