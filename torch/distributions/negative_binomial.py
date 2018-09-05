@@ -20,7 +20,8 @@ class NegativeBinomial(Distribution):
         logits (Tensor): Event log-odds for probabilities of success
     """
     arg_constraints = {'total_count': constraints.greater_than_eq(0),
-                       'probs': constraints.half_open_interval(0., 1.)}
+                       'probs': constraints.half_open_interval(0., 1.),
+                       'logits': constraints.real}
     support = constraints.nonnegative_integer
 
     def __init__(self, total_count, probs=None, logits=None, validate_args=None):
