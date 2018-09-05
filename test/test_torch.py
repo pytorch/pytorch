@@ -26,7 +26,6 @@ from common import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MKL, \
     TEST_LIBROSA, run_tests, download_file, skipIfNoLapack, suppress_warnings, \
     IS_WINDOWS, PY3, NO_MULTIPROCESSING_SPAWN, skipIfRocm
 from multiprocessing.reduction import ForkingPickler
-from test_autograd import random_fullrank_matrix_distinct_singular_value
 
 if TEST_NUMPY:
     import numpy as np
@@ -4494,6 +4493,7 @@ class TestTorch(TestCase):
 
         # Single matrix, but full rank
         # This is for negative powers
+        from test_autograd import random_fullrank_matrix_distinct_singular_value
         M = conv_fn(random_fullrank_matrix_distinct_singular_value(5))
         run_test(M)
         run_test(M, sign=-1)
