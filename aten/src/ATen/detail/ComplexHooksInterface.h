@@ -5,7 +5,7 @@
 
 namespace at {
 
-struct Context;
+class Context;
 
 struct AT_API ComplexHooksInterface {
   virtual ~ComplexHooksInterface() {}
