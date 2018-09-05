@@ -765,9 +765,9 @@
 - name: zero_(Tensor self)
   self: zeros_like(grad)
 
-- name: _sparse_mask(Tensor self, SparseTensorRef mask)
-  self: not_implemented("_sparse_mask")
-  mask: not_implemented("_sparse_mask")
+- name: sparse_mask(Tensor self, SparseTensorRef mask)
+  self: not_implemented("sparse_mask")
+  mask: not_implemented("sparse_mask")
 
 - name: _standard_gamma(Tensor self, Generator generator)
   self: grad * _standard_gamma_grad(self, result)
