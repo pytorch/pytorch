@@ -50,6 +50,15 @@ class Uniform(Distribution):
         if self._validate_args and not torch.lt(self.low, self.high).all():
             raise ValueError("Uniform is not defined when low>= high")
 
+    def expand(self, batch_shape=torch.Size()):
+        batch_shape = torch.Size(batch_shape)
+        new = self.__new__(Uniform)
+        new.low = self.low.expand(batch_shape)
+        new.high = self.high.expand(batch_shape)
+        super(Uniform, new).__init__(batch_shape, validate_args=False)
+        new._validate_args = self._validate_args
+        return new
+
     @constraints.dependent_property
     def support(self):
         return constraints.interval(self.low, self.high)

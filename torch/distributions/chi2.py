@@ -1,3 +1,4 @@
+import torch
 from torch.distributions import constraints
 from torch.distributions.gamma import Gamma
 
@@ -20,6 +21,9 @@ class Chi2(Gamma):
 
     def __init__(self, df, validate_args=None):
         super(Chi2, self).__init__(0.5 * df, 0.5, validate_args=validate_args)
+
+    def expand(self, batch_shape=torch.Size()):
+        return super(Chi2, self).expand(batch_shape)
 
     @property
     def df(self):

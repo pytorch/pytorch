@@ -116,6 +116,20 @@ class LowRankMultivariateNormal(Distribution):
         super(LowRankMultivariateNormal, self).__init__(batch_shape, event_shape,
                                                         validate_args=validate_args)
 
+    def expand(self, batch_shape=torch.Size()):
+        batch_shape = torch.Size(batch_shape)
+        loc_shape = batch_shape + self.event_shape
+        new = self.__new__(LowRankMultivariateNormal)
+        new.loc = self.loc.expand(loc_shape)
+        new.cov_diag = self.cov_diag.expand(loc_shape)
+        new.cov_factor = self.cov_factor.expand(loc_shape + self.cov_factor.shape[-1:])
+        new._capacitance_tril = self._capacitance_tril
+        super(LowRankMultivariateNormal, new).__init__(batch_shape,
+                                                       self.event_shape,
+                                                       validate_args=False)
+        new._validate_args = self._validate_args
+        return new
+
     @property
     def mean(self):
         return self.loc

@@ -793,6 +793,24 @@ class TestDistributions(TestCase):
                 self.assertIn(Dist, distributions_with_examples,
                               "Please add {} to the EXAMPLES list in test_distributions.py".format(Dist.__name__))
 
+    def test_distribution_expand(self):
+        shapes = [torch.Size(), torch.Size((2,)), torch.Size((2, 1))]
+        for Dist, params in EXAMPLES:
+            if Dist.__name__ == "TransformedDistribution":
+                continue
+            for param in params:
+                for shape in shapes:
+                    d = Dist(**param)
+                    expanded_shape = shape + d.batch_shape
+                    original_shape = d.batch_shape + d.event_shape
+                    expected_shape = shape + original_shape
+                    expanded = d.expand(batch_shape=expanded_shape)
+                    sample = expanded.sample()
+                    actual_shape = expanded.sample().shape
+                    self.assertEqual(d.sample().shape, original_shape)
+                    self.assertEqual(expanded.log_prob(sample), d.log_prob(sample))
+                    self.assertEqual(actual_shape, expected_shape)
+
     def test_bernoulli(self):
         p = torch.tensor([0.7, 0.2, 0.4], requires_grad=True)
         r = torch.tensor(0.3, requires_grad=True)
@@ -2177,6 +2195,27 @@ class TestDistributions(TestCase):
                         self.assertEqual(indep_dist.entropy().shape, indep_log_prob_shape)
                     except NotImplementedError:
                         pass
+
+    def test_independent_expand(self):
+        for Dist, params in EXAMPLES:
+            if Dist.__name__ == "TransformedDistribution":
+                continue
+            for i, param in enumerate(params):
+                base_dist = Dist(**param)
+                for reinterpreted_batch_ndims in range(len(base_dist.batch_shape) + 1):
+                    for s in [torch.Size(), torch.Size((2,)), torch.Size((2, 3))]:
+                        indep_dist = Independent(base_dist, reinterpreted_batch_ndims)
+                        expanded_shape = s + indep_dist.batch_shape
+                        expanded = indep_dist.expand(expanded_shape)
+                        expanded_sample = expanded.sample()
+                        expected_shape = expanded_shape + indep_dist.event_shape
+                        self.assertEqual(expanded_sample.shape, expected_shape)
+                        self.assertEqual(expanded.log_prob(expanded_sample),
+                                         indep_dist.log_prob(expanded_sample))
+                        self.assertEqual(expanded.event_shape, indep_dist.event_shape)
+                        self.assertEqual(expanded.batch_shape, expanded_shape)
+
+
 
     def test_cdf_icdf_inverse(self):
         # Tests the invertibility property on the distributions
@@ -4032,5 +4071,5 @@ class TestValidation(TestCase):
         super(TestCase, self).tearDown()
         Distribution.set_default_validate_args(False)
 
-if __name__ == '__main__':
-    run_tests()
+# if __name__ == '__main__':
+#     run_tests()

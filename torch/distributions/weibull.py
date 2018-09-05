@@ -29,10 +29,25 @@ class Weibull(TransformedDistribution):
     def __init__(self, scale, concentration, validate_args=None):
         self.scale, self.concentration = broadcast_all(scale, concentration)
         self.concentration_reciprocal = self.concentration.reciprocal()
-        base_dist = Exponential(self.scale.new(self.scale.size()).fill_(1.0))
-        transforms = [PowerTransform(exponent=self.concentration_reciprocal),
-                      AffineTransform(loc=0, scale=self.scale)]
-        super(Weibull, self).__init__(base_dist, transforms, validate_args=validate_args)
+        self._base_dist = Exponential(self.scale.new(self.scale.size()).fill_(1.0))
+        self._transforms = [PowerTransform(exponent=self.concentration_reciprocal),
+                            AffineTransform(loc=0, scale=self.scale)]
+        super(Weibull, self).__init__(self._base_dist,
+                                      self._transforms,
+                                      validate_args=validate_args)
+
+    def expand(self, batch_shape=torch.Size()):
+        batch_shape = torch.Size(batch_shape)
+        new = self.__new__(Weibull)
+        new.scale = self.scale.expand(batch_shape)
+        new.concentration = self.concentration.expand(batch_shape)
+        new._base_dist = self._base_dist.expand(batch_shape)
+        new._transforms = self._transforms
+        super(Weibull, new).__init__(new._base_dist,
+                                     new._transforms,
+                                     validate_args=False)
+        new._validate_args = self._validate_args
+        return new
 
     @property
     def mean(self):
