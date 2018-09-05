@@ -258,6 +258,11 @@
   cname: SpatialDepthwiseConvolution
   buffers: []
 
+- name: thnn_convtbc_depthwise2d(Tensor self, Tensor weight, IntList[2] kernel_size, Tensor bias={}, IntList[2] stride=1, IntList[2] padding=0, IntList[2] dilation=1)
+  cname: SpatialDepthwiseConvolutionTBC
+  buffers: []
+
+
 - name: thnn_conv3d(Tensor self, Tensor weight, IntList[3] kernel_size, Tensor bias={}, IntList[3] stride=1, IntList[3] padding=0)
   cname: VolumetricConvolutionMM
   buffers: [finput, fgrad_input]

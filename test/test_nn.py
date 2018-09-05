@@ -3630,6 +3630,55 @@ class TestNN(NNTestCase):
                                         m2.weight.grad.data], 0),
                              prec=dtype2prec[dtype])
 
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    @skipIfRocm
+    @repeat_test_for_types(ALL_TENSORTYPES)
+    def test_convtbc_depthwise_cuda(self, dtype=torch.float):
+        def convtbc_reference(self, weight, bias, padding=0):
+            # t, b, c -> b, c, t
+            input = self.permute(1, 2, 0).contiguous()
+            # kw, c, oc -> oc, c, kw
+            weight = weight.transpose(0, -1).contiguous()
+            return \
+                F.conv1d(input, weight, bias, padding=padding, groups=groups).permute(2, 0, 1).contiguous()
+
+        def check(xs, ys):
+            for x, y in zip(xs, ys):
+                self.assertEqual(x, y)
+
+        def run_checks(batch_size=1024, in_channels=1024, out_channels=1024,
+                       time=64, kernel_width=31, groups=1024, pad=0):
+            def get_inputs(seed=17, **kwargs):
+                assert in_channels % groups == 0
+                assert out_channels % groups == 0
+                torch.manual_seed(seed)  # reseed everytime for consistent results
+
+                input = torch.randn((time, batch, in_channels), **kwargs)
+                weight = torch.randn((kernel_width, int(in_channels / groups), out_channels), **kwargs)
+                bias = torch.randn((out_channels,), **kwargs)
+                return [input, weight, bias]
+
+            control_inputs = inputs(requires_grad=True, device='cuda')
+            expected = convtbc(*control_inputs, padding=pad, groups=groups)
+            expected_grads = torch.autograd.grad([expected], control_inputs, [gI])
+
+            test_inputs = inputs(requires_grad=True, device='cuda')
+            result = torch.conv_tbc_group(*test_inputs, pad=pad, groups=groups)
+            result_grads = torch.autograd.grad([result], test_inputs, [gI])
+
+            self.assertEqual(result, expected)
+            self.assertEqual(result_grads, expected_grads)
+
+        # NB: Only depthwise_multiplier 1 is supported right now.
+        # This means that in_channels == out_channels == groups
+        test_sizes = [
+            dict(batch_size=1024, in_channels=1024, out_channels=1024, time=64, kernel_width=31, groups=1024, pad=0),
+            dict(batch_size=1024, in_channels=1024, out_channels=1024, time=31, kernel_width=31, groups=1024, pad=0),
+            dict(batch_size=1, in_channels=1024, out_channels=1024, time=100, kernel_width=31, groups=1024, pad=0),
+            dict(batch_size=123, in_channels=17, out_channels=17, time=101, kernel_width=7, groups=17, pad=0),
+            dict(batch_size=1024, in_channels=1024, out_channels=1024, time=64, kernel_width=31, groups=1024, pad=3),
+        ]
+
     def test_MaxUnpool2d_output_size(self):
         m = nn.MaxPool2d(3, stride=2, return_indices=True)
         mu = nn.MaxUnpool2d(3, stride=2)

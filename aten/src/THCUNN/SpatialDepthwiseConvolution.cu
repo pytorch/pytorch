@@ -168,7 +168,6 @@ __global__ void spatialDepthwiseConvolutionUpdateGradInput(
   }
 }
 
-
 template <typename T, typename AccT, typename IndexType>
 __global__ void spatialDepthwiseConvolutionAccGradParameters(
     const THCDeviceTensor<T, 4> gradOutput,
@@ -215,7 +214,7 @@ __global__ void spatialDepthwiseConvolutionAccGradParameters(
   // should be. That allows to get rid of one modulo operation inside the loop (because n/batchIdx
   // now does not have to be computed through modulo, you are just looping over it), and
   // bring a nice speed-up.
-  for (int batchIdx = batch; batchIdx < batchSize; batchIdx += nwarps){  
+  for (int batchIdx = batch; batchIdx < batchSize; batchIdx += nwarps){
     // Warp-stride loop over elements in a batch item
     for (IndexType idx = laneId; idx < imageElements; idx += WARP_SIZE) {
     // Need to calculate the following: batch position, and offset into the gradOutput
@@ -223,13 +222,14 @@ __global__ void spatialDepthwiseConvolutionAccGradParameters(
     // the other parameters we have
       int go_w_offset = idx % outputWidth;
       int go_h_offset = (idx / outputWidth);
-  
+
       int i_w_offset = (go_w_offset * strideWidth) + (kW * dilationWidth) - padWidth;
       int i_h_offset = (go_h_offset * strideHeight) + (kH * dilationHeight) - padHeight;
-  
+
       if (i_w_offset >= 0 && i_h_offset >= 0 && i_w_offset < inputWidth && i_h_offset < inputHeight) {
         int inputOffset = ((batchIdx * inputChannels + inputCh) * inputHeight + i_h_offset) * inputWidth + i_w_offset;
-        int outputOffset = ((batchIdx * kernelChannels + ch) * outputHeight ) * outputWidth + idx; 
+        int outputOffset = ((batchIdx * kernelChannels + ch) * outputHeight ) * outputWidth + idx;
+
         grad = THCNumerics<AccT>::add(
             grad,
             THCNumerics<AccT>::mul(
@@ -253,6 +253,234 @@ __global__ void spatialDepthwiseConvolutionAccGradParameters(
     gradWeight.data()[weightOffset] = ScalarConvert<AccT, T>::to(tval);
   }
 }
+
+template <typename T, typename IndexType>
+__inline__ __device__
+void fastGetIndex4d(
+    const THCDeviceTensor<T, 4>& input,
+    const IndexType linearIndex,
+    IndexType* result) {
+  int indtmp1 = linearIndex / input.getSize(3);
+  result[3] = linearIndex - indtmp1 * input.getSize(3);
+  int indtmp2 = indtmp1 / input.getSize(2);
+  result[2] = indtmp1 - indtmp2 * input.getSize(2);
+  indtmp1 = indtmp2;
+  indtmp2 = indtmp1 / input.getSize(1);
+  result[1] = indtmp1 - indtmp2 * input.getSize(1);
+  result[0] = indtmp2;
+}
+
+template <typename T, typename AccT, typename IndexType, int kSize>
+__global__ void spatialDepthwiseConvolutionTBCUpdateOutput(
+    const THCDeviceTensor<T, 4> input,
+    THCDeviceTensor<T, 4> output,
+    const THCDeviceTensor<T, 4> weight,
+    const THCDeviceTensor<T, 1> bias,
+    bool biasEnabled,
+    IndexType totalElements,
+    const int outputChannels,
+    const int depthwiseMultiplier,
+    const int inputWidth, const int inputHeight,
+    const int outputWidth, const int outputHeight,
+    const int kernelWidth, const int kernelHeight,
+    const int strideWidth, const int strideHeight,
+    const int padWidth, const int padHeight,
+    const int dilationWidth, const int dilationHeight)
+{
+  // input :  H,  W, N, iC
+  // output: oH, oW, N, oC
+  // weight: kH, kW, 1, oC
+  // bias  : oC
+
+  const int KW_LIMIT = (kSize !=0) ? kSize : kernelWidth;
+  const int KH_LIMIT = (kSize !=0) ? kSize : kernelHeight;
+
+  IndexType indices[4];
+
+  for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
+       linearIndex < totalElements;
+       linearIndex += gridDim.x * blockDim.x) {
+
+    fastGetIndex4d<T, IndexType>(output, linearIndex, indices);
+    const int c = indices[3];
+    const int n = indices[2];
+    const int w = indices[1];
+    const int h = indices[0];
+
+    int inputChannel = c;
+    int inputChannels = outputChannels;
+    if (depthwiseMultiplier !=1) {
+      inputChannel /= depthwiseMultiplier;
+      inputChannels /= depthwiseMultiplier;
+    }
+
+    int weightOffset = 0;
+
+    AccT value = biasEnabled ? ScalarConvert<T, AccT>::to(bias.data()[c]) : ScalarConvert<int, AccT>::to(0);
+    const IndexType offset0 = (n * inputChannels + inputChannel);
+#pragma unroll
+    for (int kH = 0; kH < KH_LIMIT; ++kH) {
+#pragma unroll
+      for (int kW = 0; kW < KW_LIMIT; ++kW) {
+        const int h_in = -padHeight + h * strideHeight + kH * dilationHeight;
+        const int w_in = -padWidth + w * strideWidth + kW * dilationWidth;
+
+        weightOffset = kH * weight.getStride(0) + kW * weight.getStride(1) + c;
+
+        if ((h_in >= 0) && (h_in < inputHeight) && (w_in >= 0) && (w_in < inputWidth)) {
+          const IndexType offset = offset0 + h_in * input.getStride(0) + w_in * input.getStride(1);
+          value = THCNumerics<AccT>::add(
+            value,
+            THCNumerics<AccT>::mul(
+              ScalarConvert<T, AccT>::to(weight.data()[weightOffset]),
+              ScalarConvert<T, AccT>::to(input.data()[offset])));
+        }
+      }
+    }
+    output.data()[linearIndex] = ScalarConvert<AccT, T>::to(value);
+  }
+}
+
+template <typename T, typename AccT, typename IndexType, int kSize, int stride>
+__global__ void spatialDepthwiseConvolutionTBCUpdateGradInput(
+    const THCDeviceTensor<T, 4> gradOutput,
+    THCDeviceTensor<T, 4> gradInput,
+    const THCDeviceTensor<T, 4> weight,
+    IndexType totalElements,
+    const int inputChannels,
+    const int depthwiseMultiplier,
+    const int outputChannels,
+    const int inputWidth, const int inputHeight,
+    const int outputWidth, const int outputHeight,
+    const int kernelWidth, const int kernelHeight,
+    const int strideWidth, const int strideHeight,
+    const int padWidth, const int padHeight,
+    const int dilationWidth, const int dilationHeight)
+{
+  // input :  H,  W, N, iC
+  // output: oH, oW, N, oC
+  // weight: kH, kW, 1, oC
+  // bias  : oC
+
+  const int KW_LIMIT = (kSize !=0) ? kSize : kernelWidth;
+  const int KH_LIMIT = (kSize !=0) ? kSize : kernelHeight;
+  const int strideW = (stride !=0) ? stride : strideWidth;
+  const int strideH = (stride !=0) ? stride : strideHeight;
+
+  IndexType indices[4];
+
+  for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
+       linearIndex < totalElements;
+       linearIndex += gridDim.x * blockDim.x) {
+
+    fastGetIndex4d<T, IndexType>(gradOutput, linearIndex, indices);
+    const int c = indices[3];
+    const int n = indices[2];
+    const int w = indices[1];
+    const int h = indices[0];
+
+    AccT value = ScalarConvert<int, AccT>::to(0);
+
+#pragma unroll
+    for (int multiplier = 0; multiplier < depthwiseMultiplier; ++multiplier) {
+      int och = (c * depthwiseMultiplier) + multiplier;
+      int weightOffset = och;
+#pragma unroll
+      for (int kh = 0; kh < KH_LIMIT; ++kh) {
+#pragma unroll
+        for (int kw = 0; kw < KW_LIMIT; ++kw) {
+          int h_out = h + padHeight - kh * dilationHeight;
+          int w_out = w + padWidth - kw * dilationWidth;
+          if ((h_out % strideH == 0) && (w_out % strideW == 0)) {
+            h_out = h_out / strideH;
+            w_out = w_out / strideW;
+
+            if ((h_out >= 0) && (h_out < outputHeight)
+                  && (w_out >= 0) && (w_out < outputWidth)) {
+
+              const int offset =
+                och + n * gradOutput.getStride(2) + w_out * gradOutput.getStride(1) +
+                h_out * gradOutput.getStride(0);
+              value = THCNumerics<AccT>::add(
+                value,
+                THCNumerics<AccT>::mul(
+                  ScalarConvert<T, AccT>::to(weight.data()[weightOffset]),
+                  ScalarConvert<T, AccT>::to(gradOutput.data()[offset])));
+            }
+          }
+          weightOffset += weight.getStride(1);
+        }
+      }
+    }
+    gradInput.data()[linearIndex] = ScalarConvert<AccT, T>::to(value);
+  }
+}
+
+template <typename T, typename AccT, typename IndexType>
+__global__ void spatialDepthwiseConvolutionTBCAccGradParameters(
+    const THCDeviceTensor<T, 4> gradOutput,
+    const THCDeviceTensor<T, 4> input,
+    THCDeviceTensor<T, 4> gradWeight,
+    const int batchSize,
+    const int inputChannels,
+    const int kernelChannels,
+    const int depthwiseMultiplier,
+    const int inputWidth, const int inputHeight,
+    const int outputWidth, const int outputHeight,
+    const int kernelWidth, const int kernelHeight,
+    const int strideWidth, const int strideHeight,
+    const int padWidth, const int padHeight,
+    const int dilationWidth, const int dilationHeight)
+{
+  // input :  H,  W, N, iC
+  // output: oH, oW, N, oC
+  // weight: kH, kW, 1, oC
+  // bias  : oC
+  IndexType totalElements = kernelChannels * kernelWidth * kernelHeight;
+
+  for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
+       linearIndex < totalElements;
+       linearIndex += gridDim.x * blockDim.x) {
+    const int ch = linearIndex % gradWeight.getSize(3);
+    const int kW = linearIndex / gradWeight.getStride(1) % gradWeight.getSize(1);
+    const int kH = linearIndex / gradWeight.getStride(0);
+
+    int inputCh = ch / depthwiseMultiplier;
+
+    AccT grad = ScalarConvert<float, AccT>::to(0.0);
+
+#pragma unroll
+    for (int outHeightIdx = 0; outHeightIdx < outputHeight; ++outHeightIdx) {
+#pragma unroll
+      for (int outWidthIdx = 0; outWidthIdx < outputWidth; ++outWidthIdx) {
+        int inWidthIdx = (outWidthIdx * strideWidth) + (kW * dilationWidth) - padWidth;
+        int inHeightIdx = (outHeightIdx * strideHeight) + (kH * dilationHeight) - padHeight;
+#pragma unroll
+        for (int batchIdx = 0; batchIdx < batchSize; ++batchIdx) {
+
+          int inputOffset = inHeightIdx * input.getStride(0) +
+                             inWidthIdx * input.getStride(1) +
+                               batchIdx * input.getStride(2) +
+                                inputCh;
+          int outputOffset = outHeightIdx * gradOutput.getStride(0) +
+                              outWidthIdx * gradOutput.getStride(1) +
+                                 batchIdx * gradOutput.getStride(2) +
+                                       ch;
+
+          grad = THCNumerics<AccT>::add(
+              grad,
+              THCNumerics<AccT>::mul(
+                ScalarConvert<T, AccT>::to(input.data()[inputOffset]),
+                ScalarConvert<T, AccT>::to(gradOutput.data()[outputOffset])));
+        }
+      }
+    }
+
+    int weightOffset = kH * gradWeight.getStride(0) + kW * gradWeight.getStride(1) + ch;
+    gradWeight.data()[weightOffset] = ScalarConvert<AccT, T>::to(grad);
+  }
+}
+
 
 #include "generic/SpatialDepthwiseConvolution.cu"
 #include "THCGenerateFloatTypes.h"

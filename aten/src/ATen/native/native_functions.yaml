@@ -386,6 +386,12 @@
 - func: conv_tbc_backward(Tensor self, Tensor input, Tensor weight, Tensor bias, int64_t pad) -> (Tensor, Tensor, Tensor)
   variants: function
 
+- func: conv_tbc_group(Tensor self, Tensor weight, Tensor bias, int64_t pad, int64_t groups) -> Tensor
+  variants: function
+
+  # func: conv_tbc_group_backward(Tensor self, Tensor input, Tensor weight, Tensor bias, int64_t pad, int64_t groups) -> (Tensor, Tensor, Tensor)
+  # variants: function
+
 # NB: we inherit the goofy argument order from PyTorch torch.nn.functional
 - func: conv_transpose1d(Tensor input, Tensor weight, Tensor bias={}, IntList[1] stride=1, IntList[1] padding=0, IntList[1] output_padding=0, int64_t groups=1, IntList[1] dilation=1) -> Tensor
   variants: function
