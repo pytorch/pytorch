@@ -6,7 +6,7 @@
 #include <ATen/Context.h>
 #include <ATen/core/Backend.h>
 
-#include <ATen/detail/VariableHooksInterface.h>
+#include <ATen/core/VariableHooksInterface.h>
 
 #include <TH/THTensor.hpp>
 

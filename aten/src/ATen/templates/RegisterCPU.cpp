@@ -5,7 +5,7 @@
 #include <ATen/Type.h>
 #include <ATen/Context.h>
 #include <ATen/UndefinedType.h>
-#include <ATen/detail/VariableHooksInterface.h>
+#include <ATen/core/VariableHooksInterface.h>
 
 ${cpu_type_headers}
 
