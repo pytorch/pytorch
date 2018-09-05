@@ -163,6 +163,10 @@ struct Method {
     return get_executor().getDebugState();
   }
 
+  bool is_optimized() {
+    return optimize;
+  }
+
 private:
   std::string name_;
   std::shared_ptr<Graph> graph_; // for debugging and for inlining
