@@ -5,6 +5,7 @@ from __future__ import unicode_literals
 
 import numpy as np
 import unittest
+import os
 
 from hypothesis import given, settings
 import hypothesis.strategies as st
@@ -129,6 +130,7 @@ def collect_and_distribute_fpn_rpn_ref(*inputs):
 
 
 class TestCollectAndDistributeFpnRpnProposals(hu.HypothesisTestCase):
+    @unittest.skipIf("IN_CIRCLECI" in os.environ, "FIXME: flaky test in CircleCI")
     @given(proposal_count=st.integers(min_value=1000, max_value=8000),
            rpn_min_level=st.integers(min_value=1, max_value=4),
            rpn_num_levels=st.integers(min_value=1, max_value=6),
