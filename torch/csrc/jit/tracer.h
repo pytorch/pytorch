@@ -247,6 +247,8 @@ void addInputs(Node *n, const char * name, std::array<bool, N> value) {
   throw std::runtime_error("Found an unsupported argument type in the JIT tracer. File a bug report.");
 }
 
+TORCH_API void ensureUnique(const char * name, const at::Tensor& tensor);
+
 template <
     typename T,
     typename = torch::enable_if_t<

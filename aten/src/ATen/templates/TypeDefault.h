@@ -12,9 +12,15 @@ struct AT_API TypeDefault : public Type {
 
   // Make sure overload resolution considers the nullary virtual method.
   // (A single argument overload is generated in the list.)
-  bool is_cuda() const override = 0;
-  bool is_sparse() const override = 0;
-  bool is_distributed() const override = 0;
+  bool is_cuda() const override {
+    return backend() == Backend::CUDA || backend() == Backend::SparseCUDA;
+  }
+  bool is_sparse() const override {
+    return backend() == Backend::SparseCPU || backend() == Backend::SparseCUDA;
+  }
+  bool is_distributed() const override {
+    return false;
+  }
 
   Type & toBackend(Backend b) const override;
   Type & toScalarType(ScalarType s) const override;
@@ -27,6 +33,13 @@ struct AT_API TypeDefault : public Type {
   Tensor tensorWithAllocator(IntList sizes, Allocator* allocator) const override;
   Tensor tensorWithAllocator(IntList sizes, IntList strides, Allocator* allocator) const override;
   Tensor scalarTensor(Scalar s) const override;
+
+  Storage storage(bool resizable = false) const override;
+  Storage storage(size_t size, bool resizable = false) const override;
+  Storage storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const override;
+  Storage storageWithAllocator(int64_t size, Allocator* allocator) const override;
+  Storage unsafeStorageFromTH(void * th_pointer, bool retain) const override;
+  Tensor unsafeTensorFromTH(void * th_pointer, bool retain) const override;
 
   // example
   // virtual Tensor * add(Tensor & a, Tensor & b) = 0;
