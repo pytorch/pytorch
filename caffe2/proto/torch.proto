@@ -171,7 +171,12 @@ message NodeProto {
   optional string doc_string = 6;
 
   // Additional annotations, attributes are defined in Schema
-  repeated AttributeProto annotation = 8;
+  // To be added as annotations:
+  //    string engine
+  //    string list control_input
+  //    int64 is_gradient_op
+  //    string debug_info
+  repeated AttributeProto annotations = 8;
 
   // Node type, like PythonOp, etc, purely for PyTorch
   optional string node_type = 51;
@@ -248,6 +253,17 @@ message ModelProto {
 
   // Model name
   optional string name = 16;
+
+  // Model name
+  repeated AttributeProto annotations = 17;
+
+  // Mapping from list name to blob name list, must be string list type.
+  // Equivalent to blobs in MetaNetDef.
+  repeated AttributeProto blob_lists = 51;
+
+  // Mapping from plan name to serialized plan, must be string list type.
+  // Equivalent to plans in MetaNetDef.
+  repeated AttributeProto plans = 52;
 };
 
 // StringStringEntryProto follows the pattern for cross-proto-version maps.
@@ -289,7 +305,7 @@ message GraphProto {
   repeated ValueInfoProto value_info = 13;
 
   // Additional annotations.
-  repeated AttributeProto annotation = 14;
+  repeated AttributeProto annotations = 14;
 
   // DO NOT USE the following fields, they were deprecated from earlier versions.
   // repeated string input = 3;
@@ -298,6 +314,9 @@ message GraphProto {
   // optional int64 producer_version = 7;
   // optional string producer_tag = 8;
   // optional string domain = 9;
+
+  // Graph type, equivalent to Caffe2's NetDef.type
+  optional string type = 51;
 }
 
 // Tensors
@@ -344,6 +363,8 @@ message TensorProto {
   message Segment {
     optional int64 begin = 1;
     optional int64 end = 2;
+    optional int64 chuck_num = 51;
+    optional int64 chuck_id = 52;
   }
   // Used as offset in the external shared data.
   optional Segment segment = 3;
@@ -427,7 +448,7 @@ message TensorProto {
   optional string alias = 16;
 
   // Additional annotations.
-  repeated AttributeProto annotation = 17;
+  repeated AttributeProto annotations = 17;
 
   // Device info
   optional DeviceOption device_detail = 51;
@@ -511,6 +532,13 @@ message TypeProto {
   // stored inside. Refer to https://github.com/onnx/onnx/blob/master/docs/TypeDenotation.md#type-denotation-definition
   // for pre-defined type denotations.
   optional string denotation = 6;
+}
+
+// TensorProtos stores multiple TensorProto objects in one single proto. This
+// is useful for small tensors; For anything big, consider using a DB for
+// storage.
+message TensorProtos {
+  repeated TensorProto protos = 1;
 }
 
 // Operator Sets
