@@ -6785,12 +6785,6 @@ EXCLUDE_TRACED = {
     # nn functional test
     # schema not found for onnx node
     'test_nn_instance_norm',
-
-    # output no dependence with traced input, tracer confusion
-    'test_nn_rrelu',
-
-    # aten op has additional cudnn argument
-    'test_nn_group_norm',
 }
 
 # known to be failing in script
