@@ -291,7 +291,7 @@ def add_dim3(kernel_string, cuda_kernel):
         elif c == ")":
             closure -= 1
         elif (c == "," or ind == len(kernel_string) - 1) and closure == 0:
-            arg_locs[count]['end'] = ind
+            arg_locs[count]['end'] = ind + (c != ",")
             count += 1
             if count < 2:
                 arg_locs[count]['start'] = ind + 1
