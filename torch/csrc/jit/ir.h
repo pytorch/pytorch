@@ -679,7 +679,7 @@ public:
   }
 
   // XXX: this function is meant to be used with string literals only!
-  bool matches(const char *signature_literal, at::ArrayRef<Symbol> const_inputs={}) const;
+  TORCH_API bool matches(const char *signature_literal, at::ArrayRef<Symbol> const_inputs={}) const;
 
   const FunctionSchema& schema() const {
     if (!schema_)

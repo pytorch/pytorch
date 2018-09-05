@@ -1,3 +1,4 @@
+from __future__ import division
 import torch
 import torch.jit
 import torch.nn as nn
@@ -28,6 +29,10 @@ import random
 
 from torch.jit.frontend import NotSupportedError
 from torch.jit import BatchTensor
+
+# For testing truediv in python 2
+from test_module.future_div import div_int_future, div_float_future
+from test_module.no_future_div import div_int_nofuture, div_float_nofuture
 
 try:
     import torchvision
@@ -3350,7 +3355,7 @@ a")
 
         @torch.jit.script
         def bar(c, b):
-            return c / b
+            return c + b
 
         with self.assertRaisesRegex(RuntimeError, "failed in interpreter"):
             bar(Variable(torch.rand(10), requires_grad=True), Variable(torch.rand(9), requires_grad=True))
@@ -3379,10 +3384,6 @@ a")
             return 3.14 {op} 3.14
         ''')
         ops = ['+', '-', '*', '<', '<=', '>', '>=', '==', '!=']
-        # TODO: turn this on for py3 (and add PY3 division semantics)
-        ops_py2_only = ['/']
-        if PY2:
-            ops.extend(ops_py2_only)
 
         for op in ops:
             code = template.format(op=op)
@@ -3394,6 +3395,19 @@ a")
             self.assertEqual(cu.func2(), scope['func2']())
             self.assertEqual(cu.func3(), scope['func3']())
             self.assertEqual(cu.func4(), scope['func4']())
+
+    def test_number_div(self):
+        self.checkScript(div_int_future, (), optimize=True)
+        self.checkScript(div_float_future, (), optimize=True)
+
+        if PY2:
+            with self.assertRaisesRegex(RuntimeError, 'from __future__ import division'):
+                torch.jit.script(div_int_nofuture)
+            with self.assertRaisesRegex(RuntimeError, 'from __future__ import division'):
+                torch.jit.script(div_float_nofuture)
+        else:
+            self.checkScript(div_int_nofuture, (), optimize=True)
+            self.checkScript(div_float_nofuture, (), optimize=True)
 
     def test_number_augassign(self):
         def func():
@@ -4732,6 +4746,38 @@ a")
         self.assertExpected(torch.onnx.export_to_pretty_string(
             mte, (torch.zeros(1, 2, 3),), None, verbose=False,
             example_outputs=outputs))
+
+    def test_onnx_export_script_truediv(self):
+        class ModuleToExport(torch.jit.ScriptModule):
+            def __init__(self):
+                super(ModuleToExport, self).__init__()
+
+            @torch.jit.script_method
+            def forward(self, x):
+                z = x.size(0) / 2
+                return x + z
+
+        mte = ModuleToExport()
+        outputs = mte(torch.zeros(1, 2, 3))
+        self.assertExpected(torch.onnx.export_to_pretty_string(
+            mte, (torch.zeros(1, 2, 3),), None, verbose=False,
+            example_outputs=outputs))
+
+    def test_onnx_raw_export_script_truediv(self):
+        class ModuleToExport(torch.jit.ScriptModule):
+            def __init__(self):
+                super(ModuleToExport, self).__init__()
+
+            @torch.jit.script_method
+            def forward(self, x):
+                z = x.size(0) / 2
+                return x + z
+
+        mte = ModuleToExport()
+        outputs = mte(torch.zeros(1, 2, 3))
+        self.assertExpected(torch.onnx.export_to_pretty_string(
+            mte, (torch.zeros(1, 2, 3),), None, verbose=False,
+            example_outputs=outputs, export_raw_ir=True))
 
     def test_onnx_export_script_module_if(self):
         class ModuleToExport(torch.jit.ScriptModule):

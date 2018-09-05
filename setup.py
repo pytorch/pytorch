@@ -831,6 +831,7 @@ main_sources = [
     "torch/csrc/jit/ivalue.cpp",
     "torch/csrc/jit/passes/onnx.cpp",
     "torch/csrc/jit/passes/onnx/fixup_onnx_loop.cpp",
+    "torch/csrc/jit/passes/onnx/prepare_division_for_onnx.cpp",
     "torch/csrc/jit/passes/onnx/peephole.cpp",
     "torch/csrc/jit/passes/to_batch.cpp",
     "torch/csrc/jit/python_arg_flatten.cpp",

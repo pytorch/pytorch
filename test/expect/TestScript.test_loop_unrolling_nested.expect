@@ -8,7 +8,7 @@ graph(%x : Dynamic) {
       %8 : int = prim::Constant[value=1]()
       %9 : int = prim::Constant[value=0]()
       %10 : int = prim::Constant[value=8]()
-      %11 : int = aten::div(%7, %10)
+      %11 : int = aten::floordiv(%7, %10)
       %12 : int = prim::Constant[value=8]()
       %13 : int = aten::mul(%11, %12)
       %14 : int = aten::sub(%7, %13)
