@@ -15,7 +15,7 @@
 #include "ATen/core/Half.h"
 #include "ATen/core/TensorTypeIdRegistration.h"
 #include "ATen/core/Reduction.h"
-#include "ATen/TensorOptions.h"
+#include "ATen/core/TensorOptions.h"
 
 #include <array>
 #include <cstddef>
