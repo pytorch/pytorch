@@ -7473,6 +7473,7 @@ EXCLUDE_SCRIPT = {
     'test_renorm_norm_inf',
     'test_matrix_power_n=-1',  # involves inverse
     'test_matrix_power_n=-3',  # involves inverse
+
     # skipped nn functional tests
     # ops involves sampling which could not test
     'test_nn_dropout',
@@ -7485,7 +7486,6 @@ EXCLUDE_SCRIPT = {
     'test_nn_adaptive_max_pool2d',
     'test_nn_adaptive_max_pool3d',
     'test_nn_ctc_loss',
-
 
     # argument has custom behavior
     'test_nn_fractional_max_pool2d',
@@ -7518,7 +7518,6 @@ EXCLUDE_SCRIPT = {
     'test_nn_cosine_similarity',
     'test_nn_normalize',
     'test_nn_fold',
-    'test_nn_linear',
     'test_nn_max_unpool1d',
     'test_nn_lp_pool1d',
     'test_nn_lp_pool2d',
