@@ -370,7 +370,7 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
   }
 
  public:
-  static constexpr int kNoNetPositionSet = -1;
+  static const int kNoNetPositionSet = -1;
 
  private:
   Workspace* operator_ws_;
