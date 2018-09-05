@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/stack.h>
 
 #include <string>
+#include <memory>
 
 namespace torch {
 namespace jit {

@@ -127,11 +127,11 @@ struct TORCH_API BuiltinModule : public SugaredValue {
     : name(name) {}
   std::string name;
 
-  virtual std::string kind() const override {
+  std::string kind() const override {
     return "builtin module";
   }
 
-  virtual std::shared_ptr<SugaredValue> attr(SourceRange loc, Method & m, const std::string& field) override {
+  std::shared_ptr<SugaredValue> attr(SourceRange loc, Method & m, const std::string& field) override {
     return std::make_shared<BuiltinFunction>(Symbol::aten(field), at::nullopt);
   }
 };
