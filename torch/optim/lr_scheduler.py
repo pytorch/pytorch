@@ -305,7 +305,7 @@ class CosineAnnealingRestartsLR(_LRScheduler):
             T_i = self.T
 
         else:
-            # computation on the last restarting epoch is based on sum of geometric series:
+            # computation of the last restarting epoch is based on sum of geometric series:
             # last_restart = T * (1 + T_mult + T_mult ** 2 + ... + T_mult ** i_restarts)
             i_restarts = math.floor(math.log(1 - self.last_epoch * (1 - self.T_mult) / self.T,
                                              self.T_mult))
