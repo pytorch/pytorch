@@ -3,12 +3,11 @@
 // ${generated_comment}
 
 #include "ATen/Tensor.h"
-#include "ATen/Scalar.h"
+#include "ATen/core/Scalar.h"
 #include "ATen/core/SparseTensorRef.h"
 #include "ATen/Type.h"
 #include "ATen/core/TensorOptions.h"
 #include "ATen/DeviceGuard.h"
-#include "ATen/Context.h"
 
 namespace at {
 
@@ -54,8 +53,11 @@ inline Tensor to(
   if (tensor.options() == options) {
     return tensor;
   }
+  AT_CHECK(tensor.is_variable() == options.is_variable(),
+           "cannot change is_variable, from: ", tensor.is_variable(),
+           " to: ", options.is_variable());
   DeviceGuard guard(options.device());
-  return at::getType(options).copy(tensor, non_blocking);
+  return tensor.type().toBackend(options.backend()).toScalarType(options.dtype()).copy(tensor, non_blocking);
 }
 } // namespace detail
 

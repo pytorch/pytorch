@@ -4,7 +4,7 @@
 
 #include "ATen/ExpandUtils.h"
 #include "ATen/NativeFunctions.h"
-#include "ATen/Scalar.h"
+#include "ATen/core/Scalar.h"
 #include "ATen/core/SparseTensorRef.h"
 #include "ATen/core/Storage.h"
 #include "ATen/Tensor.h"
