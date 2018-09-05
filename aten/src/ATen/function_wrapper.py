@@ -1286,7 +1286,7 @@ def create_derived(backend_type_env, declarations):
                           .format(name, name))
         return [
             'auto {}_ = {};'.format(name, allocation),
-            'auto {} = Tensor({}, false);'.format(name, tensor_arg),
+            'auto {} = Tensor(c10::intrusive_ptr<TensorImpl, UndefinedTensor>::reclaim({}));'.format(name, tensor_arg),
         ]
 
     def resize_arg(arg):
@@ -1494,7 +1494,7 @@ def create_derived(backend_type_env, declarations):
                                else ""
                 wrapped_tensor = CodeTemplate(ALLOC_WRAP[ret['type']]).substitute(
                     env, arguments=[call])
-                return_tensor = "return Tensor((${wrapped_tensor})${maybe_scalar},false);"
+                return_tensor = "return Tensor(c10::intrusive_ptr<TensorImpl, UndefinedTensor>::reclaim((${wrapped_tensor})${maybe_scalar}));"
                 body.append(CodeTemplate(return_tensor).substitute(
                     env, wrapped_tensor=wrapped_tensor, maybe_scalar=maybe_scalar))
             # return the same underlying Tensor type for both real and accreal; this ensures

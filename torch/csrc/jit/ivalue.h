@@ -121,13 +121,18 @@ struct TORCH_API IValue final {
   bool isTensor() const { return Tag::Tensor == tag; }
   at::Tensor toTensor() && {
     JIT_ASSERT(isTensor());
-    at::Tensor t(as_tensor_impl, /*retain=*/false);
+    at::Tensor t(c10::intrusive_ptr<at::TensorImpl, at::UndefinedTensor>::reclaim(as_tensor_impl));
     clearToNone();
     return t;
   }
   at::Tensor toTensor() const & {
     JIT_ASSERT(isTensor());
-    return at::Tensor(as_tensor_impl, /*retain=*/true);
+    JIT_ASSERT(is_intrusive_ptr == (as_tensor_impl != at::UndefinedTensor::singleton()));
+    auto tensor_impl = c10::intrusive_ptr<at::TensorImpl, at::UndefinedTensor>::reclaim(as_tensor_impl);
+    if (is_intrusive_ptr) {
+      c10::raw::intrusive_ptr::incref(tensor_impl.get());
+    }
+    return at::Tensor(std::move(tensor_impl));
   }
 
   // Tuple

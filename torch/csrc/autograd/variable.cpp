@@ -108,7 +108,9 @@ std::shared_ptr<Function> Variable::Impl::get_grad_accumulator() {
   if (result)
     return result;
 
-  result = std::make_shared<AccumulateGrad>(Variable(this, true));
+  c10::raw::intrusive_ptr::incref(this);
+  auto intrusive_from_this = c10::intrusive_ptr<Variable::Impl>::reclaim(this);
+  result = std::make_shared<AccumulateGrad>(Variable(std::move(intrusive_from_this)));
   grad_accumulator_ = result;
   return result;
 }

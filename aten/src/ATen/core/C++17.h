@@ -82,6 +82,7 @@ template<class T> using remove_cv_t = std::remove_cv_t<T>;
 template<class T> using result_of_t = std::result_of_t<T>;
 template<class T> using decay_t = std::decay_t<T>;
 template<class T> using remove_const_t = std::remove_const_t<T>;
+template<class T> using remove_pointer_t = std::remove_pointer_t<T>;
 #else
 template<bool B, class T, class F> using conditional_t = typename std::conditional<B, T, F>::type;
 template<bool B, class T = void> using enable_if_t = typename std::enable_if<B, T>::type;
@@ -91,6 +92,7 @@ template<class T> using remove_cv_t = typename std::remove_cv<T>::type;
 template<class T> using result_of_t = typename std::result_of<T>::type;
 template<class T> using decay_t = typename std::decay<T>::type;
 template<class T> using remove_const_t = typename std::remove_const<T>::type;
+template<class T> using remove_pointer_t = typename std::remove_pointer<T>::type;
 #endif
 
 

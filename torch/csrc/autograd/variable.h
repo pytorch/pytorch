@@ -245,7 +245,6 @@ struct TORCH_API Variable : public at::Tensor {
   // Private Methods
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-  Variable(Variable::Impl* self, bool retain);
   Variable(c10::intrusive_ptr<Variable::Impl> self);
   Impl* get() const;
 };
@@ -567,9 +566,6 @@ inline PyObject* Variable::pyobj() const noexcept {
 
 // Private Methods
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-inline Variable::Variable(Variable::Impl* self, bool retain)
-    : at::Tensor(self, retain) {}
 
 inline Variable::Variable(c10::intrusive_ptr<Variable::Impl> self)
     : at::Tensor(std::move(self)) {}
