@@ -26,3 +26,6 @@ matrix:
         python: "3.6"
         install: pip install mypy mypy-extensions
         script: mypy @mypy-files.txt
+      - env: CPP_DOC_CHECK
+        install: sudo apt-get install -y doxygen
+        script: cd docs/cpp && ./check-doxygen.sh
