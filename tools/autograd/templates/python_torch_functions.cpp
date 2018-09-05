@@ -19,6 +19,7 @@
 #include "torch/csrc/utils/tensor_layouts.h"
 #include "torch/csrc/utils/tensor_new.h"
 #include "torch/csrc/utils/tensor_numpy.h"
+#include "torch/csrc/jit/tracer.h"
 #include "torch/csrc/autograd/generated/variable_factories.h"
 
 #include <ATen/ATen.h>
@@ -187,6 +188,7 @@ static PyObject * THPVariable_range(PyObject* self, PyObject* args, PyObject* kw
 static PyObject * THPVariable_as_tensor(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
+  jit::tracer::warn("torch.as_tensor");
   return THPVariable_Wrap(torch::utils::as_tensor(default_type(), args, kwargs));
   END_HANDLE_TH_ERRORS
 }
@@ -194,6 +196,7 @@ static PyObject * THPVariable_as_tensor(PyObject* self, PyObject* args, PyObject
 static PyObject * THPVariable_from_numpy(PyObject* module, PyObject* arg)
 {
   HANDLE_TH_ERRORS
+  jit::tracer::warn("torch.from_numpy");
   auto data = torch::utils::tensor_from_numpy(arg);
   return THPVariable_Wrap(make_variable(std::move(data), /*requires_grad=*/false));
   END_HANDLE_TH_ERRORS
@@ -218,6 +221,7 @@ static PyObject * THPVariable__promote_types(PyObject* self, PyObject* args, PyO
 static PyObject * THPVariable_sparse_coo_tensor(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
+  jit::tracer::warn("torch.sparse_coo_tensor");
   return THPVariable_Wrap(torch::utils::sparse_coo_tensor_ctor(default_type(), args, kwargs));
   END_HANDLE_TH_ERRORS
 }
@@ -225,6 +229,7 @@ static PyObject * THPVariable_sparse_coo_tensor(PyObject* self, PyObject* args, 
 static PyObject * THPVariable_tensor(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
+  jit::tracer::warn("torch.tensor");
   return THPVariable_Wrap(torch::utils::tensor_ctor(default_type(), args, kwargs));
   END_HANDLE_TH_ERRORS
 }
