@@ -54,7 +54,7 @@ VariableInfo::VariableInfo(const Variable& var)
 
 Variable VariableInfo::zeros(at::DeviceGuard& device_guard) const {
   device_guard.set_index(device);
-  return at::zeros(size, *type);
+  return at::zeros(size, type->options());
 }
 
 auto PyFunction::legacy_apply(const variable_list& inputs) -> variable_list {

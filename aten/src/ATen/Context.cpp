@@ -118,4 +118,8 @@ Type& getMaybeVariableType(const TensorImpl* impl) {
             backend, impl->scalar_type(), impl->is_variable());
 }
 
+Allocator* getCPUAllocator() {
+  return getTHDefaultAllocator();
+}
+
 }
