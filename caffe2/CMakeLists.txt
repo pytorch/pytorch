@@ -327,7 +327,7 @@ if(USE_CUDA)
   # NB: This must be target_compile_definitions, not target_compile_options,
   # as the latter is not respected by nvcc
   if (MSVC)
-      target_compile_definitions(caffe2_gpu PRIVATE "-DCAFFE2_BUILD_MAIN_LIB")
+	  target_compile_definitions(caffe2_gpu PRIVATE "-DCAFFE2_CUDA_BUILD_MAIN_LIB")
   endif()
 
   # Set standard properties on the target
