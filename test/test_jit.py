@@ -6781,71 +6781,18 @@ class TestPytorchExportModes(JitTestCase):
 EXCLUDE_TRACED = {
     'test_split_dim',
     'test_split_dim_neg0',
-
-    # nn functional test
-    # schema not found for onnx node
-    'test_nn_instance_norm',
-
-    # output no dependence with traced input, tracer confusion
-    'test_nn_rrelu',
-
-    # aten op has additional cudnn argument
-    'test_nn_group_norm',
 }
 
 # known to be failing in script
 EXCLUDE_SCRIPT = {
-    # TODO: Fix var/std
-    # there are two schemas for var (and std):
-    # (1) var(Tensor, int, *, bool, bool, Tensor)
-    # (2) var(Tensor, *, bool)
-    #
-    # Right now, the following is happening:
-    # - Shorter schemas come before longer schemas
-    # - bool, int are treated as IntType rather than DynamicType like before
-    # So the schemas look like the following in operator:
-    # (2) var(DynamicType, IntType)
-    # (1) var(DynamicType, IntType, IntType, DynamicType)
-    # Now, when one calls torch.var(tensor, dim=1), the compiler mistakingly
-    # matches it with (2) instead of (1), which is a problem.
-    'test_std_dim',
-    'test_std_dim_1d',
-    'test_std_dim_1d_neg0',
-    'test_std_dim_neg0',
-    'test_var_dim',
-    'test_var_dim_1d',
-    'test_var_dim_1d_neg0',
-    'test_var_dim_neg0',
     'test_norm_inf',
     'test_renorm_norm_inf',
-    'test_split',
     'test_split_size_list',
     'test_split_size_list_dim',
     'test_split_size_list_dim_neg0',
-    'test_expand',
-    'test_expand_1_element',
-    'test_expand_new_dim',
-    'test_expand_new_dim_front_old_front_1',
-    'test_expand_scalar_to_dims',
-    'test_expand_size',
-    'test_permute',
-    'test_permute_neg_dim',
-    'test_repeat',
-    'test_repeat_scalar',
-    'test_repeat_single_number',
-    'test_repeat_unsqueeze',
-    'test_reshape',
-    'test_reshape_1d',
-    'test_reshape_scalar_to_1d',
     'test_reshape_size',
-    'test_view',
-    'test_view_1d',
-    'test_view_scalar_to_1d',
     'test_view_size',
-    'test_split_dim',
-    'test_split_dim_neg0',
-    'test_gesv',
-    'test_inverse',
+
     # skipped nn functional tests
     # ops involves sampling which could not test
     'test_nn_dropout',
@@ -6858,14 +6805,13 @@ EXCLUDE_SCRIPT = {
     'test_nn_adaptive_max_pool2d',
     'test_nn_adaptive_max_pool3d',
 
-
     # argument has custom behavior
     'test_nn_fractional_max_pool2d',
     'test_nn_embedding',
     'test_nn_embedding_bag',
     'test_nn_batch_norm',
+
     # aten op has additional cudnn argument
-    'test_nn_group_norm',
     'test_nn_nll_loss',
     'test_nn_unfold',
     'test_nn_max_unpool2d',
@@ -6888,7 +6834,6 @@ EXCLUDE_SCRIPT = {
     'test_nn_cosine_similarity',
     'test_nn_normalize',
     'test_nn_fold',
-    'test_nn_linear',
     'test_nn_max_unpool1d',
     'test_nn_lp_pool1d',
     'test_nn_lp_pool2d',
