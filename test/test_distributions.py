@@ -93,6 +93,7 @@ EXAMPLES = [
         {'probs': torch.tensor([0.7, 0.2, 0.4], requires_grad=True)},
         {'probs': torch.tensor([0.3], requires_grad=True)},
         {'probs': 0.3},
+        {'logits': torch.tensor([0.], requires_grad=True)},
     ]),
     Example(Geometric, [
         {'probs': torch.tensor([0.7, 0.2, 0.4], requires_grad=True)},
@@ -112,6 +113,7 @@ EXAMPLES = [
     Example(Categorical, [
         {'probs': torch.tensor([[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]], requires_grad=True)},
         {'probs': torch.tensor([[1.0, 0.0], [0.0, 1.0]], requires_grad=True)},
+        {'logits': torch.tensor([[0.0, 0.0], [0.0, 0.0]], requires_grad=True)},
     ]),
     Example(Binomial, [
         {'probs': torch.tensor([[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]], requires_grad=True), 'total_count': 10},
@@ -322,6 +324,7 @@ EXAMPLES = [
     Example(OneHotCategorical, [
         {'probs': torch.tensor([[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]], requires_grad=True)},
         {'probs': torch.tensor([[1.0, 0.0], [0.0, 1.0]], requires_grad=True)},
+        {'logits': torch.tensor([[0.0, 0.0], [0.0, 0.0]], requires_grad=True)},
     ]),
     Example(Pareto, [
         {
@@ -712,6 +715,12 @@ class TestDistributions(TestCase):
             self.assertEqual(actual, expected)
             actual = dist(param).enumerate_support()
             self.assertEqual(actual, expected)
+
+    def test_repr(self):
+        for Dist, params in EXAMPLES:
+            for param in params:
+                dist = Dist(**param)
+                self.assertTrue(repr(dist).startswith(dist.__class__.__name__))
 
     def test_sample_detached(self):
         for Dist, params in EXAMPLES:
