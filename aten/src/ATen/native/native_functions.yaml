@@ -2029,8 +2029,8 @@
     SparseCUDA: sparse_resize_and_clear_
 
 
-- func: _sparse_mask(Tensor self, SparseTensorRef mask) -> Tensor
-  variants: function
+- func: sparse_mask(Tensor self, SparseTensorRef mask) -> Tensor
+  variants: method
   dispatch:
     CPU: sparse_mask_cpu
     CUDA: sparse_mask_cuda
@@ -2044,7 +2044,7 @@
 
 
 - func: _sparseDims(Tensor self) -> int64_t
-  variants: function
+  variants: method
   dispatch:
     SparseCPU: _sparseDims_sparse
     SparseCUDA: _sparseDims_sparse
@@ -2058,7 +2058,7 @@
 
 
 - func: _denseDims(Tensor self) -> int64_t
-  variants: function
+  variants: method
   dispatch:
     SparseCPU: _denseDims_sparse
     SparseCUDA: _denseDims_sparse

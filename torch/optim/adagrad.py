@@ -85,7 +85,7 @@ class Adagrad(Optimizer):
                             return constructor().resize_as_(grad)
                         return constructor(grad_indices, values, size)
                     state['sum'].add_(make_sparse(grad_values.pow(2)))
-                    std = state['sum']._sparse_mask(grad)
+                    std = state['sum'].sparse_mask(grad)
                     std_values = std._values().sqrt_().add_(1e-10)
                     p.data.add_(-clr, make_sparse(grad_values / std_values))
                 else:

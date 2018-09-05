@@ -198,12 +198,12 @@ SparseTensor& add_out_sparse_cpu(SparseTensor& r, const SparseTensor& t, const S
     return mul_out_sparse_scalar(r, src, value);
   }
 
-  AT_CHECK(_is_same_density(t, src), "add: expected 'self' and 'other' to have same density, but 'self' has ", at::_sparseDims(t), " sparse dimensions while 'other' has ", at::_sparseDims(src), " sparse dimensions");
+  AT_CHECK(_is_same_density(t, src), "add: expected 'self' and 'other' to have same density, but 'self' has ", t._sparseDims(), " sparse dimensions while 'other' has ", src._sparseDims(), " sparse dimensions");
 
   // saving those because they can be overwritten when doing in-place operations
   int64_t t_nnz = t._nnz(), s_nnz = src._nnz(), max_nnz = t_nnz + s_nnz;
   bool t_coalesced = t.is_coalesced(), s_coalesced = src.is_coalesced();
-  int64_t sparseDims = at::_sparseDims(src);
+  int64_t sparseDims = src._sparseDims();
   LongTensor t_indices = t._indices();
   Tensor t_values = t._values();
   LongTensor src_indices = src._indices();
@@ -297,7 +297,7 @@ void add_dense_sparse_worker_cpu(Tensor& r, Scalar value, const SparseTensor& sp
   #pragma omp parallel for private(k)
   for (k = 0; k < sparse._nnz(); k++) {
     int64_t index = r.storage_offset();
-    for (int64_t d = 0; d < at::_sparseDims(sparse); d++) {
+    for (int64_t d = 0; d < sparse._sparseDims(); d++) {
       index += r.stride(d) * indices_accessor[d][k];
     }
     r_ptr[index] += cast_value * values_accessor[k];
@@ -324,7 +324,7 @@ Tensor& add_out_dense_sparse_cpu(Tensor& r, const Tensor& dense, SparseTensorRef
   LongTensor indices = sparse._indices();
   Tensor values = sparse._values();
   int64_t nDim = dense.dim();
-  int64_t nDimI = at::_sparseDims(sparse);
+  int64_t nDimI = sparse._sparseDims();
 
   if (!isSameTensor(r, dense)) r.copy_(dense);
   if (sparse._nnz() == 0) return r;
@@ -334,7 +334,7 @@ Tensor& add_out_dense_sparse_cpu(Tensor& r, const Tensor& dense, SparseTensorRef
     auto indices_accessor = indices.accessor<int64_t, 2>();
     for (int64_t k = 0; k < sparse._nnz(); k++) {
       Tensor dstBuffer = r;
-      for (int64_t d = 0; d < at::_sparseDims(sparse); d++) {
+      for (int64_t d = 0; d < sparse._sparseDims(); d++) {
         dstBuffer = dstBuffer.select(0, indices_accessor[d][k]);
       }
       Tensor srcBuffer = values.select(0, k);
@@ -377,7 +377,7 @@ SparseTensor& mul_out_sparse_cpu(SparseTensor& r, const Tensor& t_, const Tensor
   // saving those because they can be overwritten when doing in-place operations
   int64_t t_nnz = t._nnz(), s_nnz = src._nnz();
   int64_t max_nnz = std::min(t_nnz, s_nnz);  // multiply by zero is zero, and can be dropped
-  int64_t sparseDims = at::_sparseDims(src);
+  int64_t sparseDims = src._sparseDims();
   LongTensor t_indices = t._indices();
   Tensor t_values = t._values();
   LongTensor src_indices = src._indices();
@@ -517,8 +517,8 @@ Tensor& s_addmm_out_sparse_dense_cpu(
   AT_CHECK(!sparse_.is_cuda(), "addmm: expected 'mat1' to be a CPU tensor, but got a CUDA tensor");
   AT_CHECK(!dense.is_cuda(), "addmm: expected 'mat2' to be a CPU tensor, but got a CUDA tensor");
 
-  AT_CHECK(at::_sparseDims(sparse_) == 2, "addmm: matrices expected, got ", at::_sparseDims(sparse_), "D tensor");
-  AT_CHECK(at::_denseDims(sparse_) == 0, "addmm: scalar values expected, got ", at::_denseDims(sparse_), "D values");
+  AT_CHECK(sparse_._sparseDims() == 2, "addmm: matrices expected, got ", sparse_._sparseDims(), "D tensor");
+  AT_CHECK(sparse_._denseDims() == 0, "addmm: scalar values expected, got ", sparse_._denseDims(), "D values");
   AT_CHECK(dense.numel() != 0, "addmm: matrices expected, got empty tensor");
   AT_CHECK(dense.dim() == 2, "addmm: matrices expected, got ", dense.dim(), "D tensor");
 
@@ -594,10 +594,10 @@ SparseTensor& hspmm_out_sparse_cpu(SparseTensor& r, const SparseTensor& sparse_,
   AT_CHECK(!r.is_cuda(), "hspmm: expected 'out' to be CPU tensor, but got CUDA tensor");
   AT_CHECK(!dense.is_cuda(), "hspmm: expected 'other' to be a CPU tensor, but got a CUDA tensor");
 
-  AT_CHECK(at::_sparseDims(sparse_) == 2,
-      "hspmm: Argument #2: matrices expected, got ", at::_sparseDims(sparse_), "D tensor");
-  AT_CHECK(at::_denseDims(sparse_) == 0,
-      "hspmm: Argument #2: scalar values expected, got ", at::_denseDims(sparse_), "D values");
+  AT_CHECK(sparse_._sparseDims() == 2,
+      "hspmm: Argument #2: matrices expected, got ", sparse_._sparseDims(), "D tensor");
+  AT_CHECK(sparse_._denseDims() == 0,
+      "hspmm: Argument #2: scalar values expected, got ", sparse_._denseDims(), "D values");
   AT_CHECK(dense.dim() == 2,
       "hspmm: Argument #3: matrices expected, got ", dense.dim(), "D tensor");
 
@@ -678,10 +678,10 @@ SparseTensor& _sspaddmm_out_cpu(
   AT_CHECK(!sparse_.is_cuda(), "sspaddmm: expected 'mat1' to be a CPU tensor, but got a CUDA tensor");
   AT_CHECK(!dense.is_cuda(), "sspaddmm: expected 'mat2' to be a CPU tensor, but got a CUDA tensor");
 
-  AT_CHECK(at::_sparseDims(sparse_) == 2,
-      "sspaddmm: Argument #2: matrices expected, got ", at::_sparseDims(sparse_), "D tensor");
-  AT_CHECK(at::_denseDims(sparse_) == 0,
-      "sspaddmm: Argument #2: scalar values expected, got ", at::_denseDims(sparse_), "D values");
+  AT_CHECK(sparse_._sparseDims() == 2,
+      "sspaddmm: Argument #2: matrices expected, got ", sparse_._sparseDims(), "D tensor");
+  AT_CHECK(sparse_._denseDims() == 0,
+      "sspaddmm: Argument #2: scalar values expected, got ", sparse_._denseDims(), "D values");
   AT_CHECK(dense.dim() == 2,
       "sspaddmm: Argument #2: matrices expected, got ", dense.dim(), "D tensor");
 

@@ -45,7 +45,7 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
   // TODO: I'm not sure if this could ever be non-contiguous
   LongTensor values = self._values().contiguous();
 
-  int64_t sparseDims = at::_sparseDims(self);
+  int64_t sparseDims = self._sparseDims();
   int64_t stride = values.stride(0);
 
   // indices will be modified by Thrust, so we have to clone or use new storage

@@ -51,8 +51,8 @@ Tensor& s_addmm_out_sparse_dense_cuda(Tensor& r_, const Tensor& t, const SparseT
   AT_CHECK(_check_device({sparse_, r_, t, dense}));
 
   // TODO: This error message seems awfully opaque
-  AT_CHECK(at::_sparseDims(sparse_) == 2, "addmm: 2D tensor expected, got ", at::_sparseDims(sparse_), "D tensor");
-  AT_CHECK(at::_denseDims(sparse_) == 0, "addmm: scalar values expected, got ", at::_denseDims(sparse_), "D values");
+  AT_CHECK(sparse_._sparseDims() == 2, "addmm: 2D tensor expected, got ", sparse_._sparseDims(), "D tensor");
+  AT_CHECK(sparse_._denseDims() == 0, "addmm: scalar values expected, got ", sparse_._denseDims(), "D values");
   AT_CHECK(dense.dim() == 2, "addmm: 2D tensor expected, got ", dense.dim(), "D tensor");
 
   // mxk * kxn = mxn
@@ -182,10 +182,10 @@ SparseTensor& hspmm_out_sparse_cuda(SparseTensor& r_, const SparseTensor& sparse
 
   AT_CHECK(_check_device({r_, sparse_, dense}));
 
-  AT_CHECK(at::_sparseDims(sparse_) == 2,
-      "hspmm: Argument #2: 2D tensor expected, got ", at::_sparseDims(sparse_), "D tensor");
-  AT_CHECK(at::_denseDims(sparse_) == 0,
-      "hspmm: Argument #2: scalar values expected, got ", at::_denseDims(sparse_), "D values");
+  AT_CHECK(sparse_._sparseDims() == 2,
+      "hspmm: Argument #2: 2D tensor expected, got ", sparse_._sparseDims(), "D tensor");
+  AT_CHECK(sparse_._denseDims() == 0,
+      "hspmm: Argument #2: scalar values expected, got ", sparse_._denseDims(), "D values");
   AT_CHECK(dense.dim() == 2,
       "hspmm: Argument #3: 2D tensor expected, got ", dense.dim(), "D tensor");
 
@@ -279,7 +279,7 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, SparseTensorR
   LongTensor indices = sparse._indices();
   Tensor values = sparse._values();
   int64_t nDim = dense.dim();
-  int64_t nDimI = at::_sparseDims(sparse);
+  int64_t nDimI = sparse._sparseDims();
 
   if (sparse.is_coalesced()) {
     // TODO benchmark to decide whether to remove this special case
@@ -288,7 +288,7 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, SparseTensorR
     int curDevice = -1;
     cudaGetDevice(&curDevice);
     cudaStream_t stream = at::cuda::getCurrentCUDAStream(curDevice);
-    if (at::_denseDims(sparse) == 0) {
+    if (sparse._denseDims() == 0) {
       AT_CHECK(cuda::getApplyGrid(nnz, grid, curDevice), "add: Argument #0: tensor too large or too many dimensions");
 
       AT_DISPATCH_ALL_TYPES_AND_HALF(
@@ -364,7 +364,7 @@ SparseTensor& add_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t, const
     return mul_out_sparse_scalar(r_, src, value);
   }
 
-  AT_CHECK(_is_same_density(t, src), "add: expected 'self' and 'other' to have same density, but 'self' has ", at::_sparseDims(t), " sparse dimensions while 'other' has ", at::_sparseDims(src), " sparse dimensions");
+  AT_CHECK(_is_same_density(t, src), "add: expected 'self' and 'other' to have same density, but 'self' has ", t._sparseDims(), " sparse dimensions while 'other' has ", src._sparseDims(), " sparse dimensions");
 
   // We deliberately choose to simply concat the indices and values tensors
   // rather than merging them. This removes the need to synchronously fetch nnz

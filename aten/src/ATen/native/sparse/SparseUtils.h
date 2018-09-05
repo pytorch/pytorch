@@ -74,13 +74,13 @@ inline bool isSameTensor(const Tensor& lhs, const Tensor& rhs) {
 }
 
 inline bool _is_same_density(const SparseTensor& self, const SparseTensor& src) {
-  return at::_sparseDims(self) == at::_sparseDims(src) && at::_denseDims(self) == at::_denseDims(src);
+  return self._sparseDims() == src._sparseDims() && self._denseDims() == src._denseDims();
 }
 
 // if forceClone is true, the result will forced to be a clone of self.
 inline LongTensor _newFlattenedIndices(const SparseTensor& self, bool forceClone) {
   LongTensor indices = self._indices();
-  int64_t sparseDims = at::_sparseDims(self);
+  int64_t sparseDims = self._sparseDims();
   if (sparseDims == 1) {
     if (forceClone) {
       return indices.clone();

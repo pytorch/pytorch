@@ -366,7 +366,7 @@ Tensor& stack_out(Tensor& result, TensorList tensors, int64_t dim) {
 }
 
 static inline Tensor & sparse_transpose_(Tensor & self, int64_t dim0, int64_t dim1) {
-  int64_t nsparseDims = at::_sparseDims(self);
+  int64_t nsparseDims = self._sparseDims();
   if (dim0 >= nsparseDims || dim1 >= nsparseDims) {
     AT_ERROR(
         "sparse transpose: transposed dimensions must be sparse ",
@@ -377,7 +377,7 @@ static inline Tensor & sparse_transpose_(Tensor & self, int64_t dim0, int64_t di
     auto sizes = self.sizes().vec();
     std::swap(sizes[dim0], sizes[dim1]);
 
-    _get_sparse_impl(self)->raw_resize_(at::_sparseDims(self), at::_denseDims(self), sizes);
+    _get_sparse_impl(self)->raw_resize_(self._sparseDims(), self._denseDims(), sizes);
   } else {
     auto indices = self._indices();
     auto row0 = indices.select(0, dim0);
@@ -440,8 +440,8 @@ Tensor transpose(const Tensor & self, int64_t dim0, int64_t dim1) {
 
 static void check_t(const Tensor& self, const char *fn) {
   if (self.is_sparse()) {
-    int64_t sparseDims = at::_sparseDims(self);
-    int64_t denseDims = at::_denseDims(self);
+    int64_t sparseDims = self._sparseDims();
+    int64_t denseDims = self._denseDims();
     if (!(sparseDims == 2 && denseDims == 0)) {
       AT_ERROR(fn, " expects a tensor with 2 sparse and 0 dense dimensions, but got ",
                sparseDims, " sparse and ", denseDims, " dense dimensions");

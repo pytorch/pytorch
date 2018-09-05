@@ -355,11 +355,11 @@ class TestSparse(TestCase):
     def test_cuda_empty(self):
         x = torch.sparse.FloatTensor(2, 3, 4)
         y = x.cuda(0)
-        self.assertEqual(torch._sparseDims(x), torch._sparseDims(y))
-        self.assertEqual(torch._denseDims(x), torch._denseDims(y))
+        self.assertEqual(x._sparseDims(), y._sparseDims())
+        self.assertEqual(x._denseDims(), y._denseDims())
         x = y.cpu()
-        self.assertEqual(torch._sparseDims(y), torch._sparseDims(x))
-        self.assertEqual(torch._denseDims(y), torch._denseDims(x))
+        self.assertEqual(y._sparseDims(), x._sparseDims())
+        self.assertEqual(y._denseDims(), x._denseDims())
 
     @skipIfRocm
     def test_transpose(self):
@@ -399,16 +399,16 @@ class TestSparse(TestCase):
         self.assertEqual(torch.Size([3, 2]), x.size())
         self.assertEqual(0, x._indices().numel())
         self.assertEqual(0, x._values().numel())
-        self.assertEqual(torch._sparseDims(x), 2)
-        self.assertEqual(torch._denseDims(x), 0)
+        self.assertEqual(x._sparseDims(), 2)
+        self.assertEqual(x._denseDims(), 0)
 
         x = self.SparseTensor(2, 3)
         y = x.t()
         self.assertEqual(torch.Size([3, 2]), y.size())
         self.assertEqual(0, y._indices().numel())
         self.assertEqual(0, y._values().numel())
-        self.assertEqual(torch._sparseDims(x), 2)
-        self.assertEqual(torch._denseDims(x), 0)
+        self.assertEqual(x._sparseDims(), 2)
+        self.assertEqual(x._denseDims(), 0)
 
     @skipIfRocm
     def test_add_zeros(self):
@@ -681,7 +681,7 @@ class TestSparse(TestCase):
             [17, 18, 19, 20],
         ])
         exp_v = self.ValueTensor([7, 14, 3, 20])
-        res = torch._sparse_mask(dense, x)
+        res = dense.sparse_mask(x)
         expected = self.SparseTensor(i, exp_v, torch.Size([5, 4]))
         self.assertEqual(res, expected)
 
@@ -702,8 +702,8 @@ class TestSparse(TestCase):
             self.assertEqual(tuple(out.size()), tuple(shape))
             self.assertTrue(out._indices().numel() == out._values().numel() == 0)
             self.assertEqual(out._nnz(), 0)
-            self.assertEqual(torch._sparseDims(out), len(shape))
-            self.assertEqual(torch._denseDims(out), 0)
+            self.assertEqual(out._sparseDims(), len(shape))
+            self.assertEqual(out._denseDims(), 0)
 
     @skipIfRocm
     def test_log1p(self):
@@ -757,8 +757,8 @@ class TestSparse(TestCase):
             self.assertEqual(tuple(res.size()), tuple(template_shape))
             self.assertTrue(res._indices().numel() == res._values().numel() == 0)
             self.assertEqual(res._nnz(), 0)
-            self.assertEqual(torch._sparseDims(res), len(template_shape_i))
-            self.assertEqual(torch._denseDims(res), len(template_shape_v))
+            self.assertEqual(res._sparseDims(), len(template_shape_i))
+            self.assertEqual(res._denseDims(), len(template_shape_v))
 
     def test_zeros_like(self):
         i_shapes = [2, 3, 4]
@@ -784,7 +784,7 @@ class TestSparse(TestCase):
             [[13, 5], [14, 1], [15, 1], [16, 6]],
             [[17, 7], [18, 2], [19, 7], [20, 1]],
         ])
-        res = torch._sparse_mask(dense, x)
+        res = dense.sparse_mask(x)
         exp_v = self.ValueTensor([[7, 9], [14, 1], [3, 3], [20, 1]])
         expected = self.SparseTensor(i, exp_v, torch.Size([5, 4, 2]))
         self.assertEqual(res, expected)
@@ -811,8 +811,8 @@ class TestSparse(TestCase):
             'is_coalesced': lambda x: x.is_coalesced(),
             'coalesce': lambda x: x.coalesce(),
             'to_dense': lambda x: x.to_dense(),
-            '_sparseDims': lambda x: torch._sparseDims(x),
-            '_denseDims': lambda x: torch._denseDims(x),
+            '_sparseDims': lambda x: x._sparseDims(),
+            '_denseDims': lambda x: x._denseDims(),
             'norm': lambda x: x.norm(),
             'log1p': lambda x: x.log1p(),
         }
@@ -1166,8 +1166,8 @@ class TestSparse(TestCase):
         x.resize_as_(y)
         x_dense.resize_as_(y_dense)
         self.assertEqual(x.shape, y.shape)
-        self.assertEqual(torch._sparseDims(x), torch._sparseDims(y))
-        self.assertEqual(torch._denseDims(x), torch._denseDims(y))
+        self.assertEqual(x._sparseDims(), y._sparseDims())
+        self.assertEqual(x._denseDims(), y._denseDims())
         self.assertEqual(x.shape, x_dense.shape)
         self.assertEqual(y.shape, y_dense.shape)
         # Here we make sure that the original data are preserved after resizing

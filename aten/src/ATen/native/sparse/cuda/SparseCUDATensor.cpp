@@ -28,16 +28,16 @@ SparseTensor& sparse_mask_out_cuda(SparseTensor& r, const Tensor& t, const Spars
 
   LongTensor indices = at::zeros({mask._nnz()}, mask_indices.options());
 
-  for (int64_t d = 0; d < at::_sparseDims(mask); d++) {
+  for (int64_t d = 0; d < mask._sparseDims(); d++) {
     indices.mul_(mask.size(d));
     // This used to use a buffer but I deoptimized it
     indices.add_(mask_indices.select(0, d));
   }
 
-  std::vector<int64_t> view_size(1 + at::_denseDims(mask));
+  std::vector<int64_t> view_size(1 + mask._denseDims());
   view_size[0] = -1;
-  for (int64_t d = 0; d < at::_denseDims(mask); d++) {
-    view_size[d + 1] = mask.size(at::_sparseDims(mask) + d);
+  for (int64_t d = 0; d < mask._denseDims(); d++) {
+    view_size[d + 1] = mask.size(mask._sparseDims() + d);
   }
 
   Tensor t_view = t.view(view_size);
