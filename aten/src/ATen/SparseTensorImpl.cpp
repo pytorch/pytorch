@@ -30,24 +30,16 @@ namespace {
 // values tensor for such an empty tensor.
 SparseTensorImpl::SparseTensorImpl(at::TensorTypeId type_id, at::ScalarType scalar_type)
     : TensorImpl(type_id, scalar_type, false)
-    , size_{0}
     , sparseDims_(1)
     , denseDims_(0)
     , indices_(globalContext().getNonVariableTypeOpt(sparseTensorIdToDenseBackend(type_id), ScalarType::Long)->tensor({1, 0}))
     , values_(globalContext().getNonVariableTypeOpt(sparseTensorIdToDenseBackend(type_id), scalar_type)->tensor()) {}
 
-IntList SparseTensorImpl::sizes() const {
-  return size_;
-}
 IntList SparseTensorImpl::strides() const {
   AT_ERROR("sparse tensors do not have strides");
 }
 bool SparseTensorImpl::is_contiguous() const {
   AT_ERROR("sparse tensors do not have is_contiguous");
-}
-int64_t SparseTensorImpl::size(int64_t d) const {
-  d = at::maybe_wrap_dim(d, dim(), false);
-  return size_[d];
 }
 int64_t SparseTensorImpl::stride(int64_t d) const {
   AT_ERROR("sparse tensors do not have strides");

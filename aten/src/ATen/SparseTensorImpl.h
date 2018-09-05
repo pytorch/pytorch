@@ -14,11 +14,6 @@ struct AT_API SparseTensorImpl : public TensorImpl {
   // _indices.shape: dimensionality: 2,  shape: (_sparseDims, nnz)
   // _values.shape:  dimensionality: 1 + _denseDims.  shape: (nnz, shape[_sparseDims:])
 
-  // The true size of the sparse tensor (e.g., if you called to_dense()
-  // on it).  When THTensor merges into TensorImpl, this field
-  // should move to the parent class.
-  std::vector<int64_t> size_;
-
   int64_t sparseDims_ = 0; // number of sparse dimensions
   int64_t denseDims_ = 0; // number of dense dimensions
 
@@ -45,10 +40,8 @@ public:
   Tensor indices() const { return indices_; }
   Tensor values() const { return values_; }
 
-  IntList sizes() const override;
   IntList strides() const override;
   bool is_contiguous() const override;
-  int64_t size(int64_t d) const override;
   int64_t stride(int64_t d) const override;
   void resize_dim(int64_t ndim) override;
   void set_size(int64_t dim, int64_t new_size) override;
@@ -63,10 +56,9 @@ public:
   // WARNING: This function does NOT preserve invariants of sparseDims/denseDims with
   // respect to indices and values
   void raw_resize_(int64_t sparseDims, int64_t denseDims, IntList size) {
-    size_ = size.vec();
     sparseDims_ = sparseDims;
     denseDims_ = denseDims;
-    refresh_numel();
+    set_sizes_and_strides(size.vec(), {1});
   }
 
   // NOTE: This function preserves invariants of sparseDims/denseDims with respect to
@@ -132,7 +124,7 @@ public:
         "shrinking the size of dense dimensions (from ", dense_size_original, " to ", dense_size_new, ") on a non-empty sparse tensor is not supported.\n", alt_options_msg);
     }
 
-    if ((!size.equals(size_)) || (sparseDims != sparseDims_) || (denseDims != denseDims_)) {
+    if ((!size.equals(sizes())) || (sparseDims != sparseDims_) || (denseDims != denseDims_)) {
       std::vector<int64_t> values_size = {values().size(0)};
       auto dense_size = size.slice(sparseDims);
       values_size.insert(values_size.end(), dense_size.begin(), dense_size.end());
@@ -143,17 +135,16 @@ public:
       indices_.resize_(indices_size);
     }
 
-    size_ = size.vec();
     sparseDims_ = sparseDims;
     denseDims_ = denseDims;
-    refresh_numel();
+    set_sizes_and_strides(size.vec(), {1});
   }
 
   // NOTE: this function will resize the sparse tensor and also set `indices` and `values` to empty.
   void resize_and_clear_(int64_t sparseDims, int64_t denseDims, IntList size) {
     AT_CHECK(sparseDims + denseDims == size.size(), "number of dimensions must be sparseDims (", sparseDims, ") + denseDims (", denseDims, "), but got ", size.size());
 
-    size_ = size.vec();
+    set_sizes_and_strides(size.vec(), {1});
     sparseDims_ = sparseDims;
     denseDims_ = denseDims;
 
@@ -163,7 +154,6 @@ public:
     values_size.insert(values_size.end(), dense_size.begin(), dense_size.end());
     auto empty_values = values().type().tensor(values_size);
     set_indices_and_values_unsafe(empty_indices, empty_values);
-    refresh_numel();
   }
 
   void set_coalesced(bool coalesced) { coalesced_ = coalesced; }
