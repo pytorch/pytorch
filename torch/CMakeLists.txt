@@ -375,6 +375,7 @@ set(ATen_CPU_INCLUDE
   ${TORCH_ROOT}/aten/src
   ${CMAKE_CURRENT_BINARY_DIR}/../aten/src
   ${CMAKE_CURRENT_BINARY_DIR}/../aten/src/ATen
+  ${CMAKE_CURRENT_BINARY_DIR}/../aten/src/ATen/core
   ${CMAKE_BINARY_DIR}/aten/src)
 target_include_directories(torch PRIVATE ${ATen_CPU_INCLUDE})
 
