@@ -1721,6 +1721,9 @@
     CPU: _tanh_out_cpu
     CUDA: _tanh_out_cuda
 
+- func: tensordot(Tensor self, Tensor other, IntList dims_self, IntList dims_other) -> Tensor
+  variants: function
+
 - func: transpose(Tensor self, int64_t dim0, int64_t dim1) -> Tensor
 
 - func: transpose_(Tensor self, int64_t dim0, int64_t dim1) -> Tensor
