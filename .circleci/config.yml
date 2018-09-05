@@ -121,7 +121,12 @@ pytorch_linux_test_defaults: &pytorch_linux_test_defaults
         if [ -d "/opt/workspace/cpp-build" ]; then
           docker cp "/opt/workspace/cpp-build" "$id:/var/lib/jenkins/cpp-build"
         fi
-        (echo "source ./workspace/env" && echo 'sudo chown -R jenkins workspace /opt/conda/lib/python${PYTHON_VERSION}/site-packages/torch && cd workspace && (git submodule update --init || git submodule update --init || git submodule update --init) && .jenkins/pytorch/test.sh') | docker exec -u jenkins -i "$id" bash
+        if [ -n "${MULTI_GPU}" ]; then
+          export TEST_SCRIPT=.jenkins/pytorch/multigpu-test.sh
+        else
+          export TEST_SCRIPT=.jenkins/pytorch/test.sh
+        fi
+        (echo "source ./workspace/env" && echo 'sudo chown -R jenkins workspace /opt/conda/lib/python${PYTHON_VERSION}/site-packages/torch && cd workspace && (git submodule update --init || git submodule update --init || git submodule update --init) && ${TEST_SCRIPT}') | docker exec -u jenkins -i "$id" bash
 
 caffe2_linux_build_defaults: &caffe2_linux_build_defaults
   resource_class: large
@@ -454,6 +459,15 @@ jobs:
       PYTHON_VERSION: "3.6"
       CUDA_VERSION: "8"
     resource_class: gpu.medium
+    <<: *pytorch_linux_test_defaults
+
+  pytorch_linux_xenial_cuda8_cudnn6_py3_multigpu_test:
+    environment:
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn6-py3:238"
+      PYTHON_VERSION: "3.6"
+      CUDA_VERSION: "8"
+      MULTI_GPU: "1"
+    resource_class: gpu.large
     <<: *pytorch_linux_test_defaults
 
   pytorch_linux_xenial_cuda9_cudnn7_py2_build:
@@ -845,6 +859,9 @@ workflows:
             - pytorch_linux_xenial_py3_clang5_asan_build
       - pytorch_linux_xenial_cuda8_cudnn6_py3_build
       - pytorch_linux_xenial_cuda8_cudnn6_py3_test:
+          requires:
+            - pytorch_linux_xenial_cuda8_cudnn6_py3_build
+      - pytorch_linux_xenial_cuda8_cudnn6_py3_multigpu_test:
           requires:
             - pytorch_linux_xenial_cuda8_cudnn6_py3_build
       - pytorch_linux_xenial_cuda9_cudnn7_py2_build
