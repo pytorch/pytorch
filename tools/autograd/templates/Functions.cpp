@@ -531,7 +531,7 @@ Tensor _fused_dropout_backward(Tensor grad, Tensor mask, double p1m) {
     // Use autograd-friendly backward if double backward is required
     return grad * (mask.type_as(grad) * (1. / p1m));
   } else {
-    return at::_masked_scale(grad, mask, 1. / p1m);
+    return grad._masked_scale(mask, 1. / p1m);
   }
 }
 
