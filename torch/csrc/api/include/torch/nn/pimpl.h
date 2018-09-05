@@ -12,7 +12,7 @@ namespace detail {
 /// This class exists  only to do SFINAE on abstract types `T` that are really
 /// `ModuleHolder<ModuleType>`, because there's no good way to say that `T` is a
 /// `ModuleHolder` over some unknown type `ModuleType`. With this, you can do
-/// enable_if_t<is_base_of<ModuleHolderIndicator, T>::value>::type.
+/// `enable_if_t<is_base_of_v<ModuleHolderIndicator, T>>`.
 struct ModuleHolderIndicator {};
 
 template <typename T>
