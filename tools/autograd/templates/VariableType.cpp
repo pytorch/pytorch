@@ -127,7 +127,7 @@ struct VariableTypeRegistry {
 
 struct VariableHooks : public at::VariableHooksInterface {
   VariableHooks(at::VariableHooksArgs) {}
-  void registerVariableTypeFor(at::Context*, at::Backend, at::ScalarType) const override;
+  void registerVariableTypeFor(at::LegacyTypeDispatch*, at::Backend, at::ScalarType) const override;
   at::Type& getVariableTypeFromBaseType(const at::Type&) const override;
 };
 
@@ -161,7 +161,7 @@ static VariableTypeRegistry registry;
 REGISTER_VARIABLE_HOOKS(VariableHooks)
 
 // Pre-condition: backend/scalar_type is a valid type in the type_registry
-void VariableHooks::registerVariableTypeFor(at::Context* context, at::Backend backend, at::ScalarType scalar_type) const {
+void VariableHooks::registerVariableTypeFor(at::LegacyTypeDispatch* context, at::Backend backend, at::ScalarType scalar_type) const {
   auto* baseType = context->getNonVariableTypeRaw(backend, scalar_type);
   register_variable_type_for(baseType);
 }

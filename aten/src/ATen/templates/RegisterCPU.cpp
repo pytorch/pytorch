@@ -13,8 +13,7 @@ namespace at {
 
 void register_cpu_types(Context * context) {
   ${cpu_type_registrations}
-  context->type_registry[static_cast<int>(Backend::Undefined)]
-                        [static_cast<int>(ScalarType::Undefined)].reset(new UndefinedType());
+  context->registerType(Backend::Undefined, ScalarType::Undefined, new UndefinedType());
 }
 
 } // namespace at
