@@ -27,7 +27,6 @@ struct AT_API StorageImpl : public c10::intrusive_ptr_target {
       bool resizable);
   StorageImpl(StorageImpl&) = delete;
   StorageImpl(const StorageImpl&) = delete;
-  // NB: Don't move ref count!
   StorageImpl(StorageImpl&& other) = default;
   StorageImpl& operator=(StorageImpl&& other) = default;
 

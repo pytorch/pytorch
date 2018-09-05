@@ -157,18 +157,15 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
         storage_.dtype(), numel_, &value, mutable_data<T>());
   }
 
+
   /**
    * @brief Delete the copy constructor and use Clone explicitly
    */
-  TensorImpl(const TensorImpl& src) = delete;
-
-  TensorImpl(TensorImpl&& src) noexcept {
-    swap(src);
-  }
-
-  TensorImpl& operator=(TensorImpl&&) = default;
-  // Note(jiayq): possibly a rule-of-three violation, but we explicitly
-  // discourage the use of = for Tensors.
+  TensorImpl(TensorImpl&) = delete;
+  TensorImpl(const TensorImpl&) = delete;
+  TensorImpl(TensorImpl&& other) = delete;
+  TensorImpl(const TensorImpl&& other) = delete;
+  TensorImpl& operator=(TensorImpl&& other) = delete;
   TensorImpl& operator=(const TensorImpl& src) = delete;
 
   virtual ~TensorImpl() noexcept {}
