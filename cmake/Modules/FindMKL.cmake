@@ -310,7 +310,7 @@ if (USE_MKL AND USE_MKLML)
   set(CAFFE2_USE_MKL 1)
 endif()
 
-if (USE_MKL AND USE_IDEEP) 
+if (USE_MKL AND USE_IDEEP)
   set(IDEEP_ROOT "${PROJECT_SOURCE_DIR}/third_party/ideep")
   set(MKLDNN_ROOT "${IDEEP_ROOT}/mkl-dnn")
   find_path(IDEEP_INCLUDE_DIR ideep.hpp PATHS ${IDEEP_ROOT} PATH_SUFFIXES include)
@@ -319,7 +319,7 @@ if (USE_MKL AND USE_IDEEP)
     execute_process(COMMAND git submodule update --init mkl-dnn WORKING_DIRECTORY ${IDEEP_ROOT})
     find_path(MKLDNN_INCLUDE_DIR mkldnn.hpp mkldnn.h PATHS ${MKLDNN_ROOT} PATH_SUFFIXES include)
   endif()
-  
+
   if (MKLDNN_INCLUDE_DIR)
     list(APPEND IDEEP_INCLUDE_DIR ${MKLDNN_INCLUDE_DIR})
     list(APPEND __ideep_looked_for MKLDNN_INCLUDE_DIR)
