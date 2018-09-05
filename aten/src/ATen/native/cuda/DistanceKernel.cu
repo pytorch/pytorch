@@ -16,12 +16,12 @@ template <typename scalar_t>
 static __forceinline__ __device__ scalar_t device_sqrt(scalar_t val);
 
 template <>
-float device_sqrt(float val) {
+__forceinline__ __device__ float device_sqrt(float val) {
   return ::sqrtf(val);
 }
 
 template <>
-double device_sqrt(double val) {
+__forceinline__ __device__ double device_sqrt(double val) {
   return ::sqrt(val);
 }
 
@@ -55,7 +55,7 @@ struct dists {
   // Two norm
   struct two {
     static __forceinline__ __device__ void inc(scalar_t& agg, const scalar_t diff, const scalar_t p) { agg += diff * diff; }
-    static __forceinline__ __device__ scalar_t finish(const scalar_t agg, const scalar_t p) { return device_sqrt(agg); }
+    static __forceinline__ __device__ scalar_t finish(const scalar_t agg, const scalar_t p) { return device_sqrt<scalar_t>(agg); }
     static __forceinline__ __device__ void agg(scalar_t& update, const scalar_t other) { update += other; }
     static __forceinline__ __device__ scalar_t backward(const scalar_t diff, const scalar_t grad, const scalar_t dist, const scalar_t p) { return dist == 0.0 ? 0 : grad * diff / dist; }
   };
@@ -85,7 +85,7 @@ __global__ static void pdist_kernel_cuda_impl(scalar_t * result, const scalar_t 
 
   float n2 = n - .5;
   // The -1 accounts for floating point truncation issues
-  int64_t i = static_cast<int64_t>((n2 - device_sqrt(n2 * n2 - 2 * k - 1)));
+  int64_t i = static_cast<int64_t>((n2 - device_sqrt<scalar_t>(n2 * n2 - 2 * k - 1)));
   int64_t j = k - n * i + i * (i + 1) / 2 + i + 1;
 
   const scalar_t * const start = self + i * m;
@@ -134,7 +134,7 @@ __global__ static void pdist_backward_kernel_cuda_impl(scalar_t * buffer, const 
 
   float n2 = n - .5;
   // The -1 accounts for floating point truncation issues
-  int64_t i = static_cast<int64_t>((n2 - device_sqrt(n2 * n2 - 2 * k - 1)));
+  int64_t i = static_cast<int64_t>((n2 - device_sqrt<scalar_t>(n2 * n2 - 2 * k - 1)));
   int64_t j = k - n * i + i * (i + 1) / 2 + i + 1;
   int64_t ib = j - i - 1;
   int64_t jb = n - 2 - i;
