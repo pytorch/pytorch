@@ -229,18 +229,20 @@ class _DistTestBase(object):
     def test_send_recv(self):
         rank = dist.get_rank()
         tensor = _build_tensor(rank + 1)
-        for dest in range(0, dist.get_world_size()):
-            if dest == rank:
-                continue
-            dist.send(tensor, dest)
 
         for src in range(0, dist.get_world_size()):
             if src == rank:
-                continue
-            tensor = _build_tensor(src + 1, value=-1)
-            expected_tensor = _build_tensor(src + 1)
-            dist.recv(tensor, src)
-            self.assertEqual(tensor, expected_tensor)
+                # Send mode
+                for dst in range(0, dist.get_world_size()):
+                    if dst == rank:
+                        continue
+                    dist.send(tensor, dst)
+            else:
+                # Recv mode
+                expected_tensor = _build_tensor(src + 1)
+                output_tensor = _build_tensor(src + 1, value=-1)
+                dist.recv(output_tensor, src)
+                self.assertEqual(output_tensor, expected_tensor)
 
         self._barrier()
 
@@ -253,20 +255,26 @@ class _DistTestBase(object):
     )
     def test_send_recv_any_source(self):
         rank = dist.get_rank()
-        tensor = _build_tensor(10, rank)
-        for dest in range(0, dist.get_world_size()):
-            if dest == rank:
-                continue
-            dist.send(tensor, dest)
-
+        tensor = _build_tensor(10, value=rank)
         recv_ranks = set()
-        for src in range(0, dist.get_world_size()):
-            if src == rank:
-                continue
-            tensor = _build_tensor(10, value=-1)
-            sender = dist.recv(tensor)
-            self.assertTrue(tensor.eq(sender).all())
-            recv_ranks.add(sender)
+
+        for dst in range(0, dist.get_world_size()):
+            if dst == rank:
+                # Recv mode
+                for dst in range(0, dist.get_world_size()):
+                    if dst == rank:
+                        continue
+                    output_tensor = _build_tensor(10, value=-1)
+                    sender = dist.recv(output_tensor)
+
+                    # Assert the scalar value "sender" that should be
+                    # equal to the rank of the sender is equal to all
+                    # values in the received tensor.
+                    self.assertTrue(output_tensor.eq(sender).all())
+                    recv_ranks.add(sender)
+            else:
+                # Send mode
+                dist.send(tensor, dst)
 
         self.assertEqual(len(recv_ranks), dist.get_world_size() - 1)
         self._barrier()
