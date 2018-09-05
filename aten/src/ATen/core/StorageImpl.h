@@ -27,6 +27,9 @@ struct AT_API StorageImpl : public c10::intrusive_ptr_target {
       bool resizable);
   StorageImpl(StorageImpl&) = delete;
   StorageImpl(const StorageImpl&) = delete;
+  StorageImpl(const StorageImpl&& other) = delete;
+  StorageImpl& operator=(const StorageImpl& src) = delete;
+
   StorageImpl(StorageImpl&& other) = default;
   StorageImpl& operator=(StorageImpl&& other) = default;
 
@@ -51,8 +54,6 @@ struct AT_API StorageImpl : public c10::intrusive_ptr_target {
   void release_resources() override {
     data_ptr_.clear();
   }
-
-  void operator=(const StorageImpl&) = delete;
 
   size_t itemsize() const {
     return at::elementSize(dataTypeToScalarType(data_type_));
