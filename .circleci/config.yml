@@ -915,16 +915,16 @@ workflows:
       - caffe2_conda2_ubuntu16_04_test:
           requires:
             - caffe2_conda2_ubuntu16_04_build
-      - caffe2_py2_cuda8_0_cudnn7_ubuntu16_04_build
-      - caffe2_py2_gcc4_9_ubuntu14_04_build
-      - caffe2_py2_clang3_8_ubuntu16_04_build
-      - caffe2_py2_clang3_9_ubuntu16_04_build
-      - caffe2_py2_gcc6_ubuntu16_04_build
-      - caffe2_py2_gcc7_ubuntu16_04_build
-      - caffe2_py2_cuda8_0_cudnn7_aten_ubuntu16_04_build
-      - caffe2_py2_android_ubuntu16_04_build
-      - caffe2_conda3_cuda9_0_cudnn7_ubuntu16_04_build
-      - caffe2_py2_cuda9_0_cudnn7_centos7_build
+      # - caffe2_py2_cuda8_0_cudnn7_ubuntu16_04_build
+      # - caffe2_py2_gcc4_9_ubuntu14_04_build
+      # - caffe2_py2_clang3_8_ubuntu16_04_build
+      # - caffe2_py2_clang3_9_ubuntu16_04_build
+      # - caffe2_py2_gcc6_ubuntu16_04_build
+      # - caffe2_py2_gcc7_ubuntu16_04_build
+      # - caffe2_py2_cuda8_0_cudnn7_aten_ubuntu16_04_build
+      # - caffe2_py2_android_ubuntu16_04_build
+      # - caffe2_conda3_cuda9_0_cudnn7_ubuntu16_04_build
+      # - caffe2_py2_cuda9_0_cudnn7_centos7_build
 
       # - caffe2_py2_ios_macos10_13_build
       # - caffe2_py2_system_macos10_13_build
