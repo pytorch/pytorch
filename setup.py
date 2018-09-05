@@ -188,6 +188,7 @@ cwd = os.path.dirname(os.path.abspath(__file__))
 lib_path = os.path.join(cwd, "torch", "lib")
 third_party_path = os.path.join(cwd, "third_party")
 tmp_install_path = lib_path + "/tmp_install"
+caffe2_build_dir = os.path.join(cwd, "build")
 # lib/pythonx.x/site-packages
 rel_site_packages = distutils.sysconfig.get_python_lib(prefix='')
 # full absolute path to the dir above
@@ -466,6 +467,15 @@ class develop(setuptools.command.develop.develop):
         self.run_command('create_version_file')
         setuptools.command.develop.develop.run(self)
         self.create_compile_commands()
+
+        # Copy Caffe2's Python proto files (generated during the build with the
+        # protobuf python compiler) from the build folder to the root folder
+        # cp root/build/caffe2/proto/proto.py root/caffe2/proto/proto.py
+        for src in glob.glob(
+                os.path.join(caffe2_build_dir, 'caffe2', 'proto', '*.py')):
+            dst = os.path.join(
+                cwd, os.path.relpath(src, caffe2_build_dir))
+            self.copy_file(src, dst)
 
     def create_compile_commands(self):
         def load(filename):

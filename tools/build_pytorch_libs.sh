@@ -240,6 +240,9 @@ function build_nccl() {
 # detected them (to ensure that we have a consistent view between the
 # PyTorch and Caffe2 builds.)
 function build_caffe2() {
+  # pwd is pytorch_root/build
+
+  # TODO change these to CMAKE_ARGS for consistency
   if [[ -z $EXTRA_CAFFE2_CMAKE_FLAGS ]]; then
     EXTRA_CAFFE2_CMAKE_FLAGS=()
   fi
@@ -288,19 +291,15 @@ function build_caffe2() {
 
   # This is needed by the aten tests built with caffe2
   if [ -f "${INSTALL_DIR}/lib/libnccl.so" ] && [ ! -f "lib/libnccl.so.1" ]; then
+    # cp root/torch/lib/tmp_install/libnccl root/build/lib/libnccl
     cp "${INSTALL_DIR}/lib/libnccl.so.1" "lib/libnccl.so.1"
   fi
 
   ${CMAKE_INSTALL} -j"$MAX_JOBS"
 
-  # Install Caffe2's Python proto files
-  find . -name proto
-  for proto_file in ./caffe2/proto/*.py; do
-    cp $proto_file "../caffe2/proto/"
-  done
-
   # Fix rpaths of shared libraries
   if [[ $(uname) == 'Darwin' ]]; then
+    # root/torch/lib/tmp_install/lib
     pushd "$INSTALL_DIR/lib"
     for lib in *.dylib; do
       echo "Updating install_name for $lib"
