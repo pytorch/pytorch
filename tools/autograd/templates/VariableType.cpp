@@ -55,10 +55,12 @@ ScalarType VariableType::scalarType() const {
 Backend VariableType::backend() const {
   return baseType->backend();
 }
-bool VariableType::is_cuda() const { return baseType->is_cuda(); }
-bool VariableType::is_sparse() const { return baseType->is_sparse(); }
-bool VariableType::is_distributed() const { return baseType->is_distributed(); }
-
+Allocator* VariableType::allocator() const {
+  return baseType->allocator();
+}
+Device VariableType::getDeviceFromPtr(void * data) const {
+  return baseType->getDeviceFromPtr(data);
+}
 Storage VariableType::storage(bool resizable) const {
   return baseType->storage();
 }
@@ -95,10 +97,6 @@ Type & VariableType::toScalarType(ScalarType s) const {
 }
 TypeID VariableType::ID() const {
   return static_cast<TypeID>(id_);
-}
-
-const char * VariableType::typeString() {
-  return "VariableType";
 }
 
 std::vector<std::unique_ptr<Type>> type_to_variable_type;
