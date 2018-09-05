@@ -17,6 +17,7 @@ USE_NNPACK=0
 USE_MKLDNN=0
 USE_GLOO_IBVERBS=0
 FULL_CAFFE2=0
+CAFFE2_STATIC_LINK_CUDA=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
       --use-cuda)
@@ -170,6 +171,7 @@ function build() {
               -DTH_LIB_PATH="$INSTALL_DIR/lib" \
               -DTH_LIBRARIES="$INSTALL_DIR/lib/libTH$LD_POSTFIX" \
               -DCAFFE2_LIBRARIES="$INSTALL_DIR/lib/libcaffe2$LD_POSTFIX" \
+              -DCAFFE2_STATIC_LINK_CUDA=$CAFFE2_STATIC_LINK_CUDA \
               -DTHNN_LIBRARIES="$INSTALL_DIR/lib/libTHNN$LD_POSTFIX" \
               -DTHCUNN_LIBRARIES="$INSTALL_DIR/lib/libTHCUNN$LD_POSTFIX" \
               -DTHS_LIBRARIES="$INSTALL_DIR/lib/libTHS$LD_POSTFIX" \
@@ -255,7 +257,7 @@ function build_caffe2() {
       -DBUILDING_WITH_TORCH_LIBS=ON \
       -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
       -DBUILD_TORCH=$BUILD_TORCH \
-      -DBUILD_PYTHON=$FULL_CAFFE2 \
+      -DBUILD_PYTHON=ON \
       -DBUILD_SHARED_LIBS=$BUILD_SHARED_LIBS \
       -DBUILD_BINARY=$FULL_CAFFE2 \
       -DBUILD_TEST=$FULL_CAFFE2 \
@@ -291,13 +293,11 @@ function build_caffe2() {
 
   ${CMAKE_INSTALL} -j"$MAX_JOBS"
 
-  # Install Python proto files
-  if [[ $FULL_CAFFE2 -ne 0 ]]; then
-    find . -name proto
-    for proto_file in ./caffe2/proto/*.py; do
-      cp $proto_file "../caffe2/proto/"
-    done
-  fi
+  # Install Caffe2's Python proto files
+  find . -name proto
+  for proto_file in ./caffe2/proto/*.py; do
+    cp $proto_file "../caffe2/proto/"
+  done
 
   # Fix rpaths of shared libraries
   if [[ $(uname) == 'Darwin' ]]; then
