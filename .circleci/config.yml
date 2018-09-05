@@ -832,33 +832,33 @@ workflows:
   version: 2
   build:
     jobs:
-      - pytorch_linux_trusty_py2_7_9_build_test
-      - pytorch_linux_trusty_py2_7_build_test
-      - pytorch_linux_trusty_py3_5_build_test
-      - pytorch_linux_trusty_py3_6_gcc4_8_build_test
-      - pytorch_linux_trusty_py3_6_gcc5_4_build_test
-      - pytorch_linux_trusty_py3_6_gcc7_build_test
-      - pytorch_linux_trusty_pynightly_build_test
-      - pytorch_linux_xenial_py3_clang5_asan_build
-      - pytorch_linux_xenial_py3_clang5_asan_test:
-          requires:
-            - pytorch_linux_xenial_py3_clang5_asan_build
-      - pytorch_linux_xenial_cuda8_cudnn6_py3_build
-      - pytorch_linux_xenial_cuda8_cudnn6_py3_test:
-          requires:
-            - pytorch_linux_xenial_cuda8_cudnn6_py3_build
-      - pytorch_linux_xenial_cuda9_cudnn7_py2_build
-      - pytorch_linux_xenial_cuda9_cudnn7_py2_test:
-          requires:
-            - pytorch_linux_xenial_cuda9_cudnn7_py2_build
-      - pytorch_linux_xenial_cuda9_cudnn7_py3_build
-      - pytorch_linux_xenial_cuda9_cudnn7_py3_test:
-          requires:
-            - pytorch_linux_xenial_cuda9_cudnn7_py3_build
-      - pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_build
-      - pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_test:
-          requires:
-            - pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_build
+      # - pytorch_linux_trusty_py2_7_9_build_test
+      # - pytorch_linux_trusty_py2_7_build_test
+      # - pytorch_linux_trusty_py3_5_build_test
+      # - pytorch_linux_trusty_py3_6_gcc4_8_build_test
+      # - pytorch_linux_trusty_py3_6_gcc5_4_build_test
+      # - pytorch_linux_trusty_py3_6_gcc7_build_test
+      # - pytorch_linux_trusty_pynightly_build_test
+      # - pytorch_linux_xenial_py3_clang5_asan_build
+      # - pytorch_linux_xenial_py3_clang5_asan_test:
+      #     requires:
+      #       - pytorch_linux_xenial_py3_clang5_asan_build
+      # - pytorch_linux_xenial_cuda8_cudnn6_py3_build
+      # - pytorch_linux_xenial_cuda8_cudnn6_py3_test:
+      #     requires:
+      #       - pytorch_linux_xenial_cuda8_cudnn6_py3_build
+      # - pytorch_linux_xenial_cuda9_cudnn7_py2_build
+      # - pytorch_linux_xenial_cuda9_cudnn7_py2_test:
+      #     requires:
+      #       - pytorch_linux_xenial_cuda9_cudnn7_py2_build
+      # - pytorch_linux_xenial_cuda9_cudnn7_py3_build
+      # - pytorch_linux_xenial_cuda9_cudnn7_py3_test:
+      #     requires:
+      #       - pytorch_linux_xenial_cuda9_cudnn7_py3_build
+      # - pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_build
+      # - pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_test:
+      #     requires:
+      #       - pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_build
 
       # - pytorch_macos_10_13_py3_build
       # - pytorch_macos_10_13_py3_test:
